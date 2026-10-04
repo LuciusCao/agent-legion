@@ -86,7 +86,12 @@ def test_code_claim_records_config_snapshot(job_db) -> None:
             "select config_snapshot_json from node_runs where job_id='job-1' and node_key='package'"
         ).fetchone()
     assert run is not None
-    assert json.loads(run["config_snapshot_json"]) == {"mode": "fast"}
+    # #691: the claim is the timeout decision point; this hand-built manifest
+    # carries neither a base nor a timeout, so the platform default decides.
+    assert json.loads(run["config_snapshot_json"]) == {
+        "mode": "fast",
+        "_config_resolution": {"timeout_seconds": {"value": 600, "source": "platform_default"}},
+    }
 
 
 def test_code_claim_requires_declared_code_capacity(job_db) -> None:

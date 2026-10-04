@@ -61,6 +61,12 @@ vi.mock('../api', () => ({
   fetchActiveWorkflowRevision: (
     ...args: Parameters<typeof fetchActiveWorkflowRevision>
   ) => mockFetchWorkflowDefinition(...args),
+  // 「等待中」排查横幅 / 引导 Worker 步骤的数据源：无 Worker。
+  listAgentWorkers: () => Promise.resolve([]),
+}))
+
+vi.mock('../hooks/useWorkerConsoleUrl', () => ({
+  useWorkerConsoleUrl: () => '',
 }))
 
 vi.mock('../api/jobApi', () => ({

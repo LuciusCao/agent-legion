@@ -144,7 +144,9 @@ def flag_live_locked(runtime: SessionRuntime) -> bool:
     return since is not None and time.monotonic() - since < COMPACTING_TIMEOUT_SECONDS
 
 
-def late_gate_blocked(db: Any, session_id: str, runtime: SessionRuntime, text: str) -> bool:
+def late_gate_blocked(
+    db: Any, session_id: str, runtime: SessionRuntime, text: str, *, claimed: bool = True
+) -> bool:
     """#694 review R2-P1 late re-check inside send_message's turn-start
     critical section (caller holds runtime.lock): a compaction marker
     landing after the early send_blocked gate flips the flag before the
@@ -154,7 +156,8 @@ def late_gate_blocked(db: Any, session_id: str, runtime: SessionRuntime, text: s
     cleared so the send may proceed; a LIVE flag is never cleared here."""
     live = flag_live_locked(runtime)
     if live and not text.lstrip().startswith("/compact"):
-        db.update_studio_chat_session_if(session_id, status_in=("running",), status="idle")
+        if claimed:
+            db.update_studio_chat_session_if(session_id, status_in=("running",), status="idle")
         return True
     if runtime.compacting and not live:
         runtime.compacting = False

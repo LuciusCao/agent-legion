@@ -13,6 +13,8 @@ import os
 from collections.abc import Callable
 from typing import Any
 
+from server.app.configuration.worker_console import CONSOLE_URL_ENV, console_url_env
+
 
 def _str_parser(value: str) -> str:
     return value
@@ -65,11 +67,26 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     # variable must fail loudly at load time instead of silently ignoring a
     # credential the operator still believes is active.
     "AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD": (("auth", "bootstrap_admin_password"), _str_parser),
+    # #738: per-token request bucket for workspace API tokens (instance-wide
+    # refill rate per minute + burst capacity; defaults 60 / 20 in
+    # auth/api_token_limits.py). env-only like the rest of ``auth``; a
+    # non-integer or < 1 value fails the startup.
+    "AGENT_LEGION_API_TOKEN_RATE_LIMIT_PER_MINUTE": (
+        ("auth", "api_token_rate_limit_per_minute"),
+        _int_parser,
+    ),
+    "AGENT_LEGION_API_TOKEN_RATE_LIMIT_BURST": (
+        ("auth", "api_token_rate_limit_burst"),
+        _int_parser,
+    ),
     "AGENT_LEGION_CORS_ALLOW_ORIGINS": (("server", "cors", "allow_origins"), _csv_parser),
     "AGENT_LEGION_CORS_ALLOW_CREDENTIALS": (("server", "cors", "allow_credentials"), _bool_parser),
     "AGENT_LEGION_VAULT_MASTER_KEY": (("vault", "master_key"), _str_parser),
     "AGENT_LEGION_VAULT_MASTER_KEY_FILE": (("vault", "master_key_file"), _path_parser),
     "AGENT_LEGION_SKILLS_RUNS_DIR": (("skills", "runs_dir"), _path_parser),
+    # 主控制台里「打开 Worker 控制台」链接的地址（部署拓扑，env-only；见
+    # AgentWorkersRuntimeConfig.console_url）。
+    "AGENT_LEGION_WORKER_CONSOLE_URL": (("agent_workers", "console_url"), _str_parser),
 }
 
 _DATABASE_URL_ENV = "AGENT_LEGION_DATABASE_URL"
@@ -92,7 +109,7 @@ def apply_database_url_env(config: dict[str, Any]) -> None:
 def apply_env_overrides(config: dict[str, Any]) -> None:
     """Apply known environment variable overrides before typed validation."""
     for env_var, (path, parser) in _ENV_OVERRIDES.items():
-        raw = os.environ.get(env_var)
+        raw = console_url_env() if env_var == CONSOLE_URL_ENV else os.environ.get(env_var)
         if raw is None:
             continue
         node = config

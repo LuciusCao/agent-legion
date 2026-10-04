@@ -28,9 +28,11 @@ Worker 不读写 Host 的 `data/`，它持有自己的目录：
 |------|--------|------|----------|
 | work root | Worker 执行进程 | 每次执行一个 execution dir，内含解包的 bundle、执行产物与结果 | 可删除缓存/在途状态。配置项 `work_root`，默认 `/var/lib/agent-legion-worker`（`worker/executor.py` 的 `work_root` 解析、`deploy/worker.remote.example.yaml` 的 `work_root` 项）。supervisor 启动时 `clean_work_root` 清掉崩溃残留目录，但带 `upload_pending.json` 标记的目录保留到结果上报完成（`worker/cleanup.py` 的 `clean_work_root`、`worker/upload/queue.py` 的 `PENDING_FILENAME`） |
 | 状态目录 | Worker Service（控制面） | 导入后的可写 `worker.yaml`、`control_token`（0600）、`register_token`、运行状态与指标缓存（`worker/config_store.py` 的 `ConfigStore.save` / `load`） | 持久配置状态，不可随意删除。容器内为 `--state-dir /var/lib/agent-legion-worker-control`（`Dockerfile` 的 worker service `CMD`）；本地运行默认 `data/agent-worker-service`（`worker/cli_args.py` 的默认 state-dir、`worker/service.py` 的本地默认值），即落在仓库 `data/` 下 |
-| `bin/` | Worker 自带二进制 | 按平台构建的 velites 副本 `bin/velites` + `bin/velites.src-stamp` 指纹文件（`scripts/ensure-velites.sh --dest data/bin` 安置） | 部署产物，可由脚本按指纹重建。Worker 二进制解析顺序：自带副本优先、PATH 兜底（`worker/binary_resolution.py::resolve_binary`）；agent runtime 执行器不进 worker 镜像（issue #381），Docker 部署经 compose 把平台匹配的二进制 bind mount 到 `/app/data/bin/velites`（即镜像内的此目录），裸机经 `ensure-velites.sh` 或 GitHub Release 产物安置 |
+| `bin/` | Worker 自带二进制 | 按平台构建的 velites 副本 `bin/velites` + `bin/velites.src-stamp` 指纹文件（`scripts/ensure-velites.sh --dest data/bin` 安置） | 部署产物，可由脚本按指纹重建。Worker 二进制解析顺序：自带副本优先、PATH 兜底（`worker/binary_resolution.py::resolve_binary`）；agent runtime 执行器不进 worker 镜像（issue #381），Docker 部署经 compose 把平台匹配的二进制 bind mount 到 `/app/data/bin/velites`（即镜像内的此目录），裸机经 `ensure-velites.sh` 或 GitHub Release 产物安置。原生形态 `make prod-up` 对 PATH 与此副本两处都做指纹刷新（#831：只刷 PATH 时自带副本优先命中，升级静默失效；安置目标由 `scripts/velites_deploy_plan.py` 从真实 resolver 推导，#835），Worker 与 Host 启动对账在消费角色实际解析到的副本 stamp 滞后仓库指纹时打 WARNING |
 
 `upload_pending.json` 是 UploadQueue 的持久化标记：任务入队前写入 execution dir，Host 接受结果后才删除；Worker 重启时按标记恢复未上报的结果（`worker/upload/queue.py:1-17`）。
+
+execution dir 内 agent 执行的 run 目录（`job/runs/<node_key>/worker/`）除 `events.jsonl`（agent 事件流，上传前经 `shared/pi_events.py` 压缩）与 `session/`、`prompt.md` 外，还可能含 `agent-stderr.log`（#748）：agent 子进程的 stderr 在 spawn 侧合并进 stdout 管道、pump 原样落进 events.jsonl，而压缩 rewrite 会丢弃非 JSON 行——上传准备阶段（`worker/upload/prepare.py`）在同一次扫描里把这部分尾部（保尾，硬上限 8KB，`shared/stderr_tail.py` 的 `STDERR_TAIL_BYTES`；落盘前已脱敏）抢救到该文件，并随 run 目录整体进 result.tar.gz 交付 Host，Host 将其与 `events.jsonl` 一起提升进 job dir 的同一 run 目录（超过 8KB 的成员视为不可信、不提升）；进程非零退出（非 130 取消、非 124 超时）时 error_message 与 result metadata 的 `agent_stderr_tail` 字段同步携带该尾部，用于崩溃归因。
 
 ## 3. 部署形态映射
 

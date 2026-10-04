@@ -126,6 +126,39 @@ def test_health_host_normalization_behavior() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("bind", "expected"),
+    [
+        ("0.0.0.0", "127.0.0.1"),
+        ("::", "[::1]"),
+        ("2001:db8::1", "[2001:db8::1]"),
+        ("[::1]", "[::1]"),
+        ("192.0.2.1", "192.0.2.1"),
+    ],
+)
+def test_console_url_uses_browser_reachable_host(tmp_path, bind, expected) -> None:
+    normalize = re.search(r"^health_host\(\) \{.*?^\}", NATIVE_PROD_UP, re.M | re.S)
+    injection = re.findall(
+        r"^    (?:console_host=|export AGENT_LEGION_WORKER_CONSOLE_DEFAULT_URL=).*$",
+        NATIVE_PROD_UP,
+        re.M,
+    )
+    assert normalize and injection
+    code = (
+        normalize.group(0)
+        + '\nunset AGENT_LEGION_WORKER_CONSOLE_URL\nWORKER_BIND="$1"\nWORKER_PORT=8799\n'
+    )
+    code += "\n".join(injection) + '\nprintf "%s" "$AGENT_LEGION_WORKER_CONSOLE_DEFAULT_URL"\n'
+    result = subprocess.run(
+        ["bash", "-eu", "-c", code, "console", bind],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout == f"http://{expected}:8799"
+
+
 def test_idempotency_matches_bind_address() -> None:
     """幂等判定按「bind 地址 + 端口 + 地址族」匹配：port_listening 消费
     两个参数，族别经 lsof -i4/-i6 过滤器带入（-F n 不输出族别）——
@@ -267,6 +300,18 @@ def test_listener_match_behavior_mixed_family() -> None:
     finally:
         s4.close()
         s6.close()
+
+
+def test_velites_refresh_covers_bundled_copy_channel() -> None:
+    """#831：prod-up 必须同时刷新 PATH 与 data/bin 两个 velites 安置点。
+
+    Worker/Host 的二进制解析是「自带副本 data/bin 优先、PATH 兜底」
+    （worker/binary_resolution.py / shared/code_sandbox.py）——只刷 PATH 时，
+    install-deps 首次安置的 data/bin 旧副本永远优先命中，velites 升级在
+    原生形态静默失效。行为级回归见 test_ensure_velites.py 的
+    test_prod_up_sequence_refreshes_stale_bundled_copy；这里钉住接线。"""
+    assert "./scripts/ensure-velites.sh\n" in NATIVE_PROD_UP
+    assert "./scripts/ensure-velites.sh --dest data/bin\n" in NATIVE_PROD_UP
 
 
 def test_warning_host_url_uses_bracketed_host() -> None:

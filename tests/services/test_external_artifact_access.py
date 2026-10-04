@@ -15,6 +15,7 @@ import hashlib
 import pytest
 
 from server.app.services.external_artifact_access import ExternalArtifactAccessService
+from server.app.services.job_artifact_media import attachment_disposition
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_errors import NotFoundError
 from server.app.storage_paths import resolve_job_dir
@@ -74,6 +75,23 @@ def _seed_manifest_row(
         size_bytes=len(stored),
         content_hash=hashlib.sha256(payload).hexdigest(),
     )
+
+
+def _seed_bare_key_row(store, job, name: str, payload: bytes) -> str:
+    """Register an UNCOMPRESSED manifest row (legacy/older-Worker form): the
+    storage key carries no .gz suffix — the only form presigned for #739."""
+    storage_key = f"jobs/{job['workspace_id']}/{job['id']}/{name}"
+    store.storage.objects[storage_key] = payload
+    store.record_remote(
+        workspace_id=job["workspace_id"],
+        job_id=job["id"],
+        node_key="upstream",
+        name=name,
+        storage_key=storage_key,
+        size_bytes=len(payload),
+        content_hash=hashlib.sha256(payload).hexdigest(),
+    )
+    return storage_key
 
 
 # --- 归属校验 ----------------------------------------------------------------
@@ -370,3 +388,198 @@ def test_open_raw_current_prefers_manifest_object_over_local(job_db):
     legacy = service.open_raw_current(job["id"], "legacy.txt")
     assert legacy.path is not None
     assert legacy.path.read_bytes() == b"legacy"
+
+
+# --- #739: presigned download_url -------------------------------------------------
+
+
+def test_list_artifacts_presigns_bare_key_rows(job_db, settings):
+    """#739：非 .gz 对象行签发 presigned GET——URL 只针对行的 storage_key
+    （服务端布局生成的 key，无请求输入参与），expires_at = now + 实例 TTL。"""
+    from datetime import UTC, datetime, timedelta
+
+    job = _seed_job(job_db)
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage())
+    service = ExternalArtifactAccessService(job_db, settings, object_store=store)
+    key = _seed_bare_key_row(store, job, "clip.mp4", b"0123456789")
+
+    before = datetime.now(UTC)
+    listing = service.list_artifacts(job["workspace_id"], job["id"])
+    after = datetime.now(UTC)
+
+    entry = next(e for e in listing["artifacts"] if e["name"] == "clip.mp4")
+    assert entry["storage"] == "object"
+    # FakeObjectStorage 的 presign_get 返回 key 派生 URL 并记录调用——签名
+    # 对象就是行的 storage_key，不是 job_id/name 拼接（防 key 注入面）。
+    assert store.storage.presigned_gets == [key]
+    assert entry["download_url"] == f"https://s3.test/download/{key}"
+    assert entry["content_encoding"] == ""
+    # TTL 断言：默认 3600（实例设置契约的默认值）。
+    assert store.storage.get_expiries == [3600]
+    assert (
+        before + timedelta(seconds=3600) <= entry["expires_at"] <= after + timedelta(seconds=3600)
+    )
+
+
+def test_list_artifacts_respects_instance_presign_ttl(job_db, settings):
+    """实例设置改 TTL（重启生效语义：测试直接改运行时块），签发秒数跟随。"""
+    settings.executor_runtime.agent_workers.artifact_download_presign_ttl_seconds = 600
+
+    job = _seed_job(job_db)
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage())
+    service = ExternalArtifactAccessService(job_db, settings, object_store=store)
+    _seed_bare_key_row(store, job, "clip.mp4", b"0123456789")
+
+    listing = service.list_artifacts(job["workspace_id"], job["id"])
+
+    assert store.storage.get_expiries == [600]
+    entry = next(e for e in listing["artifacts"] if e["name"] == "clip.mp4")
+    assert entry["expires_at"] is not None
+
+
+def test_list_artifacts_gzip_rows_are_presigned_with_gzip_encoding(job_db, settings):
+    """#338/#739 codex P2：v4+ Worker 的产物全是 .gz——排除它们等于直连
+    对真实远程产物整体失效。.gz 行照常签发，Content-Encoding: gzip 作为
+    S3 响应覆盖签进 URL（与 raw 端点透传同一表示），content_encoding 标
+    存储态。"""
+    job = _seed_job(job_db)
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage())
+    service = ExternalArtifactAccessService(job_db, settings, object_store=store)
+    _seed_manifest_row(store, job, "report.json", b'{"r": 1}')
+
+    listing = service.list_artifacts(job["workspace_id"], job["id"])
+
+    key = str(next(iter(store.rows_for_job(job["id"])))["storage_key"])
+    assert key.endswith(".gz")
+    assert store.storage.presigned_gets == [key]
+    entry = next(e for e in listing["artifacts"] if e["name"] == "report.json")
+    assert entry["download_url"] == f"https://s3.test/download/{key}"
+    assert entry["expires_at"] is not None
+    assert entry["content_encoding"] == "gzip"
+    assert store.storage.get_response_headers == [
+        {
+            "ResponseContentType": "application/octet-stream",
+            "ResponseContentDisposition": attachment_disposition("report.json"),
+            "ResponseContentEncoding": "gzip",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "gzipped"),
+    [("clip.mp4", False), ("clip.mp4", True), ("report.pdf", False), ('a "b".json', False)],
+)
+def test_presigned_headers_match_raw_endpoint_policy(name, gzipped):
+    """#739 codex P2（媒体类型）：直连的响应头与 raw_response 同源——
+    Content-Type 走同一白名单、非白名单同样 attachment（含 RFC 6266 转义）、
+    gzip 同样附 Content-Encoding。逐头对照 raw 端点实际构造的响应。"""
+    import io
+
+    from server.app.routes.job_artifact_raw_response import raw_response
+    from server.app.services.external_artifact_access import _presigned_headers
+    from server.app.services.job_artifact_raw_types import RawArtifact
+
+    raw = raw_response(
+        RawArtifact(
+            name=name,
+            stream=io.BytesIO(b"x"),
+            size_bytes=1,
+            content_encoding="gzip" if gzipped else None,
+        )
+    )
+    expected = {"ResponseContentType": raw.media_type}
+    if "content-disposition" in raw.headers:
+        expected["ResponseContentDisposition"] = raw.headers["content-disposition"]
+    if gzipped:
+        expected["ResponseContentEncoding"] = raw.headers["content-encoding"]
+    assert _presigned_headers(name, gzipped) == expected
+
+
+def test_list_artifacts_local_and_disabled_entries_have_no_url(job_db, settings):
+    """local 条目与未配置对象存储时：download_url/expires_at 全空（对象存储
+    之外没有可签发的东西），object_storage_enabled 语义不变。
+    ``script.md`` 是 job 快照的声明产物名——local 清单收窄到声明名
+    （#703 codex round 4 P2-1）。"""
+    job = _seed_job(job_db)
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage())
+    service = ExternalArtifactAccessService(job_db, settings, object_store=store)
+    _seed_bare_key_row(store, job, "clip.mp4", b"0123456789")
+    storage = resolve_job_dir(job, job_db.jobs_dir)
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "script.md").write_text("old", encoding="utf-8")
+
+    listing = service.list_artifacts(job["workspace_id"], job["id"])
+    entries = {e["name"]: e for e in listing["artifacts"]}
+
+    assert entries["script.md"]["storage"] == "local"
+    assert entries["script.md"]["download_url"] is None
+    assert entries["script.md"]["expires_at"] is None
+    assert entries["script.md"]["content_encoding"] == ""
+    assert listing["object_storage_enabled"] is True
+
+    # 未配置 bucket（store disabled）：对象行本来就不会列出，local 行无 URL。
+    disabled = ExternalArtifactAccessService(job_db, settings, object_store=_NoStorage())
+    degraded = disabled.list_artifacts(job["workspace_id"], job["id"])
+    assert degraded["object_storage_enabled"] is False
+    for entry in degraded["artifacts"]:
+        assert entry["download_url"] is None
+        assert entry["expires_at"] is None
+
+
+def test_status_poll_is_unsigned_and_survives_signing_failure(job_db, settings, monkeypatch):
+    """#739 codex P2：status 走免签名名称管线——轮询 N 次零 presign 调用
+    （计数桩断言 0），签名客户端/凭据异常不传染状态面（仍返回完整名单，
+    状态面只依赖 DB）；对照组证明桩是活的、清单面确实签名。"""
+    job = _seed_job(job_db)
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage())
+    service = ExternalArtifactAccessService(job_db, settings, object_store=store)
+    _seed_bare_key_row(store, job, "clip.mp4", b"0123456789")
+    _seed_manifest_row(store, job, "report.json", b'{"r": 1}')
+    calls: list[str] = []
+
+    def _boom(storage_key, expires_seconds=3600, response_headers=None):  # noqa: ANN001, ANN202
+        calls.append(storage_key)
+        raise ConnectionError("signing credentials broken")
+
+    monkeypatch.setattr(store.storage, "presign_get", _boom)
+
+    for _ in range(3):
+        payload = service.status(job["workspace_id"], job["id"])
+        assert payload["artifacts"] == ["clip.mp4", "report.json"]
+
+    assert calls == []
+
+    # 对照：同一必炸桩下清单接口仍走到 presign（桩活、签名面未退化）。
+    with pytest.raises(ConnectionError, match="signing credentials broken"):
+        service.list_artifacts(job["workspace_id"], job["id"])
+    assert calls
+
+
+def test_presign_targets_exactly_the_manifest_row_key(job_db, settings):
+    """安全面（签名目标）：presign_get 收到的必须逐位等于权威 manifest 行
+    的 storage_key——行由服务端布局生成（record_remote/verify_remote 拒绝
+    布局外 key），这是「请求输入无法影响签名目标」的落点。测试从 DB 读回
+    行断言（不自己拼 key），并混入一条 gzip 行钉住逐行对应：签错对象
+    （拼名、漏 workspace 段、签成别行的 key、跨条目乱签）都会红。"""
+    job = _seed_job(job_db)
+    store = JobArtifactObjectStore(job_db, FakeObjectStorage())
+    service = ExternalArtifactAccessService(job_db, settings, object_store=store)
+    bare_key = _seed_bare_key_row(store, job, "clip.mp4", b"0123456789")
+    _seed_manifest_row(store, job, "report.json", b'{"r": 1}')  # .gz 孪生条目
+
+    rows = {str(row["name"]): row for row in store.rows_for_job(job["id"])}
+    assert str(rows["clip.mp4"]["storage_key"]) == bare_key  # 行与种子一致（自检）
+    settings.executor_runtime.agent_workers.artifact_download_presign_ttl_seconds = 7200
+
+    listing = service.list_artifacts(job["workspace_id"], job["id"])
+
+    entry = next(e for e in listing["artifacts"] if e["name"] == "clip.mp4")
+    # 签发名单：每行恰好一次、恰好该行的 key。
+    assert sorted(store.storage.presigned_gets) == sorted(
+        str(row["storage_key"]) for row in rows.values()
+    )
+    # TTL 参数逐位等于实例配置值（防回落硬编码默认）。
+    assert store.storage.get_expiries == [7200, 7200]
+    # 响应字段就是那次调用的返回值（Fake 按 key 派生 URL——签错对象时两者
+    # 同时偏离，双保险）。
+    assert entry["download_url"] == f"https://s3.test/download/{bare_key}"

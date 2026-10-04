@@ -168,6 +168,21 @@ def test_select_affected_tests_unknown_source_maps_to_nothing():
     assert select_affected_tests(["server/app/new_module.py"], mapping) == []
 
 
+@pytest.mark.parametrize("tier", ["full", "ci"])
+@pytest.mark.parametrize("mapped", [False, True])
+def test_unit_selection_cannot_reintroduce_excluded_tiers(tmp_path, tier, mapped):
+    path = f"tests/{tier}/test_database.py"
+    test_file = tmp_path / path
+    test_file.parent.mkdir(parents=True)
+    test_file.touch()
+    changed = "server/app/settings.py" if mapped else path
+    mapping = {changed: [f"{path}::test_database"]} if mapped else {}
+
+    # Explicit pytest nodeids bypass --ignore; unit selection must enforce
+    # the same directory boundary for both changed files and indexed tests.
+    assert select_affected_tests([changed], mapping, repo_root=tmp_path) == []
+
+
 def test_select_affected_tests_sorted_and_deduplicated(tmp_path):
     mapping = {
         "server/app/a.py": ["tests/test_x.py::test_2", "tests/test_x.py::test_1"],

@@ -16,8 +16,9 @@ Two cooperating pieces:
 
 Semantics and guardrails:
 
-* Tests never seen by the indexer (new tests, or tests whose file is new)
-  always run — the selection is a *superset* of affected tests.
+* Unit-tier tests never seen by the indexer (new tests, or new files)
+  always run — the selection is a *superset* of affected unit tests.
+  ``tests/full/`` and ``tests/ci/`` remain owned by their dedicated tiers.
 * Only files under the repo's tracked source roots (``server/``,
   ``worker/``, ``shared/``, ``workflow_nodes/``, ``scripts/``,
   ``workspace_libs/``, ``tests/``) are mapped; anything else (venv,
@@ -188,7 +189,11 @@ def select_affected_tests(
             # 文件（helpers/conftest 等）由 unmapped_source_files 计入盲区
             # 回退（exit 4 → 全量 unit 档）——见该函数的注释。
             selected.add(path)
-    return sorted(selected)
+    # The aff caller runs the offline unit tier. Explicit pytest nodeids
+    # bypass --ignore, so enforce its directory exclusions here as well.
+    return sorted(
+        nodeid for nodeid in selected if not nodeid.startswith(("tests/full/", "tests/ci/"))
+    )
 
 
 def _nodeid_file_exists(nodeid: str, root: Path) -> bool:

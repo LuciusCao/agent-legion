@@ -22,10 +22,14 @@ from pathlib import Path
 from typing import Any
 
 _SCHEMA_FILE = Path(__file__).resolve().parents[2] / "server/app/db/postgres_schema.sql"
+# The terminal four-parameter bump_job_node_status_counts lives in the v88
+# migration SQL (#690), not the schema file; the v69 restore only adds a
+# five-parameter overload beside it, so the terminal bump never needs
+# restoring here.
 _V70_FUNCTION_NAMES = (
-    "bump_job_node_status_counts",
     "sync_job_node_status_counts",
     "deduct_job_node_status_counts",
+    "rekey_job_node_status_counts",
 )
 
 _REVISIONS_UNIQUE_OLD = "workflow_revisions_workspace_id_workflow_key_version_key"
@@ -186,8 +190,9 @@ def narrow_back_to_v70(conn: Any) -> None:
     """Undo ``restore_pre_v70_shape``: replay the v70 migration's DDL so
     later tests on the shared database see the terminal shape (baseline
     assertions key on the exact column set). The v69 rekey trigger drops
-    first — it depends on the column — and the per-test ``init_db`` replay
-    recreates the terminal trigger chain."""
+    first — it depends on the column — and is recreated in its terminal
+    shape from the schema file at the end (init_db is a no-op at the
+    version high-water mark, so nothing else would restore it)."""
     conn.execute("drop trigger if exists jobs_node_status_counts_rekey on jobs")
     # The v69 create-or-replace above left the five-parameter trigger
     # functions in place; dropping the workflow_key column alone would leave
@@ -233,3 +238,14 @@ def narrow_back_to_v70(conn: Any) -> None:
         "create index if not exists idx_agent_requests_node_active"
         " on agent_execution_requests(workspace_id, node_key, state)"
     )
+    # The terminal rekey trigger (dropped above with its v69 column list)
+    # comes back from the schema file too, so later tests on this worker see
+    # the full terminal trigger chain.
+    _m = re.search(
+        r"drop trigger if exists jobs_node_status_counts_rekey on jobs;"
+        r".*?execute function rekey_job_node_status_counts\(\);",
+        schema_text,
+        re.DOTALL,
+    )
+    assert _m is not None, "jobs_node_status_counts_rekey"
+    conn.execute(_m.group(0))

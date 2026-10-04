@@ -1,0 +1,20 @@
+/* 签发成功后的「下一步」指引（把人送到 Worker 控制台） */
+.nextSteps {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+.nextStepsTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: #43474e;
+  margin: 0 0 6px;
+}
+.nextStepsList {
+  margin: 0 0 10px;
+  padding-left: 20px;
+  font-size: 13px;
+  color: #43474e;
+  line-height: 1.6;
+}

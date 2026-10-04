@@ -12,11 +12,18 @@ the skill lock document); the pool task (``validate_skill_commit_outputs``)
 is a pure path-in/string-out transform — materialize the (skill, commit)
 pair through the shared cache (``skills.commit_cache``, zero git calls on a
 hit), copy out a per-validation private tree under the same FileLock,
-contract-check it, run the two-layer validator against it. The task must
-stay an importable module-level function with picklable args/return (the
-spawn-context constraint); exceptions cross the boundary pickled by
-reference, so ``SkillRepoError`` keeps its type for the caller's
-convert-to-contract containment.
+contract-check it, then build the declared inputs+outputs validation view
+(#757) and run the two-layer validator against it. There is deliberately no
+"nothing to validate" skip: the dispatch contract trio
+(``workflows.skills.REQUIRED_CONTRACT_FILES``) already guarantees every
+skill reaching this task ships ``scripts/validate_output.py`` — a tree
+missing it is the #638 poisoned-cache case and must fail closed, not skip —
+so validation is never a no-op here and the cost discipline is the view's
+zero-copy hardlink placement instead. The task must stay an importable
+module-level function with picklable args/return (the spawn-context
+constraint); exceptions cross the boundary pickled by reference, so
+``SkillRepoError`` keeps its type for the caller's convert-to-contract
+containment.
 
 Pool size: ``AGENT_LEGION_RESULT_VALIDATE_WORKERS`` overrides the instance
 setting ``result_validate.workers`` (admin UI, restart-effective via
@@ -125,8 +132,13 @@ def validate_skill_commit_outputs(
     skill_key: str,
     commit: str,
     job_dir: str,
+    run_view_dir: str,
+    inputs: tuple[str, ...],
+    outputs: tuple[str, ...],
+    input_refs: dict[str, Any] | None = None,
+    artifact_root: str | None = None,
 ) -> str | None:
-    """Pool task: validate ``job_dir`` against a private copy of (skill, commit).
+    """Pool task: validate this attempt's declared view against (skill, commit).
 
     Runs in a pool worker: no DB handle, no shared process state — the
     manager is rebuilt from plain path/string args with a NullSkillStore
@@ -138,6 +150,30 @@ def validate_skill_commit_outputs(
     per-repo FileLock, and the validator reads only the private copy).
     Returns the validator verdict (None = valid); raises cross the process
     boundary (materialization/contract failures) for the caller to convert.
+
+    #757: the validator never sees the raw job dir. The declared validation
+    view (``validation_view.validation_view``) is built HERE, in the pool
+    worker, after the trio contract check — which already guarantees the
+    legacy script exists, so no "nothing to validate" skip is reachable (a
+    script-less tree must keep failing closed, #638). The view's exit arms
+    reconcile output mutations back into the run view and enforce the
+    inputs read-only contract (a violation raises and crosses the boundary
+    into the caller's Validator-error conversion). Input bytes resolve
+    through ``input_refs`` + ``artifact_root`` (#833): the dispatch-frozen
+    CAS copy wins, the job dir is the fallback — the blob open is
+    filesystem-only, so the pool worker needs no DB handle for it.
+
+    Known window (#876 B 员 P3, documented not fixed): ``validate_in_pool``
+    retries the WHOLE task once on ``BrokenProcessPool`` — if the pool
+    worker died mid-validation, the retry runs the validator again against
+    a run view that may already hold partially reconciled bytes from the
+    crashed attempt (reconcile happens only on CLEAN body exit, so the
+    crash must have occurred inside the reconcile/sync itself to leave
+    partial state — a sub-second window). The double-apply surface for a
+    non-idempotent validator is bounded by construction: the view holds
+    only declared names, so re-validation can only re-apply the validator's
+    own rules to its own declared outputs (clean-in-place validators are
+    idempotent by design); nothing undeclared can accumulate.
     """
     # Local imports: keeps the spawn child's import graph minimal and lets
     # the pool module itself stay cheap to import in the main process.
@@ -150,6 +186,7 @@ def validate_skill_commit_outputs(
     from server.app.skills.manager import SkillManager
     from server.app.workflows.output_validation import run_output_validator
     from server.app.workflows.skills import resolve_workflow_skill
+    from server.app.workflows.validation_view import InputAuthority, validation_view
 
     manager = SkillManager(
         store=NullSkillStore(),
@@ -164,7 +201,21 @@ def validate_skill_commit_outputs(
         # <runs_dir>/<validation_id>/<workflow>/<capability>, so parents[1]
         # is the root the key joins under.
         resolve_workflow_skill(run_dir.parents[1], skill_key)
-        return run_output_validator(run_dir, Path(job_dir))
+        # #833: dispatch-frozen input bytes channel — the CAS blob open
+        # happens here in the pool worker (read-only, no DB handle needed).
+        authority = (
+            InputAuthority(refs=input_refs, artifact_root=Path(artifact_root))
+            if input_refs is not None and artifact_root is not None
+            else None
+        )
+        with validation_view(
+            Path(job_dir),
+            inputs=inputs,
+            outputs=outputs,
+            output_source=Path(run_view_dir),
+            input_authority=authority,
+        ) as view_dir:
+            return run_output_validator(run_dir, view_dir)
     finally:
         # Per-validation cleanup is back (#569's original design removed it
         # with the per-validation dir); a pool worker dying hard leaks the

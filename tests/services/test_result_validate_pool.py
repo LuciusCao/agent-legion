@@ -34,6 +34,9 @@ def _task_args(tmp_path: Path, *, validate_script: str = "import sys; sys.exit(0
         _KEY,
         _head_commit(repo),
         str(job_dir),
+        str(job_dir),
+        (),
+        (),
     )
 
 
@@ -57,7 +60,7 @@ def test_materialization_error_type_survives_the_process_boundary(
     tmp_path: Path,
 ) -> None:
     args = _task_args(tmp_path)
-    bad = (*args[:4], "0" * 40, args[5])
+    bad = (*args[:4], "0" * 40, *args[5:])
 
     with pytest.raises(SkillRepoError, match="missing"):
         validate_in_pool(validate_skill_commit_outputs, *bad)

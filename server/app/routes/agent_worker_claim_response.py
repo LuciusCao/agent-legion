@@ -38,6 +38,11 @@ def build_claim_response(
 ) -> AgentClaimResponse:
     """Assemble one claim response, injecting the response-path-only blocks."""
     manifest = claimed.manifest
+    # #755 codex P1：换轨预检的判定口径——把实例设置的实际上限下发给
+    # Worker（此前 Worker 侧只能硬编码默认 64 MiB，Host 调小上限时换轨
+    # 内嵌必撞 413）。claim 响应路径内存态注入，与 artifact_uploads 同
+    # 纪律：不持久化进队列 manifest。
+    manifest["max_archive_bytes"] = int(settings.executor_runtime.agent_workers.max_archive_bytes)
     if claimed.kind == "code":
         # Secret injection happens on the response path only: the queued
         # manifest keeps vault references, the resolved plaintext crosses

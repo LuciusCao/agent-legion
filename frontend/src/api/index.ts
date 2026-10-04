@@ -46,13 +46,13 @@ export { createRegisterToken, deleteRegisterToken, listRegisterTokens } from './
 // prettier-ignore
 export { createWorkspaceApiToken, listWorkspaceApiTokens, revokeWorkspaceApiToken } from './workspaceApiTokens'
 // prettier-ignore
-export { deleteAgentWorker, listAgentWorkers } from './agentWorkers'
+export { deleteAgentWorker, fetchAgentWorkers, listAgentWorkers } from './agentWorkers'
 // prettier-ignore
 export type { AgentRegisterTokenCreatedResponse, AgentRegisterTokenSummary } from './workerTokens'
 // prettier-ignore
 export type { WorkspaceApiTokenCreatedResponse, WorkspaceApiTokenSummary } from './workspaceApiTokens'
 // prettier-ignore
-export type { AgentWorkerSummary } from './agentWorkers'
+export type { AgentWorkerSummary, AgentWorkersResponse } from './agentWorkers'
 // prettier-ignore
 export { getWorkspaceSharedMaterials, getWorkspaceSharedMaterialFile, propagateWorkspaceSharedMaterials } from './workspaceSharedMaterials'
 // prettier-ignore

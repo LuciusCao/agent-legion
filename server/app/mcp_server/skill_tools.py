@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 from mcp.server.fastmcp import FastMCP
 
+from server.app.mcp_server import local_files
 from server.app.mcp_server.config import McpServerConfig
 from server.app.mcp_server.tool_client import ToolClient
 
@@ -36,17 +37,32 @@ def _skill_key_path(skill_key: str) -> str:
 
 def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
     @mcp.tool(structured_output=False)
-    async def get_skill(workspace_id: str, skill_key: str, ref: str | None = None) -> str:
+    async def get_skill(
+        workspace_id: str,
+        skill_key: str,
+        ref: str | None = None,
+        output_path: str | None = None,
+    ) -> str:
         """Read a skill: key, git tags (latest first), text files (SKILL.md +
         references/ + scripts/). workspace_id must match the skill key's own
         workspace segment (skills are workspace-isolated). No ref → working
         tree at HEAD (the latest semantics); ref previews one tag without
-        moving the lock (unknown tag → 404)."""
+        moving the lock (unknown tag → 404). output_path exports committed
+        Git content (HEAD or the requested tag), excluding all local changes
+        and untracked/ignored files, as full JSON
+        to a NEW staging file on the MCP host under
+        data/studio-mcp-files/<workspace_id>/ and returns path/size/SHA-256.
+        Select only edited, non-shared paths (at most 100 per save) and pass
+        files_path to save_skill_version. Repository reads have a byte budget,
+        not the 100-file save limit; unsupported trees fail without truncation."""
         _, client = await client_factory()
         path = _skill_path(workspace_id, skill_key)
         if ref is not None:
             path += f"?ref={quote(ref, safe='')}"
-        return await client.call("GET", path)
+        if output_path is not None:
+            path += ("&" if ref is not None else "?") + "for_edit=true"
+        response = await client.call("GET", path)
+        return await local_files.export_response(workspace_id, output_path, response)
 
     @mcp.tool(structured_output=False)
     async def validate_skill(workspace_id: str, skill_key: str) -> str:
@@ -63,9 +79,10 @@ def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
     async def save_skill_version(
         workspace_id: str,
         skill_key: str,
-        files: list[dict[str, str]],
         new_tag: str,
         message: str,
+        files: list[dict[str, str]] | None = None,
+        files_path: str | None = None,
     ) -> str:
         """Write a new skill version into its LOCAL in-place repo: paths
         validated (inside the skill dir, no '..'/absolute), contract
@@ -73,8 +90,14 @@ def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         only warns), then commit + tag new_tag (existing tag = conflict).
         workspace_id must match the skill key's own workspace segment. Skill
         lock untouched — pinned nodes keep the locked commit, latest nodes
-        follow the new HEAD; a human reviews, re-pins, relocks."""
+        follow the new HEAD; a human reviews, re-pins, relocks. Supply files
+        OR files_path (UTF-8 JSON list or get_skill export); each file has
+        path and exactly one of content/file_path. Local paths stay under
+        data/studio-mcp-files/<workspace_id>/ on the MCP host. Skill writes
+        are incremental: include only edited, non-shared paths; edit mapped
+        shared references with save_shared_materials instead."""
         _, client = await client_factory()
+        files, _ = await local_files.prepare_files(client, workspace_id, files, files_path)
         body: dict[str, Any] = {"files": files, "new_tag": new_tag, "message": message}
         return await client.call("POST", f"{_skill_path(workspace_id, skill_key)}/versions", body)
 

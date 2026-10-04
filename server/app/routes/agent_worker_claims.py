@@ -38,7 +38,7 @@ def create_agent_worker_claim_router(
     def claim(
         payload: ClaimAgentExecutionRequest, request: Request
     ) -> Response | BatchAgentClaimResponse:
-        worker = authorize_worker(request, payload.worker_id)
+        worker = authorize_worker(request, payload.worker_id, claim_enabled=True)
         # #546 batch claim, #547 single-path retirement: every request is a
         # batch request now (the default limit=1 answers a one-element
         # ``claims`` list; the pre-#546 byte-identical single-object body is

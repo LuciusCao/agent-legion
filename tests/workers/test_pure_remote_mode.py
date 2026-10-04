@@ -69,37 +69,14 @@ class ExplodingExecutor:
 
 def test_code_capacity_zero_is_accepted_by_both_contracts() -> None:
     from server.app.routes.instance_settings_contracts import InstanceSettingsUpdate
+    from server.app.services.instance_settings import default_instance_document
 
-    doc = InstanceSettingsUpdate.model_validate(
-        {
-            "cleanup": {
-                "log_retention_days": 30,
-                "run_dir_retention_days": 3,
-                "interval_seconds": 3600,
-            },
-            "monitoring": {"sample_interval_seconds": 15.0, "retention_days": 30},
-            "heartbeat_interval_seconds": 10.0,
-            "lease_ttl_seconds": 90,
-            "heartbeat_failure_threshold": 3,
-            "sweeper_enabled": True,
-            "sweeper_interval_seconds": 5.0,
-            "code_capacity": 0,
-            "materials_ttl_days": 0,
-            "execution_retention_days": 0,
-            "workflows": {"max_items_per_run": 20_000, "node_code_max_bytes": 64 * 1024},
-            "agent_workers": {
-                "max_archive_bytes": 1024,
-                "min_protocol_version": 1,
-                "max_concurrent_result_commits": 16,
-                "result_commit_batching": True,
-                "artifact_spot_check_percent": 3,
-            },
-            "agent_enqueue": {"workers": 48, "max_pending": 1024},
-            "result_unpack": {"workers": 0},
-            "result_validate": {"workers": 0},
-            "agent_claim": {"worker_touch_interval_seconds": 30},
-        }
-    )
+    # 全量文档脚手架从唯一事实源派生（#739 教训：手造字面量在新必填字段
+    # 上线时静默断裂，断点散落在与字段无关的测试里）；本测试只关心
+    # code_capacity=0 的接受度。
+    payload = default_instance_document()
+    payload["code_capacity"] = 0
+    doc = InstanceSettingsUpdate.model_validate(payload)
     assert doc.code_capacity == 0
 
     runtime = ExecutorRuntimeConfig.model_validate({"code_capacity": 0})

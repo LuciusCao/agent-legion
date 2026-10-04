@@ -83,7 +83,9 @@ make dev-down       # 全部停止
 
 打开 http://127.0.0.1:5174——首次访问会跳转到 `/setup` 创建 admin 用户。
 worker 按设计默认关闭任务领取，到 worker 控制台 http://127.0.0.1:8789
-打开。
+打开。主控制台里 workspace「设置 → Agent 与 Worker」顶部有「打开 Worker
+控制台」入口与接入三步说明（地址由 `make dev-up` 按 Worker 端口注入，见
+`.env.example` 的 `AGENT_LEGION_WORKER_CONSOLE_URL`）。
 
 worker 注册不再使用全局 token：启动后在 Host Web UI 的
 workspace「设置 → Agent 与 Worker」为 workspace 签发 scoped token，到 Worker
@@ -110,7 +112,8 @@ make import-demo      # 安装并锁定 demo skills；不存在时创建并 seed
    LLM 端点提供的 provider/model（一处即覆盖全部 agent 节点，也可逐节点
    `execution.*` 覆盖；输入框会按节点 Agent 的 runtime 给出在线 Worker
    上报的可用 provider/model 选项，也可手输）。
-3. 打开 workspace 的自动调度，并在 Worker 控制台打开 claim。
+3. 打开 workspace 的自动调度，并在 Worker 控制台打开 claim（主控制台会把
+   未开领取的 Worker 标为「在线·未领取」，新 workspace 的引导也有这两步）。
 4. 提交一批任务：在 workspace 里「添加条目」对话框上传知识点 markdown，
    或在面板中勾选已播种的示例材料，确认后创建运行——每个材料一个
    job。（「粘贴 ID」面板是 **ref 条目**：需先在 admin 配置外部服务连接，

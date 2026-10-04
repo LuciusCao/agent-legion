@@ -97,3 +97,24 @@ def test_data_plane_client_has_bounded_timeouts_and_no_botocore_retries() -> Non
     assert config.read_timeout == 120
     # botocore normalizes max_attempts=1 (one retry) to total_max_attempts.
     assert config.retries["total_max_attempts"] == 2
+
+
+def test_presign_get_signs_response_header_overrides() -> None:
+    """#739: response overrides land in the signed query string (the holder
+    cannot strip or alter them) — S3 answers with exactly these headers."""
+    from urllib.parse import parse_qs
+
+    storage = S3StorageClient(_settings())
+
+    url = storage.presign_get(
+        "k.bin.gz",
+        response_headers={
+            "ResponseContentType": "video/mp4",
+            "ResponseContentEncoding": "gzip",
+        },
+    )
+
+    query = parse_qs(urlparse(url).query)
+    assert query["response-content-type"] == ["video/mp4"]
+    assert query["response-content-encoding"] == ["gzip"]
+    assert "X-Amz-Signature" in query

@@ -34,6 +34,7 @@ from server.app.mcp_server import (
     agent_tools,
     draft_tools,
     job_tools,
+    local_files,
     preview_tools,
     prompt_tools,
     schema_slim,
@@ -92,42 +93,62 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
                 return "get_studio_context is unavailable: no chat session bound"
             return await client.call("GET", f"/chat-sessions/{config.session_id}/context")
 
+    # #749（开发者契约，不入工具 docstring——docstring 会进 LLM 上下文）：
+    # save_node_code_draft / save_agent_definition_draft 的响应携带刚写入
+    # 草稿的 code_hash / definition_hash。本工具面永不发布
+    # （STUDIO-AGENT-001），但人的发布流（检查器面板 / 聊天草稿卡）已用
+    # expected_hash 做事务内 CAS 核对——将来任何工具侧发布必须带保存响应
+    # 的 hash 作为 expected_hash（不匹配 409），绝不 hash-less 发布。
     @mcp.tool(structured_output=False)
     async def save_node_code_draft(
         workspace_id: str,
         node_key: str,
-        code: str,
+        code: str | None = None,
         change_note: str = "",
         expected_capability: str | None = None,
+        code_path: str | None = None,
     ) -> str:
         """Save a draft of a code node's Python source (module-level run
         function required; get_authoring_guide §4). Draft only — a human
         publishes in Studio. expected_capability declares the capability you
         believe the node binds: mismatch with an existing node is rejected; a
         node absent from any published revision is accepted only WITH it
-        (without it → 404)."""
-        body: dict[str, Any] = {"code": code, "change_note": change_note or None}
+        (without it → 404). Supply exactly one of code or code_path. code_path
+        reads UTF-8 bytes from data/studio-mcp-files/<workspace_id>/ on the
+        MCP host (relative to that directory, or absolute within it).
+        The response carries the saved draft's code_hash."""
+        _, client = await _client()
+        source = await local_files.load_code(client, workspace_id, code, code_path)
+        body: dict[str, Any] = {"code": source, "change_note": change_note or None}
         if expected_capability is not None:
             body["expected_capability"] = expected_capability
-        _, client = await _client()
-        return await client.call(
+        response = await client.call(
             "PUT",
             # workflows/{workflow_key} URL segment retired (#211): the
             # workspace-scoped path keys on workspace_id alone (key == id).
             f"/workspaces/{workspace_id}/nodes/{node_key}/code/draft",
             body,
         )
+        return local_files.compact_response(response) if code_path is not None else response
 
     @mcp.tool(structured_output=False)
-    async def get_node_code(workspace_id: str, node_key: str) -> str:
+    async def get_node_code(
+        workspace_id: str, node_key: str, output_path: str | None = None
+    ) -> str:
         """Read a code node's current code state: builtin source, published
-        custom code, any pending draft."""
+        custom code, any pending draft. output_path exports the full JSON to
+        a NEW file in data/studio-mcp-files/<workspace_id>/ on the MCP host
+        and returns only path/size/SHA-256. Parse JSON locally, select
+        draft_code if present else code, edit and save with code_path."""
         _, client = await _client()
-        return await client.call(
+        response = await client.call(
             "GET",
             f"/workspaces/{workspace_id}/nodes/{node_key}/code",
         )
+        return await local_files.export_response(workspace_id, output_path, response)
 
+    # 同 save_node_code_draft 上方的 #749 开发者契约（响应 hash 是未来
+    # 任何工具侧发布的必带 CAS 令牌）。
     @mcp.tool(structured_output=False)
     async def save_agent_definition_draft(
         workspace_id: str,
@@ -145,7 +166,8 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         → catalog default tier, requires_labels → {}, config_schema → {}). To
         change just one field on an existing Agent, first call
         get_agent_definitions and echo back every current value you want
-        kept. Draft only — a human publishes it in Studio."""
+        kept. Draft only — a human publishes it in Studio. The response
+        carries the saved draft's definition_hash."""
         body: dict[str, Any] = {
             "capability": capability,
             "runtime": runtime,

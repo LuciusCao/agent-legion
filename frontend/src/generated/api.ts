@@ -528,6 +528,26 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/agent-workers/console': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Worker Console
+     * @description Read deployment metadata without enumerating Worker registrations.
+     */
+    get: operations['worker_console_api_agent_workers_console_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agent-workers/register': {
     parameters: {
       query?: never
@@ -576,6 +596,26 @@ export interface paths {
     get: operations['get_worker_metrics_api_agent_workers_self_metrics_get']
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-workers/self/presence': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Report Presence
+     * @description Refresh liveness and record the Worker's claim switch; answers the self record.
+     */
+    post: operations['report_presence_api_agent_workers_self_presence_post']
     delete?: never
     options?: never
     head?: never
@@ -3812,6 +3852,14 @@ export interface components {
       /** Versions */
       versions: components['schemas']['AgentVersionSummary'][]
     }
+    /** AgentWorkerConsoleResponse */
+    AgentWorkerConsoleResponse: {
+      /**
+       * Console Url
+       * @default
+       */
+      console_url: string
+    }
     /** AgentWorkerDeleteResponse */
     AgentWorkerDeleteResponse: {
       /** Deleted */
@@ -3825,6 +3873,8 @@ export interface components {
       allowed_workspaces: string[]
       /** Capabilities */
       capabilities: string[]
+      /** Claim Enabled */
+      claim_enabled?: boolean | null
       /** Labels */
       labels: {
         [key: string]: string
@@ -3867,6 +3917,11 @@ export interface components {
     }
     /** AgentWorkersResponse */
     AgentWorkersResponse: {
+      /**
+       * Console Url
+       * @default
+       */
+      console_url: string
       /** Workers */
       workers: components['schemas']['AgentWorkerSummary'][]
     }
@@ -4273,13 +4328,39 @@ export interface components {
      *     job_artifacts manifest (size/content_hash/uploaded_at distinguish the
      *     current execution after a rerun, #508); ``local`` rows are legacy
      *     job_dir-only names with no manifest metadata.
+     *
+     *     #739: object-backed rows additionally carry a presigned GET
+     *     ``download_url`` (S3 answers it directly — big media downloads leave the
+     *     Host process alone). The URL serves the raw endpoint's representation:
+     *     its response headers (Content-Type, attachment disposition and, for
+     *     ``.gz`` rows (#338), ``Content-Encoding: gzip``) are signed in, so the
+     *     two channels answer alike. It addresses the CURRENT bytes under the name
+     *     (rerun semantics #508, same as raw — verify against ``content_hash``) and
+     *     ``expires_at`` is an upper bound (re-fetch the manifest on 403).
+     *     ``local`` rows and instances without object storage keep both fields null.
      */
     ExternalArtifactEntry: {
+      /**
+       * Content Encoding
+       * @description Stored-form marker: "gzip" when the object holds gzip-compressed bytes (#338) — both download_url and the raw endpoint answer with Content-Encoding: gzip (HTTP clients decode transparently); empty otherwise
+       * @default
+       */
+      content_encoding: string
       /**
        * Content Hash
        * @default
        */
       content_hash: string
+      /**
+       * Download Url
+       * @description Presigned object-storage GET URL answering with the raw endpoint's headers (storage=object rows); null for local entries and instances without object storage — use the raw endpoint then
+       */
+      download_url?: string | null
+      /**
+       * Expires At
+       * @description Latest moment download_url can work (upper bound: it may 403 earlier, e.g. short-lived signing credentials — re-fetch the manifest then); null whenever download_url is null
+       */
+      expires_at?: string | null
       /**
        * Media Type
        * @description Content-Type the raw endpoint serves (whitelist-gated; JSON/text and non-whitelisted extensions download as octet-stream)
@@ -4443,6 +4524,8 @@ export interface components {
     }
     /** InstanceAgentWorkersSettings */
     InstanceAgentWorkersSettings: {
+      /** Artifact Download Presign Ttl Seconds */
+      artifact_download_presign_ttl_seconds: number
       /** Artifact Spot Check Percent */
       artifact_spot_check_percent: number
       /** Max Archive Bytes */
@@ -4946,6 +5029,8 @@ export interface components {
     JobsResponse: {
       /** Jobs */
       jobs: components['schemas']['JobSummaryResponse'][]
+      /** Truncated */
+      truncated: boolean
     }
     /** LogEventResponse */
     LogEventResponse: {
@@ -5945,6 +6030,7 @@ export interface components {
         | components['schemas']['RunItemMaterial']
         | components['schemas']['RunItemRef']
         | components['schemas']['RunItemBundle']
+        | components['schemas']['RunItemText']
       )[]
       /**
        * Workflow Key
@@ -5955,11 +6041,19 @@ export interface components {
     }
     /**
      * RunCreateResponse
-     * @description #467 A4：run + created_count only；job 行移到读取路径（#420）。
+     * @description #467 A4 响应瘦身保持：run + created_count only，永不物化 job 行
+     *     （万级 items 的响应体积回归由测试钉住）；#735 加回 job_ids——服务层
+     *     本就返回的字符串 id 列表（体积与 job rows 差一个数量级），外部系统
+     *     提交后即可拿到 job_id 去 #703 的单 job 端点轮询。
      */
     RunCreateResponse: {
       /** Created Count */
       created_count: number
+      /**
+       * Job Ids
+       * @description 本次提交新建的 job id 列表（非 run 全量）；全部 item 已存在时为空数组（重复提交治愈语义，见 #501）。
+       */
+      job_ids: string[]
       run: components['schemas']['RunRecord']
     }
     /** RunDetailResponse */
@@ -6002,6 +6096,21 @@ export interface components {
        * @enum {string}
        */
       type: 'ref'
+    }
+    /**
+     * RunItemText
+     * @description Requirement text typed inline; persisted as a material before resolution.
+     */
+    RunItemText: {
+      /** Content */
+      content: string
+      /** Filename */
+      filename?: string | null
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'text'
     }
     /** RunJobStats */
     RunJobStats: {
@@ -7456,6 +7565,11 @@ export interface components {
       /** Error Type */
       type: string
     }
+    /** WorkerPresenceRequest */
+    WorkerPresenceRequest: {
+      /** Claim Enabled */
+      claim_enabled: boolean
+    }
     /** WorkerStatusResponse */
     WorkerStatusResponse: {
       /** Paused */
@@ -7718,6 +7832,8 @@ export interface components {
       code: string
       /** Draft Code */
       draft_code?: string | null
+      /** Draft Code Hash */
+      draft_code_hash?: string | null
       /** Draft Version */
       draft_version?: number | null
       /**
@@ -7842,6 +7958,7 @@ export interface components {
       outputs: string[]
       skill?: components['schemas']['WorkflowNodeSkillResponse'] | null
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
+      text_input?: components['schemas']['WorkflowTextInputResponse'] | null
       /** Tools */
       tools?: string[]
     }
@@ -7923,6 +8040,24 @@ export interface components {
     WorkflowTerminalResponse: {
       /** Outcome */
       outcome: string
+    }
+    /** WorkflowTextInputResponse */
+    WorkflowTextInputResponse: {
+      /**
+       * Filename
+       * @default
+       */
+      filename: string
+      /**
+       * Label
+       * @default
+       */
+      label: string
+      /**
+       * Template
+       * @default
+       */
+      template: string
     }
     /** WorkspaceAgentRouteEntry */
     WorkspaceAgentRouteEntry: {
@@ -9435,6 +9570,26 @@ export interface operations {
       }
     }
   }
+  worker_console_api_agent_workers_console_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentWorkerConsoleResponse']
+        }
+      }
+    }
+  }
   register_api_agent_workers_register_post: {
     parameters: {
       query?: never
@@ -9506,6 +9661,39 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['OpsMetricsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  report_presence_api_agent_workers_self_presence_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkerPresenceRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentWorkerSummary']
         }
       }
       /** @description Validation Error */
@@ -11166,7 +11354,9 @@ export interface operations {
   }
   get_shared_materials_api_studio_agent_tools_workspaces__workspace_id__skills_shared_get: {
     parameters: {
-      query?: never
+      query?: {
+        for_edit?: boolean
+      }
       header?: never
       path: {
         workspace_id: string
@@ -11269,6 +11459,7 @@ export interface operations {
     parameters: {
       query?: {
         ref?: string | null
+        for_edit?: boolean
       }
       header?: never
       path: {
@@ -12327,6 +12518,8 @@ export interface operations {
          */
         workflow_key?: string | null
         status?: string | null
+        run_id?: string | null
+        limit?: number
       }
       header?: never
       path: {

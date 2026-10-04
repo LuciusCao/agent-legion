@@ -4,6 +4,31 @@
 
 **权限边界**：MCP server 只是薄转发，真正的约束在后端——scoped token 只能走工具面（草稿/校验/读取），发布、回滚、归档等生效操作永远由人在 Studio 里完成（STUDIO-AGENT-001）。token 只存 sha256 digest，明文只在铸造时返回一次。Studio 对话内铸造的 run token（origin='run'）还绑定会话所在 workspace（schema v45，绑定与 token 行同一条 INSERT 原子写入）：带 workspace 路径的工具端点对其它 workspace 一律 403；自助 token（origin='user'，本文档流程铸造的）不带绑定，按 workspace 成员关系校验（成员/admin 放行，非成员 404）。注意铸造端点自 P4 起 admin-only——「自助」仅指 admin 用户自助，member 无法铸造新 token（已铸造未过期的 token 在 TTL 内仍可用）。
 
+## 大文件的字节精确编辑（#767/#768）
+
+`get_node_code`、`get_skill`、`get_shared_materials` 可以传
+`output_path="snapshot.json"`，将完整响应直接导出到 MCP 主机的
+`<进程 cwd>/data/studio-mcp-files/<workspace_id>/`，只返回路径、
+字节数与 SHA-256。同机 agent 可本地解析、修改，再传 `code_path`
+（节点源码）或 `files_path`（skill/shared 的 JSON 文件列表，亦接受
+完整导出响应）提交；单个文件条目也支持 `file_path` 替代 `content`。
+原来的 inline 参数保持兼容。不要同时提交路径参数和对应正文参数。
+
+完整 skill 编辑导出仅限当前 workspace 自有的 skill；group skill 只能通过
+不带 `output_path` 的 `get_skill` 读取原有公开内容，不能导出完整编辑快照。
+
+skill/shared 的路径导出使用后端 `for_edit=true` 编辑快照，不能用展示
+接口的投影代替。共享快照包含 `map.json` 原文及全部可写文件（不按扩展名
+筛选）；损坏 UTF-8、超过可写上限或不安全的共享目录会整体拒绝导出，
+避免重新保存时静默替换字节或删除遗漏文件。
+
+路径只允许该 workspace 暂存目录内的普通 UTF-8 文件，禁止越界与链接。
+导出不会覆盖已有文件，读取后仍走原来的权限和内容校验；不会直接发布。
+Skill 是增量更新，导出后只保留要提交的非共享映射文件；映射文件应通过
+共享材料工具修改其来源。共享材料仍需提交完整文件集，skill 已存在的 tag 仍返回冲突。远程 agent
+若无法访问 MCP 主机文件系统，应继续使用 inline 参数。完整操作顺序见
+`get_authoring_guide(section="tool-map")`。
+
 ## 1. 铸造 token
 
 token 是 **admin 用户**签发的长效 scoped token（P4 起 `POST /api/studio-agent-tokens` 及 list/DELETE 端点全部 admin-only，非 admin 403；origin='user'，默认 168h，上限 720h）：

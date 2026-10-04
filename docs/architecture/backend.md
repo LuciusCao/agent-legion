@@ -116,9 +116,11 @@ server/app/
 | POST | `/agent-executions/{execution_id}/heartbeat` | `heartbeat` | routes/agent_worker_heartbeat.py |
 | POST | `/agent-executions/heartbeats` | `heartbeat_batch` | routes/agent_worker_heartbeat_batch.py |
 | GET | `/agent-workers/self/metrics` | `get_worker_metrics` | routes/agent_worker_metrics.py |
+| POST | `/agent-workers/self/presence` | `report_presence` | routes/agent_worker_presence.py |
 | POST | `/agent-workers/register` | `register` | routes/agent_workers.py |
 | GET | `/agent-workers/self` | `get_worker_self` | routes/agent_workers.py |
 | DELETE | `/agent-workers/{worker_id}` | `delete_worker` | routes/agent_workers.py |
+| GET | `/agent-workers/console` | `worker_console` | routes/agent_workers.py |
 | GET | `/agent-workers` | `list_workers` | routes/agent_workers.py |
 | GET | `/agent-executions/{execution_id}/bundle` | `bundle` | routes/agent_workers.py |
 | POST | `/agent-executions/{execution_id}/release-slot` | `release_slot` | routes/agent_workers.py |
@@ -369,7 +371,8 @@ server/app/
 | AgentRegisterTokensResponse | BaseModel | tokens: list[AgentRegisterTokenSummary] | app/routes/agent_workers_contracts.py |
 | AgentRegisterTokenDeleteResponse | BaseModel | token_id: str, deleted: bool, cascaded_worker_ids: list[str] | app/routes/agent_workers_contracts.py |
 | AgentWorkerSummary | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
-| AgentWorkersResponse | BaseModel | workers: list[AgentWorkerSummary] | app/routes/agent_workers_contracts.py |
+| WorkerPresenceRequest | BaseModel | claim_enabled: bool | app/routes/agent_workers_contracts.py |
+| AgentWorkerConsoleResponse | BaseModel | console_url: str | app/routes/agent_workers_contracts.py |
 | AgentWorkerDeleteResponse | BaseModel | worker_id: str, deleted: bool | app/routes/agent_workers_contracts.py |
 | AgentHeartbeatResponse | BaseModel | cancelled_execution_ids: list[str] | app/routes/agent_workers_contracts.py |
 | AgentStatusResponse | BaseModel | id: str, name: str, busy: bool | app/routes/agents.py |
@@ -453,7 +456,7 @@ server/app/
 | StressEventBatchResponse | BaseModel | recorded: int, recorded_at: float | app/routes/job_stress_events.py |
 | JobNodeSummaryResponse | BaseModel | node_key: str, label: str, status: str, error_message: str | app/routes/job_view_contracts.py |
 | JobSummaryResponse | BaseModel | id: str, workspace_id: str, workflow_key: str, source_type: str, source_id: s... | app/routes/job_view_contracts.py |
-| JobsResponse | BaseModel | jobs: list[JobSummaryResponse] | app/routes/job_view_contracts.py |
+| JobsResponse | BaseModel | jobs: list[JobSummaryResponse], truncated: bool | app/routes/job_view_contracts.py |
 | JobsSnapshotResponse | BaseModel | workspace_id: str, revision: int, stats: dict[str, int], jobs: list[JobSummar... | app/routes/job_view_contracts.py |
 | JobNodeResponse | BaseModel | id: int, job_id: str, node_key: str, status: str, stale_reason: str, error_me... | app/routes/job_view_contracts.py |
 | NodeRunResponse | BaseModel | id: int, job_id: str, node_key: str, status: str, started_at: str, finished_a... | app/routes/job_view_contracts.py |
@@ -510,9 +513,10 @@ server/app/
 | RunItemMaterial | BaseModel | type: Literal['material'], material_id: str | app/routes/run_contracts.py |
 | RunItemRef | BaseModel | type: Literal['ref'], connection_key: str, external_id: str, params: dict[str... | app/routes/run_contracts.py |
 | RunItemBundle | BaseModel | type: Literal['bundle'], bundle_id: str | app/routes/run_contracts.py |
+| RunItemText | BaseModel | type: Literal['text'], content: str, filename: str | None | app/routes/run_contracts.py |
 | RunCreateRequest | BaseModel | workflow_key: str | None, items: list[RunItem] | app/routes/run_contracts.py |
 | RunRecord | BaseModel | id: str, workspace_id: str, workflow_key: str, source_kind: str, status: str,... | app/routes/run_contracts.py |
-| RunCreateResponse | BaseModel | run: RunRecord, created_count: int | app/routes/run_contracts.py |
+| RunCreateResponse | BaseModel | run: RunRecord, created_count: int, job_ids: list[str] | app/routes/run_contracts.py |
 | RunListResponse | BaseModel | runs: list[RunRecord] | app/routes/run_contracts.py |
 | RunJobStats | BaseModel | total: int, by_status: dict[str, int] | app/routes/run_contracts.py |
 | RunDetailResponse | BaseModel | run: RunRecord, job_stats: RunJobStats | app/routes/run_contracts.py |
@@ -638,6 +642,7 @@ server/app/
 | WorkflowTerminalResponse | BaseModel | outcome: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeExecutionResponse | BaseModel | provider: str, model: str, thinking: str, prompt: str, prompt_mode: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeSkillResponse | BaseModel | key: str, ref: str | app/routes/workflow_node_contracts.py |
+| WorkflowTextInputResponse | BaseModel | label: str, filename: str, template: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeResponse | BaseModel | key: str, label: str, capability: str, node_type: str, accepted_item_types: l... | app/routes/workflow_node_contracts.py |
 | NodePromptPreviewRequest | BaseModel | node_key: str, definition_yaml: str | None | app/routes/workflow_node_prompt_contracts.py |
 | NodePromptPreviewResponse | BaseModel | effective_prompt: str, platform_prompt: str, default_instructions: str, custo... | app/routes/workflow_node_prompt_contracts.py |
@@ -818,6 +823,26 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 
 接入新内容类型只需两步：在 `RESOLVERS` 注册 resolver、为 DAG 首节点绑定 capability 并在其 `config_schema` 声明 `connection` 键（实例级外部服务连接 key）与业务参数。Intake 快照只冻结 `node_config` 与 `secret_ref`；声明 `runtime_mutable: true` 的运行开关键不受冻结约束，每次 dispatch 按同一解析链重取 workspace 覆盖并落 `node_runs.config_snapshot_json` 审计（CONFIG-RUNTIME-MUTABLE-001）。
 
+### 节点配置可变性分类（#691）
+
+节点配置值分两类，解析链都是「schema 默认 → 节点 `config` → workspace 覆盖」（workspace 覆盖优先级最高），区别只在**何时**求值：
+
+| 类别 | 键 | 求值时机 | 改动生效范围 | 理由 |
+| --- | --- | --- | --- | --- |
+| 随 workflow 版本化（默认） | 普通 `config_schema` 业务键、`sandbox_network` | job intake 时冻结 | 只影响之后 intake 的新 job；节点 `config` 层的改动需发布新 revision | 影响产物正确性/可复现性；`sandbox_network` 是网络出站安全边界，放开必须走 revision 发布评审，不能用运行时开关给在飞 job 开网 |
+| 运行时可调 | 声明 `runtime_mutable: true` 的业务键（运行开关）、保留执行键 `timeout_seconds` | 运行开关：每次 dispatch 现场重解析；`timeout_seconds`：见下方模型 | 尚未判定的执行即用新值；已开始的执行不变 | 纯运行开关或资源/弹性参数，不改变节点产出什么 |
+
+`timeout_seconds` 模型（CONFIG-RUNTIME-TIMEOUT-001，实现 `server/app/services/runtime_reserved_config.py`，测试矩阵 `tests/services/test_runtime_timeout_matrix.py`）：
+
+- 三层：L0 平台默认（agent 1800s / code 600s）；L1 job 所钉 revision 的节点 `config.timeout_seconds`（对该 job 不可变）；L2 workspace 覆盖——唯一可变层。
+- 不可变部分在入队时冻结：远程请求的 manifest 携带 `timeout_base = {value, source} = resolve(L0, L1)`，claim 计算超时不需要读 revision 文档。base 只是中间值，不是判定。
+- 每次执行只有**一个判定点**：本地 code 池 = Host dispatch；远程 agent/code = Worker claim（候选选取时的快照，写事务沿用、不重读、不加锁）。所有路径共用同一个纯函数 `effective = resolve_timeout(base, L2)`；判定后值固定，审计记录的恰好是判定的值与来源。claim 扫描在 SQL 里把 L2 投影成标量（`workspaces.node_config_json` 按 workspace 解析一次，键为 `default_workflow_key`，即 manifest 的 `workflow_key`），整份文档不进候选行。
+- L2 非法（合法 = 非 bool 的整数且 >= 1，与保留 schema 一致）时，**所有路径**都回落到 base，审计来源记为 `workspace_override_invalid`，并打一条结构化 warning（node key、workspace、原始值；同一组合只打一次）。任何路径都不再因非法超时覆盖让节点失败（#691 之前 dispatch 会让节点失败），intake 冻结同样忽略非法超时覆盖。
+- 旧 Host 入队、manifest 里没有 `timeout_base` 的请求：以入队时的值为 base，来源 `enqueue_snapshot`。
+- 审计：每次执行在 `node_runs.config_snapshot_json` 的 `_config_resolution` 元键下记录判定结果，远程请求在 claim 下发的 manifest 里另带同形的 `config_resolution` 键，形如 `{"timeout_seconds": {"value", "source"}}`，来源取 `platform_default` / `node_config` / `workspace_override` / `workspace_override_invalid` / `enqueue_snapshot`。
+- 保留键 `timeout_seconds` / `sandbox_network` 仍不得在 `config_schema` 中重声明（loader 拒绝），也不能挂 `runtime_mutable` 标记；它们不进 `runtime_mutable_keys`，因此也不影响 inherit 升级的继承判定。intake 冻结快照仍记录 intake 时刻的超时（inherit 升级 diff 照旧比较），但执行不使用它。
+- 生效时点（快照语义）：运行时可调键是**配置输入**，不是判定状态。每次求值在一个声明好的时点读取一次——Host dispatch 时，或 Worker 批量 claim 的候选选取阶段（只读连接）——写事务沿用该快照，不在锁下重读，也不对 `workspaces` 行加锁；在此之后提交的修改从下一次 dispatch / claim 起生效。与「先选候选、后在写事务内修改并提交」之间提交的修改效果上等同于晚于本次 claim 提交，不产生错误执行；在 claim 热路径上加锁消除这个窗口的代价（#690 锁序族）远大于收益。跨事务携带的身份、状态、执行代次、租约、容量等**判定状态**仍须在写事务内重新校验（AGENTS.md「多步变更」条）。
+
 ## Database
 
 - PostgreSQL 服务 Agent Legion workflow 与平台状态（当前版本见 `server/app/db/schema.py` 的 `SCHEMA_VERSION`）：
@@ -901,10 +926,10 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 `config/app.yaml` 已整体退役：bootstrap/安全类键转 env-only，实例级可调配置迁入 DB：
 
-- env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers` 的全局 register token 已随 issue #35 退役（遗留的 `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 或 yaml `register_token[_file]` 会让启动直接报错）。
+- env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers.console_url` → `AGENT_LEGION_WORKER_CONSOLE_URL`（主控制台「打开 Worker 控制台」入口地址，随 `GET /api/agent-workers` 的 `console_url` 下发；部署拓扑而非运行时调优，不进实例设置文档，dev/prod 启动脚本按 Worker 端口注入，空串 = 不显示链接）；`agent_workers` 的全局 register token 已随 issue #35 退役（遗留的 `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 或 yaml `register_token[_file]` 会让启动直接报错）。
 - DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`code_capacity`（本地兜底执行并发上限，0 = 纯控制面模式，#389）、`workflows.max_items_per_run`、`workflows.node_code_max_bytes`（节点代码体积上限，默认 64KB、`ge=1024`，#786 起实例设置管理，env `AGENT_LEGION_NODE_CODE_MAX_BYTES` 保留为默认值来源：实例设置 > env > 默认）、`agent_workers.max_archive_bytes` / `min_protocol_version` / `max_concurrent_result_commits`（result 提交削峰 gate，默认 16，0 = 关闭，#521）/ `result_commit_batching`（终态写组提交，默认开，False = 直连串行路径，#591）/ `artifact_spot_check_percent`（信任上报产物的抽检比例，默认 3，0 = 裸键全信任，100 = 全核验；`.gz` 引用永远全量核验不参与抽检，#356）、`agent_enqueue.workers`（默认 48，上限 256）/ `max_pending`（默认 1024）（Host 入队线程池，#509）、`result_unpack.workers`（result 解包进程池尺寸，0 = 自动 min(4, 核数)，上限 64；env `AGENT_LEGION_RESULT_UNPACK_WORKERS` 保留为覆盖通道，#554）、`result_validate.workers`（result 校验进程池尺寸，同 result_unpack 语义；env `AGENT_LEGION_RESULT_VALIDATE_WORKERS`，#569）、`agent_claim.worker_touch_interval_seconds`（claim/result 路径刷新 Worker 在线标记的节流间隔，默认 30s，0 = 逐次写恢复 0.7.5 行为，#561）。`openclaw` 块已随 openclaw runtime 一并退役（#75）：存量 DB 文档读取时整块剥离、写入返回 422，explicit 单文件配置里的残留块被忽略；`workflows.enabled` 已随 #385/#389 退役：存量文档读取时键级剥离（`workflows` 块的 `max_items_per_run` 活跃保留）。
 
-env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
+env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码、workspace API token 请求限流桶参数）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`、`AGENT_LEGION_API_TOKEN_RATE_LIMIT_PER_MINUTE` / `_BURST`，默认 60 / 20，#738）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
 外部服务集成走实例级外部服务连接（EXTERNAL-CONNECTION-001），不经全局 yaml 段配置（全局 `cms:` 段已退役，写进任何 split yaml 会撞退役文件校验报错）：连接由 admin 在全局设置「外部服务连接」或 admin API（`GET/POST /api/admin/connections`、`PUT/DELETE /api/admin/connections/{key}`、`POST /api/admin/connections/{key}/test`、`GET /api/admin/connection-types`）维护，存 DB `external_connections`（只存非敏感配置）；敏感字段转入实例 vault（`instance_secrets`，Fernet 加密，连接配置里只留 `conn:<key>:<field>` 引用），鉴权换来的 token 加密缓存在 `connection_tokens`，过期在父连接行锁下单飞刷新（`server/app/services/connection_tokens.py`）。平台内置 `static_bearer` 与通用 `hmac_token`（HMAC 签名换 token）adapter（`server/app/services/connection_adapters.py` / `connection_adapter_hmac.py`）；业务专属鉴权协议随业务节点迁出，不再由平台携带。节点 config 只写 `connection: "<key>"` 引用连接 + 业务参数（出厂默认值声明在 capability 的 `config_schema`，沿「schema defaults → 节点 config → workspace 覆盖」链解析，Settings UI 可改）。env `CMS_*` / `AGENT_LEGION_CMS_TOKEN` 运行时通道已退役：升级后首次启动由 schema v34 迁移（`server/app/db/migrations/external_connections.py`）把 env 凭据与 workspace 节点旧配置收编进连接，此后 env 不再被读取。explicit 单文件配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。
 

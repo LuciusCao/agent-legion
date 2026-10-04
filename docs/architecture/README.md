@@ -46,11 +46,16 @@ data/  (videos, logs, packages, jobs, run traces)
 | 前端 | [frontend.md](frontend.md) | React SPA、状态管理、UI 组件 |
 | 部署 | [deployment.md](deployment.md) | 本地运行、配置、质量门 |
 | 质量门 | [local-quality-gates.md](local-quality-gates.md) | 本地 hooks + GitHub Actions CI 的门禁层级、凭证与分支保护策略 |
+| 评审收敛 | [review-convergence.md](review-convergence.md) | 自动评审 finding 的阻塞/非阻塞分诊、回应方式与停止条件（#835） |
 | 项目结构 | [project-structure.md](project-structure.md) | 完整目录树 |
 | velites harness | [velites-harness.md](velites-harness.md) | 自研 Rust agent harness（velites 执行内核）设计 |
 | 证据矩阵 | [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md) | 架构承诺的反向审计证据矩阵（与 `config/architecture/` invariant registry 对齐） |
 | 执行代次协议 | [execution-generation.md](execution-generation.md) | EXEC-GENERATION-001 执行代次协议（#759/#645）：代次列与 bump/CAS 面、锁序与批序全序、三平面一致性与并发对抗审查 checklist |
+| 产物身份状态空间 | [artifact-identity-state-space.md](artifact-identity-state-space.md) | 产物身份协议的网格模型（#876）：生命周期六阶段 × 八变异轴 × 八不变量（EXEC-INPUT-IDENTITY-001 / EXEC-VALIDATION-VIEW-001）逐格钉测试/论证，一致性检查防腐 |
 | Studio 草稿-校验-发布契约 | [studio-draft-publish-contract.md](studio-draft-publish-contract.md) | studio 草稿编辑的三台协作状态机（保存/自动校验/发布）迁移表 + 组合 invariant 表与变更纪律（#633/#804） |
+| Studio 本地文件编辑 | [studio-local-authoring-contract.md](studio-local-authoring-contract.md) | Git 内容归属、shared 全量状态、传输预算与测试矩阵（#820） |
+| Kimi 后台任务接续 | [studio-kimi-background-wakeup.md](studio-kimi-background-wakeup.md) | 后台终态回执、空闲接续及 Kimi V1 存储兼容边界（#806） |
+| Studio 服务生命周期 | [studio-service-lifecycle.md](studio-service-lifecycle.md) | create/resume 准入、在途启动排空与 shutdown 清理顺序（STUDIO-RUNTIME-001） |
 | 节点 SDK / Worker 执行 | [node-sdk-and-worker-execution-design.md](node-sdk-and-worker-execution-design.md) | 节点 SDK（NodeContext）与 code 节点执行迁移 Worker 的合并设计（Issue #30/#82） |
 | 材料与 runs | [materials-and-runs-design.md](materials-and-runs-design.md) | runs / 材料 / bundle 文件夹条目 / 产物对象存储的输入模型与治理设计 |
 | velites 模型注册 | [velites-model-registry.md](velites-model-registry.md) | runtime-owned 模型发现与 velites provider registry（Worker 侧发现、Host 侧三元组路由） |

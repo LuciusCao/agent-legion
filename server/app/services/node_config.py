@@ -9,7 +9,9 @@ code-routed nodes also get the platform-reserved execution keys merged in
 batch payload; dispatch reads the frozen value and only forwards
 schema-whitelisted, non-secret keys (CONFIG-MANIFEST-001). Keys declared
 ``runtime_mutable: true`` are overlaid with a live re-resolution at dispatch
-(CONFIG-RUNTIME-MUTABLE-001, ``node_config_runtime``).
+(CONFIG-RUNTIME-MUTABLE-001, ``node_config_runtime``); ``timeout_seconds``
+follows CONFIG-RUNTIME-TIMEOUT-001 (``runtime_reserved_config``), while
+``sandbox_network`` stays frozen.
 """
 
 from __future__ import annotations
@@ -27,10 +29,15 @@ from server.app.services.node_config_batch import frozen_node_config
 from server.app.services.node_config_runtime import runtime_mutable_keys
 from server.app.services.node_config_secret_guard import reject_secret_violations
 from server.app.services.node_execution_config import (
-    AGENT_DEFAULT_TIMEOUT_SECONDS,
+    agent_effective_schema,
     merge_reserved_execution_schema,
 )
 from server.app.services.node_secrets import strip_secret_fields
+from server.app.services.runtime_reserved_config import (
+    TIMEOUT_KEY,
+    chain_override,
+    dispatch_timeout,
+)
 from server.app.workflows.schema import WorkflowDefinition, WorkflowNode
 
 
@@ -74,10 +81,7 @@ def _node_config_schema(
     capability with a published Agent without inheriting the Agent's schema.
     """
     if node.node_type == "agent":
-        return merge_reserved_execution_schema(
-            agent_schemas.get(node.capability, {}),
-            {"timeout_seconds": AGENT_DEFAULT_TIMEOUT_SECONDS},
-        )
+        return agent_effective_schema(agent_schemas.get(node.capability, {}))
     return merge_reserved_execution_schema(node.config_schema)
 
 
@@ -157,7 +161,7 @@ def resolve_workflow_node_configs(
     resolved: dict[str, dict[str, Any]] = {}
     for node in definition.executable_nodes.values():
         node_schema = _node_config_schema(node, agent_schemas)
-        workspace_override = overrides.get(node.key, {})
+        workspace_override = chain_override(overrides.get(node.key, {}))
         # Approval gates never dispatch (EXEC-APPROVAL-001): their config
         # (rework_target/feedback_artifact) is platform semantics consumed by
         # the approval service, not an execution config to validate/freeze.
@@ -172,33 +176,49 @@ def resolve_workflow_node_configs(
     return resolved
 
 
-def dispatch_effective_config(
+def dispatch_config_resolution(
     config_schema: dict[str, Any],
     node: Any,
     workflow_key: str,
     workspace: Mapping[str, Any] | None,
     run_payload: Mapping[str, Any] | None,
     fallback_defaults: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Effective config at dispatch time: the job's frozen config wins.
+    *,
+    decide: bool = True,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Effective config at dispatch time plus the ``timeout_seconds`` entry.
 
-    Pre-mechanism jobs (or replays without a frozen config) fall back to
-    live resolution from the node and workspace layers. Frozen snapshots
-    predating the reserved execution keys get *fallback_defaults*
-    underneath (frozen values always win), so in-flight old jobs keep their
-    node-declared timeout/network behavior (P-0.5). Frozen snapshots are
-    overlaid with a live re-resolution of the keys declared
-    ``runtime_mutable: true`` (CONFIG-RUNTIME-MUTABLE-001); everything
-    else — including the platform-reserved execution keys — stays frozen.
+    The job's frozen config wins. Pre-mechanism jobs (or replays without a
+    frozen config) fall back to live resolution from the node and workspace
+    layers. Frozen snapshots predating the reserved execution keys get
+    *fallback_defaults* underneath (frozen values always win), so in-flight
+    old jobs keep their node-declared network behavior (P-0.5). Frozen
+    snapshots are overlaid with a live re-resolution of the keys declared
+    ``runtime_mutable: true`` (CONFIG-RUNTIME-MUTABLE-001); ``sandbox_network``
+    and everything else stay frozen. ``timeout_seconds`` follows the #691
+    model (``runtime_reserved_config``): ``decide=True`` is the local code
+    pool's decision point (base + live L2); ``decide=False`` (remote enqueue)
+    yields only the base the queued manifest carries for the claim to decide.
+    The second element is that ``{"value", "source"}`` entry (None when the
+    schema carries no reserved timeout).
     """
     frozen = frozen_node_config(run_payload, node.key)
+    raw_override = workspace_node_overrides(workspace, workflow_key).get(node.key, {})
+    override = chain_override(raw_override)
     if frozen is None:
-        overrides = workspace_node_overrides(workspace, workflow_key)
-        return resolve_node_config(config_schema, node.config, overrides.get(node.key, {}))
-    effective = {**fallback_defaults, **frozen} if fallback_defaults else dict(frozen)
-    mutable = runtime_mutable_keys(config_schema)
-    if not mutable:
-        return effective
-    overrides = workspace_node_overrides(workspace, workflow_key)
-    live = resolve_node_config(config_schema, node.config, overrides.get(node.key, {}))
-    return {**effective, **{key: live[key] for key in mutable if key in live}}
+        effective = resolve_node_config(config_schema, node.config, override)
+    else:
+        effective = {**fallback_defaults, **frozen} if fallback_defaults else dict(frozen)
+        mutable = runtime_mutable_keys(config_schema)
+        if mutable:
+            live = resolve_node_config(config_schema, node.config, override)
+            effective.update({key: live[key] for key in mutable if key in live})
+    entry = dispatch_timeout(config_schema, node, raw_override, workspace, decide=decide)
+    if entry is not None:
+        effective[TIMEOUT_KEY] = entry["value"]
+    return effective, entry
+
+
+def dispatch_effective_config(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """``dispatch_config_resolution`` without the timeout entry."""
+    return dispatch_config_resolution(*args, **kwargs)[0]

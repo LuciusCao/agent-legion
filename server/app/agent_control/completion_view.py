@@ -1,14 +1,15 @@
 """Worker 结果读视图的链接机制（#759 review P1-1、对抗复审 P2 族）。
 
 自 ``completion_staged`` 拆出的文件预算姊妹模块：staging 目录即读视图，
-归档成员不可信，而视图只是 finish 前的私有 scratch。链入视图的只有两
-类名：「本次 ref 校验提升」的产物（#779 终审 P1：job_dir 残留永不进视
-图）与节点声明 inputs（#828/#830，名单与字节来源裁决在姊妹模块
-``completion_view_inputs``）。链接一律覆盖——同名归档暂存字节让位可
-信字节（#759 对抗复审 N2），挡位垃圾（同名目录、文件祖先、symlink）
-全域清理，源消失的 TOCTOU 按未产出跳过，任何形状/竞态组合都不炸异常
-（炸穿结果提交在覆盖链接命中时就是 codex #774 P2 的同型现场：remote
-promote 已提交、staging key 已删）。
+归档成员不可信，而视图只是 finish 前的私有 scratch。链入视图的只有
+「本次 ref 校验提升」的产物名（#779 终审 P1：job_dir 残留永不进视图）
+——节点声明 inputs 不进 staging 视图，校验数据面由声明校验视图族
+（``workflows/validation_view``，含 #828/#830/#833 的名单裁决与
+dispatch 冻结 CAS 字节来源）在校验时刻单独构造。链接一律覆盖——同
+名归档暂存字节让位可信字节（#759 对抗复审 N2），挡位垃圾（同名目录、
+文件祖先、symlink）全域清理，源消失的 TOCTOU 按未产出跳过，任何形
+状/竞态组合都不炸异常（炸穿结果提交在覆盖链接命中时就是 codex #774
+P2 的同型现场：remote promote 已提交、staging key 已删）。
 """
 
 from __future__ import annotations

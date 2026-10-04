@@ -21,8 +21,8 @@ from server.app.agent_broker.result_timing import mark as mark_result_stage
 from server.app.agent_broker.result_unpack import safe_relative_dir
 from server.app.agent_control.completion_moves import gate_safe_staged_moves
 from server.app.agent_control.completion_preflight import find_landing_conflict
+from server.app.agent_control.completion_ref_registration import register_reported_output_refs
 from server.app.agent_control.completion_view import link_into_view
-from server.app.agent_control.completion_view_inputs import link_declared_inputs_into_view
 from server.app.executors._shard_contract import read_shard_output
 from server.app.executors.artifact_mirror import upload_produced_artifacts
 from server.app.executors.models import ExecutionResult
@@ -148,29 +148,42 @@ def finish_staged(
         # pre-staging "last writer wins" order).
         remote_targets = {job_dir / name for name in remote_names}
         staged_moves = [move for move in staged_moves if move[0] not in remote_targets]
-    for name, ref in outcome.output_artifacts.items():
-        if name not in remote_names:
-            handler.artifact_store.add_ref(job_id, node_key, name, str(ref).split(":", 1)[-1])
+    # #876 P2-1：校验前登记（legacy 通道 blob 的 GC 防护）+ 撞名守卫
+    # （共享 (job,node,name) 槽位，撞名时冻结 input 优先）——裁决与登记
+    # 在 completion_ref_registration。
+    register_reported_output_refs(
+        handler.artifact_store, job_id, node_key, outcome, remote_names, manifest, expected
+    )
     mark_result_stage(stage_timer, "artifacts_verify")
     produced = tuple(name for name in expected if (view_dir / name).is_file())
     status = outcome.status
     exit_code = outcome.exit_code
     error = outcome.error_message
-    if status == "completed" and expected and not outcome.output_artifacts:
+    # #755 对抗复审 P2-1：truncated 标记意味着头部清单被字节预算整体降级
+    # （CAS 最后手段截断），而非 Worker 未报告——产物字节随归档已在暂存视
+    # 图里，跳过此改判，交给下方 produced/missing 检查从视图判定。该标记
+    # 由此从「只记录无消费」升级为 Host 完成契约的一部分。
+    empty_manifest = not outcome.output_artifacts and not outcome.output_artifacts_truncated
+    if status == "completed" and expected and empty_manifest:
         status, exit_code, error = "failed", 1, "Agent Worker did not report output artifacts"
     missing = [name for name in expected if name not in produced]
     if status == "completed" and missing:
         status, exit_code, error = "failed", 1, f"Missing outputs: {', '.join(missing)}"
     # Worker results are untrusted: validate Host-side like the Pi runner.
+    # #757: never against the raw job_dir — it accumulates every node's
+    # outputs across all attempts, and a glob-based legacy validator would
+    # see a sibling's (stale or current) files and misattribute their
+    # verdict to this node. The pool task builds the declared view (this
+    # node's inputs from job_dir + this attempt's outputs from the read
+    # view) and reconciles the validator's output mutations back into
+    # view_dir, so what the finish gate promotes is what passed validation.
     if status == "completed" and handler.skill_manager is not None:
-        # #828/#830：validator 的跨文件事实回引对账要读节点声明 inputs——
-        # staging 化后视图只收本次产物，inputs 必须在校验前链回视图（与
-        # expected/staged 提升源同名的名不链，#779 终审 P1 的残留排除语
-        # 义不动；字节优先 dispatch 冻结的 CAS 副本，codex 对抗复审 P1）。
-        link_declared_inputs_into_view(
-            handler.artifact_store, manifest, expected, job_dir, view_dir, staged_moves
+        # #828/#830/#833：input 名单裁决与字节来源（dispatch 冻结 CAS 优先、
+        # 缺失回落 job_dir）已下沉进池化视图构造（workflows/validation_view
+        # 族），artifact_store 只为取 CAS root 传入，主进程不碰字节。
+        validation_error = validate_worker_outputs(
+            handler.skill_manager, manifest, job_dir, view_dir, handler.artifact_store
         )
-        validation_error = validate_worker_outputs(handler.skill_manager, manifest, view_dir)
         if validation_error:
             status, exit_code, error = "failed", 1, validation_error
     mark_result_stage(stage_timer, "validate")

@@ -17,6 +17,8 @@ export const extraQueryKeys = {
   // workspace 签发的 API intake token 列表（#626，按 workspace 作用域）。
   workspaceApiTokens: (workspaceId: string) =>
     ['workspaceApiTokens', workspaceId] as const,
+  // 部署级入口元数据；专用接口不含 Worker 清单，多个入口共享请求。
+  workerConsole: () => ['workerConsole'] as const,
   // workspace 视角的 worker 列表（按 scoped token 注册过滤，issue #35）。
   workspaceWorkers: (workspaceId: string) =>
     ['workspaceWorkers', workspaceId] as const,

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from server.app.db.migration_registry import MIGRATIONS
 from server.app.db.schema import SCHEMA_VERSION
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
@@ -25,56 +26,16 @@ def _seed_workspace(conn, workspace_id: str, key: str) -> None:
 
 
 def test_schema_version_pin() -> None:
-    # The latest-migration record pin moved through
-    # test_retire_global_register_tokens_migration.py (v58) →
-    # test_jobs_run_id_index.py (v59) → back to the v58 file for the DDL-only
-    # v60; v62 owns its own module, v63 is DDL-only (workspace_preview_config),
-    # v64's data migration lives in
-    # tests/db/test_workspace_execution_defaults_migration.py (the retired
-    # default_agent_* / intake_config_json columns still drop in schema.py's
-    # post-chain sweep); v65 is DDL-only (approval_decisions,
-    # EXEC-APPROVAL-001), and v66's data migration lives in
-    # tests/db/test_workflow_node_explicit_types_migration.py; v67 is
-    # DDL-only (jobs_workspace_scan_indexes) and v68 is the jobs key
-    # alignment data migration (#211 Phase 3 read-layer binding); v69 is
-    # DDL-only (executor_leases_workspace_index); v70 retires the
-    # workflow_key columns (#211 Phase 3 M2); v71 widens the
-    # versioned_entities entity_type CHECK for preview panels (#328); v72
-    # adds the ops_runtime_profile_samples gauge table (#359); v73 adds the
-    # run_job_status_counts counter table (#358); v74 is DDL-only
-    # (studio_chat_agent_config, #368) and owns
-    # tests/db/test_studio_chat_schema.py; v75 is DDL-only
-    # (node_runs_skill_key, #410); v76 is studio_publish_requests (#416,
-    # claimed 76 after the #434 renumber) and owns
-    # tests/db/test_studio_publish_requests.py; v77
-    # (job_status_counts_statement_triggers, #437) owns
-    # tests/db/test_schema_upgrade_parity.py; v78
-    # (claim_stage_profile, #448) owns
-    # tests/db/test_claim_stage_profile_migration.py; v79
-    # (shard_identity_index, #401) owns
-    # tests/db/test_agent_request_shard_index.py; v80
-    # (result_stage_profile, #521) owns
-    # tests/db/test_result_stage_profile_migration.py; v81
-    # (claim_queue_wait_profile, #551) owns
-    # tests/db/test_claim_queue_wait_profile_migration.py; v82
-    # (job_status_counts_advisory_locks, #659) owns
-    # tests/db/test_status_counts_deadlock.py; v83
-    # (studio_chat_context_health, #694) owns
-    # tests/db/test_studio_chat_schema.py; v84
-    # (workspace_api_tokens, #626) owns
-    # tests/db/test_workspace_api_tokens_migration.py; v85
-    # (execution_generation, #759) owns
-    # tests/db/test_execution_generation_schema.py; v86
-    # (node_runs_impl_identity, #645) owns
-    # tests/db/test_node_runs_impl_identity_schema.py — this copy stays as
-    # a backstop that the chain tail stays in sync.
-    assert SCHEMA_VERSION == 86
+    # Check registry/database agreement here. Each migration owns its
+    # version-specific assertions; schema_upgrade_parity pins the latest
+    # migration's concrete effects and its rewind inventory.
+    assert MIGRATIONS[-1].version == SCHEMA_VERSION
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "node_runs_impl_identity"
+    assert row["name"] == MIGRATIONS[-1].name
 
 
 def test_renames_ids_to_keys_and_cascades_children() -> None:

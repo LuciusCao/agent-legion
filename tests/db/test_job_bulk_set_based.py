@@ -12,8 +12,11 @@ The unnest rewrite batches a whole run's inserts into one statement per
 - return-value equivalence: the returned rows keep the executemany
   contract (one row per unique id, in first-seen order, with the
   workflow_key identity shim);
-- re-submission semantics: the ON CONFLICT update arm still rebinds
-  run_id/title/input/frozen config on existing rows;
+- re-submission semantics (#735): the ON CONFLICT update arm refreshes
+  title/input/frozen config on rows THIS run already owns, while a row
+  owned by a DIFFERENT run is skipped (first writer wins — concurrent
+  submissions can never steal a job from its run) and drops out of the
+  returned ids;
 - trigger-count economics: a full-batch insert fires the statement
   trigger once per batch, not once per row.
 """
@@ -151,10 +154,61 @@ def test_bulk_create_returns_rows_in_candidate_order_with_identity_shim(tmp_path
     )
 
 
-def test_bulk_resubmit_rebinds_run_and_freeze(tmp_path: Path) -> None:
-    # The ON CONFLICT arm: a re-submitted job takes the new run binding,
-    # title, input and frozen config; its job_nodes rows survive (do
-    # nothing), and the run counters follow the rebind.
+def test_bulk_same_run_resubmit_updates_freeze(tmp_path: Path) -> None:
+    # The ON CONFLICT ownership clause passes for rows THIS run already owns:
+    # a same-run re-submission takes the new title/input/frozen config
+    # (RUN-FREEZE-001), keeps the run binding, returns the id, and its
+    # job_nodes rows survive (do nothing).
+    db = _make_db(tmp_path)
+    _seed_workspace(db, "ws-sb")
+
+    db.create_jobs_bulk(
+        candidates=[_candidate(0)],
+        workflow_key="wf",
+        run_id="run-sb-1",
+        node_keys=_NODE_KEYS,
+        workspace_id="ws-sb",
+        revision=_REVISION,
+        frozen_config={"node_a": {"k": "old"}},
+    )
+    job_ids = db.create_jobs_bulk(
+        candidates=[_candidate(0)],
+        workflow_key="wf",
+        run_id="run-sb-1",
+        node_keys=_NODE_KEYS,
+        workspace_id="ws-sb",
+        revision=_REVISION,
+        frozen_config={"node_a": {"k": "new"}},
+    )
+
+    assert [str(job_id) for job_id in job_ids] == ["ws-sb_wf_item-00000"]
+    with read_connection(TEST_DATABASE_URL) as conn:
+        job_row = conn.execute(
+            "select run_id, title, frozen_config_json from jobs where id=%s", (job_ids[0],)
+        ).fetchone()
+        nodes = conn.execute(
+            "select count(*) as cnt from job_nodes where job_id=%s", ("ws-sb_wf_item-00000",)
+        ).fetchone()
+        run1 = conn.execute(
+            "select cnt from run_job_status_counts where run_id=%s and status='queued'",
+            ("run-sb-1",),
+        ).fetchone()
+    assert str(job_row["run_id"]) == "run-sb-1"
+    assert str(job_row["title"]) == "Title 0"
+    assert json.loads(str(job_row["frozen_config_json"])) == {"node_a": {"k": "new"}}
+    # No duplicate node rows from the double submit; the counter still
+    # counts the row exactly once (the update arm moved nothing).
+    assert int(nodes["cnt"]) == len(_NODE_KEYS)
+    assert run1 is not None and int(run1["cnt"]) == 1
+
+
+def test_bulk_cross_run_submit_cannot_steal_ownership(tmp_path: Path) -> None:
+    # #735 review P1: the pre-fix arm re-bound run_id to the LAST writer, so
+    # two concurrent runs racing one item both reported the job while only
+    # the later run still owned it. The ownership clause makes first writer
+    # win atomically: the second run's INSERT skips the row, its RETURNING
+    # drops the id (the response never claims another run's job), the row
+    # keeps its original binding/freeze, and no foreign node rows land on it.
     db = _make_db(tmp_path)
     _seed_workspace(db, "ws-sb")
     with db.connect() as conn:
@@ -173,23 +227,28 @@ def test_bulk_resubmit_rebinds_run_and_freeze(tmp_path: Path) -> None:
         revision=_REVISION,
         frozen_config={"node_a": {"k": "old"}},
     )
-    job_ids = db.create_jobs_bulk(
+    # The losing run even carries a DIFFERENT node set (other revision):
+    # nothing of it may leak onto the winner's job.
+    stolen_ids = db.create_jobs_bulk(
         candidates=[_candidate(0)],
         workflow_key="wf",
         run_id="run-sb-2",
-        node_keys=_NODE_KEYS,
+        node_keys=["node_z"],
         workspace_id="ws-sb",
         revision=_REVISION,
         frozen_config={"node_a": {"k": "new"}},
     )
 
+    assert stolen_ids == []
     with read_connection(TEST_DATABASE_URL) as conn:
         job_row = conn.execute(
-            "select run_id, title, frozen_config_json from jobs where id=%s", (job_ids[0],)
+            "select run_id, title, frozen_config_json from jobs where id=%s",
+            ("ws-sb_wf_item-00000",),
         ).fetchone()
-        nodes = conn.execute(
-            "select count(*) as cnt from job_nodes where job_id=%s", ("ws-sb_wf_item-00000",)
-        ).fetchone()
+        node_keys = conn.execute(
+            "select node_key from job_nodes where job_id=%s order by node_key",
+            ("ws-sb_wf_item-00000",),
+        ).fetchall()
         run1 = conn.execute(
             "select cnt from run_job_status_counts where run_id=%s and status='queued'",
             ("run-sb-1",),
@@ -198,14 +257,13 @@ def test_bulk_resubmit_rebinds_run_and_freeze(tmp_path: Path) -> None:
             "select cnt from run_job_status_counts where run_id=%s and status='queued'",
             ("run-sb-2",),
         ).fetchone()
-    assert str(job_row["run_id"]) == "run-sb-2"
-    assert str(job_row["title"]) == "Title 0"
-    assert json.loads(str(job_row["frozen_config_json"])) == {"node_a": {"k": "new"}}
-    # No duplicate node rows from the double submit.
-    assert int(nodes["cnt"]) == len(_NODE_KEYS)
-    # The rebind moved the row from run 1 to run 2 in the counters.
-    assert run1 is None or int(run1["cnt"]) == 0
-    assert run2 is not None and int(run2["cnt"]) == 1
+    assert str(job_row["run_id"]) == "run-sb-1"
+    assert json.loads(str(job_row["frozen_config_json"])) == {"node_a": {"k": "old"}}
+    assert [str(row["node_key"]) for row in node_keys] == sorted(_NODE_KEYS)
+    # The counters never moved: the skipped row fired no INSERT/UPDATE
+    # transition row, so run 2 counts nothing and run 1 keeps its job.
+    assert run1 is not None and int(run1["cnt"]) == 1
+    assert run2 is None or int(run2["cnt"]) == 0
 
 
 def test_bulk_duplicate_ids_in_one_call_take_the_last_row(tmp_path: Path) -> None:

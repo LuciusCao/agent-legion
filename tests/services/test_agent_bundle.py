@@ -72,6 +72,35 @@ def test_result_unpack_promotes_only_expected_outputs(tmp_path: Path) -> None:
     assert [path.name for path in job_dir.iterdir()] == ["expected.json"]
 
 
+def test_result_unpack_promotes_capped_stderr_tail_beside_events(tmp_path: Path) -> None:
+    """#755 codex R11 P2: the Worker's redacted agent-stderr.log is promoted
+    with events.jsonl into the job dir's run dir (it used to be dropped with
+    the staging dir); a member larger than any tail a Worker writes is not
+    evidence and stays out."""
+    from shared.stderr_tail import STDERR_TAIL_BYTES
+
+    run_dir = "runs/generate/worker"
+    for name, payload, promoted in (
+        ("small", b"panic: boom", True),
+        ("oversized", b"x" * (STDERR_TAIL_BYTES + 1), False),
+    ):
+        job_dir = tmp_path / name / "job"
+        job_dir.mkdir(parents=True)
+        archive = tmp_path / name / "result.tar.gz"
+        _write_result_archive(
+            archive,
+            {f"{run_dir}/events.jsonl": b"{}", f"{run_dir}/agent-stderr.log": payload},
+        )
+
+        unpack_agent_result(archive, job_dir, (), run_dir)
+
+        assert (job_dir / run_dir / "events.jsonl").is_file()
+        stderr_log = job_dir / run_dir / "agent-stderr.log"
+        assert stderr_log.is_file() is promoted
+        if promoted:
+            assert stderr_log.read_bytes() == payload
+
+
 def test_concurrent_shard_results_share_job_dir_without_clobber(tmp_path: Path) -> None:
     """#401 review P1-2: sibling shards' result archives declare only their
     per-index output (the dispatch side excludes the node's ordinary outputs

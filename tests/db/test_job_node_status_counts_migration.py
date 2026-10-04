@@ -59,12 +59,20 @@ def _group_by_counts(conn, workspace_id: str) -> dict[str, dict[str, int]]:
 
 
 def _table_counts(conn, workspace_id: str) -> dict[str, dict[str, int]]:
+    # Base + pending deltas (v88, #690): a concurrent test on another xdist
+    # schema can hold the same per-database class-88 try-lock key, turning
+    # this transaction into a delta-appending loser.
     rows = conn.execute(
         """
-        select node_key, status, cnt from workspace_job_node_status_counts
-        where workspace_id = %s and cnt <> 0
+        select node_key, status, sum(cnt) as cnt from (
+          select node_key, status, cnt from workspace_job_node_status_counts
+          where workspace_id = %s
+          union all
+          select node_key, status, delta from workspace_job_node_status_count_deltas
+          where workspace_id = %s
+        ) counts group by 1, 2 having sum(cnt) <> 0
         """,
-        (workspace_id,),
+        (workspace_id, workspace_id),
     ).fetchall()
     result: dict[str, dict[str, int]] = {}
     for row in rows:
@@ -155,6 +163,7 @@ def test_backfill_rebuilds_and_is_idempotent() -> None:
         _insert_node(conn, "jnsc-bf-1", "review", "failed")
         # Wipe the counter table so the backfill is exercised from scratch.
         conn.execute("delete from workspace_job_node_status_counts")
+        conn.execute("delete from workspace_job_node_status_count_deltas")
         migrate_workspace_job_node_status_counts(conn)
         first = _table_counts(conn, "jnsc-bf-ws")
         migrate_workspace_job_node_status_counts(conn)

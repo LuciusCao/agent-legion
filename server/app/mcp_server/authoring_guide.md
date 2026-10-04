@@ -6,6 +6,57 @@ Studio. Nothing you do takes effect in production by itself.
 
 ## 1. Tool map (in the order you typically need them)
 
+### Large files: byte-preserving local round trip (#767/#768)
+
+`get_node_code`, `get_skill`, and `get_shared_materials` accept
+`output_path="snapshot.json"`. This exports their full JSON response to a
+NEW file under `<MCP process cwd>/data/studio-mcp-files/<workspace_id>/`
+and returns its absolute path, byte size and SHA-256 without echoing the
+payload. Existing files are never overwritten. Agent and MCP must share
+that filesystem; for remote agents, keep using inline content.
+Local-path node/shared saves also return hashes and metadata instead of
+echoing the saved code/file bodies; inline saves retain their original replies.
+
+Parse/edit that JSON with local scripts rather than regenerating its text.
+For node code, extract `draft_code` when non-null, otherwise `code`, into
+a UTF-8 file using byte-preserving I/O, edit locally, then call
+`save_node_code_draft(..., code_path="node.py")` with no `code`.
+For skill/shared files, edit the exported `files` array and call
+`save_skill_version(..., files_path="snapshot.json", new_tag=..., message=...)`
+or `save_shared_materials(..., files_path="snapshot.json")`, omitting `files`.
+The JSON may be either a file list or the complete read response. Alternatively,
+`files=[{path: "...", file_path: "local.txt"}]` reads individual local files;
+each entry must choose exactly one of `content` or `file_path`.
+Skill writes are incremental: filter the exported `files` array to the paths
+you intend to save (at most 100 per save, regardless of repository size).
+Skill editing exports read one immutable commit: HEAD when `ref` is absent,
+or the requested tag's commit. Local modifications, staged changes and
+untracked/ignored files are excluded; the returned commit identifies the bytes.
+The whole committed tree is exported within a 16 MiB budget including UTF-8
+content, path bytes and 128 bytes of metadata allowance per file. Unsupported
+members or an exceeded budget reject the whole export, never truncate it.
+Exclude mapped shared copies; edit their authoritative
+sources through the shared-material tools instead. Do not blindly resubmit
+the whole skill export when it contains mapped shared files.
+
+Paths are relative to that workspace's staging directory, or absolute within
+it. Traversal, symbolic/hard links, non-regular files, invalid UTF-8 and
+truncated exports are rejected before any authoritative save. Raw local sources
+and decoded file batches are capped at 16 MiB. JSON exports and `files_path`
+imports allow 96 MiB to accommodate JSON escaping of a complete legal batch
+or committed skill snapshot; backend file/code limits still apply. The 100-file
+limit is a save-batch limit for skills and a full-state limit for shared material.
+Skill versions allow 128 × 1024 characters per file (up to 512 KiB UTF-8);
+shared materials and skill creation additionally enforce 128 KiB per file.
+Shared materials remain FULL state: preserve every unchanged file in the
+export (omitted files are deleted), then call `sync_shared_materials` to
+propagate. Skill saves retain their tag-conflict behavior: repeated content
+keeps identical bytes, but reusing an existing tag still returns 409.
+This channel does not add CAS to node or skill saves; coordinate concurrent
+editing and re-read before submitting.
+
+### Tool reference
+
 - `get_studio_context()` — which workspace this session is bound to, which
   node the human has selected, and the canvas' current unpublished workflow
   draft YAML (null until the human's Studio pushes it). Call first; takes no
@@ -280,7 +331,12 @@ to an implementation:
   frozen at job intake; a property marked `runtime_mutable: true` (run
   switches like `dry_run`) opts out of the freeze and is re-resolved
   against the live workspace override at every dispatch
-  (CONFIG-RUNTIME-MUTABLE-001).
+  (CONFIG-RUNTIME-MUTABLE-001). Of the reserved keys, `timeout_seconds`
+  is runtime-adjustable (a workspace override reaches queued,
+  not-yet-started nodes; an invalid one falls back to the node/platform
+  value; defaults: agent 1800s, code 600s, CONFIG-RUNTIME-TIMEOUT-001), while
+  `sandbox_network` stays frozen at intake — opening network egress ships
+  with a workflow revision.
 - Node config `connection` keys reference instance-level external service
   connections (external APIs such as TTS or CMS; the boundary is
   SECURITY-EXTERNAL-CONNECTION-001). Those are admin-only and live in

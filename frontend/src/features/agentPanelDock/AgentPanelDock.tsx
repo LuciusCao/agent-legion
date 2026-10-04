@@ -10,8 +10,9 @@
  *   自己的入口即可，不再需要右下角小条）：标题栏只有关闭按钮，Esc =
  *   关闭（走各 surface 自己的关闭路径：studio 是 hidden、定制预览/job
  *   排查是卸载）；存量 localStorage 里的 collapsed 字段读取时忽略。
- * - z-index 900：高于 AppBar 100/页面内容，低于 Toast 1000、
- *   TokenUsageDialog 1190/1200、MUI Modal 1300（分层契约见 css 模块注释）。
+ * - z-index 900：高于 AppBar 100/页面内容，低于 DagFullscreenDialog 1000、
+ *   TokenUsageDialog 1190/1200、Toast、MUI Modal 1300（全局刻度见
+ *   lib/zLayers.ts）。
  * - 不遮顶部 AppBar：默认/钳制位置的顶边让开 AppBar **实测**底边
  *   （useAppBarBottom；首帧未测量回退 --app-bar-height 声明值——版本芯片/
  *   放大字体时 AppBar 实测更高，硬编码 56px 会盖住 AppBar 底部）。未被用户
@@ -26,7 +27,7 @@
  *   Modal/Menu 开着时让给对方，不抢已消费的 Esc）。同页多实例时 Esc 只关
  *   栈顶：模块级 Dock 栈（dockStack.ts，#801 codex P1），mount/交互置顶、
  *   unmount/hidden 出栈；栈位同时映射视觉层级（z-index = 900 + 栈位，钳
- *   999 低于 Toast 1000）——被点击的 Dock 同步抬到最上层。
+ *   999 低于 Toast）——被点击的 Dock 同步抬到最上层。
  */
 import { type ReactNode, useState, useSyncExternalStore } from 'react'
 import { IconButton, Paper, Portal, Tooltip } from '@mui/material'
@@ -120,7 +121,7 @@ export function AgentPanelDock({
   const [stackId] = useState(() => Symbol(`dock:${surfaceKey}`))
   const raiseOnInteract = () => dockStackRaise(stackId)
   // 栈位映射视觉层级（#801 codex 轮 2）：交互抬栈后本面板同步抬到最上
-  // 层（z-index = 900 + 栈位，钳 999 低于 Toast 1000）。
+  // 层（z-index = 900 + 栈位，钳 999 低于 Toast，刻度见 lib/zLayers.ts）。
   const zIndex = useSyncExternalStore(dockStackSubscribe, () =>
     dockStackZIndex(stackId)
   )

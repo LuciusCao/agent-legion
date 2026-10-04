@@ -4,6 +4,38 @@
 草稿编辑的三台协作状态机与它们的组合 invariant；改这块代码前对照
 invariant 表。
 
+## MCP 大文件编辑（#767/#768）
+
+MCP 的 node code、skill、shared 读取工具可用 `output_path` 导出完整 JSON；
+返回路径、体积与 SHA-256，正文不进入模型上下文。agent 本地解析并修改暂存
+文件，再通过 `code_path`、`files_path` 或文件条目的 `file_path` 提交。
+路径仅限 MCP 进程工作目录下 `data/studio-mcp-files/<workspace_id>/`，
+工具先通过既有 workspace API 鉴权，再以目录描述符逐级拒绝符号链接。
+导出不覆盖已有文件；整个提交批次读取成功后才交给原来的后端校验与保存。
+这是同机/共享文件系统通道，远程 agent 保留 inline 参数。
+大小限制分开计量：原始本地文件和解码后批次仍限 16 MiB；JSON 导出与
+`files_path` 导入共用 96 MiB 容器上限，覆盖控制字符六倍转义后的合法完整快照。
+后端最多 100 个文件、每文件 128 KiB 的校验仍然生效，不因容器上限而放宽。
+
+编辑快照与展示投影分离：skill/shared 导出请求 `for_edit=true`，
+skill 编辑投影必须通过与保存相同的 workspace 写权限检查；group skill
+只开放原有受限展示，不因 `output_path` 或显式 HTTP 参数扩展可读文件集合。
+工作树与 tag 两条读取路径都在权限检查之后解析，拒绝时不创建暂存文件。
+禁止截断和有损 UTF-8 解码。共享快照在同一目录锁内读取原始 map.json 与
+全部文件，并用同一个 FULL-state PUT 校验器验证可重存性；任何不可表示、
+越界或超限文件使整个快照失败，不能靠省略文件让重存变成意外删除。
+
+### Quality Impact
+
+不改数据库 schema、发布权限或原有并发语义，不把文件路径传给后端服务。
+HTTP 读取增加可选的严格编辑投影，生成 API 类型同步更新；真实 HTTP 回归
+验证 map 格式/CRLF、无后缀与 CSV 文件、原样重存和单行编辑的字节 hash。
+测试覆盖超过 225 KB 的转义源码、CRLF、三行改动重试、完整材料包单文件
+编辑，以及越界、符号链接、硬链接、特殊文件、失效权限、批次失败零写入。
+极限 HTTP/MCP 回归覆盖 100 个合法文件及最坏 JSON 转义的导出、重存、逐文件
+字节一致性；单元测试验证导入与导出同上限，容器超限和解码后超限都在保存前拒绝。
+Skill 重复 tag 仍冲突，共享材料仍按完整状态保存；详见 authoring guide。
+
 ## 三台状态机
 
 ### 1. 草稿保存机（draftSaveController.ts + draftSaveConflict.ts）

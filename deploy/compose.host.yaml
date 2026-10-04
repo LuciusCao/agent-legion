@@ -55,7 +55,17 @@ services:
         # s3.json 必须让降权后的运行用户可读：umask 077 产出的 0600 若留在
         # root 名下，su-exec 后 weed 读不到会 Fatalf 退出（重启循环）。
         chown seaweed:seaweed /tmp/s3.json
-        exec su-exec seaweed weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json -master.volumeSizeLimitMB=2048 -volume.max=0
+        # -volume.max：显式上限而非 0（0 = 按磁盘余量自动推导）。0 在
+        # volume server 注册信息 stale 时会把可写槽判定为 0，master 认为
+        # 没有可分配 volume，PutObject 全量 503（no free volumes）——表现为
+        # 磁盘远未写满却"写满"。上限经 env 可调
+        # （AGENT_LEGION_SEAWEEDFS_VOLUME_MAX，compose 解析期插值），默认
+        # 100 只是保守起点：100 × volumeSizeLimitMB=2048 ≈ 200GiB 惰性
+        # 增长闸门（volume 按需创建，不预占磁盘），按部署容量在 deploy/.env
+        # 调大；变更前确认新值不低于现有 volume 数（weed shell 的
+        # volume.list），否则 master 停止分配新 volume。空 volume 回收见
+        # docs/materials-storage-deployment.md「可写槽位耗尽」。
+        exec su-exec seaweed weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json -master.volumeSizeLimitMB=2048 -volume.max=${AGENT_LEGION_SEAWEEDFS_VOLUME_MAX:-100}
     environment:
       AGENT_LEGION_S3_ACCESS_KEY: ${AGENT_LEGION_S3_ACCESS_KEY:-}
       AGENT_LEGION_S3_SECRET_KEY: ${AGENT_LEGION_S3_SECRET_KEY:-}
@@ -131,6 +141,10 @@ services:
       PGPASSFILE: /run/secrets/postgres_pgpass
       AGENT_LEGION_VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
       AGENT_LEGION_DATA_DIR: /var/lib/agent-legion
+      # 主控制台「打开 Worker 控制台」入口地址：Host stack 配套的本机 Worker
+      # 控制台默认发布在宿主机 127.0.0.1:8787（compose.worker.yaml）；经其它
+      # 地址暴露时在 deploy/.env 显式配置。无冒号形式：显式留空 = 不显示链接。
+      AGENT_LEGION_WORKER_CONSOLE_URL: ${AGENT_LEGION_WORKER_CONSOLE_URL-http://127.0.0.1:8787}
       # 无冒号的 ${VAR-默认值} 形式：deploy/.env 显式写 AGENT_LEGION_S3_ENDPOINT=
       # （空值）时生效为「AWS 默认端点」，不会被默认值盖掉；外部 S3 在这里
       # 配远程地址后，local-s3-decide.sh 会同步跳过本地后端。
@@ -208,6 +222,9 @@ services:
       # （零 runtime 注册合法），不会被默认值盖掉（同 AGENT_LEGION_S3_ENDPOINT
       # 的插值语义）。
       AGENT_WORKER_EXPECT_RUNTIMES: ${AGENT_WORKER_EXPECT_RUNTIMES-velites}
+      # 监听地址不能推导浏览器可达地址；显式配置后才自报 labels.console_url。
+      # 未配置或留空均不自报，避免把通配绑定或容器地址作为浏览器入口。
+      AGENT_WORKER_CONSOLE_URL: ${AGENT_WORKER_CONSOLE_URL-}
     stop_grace_period: 30s
     healthcheck:
       # Healthy = 服务可达，且控制面未进入 failed，且（Worker 进程在跑或尚未配置）。

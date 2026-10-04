@@ -32,10 +32,14 @@ export function EmptyStateGuide({ steps }: EmptyStateGuideProps) {
               step.unlocked ? '' : styles.locked
             }`}
           >
-            <div className={styles.stepIcon}>
-              <MaterialIcon
-                name={step.completed ? 'check_circle' : step.icon}
-              />
+            <div className={styles.stepMarker}>
+              {/* 步骤有先后顺序：图标上方标出 Step N，一眼看出走到哪一步。 */}
+              <span className={styles.stepNumber}>Step {idx + 1}</span>
+              <div className={styles.stepIcon}>
+                <MaterialIcon
+                  name={step.completed ? 'check_circle' : step.icon}
+                />
+              </div>
             </div>
             <div className={styles.stepBody}>
               <h3 className={styles.stepTitle}>

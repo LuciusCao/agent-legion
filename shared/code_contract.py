@@ -24,6 +24,25 @@ CODE_BUNDLE_LIBS_DIR = "workspace_libs"
 # kind='code' results (batch 2 decision 10); the Host promotes it to the
 # run's canonical log path.
 CODE_RESULT_LOG_MEMBER = "node.log"
+# 结果归档里携带直传产物清单的保留成员名（#755 codex P1）：结果头字节预算
+# 装不下直传 dict ref 清单时，Worker 把完整 {"name": ref} 映射写成该成员
+# （首成员），头里只留 output_artifacts_in_archive 标记；产物字节已在 S3
+# （presigned 通道），不重复传输。Worker 写入（worker/upload/report.py 经
+# result_manifest.py），Host 读取（server/app/agent_broker/
+# result_output_manifest.py）；该成员永不进 expected outputs 提升面。
+RESULT_OUTPUT_ARTIFACTS_MEMBER = "result-output-artifacts.json"
+# 与清单成员配套的头部布尔标记键（同 #755 codex P1 协议）：Worker 写
+# （worker/upload/report.py 溢出臂），Host 读（agent_worker_results.py 的
+# parse_result_metadata）；单一事实来源在此，两侧字面量漂移即断。
+RESULT_OUTPUT_ARTIFACTS_FLAG = "output_artifacts_in_archive"
+# 结果元数据 ``command`` 面的段数上限（#822）。command 是纯观测面（Host 只
+# 记录、不参与完成判定），但 agent argv 会把每个 expected output 以
+# ``--require-output <name>`` 重复进去，产物一多段数即线性膨胀。两侧同一
+# 语义——超限截断保前缀、不拒收：Worker 序列化（worker/host/transfer.py 的
+# ``_result_header_value``）主动收缩，Host 解析（agent_worker_results.py 的
+# ``parse_result_metadata``）防御性截断。旧版 Host 对超限直接 400，Worker 4xx
+# 终态丢弃 marker → 租约过期重排队 → 同样产物再跑一遍的死循环即由此而来。
+MAX_RESULT_COMMAND_PARTS = 64
 # Mirrors workspace_libs/node_sdk.py NODE_RUNTIME_DIR / AUTH_FAILURE_MARKER.
 # node_sdk must stay import-self-contained (the code bundle ships only the
 # workspace_libs snapshot), so that mirror keeps a comment pointer instead of

@@ -238,15 +238,26 @@ def test_runtime_mutable_live_re_resolution_is_validated() -> None:
         dispatch_effective_config(MUTABLE_SCHEMA, node, "wf", workspace, frozen)
 
 
-def test_reserved_execution_keys_stay_frozen_at_dispatch() -> None:
+def test_reserved_keys_split_frozen_network_live_timeout_at_dispatch() -> None:
+    # #691: timeout_seconds is runtime-adjustable (re-resolved at dispatch),
+    # sandbox_network stays intake-frozen (security boundary).
     node = _definition({"timeout_seconds": 30}).nodes["generate"]
     schema = merge_reserved_execution_schema(
         {"properties": {"dry_run": {"type": "boolean", "runtime_mutable": True}}}
     )
-    frozen = {"node_config": {"generate": {"timeout_seconds": 30, "dry_run": False}}}
-    workspace = {"node_config": {"wf": {"generate": {"timeout_seconds": 5, "dry_run": True}}}}
+    frozen = {
+        "node_config": {
+            "generate": {"timeout_seconds": 30, "sandbox_network": False, "dry_run": False}
+        }
+    }
+    workspace = {
+        "node_config": {
+            "wf": {"generate": {"timeout_seconds": 5, "sandbox_network": True, "dry_run": True}}
+        }
+    }
     effective = dispatch_effective_config(schema, node, "wf", workspace, frozen)
-    assert effective["timeout_seconds"] == 30
+    assert effective["timeout_seconds"] == 5
+    assert effective["sandbox_network"] is False
     assert effective["dry_run"] is True
 
 
@@ -542,10 +553,12 @@ def test_resolve_node_config_accepts_non_secret_defaults_and_clean_secrets() -> 
 
 
 def test_agent_claim_frozen_seed_pads_agent_timeout_not_code_default() -> None:
-    """#550 review P2：agent 路径的 dispatch 垫底种子（agent_claim.py 构造
-    fallback_defaults 的方式）必须给 pre-#550 冻结配置垫 1800（agent 产品
-    常量），绝不能落回 code 节点的 600——升级静默砍掉在飞 agent 任务
-    三分之二超时预算的回归防线。种子带节点自声明值时以其为准。"""
+    """#550 review P2：agent 路径 dispatch 对 pre-#550 冻结配置必须给出 1800
+    （agent 产品常量），绝不能落回 code 节点的 600——升级静默砍掉在飞 agent
+    任务三分之二超时预算的回归防线。节点自声明值时以其为准。#691 起
+    timeout 现场重解析（agent schema 默认 1800 → 节点 config → workspace
+    覆盖），垫底种子只再承担 sandbox_network：即便种子是 code 的 600，
+    timeout 也不受影响。"""
     from server.app.services.node_execution_config import (
         AGENT_DEFAULT_TIMEOUT_SECONDS,
         merge_reserved_execution_schema,
@@ -557,13 +570,7 @@ def test_agent_claim_frozen_seed_pads_agent_timeout_not_code_default() -> None:
 
     # 与 agent_claim.py 完全同形的构造（schema 合并 + 垫底种子）。
     def _agent_fallback(node_config: dict) -> dict:
-        reserved = node_config_reserved_defaults(node_config)
-        return {
-            **reserved,
-            "timeout_seconds": reserved["timeout_seconds"]
-            if "timeout_seconds" in node_config
-            else AGENT_DEFAULT_TIMEOUT_SECONDS,
-        }
+        return node_config_reserved_defaults(node_config)
 
     effective = dispatch_effective_config(
         merge_reserved_execution_schema(SCHEMA, {"timeout_seconds": AGENT_DEFAULT_TIMEOUT_SECONDS}),

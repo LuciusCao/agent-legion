@@ -15,11 +15,10 @@ from server.app.services.agent_version_pins import (
     agent_version_pin,
     resolve_dispatch_agent_definition,
 )
-from server.app.services.node_config import dispatch_effective_config
+from server.app.services.node_config import dispatch_config_resolution
 from server.app.services.node_config_batch import run_frozen_payload
 from server.app.services.node_execution_config import (
-    AGENT_DEFAULT_TIMEOUT_SECONDS,
-    merge_reserved_execution_schema,
+    agent_effective_schema,
     node_config_reserved_defaults,
 )
 from server.app.skills.errors import SkillRepoError
@@ -128,25 +127,18 @@ def claim_agent_node(
             f" does not match node capability {node.capability!r}"
         )
     try:
-        # #550：agent 节点的有效 schema 同样合并保留执行键（timeout/
-        # network 走常规 config 链）；冻结快照早于保留键时从节点自身声明
-        # 的 config 值垫底（与 code 路径同款 P-0.5 语义），垫底超时保持
-        # agent 产品常量 1800s（非 code 节点的 600）。
-        node_config = dispatch_effective_config(
-            merge_reserved_execution_schema(
-                definition_config.config_schema,
-                {"timeout_seconds": AGENT_DEFAULT_TIMEOUT_SECONDS},
-            ),
+        # #550：agent 节点的有效 schema 同样合并保留执行键（默认超时保持
+        # agent 产品常量 1800s）；冻结快照早于保留键时 network 从节点自身
+        # 声明的 config 值垫底（P-0.5）。#691：入队只定超时 base（默认 →
+        # 节点 config），workspace 覆盖由 Worker claim 判定。
+        node_config, timeout_base = dispatch_config_resolution(
+            agent_effective_schema(definition_config.config_schema),
             node,
             workflow_key,
             workspace,
             run_payload,
-            fallback_defaults={
-                **node_config_reserved_defaults(node.config),
-                "timeout_seconds": node_config_reserved_defaults(node.config)["timeout_seconds"]
-                if "timeout_seconds" in node.config
-                else AGENT_DEFAULT_TIMEOUT_SECONDS,
-            },
+            node_config_reserved_defaults(node.config),
+            decide=False,
         )
     except ValueError as exc:
         # Config drift must fail THIS node, not abort the whole poll pass.
@@ -167,6 +159,7 @@ def claim_agent_node(
                 log_path=log_path,
                 inputs=inputs,
                 node_config=node_config,
+                timeout_base=timeout_base,
                 pinned_agent_version=int(pin["version"]) if pin is not None else None,
                 execution_generation=execution_generation,
             )

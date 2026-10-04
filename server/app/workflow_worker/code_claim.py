@@ -24,7 +24,7 @@ from server.app.services.connection_tokens import (
 from server.app.services.job_errors import JobServiceError
 from server.app.services.node_code_pins import frozen_dispatch_pin
 from server.app.services.node_code_resolution import resolve_dispatch_node_code
-from server.app.services.node_config import dispatch_effective_config
+from server.app.services.node_config import dispatch_config_resolution
 from server.app.services.node_execution_config import (
     merge_reserved_execution_schema,
     node_config_reserved_defaults,
@@ -128,8 +128,9 @@ def try_claim_code_worker_node(
     schema = merge_reserved_execution_schema(node.config_schema)
     reserved_defaults = node_config_reserved_defaults(node.config)
     try:
-        unresolved = dispatch_effective_config(
-            schema, node, workflow_key, workspace, run_payload, reserved_defaults
+        # #691: enqueue only fixes the timeout base; the claim decides.
+        unresolved, timeout_base = dispatch_config_resolution(
+            schema, node, workflow_key, workspace, run_payload, reserved_defaults, decide=False
         )
         config, secret_config = split_manifest_config(schema, unresolved)
     except PlaintextSecretError:
@@ -180,6 +181,7 @@ def try_claim_code_worker_node(
                 secret_config=secret_config,
                 shard_runtime=shard_runtime,
                 execution_generation=execution_generation,
+                timeout_base=timeout_base,
             )
         except (ValueError, VaultError, JobServiceError) as exc:
             # Same trade-off as the agent enqueue pool: a configuration error

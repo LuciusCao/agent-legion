@@ -45,6 +45,21 @@ class AgentOutcome:
     # token to be invalidated (upstream auth failure); the commit path
     # performs the privileged invalidation. Empty = no request.
     auth_failure_connection: str = ""
+    # #748: bounded tail of the crashed agent's stderr (merged into the
+    # events stream at spawn, retained by the upload-side compression pass).
+    # Surfaces the crash cause in the result record without unpacking the
+    # archive's agent-stderr.log member; empty for non-crash outcomes.
+    agent_stderr_tail: str = ""
+    # #748 R2 P2-1 + #755 对抗复审 P2-1: the Worker's result-header byte
+    # budget can force the CAS-form artifact manifest to the last-resort
+    # truncation (an empty list); ``output_artifacts_truncated`` says the
+    # dict is NOT the full set and ``output_artifacts_total`` carries the
+    # pre-truncation count. The bytes themselves still ride the result
+    # archive. The flag is part of the completion contract: the staged
+    # finish skips the empty-manifest completed→failed flip when it is
+    # set and judges produced/missing from the archive view instead.
+    output_artifacts_truncated: bool = False
+    output_artifacts_total: int = 0
 
 
 def report_auth_failure_safe(database_dsn: ConnectSource, connection_key: str) -> None:
@@ -132,7 +147,8 @@ class AgentCompletionHandler:
         # lease-finish generation gate (ExecutionResult.staged_file_moves),
         # so a stale (post-reset) completion can never overwrite the new
         # generation's local inputs. view_dir is the read view every
-        # pre-finish consumer (validation, shard read, mirror upload) uses.
+        # pre-finish consumer (shard read, mirror upload) uses; validation
+        # derives its declared inputs+outputs view from it (#757).
         staging_cm: tempfile.TemporaryDirectory[str] | None = None
         staged_moves: list[tuple[Path, Path]] = []
         view_dir = job_dir

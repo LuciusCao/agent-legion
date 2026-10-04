@@ -93,6 +93,7 @@ class JobNodeQueriesMixin(JobNodeRunQueriesMixin):
         workspace_id: str | None = None,
         source_id: str | None = None,
         status_not_in: Sequence[str] | None = None,
+        run_id: str | None = None,
         limit: int = 500,
     ) -> list[dict[str, Any]]:
         # workflow_key is inert (#211 M2 dropped the column): callers may keep
@@ -104,6 +105,10 @@ class JobNodeQueriesMixin(JobNodeRunQueriesMixin):
             ("workspace_id", workspace_id),
             ("status", status),
             ("source_id", source_id),
+            # #735: run filter, not resource addressing — a run_id belonging
+            # to another workspace simply yields no rows here (empty list at
+            # the API surface), never a lookup error.
+            ("run_id", run_id),
         ):
             if val:
                 clauses.append(f"{col}=%s")
@@ -115,7 +120,12 @@ class JobNodeQueriesMixin(JobNodeRunQueriesMixin):
         # #272: the legacy unbounded list (select * including KB-scale TEXT
         # columns) needs a hard cap. The frontend already uses the paginated
         # /jobs/snapshot endpoint; this bound is API-compat protection only.
-        params.append(max(1, min(limit, 500)))
+        # #735 review P2-1: 2000 is the public per-request ceiling (the
+        # route-level Query(le=2000)); the +1 headroom lets the route's
+        # limit+1 truncation probe distinguish exactly-full from over-full
+        # at the boundary — clamping at exactly 2000 would make a >2000-job
+        # run look complete at limit=2000 (silent truncation, the red line).
+        params.append(max(1, min(limit, 2001)))
         with self._connect_read() as conn:
             rows = conn.execute(
                 f"select * from jobs{where} order by created_at desc limit %s", params
@@ -169,12 +179,8 @@ class JobNodeQueriesMixin(JobNodeRunQueriesMixin):
         暂存与清单删除必须由同一份锁内当前状态驱动——锁外读数到取锁之间
         节点可能被 claim 并完成，用过期集合暂存会清掉已完成节点的权威
         产物。"""
-        return {
-            str(row["node_key"]): str(row["status"])
-            for row in conn.execute(
-                "select node_key, status from job_nodes where job_id=%s", (job_id,)
-            )
-        }
+        rows = conn.execute("select node_key, status from job_nodes where job_id=%s", (job_id,))
+        return {str(row["node_key"]): str(row["status"]) for row in rows}
 
     @staticmethod
     def job_revision_identity_in_transaction(conn: Any, job_id: str) -> tuple[str, str] | None:

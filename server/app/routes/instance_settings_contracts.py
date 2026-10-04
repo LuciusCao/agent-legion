@@ -57,6 +57,11 @@ class InstanceAgentWorkersSettings(BaseModel):
     # everything, 100 = always verify — the pre-#356 behavior);
     # restart-effective.
     artifact_spot_check_percent: int = Field(ge=0, le=100)
+    # #739: presigned GET TTL for the external artifact manifest's
+    # download_url entries; restart-effective. Lower bound 60 keeps a mistyped
+    # value from expiring between the manifest read and the first download;
+    # upper bound mirrors S3's 7-day SigV4 presign ceiling.
+    artifact_download_presign_ttl_seconds: int = Field(ge=60, le=604_800)
 
 
 class InstanceAgentEnqueueSettings(BaseModel):

@@ -10,6 +10,8 @@ them reports them the same way).
 
 from pydantic import BaseModel, Field
 
+from server.app.skill_authoring_limits import SKILL_CONTENT_MAX_CHARS
+
 
 class SkillValidationIssue(BaseModel):
     path: str
@@ -32,8 +34,8 @@ class SkillValidateToolResponse(BaseModel):
 
 class SkillVersionFileWrite(BaseModel):
     path: str = Field(min_length=1, max_length=512)
-    # Aligned with the 128 KB read cap (skill_repo.MAX_FILE_BYTES).
-    content: str = Field(max_length=128 * 1024)
+    # Pydantic max_length counts characters; UTF-8 can take four bytes each.
+    content: str = Field(max_length=SKILL_CONTENT_MAX_CHARS)
 
 
 class SkillSaveVersionRequest(BaseModel):

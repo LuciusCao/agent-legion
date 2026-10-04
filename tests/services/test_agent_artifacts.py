@@ -83,3 +83,56 @@ def test_stage_agent_inputs_handles_empty_inputs(tmp_path: Path) -> None:
 
     assert manifest["bundle_mode"] == "refs"
     assert manifest["input_artifacts"] == {}
+
+
+def test_stage_agent_inputs_dedupes_normalized_aliases(tmp_path: Path) -> None:
+    """INV-9（#876 P2-a）冻结点去重：重复声明（含 ./ 拼写）只读一次源文
+    件、只 put 一次 CAS、refs 只记归一化单键——序语义在冻结点消失，
+    Worker/Host/任何序无从分叉。声明列表（context.inputs）不在本函数
+    职责内，不由它改写。"""
+    store = _make_store(tmp_path)
+    _make_job("job-1")
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    payload = b"same-file"
+    (job_dir / "in.json").write_bytes(payload)
+    manifest: dict = {}
+    put_count = 0
+    original_put = store.put
+
+    def _counting_put(data: bytes) -> str:
+        nonlocal put_count
+        put_count += 1
+        return original_put(data)
+
+    store.put = _counting_put  # type: ignore[method-assign]
+    stage_agent_inputs(store, _context(job_dir, ("in.json", "./in.json", "in.json")), manifest)
+
+    digest = hashlib.sha256(payload).hexdigest()
+    assert put_count == 1  # 单次 put
+    assert manifest["input_artifacts"] == {"in.json": f"sha256:{digest}"}  # 归一化单键
+    with read_connection(TEST_DATABASE_URL) as conn:
+        rows = conn.execute(
+            "select name, hash from artifact_refs where job_id='job-1' and node_key='node-a'"
+        ).fetchall()
+    assert [(row["name"], row["hash"]) for row in rows] == [("in.json", digest)]
+
+
+def test_stage_agent_inputs_skips_unsafe_names(tmp_path: Path) -> None:
+    """与视图侧同一 safe_relative 语义：不安全名（绝对路径/..）不冻结、
+    不进 refs——顺带关掉 dispatch 侧的越界读（此前 job_dir/../x 会被读
+    出）。"""
+    store = _make_store(tmp_path)
+    _make_job("job-1")
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    (tmp_path / "escape.json").write_bytes(b"outside")
+    (job_dir / "in.json").write_bytes(b"inside")
+    manifest: dict = {}
+
+    stage_agent_inputs(
+        store, _context(job_dir, ("../escape.json", "/abs/x.json", "in.json")), manifest
+    )
+
+    digest = hashlib.sha256(b"inside").hexdigest()
+    assert manifest["input_artifacts"] == {"in.json": f"sha256:{digest}"}

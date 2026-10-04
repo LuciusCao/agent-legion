@@ -1,4 +1,41 @@
 invariants:
+  - id: STUDIO-RUNTIME-001
+    statement: "ACP callbacks and permission decisions belong to their originating runtime. Retirement fences producers before the close marker; permission waits release the runtime lock and revalidate ownership after waking. Consumer exit fences prompt admission before transport teardown or fatal callbacks, without claiming explicit-close ownership. Service shutdown seals create/resume admission and drains admitted operations before snapshotting runtimes; concurrent shutdown calls wait through cleanup. Known-dead credentials always request stop of their own generation, independently of escalation or notification I/O. Close continues when its snapshotted runtime has exited, but never closes a registered successor."
+    owner: studio
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/services/test_studio_chat_generation_boundary.py
+        gate: quick
+      - kind: contract
+        target: tests/services/test_studio_chat_fatal_admission.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_admission.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_shutdown_races.py
+        gate: quick
+  - id: STUDIO-BACKGROUND-001
+    statement: "Kimi V1 completions use descriptor-anchored root-task metadata reads; automatic followups validate runtime, cancellation epoch, compaction and live credentials at admission and ACP consumption, releasing only owned claims on rejection. Rearm observes completions after durable human admission; unavailable roots and incomplete task reads cannot establish empty or partial baselines. Observation failures preserve the human handoff and keep followups disabled until same-epoch retry. Initial observation failures defer baseline establishment. Resume captures history before claim and uses it only for the matching successfully loaded ACP session. See docs/architecture/studio-kimi-background-wakeup.md."
+    owner: studio
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/services/test_studio_chat_background_wakeup.py
+        gate: quick
+      - kind: contract
+        target: tests/services/test_studio_chat_baseline_observation.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_background_boundaries.py
+        gate: quick
+      - kind: contract
+        target: tests/services/test_studio_chat_background_activity.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_background_recovery.py
+        gate: quick
   - id: API-CONTRACT-001
     statement: Generated frontend API types remain in sync with the backend OpenAPI schema.
     owner: architecture
@@ -456,7 +493,7 @@ invariants:
   # Rust-side wrap policy (seatbelt/bwrap argv) is covered by
   # velites/tests/sandbox_wrap.rs; registry targets allow only tests//scripts/.
   - id: EXEC-CODE-003
-    statement: "All (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend node code never runs unsandboxed. This holds on the Host (the bare multiprocessing child retired with the path mechanism in #96) and on a Worker alike (worker/code_runner.py): the Worker verifies code_hash before spawn, and its startup preflight refuses to start when code capacity is declared without a resolvable velites binary (fail-closed). Worker-side binary resolution is shared between preflight, code_runner and execution_prepare (worker/binary_resolution.py resolve_binary): the bundled copy `data/bin/velites` (installed per-platform via `scripts/ensure-velites.sh --dest data/bin`) takes precedence over PATH, so a Worker machine needs no preinstalled velites."
+    statement: "All (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend node code never runs unsandboxed. This holds on the Host (the bare multiprocessing child retired with the path mechanism in #96) and on a Worker alike (worker/code_runner.py): the Worker verifies code_hash before spawn, and its startup preflight refuses to start when code capacity is declared without a resolvable velites binary (fail-closed). Worker-side binary resolution is shared between preflight, code_runner and execution_prepare (worker/binary_resolution.py resolve_binary): the bundled copy `data/bin/velites` (installed per-platform via `scripts/ensure-velites.sh --dest data/bin`) takes precedence over PATH, so a Worker machine needs no preinstalled velites. Deploy-surface placement and freshness decisions live in scripts/velites_deploy_plan.py, which derives install targets from these real resolvers — deployment scripts must not carry a parallel lookup model (#835)."
     owner: workspace-executor
     risk: high
     evidence:
@@ -642,8 +679,52 @@ invariants:
         target: tests/full/test_auth_control_plane.py
         gate: full
 
+  - id: STUDIO-MCP-FILES-001
+    statement: "MCP local authoring files are confined to data/studio-mcp-files/<workspace_id> below the MCP process cwd. A successful workspace-scoped backend read authorizes every local read/export; descriptor-relative opens reject traversal, symbolic/hard links and nonregular inputs. Skill edit snapshots require save-side workspace ownership and read only one resolved HEAD/tag commit, never local uncommitted or untracked files. Both refs share a preflight byte budget, independent of the 100-file incremental save batch limit. Shared snapshots include the complete writable tree and raw map.json because omission on save means deletion. Unsupported snapshots fail as a whole. UTF-8 decoding preserves original bytes; batches are fully loaded before validated saves. JSON export/import share an encoded-byte budget; raw-source and decoded-batch budgets remain independently enforced. Exports never overwrite files. No direct authoritative write or publish bypass. See docs/architecture/studio-local-authoring-contract.md for the contract test matrix."
+    owner: security
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/mcp_server/test_local_files.py
+        gate: quick
+      - kind: integration
+        target: tests/mcp_server/test_edit_snapshot_integration.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_skill_snapshot_contract.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_skill_snapshot_resources.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_skill_edit_snapshot.py
+        gate: quick
+
+  # #738: the intake channel's entry guardrail, registered next to the
+  # identity boundary it rides on.
+  - id: SECURITY-AUTH-003
+    statement: "Every workspace API intake token has its own request token bucket keyed by token_id (instance-wide refill rate and burst from the env-only auth section, defaults 60/min and 20): charged once per authenticated api-token request (off-surface 404 probes included), only after the secret verified (a bare token_id cannot drain another token's budget). Over-limit answers 429 with Retry-After (ceil from the refill rate) and a per-token coalesced structured warning keyed by token_id. Counters are process-local behind the replaceable ApiTokenLimiter protocol (reset on restart, per-replica best-effort); user sessions and studio-agent scoped tokens are never limited, and one token's exhaustion never affects another token."
+    owner: security
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/services/test_api_token_limits.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_workspace_api_token_rate_limits.py
+        gate: quick
+
+  - id: STUDIO-ADMISSION-001
+    statement: "Human Studio prompt preparation is side-effect-free for conversation state. The handle rejects closed/stopping queues before admission; credential validation, idle claim and user-message insertion commit in one transaction. Only accepted input consumes resume context and resets turn/replay state, before queue visibility. Snapshot failures after acceptance do not invite retries. Runtime locks pin admission and token escalation to the same generation through teardown; old requests cannot mutate a successor."
+    owner: studio
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_studio_chat_admission.py
+        gate: quick
+
   - id: STUDIO-AGENT-001
-    statement: "Studio agent conversation runs authenticate with short-lived scoped tokens minted by the server (auth_scoped_tokens persists only sha256 digests; each token binds the initiating user and actor_scope='studio_agent', carries a TTL that is fixed at mint time and slides forward at studio chat turn start when close to expiry (#158 — the agent's MCP headers cannot be re-pointed mid-session; renewal never revives an already-expired token) and, since #411, additionally on every agent `tool_call` sessionUpdate mid-turn (status-only `tool_call_update` notifications excluded) via studio_chat/token_keepalive with a keepalive threshold of one full turn duration plus grace (a turn may run up to PROMPT_TIMEOUT_SECONDS, so turn-start renewal alone let a long turn outlive its token — every tool call then 401s and the agent-side MCP client disconnects; the keepalive slides a still-live token so a checked-live token always outlives the current turn, reports a dead token — revoked, expired, or user-disabled — as one run_token_invalidated timeline notice per runtime generation, and never revives revoked/expired tokens), and is revocable; a leaked token still dies on its own once the session goes idle or closes). Run tokens additionally bind the chat session's workspace (schema v45, auth_scoped_tokens.workspace_id): workspace-path tool endpoints refuse a bound token operating on any other workspace with 403, the studio chat read endpoints (session/message reads and the SSE stream) enforce the same binding (#158), and the session-context endpoint hides foreign (bound) or non-member (unbound) sessions behind 404; unbound self-service tokens (origin='user') follow workspace membership, mirroring require_workspace_access. Scoped tokens resolve only through the Bearer channel, and every effecting endpoint mounts reject_studio_agent_scope to refuse them with 403 while draft/validate endpoints stay reachable. Effecting endpoints comprise the publish/rollback/archive flows (workflow drafts, node code, agent definitions — the executor definition endpoints retired with the executor concept, schema v47), job lifecycle and execution triggers (job delete, rerun/run-to/continue and their batch variants, batch intake, workflow upgrade, quality replays), workspace/secret/package/member/settings/configuration writes, worker pause/resume, and the studio chat effecting endpoints (session create/close, message send/cancel, permission answers, context push — a scoped token must not mint fresh run tokens, self-approve permission prompts, nor rewrite the context it reads back); require_admin additionally refuses any scoped identity outright, so admin endpoints stay unreachable even though a scoped token inherits the initiating user's role. The skill tool endpoints (get/validate/save-version, #217) are instance-scoped by design: they sit on the global tool router with no workspace binding, so a run token bound to workspace A can read and tag every local skill repo — skills are instance-level shared resources, save_skill_version never touches the skill lock (release stays a human admin relock), and token minting is admin-only. The skill creation tool (#633, create_skill) is the deliberate workspace-scoped exception: a brand-new skill repo lands under the calling workspace's skill dir (~/.agents/skills/<workspace_id>/), so it mounts on the workspace-bound sub-router; like save_version it never touches the skill lock (repo creation is draft-level, publishing/relock stays human-only). The node prompt tools (get/save, workspace-bound) are draft-only by the same token: the save edits the workspace's unpublished workflow draft YAML (nodes.<key>.execution.prompt) and never publishes. The agent-definition draft tools (save/create, #635, workspace-bound) are draft-only by the same token: the create starts a capability-derived draft (agent_id derives from the capability; an occupied capability in any status is a 409, so the tool never spawns a second entity), and definition creation is draft-level — publishing/archiving stays on the guarded human router. The node prompt tools (get/save, workspace-bound) are draft-only by the same token: the save edits the workspace's unpublished workflow draft YAML (nodes.<key>.execution.prompt) and never publishes. The workflow draft-store tools (get/save, #633, workspace-bound) are draft-only by the same token: the save is a compare-and-set on the SAME canvas draft row the human editor autosaves to (workspace_workflow_drafts) — it carries the updated_at a previous read returned (or the literal 'never-saved' marker), a stale value is a 409 whose detail carries the current draft for rebasing, and it never publishes; the human editor's PUT on the guarded surface also enforces the CAS base since the #633 codex review (expected_updated_at, the same token shape as the tool surface: a stale base is a 409 carrying the current draft, and a value that is neither an ISO timestamp nor 'never-saved' is a 422), while an absent field keeps the legacy two-tab last-write-wins semantics for old clients — so an agent-saved draft lost to a human autosave surfaces as a visible conflict state instead of a silent overwrite."
+    statement: "Studio agent conversation runs authenticate with short-lived scoped tokens minted by the server (auth_scoped_tokens persists only sha256 digests; each token binds the initiating user and actor_scope='studio_agent', carries a TTL that is fixed at mint time and slides forward at studio chat turn start when close to expiry (#158 — the agent's MCP headers cannot be re-pointed mid-session; renewal never revives an already-expired token) and, since #411, additionally on every agent `tool_call` sessionUpdate mid-turn (status-only `tool_call_update` notifications excluded) via studio_chat/token_keepalive with a keepalive threshold of one full turn duration plus grace (a turn may run up to PROMPT_TIMEOUT_SECONDS, so turn-start renewal alone let a long turn outlive its token — every tool call then 401s and the agent-side MCP client disconnects; the keepalive slides a still-live token so a checked-live token always outlives the current turn, reports a dead token — revoked, expired, or user-disabled — as one run_token_invalidated timeline notice per runtime generation, and never revives revoked/expired tokens), and is revocable; a leaked token still dies on its own once the session goes idle or closes). Run tokens additionally bind the chat session's workspace (schema v45, auth_scoped_tokens.workspace_id): workspace-path tool endpoints refuse a bound token operating on any other workspace with 403, the studio chat read endpoints (session/message reads and the SSE stream) enforce the same binding (#158), and the session-context endpoint hides foreign (bound) or non-member (unbound) sessions behind 404; unbound self-service tokens (origin='user') follow workspace membership, mirroring require_workspace_access. Scoped tokens resolve only through the Bearer channel, and every effecting endpoint mounts reject_studio_agent_scope to refuse them with 403 while draft/validate endpoints stay reachable. Effecting endpoints comprise the publish/rollback/archive flows (workflow drafts, node code, agent definitions — the executor definition endpoints retired with the executor concept, schema v47), job lifecycle and execution triggers (job delete, rerun/run-to/continue and their batch variants, batch intake, workflow upgrade, quality replays), workspace/secret/package/member/settings/configuration writes, worker pause/resume, and the studio chat effecting endpoints (session create/close, message send/cancel, permission answers, context push — a scoped token must not mint fresh run tokens, self-approve permission prompts, nor rewrite the context it reads back); require_admin additionally refuses any scoped identity outright, so admin endpoints stay unreachable even though a scoped token inherits the initiating user's role. The skill tool endpoints (get/validate/save-version, #217/#710) are workspace-bound: private skills belong to the workspace identified by the key's first segment; foreign workspace keys are hidden, while group skills remain shared restricted-read surfaces. Scoped agents may save versions or request complete for_edit snapshots only for their own workspace's skills, never group skills. Both HEAD and tag commit edit exports use the save-side ownership check. The create_skill tool (#633) creates new repositories under the calling workspace's skill directory (~/.agents/skills/<workspace_id>/). Creation and save_version remain draft-level operations and never change the DB skill lock; publishing/relock remains human-only. The node prompt tools (get/save, workspace-bound) are draft-only by the same token: the save edits the workspace's unpublished workflow draft YAML (nodes.<key>.execution.prompt) and never publishes. The agent-definition draft tools (save/create, #635, workspace-bound) are draft-only by the same token: the create starts a capability-derived draft (agent_id derives from the capability; an occupied capability in any status is a 409, so the tool never spawns a second entity), and definition creation is draft-level — publishing/archiving stays on the guarded human router. The node prompt tools (get/save, workspace-bound) are draft-only by the same token: the save edits the workspace's unpublished workflow draft YAML (nodes.<key>.execution.prompt) and never publishes. The workflow draft-store tools (get/save, #633, workspace-bound) are draft-only by the same token: the save is a compare-and-set on the SAME canvas draft row the human editor autosaves to (workspace_workflow_drafts) — it carries the updated_at a previous read returned (or the literal 'never-saved' marker), a stale value is a 409 whose detail carries the current draft for rebasing, and it never publishes; the human editor's PUT on the guarded surface also enforces the CAS base since the #633 codex review (expected_updated_at, the same token shape as the tool surface: a stale base is a 409 carrying the current draft, and a value that is neither an ISO timestamp nor 'never-saved' is a 422), while an absent field keeps the legacy two-tab last-write-wins semantics for old clients — so an agent-saved draft lost to a human autosave surfaces as a visible conflict state instead of a silent overwrite."
     owner: security
     risk: high
     evidence:
@@ -712,7 +793,7 @@ invariants:
         gate: quick
 
   - id: CONFIG-MANIFEST-001
-    statement: "Agent manifests carry only config_schema-whitelisted, non-secret config keys (keys marked `secret` never leave the server); effective node config resolves schema defaults → workflow node config → workspace override, each layer validated against the typed schema subset, and is frozen into the intake batch payload (keys declared `runtime_mutable: true` are the only exception — they are re-resolved at dispatch, CONFIG-RUNTIME-MUTABLE-001). The schema source priority is Agent Definition → node-declared `config_schema` (workflow YAML, versioned with the revision snapshot; it must not redeclare platform-reserved keys) — the executor capability fallback retired with the executor concept (P-0.5, schema v47); code-routed nodes get the platform-reserved execution keys `timeout_seconds` (integer, default 600, >= 1) and `sandbox_network` (boolean, default false) auto-merged into their effective schema — the v47 harvest moved executor-level timeout/network values onto the revision nodes' config — so timeout/network travel the same freeze chain, and frozen batches predating the reserved keys are padded with the node's own declared values underneath at dispatch (frozen values win)."
+    statement: "Agent manifests carry only config_schema-whitelisted, non-secret config keys (keys marked `secret` never leave the server); effective node config resolves schema defaults → workflow node config → workspace override, each layer validated against the typed schema subset, and is frozen into the intake batch payload (keys declared `runtime_mutable: true` are the only exception — they are re-resolved at dispatch, CONFIG-RUNTIME-MUTABLE-001). The schema source priority is Agent Definition → node-declared `config_schema` (workflow YAML, versioned with the revision snapshot; it must not redeclare platform-reserved keys) — the executor capability fallback retired with the executor concept (P-0.5, schema v47); code-routed nodes get the platform-reserved execution keys `timeout_seconds` (integer, default 600, >= 1) and `sandbox_network` (boolean, default false) auto-merged into their effective schema — the v47 harvest moved executor-level timeout/network values onto the revision nodes' config — so timeout/network travel the same chain (network intake-frozen; timeout runtime-adjustable, CONFIG-RUNTIME-TIMEOUT-001), and frozen batches predating the reserved keys are padded with the node's own declared values underneath at dispatch (frozen values win)."
     owner: security
     risk: critical
     evidence:
@@ -730,7 +811,7 @@ invariants:
         gate: full
 
   - id: CONFIG-RUNTIME-MUTABLE-001
-    statement: "Node config keys are intake-frozen by default (job reproducibility); a config_schema property declared `runtime_mutable: true` opts out of the freeze and is re-resolved at every dispatch along the usual chain (schema defaults → node config → workspace override), so run switches (dry_run, upload_enabled, ...) take effect on the next node execution of an already-intaken job. The platform-reserved execution keys `timeout_seconds`/`sandbox_network` always stay frozen: node config_schemas cannot redeclare them (the loader rejects that) and the marker is ignored even on hand-built schemas. The audit trail is per-attempt: the non-secret resolved config used for a run is persisted onto node_runs.config_snapshot_json (schema v49) — the local code pool carries it on the lease claim, the code-Worker/Agent paths persist the enqueue-time manifest config (secrets never leave the Host, CONFIG-MANIFEST-001; the manifest whitelist governs which keys may leave the server, runtime_mutable only governs resolution timing)."
+    statement: "Node config keys are intake-frozen by default (job reproducibility); a config_schema property declared `runtime_mutable: true` opts out of the freeze and is re-resolved at every dispatch along the usual chain (schema defaults → node config → workspace override), so run switches (dry_run, upload_enabled, ...) take effect on the next node execution of an already-intaken job. The platform-reserved execution keys cannot carry the marker (node config_schemas cannot redeclare them — the loader rejects that — and the marker is ignored even on hand-built schemas); their mutability is platform-classified: `sandbox_network` stays intake-frozen (network egress is a security boundary; loosening it goes through a workflow revision release) and `timeout_seconds` follows CONFIG-RUNTIME-TIMEOUT-001. The audit trail is per-attempt: the non-secret resolved config used for a run is persisted onto node_runs.config_snapshot_json (schema v49) — the local code pool carries it on the lease claim, the code-Worker/Agent paths persist the claim-time manifest config (secrets never leave the Host, CONFIG-MANIFEST-001; the manifest whitelist governs which keys may leave the server, runtime_mutable only governs resolution timing)."
     owner: security
     risk: high
     evidence:
@@ -745,6 +826,18 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/services/test_code_claim.py
+        gate: quick
+
+  - id: CONFIG-RUNTIME-TIMEOUT-001
+    statement: "`timeout_seconds` follows one model (#691, server/app/services/runtime_reserved_config.py). Layers: L0 the platform default by kind (agent 1800s / code 600s), L1 the job's pinned revision node `config.timeout_seconds` (immutable per job), L2 the workspace override (the only mutable layer). The immutable part is frozen at enqueue: a queued remote request's manifest carries `timeout_base` = resolve(L0, L1), so the claim never needs the revision document for the timeout. Each execution has exactly one decision point — local code pool: the Host dispatch; remote agent/code: the Worker claim (candidate-selection snapshot, reused by the batch write transaction without re-read or lock) — and every path uses the same pure function effective = resolve_timeout(base, L2); the value is fixed after the decision, and the audit (`_config_resolution` in node_runs.config_snapshot_json, `config_resolution` in the claimed manifest) records exactly the decided value and source. The claim scan projects L2 as a SQL scalar (the workspace override document is parsed once per workspace and never rides the candidate rows). An invalid L2 (valid = non-bool integer >= 1) never fails a node or an intake: every path falls back to the base with source `workspace_override_invalid` and a deduplicated structured warning. Requests queued by a pre-#691 Host (no `timeout_base`) use their enqueue-time value as the base (source `enqueue_snapshot`). `sandbox_network` stays intake-frozen on every path."
+    owner: security
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_runtime_timeout_matrix.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_node_config.py
         gate: quick
 
   - id: VAULT-SECRET-001
@@ -1115,12 +1208,15 @@ invariants:
         gate: quick
 
   - id: DB-JOB-NODE-STATUS-COUNTS-001
-    statement: "workspace_job_node_status_counts is the read source for count_workspace_job_nodes_by_status (the workspace DAG endpoint); a join+group-by over job_nodes ⋈ jobs is O(workspace job_nodes) per call and was measured at 48s on 260k jobs / 2.9M job_nodes with the hash join spilling ~1GB to temp (issue #121). Triggers keep the counter table transactionally in sync across every write path: per-row on job_nodes (insert/delete/update of status, node_key, job_id, deriving workspace_id/workflow_key from the parent jobs row), set-based BEFORE DELETE on jobs (the cascaded job_nodes deletes afterwards find no parent and skip), and set-based AFTER UPDATE OF workspace_id, workflow_key on jobs (re-key moves every node count). The v56 backfill rebuilds it from job_nodes ⋈ jobs and is idempotent. The read omits zero-count rows, so results are identical to the group-by it replaced."
+    statement: "workspace_job_node_status_counts is the compact base for count_workspace_job_nodes_by_status (the workspace DAG endpoint); a join+group-by over job_nodes ⋈ jobs is O(workspace job_nodes) per call and does not scale to large workspaces (issue #121). Triggers keep the counters transactionally in sync across every write path: per-row on job_nodes (insert/delete/update of status, node_key, job_id, deriving workspace_id from the parent jobs row), BEFORE DELETE on jobs (the cascaded job_nodes deletes afterwards find no parent and skip; a workspace cascade skips entirely), and AFTER UPDATE OF workspace_id on jobs (re-key moves every node count). Since v88 (#690) every one of them writes only through bump_job_node_status_counts, which applies v82's protocol: pg_try_advisory_xact_lock(88, ws) elects the one transaction that alone writes the workspace's base rows until it ends (folding the committed delta tail with DELETE ... RETURNING first), while every other writer appends an insert-only row to workspace_job_node_status_count_deltas without waiting. No acquisition in the family blocks, so it adds no wait-for edge (no counter-row AB-BA ring, no row-lock × advisory ring, no lock order to keep against the job family's classes 82/83). bump_job_node_status_counts lives only in the v88 migration SQL so a schema-file replay cannot restore the blocking body. The read sums base + pending deltas in one MVCC snapshot and omits zero totals, so results are identical to the group-by it replaced. The v56 backfill rebuilds the base from job_nodes ⋈ jobs and is idempotent."
     owner: jobs
     risk: high
     evidence:
       - kind: integration
         target: tests/db/test_job_node_status_counts_migration.py
+        gate: quick
+      - kind: contract
+        target: tests/db/test_node_status_counts_deadlock.py
         gate: quick
 
   - id: DB-RUN-JOB-STATUS-COUNTS-001
@@ -1187,6 +1283,15 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/routes/test_materials_routes.py
+        gate: quick
+
+  - id: MATERIAL-INLINE-OWNERSHIP-001
+    statement: "Inline text publication may insert new ready materials or reuse existing ready identities, but must never update, revive, or redirect an existing material row. Non-ready hash conflicts reject the whole batch with 409; row age is not proof of presign expiry. Reused identities and status are revalidated under row locks in the publication transaction. Cleanup only targets request-owned object keys and must verify current references before deletion. Browser presign/PUT/complete and TTL retain ownership of their existing rows."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/routes/test_runs_text_api.py
         gate: quick
 
   - id: MATERIAL-BUNDLE-001
@@ -1390,4 +1495,108 @@ invariants:
         gate: quick
       - kind: contract
         target: tests/scripts/test_execution_write_surfaces.py
+        gate: quick
+  - id: EXEC-INPUT-IDENTITY-001
+    statement: "A node execution's input identity (which digest's bytes) has exactly one resolution point — dispatch: stage_agent_inputs puts the bytes the Worker will consume into the CAS, holds a (job,node) ref against GC, and freezes sha256:<digest> into the DB manifest's input_artifacts. Every later stage may only perform equivalent transport transforms (same digest, different transfer form), never re-resolve identity from mutable present state (the current job_artifacts row, the job_dir's current bytes): the claim presigned upgrade is gated by comparing the row's content_hash against the frozen digest — a rewritten row keeps the legacy CAS form (#876 codex P1, the re-resolution defect class) — but that comparison is only the fast-path filter, since the presigned URL still points at the mutable authority key which can be overwritten between the check and the Worker's GET; the structural guarantee closes at the consumption point — the Worker self-verifies downloaded bytes against the ref's sha256 (equal to the frozen digest at issue time) and falls back to the CAS channel on mismatch, failing only with a two-segment error when CAS also cannot deliver (worker/artifact/inputs._download_cas) — and Host validation reads the dispatch-frozen CAS blob (private-copy isolated); dispatch dedupes aliases of one normalized name at the freeze point (single read/put/ref keyed by the normalized name — ordering semantics never enter the dict, #876 P2-a / EXEC-ORDER-SEMANTICS-001), and pre-dedup legacy manifests resolve the alias whose raw spelling sorts last in the serialized key order (what the Worker actually consumed); the claim guard covers dict-shaped refs too (their sha256 field is the frozen identity; a mismatch downgrades to the CAS string form), the Worker falls back to CAS on ANY presigned-segment failure (digest mismatch, exhausted HTTP retries, decode errors), and completion registers output refs BEFORE validation for GC protection (a zero-ref legacy blob reaped during a >grace queue wait would make the later add_ref fail closed) with a collision guard: a reported artifact whose normalized name is not a declared output and collides with a declared input never touches the shared (job,node,name) slot — the frozen input ref wins; RMW names (declared as both) register normally. The job_dir fallback in validation input resolution is a legacy exemption serving only pre-#833 manifests without a frozen ref (drains to zero as old jobs exhaust) plus the fail-open GC-race/blob-missing degradation; hydration only refills the evictable job_dir cache and never decides execution identity; the artifact read endpoints/UI read the latest row under documented #508 semantics and are not execution inputs. Hash bases are directly comparable: a row's content_hash is always the uncompressed-content sha256 (gzip rows included, #338), the same basis as the dispatch CAS digest. Design: docs/architecture/execution-generation.md section 2.11; the full state-space grid (lifecycle stages × variation axes × invariants, per-cell evidence) lives in docs/architecture/artifact-identity-state-space.md."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/scripts/test_artifact_identity_grid.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifact_inject.py::test_inject_keeps_cas_form_when_row_was_rewritten_after_dispatch
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifact_inject.py::test_inject_v4_worker_keeps_cas_form_for_rewritten_gz_row
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifact_inject.py::test_inject_decides_upgrade_per_input_identity
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifact_inject.py::test_inject_dict_ref_with_rewritten_row_downgrades_to_cas
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_dict_form_falls_back_to_cas_on_digest_mismatch
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_presigned_http_failure_falls_back_to_cas
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_fallback_failure_carries_both_segments
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_corrupt_deflate_body_falls_back_to_cas
+        gate: quick
+      - kind: contract
+        target: tests/workers/test_artifact_input_downloads.py::test_gzip_decode_surface_normalizes_to_runtime_error
+        gate: quick
+      - kind: contract
+        target: tests/workers/test_artifact_input_downloads.py::test_download_read_errors_normalize_to_runtime_error
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_mid_stream_protocol_error_falls_back_to_cas
+        gate: quick
+      - kind: integration
+        target: tests/db/test_completion_view_inputs.py::test_validation_uses_dispatch_frozen_input_bytes
+        gate: quick
+      - kind: integration
+        target: tests/db/test_completion_view_inputs.py::test_legacy_channel_output_ref_registered_before_validation
+        gate: quick
+      - kind: integration
+        target: tests/db/test_completion_view_inputs.py::test_colliding_undeclared_report_skips_the_frozen_input_slot
+        gate: quick
+      - kind: integration
+        target: tests/db/test_completion_view_inputs.py::test_rmw_colliding_name_registers_normally
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation_view_files.py::test_same_size_rewrite_with_restored_mtime_still_syncs_back
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation_view.py::test_input_bytes_come_from_the_dispatch_frozen_cas_copy
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation_view.py::test_duplicate_input_aliases_follow_serialized_key_order
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation_view.py::test_duplicate_aliases_on_deduped_manifest_hit_the_normalized_key
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifacts.py::test_stage_agent_inputs_dedupes_normalized_aliases
+        gate: quick
+
+  - id: EXEC-ORDER-SEMANTICS-001
+    statement: "Ordering semantics are carried only by arrays: a dict's key order is undefined across any serialization boundary (json.dumps sort_keys, JSON round-trips, DB persistence) and must never carry meaning for a consumer that iterates it (#876 P2-a, grid INV-9). The artifact-identity prototype — manifest input_artifacts consumed by key-iteration order — is closed by deduping aliases at the dispatch freeze point (one read, one CAS put, one normalized ref key: no ordering left to diverge) plus a legacy consumption rule for pre-dedup in-flight manifests (the alias whose raw spelling sorts last, matching the Worker's serialized-key materialization). A repo-wide family scan (the 'dict key order carries semantics + serialization boundary + consumer iteration-order reading' pattern, 30 production callsites) found this prototype the only member — the appendix table in docs/architecture/artifact-identity-state-space.md records the per-callsite exclusions; adding a persisted-dict + iterated-consumption path must pass the INV-9 checklist (grid usage rules §5.6)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_agent_artifacts.py::test_stage_agent_inputs_dedupes_normalized_aliases
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_artifacts.py::test_stage_agent_inputs_skips_unsafe_names
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation_view.py::test_duplicate_input_aliases_follow_serialized_key_order
+        gate: quick
+      - kind: contract
+        target: tests/scripts/test_artifact_identity_grid.py
+        gate: quick
+
+  - id: EXEC-VALIDATION-VIEW-001
+    statement: "The Host-side legacy validator runs against the declared validation view (workflows/validation_view.py + _validation_view_files.py, single construction site in the result-validate pool task) — the state-space grid's INV-2/3/4/6 (docs/architecture/artifact-identity-state-space.md): it sees exactly this node's declared inputs plus this attempt's declared outputs — sibling outputs, stale residues, undeclared files and untrusted archive members never enter (INV-2, #757); declared inputs are reflink-or-copy private inodes (CAS-sourced bytes included), so a validator's in-place write/chmod/replace can never cross a shared inode into the job dir or a CAS blob, with the snapshot check as defense in depth (INV-3); the validator's output mutations reconcile back into the run view across every write family (in-place via hardlink, temp+replace/delete+rewrite/delete via the reconcile arm, failure verdicts included), so the finish gate promotes exactly the bytes that passed validation (INV-4); the reconcile skips entries whose content sha256 still equals the source's — the unmodified check is hash-level because mtime/size are forgeable on an identity path (INV-6, #876 codex P2)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/workflows/test_output_validation_view.py
+        gate: quick
+      - kind: integration
+        target: tests/workflows/test_output_validation_view_files.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_completion_generation_gates.py::test_completion_stale_finish_never_lands_bytes_or_rows
+        gate: quick
+      - kind: contract
+        target: tests/scripts/test_artifact_identity_grid.py
         gate: quick

@@ -150,6 +150,23 @@ describe('NodeConfigCard', () => {
     expect(screen.queryByText('page_size · 运行开关')).not.toBeInTheDocument()
   })
 
+  it('badges the runtime-adjustable reserved timeout but not sandbox_network', () => {
+    renderCard({
+      schema: {
+        type: 'object',
+        properties: {
+          timeout_seconds: { type: 'integer', default: 600, minimum: 1 },
+          sandbox_network: { type: 'boolean', default: false },
+        },
+      },
+      initialValues: {},
+    })
+
+    expect(screen.getByText('timeout_seconds · 运行时可调')).toBeInTheDocument()
+    expect(screen.queryByText(/sandbox_network ·/)).not.toBeInTheDocument()
+    expect(screen.getByText(/排队中尚未开始的节点即用新值/)).toBeInTheDocument()
+  })
+
   it('renders no runtime-mutable badge for plain schemas', () => {
     renderCard()
 

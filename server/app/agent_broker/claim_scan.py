@@ -127,10 +127,21 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
     # kind='code' rows skip the versioned_entities hard join (batch 2): their
     # payload is self-contained, runtime is the literal 'code', and the
     # capability comes from the frozen manifest.
+    # #691 (CONFIG-RUNTIME-TIMEOUT-001): the workspace override (L2) for the
+    # claim's timeout decision rides each row as a SCALAR only. The CTE parses
+    # the workflow's override map once per workspace (never selected out); its
+    # key is default_workflow_key — the key the worker scanned the definition
+    # by, i.e. the manifest's workflow_key (== workspace id since v62).
+    # Malformed JSON reads as "no override"; an object/array value collapses
+    # to an invalid marker (→ base, workspace_override_invalid).
     rows: list[Any] = conn.execute(
         """
         with eligible_workspaces as (
-          select ws.id as workspace_id
+          select ws.id as workspace_id,
+                 case when pg_input_is_valid(ws.node_config_json, 'jsonb')
+                      then ws.node_config_json::jsonb
+                           -> coalesce(nullif(ws.default_workflow_key, ''), ws.id)
+                 end as workflow_node_config
           from workspaces ws
           left join workspace_agent_capacities w on w.workspace_id=ws.id
           where exists (select 1 from agent_execution_requests q
@@ -142,6 +153,11 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
                     ) < coalesce(w.max_concurrency, 2147483647))
         )
         select r.*, wr.definition_json as revision_definition_json,
+               case when jsonb_typeof(ws.workflow_node_config
+                                      #> array[r.node_key, 'timeout_seconds'])
+                         in ('object', 'array') then '"<non-scalar>"'::jsonb
+                    else ws.workflow_node_config #> array[r.node_key, 'timeout_seconds']
+               end as workspace_timeout_override,
                -- Batch agent claims retain several agent-ws capacity locks
                -- in one transaction. Carry the ACTUAL lock key so the write
                -- phase never substitutes unrelated workspace-text order.

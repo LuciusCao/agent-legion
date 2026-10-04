@@ -13,13 +13,21 @@ retirement slice.
 chunked set-based existence probes, the dedup scan loads only this request's
 keys, job insertion commits in bounded chunks, and the create response no
 longer materializes job rows (run id + created_count; the detail endpoint and
-#358's counter tables carry the rest).
+#358's counter tables carry the rest). #735 restores the bare ``job_ids``
+string list on the response — ids only, the row-slimming contract of #467 A4
+stays in force (regression-pinned by tests). #735 review P1: the response's
+job_ids/created_count derive from the bulk INSERT's ownership RETURNING (the
+post-write truth), never from the pre-insert candidate list — two concurrent
+submissions racing the same item past the dedup probe are arbitrated by the
+ON CONFLICT ownership clause (first writer wins, ownership is never
+re-bound), so a response can never claim a job another run owns, and the
+GET /jobs run_id filter stays consistent with every returned id.
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from server.app.db.rowmap import iso_optional, parse_object
 from server.app.events import JobEventManager
@@ -33,7 +41,11 @@ from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.run_item_resolution import resolve_run_items
 from server.app.services.run_item_types import validate_run_item_types
 from server.app.services.run_partial_failure import compensate_partial_creation
+from server.app.services.run_text_items import is_text_item, materialize_text_items
 from server.app.settings import Settings
+
+if TYPE_CHECKING:
+    from server.app.services.materials import MaterialsService
 from server.app.workflows.definition import workflow_definition_from_dict
 
 # Runs created from items carry this marker in source_kind; legacy rows keep
@@ -70,11 +82,15 @@ class RunService:
         settings: Settings,
         job_event_manager: JobEventManager | None = None,
         job_event_buffer: Any | None = None,
+        materials_service: MaterialsService | None = None,
     ):
         self.job_db = job_db
         self.settings = settings
         self.job_event_manager = job_event_manager
         self.job_event_buffer = job_event_buffer
+        # Object store seam for ``text`` items (run_text_items); None keeps
+        # text submissions failing closed with 503 like the materials API.
+        self.materials_service = materials_service
 
     def create_run(
         self,
@@ -82,6 +98,7 @@ class RunService:
         *,
         workflow_key: str,
         items: list[dict[str, Any]],
+        created_by: str = "",
     ) -> dict[str, Any]:
         workspace = get_workspace(self.job_db, workspace_id)
         active_revision = self.job_db.get_active_workflow_revision(workspace_id, workflow_key)
@@ -110,7 +127,11 @@ class RunService:
 
         # Validate everything (items, node config, pins) before the first
         # write so a rejected request leaves no half-created run behind.
-        candidates = resolve_run_items(self.job_db, workspace_id, items)
+        # Text items are the one exception: they become materials after the
+        # read-only checks (see run_text_items), so the stored items are
+        # probed first and the full list re-resolved once texts exist.
+        stored_items = [item for item in items if not is_text_item(item)]
+        candidates = resolve_run_items(self.job_db, workspace_id, stored_items)
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
@@ -126,13 +147,32 @@ class RunService:
             workflow_key,
             list(definition.executable_nodes),
         )
+        if len(stored_items) != len(items):
+            start_node = definition.start_node
+            text_input = start_node.text_input if start_node is not None else None
+            candidates = resolve_run_items(
+                self.job_db,
+                workspace_id,
+                materialize_text_items(
+                    self.job_db,
+                    self.materials_service,
+                    workspace_id,
+                    items,
+                    created_by=created_by,
+                    default_filename=text_input.filename if text_input is not None else "",
+                ),
+            )
 
         # Same dedup contract as intake: items whose (source_type, source_id)
         # already has a job in this workflow drop out; accepted keys grow the
         # set so intra-request duplicates filter exactly like pre-existing jobs.
         # #467 A2: point lookups over this request's keys (indexed IN probes)
         # instead of loading the whole workspace's keys — same workspace-
-        # scoped semantics, cost tracks the submission size.
+        # scoped semantics, cost tracks the submission size. #735 review P1:
+        # this probe is a check-then-act read — a concurrent submission can
+        # claim the same item after it; that race is closed on the write side
+        # (create_jobs_bulk's ownership clause + RETURNING), not by locking
+        # here, so the loser simply drops the raced item from its response.
         existing_keys = self.job_db.filter_existing_dedup_keys(
             workspace_id,
             (
@@ -256,10 +296,21 @@ class RunService:
             self.job_event_manager.broadcast_jobs_created(
                 workspace_id, [{"id": job_id} for job_id in job_ids], {}
             )
-        # #467 A4: the response carries run + created_count only; job rows
-        # moved to the read paths (run detail + paginated job list), so a
-        # 万级-items run no longer serializes a proportional JSON payload
+        # #467 A4: the response carries run + created_count plus job_ids only
+        # (#735 re-added the id list so external callers can poll #703's
+        # per-job endpoints right after submit — ids, never job rows); a
+        # 万级-items run still does not serialize a proportional JSON payload
         # inside the request thread.
+        # #735 review P1: ``job_ids`` here is the bulk INSERT's ownership
+        # truth — candidates a concurrent run claimed first (between the
+        # dedup probe above and the insert) were skipped by the ON CONFLICT
+        # ownership clause and are absent, so created_count == len(job_ids)
+        # is this run's real acquisition and every returned id resolves
+        # under GET /jobs?run_id=<this run>. When EVERY candidate loses the
+        # race the run keeps created_count=0 with an empty id list — the
+        # truthful shape of "a concurrent run won all of these items" (the
+        # serialized equivalent, the dedup probe's 400/heal branch, never
+        # applies to an in-flight race).
         return {"run": _run_record(run), "created_count": len(job_ids), "job_ids": job_ids}
 
     def list_runs(self, workspace_id: str, *, limit: int = 100) -> list[dict[str, Any]]:

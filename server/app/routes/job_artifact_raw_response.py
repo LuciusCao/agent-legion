@@ -11,9 +11,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from server.app.services.job_artifact_media import (
-    FALLBACK_MEDIA_TYPE as _FALLBACK_MEDIA_TYPE,
-)
-from server.app.services.job_artifact_media import (
+    attachment_disposition,
+    raw_disposition_type,
     raw_media_type,
 )
 from server.app.services.job_artifact_raw import RawArtifact
@@ -22,10 +21,6 @@ from server.app.services.job_artifact_raw import RawArtifact
 # iterate_in_threadpool，botocore StreamingBody 默认 1 KiB 一块会让大媒体
 # 每秒数千次线程池跳转。
 _STREAM_CHUNK_BYTES = 64 * 1024
-
-
-def _is_whitelisted(media_type: str) -> bool:
-    return media_type != _FALLBACK_MEDIA_TYPE
 
 
 def raw_response(raw: RawArtifact) -> FileResponse | StreamingResponse:
@@ -50,7 +45,7 @@ def raw_response(raw: RawArtifact) -> FileResponse | StreamingResponse:
     this form.
     """
     media_type = raw_media_type(raw.name)
-    disposition = "inline" if _is_whitelisted(media_type) else "attachment"
+    disposition = raw_disposition_type(raw.name)
     if raw.stream is not None:
         stream = raw.stream
         headers = {}
@@ -66,14 +61,7 @@ def raw_response(raw: RawArtifact) -> FileResponse | StreamingResponse:
         else:
             headers["Accept-Ranges"] = "bytes"
         if disposition == "attachment":
-            # artifact 名只挡了路径分隔符；引号/换行会让 header 畸形，
-            # 按 RFC 6266 转义（starlette 的 quote 用法见 FileResponse）。
-            from urllib.parse import quote
-
-            escaped = quote(raw.name)
-            headers["Content-Disposition"] = (
-                f"attachment; filename=\"{escaped}\"; filename*=UTF-8''{escaped}"
-            )
+            headers["Content-Disposition"] = attachment_disposition(raw.name)
         status = 206 if raw.range_start is not None and raw.range_end is not None else 200
         return StreamingResponse(
             iter(lambda: stream.read(_STREAM_CHUNK_BYTES), b""),

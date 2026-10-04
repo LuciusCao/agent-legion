@@ -24,6 +24,7 @@ from server.app.jobs.queries.job_nodes import JobNodeQueriesMixin
 from server.app.jobs.queries.job_rerun_states import JobRerunStateQueriesMixin
 from server.app.jobs.queries.job_scan_delta import JobScanDeltaMixin
 from server.app.jobs.queries.job_scan_marks import JobScanMarksMixin
+from server.app.jobs.queries.material_inline import InlineMaterialQueriesMixin
 from server.app.jobs.queries.path_hygiene import PathHygieneQueriesMixin
 from server.app.jobs.queries.quality_replays import QualityReplayQueriesMixin
 from server.app.jobs.queries.run_item_probes import RunItemProbeQueriesMixin
@@ -32,6 +33,7 @@ from server.app.jobs.queries.scoped_token_management import ScopedTokenManagemen
 from server.app.jobs.queries.scoped_tokens import ScopedTokenQueriesMixin
 from server.app.jobs.queries.status import JobStatusQueriesMixin
 from server.app.jobs.queries.studio_chat import StudioChatQueriesMixin
+from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionQueriesMixin
 from server.app.jobs.queries.studio_publish_requests import StudioPublishRequestQueriesMixin  # #416
 from server.app.jobs.queries.sweep_guard import SweepGuardQueriesMixin
 from server.app.jobs.queries.upgrade_impl_identity import UpgradeImplIdentityQueriesMixin  # #645
@@ -70,6 +72,7 @@ class RunDomainQueriesMixin(
     RunQueriesMixin,
     JobBulkQueriesMixin,
     RunItemProbeQueriesMixin,
+    InlineMaterialQueriesMixin,
     JobNodeQueriesMixin,
     JobRerunStateQueriesMixin,
     FailedNodeRunQueriesMixin,
@@ -92,7 +95,9 @@ class RunDomainQueriesMixin(
     """Runs, jobs, nodes, scans, reruns, quality replays, approvals, retention, and execution control."""
 
 
-class StudioChatDomainQueriesMixin(StudioChatQueriesMixin, StudioPublishRequestQueriesMixin):
+class StudioChatDomainQueriesMixin(
+    StudioChatQueriesMixin, StudioChatAdmissionQueriesMixin, StudioPublishRequestQueriesMixin
+):
     """Studio chat sessions/messages + agent publish requests (#416)."""
 
 

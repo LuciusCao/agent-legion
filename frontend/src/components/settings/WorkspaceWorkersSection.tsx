@@ -2,6 +2,15 @@ import { useQuery } from '@tanstack/react-query'
 import { listAgentWorkers } from '../../api'
 import type { AgentWorkerSummary } from '../../api'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import { useWorkerConsoleUrl } from '../../hooks/useWorkerConsoleUrl'
+import { workerConsoleUrl } from '../../lib/workerConsoleUrl'
+import {
+  PRESENCE_LABEL,
+  presenceChipClass,
+  presenceTitle,
+  workerPresence,
+} from '../../lib/workerPresence'
+import { WorkerConsoleLink } from '../WorkerConsoleLink'
 import styles from './WorkspaceWorkersSection.module.css'
 
 function formatLastSeen(iso: string): string {
@@ -32,6 +41,7 @@ export function WorkspaceWorkersSection({
     // Worker 注册/下线应在几秒内自动反映到列表。
     refetchInterval: 5000,
   })
+  const consoleUrl = useWorkerConsoleUrl() ?? ''
 
   return (
     <div className={styles.block}>
@@ -50,7 +60,8 @@ export function WorkspaceWorkersSection({
       ) : (workers ?? []).length === 0 ? (
         <p className={styles.empty}>
           本 workspace 尚无可用 Worker。请联系管理员签发本 workspace 的
-          Token，并在 Worker 控制台添加。
+          Token，并在 Worker 控制台「配置 → Workspace 访问」添加。{' '}
+          <WorkerConsoleLink url={consoleUrl} />
         </p>
       ) : (
         <ul className={styles.list}>
@@ -64,17 +75,22 @@ export function WorkspaceWorkersSection({
                 {worker.name || worker.worker_id}
               </span>
               <span
-                className={`${styles.chip} ${
-                  worker.online ? styles.chipActive : ''
-                }`}
-                title={`最近心跳 ${formatLastSeen(worker.last_seen_at)}`}
+                className={`${styles.chip} ${presenceChipClass(workerPresence(worker), styles)}`}
+                title={presenceTitle(
+                  workerPresence(worker),
+                  `最近心跳 ${formatLastSeen(worker.last_seen_at)}`
+                )}
               >
-                {worker.online ? '在线' : '离线'}
+                {PRESENCE_LABEL[workerPresence(worker)]}
               </span>
               <span className={styles.chip}>{worker.runtimes.join(', ')}</span>
               <span className={styles.chip}>
                 并发上限 {worker.max_concurrency}
               </span>
+              <WorkerConsoleLink
+                url={workerConsoleUrl(worker)}
+                label="控制台"
+              />
             </li>
           ))}
         </ul>

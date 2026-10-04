@@ -54,6 +54,42 @@ SANDBOX_BINARY_CANDIDATES: tuple[str, ...] = ("velites-sandbox", "velites")
 BUNDLED_SANDBOX_DIR = Path(__file__).resolve().parents[1] / "data" / "bin"
 
 
+def is_consumable_binary(path: Path) -> bool:
+    """Resolver 的接受谓词：常规文件且可执行（X_OK）。
+
+    单一事实源（#835 codex R5 P2）：解析 walk 的自带副本步、
+    ``worker/binary_resolution.resolve_binary`` 与部署 planner 的判鲜
+    （scripts/velites_deploy_plan.py 的 check）共用——判鲜谓词弱于接受
+    谓词时，执行位丢失（无 -p 拷贝/权限变更）的副本会被判「新鲜」，
+    脚本跳过刷新而 resolver 实际跳过该副本，Worker 回落旧副本或启动
+    失败。PATH 步（shutil.which）天然要求 X_OK，同一口径。"""
+    return path.is_file() and os.access(path, os.X_OK)
+
+
+def sandbox_resolution_walk() -> list[tuple[str, str]]:
+    """All filesystem locations the sandbox resolver may hit, in order.
+
+    返回 ``(候选名, 位置)`` 对：每个候选名贡献「自带副本目录 → PATH 上
+    which 命中」两步（PATH 形态不要求可执行——与 shutil.which 的既定口
+    径一致）；位置为空串表示该步缺失。名字随行携带是刻意的：消费方
+    （staleness 对账、部署 planner）需要知道每个位置属于哪个候选名，
+    扁平列表会在多候选时诱发名字与路径错位（#835 实现期实测）。
+
+    这是 resolve_sandbox_binary 的**全量展开**形态：#835 起部署侧
+    （scripts/ensure-velites.sh 经 scripts/velites_deploy_plan.py）与
+    对账侧（worker/runtime/staleness.py）一律从本 walk 推导目标与对账
+    对象，不再平行手写查找逻辑——脚本与 resolver 各持一份解析模型正是
+    #831/#835 多轮 codex 同构 finding 的根源（fast-path 短路、PATH 目录
+    分叉、漏刷家族成员全都是两份模型失同步的实例）。
+    """
+    walk: list[tuple[str, str]] = []
+    for name in SANDBOX_BINARY_CANDIDATES:
+        bundled = BUNDLED_SANDBOX_DIR / name
+        walk.append((name, str(bundled) if is_consumable_binary(bundled) else ""))
+        walk.append((name, shutil.which(name) or ""))
+    return walk
+
+
 def resolve_sandbox_binary() -> str | None:
     """Resolve the sandbox wrapper; None when no candidate exists.
 
@@ -62,13 +98,9 @@ def resolve_sandbox_binary() -> str | None:
     全量二进制都命中。与 agent runtime 解析（worker/binary_resolution.py
     的 runtime 目录语义）刻意分开：沙箱是基础设施、不是 runtime。
     """
-    for name in SANDBOX_BINARY_CANDIDATES:
-        bundled = BUNDLED_SANDBOX_DIR / name
-        if bundled.is_file() and os.access(bundled, os.X_OK):
-            return str(bundled)
-        resolved = shutil.which(name)
-        if resolved:
-            return resolved
+    for _, hit in sandbox_resolution_walk():
+        if hit:
+            return hit
     return None
 
 

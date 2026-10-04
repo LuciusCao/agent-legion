@@ -203,7 +203,7 @@ EOF
   务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
   会继续。
 - 当前 schema 版本以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准
-  （目前 v86）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
+  （目前 v88）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
   v55（`material_bundles`）、v56（`job_node_status_counts` 触发器维护的
   状态计数）、v57（`studio_chat_sessions.draft_yaml`）、v58（scoped worker
   token——撤销存量全局 register token，行为变更）、v61（Studio workflow
@@ -219,7 +219,9 @@ EOF
   上下文健康观测列，#694）、v84（workspace-scoped API intake token，
   #626）、v85（`execution_generation` 执行代次列族，#759——全部重置
   入口的 CAS 纪元）、v86（`node_runs.agent_definition_hash` 实现身份
-  镜像，#645）。v59（`jobs(run_id)` 索引）与
+  镜像，#645）、v87（`agent_workers.claim_enabled` Worker 自报的领取
+  开关列，主控制台据此区分「在线·未领取」）、v88（job 节点状态计数改为
+  v82 同款 try-lock delta fold，#690）。v59（`jobs(run_id)` 索引）与
   v60（register token ids 列）与本部署面无直接关系。
   迁移明细以 `server/app/db/migration_chain.py` 为准。
 - bundle 条目（文件夹整体一个条目）复用同一 bucket 与材料缓存，无额外
@@ -295,3 +297,74 @@ EOF
 | complete 422 | 实际上传字节与声明 size/hash 不符，重新上传 |
 | 节点报 "material storage is not configured" | Host/Worker 侧 env 缺失；Worker 路径靠 Host 签发的 presigned GET（1h 有效），失败会由 sweeper 重排队换新 URL |
 | 缓存目录膨胀 | 调低 `AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES` 或手动清空 |
+| PutObject 全量 503（master 日志 no free volumes），磁盘未写满 | SeaweedFS 可写槽位耗尽，见下节「可写槽位耗尽」 |
+
+## 6. 可写槽位耗尽（SeaweedFS，PutObject 503 / no free volumes）
+
+**机制**：SeaweedFS 的 volume 按 collection 成批预分配（每个 collection
+一次创建一批 volume，默认 7 个）。S3 bucket `<b>` 的对象一律写进同名
+collection `<b>`（每个派生 worktree bucket 首次写入就占一批槽位）；删除
+bucket 会连带删其 collection 的 volume，只有 master 侧删除失败/超时才留
+孤儿——`scripts/clean-worktree.sh` 在 bucket 删除后（或 bucket 已不存在
+的重跑路径上）经 master `/vol/status` 只读核对同名 collection，残留即告警
+并打印手动回收命令（`/col/delete`），确认没有同名 worktree 正在复用该
+bucket 后由人执行；脚本刻意不自动删除，避免删到被重建复用的同名
+collection（#824；master 地址默认由 `:8333` endpoint 推导
+为同主机 `:9333`，可用 `AGENT_LEGION_SEAWEEDFS_MASTER_URL` 覆盖，非
+seaweedfs 后端自动跳过）。**无 collection 标记（`""`）的 volume 不是孤儿**：
+filer 的元数据变更日志（`/topics/.system/log`）落在这里，持续有小量写入，
+遍历 `/buckets` 找不到引用属正常，不要 `volume.delete` 它们（会丢失元数据
+变更历史）。另外**从未被写入过的空
+volume 不在 `volume.deleteEmpty` 的回收范围**（回收条件要求 volume 有
+过写入），长期增删 bucket 与空 collection 的预分配仍会攒下一批全空的
+volume。另外 compose 曾以 `-volume.max=0`（按磁盘余量自动推导上限）运行：当
+volume server 在 master 侧的注册信息 stale 时，自动推导会把可写槽位判成
+0，master 认为没有可分配 volume，全部 PutObject 返回 503
+（no free volumes）——表象是「磁盘远未写满却写满」。即便注册信息正常，
+自动推导的上限 ≈ 磁盘余量 ÷ 2GiB，在余量几十 GB 的开发机上只有十几个
+槽位：元数据日志的 `""`、prod 主 bucket、develop bucket 各占一批 7 个，
+再有一两个活跃 worktree bucket 写入就会撞到 `only 0 volumes left`
+（#824 实测）。现 compose 已改为
+显式上限（`AGENT_LEGION_SEAWEEDFS_VOLUME_MAX`，默认 100；惰性增长的
+上限闸门，volume 按需创建、不预占磁盘，100 × 2GiB ≈ 200GiB 的可增长
+容量），但空 volume 堆积与未收尾 worktree 的 bucket 仍会挤占这个槽位
+上限。注意上限只在容器**重建**时生效：仓库改了 compose 而容器沿用旧
+命令行（`docker inspect` 看 `-volume.max`）即仍是旧行为。
+
+**上限可调**：上限只是槽位闸门，调大**无需迁移数据**（新 volume 惰性
+创建），在 `deploy/.env` 设 `AGENT_LEGION_SEAWEEDFS_VOLUME_MAX` 后
+`docker compose -f deploy/compose.host.yaml up -d seaweedfs` 生效
+（compose 文件非默认文件名，`-f` 不可省；或走 `make prod-up` 入口）。
+升级本变更或调大上限前，先用
+`weed shell` 确认当前 volume 数低于新上限：
+
+```bash
+docker exec <seaweedfs 容器> sh -c \
+  'printf "lock\nvolume.list\nunlock\n" | weed shell -master=localhost:9333'
+```
+
+若新上限低于现有 volume 数（例如升级前部署已超过 100 个非空 volume，
+或数据已增长到 100 × 2GiB ≈ 200GiB 量级），master 会停止分配新
+volume，所有新写入返回 no free volumes——上限必须始终大于当前 volume
+数。`volume.deleteEmpty` 对非空 volume 无效，不能把「超上限」状态救回。
+
+**排查**：master UI（`:9333`）看 volume 总数与已用比例；PutObject 503 且
+master 日志出现 `no free volumes` 即命中本问题。
+
+**恢复**（先重启让 volume server 重新注册，再回收空 volume）：
+
+```bash
+docker restart <seaweedfs 容器>
+docker exec <seaweedfs 容器> sh -c \
+  'printf "lock\nvolume.deleteEmpty -quietFor=1h -apply\nunlock\n" | weed shell -master=localhost:9333'
+```
+
+`volume.deleteEmpty` 只删「空、有过写入、且静默超过 quietFor 时长」的
+volume，幂等可重跑；删完 PutObject 即恢复。从未被写入过的空 volume 不在
+其回收范围——若 volume 数仍贴着上限，再调大
+`AGENT_LEGION_SEAWEEDFS_VOLUME_MAX`（见上节「上限可调」）
+或清理无用 bucket/collection：已不需要的 worktree 走
+`scripts/clean-worktree.sh <worktree名>`（bucket 删除通常连带回收同名
+collection 卷；bucket 已删但卷残留时重跑同一命令会列出残留并给出手动回收
+命令，`report-orphan-s3-buckets.py`
+列出待收尾的孤儿派生 bucket）。
