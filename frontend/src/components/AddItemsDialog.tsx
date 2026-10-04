@@ -14,6 +14,7 @@ import { useUiStore } from '../stores/uiStore'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
 import { acceptedItemTypes } from '../lib/acceptedItemTypes'
+import { isInvalidTouchedTextItem } from '../lib/textItemFilename'
 import { resolveTextItem, startTextInput, textRunItem } from '../lib/textItem'
 import { parseRefIds } from '../lib/addItems'
 import type { RunItem, WorkspaceResponse } from '../types'
@@ -133,14 +134,8 @@ export function AddItemsDialog({
   const textItem = resolveTextItem(text, textFilename, textConfig)
   const textItems = textAccepted && textItem.ready ? 1 : 0
   const invalidText = textAccepted && textItem.tooLong
-  // 用户已改动内容但文件名无效：混合提交时 text 条目只是不计数会被静默
-  // 丢弃（codex #911 P1）——阻塞提交，修正或清空后才放行。未触碰模板
-  // （untouchedTemplate）与空白内容本来就不是条目，不阻塞。
-  const invalidTextFilename =
-    textAccepted &&
-    !!textItem.filenameError &&
-    textItem.content.trim().length > 0 &&
-    !textItem.untouchedTemplate
+  // 已改动但文件名无效的 text 条目不得被静默丢弃（见 helper 注释）。
+  const invalidTextFilename = textAccepted && isInvalidTouchedTextItem(textItem)
   // 契约解析后收窄的窗口期：隐藏面板里残留的条目不计数、不提交。
   const totalItems =
     (materialAccepted ? doneEntries.length + selectedMaterialIds.length : 0) +
