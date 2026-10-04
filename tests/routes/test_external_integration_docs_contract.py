@@ -294,6 +294,7 @@ _EXPECTED_BLOCKS: dict[str, tuple[tuple[str, str, frozenset[str]], ...]] = {
     "docs/workspace-api-tokens.md": (
         ("bash", "最小示例 1. 签发", frozenset({"create_api_token"})),
         ("bash", "最小示例 2. 提交", frozenset({"create_run"})),
+        ("bash", "最小示例 2. 提交（client_token，#813）", frozenset({"create_run"})),
         (
             "bash",
             "最小示例 3. 轮询",

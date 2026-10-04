@@ -14,21 +14,23 @@ _start:
 Presentation only: it never gates a submission (the contract is
 ``accepted_item_types``), so a definition may declare it without ``text``
 accepted — the block is then inert, exactly like an unused config value.
-Validation is shape-level (strings, bounded sizes, a bare ``.md``/``.txt``
-filename) and mirrors the run-time rules in ``run_text_items``.
+Validation is shape-level (strings, bounded sizes, a bare filename whose
+suffix is in ``text_item_content_types.TEXT_CONTENT_TYPES`` — ``.md``/``.txt``/``.json``,
+the single source shared with the run-time rules in ``run_text_items``).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from server.app.services.text_item_content_types import TEXT_CONTENT_TYPES
 from server.app.workflows.schema import WorkflowDefinitionError, WorkflowTextInput
 
 TEXT_INPUT_KEYS = ("label", "filename", "template")
 MAX_LABEL_CHARS = 80
 MAX_FILENAME_CHARS = 255
 MAX_TEMPLATE_CHARS = 16 * 1024
-_FILENAME_SUFFIXES = (".md", ".txt")
+_FILENAME_SUFFIXES = tuple(TEXT_CONTENT_TYPES)
 
 
 def load_text_input(raw: Any, node_key: str) -> WorkflowTextInput | None:
@@ -71,7 +73,7 @@ def load_text_input(raw: Any, node_key: str) -> WorkflowTextInput | None:
         or not filename.lower().endswith(_FILENAME_SUFFIXES)
     ):
         raise WorkflowDefinitionError(
-            f"Start node {node_key}.text_input.filename must be a bare .md or .txt name"
+            f"Start node {node_key}.text_input.filename must be a bare .md, .txt or .json name"
         )
     text_input = WorkflowTextInput(**values)
     # An all-empty block is the same as no block: keeps echo/compare symmetric.

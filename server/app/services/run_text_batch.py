@@ -17,9 +17,15 @@ from botocore.exceptions import BotoCoreError, ClientError
 from server.app.services.job_errors import ConflictError
 from server.app.services.material_ttl import materials_ttl_days
 from server.app.services.materials import MaterialStorageUnavailableError
+from server.app.services.text_item_content_types import TEXT_CONTENT_TYPES
 from server.app.storage import ObjectStorage
 
 logger = logging.getLogger(__name__)
+
+
+def text_content_type(filename: str) -> str:
+    """The content type a validated text-item filename is stored with."""
+    return TEXT_CONTENT_TYPES[filename[filename.rfind(".") :].lower()]
 
 
 def _cleanup(job_db: Any, storage: ObjectStorage, workspace_id: str, keys: list[str]) -> None:
@@ -69,11 +75,7 @@ def store_text_batch(
                 entries[digest] = dict(content_hash=digest, material_id=existing["id"])
                 continue
             key = f"{workspace_id}/{digest}/inline-{uuid.uuid4().hex}"
-            content_type = (
-                "text/markdown; charset=utf-8"
-                if filename.lower().endswith(".md")
-                else "text/plain; charset=utf-8"
-            )
+            content_type = text_content_type(filename)
             # Register before PUT: a timeout can occur after the server stored it.
             keys.append(key)
             storage.put_object(key, payload, content_type=content_type)

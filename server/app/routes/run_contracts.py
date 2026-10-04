@@ -1,52 +1,16 @@
 """Runs API contracts (materials-and-runs design §4/§5.2, slice 3)."""
 
-from typing import Annotated, Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from server.app.routes.run_item_contracts import RunItem
 
 # #211 Phase 2: request-param deprecation wording (server-side default).
 _DEPRECATED_DEFAULT = (
     "Deprecated: defaults to the path workspace_id; removal tracked in #211 (drops by 2026-10-31)."
 )
 _DEPRECATED_READ = "Deprecated: read workspace_id instead. Since schema v62 the two are equal; removal tracked in #211 (drops by 2026-10-31)."
-
-
-class RunItemMaterial(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["material"]
-    material_id: str = Field(min_length=1)
-
-
-class RunItemRef(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["ref"]
-    connection_key: str = Field(min_length=1)
-    external_id: str = Field(min_length=1)
-    params: dict[str, Any] = Field(default_factory=dict)
-
-
-class RunItemBundle(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["bundle"]
-    bundle_id: str = Field(min_length=1)
-
-
-class RunItemText(BaseModel):
-    """Requirement text typed inline; persisted as a material before resolution."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["text"]
-    content: str = Field(min_length=1, max_length=65536)
-    filename: str | None = Field(default=None, max_length=255)
-
-
-RunItem = Annotated[
-    RunItemMaterial | RunItemRef | RunItemBundle | RunItemText, Field(discriminator="type")
-]
 
 
 class RunCreateRequest(BaseModel):

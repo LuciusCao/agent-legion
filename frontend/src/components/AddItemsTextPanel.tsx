@@ -43,7 +43,7 @@ export function AddItemsTextPanel({
         value={item.filename}
         onChange={(event) => onFilenameChange(event.target.value)}
         placeholder={DEFAULT_TEXT_FILENAME}
-        helperText="存成材料时使用的文件名，.md 或 .txt"
+        helperText="存成材料时使用的文件名，.md、.txt 或 .json"
         size="small"
         fullWidth
       />

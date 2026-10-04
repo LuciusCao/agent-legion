@@ -16,6 +16,12 @@ This is the only write RunService performs before the run row exists; a
 material is a workspace asset (TTL-collected when unreferenced), which is
 precisely what a manual upload leaves behind when the run is rejected
 afterwards, so the fail-closed creation contract is unchanged.
+
+#813: an item's ``client_token`` is captured here, before normalization, and
+carried onto the rewritten material item, so identical text under different
+tokens still shares one material but resolves to independent jobs
+(run_item_client_token). ``.json`` joins the filename allowlist for
+hand-typed JSON payloads.
 """
 
 from __future__ import annotations
@@ -24,14 +30,12 @@ from typing import Any
 
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.materials import MaterialsService, MaterialStorageUnavailableError
+from server.app.services.run_item_client_token import item_client_token
 from server.app.services.run_text_batch import store_text_batch
+from server.app.services.text_item_content_types import TEXT_CONTENT_TYPES
 
 TEXT_ITEM_MAX_BYTES = 64 * 1024
 DEFAULT_TEXT_FILENAME = "需求.md"
-_CONTENT_TYPES = {
-    ".md": "text/markdown; charset=utf-8",
-    ".txt": "text/plain; charset=utf-8",
-}
 
 
 def is_text_item(item: Any) -> bool:
@@ -39,7 +43,7 @@ def is_text_item(item: Any) -> bool:
 
 
 def text_item_filename(raw: Any, default: str = "") -> str:
-    """The material filename for a text item: a bare ``.md`` / ``.txt`` name."""
+    """The material filename for a text item: a bare ``.md`` / ``.txt`` / ``.json`` name."""
     name = str(raw or "").strip() or default.strip() or DEFAULT_TEXT_FILENAME
     if "/" in name or "\\" in name or name.startswith("."):
         raise InvalidOperationError(f"text item filename is invalid: {name!r}")
@@ -50,8 +54,8 @@ def text_item_filename(raw: Any, default: str = "") -> str:
     except UnicodeError as exc:
         raise InvalidOperationError("text item filename must be valid UTF-8") from exc
     suffix = name[name.rfind(".") :].lower() if "." in name else ""
-    if suffix not in _CONTENT_TYPES:
-        raise InvalidOperationError("text item filename must end with .md or .txt")
+    if suffix not in TEXT_CONTENT_TYPES:
+        raise InvalidOperationError("text item filename must end with .md, .txt or .json")
     return name
 
 
@@ -61,6 +65,7 @@ def _prepare(items: list[dict[str, Any]], default_filename: str) -> list[tuple[i
     for index, item in enumerate(items):
         if not is_text_item(item):
             continue
+        item_client_token(item)
         content = str(item.get("content") or "")
         if not content.strip():
             raise InvalidOperationError("text item requires non-empty content")
@@ -106,5 +111,9 @@ def materialize_text_items(
     for index, material_id in store_text_batch(
         job_db, storage, workspace_id, prepared, created_by
     ).items():
-        resolved[index] = {"type": "material", "material_id": material_id}
+        material_item: dict[str, Any] = {"type": "material", "material_id": material_id}
+        token = item_client_token(items[index])
+        if token:
+            material_item["client_token"] = token
+        resolved[index] = material_item
     return resolved
