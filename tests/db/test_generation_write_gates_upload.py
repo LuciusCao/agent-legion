@@ -48,8 +48,18 @@ from tests.db.generation_write_gate_helpers import (
     _start,
     _store,
 )
+from tests.fakes.artifact_keys import pin_legacy_authority_keys
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
+
+
+@pytest.fixture(autouse=True)
+def _legacy_fixed_authority_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本文件验证共享 promote primitive 的覆盖契约（备份 / 恢复 / 串行化）：
+    把版本 key 钉回 #853 前的固定布局，等价于「存量固定 key 被覆盖」场景
+    （见 tests/fakes/artifact_keys.py；#853 生产布局见
+    test_artifact_direct_url_pinning.py）。"""
+    pin_legacy_authority_keys(monkeypatch)
 
 
 def test_upload_writes_when_lease_owns_current_generation(

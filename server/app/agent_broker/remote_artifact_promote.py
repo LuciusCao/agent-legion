@@ -28,7 +28,10 @@ from server.app.services.job_artifact_gzip import GZIP_SUFFIX, is_gzip_key
 from server.app.services.job_artifact_objects import (
     JobArtifactObjectStore,
     artifact_staging_key,
-    artifact_storage_key,
+)
+from server.app.services.job_artifact_versions import (
+    artifact_version_key,
+    discard_superseded_objects,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,7 +61,11 @@ def promote_all(
     between the first committer's promote and its finish (lifecycle and
     s3_jobs_gc reap them on every outcome, #774 对抗复审 P1).
 
-    Re-runs overwrite existing authority keys, so every pre-existing
+    #853: the authority key is a fresh per-attempt version key, so a promote
+    never overwrites an existing object (the backup arm below stays as the
+    primitive's generic contract but finds nothing to back up) and the
+    superseded key is removed after the registration commits. Before #853,
+    re-runs overwrote existing authority keys, so every pre-existing
     authority object is first backed up (server-side copy to a per-invocation
     rollback key under this execution's staging prefix, no byte downloads). A
     mid-batch copy failure or a rejected registration restores the
@@ -101,11 +108,6 @@ def promote_all(
             node_key,
         )
         return False
-    authority_keys = {
-        name: artifact_storage_key(workspace_id, job_id, name)
-        + (GZIP_SUFFIX if is_gzip_key(str(ref["storage_key"])) else "")
-        for name, ref in remote.items()
-    }
     # 回滚备份落 per-invocation key（codex #774 P1）：并发 /result 重试
     # （同 execution、同名）若共享 rollback key，先提交者的锁外清理会删掉
     # 后者的备份，后者闸拒/登记失败时恢复无备份可取——旧清单行指向新字
@@ -114,6 +116,15 @@ def promote_all(
     # 绝不删除 staging 源——重试在其 promote 与 finish 之间仍需读到它
     # （#774 对抗复审 P1），残留统一交 lifecycle/GC。
     attempt = uuid4().hex
+    # #853：authority 落一次性版本 key（同一 attempt 维度），从不覆盖既有
+    # 对象——此前签发的直连 URL 绑定旧 key，不会读到本次字节；被取代的旧
+    # key 在登记提交后经 artifact-authority 锁复核删除。
+    authority_keys = {
+        name: artifact_version_key(workspace_id, job_id, attempt, name)
+        + (GZIP_SUFFIX if is_gzip_key(str(ref["storage_key"])) else "")
+        for name, ref in remote.items()
+    }
+    superseded: list[str] = []
     registered = promote_to_authority_guarded(
         storage,
         object_store.database_dsn,
@@ -135,6 +146,7 @@ def promote_all(
         ),
         staged_files=staged,
         job_dir=job_dir,
+        superseded=superseded,
     )
     if registered is None:
         # The stale write gate rejected the registration: a sweep/reset
@@ -157,6 +169,7 @@ def promote_all(
     # completion_staged 的失败/成功收尾经 ``discard_staging_refs`` 执
     # 行）；其余结局（预检判死、verify 失败、闸拒、进程崩溃）的残留由
     # bucket lifecycle / GC 兜底。
+    discard_superseded_objects(object_store, superseded, job_id)
     return True
 
 

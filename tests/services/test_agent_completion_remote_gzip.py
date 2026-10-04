@@ -25,6 +25,7 @@ from server.app.agent_control.completion import AgentCompletionHandler, AgentOut
 from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from tests.fakes.artifact_keys import pin_legacy_authority_keys
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -34,6 +35,15 @@ STAGING_KEY = "jobs-staging/ws-1/job-1/exec-1/out.json"
 AUTHORITY_KEY = "jobs/ws-1/job-1/out.json"
 
 FakeStorage = FakeObjectStorage
+
+
+@pytest.fixture(autouse=True)
+def _legacy_fixed_authority_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本文件验证共享 promote primitive 的覆盖契约（备份 / 恢复 / 串行化）：
+    把版本 key 钉回 #853 前的固定布局，等价于「存量固定 key 被覆盖」场景
+    （见 tests/fakes/artifact_keys.py；#853 生产布局见
+    test_artifact_direct_url_pinning.py）。"""
+    pin_legacy_authority_keys(monkeypatch)
 
 
 class _StubJobDb:
@@ -226,8 +236,9 @@ def test_finish_gzip_cancelled_empty_hash_registers_host_computed(tmp_path: Path
 
 def test_finish_rerun_form_change_raw_to_gzip(tmp_path: Path) -> None:
     """形态切换的重跑：上次裸对象（旧 worker）、这次 .gz（v4 worker）。
-    新 authority key 带后缀、旧裸对象留存（无覆盖即无需备份），清单行
-    单事务 retarget 到新 key；单节点重跑在新旧混合数据下通过。"""
+    新 authority key 带后缀、旧裸对象不被覆盖（无覆盖即无需备份），清单行
+    单事务 retarget 到新 key 后旧裸对象作为被取代对象删除（#853）；单节点
+    重跑在新旧混合数据下通过。"""
     storage = FakeStorage()
     storage.objects[AUTHORITY_KEY] = b"previous-raw-bytes"
     storage.objects[GZ_STAGING_KEY] = GZ_PAYLOAD
@@ -248,8 +259,9 @@ def test_finish_rerun_form_change_raw_to_gzip(tmp_path: Path) -> None:
     assert leases.results[0].status == "completed"
     assert (job_dir / "out.json").read_bytes() == PAYLOAD
     # 旧裸对象未被覆盖（新 key 不存在即无备份/回滚），新对象带后缀；
-    # staging 源在 finish 提交后删除。
-    assert storage.objects == {AUTHORITY_KEY: b"previous-raw-bytes", GZ_AUTHORITY_KEY: GZ_PAYLOAD}
+    # staging 源在 finish 提交后删除。#853：清单行 retarget 后旧裸对象成为
+    # 被取代对象，登记提交后经 artifact-authority 锁复核删除（不再留孤儿）。
+    assert storage.objects == {GZ_AUTHORITY_KEY: GZ_PAYLOAD}
     row = object_store.lookup("job-1", "out.json")
     assert row is not None
     assert row["storage_key"] == GZ_AUTHORITY_KEY

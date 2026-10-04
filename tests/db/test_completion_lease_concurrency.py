@@ -22,6 +22,7 @@ from tests.db.completion_helpers import (
     _result_archive,
     _seed_completion_job,
 )
+from tests.fakes.artifact_keys import manifest_bytes
 from tests.fakes.storage import FakeObjectStorage
 
 
@@ -96,7 +97,7 @@ def test_concurrent_duplicate_result_finishes_never_flip_node_to_failed(
     # 赢家在 finish 提交后删了 staging 源（重复删除幂等、不炸）；authority
     # 字节与清单行不受并发重试影响。
     assert staging_key not in storage.objects
-    assert storage.objects["jobs/gate24-ws/gate24-job/out.json"] == b"ref-bytes"
+    assert manifest_bytes(store, "gate24-job", "out.json") == b"ref-bytes"
     row = store.row_for_node("gate24-job", "node_a", "out.json")
     assert row is not None
     assert row["size_bytes"] == 9
@@ -172,7 +173,7 @@ def test_concurrent_same_lease_results_commit_only_the_finish_winner(
     assert outcome_b.get("error") is None
     assert outcome_b["result"] is False  # 迟到 finish = 409 语义
 
-    assert storage.objects["jobs/dup-ws/dup-job/out.json"] == b"bytes-a"  # 权威面=获胜者
+    assert manifest_bytes(store, "dup-job", "out.json") == b"bytes-a"  # 权威面=获胜者
     assert (job_dir / "out.json").read_bytes() == b"bytes-a"  # 本地面=获胜者
     row = store.row_for_node("dup-job", "node_a", "out.json")
     assert row is not None
@@ -253,7 +254,7 @@ def test_concurrent_unpack_failure_finish_shares_lease_critical_section(
 
     assert _node_row("unpack-job", "node_a")["status"] == "completed"
     assert (job_dir / "out.json").read_bytes() == b"bytes-a"  # 本地面=获胜者
-    assert storage.objects["jobs/unpack-ws/unpack-job/out.json"] == b"bytes-a"  # 权威面
+    assert manifest_bytes(store, "unpack-job", "out.json") == b"bytes-a"  # 权威面
     row = store.row_for_node("unpack-job", "node_a", "out.json")
     assert row is not None
     assert row["content_hash"] == hashlib.sha256(b"bytes-a").hexdigest()  # 清单面

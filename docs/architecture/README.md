@@ -51,6 +51,7 @@ data/  (videos, logs, packages, jobs, run traces)
 | velites harness | [velites-harness.md](velites-harness.md) | 自研 Rust agent harness（velites 执行内核）设计 |
 | 证据矩阵 | [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md) | 架构承诺的反向审计证据矩阵（与 `config/architecture/` invariant registry 对齐） |
 | 执行代次协议 | [execution-generation.md](execution-generation.md) | EXEC-GENERATION-001 执行代次协议（#759/#645）：代次列与 bump/CAS 面、锁序与批序全序、三平面一致性与并发对抗审查 checklist |
+| 产物直连 URL 版本固定 | [artifact-direct-url-pinning.md](artifact-direct-url-pinning.md) | 不可变版本 key 布局与被取代对象清理（#853）：方案对比、SeaweedFS 实测、存量兼容与残余面 |
 | Studio 草稿-校验-发布契约 | [studio-draft-publish-contract.md](studio-draft-publish-contract.md) | studio 草稿编辑的三台协作状态机（保存/自动校验/发布）迁移表 + 组合 invariant 表与变更纪律（#633/#804） |
 | Studio 本地文件编辑 | [studio-local-authoring-contract.md](studio-local-authoring-contract.md) | Git 内容归属、shared 全量状态、传输预算与测试矩阵（#820） |
 | Kimi 后台任务接续 | [studio-kimi-background-wakeup.md](studio-kimi-background-wakeup.md) | 后台终态回执、空闲接续及 Kimi V1 存储兼容边界（#806） |

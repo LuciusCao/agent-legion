@@ -1,7 +1,10 @@
 """Job artifact object storage (materials-and-runs design §6.5, D12, #160).
 
 The authoritative copy of every declared node artifact lives in the instance
-S3-compatible object store under ``jobs/{workspace_id}/{job_id}/{name}``;
+S3-compatible object store under the ``jobs/{workspace_id}/{job_id}/`` prefix —
+since #853 every write lands on an immutable per-write version key
+``jobs/{ws}/{job}/.v/{version}/{name}`` (pre-#853 rows keep the fixed
+``jobs/{ws}/{job}/{name}`` key, read as-is via ``storage_key``, no migration);
 ``job_artifacts`` is the manifest table and the local job_dir copy is an
 evictable cache (EXEC-ARTIFACT-STORE-001). Reads resolve local-first with the
 object store as fallback so legacy jobs (never uploaded) keep working without
@@ -42,6 +45,7 @@ from server.app.executors._artifact_promotion import (
     put_stream_with_retries,
     upload_via_staging_guarded,
 )
+from server.app.executors._artifact_supersede import collect_superseded_tx
 from server.app.executors._lease_write_gate import lease_artifact_write_current
 from server.app.services.job_artifact_gzip import GZIP_SUFFIX, content_stream
 from server.app.services.job_artifact_rows import upsert_artifact_row_tx
@@ -64,6 +68,7 @@ STAGING_KEY_PREFIX = "jobs-staging"
 
 
 def artifact_storage_key(workspace_id: str, job_id: str, name: str) -> str:
+    """Legacy fixed authority key (pre-#853 rows; the bare verify arm)."""
     return f"{KEY_PREFIX}/{workspace_id}/{job_id}/{name}"
 
 
@@ -146,7 +151,22 @@ class JobArtifactObjectStore:
         if not valid_artifact_name(name):
             raise ValueError(f"invalid artifact name: {name!r}")
         size_bytes, content_hash = hash_local_file(local_path)
-        storage_key = artifact_storage_key(workspace_id, job_id, name)
+        # #853：每次写入一个新版本 key（attempt 维度唯一），从不覆盖既有
+        # 对象；被取代的旧 key 在登记提交后删除。lazy import：版本模块从
+        # 本模块取 KEY_PREFIX（避免循环导入）。
+        from server.app.services import job_artifact_versions as versions
+
+        attempt = uuid4().hex
+        storage_key = versions.artifact_version_key(workspace_id, job_id, attempt, name)
+        row: dict[str, Any] = {
+            "job_id": job_id,
+            "node_key": node_key,
+            "name": name,
+            "storage_key": storage_key,
+            "size_bytes": size_bytes,
+            "content_hash": content_hash,
+        }
+        superseded: list[str] = []
         if lease_id:
             # 每次调用独立 attempt 命名空间（codex #774 P1×2）：并发重试
             # （同 lease 同名、不同字节）的 staging/rollback 对象若共享
@@ -155,8 +175,7 @@ class JobArtifactObjectStore:
             # size/hash），先行者的 finally 还会删掉后者的 staging/rollback
             # 对象（后者闸拒/登记失败时恢复无备份可取）。per-invocation
             # key 从构造上拆掉这两条跨调用通道。
-            attempt = uuid4().hex
-            return upload_via_staging_guarded(
+            registered = upload_via_staging_guarded(
                 self.storage,
                 self._dsn,
                 job_id=job_id,
@@ -171,26 +190,17 @@ class JobArtifactObjectStore:
                 rollback_key=artifact_staging_key(
                     workspace_id, job_id, lease_id, f".rollback/{attempt}/{name}"
                 ),
-                row={
-                    "job_id": job_id,
-                    "node_key": node_key,
-                    "name": name,
-                    "storage_key": storage_key,
-                    "size_bytes": size_bytes,
-                    "content_hash": content_hash,
-                },
+                row=row,
+                superseded=superseded,
             )
-        put_stream_with_retries(
-            self.storage, storage_key, local_path, size_bytes, job_id=job_id, name=name
-        )
-        return self._register_row(
-            job_id=job_id,
-            node_key=node_key,
-            name=name,
-            storage_key=storage_key,
-            size_bytes=size_bytes,
-            content_hash=content_hash,
-        )
+        else:
+            put_stream_with_retries(
+                self.storage, storage_key, local_path, size_bytes, job_id=job_id, name=name
+            )
+            registered = self._register_row(**row, superseded=superseded)
+        if registered is not None:
+            versions.discard_superseded_objects(self, superseded, job_id)
+        return registered
 
     def verify_remote(
         self,
@@ -308,6 +318,7 @@ class JobArtifactObjectStore:
         storage_key: str,
         size_bytes: int,
         content_hash: str,
+        superseded: list[str] | None = None,
     ) -> dict[str, Any] | None:
         """Single-row upsert in its own transaction (batch path inlines it).
 
@@ -315,8 +326,11 @@ class JobArtifactObjectStore:
         (``record_remote`` HEAD-verified registrations, the reconciler and
         approval direct writes) — lease-carrying writes go through
         ``register_rows_guarded`` inside the shared promote primitive.
+        ``superseded`` (#853) collects the key the row pointed at before.
         """
         with write_transaction(self._dsn) as conn:
+            key_row = {"job_id": job_id, "node_key": node_key, "name": name}
+            collect_superseded_tx(conn, [{**key_row, "storage_key": storage_key}], superseded)
             return upsert_artifact_row_tx(
                 conn,
                 ARTIFACT_ROW_UPSERT_SQL,

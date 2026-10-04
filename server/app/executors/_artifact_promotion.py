@@ -61,6 +61,7 @@ from server.app.executors._artifact_restore import (
     discard_object,
     restore_authority_backups,
 )
+from server.app.executors._artifact_supersede import collect_superseded_tx
 from server.app.executors._file_promotion import FilePromotionGuard, promote_file_moves_guarded
 from server.app.executors._lease_write_gate import lease_artifact_write_current
 from server.app.services.job_artifact_rows import upsert_artifact_row_tx
@@ -165,6 +166,7 @@ def register_rows_guarded(
     lease_id: str,
     staged_files: dict[str, Path] | None = None,
     job_dir: Path | None = None,
+    superseded: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]] | None, FilePromotionGuard]:
     """锁内复查 + 锁内落盘 + 清单行登记；(None, 空簿) = 闸关（零写入）。
 
@@ -181,6 +183,9 @@ def register_rows_guarded(
     行、authority 同面回滚（旧文件回位、新文件移除）；提交成功才
     ``discard()``。提前丢弃会让 local-first 读取独自携带未提交的新字节
     （三面分叉）。
+
+    ``superseded``（#853）：闸内、upsert 之前收集各行此前指向的另一个
+    key（版本 key 布局下即被取代对象）；只在外层事务提交后才可据此删除。
     """
     if not lease_artifact_write_current(conn, lease_id, job_id):
         return None, FilePromotionGuard()
@@ -192,6 +197,7 @@ def register_rows_guarded(
             backup_parent=job_dir,
         )
     try:
+        collect_superseded_tx(conn, rows, superseded)
         registered = [
             upsert_artifact_row_tx(
                 conn,
@@ -231,6 +237,7 @@ def promote_to_authority_guarded(
     rows: list[dict[str, Any]],
     staged_files: dict[str, Path] | None = None,
     job_dir: Path | None = None,
+    superseded: list[str] | None = None,
 ) -> list[dict[str, Any]] | None:
     """备份 → copy → 锁内闸 + 登记 → 失败恢复 → 清理备份（两端共用）。
 
@@ -261,6 +268,10 @@ def promote_to_authority_guarded(
     实际已提交）下恢复会把旧字节盖回——选边偏向远更常见的 rollback
     half（连接死于 commit 到达前、序列化失败、死锁都是回滚），登记为不
     再收窄的残余面（docs/architecture/execution-generation.md §4）。
+
+    #853：调用方传入一次性版本 key 作 authority key 时该 key 此前不存在，
+    备份/恢复臂天然空转；``superseded`` 收集被取代的旧 key，**仅在本函数
+    正常返回非 None（登记已提交）后**由调用方删除。
     """
     authority_keys = {spec.name: spec.authority_key for spec in copies}
     assert len(authority_keys) == len(copies), (
@@ -293,6 +304,7 @@ def promote_to_authority_guarded(
                     lease_id=lease_id,
                     staged_files=staged_files,
                     job_dir=job_dir,
+                    superseded=superseded,
                 )
             except BaseException as exc:
                 # #204 broad-except audit: in-transaction compensate-then-
@@ -399,6 +411,7 @@ def upload_via_staging_guarded(
     authority_key: str,
     rollback_key: str,
     row: dict[str, Any],
+    superseded: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """本地 lease 臂上传：字节先落 per-invocation staging key，再走共享 primitive。
 
@@ -426,6 +439,7 @@ def upload_via_staging_guarded(
             lease_id=lease_id,
             copies=[copy_spec],
             rows=[row],
+            superseded=superseded,
         )
     finally:
         discard_object(storage, staging_key)
