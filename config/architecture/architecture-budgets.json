@@ -2018,6 +2018,8 @@
     "worker/service.py": 125,
     "worker/service_bind.py": 25,
     "worker/service_env.py": 40,
+    "worker/service_host_guard.py": 89,
+    "worker/service_host_names.py": 39,
     "worker/service_models.py": 29,
     "worker/service_static.py": 39,
     "worker/service_tokens.py": 45,
