@@ -155,15 +155,11 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     let stop_reading = CancellationToken::new();
     let stdout_task = tokio::spawn({
         let (boundary, stop) = (boundary_fired.clone(), stop_reading.clone());
-        async move {
-            read_with_first_byte(&mut stdout_pipe, output_started, boundary, cap, stop).await
-        }
+        async move { read_with_first_byte(&mut stdout_pipe, output_started, boundary, cap, stop).await }
     });
     let stderr_task = tokio::spawn({
         let (boundary, stop) = (boundary_fired.clone(), stop_reading.clone());
-        async move {
-            read_with_first_byte(&mut stderr_pipe, output_started, boundary, cap, stop).await
-        }
+        async move { read_with_first_byte(&mut stderr_pipe, output_started, boundary, cap, stop).await }
     });
 
     let timeout = Duration::from_secs(timeout_secs);
