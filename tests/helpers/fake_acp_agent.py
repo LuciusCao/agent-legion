@@ -33,12 +33,22 @@ the client-side terminal protocol: the fake agent asks the backend to create
 a terminal, polls output, waits for exit, and releases it — mirroring how
 kimi runs its Bash tool. The received initialize params (clientCapabilities)
 are sunk so tests can assert on the advertised capability flags.
+
+Agent-launched turns (#938): ``"kimi_wire": {"home": ..., "workspace": ...}``
+creates a Kimi Code style main-agent journal at session/new|load;
+``"unprompted": {"delay": s, "wire": [records], "notify": [updates]}`` fires
+once, ``delay`` seconds after the first prompt response, with NO prompt in
+flight: ``wire`` records are appended to the journal (what Kimi Code 0.43
+does — its ACP adapter drops the turn's events) and ``notify`` updates are
+pushed as out-of-turn session/update notifications.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
+import threading
 from typing import Any
 
 
@@ -51,10 +61,45 @@ class _FakeAgent:
         self.cancelled = False
         self.acp_session_id = str(self.script.get("session_id", "fake-session-1"))
         self._next_request_id = 1
+        self._write_lock = threading.Lock()
+        self._unprompted_armed = "unprompted" in self.script
 
     def _send(self, message: dict[str, Any]) -> None:
-        sys.stdout.write(json.dumps(message) + "\n")
-        sys.stdout.flush()
+        with self._write_lock:
+            sys.stdout.write(json.dumps(message) + "\n")
+            sys.stdout.flush()
+
+    def _wire_path(self, session_id: str) -> str | None:
+        wire = self.script.get("kimi_wire")
+        if not wire:
+            return None
+        directory = os.path.join(
+            wire["home"], "sessions", wire.get("workspace", "wd_fake"), session_id, "agents", "main"
+        )
+        os.makedirs(directory, exist_ok=True)
+        return os.path.join(directory, "wire.jsonl")
+
+    def _open_wire(self, session_id: str) -> None:
+        path = self._wire_path(session_id)
+        if path is not None:
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps({"type": "metadata", "protocol_version": "1.5"}) + "\n")
+
+    def _fire_unprompted(self, session_id: str) -> None:
+        plan = self.script["unprompted"]
+        path = self._wire_path(session_id)
+        if path is not None and plan.get("wire"):
+            with open(path, "a", encoding="utf-8") as handle:
+                for record in plan["wire"]:
+                    handle.write(json.dumps(record) + "\n")
+        for update in plan.get("notify", []):
+            self._send(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {"sessionId": session_id, "update": update},
+                }
+            )
 
     def _sink(self, message: dict[str, Any]) -> None:
         with open(self.sink_path, "a", encoding="utf-8") as handle:
@@ -116,6 +161,7 @@ class _FakeAgent:
                 result["modes"] = self.script["modes"]
             if "config_options" in self.script:
                 result["configOptions"] = self.script["config_options"]
+            self._open_wire(self.acp_session_id)
             self._send({"jsonrpc": "2.0", "id": request_id, "result": result})
         elif method == "session/load":
             if self.script.get("load_error"):
@@ -148,6 +194,7 @@ class _FakeAgent:
                             },
                         }
                     )
+                self._open_wire(message["params"].get("sessionId", self.acp_session_id))
                 self._send({"jsonrpc": "2.0", "id": request_id, "result": result})
         elif method == "session/set_mode":
             if self.script.get("set_mode_error"):
@@ -220,6 +267,11 @@ class _FakeAgent:
                     },
                 }
             )
+            if self._unprompted_armed:
+                self._unprompted_armed = False
+                session_id = message["params"].get("sessionId", self.acp_session_id)
+                delay = float(self.script["unprompted"].get("delay", 1.0))
+                threading.Timer(delay, self._fire_unprompted, args=(session_id,)).start()
         else:
             self._send({"jsonrpc": "2.0", "id": request_id, "result": {}})
 
