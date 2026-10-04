@@ -60,7 +60,8 @@ function useInvalidatePreviewPanel(workspaceId: string | undefined) {
 export function usePublishPreviewPanel(workspaceId: string | undefined) {
   const invalidate = useInvalidatePreviewPanel(workspaceId)
   return useMutation({
-    mutationFn: () => publishPreviewPanel(workspaceId!),
+    mutationFn: (expectedHash: string) =>
+      publishPreviewPanel(workspaceId!, expectedHash),
     onSuccess: invalidate,
   })
 }

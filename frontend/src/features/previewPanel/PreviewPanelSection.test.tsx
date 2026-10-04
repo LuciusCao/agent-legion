@@ -609,7 +609,10 @@ describe('PreviewPanelSection', () => {
 
     // #796 R4：发布草稿外露出治理区（状态 Chip 旁），恢复默认留在 ⋮ 菜单。
     fireEvent.click(screen.getByRole('button', { name: '发布草稿' }))
-    await waitFor(() => expect(mockPublish).toHaveBeenCalledWith('ws1'))
+    // #841：发布携带头部所示草稿的 html_hash（expected_hash CAS 令牌）。
+    await waitFor(() =>
+      expect(mockPublish).toHaveBeenCalledWith('ws1', DRAFT.html_hash)
+    )
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     clickGovernanceAction(/恢复默认（归档）/)

@@ -55,7 +55,8 @@ def seed_demo_workspace_agent_definitions(
     for agent_id, definition in BUILTIN_AGENT_DEFINITIONS.items():
         if service.list_versions(agent_id):
             continue
-        service.save_draft(agent_id, definition, created_by="system")
-        service.publish(agent_id)
+        saved = service.save_draft(agent_id, definition, created_by="system")
+        # #841: assert the draft this seed just saved (no hash-less publish).
+        service.publish(agent_id, saved.definition_hash)
         seeded.append(agent_id)
     return seeded

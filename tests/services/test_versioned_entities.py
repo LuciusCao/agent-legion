@@ -47,14 +47,14 @@ def test_save_draft_overwrites_existing_draft(store, workspace_id) -> None:
 
 def test_publish_flow_archives_previous_published(store, workspace_id) -> None:
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
-    published = store.publish("wf:node", workspace_id)
+    published = store.publish("wf:node", workspace_id, "hash1")
 
     assert published.status == "published"
     assert published.published_at is not None
     assert store.get_published("wf:node", workspace_id).definition == DEFINITION_V1
 
     store.save_draft("wf:node", DEFINITION_V2, "hash2", workspace_id, "user:u1")
-    republished = store.publish("wf:node", workspace_id)
+    republished = store.publish("wf:node", workspace_id, "hash2")
 
     assert republished.version == 2
     versions = {e.version: e.status for e in store.list_versions("wf:node", workspace_id)}
@@ -74,7 +74,7 @@ def test_published_state_changes_take_implementation_revalidation_lock(
     monkeypatch.setattr(
         versioned_entities_module, "acquire_implementation_publication_lock", observed_lock
     )
-    store.publish("wf:node", workspace_id)
+    store.publish("wf:node", workspace_id, "hash1")
     store.rollback("wf:node", 1, workspace_id, "user:ops")
     store.archive_all("wf:node", workspace_id)
 
@@ -83,7 +83,7 @@ def test_published_state_changes_take_implementation_revalidation_lock(
 
 def test_publish_without_draft_raises(store, workspace_id) -> None:
     with pytest.raises(NotFoundError):
-        store.publish("wf:node", workspace_id)
+        store.publish("wf:node", workspace_id, "hash1")
 
 
 # #692 codex P1（第三轮补充）：expected_hash 在选择 draft 的同一事务内
@@ -157,9 +157,9 @@ def test_publish_expected_hash_match_publishes(store, workspace_id) -> None:
 
 def test_rollback_republishes_old_version_as_new(store, workspace_id) -> None:
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
-    store.publish("wf:node", workspace_id)
+    store.publish("wf:node", workspace_id, "hash1")
     store.save_draft("wf:node", DEFINITION_V2, "hash2", workspace_id, "user:u1")
-    store.publish("wf:node", workspace_id)
+    store.publish("wf:node", workspace_id, "hash2")
 
     rolled = store.rollback(
         "wf:node", 1, workspace_id, "user:ops", definition_patch={"change_note": "rollback to v1"}
@@ -182,7 +182,7 @@ def test_rollback_unknown_version_raises(store, workspace_id) -> None:
 
 def test_archive_all_is_idempotent(store, workspace_id) -> None:
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
-    store.publish("wf:node", workspace_id)
+    store.publish("wf:node", workspace_id, "hash1")
 
     assert store.archive_all("wf:node", workspace_id) == 1
     assert store.get_published("wf:node", workspace_id) is None
@@ -199,7 +199,7 @@ def test_versions_number_by_max_plus_one(store, workspace_id) -> None:
 
 def test_copy_duplicates_latest_definition_as_draft(store, workspace_id) -> None:
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
-    store.publish("wf:node", workspace_id)
+    store.publish("wf:node", workspace_id, "hash1")
 
     copied = store.copy("wf:node", "wf:node2", workspace_id, "user:u2")
 
@@ -225,10 +225,10 @@ def test_copy_existing_key_conflicts(store, workspace_id) -> None:
 
 def test_list_latest_prefers_draft_over_published(store, workspace_id) -> None:
     store.save_draft("wf:a", DEFINITION_V1, "hash1", workspace_id, "user:u1")
-    store.publish("wf:a", workspace_id)
+    store.publish("wf:a", workspace_id, "hash1")
     store.save_draft("wf:a", DEFINITION_V2, "hash2", workspace_id, "user:u1")
     store.save_draft("wf:b", DEFINITION_V1, "hash1", workspace_id, "user:u1")
-    store.publish("wf:b", workspace_id)
+    store.publish("wf:b", workspace_id, "hash1")
 
     latest = {e.entity_key: e for e in store.list_latest(workspace_id)}
 
@@ -239,7 +239,7 @@ def test_list_latest_prefers_draft_over_published(store, workspace_id) -> None:
 
 def test_list_published_and_keys(store, workspace_id) -> None:
     store.save_draft("wf:a", DEFINITION_V1, "hash1", workspace_id, "user:u1")
-    store.publish("wf:a", workspace_id)
+    store.publish("wf:a", workspace_id, "hash1")
     store.save_draft("wf:b", DEFINITION_V2, "hash2", workspace_id, "user:u1")
 
     published = store.list_published(workspace_id)
@@ -254,7 +254,7 @@ def test_workspace_scopes_are_isolated(job_db, store, workspace_id) -> None:
         default_workflow_key="demo_workflow", name="ve-store-other"
     )["id"]
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
-    store.publish("wf:node", workspace_id)
+    store.publish("wf:node", workspace_id, "hash1")
 
     assert store.get_published("wf:node", other_workspace) is None
     assert store.list_versions("wf:node", other_workspace) == []
@@ -265,7 +265,7 @@ def test_workspace_scopes_are_isolated(job_db, store, workspace_id) -> None:
 def test_global_entities_publish_with_null_workspace(job_db) -> None:
     store = VersionedEntityStore(job_db.dsn_identity, "agent")
     store.save_draft("agent-1", {"capability": "cap"}, "hash1", None, "user:u1")
-    published = store.publish("agent-1", None)
+    published = store.publish("agent-1", None, "hash1")
 
     assert published.workspace_id is None
     assert published.status == "published"
@@ -274,7 +274,7 @@ def test_global_entities_publish_with_null_workspace(job_db) -> None:
 
 def test_get_version_reads_archived_rows(store, workspace_id) -> None:
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
-    store.publish("wf:node", workspace_id)
+    store.publish("wf:node", workspace_id, "hash1")
     store.archive_all("wf:node", workspace_id)
 
     entity = store.get_version("wf:node", 1, workspace_id)
@@ -290,7 +290,7 @@ def test_save_draft_guard_rejects_concurrently_published_row(
     import server.app.services.versioned_entities as versioned_entities
 
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
-    store.publish("wf:node", workspace_id)
+    store.publish("wf:node", workspace_id, "hash1")
     published = store.get_published("wf:node", workspace_id)
     # 只拦截 draft 读取（save_draft/publish 的写路径）；get_published 的
     # 断言读走原实现（get_published 与写路径共用 _latest_status_row 查询件）。
@@ -321,11 +321,13 @@ def test_publish_guard_rejects_concurrently_archived_draft(
         versioned_entities,
         "_latest_status_row",
         lambda conn, et, ws, key, status: (
-            {"id": draft_id} if status == "draft" else original(conn, et, ws, key, status)
+            {"id": draft_id, "definition_hash": "hash1"}
+            if status == "draft"
+            else original(conn, et, ws, key, status)
         ),
     )
     with pytest.raises(ConflictError):
-        store.publish("wf:node", workspace_id)
+        store.publish("wf:node", workspace_id, "hash1")
     assert store.get_published("wf:node", workspace_id) is None
 
 
@@ -349,7 +351,7 @@ def test_get_draft_returns_only_the_current_draft(store, workspace_id) -> None:
     assert draft.status == "draft"
     assert draft.definition == DEFINITION_V1
 
-    store.publish("wf:node", workspace_id)
+    store.publish("wf:node", workspace_id, "hash1")
     assert store.get_draft("wf:node", workspace_id) is None
 
     store.save_draft("wf:node", DEFINITION_V2, "hash2", workspace_id, "user:u2")

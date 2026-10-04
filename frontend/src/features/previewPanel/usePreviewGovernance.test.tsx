@@ -8,7 +8,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
-import { usePreviewGovernance } from './usePreviewGovernance'
+import {
+  PREVIEW_DRAFT_OVERRIDDEN_HINT,
+  PREVIEW_NO_DRAFT_HINT,
+  usePreviewGovernance,
+} from './usePreviewGovernance'
 
 const mockPublishMutate = vi.fn()
 const mockArchiveMutate = vi.fn()
@@ -24,7 +28,7 @@ function Probe({ workspaceId }: { workspaceId: string }) {
     <div>
       <span data-testid="error">{gov.actionError ?? ''}</span>
       <span data-testid="publishing">{String(gov.publishing)}</span>
-      <button type="button" onClick={gov.publish}>
+      <button type="button" onClick={() => gov.publish('hash-seen')}>
         发布
       </button>
       <button type="button" onClick={gov.archive}>
@@ -85,5 +89,59 @@ describe('usePreviewGovernance 的 workspace 隔离', () => {
     rerender((<Probe workspaceId="ws1" />) as ReactElement)
     expect(screen.getByTestId('error')).toHaveTextContent('迟到的失败')
     expect(screen.getByTestId('publishing')).toHaveTextContent('false')
+  })
+})
+
+// #841：发布带调用方看到的草稿 hash；失败文案按 #749 同款口径分流。
+describe('usePreviewGovernance 的发布 CAS', () => {
+  const httpError = (status: number, message: string) =>
+    Object.assign(new Error(message), { status })
+
+  it('发布把调用方的草稿 hash 交给 mutation（expected_hash 令牌）', async () => {
+    mockPublishMutate.mockResolvedValue({})
+    renderProbe()
+    fireEvent.click(screen.getByRole('button', { name: '发布' }))
+    await waitFor(() =>
+      expect(mockPublishMutate).toHaveBeenCalledWith('hash-seen')
+    )
+  })
+
+  it('409（草稿已被覆盖）给引导重看最新草稿的专用文案', async () => {
+    mockPublishMutate.mockRejectedValue(
+      httpError(409, 'draft hash mismatch for preview_panel default')
+    )
+    renderProbe()
+    fireEvent.click(screen.getByRole('button', { name: '发布' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('error')).toHaveTextContent(
+        PREVIEW_DRAFT_OVERRIDDEN_HINT
+      )
+    )
+  })
+
+  it('404（无草稿可发）给可行动文案；其余错误直显后端 detail', async () => {
+    mockPublishMutate.mockRejectedValueOnce(httpError(404, 'no draft'))
+    renderProbe()
+    fireEvent.click(screen.getByRole('button', { name: '发布' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('error')).toHaveTextContent(
+        PREVIEW_NO_DRAFT_HINT
+      )
+    )
+
+    mockPublishMutate.mockRejectedValueOnce(httpError(500, 'HTTP 500 boom'))
+    fireEvent.click(screen.getByRole('button', { name: '发布' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('error')).toHaveTextContent('HTTP 500 boom')
+    )
+  })
+
+  it('归档的 409 不套用发布文案（直显后端 detail）', async () => {
+    mockArchiveMutate.mockRejectedValue(httpError(409, 'archive conflict'))
+    renderProbe()
+    fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('error')).toHaveTextContent('archive conflict')
+    )
   })
 })

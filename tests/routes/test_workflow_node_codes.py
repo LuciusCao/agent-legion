@@ -14,6 +14,16 @@ BASE = f"/api/workspaces/{WF}/workflows/{WF}/nodes/{NODE}/code"
 CUSTOM_V1 = "def run(job, job_dir, runtime):\n    return 'v1'\n"
 CUSTOM_V2 = "def run(job, job_dir, runtime):\n    return 'v2'\n"
 
+# #841: publish requires expected_hash; error-path probes carry a dummy one so
+# they still reach the asserted guard instead of the 422 body validation.
+ANY_HASH = {"expected_hash": "any"}
+
+
+def _publish(client, base: str = BASE):
+    """Publish asserting the current draft's hash (as the inspector panel does)."""
+    draft_hash = client.get(base).json()["draft_code_hash"]
+    return client.post(f"{base}/publish", json={"expected_hash": draft_hash})
+
 
 @pytest.fixture
 def workspace_with_revision(client, job_db, settings):
@@ -53,7 +63,7 @@ def test_draft_publish_get_flow(workspace_with_revision) -> None:
     assert before["origin"] == "builtin"
     assert before["has_draft"] is True
 
-    published = workspace_with_revision.post(f"{BASE}/publish")
+    published = _publish(workspace_with_revision)
     assert published.status_code == 200
     assert published.json()["status"] == "published"
     assert published.json()["published_at"] is not None
@@ -66,9 +76,9 @@ def test_draft_publish_get_flow(workspace_with_revision) -> None:
 
 def test_versions_and_rollback(workspace_with_revision) -> None:
     workspace_with_revision.put(BASE, json={"code": CUSTOM_V1})
-    workspace_with_revision.post(f"{BASE}/publish")
+    _publish(workspace_with_revision)
     workspace_with_revision.put(BASE, json={"code": CUSTOM_V2})
-    workspace_with_revision.post(f"{BASE}/publish")
+    _publish(workspace_with_revision)
 
     versions = workspace_with_revision.get(f"{BASE}/versions").json()["versions"]
     assert [row["version"] for row in versions] == [3, 2, 1]
@@ -89,7 +99,7 @@ def test_versions_and_rollback(workspace_with_revision) -> None:
 
 def test_delete_archives_workspace_code_without_global_fallback(workspace_with_revision) -> None:
     workspace_with_revision.put(BASE, json={"code": CUSTOM_V1})
-    workspace_with_revision.post(f"{BASE}/publish")
+    _publish(workspace_with_revision)
 
     deleted = workspace_with_revision.delete(BASE)
 
@@ -99,7 +109,15 @@ def test_delete_archives_workspace_code_without_global_fallback(workspace_with_r
 
 
 def test_publish_without_draft_is_404(workspace_with_revision) -> None:
-    assert workspace_with_revision.post(f"{BASE}/publish").status_code == 404
+    assert workspace_with_revision.post(f"{BASE}/publish", json=ANY_HASH).status_code == 404
+
+
+def test_publish_requires_expected_hash(workspace_with_revision) -> None:
+    """#841：hash-less 发布退役——缺 body/字段 422，草稿原样保留。"""
+    workspace_with_revision.put(BASE, json={"code": CUSTOM_V1})
+    assert workspace_with_revision.post(f"{BASE}/publish").status_code == 422
+    assert workspace_with_revision.post(f"{BASE}/publish", json={}).status_code == 422
+    assert workspace_with_revision.get(BASE).json()["has_draft"] is True
 
 
 def test_rollback_unknown_version_is_404(workspace_with_revision) -> None:
@@ -151,7 +169,7 @@ def test_gate_disabled_is_403(workspace_with_revision, monkeypatch) -> None:
 
     assert workspace_with_revision.get(BASE).status_code == 403
     assert workspace_with_revision.put(BASE, json={"code": CUSTOM_V1}).status_code == 403
-    assert workspace_with_revision.post(f"{BASE}/publish").status_code == 403
+    assert workspace_with_revision.post(f"{BASE}/publish", json=ANY_HASH).status_code == 403
     assert workspace_with_revision.get(f"{BASE}/versions").status_code == 403
     assert workspace_with_revision.post(f"{BASE}/rollback", json={"version": 1}).status_code == 403
     assert workspace_with_revision.delete(BASE).status_code == 403
@@ -193,9 +211,9 @@ def test_get_exposes_draft_code_hash_for_cas_publish(workspace_with_revision) ->
 
 def test_get_version_returns_code_for_any_status(workspace_with_revision) -> None:
     workspace_with_revision.put(BASE, json={"code": CUSTOM_V1})
-    workspace_with_revision.post(f"{BASE}/publish")
+    _publish(workspace_with_revision)
     workspace_with_revision.put(BASE, json={"code": CUSTOM_V2})
-    workspace_with_revision.post(f"{BASE}/publish")
+    _publish(workspace_with_revision)
 
     # Archived user version remains readable (v1 is the factory seed).
     v2 = workspace_with_revision.get(f"{BASE}/versions/2")
@@ -227,7 +245,7 @@ def test_non_admin_member_gets_403(workspace_with_revision, client, job_db) -> N
     assert viewer.get(BASE).status_code == 403
     assert viewer.get(f"{BASE}/versions").status_code == 403
     assert viewer.put(BASE, json={"code": CUSTOM_V1}).status_code == 403
-    assert viewer.post(f"{BASE}/publish").status_code == 403
+    assert viewer.post(f"{BASE}/publish", json=ANY_HASH).status_code == 403
     assert viewer.post(f"{BASE}/rollback", json={"version": 1}).status_code == 403
     assert viewer.delete(BASE).status_code == 403
 
@@ -280,7 +298,7 @@ def test_segment_free_path_serves_the_same_resource(client, job_db, settings) ->
 
     draft = client.put(f"/api/workspaces/{WF}/nodes/{NODE}/code", json={"code": CUSTOM_V1})
     assert draft.status_code == 200, draft.text
-    published = client.post(f"/api/workspaces/{WF}/nodes/{NODE}/code/publish")
+    published = _publish(client, f"/api/workspaces/{WF}/nodes/{NODE}/code")
     assert published.status_code == 200, published.text
     effective = client.get(f"/api/workspaces/{WF}/nodes/{NODE}/code").json()
     assert effective["origin"] == "custom"
@@ -299,7 +317,7 @@ def test_segment_free_path_rejects_mismatched_workflow_key_query(
     assert workspace_with_revision.get(mismatched).status_code == 400
     assert workspace_with_revision.put(mismatched, json={"code": CUSTOM_V1}).status_code == 400
     publish = f"/api/workspaces/{WF}/nodes/{NODE}/code/publish?workflow_key=other_flow"
-    assert workspace_with_revision.post(publish).status_code == 400
+    assert workspace_with_revision.post(publish, json=ANY_HASH).status_code == 400
 
 
 def test_get_advertises_default_byte_budget(workspace_with_revision) -> None:
