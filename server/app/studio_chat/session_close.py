@@ -51,3 +51,23 @@ def close_session(
         if committed and runtime is not None:
             service.teardown_runtime(session_id, runtime, expected=runtime)
     return service.get_session(session_id, include_deleted=include_deleted)
+
+
+# Bound on close retries after a visibility stamp (delete #872 / archive #924).
+_SETTLE_ATTEMPTS = 3
+
+
+def close_until_settled(
+    service: StudioChatService, session_id: str, workspace_id: str, *, include_deleted: bool
+) -> None:
+    """Close after a stamp that the resume claim refuses (deleted_at /
+    archived_at): a resume that claimed before the stamp can still be
+    mid-spawn, and close's generation pin bails when a runtime registered
+    after its snapshot, so retry (bounded) until the row is closed with no
+    runtime registered. A spawn whose row was closed or stamped under it
+    tears itself down at the registration fence / readiness check (spawn.py),
+    so the bound only has to cover the registration window."""
+    for _ in range(_SETTLE_ATTEMPTS):
+        session = close_session(service, session_id, workspace_id, include_deleted=include_deleted)
+        if session["status"] == "closed" and service.runtime(session_id) is None:
+            return
