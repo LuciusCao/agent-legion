@@ -184,8 +184,10 @@ async fn bash_drain_is_bounded_when_a_process_leaves_the_group() {
     // command's group — is not signalled.
     let dir = tempfile::tempdir().unwrap();
     let pf = dir.path().join("escaped");
+    // Wait for the escape to complete before exiting, else the final group
+    // KILL can legitimately catch it while it is still in the group.
     let command = format!(
-        "setsid sh -c 'echo $$ > {}; exec sleep 20' & echo done",
+        "setsid sh -c 'echo $$ > {0}; exec sleep 20' & until [ -s {0} ]; do sleep 0.05; done; echo done",
         pf.display()
     );
     let started = Instant::now();
