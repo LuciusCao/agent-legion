@@ -47,8 +47,11 @@ vi.mock('../api', () => ({
   listAgentWorkers: () => mockListAgentWorkers(),
 }))
 
+// 部署元数据：code_requires_worker（#875，纯远程实例 code 节点也要 Worker）。
+const mockConsoleConfig = vi.fn()
 vi.mock('../hooks/useWorkerConsoleUrl', () => ({
   useWorkerConsoleUrl: () => '',
+  useWorkerConsoleConfig: (enabled?: boolean) => mockConsoleConfig(enabled),
 }))
 
 const mockGetWorkspaceExecutionConfiguration = vi.fn()
@@ -137,6 +140,10 @@ describe('WorkspaceMainPage onboarding guide', () => {
     mockFetchWorkflowDefinition.mockReset()
     mockListAgentWorkers.mockReset()
     mockListAgentWorkers.mockResolvedValue([])
+    mockConsoleConfig.mockReset()
+    mockConsoleConfig.mockReturnValue({
+      data: { console_url: '', code_requires_worker: false },
+    })
     mockGetWorkspaceExecutionConfiguration.mockReset()
     mockGetWorkspaceExecutionConfiguration.mockResolvedValue({
       node_limits: [],
@@ -378,5 +385,115 @@ describe('WorkspaceMainPage onboarding guide', () => {
         String(path).startsWith('/api/worker/status')
       )
     ).toBe(false)
+  })
+  describe('code-only workflow Worker dependency (#875)', () => {
+    const codeOnlyWorkflow = {
+      ...workflowDefinition,
+      nodes: [workflowDefinition.nodes[0]],
+    }
+
+    beforeEach(() => {
+      mockFetchWorkflowDefinition.mockResolvedValue({
+        workflow: codeOnlyWorkflow,
+      })
+    })
+
+    it('keeps both Worker steps on a pure-remote instance', async () => {
+      mockConsoleConfig.mockReturnValue({
+        data: { console_url: '', code_requires_worker: true },
+      })
+      renderPage()
+      await loadJobsViaSSE()
+
+      expect(await screen.findByText('接入 Worker')).toBeInTheDocument()
+      expect(screen.getByText('打开执行开关')).toBeInTheDocument()
+      expect(mockConsoleConfig).toHaveBeenCalledWith(true)
+      await waitFor(() => expect(mockListAgentWorkers).toHaveBeenCalled())
+    })
+
+    it('does not complete the Worker steps with only an agent-only Worker online', async () => {
+      mockConsoleConfig.mockReturnValue({
+        data: { console_url: '', code_requires_worker: true },
+      })
+      mockListAgentWorkers.mockResolvedValue([
+        {
+          online: true,
+          revoked: false,
+          claim_enabled: true,
+          max_code_concurrency: 0,
+          labels: {},
+        },
+      ])
+      renderPage()
+      await loadJobsViaSSE()
+
+      expect(await screen.findByText('接入 Worker')).toBeInTheDocument()
+      await waitFor(() => expect(mockListAgentWorkers).toHaveBeenCalled())
+      expect(
+        await screen.findByRole('button', { name: '去接入 Worker' })
+      ).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '添加条目' })).toBeDisabled()
+    })
+
+    it('drops the Worker connection step on a default instance', async () => {
+      renderPage()
+      await loadJobsViaSSE()
+
+      expect(await screen.findByText('打开执行开关')).toBeInTheDocument()
+      expect(screen.queryByText('接入 Worker')).not.toBeInTheDocument()
+      expect(mockListAgentWorkers).not.toHaveBeenCalled()
+    })
+
+    it('diagnoses a missing code Worker for waiting jobs on a pure-remote instance', async () => {
+      mockConsoleConfig.mockReturnValue({
+        data: { console_url: '', code_requires_worker: true },
+      })
+      // 只有 agent-only Worker 在线且在领取：code 节点仍领不到。
+      mockListAgentWorkers.mockResolvedValue([
+        {
+          online: true,
+          revoked: false,
+          claim_enabled: true,
+          max_code_concurrency: 0,
+          labels: {},
+        },
+      ])
+      const waitingStats = {
+        ...baseStats,
+        job_stats: { ...baseStats.job_stats, pending: 1 },
+      }
+      mockFetchWorkspaceStats.mockResolvedValue(waitingStats)
+      mockApi.mockImplementation((path: string) => {
+        if (path === '/api/workspaces/ws1/stats')
+          return Promise.resolve(waitingStats)
+        if (path === '/api/worker/status?workspace_id=ws1')
+          return Promise.resolve({ paused: false })
+        return Promise.resolve({})
+      })
+      mockFetchJobsSnapshot.mockImplementation(() =>
+        Promise.resolve({
+          workspace_id: 'ws1',
+          revision: 1,
+          stats: waitingStats.job_stats,
+          jobs: [
+            {
+              id: 'j1',
+              workspace_id: 'ws1',
+              source_id: 'Q1',
+              title: 'Job',
+              status: 'pending',
+            },
+          ],
+          total: 1,
+          next_cursor: null,
+        })
+      )
+
+      renderPage()
+      await loadJobsViaSSE()
+
+      const banner = await screen.findByTestId('worker-readiness-banner')
+      expect(banner).toHaveTextContent('没有可执行 code 节点的在线 Worker')
+    })
   })
 })

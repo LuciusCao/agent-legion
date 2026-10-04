@@ -213,7 +213,10 @@ def create_agent_workers_router(
         _user: Annotated[dict[str, Any], Depends(require_user)],
     ) -> AgentWorkerConsoleResponse:
         """Read deployment metadata without enumerating Worker registrations."""
-        return AgentWorkerConsoleResponse(console_url=config.console_url)
+        return AgentWorkerConsoleResponse(
+            console_url=config.console_url,
+            code_requires_worker=settings.executor_runtime.code_capacity <= 0,
+        )
 
     @router.get("/agent-workers", response_model=AgentWorkersResponse)
     def list_workers(

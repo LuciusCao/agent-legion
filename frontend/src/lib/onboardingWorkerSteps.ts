@@ -1,13 +1,15 @@
 import type { AgentWorkerSummary } from '../api/agentWorkers'
-import { readyWorkerConsoleUrl } from './workerConsoleUrl'
 import { hasClaimingWorker, hasOnlineWorker } from './workerPresence'
+import { needsAnyWorker, type WorkerNeeds } from './workerDependency'
+import { needsConsoleUrl, workersMeetingNeeds } from './workerNeedsFleet'
 
 export interface WorkerOnboardingInput {
   /** 本 workspace 视角的 Worker 列表（按 scoped token 注册过滤）。 */
   workers: AgentWorkerSummary[]
   /** workspace 调度是否暂停（顶栏「已暂停／运行中」）。 */
   paused: boolean | undefined
-  needsWorker?: boolean
+  /** 需要 Worker 承接的执行类型（lib/workerDependency）；缺省按需要 Agent Worker。 */
+  needs?: WorkerNeeds
   /** 部署级 Worker 控制台地址（空串 = 未配置）。 */
   consoleUrl: string
   goWorkerSettings: () => void
@@ -35,19 +37,24 @@ export interface OnboardingStep {
 export function buildWorkerOnboardingSteps(
   input: WorkerOnboardingInput
 ): OnboardingStep[] {
-  const needsWorker = input.needsWorker !== false
-  const online = !needsWorker || hasOnlineWorker(input.workers)
+  const needs = input.needs ?? { agent: true, code: false }
+  const needsWorker = needsAnyWorker(needs)
+  // 只有能承接所需执行类型的 Worker 才算就绪（#875：纯远程实例的 code
+  // 节点不认 agent-only Worker）。
+  const capable = workersMeetingNeeds(input.workers, needs)
+  const online = !needsWorker || hasOnlineWorker(capable)
   const ready =
     online &&
-    (!needsWorker || hasClaimingWorker(input.workers)) &&
+    (!needsWorker || hasClaimingWorker(capable)) &&
     input.paused === false
-  const consoleUrl = readyWorkerConsoleUrl(input.workers, input.consoleUrl)
+  const consoleUrl = needsConsoleUrl(input.workers, needs, input.consoleUrl)
   const steps = [
     {
       icon: 'smart_toy',
       title: '接入 Worker',
-      description:
-        '为本 workspace 签发 Key，到 Worker 控制台「配置 → Workspace 访问」添加；Worker 上线后这一步自动完成。',
+      description: needs.code
+        ? '为本 workspace 签发 Key，到 Worker 控制台「配置 → Workspace 访问」添加，并为 Worker 开启 code 并发（本实例的 code 节点只在 Worker 上执行）；可执行 code 的 Worker 上线后这一步自动完成。'
+        : '为本 workspace 签发 Key，到 Worker 控制台「配置 → Workspace 访问」添加；Worker 上线后这一步自动完成。',
       unlocked: true,
       completed: online,
       actionLabel: online ? '查看 Worker' : '去接入 Worker',

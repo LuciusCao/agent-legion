@@ -67,6 +67,7 @@ vi.mock('../api', () => ({
 
 vi.mock('../hooks/useWorkerConsoleUrl', () => ({
   useWorkerConsoleUrl: () => '',
+  useWorkerConsoleConfig: () => ({ data: undefined }),
 }))
 
 vi.mock('../api/jobApi', () => ({

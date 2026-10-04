@@ -102,7 +102,11 @@ describe('buildWorkerOnboardingSteps', () => {
   )
 
   it('does not require a Worker for a published pure code workflow', () => {
-    const steps = build({ needsWorker: false, workers: [], paused: false })
+    const steps = build({
+      needs: { agent: false, code: false },
+      workers: [],
+      paused: false,
+    })
     expect(steps).toHaveLength(1)
     expect(steps[0].completed).toBe(true)
   })
@@ -191,5 +195,25 @@ describe('buildWorkerOnboardingSteps', () => {
       '打开执行开关',
       'add',
     ])
+  })
+
+  it('does not count an agent-only Worker for code nodes on a pure-remote instance (#875)', () => {
+    const needs = { agent: false, code: true }
+    const [connect, switches] = build({
+      needs,
+      workers: [worker({ claim_enabled: true, max_code_concurrency: 0 })],
+      paused: false,
+    })
+    expect(connect.completed).toBe(false)
+    expect(connect.description).toContain('code 并发')
+    expect(switches.completed).toBe(false)
+
+    const [codeConnect, codeSwitches] = build({
+      needs,
+      workers: [worker({ claim_enabled: true, max_code_concurrency: 2 })],
+      paused: false,
+    })
+    expect(codeConnect.completed).toBe(true)
+    expect(codeSwitches.completed).toBe(true)
   })
 })
