@@ -69,6 +69,18 @@ invariants:
         target: tests/full/test_storage_path_corruption.py
         gate: full
 
+  - id: SECURITY-PATH-002
+    statement: "Server-side containment of untrusted path names goes through the shared primitives in server/app/fs_safety.py (#928): I/O on untrusted-writable trees walks directory descriptors from a trusted root with O_NOFOLLOW on every component below it (open_dir_beneath / open_dir_nofollow / open_regular_at / create_new_at); name-to-path containment uses resolve_within (resolve, then require the result under the resolved root). Switched modules are listed in the evidence test and may not reintroduce hand-rolled is_relative_to / relative_to-ValueError / commonpath / O_NOFOLLOW checks; worker/ and velites/ are separate process boundaries and are out of scope."
+    owner: security
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/app/test_fs_safety.py
+        gate: quick
+      - kind: integration
+        target: tests/mcp_server/test_local_files.py
+        gate: quick
+
   - id: DB-MUTATION-001
     statement: "Job deletion rollback is conflict-safe: it restores only when the destination is absent, uses atomic same-filesystem rename, and preserves the staged recovery path when a concurrent recreation exists."
     owner: jobs

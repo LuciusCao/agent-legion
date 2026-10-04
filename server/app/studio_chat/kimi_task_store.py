@@ -8,8 +8,9 @@ import re
 from collections.abc import Collection
 from pathlib import Path
 
+from server.app.fs_safety import DIRECTORY_FLAGS
+from server.app.fs_safety import open_dir_nofollow as directory
 from server.app.studio_chat.kimi_task_snapshot import BackgroundTask, read_task
-from server.app.studio_chat.task_metadata_files import DIRECTORY_FLAGS, directory
 
 _ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}\Z")
 
