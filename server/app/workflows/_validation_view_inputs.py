@@ -18,8 +18,12 @@ tests/db/test_completion_view_inputs.py:
   drains to zero as old jobs exhaust — every new manifest carries frozen
   refs; the blob-missing arm is the fail-open GC-race degradation, rare by
   construction ((job,node) refs shield the blob for the job's lifetime);
-- the refs map keys on the RAW declared name (``stage_agent_inputs`` records
-  the declared spelling), while the view placement uses the normalized
+- the refs map keys: post-#876-P2-a manifests record the NORMALIZED name
+  (``stage_agent_inputs`` dedupes aliases at the freeze point); pre-dedup
+  legacy manifests record the raw declared spelling. Lookup tries the raw
+  alias first (legacy hit, and the exact alias the legacy Worker consumed),
+  then the normalized name (new manifests), then the job dir — see
+  ``resolve_input_source``; the view placement uses the normalized
   ``safe_relative`` name.
 """
 
@@ -35,8 +39,9 @@ from typing import Any
 class InputAuthority:
     """The dispatch-frozen input-bytes channel.
 
-    ``refs`` is the manifest's ``input_artifacts`` map (raw declared name →
-    ref); ``artifact_root`` is the CAS root. Either may be absent (legacy
+    ``refs`` is the manifest's ``input_artifacts`` map (normalized name → ref
+    for post-#876-P2-a manifests, raw declared spelling for pre-dedup legacy
+    ones); ``artifact_root`` is the CAS root. Either may be absent (legacy
     manifest, no store on the caller) — resolution then falls back to the
     job dir.
     """
@@ -57,6 +62,11 @@ def resolve_input_source(
     """
     if authority is not None and authority.artifact_root is not None:
         digest = _cas_digest(authority.refs.get(raw))
+        if digest is None:
+            # 冻结点去重后的新 manifest 以归一化名为 ref 键（#876 P2-a）
+            # ——声明别名（如 ./in.json）的 raw 查不到时按归一化名再查；
+            # legacy manifest 的 raw 键第一查已命中。
+            digest = _cas_digest(authority.refs.get(rel))
         if digest is not None:
             # Local import: keeps the pool worker's import graph free of the
             # DB-touching store module until a CAS ref actually resolves.

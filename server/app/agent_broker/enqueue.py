@@ -65,6 +65,9 @@ def enqueue_request(broker: AgentExecutionBroker, request: AgentExecutionRequest
                     request.agent_id,
                     request.agent_definition_hash,
                     stored_limit,
+                    # INV-9（#876 P2-a）：本路径序语义已在冻结点归一化
+                    # （stage_agent_inputs 按归一化名去重），sort_keys 只
+                    # 做 canonical 形态，不再承载语义。
                     json.dumps(dict(request.manifest), ensure_ascii=False, sort_keys=True),
                     request.pinned_agent_version,
                     request.execution_generation,

@@ -688,30 +688,49 @@ def test_duplicate_declarations_place_once(tmp_path: Path) -> None:
     assert _seen(seen_file) == ["cleaned_question.json", "review_a.json"]
 
 
-def test_duplicate_input_aliases_resolve_last_wins(tmp_path: Path) -> None:
-    """#876 codex P2: two aliases of one normalized name freeze DIFFERENT
-    digests when the file is overwritten between ``stage_agent_inputs``' two
-    reads. The Worker downloads aliases in declaration order onto the same
-    path and actually consumes the LAST one — the view must resolve to the
-    same identity (last wins), or validation would check bytes the Worker
-    never ran with."""
+def test_duplicate_input_aliases_follow_serialized_key_order(tmp_path: Path) -> None:
+    """#876 P2-a legacy 消耗规则：冻结点去重前的存量 manifest 里，同一归
+    一化名的两个别名冻结了不同 digest——Worker 按排序后键序（enqueue
+    sort_keys）下载、同路径后者覆盖前者，实际消费「排序后原始拼写最后
+    者」（max 原拼写）。校验必须取同一身份；声明列表顺序无关（此处故
+    意反序声明）。"""
     rules = (
-        "if (job / 'cleaned_question.json').read_text() != 'last-alias-bytes':\n"
-        "    sys.stderr.write('validated the first alias, not the consumed one\\n')\n"
+        "if (job / 'cleaned_question.json').read_text() != 'consumed-bytes':\n"
+        "    sys.stderr.write('validated the shadowed alias, not the consumed one\\n')\n"
         "    sys.exit(1)\n"
     )
     manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
     job_dir, run_view = _layout(tmp_path)
     cas_root = tmp_path / "cas"
-    first_digest = _cas_blob(cas_root, b"first-alias-bytes")
-    last_digest = _cas_blob(cas_root, b"last-alias-bytes")
+    shadowed_digest = _cas_blob(cas_root, b"shadowed-bytes")
+    consumed_digest = _cas_blob(cas_root, b"consumed-bytes")
+    (job_dir / "cleaned_question.json").write_text("overwritten-later")
+
+    # "./cleaned_question.json" < "cleaned_question.json"（'.' < 'c'）——
+    # 排序后最后者是 "cleaned_question.json"，Worker 消费它的 digest。
+    manifest = _manifest(["./cleaned_question.json", "cleaned_question.json"], [])
+    manifest["input_artifacts"] = {
+        "./cleaned_question.json": f"sha256:{shadowed_digest}",
+        "cleaned_question.json": f"sha256:{consumed_digest}",
+    }
+    assert (
+        validate_worker_outputs(manager, manifest, job_dir, run_view, _cas_store(cas_root)) is None
+    )
+
+
+def test_duplicate_aliases_on_deduped_manifest_hit_the_normalized_key(tmp_path: Path) -> None:
+    """#876 P2-a 新形态：冻结点去重后的 manifest 只有归一化单键——声明
+    列表仍含别名（展示/审计语义），两个别名的 raw 查找都落空、按归一
+    化名命中同一冻结 digest，序无关。"""
+    rules = "if (job / 'cleaned_question.json').read_text() != 'frozen':\n    sys.exit(1)\n"
+    manager = _manager(tmp_path, _validator(tmp_path / "seen.txt", rules))
+    job_dir, run_view = _layout(tmp_path)
+    cas_root = tmp_path / "cas"
+    digest = _cas_blob(cas_root, b"frozen")
     (job_dir / "cleaned_question.json").write_text("overwritten-later")
 
     manifest = _manifest(["cleaned_question.json", "./cleaned_question.json"], [])
-    manifest["input_artifacts"] = {
-        "cleaned_question.json": f"sha256:{first_digest}",
-        "./cleaned_question.json": f"sha256:{last_digest}",
-    }
+    manifest["input_artifacts"] = {"cleaned_question.json": f"sha256:{digest}"}
     assert (
         validate_worker_outputs(manager, manifest, job_dir, run_view, _cas_store(cas_root)) is None
     )

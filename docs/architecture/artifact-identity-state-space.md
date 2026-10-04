@@ -19,7 +19,7 @@ RELATED: [execution-generation.md](execution-generation.md) §2.11
 |---|---|---|
 | S1 dispatch 冻结 | `stage_agent_inputs` 把 Worker 将消费的 input 字节 put 进 CAS、按 (job,node) 持 ref 防 GC、`sha256:<digest>` 冻结进 DB manifest | `agent_broker/agent_artifacts.py` |
 | S2 claim 变换 | claim 时把 CAS ref 做等价 transport 变换为 presigned GET（digest 比对守卫，memory-only 不落库） | `agent_broker/remote_artifact_support.py` |
-| S3 Worker 物化 | 按 ref 形态下载（presigned/CAS 双 transport），digest 自验，失配/失败回落 CAS；重复规范化名按声明顺序物化、last wins | `worker/artifact/inputs.py` |
+| S3 Worker 物化 | 按 ref 形态下载（presigned/CAS 双 transport），digest 自验，失配/失败回落 CAS；重复规范化名在冻结点已去重（单一归一化键），legacy manifest 按排序后键序物化、排序最后者 wins | `worker/artifact/inputs.py` |
 | S4 执行 | Worker 跑节点（ velites / code ），写 outputs | worker 执行域 |
 | S5 completion | 解包归档、remote refs 验证/提升下载、产物 ref 登记（撞名守卫）、Host 侧声明视图校验 | `agent_control/completion_staged.py`、`workflows/validation_view.py` |
 | S6 promotion | reconcile → 代次闸 → 提升 → manifest commit → 镜像 | `executors/_lease_finish_promotion.py`、`executors/artifact_mirror.py` |
@@ -47,7 +47,8 @@ RELATED: [execution-generation.md](execution-generation.md) §2.11
 | INV-4 | 提升字节 == 校验通过字节：outputs 全写模式族 reconcile 回 run view，finish 闸只提升验后字节 | 提升未清洗字节（review 族 clean-in-place 失效） |
 | INV-5 | ref 生命周期覆盖「上传→校验→提升」全程：校验前登记（GC 防护）+ 撞名守卫（冻结 input 优先） | 零引用窗口 blob 被 GC 后 add_ref 撞 FK 即 500；撞名 upsert 把冻结 input 顶成孤儿 |
 | INV-6 | 未修改判定不可伪造：hash 级（内容 sha256），永不用 mtime/size | utime 回拨 + 同尺寸改写的伪造绕过 reconcile，旧字节被提升 |
-| INV-7 | 重复规范化名 last-wins：消费身份由 Worker 物化顺序定义，校验视图同向去重 | 校验第一个别名、Worker 消费最后一个别名，身份错位 |
+| INV-7 | 重复规范化名：冻结点（dispatch）去重为单一归一化键，序语义不进 dict；legacy manifest 的别名消耗按排序后原始拼写最后者（Worker 线序），校验视图同向 | 别名各冻结不同 digest 时校验与消费错位；参照系选错（声明序 vs 键序，#876 codex P2-a）同样错位 |
+| INV-9 | 序语义只由数组承载；dict 键序在任何序列化边界后视为未定义（EXEC-ORDER-SEMANTICS-001） | 序语义藏进 dict 键序，序列化边界（sort_keys/JSON 往返）静默换序，双端各读各的序 |
 | INV-8 | 失败语义分级：构造/placement 失败 fail-closed，缺源 fail-open，传输失败两段式归因 | 静默不完整视图被当成验过 / 残余竞态被当成业务失败 |
 
 ## 4. 矩阵本体
@@ -64,7 +65,7 @@ RELATED: [execution-generation.md](execution-generation.md) §2.11
 | INV-1 | E1 | ✅ | `tests/services/test_agent_artifact_inject.py::test_inject_keeps_cas_form_when_row_was_rewritten_after_dispatch`、`tests/services/test_agent_artifact_inject.py::test_inject_v4_worker_keeps_cas_form_for_rewritten_gz_row`、`tests/services/test_agent_artifact_inject.py::test_inject_dict_ref_with_rewritten_row_downgrades_to_cas` |
 | INV-1 | E2 | ✅ | `tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_dict_form_falls_back_to_cas_on_digest_mismatch`、`tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_presigned_http_failure_falls_back_to_cas`、`tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_truncated_gzip_falls_back_to_cas` |
 | INV-1 | E3 | ✅ | `tests/db/test_completion_view_inputs.py::test_legacy_channel_output_ref_registered_before_validation`、`tests/db/test_completion_view_inputs.py::test_colliding_undeclared_report_skips_the_frozen_input_slot` |
-| INV-1 | E5 | ✅ | `tests/workflows/test_output_validation_view.py::test_duplicate_input_aliases_resolve_last_wins` |
+| INV-1 | E5 | ✅ | `tests/workflows/test_output_validation_view.py::test_duplicate_input_aliases_follow_serialized_key_order` |
 | INV-1 | E6 | 🧱 | reclaim 三点闭环：staging 源的唯一安全删除点是 finish 提交之后（`discard_staging_refs`，codex #774 复审钉死）；requeue 后重 claim 用新鲜 manifest 重新判定身份；CAS blob 由 (job,node) ref 防 GC（job 存活期间不可回收）。三点各自封闭，无残余竞态面 |
 | INV-1 | C7 | ✅ | `tests/db/test_completion_view_inputs.py::test_colliding_undeclared_report_skips_the_frozen_input_slot`（撞名上报）、`tests/db/test_completion_truncated_manifest.py::test_completion_truncated_manifest_judged_from_archive_view`（截断 manifest） |
 | INV-1 | C8 | ✅ | `tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_fallback_failure_carries_both_segments`（两段皆败归因）、`tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_fallback_cas_bytes_are_digest_verified`（CAS 假字节自验）、`tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_corrupt_gzip_header_falls_back_to_cas`（gzip 头坏）、`tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_truncated_gzip_falls_back_to_cas`（截断）、`tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_corrupt_deflate_body_falls_back_to_cas`（deflate 体坏——zlib.error 经归一化进回落族）、`tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_mid_stream_protocol_error_falls_back_to_cas`（urllib3 读时 ProtocolError 中段断连：归一化→重试→耗尽→回落）、`tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_read_timeout_falls_back_to_cas`（ReadTimeoutError 同族）、`tests/workers/test_artifact_input_downloads.py::test_download_read_errors_normalize_to_runtime_error`（传输族归一化单点） |
@@ -85,9 +86,11 @@ RELATED: [execution-generation.md](execution-generation.md) §2.11
 | INV-5 | C6 | ✅ | `tests/db/test_completion_view_inputs.py::test_rmw_colliding_name_registers_normally`；论证：RMW 名（同名 declared input+output）在视图中取产物字节（output_rels 排除 input 臂），校验从不为该名读冻结 input blob——槽位在校验前被覆盖无孤儿窗口，撞槽无校验面 |
 | INV-6 | C6 | ✅ | `tests/workflows/test_output_validation_view_files.py::test_same_size_rewrite_with_restored_mtime_still_syncs_back`（同尺寸改写 + utime 回拨的伪造被内容 hash 看穿） |
 | INV-6 | C4 | ✅ | `tests/workflows/test_output_validation_view_files.py::test_unmodified_copied_outputs_skip_sync_back`（真未修改仍跳过，F5 优化保留） |
-| INV-7 | E5 | ✅ | `tests/workflows/test_output_validation_view.py::test_duplicate_input_aliases_resolve_last_wins`（两别名冻结不同 digest 时视图取最后一个 = Worker 实际消费） |
+| INV-7 | E5 | ✅ | `tests/workflows/test_output_validation_view.py::test_duplicate_input_aliases_follow_serialized_key_order`（legacy 双别名双 digest 时取排序后原始拼写最后者 = Worker 实际消费；声明列表序无关） |
 | INV-7 | C3 | ✅ | `tests/workflows/test_output_validation_view.py::test_duplicate_declarations_place_once`（归一化去重、快照不误判，#868） |
-| INV-7 | C1 | 🧱 | dispatch 侧（`stage_agent_inputs`）刻意不去重：consumer 侧 last-wins 规则是唯一事实源，dispatch 去重会引入第二个决策点（EXEC-INPUT-IDENTITY-001 statement 钉死）；Worker 顺序物化天然实现 last-wins，重复下载是病态配置的固有代价 |
+| INV-7 | C1 | ✅ | `tests/services/test_agent_artifacts.py::test_stage_agent_inputs_dedupes_normalized_aliases`（冻结点去重：单读/单 put/归一化单键）、`tests/workflows/test_output_validation_view.py::test_duplicate_aliases_on_deduped_manifest_hit_the_normalized_key`（新形态按归一化名命中，序无关）；论证：冻结点单键后 dict 键序无任何可分叉对象——序语义不进 dict 是结构性保证，Worker 侧零改动 |
+| INV-9 | C5 | ✅ | `tests/services/test_agent_artifacts.py::test_stage_agent_inputs_dedupes_normalized_aliases`、`tests/workflows/test_output_validation_view.py::test_duplicate_input_aliases_follow_serialized_key_order`（本原型：input_artifacts 序语义——sort_keys 落库换序曾是真实错位源，#876 codex P2-a） |
+| INV-9 | C5 | 🧱 | 族扫（附录 A：「dict 键序承载语义 + sort_keys/JSON 往返 + 消费方迭代序解读」模式全仓枚举 30 个生产调用点）：唯一成员即本原型；约 1/3 是 sort_keys 的 canonical/哈希归一化正确用途（不承载序语义），其余为键访问/纯展示；`workflow_revision_runtime` 的 nodes 排序影响就绪枚举序/echo 序但单视图无错位——记边界格 |
 | INV-8 | C8 | ✅ | `tests/workflows/test_output_validation_view.py::test_view_construction_failure_fails_closed`、`tests/workflows/test_output_validation_view.py::test_placement_failure_fails_closed`、`tests/workflows/test_output_validation_view.py::test_skill_missing_legacy_script_fails_closed`（构造/placement/契约缺失 fail-closed） |
 | INV-8 | C3 | ✅ | `tests/workflows/test_output_validation_view.py::test_missing_declared_entries_are_absent_not_errors`（缺源 fail-open） |
 | INV-8 | C8 | ✅ | `tests/workers/test_artifact_input_downloads.py::test_download_input_artifacts_presigned_failure_and_cas_missing_message`（两段式归因）、`tests/workers/test_artifact_input_downloads.py::test_gzip_decode_surface_normalizes_to_runtime_error`（异常分类学归一化单点：gzip 三层错误面 → RuntimeError，下载层永不泄漏 zlib.error） |
@@ -108,10 +111,6 @@ RELATED: [execution-generation.md](execution-generation.md) §2.11
    制：✅ 格点名的测试必须真实存在（文件 + `::符号` AST 解析），🧱
    格论证必须非空，⬜ 与任何第四态拒绝，轴 token 必须落在图例内。
    网格即活文档——测试改名/删除会立刻红。
-5. **枚举纪律**：凡格子涉及底层库异常面，钉之前必须先列该库的完整
-   错误清单——gzip 样例：三层错误面（`BadGzipFile` 头/容器，OSError
-   族；`EOFError` 截断；`zlib.error` deflate 体损坏，直接继承
-   Exception）各自落在哪个 catch 集合里逐一确认，归一化单点收在下载
    层（`worker/artifact/gzip.py::copy_stream`），调用方分类学归零。
    漏一层就是 #876 codex P2 第五轮（zlib.error 绕过回落）的重演。
    承载库样例：urllib3 读时错误面（2.7.0 源码实证，
@@ -121,6 +120,11 @@ RELATED: [execution-generation.md](execution-generation.md) §2.11
    全部派生自公共基类 `urllib3.exceptions.HTTPError`，捕基类对版本
    升级稳健（新增错误类型都派生自它），归一化单点在
    `worker/artifact/download.py::download_object_artifact`。
+6. **INV-9 评审清单条目**：新增「持久化 dict + 迭代消费」路径时必须
+   过 INV-9 检查——序语义只由数组承载，dict 键序在任何序列化边界
+   （`sort_keys` / JSON 往返 / DB 存取）后视为未定义；要序就换成数
+   组，或在冻结点把序语义消掉（本原型的归一化去重）。族扫发现 #510
+   历史同款——直觉坑反复出现，评审时必须主动想这一格。
 
 ## 6. 战绩：历史发现 → 格子归宿
 
@@ -144,3 +148,26 @@ RELATED: [execution-generation.md](execution-generation.md) §2.11
 | mtime+size 未修改判定可伪造 | #876 codex P2-2 第四轮 | INV-6 × C6 | 内容 sha256 判定 |
 | gzip deflate 体损坏（zlib.error）绕过回落 | #876 codex P2 第五轮 | INV-1 × C8 | 下载层归一化（`copy_stream` 单点，三层错误面 → RuntimeError）+ 枚举纪律入规程 |
 | urllib3 读时错误族（ProtocolError/ReadTimeoutError/SSLError）零重试零回落 | #876 delta 审查 C2-1 | INV-1 × C8 | 传输族归一化（`download_object_artifact` 捕公共基类 HTTPError → RuntimeError → retriable → 回落）+ 读时错误注入 seam |
+| keep-last 参照系错位（声明序 vs 落库键序） | #876 codex P2-a | INV-7 × C5 / INV-9 × C5 | 冻结点归一化去重（序语义不进 dict）+ legacy 排序键序消耗规则兜底；族扫全仓 30 调用点仅 1 成员（附录 A）——证据强度：全仓唯一 |
+
+## 附录 A：INV-9 族扫排除清单（🧱 格的逐点论证）
+
+族定义：「dict 键序承载语义 + `sort_keys` / JSON 往返 / DB 存取 + 消费
+方按迭代序解读」。模式全仓枚举 30 个生产调用点（`sort_keys=True` 19
+处 + dict 迭代序消费模式 11 处），唯一成员即本原型
+（`input_artifacts` 序语义，#876 P2-a）。逐点排除：
+
+| 调用点 | 排除理由 |
+|---|---|
+| `agent_control/registry.py` ×2 | normalized_models/labels 的 canonical 序列化做存储比对——sort_keys 正是「不承载序语义」的正确用途 |
+| `agent_broker/empty_diagnostics.py` | skip_reasons 计数展示，无消费方解读序 |
+| `agent_broker/code_manifest.py` | batch payload 哈希归一化（canonical），哈希对序不敏感正是目的 |
+| `agent_broker/worker_events.py` / `worker/events.py` | 事件行 canonical 形态（日志展示），键序无语义 |
+| `workflows/revision_format.py` | revision 哈希 canonical——同 code_manifest |
+| `agent_catalog/definition.py` | 定义哈希 canonical |
+| `db/migrations/*` ×5（cms_config / agent_catalog_cutover / executor_asr_config_schema / workflow_node_explicit_types / executor_retirement / external_connections / workspace_execution_defaults） | 迁移期 canonical 比对，一次性 |
+| `jobs/queries/run_healing.py` / `batch.py` ×2 / `job_bulk.py` / `workspace.py` | digest/pins 的 canonical 存储，键访问不迭代 |
+| `services/job_workflow_upgrade_diff.py` / `job_workflow_upgrade_config.py` / `workflow_revision_runtime.py` / `runtime_reserved_config.py` / `run_payload.py` / `workflow_draft_compare_conditions.py` | canonical/哈希归一化或快照展示，无迭代序消费 |
+| `worker/executor_log.py` | 事件行键序仅影响日志字段先后（展示），注释已自述 |
+| `workflow_revision_runtime` nodes 排序（边界格） | 排序影响就绪枚举序/echo 序，但单视图内无第二读者对同一集合按序解读——无错位面 |
+| 其余 dict 迭代序消费点（11 处键访问/纯展示） | 消费方只按键访问或纯展示拼字符串，不把迭代序当语义 |

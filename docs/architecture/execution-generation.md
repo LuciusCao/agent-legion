@@ -425,7 +425,7 @@ worker 端 `sha256_file` 下载后校验；claim 升级前行 `content_hash` 与
 |---|---|---|---|
 | dispatch `stage_agent_inputs` | 解析 | 合法（唯一解析点） | 身份在此冻结，(job,node) ref 防 GC |
 | claim presigned 升级（`remote_artifact_support.upgrade_input_artifacts`） | transport 变换 | 合法（带 digest 比对守卫） | 行 hash == 冻结 digest 才升级；不一致/无行保留 CAS 形态；守卫覆盖 str 与 dict 两 ref 形态（dict 的 sha256 即冻结身份，失配降级拼回 `sha256:<digest>` 串）；签发比对只是快路径过滤，结构性保证在消费点 |
-| Worker 下载（`worker/artifact/inputs`，presigned/CAS 双 transport） | transport 消费 | 合法（digest 自验闭环） | 两形态下载后按冻结 digest 自验；presigned 任何失败（digest 失配/HTTP 重试耗尽/解码失败）都回落 CAS，两段式报错归因；重复规范化名按声明顺序物化、last wins（消费身份唯一定义点） |
+| Worker 下载（`worker/artifact/inputs`，presigned/CAS 双 transport） | transport 消费 | 合法（digest 自验闭环） | 两形态下载后按冻结 digest 自验；presigned 任何失败（digest 失配/HTTP 重试耗尽/解码失败）都回落 CAS，两段式报错归因；重复规范化名在冻结点已去重（单一归一化键），legacy manifest 按排序后键序物化、排序最后者 wins（legacy 消耗规则） |
 | completion 产物 ref 登记（`completion_staged` 的 `add_ref` 循环） | 写槽位 | 合法（校验前登记 + 撞名守卫） | 校验前登记是 legacy 通道 blob 的 GC 防护（零引用窗口跨过 grace + GC tick 即 500 不可恢复）；归一化后「不在声明 outputs 且与声明 inputs 撞名」的上报条目跳过 add_ref——共享槽位撞名时冻结 input 优先，RMW 名（同名 input+output）照常登记 |
 | Host 校验 CAS-first（`_validation_view_inputs.resolve_input_source`） | transport 消费 | 合法 | 按冻结 ref 开 blob，ref 来自 DB manifest（claim 注入 memory-only 不落库） |
 | 校验 job_dir 回落（无 ref） | 重解析 | 仅 legacy 豁免：服务 #833 前无冻结 ref 的 manifest，随旧 job 耗尽归零 | 新 manifest 必有冻结 ref；暴露面与 #833 前校验直读 job_dir 一致 |
@@ -435,10 +435,11 @@ worker 端 `sha256_file` 下载后校验；claim 升级前行 `content_hash` 与
 
 新增任何读 input 字节的路径先过判定准则：digest 来自 dispatch 冻结
 ref ⇒ transport，来自当下可变状态且流向执行/校验 ⇒ 缺陷。重复规范
-化名（`a.json` 与 `./a.json`）的消费身份由 Worker 物化顺序唯一定义
-——顺序下载、同路径后者覆盖前者，last wins；校验视图的去重必须同
-向（keep-last），dispatch 侧刻意不去重（consumer 侧规则是唯一事实
-源）。digest 比
+化名（`a.json` 与 `./a.json`）在冻结点去重（`stage_agent_inputs` 按
+归一化名单读单 put 单键，#876 P2-a）——序语义不进 dict（INV-9：
+dict 键序在任何序列化边界后视为未定义）；冻结点去重前的存量
+manifest 按 legacy 消耗规则兜底：Worker 按排序后键序物化、同路径后
+者覆盖前者，校验视图取「排序后原始拼写最后者」。digest 比
 对口径：行 `content_hash` 恒为未压缩内容 sha256（gzip 行同，#338），
 与 dispatch CAS digest 同基准，直接可比。
 

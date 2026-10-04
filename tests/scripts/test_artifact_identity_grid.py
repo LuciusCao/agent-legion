@@ -20,7 +20,7 @@ GRID_PATH = PROJECT_ROOT / "docs" / "architecture" / "artifact-identity-state-sp
 
 REQUIRED_COLUMNS = ["不变量", "轴", "状态", "证据 / 论证"]
 ALLOWED_STATES = {"✅", "🧱"}
-ALLOWED_INVARIANTS = {f"INV-{i}" for i in range(1, 9)}
+ALLOWED_INVARIANTS = {f"INV-{i}" for i in range(1, 10)}
 ALLOWED_AXES = {f"C{i}" for i in range(1, 9)} | {f"E{i}" for i in range(1, 7)}
 _AXIS_TOKEN_RE = re.compile(r"[CE]\d+")
 _TEST_REF_RE = re.compile(r"`(tests/[^`]+\.py(?:::[A-Za-z_][A-Za-z0-9_]*)?)`")
@@ -145,7 +145,7 @@ def test_checker_rejects_missing_test_symbols(tmp_path: Path) -> None:
 
 
 def test_checker_rejects_unknown_axes_and_invariants() -> None:
-    row = "| INV-9 | C9 | ✅ | `tests/workflows/test_output_validation_view.py` |"
+    row = "| INV-10 | C9 | ✅ | `tests/workflows/test_output_validation_view.py` |"
     errors = validate_grid(_grid(row), PROJECT_ROOT)
     assert any("unknown invariant" in error for error in errors)
     assert any("outside the legend" in error for error in errors)

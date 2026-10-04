@@ -138,26 +138,33 @@ def materialize_validation_view(
     placed from ``output_source`` and exempt from the input snapshot. Other
     inputs resolve their bytes through ``input_authority`` (dispatch-frozen
     CAS first, job-dir fallback — see ``resolve_input_source``). Duplicate
-    declarations are deduped on the normalized name (#868); inputs dedup
-    LAST-wins (#876 codex P2): the Worker downloads aliases in declaration
-    order onto the same normalized path and actually consumes the last one
-    (two aliases can freeze different digests when the file is overwritten
-    between ``stage_agent_inputs``' two reads), so the consumption identity
-    is defined by the Worker's materialization order and the view must
-    resolve to the same identity — a keep-first dedup would validate
-    different bytes than the Worker ran with. Outputs dedup direction is
+    declarations are deduped on the normalized name (#868); the alias pick
+    for inputs follows the LEGACY consumption rule (#876 P2-a): pre-dedup
+    manifests may carry several alias refs (distinct digests) for one
+    normalized name, and the Worker materializes them in SERIALIZED KEY
+    order (the enqueue sort_keys=True), the last one winning — the view
+    picks the alias whose raw spelling sorts last to validate the identity
+    the Worker actually consumed. New manifests are deduped at the freeze
+    point (single normalized ref key), so the rule never fires there.
+    Outputs dedup direction is
     identity-neutral: aliases normalize to ONE on-disk file, so every alias
     names the same bytes regardless of which is kept.
     """
     output_rels = {rel for name in outputs if (rel := safe_relative(name)) is not None}
-    # rel → 最后别名的原拼写（last wins = Worker 物化顺序定义消费身份）；
-    # refs 按原拼写取，恰好落到最后别名冻结的 digest。
+    # rel → 别名原拼写。重复规范化名的 alias 裁决是 legacy 消耗规则
+    # （INV-9，#876 P2-a）：冻结点去重（stage_agent_inputs）之前的存量
+    # manifest 里同一归一化名可能有多个别名 ref（不同 digest）——
+    # Worker 按排序后键序（enqueue 的 sort_keys=True）下载、同路径后者
+    # 覆盖前者，实际消费「排序后原始拼写最后者」（字符串序 max）；校验
+    # 必须取同一身份。新 manifest 的 refs 只有归一化单键，选哪个别名都
+    # 经 resolve_input_source 的归一化回落落到同一 digest。
     input_names: dict[str, str] = {}
     for name in inputs:
         rel = safe_relative(name)
         if rel is None or rel in output_rels:
             continue
-        input_names[rel] = name
+        if rel not in input_names or name > input_names[rel]:
+            input_names[rel] = name
     input_snaps: list[InputSnapshot] = []
     for rel, raw in input_names.items():
         source = resolve_input_source(raw, rel, input_authority, input_source)
