@@ -17,6 +17,7 @@ import pytest
 import requests
 
 from worker import executor as agent_worker
+from worker.host.errors import HostResponseError
 from worker.registration.retry import register_with_retry
 
 
@@ -374,5 +375,22 @@ def test_client_claim_batch_error_family_matches_single_claim() -> None:
     with pytest.raises(agent_worker.WorkerAuthError):
         client.claim_batch("w1", 70, 4, limit=8, agent_limit=5, code_limit=3)
     client.request = lambda *a, **k: (500, b"boom")  # type: ignore[method-assign]
-    with pytest.raises(RuntimeError, match="Agent claim failed: HTTP 500"):
+    # #960：非 200 收口为 HostResponseError（仍是 RuntimeError 子类，旧契约不破）。
+    with pytest.raises(HostResponseError, match="Agent claim failed: HTTP 500"):
+        client.claim_batch("w1", 70, 4, limit=8, agent_limit=5, code_limit=3)
+    assert issubclass(HostResponseError, RuntimeError)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [b"<html>502 Bad Gateway</html>", b"[]", b"null", b'{"claims": [1]}'],
+)
+def test_client_claim_batch_malformed_body_is_host_response_error(body: bytes) -> None:
+    """#960：200 但 body 不可解码/形状不对（中间代理的 HTML、非对象 JSON、
+    非对象 claim 项）是 Host 侧失常，收口为 HostResponseError 走 executor
+    退避——不得以 ValueError/AttributeError/TypeError 原样逃逸，否则会被
+    收窄后的 claim 循环当成编程错误致进程崩溃。"""
+    client = agent_worker.Client("http://unused")
+    client.request = lambda *a, **k: (200, body)  # type: ignore[method-assign]
+    with pytest.raises(HostResponseError, match="Agent claim failed"):
         client.claim_batch("w1", 70, 4, limit=8, agent_limit=5, code_limit=3)

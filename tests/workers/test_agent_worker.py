@@ -16,10 +16,10 @@ import stat
 import subprocess
 import threading
 import time
-import urllib.error
 from pathlib import Path
 
 import pytest
+import requests
 
 from tests.workers.helpers import FakeClient, _claim, _run_main, _write_main_config
 from worker import executor as agent_worker
@@ -156,7 +156,7 @@ def test_main_survives_transient_claim_errors(
         nonlocal claim_calls
         claim_calls += 1
         if claim_calls <= 3:
-            raise urllib.error.URLError("connection refused")
+            raise requests.ConnectionError("connection refused")
         return None
 
     fake.claim = flaky_claim  # type: ignore[attr-defined]
@@ -197,7 +197,7 @@ def test_main_error_pass_waits_via_backoff_not_pacing(
         if claim_calls == 1:
             return _claim("exec-1")
         if claim_calls == 2:
-            raise urllib.error.URLError("connection refused")
+            raise requests.ConnectionError("connection refused")
         return None
 
     class RecordingBackoff(agent_worker.ClaimBackoffSequence):

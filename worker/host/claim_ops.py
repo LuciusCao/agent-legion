@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from worker.host.errors import WorkerAuthError
+from worker.host.errors import HostResponseError, WorkerAuthError
 
 _CLAIM_PATH = "/api/agent-executions/claim"
 
@@ -60,10 +60,23 @@ class ClaimOperations:
             return []
         if status in (401, 409):
             raise WorkerAuthError(f"HTTP {status}: {body[:300]!r}")
+        # #960：Host 侧的一切不合契约应答（意外状态码、不可解码或形状不对
+        # 的 body）统一收口为 HostResponseError——executor claim 循环只对
+        # 它与传输族（requests.RequestException）退避，Worker 侧编程错误
+        # 不再被宽捕获伪装成「Host 不可用」。
         if status != 200:
-            raise RuntimeError(f"Agent claim failed: HTTP {status}: {body[:300]!r}")
-        document: dict[str, Any] = json.loads(body)
+            raise HostResponseError(f"Agent claim failed: HTTP {status}: {body[:300]!r}")
+        try:
+            document = json.loads(body)
+        except ValueError as exc:
+            raise HostResponseError(
+                f"Agent claim failed: undecodable body: {body[:300]!r}"
+            ) from exc
+        if not isinstance(document, dict):
+            raise HostResponseError(f"Agent claim failed: non-object body: {body[:300]!r}")
         claims = document.get("claims")
         if isinstance(claims, list):
+            if not all(isinstance(item, dict) for item in claims):
+                raise HostResponseError(f"Agent claim failed: non-object claim: {body[:300]!r}")
             return [dict(item) for item in claims]
         return [document]
