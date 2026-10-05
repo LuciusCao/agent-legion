@@ -1334,6 +1334,7 @@
     "server/app/routes/__init__.py": 137,
     "server/app/routes/agent_catalog_contracts.py": 24,
     "server/app/routes/agent_definition_contracts.py": 65,
+    "server/app/routes/agent_definition_deprecation.py": 25,
     "server/app/routes/agent_definitions.py": 163,
     "server/app/routes/agent_register_tokens.py": 66,
     "server/app/routes/agent_runtimes.py": 26,
