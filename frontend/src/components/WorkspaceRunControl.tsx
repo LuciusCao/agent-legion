@@ -13,7 +13,7 @@ export interface WorkspaceRunControlProps {
 
 export function WorkspaceRunControl({ workspaceId }: WorkspaceRunControlProps) {
   // #961：暂停位唯一来源是 RQ 缓存；拉取中/失败不得冒充「已暂停」。
-  // 失败态（含刷新失败）显示「状态未知」，点击重试拉取而不是盲目切换。
+  // 无缓存值的失败态显示「状态未知」，点击重试拉取而不是盲目切换。
   const status = useWorkerPausedStatus(workspaceId)
   const setWorkerPaused = useWorkerScheduling(workspaceId)
   const view = runControlView(status)

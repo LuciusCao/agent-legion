@@ -148,6 +148,21 @@ describe('WorkspaceRunControl', () => {
     expect(setWorkerPausedMock).not.toHaveBeenCalled()
   })
 
+  it('keeps the last known state when a background refresh fails', async () => {
+    mockWorkerPausedByWorkspace = { ws1: false }
+    renderControl()
+    const button = await screen.findByLabelText('暂停运行')
+    // 暂停成功写回缓存后会失效重拉：让这次后台刷新失败。
+    fetchWorkerStatusMock.mockRejectedValue(new Error('offline'))
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    await waitFor(() => expect(fetchWorkerStatusMock).toHaveBeenCalledTimes(2))
+    await act(async () => {})
+    expect(screen.getByText('已暂停')).toBeInTheDocument()
+    expect(screen.queryByText('状态未知')).not.toBeInTheDocument()
+  })
+
   it('shows 读取中 (not 已暂停) and disables the toggle before the first status arrives', async () => {
     fetchWorkerStatusMock.mockReturnValue(new Promise(() => {}))
     renderControl()

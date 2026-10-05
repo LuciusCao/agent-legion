@@ -1,4 +1,4 @@
-/** 顶栏运行按钮的三态视图（#961）：读取中 / 状态未知（拉取失败）/ 已知的
+/** 顶栏运行按钮的三态视图（#961）：读取中 / 状态未知（拉取失败且无缓存值）/ 已知的
  * 暂停或运行。拉取中与失败都不得冒充「已暂停」。 */
 export type RunControlView = {
   kind: 'loading' | 'unknown' | 'known'
@@ -12,7 +12,9 @@ export function runControlView(status: {
   data: boolean | undefined
   isError: boolean
 }): RunControlView {
-  if (status.isError) {
+  // 后台刷新失败但已有上次成功值时继续显示该值（窗口聚焦刷新偶发失败
+  // 不闪「状态未知」）；只有从未拿到值且失败才是「状态未知」。
+  if (status.isError && status.data === undefined) {
     const ariaLabel = '重新获取运行状态'
     return {
       kind: 'unknown',

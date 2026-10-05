@@ -426,7 +426,7 @@
     "frontend/src/features/workflowStudio/chat/useStudioChatQueue.ts": 49,
     "frontend/src/features/workflowStudio/chat/useStudioChatResume.ts": 21,
     "frontend/src/features/workflowStudio/chat/useStudioChatRunTiming.ts": 29,
-    "frontend/src/features/workflowStudio/chat/useStudioChatSessionActions.ts": 106,
+    "frontend/src/features/workflowStudio/chat/useStudioChatSessionActions.ts": 105,
     "frontend/src/features/workflowStudio/chat/useStudioChatSessionArchive.ts": 49,
     "frontend/src/features/workflowStudio/chat/useStudioChatSessionManage.ts": 40,
     "frontend/src/features/workflowStudio/chat/useStudioChatSessionMemory.ts": 35,

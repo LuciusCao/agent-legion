@@ -30,8 +30,8 @@ function ownsSession(
 }
 
 /** #962：send / cancel / setAllowAll 的会话归属守卫（runAction 的会话版）。
- * 发起前断言：调用方显式传入 expected 时须与当前选中会话一致（防旧渲染帧
- * 绑定的回调串到新会话）；任何 await 之后再与 activeSessionIdRef 复核——
+ * 发起前只断言调用方显式传入的 expected 与发起时的选中会话一致；真正的
+ * 防护在 await 之后：与 activeSessionIdRef 复核——
  * 切换会话后旧会话的迟到结果（消息、快照、错误）一律丢弃并留 warn 日志。
  * 返回 null 表示未发起、已丢弃或失败（失败原因已置 actionError）。 */
 async function runStudioChatSessionAction<T>(
@@ -47,7 +47,9 @@ async function runStudioChatSessionAction<T>(
     )
     return null
   }
-  if (!ownsSession(ctx, sessionId, op)) return null
+  // 发请求前不比对 activeSessionIdRef：它由 passive effect 同步，会话切换
+  // commit 与 effect flush 之间有毫秒级窗口，此时预检会静默丢弃合法点击。
+  // 归属复核只放在 await 之后。
   ctx.setActionError(null)
   try {
     const value = await action(workspaceId, sessionId)
