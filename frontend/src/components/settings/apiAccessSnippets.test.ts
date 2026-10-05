@@ -59,27 +59,23 @@ describe('buildPythonExample duplicate submission (#907)', () => {
   it('reconciles the existing job by the item client_token', () => {
     expect(python).toContain('"client_token": CLIENT_TOKEN')
     expect(python).toContain('/jobs/snapshot"')
-    expect(python).toContain('job["source_id"].endswith(f"~{CLIENT_TOKEN}")')
+    expect(python).toContain('job["client_token"] == CLIENT_TOKEN')
     expect(python).toContain('cursor = page["next_cursor"]')
   })
 
-  it('backs off on 429 during reconciliation before reading the page', () => {
+  it('raises instead of picking the first match when a token is reused (#910)', () => {
     const loop = python.slice(
       python.indexOf('while not job_ids:'),
-      python.indexOf('cursor = page["next_cursor"]')
+      python.indexOf('job_ids = job_ids or matches')
     )
-    const steps = [
-      '/jobs/snapshot',
-      'if r.status_code == 429:',
-      'time.sleep(int(r.headers.get("Retry-After"',
-      'continue',
-      'r.raise_for_status()',
-      'page = r.json()',
-      'page["jobs"]',
-    ].map((step) => loop.indexOf(step))
-    expect(steps.every((position) => position > -1)).toBe(true)
-    expect(steps).toEqual([...steps].sort((a, b) => a - b))
-    // run_id 读回失败（含 429）不解析错误体，落到去重键对账。
-    expect(python).toContain('if readback.ok else []')
+    // 翻完全部页只累积命中，不在循环里提前收敛到某一个。
+    expect(loop).toContain('matches += [')
+    expect(loop).not.toContain('job_ids =')
+    const verdict = python.slice(python.indexOf('job_ids = job_ids or matches'))
+    const check = verdict.indexOf('if len(job_ids) != 1:')
+    const raise = verdict.indexOf('raise SystemExit(')
+    expect(check).toBeGreaterThan(-1)
+    expect(raise).toBeGreaterThan(check)
+    expect(verdict.indexOf('job_id = job_ids[0]')).toBeGreaterThan(raise)
   })
 })

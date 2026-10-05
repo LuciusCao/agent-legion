@@ -12,10 +12,8 @@ from fastapi import APIRouter, Header
 from fastapi.responses import FileResponse, StreamingResponse
 
 from server.app.routes.job_artifact_raw_response import raw_response
-from server.app.routes.job_http import raise_job_http_error
 from server.app.services.job_artifact_media import raw_media_type
 from server.app.services.job_artifacts import JobArtifactService
-from server.app.services.job_errors import JobServiceError
 from server.app.settings import Settings
 
 __all__ = ["raw_media_type", "raw_response", "register_raw_artifact_route"]
@@ -58,7 +56,4 @@ def register_raw_artifact_route(
         # 见 jobs.py get_job 的注释——跨域与未知 job 同为 404，Range 行为
         # 不变）。
         # Range 解析在 service.open_raw 内（本地分支忽略，FileResponse 原生支持）。
-        try:
-            return raw_response(service.open_raw(job_id, artifact_name, range_header))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return raw_response(service.open_raw(job_id, artifact_name, range_header))

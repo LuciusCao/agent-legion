@@ -241,6 +241,7 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
             "thinking": "low",
             "timeout_seconds": 1800,
             "no_sandbox": False,
+            "sandbox_network": False,
         }
 
         registry = AgentWorkerRegistry(TEST_DATABASE_URL)

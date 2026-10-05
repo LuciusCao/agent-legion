@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -18,9 +19,14 @@ def close_session(
     workspace_id: str,
     *,
     include_deleted: bool = False,
+    still_wanted: Callable[[dict[str, Any] | None], bool] | None = None,
 ) -> dict[str, Any]:
     # include_deleted: only the soft-delete path (#872) closes a row it has
     # already stamped; every public caller keeps the stamped-row 404.
+    # still_wanted: re-validated against the raw row under _runtimes_lock
+    # right before the closed write (#924 review P1) — an archive whose
+    # stamp was cleared by a concurrent unarchive must not close the
+    # restored session. unarchive clears under the same lock.
     session = service.get_session(session_id, workspace_id, include_deleted=include_deleted)
     if session["status"] == "closed":
         return session
@@ -33,6 +39,14 @@ def close_session(
                 # snapshot must not inherit this stale close's DB write.
                 current = service._runtimes.get(session_id)
                 if current is not None and current is not runtime:
+                    return service.get_session(session_id, include_deleted=include_deleted)
+                # #940: one raw read serves both re-checks; a concurrent
+                # close that already committed owns the terminal marker and
+                # teardown, so a second closed write here would duplicate them.
+                row = service.db.get_studio_chat_session(session_id)
+                if (row is not None and row.get("status") == "closed") or (
+                    still_wanted is not None and not still_wanted(row)
+                ):
                     return service.get_session(session_id, include_deleted=include_deleted)
                 service.db.update_studio_chat_session(
                     session_id, status="closed", closed_at=datetime.now(UTC)

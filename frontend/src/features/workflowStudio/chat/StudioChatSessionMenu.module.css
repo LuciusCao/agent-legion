@@ -76,22 +76,12 @@
   font-size: 11px;
   color: #9e9e9e;
 }
-.rowEdit,
-.rowConfirm {
+.rowEdit {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 5px 8px 5px 12px;
   font-size: 12px;
-}
-.rowConfirm {
-  background: #fff5f5;
-  flex-wrap: wrap;
-}
-.confirmText {
-  flex: 1 1 100%;
-  color: #b71c1c;
-  overflow-wrap: anywhere;
 }
 .titleInput {
   flex: 1;
@@ -103,8 +93,7 @@
   font-family: inherit;
   outline: none;
 }
-.textAction,
-.dangerAction {
+.textAction {
   flex: none;
   border: 1px solid #e0e0e0;
   background: #fff;
@@ -114,13 +103,7 @@
   font-size: 12px;
   cursor: pointer;
 }
-.dangerAction {
-  border-color: #c62828;
-  background: #c62828;
-  color: #fff;
-}
-.textAction:disabled,
-.dangerAction:disabled {
+.textAction:disabled {
   opacity: 0.5;
   cursor: default;
 }

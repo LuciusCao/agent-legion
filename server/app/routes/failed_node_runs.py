@@ -12,7 +12,6 @@ from server.app.routes.failed_node_run_contracts import (
     FailedNodeRunsResponse,
 )
 from server.app.routes.job_http import (
-    raise_job_http_error,
     reject_mismatched_workflow_key,
 )
 from server.app.routes.job_rerun_by_failure_contracts import (
@@ -21,7 +20,6 @@ from server.app.routes.job_rerun_by_failure_contracts import (
     JobRerunByFailureResultResponse,
 )
 from server.app.services.failed_node_runs import FailedNodeRunQueryService
-from server.app.services.job_errors import JobServiceError
 from server.app.services.job_rerun import JobRerunService
 
 # #211 Phase 2: query-param deprecation wording (server-side default).
@@ -56,16 +54,13 @@ def create_failed_node_runs_router(
         # a mismatched explicit key can no longer narrow the list — reject it
         # instead of silently widening the result.
         reject_mismatched_workflow_key(workspace_id, workflow_key)
-        try:
-            rows = queries.list_failed_node_runs(
-                workspace_id,
-                category=category,
-                detail=detail,
-                since=since,
-            )
-            return FailedNodeRunsResponse(runs=[FailedNodeRunItem(**row) for row in rows])
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        rows = queries.list_failed_node_runs(
+            workspace_id,
+            category=category,
+            detail=detail,
+            since=since,
+        )
+        return FailedNodeRunsResponse(runs=[FailedNodeRunItem(**row) for row in rows])
 
     @router.post(
         "/workspaces/{workspace_id}/jobs/rerun-by-failure",

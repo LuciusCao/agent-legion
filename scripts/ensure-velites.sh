@@ -71,7 +71,7 @@ _run_plan() {
     PLAN_RC=$?
     set -e
     if [[ "$PLAN_RC" -ne 0 ]]; then
-        echo "velites_deploy_plan.py 执行失败（rc=$PLAN_RC）：$PLAN_OUTPUT" >&2
+        echo "velites_deploy_plan.py 执行失败（rc=${PLAN_RC}）：$PLAN_OUTPUT" >&2
         exit 1
     fi
 }
@@ -143,7 +143,7 @@ while IFS='|' read -r bin target; do
     [[ -z "$bin" ]] && continue
     src="velites/target/release/$bin"
     if [[ ! -f "$src" ]]; then
-        echo "错误：构建产物缺失 $src（velites/Cargo.toml 的 [[bin]] 与安置面不一致？）" >&2
+        echo "错误：构建产物缺失 ${src}（velites/Cargo.toml 的 [[bin]] 与安置面不一致？）" >&2
         PREPARE_FAILED=1
         break
     fi
@@ -168,7 +168,7 @@ while IFS='|' read -r bin target; do
     stamp_tmp="${target}.src-stamp.tmp.$$"
     STAGED_TMPS+=("$tmp" "$stamp_tmp")
     if ! cp "$src" "$tmp" || ! chmod +x "$tmp" || ! echo "$SRC_ID" >"$stamp_tmp"; then
-        echo "错误：无法写入 $target（权限不足？）——未改动任何已安装副本" >&2
+        echo "错误：无法写入 ${target}（权限不足？）——未改动任何已安装副本" >&2
         PREPARE_FAILED=1
         break
     fi

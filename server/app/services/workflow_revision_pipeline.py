@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config_prune import override_prune_commit_hook
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
@@ -57,7 +57,7 @@ def publish_workflow_revision(
     # publish back instead of stranding an active revision whose stale
     # overrides still block every new job's intake (codex 终轮 P1-3).
     prune_hook = override_prune_commit_hook(
-        job_db, workspace_id, definition, published_agent_definitions(job_db, workspace_id)
+        job_db, workspace_id, definition, legacy_agent_catalog(job_db, workspace_id)
     )
     return job_db.create_workflow_revision(
         revision_id=revision_id,

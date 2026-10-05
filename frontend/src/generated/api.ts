@@ -3048,6 +3048,23 @@ export interface paths {
     patch: operations['rename_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__patch']
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/archive': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Archive Session */
+    post: operations['archive_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__archive_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/cancel': {
     parameters: {
       query?: never
@@ -3213,6 +3230,23 @@ export interface paths {
     put?: never
     /** Resume Session */
     post: operations['resume_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__resume_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/unarchive': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Unarchive Session */
+    post: operations['unarchive_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__unarchive_post']
     delete?: never
     options?: never
     head?: never
@@ -4513,6 +4547,8 @@ export interface components {
     }
     /** HealthResponse */
     HealthResponse: {
+      /** Instance Proof */
+      instance_proof?: string | null
       /** Ok */
       ok: boolean
       storage?: components['schemas']['StorageStatus'] | null
@@ -4520,6 +4556,24 @@ export interface components {
       workers?: {
         [key: string]: string
       } | null
+    }
+    /**
+     * HydrationDeferResponse
+     * @description #887：节点因输入恢复不全（悬挂清单行）被挡，而非普通排队。
+     */
+    HydrationDeferResponse: {
+      /** Inputs */
+      inputs: string[]
+      /**
+       * Reasons
+       * @description object_missing | hash_mismatch | corrupt（重试不会自愈的恢复失败）
+       */
+      reasons: string[]
+      /**
+       * Rerun Nodes
+       * @description 建议重跑以重新生成这些输入的生产节点 key
+       */
+      rerun_nodes: string[]
     }
     /** InfraConnectionTestRequest */
     InfraConnectionTestRequest: {
@@ -4861,6 +4915,7 @@ export interface components {
       executor_kind?: ('code' | 'pi' | 'openclaw') | null
       /** Finished At */
       finished_at?: string | null
+      hydration_defer?: components['schemas']['HydrationDeferResponse'] | null
       /** Id */
       id: number
       /** Inputs */
@@ -7204,6 +7259,8 @@ export interface components {
       agent_id: string
       /** Allow All Permissions */
       allow_all_permissions: boolean
+      /** Archived At */
+      archived_at?: string | null
       /** Capability Snapshot */
       capability_snapshot: {
         [key: string]: unknown
@@ -10069,7 +10126,9 @@ export interface operations {
   }
   health_api_health_get: {
     parameters: {
-      query?: never
+      query?: {
+        instance_probe?: string | null
+      }
       header?: never
       path?: never
       cookie?: never
@@ -10083,6 +10142,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['HealthResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }
@@ -14956,7 +15024,9 @@ export interface operations {
   }
   list_sessions_api_workspaces__workspace_id__studio_chat_sessions_get: {
     parameters: {
-      query?: never
+      query?: {
+        archived?: boolean
+      }
       header?: never
       path: {
         workspace_id: string
@@ -15099,6 +15169,38 @@ export interface operations {
         'application/json': components['schemas']['StudioChatSessionUpdateRequest']
       }
     }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  archive_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__archive_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
     responses: {
       /** @description Successful Response */
       200: {
@@ -15468,6 +15570,38 @@ export interface operations {
     }
   }
   resume_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__resume_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  unarchive_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__unarchive_post: {
     parameters: {
       query?: never
       header?: never

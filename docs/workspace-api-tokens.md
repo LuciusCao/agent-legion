@@ -54,6 +54,10 @@ api-scope 准入面对账，改权限面表须同步 UI 端点清单。
    1–64 字符 `[A-Za-z0-9._-]`、首字符为字母或数字，非法 422）：同一份内容
    要作为多个独立 job 存在时，给每份一个不同的 token（如外部系统自己的
    记录 id）；同 token 重提幂等命中同一 job。不传即现行为（纯内容寻址）。
+   **token 在 workspace 内须按内容版本唯一**（#910）：一个 token 只对应
+   一份内容，内容改了（新版本）就换新 token。同一 token 复用于不同内容时
+   服务端照常各建一个 job（去重身份是 `material_id~token`），但之后按 token
+   对账会命中多个 job、无法判定哪个对应本次内容（见「对账」）。
    ref 项不收 `client_token`（422）——`external_id` 本身就是调用方控制的
    命名空间，要多份 job 用不同的 `external_id` 即可：
 
@@ -233,7 +237,11 @@ failed run 治愈路径（以及下文的并发重提）。识别「已存在」
   （例如 job 已被删除），按「未提交」处理，不要当作已存在。
 - text 项：material id 由服务端按内容派生，调用方不知道——带了
   `client_token` 时用 `GET /jobs/snapshot?search=~<client_token>`，在结果里
-  按 `client_token` 字段精确匹配（token 由调用方生成，天然可对账）；没带 token 时用 `GET /runs`（最近的 run 在前）按提交时间定位
+  按 `client_token` 字段精确匹配（token 由调用方生成，天然可对账），同样沿
+  `next_cursor` 翻完全部页。精确命中多于一个 job 说明该 token 被复用于不同
+  内容（违反上文「按内容版本唯一」）：**按错误处理，不要取第一个**——结果
+  按创建时间倒序，第一个可能是另一份内容的 job，轮询 / 下载会拿到别的内容
+  的产物；改用新 token 提交或人工核对。没带 token 时用 `GET /runs`（最近的 run 在前）按提交时间定位
   run，再 `GET /jobs?run_id=<run.id>` 取 job。需要可靠对账的调用方建议给
   text 项带 token，或先把文本作为 material 上传、再以 material 项提交。
 
@@ -278,7 +286,7 @@ failed run 治愈路径（以及下文的并发重提）。识别「已存在」
 | 404 | `Job not found` / `Run not found`：不存在或属于别的 workspace（同样防枚举）；`Artifact not found`：产物不存在或对象已被 bucket lifecycle 回收 | 不重试 |
 | 404 | `Material not found: …` / `Material bundle not found: …`：`POST /runs` 引用了本 workspace 没有的素材 | 不重试；修正 items |
 | 409 | text 项内容与一个未就绪（上传未完成）的 material 同 hash | 完成或删除那个 material 后重试 |
-| 422 | 请求体 / 参数校验失败：items 为空、未知字段（含 ref 项带 `client_token`）、`type` 不在四种之内、`client_token` 超长 / 含非法字符；`GET /runs` 与 `GET /jobs/snapshot` 的 `limit` 不在 1–500、`GET /jobs` 的 `limit` 不在 1–2000；`run_id` / `status` 过滤传空串；参数类型不对（如 `limit=abc`） | 不重试；修正请求 |
+| 422 | 请求体 / 参数校验失败：items 为空、未知字段（含 ref 项带 `client_token`）、`type` 不在四种之内、`client_token` 超长 / 含非法字符；`GET /runs` 与 `GET /jobs/snapshot` 的 `limit` 不在 1–500、`GET /jobs` 的 `limit` 不在 1–2000；`GET /jobs/snapshot` 的 `cursor` 无法解析（不是上一页原样返回的 `next_cursor`：缺分隔符、时间戳非法等，#891）；`run_id` / `status` 过滤传空串；参数类型不对（如 `limit=abc`） | 不重试；修正请求 |
 | 429 | per-token 限流命中（#738）：超出该 token 的令牌桶，响应带 `Retry-After`（秒，按补充速率向上取整） | 按 `Retry-After` 退避后重试；批量轮询改用 `/jobs/snapshot` 一次取整批，降低请求频率 |
 | 503 | text 项需要对象存储，实例未配置时返回 | 稍后重试或联系管理员 |
 | 5xx | 服务端异常 | 指数退避重试；`POST /runs` 重试安全（见上节） |

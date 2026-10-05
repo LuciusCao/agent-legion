@@ -13,12 +13,10 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.auth.dependencies import reject_studio_agent_scope
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_chat_contracts import (
     StudioChatSessionRecord,
     StudioChatSessionResponse,
 )
-from server.app.services.job_errors import JobServiceError
 from server.app.studio_chat.service import StudioChatService
 from server.app.studio_chat.session_config import set_session_config_option, set_session_mode
 
@@ -61,10 +59,7 @@ def create_studio_chat_config_router(service: StudioChatService) -> APIRouter:
     def set_allow_all(
         workspace_id: str, session_id: str, payload: StudioChatAllowAllRequest
     ) -> StudioChatSessionResponse:
-        try:
-            session = service.set_allow_all_permissions(session_id, workspace_id, payload.enabled)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        session = service.set_allow_all_permissions(session_id, workspace_id, payload.enabled)
         return _session_response(session)
 
     @router.post(
@@ -74,10 +69,7 @@ def create_studio_chat_config_router(service: StudioChatService) -> APIRouter:
     def set_mode(
         workspace_id: str, session_id: str, payload: StudioChatSetModeRequest
     ) -> StudioChatSessionResponse:
-        try:
-            session = set_session_mode(service, session_id, workspace_id, payload.mode_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        session = set_session_mode(service, session_id, workspace_id, payload.mode_id)
         return _session_response(session)
 
     @router.post(
@@ -87,12 +79,9 @@ def create_studio_chat_config_router(service: StudioChatService) -> APIRouter:
     def set_config_option(
         workspace_id: str, session_id: str, payload: StudioChatSetConfigOptionRequest
     ) -> StudioChatSessionResponse:
-        try:
-            session = set_session_config_option(
-                service, session_id, workspace_id, payload.config_id, payload.value
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        session = set_session_config_option(
+            service, session_id, workspace_id, payload.config_id, payload.value
+        )
         return _session_response(session)
 
     return router

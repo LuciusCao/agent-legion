@@ -37,6 +37,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
+from server.app.fs_safety import PathEscapeError, resolve_within
 from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_repo import (
     MAX_FILE_BYTES,
@@ -216,11 +217,9 @@ def read_shared_file_content(
         # containment root (another workspace's or a host directory) —
         # refuse outright.
         raise NotFoundError("Shared material not found")
-    shared_root = shared_dir.resolve()
-    target = (shared_root / path).resolve()
     try:
-        target.relative_to(shared_root)
-    except ValueError as exc:
+        target = resolve_within(shared_dir, path, allow_root=True)
+    except PathEscapeError as exc:
         raise NotFoundError("Shared material not found") from exc
     if target.is_symlink() or not target.is_file():
         raise NotFoundError("Shared material not found")

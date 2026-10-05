@@ -58,7 +58,12 @@ class RecordingBus:
 
 
 @pytest.fixture
-def chat(job_db, settings, tmp_path):
+def chat(job_db, settings, tmp_path, monkeypatch):
+    # #915: the registered api_base (127.0.0.1:8000) is never this test
+    # process; the callback self-check is pinned to "reachable" here so the
+    # timeline assertions stay about their own subject. The check itself is
+    # covered by tests/services/test_studio_chat_callback_check.py.
+    monkeypatch.setattr("server.app.studio_chat.spawn.check_api_base", lambda api_base: None)
     bus = RecordingBus()
     service = StudioChatService(job_db, settings, bus)
     store = StudioAgentRegistryStore(TEST_DATABASE_URL)

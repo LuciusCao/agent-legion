@@ -40,8 +40,8 @@ from __future__ import annotations
 
 import logging
 
-from server.app.agent_catalog import AgentDefinition
 from server.app.jobs import JobQueries
+from server.app.services.agent_node_profile import AgentNodeProfile
 from server.app.skills.config import LATEST_REF, SkillsLock
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.schema import WorkflowNode
@@ -81,14 +81,14 @@ def read_skill_lock(job_db: JobQueries, *, domain_held: bool = False) -> SkillsL
 
 
 def _effective_skill_binding(
-    node: WorkflowNode, agent_definition: AgentDefinition | None
+    node: WorkflowNode, profile: AgentNodeProfile | None
 ) -> tuple[str, str] | None:
     """agent 节点的有效 skill 绑定 ``(key, ref)``（dispatch 同款优先级）。
 
     ``effective_node_skill`` 在两侧皆空时抛 ValueError（dispatch 侧即节点
     失败）——这里返回 None 表示无 skill 面（由 P1-1 的哈希维度覆盖）。"""
     try:
-        return effective_node_skill(node, agent_definition.skill if agent_definition else "")
+        return effective_node_skill(node, profile.skill if profile else "")
     except ValueError:
         return None
 
@@ -134,7 +134,7 @@ def _skill_commit_matches(
 
 
 def skill_excluded_nodes(
-    resolved_agents: dict[str, AgentDefinition],
+    resolved_agents: dict[str, AgentNodeProfile],
     definition: WorkflowDefinition,
     executed: dict[str, tuple[str, str, str, str]],
     skill_lock: SkillsLock | None,

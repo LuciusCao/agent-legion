@@ -349,16 +349,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/451
   ceiling: 231
 - check: architecture.file_budget
-  path: worker/worker_declarations.py
-  reason: 'The deprecated-capabilities normalization moved here from config_validation (#444 rework) to
-    free that file''s zero headroom for the proxy field; labels/models/capabilities are one family of
-    scheduling declarations and share this validation module. The move is net-zero for the package; remove
-    this exemption together with the capabilities compat key itself (tracked separately from the #284
-    mechanism retirement) instead of re-splitting.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/452
-  ceiling: 54
-- check: architecture.file_budget
   path: server/app/routes/artifacts.py
   reason: 'Artifact routes authenticate the per-Worker token used by Agent execution transport,
     and the per-file upload path grew past the plain baseline with the scoped-token work (#35).
@@ -423,10 +413,11 @@ exemptions:
     goes stale automatically. The Codex P2 fix on PR 299 adds _resolve_key (query-bound alias must equal
     the workspace id), which is part of the same deprecation-window cost. Issue 692 (codex P1 round 4)
     adds the optional expected_hash publish body (about 17 lines) — the server-side CAS guard for chat
-    draft cards; re-signed to 257, 2 beyond the prior 240+15 band, time-boxed per issue 641.
+    draft cards; re-signed to 257, 2 beyond the prior 240+15 band, time-boxed per issue 641. Issue 927
+    drops the route-level JobServiceError boilerplate (app-level handler), lowered to actual + 10.
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 257
+  ceiling: 246
   expires: 2026-10-31
 - check: architecture.file_budget
   path: server/app/routes/job_http.py
@@ -976,17 +967,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1014
   ceiling: 98
 - check: architecture.file_budget
-  path: server/app/services/node_prompt_preview.py
-  reason: '#513: the preview payload gains prompt_mode (normalized to append) and save_node_prompt
-    accepts it — the API surface of the mode feature. The service is the single preview/save
-    implementation shared by the Studio route and the MCP tools; the growth is the feature,
-    not drift. Remove if prompt previewing is extracted from the draft-editing service. Re-anchored
-    by #926 from #456 (closed) to #1016: the overage above is the shipped feature itself and
-    the removal condition above stands; #1016 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1016
-  ceiling: 161
-- check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/WorkflowNodeToolsEditor.tsx
   reason: 'codex P2 on #527: invalid declared tools render as removable chips (MUI multi-select
     cannot deselect a disabled option, so the removal needs its own surface) — one Chip row
@@ -1068,20 +1048,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1001
   ceiling: 192
-- check: architecture.file_budget
-  path: server/app/routes/studio_agent_catalog_read_tools.py
-  reason: 'Issue #633 adds the workspace-scoped agent-definition create entry to the agent-definition
-    tool group: one POST handler (capability-derived agent_id, studio-agent attribution) beside
-    the read trio and the save draft. The module IS the single agent-definition tool endpoint
-    surface; splitting one endpoint into a sister module would fork the group''s shared router
-    guards and the version-response helper. Ceiling at actual + 10 per the dated-exemption convention.
-    Remove when the agent-definition tool endpoints get a route split per verb or a budget re-balance
-    frees headroom. Re-anchored by #926 from #456 (closed) to #1009: the overage above is the
-    shipped feature itself and the removal condition above stands; #1009 tracks at most five
-    entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1009
-  ceiling: 116
 - check: architecture.file_budget
   path: server/app/mcp_server/agent_tools.py
   reason: 'Issue #633 adds the create_agent_definition tool to the agent tool group: one more
@@ -1228,21 +1194,23 @@ exemptions:
 - check: architecture.file_budget
   path: velites/src/tools/bash.rs
   reason: 'Issue #637 hardens the bash tool against unbounded pipe reads (the allocation-storm
-    incident): read_with_first_byte returns a PipeCapture (head kept to the per-stream 4 MiB
-    cap, total_bytes counted, hit_cap flag), the drain loop keeps reading to EOF past the cap
-    (no pipe backpressure on the child), and the capped-output display branch (truncate_head
-    + the honest no-full-output notice) grew alongside. The capture cap, its tests, and the
-    display branches are one cohesive read/display flow; splitting them would fork the child-output
-    lifecycle across modules. #779 train R4 review P2 grew the same capped-display branch further
-    (per-stream display budgets: stderr gets a reserved half-share, each stream keeps its head
-    when capture-capped and its tail when fully collected). Ceiling re-seated at actual + 10
-    per the dated-exemption convention (#431/#458 precedents). Remove when the capped-display
-    branches move into truncate.rs or the module gets a bash-output split. Re-anchored by #926
-    from #637 (closed) to #995: the overage above is the shipped feature itself and the removal
-    condition above stands; #995 tracks at most five entries (#917 A-2).'
+    incident): read_with_first_byte returns a PipeCapture (head kept to the per-stream 4 MiB cap,
+    total_bytes counted, hit_cap flag), the drain loop keeps reading to EOF past the cap (no pipe
+    backpressure on the child), and the capped-output display branch (truncate_head + the honest
+    no-full-output notice) grew alongside. The capture cap, its tests, and the display branches are
+    one cohesive read/display flow; splitting them would fork the child-output lifecycle across
+    modules. #779 train R4 review P2 grew the same capped-display branch further (per-stream display
+    budgets: stderr gets a reserved half-share, each stream keeps its head when capture-capped and
+    its tail when fully collected). Ceiling re-seated at actual + 10 per the dated-exemption
+    convention (#431/#458 precedents). Remove when the capped-display branches move into truncate.rs
+    or the module gets a bash-output split. #942/#922 moved the child-process lifecycle (env
+    allowlist, group termination, bounded drain, pipe reader) into bash_proc.rs; ceiling re-seated
+    at actual + 10. Re-anchored by #926 from #637 (closed) to #995: the overage above is the shipped
+    feature itself and the removal condition above stands; #995 tracks at most five entries
+    (#917 A-2).'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/995
-  ceiling: 411
+  ceiling: 312
   expires: 2027-03-31
 - check: architecture.file_budget
   path: velites/src/tools/truncate.rs
@@ -1301,7 +1269,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/727
   ceiling: 679
-
 - check: architecture.file_budget
   path: worker/execution/heartbeat_batch.py
   reason: 'Issue #644 closes the result-report 409 storm: register_upload is the
@@ -1405,18 +1372,19 @@ exemptions:
   path: server/app/routes/runs.py
   reason: '#734 tags the three runs routes with API_SCOPE_INTAKE_TAG so the api-scope admission
     surface derives from the matched route object (auth/api_scope_surface.py) instead of a second
-    hand-copied path list in the guard: the import and the per-route decorator expansions add
-    10 effective lines (77→87, 10 past the 62+15 band). The tags stay per-route on purpose —
-    the fail-closed interlock requires both a route-level tag edit and a manifest edit to admit
-    a new endpoint, and router-level tags would hand the tag to any future route added here
-    for free. Ceiling at actual + 10 per the dated-exemption convention (#431/#458 precedents).
-    Remove when the module is re-balanced under the baseline or the intake tagging moves into
-    a registration helper. Re-anchored by #926 from #734 (closed) to #1002: the overage above
-    is the shipped feature itself and the removal condition above stands; #1002 tracks at most
-    five entries (#917 A-2).'
+    hand-copied path list in the guard: the import and the per-route decorator expansions add 10
+    effective lines (77→87, 10 past the 62+15 band). The tags stay per-route on purpose — the
+    fail-closed interlock requires both a route-level tag edit and a manifest edit to admit a new
+    endpoint, and router-level tags would hand the tag to any future route added here for free.
+    Ceiling at actual + 10 per the dated-exemption convention (#431/#458 precedents). Remove when
+    the module is re-balanced under the baseline or the intake tagging moves into a registration
+    helper. #927 drops the route-level JobServiceError boilerplate (app-level handler): lowered to
+    actual + 10. Re-anchored by #926 from #734 (closed) to #1002: the overage above is the shipped
+    feature itself and the removal condition above stands; #1002 tracks at most five entries
+    (#917 A-2).'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1002
-  ceiling: 97
+  ceiling: 87
   expires: 2026-12-31
 - check: architecture.file_budget
   path: server/app/services/external_artifact_access.py
