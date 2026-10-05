@@ -13,7 +13,10 @@ strand a published revision no new job can use (VAULT-SECRET-001).
 from __future__ import annotations
 
 from server.app.jobs import JobQueries
-from server.app.services.agent_node_profile import resolve_agent_node_profile
+from server.app.services.agent_node_profile import (
+    build_capability_index,
+    resolve_agent_node_profile,
+)
 from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.node_code_resolution import resolve_dispatch_node_code
 from server.app.services.node_config import workflow_node_config_schemas
@@ -46,12 +49,13 @@ def validate_workflow_for_publish(
     agents = legacy_agent_catalog(job_db, workspace_id)
     schemas = workflow_node_config_schemas(definition, agents)
     errors.extend(secret_gate_errors(schemas, definition))
+    index = build_capability_index(agents)
     for node in definition.executable_nodes.values():
         if node.node_type == "approval":
             continue
         is_agent = node.node_type == "agent"
         # #932：agent 节点经执行档案门面解析（P1 来源 = 恰好一个 published Agent）。
-        profile = resolve_agent_node_profile(node, agents)
+        profile = resolve_agent_node_profile(node, agents, index=index)
         if is_agent and profile is None:
             errors.append(
                 f"Agent capability {node.capability} must resolve to exactly one published Agent"

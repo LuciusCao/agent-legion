@@ -83,15 +83,37 @@ def profile_from_definition(agent_id: str, definition: AgentDefinition) -> Agent
     )
 
 
+CapabilityIndex = Mapping[str, tuple[str, ...]]
+
+
+def build_capability_index(legacy_catalog: Mapping[str, AgentDefinition]) -> CapabilityIndex:
+    """capability → agent ids serving it (catalog order), built in one pass.
+
+    Callers resolving many nodes against one catalog build this once and
+    pass it as ``index=`` so a workflow resolves in O(agents + nodes)
+    (PR #987 codex R2).
+    """
+    index: dict[str, list[str]] = {}
+    for agent_id, definition in legacy_catalog.items():
+        index.setdefault(definition.capability, []).append(agent_id)
+    return {capability: tuple(ids) for capability, ids in index.items()}
+
+
 def legacy_agent_candidates(
-    node: AgentNodeLike, legacy_catalog: Mapping[str, AgentDefinition]
+    node: AgentNodeLike,
+    legacy_catalog: Mapping[str, AgentDefinition],
+    *,
+    index: CapabilityIndex | None = None,
 ) -> tuple[str, ...]:
     """Agent ids in *legacy_catalog* serving the node's capability (catalog order).
 
     Callers that must tell "none" from "ambiguous" (route materialization,
     publish diagnostics) read the count; everyone else uses
-    ``resolve_agent_node_profile``.
+    ``resolve_agent_node_profile``. *index* (``build_capability_index`` of
+    the same catalog) replaces the per-call catalog scan.
     """
+    if index is not None:
+        return index.get(node.capability, ())
     return tuple(
         agent_id
         for agent_id, definition in legacy_catalog.items()
@@ -100,18 +122,22 @@ def legacy_agent_candidates(
 
 
 def resolve_agent_node_profile(
-    node: AgentNodeLike, legacy_catalog: Mapping[str, AgentDefinition]
+    node: AgentNodeLike,
+    legacy_catalog: Mapping[str, AgentDefinition],
+    *,
+    index: CapabilityIndex | None = None,
 ) -> AgentNodeProfile | None:
     """The node's execution profile, or None when it has none.
 
     None for non-agent nodes (#284: only ``type: agent`` dispatches through
     an Agent) and when the capability resolves to zero or several published
     Agents — the latter is a catalog error every caller already rejects or
-    treats as unresolved (publish gate, route derivation).
+    treats as unresolved (publish gate, route derivation). Pass *index*
+    when resolving several nodes against the same catalog.
     """
     if node.node_type != "agent":
         return None
-    candidates = legacy_agent_candidates(node, legacy_catalog)
+    candidates = legacy_agent_candidates(node, legacy_catalog, index=index)
     if len(candidates) != 1:
         return None
     agent_id = candidates[0]

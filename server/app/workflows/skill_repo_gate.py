@@ -20,7 +20,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from server.app.jobs import JobQueries
-from server.app.services.agent_node_profile import resolve_agent_node_profile
+from server.app.services.agent_node_profile import (
+    build_capability_index,
+    resolve_agent_node_profile,
+)
 from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.skill_repo import contract_declared_at_ref
 from server.app.skills.config import LATEST_REF
@@ -39,6 +42,7 @@ def _agent_node_skills(
     are skipped — the base publish gate reports the missing binding.
     """
     catalog = legacy_agent_catalog(job_db, workspace_id)
+    index = build_capability_index(catalog)
     triples: list[tuple[str, str, str]] = []
     for node in definition.executable_nodes.values():
         if node.node_type != "agent":
@@ -47,7 +51,7 @@ def _agent_node_skills(
             skill_key = node.skill.key
             ref = node.skill.ref
         else:
-            profile = resolve_agent_node_profile(node, catalog)
+            profile = resolve_agent_node_profile(node, catalog, index=index)
             skill_key = profile.skill if profile is not None else ""
             ref = LATEST_REF
         if skill_key:

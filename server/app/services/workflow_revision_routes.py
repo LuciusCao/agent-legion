@@ -10,7 +10,7 @@ change only at revision publication.
 
 from __future__ import annotations
 
-from server.app.services.agent_node_profile import legacy_agent_candidates
+from server.app.services.agent_node_profile import build_capability_index, legacy_agent_candidates
 from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.workflows.definition import WorkflowDefinition
 
@@ -27,13 +27,14 @@ def derive_agent_routes(
     is a catalog error, never a silent pick.
     """
     catalog = legacy_agent_catalog(job_db, workspace_id)
+    index = build_capability_index(catalog)
     routes: dict[str, str] = {}
     for node in definition.nodes.values():
         if node.node_type != "agent":
             continue
         # #932: routes materialize only legacy-sourced profiles (the target
         # is a published Agent id); ambiguity stays a publish error here.
-        candidates = legacy_agent_candidates(node, catalog)
+        candidates = legacy_agent_candidates(node, catalog, index=index)
         if len(candidates) > 1:
             raise ValueError(
                 f"Agent node {node.key!r} capability {node.capability!r} must resolve to"

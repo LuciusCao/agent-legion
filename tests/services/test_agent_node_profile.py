@@ -6,12 +6,17 @@ import pytest
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.services.agent_node_profile import (
+    build_capability_index,
     legacy_agent_candidates,
     profile_from_definition,
     resolve_agent_node_profile,
     resolve_routed_agent_profile,
 )
-from server.app.workflows.definition import WorkflowNode
+from server.app.services.node_config import (
+    resolve_workflow_node_configs,
+    workflow_node_config_schemas,
+)
+from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 
 pytestmark = pytest.mark.no_db
 
@@ -91,3 +96,59 @@ def test_routed_profile_follows_the_route_target_id() -> None:
     assert routed is not None and routed.legacy_ref is not None
     assert routed.legacy_ref.capability == "review"
     assert resolve_routed_agent_profile("missing", catalog) is None
+
+
+def test_index_lookup_matches_catalog_scan() -> None:
+    catalog = {
+        "agent-1": _definition("generate"),
+        "agent-2": _definition("review"),
+        "agent-3": _definition("review"),
+    }
+    index = build_capability_index(catalog)
+
+    for capability in ("generate", "review", "missing"):
+        node = _node(capability=capability)
+        assert legacy_agent_candidates(node, catalog, index=index) == legacy_agent_candidates(
+            node, catalog
+        )
+        assert resolve_agent_node_profile(node, catalog, index=index) == (
+            resolve_agent_node_profile(node, catalog)
+        )
+
+
+class _CountingCatalog(dict):
+    """A catalog that counts full scans (``items()``)."""
+
+    scans = 0
+
+    def items(self):  # type: ignore[override]
+        type(self).scans += 1
+        return super().items()
+
+
+def test_workflow_config_resolution_scans_the_catalog_once() -> None:
+    """PR #987 codex R2: N agent nodes resolve in one catalog pass, not N."""
+    nodes = {
+        f"n{i}": WorkflowNode(
+            key=f"n{i}",
+            label=f"n{i}",
+            capability=f"cap{i}",
+            node_type="agent",
+            outputs=["o.json"],
+        )
+        for i in range(20)
+    }
+    definition = WorkflowDefinition(key="wf", label="wf", intake=WorkflowIntake(), nodes=nodes)
+    catalog = _CountingCatalog(
+        {f"agent-{i}": _definition(f"cap{i}", config_schema=_SCHEMA) for i in range(20)}
+    )
+    _CountingCatalog.scans = 0
+
+    resolved = resolve_workflow_node_configs(definition, catalog, None)
+    assert _CountingCatalog.scans == 1
+    assert resolved["n7"]["tone"] == "calm"
+
+    _CountingCatalog.scans = 0
+    schemas = workflow_node_config_schemas(definition, catalog)
+    assert _CountingCatalog.scans == 1
+    assert set(schemas) == set(nodes)

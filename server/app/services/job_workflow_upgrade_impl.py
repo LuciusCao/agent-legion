@@ -48,7 +48,11 @@ from typing import Any
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.jobs import JobQueries
-from server.app.services.agent_node_profile import AgentNodeProfile, resolve_agent_node_profile
+from server.app.services.agent_node_profile import (
+    AgentNodeProfile,
+    build_capability_index,
+    resolve_agent_node_profile,
+)
 from server.app.services.agent_node_profile_catalog import fresh_legacy_agent_catalog
 from server.app.services.job_workflow_upgrade_skill import read_skill_lock, skill_excluded_nodes
 from server.app.services.node_config_runtime import runtime_mutable_keys
@@ -110,9 +114,10 @@ def _resolved_agent_nodes(
     """
     if catalog is None:
         return {}
+    index = build_capability_index(catalog)
     resolved: dict[str, AgentNodeProfile] = {}
     for key, node in definition.executable_nodes.items():
-        profile = resolve_agent_node_profile(node, catalog)
+        profile = resolve_agent_node_profile(node, catalog, index=index)
         if profile is not None:
             resolved[key] = profile
     return resolved
