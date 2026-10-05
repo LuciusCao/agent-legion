@@ -11,9 +11,11 @@ surface render it live.
 
 Turns the Studio drove (origin ``user`` / ``skill_activation``, including the
 #816 wakeup prompt) already reach the timeline over ACP and are skipped. The
-session status and turn ownership are untouched: a human message sent while
-the agent reports is queued by the engine behind the unprompted turn, the
-existing busy semantics of a running prompt.
+session status and turn ownership are untouched. A human message sent while
+the agent reports is held by Studio until the turn's end is written
+(unprompted_queue.py, #1029): sent to ACP meanwhile, the engine would queue it
+and settle the prompt at once with zero content, and its reply would never
+reach the timeline.
 """
 
 from __future__ import annotations
@@ -224,8 +226,11 @@ def start_unprompted_watcher(
 ) -> None:
     if not runtime.kimi_agent:
         return
+    from server.app.studio_chat.unprompted_queue import GatedUnpromptedWatcher
+
     homes = kimi_code_homes(runtime.handle.cwd)
-    watcher = UnpromptedTurnWatcher(
+    # #1029: the gated subclass also holds human input during unprompted turns.
+    watcher = GatedUnpromptedWatcher(
         service, session_id, runtime, lambda: locate_wire(homes, acp_session_id)
     )
     # Where to start is decided by who wrote the journal, never by the clock
