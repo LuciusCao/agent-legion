@@ -14,6 +14,7 @@ import pytest
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import inbound_queue
 from server.app.studio_chat.background_wakeup import wake_session
+from server.app.studio_chat.resume_context import build_resume_transcript
 from tests.helpers import studio_chat_fixtures
 
 admission = studio_chat_fixtures.admission
@@ -125,3 +126,35 @@ def test_human_turn_still_refuses_a_concurrent_send(admission) -> None:
         service.send_message(sid, workspace, "while running")
     assert db.count_studio_chat_user_messages(sid) == 1
     assert runtime.inbound_pending == 0
+
+
+def test_resume_transcript_keeps_delivered_and_drops_undelivered_queued(admission) -> None:
+    """codex R2 on #1028: a queued message that never reached the agent asked
+    the user to resend; a non-loadSession resume must not inject it."""
+    service, db, sid, workspace, runtime = admission
+    _start_background_turn(service, db, sid, runtime)
+    delivered = service.send_message(sid, workspace, "delivered question")
+    dropped = service.send_message(sid, workspace, "dropped question")
+    _prompt, start_delivered = _next_item(runtime)
+    _prompt, start_dropped = _next_item(runtime)
+    _finish_turn(service, sid)
+    assert start_delivered()
+    _finish_turn(service, sid)
+    with runtime.lock:
+        runtime.compacting = True
+        runtime.compacting_since = time.monotonic()
+    assert not start_dropped()
+    assert _events(db, sid, "queued_delivered")[0]["message_id"] == delivered["id"]
+    assert _events(db, sid, "queued_dropped")[0]["message_id"] == dropped["id"]
+    with runtime.lock:
+        runtime.compacting = False
+    # Queued behind a later background turn and never started (the runtime
+    # went away before its turn): no delivery proof either.
+    _start_background_turn(service, db, sid, runtime)
+    orphan = service.send_message(sid, workspace, "orphan question")
+    assert orphan["content"]["queued"] is True
+
+    transcript = build_resume_transcript(db.list_studio_chat_messages_tail(sid))
+    assert "用户：delivered question" in transcript
+    assert "dropped question" not in transcript
+    assert "orphan question" not in transcript
