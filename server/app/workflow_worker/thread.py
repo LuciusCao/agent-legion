@@ -158,6 +158,9 @@ class WorkflowWorkerThread:
         # from pre-#389 behavior): a saturated pool plus zero Agents skips the
         # scan, so a ready approval gate parks only after a slot frees; in
         # pure-remote mode an offline Worker fleet has the same effect.
+        # #933: "Agents" = a published Agent OR an active revision with a
+        # self-contained agent node — a workspace with no Agent definitions
+        # must still scan its self-contained agent candidates.
         if not (
             snapshot.has_any_capacity() or has_online_code_workers(self.job_db)
         ) and not agent_profiles_may_exist(self.job_db):

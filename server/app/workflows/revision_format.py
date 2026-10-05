@@ -11,6 +11,7 @@ import yaml
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
 from server.app.workflows.schema import WorkflowNode
 from server.app.workflows.start_text_input import text_input_payload
+from server.app.workflows.workflow_node_execution import node_execution_payload
 from server.app.workflows.workflow_node_skill import apply_skill_echo
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                 "after": node.after,
                 "inputs": node.inputs,
                 "outputs": node.outputs,
-                "execution": asdict(node.execution),
+                "execution": node_execution_payload(node.execution),
                 "skill": asdict(node.skill) if node.skill is not None else None,
                 # Omitted when undeclared (empty) so payload/yaml stay clean.
                 **({"tools": list(node.tools)} if node.tools else {}),
@@ -186,6 +187,10 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
             raw_node["config_schema"] = node.config_schema
         if node.tools:
             raw_node["tools"] = list(node.tools)
+        # #933: self-contained agent profile labels (runtime echoes with
+        # the execution block above).
+        if node.requires_labels:
+            raw_node["requires_labels"] = dict(node.requires_labels)
         apply_skill_echo(raw_node, node)
         payload["nodes"][key] = raw_node
     for edge in definition.edges:

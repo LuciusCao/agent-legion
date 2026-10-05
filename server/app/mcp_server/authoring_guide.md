@@ -444,6 +444,20 @@ the `review` node's `tools:` list of three tools wins over the
 definition's two; an agent node without `tools:` (say `report`, if it is
 agent-routed too) uses ITS Agent definition's default.
 
+### 5.3 Self-contained agent nodes (no Agent definition, #933)
+
+An agent node may carry its whole execution profile in the workflow YAML:
+`execution.runtime` (`pi` or `velites`; a workflow top-level
+`execution.runtime` is the default for every agent node) plus optional
+node-level `requires_labels: {key: value}` (Worker labels must include
+them). With a runtime set, the node needs NO Agent definition: its
+`tools` (default set when omitted), `config_schema` and `skill` binding are
+the profile, and publish does not require a published Agent. Leaving
+`runtime` empty keeps the Agent-definition path above; declaring
+`requires_labels` without a runtime fails publish. Write these fields via
+`save_workflow_draft` (the Studio inspector does not edit them yet); a
+runtime change takes effect for in-flight jobs only after「升级 workflow」.
+
 ## 6. Skill editing (create → read → edit → validate → tag)
 
 Skills live in git repos under the skills root (`<skills root>/<group>/<name>`,

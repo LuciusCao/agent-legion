@@ -1,14 +1,17 @@
-"""Agent node execution profile: the single read model for agent nodes (#932, #440 P1).
+"""Agent node execution profile: the single read model for agent nodes (#932, #933).
 
 Every reader that needs an agent node's execution configuration (runtime,
 tools, labels, config schema, legacy skill fallback) resolves it here
-instead of walking the published Agent catalog itself. In P1 the only
-``source`` is ``agent_definition``: the node's capability resolves to
-exactly one published Agent of the workspace (the catalog's partial unique
-index guarantees at most one per capability), so the profile is a
-field-for-field projection of that definition — zero behavior change.
-P2 (#933) adds ``source='node'`` for self-contained nodes; callers stay
-unchanged because they read only the profile.
+instead of walking the published Agent catalog itself. Two sources (#440
+P2, dual read):
+
+- ``node`` — the node is self-contained (``execution.runtime`` declared,
+  ``workflow_node_profile``): the profile is the node's own runtime /
+  tools / requires_labels / config_schema; no Agent definition, no route.
+- ``agent_definition`` — the legacy path: the node's capability resolves to
+  exactly one published Agent of the workspace (the catalog's partial
+  unique index guarantees at most one per capability), so the profile is a
+  field-for-field projection of that definition.
 
 This module is pure (no DB): the legacy catalog is passed in. The loaders —
 the only place allowed to read ``published_agent_definitions`` (ratchet,
@@ -20,67 +23,37 @@ from the Agent publish path without an import cycle.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Protocol
 
 from server.app.agent_catalog import AgentDefinition
+from server.app.services.agent_node_profile_types import (
+    AgentNodeProfile,
+    profile_from_definition,
+    profile_from_node,
+)
+from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 
-AgentProfileSource = Literal["agent_definition"]
+__all__ = [
+    "AgentNodeProfile",
+    "build_capability_index",
+    "legacy_agent_candidates",
+    "profile_from_definition",
+    "resolve_agent_node_profile",
+    "resolve_routed_agent_profile",
+]
 
 
 class AgentNodeLike(Protocol):
     """The node fields profile resolution reads (WorkflowNode satisfies it)."""
 
     @property
+    def key(self) -> str: ...
+
+    @property
     def capability(self) -> str: ...
 
     @property
     def node_type(self) -> str: ...
-
-
-@dataclass(frozen=True)
-class LegacyAgentRef:
-    """The published Agent definition a legacy-sourced profile projects."""
-
-    agent_id: str
-    definition: AgentDefinition
-
-    @property
-    def capability(self) -> str:
-        return self.definition.capability
-
-    def definition_hash(self) -> str:
-        return self.definition.definition_hash()
-
-
-@dataclass(frozen=True)
-class AgentNodeProfile:
-    """Execution profile of one agent node.
-
-    ``skill`` is the legacy definition-level fallback (``""`` = none); the
-    node's own ``skill`` binding still wins at dispatch (#76).
-    """
-
-    runtime: str
-    tools: tuple[str, ...]
-    requires_labels: Mapping[str, str]
-    config_schema: Mapping[str, Any]
-    skill: str
-    source: AgentProfileSource
-    legacy_ref: LegacyAgentRef | None
-
-
-def profile_from_definition(agent_id: str, definition: AgentDefinition) -> AgentNodeProfile:
-    """Project one published (or pinned) Agent definition into a profile."""
-    return AgentNodeProfile(
-        runtime=definition.runtime,
-        tools=definition.tools,
-        requires_labels=definition.requires_labels,
-        config_schema=definition.config_schema,
-        skill=definition.skill,
-        source="agent_definition",
-        legacy_ref=LegacyAgentRef(agent_id=agent_id, definition=definition),
-    )
 
 
 CapabilityIndex = Mapping[str, tuple[str, ...]]
@@ -129,14 +102,19 @@ def resolve_agent_node_profile(
 ) -> AgentNodeProfile | None:
     """The node's execution profile, or None when it has none.
 
-    None for non-agent nodes (#284: only ``type: agent`` dispatches through
-    an Agent) and when the capability resolves to zero or several published
+    Self-contained nodes (#933) resolve to their own ``source='node'``
+    profile. None for non-agent nodes (#284: only ``type: agent`` dispatches
+    through an Agent) and when the capability resolves to zero or several published
     Agents — the latter is a catalog error every caller already rejects or
     treats as unresolved (publish gate, route derivation). Pass *index*
     when resolving several nodes against the same catalog.
     """
     if node.node_type != "agent":
         return None
+    # #933: a self-contained node wins over any published Agent sharing its
+    # capability — its profile never touches the catalog.
+    if is_self_contained_agent_node(node):
+        return profile_from_node(node)
     candidates = legacy_agent_candidates(node, legacy_catalog, index=index)
     if len(candidates) != 1:
         return None

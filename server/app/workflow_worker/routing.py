@@ -17,9 +17,15 @@ from typing import TYPE_CHECKING
 from server.app.executors.models import CODE_EXECUTOR_ID
 from server.app.jobs.queries.workspace_node_limits import get_local_node_limit
 from server.app.services.agent_node_profile_catalog import resolve_dispatch_agent_profile
+from server.app.services.agent_node_profile_types import (
+    PROFILE_SOURCE_DEFINITION,
+    PROFILE_SOURCE_NODE,
+)
+from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
+    from server.app.workflows.schema import WorkflowNode
 
 ROUTE_CACHE_TTL_SECONDS = 30.0
 
@@ -32,16 +38,32 @@ class NodeRoute:
     target_id: str = ""
     local_node_limit: int | None = None
     error_message: str = ""
+    # #933: 'node' = self-contained agent node (target_id is the node key,
+    # the profile comes from the job snapshot); 'agent_definition' = routed
+    # to a published Agent through workspace_node_routes.
+    profile_source: str = PROFILE_SOURCE_DEFINITION
 
 
 def resolve_node_route(
     worker: WorkflowWorkerThread,
     workspace_id: str,
     workflow_key: str,
-    node_key: str,
-    capability: str,
+    node: WorkflowNode,
 ) -> NodeRoute:
-    """Resolve a node's route, through the worker's short-TTL cache."""
+    """Resolve a node's route, through the worker's short-TTL cache.
+
+    A self-contained agent node (#933, ``execution.runtime`` in the job's
+    frozen snapshot) routes to itself with zero DB and is never cached: the
+    cache key is per (workspace, workflow, node) while the profile is per
+    job snapshot, so a legacy job and an upgraded job sharing a node key
+    must not see each other's route.
+    """
+    if is_self_contained_agent_node(node):
+        if worker.agent_dispatch is None:
+            raise RuntimeError("Agent dispatch service is not configured")
+        return NodeRoute("agent", target_id=node.key, profile_source=PROFILE_SOURCE_NODE)
+    node_key = node.key
+    capability = node.capability
     key = (workspace_id, workflow_key, node_key)
     now = time.monotonic()
     cached = worker.state.route_cache.get(key)

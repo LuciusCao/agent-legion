@@ -1,0 +1,150 @@
+"""Dual-track publish gate (#933, #440 P2).
+
+Self-contained agent nodes (``execution.runtime``) publish in a workspace
+with no Agent definitions and materialize no route; half-filled profiles
+are rejected; legacy agent nodes keep requiring exactly one published
+Agent. The scan-gate probe sees the self-contained active revision.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+import yaml
+
+from server.app.jobs.queries import JobQueries
+from server.app.jobs.queries.agent_definition_reads import has_self_contained_agent_nodes
+from server.app.services.agent_node_profile_catalog import agent_profiles_may_exist
+from server.app.services.workflow_draft_publish import validate_workflow_draft_for_publish
+from server.app.services.workflow_revisions import WorkflowRevisionService
+from server.app.workflows.definition import workflow_definition_from_mapping
+from tests.postgres_support import TEST_DATABASE_URL
+
+_SKILL = "education-video-problems-generation/review-questions"
+
+
+def _yaml(node_extra: str, top: str = "") -> str:
+    return f"""
+key: profile_flow
+label: Profile Flow
+{top}
+nodes:
+  draft:
+    type: agent
+    capability: draft
+    outputs: [draft.json]
+    skill:
+      key: {_SKILL}
+{node_extra}
+"""
+
+
+_SELF_CONTAINED = _yaml(
+    "    requires_labels: {gpu: 'yes'}\n",
+    top="execution:\n  runtime: velites\n  provider: p\n  model: m",
+)
+
+
+def _skill_base(tmp_path: Path) -> Path:
+    base = tmp_path / "skills"
+    repo = base / _SKILL
+    repo.mkdir(parents=True)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True, env=env)
+    return base
+
+
+def _workspace(queries: JobQueries) -> str:
+    return str(queries.create_workspace("profile-ws", default_workflow_key="profile_flow")["id"])
+
+
+def _routes(queries: JobQueries, workspace_id: str) -> list[dict]:
+    with queries._connect_read() as conn:
+        rows = conn.execute(
+            "select node_key, target_kind from workspace_node_routes where workspace_id=%s",
+            (workspace_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def test_self_contained_node_publishes_without_any_agent_definition(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace_id = _workspace(queries)
+
+    errors = validate_workflow_draft_for_publish(
+        queries, workspace_id, _SELF_CONTAINED, True, skill_base_dir=_skill_base(tmp_path)
+    )
+
+    assert errors == []
+
+
+def test_half_filled_profile_is_rejected_at_publish(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace_id = _workspace(queries)
+
+    errors = validate_workflow_draft_for_publish(
+        queries,
+        workspace_id,
+        _yaml("    requires_labels: {gpu: 'yes'}\n"),
+        True,
+        skill_base_dir=_skill_base(tmp_path),
+    )
+
+    assert any("requires_labels but no execution.runtime" in error for error in errors)
+
+
+def test_legacy_agent_node_still_needs_a_published_agent(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace_id = _workspace(queries)
+
+    errors = validate_workflow_draft_for_publish(
+        queries, workspace_id, _yaml(""), True, skill_base_dir=_skill_base(tmp_path)
+    )
+
+    assert any("must resolve to exactly one published Agent" in error for error in errors)
+
+
+def test_self_contained_revision_materializes_no_route_and_opens_the_scan_gate(
+    tmp_path: Path,
+) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace_id = _workspace(queries)
+    assert agent_profiles_may_exist(queries) is False
+
+    raw = yaml.safe_load(_SELF_CONTAINED)
+    raw["key"] = workspace_id
+    WorkflowRevisionService(queries, True).save_workspace_revision(
+        workspace_id, workflow_definition_from_mapping(raw)
+    )
+
+    assert _routes(queries, workspace_id) == []
+    # The poll-loop scan gates (thread.py / agent_gate.py) must open with
+    # zero published Agents anywhere (#933 high-risk gate).
+    assert has_self_contained_agent_nodes(queries) is True
+    assert agent_profiles_may_exist(queries) is True
+
+
+def test_scan_probe_ignores_legacy_agent_revisions(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace_id = _workspace(queries)
+    corrupt_ws = str(queries.create_workspace("corrupt-ws", default_workflow_key="x")["id"])
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into workflow_revisions(id, workspace_id, version, status,"
+            " definition_json, definition_hash)"
+            " values ('legacy-rev', %s, 1, 'active', %s, 'h')",
+            (
+                workspace_id,
+                '{"nodes": {"draft": {"node_type": "agent", "execution": {"provider": "p"}}}}',
+            ),
+        )
+        conn.execute(
+            "insert into workflow_revisions(id, workspace_id, version, status,"
+            " definition_json, definition_hash)"
+            " values ('corrupt-rev', %s, 1, 'active', 'not json', 'h')",
+            (corrupt_ws,),
+        )
+
+    assert has_self_contained_agent_nodes(queries) is False

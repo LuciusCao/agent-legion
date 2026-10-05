@@ -108,12 +108,13 @@ def _resolved_agent_nodes(
 ) -> dict[str, AgentNodeProfile]:
     """node_key → agent 节点的执行档案（#932 门面，与 dispatch 同款解析）。
 
-    P1 来源 = capability → 唯一 published Agent（同 ``derive_agent_routes``）；
+    legacy 来源 = capability → 唯一 published Agent（同 ``derive_agent_routes``）；
     0 个或多个 published（数据态漂移）、catalog 不可用都不解析（调用方
-    按不可证明处理）。
+    按不可证明处理）。自含节点（#933 ``source='node'``）不读 catalog，
+    catalog 不可用时仍按节点档案解析。
     """
     if catalog is None:
-        return {}
+        catalog = {}
     index = build_capability_index(catalog)
     resolved: dict[str, AgentNodeProfile] = {}
     for key, node in definition.executable_nodes.items():
@@ -126,13 +127,11 @@ def _resolved_agent_nodes(
 def _current_agent_identities(
     catalog: Mapping[str, AgentDefinition] | None, definition: WorkflowDefinition
 ) -> dict[str, str]:
-    """node_key → agent 节点当前 published 实现的定义哈希。"""
+    """node_key → agent 节点当前实现身份（legacy = 定义哈希，自含节点 = 档案哈希，#933）。"""
     identities: dict[str, str] = {}
     for key, profile in _resolved_agent_nodes(catalog, definition).items():
-        if profile.legacy_ref is None:
-            continue
         try:
-            identities[key] = profile.legacy_ref.definition_hash()
+            identities[key] = profile.identity_hash()
         except Exception:
             # #204 broad-except audit: 纯内存序列化失败即数据态损坏，
             # 该节点按不可证明处理。

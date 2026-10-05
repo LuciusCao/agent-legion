@@ -16,6 +16,9 @@ from psycopg import IntegrityError
 from server.app.agent_broker.manifest_guard import require_routable_execution
 from server.app.db.transaction import write_transaction
 from server.app.executors._lease_control import lock_job_mutation_and_read_generation
+from server.app.services.agent_node_profile_types import (
+    PROFILE_SOURCE_NODE,
+)
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionRequest
@@ -47,14 +50,24 @@ def enqueue_request(broker: AgentExecutionBroker, request: AgentExecutionRequest
             # Code requests are executor-routed (not Agent-routed) and carry
             # no versioned Agent definition; dispatch validated the binding,
             # code hash and worker eligibility already.
-            stored_limit = 1 if request.kind == "code" else _validate_agent_route(conn, request)
+            # Self-contained agent nodes (profile_source='node', #933) have no
+            # route row and no versioned definition: the frozen profile rides
+            # the request row itself, so only the audit limit is read.
+            if request.kind == "code":
+                stored_limit = 1
+            elif request.profile_source == PROFILE_SOURCE_NODE:
+                stored_limit = _workspace_agent_limit(conn, request.workspace_id)
+            else:
+                stored_limit = _validate_agent_route(conn, request)
             conn.execute(
                 """
                 insert into agent_execution_requests(
                   execution_id, workspace_id, job_id, node_key,
                   kind, agent_id, agent_definition_hash, node_concurrency_limit,
-                  queued_at, manifest_json, pinned_agent_version, execution_generation
-                ) values (%s, %s, %s, %s, %s, %s, %s, %s, current_timestamp, %s, %s, %s)
+                  queued_at, manifest_json, pinned_agent_version, execution_generation,
+                  profile_source, runtime, requires_labels_json
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s, current_timestamp, %s, %s, %s,
+                          %s, %s, %s)
                 """,
                 (
                     execution_id,
@@ -71,6 +84,13 @@ def enqueue_request(broker: AgentExecutionBroker, request: AgentExecutionRequest
                     json.dumps(dict(request.manifest), ensure_ascii=False, sort_keys=True),
                     request.pinned_agent_version,
                     request.execution_generation,
+                    request.profile_source,
+                    request.runtime,
+                    (
+                        json.dumps(dict(request.requires_labels), sort_keys=True)
+                        if request.requires_labels is not None
+                        else None
+                    ),
                 ),
             )
     except IntegrityError as exc:
@@ -121,10 +141,16 @@ def _validate_agent_route(conn: Any, request: AgentExecutionRequest) -> int:
         ).fetchone()
         if definition is None or definition["definition_hash"] != request.agent_definition_hash:
             raise ValueError("Agent definition is unavailable or changed before enqueue")
+    return _workspace_agent_limit(conn, request.workspace_id)
+
+
+def _workspace_agent_limit(conn: Any, workspace_id: str) -> int:
+    """Audit-only snapshot of the governing workspace-level limit at enqueue.
+
+    1 records "no configured limit (unlimited)". Never enforced.
+    """
     capacity = conn.execute(
         "select max_concurrency from workspace_agent_capacities where workspace_id=%s",
-        (request.workspace_id,),
+        (workspace_id,),
     ).fetchone()
-    # Audit-only snapshot of the governing workspace-level limit at enqueue
-    # time; 1 records "no configured limit (unlimited)". Never enforced.
     return int(capacity["max_concurrency"]) if capacity is not None else 1

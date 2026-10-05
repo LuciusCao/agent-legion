@@ -126,7 +126,10 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
     # workspace_id` scan would walk the entire queued index on every claim.
     # kind='code' rows skip the versioned_entities hard join (batch 2): their
     # payload is self-contained, runtime is the literal 'code', and the
-    # capability comes from the frozen manifest.
+    # capability comes from the frozen manifest. Self-contained agent rows
+    # (profile_source='node', schema v92, #933) skip it the same way: runtime
+    # and requires_labels come from the request row, capability from the
+    # manifest — they never depend on a published Agent definition.
     # #691 (CONFIG-RUNTIME-TIMEOUT-001): the workspace override (L2) for the
     # claim's timeout decision rides each row as a SCALAR only. The CTE parses
     # the workflow's override map once per workspace (never selected out); its
@@ -166,13 +169,19 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
         cross join lateral (
           select r2.*,
                  case when r2.kind='code' then 'code'
+                      when r2.profile_source='node' then r2.runtime
                       else d.definition_json::jsonb->>'runtime' end as runtime,
-                 case when r2.kind='code' then r2.manifest_json::jsonb->>'capability'
+                 case when r2.kind='code' or r2.profile_source='node'
+                      then r2.manifest_json::jsonb->>'capability'
                       else d.definition_json::jsonb->>'capability' end as capability,
-                 coalesce(d.definition_json, '{}') as definition_json
+                 case when r2.profile_source='node'
+                      then json_build_object('requires_labels',
+                             coalesce(r2.requires_labels_json::json, '{}'::json))::text
+                      else coalesce(d.definition_json, '{}') end as definition_json
           from agent_execution_requests r2
           left join versioned_entities d
-            on r2.kind='agent' and d.entity_type='agent' and d.workspace_id=r2.workspace_id
+            on r2.kind='agent' and r2.profile_source='agent_definition'
+           and d.entity_type='agent' and d.workspace_id=r2.workspace_id
            and d.entity_key=r2.agent_id and d.definition_hash=r2.agent_definition_hash
            -- Quality replay pins match their immutable version row (any
            -- status); unpinned requests match the currently published row.
@@ -180,7 +189,7 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
                  and d.version=r2.pinned_agent_version)
                 or (r2.pinned_agent_version is null and d.status='published'))
           where r2.workspace_id=ws.workspace_id and r2.state='queued' and r2.kind=%s
-            and (r2.kind='code' or d.definition_json is not null)
+            and (r2.kind='code' or r2.profile_source='node' or d.definition_json is not null)
           order by r2.queued_at, r2.execution_id limit %s
         ) r
         join jobs j on j.id=r.job_id
