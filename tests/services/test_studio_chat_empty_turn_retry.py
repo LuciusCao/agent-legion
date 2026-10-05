@@ -153,9 +153,9 @@ def test_token_revoked_before_the_claim_sends_nothing(admission, monkeypatch) ->
     _empty_turn(service, sid, runtime)
     real_claim = db.claim_studio_chat_turn_with_token
 
-    def revoke_then_claim(session_id, token_hash):
+    def revoke_then_claim(session_id, token_hash, notice):
         db.revoke_scoped_token(token_hash)
-        return real_claim(session_id, token_hash)
+        return real_claim(session_id, token_hash, notice)
 
     monkeypatch.setattr(db, "claim_studio_chat_turn_with_token", revoke_then_claim)
     with pytest.raises(ConflictError):

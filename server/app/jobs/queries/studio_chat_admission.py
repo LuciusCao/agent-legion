@@ -42,30 +42,39 @@ def _claim_idle(conn: Any, session_id: str) -> None:
         raise StudioChatAdmissionRejected
 
 
+def _insert_row(
+    conn: Any, session_id: str, kind: str, role: str, content: dict[str, Any]
+) -> dict[str, Any]:
+    message_id = uuid4().hex
+    row = conn.execute(
+        "insert into studio_chat_messages(id,session_id,kind,role,content_json)"
+        " values (%s,%s,%s,%s,%s) returning seq,created_at",
+        (message_id, session_id, kind, role, json.dumps(content)),
+    ).fetchone()
+    return _message_record(message_id, session_id, kind, role, content, row)
+
+
 class StudioChatAdmissionQueriesMixin(ConnectionQueriesMixin):
     def accept_studio_chat_message(
         self, session_id: str, token_hash: str, text: str
     ) -> dict[str, Any]:
-        message_id = uuid4().hex
-        content = {"text": text}
         with self.connect() as conn:
             _lock_live_token(conn, token_hash)
             _claim_idle(conn, session_id)
-            row = conn.execute(
-                "insert into studio_chat_messages(id,session_id,kind,role,content_json)"
-                " values (%s,%s,'text','user',%s) returning seq,created_at",
-                (message_id, session_id, json.dumps(content)),
-            ).fetchone()
-        assert row is not None
-        return _message_record(message_id, session_id, "text", "user", content, row)
+            return _insert_row(conn, session_id, "text", "user", {"text": text})
 
-    def claim_studio_chat_turn_with_token(self, session_id: str, token_hash: str) -> None:
-        """#882 replay / queued delivery: the human-admission token lock and
-        the idle claim in one transaction, for a message already persisted.
-        Raises StudioChatAdmissionRejected when either check fails."""
+    def claim_studio_chat_turn_with_token(
+        self, session_id: str, token_hash: str, notice: dict[str, Any]
+    ) -> dict[str, Any]:
+        """#882 replay / queued delivery: the human-admission token lock, the
+        idle claim and the status row proving the delivery commit together, for
+        a message already persisted — no claimed turn without its proof (the
+        resume transcript trusts ``queued_delivered``). Raises
+        StudioChatAdmissionRejected when either check fails."""
         with self.connect() as conn:
             _lock_live_token(conn, token_hash)
             _claim_idle(conn, session_id)
+            return _insert_row(conn, session_id, "status", "system", notice)
 
     def enqueue_studio_chat_message(
         self, session_id: str, token_hash: str, text: str

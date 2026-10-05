@@ -10,7 +10,9 @@ from __future__ import annotations
 import time
 
 import pytest
+from psycopg import OperationalError
 
+from server.app.db.connection import DatabaseConnection
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import inbound_queue
 from server.app.studio_chat.background_wakeup import wake_session
@@ -117,6 +119,32 @@ def test_queued_message_that_cannot_start_is_dropped_visibly(admission) -> None:
         "message_id": queued["id"],
         "detail": inbound_queue.DROPPED_COMPACTING,
     }
+
+
+def test_delivery_proof_commits_with_the_claim(admission, monkeypatch) -> None:
+    """codex R3 on #1028: if the queued_delivered row cannot be written, the
+    claim rolls back with it — no prompt is sent without its proof."""
+    service, db, sid, workspace, runtime = admission
+    _start_background_turn(service, db, sid, runtime)
+    queued = service.send_message(sid, workspace, "needs proof")
+    _prompt, start = _next_item(runtime)
+    _finish_turn(service, sid)
+    execute = DatabaseConnection.execute
+
+    def fail_proof(conn, sql, params=None):
+        if sql.startswith("insert into studio_chat_messages") and "queued_delivered" in str(params):
+            raise OperationalError("injected proof failure")
+        return execute(conn, sql, params)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(DatabaseConnection, "execute", fail_proof)
+        assert not start()
+    assert db.get_studio_chat_session(sid)["status"] == "idle"
+    assert not runtime.turn_open
+    assert _events(db, sid, "queued_delivered") == []
+    [dropped] = _events(db, sid, "queued_dropped")
+    assert dropped["message_id"] == queued["id"]
+    assert dropped["detail"] == inbound_queue.DROPPED_ERROR
 
 
 def test_human_turn_still_refuses_a_concurrent_send(admission) -> None:

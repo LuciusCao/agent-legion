@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.auth.sessions import hash_token
 from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.studio_chat import compaction
+from server.app.studio_chat.payloads import serialize_message
 from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
 from server.app.studio_chat.turn_state import open_turn
 
@@ -109,7 +110,7 @@ def _deliver(
             elif not _token_alive(service, runtime.token):
                 invalidate_run_token(service, session_id, runtime)
                 detail = DROPPED_TOKEN
-            elif (detail := _claim(service, session_id, runtime)) is None:
+            elif (detail := _claim(service, session_id, runtime, message_id)) is None:
                 open_turn(runtime, text, message_id=message_id, prompt=prompt)
         except Exception:
             # #204 broad-except audit: every step before the claim is a
@@ -118,34 +119,57 @@ def _deliver(
             # killing the prompt loop. Traceback retained.
             logger.warning("queued chat message delivery failed for %s", session_id, exc_info=True)
             detail = DROPPED_ERROR
-        _note(service, session_id, message_id, detail)
+        if detail is not None:
+            _note_dropped(service, session_id, message_id, detail)
         return detail is None
 
 
-def _claim(service: StudioChatService, session_id: str, runtime: SessionRuntime) -> str | None:
-    """Token lock + idle claim in one transaction (human-admission parity)."""
+def _claim(
+    service: StudioChatService, session_id: str, runtime: SessionRuntime, message_id: str
+) -> str | None:
+    """Token lock + idle claim + ``queued_delivered`` row in one transaction
+    (human-admission parity; the delivery proof can never be missing for a
+    turn that was actually claimed and sent)."""
+    notice = {"event": "queued_delivered", "message_id": message_id, "detail": DELIVERED_DETAIL}
     try:
-        service.db.claim_studio_chat_turn_with_token(session_id, hash_token(runtime.token))
+        row = service.db.claim_studio_chat_turn_with_token(
+            session_id, hash_token(runtime.token), notice
+        )
     except StudioChatAdmissionRejected:
         alive = _token_alive(service, runtime.token)
         if not alive:
             invalidate_run_token(service, session_id, runtime)
         return DROPPED_BUSY if alive else DROPPED_TOKEN
+    publish_committed(service, session_id, row)
     return None
 
 
-def _note(service: StudioChatService, session_id: str, message_id: str, detail: str | None) -> None:
-    event = "queued_delivered" if detail is None else "queued_dropped"
+def publish_committed(service: StudioChatService, session_id: str, row: dict[str, Any]) -> None:
+    """Push an already-committed status row + snapshot; best-effort only."""
+    try:
+        service.store.publish(session_id, {"type": "message", "message": serialize_message(row)})
+        service.store.publish_session(session_id)
+    except Exception:
+        # #204 broad-except audit: the row and claim are durable; a failed
+        # publish must not abort the claimed turn's prompt. SSE reconnect /
+        # REST refill recovers it; traceback retained.
+        logger.warning("queued chat message publish failed for %s", session_id, exc_info=True)
+
+
+def _note_dropped(
+    service: StudioChatService, session_id: str, message_id: str, detail: str
+) -> None:
     try:
         service.store.append_message(
             session_id,
             "status",
             "system",
-            {"event": event, "message_id": message_id, "detail": detail or DELIVERED_DETAIL},
+            {"event": "queued_dropped", "message_id": message_id, "detail": detail},
         )
         service.store.publish_session(session_id)
     except Exception:
-        # #204 broad-except audit: advisory notice after the outcome is
-        # decided; a raise here would abort a claimed turn's prompt. The UI
-        # falls back to the session status; traceback retained.
+        # #204 broad-except audit: advisory notice after the drop is decided
+        # (no turn was claimed, nothing sent); a missing row only leaves the
+        # UI on its session-status fallback and the transcript excludes the
+        # message either way. Traceback retained.
         logger.warning("queued chat message notice failed for %s", session_id, exc_info=True)

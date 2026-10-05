@@ -19,22 +19,20 @@ automatic replay could hit the same quiescence window again.
 
 from __future__ import annotations
 
-import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from server.app.auth.scoped_tokens import renew_scoped_token
 from server.app.auth.sessions import hash_token
 from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import compaction
+from server.app.studio_chat.inbound_queue import publish_committed
 from server.app.studio_chat.token_admission import require_live_run_token
 from server.app.studio_chat.turn_state import open_turn
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
-
-logger = logging.getLogger(__name__)
 
 RETRY_DETAIL = "已重新投递上一条未被处理的消息"
 
@@ -54,22 +52,18 @@ def retry_empty_turn(service: StudioChatService, session_id: str, runtime: Sessi
         renew_scoped_token(service.db, runtime.token)
         require_live_run_token(service, session_id, runtime)
 
+        notice = {"event": "empty_turn_retry", "message_id": message_id, "detail": RETRY_DETAIL}
+        committed: dict[str, Any] = {}
+
         def accept() -> None:
-            service.db.claim_studio_chat_turn_with_token(session_id, hash_token(runtime.token))
-            open_turn(runtime, text, message_id=message_id, prompt=prompt)
-            try:
-                service.store.append_message(
-                    session_id,
-                    "status",
-                    "system",
-                    {"event": "empty_turn_retry", "message_id": message_id, "detail": RETRY_DETAIL},
+            # Claim + replay notice commit together (no claimed turn without
+            # its timeline record, and no record without the turn).
+            committed.update(
+                service.db.claim_studio_chat_turn_with_token(
+                    session_id, hash_token(runtime.token), notice
                 )
-            except Exception:
-                # #204 broad-except audit: the claim and turn are committed;
-                # raising here would strand a running row with no prompt.
-                # The notice is advisory (the reply itself shows the replay),
-                # so log with traceback and continue the hand-off.
-                logger.warning("empty turn retry notice failed for %s", session_id, exc_info=True)
+            )
+            open_turn(runtime, text, message_id=message_id, prompt=prompt)
 
         try:
             queued = runtime.handle.send_prompt(prompt, accept=accept)
@@ -78,5 +72,5 @@ def retry_empty_turn(service: StudioChatService, session_id: str, runtime: Sessi
             raise ConflictError("Chat session is no longer idle") from None
         if not queued:
             raise ConflictError("Chat session agent is not running")
-    service.store.publish_session(session_id)
+    publish_committed(service, session_id, committed)
     return True
