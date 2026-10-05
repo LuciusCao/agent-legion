@@ -41,11 +41,15 @@ EMPTY_TURN_SECONDS = 2.0
 # How long trailing content may lag the prompt response before the verdict.
 EMPTY_TURN_GRACE_SECONDS = 1.5
 
+# #882: a confirmed empty turn keeps its human message replayable — the
+# idle-state 「继续对话」 re-delivers it once (empty_turn_retry.py).
 COMPACTION_DETAIL = (
     "agent 未实际处理这条消息（本会话发生过上下文压缩，agent 可能仍在后台压缩）；"
-    "请稍后重发，如反复出现请点「＋ 新对话」"
+    "请稍后点「继续对话」重新投递，如反复出现请点「＋ 新对话」"
 )
-NEUTRAL_DETAIL = "agent 未返回任何内容就结束了这一轮，这条消息可能没有被处理；请重发"
+NEUTRAL_DETAIL = (
+    "agent 未返回任何内容就结束了这一轮，这条消息可能没有被处理；可点「继续对话」重新投递"
+)
 
 
 def schedule_check(
@@ -99,6 +103,7 @@ def _confirm(
             ):
                 return
             suspected = runtime.kimi_agent and (runtime.compacting or runtime.compaction_seen)
+            source = runtime.turn_retry_source
             # Appended under the lock (compact_timer._fire precedent): a
             # new turn cannot open between the verdict and the notice, so
             # the warning never lands below the user's next message.
@@ -110,8 +115,12 @@ def _confirm(
                     "event": "empty_turn",
                     "detail": COMPACTION_DETAIL if suspected else NEUTRAL_DETAIL,
                     "compaction_suspected": suspected,
+                    "message_id": source[0] if source else None,
                 },
             )
+            # Armed only after the notice is durable: the UI offers the
+            # replay from that row, the backend honours it from this slot.
+            runtime.empty_turn_retry = source
     except Exception:
         # #204 broad-except audit: timer-thread advisory notice. Failure
         # means only that the warning row is missing (the turn itself already

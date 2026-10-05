@@ -16,6 +16,26 @@ function message(role: 'user' | 'agent', text: string, id = 'm1'): ChatMessage {
 }
 
 describe('StudioChatTextBubble', () => {
+  it('tags inbound-queued user messages (#882)', () => {
+    const { container, rerender } = render(
+      <StudioChatTextBubble
+        message={message('user', '排队的问题')}
+        streaming={false}
+        queueState="pending"
+      />
+    )
+    expect(container).toHaveTextContent('排队的问题')
+    expect(container).toHaveTextContent('已排队')
+    rerender(
+      <StudioChatTextBubble
+        message={message('user', '排队的问题')}
+        streaming={false}
+        queueState="dropped"
+      />
+    )
+    expect(container).toHaveTextContent('未送达，请重发')
+  })
+
   it('renders a completed agent message as markdown', () => {
     const { container } = render(
       <StudioChatTextBubble

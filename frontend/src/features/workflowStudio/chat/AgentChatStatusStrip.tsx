@@ -1,3 +1,4 @@
+import { emptyTurnRetryPending } from './studioChatTurnRecovery'
 import type { StudioChat } from './useStudioChat'
 import type { useStudioChatQueue } from './useStudioChatQueue'
 import styles from './AgentChatStatusStrip.module.css'
@@ -45,6 +46,23 @@ export function AgentChatStatusStrip({ chat, queue }: Props) {
           onClick={() => void chat.resume()}
         >
           {chat.resuming ? '正在恢复…' : '继续对话'}
+        </button>
+      </>
+    )
+  } else if (status === 'idle' && emptyTurnRetryPending(chat.messages)) {
+    // #882：会话仍空闲可用，但上一条消息被确认未处理——「继续对话」重新投递
+    // 那一条（后端只投递一次，不新增用户消息）。
+    runSlot = (
+      <>
+        <span className={`${styles.dot} ${styles.dotError}`} />
+        <span className={styles.label}>上一条消息未被处理</span>
+        <button
+          type="button"
+          className={styles.button}
+          disabled={chat.resuming}
+          onClick={() => void chat.resume()}
+        >
+          {chat.resuming ? '正在重新投递…' : '继续对话'}
         </button>
       </>
     )
