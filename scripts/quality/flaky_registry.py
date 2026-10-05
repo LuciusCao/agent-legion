@@ -150,9 +150,9 @@ def load_registry(path: Path) -> list[RegistryEntry]:
 
 def touched_entry_ids(entries: list[RegistryEntry], base_path: Path) -> set[str]:
     """Ids of entries added, or whose deadline changed, relative to a base
-    registry (#941 R3). PRs into non-default branches enforce expiry only for
-    these: scheduled jobs never check release/develop, yet untouched entries
-    must not turn every PR red on their deadline day. The base is parsed
+    registry (#941 R3/R4). Every PR enforces expiry for these (the nightly
+    job sees only the default branch, and only after a merge), yet untouched
+    entries must not turn every PR red on their deadline day. The base is parsed
     leniently because it may predate the current schema."""
     try:
         data = yaml.safe_load(base_path.read_text(encoding="utf-8"))

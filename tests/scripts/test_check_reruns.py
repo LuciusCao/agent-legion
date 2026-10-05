@@ -379,3 +379,22 @@ def test_base_registry_enforces_expiry_only_for_touched_entries(tmp_path: Path) 
         )
         == 0
     )
+
+
+def test_pr_gate_passes_base_registry_for_every_target_branch() -> None:
+    # #941 R4: a default-branch condition let PRs into main add an already
+    # expired entry; the base registry is passed whenever a base sha exists.
+    workflow = yaml.safe_load(
+        (Path(__file__).resolve().parents[2] / ".github/workflows/quality-gate.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    step = next(
+        step
+        for step in workflow["jobs"]["backend-coverage"]["steps"]
+        if step.get("name") == "Enforce flaky rerun registry"
+    )
+    assert "pull_request.base.sha" in step["env"]["BASE_SHA"]
+    assert "default_branch" not in str(step) and "base_ref" not in str(step)
+    assert 'if [ -n "$BASE_SHA" ]; then' in step["run"]
+    assert "--base-registry" in step["run"]

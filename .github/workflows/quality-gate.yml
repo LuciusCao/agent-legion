@@ -617,20 +617,19 @@ jobs:
       # immediately. Deadline expiry is a wall-clock judgement and is only
       # enforced by nightly-gate.yml exemption-expiry (#941): enforcing it
       # here turned every deadline day red for unrelated PRs.
-      # Scheduled jobs only run on the default branch, so PRs into any other
-      # branch (release/*, develop) still reject entries the PR itself adds
-      # or re-dates with an already expired deadline (--base-registry); the
-      # untouched entries stay clock-free (#941 R3).
+      # Every PR / merge-group run (whatever its target branch) still rejects
+      # entries it adds or re-dates with an already expired deadline, judged
+      # against the target's registry (--base-registry); untouched entries
+      # stay clock-free (#941 R3/R4). Scheduled jobs only see the default
+      # branch, and the nightly check runs only after the merge.
       - name: Enforce flaky rerun registry
         if: always()
         env:
-          BASE_REF: ${{ github.base_ref }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
           base_args=()
-          if [ -n "$BASE_REF" ] && [ "$BASE_REF" != "$DEFAULT_BRANCH" ]; then
+          if [ -n "$BASE_SHA" ]; then
             git fetch --no-tags --depth=1 origin "$BASE_SHA"
             if git show "$BASE_SHA:tests/flaky_registry.yaml" >"$RUNNER_TEMP/base-flaky-registry.yaml"; then
               base_args=(--base-registry "$RUNNER_TEMP/base-flaky-registry.yaml")

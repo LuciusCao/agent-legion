@@ -165,8 +165,8 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         metavar="PATH",
         help="the target branch's registry: entries added or re-dated "
-        "relative to it must not already be expired (#941 R3, PRs into "
-        "release/develop, which no scheduled job checks)",
+        "relative to it must not already be expired (#941 R3/R4, passed by "
+        "every PR run regardless of target branch)",
     )
     args = parser.parse_args(argv)
 
