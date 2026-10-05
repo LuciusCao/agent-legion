@@ -144,13 +144,19 @@ def _finish(
     handler: AgentCompletionHandler,
     artifacts: dict[str, Any],
     expected: tuple[str, ...] = ("out.json",),
+    inputs: tuple[str, ...] = (),
 ) -> None:
     handler.finish(
         lease_id="lease-1",
         worker_id="worker-1",
         job_id="job-1",
         node_key="node_a",
-        manifest={"expected_outputs": list(expected), "execution_id": "exec-1", "skill": SKILL},
+        manifest={
+            "expected_outputs": list(expected),
+            "inputs": list(inputs),
+            "execution_id": "exec-1",
+            "skill": SKILL,
+        },
         outcome=AgentOutcome(status="completed", exit_code=0, output_artifacts=artifacts),
         archive_name="",
     )
@@ -181,7 +187,6 @@ def test_remote_output_snapshot_reuses_promote_digest(
     """codex #913 P2：校验前快照取提升阶段已流式算出的摘要，不再整读产物；
     只在校验通过后复算一次。"""
     import server.app.workflows.remote_output_guard as guard
-    import server.app.workflows.worker_output_validation as wov
 
     hashed: list[str] = []
     real_sha256 = guard.file_sha256
@@ -189,9 +194,9 @@ def test_remote_output_snapshot_reuses_promote_digest(
         guard, "file_sha256", lambda path: hashed.append(path.name) or real_sha256(path)
     )
     snapshots: list[dict[str, str]] = []
-    real_find = wov.find_remote_output_rewrites
+    real_find = guard.find_remote_output_rewrites
     monkeypatch.setattr(
-        wov,
+        guard,
         "find_remote_output_rewrites",
         lambda view, snapshot: snapshots.append(dict(snapshot)) or real_find(view, snapshot),
     )
@@ -263,6 +268,92 @@ def test_failing_validator_that_also_rewrites_keeps_its_verdict_and_evicts(
     assert result.status == "failed"
     assert result.error_message.startswith("Output validation failed: bad output")
     _assert_reads_serve_worker_bytes(job_dir, object_store)
+
+
+def test_input_read_only_violation_that_also_rewrites_keeps_its_verdict_and_evicts(
+    tmp_path: Path,
+) -> None:
+    """#939：validator 同时改写声明 input 与 remote 输出——视图出口的 input
+    只读检查抛错（异常路径）时，原错误保留，remote 改写副本同样逐出。"""
+    storage = _storage()
+    script = _VALIDATE_REWRITE_IN_PLACE + (
+        "(pathlib.Path(sys.argv[1]) / 'in.json').write_text('{\"mutated\": true}')\n"
+    )
+    handler, leases, object_store, job_dir = _make_handler(tmp_path, storage, script)
+    (job_dir / "in.json").write_text('{"in": 1}', encoding="utf-8")
+
+    _finish(handler, {"out.json": _remote_ref()}, inputs=("in.json",))
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert result.error_message.startswith("Validator error: ")
+    assert "mutated declared input 'in.json'" in result.error_message
+    assert "remote-channel" not in result.error_message
+    assert storage.objects[AUTHORITY_KEY] == PAYLOAD
+    row = object_store.lookup("job-1", "out.json")
+    assert row is not None and row["content_hash"] == HASH
+    _assert_reads_serve_worker_bytes(job_dir, object_store)
+
+
+def test_unhashable_remote_output_never_skips_eviction_of_the_others(tmp_path: Path) -> None:
+    """codex #1031 R1：改写 A、令排序靠后的 B 不可读、并触发 input 只读错误——
+    B 记为无法验证（视为分歧），A、B 的本地副本都被逐出，原错误保留。"""
+    payload_b = b'{"b": "worker bytes"}'
+    staging_b = "jobs-staging/ws-1/job-1/exec-1/zz.json"
+    storage = _storage()
+    storage.objects[staging_b] = payload_b
+    script = _VALIDATE_REWRITE_IN_PLACE + (
+        "import os\n"
+        "os.chmod(pathlib.Path(sys.argv[1]) / 'zz.json', 0)\n"
+        "(pathlib.Path(sys.argv[1]) / 'in.json').write_text('{\"mutated\": true}')\n"
+    )
+    handler, leases, object_store, job_dir = _make_handler(tmp_path, storage, script)
+    (job_dir / "in.json").write_text('{"in": 1}', encoding="utf-8")
+    ref_b = {
+        "storage_key": staging_b,
+        "size_bytes": len(payload_b),
+        "content_hash": hashlib.sha256(payload_b).hexdigest(),
+    }
+
+    _finish(
+        handler,
+        {"out.json": _remote_ref(), "zz.json": ref_b},
+        expected=("out.json", "zz.json"),
+        inputs=("in.json",),
+    )
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "mutated declared input 'in.json'" in result.error_message
+    _assert_reads_serve_worker_bytes(job_dir, object_store)
+    assert not (job_dir / "zz.json").exists()
+    raw = open_raw_artifact(job_dir / "zz.json", object_store, "job-1", "zz.json")
+    assert raw.path is None and raw.stream is not None
+    with raw.stream as stream:
+        assert stream.read() == payload_b
+
+
+def test_eviction_failure_never_replaces_the_original_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#939：逐出自身出错只记日志，不吞掉 / 覆盖原校验错误。"""
+    real_unlink = Path.unlink
+
+    def _unlink_boom(self: Path, *args: Any, **kwargs: Any) -> None:
+        if self.name == "out.json":
+            raise RuntimeError("evict exploded")
+        real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", _unlink_boom)
+    storage = _storage()
+    script = _VALIDATE_REWRITE_IN_PLACE + "print('bad output', file=sys.stderr)\nsys.exit(1)\n"
+    handler, leases, _, _ = _make_handler(tmp_path, storage, script)
+
+    _finish(handler, {"out.json": _remote_ref()})
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert result.error_message.startswith("Output validation failed: bad output")
 
 
 def test_validator_replacing_remote_output_with_identical_bytes_completes(

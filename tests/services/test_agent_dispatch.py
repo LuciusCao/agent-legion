@@ -152,6 +152,30 @@ def test_enqueue_manifest_timeout_follows_node_config(harness: SimpleNamespace) 
     assert request.manifest["execution"]["timeout_seconds"] == 7200
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"), [(True, True), (False, False), ("true", False), (1, False)]
+)
+def test_enqueue_manifest_sandbox_network_follows_node_config(
+    harness: SimpleNamespace, value: object, expected: bool
+) -> None:
+    """#715: the agent bash tool's network opt-in rides the node's reserved
+    ``sandbox_network`` key; only a literal True opens it."""
+    harness.service.enqueue(
+        agent_id="generator-v1",
+        definition=_definition(),
+        workspace={"id": "workspace-1", "name": "Workspace"},
+        job={"id": "job-1", "title": "Question"},
+        workflow_key="questions",
+        node=_node(),
+        job_dir=harness.tmp_path / "jobs" / "job-1",
+        log_path=harness.tmp_path / "logs" / "job-1.log",
+        inputs=("question.json",),
+        node_config={"sandbox_network": value},
+    )
+    request = harness.broker.enqueue.call_args.args[0]
+    assert request.manifest["execution"]["sandbox_network"] is expected
+
+
 def test_enqueue_pool_sized_from_settings(harness: SimpleNamespace) -> None:
     # Defaults come from executor_runtime.agent_enqueue (AgentEnqueueConfig);
     # workers 48 since #546 (the stock pool fell behind batch-claim demand).
@@ -197,6 +221,7 @@ def test_enqueue_builds_an_immutable_manifest_and_bundle(harness: SimpleNamespac
         "thinking": "high",
         "timeout_seconds": 1800,
         "no_sandbox": False,
+        "sandbox_network": False,
     }
     # schema v64：workspace Agent 默认退役，新 manifest 不再写 execution_defaults。
     assert "execution_defaults" not in manifest

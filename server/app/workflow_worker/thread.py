@@ -11,7 +11,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.scheduling.capacity import load_capacity_snapshot
 from server.app.jobs import JobQueries
-from server.app.services.agent_service import has_published_agent_definitions
+from server.app.services.agent_node_profile_catalog import agent_profiles_may_exist
 from server.app.services.runtime_profile import profile
 from server.app.settings import Settings
 from server.app.workflow_worker.agent_gate import prepare_agent_pass
@@ -160,7 +160,7 @@ class WorkflowWorkerThread:
         # pure-remote mode an offline Worker fleet has the same effect.
         if not (
             snapshot.has_any_capacity() or has_online_code_workers(self.job_db)
-        ) and not has_published_agent_definitions(self.job_db):
+        ) and not agent_profiles_may_exist(self.job_db):
             return False
 
         scan_started = time.monotonic()

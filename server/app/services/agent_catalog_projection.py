@@ -5,7 +5,7 @@ from typing import Any
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.db.dialect import ConnectSource
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.skill_catalog import SkillCatalogService
 from server.app.settings import Settings
 
@@ -26,7 +26,7 @@ def agent_catalog(
     top-level ``execution`` block (workspace agentDefaults retired at v64).
     """
     if agent_definitions is None:
-        agent_definitions = published_agent_definitions(
+        agent_definitions = legacy_agent_catalog(
             connect_source or settings.database_url, workspace_id
         )
     return {

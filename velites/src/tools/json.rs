@@ -26,6 +26,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
+use super::atomic_write::atomic_write;
 use super::json_lenient::{format_gate_size, parse_double_encoded_container, LenientParse};
 use super::json_limits::{self, JsonBudget, ParseBoundedError};
 use super::{resolve_in_cwd, truncate, ToolContext, ToolError, ToolOutput};
@@ -134,24 +135,15 @@ fn budget_error(path: &str, budget: JsonBudget) -> ToolError {
 
 /// Serialize the whole document back compactly (bounded by the tree budget
 /// — compact output never exceeds the pretty form of the same tree) and
-/// atomically replace the file (tmp + rename, same protocol as the `write`
-/// tool). #518 shipped pretty files; the width amplification (2-2.5x per
+/// atomically replace the file (tmp + rename, the shared `atomic_write`
+/// of the `write` tool, #922 R-2). #518 shipped pretty files; the width amplification (2-2.5x per
 /// pretty line, attack-report HIGH-2) moved the format to compact so the
 /// on-disk size cannot balloon past the read cap that governs every later
 /// operation on the same file.
 fn store_json(resolved: &std::path::Path, root: &Value, path: &str) -> Result<u64, ToolError> {
     let text = json_limits::serialize(root, false)
         .map_err(|err| ToolError::InvalidArgs(format!("re-serializing {path} failed: {err}")))?;
-    let name = resolved
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("velites-tmp");
-    let tmp = resolved.with_file_name(format!("{name}.velites-tmp"));
-    let write_result = std::fs::write(&tmp, &text).and_then(|_| std::fs::rename(&tmp, resolved));
-    if let Err(err) = write_result {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(err.into());
-    }
+    atomic_write(resolved, text.as_bytes())?;
     Ok(text.len() as u64)
 }
 

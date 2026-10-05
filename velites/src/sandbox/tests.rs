@@ -22,7 +22,7 @@ fn bwrap_argv_selective_binds_plus_write_binds() {
         PathBuf::from("/tmp"),
     ];
     let ro = vec![PathBuf::from("/skill/dir")];
-    let argv = bwrap_argv(&ro, &rw, &inner());
+    let argv = bwrap_argv(&ro, &rw, &inner(), false);
     let joined = argv.join(" ");
     assert!(joined.contains("--die-with-parent"));
     // No blanket root bind: reads are limited to the selective binds.
@@ -37,9 +37,14 @@ fn bwrap_argv_selective_binds_plus_write_binds() {
     // Read-only roots are bound read-only, never read-write.
     assert!(joined.contains("--ro-bind /skill/dir /skill/dir"));
     assert!(!joined.contains("--bind /skill/dir"));
-    // The bash tool keeps its shared network and pid namespaces.
-    assert!(!joined.contains("--unshare-net"));
-    assert!(!joined.contains("--unshare-pid"));
+    // #922 R-1 / #715: private pid namespace (the mounted /proc is the
+    // sandbox's own) and, by default, a private network namespace.
+    assert!(joined.contains("--unshare-pid"));
+    assert!(joined.contains("--unshare-net"));
+    assert!(
+        argv.iter().position(|a| a == "--unshare-pid").unwrap()
+            < argv.iter().position(|a| a == "--proc").unwrap()
+    );
     assert!(
         joined.contains("--tmpfs /tmp"),
         "tmpfs /tmp missing: {joined}"
@@ -63,15 +68,15 @@ fn bwrap_argv_selective_binds_plus_write_binds() {
 
 #[test]
 fn bwrap_argv_without_tmp_dir_has_no_tmpfs() {
-    let argv = bwrap_argv(&[], &[PathBuf::from("/job")], &inner());
+    let argv = bwrap_argv(&[], &[PathBuf::from("/job")], &inner(), false);
     assert!(!argv.iter().any(|a| a == "--tmpfs"));
 }
 
 #[test]
-fn bwrap_wrap_argv_selective_binds_and_private_namespaces() {
+fn bwrap_argv_wrap_roots_and_private_namespaces() {
     let rw = vec![PathBuf::from("/job/dir"), PathBuf::from("/tmp")];
     let ro = vec![PathBuf::from("/repo/server"), PathBuf::from("/opt/venv")];
-    let argv = bwrap_wrap_argv(&ro, &rw, &inner(), false);
+    let argv = bwrap_argv(&ro, &rw, &inner(), false);
     let joined = argv.join(" ");
     assert!(joined.contains("--unshare-pid"));
     assert!(joined.contains("--unshare-net"));
@@ -86,7 +91,7 @@ fn bwrap_wrap_argv_selective_binds_and_private_namespaces() {
     assert!(joined.contains("--bind /job/dir /job/dir"));
     assert!(joined.contains("--tmpfs /tmp"));
     // Network opt-in drops only the net unshare; pid stays private.
-    let allowed = bwrap_wrap_argv(&ro, &rw, &inner(), true).join(" ");
+    let allowed = bwrap_argv(&ro, &rw, &inner(), true).join(" ");
     assert!(!allowed.contains("--unshare-net"));
     assert!(allowed.contains("--unshare-pid"));
 }
@@ -121,11 +126,11 @@ fn resolv_conf_target_outside_flags_symlink_leaving_etc() {
 fn bwrap_argvs_bind_resolv_conf_target_when_it_leaves_etc() {
     // Host-adaptive: only hosts whose /etc/resolv.conf resolves outside
     // /etc (systemd-resolved; macOS' /private/etc in test builds) get
-    // the extra bind. Both the bash tool and wrap argv must agree.
+    // the extra bind, with or without network isolation.
     let expected = resolv_conf_read_root();
     for joined in [
-        bwrap_argv(&[], &[PathBuf::from("/job")], &inner()).join(" "),
-        bwrap_wrap_argv(&[], &[PathBuf::from("/job")], &inner(), false).join(" "),
+        bwrap_argv(&[], &[PathBuf::from("/job")], &inner(), true).join(" "),
+        bwrap_argv(&[], &[PathBuf::from("/job")], &inner(), false).join(" "),
     ] {
         match &expected {
             Some(target) => {
@@ -144,10 +149,12 @@ fn bwrap_argvs_bind_resolv_conf_target_when_it_leaves_etc() {
 }
 
 #[test]
-fn bwrap_argv_opts_unshares_network_only_when_requested() {
-    let shared = bwrap_argv_opts(&[], &[PathBuf::from("/job")], &inner(), false);
+fn bwrap_argv_shares_network_only_when_allowed() {
+    let shared = bwrap_argv(&[], &[PathBuf::from("/job")], &inner(), true);
     assert!(!shared.iter().any(|a| a == "--unshare-net"));
-    let isolated = bwrap_argv_opts(&[], &[PathBuf::from("/job")], &inner(), true);
+    // Allowing network never drops the pid namespace (#922 R-1).
+    assert!(shared.iter().any(|a| a == "--unshare-pid"));
+    let isolated = bwrap_argv(&[], &[PathBuf::from("/job")], &inner(), false);
     assert!(isolated.iter().any(|a| a == "--unshare-net"));
     // Network isolation lands before the first read-only bind.
     let unshare = isolated.iter().position(|a| a == "--unshare-net").unwrap();
