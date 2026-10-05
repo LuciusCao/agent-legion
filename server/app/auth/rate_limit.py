@@ -13,11 +13,12 @@ import time
 # 反向代理）下全部连接可能共享同一个对端地址，按 IP 计数会让任何人用
 # 任意用户名把整个实例锁死。同理，对端地址共享时 (账号, IP) 退化为按
 # 账号计数，行为与旧实现相同，不会更差。
-# 失败计数只在 failure_window 内累积，过窗自动重开。表达到 _MAX_ENTRIES
-# 时先剔除过窗条目，仍满则按窗口起点从旧到新淘汰「未锁定」条目——锁定
-# 条目从不淘汰（否则灌入大量新用户名即可冲掉自己的锁定），它们在
-# lock_seconds 后自然过期。客户端 IP 由调用方给出（路由层取
-# request.client 的对端地址），本模块不解析转发头。
+# 失败计数只在 failure_window 内累积，过窗自动重开。表大小达到清扫水位
+# （起始 _MAX_ENTRIES）时只剔除过窗/锁定已到期的条目，仍在窗口内的计数
+# 永不淘汰——否则用垃圾用户名灌满表就能清零目标账号进行中的计数、无限
+# 续猜。清扫后水位抬到存活条目数的两倍，摊还 O(1)；表的增长受「请求速率
+# × 窗口」约束。客户端 IP 由调用方给出（路由层取 request.client 的对端
+# 地址），本模块不解析转发头。
 _PAIR, _ACCOUNT = "pair", "account"
 _MAX_ENTRIES = 10_000
 
@@ -45,6 +46,7 @@ class LoginRateLimiter:
         self._lock_seconds, self._window = lock_seconds, failure_window
         # key -> (failures, window_started_at, locked_until)
         self._entries: dict[tuple[str, ...], tuple[int, float, float]] = {}
+        self._sweep_at = _MAX_ENTRIES
         self._lock = threading.Lock()
 
     @staticmethod
@@ -63,13 +65,11 @@ class LoginRateLimiter:
         self._entries.pop(key, None)
         return None
 
-    def _make_room(self, now: float) -> None:
+    def _sweep(self, now: float) -> None:
+        """Drop lapsed entries only; live counts are never evicted (#970)."""
         for key in list(self._entries):
             self._live(key, now)
-        # (window start, key) of every unlocked entry, oldest first.
-        unlocked = sorted((e[1], k) for k, e in self._entries.items() if e[2] <= now)
-        for _, key in unlocked[: max(0, len(self._entries) - _MAX_ENTRIES + 2)]:
-            del self._entries[key]
+        self._sweep_at = max(_MAX_ENTRIES, 2 * len(self._entries))
 
     def check(self, username: str, client_ip: str | None = None) -> None:
         """Raise LoginLockedError while any key is inside its lock window."""
@@ -83,8 +83,8 @@ class LoginRateLimiter:
     def record_failure(self, username: str, client_ip: str | None = None) -> None:
         now = time.monotonic()
         with self._lock:
-            if len(self._entries) >= _MAX_ENTRIES:
-                self._make_room(now)
+            if len(self._entries) >= self._sweep_at:
+                self._sweep(now)
             for key in self._keys(username, client_ip):
                 failures, started, _ = self._live(key, now) or (0, now, 0.0)
                 failures += 1

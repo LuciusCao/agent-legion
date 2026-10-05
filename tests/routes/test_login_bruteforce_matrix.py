@@ -147,20 +147,37 @@ def test_table_prunes_stale_entries_at_capacity(clock, monkeypatch) -> None:
 
 
 @pytest.mark.no_db
-def test_table_cap_evicts_oldest_unlocked_but_never_a_lock(clock, monkeypatch) -> None:
-    """Live entries are bounded too, but flooding fresh usernames cannot
-    flush the flooder's own lock out of the table."""
+def test_flooding_the_table_never_resets_a_live_count(clock, monkeypatch) -> None:
+    """Junk usernames filling the table must not evict an in-progress count:
+    4 failures, flood past the cap, then the 5th failure still locks."""
     monkeypatch.setattr("server.app.auth.rate_limit._MAX_ENTRIES", 6)
-    limiter = LoginRateLimiter(max_failures=2, max_account_failures=10, failure_window=900)
-    _fail(limiter, "admin", ATTACKER, 2)  # locked pair + live account entry
-    for index in range(20):
+    limiter = LoginRateLimiter(max_failures=5, max_account_failures=20, failure_window=900)
+    _fail(limiter, "admin", ATTACKER, 4)
+    for index in range(30):
         clock[0] += 1
-        _fail(limiter, f"flood{index}", ATTACKER, 1)
-        assert len(limiter._entries) <= 6
-    assert _locked(limiter, "admin", ATTACKER)
-    # The oldest unlocked entries went first; the newest flood survives.
-    assert ("account", "flood19") in limiter._entries
-    assert ("account", "flood0") not in limiter._entries
+        _fail(limiter, f"junk{index}", ATTACKER, 1)
+    assert limiter._entries[("pair", "admin", ATTACKER)][0] == 4
+    _fail(limiter, "admin", ATTACKER, 1)
+    with pytest.raises(LoginLockedError):
+        limiter.check("admin", ATTACKER)
+
+
+@pytest.mark.no_db
+def test_sweep_watermark_tracks_the_live_table(clock, monkeypatch) -> None:
+    """Over the cap with only live entries, the table keeps growing (bounded
+    by request rate x window) and sweeps stay amortized, not per-request."""
+    monkeypatch.setattr("server.app.auth.rate_limit._MAX_ENTRIES", 4)
+    limiter = LoginRateLimiter(failure_window=900)
+    for index in range(10):
+        _fail(limiter, f"live{index}", None, 1)
+    assert len(limiter._entries) == 20
+    assert limiter._sweep_at >= len(limiter._entries)
+    clock[0] += 901
+    _fail(limiter, "late", None, 1)
+    while len(limiter._entries) < limiter._sweep_at:
+        _fail(limiter, f"fill{len(limiter._entries)}", None, 1)
+    _fail(limiter, "trigger", None, 1)
+    assert ("account", "live0") not in limiter._entries
 
 
 # --- end to end through the login route ----------------------------------
