@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
+from server.app.fs_safety import PathEscapeError, resolve_within
 from server.app.services import skill_repo
 from server.app.services.job_errors import ConflictError
 from server.app.services.skill_shared_store import MAP_PATH
@@ -81,11 +82,9 @@ def read_shared_source_bytes(shared_dir: Path, source: str) -> bytes:
     the trusted root."""
     if shared_dir.is_symlink() or shared_dir.parent.is_symlink():
         raise OSError("_shared and its workspace dir must be real directories, not symlinks")
-    root = shared_dir.resolve()
-    target = (root / source).resolve()
     try:
-        target.relative_to(root)
-    except ValueError as exc:
+        target = resolve_within(shared_dir, source, allow_root=True)
+    except PathEscapeError as exc:
         raise OSError(f"source {source!r} escapes _shared via a symlink") from exc
     return target.read_bytes()
 

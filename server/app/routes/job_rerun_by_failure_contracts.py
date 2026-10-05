@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from server.app.routes.job_batch_filter_contracts import JobFilterPayload
 from server.app.routes.job_operation_contracts import JobMutationResultResponse
+from server.app.services.job_selection_resolver import MAX_BATCH_JOBS
 
 
 class JobRerunByFailureRequest(BaseModel):
@@ -15,10 +16,11 @@ class JobRerunByFailureRequest(BaseModel):
     # node itself or one of its downstream nodes rerun from this node instead
     # of the strategy-derived target; other selected jobs are skipped.
     from_node_key: str | None = None
-    # Empty job_ids + no filter selects every job with a matching failed run.
-    job_ids: list[str] = Field(default_factory=list)
+    # Empty job_ids + no filter selects every job with a matching failed run
+    # (the matched set is capped by MAX_BATCH_JOBS in the service, #712).
+    job_ids: list[str] = Field(default_factory=list, max_length=MAX_BATCH_JOBS)
     filter: JobFilterPayload | None = None
-    exclude_ids: list[str] = Field(default_factory=list)
+    exclude_ids: list[str] = Field(default_factory=list, max_length=MAX_BATCH_JOBS)
     # #211 Phase 2 second batch: optional with server-side default from the
     # path workspace_id (equal since schema v62); the filter is
     # workspace-scoped either way. Explicit values stay accepted during the

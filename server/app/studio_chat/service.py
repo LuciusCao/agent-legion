@@ -37,6 +37,7 @@ from server.app.studio_chat.lifecycle import ServiceLifecycle, starting_operatio
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.resume import resume_session
 from server.app.studio_chat.runtime import SessionRuntime
+from server.app.studio_chat.session_archive import archive_session, unarchive_session
 from server.app.studio_chat.session_close import close_session
 from server.app.studio_chat.session_delete import delete_session
 from server.app.studio_chat.spawn import spawn_session_runtime
@@ -154,12 +155,13 @@ class StudioChatService:
             agent,
             user_id,
             workspace_id,
+            store=self.store,
         )
         self.store.publish_session(session_id)
         return self.get_session(session_id)
 
-    def list_sessions(self, workspace_id: str) -> list[dict[str, Any]]:
-        return self._db.list_studio_chat_sessions(workspace_id)
+    def list_sessions(self, workspace_id: str, *, archived: bool = False) -> list[dict[str, Any]]:
+        return self._db.list_studio_chat_sessions(workspace_id, archived=archived)
 
     def get_session(
         self, session_id: str, workspace_id: str | None = None, *, include_deleted: bool = False
@@ -189,6 +191,14 @@ class StudioChatService:
         """Soft delete (#872): stamp first, then close the runtime (see
         studio_chat.session_delete for the ordering argument)."""
         delete_session(self, session_id, workspace_id)
+
+    def archive_session(self, session_id: str, workspace_id: str) -> dict[str, Any]:
+        """Recoverable archive (#924): stamp, then close like delete does
+        (see studio_chat.session_archive); unarchive never spawns."""
+        return archive_session(self, session_id, workspace_id)
+
+    def unarchive_session(self, session_id: str, workspace_id: str) -> dict[str, Any]:
+        return unarchive_session(self, session_id, workspace_id)
 
     @starting_operation
     def resume_session(self, session_id: str, workspace_id: str, user_id: str) -> dict[str, Any]:

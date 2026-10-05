@@ -22,8 +22,6 @@ const browserTestFiles = [
   'src/features/previewPanel/previewDisplayMode.test.ts',
   'src/hooks/useDashboardEvents.test.ts',
   'src/hooks/useDebouncedCallback.test.ts',
-  'src/hooks/useJobComprehensionInfo.test.ts',
-  'src/hooks/useJobQuestion.test.ts',
   'src/hooks/useWorkspaceEvents.test.ts',
   'src/lib/download.test.ts',
   'src/lib/htmlText.test.ts',

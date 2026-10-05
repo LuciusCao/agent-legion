@@ -168,8 +168,6 @@ function fillForm(config) {
       currentDisabledRuntimes = Array.isArray(value) ? value : [];
     } else if (key === "runtimes") {
       // 派生值（探测 − 停用），仅展示于 runtime 卡片，无表单控件
-    } else if (key === "capabilities") {
-      // 已退役（issue #284）：配置接口仍回读该键，表单已无对应控件，忽略。
     } else if (key === "models") {
       form.elements.models.value = value.map((item) => `${item.runtime ? `${item.runtime}:` : ""}${item.provider}/${item.model}`).join("\n");
     } else if (key === "labels") {

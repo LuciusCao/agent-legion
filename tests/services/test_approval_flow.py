@@ -14,7 +14,9 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.approval_decisions import ApprovalDecisionService
 from server.app.services.job_errors import ConflictError, InvalidOperationError
+from server.app.services.job_query_presenters import artifact_names, artifact_names_deep
 from server.app.services.job_rerun import JobRerunService
+from server.app.services.staged_json_artifact import STAGING_DIR_NAME
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import workflow_definition_from_mapping
@@ -130,6 +132,100 @@ def test_decide_requires_awaiting_status(approval_setup):
     # Already decided → conflict again (insert-only history stays single).
     with pytest.raises(ConflictError, match="not awaiting approval"):
         service.decide(workspace_id, job_id, "gate", verdict="approved")
+
+
+class _RecordingObjectStore:
+    enabled = True
+
+    def __init__(self) -> None:
+        self.uploads: list[tuple[str, bytes]] = []
+
+    def upload(self, *, local_path, name, **_kwargs) -> None:
+        self.uploads.append((name, local_path.read_bytes()))
+
+
+def test_duplicate_approve_conflicts_without_touching_committed_artifact(approval_setup):
+    """#929: a repeated approve is rejected by the status guard before the
+    committed decision artifact (local copy or object-store promotion) is
+    rewritten, so its audit fields keep matching the DB history."""
+    job_db, leases, service, workspace_id, job_id, job_dir = approval_setup
+    store = _RecordingObjectStore()
+    service.object_store = store
+    leases.park_awaiting_approval(job_id, "gate")
+    first = service.decide(
+        workspace_id, job_id, "gate", verdict="approved", note="结构OK", decided_by="user:u1"
+    )
+    artifact = job_dir / "gate.approval.json"
+    committed = artifact.read_bytes()
+
+    with pytest.raises(ConflictError, match="not awaiting approval"):
+        service.decide(
+            workspace_id, job_id, "gate", verdict="approved", note="重复", decided_by="user:u2"
+        )
+
+    assert artifact.read_bytes() == committed
+    payload = json.loads(committed)
+    assert (payload["id"], payload["note"], payload["decided_by"]) == (
+        first["id"],
+        "结构OK",
+        "user:u1",
+    )
+    assert [d["id"] for d in service.list_decisions(workspace_id, job_id)] == [first["id"]]
+    assert store.uploads == [("gate.approval.json", committed)]
+    assert _staged_leftovers(job_dir) == []
+
+
+def _staged_leftovers(job_dir) -> list[str]:
+    staging = job_dir / STAGING_DIR_NAME
+    return sorted(p.name for p in staging.iterdir()) if staging.is_dir() else []
+
+
+def test_staged_approval_artifact_is_not_listed_while_waiting_for_the_lock(
+    approval_setup, settings, monkeypatch
+):
+    """#929 review: the staged temp file exists while the decision waits for
+    the job-mutation lock; it must never surface as a job artifact."""
+    job_db, leases, service, workspace_id, job_id, job_dir = approval_setup
+    leases.park_awaiting_approval(job_id, "gate")
+    job = job_db.get_job(job_id)
+    seen: dict[str, list[str]] = {}
+    original = job_db.approve_gate_atomic
+
+    def _observe(decision, **kwargs):
+        seen["staged"] = _staged_leftovers(job_dir)
+        seen["root"] = artifact_names(job, settings)
+        seen["deep"] = artifact_names_deep(job, settings)
+        return original(decision, **kwargs)
+
+    monkeypatch.setattr(job_db, "approve_gate_atomic", _observe)
+    service.decide(workspace_id, job_id, "gate", verdict="approved", decided_by="user:u1")
+
+    assert len(seen["staged"]) == 1  # the temp file really existed at that point
+    assert seen["root"] == ["script.md"]
+    assert not [n for n in seen["deep"] if STAGING_DIR_NAME in n or ".approval.json." in n]
+    assert artifact_names(job, settings) == ["gate.approval.json", "script.md"]
+    assert _staged_leftovers(job_dir) == []
+
+
+def test_approve_artifact_swap_failure_rolls_back_and_leaves_no_partial_file(
+    approval_setup, monkeypatch
+):
+    """#929: the artifact swap runs inside the guarded transaction — a failed
+    swap leaves the gate awaiting, no decision row, and no temp file."""
+    job_db, leases, service, workspace_id, job_id, job_dir = approval_setup
+    leases.park_awaiting_approval(job_id, "gate")
+
+    def _fail_replace(_src, _dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("server.app.services.approval_decisions.os.replace", _fail_replace)
+    with pytest.raises(OSError, match="disk full"):
+        service.decide(workspace_id, job_id, "gate", verdict="approved", decided_by="user:u1")
+
+    assert _node_status(job_db, job_id, "gate") == "awaiting_approval"
+    assert service.list_decisions(workspace_id, job_id) == []
+    assert not (job_dir / "gate.approval.json").exists()
+    assert _staged_leftovers(job_dir) == []
 
 
 def test_decide_rejects_non_approval_nodes(approval_setup):

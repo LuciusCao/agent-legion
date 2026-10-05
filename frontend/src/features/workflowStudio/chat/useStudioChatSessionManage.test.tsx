@@ -12,6 +12,12 @@ import * as manageApi from './studioChatSessionManageApi'
 import { useStudioChatSessionManage } from './useStudioChatSessionManage'
 
 vi.mock('./studioChatSessionManageApi')
+// #924：manage hook 内嵌归档视图查询；这里只测改名/删除，归档 API 打桩。
+vi.mock('./studioChatSessionArchiveApi', () => ({
+  fetchArchivedStudioChatSessions: vi.fn().mockResolvedValue([]),
+  archiveStudioChatSession: vi.fn(),
+  unarchiveStudioChatSession: vi.fn(),
+}))
 const mockApi = vi.mocked(manageApi)
 
 function setup(initialActive: string | null) {

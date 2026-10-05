@@ -269,7 +269,7 @@ class TestClaimBatchLimitConfigApi:
         supervisor = FakeSupervisor(store)
         app = create_app(supervisor, tmp_path)
         headers = {"Authorization": f"Bearer {store.control_token()}"}
-        return store, supervisor, TestClient(app), headers
+        return store, supervisor, TestClient(app, base_url="http://127.0.0.1"), headers
 
     def test_hot_update_without_restart(self, tmp_path: Path) -> None:
         store, supervisor, client, headers = self._app(tmp_path)

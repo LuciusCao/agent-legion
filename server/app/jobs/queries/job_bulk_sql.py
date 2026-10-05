@@ -6,6 +6,7 @@ Split out of ``job_bulk.py`` for the file-size budget (same precedent as
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 # Chunk = one committed transaction (lock probe + insert + node rows); a
@@ -13,6 +14,19 @@ from typing import Any
 # 1000 = the pre-chunking statement batch: each chunk's unnest INSERT still
 # fires the v77 trigger once (#448).
 CHUNK_ROWS = 1000
+
+
+def id_chunks(ids: Iterable[Any]) -> Iterator[list[str]]:
+    """Distinct ids (first-seen order, stringified) in ≤CHUNK_ROWS slices.
+
+    Bulk ``id in (...)`` reads iterate these so no statement carries a giant
+    parameter list (#712); de-duplication keeps an id from landing in two
+    chunks, so callers that group rows per id never see a row twice.
+    """
+    distinct = list(dict.fromkeys(str(value) for value in ids))
+    for start in range(0, len(distinct), CHUNK_ROWS):
+        yield distinct[start : start + CHUNK_ROWS]
+
 
 MATERIAL_LOCK_IN_SQL = (
     "select id from materials where workspace_id=%s and id in ({ids}) order by id for key share"

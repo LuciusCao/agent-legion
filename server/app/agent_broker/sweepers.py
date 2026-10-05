@@ -17,6 +17,7 @@ from server.app.agent_broker.heartbeat_deferral import HeartbeatDeferral
 from server.app.agent_broker.lease_reclaim_audit import ReclaimTally
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
 from server.app.db.transaction import write_transaction
+from server.app.executors._lease_control import sync_job_status
 from server.app.workflows.sharding_requeue import (
     fail_shard_for_dead_execution,
     reset_shard_for_requeue,
@@ -170,16 +171,17 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 fail_shard_for_dead_execution(
                     conn, row["job_id"], row["node_key"], row["execution_id"], error_message
                 )
-                conn.execute(
+                # #943: guard like the requeue branch — only a node still
+                # in flight is failed; one that reached a terminal state
+                # outside the broker keeps it. Job status is re-derived
+                # (sync_job_status), never written directly.
+                failed_node = conn.execute(
                     "update job_nodes set status='failed', finished_at=current_timestamp,"
-                    " error_message=%s where job_id=%s and node_key=%s",
+                    " error_message=%s where job_id=%s and node_key=%s and status='running'",
                     (outcome["error_message"], row["job_id"], row["node_key"]),
                 )
-                conn.execute(
-                    "update jobs set status='failed', error_message=%s, updated_at=current_timestamp"
-                    " where id=%s",
-                    (outcome["error_message"], row["job_id"]),
-                )
+                if failed_node.rowcount:
+                    sync_job_status(conn, str(row["job_id"]))
         deferral.prune_log_buckets()
     reclaims.report(deferral, requeued)  # post-commit: a rolled-back sweep reports nothing
     for worker_id, workspace_id in released:

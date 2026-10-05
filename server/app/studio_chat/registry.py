@@ -29,13 +29,17 @@ from server.app.jobs.queries.global_settings import (
     GlobalSettingsKVQueriesMixin,
     global_settings_kv_from_dsn,
 )
+from server.app.studio_chat.serving_address import derived_api_base
 
 GLOBAL_SETTINGS_KEY = "studio_agents"
 DEFAULT_API_BASE = "http://127.0.0.1:8000"
 
 
 def default_registry_document() -> dict[str, Any]:
-    return {"api_base": DEFAULT_API_BASE, "agents": []}
+    """Code defaults. An unconfigured ``api_base`` falls back to this process's
+    observed serving address (#915, serving_address.py), never blindly to the
+    prod port; the constant is only the before-first-request last resort."""
+    return {"api_base": derived_api_base() or DEFAULT_API_BASE, "agents": []}
 
 
 def api_base_host_is_internal(api_base: str) -> bool:

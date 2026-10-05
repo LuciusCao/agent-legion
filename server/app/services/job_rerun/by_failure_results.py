@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from server.app.services.job_operation_error import JobOperationResult
-from server.app.services.job_rerun.single import execute_rerun_result
-
-if TYPE_CHECKING:
-    from server.app.services.job_rerun import JobRerunService
 
 
 def job_failure_result(
@@ -26,16 +22,6 @@ def job_failure_result(
         "message": message,
         "rerun_nodes": [],
     }
-
-
-def execute_rerun_targets(
-    service: JobRerunService,
-    job: dict[str, Any],
-    job_id: str,
-    targets: list[str],
-) -> dict[str, Any]:
-    node_results = [execute_rerun_result(service, job, job_id, target) for target in targets]
-    return assemble_rerun_targets(job_id, node_results)
 
 
 def assemble_rerun_targets(job_id: str, node_results: list[JobOperationResult]) -> dict[str, Any]:

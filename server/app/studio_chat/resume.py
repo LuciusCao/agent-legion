@@ -19,6 +19,8 @@ from server.app.studio_chat.spawn import spawn_session_runtime
 if TYPE_CHECKING:
     from server.app.studio_chat.service import StudioChatService
 
+_ARCHIVED_DETAIL = "Chat session is archived; unarchive it before continuing"
+
 
 def resume_session(
     service: StudioChatService, session_id: str, workspace_id: str, user_id: str
@@ -36,6 +38,10 @@ def resume_session(
     from server.app.studio_chat import service as service_module
 
     session = service.get_session(session_id, workspace_id)
+    if session.get("archived_at") is not None:
+        # #924: an archived session continues only after unarchive (the
+        # claim SQL and the spawn fence refuse the stamp too).
+        raise ConflictError(_ARCHIVED_DETAIL)
     if session["status"] not in ("closed", "error"):
         if service.runtime(session_id) is not None:
             return session
@@ -66,6 +72,8 @@ def resume_session(
     baseline = capture_resume_baseline(str(service._settings.root_dir), session["acp_session_id"])
     if not service.db.claim_studio_chat_resume(session_id, max_active=max_active):
         current = service.db.get_studio_chat_session(session_id) or {}
+        if current.get("archived_at") is not None:
+            raise ConflictError(_ARCHIVED_DETAIL)
         if current.get("status") not in ("closed", "error"):
             raise ConflictError("Chat session was resumed concurrently")
         raise ConflictError(
@@ -94,6 +102,7 @@ def resume_session(
         workspace_id,
         resume_acp_session_id=claimed["acp_session_id"],
         background_baseline=baseline,
+        store=service.store,
     )
     runtime = service.runtime(session_id)
     if runtime is not None and not handle.loaded_existing:

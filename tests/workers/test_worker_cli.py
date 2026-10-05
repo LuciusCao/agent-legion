@@ -84,14 +84,12 @@ def test_status_prints_worker_id_fallback_when_name_missing(
     assert registration_line == "Host 登记: w-1 / w-1"
 
 
-def test_configure_accepts_models_capabilities_and_token_file(tmp_path: Path) -> None:
+def test_configure_accepts_models_and_token_file(tmp_path: Path) -> None:
     token_file = tmp_path / "register-token"
     token_file.write_text("host-issued-token\n", encoding="utf-8")
     args = build_parser().parse_args(
         [
             "configure",
-            "--capability",
-            "review",
             "--model",
             "velites:openai/gpt-5",
             "--register-token-file",
@@ -100,7 +98,6 @@ def test_configure_accepts_models_capabilities_and_token_file(tmp_path: Path) ->
     )
 
     assert configure_payload(args) == {
-        "capabilities": ["review"],
         "models": [{"runtime": "velites", "provider": "openai", "model": "gpt-5"}],
         "register_token": "host-issued-token",
     }
