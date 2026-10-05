@@ -152,7 +152,7 @@ def _backups(conn) -> list[dict]:
     return [
         dict(row)
         for row in conn.execute(
-            "select source, source_id, original_text, report_json"
+            "select source, source_id, original_text, original_hash, report_json"
             " from agent_profile_backfill_backups where workspace_id=%s order by source",
             (_WS,),
         ).fetchall()
@@ -224,6 +224,7 @@ def test_active_revision_nodes_are_inlined_from_the_agent_they_run() -> None:
 
     revision_backup = next(b for b in backups if b["source"] == "active_revision")
     assert revision_backup["original_text"] == original
+    assert revision_backup["original_hash"] == "old"
     report = {n["node_key"]: n for n in json.loads(revision_backup["report_json"])["nodes"]}
     assert report["gen"]["status"] == "backfilled"
     assert report["gen"]["config_schema_overridden"] is True

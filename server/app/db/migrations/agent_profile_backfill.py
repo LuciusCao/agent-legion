@@ -74,12 +74,13 @@ create table if not exists agent_profile_backfill_backups (
   source text not null check(source in ('active_revision', 'draft')),
   source_id text not null,
   original_text text not null,
+  original_hash text,
   report_json text not null,
   created_at timestamptz not null default current_timestamp
 )
 """
 _ACTIVE_REVISIONS = (
-    "select id, workspace_id, definition_json from workflow_revisions"
+    "select id, workspace_id, definition_json, definition_hash from workflow_revisions"
     " where status='active' order by workspace_id"
 )
 _DRAFTS = (
@@ -227,7 +228,13 @@ def _backfill_payload(
 
 
 def _backup(
-    conn: Any, workspace_id: str, kind: str, source_id: str, original: str, report: list
+    conn: Any,
+    workspace_id: str,
+    kind: str,
+    source_id: str,
+    original: str,
+    report: list,
+    original_hash: str | None = None,
 ) -> None:
     """Back up a source before it is rewritten, or report its unresolved nodes.
 
@@ -244,9 +251,16 @@ def _backup(
             return
     conn.execute(
         "insert into agent_profile_backfill_backups"
-        "(workspace_id, source, source_id, original_text, report_json)"
-        " values (%s, %s, %s, %s, %s)",
-        (workspace_id, kind, source_id, original, _canonical_json({"nodes": report})),
+        "(workspace_id, source, source_id, original_text, original_hash, report_json)"
+        " values (%s, %s, %s, %s, %s, %s)",
+        (
+            workspace_id,
+            kind,
+            source_id,
+            original,
+            original_hash,
+            _canonical_json({"nodes": report}),
+        ),
     )
 
 
@@ -292,7 +306,15 @@ def _migrate_revisions(conn: Any, catalogs: dict[str, LegacyCatalog]) -> None:
         )
         if not report:
             continue
-        _backup(conn, workspace_id, "active_revision", str(revision["id"]), original, report)
+        _backup(
+            conn,
+            workspace_id,
+            "active_revision",
+            str(revision["id"]),
+            original,
+            report,
+            str(revision["definition_hash"]),
+        )
         if not provenance:
             continue
         payload[PROVENANCE_KEY] = {**(payload.get(PROVENANCE_KEY) or {}), **provenance}
