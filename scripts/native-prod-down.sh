@@ -9,11 +9,18 @@
 # bind 停。同族通配监听（*:port / [::]:port）占满所属族，同样匹配。
 # 端口/bind 与 up 同一两级来源：进程环境 > 根 .env（#486，写进 .env 的
 # bind 不必每次 down 时再 export 一遍）。
+# #894：运行态优先——prod-up 落的 data/native-prod.state 记着实例实际的
+# PID 与 bind/port，down 先按它停（经签名 + 工作目录校验防 PID 复用），
+# 记录缺失/陈旧才回落上面这组配置定位并提示。改 bind/port 的正确顺序
+# 仍是「先 down、再改配置、再 up」。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=dotenv-lib.sh
 source "$ROOT/scripts/dotenv-lib.sh"
+# shellcheck source=native-prod-state-lib.sh
+source "$ROOT/scripts/native-prod-state-lib.sh"
+STATE_FILE="$ROOT/$NATIVE_STATE_REL"
 
 BACKEND_PORT="$(dotenv_lookup_or NATIVE_BACKEND_PORT 8000 "$ROOT/.env")"
 WORKER_PORT="$(dotenv_lookup_or NATIVE_WORKER_PORT 8787 "$ROOT/.env")"
@@ -57,15 +64,10 @@ listener_pids() {
         }' | sort -u
 }
 
-stop_port() {
-    local bind="$1" port="$2" name="$3" grace="$4"
-    local pid
-    pid="$(listener_pids "$bind" "$port" | head -1 || true)"
-    if [[ -z "$pid" ]]; then
-        echo "$name $bind:$port 未在运行，跳过"
-        return 0
-    fi
-    echo "停止 $name $bind:$port (pid $pid) …"
+# 向 pid 发 SIGTERM 并在 grace 秒内等待退出。
+stop_pid() {
+    local pid="$1" label="$2" name="$3" grace="$4"
+    echo "停止 $name $label (pid $pid) …"
     kill "$pid" 2>/dev/null || true
     for i in $(seq 1 "$grace"); do
         if ! kill -0 "$pid" 2>/dev/null; then
@@ -78,8 +80,71 @@ stop_port() {
     return 1
 }
 
+# 按配置的 bind/port 定位（无运行态记录或记录陈旧时的回落路径）。
+stop_port() {
+    local bind="$1" port="$2" name="$3" grace="$4"
+    local pid
+    pid="$(listener_pids "$bind" "$port" | head -1 || true)"
+    if [[ -z "$pid" ]]; then
+        echo "$name $bind:$port 未在运行，跳过"
+        return 0
+    fi
+    stop_pid "$pid" "$bind:$port" "$name" "$grace"
+}
+
+# 按记录停：kill 紧前重新校验身份（签名 + --host/--port + 工作目录）——定位到
+# kill 之间实例可能已退出且 PID 被复用。校验不过就在记录地址上重新定位，
+# 仍找不到即视为已退出，不发任何信号。
+stop_recorded_pid() {
+    local kind="$1" pid="$2" bind="$3" port="$4" name="$5" grace="$6"
+    if ! native_pid_is_instance "$ROOT" "$kind" "$pid" "$port" "$bind"; then
+        pid="$(native_find_instance_pid "$ROOT" "$kind" "$bind" "$port")"
+        if [[ -z "$pid" ]]; then
+            echo "$name ${bind}:${port} 已退出，跳过"
+            return 0
+        fi
+    fi
+    stop_pid "$pid" "${bind}:${port}" "$name" "$grace"
+}
+
+# 运行态优先：记录中的实例仍在（签名校验通过）就按记录停，否则回落配置。
+stop_service() {
+    local kind="$1" prefix="$2" bind="$3" port="$4" name="$5" grace="$6"
+    local pid rec_bind rec_port rec_pid
+    rec_port="$(native_state_get "$STATE_FILE" "${prefix}_PORT")"
+    if [[ -n "$rec_port" ]]; then
+        rec_bind="$(native_state_get "$STATE_FILE" "${prefix}_BIND")"
+        pid="$(native_state_live_pid "$ROOT" "$kind" "$prefix")"
+        if [[ -n "$pid" ]]; then
+            if [[ "$rec_bind:$rec_port" != "$bind:$port" ]]; then
+                echo "提示：按运行态记录停止 ${name}（实际 ${rec_bind}:${rec_port}，当前配置为 ${bind}:${port}）"
+            fi
+            stop_recorded_pid "$kind" "$pid" "$rec_bind" "$rec_port" "$name" "$grace"
+            return
+        fi
+        rec_pid="$(native_state_get "$STATE_FILE" "${prefix}_PID")"
+        if [[ "$rec_pid" =~ ^[0-9]+$ ]] && kill -0 "$rec_pid" 2>/dev/null; then
+            # 记录 PID 仍存活却校验不过：可能是 PID 复用，也可能是无法确认
+            # 身份的本实例——不发信号，但也不能当作已终止删掉记录（#894 R2）。
+            KEEP_STATE=1
+            echo "警告：运行态记录中的 ${name}（pid ${rec_pid}，${rec_bind}:${rec_port}）仍存活但无法确认属于本实例，未发送信号；保留 ${NATIVE_STATE_REL}，请人工核对（ps -p ${rec_pid}）" >&2
+        fi
+        echo "提示：运行态记录中的 ${name}（${rec_bind}:${rec_port}）已不在运行或已非本实例，回落按当前配置 ${bind}:${port} 定位"
+    fi
+    stop_port "$bind" "$port" "$name" "$grace"
+}
+
+if [[ ! -f "$STATE_FILE" ]]; then
+    echo "提示：无运行态记录（${NATIVE_STATE_REL}），按当前配置定位实例"
+fi
 rc=0
+KEEP_STATE=0
 # 先停 worker（停止领新任务并给它上报预算），再停后端
-stop_port "$WORKER_BIND" "$WORKER_PORT" "Worker" 35 || rc=1
-stop_port "$BACKEND_BIND" "$BACKEND_PORT" "后端" 15 || rc=1
+stop_service worker WORKER "$WORKER_BIND" "$WORKER_PORT" "Worker" 35 || rc=1
+stop_service backend BACKEND "$BACKEND_BIND" "$BACKEND_PORT" "后端" 15 || rc=1
+# 两个服务都已确认停下（或记录可证陈旧：PID 已不存在、记录地址无本实例）
+# 才删记录；有残留或无法确认时保留，供下次 down 继续按它定位。
+if [[ "$rc" -eq 0 && "$KEEP_STATE" -eq 0 ]]; then
+    rm -f "$STATE_FILE"
+fi
 exit "$rc"

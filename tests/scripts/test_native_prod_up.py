@@ -485,8 +485,10 @@ def test_wildcard_guard_runs_before_any_process_starts() -> None:
     guard_worker = NATIVE_PROD_UP.index(
         'refuse_wildcard_double_instance "Worker" "$WORKER_BIND" "$WORKER_PORT"'
     )
-    first_start = NATIVE_PROD_UP.index("nohup ${CAFFEINATE")
+    first_start = NATIVE_PROD_UP.index("nohup .venv/bin/python")
     assert guard_backend < first_start and guard_worker < first_start
+    for kind in ("backend", "worker"):  # #894 运行态记录守卫同样在启动前
+        assert NATIVE_PROD_UP.index(f"refuse_recorded_instance_elsewhere {kind} ") < first_start
 
 
 def test_velites_refresh_covers_bundled_copy_channel() -> None:
@@ -519,8 +521,10 @@ def test_prod_down_locates_by_bind_address() -> None:
     assert 'WORKER_BIND="$(dotenv_lookup_or NATIVE_WORKER_BIND 127.0.0.1 "$ROOT/.env")"' in down
     assert 'listener_pids "$bind" "$port"' in down
     assert '-iTCP:"$port" -i"$family"' in down
-    assert 'stop_port "$WORKER_BIND" "$WORKER_PORT" "Worker" 35' in down
-    assert 'stop_port "$BACKEND_BIND" "$BACKEND_PORT" "后端" 15' in down
+    # #894 起运行态记录优先，配置定位（stop_port）是 stop_service 的回落。
+    assert 'stop_service worker WORKER "$WORKER_BIND" "$WORKER_PORT" "Worker" 35' in down
+    assert 'stop_service backend BACKEND "$BACKEND_BIND" "$BACKEND_PORT" "后端" 15' in down
+    assert 'stop_port "$bind" "$port" "$name" "$grace"' in down
     assert down.count("lsof -nP -tiTCP") == 0  # 旧式仅按端口取 pid 的调用不得残留
 
 
