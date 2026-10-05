@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.services import skill_repo
 from server.app.services.job_errors import ConflictError, NotFoundError
+from server.app.services.skill_build_residue import BUILD_RESIDUE_GITIGNORE
 from server.app.services.skill_edit_checks import (
     contract_errors,
     contract_yaml_errors,
@@ -130,6 +131,14 @@ class SkillCreationService:
                 for path, content in targets:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(content, encoding="utf-8")
+                # #1038: a new repo is born ignoring Python build residue, so
+                # a local validator run never dirties it with tracked .pyc. A
+                # payload-declared .gitignore wins (never overwritten); only
+                # this brand-new repo is touched — existing repos and their
+                # index are never rewritten.
+                declared = {path.relative_to(repo_dir.resolve()) for path, _ in targets}
+                if Path(".gitignore") not in declared:
+                    (repo_dir / ".gitignore").write_text(BUILD_RESIDUE_GITIGNORE, encoding="utf-8")
                 # Defense in depth: the four-file set was checked on the
                 # proposed payload; re-check what actually landed on disk
                 # (trio + root contract.yaml, same graded rules — a

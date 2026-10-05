@@ -50,7 +50,10 @@ Skill versions allow 128 × 1024 characters per file (up to 512 KiB UTF-8);
 shared materials and skill creation additionally enforce 128 KiB per file.
 Shared materials remain FULL state: preserve every unchanged file in the
 export (omitted files are deleted), then call `sync_shared_materials` to
-propagate. Skill saves retain their tag-conflict behavior: repeated content
+propagate. Python build residue (`__pycache__/`, `*.pyc`) is skipped by the
+export, kept on disk by the save, and rejected if put in a payload;
+`save_skill_version` likewise ignores unstaged residue when checking for
+uncommitted changes. Skill saves retain their tag-conflict behavior: repeated content
 keeps identical bytes, but reusing an existing tag still returns 409.
 This channel does not add CAS to node or skill saves; coordinate concurrent
 editing and re-read before submitting.

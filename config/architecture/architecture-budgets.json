@@ -1669,6 +1669,7 @@
     "server/app/services/runtime_reserved_config.py": 68,
     "server/app/services/s3_jobs_gc.py": 154,
     "server/app/services/skill_browser.py": 30,
+    "server/app/services/skill_build_residue.py": 30,
     "server/app/services/skill_catalog.py": 64,
     "server/app/services/skill_commit_snapshot.py": 54,
     "server/app/services/skill_creation.py": 199,
