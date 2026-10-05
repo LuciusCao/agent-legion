@@ -11,14 +11,12 @@ from server.app.routes.failed_node_run_contracts import (
     FailedNodeRunItem,
     FailedNodeRunsResponse,
 )
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.job_rerun_by_failure_contracts import (
     JobRerunByFailureRequest,
     JobRerunByFailureResponse,
     JobRerunByFailureResultResponse,
 )
 from server.app.services.failed_node_runs import FailedNodeRunQueryService
-from server.app.services.job_errors import JobServiceError
 from server.app.services.job_rerun import JobRerunService
 
 
@@ -42,16 +40,13 @@ def create_failed_node_runs_router(
         detail: Annotated[str | None, Query(min_length=1)] = None,
         since: datetime | None = None,
     ) -> FailedNodeRunsResponse:
-        try:
-            rows = queries.list_failed_node_runs(
-                workspace_id,
-                category=category,
-                detail=detail,
-                since=since,
-            )
-            return FailedNodeRunsResponse(runs=[FailedNodeRunItem(**row) for row in rows])
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        rows = queries.list_failed_node_runs(
+            workspace_id,
+            category=category,
+            detail=detail,
+            since=since,
+        )
+        return FailedNodeRunsResponse(runs=[FailedNodeRunItem(**row) for row in rows])
 
     @router.post(
         "/workspaces/{workspace_id}/jobs/rerun-by-failure",

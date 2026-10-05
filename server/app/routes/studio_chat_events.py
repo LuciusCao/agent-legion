@@ -15,8 +15,6 @@ from starlette import concurrency
 
 from server.app.auth.dependencies import enforce_scoped_workspace_binding
 from server.app.events import JobEventManager
-from server.app.routes.job_http import raise_job_http_error
-from server.app.services.job_errors import JobServiceError
 from server.app.studio_chat.channels import studio_chat_channel
 from server.app.studio_chat.service import StudioChatService
 
@@ -38,12 +36,9 @@ def create_studio_chat_events_router(
     ) -> StreamingResponse:
         if job_event_manager is None:
             raise HTTPException(status_code=503, detail="Event manager not available")
-        try:
-            # Synchronous DB read (pool checkout) run off the loop so a busy
-            # pool cannot stall every SSE/WS heartbeat behind this lookup.
-            await concurrency.run_in_threadpool(service.get_session, session_id, workspace_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        # Synchronous DB read (pool checkout) run off the loop so a busy
+        # pool cannot stall every SSE/WS heartbeat behind this lookup.
+        await concurrency.run_in_threadpool(service.get_session, session_id, workspace_id)
         return await job_event_manager.connect(request, studio_chat_channel(session_id))
 
     return router

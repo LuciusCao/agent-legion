@@ -21,7 +21,7 @@ from server.app.routes.workspace_shared_materials_propagate_contracts import (
     SharedMaterialsPropagateRequest,
     SharedMaterialsPropagateResponse,
 )
-from server.app.services.job_errors import JobServiceError, NotFoundError
+from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_shared_propagate import propagate_shared_materials
 from server.app.settings import Settings
 
@@ -44,12 +44,9 @@ def create_workspace_shared_materials_propagate_router(
     ) -> SharedMaterialsPropagateResponse:
         if job_db.get_workspace(workspace_id) is None:
             raise_job_http_error(NotFoundError("Workspace not found"))
-        try:
-            result = propagate_shared_materials(
-                workspace_id, payload.sources, runs_dir=settings.skills_runs_dir
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        result = propagate_shared_materials(
+            workspace_id, payload.sources, runs_dir=settings.skills_runs_dir
+        )
         return SharedMaterialsPropagateResponse(
             workspace_id=workspace_id,
             results=[SharedMaterialPropagateSkillResult(**vars(r)) for r in result.results],

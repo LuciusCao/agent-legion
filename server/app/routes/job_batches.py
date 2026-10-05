@@ -2,8 +2,6 @@ from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.routes.job_contracts import JobBatchRequest, JobBatchResponse
-from server.app.routes.job_http import raise_job_http_error
-from server.app.services.job_errors import JobServiceError
 from server.app.services.job_intake import JobIntakeService
 
 
@@ -18,10 +16,7 @@ def create_job_batches_router(service: JobIntakeService) -> APIRouter:
         # a stray client value (extra="allow") is overwritten, never trusted.
         body = payload.model_dump()
         body["workflow_key"] = workspace_id
-        try:
-            return JobBatchResponse(**service.create_batch(workspace_id, body))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return JobBatchResponse(**service.create_batch(workspace_id, body))
 
     @router.post(
         "/workspaces/{workspace_id}/job-batches",

@@ -5,7 +5,6 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 
 from server.app.auth.dependencies import reject_studio_agent_scope, require_user
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workflow_node_code_contracts import (
     WorkflowNodeCodeArchiveResponse,
     WorkflowNodeCodeDraftRequest,
@@ -17,7 +16,6 @@ from server.app.routes.workflow_node_code_contracts import (
     WorkflowNodeCodeVersionsResponse,
     WorkflowNodeCodeVersionSummary,
 )
-from server.app.services.job_errors import JobServiceError
 from server.app.services.node_code_template import NODE_CODE_TEMPLATE
 from server.app.services.node_codes import NodeCodeService
 from server.app.settings import Settings
@@ -68,10 +66,7 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
     )
     def get_node_code(workspace_id: str, node_key: str) -> WorkflowNodeCodeResponse:
         _reject_start_node(workspace_id, node_key)
-        try:
-            versions = _service().list_versions(workspace_id, workspace_id, node_key)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        versions = _service().list_versions(workspace_id, workspace_id, node_key)
         published = next((row for row in versions if row["status"] == "published"), None)
         # list_versions is version-descending: the first draft is the current one.
         draft = next((row for row in versions if row["status"] == "draft"), None)
@@ -114,17 +109,14 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
         user: Annotated[dict[str, Any], Depends(require_user)],
     ) -> WorkflowNodeCodeVersionResponse:
         _reject_start_node(workspace_id, node_key)
-        try:
-            row = _service().save_draft(
-                workspace_id,
-                workspace_id,
-                node_key,
-                request.code,
-                f"user:{user['id']}",
-                request.change_note,
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        row = _service().save_draft(
+            workspace_id,
+            workspace_id,
+            node_key,
+            request.code,
+            f"user:{user['id']}",
+            request.change_note,
+        )
         return WorkflowNodeCodeVersionResponse(**row)
 
     @router.post(
@@ -138,15 +130,12 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
         request: Annotated[WorkflowNodeCodePublishRequest, Body()],
     ) -> WorkflowNodeCodeVersionResponse:
         _reject_start_node(workspace_id, node_key)
-        try:
-            row = _service().publish(
-                workspace_id,
-                workspace_id,
-                node_key,
-                request.expected_hash,
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        row = _service().publish(
+            workspace_id,
+            workspace_id,
+            node_key,
+            request.expected_hash,
+        )
         return WorkflowNodeCodeVersionResponse(**row)
 
     @router.get(
@@ -157,10 +146,7 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
         workspace_id: str, node_key: str
     ) -> WorkflowNodeCodeVersionsResponse:
         _reject_start_node(workspace_id, node_key)
-        try:
-            rows = _service().list_versions(workspace_id, workspace_id, node_key)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        rows = _service().list_versions(workspace_id, workspace_id, node_key)
         return WorkflowNodeCodeVersionsResponse(
             versions=[WorkflowNodeCodeVersionSummary(**row) for row in rows]
         )
@@ -173,10 +159,7 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
         workspace_id: str, node_key: str, version: int
     ) -> WorkflowNodeCodeVersionResponse:
         _reject_start_node(workspace_id, node_key)
-        try:
-            row = _service().get_code_by_version(workspace_id, workspace_id, node_key, version)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        row = _service().get_code_by_version(workspace_id, workspace_id, node_key, version)
         if row is None:
             raise HTTPException(status_code=404, detail=f"No node code version {version}")
         return WorkflowNodeCodeVersionResponse(**row)
@@ -193,16 +176,13 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
         user: Annotated[dict[str, Any], Depends(require_user)],
     ) -> WorkflowNodeCodeVersionResponse:
         _reject_start_node(workspace_id, node_key)
-        try:
-            row = _service().rollback(
-                workspace_id,
-                workspace_id,
-                node_key,
-                request.version,
-                f"user:{user['id']}",
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        row = _service().rollback(
+            workspace_id,
+            workspace_id,
+            node_key,
+            request.version,
+            f"user:{user['id']}",
+        )
         return WorkflowNodeCodeVersionResponse(**row)
 
     @router.delete(
@@ -212,10 +192,7 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
     )
     def archive_node_code(workspace_id: str, node_key: str) -> WorkflowNodeCodeArchiveResponse:
         _reject_start_node(workspace_id, node_key)
-        try:
-            archived = _service().archive_all(workspace_id, workspace_id, node_key)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        archived = _service().archive_all(workspace_id, workspace_id, node_key)
         return WorkflowNodeCodeArchiveResponse(archived=archived)
 
     @router.get(

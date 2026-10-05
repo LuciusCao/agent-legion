@@ -5,13 +5,11 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Query
 
 from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_TAG
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.job_view_contracts import (
     JobDetailResponse,
     JobsResponse,
     JobSummaryResponse,
 )
-from server.app.services.job_errors import JobServiceError
 from server.app.services.job_queries import JobQueryService
 
 
@@ -50,22 +48,19 @@ def create_jobs_router(
         run_id: Annotated[str | None, Query(min_length=1)] = None,
         limit: Annotated[int, Query(ge=1, le=2000)] = 500,
     ) -> JobsResponse:
-        try:
-            # limit+1 probe: the extra row decides `truncated` before the
-            # response is cut to the requested bound.
-            jobs = job_queries.list_jobs(
-                workspace_id,
-                status=status,
-                run_id=run_id,
-                limit=limit + 1,
-            )
-            truncated = len(jobs) > limit
-            return JobsResponse(
-                jobs=cast(list[JobSummaryResponse], jobs[:limit] if truncated else jobs),
-                truncated=truncated,
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        # limit+1 probe: the extra row decides `truncated` before the
+        # response is cut to the requested bound.
+        jobs = job_queries.list_jobs(
+            workspace_id,
+            status=status,
+            run_id=run_id,
+            limit=limit + 1,
+        )
+        truncated = len(jobs) > limit
+        return JobsResponse(
+            jobs=cast(list[JobSummaryResponse], jobs[:limit] if truncated else jobs),
+            truncated=truncated,
+        )
 
     @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
     def get_job(job_id: str) -> JobDetailResponse:
@@ -75,9 +70,6 @@ def create_jobs_router(
         # /workspaces/{ws}/jobs/{job_id} 前缀家族同一语义：scoped 绑定
         # token 只读绑定 workspace（跨域/未知 job 一律 404），成员按
         # membership，全会话 admin 走 fast path）。
-        try:
-            return JobDetailResponse(**job_queries.detail(job_id))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return JobDetailResponse(**job_queries.detail(job_id))
 
     return router

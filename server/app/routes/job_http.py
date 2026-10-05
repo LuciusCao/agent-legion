@@ -1,7 +1,6 @@
 from typing import Never
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import HTTPException
 
 from server.app.services.job_errors import (
     ConflictError,
@@ -15,7 +14,6 @@ from server.app.services.job_errors import (
 )
 from server.app.services.job_log_raw import PayloadTooLargeError
 from server.app.services.job_operation_error import JobOperationError
-from server.app.services.job_selection_resolver import BatchSelectionTooLargeError
 from server.app.services.run_partial_failure import PartialRunCreationError
 from server.app.services.skill_editing import SkillEditValidationError
 
@@ -58,22 +56,3 @@ def raise_job_operation_error(error: JobOperationError) -> Never:
     """Map a failed/skipped single-job mutation to its HTTP error."""
     status_code = 404 if error.reason_code in ("not_found", "node_not_found") else 400
     raise HTTPException(status_code=status_code, detail=error.failure_detail) from error
-
-
-def batch_selection_too_large_response(_request: Request, error: Exception) -> JSONResponse:
-    """422 for an oversized batch selection (#712 / #917 B-2).
-
-    Raised by the shared selection resolver from every batch endpoint, so it
-    is mapped once at the app level instead of per route. ``detail.message``
-    is what clients display; ``code`` / ``limit`` let them localize it.
-    """
-    if not isinstance(error, BatchSelectionTooLargeError):
-        raise error
-    return JSONResponse(
-        status_code=422,
-        content={"detail": {"message": str(error), "code": error.code, "limit": error.limit}},
-    )
-
-
-def register_job_http_exception_handlers(app: FastAPI) -> None:
-    app.add_exception_handler(BatchSelectionTooLargeError, batch_selection_too_large_response)
