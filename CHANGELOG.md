@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.15] - 2026-10-05
+
+主打并发正确性收口与生产稳定性：upgrade inherit + 节点重跑组合卡死修复（#827，产物清单行与对象同生共死）、Worker 事故包（#681 崩溃重启保留领取开关 + 整批收回审计、#682 容器 PID 1 僵尸收割）、前端请求超时与实时流断线可见性（#719/#720/#914）；Studio 线交付编辑空间减法与 execution 面板内保存（#769/#770）、会话改名/归档/删除（#872/#924）、Agent 定义目录与孤儿归档（#677/#906）；外部对接落地产品面（#870 API token 独立 section + 接入信息卡）与条目级幂等键 client_token（#813/#925）。安全面收口 workspace 列表与 dashboard 事件流的成员过滤（#711/#881）。
+
 ### Added
 - workspace 设置页新增「Agent 定义」目录（issue #677）：此前 Agent 定义的归档入口只在 Studio 已绑定节点的 inspector 里，workflow 重构后不再被任何节点引用的孤儿 Agent 无法从界面归档。新区块列出本 workspace 全部未归档的 Agent 定义（含草稿），按当前生效 workflow 的 agent 节点标出「被 N 个节点引用 / 未被引用」并提供「未被引用」过滤视图，每项带二次确认的归档动作；被节点引用的 Agent 在确认框里列出引用节点并说明归档后的影响（后端 `DELETE /api/agent-definitions/{agent_id}` 语义不变，对仍被引用的 Agent 不拒绝）。引用关系只按 active revision 计算，未发布的 workflow 草稿不计；端点为 admin-only，非 admin 不显示该区块与导航项。
 - workspace 设置新增「外部对接」一级 section（issue #870，仅管理员可见）：API Token 签发 / 列表 / 吊销从「Agent 与 Worker」段搬入（Worker Token 留在原处），并配接入信息卡——Workspace ID、API Base、鉴权头与当前生效的 per-token 限流参数（只读）可逐项复制或一键「复制接入信息」，权限面 8 个端点清单、填好本 workspace 的最小 curl / Python 示例（提交 → 轮询 → 产物清单 → 下载）与直连 / raw 下载说明。端点清单与示例以 docs/workspace-api-tokens.md 为单一事实源，由契约测试与文档权限面表、后端 api-scope 准入面、OpenAPI 契约对账防漂移。
