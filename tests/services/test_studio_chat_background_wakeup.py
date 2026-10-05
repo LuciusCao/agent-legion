@@ -129,6 +129,7 @@ def chat(tmp_path, monkeypatch):
     monkeypatch.setattr(delivery, "invalidate_run_token", Mock())
     monkeypatch.setattr(delivery, "_token_alive", Mock(return_value=True))
     monkeypatch.setattr(wake, "task_root", lambda *_: tmp_path)
+    monkeypatch.setattr(wake, "kimi_code_task_root", lambda *_: None)  # V1 layout
     monkeypatch.setattr(wake, "POLL_SECONDS", 0.01)
     yield service, runtime
     runtime.background_stop.set()

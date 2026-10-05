@@ -1,4 +1,9 @@
-"""Kimi task completion cursor, cancellation epochs and idle followups."""
+"""Kimi task watcher lifecycle, cancellation epochs and idle followups.
+
+Kimi CLI V1 sessions get receipts and idle followups; Kimi Code sessions
+(located by their session directory, #972) get receipts only. The cursor
+itself lives in completion_cursor.py.
+"""
 
 from __future__ import annotations
 
@@ -6,76 +11,19 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
-from server.app.studio_chat.background_delivery import wake_session
+from server.app.studio_chat.background_delivery import wake_session as wake_session
 from server.app.studio_chat.background_rearm import prepare_rearm as prepare_rearm
 from server.app.studio_chat.background_rearm import rearm_wakeup as rearm_wakeup
-from server.app.studio_chat.background_rearm import try_rearm
-from server.app.studio_chat.background_receipts import ReceiptCursor
-from server.app.studio_chat.kimi_task_store import task_root, task_snapshots
+from server.app.studio_chat.completion_cursor import CompletionCursor
+from server.app.studio_chat.kimi_code_tasks import kimi_code_task_root
+from server.app.studio_chat.kimi_task_store import task_root
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
 
 logger = logging.getLogger(__name__)
 POLL_SECONDS = 2
-
-
-class CompletionCursor:
-    def __init__(
-        self, root: Path, acp_session_id: str, *, seen: frozenset[str] | None = None
-    ) -> None:
-        self.root, self.acp_session_id = root, acp_session_id
-        self.seen = set(seen or ())
-        self.pending: set[str] = set()
-        self.initialized = seen is not None
-        self.receipts = ReceiptCursor.from_baseline(root, acp_session_id, self.seen)
-        if not self.initialized:
-            try:
-                self.baseline()
-            except (OSError, ValueError):
-                logger.warning(
-                    "Kimi initial baseline unavailable; watcher will retry", exc_info=True
-                )
-
-    def baseline(self) -> None:
-        tasks = task_snapshots(self.root, self.acp_session_id, strict=True)
-        if not self.initialized:
-            self.receipts.initial_terminal.update(
-                key for key, task in tasks.items() if task.terminal
-            )
-        self.seen.update(
-            key for key, task in tasks.items() if task.kind == "agent" and task.terminal
-        )
-        self.pending.clear()
-        self.initialized = True
-
-    def step(self, service: StudioChatService, session_id: str, runtime: SessionRuntime) -> None:
-        # Scan and cancellation baseline share the lock: stale scan results
-        # cannot cross a rapid cancel/rearm boundary.
-        with runtime.lock:
-            if runtime.closed or service.runtime(session_id) is not runtime:
-                return
-            if not self.initialized:
-                self.baseline()
-            completed = self.receipts.step(service, session_id)
-            if runtime.background_wakeup_enabled:
-                self.pending.update(completed - self.seen)
-            self.seen.update(completed)
-            if runtime.background_cleanup is not None:
-                if not runtime.background_cleanup():
-                    return
-                runtime.background_cleanup = None
-            if not runtime.background_wakeup_enabled:
-                if runtime.background_rearm_epoch is None:
-                    self.baseline()
-                    return
-                if not try_rearm(runtime):
-                    return
-            if self.pending and wake_session(service, session_id, runtime, sorted(self.pending)):
-                self.pending.clear()
 
 
 def cancel_wakeup(runtime: SessionRuntime) -> None:
@@ -87,12 +35,29 @@ def cancel_wakeup(runtime: SessionRuntime) -> None:
             runtime.background_cursor.pending.clear()
 
 
+def _adopt_code_layout(
+    runtime: SessionRuntime, cursor: CompletionCursor, acp_session_id: str
+) -> CompletionCursor:
+    """A V1 cursor that never observed its root switches to the Kimi Code
+    layout once that session directory appears (#972)."""
+    if not cursor.wakes or cursor.initialized:
+        return cursor
+    code_root = kimi_code_task_root(runtime.handle.cwd, acp_session_id)
+    if code_root is None:
+        return cursor
+    with runtime.lock:
+        if runtime.background_cursor is cursor:
+            runtime.background_cursor = CompletionCursor(code_root, acp_session_id, wakes=False)
+        return runtime.background_cursor or cursor
+
+
 def start_watcher(
     service: StudioChatService, session_id: str, runtime: SessionRuntime, acp_session_id: str
 ) -> None:
     if not runtime.kimi_agent:
         return
-    root = task_root(runtime.handle.cwd, acp_session_id)
+    code_root = kimi_code_task_root(runtime.handle.cwd, acp_session_id)
+    root = code_root or task_root(runtime.handle.cwd, acp_session_id)
     if root is None:
         return
     with runtime.lock:
@@ -109,11 +74,15 @@ def start_watcher(
             and baseline.acp_session_id == acp_session_id
             else None
         )
-        cursor = runtime.background_cursor = CompletionCursor(root, acp_session_id, seen=seen)
+        cursor = runtime.background_cursor = CompletionCursor(
+            root, acp_session_id, seen=seen, wakes=code_root is None
+        )
 
     def watch() -> None:
+        nonlocal cursor
         while not runtime.background_stop.wait(POLL_SECONDS):
             try:
+                cursor = _adopt_code_layout(runtime, cursor, acp_session_id)
                 cursor.step(service, session_id, runtime)
             except Exception:
                 # #204 broad-except audit: retry metadata/DB failures without
