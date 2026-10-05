@@ -1,4 +1,8 @@
-"""Read-only, descriptor-anchored Kimi V1 task compatibility boundary."""
+"""Read-only, descriptor-anchored Kimi task compatibility boundary.
+
+Kimi CLI V1 layout here; a Kimi Code root (kimi_code_tasks.py, #972) is
+dispatched by its shape so every caller reads either layout.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ from pathlib import Path
 
 from server.app.fs_safety import DIRECTORY_FLAGS
 from server.app.fs_safety import open_dir_nofollow as directory
+from server.app.studio_chat.kimi_code_tasks import code_task_snapshots, is_code_task_root
 from server.app.studio_chat.kimi_task_snapshot import BackgroundTask, read_task
 
 _ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}\Z")
@@ -29,6 +34,8 @@ def task_snapshots(
     root: Path, session_id: str, *, ignored: Collection[str] = (), strict: bool = False
 ) -> dict[str, BackgroundTask]:
     """Keep spec, runtime and output on one pinned task directory."""
+    if is_code_task_root(root):  # Kimi Code layout (#972)
+        return code_task_snapshots(root, ignored=ignored, strict=strict)
     result: dict[str, BackgroundTask] = {}
     try:
         with directory(root) as root_fd:

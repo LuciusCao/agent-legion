@@ -94,8 +94,8 @@ exactly-once 模型调用，也不拥有 Kimi 的原生通知消费状态。
 回执游标与自动投递游标独立：取消和重启用只推进投递基线，不吞掉活动回执。
 单个回执写入失败只重试该任务；旧 turn 清理失败只阻断自动投递，活动仍持续记录。
 取消只停止自动接续，仍展示已派发任务的状态；Bash 任务展示状态但不会
-触发 #806 的子代理自动接续。此适配仅支持本机 Kimi V1，不推断其它 harness
-的后台生命周期。不同 harness 需要各自提供有身份边界的真实状态来源。
+触发 #806 的子代理自动接续。此适配支持本机 Kimi V1 与 Kimi Code（见下文 #972），
+不推断其它 harness 的后台生命周期。不同 harness 需要各自提供有身份边界的真实状态来源。
 
 ## Quality Impact
 
@@ -136,8 +136,8 @@ Kimi Code 0.43（`kimi acp`，agentInfo `Kimi Code CLI`）与上文的 kimi-cli 
 会话空闲时收到后台任务完成通知（`origin.kind = task`）或 cron 触发（`cron_job`），
 引擎自己开一轮并调用模型；但其 ACP 适配层只转发绑定到在途 `session/prompt` 的那一轮，
 其余回合的事件在发到 wire 之前就被丢弃。Studio 的 `on_update` 本身没有 turn 门槛，
-SSE 与前端也始终订阅，问题在于这些更新从未到达。上文的 V1 watcher 读 `~/.kimi`，
-对 Kimi Code 的存储布局不生效，因此不会补发系统提示。
+SSE 与前端也始终订阅，问题在于这些更新从未到达。Kimi Code 会话上不发 #816 系统提示
+（引擎自己开回合），任务回执改读 Kimi Code 布局，见下文 #972。
 
 `unprompted_turns.py` 为识别为 kimi 的会话启动只读 watcher，每秒跟踪主 agent 的 wire
 日志 `<home>/sessions/<workspace>/<acp-session>/agents/main/wire.jsonl`（`kimi_wire.py`）。
@@ -151,7 +151,9 @@ Studio 发起的回合按 origin 跳过，不会重复；session/load 加载来�
 末尾偏移，不读内容），此刻没有任何写者，新进程在 load 期间、on_ready 之前、首次轮询之前
 写完的回合都落在基线之后；加载来的日志若没有可用基线（找不到、stat 失败、acp session
 或路径不一致），则首次定位时取末尾，宁可漏报也绝不重放。文件被替换或截断时在新末尾
-重新建基线，宁可漏报也不重复。逐级 `dir_fd` / `O_NOFOLLOW` 打开，单次最多读 1 MiB，只消费完整行。
+重新建基线，宁可漏报也不重复。逐级 `dir_fd` / `O_NOFOLLOW` 打开，日志本身经
+`fs_safety.open_regular_at`（SECURITY-PATH-002）打开：只接受单链接普通文件，非阻塞，
+不符合即拒绝且不读内容（#1044）。单次最多读 1 MiB，只消费完整行。
 
 `turn.prompt` 的 origin 为 `user` / `skill_activation` 的回合由 Studio 发起（含 #816
 系统提示），已经走 ACP，跳过；其余回合按到达顺序写入 `status`（`unprompted_turn` 回执）、
@@ -160,6 +162,25 @@ agent `text` / `thought`、ACP 形状的 `tool_call` / `tool_call_update`（id �
 引擎以 `reason = failed` 结束的回合改写一条 `error` 状态事件（detail 只含错误 code 与
 message，不含 details / cause），与 ACP 路径 `on_turn_error` 的形态一致，前端按既有告警条
 显示，不写 `turn_end`。前端照常触发终止回取与草稿查询失效。写入在 runtime 锁内复核 runtime 身份与 closed，
-关闭 / 删除栅栏之后不再写；写失败的行保留到下一次轮询重试。会话状态、turn owner
+关闭 / 删除栅栏之后不再写；写失败的行保留到下一次轮询重试，积压未落库期间暂停读取日志，
+先按序持久化积压再推进，数据库故障期间内存积压不增长（#1044）。会话状态、turn owner
 与 empty_turn 判定都不变：自发回合进行中用户发的消息由 Kimi 引擎排队，按既有
 running 语义在其后执行。kimi-cli V1 会话没有该 wire 文件，watcher 保持空转。
+
+## Kimi Code 任务存储布局（#972）
+
+Kimi Code 把主 agent 的后台任务放在 wire 日志旁：
+`<home>/sessions/<workspace>/<acp-session>/agents/main/tasks/<taskId>.json`（每任务一份
+camelCase 信息文档，时间戳为毫秒，kind 为 `agent` / `process`），输出在
+`tasks/<taskId>/output.log`；子代理只在结束时写输出，运行中的进度取其自身日志
+`agents/<agentId>/wire.jsonl` 的修改时间。home 探测与 wire 日志相同（`KIMI_CODE_HOME`、
+`~/.kimi-code`）。`kimi_code_tasks.py` 读取该布局，映射到与 V1 相同的任务快照（`process` →
+`bash`，非 detached 的前台调用与其他 kind 忽略），继续走 `task_metadata_files` /
+`fs_safety` 的逐级 `dir_fd` 打开与软失败策略；tasks 目录尚未创建视为空（首个后台任务时才建）。
+`kimi_task_store.task_snapshots` 按根目录形状分派两种布局，恢复基线同样先探测 Kimi Code 会话目录。
+
+会话是否为 Kimi Code 由会话目录是否存在决定：on_ready 时已能定位则直接按 Kimi Code
+启动；尚未定位时按 V1 启动，V1 游标从未成功观察到根目录期间每次轮询重新探测，一旦出现
+Kimi Code 会话目录即切换（kimi-cli V1 与 Kimi Code 的 ACP session id 不会互相命中）。
+Kimi Code 会话只写 #772 活动回执，不发 #816 系统提示：引擎收到任务通知会自行开回合，
+其内容经上文 wire 日志进入会话流。V1 布局行为不变。
