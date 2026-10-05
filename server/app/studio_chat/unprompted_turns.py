@@ -181,7 +181,8 @@ class UnpromptedTurnWatcher:
         # from its start (WireTail.read, identity None).
         self.baseline_on_locate = False
         self.projector = UnpromptedTurnProjector()
-        # Projected but not yet durably appended (retried on the next step).
+        # Projected but not yet durably appended (retried on the next step,
+        # before the journal is read any further).
         self.pending: list[Row] = []
 
     def step(self) -> None:
@@ -195,8 +196,11 @@ class UnpromptedTurnWatcher:
                 self.tail = tail
                 return
             self.tail = tail
-        for record in self.tail.read():
-            self.pending.extend(self.projector.project(record))
+        if not self.pending:
+            # A backlog left by a failed append pauses the journal: it is
+            # persisted first, so retries never grow it (#1044).
+            for record in self.tail.read():
+                self.pending.extend(self.projector.project(record))
         if not self.pending:
             return
         runtime, store = self.runtime, self.service.store
