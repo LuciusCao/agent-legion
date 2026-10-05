@@ -32,6 +32,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Studio「Agent 助手」在 Kimi Code 引擎上读不到后台任务、唤醒 watcher 每 2 秒刷 `FileNotFoundError`（issue #972，#945 根因排查发现）：#772 后台任务状态与恢复基线此前只认 kimi-cli V1 存储布局；现按 #945 的存储探测（`KIMI_CODE_HOME` / `~/.kimi-code`）支持 Kimi Code 0.43 的 `sessions/<wd>/<sid>/agents/main/tasks` 布局，严格基线对缺必需字段的任务文档与扫描期间被替换的任务目录判失败重试；Kimi Code 会话只写 #772 回执、不再发 #816 唤醒（引擎自身开回合），消除 warning 刷屏。Kimi Code 自发回合期间用户消息的排队另见 #1029。
+- Studio「Agent 助手」自发回合补发在数据库暂时不可用时不再无界堆积（issue #1044，#945 follow-up）：已有待持久化积压时暂停读取 wire 日志，先按序落库再推进。
 - Studio「Agent 助手」零内容空轮与后台唤醒轮期间的消息不再丢失（issue #882，#863 follow-up）：宽限复核后确认零内容的一轮（`empty_turn`）现在在会话空闲时也给出「继续对话」——状态行显示「上一条消息未被处理」，点击经既有 resume 端点把那一条原样重新投递（不新增用户消息，时间线记一条 `empty_turn_retry`；同一次判定只投递一次，双击、多标签页或之后已发过新消息都不会重复投递），告警文案同步改为指向「继续对话」；不做自动重投（平台无法区分 ACP 层吞掉的消息与 agent 合法的零输出，自动重投还可能再撞同一静默窗口）。后台子代理完成唤醒轮占用会话时发出的消息改为后端入站排队：消息立即落库并在气泡下标「已排队」，当前轮结束后按到达顺序逐条投递（时间线记 `queued_delivered`），排队期间新的后台唤醒让位；轮到时若会话已无法接收（压缩窗口、运行凭证失效、状态已变化）则不投递并给出 `queued_dropped` 提示与气泡「未送达，请重发」，不再静默丢失。人发起的轮次运行中再发送的行为不变（前端发送队列）。
 - worker 孤儿进程组回收按组在各自 SIGTERM 紧前刷新成员（issue #904，#895 follow-up）：一次清理含多个进程组时，此前只在批量 TERM 入口取一次 `/proc` 成员快照，后序组在快照之后才派生、忽略 TERM 的成员不会被钉住，原钉住成员在等待期退出并被 init 立即收割后 KILL 阶段的身份现证失败、该成员脱离清理；现改为增量成员索引（入口一次全表扫描，之后每组 TERM 前只重列 `/proc` 并读取新出现 pid 的 stat），每组 TERM 前按 pgid 取当前成员、现证属主后并入钉住集合。
 - `GET /api/workspaces/{workspace_id}/jobs/snapshot` 的 `cursor` 无法解析时返回 422（issue #891，#852 follow-up，对外行为变更）：此前缺 `|` 分隔符（如 `cursor=garbage`）、时间戳非法（如 `cursor=notadate|x`）等坏 cursor 落到 SQL 抛未处理异常成 5xx，而对接文档错误码表让调用方对 5xx 退避重试，结果对一个永远失败的参数错误无限重试。现 cursor 在参数校验层解析（与 `limit` 越界同一约定），失败返回 422 + 可读 detail（`loc` 指向 `query.cursor`）；空串仍等同第一页，原样回传的 `next_cursor` 不受影响。docs/workspace-api-tokens.md 错误码表与契约测试同步。
@@ -45,6 +47,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Security
 
+- Studio chat 引擎自发回合的 wire 日志读取改经 `fs_safety` 共享原语打开，拒绝多链接与非普通文件（issue #1044，#945 follow-up，路径安全类）。
 - Studio 对话 ACP 子进程权限模型与环境继承收敛（issue #921）：只读类工具调用的自动批准收窄到本 workspace 的 MCP 暂存目录（`data/studio-mcp-files/<workspace_id>`）内，其余只读调用改走人工确认；人工选择「本会话总是允许」在 ACP 线上收窄为单次允许，后续每次调用都重新经过权限请求（需要免确认时用会话的「全部允许」开关）。ACP terminal 子进程改为白名单环境（PATH / HOME / 语言区域等基础项 + agent 自带覆盖项），不再继承 server 进程环境；`terminal/create` 必须对应一条经人工或「全部允许」批准的权限请求（平台自动批准不算），工作目录约束在会话根目录内。前端 agent 气泡渲染 markdown 时不再自动加载任何图片，改为点击才打开的链接占位。
 - Worker 本机控制台加 Host 头白名单与变更请求来源校验（issue #923）：`worker/service.py` 控制面的页面、静态资产与全部 `/api/*` 只接受回环变体（`127.0.0.1` / `localhost` / `[::1]`，任意端口）∪ 实际暴露面地址 ∪ `AGENT_WORKER_CONSOLE_URL` 主机名的 Host 头，其余 403；变更类请求另校验 `Sec-Fetch-Site` / `Origin`（跨站或来源与 Host 不一致即 403，不带这两个头的 `workerctl` 不受影响）。控制 token 内嵌页面的前提收紧为「暴露面回环 ∧ Host 校验已启用 ∧ 白名单不含非回环主机名（含控制台地址）」；暴露面为通配地址时 Host 校验不启用、token 不内嵌。经自定义主机名访问控制台的部署需把该地址写进 `AGENT_WORKER_CONSOLE_URL`，详见 docs/agent-worker-deployment.md §控制面鉴权。同 stack 容器经 compose 服务名访问 Worker 控制台同样返回 403（compose 健康检查走 `127.0.0.1`，不受影响）。
 - velites 工具沙箱收敛（issue #922、#942、#715，velites 侧，需随 velites 补丁版生效）：Linux bwrap 下 bash 工具与 `sandbox wrap` 统一命名空间隔离（私有 pid 命名空间与沙箱自有 /proc，网络默认私有命名空间），启动时按 bash 工具的确切策略探测一次，建不起命名空间即 fail-closed 报错；bash 子进程环境改为具名白名单继承（对齐 Host 侧 code 沙箱）；write / json 工具的原子写临时文件改为随机名独占创建；命令退出、超时或取消后对进程组做有界清理（TERM → drain → KILL），脱离进程组仍持管道的进程不再拖住返回。默认断网等行为变化与升级顺序见 Changed 段。
