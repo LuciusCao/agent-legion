@@ -34,7 +34,6 @@ def _seed_run(
     run_id: int,
     job_id: str,
     workspace_id: str = WORKSPACE,
-    workflow_key: str = "wf-a",
     node_key: str = "node-a",
     status: str = "completed",
     skill_version: str = "v1",
@@ -119,7 +118,6 @@ def test_filters_narrow_candidates():
                 job_id=f"job-b-{index}",
                 node_key="node-b",
                 status="failed",
-                workflow_key="wf-b",
             )
     service = _service()
     batch = service.create_batch(
@@ -127,7 +125,6 @@ def test_filters_narrow_candidates():
         name="b",
         sample_size=50,
         seed="s",
-        workflow_key="wf-b",
         node_keys=["node-b"],
         statuses=["failed"],
     )

@@ -44,8 +44,9 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # archive (default list hides it, resume claim + spawn fence refuse it
     # until unarchive). Column, not status value, same argument as v89.
     SchemaMigration(90, "studio_chat_session_archive", migrate_studio_chat_session_archive),
-    # v91 (#211 M3): drop workspaces.default_workflow_key — equal to the id
-    # on every row since v62, so the id is the only identifier left. Guarded
-    # (drop if exists): fresh databases never create it.
+    # v91 (#211 M3): drop workspaces.default_workflow_key and
+    # quality_sample_batches.workflow_key — both equal the workspace id, so
+    # the id is the only identifier left. Guarded (drop if exists): fresh
+    # databases never create them.
     SchemaMigration(91, "retire_default_workflow_key", migrate_retire_default_workflow_key),
 ]

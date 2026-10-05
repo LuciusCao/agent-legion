@@ -303,3 +303,36 @@ def test_v91_upgrade_drops_key_column_and_keeps_rows() -> None:
     assert column is None
     assert "bind_v90_ws" in ids
     assert recorded is not None and recorded["name"] == "retire_default_workflow_key"
+
+
+@pytest.mark.fresh_schema
+def test_v91_upgrade_drops_quality_batch_key_column() -> None:
+    """#211 M3 (codex R2 on #1032): quality_sample_batches.workflow_key was a
+    writable second workflow identifier; v91 drops it on upgrade, keeps the
+    batch rows, and the terminal shape never creates it."""
+    from server.app.db.schema import init_db
+
+    def _column(conn):
+        return conn.execute(
+            "select 1 from information_schema.columns where table_schema=current_schema()"
+            " and table_name='quality_sample_batches' and column_name='workflow_key'"
+        ).fetchone()
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        assert _column(conn) is None
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "alter table quality_sample_batches"
+            " add column if not exists workflow_key text not null default ''"
+        )
+        conn.execute("insert into workspaces(id, name) values ('bind_qb_ws', 'Q')")
+        conn.execute(
+            "insert into quality_sample_batches(id, workspace_id, sample_size, workflow_key)"
+            " values ('qb-1', 'bind_qb_ws', 1, 'bind_qb_ws')"
+        )
+        conn.execute("delete from schema_migrations where version >= 91")
+    init_db(TEST_DATABASE_URL)
+    with read_connection(TEST_DATABASE_URL) as conn:
+        assert _column(conn) is None
+        batch = conn.execute("select id from quality_sample_batches where id='qb-1'").fetchone()
+    assert batch is not None

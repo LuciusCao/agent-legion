@@ -901,7 +901,6 @@ create table if not exists quality_sample_batches (
   id text primary key,
   workspace_id text not null references workspaces(id) on delete cascade,
   name text not null default '',
-  workflow_key text not null default '',
   filters_json jsonb not null default '{}',
   sample_size integer not null check(sample_size > 0),
   seed text not null default '',

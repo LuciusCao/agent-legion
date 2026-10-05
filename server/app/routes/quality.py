@@ -41,8 +41,6 @@ def create_quality_router(
         result = sampling.create_batch(
             workspace_id,
             name=payload.name,
-            # #211 M3: the stored batch column mirrors the workspace id.
-            workflow_key=workspace_id,
             node_keys=payload.filters.node_keys,
             statuses=payload.filters.statuses,
             since=payload.filters.since,

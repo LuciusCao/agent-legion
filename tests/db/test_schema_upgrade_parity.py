@@ -45,9 +45,9 @@ from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SC
 
 # Effects the newest migration (v91, retire_default_workflow_key) must
 # leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v91 only drops workspaces.default_workflow_key (#211 M3),
-# so the undo re-adds that column in its v90 shape (text not null, no
-# default) and nothing else.
+# SCHEMA_VERSION-1. v91 only drops workspaces.default_workflow_key and
+# quality_sample_batches.workflow_key (#211 M3), so the undo re-adds both in
+# their v90 shapes and nothing else.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
@@ -55,6 +55,7 @@ _NEWEST_MIGRATION_NAME = "retire_default_workflow_key"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = (
     ("workspaces", "default_workflow_key text not null"),
+    ("quality_sample_batches", "workflow_key text not null default ''"),
 )
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
 # faithful v90 (v91 is a pure column drop: the restore above covers it).
