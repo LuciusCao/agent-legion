@@ -24,7 +24,7 @@ cd "$ROOT"
 
 # 0. 嵌套防护（AGENTS.md §1）：worktree 一律是主仓库根的平级子目录，
 #    嵌套会让 data/、测试库派生与清理路径全部混乱，直接拒绝。
-MAIN="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+MAIN="$(git worktree list --porcelain | awk '/^worktree /&&!seen{print $2; seen=1}')"
 if [[ "$ROOT" != "$MAIN" && "$(dirname "$ROOT")" != "$MAIN/.worktrees" ]]; then
     echo "错误: worktree 禁止嵌套（当前: ${ROOT}）。" >&2
     echo "请先 cd 到主仓库根（${MAIN}），再 git worktree add .worktrees/<name> -b <branch> <base>。" >&2
