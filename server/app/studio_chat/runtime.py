@@ -43,6 +43,9 @@ class SessionRuntime:
         self.background_epoch = 0
         self.background_rearm_epoch: int | None = None
         self.background_baseline: Any = None
+        # #938: pre-spawn baseline of the resumed Kimi Code wire journal
+        # (wire_baseline.WireBaseline); None for a session this runtime created.
+        self.wire_baseline: Any = None
         self.background_cursor: Any = None
         self.background_cleanup: Any = None
         # Streaming chunk coalescing (agent text + thought): each kind folds

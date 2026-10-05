@@ -129,3 +129,37 @@ agent/bash 终态、摘要截断、FIFO 不阻塞读取、错误元数据和写�
 `test_studio_chat_baseline_observation.py` 覆盖真实目录缺失、目录替换、部分元数据、
 初始扫描重试以及失败时游标不发生部分提交；人工交接回归直接注入读取器的文件系统故障。
 服务启动排空与 fatal consumer fencing 复用 #814 的真实 ACP/数据库回归。
+
+## Kimi Code 自发回合进入会话流（#938）
+
+Kimi Code 0.43（`kimi acp`，agentInfo `Kimi Code CLI`）与上文的 kimi-cli V1 行为不同：
+会话空闲时收到后台任务完成通知（`origin.kind = task`）或 cron 触发（`cron_job`），
+引擎自己开一轮并调用模型；但其 ACP 适配层只转发绑定到在途 `session/prompt` 的那一轮，
+其余回合的事件在发到 wire 之前就被丢弃。Studio 的 `on_update` 本身没有 turn 门槛，
+SSE 与前端也始终订阅，问题在于这些更新从未到达。上文的 V1 watcher 读 `~/.kimi`，
+对 Kimi Code 的存储布局不生效，因此不会补发系统提示。
+
+`unprompted_turns.py` 为识别为 kimi 的会话启动只读 watcher，每秒跟踪主 agent 的 wire
+日志 `<home>/sessions/<workspace>/<acp-session>/agents/main/wire.jsonl`（`kimi_wire.py`）。
+home 依次探测后端进程的 `KIMI_CODE_HOME` 与 `~/.kimi-code`：ACP SDK 以精简环境拉起子进程，
+普通 `kimi acp` 只能用默认 home，包装命令另设 home 时需在后端进程设置同名变量。
+从哪里开始读由「日志是谁写的」决定，而不是由某个时刻决定（任何时刻之前都还有时间，
+那里写完的回合会被误当历史）：本 runtime 自己的 kimi 进程在 session/new 时创建的日志
+（含恢复时 session/load 失败回落 session/new 的情形）整份属于本 runtime，从头读取，
+Studio 发起的回合按 origin 跳过，不会重复；session/load 加载来的日志在 `resume.py`
+里于旧进程被回收之后、新进程拉起之前取基线（`capture_wire_baseline`，只 stat 取身份与
+末尾偏移，不读内容），此刻没有任何写者，新进程在 load 期间、on_ready 之前、首次轮询之前
+写完的回合都落在基线之后；加载来的日志若没有可用基线（找不到、stat 失败、acp session
+或路径不一致），则首次定位时取末尾，宁可漏报也绝不重放。文件被替换或截断时在新末尾
+重新建基线，宁可漏报也不重复。逐级 `dir_fd` / `O_NOFOLLOW` 打开，单次最多读 1 MiB，只消费完整行。
+
+`turn.prompt` 的 origin 为 `user` / `skill_activation` 的回合由 Studio 发起（含 #816
+系统提示），已经走 ACP，跳过；其余回合按到达顺序写入 `status`（`unprompted_turn` 回执）、
+agent `text` / `thought`、ACP 形状的 `tool_call` / `tool_call_update`（id 为
+`<turnId>:<toolCallId>`，与 Kimi ACP 一致），最后写 `turn_end`（`unprompted: true`）；
+引擎以 `reason = failed` 结束的回合改写一条 `error` 状态事件（detail 只含错误 code 与
+message，不含 details / cause），与 ACP 路径 `on_turn_error` 的形态一致，前端按既有告警条
+显示，不写 `turn_end`。前端照常触发终止回取与草稿查询失效。写入在 runtime 锁内复核 runtime 身份与 closed，
+关闭 / 删除栅栏之后不再写；写失败的行保留到下一次轮询重试。会话状态、turn owner
+与 empty_turn 判定都不变：自发回合进行中用户发的消息由 Kimi 引擎排队，按既有
+running 语义在其后执行。kimi-cli V1 会话没有该 wire 文件，watcher 保持空转。
