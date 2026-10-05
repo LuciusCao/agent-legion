@@ -935,7 +935,7 @@
     "scripts/e2e/_demo_seed.py": 42,
     "scripts/e2e/_llm_stub.py": 99,
     "scripts/e2e/_main_flow_seed.py": 181,
-    "scripts/e2e/_worker.py": 114,
+    "scripts/e2e/_worker.py": 110,
     "scripts/e2e/run_browser_smoke.py": 230,
     "scripts/ensure-s3-bucket.py": 74,
     "scripts/export_openapi.py": 112,
