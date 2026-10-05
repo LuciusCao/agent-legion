@@ -21,7 +21,7 @@ from server.app.routes.studio_agent_preview_contracts import (
     PreviewPanelStateResponse,
     PreviewPanelVersionResponse,
 )
-from server.app.services.job_errors import JobServiceError, NotFoundError
+from server.app.services.job_errors import NotFoundError
 from server.app.services.preview_panels import PreviewPanelService
 from server.app.settings import Settings
 
@@ -68,10 +68,7 @@ def create_preview_panels_router(job_db: JobQueries, settings: Settings) -> APIR
         workspace_id: str, request: PreviewPanelPublishRequest
     ) -> PreviewPanelVersionResponse:
         """#841: CAS publish — 409 when the draft is no longer the asserted one."""
-        try:
-            row = _service(workspace_id).publish(workspace_id, request.expected_hash)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        row = _service(workspace_id).publish(workspace_id, request.expected_hash)
         return PreviewPanelVersionResponse.model_validate(row)
 
     @router.post(

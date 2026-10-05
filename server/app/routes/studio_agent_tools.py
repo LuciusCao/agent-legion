@@ -16,7 +16,6 @@ from server.app.auth.dependencies import (
     require_studio_agent_workspace,
 )
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_agent_catalog_read_tools import (
     create_studio_agent_catalog_read_tools_router,
 )
@@ -43,7 +42,6 @@ from server.app.routes.workflow_revisions_contracts import (
     WorkflowDraftRequest,
     WorkflowDraftValidationResponse,
 )
-from server.app.services.job_errors import JobServiceError
 from server.app.services.studio_agent_tools import StudioAgentToolsService
 from server.app.settings import Settings
 
@@ -74,10 +72,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
     def compare_workflow(
         workspace_id: str, payload: WorkflowDraftRequest
     ) -> WorkflowDraftCompareResponse:
-        try:
-            result = _service().compare_workflow(workspace_id, payload.definition_yaml)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        result = _service().compare_workflow(workspace_id, payload.definition_yaml)
         return WorkflowDraftCompareResponse.model_validate(result)
 
     # #211 Phase 2: the {workflow_key} URL segment is a deprecated alias of
@@ -119,18 +114,15 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         workflow_key: str | None = None,
     ) -> WorkflowNodeCodeVersionResponse:
         key = _resolve_key(workspace_id, workflow_key)
-        try:
-            row = _service().save_node_code_draft(
-                workspace_id,
-                key,
-                node_key,
-                payload.code,
-                payload.change_note,
-                str(user["id"]),
-                expected_capability=payload.expected_capability,
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        row = _service().save_node_code_draft(
+            workspace_id,
+            key,
+            node_key,
+            payload.code,
+            payload.change_note,
+            str(user["id"]),
+            expected_capability=payload.expected_capability,
+        )
         return WorkflowNodeCodeVersionResponse(**row)
 
     @workspace_scoped.get(
@@ -138,10 +130,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         response_model=StudioAgentActiveWorkflowResponse,
     )
     def get_active_revision(workspace_id: str) -> StudioAgentActiveWorkflowResponse:
-        try:
-            payload = _service().get_active_revision(workspace_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        payload = _service().get_active_revision(workspace_id)
         return StudioAgentActiveWorkflowResponse.model_validate(payload)
 
     @workspace_scoped.get(
@@ -159,10 +148,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         workspace_id: str, node_key: str, workflow_key: str | None = None
     ) -> WorkflowNodeCodeResponse:
         key = _resolve_key(workspace_id, workflow_key)
-        try:
-            state = _service().get_node_code_state(workspace_id, key, node_key)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        state = _service().get_node_code_state(workspace_id, key, node_key)
         return WorkflowNodeCodeResponse(**state)
 
     router.include_router(create_studio_agent_skill_tools_router(job_db, settings))
