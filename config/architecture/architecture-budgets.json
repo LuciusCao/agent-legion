@@ -1113,6 +1113,8 @@
     "server/app/db/migration_registry.py": 13,
     "server/app/db/migrations/__init__.py": 59,
     "server/app/db/migrations/agent_catalog_cutover.py": 57,
+    "server/app/db/migrations/agent_profile_backfill.py": 276,
+    "server/app/db/migrations/agent_profile_backfill_rules.py": 130,
     "server/app/db/migrations/agent_request_kind_window.py": 19,
     "server/app/db/migrations/agent_request_profile_source.py": 27,
     "server/app/db/migrations/agent_worker_claim_state.py": 18,
