@@ -42,7 +42,7 @@ export const RETENTION_FIELD_GROUPS: FieldGroup[] = [
         integer: true,
         allowZero: true,
         max: 36500,
-        hint: '归档或删除超过该天数的已关闭对话连同消息永久清理；0 为永不清理，保存后立即生效',
+        hint: '归档或删除超过该天数的已关闭对话连同消息永久清理；0 为永不清理，保存后立即生效。开启后首轮清理会删除已超龄的归档/已删除会话（含界面不可见的已删除会话），不可恢复',
       },
     ],
     toggles: [],

@@ -16,9 +16,14 @@ Safety (the conservative union of both guards, issue acceptance "活跃会话
   an unarchive (stamp cleared) or a resume (status left closed) racing the
   page read wins and the row survives;
 - the purge additionally skips any session that still has an in-process
-  runtime, decided under ``_runtimes_lock`` — the same lock the spawn
-  registration fence and the archive close re-validate under — so no runtime
-  can be registered between the check and the delete.
+  runtime (a snapshot taken under ``_runtimes_lock``). The lock is released
+  before the DELETE: it guards every chat event path in this process, and a
+  batch's cascading delete must not stall live conversations. Dropping it is
+  safe because a *new* runtime cannot appear for a candidate in between —
+  the resume claim only moves an unstamped closed/error row to ``starting``
+  (and the spawn registration fence refuses stamped rows), so any session
+  that could gain a runtime has already failed the DELETE's own predicate
+  re-check.
 
 Deletion order (AGENTS.md §6 multi-step discipline): the message store is the
 ``studio_chat_messages`` table, FK ``on delete cascade`` to the session row,
@@ -84,10 +89,12 @@ def sweep_expired_chat_sessions(service: StudioChatService, *, now: datetime | N
         if not ids:
             break
         after_id = ids[-1]
+        # Snapshot only under the lock; the DELETE runs after release (see
+        # module docstring for why its predicate re-check makes that safe).
         with service._runtimes_lock:
             live = [sid for sid in ids if sid in service._runtimes]
-            eligible = [sid for sid in ids if sid not in service._runtimes]
-            purged += len(db.purge_expired_studio_chat_sessions(eligible, cutoff))
+        eligible = [sid for sid in ids if sid not in live]
+        purged += len(db.purge_expired_studio_chat_sessions(eligible, cutoff))
         if live:
             logger.warning(
                 "studio chat retention skipped %d expired session(s) with a live runtime: %s",

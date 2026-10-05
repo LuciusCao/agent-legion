@@ -216,6 +216,10 @@ describe('InstanceSettingsSection', () => {
       await screen.findByLabelText('归档/已删除对话保留天数（0 关闭）')
     expect(field).toHaveValue(0)
     expect(field).toHaveAttribute('max', '36500')
+    // 开启即首轮清理存量超龄会话（含界面不可见的已删除会话）的警示。
+    expect(
+      screen.getByText(/首轮清理会删除已超龄的归档\/已删除会话/)
+    ).toBeInTheDocument()
     fireEvent.change(field, { target: { value: '30' } })
     fireEvent.click(screen.getByText('保存实例设置'))
 

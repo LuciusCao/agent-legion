@@ -20,6 +20,7 @@ import pytest
 
 from server.app.services.instance_settings_store import InstanceSettingsStore
 from server.app.studio_chat.retention import (
+    StudioChatRetentionThread,
     studio_chat_retention_days,
     sweep_expired_chat_sessions,
 )
@@ -147,6 +148,70 @@ def test_deleted_from_archive_is_timed_from_deletion(chat, job_db) -> None:
     assert sweep_expired_chat_sessions(service) == 0
     assert job_db.get_studio_chat_session(session_id) is not None
     assert sweep_expired_chat_sessions(service, now=_later(WINDOW_DAYS + 1)) == 1
+
+
+@pytest.mark.parametrize("race", ["unarchive", "resume_claim", "running"])
+def test_purge_rechecks_the_predicate_inside_the_delete(chat, job_db, race: str) -> None:
+    """The page read and the DELETE are separate statements: a session that
+    was unarchived or left closed/error in between must survive a purge
+    called with the stale candidate ids (the DELETE re-checks, not trusts)."""
+    service, workspace_id, user_id = chat
+    session_id = _closed_session(job_db, workspace_id, user_id)
+    assert job_db.set_studio_chat_session_archived(session_id, True)
+    cutoff = _later(WINDOW_DAYS + 1)
+    stale_ids = job_db.page_expired_studio_chat_sessions(cutoff, "", 100)
+    assert stale_ids == [session_id]
+
+    if race == "unarchive":
+        assert job_db.set_studio_chat_session_archived(session_id, False)
+    elif race == "resume_claim":
+        job_db.update_studio_chat_session(session_id, status="starting")
+    else:
+        job_db.update_studio_chat_session(session_id, status="running")
+
+    assert job_db.purge_expired_studio_chat_sessions(stale_ids, cutoff) == []
+    assert job_db.get_studio_chat_session(session_id) is not None
+    assert _message_rows(job_db, session_id) == 2
+
+
+def test_sweeper_replica_starts_the_chat_retention_thread(chat, monkeypatch) -> None:
+    """The chat retention thread rides the sweeper-owned slow sweeps and is
+    handed the chat service (for the runtime skip)."""
+    from server.app import sweeper_owned_startup
+
+    service, _workspace_id, _user_id = chat
+
+    class _Inert:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+
+        def start(self) -> None: ...
+
+        def stop(self) -> None: ...
+
+    for name in (
+        "ArtifactOrphanGcThread",
+        "JobArtifactMaintenanceThread",
+        "MaterialTtlSweeperThread",
+        "ExecutionRetentionThread",
+    ):
+        monkeypatch.setattr(sweeper_owned_startup, name, _Inert)
+    threads = sweeper_owned_startup.start_sweeper_owned_threads(
+        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        service.db,
+        None,  # type: ignore[arg-type]
+        None,
+        service,
+    )
+    chat_thread = threads[-1]
+    try:
+        assert isinstance(chat_thread, StudioChatRetentionThread)
+        assert chat_thread._service is service
+        assert chat_thread._thread is not None and chat_thread._thread.is_alive()
+    finally:
+        chat_thread.stop()
+    assert chat_thread._thread is None
 
 
 def test_retention_days_degrades_malformed_values_to_disabled(job_db) -> None:
