@@ -68,15 +68,21 @@ class ClaimOperations:
             raise HostResponseError(f"Agent claim failed: HTTP {status}: {body[:300]!r}")
         try:
             document = json.loads(body)
-        except ValueError as exc:
+        except (ValueError, RecursionError) as exc:
             raise HostResponseError(
                 f"Agent claim failed: undecodable body: {body[:300]!r}"
             ) from exc
-        if not isinstance(document, dict):
-            raise HostResponseError(f"Agent claim failed: non-object body: {body[:300]!r}")
-        claims = document.get("claims")
-        if isinstance(claims, list):
-            if not all(isinstance(item, dict) for item in claims):
-                raise HostResponseError(f"Agent claim failed: non-object claim: {body[:300]!r}")
-            return [dict(item) for item in claims]
-        return [document]
+        claims = document.get("claims") if isinstance(document, dict) else None
+        # pre-#546 Host 的单对象兜底只认带 execution_id 的对象：中间盒的
+        # 200 JSON（如 {"error": ...}）、{"claims": null} 等不得冒充 claim。
+        if claims is None and isinstance(document, dict) and "execution_id" in document:
+            claims = [document]
+        # 每项须是含 execution_id / node_key 的对象（submit 路径的
+        # events.execution_base 硬读这两个键），否则在 executor 内 KeyError。
+        if not isinstance(claims, list) or not all(_is_claim(item) for item in claims):
+            raise HostResponseError(f"Agent claim failed: off-contract body: {body[:300]!r}")
+        return [dict(item) for item in claims]
+
+
+def _is_claim(item: Any) -> bool:
+    return isinstance(item, dict) and "execution_id" in item and "node_key" in item

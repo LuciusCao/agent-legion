@@ -334,7 +334,11 @@ def test_client_claim_batch_posts_split_pool_limits() -> None:
     seen: list[dict] = []
     client.request = lambda *a, **k: (  # type: ignore[method-assign]
         seen.append(json.loads(k["data"])),
-        (200, b'{"claims": [{"execution_id": "e1"}, {"execution_id": "e2"}]}'),
+        (
+            200,
+            b'{"claims": [{"execution_id": "e1", "node_key": "a"},'
+            b' {"execution_id": "e2", "node_key": "b"}]}',
+        ),
     )[1]
 
     claims = client.claim_batch("w1", 70, 4, limit=8, agent_limit=5, code_limit=3)
@@ -362,10 +366,11 @@ def test_client_claim_batch_wraps_single_claim_for_old_host() -> None:
     """混合舰队回落：pre-#546 Host 忽略批字段、照常返回单条 claim 对象——
     形状嗅探包成单元素列表，调用方退化为逐条领取。"""
     client = agent_worker.Client("http://unused")
-    client.request = lambda *a, **k: (200, b'{"execution_id": "e1", "kind": "agent"}')  # type: ignore[method-assign]
+    single = b'{"execution_id": "e1", "node_key": "a", "kind": "agent"}'
+    client.request = lambda *a, **k: (200, single)  # type: ignore[method-assign]
 
     assert client.claim_batch("w1", 70, 4, limit=8, agent_limit=5, code_limit=3) == [
-        {"execution_id": "e1", "kind": "agent"}
+        {"execution_id": "e1", "node_key": "a", "kind": "agent"}
     ]
 
 
@@ -383,7 +388,19 @@ def test_client_claim_batch_error_family_matches_single_claim() -> None:
 
 @pytest.mark.parametrize(
     "body",
-    [b"<html>502 Bad Gateway</html>", b"[]", b"null", b'{"claims": [1]}'],
+    [
+        b"<html>502 Bad Gateway</html>",
+        b"[]",
+        b"null",
+        b'{"claims": [1]}',
+        # 对抗式 review（#960）：解码为对象但不合契约的 200——中间盒 JSON、
+        # claims 为 null、claim 项缺 execution_id / node_key、深嵌套 JSON。
+        b'{"error": "blocked by gateway"}',
+        b'{"claims": null}',
+        b'{"claims": [{"node_key": "a"}]}',
+        b'{"claims": [{"execution_id": "e1"}]}',
+        b"[" * 100_000,
+    ],
 )
 def test_client_claim_batch_malformed_body_is_host_response_error(body: bytes) -> None:
     """#960：200 但 body 不可解码/形状不对（中间代理的 HTML、非对象 JSON、
