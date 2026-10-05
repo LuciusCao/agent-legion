@@ -18,12 +18,17 @@ class AcpClient(TerminalClientMixin):
 
     async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:
         payload = update.model_dump(by_alias=True, exclude_none=True, mode="json")
+        # Before any await: a later permission request on this tool call
+        # must see the command it declared (tool_call_commands.py, #954).
+        self.terminals.grants.calls.observe(payload)
         self._handle.callbacks.on_update(payload)
 
     async def request_permission(
         self, session_id: str, tool_call: Any, options: list[Any], **kwargs: Any
     ) -> RequestPermissionResponse:
         tool_call_payload = tool_call.model_dump(by_alias=True, exclude_none=True, mode="json")
+        # The human sees (and the grant binds) the same command.
+        tool_call_payload = self.terminals.grants.calls.bind(tool_call_payload)
         option_payloads = [
             option.model_dump(by_alias=True, exclude_none=True, mode="json") for option in options
         ]

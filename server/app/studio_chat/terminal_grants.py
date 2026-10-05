@@ -8,9 +8,13 @@ grants. Grants are one-shot and short-lived; when the approved call
 declared a command, the terminal must run exactly that command (as the
 whole command line, or as the ``-c`` script, allowing only a leading
 single-quoted ``cd '<dir>' && `` wrapper whose ``<dir>`` must also stay
-inside the session root). A permission payload that carries no command
-(kimi's approval bridge sends only the tool name) mints an unbound grant:
-still one approved request per terminal, but not command-bound (#954).
+inside the session root). When the permission payload itself carries no
+command (kimi's approval bridge sends only the tool name), the command the
+same ``toolCallId`` declared on ``session/update`` is bound instead
+(tool_call_commands.py, #954). Only when no command was declared anywhere is
+the grant unbound — still one approved request per terminal — and a
+command-less approval of a kind that never spawns a terminal (edit, fetch,
+...) mints none.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from typing import Any
 from acp import RequestError
 
 from server.app.studio_chat.terminal_policy import confined_cwd
+from server.app.studio_chat.tool_call_commands import ToolCallCommands, declared_command
 
 # Grant lifetime: the agent spawns right after the answer; a stale grant must
 # not linger for a later, unapproved command.
@@ -53,14 +58,17 @@ class TerminalGrants:
 
     def __init__(self) -> None:
         self._grants: list[_Grant] = []
+        # Fed by session/update; binds commands to command-less requests.
+        self.calls = ToolCallCommands()
 
     def grant(self, tool_call: dict[str, Any]) -> None:
-        raw_input = tool_call.get("rawInput")
-        command = raw_input.get("command") if isinstance(raw_input, dict) else None
+        """Mint for an approved request (already passed through ``calls.bind``)."""
+        if not self.calls.may_spawn_terminal(tool_call):
+            return
         self._prune()
         self._grants.append(
             _Grant(
-                command=command.strip() if isinstance(command, str) and command.strip() else None,
+                command=declared_command(tool_call),
                 expires_at=time.monotonic() + GRANT_TTL_SECONDS,
             )
         )
@@ -98,7 +106,7 @@ def _runs(approved: str, command: str, args: list[str] | None, root: str) -> boo
     if script == approved:
         return True
     wrapper = _CD_WRAPPER.match(script)
-    if wrapper is None or script[wrapper.end() :] != approved:
+    if wrapper is None or script[wrapper.end() :].strip() != approved:
         return False
     try:
         confined_cwd(wrapper.group(1).replace("'\\''", "'"), root)

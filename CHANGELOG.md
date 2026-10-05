@@ -35,6 +35,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Security
 
 - Studio 对话 ACP 子进程权限模型与环境继承收敛（issue #921）：只读类工具调用的自动批准收窄到本 workspace 的 MCP 暂存目录（`data/studio-mcp-files/<workspace_id>`）内，其余只读调用改走人工确认；人工选择「本会话总是允许」在 ACP 线上收窄为单次允许，后续每次调用都重新经过权限请求（需要免确认时用会话的「全部允许」开关）。ACP terminal 子进程改为白名单环境（PATH / HOME / 语言区域等基础项 + agent 自带覆盖项），不再继承 server 进程环境；`terminal/create` 必须对应一条经人工或「全部允许」批准的权限请求（平台自动批准不算），工作目录约束在会话根目录内。前端 agent 气泡渲染 markdown 时不再自动加载任何图片，改为点击才打开的链接占位。
+- Studio 对话 ACP terminal 授权绑定到具体命令（issue #954，#921 follow-up）：kimi 的权限请求负载只带工具名与截断到 50 字的动作摘要，此前签发的是「未绑定命令」的一次性授权，批准一次即可换任意 terminal 命令。现按 `toolCallId` 关联同一工具调用先行发出的 `tool_call` / `tool_call_update` 通知里的 `rawInput.command`，`terminal/create` 必须精确运行该命令（允许 kimi 自带的、目录同样受会话根约束的 `cd '<dir>' && ` 前缀）；绑定的完整命令写进权限消息，权限卡片直接展示「将要运行的命令」，人批准的就是授权绑定的那一条。任何来源都拿不到命令时维持原行为（未绑定、一次一用，Bash 工具照常可用）；不带命令、且工具类型声明为编辑 / 读取 / 抓取等不会起 terminal 的批准不再签发授权。
 - Worker 本机控制台加 Host 头白名单与变更请求来源校验（issue #923）：`worker/service.py` 控制面的页面、静态资产与全部 `/api/*` 只接受回环变体（`127.0.0.1` / `localhost` / `[::1]`，任意端口）∪ 实际暴露面地址 ∪ `AGENT_WORKER_CONSOLE_URL` 主机名的 Host 头，其余 403；变更类请求另校验 `Sec-Fetch-Site` / `Origin`（跨站或来源与 Host 不一致即 403，不带这两个头的 `workerctl` 不受影响）。控制 token 内嵌页面的前提收紧为「暴露面回环 ∧ Host 校验已启用 ∧ 白名单不含非回环主机名（含控制台地址）」；暴露面为通配地址时 Host 校验不启用、token 不内嵌。经自定义主机名访问控制台的部署需把该地址写进 `AGENT_WORKER_CONSOLE_URL`，详见 docs/agent-worker-deployment.md §控制面鉴权。
 
 ## [0.7.15] - 2026-10-05

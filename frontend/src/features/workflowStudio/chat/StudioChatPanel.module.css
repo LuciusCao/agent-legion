@@ -190,6 +190,17 @@
 .permissionTitle {
   margin-bottom: 8px;
 }
+.permissionCommand {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid #ffe0b2;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 160px;
+  overflow: auto;
+}
 .permissionActions {
   display: flex;
   gap: 8px;
