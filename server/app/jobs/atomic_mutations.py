@@ -17,6 +17,7 @@ from server.app.workflows.sharding import delete_shards
 __all__ = [
     "AtomicJobMutationsMixin",
     "JobMutationConflict",
+    "job_mutation_lock",
     "lease_guarded_mutation",
     "mark_nodes_for_rerun",
 ]
@@ -62,6 +63,21 @@ def lease_guarded_mutation(
                 raise JobMutationConflict("busy", "Job has running nodes")
 
         yield conn
+
+
+@contextmanager
+def job_mutation_lock(path: str, job_id: str) -> Iterator[bool]:
+    """Hold ``job-mutation:<job_id>`` for one short transaction; yield whether
+    the jobs row exists under the lock.
+
+    #958：job 删除提交后的本地清理在本锁下复核行仍不存在才动文件——同源
+    重建的 job（确定性 id）若已落行就整体跳过；持锁期间新 job 的 claim
+    （同锁域）无法推进，不会有节点往待移走的目录写入。只读，不写任何行。
+    """
+    with write_transaction(path) as conn:
+        conn.execute("select pg_advisory_xact_lock(hashtext('job-mutation:' || %s))", (job_id,))
+        row = conn.execute("select 1 from jobs where id=%s", (job_id,)).fetchone()
+        yield row is not None
 
 
 def mark_nodes_for_rerun(
@@ -172,6 +188,11 @@ class AtomicJobMutationsMixin:
             now,
             reject_running_nodes=reject_running_nodes,
         )
+
+    def job_mutation_lock(
+        self: _AtomicMutationQueries, job_id: str
+    ) -> AbstractContextManager[bool]:
+        return job_mutation_lock(self._path, job_id)
 
     def apply_run_to_atomic(
         self: _AtomicMutationQueries,

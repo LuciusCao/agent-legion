@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -382,14 +383,14 @@ def test_delete_moves_files_only_after_commit(
     job = _create_job(job_db, "ws-order", "Q010", status="completed")
     storage_dir, log_path = _seed_job_files(settings, job)
 
-    real_move = trash_module.shutil.move
+    real_rename = trash_module.os.rename
     row_visible_at_move: list[bool] = []
 
-    def _observing_move(src: str, dst: str) -> Any:
+    def _observing_move(src: Any, dst: Any) -> Any:
         row_visible_at_move.append(job_db.get_job(job["id"]) is not None)
-        return real_move(src, dst)
+        return real_rename(src, dst)
 
-    monkeypatch.setattr(trash_module.shutil, "move", _observing_move)
+    monkeypatch.setattr(trash_module.os, "rename", _observing_move)
 
     result = service.delete(job["workspace_id"], job["id"])
 
@@ -412,10 +413,11 @@ def test_delete_succeeds_when_staging_into_trash_fails(
     job = _create_job(job_db, "ws-stagefail", "Q011", status="completed")
     storage_dir, log_path = _seed_job_files(settings, job)
 
-    def _move_fails(src: str, dst: str) -> None:
-        raise OSError("disk unhappy")
+    def _move_fails(src: Any, dst: Any) -> None:
+        # 跨文件系统：锁下不退化为拷贝，直接放弃留残留。
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
 
-    monkeypatch.setattr(trash_module.shutil, "move", _move_fails)
+    monkeypatch.setattr(trash_module.os, "rename", _move_fails)
 
     result = service.delete(job["workspace_id"], job["id"])
 
@@ -500,3 +502,62 @@ def test_delete_raises_for_escaping_storage_dir(job_db: JobQueries, tmp_path: Pa
     assert legitimate_storage.exists()
     assert (legitimate_storage / "artifact.json").exists()
     assert not (settings.jobs_dir / ".trash").exists()
+
+
+def test_delete_skips_cleanup_when_same_source_job_recreated_before_purge(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#958 B1：提交后、清理前同源 job（确定性 id）被重建并写入目录与日志，
+    锁下复核发现行已存在 → 整体跳过，新 job 的目录、文件与日志全部保留。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-recreate", "Q020", status="completed")
+    storage_dir, log_path = _seed_job_files(settings, job)
+    original_lock = job_db.job_mutation_lock
+
+    @contextmanager
+    def _recreate_then_lock(job_id: str):
+        recreated = _create_job(job_db, "ws-recreate", "Q020")
+        assert recreated["id"] == job_id
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        (storage_dir / "fresh.json").write_text("fresh", encoding="utf-8")
+        log_path.write_text("fresh-log", encoding="utf-8")
+        with original_lock(job_id) as exists:
+            yield exists
+
+    monkeypatch.setattr(job_db, "job_mutation_lock", _recreate_then_lock)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert job_db.get_job(job["id"]) is not None
+    assert (storage_dir / "fresh.json").read_text(encoding="utf-8") == "fresh"
+    assert log_path.read_text(encoding="utf-8") == "fresh-log"
+    assert _trash_entries(settings) == []
+
+
+def test_delete_purges_only_own_node_logs_not_sibling_prefix(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """#958：日志按节点 key 精确匹配（含分片日志），不误删 source_id 以
+    ``<source>-`` 开头的兄弟 job 的日志。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-sibling", "Q030", status="completed")
+    sibling = _create_job(job_db, "ws-sibling", "Q030-x", status="completed")
+    _storage_dir, own_log = _seed_job_files(settings, job)
+    own_shard_log = own_log.with_name(f"{job['id']}-extract_question-shard-0.log")
+    own_shard_log.write_text("shard", encoding="utf-8")
+    sibling_log = settings.logs_dir / "jobs" / f"{sibling['id']}-extract_question.log"
+    sibling_log.write_text("sibling", encoding="utf-8")
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert not own_log.exists()
+    assert not own_shard_log.exists()
+    assert sibling_log.read_text(encoding="utf-8") == "sibling"

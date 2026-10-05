@@ -98,6 +98,10 @@ class JobDeletionService:
             else []
         )
         operation_id = f"{self._now().strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
+        # 节点 key 快照（含已退出图的历史节点）：行级联消失后日志按它精确匹配。
+        node_keys = {n["node_key"] for n in self.job_db.list_job_nodes(job_id)} | {
+            r["node_key"] for r in self.job_db.list_node_runs(job_id)
+        }
 
         # #958：事务只做 DB 删除，不碰文件系统（文件 I/O 不再拉长 job-mutation
         # 锁的持有时间）；本地 job_dir / 日志在提交后由 purge_deleted_job_files
@@ -125,7 +129,7 @@ class JobDeletionService:
             logger.exception("Unexpected error deleting job %s", job_id)
             _fail(job_id, "delete_failed", str(exc))
 
-        purge_deleted_job_files(job, self.settings, operation_id)
+        purge_deleted_job_files(self.job_db, job, node_keys, self.settings, operation_id)
         gc_deleted_job_artifacts(self.artifact_store, job_id, artifact_candidates)
         if object_rows and self.object_store is not None:
             self.object_store.delete_objects(object_rows)
