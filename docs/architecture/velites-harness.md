@@ -303,7 +303,7 @@ velites --mode json \
         --skill <dir> \
         --tools read,write,bash \
         --provider <provider-key> --model <model-id> --thinking low \
-        [--max-turns N] [--max-tokens N] [--require-output f ...] \
+        [--max-turns N] [--max-tokens N] [--max-output-tokens N] [--require-output f ...] \
         [--no-sandbox] [--allow-network] \
         @<run>/prompt.md "Execute the attached node instructions."
 ```
@@ -313,7 +313,11 @@ velites --mode json \
   adapter 动态发现；
 - `--mode` 只有 `json`（headless 唯一形态）；
 - 未知 flag 直接报错退出（与 Pi/pi_agent_rust 的静默吞掉相反，防止配置漂移）；
-- `--name` 保留（仅标识用途，写入 `session` 事件）。
+- `--name` 保留（仅标识用途，写入 `session` 事件）；
+- `--max-output-tokens`（#952）是**单次**模型调用的输出上限（thinking 计入其中），
+  覆盖 models.json 的 `maxOutputTokens`，OpenAI 兼容路径作为请求体 `max_tokens`
+  下发；与累计预算 `--max-tokens` 无关。来源是节点 config 键 `max_output_tokens`，
+  触顶归因与续写草案见 [llm-output-budget-design.md](llm-output-budget-design.md)。
 
 ### `velites sandbox wrap`（EXEC-CODE-003）
 

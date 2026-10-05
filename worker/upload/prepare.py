@@ -11,6 +11,7 @@ import tarfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from shared.output_truncation import OutputTruncation
 from shared.pi_events import scan_and_compress_pi_events
 from worker.upload.result_metadata import (
     MAX_ERROR_MESSAGE_CHARS,
@@ -77,17 +78,26 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # the longest literal's length as lookback, see shared/pi_events.py).
     # 崩溃/超时（非 0 退出）下 model_error 归因让位给退出码归因——扫描
     # 结论只在 exit 0 时采纳。
+    # #952: the same pass counts per-call output truncations (stopReason=length).
     scanned_model_error, _, _, scanned_tail = scan_and_compress_pi_events(
         events,
         stderr_sink=run_dir / AGENT_STDERR_FILENAME,
         secret_spans=secret_spans,
         secret_max_chars=max_secret_chars(),
+        event_observer=(truncation := OutputTruncation()).observe,
     )
     model_error = scanned_model_error if task.exit_code == 0 else None
     stderr_tail = stderr_tail_for_run(run_dir, scanned_tail)
     outputs = [name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()]
+    # #952: attribution only — replaces the opaque "Missing outputs" (exit 0,
+    # Host-judged) / "Agent process exited 1" (velites output contract) face;
+    # a truncated run whose outputs all landed still completes, and model
+    # errors / crashes / timeouts keep their own attribution.
+    truncated_error = truncation.failure(task.expected_outputs, outputs, task.exit_code)
     if task.exit_code == 130:
         result_status, error = "cancelled", "Agent Worker is shutting down"
+    elif truncated_error and not model_error:
+        result_status, error = "failed", truncated_error
     elif task.exit_code == 0:
         if model_error:
             result_status, error = "failed", model_error

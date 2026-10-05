@@ -1930,6 +1930,7 @@
     "shared/concurrency_limits.py": 12,
     "shared/material_bundle.py": 75,
     "shared/material_cache.py": 149,
+    "shared/output_truncation.py": 44,
     "shared/pi_events.py": 77,
     "shared/pi_model_error.py": 56,
     "shared/protocol.py": 15,

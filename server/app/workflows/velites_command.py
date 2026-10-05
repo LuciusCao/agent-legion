@@ -11,6 +11,9 @@
   （config_schema defaults → 节点 config → workspace 覆盖，intake 冻结后经
   ``manifest["config"]`` 下发，CONFIG-MANIFEST-001 白名单内）；节点未配置则不发，
   这里不硬编码默认值；
+- ``--max-output-tokens``（#952）同一解析链的节点 ``max_output_tokens``：单次模型
+  调用的输出上限（thinking 计入其中），覆盖 Worker 本机 models.json 的
+  ``maxOutputTokens``；与累计预算 ``max_tokens`` 是两回事；
 - ``--allow-network``（#715）：仅当 manifest ``execution.sandbox_network`` 为字面
   ``True``（节点保留键 ``sandbox_network`` 的 dispatch 解析值）时下发；缺省即
   velites bash 工具网络隔离；
@@ -28,6 +31,8 @@ from typing import Any
 # manifest["config"] 里；未声明的键在解析链上就被拒绝）。
 MAX_TURNS_KEY = "max_turns"
 MAX_TOKENS_KEY = "max_tokens"
+# #952：单次调用输出预算（per-call），区别于上面的累计 usage 预算。
+MAX_OUTPUT_TOKENS_KEY = "max_output_tokens"
 
 
 def build_velites_command(
@@ -65,7 +70,11 @@ def build_velites_command(
             cmd.extend([flag, value])
     node_config = manifest.get("config")
     if isinstance(node_config, dict):
-        for flag, key in (("--max-turns", MAX_TURNS_KEY), ("--max-tokens", MAX_TOKENS_KEY)):
+        for flag, key in (
+            ("--max-turns", MAX_TURNS_KEY),
+            ("--max-tokens", MAX_TOKENS_KEY),
+            ("--max-output-tokens", MAX_OUTPUT_TOKENS_KEY),
+        ):
             budget = node_config.get(key)
             if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
                 cmd.extend([flag, str(budget)])

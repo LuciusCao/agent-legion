@@ -84,6 +84,7 @@ banner 标注了后续演进对其中结论的修订。
 | [risk-review-2026-06-13.md](risk-review-2026-06-13.md) | 2026-06-13 时点架构风险快照 |
 | [risk-review-2026-07-18.md](risk-review-2026-07-18.md) | 2026-07-18 架构 Review：扩展性、可维护性与分布式演进路线 |
 | [workflow-key-retirement-inventory.md](workflow-key-retirement-inventory.md) | `workflow_key` 退役盘点（issue #211 Phase 1 产出，退役执行的输入清单） |
+| [llm-output-budget-design.md](llm-output-budget-design.md) | LLM 节点单次输出预算与触顶续写（#952）：P0 显式输出预算参数 + 触顶归因已落地，自动续写为设计草案（待 owner 决策） |
 | [execution-snapshot-retirement-draft.md](execution-snapshot-retirement-draft.md) | `jobs.workflow_definition_snapshot_json` 瘦身（#354 方案 3）的评估结论与迁移草案（设计草案，未实施） |
 
 索引完整性约定：本目录新增 `.md` 文件必须同时登记进「现行文档」或

@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - job 详情页区分「排队」与「输入恢复不全卡住」（issue #887，#827 follow-up）：workflow worker 对悬挂清单行（对象缺失 / 内容校验不符 / 压缩对象损坏）连续 defer 达到升级阈值、且没有在途生产者会重写该输入时，`GET /api/jobs/{job_id}` 的节点新增只读字段 `hydration_defer {inputs, reasons, rerun_nodes}`，只出现在受阻的等待中节点上；详情页时间线据此在该节点显示「输入恢复不全，建议重跑 <生产节点>」，悬停给出输入名与原因。状态与 worker 进程内的连续计数同生共死（不落库、无 schema 变更）：输入恢复、行身份变化或 job 离开可运行集即撤下，Host 重启后按阈值轮数重新出现。
 
+- velites agent 节点可显式设定单次模型调用的输出上限（issue #952）：节点 `config_schema` 声明 `max_output_tokens`（整数，与 `max_turns` / `max_tokens` 走同一解析链：默认值 → 节点 config → workspace 覆盖）后，dispatch 下发 velites 新 flag `--max-output-tokens`；该值覆盖 Worker 本机 models.json 的 `maxOutputTokens`（Anthropic 路径），并在 OpenAI 兼容路径作为请求体 `max_tokens` 发送（未配置时请求与此前完全一致）。thinking 计入同一配额；它与累计预算 `max_tokens` 无关。pi runtime 忽略该键。需要包含本改动的 velites 二进制（旧二进制遇到未知 flag 会报错，只影响声明了该键的节点）。触顶自动续写的设计草案见 `docs/architecture/llm-output-budget-design.md`。
+
 ### Changed
 
 - schema 推进到 v91（issue #211 M3）：删除 `workspaces.default_workflow_key` 列与 `quality_sample_batches.workflow_key` 镜像列——v62 起二者都恒等于 workspace id，所有读取改用 id。迁移有守卫、幂等（列不存在即跳过；全新库从不创建该列），任何旧版本库可直接升到本版本（启动时按序跑完 v62 绑定、v68 对齐、v70 删列与 v91）；数据零丢失，历史 job / run / revision 按 workspace id 照常可查。`workflow_node_codes` / `job_batches` / `workspace_node_bindings` 的 key 列与 `versioned_entities.entity_key` 的 key 前缀属迁移考古层，按设计保留。
@@ -26,6 +28,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- agent 节点因单次输出触顶（`max_tokens`，thinking 计入）而缺产物时，失败原因不再是笼统的 `Missing outputs` / `Agent process exited 1`（issue #952）：Worker 在结果准备的同一遍事件扫描中统计 `stopReason=length`，声明产物缺失时失败原因改为 `Model output hit the per-call output token limit (stopReason=length, Nx) …`，点名缺失产物并给出配平手段（降低 `execution.thinking`、分块写盘、调高 `max_output_tokens`），失败分类新增 `technical / output_truncated`；job 日志把该停止原因显示为「单次输出触顶」告警而非「模型调用错误」。只改归因、不改成败：触顶但产物齐全的 run 仍判完成，崩溃 / 超时退出保持原归因。
 - Studio「Agent 助手」零内容空轮与后台唤醒轮期间的消息不再丢失（issue #882，#863 follow-up）：宽限复核后确认零内容的一轮（`empty_turn`）现在在会话空闲时也给出「继续对话」——状态行显示「上一条消息未被处理」，点击经既有 resume 端点把那一条原样重新投递（不新增用户消息，时间线记一条 `empty_turn_retry`；同一次判定只投递一次，双击、多标签页或之后已发过新消息都不会重复投递），告警文案同步改为指向「继续对话」；不做自动重投（平台无法区分 ACP 层吞掉的消息与 agent 合法的零输出，自动重投还可能再撞同一静默窗口）。后台子代理完成唤醒轮占用会话时发出的消息改为后端入站排队：消息立即落库并在气泡下标「已排队」，当前轮结束后按到达顺序逐条投递（时间线记 `queued_delivered`），排队期间新的后台唤醒让位；轮到时若会话已无法接收（压缩窗口、运行凭证失效、状态已变化）则不投递并给出 `queued_dropped` 提示与气泡「未送达，请重发」，不再静默丢失。人发起的轮次运行中再发送的行为不变（前端发送队列）。
 - worker 孤儿进程组回收按组在各自 SIGTERM 紧前刷新成员（issue #904，#895 follow-up）：一次清理含多个进程组时，此前只在批量 TERM 入口取一次 `/proc` 成员快照，后序组在快照之后才派生、忽略 TERM 的成员不会被钉住，原钉住成员在等待期退出并被 init 立即收割后 KILL 阶段的身份现证失败、该成员脱离清理；现改为增量成员索引（入口一次全表扫描，之后每组 TERM 前只重列 `/proc` 并读取新出现 pid 的 stat），每组 TERM 前按 pgid 取当前成员、现证属主后并入钉住集合。
 - `GET /api/workspaces/{workspace_id}/jobs/snapshot` 的 `cursor` 无法解析时返回 422（issue #891，#852 follow-up，对外行为变更）：此前缺 `|` 分隔符（如 `cursor=garbage`）、时间戳非法（如 `cursor=notadate|x`）等坏 cursor 落到 SQL 抛未处理异常成 5xx，而对接文档错误码表让调用方对 5xx 退避重试，结果对一个永远失败的参数错误无限重试。现 cursor 在参数校验层解析（与 `limit` 越界同一约定），失败返回 422 + 可读 detail（`loc` 指向 `query.cursor`）；空串仍等同第一页，原样回传的 `next_cursor` 不受影响。docs/workspace-api-tokens.md 错误码表与契约测试同步。
