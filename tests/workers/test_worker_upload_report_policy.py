@@ -1,8 +1,8 @@
 """#959：结果上报的 Host 应答分级与诚实判败降级（worker/upload/report_policy.py）。
 
 钉三件事：409 之外的 4xx 判决降级一次为 failed 上报（不再删 marker 后
-等租约过期整次重跑）；5xx / 网络错误有界重试、耗尽后降级、判败也耗尽则
-保留 marker 交给下次启动；主路径 prepare 后按 Host 下发的
+等租约过期整次重跑）；5xx / 网络错误 / 408·425·429 从不降级、租约持有
+期间持续重试直到 204 / 409；主路径 prepare 后按 Host 下发的
 max_archive_bytes 预检，超限直接判败而不送出注定 413 的归档。
 共享桩/工具见 tests/workers/upload_queue_testlib.py。
 """
@@ -55,7 +55,6 @@ class ScriptedReportClient(QueueFakeClient):
 def _fast_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.001)
     monkeypatch.setattr(upload_queue, "_RETRY_CAP_SECONDS", 0.001)
-    monkeypatch.setattr(report_policy, "REPORT_TRANSIENT_MAX_ROUNDS", 3)
 
 
 def _deliver(work_root: Path, client: QueueFakeClient, **task_kwargs: Any) -> None:
@@ -121,46 +120,42 @@ def test_lease_conflict_409_never_degrades(tmp_path: Path) -> None:
     assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
 
 
-@pytest.mark.parametrize("transient", [None, 500, 503])
-def test_transient_failures_are_bounded_then_degrade(tmp_path: Path, transient: int | None) -> None:
-    """5xx / 网络错误有界重试（此处上限 3 轮）：耗尽后降级为诚实判败（空
-    归档——内容本身可能就是 Host 端失败原因），Host 恢复后判败被接收。
-    重试幂等由 Host 的租约绑定提交保证（重报要么首次提交、要么 409）。"""
+@pytest.mark.parametrize("transient", [None, 500, 503, 408, 425, 429])
+def test_transient_failures_never_degrade_and_retry_until_409(
+    tmp_path: Path, transient: int | None
+) -> None:
+    """5xx / 网络错误 / 408·425·429 从不把可交付结果判败（对抗复审 B1）：
+    Host 存活而 /result 持续失败时，判败等于把长时成功执行白跑。租约持有期间
+    持续退避重试，每次重报都是原结果，由 409（租约已不归本 attempt）自然终止。"""
     work_root = tmp_path / "work"
     _execution_dir(work_root)
-    client = ScriptedReportClient([transient, transient, transient, 204])
+    client = ScriptedReportClient([transient] * 30 + [409])
     _deliver(work_root, client)
 
-    assert len(client.calls) == 4
-    assert all(call["metadata"]["status"] == "completed" for call in client.calls[:3])
-    degraded = client.calls[3]["metadata"]
-    assert degraded["status"] == "failed"
-    assert "result report failed after 3 attempts" in degraded["error_message"]
-    assert client.calls[3]["members"] == []
+    assert len(client.calls) == 31
+    assert all(call["metadata"]["status"] == "completed" for call in client.calls)
+    assert all("output.json" in call["members"] for call in client.calls)
+    assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+
+
+def test_transient_recovery_delivers_original(tmp_path: Path) -> None:
+    """瞬时失败后恢复：原结果照常交付，不降级。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = ScriptedReportClient([503, None, 429, 204])
+    _deliver(work_root, client)
+
+    assert [call["metadata"]["status"] for call in client.calls] == ["completed"] * 4
     assert not (work_root / "exec-1").exists()
 
 
-def test_transient_recovery_within_budget_delivers_original(tmp_path: Path) -> None:
-    """预算内恢复：原结果照常交付，不降级。"""
-    work_root = tmp_path / "work"
-    _execution_dir(work_root)
-    client = ScriptedReportClient([503, None, 204])
-    _deliver(work_root, client)
-
-    assert [call["metadata"]["status"] for call in client.calls] == ["completed"] * 3
-    assert not (work_root / "exec-1").exists()
-
-
-def test_host_unreachable_gives_up_keeping_marker(tmp_path: Path) -> None:
-    """判败上报也耗尽（Host 不可达）：放弃本轮投递但保留 marker——下次启动
-    restore 重新 prepare 原结果再投；总尝试数有界（2 × 上限）。"""
-    work_root = tmp_path / "work"
-    _execution_dir(work_root)
-    client = ScriptedReportClient([None])
-    _deliver(work_root, client)
-
-    assert len(client.calls) == 6
-    assert (work_root / "exec-1" / PENDING_FILENAME).is_file()
+def test_retryable_client_statuses_are_not_verdicts() -> None:
+    for status in (408, 425, 429, 500, 503):
+        assert report_policy.is_transient_status(status)
+        assert not report_policy.is_verdict_rejection(status)
+    for status in (400, 401, 413, 422):
+        assert report_policy.is_verdict_rejection(status)
+    assert not report_policy.is_verdict_rejection(409)
 
 
 def test_main_path_archive_over_declared_ceiling_fails_honestly(tmp_path: Path) -> None:

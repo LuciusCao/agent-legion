@@ -18,7 +18,11 @@ from worker.upload.cleanup import drop_marker
 from worker.upload.control import CombinedStop
 from worker.upload.embed_precheck import ARCHIVE_EMBED_DEFAULT_CEILING_BYTES
 from worker.upload.prepare import failed_metadata
-from worker.upload.report_policy import ReportDegradeGate, ensure_submittable_archive
+from worker.upload.report_policy import (
+    ReportDegradeGate,
+    ensure_submittable_archive,
+    is_transient_status,
+)
 from worker.upload.result_manifest import (
     ManifestEmbedExceedsArchiveCeiling,
     embed_output_artifacts_manifest,
@@ -77,9 +81,9 @@ def report_task(
                 status_code, body = client.report(
                     task.execution_id, task.lease_id, metadata, archive
                 )
-            if status_code >= 500:
-                # 传输层已把 5xx 归一为 RuntimeError；非 TransferOperations
-                # 形态的 client 直接回传状态码，同归瞬时臂。
+            if is_transient_status(status_code):
+                # 传输层已把 5xx 归一为 RuntimeError、4xx 原样透传；408/425/429
+                # 与非 TransferOperations 形态回传的 5xx 同归瞬时臂（持续重试）。
                 raise RuntimeError(f"HTTP {status_code}: {body[:200]!r}")
         except TransferStopped:
             if task.ownership_lost.is_set():
@@ -175,12 +179,8 @@ def report_task(
                 upload_heartbeat.quiesce_task_heartbeat(task, heartbeat_join_seconds)
             continue
         except RuntimeError as exc:
-            # #959 有界重试：耗尽即降级为诚实判败；判败上报也耗尽（Host
-            # 不可达）则放弃本轮投递但保留 marker——下次启动 restore 重新
-            # prepare 原结果再投。
-            if not degrade_gate.on_transient(exc):
-                return "aborted"
-            metadata = task.prepared_metadata or metadata
+            # #959：瞬时失败从不判败——租约持有期间持续退避重试，由 204 /
+            # 409 / ownership_lost 终止（重试幂等见 report_policy）。
             print(f"result report retry for {task.execution_id}: {exc}", flush=True)
             task.heartbeat_thread = upload_heartbeat.resume_upload_heartbeat(
                 client, task, heartbeat_interval
