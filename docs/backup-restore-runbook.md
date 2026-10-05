@@ -25,8 +25,12 @@
 - **实例对象存储**：材料 bucket（`AGENT_LEGION_S3_BUCKET`，默认
   `agent-legion`）的全部对象。`jobs-staging/` 前缀是 Worker 直传的暂存残留，
   可不备份。
-- **vault 主密钥**：`deploy/secrets/vault_master_key`（或原生形态 `.env` 所指的
-  key / key 文件）。**与数据库备份分开存放**（例如单独的密钥保管处）：dump +
+- **vault 主密钥**：备份 Host 进程**实际读取**的那把 key。Docker stack 是
+  `deploy/secrets/vault_master_key`（或 `VAULT_MASTER_KEY_FILE` 覆盖的路径）；
+  原生形态 Host 只从进程环境 / 根 `.env` 读 `AGENT_LEGION_VAULT_MASTER_KEY`
+  （key 字面值）或 `AGENT_LEGION_VAULT_MASTER_KEY_FILE`（所指文件），默认不读
+  `deploy/secrets/vault_master_key`（`server/app/services/vault.py` 的
+  `resolve_master_key`），备份的是该变量的值或它指向的文件。**与数据库备份分开存放**（例如单独的密钥保管处）：dump +
   key 放在一起，等于把全部 secret 明文交给拿到备份的人；但两者都必须可恢复。
 - **部署凭据**：`deploy/secrets/postgres_password`、`deploy/secrets/postgres_pgpass`
   与 `deploy/.env`（S3 凭据等）。丢了可以重新生成，但要同步改 PostgreSQL 角色
@@ -35,8 +39,9 @@
 ### 1.2 建议备份
 
 - Host 数据卷 `host-data` 下的 `artifacts/`：legacy 本地 CAS，存量 blob 仍可能被
-  旧清单行引用（见 [data-layout.md](data-layout.md) §1）。新产物不再写这里，
-  体量通常很小，随数据库一起备份即可。
+  旧清单行引用；Worker 直传缺上传规格、直传失败或崩溃恢复重进时也会回落到这条
+  CAS 旧通道写入（见 [data-layout.md](data-layout.md) §1）。正常路径下体量通常
+  很小，随数据库一起备份即可。
 - Worker 状态卷 `worker-control`（状态副本 `worker.yaml`、control token）：丢失
   可按 [agent-worker-deployment.md](agent-worker-deployment.md) 重新配置与注册，
   备份只为省去重配。
@@ -109,26 +114,38 @@ docker compose -f deploy/compose.host.yaml exec -T postgres \
 路径——把新版本 dump 恢复给旧代码属于不受支持的形态。
 
 1. 停 Host 与 Worker，避免恢复期间有写入：
-   `docker compose -f deploy/compose.host.yaml stop host worker`。
-2. 恢复 vault 主密钥：把备份的 key 放回 `deploy/secrets/vault_master_key`
-   （`chmod 600`）。**不要**在缺 key 文件的状态下运行 `scripts/install-deps.sh`
-   或 `scripts/init-worktree.sh`：二者在该文件缺失或为空时会生成一把新 key，
-   新 key 解不开备份里的任何密文。
-3. 重建数据库并导入 dump：
+   `docker compose -f deploy/compose.host.yaml stop host worker`。全新机器上
+   先只拉起数据库：`docker compose -f deploy/compose.host.yaml up -d postgres`
+   （后续 `exec` 需要容器在运行）。
+2. 恢复 vault 主密钥：把备份的 key 放回 Host 实际读取的位置（Docker stack 为
+   `deploy/secrets/vault_master_key`，`chmod 600`；原生形态见 §1.1）。**不要**在
+   缺 key 文件的状态下运行 `scripts/install-deps.sh` 或 `scripts/init-worktree.sh`：
+   二者在该文件缺失或为空时会生成一把新 key，新 key 解不开备份里的任何密文。
+3. 先证明 dump 可读，再把现库**改名保留**（不要 drop），然后建空库、整事务导入：
 
    ```bash
-   docker compose -f deploy/compose.host.yaml exec -T postgres dropdb -U agent_legion agent_legion
-   docker compose -f deploy/compose.host.yaml exec -T postgres createdb -U agent_legion -O agent_legion agent_legion
-   docker compose -f deploy/compose.host.yaml exec -T postgres \
-     pg_restore -U agent_legion -d agent_legion --no-owner < <备份目录>/agent_legion-<时间戳>.dump
+   C="docker compose -f deploy/compose.host.yaml exec -T postgres"
+   DUMP=<备份目录>/agent_legion-<时间戳>.dump
+   $C pg_restore --list < "$DUMP" > /dev/null          # 读不出目录即停止，现库原样不动
+   $C psql -U agent_legion -d postgres -v ON_ERROR_STOP=1 \
+     -c 'ALTER DATABASE agent_legion RENAME TO agent_legion_pre_restore'
+   $C createdb -U agent_legion -O agent_legion agent_legion
+   $C pg_restore -U agent_legion -d agent_legion --no-owner \
+     --exit-on-error --single-transaction < "$DUMP"
    ```
 
-4. 恢复对象存储：S3 层反向同步，或停 `seaweedfs` 后清空卷内容再解包
-   （`docker run --rm -v agent-legion_seaweedfs-data:/data -v <备份目录>:/backup busybox sh -c 'rm -rf /data/* && tar xzf /backup/seaweedfs-data-<时间戳>.tar.gz -C /data'`）。
+   `pg_restore` 默认遇错继续、只在结尾报错数，`--exit-on-error --single-transaction`
+   让任何一条失败都整体回滚，不会留下半导入的库。导入失败时删掉空的新库、把
+   `agent_legion_pre_restore` 改回 `agent_legion` 即回到恢复前状态。旧库保留到
+   §2.4 全部核对通过后再 `dropdb -U agent_legion agent_legion_pre_restore`
+   （同样经 `$C` 执行）。
+4. 恢复对象存储：S3 层反向同步，或停 `seaweedfs` 后清空卷内容再解包——用
+   `find -mindepth 1 -delete` 清空（`rm -rf /data/*` 不会删隐藏文件）：
+   `docker run --rm -v agent-legion_seaweedfs-data:/data -v <备份目录>:/backup busybox sh -c 'find /data -mindepth 1 -delete && tar xzf /backup/seaweedfs-data-<时间戳>.tar.gz -C /data'`。
 5. `make prod-up docker` 拉起整个 stack；低于当前版本的 dump 会在启动时自动
    迁移到当前 schema。
-6. 后端每次启动都会把全部 workspace 调度重置为暂停（`server/app/worker_control.py`），
-   恢复后先完成 §2.4 的核对，再经控制台恢复调度。
+6. 后端每次启动都会把全部 workspace 调度重置为暂停（`server/app/main.py` 启动时
+   调用 `reset_all_to_paused`），恢复后先完成 §2.4 的核对，再经控制台恢复调度。
 
 ### 2.4 恢复后核对
 
@@ -136,8 +153,10 @@ docker compose -f deploy/compose.host.yaml exec -T postgres \
   （`POST /api/admin/infra-connections/test`，`target` 分别取 `database` / `storage`）显示数据库与对象存储均可达。
 - 对每个外部服务连接执行一次测试（admin 全局设置「外部服务连接」，或
   `POST /api/admin/connections/{key}/test`）：它会解析实例 vault 中的凭据，
-  是验证 vault 主密钥与数据库匹配的最直接手段。
-- 热备份恢复的实例：`scripts/gc-s3-jobs.py` 默认 dry-run，先只看报告——列出的
+  是验证 vault 主密钥与数据库匹配的最直接手段。key 对不上时该接口返回 HTTP 500
+  （凭据解析在探测之前抛错），而不是 `ok: false`。
+- 热备份恢复的实例：`scripts/gc-s3-jobs.py` 默认 dry-run（Docker stack 在 Host
+  容器内执行：`docker compose -f deploy/compose.host.yaml exec host python scripts/gc-s3-jobs.py`），先只看报告——列出的
   是 dump 之后写入、清单里没有行的孤儿对象，确认无误后再加 `--apply`。「行在、
   对象缺失」的产物会让依赖它的下游节点停在等待中，job 详情页对应节点显示
   「输入恢复不全，建议重跑 <生产节点>」，按提示重跑生产节点即可。
@@ -165,12 +184,17 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
   with the configured master key`；完全未配置 key 时抛 `Vault master key is not
   configured`。引用 secret 的节点在派发时以配置错误失败，intake 冻结的
   `secret_ref` 同样解析失败。
-- **外部服务连接凭据**（`instance_secrets`）：连接测试与依赖该连接的节点全部失败。
+- **外部服务连接凭据**（`instance_secrets`）：依赖该连接的节点全部失败，连接测试
+  接口返回 HTTP 500。
 - **连接 token 缓存**（`connection_tokens`）：解不开时视作过期并重新换取，本身能
   自愈——但换取要用上一条的凭据，所以凭据重录之前同样失败。
-- **日志脱敏退化**：job 日志在读取时用 vault 明文做替换脱敏，解不开时这一步静默
-  跳过（不影响读日志），此前写入日志的 secret 值会以明文显示，直到相同的值被
-  重新录入。
+- **日志脱敏退化**：job 日志在读取时用该 workspace 的全部 vault 明文做替换脱敏
+  （`collect_vault_plaintexts`），这一步是全有或全无的——该 workspace 只要还有
+  **任意一个** secret 解不开，整个 workspace 的 vault 脱敏都静默关闭（不影响读
+  日志），此前写入日志的 secret 值会以明文显示。只重录其中几个并不能恢复脱敏，
+  必须让该 workspace 的每个 secret 都能被新 key 解开（重写或删除，见 §4.2 第 3
+  步的完成核对）。实例级的外部服务连接凭据（`instance_secrets`）本来就不参与
+  日志脱敏。
 - 设置页对 secret 字段只显示「已设置」标记，它只看引用是否存在，**key 丢失后仍
   显示已设置**，不能据此判断 secret 是否可用。
 
@@ -184,17 +208,23 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
    密钥保管处。只要找回原 key 放回原位并重启 Host，一切恢复，无需其他操作。
 2. **确认无法找回后再换新 key**。新 key 一旦开始用于写入，旧 key 即使事后找回也
    解不开新写入的密文（单 key 设计，两把 key 不能并存），所以这一步要一次决定。
-   生成方式与首次部署相同（见 [agent-worker-deployment.md](agent-worker-deployment.md) §1）：
+   生成方式与首次部署相同（见 [agent-worker-deployment.md](agent-worker-deployment.md) §1）。
+   先把现有 key 文件改名留存（万一判断有误还能退回），不要直接 `>` 覆盖：
 
    ```bash
+   mv deploy/secrets/vault_master_key deploy/secrets/vault_master_key.old
    UV_CACHE_DIR=.uv-cache uv run python -c \
      "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
      > deploy/secrets/vault_master_key
    chmod 600 deploy/secrets/vault_master_key
    ```
 
-   然后重启 Host（`make prod-up docker` 或原生 `make prod-down && make prod-up`），
-   并立刻把新 key 纳入 §1.1 的备份。
+   上面是 Docker stack 的位置。原生形态 Host 不读 `deploy/secrets/vault_master_key`：
+   在根 `.env` 里把 `AGENT_LEGION_VAULT_MASTER_KEY` 改为新 key，或让
+   `AGENT_LEGION_VAULT_MASTER_KEY_FILE` 指向新 key 文件（二者择一；旧值 / 旧文件
+   同样先留存）。然后重启 Host（`make prod-up docker`，或原生
+   `make prod-down && make prod-up`），记下换 key 的时间，并立刻把新 key 纳入
+   §1.1 的备份。
 3. **重新录入全部 secret**（按名称覆盖写入，名称不变，已冻结的 `secret_ref` 在
    重录后即可重新解析）：
    - 外部服务连接：admin 全局设置「外部服务连接」逐个编辑，在 secret 字段输入
@@ -205,6 +235,11 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
    - 直接经 API 写入的 workspace secret：`GET /api/workspaces/{workspace_id}/secrets`
      列出名称（只有名称与时间戳），逐个 `PUT /api/workspaces/{workspace_id}/secrets/{name}`
      重写。
+   - **完成核对**（逐个 workspace）：`GET /api/workspaces/{workspace_id}/secrets`
+     列出的全部名称（节点 secret 字段也在其中，名称形如 `node:...`），每一个的
+     `updated_at` 都必须晚于换 key 时间；不再需要的用
+     `DELETE /api/workspaces/{workspace_id}/secrets/{name}` 删除。剩下任何一个旧
+     密文，该 workspace 的引用节点仍会失败，日志脱敏也仍然整体关闭（§4.1）。
 4. **补跑失败的 job**：key 失效期间因 secret 解析失败的节点以配置错误失败，
    重录完成后按常规方式重跑。
 
@@ -212,5 +247,5 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
 
 拿到 key 与数据库（或其备份）的人可以解出全部 secret。处置与 4.2 第 2、3 步
 相同：生成新 key、重启，并在**上游服务侧轮换**每一个凭据后用新值重录——仅换
-平台 key 而沿用旧凭据，泄露的明文依然有效。注意轮换后旧值不再参与日志脱敏，
-历史日志里若留有旧值会明文显示。
+平台 key 而沿用旧凭据，泄露的明文依然有效。注意脱敏只替换 vault 里的**当前**
+值，轮换后历史日志里若留有旧值会明文显示。
