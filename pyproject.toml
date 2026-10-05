@@ -30,7 +30,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-  "freezegun>=1.5.5",
   "httpx",
   "mypy>=2.1.0",
   "pytest",
@@ -47,7 +46,6 @@ markers = [
   "full_gate: deterministic higher-fidelity architecture scenarios",
   "ci_extended: repeated stress scenarios for CI",
   "slow: tests involving real subprocesses or long sleeps",
-  "repository_gate: whole-repository checks executed separately by the quality gate",
   "postgres: tests that require the isolated PostgreSQL test database",
   "smoke: curated fast high-value tests for the pre-push smoke tier (assigned in tests/conftest.py)",
   "no_db: pure static tests that never touch the database; skips TRUNCATE-based DB isolation",
