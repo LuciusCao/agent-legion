@@ -95,7 +95,7 @@ export function QueueSummaryCards({
           className={panelStyles.metricValue}
           data-testid="queue-depth-summary"
         >
-          {typeof queue?.queued === 'number' ? formatNumber(queue.queued) : '-'}
+          {formatNumber(queue?.queued)}
         </div>
         <div className={panelStyles.metricMeta}>
           队首最老{' '}

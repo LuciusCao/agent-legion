@@ -80,11 +80,13 @@ describe('PreviewPanelSection 治理面状态轮询档位（#965）', () => {
     await advance(27_000)
     expect(mockFetchState).toHaveBeenCalledTimes(2)
 
-    // 打开定制对话：恢复 3s（改一版看一版）。
+    // 打开定制对话：立即刷新一次，并恢复 3s（改一版看一版）。
     fireEvent.click(screen.getByRole('button', { name: '定制预览' }))
+    await advance(0)
+    expect(mockFetchState).toHaveBeenCalledTimes(3)
     await advance(3_100)
     const afterOpen = mockFetchState.mock.calls.length
-    expect(afterOpen).toBeGreaterThanOrEqual(3)
+    expect(afterOpen).toBe(4)
     await advance(3_000)
     expect(mockFetchState.mock.calls.length).toBe(afterOpen + 1)
 

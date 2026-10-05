@@ -2,6 +2,7 @@
  * 预览面板查询 hooks（issue #328）。query key 留在本特性目录内定义
  * （previewPanel 是 #328 的自包含特性面，不扩散到 lib/queryKeys）。
  */
+import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   archivePreviewPanel,
@@ -53,12 +54,19 @@ export function usePreviewPanelState(
   enabled: boolean,
   customizing = false
 ) {
-  return useQuery({
+  const query = useQuery({
     queryKey: previewPanelKeys.state(workspaceId ?? ''),
     queryFn: ({ signal }) => fetchPreviewPanelState(workspaceId!, signal),
     enabled: Boolean(workspaceId) && enabled,
     refetchInterval: previewPanelStatePollInterval(enabled, customizing),
   })
+  // 对话打开即刷新一次：空闲档最多 30s 前的帧不该成为「改一版看一版」的起点。
+  const { refetch } = query
+  const active = Boolean(workspaceId) && enabled && customizing
+  useEffect(() => {
+    if (active) void refetch()
+  }, [active, refetch])
+  return query
 }
 
 function useInvalidatePreviewPanel(workspaceId: string | undefined) {
