@@ -890,6 +890,8 @@ jobs:
       # standalone Worker's agent runtime are both fail-closed without it
       # (the runner builds it via scripts/ensure-velites.sh --dest data/bin).
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -944,6 +946,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       # Cold build is ~14 min; the cache is mandatory, not optional.

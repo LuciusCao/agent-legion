@@ -91,3 +91,20 @@ def test_dependency_audit_runs_in_nightly_gate_not_pr_gate() -> None:
     assert "check-deps-audit" not in quality_gate
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     assert re.search(r"^audit:.*\n\t\./scripts/check-deps-audit\.sh$", makefile, re.MULTILINE)
+
+
+def test_rust_toolchain_steps_declare_toolchain_explicitly() -> None:
+    """rust-toolchain 钉的是 stable 分支提交（默认 toolchain=stable）；master / v1
+    的 action.yml 要求 toolchain 必填——Dependabot 把 ``# stable`` 当 commit pin
+    升级到别的提交时，缺省输入会让 Rust lane 挂掉，故每处必须显式声明。"""
+    steps_seen = 0
+    for workflow in _workflow_files():
+        data = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        for job_name, job in data["jobs"].items():
+            for step in job.get("steps", []):
+                if not str(step.get("uses", "")).startswith("dtolnay/rust-toolchain@"):
+                    continue
+                steps_seen += 1
+                toolchain = (step.get("with") or {}).get("toolchain")
+                assert toolchain == "stable", f"{workflow.name}:{job_name} 未显式 toolchain: stable"
+    assert steps_seen, "未找到任何 dtolnay/rust-toolchain step"
