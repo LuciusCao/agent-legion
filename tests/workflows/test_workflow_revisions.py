@@ -297,13 +297,13 @@ def test_archived_agent_does_not_rewrite_routes_until_next_publish(tmp_path: Pat
     assert rows["routes"] == {}
 
 
-def test_publish_rejects_ambiguous_agent_capability(
+def test_publish_rejects_legacy_agent_node_whatever_the_catalog(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An agent-typed node whose capability has >1 published Agent fails
-    publish validation. The DB partial unique index makes this
-    unrepresentable via real rows, so stub the catalog read (the guard is
-    defense in depth for catalogs produced before the index existed)."""
+    """#935 gate flip: an agent-typed node without its own execution profile
+    fails publish whatever the Agent catalog holds — here even an ambiguous
+    one (two published Agents per capability, stubbed: the DB partial unique
+    index makes it unrepresentable) is never consulted for resolution."""
     from server.app.agent_catalog import AgentDefinition
 
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
@@ -329,8 +329,10 @@ def test_publish_rejects_ambiguous_agent_capability(
     )
 
     assert any(
-        "write_script must resolve to exactly one published Agent" in error for error in errors
+        "Agent node write_script must declare its own execution profile" in error
+        for error in errors
     )
+    assert not any("exactly one published Agent" in error for error in errors)
 
 
 def test_create_job_stores_workflow_revision_snapshot(tmp_path: Path) -> None:
@@ -407,11 +409,10 @@ def test_publish_validation_reports_missing_node_code(tmp_path: Path) -> None:
         custom_nodes_enabled=True,
     )
 
-    # Bare JobQueries seeds no Agent definitions and no node code: the demo's
-    # agent-typed nodes miss their published Agent and its code nodes miss
-    # their published code, so both error kinds are reported.
+    # Bare JobQueries seeds no node code, and the demo's agent-typed nodes
+    # carry no execution profile (#935 gate flip): both error kinds report.
     assert any("no published node code" in error for error in errors)
-    assert any("must resolve to exactly one published Agent" in error for error in errors)
+    assert any("must declare its own execution profile" in error for error in errors)
 
 
 def test_failed_publish_validation_preserves_active_revision(tmp_path: Path) -> None:

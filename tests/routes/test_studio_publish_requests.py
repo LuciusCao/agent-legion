@@ -14,7 +14,6 @@ the manual Studio button, or cancels. Security matrix front and center:
 
 from __future__ import annotations
 
-from server.app.agent_catalog import AgentDefinition
 from tests.routes.studio_publish_request_testlib import (
     DRAFT_YAML as _DRAFT_YAML,
 )
@@ -489,14 +488,9 @@ def test_request_and_poll_carry_skill_contract_warnings(client, job_db, monkeypa
     advisory on the agent's request response, the status tool, AND the human
     pending poll (the review dialog's data source) — computed fresh each
     read, never persisted."""
-    from tests.helpers import replace_agent_catalog
-
     workspace_id = _seed_workspace(client, job_db)
-    # Route the node through a published Agent so the draft validates, and
-    # bind the skill on the node (#76 semantics).
-    replace_agent_catalog(
-        workspace_id, {"do-thing-v1": AgentDefinition(capability="do_thing", runtime="velites")}
-    )
+    # A self-contained agent node (#935 gate: execution.runtime on the node)
+    # validates without any Agent definition; the skill binds on the node.
     _put_draft(
         client,
         workspace_id,
@@ -507,6 +501,7 @@ nodes:
   do_thing:
     type: agent
     capability: do_thing
+    execution: {runtime: velites}
     skill: {key: group/contract-less, ref: latest}
 """,
     )

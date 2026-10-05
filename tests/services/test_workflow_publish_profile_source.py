@@ -2,8 +2,7 @@
 
 Self-contained agent nodes (``execution.runtime``) publish in a workspace
 with no Agent definitions and materialize no route; half-filled profiles
-are rejected; legacy agent nodes keep requiring exactly one published
-Agent. The scan-gate probe sees the self-contained active revision.
+are rejected; since #935 (P3 gate flip) legacy agent nodes are rejected. The scan-gate probe sees the self-contained active revision.
 """
 
 from __future__ import annotations
@@ -95,7 +94,8 @@ def test_half_filled_profile_is_rejected_at_publish(tmp_path: Path) -> None:
     assert any("requires_labels but no execution.runtime" in error for error in errors)
 
 
-def test_legacy_agent_node_still_needs_a_published_agent(tmp_path: Path) -> None:
+def test_legacy_agent_node_is_rejected_after_the_gate_flip(tmp_path: Path) -> None:
+    """#935 (#440 P3): agent nodes must be self-contained to publish."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace_id = _workspace(queries)
 
@@ -103,7 +103,7 @@ def test_legacy_agent_node_still_needs_a_published_agent(tmp_path: Path) -> None
         queries, workspace_id, _yaml(""), True, skill_base_dir=_skill_base(tmp_path)
     )
 
-    assert any("must resolve to exactly one published Agent" in error for error in errors)
+    assert any("must declare its own execution profile" in error for error in errors)
 
 
 def test_self_contained_revision_materializes_no_route_and_opens_the_scan_gate(
@@ -124,6 +124,32 @@ def test_self_contained_revision_materializes_no_route_and_opens_the_scan_gate(
     # zero published Agents anywhere (#933 high-risk gate).
     assert has_self_contained_agent_nodes(queries) is True
     assert agent_profiles_may_exist(queries) is True
+
+
+def test_self_contained_publish_freezes_existing_routes(tmp_path: Path) -> None:
+    """#935 route 停写: once a workspace publishes a fully self-contained
+    revision the route table is never written again — rows materialized for
+    an earlier legacy revision stay frozen (read-only) for its in-flight jobs
+    instead of being pruned."""
+    from server.app.agent_catalog import AgentDefinition
+    from tests.helpers import replace_agent_catalog
+
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace_id = _workspace(queries)
+    replace_agent_catalog(
+        workspace_id, {"draft-agent": AgentDefinition(capability="draft", runtime="pi")}
+    )
+    service = WorkflowRevisionService(queries, True)
+    legacy = yaml.safe_load(_yaml(""))
+    legacy["key"] = workspace_id
+    service.publish_workspace_revision(workspace_id, workflow_definition_from_mapping(legacy))
+    assert _routes(queries, workspace_id) == [{"node_key": "draft", "target_kind": "agent"}]
+
+    raw = yaml.safe_load(_SELF_CONTAINED)
+    raw["key"] = workspace_id
+    service.publish_workspace_revision(workspace_id, workflow_definition_from_mapping(raw))
+
+    assert _routes(queries, workspace_id) == [{"node_key": "draft", "target_kind": "agent"}]
 
 
 def test_scan_probe_ignores_legacy_agent_revisions(tmp_path: Path) -> None:

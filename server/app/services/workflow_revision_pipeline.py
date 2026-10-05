@@ -21,7 +21,10 @@ from server.app.services.agent_profile_provenance import (
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config_prune import override_prune_commit_hook
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
-from server.app.services.workflow_revision_routes import derive_agent_routes
+from server.app.services.workflow_revision_routes import (
+    derive_agent_routes,
+    has_legacy_agent_nodes,
+)
 from server.app.services.workflow_revision_runtime import embed_node_code_pins
 from server.app.workflows.definition import WorkflowDefinition
 
@@ -62,7 +65,14 @@ def publish_workflow_revision(
     )
     version = job_db.next_workflow_revision_version(workspace_id, definition.key)
     revision_id = f"{workspace_id}:{definition.key}:v{version}"
-    agent_routes = derive_agent_routes(job_db, workspace_id, definition)
+    agent_routes: dict[str, str] | None = derive_agent_routes(job_db, workspace_id, definition)
+    # #935 route 停写（#440 P3）：门禁要求 agent 节点自含后，产品发布路径
+    # 只会发布全自含 revision——它不碰 workspace_node_routes（不 upsert、
+    # 不 prune），存量行冻结只读，服务旧快照 legacy 节点的在途 job。仅内部
+    # 种子路径（demo builtin / ensure_active_revision，P4 改 YAML 自含）仍
+    # 可能带 legacy 节点并照旧物化。
+    if not has_legacy_agent_nodes(definition):
+        agent_routes = None
     # The new revision's schemas are the live truth for the workspace's
     # node overrides: keys/values it no longer accepts must go so intake
     # keeps working after a schema rename/removal (#428 二轮复审 P2-1).
