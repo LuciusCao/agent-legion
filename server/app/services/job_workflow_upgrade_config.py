@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from server.app.jobs import JobQueries
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.workflows.definition import WorkflowDefinition
 
@@ -26,7 +26,7 @@ def intake_frozen_config_json(
     """
     resolved = resolve_workflow_node_configs(
         definition,
-        published_agent_definitions(job_db, workspace_id),
+        legacy_agent_catalog(job_db, workspace_id),
         job_db.get_workspace(workspace_id),
     )
     if not resolved:

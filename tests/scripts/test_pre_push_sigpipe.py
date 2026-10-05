@@ -143,6 +143,8 @@ def hook_repo(tmp_path: Path) -> tuple[Path, Path]:
         PROJECT_ROOT / "scripts" / "run-local-gate.sh",
         repo / "scripts" / "run-local-gate.sh",
     )
+    # The hook sources the shared lane path rules (#941).
+    shutil.copy2(PROJECT_ROOT / "scripts" / "lane-paths.sh", repo / "scripts" / "lane-paths.sh")
     passed_marker = tmp_path / "gate-passed"
     _write_executable(
         repo / "scripts" / "check-quick.sh",
@@ -210,6 +212,7 @@ def test_git_push_survives_harness_output_cap_and_updates_ref(
         "check-quick-frontend.sh",
         "gate-jobs.sh",
         "gate-queue.sh",
+        "lane-paths.sh",
     ):
         shutil.copy2(PROJECT_ROOT / "scripts" / name, scripts / name)
     # Stub lanes firehose into the log files the gate gives them (their fd 1
@@ -302,6 +305,7 @@ def _quick_gate_fixture(tmp_path: Path) -> tuple[Path, Path]:
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", scripts / "check-quick.sh")
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "lane-paths.sh", scripts / "lane-paths.sh")
     _write_executable(
         scripts / "check-quick-backend.sh",
         "#!/usr/bin/env bash\n"

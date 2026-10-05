@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from server.app.jobs.atomic_mutations import AtomicJobMutationsMixin
 from server.app.jobs.execution_control import JobExecutionControlMixin
+from server.app.jobs.queries.agent_definition_reads import AgentDefinitionReadQueriesMixin  # #932
 from server.app.jobs.queries.approval_decisions import ApprovalDecisionQueriesMixin
 from server.app.jobs.queries.auth import AuthQueriesMixin
 from server.app.jobs.queries.batch import RunQueriesMixin
@@ -64,8 +65,9 @@ class WorkspaceDomainQueriesMixin(
     WorkspaceQueriesMixin,
     # Subclasses ConnectionQueriesMixin, so it need not be listed separately.
     ExternalConnectionKeyQueriesMixin,
+    AgentDefinitionReadQueriesMixin,
 ):
-    """Workspace lifecycle, packages, agent routes, drafts, and connections."""
+    """Workspace lifecycle, packages, agent routes and catalog reads, drafts, and connections."""
 
 
 class RunDomainQueriesMixin(

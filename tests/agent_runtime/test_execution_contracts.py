@@ -127,3 +127,12 @@ def test_resolve_execution_timeout_from_dispatch_config() -> None:
     assert resolve_execution(node, "velites", timeout_seconds=0)["timeout_seconds"] == 1800
     assert resolve_execution(node, "velites", timeout_seconds=-5)["timeout_seconds"] == 1800
     assert resolve_execution(node, "velites", timeout_seconds=True)["timeout_seconds"] == 1800
+
+
+def test_resolve_sandbox_network_is_strict_opt_in() -> None:
+    """#715: only a literal True opens the agent bash tool's network."""
+    node = _node(provider="p", model="m")
+    assert resolve_execution(node, "velites")["sandbox_network"] is False
+    assert resolve_execution(node, "velites", sandbox_network=True)["sandbox_network"] is True
+    for value in ("true", 1, None):
+        assert resolve_execution(node, "velites", sandbox_network=value)["sandbox_network"] is False

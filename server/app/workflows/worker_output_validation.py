@@ -32,11 +32,7 @@ from server.app.agent_broker.result_validate_pool import (
     validate_skill_commit_outputs,
 )
 from server.app.skills.commit_cache import resolve_skill_commit
-from server.app.workflows.remote_output_guard import (
-    evict_diverged_copies,
-    find_remote_output_rewrites,
-    remote_output_rewrite_error,
-)
+from server.app.workflows.remote_output_guard import guard_remote_outputs
 
 if TYPE_CHECKING:
     from server.app.services.artifact_store import ArtifactStore
@@ -68,6 +64,7 @@ def validate_worker_outputs(
     skill = str(manifest.get("skill", ""))
     if not skill:
         return None
+    verdict: str | None
     try:
         commit = _manifest_commit(skill_manager, manifest, skill)
         refs = manifest.get("input_artifacts")
@@ -75,7 +72,7 @@ def validate_worker_outputs(
             # Legacy manifest (or a claim-time non-dict shape): no CAS channel
             # at all — never touch the store, every input reads the job dir.
             refs, artifact_store = None, None
-        verdict: str | None = validate_in_pool(
+        verdict = validate_in_pool(
             validate_skill_commit_outputs,
             str(skill_manager.base_dir),
             str(skill_manager.runs_dir),
@@ -89,14 +86,6 @@ def validate_worker_outputs(
             refs,
             str(artifact_store.root) if artifact_store is not None else None,
         )
-        # Judge first, evict after (multi-step discipline): a validator that
-        # failed but still touched a remote output leaves the same diverged
-        # local copy, so the check runs on every verdict; its own message wins.
-        snapshot = read_only_outputs or {}
-        if rewrites := find_remote_output_rewrites(run_view_dir, snapshot):
-            verdict = verdict or remote_output_rewrite_error(rewrites)
-            evict_diverged_copies(snapshot, rewrites, run_view_dir, job_dir)
-        return verdict
     except Exception as exc:
         # #204 broad-except audit: convert-to-contract, same channel as
         # run_output_validator's catch — the string verdict is the only
@@ -106,15 +95,18 @@ def validate_worker_outputs(
         # failures pickled back by reference — materialization/contract
         # (SkillRepoError, ValueError) plus the #757 view arms (an
         # unbuildable view, a failed output reconcile, a mutated declared
-        # input all fail closed like an unrunnable validator), and the #867
-        # remote-output hashing (OSError on an unreadable landed file) — a
-        # Worker-pinned skill that cannot be
-        # materialized or validated is an untrusted-input outcome, not a
-        # host bug, and must fail THIS node ("Validator error: ...") rather
-        # than crash the completion path — the lease would otherwise expire
-        # into the same poison manifest. The exception text rides the
-        # message.
-        return f"Validator error: {exc}"
+        # input all fail closed like an unrunnable validator) — a Worker-pinned
+        # skill that cannot be materialized or validated is an untrusted-input
+        # outcome, not a host bug, and must fail THIS node ("Validator error:
+        # ...") rather than crash the completion path — the lease would
+        # otherwise expire into the same poison manifest. The exception text
+        # rides the message.
+        verdict = f"Validator error: {exc}"
+    # Judge first, evict after (multi-step discipline): a validator that
+    # failed — including through a raised view arm such as a mutated declared
+    # input (#939) — may still have touched a remote output, so the check runs
+    # on every verdict; the original message wins.
+    return guard_remote_outputs(verdict, read_only_outputs or {}, run_view_dir, job_dir)
 
 
 def _manifest_commit(skill_manager: SkillManager, manifest: dict[str, Any], skill: str) -> str:

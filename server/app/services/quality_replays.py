@@ -10,7 +10,7 @@ artifacts and state are never touched.
 Agent-routed nodes may pin an explicit Agent version (draft/published/
 archived — comparing old or candidate versions is the point); the pin is
 frozen into the copy batch's source payload and honored at dispatch time
-(``resolve_dispatch_agent_definition``). Executor-routed nodes replay as-is.
+(``resolve_dispatch_agent_profile``, #932). Executor-routed nodes replay as-is.
 
 Replay status is reconciled lazily from the copy job's node row on read —
 no hook into the completion path.

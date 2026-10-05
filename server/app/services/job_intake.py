@@ -8,7 +8,7 @@ from server.app.db.rowmap import wire_batch_id
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.job_intake_chunks import resolve_fresh_candidates
 from server.app.services.job_intake_enqueue import enqueue_intake_batch
@@ -72,7 +72,7 @@ class JobIntakeService:
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
-                published_agent_definitions(self.job_db, workspace_id),
+                legacy_agent_catalog(self.job_db, workspace_id),
                 workspace,
             )
         except ValueError as exc:

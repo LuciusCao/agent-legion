@@ -191,8 +191,8 @@ jobs:
           cat test-results/ci-extended-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       # Flaky governance (test architecture plan, Phase 5D): reruns are fine
-      # only for nodeids registered in tests/flaky_registry.yaml with a live
-      # deadline.
+      # only for nodeids registered in tests/flaky_registry.yaml (deadline
+      # expiry is the exemption-expiry job's call, #941).
       - name: Fail on unregistered reruns
         if: always()
         run: >-
@@ -240,6 +240,8 @@ jobs:
       # exemption lifecycle above — an expired entry surfaced only when the
       # nightly extended suite happened to run (or never). Same cadence,
       # same job: the check is deadline-only here, rerun evidence stays on
-      # the ci-extended job.
+      # the ci-extended job. Since #941 this is the only place an expired
+      # deadline fails (PR CI and the unit tier stay clock-free); entries
+      # due within 7 days surface as ::warning:: annotations on the run.
       - name: Detect expired flaky-registry deadlines
         run: uv run python scripts/check_reruns.py --check-deadlines

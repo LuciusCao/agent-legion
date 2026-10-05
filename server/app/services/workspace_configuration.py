@@ -1,7 +1,7 @@
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.demo_material_seed import seed_demo_workspace_materials
 from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.job_errors import (
@@ -58,7 +58,7 @@ class WorkspaceConfigurationService:
     def _payload(self, workspace: dict[str, Any]) -> dict[str, Any]:
         return workspace_settings_payload_with_schemas(
             self.job_db,
-            published_agent_definitions(self.job_db, str(workspace["id"])),
+            legacy_agent_catalog(self.job_db, str(workspace["id"])),
             workspace,
         )
 
@@ -258,7 +258,7 @@ class WorkspaceConfigurationService:
             workspace = update_workspace_node_config(
                 self.job_db,
                 self.settings,
-                published_agent_definitions(self.job_db, workspace_id),
+                legacy_agent_catalog(self.job_db, workspace_id),
                 workspace,
                 patch,
             )
