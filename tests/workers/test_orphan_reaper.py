@@ -317,7 +317,9 @@ def _patch_reaper_proc(
 ) -> None:
     real_identity, real_owned = proc_groups.group_identity, proc_groups.still_owned
     real_members, real_refresh = proc_groups.pgid_members, proc_groups.refresh_identity
+    real_index = proc_groups.MemberIndex
     monkeypatch.setattr(proc_groups, "pgid_members", lambda: real_members(root))
+    monkeypatch.setattr(proc_groups, "MemberIndex", lambda: real_index(root))
     monkeypatch.setattr(
         proc_groups,
         "group_identity",
@@ -408,3 +410,51 @@ def test_reap_kills_term_ignoring_member_spawned_after_verification(
     orphan_reaper.reap_orphaned_agents(tmp_path / "work", lambda _m: None)
 
     assert signals == [(500, signal.SIGTERM), (500, signal.SIGKILL)]
+
+
+# --- #904：多组批量时按组在各自 TERM 紧前刷新成员 ----------------------------
+
+
+def test_member_index_sees_new_and_drops_gone_pids_incrementally(tmp_path: Path) -> None:
+    _fake_proc_entry(tmp_path, 500, 500, ["velites"], start=1)
+    _fake_proc_entry(tmp_path, 600, 600, ["velites"], start=2)
+    index = proc_groups.MemberIndex(tmp_path)
+    assert index.members_of(600) == {600: [600]}
+
+    _fake_proc_entry(tmp_path, 601, 600, ["bwrap"], start=3)
+    shutil.rmtree(tmp_path / "500")
+    assert index.members_of(600) == {600: [600, 601]}
+    assert index.members_of(500) == {500: []}
+    assert proc_groups.MemberIndex(tmp_path / "none").members_of(500) == {500: []}
+
+
+def test_reap_kills_term_ignoring_member_spawned_into_later_group_mid_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """多组批量：后序组在入口快照之后（前序组 TERM 时）才派生忽略 TERM 的成员，
+    原钉住成员在等待期退出并被立即收割后，该成员仍须收到 SIGKILL。"""
+    proc_root = tmp_path / "proc"
+    _fake_proc_entry(proc_root, 500, 500, ["velites", "--name", "agent-legion-exec-1"], start=111)
+    _fake_proc_entry(proc_root, 600, 600, ["velites", "--name", "agent-legion-exec-2"], start=222)
+    _write_record(tmp_path / "work", "exec-1", 500)
+    _write_record(tmp_path / "work", "exec-2", 600)
+    signals: list[tuple[int, int]] = []
+    _patch_reaper_proc(monkeypatch, proc_root, signals)
+
+    later: list[int] = []  # 批次中后序的组（glob 顺序不定，按首个 TERM 判定）
+
+    def _killpg(pgid: int, sig: int) -> None:
+        signals.append((pgid, sig))
+        if sig == signal.SIGTERM and not later:  # 批次已开始，后序组才派生新成员
+            later.append(600 if pgid == 500 else 500)
+            _fake_proc_entry(proc_root, later[0] + 1, later[0], ["bwrap", "--ignore-term"], start=3)
+
+    monkeypatch.setattr(os, "killpg", _killpg)
+    monkeypatch.setattr(
+        orphan_reaper.time, "sleep", lambda _s: shutil.rmtree(proc_root / str(later[0]))
+    )  # 后序组原钉住成员死于 TERM 并被立即收割；新成员忽略 TERM 存活
+
+    orphan_reaper.reap_orphaned_agents(tmp_path / "work", lambda _m: None)
+
+    assert signals[1] == (later[0], signal.SIGTERM)
+    assert (later[0], signal.SIGKILL) in signals

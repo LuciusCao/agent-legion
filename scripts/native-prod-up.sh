@@ -162,10 +162,10 @@ binds_specific_interface() {
 if binds_specific_interface "$BACKEND_BIND" \
     && [[ -f data/agent-worker-service/worker.yaml ]] \
     && grep -Eq 'host_url:[[:space:]]*https?://(127\.|localhost)' data/agent-worker-service/worker.yaml; then
-    echo "警告: 后端已绑定 $BACKEND_BIND，但本地 Worker 状态副本的 host_url 仍指向 loopback——请经 Worker 控制台改为 http://$BACKEND_HEALTH_HOST:$BACKEND_PORT，否则本地 Worker 将无法注册（静默退避重试）" >&2
+    echo "警告: 后端已绑定 ${BACKEND_BIND}，但本地 Worker 状态副本的 host_url 仍指向 loopback——请经 Worker 控制台改为 http://$BACKEND_HEALTH_HOST:${BACKEND_PORT}，否则本地 Worker 将无法注册（静默退避重试）" >&2
 fi
 if binds_specific_interface "$WORKER_BIND"; then
-    echo "提示: Worker 控制台已绑定 $WORKER_BIND，本机访问地址改为 http://$WORKER_HEALTH_HOST:$WORKER_PORT（127.0.0.1 不再监听）" >&2
+    echo "提示: Worker 控制台已绑定 ${WORKER_BIND}，本机访问地址改为 http://$WORKER_HEALTH_HOST:${WORKER_PORT}（127.0.0.1 不再监听）" >&2
 fi
 
 # 1.5 材料对象存储：原生形态下后端/worker 是本机进程，对象存储仍由 docker

@@ -195,9 +195,10 @@ make stack-logs STACK=worker
 
 页面保存配置后会原子写入控制卷。身份、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和热字段（`max_concurrency` / `max_code_concurrency` / `upload_max_concurrency` / `ramp_up` / `claim_batch_limit`）都会热更新，无需重启。每次 Worker 执行进程启动（包括服务启动、手动重启和崩溃后的自动重启）都会先把 claim 置为关闭，即使上次退出前处于开启状态也不会自动恢复；用户必须在控制台点击「开始领取」，或执行 `workerctl claim enable`，之后 Worker 才会按本机 `max_concurrency` 拉取任务。
 
-Worker 不再需要声明 `capabilities`（issue #284 起该机制退役：claim 准入不再按
-capability 匹配；旧配置里的 `capabilities:` 键只是 deprecated no-op，存在时启动
-warning，建议删除）。`models` 是可选的 runtime-scoped allowlist，不再是
+Worker 不声明 `capabilities`（issue #284 起 claim 准入不再按 capability 匹配；
+worker.yaml 的 `capabilities:` 键已于 issue #452 移除：存量状态副本残留该键时读取即
+剥离、进程内告警一次，下次保存配置时从文件清除；`PUT /api/config` 与
+`workerctl configure` 不再接受该字段）。`models` 是可选的 runtime-scoped allowlist，不再是
 模型事实源。Agent runtime 声明由本机探测推导（issue #254）：启动时按二进制解析
 （自带副本 `data/bin/` 优先、PATH 兜底）探测已安装的 runtime 并默认全部启用，
 `disabled_runtimes`（控制台「配置 → Agent 运行时」或 `workerctl configure

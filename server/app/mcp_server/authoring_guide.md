@@ -535,6 +535,13 @@ semantics stay in prose in `references/output-contract.md` — the engine
 does not express them — and `scripts/validate_output.py` is the
 business-rule layer that enforces everything the engine cannot say (a
 permanent second validation layer, not a fallback awaiting retirement).
+Write `validate_output.py` as a pure checker: report violations on
+stderr and exit non-zero, never rewrite the output files. Outputs an
+Agent Worker uploaded straight to object storage are already the
+authority copy when the Host validates them, so any change the validator
+makes to one fails the node (`Validator error: validator modified
+remote-channel output(s) ...`, #867); fix the content in the skill's
+instructions instead of cleaning it in the validator.
 
 Migration promise: the pre-#542 location — a fenced ```yaml contract
 block embedded in `references/output-contract.md` — still works but is

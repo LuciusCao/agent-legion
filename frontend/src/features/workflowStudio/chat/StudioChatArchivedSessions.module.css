@@ -1,0 +1,117 @@
+/* #924：会话菜单的归档区（「已归档（N）」折叠区）与行内二次确认。
+ * 确认行从 StudioChatSessionMenu.module.css 迁来（删除 danger / 归档
+ * primary 两档共用）；视觉档与会话菜单一致。 */
+.rowConfirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 12px;
+  font-size: 12px;
+  background: #fff5f5;
+}
+.rowConfirm[data-tone='primary'] {
+  background: #f3f8fe;
+}
+.confirmText {
+  flex: 1 1 100%;
+  color: #b71c1c;
+  overflow-wrap: anywhere;
+}
+.rowConfirm[data-tone='primary'] .confirmText {
+  color: #0d47a1;
+}
+.textAction,
+.dangerAction,
+.primaryAction {
+  flex: none;
+  border: 1px solid #e0e0e0;
+  background: #fff;
+  color: #424242;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.dangerAction {
+  border-color: #c62828;
+  background: #c62828;
+  color: #fff;
+}
+.primaryAction {
+  border-color: #1565c0;
+  background: #1565c0;
+  color: #fff;
+}
+.textAction:disabled,
+.dangerAction:disabled,
+.primaryAction:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.section {
+  border-top: 1px solid #eeeeee;
+  margin-top: 4px;
+  padding-top: 2px;
+}
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 6px 12px 6px 8px;
+  font-size: 12px;
+  color: #757575;
+  cursor: pointer;
+  text-align: left;
+}
+.toggle:hover {
+  color: #424242;
+  background: #f5f7fa;
+}
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.archivedRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 2px 26px;
+  font-size: 18px;
+}
+.archivedRow:hover {
+  background: #f5f7fa;
+}
+.archivedLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: #616161;
+}
+.restoreAction {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid #90caf9;
+  border-radius: 4px;
+  background: #fff;
+  color: #1565c0;
+  padding: 1px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.restoreAction:hover {
+  background: #e3f2fd;
+}
+.restoreAction:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

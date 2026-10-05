@@ -254,8 +254,6 @@ server/app/
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions` | `list_sessions` | routes/studio_chat.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `get_session` | routes/studio_chat.py |
 | DELETE | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `close_session` | routes/studio_chat.py |
-| PATCH | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `rename_session` | routes/studio_chat.py |
-| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/delete` | `delete_session` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/resume` | `resume_session` | routes/studio_chat.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `list_messages` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `send_message` | routes/studio_chat.py |
@@ -266,6 +264,10 @@ server/app/
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/config-options` | `set_config_option` | routes/studio_chat_config.py |
 | PUT | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context` | `update_context` | routes/studio_chat_context.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events` | `session_events` | routes/studio_chat_events.py |
+| PATCH | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `rename_session` | routes/studio_chat_session_manage.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/delete` | `delete_session` | routes/studio_chat_session_manage.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/archive` | `archive_session` | routes/studio_chat_session_manage.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/unarchive` | `unarchive_session` | routes/studio_chat_session_manage.py |
 | GET | `/workspaces/{workspace_id}/workflow-drafts/publish-request` | `get_pending_publish_request` | routes/studio_publish_requests.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/confirm` | `confirm_publish_request` | routes/studio_publish_requests.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/cancel` | `cancel_publish_request` | routes/studio_publish_requests.py |
@@ -393,7 +395,7 @@ server/app/
 | MembersResponse | BaseModel | members: list[MemberResponse] | app/routes/auth_contracts.py |
 | MemberPutRequest | BaseModel | user_id: str, role: Literal['editor', 'viewer'] | app/routes/auth_contracts.py |
 | StorageStatus | BaseModel | configured: bool, reachable: bool | app/routes/common.py |
-| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None, storage: StorageStatus | None | app/routes/common.py |
+| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None, storage: StorageStatus | None, inst... | app/routes/common.py |
 | ConnectionCreate | BaseModel | key: str, type: str, display_name: str, config: dict[str, Any] | app/routes/connections_contracts.py |
 | ConnectionUpdate | BaseModel | display_name: str | None, config: dict[str, Any] | None, enabled: bool | None | app/routes/connections_contracts.py |
 | ConnectionTokenStatus | BaseModel | expires_at: str | None, refreshed_at: str | None | app/routes/connections_contracts.py |
@@ -460,7 +462,6 @@ server/app/
 | JobNodeSummaryResponse | BaseModel | node_key: str, label: str, status: str, error_message: str | app/routes/job_view_contracts.py |
 | JobSummaryResponse | BaseModel | id: str, workspace_id: str, workflow_key: str, source_type: str, source_id: s... | app/routes/job_view_contracts.py |
 | JobsResponse | BaseModel | jobs: list[JobSummaryResponse], truncated: bool | app/routes/job_view_contracts.py |
-| JobsSnapshotResponse | BaseModel | workspace_id: str, revision: int, stats: dict[str, int], jobs: list[JobSummar... | app/routes/job_view_contracts.py |
 | JobNodeResponse | BaseModel | id: int, job_id: str, node_key: str, status: str, stale_reason: str, error_me... | app/routes/job_view_contracts.py |
 | NodeRunResponse | BaseModel | id: int, job_id: str, node_key: str, status: str, started_at: str, finished_a... | app/routes/job_view_contracts.py |
 | LogEventResponse | BaseModel | type: str, title: str, detail: str, truncated: bool | app/routes/job_view_contracts.py |

@@ -1,4 +1,5 @@
 import { marked } from 'marked'
+import { inertImageMarked } from './markdownInertImages'
 import { sanitizeHtml } from './sanitizeHtml'
 
 // Tags/attrs that markdown output needs beyond the base sanitize profile.
@@ -27,9 +28,23 @@ const MARKDOWN_TAGS = [
 ]
 const MARKDOWN_ATTRS = ['href']
 
+export type MarkdownRenderOptions = {
+  /** Agent-authored text (Studio chat): images become link placeholders
+   * and raw <img> is forbidden — rendering never fetches on its own. */
+  inertImages?: boolean
+}
+
 /** Parse markdown to sanitized HTML. breaks: on so single newlines render
  * like the previous pre-wrap plain-text bubbles. */
-export function renderMarkdownHtml(markdown: string): string {
-  const raw = marked.parse(markdown, { async: false, gfm: true, breaks: true })
-  return sanitizeHtml(raw, { tags: MARKDOWN_TAGS, attrs: MARKDOWN_ATTRS })
+export function renderMarkdownHtml(
+  markdown: string,
+  options: MarkdownRenderOptions = {}
+): string {
+  const parser = options.inertImages ? inertImageMarked : marked
+  const raw = parser.parse(markdown, { async: false, gfm: true, breaks: true })
+  return sanitizeHtml(raw, {
+    tags: MARKDOWN_TAGS,
+    attrs: MARKDOWN_ATTRS,
+    forbidTags: options.inertImages ? ['img'] : [],
+  })
 }

@@ -77,7 +77,6 @@ const DOM_PACKAGE_IMPORT_RE = /['"](dompurify|katex)['"]/
 // and are not bypassed by this list.
 const NODE_SAFE_GUARDED_MODULES = [
   'src/api/requestAuth.ts',
-  'src/lib/questionHighlight.ts',
   'src/stores/authStore.ts',
 ]
 
@@ -97,7 +96,6 @@ const DOM_INFRASTRUCTURE_MODULES = [
 // Each entry needs a reason — stale entries are reported so they get pruned.
 // Format: 'relative/path.test.ts: reason'
 const NODE_SAFE_TEST_EXEMPTIONS = [
-  'src/lib/questionHighlight.test.ts: questionHighlight.ts falls back to regex entity decoding when window is undefined',
   'src/pages/jobDetail/jobNodeHelpers.test.ts: DagGraph imports are type-only; runtime stays pure',
   'src/features/workflowStudio/canvas/workflowStudioDag.test.ts: DagGraph imports are type-only; runtime stays pure',
   'src/features/workflowStudio/canvas/workflowStudioDagChanges.test.ts: DagGraph imports are type-only; runtime stays pure',

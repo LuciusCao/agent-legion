@@ -7,6 +7,8 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Scope
 
+from server.app.fs_safety import PathEscapeError, resolve_within
+
 # Static-file serving helpers with cache headers for the SPA build output.
 # Fingerprinted build assets (e.g. /assets/index-BdvET8O9.js) never change
 # under the same URL, so they can be cached forever.
@@ -48,8 +50,11 @@ def mount_spa(app: FastAPI, frontend_dist: Path) -> None:
             headers = {"Cache-Control": REVALIDATE_CACHE_CONTROL}
             if not path:
                 return FileResponse(frontend_index, headers=headers)
-            requested = (frontend_dist / path).resolve()
-            if requested.is_relative_to(frontend_dist.resolve()) and requested.is_file():
+            try:
+                requested = resolve_within(frontend_dist, path, allow_root=True)
+            except PathEscapeError:
+                return FileResponse(frontend_index, headers=headers)
+            if requested.is_file():
                 return FileResponse(requested, headers=headers)
             return FileResponse(frontend_index, headers=headers)
 

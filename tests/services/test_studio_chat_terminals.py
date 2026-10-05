@@ -157,10 +157,10 @@ def test_env_vars_are_passed_to_the_process() -> None:
             command=sys.executable,
             args=[
                 "-c",
-                "import os; print(os.environ.get('STUDIO_TEST_MARKER', 'missing')); "
+                "import os; print(os.environ.get('GIT_TERMINAL_PROMPT', 'missing')); "
                 "print('PATH' in os.environ and 'path-kept' or 'path-lost')",
             ],
-            env=[_Env("STUDIO_TEST_MARKER", "present")],
+            env=[_Env("GIT_TERMINAL_PROMPT", "present")],
             cwd=None,
             output_byte_limit=None,
             default_cwd=".",
@@ -168,7 +168,7 @@ def test_env_vars_are_passed_to_the_process() -> None:
         await store.wait_for_exit(created.terminalId)
         state = await store.output(created.terminalId)
         assert "present" in state.output
-        # env 是合并而非替换：agent 只传覆盖项时继承环境（PATH 等）不丢。
+        # 白名单内的覆盖项叠加在基础环境上：PATH 等基础项不丢（#921）。
         assert "path-kept" in state.output
 
     asyncio.run(_run())
