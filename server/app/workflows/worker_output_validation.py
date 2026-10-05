@@ -23,6 +23,7 @@ blob open itself happens in the pool worker.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -31,6 +32,11 @@ from server.app.agent_broker.result_validate_pool import (
     validate_skill_commit_outputs,
 )
 from server.app.skills.commit_cache import resolve_skill_commit
+from server.app.workflows.remote_output_guard import (
+    evict_diverged_copies,
+    find_remote_output_rewrites,
+    remote_output_rewrite_error,
+)
 
 if TYPE_CHECKING:
     from server.app.services.artifact_store import ArtifactStore
@@ -43,6 +49,7 @@ def validate_worker_outputs(
     job_dir: Path,
     run_view_dir: Path,
     artifact_store: ArtifactStore | None = None,
+    read_only_outputs: Mapping[str, str] | None = None,
 ) -> str | None:
     """Validate this attempt's outputs against the manifest's pinned skill.
 
@@ -53,6 +60,10 @@ def validate_worker_outputs(
     dispatch-frozen input bytes channel, #833); None (or a legacy manifest
     without ``input_artifacts``) means the job-dir fallback on every input.
     Worker-reported success is untrusted; same bar as the local path.
+    ``read_only_outputs`` maps the landed remote-channel outputs to the
+    digest the promote phase registered (#867, ``remote_output_guard``):
+    re-hashed once after validation; any change fails the run and evicts
+    the diverged local copies (readers fall back to the authority object).
     """
     skill = str(manifest.get("skill", ""))
     if not skill:
@@ -78,6 +89,13 @@ def validate_worker_outputs(
             refs,
             str(artifact_store.root) if artifact_store is not None else None,
         )
+        # Judge first, evict after (multi-step discipline): a validator that
+        # failed but still touched a remote output leaves the same diverged
+        # local copy, so the check runs on every verdict; its own message wins.
+        snapshot = read_only_outputs or {}
+        if rewrites := find_remote_output_rewrites(run_view_dir, snapshot):
+            verdict = verdict or remote_output_rewrite_error(rewrites)
+            evict_diverged_copies(snapshot, rewrites, run_view_dir, job_dir)
         return verdict
     except Exception as exc:
         # #204 broad-except audit: convert-to-contract, same channel as
@@ -88,7 +106,8 @@ def validate_worker_outputs(
         # failures pickled back by reference — materialization/contract
         # (SkillRepoError, ValueError) plus the #757 view arms (an
         # unbuildable view, a failed output reconcile, a mutated declared
-        # input all fail closed like an unrunnable validator) — a
+        # input all fail closed like an unrunnable validator), and the #867
+        # remote-output hashing (OSError on an unreadable landed file) — a
         # Worker-pinned skill that cannot be
         # materialized or validated is an untrusted-input outcome, not a
         # host bug, and must fail THIS node ("Validator error: ...") rather

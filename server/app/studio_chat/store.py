@@ -40,6 +40,22 @@ class StudioChatStore:
         self.publish(session_id, {"type": "message", "message": serialize_message(message)})
         return message
 
+    def append_message_if_live(
+        self,
+        session_id: str,
+        kind: str,
+        role: str,
+        content: dict[str, Any],
+        live_statuses: tuple[str, ...],
+    ) -> dict[str, Any] | None:
+        """Atomic live-guarded append (#915); publishes only what was inserted."""
+        message = self._db.append_studio_chat_message_if_live(
+            session_id, kind, role, content, live_statuses
+        )
+        if message is not None:
+            self.publish(session_id, {"type": "message", "message": serialize_message(message)})
+        return message
+
     def publish_session(self, session_id: str) -> None:
         session = self._db.get_studio_chat_session(session_id)
         if session is not None:
