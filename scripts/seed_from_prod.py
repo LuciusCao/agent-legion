@@ -29,9 +29,10 @@ import sys
 import tempfile
 import time
 import urllib.parse
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from scripts.seed_dump_projection import project_copy_blocks
 from server.app.db.schema_guard import dsn_database_name
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -295,7 +296,12 @@ def target_columns(psql: str, dsn: str, table: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def restore_plain_sql(psql: str, dsn: str, dump_path: Path) -> None:
+def restore_plain_sql(
+    psql: str,
+    dsn: str,
+    dump_path: Path,
+    target_columns_by_table: Mapping[str, Sequence[str]] | None = None,
+) -> None:
     """Restore a plain-format dump with FK triggers disabled.
 
     Source (prod container) and target (local dev) both run PG 17; plain SQL
@@ -314,7 +320,7 @@ def restore_plain_sql(psql: str, dsn: str, dump_path: Path) -> None:
     assert proc.stdin is not None
     with dump_path.open("rb") as fh:
         proc.stdin.write(b"SET session_replication_role = replica;\n")
-        for line in fh:
+        for line in project_copy_blocks(fh, target_columns_by_table or {}):
             if line.startswith(b"SET transaction_timeout"):
                 continue
             proc.stdin.write(line)
@@ -363,7 +369,10 @@ def seed_layer1(compose_dir: Path, dsn: str, pg_bin: Path, tmpdir: Path, dry_run
     log("第 1 层：目标侧 TRUNCATE 定义表（CASCADE）")
     target_psql(psql, dsn, f"TRUNCATE {tables} CASCADE")
     log("第 1 层：psql 灌入目标库（session_replication_role=replica 绕过 FK 顺序）")
-    restore_plain_sql(psql, dsn, dump_path)
+    # Source may lag the target by a schema version: project each COPY block
+    # onto the columns the target still has (#211 M3 dropped a workspaces column).
+    columns_by_table = {table: target_columns(psql, dsn, table) for table in LAYER1_TABLES}
+    restore_plain_sql(psql, dsn, dump_path, columns_by_table)
 
 
 def seed_layer2_db(

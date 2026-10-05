@@ -367,7 +367,9 @@ def step4_node_codes(
                     f"on new workspace of {workflow_key}"
                 )
                 continue
-            base = f"/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code"
+            # #211 M3: node code routes key on the workspace id alone (it IS
+            # the workflow key); the workflows/{key} alias is gone.
+            base = f"/api/workspaces/{workspace_id}/nodes/{node_key}/code"
             current = client.get(base, allow_404=True)
             if current is None:
                 failures.append(
@@ -479,7 +481,9 @@ def verify(client: Client, seed: dict[str, Any], bound: dict[str, list[str]]) ->
         for workspace_id in bound.get(workflow_key) or []:
             if workspace_id.startswith("<new:"):
                 continue
-            base = f"/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code"
+            # #211 M3: node code routes key on the workspace id alone (it IS
+            # the workflow key); the workflows/{key} alias is gone.
+            base = f"/api/workspaces/{workspace_id}/nodes/{node_key}/code"
             current = client.get(base, allow_404=True) or {}
             ok = current.get("origin") == "custom" and current.get("code") == entry["code"]
             check(

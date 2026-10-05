@@ -167,8 +167,7 @@ class FakeClient:
                 "published": state.get("published"),
             }
         if "/nodes/" in path and path.endswith("/code"):
-            parts = path.split("/")
-            workspace_id, workflow_key, node_key = parts[3], parts[5], parts[7]
+            workspace_id, workflow_key, node_key = _node_code_key(path)
             revision = self.revisions.get(workspace_id)
             if revision is None or node_key not in (revision.get("nodes") or {}):
                 return self._missing(path, allow_404)
@@ -251,18 +250,30 @@ class FakeClient:
             state["published"] = {"version": version, "definition": state["draft"]}
             return {"version": version}
         if method == "PUT" and path.endswith("/code"):
-            key = (path.split("/")[3], path.split("/")[5], path.split("/")[7])
+            key = _node_code_key(path)
             state = self.node_codes.setdefault(key, {"published": None})
             state["draft"] = body["code"]
             return {"status": "draft", "code_hash": _fake_hash(body["code"])}
         if method == "POST" and path.endswith("/code/publish"):
-            key = (path.split("/")[3], path.split("/")[5], path.split("/")[7])
+            key = _node_code_key(path)
             state = self.node_codes[key]
             assert body == {"expected_hash": _fake_hash(state["draft"])}
             version = ((state.get("published") or {}).get("version") or 0) + 1
             state["published"] = {"version": version, "code": state["draft"]}
             return {"version": version}
         raise AssertionError(f"unexpected {method} {path}")
+
+
+def _node_code_key(path: str) -> tuple[str, str, str]:
+    """(workspace, workflow key, node) from the live node-code route.
+
+    #211 M3 removed the /workflows/{workflow_key}/ alias (the real Host
+    404s on it), so the fake rejects it instead of silently serving it."""
+    parts = path.split("/")
+    assert "workflows" not in parts, f"retired workflows/{{key}} alias: {path}"
+    assert parts[1:3] == ["api", "workspaces"] and parts[4] == "nodes", path
+    assert parts[6] == "code", path
+    return parts[3], parts[3], parts[5]
 
 
 def _fake_hash(content: object) -> str:

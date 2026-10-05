@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from scripts.seed_dump_projection import project_copy_blocks  # noqa: E402
 from scripts.seed_from_prod import (  # noqa: E402
     SeedError,
     artifact_blob_relpath,
@@ -157,3 +158,44 @@ class TestComposeBaseCmd:
     def test_no_compose_files_raises(self, tmp_path: Path):
         with pytest.raises(SeedError, match="compose"):
             compose_base_cmd(tmp_path)
+
+
+class TestProjectCopyBlocks:
+    """#211 M3 (codex P2 on #1032): a pre-v91 source dump still carries
+    workspaces.default_workflow_key; layer 1 must project it away instead of
+    failing the whole restore."""
+
+    _DUMP = [
+        b"SET statement_timeout = 0;\n",
+        b"COPY public.workspaces (id, name, default_workflow_key, description) FROM stdin;\n",
+        b"ws1\tOne\tws1\tline\\twith tab\n",
+        b"ws2\tTwo\tws2\t\\N\n",
+        b"\\.\n",
+        b"COPY public.users (id, username) FROM stdin;\n",
+        b"u1\tadmin\n",
+        b"\\.\n",
+    ]
+
+    def test_drops_columns_the_target_no_longer_has(self):
+        out = list(
+            project_copy_blocks(
+                self._DUMP,
+                {"workspaces": ["id", "name", "description"], "users": ["id", "username"]},
+            )
+        )
+        assert out == [
+            b"SET statement_timeout = 0;\n",
+            b"COPY public.workspaces (id, name, description) FROM stdin;\n",
+            b"ws1\tOne\tline\\twith tab\n",
+            b"ws2\tTwo\t\\N\n",
+            b"\\.\n",
+            b"COPY public.users (id, username) FROM stdin;\n",
+            b"u1\tadmin\n",
+            b"\\.\n",
+        ]
+
+    def test_matching_schema_passes_through_unchanged(self):
+        columns = {"workspaces": ["id", "name", "default_workflow_key", "description"]}
+        assert list(project_copy_blocks(self._DUMP, columns)) == self._DUMP
+        # Tables without a known target column list are left verbatim too.
+        assert list(project_copy_blocks(self._DUMP, {})) == self._DUMP

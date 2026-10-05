@@ -966,6 +966,7 @@
     "scripts/seed/import_seed.py": 445,
     "scripts/seed/seed_common.py": 199,
     "scripts/seed_demo.py": 154,
+    "scripts/seed_dump_projection.py": 47,
     "scripts/seed_from_prod.py": 444,
     "scripts/stress/_e2e_frontend.py": 48,
     "scripts/stress/_e2e_readiness.py": 55,
