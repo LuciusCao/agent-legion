@@ -130,3 +130,31 @@ def test_legacy_workflow_echo_and_payload_stay_unchanged() -> None:
 def test_node_execution_payload_keeps_a_declared_runtime() -> None:
     payload = node_execution_payload(WorkflowNodeExecution(runtime="pi"))
     assert payload["runtime"] == "pi"
+
+
+def test_response_contract_exposes_the_profile_fields_read_only() -> None:
+    """PR #1039 codex R1: the structured workflow payload (revision routes,
+    Studio Agent read tools) shows runtime / requires_labels; legacy nodes
+    read as empty."""
+    from server.app.routes.workflow_contracts import WorkflowDefinitionResponse
+    from server.app.workflows.revision_format import workflow_definition_to_response_payload
+
+    definition = workflow_definition_from_mapping(
+        _raw(
+            {
+                "gen": _agent(execution={"runtime": "velites"}, requires_labels={"gpu": "yes"}),
+                "legacy": _agent(capability="review", after=["gen"]),
+            }
+        )
+    )
+    payload = workflow_definition_to_response_payload(definition)
+    raw_legacy = next(node for node in payload["nodes"] if node["key"] == "legacy")
+    assert "requires_labels" not in raw_legacy
+    assert "runtime" not in raw_legacy["execution"]
+
+    response = WorkflowDefinitionResponse.model_validate(payload)
+    nodes = {node.key: node for node in response.nodes}
+    assert nodes["gen"].execution.runtime == "velites"
+    assert nodes["gen"].requires_labels == {"gpu": "yes"}
+    assert nodes["legacy"].execution.runtime == ""
+    assert nodes["legacy"].requires_labels == {}

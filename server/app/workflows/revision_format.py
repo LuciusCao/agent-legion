@@ -84,6 +84,8 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                 "skill": asdict(node.skill) if node.skill is not None else None,
                 # Omitted when undeclared (empty) so payload/yaml stay clean.
                 **({"tools": list(node.tools)} if node.tools else {}),
+                # #933: self-contained profile labels, omitted when undeclared.
+                **({"requires_labels": dict(node.requires_labels)} if node.requires_labels else {}),
                 "config": node.config,
                 "terminal": (
                     {"outcome": node.terminal.outcome} if node.terminal is not None else None

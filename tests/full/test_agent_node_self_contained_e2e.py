@@ -60,19 +60,20 @@ class _NoLocalExecutor:
         pass
 
 
-def _definition():
+def _definition(runtime: str = "velites"):
+    labels = {"requires_labels": {"arch": "arm64"}} if runtime else {}
     return workflow_definition_from_mapping(
         {
             "key": _WS,
             "label": "Self-contained",
-            "execution": {"runtime": "velites", "provider": "gateway", "model": "test-model"},
+            "execution": {"runtime": runtime, "provider": "gateway", "model": "test-model"},
             "nodes": {
                 "draft": {
                     "type": "agent",
                     "capability": "draft",
                     "outputs": ["draft.json"],
                     "skill": {"key": _SKILL},
-                    "requires_labels": {"arch": "arm64"},
+                    **labels,
                 }
             },
         }
@@ -80,9 +81,14 @@ def _definition():
 
 
 @pytest.mark.full_gate
+@pytest.mark.parametrize("republish_legacy", [False, True])
 def test_workspace_without_agent_definitions_runs_a_self_contained_node(
-    tmp_path: Path, job_db
+    tmp_path: Path, job_db, republish_legacy: bool
 ) -> None:
+    """``republish_legacy`` (PR #1039 codex R1): after the job froze the
+    self-contained snapshot, the workspace publishes a revision WITHOUT any
+    self-contained node — the in-flight job's node must still be enqueued
+    (the scan gate also looks at revisions runnable jobs are pinned to)."""
     workspace = job_db.create_workspace(
         "Self-contained", default_workflow_key=_WS, workspace_id=_WS
     )
@@ -108,6 +114,11 @@ def test_workspace_without_agent_definitions_runs_a_self_contained_node(
         workflow_definition_snapshot_json=snapshot_json,
         workflow_revision_id=str(revision["id"]),
     )
+
+    if republish_legacy:
+        WorkflowRevisionService(job_db, True).save_workspace_revision(_WS, _definition(""))
+        active = job_db.get_active_workflow_revision(_WS, _WS)
+        assert active is not None and active["id"] != revision["id"]
 
     # Pure-remote shape: no local code capacity, no online code Worker — the
     # self-contained active revision is the only thing keeping the scan on.

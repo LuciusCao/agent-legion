@@ -648,7 +648,7 @@ server/app/
 | WorkflowNodeCodeRollbackRequest | BaseModel | version: int | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeArchiveResponse | BaseModel | archived: int | app/routes/workflow_node_code_contracts.py |
 | WorkflowTerminalResponse | BaseModel | outcome: str | app/routes/workflow_node_contracts.py |
-| WorkflowNodeExecutionResponse | BaseModel | provider: str, model: str, thinking: str, prompt: str, prompt_mode: str | app/routes/workflow_node_contracts.py |
+| WorkflowNodeExecutionResponse | BaseModel | provider: str, model: str, thinking: str, prompt: str, prompt_mode: str, runt... | app/routes/workflow_node_contracts.py |
 | WorkflowNodeSkillResponse | BaseModel | key: str, ref: str | app/routes/workflow_node_contracts.py |
 | WorkflowTextInputResponse | BaseModel | label: str, filename: str, template: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeResponse | BaseModel | key: str, label: str, capability: str, node_type: str, accepted_item_types: l... | app/routes/workflow_node_contracts.py |
