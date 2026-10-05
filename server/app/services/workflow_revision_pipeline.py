@@ -14,6 +14,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
+from server.app.services.agent_profile_provenance import (
+    carry_forward_provenance,
+    embed_provenance,
+)
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config_prune import override_prune_commit_hook
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
@@ -46,6 +50,16 @@ def publish_workflow_revision(
         list(definition.executable_nodes),
     )
     stored_json = embed_node_code_pins(definition_json, pins)
+    # #935：v93 回填写下的 agent_profile_provenance 对档案字段未变的节点
+    # 随新 revision 延续（同 node_code_pins，不计入 definition_hash）——
+    # 升级 diff 归一靠它识别「旧快照 legacy 节点 == 内联后的节点」。
+    previous = job_db.get_active_workflow_revision(workspace_id, definition.key)
+    stored_json = embed_provenance(
+        stored_json,
+        carry_forward_provenance(
+            str(previous["definition_json"]) if previous is not None else None, definition
+        ),
+    )
     version = job_db.next_workflow_revision_version(workspace_id, definition.key)
     revision_id = f"{workspace_id}:{definition.key}:v{version}"
     agent_routes = derive_agent_routes(job_db, workspace_id, definition)

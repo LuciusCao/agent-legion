@@ -1497,6 +1497,7 @@
     "server/app/services/agent_node_profile.py": 72,
     "server/app/services/agent_node_profile_catalog.py": 49,
     "server/app/services/agent_node_profile_types.py": 80,
+    "server/app/services/agent_profile_provenance.py": 110,
     "server/app/services/agent_publish_prune.py": 103,
     "server/app/services/agent_runtime_catalog.py": 31,
     "server/app/services/agent_service.py": 114,
