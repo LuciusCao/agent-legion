@@ -10,9 +10,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def _publish(client: TestClient, workspace_id: str = "ws-routes") -> None:
     job_db = JobQueries(TEST_DATABASE_URL, Path(client.app.state.settings.jobs_dir))
-    job_db.create_workspace(
-        workspace_id, default_workflow_key="education_video_problems_generation"
-    )
+    job_db.create_workspace(workspace_id)
     # Agent definitions are workspace-scoped (schema v46): seed the demo
     # agents into this workspace before publishing so routes materialize.
     seed_workspace_agent_definitions(workspace_id)
@@ -35,8 +33,8 @@ def test_agent_routes_returns_materialized_routes(client: TestClient) -> None:
         "review_questions",
     }
     entry = by_node["write_script"]
-    # #211 M2: the deprecated field carries the workspace id (identity value).
-    assert entry["workflow_key"] == "ws-routes"
+    # #211 M3: the route entry no longer carries a workflow_key.
+    assert "workflow_key" not in entry
     assert entry["agent_id"] == "example-write-script-v1"
     assert entry["capability"] == "write_script"
     # issue #76: skill 绑定迁到 DAG 节点，Agent 定义的 legacy 兜底为空。

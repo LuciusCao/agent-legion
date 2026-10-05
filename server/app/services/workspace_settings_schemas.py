@@ -27,8 +27,8 @@ def workspace_settings_payload_with_schemas(
     """
     payload = workspace_settings_payload(workspace)
     schemas: dict[str, dict[str, Any]] = {}
-    workflow_key = str(payload.get("workflowKey") or "")
-    definition = workspace_active_definition(job_db, str(workspace["id"]), workflow_key)
+    workspace_id = str(workspace["id"])
+    definition = workspace_active_definition(job_db, workspace_id, workspace_id)
     if definition is not None:
         schemas = workflow_node_config_schemas(definition, agent_definitions)
     payload["nodeConfigSchemas"] = schemas

@@ -77,7 +77,7 @@ def _make_worker(
 
 def _prepare_job(tmp_path: Path, node: WorkflowNode, batch_payload: dict | None = None):
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
     batch_id = ""
     if batch_payload is not None:
         # The payload is only the id digest input; the pin keys persist as the
@@ -131,7 +131,7 @@ def test_dispatch_runs_latest_published_ignoring_intake_pin(tmp_path: Path) -> N
     newer code version takes effect on the job's next node execution."""
     node = _local_node("fetch")
     codes_ws = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    seed_ws = codes_ws.create_workspace("Seed WS", default_workflow_key="test")
+    seed_ws = codes_ws.create_workspace("Seed WS")
     codes = NodeCodeService(TEST_DATABASE_URL)
     codes.save_draft(seed_ws["id"], "test", "fetch", CUSTOM_V1, "user:u1")
     codes.publish(seed_ws["id"], "test", "fetch")

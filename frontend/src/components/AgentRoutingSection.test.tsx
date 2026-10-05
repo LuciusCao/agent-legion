@@ -13,7 +13,6 @@ const executionConfiguration = {
 
 const settings = {
   entityType: 'video',
-  workflowKey: 'demo_video_workflow',
   resources: {},
 }
 

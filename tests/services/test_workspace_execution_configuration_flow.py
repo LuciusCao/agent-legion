@@ -53,15 +53,13 @@ def test_workspace_execution_configuration_lifecycle(flow_client: TestClient) ->
     # Code-pool nodes accept limits; Agent-routed nodes are deliberately
     # rejected (their concurrency comes from the Agent capacity, P-0.5).
     save_payload = {
-        "settings": {"workflowKey": WORKFLOW_KEY},
+        "settings": {},
         "node_limits": [
             {
-                "workflow_key": WORKFLOW_KEY,
                 "node_key": "intake_knowledge_points",
                 "concurrency_limit": 1,
             },
             {
-                "workflow_key": WORKFLOW_KEY,
                 "node_key": "publish_content",
                 "concurrency_limit": 1,
             },
@@ -77,10 +75,9 @@ def test_workspace_execution_configuration_lifecycle(flow_client: TestClient) ->
     # Reject an Agent-routed node limit without changing any persisted rows.
     bad_payload = {
         "name": "Must Not Change",
-        "settings": {"workflowKey": WORKFLOW_KEY},
+        "settings": {},
         "node_limits": [
             {
-                "workflow_key": WORKFLOW_KEY,
                 "node_key": "write_script",
                 "concurrency_limit": 1,
             },

@@ -38,7 +38,7 @@ def vault_key(monkeypatch):
 @pytest.mark.full_gate
 def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -> None:
     workspace = job_db.create_workspace(
-        "vault-full", default_workflow_key="education_video_problems_generation"
+        "vault-full", workspace_id="education_video_problems_generation"
     )
     workspace_id = str(workspace["id"])
     seed_demo_workspace_node_codes(settings, workspace_id)

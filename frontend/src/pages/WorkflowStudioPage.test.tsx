@@ -46,7 +46,6 @@ vi.mock('../api', () => {
     revision: {
       id: 'ws1:demo_video_workflow:v1',
       workspace_id: 'ws1',
-      workflow_key: 'demo_video_workflow',
       version: 1,
       status: 'active',
       definition_hash: 'abcdef1234567890',
@@ -142,7 +141,6 @@ vi.mock('../api', () => {
       valid: true,
       base_revision: {
         id: activeRevisionPayload.revision.id,
-        workflow_key: activeRevisionPayload.revision.workflow_key,
         version: activeRevisionPayload.revision.version,
         definition_hash: activeRevisionPayload.revision.definition_hash,
       },

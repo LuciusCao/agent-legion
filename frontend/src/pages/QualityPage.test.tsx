@@ -13,7 +13,6 @@ const batch = {
   created_by: 'admin',
   sample_size: 20,
   seed: 'seed-123',
-  workflow_key: 'demo_workflow',
   workspace_id: 'ws1',
   filters: {},
 }

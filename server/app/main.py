@@ -95,7 +95,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # agent templates instantiated seed-if-absent at creation time
     # (WorkflowRevisionService.ensure_active_revision). The workflow catalog
     # is retired (schema v50, #112): a workflow is the DAG inside one
-    # workspace, keyed by workspaces.default_workflow_key as plain text.
+    # workspace, identified by the workspace id (#211 M3).
     # The global skill source registry is retired (#322): skill locations
     # derive from the skills root + key, unpinned node refs follow the repo's
     # live HEAD. Delete the persisted skill_sources document (idempotent

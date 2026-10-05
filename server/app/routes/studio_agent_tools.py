@@ -9,7 +9,7 @@ human-facing routers behind ``reject_studio_agent_scope`` (STUDIO-AGENT-001).
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import (
     require_studio_agent_scope,
@@ -80,49 +80,20 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
             raise_job_http_error(exc)
         return WorkflowDraftCompareResponse.model_validate(result)
 
-    # #211 Phase 2: the {workflow_key} URL segment is a deprecated alias of
-    # the workspace id (equal since schema v62); the handler falls back to
-    # the path workspace_id when it is absent.
-    _deprecated_path = (
-        "Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema "
-        "v62); use /studio-agent/tools/workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31)."
-    )
-
-    def _resolve_key(workspace_id: str, workflow_key: str | None) -> str:
-        """Codex P2 on #299: the deprecated segment (bound as a query param on
-        the segment-free path) must not steer the entity key away from the
-        path workspace id — only its equal value is accepted (v62 invariant).
-        """
-        if workflow_key not in (None, workspace_id):
-            raise HTTPException(
-                status_code=400,
-                detail="workflow_key must equal the workspace id (schema v62)",
-            )
-        return workspace_id
-
     @workspace_scoped.put(
         "/studio-agent/tools/workspaces/{workspace_id}/nodes/{node_key}/code/draft",
         response_model=WorkflowNodeCodeVersionResponse,
-    )
-    @workspace_scoped.put(
-        "/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}"
-        "/nodes/{node_key}/code/draft",
-        response_model=WorkflowNodeCodeVersionResponse,
-        deprecated=True,
-        description=_deprecated_path,
     )
     def save_node_code_draft(
         workspace_id: str,
         node_key: str,
         payload: StudioAgentNodeCodeDraftRequest,
         user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
-        workflow_key: str | None = None,
     ) -> WorkflowNodeCodeVersionResponse:
-        key = _resolve_key(workspace_id, workflow_key)
         try:
             row = _service().save_node_code_draft(
                 workspace_id,
-                key,
+                workspace_id,
                 node_key,
                 payload.code,
                 payload.change_note,
@@ -148,19 +119,9 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         "/studio-agent/tools/workspaces/{workspace_id}/nodes/{node_key}/code",
         response_model=WorkflowNodeCodeResponse,
     )
-    @workspace_scoped.get(
-        "/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}"
-        "/nodes/{node_key}/code",
-        response_model=WorkflowNodeCodeResponse,
-        deprecated=True,
-        description=_deprecated_path,
-    )
-    def get_node_code_state(
-        workspace_id: str, node_key: str, workflow_key: str | None = None
-    ) -> WorkflowNodeCodeResponse:
-        key = _resolve_key(workspace_id, workflow_key)
+    def get_node_code_state(workspace_id: str, node_key: str) -> WorkflowNodeCodeResponse:
         try:
-            state = _service().get_node_code_state(workspace_id, key, node_key)
+            state = _service().get_node_code_state(workspace_id, workspace_id, node_key)
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return WorkflowNodeCodeResponse(**state)

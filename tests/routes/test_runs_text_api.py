@@ -67,7 +67,7 @@ def _insert_ready_material(job_db, workspace_id: str, material_id: str) -> None:
 def _create_run(client, workspace_id: str, items: list[dict]):
     return client.post(
         f"/api/workspaces/{workspace_id}/runs",
-        json={"workflow_key": WORKFLOW_KEY, "items": items},
+        json={"items": items},
     )
 
 

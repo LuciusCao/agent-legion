@@ -133,9 +133,7 @@ def _run_to_completion(worker, queries: JobQueries, job_id: str) -> None:
 def _test_upgrade_then_execute_fresh_bytes(tmp_path: Path, *, mode: str) -> None:
     """反例全生命周期：upgrade（clean 或 inherit 全退化）→ ready/claim/执行。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "wfchain", default_workflow_key="wfchain", workspace_id="wfchain"
-    )
+    workspace = queries.create_workspace("wfchain", workspace_id="wfchain")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(
         workspace["id"], _counterexample("cap_p", "cap_c")

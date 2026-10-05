@@ -191,7 +191,6 @@ describe('agent / node draft extraction', () => {
         title: 'save_node_code_draft',
         status: 'completed',
         rawInput: {
-          workflow_key: 'w',
           node_key: 'assess_difficulty',
           code: 'x',
         },

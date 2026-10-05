@@ -18,7 +18,7 @@ def require_draft_workflow_key_match(
     Compare already rejects a foreign key as a schema error, but publish had no
     such check; close that gap. Unparseable YAML is left to the publish
     validation set (reported as draft errors); a parseable draft whose key does
-    not match the workspace default_workflow_key is rejected with 422.
+    not match the workspace id (the workflow key, #211 M3) is rejected with 422.
     """
     workspace = job_db.get_workspace(workspace_id)
     if workspace is None:
@@ -27,12 +27,9 @@ def require_draft_workflow_key_match(
         draft_key = workflow_definition_from_yaml_string(definition_yaml).key
     except WorkflowDefinitionError:
         return
-    default_key = str(workspace.get("default_workflow_key") or "")
+    default_key = str(workspace["id"])
     # Schema v62: the key is bound at creation (id == key), so the match
-    # guard is unconditional; the empty-key branch only exists for databases
-    # still mid-upgrade to v62.
-    if not default_key:
-        return
+    # guard is unconditional.
     if draft_key != default_key:
         raise DraftWorkflowKeyMismatchError(
             f"Draft workflow key '{draft_key}' does not match "

@@ -146,9 +146,8 @@ describe('WorkflowNodeCodeSection', () => {
   })
 
   it('keys the code URL on the workspace id only', async () => {
-    // workflows/{workflowKey} 路径段已退役（#211）：key 与 workspace id
-    // 恒等，节点代码路由改挂 workspace 下。
-    useSettingStore.getState().setSettings({ workflowKey: 'stale_snapshot' })
+    // workflows/{key} 路径段已退役（#211 M3 删除了旧别名）：key 与
+    // workspace id 恒等，节点代码路由只挂 workspace 下。
     renderSection()
 
     await screen.findByText(/出厂版本/)

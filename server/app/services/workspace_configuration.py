@@ -119,7 +119,6 @@ class WorkspaceConfigurationService:
         try:
             workspace = self.job_db.create_workspace(
                 clean_name,
-                default_workflow_key=workspace_id,
                 default_entity=payload.get("default_entity", "question"),
                 resource_config=payload.get("resource_config", {}),
                 workspace_id=workspace_id,
@@ -137,9 +136,6 @@ class WorkspaceConfigurationService:
 
     def update(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._workspace(workspace_id)
-        # Schema v62: the workflow key (= workspace id) is immutable.
-        if payload.get("default_workflow_key") is not None:
-            raise InvalidOperationError(_WORKFLOW_KEY_IMMUTABLE)
         try:
             return self.job_db.update_workspace(
                 workspace_id,
@@ -185,15 +181,8 @@ class WorkspaceConfigurationService:
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
         current = workspace_settings_payload(workspace)
-        # Schema v62: the workflow key is bound to the workspace id and
-        # immutable. The settings payload still carries workflowKey for
-        # compatibility; a matching value is a no-op round-trip.
-        workflow_key = settings_patch.get("workflowKey") or str(current["workflowKey"])
-        if not workflow_key:
-            raise InvalidOperationError("Workspace workflow is not set")
-        if workflow_key != str(workspace["default_workflow_key"]):
-            raise InvalidOperationError(_WORKFLOW_KEY_IMMUTABLE)
-        workflow = self._definition_for_seed(workspace_id, workflow_key)
+        # Schema v62 / #211 M3: the workspace id is the workflow identifier.
+        workflow = self._definition_for_seed(workspace_id, workspace_id)
         # workflow is None before the first publish; the validator then runs
         # only the definition-independent checks, and publish-time validation
         # enforces node correctness — this unblocks the first-publish
@@ -223,7 +212,6 @@ class WorkspaceConfigurationService:
                 workspace_id,
                 name=name,
                 description=description,
-                default_workflow_key=workflow_key,
                 default_entity=settings_patch.get("entityType") or str(current["entityType"]),
                 resource_config=resource_config,
                 node_limits=node_limits,
@@ -242,12 +230,7 @@ class WorkspaceConfigurationService:
             "workspace": saved_workspace,
             "settings": self._payload(saved_workspace),
             "execution_configuration": {
-                # #211 M2: the limits table lost workflow_key (v70); the
-                # deprecated response field carries the identity value.
-                "node_limits": [
-                    {**limit, "workflow_key": workspace_id}
-                    for limit in self.job_db.get_workspace_node_limits(workspace_id)
-                ],
+                "node_limits": self.job_db.get_workspace_node_limits(workspace_id),
                 "migration_warnings": [],
             },
             "agent_capacity": self.job_db.get_workspace_agent_capacity(workspace_id),
@@ -269,8 +252,7 @@ class WorkspaceConfigurationService:
             # The section stays so legacy clients sending an unchanged key
             # keep working; any change is rejected.
             workflow_key = patch.get("workflowKey")
-            bound_key = str(workspace["default_workflow_key"])
-            if workflow_key is not None and str(workflow_key) != bound_key:
+            if workflow_key is not None and str(workflow_key) != workspace_id:
                 raise InvalidOperationError(_WORKFLOW_KEY_IMMUTABLE)
         elif section == "nodes":
             workspace = update_workspace_node_config(

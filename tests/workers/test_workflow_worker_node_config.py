@@ -75,9 +75,7 @@ def _prepare_job(
     workspace: dict | None = None,
     run_id: str = "",
 ) -> tuple[dict, dict]:
-    ws = workspace or job_db.create_workspace(
-        "Test WS", default_workflow_key="test", workspace_id="test"
-    )
+    ws = workspace or job_db.create_workspace("Test WS", workspace_id="test")
     job = job_db.create_job(
         workflow_key="test",
         source_type="question",
@@ -135,7 +133,7 @@ def test_dispatch_prefers_frozen_batch_node_config(tmp_path: Path) -> None:
     node = _local_node(
         "fetch",
     )
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
     batch = job_db.create_run(
         "test",
         "batch_by_ids",
@@ -181,7 +179,7 @@ def test_dispatch_pads_frozen_batch_with_node_declared_reserved_values(tmp_path:
         config={"timeout_seconds": 900, "sandbox_network": True},
         outputs=["output.json"],
     )
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
     batch = job_db.create_run(
         "test",
         "batch_by_ids",

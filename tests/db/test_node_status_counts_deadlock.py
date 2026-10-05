@@ -114,8 +114,8 @@ def _seed(workspace: str, nodes: dict[str, str], requests: tuple[str, ...] = ())
     """One job per node id (all on node_key ``review``), status as given."""
     with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as seed:
         seed.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, %s)",
-            (workspace, workspace, workspace),
+            "insert into workspaces(id, name) values (%s, %s)",
+            (workspace, workspace),
         )
         for job_id, status in nodes.items():
             seed.execute(

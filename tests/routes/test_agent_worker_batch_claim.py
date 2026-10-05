@@ -30,7 +30,6 @@ _SINGLE_CLAIM_KEYS = {
     "lease_id",
     "workspace_id",
     "job_id",
-    "workflow_key",
     "node_key",
     "agent_id",
     "kind",

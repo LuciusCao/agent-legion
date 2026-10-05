@@ -83,7 +83,7 @@ def _accept_all_item_types(job_db, workspace_id: str) -> None:
 def _create_run(client, workspace_id: str, items: list[dict]):
     return client.post(
         f"/api/workspaces/{workspace_id}/runs",
-        json={"workflow_key": WORKFLOW_KEY, "items": items},
+        json={"items": items},
     )
 
 
@@ -94,7 +94,7 @@ def test_runs_require_auth(anon_client) -> None:
     assert (
         anon_client.post(
             url,
-            json={"workflow_key": "wf", "items": [{"type": "material", "material_id": "m"}]},
+            json={"items": [{"type": "material", "material_id": "m"}]},
         ).status_code
         == 401
     )
@@ -116,7 +116,7 @@ def test_non_member_gets_404(client, job_db) -> None:
     assert member.get(f"/api/workspaces/{workspace_id}/runs/run-1").status_code == 404
     response = member.post(
         f"/api/workspaces/{workspace_id}/runs",
-        json={"workflow_key": WORKFLOW_KEY, "items": [{"type": "material", "material_id": "m"}]},
+        json={"items": [{"type": "material", "material_id": "m"}]},
     )
     assert response.status_code == 404
 
@@ -183,8 +183,9 @@ def test_run_detail_is_workspace_scoped(client, job_db) -> None:
     assert client.get(f"/api/workspaces/{workspace_id}/runs/missing").status_code == 404
 
 
-def test_create_run_without_workflow_key_defaults_to_workspace_id(client, job_db) -> None:
-    """#211 Phase 2 第二批：缺省 workflow_key 由服务端从 path 推导。"""
+def test_create_run_response_carries_no_workflow_key(client, job_db) -> None:
+    """#211 M3: the request needs no key (the path workspace id is the
+    workflow) and the run record no longer echoes one."""
     workspace_id = _create_workspace(client)
     _insert_material(job_db, workspace_id, "mat-default")
 
@@ -195,12 +196,15 @@ def test_create_run_without_workflow_key_defaults_to_workspace_id(client, job_db
 
     assert response.status_code == 200, response.text
     run = response.json()["run"]
-    assert run["workflow_key"] == workspace_id
+    assert run["workspace_id"] == workspace_id
+    assert "workflow_key" not in run
     assert response.json()["created_count"] == 1
 
 
-def test_create_run_with_explicit_workflow_key_still_accepted(client, job_db) -> None:
-    """兼容窗口：显式传 workflow_key（=workspace id）照旧工作。"""
+def test_create_run_rejects_retired_workflow_key(client, job_db) -> None:
+    """#211 M3: workflow_key left the request contract; RunCreateRequest is
+    extra=forbid, so a client still sending it gets 422 (upgrade note in
+    CHANGELOG: migrate scripts to the path workspace id)."""
     workspace_id = _create_workspace(client)
     _insert_material(job_db, workspace_id, "mat-explicit")
 
@@ -212,8 +216,7 @@ def test_create_run_with_explicit_workflow_key_still_accepted(client, job_db) ->
         },
     )
 
-    assert response.status_code == 200, response.text
-    assert response.json()["run"]["workflow_key"] == workspace_id
+    assert response.status_code == 422, response.text
 
 
 def test_material_validation_errors(client, job_db) -> None:
@@ -254,7 +257,7 @@ def test_ref_validation_errors(client, job_db) -> None:
     assert response.status_code == 422
     response = client.post(
         f"/api/workspaces/{workspace_id}/runs",
-        json={"workflow_key": WORKFLOW_KEY, "items": []},
+        json={"items": []},
     )
     assert response.status_code == 422
 
@@ -301,30 +304,6 @@ def test_item_type_rejected_by_start_contract(client, job_db) -> None:
     assert response.status_code == 400
     assert "not accepted by this workflow" in response.json()["detail"]
     assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []
-
-
-def test_create_run_rejects_mismatched_workflow_key(client, job_db, settings):
-    """Codex P1 on #307: a mismatched explicit key would otherwise flow
-    verbatim into runs/jobs rows (violating the v62 binding) — the route
-    rejects it before the service call."""
-    from server.app.services.workflow_revisions import WorkflowRevisionService
-    from tests.helpers import load_builtin_definition
-
-    job_db.create_workspace("ws-run-key", default_workflow_key="ws-run-key")
-    WorkflowRevisionService(job_db).ensure_active_revision(
-        "ws-run-key", load_builtin_definition("education_video_problems_generation")
-    )
-
-    response = client.post(
-        "/api/workspaces/ws-run-key/runs",
-        json={
-            "workflow_key": "other_flow",
-            "items": [{"type": "ref", "connection_key": "c", "external_id": "e1"}],
-        },
-    )
-
-    assert response.status_code == 400, response.text
-    assert "workflow_key must equal the workspace id" in response.json()["detail"]
 
 
 def test_create_run_rejects_items_over_limit(client, job_db, monkeypatch) -> None:

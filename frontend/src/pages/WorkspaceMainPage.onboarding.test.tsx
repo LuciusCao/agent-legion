@@ -87,7 +87,6 @@ async function loadJobsViaSSE() {
 const baseStats: WorkspaceStats = {
   workspace_id: 'ws1',
   name: 'WS One',
-  workflow_key: 'question_content',
   workflow_label: 'Question Content',
   job_stats: { pending: 0, running: 0, completed: 0, failed: 0 },
   code_pool: { capacity: 16, running: 0, available: 16 },
@@ -223,13 +222,11 @@ describe('WorkspaceMainPage onboarding guide', () => {
       workspaceDescription: '',
       settings: {
         entityType: 'question',
-        workflowKey: '',
       },
       originalWorkspaceName: 'WS One',
       originalWorkspaceDescription: '',
       originalSettings: {
         entityType: 'question',
-        workflowKey: '',
       },
       isDirty: false,
       isSaving: false,
@@ -251,7 +248,6 @@ describe('WorkspaceMainPage onboarding guide', () => {
   it('guides through Studio as step 1 for a workspace without a published workflow', async () => {
     mockFetchWorkspaceStats.mockResolvedValue({
       ...baseStats,
-      workflow_key: null,
       workflow_label: null,
     } as unknown as WorkspaceStats)
     mockFetchWorkflowDefinition.mockResolvedValue({ workflow: null })

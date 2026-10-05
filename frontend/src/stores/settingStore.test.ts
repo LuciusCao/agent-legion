@@ -31,7 +31,6 @@ const defaultSettings: WorkspaceSettings = {
 const initialExecutionConfiguration: WorkspaceExecutionConfiguration = {
   node_limits: [
     {
-      workflow_key: 'question_content',
       node_key: 'ingest',
       concurrency_limit: 1,
     },
@@ -146,7 +145,7 @@ describe('settingStore', () => {
       originalSettings: defaultSettings,
       originalExecutionConfiguration: initialExecutionConfiguration,
     })
-    useSettingStore.getState().setNodeLimit('question_content', 'ingest', 3)
+    useSettingStore.getState().setNodeLimit('ingest', 3)
     expect(useSettingStore.getState().isDirty).toBe(true)
   })
 
@@ -160,9 +159,6 @@ describe('settingStore', () => {
       workspaceDescription: 'A workspace',
       settings: {
         entityType: 'knowledge' as const,
-        // 服务端快照仍下发 workflowKey（deprecated 兼容期），但 PUT
-        // 载荷已停发——快照携带仅用于水合，不再参与保存。
-        workflowKey: 'knowledge_content',
       },
       executionConfiguration: {
         node_limits: [],
@@ -257,12 +253,10 @@ describe('settingStore', () => {
       workspace: { name: 'Test', description: 'Desc' },
       settings: {
         ...defaultSettings,
-        workflowKey: 'question_content',
       },
       execution_configuration: {
         node_limits: [
           {
-            workflow_key: 'question_content',
             node_key: 'ingest',
             concurrency_limit: 2,
           },
@@ -278,13 +272,11 @@ describe('settingStore', () => {
       originalSettings: defaultSettings,
       settings: {
         ...defaultSettings,
-        workflowKey: 'question_content',
       },
       originalExecutionConfiguration: emptyExecutionConfiguration,
       executionConfiguration: {
         node_limits: [
           {
-            workflow_key: 'question_content',
             node_key: 'ingest',
             concurrency_limit: 2,
           },
@@ -308,7 +300,6 @@ describe('settingStore', () => {
       description: 'Desc',
       node_limits: [
         {
-          workflow_key: 'question_content',
           node_key: 'ingest',
           concurrency_limit: 2,
         },
@@ -320,15 +311,15 @@ describe('settingStore', () => {
   })
 
   it('saveAll PUT payload stops carrying workflowKey (#211 Phase 2)', async () => {
-    // settings blob 的 workflowKey 已停发：即使 store 快照里仍带着
-    // 服务端下发的值（deprecated 兼容期），PUT 载荷也不得回传。
+    // settings blob 的 workflowKey 已随 #211 M3 从契约退役（后端
+    // extra=forbid 会 422），PUT 载荷不得携带。
     mockApi.mockResolvedValue({
       workspace: { name: 'Test', description: '' },
-      settings: { ...defaultSettings, workflowKey: 'question_content' },
+      settings: { ...defaultSettings },
       execution_configuration: emptyExecutionConfiguration,
     })
     useSettingStore.setState({
-      settings: { ...defaultSettings, workflowKey: 'question_content' },
+      settings: { ...defaultSettings },
     })
 
     await useSettingStore.getState().saveAll()
@@ -351,7 +342,6 @@ describe('settingStore', () => {
       workspace: { name: 'Saved', description: 'Saved Desc' },
       settings: {
         ...defaultSettings,
-        workflowKey: 'question_content',
       },
       execution_configuration: responseConfiguration,
     })
@@ -363,7 +353,6 @@ describe('settingStore', () => {
       originalSettings: defaultSettings,
       settings: {
         ...defaultSettings,
-        workflowKey: 'question_content',
       },
       originalExecutionConfiguration: emptyExecutionConfiguration,
       executionConfiguration: emptyExecutionConfiguration,
@@ -425,12 +414,10 @@ describe('settingStore', () => {
       originalSettings: defaultSettings,
       originalExecutionConfiguration: initialExecutionConfiguration,
     })
-    useSettingStore.getState().setNodeLimit('question_content', 'ingest', 3)
+    useSettingStore.getState().setNodeLimit('ingest', 3)
     const limit = useSettingStore
       .getState()
-      .executionConfiguration.node_limits.find(
-        (l) => l.workflow_key === 'question_content' && l.node_key === 'ingest'
-      )
+      .executionConfiguration.node_limits.find((l) => l.node_key === 'ingest')
     expect(limit?.concurrency_limit).toBe(3)
   })
 
@@ -439,14 +426,11 @@ describe('settingStore', () => {
       originalSettings: defaultSettings,
       originalExecutionConfiguration: initialExecutionConfiguration,
     })
-    useSettingStore.getState().setNodeLimit('question_content', 'ingest', null)
+    useSettingStore.getState().setNodeLimit('ingest', null)
     expect(
       useSettingStore
         .getState()
-        .executionConfiguration.node_limits.some(
-          (l) =>
-            l.workflow_key === 'question_content' && l.node_key === 'ingest'
-        )
+        .executionConfiguration.node_limits.some((l) => l.node_key === 'ingest')
     ).toBe(false)
   })
 })

@@ -242,10 +242,8 @@ server/app/
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/workflow/validate` | `validate_workflow` | routes/studio_agent_tools.py |
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/workflow/compare` | `compare_workflow` | routes/studio_agent_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/nodes/{node_key}/code/draft` | `save_node_code_draft` | routes/studio_agent_tools.py |
-| PUT | `/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft` | `save_node_code_draft` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/workflow/active` | `get_active_revision` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/nodes/{node_key}/code` | `get_node_code_state` | routes/studio_agent_tools.py |
-| GET | `/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code_state` | routes/studio_agent_tools.py |
 | GET | `/admin/studio-agents` | `get_studio_agents` | routes/studio_agents_admin.py |
 | PUT | `/admin/studio-agents` | `put_studio_agents` | routes/studio_agents_admin.py |
 | POST | `/admin/studio-agents/redetect` | `redetect_studio_agents` | routes/studio_agents_admin.py |
@@ -285,19 +283,12 @@ server/app/
 | GET | `/workspaces/{workspace_id}/workflow-draft` | `get_draft` | routes/workflow_draft_store.py |
 | PUT | `/workspaces/{workspace_id}/workflow-draft` | `put_draft` | routes/workflow_draft_store.py |
 | GET | `/workspaces/{workspace_id}/nodes/{node_key}/code` | `get_node_code` | routes/workflow_node_codes.py |
-| GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code` | routes/workflow_node_codes.py |
 | PUT | `/workspaces/{workspace_id}/nodes/{node_key}/code` | `save_node_code_draft` | routes/workflow_node_codes.py |
-| PUT | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `save_node_code_draft` | routes/workflow_node_codes.py |
 | POST | `/workspaces/{workspace_id}/nodes/{node_key}/code/publish` | `publish_node_code` | routes/workflow_node_codes.py |
-| POST | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/publish` | `publish_node_code` | routes/workflow_node_codes.py |
 | GET | `/workspaces/{workspace_id}/nodes/{node_key}/code/versions` | `list_node_code_versions` | routes/workflow_node_codes.py |
-| GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/versions` | `list_node_code_versions` | routes/workflow_node_codes.py |
 | GET | `/workspaces/{workspace_id}/nodes/{node_key}/code/versions/{version}` | `get_node_code_version` | routes/workflow_node_codes.py |
-| GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/versions/{version}` | `get_node_code_version` | routes/workflow_node_codes.py |
 | POST | `/workspaces/{workspace_id}/nodes/{node_key}/code/rollback` | `rollback_node_code` | routes/workflow_node_codes.py |
-| POST | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/rollback` | `rollback_node_code` | routes/workflow_node_codes.py |
 | DELETE | `/workspaces/{workspace_id}/nodes/{node_key}/code` | `archive_node_code` | routes/workflow_node_codes.py |
-| DELETE | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `archive_node_code` | routes/workflow_node_codes.py |
 | GET | `/workflow-node-code-template` | `get_node_code_template` | routes/workflow_node_codes.py |
 | POST | `/workspaces/{workspace_id}/workflow/node-prompt-preview` | `preview_node_prompt_route` | routes/workflow_node_prompt_route.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions` | `list_workflow_revisions` | routes/workflow_revisions.py |
@@ -361,7 +352,7 @@ server/app/
 | RuntimeTools | BaseModel | tools: list[RuntimeToolEntry] | app/routes/agent_runtimes_contracts.py |
 | AgentRuntimesResponse | BaseModel | runtimes: dict[str, RuntimeTools] | app/routes/agent_runtimes_contracts.py |
 | ClaimAgentExecutionRequest | BaseModel | worker_id: str, max_concurrency: int | None, max_code_concurrency: int | None... | app/routes/agent_worker_claim_contracts.py |
-| AgentClaimResponse | BaseModel | execution_id: str, lease_id: str, workspace_id: str, job_id: str, workflow_ke... | app/routes/agent_worker_claim_contracts.py |
+| AgentClaimResponse | BaseModel | execution_id: str, lease_id: str, workspace_id: str, job_id: str, node_key: s... | app/routes/agent_worker_claim_contracts.py |
 | BatchAgentClaimResponse | BaseModel | claims: list[AgentClaimResponse] | app/routes/agent_worker_claim_contracts.py |
 | BatchHeartbeatItem | BaseModel | execution_id: str, lease_id: str | app/routes/agent_worker_heartbeat_batch.py |
 | BatchHeartbeatRequest | BaseModel | executions: list[BatchHeartbeatItem] | app/routes/agent_worker_heartbeat_batch.py |
@@ -408,7 +399,7 @@ server/app/
 | ExternalJobStatusResponse | BaseModel | job_id: str, workspace_id: str, status: str, outcome: str, created_at: dateti... | app/routes/external_artifact_contracts.py |
 | ExternalArtifactEntry | BaseModel | name: str, storage: str, node_key: str, size_bytes: int | None, content_hash:... | app/routes/external_artifact_contracts.py |
 | ExternalArtifactListResponse | BaseModel | job_id: str, workspace_id: str, status: str, artifacts: list[ExternalArtifact... | app/routes/external_artifact_contracts.py |
-| FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
+| FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, failure_category: str, failure_... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
 | DatabaseConnectionView | BaseModel | engine: str, host: str, port: int | None, name: str, user: str, password_set:... | app/routes/infra_connections_contracts.py |
 | StorageConnectionView | BaseModel | configured: bool, backend: str, endpoint_url: str, public_endpoint_url: str, ... | app/routes/infra_connections_contracts.py |
@@ -430,7 +421,7 @@ server/app/
 | JobFilterPayload | BaseModel | status: str | None, search: str | None, workflow_version: int | None, workflo... | app/routes/job_batch_filter_contracts.py |
 | JobSelectionMixin | BaseModel | job_ids: list[str] | None, filter: JobFilterPayload | None, exclude_ids: list... | app/routes/job_batch_filter_contracts.py |
 | JobClientTokenFields | BaseModel | client_token: str | None, source_base_id: str | None | app/routes/job_client_token_contracts.py |
-| JobBatchRequest | BaseModel | workflow_key: str | None, entity: str | None, source_kind: str, question_ids:... | app/routes/job_contracts.py |
+| JobBatchRequest | BaseModel | entity: str | None, source_kind: str, question_ids: list[str], knowledge_code... | app/routes/job_contracts.py |
 | JobBatchResponse | BaseModel | batch: dict[str, Any], created_count: int, jobs: list[dict[str, Any]] | app/routes/job_contracts.py |
 | WorkspaceCreateRequest | BaseModel | id: str, name: str, default_entity: str, resource_config: dict[str, Any] | app/routes/job_contracts.py |
 | WorkspaceUpdateRequest | BaseModel | name: str | None, description: str | None, default_entity: str | None, resour... | app/routes/job_contracts.py |
@@ -443,7 +434,7 @@ server/app/
 | WorkspaceRunsResponse | BaseModel | runs: list[NodeRunResponse] | app/routes/job_contracts.py |
 | WorkspaceDagResponse | BaseModel | workflow: dict[str, Any], nodes: list[dict[str, Any]] | app/routes/job_contracts.py |
 | CodePoolStatus | BaseModel | capacity: int, running: int, available: int | app/routes/job_contracts.py |
-| WorkspaceStatsResponse | BaseModel | workspace_id: str, name: str, workflow_key: str, workflow_label: str, job_sta... | app/routes/job_contracts.py |
+| WorkspaceStatsResponse | BaseModel | workspace_id: str, name: str, workflow_label: str, job_stats: dict[str, int],... | app/routes/job_contracts.py |
 | DeleteWorkspaceResponse | BaseModel | deleted: str | app/routes/job_contracts.py |
 | ExecutionControlSummaryResponse | BaseModel | mode: Literal['full', 'until_node'], target_node_key: str | None, paused: boo... | app/routes/job_execution_control_contracts.py |
 | JobsPageResponse | BaseModel | workspace_id: str, revision: int, total: int | None, stats: dict[str, int], j... | app/routes/job_list_contracts.py |
@@ -460,7 +451,7 @@ server/app/
 | StressEventBatchRequest | BaseModel | events: list[StressEventRecord] | app/routes/job_stress_events.py |
 | StressEventBatchResponse | BaseModel | recorded: int, recorded_at: float | app/routes/job_stress_events.py |
 | JobNodeSummaryResponse | BaseModel | node_key: str, label: str, status: str, error_message: str | app/routes/job_view_contracts.py |
-| JobSummaryResponse | BaseModel | id: str, workspace_id: str, workflow_key: str, source_type: str, source_id: s... | app/routes/job_view_contracts.py |
+| JobSummaryResponse | BaseModel | id: str, workspace_id: str, source_type: str, source_id: str, batch_id: str, ... | app/routes/job_view_contracts.py |
 | JobsResponse | BaseModel | jobs: list[JobSummaryResponse], truncated: bool | app/routes/job_view_contracts.py |
 | HydrationDeferResponse | BaseModel | inputs: list[str], reasons: list[str], rerun_nodes: list[str] | app/routes/job_view_contracts.py |
 | JobNodeResponse | BaseModel | id: int, job_id: str, node_key: str, status: str, stale_reason: str, error_me... | app/routes/job_view_contracts.py |
@@ -497,8 +488,8 @@ server/app/
 | WorkspacePackageDeleteResponse | BaseModel | deleted: bool | app/routes/package_history_contracts.py |
 | WorkspacePackageUpdateResponse | BaseModel | id: int, name: str | None, locked: bool | None | app/routes/package_history_contracts.py |
 | QualitySampleFilters | BaseModel | node_keys: list[str] | None, statuses: list[str] | None, since: datetime | No... | app/routes/quality_contracts.py |
-| QualitySampleBatchCreateRequest | BaseModel | name: str, workflow_key: str | None, filters: QualitySampleFilters, sample_si... | app/routes/quality_contracts.py |
-| QualitySampleBatch | BaseModel | id: str, workspace_id: str, name: str, workflow_key: str, filters: dict[str, ... | app/routes/quality_contracts.py |
+| QualitySampleBatchCreateRequest | BaseModel | name: str, filters: QualitySampleFilters, sample_size: int, seed: str | None | app/routes/quality_contracts.py |
+| QualitySampleBatch | BaseModel | id: str, workspace_id: str, name: str, filters: dict[str, Any], sample_size: ... | app/routes/quality_contracts.py |
 | QualitySampleBatchListResponse | BaseModel | batches: list[QualitySampleBatch] | app/routes/quality_contracts.py |
 | QualityLabel | BaseModel | id: str, item_id: str, target: str, verdict: str, reason_codes: list[str], no... | app/routes/quality_contracts.py |
 | QualitySampleItem | BaseModel | id: str, batch_id: str, node_run_id: int, job_id: str, node_key: str, capabil... | app/routes/quality_contracts.py |
@@ -515,8 +506,8 @@ server/app/
 | QualityConfusionMatrix | BaseModel | tp: int, fp: int, fn: int, tn: int, precision: float | None, recall: float | ... | app/routes/quality_contracts.py |
 | QualityStatsGroup | BaseModel | node_key: str, skill_version: str, provider: str, model: str, runs: int, succ... | app/routes/quality_contracts.py |
 | QualityBatchStatsResponse | BaseModel | batch_id: str, groups: list[QualityStatsGroup] | app/routes/quality_contracts.py |
-| RunCreateRequest | BaseModel | workflow_key: str | None, items: list[RunItem] | app/routes/run_contracts.py |
-| RunRecord | BaseModel | id: str, workspace_id: str, workflow_key: str, source_kind: str, status: str,... | app/routes/run_contracts.py |
+| RunCreateRequest | BaseModel | items: list[RunItem] | app/routes/run_contracts.py |
+| RunRecord | BaseModel | id: str, workspace_id: str, source_kind: str, status: str, created_count: int... | app/routes/run_contracts.py |
 | RunCreateResponse | BaseModel | run: RunRecord, created_count: int, job_ids: list[str] | app/routes/run_contracts.py |
 | RunListResponse | BaseModel | runs: list[RunRecord] | app/routes/run_contracts.py |
 | RunJobStats | BaseModel | total: int, by_status: dict[str, int] | app/routes/run_contracts.py |
@@ -627,7 +618,7 @@ server/app/
 | WorkflowResponse | BaseModel | workflow: WorkflowDefinitionResponse | app/routes/workflow_contracts.py |
 | WorkflowDraftCompareRequest | BaseModel | definition_yaml: str, allow_missing_baseline: bool | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowDraftCompareError | BaseModel | category: str, message: str, line: int | None, column: int | None, node_key: ... | app/routes/workflow_draft_compare_contracts.py |
-| WorkflowRevisionSummaryItem | BaseModel | id: str, version: int, workspace_id: str, workflow_key: str, definition_hash:... | app/routes/workflow_draft_compare_contracts.py |
+| WorkflowRevisionSummaryItem | BaseModel | id: str, version: int, workspace_id: str, definition_hash: str | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowDraftSummaryItem | BaseModel | key: str, label: str, version: int | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowNodeChange | BaseModel | type: WorkflowChangeType, node_key: str, label: str, node_type: Literal['star... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowEdgeChange | BaseModel | type: WorkflowEdgeChangeType, source: str, target: str, before_condition: str... | app/routes/workflow_draft_compare_contracts.py |
@@ -656,7 +647,7 @@ server/app/
 | NodePromptPreviewResponse | BaseModel | effective_prompt: str, platform_prompt: str, default_instructions: str, custo... | app/routes/workflow_node_prompt_contracts.py |
 | NodePromptSaveRequest | BaseModel | node_key: str, prompt: str, prompt_mode: Literal['append', 'overwrite'] | None | app/routes/workflow_node_prompt_contracts.py |
 | NodePromptSaveResponse | BaseModel | node_key: str, is_default: bool, prompt_mode: str, definition_yaml: str, upda... | app/routes/workflow_node_prompt_contracts.py |
-| WorkflowRevisionSummary | BaseModel | id: str, workspace_id: str, workflow_key: str, version: int, status: str, def... | app/routes/workflow_revisions_contracts.py |
+| WorkflowRevisionSummary | BaseModel | id: str, workspace_id: str, version: int, status: str, definition_hash: str, ... | app/routes/workflow_revisions_contracts.py |
 | WorkflowRevisionsResponse | BaseModel | revisions: list[WorkflowRevisionSummary] | app/routes/workflow_revisions_contracts.py |
 | WorkflowDraftRequest | BaseModel | definition_yaml: str | app/routes/workflow_revisions_contracts.py |
 | WorkflowDraftValidationResponse | BaseModel | valid: bool, errors: list[str] | app/routes/workflow_revisions_contracts.py |
@@ -668,13 +659,13 @@ server/app/
 | ApiTokenRateLimit | BaseModel | requests_per_minute: int, burst: int | app/routes/workspace_api_token_contracts.py |
 | WorkspaceApiTokensResponse | BaseModel | tokens: list[WorkspaceApiTokenSummary], rate_limit: ApiTokenRateLimit | app/routes/workspace_api_token_contracts.py |
 | WorkspaceApiTokenRevokeResponse | BaseModel | token_id: str, revoked: bool | app/routes/workspace_api_token_contracts.py |
-| WorkspaceRecord | BaseModel | id: str, name: str, description: str, default_workflow_key: str, default_enti... | app/routes/workspace_contracts.py |
-| NodeLimitRequest | BaseModel | workflow_key: str, node_key: str, concurrency_limit: int | app/routes/workspace_execution_contracts.py |
+| WorkspaceRecord | BaseModel | id: str, name: str, description: str, default_entity: str, resource_config_js... | app/routes/workspace_contracts.py |
+| NodeLimitRequest | BaseModel | node_key: str, concurrency_limit: int | app/routes/workspace_execution_contracts.py |
 | WorkspaceExecutionConfigurationResponse | BaseModel | node_limits: list[NodeLimitEntry], migration_warnings: list[str], agent_capac... | app/routes/workspace_execution_contracts.py |
-| WorkspaceAgentRouteEntry | BaseModel | workflow_key: str, node_key: str, node_label: str, capability: str, agent_id:... | app/routes/workspace_execution_contracts.py |
+| WorkspaceAgentRouteEntry | BaseModel | node_key: str, node_label: str, capability: str, agent_id: str, agent_skill: ... | app/routes/workspace_execution_contracts.py |
 | WorkspaceAgentRoutesResponse | BaseModel | routes: list[WorkspaceAgentRouteEntry] | app/routes/workspace_execution_contracts.py |
-| WorkspaceSettingsPayload | BaseModel | entityType: str, workflowKey: str | None, previewHidden: list[str] | app/routes/workspace_execution_contracts.py |
-| WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, workflowKey: str | None, previewHidden: list[str] | N... | app/routes/workspace_execution_contracts.py |
+| WorkspaceSettingsPayload | BaseModel | entityType: str, previewHidden: list[str] | app/routes/workspace_execution_contracts.py |
+| WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, previewHidden: list[str] | None | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationResponse | BaseModel | workspace: WorkspaceRecord, settings: WorkspaceSettingsPayload, execution_con... | app/routes/workspace_execution_contracts.py |
 | WorkspaceRuntimeModelsResponse | BaseModel | runtimes: dict[str, dict[str, list[str]]] | app/routes/workspace_runtime_models.py |
@@ -862,7 +853,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 
 - 三层：L0 平台默认（agent 1800s / code 600s）；L1 job 所钉 revision 的节点 `config.timeout_seconds`（对该 job 不可变）；L2 workspace 覆盖——唯一可变层。
 - 不可变部分在入队时冻结：远程请求的 manifest 携带 `timeout_base = {value, source} = resolve(L0, L1)`，claim 计算超时不需要读 revision 文档。base 只是中间值，不是判定。
-- 每次执行只有**一个判定点**：本地 code 池 = Host dispatch；远程 agent/code = Worker claim（候选选取时的快照，写事务沿用、不重读、不加锁）。所有路径共用同一个纯函数 `effective = resolve_timeout(base, L2)`；判定后值固定，审计记录的恰好是判定的值与来源。claim 扫描在 SQL 里把 L2 投影成标量（`workspaces.node_config_json` 按 workspace 解析一次，键为 `default_workflow_key`，即 manifest 的 `workflow_key`），整份文档不进候选行。
+- 每次执行只有**一个判定点**：本地 code 池 = Host dispatch；远程 agent/code = Worker claim（候选选取时的快照，写事务沿用、不重读、不加锁）。所有路径共用同一个纯函数 `effective = resolve_timeout(base, L2)`；判定后值固定，审计记录的恰好是判定的值与来源。claim 扫描在 SQL 里把 L2 投影成标量（`workspaces.node_config_json` 按 workspace 解析一次，键为 workspace id，即 manifest 的 `workflow_key`），整份文档不进候选行。
 - L2 非法（合法 = 非 bool 的整数且 >= 1，与保留 schema 一致）时，**所有路径**都回落到 base，审计来源记为 `workspace_override_invalid`，并打一条结构化 warning（node key、workspace、原始值；同一组合只打一次）。任何路径都不再因非法超时覆盖让节点失败（#691 之前 dispatch 会让节点失败），intake 冻结同样忽略非法超时覆盖。
 - 旧 Host 入队、manifest 里没有 `timeout_base` 的请求：以入队时的值为 base，来源 `enqueue_snapshot`。
 - 审计：每次执行在 `node_runs.config_snapshot_json` 的 `_config_resolution` 元键下记录判定结果，远程请求在 claim 下发的 manifest 里另带同形的 `config_resolution` 键，形如 `{"timeout_seconds": {"value", "source"}}`，来源取 `platform_default` / `node_config` / `workspace_override` / `workspace_override_invalid` / `enqueue_snapshot`。
@@ -873,7 +864,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 ## Database
 
 - PostgreSQL 服务 Agent Legion workflow 与平台状态（当前版本见 `server/app/db/schema.py` 的 `SCHEMA_VERSION`）：
-  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`（schema v62 起 = workspace id，deprecated，见 DB-WORKSPACE-KEY-BINDING-001）, `node_config_json`, `default_entity`, `preview_config_json`（v63，产物预览隐藏列表 `{"hidden": [...]}`，见 Job Detail 预览段）；`intake_config_json` 与 `default_agent_*` 三列已随 schema v64 退役 drop）。`node_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（见下文 Secrets Vault）；旧 `resource_config_json`（resource binding）已在 v24 迁移为节点覆盖并清空
+  - `workspaces` — Agent Legion workspace 定义（含 `node_config_json`（按 workflow 标识即 workspace id 分区；独立的 key 列已随 schema v91 退役，见 DB-WORKSPACE-KEY-BINDING-001）, `default_entity`, `preview_config_json`（v63，产物预览隐藏列表 `{"hidden": [...]}`，见 Job Detail 预览段）；`intake_config_json` 与 `default_agent_*` 三列已随 schema v64 退役 drop）。`node_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（见下文 Secrets Vault）；旧 `resource_config_json`（resource binding）已在 v24 迁移为节点覆盖并清空
   - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
   - `external_connections` / `instance_secrets` / `connection_tokens` — 实例级外部服务连接：连接只存非敏感配置，敏感字段 Fernet 加密入 `instance_secrets`（`conn:<key>:<field>` 引用），鉴权 token 加密缓存在 `connection_tokens`（v34 新增，见下文外部服务连接段）
   - `runs`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表（`job_batches` 已随 schema v53 drop，由 `runs` 取代）
@@ -971,7 +962,7 @@ Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 sc
 其他配置文件：
 
 - Agent skill 是 skill root（`~/.agents/skills`，单一来源 `server/app/skills/skill_roots.py`）下的本地 in-place git 仓库（唯一模式，#322 起全局 skill_sources 注册表、远程 clone 通道与缓存缺失 re-clone 自愈均已退役；缓存缺失即报错并指引在 skill root 下创建）。节点 `skill.ref`：`latest`（空 ref 归一为它）= 跟随仓库 HEAD，每次 dispatch 现场解析、永不入锁；具体 tag = 首次 dispatch 把解析的 commit 冻结进 DB `global_settings` 的 `skill_lock` 文档（v2 多值：per-skill `{repo, refs: {ref → commit}}`，`repo` 仅审计），CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）遍历锁内已有条目重解析 pinned refs。启动一次性迁移 `server/app/skills/skill_sources_retirement.py` 幂等删除残留的 `skill_sources` 文档（保留 `skill_lock`）；tracked `config/skills.yaml` / `config/skills.lock` 早已退役。
-- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；schema v62 起创建 workspace 不再种子模板，demo workspace 由 `make import-demo`（`scripts/seed_demo.py`）提供，其 id 与 key 同为 `education_video_problems_generation`。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）。schema v62（DB-WORKSPACE-KEY-BINDING-001）起 workspace id 与 `workspaces.default_workflow_key` 是同一个标识：创建时显式填写、终身不可变（PATCH / PUT configuration 改 key 一律 400，发布草稿 key 不匹配 422）；v62 迁移把存量 workspace 的 id 改成已绑定的 key（key 为空的按 id 回填），`default_workflow_key` 作为独立概念已标 deprecated（退役评估 issue 待开）。
+- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；schema v62 起创建 workspace 不再种子模板，demo workspace 由 `make import-demo`（`scripts/seed_demo.py`）提供，其 id 与 key 同为 `education_video_problems_generation`。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）。schema v62（DB-WORKSPACE-KEY-BINDING-001）起 workspace id 即 workflow key：创建时显式填写、终身不可变（发布/对比草稿 key 与 id 不符即拒绝）；v62 迁移把存量 workspace 的 id 改成已绑定的 key，#211 M3（schema v91）删除了独立的 key 列，契约面的 `workflow_key` 字段、`workflows/{key}` 路径别名与不匹配守卫一并移除。
 - worker 配置：`config/agent-worker.example.yaml` 已随 #323 退役；worker 唯一生效配置是状态副本 `data/agent-worker-service/worker.yaml`（控制台/API 驱动，Worker 侧独立加载，不经 server 的 owned-key 校验），docker/远程部署的可选 bootstrap 模板见 `deploy/worker.host.example.yaml` / `deploy/worker.remote.example.yaml`。
 - `config/architecture/*`：架构不变量、豁免、源文件体积预算。
 

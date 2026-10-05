@@ -206,7 +206,7 @@ def _names(queries: JobQueries, job_id: str) -> set[tuple[str, str]]:
 @pytest.mark.parametrize("path", ["rerun", "run_to", "upgrade"])
 def test_retire_deletes_same_name_rows_outside_reset_face(tmp_path: Path, path: str) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("wfchain", default_workflow_key="wfchain")
+    workspace = queries.create_workspace("wfchain")
     job_id = _chain_job(queries, workspace)
     key = f"jobs/{workspace['id']}/{job_id}/{SHARED}"
     # (gone, shared.json)：已不在定义里的遗留行；(k, k_out.json)：无关名不受波及。

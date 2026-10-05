@@ -35,8 +35,8 @@ export function saveActions(set: SettingStoreSet, get: () => SettingState) {
               // 契约是 extra=forbid：GET /settings 返回的 nodeConfig/
               // nodeConfigSchemas 等服务端附加键不在 PUT 白名单里（各有
               // 自己的 PATCH section），全量回传会 422。
-              // workflowKey 已停发（#211 Phase 2 第二批）：key 与
-              // workspace id 恒等且不可变，PUT 缺省=沿用已存。
+              // workflowKey 已随 #211 M3 从契约退役（key 即 workspace
+              // id），回传会被 extra=forbid 拒绝。
               settings: {
                 entityType: settings.entityType,
                 previewHidden: settings.previewHidden,

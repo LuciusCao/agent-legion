@@ -86,8 +86,7 @@ def _publish_agent() -> str:
 def _insert_agent_job_rows(job_db, *, job_id: str = "job-1") -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
             (_WORKSPACE,),
         )
         conn.execute(

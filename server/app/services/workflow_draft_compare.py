@@ -402,9 +402,6 @@ def _base_revision_summary(revision: dict[str, Any] | None) -> dict[str, Any] | 
         "id": revision["id"],
         "version": revision["version"],
         "workspace_id": revision["workspace_id"],
-        # #211 M2: the column is gone — the deprecated response field keeps
-        # returning the identity value until the M3 contract drop.
-        "workflow_key": revision["workspace_id"],
         "definition_hash": revision["definition_hash"],
     }
 
@@ -437,16 +434,14 @@ def compare_workflow_draft(
             {"category": "revision", "message": f"Workspace {workspace_id} not found"}
         )
 
-    default_workflow_key = str(workspace.get("default_workflow_key") or "")
-    # An empty default key marks a blank-canvas workspace (schema v50): its
-    # first publish adopts the draft key, so no mismatch is possible yet.
-    if default_workflow_key and draft.key != default_workflow_key:
+    # Schema v62 / #211 M3: the workspace id is the workflow key.
+    if draft.key != workspace_id:
         return _invalid_compare(
             {
                 "category": "schema",
                 "message": (
                     f"Draft workflow key '{draft.key}' does not match "
-                    f"workspace default workflow key '{default_workflow_key}'"
+                    f"workspace default workflow key '{workspace_id}'"
                 ),
             }
         )

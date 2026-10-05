@@ -27,7 +27,7 @@ def test_write_transaction_rolls_back() -> None:
         write_transaction(TEST_DATABASE_URL) as conn,
     ):
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow')",
+            "insert into workspaces(id, name) values (%s, %s)",
             ("rolled-back", "Rolled back"),
         )
         raise RuntimeError("rollback")
@@ -40,7 +40,7 @@ def test_connection_pool_reuses_short_lived_connections(tmp_path: Path) -> None:
     del tmp_path
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow')",
+            "insert into workspaces(id, name) values (%s, %s)",
             ("pool", "Pool"),
         )
     with read_connection(TEST_DATABASE_URL) as conn:
@@ -67,14 +67,13 @@ def test_failed_checkout_does_not_tear_down_pools(monkeypatch: pytest.MonkeyPatc
     assert row == {"ok": 1}
 
 
-def test_workspace_default_workflow_key_has_no_column_default() -> None:
-    """The platform ships no default workflow: the column is NOT NULL without
-    a default, so every workspace names its workflow explicitly."""
+def test_workspaces_have_no_separate_workflow_key_column() -> None:
+    """#211 M3 (schema v91): the workspace id is the only workflow identifier;
+    the redundant key column is gone from the terminal shape."""
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
-            "select column_default from information_schema.columns"
+            "select 1 from information_schema.columns"
             " where table_schema=current_schema() and table_name='workspaces'"
             " and column_name='default_workflow_key'"
         ).fetchone()
-    assert row is not None
-    assert row["column_default"] is None
+    assert row is None

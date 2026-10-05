@@ -203,7 +203,7 @@ EOF
   务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
   会继续。
 - 当前 schema 版本以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准
-  （目前 v90）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
+  （目前 v91）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
   v55（`material_bundles`）、v56（`job_node_status_counts` 触发器维护的
   状态计数）、v57（`studio_chat_sessions.draft_yaml`）、v58（scoped worker
   token——撤销存量全局 register token，行为变更）、v61（Studio workflow
@@ -223,7 +223,8 @@ EOF
   开关列，主控制台据此区分「在线·未领取」）、v88（job 节点状态计数改为
   v82 同款 try-lock delta fold，#690）、v89（`studio_chat_sessions.deleted_at`
   会话软删列，#872）、v90（`studio_chat_sessions.archived_at` 会话
-  归档列，#924）。v59（`jobs(run_id)` 索引）与
+  归档列，#924）、v91（删除冗余的 workspace workflow key 列——workspace
+  id 即 workflow key，#211 M3；有守卫、幂等）。v59（`jobs(run_id)` 索引）与
   v60（register token ids 列）与本部署面无直接关系。
   迁移明细以 `server/app/db/migration_chain.py`（v87 起在
   `migration_chain_recent.py`）为准。

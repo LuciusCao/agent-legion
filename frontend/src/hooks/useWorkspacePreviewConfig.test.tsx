@@ -25,7 +25,6 @@ function makeSnapshot(previewHidden: string[]): WorkspaceSettingsSnapshot {
     workspaceDescription: '',
     settings: {
       entityType: 'question',
-      workflowKey: 'wf',
       previewHidden,
     },
     executionConfiguration: {

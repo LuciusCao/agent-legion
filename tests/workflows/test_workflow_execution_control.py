@@ -170,9 +170,7 @@ def _setup_workspace(
     target_node_key: str | None = None,
     executor_id: str = "code-default",
 ) -> tuple[str, str]:
-    workspace = queries.create_workspace(
-        name="control-ws", default_workflow_key=definition.key, workspace_id=definition.key
-    )
+    workspace = queries.create_workspace(name="control-ws", workspace_id=definition.key)
     workspace_id = workspace["id"]
     job = queries.create_job(
         workflow_key=definition.key,
@@ -483,9 +481,7 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
     tmp_path: Path,
 ) -> None:
     definition = _branched_definition()
-    workspace = queries.create_workspace(
-        name="worker-control-ws", default_workflow_key="branched", workspace_id="branched"
-    )
+    workspace = queries.create_workspace(name="worker-control-ws", workspace_id="branched")
     workspace_id = workspace["id"]
     job = queries.create_job(
         workflow_key="branched",

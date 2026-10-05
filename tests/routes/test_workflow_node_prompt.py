@@ -12,7 +12,7 @@ def _url(workspace_id: str) -> str:
 
 
 def _workspace(job_db, name: str) -> str:
-    workspace = job_db.create_workspace(name, default_workflow_key=_WORKFLOW_KEY)
+    workspace = job_db.create_workspace(name)
     publish_builtin_revision(job_db, str(workspace["id"]))
     return str(workspace["id"])
 
@@ -82,7 +82,7 @@ def test_preview_unknown_workspace_gets_404(client) -> None:
 
 
 def test_preview_without_active_revision_gets_404(client, job_db) -> None:
-    job_db.create_workspace("ws-np-bare", default_workflow_key="bare_flow")
+    job_db.create_workspace("ws-np-bare")
 
     response = client.post(_url("ws-np-bare"), json={"node_key": "gen"})
 

@@ -1,7 +1,6 @@
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.services.job_errors import InvalidOperationError
 from server.app.services.workflow_definitions import workspace_active_definition
 from server.app.settings import Settings
 
@@ -12,9 +11,8 @@ def build_workspace_stats(
     job_db: JobQueries,
     settings: Settings,
 ) -> dict[str, Any]:
-    workflow_key = str(workspace.get("default_workflow_key") or "")
-    if not workflow_key:
-        raise InvalidOperationError("Workspace workflow is not set")
+    # The workspace id is the workflow key (schema v62 / #211 M3).
+    workflow_key = workspace_id
     latest_run = job_db.get_latest_node_run_for_workspace(workspace_id)
     # Local fallback execution capacity (#389): availability is global (the
     # pool is shared across workspaces); capacity 0 (pure-remote mode) means
@@ -33,7 +31,6 @@ def build_workspace_stats(
     return {
         "workspace_id": workspace_id,
         "name": workspace.get("name", ""),
-        "workflow_key": workflow_key,
         "workflow_label": workflow_label,
         "job_stats": job_db.count_jobs_by_status(workspace_id),
         "code_pool": code_pool,

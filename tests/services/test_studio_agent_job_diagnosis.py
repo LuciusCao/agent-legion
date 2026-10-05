@@ -29,7 +29,7 @@ def service(job_db, settings) -> StudioAgentJobToolsService:
 
 def _seed_workspace(job_db, workspace_id: str) -> None:
     with job_db.connect() as conn:
-        insert_workspace(conn, workspace_id=workspace_id, default_workflow_key=_WORKFLOW_KEY)
+        insert_workspace(conn, workspace_id=workspace_id)
     publish_builtin_revision(job_db, workspace_id)
 
 

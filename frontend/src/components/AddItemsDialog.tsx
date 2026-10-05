@@ -85,7 +85,9 @@ export function AddItemsDialog({
     enabled,
   })
   const workspace = workspaceQuery.data?.workspace ?? null
-  const workflowKey = workspace?.default_workflow_key ?? ''
+  // workspace id 即 workflow key（schema v62；#211 M3 退役独立字段）：
+  // workspace 未加载到时禁用提交。
+  const workflowKey = workspace?.id ?? ''
 
   // 入口契约：active revision 的 start 节点决定哪些条目类型可用
   // （EXEC-WORKFLOW-START-001）；取不到定义时缺省全接受。
@@ -172,10 +174,7 @@ export function AddItemsDialog({
     ]
     setIsSubmitting(true)
     try {
-      const response = await createRun(workspaceId, {
-        workflow_key: workflowKey,
-        items,
-      })
+      const response = await createRun(workspaceId, { items })
       showToast(`运行已创建，共 ${response.created_count} 个任务`, 'success')
       resetState()
       onClose()

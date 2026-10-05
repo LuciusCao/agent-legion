@@ -31,9 +31,7 @@ def test_workspace_bound_token_roundtrip(job_db) -> None:
     """Schema v45: a run token minted with workspace_id resolves with the
     binding attached; the tool surface enforces it (STUDIO-AGENT-001)."""
     user_id = _create_user(job_db)
-    workspace_id = str(
-        job_db.create_workspace(default_workflow_key="demo_workflow", name="Scoped WS")["id"]
-    )
+    workspace_id = str(job_db.create_workspace(name="Scoped WS")["id"])
     token = scoped_tokens.mint_scoped_token(job_db, user_id, workspace_id=workspace_id)
 
     user = scoped_tokens.authenticate_scoped_token(job_db, token)

@@ -123,7 +123,7 @@ def test_rerun_stages_implicit_consumer_outputs_and_rows(
     （提交后删除）、清单行事务内删除、对象 best-effort 清理。
     """
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job = _seed_job_with_manifest(
         job_db, settings, implicit_consumer_definition, workspace=workspace, storage=storage
     )
@@ -184,7 +184,7 @@ def test_run_to_stages_implicit_consumer_inside_target_closure(job_db, settings)
         },
     )
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job = _seed_job_with_manifest(
         job_db,
         settings,
@@ -248,7 +248,7 @@ def test_rerun_resets_same_name_producer(job_db, settings, shared_output_definit
     同语义：c 一并 stale、x.json 暂存、两条清单行同事务删除。
     """
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job = _seed_job_with_manifest(
         job_db,
         settings,
@@ -305,7 +305,7 @@ def test_run_to_resets_completed_same_name_producer_inside_closure(job_db, setti
         },
     )
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job = _seed_job_with_manifest(
         job_db,
         settings,
@@ -365,7 +365,7 @@ def test_run_to_stales_same_name_producer_outside_closure(job_db, settings):
         },
     )
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job = _seed_job_with_manifest(
         job_db,
         settings,

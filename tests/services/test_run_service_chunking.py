@@ -59,7 +59,7 @@ def _definition_accepting_refs():
 
 
 def _workspace(job_db, settings) -> None:
-    job_db.create_workspace(WORKSPACE_ID, default_workflow_key=WORKFLOW_KEY)
+    job_db.create_workspace(WORKSPACE_ID)
     from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 
     seed_demo_workspace_node_codes(settings, WORKSPACE_ID)

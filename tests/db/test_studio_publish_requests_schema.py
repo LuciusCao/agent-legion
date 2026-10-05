@@ -92,8 +92,8 @@ def test_claim_moves_pending_to_confirming_and_back() -> None:
     job_db._path = TEST_DATABASE_URL  # noqa: SLF001 — test wiring
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('claim_ws', 'Claim WS', 'claim_ws') on conflict (id) do nothing"
+            "insert into workspaces(id, name)"
+            " values ('claim_ws', 'Claim WS') on conflict (id) do nothing"
         )
     request = job_db.create_pending_publish_request(
         "claim_ws", "studio-agent:test", draft_hash="hash-a"
@@ -145,8 +145,8 @@ def test_stale_confirming_row_is_expired_by_the_sweep() -> None:
     job_db._path = TEST_DATABASE_URL  # noqa: SLF001 — test wiring
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('stale_ws', 'Stale WS', 'stale_ws') on conflict (id) do nothing"
+            "insert into workspaces(id, name)"
+            " values ('stale_ws', 'Stale WS') on conflict (id) do nothing"
         )
     request = job_db.create_pending_publish_request("stale_ws", "studio-agent:test")
     request_id = str(request["id"])

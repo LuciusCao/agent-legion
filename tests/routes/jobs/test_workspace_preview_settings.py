@@ -100,7 +100,6 @@ def test_settings_get_put_round_trip_accepted(client_factory):
     """
     put_whitelist = {
         "entityType",
-        "workflowKey",
         "previewHidden",
     }
     with client_factory() as c:

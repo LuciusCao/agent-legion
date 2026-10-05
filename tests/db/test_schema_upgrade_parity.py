@@ -43,20 +43,21 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v90, studio_chat_session_archive) must
+# Effects the newest migration (v91, retire_default_workflow_key) must
 # leave behind so the undo step rewinds a current-shape database to exactly
-# SCHEMA_VERSION-1. v90 only adds the nullable studio_chat_sessions.archived_at
-# column (#924), so the undo drops that column and nothing else.
+# SCHEMA_VERSION-1. v91 only drops workspaces.default_workflow_key (#211 M3),
+# so the undo re-adds that column in its v90 shape (text not null, no
+# default) and nothing else.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("studio_chat_sessions", "archived_at", "timestamp with time zone"),
-)
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "studio_chat_session_archive"
+_NEWEST_MIGRATION_NAME = "retire_default_workflow_key"
 # (table, column DDL) pairs re-created by the undo step.
-_NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
+_NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = (
+    ("workspaces", "default_workflow_key text not null"),
+)
 # Old-shape DDL the rewind recreates so the (SCHEMA_VERSION-1) database is a
-# faithful v89 (v90 is a pure column add: nothing to recreate).
+# faithful v90 (v91 is a pure column drop: the restore above covers it).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.

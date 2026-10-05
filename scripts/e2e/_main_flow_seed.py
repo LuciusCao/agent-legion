@@ -207,9 +207,7 @@ def seed_main_flow_workspace(dsn: str, data_dir: Path) -> str:
 
     workspaces = [w for w in job_db.list_workspaces() if w.get("id") == WORKSPACE_ID]
     if not workspaces:
-        job_db.create_workspace(
-            WORKSPACE_NAME, default_workflow_key=WORKSPACE_ID, workspace_id=WORKSPACE_ID
-        )
+        job_db.create_workspace(WORKSPACE_NAME, workspace_id=WORKSPACE_ID)
 
     # #322: the skill repo must be the in-place directory at
     # <skills root>/<key> — there is no clone channel anymore. The node binds

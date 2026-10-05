@@ -37,7 +37,6 @@ vi.mock('../stores/authStore', () => ({
 const ws1 = makeWorkspace({
   id: 'ws-1',
   name: 'Test Workspace',
-  default_workflow_key: 'demo_workflow',
 })
 
 describe('DashboardPage', () => {
@@ -174,7 +173,6 @@ describe('DashboardPage', () => {
         makeWorkspace({
           id: 'demo_video_workflow',
           name: 'Video Knowledge',
-          default_workflow_key: 'demo_video_workflow',
         }),
       ],
     })
@@ -203,8 +201,8 @@ describe('DashboardPage', () => {
   it('opens one dashboard event stream instead of one per workspace', async () => {
     mockFetchWorkspaces.mockResolvedValue({
       workspaces: [
-        makeWorkspace({ id: 'ws1', name: 'One', default_workflow_key: 'wf' }),
-        makeWorkspace({ id: 'ws2', name: 'Two', default_workflow_key: 'wf' }),
+        makeWorkspace({ id: 'ws1', name: 'One' }),
+        makeWorkspace({ id: 'ws2', name: 'Two' }),
       ],
     })
 

@@ -80,7 +80,7 @@ class TestResolveTargetDsn:
 class TestBuildSampleSql:
     def test_row_number_partition_and_limit(self):
         sql = build_sample_sql(30)
-        assert "row_number() OVER (PARTITION BY workflow_key" in sql
+        assert "row_number() OVER (PARTITION BY workspace_id" in sql
         assert "ORDER BY created_at DESC" in sql
         assert "rn <= 30" in sql
         assert "FROM public.jobs" in sql
@@ -95,15 +95,15 @@ class TestBuildSampleSql:
 
 class TestCopySql:
     def test_copy_out_quotes_columns_and_header(self):
-        sql = build_copy_out_sql("jobs", ["id", "workflow_key"], "id IN (SELECT 1)")
-        assert sql.startswith('COPY (SELECT "id", "workflow_key" FROM public."jobs"')
+        sql = build_copy_out_sql("jobs", ["id", "workspace_id"], "id IN (SELECT 1)")
+        assert sql.startswith('COPY (SELECT "id", "workspace_id" FROM public."jobs"')
         assert "WHERE id IN (SELECT 1)" in sql
         assert "TO STDOUT WITH (FORMAT csv, HEADER true)" in sql
 
     def test_copy_in_matches_column_list(self):
-        sql = build_copy_in_sql("jobs", ["id", "workflow_key"])
+        sql = build_copy_in_sql("jobs", ["id", "workspace_id"])
         assert sql == (
-            'COPY public."jobs" ("id", "workflow_key") FROM STDIN WITH (FORMAT csv, HEADER true)'
+            'COPY public."jobs" ("id", "workspace_id") FROM STDIN WITH (FORMAT csv, HEADER true)'
         )
 
 
@@ -130,7 +130,7 @@ class TestJobStorageRelpath:
         rel = job_storage_relpath("jobs/demo_workspace/job-1", "wf", "job-1")
         assert rel == Path("jobs/demo_workspace/job-1")
 
-    def test_falls_back_to_workflow_key_and_id(self):
+    def test_falls_back_to_workspace_and_id(self):
         rel = job_storage_relpath("", "demo_video_workflow", "job-9")
         assert rel == Path("jobs/demo_video_workflow/job-9")
 

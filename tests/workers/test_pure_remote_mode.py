@@ -136,9 +136,7 @@ def test_pure_remote_poll_never_reaches_local_executor(tmp_path: Path) -> None:
     from server.app.workflows.definition import WorkflowNode
 
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace(
-        "PureRemote", default_workflow_key="pure_remote", workspace_id="pure_remote"
-    )
+    ws = job_db.create_workspace("PureRemote", workspace_id="pure_remote")
     definition = make_definition(
         [WorkflowNode(key="solo", label="solo", capability="solo", outputs=["out.json"])]
     )

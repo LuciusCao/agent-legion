@@ -5,10 +5,7 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Query
 
 from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_TAG
-from server.app.routes.job_http import (
-    raise_job_http_error,
-    reject_mismatched_workflow_key,
-)
+from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.job_view_contracts import (
     JobDetailResponse,
     JobsResponse,
@@ -16,12 +13,6 @@ from server.app.routes.job_view_contracts import (
 )
 from server.app.services.job_errors import JobServiceError
 from server.app.services.job_queries import JobQueryService
-
-# #211 Phase 2: query-param deprecation wording (server-side default).
-_DEPRECATED_QUERY = (
-    "Deprecated: defaults to the workspace id from the path (equal since schema v62); "
-    "removal is tracked in #211 (deprecated field drops by 2026-10-31)."
-)
 
 
 def create_jobs_router(
@@ -55,24 +46,15 @@ def create_jobs_router(
     )
     def list_workspace_jobs(
         workspace_id: str,
-        workflow_key: Annotated[
-            str | None,
-            Query(deprecated=True, description=_DEPRECATED_QUERY),
-        ] = None,
         status: Annotated[str | None, Query(min_length=1)] = None,
         run_id: Annotated[str | None, Query(min_length=1)] = None,
         limit: Annotated[int, Query(ge=1, le=2000)] = 500,
     ) -> JobsResponse:
-        # Subagent review P3-1 on #307: guard parity with failed-node-runs —
-        # a mismatched key can no longer narrow (the column filter is the
-        # next read-binding batch); reject instead of silently widening.
-        reject_mismatched_workflow_key(workspace_id, workflow_key)
         try:
             # limit+1 probe: the extra row decides `truncated` before the
             # response is cut to the requested bound.
             jobs = job_queries.list_jobs(
                 workspace_id,
-                workflow_key=workflow_key,
                 status=status,
                 run_id=run_id,
                 limit=limit + 1,

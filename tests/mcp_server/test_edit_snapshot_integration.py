@@ -18,7 +18,7 @@ from tests.helpers.skill_snapshot import commit, git
 @pytest.fixture
 def snapshot_channel(client, job_db, tmp_path, monkeypatch):
     workspace = "edit-snapshot"
-    job_db.create_workspace("Snapshot", default_workflow_key=workspace, workspace_id=workspace)
+    job_db.create_workspace("Snapshot", workspace_id=workspace)
     token = mint_scoped_token(
         job_db, str(job_db.get_user_credentials("admin")["id"]), workspace_id=workspace
     )
@@ -355,7 +355,7 @@ def test_edit_export_authorization_precedes_git_and_staging(
     from server.app.services.skill_catalog import SkillCatalogService
 
     run, root = snapshot_channel
-    job_db.create_workspace("Other", default_workflow_key="other", workspace_id="other")
+    job_db.create_workspace("Other", workspace_id="other")
     key = "other/example" if kind == "foreign" else "edit-snapshot/example"
     workspace = "other" if kind == "binding" else "edit-snapshot"
     if kind == "missing":

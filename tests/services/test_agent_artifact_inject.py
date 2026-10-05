@@ -47,8 +47,7 @@ def _make_job(job_id: str = "job-1", workspace_id: str = "ws-1") -> None:
     init_db(TEST_DATABASE_URL)
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, 'ws', 'demo_workflow')"
-            " on conflict (id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'ws') on conflict (id) do nothing",
             (workspace_id,),
         )
         conn.execute(

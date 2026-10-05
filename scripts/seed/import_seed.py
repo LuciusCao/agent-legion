@@ -185,7 +185,8 @@ def step1_workspaces(
     workspaces = listed.get("workspaces") or []
     bound: dict[str, list[str]] = {w["key"]: [] for w in seed["workflows"]}
     for workspace in workspaces:
-        key = str(workspace.get("default_workflow_key") or "")
+        # The workspace id is the workflow key (schema v62 / #211 M3).
+        key = str(workspace.get("id") or "")
         if key in bound:
             bound[key].append(str(workspace["id"]))
 
@@ -200,11 +201,7 @@ def step1_workspaces(
             continue
         # Blank creation: nothing seeds — the seed's own definition is
         # published as revision v1 in step 3 (and its agents in step 2).
-        body: dict[str, Any] = {
-            "name": name,
-            "default_workflow_key": workflow_key,
-            "workflow_mode": "blank",
-        }
+        body: dict[str, Any] = {"id": workflow_key, "name": name}
         if entity is not None:
             body["default_entity"] = entity
         created = client.mutate(

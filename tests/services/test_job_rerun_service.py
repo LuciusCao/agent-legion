@@ -29,9 +29,7 @@ def rerun_service(job_db, settings):
 
 @pytest.fixture
 def job(job_db):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",
@@ -59,9 +57,7 @@ def job(job_db):
 
 @pytest.fixture
 def running_job(job_db):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",
@@ -151,7 +147,7 @@ def test_rerun_marks_implicit_consumers_stale(rerun_service, job_db):
         }
     )
     assert downstream_nodes(definition, "p") == []
-    workspace = job_db.create_workspace("default", default_workflow_key="wf759_implicit")
+    workspace = job_db.create_workspace("default")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     batch = job_db.create_run(
         "wf759_implicit", "batch_by_ids", {"ids": ["1"]}, workspace_id=workspace["id"]
@@ -193,7 +189,7 @@ def test_rerun_stages_implicit_consumer_outputs(rerun_service, job_db):
             "edges": [],
         }
     )
-    workspace = job_db.create_workspace("default", default_workflow_key="wf759_implicit_stage")
+    workspace = job_db.create_workspace("default")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     batch = job_db.create_run(
         "wf759_implicit_stage", "batch_by_ids", {"ids": ["1"]}, workspace_id=workspace["id"]
@@ -489,9 +485,7 @@ def test_rerun_expired_lease_is_not_blocking(rerun_service, job):
 
 
 def test_batch_rerun_returns_results_in_request_order(rerun_service, job_db):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",
@@ -522,9 +516,7 @@ def test_batch_rerun_returns_results_in_request_order(rerun_service, job_db):
 
 
 def test_batch_rerun_node_not_found_for_one_job(rerun_service, job_db):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",
@@ -581,9 +573,7 @@ def test_rerun_from_failed_node_skips_when_no_failed_node(rerun_service, job):
 
 def test_batch_rerun_from_failed_node_per_job(rerun_service):
     job_db = rerun_service.job_db
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",
@@ -621,9 +611,7 @@ def test_batch_rerun_from_failed_node_per_job(rerun_service):
 
 
 def test_batch_rerun_mixed_workflows(rerun_service, job_db):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     q_batch = job_db.create_run(
         "education_video_problems_generation",
@@ -668,9 +656,7 @@ def _node_statuses(job_db, job_id):
 
 
 def test_rerun_from_intake_resets_not_applicable_downstream(job_db, rerun_service):
-    workspace = job_db.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("ws1")
     publish_builtin_revision(job_db, workspace["id"])
     definition = load_builtin_definition("education_video_problems_generation")
     job = job_db.create_job(

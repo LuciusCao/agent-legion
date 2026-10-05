@@ -54,9 +54,7 @@ def _node_statuses(job_db: JobQueries, job_id: str) -> dict[str, str]:
 
 
 def test_run_to_with_start_rejects_failed_upstream(execution_service, job_db):
-    ws = job_db.create_workspace(
-        "run-to-guard", default_workflow_key="education_video_problems_generation"
-    )
+    ws = job_db.create_workspace("run-to-guard")
     publish_builtin_revision(job_db, str(ws["id"]))
     job = _create_job(job_db, str(ws["id"]), "Q-run-to-stuck")
     job_db.update_job_node(job["id"], "intake_knowledge_points", status="completed")
@@ -83,9 +81,7 @@ def test_run_to_with_start_rejects_failed_upstream(execution_service, job_db):
 
 
 def test_run_to_with_start_succeeds_when_upstream_healthy(execution_service, job_db):
-    ws = job_db.create_workspace(
-        "run-to-guard-ok", default_workflow_key="education_video_problems_generation"
-    )
+    ws = job_db.create_workspace("run-to-guard-ok")
     publish_builtin_revision(job_db, str(ws["id"]))
     job = _create_job(job_db, str(ws["id"]), "Q-run-to-ok")
     job_db.update_job_node(job["id"], "intake_knowledge_points", status="completed")

@@ -80,9 +80,7 @@ def _seed_mixed(job_db, tag: str) -> dict[str, Any]:
     The workspace name stays constant so message strings (which embed it)
     compare equal across the per-job and batch datasets.
     """
-    ws = job_db.create_workspace(
-        "batch-eq", default_workflow_key="education_video_problems_generation"
-    )
+    ws = job_db.create_workspace("batch-eq")
     publish_builtin_revision(job_db, str(ws["id"]))
     ws_id = str(ws["id"])
     ok_a = _create_job(job_db, ws_id, f"{tag}-ok-a")
@@ -91,9 +89,7 @@ def _seed_mixed(job_db, tag: str) -> dict[str, Any]:
     leased = _create_job(job_db, ws_id, f"{tag}-leased")
     failed_node = _create_job(job_db, ws_id, f"{tag}-failed-node")
     not_failed = _create_job(job_db, ws_id, f"{tag}-not-failed")
-    other = job_db.create_workspace(
-        f"batch-{tag}-other", default_workflow_key="education_video_problems_generation"
-    )
+    other = job_db.create_workspace(f"batch-{tag}-other")
     publish_builtin_revision(job_db, str(other["id"]))
     foreign = _create_job(job_db, str(other["id"]), f"{tag}-foreign")
 
@@ -201,9 +197,7 @@ def test_batch_rerun_matches_per_job_rerun_from_failed_node(rerun_service, job_d
 def test_category_batch_matches_per_job_rerun_targets(rerun_service, job_db) -> None:
     """technical=rerun_self / business=rerun_upstream：类别批量结果与逐条
     rerun 同一目标节点的结果一致。"""
-    ws = job_db.create_workspace(
-        "cat-eq", default_workflow_key="education_video_problems_generation"
-    )
+    ws = job_db.create_workspace("cat-eq")
     publish_builtin_revision(job_db, str(ws["id"]))
     ws_id = str(ws["id"])
     technical_job = _create_job(job_db, ws_id, "cat-tech")
@@ -276,9 +270,7 @@ def _count_read_connections(job_db, monkeypatch) -> dict[str, int]:
 
 def test_batch_rerun_read_queries_bounded(rerun_service, job_db, monkeypatch) -> None:
     """300 个可重跑 job 的批量执行：读查询常数级（写事务不在此计量）。"""
-    ws = job_db.create_workspace(
-        "batch-perf", default_workflow_key="education_video_problems_generation"
-    )
+    ws = job_db.create_workspace("batch-perf")
     publish_builtin_revision(job_db, str(ws["id"]))
     ws_id = str(ws["id"])
     batch = job_db.create_run(

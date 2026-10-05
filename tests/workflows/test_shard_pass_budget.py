@@ -128,8 +128,7 @@ def test_single_pass_caps_submissions_at_budget(job_db, tmp_path, monkeypatch) -
     """50 pending shards, budget 5: ONE pass submits exactly 5."""
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-budget', 'ws', 'demo_workflow') on conflict do nothing"
+            "insert into workspaces(id, name) values ('ws-budget', 'ws') on conflict do nothing"
         )
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id, status, storage_dir)"
@@ -154,8 +153,7 @@ def test_next_pass_continues_draining(job_db, tmp_path, monkeypatch) -> None:
     """Budget 5, 8 shards: pass one submits 5, pass two drains the rest."""
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-budget', 'ws', 'demo_workflow') on conflict do nothing"
+            "insert into workspaces(id, name) values ('ws-budget', 'ws') on conflict do nothing"
         )
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id, status, storage_dir)"
@@ -188,8 +186,7 @@ def test_disabled_gate_submits_whole_fanout(job_db, tmp_path, monkeypatch) -> No
     """Gate off: no pass cap — the whole pending fan-out goes in one pass."""
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-budget', 'ws', 'demo_workflow') on conflict do nothing"
+            "insert into workspaces(id, name) values ('ws-budget', 'ws') on conflict do nothing"
         )
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id, status, storage_dir)"

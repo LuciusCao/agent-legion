@@ -29,8 +29,7 @@ values (%s, %s, 'pp-mig-ws', 'default', 1, 'draft', '{}', 'h', 'u')
 
 def _insert_entity(conn, entity_type: str, row_id: str) -> None:
     conn.execute(
-        "insert into workspaces(id, name, default_workflow_key)"
-        " values ('pp-mig-ws', 'pp-mig-ws', 'wf') on conflict do nothing"
+        "insert into workspaces(id, name) values ('pp-mig-ws', 'pp-mig-ws') on conflict do nothing"
     )
     conn.execute(_INSERT_SQL, (row_id, entity_type))
 

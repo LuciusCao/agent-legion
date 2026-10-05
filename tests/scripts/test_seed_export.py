@@ -22,6 +22,8 @@ from scripts.seed.seed_common import validate_seed  # noqa: E402
 pytestmark = pytest.mark.no_db
 
 WORKFLOW_KEY = "invoices_pipeline"
+# The workspace id is the workflow key (schema v62 / #211 M3).
+WORKSPACE_ID = WORKFLOW_KEY
 
 
 def make_definition() -> dict:
@@ -92,11 +94,7 @@ class FakeConn:
             return FakeResult([r for r in self.revision_rows if r["key"] in keys])
         if "from workspaces" in sql:
             wanted = set(params[0]) if params else set()
-            rows = [
-                r
-                for r in self.workspace_rows
-                if r.get("id") in wanted or r.get("default_workflow_key") in wanted
-            ]
+            rows = [r for r in self.workspace_rows if r.get("id") in wanted]
             return FakeResult(rows)
         if "entity_type='agent'" in sql:
             wanted = set(params[0]) if params else set()
@@ -111,7 +109,7 @@ class FakeConn:
         raise AssertionError(f"unexpected SQL: {sql}")
 
 
-def revision_row(workspace_id: str = "acme", key: str = WORKFLOW_KEY) -> dict:
+def revision_row(workspace_id: str = WORKSPACE_ID, key: str = WORKFLOW_KEY) -> dict:
     return {
         "workspace_id": workspace_id,
         "key": key,
@@ -147,14 +145,14 @@ CODE = "def run(ctx):\n    return None\n"
 
 def test_build_seed_assembles_generic_package():
     conn = FakeConn(
-        revision_rows=[revision_row("acme")],
-        workspace_rows=[{"id": "acme", "default_workflow_key": WORKFLOW_KEY}],
+        revision_rows=[revision_row(WORKSPACE_ID)],
+        workspace_rows=[{"id": WORKSPACE_ID}],
         agent_rows=[
-            agent_row("acme", "invoice-summarizer-v1"),
+            agent_row(WORKSPACE_ID, "invoice-summarizer-v1"),
             # capability not referenced by the exported DAG -> excluded
-            agent_row("acme", "unrelated-v1", capability="unrelated_capability"),
+            agent_row(WORKSPACE_ID, "unrelated-v1", capability="unrelated_capability"),
         ],
-        node_code_rows=[node_code_row("acme", f"{WORKFLOW_KEY}:fetch", CODE)],
+        node_code_rows=[node_code_row(WORKSPACE_ID, f"{WORKFLOW_KEY}:fetch", CODE)],
         settings_rows=[
             {
                 "key": "skill_lock",
@@ -166,7 +164,7 @@ def test_build_seed_assembles_generic_package():
     assert warnings == []
     assert [w["key"] for w in seed["workflows"]] == [WORKFLOW_KEY]
     assert [a["agent_id"] for a in seed["agents"]] == ["invoice-summarizer-v1"]
-    assert seed["agents"][0]["source_workspace"] == "acme"
+    assert seed["agents"][0]["source_workspace"] == WORKSPACE_ID
     assert [n["node_key"] for n in seed["node_codes"]] == ["fetch"]
     # #322: only the lock is exported (the source registry is retired).
     assert seed["skills"]["lock"]["skills"]["acme/summarize"]["commit"] == "a" * 40
@@ -256,9 +254,9 @@ def test_node_code_override_unknown_capability_warns():
 
 
 def test_resolve_source_workspaces_explicit_missing_warns():
-    conn = FakeConn(workspace_rows=[{"id": "acme", "default_workflow_key": WORKFLOW_KEY}])
-    ids, warnings = resolve_source_workspaces(conn, [WORKFLOW_KEY], ["acme", "ghost"])
-    assert ids == ["acme"]
+    conn = FakeConn(workspace_rows=[{"id": WORKSPACE_ID}])
+    ids, warnings = resolve_source_workspaces(conn, [WORKFLOW_KEY], [WORKSPACE_ID, "ghost"])
+    assert ids == [WORKSPACE_ID]
     assert any("ghost" in warning for warning in warnings)
 
 

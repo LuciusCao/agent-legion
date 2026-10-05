@@ -3,7 +3,7 @@ import { useJobStore } from '../stores/jobStore'
 import { queryKeys } from '../lib/queryKeys'
 import type { WorkspaceStats } from '../types/workspaceTypes'
 
-// 浅合并事件携带的 job_stats：只替换 job_stats，保留 workflow_key 等其他
+// 浅合并事件携带的 job_stats：只替换 job_stats，保留 workflow_label 等其他
 // 字段；old 为 undefined 时与原 store 展开 undefined 的行为一致（cast 是
 // 因为展开 undefined 会让必填字段变可选）。
 export function mergeWorkspaceEventStats(

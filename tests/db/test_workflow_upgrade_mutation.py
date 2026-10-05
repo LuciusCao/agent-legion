@@ -20,7 +20,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def _setup(tmp_path: Path):
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("wsmut", default_workflow_key="wfmut")
+    workspace = queries.create_workspace("wsmut")
     job = queries.create_job(
         workflow_key="wfmut",
         source_type="question",

@@ -13,9 +13,7 @@ def build_workspace_dag(
     workspace = job_db.get_workspace(workspace_id)
     if workspace is None:
         raise NotFoundError("Workspace not found")
-    workflow_key = str(workspace.get("default_workflow_key") or "")
-    if not workflow_key:
-        raise NotFoundError("Workspace workflow is not set")
+    workflow_key = str(workspace["id"])
     active = job_db.get_active_workflow_revision(workspace_id, workflow_key)
     if active is None:
         raise NotFoundError("Workspace has no active workflow revision")

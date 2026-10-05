@@ -50,7 +50,7 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
         ("GET", "/api/studio-agent/tools/publish-requests/req-x", None),
         (
             "PUT",
-            f"{base}/workflows/wf/nodes/node/code/draft",
+            f"{base}/nodes/node/code/draft",
             {"code": "not python"},
         ),
         ("PUT", f"{base}/agent-definitions/agent-x/draft", {}),
@@ -65,7 +65,7 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
         ("GET", f"{base}/agent-definitions", None),
         ("GET", f"{base}/runtime-models", None),
         ("GET", f"{base}/agent-runtimes", None),
-        ("GET", f"{base}/workflows/wf/nodes/node/code", None),
+        ("GET", f"{base}/nodes/node/code", None),
         ("GET", "/api/studio-agent/tools/chat-sessions/session-x/context", None),
         # Skill tools (issue #217; workspace-scoped since #710 — the skill
         # key's first segment must equal the path workspace): unknown skill
@@ -190,7 +190,7 @@ def test_get_active_revision_empty_state_for_unpublished_workflow(client, job_db
     state (200) instead of a 404, so the agent can start the from-scratch
     authoring flow."""
     scoped, _ = _scoped_client(client, job_db)
-    workspace = job_db.create_workspace("ws-empty", default_workflow_key="studio_empty_flow")
+    workspace = job_db.create_workspace("ws-empty")
     workspace_id = str(workspace["id"])
 
     response = scoped.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active")
@@ -198,7 +198,7 @@ def test_get_active_revision_empty_state_for_unpublished_workflow(client, job_db
     assert response.status_code == 200, response.text
     assert response.json() == {
         "state": "empty",
-        "workflow_key": "studio_empty_flow",
+        "workflow_key": workspace_id,
         "revision": None,
         "workflow": None,
         "definition_yaml": None,
@@ -218,7 +218,7 @@ def test_get_active_revision_404_for_unknown_workspace(client, job_db) -> None:
 
 def test_validate_workflow(client, job_db) -> None:
     scoped, _ = _scoped_client(client, job_db)
-    workspace = job_db.create_workspace("ws-validate", default_workflow_key="studio_validate_flow")
+    workspace = job_db.create_workspace("ws-validate")
     workspace_id = str(workspace["id"])
     url = f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/validate"
     draft_yaml = """
@@ -295,8 +295,7 @@ def test_get_node_code_state_reads_builtin(client, job_db) -> None:
     scoped, _ = _scoped_client(client, job_db)
 
     response = scoped.get(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        f"/workflows/{_WORKFLOW_KEY}/nodes/{_NODE_KEY}/code"
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code"
     )
 
     assert response.status_code == 200, response.text
@@ -316,10 +315,7 @@ def test_get_node_code_state_reads_skeleton_node(client, job_db) -> None:
     # yet -> origin none; a saved skeleton draft reads back (issue #101).
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
-    base = (
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        f"/workflows/{_WORKFLOW_KEY}/nodes/no_such_node/code"
-    )
+    base = f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/no_such_node/code"
 
     empty = scoped.get(base)
     assert empty.status_code == 200
@@ -342,8 +338,7 @@ def test_save_node_code_draft_rejects_empty_expected_capability(client, job_db) 
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
     response = scoped.put(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        f"/workflows/{_WORKFLOW_KEY}/nodes/{_NODE_KEY}/code/draft",
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
         json={"code": _NODE_CODE, "expected_capability": ""},
     )
     assert response.status_code == 422
@@ -354,10 +349,7 @@ def test_node_code_tools_404_for_start_node(client, job_db) -> None:
     # saving a draft for it 404s (draft-only unknown nodes are allowed).
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
-    base = (
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        f"/workflows/{_WORKFLOW_KEY}/nodes/_start/code"
-    )
+    base = f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/_start/code"
     assert scoped.get(base).status_code == 404
     assert scoped.put(f"{base}/draft", json={"code": _NODE_CODE}).status_code == 404
 
@@ -365,10 +357,7 @@ def test_node_code_tools_404_for_start_node(client, job_db) -> None:
 def test_save_node_code_draft_attributes_studio_agent(client, job_db) -> None:
     workspace_id = _create_workspace(client)
     scoped, admin_id = _scoped_client(client, job_db)
-    base = (
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        f"/workflows/{_WORKFLOW_KEY}/nodes/{_NODE_KEY}/code"
-    )
+    base = f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code"
 
     saved = scoped.put(f"{base}/draft", json={"code": _NODE_CODE, "change_note": "agent draft"})
 
@@ -389,8 +378,7 @@ def test_save_node_code_draft_rejects_invalid_code(client, job_db) -> None:
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
     response = scoped.put(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        f"/workflows/{_WORKFLOW_KEY}/nodes/{_NODE_KEY}/code/draft",
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
         json={"code": "def helper():\n    pass\n"},
     )
     assert response.status_code == 400
@@ -463,8 +451,7 @@ def test_save_node_code_draft_404_for_unknown_node(client, job_db) -> None:
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
     response = scoped.put(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        f"/workflows/{_WORKFLOW_KEY}/nodes/no_such_node/code/draft",
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/no_such_node/code/draft",
         json={"code": _NODE_CODE},
     )
     assert response.status_code == 404
@@ -473,10 +460,7 @@ def test_save_node_code_draft_404_for_unknown_node(client, job_db) -> None:
 def test_save_node_code_draft_expected_capability_match_and_mismatch(client, job_db) -> None:
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
-    url = (
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        f"/workflows/{_WORKFLOW_KEY}/nodes/{_NODE_KEY}/code/draft"
-    )
+    url = f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft"
 
     matched = scoped.put(
         url,
@@ -503,8 +487,7 @@ def test_save_node_code_draft_expected_capability_allows_new_node(client, job_db
     scoped, admin_id = _scoped_client(client, job_db)
 
     saved = scoped.put(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        f"/workflows/{_WORKFLOW_KEY}/nodes/brand_new_node/code/draft",
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/brand_new_node/code/draft",
         json={"code": _NODE_CODE, "expected_capability": "brand_new_capability"},
     )
 
@@ -518,14 +501,9 @@ def test_save_node_code_draft_skeleton_without_any_revision(client, job_db) -> N
     """From-scratch flow: no active revision at all. expected_capability gates
     the skeleton draft; without it the historic 404 stands."""
     scoped, _ = _scoped_client(client, job_db)
-    workspace = job_db.create_workspace(
-        "Skeleton", default_workflow_key="studio_skeleton_flow", workspace_id="studio_skeleton_flow"
-    )
+    workspace = job_db.create_workspace("Skeleton", workspace_id="studio_skeleton_flow")
     workspace_id = str(workspace["id"])
-    url = (
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        "/workflows/studio_skeleton_flow/nodes/first_node/code/draft"
-    )
+    url = f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/first_node/code/draft"
 
     rejected = scoped.put(url, json={"code": _NODE_CODE})
     assert rejected.status_code == 404
@@ -594,53 +572,28 @@ def test_node_prompt_tools_404_for_unknown_targets(client, job_db) -> None:
     assert scoped.post(url, json={"node_key": "_start"}).status_code == 400
 
 
-def test_segment_free_node_code_paths_serve_the_same_resource(client, job_db) -> None:
-    """#211 Phase 2: the studio-agent tool routes drop the deprecated
-    workflows/{workflow_key} segment — on a v62-shaped workspace (id == key)
-    the segment-free path serves the same resource as the legacy alias."""
+def test_retired_workflow_segment_alias_is_gone(client, job_db) -> None:
+    """#211 M3: the studio-agent tool routes no longer register the
+    workflows/{workflow_key} alias — the old path 404s; the workspace-scoped
+    path serves reads and draft writes."""
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
 
+    legacy_segment = f"/workflows/{_WORKFLOW_KEY}"
     legacy = scoped.get(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        f"/workflows/{_WORKFLOW_KEY}/nodes/{_NODE_KEY}/code"
+        f"/api/studio-agent/tools/workspaces/{workspace_id}{legacy_segment}/nodes/{_NODE_KEY}/code"
     )
-    current = scoped.get(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code"
-    )
+    assert legacy.status_code == 404
 
-    assert legacy.status_code == 200, legacy.text
-    assert current.status_code == 200, current.text
-    assert current.json() == legacy.json()
-
-    # Drafts round-trip through the segment-free path too.
     saved = scoped.put(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft"
+        "?workflow_key=other_flow",
         json={"code": "def run(job, job_dir, runtime):\n    return {}\n"},
     )
     assert saved.status_code == 200, saved.text
+    # A stray workflow_key query is ignored: the draft lands on the path
+    # workspace's entity key, visible on the workspace-scoped read.
     state = scoped.get(
         f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code"
     ).json()
     assert state["has_draft"] is True
-
-
-def test_segment_free_node_code_paths_reject_mismatched_workflow_key(client, job_db) -> None:
-    """Codex P2 on #299 (guard parity with the Studio routes): the deprecated
-    segment, query-bound on the segment-free path, must equal the workspace
-    id — anything else is a 400, not a silent key steer."""
-    workspace_id = _create_workspace(client)
-    scoped, _ = _scoped_client(client, job_db)
-
-    read = scoped.get(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        f"/nodes/{_NODE_KEY}/code?workflow_key=other_flow"
-    )
-    write = scoped.put(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        f"/nodes/{_NODE_KEY}/code/draft?workflow_key=other_flow",
-        json={"code": "def run(job, job_dir, runtime):\n    return {}\n"},
-    )
-
-    assert read.status_code == 400, read.text
-    assert write.status_code == 400, write.text

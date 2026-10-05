@@ -43,7 +43,7 @@ def _definition() -> WorkflowDefinition:
 
 @pytest.mark.full_gate
 def test_intake_freeze_and_manifest_whitelist(job_db) -> None:
-    workspace = job_db.create_workspace(default_workflow_key="demo_workflow", name="cfg-ws")
+    workspace = job_db.create_workspace(name="cfg-ws")
     job_db.update_workspace(
         workspace["id"],
         node_config={"wf": {"generate": {"page_size": 5, "api_key": "sekret"}}},
@@ -131,7 +131,7 @@ def _executor_definition() -> WorkflowDefinition:
 def test_node_layered_config_freeze_and_manifest(job_db) -> None:
     """Node-declared schemas join the freeze chain (spec D15, P-0.5 step 3:
     the executor capability fallback is gone)."""
-    workspace = job_db.create_workspace(default_workflow_key="demo_workflow", name="cfg-exec-ws")
+    workspace = job_db.create_workspace(name="cfg-exec-ws")
     job_db.update_workspace(
         workspace["id"],
         node_config={"wf": {"fetch": {"country_id": "9"}}},
@@ -191,7 +191,7 @@ NODE_SCHEMA = {
 @pytest.mark.full_gate
 def test_node_declared_schema_freeze_and_manifest(job_db) -> None:
     """A node-declared config_schema joins the same freeze chain (P-0.5)."""
-    workspace = job_db.create_workspace(default_workflow_key="demo_workflow", name="cfg-node-ws")
+    workspace = job_db.create_workspace(name="cfg-node-ws")
     job_db.update_workspace(
         workspace["id"],
         node_config={"wf": {"intake": {"knowledge_dir": "custom", "timeout_seconds": 30}}},

@@ -25,7 +25,8 @@ from scripts.seed.seed_common import sha256_text  # noqa: E402
 pytestmark = pytest.mark.no_db
 
 WORKFLOW_KEY = "invoices_pipeline"
-WORKSPACE_ID = "acme"
+# The workspace id is the workflow key (schema v62 / #211 M3).
+WORKSPACE_ID = WORKFLOW_KEY
 CODE = "def run(ctx):\n    return None\n"
 SKILL_COMMIT = "a" * 40
 
@@ -131,7 +132,6 @@ class FakeClient:
             WORKSPACE_ID: {
                 "id": WORKSPACE_ID,
                 "name": "Acme",
-                "default_workflow_key": WORKFLOW_KEY,
                 "default_entity": "invoice",
             }
         }
@@ -206,7 +206,7 @@ class FakeClient:
     def _apply(self, method: str, path: str, body: dict | None, params: dict | None) -> Any:
         body = body or {}
         if method == "POST" and path == "/api/workspaces":
-            workspace_id = body["name"].lower().replace(" ", "_")
+            workspace_id = body["id"]
             self.workspaces[workspace_id] = {"id": workspace_id, **body}
             return {"workspace": self.workspaces[workspace_id]}
         if method == "POST" and path.endswith("/workflow-drafts/publish"):
@@ -375,8 +375,9 @@ def test_workspace_spec_creation_flow():
     client.workspaces = {}
     client.revisions = {}
     run_all(client, make_seed(), ["Acme Labs=invoices_pipeline:invoice"])
-    assert "acme_labs" in client.workspaces
-    assert client.workspaces["acme_labs"]["default_entity"] == "invoice"
+    assert WORKFLOW_KEY in client.workspaces
+    assert client.workspaces[WORKFLOW_KEY]["name"] == "Acme Labs"
+    assert client.workspaces[WORKFLOW_KEY]["default_entity"] == "invoice"
 
 
 def test_parse_workspace_spec():

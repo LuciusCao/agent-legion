@@ -9,6 +9,9 @@ from server.app.db.migrations.agent_worker_claim_state import migrate_agent_work
 from server.app.db.migrations.job_node_status_count_deltas import (
     migrate_job_node_status_count_deltas as _migrate_v88_node_deltas,
 )
+from server.app.db.migrations.retire_default_workflow_key import (
+    migrate_retire_default_workflow_key,
+)
 from server.app.db.migrations.studio_chat_session_archive import (
     migrate_studio_chat_session_archive,
 )
@@ -41,4 +44,8 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # archive (default list hides it, resume claim + spawn fence refuse it
     # until unarchive). Column, not status value, same argument as v89.
     SchemaMigration(90, "studio_chat_session_archive", migrate_studio_chat_session_archive),
+    # v91 (#211 M3): drop workspaces.default_workflow_key — equal to the id
+    # on every row since v62, so the id is the only identifier left. Guarded
+    # (drop if exists): fresh databases never create it.
+    SchemaMigration(91, "retire_default_workflow_key", migrate_retire_default_workflow_key),
 ]
