@@ -20,6 +20,9 @@ from shared.output_truncation import (
 from shared.pi_events import scan_and_compress_pi_events
 from tests.workers.upload_queue_testlib import QueueFakeClient, _execution_dir, _queue, _task
 
+# velites 产物契约的证据事件：exit 1 只有带它才可归因为触顶。
+_VALIDATION = {"type": "outputs_validation", "missing": ["output.json"]}
+
 
 def _assistant(stop_reason: str, event_type: str = "message_end") -> dict:
     return {"type": event_type, "message": {"role": "assistant", "stopReason": stop_reason}}
@@ -100,7 +103,8 @@ def test_velites_contract_exit_one_attributes_truncation(tmp_path: Path) -> None
     work_root = tmp_path / "work"
     _execution_dir(work_root)
     _drop_output(work_root)
-    _write_events(work_root, [_assistant("length"), _assistant("length")], ("velites: missing",))
+    events = [_assistant("length"), _assistant("length"), _VALIDATION, {"type": "agent_end"}]
+    _write_events(work_root, events, ("velites: missing",))
     report = _report(work_root, exit_code=1)
     assert report["status"] == "failed"
     assert report["exit_code"] == 1
@@ -146,3 +150,46 @@ def test_unrecovered_model_error_keeps_precedence(tmp_path: Path) -> None:
     report = _report(work_root, exit_code=0)
     assert report["status"] == "failed"
     assert report["error_message"] == "401 unauthorized"
+
+
+_MODEL_ERROR = {
+    "type": "message_end",
+    "message": {"role": "assistant", "stopReason": "error", "errorMessage": "429 rate limited"},
+}
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
+        # 早轮触顶 → 后续未恢复的模型错误（velites 出错直接 break，不发 outputs_validation）。
+        pytest.param([_assistant("length"), _MODEL_ERROR, {"type": "agent_end"}], id="model-error"),
+        # 早轮触顶 → max_turns 等预算耗尽（收尾轮后仍缺产物）。
+        pytest.param(
+            [
+                _assistant("length"),
+                _assistant("stop"),
+                _VALIDATION,
+                {"type": "agent_end", "reason": "budget_exceeded"},
+            ],
+            id="budget-exceeded",
+        ),
+        # pi 的 exit 1 是进程失败：没有 outputs_validation，不能归因为触顶。
+        pytest.param([_assistant("length")], id="pi-exit-1"),
+    ],
+)
+def test_exit_one_with_more_direct_cause_is_not_rewritten(
+    tmp_path: Path, events: list[dict]
+) -> None:
+    """review B2：exit 1 下更直接的原因（模型错误 / 预算耗尽 / 非契约退出）不被改写。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _drop_output(work_root)
+    _write_events(work_root, events, ("velites: boom",))
+    report = _report(work_root, exit_code=1)
+    assert report["status"] == "failed"
+    assert report["error_message"] == "Agent process exited 1: velites: boom"
+
+
+def test_truncation_message_mentions_context_window() -> None:
+    """Anthropic 的 model_context_window_exceeded 同样映射为 length，文案需覆盖。"""
+    assert "context window" in output_truncation_error(1, ["a.json"])

@@ -15,36 +15,53 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from shared.pi_model_error import fold_model_error
+
 OUTPUT_LIMIT_STOP_REASON = "length"
 OUTPUT_TRUNCATED_PREFIX = "Model output hit the per-call output token limit"
 _MAX_LISTED_MISSING = 10
-# 只有这两种退出码下「产物缺失」才是 run 的失败面：0 = pi（Host 判缺产物），
-# 1 = velites 产物契约退出；崩溃 / 超时 / 取消保持各自归因。
-_ATTRIBUTABLE_EXIT_CODES = (0, 1)
+_BUDGET_EXCEEDED = "budget_exceeded"
 
 
 @dataclass
 class OutputTruncation:
-    """单遍扫描中累计的输出触顶次数；``observe`` 作为扫描的事件观察者。"""
+    """单遍扫描中累计的触顶事实；``observe`` 作为扫描的事件观察者。
+
+    除触顶次数外还记录排除归因所需的旁证：未恢复的模型调用错误（与扫描的
+    model_error 同一 fold，但不受 exit 0 门控）、velites 的预算耗尽
+    （``agent_end.reason``）以及 ``outputs_validation`` 事件是否出现（证明
+    velites 的 exit 1 来自产物契约，而非崩溃 / 模型错误）。"""
 
     count: int = 0
+    model_error: str | None = None
+    budget_exceeded: bool = False
+    outputs_validated: bool = False
 
     def observe(self, event: dict[str, Any]) -> None:
-        # 只看 message_end：message_start/turn_end 也携带同一条消息，重复计数。
-        if event.get("type") != "message_end":
-            return
-        msg = event.get("message")
-        if not isinstance(msg, dict) or msg.get("role") != "assistant":
-            return
-        if msg.get("stopReason") == OUTPUT_LIMIT_STOP_REASON:
-            self.count += 1
+        self.model_error = fold_model_error(event, self.model_error)
+        kind = event.get("type")
+        if kind == "outputs_validation":
+            self.outputs_validated = True
+        elif kind == "agent_end":
+            self.budget_exceeded |= event.get("reason") == _BUDGET_EXCEEDED
+        elif kind == "message_end":
+            # 只看 message_end：message_start/turn_end 也携带同一条消息，重复计数。
+            msg = event.get("message")
+            if isinstance(msg, dict) and msg.get("role") == "assistant":
+                self.count += msg.get("stopReason") == OUTPUT_LIMIT_STOP_REASON
 
     def failure(self, expected: Sequence[str], produced: Sequence[str], exit_code: int) -> str:
-        """归因判定：触顶过、声明产物有缺失且退出码可归因时返回失败原因，否则 ""。
+        """归因判定：触顶过、声明产物缺失且缺失确由触顶解释时返回失败原因，否则 ""。
 
-        只改写失败原因、不改成败：产物齐全的触顶 run 照常完成。"""
+        只改写失败原因、不改成败：产物齐全的触顶 run 照常完成。可归因的退出面
+        只有两个：exit 0（pi 正常退出、Host 判缺产物）与带 ``outputs_validation``
+        的 exit 1（velites 产物契约退出）；pi 的 exit 1 是进程失败，不归因。未恢复
+        的模型错误、预算耗尽是更直接的原因，一律不改写。"""
         missing = [name for name in expected if name not in produced]
-        if not self.count or not missing or exit_code not in _ATTRIBUTABLE_EXIT_CODES:
+        contract_exit = exit_code == 0 or (exit_code == 1 and self.outputs_validated)
+        if not self.count or not missing or not contract_exit:
+            return ""
+        if self.model_error or self.budget_exceeded:
             return ""
         return output_truncation_error(self.count, missing)
 
@@ -58,5 +75,7 @@ def output_truncation_error(count: int, missing: Sequence[str]) -> str:
         f"{OUTPUT_TRUNCATED_PREFIX} (stopReason=length, {count}x) and declared outputs "
         f"are missing: {shown}. Thinking shares the same per-call output budget: lower "
         "execution.thinking, write the output in smaller chunks across several tool "
-        "calls, or raise the node config max_output_tokens (velites)"
+        "calls, or raise the node config max_output_tokens (velites). A provider may "
+        "also report a context-window overflow as stopReason=length; if the input is "
+        "already near the model's context window, shrink the context instead"
     )

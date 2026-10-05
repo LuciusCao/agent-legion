@@ -47,11 +47,16 @@
    pi runtime 无对应 flag，配置后被忽略（与 `max_turns` / `max_tokens` 一致）。
 2. **触顶失败归因**：Worker 结果准备（`worker/upload/prepare.py`）在同一遍
    事件扫描里统计 `stopReason=length` 次数（`shared/output_truncation.py`
-   `OutputTruncation`）。仅当**声明产物缺失**且退出码为 0（pi / Host 判缺产物）
-   或 1（velites 产物契约退出）时，失败原因改为
+   `OutputTruncation`）。仅当**声明产物缺失**、且退出确由产物缺失造成——exit 0
+   （pi 正常退出、Host 判缺产物），或 exit 1 且事件流含 velites 的
+   `outputs_validation`（产物契约退出；pi 的 exit 1 是进程失败，不归因）——
+   并且没有更直接的原因（未恢复的模型调用错误、`agent_end.reason=budget_exceeded`）
+   时，失败原因改为
    `Model output hit the per-call output token limit (stopReason=length, Nx) and declared outputs are missing: …`
    并给出配平手段。触顶但产物齐全的 run 仍判完成；崩溃、超时等其他退出码保持
-   原归因。失败分类新增 `technical / output_truncated`。
+   原归因。失败分类新增 `technical / output_truncated`。Anthropic 的
+   `model_context_window_exceeded` 同样映射为 `length`，事件流无法区分，故文案
+   同时提示上下文窗口溢出的可能。
 3. **日志告警**：job 日志渲染把 `stopReason=length` 从「模型调用错误
    stop_reason=length」改为「单次输出触顶」条目，说明 thinking 计入同一预算、
    未完成的工具调用未执行，以及可用的配平手段。即使后续轮次恢复、run 成功，

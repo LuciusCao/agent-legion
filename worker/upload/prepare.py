@@ -92,11 +92,12 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # #952: attribution only — replaces the opaque "Missing outputs" (exit 0,
     # Host-judged) / "Agent process exited 1" (velites output contract) face;
     # a truncated run whose outputs all landed still completes, and model
-    # errors / crashes / timeouts keep their own attribution.
+    # errors / budget exhaustion / crashes / timeouts keep their attribution
+    # (exclusion rules: OutputTruncation.failure).
     truncated_error = truncation.failure(task.expected_outputs, outputs, task.exit_code)
     if task.exit_code == 130:
         result_status, error = "cancelled", "Agent Worker is shutting down"
-    elif truncated_error and not model_error:
+    elif truncated_error:
         result_status, error = "failed", truncated_error
     elif task.exit_code == 0:
         if model_error:

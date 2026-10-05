@@ -5,7 +5,14 @@ use clap::Parser;
 use velites::cli::Cli;
 
 fn parse(value: &str) -> Result<Cli, clap::Error> {
-    Cli::try_parse_from(["velites", "--provider", "stub", "--max-output-tokens", value, "work"])
+    Cli::try_parse_from([
+        "velites",
+        "--provider",
+        "stub",
+        "--max-output-tokens",
+        value,
+        "work",
+    ])
 }
 
 #[test]
