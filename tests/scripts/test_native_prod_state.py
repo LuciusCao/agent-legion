@@ -401,3 +401,60 @@ def test_up_records_launch_pid_and_side_attaches_caffeinate() -> None:
         start = up.index(f"> data/logs/{log} 2>&1 &")
         assert up.index(f"{kind}_LAUNCH_PID=$!", start) < up.index("native_state_write", start)
     assert up.count('"$BACKEND_LAUNCH_PID" "$WORKER_BIND" "$WORKER_PORT" "$WORKER_LAUNCH_PID"') == 4
+
+
+def _up_function_call(repo: Path, name: str, snippet: str) -> subprocess.CompletedProcess[str]:
+    up = (ROOT / "scripts" / "native-prod-up.sh").read_text(encoding="utf-8")
+    match = re.search(rf"^{name}\(\) \{{.*?^\}}", up, re.MULTILINE | re.DOTALL)
+    assert match, f"{name} 函数定义缺失"
+    code = (
+        "set -euo pipefail\n"
+        f'ROOT="{repo}"\n'
+        f'source "{repo}/scripts/native-prod-state-lib.sh"\n' + match.group(0) + "\n" + snippet
+    )
+    return subprocess.run(["bash", "-c", code], capture_output=True, text=True, timeout=60)
+
+
+def test_rerun_with_same_config_adopts_pending_instance(repo: Path, procs: list) -> None:
+    """R3 finding：上次 up 在 nohup 之后、监听之前被中断，同配置重跑时记录中
+    的本实例虽未监听也视为已在运行（交给健康等待），不得再 nohup 第二个
+    进程；配置改了地址则不认领（由 refuse_recorded_instance_elsewhere 拒绝）。"""
+    port_b = _free_port()
+    argv = [sys.executable, "-c", _NOT_LISTENING, *_SIGNATURES["backend"]]
+    pending = _detach(procs, repo, [*argv, "--host", "127.0.0.1", "--port", str(port_b)])
+    deadline = time.monotonic() + 10
+    while (
+        "server.app.main"
+        not in subprocess.run(
+            ["ps", "-ww", "-o", "command=", "-p", str(pending.pid)], capture_output=True, text=True
+        ).stdout
+    ):
+        assert time.monotonic() < deadline, "fake backend did not exec"
+        time.sleep(0.05)
+    _write_state(repo, BACKEND_PID=pending.pid, BACKEND_BIND="127.0.0.1", BACKEND_PORT=port_b)
+    call = "recorded_pending_pid backend BACKEND 127.0.0.1 {}\n"
+
+    same = _up_function_call(repo, "recorded_pending_pid", call.format(port_b))
+    assert same.returncode == 0, same.stderr
+    assert same.stdout.strip() == str(pending.pid)
+    moved = _up_function_call(repo, "recorded_pending_pid", call.format(_free_port()))
+    assert moved.returncode == 0 and moved.stdout.strip() == ""
+
+    pending.kill()
+    assert _exited(pending)
+    gone = _up_function_call(repo, "recorded_pending_pid", call.format(port_b))
+    assert gone.returncode == 0 and gone.stdout.strip() == ""
+
+
+def test_up_never_relaunches_pending_recorded_instance() -> None:
+    """R3 接线钉：认领未就绪记录实例的分支在 nohup 分支之前，且认领值读在
+    任何记录覆盖之前；沿用的 PID 作为启动 PID 继续写入记录，超时提示先 down。"""
+    up = (ROOT / "scripts" / "native-prod-up.sh").read_text(encoding="utf-8")
+    first_write = up.index('native_state_write "$ROOT"')
+    for kind, label in (("BACKEND", "后端"), ("WORKER", "Worker")):
+        read = up.index(f'{kind}_PENDING_PID="$(recorded_pending_pid')
+        branch = up.index(f'elif [[ -n "${kind}_PENDING_PID" ]]; then')
+        adopt = up.index(f'{kind}_LAUNCH_PID="${kind}_PENDING_PID"', branch)
+        nohup = up.index("nohup .venv/bin/python", branch)
+        assert read < first_write and read < branch < adopt < nohup, label
+    assert "请先 make prod-down 按运行态记录停掉它" in up

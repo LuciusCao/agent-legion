@@ -127,6 +127,18 @@ refuse_recorded_instance_elsewhere() {
     return 1
 }
 
+# 同配置重跑时，记录中的本实例已启动但尚未监听（上次 up 在 nohup 之后、
+# 就绪之前被中断）：输出其 PID，调用方视其为已在运行——不再 nohup 第二个
+# 进程（两个进程会并行跑启动流程、连同一个库，#894 R3），改为等它就绪。
+recorded_pending_pid() {
+    local kind="$1" prefix="$2" bind="$3" port="$4" pid rec
+    pid="$(native_state_live_pid "$ROOT" "$kind" "$prefix")"
+    [[ -n "$pid" ]] || return 0
+    rec="$(native_state_get "$ROOT/$NATIVE_STATE_REL" "${prefix}_BIND"):$(native_state_get "$ROOT/$NATIVE_STATE_REL" "${prefix}_PORT")"
+    [[ "$rec" == "$bind:$port" ]] && echo "$pid"
+    return 0
+}
+
 # 健康检查与就绪提示用的探测地址：0.0.0.0 是 IPv4 全接口监听，必然含
 # IPv4 loopback，归一为 127.0.0.1；:: 是 IPv6 全接口（bindv6only=1 的
 # Linux 上不含 IPv4），必然含 ::1，归一为 [::1]——注意两个通配各自只
@@ -251,8 +263,14 @@ refuse_recorded_instance_elsewhere worker WORKER "Worker" "$WORKER_BIND" "$WORKE
 if [[ "$wildcard_rc" -ne 0 ]]; then
     exit 1
 fi
+# 必须在下方任何 native_state_write 覆盖记录之前读出。
+BACKEND_PENDING_PID="$(recorded_pending_pid backend BACKEND "$BACKEND_BIND" "$BACKEND_PORT")"
+WORKER_PENDING_PID="$(recorded_pending_pid worker WORKER "$WORKER_BIND" "$WORKER_PORT")"
 if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
     echo "后端已在 :$BACKEND_PORT 运行，跳过"
+elif [[ -n "$BACKEND_PENDING_PID" ]]; then
+    echo "后端（pid ${BACKEND_PENDING_PID}）已在启动中、尚未监听，等待其就绪，不重复启动"
+    BACKEND_LAUNCH_PID="$BACKEND_PENDING_PID"
 else
     echo "启动后端 $BACKEND_BIND:$BACKEND_PORT …"
     ulimit -n 65535
@@ -282,6 +300,9 @@ native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$BACKEND_LAUNCH_PID"
 # 3. Worker
 if port_listening "$WORKER_BIND" "$WORKER_PORT"; then
     echo "Worker 已在 :$WORKER_PORT 运行，跳过"
+elif [[ -n "$WORKER_PENDING_PID" ]]; then
+    echo "Worker（pid ${WORKER_PENDING_PID}）已在启动中、尚未监听，等待其就绪，不重复启动"
+    WORKER_LAUNCH_PID="$WORKER_PENDING_PID"
 else
     echo "启动 Worker $WORKER_BIND:$WORKER_PORT …"
     ulimit -n 65535
@@ -313,4 +334,7 @@ done
 # 未就绪也落记录（PID 取得到多少记多少），down 仍能按实际地址收拾残局。
 native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$BACKEND_LAUNCH_PID" "$WORKER_BIND" "$WORKER_PORT" "$WORKER_LAUNCH_PID"
 echo "服务未在预期时间内就绪，日志见 data/logs/prod-{backend,worker}.log" >&2
+if [[ -n "$BACKEND_PENDING_PID$WORKER_PENDING_PID" ]]; then
+    echo "其中沿用了上次未就绪的启动进程（未重复启动）；请先 make prod-down 按运行态记录停掉它，再重新 make prod-up" >&2
+fi
 exit 1
