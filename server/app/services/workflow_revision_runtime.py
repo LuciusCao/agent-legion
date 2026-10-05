@@ -19,11 +19,18 @@ if TYPE_CHECKING:
 
 def _structural_payload(definition: WorkflowDefinition) -> dict:
     payload = asdict(definition)
+    # ``execution.runtime`` (#933) is NOT a runtime setting: it selects the
+    # node's execution-profile source and is frozen with the revision/job
+    # snapshot, so changing it must publish a new revision (in-flight jobs
+    # keep the old one — PR #1039 codex R5). Only the remaining keys
+    # (provider/model/thinking/prompt) stay editable in place.
     for node in payload["nodes"].values():
-        node.pop("execution", None)
+        execution = node.pop("execution", None) or {}
+        node["profile_runtime"] = execution.get("runtime", "")
     # Top-level execution defaults are runtime settings like the node-level
     # block: editing them updates the active revision in place instead of
-    # publishing a structural revision.
+    # publishing a structural revision (its runtime default is already baked
+    # into every agent node above).
     payload.pop("execution", None)
     return payload
 

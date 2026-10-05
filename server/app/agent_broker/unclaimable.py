@@ -67,11 +67,13 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             select r.execution_id, r.job_id, r.node_key, r.manifest_json,
                    r.workspace_id,
                    hashtext('agent-ws:' || r.workspace_id)::int as ws_lock_key,
-                   d.definition_json::jsonb->>'runtime' as runtime,
+                   case when r.profile_source='node' then r.runtime
+                        else d.definition_json::jsonb->>'runtime' end as runtime,
                    wr.definition_json as revision_definition_json
             from agent_execution_requests r
-            join versioned_entities d
-              on d.entity_type='agent' and d.workspace_id=r.workspace_id
+            left join versioned_entities d
+              on r.profile_source='agent_definition'
+             and d.entity_type='agent' and d.workspace_id=r.workspace_id
              and d.entity_key=r.agent_id and d.definition_hash=r.agent_definition_hash
              -- Mirrors the claim candidate join: quality replay pins match
              -- their immutable version row, unpinned match published.
@@ -80,7 +82,10 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
                   or (r.pinned_agent_version is null and d.status='published'))
             join jobs j on j.id=r.job_id
             left join workflow_revisions wr on wr.id=j.workflow_revision_id
-            where r.state='queued'
+            where r.state='queued' and r.kind='agent'
+              -- Self-contained rows (#933) carry their runtime; legacy rows
+              -- need the live definition (stale ones are the other sweep's).
+              and (r.profile_source='node' or d.definition_json is not null)
             order by r.queued_at, r.execution_id
             limit %s
             """,

@@ -8,7 +8,6 @@ caller gates on the same config.
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +20,7 @@ from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.workflow_worker.execution import submit_claim
 from server.app.workflow_worker.local_dispatch import decide_local_code_dispatch
 from server.app.workflows.definition import WorkflowNode
+from server.app.workflows.workflow_node_execution import node_execution_payload
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -120,7 +120,7 @@ def claim_shard_locally(
         # per-shard missing-output check.
         expected_outputs=(f"shard_output-{shard_index}.json",),
         runtime={
-            "node_execution": asdict(node.execution),
+            "node_execution": node_execution_payload(node.execution),
             "shard_index": shard_index,
             "shard_input": shard_input,
         },

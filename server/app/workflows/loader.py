@@ -26,6 +26,10 @@ from server.app.workflows.validator import _validate_acyclic
 from server.app.workflows.workflow_execution_defaults import apply_workflow_execution
 from server.app.workflows.workflow_intake import load_intake
 from server.app.workflows.workflow_node_execution import load_node_execution
+from server.app.workflows.workflow_node_profile import (
+    load_node_requires_labels,
+    validate_node_profile_fields,
+)
 from server.app.workflows.workflow_node_skill import load_node_skill
 
 
@@ -215,7 +219,7 @@ def _load_nodes(
             raise WorkflowDefinitionError(
                 f"Node {node_key}.config must be a mapping with string keys"
             )
-        nodes[node_key] = WorkflowNode(
+        node = WorkflowNode(
             key=node_key,
             label=node_label,
             capability=capability,
@@ -228,12 +232,17 @@ def _load_nodes(
             config_schema=load_node_config_schema(raw_node, node_key),
             skill=load_node_skill(raw_node, node_key),
             tools=tuple(tools),
+            requires_labels=load_node_requires_labels(raw_node, node_key),
             shard=_load_shard(raw_node, node_key, inputs),
             reduce=_load_reduce(raw_node, node_key),
             node_type=node_type,
             accepted_item_types=accepted_item_types,
             text_input=text_input,
         )
+        # #933: self-contained profile fields (execution.runtime,
+        # requires_labels) are agent-only and the runtime must be known.
+        validate_node_profile_fields(node)
+        nodes[node_key] = node
 
     for node in nodes.values():
         for dep in node.after:

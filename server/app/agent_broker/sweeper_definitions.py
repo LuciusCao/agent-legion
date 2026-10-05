@@ -57,6 +57,9 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
               -- kind='code' payloads are self-contained: no versioned Agent
               -- definition exists for them by design (batch 2).
               and r.kind='agent'
+              -- Self-contained agent rows (profile_source='node', #933) froze
+              -- their profile on the row: no Agent definition can go stale.
+              and r.profile_source='agent_definition'
               and not exists (
                   select 1 from versioned_entities d
                   where d.entity_type='agent' and d.workspace_id=r.workspace_id

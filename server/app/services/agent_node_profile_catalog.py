@@ -4,8 +4,9 @@ The only production module allowed to read the published Agent catalog
 (``published_agent_definitions`` / ``has_published_agent_definitions``):
 the ratchet in ``scripts/architecture/agent_definition_callers.py`` turns
 any new direct caller red. Every other reader loads the legacy catalog here
-and resolves node profiles with ``agent_node_profile``; P2 (#933) widens
-the profile sources without touching those readers again.
+and resolves node profiles with ``agent_node_profile``, which since P2
+(#933) also yields self-contained ``source='node'`` profiles without
+touching those readers again.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.db.dialect import ConnectSource
+from server.app.jobs.queries.agent_profile_scan import has_self_contained_agent_nodes
 from server.app.services.agent_node_profile import (
     AgentNodeProfile,
     profile_from_definition,
@@ -52,8 +54,17 @@ def fresh_legacy_agent_catalog(
 
 
 def agent_profiles_may_exist(connect_source: ConnectSource) -> bool:
-    """Cheap cross-workspace probe for poll-loop scan gates (never for resolution)."""
-    return has_published_agent_definitions(connect_source)
+    """Cheap cross-workspace probe for poll-loop scan gates (never for resolution).
+
+    True when any workspace has a published Agent (legacy source) OR any
+    revision a job may still dispatch from (the active one, or one a runnable
+    job is pinned to) has a self-contained agent node (#933). The second half
+    is load-bearing: a workspace with no Agent definitions at all would
+    otherwise never scan its agent candidates (thread / agent_gate gates).
+    """
+    return has_published_agent_definitions(connect_source) or has_self_contained_agent_nodes(
+        connect_source
+    )
 
 
 def resolve_dispatch_agent_profile(

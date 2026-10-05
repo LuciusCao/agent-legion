@@ -335,6 +335,35 @@ flipping the field:
   > **Status note:** the runtime migration described above is complete; the
   > canary playbook is kept as operational context for future runtime changes.
 
+### 6.1 Self-contained agent nodes and rolling back to 0.7.15 (#933)
+
+From 0.7.16 an agent node may declare its own profile in the workflow YAML
+(`execution.runtime`, optional node-level `requires_labels`; the workflow
+top-level `execution.runtime` is the default). Such a node needs no Agent
+definition: its runtime is switched by editing the workflow and publishing a
+revision, and in-flight jobs pick the change up only through「升级 workflow」
+(the profile is frozen with the job snapshot). Queued requests of these
+nodes are marked `profile_source='node'` in `agent_execution_requests`
+(schema v92), with `agent_id` = node key.
+
+**Rolling the Host back to 0.7.15** needs no schema step (v92 only added
+columns, which 0.7.15 ignores), but plan for these rows:
+
+- 0.7.15 does not understand `profile_source='node'`: its stale-definition
+  sweeper finds no published Agent matching the row and fails the node with
+  `Agent definition '<node_key>' was disabled or changed while the request
+  was queued` (failure detail `stale_definition`). Nothing is claimed with
+  the wrong profile.
+- 0.7.15 ignores both fields when it loads the revision, so every
+  self-contained node silently turns back into a legacy Agent node and needs
+  exactly one published Agent definition for its capability. Publish those
+  definitions (same runtime / labels as the node profile) before or right
+  after the rollback, then rerun the failed nodes (rerun-by-failure on
+  `stale_definition` works as for any stale request).
+- Drain first when possible: pausing the affected workspaces and letting
+  claimed executions finish avoids failing queued rows at all; claimed and
+  running executions finish on their frozen manifests either way.
+
 ## 7. Troubleshooting
 
 | Symptom | Cause | Action |

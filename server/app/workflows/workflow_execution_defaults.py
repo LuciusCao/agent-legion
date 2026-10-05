@@ -15,10 +15,11 @@ from server.app.workflows.schema import (
     WorkflowNode,
     WorkflowNodeExecution,
 )
+from server.app.workflows.workflow_node_profile import validate_agent_runtime
 
 
 def load_workflow_execution(raw: dict[str, Any]) -> WorkflowNodeExecution:
-    """Optional top-level ``execution`` defaults (provider/model/thinking).
+    """Optional top-level ``execution`` defaults (provider/model/thinking/runtime).
 
     Same validation as the node-level block, minus ``prompt``/``prompt_mode``
     (#513) — a default prompt or prompt mode makes no sense across nodes.
@@ -31,11 +32,13 @@ def load_workflow_execution(raw: dict[str, Any]) -> WorkflowNodeExecution:
     if not isinstance(raw_execution, dict):
         raise WorkflowDefinitionError("Workflow execution must be a mapping")
     values: dict[str, str] = {}
-    for field_name in ("provider", "model", "thinking"):
+    for field_name in ("provider", "model", "thinking", "runtime"):
         value = raw_execution.get(field_name, "")
         if not isinstance(value, str):
             raise WorkflowDefinitionError(f"Workflow execution.{field_name} must be a string")
         values[field_name] = value
+    # #933 D5: the top-level runtime is the default for every agent node.
+    validate_agent_runtime(values["runtime"], "Workflow execution.runtime")
     if raw_execution.get("prompt"):
         raise WorkflowDefinitionError("Workflow execution.prompt is not allowed (node-level only)")
     if raw_execution.get("prompt_mode"):
@@ -66,6 +69,9 @@ def merge_execution_defaults(node: WorkflowNode, defaults: WorkflowNodeExecution
         thinking=execution.thinking or defaults.thinking,
         prompt=execution.prompt,
         prompt_mode=execution.prompt_mode,
+        # #933: the runtime default reaches agent nodes only — a code node
+        # must not declare one (the snapshot would fail its own reload).
+        runtime=execution.runtime or (defaults.runtime if node.node_type == "agent" else ""),
     )
     if merged == execution:
         return node
@@ -76,7 +82,7 @@ def apply_execution_defaults(
     nodes: dict[str, WorkflowNode], defaults: WorkflowNodeExecution
 ) -> dict[str, WorkflowNode]:
     """Merge the top-level defaults into every node; no-op when undeclared."""
-    if not (defaults.provider or defaults.model or defaults.thinking):
+    if not (defaults.provider or defaults.model or defaults.thinking or defaults.runtime):
         return nodes
     return {key: merge_execution_defaults(node, defaults) for key, node in nodes.items()}
 

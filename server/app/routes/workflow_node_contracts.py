@@ -12,6 +12,8 @@ class WorkflowNodeExecutionResponse(BaseModel):
     prompt: str = ""
     # #513：自定义提示词拼接模式（append/overwrite）；空 = append。
     prompt_mode: str = ""
+    # #933：自含 agent 节点的 runtime（空 = 走 Agent 定义旧路径）；只读。
+    runtime: str = Field(default_factory=str)
 
 
 class WorkflowNodeSkillResponse(BaseModel):
@@ -49,4 +51,6 @@ class WorkflowNodeResponse(BaseModel):
     # Node-level tool whitelist (#443): agent nodes only; empty = inherit the
     # Agent definition's tools at dispatch.
     tools: list[str] = Field(default_factory=list)
+    # #933：自含 agent 节点的 Worker 标签要求（Worker labels ⊇ 它）；只读。
+    requires_labels: dict[str, str] = Field(default_factory=dict)
     execution: WorkflowNodeExecutionResponse = Field(default_factory=WorkflowNodeExecutionResponse)
