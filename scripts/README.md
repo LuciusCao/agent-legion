@@ -72,6 +72,7 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 | `seed_from_prod.py` | 从本地 prod Docker stack 的 Postgres 只读导出并种子 develop 库（目标库名为 prod 名或 host 非 loopback 时拒绝执行）。无 make target，直接 `uv run python scripts/seed_from_prod.py` 调用。 |
 | `gc_artifacts.py` | 报告/回收 content-addressed artifact store 中零引用且超过在途宽限期的孤儿 blob（默认 dry-run，`--apply` 回收）。 |
 | `gc-s3-jobs.py` | 报告/回收对象存储 `jobs/`、`jobs-staging/` 前缀的孤儿对象（job 删除失败残留、promote 中途失败、staging 滞留；对照 `job_artifacts` 清单行 + 宽限窗判定，#340；默认 dry-run，`--apply` 回收）。 |
+| `agent_backfill_dry_run.py` | Agent 定义退役回填 dry-run 报告（#934 / #440，只读：连接强制 `default_transaction_read_only`、不跑 `init_db`、不碰对象存储）：遍历各 workspace 的 active revision 与草稿，模拟回填每个 agent 节点的 runtime / tools / config_schema / skill / requires_labels，列出共享定义组、解析不到的节点与 config_schema 覆盖差异。`uv run python -m scripts.agent_backfill_dry_run [--workspace ID] [--output PATH]`；报告反映部署数据，只留本地、不进仓库。 |
 | `report-orphan-s3-buckets.py` | 报告孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已不存在；只报不删，逐个给出 `clean-worktree.sh` 收尾命令，#340）。 |
 
 ## 一次性与运维脚本
