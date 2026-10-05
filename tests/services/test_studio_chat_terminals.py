@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
 
 import pytest
 
@@ -102,6 +103,7 @@ def test_kill_stops_a_long_running_terminal() -> None:
             output_byte_limit=None,
             default_cwd=".",
         )
+        # 保留：让子进程越过 exec 进入运行态再 kill；终端存储无公开就绪点，kill 语义不依赖该窗。
         await asyncio.sleep(0.3)
         await store.kill(created.terminalId)
         awaited = await store.wait_for_exit(created.terminalId)
@@ -191,27 +193,36 @@ def test_kill_takes_down_the_whole_process_group() -> None:
             output_byte_limit=None,
             default_cwd=".",
         )
-        await asyncio.sleep(0.5)
         terminal = store._terminals[created.terminalId]
         pgid = os.getpgid(terminal.process.pid)
-        # The group already has the direct child plus two sleeps.
-        # (macOS/Linux `ps` per-group listing; count what our group holds.)
+        import subprocess
+
+        def _group_members() -> list[list[str]]:
+            listing = subprocess.run(
+                ["ps", "-o", "pgid=", "-eo", "pgid,pid"], capture_output=True, text=True
+            )
+            return [
+                line.split()
+                for line in listing.stdout.splitlines()
+                if line.split() and line.split()[0] == str(pgid)
+            ]
+
+        # The group already has the direct child plus two sleeps — observed
+        # via the per-group `ps` listing rather than a fixed sleep (a kill
+        # before the sleeps spawn would make the test vacuous).
+        deadline = time.monotonic() + 10
+        while len(_group_members()) < 3 and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+        assert len(_group_members()) >= 3, _group_members()
         await store.kill(created.terminalId)
         awaited = await store.wait_for_exit(created.terminalId)
         assert awaited.exit_code is None  # group SIGKILL reads as signal death
-        await asyncio.sleep(0.3)
-        # After the group kill no member of the old pgid may survive.
-        import subprocess
-
-        listing = subprocess.run(
-            ["ps", "-o", "pgid=", "-eo", "pgid,pid"], capture_output=True, text=True
-        )
-        surviving = [
-            line.split()
-            for line in listing.stdout.splitlines()
-            if line.split() and line.split()[0] == str(pgid)
-        ]
-        assert surviving == []
+        # After the group kill no member of the old pgid may survive (poll
+        # until the orphaned sleeps are reaped instead of a fixed sleep).
+        deadline = time.monotonic() + 10
+        while _group_members() and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+        assert _group_members() == []
         await store.release(created.terminalId)
 
     asyncio.run(_run())

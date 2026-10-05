@@ -161,6 +161,7 @@ def test_max_workers_caps_live_threads() -> None:
         deadline = time.monotonic() + 5
         while pool.live_threads() < 3 and time.monotonic() < deadline:
             time.sleep(0.02)
+        # 保留：负向观察窗——达上限后线程数「不」继续增长。
         time.sleep(0.3)
         assert pool.live_threads() == 3
         release.set()
@@ -196,6 +197,7 @@ def test_shutdown_waits_for_in_flight_tasks() -> None:
 
     thread = threading.Thread(target=shutdown_thread)
     thread.start()
+    # 保留：负向观察窗——在飞任务未完成前 shutdown「不」返回。
     time.sleep(0.3)  # shutdown 已进入等待，任务仍在跑
     assert not finished.is_set()
     release.set()

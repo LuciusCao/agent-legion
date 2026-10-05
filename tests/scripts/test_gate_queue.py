@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import wait_for_predicate
+
 pytestmark = pytest.mark.no_db
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -138,6 +140,15 @@ def _write_slot(repo_dir: Path, name: str, pid: int, worktree: str = "/wt") -> N
     (slots / name).write_text(f"{pid}\n{worktree}\n2026-01-01T00:00:00Z\n", encoding="utf-8")
 
 
+def _wait_for_text(path: Path, text: str, timeout: float = 20.0) -> None:
+    """Poll a subprocess's redirected stream file until *text* shows up."""
+    wait_for_predicate(
+        lambda: path.exists() and text in path.read_text(encoding="utf-8"),
+        timeout=timeout,
+        interval=0.05,
+    )
+
+
 def test_acquire_creates_slot_and_release_removes_it(repo: Path) -> None:
     out = _bash(
         QUEUE_SCRIPT,
@@ -170,7 +181,7 @@ def test_dead_pid_slots_do_not_count_and_get_reclaimed(repo: Path) -> None:
     assert not list(_slots_dir(repo).glob("gate-*"))
 
 
-def test_live_slots_count_and_capacity_wait(repo: Path) -> None:
+def test_live_slots_count_and_capacity_wait(repo: Path, tmp_path: Path) -> None:
     holder = subprocess.Popen(["sleep", "60"])
     try:
         _write_slot(repo, "gate-holder", pid=holder.pid, worktree="/holder-wt")
@@ -198,6 +209,8 @@ def test_live_slots_count_and_capacity_wait(repo: Path) -> None:
         waiter_env.pop("AGENT_LEGION_GATE_SLOT_FILE", None)
         waiter_env.pop("AGENT_LEGION_GATE_SLOT_HELD", None)
         waiter_env.pop("AGENT_LEGION_MAX_PARALLEL_GATES", None)
+        waiter_err = tmp_path / "waiter.err"
+        err_handle = waiter_err.open("w", encoding="utf-8")
         waiter = subprocess.Popen(
             [
                 "bash",
@@ -211,12 +224,16 @@ def test_live_slots_count_and_capacity_wait(repo: Path) -> None:
             cwd=repo,
             env=waiter_env,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=err_handle,
             text=True,
         )
-        time.sleep(2)
+        # 等 waiter 真正进入排队（打出 queue-full 公告）再让 holder 退出，
+        # 不靠固定 sleep 猜它何时走到等待循环。
+        _wait_for_text(waiter_err, "Machine gate queue full")
         holder.terminate()
-        stdout, stderr = waiter.communicate(timeout=30)
+        waiter.communicate(timeout=30)
+        err_handle.close()
+        stderr = waiter_err.read_text(encoding="utf-8")
         assert waiter.returncode == 0, stderr
         assert "Machine gate queue full" in stderr
         assert "holder-wt" in stderr
@@ -251,13 +268,22 @@ def test_default_max_parallel_gates_is_one(repo: Path) -> None:
         holder.wait()
 
 
-def test_serialized_queue_gives_gate_full_machine_budget(repo: Path) -> None:
+def test_serialized_queue_gives_gate_full_machine_budget(repo: Path, tmp_path: Path) -> None:
     """With the default cap of 1, a queued gate that acquires the slot after
     the holder exits runs with the full worker budget (N=1 slot), not the
     divided one — serialization trades queue wait for lone-gate speed."""
     holder = subprocess.Popen(["sleep", "60"])
     try:
         _write_slot(repo, "gate-holder", pid=holder.pid)
+        # Scrub the parent gate's slot env (same as _bash): an unscrubbed
+        # waiter under check-quick.sh would take the re-entrant path and
+        # never queue behind the holder.
+        waiter_env = os.environ.copy()
+        waiter_env.pop("AGENT_LEGION_GATE_SLOT_FILE", None)
+        waiter_env.pop("AGENT_LEGION_GATE_SLOT_HELD", None)
+        waiter_env.pop("AGENT_LEGION_MAX_PARALLEL_GATES", None)
+        waiter_err = tmp_path / "waiter.err"
+        err_handle = waiter_err.open("w", encoding="utf-8")
         waiter = subprocess.Popen(
             [
                 "bash",
@@ -269,14 +295,18 @@ def test_serialized_queue_gives_gate_full_machine_budget(repo: Path) -> None:
                 "detect_gate_default_jobs_worktree_aware",
             ],
             cwd=repo,
+            env=waiter_env,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=err_handle,
             text=True,
         )
-        time.sleep(2)
+        # The waiter must really be queued behind the holder before it exits.
+        _wait_for_text(waiter_err, "Machine gate queue full")
         holder.terminate()
         holder.wait()
-        stdout, stderr = waiter.communicate(timeout=30)
+        stdout, _ = waiter.communicate(timeout=30)
+        err_handle.close()
+        stderr = waiter_err.read_text(encoding="utf-8")
         assert waiter.returncode == 0, stderr
         cores = _cpu_count()
         # Full budget: (cores-2)/1, clamped to [2, 8] — same as a lone gate.
@@ -458,7 +488,7 @@ done
 """
 
 
-def test_waiter_survives_yielding_contender_churn(repo: Path) -> None:
+def test_waiter_survives_yielding_contender_churn(repo: Path, tmp_path: Path) -> None:
     holder = subprocess.Popen(["sleep", "60"])
     churners = []
     waiter = None
@@ -474,6 +504,8 @@ def test_waiter_survives_yielding_contender_churn(repo: Path) -> None:
         waiter_env.pop("AGENT_LEGION_GATE_SLOT_FILE", None)
         waiter_env.pop("AGENT_LEGION_GATE_SLOT_HELD", None)
         waiter_env.pop("AGENT_LEGION_MAX_PARALLEL_GATES", None)
+        waiter_err = tmp_path / "waiter.err"
+        err_handle = waiter_err.open("w", encoding="utf-8")
         waiter = subprocess.Popen(
             [
                 "bash",
@@ -487,14 +519,17 @@ def test_waiter_survives_yielding_contender_churn(repo: Path) -> None:
             cwd=repo,
             env=waiter_env,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=err_handle,
             text=True,
         )
-        # The holder exits mid-wait; its slot frees via the age-based
-        # reclamation (the zombie pid stays kill-0-alive until reaped).
-        time.sleep(2)
+        # The holder exits mid-wait (once the waiter has announced it is
+        # queued); its slot frees via the age-based reclamation (the zombie
+        # pid stays kill-0-alive until reaped).
+        _wait_for_text(waiter_err, "Machine gate queue full")
         holder.terminate()
-        stdout, stderr = waiter.communicate(timeout=30)
+        waiter.communicate(timeout=30)
+        err_handle.close()
+        stderr = waiter_err.read_text(encoding="utf-8")
         assert waiter.returncode == 0, stderr
         assert "Machine gate queue full" in stderr
         assert "holder-wt" in stderr

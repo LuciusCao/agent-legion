@@ -31,6 +31,7 @@ def test_upsert_is_idempotent_and_advances_updated_at(job_db) -> None:
     again = job_db.upsert_workspace_workflow_draft(workspace["id"], "key: wf\n")
     assert again["created_at"] == first["created_at"]
 
+    # 保留的墙钟等待：断言 updated_at 严格前移，需要真实时钟推进。
     time.sleep(0.02)
     updated = job_db.upsert_workspace_workflow_draft(workspace["id"], "key: wf2\n")
     assert updated["definition_yaml"] == "key: wf2\n"

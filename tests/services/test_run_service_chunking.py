@@ -42,6 +42,7 @@ from server.app.services.run_partial_failure import PartialRunCreationError
 from server.app.services.run_service import RunService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from tests.helpers import load_builtin_definition
+from tests.helpers.pg_waits import backend_pid, wait_until_blocked_by
 
 WORKFLOW_KEY = "education_video_problems_generation"
 WORKSPACE_ID = "ws-run-chunk"
@@ -625,7 +626,8 @@ def test_material_delete_holding_for_update_blocks_chunk_probe(service, job_db) 
             thread = threading.Thread(target=_create)
             thread.start()
             assert entered.wait(timeout=5)
-            time.sleep(0.5)  # create_run 应正阻塞在该块的 FOR KEY SHARE 探测上
+            # create_run 应正阻塞在该块的 FOR KEY SHARE 探测上：以 pg_blocking_pids 观测为准。
+            wait_until_blocked_by(backend_pid(holder), thread=thread)
             assert thread.is_alive()
         thread.join(timeout=15)
     finally:
@@ -832,6 +834,7 @@ def test_identity_precheck_blocks_on_in_flight_id_insert(service, job_db) -> Non
         assert thread_a.is_alive(), "A should be parked inside its INSERT"
         thread_b = threading.Thread(target=_submit, args=("b", _material_item("col_a")))
         thread_b.start()
+        # 保留：负向观察窗——B 的在途形态不唯一（预查空过 / 阻塞在 A 的唯一索引仲裁 / 未到验证点），只断言窗内无决定性结果。
         time.sleep(0.6)
         # A 仍在泊车：B 未见决定性结果（预查空过、INSERT 阻塞在 A 的唯一
         # 索引仲裁上，或尚未到达验证点）——B 的最终命运由验证点裁决。

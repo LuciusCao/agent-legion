@@ -149,6 +149,7 @@ def test_close_during_pending_permission_stays_closed(chat) -> None:
     # Teardown settles the pending permission as denied; the waiter thread's
     # finally must not resurrect the closed session back to running.
     _wait_for(lambda: not runtime.pending_permissions)
+    # 保留：负向观察窗（断言会话「不被」复活），无正向事件可等。
     time.sleep(0.2)  # let a regressed finally's status write land
     assert service.get_session(session["id"])["status"] == "closed"
 

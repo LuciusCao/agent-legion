@@ -105,8 +105,10 @@ def test_queue_wait_grows_under_lane_pressure(
         def __init__(self) -> None:
             super().__init__()
             self.gate = threading.Event()
+            self.entered = threading.Event()
 
         def upload_artifact(self, path: Path) -> str:
+            self.entered.set()
             self.gate.wait(10)
             return super().upload_artifact(path)
 
@@ -117,9 +119,11 @@ def test_queue_wait_grows_under_lane_pressure(
         client, ExecutionStatusReporter(None), max_concurrency=1, heartbeat_interval=0.05
     )
     queue.submit(_task(tmp_path, "exec-1"))
-    time.sleep(0.3)  # exec-1 占住唯一车道
+    assert client.entered.wait(10), "exec-1 never took the only lane"
     queue.submit(_task(tmp_path, "exec-2"))
-    time.sleep(0.3)  # exec-2 在队列里等——gate 放行前它进不了车道
+    # 保留的墙钟等待：被测量的正是 queue_wait 时长，exec-2 必须真实排队一段时间
+    # （断言要求比 exec-1 多 >0.1s）——gate 放行前它进不了车道。
+    time.sleep(0.3)
     client.gate.set()
     wait_for_predicate(lambda: queue.depth == 0, timeout=10)
     queue.shutdown()

@@ -310,6 +310,7 @@ def test_close_during_permission_park_leaves_session_closed(chat) -> None:
             for m in service.list_messages(session["id"], workspace_id)
         )
     )
+    # 保留：负向观察窗——给回归的 finally 状态写一个落地窗口，断言会话「不被」复活。
     time.sleep(0.2)
     assert service.get_session(session["id"])["status"] == "closed"
     assert (
