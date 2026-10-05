@@ -1,5 +1,5 @@
 //! `bash` tool: run a command in the working directory with an allowlisted
-//! environment (#922 R-4; lifecycle helpers live in `bash_proc`).
+//! environment (#922 R-4, `bash_env`; lifecycle helpers live in `bash_proc`).
 //!
 //! The child is put in its own process group; on timeout OR cancellation the
 //! whole group receives SIGTERM, then SIGKILL after a grace period (Pi
@@ -67,6 +67,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+use super::bash_env;
 use super::bash_proc::{self, read_with_first_byte};
 use super::command_guard;
 use super::truncate::{self, TruncatedBy};
@@ -123,7 +124,7 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         // harness shutdown; the terminate path below handles timeout and
         // cancellation.
         .env_clear()
-        .envs(bash_proc::inherited_env())
+        .envs(bash_env::inherited_env())
         .kill_on_drop(true);
     #[cfg(unix)]
     cmd.process_group(0);
