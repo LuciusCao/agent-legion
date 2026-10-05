@@ -15,13 +15,15 @@ from server.app.auth.password_policy import WeakPasswordError, validate_new_pass
 from server.app.auth.passwords import hash_password
 
 CSRF = {"x-agent-legion-request": "1"}
+# Captured at import, before the autouse harness relaxation patches it.
+_PRODUCTION_FLOOR = password_policy.MIN_PASSWORD_LENGTH
 STRONG = "orbit-lantern-quiet-47"
 
 
 @pytest.fixture
 def floor(monkeypatch: pytest.MonkeyPatch) -> None:
     """Request AFTER ``client`` so the fixture admin bootstraps first."""
-    monkeypatch.setattr(password_policy, "MIN_PASSWORD_LENGTH", 12)
+    monkeypatch.setattr(password_policy, "MIN_PASSWORD_LENGTH", _PRODUCTION_FLOOR)
 
 
 @pytest.mark.no_db
@@ -45,7 +47,7 @@ def test_bootstrap_refuses_a_weak_password_and_stays_available(anon_client, floo
         "/api/auth/bootstrap", json={"username": "admin", "password": "admin-pw"}
     )
     assert response.status_code == 400
-    assert "at least 12 characters" in response.json()["detail"]
+    assert f"at least {_PRODUCTION_FLOOR} characters" in response.json()["detail"]
     assert anon_client.get("/api/auth/bootstrap").json() == {"available": True}
     ok = anon_client.post("/api/auth/bootstrap", json={"username": "admin", "password": STRONG})
     assert ok.status_code == 200, ok.text

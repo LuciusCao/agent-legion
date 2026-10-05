@@ -119,7 +119,7 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
 | # | 状态 | 位置 | 多副本下的症状形态 |
 |---|------|------|--------------------|
 | 1 | 事件总线（SSE fan-out） | `InProcessEventBus`（`server/app/events/bus.py`） | 副本 A 写入的 job/agent 事件只广播给连在 A 上的 SSE 客户端；连在 B 上的浏览器收不到该事件，表现为「任务明明在跑但界面不动」 |
-| 2 | 登录限速 | `LoginRateLimiter`（`server/app/auth/rate_limit.py`） | 每副本各自计数（账号 + IP / 账号 / IP 三把钥匙，#970），暴力破解配额被副本数稀释（N 副本 ≈ 每把钥匙 N 倍失败窗口） |
+| 2 | 登录限速 | `LoginRateLimiter`（`server/app/auth/rate_limit.py`） | 每副本各自计数（账号 + IP / 账号两个维度，#970），暴力破解配额被副本数稀释（N 副本 ≈ 每把钥匙 N 倍失败窗口） |
 | 3 | Studio Chat 会话 | `StudioChatService._runtimes`（`server/app/studio_chat/service.py`） | 会话的 agent 子进程只活在创建它的副本里；请求被负载均衡到另一副本时该会话互不可见，表现为「会话时有时无 / 无法继续」 |
 | 4 | 暂停状态启动重置 | `WorkspaceWorkerControl.reset_all_to_paused`（`server/app/worker_control.py`，`main.py` 启动调用） | 副本 B 启动即把全部 workspace 重置为暂停，把副本 A 上刚由操作员恢复的调度一并打掉，两个副本的暂停语义互相打架 |
 | 5 | hydration defer 公告（#887） | `HydrationDeferBoard`（`server/app/services/hydration_defer_board.py`），由 workflow worker 线程写入 | 只有恰好评估到该 job 的副本知道「输入恢复不全」；请求落到另一副本时 job 详情不显示提示，节点看起来只是普通「等待中」 |
