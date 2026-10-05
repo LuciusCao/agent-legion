@@ -22,6 +22,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from server.app.auth.scoped_tokens import renew_scoped_token
+from server.app.auth.sessions import hash_token
 from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import compaction
@@ -46,10 +48,14 @@ def retry_empty_turn(service: StudioChatService, session_id: str, runtime: Sessi
         message_id, text, prompt = runtime.empty_turn_retry
         if compaction.send_blocked(service.db, session_id, runtime, text):
             raise ConflictError(compaction.SEND_BLOCKED_DETAIL)
+        # Same credential path as human admission (admission.send_message):
+        # slide the run token before the turn, then re-check it under lock
+        # in the claim transaction itself.
+        renew_scoped_token(service.db, runtime.token)
+        require_live_run_token(service, session_id, runtime)
 
         def accept() -> None:
-            if not service.db.claim_studio_chat_turn(session_id):
-                raise StudioChatAdmissionRejected
+            service.db.claim_studio_chat_turn_with_token(session_id, hash_token(runtime.token))
             open_turn(runtime, text, message_id=message_id, prompt=prompt)
             try:
                 service.store.append_message(
@@ -68,6 +74,7 @@ def retry_empty_turn(service: StudioChatService, session_id: str, runtime: Sessi
         try:
             queued = runtime.handle.send_prompt(prompt, accept=accept)
         except StudioChatAdmissionRejected:
+            require_live_run_token(service, session_id, runtime)
             raise ConflictError("Chat session is no longer idle") from None
         if not queued:
             raise ConflictError("Chat session agent is not running")

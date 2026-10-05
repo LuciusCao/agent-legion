@@ -7,8 +7,12 @@ row and is a no-op once anything newer happened.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
+from server.app.auth.sessions import hash_token
+from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import empty_turn
 from tests.helpers import studio_chat_fixtures
 
@@ -37,7 +41,8 @@ def _drain(runtime) -> list[str]:
     items = []
     while not runtime.handle._queue.empty():
         item = runtime.handle._queue.get_nowait()
-        items.append(item if isinstance(item, str) else item[0])
+        if isinstance(item, (str, tuple)):  # skip the handle's close sentinel
+            items.append(item if isinstance(item, str) else item[0])
     return items
 
 
@@ -108,6 +113,55 @@ def test_newer_message_supersedes_the_replay(admission) -> None:
     assert runtime.empty_turn_retry is None
     assert service.resume_session(sid, workspace, "unused-user")["status"] == "idle"
     assert _drain(runtime) == []
+    assert _events(db, sid, "empty_turn_retry") == []
+
+
+def _expires_at(db, runtime):
+    with db.connect() as conn:
+        row = conn.execute(
+            "select expires_at from auth_scoped_tokens where token_hash=%s",
+            (hash_token(runtime.token),),
+        ).fetchone()
+    value = row["expires_at"]
+    return datetime.fromisoformat(value) if isinstance(value, str) else value
+
+
+def test_replay_renews_a_token_close_to_ttl(admission) -> None:
+    """Human-admission parity: a click near the run token's TTL slides it
+    forward before the replayed turn starts (codex R1 on #1028)."""
+    service, db, sid, workspace, runtime = admission
+    service.send_message(sid, workspace, "lost question")
+    _drain(runtime)
+    _empty_turn(service, sid, runtime)
+    soon = datetime.now(UTC) + timedelta(minutes=2)
+    with db.connect() as conn:
+        conn.execute(
+            "update auth_scoped_tokens set expires_at=%s where token_hash=%s",
+            (soon, hash_token(runtime.token)),
+        )
+    assert service.resume_session(sid, workspace, "unused-user")["status"] == "running"
+    assert _expires_at(db, runtime) > soon + timedelta(minutes=30)
+    assert len(_drain(runtime)) == 1
+
+
+def test_token_revoked_before_the_claim_sends_nothing(admission, monkeypatch) -> None:
+    """The claim transaction re-checks the token under lock: a revoke landing
+    after the pre-check refuses the replay with no turn claimed."""
+    service, db, sid, workspace, runtime = admission
+    service.send_message(sid, workspace, "lost question")
+    _drain(runtime)
+    _empty_turn(service, sid, runtime)
+    real_claim = db.claim_studio_chat_turn_with_token
+
+    def revoke_then_claim(session_id, token_hash):
+        db.revoke_scoped_token(token_hash)
+        return real_claim(session_id, token_hash)
+
+    monkeypatch.setattr(db, "claim_studio_chat_turn_with_token", revoke_then_claim)
+    with pytest.raises(ConflictError):
+        service.resume_session(sid, workspace, "unused-user")
+    assert _drain(runtime) == []
+    assert db.get_studio_chat_session(sid)["status"] != "running"
     assert _events(db, sid, "empty_turn_retry") == []
 
 

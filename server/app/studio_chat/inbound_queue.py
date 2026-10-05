@@ -29,6 +29,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from server.app.auth.sessions import hash_token
+from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.studio_chat import compaction
 from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
 from server.app.studio_chat.turn_state import open_turn
@@ -108,9 +109,7 @@ def _deliver(
             elif not _token_alive(service, runtime.token):
                 invalidate_run_token(service, session_id, runtime)
                 detail = DROPPED_TOKEN
-            elif not service.db.claim_studio_chat_turn(session_id):
-                detail = DROPPED_BUSY
-            else:
+            elif (detail := _claim(service, session_id, runtime)) is None:
                 open_turn(runtime, text, message_id=message_id, prompt=prompt)
         except Exception:
             # #204 broad-except audit: every step before the claim is a
@@ -121,6 +120,18 @@ def _deliver(
             detail = DROPPED_ERROR
         _note(service, session_id, message_id, detail)
         return detail is None
+
+
+def _claim(service: StudioChatService, session_id: str, runtime: SessionRuntime) -> str | None:
+    """Token lock + idle claim in one transaction (human-admission parity)."""
+    try:
+        service.db.claim_studio_chat_turn_with_token(session_id, hash_token(runtime.token))
+    except StudioChatAdmissionRejected:
+        alive = _token_alive(service, runtime.token)
+        if not alive:
+            invalidate_run_token(service, session_id, runtime)
+        return DROPPED_BUSY if alive else DROPPED_TOKEN
+    return None
 
 
 def _note(service: StudioChatService, session_id: str, message_id: str, detail: str | None) -> None:

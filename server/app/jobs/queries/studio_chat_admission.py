@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.studio_chat_messages import _message_record
 
 
 class StudioChatAdmissionRejected(Exception):
@@ -31,18 +32,14 @@ def _lock_live_token(conn: Any, token_hash: str) -> None:
         raise StudioChatAdmissionRejected
 
 
-def _user_record(
-    message_id: str, session_id: str, content: dict[str, Any], row: Any
-) -> dict[str, Any]:
-    return {
-        "id": message_id,
-        "session_id": session_id,
-        "kind": "text",
-        "role": "user",
-        "content": content,
-        "seq": row["seq"],
-        "created_at": row["created_at"],
-    }
+def _claim_idle(conn: Any, session_id: str) -> None:
+    claimed = conn.execute(
+        "update studio_chat_sessions set status='running', updated_at=current_timestamp"
+        " where id=%s and status='idle' returning id",
+        (session_id,),
+    ).fetchone()
+    if claimed is None:
+        raise StudioChatAdmissionRejected
 
 
 class StudioChatAdmissionQueriesMixin(ConnectionQueriesMixin):
@@ -53,20 +50,22 @@ class StudioChatAdmissionQueriesMixin(ConnectionQueriesMixin):
         content = {"text": text}
         with self.connect() as conn:
             _lock_live_token(conn, token_hash)
-            claimed = conn.execute(
-                "update studio_chat_sessions set status='running', updated_at=current_timestamp"
-                " where id=%s and status='idle' returning id",
-                (session_id,),
-            ).fetchone()
-            if claimed is None:
-                raise StudioChatAdmissionRejected
+            _claim_idle(conn, session_id)
             row = conn.execute(
                 "insert into studio_chat_messages(id,session_id,kind,role,content_json)"
                 " values (%s,%s,'text','user',%s) returning seq,created_at",
                 (message_id, session_id, json.dumps(content)),
             ).fetchone()
         assert row is not None
-        return _user_record(message_id, session_id, content, row)
+        return _message_record(message_id, session_id, "text", "user", content, row)
+
+    def claim_studio_chat_turn_with_token(self, session_id: str, token_hash: str) -> None:
+        """#882 replay / queued delivery: the human-admission token lock and
+        the idle claim in one transaction, for a message already persisted.
+        Raises StudioChatAdmissionRejected when either check fails."""
+        with self.connect() as conn:
+            _lock_live_token(conn, token_hash)
+            _claim_idle(conn, session_id)
 
     def enqueue_studio_chat_message(
         self, session_id: str, token_hash: str, text: str
@@ -88,4 +87,4 @@ class StudioChatAdmissionQueriesMixin(ConnectionQueriesMixin):
             ).fetchone()
             if row is None:
                 raise StudioChatAdmissionRejected
-        return _user_record(message_id, session_id, content, row)
+        return _message_record(message_id, session_id, "text", "user", content, row)
