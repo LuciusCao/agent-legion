@@ -245,3 +245,20 @@ jobs:
       # due within 7 days surface as ::warning:: annotations on the run.
       - name: Detect expired flaky-registry deadlines
         run: uv run python scripts/check_reruns.py --check-deadlines
+
+      # #1024: the schedule only ever checks out the default branch, so
+      # entries living only on develop / an unreleased release/* train had
+      # no expiry check at all. Fetch those branch tips (globs: a missing
+      # develop matches nothing instead of failing the fetch) and read each
+      # maintained branch's registry from git — develop plus every
+      # release/X.Y.Z above the default branch's pyproject version; shipped
+      # trains are covered by the step above. Selection rule and the
+      # lenient (pre-#941 schema) parsing live in the script, unit-tested.
+      - name: Fetch maintained branch tips
+        run: >-
+          git fetch --no-tags --depth=1 origin
+          '+refs/heads/develop*:refs/remotes/origin/develop*'
+          '+refs/heads/release/*:refs/remotes/origin/release/*'
+
+      - name: Detect expired flaky-registry deadlines on maintained branches
+        run: uv run python -m scripts.quality.flaky_branch_deadlines

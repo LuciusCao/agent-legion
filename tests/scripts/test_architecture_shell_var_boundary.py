@@ -39,7 +39,6 @@ def _bytes(text: str) -> bytes:
         'echo "$WORKER_PORT（127.0.0.1）"',
         'echo "$x中"',
         "echo $_v→",
-        "\t@echo $$STATE_COPY（dev）",
     ],
 )
 def test_bare_var_before_non_ascii_is_flagged(line: str) -> None:
@@ -63,6 +62,71 @@ def test_bare_var_before_non_ascii_is_flagged(line: str) -> None:
 )
 def test_safe_forms_are_not_flagged(line: str) -> None:
     assert find_violations("scripts/x.sh", _bytes(line)) == []
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "echo '$VAR中文'",  # single quotes never expand
+        "echo \\$VAR中文",  # escaped dollar is a literal
+        'echo "\\$VAR中文"',  # escaped inside double quotes too
+        "echo $'$VAR中文'",  # ANSI-C quoting does not expand $NAME
+        "trap 'rm -f \"$TMP，\"' EXIT",  # double quotes nested in single
+        "cat <<'EOF'\n$VAR中文\nEOF\n",  # quoted heredoc body is literal
+        'cat <<"EOF"\n$VAR中文\nEOF\n',
+        "cat <<\\EOF\n$VAR中文\nEOF\n",
+        "cat <<EOF\n\\$VAR中文\nEOF\n",  # escaped in unquoted heredoc
+        "echo $$X中",  # $$ is the PID parameter, X中 is literal text
+        "echo a # 行尾注释 $VAR，",
+        "x=$(( 1 << 2 ))\necho ok $X\n",  # arithmetic shift, not a heredoc
+        'grep -q x <<<"$S"\necho "ok"',  # here-string is not a heredoc
+    ],
+)
+def test_non_expanding_contexts_are_not_flagged(content: str) -> None:
+    """#1022：只在 shell 会展开的上下文判定——字面量与转义不误报。"""
+    assert find_violations("scripts/x.sh", _bytes(content)) == []
+
+
+@pytest.mark.parametrize(
+    ("content", "lineno"),
+    [
+        # A physical line starting with # inside a multi-line "..." expands.
+        ('echo "first\n# $VAR，still quoted"\n', 2),
+        # Unquoted heredoc body: # lines and quotes are plain body text.
+        ("cat <<EOF\n# $VAR，in heredoc\nEOF\n", 2),
+        ("cat <<-EOF\n\t'$VAR，'\n\tEOF\necho done\n", 2),
+        # Quotes inside a command substitution open their own frame.
+        ('printf \'%s\' "$(printf \'%s\' "$1" | sed "s/\'/x/")"\necho "$Y，"\n', 2),
+        # A heredoc after a quoted one is still tracked line by line.
+        ("cat <<'A'\n$X，\nA\ncat <<B\n$Z，\nB\n", 5),
+    ],
+)
+def test_expanding_multiline_contexts_are_flagged(content: str, lineno: int) -> None:
+    """#1022：跨行双引号串 / 未加引号 heredoc 内以 # 开头的物理行仍会展开，不漏检。"""
+    (error,) = find_violations("scripts/x.sh", _bytes(content))
+    assert error.startswith(f"scripts/x.sh:{lineno}: bare $")
+
+
+def test_makefile_recipes_follow_make_semantics() -> None:
+    """#1022：Makefile 按 make 语义——注释行跳过；$$ 即 shell 的 $，单个 $ 由 make 展开；
+    赋值值经 $(VAR) 粘进 recipe，其中的 $$NAME 仍会成为 shell 的 $NAME。"""
+    content = _bytes(
+        "# 注释 $$NOPE，\n"
+        "MSG = $$PASTED，\n"
+        "NAME = $(X)（make 变量）\n"
+        "all:\n"
+        "\t@echo $(MSG)（make 展开）\n"
+        "\t@echo '$$QUOTED，'\n"
+        "\t@echo $$STATE_COPY（dev）\n"
+        "\t@echo first \\\n"
+        "\t  $$CONT，\n"
+    )
+    errors = find_violations("Makefile", content)
+    assert [e.split(" ")[0] + " " + e.split(" ")[2] for e in errors] == [
+        "Makefile:2: $PASTED",
+        "Makefile:7: $STATE_COPY",
+        "Makefile:9: $CONT",
+    ]
 
 
 def test_violation_reports_line_number_and_braced_fix() -> None:
