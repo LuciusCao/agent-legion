@@ -22,6 +22,10 @@ hydration 的纪律是「恢复不全 → 不缓存评估、下一轮重试」�
 行被退役后重登）即重新计数；名字恢复成功或 job 离开可运行集即清除。
 状态只活在 workflow worker 进程内存里：重启后重新计数，最坏多 defer
 N 轮，不影响正确性。
+
+不可释放的升级项同时上 ``HydrationDeferBoard``（#887）：job 详情接口据此在
+受阻的等待节点上显示「输入恢复不全，建议重跑 X」，与普通排队区分；公告与
+计数同生共死（计数清除即撤下）。
 """
 
 from __future__ import annotations
@@ -37,6 +41,12 @@ from server.app.executors.artifact_restore import (
     RESTORED,
     restore_outcome_from_manifest_row,
 )
+from server.app.services.hydration_defer_board import (
+    HYDRATION_DEFER_BOARD,
+    HydrationDeferBoard,
+    HydrationDeferNotice,
+)
+from server.app.workflow_worker.hydration_defer_notice import defer_notice, rerun_nodes
 from server.app.workflows.condition_barrier import TERMINAL_SUCCESS_STATUSES
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.workflow_branching import RUNNABLE_STATUSES, effective_node_statuses
@@ -155,8 +165,13 @@ def settle_unrestored(
 class DanglingManifestStreaks:
     """per-worker 的悬挂清单行连续轮次账本（只由 poll 线程访问）。"""
 
-    def __init__(self, threshold: int = DANGLING_ESCALATION_PASSES) -> None:
+    def __init__(
+        self,
+        threshold: int = DANGLING_ESCALATION_PASSES,
+        board: HydrationDeferBoard = HYDRATION_DEFER_BOARD,
+    ) -> None:
         self.threshold = threshold
+        self.board = board
         self._streaks: dict[str, dict[str, _Streak]] = {}
 
     def observe(
@@ -188,15 +203,21 @@ class DanglingManifestStreaks:
         else:
             self._streaks.pop(job_id, None)
         releasable: set[str] = set()
+        notices: list[HydrationDeferNotice] = []
         for name, streak in sorted(current.items()):
             if streak.count < self.threshold:
                 continue
             release = rewrite_pending(definition, statuses, name)
             if release:
                 releasable.add(name)
+            else:
+                outcome, node_key = streak.identity[:2]
+                notices.append(defer_notice(definition, statuses, name, outcome, node_key))
             if not streak.reported:
                 streak.reported = True
                 self._report(job_id, name, streak, release, definition)
+        # 公告与计数同生共死：本轮无维持 defer 的升级项即撤下。
+        self.board.publish(job_id, notices)
         return frozenset(releasable)
 
     def describe(self, job_id: str) -> dict[str, str]:
@@ -210,6 +231,7 @@ class DanglingManifestStreaks:
         """丢弃已离开可运行集的 job（完成/失败/暂停/删除）。"""
         for job_id in [job_id for job_id in self._streaks if job_id not in job_ids]:
             del self._streaks[job_id]
+            self.board.publish(job_id, ())
 
     def _report(
         self,
@@ -220,7 +242,7 @@ class DanglingManifestStreaks:
         definition: WorkflowDefinition,
     ) -> None:
         outcome, node_key, storage_key = streak.identity[:3]
-        producers = sorted(artifact_producers(definition).get(name, set())) or [node_key]
+        producers = rerun_nodes(definition, name, node_key)
         if released:
             action = (
                 "treating it as absent so the job keeps scheduling; "

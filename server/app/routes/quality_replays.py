@@ -9,14 +9,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import reject_studio_agent_scope, require_user
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.quality_contracts import (
     QualityReplayCreateRequest,
     QualityReplayDetailResponse,
     QualityReplayListResponse,
     QualityReplayResponse,
 )
-from server.app.services.job_errors import JobServiceError
 from server.app.services.quality_replays import QualityReplayService
 
 
@@ -34,15 +32,12 @@ def create_quality_replays_router(replays: QualityReplayService) -> APIRouter:
         payload: QualityReplayCreateRequest,
         user: Annotated[dict[str, Any], Depends(require_user)],
     ) -> QualityReplayResponse:
-        try:
-            replay = replays.create_replay(
-                workspace_id,
-                item_id,
-                agent_version=payload.agent_version,
-                created_by=f"user:{user['id']}",
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        replay = replays.create_replay(
+            workspace_id,
+            item_id,
+            agent_version=payload.agent_version,
+            created_by=f"user:{user['id']}",
+        )
         return QualityReplayResponse.model_validate({"replay": replay})
 
     @router.get(
@@ -50,10 +45,7 @@ def create_quality_replays_router(replays: QualityReplayService) -> APIRouter:
         response_model=QualityReplayListResponse,
     )
     def list_replays(workspace_id: str, item_id: str) -> QualityReplayListResponse:
-        try:
-            rows = replays.list_replays(workspace_id, item_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        rows = replays.list_replays(workspace_id, item_id)
         return QualityReplayListResponse.model_validate({"replays": rows})
 
     @router.get(
@@ -61,10 +53,7 @@ def create_quality_replays_router(replays: QualityReplayService) -> APIRouter:
         response_model=QualityReplayDetailResponse,
     )
     def get_replay(workspace_id: str, replay_id: str) -> QualityReplayDetailResponse:
-        try:
-            detail = replays.get_replay_detail(workspace_id, replay_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        detail = replays.get_replay_detail(workspace_id, replay_id)
         return QualityReplayDetailResponse.model_validate(detail)
 
     return router
