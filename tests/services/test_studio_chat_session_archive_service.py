@@ -10,6 +10,7 @@ spawn registration fence (the #872 delete fence, extended to archived_at).
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -172,3 +173,55 @@ def test_archive_close_under_lock_rechecks_the_stamp(chat, job_db, monkeypatch) 
     assert archived["status"] == "idle"
     assert service.runtime(session_id) is not None
     service.close_session(session_id, workspace_id)
+
+
+def test_concurrent_archives_write_a_single_session_closed(chat, job_db, monkeypatch) -> None:
+    """#940: two archives of the same live session that both passed close's
+    pre-lock check serialize on runtime.lock; the later one must re-check the
+    closed state under the lock and leave the terminal marker to the first."""
+    service, _bus, register, workspace_id, user_id = chat
+    register(TEXT_SCRIPT)
+    minted = _capture_mints(monkeypatch)
+    session_id = service.create_session(workspace_id, user_id, "fake-agent")["id"]
+    runtime = service.runtime(session_id)
+    assert runtime is not None
+
+    snapshotted: set[threading.Thread] = set()
+    both_snapshotted = threading.Event()
+    original_runtime = service.runtime
+
+    def tracking_runtime(sid):
+        if threading.current_thread() in archivers:
+            snapshotted.add(threading.current_thread())
+            if len(snapshotted) == len(archivers):
+                both_snapshotted.set()
+        return original_runtime(sid)
+
+    monkeypatch.setattr(service, "runtime", tracking_runtime)
+    results: list[dict] = []
+    archivers = [
+        threading.Thread(
+            target=lambda: results.append(service.archive_session(session_id, workspace_id))
+        )
+        for _ in range(2)
+    ]
+    # Hold the generation lock so both archives pin the live runtime before
+    # either can commit the closed write.
+    with runtime.lock:
+        for thread in archivers:
+            thread.start()
+        assert both_snapshotted.wait(10)
+    for thread in archivers:
+        thread.join(10)
+        assert not thread.is_alive()
+
+    assert len(results) == 2
+    assert all(result["status"] == "closed" for result in results)
+    assert original_runtime(session_id) is None
+    assert authenticate_scoped_token(job_db, minted[0]) is None
+    events = [
+        message["content"].get("event")
+        for message in service.list_messages(session_id, workspace_id)
+        if message["kind"] == "status"
+    ]
+    assert events.count("session_closed") == 1

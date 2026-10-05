@@ -20,11 +20,9 @@ from server.app.routes.job_approval_contracts import (
     ApprovalDecisionResponse,
 )
 from server.app.routes.job_http import (
-    raise_job_http_error,
     raise_job_operation_error,
 )
 from server.app.services.approval_decisions import ApprovalDecisionService
-from server.app.services.job_errors import JobServiceError
 from server.app.services.job_operation_error import JobOperationError
 
 
@@ -57,8 +55,6 @@ def create_job_approvals_router(
             )
         except JobOperationError as exc:
             raise_job_operation_error(exc)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
         return ApprovalDecisionResponse(**decision)
 
     @router.get(
@@ -66,10 +62,7 @@ def create_job_approvals_router(
         response_model=ApprovalDecisionListResponse,
     )
     def list_approval_decisions(workspace_id: str, job_id: str) -> ApprovalDecisionListResponse:
-        try:
-            decisions = approvals.list_decisions(workspace_id, job_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        decisions = approvals.list_decisions(workspace_id, job_id)
         return ApprovalDecisionListResponse.model_validate({"decisions": decisions})
 
     return router
