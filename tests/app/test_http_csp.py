@@ -39,6 +39,12 @@ def test_spa_documents_carry_csp_and_other_responses_do_not(tmp_path, monkeypatc
             assert "'self'" in policy["connect-src"]
         assert "content-security-policy" not in client.get("/assets/main.js").headers
         assert "content-security-policy" not in client.get("/api/health").headers
+        # FastAPI's built-in API docs pages keep their own CDN-loaded UI.
+        for path in ("/docs", "/redoc", "/docs/oauth2-redirect"):
+            response = client.get(path)
+            assert response.status_code == 200, path
+            assert response.headers["content-type"].startswith("text/html")
+            assert "content-security-policy" not in response.headers, path
 
 
 @pytest.mark.no_db

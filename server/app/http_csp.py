@@ -1,8 +1,8 @@
 """Content-Security-Policy for the HTML documents the Host serves (#752).
 
 Every ``text/html`` response (the SPA shell, its catch-all, the
-frontend-missing page) gets one policy; API JSON, SSE, and raw artifact
-responses are left alone (raw HTML/SVG artifacts are already forced to
+frontend-missing page) gets one policy; API JSON, SSE, raw artifact
+responses and FastAPI's built-in ``/docs`` / ``/redoc`` pages are left alone (raw HTML/SVG artifacts are already forced to
 download, see services/job_artifact_media). The policy is a second layer
 behind DOMPurify, sized to what the shipped frontend actually loads:
 
@@ -91,6 +91,15 @@ def _is_plain_host(host: str) -> bool:
     return bool(host) and all(ch.isalnum() or ch in ".-:[]" for ch in host)
 
 
+# FastAPI's built-in API docs pages (default docs_url / redoc_url) load their
+# UI bundles from a CDN; the SPA policy is not theirs, so they are left alone.
+_API_DOCS_PATHS = ("/docs", "/redoc")
+
+
+def _is_api_docs_path(path: str) -> bool:
+    return any(path == base or path.startswith(base + "/") for base in _API_DOCS_PATHS)
+
+
 class ContentSecurityPolicyMiddleware:
     """Attach the document CSP to ``text/html`` responses lacking one."""
 
@@ -99,7 +108,7 @@ class ContentSecurityPolicyMiddleware:
         self.connect_sources = tuple(connect_sources)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
+        if scope["type"] != "http" or _is_api_docs_path(scope["path"]):
             await self.app(scope, receive, send)
             return
         host = Headers(scope=scope).get("host", "")
