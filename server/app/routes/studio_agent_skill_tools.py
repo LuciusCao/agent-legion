@@ -23,7 +23,6 @@ from server.app.auth.dependencies import (
     require_studio_agent_workspace,
 )
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.skill_catalog_route import (
     require_skill_key_in_workspace,
     resolve_skill_key_owner,
@@ -34,7 +33,7 @@ from server.app.routes.studio_agent_skill_contracts import (
     SkillSaveVersionResponse,
     SkillValidateToolResponse,
 )
-from server.app.services.job_errors import JobServiceError, NotFoundError
+from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_catalog import SkillCatalogService
 from server.app.services.skill_editing import SkillEditingService, SkillFileWrite
 from server.app.settings import Settings
@@ -61,29 +60,23 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
     def get_skill(
         workspace_id: str, skill_key: str, ref: str | None = None, for_edit: bool = False
     ) -> SkillDetailResponse:
-        try:
-            if for_edit:
-                _require_skill_writable_in_workspace(job_db, skill_key, workspace_id)
-            else:
-                _require_skill_in_workspace(job_db, skill_key, workspace_id)
-            return SkillDetailResponse(
-                **catalog.detail(
-                    skill_key, ref=ref, for_edit=for_edit, runs_dir=settings.skills_runs_dir
-                )
+        if for_edit:
+            _require_skill_writable_in_workspace(job_db, skill_key, workspace_id)
+        else:
+            _require_skill_in_workspace(job_db, skill_key, workspace_id)
+        return SkillDetailResponse(
+            **catalog.detail(
+                skill_key, ref=ref, for_edit=for_edit, runs_dir=settings.skills_runs_dir
             )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        )
 
     @router.post(
         "/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key:path}/validate",
         response_model=SkillValidateToolResponse,
     )
     def validate_skill(workspace_id: str, skill_key: str) -> SkillValidateToolResponse:
-        try:
-            _require_skill_in_workspace(job_db, skill_key, workspace_id)
-            return SkillValidateToolResponse(**editing.validate(skill_key))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        _require_skill_in_workspace(job_db, skill_key, workspace_id)
+        return SkillValidateToolResponse(**editing.validate(skill_key))
 
     @router.post(
         "/studio-agent/tools/workspaces/{workspace_id}/skills/{skill_key:path}/versions",
@@ -94,11 +87,8 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
         workspace_id: str, skill_key: str, payload: SkillSaveVersionRequest
     ) -> SkillSaveVersionResponse:
         files = [SkillFileWrite(path=item.path, content=item.content) for item in payload.files]
-        try:
-            _require_skill_writable_in_workspace(job_db, skill_key, workspace_id)
-            result = editing.save_version(skill_key, files, payload.new_tag, payload.message)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        _require_skill_writable_in_workspace(job_db, skill_key, workspace_id)
+        result = editing.save_version(skill_key, files, payload.new_tag, payload.message)
         assert result is not None  # None only when prepare skips (not used here)
         return SkillSaveVersionResponse(**result)
 

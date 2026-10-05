@@ -58,6 +58,16 @@ class JobsResponse(BaseModel):
     truncated: bool
 
 
+class HydrationDeferResponse(BaseModel):
+    """#887：节点因输入恢复不全（悬挂清单行）被挡，而非普通排队。"""
+
+    inputs: list[str]
+    reasons: list[str] = Field(
+        description="object_missing | hash_mismatch | corrupt（重试不会自愈的恢复失败）"
+    )
+    rerun_nodes: list[str] = Field(description="建议重跑以重新生成这些输入的生产节点 key")
+
+
 class JobNodeResponse(BaseModel):
     id: int
     job_id: str
@@ -77,6 +87,7 @@ class JobNodeResponse(BaseModel):
     executor_kind: Literal["code", "pi", "openclaw"] | None = None
     agent_id: str | None = None
     worker_id: str | None = None
+    hydration_defer: HydrationDeferResponse | None = None
 
 
 class NodeRunResponse(BaseModel):

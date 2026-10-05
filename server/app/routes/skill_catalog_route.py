@@ -7,9 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from server.app.auth.dependencies import get_current_user
 from server.app.db.dialect import ConnectSource
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.skill_contracts import SkillDetailResponse
-from server.app.services.job_errors import JobServiceError
 from server.app.services.skill_catalog import SkillCatalogService
 from server.app.settings import Settings
 
@@ -123,11 +121,8 @@ def create_skill_catalog_router(
         # an existence oracle on the workspace namespace.
         if resolve_skill_key_owner(job_db, skill_key) is None and not _skills().has_dir(skill_key):
             raise _skill_not_found()
-        try:
-            # ref (a git tag of the skill repo) previews that tag's content;
-            # an unknown tag is a 404 (see SkillDetailResponse).
-            return SkillDetailResponse(**_skills().detail(skill_key, ref=ref))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        # ref (a git tag of the skill repo) previews that tag's content;
+        # an unknown tag is a 404 (see SkillDetailResponse).
+        return SkillDetailResponse(**_skills().detail(skill_key, ref=ref))
 
     return router

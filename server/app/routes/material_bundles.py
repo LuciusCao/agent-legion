@@ -13,8 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.auth.workspace_access import require_workspace_access
-from server.app.routes.job_http import raise_job_http_error
-from server.app.services.job_errors import JobServiceError
 from server.app.services.material_bundles import (
     MAX_BUNDLE_MEMBERS,
     MaterialBundlesService,
@@ -84,15 +82,12 @@ def create_material_bundles_router(service: MaterialBundlesService) -> APIRouter
         payload: MaterialBundleCreateRequest,
         user: Annotated[dict[str, Any], Depends(require_workspace_access)],
     ) -> MaterialBundleResponse:
-        try:
-            result = service.create(
-                workspace_id,
-                name=payload.name,
-                members=[member.model_dump() for member in payload.members],
-                created_by=str(user.get("id") or ""),
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        result = service.create(
+            workspace_id,
+            name=payload.name,
+            members=[member.model_dump() for member in payload.members],
+            created_by=str(user.get("id") or ""),
+        )
         return MaterialBundleResponse(bundle=MaterialBundleRecord(**result))
 
     @router.get(
@@ -104,24 +99,16 @@ def create_material_bundles_router(service: MaterialBundlesService) -> APIRouter
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> MaterialBundleListResponse:
-        try:
-            return MaterialBundleListResponse(
-                **service.list(workspace_id, limit=limit, offset=offset)
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return MaterialBundleListResponse(**service.list(workspace_id, limit=limit, offset=offset))
 
     @router.get(
         "/workspaces/{workspace_id}/material-bundles/{bundle_id}",
         response_model=MaterialBundleResponse,
     )
     def get_bundle(workspace_id: str, bundle_id: str) -> MaterialBundleResponse:
-        try:
-            return MaterialBundleResponse(
-                bundle=MaterialBundleRecord(**service.get(workspace_id, bundle_id))
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return MaterialBundleResponse(
+            bundle=MaterialBundleRecord(**service.get(workspace_id, bundle_id))
+        )
 
     @router.delete(
         "/workspaces/{workspace_id}/material-bundles/{bundle_id}",
@@ -129,10 +116,7 @@ def create_material_bundles_router(service: MaterialBundlesService) -> APIRouter
         dependencies=[Depends(reject_studio_agent_scope)],
     )
     def delete_bundle(workspace_id: str, bundle_id: str) -> MaterialBundleDeleteResponse:
-        try:
-            service.delete(workspace_id, bundle_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        service.delete(workspace_id, bundle_id)
         return MaterialBundleDeleteResponse(deleted=bundle_id)
 
     return router

@@ -16,7 +16,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from server.app.auth.dependencies import enforce_scoped_workspace_binding, reject_studio_agent_scope
 from server.app.auth.workspace_access import require_workspace_access
 from server.app.events import JobEventManager
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_chat_config import create_studio_chat_config_router
 from server.app.routes.studio_chat_context import create_studio_chat_context_router
 from server.app.routes.studio_chat_contracts import (
@@ -34,7 +33,6 @@ from server.app.routes.studio_chat_contracts import (
 )
 from server.app.routes.studio_chat_events import create_studio_chat_events_router
 from server.app.routes.studio_chat_session_manage import create_studio_chat_session_manage_router
-from server.app.services.job_errors import JobServiceError
 from server.app.studio_chat.service import StudioChatService
 
 
@@ -68,12 +66,9 @@ def create_studio_chat_router(
         payload: StudioChatSessionCreateRequest,
         user: Annotated[dict[str, Any], Depends(require_workspace_access)],
     ) -> StudioChatSessionResponse:
-        try:
-            session = service.create_session(workspace_id, str(user["id"]), payload.agent_id)
-            if payload.title:
-                session = service.rename_session(session["id"], workspace_id, payload.title)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        session = service.create_session(workspace_id, str(user["id"]), payload.agent_id)
+        if payload.title:
+            session = service.rename_session(session["id"], workspace_id, payload.title)
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
 
     @router.get(
@@ -98,10 +93,7 @@ def create_studio_chat_router(
     def get_session(
         workspace_id: str, session_id: str, _user: scoped_read
     ) -> StudioChatSessionResponse:
-        try:
-            session = service.get_session(session_id, workspace_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        session = service.get_session(session_id, workspace_id)
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
 
     @guarded.delete(
@@ -109,10 +101,7 @@ def create_studio_chat_router(
         response_model=StudioChatSessionResponse,
     )
     def close_session(workspace_id: str, session_id: str) -> StudioChatSessionResponse:
-        try:
-            session = service.close_session(session_id, workspace_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        session = service.close_session(session_id, workspace_id)
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
 
     @guarded.post(
@@ -124,10 +113,7 @@ def create_studio_chat_router(
         session_id: str,
         user: Annotated[dict[str, Any], Depends(require_workspace_access)],
     ) -> StudioChatSessionResponse:
-        try:
-            session = service.resume_session(session_id, workspace_id, str(user["id"]))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        session = service.resume_session(session_id, workspace_id, str(user["id"]))
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
 
     @router.get(
@@ -137,10 +123,7 @@ def create_studio_chat_router(
     def list_messages(
         workspace_id: str, session_id: str, _user: scoped_read, after_seq: int = 0
     ) -> StudioChatMessagesResponse:
-        try:
-            messages = service.list_messages(session_id, workspace_id, after_seq=after_seq)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        messages = service.list_messages(session_id, workspace_id, after_seq=after_seq)
         return StudioChatMessagesResponse(
             messages=[StudioChatMessageRecord.model_validate(row) for row in messages]
         )
@@ -152,10 +135,7 @@ def create_studio_chat_router(
     def send_message(
         workspace_id: str, session_id: str, payload: StudioChatMessageCreateRequest
     ) -> StudioChatMessageResponse:
-        try:
-            message = service.send_message(session_id, workspace_id, payload.text)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        message = service.send_message(session_id, workspace_id, payload.text)
         return StudioChatMessageResponse(message=StudioChatMessageRecord.model_validate(message))
 
     @guarded.post(
@@ -163,10 +143,7 @@ def create_studio_chat_router(
         response_model=StudioChatSessionResponse,
     )
     def cancel_turn(workspace_id: str, session_id: str) -> StudioChatSessionResponse:
-        try:
-            session = service.cancel(session_id, workspace_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        session = service.cancel(session_id, workspace_id)
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
 
     @guarded.post(
@@ -181,16 +158,13 @@ def create_studio_chat_router(
     ) -> StudioChatPermissionAnswerResponse:
         if not payload.deny and not payload.option_id:
             raise HTTPException(status_code=422, detail="option_id is required unless deny=true")
-        try:
-            service.respond_permission(
-                session_id,
-                workspace_id,
-                request_id,
-                option_id=payload.option_id,
-                deny=payload.deny,
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        service.respond_permission(
+            session_id,
+            workspace_id,
+            request_id,
+            option_id=payload.option_id,
+            deny=payload.deny,
+        )
         return StudioChatPermissionAnswerResponse(resolved=request_id)
 
     # Order matters: the config router's fixed permissions/allow-all path
