@@ -92,6 +92,21 @@ stop_port() {
     stop_pid "$pid" "$bind:$port" "$name" "$grace"
 }
 
+# 按记录停：kill 紧前重新校验身份（签名 + --host/--port + 工作目录）——定位到
+# kill 之间实例可能已退出且 PID 被复用。校验不过就在记录地址上重新定位，
+# 仍找不到即视为已退出，不发任何信号。
+stop_recorded_pid() {
+    local kind="$1" pid="$2" bind="$3" port="$4" name="$5" grace="$6"
+    if ! native_pid_is_instance "$ROOT" "$kind" "$pid" "$port" "$bind"; then
+        pid="$(native_find_instance_pid "$ROOT" "$kind" "$bind" "$port")"
+        if [[ -z "$pid" ]]; then
+            echo "$name ${bind}:${port} 已退出，跳过"
+            return 0
+        fi
+    fi
+    stop_pid "$pid" "${bind}:${port}" "$name" "$grace"
+}
+
 # 运行态优先：记录中的实例仍在（签名校验通过）就按记录停，否则回落配置。
 stop_service() {
     local kind="$1" prefix="$2" bind="$3" port="$4" name="$5" grace="$6"
@@ -104,7 +119,7 @@ stop_service() {
             if [[ "$rec_bind:$rec_port" != "$bind:$port" ]]; then
                 echo "提示：按运行态记录停止 ${name}（实际 ${rec_bind}:${rec_port}，当前配置为 ${bind}:${port}）"
             fi
-            stop_pid "$pid" "$rec_bind:$rec_port" "$name" "$grace"
+            stop_recorded_pid "$kind" "$pid" "$rec_bind" "$rec_port" "$name" "$grace"
             return
         fi
         echo "提示：运行态记录中的 ${name}（${rec_bind}:${rec_port}）已不在运行或已非本实例，回落按当前配置 ${bind}:${port} 定位"

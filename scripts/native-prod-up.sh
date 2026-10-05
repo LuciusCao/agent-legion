@@ -261,6 +261,10 @@ else
         --log-config deploy/uvicorn-log-config.json \
         > data/logs/prod-backend.log 2>&1 &
 fi
+# 每起一个子进程立即落记录（#894）：nohup 子进程脱离本脚本存活，健康等待
+# 期间被 Ctrl-C / SIGHUP / 作业超时打断也不会丢掉「实例起在哪」。此刻尚未
+# 监听、PID 多半为空，down 届时按记录的 bind:port + 签名定位；就绪后再补 PID。
+native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$WORKER_BIND" "$WORKER_PORT"
 
 # 3. Worker
 if port_listening "$WORKER_BIND" "$WORKER_PORT"; then
@@ -273,6 +277,7 @@ else
         --host "$WORKER_BIND" --port "$WORKER_PORT" \
         > data/logs/prod-worker.log 2>&1 &
 fi
+native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$WORKER_BIND" "$WORKER_PORT"
 
 # 4. 健康等待：最多 5 分钟（#127——冷启动时 PG 冷缓存、schema 引导等
 # 仍可能超过 1 分钟；等待期间每 30s 输出一次进度，避免误报启动失败）。

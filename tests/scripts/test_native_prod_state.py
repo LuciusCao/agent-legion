@@ -39,7 +39,8 @@ _SIGNATURES = {
 # argv 尾部 [..., "--host", host, "--port", port]：与真实启动命令同形。
 _LISTENER = (
     "import socket, sys, time\n"
-    "s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+    "fam = socket.AF_INET6 if ':' in sys.argv[-3] else socket.AF_INET\n"
+    "s = socket.socket(fam); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
     "s.bind((sys.argv[-3], int(sys.argv[-1]))); s.listen(1)\n"
     "time.sleep(600)\n"
 )
@@ -107,13 +108,14 @@ def _detach(procs: list[_Proc], cwd: Path, argv: list[str]) -> _Proc:
     return proc
 
 
-def _spawn(procs: list[_Proc], cwd: Path, kind: str, port: int) -> _Proc:
+def _spawn(procs: list[_Proc], cwd: Path, kind: str, port: int, host: str = "127.0.0.1") -> _Proc:
     argv = [sys.executable, "-c", _LISTENER, *_SIGNATURES[kind]]
-    proc = _detach(procs, cwd, [*argv, "--host", "127.0.0.1", "--port", str(port)])
+    proc = _detach(procs, cwd, [*argv, "--host", host, "--port", str(port)])
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        with socket.socket() as sock:
-            if sock.connect_ex(("127.0.0.1", port)) == 0:
+        with socket.socket(family) as sock:
+            if sock.connect_ex((host, port)) == 0:
                 return proc
         time.sleep(0.05)
     raise AssertionError(f"fake {kind} did not listen on {port}")
@@ -175,14 +177,22 @@ def test_down_stops_recorded_instance_after_config_changed(repo: Path, procs: li
     assert not (repo / "data" / "native-prod.state").exists()
 
 
-def test_down_finds_instance_on_recorded_port_when_pid_stale(repo: Path, procs: list) -> None:
-    """记录 PID 已失效（实例被别的方式重启过）但记录端口上仍有签名匹配的本
-    实例监听：仍按运行态停它，而不是回落到已改的配置。"""
+@pytest.mark.parametrize("recorded_pid", ["dead", "empty"])
+def test_down_finds_instance_on_recorded_port_when_pid_stale(
+    repo: Path, procs: list, recorded_pid: str
+) -> None:
+    """记录 PID 已失效（实例被别的方式重启过），或为空（up 刚 nohup 子进程、
+    尚未监听就被中断——R1 finding：启动后立即落的记录此时只有地址）：记录的
+    bind:port 上仍有签名匹配的本实例监听时，按运行态停它，而不是回落到已改
+    的配置。"""
     old_b, old_w = _free_port(), _free_port()
     backend = _spawn(procs, repo, "backend", old_b)
-    dead = subprocess.Popen(["true"])
-    dead.wait()
-    _write_state(repo, BACKEND_PID=dead.pid, BACKEND_BIND="127.0.0.1", BACKEND_PORT=old_b)
+    pid: object = ""
+    if recorded_pid == "dead":
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        pid = dead.pid
+    _write_state(repo, BACKEND_PID=pid, BACKEND_BIND="127.0.0.1", BACKEND_PORT=old_b)
     _write_config(repo, _free_port(), old_w)
 
     result = _run_down(repo)
@@ -276,3 +286,66 @@ def test_state_write_records_listener_pid_and_address(repo: Path, procs: list) -
     assert f"BACKEND_PID={backend.pid}\n" in state
     assert f"BACKEND_PORT={port_b}\n" in state
     assert "WORKER_PID=\n" in state and "WORKER_BIND=0.0.0.0\n" in state
+
+
+def _down_call(repo: Path, snippet: str) -> subprocess.CompletedProcess[str]:
+    down = (ROOT / "scripts" / "native-prod-down.sh").read_text(encoding="utf-8")
+    funcs = []
+    for name in ("stop_pid", "stop_recorded_pid"):
+        match = re.search(rf"^{name}\(\) \{{.*?^\}}", down, re.MULTILINE | re.DOTALL)
+        assert match, f"{name} 函数定义缺失"
+        funcs.append(match.group(0))
+    code = (
+        "set -euo pipefail\n"
+        f'ROOT="{repo}"\n'
+        f'source "{repo}/scripts/native-prod-state-lib.sh"\n' + "\n".join(funcs) + "\n" + snippet
+    )
+    return subprocess.run(["bash", "-c", code], capture_output=True, text=True, timeout=60)
+
+
+def test_kill_reverifies_identity_right_before_signal(repo: Path, procs: list) -> None:
+    """R1 finding（TOCTOU）：定位到 kill 之间实例退出且 PID 被复用时，kill
+    紧前的复核不通过——在记录地址上重新定位，找不到就不发任何信号；找得到
+    （实例换了 PID 仍在记录地址）则停新定位到的本实例。"""
+    port = _free_port()
+    reused = _detach(procs, repo, ["sleep", "300"])  # 模拟 PID 已被无关进程复用
+    call = 'stop_recorded_pid backend {} 127.0.0.1 {} "后端" 5\n'
+
+    skipped = _down_call(repo, call.format(reused.pid, port))
+    assert skipped.returncode == 0, skipped.stderr
+    assert "已退出，跳过" in skipped.stdout
+    assert reused.alive()
+
+    backend = _spawn(procs, repo, "backend", port)
+    relocated = _down_call(repo, call.format(reused.pid, port))
+    assert relocated.returncode == 0, relocated.stderr
+    assert f"pid {backend.pid}" in relocated.stdout
+    assert _exited(backend) and reused.alive()
+
+
+def test_state_pid_and_address_come_from_same_listener(repo: Path, procs: list) -> None:
+    """R1 finding：同端口另一地址上已有本 worktree 的同类旧实例（先起、PID
+    更小）时，记录的 PID 必须是监听所记 bind 的那个进程，不能把旧实例的
+    PID 与新地址拼成一条记录。"""
+    port = _free_port()
+    old = _spawn(procs, repo, "backend", port, host="::1")
+    new = _spawn(procs, repo, "backend", port, host="127.0.0.1")
+    result = _lib_call(repo, f'native_state_write "$ROOT" 127.0.0.1 {port} 127.0.0.1 1\n')
+    assert result.returncode == 0, result.stderr
+    state = (repo / "data" / "native-prod.state").read_text(encoding="utf-8")
+    assert f"BACKEND_PID={new.pid}\n" in state
+    assert f"BACKEND_PID={old.pid}\n" not in state
+
+
+def test_up_records_state_right_after_each_launch() -> None:
+    """R1 finding 接线钉：每个 nohup 子进程起来后立即落记录（早于健康等待），
+    健康等待期间被中断也不丢实例地址。"""
+    up = (ROOT / "scripts" / "native-prod-up.sh").read_text(encoding="utf-8")
+    write = 'native_state_write "$ROOT" "$BACKEND_BIND"'
+    backend_start = up.index("> data/logs/prod-backend.log 2>&1 &")
+    worker_start = up.index("> data/logs/prod-worker.log 2>&1 &")
+    health_loop = up.index("for i in $(seq 1 150)")
+    after_backend = up.index(write, backend_start)
+    after_worker = up.index(write, worker_start)
+    assert after_backend < worker_start
+    assert worker_start < after_worker < health_loop
