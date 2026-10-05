@@ -295,22 +295,56 @@ def test_input_read_only_violation_that_also_rewrites_keeps_its_verdict_and_evic
     _assert_reads_serve_worker_bytes(job_dir, object_store)
 
 
+def test_unhashable_remote_output_never_skips_eviction_of_the_others(tmp_path: Path) -> None:
+    """codex #1031 R1：改写 A、令排序靠后的 B 不可读、并触发 input 只读错误——
+    B 记为无法验证（视为分歧），A、B 的本地副本都被逐出，原错误保留。"""
+    payload_b = b'{"b": "worker bytes"}'
+    staging_b = "jobs-staging/ws-1/job-1/exec-1/zz.json"
+    storage = _storage()
+    storage.objects[staging_b] = payload_b
+    script = _VALIDATE_REWRITE_IN_PLACE + (
+        "import os\n"
+        "os.chmod(pathlib.Path(sys.argv[1]) / 'zz.json', 0)\n"
+        "(pathlib.Path(sys.argv[1]) / 'in.json').write_text('{\"mutated\": true}')\n"
+    )
+    handler, leases, object_store, job_dir = _make_handler(tmp_path, storage, script)
+    (job_dir / "in.json").write_text('{"in": 1}', encoding="utf-8")
+    ref_b = {
+        "storage_key": staging_b,
+        "size_bytes": len(payload_b),
+        "content_hash": hashlib.sha256(payload_b).hexdigest(),
+    }
+
+    _finish(
+        handler,
+        {"out.json": _remote_ref(), "zz.json": ref_b},
+        expected=("out.json", "zz.json"),
+        inputs=("in.json",),
+    )
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert "mutated declared input 'in.json'" in result.error_message
+    _assert_reads_serve_worker_bytes(job_dir, object_store)
+    assert not (job_dir / "zz.json").exists()
+    raw = open_raw_artifact(job_dir / "zz.json", object_store, "job-1", "zz.json")
+    assert raw.path is None and raw.stream is not None
+    with raw.stream as stream:
+        assert stream.read() == payload_b
+
+
 def test_eviction_failure_never_replaces_the_original_verdict(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """#939：逐出自身出错只记日志，不吞掉 / 覆盖原校验错误。"""
-    import server.app.workflows.remote_output_guard as guard
+    real_unlink = Path.unlink
 
-    real_sha256 = guard.file_sha256
-    calls: list[Path] = []
-
-    def _sha256_then_boom(path: Path) -> str:
-        calls.append(path)
-        if len(calls) > 1:  # 首次是改写检测，其后是逐出环节
+    def _unlink_boom(self: Path, *args: Any, **kwargs: Any) -> None:
+        if self.name == "out.json":
             raise RuntimeError("evict exploded")
-        return real_sha256(path)
+        real_unlink(self, *args, **kwargs)
 
-    monkeypatch.setattr(guard, "file_sha256", _sha256_then_boom)
+    monkeypatch.setattr(Path, "unlink", _unlink_boom)
     storage = _storage()
     script = _VALIDATE_REWRITE_IN_PLACE + "print('bad output', file=sys.stderr)\nsys.exit(1)\n"
     handler, leases, _, _ = _make_handler(tmp_path, storage, script)
@@ -320,7 +354,6 @@ def test_eviction_failure_never_replaces_the_original_verdict(
     result = leases.results[0]
     assert result.status == "failed"
     assert result.error_message.startswith("Output validation failed: bad output")
-    assert len(calls) > 1
 
 
 def test_validator_replacing_remote_output_with_identical_bytes_completes(

@@ -42,18 +42,27 @@ def find_remote_output_rewrites(view_dir: Path, snapshot: Mapping[str, str]) -> 
 
     ``snapshot`` maps name -> sha256 of the bytes that landed (the promote
     phase's verified digest); the result maps name -> ``"rewritten"`` /
-    ``"deleted"``. A full re-hash, never a stat fast-path: replacing a file
-    with identical bytes is not flagged, while a same-size in-place rewrite
-    within one timestamp tick (unchanged size/mtime) is.
+    ``"deleted"`` / ``"unverifiable"``. A full re-hash, never a stat
+    fast-path: replacing a file with identical bytes is not flagged, while a
+    same-size in-place rewrite within one timestamp tick (unchanged
+    size/mtime) is. Each output is checked independently (#939): one that
+    cannot be hashed is recorded as unverifiable — treated as diverged — and
+    never stops the check of the others.
     """
-    changes: dict[str, str] = {}
-    for name in sorted(snapshot):
-        path = view_dir / name
-        if not path.is_file():
-            changes[name] = "deleted"
-        elif file_sha256(path) != snapshot[name]:
-            changes[name] = "rewritten"
-    return changes
+    kinds = {name: _change_kind(view_dir / name, snapshot[name]) for name in sorted(snapshot)}
+    return {name: kind for name, kind in kinds.items() if kind is not None}
+
+
+def _change_kind(path: Path, digest: str) -> str | None:
+    if not path.is_file():
+        return "deleted"
+    try:
+        return None if file_sha256(path) == digest else "rewritten"
+    except Exception:
+        # #204 broad-except audit: fail-closed — an unhashable copy is
+        # untrusted (diverged from the authority digest), never a reason to
+        # stop checking or evicting the others (#939).
+        return "unverifiable"
 
 
 def evict_diverged_copies(snapshot: Mapping[str, str], names: Iterable[str], *dirs: Path) -> None:
@@ -67,13 +76,14 @@ def evict_diverged_copies(snapshot: Mapping[str, str], names: Iterable[str], *di
     dropping the diverged copy sends readers to the authority object — no
     download-back. Copies still matching the digest (e.g. the job-dir inode a
     replace-family rewrite left alone) stay. Runs only after the verdict is
-    final; any eviction failure is logged and never masks that verdict.
+    final; a copy that cannot be hashed is untrusted and evicted too (#939);
+    any eviction failure is logged and never masks that verdict.
     """
     for name in names:
         for base in dict.fromkeys(dirs):
             path = base / name
             try:
-                if path.is_file() and file_sha256(path) != snapshot[name]:
+                if _change_kind(path, snapshot[name]) in ("rewritten", "unverifiable"):
                     path.unlink()
             except Exception as exc:
                 # #204 broad-except audit: log-and-continue — eviction runs
@@ -90,15 +100,12 @@ def guard_remote_outputs(
     failure, or a raised view arm already converted to ``Validator error:``
     (e.g. a mutated declared input). A rewrite fails the node only when no
     verdict exists yet (the original message wins) and always evicts the
-    diverged local copies. Neither a hashing error nor an eviction error may
-    replace or drop an existing verdict.
+    diverged local copies — an output that cannot be hashed counts as
+    diverged (``"unverifiable"``), so one unreadable file never skips the
+    eviction of the others. No hashing or eviction error may replace or drop
+    an existing verdict.
     """
-    try:
-        rewrites = find_remote_output_rewrites(view_dir, snapshot)
-    except Exception as exc:
-        # #204 broad-except audit: convert-to-contract — an unreadable landed
-        # file (OSError) fails THIS node, never masking an earlier verdict.
-        return verdict or f"Validator error: {exc}"
+    rewrites = find_remote_output_rewrites(view_dir, snapshot)
     if rewrites:
         verdict = verdict or remote_output_rewrite_error(rewrites)
         evict_diverged_copies(snapshot, rewrites, view_dir, job_dir)
