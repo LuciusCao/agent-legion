@@ -16,7 +16,7 @@ import uuid
 from collections.abc import Sequence
 from pathlib import Path
 
-from server.app.services.skill_build_residue import is_build_residue
+from server.app.services.skill_build_residue_io import carry_build_residue
 from server.app.services.skill_shared_store import (
     SHARED_DIR_NAME,
     SharedMaterialWriteError,
@@ -40,8 +40,9 @@ def write_shared_materials(
     message names it.
 
     #1038: build residue in the live dir is carried into the staged tree
-    (``_carry_build_residue``) — "files omitted from the payload disappear"
-    applies to authored files only, never to residue the export skipped.
+    (``skill_build_residue_io.carry_build_residue``) — "files omitted from
+    the payload disappear" applies to authored files only, never to residue
+    the export skipped.
     """
     staging = shared_dir.parent / f"{SHARED_DIR_NAME}.tmp-{uuid.uuid4().hex[:12]}"
     retired = shared_dir.parent / f"{SHARED_DIR_NAME}.old-{uuid.uuid4().hex[:12]}"
@@ -56,7 +57,7 @@ def write_shared_materials(
             if had_previous:
                 # #1038: carried under the lock, BEFORE the live dir moves —
                 # a copy failure aborts the write with the live dir untouched.
-                _carry_build_residue(shared_dir, staging)
+                carry_build_residue(shared_dir, staging)
                 os.rename(shared_dir, retired)
             try:
                 os.rename(staging, shared_dir)
@@ -80,48 +81,3 @@ def write_shared_materials(
         shutil.rmtree(staging, ignore_errors=True)
         if not keep_retired:
             shutil.rmtree(retired, ignore_errors=True)
-
-
-def _carry_build_residue(shared_dir: Path, staging: Path) -> None:
-    """Copy the live dir's build residue (``__pycache__/``, ``*.pyc``) into
-    the staged tree so the swap does not remove it (#1038).
-
-    Why keep rather than clean: the editing snapshot SKIPS residue, so a
-    round-trip (export → PUT) never mentioned it — deleting it would turn
-    "skipped from the export" into "deleted by omission", and the swap
-    would silently remove files nobody asked to remove (a locally running
-    validator also just recreates them). Residue is carried only where its
-    owning directory survives in the new state (a dropped ``scripts/x/``
-    takes its ``__pycache__`` with it), symlinks are never followed or
-    copied, and existing staged paths win (the payload cannot author
-    residue anyway — ``validate_shared_put_payload`` rejects it).
-    """
-    for dirpath, dirnames, filenames in os.walk(shared_dir, followlinks=False):
-        current = Path(dirpath)
-        relative_dir = current.relative_to(shared_dir)
-        for filename in filenames:
-            relative = relative_dir / filename
-            if not is_build_residue(relative.as_posix()):
-                continue
-            source = current / filename
-            owner = relative.parent
-            while owner.parts and is_build_residue(owner.as_posix()):
-                owner = owner.parent
-            target = staging / relative
-            if (
-                source.is_symlink()
-                or not source.is_file()  # FIFOs/devices: never open them
-                or not (staging / owner).is_dir()
-                or target.exists()
-            ):
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                shutil.copy2(source, target, follow_symlinks=False)
-            except FileNotFoundError:
-                # A validator outside the lock removed it between the walk and
-                # the copy: nothing left to keep. Any other OSError aborts.
-                target.unlink(missing_ok=True)
-        # Never descend through a symlinked directory (os.walk lists it in
-        # dirnames but, with followlinks=False, does not enter it).
-        dirnames[:] = [name for name in dirnames if not (current / name).is_symlink()]

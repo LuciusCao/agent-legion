@@ -241,21 +241,21 @@ def test_created_skill_keeps_a_declared_gitignore(home: Path, tmp_path: Path) ->
 def test_residue_vanishing_mid_copy_is_skipped_other_errors_abort(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from server.app.services import skill_shared_swap
+    from server.app.services import skill_build_residue_io
     from server.app.services.skill_shared_store import SharedMaterialWriteError
 
     root = _shared(tmp_path)
     targets = validate_shared_put_payload(
         root, [(item["path"], item["content"]) for item in shared_edit_snapshot(root)]
     )
-    real_copy = skill_shared_swap.shutil.copy2
+    real_copy = skill_build_residue_io.shutil.copy2
 
     def vanishing_copy(source, target, **kwargs):
         if Path(source).name == "stray.pyc":
             Path(source).unlink()  # a validator outside the lock cleaned it
         return real_copy(source, target, **kwargs)
 
-    monkeypatch.setattr(skill_shared_swap.shutil, "copy2", vanishing_copy)
+    monkeypatch.setattr(skill_build_residue_io.shutil, "copy2", vanishing_copy)
     write_shared_materials(root, list(targets.items()), tmp_path)
     assert not (root / "scripts" / "stray.pyc").exists()
     assert (root / "scripts" / "__pycache__" / "common.cpython-312.pyc").read_bytes() == _PYC
@@ -263,7 +263,7 @@ def test_residue_vanishing_mid_copy_is_skipped_other_errors_abort(
     def denied_copy(source, target, **kwargs):
         raise PermissionError("denied")
 
-    monkeypatch.setattr(skill_shared_swap.shutil, "copy2", denied_copy)
+    monkeypatch.setattr(skill_build_residue_io.shutil, "copy2", denied_copy)
     with pytest.raises(SharedMaterialWriteError):
         write_shared_materials(root, [*targets.items(), ("scripts/new.py", "Y\n")], tmp_path)
     assert not (root / "scripts" / "new.py").exists()  # live dir untouched

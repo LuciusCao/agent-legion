@@ -14,7 +14,7 @@ from pathlib import Path
 
 from server.app.services import skill_repo
 from server.app.services.job_errors import ConflictError
-from server.app.services.skill_build_residue import is_build_residue
+from server.app.services.skill_build_residue_io import tree_blocks_save
 from server.app.services.skill_repo_edit import SkillEditValidationError
 
 GitRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -50,44 +50,14 @@ def check_clean(run_git: GitRunner, skill_key: str, repo_dir: Path) -> None:
     the commit, while a STAGED one still refuses. ``-uall`` lists untracked
     files individually (a collapsed ``?? scripts/`` would hide whether the
     directory holds anything but residue); ``-z`` keeps paths unquoted.
-    The index is never rewritten here (no ``git rm --cached``).
+    The index is never rewritten here (no ``git rm --cached``); a status
+    output that cannot be decoded (non-UTF-8 file name) also refuses.
     """
-    try:
-        status = run_git(
-            repo_dir, ["status", "--porcelain", "-z", "--untracked-files=all"], check=False
-        )
-        blocking = status.returncode != 0 or bool(_blocking_entries(status.stdout))
-    except UnicodeDecodeError:
-        # -z prints raw (unquoted) path bytes: a non-UTF-8 file name (Linux)
-        # fails the runner's strict text decode. Such an entry is dirt we
-        # cannot classify — refuse like any dirty tree (409, never a 500).
-        blocking = True
-    if blocking:
+    if tree_blocks_save(run_git, repo_dir):
         raise ConflictError(
             f"Skill {skill_key!r} repo has uncommitted changes; commit or revert them first"
             " (unstaged build residue such as __pycache__/ or *.pyc is ignored)"
         )
-
-
-def _blocking_entries(porcelain_z: str) -> list[str]:
-    """Dirty entries of ``git status --porcelain -z`` that block a save."""
-    blocking: list[str] = []
-    tokens = porcelain_z.split("\0")
-    index = 0
-    while index < len(tokens):
-        entry = tokens[index]
-        index += 1
-        if not entry:
-            continue
-        code, path = entry[:2], entry[3:]
-        if "R" in code or "C" in code:
-            index += 1  # the rename/copy source path follows as its own token
-            blocking.append(path)
-            continue
-        if code[0] in " ?" and is_build_residue(path):
-            continue
-        blocking.append(path)
-    return blocking
 
 
 def check_overwrites(
