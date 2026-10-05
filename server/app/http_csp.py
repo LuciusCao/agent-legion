@@ -93,11 +93,13 @@ def _is_plain_host(host: str) -> bool:
 
 # FastAPI's built-in API docs pages (default docs_url / redoc_url) load their
 # UI bundles from a CDN; the SPA policy is not theirs, so they are left alone.
-_API_DOCS_PATHS = ("/docs", "/redoc")
+# Exact paths only: anything else under these prefixes falls through to the
+# SPA catch-all and must keep the SPA policy.
+_API_DOCS_PATHS = frozenset({"/docs", "/docs/oauth2-redirect", "/redoc"})
 
 
 def _is_api_docs_path(path: str) -> bool:
-    return any(path == base or path.startswith(base + "/") for base in _API_DOCS_PATHS)
+    return path in _API_DOCS_PATHS
 
 
 class ContentSecurityPolicyMiddleware:
