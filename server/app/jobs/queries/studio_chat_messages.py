@@ -14,6 +14,20 @@ from uuid import uuid4
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
+def _message_record(
+    message_id: str, session_id: str, kind: str, role: str, content: dict[str, Any], row: Any
+) -> dict[str, Any]:
+    return {
+        "id": message_id,
+        "session_id": session_id,
+        "kind": kind,
+        "role": role,
+        "content": content,
+        "seq": row["seq"],
+        "created_at": row["created_at"],
+    }
+
+
 class StudioChatMessageQueriesMixin(ConnectionQueriesMixin):
     """CRUD for studio_chat_messages."""
 
@@ -28,15 +42,36 @@ class StudioChatMessageQueriesMixin(ConnectionQueriesMixin):
                 (message_id, session_id, kind, role, json.dumps(content)),
             ).fetchone()
         assert row is not None  # insert ... returning always yields a row
-        return {
-            "id": message_id,
-            "session_id": session_id,
-            "kind": kind,
-            "role": role,
-            "content": content,
-            "seq": row["seq"],
-            "created_at": row["created_at"],
-        }
+        return _message_record(message_id, session_id, kind, role, content, row)
+
+    def append_studio_chat_message_if_live(
+        self,
+        session_id: str,
+        kind: str,
+        role: str,
+        content: dict[str, Any],
+        live_statuses: tuple[str, ...],
+    ) -> dict[str, Any] | None:
+        """Insert only while the session is live and not soft-deleted (#915).
+
+        One statement: the liveness predicate and the INSERT cannot be split
+        by a concurrent close / soft delete. ``FOR SHARE`` on the session row
+        makes a racing status/deleted_at UPDATE wait for this insert (or, if
+        it committed first, re-evaluates the predicate on the new row
+        version), so a dead session never gets the row. None = not inserted.
+        """
+        message_id = uuid4().hex
+        with self.connect() as conn:
+            row = conn.execute(
+                "with live as (select id from studio_chat_sessions"
+                " where id=%s and status = any(%s) and deleted_at is null for share)"
+                " insert into studio_chat_messages(id, session_id, kind, role, content_json)"
+                " select %s, live.id, %s, %s, %s from live returning seq, created_at",
+                (session_id, list(live_statuses), message_id, kind, role, json.dumps(content)),
+            ).fetchone()
+        if row is None:
+            return None
+        return _message_record(message_id, session_id, kind, role, content, row)
 
     def update_studio_chat_message_content(self, message_id: str, content: dict[str, Any]) -> None:
         """Replace a message's content (streaming agent text coalescing)."""

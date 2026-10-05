@@ -6,8 +6,10 @@ import {
   deleteStudioChatSession,
   renameStudioChatSession,
 } from './studioChatSessionManageApi'
+import { useStudioChatSessionArchive } from './useStudioChatSessionArchive'
 
-/** 会话列表管理动作（#872）：改名 / 删除。失败原样抛给调用方（会话菜单
+/** 会话列表管理动作（#872）：改名 / 删除；#924 起并入归档 / 取消归档与
+ * 归档视图列表（useStudioChatSessionArchive）。失败原样抛给调用方（会话菜单
  * 行内展示错误），成功后刷新 sessions 列表缓存。
  * 删除当前会话时先把它从缓存里摘掉、再清空选中：会话记忆 hook 在选中为空
  * 时按「记忆值 → 列表首项」回落，若列表还滞留被删会话就会把它重新选回来
@@ -21,6 +23,7 @@ export function useStudioChatSessionManage(
 ) {
   const queryClient = useQueryClient()
   const key = queryKeys.studioChatSessions(workspaceId ?? '')
+  const archiving = useStudioChatSessionArchive(workspaceId, selectSession)
 
   async function rename(sessionId: string, title: string): Promise<void> {
     if (!workspaceId) return
@@ -38,5 +41,5 @@ export function useStudioChatSessionManage(
     await queryClient.invalidateQueries({ queryKey: key })
   }
 
-  return { rename, remove }
+  return { rename, remove, ...archiving }
 }

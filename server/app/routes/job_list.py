@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_TAG
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.routes.job_list_contracts import JobFacetsResponse, JobsPageResponse
+from server.app.routes.job_list_contracts import JobCursor, JobFacetsResponse, JobsPageResponse
 from server.app.services.job_list_queries import JobListQueryService
 
 # #735 review P2 (cluster): optional str filters reject the empty-string form
@@ -14,7 +14,8 @@ from server.app.services.job_list_queries import JobListQueryService
 # the clause and return an unfiltered page — None (absent) is the only "no
 # filter" spelling. search/cursor stay unconstrained: an empty search term or
 # cursor is an identity no-op (matches everything / first page), never a
-# silently-widened filter.
+# silently-widened filter (a non-empty cursor's format is validated by
+# JobCursor, #891).
 _NonEmptyFilter = Annotated[str | None, Query(min_length=1)]
 
 
@@ -63,7 +64,7 @@ def create_job_list_router(
         # #852：越界 422（与 /runs、/jobs 同一约定），不在函数体内静默钳制——
         # 调用方据返回条数判断是否翻完时，被改写的页大小会让它少读结果。
         limit: Annotated[int, Query(ge=1, le=500)] = 200,
-        cursor: str | None = None,
+        cursor: JobCursor = None,
         status: _NonEmptyFilter = None,
         search: str | None = None,
         workflow_version: int | None = None,

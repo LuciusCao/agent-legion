@@ -263,7 +263,7 @@ else
     if [[ "$rc" -eq 3 || "$rc" -eq 4 ]]; then
         exit 1
     fi
-    echo "提示: S3 endpoint 不可达或清理失败（exit=$rc），跳过 bucket 清理。" >&2
+    echo "提示: S3 endpoint 不可达或清理失败（exit=${rc}），跳过 bucket 清理。" >&2
     echo "      待共享对象存储（SeaweedFS/RustFS）可达后可重跑本脚本补齐。" >&2
 fi
 
