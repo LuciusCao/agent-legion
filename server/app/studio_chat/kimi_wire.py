@@ -38,7 +38,7 @@ import stat
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from server.app.studio_chat.task_metadata_files import directory
+from server.app.fs_safety import open_dir_nofollow as directory
 
 if TYPE_CHECKING:
     from server.app.studio_chat.wire_baseline import WireBaseline
