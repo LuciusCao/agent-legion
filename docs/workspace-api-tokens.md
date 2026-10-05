@@ -279,7 +279,7 @@ failed run 治愈路径（以及下文的并发重提）。识别「已存在」
 | --- | --- | --- |
 | 400 | `No tasks were resolved from input`：全部条目已有 job | 不重试；按「已存在」对账（见上节） |
 | 400 | `{"message", "run_id", "created_so_far"}`：分块提交中途失败 | 原样重提同一组 items 续建 |
-| 400 | 其它输入错误：素材未就绪（`Material is not ready` / bundle 成员未全部就绪）、workspace 无已发布 workflow、items 超过实例上限 `workflows.max_items_per_run`、节点配置无效、`workflow_key` 与 workspace 不符、非法产物名 | 修正输入；素材未就绪可等上传完成后重提 |
+| 400 | 其它输入错误：素材未就绪（`Material is not ready` / bundle 成员未全部就绪）、workspace 无已发布 workflow、items 超过实例上限 `workflows.max_items_per_run`、节点配置无效、非法产物名 | 修正输入；素材未就绪可等上传完成后重提 |
 | 401 | `Not authenticated`（缺 Authorization）、`Session expired or revoked`（token 吊销 / 过期 / 格式错） | 不重试；重新签发 token |
 | 403 | `Scoped tokens cannot take effect` 等：调用了不对 token 开放的 effecting / 管理 / 用户端点（如 `POST /job-batches`、legacy `/api/jobs/{job_id}` 变更端点） | 不重试；改用上表端点 |
 | 404 | `Workspace not found`：URL 里的 workspace 与 token 绑定的不一致、workspace 不存在、或端点不在 token 权限面内 | 不重试；三种情形刻意同形态（防枚举），检查 URL 与 token 是否配套 |
