@@ -40,8 +40,12 @@ def close_session(
                 current = service._runtimes.get(session_id)
                 if current is not None and current is not runtime:
                     return service.get_session(session_id, include_deleted=include_deleted)
-                if still_wanted is not None and not still_wanted(
-                    service.db.get_studio_chat_session(session_id)
+                # #940: one raw read serves both re-checks; a concurrent
+                # close that already committed owns the terminal marker and
+                # teardown, so a second closed write here would duplicate them.
+                row = service.db.get_studio_chat_session(session_id)
+                if (row is not None and row.get("status") == "closed") or (
+                    still_wanted is not None and not still_wanted(row)
                 ):
                     return service.get_session(session_id, include_deleted=include_deleted)
                 service.db.update_studio_chat_session(

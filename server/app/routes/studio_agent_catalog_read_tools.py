@@ -32,13 +32,11 @@ from server.app.routes.agent_definition_contracts import (
     AgentVersionResponse,
 )
 from server.app.routes.agent_runtimes_contracts import AgentRuntimesResponse
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_agent_tool_contracts import (
     StudioAgentAgentCreateRequest,
     StudioAgentAgentVersionsResponse,
 )
 from server.app.routes.workspace_runtime_models import WorkspaceRuntimeModelsResponse
-from server.app.services.job_errors import JobServiceError
 from server.app.services.studio_agent_catalog_reads import StudioAgentCatalogReads
 from server.app.services.studio_agent_tools import StudioAgentToolsService
 from server.app.services.versioned_entities import VersionedEntity
@@ -91,10 +89,7 @@ def create_studio_agent_catalog_read_tools_router(
         """Latest version per Agent of the workspace (a pending draft beats
         the published row), with the full definition payload — the read side
         of the agent-authoring loop."""
-        try:
-            entities = reads.list_agent_definitions(workspace_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        entities = reads.list_agent_definitions(workspace_id)
         return StudioAgentAgentVersionsResponse(versions=[_version_response(e) for e in entities])
 
     @router.put(
@@ -109,12 +104,9 @@ def create_studio_agent_catalog_read_tools_router(
     ) -> AgentVersionResponse:
         """Draft-only write: a human publishes it in Studio (STUDIO-AGENT-001)."""
         definition = _parse_agent_definition(payload)
-        try:
-            entity = StudioAgentToolsService(job_db, settings).save_agent_definition_draft(
-                workspace_id, agent_id, definition, str(user["id"])
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        entity = StudioAgentToolsService(job_db, settings).save_agent_definition_draft(
+            workspace_id, agent_id, definition, str(user["id"])
+        )
         return _version_response(entity)
 
     @router.post(
@@ -133,13 +125,10 @@ def create_studio_agent_catalog_read_tools_router(
         ``studio-agent:{user_id}``. Draft-only like the save: a human
         publishes it in Studio (STUDIO-AGENT-001)."""
         definition = _parse_agent_definition(payload)
-        try:
-            service = StudioAgentToolsService(job_db, settings)
-            entity = service.save_agent_definition_draft(
-                workspace_id, None, definition, str(user["id"])
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        service = StudioAgentToolsService(job_db, settings)
+        entity = service.save_agent_definition_draft(
+            workspace_id, None, definition, str(user["id"])
+        )
         return _version_response(entity)
 
     @router.get(
@@ -150,10 +139,7 @@ def create_studio_agent_catalog_read_tools_router(
         """``{runtime: {provider: [models]}}`` across the workspace's online
         Workers — read-only visibility (EXEC-RUNTIME-MODELS-001): workers own
         provider/model declarations; there is no tool to edit them."""
-        try:
-            models = reads.runtime_models(workspace_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        models = reads.runtime_models(workspace_id)
         return WorkspaceRuntimeModelsResponse(runtimes=models)
 
     @router.get(

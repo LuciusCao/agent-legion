@@ -13,12 +13,10 @@ published (re-pin/relock stays a human admin action), exactly like
 from fastapi import APIRouter
 
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_agent_skill_contracts import (
     SkillCreateRequest,
     SkillCreateResponse,
 )
-from server.app.services.job_errors import JobServiceError
 from server.app.services.skill_creation import SkillCreationService
 from server.app.services.skill_editing import SkillFileWrite
 from server.app.settings import Settings
@@ -37,12 +35,9 @@ def create_studio_agent_skill_creation_tools_router(
     )
     def create_skill(workspace_id: str, payload: SkillCreateRequest) -> SkillCreateResponse:
         files = [SkillFileWrite(path=item.path, content=item.content) for item in payload.files]
-        try:
-            result = creation.create_skill(
-                workspace_id, payload.skill_name, files, payload.new_tag, payload.message
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        result = creation.create_skill(
+            workspace_id, payload.skill_name, files, payload.new_tag, payload.message
+        )
         return SkillCreateResponse(**result)
 
     return router

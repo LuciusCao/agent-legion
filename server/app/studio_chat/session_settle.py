@@ -47,5 +47,19 @@ def close_until_settled(
             include_deleted=include_deleted,
             still_wanted=still_wanted,
         )
-        if session["status"] == "closed" and service.runtime(session_id) is None:
+        if session["status"] != "closed":
+            continue
+        runtime = service.runtime(session_id)
+        if runtime is None:
             return
+        # #903: a concurrent close committed closed but has not torn its
+        # runtime down yet (close_session's early return). Pin first, then
+        # re-read: a resume re-claims the row (closed -> starting) before it
+        # registers, so a still-closed row means the pinned generation is
+        # retired — tear it down here instead of answering while it lives.
+        row = service.db.get_studio_chat_session(session_id)
+        if row is not None and row.get("status") == "closed":
+            if still_wanted is None or still_wanted(row):
+                service.teardown_runtime(session_id, runtime, expected=runtime)
+            if service.runtime(session_id) is None:
+                return

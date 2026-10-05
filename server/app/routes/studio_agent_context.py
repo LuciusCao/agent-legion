@@ -13,9 +13,7 @@ from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import require_studio_agent_scope
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_agent_context_contracts import StudioChatContextResponse
-from server.app.services.job_errors import JobServiceError
 from server.app.services.studio_chat_context import build_session_context
 
 
@@ -30,10 +28,7 @@ def create_studio_agent_context_router(job_db: JobQueries) -> APIRouter:
         session_id: str,
         user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
     ) -> StudioChatContextResponse:
-        try:
-            context = build_session_context(job_db, session_id, user)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        context = build_session_context(job_db, session_id, user)
         return StudioChatContextResponse.model_validate(context)
 
     return router

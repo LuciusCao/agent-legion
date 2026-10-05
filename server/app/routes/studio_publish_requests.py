@@ -14,13 +14,11 @@ from fastapi import APIRouter, Depends, Request
 
 from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_publish_request_contracts import (
     StudioPublishRequestPendingResponse,
     StudioPublishRequestResolveResponse,
 )
 from server.app.scheduler_wakeup import notify_schedulable_work, reload_worker_scan_entries
-from server.app.services.job_errors import JobServiceError
 from server.app.services.studio_publish_requests import StudioPublishRequestService
 from server.app.settings import Settings
 
@@ -54,10 +52,7 @@ def create_studio_publish_request_router(job_db: JobQueries, settings: Settings)
         http_request: Request,
         _user: Annotated[dict[str, Any], Depends(reject_studio_agent_scope)],
     ) -> StudioPublishRequestResolveResponse:
-        try:
-            request = _service().confirm(workspace_id, request_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        request = _service().confirm(workspace_id, request_id)
         # The confirm action IS a publish: replay the manual publish route's
         # post-publish hooks (worker scan reload + schedulable-work notify),
         # so a confirmed request behaves identically to the Studio button.
@@ -72,10 +67,7 @@ def create_studio_publish_request_router(job_db: JobQueries, settings: Settings)
     def cancel_publish_request(
         workspace_id: str, request_id: str
     ) -> StudioPublishRequestResolveResponse:
-        try:
-            request = _service().cancel(workspace_id, request_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        request = _service().cancel(workspace_id, request_id)
         return StudioPublishRequestResolveResponse.model_validate({"request": request})
 
     return router
