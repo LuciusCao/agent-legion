@@ -3,8 +3,16 @@
 The global ``--reruns 1`` gives a timing-sensitive test one diagnostic retry,
 but a retry-pass must not become invisible. PR backend-coverage feeds every
 ``scripts/pytest_telemetry.py`` JSON report to this script and fails when a
-rerun lands on a nodeid without a live registry entry. Nightly also invokes
-the deadline-only mode so stale entries fail even during a quiet week.
+rerun lands on a nodeid without a registry entry.
+
+Deadline expiry is a wall-clock judgement, so it only fails the nightly
+deadline-only mode (``--check-deadlines``, #941): PR runs and the unit tier
+must stay deterministic, otherwise every entry reaching its deadline turns
+unrelated PRs red on the same day. Rerun-report mode merely lists expired
+entries. Deadline-only mode also warns ``DEADLINE_WARNING_DAYS`` ahead.
+
+The registry schema and its clock-free rules (nodeid uniqueness, deadline
+window) live in ``scripts/quality/flaky_registry.py``.
 Registry: ``tests/flaky_registry.yaml``.
 """
 
@@ -12,95 +20,40 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
-from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
-import yaml
-
+# Run as a file path from CI (`python scripts/check_reruns.py`): put the repo
+# root on sys.path so the `scripts.quality` package resolves; idempotent when
+# imported as `scripts.check_reruns`.
 ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from scripts.quality.flaky_registry import (  # noqa: E402  # sys.path first (above)
+    MAX_DEADLINE_WINDOW_DAYS,
+    RegistryEntry,
+    RegistryError,
+    load_registry,
+    touched_entry_ids,
+)
+
+__all__ = [
+    "MAX_DEADLINE_WINDOW_DAYS",
+    "RegistryEntry",
+    "RegistryError",
+    "evaluate",
+    "expiring_soon",
+    "load_registry",
+    "load_rerun_nodeids",
+    "main",
+    "touched_entry_ids",
+]
+
 DEFAULT_REGISTRY = ROOT_DIR / "tests" / "flaky_registry.yaml"
-
-
-class RegistryError(ValueError):
-    """Raised when the flaky registry fails schema validation."""
-
-
-@dataclass(frozen=True)
-class RegistryEntry:
-    entry_id: str
-    owner: str
-    reason: str
-    observed: str
-    nodeid: str | None
-    scope: str | None
-    deadline: date | None
-    recurring: bool
-
-
-def _parse_entry(raw: object, index: int) -> RegistryEntry:
-    where = f"entries[{index}]"
-    if not isinstance(raw, dict):
-        raise RegistryError(f"{where}: entry must be a mapping")
-
-    entry_id = raw.get("id")
-    if not isinstance(entry_id, str) or not entry_id.strip():
-        raise RegistryError(f"{where}: missing or invalid 'id'")
-    where = f"entry {entry_id}"
-
-    for field in ("owner", "reason", "observed"):
-        if not isinstance(raw.get(field), str) or not str(raw[field]).strip():
-            raise RegistryError(f"{where}: missing or invalid '{field}'")
-
-    nodeid = raw.get("nodeid")
-    scope = raw.get("scope")
-    if (nodeid is None) == (scope is None):
-        raise RegistryError(f"{where}: exactly one of 'nodeid' or 'scope' is required")
-    for name, value in (("nodeid", nodeid), ("scope", scope)):
-        if value is not None and (not isinstance(value, str) or not value.strip()):
-            raise RegistryError(f"{where}: '{name}' must be a non-empty string")
-
-    recurring = bool(raw.get("recurring", False))
-    raw_deadline = raw.get("deadline")
-    if recurring:
-        if raw_deadline is not None:
-            raise RegistryError(f"{where}: recurring entries must not set 'deadline'")
-        deadline = None
-    else:
-        if raw_deadline is None:
-            raise RegistryError(f"{where}: non-recurring entries require 'deadline'")
-        try:
-            deadline = date.fromisoformat(str(raw_deadline))
-        except ValueError as exc:
-            raise RegistryError(f"{where}: invalid 'deadline' {raw_deadline!r}") from exc
-
-    return RegistryEntry(
-        entry_id=entry_id.strip(),
-        owner=str(raw["owner"]).strip(),
-        reason=str(raw["reason"]).strip(),
-        observed=str(raw["observed"]).strip(),
-        nodeid=nodeid.strip() if isinstance(nodeid, str) else None,
-        scope=scope.strip() if isinstance(scope, str) else None,
-        deadline=deadline,
-        recurring=recurring,
-    )
-
-
-def load_registry(path: Path) -> list[RegistryEntry]:
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        raise RegistryError(f"cannot read registry {path}: {exc}") from exc
-    if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
-        raise RegistryError(f"{path}: top-level 'entries' list is required")
-    entries = [_parse_entry(raw, index) for index, raw in enumerate(data["entries"])]
-    seen: set[str] = set()
-    for entry in entries:
-        if entry.entry_id in seen:
-            raise RegistryError(f"duplicate entry id {entry.entry_id}")
-        seen.add(entry.entry_id)
-    return entries
+DEADLINE_WARNING_DAYS = 7
 
 
 def load_rerun_nodeids(paths: list[Path]) -> tuple[set[str], list[Path]]:
@@ -122,8 +75,17 @@ def evaluate(
     entries: list[RegistryEntry],
     rerun_nodeids: set[str],
     today: date,
+    *,
+    enforce_deadlines: bool = False,
+    enforce_ids: frozenset[str] = frozenset(),
 ) -> tuple[list[str], list[str]]:
-    """Return (report lines, violations). Any violation means exit 1."""
+    """Return (report lines, violations). Any violation means exit 1.
+
+    Expired deadlines are violations only with ``enforce_deadlines`` (the
+    nightly deadline-only mode) or for ``enforce_ids`` (entries the PR itself
+    added or re-dated); otherwise they are reported as notes so a calendar
+    date can never red an unrelated PR (#941).
+    """
     lines: list[str] = []
     violations: list[str] = []
 
@@ -134,10 +96,14 @@ def evaluate(
     ]
     for entry in expired:
         target = entry.nodeid or entry.scope
-        violations.append(
+        message = (
             f"{entry.entry_id} ({target}): deadline {entry.deadline} expired; "
             "fix the flake or extend the entry with a reviewed reason"
         )
+        if enforce_deadlines or entry.entry_id in enforce_ids:
+            violations.append(message)
+        else:
+            lines.append(f"  note: {message} (enforced by the nightly deadline check)")
 
     registered = {entry.nodeid: entry for entry in entries if entry.nodeid is not None}
     unregistered = sorted(nodeid for nodeid in rerun_nodeids if nodeid not in registered)
@@ -153,6 +119,18 @@ def evaluate(
         lines.append("  (none)")
     lines.append(f"Registry entries: {len(entries)} ({len(expired)} expired)")
     return lines, violations
+
+
+def expiring_soon(
+    entries: list[RegistryEntry], today: date, days: int = DEADLINE_WARNING_DAYS
+) -> list[RegistryEntry]:
+    """Non-recurring entries whose deadline falls within ``days`` from today."""
+    horizon = today + timedelta(days=days)
+    return [
+        entry
+        for entry in entries
+        if not entry.recurring and entry.deadline is not None and today <= entry.deadline <= horizon
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -178,7 +156,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="deadline-only mode: no rerun report required (#295 — nightly "
         "exemption-expiry job detects an expired flaky registry deadline "
-        "even when the extended rerun evidence did not run)",
+        "even when the extended rerun evidence did not run); the only mode "
+        "in which an expired deadline fails (#941)",
+    )
+    parser.add_argument(
+        "--base-registry",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="the target branch's registry: entries added or re-dated "
+        "relative to it must not already be expired (#941 R3/R4, passed by "
+        "every PR run regardless of target branch)",
     )
     args = parser.parse_args(argv)
 
@@ -188,16 +176,29 @@ def main(argv: list[str] | None = None) -> int:
     today = args.today or date.today()
     try:
         entries = load_registry(args.registry)
+        touched = (
+            touched_entry_ids(entries, args.base_registry)
+            if args.base_registry is not None
+            else set()
+        )
     except RegistryError as exc:
         print(f"flaky registry error: {exc}", file=sys.stderr)
         return 1
 
     rerun_nodeids, missing = load_rerun_nodeids(args.rerun_report)
-    lines, violations = evaluate(entries, rerun_nodeids, today)
+    lines, violations = evaluate(
+        entries,
+        rerun_nodeids,
+        today,
+        enforce_deadlines=args.check_deadlines,
+        enforce_ids=frozenset(touched),
+    )
 
     print(f"Flaky rerun governance (registry: {args.registry}, today: {today})")
     for line in lines:
         print(line)
+    if args.check_deadlines:
+        _warn_expiring(entries, today)
     for path in missing:
         print(f"note: skipped missing/unreadable rerun report {path}")
     if violations:
@@ -205,8 +206,24 @@ def main(argv: list[str] | None = None) -> int:
         for violation in violations:
             print(f"  FAIL: {violation}")
         return 1
-    print("\nOK: all reruns are registered and no deadline has expired.")
+    if args.check_deadlines:
+        print("\nOK: no flaky registry deadline has expired.")
+    else:
+        print("\nOK: all reruns are registered.")
     return 0
+
+
+def _warn_expiring(entries: list[RegistryEntry], today: date) -> None:
+    annotate = os.environ.get("GITHUB_ACTIONS") == "true"
+    for entry in expiring_soon(entries, today):
+        target = entry.nodeid or entry.scope
+        message = (
+            f"{entry.entry_id} ({target}) deadline {entry.deadline} is within "
+            f"{DEADLINE_WARNING_DAYS} days; fix the flake or extend it with a reviewed reason"
+        )
+        print(f"  WARN: {message}")
+        if annotate:
+            print(f"::warning title=flaky registry deadline::{message}")
 
 
 if __name__ == "__main__":
