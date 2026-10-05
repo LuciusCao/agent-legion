@@ -20,8 +20,8 @@ def _urls(workspace_id: str) -> tuple[str, str]:
 
 
 def test_validate_reports_unresolvable_code_errors(client, job_db) -> None:
-    job_db.create_workspace("ws-validate", default_workflow_key="test_validate_flow")
-    validate_url, publish_url = _urls("ws-validate")
+    job_db.create_workspace("ws-validate", workspace_id="test_validate_flow")
+    validate_url, publish_url = _urls("test_validate_flow")
 
     response = client.post(validate_url, json={"definition_yaml": _DRAFT_YAML})
 
@@ -34,11 +34,11 @@ def test_validate_reports_unresolvable_code_errors(client, job_db) -> None:
     # The same set publish would report — and validate persisted nothing.
     publish = client.post(publish_url, json={"definition_yaml": _DRAFT_YAML})
     assert publish.json()["errors"] == body["errors"]
-    assert job_db.get_active_workflow_revision("ws-validate", "test_validate_flow") is None
+    assert job_db.get_active_workflow_revision("test_validate_flow", "test_validate_flow") is None
 
 
 def test_validate_clean_with_published_node_code(client, job_db) -> None:
-    workspace = job_db.create_workspace("ws-validate-ok", default_workflow_key="test_validate_flow")
+    workspace = job_db.create_workspace("ws-validate-ok", workspace_id="test_validate_flow")
     codes = NodeCodeService(TEST_DATABASE_URL)
     codes.save_draft(
         workspace["id"],
@@ -48,7 +48,7 @@ def test_validate_clean_with_published_node_code(client, job_db) -> None:
         "test seed",
     )
     codes.publish(workspace["id"], "test_validate_flow", "publish_content")
-    validate_url, _ = _urls("ws-validate-ok")
+    validate_url, _ = _urls("test_validate_flow")
 
     response = client.post(validate_url, json={"definition_yaml": _DRAFT_YAML})
 

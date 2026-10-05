@@ -464,8 +464,7 @@ def test_compare_invalid_yaml_returns_errors_and_no_summary(app_with_workspace):
 def test_compare_missing_active_revision_returns_revision_error(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     workspace = app.state.job_db.create_workspace(
-        "Empty",
-        default_workflow_key="education_video_problems_generation",
+        "Empty", workspace_id="education_video_problems_generation"
     )
     workspace_id = workspace["id"]
     definition = load_builtin_definition("education_video_problems_generation")
@@ -486,8 +485,7 @@ def test_compare_allow_missing_baseline_previews_full_draft(tmp_path):
     as added and a no_baseline flag explains the preview mode."""
     app = create_app(data_dir=tmp_path, start_worker=False)
     workspace = app.state.job_db.create_workspace(
-        "Empty",
-        default_workflow_key="education_video_problems_generation",
+        "Empty", workspace_id="education_video_problems_generation"
     )
     definition = load_builtin_definition("education_video_problems_generation")
     raw = definition_to_yaml(definition)
@@ -525,7 +523,7 @@ def test_compare_node_changes_carry_node_type(tmp_path):
     ``_start``; its added change is marked node_type 'start' so the canvas can
     synthesize the ghost node's inspector details."""
     app = create_app(data_dir=tmp_path, start_worker=False)
-    workspace = app.state.job_db.create_workspace("Empty", default_workflow_key="demo")
+    workspace = app.state.job_db.create_workspace("Empty", workspace_id="demo")
     raw = (
         "key: demo\n"
         "label: Demo\n"
@@ -559,8 +557,7 @@ def test_compare_route_accepts_allow_missing_baseline(tmp_path):
     a never-published workspace previews the draft instead of a revision error."""
     app = create_app(data_dir=tmp_path, start_worker=False)
     workspace = app.state.job_db.create_workspace(
-        "Empty",
-        default_workflow_key="education_video_problems_generation",
+        "Empty", workspace_id="education_video_problems_generation"
     )
     workspace_id = workspace["id"]
     definition = load_builtin_definition("education_video_problems_generation")

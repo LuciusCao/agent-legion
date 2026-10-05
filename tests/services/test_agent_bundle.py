@@ -143,8 +143,7 @@ def test_shard_manifest_expected_outputs_exclude_ordinary_outputs(job_db, tmp_pa
 
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-p12', 'Test', 'demo_workflow') on conflict do nothing"
+            "insert into workspaces(id, name) values ('ws-p12', 'Test') on conflict do nothing"
         )
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id)"

@@ -62,7 +62,7 @@ def _active_workflow_summary(job_db: JobQueries, workspace_id: str) -> dict[str,
     workspace = job_db.get_workspace(workspace_id)
     if workspace is None:
         return None
-    workflow_key = str(workspace.get("default_workflow_key") or "")
+    workflow_key = str(workspace["id"])
     revision = job_db.get_active_workflow_revision(workspace_id, workflow_key)
     if revision is None:
         return None

@@ -165,7 +165,7 @@ def _make_worker(
 def test_same_node_submitted_once(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
 
     block_event = threading.Event()
     executor = FakeExecutor("code", block_event=block_event)
@@ -198,7 +198,7 @@ def test_same_node_submitted_once(tmp_path: Path) -> None:
 def test_global_capacity_not_exceeded_across_workers(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
 
     block_event = threading.Event()
     executor = FakeExecutor("code", block_event=block_event)
@@ -232,10 +232,8 @@ def test_global_capacity_not_exceeded_across_workers(tmp_path: Path) -> None:
 def test_local_node_limits_are_workspace_specific(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws_a = job_db.create_workspace("Workspace A", default_workflow_key="test", workspace_id="test")
-    ws_b = job_db.create_workspace(
-        "Workspace B", default_workflow_key="test_b", workspace_id="test_b"
-    )
+    ws_a = job_db.create_workspace("Workspace A", workspace_id="test")
+    ws_b = job_db.create_workspace("Workspace B", workspace_id="test_b")
 
     block_event = threading.Event()
     executor = FakeExecutor("code", block_event=block_event)
@@ -271,10 +269,8 @@ def test_local_node_limits_are_workspace_specific(tmp_path: Path) -> None:
 def test_round_robin_allows_small_workspace_to_claim(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws_a = job_db.create_workspace("Workspace A", default_workflow_key="test", workspace_id="test")
-    ws_b = job_db.create_workspace(
-        "Workspace B", default_workflow_key="test_b", workspace_id="test_b"
-    )
+    ws_a = job_db.create_workspace("Workspace A", workspace_id="test")
+    ws_b = job_db.create_workspace("Workspace B", workspace_id="test_b")
 
     block_event = threading.Event()
     executor = FakeExecutor("code", block_event=block_event)
@@ -318,7 +314,7 @@ def test_missing_node_code_creates_failed_node_run(tmp_path: Path) -> None:
     (the executor binding check it replaces died with the bindings table)."""
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
 
     executor = FakeExecutor("code")
     definition = _make_definition([_local_node("fetch")])
@@ -346,7 +342,7 @@ def test_missing_node_code_creates_failed_node_run(tmp_path: Path) -> None:
 def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
 
     block_event = threading.Event()
     executor = FakeExecutor("code", block_event=block_event)
@@ -399,7 +395,7 @@ def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -
 def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
 
     job = job_db.create_job(
         workflow_key="test",
@@ -448,7 +444,7 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
     """The lease repository itself rejects claims that would exceed global capacity."""
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
 
     executor = FakeExecutor("code")
     definition = _make_definition([_local_node("fetch")])

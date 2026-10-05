@@ -43,7 +43,6 @@ function mockWorkspace() {
               workspace: {
                 id: 'ws1',
                 name: 'demo',
-                default_workflow_key: 'demo_workflow',
               },
             }
       ) as never

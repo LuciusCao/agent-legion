@@ -26,7 +26,7 @@ def service(job_db):
 
 @pytest.fixture
 def workspace_id(job_db):
-    return job_db.create_workspace(default_workflow_key="wf", name="preview-panels")["id"]
+    return job_db.create_workspace(name="preview-panels")["id"]
 
 
 def test_save_draft_creates_version_one(service, workspace_id) -> None:
@@ -137,7 +137,7 @@ def test_archive_all_resets_to_fallback(service, workspace_id) -> None:
 
 
 def test_panels_are_isolated_between_workspaces(service, job_db, workspace_id) -> None:
-    other = job_db.create_workspace(default_workflow_key="wf", name="preview-other")["id"]
+    other = job_db.create_workspace(name="preview-other")["id"]
     service.save_draft(workspace_id, VALID_HTML, "user:u1")
     service.publish(workspace_id)
 
@@ -216,7 +216,7 @@ def test_get_preview_context_selects_requested_job(job_db, settings, workspace_i
 def test_get_preview_context_rejects_job_from_another_workspace(
     job_db, settings, workspace_id
 ) -> None:
-    other = job_db.create_workspace(default_workflow_key="wf", name="preview-ctx-other")["id"]
+    other = job_db.create_workspace(name="preview-ctx-other")["id"]
     foreign = job_db.create_job(
         workflow_key="wf",
         source_type="question",

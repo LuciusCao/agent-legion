@@ -28,6 +28,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from server.app.db.migrations.retire_workflow_key_columns import has_column
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,10 +37,15 @@ def migrate_workflow_catalog_retirement(conn: Any) -> None:
     """Fold catalog knowledge into workspaces, then drop the table (v50)."""
     if not conn.execute("select to_regclass('workflow_catalog')").fetchone()["to_regclass"]:
         return
+    # #211 M3: the key column is gone after v91 (never on fresh databases);
+    # the id carries the same value there.
+    key_column = (
+        "default_workflow_key" if has_column(conn, "workspaces", "default_workflow_key") else "id"
+    )
     referenced = {
-        str(row["default_workflow_key"])
-        for row in conn.execute("select distinct default_workflow_key from workspaces").fetchall()
-        if row["default_workflow_key"]
+        str(row["key"])
+        for row in conn.execute(f"select distinct {key_column} as key from workspaces").fetchall()
+        if row["key"]
     }
     for row in conn.execute("select key, origin from workflow_catalog order by key").fetchall():
         key = str(row["key"])

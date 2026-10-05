@@ -55,8 +55,7 @@ def test_v82_database_upgrades_via_init_db() -> None:
         # v84's table-creating apply fn.
         conn.execute("delete from schema_migrations where version >= 84")
         conn.execute(
-            "insert into workspaces(id, default_workflow_key, name)"
-            " values ('ws-v83-upgrade', 'ws-v83-upgrade', 'upgrade witness')"
+            "insert into workspaces(id, name) values ('ws-v83-upgrade', 'upgrade witness')"
         )
 
     init_db(TEST_DATABASE_URL)

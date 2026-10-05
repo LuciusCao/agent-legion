@@ -64,18 +64,18 @@ def _masked_dsn(dsn: str) -> str:
 
 
 def export_workflows(conn: Any, workflow_keys: list[str]) -> tuple[list[dict], list[str]]:
-    """Export each key's ACTIVE revision definition from its bound workspaces.
+    """Export each key's ACTIVE revision definition from its workspace.
 
-    Several workspaces may share one key (legacy): the first workspace's
-    definition wins and diverging revisions are flagged."""
+    The workspace id is the workflow key (schema v62 / #211 M3), so each key
+    has at most one source workspace; the divergence check below stays as a
+    defensive guard."""
     rows = conn.execute(
-        "select w.id as workspace_id, w.default_workflow_key as key, r.definition_json "
+        "select w.id as workspace_id, w.id as key, r.definition_json "
         "from workspaces w "
         "join workflow_revisions r "
-        "  on r.workspace_id = w.id and r.workflow_key = w.default_workflow_key "
-        " and r.status = 'active' "
-        "where w.default_workflow_key = any(%s) "
-        "order by w.default_workflow_key, w.id",
+        "  on r.workspace_id = w.id and r.status = 'active' "
+        "where w.id = any(%s) "
+        "order by w.id",
         (list(workflow_keys),),
     ).fetchall()
     warnings: list[str] = []
@@ -125,7 +125,7 @@ def resolve_source_workspaces(
         ]
         return sorted(found), warnings
     rows = conn.execute(
-        "select id from workspaces where default_workflow_key = any(%s) order by id",
+        "select id from workspaces where id = any(%s) order by id",
         (list(workflow_keys),),
     ).fetchall()
     return [str(row["id"]) for row in rows], []

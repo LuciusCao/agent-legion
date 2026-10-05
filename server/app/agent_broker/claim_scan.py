@@ -133,8 +133,8 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
     # #691 (CONFIG-RUNTIME-TIMEOUT-001): the workspace override (L2) for the
     # claim's timeout decision rides each row as a SCALAR only. The CTE parses
     # the workflow's override map once per workspace (never selected out); its
-    # key is default_workflow_key — the key the worker scanned the definition
-    # by, i.e. the manifest's workflow_key (== workspace id since v62).
+    # key is the workspace id — the key the worker scanned the definition by
+    # (the separate key column retired at v91, #211 M3).
     # Malformed JSON reads as "no override"; an object/array value collapses
     # to an invalid marker (→ base, workspace_override_invalid).
     rows: list[Any] = conn.execute(
@@ -143,7 +143,7 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
           select ws.id as workspace_id,
                  case when pg_input_is_valid(ws.node_config_json, 'jsonb')
                       then ws.node_config_json::jsonb
-                           -> coalesce(nullif(ws.default_workflow_key, ''), ws.id)
+                           -> ws.id
                  end as workflow_node_config
           from workspaces ws
           left join workspace_agent_capacities w on w.workspace_id=ws.id

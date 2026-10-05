@@ -1,12 +1,10 @@
 from tests.helpers.auth import authenticate_client
 
 
-def _create_workspace(
-    client, name="default", default_workflow_key="education_video_problems_generation"
-):
+def _create_workspace(client, name="default", workspace_key="education_video_problems_generation"):
     return client.post(
         "/api/workspaces",
-        json={"id": default_workflow_key, "name": name},
+        json={"id": workspace_key, "name": name},
     ).json()["workspace"]["id"]
 
 
@@ -25,11 +23,9 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                 "description": "Atomic settings",
                 "settings": {
                     "entityType": "video",
-                    "workflowKey": "education_video_problems_generation",
                 },
                 "node_limits": [
                     {
-                        "workflow_key": "education_video_problems_generation",
                         "node_key": "publish_content",
                         "concurrency_limit": 3,
                     },
@@ -44,7 +40,6 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     # P-0.5：execution_configuration 只剩 node_limits（allocations/bindings 已退役）。
     assert body["execution_configuration"]["node_limits"] == [
         {
-            "workflow_key": "education_video_problems_generation",
             "node_key": "publish_content",
             "concurrency_limit": 3,
         },
@@ -65,10 +60,9 @@ def test_workspace_configuration_rejects_invalid_node_limit_without_partial_upda
             f"/api/workspaces/{ws_id}/configuration",
             json={
                 "name": "Rollback Test",
-                "settings": {"workflowKey": "education_video_problems_generation"},
+                "settings": {},
                 "node_limits": [
                     {
-                        "workflow_key": "education_video_problems_generation",
                         "node_key": "publish_content",
                         "concurrency_limit": 2,
                     },
@@ -81,10 +75,9 @@ def test_workspace_configuration_rejects_invalid_node_limit_without_partial_upda
             f"/api/workspaces/{ws_id}/configuration",
             json={
                 "name": "Must Roll Back",
-                "settings": {"workflowKey": "education_video_problems_generation"},
+                "settings": {},
                 "node_limits": [
                     {
-                        "workflow_key": "education_video_problems_generation",
                         "node_key": "unknown_node",
                         "concurrency_limit": 1,
                     },
@@ -111,10 +104,9 @@ def test_workspace_execution_configuration_lifecycle(tmp_path):
         saved = c.put(
             f"/api/workspaces/{ws_id}/configuration",
             json={
-                "settings": {"workflowKey": "education_video_problems_generation"},
+                "settings": {},
                 "node_limits": [
                     {
-                        "workflow_key": "education_video_problems_generation",
                         "node_key": "publish_content",
                         "concurrency_limit": 2,
                     },
@@ -128,7 +120,6 @@ def test_workspace_execution_configuration_lifecycle(tmp_path):
         config = loaded.json()
         assert config["node_limits"] == [
             {
-                "workflow_key": "education_video_problems_generation",
                 "node_key": "publish_content",
                 "concurrency_limit": 2,
             }
@@ -140,7 +131,7 @@ def test_workspace_execution_configuration_lifecycle(tmp_path):
         echoed = c.put(
             f"/api/workspaces/{ws_id}/configuration",
             json={
-                "settings": {"workflowKey": "education_video_problems_generation"},
+                "settings": {},
                 "node_limits": config["node_limits"],
             },
         )
@@ -163,7 +154,7 @@ def test_workspace_configuration_agent_capacity_round_trip(tmp_path):
         saved = c.put(
             f"/api/workspaces/{ws_id}/configuration",
             json={
-                "settings": {"workflowKey": "education_video_problems_generation"},
+                "settings": {},
                 "node_limits": [],
                 "agent_capacity": 7,
             },
@@ -179,7 +170,7 @@ def test_workspace_configuration_agent_capacity_round_trip(tmp_path):
         omitted = c.put(
             f"/api/workspaces/{ws_id}/configuration",
             json={
-                "settings": {"workflowKey": "education_video_problems_generation"},
+                "settings": {},
                 "node_limits": [],
             },
         )
@@ -189,7 +180,7 @@ def test_workspace_configuration_agent_capacity_round_trip(tmp_path):
         invalid = c.put(
             f"/api/workspaces/{ws_id}/configuration",
             json={
-                "settings": {"workflowKey": "education_video_problems_generation"},
+                "settings": {},
                 "node_limits": [],
                 "agent_capacity": 0,
             },
@@ -219,30 +210,22 @@ def test_put_configuration_without_workflow_key_succeeds(client_factory):
     assert response.json()["settings"]["entityType"] == "video"
 
 
-def test_put_configuration_with_matching_workflow_key_round_trips(client_factory):
-    """旧快照带 key（值匹配）仍是 no-op 往返：兼容窗口内显式传值不报错。"""
+def test_put_configuration_rejects_retired_workflow_key(client_factory):
+    """#211 M3: workflowKey left the settings blob contract (extra=forbid) —
+    a client still sending it, matching or not, gets 422."""
     with client_factory() as c:
         ws_id = _create_workspace(c, "with-key")
-        response = _settings_put(c, ws_id, {"workflowKey": ws_id, "entityType": "video"})
+        matching = _settings_put(c, ws_id, {"workflowKey": ws_id, "entityType": "video"})
+        other = _settings_put(c, ws_id, {"workflowKey": "some_other", "entityType": "video"})
+        fetched = c.get(f"/api/workspaces/{ws_id}/settings").json()["settings"]
 
-    assert response.status_code == 200, response.text
-    # 响应侧仍下发该字段（Phase 3/4 才下线）。
-    assert response.json()["settings"]["workflowKey"] == ws_id
-
-
-def test_put_configuration_with_mismatched_workflow_key_is_rejected(client_factory):
-    """key 与 workspace id 不匹配仍走不可变守卫（400）。"""
-    with client_factory() as c:
-        ws_id = _create_workspace(c, "immutable")
-        response = _settings_put(
-            c, ws_id, {"workflowKey": "some_other_workflow", "entityType": "video"}
-        )
-
-    assert response.status_code == 400
+    assert matching.status_code == 422, matching.text
+    assert other.status_code == 422, other.text
+    assert "workflowKey" not in fetched
 
 
 def test_put_configuration_old_snapshot_round_trip_keeps_stored_fields(client_factory):
-    """旧客户端快照往返（带 key、带 previewHidden）完整保留服务端状态。"""
+    """客户端快照往返（带 previewHidden）完整保留服务端状态。"""
     with client_factory() as c:
         ws_id = _create_workspace(c, "old-snapshot")
         # 先用 PATCH section 建立已存的 previewHidden。
@@ -252,14 +235,13 @@ def test_put_configuration_old_snapshot_round_trip_keeps_stored_fields(client_fa
         )
         assert patched.status_code == 200
 
-        # 模拟旧客户端：GET 快照（含 workflowKey + previewHidden）原样 PUT 回。
+        # 模拟客户端：GET 快照（previewHidden）原样 PUT 回。
         snapshot = c.get(f"/api/workspaces/{ws_id}/settings").json()["settings"]
         legacy_put = _settings_put(
             c,
             ws_id,
             {
                 "entityType": snapshot["entityType"],
-                "workflowKey": snapshot["workflowKey"],
                 "previewHidden": snapshot["previewHidden"],
             },
         )

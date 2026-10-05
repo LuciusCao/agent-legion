@@ -14,7 +14,7 @@ export function createJobSummary(
 ): JobTypes.JobSummary {
   // prettier-ignore
   return {
-    active_node_key: null, batch_id: '', completed_nodes: 0, created_at: '', error_message: '', error_summary: '', id: '', node_summaries: undefined, source_id: '', source_type: '', status: '', storage_dir: '', title: '', total_nodes: 0, updated_at: '', workflow_key: '', workspace_id: '', workflow_revision_id: '', workflow_version: null, workflow_definition_hash: '', outcome: '', current_workflow_revision_id: '', current_workflow_revision_version: null, is_workflow_outdated: false, packed: 0,
+    active_node_key: null, batch_id: '', completed_nodes: 0, created_at: '', error_message: '', error_summary: '', id: '', node_summaries: undefined, source_id: '', source_type: '', status: '', storage_dir: '', title: '', total_nodes: 0, updated_at: '', workspace_id: '', workflow_revision_id: '', workflow_version: null, workflow_definition_hash: '', outcome: '', current_workflow_revision_id: '', current_workflow_revision_version: null, is_workflow_outdated: false, packed: 0,
     ...partial,
   }
 }

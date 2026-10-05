@@ -53,8 +53,8 @@ def _seed_old_root(old_root: Path) -> None:
     with write_transaction(db_path) as conn:
         conn.execute(
             """
-            insert into workspaces(id, name, default_workflow_key, default_entity)
-            values ('default', 'Default', 'education_video_problems_generation', 'question')
+            insert into workspaces(id, name, default_entity)
+            values ('default', 'Default', 'question')
             """
         )
         conn.execute(

@@ -12,7 +12,7 @@ host is not loopback.
 
 Layers:
   1. Definition data: full-table copy (pg_dump --data-only | pg_restore).
-  2. Sample jobs: newest N jobs per workflow_key, copied with their child
+  2. Sample jobs: newest N jobs per workspace, copied with their child
      rows (COPY CSV), plus their on-disk job dirs and artifact blobs.
   3. Secrets are NOT copied; a reminder is printed at the end (develop uses
      its own vault_master_key, so prod ciphertext would be undecryptable).
@@ -29,9 +29,10 @@ import sys
 import tempfile
 import time
 import urllib.parse
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from scripts.seed_dump_projection import project_copy_blocks
 from server.app.db.schema_guard import dsn_database_name
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -72,7 +73,7 @@ LAYER1_TABLES: tuple[str, ...] = (
 # both jobs and artifacts.
 SAMPLE_SUBQUERY = (
     "SELECT id FROM ("
-    "SELECT id, row_number() OVER (PARTITION BY workflow_key "
+    "SELECT id, row_number() OVER (PARTITION BY workspace_id "
     "ORDER BY created_at DESC, id DESC) AS rn FROM public.jobs"
     ") t WHERE rn <= {limit}"
 )
@@ -175,9 +176,9 @@ def artifact_blob_relpath(hash_value: str) -> Path:
     return Path("artifacts") / digest[:2] / digest
 
 
-def job_storage_relpath(storage_dir: str, workflow_key: str, job_id: str) -> Path:
+def job_storage_relpath(storage_dir: str, workspace_id: str, job_id: str) -> Path:
     """On-disk job dir relative to data/; falls back to the conventional path."""
-    rel = (storage_dir or "").strip() or f"jobs/{workflow_key}/{job_id}"
+    rel = (storage_dir or "").strip() or f"jobs/{workspace_id}/{job_id}"
     path = Path(rel)
     if path.is_absolute() or ".." in path.parts:
         raise SeedError(f"非法 job storage_dir: {storage_dir!r}")
@@ -295,7 +296,12 @@ def target_columns(psql: str, dsn: str, table: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def restore_plain_sql(psql: str, dsn: str, dump_path: Path) -> None:
+def restore_plain_sql(
+    psql: str,
+    dsn: str,
+    dump_path: Path,
+    target_columns_by_table: Mapping[str, Sequence[str]] | None = None,
+) -> None:
     """Restore a plain-format dump with FK triggers disabled.
 
     Source (prod container) and target (local dev) both run PG 17; plain SQL
@@ -314,7 +320,7 @@ def restore_plain_sql(psql: str, dsn: str, dump_path: Path) -> None:
     assert proc.stdin is not None
     with dump_path.open("rb") as fh:
         proc.stdin.write(b"SET session_replication_role = replica;\n")
-        for line in fh:
+        for line in project_copy_blocks(fh, target_columns_by_table or {}):
             if line.startswith(b"SET transaction_timeout"):
                 continue
             proc.stdin.write(line)
@@ -363,7 +369,10 @@ def seed_layer1(compose_dir: Path, dsn: str, pg_bin: Path, tmpdir: Path, dry_run
     log("第 1 层：目标侧 TRUNCATE 定义表（CASCADE）")
     target_psql(psql, dsn, f"TRUNCATE {tables} CASCADE")
     log("第 1 层：psql 灌入目标库（session_replication_role=replica 绕过 FK 顺序）")
-    restore_plain_sql(psql, dsn, dump_path)
+    # Source may lag the target by a schema version: project each COPY block
+    # onto the columns the target still has (#211 M3 dropped a workspaces column).
+    columns_by_table = {table: target_columns(psql, dsn, table) for table in LAYER1_TABLES}
+    restore_plain_sql(psql, dsn, dump_path, columns_by_table)
 
 
 def seed_layer2_db(
@@ -418,8 +427,8 @@ def seed_layer2_db(
 
 def fetch_sample_jobs(compose_dir: Path, limit: int) -> list[dict[str, str]]:
     sql = (
-        "COPY (SELECT id, workflow_key, storage_dir FROM public.jobs "
-        f"WHERE id IN ({build_sample_sql(limit)}) ORDER BY workflow_key, id) "
+        "COPY (SELECT id, workspace_id, storage_dir FROM public.jobs "
+        f"WHERE id IN ({build_sample_sql(limit)}) ORDER BY workspace_id, id) "
         "TO STDOUT WITH (FORMAT csv, HEADER true)"
     )
     proc = run(source_psql_cmd(compose_dir) + ["-c", sql], stdout=subprocess.PIPE)
@@ -439,7 +448,7 @@ def copy_job_files(
     dirs = 0
     total_bytes = 0
     for job in sample_jobs:
-        rel = job_storage_relpath(job["storage_dir"], job["workflow_key"], job["id"])
+        rel = job_storage_relpath(job["storage_dir"], job["workspace_id"], job["id"])
         src = prod_data / rel
         dst = dev_data / rel
         if not src.is_dir():
@@ -496,7 +505,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--jobs-per-workflow",
         type=int,
         default=30,
-        help="每个 workflow_key 抽取的最新 job 数（默认 30）",
+        help="每个 workspace 抽取的最新 job 数（默认 30）",
     )
     parser.add_argument(
         "--prod-compose-dir",
@@ -537,7 +546,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix="seed-from-prod-") as tmp:
         tmpdir = Path(tmp)
         seed_layer1(compose_dir, dsn, pg_bin, tmpdir, args.dry_run)
-        log(f"第 2 层：每个 workflow_key 最新 {args.jobs_per_workflow} 个 job")
+        log(f"第 2 层：每个 workspace 最新 {args.jobs_per_workflow} 个 job")
         layer2_counts = seed_layer2_db(
             compose_dir, dsn, pg_bin, tmpdir, args.jobs_per_workflow, args.dry_run
         )

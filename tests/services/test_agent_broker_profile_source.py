@@ -41,9 +41,8 @@ def _seed_node_request(
     """A self-contained agent request: no Agent definition, no route row."""
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, 'Test', %s)"
-            " on conflict(id) do nothing",
-            (_WS, _WS),
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
+            (_WS,),
         )
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id)"

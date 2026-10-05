@@ -38,9 +38,7 @@ def _create_job(job_db, workspace_id: str, source_id: str) -> dict[str, Any]:
 
 @pytest.fixture
 def seeded(job_db):
-    ws = job_db.create_workspace(
-        "pause-batch", default_workflow_key="education_video_problems_generation"
-    )
+    ws = job_db.create_workspace("pause-batch")
     ws_id = str(ws["id"])
     jobs = {
         key: _create_job(job_db, ws_id, f"pause-{key}") for key in ("a", "b", "terminal", "target")
@@ -53,9 +51,7 @@ def seeded(job_db):
             " pause_reason='target_reached' where id=%s",
             (jobs["target"]["id"],),
         )
-    other = job_db.create_workspace(
-        "pause-other", default_workflow_key="education_video_problems_generation"
-    )
+    other = job_db.create_workspace("pause-other")
     foreign = _create_job(job_db, str(other["id"]), "pause-foreign")
     return {"ws_id": ws_id, "jobs": jobs, "foreign": foreign}
 

@@ -48,7 +48,7 @@ def _setup(
 ):
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
     block_event = threading.Event()
     executor = BlockingExecutor("code", block_event)
     definition = make_definition([local_node(key) for key in node_keys])
@@ -114,7 +114,7 @@ def test_execution_control_error_yields_no_candidates_without_killing_pass(
     swallowed here: it propagates to the poll-loop safety net (next test)."""
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
     block_event = threading.Event()
     executor = BlockingExecutor("code", block_event)
     definition = make_definition([local_node("fetch")])
@@ -152,7 +152,7 @@ def test_programming_error_in_ready_evaluation_is_not_swallowed(
     dropping the job."""
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
     block_event = threading.Event()
     executor = BlockingExecutor("code", block_event)
     definition = make_definition([local_node("fetch")])
@@ -197,8 +197,8 @@ def test_paused_workspace_skipped_at_scan(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     # v62 恒等：两个 workspace 各自的 key（共享 key 的 legacy 形状已不可能）
-    ws_a = job_db.create_workspace("WS A", default_workflow_key="test", workspace_id="test")
-    ws_b = job_db.create_workspace("WS B", default_workflow_key="test_b", workspace_id="test_b")
+    ws_a = job_db.create_workspace("WS A", workspace_id="test")
+    ws_b = job_db.create_workspace("WS B", workspace_id="test_b")
     block_event = threading.Event()
     executor = BlockingExecutor("code", block_event)
     definition = make_definition([local_node("fetch")])

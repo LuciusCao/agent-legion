@@ -10,9 +10,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def test_create_batch_and_question_jobs(tmp_path):
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("default")
 
     batch = queries.create_run(
         workflow_key="education_video_problems_generation",
@@ -31,9 +29,8 @@ def test_create_batch_and_question_jobs(tmp_path):
     )
 
     assert batch["workspace_id"] == "default"
-    # Deprecated wire field keeps the identity value after v70 dropped the
-    # runs.workflow_key column (#211 M2; removal window 2026-10-31).
-    assert batch["workflow_key"] == workspace["id"]
+    # #211 M3: the identity backfill is gone with the deprecated wire field.
+    assert "workflow_key" not in batch
     assert job["id"] == "default_education_video_problems_generation_Q001"
     assert job["workspace_id"] == "default"
     assert job["storage_dir"].endswith(
@@ -49,10 +46,8 @@ def test_create_batch_and_question_jobs(tmp_path):
 
 def test_workspaces_isolate_jobs_with_same_source_id(tmp_path):
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    queries.create_workspace("default", default_workflow_key="education_video_problems_generation")
-    workspace = queries.create_workspace(
-        "Math Sprint", default_workflow_key="education_video_problems_generation"
-    )
+    queries.create_workspace("default")
+    workspace = queries.create_workspace("Math Sprint")
 
     default_job = queries.create_job(
         workflow_key="education_video_problems_generation",
@@ -88,7 +83,7 @@ def test_workspaces_isolate_jobs_with_same_source_id(tmp_path):
 
 def test_node_run_lifecycle(tmp_path):
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    queries.create_workspace("default", default_workflow_key="education_video_problems_generation")
+    queries.create_workspace("default")
     job = queries.create_job(
         workflow_key="education_video_problems_generation",
         source_type="question_id",
@@ -114,7 +109,7 @@ def test_start_node_run_claims_each_node_only_once(tmp_path):
     db_path = TEST_DATABASE_URL
     first = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     second = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    first.create_workspace("default", default_workflow_key="education_video_problems_generation")
+    first.create_workspace("default")
     job = first.create_job(
         workflow_key="education_video_problems_generation",
         source_type="question_id",
@@ -135,7 +130,7 @@ def test_start_node_run_claims_each_node_only_once(tmp_path):
 
 def test_create_job_rejects_identity_collision(tmp_path):
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    queries.create_workspace("default", default_workflow_key="education_video_problems_generation")
+    queries.create_workspace("default")
     queries.create_job(
         workflow_key="education_video_problems_generation",
         source_type="question_id",
@@ -160,7 +155,7 @@ def test_create_job_rejects_identity_collision(tmp_path):
 
 def test_start_node_run_rejects_missing_node(tmp_path):
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    queries.create_workspace("default", default_workflow_key="education_video_problems_generation")
+    queries.create_workspace("default")
     job = queries.create_job(
         workflow_key="education_video_problems_generation",
         source_type="question_id",
@@ -179,7 +174,7 @@ def test_start_node_run_rejects_missing_node(tmp_path):
 
 def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    queries.create_workspace("default", default_workflow_key="education_video_problems_generation")
+    queries.create_workspace("default")
     definition = load_builtin_definition("education_video_problems_generation")
     job = queries.create_job(
         workflow_key="education_video_problems_generation",
@@ -222,7 +217,7 @@ def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
 
 def test_mark_node_for_rerun_rejects_missing_persisted_node(tmp_path):
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    queries.create_workspace("default", default_workflow_key="education_video_problems_generation")
+    queries.create_workspace("default")
     job = queries.create_job(
         workflow_key="education_video_problems_generation",
         source_type="question_id",
@@ -239,7 +234,7 @@ def test_mark_node_for_rerun_rejects_missing_persisted_node(tmp_path):
 
 def test_start_node_run_clears_stale_reason(tmp_path):
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    queries.create_workspace("default", default_workflow_key="education_video_problems_generation")
+    queries.create_workspace("default")
     job = queries.create_job(
         workflow_key="education_video_problems_generation",
         source_type="question_id",
@@ -267,7 +262,7 @@ def test_start_node_run_clears_stale_reason(tmp_path):
 
 def test_start_node_run_persists_run_and_session_directories(tmp_path):
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    queries.create_workspace("default", default_workflow_key="education_video_problems_generation")
+    queries.create_workspace("default")
     job = queries.create_job(
         workflow_key="education_video_problems_generation",
         source_type="question_id",
@@ -294,9 +289,7 @@ def test_run_upsert_refreshes_frozen_pins_when_run_has_no_jobs(tmp_path):
     """Id collision on a jobless run (jobs deleted, code republished, same
     items resubmitted) must refresh the pins a quality replay would freeze to."""
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("default")
     digest_payload = {"question_ids": ["Q001"], "node_config": {}}
 
     first = queries.create_run(
@@ -322,9 +315,7 @@ def test_run_upsert_refreshes_frozen_pins_when_run_has_no_jobs(tmp_path):
 def test_run_upsert_keeps_frozen_pins_while_run_has_jobs(tmp_path):
     """A run with live jobs keeps the pins those jobs were created with."""
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("default")
     digest_payload = {"question_ids": ["Q001"], "node_config": {}}
 
     first = queries.create_run(
@@ -362,9 +353,7 @@ def test_job_dedup_keys_are_scoped_per_workspace(tmp_path):
     workspace — the workflow_key argument is inert (it equals the workspace
     id since v62, so one workspace is one dedup domain)."""
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("default")
     queries.create_job(
         workflow_key="workflow_a",
         source_type="question_id",
@@ -379,5 +368,5 @@ def test_job_dedup_keys_are_scoped_per_workspace(tmp_path):
     # Any key argument yields the same workspace-scoped domain.
     assert queries.list_job_dedup_keys(workspace["id"], "workflow_a") == {("question_id", "Q100")}
     assert queries.list_job_dedup_keys(workspace["id"], "workflow_c") == {("question_id", "Q100")}
-    other = queries.create_workspace("Other", default_workflow_key="other_ws")
+    other = queries.create_workspace("Other")
     assert queries.list_job_dedup_keys(str(other["id"]), "workflow_a") == set()

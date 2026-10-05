@@ -196,9 +196,7 @@ def test_workspace_bound_token_cannot_write_other_workspace(
 ) -> None:
     with client_factory(fresh=True) as client:
         admin_id = str(job_db.get_user_credentials("admin")["id"])
-        other = job_db.create_workspace(
-            "Other WS", default_workflow_key="other_ws_flow", workspace_id="other_ws_flow"
-        )
+        other = job_db.create_workspace("Other WS", workspace_id="other_ws_flow")
         bound_token = scoped_tokens.mint_scoped_token(
             job_db, admin_id, workspace_id=str(other["id"])
         )

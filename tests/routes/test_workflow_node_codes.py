@@ -10,7 +10,7 @@ from tests.helpers import load_builtin_definition
 
 WF = "education_video_problems_generation"
 NODE = "intake_knowledge_points"
-BASE = f"/api/workspaces/{WF}/workflows/{WF}/nodes/{NODE}/code"
+BASE = f"/api/workspaces/{WF}/nodes/{NODE}/code"
 CUSTOM_V1 = "def run(job, job_dir, runtime):\n    return 'v1'\n"
 CUSTOM_V2 = "def run(job, job_dir, runtime):\n    return 'v2'\n"
 
@@ -28,7 +28,7 @@ def _publish(client, base: str = BASE):
 @pytest.fixture
 def workspace_with_revision(client, job_db, settings):
     # v62 shape: workspace id == workflow key (id==key invariant).
-    job_db.create_workspace(WF, default_workflow_key=WF)
+    job_db.create_workspace(WF)
     definition = load_builtin_definition(WF)
     seed_demo_workspace_node_codes(settings, WF)
     WorkflowRevisionService(job_db).ensure_active_revision(WF, definition)
@@ -133,7 +133,7 @@ def test_invalid_code_is_400(workspace_with_revision, code) -> None:
 def test_unknown_node_reads_as_empty_state(workspace_with_revision) -> None:
     # Draft-only nodes (entering with the next publish) are readable so their
     # code can be drafted before the revision exists: nothing stored yet.
-    url = f"/api/workspaces/{WF}/workflows/{WF}/nodes/no_such_node/code"
+    url = f"/api/workspaces/{WF}/nodes/no_such_node/code"
     response = workspace_with_revision.get(url)
     assert response.status_code == 200
     body = response.json()
@@ -142,7 +142,7 @@ def test_unknown_node_reads_as_empty_state(workspace_with_revision) -> None:
 
 
 def test_unknown_node_accepts_draft(workspace_with_revision) -> None:
-    url = f"/api/workspaces/{WF}/workflows/{WF}/nodes/no_such_node/code"
+    url = f"/api/workspaces/{WF}/nodes/no_such_node/code"
     assert workspace_with_revision.put(url, json={"code": CUSTOM_V1}).status_code == 200
     body = workspace_with_revision.get(url).json()
     assert body["origin"] == "none"
@@ -153,7 +153,7 @@ def test_unknown_node_accepts_draft(workspace_with_revision) -> None:
 def test_start_node_is_404(workspace_with_revision) -> None:
     # The synthetic `_start` entry node never executes: no code to read or
     # draft (404 even though draft-only unknown nodes are allowed through).
-    url = f"/api/workspaces/{WF}/workflows/{WF}/nodes/_start/code"
+    url = f"/api/workspaces/{WF}/nodes/_start/code"
     assert workspace_with_revision.get(url).status_code == 404
     assert workspace_with_revision.put(url, json={"code": CUSTOM_V1}).status_code == 404
 
@@ -268,13 +268,13 @@ def test_get_code_pathless_capability_returns_none_origin(client_factory, job_db
     # P-0.5: a capability needs no executor definition at all — a node
     # without any published code simply reports origin "none".
     with client_factory(fresh=True) as client:
-        job_db.create_workspace("custom_wf", default_workflow_key="custom_wf")
+        job_db.create_workspace("custom_wf")
         definition = workflow_definition_from_yaml_string(
             "key: custom_wf\nlabel: Custom\nnodes:\n  do_custom:\n    capability: custom_only\n"
         )
         WorkflowRevisionService(job_db).ensure_active_revision("custom_wf", definition)
 
-        response = client.get("/api/workspaces/custom_wf/workflows/custom_wf/nodes/do_custom/code")
+        response = client.get("/api/workspaces/custom_wf/nodes/do_custom/code")
 
     assert response.status_code == 200
     body = response.json()
@@ -283,18 +283,16 @@ def test_get_code_pathless_capability_returns_none_origin(client_factory, job_db
     assert "path" not in body
 
 
-def test_segment_free_path_serves_the_same_resource(client, job_db, settings) -> None:
-    """#211 Phase 2: the workflows/{workflow_key} URL segment retires. On a
-    v62-shaped workspace (id == key) the segment-free path serves the same
-    resource as the deprecated alias, for reads and writes alike."""
-    job_db.create_workspace(WF, default_workflow_key=WF)
+def test_retired_workflow_segment_alias_is_gone(client, job_db, settings) -> None:
+    """#211 M3: the workflows/{workflow_key} URL aliases are removed — the
+    old path 404s, while the workspace-scoped path serves reads and writes."""
+    job_db.create_workspace(WF)
     definition = load_builtin_definition(WF)
     seed_demo_workspace_node_codes(settings, WF)
     WorkflowRevisionService(job_db).ensure_active_revision(WF, definition)
 
-    legacy = client.get(f"/api/workspaces/{WF}/workflows/{WF}/nodes/{NODE}/code").json()
-    current = client.get(f"/api/workspaces/{WF}/nodes/{NODE}/code").json()
-    assert current == legacy
+    legacy = client.get(f"/api/workspaces/{WF}/workflows/{WF}/nodes/{NODE}/code")
+    assert legacy.status_code == 404
 
     draft = client.put(f"/api/workspaces/{WF}/nodes/{NODE}/code", json={"code": CUSTOM_V1})
     assert draft.status_code == 200, draft.text
@@ -305,19 +303,19 @@ def test_segment_free_path_serves_the_same_resource(client, job_db, settings) ->
     assert effective["code"] == CUSTOM_V1
 
 
-def test_segment_free_path_rejects_mismatched_workflow_key_query(
+def test_stray_workflow_key_query_cannot_steer_the_entity_key(
     workspace_with_revision,
 ) -> None:
-    """Codex P2 on #299: on the segment-free path the deprecated (now
-    query-bound) workflow_key must not steer the entity key away from the
-    path workspace id — anything but the equal value is a 400, on reads and
-    writes alike (a mismatched write would create invisible versions)."""
-    mismatched = f"/api/workspaces/{WF}/nodes/{NODE}/code?workflow_key=other_flow"
+    """#211 M3: the query-bound workflow_key is no longer a parameter at all;
+    a stray value is ignored and the entity stays keyed on the path
+    workspace id (a write never lands under another key)."""
+    stray = f"/api/workspaces/{WF}/nodes/{NODE}/code?workflow_key=other_flow"
 
-    assert workspace_with_revision.get(mismatched).status_code == 400
-    assert workspace_with_revision.put(mismatched, json={"code": CUSTOM_V1}).status_code == 400
-    publish = f"/api/workspaces/{WF}/nodes/{NODE}/code/publish?workflow_key=other_flow"
-    assert workspace_with_revision.post(publish, json=ANY_HASH).status_code == 400
+    saved = workspace_with_revision.put(stray, json={"code": CUSTOM_V1})
+    assert saved.status_code == 200, saved.text
+    body = workspace_with_revision.get(BASE).json()
+    assert body["has_draft"] is True
+    assert body["draft_code"] == CUSTOM_V1
 
 
 def test_get_advertises_default_byte_budget(workspace_with_revision) -> None:

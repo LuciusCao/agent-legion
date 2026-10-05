@@ -47,7 +47,7 @@ def test_branch_condition_artifact_hydrated_before_branch_evaluation(tmp_path: P
     not_applicable（永远不会 ready）。
     """
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    workspace = queries.create_workspace("test", workspace_id="test")
     definition = WorkflowDefinition(
         key="test",
         label="Test",
@@ -105,7 +105,7 @@ def test_branch_condition_artifact_hydrated_before_branch_evaluation(tmp_path: P
 def test_missing_object_defers_evaluation_without_caching(tmp_path: Path) -> None:
     """清单行有但对象缺失 → 节点保持 pending、不缓存评估结果（下轮重试）。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    workspace = queries.create_workspace("test", workspace_id="test")
     definition = WorkflowDefinition(
         key="test",
         label="Test",
@@ -182,7 +182,7 @@ def test_generation_bump_during_hydration_discards_restored_files(tmp_path: Path
     不再回填（清单行已删）。
     """
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    workspace = queries.create_workspace("test", workspace_id="test")
     definition = WorkflowDefinition(
         key="test",
         label="Test",
@@ -268,7 +268,7 @@ def test_generation_bump_during_hydration_discards_restored_files(tmp_path: Path
 def test_no_object_storage_keeps_pre_hydration_behavior(tmp_path: Path) -> None:
     """未配置对象存储（store=None）→ hydration no-op，行为与现状一致。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    workspace = queries.create_workspace("test", workspace_id="test")
     definition = WorkflowDefinition(
         key="test",
         label="Test",
@@ -324,9 +324,7 @@ def test_manifest_read_failure_defers_without_caching_and_recovers(tmp_path: Pat
     永久停 queued（parked-forever 回归）。
     """
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "wfchain", default_workflow_key="wfchain", workspace_id="wfchain"
-    )
+    workspace = queries.create_workspace("wfchain", workspace_id="wfchain")
     job = pending_b_job(queries, workspace)
     job_dir = resolve_job_dir(job, queries.jobs_dir)
     storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
@@ -381,9 +379,7 @@ def test_manifest_read_failure_defers_without_caching_and_recovers(tmp_path: Pat
 def test_generation_preread_failure_defers_without_caching(tmp_path: Path) -> None:
     """代次预读失败 → 不读清单、不缓存、下轮重试；读恢复后正常 hydration 并 claim。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "wfchain", default_workflow_key="wfchain", workspace_id="wfchain"
-    )
+    workspace = queries.create_workspace("wfchain", workspace_id="wfchain")
     job = pending_b_job(queries, workspace)
     job_dir = resolve_job_dir(job, queries.jobs_dir)
     storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
@@ -441,9 +437,7 @@ def test_successful_manifest_read_without_rows_caches_evaluation(tmp_path: Path)
     的 job 每轮都做无谓的清单重读。
     """
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "wfchain", default_workflow_key="wfchain", workspace_id="wfchain"
-    )
+    workspace = queries.create_workspace("wfchain", workspace_id="wfchain")
     job = pending_b_job(queries, workspace)
     job_dir = resolve_job_dir(job, queries.jobs_dir)
     # 本地无 a_out.json，也刻意不播种清单行：输入真缺失。

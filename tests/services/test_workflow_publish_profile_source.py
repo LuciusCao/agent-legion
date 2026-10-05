@@ -57,7 +57,7 @@ def _skill_base(tmp_path: Path) -> Path:
 
 
 def _workspace(queries: JobQueries) -> str:
-    return str(queries.create_workspace("profile-ws", default_workflow_key="profile_flow")["id"])
+    return str(queries.create_workspace("profile-ws", workspace_id="profile_flow")["id"])
 
 
 def _routes(queries: JobQueries, workspace_id: str) -> list[dict]:
@@ -129,7 +129,7 @@ def test_self_contained_revision_materializes_no_route_and_opens_the_scan_gate(
 def test_scan_probe_ignores_legacy_agent_revisions(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace_id = _workspace(queries)
-    corrupt_ws = str(queries.create_workspace("corrupt-ws", default_workflow_key="x")["id"])
+    corrupt_ws = str(queries.create_workspace("corrupt-ws", workspace_id="corrupt-ws")["id"])
     with queries.connect() as conn:
         conn.execute(
             "insert into workflow_revisions(id, workspace_id, version, status,"

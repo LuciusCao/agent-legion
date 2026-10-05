@@ -47,8 +47,8 @@ from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SC
 # leave behind so the undo step rewinds a current-shape database to exactly
 # the previous recorded version. v92 adds three agent_execution_requests
 # columns plus the profile_source CHECK (#933); dropping the columns drops
-# the column-bound constraint with them. (v91 is reserved by the in-flight
-# #211 M3 PR; the rewind deletes the SCHEMA_VERSION row only.)
+# the column-bound constraint with them. (v91, #211 M3, sits below: the
+# rewind leaves the database at v91, so its column drops stay applied.)
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("agent_execution_requests", "profile_source", "text"),
@@ -60,7 +60,7 @@ _NEWEST_MIGRATION_NAME = "agent_request_profile_source"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the rewound database is a faithful
-# v90 (v92 is a pure column add: nothing to recreate).
+# v91 (v92 is a pure column add: nothing to recreate).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.

@@ -31,8 +31,8 @@ const NO_DRAFT_HASH_HINT =
 const statusOf = (err: unknown) => (err as { status?: number } | null)?.status
 
 function codeUrl(workspaceId: string, nodeKey: string) {
-  // workflows/{workflowKey} 路径段已退役（#211）：key 与 workspace id 自
-  // schema v62 起恒等，节点代码路由改挂 workspace 下。
+  // workflows/{key} 路径段已退役（#211 M3 删除旧别名）：key 与 workspace
+  // id 自 schema v62 起恒等，节点代码路由只挂 workspace 下。
   return `/api/workspaces/${encodeURIComponent(workspaceId)}/nodes/${encodeURIComponent(nodeKey)}/code`
 }
 

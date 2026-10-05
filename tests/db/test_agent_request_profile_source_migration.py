@@ -30,8 +30,7 @@ def _columns(conn) -> dict[str, dict]:
 
 def _seed_row(conn, execution_id: str, **columns: str) -> None:
     conn.execute(
-        "insert into workspaces(id, name, default_workflow_key) values ('ps-ws', 'PS', 'ps-ws')"
-        " on conflict(id) do nothing"
+        "insert into workspaces(id, name) values ('ps-ws', 'PS') on conflict(id) do nothing"
     )
     conn.execute(
         "insert into jobs(id, workspace_id, source_type, source_id)"

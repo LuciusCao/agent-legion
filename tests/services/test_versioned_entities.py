@@ -19,7 +19,7 @@ def store(job_db):
 
 @pytest.fixture
 def workspace_id(job_db):
-    return job_db.create_workspace(default_workflow_key="demo_workflow", name="ve-store")["id"]
+    return job_db.create_workspace(name="ve-store")["id"]
 
 
 def test_save_draft_creates_version_one(store, workspace_id) -> None:
@@ -250,9 +250,7 @@ def test_list_published_and_keys(store, workspace_id) -> None:
 
 
 def test_workspace_scopes_are_isolated(job_db, store, workspace_id) -> None:
-    other_workspace = job_db.create_workspace(
-        default_workflow_key="demo_workflow", name="ve-store-other"
-    )["id"]
+    other_workspace = job_db.create_workspace(name="ve-store-other")["id"]
     store.save_draft("wf:node", DEFINITION_V1, "hash1", workspace_id, "user:u1")
     store.publish("wf:node", workspace_id, "hash1")
 

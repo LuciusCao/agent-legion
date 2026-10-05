@@ -27,11 +27,7 @@ def _seeded_rows(job_db, workspace_id: str) -> list[dict]:
 
 
 def test_seed_uploads_examples_as_ready_materials(job_db, settings) -> None:
-    workspace_id = str(
-        job_db.create_workspace("demo", default_workflow_key="education_video_problems_generation")[
-            "id"
-        ]
-    )
+    workspace_id = str(job_db.create_workspace("demo")["id"])
     storage = FakeStorage()
 
     seeded = seed_demo_workspace_materials(settings, workspace_id, storage=storage)
@@ -52,11 +48,7 @@ def test_seed_uploads_examples_as_ready_materials(job_db, settings) -> None:
 
 
 def test_seed_is_idempotent(job_db, settings) -> None:
-    workspace_id = str(
-        job_db.create_workspace("demo", default_workflow_key="education_video_problems_generation")[
-            "id"
-        ]
-    )
+    workspace_id = str(job_db.create_workspace("demo")["id"])
     storage = FakeStorage()
 
     first = seed_demo_workspace_materials(settings, workspace_id, storage=storage)
@@ -68,11 +60,7 @@ def test_seed_is_idempotent(job_db, settings) -> None:
 def test_seed_skips_when_storage_unconfigured(
     job_db, settings, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    workspace_id = str(
-        job_db.create_workspace("demo", default_workflow_key="education_video_problems_generation")[
-            "id"
-        ]
-    )
+    workspace_id = str(job_db.create_workspace("demo")["id"])
     monkeypatch.setattr("server.app.services.demo_material_seed.build_s3_storage", lambda: None)
 
     with caplog.at_level(logging.WARNING):
@@ -85,11 +73,7 @@ def test_seed_skips_when_storage_unconfigured(
 def test_seed_skips_when_examples_tree_missing(
     job_db, settings, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    workspace_id = str(
-        job_db.create_workspace("demo", default_workflow_key="education_video_problems_generation")[
-            "id"
-        ]
-    )
+    workspace_id = str(job_db.create_workspace("demo")["id"])
     settings.root_dir = tmp_path  # SPA-style root without the examples tree
 
     with caplog.at_level(logging.WARNING):
@@ -100,11 +84,7 @@ def test_seed_skips_when_examples_tree_missing(
 
 
 def test_seed_aborts_gracefully_when_store_unreachable(job_db, settings) -> None:
-    workspace_id = str(
-        job_db.create_workspace("demo", default_workflow_key="education_video_problems_generation")[
-            "id"
-        ]
-    )
+    workspace_id = str(job_db.create_workspace("demo")["id"])
 
     seeded = seed_demo_workspace_materials(
         settings, workspace_id, storage=FakeStorage(fail_put=True)
@@ -118,11 +98,7 @@ def test_seed_aborts_on_boto_outage_but_propagates_programming_errors(job_db, se
     """#204 窄化：botocore 数据面故障（ClientError/BotoCoreError）按既有的
     warning + break 降级；编程错误（此处以 TypeError 代表）上抛给
     workspace 创建调用方，不再被吞成「部分种子完成」。"""
-    workspace_id = str(
-        job_db.create_workspace("demo", default_workflow_key="education_video_problems_generation")[
-            "id"
-        ]
-    )
+    workspace_id = str(job_db.create_workspace("demo")["id"])
 
     from botocore.exceptions import BotoCoreError, ClientError
 

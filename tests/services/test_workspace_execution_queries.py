@@ -16,18 +16,17 @@ def queries(tmp_path: Path) -> JobQueries:
 
 
 def test_get_workspace_node_limits_empty(queries: JobQueries) -> None:
-    workspace = queries.create_workspace("Math", default_workflow_key="demo_workflow")
+    workspace = queries.create_workspace("Math")
 
     assert queries.get_workspace_node_limits(workspace["id"]) == []
 
 
 def test_replace_node_limits_is_authoritative(queries: JobQueries) -> None:
-    workspace = queries.create_workspace("Math", default_workflow_key="demo_workflow")
+    workspace = queries.create_workspace("Math")
     queries.update_workspace_configuration(
         workspace["id"],
         name="Math",
         description="",
-        default_workflow_key="demo_workflow",
         default_entity="question",
         resource_config={},
         node_limits=[
@@ -42,7 +41,6 @@ def test_replace_node_limits_is_authoritative(queries: JobQueries) -> None:
         workspace["id"],
         name="Math",
         description="",
-        default_workflow_key="demo_workflow",
         default_entity="question",
         resource_config={},
         node_limits=[],
@@ -52,7 +50,7 @@ def test_replace_node_limits_is_authoritative(queries: JobQueries) -> None:
 
 
 def test_replace_node_limits_rollback(queries: JobQueries) -> None:
-    workspace = queries.create_workspace("Math", default_workflow_key="demo_workflow")
+    workspace = queries.create_workspace("Math")
     original_node_limits = [
         {
             "workflow_key": "demo_workflow",

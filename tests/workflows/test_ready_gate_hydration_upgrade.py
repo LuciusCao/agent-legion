@@ -46,9 +46,7 @@ from tests.workers.helpers import RecordingExecutor, _make_worker, _seed_trivial
 def test_inherit_upgrade_manifest_only_artifact_reaches_claim(tmp_path: Path) -> None:
     """upgrade inherit 后被继承产物只剩清单行 → hydration 回填 → b ready → claim。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "wfchain", default_workflow_key="wfchain", workspace_id="wfchain"
-    )
+    workspace = queries.create_workspace("wfchain", workspace_id="wfchain")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], chain_definition())
     current = revisions.publish_workspace_revision(
@@ -132,7 +130,7 @@ def test_inherit_upgrade_manifest_only_artifact_reaches_claim(tmp_path: Path) ->
 def test_evicted_upstream_input_restored_after_downstream_rerun(tmp_path: Path) -> None:
     """本地淘汰场景：completed 上游产物本地被淘汰、下游 rerun → 下一轮评估回填后 ready。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    workspace = queries.create_workspace("test", workspace_id="test")
     definition = WorkflowDefinition(
         key="test",
         label="Test",
@@ -199,7 +197,7 @@ def test_rerun_condition_producer_defers_branch_until_producer_completes(
     from server.app.workflows.workflow_consumption import dependency_downstream
 
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    workspace = queries.create_workspace("test", workspace_id="test")
     definition = WorkflowDefinition(
         key="test",
         label="Test",

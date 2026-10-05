@@ -34,8 +34,8 @@ FakeStorage = FakeObjectStorage
 def material(job_db):
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, 'MatDispatch', 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name)"
+            " values (%s, 'MatDispatch') on conflict(id) do nothing",
             (WORKSPACE_ID,),
         )
         conn.execute(

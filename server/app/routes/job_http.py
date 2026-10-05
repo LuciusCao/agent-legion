@@ -17,20 +17,6 @@ from server.app.services.job_operation_error import JobOperationError
 from server.app.services.run_partial_failure import PartialRunCreationError
 from server.app.services.skill_editing import SkillEditValidationError
 
-
-def reject_mismatched_workflow_key(workspace_id: str, workflow_key: str | None) -> None:
-    """#211 Phase 3 read-binding guard (mirrors #299's URL-alias guard): a
-    request body's deprecated workflow_key equals the workspace id (v62
-    binding). With predicates binding workspace_id alone, a mismatched key
-    cannot narrow any lookup and must not flow into rows — reject with 400.
-    """
-    if workflow_key not in (None, workspace_id):
-        raise HTTPException(
-            status_code=400,
-            detail="workflow_key must equal the workspace id (schema v62)",
-        )
-
-
 # ``require_workflows_enabled`` retired (#385/#389): the gray-release 404
 # gate covered the entire core API surface with no legitimate off state in
 # single-node deployments; the API plane is now always available and the

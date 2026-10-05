@@ -14,9 +14,7 @@ from server.app.services.node_codes import NodeCodeService
 
 def test_large_published_node_roundtrip_and_three_line_edit(client, job_db, tmp_path, monkeypatch):
     workspace = "byte-exact-node"
-    job_db.create_workspace(
-        "Byte-exact test", default_workflow_key=workspace, workspace_id=workspace
-    )
+    job_db.create_workspace("Byte-exact test", workspace_id=workspace)
     user_id = str(job_db.get_user_credentials("admin")["id"])
     token = mint_scoped_token(job_db, user_id, workspace_id=workspace)
     monkeypatch.setattr(

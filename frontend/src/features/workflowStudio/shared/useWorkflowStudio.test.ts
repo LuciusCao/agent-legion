@@ -17,7 +17,6 @@ const activeRevisionPayload = {
   revision: {
     id: 'ws1:demo:v1',
     workspace_id: 'ws1',
-    workflow_key: 'demo',
     version: 1,
     status: 'active',
     definition_hash: 'hash1234',
@@ -90,7 +89,7 @@ describe('useWorkflowStudio', () => {
       revisions: [activeRevisionPayload.revision],
     })
     mocks.fetchWorkspaces.mockResolvedValue({
-      workspaces: [{ id: 'ws1', default_workflow_key: 'demo' }],
+      workspaces: [{ id: 'ws1' }],
     })
     mocks.getAgentCatalog.mockResolvedValue({ agents: [] })
     mocks.publishWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
@@ -349,7 +348,7 @@ describe('useWorkflowStudio', () => {
 
     await waitFor(() => expect(result.current.loadState).toBe('empty'))
     expect(result.current.definitionYaml).toBe(
-      'key: demo\nlabel: demo\nnodes:\n  _start:\n    type: start\n  intake:\n    type: code\n    capability: intake\n    after: [_start]\n'
+      'key: ws1\nlabel: ws1\nnodes:\n  _start:\n    type: start\n  intake:\n    type: code\n    capability: intake\n    after: [_start]\n'
     )
     // 空态模板草稿同样驱动画布：workflow 来自模板 YAML 解析（含 _start/intake）。
     expect(result.current.workflow?.nodes.map((node) => node.key)).toEqual([
@@ -509,7 +508,7 @@ describe('useWorkflowStudio', () => {
     await waitFor(() =>
       expect(mocks.compareWorkflowDraft).toHaveBeenCalledWith('ws1', {
         definition_yaml:
-          'key: demo\nlabel: demo\nnodes:\n  _start:\n    type: start\n  intake:\n    type: code\n    capability: intake\n    after: [_start]\n',
+          'key: ws1\nlabel: ws1\nnodes:\n  _start:\n    type: start\n  intake:\n    type: code\n    capability: intake\n    after: [_start]\n',
         allow_missing_baseline: true,
       })
     )

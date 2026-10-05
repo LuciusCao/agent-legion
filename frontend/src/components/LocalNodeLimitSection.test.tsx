@@ -4,11 +4,10 @@ import { LocalNodeLimitSection } from './LocalNodeLimitSection'
 import { useSettingStore } from '../stores/settingStore'
 
 // Agent 路由（review_keywords）经 agentRoutes 快照标注；其余节点一律 code 池。
-// agentRoutes 过滤键是 store 的 workspaceId（workflow_key 已 deprecated 且
-// v62 起恒等于 workspace id，#211 Phase 2）。
+// agentRoutes 按 workspace 取回，节点只按 node_key 匹配（#211 M3 退役了
+// workflow_key 维度）。
 const agentRoutes = [
   {
-    workflow_key: 'ws1',
     node_key: 'review_keywords',
     node_label: '审核关键词',
     capability: 'review_keywords',
@@ -65,12 +64,10 @@ describe('LocalNodeLimitSection', () => {
       workspaceId: 'ws1',
       settings: {
         entityType: 'question',
-        workflowKey: 'sample_workflow',
       },
       executionConfiguration: {
         node_limits: [
           {
-            workflow_key: 'sample_workflow',
             node_key: 'fetch_items',
             concurrency_limit: 2,
           },
@@ -100,7 +97,6 @@ describe('LocalNodeLimitSection', () => {
         useSettingStore.getState().executionConfiguration.node_limits
       ).toEqual([
         {
-          workflow_key: 'sample_workflow',
           node_key: 'fetch_items',
           concurrency_limit: 3,
         },
@@ -134,12 +130,10 @@ describe('LocalNodeLimitSection', () => {
         useSettingStore.getState().executionConfiguration.node_limits
       ).toEqual([
         {
-          workflow_key: 'sample_workflow',
           node_key: 'fetch_items',
           concurrency_limit: 2,
         },
         {
-          workflow_key: 'sample_workflow',
           node_key: 'clean_items',
           concurrency_limit: 2,
         },

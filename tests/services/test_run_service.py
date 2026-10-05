@@ -37,7 +37,7 @@ def _definition_accepting(*item_types: str):
 def _workspace_with_revision(
     job_db, settings, workspace_id: str = WORKSPACE_ID, definition=None
 ) -> dict:
-    workspace = job_db.create_workspace(workspace_id, default_workflow_key=WORKFLOW_KEY)
+    workspace = job_db.create_workspace(workspace_id)
     seed_demo_workspace_node_codes(settings, workspace["id"])
     WorkflowRevisionService(job_db).ensure_active_revision(
         workspace["id"], definition or load_builtin_definition(WORKFLOW_KEY)
@@ -116,9 +116,8 @@ def test_material_item_creates_job_with_frozen_input(service, job_db, settings) 
     assert result["created_count"] == 1
     run = result["run"]
     assert run["source_kind"] == "items"
-    # #211 M2: the runs column is gone; the deprecated record field carries
-    # the workspace id (the identity value since v62).
-    assert run["workflow_key"] == WORKSPACE_ID
+    # #211 M3: the run record no longer carries a workflow_key.
+    assert run["workspace_id"] == WORKSPACE_ID and "workflow_key" not in run
     assert "node_code_versions" in run["frozen_pins"]
     assert len(result["job_ids"]) == 1
     stored = _fetch_job(job_db, result["job_ids"][0])
@@ -388,7 +387,7 @@ def test_missing_workspace_and_revision_are_rejected(service, job_db) -> None:
         service.create_run("missing", workflow_key=WORKFLOW_KEY, items=[_material_item("m")])
     # v62（#211）：每 workspace 只有一个 workflow 概念，revision 按 workspace
     # 解析——no-revision 场景用「创建但从未发布」的独立 workspace 构造。
-    job_db.create_workspace("ws-never-published", default_workflow_key="ws-never-published")
+    job_db.create_workspace("ws-never-published")
     with pytest.raises(InvalidOperationError, match="no active workflow revision"):
         service.create_run(
             "ws-never-published",

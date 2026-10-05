@@ -5,8 +5,7 @@ import type { WorkspaceSettings } from '../../types'
  * saveAll 的 PUT /configuration 契约：settings 必须是白名单 pick。
  * GET /settings 返回的服务端附加键（nodeConfig/nodeConfigSchemas）
  * 不在 PUT 契约（extra=forbid）里，全量回传会 422。
- * workflowKey 已随 #211 Phase 2 第二批停发（key 与 workspace id 恒等
- * 且不可变，PUT 缺省=沿用已存），快照里带着也不得回传。
+ * workflowKey 已随 #211 M3 从契约退役（key 即 workspace id），PUT 不得携带。
  */
 
 const mockApi = vi.fn()
@@ -29,7 +28,6 @@ async function setupStore(overrides: Partial<WorkspaceSettings> = {}) {
   const { useSettingStore } = (await import('./index')) as SettingsStoreModule
   const settings: WorkspaceSettings = {
     entityType: 'question',
-    workflowKey: 'wf',
     previewHidden: ['questions.json'],
     // 服务端 GET 附加键（真实水合后 draft 会带上）。
     nodeConfig: { some_node: { timeout_seconds: 10 } },

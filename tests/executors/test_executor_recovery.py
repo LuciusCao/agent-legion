@@ -67,7 +67,7 @@ def _make_definition() -> WorkflowDefinition:
 
 
 def _setup_workspace(queries: JobQueries, name: str) -> tuple[str, str]:
-    workspace = queries.create_workspace(name=name, default_workflow_key="recovery_test")
+    workspace = queries.create_workspace(name=name)
     workspace_id = workspace["id"]
     job = queries.create_job(
         workflow_key="recovery_test",

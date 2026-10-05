@@ -135,7 +135,6 @@ function seedJobs(jobs: ReturnType<typeof makeJob>[]) {
 const baseStats: WorkspaceStats = {
   workspace_id: 'question_content',
   name: 'WS One',
-  workflow_key: 'question_content',
   workflow_label: 'Question Content',
   job_stats: { pending: 1, running: 2, completed: 3, failed: 1 },
   code_pool: { capacity: 16, running: 1, available: 15 },
@@ -275,13 +274,11 @@ describe('WorkspaceMainPage batch operations', () => {
       workspaceDescription: '',
       settings: {
         entityType: 'question',
-        workflowKey: '',
       },
       originalWorkspaceName: 'WS One',
       originalWorkspaceDescription: '',
       originalSettings: {
         entityType: 'question',
-        workflowKey: '',
       },
       isDirty: false,
       isSaving: false,

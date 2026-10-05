@@ -29,7 +29,6 @@ function makeDetail(nodes: JobDetail['nodes']): JobDetail {
     job: {
       id: 'j1',
       workspace_id: 'ws1',
-      workflow_key: 'demo',
       source_id: 'Q1',
       source_type: 'question',
       title: '',

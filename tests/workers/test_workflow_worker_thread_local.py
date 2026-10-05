@@ -44,7 +44,7 @@ def test_worker_creates_the_single_code_pool(tmp_path: Path) -> None:
 def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
     executor = RecordingExecutor("code")
     definition = _make_definition([_local_node("fetch")])
 
@@ -73,7 +73,7 @@ def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
 def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
     block_event = threading.Event()
     executor = RecordingExecutor("code", block_event=block_event)
     definition = _make_definition([_local_node("fetch")])
@@ -103,7 +103,7 @@ def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
 def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
     executor = RecordingExecutor("code")
     definition = _make_definition([_local_node("fetch")])
 
@@ -133,7 +133,7 @@ def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
 def test_poll_fails_node_without_published_code(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
     executor = RecordingExecutor("code")
     definition = _make_definition([_local_node("fetch")])
 
@@ -210,7 +210,7 @@ def test_poll_loop_thread_survives_repeated_poll_failures(tmp_path: Path, caplog
 def test_poll_skips_paused_job(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
     executor = RecordingExecutor("code")
     definition = _make_definition([_local_node("fetch")])
 
@@ -239,7 +239,7 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
 
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="test", workspace_id="test")
+    ws = job_db.create_workspace("Test WS", workspace_id="test")
     executor = RecordingExecutor("code")
     definition = _make_definition(
         [
@@ -350,7 +350,6 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
     worker, definition = make_workflow_worker(tmp_path, queries)
     workspace = queries.create_workspace(
         "test_ws",
-        default_workflow_key="education_video_problems_generation",
         workspace_id="education_video_problems_generation",
     )
     from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
@@ -436,7 +435,6 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace(
         "Test WS",
-        default_workflow_key="education_video_problems_generation",
         workspace_id="education_video_problems_generation",
     )
     executor = RecordingExecutor("code")

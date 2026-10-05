@@ -19,7 +19,6 @@ const mockCompare = vi.mocked(compareWorkflowDraft)
 
 const baseSettings: WorkspaceSettings = {
   entityType: 'question',
-  workflowKey: '',
 }
 
 function sessionRecord(

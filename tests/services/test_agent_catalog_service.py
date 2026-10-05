@@ -6,7 +6,7 @@ from tests.helpers import seed_workspace_agent_definitions
 
 @pytest.fixture
 def workspace_id(job_db) -> str:
-    return job_db.create_workspace("Catalog WS", default_workflow_key="demo_workflow")["id"]
+    return job_db.create_workspace("Catalog WS")["id"]
 
 
 @pytest.fixture

@@ -54,7 +54,7 @@ def skill_home(tmp_path, monkeypatch, job_db):
     base = tmp_path / "home" / ".agents" / "skills"
     base.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    workspace = job_db.create_workspace(_WS, default_workflow_key="ws_create_flow")
+    workspace = job_db.create_workspace(_WS)
     assert workspace is not None
     return base
 

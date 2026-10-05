@@ -207,7 +207,7 @@ def test_compare_workflow_without_baseline_returns_full_draft_preview(client, jo
     no revision): instead of a revision error the draft is diffed against an
     empty base, so the agent can preview the full from-scratch shape."""
     scoped, _ = _scoped_client(client, job_db)
-    workspace = job_db.create_workspace("ws-fresh", default_workflow_key="studio_fresh_flow")
+    workspace = job_db.create_workspace("ws-fresh", workspace_id="studio_fresh_flow")
     workspace_id = str(workspace["id"])
 
     response = scoped.post(

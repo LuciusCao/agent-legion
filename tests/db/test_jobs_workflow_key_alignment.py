@@ -53,10 +53,7 @@ def test_migration_aligns_stale_keys(legacy_shape_db) -> None:
     rewritten to the workspace id across every live table (Codex P1 on
     #313/#315)."""
     with write_transaction(legacy_shape_db) as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-aligned', 'WS', 'ws-aligned')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-aligned', 'WS')")
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
             " title, status, storage_dir)"
@@ -113,10 +110,7 @@ def test_migration_aligns_node_code_entity_keys(fresh_db) -> None:
     workspace id — NodeCodeService lookups pass the identity value and must
     find the stored rows (Codex P1 on #315)."""
     with write_transaction(fresh_db) as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-entity', 'WS', 'ws-entity')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-entity', 'WS')")
         for entity_id, entity_key, version in (
             ("e1", "old_key:fetch", 1),
             ("e2", "old_key:parse", 1),
@@ -158,10 +152,7 @@ def test_migration_moves_node_status_counts(legacy_shape_db) -> None:
     the merge pass folds any remaining old-key rows into workspace-id rows
     (P3-1 on PR #313)."""
     with write_transaction(legacy_shape_db) as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-counts', 'WS', 'ws-counts')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-counts', 'WS')")
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
             " title, status, storage_dir)"
@@ -189,10 +180,7 @@ def test_migration_moves_node_status_counts(legacy_shape_db) -> None:
 def test_migration_is_idempotent(legacy_shape_db) -> None:
     """A second run finds no divergent rows and is a no-op."""
     with write_transaction(legacy_shape_db) as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-idem', 'WS', 'ws-idem')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-idem', 'WS')")
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
             " title, status, storage_dir)"
@@ -228,10 +216,7 @@ def test_aligned_entity_history_is_preserved(fresh_db) -> None:
     the whole version history (ordinary dispatch finds the published code,
     pinned replays keep their frozen versions)."""
     with write_transaction(fresh_db) as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-hist', 'WS', 'ws-hist')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-hist', 'WS')")
         for entity_id, version, status in (
             ("h1", 1, "archived"),
             ("h2", 2, "archived"),
@@ -263,10 +248,7 @@ def test_state_table_twins_drop_old_key_row(legacy_shape_db) -> None:
     """Window-era routes/limits rows under the workspace id win; the old-key
     twin drops instead of colliding on the composite PK (Codex P1 on #315)."""
     with write_transaction(legacy_shape_db) as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-twins', 'WS', 'ws-twins')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-twins', 'WS')")
         for key in ("old_key", "ws-twins"):
             conn.execute(
                 "insert into workspace_node_routes(workspace_id, workflow_key,"
@@ -299,10 +281,7 @@ def test_revisions_shift_past_window_era_versions(legacy_shape_db) -> None:
     old-key rows); the old history shifts above the window-era maximum
     instead of colliding on unique(workspace_id, workflow_key, version)."""
     with write_transaction(legacy_shape_db) as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-rev', 'WS', 'ws-rev')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-rev', 'WS')")
         # Old-key history: v1, v2. Window era republished: v1 (numbering from 1).
         for version in (1, 2):
             conn.execute(
@@ -345,10 +324,7 @@ def test_old_key_active_revision_archived(legacy_shape_db) -> None:
     authoritative; the shifted old-key active must be archived, or the
     elevated old DAG would outrank the window-era publish."""
     with write_transaction(legacy_shape_db) as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-dual', 'WS', 'ws-dual')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-dual', 'WS')")
         conn.execute(
             "insert into workflow_revisions(id, workspace_id, workflow_key,"
             " version, status, definition_json, definition_hash)"
@@ -385,10 +361,7 @@ def test_entity_history_survives_draft_only_collision(fresh_db) -> None:
     era that only drafted — dispatch keeps resolvable published code and the
     draft twin (same version, non-published) drops."""
     with write_transaction(fresh_db) as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-draft', 'WS', 'ws-draft')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-draft', 'WS')")
         conn.execute(
             "insert into versioned_entities(id, entity_type, workspace_id,"
             " entity_key, version, status, definition_json, definition_hash,"
@@ -426,10 +399,7 @@ def test_sole_old_key_active_survives(legacy_shape_db) -> None:
     its ONLY active revision under the old key — it must stay active through
     the rewrite (intake/Studio/worker all resolve the active definition)."""
     with write_transaction(legacy_shape_db) as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-sole', 'WS', 'ws-sole')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-sole', 'WS')")
         conn.execute(
             "insert into workflow_revisions(id, workspace_id, workflow_key,"
             " version, status, definition_json, definition_hash)"
@@ -456,10 +426,7 @@ def test_frozen_pin_hash_survives_twin_demotion_order(fresh_db) -> None:
     BEFORE the demotion, so the old v1 keeps its exact definition_hash —
     a replay frozen on {version: 1, hash: old} still resolves."""
     with write_transaction(fresh_db) as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-pin', 'WS', 'ws-pin')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-pin', 'WS')")
         conn.execute(
             "insert into versioned_entities(id, entity_type, workspace_id,"
             " entity_key, version, status, definition_json, definition_hash,"
@@ -510,10 +477,7 @@ def test_both_published_same_version_twin_resolves(fresh_db) -> None:
     old-key row — version numbers identify the CURRENT publish history of
     the entity-key domain, which the window era restarted."""
     with write_transaction(fresh_db) as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-both', 'WS', 'ws-both')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-both', 'WS')")
         for entity_id, key, hash_ in (
             ("b-old", "old_key:fetch", "old-hash"),
             ("b-new", "ws-both:fetch", "new-hash"),

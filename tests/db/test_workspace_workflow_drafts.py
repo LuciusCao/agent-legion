@@ -6,7 +6,7 @@ import time
 
 
 def test_upsert_then_get_roundtrip(job_db) -> None:
-    workspace = job_db.create_workspace("ws-draft", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-draft")
 
     stored = job_db.upsert_workspace_workflow_draft(workspace["id"], "key: wf\n")
 
@@ -19,13 +19,13 @@ def test_upsert_then_get_roundtrip(job_db) -> None:
 
 
 def test_get_returns_none_without_a_draft(job_db) -> None:
-    workspace = job_db.create_workspace("ws-draft-empty", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-draft-empty")
 
     assert job_db.get_workspace_workflow_draft(workspace["id"]) is None
 
 
 def test_upsert_is_idempotent_and_advances_updated_at(job_db) -> None:
-    workspace = job_db.create_workspace("ws-draft-upsert", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-draft-upsert")
 
     first = job_db.upsert_workspace_workflow_draft(workspace["id"], "key: wf\n")
     again = job_db.upsert_workspace_workflow_draft(workspace["id"], "key: wf\n")
@@ -44,7 +44,7 @@ def test_upsert_is_idempotent_and_advances_updated_at(job_db) -> None:
 
 
 def test_workspace_delete_cascades_to_the_draft(job_db) -> None:
-    workspace = job_db.create_workspace("ws-draft-cascade", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-draft-cascade")
     job_db.upsert_workspace_workflow_draft(workspace["id"], "key: wf\n")
 
     job_db.delete_workspace(workspace["id"])
@@ -55,7 +55,7 @@ def test_workspace_delete_cascades_to_the_draft(job_db) -> None:
 def test_workspace_delete_cancels_queued_requests(job_db) -> None:
     """#759：workspace 删除后其 queued 请求行随之物理消失（on delete
     cascade）——钉住升级路径修复依赖的 cascade 契约。"""
-    workspace = job_db.create_workspace("ws-cancel-cascade", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-cancel-cascade")
     batch = job_db.create_run("wf", "batch_by_ids", {"ids": ["1"]}, workspace["id"])
     job = job_db.create_job(
         workflow_key="wf",

@@ -115,9 +115,7 @@ def make_e2e(tmp_path: Path, definition, executor, *, capacity: int = 10):
     definition = dataclasses.replace(definition, key=unique_key)
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    workspace = job_db.create_workspace(
-        "ws", default_workflow_key=unique_key, workspace_id=unique_key
-    )
+    workspace = job_db.create_workspace("ws", workspace_id=unique_key)
     job = job_db.create_job(
         workflow_key=unique_key,
         source_type="question",

@@ -44,7 +44,6 @@ vi.mock('../api', () => ({
       {
         id: 'ws1',
         name: '测试空间',
-        default_workflow_key: 'question_content',
         default_entity: 'question',
       },
     ],

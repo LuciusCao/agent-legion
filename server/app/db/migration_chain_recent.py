@@ -12,6 +12,9 @@ from server.app.db.migrations.agent_worker_claim_state import migrate_agent_work
 from server.app.db.migrations.job_node_status_count_deltas import (
     migrate_job_node_status_count_deltas as _migrate_v88_node_deltas,
 )
+from server.app.db.migrations.retire_default_workflow_key import (
+    migrate_retire_default_workflow_key,
+)
 from server.app.db.migrations.studio_chat_session_archive import (
     migrate_studio_chat_session_archive,
 )
@@ -44,11 +47,15 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # archive (default list hides it, resume claim + spawn fence refuse it
     # until unarchive). Column, not status value, same argument as v89.
     SchemaMigration(90, "studio_chat_session_archive", migrate_studio_chat_session_archive),
+    # v91 (#211 M3): drop workspaces.default_workflow_key and
+    # quality_sample_batches.workflow_key — both equal the workspace id, so
+    # the id is the only identifier left. Guarded (drop if exists): fresh
+    # databases never create them.
+    SchemaMigration(91, "retire_default_workflow_key", migrate_retire_default_workflow_key),
     # v92 (#933, #440 P2): agent_execution_requests.profile_source / runtime /
     # requires_labels_json — self-contained agent node rows carry their
-    # frozen profile and skip the versioned_entities join at claim. v91 is
-    # reserved by the in-flight #211 M3 PR (default_workflow_key drop); if
-    # that one slips, the later merge renumbers per the #434 protocol.
+    # frozen profile and skip the versioned_entities join at claim. Follows
+    # v91 (#211 M3) in merge order (#434 protocol).
     # DDL-only, same guarded-ALTER home rule as v87.
     SchemaMigration(92, "agent_request_profile_source", migrate_agent_request_profile_source),
 ]

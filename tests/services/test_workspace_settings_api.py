@@ -53,7 +53,7 @@ def test_workspace_settings_round_trip(tmp_path):
     assert "intakeModes" not in settings
     assert "labelOverrides" not in settings
     assert "agentDefaults" not in settings
-    assert settings["workflowKey"] == "education_video_problems_generation"
+    assert "workflowKey" not in settings  # #211 M3: retired settings member
     workspace = app.state.job_db.get_workspace(workspace_id)
     assert "pipeline_config" not in workspace
 
@@ -370,7 +370,7 @@ def test_blank_workspace_first_publish_adopts_key_and_runs_job(tmp_path):
         workspace = ws.json()["workspace"]
         workspace_id = workspace["id"]
         # Schema v62: the key is bound at creation (id == key), not adopted.
-        assert workspace["default_workflow_key"] == "acme_flow"
+        assert workspace["id"] == "acme_flow"
 
         # The code node needs published code before the first revision (the
         # known bootstrap constraint; node code is workspace-scoped).
@@ -416,7 +416,7 @@ def test_blank_workspace_first_publish_adopts_key_and_runs_job(tmp_path):
         assert mismatched.status_code == 422
 
         fetched = c.get(f"/api/workspaces/{workspace_id}")
-        assert fetched.json()["workspace"]["default_workflow_key"] == "acme_flow"
+        assert fetched.json()["workspace"]["id"] == "acme_flow"
         active = c.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
         assert active.status_code == 200
         assert active.json()["revision"]["version"] == 1
@@ -424,7 +424,6 @@ def test_blank_workspace_first_publish_adopts_key_and_runs_job(tmp_path):
         batch = c.post(
             f"/api/workspaces/{workspace_id}/job-batches",
             json={
-                "workflow_key": "acme_flow",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
             },

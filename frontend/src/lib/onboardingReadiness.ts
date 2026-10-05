@@ -8,8 +8,8 @@ export interface EmptyGuideVisibilityInput {
   /**
    * stats 未到时为 undefined；后端无 published workflow 时是 null（生成
    * 类型标 string，运行时可空），两者都算已 settle。字段名保留
-   * workflowKey 是历史口径——调用方传的是 workspace_id（#211 Phase 2：
-   * workflow_key 已 deprecated，值恒等）。
+   * workflowKey 是历史口径——调用方传的是 workspace_id（#211：独立的
+   * workflow_key 字段已退役，key 即 workspace id）。
    */
   workflowKey: string | null | undefined
   /** active revision 查询在途时为 false（data 仍为 undefined）。 */

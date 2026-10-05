@@ -13,9 +13,8 @@ def workspace_and_job(client):
     job_id = "token_job_1"
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, %s)"
-            " on conflict (id) do nothing",
-            (workspace_id, "token_ws", "demo_workflow"),
+            "insert into workspaces(id, name) values (%s, %s) on conflict (id) do nothing",
+            (workspace_id, "token_ws"),
         )
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id) "

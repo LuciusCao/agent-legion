@@ -223,9 +223,10 @@ EOF
   开关列，主控制台据此区分「在线·未领取」）、v88（job 节点状态计数改为
   v82 同款 try-lock delta fold，#690）、v89（`studio_chat_sessions.deleted_at`
   会话软删列，#872）、v90（`studio_chat_sessions.archived_at` 会话
-  归档列，#924）、v92（`agent_execution_requests` 的 `profile_source` /
+  归档列，#924）、v91（删除冗余的 workspace workflow key 列与质量抽样
+  批次的 key 镜像列——workspace id 即 workflow key，#211 M3；有守卫、幂等）、v92（`agent_execution_requests` 的 `profile_source` /
   `runtime` / `requires_labels_json` 执行档案来源列，自含 agent 节点双读，
-  #933；v91 由在途的 #211 M3 占用）。v59（`jobs(run_id)` 索引）与
+  #933）。v59（`jobs(run_id)` 索引）与
   v60（register token ids 列）与本部署面无直接关系。
   迁移明细以 `server/app/db/migration_chain.py`（v87 起在
   `migration_chain_recent.py`）为准。

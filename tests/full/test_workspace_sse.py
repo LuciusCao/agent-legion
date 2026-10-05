@@ -84,7 +84,6 @@ def test_workspace_sse_receives_jobs_created(tmp_path):
                 resp = client.post(
                     f"{base_url}/api/workspaces/{workspace_id}/job-batches",
                     json={
-                        "workflow_key": "sse_test",
                         "source_kind": "direct_ids",
                         "knowledge_point_ids": ["q123"],
                     },

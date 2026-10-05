@@ -1660,48 +1660,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /**
-     * Get Node Code State
-     * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /studio-agent/tools/workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
-     */
-    get: operations['get_node_code_state_api_studio_agent_tools_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    /**
-     * Save Node Code Draft
-     * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /studio-agent/tools/workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
-     */
-    put: operations['save_node_code_draft_api_studio_agent_tools_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_draft_put']
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/users': {
     parameters: {
       query?: never
@@ -3458,121 +3416,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /**
-     * Get Node Code
-     * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
-     */
-    get: operations['get_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_get']
-    /**
-     * Save Node Code Draft
-     * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
-     */
-    put: operations['save_node_code_draft_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_put']
-    post?: never
-    /**
-     * Archive Node Code
-     * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
-     */
-    delete: operations['archive_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_delete']
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/publish': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * Publish Node Code
-     * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
-     */
-    post: operations['publish_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_publish_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/rollback': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * Rollback Node Code
-     * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
-     */
-    post: operations['rollback_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_rollback_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/versions': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /**
-     * List Node Code Versions
-     * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
-     */
-    get: operations['list_node_code_versions_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_versions_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/versions/{version}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /**
-     * Get Node Code Version
-     * @deprecated
-     * @description Deprecated path: workflows/{workflow_key} is the workspace id (equal since schema v62); use /workspaces/{id}/nodes/... — removal is tracked in #211 (deprecated field drops by 2026-10-31).
-     */
-    get: operations['get_node_code_version_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_versions__version__get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -3629,12 +3472,6 @@ export interface components {
       }
       /** Node Key */
       node_key: string
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflow_key: string
       /** Workspace Id */
       workspace_id: string
     }
@@ -4528,12 +4365,6 @@ export interface components {
       node_key: string
       /** Node Run Id */
       node_run_id: number
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: filter by the workspace the rows were fetched from instead (the list endpoint is workspace-scoped; the value always equals that workspace's id since schema v62). Removal is tracked in #211.
-       */
-      workflow_key: string
     }
     /** FailedNodeRunsResponse */
     FailedNodeRunsResponse: {
@@ -4737,12 +4568,6 @@ export interface components {
       question_ids?: string[]
       /** Source Kind */
       source_kind: string
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflow_key?: string | null
     } & {
       [key: string]: unknown
     }
@@ -4968,12 +4793,6 @@ export interface components {
        * @enum {string}
        */
       strategy: 'auto' | 'rerun_self' | 'rerun_upstream'
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: defaults to the workspace id from the path (the two are equal since schema v62). Removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflow_key?: string | null
     }
     /** JobRerunByFailureResponse */
     JobRerunByFailureResponse: {
@@ -5096,12 +4915,6 @@ export interface components {
        * @default
        */
       workflow_definition_hash: string
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflow_key: string
       /**
        * Workflow Revision Id
        * @default
@@ -5360,18 +5173,15 @@ export interface components {
       /** Total Tokens */
       total_tokens: number
     }
-    /** NodeLimitEntry */
+    /**
+     * NodeLimitEntry
+     * @description Response twin of NodeLimitRequest (#269 split, kept as a named shape).
+     */
     NodeLimitEntry: {
       /** Concurrency Limit */
       concurrency_limit: number
       /** Node Key */
       node_key: string
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflow_key: string
     }
     /** NodeLimitRequest */
     NodeLimitRequest: {
@@ -5379,8 +5189,6 @@ export interface components {
       concurrency_limit: number
       /** Node Key */
       node_key: string
-      /** Workflow Key */
-      workflow_key: string
     }
     /** NodePromptPreviewRequest */
     NodePromptPreviewRequest: {
@@ -5885,12 +5693,6 @@ export interface components {
       sample_size: number
       /** Seed */
       seed: string
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflow_key: string
       /** Workspace Id */
       workspace_id: string
     }
@@ -5903,12 +5705,6 @@ export interface components {
       sample_size: number
       /** Seed */
       seed?: string | null
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: defaults to the workspace id from the path (equal since schema v62). Removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflow_key?: string | null
     }
     /** QualitySampleBatchCreateResponse */
     QualitySampleBatchCreateResponse: {
@@ -5933,12 +5729,6 @@ export interface components {
       sampled_count: number
       /** Seed */
       seed: string
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflow_key: string
       /** Workspace Id */
       workspace_id: string
     }
@@ -6148,12 +5938,6 @@ export interface components {
         | components['schemas']['RunItemBundle']
         | components['schemas']['RunItemText']
       )[]
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: defaults to the path workspace_id; removal tracked in #211 (drops by 2026-10-31).
-       */
-      workflow_key?: string | null
     }
     /**
      * RunCreateResponse
@@ -6283,12 +6067,6 @@ export interface components {
       status: string
       /** Updated At */
       updated_at: string | null
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are equal; removal tracked in #211 (drops by 2026-10-31).
-       */
-      workflow_key: string
       /** Workspace Id */
       workspace_id: string
     }
@@ -8147,12 +7925,6 @@ export interface components {
       status: string
       /** Version */
       version: number
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflow_key: string
       /** Workspace Id */
       workspace_id: string
     }
@@ -8164,12 +7936,6 @@ export interface components {
       id: string
       /** Version */
       version: number
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: equals workspace_id (schema v62); read workspace_id instead. Removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflow_key: string
       /** Workspace Id */
       workspace_id: string
     }
@@ -8225,12 +7991,6 @@ export interface components {
       node_key: string
       /** Node Label */
       node_label: string
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflow_key: string
     }
     /** WorkspaceAgentRoutesResponse */
     WorkspaceAgentRoutesResponse: {
@@ -8304,12 +8064,6 @@ export interface components {
       entityType?: string | null
       /** Previewhidden */
       previewHidden?: string[] | null
-      /**
-       * Workflowkey
-       * @deprecated
-       * @description Deprecated: equals the workspace id since schema v62; removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflowKey?: string | null
     }
     /** WorkspaceCreateRequest */
     WorkspaceCreateRequest: {
@@ -8452,12 +8206,6 @@ export interface components {
       created_at: string
       /** Default Entity */
       default_entity: string
-      /**
-       * Default Workflow Key
-       * @deprecated
-       * @description Deprecated: read id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      default_workflow_key: string
       /** Description */
       description: string
       /** Id */
@@ -8531,12 +8279,6 @@ export interface components {
       entityType: string
       /** Previewhidden */
       previewHidden?: string[]
-      /**
-       * Workflowkey
-       * @deprecated
-       * @description Deprecated: equals the workspace id since schema v62; removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflowKey?: string | null
     }
     /** WorkspaceSettingsResponse */
     WorkspaceSettingsResponse: {
@@ -8586,12 +8328,6 @@ export interface components {
       } | null
       /** Name */
       name: string
-      /**
-       * Workflow Key
-       * @deprecated
-       * @description Deprecated: read workspace_id instead. Since schema v62 the two are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31).
-       */
-      workflow_key: string
       /** Workflow Label */
       workflow_label: string
       /** Workspace Id */
@@ -11283,9 +11019,7 @@ export interface operations {
   }
   get_node_code_state_api_studio_agent_tools_workspaces__workspace_id__nodes__node_key__code_get: {
     parameters: {
-      query?: {
-        workflow_key?: string | null
-      }
+      query?: never
       header?: never
       path: {
         workspace_id: string
@@ -11317,9 +11051,7 @@ export interface operations {
   }
   save_node_code_draft_api_studio_agent_tools_workspaces__workspace_id__nodes__node_key__code_draft_put: {
     parameters: {
-      query?: {
-        workflow_key?: string | null
-      }
+      query?: never
       header?: never
       path: {
         workspace_id: string
@@ -11909,76 +11641,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowDraftValidationResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_node_code_state_api_studio_agent_tools_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-        node_key: string
-        workflow_key: string | null
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowNodeCodeResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  save_node_code_draft_api_studio_agent_tools_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_draft_put: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-        node_key: string
-        workflow_key: string | null
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['StudioAgentNodeCodeDraftRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowNodeCodeVersionResponse']
         }
       }
       /** @description Validation Error */
@@ -12605,11 +12267,6 @@ export interface operations {
       query?: {
         category?: string | null
         detail?: string | null
-        /**
-         * @deprecated
-         * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211 (deprecated field drops by 2026-10-31).
-         */
-        workflow_key?: string | null
         since?: string | null
       }
       header?: never
@@ -12678,11 +12335,6 @@ export interface operations {
   list_workspace_jobs_api_workspaces__workspace_id__jobs_get: {
     parameters: {
       query?: {
-        /**
-         * @deprecated
-         * @description Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211 (deprecated field drops by 2026-10-31).
-         */
-        workflow_key?: string | null
         status?: string | null
         run_id?: string | null
         limit?: number
@@ -13761,9 +13413,7 @@ export interface operations {
   }
   get_node_code_api_workspaces__workspace_id__nodes__node_key__code_get: {
     parameters: {
-      query?: {
-        workflow_key?: string | null
-      }
+      query?: never
       header?: never
       path: {
         workspace_id: string
@@ -13795,9 +13445,7 @@ export interface operations {
   }
   save_node_code_draft_api_workspaces__workspace_id__nodes__node_key__code_put: {
     parameters: {
-      query?: {
-        workflow_key?: string | null
-      }
+      query?: never
       header?: never
       path: {
         workspace_id: string
@@ -13833,9 +13481,7 @@ export interface operations {
   }
   archive_node_code_api_workspaces__workspace_id__nodes__node_key__code_delete: {
     parameters: {
-      query?: {
-        workflow_key?: string | null
-      }
+      query?: never
       header?: never
       path: {
         workspace_id: string
@@ -13867,9 +13513,7 @@ export interface operations {
   }
   publish_node_code_api_workspaces__workspace_id__nodes__node_key__code_publish_post: {
     parameters: {
-      query?: {
-        workflow_key?: string | null
-      }
+      query?: never
       header?: never
       path: {
         workspace_id: string
@@ -13905,9 +13549,7 @@ export interface operations {
   }
   rollback_node_code_api_workspaces__workspace_id__nodes__node_key__code_rollback_post: {
     parameters: {
-      query?: {
-        workflow_key?: string | null
-      }
+      query?: never
       header?: never
       path: {
         workspace_id: string
@@ -13943,9 +13585,7 @@ export interface operations {
   }
   list_node_code_versions_api_workspaces__workspace_id__nodes__node_key__code_versions_get: {
     parameters: {
-      query?: {
-        workflow_key?: string | null
-      }
+      query?: never
       header?: never
       path: {
         workspace_id: string
@@ -13977,9 +13617,7 @@ export interface operations {
   }
   get_node_code_version_api_workspaces__workspace_id__nodes__node_key__code_versions__version__get: {
     parameters: {
-      query?: {
-        workflow_key?: string | null
-      }
+      query?: never
       header?: never
       path: {
         workspace_id: string
@@ -16060,250 +15698,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['NodePromptPreviewResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-        node_key: string
-        workflow_key: string | null
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowNodeCodeResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  save_node_code_draft_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_put: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-        node_key: string
-        workflow_key: string | null
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['WorkflowNodeCodeDraftRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowNodeCodeVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  archive_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_delete: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-        node_key: string
-        workflow_key: string | null
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowNodeCodeArchiveResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  publish_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_publish_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-        node_key: string
-        workflow_key: string | null
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['WorkflowNodeCodePublishRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowNodeCodeVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  rollback_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_rollback_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-        node_key: string
-        workflow_key: string | null
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['WorkflowNodeCodeRollbackRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowNodeCodeVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  list_node_code_versions_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_versions_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-        node_key: string
-        workflow_key: string | null
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowNodeCodeVersionsResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_node_code_version_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_versions__version__get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-        node_key: string
-        version: number
-        workflow_key: string | null
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowNodeCodeVersionResponse']
         }
       }
       /** @description Validation Error */

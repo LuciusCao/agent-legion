@@ -25,7 +25,8 @@ from scripts.seed.seed_common import sha256_text  # noqa: E402
 pytestmark = pytest.mark.no_db
 
 WORKFLOW_KEY = "invoices_pipeline"
-WORKSPACE_ID = "acme"
+# The workspace id is the workflow key (schema v62 / #211 M3).
+WORKSPACE_ID = WORKFLOW_KEY
 CODE = "def run(ctx):\n    return None\n"
 SKILL_COMMIT = "a" * 40
 
@@ -131,7 +132,6 @@ class FakeClient:
             WORKSPACE_ID: {
                 "id": WORKSPACE_ID,
                 "name": "Acme",
-                "default_workflow_key": WORKFLOW_KEY,
                 "default_entity": "invoice",
             }
         }
@@ -167,8 +167,7 @@ class FakeClient:
                 "published": state.get("published"),
             }
         if "/nodes/" in path and path.endswith("/code"):
-            parts = path.split("/")
-            workspace_id, workflow_key, node_key = parts[3], parts[5], parts[7]
+            workspace_id, workflow_key, node_key = _node_code_key(path)
             revision = self.revisions.get(workspace_id)
             if revision is None or node_key not in (revision.get("nodes") or {}):
                 return self._missing(path, allow_404)
@@ -206,7 +205,7 @@ class FakeClient:
     def _apply(self, method: str, path: str, body: dict | None, params: dict | None) -> Any:
         body = body or {}
         if method == "POST" and path == "/api/workspaces":
-            workspace_id = body["name"].lower().replace(" ", "_")
+            workspace_id = body["id"]
             self.workspaces[workspace_id] = {"id": workspace_id, **body}
             return {"workspace": self.workspaces[workspace_id]}
         if method == "POST" and path.endswith("/workflow-drafts/publish"):
@@ -251,18 +250,30 @@ class FakeClient:
             state["published"] = {"version": version, "definition": state["draft"]}
             return {"version": version}
         if method == "PUT" and path.endswith("/code"):
-            key = (path.split("/")[3], path.split("/")[5], path.split("/")[7])
+            key = _node_code_key(path)
             state = self.node_codes.setdefault(key, {"published": None})
             state["draft"] = body["code"]
             return {"status": "draft", "code_hash": _fake_hash(body["code"])}
         if method == "POST" and path.endswith("/code/publish"):
-            key = (path.split("/")[3], path.split("/")[5], path.split("/")[7])
+            key = _node_code_key(path)
             state = self.node_codes[key]
             assert body == {"expected_hash": _fake_hash(state["draft"])}
             version = ((state.get("published") or {}).get("version") or 0) + 1
             state["published"] = {"version": version, "code": state["draft"]}
             return {"version": version}
         raise AssertionError(f"unexpected {method} {path}")
+
+
+def _node_code_key(path: str) -> tuple[str, str, str]:
+    """(workspace, workflow key, node) from the live node-code route.
+
+    #211 M3 removed the /workflows/{workflow_key}/ alias (the real Host
+    404s on it), so the fake rejects it instead of silently serving it."""
+    parts = path.split("/")
+    assert "workflows" not in parts, f"retired workflows/{{key}} alias: {path}"
+    assert parts[1:3] == ["api", "workspaces"] and parts[4] == "nodes", path
+    assert parts[6] == "code", path
+    return parts[3], parts[3], parts[5]
 
 
 def _fake_hash(content: object) -> str:
@@ -375,8 +386,9 @@ def test_workspace_spec_creation_flow():
     client.workspaces = {}
     client.revisions = {}
     run_all(client, make_seed(), ["Acme Labs=invoices_pipeline:invoice"])
-    assert "acme_labs" in client.workspaces
-    assert client.workspaces["acme_labs"]["default_entity"] == "invoice"
+    assert WORKFLOW_KEY in client.workspaces
+    assert client.workspaces[WORKFLOW_KEY]["name"] == "Acme Labs"
+    assert client.workspaces[WORKFLOW_KEY]["default_entity"] == "invoice"
 
 
 def test_parse_workspace_spec():

@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from scripts.seed_dump_projection import project_copy_blocks  # noqa: E402
 from scripts.seed_from_prod import (  # noqa: E402
     SeedError,
     artifact_blob_relpath,
@@ -80,7 +81,7 @@ class TestResolveTargetDsn:
 class TestBuildSampleSql:
     def test_row_number_partition_and_limit(self):
         sql = build_sample_sql(30)
-        assert "row_number() OVER (PARTITION BY workflow_key" in sql
+        assert "row_number() OVER (PARTITION BY workspace_id" in sql
         assert "ORDER BY created_at DESC" in sql
         assert "rn <= 30" in sql
         assert "FROM public.jobs" in sql
@@ -95,15 +96,15 @@ class TestBuildSampleSql:
 
 class TestCopySql:
     def test_copy_out_quotes_columns_and_header(self):
-        sql = build_copy_out_sql("jobs", ["id", "workflow_key"], "id IN (SELECT 1)")
-        assert sql.startswith('COPY (SELECT "id", "workflow_key" FROM public."jobs"')
+        sql = build_copy_out_sql("jobs", ["id", "workspace_id"], "id IN (SELECT 1)")
+        assert sql.startswith('COPY (SELECT "id", "workspace_id" FROM public."jobs"')
         assert "WHERE id IN (SELECT 1)" in sql
         assert "TO STDOUT WITH (FORMAT csv, HEADER true)" in sql
 
     def test_copy_in_matches_column_list(self):
-        sql = build_copy_in_sql("jobs", ["id", "workflow_key"])
+        sql = build_copy_in_sql("jobs", ["id", "workspace_id"])
         assert sql == (
-            'COPY public."jobs" ("id", "workflow_key") FROM STDIN WITH (FORMAT csv, HEADER true)'
+            'COPY public."jobs" ("id", "workspace_id") FROM STDIN WITH (FORMAT csv, HEADER true)'
         )
 
 
@@ -130,7 +131,7 @@ class TestJobStorageRelpath:
         rel = job_storage_relpath("jobs/demo_workspace/job-1", "wf", "job-1")
         assert rel == Path("jobs/demo_workspace/job-1")
 
-    def test_falls_back_to_workflow_key_and_id(self):
+    def test_falls_back_to_workspace_and_id(self):
         rel = job_storage_relpath("", "demo_video_workflow", "job-9")
         assert rel == Path("jobs/demo_video_workflow/job-9")
 
@@ -157,3 +158,44 @@ class TestComposeBaseCmd:
     def test_no_compose_files_raises(self, tmp_path: Path):
         with pytest.raises(SeedError, match="compose"):
             compose_base_cmd(tmp_path)
+
+
+class TestProjectCopyBlocks:
+    """#211 M3 (codex P2 on #1032): a pre-v91 source dump still carries
+    workspaces.default_workflow_key; layer 1 must project it away instead of
+    failing the whole restore."""
+
+    _DUMP = [
+        b"SET statement_timeout = 0;\n",
+        b"COPY public.workspaces (id, name, default_workflow_key, description) FROM stdin;\n",
+        b"ws1\tOne\tws1\tline\\twith tab\n",
+        b"ws2\tTwo\tws2\t\\N\n",
+        b"\\.\n",
+        b"COPY public.users (id, username) FROM stdin;\n",
+        b"u1\tadmin\n",
+        b"\\.\n",
+    ]
+
+    def test_drops_columns_the_target_no_longer_has(self):
+        out = list(
+            project_copy_blocks(
+                self._DUMP,
+                {"workspaces": ["id", "name", "description"], "users": ["id", "username"]},
+            )
+        )
+        assert out == [
+            b"SET statement_timeout = 0;\n",
+            b"COPY public.workspaces (id, name, description) FROM stdin;\n",
+            b"ws1\tOne\tline\\twith tab\n",
+            b"ws2\tTwo\t\\N\n",
+            b"\\.\n",
+            b"COPY public.users (id, username) FROM stdin;\n",
+            b"u1\tadmin\n",
+            b"\\.\n",
+        ]
+
+    def test_matching_schema_passes_through_unchanged(self):
+        columns = {"workspaces": ["id", "name", "default_workflow_key", "description"]}
+        assert list(project_copy_blocks(self._DUMP, columns)) == self._DUMP
+        # Tables without a known target column list are left verbatim too.
+        assert list(project_copy_blocks(self._DUMP, {})) == self._DUMP

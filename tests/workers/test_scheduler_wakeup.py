@@ -72,9 +72,7 @@ def test_worker_wake_sets_wake_event(tmp_path: Path, registered) -> None:
 
 
 def _create_workspace_with_revision(job_db, settings):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     # The demo workflow no longer declares intake modes (#154); these tests
     # exercise the job-batches intake service, so seed the legacy variant.
     definition = load_demo_legacy_intake_definition()

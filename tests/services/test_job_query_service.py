@@ -30,9 +30,7 @@ def query_service(job_db, settings):
 
 
 def create_question_job(job_db, source_id: str) -> dict[str, Any]:
-    workspace = job_db.get_workspace("default") or job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.get_workspace("default") or job_db.create_workspace("default")
     # Jobs created without an intake snapshot resolve their definition from
     # the workspace's active revision (schema v50), so publish it.
     publish_builtin_revision(job_db, workspace["id"])
@@ -55,7 +53,7 @@ def create_question_job(job_db, source_id: str) -> dict[str, Any]:
 
 
 def test_job_query_service_lists_jobs(query_service, job_db):
-    job_db.create_workspace("default", default_workflow_key="education_video_problems_generation")
+    job_db.create_workspace("default")
     job = query_service.list_jobs("default")
     assert isinstance(job, list)
 
@@ -86,9 +84,7 @@ def test_list_jobs_returns_typed_node_summaries(query_service, job_db):
 
 
 def test_list_jobs_exposes_job_workflow_version_and_outdated_status(query_service, job_db):
-    workspace = job_db.create_workspace(
-        "versioned", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("versioned")
     definition = load_builtin_definition("education_video_problems_generation")
     revision_service = WorkflowRevisionService(job_db)
     original = revision_service.publish_workspace_revision(workspace["id"], definition)
@@ -125,9 +121,7 @@ def test_list_jobs_marks_same_revision_with_stale_hash_as_outdated(query_service
     # Older upgrade paths moved the revision pin without swapping the
     # snapshot: same revision id, stale definition hash — the job is
     # effectively outdated and the UI must offer the upgrade action.
-    workspace = job_db.create_workspace(
-        "stalehash", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("stalehash")
     definition = load_builtin_definition("education_video_problems_generation")
     current = WorkflowRevisionService(job_db).publish_workspace_revision(
         workspace["id"], definition
@@ -159,9 +153,7 @@ def test_list_jobs_marks_same_revision_with_stale_hash_as_outdated(query_service
 
 
 def test_list_jobs_orders_node_summaries_by_workflow_dag(query_service, job_db):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",
@@ -253,9 +245,7 @@ def test_list_jobs_does_not_reload_each_job_for_execution_control(
 
 
 def test_job_query_service_detail_enriches_nodes(query_service, job_db):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",
@@ -286,9 +276,7 @@ def test_job_query_service_detail_enriches_nodes(query_service, job_db):
 
 
 def test_job_query_service_detail_orders_nodes_and_uses_edge_dependencies(query_service, job_db):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",
@@ -329,9 +317,7 @@ def test_job_query_service_detail_orders_nodes_and_uses_edge_dependencies(query_
 def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(
     query_service, job_db, settings
 ):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",
@@ -361,9 +347,7 @@ def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(
 def test_job_detail_projects_agent_route_over_code_pool(query_service, job_db):
     """P-0.5：Agent 路由节点投影 agent_id（executor 字段为空），其余一律
     常量 code 池，不再读任何 executor 配置。"""
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",
@@ -398,9 +382,7 @@ def test_job_detail_projects_agent_route_over_code_pool(query_service, job_db):
 
 
 def test_workspace_run_service_filters_runs(query_service, job_db):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",
@@ -426,11 +408,9 @@ def test_workspace_run_service_filters_runs(query_service, job_db):
 
 
 def test_workspace_dag_preserves_status_buckets(query_service, job_db):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
-    definition = load_builtin_definition(workspace["default_workflow_key"])
+    definition = load_builtin_definition("education_video_problems_generation")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     job_db.create_run(
         "education_video_problems_generation",
@@ -454,9 +434,7 @@ def test_workspace_dag_preserves_status_buckets(query_service, job_db):
 
 
 def _create_job_with_node_run(job_db, settings, workspace_id: str = "default") -> dict[str, Any]:
-    workspace = job_db.create_workspace(
-        workspace_id, default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace(workspace_id)
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",
@@ -543,9 +521,7 @@ def test_workspace_runs_resolves_run_paths_absolute(query_service, job_db, setti
 
 
 def test_detail_preserves_empty_optional_run_dirs(query_service, job_db, settings):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",
@@ -616,9 +592,7 @@ def test_query_service_does_not_mutate_repository_records(query_service, job_db,
 
 
 def test_job_detail_includes_workflow_revision_and_outcome(query_service, job_db):
-    workspace = job_db.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("ws1")
     publish_builtin_revision(job_db, workspace["id"])
     job = job_db.create_job(
         workflow_key="education_video_problems_generation",
@@ -645,9 +619,7 @@ def test_job_detail_includes_workflow_revision_and_outcome(query_service, job_db
 
 
 def _create_two_node_job(job_db) -> dict[str, Any]:
-    workspace = job_db.get_workspace("default") or job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.get_workspace("default") or job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",

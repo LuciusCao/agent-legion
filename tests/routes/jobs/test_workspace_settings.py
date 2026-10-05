@@ -1,7 +1,5 @@
-def _create_workspace(
-    client, name="default", default_workflow_key="education_video_problems_generation"
-):
-    ws_id = client.post("/api/workspaces", json={"id": default_workflow_key, "name": name}).json()[
+def _create_workspace(client, name="default", workspace_key="education_video_problems_generation"):
+    ws_id = client.post("/api/workspaces", json={"id": workspace_key, "name": name}).json()[
         "workspace"
     ]["id"]
     # v62: creation seeds nothing; node settings need an active revision.

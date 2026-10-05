@@ -78,7 +78,6 @@ beforeEach(() => {
         created_at: '2026-07-01T00:00:00Z',
         updated_at: '2026-07-01T00:00:00Z',
         default_entity: '',
-        default_workflow_key: '',
         node_config: {},
         node_config_json: '{}',
         resource_config: {},

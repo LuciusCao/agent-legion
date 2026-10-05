@@ -85,7 +85,6 @@ class QualitySamplingService:
         *,
         name: str,
         sample_size: int,
-        workflow_key: str = "",
         node_keys: list[str] | None = None,
         statuses: list[str] | None = None,
         since: datetime | None = None,
@@ -96,11 +95,8 @@ class QualitySamplingService:
     ) -> dict[str, Any]:
         """Create a batch and snapshot up to ``sample_size`` matching runs."""
         resolved_seed = seed or uuid.uuid4().hex
-        # #211 Phase 3 (read-layer binding): the candidate filter keys on
-        # jobs.workspace_id alone — workflow_key equals it on every row (v62
-        # binding), so the column predicate was redundant. The parameter
-        # stays for the quality_sample_batches insert (column drops in
-        # Phase 4).
+        # #211: the candidate filter keys on jobs.workspace_id alone — the
+        # workspace id is the workflow key (the batch column retired at v91).
         clauses = ["jobs.workspace_id = %s"]
         params: list[Any] = [workspace_id]
         if node_keys:
@@ -128,15 +124,14 @@ class QualitySamplingService:
             conn.execute(
                 """
                 insert into quality_sample_batches(
-                  id, workspace_id, name, workflow_key, filters_json,
+                  id, workspace_id, name, filters_json,
                   sample_size, seed, created_by
-                ) values (%s, %s, %s, %s, %s, %s, %s, %s)
+                ) values (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     batch_id,
                     workspace_id,
                     name,
-                    workflow_key,
                     Jsonb(filters or {}),
                     sample_size,
                     resolved_seed,

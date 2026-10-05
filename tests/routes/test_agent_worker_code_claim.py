@@ -33,7 +33,7 @@ _SCHEMA = {
 def _enqueue_code_request(app, job_db, *, job_id: str) -> str:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'demo_workflow')"
+            "insert into workspaces(id, name) values ('test-workspace', 'Test')"
             " on conflict(id) do nothing"
         )
         conn.execute(
@@ -141,7 +141,7 @@ def _enqueue_shard_request(app, job_db, *, job_id: str, shard_index: int) -> str
     """Enqueue a kind='code' manifest carrying shard identity (#389)."""
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'demo_workflow')"
+            "insert into workspaces(id, name) values ('test-workspace', 'Test')"
             " on conflict(id) do nothing"
         )
         conn.execute(

@@ -89,9 +89,7 @@ def test_workspace_without_agent_definitions_runs_a_self_contained_node(
     self-contained snapshot, the workspace publishes a revision WITHOUT any
     self-contained node — the in-flight job's node must still be enqueued
     (the scan gate also looks at revisions runnable jobs are pinned to)."""
-    workspace = job_db.create_workspace(
-        "Self-contained", default_workflow_key=_WS, workspace_id=_WS
-    )
+    workspace = job_db.create_workspace("Self-contained", workspace_id=_WS)
     definition = _definition()
     revision = WorkflowRevisionService(job_db, True).save_workspace_revision(_WS, definition)
     with job_db._connect_read() as conn:

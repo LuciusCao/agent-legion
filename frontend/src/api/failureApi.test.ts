@@ -33,18 +33,6 @@ describe('failure api', () => {
     )
   })
 
-  it('appends the workflow key filter when provided', async () => {
-    const fetchMock = mockFetchJson({ runs: [] })
-    global.fetch = fetchMock
-
-    await fetchFailedNodeRuns('ws1', { workflowKey: 'video knowledge' })
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/workspaces/ws1/failed-node-runs?workflow_key=video+knowledge',
-      expect.anything()
-    )
-  })
-
   it('reruns jobs by failure with a POST body', async () => {
     const payload = { results: [] }
     const fetchMock = mockFetchJson(payload)

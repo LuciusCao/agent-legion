@@ -70,9 +70,7 @@ class _Env:
     ) -> None:
         self.job_db = job_db
         self.tmp_path = tmp_path
-        ws = job_db.create_workspace(
-            default_workflow_key="education_video_problems_generation", name="Replay WS"
-        )
+        ws = job_db.create_workspace(name="Replay WS")
         self.workspace_id = str(ws["id"])
         definition = definition or _definition()
         snapshot = serialize_definition(definition)

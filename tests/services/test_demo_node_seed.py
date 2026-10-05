@@ -11,7 +11,7 @@ NODE_KEYS = ("intake_knowledge_points", "publish_content")
 
 
 def _workspace(job_db, name: str) -> str:
-    return str(job_db.create_workspace(name, default_workflow_key=DEMO_WORKFLOW_KEY)["id"])
+    return str(job_db.create_workspace(name)["id"])
 
 
 def test_seed_publishes_workspace_versions_only(job_db, settings) -> None:
@@ -79,7 +79,9 @@ def test_steady_state_startup_does_not_scan_workspaces(job_db, settings, monkeyp
 
 
 def test_migration_copies_legacy_global_then_archives_it(job_db, settings) -> None:
-    first_id = _workspace(job_db, "first")
+    # The demo-bound workspace is the one whose id IS the demo key (schema
+    # v62; #211 M3 retired the separate key column); others are untouched.
+    first_id = str(job_db.create_workspace("first", workspace_id=DEMO_WORKFLOW_KEY)["id"])
     second_id = _workspace(job_db, "second")
     service = NodeCodeService(job_db.dsn_identity)
     legacy_code = "def run(job, job_dir, runtime):\n    return 'legacy'\n"
@@ -97,7 +99,7 @@ def test_migration_copies_legacy_global_then_archives_it(job_db, settings) -> No
     )
     service.publish(first_id, DEMO_WORKFLOW_KEY, "publish_content")
 
-    assert migrate_demo_node_codes_to_workspaces(settings, job_db) == 3
+    assert migrate_demo_node_codes_to_workspaces(settings, job_db) == len(NODE_KEYS) - 1
 
     for node_key in NODE_KEYS:
         assert service.get_global_published(DEMO_WORKFLOW_KEY, node_key) is None
@@ -110,10 +112,7 @@ def test_migration_copies_legacy_global_then_archives_it(job_db, settings) -> No
         == custom_code
     )
     for node_key in NODE_KEYS:
-        assert (
-            service.get_effective_code(second_id, DEMO_WORKFLOW_KEY, node_key)["code"]
-            == legacy_code
-        )
+        assert service.get_effective_code(second_id, DEMO_WORKFLOW_KEY, node_key) is None
 
     # Archived global history remains available to old quality-replay pins.
     archived = service.get_global_code_by_version(DEMO_WORKFLOW_KEY, "intake_knowledge_points", 1)

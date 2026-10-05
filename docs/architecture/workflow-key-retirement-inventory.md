@@ -1,6 +1,11 @@
 # workflow_key 退役盘点（issue #211 Phase 1）
 
-状态：盘点文档（Phase 1 产出，不含代码/契约变更）
+状态：盘点文档（Phase 1 产出，不含代码/契约变更）。**退役已完成**（#211 M3，schema
+v91）：`workspaces.default_workflow_key` 列已删除，deprecated 契约字段、
+`workflows/{workflow_key}` URL 别名与 key 不匹配守卫已移除；下文是退役前的历史
+快照，行号与计数不再对应现行代码。考古层（`workflow_node_codes` /
+`job_batches` / `workspace_node_bindings` 的 key 列与 `versioned_entities.entity_key`
+的 key 前缀）按设计保留。
 基准：develop@bfd7ad4f（schema v64）· 分支 `refactor/211-workflow-key-inventory`
 
 ## 概述

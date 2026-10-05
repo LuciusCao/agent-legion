@@ -41,8 +41,7 @@ export const extraQueryKeys = {
   // SettingsPage 与 WorkspaceMainPage 经同一 key 共享工作流定义缓存。
   workflowDefinition: (key: string) => k('workflowDefinition', key),
   workspaceSettings: (ws: string) => k('workspaceSettings', ws),
-  failedNodeRuns: (ws: string, workflowKey: string | null | undefined) =>
-    ['failedNodeRuns', ws, workflowKey ?? null] as const,
+  failedNodeRuns: (ws: string) => ['failedNodeRuns', ws] as const,
   workspaceTokenUsage: (
     workspaceId: string,
     filters: {

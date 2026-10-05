@@ -45,7 +45,7 @@ def _create_settings(tmp_path: Path) -> Settings:
 def _create_job(
     job_db: JobQueries, workspace_id: str, source_id: str, status: str = "queued"
 ) -> dict[str, Any]:
-    job_db.create_workspace(workspace_id, default_workflow_key="demo_workflow")
+    job_db.create_workspace(workspace_id)
     batch = job_db.create_run(
         "demo_workflow", "batch_by_ids", {"question_ids": [source_id]}, workspace_id
     )

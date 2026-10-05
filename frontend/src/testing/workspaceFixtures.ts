@@ -7,7 +7,6 @@ export function makeWorkspace(
     id: 'ws1',
     name: 'Test Workspace',
     description: '',
-    default_workflow_key: 'demo_workflow',
     default_entity: 'question',
     resource_config_json: '{}',
     node_config_json: '{}',

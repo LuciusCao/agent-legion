@@ -90,7 +90,6 @@ function setSnapshot(partial: Partial<WorkspaceSettingsSnapshot>) {
     workspaceDescription: '',
     settings: {
       entityType: 'question',
-      workflowKey: '',
     },
     executionConfiguration: {
       node_limits: [],
@@ -115,7 +114,6 @@ const defaultState: SettingState = {
   workspaceDescription: '测试描述',
   settings: {
     entityType: 'question',
-    workflowKey: '',
   },
   originalWorkspaceName: '测试空间',
   originalWorkspaceDescription: '测试描述',
@@ -367,7 +365,6 @@ describe('SettingsPage', () => {
   it('saves node limits in one PUT request', async () => {
     const settings: WorkspaceSettings = {
       entityType: 'question',
-      workflowKey: 'sample_workflow',
     }
     setSnapshot({ agentRoutes: [] })
     setWorkflowDefinition({
@@ -416,7 +413,6 @@ describe('SettingsPage', () => {
       execution_configuration: {
         node_limits: [
           {
-            workflow_key: 'sample_workflow',
             node_key: 'fetch_items',
             concurrency_limit: 2,
           },
@@ -440,7 +436,6 @@ describe('SettingsPage', () => {
         useSettingStore.getState().executionConfiguration.node_limits
       ).toEqual([
         {
-          workflow_key: 'sample_workflow',
           node_key: 'fetch_items',
           concurrency_limit: 2,
         },
@@ -465,7 +460,6 @@ describe('SettingsPage', () => {
       description: '',
       node_limits: [
         {
-          workflow_key: 'sample_workflow',
           node_key: 'fetch_items',
           concurrency_limit: 2,
         },
