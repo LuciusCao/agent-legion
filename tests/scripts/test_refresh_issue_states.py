@@ -110,6 +110,55 @@ def test_fetch_issue_states_one_call_per_repo(
     assert {c[c.index("--repo") + 1] for c in calls} == set(responses)
 
 
+def test_fetch_issue_states_resolves_unlisted_anchor_individually(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#926: `gh issue list` omits PRs; unlisted anchors go through `gh api`."""
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **_kwargs: object) -> object:
+        calls.append(argv)
+
+        class Result:
+            returncode = 0
+            stderr = ""
+            stdout = (
+                json.dumps([{"number": 195, "state": "OPEN"}]) if argv[1] == "issue" else "closed\n"
+            )
+
+        return Result()
+
+    monkeypatch.setattr("scripts.refresh_issue_states.subprocess.run", fake_run)
+    states = fetch_issue_states({"LuciusCao/agent-legion": {195, 835}})
+
+    assert states == {
+        "github.com/LuciusCao/agent-legion/issues/195": "open",
+        "github.com/LuciusCao/agent-legion/issues/835": "closed",
+    }
+    assert calls[1] == [
+        "gh",
+        "api",
+        "repos/LuciusCao/agent-legion/issues/835",
+        "--jq",
+        ".state",
+    ]
+    assert len(calls) == 2
+
+
+def test_fetch_issue_states_unresolvable_anchor_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(argv: list[str], **_kwargs: object) -> object:
+        class Result:
+            returncode = 0 if argv[1] == "issue" else 1
+            stdout = "[]" if argv[1] == "issue" else ""
+            stderr = "" if argv[1] == "issue" else "gh: Not Found (HTTP 404)"
+
+        return Result()
+
+    monkeypatch.setattr("scripts.refresh_issue_states.subprocess.run", fake_run)
+    with pytest.raises(RuntimeError, match=r"gh api failed for example/repo#4: .*404"):
+        fetch_issue_states({"example/repo": {4}})
+
+
 def test_fetch_issue_states_gh_failure_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_run(argv: list[str], **_kwargs: object) -> object:
         class Result:

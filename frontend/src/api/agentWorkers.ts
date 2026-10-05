@@ -14,7 +14,9 @@ export function fetchWorkerConsole() {
 
 // Full list response: workers plus the deployment-level Worker console
 // address (console_url, AGENT_LEGION_WORKER_CONSOLE_URL; "" = unset) that
-// the "打开 Worker 控制台" entries render. Any logged-in user may call it.
+// the "打开 Worker 控制台" entries render. Any logged-in user may call it;
+// non-admins only get workers serving their own workspaces, with
+// allowed_workspaces trimmed to those and register_token_ids emptied (#752).
 export async function fetchAgentWorkers(
   workspaceId?: string,
   signal?: AbortSignal

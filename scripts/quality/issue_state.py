@@ -7,10 +7,13 @@ be fulfilled (split the file below its baseline ceiling and drop the entry)
 or re-anchored to a live open issue. Live GitHub state is network-dependent,
 so gates read a tracked cache (``config/architecture/issue-states.json``)
 that ``scripts/refresh_issue_states.py`` refreshes via ``gh`` — the check
-itself stays offline and deterministic. An issue absent from the cache is
-treated as unknown (never expired), and a missing cache file only disables
-the cache lookup: a ``remove_when`` that itself declares ``issues/closed/``
-still fails, because that declaration is self-contained.
+itself stays offline and deterministic. An issue absent from a present
+cache fails the check (#926): an unresolved anchor is not proof the issue is
+open, and treating it as unexpired let anchors that pointed at merged PRs or
+were added without a refresh escape expiry detection indefinitely — refresh
+the cache in the same change that adds the anchor. A missing cache file only
+disables the cache lookup: a ``remove_when`` that itself declares
+``issues/closed/`` still fails, because that declaration is self-contained.
 """
 
 from __future__ import annotations
@@ -98,7 +101,7 @@ def expired_issue_errors(
     exemptions: tuple[ArchitectureExemption, ...],
     base_path: str | Path | None = None,
 ) -> list[str]:
-    """Return errors for exemptions whose issue anchor is already closed."""
+    """Return errors for exemptions whose issue anchor is closed or uncached."""
     root = Path(base_path) if base_path else Path.cwd()
 
     manifest_path = root / MANIFEST_RELATIVE_PATH
@@ -115,8 +118,15 @@ def expired_issue_errors(
         if parsed is None:
             continue
         declared, reference = parsed
-        closed = declared == "closed" or states is not None and states.get(reference) == "closed"
-        if not closed:
+        cached = states.get(reference) if states is not None else None
+        if declared != "closed" and states is not None and cached is None:
+            errors.append(
+                f"exemption {idx} ({ex.check} on {ex.path}): anchor {reference} is missing "
+                f"from {MANIFEST_RELATIVE_PATH}; refresh it (make architecture-issue-states) "
+                "so expiry detection can resolve the anchor"
+            )
+            continue
+        if declared != "closed" and cached != "closed":
             continue
         errors.append(
             f"exemption {idx} ({ex.check} on {ex.path}): exemption expired — "

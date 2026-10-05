@@ -69,3 +69,20 @@
 .markdown th {
   background: #f6f8fa;
 }
+/* #882：后端入站排队的用户消息——气泡右下挂「已排队」/「未送达」小标签。 */
+.queuedWrap {
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  max-width: 92%;
+}
+.queuedTag,
+.droppedTag {
+  font-size: 11px;
+  color: #1565c0;
+}
+.droppedTag {
+  color: #c62828;
+}

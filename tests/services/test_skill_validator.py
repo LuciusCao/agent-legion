@@ -108,6 +108,9 @@ def test_validate_rejects_bad_paths(base_dir, tmp_path) -> None:
     outside = validator.validate(str(tmp_path / "elsewhere"))
     assert outside.valid is False
     assert "managed skills dir" in (outside.error or "")
+    # #752: the refusal never echoes the server-side base path.
+    assert str(base_dir) not in (outside.error or "")
+    assert str(base_dir.resolve()) not in (outside.error or "")
 
 
 def test_validate_requires_directory_and_skill_md(base_dir) -> None:

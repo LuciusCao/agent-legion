@@ -9,7 +9,7 @@ from server.app.auth.scoped_tokens import renew_scoped_token
 from server.app.auth.sessions import hash_token
 from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.services.job_errors import ConflictError
-from server.app.studio_chat import compaction
+from server.app.studio_chat import compaction, inbound_queue
 from server.app.studio_chat.background_wakeup import prepare_rearm
 from server.app.studio_chat.payloads import serialize_message
 from server.app.studio_chat.resume_context import prepare_resume_prompt
@@ -38,7 +38,10 @@ def send_message(
         if compaction.send_blocked(service._db, session_id, runtime, text):
             raise ConflictError(compaction.SEND_BLOCKED_DETAIL)
         current = service.get_session(session_id)
-        if current["status"] != "idle":
+        # #882: behind a background turn (or already-queued messages) the
+        # message is queued instead of refused (inbound_queue.py).
+        queueing = inbound_queue.should_queue(runtime, current["status"])
+        if current["status"] != "idle" and not queueing:
             raise ConflictError(f"Chat session is busy ({current['status']})")
         if compaction.late_gate_blocked(service._db, session_id, runtime, text, claimed=False):
             raise ConflictError(compaction.SEND_BLOCKED_DETAIL)
@@ -52,6 +55,18 @@ def send_message(
         )
         require_live_run_token(service, session_id, runtime)
         commit_wakeup = prepare_rearm(runtime)
+        if queueing:
+            try:
+                queued_row = inbound_queue.enqueue(
+                    service, session_id, runtime, text, prompt_text, commit_wakeup
+                )
+            except StudioChatAdmissionRejected:
+                require_live_run_token(service, session_id, runtime)
+                raise ConflictError("Chat session is no longer running") from None
+            if queued_row is None:
+                raise ConflictError("Chat session agent is not running")
+            _publish(service, session_id, queued_row)
+            return queued_row
         message = None
 
         def accept() -> None:
@@ -62,7 +77,7 @@ def send_message(
             # Finish local state before the queue becomes visible: replay
             # filtering can inspect loading before acquiring runtime.lock.
             runtime.resume_transcript_pending = False
-            open_turn(runtime, text)
+            open_turn(runtime, text, message_id=str(message["id"]), prompt=prompt_text)
             commit_wakeup()
 
         try:
@@ -76,14 +91,16 @@ def send_message(
             )
             raise ConflictError("Chat session agent is not running")
         assert message is not None
-        service.store.publish(
-            session_id, {"type": "message", "message": serialize_message(message)}
-        )
-        try:
-            service.store.publish_session(session_id)
-        except Exception:
-            # #204 broad-except audit: admission and enqueue succeeded;
-            # a snapshot read failure must not turn success into a retry.
-            # REST/SSE refill recovers the snapshot; preserve the cause.
-            logger.warning("accepted chat snapshot failed for %s", session_id, exc_info=True)
+        _publish(service, session_id, message)
     return message
+
+
+def _publish(service: StudioChatService, session_id: str, message: dict[str, Any]) -> None:
+    service.store.publish(session_id, {"type": "message", "message": serialize_message(message)})
+    try:
+        service.store.publish_session(session_id)
+    except Exception:
+        # #204 broad-except audit: admission and enqueue succeeded;
+        # a snapshot read failure must not turn success into a retry.
+        # REST/SSE refill recovers the snapshot; preserve the cause.
+        logger.warning("accepted chat snapshot failed for %s", session_id, exc_info=True)

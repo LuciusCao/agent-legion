@@ -80,14 +80,40 @@ def test_cache_manifest_declared_open_passes(project_root: Path) -> None:
     assert expired_issue_errors((make_exemption(f"issues/open/{REFERENCE}"),), project_root) == []
 
 
-def test_issue_missing_from_cache_is_treated_as_open(project_root: Path) -> None:
-    """The cache only lists issues referenced when it was last refreshed.
+def test_issue_missing_from_cache_fails_the_check(project_root: Path) -> None:
+    """#926: an anchor the cache cannot resolve is a red, not a pass-through.
 
-    A stale cache must not expire a newly added exemption: unknown means
-    not-proven-closed, matching the offline deterministic contract.
+    Treating unknown as unexpired let anchors naming merged PRs (absent from
+    ``gh issue list``) and anchors added without a refresh dodge expiry
+    detection indefinitely; the change adding an anchor refreshes the cache.
     """
     write_manifest(project_root, {"github.com/LuciusCao/agent-legion/issues/999": "open"})
-    assert expired_issue_errors((make_exemption(f"issues/open/{REFERENCE}"),), project_root) == []
+    errors = expired_issue_errors((make_exemption(f"issues/open/{REFERENCE}"),), project_root)
+    assert len(errors) == 1
+    assert REFERENCE in errors[0]
+    assert "missing from config/architecture/issue-states.json" in errors[0]
+    assert "make architecture-issue-states" in errors[0]
+    assert "exemption expired" not in errors[0]
+
+
+def test_declared_closed_anchor_missing_from_cache_reports_expiry(project_root: Path) -> None:
+    """The self-contained ``issues/closed/`` declaration needs no cache entry."""
+    write_manifest(project_root, {})
+    errors = expired_issue_errors((make_exemption(f"issues/closed/{REFERENCE}"),), project_root)
+    assert len(errors) == 1
+    assert "exemption expired" in errors[0]
+
+
+def test_cached_and_uncached_anchors_reported_separately(project_root: Path) -> None:
+    other = "github.com/LuciusCao/agent-legion/issues/196"
+    write_manifest(project_root, {REFERENCE: "open"})
+    errors = expired_issue_errors(
+        (make_exemption(f"issues/open/{REFERENCE}"), make_exemption(f"issues/open/{other}")),
+        project_root,
+    )
+    assert len(errors) == 1
+    assert errors[0].startswith("exemption 2 ")
+    assert other in errors[0]
 
 
 def test_missing_cache_manifest_keeps_issue_exemptions_unexpired(project_root: Path) -> None:
