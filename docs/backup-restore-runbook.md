@@ -121,24 +121,36 @@ docker compose -f deploy/compose.host.yaml exec -T postgres \
    `deploy/secrets/vault_master_key`，`chmod 600`；原生形态见 §1.1）。**不要**在
    缺 key 文件的状态下运行 `scripts/install-deps.sh` 或 `scripts/init-worktree.sh`：
    二者在该文件缺失或为空时会生成一把新 key，新 key 解不开备份里的任何密文。
-3. 先证明 dump 可读，再把现库**改名保留**（不要 drop），然后建空库、整事务导入：
+3. 先预检 dump，再把现库**改名保留**（不要 drop），然后建空库、整事务导入。
+   旧库保留期间新旧两份数据并存，PostgreSQL 数据卷所在磁盘需要约两倍库体积
+   的空闲空间。以下命令在 bash 与 zsh 下都可直接执行（用函数而不是字符串变量
+   包装 `docker compose`，zsh 不会对未加引号的变量分词），各步以 `&&` 串联，
+   任何一步失败即停止：
 
    ```bash
-   C="docker compose -f deploy/compose.host.yaml exec -T postgres"
+   C() { docker compose -f deploy/compose.host.yaml exec -T postgres "$@"; }
    DUMP=<备份目录>/agent_legion-<时间戳>.dump
-   $C pg_restore --list < "$DUMP" > /dev/null          # 读不出目录即停止，现库原样不动
-   $C psql -U agent_legion -d postgres -v ON_ERROR_STOP=1 \
-     -c 'ALTER DATABASE agent_legion RENAME TO agent_legion_pre_restore'
-   $C createdb -U agent_legion -O agent_legion agent_legion
-   $C pg_restore -U agent_legion -d agent_legion --no-owner \
-     --exit-on-error --single-transaction < "$DUMP"
+   # 预检：把整个归档解码为 SQL 丢弃，能读完说明文件完整（--list 只读头部与目录）
+   C pg_restore -f /dev/null < "$DUMP" \
+     && C psql -U agent_legion -d postgres -v ON_ERROR_STOP=1 \
+          -c 'ALTER DATABASE agent_legion RENAME TO agent_legion_pre_restore' \
+     && C createdb -U agent_legion -O agent_legion agent_legion \
+     && C pg_restore -U agent_legion -d agent_legion --no-owner \
+          --exit-on-error --single-transaction < "$DUMP"
    ```
 
-   `pg_restore` 默认遇错继续、只在结尾报错数，`--exit-on-error --single-transaction`
-   让任何一条失败都整体回滚，不会留下半导入的库。导入失败时删掉空的新库、把
-   `agent_legion_pre_restore` 改回 `agent_legion` 即回到恢复前状态。旧库保留到
-   §2.4 全部核对通过后再 `dropdb -U agent_legion agent_legion_pre_restore`
-   （同样经 `$C` 执行）。
+   预检失败时后续步骤都不会执行，现库原样不动。`pg_restore` 默认遇错继续、只在
+   结尾报错数，`--exit-on-error --single-transaction` 让任何一条失败都整体回滚，
+   不会留下半导入的库。改名之后的步骤失败时，用下面两条命令回到恢复前状态：
+
+   ```bash
+   C dropdb -U agent_legion agent_legion
+   C psql -U agent_legion -d postgres -v ON_ERROR_STOP=1 \
+     -c 'ALTER DATABASE agent_legion_pre_restore RENAME TO agent_legion'
+   ```
+
+   旧库保留到 §2.4 全部核对通过后再删除：
+   `C dropdb -U agent_legion agent_legion_pre_restore`（`C` 即上面定义的函数）。
 4. 恢复对象存储：S3 层反向同步，或停 `seaweedfs` 后清空卷内容再解包——用
    `find -mindepth 1 -delete` 清空（`rm -rf /data/*` 不会删隐藏文件）：
    `docker run --rm -v agent-legion_seaweedfs-data:/data -v <备份目录>:/backup busybox sh -c 'find /data -mindepth 1 -delete && tar xzf /backup/seaweedfs-data-<时间戳>.tar.gz -C /data'`。
