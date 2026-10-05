@@ -34,17 +34,16 @@ def test_replace_configuration_saves_workspace_and_node_limits_in_one_transactio
     result = workspace_service.replace_configuration(
         workspace["id"],
         workspace_patch={"name": "Reading"},
-        settings_patch={"workflowKey": "education_video_problems_generation"},
+        settings_patch={},
         node_limits=[
             {
-                "workflow_key": "education_video_problems_generation",
                 "node_key": "publish_content",
                 "concurrency_limit": 2,
             }
         ],
     )
     assert result["workspace"]["name"] == "Reading"
-    assert result["settings"]["workflowKey"] == "education_video_problems_generation"
+    assert "workflowKey" not in result["settings"]  # #211 M3: retired
     assert result["execution_configuration"]["node_limits"][0]["concurrency_limit"] == 2
 
 
@@ -57,10 +56,9 @@ def test_replace_configuration_rolls_back_workspace_on_invalid_node_limit(
         workspace_service.replace_configuration(
             workspace["id"],
             workspace_patch={"name": "Must Roll Back"},
-            settings_patch={"workflowKey": "education_video_problems_generation"},
+            settings_patch={},
             node_limits=[
                 {
-                    "workflow_key": "education_video_problems_generation",
                     "node_key": "unknown_node",
                     "concurrency_limit": 1,
                 }
@@ -78,7 +76,8 @@ def test_workspace_configuration_update_delegates(workspace_service, workspace):
 
 def test_workspace_configuration_settings_payload(workspace_service, workspace):
     payload = workspace_service.settings_payload(workspace["id"])
-    assert payload["workflowKey"] == "education_video_problems_generation"
+    assert "workflowKey" not in payload  # #211 M3: retired settings member
+    assert payload["entityType"]
 
 
 def _claim_code_lease(job_db, workspace_id: str, job_id: str, settings, capacity: int = 16):
@@ -143,7 +142,6 @@ def test_create_workspace_binds_key_and_seeds_nothing(workspace_service, job_db)
     revision (demo provisioning is `make import-demo` / scripts/seed_demo.py)."""
     workspace = workspace_service.create({"id": "fresh_ws", "name": "WS"})
     assert workspace["id"] == "fresh_ws"
-    assert workspace["default_workflow_key"] == "fresh_ws"
     assert job_db.get_active_workflow_revision(workspace["id"], "fresh_ws") is None
 
 
@@ -151,7 +149,7 @@ def _save(workspace_service, workspace_id: str, agent_capacity: int | None = Non
     return workspace_service.replace_configuration(
         workspace_id,
         workspace_patch={},
-        settings_patch={"workflowKey": "education_video_problems_generation"},
+        settings_patch={},
         node_limits=[],
         agent_capacity=agent_capacity,
     )
@@ -203,10 +201,11 @@ def test_update_workflow_accepts_unchanged_key(workspace_service, job_db):
     result = workspace_service.update_section(
         workspace["id"], "workflow", {"workflowKey": "education_video_problems_generation"}
     )
-    assert result["workflowKey"] == "education_video_problems_generation"
+    # #211 M3: the settings payload no longer echoes a separate key.
+    assert "workflowKey" not in result
     stored = job_db.get_workspace(workspace["id"])
     assert stored is not None
-    assert stored["default_workflow_key"] == "education_video_problems_generation"
+    assert stored["id"] == "education_video_problems_generation"
 
 
 def test_list_visible_workspaces_narrows_by_membership_and_binding(workspace_service, job_db):

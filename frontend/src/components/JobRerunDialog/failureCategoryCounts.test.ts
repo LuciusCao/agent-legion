@@ -7,7 +7,6 @@ function makeRun(overrides: Partial<FailedNodeRunItem>): FailedNodeRunItem {
     job_id: 'j1',
     node_key: 'extract',
     node_run_id: 1,
-    workflow_key: 'wf',
     failure_category: 'technical',
     failure_detail: 'timeout',
     error_message: 'boom',

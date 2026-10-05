@@ -130,7 +130,7 @@ def test_inherit_upgrade_requires_manifest_row_when_authority_enabled(tmp_path: 
     from tests.fakes.storage import FakeObjectStorage
 
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("wschain", default_workflow_key="wfchain")
+    workspace = queries.create_workspace("wschain")
     revisions = WorkflowRevisionService(queries)
     definition = inherit_chain_definition()
     nodes = {

@@ -100,8 +100,7 @@ def test_exception_mid_transaction_returns_connection_idle(
         write_transaction(TEST_DATABASE_URL) as conn,
     ):
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, %s, 'demo_workflow')",
+            "insert into workspaces(id, name) values (%s, %s)",
             ("issue-438-rolled-back", "must not persist"),
         )
         assert conn._raw.info.transaction_status == TransactionStatus.INTRANS

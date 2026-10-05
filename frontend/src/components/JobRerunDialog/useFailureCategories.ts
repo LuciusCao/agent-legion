@@ -13,7 +13,6 @@ import {
 
 export type FailureCategoryContext = {
   workspaceId: string
-  workflowKey?: string | null
 }
 
 export type JobRerunConfirmArgs = [
@@ -49,15 +48,12 @@ export function useFailureCategories(
   const [fromNodeKey, setFromNodeKey] = useState<string | null>(null)
 
   const workspaceId = failureContext?.workspaceId
-  const workflowKey = failureContext?.workflowKey
 
   // 加载失败时 error 不消费：chips 保持可见但不显示计数（静默降级）。
   const { data: failedRuns } = useQuery({
-    queryKey: extraQueryKeys.failedNodeRuns(workspaceId ?? '', workflowKey),
+    queryKey: extraQueryKeys.failedNodeRuns(workspaceId ?? ''),
     queryFn: async () => {
-      const data = await fetchFailedNodeRuns(workspaceId ?? '', {
-        workflowKey,
-      })
+      const data = await fetchFailedNodeRuns(workspaceId ?? '')
       return data.runs ?? []
     },
     enabled: failedMode && !!workspaceId,

@@ -71,14 +71,14 @@ nodes:
 
 
 def _workspace(job_db, name: str) -> str:
-    workspace = job_db.create_workspace(name, default_workflow_key=_WORKFLOW_KEY)
+    workspace = job_db.create_workspace(name)
     publish_builtin_revision(job_db, str(workspace["id"]))
     return str(workspace["id"])
 
 
 def _workspace_with_agent_skill(job_db, name: str) -> str:
     """Workspace whose published Agent for ``custom_cap`` carries a legacy skill."""
-    workspace = job_db.create_workspace(name, default_workflow_key="wf")
+    workspace = job_db.create_workspace(name)
     workspace_id = str(workspace["id"])
     service = AgentService(job_db.dsn_identity, workspace_id)
     service.save_draft(
@@ -145,7 +145,7 @@ def test_preview_falls_back_to_the_agent_definition_skill(job_db) -> None:
 
 
 def test_preview_unbound_capability_has_no_skill_key(job_db) -> None:
-    workspace = job_db.create_workspace("ws-prompt-unbound", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-prompt-unbound")
     del workspace  # 只需 workspace 行存在；definition_yaml 显式给出定义。
 
     payload = preview_node_prompt(job_db, "ws-prompt-unbound", "write_script", _DRAFT_YAML_NO_SKILL)
@@ -182,7 +182,7 @@ def test_preview_start_node_is_rejected(job_db) -> None:
 
 
 def test_preview_without_revision_or_workspace_raises_not_found(job_db) -> None:
-    workspace = job_db.create_workspace("ws-prompt-no-rev", default_workflow_key="ghost_flow")
+    workspace = job_db.create_workspace("ws-prompt-no-rev")
     assert workspace["id"]
 
     with pytest.raises(NotFoundError, match="No active workflow revision"):
@@ -251,7 +251,7 @@ def test_save_node_prompt_rejects_invalid_prompt_mode(job_db) -> None:
 
 def test_save_node_prompt_unknown_targets_raise_not_found(job_db) -> None:
     workspace_id = _workspace(job_db, "ws-prompt-save-404")
-    job_db.create_workspace("ws-prompt-bare", default_workflow_key="bare_flow")
+    job_db.create_workspace("ws-prompt-bare")
 
     with pytest.raises(NotFoundError, match="Unknown workflow node"):
         save_node_prompt(job_db, workspace_id, "no_such_node", "x")

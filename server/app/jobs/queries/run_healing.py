@@ -12,7 +12,6 @@ import hashlib
 import json
 from typing import Any
 
-from server.app.jobs.queries.batch_queue import backfill_deprecated_workflow_key
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 
@@ -68,4 +67,4 @@ class RunHealingQueriesMixin(ConnectionQueriesMixin):
             ).fetchone()
         if row is None:
             return None
-        return backfill_deprecated_workflow_key(dict(row))
+        return dict(row)

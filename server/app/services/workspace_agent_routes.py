@@ -59,9 +59,6 @@ def list_workspace_agent_routes(job_db: JobQueries, workspace_id: str) -> list[d
         node_key = str(row["node_key"])
         routes.append(
             {
-                # #211 M2: the column is gone — the deprecated response field
-                # keeps returning the identity value until the M3 contract drop.
-                "workflow_key": workspace_id,
                 "node_key": node_key,
                 "node_label": labels.get(node_key, node_key),
                 "capability": str(row["capability"]),

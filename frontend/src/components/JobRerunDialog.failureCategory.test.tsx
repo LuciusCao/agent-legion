@@ -44,7 +44,6 @@ function makeRun(overrides: Partial<FailedNodeRunItem>): FailedNodeRunItem {
     job_id: 'j1',
     node_key: 'extract',
     node_run_id: 1,
-    workflow_key: 'question_content',
     failure_category: 'technical',
     failure_detail: 'timeout',
     error_message: 'boom',
@@ -60,7 +59,7 @@ function renderDialog(
     <JobRerunDialog
       open
       allowFailedNodeMode
-      failureContext={{ workspaceId: 'ws1', workflowKey: 'question_content' }}
+      failureContext={{ workspaceId: 'ws1' }}
       jobs={[
         makeJob({ id: 'j1', status: 'failed', source_id: 'Q1' }),
         makeJob({ id: 'j2', status: 'failed', source_id: 'Q2' }),
@@ -74,7 +73,7 @@ function renderDialog(
   )
 }
 
-// workflow_key 需与测试 workflow 匹配，否则对话框拿不到节点列表。
+// workspace_id 需与测试 workflow key 匹配，否则对话框拿不到节点列表。
 const workflowJobs = () => [
   makeJob({
     id: 'j1',
@@ -116,9 +115,7 @@ describe('JobRerunDialog failure category mode', () => {
     })
 
     await waitFor(() =>
-      expect(mockFetchFailedNodeRuns).toHaveBeenCalledWith('ws1', {
-        workflowKey: 'question_content',
-      })
+      expect(mockFetchFailedNodeRuns).toHaveBeenCalledWith('ws1')
     )
   })
 

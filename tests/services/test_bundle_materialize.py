@@ -45,8 +45,8 @@ def storage() -> FakeStorage:
 def bundle(job_db, storage) -> dict:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, 'BundleCache', 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name)"
+            " values (%s, 'BundleCache') on conflict(id) do nothing",
             (WORKSPACE_ID,),
         )
         for material_id, content_hash, size, storage_key in (

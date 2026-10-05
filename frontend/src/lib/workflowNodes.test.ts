@@ -12,7 +12,6 @@ function makeJob(overrides: Partial<JobSummary> = {}): JobSummary {
   const job = {
     id: 'j1',
     workspace_id: 'ws1',
-    workflow_key: 'p1',
     source_id: 'Q1',
     source_type: 'question',
     title: '',

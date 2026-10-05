@@ -17,7 +17,18 @@ from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
 
+def _restore_key_column(conn) -> None:
+    """v91 (#211 M3) dropped the key column; these tests drive the v62
+    migration against the pre-v91 shape, so they re-add it (the
+    fresh_schema marker rebuilds the terminal shape afterwards)."""
+    conn.execute(
+        "alter table workspaces add column if not exists"
+        " default_workflow_key text not null default ''"
+    )
+
+
 def _seed_workspace(conn, workspace_id: str, key: str) -> None:
+    _restore_key_column(conn)
     conn.execute(
         "insert into workspaces(id, name, default_workflow_key)"
         " values (%s, %s, %s) on conflict do nothing",
@@ -38,6 +49,7 @@ def test_schema_version_pin() -> None:
     assert row["name"] == MIGRATIONS[-1].name
 
 
+@pytest.mark.fresh_schema
 def test_renames_ids_to_keys_and_cascades_children() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         # Direct-call on a v64 database: the retired default_agent_* and
@@ -127,6 +139,7 @@ def test_renames_ids_to_keys_and_cascades_children() -> None:
             conn.execute(f"alter table workspaces drop column if exists {column}")
 
 
+@pytest.mark.fresh_schema
 def test_conflicting_target_fails_fast() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         # bind-conflict-a wants id "shared_flow", which bind-conflict-b
@@ -155,6 +168,7 @@ def test_conflicting_target_fails_fast() -> None:
     assert ids == {"bind-conflict-a", "shared_flow"}
 
 
+@pytest.mark.fresh_schema
 def test_shared_key_fails_fast() -> None:
     """Two workspaces claiming the same key (legal under v50's free-form
     per-workspace keys) would both rename onto one id — the second parent
@@ -202,6 +216,7 @@ def test_shared_key_fails_fast() -> None:
     assert count_ws == {"bind-shared-a", "bind-shared-b"}
 
 
+@pytest.mark.fresh_schema
 def test_illegal_legacy_key_fails_fast() -> None:
     """A legacy key that violates the v62 id contract (e.g. 'team/flow') is
     rejected up front — renaming to it would strand the workspace behind
@@ -226,11 +241,14 @@ def test_illegal_legacy_key_fails_fast() -> None:
     assert row is not None and row["default_workflow_key"] == "team/flow"
 
 
+@pytest.mark.fresh_schema
 def test_replay_is_idempotent() -> None:
     from server.app.db.migrations.workspace_id_key_binding import (
         migrate_workspace_id_key_binding,
     )
 
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        _seed_workspace(conn, "bind-idem-ws", "")
     for _ in range(2):
         with write_transaction(TEST_DATABASE_URL) as conn:
             migrate_workspace_id_key_binding(conn)
@@ -241,3 +259,80 @@ def test_replay_is_idempotent() -> None:
             " or default_workflow_key = ''"
         ).fetchall()
     assert bad == [], "post-v62 invariant violated: every workspace has id == key"
+
+
+def test_terminal_shape_has_no_key_column_and_skips() -> None:
+    """#211 M3 (v91): the key column is gone on the current shape, and the
+    v62 migration's has_column guard makes a replay a no-op there."""
+    from server.app.db.migrations.workspace_id_key_binding import (
+        migrate_workspace_id_key_binding,
+    )
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("insert into workspaces(id, name) values ('bind-terminal', 'T')")
+        migrate_workspace_id_key_binding(conn)
+    with read_connection(TEST_DATABASE_URL) as conn:
+        column = conn.execute(
+            "select 1 from information_schema.columns where table_schema=current_schema()"
+            " and table_name='workspaces' and column_name='default_workflow_key'"
+        ).fetchone()
+        ids = {row["id"] for row in conn.execute("select id from workspaces").fetchall()}
+    assert column is None
+    assert "bind-terminal" in ids
+
+
+@pytest.mark.fresh_schema
+def test_v91_upgrade_drops_key_column_and_keeps_rows() -> None:
+    """#211 M3: a v90 database (key column present, id == key on every row)
+    upgrades to v91 — the column goes, the workspace rows stay, and a second
+    init_db is a no-op (the drop is guarded)."""
+    from server.app.db.schema import init_db
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        _seed_workspace(conn, "bind_v90_ws", "bind_v90_ws")
+        conn.execute("delete from schema_migrations where version >= 91")
+    init_db(TEST_DATABASE_URL)
+    init_db(TEST_DATABASE_URL)
+    with read_connection(TEST_DATABASE_URL) as conn:
+        column = conn.execute(
+            "select 1 from information_schema.columns where table_schema=current_schema()"
+            " and table_name='workspaces' and column_name='default_workflow_key'"
+        ).fetchone()
+        ids = {row["id"] for row in conn.execute("select id from workspaces").fetchall()}
+        recorded = conn.execute("select name from schema_migrations where version=91").fetchone()
+    assert column is None
+    assert "bind_v90_ws" in ids
+    assert recorded is not None and recorded["name"] == "retire_default_workflow_key"
+
+
+@pytest.mark.fresh_schema
+def test_v91_upgrade_drops_quality_batch_key_column() -> None:
+    """#211 M3 (codex R2 on #1032): quality_sample_batches.workflow_key was a
+    writable second workflow identifier; v91 drops it on upgrade, keeps the
+    batch rows, and the terminal shape never creates it."""
+    from server.app.db.schema import init_db
+
+    def _column(conn):
+        return conn.execute(
+            "select 1 from information_schema.columns where table_schema=current_schema()"
+            " and table_name='quality_sample_batches' and column_name='workflow_key'"
+        ).fetchone()
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        assert _column(conn) is None
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "alter table quality_sample_batches"
+            " add column if not exists workflow_key text not null default ''"
+        )
+        conn.execute("insert into workspaces(id, name) values ('bind_qb_ws', 'Q')")
+        conn.execute(
+            "insert into quality_sample_batches(id, workspace_id, sample_size, workflow_key)"
+            " values ('qb-1', 'bind_qb_ws', 1, 'bind_qb_ws')"
+        )
+        conn.execute("delete from schema_migrations where version >= 91")
+    init_db(TEST_DATABASE_URL)
+    with read_connection(TEST_DATABASE_URL) as conn:
+        assert _column(conn) is None
+        batch = conn.execute("select id from quality_sample_batches where id='qb-1'").fetchone()
+    assert batch is not None

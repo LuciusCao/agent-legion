@@ -2,12 +2,10 @@ from tests.helpers import publish_legacy_intake_revision
 from tests.helpers.auth import authenticate_client
 
 
-def _create_workspace(
-    client, name="default", default_workflow_key="education_video_problems_generation"
-):
-    workspace_id = client.post(
-        "/api/workspaces", json={"id": default_workflow_key, "name": name}
-    ).json()["workspace"]["id"]
+def _create_workspace(client, name="default", workspace_key="education_video_problems_generation"):
+    workspace_id = client.post("/api/workspaces", json={"id": workspace_key, "name": name}).json()[
+        "workspace"
+    ]["id"]
     # The demo workflow no longer declares intake modes (#154); these tests
     # post job-batches, so publish the legacy-intake variant.
     publish_legacy_intake_revision(client.app.state.job_db, workspace_id)

@@ -290,7 +290,7 @@ def _make_legacy(job_db: JobQueries, kind: str) -> None:
 
 
 def _seed_workspace(job_db: JobQueries, kind: str) -> None:
-    job_db.create_workspace("WS", default_workflow_key=WS, workspace_id=WS)
+    job_db.create_workspace("WS", workspace_id=WS)
     if kind == "agent":
         replace_agent_catalog(WS, {"generator": _agent_definition()})
         with job_db.connect() as conn:

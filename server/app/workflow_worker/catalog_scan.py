@@ -1,8 +1,8 @@
 """Workflow scan entries and runnable-workspace collection for the worker.
 
-Workspace-driven (schema v50, issue #112): every workspace with a non-empty
-``default_workflow_key`` is scanned, and its ACTIVE revision definition rides
-along as the fallback for snapshot-less jobs.
+Workspace-driven (schema v50, issue #112): every workspace is scanned (its id
+is the workflow identifier — #211 M3), and its ACTIVE revision definition
+rides along as the fallback for snapshot-less jobs.
 """
 
 from __future__ import annotations
@@ -24,10 +24,7 @@ logger = logging.getLogger(__name__)
 ScanEntry = tuple[str, str, "WorkflowDefinition | None"]
 WorkspaceJobs = dict[str, list[tuple["WorkflowDefinition | None", dict[str, Any]]]]
 
-_SCANNABLE_WORKSPACES = (
-    "select id, default_workflow_key from workspaces"
-    " where default_workflow_key <> '' order by created_at, id"
-)
+_SCANNABLE_WORKSPACES = "select id from workspaces order by created_at, id"
 _ACTIVE_REVISIONS = (
     "select workspace_id, definition_json from workflow_revisions where status='active'"
 )
@@ -48,7 +45,7 @@ def load_workflow_scan_entries(connect_source: Any) -> list[ScanEntry]:
     entries: list[ScanEntry] = []
     for workspace in workspaces:
         workspace_id = str(workspace["id"])
-        workflow_key = str(workspace["default_workflow_key"])
+        workflow_key = workspace_id
         raw = revisions.get(workspace_id)
         definition: WorkflowDefinition | None = None
         if raw:

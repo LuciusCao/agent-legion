@@ -57,10 +57,7 @@ def _make_db(tmp_path: Path) -> Path:
     db_path = TEST_DATABASE_URL
     init_db(db_path)
     with write_transaction(db_path) as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('w1', 'ws', 'demo_workflow')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('w1', 'ws')")
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id,"
             " title, status, storage_dir)"

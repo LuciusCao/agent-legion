@@ -223,7 +223,7 @@ publish, agent definition publish, and skill release actions stay human-only).
 ## 3. Workflow definition YAML
 
 ```yaml
-key: my_workflow            # = workspace default_workflow_key, snake_case
+key: my_workflow            # = the workspace id, snake_case
 label: 人类可读名称
 schema_version: 2           # 2 recommended; 1 derives edges from `after`
 intake:                     # optional; how jobs enter the workflow

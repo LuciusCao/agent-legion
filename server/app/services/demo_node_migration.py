@@ -36,7 +36,7 @@ def migrate_demo_node_codes_to_workspaces(settings: Settings, job_db: JobQueries
 
     seeded = 0
     for workspace in job_db.list_workspaces():
-        if workspace.get("default_workflow_key") == DEMO_WORKFLOW_KEY:
+        if workspace.get("id") == DEMO_WORKFLOW_KEY:
             seeded += len(
                 seed_demo_workspace_node_codes(
                     settings,

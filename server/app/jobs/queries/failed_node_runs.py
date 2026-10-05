@@ -38,7 +38,6 @@ class FailedNodeRunQueriesMixin(ConnectionQueriesMixin):
                   latest.node_run_id,
                   latest.job_id,
                   latest.node_key,
-                  latest.workflow_key,
                   latest.failure_category,
                   latest.failure_detail,
                   latest.error_message,
@@ -109,9 +108,6 @@ def _latest_failed_runs_sql(
             node_runs.failure_detail,
             node_runs.error_message,
             node_runs.finished_at,
-            -- #211 M2: jobs lost workflow_key (v70); the deprecated
-            -- response field carries the identity value instead.
-            jobs.workspace_id as workflow_key,
             row_number() over (
               partition by node_runs.job_id, node_runs.node_key
               order by node_runs.id desc

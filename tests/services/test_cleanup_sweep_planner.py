@@ -46,9 +46,7 @@ def test_sweep_forces_index_and_serves_pages(tmp_path, monkeypatch):
     log_path.write_text("old log")
     old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
     with db.connect() as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'demo_workflow')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws1', 'ws1')")
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id, storage_dir)"
             " values ('job-1', 'ws1', 'question', 'job-1', '')"
@@ -96,9 +94,7 @@ def test_sweep_skips_unresolvable_log_path_and_continues(tmp_path, monkeypatch):
     good_log.write_text("old log")
     old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
     with db.connect() as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'demo_workflow')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws1', 'ws1')")
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id, storage_dir)"
             " values ('job-1', 'ws1', 'question', 'job-1', ''),"
@@ -130,9 +126,7 @@ def test_sweep_unresolvable_run_dir_warns_without_raising(tmp_path):
     data_dir, db = _make_db(tmp_path)
     old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
     with db.connect() as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'demo_workflow')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws1', 'ws1')")
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id, storage_dir)"
             " values ('job-1', 'ws1', 'question', 'job-1', '')"
@@ -161,9 +155,7 @@ def test_sweep_survives_os_level_resolve_failures(tmp_path, monkeypatch):
     data_dir, db = _make_db(tmp_path)
     old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
     with db.connect() as conn:
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'demo_workflow')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws1', 'ws1')")
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id, storage_dir)"
             " values ('job-1', 'ws1', 'question', 'job-1', '')"

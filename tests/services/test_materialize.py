@@ -40,8 +40,7 @@ def material(job_db):
     """一个 ready 的 material 行 + 所属 workspace。"""
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, 'MatCache', 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'MatCache') on conflict(id) do nothing",
             (WORKSPACE_ID,),
         )
         conn.execute(

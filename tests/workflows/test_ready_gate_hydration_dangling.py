@@ -82,7 +82,7 @@ def test_dangling_row_with_in_flight_producer_is_released_after_n_passes(
     行指向已删对象。修复前 job 永久 defer、a 永不派发；兜底后第 N 轮释放，
     a 被 claim（它会重写该名字）。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    workspace = queries.create_workspace("test", workspace_id="test")
     job = _job(queries, workspace, "pending", "stale")
     storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
     seed_manifest_row(queries, job["id"], storage_key, A_PAYLOAD)  # 对象不存在
@@ -123,7 +123,7 @@ def test_dangling_row_without_rewriter_stays_deferred_with_suggested_action(
     """没有在途生产者会重写（a 已 completed）且字节不符：不猜，继续 defer，
     但升级为带 suggested action 的 WARNING（每个清单行只打一次）。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    workspace = queries.create_workspace("test", workspace_id="test")
     job = _job(queries, workspace, "completed", "pending")
     storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
     seed_manifest_row(queries, job["id"], storage_key, A_PAYLOAD)
@@ -175,7 +175,7 @@ def test_corrupt_gzip_object_counts_as_dangling(
     落到瞬时 failed，计数每轮清零、永久 defer 且反复下载。现归为 corrupt
     参与连续计数，第 N 轮按同一路径释放（在途生产者会重写）。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    workspace = queries.create_workspace("test", workspace_id="test")
     job = _job(queries, workspace, "pending", "stale")
     storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json.gz"
     seed_manifest_row(queries, job["id"], storage_key, A_PAYLOAD)
@@ -209,7 +209,7 @@ def test_corrupt_gzip_object_counts_as_dangling(
 def test_new_manifest_row_restarts_the_streak(tmp_path: Path) -> None:
     """行身份变化（新写者重新登记）即重新计数；恢复成功后计数清除。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    workspace = queries.create_workspace("test", workspace_id="test")
     job = _job(queries, workspace, "completed", "pending")
     storage_key = f"jobs/{workspace['id']}/{job['id']}/a_out.json"
     seed_manifest_row(queries, job["id"], storage_key, A_PAYLOAD)

@@ -352,12 +352,11 @@ direct-ref 清单写成结果归档首成员 `result-output-artifacts.json`（�
 时回落 64 MiB 默认）做体积预检，超「上限 − 1 MiB 余量」不换轨、本地诚实判败，
 避免重内嵌必撞 Host 413 丢结果后的全量重跑循环。
 
-**workflow_key 兼容窗口期（issue #211，截止 2026-10-31）**：claim 响应中的
-`workflow_key` 字段已 deprecated（与 `workspace_id` 恒等，schema v62 绑定）。字段
-与列将于 2026-10-31 的终态批移除——所有 Host 实例须在窗口期内升级至 ≥ schema v68
-（存量 workflow_key 已对齐），Worker 镜像须改为读取 `workspace_id`；仍解析旧字段
-的 Worker 在字段移除后将解析失败。升级顺序沿用 **Host first, Worker second**：
-v68 及以上的 Host 仍下发 `workflow_key`（兼容窗口内），Worker 可在其后任意时间切换。
+**workflow_key 已从 claim 响应移除（issue #211 M3，schema v91）**：claim 响应只按
+`workspace_id` 标识 workflow（schema v62 起两者恒等）。v0.5.0 起的 Worker 都不读取
+claim 里的 `workflow_key`，因此仍在受支持范围内的 Worker（已不早于 #547 的批量
+claim 形态）无需随之升级；manifest 里的 `workflow_key`（节点代码 runtime dict 可见）
+是另一个面，保持不变。
 
 节点的 provider、model、thinking 和 prompt 可以继续在 workflow 编辑器中修改。只修改这些运行配置会更新当前 revision，而不会创建新版本；已创建但尚未领取的 Job 会在领取时使用其 revision 的最新运行配置。任务一旦领取，就固定使用领取时下发的配置。
 

@@ -24,7 +24,6 @@ const activeRevisionPayload = {
   revision: {
     id: 'ws1:demo:v1',
     workspace_id: 'ws1',
-    workflow_key: 'demo',
     version: 1,
     status: 'active',
     definition_hash: 'hash1234',
@@ -91,7 +90,6 @@ const archivedRevisionDetail = {
   revision: {
     id: 'rev-old',
     workspace_id: 'ws1',
-    workflow_key: 'wf',
     version: 1,
     status: 'archived',
     definition_hash: 'oldhash',
@@ -124,7 +122,7 @@ describe('useWorkflowStudio draft & revision', () => {
       revisions: [activeRevisionPayload.revision],
     })
     mocks.fetchWorkspaces.mockResolvedValue({
-      workspaces: [{ id: 'ws1', default_workflow_key: 'demo' }],
+      workspaces: [{ id: 'ws1' }],
     })
     mocks.getAgentCatalog.mockResolvedValue({ agents: [] })
     mocks.publishWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
@@ -250,7 +248,6 @@ describe('useWorkflowStudio draft & revision', () => {
       revision: {
         id: 'rev-slow',
         workspace_id: 'ws1',
-        workflow_key: 'wf',
         version: 1,
         status: 'archived',
         definition_hash: 'slowhash',
@@ -264,7 +261,6 @@ describe('useWorkflowStudio draft & revision', () => {
       revision: {
         id: 'rev-fast',
         workspace_id: 'ws1',
-        workflow_key: 'wf',
         version: 2,
         status: 'archived',
         definition_hash: 'fasthash',

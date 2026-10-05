@@ -1,7 +1,6 @@
 create table if not exists workspaces (
   id text primary key,
   name text not null,
-  default_workflow_key text not null,
   created_at timestamptz not null default current_timestamp,
   updated_at timestamptz not null default current_timestamp,
   cms_config_json text not null default '{}',
@@ -23,14 +22,8 @@ create table if not exists workspaces (
 -- `create table if not exists` above does not add columns to existing tables.
 alter table workspaces add column if not exists node_config_json text not null default '{}';
 
--- The platform ships no default workflow: existing databases keep their
--- stored values, only the column default is dropped.
-alter table workspaces alter column default_workflow_key drop default;
-
--- Schema v62: default_workflow_key is DEPRECATED — it mirrors the workspace
--- id (bound at creation, immutable; the v62 migration renamed legacy ids to
--- their keys). Full retirement is tracked in issue #211; until then the
--- column stays the runtime authority for revision/DAG resolution.
+-- Schema v91 (#211 M3): the workspace id is the only workflow identifier;
+-- the redundant key column is gone (dropped on upgraded databases by v91).
 
 -- Schema v63: workspace-level artifact preview config (job detail left
 -- panel; {"hidden": ["questions.json", ...]}). DDL-only — the idempotent
@@ -228,7 +221,7 @@ create table if not exists workflow_revisions (
 -- Workflow catalog (schema v40) is retired at schema v50 (issue #112): the
 -- global workflow key registry was the last global concept on the execution
 -- path; a workflow is now just the DAG inside one workspace
--- (workspaces.default_workflow_key is a plain text identifier). The table is
+-- (the workspace id identifies it). The table is
 -- no longer created here; migrate_workflow_catalog_retirement drops it on
 -- existing databases.
 
@@ -908,7 +901,6 @@ create table if not exists quality_sample_batches (
   id text primary key,
   workspace_id text not null references workspaces(id) on delete cascade,
   name text not null default '',
-  workflow_key text not null default '',
   filters_json jsonb not null default '{}',
   sample_size integer not null check(sample_size > 0),
   seed text not null default '',

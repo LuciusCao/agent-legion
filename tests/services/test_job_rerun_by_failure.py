@@ -27,9 +27,7 @@ def rerun_service(job_db, settings):
 
 @pytest.fixture
 def workspace(job_db):
-    created = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    created = job_db.create_workspace("default")
     publish_builtin_revision(job_db, created["id"])
     return created
 

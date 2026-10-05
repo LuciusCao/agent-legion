@@ -21,7 +21,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 def _create_job_with_run(
     job_db: JobQueries, settings: Settings, log_path: str | None = None
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    workspace = job_db.create_workspace("Test WS", default_workflow_key="demo_workflow")
+    workspace = job_db.create_workspace("Test WS")
     job = job_db.create_job(
         workflow_key="demo_workflow",
         source_type="question",
@@ -150,7 +150,7 @@ def test_job_log_service_rejects_run_from_other_job(log_service):
     log_file = logs_root / "run.log"
     log_file.write_text("secret", encoding="utf-8")
 
-    workspace = job_db.create_workspace("Other WS", default_workflow_key="demo_workflow")
+    workspace = job_db.create_workspace("Other WS")
     other_job = job_db.create_job(
         workflow_key="demo_workflow",
         source_type="question",
@@ -350,7 +350,7 @@ def _create_pi_job(
     job_db: JobQueries,
     settings: Settings,
 ) -> tuple[dict[str, Any], dict[str, Any], Path]:
-    workspace = job_db.create_workspace("Pi WS", default_workflow_key="demo_workflow")
+    workspace = job_db.create_workspace("Pi WS")
     job = job_db.create_job(
         workflow_key="demo_workflow",
         source_type="question",

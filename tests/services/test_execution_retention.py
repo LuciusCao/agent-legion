@@ -42,8 +42,7 @@ def _clear_settings() -> None:
 def _seed_workspace_and_job(job_db, *, job_id: str) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
             (_WORKSPACE,),
         )
         conn.execute(

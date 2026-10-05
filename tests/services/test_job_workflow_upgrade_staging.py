@@ -20,7 +20,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def _two_revision_env(queries, tmp_path, old_nodes, new_nodes):
     """旧/新两个自定义 revision：job 钉在旧 revision 上，active 已是新 revision。"""
-    workspace = queries.create_workspace("ws-upg", default_workflow_key="wf_upg")
+    workspace = queries.create_workspace("ws-upg")
     old_def = WorkflowDefinition(
         key="wf_upg", label="wf_upg", intake=WorkflowIntake(), nodes=old_nodes
     )

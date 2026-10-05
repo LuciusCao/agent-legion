@@ -65,9 +65,7 @@ def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
         # workspace_id is the authorization scope (#745): the group-form key
         # (hyphens, not a workspace id) reads through any workspace the admin
         # session can access — a member workspace mirrors the demo setup.
-        workspace = client.app.state.job_db.create_workspace(
-            "Catalog Skill WS", default_workflow_key="catalog_skill_flow"
-        )
+        workspace = client.app.state.job_db.create_workspace("Catalog Skill WS")
         response = client.get(
             "/api/agent-catalog/skills/education-video-problems-generation/generate-questions",
             params={"workspace_id": str(workspace["id"])},

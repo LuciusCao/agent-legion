@@ -53,7 +53,6 @@ const mockDetail = {
   job: {
     id: 'j1',
     workspace_id: 'ws1',
-    workflow_key: 'question_content',
     source_id: 'Q100',
     source_type: 'knowledge',
     title: 'Algebra Problem',

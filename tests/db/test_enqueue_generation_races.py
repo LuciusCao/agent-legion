@@ -107,8 +107,7 @@ def _seed_code_lane(job_db, *, workspace_id: str, job_id: str, node_keys: list[s
     """kind='code' 的最小行集（无 Agent 路由——code 请求跳过路由校验）。"""
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(

@@ -26,9 +26,7 @@ _MAX_READ_CONNECTIONS = 8
 
 
 def _seed_failed_jobs(job_db, count: int) -> tuple[str, list[str]]:
-    workspace = job_db.create_workspace(
-        "preview-perf", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("preview-perf")
     publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "education_video_problems_generation",

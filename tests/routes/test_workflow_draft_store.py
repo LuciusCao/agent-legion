@@ -10,7 +10,7 @@ def _url(workspace_id: str) -> str:
 
 
 def test_get_returns_structured_empty_state(client, job_db) -> None:
-    workspace = job_db.create_workspace("ws-store-empty", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-store-empty")
 
     response = client.get(_url(workspace["id"]))
 
@@ -19,7 +19,7 @@ def test_get_returns_structured_empty_state(client, job_db) -> None:
 
 
 def test_put_then_get_roundtrip(client, job_db) -> None:
-    workspace = job_db.create_workspace("ws-store", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-store")
 
     put = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
 
@@ -32,7 +32,7 @@ def test_put_then_get_roundtrip(client, job_db) -> None:
 
 
 def test_put_overwrites_the_previous_draft(client, job_db) -> None:
-    workspace = job_db.create_workspace("ws-store-overwrite", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-store-overwrite")
     client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
 
     updated = client.put(_url(workspace["id"]), json={"definition_yaml": "key: wf\nlabel: V2\n"})
@@ -42,7 +42,7 @@ def test_put_overwrites_the_previous_draft(client, job_db) -> None:
 
 
 def test_put_rejects_blank_draft(client, job_db) -> None:
-    workspace = job_db.create_workspace("ws-store-blank", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-store-blank")
 
     for blank in ("", "   \n  "):
         response = client.put(_url(workspace["id"]), json={"definition_yaml": blank})
@@ -57,8 +57,8 @@ def test_unknown_workspace_gets_404(client) -> None:
 
 
 def test_drafts_are_isolated_between_workspaces(client, job_db) -> None:
-    first = job_db.create_workspace("ws-store-a", default_workflow_key="wf")
-    second = job_db.create_workspace("ws-store-b", default_workflow_key="wf")
+    first = job_db.create_workspace("ws-store-a")
+    second = job_db.create_workspace("ws-store-b")
 
     client.put(_url(first["id"]), json={"definition_yaml": _DRAFT_YAML})
 
@@ -69,7 +69,7 @@ def test_drafts_are_isolated_between_workspaces(client, job_db) -> None:
 
 
 def test_anonymous_gets_401(anon_client, job_db) -> None:
-    workspace = job_db.create_workspace("ws-store-anon", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-store-anon")
 
     assert anon_client.get(_url(workspace["id"])).status_code == 401
     put = anon_client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
@@ -77,7 +77,7 @@ def test_anonymous_gets_401(anon_client, job_db) -> None:
 
 
 def test_cookie_put_without_csrf_header_gets_403(client, job_db) -> None:
-    workspace = job_db.create_workspace("ws-store-csrf", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-store-csrf")
     bare = client.__class__(client.app)
     session = client.cookies.get("agent_legion_session")
     assert session
@@ -95,7 +95,7 @@ def test_scoped_token_cannot_write_but_can_read(client, job_db) -> None:
     like the other studio_secured reads."""
     from server.app.auth import scoped_tokens
 
-    workspace = job_db.create_workspace("ws-store-scoped", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-store-scoped")
     client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
     admin_id = str(job_db.get_user_credentials("admin")["id"])
     scoped = client.__class__(client.app)
@@ -119,7 +119,7 @@ def test_put_with_stale_expected_updated_at_gets_409_with_current_draft(client, 
     NOT be silently overwritten by a human autosave carrying a stale base —
     the 409 detail carries the current draft (same payload shape as the tool
     surface) so the editor can rebase in one round-trip."""
-    workspace = job_db.create_workspace("ws-store-cas-stale", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-store-cas-stale")
     first = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
     assert first.status_code == 200
     stale_base = first.json()["updated_at"]
@@ -167,7 +167,7 @@ def test_put_with_stale_expected_updated_at_gets_409_with_current_draft(client, 
 def test_put_without_expected_updated_at_keeps_last_write_wins(client, job_db) -> None:
     """Backward compatibility: an absent/null expected_updated_at keeps the
     documented two-tab last-write-wins semantics (no 409 for legacy callers)."""
-    workspace = job_db.create_workspace("ws-store-cas-none", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-store-cas-none")
     first = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
     base = first.json()["updated_at"]
 
@@ -199,7 +199,7 @@ def test_put_without_expected_updated_at_keeps_last_write_wins(client, job_db) -
 
 
 def test_put_with_matching_expected_updated_at_succeeds(client, job_db) -> None:
-    workspace = job_db.create_workspace("ws-store-cas-ok", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-store-cas-ok")
     first = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
     base = first.json()["updated_at"]
 
@@ -218,7 +218,7 @@ def test_put_with_matching_expected_updated_at_succeeds(client, job_db) -> None:
 def test_put_with_never_saved_conflicts_when_a_draft_already_exists(client, job_db) -> None:
     """never-saved is only valid while the draft truly does not exist; a
     caller that last saw a draft must not insert over its absence."""
-    workspace = job_db.create_workspace("ws-store-cas-ns", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-store-cas-ns")
     client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
 
     conflict = client.put(
@@ -235,7 +235,7 @@ def test_put_with_never_saved_conflicts_when_a_draft_already_exists(client, job_
 
 
 def test_put_with_invalid_expected_updated_at_gets_422(client, job_db) -> None:
-    workspace = job_db.create_workspace("ws-store-cas-bad", default_workflow_key="wf")
+    workspace = job_db.create_workspace("ws-store-cas-bad")
 
     for bad in ("garbage", "2026-13-45T99:99:99+00:00", "yesterday"):
         response = client.put(

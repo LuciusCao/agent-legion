@@ -74,16 +74,13 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
         created = c.post(
             f"/api/workspaces/{workspace_id}/job-batches",
             json={
-                "workflow_key": "math_sprint",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q001"],
             },
         )
-        workspace_jobs = c.get(f"/api/workspaces/{workspace_id}/jobs?workflow_key=math_sprint")
-        # #211 Phase 3（#307）：跨 workspace 的 key 在 v62 绑定下不可能存在——
-        # 守卫 400 取代旧的「静默空集」收窄；other 用自己的恒等 key 查询得空集。
-        other_jobs_mismatched = c.get(f"/api/workspaces/{other_id}/jobs?workflow_key=math_sprint")
-        other_jobs = c.get(f"/api/workspaces/{other_id}/jobs?workflow_key=other")
+        workspace_jobs = c.get(f"/api/workspaces/{workspace_id}/jobs")
+        # #211 M3：jobs 列表只按 path workspace 圈定（workflow_key 查询参数已退役）。
+        other_jobs = c.get(f"/api/workspaces/{other_id}/jobs")
 
     assert workspace_response.status_code == 200
     assert workspace_id == "math_sprint"
@@ -93,7 +90,6 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
     assert body["jobs"][0]["id"] == f"{workspace_id}_math_sprint_Q001"
     assert body["jobs"][0]["source_type"] == "question"
     assert [job["id"] for job in workspace_jobs.json()["jobs"]] == [body["jobs"][0]["id"]]
-    assert other_jobs_mismatched.status_code == 400
     assert other_jobs.json()["jobs"] == []
 
 
@@ -255,7 +251,7 @@ def test_create_workspace_binds_key_and_seeds_nothing(tmp_path):
 
     assert created.status_code == 200
     assert workspace["id"] == "blank_ws"
-    assert workspace["default_workflow_key"] == "blank_ws"
+    assert "default_workflow_key" not in workspace  # #211 M3: retired field
     assert active.status_code == 404
     assert agents.status_code == 200
     assert agents.json()["agents"] == []
@@ -317,7 +313,6 @@ def test_create_workspace_stores_default_entity(tmp_path):
     workspace = queries.create_workspace(
         "Intake WS",
         default_entity="knowledge",
-        default_workflow_key="education_video_problems_generation",
     )
 
     assert workspace["default_entity"] == "knowledge"
@@ -328,9 +323,7 @@ def test_create_workspace_uses_default_entity_defaults(tmp_path):
 
     db_path = TEST_DATABASE_URL
     queries = JobQueries(db_path, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "Default WS", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("Default WS")
 
     assert workspace["default_entity"] == "question"
 
@@ -340,9 +333,7 @@ def test_update_workspace_persists_default_entity(tmp_path):
 
     db_path = TEST_DATABASE_URL
     queries = JobQueries(db_path, tmp_path / "jobs")
-    created = queries.create_workspace(
-        "Update WS", default_workflow_key="education_video_problems_generation"
-    )
+    created = queries.create_workspace("Update WS")
     workspace_id = created["id"]
     workspace = queries.update_workspace(
         workspace_id,

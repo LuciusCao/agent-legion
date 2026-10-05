@@ -6,27 +6,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.routes.run_item_contracts import RunItem
 
-# #211 Phase 2: request-param deprecation wording (server-side default).
-_DEPRECATED_DEFAULT = (
-    "Deprecated: defaults to the path workspace_id; removal tracked in #211 (drops by 2026-10-31)."
-)
-_DEPRECATED_READ = "Deprecated: read workspace_id instead. Since schema v62 the two are equal; removal tracked in #211 (drops by 2026-10-31)."
-
 
 class RunCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # #211 Phase 2: absent defaults to the path workspace_id (equal since v62).
-    workflow_key: str | None = Field(
-        default=None, min_length=1, deprecated=True, description=_DEPRECATED_DEFAULT
-    )
     items: list[RunItem] = Field(min_length=1)
 
 
 class RunRecord(BaseModel):
     id: str
     workspace_id: str
-    workflow_key: str = Field(description=_DEPRECATED_READ, deprecated=True)
     source_kind: str
     status: str
     created_count: int

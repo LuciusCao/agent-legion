@@ -73,7 +73,7 @@ def insert_job_rows(
 ) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(
@@ -259,7 +259,7 @@ def insert_code_job_rows(job_db, *, job_id: str, node_key: str = "package") -> N
     """Minimal job rows for the kind='code' claim path (no agent routing)."""
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'demo_workflow')"
+            "insert into workspaces(id, name) values ('test-workspace', 'Test')"
             " on conflict(id) do nothing"
         )
         conn.execute(

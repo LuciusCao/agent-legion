@@ -219,43 +219,37 @@ def test_main_allows_derived_database(tmp_path, monkeypatch):
     assert (tmp_path / "out.json").exists()
 
 
-def test_deprecated_workflow_key_paths_are_marked(tmp_path):
-    """#211 Phase 2: the workflows/{workflow_key} URL segment retires — every
-    legacy path stays registered as a deprecated alias of the segment-free
-    route, so clients see the removal coming in their generated types."""
+# #211 M3: the only workflow-key members left on the contract are the
+# studio-agent MCP read shapes (never deprecated; they echo the workspace id)
+# and the legacy settings-section request (no-op when equal to the id).
+_SURVIVING_WORKFLOW_KEY_MEMBERS = {
+    ("StudioAgentActiveWorkflowResponse", "workflow_key"),
+    ("StudioContextWorkflow", "workflow_key"),
+    ("WorkspaceSettingsSectionRequest", "workflowKey"),
+}
+
+
+def test_retired_workflow_key_contract_surface_is_gone(tmp_path):
+    """#211 M3: the deprecated workflow_key fields, the workflows/{workflow_key}
+    URL aliases and the workflow_key query params are removed from the
+    contract (removal window announced for 2026-10-31)."""
     schema = build_openapi_schema(tmp_path / "schema")
 
-    legacy_paths = [path for path in schema["paths"] if "/workflows/{workflow_key}/nodes/" in path]
-    assert legacy_paths, "expected deprecated workflow-key alias paths in the schema"
-    for path in legacy_paths:
-        for method, operation in schema["paths"][path].items():
-            if method not in {"get", "post", "put", "patch", "delete"}:
+    assert not [path for path in schema["paths"] if "/workflows/{workflow_key}/" in path]
+    for path, operations in schema["paths"].items():
+        for method, operation in operations.items():
+            if not isinstance(operation, dict):
                 continue
-            assert operation.get("deprecated") is True, (path, method)
-            assert "removal is tracked in #211" in operation.get("description", "")
+            params = {param["name"] for param in operation.get("parameters", [])}
+            assert "workflow_key" not in params, (path, method)
+            assert "#211" not in operation.get("description", ""), (path, method)
 
-    # The deprecated jobs list query param carries the same marker.
-    jobs_list = schema["paths"]["/api/workspaces/{workspace_id}/jobs"]["get"]
-    workflow_key_param = next(
-        param
-        for param in jobs_list["parameters"]
-        if param["name"] == "workflow_key" and param["in"] == "query"
-    )
-    assert workflow_key_param["deprecated"] is True
-
-    # Segment-free node-code routes exist and are NOT deprecated.
-    fresh = schema["paths"]["/api/workspaces/{workspace_id}/nodes/{node_key}/code"]
-    assert "deprecated" not in fresh["get"]
-
-
-def test_claim_response_workflow_key_is_deprecated(tmp_path):
-    """#211 Phase 2 (cross-process protocol): the claim body's workflow_key
-    equals workspace_id (schema v62); Workers read workspace_id. The field
-    stays until the Phase 3/4 removal window (shipped Worker images keep
-    parsing the body), but the contract marks it deprecated."""
-    schema = build_openapi_schema(tmp_path / "schema")
-
+    members = {
+        (name, prop)
+        for name, component in schema["components"]["schemas"].items()
+        for prop in (component.get("properties") or {})
+        if prop in {"workflow_key", "workflowKey", "default_workflow_key"}
+    }
+    assert members == _SURVIVING_WORKFLOW_KEY_MEMBERS
     claim = schema["components"]["schemas"]["AgentClaimResponse"]
-    assert claim["properties"]["workflow_key"]["deprecated"] is True
-    assert "Deprecated" in claim["properties"]["workflow_key"]["description"]
-    assert "deprecated" not in claim["properties"]["workspace_id"]
+    assert "workspace_id" in claim["properties"]

@@ -182,7 +182,7 @@ def wfchain_agent_definition(
 def setup_wfchain_env(tmp_path: Path, definition: WorkflowDefinition):
     """建库连接 + workspace + 首发 revision（wfchain 族公共环境）。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("wschain", default_workflow_key="wfchain")
+    workspace = queries.create_workspace("wschain")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
     return queries, workspace, revisions, original
@@ -242,7 +242,7 @@ def inherit_chain_definition(b_cap: str = "cap_b") -> WorkflowDefinition:
 def setup_inherit_env(tmp_path: Path):
     """wfchain 环境 + 裸构造升级服务（无 artifact_mutation/object_store）。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("wschain", default_workflow_key="wfchain")
+    workspace = queries.create_workspace("wschain")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], inherit_chain_definition())
     service = JobWorkflowUpgradeService(

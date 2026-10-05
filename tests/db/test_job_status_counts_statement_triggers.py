@@ -33,8 +33,7 @@ _SEED_JOB_COUNT = 6
 
 def _seed(conn, workspace_id: str, run_id: str, count: int = _SEED_JOB_COUNT) -> list[str]:
     conn.execute(
-        "insert into workspaces(id, name, default_workflow_key)"
-        " values (%s, %s, 'question_comprehension_info') on conflict do nothing",
+        "insert into workspaces(id, name) values (%s, %s) on conflict do nothing",
         (workspace_id, workspace_id),
     )
     conn.execute(

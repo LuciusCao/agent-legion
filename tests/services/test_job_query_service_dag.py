@@ -111,7 +111,7 @@ def _publish_schema_v2_stale_after_echo_revision(job_db, workspace_id: str):
 
 
 def test_job_detail_edges_derive_from_top_level_edges_schema_v2(query_service, job_db):
-    workspace = job_db.create_workspace("schema_v2_ws", default_workflow_key="schema_v2_edges_only")
+    workspace = job_db.create_workspace("schema_v2_ws")
     _publish_schema_v2_edges_only_revision(job_db, workspace["id"])
     batch = job_db.create_run(
         "schema_v2_edges_only",
@@ -140,7 +140,7 @@ def test_job_detail_edges_derive_from_top_level_edges_schema_v2(query_service, j
 
 
 def test_workspace_dag_after_derives_from_top_level_edges_schema_v2(query_service, job_db):
-    workspace = job_db.create_workspace("schema_v2_ws", default_workflow_key="schema_v2_edges_only")
+    workspace = job_db.create_workspace("schema_v2_ws")
     _publish_schema_v2_edges_only_revision(job_db, workspace["id"])
 
     payload = query_service.workspace_dag(workspace["id"])
@@ -166,9 +166,7 @@ def test_workspace_dag_empty_predecessors_when_after_echo_is_stale_schema_v2(que
     只按它派生就绪）；节点无顶层入边时前驱必须是空数组，回退原始
     node.after 会返回执行器不会采用的边。
     """
-    workspace = job_db.create_workspace(
-        "schema_v2_stale_ws", default_workflow_key="schema_v2_stale_after_echo"
-    )
+    workspace = job_db.create_workspace("schema_v2_stale_ws")
     _publish_schema_v2_stale_after_echo_revision(job_db, workspace["id"])
 
     payload = query_service.workspace_dag(workspace["id"])

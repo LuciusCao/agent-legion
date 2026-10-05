@@ -15,7 +15,6 @@ const mockFetchWorkspaceStats = vi.mocked(fetchWorkspaceStats)
 
 const stats = {
   workspace_id: 'ws1',
-  workflow_key: 'question_content',
   job_stats: { running: 1 },
 } as unknown as WorkspaceStats
 

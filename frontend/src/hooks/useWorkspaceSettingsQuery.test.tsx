@@ -40,14 +40,12 @@ function mockSnapshotApi(workspaceName = '空间一') {
     if (path === '/api/workspaces/ws1/settings') {
       return Promise.resolve({
         entityType: 'knowledge',
-        workflowKey: 'knowledge_content',
       })
     }
     if (path === '/api/workspaces/ws1/agent-routes') {
       return Promise.resolve({
         routes: [
           {
-            workflow_key: 'knowledge_content',
             node_key: 'review',
             node_label: '审核',
             capability: 'review',
@@ -75,7 +73,6 @@ function resetStore() {
     workspaceDescription: '',
     settings: {
       entityType: 'question',
-      workflowKey: '',
     },
     originalWorkspaceName: '',
     originalWorkspaceDescription: '',
@@ -112,7 +109,6 @@ describe('useWorkspaceSettingsQuery', () => {
     expect(snapshot.workspaceName).toBe('空间一')
     expect(snapshot.workspaceDescription).toBe('描述一')
     expect(snapshot.settings.entityType).toBe('knowledge')
-    expect(snapshot.settings.workflowKey).toBe('knowledge_content')
     expect(snapshot.executionConfiguration.migration_warnings).toEqual([
       'legacy migration',
     ])
@@ -148,7 +144,7 @@ describe('useWorkspaceSettingsQuery', () => {
         return Promise.resolve({ workspace: { name: '空间一' } })
       }
       if (path === '/api/workspaces/ws1/settings') {
-        return Promise.resolve({ workflowKey: 'knowledge_content' })
+        return Promise.resolve({ entityType: 'knowledge' })
       }
       return Promise.resolve({})
     })
@@ -199,7 +195,7 @@ describe('useSettingStoreHydration', () => {
     const state = useSettingStore.getState()
     expect(state.workspaceId).toBe('ws1')
     expect(state.originalWorkspaceName).toBe('空间一')
-    expect(state.originalSettings?.workflowKey).toBe('knowledge_content')
+    expect(state.originalSettings?.entityType).toBe('knowledge')
     expect(state.isDirty).toBe(false)
   })
 

@@ -46,8 +46,7 @@ def _publish(workspace_id: str, node_key: str, code: str) -> None:
 def _seed_workspace(workspace_id: str) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, %s, 'demo') on conflict do nothing",
+            "insert into workspaces(id, name) values (%s, %s) on conflict do nothing",
             (workspace_id, workspace_id),
         )
 
@@ -103,8 +102,8 @@ def test_vault_memo_shares_one_read_and_drops_on_write(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-vault', 'ws-vault', 'demo') on conflict do nothing"
+            "insert into workspaces(id, name)"
+            " values ('ws-vault', 'ws-vault') on conflict do nothing"
         )
     memo: dict[tuple[str, str], str | None] = {}
     vault = VaultService(TEST_DATABASE_URL, memo=memo)

@@ -30,7 +30,6 @@ _NOT_VERSIONED_ENTITY_PUBLISH = {
 _CAS_PUBLISH_ROUTES = {
     "/api/agent-definitions/{agent_id}/publish",
     "/api/workspaces/{workspace_id}/nodes/{node_key}/code/publish",
-    "/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/publish",
     "/api/workspaces/{workspace_id}/preview-panel/publish",
 }
 

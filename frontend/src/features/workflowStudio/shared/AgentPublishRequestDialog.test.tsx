@@ -46,7 +46,6 @@ const workflow = {
 const revision = {
   id: 'rev-active',
   workspace_id: 'ws1',
-  workflow_key: 'demo_video_workflow',
   version: 1,
   status: 'active',
   definition_hash: '17d8077e',

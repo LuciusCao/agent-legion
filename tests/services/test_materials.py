@@ -38,8 +38,7 @@ def storage() -> FakeStorage:
 def service(job_db, storage) -> MaterialsService:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, 'Materials', 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Materials') on conflict(id) do nothing",
             (WORKSPACE_ID,),
         )
     return MaterialsService(job_db.dsn_identity, storage)
@@ -181,8 +180,7 @@ def test_operations_require_configured_storage(job_db) -> None:
 def test_get_scopes_to_workspace(service, job_db) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, 'Other', 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Other') on conflict(id) do nothing",
             (OTHER_WORKSPACE_ID,),
         )
     result = service.presign(WORKSPACE_ID, filename="i.txt", size_bytes=1)

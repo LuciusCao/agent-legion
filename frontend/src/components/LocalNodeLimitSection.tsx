@@ -4,21 +4,14 @@ import { useWorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery
 
 export function LocalNodeLimitSection() {
   const { executionConfiguration, setNodeLimit } = useSettingStore()
-  const workspaceId = useSettingStore((s) => s.workspaceId)
   const { workflowDefinition, agentRoutes } = useWorkspaceSettingsSnapshot()
 
   if (!workflowDefinition) return null
 
-  const workflowKey = workflowDefinition.key
   // P-0.5：无 Agent 路由的节点一律进入内置 code 池；并发上限保存时由后端
-  // 按实例 code_capacity 校验。agentRoutes 过滤键用 workspace_id
-  //（workflow_key 已 deprecated 且 v62 起恒等于 workspace id，#211）；
-  // workflowKey 仍用于 node_limits 过滤与 PUT 载荷（请求侧 Phase 2 后续批次）。
-  const agentRouted = new Set(
-    agentRoutes
-      .filter((route) => route.workflow_key === workspaceId)
-      .map((route) => route.node_key)
-  )
+  // 按实例 code_capacity 校验。agentRoutes 与 node_limits 都按 workspace
+  // 取回，节点只按 node_key 匹配（#211 M3 退役了 workflow_key 维度）。
+  const agentRouted = new Set(agentRoutes.map((route) => route.node_key))
   const codeNodes = workflowDefinition.nodes.filter(
     (node) => !agentRouted.has(node.key)
   )
@@ -47,7 +40,7 @@ export function LocalNodeLimitSection() {
       >
         {codeNodes.map((node) => {
           const limit = executionConfiguration.node_limits.find(
-            (l) => l.workflow_key === workflowKey && l.node_key === node.key
+            (l) => l.node_key === node.key
           )
 
           return (
@@ -69,7 +62,6 @@ export function LocalNodeLimitSection() {
                   const raw = event.target.value
                   const value = Number(raw)
                   setNodeLimit(
-                    workflowKey,
                     node.key,
                     raw === '' || Number.isNaN(value) ? null : value
                   )

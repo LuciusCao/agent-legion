@@ -39,9 +39,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def test_publish_and_get_active_revision(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     # Agent definitions are workspace-scoped (schema v46): seed the demo
     # templates into this workspace so its routes resolve.
     seed_workspace_agent_definitions(workspace["id"])
@@ -78,7 +76,7 @@ def test_runtime_only_save_updates_active_revision_without_new_version(
     tmp_path: Path,
 ) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("runtime-ws", default_workflow_key="runtime-flow")
+    workspace = queries.create_workspace("runtime-ws")
     service = WorkflowRevisionService(queries)
     original = workflow_definition_from_mapping(
         {
@@ -137,7 +135,7 @@ def test_config_only_save_creates_new_revision(tmp_path: Path) -> None:
     config-only save publishes a new revision (the same fact compare now
     reports via creates_revision; the two must stay aligned)."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("runtime-ws", default_workflow_key="runtime-flow")
+    workspace = queries.create_workspace("runtime-ws")
     service = WorkflowRevisionService(queries)
     original = workflow_definition_from_mapping(
         {
@@ -241,9 +239,7 @@ def _route_and_capacity_rows(queries: JobQueries, workspace_id: str) -> dict:
 
 def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     seed_workspace_agent_definitions(workspace["id"])
     service = WorkflowRevisionService(queries)
     service.publish_workspace_revision(
@@ -280,9 +276,7 @@ def test_archived_agent_does_not_rewrite_routes_until_next_publish(tmp_path: Pat
     they only change when a new revision is published (the startup reconcile
     was retired with the explicit-type cutover)."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     seed_workspace_agent_definitions(workspace["id"])
     service = WorkflowRevisionService(queries)
     service.publish_workspace_revision(
@@ -313,9 +307,7 @@ def test_publish_rejects_ambiguous_agent_capability(
     from server.app.agent_catalog import AgentDefinition
 
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     ambiguous = {
         "write-script-v1": AgentDefinition(
             capability="write_script", runtime="velites", skill="example/write-script"
@@ -343,9 +335,7 @@ def test_publish_rejects_ambiguous_agent_capability(
 
 def test_create_job_stores_workflow_revision_snapshot(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
     service = WorkflowRevisionService(queries)
     revision = service.publish_workspace_revision(workspace["id"], definition)
@@ -407,9 +397,7 @@ edges: []
 def test_publish_validation_reports_missing_node_code(tmp_path: Path) -> None:
     """P-0.5: a code node without resolvable code fails publish."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
 
     errors = validate_workflow_for_publish(
@@ -428,9 +416,7 @@ def test_publish_validation_reports_missing_node_code(tmp_path: Path) -> None:
 
 def test_failed_publish_validation_preserves_active_revision(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
     service = WorkflowRevisionService(queries)
     active = service.publish_workspace_revision(workspace["id"], definition)
@@ -460,9 +446,7 @@ def test_mid_publish_projection_failure_rolls_back_revision_insert(
     注入失败，断言新 revision 行与 active 指针都不落库。
     """
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
     service = WorkflowRevisionService(queries)
     first = service.publish_workspace_revision(workspace["id"], definition)
@@ -558,7 +542,6 @@ def test_get_workflow_revision_detail_returns_404_for_unknown_revision(
     app = create_app(data_dir=tmp_path, start_worker=False)
     workspace = app.state.job_db.create_workspace(
         "Studio",
-        default_workflow_key="education_video_problems_generation",
     )
     with authenticate_client(TestClient(app)) as client:
         response = client.get(f"/api/workspaces/{workspace['id']}/workflow-revisions/missing-rev")
@@ -585,7 +568,7 @@ def test_get_workflow_revision_detail_rejects_other_workspace_revision(
         first_id = first.json()["workspace"]["id"]
         second_id = second.json()["workspace"]["id"]
         # v62: creation seeds nothing; publish into the first workspace. The
-        # /active lookup resolves default_workflow_key, which equals the
+        # /active lookup resolves the workspace id, which equals the
         # workspace id here — so the built-in definition is published with
         # its key rewritten to the id (the JobQueries-level key rewrite the
         # publish guard would demand of an HTTP draft anyway).
@@ -611,7 +594,6 @@ def test_get_active_workflow_revision_returns_404_for_workspace_without_revision
     app = create_app(data_dir=tmp_path, start_worker=False)
     workspace = app.state.job_db.create_workspace(
         "No Revision",
-        default_workflow_key="education_video_problems_generation",
     )
     with authenticate_client(TestClient(app)) as client:
         response = client.get(f"/api/workspaces/{workspace['id']}/workflow-revisions/active")
@@ -658,9 +640,7 @@ def test_sharded_revision_snapshot_round_trip(tmp_path: Path) -> None:
     ``GET /workflow-revisions/active`` 与 compare 基线解析臂全部失效。
     """
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     revision = WorkflowRevisionService(queries).publish_workspace_revision(
         workspace["id"], _sharded_reduce_definition()
     )
@@ -704,9 +684,7 @@ def test_response_payload_includes_terminal_outcome(tmp_path: Path) -> None:
 def test_publish_revision_records_node_code_pins(tmp_path: Path) -> None:
     """Publish snapshots published custom code versions as node_code_pins."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws-pins", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws-pins")
     codes = NodeCodeService(queries.dsn_identity)
     codes.save_draft(
         workspace["id"],
@@ -737,9 +715,7 @@ def test_publish_revision_records_node_code_pins(tmp_path: Path) -> None:
 def test_publish_revision_pins_workspace_factory_seed_codes(tmp_path: Path, settings) -> None:
     """Workspace factory seeds are pinned into revision publishes."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws-no-pins", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws-no-pins")
     from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 
     seed_demo_workspace_node_codes(settings, workspace["id"])
@@ -758,9 +734,7 @@ def test_publish_revision_pins_workspace_factory_seed_codes(tmp_path: Path, sett
 
 def test_publish_revision_skips_pins_when_gate_disabled(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws-gated-pins", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws-gated-pins")
     codes = NodeCodeService(queries.dsn_identity)
     codes.save_draft(
         workspace["id"],
@@ -784,9 +758,7 @@ def test_runtime_only_update_preserves_node_code_pins(tmp_path: Path) -> None:
     from server.app.workflows.schema import WorkflowNodeExecution
 
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws-pins-keep", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws-pins-keep")
     codes = NodeCodeService(queries.dsn_identity)
     codes.save_draft(
         workspace["id"],
@@ -825,7 +797,7 @@ def test_publish_validation_skips_approval_gates(tmp_path: Path) -> None:
     """Approval gates never dispatch (EXEC-APPROVAL-001): the publish gate
     must not demand Agents or node code for them."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws-approval", default_workflow_key="gated")
+    workspace = queries.create_workspace("ws-approval")
     definition = workflow_definition_from_mapping(
         {
             "key": "gated",
@@ -886,9 +858,7 @@ def test_publish_prunes_stale_override_keys(tmp_path: Path) -> None:
     property leaves stale keys that fail every later intake at the whitelist
     validation, and the override card's PATCH-everything save 400s."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "prune-ws", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("prune-ws")
 
     _publish_with_node_schema(
         queries,
@@ -923,9 +893,7 @@ def test_publish_prunes_type_mismatched_override_values(tmp_path: Path) -> None:
     type check raises on it exactly like an unknown key, so publish prunes it
     too (#418 二轮复审 P2-1)."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "prune-type-ws", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("prune-type-ws")
 
     _publish_with_node_schema(queries, workspace["id"], {"count": {"type": "integer"}})
     queries.update_workspace(
@@ -948,9 +916,7 @@ def test_publish_prunes_type_mismatched_override_values(tmp_path: Path) -> None:
 def test_publish_keeps_valid_and_secret_overrides(tmp_path: Path) -> None:
     """Legitimate overrides survive the prune, secret_ref markers included."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "prune-keep-ws", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("prune-keep-ws")
 
     schema = {"count": {"type": "integer"}, "token": {"type": "string", "secret": True}}
     _publish_with_node_schema(queries, workspace["id"], schema)
@@ -976,9 +942,7 @@ def test_publish_keeps_valid_and_secret_overrides(tmp_path: Path) -> None:
 def test_publish_without_overrides_is_a_noop_prune(tmp_path: Path) -> None:
     """No stored overrides → publish must not write the workspace row."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "prune-empty-ws", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("prune-empty-ws")
 
     _publish_with_node_schema(queries, workspace["id"], {"count": {"type": "integer"}})
 
