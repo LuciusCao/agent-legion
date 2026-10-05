@@ -49,11 +49,13 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
         # #957: 每周期至多 SWEEP_BATCH_LIMIT 行，最老心跳优先，剩余留到下一
         # 周期——积压时单事务不再锁全部过期行。SKIP LOCKED 照旧让并发 sweeper
         # 拿互斥子集；被 #566 延期的行最多停留 2×TTL（硬截止后必走过期分支），
-        # 挤占批额的时长有界。
+        # 挤占批额的时长有界。lease 为空 / lease 行已不存在的孤儿行在选取时
+        # 排除：循环对它们本就只 continue，留在批里会永久占满最老位置、让清扫停摆。
         rows = conn.execute(
-            "select *, hashtext('agent-ws:' || workspace_id)::int as ws_lock_key"
-            " from agent_execution_requests"
-            " where state in ('claimed', 'reporting') and heartbeat_at<%s"
+            "select r.*, hashtext('agent-ws:' || r.workspace_id)::int as ws_lock_key"
+            " from agent_execution_requests r"
+            " where r.state in ('claimed', 'reporting') and r.heartbeat_at<%s"
+            " and exists (select 1 from executor_leases l where l.id = r.lease_id)"
             " order by heartbeat_at, execution_id limit %s for update skip locked",
             (cutoff, SWEEP_BATCH_LIMIT),
         ).fetchall()

@@ -148,3 +148,30 @@ def test_sweep_batch_reads_once_and_keeps_requeue_outcome(job_db, monkeypatch) -
     assert all(r["status"] == "failed" for r in runs)
     assert all(r["error_message"] == "Agent Worker heartbeat expired" for r in runs)
     assert all(r["status"] == "pending" for r in nodes)
+
+
+def test_orphan_claims_beyond_cap_do_not_block_real_expiry(job_db, monkeypatch) -> None:
+    """lease 为空 / lease 行已不存在的孤儿行不进批：数量超过上限也不挡住真实过期行。"""
+    instance, claims = _claim_all(job_db, 4)
+    ids = [claim.execution_id for claim in claims]
+    orphans, real = ids[:3], ids[3]
+    for offset, execution_id in enumerate(ids):
+        _age(job_db, execution_id, _TTL + 100 - offset * 10)  # orphans oldest
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set lease_id=null where execution_id = any(%s)",
+            (orphans[:2],),
+        )
+        conn.execute(
+            "delete from executor_leases where id ="
+            " (select lease_id from agent_execution_requests where execution_id=%s)",
+            (orphans[2],),
+        )
+    monkeypatch.setattr(sweepers, "SWEEP_BATCH_LIMIT", 2)
+
+    assert instance.sweep_expired_claims() == [real]
+    with job_db._connect_read() as conn:
+        states = conn.execute(
+            "select state from agent_execution_requests where execution_id = any(%s)", (orphans,)
+        ).fetchall()
+    assert [r["state"] for r in states] == ["claimed"] * 3  # base skip semantics: untouched
