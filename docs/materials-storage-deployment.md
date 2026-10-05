@@ -356,9 +356,11 @@ volume，所有新写入返回 no free volumes——上限必须始终大于当�
 
 **水位观察（日常运维项，#746）**：volume 数随 bucket/collection 增长单调
 累积，删数据不会减少 volume 个数，打满只是时间问题——一旦打满，新
-bucket（新实例、新派生 worktree）写不进去，已有 bucket 不受影响，容易
-被误判为个别环境故障。把上面的 `volume.list`（或 master UI 的 volume
-总数）列入例行巡检：对比「已有 volume 数」与「当前生效的 `-volume.max`」
+bucket（新实例、新派生 worktree）写不进去；已有 bucket 仅在其已有可写
+volume 尚有空间时仍可写入，需要再分配 volume 时同样失败。只有部分 bucket
+报错时容易被误判为个别环境故障；已有 bucket 写入失败时也不能据此排除卷上限
+问题。把上面的 `volume.list`（或 master UI 的 volume 总数）列入例行巡检：
+对比「已有 volume 数」与「当前生效的 `-volume.max`」
 （`docker inspect` 看容器实际命令行，而不是只看 compose 文件），已用接近
 上限（例如过半后增长明显、或剩余槽位不足几批 collection 预分配）就提前
 调大 `AGENT_LEGION_SEAWEEDFS_VOLUME_MAX` 并重建容器——接近上限前扩容只是

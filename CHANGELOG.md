@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 
 - job 详情页区分「排队」与「输入恢复不全卡住」（issue #887，#827 follow-up）：workflow worker 对悬挂清单行（对象缺失 / 内容校验不符 / 压缩对象损坏）连续 defer 达到升级阈值、且没有在途生产者会重写该输入时，`GET /api/jobs/{job_id}` 的节点新增只读字段 `hydration_defer {inputs, reasons, rerun_nodes}`，只出现在受阻的等待中节点上；详情页时间线据此在该节点显示「输入恢复不全，建议重跑 <生产节点>」，悬停给出输入名与原因。状态与 worker 进程内的连续计数同生共死（不落库、无 schema 变更）：输入恢复、行身份变化或 job 离开可运行集即撤下，Host 重启后按阈值轮数重新出现。
+- 新增备份与恢复 runbook `docs/backup-restore-runbook.md`（issue #956，#917 follow-up）：明确实例持久状态的三块（PostgreSQL、实例对象存储、vault 主密钥）各自的备份口径与数据库 / 对象存储时间差的一致性取舍（先 dump 后复制，或冷备份），给出 Docker stack 下 `pg_dump` / `pg_restore`、SeaweedFS 卷级冷备份与 S3 层同步的备份恢复步骤、恢复后核对项（外部服务连接测试验证 key 与库匹配、`scripts/gc-s3-jobs.py` 先 dry-run）与演练频率建议；新增 vault 主密钥丢失 / 泄露处置：单 key Fernet、无轮换或重新加密命令，丢失即全部 `secret_ref` 与外部服务连接凭据解析失败，处置为先找回原 key、确认无法找回后一次性换新 key 并按名称重录全部 secret（外部服务连接、节点 secret 字段、workspace secret API），泄露时还须在上游轮换凭据。docs/postgresql-runbook.md 与 docs/README.md 互链，现行文档白名单同步登记。
 
 ### Changed
 
@@ -26,6 +27,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- docs/materials-storage-deployment.md「可写槽位耗尽」节的水位观察项收窄「已有 bucket 不受影响」的表述（issue #1040，#983 codex follow-up）：已有 bucket 仅在其已有可写 volume 尚有空间时仍可写入，需要再分配 volume 时同样因卷上限失败，避免运维在老 bucket 也写不进时误排除卷上限问题。
 - Studio「Agent 助手」零内容空轮与后台唤醒轮期间的消息不再丢失（issue #882，#863 follow-up）：宽限复核后确认零内容的一轮（`empty_turn`）现在在会话空闲时也给出「继续对话」——状态行显示「上一条消息未被处理」，点击经既有 resume 端点把那一条原样重新投递（不新增用户消息，时间线记一条 `empty_turn_retry`；同一次判定只投递一次，双击、多标签页或之后已发过新消息都不会重复投递），告警文案同步改为指向「继续对话」；不做自动重投（平台无法区分 ACP 层吞掉的消息与 agent 合法的零输出，自动重投还可能再撞同一静默窗口）。后台子代理完成唤醒轮占用会话时发出的消息改为后端入站排队：消息立即落库并在气泡下标「已排队」，当前轮结束后按到达顺序逐条投递（时间线记 `queued_delivered`），排队期间新的后台唤醒让位；轮到时若会话已无法接收（压缩窗口、运行凭证失效、状态已变化）则不投递并给出 `queued_dropped` 提示与气泡「未送达，请重发」，不再静默丢失。人发起的轮次运行中再发送的行为不变（前端发送队列）。
 - worker 孤儿进程组回收按组在各自 SIGTERM 紧前刷新成员（issue #904，#895 follow-up）：一次清理含多个进程组时，此前只在批量 TERM 入口取一次 `/proc` 成员快照，后序组在快照之后才派生、忽略 TERM 的成员不会被钉住，原钉住成员在等待期退出并被 init 立即收割后 KILL 阶段的身份现证失败、该成员脱离清理；现改为增量成员索引（入口一次全表扫描，之后每组 TERM 前只重列 `/proc` 并读取新出现 pid 的 stat），每组 TERM 前按 pgid 取当前成员、现证属主后并入钉住集合。
 - `GET /api/workspaces/{workspace_id}/jobs/snapshot` 的 `cursor` 无法解析时返回 422（issue #891，#852 follow-up，对外行为变更）：此前缺 `|` 分隔符（如 `cursor=garbage`）、时间戳非法（如 `cursor=notadate|x`）等坏 cursor 落到 SQL 抛未处理异常成 5xx，而对接文档错误码表让调用方对 5xx 退避重试，结果对一个永远失败的参数错误无限重试。现 cursor 在参数校验层解析（与 `limit` 越界同一约定），失败返回 422 + 可读 detail（`loc` 指向 `query.cursor`）；空串仍等同第一页，原样回传的 `next_cursor` 不受影响。docs/workspace-api-tokens.md 错误码表与契约测试同步。
