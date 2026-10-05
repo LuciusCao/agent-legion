@@ -23,6 +23,8 @@ type Props = {
   archivedSessions?: StudioChatSessionRecord[]
   onArchiveSession?: (sessionId: string) => Promise<void>
   onUnarchiveSession?: (sessionId: string) => Promise<void>
+  /** 实例对话保留天数（#1041，0 = 未配置）：归档倒计时与清理提示。 */
+  retentionDays?: number
 }
 
 /** 会话管理条：Agent 选择 + 会话菜单 + 新对话。#825：在 AgentPanelDock 内
@@ -54,6 +56,7 @@ export function StudioChatSessionBar(props: Props) {
         archivedSessions={props.archivedSessions}
         onArchive={props.onArchiveSession}
         onUnarchive={props.onUnarchiveSession}
+        retentionDays={props.retentionDays}
       />
       <button
         type="button"

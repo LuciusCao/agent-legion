@@ -28,6 +28,7 @@ const settings: InstanceSettingsResponse = {
   code_capacity: 16,
   materials_ttl_days: 0,
   execution_retention_days: 0,
+  studio_chat_retention_days: 0,
   workflows: { max_items_per_run: 20000, node_code_max_bytes: 65536 },
   agent_workers: {
     max_archive_bytes: 104857600,
@@ -200,6 +201,29 @@ describe('InstanceSettingsSection', () => {
     // Baseline updated: the form is clean again after a successful save.
     await waitFor(() => {
       expect(screen.getByText('保存实例设置')).toBeDisabled()
+    })
+  })
+
+  it('edits the Studio chat retention window online (#1041)', async () => {
+    vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
+      ...settings,
+      ...payload,
+    }))
+
+    renderSection()
+    // 保留策略组直接可见（非高级参数）：默认 0 = 永不清理。
+    const field =
+      await screen.findByLabelText('归档/已删除对话保留天数（0 关闭）')
+    expect(field).toHaveValue(0)
+    expect(field).toHaveAttribute('max', '36500')
+    fireEvent.change(field, { target: { value: '30' } })
+    fireEvent.click(screen.getByText('保存实例设置'))
+
+    await waitFor(() => {
+      expect(updateInstanceSettings).toHaveBeenCalledWith({
+        ...updateBase,
+        studio_chat_retention_days: 30,
+      })
     })
   })
 

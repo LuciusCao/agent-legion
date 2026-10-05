@@ -87,6 +87,9 @@ def default_instance_document(
         # Execution-plane row retention (#354): 0 = disabled (safe default);
         # read fresh from the DB at sweep time, never hydrated into Settings.
         "execution_retention_days": 0,
+        # Studio chat session retention (#1041): 0 = disabled; read fresh at
+        # sweep / list time, never hydrated into Settings.
+        "studio_chat_retention_days": 0,
     }
     for block, keys in _NESTED_BLOCK_KEYS:
         block_model = getattr(runtime, block)

@@ -4513,6 +4513,8 @@ export interface components {
        * @default ~/.agents/skills
        */
       skills_root: string
+      /** Studio Chat Retention Days */
+      studio_chat_retention_days: number
       /** Sweeper Enabled */
       sweeper_enabled: boolean
       /** Sweeper Interval Seconds */
@@ -4540,6 +4542,8 @@ export interface components {
       monitoring: components['schemas']['InstanceMonitoringSettings']
       result_unpack: components['schemas']['InstanceResultUnpackSettings']
       result_validate: components['schemas']['InstanceResultValidateSettings']
+      /** Studio Chat Retention Days */
+      studio_chat_retention_days: number
       /** Sweeper Enabled */
       sweeper_enabled: boolean
       /** Sweeper Interval Seconds */
@@ -7120,6 +7124,11 @@ export interface components {
     }
     /** StudioChatSessionsResponse */
     StudioChatSessionsResponse: {
+      /**
+       * Retention Days
+       * @default 0
+       */
+      retention_days: number
       /** Sessions */
       sessions: components['schemas']['StudioChatSessionRecord'][]
     }

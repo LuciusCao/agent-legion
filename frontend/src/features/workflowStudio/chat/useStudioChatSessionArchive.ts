@@ -47,5 +47,11 @@ export function useStudioChatSessionArchive(
     await queryClient.invalidateQueries({ queryKey: key })
   }
 
-  return { archivedSessions: archivedQuery.data ?? [], archive, unarchive }
+  return {
+    archivedSessions: archivedQuery.data?.sessions ?? [],
+    // #1041：实例对话保留天数（0 = 未配置 → 不显示倒计时与清理提示）。
+    retentionDays: archivedQuery.data?.retentionDays ?? 0,
+    archive,
+    unarchive,
+  }
 }
