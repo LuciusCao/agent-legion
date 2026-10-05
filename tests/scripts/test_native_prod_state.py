@@ -458,3 +458,57 @@ def test_up_never_relaunches_pending_recorded_instance() -> None:
         nohup = up.index("nohup .venv/bin/python", branch)
         assert read < first_write and read < branch < adopt < nohup, label
     assert "请先 make prod-down 按运行态记录停掉它" in up
+
+
+def _spawn_pending(procs: list[_Proc], repo: Path, kind: str, port: int) -> _Proc:
+    argv = [sys.executable, "-c", _NOT_LISTENING, *_SIGNATURES[kind]]
+    proc = _detach(procs, repo, [*argv, "--host", "127.0.0.1", "--port", str(port)])
+    marker = _SIGNATURES[kind][2] if kind == "backend" else _SIGNATURES[kind][1]
+    deadline = time.monotonic() + 10
+    while (
+        marker
+        not in subprocess.run(
+            ["ps", "-ww", "-o", "command=", "-p", str(proc.pid)], capture_output=True, text=True
+        ).stdout
+    ):
+        assert time.monotonic() < deadline, f"fake {kind} did not exec"
+        time.sleep(0.05)
+    return proc
+
+
+def test_rerun_interrupted_between_writes_keeps_both_pending_pids(repo: Path, procs: list) -> None:
+    """R4 finding：同配置重跑认领两个未就绪的记录实例，若在后端分支之后那次
+    写记录与 Worker 分支之间被中断，记录仍须保有两个 PID（认领值读出后即
+    预置为启动 PID）。真实执行 up 脚本里「读认领值 → 后端分支 → 首次写记录」
+    这一段，后端/Worker 都是只睡不监听的签名进程，执行到首次写记录即止。"""
+    port_b, port_w = _free_port(), _free_port()
+    backend = _spawn_pending(procs, repo, "backend", port_b)
+    worker = _spawn_pending(procs, repo, "worker", port_w)
+    _write_state(
+        repo,
+        BACKEND_PID=backend.pid,
+        BACKEND_BIND="127.0.0.1",
+        BACKEND_PORT=port_b,
+        WORKER_PID=worker.pid,
+        WORKER_BIND="127.0.0.1",
+        WORKER_PORT=port_w,
+    )
+    up = (ROOT / "scripts" / "native-prod-up.sh").read_text(encoding="utf-8")
+    start = up.index('BACKEND_PENDING_PID="$(recorded_pending_pid')
+    first_write = up.index('native_state_write "$ROOT"', start)
+    segment = up[start : up.index("\n", first_write) + 1]
+    assert "nohup" in segment  # 片段确实覆盖后端分支（认领分支先于 nohup 命中）
+    snippet = (
+        "port_listening() { return 1; }\n"
+        "BACKEND_BIND=127.0.0.1\n"
+        f"BACKEND_PORT={port_b}\n"
+        "WORKER_BIND=127.0.0.1\n"
+        f"WORKER_PORT={port_w}\n"
+        'BACKEND_LAUNCH_PID=""\nWORKER_LAUNCH_PID=""\n' + segment
+    )
+    result = _up_function_call(repo, "recorded_pending_pid", snippet)
+    assert result.returncode == 0, result.stderr
+    assert "已在启动中、尚未监听" in result.stdout
+    state = (repo / "data" / "native-prod.state").read_text(encoding="utf-8")
+    assert f"BACKEND_PID={backend.pid}\n" in state
+    assert f"WORKER_PID={worker.pid}\n" in state

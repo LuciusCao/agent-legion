@@ -266,6 +266,10 @@ fi
 # 必须在下方任何 native_state_write 覆盖记录之前读出。
 BACKEND_PENDING_PID="$(recorded_pending_pid backend BACKEND "$BACKEND_BIND" "$BACKEND_PORT")"
 WORKER_PENDING_PID="$(recorded_pending_pid worker WORKER "$WORKER_BIND" "$WORKER_PORT")"
+# 立即预置为启动 PID：后端分支之后那次写记录发生在 Worker 分支之前，若此时
+# 仍为空，未监听的 Worker（socket 反查不到）会从记录里被清掉（#894 R4）。
+BACKEND_LAUNCH_PID="$BACKEND_PENDING_PID"
+WORKER_LAUNCH_PID="$WORKER_PENDING_PID"
 if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
     echo "后端已在 :$BACKEND_PORT 运行，跳过"
 elif [[ -n "$BACKEND_PENDING_PID" ]]; then
