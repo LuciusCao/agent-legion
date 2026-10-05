@@ -6,6 +6,7 @@ from typing import Any
 
 from server.app.jobs.queries.job_bulk_sql import id_chunks
 from server.app.jobs.queries.job_node_runs import JobNodeRunQueriesMixin
+from server.app.jobs.queries.job_shard_reads import JobShardReadQueriesMixin
 from server.app.jobs.storage_layout import job_storage_dir
 from server.app.storage_paths import make_data_relative
 
@@ -15,7 +16,7 @@ def _job_id(workspace_id: str, workflow_key: str, source_id: str) -> str:
     return f"{workspace_id}_{workflow_key}_{safe_source_id}"
 
 
-class JobNodeQueriesMixin(JobNodeRunQueriesMixin):
+class JobNodeQueriesMixin(JobNodeRunQueriesMixin, JobShardReadQueriesMixin):
     jobs_dir: Path
 
     def create_job(
