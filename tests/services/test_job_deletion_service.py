@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+import server.app.services.job_deletion as job_deletion_module
 import server.app.services.job_deletion_trash as trash_module
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
@@ -515,19 +516,19 @@ def test_delete_skips_cleanup_when_same_source_job_recreated_before_purge(
     )
     job = _create_job(job_db, "ws-recreate", "Q020", status="completed")
     storage_dir, log_path = _seed_job_files(settings, job)
-    original_lock = job_db.job_mutation_lock
+    original_purge = job_deletion_module.purge_deleted_job_files
 
-    @contextmanager
-    def _recreate_then_lock(job_id: str):
+    def _recreate_then_purge(*args: Any, **kwargs: Any) -> None:
+        # 竞态本身：删除已提交、本地清理开始前，同源 job 被重建并写入。
+        assert job_db.get_job(job["id"]) is None
         recreated = _create_job(job_db, "ws-recreate", "Q020")
-        assert recreated["id"] == job_id
+        assert recreated["id"] == job["id"]
         storage_dir.mkdir(parents=True, exist_ok=True)
         (storage_dir / "fresh.json").write_text("fresh", encoding="utf-8")
         log_path.write_text("fresh-log", encoding="utf-8")
-        with original_lock(job_id) as exists:
-            yield exists
+        original_purge(*args, **kwargs)
 
-    monkeypatch.setattr(job_db, "job_mutation_lock", _recreate_then_lock)
+    monkeypatch.setattr(job_deletion_module, "purge_deleted_job_files", _recreate_then_purge)
 
     result = service.delete(job["workspace_id"], job["id"])
 
@@ -561,3 +562,28 @@ def test_delete_purges_only_own_node_logs_not_sibling_prefix(
     assert not own_log.exists()
     assert not own_shard_log.exists()
     assert sibling_log.read_text(encoding="utf-8") == "sibling"
+
+
+def test_delete_shard_log_match_escapes_glob_metacharacters(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """#958：source_id 含 glob 元字符时分片日志前缀按字面匹配——``Q[12]`` 不能
+    当成字符类去命中兄弟 job ``Q1`` 的分片日志，自己的分片日志照删。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-glob", "Q[12]", status="completed")
+    sibling = _create_job(job_db, "ws-glob", "Q1", status="completed")
+    log_dir = settings.logs_dir / "jobs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    own_shard = log_dir / f"{job['id']}-extract_question-shard-0.log"
+    own_shard.write_text("own", encoding="utf-8")
+    sibling_shard = log_dir / f"{sibling['id']}-extract_question-shard-0.log"
+    sibling_shard.write_text("sibling", encoding="utf-8")
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert not own_shard.exists()
+    assert sibling_shard.read_text(encoding="utf-8") == "sibling"

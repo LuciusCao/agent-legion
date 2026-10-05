@@ -67,7 +67,9 @@ def deleted_job_log_paths(settings: Settings, job_id: str, node_keys: Iterable[s
     paths: set[Path] = set()
     for node_key in node_keys:
         paths.add(log_dir / f"{job_id}-{node_key}.log")
-        paths.update(Path(p) for p in glob.glob(str(log_dir / f"{job_id}-{node_key}-shard-*.log")))
+        # source_id 可含 glob 元字符（*?[）：前缀必须转义，否则会匹配兄弟 job。
+        shard_pattern = glob.escape(str(log_dir / f"{job_id}-{node_key}-shard-")) + "*.log"
+        paths.update(Path(p) for p in glob.glob(shard_pattern))
     return sorted(path for path in paths if path.exists())
 
 
