@@ -39,6 +39,12 @@ def test_catalog_table_absent_on_fresh_schema() -> None:
 def test_migration_drops_catalog_and_keeps_workspace_rows(caplog) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         _create_catalog(conn)
+        # Pre-v91 shape (#211 M3 dropped the key column; fresh_schema
+        # rebuilds the terminal shape afterwards).
+        conn.execute(
+            "alter table workspaces add column if not exists"
+            " default_workflow_key text not null default ''"
+        )
         conn.execute(
             "insert into workspaces(id, name, default_workflow_key)"
             " values ('ws-a', 'A', 'flow_a'), ('ws-b', 'B', 'flow_b')"
@@ -68,3 +74,22 @@ def test_migration_is_idempotent_when_table_already_gone() -> None:
         assert not _table_exists(conn, "workflow_catalog")
         migrate_workflow_catalog_retirement(conn)
         assert not _table_exists(conn, "workflow_catalog")
+
+
+@pytest.mark.fresh_schema
+def test_migration_reads_workspace_ids_on_the_terminal_shape(caplog) -> None:
+    """#211 M3: without the key column the id carries the key — a registered
+    key bound to a workspace id is not reported as orphaned."""
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        _create_catalog(conn)
+        conn.execute("insert into workspaces(id, name) values ('flow_a', 'A')")
+        conn.execute(
+            "insert into workflow_catalog(key, label, origin)"
+            " values ('flow_a', 'Flow A', 'registered'), ('orphan_flow', 'O', 'registered')"
+        )
+        with caplog.at_level(logging.WARNING):
+            migrate_workflow_catalog_retirement(conn)
+        assert not _table_exists(conn, "workflow_catalog")
+    messages = [record.message for record in caplog.records]
+    assert any("orphan_flow" in message for message in messages)
+    assert not any("'flow_a'" in message for message in messages)

@@ -12,7 +12,8 @@ def workspace_settings_payload(workspace: dict[str, Any]) -> dict[str, Any]:
     ``workspace_settings_payload_with_schemas`` which owns the capability
     schemas (VAULT-SECRET-001).
     """
-    workflow_key = str(workspace.get("default_workflow_key") or "")
+    # Node overrides are keyed by the workflow identifier — the workspace id.
+    workflow_key = str(workspace["id"])
     node_config = workspace.get("node_config")
     if not isinstance(node_config, dict):
         node_config = {}
@@ -25,7 +26,6 @@ def workspace_settings_payload(workspace: dict[str, Any]) -> dict[str, Any]:
     hidden = preview_config.get("hidden")
     return {
         "entityType": str(workspace.get("default_entity") or "question"),
-        "workflowKey": workflow_key,
         "nodeConfig": node_overrides,
         "previewHidden": hidden if isinstance(hidden, list) else [],
     }

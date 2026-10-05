@@ -42,9 +42,7 @@ def test_seed_demo_creates_complete_workspace_once(
     assert second.workspace_created is False
     assert second.workspace_id == first.workspace_id
     matching = [
-        workspace
-        for workspace in job_db.list_workspaces()
-        if workspace["default_workflow_key"] == DEMO_WORKFLOW_KEY
+        workspace for workspace in job_db.list_workspaces() if workspace["id"] == DEMO_WORKFLOW_KEY
     ]
     assert [workspace["id"] for workspace in matching] == [first.workspace_id]
     assert job_db.get_active_workflow_revision(first.workspace_id, DEMO_WORKFLOW_KEY) is not None
@@ -76,10 +74,7 @@ def test_seed_demo_creates_complete_workspace_once(
 def test_seed_demo_reuses_existing_bound_workspace(
     settings, job_db, tmp_path: Path, demo_skills_home: Path
 ) -> None:
-    existing = job_db.create_workspace(
-        "Existing Demo",
-        default_workflow_key=DEMO_WORKFLOW_KEY,
-    )
+    existing = job_db.create_workspace("Existing Demo", workspace_id=DEMO_WORKFLOW_KEY)
 
     result = seed_demo(settings)
 
@@ -99,9 +94,7 @@ def test_seed_demo_establishes_workspace_before_injecting_assets(
         seed_demo(settings)
 
     matching = [
-        workspace
-        for workspace in job_db.list_workspaces()
-        if workspace["default_workflow_key"] == DEMO_WORKFLOW_KEY
+        workspace for workspace in job_db.list_workspaces() if workspace["id"] == DEMO_WORKFLOW_KEY
     ]
     assert len(matching) == 1
     assert job_db.get_active_workflow_revision(matching[0]["id"], DEMO_WORKFLOW_KEY) is None

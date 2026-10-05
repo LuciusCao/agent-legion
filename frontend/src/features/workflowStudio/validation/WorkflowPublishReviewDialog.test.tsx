@@ -32,7 +32,6 @@ function makeSummaryResponse(
 const revision: WorkflowRevisionSummary = {
   id: 'ws1:demo:v1',
   workspace_id: 'ws1',
-  workflow_key: 'demo',
   version: 1,
   status: 'active',
   definition_hash: 'abcdef1234567890',

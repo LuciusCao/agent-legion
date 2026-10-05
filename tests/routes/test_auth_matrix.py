@@ -27,7 +27,7 @@ def _member_client(client, username="member1", password="pw1"):
 @pytest.fixture
 def workspace_id(client, job_db) -> str:
     del client
-    return job_db.create_workspace(default_workflow_key="demo_workflow", name="Matrix WS")["id"]
+    return job_db.create_workspace(name="Matrix WS")["id"]
 
 
 def test_anonymous_business_routes_return_401(anon_client) -> None:
@@ -103,8 +103,8 @@ def _scoped_bearer_client(client, job_db, user_id: str, **mint_kwargs):
 @pytest.fixture
 def two_workspaces(client, job_db) -> tuple[str, str]:
     del client
-    joined = job_db.create_workspace(default_workflow_key="matrix_joined", name="Joined")["id"]
-    other = job_db.create_workspace(default_workflow_key="matrix_other", name="Other")["id"]
+    joined = job_db.create_workspace(name="Joined")["id"]
+    other = job_db.create_workspace(name="Other")["id"]
     return str(joined), str(other)
 
 
@@ -256,12 +256,7 @@ def test_studio_authoring_surface_is_admin_only(client, workspace_id, job_db) ->
         ).status_code
         == 403
     )
-    assert (
-        editor.get(
-            f"/api/workspaces/{workspace_id}/workflows/demo_workflow/nodes/n/code"
-        ).status_code
-        == 403
-    )
+    assert editor.get(f"/api/workspaces/{workspace_id}/nodes/n/code").status_code == 403
     assert (
         editor.get("/api/agent-definitions", params={"workspace_id": workspace_id}).status_code
         == 403

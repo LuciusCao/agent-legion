@@ -63,12 +63,11 @@ def create_workspaces_router(
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> WorkspaceResponse:
         workspace = service.create(payload.model_dump())
-        # A workspace with a workflow key is a worker scan target (schema
-        # v50): hot-reload the scan list so it is picked up without a
-        # restart, then wake the poll loop.
-        if str(workspace.get("default_workflow_key") or ""):
-            reload_worker_scan_entries(request)
-            notify_schedulable_work()
+        # Every workspace is a worker scan target (schema v50): hot-reload
+        # the scan list so it is picked up without a restart, then wake the
+        # poll loop.
+        reload_worker_scan_entries(request)
+        notify_schedulable_work()
         return WorkspaceResponse(workspace=WorkspaceRecord.model_validate(workspace))
 
     @router.get("/workspaces/{workspace_id}", response_model=WorkspaceResponse)

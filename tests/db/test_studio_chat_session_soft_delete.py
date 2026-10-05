@@ -47,7 +47,7 @@ def test_upgrade_from_v88_adds_the_column() -> None:
 
 @pytest.fixture
 def seeded(job_db):
-    workspace_id = job_db.create_workspace(default_workflow_key="demo_workflow", name="SD WS")["id"]
+    workspace_id = job_db.create_workspace(name="SD WS")["id"]
     user_id = str(job_db.create_user("soft-delete-user", password_hash=None)["id"])
     first = job_db.create_studio_chat_session(workspace_id, user_id, "fake-agent")
     second = job_db.create_studio_chat_session(workspace_id, user_id, "fake-agent")

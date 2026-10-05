@@ -133,6 +133,6 @@ def active_revision_id(job_db: JobQueries, workspace_id: str) -> str | None:
     workspace = job_db.get_workspace(workspace_id)
     if workspace is None:
         return None
-    workflow_key = str(workspace.get("default_workflow_key") or "")
+    workflow_key = str(workspace["id"])
     revision = job_db.get_active_workflow_revision(workspace_id, workflow_key)
     return str(revision["id"]) if revision is not None else None

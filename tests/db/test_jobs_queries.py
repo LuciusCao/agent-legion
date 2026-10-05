@@ -28,7 +28,7 @@ def test_job_query_connections_use_postgres(tmp_path: Path) -> None:
 
 def test_fresh_schema_cascades_workspace_jobs_and_runs(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("Cascade Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("Cascade Workspace")
     batch_run = db.create_run(
         workflow_key="demo_workflow",
         source_kind="items",
@@ -83,7 +83,7 @@ def _looks_like_timestamp(value: datetime | str) -> bool:
 
 def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("Created At Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("Created At Workspace")
     job = db.create_job(
         workflow_key="demo_workflow",
         source_type="question_id",
@@ -106,7 +106,7 @@ def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
 
 def test_mark_node_for_rerun_resets_node_created_at(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("Rerun Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("Rerun Workspace")
     job = db.create_job(
         workflow_key="demo_workflow",
         source_type="question_id",
@@ -150,7 +150,7 @@ def test_mark_node_for_rerun_resets_node_created_at(tmp_path: Path) -> None:
 
 def test_set_and_clear_job_execution_target(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("Target Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("Target Workspace")
     job = db.create_job(
         workflow_key="demo_workflow",
         source_type="question_id",
@@ -183,7 +183,7 @@ def test_set_and_clear_job_execution_target(tmp_path: Path) -> None:
 
 def test_pause_and_resume_job(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("Pause Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("Pause Workspace")
     job = db.create_job(
         workflow_key="demo_workflow",
         source_type="question_id",
@@ -211,7 +211,7 @@ def test_pause_and_resume_job(tmp_path: Path) -> None:
 
 def test_resume_job_clears_target_reached_state(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("Continue Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("Continue Workspace")
     job = db.create_job(
         workflow_key="demo_workflow",
         source_type="question_id",
@@ -245,7 +245,7 @@ def test_resume_job_clears_target_reached_state(tmp_path: Path) -> None:
 
 def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("Validation Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("Validation Workspace")
     job = db.create_job(
         workflow_key="demo_workflow",
         source_type="question_id",
@@ -275,7 +275,7 @@ def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: P
 
 def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("UpdatedAt Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("UpdatedAt Workspace")
     job = db.create_job(
         workflow_key="demo_workflow",
         source_type="question_id",
@@ -350,7 +350,7 @@ def test_resume_job_does_not_clobber_concurrent_run_to(tmp_path: Path) -> None:
     SELECT 旧值落笔，末尾三条断言变红。
     """
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("Resume Race Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("Resume Race Workspace")
     job = db.create_job(
         workflow_key="demo_workflow",
         source_type="question_id",
@@ -418,8 +418,8 @@ def test_resume_job_does_not_clobber_concurrent_run_to(tmp_path: Path) -> None:
 
 def test_list_jobs_by_ids_returns_only_matching_jobs(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("List By Ids Workspace", default_workflow_key="demo_workflow")
-    other_workspace = db.create_workspace("Other Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("List By Ids Workspace")
+    other_workspace = db.create_workspace("Other Workspace")
     job1 = db.create_job(
         workflow_key="demo_workflow",
         source_type="question_id",
@@ -456,7 +456,7 @@ def test_list_jobs_by_ids_returns_only_matching_jobs(tmp_path: Path) -> None:
 
 def test_list_jobs_by_ids_returns_empty_for_empty_input(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("Empty List Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("Empty List Workspace")
     assert db.list_jobs_by_ids(workspace["id"], []) == []
 
 
@@ -488,7 +488,7 @@ def _create_list_jobs_fixtures(db: JobQueries, workspace_id: str, count: int) ->
 def test_list_jobs_caps_results_at_requested_limit(tmp_path: Path) -> None:
     """#272: the legacy list endpoint must not return unbounded row sets."""
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("Limit Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("Limit Workspace")
     job_ids = _create_list_jobs_fixtures(db, workspace["id"], count=5)
 
     listed = db.list_jobs(workspace_id=workspace["id"], limit=3)
@@ -503,7 +503,7 @@ def test_list_jobs_default_limit_caps_at_500(tmp_path: Path) -> None:
     """The default limit keeps the service-layer call site (which passes no
     limit) bounded without any signature change there."""
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("Default Limit Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("Default Limit Workspace")
     _create_list_jobs_fixtures(db, workspace["id"], count=3)
 
     # Exercise the clamp plumbing with a value far below the default; the
@@ -514,7 +514,7 @@ def test_list_jobs_default_limit_caps_at_500(tmp_path: Path) -> None:
 
 def test_list_jobs_clamps_limit_into_valid_range(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace("Clamp Workspace", default_workflow_key="demo_workflow")
+    workspace = db.create_workspace("Clamp Workspace")
     _create_list_jobs_fixtures(db, workspace["id"], count=3)
 
     # limit <= 0 clamps to 1; limit above the 500 ceiling clamps down, so a

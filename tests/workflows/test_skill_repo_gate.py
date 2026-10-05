@@ -37,7 +37,7 @@ def _definition(skill: dict | None) -> WorkflowDefinition:
 
 def test_missing_repo_is_reported_with_guidance(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws", default_workflow_key="wf")
+    workspace = queries.create_workspace("ws")
     definition = _definition({"key": "group/name", "ref": "latest"})
 
     errors = skill_repo_publish_errors(definition, workspace["id"], queries, tmp_path / "skills")
@@ -49,7 +49,7 @@ def test_missing_repo_is_reported_with_guidance(tmp_path: Path) -> None:
 
 def test_existing_repo_passes(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws", default_workflow_key="wf")
+    workspace = queries.create_workspace("ws")
     skill_base = tmp_path / "skills"
     _make_skill_repo(skill_base / "group" / "name")
 
@@ -66,7 +66,7 @@ def test_existing_repo_passes(tmp_path: Path) -> None:
 
 def test_skill_key_escape_is_rejected(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws", default_workflow_key="wf")
+    workspace = queries.create_workspace("ws")
     skill_base = tmp_path / "skills"
     (skill_base / "group").mkdir(parents=True)
     (skill_base / "group" / "name").symlink_to(tmp_path, target_is_directory=True)
@@ -81,7 +81,7 @@ def test_skill_key_escape_is_rejected(tmp_path: Path) -> None:
 
 def test_code_nodes_and_unbound_agent_nodes_are_skipped(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws", default_workflow_key="wf")
+    workspace = queries.create_workspace("ws")
     definition = workflow_definition_from_mapping(
         {
             "key": "wf",
@@ -103,7 +103,7 @@ def test_code_nodes_and_unbound_agent_nodes_are_skipped(tmp_path: Path) -> None:
 
 def test_warning_when_agent_skill_has_no_machine_contract(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws", default_workflow_key="wf")
+    workspace = queries.create_workspace("ws")
     skill_base = tmp_path / "skills"
     _make_skill_repo(skill_base / "group" / "name")
     definition = _definition({"key": "group/name", "ref": "latest"})
@@ -118,7 +118,7 @@ def test_warning_when_agent_skill_has_no_machine_contract(tmp_path: Path) -> Non
 
 def test_no_warning_when_agent_skill_carries_a_root_contract(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws", default_workflow_key="wf")
+    workspace = queries.create_workspace("ws")
     skill_base = tmp_path / "skills"
     repo = skill_base / "group" / "name"
     _make_skill_repo(repo)
@@ -138,7 +138,7 @@ def test_no_warning_for_the_deprecated_embedded_block(tmp_path: Path) -> None:
     """The embedded block still declares a machine contract — only the
     fully contract-less skill warns."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws", default_workflow_key="wf")
+    workspace = queries.create_workspace("ws")
     skill_base = tmp_path / "skills"
     repo = skill_base / "group" / "name"
     _make_skill_repo(repo)
@@ -188,7 +188,7 @@ def test_pinned_ref_warns_on_that_tag_not_the_working_tree(tmp_path: Path) -> No
     warning names the ref); a tag WITH a contract stays quiet even if the
     working tree has none."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws", default_workflow_key="wf")
+    workspace = queries.create_workspace("ws")
     skill_base = tmp_path / "skills"
     repo = skill_base / "group" / "name"
     _make_skill_repo(repo)
@@ -221,7 +221,7 @@ def test_pinned_ref_with_contract_on_the_tag_does_not_warn(tmp_path: Path) -> No
     the working tree (a later commit removed it) — the node runs the tag,
     so no warning."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws", default_workflow_key="wf")
+    workspace = queries.create_workspace("ws")
     skill_base = tmp_path / "skills"
     repo = skill_base / "group" / "name"
     _make_skill_repo(repo)

@@ -25,7 +25,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 @pytest.fixture
 def workspace_id(job_db) -> str:
-    return job_db.create_workspace("Seed WS", default_workflow_key="demo_workflow")["id"]
+    return job_db.create_workspace("Seed WS")["id"]
 
 
 @pytest.fixture
@@ -72,7 +72,7 @@ def test_demo_dag_nodes_carry_the_skill_binding() -> None:
 
 
 def test_seed_leaves_other_workspaces_empty(job_db, workspace_id) -> None:
-    other = job_db.create_workspace("Other WS", default_workflow_key="demo_workflow")["id"]
+    other = job_db.create_workspace("Other WS")["id"]
     seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id)
     assert AgentService(job_db.dsn_identity, other).list_latest() == []
 

@@ -159,10 +159,7 @@ def test_v52_database_upgrades_via_init_db() -> None:
             "alter table workspaces add column if not exists"
             " intake_config_json text not null default '{}'"
         )
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-run', 'runs-ws', 'wf_demo')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-run', 'runs-ws')")
         # Direct intake batch: frozen config + pins + two matched candidates.
         _seed_batch(
             conn,
@@ -278,10 +275,7 @@ def test_migrate_runs_is_reentrant() -> None:
     """Replaying migrate_runs after the upgrade is a no-op (idempotent)."""
     with write_transaction(TEST_DATABASE_URL) as conn:
         _rebuild_v52_shape(conn)
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-run', 'runs-ws', 'wf_demo')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-run', 'runs-ws')")
         _seed_batch(
             conn,
             "b-once",
@@ -313,10 +307,7 @@ def test_migrate_runs_set_based_edge_shapes() -> None:
     """
     with write_transaction(TEST_DATABASE_URL) as conn:
         _rebuild_v52_shape(conn)
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-run', 'runs-ws', 'wf_demo')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-run', 'runs-ws')")
         _seed_batch(
             conn,
             "b-dup",

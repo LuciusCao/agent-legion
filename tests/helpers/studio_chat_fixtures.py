@@ -86,9 +86,7 @@ def chat(job_db, settings, tmp_path, monkeypatch):
         )
         return script_path
 
-    workspace_id = job_db.create_workspace(default_workflow_key="demo_workflow", name="Chat WS")[
-        "id"
-    ]
+    workspace_id = job_db.create_workspace(name="Chat WS")["id"]
     user_id = str(job_db.create_user("chat-user", password_hash=None)["id"])
     yield service, bus, register, workspace_id, user_id
     service.shutdown()
@@ -97,9 +95,7 @@ def chat(job_db, settings, tmp_path, monkeypatch):
 @pytest.fixture
 def admission(job_db, settings):
     service = StudioChatService(job_db, settings, None)
-    workspace = job_db.create_workspace(default_workflow_key="demo_workflow", name="Admission")[
-        "id"
-    ]
+    workspace = job_db.create_workspace(name="Admission")["id"]
     user = job_db.create_user("admission-user", password_hash=None)["id"]
     sid = job_db.create_studio_chat_session(workspace, user, "test-agent")
     job_db.update_studio_chat_session(sid, status="idle")

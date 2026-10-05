@@ -24,9 +24,7 @@ def query_service(job_db, settings):
 
 @pytest.fixture
 def job(job_db) -> Iterator[dict]:
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("default")
     publish_builtin_revision(job_db, workspace["id"])
     created = job_db.create_job(
         workflow_key="education_video_problems_generation",

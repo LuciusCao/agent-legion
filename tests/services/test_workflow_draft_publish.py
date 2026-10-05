@@ -79,7 +79,7 @@ nodes:
 
 
 def _workspace(queries: JobQueries) -> dict:
-    return queries.create_workspace("draft-publish-ws", default_workflow_key="test_publish_flow")
+    return queries.create_workspace("draft-publish-ws", workspace_id="test_publish_flow")
 
 
 def _seed_node_code(workspace_id: str) -> None:

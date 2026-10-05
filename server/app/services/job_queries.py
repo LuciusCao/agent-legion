@@ -120,9 +120,6 @@ class JobQueryService:
         job = resolve_record_paths(job, self.settings.data_dir, {"storage_dir"})
         return {
             **job,
-            # #211 M2: the jobs column is gone (v70); the deprecated API field
-            # keeps the identity value until the M3 removal window closes.
-            "workflow_key": job.get("workflow_key", job["workspace_id"]),
             # Wire compatibility: the API field keeps the legacy name while
             # the column is jobs.run_id (schema v53); the value is the run id.
             "batch_id": wire_batch_id(job),

@@ -52,7 +52,7 @@ APPROVAL_DAG = {
 @pytest.fixture
 def approval_setup(job_db: JobQueries, settings):
     definition = workflow_definition_from_mapping(APPROVAL_DAG)
-    workspace = job_db.create_workspace(name="approval-ws", default_workflow_key=definition.key)
+    workspace = job_db.create_workspace(name="approval-ws")
     workspace_id = str(workspace["id"])
     WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
     job = job_db.create_job(
@@ -354,9 +354,7 @@ BRANCH_APPROVAL_DAG = {
 @pytest.fixture
 def branch_approval_setup(job_db: JobQueries, settings):
     definition = workflow_definition_from_mapping(BRANCH_APPROVAL_DAG)
-    workspace = job_db.create_workspace(
-        name="approval-branch-ws", default_workflow_key=definition.key
-    )
+    workspace = job_db.create_workspace(name="approval-branch-ws")
     workspace_id = str(workspace["id"])
     WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
     job = job_db.create_job(
@@ -475,7 +473,7 @@ def test_rework_feedback_survives_when_declared_as_node_output(approval_setup):
             },
         }
     )
-    ws = job_db.create_workspace(name="approval-ws-fb", default_workflow_key=definition.key)
+    ws = job_db.create_workspace(name="approval-ws-fb")
     WorkflowRevisionService(job_db).ensure_active_revision(str(ws["id"]), definition)
     job = job_db.create_job(
         workflow_key=definition.key,

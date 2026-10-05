@@ -50,8 +50,7 @@ def _no_backoff_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_job(job_db: JobQueries, *, workspace_id: str, job_id: str) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, 'ws', 'demo_workflow')"
-            " on conflict (id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'ws') on conflict (id) do nothing",
             (workspace_id,),
         )
         conn.execute(

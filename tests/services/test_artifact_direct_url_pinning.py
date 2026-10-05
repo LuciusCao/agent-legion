@@ -37,7 +37,7 @@ def _seed_job(job_db, workspace_id: str = "pin-ws") -> dict:
     """生产 intake 形态的 job（带冻结快照，外部清单的声明门读它）。"""
     from tests.helpers import publish_legacy_intake_revision
 
-    job_db.create_workspace(workspace_id, default_workflow_key=workspace_id)
+    job_db.create_workspace(workspace_id)
     revision = publish_legacy_intake_revision(job_db, workspace_id)
     batch = job_db.create_run(
         workspace_id, "batch_by_ids", {"question_ids": ["Q1"]}, workspace_id=workspace_id

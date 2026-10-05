@@ -26,9 +26,8 @@ def _seed_workspace(conn, workspace_id: str) -> None:
     # per-file keys would collide there (two workspaces renaming onto one
     # id). The v46 migration below reads revisions, not this column.
     conn.execute(
-        "insert into workspaces(id, name, default_workflow_key)"
-        " values (%s, %s, %s) on conflict(id) do nothing",
-        (workspace_id, workspace_id, workspace_id),
+        "insert into workspaces(id, name) values (%s, %s) on conflict(id) do nothing",
+        (workspace_id, workspace_id),
     )
 
 

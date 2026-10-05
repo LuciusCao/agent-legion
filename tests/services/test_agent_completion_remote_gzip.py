@@ -93,8 +93,7 @@ def _make_handler(
     init_db(TEST_DATABASE_URL)
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('ws-1', 'ws', 'demo_workflow')"
-            " on conflict (id) do nothing"
+            "insert into workspaces(id, name) values ('ws-1', 'ws') on conflict (id) do nothing"
         )
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id, "

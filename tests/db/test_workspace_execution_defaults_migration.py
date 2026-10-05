@@ -79,10 +79,10 @@ def _restore_pre_v64_columns(conn) -> None:
 
 def _seed_workspace(conn, workspace_id: str, provider: str, model: str, thinking: str) -> None:
     conn.execute(
-        "insert into workspaces(id, name, default_workflow_key, default_agent_provider,"
+        "insert into workspaces(id, name, default_agent_provider,"
         " default_agent_model, default_agent_thinking)"
-        " values (%s, %s, %s, %s, %s, %s)",
-        (workspace_id, workspace_id, workspace_id, provider, model, thinking),
+        " values (%s, %s, %s, %s, %s)",
+        (workspace_id, workspace_id, provider, model, thinking),
     )
 
 

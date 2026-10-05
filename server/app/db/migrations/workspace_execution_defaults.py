@@ -30,9 +30,11 @@ from server.app.db.migrations.retire_workflow_key_columns import has_column
 
 logger = logging.getLogger(__name__)
 
+# {key} is the key column on pre-v91 shapes, or the id itself once v91
+# dropped it (fresh databases never carry it — #211 M3).
 _WORKSPACES_WITH_DEFAULTS = (
-    "select id, default_workflow_key, default_agent_provider, default_agent_model,"
-    " default_agent_thinking from workspaces"
+    "select id, {key} as default_workflow_key, default_agent_provider,"
+    " default_agent_model, default_agent_thinking from workspaces"
     " where default_agent_provider <> '' or default_agent_model <> ''"
     " or default_agent_thinking <> ''"
 )
@@ -68,7 +70,11 @@ def migrate_workspace_execution_defaults(conn: Any) -> None:
     # current shape the workspace id alone identifies the active revision.
     has_key = has_column(conn, "workflow_revisions", "workflow_key")
     active_revision_sql = _ACTIVE_REVISION if has_key else _ACTIVE_REVISION_V70
-    for workspace in conn.execute(_WORKSPACES_WITH_DEFAULTS).fetchall():
+    key_column = (
+        "default_workflow_key" if has_column(conn, "workspaces", "default_workflow_key") else "id"
+    )
+    workspaces_sql = _WORKSPACES_WITH_DEFAULTS.format(key=key_column)
+    for workspace in conn.execute(workspaces_sql).fetchall():
         defaults = {
             "provider": str(workspace["default_agent_provider"] or ""),
             "model": str(workspace["default_agent_model"] or ""),

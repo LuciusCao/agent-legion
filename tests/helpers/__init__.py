@@ -256,8 +256,7 @@ def replace_agent_catalog(workspace_ids: str | list[str], definitions: dict[str,
     with write_transaction(TEST_DATABASE_URL) as conn:
         for workspace_id in ids:
             conn.execute(
-                "insert into workspaces(id, name, default_workflow_key)"
-                " values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
+                "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
                 (workspace_id,),
             )
             conn.execute(

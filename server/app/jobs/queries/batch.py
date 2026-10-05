@@ -3,10 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from server.app.jobs.queries.batch_queue import (
-    RunQueueQueriesMixin,
-    backfill_deprecated_workflow_key,
-)
+from server.app.jobs.queries.batch_queue import RunQueueQueriesMixin
 from server.app.jobs.queries.batch_queue_sql import RUN_UPSERT_CONFLICT
 from server.app.jobs.queries.run_healing import deterministic_run_id
 
@@ -65,7 +62,7 @@ class RunQueriesMixin(RunQueueQueriesMixin):
             row = conn.execute("select * from runs where id=%s", (run_id,)).fetchone()
         if row is None:
             raise RuntimeError("run upsert did not return a row")
-        return backfill_deprecated_workflow_key(dict(row))
+        return dict(row)
 
     def delete_run_without_jobs(self, run_id: str) -> None:
         """Delete a run only while it owns no jobs (creation compensation)."""

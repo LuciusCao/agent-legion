@@ -366,12 +366,8 @@ def test_workspace_bound_token_is_refused_on_other_workspaces(client, job_db) ->
     """Schema v45 binding, asserted once behaviorally for the new reads: a
     run token bound to workspace A gets 403 on workspace B's catalog reads
     — and on the create write too."""
-    workspace_id = str(
-        job_db.create_workspace("Catalog Reads", default_workflow_key=_WORKFLOW_KEY)["id"]
-    )
-    other_id = str(
-        job_db.create_workspace("Catalog Reads B", default_workflow_key=_WORKFLOW_KEY)["id"]
-    )
+    workspace_id = str(job_db.create_workspace("Catalog Reads")["id"])
+    other_id = str(job_db.create_workspace("Catalog Reads B")["id"])
     admin_id = str(job_db.get_user_credentials("admin")["id"])
     bound = client.__class__(client.app)
     bound.headers["authorization"] = (

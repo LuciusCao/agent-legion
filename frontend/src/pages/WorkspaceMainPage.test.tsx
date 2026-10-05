@@ -97,7 +97,6 @@ async function loadJobsViaSSE() {
 const baseStats: WorkspaceStats = {
   workspace_id: 'ws1',
   name: 'WS One',
-  workflow_key: 'question_content',
   workflow_label: 'Question Content',
   job_stats: { pending: 1, running: 2, completed: 3, failed: 1 },
   code_pool: { capacity: 16, running: 1, available: 15 },
@@ -231,13 +230,11 @@ describe('WorkspaceMainPage', () => {
       workspaceDescription: '',
       settings: {
         entityType: 'question',
-        workflowKey: '',
       },
       originalWorkspaceName: 'WS One',
       originalWorkspaceDescription: '',
       originalSettings: {
         entityType: 'question',
-        workflowKey: '',
       },
       isDirty: false,
       isSaving: false,
@@ -434,7 +431,6 @@ describe('WorkspaceMainPage', () => {
     // 主文件级冒烟：无 published workflow 时主页面正常渲染引导入口。
     mockFetchWorkspaceStats.mockResolvedValue({
       ...baseStats,
-      workflow_key: null,
       workflow_label: null,
     } as unknown as WorkspaceStats)
     renderPage()

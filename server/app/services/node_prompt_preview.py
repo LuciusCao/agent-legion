@@ -51,10 +51,7 @@ def _definition_for_preview(
     workspace = job_db.get_workspace(workspace_id)
     if workspace is None:
         raise NotFoundError("Workspace not found")
-    workflow_key = str(workspace.get("default_workflow_key") or "")
-    revision = (
-        job_db.get_active_workflow_revision(workspace_id, workflow_key) if workflow_key else None
-    )
+    revision = job_db.get_active_workflow_revision(workspace_id, workspace_id)
     if revision is None:
         raise NotFoundError("No active workflow revision")
     return workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
@@ -167,12 +164,7 @@ def save_node_prompt(
         workspace = job_db.get_workspace(workspace_id)
         if workspace is None:
             raise NotFoundError("Workspace not found")
-        workflow_key = str(workspace.get("default_workflow_key") or "")
-        revision = (
-            job_db.get_active_workflow_revision(workspace_id, workflow_key)
-            if workflow_key
-            else None
-        )
+        revision = job_db.get_active_workflow_revision(workspace_id, workspace_id)
         if revision is None:
             raise NotFoundError("No workflow draft or active revision to edit")
         base_definition = workflow_definition_from_dict(

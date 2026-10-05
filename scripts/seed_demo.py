@@ -111,17 +111,15 @@ def seed_demo(
     workspaces = [
         workspace
         for workspace in job_db.list_workspaces()
-        if workspace.get("default_workflow_key") == DEMO_WORKFLOW_KEY
+        if workspace.get("id") == DEMO_WORKFLOW_KEY
     ]
     workspace_created = not workspaces
-    # Schema v62: the demo workspace id is its workflow key (the find-above
-    # lookup keeps working for legacy rows).
+    # Schema v62: the demo workspace id is its workflow key.
     workspace = (
         workspaces[0]
         if workspaces
         else job_db.create_workspace(
             workspace_name,
-            default_workflow_key=DEMO_WORKFLOW_KEY,
             default_entity="question",
             workspace_id=DEMO_WORKFLOW_KEY,
         )

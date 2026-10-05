@@ -6,7 +6,7 @@ WORKFLOW_KEY = "education_video_problems_generation"
 
 
 def _make_workspace(job_db, slug):
-    workspace = job_db.create_workspace(slug, default_workflow_key=WORKFLOW_KEY)
+    workspace = job_db.create_workspace(slug)
     publish_builtin_revision(job_db, workspace["id"])
     return workspace
 

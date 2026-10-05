@@ -66,9 +66,7 @@ def test_running_job_without_recoverable_rows_skips_generation_recheck(tmp_path:
     job 绕过评估缓存使该成本每轮重复——两个测量轮修复前代次读为 4 次。
     """
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "wfext", default_workflow_key="wfext", workspace_id="wfext"
-    )
+    workspace = queries.create_workspace("wfext", workspace_id="wfext")
     job = queries.create_job(
         workflow_key="wfext",
         source_type="question",
@@ -158,9 +156,7 @@ def test_terminal_branch_lost_object_does_not_block_targeted_rerun(tmp_path: Pat
     费者终态），b 照常评估并被 claim。
     """
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "wf2br", default_workflow_key="wf2br", workspace_id="wf2br"
-    )
+    workspace = queries.create_workspace("wf2br", workspace_id="wf2br")
     job = queries.create_job(
         workflow_key="wf2br",
         source_type="question",
@@ -229,9 +225,7 @@ def test_decided_branch_lost_condition_object_does_not_block_targeted_rerun(
     对象永久丢失，无关分支 targeted rerun 时 hydration 不得把该条件产物放
     进恢复面——恢复失败曾使整个 job 跳过评估，无关分支永远到不了 claim。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "wfcond", default_workflow_key="wfcond", workspace_id="wfcond"
-    )
+    workspace = queries.create_workspace("wfcond", workspace_id="wfcond")
     job = queries.create_job(
         workflow_key="wfcond",
         source_type="question",
@@ -302,9 +296,7 @@ def test_implicit_consumer_rerun_not_blocked_by_lost_condition_object(tmp_path: 
     b 被 targeted rerun 且条件文件对象永久丢失——hydration 不得把
     decision.json 放进恢复面，b 照常 claim。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "wfimpl", default_workflow_key="wfimpl", workspace_id="wfimpl"
-    )
+    workspace = queries.create_workspace("wfimpl", workspace_id="wfimpl")
     job = queries.create_job(
         workflow_key="wfimpl",
         source_type="question",
@@ -378,9 +370,7 @@ def test_confluence_rerun_not_blocked_by_lost_condition_object(tmp_path: Path) -
     """端到端（汇合形态）：good 终态、j 经无条件边被 targeted rerun、
     条件对象永久丢失——hydration 不恢复 decision.json，j 照常 claim。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "wfconf", default_workflow_key="wfconf", workspace_id="wfconf"
-    )
+    workspace = queries.create_workspace("wfconf", workspace_id="wfconf")
     job = queries.create_job(
         workflow_key="wfconf",
         source_type="question",
@@ -465,7 +455,7 @@ def test_conditional_target_with_unconditional_path_rerun_not_blocked(tmp_path: 
         ],
     )
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("wfc3", default_workflow_key="wfc3", workspace_id="wfc3")
+    workspace = queries.create_workspace("wfc3", workspace_id="wfc3")
     job = queries.create_job(
         workflow_key="wfc3",
         source_type="question",
@@ -528,7 +518,7 @@ def test_selected_sibling_covering_rerun_not_blocked_by_lost_object(tmp_path: Pa
     照常 claim。"""
     definition = _selected_sibling_definition()
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("wfc6", default_workflow_key="wfc6", workspace_id="wfc6")
+    workspace = queries.create_workspace("wfc6", workspace_id="wfc6")
     job = queries.create_job(
         workflow_key="wfc6",
         source_type="question",

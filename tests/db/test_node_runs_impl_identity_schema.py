@@ -189,8 +189,7 @@ def test_latest_done_request_identities_node_runs_first(job_db) -> None:
     workspace_id = "test-workspace"
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(
@@ -256,8 +255,7 @@ def test_latest_done_request_identities_empty_run_hash_falls_back(job_db) -> Non
     workspace_id = "test-workspace"
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(
@@ -307,8 +305,7 @@ def test_latest_done_request_identities_never_borrows_older_run_identity(job_db)
     workspace_id = "test-workspace"
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(
@@ -347,8 +344,7 @@ def test_latest_done_request_identities_projects_skill_face(job_db) -> None:
     workspace_id = "test-workspace"
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(

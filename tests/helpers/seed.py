@@ -10,13 +10,10 @@ from __future__ import annotations
 from datetime import datetime
 
 
-def insert_workspace(
-    conn, *, workspace_id: str, name: str = "Test", default_workflow_key: str = "demo_workflow"
-) -> None:
+def insert_workspace(conn, *, workspace_id: str, name: str = "Test") -> None:
     conn.execute(
-        "insert into workspaces(id, name, default_workflow_key) values (%s, %s, %s)"
-        " on conflict (id) do nothing",
-        (workspace_id, name, default_workflow_key),
+        "insert into workspaces(id, name) values (%s, %s) on conflict (id) do nothing",
+        (workspace_id, name),
     )
 
 

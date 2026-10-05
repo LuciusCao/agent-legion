@@ -171,7 +171,6 @@ const executorCatalog = [
 
 const baseSettings: WorkspaceSettings = {
   entityType: 'question',
-  workflowKey: '',
 }
 
 function renderWorkspace(

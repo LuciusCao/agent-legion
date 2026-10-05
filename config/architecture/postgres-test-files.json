@@ -136,6 +136,7 @@
     "tests/routes/test_workspace_secrets.py",
     "tests/services/test_agent_artifact_inject.py",
     "tests/services/test_agent_artifacts.py",
+    "tests/services/test_agent_backfill_report.py",
     "tests/services/test_agent_broker.py",
     "tests/services/test_agent_broker_batch.py",
     "tests/services/test_agent_broker_claim_batch.py",

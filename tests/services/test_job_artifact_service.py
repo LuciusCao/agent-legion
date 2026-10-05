@@ -19,7 +19,7 @@ def artifact_service(job_db):
 
 @pytest.fixture
 def job(job_db):
-    workspace = job_db.create_workspace("default", default_workflow_key="demo_workflow")
+    workspace = job_db.create_workspace("default")
     batch = job_db.create_run(
         "demo_workflow",
         "batch_by_ids",

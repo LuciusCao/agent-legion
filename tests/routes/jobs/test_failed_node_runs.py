@@ -2,12 +2,10 @@ from tests.helpers import publish_legacy_intake_revision
 from tests.helpers.auth import authenticate_client
 
 
-def _create_workspace(
-    client, name="default", default_workflow_key="education_video_problems_generation"
-):
-    workspace_id = client.post(
-        "/api/workspaces", json={"id": default_workflow_key, "name": name}
-    ).json()["workspace"]["id"]
+def _create_workspace(client, name="default", workspace_key="education_video_problems_generation"):
+    workspace_id = client.post("/api/workspaces", json={"id": workspace_key, "name": name}).json()[
+        "workspace"
+    ]["id"]
     # The demo workflow no longer declares intake modes (#154); these tests
     # post job-batches, so publish the legacy-intake variant.
     publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
@@ -18,7 +16,6 @@ def _create_job(client, workspace_id: str, question_id: str) -> str:
     created = client.post(
         f"/api/workspaces/{workspace_id}/job-batches",
         json={
-            "workflow_key": "education_video_problems_generation",
             "source_kind": "direct_ids",
             "knowledge_point_ids": [question_id],
         },
@@ -85,12 +82,9 @@ def test_list_failed_node_runs_filters_by_category(tmp_path):
     assert by_detail.json()["runs"][0]["node_key"] == "publish_content"
 
 
-def test_list_failed_node_runs_absent_and_explicit_workflow_key_are_equivalent(tmp_path):
-    """#211 Phase 2：缺省 workflow_key 由服务端从 path 推导（恒等值）。
-
-    Phase 3（#307）后读法谓词只绑 workspace_id：显式恒等值仍是 no-op；
-    不匹配 key 是 400（v62 绑定下不可能存在，不再静默收窄为空集）。
-    """
+def test_list_failed_node_runs_ignores_retired_workflow_key_query(tmp_path):
+    """#211 M3: the workflow_key query param is gone; the list is scoped by
+    the path workspace alone and a stray value neither narrows nor fails."""
     from fastapi.testclient import TestClient
 
     app = _app(tmp_path)
@@ -100,55 +94,32 @@ def test_list_failed_node_runs_absent_and_explicit_workflow_key_are_equivalent(t
         _fail_node(app, job_id, "write_script", "technical", "provider_stream")
 
         absent = c.get(f"/api/workspaces/{ws_id}/failed-node-runs")
-        explicit = c.get(f"/api/workspaces/{ws_id}/failed-node-runs?workflow_key={ws_id}")
-        mismatched = c.get(f"/api/workspaces/{ws_id}/failed-node-runs?workflow_key=other_wf")
+        stray = c.get(f"/api/workspaces/{ws_id}/failed-node-runs?workflow_key=other_wf")
 
     assert absent.status_code == 200
-    assert explicit.status_code == 200
+    assert stray.status_code == 200
     assert {r["node_key"] for r in absent.json()["runs"]} == {"write_script"}
-    assert explicit.json()["runs"] == absent.json()["runs"]
-    assert mismatched.status_code == 400
-    assert "workflow_key must equal the workspace id" in mismatched.json()["detail"]
+    assert stray.json()["runs"] == absent.json()["runs"]
+    assert all("workflow_key" not in run for run in absent.json()["runs"])
 
 
-def test_rerun_by_failure_absent_and_explicit_workflow_key_are_equivalent(tmp_path):
-    """失败重跑 POST body 的 workflow_key：缺省=从 path 推导，显式传照旧。
-
-    两次调用各选各自的 job（job_ids 显式圈定），两条路径返回等价结果。
-    """
+def test_rerun_by_failure_ignores_retired_workflow_key(tmp_path):
+    """#211 M3: workflow_key left the rerun-by-failure body; a client still
+    sending it (any value) gets the same path-scoped selection."""
     from fastapi.testclient import TestClient
 
     app = _app(tmp_path)
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
-        absent_job = _create_job(c, ws_id, "Q921")
-        _fail_node(app, absent_job, "write_script", "technical", "provider_stream")
-
-        absent = c.post(
+        job = _create_job(c, ws_id, "Q921")
+        _fail_node(app, job, "write_script", "technical", "provider_stream")
+        response = c.post(
             f"/api/workspaces/{ws_id}/jobs/rerun-by-failure",
-            json={"category": "technical", "job_ids": [absent_job]},
+            json={"category": "technical", "job_ids": [job], "workflow_key": "other_wf"},
         )
 
-        # 显式传：另一个失败 job，同一 workspace（key 值=id）。
-        explicit_job = _create_job(c, ws_id, "Q922")
-        _fail_node(app, explicit_job, "write_script", "technical", "provider_stream")
-        explicit = c.post(
-            f"/api/workspaces/{ws_id}/jobs/rerun-by-failure",
-            json={
-                "category": "technical",
-                "job_ids": [explicit_job],
-                "workflow_key": ws_id,
-            },
-        )
-
-    assert absent.status_code == 200
-    assert explicit.status_code == 200
-    assert [(r["job_id"], r["status"]) for r in absent.json()["results"]] == [
-        (absent_job, "succeeded")
-    ]
-    assert [(r["job_id"], r["status"]) for r in explicit.json()["results"]] == [
-        (explicit_job, "succeeded")
-    ]
+    assert response.status_code == 200, response.text
+    assert [(r["job_id"], r["status"]) for r in response.json()["results"]] == [(job, "succeeded")]
 
 
 def test_rerun_by_failure_route_reruns_matching_jobs(tmp_path):
@@ -267,24 +238,6 @@ def test_rerun_by_failure_from_node_key_not_upstream_skips_job(tmp_path):
     assert results[0]["reason_code"] == "no_matching_failure"
     nodes = {node["node_key"]: node["status"] for node in detail["nodes"]}
     assert nodes["write_script"] == "failed"
-
-
-def test_rerun_by_failure_rejects_empty_workflow_key(tmp_path):
-    """#211 Phase 2 (review on #286): an explicitly empty workflow_key is a
-    client error, not a silent default — all five migrated request params
-    share the None-or-nonempty contract."""
-    from fastapi.testclient import TestClient
-
-    app = _app(tmp_path)
-    with authenticate_client(TestClient(app)) as c:
-        ws_id = _create_workspace(c)
-        job = _create_job(c, ws_id, "Q923")
-        _fail_node(app, job, "write_script", "technical", "provider_stream")
-        response = c.post(
-            f"/api/workspaces/{ws_id}/jobs/rerun-by-failure",
-            json={"category": "technical", "job_ids": [job], "workflow_key": ""},
-        )
-    assert response.status_code == 422
 
 
 def test_list_failed_node_runs_rejects_empty_string_filters(tmp_path):

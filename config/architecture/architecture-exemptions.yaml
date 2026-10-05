@@ -404,31 +404,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1004
   ceiling: 111
 - check: architecture.file_budget
-  path: server/app/routes/workflow_node_codes.py
-  reason: The issue-211 Phase 2 URL-segment retirement keeps every historical workflow-key path registered
-    as a deprecated alias next to the segment-free route (stacked decorators — the architecture doc generator
-    only enumerates decorator-registered routes, so add_api_route would silently drop eight routes from
-    backend.md). The deprecated aliases are the honest cost of the deprecation window; deleting them (Phase
-    3/4 removal tracked in issue 211) drops the file back under the baseline ceiling and this exemption
-    goes stale automatically. The Codex P2 fix on PR 299 adds _resolve_key (query-bound alias must equal
-    the workspace id), which is part of the same deprecation-window cost. Issue 692 (codex P1 round 4)
-    adds the optional expected_hash publish body (about 17 lines) — the server-side CAS guard for chat
-    draft cards; re-signed to 257, 2 beyond the prior 240+15 band, time-boxed per issue 641. Issue 927
-    drops the route-level JobServiceError boilerplate (app-level handler), lowered to actual + 10.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 246
-  expires: 2026-10-31
-- check: architecture.file_budget
-  path: server/app/routes/job_http.py
-  reason: The issue-211 Phase 3 read-binding guard (reject_mismatched_workflow_key, shared by five explicit-key
-    entry points per the Codex P1 on PR 307) lives here with the other route-layer HTTP helpers. The overage
-    is the honest cost of the deprecation window; dropping the deprecated workflow_key request faces (Phase
-    3/4, tracked in issue 211) removes the guard and this exemption goes stale automatically.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 47
-- check: architecture.file_budget
   path: velites/src/agent.rs
   reason: 'Issue #297 added the first inline unit tests to the agent loop module (pure-function coverage:
     enabled_tool_names, outputs_remediation, resolve_required_outputs incl. sandbox-escape rejection).
@@ -481,10 +456,10 @@ exemptions:
     dedupe, and the re-prefix separator guard. The issue-211 M2 batch adds the post-v70 shape guard via
     the shared has_column probe (fresh databases already run the terminal shape; each pass skips its table
     instead of failing the replay). The overage is that single transaction's honest cost; M2 dropped the
-    workflow_key columns, and M3 (retiring the deprecated contract fields) collapses these migration bodies
-    and the exemption with them.
+    workflow_key columns; the bodies stay after M3 because older databases still upgrade directly through
+    v68. Re-anchored #211 → #1030 at the #211 M3 close (frozen migration body; see #1030).
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1030
   ceiling: 208
 - check: architecture.file_budget
   path: server/app/db/migrations/run_job_status_counts.py
@@ -525,18 +500,10 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/db/migrations/runs_sql.py
   reason: The issue-211 M2 batch adds _INSERT_RUNS_SQL_V70 — the column-less twin of the job_batches cutover
-    (without it a pre-v53 database upgraded to v70+ silently drops every historical batch row).
+    (without it a pre-v53 database upgraded to v70+ silently drops every historical batch row). Re-anchored #211 → #1030 at the #211 M3 close (frozen migration body; see #1030).
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1030
   ceiling: 134
-- check: architecture.file_budget
-  path: server/app/jobs/queries/batch_queue.py
-  reason: The issue-211 M2 batch applies the same deprecated workflow_key identity backfill to the remaining
-    runs-row write paths (intake claim, depleted requeue, intake update) so every runs-row consumer inherits
-    the field until the 2026-10-31 removal window closes.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/211
-  ceiling: 78
 - check: architecture.file_budget
   path: frontend/src/features/previewPanel/PreviewPanelHost.tsx
   reason: 'The Codex P1 review on PR 345 added the host-injected CSP (the outbound-network red
@@ -1381,10 +1348,10 @@ exemptions:
     helper. #927 drops the route-level JobServiceError boilerplate (app-level handler): lowered to
     actual + 10. Re-anchored by #926 from #734 (closed) to #1002: the overage above is the shipped
     feature itself and the removal condition above stands; #1002 tracks at most five entries
-    (#917 A-2).'
+    (#917 A-2). #211 M3 drops the workflow_key guard (77→73 effective): lowered to 83.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1002
-  ceiling: 87
+  ceiling: 83
   expires: 2026-12-31
 - check: architecture.file_budget
   path: server/app/services/external_artifact_access.py

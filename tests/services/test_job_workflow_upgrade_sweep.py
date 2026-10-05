@@ -22,7 +22,7 @@ pytestmark = pytest.mark.postgres
 
 def test_sweep_preserves_new_generation_writes(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("wssweep", default_workflow_key="wfsweep")
+    workspace = queries.create_workspace("wssweep")
     job = queries.create_job(
         workflow_key="wfsweep",
         source_type="question",

@@ -63,7 +63,7 @@ def skill_home(tmp_path, monkeypatch, job_db):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     # The endpoints are workspace-bound (#710): the skill key's first
     # segment must be a real workspace the token is bound to.
-    job_db.create_workspace(_WS, default_workflow_key=_WS, workspace_id=_WS)
+    job_db.create_workspace(_WS, workspace_id=_WS)
     return base / _KEY
 
 
@@ -345,9 +345,7 @@ def test_foreign_workspace_binding_is_refused(client_factory, job_db, skill_home
     (#633) and the job tools (require_studio_agent_workspace)."""
     with client_factory(fresh=True) as client:
         admin_id = str(job_db.get_user_credentials("admin")["id"])
-        other = job_db.create_workspace(
-            "Other WS", default_workflow_key="other_ws_flow", workspace_id="other_ws_flow"
-        )
+        other = job_db.create_workspace("Other WS", workspace_id="other_ws_flow")
         bound_token = scoped_tokens.mint_scoped_token(
             job_db, admin_id, workspace_id=str(other["id"])
         )
@@ -377,9 +375,7 @@ def test_skill_key_workspace_mismatch_is_refused(client_factory, job_db, skill_h
     whose workspace segment disagrees with the path scope (the key IS
     <workspace>/<name>; a mismatched pair 404s like an unknown skill)."""
     with client_factory(fresh=True) as client:
-        other = job_db.create_workspace(
-            "Other WS", default_workflow_key="other_ws_flow", workspace_id="other_ws_flow"
-        )
+        other = job_db.create_workspace("Other WS", workspace_id="other_ws_flow")
         # Token bound to the OTHER workspace, calling the OTHER workspace's
         # path scope but with THIS workspace's skill key: the key's own
         # workspace segment wins — 404, not a cross-workspace read.

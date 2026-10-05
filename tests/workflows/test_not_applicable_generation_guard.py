@@ -68,7 +68,7 @@ def test_not_applicable_write_abandoned_when_generation_bumped_mid_pass(tmp_path
     轮代次相符，标记正常落库（b → not_applicable）。
     """
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    workspace = queries.create_workspace("test", workspace_id="test")
     definition = _branch_definition()
     job = queries.create_job(
         workflow_key="test",
@@ -122,7 +122,7 @@ def test_not_applicable_write_abandoned_when_generation_bumped_mid_pass(tmp_path
 def test_not_applicable_write_lands_when_generation_matches(tmp_path: Path) -> None:
     """无并发 reset 的正常路径：代次相符 → 批量写照常落库（防过修对照）。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("test", default_workflow_key="test", workspace_id="test")
+    workspace = queries.create_workspace("test", workspace_id="test")
     definition = _branch_definition()
     job = queries.create_job(
         workflow_key="test",

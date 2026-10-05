@@ -36,13 +36,7 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         workspace = job_db.get_workspace(workspace_id)
         if workspace is None:
             return WorkflowRevisionsResponse(revisions=[])
-        workflow_key = str(workspace.get("default_workflow_key") or "")
-        rows = job_db.list_workflow_revisions(workspace_id, workflow_key)
-        # #211 M2: the column is gone from workflow_revisions (v70), but the
-        # deprecated response field stays until the M3 window closes
-        # (2026-10-31) — backfill it with the workspace's bound key.
-        for row in rows:
-            row.setdefault("workflow_key", workflow_key)
+        rows = job_db.list_workflow_revisions(workspace_id, workspace_id)
         return WorkflowRevisionsResponse(revisions=[WorkflowRevisionSummary(**row) for row in rows])
 
     @router.get(
@@ -53,12 +47,9 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         workspace = job_db.get_workspace(workspace_id)
         if workspace is None:
             raise HTTPException(status_code=404, detail="Workspace not found")
-        workflow_key = str(workspace.get("default_workflow_key") or "")
-        revision = job_db.get_active_workflow_revision(workspace_id, workflow_key)
+        revision = job_db.get_active_workflow_revision(workspace_id, workspace_id)
         if revision is None:
             raise HTTPException(status_code=404, detail="No active workflow revision")
-        # #211 M2: deprecated field backfill (see list route above).
-        revision.setdefault("workflow_key", workflow_key)
         definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
         return ActiveWorkflowRevisionResponse(
             revision=WorkflowRevisionSummary.model_validate(revision),
@@ -79,12 +70,9 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         workspace = job_db.get_workspace(workspace_id)
         if workspace is None:
             raise HTTPException(status_code=404, detail="Workspace not found")
-        workflow_key = str(workspace.get("default_workflow_key") or "")
-        revision = job_db.get_workflow_revision(workspace_id, workflow_key, revision_id)
+        revision = job_db.get_workflow_revision(workspace_id, workspace_id, revision_id)
         if revision is None:
             raise HTTPException(status_code=404, detail="Workflow revision not found")
-        # #211 M2: deprecated field backfill (see list route above).
-        revision.setdefault("workflow_key", workflow_key)
         definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
         return WorkflowRevisionDetailResponse(
             revision=WorkflowRevisionSummary.model_validate(revision),

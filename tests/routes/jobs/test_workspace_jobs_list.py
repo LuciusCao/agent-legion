@@ -1,6 +1,6 @@
 """GET /workspaces/{id}/jobs guard + run_id filter + truncation coverage.
 
-#211 Phase 3 (workflow_key guard), #735 (run_id filter: external callers
+#211 M3 (retired workflow_key query), #735 (run_id filter: external callers
 enumerate one run's jobs after POST /runs returned its job_ids) and #735
 review P2-1 (bounded limit with an explicit `truncated` marker — truncation
 is never silent).
@@ -51,23 +51,18 @@ def _create_run(client, workspace_id: str, material_ids: list[str]) -> dict:
     return response.json()
 
 
-def test_list_jobs_rejects_mismatched_workflow_key(tmp_path, job_db):
-    """Subagent review P3-1 on #307: guard parity with failed-node-runs —
-    the deprecated query param can no longer narrow (read binding); a
-    mismatched key is rejected instead of silently widening the list."""
+def test_list_jobs_ignores_retired_workflow_key_query(tmp_path, job_db):
+    """#211 M3: the workflow_key query param is gone — a stray value is
+    ignored (the list is scoped by the path workspace alone)."""
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     with authenticate_client(TestClient(app)) as client:
-        job_db.create_workspace("ws-jobs-key", default_workflow_key="ws-jobs-key")
+        job_db.create_workspace("ws-jobs-key")
 
-        mismatched = client.get("/api/workspaces/ws-jobs-key/jobs?workflow_key=other_flow")
-        assert mismatched.status_code == 400, mismatched.text
-        assert "workflow_key must equal the workspace id" in mismatched.json()["detail"]
-
-        equal = client.get("/api/workspaces/ws-jobs-key/jobs?workflow_key=ws-jobs-key")
-        assert equal.status_code == 200
-        assert equal.json()["jobs"] == []
+        stray = client.get("/api/workspaces/ws-jobs-key/jobs?workflow_key=other_flow")
+        assert stray.status_code == 200, stray.text
+        assert stray.json()["jobs"] == []
 
 
 def test_list_jobs_filters_by_run_id(client, job_db):

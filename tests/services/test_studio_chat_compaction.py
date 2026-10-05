@@ -59,9 +59,7 @@ def direct(job_db, settings):
     """Idle session row + registered runtime without an ACP subprocess."""
     bus = RecordingBus()
     service = StudioChatService(job_db, settings, bus)
-    workspace_id = job_db.create_workspace(default_workflow_key="demo_workflow", name="Chat WS")[
-        "id"
-    ]
+    workspace_id = job_db.create_workspace(name="Chat WS")["id"]
     user_id = str(job_db.create_user("chat-user", password_hash=None)["id"])
     session_id = job_db.create_studio_chat_session(workspace_id, user_id, "direct-agent")
     job_db.update_studio_chat_session(session_id, status="idle")
