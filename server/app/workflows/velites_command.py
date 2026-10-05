@@ -11,6 +11,9 @@
   （config_schema defaults → 节点 config → workspace 覆盖，intake 冻结后经
   ``manifest["config"]`` 下发，CONFIG-MANIFEST-001 白名单内）；节点未配置则不发，
   这里不硬编码默认值；
+- ``--allow-network``（#715）：仅当 manifest ``execution.sandbox_network`` 为字面
+  ``True``（节点保留键 ``sandbox_network`` 的 dispatch 解析值）时下发；缺省即
+  velites bash 工具网络隔离；
 - ``--timeout-seconds`` 与 capability timeout（执行方的外层 kill 时限）取同一值：
   harness 内层 deadline 到期先给模型一个 wrap-up turn 收尾，Host SIGTERM 兜底，
   velites 对 SIGTERM 优雅退出（``agent_end{reason: cancelled}`` + exit 0）。
@@ -71,6 +74,10 @@ def build_velites_command(
         cmd.extend(["--timeout-seconds", str(timeout)])
     if execution.get("no_sandbox"):
         cmd.append("--no-sandbox")
+    if execution.get("sandbox_network") is True:
+        # #715: the bash tool's network is denied by default (same as the
+        # code sandbox); only the node's explicit sandbox_network opts in.
+        cmd.append("--allow-network")
     for output in manifest.get("expected_outputs") or []:
         cmd.extend(["--require-output", str(output)])
     cmd.extend([f"@{prompt_file}", prompt_instruction])

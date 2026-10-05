@@ -4,8 +4,12 @@
 # fix deadline or `recurring: true` for irreducible infrastructure noise.
 # Global `--reruns 1` stays, but reruns are no longer silently absorbed:
 # scripts/check_reruns.py fails PR CI when a rerun hits a nodeid outside this
-# registry or when a non-recurring entry outlives its deadline; nightly also
-# checks deadlines without requiring a rerun report.
+# registry. Deadline expiry is judged only by the nightly exemption-expiry job
+# (`--check-deadlines`, warns 7 days ahead), never by PR CI or the unit tier
+# (#941), so a calendar date cannot red unrelated PRs.
+# Clock-free rules checked on every load: one entry per nodeid; non-recurring
+# entries carry `registered_on` (plus `extended_on` after a reviewed
+# extension) and a deadline at most 45 days after the latest of the two.
 # Field style follows config/architecture/architecture-exemptions.yaml.
 entries:
 - id: FLAKY-007
@@ -18,6 +22,8 @@ entries:
     scheduled nightly run confirms the fix under load, then delete.
   observed: Local quick gate on review/architecture (c8913a71 + audit fixes),
     2026-08-27; isolated rerun passed.
+  registered_on: 2026-08-27
+  extended_on: 2026-09-14
   deadline: 2026-10-14
 - id: FLAKY-004
   scope: ci-infra:docker-hub
@@ -54,6 +60,8 @@ entries:
     considering a deeper fix.
   observed: Local pre-push quick gate for 9f479768 (pull request 175),
     2026-08-26; retry run passed in 47s.
+  registered_on: 2026-08-26
+  extended_on: 2026-10-01
   deadline: 2026-10-31
   extension: >-
     Extended 2026-10-01 (PR #808 CI unblock): zero recurrence since the
@@ -82,6 +90,7 @@ entries:
     a loaded runner. Registered for rerun absorption; the assertion itself
     (exactly one pending row) is the invariant under test and stays.
   observed: PR #636 backend-coverage lane (run 34762377305), 2026-09-13, rerun passed and the lane was green.
+  registered_on: 2026-09-13
   deadline: 2026-10-13
 - id: FLAKY-010
   nodeid: tests/services/test_workflow_draft_publish.py::test_publish_creates_active_revision
@@ -97,6 +106,7 @@ entries:
     rerun threshold. Registered for rerun absorption; the assertions
     themselves are stable in isolation (42+ consecutive local passes).
   observed: PR #636 backend-coverage lane (run 34765238572), 2026-09-13, rerun passed.
+  registered_on: 2026-09-13
   deadline: 2026-10-13
 - id: FLAKY-011
   nodeid: tests/workflows/test_workflow_execution_control.py::test_worker_runs_only_target_closure_in_until_node_mode
@@ -111,7 +121,14 @@ entries:
     timing family as FLAKY-009/010 (2-core runner, three shards plus
     coverage): registered for rerun absorption; 8 consecutive local
     passes, no poll loop of its own (single worker._poll() call).
-  observed: PR #684 backend-coverage lane (run 35056532267), 2026-09-16, rerun passed and the lane count was green.
+    Absorbed the former duplicate FLAKY-015 (#941: one entry per nodeid —
+    the rerun check keys entries by nodeid, so a second entry silently
+    shadowed the first); its observation is merged into `observed` below.
+  observed: >-
+    PR #684 backend-coverage lane (run 35056532267), 2026-09-16, rerun passed
+    and the lane count was green; again on PR #701 backend-coverage lane (run
+    35126787623), 2026-09-16, rerun absorbed (formerly FLAKY-015).
+  registered_on: 2026-09-16
   deadline: 2026-10-16
 
 - id: FLAKY-012
@@ -131,7 +148,9 @@ entries:
   observed: >-
     PR #701 and #704 backend-coverage lanes, 2026-09-16 (rerun absorbed);
     single-attempt local reproduction under batch load only.
-  deadline: 2026-12-31
+  registered_on: 2026-09-17
+  # #941: clamped from 2026-12-31 to the 45-day window from registration.
+  deadline: 2026-11-01
 - id: FLAKY-013
   nodeid: tests/services/test_studio_chat_service_permissions.py::test_turn_timeout_settles_parked_permission_and_session_survives
   owner: test-infra
@@ -147,7 +166,9 @@ entries:
   observed: >-
     PR #708 backend-coverage lane rerun governance, 2026-09-16; local batch
     load reproduction once, isolated rerun green.
-  deadline: 2026-12-31
+  registered_on: 2026-09-17
+  # #941: clamped from 2026-12-31 to the 45-day window from registration.
+  deadline: 2026-11-01
 - id: FLAKY-014
   nodeid: tests/workflows/test_workflow_worker_concurrency.py::test_target_completion_pauses_job_and_stops_further_claims
   owner: test-infra
@@ -162,21 +183,9 @@ entries:
     the shared family item (bounded wait on the terminal job status).
   observed: >-
     PR #704 and #708 backend-coverage lanes, 2026-09-16 (rerun absorbed).
-  deadline: 2026-12-31
-- id: FLAKY-015
-  nodeid: tests/workflows/test_workflow_execution_control.py::test_worker_runs_only_target_closure_in_until_node_mode
-  owner: test-infra
-  reason: >-
-    Same nodeid as FLAKY-011 (registered on the velites-0.5.4 release line,
-    not yet on develop when the 0.7.13 wave branched): loaded-runner rerun
-    absorbed again on 0.7.13 PR #701 backend-coverage lane (run 35126787623,
-    2026-09-16). The 0.7.13 diff (#615, frontend-only) cannot interact with
-    the Python target-closure plane. Entry mirrors FLAKY-011 until the
-    release line merges and the dedupe lands on develop.
-  observed: >-
-    PR #701 backend-coverage lane, 2026-09-16 (rerun absorbed); first
-    observed on PR #684 (FLAKY-011).
-  deadline: 2026-12-31
+  registered_on: 2026-09-17
+  # #941: clamped from 2026-12-31 to the 45-day window from registration.
+  deadline: 2026-11-01
 - id: FLAKY-016
   nodeid: tests/workers/test_execution_run.py::test_reclaim_serializes_old_attempt_teardown_and_new_attempt
   owner: test-infra
@@ -190,6 +199,7 @@ entries:
     postgres shards plus coverage): registered for rerun absorption; 4
     consecutive local passes (1.0-1.7s each).
   observed: PR #696 backend-coverage lane (run 35185641060), 2026-09-17, rerun passed and the lane count was green.
+  registered_on: 2026-09-17
   deadline: 2026-10-17
 - id: FLAKY-017
   nodeid: tests/services/test_job_workflow_upgrade_inherit.py::test_inherit_upgrade_code_republish_with_inserted_node_reruns_all
@@ -205,6 +215,7 @@ entries:
     local passes (0.7-0.9s each). Same loaded-runner timing family as
     FLAKY-009/010/011/016.
   observed: PR #702 backend-postgres-a lane (run 35317067107), 2026-09-18, rerun passed and the lane count was green.
+  registered_on: 2026-09-20
   deadline: 2026-10-18
 - id: FLAKY-018
   nodeid: tests/routes/test_agent_workers.py::test_worker_metrics_require_token_and_are_forced_to_own_worker
@@ -220,6 +231,7 @@ entries:
     runner, three postgres shards plus coverage). Assertions are stable: 5
     consecutive local passes (1.3-5.3s each).
   observed: PR #702 backend-postgres-c lane (run 35347504160), 2026-09-18, rerun passed and the lane count was green.
+  registered_on: 2026-09-20
   deadline: 2026-10-18
 - id: FLAKY-019
   nodeid: tests/services/test_studio_chat_compaction.py::test_compact_timeout_timer_self_clears_and_recovers_input
@@ -236,6 +248,7 @@ entries:
     FLAKY-009/010/011/016/017/018. Assertions are stable: 4 consecutive
     local passes (0.85-1.06s each).
   observed: PR #702 backend-coverage lane (run 35468147331), 2026-09-19, rerun passed and the lane count was green.
+  registered_on: 2026-09-20
   deadline: 2026-10-19
 - id: FLAKY-020
   nodeid: tests/services/test_job_workflow_upgrade_inherit_cleanup.py::test_inherit_upgrade_rmw_name_of_covered_consumer_is_retired
@@ -266,4 +279,5 @@ entries:
     PR #790 backend-postgres-a lane (run 36245071412), 2026-09-26, rerun
     passed and the shard was green; backend-coverage failed only on the
     registry check.
+  registered_on: 2026-09-26
   deadline: 2026-10-26

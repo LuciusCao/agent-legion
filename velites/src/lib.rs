@@ -120,9 +120,13 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
         None
     } else {
         Some(std::sync::Arc::new(
-            sandbox::Sandbox::new(&cwd, cli.session_dir.as_deref(), &cli.skill).context(
-                "filesystem sandbox unavailable (fail-closed); pass --no-sandbox to bypass",
-            )?,
+            sandbox::Sandbox::new(
+                &cwd,
+                cli.session_dir.as_deref(),
+                &cli.skill,
+                cli.allow_network,
+            )
+            .context("filesystem sandbox unavailable (fail-closed); pass --no-sandbox to bypass")?,
         ))
     };
 

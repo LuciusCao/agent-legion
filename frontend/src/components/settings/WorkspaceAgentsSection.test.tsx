@@ -113,6 +113,23 @@ beforeEach(() => {
 })
 
 describe('WorkspaceAgentsSection', () => {
+  it('shows the retirement notice while keeping the catalog usable', async () => {
+    renderSection()
+    const notice = screen.getByRole('note')
+    expect(notice).toHaveTextContent('Agent 定义即将退役')
+    expect(
+      within(notice).getByRole('link', { name: '查看退役计划' })
+    ).toHaveAttribute(
+      'href',
+      'https://github.com/LuciusCao/agent-legion/issues/440'
+    )
+    // D1：双读阶段目录与归档入口原样保留。
+    const list = await screen.findByRole('list', { name: 'Agent 定义列表' })
+    expect(within(list).getAllByRole('button', { name: /归档/ })).toHaveLength(
+      3
+    )
+  })
+
   it('lists all non-archived agents and flags unreferenced ones', async () => {
     renderSection()
     const list = await screen.findByRole('list', { name: 'Agent 定义列表' })

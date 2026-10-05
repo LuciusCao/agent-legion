@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from server.app.executors.models import CODE_EXECUTOR_ID
 from server.app.jobs.queries.workspace_node_limits import get_local_node_limit
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_node_profile_catalog import resolve_dispatch_agent_profile
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -76,10 +76,8 @@ def _resolve_uncached(
         # projection, not by any node-level declaration.
         if route is not None and route["target_kind"] == "agent":
             agent_id = str(route["target_id"])
-            definition_config = published_agent_definitions(worker.job_db, workspace_id).get(
-                agent_id
-            )
-            if definition_config is None:
+            profile = resolve_dispatch_agent_profile(worker.job_db, workspace_id, agent_id, None)
+            if profile is None or profile.legacy_ref is None:
                 return NodeRoute(
                     "error",
                     error_message=(
@@ -88,7 +86,7 @@ def _resolve_uncached(
                         " (schema v46) — create one in Studio (Agent 管理) for this workspace"
                     ),
                 )
-            if definition_config.capability != capability:
+            if profile.legacy_ref.capability != capability:
                 return NodeRoute("error", error_message=f"Invalid Agent route {agent_id!r}")
             if worker.agent_dispatch is None:
                 raise RuntimeError("Agent dispatch service is not configured")

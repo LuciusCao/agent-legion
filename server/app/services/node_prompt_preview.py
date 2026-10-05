@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_node_profile import resolve_agent_node_profile
+from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.workflow_draft_store import save_workflow_draft
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
@@ -71,7 +72,7 @@ def _locate_executable_node(definition: WorkflowDefinition, node_key: str) -> Wo
 
 
 def _skill_key_for_node(job_db: JobQueries, workspace_id: str, node: WorkflowNode) -> str | None:
-    """Node skill binding wins (#76); the published Agent's skill is the legacy fallback.
+    """Node skill binding wins (#76); the node profile's skill is the legacy fallback.
 
     Only ``type: agent`` nodes dispatch through an Agent (#284): a code node
     never runs skill content, so even a declared binding is ignored here.
@@ -80,10 +81,8 @@ def _skill_key_for_node(job_db: JobQueries, workspace_id: str, node: WorkflowNod
         return None
     if node.skill is not None:
         return node.skill.key
-    for definition in published_agent_definitions(job_db, workspace_id).values():
-        if definition.capability == node.capability:
-            return definition.skill or None
-    return None
+    profile = resolve_agent_node_profile(node, legacy_agent_catalog(job_db, workspace_id))
+    return (profile.skill or None) if profile is not None else None
 
 
 def _preview_payload(job_db: JobQueries, workspace_id: str, node: WorkflowNode) -> dict[str, Any]:

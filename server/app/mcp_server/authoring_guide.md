@@ -336,7 +336,9 @@ to an implementation:
   not-yet-started nodes; an invalid one falls back to the node/platform
   value; defaults: agent 1800s, code 600s, CONFIG-RUNTIME-TIMEOUT-001), while
   `sandbox_network` stays frozen at intake — opening network egress ships
-  with a workflow revision.
+  with a workflow revision. Network is denied by default for code nodes'
+  sandbox and for the velites agent bash tool alike; `sandbox_network: true`
+  opens it for that node.
 - Node config `connection` keys reference instance-level external service
   connections (external APIs such as TTS or CMS; the boundary is
   SECURITY-EXTERNAL-CONNECTION-001). Those are admin-only and live in

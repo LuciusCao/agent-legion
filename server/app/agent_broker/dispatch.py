@@ -80,7 +80,14 @@ class AgentDispatchService:
         # 由 Worker claim 叠加 workspace 覆盖后判定；缺省/畸形回落产品常量。
         timeout_raw = (node_config or {}).get("timeout_seconds")
         timeout = timeout_raw if isinstance(timeout_raw, int) and timeout_raw >= 1 else None
-        execution = resolve_execution_block(node, definition.runtime, timeout_seconds=timeout)
+        # #715：agent bash 工具的网络开关沿用节点保留键 sandbox_network（intake
+        # 冻结、默认 false）；只有字面 True 才放开（velites --allow-network）。
+        execution = resolve_execution_block(
+            node,
+            definition.runtime,
+            timeout_seconds=timeout,
+            sandbox_network=(node_config or {}).get("sandbox_network"),
+        )
         execution_id = str(uuid.uuid4())
         skill = checkout_node_skill(self.skill_manager, node, definition.skill, execution_id)
         try:
