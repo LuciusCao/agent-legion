@@ -52,10 +52,17 @@ def check_clean(run_git: GitRunner, skill_key: str, repo_dir: Path) -> None:
     directory holds anything but residue); ``-z`` keeps paths unquoted.
     The index is never rewritten here (no ``git rm --cached``).
     """
-    status = run_git(
-        repo_dir, ["status", "--porcelain", "-z", "--untracked-files=all"], check=False
-    )
-    if status.returncode != 0 or _blocking_entries(status.stdout):
+    try:
+        status = run_git(
+            repo_dir, ["status", "--porcelain", "-z", "--untracked-files=all"], check=False
+        )
+        blocking = status.returncode != 0 or bool(_blocking_entries(status.stdout))
+    except UnicodeDecodeError:
+        # -z prints raw (unquoted) path bytes: a non-UTF-8 file name (Linux)
+        # fails the runner's strict text decode. Such an entry is dirt we
+        # cannot classify — refuse like any dirty tree (409, never a 500).
+        blocking = True
+    if blocking:
         raise ConflictError(
             f"Skill {skill_key!r} repo has uncommitted changes; commit or revert them first"
             " (unstaged build residue such as __pycache__/ or *.pyc is ignored)"

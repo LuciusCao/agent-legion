@@ -116,7 +116,12 @@ def _carry_build_residue(shared_dir: Path, staging: Path) -> None:
             ):
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target, follow_symlinks=False)
+            try:
+                shutil.copy2(source, target, follow_symlinks=False)
+            except FileNotFoundError:
+                # A validator outside the lock removed it between the walk and
+                # the copy: nothing left to keep. Any other OSError aborts.
+                target.unlink(missing_ok=True)
         # Never descend through a symlinked directory (os.walk lists it in
         # dirnames but, with followlinks=False, does not enter it).
         dirnames[:] = [name for name in dirnames if not (current / name).is_symlink()]

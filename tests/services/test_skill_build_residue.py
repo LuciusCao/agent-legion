@@ -236,3 +236,53 @@ def test_created_skill_keeps_a_declared_gitignore(home: Path, tmp_path: Path) ->
     files = [*_QUARTET, SkillFileWrite(".gitignore", "out/\n")]
     service.create_skill("ws-1", "own", files, "v0.1.0", "init")
     assert (home / "ws-1" / "own" / ".gitignore").read_text() == "out/\n"
+
+
+def test_residue_vanishing_mid_copy_is_skipped_other_errors_abort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from server.app.services import skill_shared_swap
+    from server.app.services.skill_shared_store import SharedMaterialWriteError
+
+    root = _shared(tmp_path)
+    targets = validate_shared_put_payload(
+        root, [(item["path"], item["content"]) for item in shared_edit_snapshot(root)]
+    )
+    real_copy = skill_shared_swap.shutil.copy2
+
+    def vanishing_copy(source, target, **kwargs):
+        if Path(source).name == "stray.pyc":
+            Path(source).unlink()  # a validator outside the lock cleaned it
+        return real_copy(source, target, **kwargs)
+
+    monkeypatch.setattr(skill_shared_swap.shutil, "copy2", vanishing_copy)
+    write_shared_materials(root, list(targets.items()), tmp_path)
+    assert not (root / "scripts" / "stray.pyc").exists()
+    assert (root / "scripts" / "__pycache__" / "common.cpython-312.pyc").read_bytes() == _PYC
+
+    def denied_copy(source, target, **kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(skill_shared_swap.shutil, "copy2", denied_copy)
+    with pytest.raises(SharedMaterialWriteError):
+        write_shared_materials(root, [*targets.items(), ("scripts/new.py", "Y\n")], tmp_path)
+    assert not (root / "scripts" / "new.py").exists()  # live dir untouched
+
+
+def test_undecodable_status_output_is_a_conflict_not_a_crash(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``-z`` prints raw path bytes; a non-UTF-8 file name (Linux) breaks the
+    runner's strict text decode — still the base behavior's 409."""
+    real_git = SkillEditingService.__dict__["_git"].__func__
+
+    def git(repo_dir: Path, args: list[str], *, check: bool = True):
+        if args[:1] == ["status"]:
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        return real_git(repo_dir, args, check=check)
+
+    monkeypatch.setattr(SkillEditingService, "_git", staticmethod(git))
+    with pytest.raises(ConflictError, match="uncommitted changes"):
+        _service(repo, tmp_path).save_version(
+            "wf/review", [SkillFileWrite("SKILL.md", "x\n")], "v1.0.1", "m"
+        )
