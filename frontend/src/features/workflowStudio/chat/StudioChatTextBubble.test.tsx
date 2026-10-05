@@ -54,12 +54,47 @@ describe('StudioChatTextBubble', () => {
       />
     )
     expect(container.querySelector('script')).toBeNull()
-    const img = container.querySelector('img')
-    expect(img).not.toBeNull()
-    expect(img!.getAttribute('onerror')).toBeNull()
+    expect(container.querySelector('[onerror]')).toBeNull()
     const link = container.querySelector('a')
     expect(link).not.toBeNull()
     expect(link!.getAttribute('href')).toBeNull()
+  })
+
+  // 红队回归（studio chat 渲染层，资源自动加载类）：agent 文本里的任何图片
+  // 都不得在渲染时自动发起请求，只留点击才打开的链接占位。
+  it('never auto-loads images from agent markdown', () => {
+    const { container } = render(
+      <StudioChatTextBubble
+        message={message(
+          'agent',
+          '![图](https://x.test/a.png?q=1)\n\n<img src="https://x.test/b.png">\n\n<p><img src="data:image/png;base64,AAAA"></p>'
+        )}
+        streaming={false}
+      />
+    )
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.querySelector('[src]')).toBeNull()
+    const placeholder = container.querySelector('a')
+    expect(placeholder).not.toBeNull()
+    expect(placeholder).toHaveTextContent('[图片：图]')
+    expect(placeholder!.getAttribute('href')).toBe('https://x.test/a.png?q=1')
+    expect(placeholder!.getAttribute('target')).toBe('_blank')
+  })
+
+  it('escapes markup smuggled through image alt text', () => {
+    const { container } = render(
+      <StudioChatTextBubble
+        message={message(
+          'agent',
+          '![<img src=https://x.test/c.png>](javascript:alert(1))'
+        )}
+        streaming={false}
+      />
+    )
+    expect(container.querySelector('img')).toBeNull()
+    const placeholder = container.querySelector('a')
+    expect(placeholder).not.toBeNull()
+    expect(placeholder!.getAttribute('href')).toBeNull()
   })
 
   it('keeps legit https links with href and opens them in a new tab', () => {

@@ -6,6 +6,7 @@ that still reads job_batches; the sorted registry guarantees it."""
 
 from __future__ import annotations
 
+from server.app.db.migration_chain_recent import RECENT_MIGRATIONS
 from server.app.db.migration_entry import SchemaMigration
 from server.app.db.migrations import (
     migrate_agent_catalog_cutover,
@@ -41,12 +42,8 @@ from server.app.db.migrations import (
     migrate_workspace_job_node_status_counts,
     migrate_workspace_secrets,
 )
-from server.app.db.migrations.agent_worker_claim_state import migrate_agent_worker_claim_state
 from server.app.db.migrations.claim_queue_wait_profile import migrate_claim_queue_wait_profile
 from server.app.db.migrations.claim_stage_profile import migrate_claim_stage_profile
-from server.app.db.migrations.job_node_status_count_deltas import (
-    migrate_job_node_status_count_deltas as _migrate_v88_node_deltas,
-)
 from server.app.db.migrations.job_status_counts import migrate_workspace_job_status_counts
 from server.app.db.migrations.job_status_counts_advisory_locks import (
     migrate_job_status_counts_advisory_locks as _migrate_v82_locks,
@@ -59,9 +56,6 @@ from server.app.db.migrations.preview_panels import migrate_preview_panels
 from server.app.db.migrations.result_stage_profile import migrate_result_stage_profile
 from server.app.db.migrations.retire_workflow_key_columns import migrate_retire_workflow_key_columns
 from server.app.db.migrations.shard_identity_index import migrate_shard_identity_index
-from server.app.db.migrations.studio_chat_session_soft_delete import (
-    migrate_studio_chat_session_soft_delete,
-)
 
 MIGRATIONS: list[SchemaMigration] = [
     SchemaMigration(13, "auth_users_sessions_workspace_members"),
@@ -234,26 +228,8 @@ MIGRATIONS: list[SchemaMigration] = [
     # retention-deleted request rows cannot be backfilled: unprovable =
     # conservative rerun).
     SchemaMigration(86, "node_runs_impl_identity"),
-    # v87: Worker-reported claim switch column (agent_workers.claim_enabled,
-    # nullable) — the Host UI's「在线·未领取」signal. Born as this branch's
-    # v83, bumped to 87 after the base advanced to v86 (#434 collision
-    # protocol: the later merge renumbers). DDL-only, guarded rule.
-    SchemaMigration(87, "agent_worker_claim_state", migrate_agent_worker_claim_state),
-    # v88 (#690): v82's append-and-fold protocol for the job NODE counter
-    # family. The row trigger's per-node upsert on shared (workspace,
-    # node_key, status) rows closed the same cross-transaction AB-BA ring
-    # v82 removed from the job family; a try-lock (class 88) folder now
-    # alone writes a workspace's base rows and every other writer appends a
-    # delta, so no write in the family ever waits. bump_job_node_status_counts
-    # moved out of postgres_schema.sql into this migration's SQL so a later
-    # schema-file replay cannot restore the blocking body.
-    SchemaMigration(88, "job_node_status_count_deltas", _migrate_v88_node_deltas),
-    # v89 (#872): studio_chat_sessions.deleted_at — Studio chat session soft
-    # delete (list filters it, public reads 404, resume claim refuses it).
-    # A column, not a status value: status is the live runtime state
-    # machine; deletion is an orthogonal visibility flag. DDL-only, same
-    # guarded-ALTER home rule as v87.
-    SchemaMigration(89, "studio_chat_session_soft_delete", migrate_studio_chat_session_soft_delete),
+    # v87+ live in migration_chain_recent.py (file-budget split).
+    *RECENT_MIGRATIONS,
 ]
 
 _versions = [m.version for m in MIGRATIONS]

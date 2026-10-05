@@ -60,6 +60,9 @@ class StudioChatSessionRecord(BaseModel):
     created_at: datetime
     updated_at: datetime
     closed_at: datetime | None
+    # Archive stamp (#924, v90): set = hidden from the default list, shown in
+    # the archive view; resume is refused until unarchived.
+    archived_at: datetime | None = None
 
 
 class StudioChatSessionUpdateRequest(BaseModel):

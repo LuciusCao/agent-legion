@@ -42,6 +42,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from server.app.fs_safety import PathEscapeError, resolve_within
 from server.app.services import skill_repo
 from server.app.services.job_errors import (
     InvalidOperationError,
@@ -241,13 +242,10 @@ class SkillEditingService:
         parts = skill_key.split("/")
         if len(parts) != 2 or not all(parts) or ".." in parts:
             raise NotFoundError("Invalid skill key")
-        root = self.base_dir.resolve()
-        candidate = (root / parts[0] / parts[1]).resolve()
         try:
-            candidate.relative_to(root)
-        except ValueError as exc:
+            return resolve_within(self.base_dir, Path(parts[0], parts[1]), allow_root=True)
+        except PathEscapeError as exc:
             raise NotFoundError("Invalid skill path") from exc
-        return candidate
 
     def _resolve_targets(
         self, repo_dir: Path, files: list[SkillFileWrite]

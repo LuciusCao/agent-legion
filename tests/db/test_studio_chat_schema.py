@@ -60,6 +60,7 @@ def test_studio_chat_tables_exist() -> None:
         "updated_at",
         "closed_at",
         "deleted_at",
+        "archived_at",
     } == session_columns
     assert {"id", "seq", "session_id", "kind", "role", "content_json", "created_at"} == (
         message_columns

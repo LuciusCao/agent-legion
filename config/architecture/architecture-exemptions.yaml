@@ -297,16 +297,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/451
   ceiling: 231
 - check: architecture.file_budget
-  path: worker/worker_declarations.py
-  reason: 'The deprecated-capabilities normalization moved here from config_validation (#444 rework) to
-    free that file''s zero headroom for the proxy field; labels/models/capabilities are one family of
-    scheduling declarations and share this validation module. The move is net-zero for the package; remove
-    this exemption together with the capabilities compat key itself (tracked separately from the #284
-    mechanism retirement) instead of re-splitting.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/452
-  ceiling: 54
-- check: architecture.file_budget
   path: server/app/routes/artifacts.py
   reason: Artifact routes authenticate the per-Worker token used by Agent execution transport, and the
     per-file upload path grew past the plain baseline with the scoped-token work (#35). Deletion was re-assessed
