@@ -12,8 +12,13 @@ module never re-implements resolution:
 * skill: the node binding wins; otherwise the definition's legacy skill
   sinks to the node (``effective_node_skill``, ref ``latest``).
 
-Nodes whose capability resolves to zero or several published Agents stay
-untouched and are reported as unresolved with a reason.
+Draft nodes resolve by capability (what the next publish would route).
+Active-revision nodes resolve by their materialized route target
+(``workspace_node_routes`` — what dispatch actually runs; Agent publish /
+archive never rewrites routes), reading the target's definition even when
+archived; whenever the route target and today's capability resolution
+disagree the node is flagged ``route_drift`` (#934 codex R1). Nodes with
+no usable source stay untouched and are reported as unresolved with a reason.
 """
 
 from __future__ import annotations
@@ -22,7 +27,9 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from server.app.agent_catalog import AgentDefinition
+from server.app.services.agent_backfill_routes import RouteTarget, resolve_routed_node
 from server.app.services.agent_node_profile import (
+    AgentNodeProfile,
     CapabilityIndex,
     legacy_agent_candidates,
     resolve_agent_node_profile,
@@ -87,55 +94,72 @@ def _unresolved_reason(
     return "no_agent", []
 
 
+def _backfill_fields(
+    node: WorkflowNode, profile: AgentNodeProfile, agent_id: str, digest: str
+) -> dict[str, Any]:
+    schema = dict(profile.config_schema)
+    return {
+        "status": "backfill",
+        "agent_id": agent_id,
+        "agent_definition_hash": digest,
+        "runtime": profile.runtime,
+        "tools": {
+            "value": list(node.tools or profile.tools),
+            "source": "node" if node.tools else "definition",
+        },
+        "config_schema": schema,
+        "config_schema_diff": config_schema_diff(node.config_schema, schema),
+        "skill": _skill_backfill(node, profile.skill),
+        "requires_labels": dict(sorted(profile.requires_labels.items())),
+    }
+
+
+def _plan_node(
+    node: WorkflowNode,
+    catalog: Mapping[str, AgentDefinition],
+    index: CapabilityIndex,
+    unpublished: Mapping[str, tuple[str, str]],
+    routes: Mapping[str, RouteTarget] | None,
+) -> dict[str, Any]:
+    base: dict[str, Any] = {"node_key": node.key, "capability": node.capability}
+    by_capability = resolve_agent_node_profile(node, catalog, index=index)
+    if by_capability is not None and by_capability.legacy_ref is None:
+        # Already self-contained (P2 node source, #933): nothing to backfill.
+        return {**base, "status": "self_contained", "source": by_capability.source}
+    candidates = legacy_agent_candidates(node, catalog, index=index)
+    profile = by_capability
+    if routes is not None:
+        extra, profile, unresolved = resolve_routed_node(node.key, routes, candidates, catalog)
+        base.update(extra)
+        if unresolved is not None:
+            reason, agent_ids = unresolved
+            return {**base, "status": "unresolved", "reason": reason, "agent_ids": agent_ids}
+    if profile is None or profile.legacy_ref is None:
+        reason, agent_ids = _unresolved_reason(node, candidates, unpublished)
+        return {**base, "status": "unresolved", "reason": reason, "agent_ids": agent_ids}
+    legacy = profile.legacy_ref
+    return {**base, **_backfill_fields(node, profile, legacy.agent_id, legacy.definition_hash())}
+
+
 def plan_definition_backfill(
     definition: WorkflowDefinition,
     catalog: Mapping[str, AgentDefinition],
     index: CapabilityIndex,
     unpublished: Mapping[str, tuple[str, str]],
+    routes: Mapping[str, RouteTarget] | None = None,
 ) -> list[dict[str, Any]]:
     """One entry per ``type: agent`` node, sorted by node key.
 
     *unpublished*: agent_id → (capability, latest status) for Agents with
     no published version (classifies unresolved nodes; never resolves).
-    Each entry has ``status`` ``backfill`` (with the simulated fields),
-    ``unresolved`` (with ``reason`` / ``agent_ids``), or ``self_contained``
-    (the profile no longer comes from a definition — nothing to backfill).
+    *routes*: node_key → materialized route target for the active revision;
+    None (drafts) resolves by capability. Each entry has ``status``
+    ``backfill`` (with the simulated fields), ``unresolved`` (``reason`` /
+    ``agent_ids``), or ``self_contained`` (nothing to backfill); active
+    entries also carry ``route`` and, on disagreement, ``route_drift``.
     """
-    entries: list[dict[str, Any]] = []
-    for key in sorted(definition.nodes):
-        node = definition.nodes[key]
-        if node.node_type != "agent":
-            continue
-        base = {"node_key": key, "capability": node.capability}
-        profile = resolve_agent_node_profile(node, catalog, index=index)
-        if profile is None:
-            candidates = legacy_agent_candidates(node, catalog, index=index)
-            reason, agent_ids = _unresolved_reason(node, candidates, unpublished)
-            entries.append(
-                {**base, "status": "unresolved", "reason": reason, "agent_ids": agent_ids}
-            )
-            continue
-        legacy = profile.legacy_ref
-        if legacy is None:
-            # Already self-contained (P2 node source, #933): nothing to backfill.
-            entries.append({**base, "status": "self_contained", "source": profile.source})
-            continue
-        schema = dict(profile.config_schema)
-        entries.append(
-            {
-                **base,
-                "status": "backfill",
-                "agent_id": legacy.agent_id,
-                "agent_definition_hash": legacy.definition_hash(),
-                "runtime": profile.runtime,
-                "tools": {
-                    "value": list(node.tools or profile.tools),
-                    "source": "node" if node.tools else "definition",
-                },
-                "config_schema": schema,
-                "config_schema_diff": config_schema_diff(node.config_schema, schema),
-                "skill": _skill_backfill(node, profile.skill),
-                "requires_labels": dict(sorted(profile.requires_labels.items())),
-            }
-        )
-    return entries
+    return [
+        _plan_node(definition.nodes[key], catalog, index, unpublished, routes)
+        for key in sorted(definition.nodes)
+        if definition.nodes[key].node_type == "agent"
+    ]

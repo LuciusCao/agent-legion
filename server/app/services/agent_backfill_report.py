@@ -11,7 +11,10 @@ and aggregates what the 0.7.17 data migration would do:
   source (the migration expands it 1:N);
 * ``unresolved`` — nodes left untouched (no / several published Agents,
   archived, draft-only);
-* ``config_schema_overrides`` — node declarations the overwrite discards.
+* ``config_schema_overrides`` — node declarations the overwrite discards;
+* ``route_drift`` — active-revision nodes whose materialized route target
+  (what dispatch runs, and the backfill source) differs from today's
+  capability resolution in the catalog.
 
 The report is deterministic (sorted, no timestamps) so a fixture workspace
 pins it byte for byte. It is written to stdout or a local file only —
@@ -25,6 +28,7 @@ from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from server.app.services.agent_backfill_plan import plan_definition_backfill
+from server.app.services.agent_backfill_routes import load_route_targets
 from server.app.services.agent_node_profile import build_capability_index
 from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.agent_service import AgentService
@@ -32,7 +36,9 @@ from server.app.services.workflow_drafts import workflow_definition_from_yaml_st
 from server.app.workflows.definition import WorkflowDefinitionError, workflow_definition_from_dict
 
 if TYPE_CHECKING:
-    from server.app.jobs import JobQueries
+    from server.app.jobs.queries.agent_backfill_reader import (
+        AgentBackfillReader as JobQueries,
+    )
 
 REPORT_KIND = "agent-definition-backfill-dry-run"
 SOURCE_ACTIVE = "active_revision"
@@ -67,6 +73,7 @@ def _workspace_report(reader: JobQueries, workspace_id: str) -> dict[str, Any]:
         for entity in AgentService(reader, workspace_id).list_latest()
         if entity.entity_key not in catalog
     }
+    routes = load_route_targets(reader, workspace_id, catalog)
     sources: list[dict[str, Any]] = []
     for descriptor in _sources(reader, workspace_id):
         parse = descriptor.pop("_parse")
@@ -75,7 +82,9 @@ def _workspace_report(reader: JobQueries, workspace_id: str) -> dict[str, Any]:
         except (WorkflowDefinitionError, ValueError) as exc:
             sources.append({**descriptor, "error": str(exc), "nodes": []})
             continue
-        nodes = plan_definition_backfill(definition, catalog, index, unpublished)
+        # Active nodes resolve by their materialized route; drafts by capability.
+        source_routes = routes if descriptor["source"] == SOURCE_ACTIVE else None
+        nodes = plan_definition_backfill(definition, catalog, index, unpublished, source_routes)
         sources.append({**descriptor, "error": None, "nodes": nodes})
     return {
         "workspace_id": workspace_id,
@@ -88,6 +97,7 @@ def _aggregate(workspaces: list[dict[str, Any]]) -> dict[str, Any]:
     shared: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
     overrides: list[dict[str, Any]] = []
+    drift: list[dict[str, Any]] = []
     backfill_count = 0
     for workspace in workspaces:
         ws = workspace["workspace_id"]
@@ -95,6 +105,17 @@ def _aggregate(workspaces: list[dict[str, Any]]) -> dict[str, Any]:
             groups: dict[str, list[str]] = {}
             for node in source["nodes"]:
                 ref = {"workspace_id": ws, "source": source["source"], "node_key": node["node_key"]}
+                if "route_drift" in node:
+                    route = node["route"] or {}
+                    drift.append(
+                        {
+                            **ref,
+                            "capability": node["capability"],
+                            "route_target": route.get("target_id"),
+                            "route_target_status": route.get("target_status"),
+                            **node["route_drift"],
+                        }
+                    )
                 if node["status"] == "unresolved":
                     unresolved.append(
                         {**ref, **{k: node[k] for k in ("capability", "reason", "agent_ids")}}
@@ -126,7 +147,9 @@ def _aggregate(workspaces: list[dict[str, Any]]) -> dict[str, Any]:
             "agent_nodes_unresolved": len(unresolved),
             "shared_definition_groups": len(shared),
             "config_schema_overrides": len(overrides),
+            "route_drift": len(drift),
         },
+        "route_drift": drift,
         "shared_definitions": shared,
         "unresolved": unresolved,
         "config_schema_overrides": overrides,

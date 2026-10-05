@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 
 from server.app.agent_catalog import AgentDefinition
-from server.app.services.agent_backfill_plan import config_schema_diff, plan_definition_backfill
+from server.app.services.agent_backfill_plan import (
+    RouteTarget,
+    config_schema_diff,
+    plan_definition_backfill,
+)
 from server.app.services.agent_node_profile import build_capability_index
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
 
@@ -172,3 +176,54 @@ def test_self_contained_profile_is_not_backfilled(monkeypatch: pytest.MonkeyPatc
     [entry] = plan_definition_backfill(definition, catalog, build_capability_index(catalog), {})
 
     assert entry["status"] == "self_contained"
+
+
+_ROUTED_YAML = "key: wf\nlabel: WF\nnodes:\n  n:\n    type: agent\n    capability: review\n"
+
+
+def _routed(routes: dict[str, RouteTarget], catalog: dict) -> dict:
+    definition = workflow_definition_from_yaml_string(_ROUTED_YAML)
+    [entry] = plan_definition_backfill(
+        definition, catalog, build_capability_index(catalog), {}, routes
+    )
+    return entry
+
+
+def test_route_matching_catalog_backfills_without_drift() -> None:
+    catalog = {"r": _agent("review")}
+
+    entry = _routed({"n": RouteTarget("r", "published", catalog["r"])}, catalog)
+
+    assert entry["status"] == "backfill"
+    assert entry["route"] == {"target_id": "r", "target_status": "published"}
+    assert "route_drift" not in entry
+
+
+def test_missing_route_target_is_unresolved_with_drift() -> None:
+    catalog = {"r2": _agent("review")}
+
+    entry = _routed({"n": RouteTarget("gone", "missing", None)}, catalog)
+
+    assert (entry["status"], entry["reason"], entry["agent_ids"]) == (
+        "unresolved",
+        "route_target_missing",
+        ["gone"],
+    )
+    assert entry["route_drift"] == {"catalog_candidates": ["r2"]}
+
+
+def test_active_node_without_route_but_with_candidate_is_drift() -> None:
+    catalog = {"r": _agent("review")}
+
+    entry = _routed({}, catalog)
+
+    assert (entry["status"], entry["reason"]) == ("unresolved", "no_route")
+    assert entry["route"] is None
+    assert entry["route_drift"] == {"catalog_candidates": ["r"]}
+
+
+def test_active_node_without_route_or_candidate_is_plain_unresolved() -> None:
+    entry = _routed({}, {})
+
+    assert (entry["status"], entry["reason"]) == ("unresolved", "no_agent")
+    assert "route_drift" not in entry

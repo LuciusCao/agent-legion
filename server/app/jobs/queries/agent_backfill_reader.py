@@ -14,11 +14,9 @@ the Agent catalog, and must never write. Two structural guards:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
-if TYPE_CHECKING:
-    from server.app.jobs.queries import JobQueries
+from server.app.jobs.queries import JobQueries
 
 _READ_ONLY_OPTION = "-c default_transaction_read_only=on"
 
@@ -39,14 +37,26 @@ def read_only_dsn(dsn: str) -> str:
     return urlunsplit(parts._replace(query=query_text))
 
 
-def agent_backfill_reader_from_dsn(dsn: str) -> JobQueries:
-    """A JobQueries facade bound to the read-only DSN; never runs ``init_db``.
+class AgentBackfillReader(JobQueries):
+    """JobQueries plus the materialized Agent-route read the report needs."""
+
+    def agent_route_targets(self, workspace_id: str) -> dict[str, str]:
+        """node_key → Agent route target id (``workspace_node_routes``) of one workspace."""
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                "select node_key, target_id from workspace_node_routes"
+                " where workspace_id=%s and target_kind='agent'",
+                (workspace_id,),
+            ).fetchall()
+        return {str(row["node_key"]): str(row["target_id"]) for row in rows}
+
+
+def agent_backfill_reader_from_dsn(dsn: str) -> AgentBackfillReader:
+    """A facade bound to the read-only DSN; never runs ``init_db``.
 
     Only read methods are meant to be called; a write raises at the server.
     ``jobs_dir`` is deliberately unset — nothing in the report touches it.
     """
-    from server.app.jobs.queries import JobQueries
-
-    reader = JobQueries.__new__(JobQueries)
+    reader = AgentBackfillReader.__new__(AgentBackfillReader)
     reader._path = read_only_dsn(dsn)  # data-layer-private field (see queries/base.py)
     return reader

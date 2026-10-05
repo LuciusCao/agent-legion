@@ -160,7 +160,9 @@ def test_report_pins_backfill_shared_unresolved_and_overrides(fixture_db: JobQue
         "agent_nodes_unresolved": 2,
         "shared_definition_groups": 1,
         "config_schema_overrides": 1,
+        "route_drift": 0,
     }
+    assert report["route_drift"] == []
     assert report["shared_definitions"] == [
         {
             "workspace_id": "ws_bf",
@@ -214,6 +216,60 @@ def test_report_pins_backfill_shared_unresolved_and_overrides(fixture_db: JobQue
     assert ws_broken["sources"][0]["source"] == "draft"
     assert ws_broken["sources"][0]["error"]
     assert ws_empty["sources"] == []
+
+
+_DRIFT_YAML = """
+key: ws_drift
+label: Drift
+nodes:
+  gen:
+    type: agent
+    capability: generate
+    outputs: [g.json]
+"""
+
+
+def test_active_revision_resolves_by_route_and_reports_drift(tmp_path: Path) -> None:
+    """Publish routes ``gen`` → ``gen-v1``; archiving it and publishing the same
+    capability as ``gen-v2`` leaves the route on v1 (Agent publish/archive never
+    rewrites routes). Active: backfill from the route target + route_drift;
+    draft: capability resolution (v2), no drift."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    queries.create_workspace("Drift", default_workflow_key="ws_drift", workspace_id="ws_drift")
+    replace_agent_catalog("ws_drift", {"gen-v1": _agent("generate", runtime="pi")})
+    WorkflowRevisionService(queries).publish_workspace_revision(
+        "ws_drift", workflow_definition_from_yaml_string(_DRIFT_YAML)
+    )
+    replace_agent_catalog("ws_drift", {"gen-v2": _agent("generate")})
+    queries.upsert_workspace_workflow_draft("ws_drift", _DRIFT_YAML)
+
+    report = build_agent_backfill_report(
+        agent_backfill_reader_from_dsn(TEST_DATABASE_URL), ["ws_drift"]
+    )
+
+    assert report["route_drift"] == [
+        {
+            "workspace_id": "ws_drift",
+            "source": "active_revision",
+            "node_key": "gen",
+            "capability": "generate",
+            "route_target": "gen-v1",
+            "route_target_status": "archived",
+            "catalog_candidates": ["gen-v2"],
+        }
+    ]
+    assert report["summary"]["route_drift"] == 1
+    active, draft = report["workspaces"][0]["sources"]
+    [active_gen] = active["nodes"]
+    assert (active_gen["status"], active_gen["agent_id"], active_gen["runtime"]) == (
+        "backfill",
+        "gen-v1",
+        "pi",
+    )
+    assert active_gen["route"] == {"target_id": "gen-v1", "target_status": "archived"}
+    [draft_gen] = draft["nodes"]
+    assert (draft_gen["agent_id"], draft_gen["runtime"]) == ("gen-v2", "velites")
+    assert "route" not in draft_gen and "route_drift" not in draft_gen
 
 
 def test_report_is_byte_deterministic(fixture_db: JobQueries) -> None:
