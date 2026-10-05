@@ -1,8 +1,10 @@
 """Crash-safe JSON job-artifact writes: fsynced same-directory temp + os.replace.
 
 Split into staging and swap so a caller can stage outside a transaction and
-swap inside it after its guard passes (approval decisions, #929); readers
-never observe a half-written artifact.
+swap inside it after its guard passes (approval decisions, #929 / #963);
+readers never observe a half-written artifact. The swap is durable (#975):
+``replace_durable`` fsyncs the target directory after ``os.replace`` so the
+new directory entry survives a host crash once the caller commits.
 """
 
 from __future__ import annotations
@@ -44,10 +46,13 @@ def stage_json(target: Path, payload: dict[str, Any]) -> Path:
     return staged
 
 
-def write_json_atomic(target: Path, payload: dict[str, Any]) -> None:
-    """Stage then swap ``payload`` into ``target`` in one step."""
-    staged = stage_json(target, payload)
+def replace_durable(staged: Path, target: Path) -> None:
+    """``os.replace`` ``staged`` onto ``target``, then fsync ``target``'s
+    directory so the swapped-in entry is on disk before the caller commits
+    (#975: a power loss after the DB commit must not lose the artifact)."""
+    os.replace(staged, target)
+    descriptor = os.open(target.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
-        os.replace(staged, target)
+        os.fsync(descriptor)
     finally:
-        staged.unlink(missing_ok=True)
+        os.close(descriptor)

@@ -1,8 +1,11 @@
 """rework 决策的 staged 写路径（#759 预算拆分自 ``approval_rework``）。
 
 一个 guarded transaction 同时提交审计行与节点重置：锁内重查 failed-
-upstream（含 stale 集隐式生产者）→ 暂存 → 写 feedback（暂存已扫完、
-提交前就位，两种旧竞态都不存在）→ 决策行 → 节点重置；失败整体回滚。
+upstream（含 stale 集隐式生产者）→ 状态守卫 + 决策行 → 暂存 → 节点重置
+→ 换入 feedback（暂存已扫完、提交前就位，两种旧竞态都不存在）；失败整体
+回滚。#963：feedback 在锁外先写 fsync 临时文件，守卫通过后才在锁内
+durable 换入（#975 目录 fsync 先于提交）——重复 / 并发 rework 在守卫处
+冲突，不碰已提交的反馈产物。
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from server.app.services.job_staged_cleanup import (
     commit_staged_outputs,
     delete_rerun_artifact_objects,
 )
+from server.app.services.staged_json_artifact import replace_durable, stage_json
 
 if TYPE_CHECKING:
     from server.app.services.approval_decisions import ApprovalDecisionService
@@ -49,6 +53,19 @@ def commit_rework(
     stale_nodes = [key for key in affected if key != target]
     staged = None
     deleted_rows: list[dict[str, Any]] = []
+    feedback_path = service._artifact_path(job, feedback_name)
+    feedback_staged = stage_json(
+        feedback_path,
+        {
+            "gate": node_key,
+            "verdict": "rework",
+            "note": note,
+            "round": round_no,
+            "rework_target": target,
+            "decided_by": decided_by,
+            "decided_at": datetime.now(UTC).isoformat(),
+        },
+    )
     try:
         with service.job_db.lease_guarded_mutation(
             job_id, datetime.now(UTC), reject_running_nodes=True
@@ -64,21 +81,9 @@ def commit_rework(
                 target,
                 stale_nodes=stale_nodes,
             )
-            staged = service.rerun.artifact_service.stage_outputs(job, affected, definition)
-            service._write_job_artifact(
-                job,
-                feedback_name,
-                {
-                    "gate": node_key,
-                    "verdict": "rework",
-                    "note": note,
-                    "round": round_no,
-                    "rework_target": target,
-                    "decided_by": decided_by,
-                    "decided_at": datetime.now(UTC).isoformat(),
-                },
-            )
+            # #963：状态守卫先于任何文件变动——重复 / 并发 rework 在此冲突。
             service.job_db.record_rework_decision_in_transaction(conn, decision)
+            staged = service.rerun.artifact_service.stage_outputs(job, affected, definition)
             deleted_rows = service.job_db.mark_nodes_for_rerun_in_transaction(
                 conn,
                 job_id,
@@ -86,6 +91,8 @@ def commit_rework(
                 {target: stale_nodes},
                 staged_artifact_names=staged.artifact_names,
             )
+            # 暂存已扫完才换入，反馈不会被当作旧产物清掉（#759）。
+            replace_durable(feedback_staged, feedback_path)
     except (ApprovalGateConflict, JobMutationConflict) as exc:
         if staged is not None:
             staged.rollback()
@@ -111,6 +118,8 @@ def commit_rework(
         if staged is not None:
             staged.rollback()
         raise
+    finally:
+        feedback_staged.unlink(missing_ok=True)
     commit_staged_outputs(staged, job_id, "rework")
     delete_rerun_artifact_objects(service.object_store, deleted_rows, job_id, "rework")
     service._upload_artifact(job, node_key, feedback_name)
