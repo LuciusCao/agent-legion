@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.auth.sessions import hash_token
 from server.app.studio_chat.inbound_queue import DROPPED_ERROR, _deliver, _note_dropped
+from server.app.studio_chat.kimi_wire import kimi_code_homes, locate_wire
 from server.app.studio_chat.unprompted_turns import UnpromptedTurnWatcher
 
 if TYPE_CHECKING:
@@ -173,3 +174,13 @@ class GatedUnpromptedWatcher(UnpromptedTurnWatcher):
             if not runtime.handle.send_prompt(prompt, before_start=before_start):
                 runtime.inbound_pending -= 1
                 _note_dropped(service, session_id, message_id, DROPPED_ERROR)
+
+
+def gated_watcher(
+    service: StudioChatService, session_id: str, runtime: SessionRuntime, acp_session_id: str
+) -> GatedUnpromptedWatcher:
+    """The #938 journal watcher for one ACP session, with the #1029 gate."""
+    homes = kimi_code_homes(runtime.handle.cwd)
+    return GatedUnpromptedWatcher(
+        service, session_id, runtime, lambda: locate_wire(homes, acp_session_id)
+    )

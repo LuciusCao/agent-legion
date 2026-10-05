@@ -26,7 +26,7 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from server.app.studio_chat.kimi_wire import WireTail, kimi_code_homes, locate_wire
+from server.app.studio_chat.kimi_wire import WireTail
 from server.app.studio_chat.mcp_hint import is_agent_legion_tool_call
 from server.app.studio_chat.wire_baseline import usable_baseline
 
@@ -226,13 +226,10 @@ def start_unprompted_watcher(
 ) -> None:
     if not runtime.kimi_agent:
         return
-    from server.app.studio_chat.unprompted_queue import GatedUnpromptedWatcher
+    from server.app.studio_chat.unprompted_queue import gated_watcher
 
-    homes = kimi_code_homes(runtime.handle.cwd)
     # #1029: the gated subclass also holds human input during unprompted turns.
-    watcher = GatedUnpromptedWatcher(
-        service, session_id, runtime, lambda: locate_wire(homes, acp_session_id)
-    )
+    watcher = gated_watcher(service, session_id, runtime, acp_session_id)
     # Where to start is decided by who wrote the journal, never by the clock
     # (#938 review R1/R2): a journal this runtime's process created is read
     # from its start; a loaded one continues from the baseline resume.py took
