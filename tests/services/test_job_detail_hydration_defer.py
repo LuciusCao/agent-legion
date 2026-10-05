@@ -34,7 +34,7 @@ def job(job_db) -> Iterator[dict]:
         source_id="Q1",
         run_id="",
         title="Question 1",
-        node_keys=["question_understanding", "assemble_package"],
+        node_keys=["write_script", "review_script"],
         workspace_id=workspace["id"],
     )
     yield created
@@ -47,25 +47,46 @@ def test_detail_without_notice_has_no_defer(query_service, job) -> None:
 
 
 def test_detail_projects_notice_onto_waiting_node_only(query_service, job_db, job) -> None:
-    job_db.update_job_node(job["id"], "question_understanding", status="completed")
+    job_db.update_job_node(job["id"], "write_script", status="completed")
     HYDRATION_DEFER_BOARD.publish(
         job["id"],
         [
             HydrationDeferNotice(
-                input_name="understanding.json",
+                input_name="script.json",
                 outcome="object_missing",
-                rerun_nodes=("question_understanding",),
-                waiting_nodes=("assemble_package", "question_understanding"),
+                rerun_nodes=("write_script",),
+                waiting_nodes=("review_script", "write_script"),
             )
         ],
     )
 
     nodes = {n["node_key"]: n for n in query_service.detail(job["id"])["nodes"]}
 
-    assert nodes["assemble_package"]["hydration_defer"] == {
-        "inputs": ["understanding.json"],
+    assert nodes["review_script"]["hydration_defer"] == {
+        "inputs": ["script.json"],
         "reasons": ["object_missing"],
-        "rerun_nodes": ["question_understanding"],
+        "rerun_nodes": ["write_script"],
     }
     # 已完成节点不是「等待中」：即使公告列了它也不投影。
-    assert nodes["question_understanding"]["hydration_defer"] is None
+    assert nodes["write_script"]["hydration_defer"] is None
+
+
+def test_detail_skips_nodes_outside_run_to_closure(query_service, job_db, job) -> None:
+    """codex #1018 R2：until_node 闭包外的节点本就不调度，不算被 defer 挡住。"""
+    job_db.set_job_execution_mode(job["id"], "until_node", target_node_key="write_script")
+    HYDRATION_DEFER_BOARD.publish(
+        job["id"],
+        [
+            HydrationDeferNotice(
+                input_name="input.json",
+                outcome="hash_mismatch",
+                rerun_nodes=("write_script",),
+                waiting_nodes=("review_script", "write_script"),
+            )
+        ],
+    )
+
+    nodes = {n["node_key"]: n for n in query_service.detail(job["id"])["nodes"]}
+
+    assert nodes["write_script"]["hydration_defer"] is not None
+    assert nodes["review_script"]["hydration_defer"] is None

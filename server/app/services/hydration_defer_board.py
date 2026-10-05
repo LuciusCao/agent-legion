@@ -23,7 +23,10 @@ from __future__ import annotations
 import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
+from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.execution_control import ExecutionControlError, allowed_nodes
 from server.app.workflows.workflow_branching import RUNNABLE_STATUSES
 
 
@@ -66,6 +69,22 @@ class HydrationDeferBoard:
 
 #: 进程级单例：worker 账本默认写入这里，job 详情查询从这里读。
 HYDRATION_DEFER_BOARD = HydrationDeferBoard()
+
+
+def defer_scope(definition: WorkflowDefinition, job: dict[str, Any]) -> frozenset[str]:
+    """会被调度的节点集：run-to（until_node）闭包外的节点本就不运行，不算受阻。
+
+    与 ``ready_cache`` 同一 ``allowed_nodes`` 口径（codex #1018 R2 P2）；
+    执行控制与定义不一致时调度本身无候选，退回全集不收窄。
+    """
+    control = {
+        "execution_mode": job.get("execution_mode") or "full",
+        "target_node_key": job.get("target_node_key"),
+    }
+    try:
+        return allowed_nodes(definition, control)
+    except ExecutionControlError:
+        return frozenset(definition.nodes)
 
 
 def node_defer_view(
