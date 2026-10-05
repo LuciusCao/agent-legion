@@ -26,7 +26,6 @@ import yaml
 
 from scripts.e2e._llm_stub import StubGateway, write_models_json
 from scripts.e2e._main_flow_seed import (
-    AGENT_CAPABILITY,
     DRAFT_CONTENT,
     DRAFT_OUTPUT,
     seed_main_flow_workspace,
@@ -77,7 +76,6 @@ def write_worker_config(
     work_root: Path,
     models_path: Path,
     register_token: str,
-    capability: str,
 ) -> Path:
     """Write worker.yaml + the scoped token file; returns the yaml path."""
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -92,7 +90,6 @@ def write_worker_config(
         "worker_id": "e2e-worker",
         "name": "E2E Worker",
         "runtimes": ["velites"],
-        "capabilities": [capability],
         "max_concurrency": 2,
         # 0 = agent-only: code nodes stay on the Host's local code pool.
         "max_code_concurrency": 0,
@@ -129,7 +126,6 @@ def prepare_main_flow_runtime(
             work_root=data_dir / "e2e-worker" / "work",
             models_path=models_path,
             register_token=register_token,
-            capability=AGENT_CAPABILITY,
         )
     except Exception:
         # Ownership only transfers to the caller on success; never leak the

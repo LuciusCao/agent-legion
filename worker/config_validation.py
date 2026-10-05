@@ -10,6 +10,7 @@ re-exports ``validate_config`` / ``public_config`` so existing callers
 
 from __future__ import annotations
 
+import logging
 import re
 import urllib.parse
 from typing import Any
@@ -21,10 +22,14 @@ from worker.ramp_up import normalized_ramp_up_block, validate_ramp_up
 from worker.runtime.catalog import SUPPORTED_RUNTIMES, resolve_config_runtimes
 from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY, validate_claim_controls
 
+logger = logging.getLogger(__name__)
+# 已移除的配置键（#452：`capabilities` 自 #284 起即 no-op）：存量 worker.yaml
+# 残留时剥离并每进程告警一次，不让 Worker 因旧键启动失败；下次落盘即清除。
+_REMOVED_KEYS = frozenset({"capabilities"})
+_warned_removed: set[str] = set()
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _EDITABLE_FIELDS = {
     "claim_enabled",
-    "capabilities",
     "host_url",
     "worker_id",
     "name",
@@ -43,7 +48,6 @@ _EDITABLE_FIELDS = {
 }
 _DEFAULTS: dict[str, Any] = {
     "claim_enabled": False,
-    "capabilities": [],
     "host_url": "",
     "worker_id": "",
     "name": "",
@@ -80,7 +84,10 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     """Normalize a Worker config while rejecting surprising local control input."""
     if not isinstance(raw, dict):
         raise ValueError("配置必须是对象")
-    config = {**_DEFAULTS, **raw}
+    for key in sorted((_REMOVED_KEYS & raw.keys()) - _warned_removed):
+        _warned_removed.add(key)
+        logger.warning("config key %r was removed (issue #452) and is ignored; delete it", key)
+    config = {**_DEFAULTS, **{k: v for k, v in raw.items() if k not in _REMOVED_KEYS}}
     # 生效声明 = 本机探测到的已安装 runtime − 停用集合（issue #254：探测即
     # 默认启用，反选停用；旧 opt-in runtimes 键由 catalog 迁移为补集停用）。
     # 空集合合法：本机只承接 code 任务或暂不接 agent。
@@ -120,11 +127,6 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     ):
         raise ValueError(f"上传并发数必须是 1 到 {MAX_DYNAMIC_CONCURRENCY} 的整数")
     normalized_labels = worker_declarations.normalize_labels(config.get("labels", {}))
-    # capabilities 已退役（issue #284）：deprecated no-op，归一化在
-    # worker_declarations（与其余声明类键同处，也为了本文件预算腾挪）。
-    capabilities = worker_declarations.normalize_deprecated_capabilities(
-        config.get("capabilities", [])
-    )
     # models allowlist 的 runtime 取值校验对齐支持全集而非生效集合：生效集合
     # 随机器安装状态浮动，持久化校验不该跟着漂（发现阶段仍按生效集合取交集）。
     models = worker_declarations.normalize_models(config.get("models", []), SUPPORTED_RUNTIMES)
@@ -163,7 +165,6 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
         "max_code_concurrency": code_concurrency,
         "upload_max_concurrency": upload_concurrency,
         "claim_enabled": claim_enabled,
-        "capabilities": capabilities,
         "labels": normalized_labels,
         "models": models,
         "proxy": proxy,

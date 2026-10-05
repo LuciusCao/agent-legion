@@ -4,6 +4,7 @@ from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from server.app.fs_safety import PathEscapeError, resolve_within
 from server.app.jobs import JobQueries
 from server.app.services import job_artifact_names
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
@@ -47,10 +48,10 @@ class JobArtifactService:
             raise InvalidOperationError("Invalid artifact name")
 
         base = resolve_job_dir(job, self.job_db.jobs_dir)
-        path = (base / artifact_name).resolve()
-        if not path.is_relative_to(base):
-            raise InvalidOperationError("Invalid artifact path")
-        return path
+        try:
+            return resolve_within(base, artifact_name, allow_root=True)
+        except PathEscapeError as exc:
+            raise InvalidOperationError("Invalid artifact path") from exc
 
     def read(self, job_id: str, artifact_name: str) -> dict[str, Any]:
         job = self._job_or_404(job_id)

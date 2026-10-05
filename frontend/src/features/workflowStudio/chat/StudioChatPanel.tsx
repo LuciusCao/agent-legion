@@ -72,6 +72,9 @@ export function StudioChatPanel(props: Props) {
             newChatDisabled={!selectedAgentId || chat.starting}
             onRenameSession={manage.rename}
             onDeleteSession={manage.remove}
+            archivedSessions={manage.archivedSessions}
+            onArchiveSession={manage.archive}
+            onUnarchiveSession={manage.unarchive}
           />
         </>
       }

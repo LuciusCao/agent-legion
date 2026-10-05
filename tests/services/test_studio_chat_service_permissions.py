@@ -82,21 +82,27 @@ LOCAL_BASH_MIMIC_SCRIPT = {
     ],
 }
 
-# A local read-only tool call (ACP kind "read"/"search" — the Read/Glob/Grep
-# class): auto-approved without a human roundtrip (side-effect-free).
-READ_ONLY_PERMISSION_SCRIPT = {
-    "on_prompt": [
-        {
-            "permission": {
-                "toolCall": {"toolCallId": "tc-read", "title": "Read", "kind": "read"},
-                "options": [
-                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
-                ],
+
+def _read_only_script(path: str) -> dict:
+    """A local read-only tool call (ACP kind "read") declaring one target."""
+    return {
+        "on_prompt": [
+            {
+                "permission": {
+                    "toolCall": {
+                        "toolCallId": "tc-read",
+                        "title": "Read",
+                        "kind": "read",
+                        "locations": [{"path": path}],
+                    },
+                    "options": [
+                        {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                        {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+                    ],
+                }
             }
-        }
-    ],
-}
+        ],
+    }
 
 
 class RecordingBus:
@@ -213,10 +219,11 @@ def test_human_permission_forward_answer_and_allow_all(chat) -> None:
 
 
 def test_read_only_tool_permission_auto_approves(chat) -> None:
-    """Read 类只读本地工具（kind=read/search）自动批准，不经人工确认；
-    写/Bash 类仍走人工（由 HUMAN_PERMISSION_SCRIPT 系列测试覆盖）。"""
+    """Read 类只读本地工具（kind=read/search）仅当目标在本 workspace 暂存目录内
+    才自动批准；写/Bash 类仍走人工（由 HUMAN_PERMISSION_SCRIPT 系列测试覆盖）。"""
     service, _bus, register, workspace_id, user_id = chat
-    script_path = register(READ_ONLY_PERMISSION_SCRIPT)
+    target = Path.cwd() / "data" / "studio-mcp-files" / workspace_id / "draft.yaml"
+    script_path = register(_read_only_script(str(target)))
     session = service.create_session(workspace_id, user_id, "fake-agent")
     service.send_message(session["id"], workspace_id, "read the draft")
 
@@ -235,22 +242,41 @@ def test_read_only_tool_permission_auto_approves(chat) -> None:
     assert service.get_session(session["id"])["mcp_status"] == "unverified"
 
 
+def test_read_only_tool_outside_staging_parks_for_human(chat) -> None:
+    """红队回归（权限模型，自动批准范围类）：staging 之外的只读调用不得自动批准。"""
+    service, _bus, register, workspace_id, user_id = chat
+    register(_read_only_script(str(Path.cwd() / ".env")))
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "read a file")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
+    pending = [
+        m
+        for m in service.list_messages(session["id"], workspace_id)
+        if m["kind"] == "permission" and m["content"].get("status") == "pending"
+    ]
+    assert len(pending) == 1
+    service.respond_permission(
+        session["id"], workspace_id, pending[0]["content"]["request_id"], option_id=None, deny=True
+    )
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+
+
 def test_permission_timeout_is_bounded() -> None:
     """Guard: the human permission wait must stay short enough that an
     abandoned tab cannot park a turn for long (#91 follow-up: 900s → 120s)."""
     assert permissions_module.PERMISSION_TIMEOUT_SECONDS == 120
 
 
-TERMINAL_SCRIPT = {
-    "on_prompt": [
-        {
-            "terminal": {
-                "command": sys.executable,
-                "args": ["-c", "print('terminal says hi')"],
-            }
-        }
-    ]
+TERMINAL_STEP = {
+    "terminal": {
+        "command": sys.executable,
+        "args": ["-c", "print('terminal says hi')"],
+    }
 }
+BASH_PERMISSION_STEP = HUMAN_PERMISSION_SCRIPT["on_prompt"][0]
+# Terminals only run behind an approved permission request (#921).
+TERMINAL_SCRIPT = {"on_prompt": [BASH_PERMISSION_STEP, TERMINAL_STEP]}
 
 
 def test_initialize_advertises_terminal_capability(chat) -> None:
@@ -271,12 +297,73 @@ def test_terminal_roundtrip_runs_command_and_returns_output(chat) -> None:
     service, _bus, register, workspace_id, user_id = chat
     script_path = register(TERMINAL_SCRIPT)
     session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.set_allow_all_permissions(session["id"], workspace_id, True)
     service.send_message(session["id"], workspace_id, "run a command")
 
     _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
     outcomes = [e["terminal_outcome"] for e in _read_sink(script_path) if "terminal_outcome" in e]
     assert outcomes and outcomes[0]["exitCode"] == 0
     assert "terminal says hi" in outcomes[0]["output"]
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        [TERMINAL_STEP],  # no permission request at all
+        [MCP_PERMISSION_SCRIPT["on_prompt"][0], TERMINAL_STEP],  # platform auto-approval
+    ],
+    ids=["unapproved", "auto-approved-mcp"],
+)
+def test_terminal_without_human_approval_is_refused(chat, steps) -> None:
+    """红队回归（ACP terminal，权限关联类）：未经人工/全部允许批准的 terminal
+    创建一律拒绝，子进程不启动。"""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register({"on_prompt": steps})
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "run a command")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [e["terminal_outcome"] for e in _read_sink(script_path) if "terminal_outcome" in e]
+    assert outcomes and "error" in outcomes[0]
+    assert "terminal says hi" not in json.dumps(outcomes)
+
+
+def test_human_allow_always_is_narrowed_to_allow_once(chat) -> None:
+    """红队回归（权限模型，选项归一类）：会话级 allow_always 在 ACP 线上收窄为
+    allow_once，使后续每次调用（及其 terminal）都重新经过权限请求。"""
+    service, _bus, register, workspace_id, user_id = chat
+    step = {
+        "permission": {
+            "toolCall": {"toolCallId": "tc-bash", "title": "Bash: ls"},
+            "options": [
+                {"optionId": "once", "name": "Allow", "kind": "allow_once"},
+                {"optionId": "always", "name": "Always", "kind": "allow_always"},
+                {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+            ],
+        }
+    }
+    script_path = register({"on_prompt": [step]})
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "run ls")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
+    pending = [
+        m
+        for m in service.list_messages(session["id"], workspace_id)
+        if m["kind"] == "permission" and m["content"].get("status") == "pending"
+    ]
+    service.respond_permission(
+        session["id"],
+        workspace_id,
+        pending[0]["content"]["request_id"],
+        option_id="always",
+        deny=False,
+    )
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [
+        e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
+    ]
+    assert outcomes == [{"outcome": "selected", "optionId": "once"}]
 
 
 def test_local_command_mentioning_tool_names_is_not_auto_approved(chat) -> None:

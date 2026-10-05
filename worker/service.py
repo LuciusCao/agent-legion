@@ -14,6 +14,7 @@ from typing import Any
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
+from worker import service_host_guard as host_guard
 from worker.config_response import public_config_response
 from worker.console_url import CONSOLE_URL_ENV, resolve_console_url
 from worker.heartbeat_relay import start_heartbeat_relay, stop_heartbeat_relay
@@ -58,7 +59,14 @@ def _forget_previous_worker(config: dict[str, Any]) -> None:
         )
 
 
-def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool = True) -> FastAPI:
+def create_app(
+    supervisor: WorkerSupervisor,
+    ui_dir: Path,
+    *,
+    embed_token: bool = True,
+    allowed_hosts: frozenset[str] | None = host_guard.LOOPBACK_HOSTS,
+    trusted_origin: str | None = None,
+) -> FastAPI:
     token = supervisor.store.control_token()
 
     async def require_token(request: Request) -> None:
@@ -83,6 +91,8 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
             supervisor.stop()
 
     app = FastAPI(title="Agent Legion Worker Service", version="1.0", lifespan=lifespan)
+    # #923：Host / 来源校验先于全部路由；返回值是收紧后的内嵌判定（见 install_host_guard）。
+    embed_token = host_guard.install_host_guard(app, allowed_hosts, trusted_origin, embed_token)
     # 静态资产面（index + 白名单 /assets，含 #493 P1-1 的 ui_assets 全等
     # 钉子）拆在 service_static；token 内嵌与否在此传参。
     app.include_router(create_static_router(ui_dir, token, embed_token=embed_token))
@@ -160,13 +170,24 @@ def main() -> int:
     # Worker 自报控制台地址（主控制台按 Worker 显示「控制台」入口）：只有本
     # 进程知道绑定地址，经 env 交给 executor 子进程在注册 labels 里上报；
     # 部署侧显式设置的 AGENT_WORKER_CONSOLE_URL 优先（见 worker/console_url.py）。
-    os.environ[CONSOLE_URL_ENV] = resolve_console_url(args.host, args.port, os.environ)
+    console_url = resolve_console_url(args.host, args.port, os.environ)
+    os.environ[CONSOLE_URL_ENV] = console_url
     worker_dir = Path(__file__).resolve().parent  # worker/ 包根（executor.py 与 ui/ 同级）
     store = WorkerConfigStore(
         args.state_dir.resolve(), args.config.resolve() if args.config is not None else None
     )
     supervisor = WorkerSupervisor(store, worker_dir / "executor.py")
-    app = create_app(supervisor, worker_dir / "ui", embed_token=embed_control_token(args.host))
+    # #489：Docker 形态容器内必绑 0.0.0.0（端口映射前提），但真实暴露面由
+    # compose 的宿主侧发布地址决定——AGENT_WORKER_UI_EFFECTIVE_BIND 经环境
+    # 变量传入（与发布行同源插值）。未设置时（裸机/dev 形态）按进程 bind
+    # 判定，行为与本改动前完全一致。
+    effective_host = os.environ.get("AGENT_WORKER_UI_EFFECTIVE_BIND")
+    app = create_app(
+        supervisor,
+        worker_dir / "ui",
+        embed_token=embed_control_token(args.host, effective_host),
+        **host_guard.guard_options(args.host, effective_host, console_url),
+    )
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 

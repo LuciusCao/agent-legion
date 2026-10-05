@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.db.transaction import read_connection, write_transaction
 from tests.helpers.agent_worker_api import broker as _make_broker
@@ -102,3 +104,57 @@ def test_sweep_matching_generation_requeues_as_before(job_db) -> None:
     assert request["state"] == "queued"
     node = job_db.get_job_node("job-sweep-fresh", "generate")
     assert node["status"] == "pending"
+
+
+def _claim_past_requeue_limit(job_db, job_id: str):
+    """claim 后让请求失联且 attempt 超 requeue 上限（requeue_limit=0）。"""
+    seed_request(job_db, job_id=job_id)
+    _register_worker()
+    broker = _make_broker(job_db.jobs_dir.parent, lease_ttl_seconds=_TTL, requeue_limit=0)
+    claimed = broker.claim(_WORKER_ID)
+    assert claimed is not None
+    _silence_request(claimed.execution_id, _TTL + 10)
+    _make_worker_stale()
+    return broker, claimed
+
+
+@pytest.mark.parametrize("node_status", ["completed", "not_applicable"])
+def test_sweep_requeue_limit_keeps_node_terminal_outside_broker(job_db, node_status) -> None:
+    """#943：超上限终态分支与 requeue 分支同守卫——节点已在 broker 外终结时不改写。"""
+    job_id = f"job-sweep-limit-{node_status}"
+    broker, claimed = _claim_past_requeue_limit(job_db, job_id)
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "update job_nodes set status=%s, error_message='' where job_id=%s",
+            (node_status, job_id),
+        )
+        conn.execute("update jobs set status='completed' where id=%s", (job_id,))
+
+    assert broker.sweep_expired_claims() == []
+
+    node = job_db.get_job_node(job_id, "generate")
+    assert node["status"] == node_status
+    assert node["error_message"] == ""
+    with read_connection(TEST_DATABASE_URL) as conn:
+        job = conn.execute("select status from jobs where id=%s", (job_id,)).fetchone()
+        request = conn.execute(
+            "select state from agent_execution_requests where execution_id=%s",
+            (claimed.execution_id,),
+        ).fetchone()
+    assert job["status"] == "completed"
+    assert request["state"] == "done"
+
+
+def test_sweep_requeue_limit_fails_running_node_and_derives_job_status(job_db) -> None:
+    """#943 基线：节点仍 running 时照常置 failed，job 状态经 sync_job_status 推导为 failed。"""
+    job_id = "job-sweep-limit-running"
+    broker, _claimed = _claim_past_requeue_limit(job_db, job_id)
+
+    assert broker.sweep_expired_claims() == []
+
+    node = job_db.get_job_node(job_id, "generate")
+    assert node["status"] == "failed"
+    assert "requeue limit exceeded" in node["error_message"]
+    with read_connection(TEST_DATABASE_URL) as conn:
+        job = conn.execute("select status from jobs where id=%s", (job_id,)).fetchone()
+    assert job["status"] == "failed"

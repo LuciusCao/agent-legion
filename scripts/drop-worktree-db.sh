@@ -23,9 +23,10 @@ WT="$1"
 ASSUME_YES="${2:-}"
 [[ -z "$ASSUME_YES" || "$ASSUME_YES" == "--yes" ]] || usage
 
-# 名字校验：只允许 worktree 目录名的合法字符集；派生结果必然带
+# 名字校验：只允许 worktree 目录名的合法字符集（含 '.'，#587：首字符必须
+# 是字母数字，'.'/'..' 进不来）；'.' 在派生时归并为 '_'，结果必然带
 # `agent_legion_` 前缀加非空后缀，结构上碰不到共享/prod 库。
-if [[ ! "$WT" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+if [[ ! "$WT" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
     echo "错误: 非法 worktree 名 '$WT'" >&2
     exit 1
 fi

@@ -254,8 +254,6 @@ server/app/
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions` | `list_sessions` | routes/studio_chat.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `get_session` | routes/studio_chat.py |
 | DELETE | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `close_session` | routes/studio_chat.py |
-| PATCH | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `rename_session` | routes/studio_chat.py |
-| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/delete` | `delete_session` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/resume` | `resume_session` | routes/studio_chat.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `list_messages` | routes/studio_chat.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `send_message` | routes/studio_chat.py |
@@ -266,6 +264,10 @@ server/app/
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/config-options` | `set_config_option` | routes/studio_chat_config.py |
 | PUT | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context` | `update_context` | routes/studio_chat_context.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events` | `session_events` | routes/studio_chat_events.py |
+| PATCH | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `rename_session` | routes/studio_chat_session_manage.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/delete` | `delete_session` | routes/studio_chat_session_manage.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/archive` | `archive_session` | routes/studio_chat_session_manage.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/unarchive` | `unarchive_session` | routes/studio_chat_session_manage.py |
 | GET | `/workspaces/{workspace_id}/workflow-drafts/publish-request` | `get_pending_publish_request` | routes/studio_publish_requests.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/confirm` | `confirm_publish_request` | routes/studio_publish_requests.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/cancel` | `cancel_publish_request` | routes/studio_publish_requests.py |
@@ -393,7 +395,7 @@ server/app/
 | MembersResponse | BaseModel | members: list[MemberResponse] | app/routes/auth_contracts.py |
 | MemberPutRequest | BaseModel | user_id: str, role: Literal['editor', 'viewer'] | app/routes/auth_contracts.py |
 | StorageStatus | BaseModel | configured: bool, reachable: bool | app/routes/common.py |
-| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None, storage: StorageStatus | None | app/routes/common.py |
+| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None, storage: StorageStatus | None, inst... | app/routes/common.py |
 | ConnectionCreate | BaseModel | key: str, type: str, display_name: str, config: dict[str, Any] | app/routes/connections_contracts.py |
 | ConnectionUpdate | BaseModel | display_name: str | None, config: dict[str, Any] | None, enabled: bool | None | app/routes/connections_contracts.py |
 | ConnectionTokenStatus | BaseModel | expires_at: str | None, refreshed_at: str | None | app/routes/connections_contracts.py |
@@ -460,7 +462,6 @@ server/app/
 | JobNodeSummaryResponse | BaseModel | node_key: str, label: str, status: str, error_message: str | app/routes/job_view_contracts.py |
 | JobSummaryResponse | BaseModel | id: str, workspace_id: str, workflow_key: str, source_type: str, source_id: s... | app/routes/job_view_contracts.py |
 | JobsResponse | BaseModel | jobs: list[JobSummaryResponse], truncated: bool | app/routes/job_view_contracts.py |
-| JobsSnapshotResponse | BaseModel | workspace_id: str, revision: int, stats: dict[str, int], jobs: list[JobSummar... | app/routes/job_view_contracts.py |
 | JobNodeResponse | BaseModel | id: int, job_id: str, node_key: str, status: str, stale_reason: str, error_me... | app/routes/job_view_contracts.py |
 | NodeRunResponse | BaseModel | id: int, job_id: str, node_key: str, status: str, started_at: str, finished_a... | app/routes/job_view_contracts.py |
 | LogEventResponse | BaseModel | type: str, title: str, detail: str, truncated: bool | app/routes/job_view_contracts.py |
@@ -759,6 +760,23 @@ server/app/
   的确认按协议返回空 body 的 204 响应（`Response(status_code=204)`），无 JSON 可建模。
 - `POST /api/agent-executions/{execution_id}/release-slot`（routes/agent_workers.py）：
   释放槽位的确认同样按协议返回空 204 响应，无 body。
+
+### 批量 job 端点的选择上限（#712）
+
+批量端点（`jobs/batch-rerun`、`jobs/batch-rerun/preview`、`DELETE jobs/batch`、`jobs/batch-run-to`、
+`jobs/batch-pause` / `batch-resume`、`jobs/batch-upgrade-workflow`、`jobs/package`、
+`jobs/clear-packed`、`jobs/rerun-by-failure`）在同步请求线程里逐 job 开事务执行，单次请求
+触及的 job 数有统一上限 `MAX_BATCH_JOBS`（`services/job_selection_resolver.py`，与批量读
+分块 `CHUNK_ROWS` 同一数量级）：
+
+- 显式 `job_ids` / `exclude_ids` 在契约层带 `max_length`，超限由请求校验返回 422；
+- `filter` 选择（以及 `rerun-by-failure` 不带选择时的「全部匹配失败」）在解析阶段计数，
+  超限即返回 422，`detail` 为 `{message, code: "batch_selection_too_large", limit}`，
+  任何写入发生之前拒绝；调用方缩小筛选范围或分批提交。前端按 `code` 给出本地化提示；
+- 批量预取（rerun 状态、节点状态、活跃租约、全行读取）按 `CHUNK_ROWS` 分块发 `IN` 查询，
+  不出现随选择规模增长的单条巨型参数列表。
+
+大选择转异步任务不在本上限范围内（#946 跟踪）。
 
 ## Runtime Architecture
 

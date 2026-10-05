@@ -5,7 +5,8 @@ import shellStyles from './AgentChatPanel.module.css'
 
 /** 以告警条渲染的状态事件（StudioChatStatusLine 的姊妹拆分，#694/#695
  * 波次把该文件顶到预算上限后按 #563「拆姊妹文件保体积」惯例抽出）：
- * turn_timeout/empty_turn/run_token_invalidated/error 的共同点是"这轮
+ * turn_timeout/empty_turn/run_token_invalidated/mcp_callback_unreachable/
+ * error 的共同点是"这轮
  * 出了问题，需要人看见"，文案一律以后端 detail 为唯一来源。 */
 export function StatusWarning({ message }: { message: ChatMessage }) {
   const { event, detail } = statusEvent(message)
@@ -31,6 +32,17 @@ export function StatusWarning({ message }: { message: ChatMessage }) {
     return (
       <div className={shellStyles.statusError} role="alert">
         ⚠ {detail || '工具通道已失效，点「继续对话」重建即可恢复'}
+      </div>
+    )
+  }
+  if (event === 'mcp_callback_unreachable') {
+    // #915：平台回调地址 api_base 回连不到本实例——agent 本会话没有平台
+    // 工具，只能纯对话；会话不阻断，修正地址后新建会话或「继续对话」。
+    return (
+      <div className={shellStyles.statusError} role="alert">
+        ⚠{' '}
+        {detail ||
+          '平台回调地址 api_base 无法回连本实例，agent 看不到平台工具；请在全局设置 → Studio Agent 管理修正'}
       </div>
     )
   }

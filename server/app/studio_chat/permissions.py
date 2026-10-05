@@ -4,7 +4,8 @@ Decision order for an ACP permission request:
 1. agent-legion MCP tool calls auto-approve — the session's workspace-bound
    scoped token is already the authority boundary (STUDIO-AGENT-001);
 2. local read-only ACP kinds (``read`` / ``search`` — the Read/Glob/Grep
-   class) auto-approve as side-effect-free;
+   class) auto-approve only when every declared target stays inside the
+   workspace staging directory (minimal set + rationale: permission_scope.py);
 3. the per-session allow-all switch approves everything else without a
    roundtrip;
 4. otherwise the request parks for a human answer, and an unanswered prompt
@@ -19,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from server.app.studio_chat.payloads import pick_allow_option
+from server.app.studio_chat.permission_scope import is_staging_read_only_tool_call
 from server.app.studio_chat.runtime import PendingPermission
 
 if TYPE_CHECKING:
@@ -28,16 +30,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 PERMISSION_TIMEOUT_SECONDS = 120
-
-# ACP ToolKind values that are local and read-only (the Read/Glob/Grep class).
-# Write/execute kinds (edit, delete, move, execute, fetch, ...) still require
-# human confirmation; a false negative only degrades to the human path.
-READ_ONLY_TOOL_KINDS = frozenset({"read", "search"})
-
-
-def is_read_only_tool_call(tool_call: dict[str, Any]) -> bool:
-    """Whether the ACP tool call is a local read-only kind (auto-approvable)."""
-    return str(tool_call.get("kind") or "") in READ_ONLY_TOOL_KINDS
 
 
 def handle_permission_request(
@@ -66,9 +58,14 @@ def handle_permission_request(
             runtime.mcp_observed = True
             backend.store.mark_mcp_verified(session_id)
             return auto_approve(backend, session_id, tool_call, options, decision="auto_approved")
-        if is_read_only_tool_call(tool_call):
-            return auto_approve(backend, session_id, tool_call, options, decision="auto_read_only")
         session = backend.db.get_studio_chat_session(session_id) or {}
+        if is_staging_read_only_tool_call(
+            tool_call,
+            options,
+            workspace_id=str(session.get("workspace_id") or ""),
+            cwd=runtime.handle.cwd,
+        ):
+            return auto_approve(backend, session_id, tool_call, options, decision="auto_read_only")
         if session.get("allow_all_permissions"):
             return auto_approve(backend, session_id, tool_call, options, decision="allow_all")
         runtime.pending_permissions[request_id] = pending
@@ -149,6 +146,8 @@ def auto_approve(
         outcome: dict[str, Any] = {"deny": True}
     else:
         outcome = {"option_id": option["optionId"]}
+    # `via` rides on the ACP-side outcome too: platform auto-approvals never
+    # authorize a terminal/create (terminal_grants.py), only human/allow-all.
     backend.store.append_message(
         session_id,
         "permission",
@@ -159,4 +158,4 @@ def auto_approve(
             "tool_call": tool_call,
         },
     )
-    return outcome
+    return {**outcome, "via": decision}

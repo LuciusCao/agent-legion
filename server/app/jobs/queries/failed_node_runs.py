@@ -28,28 +28,9 @@ class FailedNodeRunQueriesMixin(ConnectionQueriesMixin):
         those jobs — same semantics as filtering the result, but the window
         only walks those jobs' runs instead of the whole workspace.
         """
-        inner_clauses = ["jobs.workspace_id = %s"]
-        params: list[Any] = [workspace_id]
-        # #211 Phase 3 (read-layer binding): the workflow_key predicate was
-        # redundant — jobs.workspace_id (the join key above) already filters,
-        # and the column equals it on every row (v62 binding). The parameter
-        # stays signature-compatible; callers stop passing it.
-        if job_ids:
-            placeholders = ",".join("%s" for _ in job_ids)
-            inner_clauses.append(f"node_runs.job_id in ({placeholders})")
-            params.extend(str(job_id) for job_id in job_ids)
-        outer_clauses = ["latest.rn = 1", "latest.status = 'failed'"]
-        if category:
-            outer_clauses.append("latest.failure_category = %s")
-            params.append(category)
-        if detail:
-            outer_clauses.append("latest.failure_detail = %s")
-            params.append(detail)
-        if since is not None:
-            outer_clauses.append("latest.finished_at >= %s")
-            params.append(since)
-        inner_where = " and ".join(inner_clauses)
-        outer_where = " and ".join(outer_clauses)
+        latest_sql, params = _latest_failed_runs_sql(
+            workspace_id, category=category, detail=detail, since=since, job_ids=job_ids
+        )
         with self._connect_read() as conn:
             rows = conn.execute(
                 f"""
@@ -62,30 +43,83 @@ class FailedNodeRunQueriesMixin(ConnectionQueriesMixin):
                   latest.failure_detail,
                   latest.error_message,
                   latest.finished_at
-                from (
-                  select
-                    node_runs.id as node_run_id,
-                    node_runs.job_id,
-                    node_runs.node_key,
-                    node_runs.status,
-                    node_runs.failure_category,
-                    node_runs.failure_detail,
-                    node_runs.error_message,
-                    node_runs.finished_at,
-                    -- #211 M2: jobs lost workflow_key (v70); the deprecated
-                    -- response field carries the identity value instead.
-                    jobs.workspace_id as workflow_key,
-                    row_number() over (
-                      partition by node_runs.job_id, node_runs.node_key
-                      order by node_runs.id desc
-                    ) as rn
-                  from node_runs
-                  join jobs on jobs.id = node_runs.job_id
-                  where {inner_where}
-                ) latest
-                where {outer_where}
+                {latest_sql}
                 order by latest.finished_at desc, latest.node_run_id desc
                 """,
                 params,
             )
             return [dict(row) for row in rows]
+
+    def list_failed_job_ids(self, workspace_id: str, *, category: str, limit: int) -> list[str]:
+        """Distinct job ids whose latest run of some node failed with ``category``.
+
+        Same latest-run semantics as ``list_failed_node_runs`` but returns at
+        most ``limit`` ids (#712 review P1): the unrestricted rerun-by-failure
+        selection asks for cap + 1 to decide "too many" without materializing
+        every matching failed run of the workspace.
+        """
+        latest_sql, params = _latest_failed_runs_sql(workspace_id, category=category)
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                f"select distinct latest.job_id {latest_sql} limit %s", [*params, limit]
+            ).fetchall()
+        return [str(row["job_id"]) for row in rows]
+
+
+def _latest_failed_runs_sql(
+    workspace_id: str,
+    *,
+    category: str | None = None,
+    detail: str | None = None,
+    since: datetime | None = None,
+    job_ids: Sequence[str] | None = None,
+) -> tuple[str, list[Any]]:
+    """``from (...) latest where ...`` over each (job, node)'s latest run that
+    failed, plus its parameters; shared by the row and the job-id queries."""
+    inner_clauses = ["jobs.workspace_id = %s"]
+    params: list[Any] = [workspace_id]
+    # #211 Phase 3 (read-layer binding): the workflow_key predicate was
+    # redundant — jobs.workspace_id (the join key above) already filters,
+    # and the column equals it on every row (v62 binding). The parameter
+    # stays signature-compatible; callers stop passing it.
+    if job_ids:
+        placeholders = ",".join("%s" for _ in job_ids)
+        inner_clauses.append(f"node_runs.job_id in ({placeholders})")
+        params.extend(str(job_id) for job_id in job_ids)
+    outer_clauses = ["latest.rn = 1", "latest.status = 'failed'"]
+    if category:
+        outer_clauses.append("latest.failure_category = %s")
+        params.append(category)
+    if detail:
+        outer_clauses.append("latest.failure_detail = %s")
+        params.append(detail)
+    if since is not None:
+        outer_clauses.append("latest.finished_at >= %s")
+        params.append(since)
+    inner_where = " and ".join(inner_clauses)
+    outer_where = " and ".join(outer_clauses)
+    sql = f"""
+        from (
+          select
+            node_runs.id as node_run_id,
+            node_runs.job_id,
+            node_runs.node_key,
+            node_runs.status,
+            node_runs.failure_category,
+            node_runs.failure_detail,
+            node_runs.error_message,
+            node_runs.finished_at,
+            -- #211 M2: jobs lost workflow_key (v70); the deprecated
+            -- response field carries the identity value instead.
+            jobs.workspace_id as workflow_key,
+            row_number() over (
+              partition by node_runs.job_id, node_runs.node_key
+              order by node_runs.id desc
+            ) as rn
+          from node_runs
+          join jobs on jobs.id = node_runs.job_id
+          where {inner_where}
+        ) latest
+        where {outer_where}
+    """
+    return sql, params

@@ -31,6 +31,7 @@ from server.app.mcp_server.http_app import (
 )
 from server.app.routes import RouterDeps, create_router
 from server.app.routes.auth import create_auth_router
+from server.app.routes.job_http import register_job_http_exception_handlers
 from server.app.routes.quality_deps import build_quality_loop
 from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.agent_catalog_projection import AgentCatalogService
@@ -59,6 +60,7 @@ from server.app.storage import build_s3_storage_checked
 from server.app.studio_chat.agent_catalog import spawn_startup_detection
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.service import StudioChatService
+from server.app.studio_chat.serving_address import ServingAddressMiddleware
 from server.app.sweeper_owned_startup import start_sweeper_owned_threads
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
@@ -264,6 +266,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
 
     app = FastAPI(title="Agent Legion", lifespan=lifespan)
     add_http_middleware(app, settings)
+    register_job_http_exception_handlers(app)
+    # #915: record the serving socket address — the default Studio MCP
+    # callback base when the registry api_base is unconfigured.
+    app.add_middleware(ServingAddressMiddleware)
     app.state.settings = settings
     app.state.job_db = job_db
     app.state.auth_service = build_auth_service(job_db, settings.config)

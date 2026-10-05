@@ -8,6 +8,7 @@ import stat
 from dataclasses import dataclass
 from typing import Any
 
+from server.app.fs_safety import NotRegularFileError, open_regular_at
 from server.app.studio_chat.task_metadata_files import read_json
 
 TERMINAL = frozenset({"completed", "failed", "killed", "lost"})
@@ -47,11 +48,12 @@ def output_tail(parent: int, *, terminal: bool) -> tuple[float | None, str]:
     try:
         if not stat.S_ISREG(os.stat("output.log", dir_fd=parent, follow_symlinks=False).st_mode):
             return None, ""
-        fd = os.open("output.log", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        try:
+            fd = open_regular_at(parent, "output.log")
+        except NotRegularFileError:
+            return None, ""
         with os.fdopen(fd, "rb") as source:
             info = os.fstat(source.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-                return None, ""
             if not terminal:
                 return info.st_mtime, ""
             source.seek(max(0, info.st_size - 2048))

@@ -69,9 +69,10 @@
     "server/app/agent_broker/sweepers.py": {
       "via": [
         "sweep_expired_claims",
-        "lock_sweep_candidate"
+        "lock_sweep_candidate",
+        "sync_job_status"
       ],
-      "note": "agent sweeper：过期代次取消请求而非 requeue，job_nodes 绝不动"
+      "note": "agent sweeper：过期代次取消请求而非 requeue，job_nodes 绝不动；超 requeue 上限的终态分支只翻仍 running 的节点，job 状态经 sync_job_status 推导（#943）"
     },
     "server/app/agent_broker/unclaimable.py": {
       "via": [

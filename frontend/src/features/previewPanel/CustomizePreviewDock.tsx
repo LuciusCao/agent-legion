@@ -67,6 +67,9 @@ function CustomizePreviewChat({ workspaceId }: { workspaceId: string }) {
               newChatDisabled={!selectedAgentId || chat.starting}
               onRenameSession={manage.rename}
               onDeleteSession={manage.remove}
+              archivedSessions={manage.archivedSessions}
+              onArchiveSession={manage.archive}
+              onUnarchiveSession={manage.unarchive}
             />
           }
           emptyState="选择 Agent，点「＋ 新对话」开始"

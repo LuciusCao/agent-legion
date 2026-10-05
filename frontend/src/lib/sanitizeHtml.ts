@@ -7,7 +7,7 @@ const BASE_TAGS = 'p br strong em ul ol li span div img'.split(' ')
 // (code/pre/headings/table/a+href); the base profile stays tight for RichText.
 export function sanitizeHtml(
   html: string,
-  extra?: { tags?: string[]; attrs?: string[] }
+  extra?: { tags?: string[]; attrs?: string[]; forbidTags?: string[] }
 ): string {
   ensureSanitizeHooks()
   return DOMPurify.sanitize(html, {
@@ -18,5 +18,8 @@ export function sanitizeHtml(
     KEEP_CONTENT: true,
     FORBID_CONTENTS: [],
     ALLOWED_URI_REGEXP: SAFE_URI,
+    // Callers that must never auto-load resources (agent-authored markdown)
+    // forbid img outright; FORBID_TAGS wins over ALLOWED_TAGS.
+    FORBID_TAGS: extra?.forbidTags ?? [],
   })
 }
