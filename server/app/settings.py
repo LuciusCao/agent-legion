@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from server.app.configuration import load_application_config
 from server.app.configuration.cors import CorsSettings, load_cors_settings
+from server.app.configuration.csp import CspSettings, load_csp_settings
 from server.app.configuration.env_overrides import apply_database_url_env, apply_env_overrides
 from server.app.configuration.executor_runtime import (
     ExecutorRuntimeConfig,
@@ -38,6 +39,7 @@ class Settings:
     # domain) — per-process temp dirs pin it via AGENT_LEGION_SKILLS_RUNS_DIR.
     skills_runs_dir: Path = field(default_factory=default_skills_runs_dir)
     cors: CorsSettings = field(default_factory=CorsSettings)
+    csp: CspSettings = field(default_factory=CspSettings)
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
@@ -92,6 +94,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         config=config,
         skills_runs_dir=Path(skills_override) if skills_override else default_skills_runs_dir(),
         cors=load_cors_settings(config),
+        csp=load_csp_settings(config),
         executor_runtime=executor_runtime,
     )
 

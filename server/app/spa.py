@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Scope
 
 from server.app.fs_safety import PathEscapeError, resolve_within
+from server.app.http_csp_nonce import CSP_NONCE_PLACEHOLDER, issue_csp_nonce
 
 # Static-file serving helpers with cache headers for the SPA build output.
 # Fingerprinted build assets (e.g. /assets/index-BdvET8O9.js) never change
@@ -28,6 +29,20 @@ class FingerprintedStaticFiles(StaticFiles):
         return response
 
 
+def _index_response(frontend_index: Path, scope: Scope) -> Response:
+    """index.html with vite's CSP nonce placeholder swapped per response (#989).
+
+    The body differs on every load, so it is served without ETag /
+    Last-Modified: a 304 would pair the cached body's old nonce with the
+    fresh header's new one and block the panels' inline scripts. A build
+    without the placeholder (pre-#989 dist) is served unchanged.
+    """
+    html = frontend_index.read_text(encoding="utf-8")
+    if CSP_NONCE_PLACEHOLDER in html:
+        html = html.replace(CSP_NONCE_PLACEHOLDER, issue_csp_nonce(scope))
+    return HTMLResponse(html, headers={"Cache-Control": REVALIDATE_CACHE_CONTROL})
+
+
 def _not_found(path: str) -> None:  # noqa: ARG001
     raise HTTPException(status_code=404, detail="Not Found")
 
@@ -46,17 +61,17 @@ def mount_spa(app: FastAPI, frontend_dist: Path) -> None:
         app.mount("/assets", FingerprintedStaticFiles(directory=frontend_assets), name="assets")
 
         @app.get("/{path:path}", response_model=None)
-        def spa(path: str):
+        def spa(path: str, request: Request):
             headers = {"Cache-Control": REVALIDATE_CACHE_CONTROL}
             if not path:
-                return FileResponse(frontend_index, headers=headers)
+                return _index_response(frontend_index, request.scope)
             try:
                 requested = resolve_within(frontend_dist, path, allow_root=True)
             except PathEscapeError:
-                return FileResponse(frontend_index, headers=headers)
-            if requested.is_file():
+                return _index_response(frontend_index, request.scope)
+            if requested.is_file() and requested != frontend_index.resolve():
                 return FileResponse(requested, headers=headers)
-            return FileResponse(frontend_index, headers=headers)
+            return _index_response(frontend_index, request.scope)
 
     else:
 

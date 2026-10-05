@@ -40,6 +40,7 @@ from scripts.e2e._database import db_dsn, e2e_database_name, reset_database  # n
 from scripts.e2e._demo_seed import seed_demo_workspace  # noqa: E402
 from scripts.e2e._llm_stub import StubGateway  # noqa: E402
 from scripts.e2e._main_flow_seed import resume_main_flow_workspace  # noqa: E402
+from scripts.e2e._preview_panel_seed import seed_probe_preview_panel  # noqa: E402
 from scripts.e2e._worker import (  # noqa: E402
     ensure_velites_binary,
     prepare_main_flow_runtime,
@@ -218,10 +219,19 @@ def main() -> int:
         # and the demo seed (first) creates the tables seed_cms_connection
         # writes into.
         seed_demo_workspace(db_dsn(db_name), vault_key, DATA_DIR, PROJECT_ROOT)
+        # #989: a published panel for smoke-preview-csp (strict document CSP).
+        seed_probe_preview_panel(db_dsn(db_name), DATA_DIR, "education_video_problems_generation")
         llm_stub, worker_yaml = prepare_main_flow_runtime(
             dsn=db_dsn(db_name), data_dir=DATA_DIR, backend_base_url=backend_base_url
         )
         seed_cms_connection(db_dsn(db_name), cms_base_url, vault_key)
+        # Build BEFORE the backend boots: mount_spa only mounts frontend/dist
+        # when it exists at startup, and smoke-preview-csp (#989) loads the
+        # production bundle from the Host to get its document CSP.
+        if not _frontend_bundle_fresh():
+            _build_frontend()
+        else:
+            logger.info("frontend/dist is up to date; skipping build")
         backend_proc = _start_process(
             _backend_command(backend_port),
             cwd=PROJECT_ROOT,
@@ -236,10 +246,6 @@ def main() -> int:
         resume_main_flow_workspace(db_dsn(db_name))
         worker_proc = start_worker(worker_yaml, worker_log)
 
-        if not _frontend_bundle_fresh():
-            _build_frontend()
-        else:
-            logger.info("frontend/dist is up to date; skipping build")
         npm = shutil.which("npm")
         if npm is None:
             logger.error("npm not found; frontend preview cannot run")
@@ -270,7 +276,13 @@ def main() -> int:
         completed = subprocess.run(
             cmd,
             cwd=FRONTEND_DIR,
-            env={**os.environ, "E2E_BASE_URL": frontend_base_url},
+            # E2E_BACKEND_URL: the Host serves the same frontend/dist with its
+            # document CSP (vite preview sends none) — smoke-preview-csp (#989).
+            env={
+                **os.environ,
+                "E2E_BASE_URL": frontend_base_url,
+                "E2E_BACKEND_URL": backend_base_url,
+            },
             check=False,
         )
         returncode = completed.returncode

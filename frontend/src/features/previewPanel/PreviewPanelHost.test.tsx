@@ -5,7 +5,8 @@
  *   （opaque origin 下 event.origin 恒为 "null"，不能用于鉴别）；
  * - 桥方法只读：listArtifacts / readArtifact / getJobDetail；
  * - ready → 下发 init（jobId + --pp-* 主题变量 + katex 资源 URL）；
- * - resize 高度钳制在 [120, 6000]。
+ * - resize 高度钳制在 [120, 6000]；
+ * - #989：宿主文档有 CSP nonce 时 bundle 脚本盖章，拦截探针报告后显示提示。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, act, waitFor } from '@testing-library/react'
@@ -358,5 +359,59 @@ describe('PreviewPanelHost 桥协议', () => {
       height: 432.6,
     })
     expect(iframe.style.height).toBe('433px')
+  })
+})
+
+describe('PreviewPanelHost 宿主 CSP nonce（#989）', () => {
+  function withHostNonce(nonce: string) {
+    const meta = document.createElement('meta')
+    meta.setAttribute('property', 'csp-nonce')
+    meta.setAttribute('nonce', nonce)
+    document.head.appendChild(meta)
+    return () => meta.remove()
+  }
+
+  it('宿主文档带 nonce 时 bundle 的 <script> 盖同一 nonce', async () => {
+    const cleanup = withHostNonce('host-nonce-1')
+    try {
+      const { container } = renderHost(
+        <PreviewPanelHost
+          jobId="job-1"
+          html="<!doctype html><html><head><script>var a=1</script></head><body>p</body></html>"
+        />
+      )
+      const srcdoc = getIframe(container).getAttribute('srcdoc') ?? ''
+      expect(srcdoc).toContain('<script nonce="host-nonce-1">var a=1</script>')
+      await flush()
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('csp-violation 探针消息 → 显示拦截提示；伪造来源不触发', async () => {
+    const { container, queryByRole } = renderHost()
+    const iframe = getIframe(container)
+    await flush()
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            source: PREVIEW_PANEL_SOURCE,
+            type: 'csp-violation',
+            directive: 'script-src-attr',
+          },
+          source: window,
+        })
+      )
+    })
+    expect(queryByRole('status')).toBeNull()
+
+    emitPanelMessage(iframe, {
+      source: PREVIEW_PANEL_SOURCE,
+      type: 'csp-violation',
+      directive: 'script-src-attr',
+    })
+    expect(queryByRole('status')?.textContent).toContain('onclick=')
   })
 })

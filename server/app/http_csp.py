@@ -6,15 +6,26 @@ responses and FastAPI's built-in ``/docs`` / ``/redoc`` pages are left alone (ra
 download, see services/job_artifact_media). The policy is a second layer
 behind DOMPurify, sized to what the shipped frontend actually loads:
 
-- ``script-src 'self' 'unsafe-inline'``: the vite build has no inline
-  script, but ``srcdoc`` iframes INHERIT the embedding document's policy —
-  the workspace preview panels (``sandbox="allow-scripts"``, opaque origin)
-  are single-file bundles whose scripts are inline by contract, so a
-  ``'self'``-only script-src would blank every panel. Nonce-tightening the
-  shell (and teaching the panel host to stamp the nonce) is the follow-up;
-  until then the remaining directives still bound exfiltration and framing.
+- ``script-src 'self' 'nonce-<per-response>'`` (#989): the vite build has
+  no inline script, but ``srcdoc`` iframes INHERIT the embedding document's
+  policy — the workspace preview panels (``sandbox="allow-scripts"``, opaque
+  origin) are single-file bundles whose scripts are inline by contract. The
+  SPA route swaps vite's ``html.cspNonce`` placeholder in index.html for a
+  fresh nonce (http_csp_nonce.py), the frontend reads it back from the
+  ``<meta property="csp-nonce">`` tag and the panel host stamps it on every
+  bundle ``<script>`` (frontend/src/features/previewPanel/panelCsp.ts).
+  Inline event-handler attributes (``onclick=``) and ``javascript:`` URLs
+  stay blocked — nonces cannot authorize them, and ``'unsafe-hashes'`` would
+  need a hash per handler string of agent-authored bundles. Instances with
+  published panels that still rely on them can fall back to the pre-#989
+  ``'self' 'unsafe-inline'`` with ``AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE=1``
+  (configuration/csp.py); the nonce is then left out of the header, since
+  its presence makes browsers ignore ``'unsafe-inline'``. HTML documents
+  without a nonce (the frontend-missing page) get plain ``'self'``.
 - ``style-src 'unsafe-inline'``: MUI/emotion inject ``<style>`` tags and
-  KaTeX output carries inline ``style`` attributes. Google Fonts CSS and
+  KaTeX output carries inline ``style`` attributes. vite stamps the nonce on
+  style tags too, but style-src deliberately lists no nonce (a nonce would
+  switch ``'unsafe-inline'`` off for emotion's runtime tags). Google Fonts CSS and
   font files are the only third-party subresources (frontend/index.html).
 - ``img-src`` keeps remote ``http(s):`` images: rendered markdown allows
   them (sanitizer hook: http(s)-only), so narrowing it would blank existing
@@ -38,6 +49,7 @@ from urllib.parse import urlsplit
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from server.app.http_csp_nonce import plant_nonce_slot, script_src_directive
 from server.app.storage.s3_settings import S3Settings
 
 CSP_HEADER = "content-security-policy"
@@ -62,14 +74,20 @@ def object_store_connect_sources(s3: S3Settings | None) -> tuple[str, ...]:
     return (f"{parts.scheme}://{parts.netloc}",)
 
 
-def build_spa_csp(connect_sources: Sequence[str] = (), host: str = "") -> str:
+def build_spa_csp(
+    connect_sources: Sequence[str] = (),
+    host: str = "",
+    *,
+    script_nonce: str | None = None,
+    script_unsafe_inline: bool = False,
+) -> str:
     """Render the document policy; ``host`` is the request Host (may be '')."""
     socket_sources = (f"ws://{host}", f"wss://{host}") if _is_plain_host(host) else ()
     connect = " ".join(("'self'", *socket_sources, *connect_sources))
     return "; ".join(
         (
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline'",
+            script_src_directive(script_nonce, script_unsafe_inline),
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "font-src 'self' data: https://fonts.gstatic.com",
             "img-src 'self' data: blob: http: https:",
@@ -105,22 +123,34 @@ def _is_api_docs_path(path: str) -> bool:
 class ContentSecurityPolicyMiddleware:
     """Attach the document CSP to ``text/html`` responses lacking one."""
 
-    def __init__(self, app: ASGIApp, connect_sources: Sequence[str] = ()) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        connect_sources: Sequence[str] = (),
+        script_unsafe_inline: bool = False,
+    ) -> None:
         self.app = app
         self.connect_sources = tuple(connect_sources)
+        self.script_unsafe_inline = script_unsafe_inline
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or _is_api_docs_path(scope["path"]):
             await self.app(scope, receive, send)
             return
         host = Headers(scope=scope).get("host", "")
+        slot = plant_nonce_slot(scope)
 
         async def send_with_csp(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
                 content_type = headers.get("content-type", "")
                 if content_type.startswith("text/html") and CSP_HEADER not in headers:
-                    headers[CSP_HEADER] = build_spa_csp(self.connect_sources, host)
+                    headers[CSP_HEADER] = build_spa_csp(
+                        self.connect_sources,
+                        host,
+                        script_nonce=slot.value,
+                        script_unsafe_inline=self.script_unsafe_inline,
+                    )
             await send(message)
 
         await self.app(scope, receive, send_with_csp)

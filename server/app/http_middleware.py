@@ -56,6 +56,7 @@ def add_http_middleware(app: FastAPI, settings: Settings) -> None:
     app.add_middleware(
         ContentSecurityPolicyMiddleware,
         connect_sources=object_store_connect_sources(load_s3_settings()),
+        script_unsafe_inline=settings.csp.script_unsafe_inline,
     )
     # Request-id correlation + slow-request logging (#273). Added last, so it
     # runs outermost: every response (CORS preflight included) carries the id,
