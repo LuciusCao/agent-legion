@@ -17,12 +17,10 @@ from server.app.auth.dependencies import (
     require_studio_agent_workspace,
 )
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_publish_request_contracts import (
     StudioAgentPublishRequestResponse,
     StudioAgentPublishRequestStatusResponse,
 )
-from server.app.services.job_errors import JobServiceError
 from server.app.services.studio_publish_requests import StudioPublishRequestService
 from server.app.settings import Settings
 
@@ -42,12 +40,7 @@ def create_studio_agent_publish_tools_router(job_db: JobQueries, settings: Setti
         """Park a pending publish request: never publishes — the human
         confirms in Studio's review dialog. The workspace's draft must pass
         the full publish validation set first (a 409 names the errors)."""
-        try:
-            request = StudioPublishRequestService(job_db, settings).request_publish(
-                workspace_id, user
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        request = StudioPublishRequestService(job_db, settings).request_publish(workspace_id, user)
         return StudioAgentPublishRequestResponse.model_validate({"request": request})
 
     @router.get(
@@ -62,12 +55,7 @@ def create_studio_agent_publish_tools_router(job_db: JobQueries, settings: Setti
         the human decides; confirmed (result_revision_id set when a revision
         was produced) or rejected afterwards; expired when nobody answered
         within the TTL. Session-bound authorization lives in the service."""
-        try:
-            request = StudioPublishRequestService(job_db, settings).get_request_status(
-                request_id, user
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        request = StudioPublishRequestService(job_db, settings).get_request_status(request_id, user)
         return StudioAgentPublishRequestStatusResponse.model_validate({"request": request})
 
     router.include_router(workspace_scoped)
