@@ -586,6 +586,25 @@ def test_doc_limit_validation_semantics_match_routes() -> None:
     assert "`GET /jobs` 的 `limit` 不在 1–2000" in row_422
 
 
+def test_doc_cursor_validation_semantics_match_route() -> None:
+    """#891：snapshot 的 cursor 解析失败在参数校验层 422（不落到 SQL 成 5xx，
+    错误码表让调用方对 5xx 无限退避重试）；文档 422 行写明 cursor。行为面
+    （各类坏 cursor → 422）由 tests/routes/test_job_list_filtering.py 钉住。"""
+    from typing import get_type_hints
+
+    from pydantic import AfterValidator
+
+    from server.app.routes.job_list import create_job_list_router
+
+    router = create_job_list_router(None)  # type: ignore[arg-type]
+    route = next(r for r in router.routes if r.name == "snapshot_workspace_jobs")
+    hint = get_type_hints(route.endpoint, include_extras=True)["cursor"]
+    assert any(isinstance(m, AfterValidator) for m in getattr(hint, "__metadata__", ()))
+    tokens_doc = (ROOT / "docs/workspace-api-tokens.md").read_text(encoding="utf-8")
+    row_422 = next(line for line in tokens_doc.splitlines() if line.startswith("| 422 |"))
+    assert "`GET /jobs/snapshot` 的 `cursor` 无法解析" in row_422
+
+
 def test_doc_examples_guard_first_element_access() -> None:
     """示例里每一处 `[0]` 都必须先判空（#736 复审 P2）：job_ids 在 #501 治愈与
     并发重叠提交时是空数组、jobs/artifacts 列表也可以为空，直接下标照抄即
@@ -647,3 +666,24 @@ def test_doc_raw_downloads_are_encoded_fallbacks() -> None:
                 assert all(lines[i].strip() != "fi" for i in range(opener + 1, row)), where
                 assert any(line.strip() == "fi" for line in lines[row + 1 :]), where
     assert found >= 2, "未解析到 raw 下载调用——守卫失效"
+
+
+def test_runbook_reconciliation_rejects_ambiguous_matches() -> None:
+    """#910：runbook §9 的 find_existing_job 翻完全部页收齐命中，多于一个即
+    报错而不是返回第一个；text 项带 client_token 时按 job 的 client_token
+    字段精确比对（不自己拆 source_id 后缀）。"""
+    blocks = [code for _, lang, code in _doc_blocks("docs/remote-execution-runbook.md")]
+    [block] = [code for code in blocks if "def find_existing_job(" in code]
+    body = block[block.index("def find_existing_job(") : block.index("\nitems = ")]
+    assert "client_token: str | None = None" in body
+    assert 'j["client_token"] == client_token' in body
+    assert "endswith(" not in body
+    # 循环内只累积、不提前 return；唯一出口是翻完。
+    loop = body[body.index("while True:") : body.index("if len(hits) > 1:")]
+    assert "hits += [" in loop and "return" not in loop
+    # 翻全量会耗限流额度（#974 R2）：读响应字段前先按 Retry-After 退避 429。
+    steps = ["if r.status_code == 429:", "time.sleep(", "continue", "r.raise_for_status()"]
+    positions = [loop.index(step) for step in steps + ["page = r.json()"]]
+    assert positions == sorted(positions), positions
+    verdict = body[body.index("if len(hits) > 1:") :]
+    assert verdict.index("raise ") < verdict.index("return hits[0] if hits else None")

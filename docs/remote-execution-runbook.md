@@ -686,22 +686,37 @@ ALREADY_EXISTS = "No tasks were resolved from input"  # 全部条目已有 job �
 s = requests.Session()
 s.headers["Authorization"] = f"Bearer {WORKSPACE_API_TOKEN}"  # #626
 
-def find_existing_job(source_type: str, source_id: str) -> str | None:
-    """按去重键 (source_type, source_id) 反查已有 job。search 是子串匹配，
-    须精确比对；结果按创建时间倒序分页，旧提交可能在后面的页，沿
-    next_cursor 翻到精确命中或翻完为止。"""
-    cursor = None
+def find_existing_job(
+    source_type: str, source_id: str | None = None, client_token: str | None = None
+) -> str | None:
+    """按去重键反查已有 job：material / bundle / ref 项传完整 source_id；
+    text 项的 material id 由服务端按内容派生、调用方不知道，带了
+    client_token 时传 client_token（按 job 的 client_token 字段比对）。
+    search 是子串匹配，须精确比对；结果按创建时间倒序分页，沿 next_cursor
+    翻完全部页。token 须在 workspace 内按内容版本唯一（#910）：命中多个
+    说明同一 token 复用于不同内容，无法判定对应哪份——报错，不取第一个。"""
+    hits, cursor = [], None
     while True:
-        page = s.get(
+        r = s.get(
             f"{HOST}/api/workspaces/{WS}/jobs/snapshot",
-            params={"search": source_id, "limit": 500, "cursor": cursor},
-        ).json()
-        for j in page["jobs"]:
-            if j["source_type"] == source_type and j["source_id"] == source_id:
-                return j["id"]
+            params={"search": source_id or f"~{client_token}", "limit": 500, "cursor": cursor},
+        )
+        if r.status_code == 429:  # 翻全量会耗限流额度：按 Retry-After 退避后重取同一页
+            time.sleep(int(r.headers.get("Retry-After", "10")))
+            continue
+        r.raise_for_status()
+        page = r.json()
+        hits += [
+            j["id"] for j in page["jobs"]
+            if j["source_type"] == source_type
+            and (j["source_id"] == source_id if source_id else j["client_token"] == client_token)
+        ]
         cursor = page["next_cursor"]
         if cursor is None:
-            return None
+            break
+    if len(hits) > 1:
+        raise RuntimeError(f"{client_token or source_id}: {len(hits)} jobs match; token reused")
+    return hits[0] if hits else None
 
 
 items = [{"type": "material", "material_id": "mat-1"}]
@@ -722,6 +737,7 @@ else:
         ]
 if not job_ids:
     # 400「已存在」，或并发重叠提交时条目归了别的 run：按去重键反查
+    # （带 client_token 的 text 项：find_existing_job("material", client_token=…)）
     found = find_existing_job("material", "mat-1")
     if found is None:
         # 翻完也没有：该条目在本 workspace 没有 job（期间被删除等），
