@@ -1,6 +1,6 @@
 import { Button } from '@mui/material'
 
-import { formatBytes } from '../lib/addItems'
+import { formatBytes } from '../lib/formatters'
 import { BUNDLE_STATUS_LABELS, type BundleEntry } from '../lib/bundleFolder'
 import styles from './AddItemsDialog.module.css'
 

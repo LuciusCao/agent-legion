@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button, Chip } from '@mui/material'
 import { toErrorMessage } from '../../lib/queryError'
+import { formatDateTime } from '../../lib/formatters'
 import { useQualityBatches } from '../../hooks/useQuality'
 import { CreateSampleBatchDialog } from './CreateSampleBatchDialog'
 import type { QualitySampleBatchCreateResponse } from '../../api/qualityApi'
@@ -10,11 +11,6 @@ export interface QualityBatchesTabProps {
   workspaceId: string
   selectedBatchId: string | null
   onSelectBatch: (batchId: string) => void
-}
-
-function formatDateTime(iso: string): string {
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString('zh-CN')
 }
 
 /** Tab 1：批次列表 + 新建抽样入口。 */

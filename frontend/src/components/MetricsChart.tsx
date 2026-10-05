@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { WindowBucket } from '../lib/opsMetricsBuckets'
+import { formatNumber } from '../lib/formatters'
 import type { ChartSeries } from '../lib/metricsChartOptions'
 import {
   CHART_HEIGHT,
@@ -16,10 +17,6 @@ interface MetricsChartProps {
   area?: boolean
   ariaLabel: string
   formatTime: (iso: string) => string
-}
-
-function fmtFull(value: number) {
-  return value.toLocaleString('zh-CN')
 }
 
 export function MetricsChart({
@@ -95,7 +92,7 @@ export function MetricsChart({
                   className={styles.swatch}
                   style={{ background: s.color }}
                 />
-                {s.label} {fmtFull(value)}
+                {s.label} {formatNumber(value)}
               </span>
             )
           })}
