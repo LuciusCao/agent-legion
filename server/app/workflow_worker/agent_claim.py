@@ -11,10 +11,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.executors.models import ConfigurationFailureRequest
-from server.app.services.agent_version_pins import (
-    agent_version_pin,
-    resolve_dispatch_agent_definition,
-)
+from server.app.services.agent_node_profile_catalog import resolve_dispatch_agent_profile
+from server.app.services.agent_version_pins import agent_version_pin
 from server.app.services.node_config import dispatch_config_resolution
 from server.app.services.node_config_batch import run_frozen_payload
 from server.app.services.node_execution_config import (
@@ -110,17 +108,16 @@ def claim_agent_node(
     # run's frozen pins wins over the currently published definition.
     pin = agent_version_pin(run_payload, node.key)
     try:
-        definition_config = resolve_dispatch_agent_definition(
-            worker.job_db, str(workspace_id), agent_id, pin
-        )
+        profile = resolve_dispatch_agent_profile(worker.job_db, str(workspace_id), agent_id, pin)
     except ValueError as exc:
         return fail_config(str(exc))
-    if definition_config is None:  # resolve_node_route already validated this
+    if profile is None or profile.legacy_ref is None:  # resolve_node_route validated this
         return fail_config(
             f"Agent {agent_id!r} has no published definition in workspace {workspace_id!r};"
             " agent definitions are workspace-scoped (schema v46) — create one in"
             " Studio (Agent 管理) for this workspace"
         )
+    definition_config = profile.legacy_ref.definition
     if pin is not None and definition_config.capability != node.capability:
         return fail_config(
             f"pinned Agent version capability {definition_config.capability!r}"
@@ -132,7 +129,7 @@ def claim_agent_node(
         # 声明的 config 值垫底（P-0.5）。#691：入队只定超时 base（默认 →
         # 节点 config），workspace 覆盖由 Worker claim 判定。
         node_config, timeout_base = dispatch_config_resolution(
-            agent_effective_schema(definition_config.config_schema),
+            agent_effective_schema(profile.config_schema),
             node,
             workflow_key,
             workspace,

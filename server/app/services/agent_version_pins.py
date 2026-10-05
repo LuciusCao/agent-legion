@@ -16,7 +16,6 @@ from typing import Any
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.db.dialect import ConnectSource
-from server.app.services.agent_service import published_agent_definitions
 from server.app.services.versioned_entities import VersionedEntityStore
 
 
@@ -34,24 +33,21 @@ def agent_version_pin(
     return dict(pin) if isinstance(pin, Mapping) else None
 
 
-def resolve_dispatch_agent_definition(
+def resolve_pinned_agent_definition(
     database_dsn: ConnectSource,
     workspace_id: str,
     agent_id: str,
-    pin: Mapping[str, Any] | None,
-) -> AgentDefinition | None:
-    """Resolve the definition for dispatch; a frozen per-run version pin wins.
+    pin: Mapping[str, Any],
+) -> AgentDefinition:
+    """Resolve the exact Agent version a frozen per-run pin names.
 
     ``database_dsn`` accepts the JobQueries facade or a bare DSN string
-    (BOUNDARY-DATA-001, #187); production callers pass the facade.
-    Resolution is strictly workspace-scoped (schema v46) with no global
-    fallback. Returns None when the unpinned published definition is gone from
-    the workspace (the caller reports the invalid route); a pin whose agent,
-    version, or definition hash no longer matches raises ValueError so the
-    node fails closed.
+    (BOUNDARY-DATA-001, #187). Strictly workspace-scoped (schema v46) with
+    no global fallback. A pin whose agent, version, or definition hash no
+    longer matches raises ValueError so the node fails closed. The unpinned
+    (published) path lives in the agent node profile facade
+    (``agent_node_profile_catalog.resolve_dispatch_agent_profile``, #932).
     """
-    if pin is None:
-        return published_agent_definitions(database_dsn, workspace_id).get(agent_id)
     pinned_agent = str(pin.get("agent_id") or "")
     if pinned_agent != agent_id:
         raise ValueError(

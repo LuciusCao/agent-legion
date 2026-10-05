@@ -55,7 +55,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     force_full=1
     continue
   fi
-  if ! paths="$(git diff --name-only "$remote_sha...$local_sha" 2>/dev/null)"; then
+  # --no-renames: classify a rename's source path too (#941), same as CI.
+  if ! paths="$(git diff --name-only --no-renames "$remote_sha...$local_sha" 2>/dev/null)"; then
     force_full=1
     continue
   fi
@@ -76,9 +77,24 @@ compute_lanes() {
   local saw_non_docs=0
   local saw_any=0
   local path
+  # The classifier is control plane (#941): when the push touches it, run
+  # every lane and never source the (possibly broken) new rules. Inline,
+  # independent of scripts/lane-paths.sh, and checked before sourcing it.
+  while IFS= read -r path; do
+    if [[ "$path" == "scripts/lane-paths.sh" ]]; then
+      echo "backend frontend rust"
+      return
+    fi
+  done <<<"$changed_paths"
+  # Shared docs / velites-contract path rules (CI changes job + check-quick).
+  source "$ROOT_DIR/scripts/lane-paths.sh"
   while IFS= read -r path; do
     [[ -z "$path" ]] && continue
     saw_any=1
+    # docs/**, root *.md, LICENSE: shared rule with CI and check-quick (#941).
+    if lane_path_is_docs "$path"; then
+      continue
+    fi
     case "$path" in
       # Shared/global files: all lanes, no trimming.
       pyproject.toml|uv.lock|Makefile|scripts/*|.githooks/*|.github/*|config/*|frontend/package.json|frontend/package-lock.json)
@@ -88,12 +104,13 @@ compute_lanes() {
       velites/*)
         saw_rust=1
         saw_non_docs=1
+        if lane_path_feeds_backend "$path"; then
+          saw_backend=1
+        fi
         ;;
       frontend/*)
         saw_frontend=1
         saw_non_docs=1
-        ;;
-      docs/*|*.md|LICENSE)
         ;;
       *)
         saw_backend=1

@@ -54,6 +54,8 @@ def hook_repo(tmp_path: Path) -> tuple[Path, Path]:
         PROJECT_ROOT / "scripts" / "run-local-gate.sh",
         repo / "scripts" / "run-local-gate.sh",
     )
+    # The hook sources the shared lane path rules (#941).
+    shutil.copy2(PROJECT_ROOT / "scripts" / "lane-paths.sh", repo / "scripts" / "lane-paths.sh")
     gate_log = tmp_path / "gate.log"
     for gate, script_name in (("quick", "check-quick.sh"), ("full", "check.sh")):
         _write_executable(

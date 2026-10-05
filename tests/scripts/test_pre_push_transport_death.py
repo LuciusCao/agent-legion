@@ -119,6 +119,8 @@ def _fixture(tmp_path: Path, gate_script: str) -> tuple[Path, Path, str]:
     shutil.copy2(
         PROJECT_ROOT / "scripts" / "run-local-gate.sh", repo / "scripts" / "run-local-gate.sh"
     )
+    # The hook sources the shared lane path rules (#941).
+    shutil.copy2(PROJECT_ROOT / "scripts" / "lane-paths.sh", repo / "scripts" / "lane-paths.sh")
     _write_executable(repo / "scripts" / "check-quick.sh", gate_script)
     _write_executable(tmp_path / "bin" / "git-remote-stubpush", STUB_REMOTE_HELPER)
     _run(["git", "init", "-q"], cwd=repo)

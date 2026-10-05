@@ -831,15 +831,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
   ceiling: 98
 - check: architecture.file_budget
-  path: server/app/services/node_prompt_preview.py
-  reason: '#513: the preview payload gains prompt_mode (normalized to append) and save_node_prompt accepts
-    it — the API surface of the mode feature. The service is the single preview/save implementation shared
-    by the Studio route and the MCP tools; the growth is the feature, not drift. Remove if prompt previewing
-    is extracted from the draft-editing service.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/456
-  ceiling: 161
-- check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/WorkflowNodeToolsEditor.tsx
   reason: 'codex P2 on #527: invalid declared tools render as removable chips (MUI multi-select cannot
     deselect a disabled option, so the removal needs its own surface) — one Chip row inside the existing
@@ -1063,10 +1054,12 @@ exemptions:
     when capture-capped and its tail when fully collected). Ceiling re-seated
     at actual + 10 per the dated-exemption convention (#431/#458
     precedents). Remove when the capped-display branches move into
-    truncate.rs or the module gets a bash-output split.'
+    truncate.rs or the module gets a bash-output split. #942/#922 moved the
+    child-process lifecycle (env allowlist, group termination, bounded
+    drain, pipe reader) into bash_proc.rs; ceiling re-seated at actual + 10.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/637
-  ceiling: 411
+  ceiling: 312
   expires: 2027-03-31
 - check: architecture.file_budget
   path: velites/src/tools/truncate.rs

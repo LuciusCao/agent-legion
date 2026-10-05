@@ -13,7 +13,11 @@ strand a published revision no new job can use (VAULT-SECRET-001).
 from __future__ import annotations
 
 from server.app.jobs import JobQueries
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_node_profile import (
+    build_capability_index,
+    resolve_agent_node_profile,
+)
+from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.node_code_resolution import resolve_dispatch_node_code
 from server.app.services.node_config import workflow_node_config_schemas
 from server.app.services.node_config_secret_guard import secret_gate_errors
@@ -42,29 +46,23 @@ def validate_workflow_for_publish(
     (``secret_gate_errors``) — the YAML editor has no vault channel.
     """
     errors: list[str] = []
-    agents = published_agent_definitions(job_db, workspace_id)
-    agents_by_capability: dict[str, list] = {}
-    for agent_definition in agents.values():
-        agents_by_capability.setdefault(agent_definition.capability, []).append(agent_definition)
-    # ``getattr``: staged-catalog test doubles may be SimpleNamespaces — they
-    # model schema-less legacy Agents, and "no schema" is the right verdict.
-    schemas = workflow_node_config_schemas(
-        definition,
-        {k: d for k, d in agents.items() if getattr(d, "config_schema", None)},
-    )
+    agents = legacy_agent_catalog(job_db, workspace_id)
+    schemas = workflow_node_config_schemas(definition, agents)
     errors.extend(secret_gate_errors(schemas, definition))
+    index = build_capability_index(agents)
     for node in definition.executable_nodes.values():
         if node.node_type == "approval":
             continue
         is_agent = node.node_type == "agent"
-        candidates = agents_by_capability.get(node.capability, [])
-        if is_agent and len(candidates) != 1:
+        # #932：agent 节点经执行档案门面解析（P1 来源 = 恰好一个 published Agent）。
+        profile = resolve_agent_node_profile(node, agents, index=index)
+        if is_agent and profile is None:
             errors.append(
                 f"Agent capability {node.capability} must resolve to exactly one published Agent"
             )
         # code 节点传 None：skill 绑定无意义，声明即拒绝；agent 节点的兜底取
-        # 恰好一个 published Agent 的 skill（节点绑定优先）。
-        agent_skill = candidates[0].skill if is_agent and len(candidates) == 1 else None
+        # 执行档案的 legacy skill（节点绑定优先）。
+        agent_skill = profile.skill if profile is not None else None
         skill_error = node_skill_publish_error(node, agent_skill)
         if skill_error is not None:
             errors.append(skill_error)
