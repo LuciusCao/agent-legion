@@ -38,6 +38,20 @@ const INHERITED_VARS: &[&str] = &[
     "HOME",
     "TMPDIR",
     "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_COLLATE",
+    "LC_MESSAGES",
+    "LC_NUMERIC",
+    "LC_TIME",
+    "LC_MONETARY",
+    "LC_PAPER",
+    "LC_NAME",
+    "LC_ADDRESS",
+    "LC_TELEPHONE",
+    "LC_MEASUREMENT",
+    "LC_IDENTIFICATION",
     "USER",
     "LOGNAME",
     "SHELL",
@@ -51,14 +65,10 @@ const INHERITED_VARS: &[&str] = &[
     "PYTHONUNBUFFERED",
 ];
 
-/// Variable-name prefixes the bash child inherits: locale (`LC_*`) only.
-/// Interpreter knobs are listed by exact name above — a broad `PYTHON*`
-/// prefix would also pass arbitrarily named injected variables.
-const INHERITED_PREFIXES: &[&str] = &["LC_"];
-
+/// Exact-name match only: no prefix rule, so an arbitrarily named injected
+/// variable can never ride along with a family of allowed names.
 fn is_inherited(name: &str) -> bool {
-    let by_prefix = INHERITED_PREFIXES.iter().any(|p| name.starts_with(p));
-    by_prefix || INHERITED_VARS.contains(&name)
+    INHERITED_VARS.contains(&name)
 }
 
 /// The allowlisted subset of the harness environment for the bash child;
@@ -274,6 +284,7 @@ mod tests {
             "VELITES_MODELS_PATH",
             "MY_PATH",
             "PYTHON_API_TOKEN",
+            "LC_API_TOKEN",
             "PYTHONSTARTUP",
             "path",
         ] {

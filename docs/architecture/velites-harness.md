@@ -288,7 +288,7 @@ flag）收到该 flag 会按未知参数报错，升级顺序为先升 velites �
 `sandbox_network`。
 
 bash 子进程环境白名单（#922 R-4）：bash 子进程不再继承 velites 的完整环境，只
-放行 `PATH`/`HOME`/`TMPDIR`/`LANG`/`LC_*`、具名的 Python 解释器变量（`PYTHONPATH`/`PYTHONUTF8`/`PYTHONIOENCODING`/`PYTHONDONTWRITEBYTECODE`/`PYTHONUNBUFFERED`）与少量 shell 基础变量
+按**具名**白名单放行（无前缀匹配）：`PATH`/`HOME`/`TMPDIR`、POSIX/glibc 标准 locale 变量（`LANG`/`LANGUAGE`/`LC_ALL`/`LC_CTYPE` 等各具名类别）、具名的 Python 解释器变量（`PYTHONPATH`/`PYTHONUTF8`/`PYTHONIOENCODING`/`PYTHONDONTWRITEBYTECODE`/`PYTHONUNBUFFERED`）与少量 shell 基础变量
 （`USER`/`LOGNAME`/`SHELL`/`TERM`/`TZ`/`VIRTUAL_ENV`，见
 `velites/src/tools/bash_proc.rs`），与 Host 侧 `shared/code_sandbox.py::child_env`
 对齐；models.json 以 `$ENV` 引用的 provider 凭据、worker `environment` 注入的
