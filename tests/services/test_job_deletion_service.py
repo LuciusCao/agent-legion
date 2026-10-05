@@ -7,18 +7,15 @@ from typing import Any
 
 import pytest
 
+import server.app.services.job_deletion_trash as trash_module
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.artifact_store import ArtifactNotFoundError, ArtifactStore
-from server.app.services.job_deletion import (
-    DeletionRollbackConflict,
-    JobDeleteResult,
-    JobDeletionService,
-)
+from server.app.services.job_deletion import JobDeleteResult, JobDeletionService
 from server.app.services.job_operation_error import JobOperationError
 from server.app.settings import Settings
-from server.app.storage_paths import resolve_job_dir
+from server.app.storage_paths import ManagedPathError, resolve_job_dir
 
 
 def _create_settings(tmp_path: Path) -> Settings:
@@ -333,54 +330,150 @@ def test_batch_delete_returns_ordered_results(job_db: JobQueries, tmp_path: Path
     assert results[3]["reason_code"] == "not_found"
 
 
-def test_delete_rollback_preserves_recreated_destination(
-    job_db: JobQueries, tmp_path: Path, monkeypatch
-) -> None:
-    """Rollback must not overwrite a destination recreated after staging."""
-    settings = _create_settings(tmp_path)
-    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
-    service = JobDeletionService(job_db, lease_repo, settings)
-    job = _create_job(job_db, "ws-rollback", "Q007", status="completed")
+def _trash_entries(settings: Settings) -> list[Path]:
+    roots = [settings.jobs_dir / ".trash", settings.logs_dir / "jobs" / ".trash"]
+    return [path for root in roots if root.exists() for path in root.rglob("*")]
+
+
+def _seed_job_files(settings: Settings, job: dict[str, Any]) -> tuple[Path, Path]:
     storage_dir = resolve_job_dir(job, settings.jobs_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
     (storage_dir / "original.json").write_text("original", encoding="utf-8")
+    log_path = settings.logs_dir / "jobs" / f"{job['id']}-extract_question.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("log", encoding="utf-8")
+    return storage_dir, log_path
 
-    captured_paths: list[tuple[Path, Path]] = []
-    original_restore = JobDeletionService._restore_paths
 
-    def _capture_and_skip(restore_paths: list[tuple[Path, Path]]) -> None:
-        captured_paths.extend(restore_paths)
+def test_delete_transaction_failure_leaves_files_untouched(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#958 失败点①：事务失败时文件系统零改动（不再有 trash 暂存与回滚）。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-txfail", "Q007", status="completed")
+    storage_dir, log_path = _seed_job_files(settings, job)
 
-    monkeypatch.setattr(JobDeletionService, "_restore_paths", staticmethod(_capture_and_skip))
-
-    def _fail_once(*args, **kwargs):
+    def _db_down(*args, **kwargs):
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(job_db, "delete_job_in_transaction", _fail_once)
+    monkeypatch.setattr(job_db, "delete_job_in_transaction", _db_down)
 
     with pytest.raises(JobOperationError) as exc_info:
         service.delete(job["workspace_id"], job["id"])
 
-    assert exc_info.value.status == "failed"
-    assert captured_paths
-    staged_storage, original_storage = captured_paths[0]
-    assert staged_storage.exists()
-    assert staged_storage != original_storage
-    assert not original_storage.exists()
+    assert exc_info.value.reason_code == "delete_failed"
+    assert job_db.get_job(job["id"]) is not None
+    assert (storage_dir / "original.json").read_text(encoding="utf-8") == "original"
+    assert log_path.read_text(encoding="utf-8") == "log"
+    assert _trash_entries(settings) == []
 
-    # Simulate a concurrent recreation of the destination with different content.
-    original_storage.mkdir(parents=True, exist_ok=True)
-    (original_storage / "sentinel.json").write_text("recreated", encoding="utf-8")
 
-    with pytest.raises(DeletionRollbackConflict) as exc_info:
-        original_restore(captured_paths)
+def test_delete_moves_files_only_after_commit(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#958：文件移动发生在提交之后——移动时另一条连接已读不到 jobs 行。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-order", "Q010", status="completed")
+    storage_dir, log_path = _seed_job_files(settings, job)
 
-    assert exc_info.value.original_path == original_storage
-    assert exc_info.value.staged_path == staged_storage
-    assert (original_storage / "sentinel.json").exists()
-    assert (original_storage / "sentinel.json").read_text(encoding="utf-8") == "recreated"
-    assert staged_storage.exists()
-    assert (staged_storage / "original.json").read_text(encoding="utf-8") == "original"
+    real_move = trash_module.shutil.move
+    row_visible_at_move: list[bool] = []
+
+    def _observing_move(src: str, dst: str) -> Any:
+        row_visible_at_move.append(job_db.get_job(job["id"]) is not None)
+        return real_move(src, dst)
+
+    monkeypatch.setattr(trash_module.shutil, "move", _observing_move)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert row_visible_at_move == [False, False]  # job_dir + 一个日志
+    assert not storage_dir.exists()
+    assert not log_path.exists()
+    assert _trash_entries(settings) == []
+    assert not (settings.jobs_dir / ".trash").exists()
+
+
+def test_delete_succeeds_when_staging_into_trash_fails(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#958 失败点②：提交成功、移入 trash 失败 → 删除仍成功，残留留在原位。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-stagefail", "Q011", status="completed")
+    storage_dir, log_path = _seed_job_files(settings, job)
+
+    def _move_fails(src: str, dst: str) -> None:
+        raise OSError("disk unhappy")
+
+    monkeypatch.setattr(trash_module.shutil, "move", _move_fails)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert job_db.get_job(job["id"]) is None
+    assert (storage_dir / "original.json").exists()
+    assert log_path.exists()
+    # 空 operation 目录被剪掉，不留 trash 空壳。
+    assert _trash_entries(settings) == []
+
+
+def test_delete_succeeds_when_purging_staged_files_fails(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#958 失败点③：移入 trash 后删除失败 → 删除仍成功，残留在 .trash/<op>/。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-purgefail", "Q012", status="completed")
+    storage_dir, _log_path = _seed_job_files(settings, job)
+
+    def _rmtree_fails(path: Any, *args: Any, **kwargs: Any) -> None:
+        raise OSError("busy")
+
+    monkeypatch.setattr(trash_module.shutil, "rmtree", _rmtree_fails)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert job_db.get_job(job["id"]) is None
+    assert not storage_dir.exists()
+    staged = [p for p in (settings.jobs_dir / ".trash").rglob(storage_dir.name) if p.is_dir()]
+    assert len(staged) == 1
+    assert (staged[0] / "original.json").read_text(encoding="utf-8") == "original"
+
+
+def test_delete_skips_local_cleanup_when_path_revalidation_fails(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#958：提交后重新解析路径失败（逃逸）→ 不动文件，删除仍成功。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-revalidate", "Q013", status="completed")
+    storage_dir, _log_path = _seed_job_files(settings, job)
+
+    def _escapes(*args: Any, **kwargs: Any) -> Path:
+        raise ManagedPathError("Path escapes job root")
+
+    monkeypatch.setattr(trash_module, "resolve_job_dir", _escapes)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert job_db.get_job(job["id"]) is None
+    assert (storage_dir / "original.json").exists()
 
 
 def test_delete_raises_for_escaping_storage_dir(job_db: JobQueries, tmp_path: Path) -> None:
