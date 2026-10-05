@@ -1817,7 +1817,7 @@
     "server/app/workflow_worker/execution.py": 60,
     "server/app/workflow_worker/executor_claim.py": 78,
     "server/app/workflow_worker/hydration_dangling.py": 176,
-    "server/app/workflow_worker/hydration_defer_notice.py": 42,
+    "server/app/workflow_worker/hydration_defer_notice.py": 35,
     "server/app/workflow_worker/input_hydration.py": 82,
     "server/app/workflow_worker/local_dispatch.py": 72,
     "server/app/workflow_worker/maintenance.py": 50,

@@ -1,7 +1,7 @@
 """悬挂清单行升级项的公告构造（#887，从 ``hydration_dangling`` 拆出，文件预算）。
 
-公告回答 UI 的两个问题：哪些等待节点被这个输入挡住、重跑哪个生产节点能
-重新生成它。建议重跑节点与升级 WARNING 的 suggested action 同源。
+公告回答 UI 的两个问题：哪些等待节点被挡住（job 级 gate，即全部可运行
+节点）、重跑哪个生产节点能重新生成它。建议重跑节点与升级 WARNING 的 suggested action 同源。
 """
 
 from __future__ import annotations
@@ -12,23 +12,17 @@ from server.app.workflows.workflow_branching import RUNNABLE_STATUSES, effective
 from server.app.workflows.workflow_consumption import artifact_producers
 
 
-def waiting_nodes(definition: WorkflowDefinition, statuses: dict[str, str], name: str) -> list[str]:
-    """被该名字挡住的可运行节点：input 消费者与以它为条件的边 target。
+def waiting_nodes(definition: WorkflowDefinition, statuses: dict[str, str]) -> list[str]:
+    """被挡住的等待节点：当前全部可运行节点。
 
-    都不命中时（理论上探针面只来自这两处）退回全部可运行节点——defer 挡的
-    是整个 job 的评估，它们确实都在等。
+    hydration defer 是 job 级 gate（``eval_hydration`` 任一输入未恢复即跳过
+    整个 job 的评估），与悬挂输入无关的独立分支本轮同样进不了候选队列——
+    只标直接消费者会把它们误显示为普通排队（codex #1018 P2）。
     """
     effective = effective_node_statuses(definition, statuses)
-    runnable = {
+    return sorted(
         key for key in definition.nodes if effective.get(key, "pending") in RUNNABLE_STATUSES
-    }
-    blocked = {key for key in runnable if name in definition.nodes[key].inputs}
-    blocked |= {
-        e.target
-        for e in definition.edges
-        if e.condition is not None and e.condition.artifact == name and e.target in runnable
-    }
-    return sorted(blocked or runnable)
+    )
 
 
 def rerun_nodes(definition: WorkflowDefinition, name: str, row_node_key: str) -> list[str]:
@@ -47,5 +41,5 @@ def defer_notice(
         input_name=name,
         outcome=outcome,
         rerun_nodes=tuple(rerun_nodes(definition, name, row_node_key)),
-        waiting_nodes=tuple(waiting_nodes(definition, statuses, name)),
+        waiting_nodes=tuple(waiting_nodes(definition, statuses)),
     )

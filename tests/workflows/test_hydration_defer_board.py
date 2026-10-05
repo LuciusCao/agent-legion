@@ -18,11 +18,8 @@ from server.app.workflow_worker.hydration_dangling import (
     DANGLING_ESCALATION_PASSES,
     DanglingManifestStreaks,
 )
-from server.app.workflow_worker.hydration_defer_notice import waiting_nodes
 from server.app.workflows.schema import (
-    WorkflowCondition,
     WorkflowDefinition,
-    WorkflowEdge,
     WorkflowIntake,
     WorkflowNode,
 )
@@ -69,7 +66,8 @@ def test_stuck_name_is_published_only_at_threshold() -> None:
             input_name="a_out.json",
             outcome="hash_mismatch",
             rerun_nodes=("a",),
-            waiting_nodes=("b",),
+            # job 级 gate：与 a_out.json 无关的独立分支 c 同样被挡（codex #1018 P2）。
+            waiting_nodes=("b", "c"),
         ),
     )
 
@@ -100,29 +98,6 @@ def test_released_name_is_not_published() -> None:
         )
     assert released == {"a_out.json"}
     assert board.for_job("j1") == ()
-
-
-def test_waiting_nodes_cover_condition_targets_and_fall_back_to_runnable() -> None:
-    definition = WorkflowDefinition(
-        key="test",
-        label="Test",
-        intake=WorkflowIntake(),
-        nodes={
-            "a": WorkflowNode(key="a", label="A", capability="cap_a", outputs=["flag.json"]),
-            "b": WorkflowNode(key="b", label="B", capability="cap_b", after=["a"]),
-            "c": WorkflowNode(key="c", label="C", capability="cap_c", after=["a"]),
-        },
-        edges=[
-            WorkflowEdge(
-                source="a",
-                target="b",
-                condition=WorkflowCondition(artifact="flag.json", path="ok", equals=True),
-            ),
-        ],
-    )
-    statuses = {"a": "completed", "b": "pending", "c": "pending"}
-    assert waiting_nodes(definition, statuses, "flag.json") == ["b"]
-    assert waiting_nodes(definition, statuses, "unknown.json") == ["b", "c"]
 
 
 def test_node_view_only_for_waiting_nodes() -> None:
