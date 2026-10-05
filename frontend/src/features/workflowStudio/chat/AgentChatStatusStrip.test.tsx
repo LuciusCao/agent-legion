@@ -31,6 +31,7 @@ function sessionRecord(
 function fakeChat(overrides?: Record<string, unknown>): StudioChat {
   return {
     session: sessionRecord(),
+    messages: [],
     busy: false,
     closed: false,
     lastRunMs: null,
@@ -183,5 +184,30 @@ describe('AgentChatStatusStrip', () => {
     const strip = screen.getByLabelText('会话状态条')
     expect(strip).toHaveTextContent('运行中')
     expect(strip).toHaveTextContent('排队中 1')
+  })
+
+  it('offers 继续对话 on an idle session after a confirmed empty turn (#882)', () => {
+    const resume = vi.fn()
+    const status = (seq: number, content: Record<string, unknown>) => ({
+      id: `m${seq}`,
+      session_id: 's1',
+      kind: 'status',
+      role: 'system',
+      content,
+      seq,
+      created_at: '2026-01-01T00:00:00Z',
+    })
+    const messages = [
+      { ...status(1, { text: 'hi' }), id: 'u1', kind: 'text', role: 'user' },
+      status(2, { event: 'turn_end', stop_reason: 'end_turn' }),
+      status(3, { event: 'empty_turn', message_id: 'u1' }),
+    ]
+    renderStrip({ messages, lastRunMs: 800, resume })
+    const runState = screen.getByLabelText('运行状态')
+    // 优先于「已完成」：那一轮实际上没有被处理。
+    expect(runState).toHaveTextContent('上一条消息未被处理')
+    expect(runState).not.toHaveTextContent('已完成')
+    fireEvent.click(screen.getByRole('button', { name: '继续对话' }))
+    expect(resume).toHaveBeenCalledTimes(1)
   })
 })
