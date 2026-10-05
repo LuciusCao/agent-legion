@@ -65,6 +65,20 @@ describe('StatusLine', () => {
     )
   })
 
+  it('renders the unprompted-turn receipt with the backend detail (#938)', () => {
+    render(
+      <StatusLine
+        message={statusMessage(
+          'unprompted_turn',
+          '后台任务 agent-1 已完成，agent 正在汇报'
+        )}
+      />
+    )
+    expect(
+      screen.getByText('后台任务 agent-1 已完成，agent 正在汇报')
+    ).toBeInTheDocument()
+  })
+
   it('still renders the generic error event as a warning', () => {
     render(<StatusLine message={statusMessage('error', 'agent 崩溃')} />)
     expect(screen.getByRole('alert')).toHaveTextContent('agent 崩溃')
