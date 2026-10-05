@@ -15,7 +15,7 @@ from pathlib import Path
 import yaml
 
 from server.app.jobs.queries import JobQueries
-from server.app.jobs.queries.agent_definition_reads import has_self_contained_agent_nodes
+from server.app.jobs.queries.agent_profile_scan import has_self_contained_agent_nodes
 from server.app.services.agent_node_profile_catalog import agent_profiles_may_exist
 from server.app.services.workflow_draft_publish import validate_workflow_draft_for_publish
 from server.app.services.workflow_revisions import WorkflowRevisionService
@@ -146,5 +146,38 @@ def test_scan_probe_ignores_legacy_agent_revisions(tmp_path: Path) -> None:
             " values ('corrupt-rev', %s, 1, 'active', 'not json', 'h')",
             (corrupt_ws,),
         )
+
+    assert has_self_contained_agent_nodes(queries) is False
+
+
+def test_scan_probe_keeps_in_flight_self_contained_jobs_after_a_legacy_republish(
+    tmp_path: Path,
+) -> None:
+    """A runnable job pinned to an older self-contained revision keeps the
+    scan gate open after the workspace publishes a legacy-only revision
+    (PR #1039 codex R1); once the job is terminal the gate closes."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace_id = _workspace(queries)
+    self_contained = (
+        '{"nodes": {"draft": {"node_type": "agent", "execution": {"runtime": "velites"}}}}'
+    )
+    legacy = '{"nodes": {"draft": {"node_type": "agent", "execution": {"runtime": ""}}}}'
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into workflow_revisions(id, workspace_id, version, status,"
+            " definition_json, definition_hash) values"
+            " ('old-rev', %s, 1, 'archived', %s, 'h1'), ('new-rev', %s, 2, 'active', %s, 'h2')",
+            (workspace_id, self_contained, workspace_id, legacy),
+        )
+        conn.execute(
+            "insert into jobs(id, workspace_id, source_type, source_id, status,"
+            " workflow_revision_id) values ('inflight', %s, 'question', 'q', 'running', 'old-rev')",
+            (workspace_id,),
+        )
+
+    assert has_self_contained_agent_nodes(queries) is True
+
+    with queries.connect() as conn:
+        conn.execute("update jobs set status='completed' where id='inflight'")
 
     assert has_self_contained_agent_nodes(queries) is False

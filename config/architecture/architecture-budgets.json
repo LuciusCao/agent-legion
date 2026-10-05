@@ -1237,6 +1237,7 @@
     "server/app/jobs/node_limits.py": 32,
     "server/app/jobs/queries/__init__.py": 29,
     "server/app/jobs/queries/agent_definition_reads.py": 25,
+    "server/app/jobs/queries/agent_profile_scan.py": 43,
     "server/app/jobs/queries/approval_decisions.py": 111,
     "server/app/jobs/queries/auth.py": 196,
     "server/app/jobs/queries/base.py": 19,

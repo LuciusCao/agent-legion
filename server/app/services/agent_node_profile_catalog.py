@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.db.dialect import ConnectSource
-from server.app.jobs.queries.agent_definition_reads import has_self_contained_agent_nodes
+from server.app.jobs.queries.agent_profile_scan import has_self_contained_agent_nodes
 from server.app.services.agent_node_profile import (
     AgentNodeProfile,
     profile_from_definition,
@@ -57,7 +57,8 @@ def agent_profiles_may_exist(connect_source: ConnectSource) -> bool:
     """Cheap cross-workspace probe for poll-loop scan gates (never for resolution).
 
     True when any workspace has a published Agent (legacy source) OR any
-    active revision has a self-contained agent node (#933). The second half
+    revision a job may still dispatch from (the active one, or one a runnable
+    job is pinned to) has a self-contained agent node (#933). The second half
     is load-bearing: a workspace with no Agent definitions at all would
     otherwise never scan its agent candidates (thread / agent_gate gates).
     """
