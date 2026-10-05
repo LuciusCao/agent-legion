@@ -69,7 +69,7 @@ fi
 
 # 主仓库根 = worktree list 第一个条目；目标 worktree 一律是它的平级子目录
 # .worktrees/<name>（AGENTS.md §1 的嵌套防护约定）。
-MAIN="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+MAIN="$(git worktree list --porcelain | awk '/^worktree /&&!seen{print $2; seen=1}')"
 TARGET="$MAIN/.worktrees/$WT"
 
 # 护栏：拒绝清理调用方 shell 的 cwd 所在的 worktree。agent 常在目标 worktree

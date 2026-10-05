@@ -10,6 +10,7 @@ import {
   type NodeCodeDraftView,
   type PermissionView,
 } from './studioChatMessages'
+import type { QueuedMessageState } from './studioChatTurnRecovery'
 import { StatusLine } from './StudioChatStatusLine'
 import { StudioChatTextBubble } from './StudioChatTextBubble'
 import { StudioChatToolCallCard } from './StudioChatToolCallCard'
@@ -25,6 +26,7 @@ import styles from './StudioChatPanel.module.css'
 export type MessageItemProps = {
   message: ChatMessage
   streaming: boolean
+  queueState?: QueuedMessageState | null
   cancelSuperseded: boolean
   toolCall: ToolCallView | null
   permission: PermissionView | null
@@ -53,6 +55,7 @@ export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
   const {
     message,
     streaming,
+    queueState = null,
     cancelSuperseded,
     toolCall,
     permission,
@@ -71,7 +74,13 @@ export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
   if (message.kind === 'text') {
     // 流式中的 agent 文本保持纯文本；空闲时 busy=false 全部视为已完成
     // （含后端重启丢失 turn_end 的兜底）。
-    return <StudioChatTextBubble message={message} streaming={streaming} />
+    return (
+      <StudioChatTextBubble
+        message={message}
+        streaming={streaming}
+        queueState={queueState}
+      />
+    )
   }
   if (message.kind === 'thought') {
     return <StudioChatThought text={textContent(message)} />

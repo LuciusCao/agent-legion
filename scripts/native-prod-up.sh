@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 一键启动原生（非 Docker）生产环境：后端 (8000) + worker (8787)。
 # 前端无独立进程：后端直接服务 frontend/dist（本脚本会先构建）。
-# 幂等：端口已被监听时跳过对应进程的启动。进程经 nohup + caffeinate
+# 幂等：端口已被监听时跳过对应进程的启动。进程经 nohup（caffeinate -w 旁挂）
 # 脱离终端并防睡眠，日志在 data/logs/prod-{backend,worker}.log。
 # 端口与绑定地址可分别用 NATIVE_BACKEND_PORT / NATIVE_WORKER_PORT 与
 # NATIVE_BACKEND_BIND / NATIVE_WORKER_BIND 覆盖（默认 8000/8787 与 127.0.0.1；
@@ -9,12 +9,16 @@
 # docs/agent-worker-deployment.md）。取值两级来源：进程环境 > 根 .env
 # （#486：写进 .env 才能跨 shell 会话/重启/launchd 持久，export 仍是临时
 # 覆盖的逃生门；空值按未配置回落默认）。native-prod-down.sh 读同一组来源。
+# 就绪后在 data/native-prod.state 落运行态记录（PID + 实际 bind/port，#894），
+# down 以它为准停实例；改 bind/port 前先 down（见 native-prod-state-lib.sh）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 # shellcheck source=dotenv-lib.sh
 source scripts/dotenv-lib.sh
+# shellcheck source=native-prod-state-lib.sh
+source scripts/native-prod-state-lib.sh
 
 BACKEND_PORT="$(dotenv_lookup_or NATIVE_BACKEND_PORT 8000 .env)"
 WORKER_PORT="$(dotenv_lookup_or NATIVE_WORKER_PORT 8787 .env)"
@@ -104,6 +108,35 @@ refuse_wildcard_double_instance() {
         echo "若是旧 bind 的实例，请先停止：${var}=<旧地址> make prod-down（或 .env 里改回旧值后 make prod-down），再重新 make prod-up。"
     } >&2
     return 1
+}
+
+# 运行态记录（#894）显示本实例仍在另一个 bind/port 运行时拒绝启动：多半是
+# 改了 .env 的 bind/port 却没先 down，按新地址再起一套就是连同一个库的双
+# 实例。记录 PID 经签名 + 工作目录校验（native_pid_is_instance），陈旧记录
+# 不拦。make prod-down 以记录为准，能直接停掉旧地址上的实例。
+refuse_recorded_instance_elsewhere() {
+    local kind="$1" prefix="$2" name="$3" bind="$4" port="$5" pid rec
+    pid="$(native_state_live_pid "$ROOT" "$kind" "$prefix")"
+    [[ -n "$pid" ]] || return 0
+    rec="$(native_state_get "$ROOT/$NATIVE_STATE_REL" "${prefix}_BIND"):$(native_state_get "$ROOT/$NATIVE_STATE_REL" "${prefix}_PORT")"
+    [[ "$rec" != "$bind:$port" ]] || return 0
+    {
+        echo "错误: 运行态记录显示 ${name} 仍在 ${rec} 运行（pid ${pid}），与当前配置 ${bind}:${port} 不同。"
+        echo "再按新地址启动会形成连同一个库的双实例（违反单副本约束）。请先 make prod-down（按运行态记录停旧实例），再 make prod-up。"
+    } >&2
+    return 1
+}
+
+# 同配置重跑时，记录中的本实例已启动但尚未监听（上次 up 在 nohup 之后、
+# 就绪之前被中断）：输出其 PID，调用方视其为已在运行——不再 nohup 第二个
+# 进程（两个进程会并行跑启动流程、连同一个库，#894 R3），改为等它就绪。
+recorded_pending_pid() {
+    local kind="$1" prefix="$2" bind="$3" port="$4" pid rec
+    pid="$(native_state_live_pid "$ROOT" "$kind" "$prefix")"
+    [[ -n "$pid" ]] || return 0
+    rec="$(native_state_get "$ROOT/$NATIVE_STATE_REL" "${prefix}_BIND"):$(native_state_get "$ROOT/$NATIVE_STATE_REL" "${prefix}_PORT")"
+    [[ "$rec" == "$bind:$port" ]] && echo "$pid"
+    return 0
 }
 
 # 健康检查与就绪提示用的探测地址：0.0.0.0 是 IPv4 全接口监听，必然含
@@ -210,15 +243,38 @@ elif [[ "$local_s3_rc" -ne 0 ]]; then
     echo "警告: 跳过本地 ${LOCAL_S3_SERVICE} 启动（原因见上方），材料相关功能将不可用" >&2
 fi
 
+# 防睡眠：caffeinate 以 -w 旁挂到服务进程（服务退出它随之退出），而不是
+# 包装启动——这样 $! 就是服务进程本身，运行态记录能在它开始监听前就记下
+# 可校验的 PID（#894 R2）。无 caffeinate（Linux）时跳过。
+BACKEND_LAUNCH_PID=""
+WORKER_LAUNCH_PID=""
+keep_awake() {
+    if [[ -n "$CAFFEINATE" ]]; then
+        nohup "$CAFFEINATE" -is -w "$1" >/dev/null 2>&1 &
+    fi
+}
+
 # 2. 后端（启动任何进程前先做通配双实例检查，避免只起了一半）
 wildcard_rc=0
 refuse_wildcard_double_instance "后端" "$BACKEND_BIND" "$BACKEND_PORT" NATIVE_BACKEND_BIND || wildcard_rc=1
 refuse_wildcard_double_instance "Worker" "$WORKER_BIND" "$WORKER_PORT" NATIVE_WORKER_BIND || wildcard_rc=1
+refuse_recorded_instance_elsewhere backend BACKEND "后端" "$BACKEND_BIND" "$BACKEND_PORT" || wildcard_rc=1
+refuse_recorded_instance_elsewhere worker WORKER "Worker" "$WORKER_BIND" "$WORKER_PORT" || wildcard_rc=1
 if [[ "$wildcard_rc" -ne 0 ]]; then
     exit 1
 fi
+# 必须在下方任何 native_state_write 覆盖记录之前读出。
+BACKEND_PENDING_PID="$(recorded_pending_pid backend BACKEND "$BACKEND_BIND" "$BACKEND_PORT")"
+WORKER_PENDING_PID="$(recorded_pending_pid worker WORKER "$WORKER_BIND" "$WORKER_PORT")"
+# 立即预置为启动 PID：后端分支之后那次写记录发生在 Worker 分支之前，若此时
+# 仍为空，未监听的 Worker（socket 反查不到）会从记录里被清掉（#894 R4）。
+BACKEND_LAUNCH_PID="$BACKEND_PENDING_PID"
+WORKER_LAUNCH_PID="$WORKER_PENDING_PID"
 if port_listening "$BACKEND_BIND" "$BACKEND_PORT"; then
     echo "后端已在 :$BACKEND_PORT 运行，跳过"
+elif [[ -n "$BACKEND_PENDING_PID" ]]; then
+    echo "后端（pid ${BACKEND_PENDING_PID}）已在启动中、尚未监听，等待其就绪，不重复启动"
+    BACKEND_LAUNCH_PID="$BACKEND_PENDING_PID"
 else
     echo "启动后端 $BACKEND_BIND:$BACKEND_PORT …"
     ulimit -n 65535
@@ -232,24 +288,36 @@ else
     # agent_legion 库的操作者，显式授予 opt-in；误连该库的工具脚本
     # （缺 .env 的 worktree export_openapi 等）则被硬拦。
     AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 \
-    nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m uvicorn \
+    nohup .venv/bin/python -m uvicorn \
         server.app.main:create_prod_app --factory --host "$BACKEND_BIND" --port "$BACKEND_PORT" \
         --timeout-graceful-shutdown 3 \
         --log-config deploy/uvicorn-log-config.json \
         > data/logs/prod-backend.log 2>&1 &
+    BACKEND_LAUNCH_PID=$!
+    keep_awake "$BACKEND_LAUNCH_PID"
 fi
+# 每起一个子进程立即落记录（#894）：nohup 子进程脱离本脚本存活，健康等待
+# 期间被 Ctrl-C / SIGHUP / 作业超时打断也不会丢掉「实例起在哪」。记录的是
+# 启动 PID 本身（尚未监听也照记），down 按 PID + 签名 + 工作目录停它。
+native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$BACKEND_LAUNCH_PID" "$WORKER_BIND" "$WORKER_PORT" "$WORKER_LAUNCH_PID"
 
 # 3. Worker
 if port_listening "$WORKER_BIND" "$WORKER_PORT"; then
     echo "Worker 已在 :$WORKER_PORT 运行，跳过"
+elif [[ -n "$WORKER_PENDING_PID" ]]; then
+    echo "Worker（pid ${WORKER_PENDING_PID}）已在启动中、尚未监听，等待其就绪，不重复启动"
+    WORKER_LAUNCH_PID="$WORKER_PENDING_PID"
 else
     echo "启动 Worker $WORKER_BIND:$WORKER_PORT …"
     ulimit -n 65535
-    nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m worker.service \
+    nohup .venv/bin/python -m worker.service \
         --state-dir data/agent-worker-service \
         --host "$WORKER_BIND" --port "$WORKER_PORT" \
         > data/logs/prod-worker.log 2>&1 &
+    WORKER_LAUNCH_PID=$!
+    keep_awake "$WORKER_LAUNCH_PID"
 fi
+native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$BACKEND_LAUNCH_PID" "$WORKER_BIND" "$WORKER_PORT" "$WORKER_LAUNCH_PID"
 
 # 4. 健康等待：最多 5 分钟（#127——冷启动时 PG 冷缓存、schema 引导等
 # 仍可能超过 1 分钟；等待期间每 30s 输出一次进度，避免误报启动失败）。
@@ -258,6 +326,7 @@ for i in $(seq 1 150); do
     curl -sS -m 2 --noproxy '*' --fail -o /dev/null "http://$BACKEND_HEALTH_HOST:$BACKEND_PORT/api/health" >/dev/null 2>&1 && backend_ok=true
     curl -sS -m 2 --noproxy '*' --fail -o /dev/null "http://$WORKER_HEALTH_HOST:$WORKER_PORT/api/health" >/dev/null 2>&1 && worker_ok=true
     if $backend_ok && $worker_ok; then
+        native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$BACKEND_LAUNCH_PID" "$WORKER_BIND" "$WORKER_PORT" "$WORKER_LAUNCH_PID"
         echo "原生环境已就绪：后端 http://$BACKEND_HEALTH_HOST:$BACKEND_PORT （含前端 SPA），Worker 控制台 http://$WORKER_HEALTH_HOST:$WORKER_PORT"
         exit 0
     fi
@@ -266,5 +335,10 @@ for i in $(seq 1 150); do
     fi
     sleep 2
 done
+# 未就绪也落记录（PID 取得到多少记多少），down 仍能按实际地址收拾残局。
+native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$BACKEND_LAUNCH_PID" "$WORKER_BIND" "$WORKER_PORT" "$WORKER_LAUNCH_PID"
 echo "服务未在预期时间内就绪，日志见 data/logs/prod-{backend,worker}.log" >&2
+if [[ -n "$BACKEND_PENDING_PID$WORKER_PENDING_PID" ]]; then
+    echo "其中沿用了上次未就绪的启动进程（未重复启动）；请先 make prod-down 按运行态记录停掉它，再重新 make prod-up" >&2
+fi
 exit 1

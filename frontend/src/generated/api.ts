@@ -514,10 +514,10 @@ export interface paths {
      * @description List registered workers; workspace_id narrows to that workspace.
      *
      *     The workspace view only shows workers registered with that
-     *     workspace's scoped tokens (legacy [] scope is excluded); without the
-     *     parameter every logged-in user still sees the full list — the UI is
-     *     responsible for passing the current workspace, and the admin settings
-     *     page intentionally keeps the unfiltered view.
+     *     workspace's scoped tokens (legacy [] scope is excluded). Admins keep
+     *     the unfiltered view; other identities only see workers serving
+     *     their own workspaces, with the scope trimmed (#752, see
+     *     agent_worker_listing).
      */
     get: operations['list_workers_api_agent_workers_get']
     put?: never
