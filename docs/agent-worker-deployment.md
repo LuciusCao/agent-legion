@@ -350,7 +350,10 @@ direct-ref 清单写成结果归档首成员 `result-output-artifacts.json`（�
 存视图判定产物齐全与否。另一直传保护面：直传失败换轨（tar 内嵌产物 + CAS 通道）
 前 Worker 按 claim 下发的 `max_archive_bytes`（Host 实例设置实际值，旧 Host 未下发
 时回落 64 MiB 默认）做体积预检，超「上限 − 1 MiB 余量」不换轨、本地诚实判败，
-避免重内嵌必撞 Host 413 丢结果后的全量重跑循环。
+避免重内嵌必撞 Host 413 丢结果后的全量重跑循环。主路径同理（#959）：结果归档备妥
+后按 claim 下发的 `max_archive_bytes` 预检，超限即回收空归档诚实判败（未下发时不在
+本地猜上限，交给 Host 判决）；结果上报遇 409 之外的 4xx 降级一次为 failed 上报、
+5xx / 网络错误有界重试后同样降级，不再删掉待上报标记让租约过期后整次重跑。
 
 **workflow_key 已从 claim 响应移除（issue #211 M3，schema v91）**：claim 响应只按
 `workspace_id` 标识 workflow（schema v62 起两者恒等）。v0.5.0 起的 Worker 都不读取
