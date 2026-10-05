@@ -11,7 +11,7 @@ the profile sources without touching those readers again.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.db.dialect import ConnectSource
@@ -25,23 +25,29 @@ from server.app.services.agent_service import (
     published_agent_definitions,
 )
 from server.app.services.agent_version_pins import resolve_pinned_agent_definition
-from server.app.services.versioned_entities import VersionedEntityStore
+
+if TYPE_CHECKING:
+    from server.app.jobs import JobQueries
 
 
 def legacy_agent_catalog(
-    connect_source: ConnectSource, workspace_id: str, *, cached: bool = True
+    connect_source: ConnectSource, workspace_id: str
 ) -> Mapping[str, AgentDefinition]:
-    """The workspace's published Agent definitions keyed by agent_id.
+    """The workspace's published Agent definitions keyed by agent_id (~5s cache, hot paths)."""
+    return published_agent_definitions(connect_source, workspace_id)
 
-    ``cached=True`` reads through the ~5s ``published_agent_definitions``
-    cache (hot paths). ``cached=False`` reads the store directly for callers
-    that need post-publish truth (upgrade identity checks, #645 P1-1).
+
+def fresh_legacy_agent_catalog(
+    job_db: JobQueries, workspace_id: str
+) -> Mapping[str, AgentDefinition]:
+    """Uncached published catalog via the JobQueries facade (BOUNDARY-DATA-001).
+
+    For callers that need post-publish truth rather than the process cache
+    (workflow upgrade identity checks, #645 P1-1).
     """
-    if cached:
-        return published_agent_definitions(connect_source, workspace_id)
     return {
-        entity.entity_key: AgentDefinition.model_validate(entity.definition)
-        for entity in VersionedEntityStore(connect_source, "agent").list_published(workspace_id)
+        agent_id: AgentDefinition.model_validate(document)
+        for agent_id, document in job_db.published_agent_definition_documents(workspace_id).items()
     }
 
 

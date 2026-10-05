@@ -10,7 +10,11 @@ from server.app.agent_broker.sweeper_definitions import fail_stale_definition_re
 from server.app.agent_catalog import AgentDefinition
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.db.transaction import read_connection
-from server.app.services.agent_node_profile_catalog import resolve_dispatch_agent_profile
+from server.app.jobs import JobQueries
+from server.app.services.agent_node_profile_catalog import (
+    fresh_legacy_agent_catalog,
+    resolve_dispatch_agent_profile,
+)
 from server.app.services.agent_service import AgentService
 from tests.helpers import replace_agent_catalog
 from tests.postgres_support import TEST_DATABASE_URL
@@ -211,3 +215,13 @@ def test_resolve_dispatch_agent_profile() -> None:
         _resolve(_WORKSPACE, {**pin, "version": 99})
     with pytest.raises(ValueError, match="hash mismatch"):
         _resolve(_WORKSPACE, {**pin, "definition_hash": _v1().definition_hash()})
+
+
+def test_fresh_legacy_catalog_reads_published_rows_via_job_queries(tmp_path) -> None:
+    """#932 R1: the uncached catalog read goes through the JobQueries facade."""
+    _seed_catalog()
+    job_db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+
+    # v2 is only a draft: the published row (v1) is what the catalog serves.
+    assert dict(fresh_legacy_agent_catalog(job_db, _WORKSPACE)) == {_AGENT: _v1()}
+    assert dict(fresh_legacy_agent_catalog(job_db, "other-workspace")) == {}

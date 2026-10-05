@@ -49,7 +49,7 @@ from typing import Any
 from server.app.agent_catalog import AgentDefinition
 from server.app.jobs import JobQueries
 from server.app.services.agent_node_profile import AgentNodeProfile, resolve_agent_node_profile
-from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
+from server.app.services.agent_node_profile_catalog import fresh_legacy_agent_catalog
 from server.app.services.job_workflow_upgrade_skill import read_skill_lock, skill_excluded_nodes
 from server.app.services.node_config_runtime import runtime_mutable_keys
 from server.app.workflows.definition import WorkflowDefinition
@@ -83,14 +83,15 @@ def _published_catalog(
     """workspace 的 published Agent catalog（直读，绕过 5s 热路径缓存）。
 
     P1-1 身份比较是安全敏感读（产物冒充检查）：执行档案门面的缓存读
-    （``legacy_agent_catalog`` 默认档）会把「重发布不可见」的 stale 窗口
-    人为拉宽（复审 MEDIUM-1 注记）——升级是低频管理操作，这里走门面的
-    ``cached=False`` 直读（一次 DB 往返）消除该拉宽面。plan 到应用阶段的
+    （``legacy_agent_catalog``）会把「重发布不可见」的 stale 窗口人为拉宽
+    （复审 MEDIUM-1 注记）——升级是低频管理操作，这里走门面的
+    ``fresh_legacy_agent_catalog``（经 JobQueries 直读，一次 DB 往返）消除
+    该拉宽面。plan 到应用阶段的
     TOCTOU 由事务内重验收口；重验到提交的窗口由 Agent/node-code 发布路径
     共享的 workspace 事务锁封闭。本函数只去掉缓存这个额外放大器；读取
     失败返回 None（保守处理）。"""
     try:
-        return legacy_agent_catalog(job_db, workspace_id, cached=False)
+        return fresh_legacy_agent_catalog(job_db, workspace_id)
     except Exception:
         # #204 broad-except audit: catalog 读取失败（DB 断连等数据态故障）
         # 降级为「agent 面全部不可证明」——保守重跑，不让升级 500。
