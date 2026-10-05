@@ -21,8 +21,15 @@ __all__ = ["resolve_execution_block"]
 
 
 def resolve_execution_block(
-    node: WorkflowNode, runtime: str, *, timeout_seconds: int | None = None
+    node: WorkflowNode,
+    runtime: str,
+    *,
+    timeout_seconds: int | None = None,
+    sandbox_network: object = False,
 ) -> dict[str, Any]:
     """Resolve the manifest ``execution`` block (strict, node-only source;
-    ``timeout_seconds`` is the #550 dispatch-resolved reserved-key value)."""
-    return resolve_execution(node, runtime, timeout_seconds=timeout_seconds)
+    ``timeout_seconds`` / ``sandbox_network`` are the dispatch-resolved
+    reserved-key values, #550 / #715)."""
+    return resolve_execution(
+        node, runtime, timeout_seconds=timeout_seconds, sandbox_network=sandbox_network
+    )

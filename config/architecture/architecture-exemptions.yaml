@@ -1063,10 +1063,12 @@ exemptions:
     when capture-capped and its tail when fully collected). Ceiling re-seated
     at actual + 10 per the dated-exemption convention (#431/#458
     precedents). Remove when the capped-display branches move into
-    truncate.rs or the module gets a bash-output split.'
+    truncate.rs or the module gets a bash-output split. #942/#922 moved the
+    child-process lifecycle (env allowlist, group termination, bounded
+    drain, pipe reader) into bash_proc.rs; ceiling re-seated at actual + 10.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/637
-  ceiling: 411
+  ceiling: 312
   expires: 2027-03-31
 - check: architecture.file_budget
   path: velites/src/tools/truncate.rs

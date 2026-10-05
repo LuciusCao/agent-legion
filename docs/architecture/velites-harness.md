@@ -203,7 +203,9 @@ TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计�
 - **读**允许：cwd（job 目录）+ session dir + 显式 `--skill` 目录（只读）+
   系统库/二进制（只读，进程执行必需）；
 - **写**允许：仅 cwd + session dir + `/tmp`（含 `$TMPDIR`）；
-- **网络本轮不限制**（模型调用必须出网，且出口收敛于 gateway；网络策略另行立项）；
+- **网络默认拒绝**（#715 起，与 `sandbox wrap` 同语义；模型调用由 velites 进程自身
+  发出、不经 bash 沙箱，不受影响）：节点 `sandbox_network: true` 时 Host 下发
+  `--allow-network` 放开 bash 子进程网络，见下文「网络语义与权衡」；
 - **默认开启**，`--no-sandbox` 作为运维逃生门（worker 正常路径不传）。
 
 实现：
@@ -255,9 +257,10 @@ Linux bwrap 的 bash 工具策略（2026-08-10 收紧，回应生产 `find /` �
 读遍全主机（含 $HOME）。现改为与 `sandbox wrap` 同风格的选择性 bind：
 只读 bind = 系统路径（/usr /lib /lib64 /bin /sbin /etc /opt，缺失跳过）+
 `--skill` 目录 + python3 探测根，读写 bind = cwd/session/$TMPDIR（/tmp 为
-tmpfs）；白名单之外的路径在 mount namespace 里根本不存在。bash 工具保留
-两个历史差异：**共享网络**（不 `--unshare-net`）与**不 `--unshare-pid`**
-（`sandbox wrap` 严格变体两者都隔离）。收紧后沙箱内看不到宿主 `$HOME`
+tmpfs）；白名单之外的路径在 mount namespace 里根本不存在。bash 工具与
+`sandbox wrap` 共用同一个 bwrap argv 构造（#922 R-1 起收敛命名空间隔离）：两者都
+`--unshare-pid` 并挂沙箱自己的 /proc，网络默认 `--unshare-net`，只在白名单根上
+有差异。收紧后沙箱内看不到宿主 `$HOME`
 是**有意切断**：依赖宿主凭证的命令（`~/.gitconfig`、`~/.ssh`、`gh`/`aws`
 配置）需要在 job 内显式注入凭证，不能指望宿主 home。DNS 逃逸通道：
 systemd-resolved 主机的 `/etc/resolv.conf` 是指向 `/run/...` 的 symlink，
@@ -270,6 +273,28 @@ python3 解释器白名单覆盖的布局：系统 python（/usr）、uv
 不含 `python` 子串，且位于 $HOME 下）暂不在探测范围内——沙箱内需要
 pyenv 解释器的场景需另行立项。
 
+网络语义与权衡（#715）：bash 工具网络默认拒绝，两平台一致（macOS seatbelt
+`deny default` 本就不含网络规则；Linux 由 `--unshare-net` 隔离），与
+`sandbox wrap` 同语义。显式开关沿用节点保留执行键 `sandbox_network`（agent 节点
+的有效 config schema 早已合并该键，此前对 agent runtime 无效）：dispatch 把解析值
+写进 manifest `execution.sandbox_network`，velites 命令构建器在其为 `true` 时追加
+`--allow-network`（只放开网络命名空间，pid 命名空间仍私有）。代价：此前在 Linux
+上依赖 bash 直接联网的 skill（`pip install`、`git clone`、`curl` 等）需要在节点
+config 中显式声明 `sandbox_network: true`。不可用时 fail-closed：Linux 上
+velites 启动时以 bash 工具的确切策略探测一次 bwrap（`true` 跑在私有 pid/网络
+命名空间里），建不起命名空间（如 #39 的容器内 loopback 配置失败）即启动报错
+退出、给出修复指引，**绝不回落共享网络**；旧版 velites（无 `--allow-network`
+flag）收到该 flag 会按未知参数报错，升级顺序为先升 velites 再给 agent 节点开
+`sandbox_network`。
+
+bash 子进程环境白名单（#922 R-4）：bash 子进程不再继承 velites 的完整环境，只
+按**具名**白名单放行（无前缀匹配）：`PATH`/`HOME`/`TMPDIR`、POSIX/glibc 标准 locale 变量（`LANG`/`LANGUAGE`/`LC_ALL`/`LC_CTYPE` 等各具名类别）、具名的 Python 解释器变量（`PYTHONPATH`/`PYTHONUTF8`/`PYTHONIOENCODING`/`PYTHONDONTWRITEBYTECODE`/`PYTHONUNBUFFERED`）与少量 shell 基础变量
+（`USER`/`LOGNAME`/`SHELL`/`TERM`/`TZ`/`VIRTUAL_ENV`，见
+`velites/src/tools/bash_proc.rs`），与 Host 侧 `shared/code_sandbox.py::child_env`
+对齐；models.json 以 `$ENV` 引用的 provider 凭据、worker `environment` 注入的
+密钥与代理变量都不进入模型可控的 shell。依赖宿主 env 凭据的 skill 命令需改为
+显式注入。
+
 ## 6. CLI 接口
 
 ```
@@ -279,7 +304,7 @@ velites --mode json \
         --tools read,write,bash \
         --provider <provider-key> --model <model-id> --thinking low \
         [--max-turns N] [--max-tokens N] [--require-output f ...] \
-        [--no-sandbox] \
+        [--no-sandbox] [--allow-network] \
         @<run>/prompt.md "Execute the attached node instructions."
 ```
 
@@ -351,8 +376,15 @@ fail-closed 报错，内置节点不受影响。
 - **read**：路径必须解析在 cwd 或任一 `--skill` 目录 / session dir 内（后两者为只读
   根，与 §5 OS 沙箱的读放行口径一致；`..`/symlink 逃逸一律拒绝），支持行区间读取；
 - **write**：tmp + rename 原子写，仅限 cwd 沙箱（skill/session 目录绝不可写）；
-- **bash**：`cwd=job_dir`，env 继承父进程；超时 → 进程组 TERM → grace → KILL（对齐
-  Pi 语义，Rust 下用 `process-group` 或手动 `killpg`）；
+  临时文件在进程内创建、不受 OS 沙箱约束，故用随机名 + `O_CREAT|O_EXCL` +
+  `O_NOFOLLOW` 独占创建，已存在的任何条目（含 symlink）都不会被跟随
+  （#922 R-2，`tools/atomic_write.rs`，json 工具落盘共用）；
+- **bash**：`cwd=job_dir`，env 按 §5 白名单（#922 R-4）；超时 → 进程组 TERM →
+  grace → KILL（对齐 Pi 语义，Rust 下用 `process-group` 或手动 `killpg`）；
+  命令正常退出后同样对进程组发 TERM，读管道的 drain 有 2s grace 上界，随后
+  无条件 KILL 进程组（脱离进程组仍持管道的进程不发信号，只停止 drain 并截断
+  返回，并提示脱组进程可能仍在运行）；组长在最终组信号发出前不回收，进程组 id 不会被复用（#942：后台孙
+  进程不再挂死工具调用，也不泄漏孤儿）——需要常驻后台进程的用法不再受支持；
   必须能跑 `python3`（skill scripts 依赖，worker 镜像已具备）；
   命令守卫（`tools/command_guard.rs`）在 spawn 前拒绝全盘扫描命令
   （`find /` 等从宽泛根递归遍历，并行 job 下会打爆宿主机 fseventsd/Spotlight），

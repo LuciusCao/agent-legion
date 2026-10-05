@@ -52,7 +52,11 @@ def validate_execution_contract(
 
 
 def resolve_execution(
-    node: WorkflowNode, runtime: str, *, timeout_seconds: int | None = None
+    node: WorkflowNode,
+    runtime: str,
+    *,
+    timeout_seconds: int | None = None,
+    sandbox_network: object = False,
 ) -> dict[str, Any]:
     """Resolve the manifest ``execution`` block (strict node-only source, contract-checked).
 
@@ -61,7 +65,11 @@ def resolve_execution(
     ``timeout_seconds`` (#550) is the dispatch-resolved reserved-key value
     (agent nodes now merge it into their effective schema, so it travels the
     regular config chain); None or an invalid value falls back to the
-    product constant — hand-built manifests keep their pre-#550 shape."""
+    product constant — hand-built manifests keep their pre-#550 shape.
+    ``sandbox_network`` (#715) is the dispatch-resolved reserved key: only a
+    literal ``True`` opens the agent bash tool's network (velites
+    ``--allow-network``); anything else — including truthy non-bools — denies,
+    the same strict opt-in as the code sandbox."""
     adapter = get_adapter(runtime)
     resolved = validate_execution_contract(
         node_key=node.key, runtime=runtime, values=asdict(node.execution)
@@ -80,4 +88,5 @@ def resolve_execution(
         "thinking": resolved["thinking"],
         "timeout_seconds": timeout or EXECUTION_TIMEOUT_SECONDS,
         "no_sandbox": False,
+        "sandbox_network": sandbox_network is True,
     }

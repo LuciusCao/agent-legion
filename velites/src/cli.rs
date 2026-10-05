@@ -94,6 +94,12 @@ pub struct Cli {
     #[arg(long)]
     pub no_sandbox: bool,
 
+    /// Allow network for the sandboxed bash tool. Denied by default, the
+    /// same as `velites sandbox wrap` (#715); the Host passes it only for
+    /// nodes whose `sandbox_network` config is true.
+    #[arg(long)]
+    pub allow_network: bool,
+
     /// System prompt text. Combined with --skill SKILL.md contents.
     #[arg(long)]
     pub system_prompt: Option<String>,
@@ -225,6 +231,7 @@ mod tests {
             "--stub-fixture",
             "/fixtures/two-turns.json",
             "--no-sandbox",
+            "--allow-network",
             "do",
             "the",
             "thing",
@@ -248,6 +255,7 @@ mod tests {
             Some(Path::new("/fixtures/two-turns.json"))
         );
         assert!(cli.no_sandbox);
+        assert!(cli.allow_network);
         assert_eq!(cli.instruction, vec!["do", "the", "thing"]);
     }
 
@@ -263,6 +271,7 @@ mod tests {
         assert!(cli.require_output.is_empty());
         assert!(cli.skill.is_empty());
         assert!(!cli.no_sandbox);
+        assert!(!cli.allow_network);
         assert_eq!(cli.stub_fixture, None);
     }
 

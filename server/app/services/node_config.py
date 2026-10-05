@@ -73,7 +73,7 @@ def _node_config_schema(
     ``type: agent`` nodes keep their Agent Definition schema — with the
     platform-reserved execution keys merged UNDER it since #550 (an agent
     node's timeout is configurable like a code node's; ``sandbox_network``
-    rides along inertly — the agent runtime ignores it). The merged default
+    opens the velites bash tool's network, #715 — denied by default). The merged default
     keeps the agent product constant (1800s), NOT the code-node 600 — the
     upgrade must not silently cut existing agent runs' budget. Every other
     node is code-routed and gets the same merge into its declared schema.
