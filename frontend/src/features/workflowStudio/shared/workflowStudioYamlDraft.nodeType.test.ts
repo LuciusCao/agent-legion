@@ -199,3 +199,43 @@ describe('patchWorkflowNodeType', () => {
     )
   })
 })
+
+describe('patchWorkflowNodeType agent profile fields (#935)', () => {
+  it('writes the default runtime when a node becomes agent without a workflow default', () => {
+    const out = patchWorkflowNodeType(baseYaml, 'intake', 'agent')
+    expect(parseNodes(out).nodes?.intake?.execution).toEqual({
+      runtime: 'velites',
+    })
+  })
+
+  it('lets a node turned agent inherit the workflow top-level runtime', () => {
+    const out = patchWorkflowNodeType(
+      `execution:\n  runtime: pi\n${baseYaml}`,
+      'intake',
+      'agent'
+    )
+    expect(parseNodes(out).nodes?.intake).not.toHaveProperty('execution')
+  })
+
+  it('strips runtime / requires_labels / tools when an agent node becomes code', () => {
+    const agentYaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  gen:',
+      '    type: agent',
+      '    capability: gen',
+      '    after: [_start]',
+      '    tools: [read]',
+      '    requires_labels: {gpu: a100}',
+      '    execution: {runtime: velites, model: m}',
+      '',
+    ].join('\n')
+    const gen = parseNodes(patchWorkflowNodeType(agentYaml, 'gen', 'code'))
+      .nodes?.gen
+    expect(gen?.execution).toEqual({ model: 'm' })
+    expect(gen).not.toHaveProperty('requires_labels')
+    expect(gen).not.toHaveProperty('tools')
+  })
+})

@@ -389,6 +389,22 @@ where report_json like '%"unresolved"%';
 From 0.7.17 publishing an Agent definition no longer changes what any
 inlined node runs (D4): change the node profile and publish the workflow.
 
+Differences from the 0.7.16 dry-run report (`scripts/agent_backfill_dry_run.py`,
+#934) — v93 follows what dispatch actually runs, so a few nodes are
+classified differently: an active-revision node whose route targets an
+archived or unpublished Agent is *unresolved* in v93 (the dry-run backfilled
+it from the archived definition); an active-revision node without a route
+row resolves by its capability's unique published Agent in v93 (the dry-run
+reported `no_route`). Both share `tools_empty_unportable` (an Agent published
+with an empty tools list cannot be inlined into a node without tools — an
+empty node list means the default tier) and `skill_unportable`.
+
+Not backfilled: Studio chat session drafts (`studio_chat_sessions.draft_yaml`)
+keep their legacy YAML, and pending publish requests
+(`studio_publish_requests`) snapshot the draft they were raised on — after
+the upgrade they fail with "Draft changed" (the workspace draft was
+rewritten); raise the publish request again from the migrated draft.
+
 **Rolling the Host back to 0.7.16** needs no schema step and has no down
 migration: 0.7.16 reads the inlined fields as a self-contained profile (it
 already supports them), so dispatch behaves the same. To restore the exact

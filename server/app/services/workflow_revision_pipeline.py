@@ -67,12 +67,17 @@ def publish_workflow_revision(
     revision_id = f"{workspace_id}:{definition.key}:v{version}"
     agent_routes: dict[str, str] | None = derive_agent_routes(job_db, workspace_id, definition)
     # #935 route 停写（#440 P3）：门禁要求 agent 节点自含后，产品发布路径
-    # 只会发布全自含 revision——它不碰 workspace_node_routes（不 upsert、
-    # 不 prune），存量行冻结只读，服务旧快照 legacy 节点的在途 job。仅内部
-    # 种子路径（demo builtin / ensure_active_revision，P4 改 YAML 自含）仍
-    # 可能带 legacy 节点并照旧物化。
+    # 只会发布全自含 revision——它不再 upsert workspace_node_routes，仍声明
+    # 为 agent 的节点的存量行冻结只读（服务旧快照 legacy 节点的在途 job），
+    # 已删除或改成 code 的节点的行照常删掉（R1：防止残留行把 code 节点路由
+    # 给 Agent）。仅内部种子路径（demo builtin / ensure_active_revision，
+    # P4 改 YAML 自含）仍可能带 legacy 节点并照旧物化。
+    frozen_route_nodes: frozenset[str] | None = None
     if not has_legacy_agent_nodes(definition):
         agent_routes = None
+        frozen_route_nodes = frozenset(
+            key for key, node in definition.nodes.items() if node.node_type == "agent"
+        )
     # The new revision's schemas are the live truth for the workspace's
     # node overrides: keys/values it no longer accepts must go so intake
     # keeps working after a schema rename/removal (#428 二轮复审 P2-1).
@@ -93,4 +98,5 @@ def publish_workflow_revision(
         definition_hash=definition_hash(definition_json),
         agent_routes=agent_routes,
         on_commit=prune_hook,
+        frozen_route_nodes=frozen_route_nodes,
     )

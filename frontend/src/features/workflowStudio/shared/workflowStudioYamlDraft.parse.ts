@@ -35,7 +35,9 @@ export type WorkflowYamlNode = {
   // 白名单（后端 loader 校验，写路径 patchWorkflowNodeApprovalConfig）。
   config?: Record<string, unknown>
   // prettier-ignore
-  execution?: { provider?: string; model?: string; thinking?: string; prompt?: string; prompt_mode?: string }
+  execution?: { provider?: string; model?: string; thinking?: string; prompt?: string; prompt_mode?: string; runtime?: string }
+  // #933/#935：自含执行档案的 Worker 标签要求（仅 agent 节点）。
+  requires_labels?: Record<string, string>
 }
 
 /** 持久化 schema-v2 YAML 的边格式（loader._load_edges / revision_format

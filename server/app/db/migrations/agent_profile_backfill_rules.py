@@ -20,7 +20,9 @@ Backfill rules (#440 §3): ``runtime`` / ``requires_labels`` copied;
 (an agent node's own declaration was always ignored); ``skill`` sinks only
 when the node binds none and the definition has one in the two-segment
 ``<group>/<name>`` shape the loader accepts — otherwise the node stays
-untouched (``skill_unportable``).
+untouched (``skill_unportable``). An Agent with an empty tools list on a
+node without tools stays untouched too (``tools_empty_unportable``): an
+empty node ``tools`` means the default tier, not "no tools".
 """
 
 from __future__ import annotations
@@ -137,6 +139,11 @@ def backfill_blocker(node: Mapping[str, Any], agent: PublishedAgent) -> str:
         return "malformed_execution"
     if _skill_absent(node) and agent.skill and not skill_key_portable(agent.skill):
         return "skill_unportable"
+    if not agent.tools and not node.get("tools"):
+        # An Agent published with ``tools: []`` runs with no tools; a node
+        # profile cannot say "none" (empty = the default tier), so inlining
+        # would silently widen permissions. Leave it for the author.
+        return "tools_empty_unportable"
     return ""
 
 

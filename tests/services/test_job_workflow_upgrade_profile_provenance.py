@@ -37,7 +37,10 @@ _V1 = AgentDefinition(capability="cap_b", runtime="pi", tools=("read",))
 def _legacy_agent_chain():
     definition = wfchain_definition({"a": ["a_out.json"], "b": ["b_out.json"]})
     nodes = dict(definition.nodes)
-    nodes["b"] = dataclasses.replace(definition.nodes["b"], node_type="agent")
+    # Node tools override the definition's: the inlined profile hash then
+    # differs from the definition hash, so only the provenance identity
+    # bypass (not a coincidental hash match) can keep b inherited (#935 D2).
+    nodes["b"] = dataclasses.replace(definition.nodes["b"], node_type="agent", tools=("bash",))
     return dataclasses.replace(definition, nodes=nodes)
 
 
@@ -127,7 +130,10 @@ def test_provenance_survives_publish_only_for_unchanged_profiles(tmp_path: Path)
     # Editing b's profile (tools) drops it: normalization never vouches for edits.
     edited = dataclasses.replace(
         relabeled,
-        nodes={**relabeled.nodes, "b": dataclasses.replace(relabeled.nodes["b"], tools=("bash",))},
+        nodes={
+            **relabeled.nodes,
+            "b": dataclasses.replace(relabeled.nodes["b"], tools=("read", "bash")),
+        },
     )
     dropped = revisions.publish_workspace_revision(workspace["id"], edited)
     assert provenance_from_revision_json(dropped["definition_json"]) == {}

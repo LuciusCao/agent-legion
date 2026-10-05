@@ -39,6 +39,8 @@ _GEN = AgentDefinition(
 _REVIEW = AgentDefinition(capability="review", runtime="pi", tools=("read",))
 _OLD = AgentDefinition(capability="old", runtime="pi")
 _FLAT_SKILL = AgentDefinition(capability="flat", runtime="pi", skill="flatskill")
+# Published with no tools at all: a node profile cannot express "none".
+_BARE = AgentDefinition(capability="bare", runtime="pi", tools=())
 
 _WORKFLOW_YAML = f"""
 key: {_WS}
@@ -74,6 +76,10 @@ nodes:
   flat:
     type: agent
     capability: flat
+  bare:
+    type: agent
+    capability: bare
+    skill: {{key: {_SKILL}}}
   done:
     type: agent
     capability: review
@@ -108,6 +114,7 @@ def _seed(conn) -> str:
     _insert_agent(conn, "review_agent", _REVIEW, 1, "published")
     _insert_agent(conn, "old_agent", _OLD, 1, "archived")
     _insert_agent(conn, "flat_agent", _FLAT_SKILL, 1, "published")
+    _insert_agent(conn, "bare_agent", _BARE, 1, "published")
     definition = workflow_definition_from_mapping(yaml.safe_load(_WORKFLOW_YAML))
     stored = json.loads(serialize_definition(definition))
     stored["node_code_pins"] = {"code1": {"version": 3}}
@@ -194,7 +201,7 @@ def test_active_revision_nodes_are_inlined_from_the_agent_they_run() -> None:
     assert nodes["review_b"]["skill"] == {"key": _SKILL, "ref": "latest"}
 
     # Unresolved nodes stay untouched.
-    for key in ("ghost", "arch", "flat"):
+    for key in ("ghost", "arch", "flat", "bare"):
         assert nodes[key]["execution"].get("runtime", "") == ""
     assert nodes["code1"]["node_type"] == "code"
 
@@ -237,6 +244,9 @@ def test_active_revision_nodes_are_inlined_from_the_agent_they_run() -> None:
         "agent_ids": ["old_agent"],
     }
     assert report["flat"]["reason"] == "skill_unportable"
+    # #935 D1: inlining tools=[] would widen to the default tier.
+    assert report["bare"]["reason"] == "tools_empty_unportable"
+    assert nodes["bare"]["tools"] == []
     assert "done" not in report  # already self-contained
     assert "code1" not in report
 

@@ -152,6 +152,34 @@ def test_self_contained_publish_freezes_existing_routes(tmp_path: Path) -> None:
     assert _routes(queries, workspace_id) == [{"node_key": "draft", "target_kind": "agent"}]
 
 
+def test_self_contained_publish_prunes_routes_of_nodes_turned_code(tmp_path: Path) -> None:
+    """#935 R1: route freeze stops upserts, not the prune — a node turned
+    ``code`` (capability kept) loses its stale agent row, so neither routing
+    nor job detail can mistake it for an Agent node."""
+    from server.app.agent_catalog import AgentDefinition
+    from tests.helpers import replace_agent_catalog
+
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace_id = _workspace(queries)
+    replace_agent_catalog(
+        workspace_id, {"draft-agent": AgentDefinition(capability="draft", runtime="pi")}
+    )
+    service = WorkflowRevisionService(queries, True)
+    legacy = yaml.safe_load(_yaml(""))
+    legacy["key"] = workspace_id
+    service.publish_workspace_revision(workspace_id, workflow_definition_from_mapping(legacy))
+    assert _routes(queries, workspace_id) == [{"node_key": "draft", "target_kind": "agent"}]
+
+    as_code = yaml.safe_load(_yaml(""))
+    as_code["key"] = workspace_id
+    node = as_code["nodes"]["draft"]
+    node["type"] = "code"
+    node.pop("skill")
+    service.publish_workspace_revision(workspace_id, workflow_definition_from_mapping(as_code))
+
+    assert _routes(queries, workspace_id) == []
+
+
 def test_scan_probe_ignores_legacy_agent_revisions(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace_id = _workspace(queries)

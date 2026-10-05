@@ -400,6 +400,7 @@ included), an agent node overriding the model and selecting tools:
 
 ```yaml
 key: education_video_problems_generation
+label: 教学视频出题
 schema_version: 2
 execution:                  # workflow-level default for every agent node
   runtime: velites
