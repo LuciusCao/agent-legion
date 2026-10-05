@@ -8,8 +8,6 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.auth.dependencies import reject_studio_agent_scope
-from server.app.routes.job_http import raise_job_http_error
-from server.app.services.job_errors import JobServiceError
 from server.app.services.workspace_secrets import WorkspaceSecretsService
 from server.app.settings import Settings
 
@@ -45,12 +43,9 @@ def create_workspace_secrets_router(
 
     @router.get("/workspaces/{workspace_id}/secrets", response_model=WorkspaceSecretsResponse)
     def list_workspace_secrets(workspace_id: str) -> WorkspaceSecretsResponse:
-        try:
-            return WorkspaceSecretsResponse(
-                secrets=[WorkspaceSecretMetadata(**entry) for entry in service.list(workspace_id)]
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return WorkspaceSecretsResponse(
+            secrets=[WorkspaceSecretMetadata(**entry) for entry in service.list(workspace_id)]
+        )
 
     @router.put(
         "/workspaces/{workspace_id}/secrets/{name}",
@@ -60,11 +55,8 @@ def create_workspace_secrets_router(
     def put_workspace_secret(
         workspace_id: str, name: str, payload: WorkspaceSecretSetRequest
     ) -> WorkspaceSecretResponse:
-        try:
-            metadata = service.set(workspace_id, name, payload.value)
-            return WorkspaceSecretResponse(secret=WorkspaceSecretMetadata(**metadata))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        metadata = service.set(workspace_id, name, payload.value)
+        return WorkspaceSecretResponse(secret=WorkspaceSecretMetadata(**metadata))
 
     @router.delete(
         "/workspaces/{workspace_id}/secrets/{name}",
@@ -72,10 +64,7 @@ def create_workspace_secrets_router(
         dependencies=[Depends(reject_studio_agent_scope)],
     )
     def delete_workspace_secret(workspace_id: str, name: str) -> WorkspaceSecretDeleteResponse:
-        try:
-            service.delete(workspace_id, name)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        service.delete(workspace_id, name)
         return WorkspaceSecretDeleteResponse(deleted=name)
 
     return router

@@ -28,7 +28,7 @@ class EmptyJobSelectionError(ValueError):
 class BatchSelectionTooLargeError(ValueError):
     """A filter selection matched more jobs than one batch request may touch.
 
-    Mapped to HTTP 422 by the app-level handler (``job_http``); the caller
+    Mapped to HTTP 422 by the app-level handler (``job_http_handlers``); the caller
     narrows the filter or splits the work into several requests.
     """
 

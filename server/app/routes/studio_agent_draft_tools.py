@@ -15,8 +15,6 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field, field_validator
 
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error
-from server.app.services.job_errors import JobServiceError
 from server.app.services.workflow_draft_cas import save_workflow_draft_if_unchanged
 from server.app.services.workflow_draft_cas_token import (
     CAS_TIMESTAMP_HINT,
@@ -72,10 +70,7 @@ def create_studio_agent_draft_tools_router(job_db: JobQueries) -> APIRouter:
         response_model=StudioAgentWorkflowDraftResponse,
     )
     def get_workflow_draft_route(workspace_id: str) -> StudioAgentWorkflowDraftResponse:
-        try:
-            draft = get_workflow_draft(job_db, workspace_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        draft = get_workflow_draft(job_db, workspace_id)
         if draft is None:
             return StudioAgentWorkflowDraftResponse()
         return _draft_response(draft)
@@ -87,12 +82,9 @@ def create_studio_agent_draft_tools_router(job_db: JobQueries) -> APIRouter:
     def save_workflow_draft_route(
         workspace_id: str, payload: StudioAgentWorkflowDraftSaveRequest
     ) -> StudioAgentWorkflowDraftResponse:
-        try:
-            draft = save_workflow_draft_if_unchanged(
-                job_db, workspace_id, payload.definition_yaml, payload.expected_updated_at
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        draft = save_workflow_draft_if_unchanged(
+            job_db, workspace_id, payload.definition_yaml, payload.expected_updated_at
+        )
         return _draft_response(draft)
 
     return router

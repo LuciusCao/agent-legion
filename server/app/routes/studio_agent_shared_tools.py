@@ -48,7 +48,7 @@ from server.app.routes.workspace_shared_materials_propagate_contracts import (
     SharedMaterialsPropagateRequest,
     SharedMaterialsPropagateResponse,
 )
-from server.app.services.job_errors import ConflictError, JobServiceError, NotFoundError
+from server.app.services.job_errors import ConflictError, NotFoundError
 from server.app.services.skill_edit_snapshot import load_map_json, shared_edit_snapshot
 from server.app.services.skill_repo_edit import SkillEditValidationError
 from server.app.services.skill_shared_propagate import propagate_shared_materials
@@ -148,12 +148,9 @@ def create_studio_agent_shared_tools_router(job_db: JobQueries, settings: Settin
         # （一个 skill 的失败不中断批次），提交 + 打新 tag 复用
         # save_version 写路径，DB skill lock 不动。
         _shared_dir(job_db, workspace_id)
-        try:
-            result = propagate_shared_materials(
-                workspace_id, payload.sources, runs_dir=settings.skills_runs_dir
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        result = propagate_shared_materials(
+            workspace_id, payload.sources, runs_dir=settings.skills_runs_dir
+        )
         return SharedMaterialsPropagateResponse(
             workspace_id=workspace_id,
             results=[SharedMaterialPropagateSkillResult(**vars(r)) for r in result.results],

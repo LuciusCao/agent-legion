@@ -23,7 +23,7 @@ from server.app.routes.workspace_shared_materials_contracts import (
     SharedMaterialsMapView,
     WorkspaceSharedMaterialsResponse,
 )
-from server.app.services.job_errors import JobServiceError, NotFoundError
+from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_repo_edit import SkillEditValidationError
 from server.app.services.skill_shared_view import (
     get_shared_materials_view,
@@ -88,10 +88,7 @@ def create_workspace_shared_materials_router(job_db: JobQueries, settings: Setti
     )
     def get_shared_material_file(workspace_id: str, path: str) -> SharedMaterialFileContent:
         _require_workspace(workspace_id)
-        try:
-            content, size, truncated = read_shared_file_content(workspace_id, path)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        content, size, truncated = read_shared_file_content(workspace_id, path)
         return SharedMaterialFileContent(path=path, size=size, content=content, truncated=truncated)
 
     return router
