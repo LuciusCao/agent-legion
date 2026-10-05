@@ -181,3 +181,34 @@ def test_scan_probe_keeps_in_flight_self_contained_jobs_after_a_legacy_republish
         conn.execute("update jobs set status='completed' where id='inflight'")
 
     assert has_self_contained_agent_nodes(queries) is False
+
+
+def test_runtime_change_publishes_a_new_revision_but_model_edits_stay_in_place(
+    tmp_path: Path,
+) -> None:
+    """``execution.runtime`` picks the profile source and is frozen with the
+    snapshot: changing it must publish a new revision so in-flight jobs keep
+    the old one (PR #1039 codex R5); provider/model edits stay in place."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace_id = _workspace(queries)
+    service = WorkflowRevisionService(queries, True)
+
+    def _save(top_execution: dict) -> dict:
+        raw = yaml.safe_load(_SELF_CONTAINED)
+        raw["key"] = workspace_id
+        raw["execution"] = top_execution
+        raw["nodes"]["draft"].pop("requires_labels")
+        return service.save_workspace_revision(workspace_id, workflow_definition_from_mapping(raw))
+
+    first = _save({"runtime": "velites", "provider": "p", "model": "m"})
+    in_place = _save({"runtime": "velites", "provider": "p", "model": "m2"})
+    assert in_place["id"] == first["id"]
+
+    switched = _save({"provider": "p", "model": "m2"})  # runtime removed
+    assert switched["id"] != first["id"]
+    with queries._connect_read() as conn:
+        old = conn.execute(
+            "select definition_json from workflow_revisions where id=%s", (first["id"],)
+        ).fetchone()
+    # The frozen revision still carries the self-contained profile.
+    assert '"runtime":"velites"' in str(old["definition_json"])
