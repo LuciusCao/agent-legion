@@ -288,7 +288,7 @@ flag）收到该 flag 会按未知参数报错，升级顺序为先升 velites �
 `sandbox_network`。
 
 bash 子进程环境白名单（#922 R-4）：bash 子进程不再继承 velites 的完整环境，只
-放行 `PATH`/`HOME`/`TMPDIR`/`LANG`/`LC_*`/`PYTHON*` 与少量 shell 基础变量
+放行 `PATH`/`HOME`/`TMPDIR`/`LANG`/`LC_*`、具名的 Python 解释器变量（`PYTHONPATH`/`PYTHONUTF8`/`PYTHONIOENCODING`/`PYTHONDONTWRITEBYTECODE`/`PYTHONUNBUFFERED`）与少量 shell 基础变量
 （`USER`/`LOGNAME`/`SHELL`/`TERM`/`TZ`/`VIRTUAL_ENV`，见
 `velites/src/tools/bash_proc.rs`），与 Host 侧 `shared/code_sandbox.py::child_env`
 对齐；models.json 以 `$ENV` 引用的 provider 凭据、worker `environment` 注入的
@@ -383,7 +383,7 @@ fail-closed 报错，内置节点不受影响。
   grace → KILL（对齐 Pi 语义，Rust 下用 `process-group` 或手动 `killpg`）；
   命令正常退出后同样对进程组发 TERM，读管道的 drain 有 2s grace 上界，随后
   无条件 KILL 进程组（脱离进程组仍持管道的进程不发信号，只停止 drain 并截断
-  返回）；组长在最终组信号发出前不回收，进程组 id 不会被复用（#942：后台孙
+  返回，并提示脱组进程可能仍在运行）；组长在最终组信号发出前不回收，进程组 id 不会被复用（#942：后台孙
   进程不再挂死工具调用，也不泄漏孤儿）——需要常驻后台进程的用法不再受支持；
   必须能跑 `python3`（skill scripts 依赖，worker 镜像已具备）；
   命令守卫（`tools/command_guard.rs`）在 spawn 前拒绝全盘扫描命令

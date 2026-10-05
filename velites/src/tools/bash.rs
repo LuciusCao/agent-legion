@@ -377,7 +377,10 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         if !text.is_empty() {
             text.push('\n');
         }
-        text.push_str("[Background processes kept the output open after exit; they were killed.]");
+        text.push_str(concat!(
+            "[Output capture stopped; background processes that left the ",
+            "process group may still be running.]"
+        ));
     }
 
     let mut is_error = false;

@@ -198,7 +198,7 @@ async fn bash_drain_is_bounded_when_a_process_leaves_the_group() {
     let text = text_of(&output);
     assert!(text.contains("done"), "missing output: {text}");
     assert!(
-        text.contains("Background processes kept the output open"),
+        text.contains("Output capture stopped"),
         "missing drain note: {text}"
     );
     assert!(elapsed < Duration::from_secs(10), "took {elapsed:?}");

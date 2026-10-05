@@ -44,11 +44,17 @@ const INHERITED_VARS: &[&str] = &[
     "TERM",
     "TZ",
     "VIRTUAL_ENV",
+    "PYTHONPATH",
+    "PYTHONUTF8",
+    "PYTHONIOENCODING",
+    "PYTHONDONTWRITEBYTECODE",
+    "PYTHONUNBUFFERED",
 ];
 
-/// Variable-name prefixes the bash child inherits: locale (`LC_*`) and the
-/// interpreter knobs (`PYTHONPATH`, `PYTHONUTF8`, ...).
-const INHERITED_PREFIXES: &[&str] = &["LC_", "PYTHON"];
+/// Variable-name prefixes the bash child inherits: locale (`LC_*`) only.
+/// Interpreter knobs are listed by exact name above — a broad `PYTHON*`
+/// prefix would also pass arbitrarily named injected variables.
+const INHERITED_PREFIXES: &[&str] = &["LC_"];
 
 fn is_inherited(name: &str) -> bool {
     let by_prefix = INHERITED_PREFIXES.iter().any(|p| name.starts_with(p));
@@ -267,6 +273,8 @@ mod tests {
             "AWS_SECRET_ACCESS_KEY",
             "VELITES_MODELS_PATH",
             "MY_PATH",
+            "PYTHON_API_TOKEN",
+            "PYTHONSTARTUP",
             "path",
         ] {
             assert!(!is_inherited(name), "{name} must not be inherited");
