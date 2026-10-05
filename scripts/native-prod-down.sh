@@ -110,7 +110,7 @@ stop_recorded_pid() {
 # 运行态优先：记录中的实例仍在（签名校验通过）就按记录停，否则回落配置。
 stop_service() {
     local kind="$1" prefix="$2" bind="$3" port="$4" name="$5" grace="$6"
-    local pid rec_bind rec_port
+    local pid rec_bind rec_port rec_pid
     rec_port="$(native_state_get "$STATE_FILE" "${prefix}_PORT")"
     if [[ -n "$rec_port" ]]; then
         rec_bind="$(native_state_get "$STATE_FILE" "${prefix}_BIND")"
@@ -122,6 +122,13 @@ stop_service() {
             stop_recorded_pid "$kind" "$pid" "$rec_bind" "$rec_port" "$name" "$grace"
             return
         fi
+        rec_pid="$(native_state_get "$STATE_FILE" "${prefix}_PID")"
+        if [[ "$rec_pid" =~ ^[0-9]+$ ]] && kill -0 "$rec_pid" 2>/dev/null; then
+            # 记录 PID 仍存活却校验不过：可能是 PID 复用，也可能是无法确认
+            # 身份的本实例——不发信号，但也不能当作已终止删掉记录（#894 R2）。
+            KEEP_STATE=1
+            echo "警告：运行态记录中的 ${name}（pid ${rec_pid}，${rec_bind}:${rec_port}）仍存活但无法确认属于本实例，未发送信号；保留 ${NATIVE_STATE_REL}，请人工核对（ps -p ${rec_pid}）" >&2
+        fi
         echo "提示：运行态记录中的 ${name}（${rec_bind}:${rec_port}）已不在运行或已非本实例，回落按当前配置 ${bind}:${port} 定位"
     fi
     stop_port "$bind" "$port" "$name" "$grace"
@@ -131,11 +138,13 @@ if [[ ! -f "$STATE_FILE" ]]; then
     echo "提示：无运行态记录（${NATIVE_STATE_REL}），按当前配置定位实例"
 fi
 rc=0
+KEEP_STATE=0
 # 先停 worker（停止领新任务并给它上报预算），再停后端
 stop_service worker WORKER "$WORKER_BIND" "$WORKER_PORT" "Worker" 35 || rc=1
 stop_service backend BACKEND "$BACKEND_BIND" "$BACKEND_PORT" "后端" 15 || rc=1
-# 两个服务都已确认停下才删记录；有残留时保留，供下次 down 继续按它定位。
-if [[ "$rc" -eq 0 ]]; then
+# 两个服务都已确认停下（或记录可证陈旧：PID 已不存在、记录地址无本实例）
+# 才删记录；有残留或无法确认时保留，供下次 down 继续按它定位。
+if [[ "$rc" -eq 0 && "$KEEP_STATE" -eq 0 ]]; then
     rm -f "$STATE_FILE"
 fi
 exit "$rc"

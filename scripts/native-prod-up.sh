@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 一键启动原生（非 Docker）生产环境：后端 (8000) + worker (8787)。
 # 前端无独立进程：后端直接服务 frontend/dist（本脚本会先构建）。
-# 幂等：端口已被监听时跳过对应进程的启动。进程经 nohup + caffeinate
+# 幂等：端口已被监听时跳过对应进程的启动。进程经 nohup（caffeinate -w 旁挂）
 # 脱离终端并防睡眠，日志在 data/logs/prod-{backend,worker}.log。
 # 端口与绑定地址可分别用 NATIVE_BACKEND_PORT / NATIVE_WORKER_PORT 与
 # NATIVE_BACKEND_BIND / NATIVE_WORKER_BIND 覆盖（默认 8000/8787 与 127.0.0.1；
@@ -231,6 +231,17 @@ elif [[ "$local_s3_rc" -ne 0 ]]; then
     echo "警告: 跳过本地 ${LOCAL_S3_SERVICE} 启动（原因见上方），材料相关功能将不可用" >&2
 fi
 
+# 防睡眠：caffeinate 以 -w 旁挂到服务进程（服务退出它随之退出），而不是
+# 包装启动——这样 $! 就是服务进程本身，运行态记录能在它开始监听前就记下
+# 可校验的 PID（#894 R2）。无 caffeinate（Linux）时跳过。
+BACKEND_LAUNCH_PID=""
+WORKER_LAUNCH_PID=""
+keep_awake() {
+    if [[ -n "$CAFFEINATE" ]]; then
+        nohup "$CAFFEINATE" -is -w "$1" >/dev/null 2>&1 &
+    fi
+}
+
 # 2. 后端（启动任何进程前先做通配双实例检查，避免只起了一半）
 wildcard_rc=0
 refuse_wildcard_double_instance "后端" "$BACKEND_BIND" "$BACKEND_PORT" NATIVE_BACKEND_BIND || wildcard_rc=1
@@ -255,16 +266,18 @@ else
     # agent_legion 库的操作者，显式授予 opt-in；误连该库的工具脚本
     # （缺 .env 的 worktree export_openapi 等）则被硬拦。
     AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1 \
-    nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m uvicorn \
+    nohup .venv/bin/python -m uvicorn \
         server.app.main:create_prod_app --factory --host "$BACKEND_BIND" --port "$BACKEND_PORT" \
         --timeout-graceful-shutdown 3 \
         --log-config deploy/uvicorn-log-config.json \
         > data/logs/prod-backend.log 2>&1 &
+    BACKEND_LAUNCH_PID=$!
+    keep_awake "$BACKEND_LAUNCH_PID"
 fi
 # 每起一个子进程立即落记录（#894）：nohup 子进程脱离本脚本存活，健康等待
-# 期间被 Ctrl-C / SIGHUP / 作业超时打断也不会丢掉「实例起在哪」。此刻尚未
-# 监听、PID 多半为空，down 届时按记录的 bind:port + 签名定位；就绪后再补 PID。
-native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$WORKER_BIND" "$WORKER_PORT"
+# 期间被 Ctrl-C / SIGHUP / 作业超时打断也不会丢掉「实例起在哪」。记录的是
+# 启动 PID 本身（尚未监听也照记），down 按 PID + 签名 + 工作目录停它。
+native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$BACKEND_LAUNCH_PID" "$WORKER_BIND" "$WORKER_PORT" "$WORKER_LAUNCH_PID"
 
 # 3. Worker
 if port_listening "$WORKER_BIND" "$WORKER_PORT"; then
@@ -272,12 +285,14 @@ if port_listening "$WORKER_BIND" "$WORKER_PORT"; then
 else
     echo "启动 Worker $WORKER_BIND:$WORKER_PORT …"
     ulimit -n 65535
-    nohup ${CAFFEINATE:+$CAFFEINATE -is} .venv/bin/python -m worker.service \
+    nohup .venv/bin/python -m worker.service \
         --state-dir data/agent-worker-service \
         --host "$WORKER_BIND" --port "$WORKER_PORT" \
         > data/logs/prod-worker.log 2>&1 &
+    WORKER_LAUNCH_PID=$!
+    keep_awake "$WORKER_LAUNCH_PID"
 fi
-native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$WORKER_BIND" "$WORKER_PORT"
+native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$BACKEND_LAUNCH_PID" "$WORKER_BIND" "$WORKER_PORT" "$WORKER_LAUNCH_PID"
 
 # 4. 健康等待：最多 5 分钟（#127——冷启动时 PG 冷缓存、schema 引导等
 # 仍可能超过 1 分钟；等待期间每 30s 输出一次进度，避免误报启动失败）。
@@ -286,7 +301,7 @@ for i in $(seq 1 150); do
     curl -sS -m 2 --noproxy '*' --fail -o /dev/null "http://$BACKEND_HEALTH_HOST:$BACKEND_PORT/api/health" >/dev/null 2>&1 && backend_ok=true
     curl -sS -m 2 --noproxy '*' --fail -o /dev/null "http://$WORKER_HEALTH_HOST:$WORKER_PORT/api/health" >/dev/null 2>&1 && worker_ok=true
     if $backend_ok && $worker_ok; then
-        native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$WORKER_BIND" "$WORKER_PORT"
+        native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$BACKEND_LAUNCH_PID" "$WORKER_BIND" "$WORKER_PORT" "$WORKER_LAUNCH_PID"
         echo "原生环境已就绪：后端 http://$BACKEND_HEALTH_HOST:$BACKEND_PORT （含前端 SPA），Worker 控制台 http://$WORKER_HEALTH_HOST:$WORKER_PORT"
         exit 0
     fi
@@ -296,6 +311,6 @@ for i in $(seq 1 150); do
     sleep 2
 done
 # 未就绪也落记录（PID 取得到多少记多少），down 仍能按实际地址收拾残局。
-native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$WORKER_BIND" "$WORKER_PORT"
+native_state_write "$ROOT" "$BACKEND_BIND" "$BACKEND_PORT" "$BACKEND_LAUNCH_PID" "$WORKER_BIND" "$WORKER_PORT" "$WORKER_LAUNCH_PID"
 echo "服务未在预期时间内就绪，日志见 data/logs/prod-{backend,worker}.log" >&2
 exit 1

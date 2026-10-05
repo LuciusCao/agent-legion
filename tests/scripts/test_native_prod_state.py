@@ -37,6 +37,8 @@ _SIGNATURES = {
     "worker": ["-m", "worker.service", "--state-dir", "data/agent-worker-service"],
 }
 # argv 尾部 [..., "--host", host, "--port", port]：与真实启动命令同形。
+# 启动后尚未监听的服务（R2：nohup 之后、bind 之前被中断）：只睡不监听。
+_NOT_LISTENING = "import time\ntime.sleep(600)\n"
 _LISTENER = (
     "import socket, sys, time\n"
     "fam = socket.AF_INET6 if ':' in sys.argv[-3] else socket.AF_INET\n"
@@ -227,6 +229,9 @@ def test_down_never_kills_reused_pid(repo: Path, procs: list, tmp_path: Path) ->
     assert stray.alive() and foreign_worker.alive()
     assert result.stdout.count("回落按当前配置") == 2
     assert "未在运行，跳过" in result.stdout
+    # R2：记录 PID 仍存活却无法确认身份——不发信号，也不删记录。
+    assert "无法确认属于本实例" in result.stderr
+    assert (repo / "data" / "native-prod.state").exists()
 
 
 def test_down_without_record_falls_back_to_config(repo: Path, procs: list) -> None:
@@ -280,7 +285,9 @@ def test_state_write_records_listener_pid_and_address(repo: Path, procs: list) -
     没起来的服务 PID 留空。"""
     port_b, port_w = _free_port(), _free_port()
     backend = _spawn(procs, repo, "backend", port_b)
-    result = _lib_call(repo, f'native_state_write "$ROOT" 127.0.0.1 {port_b} 0.0.0.0 {port_w}\n')
+    result = _lib_call(
+        repo, f'native_state_write "$ROOT" 127.0.0.1 {port_b} "" 0.0.0.0 {port_w} ""\n'
+    )
     assert result.returncode == 0, result.stderr
     state = (repo / "data" / "native-prod.state").read_text(encoding="utf-8")
     assert f"BACKEND_PID={backend.pid}\n" in state
@@ -330,7 +337,7 @@ def test_state_pid_and_address_come_from_same_listener(repo: Path, procs: list) 
     port = _free_port()
     old = _spawn(procs, repo, "backend", port, host="::1")
     new = _spawn(procs, repo, "backend", port, host="127.0.0.1")
-    result = _lib_call(repo, f'native_state_write "$ROOT" 127.0.0.1 {port} 127.0.0.1 1\n')
+    result = _lib_call(repo, f'native_state_write "$ROOT" 127.0.0.1 {port} "" 127.0.0.1 1 ""\n')
     assert result.returncode == 0, result.stderr
     state = (repo / "data" / "native-prod.state").read_text(encoding="utf-8")
     assert f"BACKEND_PID={new.pid}\n" in state
@@ -349,3 +356,48 @@ def test_up_records_state_right_after_each_launch() -> None:
     after_worker = up.index(write, worker_start)
     assert after_backend < worker_start
     assert worker_start < after_worker < health_loop
+
+
+def test_down_stops_launched_instance_before_it_listens(repo: Path, procs: list) -> None:
+    """R2 finding：up 在 nohup 之后、服务开始监听之前被中断，记录里只有启动
+    PID；操作者随后改了配置再 down——仍须按记录 PID + 签名 + 工作目录停掉
+    它（不依赖监听 socket），而不是回落新配置后删记录、留旧进程稍后起来。"""
+    old_b, old_w = _free_port(), _free_port()
+    argv = [sys.executable, "-c", _NOT_LISTENING, *_SIGNATURES["backend"]]
+    pending = _detach(procs, repo, [*argv, "--host", "127.0.0.1", "--port", str(old_b)])
+    deadline = time.monotonic() + 10
+    while (
+        "server.app.main"
+        not in subprocess.run(
+            ["ps", "-ww", "-o", "command=", "-p", str(pending.pid)], capture_output=True, text=True
+        ).stdout
+    ):
+        assert time.monotonic() < deadline, "fake backend did not exec"
+        time.sleep(0.05)
+    result = _lib_call(
+        repo,
+        f'native_state_write "$ROOT" 127.0.0.1 {old_b} {pending.pid} 127.0.0.1 {old_w} ""\n',
+    )
+    assert result.returncode == 0, result.stderr
+    state = (repo / "data" / "native-prod.state").read_text(encoding="utf-8")
+    assert f"BACKEND_PID={pending.pid}\n" in state
+    _write_config(repo, _free_port(), _free_port())
+
+    down = _run_down(repo)
+
+    assert down.returncode == 0, down.stdout + down.stderr
+    assert _exited(pending)
+    assert "按运行态记录停止" in down.stdout
+    assert not (repo / "data" / "native-prod.state").exists()
+
+
+def test_up_records_launch_pid_and_side_attaches_caffeinate() -> None:
+    """R2 接线钉：服务进程直接 nohup（不经 caffeinate 包装），$! 即服务 PID 并
+    随即写入记录；caffeinate 以 -w 旁挂防睡眠。"""
+    up = (ROOT / "scripts" / "native-prod-up.sh").read_text(encoding="utf-8")
+    assert "nohup ${CAFFEINATE" not in up
+    assert 'nohup "$CAFFEINATE" -is -w "$1"' in up
+    for kind, log in (("BACKEND", "prod-backend.log"), ("WORKER", "prod-worker.log")):
+        start = up.index(f"> data/logs/{log} 2>&1 &")
+        assert up.index(f"{kind}_LAUNCH_PID=$!", start) < up.index("native_state_write", start)
+    assert up.count('"$BACKEND_LAUNCH_PID" "$WORKER_BIND" "$WORKER_PORT" "$WORKER_LAUNCH_PID"') == 4

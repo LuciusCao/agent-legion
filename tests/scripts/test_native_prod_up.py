@@ -485,7 +485,7 @@ def test_wildcard_guard_runs_before_any_process_starts() -> None:
     guard_worker = NATIVE_PROD_UP.index(
         'refuse_wildcard_double_instance "Worker" "$WORKER_BIND" "$WORKER_PORT"'
     )
-    first_start = NATIVE_PROD_UP.index("nohup ${CAFFEINATE")
+    first_start = NATIVE_PROD_UP.index("nohup .venv/bin/python")
     assert guard_backend < first_start and guard_worker < first_start
     for kind in ("backend", "worker"):  # #894 运行态记录守卫同样在启动前
         assert NATIVE_PROD_UP.index(f"refuse_recorded_instance_elsewhere {kind} ") < first_start

@@ -77,20 +77,25 @@ native_find_instance_pid() {
     return 0
 }
 
-# 写记录（原子替换）：参数为 root、backend bind/port、worker bind/port。
-# PID 取该 bind:port 上签名匹配的实际监听进程（caffeinate 包装时 $! 不是
-# 监听者）；刚 nohup 起来尚未监听时 PID 留空，down 届时按记录地址查找。
+# 写记录（原子替换）：参数为 root、backend bind/port/启动 PID、worker
+# bind/port/启动 PID。启动 PID 是 up 刚 nohup 出的服务进程本身（$!，
+# caffeinate 改为 -w 旁挂、不再包装），尚未监听也照记——down 按 PID +
+# 签名 + 工作目录识别，不依赖监听 socket。启动 PID 为空（本次 up 未启动、
+# 沿用已在运行的实例）时取该 bind:port 上签名匹配的实际监听进程。
 native_state_write() {
-    local root="$1" bbind="$2" bport="$3" wbind="$4" wport="$5" file tmp
+    local root="$1" bbind="$2" bport="$3" bpid="$4" wbind="$5" wport="$6" wpid="$7"
+    local file tmp
     file="$root/$NATIVE_STATE_REL"
     tmp="$file.tmp.$$"
     mkdir -p "$(dirname "$file")"
+    [[ -n "$bpid" ]] || bpid="$(native_find_instance_pid "$root" backend "$bbind" "$bport")"
+    [[ -n "$wpid" ]] || wpid="$(native_find_instance_pid "$root" worker "$wbind" "$wport")"
     {
         echo "# native-prod-up 运行态记录（#894），native-prod-down 以它定位实例；勿手改"
-        echo "BACKEND_PID=$(native_find_instance_pid "$root" backend "$bbind" "$bport")"
+        echo "BACKEND_PID=$bpid"
         echo "BACKEND_BIND=$bbind"
         echo "BACKEND_PORT=$bport"
-        echo "WORKER_PID=$(native_find_instance_pid "$root" worker "$wbind" "$wport")"
+        echo "WORKER_PID=$wpid"
         echo "WORKER_BIND=$wbind"
         echo "WORKER_PORT=$wport"
     } >"$tmp"
