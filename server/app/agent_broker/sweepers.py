@@ -16,6 +16,7 @@ from server.app.agent_broker.claim import cancel_request
 from server.app.agent_broker.heartbeat_deferral import HeartbeatDeferral
 from server.app.agent_broker.lease_reclaim_audit import ReclaimTally
 from server.app.agent_broker.manifest_trim import MANIFEST_TRIM
+from server.app.agent_broker.sweep_batch_reads import SWEEP_BATCH_LIMIT, batch_reads
 from server.app.db.transaction import write_transaction
 from server.app.executors._lease_control import sync_job_status
 from server.app.workflows.sharding_requeue import (
@@ -45,11 +46,16 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
     # state in this sweep, for the status panel.
     released: list[tuple[str, str]] = []
     with write_transaction(broker.database_dsn) as conn:
+        # #957: 每周期至多 SWEEP_BATCH_LIMIT 行，最老心跳优先，剩余留到下一
+        # 周期——积压时单事务不再锁全部过期行。SKIP LOCKED 照旧让并发 sweeper
+        # 拿互斥子集；被 #566 延期的行最多停留 2×TTL（硬截止后必走过期分支），
+        # 挤占批额的时长有界。
         rows = conn.execute(
             "select *, hashtext('agent-ws:' || workspace_id)::int as ws_lock_key"
             " from agent_execution_requests"
-            " where state in ('claimed', 'reporting') and heartbeat_at<%s for update skip locked",
-            (cutoff,),
+            " where state in ('claimed', 'reporting') and heartbeat_at<%s"
+            " order by heartbeat_at, execution_id limit %s for update skip locked",
+            (cutoff, SWEEP_BATCH_LIMIT),
         ).fetchall()
         # #566: expired claims on a Worker whose control plane is still
         # fresh are deferred (bounded), not expired — heartbeat starvation
@@ -66,26 +72,24 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
         # claimed/reporting rows — the mutation side's cancel only matches
         # 'queued' rows and never locks these, so row-lock → job-mutation
         # cannot close a cycle.
-        for row in sorted(rows, key=lambda r: (int(r["ws_lock_key"]), str(r["job_id"]))):
+        ordered = sorted(rows, key=lambda r: (int(r["ws_lock_key"]), str(r["job_id"])))
+        # #957: 先按同一全局序把本批涉及的 job 锁全部取到（每 job 一次，xact
+        # 锁可重入、从不提前释放），再一次性批读代次与 lease 状态——每行读数
+        # 仍发生在持有其 job 锁之后，与逐行"锁→读"的语义一致；循环内只剩写。
+        for job_id in dict.fromkeys(str(r["job_id"]) for r in ordered):
+            conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"job-mutation:{job_id}",))
+        generations, lease_status = batch_reads(conn, ordered)
+        for row in ordered:
             lease_id = row["lease_id"]
             node_run_id = row["node_run_id"]
-            conn.execute(
-                "select pg_advisory_xact_lock(hashtext(%s))",
-                (f"job-mutation:{row['job_id']}",),
-            )
-            job_row = conn.execute(
-                "select execution_generation from jobs where id=%s", (row["job_id"],)
-            ).fetchone()
             # 代次 CAS：请求落戳代次 != jobs 现值 = 该 claim 属于 reset 前的
             # 旧代次。lease 删除与 node_run 落库照常；job_nodes/jobs 回写跳过
             # （重置后的新代次行由新代次的调度负责）。
-            generation_stale = (
-                int(job_row["execution_generation"]) if job_row is not None else None
-            ) != int(row["execution_generation"])
-            lease = conn.execute(
-                "select status from executor_leases where id=%s", (lease_id,)
-            ).fetchone()
-            if lease is not None and lease["status"] != "active":
+            generation_stale = generations.get(str(row["job_id"])) != int(
+                row["execution_generation"]
+            )
+            status = lease_status.get(str(lease_id)) if lease_id is not None else None
+            if status is not None and status != "active":
                 # The result path already released this lease (finish
                 # committed, mark_done lost the race or the process
                 # crashed between the two commits) — the request is owned
@@ -101,7 +105,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 )
                 released.append((str(row["worker_id"]), str(row["workspace_id"])))
                 continue
-            if lease is None:
+            if status is None:
                 continue
             if deferral.should_defer(row):
                 deferred += 1
@@ -112,11 +116,12 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 f" job={row['job_id']} worker={row['worker_id']} attempt={row['attempt']}"
             )
             reclaims.note_expired(row, generation_stale)  # #681: worker-level burst tally
-            conn.execute("delete from executor_leases where id=%s", (lease_id,))
+            # #957: lease 删除与 node_run 落库合为一条（数据修改 CTE 同语句必执行）。
             conn.execute(
-                "update node_runs set status='failed', finished_at=current_timestamp,"
+                "with gone as (delete from executor_leases where id=%s)"
+                " update node_runs set status='failed', finished_at=current_timestamp,"
                 " error_message='Agent Worker heartbeat expired' where id=%s",
-                (node_run_id,),
+                (lease_id, node_run_id),
             )
             released.append((str(row["worker_id"]), str(row["workspace_id"])))
             if generation_stale:
