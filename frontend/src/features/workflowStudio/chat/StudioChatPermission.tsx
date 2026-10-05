@@ -1,5 +1,13 @@
-import type { PermissionView } from './studioChatMessages'
+import type { ChatMessage, PermissionView } from './studioChatMessages'
 import styles from './StudioChatPanel.module.css'
+
+/** 权限消息行的 request_id（消息列表按它查 PermissionView；从
+ * StudioChatMessageList 迁来，#882 体积预算拆分）。 */
+export function permissionRequestId(message: ChatMessage): string {
+  if (message.kind !== 'permission') return ''
+  const content = message.content as Record<string, unknown>
+  return typeof content?.request_id === 'string' ? content.request_id : ''
+}
 
 type Props = {
   permission: PermissionView
