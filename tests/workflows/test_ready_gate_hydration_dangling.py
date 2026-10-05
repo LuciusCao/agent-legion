@@ -20,6 +20,7 @@ import pytest
 
 from server.app.db.connection import connect_database
 from server.app.jobs import JobQueries
+from server.app.services.hydration_defer_board import HYDRATION_DEFER_BOARD
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflow_worker.hydration_dangling import (
@@ -149,6 +150,13 @@ def test_dangling_row_without_rewriter_stays_deferred_with_suggested_action(
     assert len(escalations) == 1
     assert "hash_mismatch" in escalations[0]
     assert "suggested action: rerun producer node(s) ['a']" in escalations[0]
+    # #887：同一升级项上公告板，job 详情据此在等待节点 b 上提示重跑 a。
+    notices = HYDRATION_DEFER_BOARD.by_waiting_node(job["id"])
+    assert [(n.input_name, n.outcome, n.rerun_nodes) for n in notices["b"]] == [
+        ("a_out.json", "hash_mismatch", ("a",))
+    ]
+    worker.state.hydration_dangling.retain(set())
+    assert HYDRATION_DEFER_BOARD.for_job(job["id"]) == ()
     worker.stop()
 
 

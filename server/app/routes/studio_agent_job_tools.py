@@ -21,7 +21,6 @@ from server.app.auth.dependencies import (
     require_studio_agent_workspace,
 )
 from server.app.jobs import JobQueries
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_agent_job_tool_contracts import (
     StudioAgentArtifactResponse,
     StudioAgentJobCompareResponse,
@@ -30,7 +29,6 @@ from server.app.routes.studio_agent_job_tool_contracts import (
     StudioAgentJobListResponse,
     StudioAgentJobLogsResponse,
 )
-from server.app.services.job_errors import JobServiceError
 from server.app.services.studio_agent_job_tools import StudioAgentJobToolsService
 from server.app.settings import Settings
 
@@ -56,10 +54,7 @@ def create_studio_agent_job_tools_router(
         user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
         node_key: str | None = None,
     ) -> StudioAgentJobContextResponse:
-        try:
-            context = _service().get_job_context(session_id, user, job_id, node_key)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        context = _service().get_job_context(session_id, user, job_id, node_key)
         return StudioAgentJobContextResponse.model_validate(context)
 
     @workspace_scoped.get(
@@ -69,10 +64,7 @@ def create_studio_agent_job_tools_router(
     def list_jobs(
         workspace_id: str, status: str | None = None, limit: int = 20
     ) -> StudioAgentJobListResponse:
-        try:
-            result = _service().list_jobs(workspace_id, status=status, limit=limit)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        result = _service().list_jobs(workspace_id, status=status, limit=limit)
         return StudioAgentJobListResponse.model_validate(result)
 
     # Registered BEFORE /jobs/{job_id} so the literal segment wins.
@@ -83,10 +75,7 @@ def create_studio_agent_job_tools_router(
     def compare_jobs(
         workspace_id: str, job_id_a: str, job_id_b: str
     ) -> StudioAgentJobCompareResponse:
-        try:
-            result = _service().compare_jobs(workspace_id, job_id_a, job_id_b)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        result = _service().compare_jobs(workspace_id, job_id_a, job_id_b)
         return StudioAgentJobCompareResponse.model_validate(result)
 
     @workspace_scoped.get(
@@ -94,10 +83,7 @@ def create_studio_agent_job_tools_router(
         response_model=StudioAgentJobDetail,
     )
     def get_job_detail(workspace_id: str, job_id: str) -> StudioAgentJobDetail:
-        try:
-            detail = _service().get_job_detail(workspace_id, job_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        detail = _service().get_job_detail(workspace_id, job_id)
         return StudioAgentJobDetail.model_validate(detail)
 
     @workspace_scoped.get(
@@ -110,10 +96,7 @@ def create_studio_agent_job_tools_router(
         node_key: str | None = None,
         run_id: int | None = None,
     ) -> StudioAgentJobLogsResponse:
-        try:
-            logs = _service().get_node_logs(workspace_id, job_id, node_key, run_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        logs = _service().get_node_logs(workspace_id, job_id, node_key, run_id)
         return StudioAgentJobLogsResponse.model_validate(logs)
 
     @workspace_scoped.get(
@@ -123,10 +106,7 @@ def create_studio_agent_job_tools_router(
     def read_artifact(
         workspace_id: str, job_id: str, artifact_name: str
     ) -> StudioAgentArtifactResponse:
-        try:
-            artifact = _service().read_artifact(workspace_id, job_id, artifact_name)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        artifact = _service().read_artifact(workspace_id, job_id, artifact_name)
         return StudioAgentArtifactResponse.model_validate(artifact)
 
     router.include_router(workspace_scoped)

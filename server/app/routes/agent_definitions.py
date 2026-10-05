@@ -20,10 +20,8 @@ from server.app.routes.agent_definition_contracts import (
     AgentVersionsResponse,
     AgentVersionSummary,
 )
-from server.app.routes.job_http import raise_job_http_error
 from server.app.services.agent_definition_create import create_agent_draft
 from server.app.services.agent_service import AgentService
-from server.app.services.job_errors import JobServiceError
 from server.app.services.versioned_entities import VersionedEntity
 
 # The catalog is workspace-scoped (schema v46): every endpoint takes the
@@ -116,14 +114,11 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
         request: AgentCreateRequest, workspace_id: WorkspaceId, user: UserDep
     ) -> AgentVersionResponse:
         definition = _parse_definition(request)
-        try:
-            # #407：agent_id 省略时按 capability 生成，同 capability 已有
-            # Agent 则 409 引导直接编辑（create-entry policy 见 service 层）。
-            entity = create_agent_draft(
-                _service(workspace_id), request.agent_id, definition, f"user:{user['id']}"
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        # #407：agent_id 省略时按 capability 生成，同 capability 已有
+        # Agent 则 409 引导直接编辑（create-entry policy 见 service 层）。
+        entity = create_agent_draft(
+            _service(workspace_id), request.agent_id, definition, f"user:{user['id']}"
+        )
         return _version_response(entity)
 
     @router.get("/agent-definitions/{agent_id}", response_model=AgentDetailResponse)
@@ -153,10 +148,7 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
         agent_id: str, request: AgentDefinitionPayload, workspace_id: WorkspaceId, user: UserDep
     ) -> AgentVersionResponse:
         definition = _parse_definition(request)
-        try:
-            entity = _service(workspace_id).save_draft(agent_id, definition, f"user:{user['id']}")
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        entity = _service(workspace_id).save_draft(agent_id, definition, f"user:{user['id']}")
         return _version_response(entity)
 
     @router.post("/agent-definitions/{agent_id}/publish", response_model=AgentVersionResponse)
@@ -166,10 +158,7 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
         request: Annotated[AgentPublishRequest, Body()],
         _guard: ScopeGuard = None,
     ) -> AgentVersionResponse:
-        try:
-            entity = _service(workspace_id).publish(agent_id, request.expected_hash)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        entity = _service(workspace_id).publish(agent_id, request.expected_hash)
         return _version_response(entity)
 
     @router.post("/agent-definitions/{agent_id}/rollback", response_model=AgentVersionResponse)
@@ -180,34 +169,21 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
         user: UserDep,
         _guard: ScopeGuard = None,
     ) -> AgentVersionResponse:
-        try:
-            entity = _service(workspace_id).rollback(
-                agent_id, request.version, f"user:{user['id']}"
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        entity = _service(workspace_id).rollback(agent_id, request.version, f"user:{user['id']}")
         return _version_response(entity)
 
     @router.post("/agent-definitions/{agent_id}/copy", response_model=AgentVersionResponse)
     def copy_agent_definition(
         agent_id: str, request: AgentCopyRequest, workspace_id: WorkspaceId, user: UserDep
     ) -> AgentVersionResponse:
-        try:
-            entity = _service(workspace_id).copy(
-                agent_id, request.new_agent_id, f"user:{user['id']}"
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        entity = _service(workspace_id).copy(agent_id, request.new_agent_id, f"user:{user['id']}")
         return _version_response(entity)
 
     @router.delete("/agent-definitions/{agent_id}", response_model=AgentArchiveResponse)
     def archive_agent_definition(
         agent_id: str, workspace_id: WorkspaceId, _guard: ScopeGuard = None
     ) -> AgentArchiveResponse:
-        try:
-            archived = _service(workspace_id).archive_all(agent_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        archived = _service(workspace_id).archive_all(agent_id)
         return AgentArchiveResponse(archived=archived)
 
     return router
