@@ -115,10 +115,12 @@ class ApprovalDecisionService:
         # ``replace_durable`` inside it, after the job-mutation-locked status guard
         # passes — a duplicate or late decision fails the guard before
         # touching the committed artifact, and the gate never completes with
-        # the artifact missing for downstream inputs. A replace failure rolls
-        # the transaction back; a commit failure after the replace leaves a
-        # file the next decision on the still-awaiting gate overwrites. The
-        # directory fsync also lands before the commit (#975).
+        # the artifact missing for downstream inputs. The directory fsync also
+        # lands before the commit (#975). A failed replace rolls the
+        # transaction back with the committed file untouched; once the replace
+        # succeeded, a failed directory fsync or commit still rolls the DB
+        # back but leaves the uncommitted file in place — the next decision on
+        # the still-awaiting gate overwrites it.
         artifact_name = f"{node_key}.approval.json"
         target = self._artifact_path(job, artifact_name)
         staged = stage_json(target, decision)

@@ -2,10 +2,12 @@
 
 一个 guarded transaction 同时提交审计行与节点重置：锁内重查 failed-
 upstream（含 stale 集隐式生产者）→ 状态守卫 + 决策行 → 暂存 → 节点重置
-→ 换入 feedback（暂存已扫完、提交前就位，两种旧竞态都不存在）；失败整体
-回滚。#963：feedback 在锁外先写 fsync 临时文件，守卫通过后才在锁内
-durable 换入（#975 目录 fsync 先于提交）——重复 / 并发 rework 在守卫处
-冲突，不碰已提交的反馈产物。
+→ 换入 feedback（暂存已扫完、提交前就位，两种旧竞态都不存在）；失败时
+DB 与暂存产物整体回滚。#963：feedback 在锁外先写 fsync 临时文件，守卫
+通过后才在锁内 durable 换入（#975 目录 fsync 先于提交）——重复 / 并发
+rework 在守卫处冲突，不碰已提交的反馈产物。残留（与 #951 approve 同一
+取舍）：os.replace 已成功、之后目录 fsync 或提交失败时，本地 feedback
+文件保留这次未提交的内容（gate 仍待审），由下一次决策覆盖。
 """
 
 from __future__ import annotations

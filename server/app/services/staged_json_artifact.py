@@ -4,7 +4,10 @@ Split into staging and swap so a caller can stage outside a transaction and
 swap inside it after its guard passes (approval decisions, #929 / #963);
 readers never observe a half-written artifact. The swap is durable (#975):
 ``replace_durable`` fsyncs the target directory after ``os.replace`` so the
-new directory entry survives a host crash once the caller commits.
+new directory entry survives a host crash once the caller commits. A swap
+cannot be undone: if the directory fsync or the caller's commit fails after
+``os.replace`` succeeded, the target keeps the uncommitted content and the
+caller's next write overwrites it.
 """
 
 from __future__ import annotations
