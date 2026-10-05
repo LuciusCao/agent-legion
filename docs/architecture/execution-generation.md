@@ -630,6 +630,10 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
     `DANGLING_ESCALATION_PASSES` 轮 object_missing / hash_mismatch 后，
     会被在途生产者重写的名字退出 defer 集，否则维持 defer 并打一次带
     suggested action 的 WARNING（`workflow_worker/hydration_dangling.py`）。
+    #887 起维持 defer 的升级项同时上进程内公告板
+    （`services/hydration_defer_board.py`，与计数同生共死、不落库），
+    job 详情接口给受阻的等待节点下发 `hydration_defer`（原因 + 建议重跑
+    的生产节点），UI 据此区分普通排队与「输入恢复不全」。
     另：`.part` 固定暂存名在 hydration 与 claim
     侧 `restore_missing_inputs` 并发恢复同名时互相截断、双方 digest 失
     败后各自重试——自愈，仅浪费一次下载，不修。
