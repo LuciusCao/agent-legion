@@ -15,6 +15,7 @@ import pytest
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.unclaimable import fail_unclaimable_model_requests
+from server.app.agent_catalog import AgentDefinition
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.workflow_worker.agent_stock import AgentStockConfig
 from server.app.workflow_worker.agent_stock_snapshot import load_stock_snapshot
@@ -119,9 +120,10 @@ def test_legacy_rows_keep_the_default_source_and_null_profile_columns(job_db) ->
     }
 
 
-def test_legacy_rows_still_require_the_route(job_db) -> None:
-    """The dual track keeps legacy validation: a legacy request without a
-    materialized route is rejected exactly as before."""
+def test_legacy_rows_without_route_still_need_the_published_definition(job_db) -> None:
+    """A route-less legacy request (job frozen before the node became
+    self-contained, PR #1039 codex R3) is accepted only while its Agent
+    definition hash is still the published one."""
     replace_agent_catalog(_WS, {})
     with job_db.connect() as conn:
         conn.execute(
@@ -129,7 +131,7 @@ def test_legacy_rows_still_require_the_route(job_db) -> None:
             " values ('no-route', %s, 'question', 'no-route')",
             (_WS,),
         )
-    with pytest.raises(ValueError, match="not routed to an Agent"):
+    with pytest.raises(ValueError, match="Agent definition is unavailable"):
         _broker(job_db).enqueue(
             AgentExecutionRequest(
                 workspace_id=_WS,
@@ -141,6 +143,31 @@ def test_legacy_rows_still_require_the_route(job_db) -> None:
                 manifest={"job_id": "no-route", "execution": _MANIFEST_EXECUTION},
             )
         )
+
+
+def test_legacy_rows_without_route_enqueue_against_the_published_definition(job_db) -> None:
+    definition = AgentDefinition(capability="draft", runtime="pi", skill="g/s")
+    replace_agent_catalog(_WS, {"drafter": definition})
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into jobs(id, workspace_id, source_type, source_id)"
+            " values ('routeless', %s, 'question', 'routeless')",
+            (_WS,),
+        )
+        conn.execute("insert into job_nodes(job_id, node_key) values ('routeless', 'draft')")
+    execution_id = _broker(job_db).enqueue(
+        AgentExecutionRequest(
+            workspace_id=_WS,
+            job_id="routeless",
+            workflow_key=_WS,
+            node_key="draft",
+            agent_id="drafter",
+            agent_definition_hash=definition.definition_hash(),
+            manifest={"job_id": "routeless", "execution": _MANIFEST_EXECUTION},
+        )
+    )
+    assert execution_id is not None
+    assert _row(job_db, execution_id)["profile_source"] == "agent_definition"
 
 
 def test_node_rows_claim_from_row_runtime_and_labels(job_db) -> None:

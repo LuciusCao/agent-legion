@@ -66,3 +66,43 @@ def test_scan_gate_probe_opens_on_either_source(
         ),
     ):
         assert agent_node_profile_catalog.agent_profiles_may_exist("dsn") is expected
+
+
+def _legacy_node() -> WorkflowNode:
+    return WorkflowNode(
+        key="draft", label="draft", capability="draft", node_type="agent", outputs=["o.json"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("catalog", "expected"),
+    [({"drafter": "draft"}, ("agent", "drafter")), ({}, ("error", ""))],
+)
+def test_route_less_legacy_agent_node_never_falls_into_the_code_pool(
+    catalog: dict[str, str], expected: tuple[str, str]
+) -> None:
+    """PR #1039 codex R3: the active revision made the node self-contained
+    (no route row) while this job's frozen snapshot keeps the legacy node —
+    resolve its Agent by capability, or fail with an actionable message."""
+    from server.app.agent_catalog import AgentDefinition
+    from server.app.workflow_worker import routing_fallback
+    from server.app.workflow_worker.routing import NodeRoute
+
+    definitions = {
+        agent_id: AgentDefinition(capability=capability, runtime="pi")
+        for agent_id, capability in catalog.items()
+    }
+    worker = MagicMock()
+    worker.state.route_cache = {}
+    with (
+        patch(
+            "server.app.workflow_worker.routing._resolve_uncached",
+            return_value=NodeRoute("executor", target_id="code"),
+        ),
+        patch.object(routing_fallback, "legacy_agent_catalog", return_value=definitions),
+    ):
+        route = resolve_node_route(worker, "ws", "ws", _legacy_node())
+
+    assert (route.kind, route.target_id) == expected
+    if route.kind == "error":
+        assert "upgrade the job" in route.error_message

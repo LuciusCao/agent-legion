@@ -117,9 +117,13 @@ def _validate_agent_route(conn: Any, request: AgentExecutionRequest) -> int:
         """,
         (request.workspace_id, request.node_key),
     ).fetchone()
-    if route is None or route["target_kind"] != "agent":
+    # No row at all: the active revision made the node self-contained
+    # (#933) while this job's frozen snapshot still dispatches it through its
+    # Agent definition — the definition-hash checks below stay authoritative.
+    # A row that routes elsewhere is still a route change.
+    if route is not None and route["target_kind"] != "agent":
         raise ValueError("workspace node is not routed to an Agent")
-    if route["target_id"] != request.agent_id:
+    if route is not None and route["target_id"] != request.agent_id:
         raise ValueError("workspace node Agent route changed before enqueue")
     if request.pinned_agent_version is not None:
         # Quality replay: the pin matches one immutable version row

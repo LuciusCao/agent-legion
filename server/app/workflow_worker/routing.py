@@ -21,6 +21,7 @@ from server.app.services.agent_node_profile_types import (
     PROFILE_SOURCE_DEFINITION,
     PROFILE_SOURCE_NODE,
 )
+from server.app.workflow_worker.routing_fallback import legacy_agent_fallback_route
 from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 
 if TYPE_CHECKING:
@@ -68,9 +69,17 @@ def resolve_node_route(
     now = time.monotonic()
     cached = worker.state.route_cache.get(key)
     if cached is not None and now - cached[0] < ROUTE_CACHE_TTL_SECONDS:
-        return cached[1]
-    route = _resolve_uncached(worker, workspace_id, workflow_key, node_key, capability)
-    worker.state.route_cache[key] = (now, route)
+        route = cached[1]
+    else:
+        route = _resolve_uncached(worker, workspace_id, workflow_key, node_key, capability)
+        worker.state.route_cache[key] = (now, route)
+    if route.kind == "executor" and node.node_type == "agent":
+        # A legacy (non-self-contained) agent node with no route row: its
+        # job froze an older revision, and the active one has since made the
+        # node self-contained (no route materialized, #933). Never send an
+        # agent node to the code pool — resolve the legacy profile from its
+        # capability (uncached: per-snapshot, like the self-contained path).
+        return legacy_agent_fallback_route(worker, workspace_id, node)
     return route
 
 
