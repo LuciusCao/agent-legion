@@ -916,6 +916,7 @@
     "scripts/architecture/service_data_boundary_baseline.py": 76,
     "scripts/architecture/service_data_boundary_history.py": 80,
     "scripts/architecture/service_data_boundary_monotonicity.py": 75,
+    "scripts/architecture/shell_var_boundary.py": 62,
     "scripts/architecture/sql_placeholders.py": 68,
     "scripts/architecture/sql_placeholders_baseline.py": 61,
     "scripts/architecture/test_placement.py": 68,
