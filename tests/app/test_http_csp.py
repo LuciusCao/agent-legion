@@ -67,6 +67,7 @@ def test_connect_src_lists_request_host_sockets_only_for_plain_hosts() -> None:
     [
         (None, ()),
         (S3Settings(bucket="b"), ("https://*.amazonaws.com",)),
+        (S3Settings(bucket="b", region="cn-north-1"), ("https://*.amazonaws.com.cn",)),
         (S3Settings(bucket="b", endpoint_url="http://seaweed:8333"), ("http://seaweed:8333",)),
         (
             S3Settings(

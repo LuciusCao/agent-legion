@@ -42,8 +42,10 @@ from server.app.storage.s3_settings import S3Settings
 
 CSP_HEADER = "content-security-policy"
 # Presigned URLs against AWS proper (no endpoint configured) are
-# virtual-hosted: https://<bucket>.s3[.<region>].amazonaws.com/...
+# virtual-hosted: https://<bucket>.s3[.<region>].amazonaws.com/... — and the
+# AWS China partition (cn-* regions) signs against amazonaws.com.cn instead.
 _AWS_S3_SOURCE = "https://*.amazonaws.com"
+_AWS_CN_S3_SOURCE = "https://*.amazonaws.com.cn"
 
 
 def object_store_connect_sources(s3: S3Settings | None) -> tuple[str, ...]:
@@ -52,7 +54,7 @@ def object_store_connect_sources(s3: S3Settings | None) -> tuple[str, ...]:
         return ()
     endpoint = s3.public_endpoint_url or s3.endpoint_url
     if not endpoint:
-        return (_AWS_S3_SOURCE,)
+        return (_AWS_CN_S3_SOURCE if s3.region.startswith("cn-") else _AWS_S3_SOURCE,)
     parts = urlsplit(endpoint)
     if parts.scheme not in ("http", "https") or not parts.netloc:
         return ()
