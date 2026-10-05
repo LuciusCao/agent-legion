@@ -93,9 +93,9 @@ def _agent(capability: str, **overrides) -> AgentDefinition:
 @pytest.fixture
 def fixture_db(tmp_path: Path) -> JobQueries:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    queries.create_workspace("Backfill", default_workflow_key="ws_bf", workspace_id="ws_bf")
-    queries.create_workspace("Empty", default_workflow_key="ws_empty", workspace_id="ws_empty")
-    queries.create_workspace("Broken", default_workflow_key="ws_broken", workspace_id="ws_broken")
+    queries.create_workspace("Backfill", workspace_id="ws_bf")
+    queries.create_workspace("Empty", workspace_id="ws_empty")
+    queries.create_workspace("Broken", workspace_id="ws_broken")
     # First catalog publishes ``old``; the second replaces it → ``old`` archived.
     replace_agent_catalog("ws_bf", {"old": _agent("legacy")})
     replace_agent_catalog(
@@ -235,7 +235,7 @@ def test_active_revision_resolves_by_route_and_reports_drift(tmp_path: Path) -> 
     rewrites routes). Active: backfill from the route target + route_drift;
     draft: capability resolution (v2), no drift."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    queries.create_workspace("Drift", default_workflow_key="ws_drift", workspace_id="ws_drift")
+    queries.create_workspace("Drift", workspace_id="ws_drift")
     replace_agent_catalog("ws_drift", {"gen-v1": _agent("generate", runtime="pi")})
     WorkflowRevisionService(queries).publish_workspace_revision(
         "ws_drift", workflow_definition_from_yaml_string(_DRIFT_YAML)
