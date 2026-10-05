@@ -187,3 +187,32 @@ def test_watcher_adopts_kimi_code_layout_once_session_appears(chat, home, caplog
     assert all(event["task_id"] != "agent-late0001" for event in _events(service))
     runtime.handle.send_prompt.assert_not_called()
     assert "Kimi completion watcher failed" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "document", ["{}", '{"taskId": "agent-part0001"}', '{"status": "completed"}']
+)
+def test_incomplete_task_info_fails_strict_baseline_only(home, document):
+    root = write_code_task(home, "agent-good0001", "completed")
+    (root / "agent-part0001.json").write_text(document)
+    assert set(task_snapshots(root, SID)) == {"agent-good0001"}
+    with pytest.raises(ValueError):
+        task_snapshots(root, SID, strict=True)
+
+
+def test_strict_snapshot_rejects_task_root_replaced_during_scan(home, monkeypatch):
+    from server.app.studio_chat import kimi_code_tasks
+
+    root = write_code_task(home, "agent-done0001", "completed")
+    original = kimi_code_tasks.read_code_task
+
+    def replace_root(*args, **kwargs):
+        task = original(*args, **kwargs)
+        if root.exists():
+            root.rename(root.parent / "tasks-old")
+            write_code_task(home, "agent-new00001", "running")
+        return task
+
+    monkeypatch.setattr(kimi_code_tasks, "read_code_task", replace_root)
+    with pytest.raises(OSError):
+        task_snapshots(root, SID, strict=True)

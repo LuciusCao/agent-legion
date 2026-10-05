@@ -90,6 +90,10 @@ def read_code_task(
     root_fd: int, agents_fd: int | None, task_id: str, *, strict: bool = False
 ) -> BackgroundTask | None:
     info = read_json(root_fd, f"{task_id}.json", strict=strict)
+    # A baseline cannot commit a partial document as "not a task" (same rule
+    # as an unsupported status): validate before any type filtering.
+    if strict and not {"taskId", "kind", "status"} <= info.keys():
+        raise ValueError("task info is incomplete")
     kind = _KINDS.get(str(info.get("kind")))
     # Foreground (non-detached) work is a plain tool call, not a task.
     if info.get("taskId") != task_id or kind is None or info.get("detached") is False:
@@ -159,4 +163,10 @@ def code_task_snapshots(
                 continue
             if task is not None:
                 result[task_id] = task
+        if strict:
+            # Same identity recheck as the V1 reader: a task directory
+            # replaced during the scan is an observation failure.
+            with directory(root) as current_fd:
+                if not os.path.samestat(os.fstat(root_fd), os.fstat(current_fd)):
+                    raise OSError("task root changed during baseline scan")
     return result
