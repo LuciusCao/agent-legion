@@ -344,7 +344,10 @@ class StudioChatService:
         rows left in a live status by a crashed or killed backend are
         zombies — their runtimes, tokens' owners, and agent subprocesses are
         gone. Marking them error at startup keeps the active-session cap
-        honest and the session list truthful."""
+        honest and the session list truthful (and lets the UI offer resume
+        on open, #760). Unconditional on purpose: the control plane is
+        single-replica (#277), and a restart that overlaps the old process
+        (the probe then sees its lock) still leaves orphans to repair."""
         reaped = self._db.reap_zombie_studio_chat_sessions()
         if reaped:
             logger.warning("reaped %d zombie studio chat session(s) at startup", reaped)
