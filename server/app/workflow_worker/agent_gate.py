@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from server.app.agent_broker import batch
-from server.app.services.agent_service import has_published_agent_definitions
+from server.app.services.agent_node_profile_catalog import agent_profiles_may_exist
 from server.app.workflow_worker.agent_stock_snapshot import StockSnapshot, load_stock_snapshot
 
 if TYPE_CHECKING:
@@ -75,7 +75,7 @@ def prepare_agent_pass(
 ) -> None:
     """Load the per-pass gate inputs in bulk, once per poll pass."""
     dispatch = worker.agent_dispatch
-    if dispatch is None or not has_published_agent_definitions(worker.job_db):
+    if dispatch is None or not agent_profiles_may_exist(worker.job_db):
         return
     job_ids = _candidate_job_ids(worker, queues)
     if not job_ids:

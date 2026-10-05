@@ -26,11 +26,16 @@ All notable changes to this project are documented here. The format follows [Kee
 - Studio 编辑空间减法三则（issue #770）：① 左上指挥中心岛的版本选择器只显示 `vN`，definition hash 降级到 tooltip 与无障碍标签（菜单内各版本 hash 照常），低频破坏性的「重置」不再外露为按钮、宽窄屏统一收进版本选择器菜单（保留确认）；② 节点抽屉双退出定案为「区分位置与图标 + 分级 Esc」：左侧「← 节点详情」只做一级返回，右侧 ✕ 在详情态与预览态统一为「关闭节点配置」，Esc 在预览子态先回节点详情、详情态才关抽屉；③ 代码节点在抽屉栏内不再内嵌滚动的代码正文，只给行数与顶层签名摘要（`@entrypoint` 入口函数在前），「查看代码」一键进全屏宽视图。
 - `GET /api/workspaces/{workspace_id}/api-tokens` 响应新增只读字段 `rate_limit {requests_per_minute, burst}`（issue #870）：取自当前生效的 per-token 令牌桶（#738，实例级 env-only 参数），供「外部对接」section 展示；`tokens` 字段不变。
 - Agent 对话面板布局收紧（#825）：Agent 选择器、会话选择器与「＋ 新对话」从标题下的独立一行挪进 Dock 标题行（与「Agent 助手」/「定制预览面板」标题同一行）；输入区去掉与消息列表之间的分割线，输入卡改为浅描边 + 投影的悬浮面板样式（聚焦时描边转主色），Studio、定制预览与 job 排查三处对话界面一致。
+- 后端内部：agent 节点的执行配置（runtime / tools / requires_labels / config_schema / legacy skill 兜底）统一经执行档案门面 `server/app/services/agent_node_profile.py` 解析（issue #932，#440 P1）：配置解析、发布门禁、路由物化、dispatch / claim、扫描开关与升级身份判定等读取方不再各自遍历已发布 Agent 定义；本版本门面的唯一来源仍是「capability → 唯一已发布 Agent 定义」，行为、API、manifest 与 schema 均不变。新增架构守卫：已发布 Agent 定义目录（`published_agent_definitions` / `has_published_agent_definitions`）只许门面调用（白名单 `config/architecture/agent-definition-catalog-callers.json`，只降不升），新增直连调用点即 `check_architecture` 失败。
 - workspace 实时流断线提示条可关闭（issue #918，0.7.15 UI 验收反馈）：提示条右侧新增关闭按钮（×），长时间断线时可以收起横幅。关闭只对当前页面会话的本次断线周期生效：关闭态只存在内存里，不写入任何浏览器存储，刷新页面后如果仍在断线，提示会再次出现；连接恢复后关闭态自动复位，下次断线照常提示。「实时连接未建立」与「中断重连」两种提示共用同一个关闭态；心跳看门狗判定的断线（#914）与连接报错的断线走同一套关闭和复位逻辑。
 - 校验脚本契约收紧（issue #867）：`scripts/validate_output.py` 对 Worker 直传对象存储的产物只读，改写或删除此类产物即判节点失败（失败分类与「改写声明输入」同为 `Validator error`）。仓库内示例 skill 的校验脚本均为纯检查、不受影响；仍在校验脚本里清洗输出的自建 skill 应改为只报错退出，把内容修正放回 skill 指令。
 
 ### Removed
 - Worker 配置的 deprecated `capabilities` 兼容键（issue #452，#284 收尾）：claim 准入自 #284 起即不按 capability 匹配，该键此前只做形状校验 + 启动 warning 的 no-op。现移除其归一化逻辑与控制面字段——`PUT /api/config` 的 `capabilities` 字段改为 422（payload 拒绝未知字段），`workerctl configure --capability` 参数删除，配置接口不再回读该键。**升级说明：** 存量 `worker.yaml`（状态副本或 bootstrap 挂载）残留 `capabilities:` 键时 Worker 照常启动——读取时剥离该键、每进程打一次 warning，下次保存配置即从状态副本清除；仍建议手工删除该行。自写脚本若向 Worker 控制面提交 `capabilities` 需删除该字段。Host 侧 Worker 注册契约的 `capabilities` 字段不受影响。
+
+### Deprecated
+- 「Agent 定义」概念进入退役（epic #440，本版本为 P1 公告，无行为变化）：Agent 的执行配置（runtime、工具、Worker 标签要求、可调参数 schema、skill 兜底）将下沉为 workflow 节点自身的「执行档案」，随 workflow revision 发布与版本化，不再依赖独立的 Agent 定义实体。时间窗：0.7.16 起节点可直接声明自含执行字段（`execution.runtime`、`requires_labels`），与 Agent 定义双读并存，未声明的节点照旧解析到 capability 对应的唯一已发布 Agent；0.7.17 计划把存量 Agent 定义回填进节点、发布门禁改为要求 agent 节点自含，`/api/agent-definitions` 的写端点（create / draft / publish / rollback / copy）与 MCP 工具 `create_agent_definition`、`save_agent_definition_draft` 进入 deprecation 并在响应中给出迁移指引（改用 `save_workflow_draft` 编辑节点），workspace 设置页「Agent 定义」目录改为只读历史；写端点、MCP 写工具与 Agent 定义实体的删除不早于 0.7.17 之后的版本，具体版本另行公告。窗口期内既有 Agent 定义、读端点与 `get_agent_definitions` 保持可用；在途 job 按其冻结快照执行，不受迁移影响。自写脚本与外部集成请停止新建依赖 Agent 定义写端点的流程。
+- workspace 设置页「Agent 定义」目录（#898）新增退役提示条（issue #932）：说明该概念即将退役、执行配置将改由节点自身声明，并链接退役计划；目录、引用判定与归档动作在双读阶段原样保留。
 
 ### Fixed
 - worker 孤儿进程组回收按组在各自 SIGTERM 紧前刷新成员（issue #904，#895 follow-up）：一次清理含多个进程组时，此前只在批量 TERM 入口取一次 `/proc` 成员快照，后序组在快照之后才派生、忽略 TERM 的成员不会被钉住，原钉住成员在等待期退出并被 init 立即收割后 KILL 阶段的身份现证失败、该成员脱离清理；现改为增量成员索引（入口一次全表扫描，之后每组 TERM 前只重列 `/proc` 并读取新出现 pid 的 stat），每组 TERM 前按 pgid 取当前成员、现证属主后并入钉住集合。

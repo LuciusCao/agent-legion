@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "symbols": [
+    "has_published_agent_definitions",
+    "published_agent_definitions"
+  ],
+  "files": [
+    "server/app/services/agent_node_profile_catalog.py",
+    "server/app/services/agent_service.py"
+  ]
+}
