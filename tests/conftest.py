@@ -573,8 +573,15 @@ def _fake_cms_question_item(question_id: str) -> dict[str, object]:
 
 @pytest.fixture(autouse=True)
 def _fast_password_hashing(_assert_shared_app_invariants, monkeypatch):
-    """Tests mint a session per client; keep pbkdf2 cheap so the suite stays fast."""
+    """Tests mint a session per client; keep pbkdf2 cheap so the suite stays fast.
+
+    Same harness relaxation for the #970 new-password length floor: fixture
+    accounts across the suite use short throwaway passwords. The weak-list
+    rule stays live; tests/routes/test_password_policy.py re-tightens the
+    length to pin the production baseline.
+    """
     monkeypatch.setattr("server.app.auth.passwords._ITERATIONS", 1_000)
+    monkeypatch.setattr("server.app.auth.password_policy.MIN_PASSWORD_LENGTH", 1)
 
 
 @pytest.fixture
