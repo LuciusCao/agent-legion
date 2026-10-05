@@ -48,6 +48,14 @@ class WorkflowNodeExecution:
     # platform envelope itself is never coverable in either mode; empty
     # string = append (the YAML default, kept unpersisted like ``prompt``).
     prompt_mode: str = ""
+    # Self-contained agent execution profile (#933, #440 P2, D5): an
+    # ``agent`` node declaring a runtime (one of ``AGENT_RUNTIMES``; the
+    # workflow top-level ``execution.runtime`` is the default) dispatches
+    # from its own profile instead of a published Agent definition. Empty =
+    # legacy path (capability → the one published Agent). Manifest builders
+    # drop the empty key (``node_execution_payload``) so legacy manifests
+    # stay byte-identical.
+    runtime: str = ""
 
 
 @dataclass(frozen=True)
@@ -120,6 +128,11 @@ class WorkflowNode:
     # empty means undeclared — dispatch falls back to the Agent definition's
     # tools. Only ``agent`` nodes may declare a non-empty list.
     tools: tuple[str, ...] = ()
+    # Worker label requirements of a self-contained agent node (#933): claim
+    # requires Worker labels ⊇ these. Only ``agent`` nodes that also declare
+    # ``execution.runtime`` may declare them (a half-filled profile is a
+    # publish error, ``workflow_node_profile``).
+    requires_labels: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

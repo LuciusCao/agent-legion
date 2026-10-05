@@ -84,7 +84,7 @@ def try_claim_and_submit(
             execution_generation=execution_generation,
         )
 
-    resolved = resolve_node_route(worker, workspace_id, workflow_key, node_key, node.capability)
+    resolved = resolve_node_route(worker, workspace_id, workflow_key, node)
     if resolved.kind == "error":
         return fail_config(resolved.error_message)
     if resolved.kind == "agent":
@@ -103,6 +103,7 @@ def try_claim_and_submit(
             resolved.target_id,
             workflow_key,
             execution_generation=execution_generation,
+            profile_source=resolved.profile_source,
         )
 
     executor_id = resolved.target_id

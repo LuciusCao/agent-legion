@@ -8,13 +8,14 @@ node (~30-100ms each, serialized by the lock) for one per executor.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.executors.models import ExecutionContext, LeaseClaimRequest
 from server.app.workflow_worker.execution import submit_claim
 from server.app.workflows.definition import WorkflowNode
+from server.app.workflows.workflow_node_execution import node_execution_payload
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -63,7 +64,7 @@ def flush_prepared_claims(worker: WorkflowWorkerThread) -> None:
                 log_path=prepared.log_path,
                 inputs=prepared.inputs,
                 expected_outputs=tuple(prepared.node.outputs),
-                runtime={"node_execution": asdict(prepared.node.execution)},
+                runtime={"node_execution": node_execution_payload(prepared.node.execution)},
                 node_config=prepared.node_config,
                 node_code=prepared.node_code,
             )

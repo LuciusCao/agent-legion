@@ -389,7 +389,7 @@ invariants:
         gate: full
 
   - id: EXEC-AGENTDEF-001
-    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the workspace-scoped Agent Catalog (versioned_entities with workspace_id set, published via AgentService; schema v46 — exactly one published Agent per capability per workspace, no global fallback at resolution); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability within the current workspace and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Since #76 the definition's skill field is optional and serves only as the legacy fallback at dispatch — the workflow node's own skill binding (EXEC-SKILL-NODE-001) takes precedence and owns the version pin. Workers separately declare node capabilities and runtime/provider/model triples derived from each selected runtime's local discovery intersected with its operator allowlist, alongside labels, protocol version, and machine-wide max_concurrency."
+    statement: "Status: in transition (#440 retirement, P2 dual read — self-contained agent nodes are governed by EXEC-AGENT-PROFILE-001 instead). Agent capability, runtime, skill, tools, and resource requirements are declared by the workspace-scoped Agent Catalog (versioned_entities with workspace_id set, published via AgentService; schema v46 — exactly one published Agent per capability per workspace, no global fallback at resolution); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability within the current workspace and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Since #76 the definition's skill field is optional and serves only as the legacy fallback at dispatch — the workflow node's own skill binding (EXEC-SKILL-NODE-001) takes precedence and owns the version pin. Workers separately declare node capabilities and runtime/provider/model triples derived from each selected runtime's local discovery intersected with its operator allowlist, alongside labels, protocol version, and machine-wide max_concurrency."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -410,6 +410,36 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/full/test_agent_worker_control_plane.py::test_agent_definition_catalog_snapshot_lifecycle
+        gate: full
+
+  - id: EXEC-AGENT-PROFILE-001
+    statement: "Status: dual read (#440 P2, #933). Every agent node's execution profile (runtime, tools, requires_labels, config_schema, legacy skill fallback) is resolved only through services/agent_node_profile (resolve_agent_node_profile). A node whose effective execution.runtime is set (node value or the workflow top-level execution.runtime default, one of AGENT_RUNTIMES) is self-contained: source='node', no published Agent is required, revision publish materializes no workspace_node_routes row, and dispatch freezes the profile into agent_execution_requests (schema v92: profile_source='node', runtime, requires_labels_json; agent_id = node key, agent_definition_hash = profile hash). Claim reads runtime/labels from the row and never joins versioned_entities for such rows; the stale-definition sweep and _validate_agent_route skip them; the unclaimable sweep judges them by the row runtime. Other agent nodes keep the Agent-definition source unchanged. requires_labels without a runtime fails publish. The poll-loop scan gates (workflow_worker/thread.py, agent_gate.py) open when a published Agent exists OR a revision still dispatchable (the active one, or one a runnable job is pinned to) has a self-contained agent node."
+    owner: workspace-executor
+    risk: critical
+    evidence:
+      - kind: contract
+        target: tests/services/test_agent_node_profile_sources.py
+        gate: quick
+      - kind: contract
+        target: tests/workflows/test_workflow_node_profile.py
+        gate: quick
+      - kind: contract
+        target: tests/services/test_agent_dispatch_profile_source.py::test_legacy_dispatch_replays_the_recorded_0716_manifest_byte_for_byte
+        gate: quick
+      - kind: contract
+        target: tests/workers/test_workflow_worker_profile_routing.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_broker_profile_source.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_workflow_publish_profile_source.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_agent_request_profile_source_migration.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_agent_node_self_contained_e2e.py::test_workspace_without_agent_definitions_runs_a_self_contained_node
         gate: full
 
   - id: EXEC-WORKERACL-001

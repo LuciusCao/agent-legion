@@ -5,6 +5,9 @@ versions here; migration_chain asserts the combined registry stays sorted."""
 from __future__ import annotations
 
 from server.app.db.migration_entry import SchemaMigration
+from server.app.db.migrations.agent_request_profile_source import (
+    migrate_agent_request_profile_source,
+)
 from server.app.db.migrations.agent_worker_claim_state import migrate_agent_worker_claim_state
 from server.app.db.migrations.job_node_status_count_deltas import (
     migrate_job_node_status_count_deltas as _migrate_v88_node_deltas,
@@ -49,4 +52,10 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # the id is the only identifier left. Guarded (drop if exists): fresh
     # databases never create them.
     SchemaMigration(91, "retire_default_workflow_key", migrate_retire_default_workflow_key),
+    # v92 (#933, #440 P2): agent_execution_requests.profile_source / runtime /
+    # requires_labels_json — self-contained agent node rows carry their
+    # frozen profile and skip the versioned_entities join at claim. Follows
+    # v91 (#211 M3) in merge order (#434 protocol).
+    # DDL-only, same guarded-ALTER home rule as v87.
+    SchemaMigration(92, "agent_request_profile_source", migrate_agent_request_profile_source),
 ]

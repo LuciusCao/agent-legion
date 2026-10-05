@@ -7857,6 +7857,8 @@ export interface components {
        * @default
        */
       provider: string
+      /** Runtime */
+      runtime?: string
       /**
        * Thinking
        * @default
@@ -7882,6 +7884,10 @@ export interface components {
       node_type?: string
       /** Outputs */
       outputs: string[]
+      /** Requires Labels */
+      requires_labels?: {
+        [key: string]: string
+      }
       skill?: components['schemas']['WorkflowNodeSkillResponse'] | null
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
       text_input?: components['schemas']['WorkflowTextInputResponse'] | null
