@@ -5,7 +5,8 @@ Thin HTTP shell over StudioChatService — no business logic here. Mounted via
 read, editors write, non-members 404). Effecting endpoints additionally mount
 ``reject_studio_agent_scope`` (STUDIO-AGENT-001) via the ``guarded``
 sub-router. The SSE stream lives in studio_chat_events.py (file budget) and
-reuses the shared JobEventManager machinery on a per-session channel.
+reuses the shared JobEventManager machinery on a per-session channel; list
+management (rename / delete / archive) lives in studio_chat_session_manage.py.
 """
 
 from typing import Annotated, Any
@@ -32,6 +33,7 @@ from server.app.routes.studio_chat_contracts import (
     StudioChatSessionsResponse,
 )
 from server.app.routes.studio_chat_events import create_studio_chat_events_router
+from server.app.routes.studio_chat_session_manage import create_studio_chat_session_manage_router
 from server.app.services.job_errors import JobServiceError
 from server.app.studio_chat.service import StudioChatService
 
@@ -78,10 +80,14 @@ def create_studio_chat_router(
         "/workspaces/{workspace_id}/studio-chat/sessions",
         response_model=StudioChatSessionsResponse,
     )
-    def list_sessions(workspace_id: str, _user: scoped_read) -> StudioChatSessionsResponse:
+    def list_sessions(
+        workspace_id: str, _user: scoped_read, archived: bool = False
+    ) -> StudioChatSessionsResponse:
+        # archived=true is the archive view (#924); the default list hides
+        # archived sessions.
         sessions = [
             StudioChatSessionRecord.model_validate(row)
-            for row in service.list_sessions(workspace_id)
+            for row in service.list_sessions(workspace_id, archived=archived)
         ]
         return StudioChatSessionsResponse(sessions=sessions)
 
@@ -193,6 +199,7 @@ def create_studio_chat_router(
     # test_allow_all_route_registers_before_permission_answer).
     router.include_router(create_studio_chat_config_router(service))
     router.include_router(create_studio_chat_context_router(service))
+    router.include_router(create_studio_chat_session_manage_router(service))
     router.include_router(create_studio_chat_events_router(service, job_event_manager))
     router.include_router(guarded)
     return router

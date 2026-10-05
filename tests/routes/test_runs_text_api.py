@@ -202,7 +202,7 @@ def test_text_item_never_takes_over_upload_rows(client, storage, job_db, status,
     [
         ({"type": "text", "content": "   \n"}, "non-empty content"),
         ({"type": "text", "content": "x", "filename": "../需求.md"}, "invalid"),
-        ({"type": "text", "content": "x", "filename": "需求.exe"}, ".md or .txt"),
+        ({"type": "text", "content": "x", "filename": "需求.exe"}, ".md, .txt or .json"),
         # 30k CJK chars pass the contract's character cap but exceed 64 KiB of UTF-8.
         ({"type": "text", "content": "需" * 30000}, "exceeds"),
         ({"type": "text", "content": "x", "filename": "bad\x00.md"}, "invalid"),

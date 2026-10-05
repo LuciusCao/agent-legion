@@ -1,3 +1,5 @@
+import { createSseStallWatchdog, SSE_HEARTBEAT_EVENT } from './sseStallWatchdog'
+
 export type ConnectionStatus = 'connecting' | 'open' | 'closed'
 
 export interface RealtimeChannelOptions {
@@ -20,6 +22,10 @@ export interface RealtimeChannel {
  * Reconnects with exponential backoff after failure/close (starting at
  * minDelayMs, doubling up to maxDelayMs, reset on open). close() is
  * idempotent, clears the pending reconnect timer and prevents reconnects.
+ *
+ * SSE also runs a stall watchdog (#914, see sseStallWatchdog): a silently
+ * hung stream never fires `error`, so no event (heartbeat included) for a
+ * few server-advertised heartbeat intervals takes the same exit as `error`.
  */
 export function createRealtimeChannel(
   opts: RealtimeChannelOptions
@@ -34,6 +40,7 @@ export function createRealtimeChannel(
   let timer: ReturnType<typeof setTimeout> | null = null
   let ws: WebSocket | null = null
   let source: EventSource | null = null
+  const watchdog = createSseStallWatchdog()
 
   const setStatus = (status: ConnectionStatus) => {
     currentStatus = status
@@ -57,12 +64,26 @@ export function createRealtimeChannel(
       ws = null
     }
     if (source) {
-      source.onopen = null
-      source.onmessage = null
-      source.onerror = null
-      source.close()
+      dropSource(source)
       source = null
     }
+  }
+
+  // The heartbeat listener stays attached but is inert: it checks
+  // `source === events`, and a closed EventSource dispatches nothing.
+  function dropSource(events: EventSource) {
+    watchdog.stop()
+    events.onopen = null
+    events.onmessage = null
+    events.onerror = null
+    events.close()
+  }
+
+  // `error` and a watchdog-detected stall share this exit.
+  function failSource(events: EventSource) {
+    dropSource(events)
+    if (source === events) source = null
+    scheduleReconnect()
   }
 
   const scheduleReconnect = () => {
@@ -102,19 +123,19 @@ export function createRealtimeChannel(
     } else {
       const events = new EventSource(url)
       source = events
-      events.onopen = handleOpen
+      events.onopen = () => {
+        handleOpen()
+        watchdog.start(() => failSource(events))
+      }
       const dispatch = (event: MessageEvent) => {
+        watchdog.activity()
         onEvent(event.type === 'message' ? null : event.type, event.data)
       }
       events.onmessage = dispatch
-      events.onerror = () => {
-        events.onopen = null
-        events.onmessage = null
-        events.onerror = null
-        if (source === events) source = null
-        events.close()
-        scheduleReconnect()
-      }
+      events.addEventListener(SSE_HEARTBEAT_EVENT, (event) => {
+        if (source === events) watchdog.heartbeat((event as MessageEvent).data)
+      })
+      events.onerror = () => failSource(events)
     }
   }
 

@@ -60,6 +60,22 @@ class StudioChatSessionRecord(BaseModel):
     created_at: datetime
     updated_at: datetime
     closed_at: datetime | None
+    # Archive stamp (#924, v90): set = hidden from the default list, shown in
+    # the archive view; resume is refused until unarchived.
+    archived_at: datetime | None = None
+
+
+class StudioChatSessionUpdateRequest(BaseModel):
+    """Session rename (#872). Surrounding whitespace is stripped; an empty
+    title falls back to the client's default label."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(max_length=200)
+
+
+class StudioChatSessionDeleteResponse(BaseModel):
+    deleted: str
 
 
 class StudioChatSessionResponse(BaseModel):

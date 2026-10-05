@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from server.app.routes.job_client_token_contracts import JobClientTokenFields
 from server.app.routes.job_execution_control_contracts import ExecutionControlSummaryResponse
 
 
@@ -12,7 +13,7 @@ class JobNodeSummaryResponse(BaseModel):
     error_message: str
 
 
-class JobSummaryResponse(BaseModel):
+class JobSummaryResponse(JobClientTokenFields, BaseModel):
     id: str
     workspace_id: str
     workflow_key: str = Field(

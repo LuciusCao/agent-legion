@@ -96,6 +96,32 @@ describe('DashboardPage', () => {
     expect(screen.queryByText('新建 Workspace')).not.toBeInTheDocument()
   })
 
+  it('tells a non-admin without memberships to ask an admin (#711)', async () => {
+    authState.user = { role: 'member' }
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    )
+    expect(
+      await screen.findByText('你还没有加入任何 Workspace，请联系管理员添加。')
+    ).toBeInTheDocument()
+  })
+
+  it('keeps the empty-membership hint away from admins', async () => {
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    )
+    await waitFor(() => {
+      expect(mockFetchWorkspaces).toHaveBeenCalled()
+    })
+    expect(
+      screen.queryByText(/还没有加入任何 Workspace/)
+    ).not.toBeInTheDocument()
+  })
+
   it('fetches workspaces on mount', async () => {
     render(
       <MemoryRouter>
@@ -118,7 +144,10 @@ describe('DashboardPage', () => {
 
     expect(await screen.findByText('Test Workspace')).toBeInTheDocument()
     await waitFor(() => {
-      expect(mockFetchWorkspaceStats).toHaveBeenCalledWith('ws-1')
+      expect(mockFetchWorkspaceStats).toHaveBeenCalledWith(
+        'ws-1',
+        expect.any(AbortSignal)
+      )
     })
   })
 

@@ -31,16 +31,28 @@ export async function fetchPublishedPreviewPanel(
 
 /** Studio 治理面读取：发布 + 草稿全态（admin / scoped token）。 */
 export async function fetchPreviewPanelState(
-  workspaceId: string
+  workspaceId: string,
+  signal?: AbortSignal
 ): Promise<PreviewPanelState> {
-  return api<PreviewPanelState>(panelUrl(workspaceId, ''))
+  return api<PreviewPanelState>(panelUrl(workspaceId, ''), { signal })
 }
 
+type PreviewPanelPublishRequest =
+  components['schemas']['PreviewPanelPublishRequest']
+
+/**
+ * #841（#749 遗留收尾）：expectedHash 是发布者看到的草稿 html_hash——服务端
+ * 在发布事务内 CAS 核对，草稿被 agent/其他会话覆盖则 409 零副作用（不会
+ * 把人没看过的 HTML 发上线）；后端必填，缺失 422。
+ */
 export async function publishPreviewPanel(
-  workspaceId: string
+  workspaceId: string,
+  expectedHash: string
 ): Promise<PreviewPanelVersion> {
+  const body: PreviewPanelPublishRequest = { expected_hash: expectedHash }
   return api<PreviewPanelVersion>(panelUrl(workspaceId, '/publish'), {
     method: 'POST',
+    body: JSON.stringify(body),
   })
 }
 

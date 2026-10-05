@@ -353,6 +353,7 @@ flipping the field:
 | Batched agent failures with `unexpected EOF during chunk size line` while other apps on the same machine also lose connectivity | Worker egress silently routed through a local proxy process (Clash/mihomo) inherited from the launch shell; the proxy's config reload/subscription refresh cuts every in-flight stream at once (#444) | The service strips inherited proxy env at startup (a one-line INFO log marks it). Production workers must not run behind a local proxy process; if egress through a proxy is genuinely required, declare it explicitly in the worker config (`proxy:` field / console 高级参数 → 出网代理) so the choice is visible and owned |
 | Worker claims steadily but concurrency "breathes" below configured capacity during recovery | Success-path claim pacing (#472) is adaptive: the wait after a successful claim is the last claim round-trip × 0.5, clamped to [10ms, 100ms] (the pre-0.7.0 fixed 0.2s wait is gone); since #546 one round-trip claims a batch (`claim_batch_limit`, default 32, hot) and pacing tracks the batch's equivalent per-claim RTT (batch RTT ÷ batch size); an empty queue resets to the floor, error paths keep the #437 exponential backoff | Expected behavior — the floor is a deliberate guard for claim-transaction lock contention. If recovery throughput still matters, check `worker claim pacing <N>ms` log lines for the current band; a cold-start burst can additionally be shaped with `ramp_up` (deployment doc §5) |
 | 高并发档位下运行容量规律性锯齿：贴满上限 → 数分钟一次掉 10%–20% 并一两分钟回满，worker 侧上传队列同时排队 | Host 单进程控制面在完成波下饱和（#521）：DAG 同相位节点成波报告，result commit 的 GIL 绑定工作（tar 解包、产物校验、写事务、events 后处理）打满单核，claim/心跳被饿死 | 运行画像（`/api/metrics/runtime-profile`）的 result 分段列（schema v80 起：`result_unpack / artifacts_verify / validate / artifacts_upload / lease_write / events / mark_done_seconds_total/max`）指认吃 CPU 的段；`result stages:` 日志行（超过 `AGENT_LEGION_SLOW_RESULT_MS`，默认 15s，升 WARNING）给单次分解。削峰 gate 默认已开（`agent_workers.max_concurrent_result_commits` = 16，instance settings 可调，0 = 关闭做 A/B）；gate 的排队等待是 result 总时长减去分段和的残差（spool 同在其中）——评估 gate 效果看这个数。调 gate 时注意连接池配比：events 段持读连接嵌套开写连接，gate 并发 × 2 逼近 `AGENT_LEGION_DB_POOL_MAX_SIZE`（默认 32）时 result 会在波峰 500（池超时），建议 gate ≤ pool/2；遗留绝对路径警告应已由一次性清理归零（启动报告 `report_absolute_db_paths` 全零），仍在刷说明有不可映射行留在库里 |
+| Worker 容器内 `Z` 态（僵尸）bwrap/velites 进程随 executor 异常退出累积，PPid 全是 1；或 supervisor 日志成批出现 `discarded unverifiable agent pgid record` | executor 被 SIGKILL（如 OOM killer）后其沙箱子进程被收养给容器 PID 1（`worker.service`）。#682 前 PID 1 不收割孤儿，孤儿进程组清理又依赖精简镜像里没有的 `ps` | 自 #682 起：作为 PID 1 时 supervisor 每 5 秒扫 `/proc` 收割被收养的僵尸（只 wait 已证明不属于任何 `subprocess.Popen` 的 pid：executor 登记豁免，同会话子进程须连续两轮仍为僵尸，日志 `PID 1 已收割 N 个孤儿僵尸进程`）；孤儿进程组身份改读 `/proc/<pid>/cmdline`（无 `/proc` 的 macOS 仍走 `ps`），杀完立即收割（日志 `reaped orphaned agent process group <pgid> (collected N)`）。旧版本的存量僵尸重启容器即清 |
 | Everything idle, nothing failing | Laptop asleep or offline | Workers recover on their own; enforce §2 item 5 |
 
 ### 7.1 Structured event codes (#490)
@@ -380,6 +381,8 @@ the two sides by `execution_id` / `worker_id`.
 | `execution.heartbeat_rejected` | Host | Heartbeat refused: `reason: not_owned` or `lease_not_active` — the worker must stop beating. 完成态收尾（done/cancelled 执行的迟到心跳）不产生本事件：Host 在 beat 事务内分类后随 batch 响应的 `settled` 通道返回，Worker 静默摘除该租约（#590） |
 | `execution.lease_expired` | Host | The sweeper deleted an expired lease: `attempt`, `requeue_limit` (will it rerun here?) |
 | `deferring expired agent lease`（WARNING 日志行，非事件；`server.app.agent_broker.heartbeat_deferral`） | Host | #566 一期止血：claim 已越过 TTL 但 worker 控制面仍新鲜（claim 轮询在触活 `last_seen_at`）——执行面心跳饿死 ≠ worker 死亡，本次不删租约不重排，execution 续命等心跳恢复自愈；同一 execution 每跨一个 TTL 桶打一条。含义：该 worker 过载到心跳线程抢不到 GIL。心跳静默超过 2×TTL 后照常过期（此时才产生 `execution.lease_expired`）；它打断的是「过期 → 重排队 → 立即重 claim → 负载更高 → 再过期」的死亡螺旋放大器。盲区已于二期闭合：claim 循环虽只在领取预算为正时发 claim，但同循环的状态同步（`get_self`，每 `heartbeat_interval_seconds` 一拍）只要主循环存活就持续触活 `last_seen_at`；主循环整体饿死（executor 进程饱和）由 supervisor 进程内的租约心跳 relay（`worker/heartbeat_relay.py`）兜底——relay 按 executor 落的 `lease_snapshot.json` 发拍，同样触活 `last_seen_at`，让本延期在纯饱和场景也能生效 |
+| `worker.lease_reclaim_burst`（WARNING 单行 JSON，`server.app.agent_broker.lease_reclaim_audit`，默认级别可见） | Host | #681：一次清扫里同一 worker 被收回的租约数达到阈值（10）时按 worker 打一条，不再只散落在逐条 `execution.lease_expired` 里：`reclaimed`（本次收回数）及其按实际分支的拆分：`requeued`（重排待重跑）、`requeue_limit_exceeded`（当前代次且超过重排上限、直接判败）、`cancelled`（旧代次请求被代次重置取消，或节点已终态）；`deferred`（同一 worker 本次因控制面新鲜被 #566 延期的数）、`worker_last_seen_at`（该 worker 最后一次任意已认证交互）、`sample_execution_ids`（抽样，便于 grep 对齐）。`worker_last_seen_at` 与收回时刻同样陈旧 = 整机失联（executor 被杀/网络断）；之后若该 worker 在线却长时间无 `claim.granted`，先查 worker 侧 `claim_enabled`（控制台「在线·未领取」） |
+| `execution.result_rejected`（WARNING 单行 JSON，同上 logger） | Host | #681：终态结果上报因租约不再归属而被 409 拒收——Worker 拿到 409 即丢弃该结果，这一行是 Host 侧唯一留痕：`stage`（`precheck` 落盘前预检 / `commit` / `finish` / `mark_done`）、`reason`（读请求行判定：`requeued` 已被清扫收回待重领、`reassigned` 已被其他 worker 领走、`superseded` 本 worker 以新租约重领、`lease_not_active`、`request_done` 等终态、`missing`）、`status`/`exit_code`、`carries_artifacts` + `output_artifact_count`、`archive_bytes`。成片出现 = 收回后迟到的已完成结果被丢弃，与同时段的 `worker.lease_reclaim_burst` 对照 |
 | 心跳 relay 日志行（`worker/heartbeat_relay.py`，进 worker 控制台与滚动日志 `data/logs/executor-<state dir 名>.log`） | Worker | 「租约停拍（Host 硬兜底回收）；控制面 ping 继续」= executor 主循环超 60s 未刷新租约快照（进程卡死级饱和）：relay 停续租约（过期后由 Host 2×TTL 硬兜底回收），但继续用不续租的轻量已认证 ping（get_self → record_seen）维持 `last_seen_at` 新鲜——Host 侧 #570 deferral 因此仍能区分「执行面饥饿」与「worker 真离线」；「心跳 relay 批量拍失败」= Host 不可达，逐拍重试；「控制面 ping 失败」= 停拍期 ping 异常（每 episode 一条）。排查卡点看 executor 滚动日志（10MB×5 轮转） |
 | relay 存活看门狗日志行（`worker/relay_sync.py`，executor stdout） | Worker | 「心跳 relay 超过 Ns 无新拍（seq=…）」= relay 每拍重写 `lease_beat_result.json` 的 seq 即存活证明；executor 持有租约而 seq 停跳超阈值（3×relay 拍间隔、下限 60s）= relay 死亡/supervisor 挂起，租约将静默过期重排，查 supervisor 进程。纯观测信号，不改结果语义；每个停滞 episode 一条，seq 恢复后重置 |
 | `claim.attempt` | Worker | One claim poll's local budget snapshot (`agent_budget`/`code_budget`/`upload_backlog`/`claim_enabled`); `limit` (#546) is the batch size this poll asks for |
@@ -416,7 +419,7 @@ with its direct evidence — no more inferring from marker files.
 | 上传积压（worker 控制台 queued 涨） | worker 日志的 `execution.reported` 分段：`queue_wait`（排队）/ `prepare`（归档 CPU）/ `transfer`（传输）/ `report_wait`（report 车道排队）/ `report`（Host commit RTT，含退避） | `report_seconds` 大 = Host result commit 慢（0.7.5 起解包已下沉进程池，#552；仍慢则看 Host 的 result 分段列）；`queue_wait` 大 = 上传并发不足（`upload_max_concurrency`）；`transfer` 大 = 链路/S3 |
 | 结果延迟大、租约濒临 90s | `execution.reported` 的 `outcome=rejected`（409 = 租约已被重发，重复执行的指纹）+ Host `result_*` 分段列 | rejected 成片出现 = 上传链比租约 TTL 慢，先按上一行定位分段 |
 | Host 进程单核贴顶 | `result_unpack_seconds_*` 分段（#552 后只剩进程池排队墙钟）+ 机器级采样 | unpack 段墙钟高而 Host CPU 低 = 进程池排队（admin 实例设置 `result_unpack.workers` 调大，重启生效；env `AGENT_LEGION_RESULT_UNPACK_WORKERS` 为覆盖通道，默认 min(4, 核数)）；unpack 低而总时长高 = 查其余分段 |
-| validate 段墙钟高 | Host `result stages:` 的 `validate=` 分段 | #569 起物化按 (skill, commit) 共享缓存（命中零 git 调用）且校验下沉独立进程池；仍高 = validate 池排队（admin 实例设置 `result_validate.workers` 调大，重启生效；env `AGENT_LEGION_RESULT_VALIDATE_WORKERS` 为覆盖通道，默认 min(4, 核数)）或校验器本身慢（velites/legacy 脚本 30s timeout） |
+| validate 段墙钟高 | Host `result stages:` 的 `validate=` 分段 | #569 起物化按 (skill, commit) 共享缓存（命中零 git 调用）且校验下沉独立进程池；仍高 = validate 池排队（admin 实例设置 `result_validate.workers` 调大，重启生效；env `AGENT_LEGION_RESULT_VALIDATE_WORKERS` 为覆盖通道，默认 min(4, 核数)）或校验器本身慢（velites 契约引擎与业务规则脚本 `validate_output.py` 各 30s timeout） |
 
 ## 8. Security notes
 
@@ -536,8 +539,8 @@ workspace 归属校验同样由 job 归属守卫覆盖（成员 404/200 与前�
 | --- | --- | --- |
 | 响应头 | 白名单 Content-Type；非白名单 `attachment`；`.gz` 对象附 `Content-Encoding: gzip` | **相同**：这三个头作为 S3 响应覆盖参数签进 URL，持有者改不了 |
 | gzip 产物（#338，v4+ Worker 的产物都是这种） | 透传压缩字节 + `Content-Encoding: gzip` | **相同**；HTTP 客户端透明解码（`requests` 自动，curl 加 `--compressed`）。清单 `content_encoding: "gzip"` 标出存储形态 |
-| 字节对应关系 | 名字下的**当前**产物（#508 重跑语义） | **相同**：URL 绑定名字而非版本。TTL 内 job 重跑会覆盖同名对象，URL 随之返回新字节。用清单的 `content_hash`（未压缩内容的 sha256）校验，不一致就重取清单 |
-| 鉴权 | 每次请求校验 workspace API token | **不继承**：URL 是独立签名的持有者凭证。吊销 token 后 TTL 内仍可下载（含 TTL 内重跑产生的同名新字节） |
+| 字节对应关系 | 名字下的**当前**产物（#508 重跑语义） | **不继承**（#853）：URL 固定到签发时的那个产物版本。TTL 内 job 重跑产出同名新字节后，旧 URL 返回旧字节或 404，绝不返回新字节；新字节要重取清单拿新 URL。清单的 `content_hash`（未压缩内容的 sha256）仍可用于校验 |
+| 鉴权 | 每次请求校验 workspace API token | **不继承**：URL 是独立签名的持有者凭证。吊销 token 后 TTL 内仍可下载签发时的那个版本（不含之后重跑产生的同名新字节） |
 | 有效期 | 不适用 | `expires_at` 是**上界**：签名凭据先失效（如 STS 临时凭据）时会提前 403。收到 403 或到达 `expires_at` 都重取清单，每次清单请求重新签发，URL 不落库 |
 | Range | 支持（`.gz` 对象忽略 Range，返回全量） | 由 S3 处理；`.gz` 对象的 Range 落在压缩字节上（HTTP 语义如此），需要 seek 的媒体请走非 gzip 形态或 raw |
 
@@ -549,10 +552,14 @@ workspace 归属校验同样由 job 归属守卫覆盖（成员 404/200 与前�
   内部端点签名，部署网络外不可达（连接超时或拒绝）。外部调用方对该形态
   应以 raw 端点兜底（直连请求失败即回落 raw），或由运维侧给实例配置
   public endpoint 后重启。
-- **签名目标**：URL 的签名对象是服务端生成的 `storage_key`
-  （`jobs/{workspace_id}/{job_id}/{name}` 布局，`record_remote`/
-  `verify_remote` 拒绝布局之外的 key，请求输入除 job_id 与产物名外无法
-  影响签名目标）；URL 只含 SigV4 签名参数，不含任何凭据。
+- **签名目标**：URL 的签名对象是服务端生成的 `storage_key`——#853 起每次
+  写入落一次性版本 key `jobs/{workspace_id}/{job_id}/.v/{version}/{name}`
+  （此前登记的存量产物保持 `jobs/{workspace_id}/{job_id}/{name}`，不迁移，
+  也不再被任何写入覆盖）；key 一律由服务端生成，请求输入除 job_id 与产物
+  名外无法影响签名目标；URL 只含 SigV4 签名参数，不含任何凭据。同名产物
+  重新登记后被取代的旧版本对象随即删除，旧 URL 答 404（`NoSuchKey`）——
+  与 403 一样按「重取清单」处理。设计与对象存储实测见
+  [artifact-direct-url-pinning.md](architecture/artifact-direct-url-pinning.md)。
 - **吊销 SOP**：吊销 token 不会让已签发 URL 失效。需要立即切断访问时，
   先把实例 TTL 调到最小（60 秒，重启生效，只约束之后签发的 URL），再删除
   相关 job。job 删除对对象存储是 **best-effort**：单个对象删除失败时 job
@@ -575,7 +582,7 @@ scoped token 一律 403。
 set -euo pipefail  # 任何一步失败立即停下，不带着空变量往下跑
 HOST="https://agent-legion.example.com"
 WS="my-workspace"
-# 0) 签发 token（管理员会话；或控制台 workspace 设置 → Agent 与 Worker）。
+# 0) 签发 token（管理员会话；或控制台 workspace 设置 → 外部对接）。
 #    明文只在这次响应里出现一次，落到调用方的密钥存储
 WORKSPACE_API_TOKEN=$(curl -sS -X POST "$HOST/api/workspaces/$WS/api-tokens" \
   -H "Authorization: Bearer $ADMIN_SESSION" \
@@ -754,7 +761,8 @@ for entry in manifest["artifacts"]:  # 可能为空数组：job 没有产出产�
     if url is not None:
         try:
             direct = requests.get(url, timeout=60)  # 无鉴权头；gzip 产物自动解码
-            if direct.status_code == 403:  # 过期或签名凭据提前失效：重取清单再试一次
+            # 403 = 过期或签名凭据提前失效；404 = 签发后该版本已被重跑取代（#853）
+            if direct.status_code in (403, 404):  # 重取清单再试一次
                 fresh = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts").json()
                 for e in fresh["artifacts"]:
                     if e["name"] == entry["name"]:
@@ -777,8 +785,8 @@ for entry in manifest["artifacts"]:  # 可能为空数组：job 没有产出产�
             continue
         raw.raise_for_status()
         blob = raw.content
-    # content_hash 是未压缩内容的 sha256：两条通道都返回名字下的当前字节，
-    # 期间若发生重跑就会不一致，此时重取清单
+    # content_hash 是未压缩内容的 sha256：raw 返回名字下的当前字节、直连
+    # 返回签发时的版本，期间若发生重跑 raw 就会与清单不一致，此时重取清单
     # （local 条目没有 content_hash，跳过校验）
     if entry["content_hash"] and hashlib.sha256(blob).hexdigest() != entry["content_hash"]:
         raise RuntimeError(f"{entry['name']}: bytes changed since manifest (rerun?) — re-fetch")

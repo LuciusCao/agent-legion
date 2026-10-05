@@ -25,6 +25,7 @@ from server.app.agent_control.completion import AgentCompletionHandler, AgentOut
 from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from tests.fakes.artifact_keys import pin_legacy_authority_keys
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -34,6 +35,15 @@ STAGING_KEY = "jobs-staging/ws-1/job-1/exec-1/out.json"
 AUTHORITY_KEY = "jobs/ws-1/job-1/out.json"
 
 FakeStorage = FakeObjectStorage
+
+
+@pytest.fixture(autouse=True)
+def _legacy_fixed_authority_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本文件验证共享 promote primitive 的覆盖契约（备份 / 恢复 / 串行化）：
+    把版本 key 钉回 #853 前的固定布局，等价于「存量固定 key 被覆盖」场景
+    （见 tests/fakes/artifact_keys.py；#853 生产布局见
+    test_artifact_direct_url_pinning.py）。"""
+    pin_legacy_authority_keys(monkeypatch)
 
 
 class _StubJobDb:

@@ -32,6 +32,7 @@ from tests.db.completion_helpers import (
     _result_archive,
     _seed_completion_job,
 )
+from tests.fakes.artifact_keys import manifest_bytes
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -54,7 +55,7 @@ def test_completion_lands_archive_outputs_and_mirror_under_current_generation(
     assert (job_dir / "out.json").read_bytes() == b'{"fresh": true}'
     row = store.row_for_node("gate10-job", "node_a", "out.json")
     assert row is not None
-    assert storage.objects["jobs/gate10-ws/gate10-job/out.json"] == b'{"fresh": true}'
+    assert manifest_bytes(store, "gate10-job", "out.json") == b'{"fresh": true}'
     assert _node_row("gate10-job", "node_a")["status"] == "completed"
     assert not list(job_dir.glob(".result-staging-*"))  # staging 已清
 
@@ -267,7 +268,7 @@ def test_completion_ref_channel_wins_over_duplicate_archive_member(
 
     assert ok is True
     assert (job_dir / "out.json").read_bytes() == b"ref-bytes"
-    assert storage.objects["jobs/gate16-ws/gate16-job/out.json"] == b"ref-bytes"
+    assert manifest_bytes(store, "gate16-job", "out.json") == b"ref-bytes"
     row = store.row_for_node("gate16-job", "node_a", "out.json")
     assert row is not None
     assert row["content_hash"] == hashlib.sha256(b"ref-bytes").hexdigest()
@@ -328,7 +329,7 @@ def test_completion_ref_channel_survives_archive_directory_collision(
     assert _node_row("gate18-job", "node_a")["status"] == "completed"
     assert (job_dir / "out.json").is_file()
     assert (job_dir / "out.json").read_bytes() == b"ref-bytes"
-    assert storage.objects["jobs/gate18-ws/gate18-job/out.json"] == b"ref-bytes"
+    assert manifest_bytes(store, "gate18-job", "out.json") == b"ref-bytes"
     # staging 源在 finish 提交后由完成方删除（窗口内绝不删，#774 对抗复审）。
     assert staging_key not in storage.objects
     assert store.row_for_node("gate18-job", "node_a", "out.json") is not None
@@ -749,4 +750,5 @@ def test_completion_view_never_backfills_unreported_outputs_from_job_dir(
     assert store.row_for_node("gate27-job", "node_a", "a.json") is not None
     assert (job_dir / "b.json").read_bytes() == b"stale-leftover"
     assert store.row_for_node("gate27-job", "node_a", "b.json") is None
-    assert "jobs/gate27-ws/gate27-job/b.json" not in storage.objects
+    # #853 版本 key 布局：任何 authority 形态（固定 / 版本 key）都不得出现 b.json。
+    assert not [k for k in storage.objects if k.startswith("jobs/") and k.endswith("/b.json")]

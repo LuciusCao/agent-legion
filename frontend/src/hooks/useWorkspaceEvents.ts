@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobStore } from '../stores/jobStore'
+import { useWorkspaceStreamStore } from '../stores/workspaceStreamStore'
 import { createRealtimeChannel } from '../lib/realtime'
 import { invalidateAgentWorkers } from '../lib/agentWorkersInvalidation'
 import { handleWorkspaceEvent } from './workspaceEventHandlers'
@@ -95,6 +96,9 @@ export function useWorkspaceEvents(
         }
       },
       onStatus: (status) => {
+        // #720：连接态接 UI（断线/重连提示）；open 时下方重新拉快照即
+        // 自动恢复，无需手动刷新。
+        useWorkspaceStreamStore.getState().setStatus(workspaceId, status)
         if (status !== 'open') return
         if (statsOnly) {
           snapshotLoadingRef.current = false

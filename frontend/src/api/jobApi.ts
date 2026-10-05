@@ -21,18 +21,22 @@ export async function fetchJobLog(
 
 export async function fetchRunTokenUsage(
   jobId: string,
-  runId: number
+  runId: number,
+  signal?: AbortSignal
 ): Promise<TokenUsageRunResponse> {
   return api<TokenUsageRunResponse>(
-    `/api/jobs/${encodeURIComponent(jobId)}/runs/${encodeURIComponent(runId)}/token-usage`
+    `/api/jobs/${encodeURIComponent(jobId)}/runs/${encodeURIComponent(runId)}/token-usage`,
+    { signal }
   )
 }
 
 export async function fetchJobTokenUsage(
-  jobId: string
+  jobId: string,
+  signal?: AbortSignal
 ): Promise<TokenUsageJobResponse> {
   return api<TokenUsageJobResponse>(
-    `/api/jobs/${encodeURIComponent(jobId)}/token-usage`
+    `/api/jobs/${encodeURIComponent(jobId)}/token-usage`,
+    { signal }
   )
 }
 

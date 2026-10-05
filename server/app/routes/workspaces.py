@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.auth.dependencies import reject_studio_agent_scope, require_admin
 from server.app.auth.workspace_access import require_workspace_access
-from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
+from server.app.auth.workspace_visibility import workspace_visibility_scope
 from server.app.events import JobEventManager
 from server.app.events.bus import workspace_channel
 from server.app.routes.dashboard_events import create_dashboard_events_router
@@ -42,18 +42,24 @@ def create_workspaces_router(
         request: Request,
         user: Annotated[dict[str, Any], Depends(require_workspace_access)],
     ) -> WorkspacesResponse:
+        # #626 review: a workspace API token is a machine identity bound to
+        # ONE workspace (no user row) — the unscoped listing would enumerate
+        # every workspace's existence to it (the hardened membership guard
+        # above 404s it first; the binding filter is defense in depth).
+        # #711: otherwise the listing is membership-scoped — a non-admin only
+        # sees its member workspaces (any role), admins keep the full list. A
+        # studio-agent scoped token inherits its minter's identity, and a
+        # workspace-bound one is further narrowed to its binding
+        # (enforce_scoped_workspace_binding's read-side rule). The identity
+        # mapping is shared with the dashboard SSE stream (#881).
+        member_user_id, bound_workspace_id = workspace_visibility_scope(user)
         try:
-            workspaces = [WorkspaceRecord.model_validate(w) for w in service.list_workspaces()]
+            visible = service.list_visible_workspaces(
+                member_user_id=member_user_id, bound_workspace_id=bound_workspace_id
+            )
         except JobServiceError as exc:
             raise_job_http_error(exc)
-        # #626 review: a workspace API token is a machine identity bound to
-        # ONE workspace — the unscoped listing would enumerate every
-        # workspace's existence to it (the hardened membership guard above
-        # 404s it first; the filter is defense in depth for future mounts).
-        if user.get("actor_scope") == WORKSPACE_API_SCOPE:
-            bound = str(user.get("scoped_workspace_id") or "")
-            workspaces = [workspace for workspace in workspaces if workspace.id == bound]
-        return WorkspacesResponse(workspaces=workspaces)
+        return WorkspacesResponse(workspaces=[WorkspaceRecord.model_validate(w) for w in visible])
 
     @guarded.post("/workspaces", response_model=WorkspaceResponse)
     def create_workspace(
@@ -114,7 +120,9 @@ def create_workspaces_router(
             raise HTTPException(status_code=503, detail="Event manager not available")
         return await job_event_manager.connect(request, workspace_channel(workspace_id))
 
-    router.include_router(create_dashboard_events_router(job_event_manager=job_event_manager))
+    router.include_router(
+        create_dashboard_events_router(service, job_event_manager=job_event_manager)
+    )
     # Studio 节点执行 datalist 的数据源（在线 Worker 的 runtime/model 声明）；
     # registry 是 agent_workers 的既有门面（BOUNDARY-DATA-001）。
     router.include_router(

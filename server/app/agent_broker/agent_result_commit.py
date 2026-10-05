@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from server.app.agent_broker import AgentExecutionBroker, worker_events
+from server.app.agent_broker.lease_reclaim_audit import reject_result
 from server.app.agent_broker.result_output_manifest import (
     enrich_outcome_from_archived_manifest,
 )
@@ -39,10 +40,13 @@ def commit_agent_result(
 
     ``staged_body`` is atomically renamed into place here; the route reclaims
     it when the commit fails."""
+    # #681: every 409 below is audited (reason / artifacts) by reject_result.
+    audit = (broker.database_dsn, execution_id, worker_id, lease_id, record)
     payload = broker.claimed_payload(execution_id, worker_id)
     if payload is None or str(payload["lease_id"]) != lease_id:
-        worker_events.note_execution_finished_rejected(execution_id, worker_id)
-        raise HTTPException(status_code=409, detail="execution is not owned by this Worker")
+        size = staged_body.stat().st_size if staged_body.exists() else None
+        detail = "execution is not owned by this Worker"
+        raise reject_result(*audit, stage="commit", detail=detail, archive_bytes=size)
     if broker.bundle_dir is None:
         raise HTTPException(status_code=500, detail="Agent bundle storage is unavailable")
     archive_name = f"{execution_id}.{uuid.uuid4().hex}.result.tar.gz"
@@ -80,10 +84,11 @@ def commit_agent_result(
             stage_timer=stage_timer,
         )
         if not finished:
-            raise HTTPException(status_code=409, detail="execution lease is no longer active")
+            detail = "execution lease is no longer active"
+            raise reject_result(*audit, stage="finish", detail=detail, payload=payload)
         if broker.mark_done(execution_id, worker_id, lease_id, record) is None:
-            worker_events.note_execution_finished_rejected(execution_id, worker_id, payload)
-            raise HTTPException(status_code=409, detail="execution is no longer owned")
+            detail = "execution is no longer owned"
+            raise reject_result(*audit, stage="mark_done", detail=detail, payload=payload)
         stage_timer.stage("mark_done")
         succeeded = True
         # #490 execution.finished: outcome + wall time (claim → committed

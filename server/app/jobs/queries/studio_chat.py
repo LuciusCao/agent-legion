@@ -1,8 +1,9 @@
 """Persistence for studio chat sessions (schema v43, phase 3 chunk 4).
 
-Message CRUD lives in studio_chat_messages.py and the resume claim in
-studio_chat_resume.py (file budget splits); this mixin inherits the latter so
-the composed JobQueries surface is unchanged.
+Message CRUD lives in studio_chat_messages.py, the resume claim in
+studio_chat_resume.py and the delete/archive stamps in studio_chat_visibility.py
+(file budget splits); this mixin inherits them so the composed JobQueries
+surface is unchanged.
 """
 
 from __future__ import annotations
@@ -15,13 +16,14 @@ from server.app.jobs.queries.studio_chat_resume import (
     _CAP_LOCK_KEY,
     StudioChatResumeQueriesMixin,
 )
+from server.app.jobs.queries.studio_chat_visibility import StudioChatVisibilityQueriesMixin
 
 _SESSION_COLUMNS = (
     "id, workspace_id, user_id, agent_id, title, status, acp_session_id,"
     " capability_snapshot_json, session_modes_json, config_options_json,"
     " allow_all_permissions, mcp_status,"
     " selected_node_key, draft_yaml, usage_json, compacting,"
-    " error_detail, created_at, updated_at, closed_at"
+    " error_detail, created_at, updated_at, closed_at, deleted_at, archived_at"
 )
 
 
@@ -67,8 +69,9 @@ def _build_session_updates(fields: dict[str, Any]) -> dict[str, Any]:
     return updates
 
 
-class StudioChatQueriesMixin(StudioChatResumeQueriesMixin):
-    """CRUD for studio_chat_sessions (messages/resume via inherited mixins)."""
+class StudioChatQueriesMixin(StudioChatResumeQueriesMixin, StudioChatVisibilityQueriesMixin):
+    """CRUD for studio_chat_sessions (messages/resume/visibility stamps via
+    inherited mixins)."""
 
     def create_studio_chat_session(
         self, workspace_id: str, user_id: str, agent_id: str, *, max_active: int | None = None
@@ -122,12 +125,18 @@ class StudioChatQueriesMixin(StudioChatResumeQueriesMixin):
             ).fetchone()
         return _session_record(row) if row is not None else None
 
-    def list_studio_chat_sessions(self, workspace_id: str) -> list[dict[str, Any]]:
+    def list_studio_chat_sessions(
+        self, workspace_id: str, *, archived: bool = False
+    ) -> list[dict[str, Any]]:
+        """Non-deleted sessions; ``archived`` picks the archive view (#924,
+        v90) instead of the default list, which hides archived rows."""
         with self._connect_read() as conn:
             rows = conn.execute(
                 f"select {_SESSION_COLUMNS} from studio_chat_sessions"
-                " where workspace_id=%s order by created_at desc, id desc",
-                (workspace_id,),
+                " where workspace_id=%s and deleted_at is null"
+                " and (archived_at is not null)=%s"
+                " order by created_at desc, id desc",
+                (workspace_id, archived),
             ).fetchall()
         return [_session_record(row) for row in rows]
 

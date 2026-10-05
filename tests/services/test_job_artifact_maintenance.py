@@ -24,6 +24,7 @@ from server.app.services.job_artifact_maintenance import (
     reupload_missing,
 )
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from tests.fakes.artifact_keys import manifest_bytes, manifest_key
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -110,7 +111,11 @@ def test_reconciler_reuploads_when_row_is_stale(
     assert row is not None
     assert int(row["size_bytes"]) == len(NEW_PAYLOAD)
     assert row["content_hash"] == hashlib.sha256(NEW_PAYLOAD).hexdigest()
-    assert storage.objects["jobs/ws-1/job-1/out.json"] == NEW_PAYLOAD
+    assert manifest_bytes(store, "job-1", "out.json") == NEW_PAYLOAD
+    # #853：重传落新版本 key，被取代的旧版本对象在登记提交后删除（不留孤儿）。
+    assert [k for k in storage.objects if k.startswith("jobs/")] == [
+        manifest_key(store, "job-1", "out.json")
+    ]
 
 
 def test_reconciler_reuploads_on_same_size_hash_mismatch(
@@ -130,7 +135,7 @@ def test_reconciler_reuploads_on_same_size_hash_mismatch(
     local.write_bytes(b"bbbb")  # 同长度新字节：只有 hash 能识别过期
 
     assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 1
-    assert storage.objects["jobs/ws-1/job-1/out.json"] == b"bbbb"
+    assert manifest_bytes(store, "job-1", "out.json") == b"bbbb"
 
 
 def test_reconciler_skips_fresh_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -476,8 +481,9 @@ def test_reconciler_survives_upload_failure_and_continues(
         assert reupload_missing(store, _job_db(job), _settings(tmp_path)) == 1
 
     # b.json 上传成功；a.json 的失败被 warning 记录（含 job 上下文）
-    assert storage.objects["jobs/ws-1/job-1/b.json"] == OLD_PAYLOAD
-    assert "jobs/ws-1/job-1/a.json" not in storage.objects
+    assert manifest_bytes(store, "job-1", "b.json") == OLD_PAYLOAD
+    assert store.lookup("job-1", "a.json") is None
+    assert not [k for k in storage.objects if k.endswith("/a.json")]
     assert any("reconciler re-upload failed" in record.message for record in caplog.records)
 
 

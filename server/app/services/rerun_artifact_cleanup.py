@@ -54,7 +54,9 @@ def delete_rerun_artifact_objects(
 
     Between the rerun transaction's commit and this cleanup the job is
     schedulable again — a fast re-attempt may register a NEW manifest row
-    with the same stable authority key. Re-validate every row against the
+    with the same stable authority key (pre-#853 fixed-layout keys; since
+    #853 every write lands on a fresh version key, so a re-attempt never
+    reuses a retired key and the guard below is defense in depth). Re-validate every row against the
     CURRENT manifest before its removal: a reappeared key belongs to the
     new attempt and is skipped. The re-check runs PER OBJECT, immediately
     before that object's removal (#683 review P1): ``promote_all`` copies

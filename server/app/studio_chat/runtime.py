@@ -43,6 +43,9 @@ class SessionRuntime:
         self.background_epoch = 0
         self.background_rearm_epoch: int | None = None
         self.background_baseline: Any = None
+        # #938: pre-spawn baseline of the resumed Kimi Code wire journal
+        # (wire_baseline.WireBaseline); None for a session this runtime created.
+        self.wire_baseline: Any = None
         self.background_cursor: Any = None
         self.background_cleanup: Any = None
         # Streaming chunk coalescing (agent text + thought): each kind folds
@@ -95,9 +98,16 @@ class SessionRuntime:
         self.turn_open = False
         self.turn_owner: object | None = None
         self.turn_may_compact = False
-        # Per-turn bookkeeping for the degenerate-turn detector: send_message
-        # stamps turn_started_at / zeroes turn_update_count / records whether
-        # the prompt was a slash command; on_update counts content updates.
+        # compaction_seen: an accepted compaction start marker in this
+        # process lifetime — the evidence gate for the empty_turn wording
+        # (#863); cleared by on_ready like the flag itself.
+        self.compaction_seen = False
+        # Per-turn bookkeeping for the degenerate-turn detector
+        # (empty_turn.py): open_turn stamps turn_started_at (also the turn's
+        # identity for the deferred verdict) / zeroes turn_update_count /
+        # exempts slash commands and platform-initiated (empty-text) turns;
+        # on_update counts content updates, trailing ones included.
         self.turn_started_at: float | None = None
         self.turn_update_count = 0
-        self.turn_slash_command = False
+        self.turn_skip_empty_check = False
+        self.empty_turn_timer: threading.Timer | None = None

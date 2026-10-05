@@ -126,7 +126,7 @@ class WorkerPresenceRequest(BaseModel):
     claim_enabled: bool
 
 
-class AgentWorkerConsoleResponse(BaseModel):
+class AgentWorkerConsoleUrl(BaseModel):
     # Instance-configured Worker console address (AGENT_LEGION_WORKER_CONSOLE_URL,
     # usually the deployment machine's local Worker): the "open the Worker
     # console" entry the Host UI shows next to worker lists and after key
@@ -134,7 +134,16 @@ class AgentWorkerConsoleResponse(BaseModel):
     console_url: str = ""
 
 
-class AgentWorkersResponse(AgentWorkerConsoleResponse):
+class AgentWorkerConsoleResponse(AgentWorkerConsoleUrl):
+    # #875: True when the running Host executes no code nodes locally
+    # (executor_runtime.code_capacity == 0, pure-remote mode, #389) — code
+    # nodes then also need an online code-capable Worker, so the console's
+    # Worker readiness checks must count them like agent nodes. Reflects the
+    # value the process started with (code_capacity is restart-effective).
+    code_requires_worker: bool = False
+
+
+class AgentWorkersResponse(AgentWorkerConsoleUrl):
     workers: list[AgentWorkerSummary]
 
 

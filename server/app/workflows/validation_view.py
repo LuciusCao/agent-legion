@@ -1,7 +1,7 @@
-"""Declared validation view for the Host-side legacy validator (#757).
+"""Declared validation view for the Host-side business-rule validator (#757).
 
 A job dir accumulates every node's outputs across all attempts, so running a
-skill's legacy ``validate_output.py`` against it lets glob-based validators
+skill's business-rule ``validate_output.py`` against it lets glob-based validators
 see sibling nodes' files — a sibling's stale fail verdict then flips this
 node's clean run (the review A/B cross-attribution bug). The bare staging
 read view overcorrects the other way: it hides the declared inputs that
@@ -62,9 +62,12 @@ tests/workflows/test_output_validation_view.py:
 - validator-created undeclared files never propagate — the promotion plan
   is frozen at unpack time (#759), so the view is not a backdoor around
   the declared artifact surface;
-- remote-channel (Worker-direct S3) outputs are the pre-existing exception:
-  their authority object is the Worker's own upload and the mirror skips
-  them, so validator mutations reach only the local copies on every design.
+- remote-channel (Worker-direct S3) outputs are read-only to the validator
+  (#867): their authority object is the Worker's own upload and the mirror
+  skips them, so a mutation could only ever reach the local copies — the
+  completion tail (``workflows.remote_output_guard``) re-hashes them after
+  validation against the promote-phase digests and fails the run on any
+  change instead.
 
 A pool worker dying hard mid-construction leaks its ``.validation-view-*``
 scratch dir into the job dir (same leak class as #759's staging dirs);

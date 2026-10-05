@@ -2,11 +2,12 @@
  * Studio 浮动功能岛（#799：去 AppBar 画布化——DAG 全屏为底板，原顶栏内容
  * 拆成两个半透明毛玻璃浮岛；#804 验收定案重组）：
  * - 左上「workflow 指挥中心」岛：返回、workspace 名（#804：去掉「/ 编辑
- *   工作流」modeText 与草稿基线文本）、版本选择器（紧跟标题）、状态 chip
+ *   工作流」modeText 与草稿基线文本）、版本选择器（紧跟标题；#770 只显示
+ *   vN，hash 降级 tooltip，重置收进其菜单）、状态 chip
  *   （CI 风格唯一状态表达：未发布变更 → 校验中… → ✓/✗，点击开校验报告
  *   抽屉；干净态不显示）、草稿保存瞬态文本（仅 保存中…/保存失败将重试/
  *   冲突警示；手动保存按钮退役，自动保存覆盖）+ 分隔线 + 生命周期动作
- *   （发布 contained 主按钮 + 仅 dirty 外露的 outlined 重置；校验按钮
+ *   （发布 contained 主按钮；#770 起重置收进版本菜单不再外露；校验按钮
  *   退役——保存成功后自动静默校验；只读态 返回/设为草稿）；
  * - 右上「纯图标」岛：Agent 面板开关 + 共享素材，视觉同质成组（用量入口
  *   已移除：实例级遥测与 workflow 编辑无语义关系，其余页面全局顶栏已有）。
@@ -40,8 +41,9 @@ export function StudioCanvasIslands() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
   const title = useWorkspaceDisplayName(workspaceId)
-  // 窄屏重置出口（轮 4 P2-D）：动作组的重置按钮窄屏隐藏，收进版本选择器
-  // 菜单（带确认）；宽屏保持外露按钮，菜单不出重置项。
+  // 重置出口（轮 4 P2-D 窄屏起步，#770 顶栏减法推广到全宽度）：低频破坏性
+  // 动作不再外露按钮，统一收进版本选择器菜单（带确认）。narrow 仅剩
+  // inert 分级用途。
   const narrow = useStudioNarrowViewport()
   // P1 宽屏互斥（#804 codex 轮 2）：左岛 max-width = 画布列宽 - 右岛实测宽
   // - 间距，resize + ResizeObserver 驱动（见 useIslandExclusiveWidth）。
@@ -72,7 +74,7 @@ export function StudioCanvasIslands() {
       {/* 左岛 = workflow 指挥中心（#804 定案排序）：返回 + workspace 名 +
           版本选择器 + 状态 chip + 保存瞬态文本 + 分隔线 + 动作组。窄屏
           降级：CSS 隐藏 secondary（标题，以及保存控件内部的瞬态文本）与
-          conditional（chip）及动作组的 outlined 次级按钮（重置），只留
+          conditional（chip）及动作组的 outlined 次级按钮，只留
           返回 + 版本选择器 + contained 主按钮；冲突警示/冲突操作出口
           窄屏保留（codex 轮 3 P1，DraftSaveControl 自行分流）。间距纪律：
           岛级 flex gap 一套机制，conditional/passthrough 用
@@ -119,7 +121,7 @@ export function StudioCanvasIslands() {
           error={studio.revisionLoadError}
           onSelectRevision={studio.selectRevision}
           onResetDraft={
-            narrow && studio.dirty && !studio.readOnly
+            studio.dirty && !studio.readOnly
               ? studio.resetDefinition
               : undefined
           }
@@ -144,14 +146,12 @@ export function StudioCanvasIslands() {
         <span className={styles.actionsGroup}>
           <WorkflowStudioCommandBarActions
             readOnly={studio.readOnly}
-            dirty={studio.dirty}
             publishing={studio.publishing}
             validating={studio.validating}
             canPublish={studio.canPublish}
             createsRevision={studio.compareSummary?.createsRevision}
             publishTooltip={publishTooltip}
             onPublish={() => void studio.requestPublish()}
-            onReset={studio.resetDefinition}
             backToDraft={studio.backToDraft}
             confirmAdoptDraft={
               studio.dirty || Boolean(countNodeChanges(studio.compareSummary))

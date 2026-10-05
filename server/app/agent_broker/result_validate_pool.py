@@ -3,7 +3,7 @@
 Sibling of ``result_unpack_pool`` (#552), deliberately NOT the same pool:
 the task profiles differ — an unpack is milliseconds of pure CPU, while a
 validation parks on subprocess waits (the velites contract engine and the
-legacy ``validate_output.py``, each with a 30s timeout), so sharing one
+skill's business-rule ``validate_output.py``, each with a 30s timeout), so sharing one
 pool would let a slow validation head-of-line block every unpack behind it.
 
 The split point keeps the DB-touching half in the main process: a legacy
@@ -154,7 +154,7 @@ def validate_skill_commit_outputs(
     #757: the validator never sees the raw job dir. The declared validation
     view (``validation_view.validation_view``) is built HERE, in the pool
     worker, after the trio contract check — which already guarantees the
-    legacy script exists, so no "nothing to validate" skip is reachable (a
+    business-rule script exists, so no "nothing to validate" skip is reachable (a
     script-less tree must keep failing closed, #638). The view's exit arms
     reconcile output mutations back into the run view and enforce the
     inputs read-only contract (a violation raises and crosses the boundary

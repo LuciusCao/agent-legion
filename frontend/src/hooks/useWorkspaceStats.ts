@@ -11,7 +11,7 @@ import { queryKeys } from '../lib/queryKeys'
 export function useWorkspaceStats(workspaceId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.workspaceStats(workspaceId ?? ''),
-    queryFn: () => fetchWorkspaceStats(workspaceId as string),
+    queryFn: ({ signal }) => fetchWorkspaceStats(workspaceId as string, signal),
     enabled: !!workspaceId,
   })
 }

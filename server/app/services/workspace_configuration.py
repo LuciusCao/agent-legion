@@ -75,6 +75,37 @@ class WorkspaceConfigurationService:
     def list_workspaces(self) -> list[dict[str, Any]]:
         return self.job_db.list_workspaces()
 
+    def list_visible_workspaces(
+        self, *, member_user_id: str | None, bound_workspace_id: str | None
+    ) -> list[dict[str, Any]]:
+        """Workspace listing narrowed to what the caller may see (#711).
+
+        ``member_user_id``: restrict to that user's member workspaces (any
+        role); None means no membership restriction (admin identities).
+        ``bound_workspace_id``: restrict to that single workspace (scoped
+        tokens bound to one workspace); applied on top of membership, so a
+        binding never widens visibility.
+        """
+        visible = self.visible_workspace_ids(
+            member_user_id=member_user_id, bound_workspace_id=bound_workspace_id
+        )
+        workspaces = self.job_db.list_workspaces()
+        return workspaces if visible is None else [w for w in workspaces if w["id"] in visible]
+
+    def visible_workspace_ids(
+        self, *, member_user_id: str | None, bound_workspace_id: str | None
+    ) -> frozenset[str] | None:
+        """The id set behind ``list_visible_workspaces``; None = unrestricted.
+
+        Only a membership restriction touches the DB (one member-row read),
+        so per-connection callers (dashboard SSE, #881) can cache the result.
+        """
+        bound = None if bound_workspace_id is None else frozenset({bound_workspace_id})
+        if member_user_id is None:
+            return bound
+        visible = frozenset(self.job_db.list_user_workspace_ids(member_user_id))
+        return visible if bound is None else visible & bound
+
     def create(self, payload: dict[str, Any]) -> dict[str, Any]:
         # Schema v62: the caller-provided id is the workflow key — bound at
         # creation and immutable. No sample-template seeding on this path;

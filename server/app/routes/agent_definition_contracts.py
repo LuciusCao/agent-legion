@@ -36,9 +36,11 @@ class AgentRollbackRequest(BaseModel):
 class AgentPublishRequest(BaseModel):
     """#692 codex P1: the caller's asserted draft hash — verified atomically
     inside the publish transaction; mismatch raises 409 with zero publish
-    side effects. Absent (legacy callers) keeps the old no-check semantics."""
+    side effects. #841: required — a missing body or field is 422 (the
+    hash-less legacy semantics are retired; read the draft's
+    ``definition_hash`` from the save/detail response first)."""
 
-    expected_hash: str | None = None
+    expected_hash: str = Field(min_length=1)
 
 
 class AgentVersionResponse(BaseModel):
@@ -73,6 +75,10 @@ class AgentListItem(BaseModel):
     status: Literal["draft", "published", "archived"]
     has_draft: bool
     published_at: datetime | None = None
+    # #906: the latest row can be a draft whose capability differs from the
+    # published version that actually routes; null = never published.
+    published_capability: str | None = None
+    published_version: int | None = None
 
 
 class AgentListResponse(BaseModel):

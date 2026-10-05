@@ -3,7 +3,8 @@ import type { ResolvedTextItem } from './textItem'
 /**
  * 与后端 run_text_items.text_item_filename 同契约的裸文件名校验（合法返回
  * null，否则返回提示文案）：不含路径分隔符、不以点开头、无控制字符、
- * 必须以 .md/.txt 结尾（大小写不敏感）。前端先行拦截，避免界面把必然
+ * 必须以 .md/.txt/.json 结尾（大小写不敏感；与后端 text_item_content_types
+ * 的白名单同步，#813 起放开 .json）。前端先行拦截，避免界面把必然
  * 被后端 400 拒绝的输入显示为可提交。
  */
 export function textItemFilenameError(name: string): string | null {
@@ -18,8 +19,8 @@ export function textItemFilenameError(name: string): string | null {
   }
   const dot = name.lastIndexOf('.')
   const suffix = dot >= 0 ? name.slice(dot).toLowerCase() : ''
-  if (suffix !== '.md' && suffix !== '.txt')
-    return '文件名须以 .md 或 .txt 结尾'
+  if (suffix !== '.md' && suffix !== '.txt' && suffix !== '.json')
+    return '文件名须以 .md、.txt 或 .json 结尾'
   return null
 }
 

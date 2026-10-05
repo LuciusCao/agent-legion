@@ -146,6 +146,47 @@ describe('useStudioChat', () => {
     expect(result.current.messages[0]?.seq).toBe(1)
   })
 
+  // #938：后台子代理完成 / cron 触发的 agent 自发回合——本地没有发起任何
+  // turn（未调用 send、会话 idle），SSE 推来的回执、汇报文本与收尾仍要实时
+  // 合入消息列表。
+  it('renders an unprompted agent turn without any local send', async () => {
+    const { result } = await renderChat()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    const status = (id: string, seq: number, content: object) => ({
+      id,
+      session_id: 's1',
+      kind: 'status' as const,
+      role: 'system' as const,
+      content,
+      seq,
+      created_at: '2026-01-01T00:00:00Z',
+    })
+    emit({
+      type: 'message',
+      message: status('r1', 1, {
+        event: 'unprompted_turn',
+        detail: '后台任务 agent-1 已完成，agent 正在汇报',
+      }),
+    })
+    emit({ type: 'message', message: textMessage('m1', 2, '子代理汇报') })
+    emit({
+      type: 'message',
+      message: status('e1', 3, { event: 'turn_end', unprompted: true }),
+    })
+    // turn_end 是终止事件：照常触发全量回取自愈（与用户回合同源）。
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatMessages).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        0
+      )
+    )
+    expect(result.current.messages.map((m) => m.id)).toEqual(['r1', 'm1', 'e1'])
+    expect(result.current.messages[1]?.content.text).toBe('子代理汇报')
+    expect(mockApi.sendStudioChatMessage).not.toHaveBeenCalled()
+    expect(result.current.busy).toBe(false)
+  })
+
   it('refetches incrementally when a partial targets an unknown message', async () => {
     const { result } = await renderChat()
     await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))

@@ -45,7 +45,7 @@ describe('text item filename validation (backend text_item_filename 同契约)',
     expect(item.ready).toBe(false)
   })
 
-  it.each(['notes.MD', '笔记.TXT', 'a.b.md'])(
+  it.each(['notes.MD', '笔记.TXT', 'a.b.md', 'payload.json', 'PAYLOAD.JSON'])(
     'valid name %s keeps ready (suffix lowercased like backend)',
     (filename) => {
       const item = resolveTextItem('实际需求', filename, config)

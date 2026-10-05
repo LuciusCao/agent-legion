@@ -98,10 +98,21 @@ def _resolve_deployment_targets(dest_dir: str | None) -> list[tuple[str, str]]:
         )
 
     targets: list[tuple[str, str]] = []
+    # #850：同一文件可有多种拼写（PATH 相对条目下主目标 ``bin/velites`` 与
+    # which 命中 ``./bin/velites``）。字符串去重放过后同一暂存件被备妥两次，
+    # 应用阶段第二次 mv 找不到暂存件报错。统一 abspath 后再去重——只做
+    # 词法归一，**不** realpath：解析 symlink 会把替换目标从链接改成链接
+    # 指向的文件，改变既有安置语义。
+    seen: set[str] = set()
+
+    def add_target(member: str, path: str | Path) -> None:
+        absolute = os.path.abspath(path)
+        if absolute not in seen:
+            seen.add(absolute)
+            targets.append((member, absolute))
+
     if dest_dir is not None:
         directory = Path(dest_dir)
-        if not directory.is_absolute():
-            directory = Path.cwd() / directory
         for member in family:
             binary_path = directory / member
             stamp_path = Path(f"{binary_path}{SRC_STAMP_SUFFIX}")
@@ -109,7 +120,7 @@ def _resolve_deployment_targets(dest_dir: str | None) -> list[tuple[str, str]]:
             # 或孤儿 stamp）都会盖住同批的 velites——存在即必须纳入刷新
             # （不主动创造，见模块 docstring 的通道语义）。
             if member == "velites" or binary_path.exists() or stamp_path.exists():
-                targets.append((member, str(binary_path)))
+                add_target(member, binary_path)
         return targets
 
     # PATH 模式：主目标跟随 which velites 的现有位置（就地刷新，旧脚本
@@ -121,16 +132,14 @@ def _resolve_deployment_targets(dest_dir: str | None) -> list[tuple[str, str]]:
         binary_path = primary_dir / member
         stamp_path = Path(f"{binary_path}{SRC_STAMP_SUFFIX}")
         if member == "velites" or binary_path.exists() or stamp_path.exists():
-            targets.append((member, str(binary_path)))
+            add_target(member, binary_path)
     # PATH 上按名独立发现的家族成员位置（#835 codex P2：PATH 上 velites
     # 与 velites-sandbox 可来自不同目录——按 velites 的兄弟路径推导是错的，
     # 必须按名独立 which）。它们盖住同批安置的 velites，漏刷即静默滞留。
-    seen = {path for _, path in targets}
     for member in family:
         hit = shutil.which(member)
-        if hit and hit not in seen:
-            seen.add(hit)
-            targets.append((member, hit))
+        if hit:
+            add_target(member, hit)
     return targets
 
 

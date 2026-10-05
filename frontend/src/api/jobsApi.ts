@@ -16,8 +16,11 @@ export async function createJobBatch(
   })
 }
 
-export async function fetchJobDetail(jobId: string): Promise<JobDetail> {
-  return api(`/api/jobs/${encodeURIComponent(jobId)}`)
+export async function fetchJobDetail(
+  jobId: string,
+  signal?: AbortSignal
+): Promise<JobDetail> {
+  return api(`/api/jobs/${encodeURIComponent(jobId)}`, { signal })
 }
 
 export async function deleteJob(jobId: string): Promise<{ deleted: string }> {

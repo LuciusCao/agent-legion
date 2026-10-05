@@ -37,7 +37,7 @@ export function WorkspaceWorkersSection({
     error,
   } = useQuery({
     queryKey: extraQueryKeys.workspaceWorkers(workspaceId),
-    queryFn: () => listAgentWorkers(workspaceId),
+    queryFn: ({ signal }) => listAgentWorkers(workspaceId, signal),
     // Worker 注册/下线应在几秒内自动反映到列表。
     refetchInterval: 5000,
   })

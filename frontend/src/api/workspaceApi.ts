@@ -7,8 +7,10 @@ import type {
 } from '../types'
 import type { WorkspaceStats } from '../types/workspaceTypes'
 
-export async function fetchWorkspaces(): Promise<WorkspacesResponse> {
-  return api('/api/workspaces')
+export async function fetchWorkspaces(
+  signal?: AbortSignal
+): Promise<WorkspacesResponse> {
+  return api('/api/workspaces', { signal })
 }
 
 export async function createWorkspace(
@@ -44,9 +46,12 @@ export async function updateWorkspace(
 }
 
 export async function fetchWorkspaceStats(
-  workspaceId: string
+  workspaceId: string,
+  signal?: AbortSignal
 ): Promise<WorkspaceStats> {
-  return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/stats`)
+  return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/stats`, {
+    signal,
+  })
 }
 
 export async function deleteWorkspace(workspaceId: string): Promise<void> {

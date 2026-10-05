@@ -1,6 +1,6 @@
 """Studio chat context-health signals (#694): usage mirror, compaction
-window tracking + send guard, degenerate-turn detection, session/load
-replay suppression.
+window tracking + send guard, session/load replay suppression. The
+degenerate-turn (empty_turn) verdict lives in test_studio_chat_empty_turn.py.
 
 Drives the service callbacks directly (stub handle, no subprocess), the
 same pattern as test_studio_chat_service_sessions.py's _direct_session.
@@ -162,6 +162,51 @@ def test_compact_markers_become_status_messages_and_flag(direct) -> None:
         service.shutdown()
 
 
+def test_compaction_completion_refreshes_context_usage(direct) -> None:
+    """#826: kimi only pushes usage_update when a turn settles and
+    compaction finishes out-of-turn — the completion notice's "Tokens
+    after" must refresh the usage mirror (and its SSE session frame) at
+    once instead of leaving the pre-compaction reading until the next turn."""
+    service, bus, session_id, _runtime, _workspace_id = direct
+    try:
+        _ready(service, session_id)
+        service._on_update(
+            session_id, {"sessionUpdate": "usage_update", "used": 200000, "size": 262144}
+        )
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        service._on_update(
+            session_id,
+            _chunk(
+                "Compaction completed.\n- Messages compacted: 42\n"
+                "- Tokens before: 200,000\n- Tokens after: 31,234"
+            ),
+        )
+        assert service.get_session(session_id)["usage"] == {"used": 31234, "size": 262144}
+        session_payloads = [p for _, p in bus.events if p.get("type") == "session"]
+        assert session_payloads[-1]["session"]["usage"] == {"used": 31234, "size": 262144}
+    finally:
+        service.shutdown()
+
+
+def test_compaction_completion_without_stats_or_window_leaves_usage(direct) -> None:
+    service, _bus, session_id, _runtime, _workspace_id = direct
+    try:
+        _ready(service, session_id)
+        # No prior usage mirror: no window size to pair the count with.
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        service._on_update(session_id, _chunk("Compaction completed.\n- Tokens after: 9,000"))
+        assert service.get_session(session_id)["usage"] is None
+        # Cancelled / stats-less completion: the mirror is left alone.
+        service._on_update(
+            session_id, {"sessionUpdate": "usage_update", "used": 5000, "size": 262144}
+        )
+        service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        service._on_update(session_id, _chunk("Compaction cancelled."))
+        assert service.get_session(session_id)["usage"] == {"used": 5000, "size": 262144}
+    finally:
+        service.shutdown()
+
+
 def test_duplicate_compact_start_marker_does_not_repeat_the_notice(direct) -> None:
     service, _bus, session_id, _runtime, workspace_id = direct
     try:
@@ -218,55 +263,6 @@ def test_on_ready_clears_inherited_compacting_flag(direct) -> None:
         _ready(service, session_id)
         assert runtime.compacting is False
         assert service.get_session(session_id)["compacting"] is False
-    finally:
-        service.shutdown()
-
-
-def test_instant_zero_content_end_turn_is_flagged(direct) -> None:
-    service, _bus, session_id, _runtime, workspace_id = direct
-    try:
-        _ready(service, session_id)
-        service.send_message(session_id, workspace_id, "hello")
-        service._on_turn_end(session_id, "end_turn")
-        events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
-        # (第一轮完成还会触发一次性的 mcp_unverified 提示，不参与断言。)
-        assert "empty_turn" in events and "turn_end" in events
-        assert events.index("empty_turn") < events.index("turn_end")
-        assert service.get_session(session_id)["status"] == "idle"
-    finally:
-        service.shutdown()
-
-
-def test_turn_with_content_is_not_flagged(direct) -> None:
-    service, _bus, session_id, _runtime, workspace_id = direct
-    try:
-        _ready(service, session_id)
-        service.send_message(session_id, workspace_id, "hello")
-        service._on_update(session_id, _chunk("短回复"))
-        service._on_turn_end(session_id, "end_turn")
-        events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
-        assert "empty_turn" not in events and "turn_end" in events
-    finally:
-        service.shutdown()
-
-
-def test_slow_or_slash_turns_are_not_flagged(direct) -> None:
-    service, _bus, session_id, runtime, workspace_id = direct
-    try:
-        _ready(service, session_id)
-        # A zero-content turn that took longer than the threshold is a legal
-        # (if odd) answer, not the quiescence-window signature.
-        service.send_message(session_id, workspace_id, "think quietly")
-        with runtime.lock:
-            runtime.turn_started_at = time.monotonic() - 10
-        service._on_turn_end(session_id, "end_turn")
-        # Slash commands are local by design: /compact settles instantly with
-        # no agent content and must not be misread as a fake completion.
-        service.send_message(session_id, workspace_id, "/compact")
-        service._on_turn_end(session_id, "end_turn")
-        events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
-        assert "empty_turn" not in events
-        assert events.count("turn_end") == 2
     finally:
         service.shutdown()
 

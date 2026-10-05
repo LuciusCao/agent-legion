@@ -62,7 +62,9 @@ def create_job_list_router(
     )
     def snapshot_workspace_jobs(
         workspace_id: str,
-        limit: int = 200,
+        # #852：越界 422（与 /runs、/jobs 同一约定），不在函数体内静默钳制——
+        # 调用方据返回条数判断是否翻完时，被改写的页大小会让它少读结果。
+        limit: Annotated[int, Query(ge=1, le=500)] = 200,
         cursor: str | None = None,
         status: _NonEmptyFilter = None,
         search: str | None = None,
@@ -84,9 +86,8 @@ def create_job_list_router(
             run_id,
         )
         try:
-            safe_limit = max(1, min(limit, 500))
             return JobsPageResponse(
-                **job_list_queries.page(workspace_id, job_filter, limit=safe_limit, cursor=cursor)
+                **job_list_queries.page(workspace_id, job_filter, limit=limit, cursor=cursor)
             )
         except JobServiceError as exc:
             raise_job_http_error(exc)

@@ -13,6 +13,8 @@ interface ConfirmDialogProps {
   title: string
   children: ReactNode
   confirmLabel?: string
+  /** 提交在途时确认按钮的文案（默认「删除中...」）。 */
+  busyLabel?: string
   onClose: () => void
   onConfirm: () => Promise<void>
 }
@@ -26,6 +28,7 @@ export function ConfirmDialog({
   title,
   children,
   confirmLabel = '删除',
+  busyLabel = '删除中...',
   onClose,
   onConfirm,
 }: ConfirmDialogProps) {
@@ -60,7 +63,7 @@ export function ConfirmDialog({
           onClick={() => void handleConfirm()}
           disabled={isSubmitting}
         >
-          {isSubmitting ? '删除中...' : confirmLabel}
+          {isSubmitting ? busyLabel : confirmLabel}
         </Button>
       </DialogActions>
     </Dialog>

@@ -39,7 +39,7 @@ scripts/
     → 前端通过 Vite proxy 访问后端 API
     → 后端通过 PostgreSQL 协调任务，并读写 data/ 目录产物
     → Job 运行产物存入 data/jobs/<workspace>/<shard>/<job_id>/（详见 ../data-layout.md）；
-      权威副本在实例对象存储（`jobs/{workspace_id}/{job_id}/{name}` key + `job_artifacts`
+      权威副本在实例对象存储（`jobs/{workspace_id}/{job_id}/.v/{version}/{name}` 不可变版本 key，#853；存量行为 `jobs/{workspace_id}/{job_id}/{name}` + `job_artifacts`
       清单表），本地 job_dir 只是执行暂存与可淘汰缓存
 ```
 

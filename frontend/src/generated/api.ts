@@ -2644,7 +2644,10 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Publish */
+    /**
+     * Publish
+     * @description #841: CAS publish — 409 when the draft is no longer the asserted one.
+     */
     post: operations['publish_api_workspaces__workspace_id__preview_panel_publish_post']
     delete?: never
     options?: never
@@ -3041,6 +3044,24 @@ export interface paths {
     delete: operations['close_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__delete']
     options?: never
     head?: never
+    /** Rename Session */
+    patch: operations['rename_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__patch']
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/archive': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Archive Session */
+    post: operations['archive_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__archive_post']
+    delete?: never
+    options?: never
+    head?: never
     patch?: never
     trace?: never
   }
@@ -3089,6 +3110,23 @@ export interface paths {
     /** Update Context */
     put: operations['update_context_api_workspaces__workspace_id__studio_chat_sessions__session_id__context_put']
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/delete': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Delete Session */
+    post: operations['delete_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__delete_post']
     delete?: never
     options?: never
     head?: never
@@ -3192,6 +3230,23 @@ export interface paths {
     put?: never
     /** Resume Session */
     post: operations['resume_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__resume_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/unarchive': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Unarchive Session */
+    post: operations['unarchive_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__unarchive_post']
     delete?: never
     options?: never
     head?: never
@@ -3701,6 +3756,10 @@ export interface components {
       has_draft: boolean
       /** Published At */
       published_at?: string | null
+      /** Published Capability */
+      published_capability?: string | null
+      /** Published Version */
+      published_version?: number | null
       /** Runtime */
       runtime: string
       /** Skill */
@@ -3722,11 +3781,13 @@ export interface components {
      * AgentPublishRequest
      * @description #692 codex P1: the caller's asserted draft hash — verified atomically
      *     inside the publish transaction; mismatch raises 409 with zero publish
-     *     side effects. Absent (legacy callers) keeps the old no-check semantics.
+     *     side effects. #841: required — a missing body or field is 422 (the
+     *     hash-less legacy semantics are retired; read the draft's
+     *     ``definition_hash`` from the save/detail response first).
      */
     AgentPublishRequest: {
       /** Expected Hash */
-      expected_hash?: string | null
+      expected_hash: string
     }
     /** AgentRegisterTokenCreatedResponse */
     AgentRegisterTokenCreatedResponse: {
@@ -3855,6 +3916,11 @@ export interface components {
     /** AgentWorkerConsoleResponse */
     AgentWorkerConsoleResponse: {
       /**
+       * Code Requires Worker
+       * @default false
+       */
+      code_requires_worker: boolean
+      /**
        * Console Url
        * @default
        */
@@ -3929,6 +3995,13 @@ export interface components {
     AgentsResponse: {
       /** Agents */
       agents: components['schemas']['AgentStatusResponse'][]
+    }
+    /** ApiTokenRateLimit */
+    ApiTokenRateLimit: {
+      /** Burst */
+      burst: number
+      /** Requests Per Minute */
+      requests_per_minute: number
     }
     /** ApprovalDecisionCreateRequest */
     ApprovalDecisionCreateRequest: {
@@ -4474,6 +4547,8 @@ export interface components {
     }
     /** HealthResponse */
     HealthResponse: {
+      /** Instance Proof */
+      instance_proof?: string | null
       /** Ok */
       ok: boolean
       storage?: components['schemas']['StorageStatus'] | null
@@ -4930,6 +5005,11 @@ export interface components {
       /** Batch Id */
       batch_id: string
       /**
+       * Client Token
+       * @description 条目级幂等键（#813）：material / bundle（含 text 归一的 material）条目带 client_token 提交时为该 token，否则为 null；ref 条目恒为 null。由服务端从 source_id 的 `~<token>` 后缀解析，只读。
+       */
+      client_token?: string | null
+      /**
        * Completed Nodes
        * @default 0
        */
@@ -4970,6 +5050,11 @@ export interface components {
        * @default 0
        */
       packed: number
+      /**
+       * Source Base Id
+       * @description 去掉 client_token 作用域后的条目 id（material_id / bundle_id）；无 token 时等于 source_id。同一材料以不同 client_token 提交的多个 job 共享同一 source_base_id。只读。
+       */
+      source_base_id?: string | null
       /** Source Id */
       source_id: string
       /** Source Type */
@@ -5442,6 +5527,18 @@ export interface components {
       change_note?: string | null
       /** Html */
       html: string
+    }
+    /**
+     * PreviewPanelPublishRequest
+     * @description #841 (#749 leftover): the publisher's asserted draft ``html_hash`` —
+     *     the draft the human saw in the job detail header. Verified atomically
+     *     inside the publish transaction; mismatch (an agent overwrote the draft
+     *     meanwhile) raises 409 with zero publish side effects. Required: a
+     *     missing body or field is 422.
+     */
+    PreviewPanelPublishRequest: {
+      /** Expected Hash */
+      expected_hash: string
     }
     /**
      * PreviewPanelPublishedResponse
@@ -6066,6 +6163,11 @@ export interface components {
       /** Bundle Id */
       bundle_id: string
       /**
+       * Client Token
+       * @description 可选的条目级幂等键（#813）：参与 job 身份与 run digest 派生。同内容不同 token 各成独立 job；同 token 重复提交幂等命中同一 job；不传保持纯内容寻址。1-64 字符，[A-Za-z0-9._-]，首字符为字母或数字。
+       */
+      client_token?: string | null
+      /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
@@ -6073,6 +6175,11 @@ export interface components {
     }
     /** RunItemMaterial */
     RunItemMaterial: {
+      /**
+       * Client Token
+       * @description 可选的条目级幂等键（#813）：参与 job 身份与 run digest 派生。同内容不同 token 各成独立 job；同 token 重复提交幂等命中同一 job；不传保持纯内容寻址。1-64 字符，[A-Za-z0-9._-]，首字符为字母或数字。
+       */
+      client_token?: string | null
       /** Material Id */
       material_id: string
       /**
@@ -6102,6 +6209,11 @@ export interface components {
      * @description Requirement text typed inline; persisted as a material before resolution.
      */
     RunItemText: {
+      /**
+       * Client Token
+       * @description 可选的条目级幂等键（#813）：参与 job 身份与 run digest 派生。同内容不同 token 各成独立 job；同 token 重复提交幂等命中同一 job；不传保持纯内容寻址。1-64 字符，[A-Za-z0-9._-]，首字符为字母或数字。
+       */
+      client_token?: string | null
       /** Content */
       content: string
       /** Filename */
@@ -7115,6 +7227,11 @@ export interface components {
        */
       title: string
     }
+    /** StudioChatSessionDeleteResponse */
+    StudioChatSessionDeleteResponse: {
+      /** Deleted */
+      deleted: string
+    }
     /** StudioChatSessionRecord */
     StudioChatSessionRecord: {
       /** Acp Session Id */
@@ -7123,6 +7240,8 @@ export interface components {
       agent_id: string
       /** Allow All Permissions */
       allow_all_permissions: boolean
+      /** Archived At */
+      archived_at?: string | null
       /** Capability Snapshot */
       capability_snapshot: {
         [key: string]: unknown
@@ -7192,6 +7311,15 @@ export interface components {
     /** StudioChatSessionResponse */
     StudioChatSessionResponse: {
       session: components['schemas']['StudioChatSessionRecord']
+    }
+    /**
+     * StudioChatSessionUpdateRequest
+     * @description Session rename (#872). Surrounding whitespace is stripped; an empty
+     *     title falls back to the client's default label.
+     */
+    StudioChatSessionUpdateRequest: {
+      /** Title */
+      title: string
     }
     /** StudioChatSessionsResponse */
     StudioChatSessionsResponse: {
@@ -7819,12 +7947,13 @@ export interface components {
      * WorkflowNodeCodePublishRequest
      * @description #692 codex P1: the caller's asserted draft code_hash — verified
      *     atomically inside the publish transaction; mismatch raises 409 with
-     *     zero publish side effects. Absent (legacy callers) keeps the old
-     *     no-check semantics.
+     *     zero publish side effects. #841: required — a missing body or field is
+     *     422 (the hash-less legacy semantics are retired; read ``code_hash`` /
+     *     ``draft_code_hash`` from the save/detail response first).
      */
     WorkflowNodeCodePublishRequest: {
       /** Expected Hash */
-      expected_hash?: string | null
+      expected_hash: string
     }
     /** WorkflowNodeCodeResponse */
     WorkflowNodeCodeResponse: {
@@ -8120,6 +8249,7 @@ export interface components {
     }
     /** WorkspaceApiTokensResponse */
     WorkspaceApiTokensResponse: {
+      rate_limit: components['schemas']['ApiTokenRateLimit']
       /** Tokens */
       tokens: components['schemas']['WorkspaceApiTokenSummary'][]
     }
@@ -9153,9 +9283,9 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: {
+    requestBody: {
       content: {
-        'application/json': components['schemas']['AgentPublishRequest'] | null
+        'application/json': components['schemas']['AgentPublishRequest']
       }
     }
     responses: {
@@ -9977,7 +10107,9 @@ export interface operations {
   }
   health_api_health_get: {
     parameters: {
-      query?: never
+      query?: {
+        instance_probe?: string | null
+      }
       header?: never
       path?: never
       cookie?: never
@@ -9991,6 +10123,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['HealthResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }
@@ -13711,11 +13852,9 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: {
+    requestBody: {
       content: {
-        'application/json':
-          | components['schemas']['WorkflowNodeCodePublishRequest']
-          | null
+        'application/json': components['schemas']['WorkflowNodeCodePublishRequest']
       }
     }
     responses: {
@@ -14048,7 +14187,11 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PreviewPanelPublishRequest']
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {
@@ -14862,7 +15005,9 @@ export interface operations {
   }
   list_sessions_api_workspaces__workspace_id__studio_chat_sessions_get: {
     parameters: {
-      query?: never
+      query?: {
+        archived?: boolean
+      }
       header?: never
       path: {
         workspace_id: string
@@ -14990,6 +15135,74 @@ export interface operations {
       }
     }
   }
+  rename_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__patch: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatSessionUpdateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  archive_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__archive_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   cancel_turn_api_workspaces__workspace_id__studio_chat_sessions__session_id__cancel_post: {
     parameters: {
       query?: never
@@ -15081,6 +15294,38 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  delete_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__delete_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionDeleteResponse']
         }
       }
       /** @description Validation Error */
@@ -15306,6 +15551,38 @@ export interface operations {
     }
   }
   resume_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__resume_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  unarchive_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__unarchive_post: {
     parameters: {
       query?: never
       header?: never
@@ -15885,11 +16162,9 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: {
+    requestBody: {
       content: {
-        'application/json':
-          | components['schemas']['WorkflowNodeCodePublishRequest']
-          | null
+        'application/json': components['schemas']['WorkflowNodeCodePublishRequest']
       }
     }
     responses: {

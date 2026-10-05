@@ -8,6 +8,7 @@ import {
   logout as apiLogout,
 } from '../api/authApi'
 import type { UserResponse } from '../api/authApi'
+import { queryClient } from '../lib/queryClient'
 
 export type AuthStatus = 'unknown' | 'authenticated' | 'anonymous'
 
@@ -45,6 +46,9 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   async login(username: string, password: string) {
     const user = await apiLogin({ username, password })
+    // 查询缓存按身份隔离（#711 起 /api/workspaces 等列表因人而异）：
+    // 换号登录不得沿用上一身份缓存的数据。
+    queryClient.clear()
     set({ user, status: 'authenticated' })
   },
 
@@ -52,6 +56,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       await apiLogout()
     } finally {
+      queryClient.clear()
       set({ user: null, status: 'anonymous' })
     }
   },

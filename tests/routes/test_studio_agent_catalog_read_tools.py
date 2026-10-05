@@ -77,6 +77,17 @@ def test_list_agent_definitions_returns_all_fields_with_version_metadata(
     assert item["published_at"] is None
 
 
+def _admin_publish(client, workspace_id: str, agent_id: str):
+    """Human publish (admin client) asserting the current draft hash (#841)."""
+    params = {"workspace_id": workspace_id}
+    detail = client.get(f"/api/agent-definitions/{agent_id}", params=params).json()
+    return client.post(
+        f"/api/agent-definitions/{agent_id}/publish",
+        params=params,
+        json={"expected_hash": detail["latest"]["definition_hash"]},
+    )
+
+
 def test_list_agent_definitions_latest_beats_published_row(client, job_db, workspace_id) -> None:
     """list_latest semantics: a pending draft v2 shadows the published v1 —
     the agent sees exactly what the next publish would ship. Publishing is a
@@ -90,7 +101,7 @@ def test_list_agent_definitions_latest_beats_published_row(client, job_db, works
         ).status_code
         == 403
     )
-    published = client.post(f"/api/agent-definitions/agent-a/publish?workspace_id={workspace_id}")
+    published = _admin_publish(client, workspace_id, "agent-a")
     assert published.status_code == 200, published.text
     _draft_agent(scoped, workspace_id, "agent-a", "review_keywords")
 
@@ -285,9 +296,7 @@ def test_create_agent_definition_conflict_on_occupied_capability(
         ).status_code
         == 403
     )
-    published = client.post(
-        f"/api/agent-definitions/generate_questions/publish?workspace_id={workspace_id}"
-    )
+    published = _admin_publish(client, workspace_id, "generate_questions")
     assert published.status_code == 200, published.text
     assert create("generate_questions").status_code == 409
     # Renamed-draft face: the draft renames the capability, but the

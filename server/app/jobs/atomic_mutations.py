@@ -9,6 +9,7 @@ from server.app.agent_broker.manifest_trim import cancel_queued_sql
 from server.app.db.connection import DatabaseConnection
 from server.app.db.rowmap import utc_datetime
 from server.app.db.transaction import write_transaction
+from server.app.jobs.artifact_row_retire import retire_artifact_rows_by_name
 from server.app.jobs.job_state_mutations import JobMutationConflict, delete_job
 from server.app.jobs.run_to_mutation import apply_run_to, set_run_to_control
 from server.app.workflows.sharding import delete_shards
@@ -79,6 +80,10 @@ def mark_nodes_for_rerun(
     rerun removed, so their ``job_artifacts`` rows must go in the SAME
     transaction — otherwise a rerun that never completes leaves the job
     listing (and serving) the previous run's artifacts from object storage.
+    Rows are retired BY NAME (#827): the authority object slot is keyed by
+    name only, so a same-name row under a node key outside the closure would
+    survive pointing at bytes this rerun invalidates (hash mismatch /
+    NoSuchKey — hydration defers forever).
     Bumps ``jobs.execution_generation`` once (EXEC-GENERATION-001) and
     stamps the reset node rows with the new epoch.
     Returns the deleted manifest rows (with ``storage_key``) for the caller's
@@ -92,20 +97,8 @@ def mark_nodes_for_rerun(
     }
     affected_nodes = set(node_keys) | descendants
     placeholders = ",".join("%s" for _ in affected_nodes)
-    deleted_rows: list[dict[str, Any]] = []
-    if staged_artifact_names:
-        name_marks = ",".join("%s" for _ in staged_artifact_names)
-        deleted_rows = [
-            dict(row)
-            for row in conn.execute(
-                f"""
-                delete from job_artifacts
-                where job_id=%s and node_key in ({placeholders}) and name in ({name_marks})
-                returning node_key, name, storage_key
-                """,
-                (job_id, *sorted(affected_nodes), *sorted(staged_artifact_names)),
-            ).fetchall()
-        ]
+    # #827：按名退役（对象槽按名字寻址），闭包外的同名遗留行一并删除。
+    deleted_rows = retire_artifact_rows_by_name(conn, job_id, staged_artifact_names)
     conn.execute(
         f"""
         update node_runs

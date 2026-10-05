@@ -264,6 +264,10 @@ server/app/
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/config-options` | `set_config_option` | routes/studio_chat_config.py |
 | PUT | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context` | `update_context` | routes/studio_chat_context.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events` | `session_events` | routes/studio_chat_events.py |
+| PATCH | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `rename_session` | routes/studio_chat_session_manage.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/delete` | `delete_session` | routes/studio_chat_session_manage.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/archive` | `archive_session` | routes/studio_chat_session_manage.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/unarchive` | `unarchive_session` | routes/studio_chat_session_manage.py |
 | GET | `/workspaces/{workspace_id}/workflow-drafts/publish-request` | `get_pending_publish_request` | routes/studio_publish_requests.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/confirm` | `confirm_publish_request` | routes/studio_publish_requests.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/publish-request/{request_id}/cancel` | `cancel_publish_request` | routes/studio_publish_requests.py |
@@ -345,7 +349,7 @@ server/app/
 | AgentDefinitionPayload | BaseModel | capability: str, runtime: Literal['pi', 'velites'], skill: str, tools: list[s... | app/routes/agent_definition_contracts.py |
 | AgentCopyRequest | BaseModel | new_agent_id: str | app/routes/agent_definition_contracts.py |
 | AgentRollbackRequest | BaseModel | version: int | app/routes/agent_definition_contracts.py |
-| AgentPublishRequest | BaseModel | expected_hash: str | None | app/routes/agent_definition_contracts.py |
+| AgentPublishRequest | BaseModel | expected_hash: str | app/routes/agent_definition_contracts.py |
 | AgentVersionResponse | BaseModel | id: str, agent_id: str, version: int, status: Literal['draft', 'published', '... | app/routes/agent_definition_contracts.py |
 | AgentVersionSummary | BaseModel | id: str, agent_id: str, version: int, status: Literal['draft', 'published', '... | app/routes/agent_definition_contracts.py |
 | AgentListItem | BaseModel | agent_id: str, capability: str, runtime: str, skill: str, version: int, statu... | app/routes/agent_definition_contracts.py |
@@ -372,7 +376,7 @@ server/app/
 | AgentRegisterTokenDeleteResponse | BaseModel | token_id: str, deleted: bool, cascaded_worker_ids: list[str] | app/routes/agent_workers_contracts.py |
 | AgentWorkerSummary | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
 | WorkerPresenceRequest | BaseModel | claim_enabled: bool | app/routes/agent_workers_contracts.py |
-| AgentWorkerConsoleResponse | BaseModel | console_url: str | app/routes/agent_workers_contracts.py |
+| AgentWorkerConsoleUrl | BaseModel | console_url: str | app/routes/agent_workers_contracts.py |
 | AgentWorkerDeleteResponse | BaseModel | worker_id: str, deleted: bool | app/routes/agent_workers_contracts.py |
 | AgentHeartbeatResponse | BaseModel | cancelled_execution_ids: list[str] | app/routes/agent_workers_contracts.py |
 | AgentStatusResponse | BaseModel | id: str, name: str, busy: bool | app/routes/agents.py |
@@ -391,7 +395,7 @@ server/app/
 | MembersResponse | BaseModel | members: list[MemberResponse] | app/routes/auth_contracts.py |
 | MemberPutRequest | BaseModel | user_id: str, role: Literal['editor', 'viewer'] | app/routes/auth_contracts.py |
 | StorageStatus | BaseModel | configured: bool, reachable: bool | app/routes/common.py |
-| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None, storage: StorageStatus | None | app/routes/common.py |
+| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None, storage: StorageStatus | None, inst... | app/routes/common.py |
 | ConnectionCreate | BaseModel | key: str, type: str, display_name: str, config: dict[str, Any] | app/routes/connections_contracts.py |
 | ConnectionUpdate | BaseModel | display_name: str | None, config: dict[str, Any] | None, enabled: bool | None | app/routes/connections_contracts.py |
 | ConnectionTokenStatus | BaseModel | expires_at: str | None, refreshed_at: str | None | app/routes/connections_contracts.py |
@@ -425,6 +429,7 @@ server/app/
 | ApprovalDecisionListResponse | BaseModel | decisions: list[ApprovalDecisionResponse] | app/routes/job_approval_contracts.py |
 | JobFilterPayload | BaseModel | status: str | None, search: str | None, workflow_version: int | None, workflo... | app/routes/job_batch_filter_contracts.py |
 | JobSelectionMixin | BaseModel | job_ids: list[str] | None, filter: JobFilterPayload | None, exclude_ids: list... | app/routes/job_batch_filter_contracts.py |
+| JobClientTokenFields | BaseModel | client_token: str | None, source_base_id: str | None | app/routes/job_client_token_contracts.py |
 | JobBatchRequest | BaseModel | workflow_key: str | None, entity: str | None, source_kind: str, question_ids:... | app/routes/job_contracts.py |
 | JobBatchResponse | BaseModel | batch: dict[str, Any], created_count: int, jobs: list[dict[str, Any]] | app/routes/job_contracts.py |
 | WorkspaceCreateRequest | BaseModel | id: str, name: str, default_entity: str, resource_config: dict[str, Any] | app/routes/job_contracts.py |
@@ -510,16 +515,16 @@ server/app/
 | QualityConfusionMatrix | BaseModel | tp: int, fp: int, fn: int, tn: int, precision: float | None, recall: float | ... | app/routes/quality_contracts.py |
 | QualityStatsGroup | BaseModel | node_key: str, skill_version: str, provider: str, model: str, runs: int, succ... | app/routes/quality_contracts.py |
 | QualityBatchStatsResponse | BaseModel | batch_id: str, groups: list[QualityStatsGroup] | app/routes/quality_contracts.py |
-| RunItemMaterial | BaseModel | type: Literal['material'], material_id: str | app/routes/run_contracts.py |
-| RunItemRef | BaseModel | type: Literal['ref'], connection_key: str, external_id: str, params: dict[str... | app/routes/run_contracts.py |
-| RunItemBundle | BaseModel | type: Literal['bundle'], bundle_id: str | app/routes/run_contracts.py |
-| RunItemText | BaseModel | type: Literal['text'], content: str, filename: str | None | app/routes/run_contracts.py |
 | RunCreateRequest | BaseModel | workflow_key: str | None, items: list[RunItem] | app/routes/run_contracts.py |
 | RunRecord | BaseModel | id: str, workspace_id: str, workflow_key: str, source_kind: str, status: str,... | app/routes/run_contracts.py |
 | RunCreateResponse | BaseModel | run: RunRecord, created_count: int, job_ids: list[str] | app/routes/run_contracts.py |
 | RunListResponse | BaseModel | runs: list[RunRecord] | app/routes/run_contracts.py |
 | RunJobStats | BaseModel | total: int, by_status: dict[str, int] | app/routes/run_contracts.py |
 | RunDetailResponse | BaseModel | run: RunRecord, job_stats: RunJobStats | app/routes/run_contracts.py |
+| RunItemMaterial | BaseModel | type: Literal['material'], material_id: str, client_token: _ClientToken | app/routes/run_item_contracts.py |
+| RunItemRef | BaseModel | type: Literal['ref'], connection_key: str, external_id: str, params: dict[str... | app/routes/run_item_contracts.py |
+| RunItemBundle | BaseModel | type: Literal['bundle'], bundle_id: str, client_token: _ClientToken | app/routes/run_item_contracts.py |
+| RunItemText | BaseModel | type: Literal['text'], content: str, filename: str | None, client_token: _Cli... | app/routes/run_item_contracts.py |
 | ProfileBucket | BaseModel | bucket_start: str, intake_runs: int, intake_items: int, pass_count: int, pass... | app/routes/runtime_profile_contracts.py |
 | ProfileVerdict | BaseModel | stage: str, conclusion: str, evidence: dict[str, object] | app/routes/runtime_profile_contracts.py |
 | RuntimeProfileResponse | BaseModel | buckets: list[ProfileBucket], verdict: ProfileVerdict | app/routes/runtime_profile_contracts.py |
@@ -552,6 +557,7 @@ server/app/
 | PreviewPanelVersionResponse | BaseModel | id: str, workspace_id: str | None, entity_key: str, version: int, status: Lit... | app/routes/studio_agent_preview_contracts.py |
 | PreviewPanelStateResponse | BaseModel | published: PreviewPanelVersionResponse | None, draft: PreviewPanelVersionResp... | app/routes/studio_agent_preview_contracts.py |
 | PreviewPanelPublishedResponse | BaseModel | published: PreviewPanelVersionResponse | None | app/routes/studio_agent_preview_contracts.py |
+| PreviewPanelPublishRequest | BaseModel | expected_hash: str | app/routes/studio_agent_preview_contracts.py |
 | PreviewPanelDraftRequest | BaseModel | html: str, change_note: str | None | app/routes/studio_agent_preview_contracts.py |
 | PreviewContextJobSummary | BaseModel | id: str, status: str | None, source_type: str | None, source_id: str | None, ... | app/routes/studio_agent_preview_contracts.py |
 | PreviewContextResponse | BaseModel | workspace_id: str, recent_jobs: list[PreviewContextJobSummary], selected_job:... | app/routes/studio_agent_preview_contracts.py |
@@ -584,6 +590,8 @@ server/app/
 | StudioChatAgentsResponse | BaseModel | agents: list[StudioChatAgentOption] | app/routes/studio_chat_contracts.py |
 | StudioChatSessionCreateRequest | BaseModel | agent_id: str, title: str | app/routes/studio_chat_contracts.py |
 | StudioChatSessionRecord | BaseModel | id: str, workspace_id: str, user_id: str, agent_id: str, title: str, status: ... | app/routes/studio_chat_contracts.py |
+| StudioChatSessionUpdateRequest | BaseModel | title: str | app/routes/studio_chat_contracts.py |
+| StudioChatSessionDeleteResponse | BaseModel | deleted: str | app/routes/studio_chat_contracts.py |
 | StudioChatSessionResponse | BaseModel | session: StudioChatSessionRecord | app/routes/studio_chat_contracts.py |
 | StudioChatSessionsResponse | BaseModel | sessions: list[StudioChatSessionRecord] | app/routes/studio_chat_contracts.py |
 | StudioChatMessageCreateRequest | BaseModel | text: str | app/routes/studio_chat_contracts.py |
@@ -633,7 +641,7 @@ server/app/
 | WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom', 'none'], code: str, version: int | None,... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeTemplateResponse | BaseModel | code: str | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeDraftRequest | BaseModel | code: str, change_note: str | None | app/routes/workflow_node_code_contracts.py |
-| WorkflowNodeCodePublishRequest | BaseModel | expected_hash: str | None | app/routes/workflow_node_code_contracts.py |
+| WorkflowNodeCodePublishRequest | BaseModel | expected_hash: str | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeVersionResponse | BaseModel | id: str, version: int, status: str, code: str, code_hash: str, created_by: st... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeVersionSummary | BaseModel | id: str, version: int, status: str, code_hash: str, created_by: str, change_n... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeVersionsResponse | BaseModel | versions: list[WorkflowNodeCodeVersionSummary] | app/routes/workflow_node_code_contracts.py |
@@ -657,7 +665,8 @@ server/app/
 | CreateWorkspaceApiTokenRequest | BaseModel | label: str, ttl_hours: int | None | app/routes/workspace_api_token_contracts.py |
 | WorkspaceApiTokenCreatedResponse | BaseModel | token_id: str, api_token: str, workspace_id: str, label: str | app/routes/workspace_api_token_contracts.py |
 | WorkspaceApiTokenSummary | BaseModel | token_id: str, workspace_id: str, label: str, created_at: str, expires_at: st... | app/routes/workspace_api_token_contracts.py |
-| WorkspaceApiTokensResponse | BaseModel | tokens: list[WorkspaceApiTokenSummary] | app/routes/workspace_api_token_contracts.py |
+| ApiTokenRateLimit | BaseModel | requests_per_minute: int, burst: int | app/routes/workspace_api_token_contracts.py |
+| WorkspaceApiTokensResponse | BaseModel | tokens: list[WorkspaceApiTokenSummary], rate_limit: ApiTokenRateLimit | app/routes/workspace_api_token_contracts.py |
 | WorkspaceApiTokenRevokeResponse | BaseModel | token_id: str, revoked: bool | app/routes/workspace_api_token_contracts.py |
 | WorkspaceRecord | BaseModel | id: str, name: str, description: str, default_workflow_key: str, default_enti... | app/routes/workspace_contracts.py |
 | NodeLimitRequest | BaseModel | workflow_key: str, node_key: str, concurrency_limit: int | app/routes/workspace_execution_contracts.py |
@@ -840,7 +849,8 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 - L2 非法（合法 = 非 bool 的整数且 >= 1，与保留 schema 一致）时，**所有路径**都回落到 base，审计来源记为 `workspace_override_invalid`，并打一条结构化 warning（node key、workspace、原始值；同一组合只打一次）。任何路径都不再因非法超时覆盖让节点失败（#691 之前 dispatch 会让节点失败），intake 冻结同样忽略非法超时覆盖。
 - 旧 Host 入队、manifest 里没有 `timeout_base` 的请求：以入队时的值为 base，来源 `enqueue_snapshot`。
 - 审计：每次执行在 `node_runs.config_snapshot_json` 的 `_config_resolution` 元键下记录判定结果，远程请求在 claim 下发的 manifest 里另带同形的 `config_resolution` 键，形如 `{"timeout_seconds": {"value", "source"}}`，来源取 `platform_default` / `node_config` / `workspace_override` / `workspace_override_invalid` / `enqueue_snapshot`。
-- 保留键 `timeout_seconds` / `sandbox_network` 仍不得在 `config_schema` 中重声明（loader 拒绝），也不能挂 `runtime_mutable` 标记；它们不进 `runtime_mutable_keys`，因此也不影响 inherit 升级的继承判定。intake 冻结快照仍记录 intake 时刻的超时（inherit 升级 diff 照旧比较），但执行不使用它。
+- 保留键 `timeout_seconds` / `sandbox_network` 仍不得在 `config_schema` 中重声明（loader 拒绝），也不能挂 `runtime_mutable` 标记；它们不进 `runtime_mutable_keys`（该集合会把节点整体排除出 inherit 继承）。intake 冻结快照仍记录 intake 时刻的超时，但执行不使用它；inherit 升级 diff 在比较节点定义 `config` 与冻结 config 段时剔除运行时可调分类的保留键（单一事实源 `runtime_reserved_config.RESERVED_KEY_MUTABILITY`，目前只有 `timeout_seconds`，#858），只改超时的 revision 升级不触发重跑，`sandbox_network` 照常参与比较。
+- 执行路径全集（#869）：本地 code 池（普通节点与本地分片）统一经 `local_dispatch.decide_local_code_dispatch` 判定（超时 + 审计、业务 config、published 代码），远程 agent/code（含远程分片）入队带 `timeout_base`、claim 判定。构造 `ExecutionContext` / `AgentExecutionRequest` 的位置由 `tests/services/test_runtime_timeout_paths_guard.py` AST 扫描钉住：新路径须接判定函数并登记到矩阵路径表，否则测试失败。
 - 生效时点（快照语义）：运行时可调键是**配置输入**，不是判定状态。每次求值在一个声明好的时点读取一次——Host dispatch 时，或 Worker 批量 claim 的候选选取阶段（只读连接）——写事务沿用该快照，不在锁下重读，也不对 `workspaces` 行加锁；在此之后提交的修改从下一次 dispatch / claim 起生效。与「先选候选、后在写事务内修改并提交」之间提交的修改效果上等同于晚于本次 claim 提交，不产生错误执行；在 claim 热路径上加锁消除这个窗口的代价（#690 锁序族）远大于收益。跨事务携带的身份、状态、执行代次、租约、容量等**判定状态**仍须在写事务内重新校验（AGENTS.md「多步变更」条）。
 
 ## Database

@@ -105,7 +105,8 @@ export function useAddSampleItemLabel(workspaceId: string, itemId: string) {
 export function useQualityReplays(workspaceId: string, itemId: string | null) {
   return useQuery({
     queryKey: extraQueryKeys.qualityReplays(workspaceId, itemId ?? ''),
-    queryFn: () => fetchReplays(workspaceId, itemId as string),
+    queryFn: ({ signal }) =>
+      fetchReplays(workspaceId, itemId as string, signal),
     enabled: itemId != null,
     refetchInterval: (query) =>
       (query.state.data?.replays ?? []).some((r) => replayActive(r.status))
@@ -121,7 +122,8 @@ export function useQualityReplayDetail(
 ) {
   return useQuery({
     queryKey: extraQueryKeys.qualityReplayDetail(workspaceId, replayId ?? ''),
-    queryFn: () => fetchReplayDetail(workspaceId, replayId as string),
+    queryFn: ({ signal }) =>
+      fetchReplayDetail(workspaceId, replayId as string, signal),
     enabled: replayId != null,
     refetchInterval: (query) =>
       replayActive(query.state.data?.replay.status) ? 3000 : false,

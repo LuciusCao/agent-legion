@@ -38,7 +38,7 @@ export function usePreviewPanelState(
 ) {
   return useQuery({
     queryKey: previewPanelKeys.state(workspaceId ?? ''),
-    queryFn: () => fetchPreviewPanelState(workspaceId!),
+    queryFn: ({ signal }) => fetchPreviewPanelState(workspaceId!, signal),
     enabled: Boolean(workspaceId) && enabled,
     refetchInterval: enabled ? 3000 : false,
   })
@@ -60,7 +60,8 @@ function useInvalidatePreviewPanel(workspaceId: string | undefined) {
 export function usePublishPreviewPanel(workspaceId: string | undefined) {
   const invalidate = useInvalidatePreviewPanel(workspaceId)
   return useMutation({
-    mutationFn: () => publishPreviewPanel(workspaceId!),
+    mutationFn: (expectedHash: string) =>
+      publishPreviewPanel(workspaceId!, expectedHash),
     onSuccess: invalidate,
   })
 }

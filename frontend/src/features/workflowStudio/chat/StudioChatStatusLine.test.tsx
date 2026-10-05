@@ -43,6 +43,42 @@ describe('StatusLine', () => {
     )
   })
 
+  it('renders mcp_callback_unreachable as an actionable warning (#915)', () => {
+    render(
+      <StatusLine
+        message={statusMessage(
+          'mcp_callback_unreachable',
+          '平台回调地址 api_base（http://127.0.0.1:8000）无法回连本实例：连接失败（ConnectError）。请在「全局设置 → Studio Agent 管理 → 平台回调地址（api_base）」修正'
+        )}
+      />
+    )
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('⚠')
+    expect(alert).toHaveTextContent('http://127.0.0.1:8000')
+    expect(alert).toHaveTextContent('Studio Agent 管理')
+  })
+
+  it('falls back to a built-in callback warning without detail (#915)', () => {
+    render(<StatusLine message={statusMessage('mcp_callback_unreachable')} />)
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '平台回调地址 api_base 无法回连本实例'
+    )
+  })
+
+  it('renders the unprompted-turn receipt with the backend detail (#938)', () => {
+    render(
+      <StatusLine
+        message={statusMessage(
+          'unprompted_turn',
+          '后台任务 agent-1 已完成，agent 正在汇报'
+        )}
+      />
+    )
+    expect(
+      screen.getByText('后台任务 agent-1 已完成，agent 正在汇报')
+    ).toBeInTheDocument()
+  })
+
   it('still renders the generic error event as a warning', () => {
     render(<StatusLine message={statusMessage('error', 'agent 崩溃')} />)
     expect(screen.getByRole('alert')).toHaveTextContent('agent 崩溃')

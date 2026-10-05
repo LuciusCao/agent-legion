@@ -10,7 +10,7 @@ import { queryKeys } from '../lib/queryKeys'
 export function useJobDetailQuery(jobId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.jobDetail(jobId ?? ''),
-    queryFn: () => fetchJobDetail(jobId as string),
+    queryFn: ({ signal }) => fetchJobDetail(jobId as string, signal),
     enabled: Boolean(jobId),
     refetchOnMount: false,
   })

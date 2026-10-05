@@ -100,6 +100,7 @@ def finish_staged(
     # (per-execution staging keys); verify ALL refs, then promote +
     # download + register (no half-applied state). Any failure flips the
     # whole result to failed.
+    landed: dict[str, str] = {}  # #867: promote-phase digests of landed outputs
     remote_names, remote_failure = apply_worker_artifact_refs(
         handler.object_store,
         runner=worker_id,
@@ -114,6 +115,7 @@ def finish_staged(
         lease_id=lease_id,
         max_size_bytes=handler.max_archive_bytes,
         spot_check_percent=handler.spot_check_percent,
+        landed_hashes=landed,
     )
     if remote_failure is not None:
         mark_result_stage(stage_timer, "artifacts_verify")
@@ -156,9 +158,7 @@ def finish_staged(
     )
     mark_result_stage(stage_timer, "artifacts_verify")
     produced = tuple(name for name in expected if (view_dir / name).is_file())
-    status = outcome.status
-    exit_code = outcome.exit_code
-    error = outcome.error_message
+    status, exit_code, error = outcome.status, outcome.exit_code, outcome.error_message
     # #755 对抗复审 P2-1：truncated 标记意味着头部清单被字节预算整体降级
     # （CAS 最后手段截断），而非 Worker 未报告——产物字节随归档已在暂存视
     # 图里，跳过此改判，交给下方 produced/missing 检查从视图判定。该标记
@@ -171,18 +171,21 @@ def finish_staged(
         status, exit_code, error = "failed", 1, f"Missing outputs: {', '.join(missing)}"
     # Worker results are untrusted: validate Host-side like the Pi runner.
     # #757: never against the raw job_dir — it accumulates every node's
-    # outputs across all attempts, and a glob-based legacy validator would
+    # outputs across all attempts, and a glob-based business-rule validator would
     # see a sibling's (stale or current) files and misattribute their
     # verdict to this node. The pool task builds the declared view (this
     # node's inputs from job_dir + this attempt's outputs from the read
     # view) and reconciles the validator's output mutations back into
     # view_dir, so what the finish gate promotes is what passed validation.
+    # #867: remote-channel outputs are the exception — their authority
+    # object is already promoted and the mirror skips them, so they are
+    # read-only to the validator (re-hashed against the promote digests).
     if status == "completed" and handler.skill_manager is not None:
         # #828/#830/#833：input 名单裁决与字节来源（dispatch 冻结 CAS 优先、
         # 缺失回落 job_dir）已下沉进池化视图构造（workflows/validation_view
         # 族），artifact_store 只为取 CAS root 传入，主进程不碰字节。
         validation_error = validate_worker_outputs(
-            handler.skill_manager, manifest, job_dir, view_dir, handler.artifact_store
+            handler.skill_manager, manifest, job_dir, view_dir, handler.artifact_store, landed
         )
         if validation_error:
             status, exit_code, error = "failed", 1, validation_error

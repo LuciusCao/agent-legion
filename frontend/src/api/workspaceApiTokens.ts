@@ -6,7 +6,11 @@ export type WorkspaceApiTokenSummary =
 export type WorkspaceApiTokenCreatedResponse =
   components['schemas']['WorkspaceApiTokenCreatedResponse']
 
-type TokensResponse = components['schemas']['WorkspaceApiTokensResponse']
+// #870: the list carries the instance-wide per-token rate limit (#738)
+// read-only next to the tokens, so the 外部对接 section can show it.
+export type WorkspaceApiTokensOverview =
+  components['schemas']['WorkspaceApiTokensResponse']
+export type ApiTokenRateLimit = components['schemas']['ApiTokenRateLimit']
 type CreateTokenRequest =
   components['schemas']['CreateWorkspaceApiTokenRequest']
 type RevokeTokenResponse =
@@ -17,11 +21,11 @@ type RevokeTokenResponse =
 // from the path, so the panel never picks a foreign workspace.
 export async function listWorkspaceApiTokens(
   workspaceId: string
-): Promise<WorkspaceApiTokenSummary[]> {
-  const data = await api<TokensResponse>(
+): Promise<WorkspaceApiTokensOverview> {
+  const data = await api<WorkspaceApiTokensOverview>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/api-tokens`
   )
-  return data.tokens ?? []
+  return { ...data, tokens: data.tokens ?? [] }
 }
 
 export async function createWorkspaceApiToken(
