@@ -60,8 +60,8 @@ def report_task(
     # #748 R3：头溢出处置只走一次（序列化侧按 ref 形态判信号——标记臂已
     # 清空清单，重报不会再抛；此处的一次性闸是双保险）。
     overflow_fallback = False
-    # #959：应答分级见 report_policy——4xx 判决与瞬时失败耗尽共用的一次性
-    # 诚实判败降级闸（降级载荷挂回 task.prepared_metadata）。
+    # #959：应答分级见 report_policy——仅 4xx 判决走的一次性诚实判败降级闸
+    # （降级载荷挂回 task.prepared_metadata）；瞬时失败持租约持续重试。
     degrade_gate = ReportDegradeGate(task, archive)
     while not shutdown.is_set():
         if task.ownership_lost.is_set():
