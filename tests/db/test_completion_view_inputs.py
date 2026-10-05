@@ -92,7 +92,7 @@ def test_validation_view_includes_declared_inputs(
 
     monkeypatch.setattr(
         "server.app.agent_control.completion_staged.validate_worker_outputs",
-        lambda _sm, manifest, jd, rvd, store=None: _capture_view(
+        lambda _sm, manifest, jd, rvd, store=None, _read_only=None: _capture_view(
             captured, manifest, jd, rvd, store
         ),
     )
@@ -146,7 +146,9 @@ def test_declared_input_never_backfills_expected_output(
     validated: list[Path] = []
     monkeypatch.setattr(
         "server.app.agent_control.completion_staged.validate_worker_outputs",
-        lambda _sm, _manifest, _jd, rvd, _store=None: validated.append(rvd) and None,
+        lambda _sm, _manifest, _jd, rvd, _store=None, _read_only=None: (
+            validated.append(rvd) and None
+        ),
     )
 
     ok = handler.finish(
@@ -204,7 +206,7 @@ def test_validation_uses_dispatch_frozen_input_bytes(
 
     monkeypatch.setattr(
         "server.app.agent_control.completion_staged.validate_worker_outputs",
-        lambda _sm, manifest, jd, rvd, store=None: _capture_view(
+        lambda _sm, manifest, jd, rvd, store=None, _read_only=None: _capture_view(
             captured, manifest, jd, rvd, store
         ),
     )
@@ -261,7 +263,12 @@ def test_legacy_channel_output_ref_registered_before_validation(
     slots_at_validation: dict[str, str] = {}
 
     def _fake_validate(
-        _sm: Any, manifest: dict[str, Any], jd: Path, rvd: Path, store: Any = None
+        _sm: Any,
+        manifest: dict[str, Any],
+        jd: Path,
+        rvd: Path,
+        store: Any = None,
+        _read_only: Any = None,
     ) -> None:
         slots_at_validation.update(
             {str(r["name"]): str(r["hash"]) for r in artifact_store.refs_for_job("inp4-job")}
@@ -319,7 +326,12 @@ def test_colliding_undeclared_report_skips_the_frozen_input_slot(
     slots_at_validation: dict[str, str] = {}
 
     def _fake_validate(
-        _sm: Any, manifest: dict[str, Any], jd: Path, rvd: Path, store: Any = None
+        _sm: Any,
+        manifest: dict[str, Any],
+        jd: Path,
+        rvd: Path,
+        store: Any = None,
+        _read_only: Any = None,
     ) -> None:
         slots_at_validation.update(
             {str(r["name"]): str(r["hash"]) for r in artifact_store.refs_for_job("inp5-job")}
@@ -385,7 +397,7 @@ def test_rmw_colliding_name_registers_normally(
 
     monkeypatch.setattr(
         "server.app.agent_control.completion_staged.validate_worker_outputs",
-        lambda _sm, manifest, jd, rvd, store=None: _capture_view(
+        lambda _sm, manifest, jd, rvd, store=None, _read_only=None: _capture_view(
             captured, manifest, jd, rvd, store
         ),
     )

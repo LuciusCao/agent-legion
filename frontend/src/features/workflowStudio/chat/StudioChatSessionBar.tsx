@@ -19,6 +19,10 @@ type Props = {
   /** 会话管理（#872）：改名 / 删除，失败 reject 由会话菜单行内展示。 */
   onRenameSession?: (sessionId: string, title: string) => Promise<void>
   onDeleteSession?: (sessionId: string) => Promise<void>
+  /** 会话归档（#924）：主整理操作（可恢复）；归档视图列表与取消归档。 */
+  archivedSessions?: StudioChatSessionRecord[]
+  onArchiveSession?: (sessionId: string) => Promise<void>
+  onUnarchiveSession?: (sessionId: string) => Promise<void>
 }
 
 /** 会话管理条：Agent 选择 + 会话菜单 + 新对话。#825：在 AgentPanelDock 内
@@ -47,6 +51,9 @@ export function StudioChatSessionBar(props: Props) {
         onSelectSession={props.onSelectSession}
         onRename={props.onRenameSession}
         onDelete={props.onDeleteSession}
+        archivedSessions={props.archivedSessions}
+        onArchive={props.onArchiveSession}
+        onUnarchive={props.onUnarchiveSession}
       />
       <button
         type="button"

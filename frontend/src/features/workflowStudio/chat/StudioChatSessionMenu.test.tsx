@@ -105,7 +105,10 @@ describe('StudioChatSessionMenu', () => {
 
     fireEvent.click(screen.getByLabelText('删除会话 旧对话'))
     expect(screen.getByRole('alert')).not.toHaveTextContent('会先关闭')
-    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    // #924：删除是 danger 次要操作，文案明确不可恢复。
+    expect(screen.getByRole('alert')).toHaveTextContent('删除后不可恢复')
+    expect(screen.getByRole('alert')).toHaveAttribute('data-tone', 'danger')
+    fireEvent.click(screen.getByRole('button', { name: '永久删除' }))
     await waitFor(() => expect(props.onDelete).toHaveBeenCalledWith('s2'))
   })
 
@@ -114,9 +117,9 @@ describe('StudioChatSessionMenu', () => {
       onDelete: vi.fn().mockRejectedValue(new Error('删除失败：404')),
     })
     fireEvent.click(screen.getByLabelText('删除会话 梳理审核节点'))
-    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    fireEvent.click(screen.getByRole('button', { name: '永久删除' }))
     expect(await screen.findByText('删除失败：404')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '删除' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '永久删除' })).toBeInTheDocument()
   })
 
   it('without manage callbacks the menu is select-only', () => {

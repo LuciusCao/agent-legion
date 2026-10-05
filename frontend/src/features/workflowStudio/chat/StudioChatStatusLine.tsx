@@ -11,6 +11,7 @@ export function StatusLine({ message, cancelSuperseded = false }: Props) {
     event === 'turn_timeout' ||
     event === 'empty_turn' ||
     event === 'run_token_invalidated' ||
+    event === 'mcp_callback_unreachable' ||
     event === 'error'
   ) {
     return <StatusWarning message={message} />
