@@ -146,3 +146,25 @@ def load_registry(path: Path) -> list[RegistryEntry]:
                 )
             nodeid_owner[entry.nodeid] = entry.entry_id
     return entries
+
+
+def touched_entry_ids(entries: list[RegistryEntry], base_path: Path) -> set[str]:
+    """Ids of entries added, or whose deadline changed, relative to a base
+    registry (#941 R3). PRs into non-default branches enforce expiry only for
+    these: scheduled jobs never check release/develop, yet untouched entries
+    must not turn every PR red on their deadline day. The base is parsed
+    leniently because it may predate the current schema."""
+    try:
+        data = yaml.safe_load(base_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise RegistryError(f"cannot read base registry {base_path}: {exc}") from exc
+    raw_entries = data.get("entries") if isinstance(data, dict) else None
+    base: dict[str, str] = {}
+    for raw in raw_entries if isinstance(raw_entries, list) else []:
+        if isinstance(raw, dict) and isinstance(raw.get("id"), str):
+            base[raw["id"].strip()] = str(raw.get("deadline"))
+    return {
+        entry.entry_id
+        for entry in entries
+        if base.get(entry.entry_id, "<absent>") != str(entry.deadline)
+    }

@@ -17,6 +17,7 @@ from scripts.check_reruns import (
     load_registry,
     load_rerun_nodeids,
     main,
+    touched_entry_ids,
 )
 
 pytestmark = pytest.mark.no_db
@@ -325,3 +326,56 @@ def test_no_report_without_deadline_flag_errors(
         main(["--registry", str(registry)])
     assert excinfo.value.code == 2
     assert "--check-deadlines" in capsys.readouterr().err
+
+
+def test_base_registry_enforces_expiry_only_for_touched_entries(tmp_path: Path) -> None:
+    # #941 R3: PRs into release/develop (never seen by the scheduled
+    # deadline job) reject entries they add or re-date with an expired
+    # deadline; untouched expired entries stay a note so no clock bomb.
+    untouched = _entry(deadline="2026-08-01", registered_on="2026-07-20")
+    redated = _entry(
+        id="FLAKY-101",
+        nodeid="tests/x/test_b.py::test_b",
+        deadline="2026-08-02",
+        registered_on="2026-07-20",
+    )
+    added = _entry(
+        id="FLAKY-102",
+        nodeid="tests/x/test_c.py::test_c",
+        deadline="2026-08-01",
+        registered_on="2026-07-20",
+    )
+    registry = _write_registry(tmp_path / "registry.yaml", [untouched, redated, added])
+    # Old-schema base (no registered_on): parsed leniently.
+    base = _write_registry(
+        tmp_path / "base.yaml",
+        [
+            {"id": "FLAKY-100", "deadline": "2026-08-01"},
+            {"id": "FLAKY-101", "deadline": "2026-07-30"},
+        ],
+    )
+    report = _write_report(tmp_path / "clean.json", [])
+
+    entries = load_registry(registry)
+    assert touched_entry_ids(entries, base) == {"FLAKY-101", "FLAKY-102"}
+
+    args = ["--registry", str(registry), "--rerun-report", str(report), "--today", "2026-08-03"]
+    assert main(args) == 0
+    assert main([*args, "--base-registry", str(base)]) == 1
+
+    fresh = _write_registry(tmp_path / "fresh.yaml", [untouched])
+    assert (
+        main(
+            [
+                "--registry",
+                str(fresh),
+                "--rerun-report",
+                str(report),
+                "--today",
+                "2026-08-03",
+                "--base-registry",
+                str(base),
+            ]
+        )
+        == 0
+    )

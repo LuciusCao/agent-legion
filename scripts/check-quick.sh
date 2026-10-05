@@ -67,7 +67,9 @@ cd "$ROOT_DIR"
 derive_lanes_from_worktree() {
   local saw_frontend=0 saw_backend=0 saw_rust=0 saw_non_docs=0 saw_any=0
   local status line path
-  if ! status="$(git status --porcelain=v1 --untracked-files=all 2>/dev/null)"; then
+  # --no-renames: a staged rename shows as deletion + addition, so its source
+  # path is classified too (#941, same as CI and pre-push).
+  if ! status="$(git status --porcelain=v1 --untracked-files=all --no-renames 2>/dev/null)"; then
     echo "backend frontend rust"
     return
   fi
@@ -85,7 +87,6 @@ derive_lanes_from_worktree() {
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     path="${line:3}"
-    path="${path##* -> }"
     saw_any=1
     # docs/**, root *.md, LICENSE: shared rule with CI and pre-push (#941).
     if lane_path_is_docs "$path"; then

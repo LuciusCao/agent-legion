@@ -37,6 +37,7 @@ from scripts.quality.flaky_registry import (  # noqa: E402  # sys.path first (ab
     RegistryEntry,
     RegistryError,
     load_registry,
+    touched_entry_ids,
 )
 
 __all__ = [
@@ -48,6 +49,7 @@ __all__ = [
     "load_registry",
     "load_rerun_nodeids",
     "main",
+    "touched_entry_ids",
 ]
 
 DEFAULT_REGISTRY = ROOT_DIR / "tests" / "flaky_registry.yaml"
@@ -75,12 +77,14 @@ def evaluate(
     today: date,
     *,
     enforce_deadlines: bool = False,
+    enforce_ids: frozenset[str] = frozenset(),
 ) -> tuple[list[str], list[str]]:
     """Return (report lines, violations). Any violation means exit 1.
 
     Expired deadlines are violations only with ``enforce_deadlines`` (the
-    nightly deadline-only mode); otherwise they are reported as notes so a
-    calendar date can never red an unrelated PR (#941).
+    nightly deadline-only mode) or for ``enforce_ids`` (entries the PR itself
+    added or re-dated); otherwise they are reported as notes so a calendar
+    date can never red an unrelated PR (#941).
     """
     lines: list[str] = []
     violations: list[str] = []
@@ -96,7 +100,7 @@ def evaluate(
             f"{entry.entry_id} ({target}): deadline {entry.deadline} expired; "
             "fix the flake or extend the entry with a reviewed reason"
         )
-        if enforce_deadlines:
+        if enforce_deadlines or entry.entry_id in enforce_ids:
             violations.append(message)
         else:
             lines.append(f"  note: {message} (enforced by the nightly deadline check)")
@@ -155,6 +159,15 @@ def main(argv: list[str] | None = None) -> int:
         "even when the extended rerun evidence did not run); the only mode "
         "in which an expired deadline fails (#941)",
     )
+    parser.add_argument(
+        "--base-registry",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="the target branch's registry: entries added or re-dated "
+        "relative to it must not already be expired (#941 R3, PRs into "
+        "release/develop, which no scheduled job checks)",
+    )
     args = parser.parse_args(argv)
 
     if not args.rerun_report and not args.check_deadlines:
@@ -163,13 +176,22 @@ def main(argv: list[str] | None = None) -> int:
     today = args.today or date.today()
     try:
         entries = load_registry(args.registry)
+        touched = (
+            touched_entry_ids(entries, args.base_registry)
+            if args.base_registry is not None
+            else set()
+        )
     except RegistryError as exc:
         print(f"flaky registry error: {exc}", file=sys.stderr)
         return 1
 
     rerun_nodeids, missing = load_rerun_nodeids(args.rerun_report)
     lines, violations = evaluate(
-        entries, rerun_nodeids, today, enforce_deadlines=args.check_deadlines
+        entries,
+        rerun_nodeids,
+        today,
+        enforce_deadlines=args.check_deadlines,
+        enforce_ids=frozenset(touched),
     )
 
     print(f"Flaky rerun governance (registry: {args.registry}, today: {today})")

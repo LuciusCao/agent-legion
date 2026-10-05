@@ -228,7 +228,10 @@ release-train `HEAD`-only exception.
   `check_reruns.py` against every shard report: a retry-pass is merge-blocking
   unless its exact nodeid has a registry entry. An expired deadline is only
   listed here, never fails the PR (#941: a calendar date must not red
-  unrelated PRs); the nightly `exemption-expiry` job enforces it.
+  unrelated PRs); the nightly `exemption-expiry` job enforces it. Scheduled
+  jobs only see the default branch, so PRs into `release/*` / `develop`
+  additionally pass the target branch's registry (`--base-registry`) and fail
+  on entries the PR itself adds or re-dates with an already expired deadline.
 - **frontend-logic / frontend-component-a/b / frontend-coverage** — frontend
   static checks and the two Vitest projects (node / jsdom) as parallel jobs;
   the slower component project is split again with Vitest's deterministic

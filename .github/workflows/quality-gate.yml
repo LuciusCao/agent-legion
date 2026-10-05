@@ -95,7 +95,10 @@ jobs:
           # whose SIGPIPE under pipefail would read as "not changed").
           changed=""
           if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
-            changed="$(git diff --name-only "$base" HEAD)"
+            # --no-renames: a rename lists both its source (deletion) and
+            # target, so moving e.g. velites/schema/** into docs/ still runs
+            # the lanes that read the source path.
+            changed="$(git diff --name-only --no-renames "$base" HEAD)"
             case $'\n'"$changed"$'\n' in
               *$'\n'scripts/lane-paths.sh$'\n'*) base="" ;;
             esac
@@ -614,15 +617,32 @@ jobs:
       # immediately. Deadline expiry is a wall-clock judgement and is only
       # enforced by nightly-gate.yml exemption-expiry (#941): enforcing it
       # here turned every deadline day red for unrelated PRs.
+      # Scheduled jobs only run on the default branch, so PRs into any other
+      # branch (release/*, develop) still reject entries the PR itself adds
+      # or re-dates with an already expired deadline (--base-registry); the
+      # untouched entries stay clock-free (#941 R3).
       - name: Enforce flaky rerun registry
         if: always()
-        run: >-
-          uv run python scripts/check_reruns.py
-          --rerun-report test-results/backend-unit-reruns.json
-          --rerun-report test-results/backend-postgres-a-reruns.json
-          --rerun-report test-results/backend-postgres-b-reruns.json
-          --rerun-report test-results/backend-postgres-c-reruns.json
-          --rerun-report test-results/backend-full-reruns.json
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          base_args=()
+          if [ -n "$BASE_REF" ] && [ "$BASE_REF" != "$DEFAULT_BRANCH" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            if git show "$BASE_SHA:tests/flaky_registry.yaml" >"$RUNNER_TEMP/base-flaky-registry.yaml"; then
+              base_args=(--base-registry "$RUNNER_TEMP/base-flaky-registry.yaml")
+            fi
+          fi
+          uv run python scripts/check_reruns.py \
+            --rerun-report test-results/backend-unit-reruns.json \
+            --rerun-report test-results/backend-postgres-a-reruns.json \
+            --rerun-report test-results/backend-postgres-b-reruns.json \
+            --rerun-report test-results/backend-postgres-c-reruns.json \
+            --rerun-report test-results/backend-full-reruns.json \
+            "${base_args[@]}"
 
   # Frontend is sharded into the two Vitest projects (test architecture plan,
   # Phase 5B): pure logic tests (node) and component tests (jsdom) run as

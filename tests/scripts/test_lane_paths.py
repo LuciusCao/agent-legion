@@ -82,6 +82,25 @@ def _commit_path(repo: Path, rel: str, content: str | None = None) -> None:
     _git(["commit", "-qm", f"touch {rel}"], cwd=repo)
 
 
+def _seed_rename_source(repo: Path, rename_from: str | None) -> None:
+    if rename_from is not None:
+        _touch(repo, rename_from, '{"title": "fixture schema"}\n')
+
+
+def _change(repo: Path, rel: str, rename_from: str | None, *, commit: bool) -> None:
+    """Touch ``rel``, or ``git mv`` an existing ``rename_from`` onto it."""
+    if rename_from is None:
+        if commit:
+            _commit_path(repo, rel)
+        else:
+            _touch(repo, rel)
+        return
+    (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+    _git(["mv", rename_from, rel], cwd=repo)
+    if commit:
+        _git(["commit", "-qm", f"rename {rename_from}"], cwd=repo)
+
+
 def _ci_filter_script() -> str:
     workflow = yaml.safe_load(
         (PROJECT_ROOT / ".github/workflows/quality-gate.yml").read_text(encoding="utf-8")
@@ -92,12 +111,13 @@ def _ci_filter_script() -> str:
     return script
 
 
-def _ci_lanes(tmp_path: Path, rel: str) -> set[str]:
+def _ci_lanes(tmp_path: Path, rel: str, rename_from: str | None = None) -> set[str]:
     repo = tmp_path / "ci"
     (repo / "scripts").mkdir(parents=True)
     shutil.copy2(PROJECT_ROOT / "scripts" / "lane-paths.sh", repo / "scripts" / "lane-paths.sh")
+    _seed_rename_source(repo, rename_from)
     base = _init_repo(repo)
-    _commit_path(repo, rel)
+    _change(repo, rel, rename_from, commit=True)
     output = tmp_path / "github_output"
     output.write_text("", encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
@@ -114,7 +134,9 @@ def _ci_lanes(tmp_path: Path, rel: str) -> set[str]:
     return {lane for lane in ("backend", "frontend", "rust") if flags[lane] == "true"}
 
 
-def _quick_gate_lanes(tmp_path: Path, rel: str, content: str | None = None) -> str:
+def _quick_gate_lanes(
+    tmp_path: Path, rel: str, content: str | None = None, rename_from: str | None = None
+) -> str:
     repo = tmp_path / "quick"
     scripts = repo / "scripts"
     scripts.mkdir(parents=True)
@@ -122,8 +144,12 @@ def _quick_gate_lanes(tmp_path: Path, rel: str, content: str | None = None) -> s
         shutil.copy2(PROJECT_ROOT / "scripts" / name, scripts / name)
     for name in ("check-quick-backend.sh", "check-quick-frontend.sh"):
         _write_executable(scripts / name, "#!/usr/bin/env bash\nexit 0\n")
+    _seed_rename_source(repo, rename_from)
     _init_repo(repo)
-    _touch(repo, rel, content)
+    if rename_from is None:
+        _touch(repo, rel, content)
+    else:
+        _change(repo, rel, rename_from, commit=False)
     env = {
         k: v
         for k, v in os.environ.items()
@@ -143,7 +169,9 @@ def _quick_gate_lanes(tmp_path: Path, rel: str, content: str | None = None) -> s
     return derived[0].removeprefix(prefix)
 
 
-def _pre_push_lanes(tmp_path: Path, rel: str, content: str | None = None) -> str:
+def _pre_push_lanes(
+    tmp_path: Path, rel: str, content: str | None = None, rename_from: str | None = None
+) -> str:
     repo = tmp_path / "hook"
     (repo / ".githooks").mkdir(parents=True)
     (repo / "scripts").mkdir()
@@ -155,8 +183,12 @@ def _pre_push_lanes(tmp_path: Path, rel: str, content: str | None = None) -> str
         repo / "scripts" / "check-quick.sh",
         '#!/usr/bin/env bash\nprintf \'%s\\n\' "${GATE_LANES:-}" >>"$GATE_LOG"\n',
     )
+    _seed_rename_source(repo, rename_from)
     base = _init_repo(repo)
-    _commit_path(repo, rel, content)
+    if rename_from is None:
+        _commit_path(repo, rel, content)
+    else:
+        _change(repo, rel, rename_from, commit=True)
     head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["GATE_LOG"] = str(gate_log)
@@ -274,6 +306,26 @@ def test_ci_changes_job_keeps_lanes_off_for_empty_diff(tmp_path: Path) -> None:
 
     flags = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
     assert set(flags.values()) == {"false"}
+
+
+# git mv of a backend-read schema into docs/: rename detection would report
+# only the docs/ target; the source path must still drive backend + rust.
+RENAME = ("velites/schema/events.schema.json", "docs/events.schema.json")
+
+
+def test_ci_changes_job_classifies_rename_source(tmp_path: Path) -> None:
+    source, target = RENAME
+    assert _ci_lanes(tmp_path, target, rename_from=source) == {"backend", "rust"}
+
+
+def test_quick_gate_classifies_rename_source(tmp_path: Path) -> None:
+    source, target = RENAME
+    assert _quick_gate_lanes(tmp_path, target, rename_from=source) == "backend rust"
+
+
+def test_pre_push_classifies_rename_source(tmp_path: Path) -> None:
+    source, target = RENAME
+    assert _pre_push_lanes(tmp_path, target, rename_from=source) == "backend rust"
 
 
 BROKEN_CLASSIFIER = "lane_path_is_docs() { return 0; }\nlane_path_feeds_backend() { return 1; }\n"

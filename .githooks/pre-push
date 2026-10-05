@@ -55,7 +55,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     force_full=1
     continue
   fi
-  if ! paths="$(git diff --name-only "$remote_sha...$local_sha" 2>/dev/null)"; then
+  # --no-renames: classify a rename's source path too (#941), same as CI.
+  if ! paths="$(git diff --name-only --no-renames "$remote_sha...$local_sha" 2>/dev/null)"; then
     force_full=1
     continue
   fi
