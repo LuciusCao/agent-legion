@@ -32,6 +32,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- job 详情的「输入恢复不全」提示覆盖扇出中的分片节点（issue #1021，#887 follow-up）：分片节点 DB 状态仍为 `running` 但还有待领取 shard 时，worker 在 hydration 前按分片有效状态把它视为等待中、公告也列为受阻节点，而详情投影此前按 DB 原始状态过滤掉 `running`，剩余 shard 被 hydration defer 挡住时 `hydration_defer` 缺失。现投影改用与 worker 同一判定（`running_shard_nodes` + `shard_effective_statuses`）；只在 job 确有公告时多一次 pending shard 查询，API 形状不变。分片仍属 Experimental 形态。
 - Studio「Agent 助手」的发送 / 取消 / 全部允许加会话归属守卫（issue #962，#917 P2）：动作发起时记下会话 id，请求返回后（成功或失败）与当前选中会话复核，切换会话后旧会话的迟到结果（消息、会话快照、错误提示）不再写进新会话，丢弃时留 `console.warn` 日志；取消按钮与权限卡片的「全部允许」开关另附渲染时的会话 id 作为辅助断言。
 - Studio DAG 再次定位同一节点时镜头不移动（issue #964，#917 P2）：画布点击来源标记改为记录「节点 + 点击时的定位请求 nonce」，每个新定位请求消费即清；受控父组件未采纳点击时残留的标记不再把之后 bump 了 nonce 的外部定位请求误判为画布点击。
 - 顶栏 workspace 运行状态拉取失败不再显示「已暂停」（issue #961，#917 P2）：调度暂停位改为 React Query 缓存单一数据源（移除 zustand 侧的 `workerPausedByWorkspace` 副本及其「未知即已暂停」默认值），首次读取中显示「读取中」（按钮禁用），从未拿到状态且拉取失败时显示「状态未知」（点击重试拉取而非切换调度），后台刷新失败时继续显示上次已知值；暂停/恢复的服务端确认值直接写回缓存，读写排序语义不变。
