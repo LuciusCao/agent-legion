@@ -105,6 +105,11 @@ def test_non_expanding_contexts_are_not_flagged(content: str) -> None:
         # An escaped blank keeps # inside the current word: not a comment.
         ('echo foo\\ # "$X，"\n', 1),
         ("echo a\\ #$X，\n", 1),
+        # A # right after a multi-line quote closes still belongs to the word.
+        ("echo 'a\nb'# \"$X，\"\n", 2),
+        ('echo "a\nb"# "$X，"\n', 2),
+        ("echo $'a\nb'# \"$X，\"\n", 2),
+        ("x=$(echo 'a\nb'# \"$X，\"\n)\n", 2),
     ],
 )
 def test_expanding_multiline_contexts_are_flagged(content: str, lineno: int) -> None:

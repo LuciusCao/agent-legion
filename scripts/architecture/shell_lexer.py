@@ -142,7 +142,10 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
         if byte == ord("\n"):
             i += 1
             lineno += 1
-            word_start = True
+            # Only an unquoted newline ends the word; inside quotes the
+            # newline is word text and the closing quote continues the word.
+            if unquoted:
+                word_start = True
             if unquoted and pending:
                 for heredoc in pending:
                     hits, i, lineno = _heredoc_body(content, i, lineno, heredoc)
