@@ -7,15 +7,11 @@ import type {
 } from '../../api'
 import { useWorkspaceApiTokensQuery } from '../../hooks/useWorkspaceApiTokensQuery'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import { formatDateTime } from '../../lib/formatters'
 import { toErrorMessage } from '../../lib/queryError'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { ApiAccessCopyButton } from './ApiAccessCopyButton'
 import styles from './ApiAccess.module.css'
-
-function formatTime(value: string): string {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
-}
 
 /**
  * Workspace API intake token panel (issue #626), hosted by the 外部对接
@@ -206,7 +202,7 @@ export function WorkspaceApiTokensSection({
                 title={token.last_used_at ?? '尚未使用'}
               >
                 {token.last_used_at
-                  ? `最近使用 ${formatTime(token.last_used_at)}`
+                  ? `最近使用 ${formatDateTime(token.last_used_at)}`
                   : '未使用'}
               </span>
               <span
@@ -214,7 +210,7 @@ export function WorkspaceApiTokensSection({
                 title={token.expires_at ?? '永不过期'}
               >
                 {token.expires_at
-                  ? `过期 ${formatTime(token.expires_at)}`
+                  ? `过期 ${formatDateTime(token.expires_at)}`
                   : '永不过期'}
               </span>
               {token.revoked ? (

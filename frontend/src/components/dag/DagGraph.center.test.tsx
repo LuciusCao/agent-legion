@@ -329,4 +329,77 @@ describe('DagGraph 选中节点镜头定位（#667 B2）', () => {
       duration: 350,
     })
   })
+
+  it('画布点击未被受控父组件采纳时，残留标记不吞掉之后的外部定位（#964）', () => {
+    // 受控父组件收到点击 b 但未采纳（选中仍是 a、effect 不跑）：来源标记
+    // 残留为 b。之后外部对 b 的定位请求（bump nonce）必须移动镜头——
+    // 旧实现只比对 key，残留标记让定位被误判为画布点击而跳过。
+    const onSelectedNodeChange = vi.fn()
+    const { rerender } = render(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode="a"
+        selectionNonce={0}
+        onSelectedNodeChange={onSelectedNodeChange}
+      />
+    )
+    expect(mocks.setCenter).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(
+      screen.getByTestId('dag-flow-wrapper').querySelector('[data-id="b"]')!
+    )
+    expect(onSelectedNodeChange).toHaveBeenCalledWith('b')
+    expect(mocks.setCenter).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode="b"
+        selectionNonce={1}
+        onSelectedNodeChange={onSelectedNodeChange}
+      />
+    )
+    expect(mocks.setCenter).toHaveBeenCalledTimes(2)
+
+    // 标记已被消费：再次对 b 发定位请求同样移动镜头。
+    rerender(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode="b"
+        selectionNonce={2}
+        onSelectedNodeChange={onSelectedNodeChange}
+      />
+    )
+    expect(mocks.setCenter).toHaveBeenCalledTimes(3)
+  })
+
+  it('画布点击被采纳（key 翻转、nonce 不变）时仍不移动镜头', () => {
+    const onSelectedNodeChange = vi.fn()
+    const { rerender } = render(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode="a"
+        selectionNonce={0}
+        onSelectedNodeChange={onSelectedNodeChange}
+      />
+    )
+    expect(mocks.setCenter).toHaveBeenCalledTimes(1)
+    fireEvent.click(
+      screen.getByTestId('dag-flow-wrapper').querySelector('[data-id="b"]')!
+    )
+    rerender(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode="b"
+        selectionNonce={0}
+        onSelectedNodeChange={onSelectedNodeChange}
+      />
+    )
+    expect(mocks.setCenter).toHaveBeenCalledTimes(1)
+  })
 })

@@ -17,6 +17,7 @@ import { ParsedJsonBody } from './ParsedJsonBody'
 import { fetchJobArtifactText } from '../../api/jobArtifactText'
 import { queryKeys } from '../../lib/queryKeys'
 import { artifactVersion } from '../../lib/jobArtifactVersions'
+import { formatNumber } from '../../lib/formatters'
 import { renderMarkdownHtml } from '../../lib/markdownHtml'
 import { tryParseJson } from '../../lib/parsers'
 import { toErrorMessage } from '../../lib/queryError'
@@ -66,7 +67,7 @@ function useArtifactText(
 function TruncationChip({ total }: { total: number }) {
   return (
     <Chip
-      label={`已截断（${total.toLocaleString()} 字符）`}
+      label={`已截断（${formatNumber(total)} 字符）`}
       size="small"
       variant="outlined"
       sx={{ mb: 1 }}

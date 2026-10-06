@@ -20,6 +20,7 @@ import type {
   ApprovalVerdict,
 } from '../../api/jobApprovalApi'
 import { fetchApprovalDecisions } from '../../api/jobApprovalApi'
+import { formatDateTime } from '../../lib/formatters'
 import { MaterialIcon } from '../MaterialIcon'
 import styles from './JobApprovalDialog.module.css'
 
@@ -150,7 +151,7 @@ function JobApprovalDialogContent({
                   <span className={styles.historyMeta}>
                     {decision.decided_by.replace(/^user:/, '')}
                     {decision.created_at
-                      ? ` · ${new Date(decision.created_at).toLocaleString()}`
+                      ? ` · ${formatDateTime(decision.created_at)}`
                       : ''}
                   </span>
                 </li>

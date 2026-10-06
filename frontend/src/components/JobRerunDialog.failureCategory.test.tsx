@@ -7,6 +7,7 @@ import type { WorkflowDefinitionRecord } from '../types'
 import type { FailedNodeRunItem } from '../types/failureTypes'
 import { fetchFailedNodeRuns } from '../api'
 import { TestQueryProvider } from '../testing/testQueryClient'
+import { MAX_FAILED_RUN_PAGES } from './JobRerunDialog/useFailureCategories'
 
 vi.mock('../api', () => ({
   fetchFailedNodeRuns: vi.fn(),
@@ -321,6 +322,52 @@ describe('JobRerunDialog failure category mode', () => {
     expect(mockFetchFailedNodeRuns).not.toHaveBeenCalled()
     expect(screen.getByTestId('rerun-category-technical')).toHaveTextContent(
       '技术性失败'
+    )
+  })
+
+  it('follows next_cursor across pages before counting (#713)', async () => {
+    mockFetchFailedNodeRuns
+      .mockResolvedValueOnce({
+        runs: [makeRun({ job_id: 'j1', failure_category: 'technical' })],
+        next_cursor: 'c1',
+      })
+      .mockResolvedValueOnce({
+        runs: [makeRun({ job_id: 'j2', failure_category: 'technical' })],
+        next_cursor: null,
+      })
+    renderDialog()
+
+    act(() => {
+      screen.getByTestId('rerun-chip-failed-node').click()
+    })
+
+    await waitFor(() =>
+      expect(screen.getByTestId('rerun-category-technical')).toHaveTextContent(
+        '技术性失败 (2)'
+      )
+    )
+    expect(mockFetchFailedNodeRuns).toHaveBeenNthCalledWith(1, 'ws1')
+    expect(mockFetchFailedNodeRuns).toHaveBeenNthCalledWith(2, 'ws1', 'c1')
+  })
+
+  it('drops counts instead of undercounting past the page budget', async () => {
+    mockFetchFailedNodeRuns.mockResolvedValue({
+      runs: [makeRun({ job_id: 'j1', failure_category: 'technical' })],
+      next_cursor: 'more',
+    })
+    renderDialog()
+
+    act(() => {
+      screen.getByTestId('rerun-chip-failed-node').click()
+    })
+
+    await waitFor(() =>
+      expect(mockFetchFailedNodeRuns).toHaveBeenCalledTimes(
+        MAX_FAILED_RUN_PAGES
+      )
+    )
+    expect(screen.getByTestId('rerun-category-technical')).toHaveTextContent(
+      /^技术性失败$/
     )
   })
 })
