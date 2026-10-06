@@ -188,3 +188,41 @@ def test_purge_enumerates_log_paths_outside_job_mutation_lock(tmp_path: Path) ->
     assert recreated is False
     assert globbed_in_lock == [False]
     assert sorted(p.name for p in log_dir.iterdir()) == []
+
+
+def test_purge_reports_recreated_when_lock_fails_before_recheck(tmp_path: Path) -> None:
+    """#1065 codex P2：锁事务在给出存在性结果前失败（瞬时 DB 错误）时，无法
+    排除同源重建，必须按「已重建」返回，让调用方跳过按 id 的清理与广播。"""
+    settings = _settings(tmp_path)
+    job_dir = settings.jobs_dir / "job-y"
+    job_dir.mkdir(parents=True)
+
+    class _JobDB:
+        @contextmanager
+        def job_mutation_lock(self, job_id: str) -> Any:
+            raise RuntimeError("connection lost")
+            yield False  # pragma: no cover
+
+    recreated = purge_deleted_job_files(
+        _JobDB(), {"id": "job-y", "storage_dir": "job-y"}, [], settings, "op-1"
+    )
+
+    assert recreated is True
+    assert job_dir.is_dir()
+
+
+def test_purge_keeps_recheck_result_when_lock_fails_after_yield(tmp_path: Path) -> None:
+    """yield 之后（如 commit）才失败：复核值已产出，照常返回真实结果。"""
+    settings = _settings(tmp_path)
+
+    class _JobDB:
+        @contextmanager
+        def job_mutation_lock(self, job_id: str) -> Any:
+            yield False
+            raise RuntimeError("commit failed")
+
+    recreated = purge_deleted_job_files(
+        _JobDB(), {"id": "job-z", "storage_dir": "job-z"}, [], settings, "op-1"
+    )
+
+    assert recreated is False

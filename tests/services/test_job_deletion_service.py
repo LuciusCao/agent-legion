@@ -586,6 +586,59 @@ def test_delete_skips_id_scoped_cleanup_and_event_when_job_recreated(
     assert recorded == []
 
 
+def test_delete_skips_id_scoped_cleanup_and_event_when_recheck_lock_fails(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#1065 codex P2：提交后的锁下复核在产出存在性结果前因瞬时 DB 错误失败，
+    「未能复核」不得当成「确认未重建」——跳过按 id 的 refs/对象清理与删除广播。"""
+    settings = _create_settings(tmp_path)
+    recorded: list[tuple[str, str]] = []
+    gc_calls: list[str] = []
+    deleted_objects: list[Any] = []
+
+    class _Buffer:
+        def record_job_deleted(self, workspace_id: str, job_id: str) -> None:
+            recorded.append((workspace_id, job_id))
+
+    class _ObjectStore:
+        enabled = True
+
+        def rows_for_job(self, job_id: str) -> list[dict[str, Any]]:
+            return [{"job_id": job_id, "storage_key": f"jobs/ws/{job_id}/a.json"}]
+
+        def delete_objects(self, rows: list[dict[str, Any]]) -> None:
+            deleted_objects.extend(rows)
+
+    service = JobDeletionService(
+        job_db,
+        ExecutorLeaseRepository(job_db, data_dir=tmp_path),
+        settings,
+        job_event_buffer=_Buffer(),
+        object_store=_ObjectStore(),
+    )
+    job = _create_job(job_db, "ws-recheck-fail", "Q022", status="completed")
+
+    @contextmanager
+    def _failing_lock(job_id: str) -> Any:
+        raise RuntimeError("connection lost before recheck")
+        yield False  # pragma: no cover
+
+    monkeypatch.setattr(job_db, "job_mutation_lock", _failing_lock)
+    monkeypatch.setattr(
+        job_deletion_module,
+        "gc_deleted_job_artifacts",
+        lambda _store, job_id, _candidates: gc_calls.append(job_id),
+    )
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert job_db.get_job(job["id"]) is None
+    assert gc_calls == []
+    assert deleted_objects == []
+    assert recorded == []
+
+
 def test_delete_purges_only_own_node_logs_not_sibling_prefix(
     job_db: JobQueries, tmp_path: Path
 ) -> None:

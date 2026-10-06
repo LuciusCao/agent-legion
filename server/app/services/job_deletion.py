@@ -130,9 +130,10 @@ class JobDeletionService:
             _fail(job_id, "delete_failed", str(exc))
 
         if purge_deleted_job_files(self.job_db, job, node_keys, self.settings, operation_id):
-            # 同源 job 已重建（同一 id）：按 id 的 refs / 对象清理与删除广播都会
-            # 打到新 job 上，一律跳过；旧 job 的孤儿 blob / 对象交给 unreferenced
-            # sweep 与 bucket lifecycle 兜底。
+            # 同源 job 已重建（同一 id），或锁下复核因 DB 错误未能确认未重建：
+            # 按 id 的 refs / 对象清理与删除广播可能打到新 job 上，一律跳过；
+            # 旧 job 的孤儿 blob 交给 orphan GC（artifact_orphan_gc），对象存储
+            # 侧孤儿由 scripts/gc-s3-jobs.py 回收。
             return self._result(job_id, "succeeded")
         gc_deleted_job_artifacts(self.artifact_store, job_id, artifact_candidates)
         if object_rows and self.object_store is not None:
