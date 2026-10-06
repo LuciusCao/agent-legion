@@ -3,7 +3,7 @@ import { Checkbox } from '@mui/material'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
-import { formatBytes } from '../lib/addItems'
+import { formatBytes } from '../lib/formatters'
 import type { MaterialListResponse } from '../types'
 import styles from './AddItemsDialog.module.css'
 

@@ -12,10 +12,6 @@ const VALID_STATUSES = new Set<DagGraphNode['status']>([
   'awaiting_approval',
 ])
 
-// awaiting_approval polls too: another editor may decide the gate in a
-// different session, and the detail page has no SSE channel to hear it.
-const POLLING_STATUSES = new Set(['queued', 'running', 'awaiting_approval'])
-
 export function normalizeStatus(status: string): DagGraphNode['status'] {
   if (VALID_STATUSES.has(status as DagGraphNode['status'])) {
     return status as DagGraphNode['status']
@@ -64,5 +60,3 @@ export function toDagEdges(nodes: JobNode[]): DagEdge[] {
   })
   return edges
 }
-
-export { POLLING_STATUSES }
