@@ -337,6 +337,7 @@ def test_closed_session_never_receives_unprompted_rows(chat, kimi_home):
     with wire.open("a") as handle:
         handle.writelines(json.dumps(record) + "\n" for record in TASK_TURN)
     # Two poll intervals past the journal write: nothing crosses the fence.
+    # 保留的墙钟等待：跨过两个 journal 轮询周期，负向断言「无」行越过关闭围栏。
     time.sleep(2.5)
     assert _agent_texts(service, session["id"]) == []
 

@@ -75,6 +75,7 @@ export function StudioChatPanel(props: Props) {
             archivedSessions={manage.archivedSessions}
             onArchiveSession={manage.archive}
             onUnarchiveSession={manage.unarchive}
+            retentionDays={manage.retentionDays}
           />
         </>
       }

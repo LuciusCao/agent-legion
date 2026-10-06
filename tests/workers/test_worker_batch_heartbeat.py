@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 
+from tests.helpers import wait_for_predicate
 from worker.execution.heartbeat import start_lease_heartbeat
 from worker.execution.heartbeat_batch import (
     MAX_BATCH_HEARTBEATS,
@@ -108,7 +109,10 @@ def test_batch_loop_survives_transient_batch_errors() -> None:
     _register(registry, "exec-1")
     client = FakeBatchClient()
 
+    boom_calls: list[int] = []
+
     def boom(executions: list[tuple[str, str]]) -> None:
+        boom_calls.append(1)
         raise RuntimeError("host unreachable")
 
     client.heartbeat_batch = boom  # type: ignore[method-assign]
@@ -117,12 +121,15 @@ def test_batch_loop_survives_transient_batch_errors() -> None:
         target=batch_heartbeat_loop, args=(client, registry, stop, 0.02), daemon=True
     )
     thread.start()
-    time.sleep(0.1)
-    # The loop must still be alive: one transient family cannot kill the
-    # machine-wide heartbeat (the lease TTL is the real deadline).
-    assert thread.is_alive()
-    stop.set()
-    thread.join(timeout=2)
+    try:
+        # 第二次 beat 发生即证明首个异常没有打断循环（不靠固定 sleep 猜 tick 数）。
+        wait_for_predicate(lambda: len(boom_calls) >= 2, timeout=5.0)
+        # The loop must still be alive: one transient family cannot kill the
+        # machine-wide heartbeat (the lease TTL is the real deadline).
+        assert thread.is_alive()
+    finally:
+        stop.set()
+        thread.join(timeout=2)
 
 
 def test_batch_loop_degrades_to_single_beats_on_pre_v5_host() -> None:
@@ -250,16 +257,21 @@ def test_registry_quiesce_excludes_lease_and_resume_re_includes() -> None:
         target=batch_heartbeat_loop, args=(client, registry, stop, 0.02), daemon=True
     )
     thread.start()
-    time.sleep(0.06)
-    registry.resume("exec-1", "lease-exec-1")
-    time.sleep(0.06)
-    stop.set()
-    thread.join(timeout=2)
-
-    assert client.batch_calls, "no beat while one lease was quiesced"
-    assert any(
-        "exec-1" in [execution_id for execution_id, _ in call] for call in client.batch_calls
-    ), "quiesced lease never resumed"
+    try:
+        wait_for_predicate(lambda: len(client.batch_calls) >= 1, timeout=5.0)
+        # resume 之前完成的 beat 必然不含被 quiesce 的租约。
+        assert "exec-1" not in [execution_id for execution_id, _ in client.batch_calls[0]]
+        registry.resume("exec-1", "lease-exec-1")
+        wait_for_predicate(
+            lambda: any(
+                "exec-1" in [execution_id for execution_id, _ in call]
+                for call in client.batch_calls
+            ),
+            timeout=5.0,
+        )
+    finally:
+        stop.set()
+        thread.join(timeout=2)
 
 
 # ---------------------------------------------------------------------------
