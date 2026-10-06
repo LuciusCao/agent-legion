@@ -196,6 +196,7 @@ def test_lower_max_concurrency_waits_for_in_flight_drain(tmp_path: Path) -> None
     # 放出两个在途任务：在途仍 >= 新 limit，exec-4 的 bulk 不得启动。
     client.gates["out-1.json"].set()
     client.gates["out-2.json"].set()
+    # 保留：负向观察窗——在途仍 >= 新 limit 时 exec-4「不」启动。
     time.sleep(0.3)
     assert "out-4.json" not in client.entered
 

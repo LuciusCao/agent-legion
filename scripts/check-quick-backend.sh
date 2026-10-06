@@ -140,7 +140,7 @@ run_tests() {
         UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
-        -m "not postgres and not repository_gate" \
+        -m "not postgres" \
         -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
@@ -183,7 +183,7 @@ run_tests() {
           UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
           --ignore=tests/full \
           --ignore=tests/ci \
-          -m "not postgres and not repository_gate" \
+          -m "not postgres" \
           -n "$workers" --dist worksteal \
           --reruns 1 \
           --reruns-delay 2 \
@@ -193,7 +193,7 @@ run_tests() {
           UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
           --ignore=tests/full \
           --ignore=tests/ci \
-          -m "not postgres and not repository_gate" \
+          -m "not postgres" \
           -n "$workers" --dist worksteal \
           --reruns 1 \
           --reruns-delay 2 \
@@ -224,7 +224,7 @@ run_tests() {
         UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
-        -m "not postgres and not repository_gate" \
+        -m "not postgres" \
         -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
@@ -249,7 +249,7 @@ run_tests() {
       UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
-        -m "postgres and not repository_gate" \
+        -m "postgres" \
         -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
@@ -278,7 +278,7 @@ run_tests() {
         UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
-        -m "not postgres and not repository_gate" \
+        -m "not postgres" \
         -n "$workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \

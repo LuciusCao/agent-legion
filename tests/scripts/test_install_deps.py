@@ -29,18 +29,25 @@ AGENT_LEGION_S3_SECRET_KEY=
 """
 
 _UNAME_STUB = """#!/usr/bin/env bash
+if [[ "$1" == "-m" ]]; then echo "${STUB_ARCH:-arm64}"; exit 0; fi
 echo "${STUB_UNAME:-Darwin}"
 """
 
 _BREW_STUB = """#!/usr/bin/env bash
 echo "brew $*" >> "${STUB_LOG}"
 if [[ "$1" == "--prefix" ]]; then echo "/stub-prefix"; exit 0; fi
-if [[ "$1" == "list" ]]; then exit 1; fi
+if [[ "$1" == "list" ]]; then
+  [[ " ${STUB_BREW_INSTALLED:-} " == *" ${!#} "* ]] && exit 0
+  exit 1
+fi
 exit 0
 """
 
 _UV_STUB = """#!/usr/bin/env bash
 echo "uv $*" >> "${STUB_LOG}"
+if [[ "$1" == "sync" ]]; then
+  echo "uv-sync-env OPENSSL_DIR=${OPENSSL_DIR:-}" >> "${STUB_LOG}"
+fi
 if [[ "$1" == "run" ]]; then
   echo "stub-vault-master-key"
 fi
@@ -260,3 +267,71 @@ def test_createdb_failure_surfaces_real_error_and_degrades(tmp_path: Path) -> No
     assert result.returncode == 0, result.stderr
     assert "createdb agent_legion_dev 未成功" in result.stdout
     assert "connection refused" in result.stdout
+
+
+def test_apple_silicon_skips_openssl3_and_openssl_dir(tmp_path: Path) -> None:
+    """Apple Silicon（arm64）有 cryptography 官方 wheel：不装 openssl@3、不导出 OPENSSL_DIR。"""
+    main, bin_dir = _setup(tmp_path)
+    _write_stub(bin_dir / "cargo", _EXIT_OK_STUB)
+    stub_log = tmp_path / "stub.log"
+
+    result = _run(main, bin_dir, stub_log, {"STUB_ARCH": "arm64"})
+
+    assert result.returncode == 0, result.stderr
+    log = stub_log.read_text().splitlines()
+    assert "brew install openssl@3" not in log
+    assert "uv-sync-env OPENSSL_DIR=" in log
+
+
+def test_intel_mac_installs_openssl3_and_exports_openssl_dir(tmp_path: Path) -> None:
+    """Intel Mac（#1089）：系统自带 openssl 通过 have openssl 也要补装 openssl@3，
+    且 uv sync 时 OPENSSL_DIR 指向其 brew prefix（cryptography 源码构建）。"""
+    main, bin_dir = _setup(tmp_path)
+    _write_stub(bin_dir / "cargo", _EXIT_OK_STUB)
+    stub_log = tmp_path / "stub.log"
+
+    result = _run(main, bin_dir, stub_log, {"STUB_ARCH": "x86_64"})
+
+    assert result.returncode == 0, result.stderr
+    log = stub_log.read_text().splitlines()
+    assert "brew install openssl@3" in log
+    assert "uv-sync-env OPENSSL_DIR=/stub-prefix" in log
+    # 先装后 sync：openssl@3 必须在 uv sync 之前就位。
+    assert log.index("brew install openssl@3") < log.index("uv sync")
+
+
+def test_intel_mac_openssl3_present_skips_install_but_exports(tmp_path: Path) -> None:
+    """Intel Mac 已装 openssl@3：跳过 brew install（幂等），仍导出 OPENSSL_DIR。"""
+    main, bin_dir = _setup(tmp_path)
+    _write_stub(bin_dir / "cargo", _EXIT_OK_STUB)
+    stub_log = tmp_path / "stub.log"
+
+    result = _run(
+        main, bin_dir, stub_log, {"STUB_ARCH": "x86_64", "STUB_BREW_INSTALLED": "openssl@3"}
+    )
+
+    assert result.returncode == 0, result.stderr
+    log = stub_log.read_text().splitlines()
+    assert "brew install openssl@3" not in log
+    assert "uv-sync-env OPENSSL_DIR=/stub-prefix" in log
+
+
+def test_intel_mac_respects_caller_openssl_dir(tmp_path: Path) -> None:
+    """调用方已显式设置 OPENSSL_DIR（如自建 OpenSSL）：不覆盖。"""
+    main, bin_dir = _setup(tmp_path)
+    _write_stub(bin_dir / "cargo", _EXIT_OK_STUB)
+    stub_log = tmp_path / "stub.log"
+
+    result = _run(
+        main,
+        bin_dir,
+        stub_log,
+        {
+            "STUB_ARCH": "x86_64",
+            "STUB_BREW_INSTALLED": "openssl@3",
+            "OPENSSL_DIR": "/opt/custom-openssl",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "uv-sync-env OPENSSL_DIR=/opt/custom-openssl" in stub_log.read_text().splitlines()
