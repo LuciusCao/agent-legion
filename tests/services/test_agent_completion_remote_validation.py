@@ -355,6 +355,48 @@ def test_eviction_failure_never_replaces_the_original_verdict(
     assert result.error_message.startswith("Output validation failed: bad output")
 
 
+@pytest.mark.parametrize(
+    ("script", "message"),
+    [
+        (_VALIDATE_READ_ONLY, "Validator error: "),
+        (
+            "import sys\nprint('bad output', file=sys.stderr)\nsys.exit(1)\n",
+            "Output validation failed: bad output",
+        ),
+    ],
+    ids=["passing-validator", "failing-validator"],
+)
+def test_stat_eio_on_remote_output_is_unverifiable_and_keeps_the_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str, message: str
+) -> None:
+    """#1035：守卫里 ``is_file()`` 的 stat 报 EIO（pathlib 不吞）时按无法验证
+    处理、不穿出完成流程——validator 已有的判败消息保留，无判定时节点按
+    remote 输出分歧判败，本地副本照常逐出。"""
+    import errno
+    import sys
+
+    real_is_file = Path.is_file
+
+    def _is_file_eio(self: Path, *args: Any, **kwargs: Any) -> bool:
+        if self.name == "out.json" and sys._getframe(1).f_code.co_name == "_change_kind":
+            raise OSError(errno.EIO, "Input/output error", str(self))
+        return real_is_file(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_file", _is_file_eio)
+    storage = _storage()
+    handler, leases, object_store, job_dir = _make_handler(tmp_path, storage, script)
+
+    _finish(handler, {"out.json": _remote_ref()})
+
+    result = leases.results[0]
+    assert result.status == "failed"
+    assert result.error_message.startswith(message)
+    if message.startswith("Validator error"):
+        assert "'out.json' (unverifiable)" in result.error_message
+    assert storage.objects[AUTHORITY_KEY] == PAYLOAD
+    _assert_reads_serve_worker_bytes(job_dir, object_store)
+
+
 def test_validator_replacing_remote_output_with_identical_bytes_completes(
     tmp_path: Path,
 ) -> None:

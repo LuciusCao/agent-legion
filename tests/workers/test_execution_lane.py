@@ -383,3 +383,98 @@ def test_spawn_start_failure_rolls_back_live_entry(monkeypatch) -> None:
         assert len(started) == 1
     finally:
         pool.shutdown(wait=True)
+
+
+def test_thread_start_failure_raises_lane_spawn_error_without_queueing(monkeypatch) -> None:
+    """#1051：Thread.start 抛资源类 RuntimeError（线程/pid 耗尽）→ submit
+    抛专用 LaneSpawnError（原异常挂 __cause__）。账目：先 spawn 后入队，
+    任务从未入队（qsize 0、没有任何线程会跑它），ghost 已回滚；资源恢复后
+    池照常可用。"""
+    from worker.execution.execution_lane import LaneSpawnError
+
+    pool = ExecutionLanePool(4, idle_timeout=30)
+    ran: list[str] = []
+    try:
+
+        def fail_start(self):  # noqa: ANN001
+            raise RuntimeError("can't start new thread")
+
+        monkeypatch.setattr(threading.Thread, "start", fail_start)
+        with pytest.raises(LaneSpawnError) as info:
+            pool.submit(ran.append, "never-runs")
+        assert isinstance(info.value.__cause__, RuntimeError)
+        assert pool._queue.qsize() == 0
+        assert pool.live_threads() == 0
+        monkeypatch.undo()
+        assert pool.submit(lambda: "ok").result(timeout=5) == "ok"
+        assert ran == []
+    finally:
+        monkeypatch.undo()
+        pool.shutdown(wait=True)
+
+
+def test_spawn_failure_with_busy_live_thread_does_not_queue_task(monkeypatch) -> None:
+    """#1051：已有线程在忙时 spawn 失败——旧顺序（先入队后 spawn）会把任务
+    留在队列里却不给调用方 future，忙线程释放后它「幽灵执行」而 executor
+    的 active 从未记账。新顺序下任务不入队、永不执行。"""
+    from worker.execution import execution_lane
+
+    pool = ExecutionLanePool(4, idle_timeout=30)
+    release = threading.Event()
+    ran: list[str] = []
+    try:
+        first = pool.submit(release.wait, 5)
+        deadline = time.monotonic() + 5
+        while pool._busy < 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        def fail_start(self):  # noqa: ANN001
+            raise RuntimeError("can't start new thread")
+
+        monkeypatch.setattr(execution_lane._LaneWorker, "start", fail_start)
+        with pytest.raises(execution_lane.LaneSpawnError):
+            pool.submit(ran.append, "ghost")
+        assert pool._queue.qsize() == 0
+        release.set()
+        assert first.result(timeout=5) is True
+        time.sleep(0.1)
+        assert ran == []
+        assert pool.live_threads() == 1
+    finally:
+        release.set()
+        pool.shutdown(wait=True)
+
+
+def test_rebalance_belt_spawn_failure_does_not_fail_taken_task(monkeypatch) -> None:
+    """#1051：消费侧补位（_rebalance_after_take）撞线程耗尽时只放弃补位——
+    异常若逃逸会落进 run 的任务遏制臂，把本线程刚取到的任务不跑就判失败。
+    构造：唯一线程忙时直接往队列塞两条（绕过 submit 的 spawn），线程取第一
+    条时 busy+queued > live 触发补位，start 失败被吞，两条照常跑完。"""
+    from concurrent.futures import Future
+
+    from worker.execution import execution_lane
+
+    pool = ExecutionLanePool(2, idle_timeout=30)
+    release = threading.Event()
+    try:
+        first = pool.submit(release.wait, 5)
+        deadline = time.monotonic() + 5
+        while pool._busy < 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        def fail_start(self):  # noqa: ANN001
+            raise RuntimeError("can't start new thread")
+
+        monkeypatch.setattr(execution_lane._LaneWorker, "start", fail_start)
+        task_a: Future = Future()
+        task_b: Future = Future()
+        pool._queue.put((task_a, lambda: "a", ()))
+        pool._queue.put((task_b, lambda: "b", ()))
+        release.set()
+        assert first.result(timeout=5) is True
+        assert task_a.result(timeout=5) == "a"
+        assert task_b.result(timeout=5) == "b"
+        assert pool.live_threads() == 1
+    finally:
+        release.set()
+        pool.shutdown(wait=True)

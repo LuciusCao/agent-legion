@@ -67,10 +67,7 @@ vi.mock('../stores/agentsStore', () => ({
     selector?: (state: ReturnType<typeof createMockAgentsState>) => unknown
   ) => {
     const state = createMockAgentsState({
-      workerPausedByWorkspace: mockWorkerPausedByWorkspace,
       agents: mockAgents,
-      getWorkerPaused: (workspaceId: string) =>
-        mockWorkerPausedByWorkspace[workspaceId] ?? true,
       fetchWorkerStatus: fetchWorkerStatusMock,
       setWorkerPaused: setWorkerPausedMock,
     })
@@ -103,25 +100,76 @@ describe('WorkspaceRunControl', () => {
         max_tasks: 8,
       }),
     ]
-    fetchWorkerStatusMock.mockResolvedValue(undefined)
-    setWorkerPausedMock.mockResolvedValue(undefined)
+    // 暂停位经 RQ 查询读取（#961）：mock 的读取按 workspace 返回服务端值。
+    fetchWorkerStatusMock.mockImplementation((workspaceId: string) =>
+      Promise.resolve({
+        paused: mockWorkerPausedByWorkspace[workspaceId] ?? true,
+        superseded: false,
+      })
+    )
+    setWorkerPausedMock.mockImplementation((paused: boolean) =>
+      Promise.resolve(paused)
+    )
   })
 
-  it('renders run state button', () => {
+  it('renders run state button', async () => {
     renderControl()
-    expect(screen.getByLabelText('恢复运行')).toBeInTheDocument()
+    expect(await screen.findByLabelText('恢复运行')).toBeInTheDocument()
   })
 
-  it('shows 已暂停 when the workspace is paused', () => {
+  it('shows 已暂停 when the workspace is paused', async () => {
     mockWorkerPausedByWorkspace = { ws1: true }
     renderControl()
-    expect(screen.getByText('已暂停')).toBeInTheDocument()
+    expect(await screen.findByText('已暂停')).toBeInTheDocument()
   })
 
-  it('shows 运行中 when the workspace is running', () => {
+  it('shows 运行中 when the workspace is running', async () => {
     mockWorkerPausedByWorkspace = { ws1: false }
     renderControl()
-    expect(screen.getByText('运行中')).toBeInTheDocument()
+    expect(await screen.findByText('运行中')).toBeInTheDocument()
+  })
+
+  // #961：拉取失败不得默认成「已暂停」——运行中的 worker 在网络抖动时会
+  // 被误读为暂停。失败态显示「状态未知」，点击重试拉取而非切换调度。
+  it('shows 状态未知 instead of 已暂停 when the status fetch fails', async () => {
+    fetchWorkerStatusMock.mockRejectedValue(new Error('offline'))
+    renderControl()
+    expect(await screen.findByText('状态未知')).toBeInTheDocument()
+    expect(screen.queryByText('已暂停')).not.toBeInTheDocument()
+
+    fetchWorkerStatusMock.mockResolvedValue({
+      paused: false,
+      superseded: false,
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('重新获取运行状态'))
+    })
+    expect(await screen.findByText('运行中')).toBeInTheDocument()
+    expect(setWorkerPausedMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps the last known state when a background refresh fails', async () => {
+    mockWorkerPausedByWorkspace = { ws1: false }
+    renderControl()
+    const button = await screen.findByLabelText('暂停运行')
+    // 暂停成功写回缓存后会失效重拉：让这次后台刷新失败。
+    fetchWorkerStatusMock.mockRejectedValue(new Error('offline'))
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    await waitFor(() => expect(fetchWorkerStatusMock).toHaveBeenCalledTimes(2))
+    await act(async () => {})
+    expect(screen.getByText('已暂停')).toBeInTheDocument()
+    expect(screen.queryByText('状态未知')).not.toBeInTheDocument()
+  })
+
+  it('shows 读取中 (not 已暂停) and disables the toggle before the first status arrives', async () => {
+    fetchWorkerStatusMock.mockReturnValue(new Promise(() => {}))
+    renderControl()
+    const button = await screen.findByLabelText('运行状态读取中')
+    expect(button).toBeDisabled()
+    expect(screen.getByText('读取中')).toBeInTheDocument()
+    expect(screen.queryByText('已暂停')).not.toBeInTheDocument()
   })
 
   it('fetches worker status for the given workspace on mount', () => {
@@ -139,8 +187,9 @@ describe('WorkspaceRunControl', () => {
     mockWorkerPausedByWorkspace = { ws1: true }
     renderControl()
 
+    const button = await screen.findByLabelText('恢复运行')
     await act(async () => {
-      fireEvent.click(screen.getByLabelText('恢复运行'))
+      fireEvent.click(button)
     })
 
     expect(setWorkerPausedMock).toHaveBeenCalledWith(false, 'ws1')
@@ -151,8 +200,9 @@ describe('WorkspaceRunControl', () => {
     mockWorkerPausedByWorkspace = { ws1: false }
     renderControl()
 
+    const button = await screen.findByLabelText('暂停运行')
     await act(async () => {
-      fireEvent.click(screen.getByLabelText('暂停运行'))
+      fireEvent.click(button)
     })
 
     expect(setWorkerPausedMock).toHaveBeenCalledWith(true, 'ws1')
