@@ -19,7 +19,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]  # worker/ 包根
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from worker import events
 from worker.claim_backoff import CLAIM_BACKOFF_CAP_SECONDS, ClaimBackoffSequence
 from worker.claim_batch import (
     ClaimRunContext,
@@ -29,7 +28,7 @@ from worker.claim_batch import (
 from worker.claim_budget import pass_budget
 from worker.claim_pacing import ClaimPacing
 from worker.cleanup import clean_work_root
-from worker.execution.execution_lane import ExecutionLanePool
+from worker.execution.execution_lane import ExecutionLanePool, LaneSpawnError
 from worker.execution.exit_watch import ExitWatchReactor
 from worker.fd_limits import raise_fd_limit_startup
 from worker.host.client import HOST_UNAVAILABLE_ERRORS, Client, WorkerAuthError
@@ -317,13 +316,19 @@ def main() -> int:
                 # 退避只会让 worker 空转且把排障方向误导到网络。已提交的
                 # future 不受退避影响。#437：等待时长经 ClaimBackoffSequence
                 # （首 1s 固定、之后指数翻倍 ±20% jitter、上限 60s），fleet
-                # 不同步对齐。
-                wait = backoff.next_wait()
-                # #490 claim.backoff：#437 序列状态结构化落盘；HTTP 错误码/
-                # URL 已在 client.request 的 http.error 事件里。
-                events.note_claim_backoff(worker_id, exc, wait, backoff.failures)
-                print(f"Agent claim error: {exc}; retrying in {wait:.1f}s", flush=True)
-                stop.wait(wait)
+                # 不同步对齐。#490 claim.backoff：#437 序列状态结构化落盘；
+                # HTTP 错误码/URL 已在 client.request 的 http.error 事件里。
+                backoff.wait_out(stop, worker_id, exc, "Agent claim error")
+                continue
+            except LaneSpawnError as exc:
+                # #1051：执行车道起线程失败（线程/pid 预算耗尽，资源类而非编程
+                # 错误）单独一臂退避——不并入 Host 不可用族、不放宽捕获。账目：
+                # 该条及本批余下执行未入池（不在 active、无心跳），租约过期后
+                # 由 Host sweep 重排队（claim_batch_pass 已逐条列出 execution_id；
+                # 每次丢弃消耗一次重排次数，超出 requeue_limit 节点判败）；已
+                # 提交的 future 照常 reap。退避期间不再领活，之后 claim_ctx 的
+                # lane_probe 熔断把每轮限为探测 1 条，直到再有 submit 成功。
+                backoff.wait_out(stop, worker_id, exc, "Agent execution lane exhausted")
                 continue
             backoff.reset()
             # #472：成功=自适应短等待，空队列=poll_interval；错误路径走 backoff。
