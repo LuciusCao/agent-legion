@@ -95,7 +95,7 @@ NATIVE_WORKER_BIND=192.0.2.1
 - prod-up 发现记录中的实例仍在另一个 bind/port 运行时拒绝启动，避免双实例；同配置重跑时若记录中的实例已启动但尚未监听（上次 up 被中断），视为已在运行并等待其就绪，超时则提示先 `make prod-down`。
 - 把 bind 从具体地址切到通配（如 `127.0.0.1` → `0.0.0.0`）时同样先按旧值 down：通配监听能与同端口的具体地址监听并存，`native-prod-up.sh` 检测到通配 bind 的端口上已有其他监听即拒绝启动并列出冲突监听，避免起出连同一个库的双实例（单副本约束见 [architecture/deployment.md](architecture/deployment.md)）。
 
-对象存储的端口发布在两种形态下都由 compose 托管（`AGENT_LEGION_S3_BIND`）：改它时 `AGENT_LEGION_S3_ENDPOINT` / `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 要跟着改，规则见 [materials-storage-deployment.md §1](materials-storage-deployment.md#1-组件与配置面)。远程 Worker 侧没有额外的网络配置项：register/claim/heartbeat/result 全部走 `host_url` 一个地址，材料、bundle 拉取与产物回传走 Host 按 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 签发的 presigned URL——对象存储可达性由 Host 侧配置决定。
+对象存储的端口发布在两种形态下都由 compose 托管（`AGENT_LEGION_S3_BIND`）：改 bind 时把 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向同一可达地址；`AGENT_LEGION_S3_ENDPOINT` 保持本机/内网地址不动（Docker 形态是 compose 注入的 `http://seaweedfs:8333`，改成 LAN / Tailnet IP 会让 `local-s3-decide.sh` 判为外部存储、不再带起本地对象存储）。原生形态的 bind 取值与 endpoint 规则见 [materials-storage-deployment.md §1](materials-storage-deployment.md#1-组件与配置面)。远程 Worker 侧没有额外的网络配置项：register/claim/heartbeat/result 全部走 `host_url` 一个地址，材料、bundle 拉取与产物回传走 Host 按 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 签发的 presigned URL——对象存储可达性由 Host 侧配置决定。
 
 如果 LLM gateway 绑定了 Tailnet 地址并设置了 `LLM_GATEWAY_TOKEN`（绑定非 loopback 地址时必须设置），Worker 容器也需要同一个 token 才能调用 gateway。Compose 通过环境变量透传它，把 token 写进 `deploy/.env`（该文件已被 `.gitignore` 与 `.dockerignore` 排除）或导出到 shell：
 
@@ -127,7 +127,7 @@ skill root 已上移为 `~/.agents/skills`（单一来源
 
 ## 3. 启动部署机的 stack
 
-Docker 部署机的唯一入口是 `make prod-up docker`（停止用 `make prod-down docker`）：
+Docker 部署机的唯一入口是 `make prod-up docker`（停止用 `make prod-down docker`；它目前不会停掉 profile 下的本地对象存储容器，见 §8）：
 
 1. **放好 velites 二进制（#381）**：worker 镜像不含 agent runtime 执行器，先把与部署机架构匹配的 velites 二进制放到 `<仓库根>/velites-bin/velites`（`chmod +x`）。compose 的默认值 `${VELITES_BIN:-../velites-bin/velites}` 按 compose 文件所在的 `deploy/` 目录解析，即仓库根下的 `velites-bin/`；用 `VELITES_BIN`（绝对路径）可改位置。产物获取与架构匹配见 §5「velites 二进制来源」。
 2. **准备对象存储凭据**：本地对象存储（默认 SeaweedFS）的凭据写进 `deploy/.env`，见 [materials-storage-deployment.md §3.1](materials-storage-deployment.md#31-准备凭据与配置)。
@@ -138,7 +138,7 @@ Docker 部署机的唯一入口是 `make prod-up docker`（停止用 `make prod-
    curl http://192.0.2.1:8000/api/health
    ```
 
-   `scripts/stack-prod-up.sh` 依次检查 §1 的三个 secret 文件、经 `scripts/local-s3-decide.sh` 决策是否带起本地对象存储（开关值非法或决策启动但凭据未配齐即 fail-fast）、先起 PostgreSQL 并等它 healthy、再构建并起全 stack，最后等 host / worker 都 healthy 才返回。
+   `scripts/stack-prod-up.sh` 依次经 `scripts/local-s3-decide.sh` 决策是否带起本地对象存储（开关值非法或决策启动但凭据未配齐即 fail-fast）、检查 §1 的三个 secret 文件、先起 PostgreSQL 并等它 healthy、再构建并起全 stack，最后等 host / worker 都 healthy 才返回。
 4. **首次部署建 bucket**：见 [materials-storage-deployment.md §3.2](materials-storage-deployment.md#32-启动与建-bucket)。
 
 stack 由 [compose.host.yaml](../deploy/compose.host.yaml) 编排 PostgreSQL、Host、部署机本地 Worker 与（按决策）本地对象存储。Worker 被隔离在专用 `worker-ctrl` 网络（host 双挂两个网络，postgres / 对象存储只在默认网络）：worker 控制台 `GET /` 无鉴权，网络隔离保证同 stack 的其它容器不能从 compose 内网提取其控制 token（拓扑说明见 §5「控制面鉴权」）。
@@ -511,7 +511,7 @@ Host 设置页顶部的「Worker 与 Worker 控制台」卡片、签发成功后
 
 ## 6. 验证两个 Worker
 
-可以直接查看 Worker 控制台或 Host Web UI，也可以在部署机用 §4 登录得到的 cookie 文件查询（`GET /api/agent-workers` 要求登录用户会话；只读 GET 不需要 `x-agent-legion-request` 头，不带 cookie 返回 401）：
+可以直接查看 Worker 控制台或 Host Web UI，也可以在部署机按 §4 的登录命令重新登录得到 cookie 文件后查询（用完同样注销并删除）（`GET /api/agent-workers` 要求登录用户会话；只读 GET 不需要 `x-agent-legion-request` 头，不带 cookie 返回 401）：
 
 ```bash
 curl -sS -b ./al-cookies.txt http://192.0.2.1:8000/api/agent-workers
@@ -551,6 +551,13 @@ docker compose -f deploy/compose.worker.yaml exec worker \
 
 ```bash
 make prod-down docker
+```
+
+注意：`make prod-down docker`（以及 `make stack-host-down` / `make stack-down`）执行的是不带 `--profile` 的 `docker compose ... down`，**不会停掉** profile 下的本地对象存储容器（`seaweedfs` 在 `materials-local`、`rustfs` 在 `materials-local-rustfs`），这些容器继续运行（compose v5 实测）。要连同对象存储一起停，显式带上对应 profile（存在 `deploy/compose.local.yaml` 时同样加 `-f`）：
+
+```bash
+docker compose -f deploy/compose.host.yaml --profile materials-local down
+# rustfs 逃生舱：--profile materials-local-rustfs
 ```
 
 Worker 机器：

@@ -84,9 +84,12 @@ address — per
 The storage endpoint is load-bearing: presigned GETs fetch materials and
 bundle members, presigned PUTs return artifacts, and compose-internal names
 (`seaweedfs:8333`) are unreachable from remote devices. With the bundled
-object storage, set both `AGENT_LEGION_S3_BIND` and
-`AGENT_LEGION_S3_PUBLIC_ENDPOINT` to the laptop's tailnet address before
-the smoke test — the rules live in
+object storage, before the smoke test publish the backend port beyond
+loopback (`AGENT_LEGION_S3_BIND`: the tailnet address or `0.0.0.0` in the
+Docker form, `0.0.0.0` in the native form) and point
+`AGENT_LEGION_S3_PUBLIC_ENDPOINT` at the laptop's tailnet address; leave
+`AGENT_LEGION_S3_ENDPOINT` on its local/compose address, otherwise the
+local backend is treated as external and not started — the rules live in
 [materials-storage-deployment.md §1](materials-storage-deployment.md#1-组件与配置面).
 If the container cannot reach the tailnet, design a dedicated Tailscale
 sidecar; do not bake Tailscale into the Worker image.

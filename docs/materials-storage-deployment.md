@@ -45,7 +45,7 @@ gzip 对象的上传下载对后端完全透明。`Content-Encoding: gzip` 响�
 | `AGENT_LEGION_LOCAL_S3` | `auto`（默认）/ `always` / `never` | 本地对象存储三态开关，判断逻辑见 `scripts/local-s3-decide.sh`（`make prod-up [docker]`、`make dev-up` 与底层 `make stack-host-up` 共用；各入口对决策失败的处理不同，见下文）。`auto`：endpoint 指向本机或未配置任何 S3 → 启动；endpoint 远程，或只配 bucket/凭据不配 endpoint（AWS 默认端点写法）→ 跳过并打一行原因日志 |
 | `AGENT_LEGION_S3_ENDPOINT` | docker stack 默认注入 `http://seaweedfs:8333`（可在 `deploy/.env` 覆盖；显式空值 = AWS S3 默认端点） | 后端直连地址；远程地址会让 `auto` 跳过本地后端。存量 rustfs 用户的 endpoint 仍指向 `http://rustfs:9000` 时，decide 脚本会提示显式配 `AGENT_LEGION_LOCAL_S3_BACKEND=rustfs` |
 | `AGENT_LEGION_S3_PUBLIC_ENDPOINT` | compose 默认 `http://127.0.0.1:8333` | presigned URL 的签发地址，必须浏览器 / remote worker 可达；留空则回落用内部 endpoint 签发。SigV4 把 Host 签进签名，签后不可改写——切后端时务必与实际服务的端口一致；不能写 compose 服务名（如 `http://seaweedfs:8333`），宿主机外与隔离网络里的 worker 都解析不到 |
-| `AGENT_LEGION_S3_BIND` | 默认 `127.0.0.1` | 本地后端端口（seaweedfs `8333`/`9333`，rustfs `9000`/`9001`）在宿主机上的发布地址，两种 prod 形态都生效（端口发布始终由 compose 托管）。默认只有本机可达：远程 Worker 或其他设备的浏览器要访问时，设为部署机的 LAN / Tailnet 地址（或 `0.0.0.0`），并把 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向同一地址。设为具体 IP 后 `127.0.0.1` 映射消失：原生形态后端进程用的 `AGENT_LEGION_S3_ENDPOINT`（根 `.env`，默认 `http://127.0.0.1:8333`）要同步改成该地址，或改用 `0.0.0.0` 保住 loopback；docker 形态 host 走 compose 内网 `seaweedfs:8333`，不受影响。写在 `deploy/.env` |
+| `AGENT_LEGION_S3_BIND` | 默认 `127.0.0.1` | 本地后端端口（seaweedfs `8333`/`9333`，rustfs `9000`/`9001`）在宿主机上的发布地址，两种 prod 形态都生效（端口发布始终由 compose 托管）。默认只有本机可达。远程 Worker 或其他设备的浏览器要访问时，**只改发布地址与 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`，`AGENT_LEGION_S3_ENDPOINT` 保持本机/内网地址**：Docker 形态 bind 可设为部署机的 LAN / Tailnet 地址或 `0.0.0.0`（host 走 compose 内网 `seaweedfs:8333`，不受影响）；原生形态设为 `0.0.0.0`，这样根 `.env` 的 `http://127.0.0.1:8333` 仍可达（设为具体 IP 会让 `127.0.0.1` 映射消失）。`PUBLIC_ENDPOINT` 指向客户端实际可达的地址。不要把 `AGENT_LEGION_S3_ENDPOINT` 改成 LAN / Tailnet IP：`scripts/local-s3-decide.sh` 只把 `127.0.0.1` / `localhost` / `::1` / `seaweedfs` / `rustfs` 认作本地，其余按外部存储跳过启动本地后端；原生形态确需绑定具体 IP 并让后端走该地址时，须同时设 `AGENT_LEGION_LOCAL_S3=always`。写在 `deploy/.env` |
 | `AGENT_LEGION_S3_BUCKET` | 默认 `agent-legion` | 每个部署实例一个 bucket；dev worktree 派生 `agent-legion-<worktree>` |
 | `AGENT_LEGION_S3_ACCESS_KEY` / `AGENT_LEGION_S3_SECRET_KEY` | 本地后端形态必填；外部 S3 走默认凭据链时留空 | compose 只做 `${}` 字面插值，`deploy/.env` 必须写字面值；`_FILE` 变体仅原生形态可用。compose 同时把它注入本地后端容器作为其 root 凭据 |
 | `AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES` | 默认 50GiB | 节点物化缓存（`data/materials_cache/`）容量上限，LRU 淘汰 |
@@ -217,7 +217,9 @@ EOF
 - 上传一个文件验证闭环：`POST /api/workspaces/{id}/materials/presign`
   → PUT → `complete`，材料状态变 `ready`。
 - 恢复 workspace 调度（后端每次启动都会把全部 scope 重置为 paused，
-  `server/app/worker_control.py`）：经控制台或 `scripts/resume-workspaces.sh` 恢复。
+  `server/app/worker_control.py`）：经控制台恢复；`scripts/resume-workspaces.sh`
+  只适用于原生 / dev 形态（它按根 `.env` 的 `AGENT_LEGION_DATABASE_URL` 直连
+  数据库，Docker 形态的 PostgreSQL 不向宿主机发布端口），Docker 部署走控制台。
 - worker 的 `claim_enabled` 默认关闭，打开方式见
   [agent-worker-deployment.md §5](agent-worker-deployment.md#5-启动-worker-机器上的-worker)。
 

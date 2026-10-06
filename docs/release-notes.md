@@ -68,6 +68,7 @@ velites v0.5.4 — 契约三档回落与迁移桥 deprecation
 ```markdown
 - 状态计数触发器跨语句死锁（#659，含 v82 迁移）：claim/心跳/rerun 间歇性 500 的根因，计数触发器改为追加 delta + `pg_try_advisory_xact_lock` 选 folder 合并，写者不再等锁、读取汇总基表与待合并 delta；node 级同类计数族由后续 v88 收口。
 ```
+
 ## 内容分层：release 写摘要，CHANGELOG 写深记录
 
 同一版本的两个层次，不要复制粘贴：
