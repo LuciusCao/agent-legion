@@ -128,9 +128,8 @@ nodes:
 
 def _seed_workspace(conn, workspace_id: str = _WORKSPACE) -> None:
     conn.execute(
-        "insert into workspaces(id, name, default_workflow_key) values (%s, %s, %s)"
-        " on conflict(id) do nothing",
-        (workspace_id, workspace_id, workspace_id),
+        "insert into workspaces(id, name) values (%s, %s) on conflict(id) do nothing",
+        (workspace_id, workspace_id),
     )
 
 

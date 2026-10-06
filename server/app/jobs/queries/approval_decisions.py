@@ -10,6 +10,7 @@ raising ``ApprovalGateConflict`` when a concurrent decision or reset won.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
@@ -97,8 +98,15 @@ class ApprovalDecisionQueriesMixin(ConnectionQueriesMixin):
             ).fetchone()
         return int(row["cnt"]) if row is not None else 0
 
-    def approve_gate_atomic(self, decision: dict[str, Any]) -> None:
-        """approved: guard + insert decision + complete the gate + re-derive job status."""
+    def approve_gate_atomic(
+        self, decision: dict[str, Any], *, on_guarded: Callable[[], None] | None = None
+    ) -> None:
+        """approved: guard + insert decision + complete the gate + re-derive job status.
+
+        ``on_guarded`` runs under the job-mutation lock right after the status
+        guard passes (the service swaps the staged decision artifact into
+        place there, #929); raising from it rolls the whole decision back.
+        """
         # Local import: executors.leases imports the jobs package, so a
         # module-level import here would close an import cycle.
         from server.app.executors._lease_control import sync_job_status
@@ -107,6 +115,8 @@ class ApprovalDecisionQueriesMixin(ConnectionQueriesMixin):
         with self.write() as conn:
             _lock_job_mutation(conn, job_id)
             _guard_awaiting(conn, job_id, node_key)
+            if on_guarded is not None:
+                on_guarded()
             _insert_decision(conn, decision)
             conn.execute(
                 """

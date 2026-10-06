@@ -78,7 +78,7 @@ def test_agent_publish_prunes_renamed_override_key(tmp_path: Path) -> None:
     key is pruned, sibling keys survive, and intake (which re-validates by
     the live agent schema) resolves cleanly where it raised before."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ag-prune-ws", default_workflow_key=_WORKFLOW_KEY)
+    workspace = queries.create_workspace("ag-prune-ws")
     _publish_revision(queries, workspace["id"])
 
     # v1 of the Agent declares old_key; the workspace overrides it.
@@ -130,7 +130,7 @@ def test_agent_publish_prunes_whole_override_when_schema_dropped(tmp_path: Path)
     non-empty-override state is what resolve_node_config rejects at intake);
     overrides of nodes routed to OTHER capabilities stay untouched."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ag-prune-empty-ws", default_workflow_key=_WORKFLOW_KEY)
+    workspace = queries.create_workspace("ag-prune-empty-ws")
     _publish_revision(queries, workspace["id"])
 
     schema_agent = _agent_with_schema({"old_key": {"type": "integer"}})
@@ -174,7 +174,7 @@ def test_agent_publish_keeps_secret_ref_marker_and_prunes_flipped_one(tmp_path: 
     blocking intake. Plaintext under a NEWLY-secret field is deleted, never
     migrated into the vault."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ag-prune-secret-ws", default_workflow_key=_WORKFLOW_KEY)
+    workspace = queries.create_workspace("ag-prune-secret-ws")
     _publish_revision(queries, workspace["id"])
     marker = {"secret_ref": "node:agent_nodes_flow:review_script:token"}
 
@@ -244,8 +244,8 @@ def test_agent_publish_prune_scopes_to_referencing_workspaces_only(tmp_path: Pat
 
     # Workspace A routes review_script agents; workspace B's workflow has no
     # agent node for the capability at all (only a code node).
-    ws_a = queries.create_workspace("ag-prune-scope-a", default_workflow_key=_WORKFLOW_KEY)
-    ws_b = queries.create_workspace("ag-prune-scope-b", default_workflow_key="other_flow")
+    ws_a = queries.create_workspace("ag-prune-scope-a")
+    ws_b = queries.create_workspace("ag-prune-scope-b")
     _publish_revision(queries, ws_a["id"])
     WorkflowRevisionService(queries).publish_workspace_revision(
         ws_b["id"],
@@ -281,7 +281,7 @@ def test_agent_publish_stays_green_when_prune_fails(
     the overrides exactly as they were (intake keeps failing for that
     workspace until the next publish retries, which is the pre-fix state)."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ag-prune-fail-ws", default_workflow_key=_WORKFLOW_KEY)
+    workspace = queries.create_workspace("ag-prune-fail-ws")
     _publish_revision(queries, workspace["id"])
     _publish_agent(queries, workspace["id"], _agent_with_schema({"old_key": {"type": "integer"}}))
     stale = {_WORKFLOW_KEY: {"review_script": {"old_key": 5}}}
@@ -311,7 +311,7 @@ def test_agent_publish_stays_green_when_prune_fails(
 def test_agent_publish_without_overrides_is_a_noop_prune(tmp_path: Path) -> None:
     """No stored overrides → the publish writes no workspace row at all."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ag-prune-noop-ws", default_workflow_key=_WORKFLOW_KEY)
+    workspace = queries.create_workspace("ag-prune-noop-ws")
     _publish_revision(queries, workspace["id"])
 
     _publish_agent(queries, workspace["id"], _agent_with_schema({"old_key": {"type": "integer"}}))
@@ -324,7 +324,7 @@ def test_agent_rollback_prunes_overrides_too(tmp_path: Path) -> None:
     staleness applies, so the same post-commit prune runs: rolling back to
     the renamed version prunes the stale key the rollback target dropped."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ag-prune-rollback-ws", default_workflow_key=_WORKFLOW_KEY)
+    workspace = queries.create_workspace("ag-prune-rollback-ws")
     _publish_revision(queries, workspace["id"])
 
     service = _service(queries, workspace["id"])

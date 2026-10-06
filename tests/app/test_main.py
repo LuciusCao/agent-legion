@@ -132,6 +132,26 @@ def test_spa_catch_all_serves_static_files_and_fallback(tmp_path, monkeypatch):
         assert mounted.text == "console.log('main')"
 
 
+def test_spa_catch_all_containment_falls_back_to_index(tmp_path, monkeypatch):
+    """SECURITY-PATH-002: links leaving dist fall back to index; in-dist links still serve."""
+    from server.app import main
+
+    root_dir, data_dir = setup_spa_app(tmp_path, monkeypatch)
+    frontend_dist = root_dir / "frontend" / "dist"
+    (frontend_dist / "assets").mkdir(parents=True)
+    (frontend_dist / "index.html").write_text("<div>spa-index</div>", encoding="utf-8")
+    (frontend_dist / "vite.svg").write_text("<svg/>", encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside", encoding="utf-8")
+    (frontend_dist / "leak.txt").symlink_to(outside)
+    (frontend_dist / "alias.svg").symlink_to(frontend_dist / "vite.svg")
+
+    app = main.create_app(data_dir=data_dir, start_worker=False)
+    with TestClient(app) as c:
+        assert c.get("/leak.txt").text == "<div>spa-index</div>"
+        assert c.get("/alias.svg").text == "<svg/>"
+
+
 def test_spa_cache_headers(tmp_path, monkeypatch):
     from server.app import main
 

@@ -26,7 +26,7 @@ DEFINITION_V2 = AgentDefinition(
 def workspace_id(job_db) -> str:
     # A fresh workspace per test: capability-uniqueness checks must only see
     # the Agents this test publishes (catalogs are workspace-scoped, v46).
-    return job_db.create_workspace("Agent Service WS", default_workflow_key="demo_workflow")["id"]
+    return job_db.create_workspace("Agent Service WS")["id"]
 
 
 @pytest.fixture
@@ -299,7 +299,7 @@ def test_db_index_rejects_second_published_capability(service, job_db, workspace
         )
 
     # 另一个 workspace 的同 capability published 不撞索引（per-workspace 唯一）。
-    other_ws = job_db.create_workspace("Other WS", default_workflow_key="demo_workflow")["id"]
+    other_ws = job_db.create_workspace("Other WS")["id"]
     with job_db.connect() as conn:
         conn.execute(
             "insert into versioned_entities("

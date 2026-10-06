@@ -5,12 +5,10 @@ from tests.helpers import publish_legacy_intake_revision
 from tests.helpers.auth import authenticate_client
 
 
-def _create_workspace(
-    client, name="default", default_workflow_key="education_video_problems_generation"
-):
-    workspace_id = client.post(
-        "/api/workspaces", json={"id": default_workflow_key, "name": name}
-    ).json()["workspace"]["id"]
+def _create_workspace(client, name="default", workspace_key="education_video_problems_generation"):
+    workspace_id = client.post("/api/workspaces", json={"id": workspace_key, "name": name}).json()[
+        "workspace"
+    ]["id"]
     # The demo workflow no longer declares intake modes (#154); these tests
     # post job-batches, so publish the legacy-intake variant.
     publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
@@ -28,7 +26,6 @@ def test_create_question_jobs_when_enabled(tmp_path):
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q001", "Q002"],
             },
@@ -61,7 +58,6 @@ def test_async_batch_returns_queued_and_consumes_in_chunks(tmp_path, monkeypatch
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q001", "Q002", "Q003"],
                 "async_processing": True,
@@ -110,7 +106,6 @@ def test_async_batch_claim_is_atomic_across_consumers(tmp_path, monkeypatch):
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q001"],
                 "async_processing": True,
@@ -135,7 +130,6 @@ def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q001", " Q002 ", "Q001", ""],
             },
@@ -167,7 +161,6 @@ def test_create_workspace_job_batch_from_direct_ids_uses_opaque_title(tmp_path):
         response = c.post(
             f"/api/workspaces/{workspace['id']}/job-batches",
             json={
-                "workflow_key": "direct_id_batch",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q001", "Q002"],
             },
@@ -198,7 +191,6 @@ def test_create_workspace_job_batch_rejects_empty_ids(tmp_path):
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": [" ", ""],
             },
@@ -213,7 +205,6 @@ def test_direct_ids_batch_creates_one_job_per_value(client):
     response = client.post(
         f"/api/workspaces/{ws_id}/job-batches",
         json={
-            "workflow_key": "education_video_problems_generation",
             "source_kind": "direct_ids",
             "knowledge_point_ids": ["Q1", "Q2", "Q1"],
         },
@@ -224,21 +215,16 @@ def test_direct_ids_batch_creates_one_job_per_value(client):
     assert body["created_count"] == 2
     assert {job["source_id"] for job in body["jobs"]} == {"Q1", "Q2"}
     assert all(job["workspace_id"] == ws_id for job in body["jobs"])
-    # #211 M2 + #467 A3：workflow_key shim 与行物化移到读取路径（list_jobs
-    # 的 summary 投影仍带 deprecated workflow_key 字段）。
+    # #211 M3：job summary 不再携带 workflow_key（workspace_id 即 key）。
     jobs_response = client.get(f"/api/workspaces/{ws_id}/jobs")
     assert jobs_response.status_code == 200
     listed = jobs_response.json()["jobs"]
     assert len(listed) == 2
-    assert all(job["workflow_key"] == ws_id for job in listed)
+    assert all(job["workspace_id"] == ws_id and "workflow_key" not in job for job in listed)
 
 
-def test_workspace_job_batch_without_workflow_key_defaults_to_workspace_id(client):
-    """#211 Phase 2 第二批：缺省 workflow_key 由服务端从 path 推导。
-
-    契约侧 workflow_key 降 optional；缺省与显式传（值=workspace id）产生
-    完全相同的 intake 结果（同 run、同 job 集合）。
-    """
+def test_workspace_job_batch_needs_no_workflow_key(client):
+    """#211 M3：请求不再携带 workflow_key——path 的 workspace id 即 workflow。"""
     ws_id = _create_workspace(client)
     absent = client.post(
         f"/api/workspaces/{ws_id}/job-batches",
@@ -252,27 +238,26 @@ def test_workspace_job_batch_without_workflow_key_defaults_to_workspace_id(clien
     body = absent.json()
     assert body["created_count"] == 1
     assert all(job["workspace_id"] == ws_id for job in body["jobs"])
-    listed = client.get(f"/api/workspaces/{ws_id}/jobs").json()["jobs"]
-    assert all(job["workflow_key"] == ws_id for job in listed)
+    assert "workflow_key" not in body["batch"]
 
 
-def test_workspace_job_batch_explicit_workflow_key_still_accepted(client):
-    """兼容窗口：显式传 workflow_key（=workspace id）照旧工作。"""
+def test_workspace_job_batch_stray_workflow_key_cannot_steer_rows(client):
+    """#211 M3：JobBatchRequest 是 extra="allow"（intake 输入字段透传），
+    旧客户端残留的 workflow_key 会被 path 的 workspace id 覆盖，不会落成别的
+    key（取代原来的 400 守卫）。"""
     ws_id = _create_workspace(client)
-    explicit = client.post(
+    stray = client.post(
         f"/api/workspaces/{ws_id}/job-batches",
         json={
-            "workflow_key": ws_id,
+            "workflow_key": "other_flow",
             "source_kind": "direct_ids",
             "knowledge_point_ids": ["Q1"],
         },
     )
 
-    assert explicit.status_code == 200, explicit.text
-    assert explicit.json()["created_count"] == 1
-    assert all(job["workspace_id"] == ws_id for job in explicit.json()["jobs"])
-    listed = client.get(f"/api/workspaces/{ws_id}/jobs").json()["jobs"]
-    assert all(job["workflow_key"] == ws_id for job in listed)
+    assert stray.status_code == 200, stray.text
+    assert stray.json()["created_count"] == 1
+    assert all(job["workspace_id"] == ws_id for job in stray.json()["jobs"])
 
 
 def test_async_batch_resubmit_after_job_deletion_requeues_and_rebuilds(tmp_path, monkeypatch):
@@ -291,7 +276,6 @@ def test_async_batch_resubmit_after_job_deletion_requeues_and_rebuilds(tmp_path,
         lambda self: False,
     )
     payload = {
-        "workflow_key": "education_video_problems_generation",
         "source_kind": "direct_ids",
         "knowledge_point_ids": ["Q001", "Q002"],
         "knowledge_codes": [],
@@ -358,7 +342,6 @@ def test_async_batch_resubmit_without_deletion_keeps_idempotency(tmp_path, monke
         lambda self: False,
     )
     payload = {
-        "workflow_key": "education_video_problems_generation",
         "source_kind": "direct_ids",
         "knowledge_point_ids": ["Q001", "Q002"],
         "knowledge_codes": [],
@@ -421,7 +404,6 @@ def test_async_batch_chunk_failure_is_recorded_and_remaining_chunks_continue(tmp
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "education_video_problems_generation",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["Q001", "Q002", "Q003"],
                 "async_processing": True,
@@ -442,17 +424,3 @@ def test_async_batch_chunk_failure_is_recorded_and_remaining_chunks_continue(tmp
         assert "resolver boom" in completed["error_message"]
         jobs = app.state.job_db.list_jobs(workspace_id=ws_id)
         assert sorted(job["source_id"] for job in jobs) == ["Q001", "Q003"]
-
-
-def test_create_job_batch_rejects_mismatched_workflow_key(client, job_db):
-    """Codex P1 on #307 (guard parity with runs): a mismatched explicit key
-    would flow verbatim into jobs rows — rejected before the service call."""
-    job_db.create_workspace("ws-batch-key", default_workflow_key="ws-batch-key")
-
-    response = client.post(
-        "/api/workspaces/ws-batch-key/job-batches",
-        json={"workflow_key": "other_flow", "source_kind": "test", "inputs": []},
-    )
-
-    assert response.status_code == 400, response.text
-    assert "workflow_key must equal the workspace id" in response.json()["detail"]

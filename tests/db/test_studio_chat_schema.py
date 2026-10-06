@@ -104,7 +104,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
         conn.execute(
             # v62 invariant: id == key (the migration renames mismatched ids,
             # so seed rows that already satisfy it keep their ids stable).
-            "insert into workspaces(id, name, default_workflow_key) values ('demo_workflow', 'legacy-ws', 'demo_workflow')"
+            "insert into workspaces(id, name) values ('demo_workflow', 'legacy-ws')"
         )
 
     init_db(TEST_DATABASE_URL)

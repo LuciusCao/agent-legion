@@ -80,9 +80,7 @@ def _direct_session(job_db, settings, token: str):
     """Idle session row + registered runtime holding the given raw token."""
     bus = RecordingBus()
     service = StudioChatService(job_db, settings, bus)
-    workspace_id = job_db.create_workspace(default_workflow_key="demo_workflow", name="Chat WS")[
-        "id"
-    ]
+    workspace_id = job_db.create_workspace(name="Chat WS")["id"]
     user_id = str(job_db.create_user("keepalive-user", password_hash=None)["id"])
     session_id = job_db.create_studio_chat_session(workspace_id, user_id, "direct-agent")
     job_db.update_studio_chat_session(session_id, status="running")
@@ -573,9 +571,7 @@ def test_live_agent_tool_call_keeps_token_alive_end_to_end(job_db, settings, tmp
             ],
         }
     )
-    workspace_id = job_db.create_workspace(default_workflow_key="demo_workflow", name="Chat WS")[
-        "id"
-    ]
+    workspace_id = job_db.create_workspace(name="Chat WS")["id"]
     user_id = str(job_db.create_user("e2e-user", password_hash=None)["id"])
     try:
         session = service.create_session(workspace_id, user_id, "fake-agent")

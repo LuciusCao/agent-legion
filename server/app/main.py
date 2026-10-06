@@ -31,6 +31,7 @@ from server.app.mcp_server.http_app import (
 )
 from server.app.routes import RouterDeps, create_router
 from server.app.routes.auth import create_auth_router
+from server.app.routes.job_http_handlers import register_job_http_exception_handlers
 from server.app.routes.quality_deps import build_quality_loop
 from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.agent_catalog_projection import AgentCatalogService
@@ -94,7 +95,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # agent templates instantiated seed-if-absent at creation time
     # (WorkflowRevisionService.ensure_active_revision). The workflow catalog
     # is retired (schema v50, #112): a workflow is the DAG inside one
-    # workspace, keyed by workspaces.default_workflow_key as plain text.
+    # workspace, identified by the workspace id (#211 M3).
     # The global skill source registry is retired (#322): skill locations
     # derive from the skills root + key, unpinned node refs follow the repo's
     # live HEAD. Delete the persisted skill_sources document (idempotent
@@ -265,6 +266,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
 
     app = FastAPI(title="Agent Legion", lifespan=lifespan)
     add_http_middleware(app, settings)
+    register_job_http_exception_handlers(app)
     # #915: record the serving socket address — the default Studio MCP
     # callback base when the registry api_base is unconfigured.
     app.add_middleware(ServingAddressMiddleware)

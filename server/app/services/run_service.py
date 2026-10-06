@@ -33,7 +33,7 @@ from server.app.db.rowmap import iso_optional, parse_object
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake_workspace import get_workspace
 from server.app.services.node_code_resolution import freeze_node_code_versions
@@ -63,7 +63,6 @@ def _run_record(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(row["id"]),
         "workspace_id": str(row["workspace_id"]),
-        "workflow_key": str(row["workspace_id"]),
         "source_kind": str(row["source_kind"]),
         "status": str(row["status"]),
         "created_count": int(row["created_count"]),
@@ -139,7 +138,7 @@ class RunService:
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
-                published_agent_definitions(self.job_db, workspace_id),
+                legacy_agent_catalog(self.job_db, workspace_id),
                 workspace,
             )
         except ValueError as exc:

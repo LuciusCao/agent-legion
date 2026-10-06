@@ -1,7 +1,7 @@
 """Workspace-driven worker scan list (schema v50, issue #112).
 
 The scan list is built from the workspaces table: one entry per workspace
-with a non-empty default_workflow_key, carrying the workspace's ACTIVE
+(every workspace — its id is the workflow key), carrying the workspace's ACTIVE
 revision definition as the job fallback. reload_scan_entries picks up new
 workspaces without a restart.
 """
@@ -20,22 +20,20 @@ from tests.workers.helpers import RecordingExecutor, _make_worker
 
 
 def test_scan_entries_cover_workspaces_and_active_revisions(settings, job_db) -> None:
-    published = job_db.create_workspace(
-        "scan-a", default_workflow_key="education_video_problems_generation"
-    )
+    published = job_db.create_workspace("scan-a")
     publish_builtin_revision(job_db, published["id"])
-    unpublished = job_db.create_workspace("scan-b", default_workflow_key="flow_b")
-    job_db.create_workspace("scan-blank", default_workflow_key="")
+    unpublished = job_db.create_workspace("scan-b")
 
     entries = load_workflow_scan_entries(job_db)
 
+    # #211 M3: every workspace is scanned and its id is the workflow key.
     by_workspace = {workspace_id: (key, definition) for workspace_id, key, definition in entries}
     assert set(by_workspace) == {str(published["id"]), str(unpublished["id"])}
     key, definition = by_workspace[str(published["id"])]
-    assert key == "education_video_problems_generation"
-    assert definition is not None and definition.key == "education_video_problems_generation"
+    assert key == str(published["id"])
+    assert definition is not None
     key_b, definition_b = by_workspace[str(unpublished["id"])]
-    assert key_b == "flow_b"
+    assert key_b == str(unpublished["id"])
     assert definition_b is None
 
 
@@ -45,16 +43,14 @@ def test_reload_scan_entries_picks_up_new_workspaces(tmp_path: Path, settings, j
         worker.reload_scan_entries()
         assert worker.state.scan_entries == []
 
-        workspace = job_db.create_workspace(
-            "scan-hot", default_workflow_key="education_video_problems_generation"
-        )
+        workspace = job_db.create_workspace("scan-hot")
         publish_builtin_revision(job_db, workspace["id"])
 
         worker.reload_scan_entries()
         by_workspace = {ws: (key, d) for ws, key, d in worker.state.scan_entries}
         assert str(workspace["id"]) in by_workspace
         key, definition = by_workspace[str(workspace["id"])]
-        assert key == "education_video_problems_generation"
+        assert key == str(workspace["id"])
         assert definition is not None
     finally:
         worker.stop()
@@ -63,9 +59,7 @@ def test_reload_scan_entries_picks_up_new_workspaces(tmp_path: Path, settings, j
 def test_reload_scan_entries_keeps_previous_snapshot_on_failure(
     tmp_path: Path, settings, job_db, monkeypatch
 ) -> None:
-    workspace = job_db.create_workspace(
-        "scan-stable", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("scan-stable")
     publish_builtin_revision(job_db, workspace["id"])
     worker = _make_worker(tmp_path, TEST_DATABASE_URL, RecordingExecutor("local-default"), [])
     try:
@@ -91,7 +85,7 @@ def test_scan_entries_contain_unparsable_active_revision(settings, job_db, caplo
     expected business failure — the workspace still gets a scan entry with
     no fallback definition (WARNING names the parse error), instead of the
     whole scan dying."""
-    workspace = job_db.create_workspace("scan-bad", default_workflow_key="broken_flow")
+    workspace = job_db.create_workspace("scan-bad")
     job_db.create_workflow_revision(
         revision_id=f"rev-{uuid.uuid4().hex[:8]}",
         workspace_id=str(workspace["id"]),
@@ -110,10 +104,10 @@ def test_scan_entries_contain_unparsable_active_revision(settings, job_db, caplo
     by_workspace = {ws: (key, definition) for ws, key, definition in entries}
     assert str(workspace["id"]) in by_workspace
     key, definition = by_workspace[str(workspace["id"])]
-    assert key == "broken_flow"
+    assert key == str(workspace["id"])
     assert definition is None
     assert any(
-        "failed to parse" in rec.message and "broken_flow" in rec.message for rec in caplog.records
+        "failed to parse" in rec.message and "scan-bad" in rec.message for rec in caplog.records
     )
 
 
@@ -123,7 +117,7 @@ def test_scan_entries_contain_malformed_json_revision(settings, job_db, caplog) 
     one malformed definition_json row kill load_workflow_scan_entries, and
     with it worker startup and scheduling for every workspace. Malformed JSON
     must hit the same per-workspace degradation as schema violations."""
-    workspace = job_db.create_workspace("scan-badjson", default_workflow_key="bad_json_flow")
+    workspace = job_db.create_workspace("scan-badjson")
     job_db.create_workflow_revision(
         revision_id=f"rev-{uuid.uuid4().hex[:8]}",
         workspace_id=str(workspace["id"]),
@@ -141,11 +135,10 @@ def test_scan_entries_contain_malformed_json_revision(settings, job_db, caplog) 
     by_workspace = {ws: (key, definition) for ws, key, definition in entries}
     assert str(workspace["id"]) in by_workspace
     key, definition = by_workspace[str(workspace["id"])]
-    assert key == "bad_json_flow"
+    assert key == str(workspace["id"])
     assert definition is None
     assert any(
-        "failed to parse" in rec.message and "bad_json_flow" in rec.message
-        for rec in caplog.records
+        "failed to parse" in rec.message and "scan-badjson" in rec.message for rec in caplog.records
     )
 
 
@@ -153,7 +146,7 @@ def test_scan_entries_propagate_programming_errors(settings, job_db, monkeypatch
     """#204 layering guard: only the definition-validation business failure
     is contained. A genuine programming error while parsing a revision must
     propagate instead of silently dropping the workspace's fallback."""
-    workspace = job_db.create_workspace("scan-err", default_workflow_key="error_flow")
+    workspace = job_db.create_workspace("scan-err")
     job_db.create_workflow_revision(
         revision_id=f"rev-{uuid.uuid4().hex[:8]}",
         workspace_id=str(workspace["id"]),

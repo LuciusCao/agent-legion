@@ -41,7 +41,7 @@ def _seed_job(job_db, workspace_id: str = "ws-a") -> dict:
     declared-outputs gate (#703 codex round 4 P2-1) reads that snapshot."""
     from tests.helpers import publish_legacy_intake_revision
 
-    job_db.create_workspace(workspace_id, default_workflow_key=workspace_id)
+    job_db.create_workspace(workspace_id)
     revision = publish_legacy_intake_revision(job_db, workspace_id)
     batch = job_db.create_run(
         workspace_id,
@@ -246,7 +246,7 @@ def _seed_job_with_subpath_output(job_db, workspace_id: str = "ws-a") -> dict:
     from server.app.services.workflow_revisions import WorkflowRevisionService
     from tests.helpers import load_demo_legacy_intake_definition
 
-    job_db.create_workspace(workspace_id, default_workflow_key=workspace_id)
+    job_db.create_workspace(workspace_id)
     definition = load_demo_legacy_intake_definition()
     nodes = dict(definition.nodes)
     nodes["publish_content"] = dataclasses.replace(
@@ -308,7 +308,7 @@ def _seed_job_with_deep_output(job_db, workspace_id: str = "ws-a") -> dict:
     from server.app.services.workflow_revisions import WorkflowRevisionService
     from tests.helpers import load_demo_legacy_intake_definition
 
-    job_db.create_workspace(workspace_id, default_workflow_key=workspace_id)
+    job_db.create_workspace(workspace_id)
     definition = load_demo_legacy_intake_definition()
     nodes = dict(definition.nodes)
     nodes["publish_content"] = dataclasses.replace(

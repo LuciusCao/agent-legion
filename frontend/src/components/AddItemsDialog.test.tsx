@@ -53,7 +53,6 @@ function mockWorkspace() {
               workspace: {
                 id: 'ws1',
                 name: 'demo',
-                default_workflow_key: 'demo_workflow',
               },
             }
       ) as never
@@ -178,7 +177,6 @@ describe('AddItemsDialog', () => {
 
     await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
     expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
-      workflow_key: 'demo_workflow',
       items: [
         { type: 'material', material_id: 'm1' },
         { type: 'ref', connection_key: 'cms', external_id: 'q1' },
@@ -302,7 +300,6 @@ describe('AddItemsDialog', () => {
 
     await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
     expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
-      workflow_key: 'demo_workflow',
       items: [
         { type: 'material', material_id: 'm-up' },
         { type: 'material', material_id: 'm-old' },
@@ -440,7 +437,6 @@ describe('AddItemsDialog', () => {
 
     await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
     expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
-      workflow_key: 'demo_workflow',
       items: [{ type: 'material', material_id: 'm1' }],
     })
   })
@@ -483,7 +479,6 @@ describe('AddItemsDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
     await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
     expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
-      workflow_key: 'demo_workflow',
       items: [{ type: 'bundle', bundle_id: 'b1' }],
     })
     await waitFor(() => expect(onClose).toHaveBeenCalled())
@@ -648,7 +643,6 @@ describe('AddItemsDialog', () => {
 
     await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
     expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
-      workflow_key: 'demo_workflow',
       items: [
         {
           type: 'text',
@@ -688,7 +682,6 @@ describe('AddItemsDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
     await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
     expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
-      workflow_key: 'demo_workflow',
       items: [{ type: 'text', content: '短需求', filename: '需求.md' }],
     })
   })
@@ -733,7 +726,6 @@ describe('AddItemsDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建运行' }))
     await waitFor(() => expect(mockCreateRun).toHaveBeenCalledOnce())
     expect(mockCreateRun).toHaveBeenCalledWith('ws1', {
-      workflow_key: 'demo_workflow',
       items: [
         { type: 'text', content: `${template}告别`, filename: '创作需求.md' },
       ],

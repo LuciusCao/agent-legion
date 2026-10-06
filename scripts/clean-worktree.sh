@@ -14,6 +14,8 @@
 #   - 名字校验只允许 worktree 目录名字符集，派生 bucket 一律带
 #     agent-legion- 前缀，结构上碰不到共享/prod bucket；
 #   - 拒绝清理脚本当前所在的 worktree 自身与 prod（生产 worktree 禁止动）；
+#   - --delete-remote-branch 拒绝删除长期分支 main/master/develop/prod 与
+#     发布线 release/*（与 pre-push 的 protected 分支口径对齐，#930）；
 #   - bucket 删除前列出对象数量与总大小，无 --yes 时逐个打印摘要并交互确认；
 #   - endpoint 不可达/未配置 S3 时 warning 跳过（对齐 init-worktree.sh 的
 #     降级语义），不影响其余步骤。
@@ -40,7 +42,10 @@ for arg in "$@"; do
 done
 
 # 名字校验：只允许 worktree 目录名的合法字符集（与 drop-worktree-db.sh 同款）。
-if [[ ! "$WT" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+# 允许 '.'（release-0.7.8 这类集成分支 worktree，#587）：首字符必须是字母
+# 数字且不允许 '/'，'.'/'..' 与任何路径分隔形态结构上进不来；派生 DB/bucket
+# 名把 '.' 归并为 '_'/'-'，仍落在派生前缀护栏内。
+if [[ ! "$WT" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
     echo "错误: 非法 worktree 名 '$WT'" >&2
     exit 1
 fi
@@ -64,7 +69,7 @@ fi
 
 # 主仓库根 = worktree list 第一个条目；目标 worktree 一律是它的平级子目录
 # .worktrees/<name>（AGENTS.md §1 的嵌套防护约定）。
-MAIN="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+MAIN="$(git worktree list --porcelain | awk '/^worktree /&&!seen{print $2; seen=1}')"
 TARGET="$MAIN/.worktrees/$WT"
 
 # 护栏：拒绝清理调用方 shell 的 cwd 所在的 worktree。agent 常在目标 worktree
@@ -97,6 +102,14 @@ fi
 
 # 2. 本地分支：git branch -d 只允许删已合并分支，未合并报错时提示但不中断
 #    后续 DB/bucket 清理。远端分支默认只打印提示命令。
+# 远端删除护栏（#930）：长期分支与发布线一律拒删，即便显式传了
+# --delete-remote-branch。
+is_protected_remote_branch() {
+    case "$1" in
+        main | master | develop | prod | release/*) return 0 ;;
+    esac
+    return 1
+}
 if [[ -n "$BRANCH" ]]; then
     if ! git show-ref --verify --quiet "refs/heads/$BRANCH"; then
         echo "本地分支不存在（跳过）: $BRANCH"
@@ -107,7 +120,9 @@ if [[ -n "$BRANCH" ]]; then
     else
         echo "提示: 本地分支 $BRANCH 未合并，git branch -d 拒绝删除，已跳过" >&2
     fi
-    if [[ -n "$DELETE_REMOTE" ]]; then
+    if is_protected_remote_branch "$BRANCH"; then
+        echo "提示: $BRANCH 是受保护分支（main/master/develop/prod/release/*），不删除远端分支" >&2
+    elif [[ -n "$DELETE_REMOTE" ]]; then
         git push origin --delete "$BRANCH" && echo "已删除远端分支: origin/$BRANCH"
     else
         echo "提示: 如需删除远端分支，执行 git push origin --delete $BRANCH"
@@ -248,7 +263,7 @@ else
     if [[ "$rc" -eq 3 || "$rc" -eq 4 ]]; then
         exit 1
     fi
-    echo "提示: S3 endpoint 不可达或清理失败（exit=$rc），跳过 bucket 清理。" >&2
+    echo "提示: S3 endpoint 不可达或清理失败（exit=${rc}），跳过 bucket 清理。" >&2
     echo "      待共享对象存储（SeaweedFS/RustFS）可达后可重跑本脚本补齐。" >&2
 fi
 

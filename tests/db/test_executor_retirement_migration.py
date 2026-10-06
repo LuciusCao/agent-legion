@@ -67,8 +67,7 @@ def _seed_executor(
 
 def _seed_revision(conn, workspace_id: str, nodes: dict) -> str:
     conn.execute(
-        "insert into workspaces(id, name, default_workflow_key)"
-        " values (%s, %s, 'wf') on conflict do nothing",
+        "insert into workspaces(id, name) values (%s, %s) on conflict do nothing",
         (workspace_id, workspace_id),
     )
     payload = {
@@ -202,10 +201,7 @@ def test_harvest_skips_agent_routed_nodes() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         _pre_v47_surface(conn)
         _seed_executor(conn, {"review_keywords": {"config_schema": _FETCH_SCHEMA}})
-        conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('ws-agent', 'ws-agent', 'wf')"
-        )
+        conn.execute("insert into workspaces(id, name) values ('ws-agent', 'ws-agent')")
         conn.execute(
             "insert into versioned_entities("
             "id, entity_type, workspace_id, entity_key, version, status,"

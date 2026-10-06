@@ -57,8 +57,7 @@ def _make_db(tmp_path: Path) -> JobQueries:
 def _seed_workspace(db: JobQueries, workspace_id: str) -> None:
     with db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, %s, 'demo_workflow') on conflict (id) do nothing",
+            "insert into workspaces(id, name) values (%s, %s) on conflict (id) do nothing",
             (workspace_id, workspace_id),
         )
         conn.execute(

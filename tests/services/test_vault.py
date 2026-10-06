@@ -39,7 +39,7 @@ def vault(job_db, settings, vault_key):
 
 def test_set_get_round_trip(vault, job_db):
     workspace = job_db.create_workspace(
-        default_workflow_key="education_video_problems_generation", name="vault-roundtrip"
+        name="vault-roundtrip", workspace_id="education_video_problems_generation"
     )
     metadata = vault.set(workspace["id"], "api-token", PLAINTEXT)
 
@@ -51,7 +51,7 @@ def test_set_get_round_trip(vault, job_db):
 
 def test_set_overwrites_existing(vault, job_db):
     workspace = job_db.create_workspace(
-        default_workflow_key="education_video_problems_generation", name="vault-overwrite"
+        name="vault-overwrite", workspace_id="education_video_problems_generation"
     )
     vault.set(workspace["id"], "api-token", "first")
     vault.set(workspace["id"], "api-token", "second")
@@ -60,15 +60,13 @@ def test_set_overwrites_existing(vault, job_db):
 
 def test_get_missing_returns_none(vault, job_db):
     workspace = job_db.create_workspace(
-        default_workflow_key="education_video_problems_generation", name="vault-missing"
+        name="vault-missing", workspace_id="education_video_problems_generation"
     )
     assert vault.get(workspace["id"], "nope") is None
 
 
 def test_list_returns_metadata_only(vault, job_db):
-    workspace = job_db.create_workspace(
-        default_workflow_key="education_video_problems_generation", name="vault-list"
-    )
+    workspace = job_db.create_workspace(name="vault-list")
     vault.set(workspace["id"], "b-token", "value-b")
     vault.set(workspace["id"], "a-token", "value-a")
 
@@ -82,9 +80,7 @@ def test_list_returns_metadata_only(vault, job_db):
 
 
 def test_delete_removes_entry(vault, job_db):
-    workspace = job_db.create_workspace(
-        default_workflow_key="education_video_problems_generation", name="vault-delete"
-    )
+    workspace = job_db.create_workspace(name="vault-delete")
     vault.set(workspace["id"], "api-token", PLAINTEXT)
     vault.delete(workspace["id"], "api-token")
     assert vault.get(workspace["id"], "api-token") is None
@@ -92,9 +88,7 @@ def test_delete_removes_entry(vault, job_db):
 
 
 def test_ciphertext_is_not_plaintext(vault, job_db):
-    workspace = job_db.create_workspace(
-        default_workflow_key="education_video_problems_generation", name="vault-cipher"
-    )
+    workspace = job_db.create_workspace(name="vault-cipher")
     vault.set(workspace["id"], "api-token", PLAINTEXT)
     with job_db.connect() as conn:
         row = conn.execute(
@@ -109,9 +103,7 @@ def test_missing_master_key_blocks_writes_and_reads(job_db, settings, monkeypatc
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY", raising=False)
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
     vault = VaultService(job_db.dsn_identity, {})
-    workspace = job_db.create_workspace(
-        default_workflow_key="education_video_problems_generation", name="vault-no-key"
-    )
+    workspace = job_db.create_workspace(name="vault-no-key")
 
     with pytest.raises(VaultMasterKeyMissingError, match="AGENT_LEGION_VAULT_MASTER_KEY"):
         vault.set(workspace["id"], "api-token", PLAINTEXT)
@@ -126,9 +118,7 @@ def test_invalid_master_key_rejected(job_db, monkeypatch):
 
 
 def test_resolve_secret_refs_replaces_ref_and_passes_plaintext(vault, job_db):
-    workspace = job_db.create_workspace(
-        default_workflow_key="education_video_problems_generation", name="vault-resolve"
-    )
+    workspace = job_db.create_workspace(name="vault-resolve")
     name = node_secret_name("education_video_problems_generation", "fetch_items", "token")
     vault.set(workspace["id"], name, PLAINTEXT)
 
@@ -143,9 +133,7 @@ def test_resolve_secret_refs_replaces_ref_and_passes_plaintext(vault, job_db):
 
 
 def test_resolve_secret_refs_missing_entry_raises(vault, job_db):
-    workspace = job_db.create_workspace(
-        default_workflow_key="education_video_problems_generation", name="vault-resolve-missing"
-    )
+    workspace = job_db.create_workspace(name="vault-resolve-missing")
     with pytest.raises(VaultError, match="not found"):
         vault.resolve_secret_refs({"token": {"secret_ref": "gone"}}, workspace["id"])
 
@@ -154,9 +142,7 @@ def test_resolve_secret_refs_without_master_key_raises(job_db, monkeypatch):
     # Key removed after the secret was written: resolution must fail loudly.
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
-    workspace = job_db.create_workspace(
-        default_workflow_key="education_video_problems_generation", name="vault-no-key-resolve"
-    )
+    workspace = job_db.create_workspace(name="vault-no-key-resolve")
     VaultService(job_db.dsn_identity, {}).set(workspace["id"], "api-token", PLAINTEXT)
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY", raising=False)
 
@@ -168,7 +154,7 @@ def test_resolve_secret_refs_without_master_key_raises(job_db, monkeypatch):
 
 def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
     workspace = job_db.create_workspace(
-        "vault-freeze", default_workflow_key="education_video_problems_generation"
+        "vault-freeze", workspace_id="education_video_problems_generation"
     )
     seed_demo_workspace_node_codes(settings, workspace["id"])
     # The demo workflow no longer declares intake modes (#154); this test

@@ -140,7 +140,7 @@ def test_revision_publish_blocks_behind_guard_lock(job_db) -> None:
     突变自检：摘掉 create_workflow_revision_with_projection 的取锁后 B 不再
     等待（同步点超时）——本用例变红。
     """
-    workspace = job_db.create_workspace("lockdom1", default_workflow_key="wf")
+    workspace = job_db.create_workspace("lockdom1")
     workspace_id = str(workspace["id"])
     _publish_revision(workspace_id, 1, "h1")
 
@@ -171,7 +171,7 @@ def test_guard_reread_waits_for_inflight_publish_and_sees_new_revision(job_db) -
     必须阻塞至 B 提交，随后读到新 revision——upgrade 不会 pin 到刚被取代
     的旧 revision。
     """
-    workspace = job_db.create_workspace("lockdom2", default_workflow_key="wf")
+    workspace = job_db.create_workspace("lockdom2")
     workspace_id = str(workspace["id"])
     _publish_revision(workspace_id, 1, "h1")
     queries_timed = JobQueries(TIMED_DATABASE_URL, job_db.jobs_dir)

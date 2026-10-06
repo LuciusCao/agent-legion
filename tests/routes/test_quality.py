@@ -16,7 +16,7 @@ BASE = f"/api/workspaces/{WORKSPACE}/quality"
 def _seed_runs() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow') on conflict do nothing",
+            "insert into workspaces(id, name) values (%s, %s) on conflict do nothing",
             (WORKSPACE, WORKSPACE),
         )
         for index, (status, node_key) in enumerate(
@@ -112,7 +112,7 @@ def test_label_latest_wins_and_stats(client):
 def test_stats_confusion_matrix(client):
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow') on conflict do nothing",
+            "insert into workspaces(id, name) values (%s, %s) on conflict do nothing",
             (WORKSPACE, WORKSPACE),
         )
         # (node_key, status, failure_detail): review pass ×2, review reject ×2,
@@ -192,7 +192,7 @@ def test_cross_workspace_batch_not_visible(client):
     batch = _create_batch(client)
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('ws-other', 'ws-other', 'demo_workflow')"
+            "insert into workspaces(id, name) values ('ws-other', 'ws-other')"
             " on conflict do nothing"
         )
     other = "/api/workspaces/ws-other/quality"
@@ -208,13 +208,9 @@ def test_anonymous_access_rejected(anon_client):
     assert response.status_code == 401
 
 
-def test_create_batch_without_workflow_key_defaults_to_workspace_id(client):
-    """#211 Phase 2 第二批：缺省 workflow_key 由服务端从 path 推导。
-
-    缺省（推导为 workspace id，即 v62 恒等值）命中 _seed_runs 的全部 3 行；
-    显式传恒等 key 是 no-op；显式传不匹配 key 在 Phase 3 读法绑定后是 400
-    （不匹配的 key 不可能存在于该 workspace，v62 绑定——不再静默收窄为 0 行）。
-    """
+def test_create_batch_ignores_retired_workflow_key(client):
+    """#211 M3: workflow_key left the sample-batch request and response; the
+    path workspace scopes the candidates and a stray value is ignored."""
     _seed_runs()
     absent = client.post(
         f"{BASE}/sample-batches",
@@ -222,29 +218,16 @@ def test_create_batch_without_workflow_key_defaults_to_workspace_id(client):
     )
     assert absent.status_code == 200, absent.text
     assert absent.json()["sampled_count"] == 3
-    assert absent.json()["workflow_key"] == WORKSPACE
+    assert "workflow_key" not in absent.json()
 
-    equal = client.post(
+    stray = client.post(
         f"{BASE}/sample-batches",
         json={
-            "name": "explicit-key",
-            "workflow_key": WORKSPACE,
-            "sample_size": 10,
-            "seed": "seed-explicit",
-        },
-    )
-    assert equal.status_code == 200, equal.text
-    assert equal.json()["sampled_count"] == 3
-    assert equal.json()["workflow_key"] == WORKSPACE
-
-    mismatched = client.post(
-        f"{BASE}/sample-batches",
-        json={
-            "name": "mismatched-key",
+            "name": "stray-key",
             "workflow_key": "legacy_wf_a",
             "sample_size": 10,
-            "seed": "seed-mismatched",
+            "seed": "seed-stray",
         },
     )
-    assert mismatched.status_code == 400, mismatched.text
-    assert "workflow_key must equal the workspace id" in mismatched.json()["detail"]
+    assert stray.status_code == 200, stray.text
+    assert stray.json()["sampled_count"] == 3

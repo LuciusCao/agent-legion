@@ -203,7 +203,7 @@ EOF
   务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
   会继续。
 - 当前 schema 版本以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准
-  （目前 v90）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
+  （目前 v92）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
   v55（`material_bundles`）、v56（`job_node_status_counts` 触发器维护的
   状态计数）、v57（`studio_chat_sessions.draft_yaml`）、v58（scoped worker
   token——撤销存量全局 register token，行为变更）、v61（Studio workflow
@@ -223,7 +223,10 @@ EOF
   开关列，主控制台据此区分「在线·未领取」）、v88（job 节点状态计数改为
   v82 同款 try-lock delta fold，#690）、v89（`studio_chat_sessions.deleted_at`
   会话软删列，#872）、v90（`studio_chat_sessions.archived_at` 会话
-  归档列，#924）。v59（`jobs(run_id)` 索引）与
+  归档列，#924）、v91（删除冗余的 workspace workflow key 列与质量抽样
+  批次的 key 镜像列——workspace id 即 workflow key，#211 M3；有守卫、幂等）、v92（`agent_execution_requests` 的 `profile_source` /
+  `runtime` / `requires_labels_json` 执行档案来源列，自含 agent 节点双读，
+  #933）。v59（`jobs(run_id)` 索引）与
   v60（register token ids 列）与本部署面无直接关系。
   迁移明细以 `server/app/db/migration_chain.py`（v87 起在
   `migration_chain_recent.py`）为准。
@@ -350,6 +353,18 @@ docker exec <seaweedfs 容器> sh -c \
 或数据已增长到 100 × 2GiB ≈ 200GiB 量级），master 会停止分配新
 volume，所有新写入返回 no free volumes——上限必须始终大于当前 volume
 数。`volume.deleteEmpty` 对非空 volume 无效，不能把「超上限」状态救回。
+
+**水位观察（日常运维项，#746）**：volume 数随 bucket/collection 增长单调
+累积，删数据不会减少 volume 个数，打满只是时间问题——一旦打满，新
+bucket（新实例、新派生 worktree）写不进去，已有 bucket 不受影响，容易
+被误判为个别环境故障。把上面的 `volume.list`（或 master UI 的 volume
+总数）列入例行巡检：对比「已有 volume 数」与「当前生效的 `-volume.max`」
+（`docker inspect` 看容器实际命令行，而不是只看 compose 文件），已用接近
+上限（例如过半后增长明显、或剩余槽位不足几批 collection 预分配）就提前
+调大 `AGENT_LEGION_SEAWEEDFS_VOLUME_MAX` 并重建容器——接近上限前扩容只是
+改一个值，打满后才处理就是写入路径整体报错的救火。上限务必通过
+`deploy/.env` 持久化，不要只靠临时 compose override：不带 override 重建
+容器即回到旧上限。
 
 **排查**：master UI（`:9333`）看 volume 总数与已用比例；PutObject 503 且
 master 日志出现 `no free volumes` 即命中本问题。

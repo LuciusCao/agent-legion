@@ -7,9 +7,11 @@ from starlette.datastructures import Headers
 from starlette.middleware.gzip import IdentityResponder
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from server.app.http_csp import ContentSecurityPolicyMiddleware, object_store_connect_sources
 from server.app.http_gzip import SelectiveGZipResponder
 from server.app.http_request_id import RequestIdMiddleware
 from server.app.settings import Settings
+from server.app.storage.s3_settings import load_s3_settings
 
 
 class SelectiveGZipMiddleware(GZipMiddleware):
@@ -38,7 +40,7 @@ class SelectiveGZipMiddleware(GZipMiddleware):
 
 
 def add_http_middleware(app: FastAPI, settings: Settings) -> None:
-    """Register CORS and gzip middleware (last added runs outermost)."""
+    """Register CORS, gzip, CSP and request-id middleware (last added runs outermost)."""
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors.allow_origins),
@@ -50,6 +52,11 @@ def add_http_middleware(app: FastAPI, settings: Settings) -> None:
     # 9 for a few percent worse ratio. Compression runs synchronously on the
     # event loop, so the CPU saved here is loop latency for every SSE/WS peer.
     app.add_middleware(SelectiveGZipMiddleware, compresslevel=6)
+    # Document CSP for served HTML (#752); policy rationale in http_csp.py.
+    app.add_middleware(
+        ContentSecurityPolicyMiddleware,
+        connect_sources=object_store_connect_sources(load_s3_settings()),
+    )
     # Request-id correlation + slow-request logging (#273). Added last, so it
     # runs outermost: every response (CORS preflight included) carries the id,
     # and the slow-request timing covers the full app stack, not just the

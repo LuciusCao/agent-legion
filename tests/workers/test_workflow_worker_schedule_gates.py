@@ -26,7 +26,7 @@ def _agent_catalog():
     """The claim path resolves the published catalog from the DB now; stub it."""
     catalog = {"agent-x": MagicMock(config_schema={})}
     with patch(
-        "server.app.workflow_worker.agent_claim.resolve_dispatch_agent_definition",
+        "server.app.workflow_worker.agent_claim_profile.resolve_dispatch_agent_profile",
         side_effect=lambda _dsn, _workspace_id, agent_id, _pin: catalog.get(agent_id),
     ):
         yield

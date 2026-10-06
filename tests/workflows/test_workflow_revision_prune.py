@@ -53,9 +53,7 @@ def test_publish_prunes_override_values_outside_tightened_enum(tmp_path: Path) -
     at the removed enum member blocked every new job at intake's
     validate_config_values."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "prune-enum-ws", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("prune-enum-ws")
 
     _publish_with_node_schema(
         queries,
@@ -95,9 +93,7 @@ def test_publish_prunes_override_values_below_tightened_minimum(tmp_path: Path) 
     """codex 终轮 P1-2: a tightened minimum prunes now-out-of-range values
     the bare type check kept (integer stayed integer)."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "prune-min-ws", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("prune-min-ws")
 
     _publish_with_node_schema(
         queries,
@@ -132,9 +128,7 @@ def test_publish_prunes_plaintext_override_of_newly_secret_field(tmp_path: Path)
     the pre-secret revision) is deleted, never migrated into the vault; the
     user re-enters it through the settings PATCH's vault channel."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "prune-secret-ws", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("prune-secret-ws")
 
     # v1: token is a plain string field with a plaintext override.
     _publish_with_node_schema(
@@ -173,9 +167,7 @@ def test_publish_keeps_secret_ref_marker_on_unchanged_secret_field(tmp_path: Pat
     that shape) — the prune must not mistake the marker for stale plaintext
     and drop the workspace's vault wiring."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "prune-secret-keep-ws", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("prune-secret-keep-ws")
 
     secret_schema = {"token": {"type": "string", "secret": True}, "kept": {"type": "string"}}
     _publish_with_node_schema(queries, workspace["id"], secret_schema)
@@ -209,9 +201,7 @@ def test_publish_prune_failure_rolls_back_revision_and_workspace(
     the stale overrides still blocking intake, and the workspace overrides
     must keep their pre-publish values (no half-applied prune)."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "prune-tx-ws", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("prune-tx-ws")
 
     _publish_with_node_schema(
         queries,
@@ -267,9 +257,7 @@ def test_publish_prune_preserves_sibling_workflow_sections(tmp_path: Path) -> No
     publishing workflow's section — a sibling workflow's overrides in the
     same node_config_json column survive the section-scoped write."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "prune-sibling-ws", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("prune-sibling-ws")
 
     _publish_with_node_schema(queries, workspace["id"], {"old_key": {"type": "integer"}})
     queries.update_workspace(
@@ -298,9 +286,7 @@ def test_locked_prune_recomputes_from_concurrent_patch_values(tmp_path: Path) ->
     judges the PATCH's committed values by the new schema: legal keys stay,
     violating keys go."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "prune-race-ws", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("prune-race-ws")
     # v1 gives the node a schema so a stale override exists to plan a prune.
     _publish_with_node_schema(
         queries,
@@ -383,9 +369,7 @@ def test_publish_prunes_override_of_node_left_without_schema(tmp_path: Path) -> 
     from tests.helpers import replace_agent_catalog
 
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "prune-schemaless-ws", default_workflow_key="agent_nodes_flow"
-    )
+    workspace = queries.create_workspace("prune-schemaless-ws")
     agent = AgentDefinition(capability="review_script", runtime="velites")
     replace_agent_catalog(workspace["id"], {"review-script-v1": agent})
 
@@ -449,9 +433,7 @@ def test_publish_prunes_secret_ref_marker_when_field_flips_plain(tmp_path: Path)
     rejects the dict-under-string, so the prune removes it there instead of
     leaving it to block intake."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "prune-unsecret-ws", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("prune-unsecret-ws")
     marker = {"secret_ref": "node:wf:intake_knowledge_points:token"}
     secret_schema = {"token": {"type": "string", "secret": True}, "kept": {"type": "string"}}
     _publish_with_node_schema(queries, workspace["id"], secret_schema)

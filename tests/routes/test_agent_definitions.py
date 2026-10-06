@@ -20,7 +20,7 @@ PAYLOAD_V2 = {
 
 @pytest.fixture
 def workspace_id(job_db) -> str:
-    return job_db.create_workspace("Agent Routes WS", default_workflow_key="demo_workflow")["id"]
+    return job_db.create_workspace("Agent Routes WS")["id"]
 
 
 @pytest.fixture
@@ -140,7 +140,7 @@ def test_catalogs_are_workspace_isolated(client, job_db, ws, workspace_id) -> No
     client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
     _publish(client, "agent-a", ws)
 
-    other = job_db.create_workspace("Other WS", default_workflow_key="demo_workflow")["id"]
+    other = job_db.create_workspace("Other WS")["id"]
     listed = client.get(BASE, params={"workspace_id": other})
     assert listed.status_code == 200
     assert listed.json()["agents"] == []
@@ -152,7 +152,7 @@ def test_catalog_is_admin_only_for_non_admin(client, job_db, ws, workspace_id) -
     A 的 editor 读写 A 的 catalog 一律 403；访问 B（非成员）仍 404
     （require_workspace_access 先跑，存在性不可枚举）。"""
     client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
-    other = job_db.create_workspace("Other WS", default_workflow_key="demo_workflow")["id"]
+    other = job_db.create_workspace("Other WS")["id"]
     created = client.post("/api/users", json={"username": "editor-a", "password": "pw1"})
     assert created.status_code == 201, created.text
     editor_id = created.json()["id"]

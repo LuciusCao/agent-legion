@@ -78,7 +78,7 @@ def _ready_bundle(client, storage: FakeStorage, workspace_id: str) -> str:
 def _create_run(client, workspace_id: str, items: list[dict]):
     return client.post(
         f"/api/workspaces/{workspace_id}/runs",
-        json={"workflow_key": WORKFLOW_KEY, "items": items},
+        json={"items": items},
     )
 
 

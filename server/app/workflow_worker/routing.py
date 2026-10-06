@@ -10,95 +10,60 @@ a seconds-old binding or fails a claim that the next pass retries.
 
 from __future__ import annotations
 
-import time
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from server.app.executors.models import CODE_EXECUTOR_ID
-from server.app.jobs.queries.workspace_node_limits import get_local_node_limit
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
+from server.app.services.node_route_decision import RouteDecision, decide_node_route
+from server.app.workflow_worker.routing_cache import (
+    ROUTE_CACHE_TTL_SECONDS as ROUTE_CACHE_TTL_SECONDS,
+)
+from server.app.workflow_worker.routing_cache import NodeRoute as NodeRoute
+from server.app.workflow_worker.routing_cache import cached_routed
+from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
-
-ROUTE_CACHE_TTL_SECONDS = 30.0
-
-
-@dataclass(frozen=True)
-class NodeRoute:
-    """Resolved routing outcome for one (workspace, workflow, node)."""
-
-    kind: str  # "agent" | "executor" | "error"
-    target_id: str = ""
-    local_node_limit: int | None = None
-    error_message: str = ""
+    from server.app.workflows.schema import WorkflowNode
 
 
 def resolve_node_route(
     worker: WorkflowWorkerThread,
     workspace_id: str,
     workflow_key: str,
-    node_key: str,
-    capability: str,
+    node: WorkflowNode,
 ) -> NodeRoute:
-    """Resolve a node's route, through the worker's short-TTL cache."""
-    key = (workspace_id, workflow_key, node_key)
-    now = time.monotonic()
-    cached = worker.state.route_cache.get(key)
-    if cached is not None and now - cached[0] < ROUTE_CACHE_TTL_SECONDS:
-        return cached[1]
-    route = _resolve_uncached(worker, workspace_id, workflow_key, node_key, capability)
-    worker.state.route_cache[key] = (now, route)
-    return route
+    """Resolve a node's route: cached DB reads + the shared pure decision.
 
-
-def _resolve_uncached(
-    worker: WorkflowWorkerThread,
-    workspace_id: str,
-    workflow_key: str,
-    node_key: str,
-    capability: str,
-) -> NodeRoute:
-    # #211 Phase 3 (read-layer binding): the route predicate keys on
-    # (workspace_id, node_key) — workflow_key equals the workspace id on
-    # every row (v62 binding, aligned by v68). The cache key keeps the
-    # workflow_key component until Phase 4 (frozen snapshots may still carry
-    # a pre-v62 key, so the composite key stays collision-free).
-    with worker.job_db._connect_read() as conn:
-        route = conn.execute(
-            """
-            select target_kind, target_id from workspace_node_routes
-            where workspace_id=%s and node_key=%s
-            """,
-            (workspace_id, node_key),
-        ).fetchone()
-        # Agent routing is decided by the materialized workspace_node_routes
-        # projection, not by any node-level declaration.
-        if route is not None and route["target_kind"] == "agent":
-            agent_id = str(route["target_id"])
-            definition_config = published_agent_definitions(worker.job_db, workspace_id).get(
-                agent_id
-            )
-            if definition_config is None:
-                return NodeRoute(
-                    "error",
-                    error_message=(
-                        f"Agent {agent_id!r} has no published definition in workspace"
-                        f" {workspace_id!r}; agent definitions are workspace-scoped"
-                        " (schema v46) — create one in Studio (Agent 管理) for this workspace"
-                    ),
-                )
-            if definition_config.capability != capability:
-                return NodeRoute("error", error_message=f"Invalid Agent route {agent_id!r}")
-            if worker.agent_dispatch is None:
-                raise RuntimeError("Agent dispatch service is not configured")
-            return NodeRoute("agent", target_id=agent_id)
-
-        # Every non-Agent-routed node joins the implicit code pool (P-0.5):
-        # no executor binding/allocation exists anymore; runnability is
-        # enforced by node-code resolution at dispatch (EXEC-CODE-002).
-        return NodeRoute(
-            "executor",
-            target_id=CODE_EXECUTOR_ID,
-            local_node_limit=get_local_node_limit(conn, workspace_id, workflow_key, node_key),
+    The decision lives in ``services/node_route_decision`` (single source
+    shared with the job-detail projection, PR #1085). The route-row half
+    (``decide_routed``) is cached per (workspace, workflow, node) for a
+    short TTL; the per-snapshot branches — a self-contained node (#933,
+    zero DB) and the capability fallback of a route-less legacy agent node —
+    are never cached: the cache key is per node key while those depend on
+    the job's frozen node, so jobs frozen on different revisions sharing a
+    node key must not see each other's outcome.
+    """
+    catalog = lambda: legacy_agent_catalog(worker.job_db, workspace_id)  # noqa: E731
+    cached: NodeRoute | None = None
+    routed: RouteDecision | None = None
+    if not is_self_contained_agent_node(node):
+        cached = cached_routed(worker, workspace_id, workflow_key, node, catalog)
+        routed = RouteDecision(
+            cached.kind,  # type: ignore[arg-type]
+            target_id=cached.target_id,
+            error_message=cached.error_message,
+            profile_source=cached.profile_source,
         )
+    decision = decide_node_route(
+        node, None, workspace_id=workspace_id, catalog=catalog, routed=routed
+    )
+    if decision.kind == "agent" and worker.agent_dispatch is None:
+        raise RuntimeError("Agent dispatch service is not configured")
+    if cached is not None and decision == routed:
+        return cached  # keeps the cached code-pool node limit
+    return NodeRoute(
+        decision.kind,
+        target_id=decision.target_id,
+        error_message=decision.error_message,
+        profile_source=decision.profile_source,
+    )

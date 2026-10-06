@@ -23,6 +23,8 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
+from server.app.fs_safety import PathEscapeError, resolve_within
+
 _ALLOWED_FORMATS = ("text", "json")
 _ALLOWED_FILE_KEYS = frozenset({"path", "format", "min_chars", "required_headings", "schema"})
 _TEXT_ONLY_KEYS = frozenset({"min_chars", "required_headings"})
@@ -254,10 +256,9 @@ def resolve_targets_checked(
     for raw, content in files:
         if (raw or ".") in rejected:
             continue
-        resolved = (root / raw).resolve()
         try:
-            resolved.relative_to(root)
-        except ValueError:
+            resolved = resolve_within(root, raw, allow_root=True)
+        except PathEscapeError:
             errors.append({"path": raw, "error": "path escapes the skill directory"})
             continue
         targets.append((resolved, content))

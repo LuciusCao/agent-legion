@@ -51,9 +51,7 @@ def _create_job(job_db, workspace_id: str, source_id: str) -> dict[str, Any]:
 
 
 def _seed_workspace(job_db) -> str:
-    ws = job_db.create_workspace(
-        "upstream-guard", default_workflow_key="education_video_problems_generation"
-    )
+    ws = job_db.create_workspace("upstream-guard")
     publish_builtin_revision(job_db, str(ws["id"]))
     return str(ws["id"])
 
@@ -201,7 +199,7 @@ def _seed_implicit_job(job_db):
             "edges": [],
         }
     )
-    workspace = job_db.create_workspace("guard-implicit", default_workflow_key="wf759_guard")
+    workspace = job_db.create_workspace("guard-implicit")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     batch = job_db.create_run(
         "wf759_guard", "batch_by_ids", {"ids": ["1"]}, workspace_id=workspace["id"]
@@ -288,7 +286,7 @@ def test_rerun_rejected_when_cross_branch_producer_failed(rerun_service, job_db)
             "edges": [],
         }
     )
-    workspace = job_db.create_workspace("guard-xbranch", default_workflow_key="wf759_xbranch")
+    workspace = job_db.create_workspace("guard-xbranch")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     batch = job_db.create_run(
         "wf759_xbranch", "batch_by_ids", {"ids": ["1"]}, workspace_id=workspace["id"]

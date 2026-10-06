@@ -420,16 +420,8 @@ def test_try_claim_many_sorts_writes_by_ws_lock_key_then_job_id(
     # Three jobs across two workspaces, passed out of order; the expected
     # write order is computed from the actual server-side lock keys, so the
     # test pins the ALGORITHM rather than a hardcoded hash outcome.
-    ws_a = str(
-        queries.create_workspace(
-            name="claim-ws-a", default_workflow_key="a-ws", workspace_id="a-ws"
-        )["id"]
-    )
-    ws_b = str(
-        queries.create_workspace(
-            name="claim-ws-b", default_workflow_key="b-ws", workspace_id="b-ws"
-        )["id"]
-    )
+    ws_a = str(queries.create_workspace(name="claim-ws-a", workspace_id="a-ws")["id"])
+    ws_b = str(queries.create_workspace(name="claim-ws-b", workspace_id="b-ws")["id"])
     job_a1 = _create_job_in_workspace(queries, ws_a)
     job_a2 = _create_job_in_workspace(queries, ws_a)
     job_b1 = _create_job_in_workspace(queries, ws_b)
@@ -492,16 +484,8 @@ def test_try_claim_many_orders_by_actual_ws_lock_key(
             ws_first, ws_second = min(smaller), wid
             break
     assert ws_first and ws_second, "expected an inverted (text, lock-key) pair"
-    ws_first = str(
-        queries.create_workspace(
-            name="claim-ws-first", default_workflow_key=ws_first, workspace_id=ws_first
-        )["id"]
-    )
-    ws_second = str(
-        queries.create_workspace(
-            name="claim-ws-second", default_workflow_key=ws_second, workspace_id=ws_second
-        )["id"]
-    )
+    ws_first = str(queries.create_workspace(name="claim-ws-first", workspace_id=ws_first)["id"])
+    ws_second = str(queries.create_workspace(name="claim-ws-second", workspace_id=ws_second)["id"])
     job_first = _create_job_in_workspace(queries, ws_first)
     job_second = _create_job_in_workspace(queries, ws_second)
 

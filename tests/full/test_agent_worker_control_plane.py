@@ -41,9 +41,7 @@ def test_agent_capacity_matrix_across_workers(job_db) -> None:
 @pytest.mark.full_gate
 def test_agent_definition_catalog_snapshot_lifecycle(job_db) -> None:
     """Publish flow replaces the workspace's published catalog; reads enforce exact hashes."""
-    workspace = job_db.create_workspace(
-        "Catalog WS", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("Catalog WS")
     workspace_id = str(workspace["id"])
     first = AgentDefinition(capability="generate", runtime="pi", skill="question/generate")
     second = AgentDefinition(capability="review", runtime="velites", skill="question/review")
@@ -96,7 +94,7 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('acl-workspace', 'ACL', 'education_video_problems_generation')"
+            "insert into workspaces(id, name) values ('acl-workspace', 'ACL')"
             " on conflict(id) do nothing"
         )
 
@@ -135,9 +133,7 @@ def test_startup_materializes_agent_routes(client, job_db) -> None:
     fixture workspace is created and published here. Explicit node types
     (#284) retired the startup reconcile: routes materialize only at
     publish."""
-    workspace = job_db.create_workspace(
-        "Route Check", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("Route Check")
     workspace_id = workspace["id"]
     # Agent definitions are workspace-scoped (schema v46): the demo seed
     # instantiates the factory templates into this workspace (the same seed

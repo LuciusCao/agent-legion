@@ -10,6 +10,7 @@ import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { AgentRoutingSection } from '../components/AgentRoutingSection'
 import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
+import { codeNodeKeys } from '../lib/codeNodes'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { BasicInfoSection } from '../components/settings/BasicInfoSection'
 import { DangerZone } from '../components/settings/DangerZone'
@@ -46,24 +47,17 @@ export function SettingsPage() {
     useWorkflowDefinitionQuery(workspaceId)
   const workflowDefinition = workflowDefinitionData ?? null
 
-  // P-0.5：无 Agent 路由的节点一律进入隐含 code 池，节点级并发上限只对
-  // code 节点有意义。agentRoutes 过滤键用 workspace_id（workflow_key 已
-  // deprecated 且 v62 起恒等于 workspace id，#211 Phase 2）。
-  const codeNodeKeys = useMemo(() => {
+  // P-0.5：非 agent 节点一律进入隐含 code 池，节点级并发上限只对 code 节点
+  // 有意义。按显式类型判定（#933 自含 agent 节点无 Agent 路由）。
+  const codeNodeKeySet = useMemo(() => {
     if (!workflowDefinition) return new Set<string>()
-    const agentRouted = new Set(
-      (settingsSnapshot?.agentRoutes ?? [])
-        .filter((r) => r.workflow_key === workspaceId)
-        .map((r) => r.node_key)
+    return codeNodeKeys(
+      workflowDefinition.nodes,
+      settingsSnapshot?.agentRoutes ?? []
     )
-    return new Set(
-      workflowDefinition.nodes
-        .filter((node) => !agentRouted.has(node.key))
-        .map((node) => node.key)
-    )
-  }, [workflowDefinition, settingsSnapshot, workspaceId])
+  }, [workflowDefinition, settingsSnapshot])
 
-  const hasCodeNodes = codeNodeKeys.size > 0
+  const hasCodeNodes = codeNodeKeySet.size > 0
 
   const navItems = useMemo(
     () => [
@@ -153,7 +147,7 @@ export function SettingsPage() {
           {/* schema v62：workflow key 与 workspace id 绑定且不可变，
               原 WorkflowSection 编辑器已移除（后端 PATCH /configuration
               对 key 变更一律 400）。settings.workflowKey 已随
-              #211 Phase 2 第二批降 optional 且保存时不再回传。 */}
+              #211 M3 从契约退役。 */}
 
           <section id="agent-workers" className={styles.section}>
             <h2 className={styles.sectionTitle}>Agent 与 Worker</h2>

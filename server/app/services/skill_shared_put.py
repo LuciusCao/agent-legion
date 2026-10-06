@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path, PurePosixPath
 
+from server.app.fs_safety import PathEscapeError, resolve_within
 from server.app.services.skill_repo import MAX_FILE_BYTES
 from server.app.services.skill_repo_edit import SkillEditValidationError
 from server.app.services.skill_shared_sync import MAP_PATH, validate_materials
@@ -61,10 +62,9 @@ def validate_shared_put_payload(shared_dir: Path, files: list[tuple[str, str]]) 
                 }
             )
             continue
-        resolved = (root / raw_path).resolve()
         try:
-            resolved.relative_to(root)
-        except ValueError:
+            resolved = resolve_within(root, raw_path, allow_root=True)
+        except PathEscapeError:
             errors.append({"path": raw_path, "error": "path escapes the _shared directory"})
             continue
         relative = resolved.relative_to(root).as_posix()

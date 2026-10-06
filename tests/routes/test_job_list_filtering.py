@@ -6,7 +6,7 @@ WORKFLOW_KEY = "education_video_problems_generation"
 
 
 def _make_workspace(job_db, slug):
-    workspace = job_db.create_workspace(slug, default_workflow_key=WORKFLOW_KEY)
+    workspace = job_db.create_workspace(slug)
     publish_builtin_revision(job_db, workspace["id"])
     return workspace
 
@@ -274,3 +274,59 @@ def test_snapshot_limit_out_of_range_is_422(client_factory, limit, expected):
         workspace = _make_workspace(client.app.state.job_db, f"snapshot-limit-{limit}-ws")
         response = client.get(f"/api/workspaces/{workspace['id']}/jobs/snapshot?limit={limit}")
     assert response.status_code == expected, response.text
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        "garbage",
+        "notadate|x",
+        "2026-13-01 00:00:00|job-1",
+        "2026-10-05 00:00:00|",
+        "|job-1",
+        # fromisoformat 接受任意单字符分隔符，PostgreSQL 不接受（#974 review）
+        "2026-10-05\U0001f40d00:00:00|job-1",
+        "2026-10-05x00:00:00|job-1",
+        # job_id 半段的控制字符：NUL 绑定进 SQL 会让 psycopg 抛 DataError（#974 R3）
+        "2026-10-05 00:00:00|job\x00x",
+        "2026-10-05 00:00:00|job\x1fx",
+    ],
+)
+def test_snapshot_malformed_cursor_is_422(client_factory, cursor):
+    """#891：cursor 解析失败与 limit 越界同一约定——422 + 可读 detail，不再
+    落到 SQL 抛未处理异常成 5xx（错误码表让调用方对 5xx 退避重试）。"""
+    with client_factory() as client:
+        workspace = _make_workspace(client.app.state.job_db, "snapshot-cursor-ws")
+        response = client.get(
+            f"/api/workspaces/{workspace['id']}/jobs/snapshot", params={"cursor": cursor}
+        )
+    assert response.status_code == 422, response.text
+    [error] = response.json()["detail"]
+    assert error["loc"] == ["query", "cursor"]
+    assert "cursor" in error["msg"]
+
+
+def test_snapshot_cursor_binds_parsed_utc_timestamp(client_factory):
+    """#974 review：SQL 绑定的是解析后的 datetime（naive 视为 UTC，与 next_cursor
+    生成形态一致），不是原字符串——合法 next_cursor 及其 `T` / `+00:00` 等价写法
+    翻到同一页。"""
+    with client_factory() as client:
+        job_db = client.app.state.job_db
+        workspace = _make_workspace(job_db, "snapshot-cursor-bind-ws")
+        for i in range(3):
+            _make_job(job_db, workspace["id"], f"q-bind-{i}")
+        first = _snapshot(client, workspace["id"], "?limit=1")
+        cursor = first["next_cursor"]
+        stamp, _, job_id = cursor.partition("|")
+        variants = [cursor, f"{stamp.replace(' ', 'T')}|{job_id}", f"{stamp}+00:00|{job_id}"]
+        pages = [
+            client.get(
+                f"/api/workspaces/{workspace['id']}/jobs/snapshot",
+                params={"limit": 1, "cursor": variant},
+            )
+            for variant in variants
+        ]
+    assert all(page.status_code == 200 for page in pages), [p.text for p in pages]
+    ids = [[job["id"] for job in page.json()["jobs"]] for page in pages]
+    assert ids[0] and ids[0] != [first["jobs"][0]["id"]]
+    assert ids == [ids[0]] * len(ids)

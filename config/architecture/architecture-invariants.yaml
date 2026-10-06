@@ -69,6 +69,18 @@ invariants:
         target: tests/full/test_storage_path_corruption.py
         gate: full
 
+  - id: SECURITY-PATH-002
+    statement: "Server-side containment of untrusted path names goes through the shared primitives in server/app/fs_safety.py (#928): I/O on untrusted-writable trees walks directory descriptors from a trusted root with O_NOFOLLOW on every component below it (open_dir_beneath / open_dir_nofollow / open_regular_at / create_new_at); name-to-path containment uses resolve_within (resolve, then require the result under the resolved root). Switched modules are listed in the evidence test and may not reintroduce hand-rolled is_relative_to / relative_to-ValueError / commonpath / O_NOFOLLOW checks; worker/ and velites/ are separate process boundaries and are out of scope."
+    owner: security
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/app/test_fs_safety.py
+        gate: quick
+      - kind: integration
+        target: tests/mcp_server/test_local_files.py
+        gate: quick
+
   - id: DB-MUTATION-001
     statement: "Job deletion rollback is conflict-safe: it restores only when the destination is absent, uses atomic same-filesystem rename, and preserves the staged recovery path when a concurrent recreation exists."
     owner: jobs
@@ -320,10 +332,13 @@ invariants:
         gate: ci_extended
 
   - id: CONFIG-WORKER-001
-    statement: "Worker Service accepts registration secrets only as write-only input through its locally authenticated UI/API/CLI, never returns or logs their plaintext, stores managed copies with mode 0600 in the writable control volume, preserves non-public runtime settings on edits, disables new-task claiming before every Worker execution-process start or restart until an operator explicitly enables it, publishes its control port on host loopback by default, and requires the local control token on every endpoint except /api/health (the port remains reachable inside the compose network). A transiently unavailable Host keeps the execution process alive and retries registration in-process without traceback or supervisor restart churn."
+    statement: "Worker Service accepts registration secrets only as write-only input through its locally authenticated UI/API/CLI, never returns or logs their plaintext, stores managed copies with mode 0600 in the writable control volume, preserves non-public runtime settings on edits, disables new-task claiming before every Worker execution-process start or restart until an operator explicitly enables it, publishes its control port on host loopback by default, and requires the local control token on every endpoint except /api/health (the port remains reachable inside the compose network). A transiently unavailable Host keeps the execution process alive and retries registration in-process without traceback or supervisor restart churn. Every control-plane route (page, assets, /api/*) rejects Host headers outside loopback variants plus the configured exposure/console host (#923); mutating requests also reject cross-site Sec-Fetch-Site or mismatched Origin, and the control token is embedded in the page only when the Host check is enabled and its allow-list contains loopback names only (exposure and console host included)."
     owner: agent-worker
     risk: high
     evidence:
+      - kind: integration
+        target: tests/workers/test_worker_control_host_guard.py
+        gate: quick
       - kind: integration
         target: tests/workers/test_agent_worker_service.py
         gate: quick
@@ -374,7 +389,7 @@ invariants:
         gate: full
 
   - id: EXEC-AGENTDEF-001
-    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the workspace-scoped Agent Catalog (versioned_entities with workspace_id set, published via AgentService; schema v46 — exactly one published Agent per capability per workspace, no global fallback at resolution); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability within the current workspace and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Since #76 the definition's skill field is optional and serves only as the legacy fallback at dispatch — the workflow node's own skill binding (EXEC-SKILL-NODE-001) takes precedence and owns the version pin. Workers separately declare node capabilities and runtime/provider/model triples derived from each selected runtime's local discovery intersected with its operator allowlist, alongside labels, protocol version, and machine-wide max_concurrency."
+    statement: "Status: in transition (#440 retirement, P2 dual read — self-contained agent nodes are governed by EXEC-AGENT-PROFILE-001 instead). Agent capability, runtime, skill, tools, and resource requirements are declared by the workspace-scoped Agent Catalog (versioned_entities with workspace_id set, published via AgentService; schema v46 — exactly one published Agent per capability per workspace, no global fallback at resolution); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability within the current workspace and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Since #76 the definition's skill field is optional and serves only as the legacy fallback at dispatch — the workflow node's own skill binding (EXEC-SKILL-NODE-001) takes precedence and owns the version pin. Workers separately declare node capabilities and runtime/provider/model triples derived from each selected runtime's local discovery intersected with its operator allowlist, alongside labels, protocol version, and machine-wide max_concurrency."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -395,6 +410,36 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/full/test_agent_worker_control_plane.py::test_agent_definition_catalog_snapshot_lifecycle
+        gate: full
+
+  - id: EXEC-AGENT-PROFILE-001
+    statement: "Status: dual read (#440 P2, #933). Every agent node's execution profile (runtime, tools, requires_labels, config_schema, legacy skill fallback) is resolved only through services/agent_node_profile (resolve_agent_node_profile). A node whose effective execution.runtime is set (node value or the workflow top-level execution.runtime default, one of AGENT_RUNTIMES) is self-contained: source='node', no published Agent is required, revision publish materializes no workspace_node_routes row, and dispatch freezes the profile into agent_execution_requests (schema v92: profile_source='node', runtime, requires_labels_json; agent_id = node key, agent_definition_hash = profile hash). Claim reads runtime/labels from the row and never joins versioned_entities for such rows; the stale-definition sweep and _validate_agent_route skip them; the unclaimable sweep judges them by the row runtime. Other agent nodes keep the Agent-definition source unchanged. requires_labels without a runtime fails publish. The poll-loop scan gates (workflow_worker/thread.py, agent_gate.py) open when a published Agent exists OR a revision still dispatchable (the active one, or one a runnable job is pinned to) has a self-contained agent node."
+    owner: workspace-executor
+    risk: critical
+    evidence:
+      - kind: contract
+        target: tests/services/test_agent_node_profile_sources.py
+        gate: quick
+      - kind: contract
+        target: tests/workflows/test_workflow_node_profile.py
+        gate: quick
+      - kind: contract
+        target: tests/services/test_agent_dispatch_profile_source.py::test_legacy_dispatch_replays_the_recorded_0716_manifest_byte_for_byte
+        gate: quick
+      - kind: contract
+        target: tests/workers/test_workflow_worker_profile_routing.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_broker_profile_source.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_workflow_publish_profile_source.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_agent_request_profile_source_migration.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_agent_node_self_contained_e2e.py::test_workspace_without_agent_definitions_runs_a_self_contained_node
         gate: full
 
   - id: EXEC-WORKERACL-001
@@ -754,7 +799,7 @@ invariants:
         gate: quick
 
   - id: STUDIO-AGENT-002
-    statement: "Studio chat sessions (phase 3 chunk 4) run user-selected ACP agents whose command lines come only from the instance-level registry (global_settings key 'studio_agents') — admin-maintained manual entries plus auto-detected entries from a fixed built-in catalog (#332): detection executes only the catalog's static executable names via PATH probe plus a fixed '--version' argument with a hard timeout (every probe failure degrades silently), merges detected templates as source: detected through a row-locked transactional RMW (SELECT ... FOR UPDATE after insert-if-absent, so concurrent redetects and admin edits queue instead of last-wins overwriting), and never overrides manual rows (same-id manual wins; any admin edit of a detected row flips it to manual), with the source provenance re-derived server-side on every PUT so it cannot be forged through the API; non-admin users pick an agent by id and the picker API never exposes command/args (detected entries included) and only lists agents whose command currently resolves on this host (PATH-level probe, ~60s TTL cache, warmed at backend startup); creating a session with an unavailable agent fails with a clear error before any spawn, and creation is rejected once a global cap of live sessions is reached — the cap check and the session-row INSERT share one transaction under an advisory lock so concurrent creators cannot race past it, and backend startup reconciles rows left in a live status by a crashed or restarted process to error (sessions are in-process only; zombies would otherwise hold cap slots forever) (#158). Closed or errored sessions (including reaped zombies) can be resumed via POST .../resume: the resume claim (closed/error -> starting) rides the same cap advisory lock with the active-count predicate inside the UPDATE, any stale registered runtime is torn down by the claim winner immediately after the atomic claim and before the spawn (a pre-claim teardown would let a claim loser destroy the winner's freshly registered runtime), and a stale exit echo from the old runtime's thread may only tear down its own pinned runtime identity — never the registry's current entry or the newer generation's session row (ABA), so no agent subprocess is orphaned, a fresh scoped token is minted (the old one was revoked at close or dies on TTL), and the agent subprocess is respawned — ACP session/load of the persisted acp_session_id when the freshly-initialized agent advertises loadSession, otherwise a fresh ACP session with the persisted user/agent transcript injected once into the first post-resume prompt; resuming a session still live on this server is an idempotent no-op, and the persisted message timeline is never rewritten. Each session mints one scoped token (origin='run', TTL renewed at turn start and on tool_call keepalive per STUDIO-AGENT-001) that crosses the process boundary only as an HTTP header inside the ACP session/new request — kimi >= 0.38 accepts only http/sse MCP servers there, so the tool surface is served in-app as a streamable-HTTP endpoint at /api/studio-agent/mcp guarded solely by an ASGI-level studio-agent scoped-token check (the Mount bypasses route-layer auth dependencies), with the token riding Authorization Bearer and the chat session binding riding x-agent-legion-mcp-session-id — never persisted, never logged, never present in message or SSE payloads — and is revoked when the session closes or the agent process dies (#158 teardown). The registry's api_base is the egress target for these tokens: the write side validates it as a plain absolute http(s) URL and warns when the host is not loopback/private, and the MCP loopback resolves it per request so an admin edit cannot split the injected URL from the loopback target (#158). Permission requests for agent-legion MCP tools auto-approve (the scoped token is the authority boundary), and local read-only ACP tool kinds (read/search — the Read/Glob/Grep class) auto-approve as side-effect-free; all other tool calls default to human confirmation (auto-denied after a 120s timeout so an abandoned tab cannot park a turn) with a per-session allow-all switch, and cancelling a turn settles every pending permission as denied."
+    statement: "Studio chat sessions (phase 3 chunk 4) run user-selected ACP agents whose command lines come only from the instance-level registry (global_settings key 'studio_agents') — admin-maintained manual entries plus auto-detected entries from a fixed built-in catalog (#332): detection executes only the catalog's static executable names via PATH probe plus a fixed '--version' argument with a hard timeout (every probe failure degrades silently), merges detected templates as source: detected through a row-locked transactional RMW (SELECT ... FOR UPDATE after insert-if-absent, so concurrent redetects and admin edits queue instead of last-wins overwriting), and never overrides manual rows (same-id manual wins; any admin edit of a detected row flips it to manual), with the source provenance re-derived server-side on every PUT so it cannot be forged through the API; non-admin users pick an agent by id and the picker API never exposes command/args (detected entries included) and only lists agents whose command currently resolves on this host (PATH-level probe, ~60s TTL cache, warmed at backend startup); creating a session with an unavailable agent fails with a clear error before any spawn, and creation is rejected once a global cap of live sessions is reached — the cap check and the session-row INSERT share one transaction under an advisory lock so concurrent creators cannot race past it, and backend startup reconciles rows left in a live status by a crashed or restarted process to error (sessions are in-process only; zombies would otherwise hold cap slots forever) (#158). Closed or errored sessions (including reaped zombies) can be resumed via POST .../resume: the resume claim (closed/error -> starting) rides the same cap advisory lock with the active-count predicate inside the UPDATE, any stale registered runtime is torn down by the claim winner immediately after the atomic claim and before the spawn (a pre-claim teardown would let a claim loser destroy the winner's freshly registered runtime), and a stale exit echo from the old runtime's thread may only tear down its own pinned runtime identity — never the registry's current entry or the newer generation's session row (ABA), so no agent subprocess is orphaned, a fresh scoped token is minted (the old one was revoked at close or dies on TTL), and the agent subprocess is respawned — ACP session/load of the persisted acp_session_id when the freshly-initialized agent advertises loadSession, otherwise a fresh ACP session with the persisted user/agent transcript injected once into the first post-resume prompt; resuming a session still live on this server is an idempotent no-op — except a live idle session whose last turn the empty_turn verdict confirmed empty, where resume re-delivers that one human message once through the same credential renewal and atomic token-locked turn claim as human admission (single-use in-memory slot consumed inside the claim and superseded by any newer turn; no new user row, an empty_turn_retry status row records it) (#882) — and the persisted message timeline is never rewritten. Each session mints one scoped token (origin='run', TTL renewed at turn start and on tool_call keepalive per STUDIO-AGENT-001) that crosses the process boundary only as an HTTP header inside the ACP session/new request — kimi >= 0.38 accepts only http/sse MCP servers there, so the tool surface is served in-app as a streamable-HTTP endpoint at /api/studio-agent/mcp guarded solely by an ASGI-level studio-agent scoped-token check (the Mount bypasses route-layer auth dependencies), with the token riding Authorization Bearer and the chat session binding riding x-agent-legion-mcp-session-id — never persisted, never logged, never present in message or SSE payloads — and is revoked when the session closes or the agent process dies (#158 teardown). The registry's api_base is the egress target for these tokens: the write side validates it as a plain absolute http(s) URL and warns when the host is not loopback/private, and the MCP loopback resolves it per request so an admin edit cannot split the injected URL from the loopback target (#158). Permission requests for agent-legion MCP tools auto-approve (the scoped token is the authority boundary), and local read-only ACP tool kinds (read/search — the Read/Glob/Grep class) auto-approve only when the payload has no nested containers and every declared target resolves inside the session workspace's MCP staging directory and a one-shot allow option is offered (#921); only offered option ids are accepted and allow_always is narrowed to allow_once on the wire (refused when no one-shot option exists); ACP terminal/create must consume a one-shot grant minted by a human-answered or allow-all-approved permission (platform auto-approvals never mint one; a command declared by the approved call must match the terminal command exactly), the terminal child gets an allowlisted environment (never the server process environment; agent overrides limited to output-only keys) and a cwd pinned as a directory descriptor walked from the session root without following links and entered by fchdir in the child (no path re-resolution at spawn; a bound grant does not accept a shell-side cd wrapper); all other tool calls default to human confirmation (auto-denied after a 120s timeout so an abandoned tab cannot park a turn) with a per-session allow-all switch, and cancelling a turn settles every pending permission as denied."
     owner: security
     risk: high
     evidence:
@@ -782,11 +827,17 @@ invariants:
       - kind: integration
         target: tests/services/test_studio_chat_service_permissions.py
         gate: quick
+      - kind: contract
+        target: tests/services/test_studio_chat_acp_policy.py
+        gate: quick
       - kind: integration
         target: tests/services/test_studio_chat_service_lifecycle.py
         gate: quick
       - kind: integration
         target: tests/services/test_studio_chat_resume_service.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_empty_turn_retry.py
         gate: quick
       - kind: integration
         target: tests/db/test_studio_chat_schema.py
@@ -1235,7 +1286,7 @@ invariants:
         gate: quick
 
   - id: DB-WORKFLOW-CATALOG-001
-    statement: "The global workflow catalog (workflow_catalog table, schema v40) is retired at schema v50 (issue #112): a workflow is the DAG inside one workspace, so workspaces.default_workflow_key is a plain text identifier (old job rows keep their workflow_key as text) and the workspace's ACTIVE workflow_revision is the only runtime definition source — node override validation and settings schemas (workspace_node_config / workspace_settings_schemas), snapshot-less job fallbacks (job detail, run-to, rerun, preview), package artifact curation, and the worker scan list all resolve it; the catalog list/register HTTP APIs and the studio-agent register/list tools are gone, and the built-in demo definition stays in the repo (server/app/workflows/builtin.py). Schema v62 supersedes the creation semantics: workspace creation takes an explicit caller-provided id which IS the workflow key (bound and immutable, no demo/blank modes and no create-path seeding — demo workspaces are provisioned by `make import-demo` / scripts/seed_demo.py), the first-publish key adoption path is removed, and the v62 migration renames legacy workspace ids to their bound keys; see DB-WORKSPACE-KEY-BINDING-001. The v50 migration drops the catalog table after warning about registered keys no workspace references."
+    statement: "The global workflow catalog (workflow_catalog table, schema v40) is retired at schema v50 (issue #112): a workflow is the DAG inside one workspace, so the workspace id identifies the workflow (the separate key column is gone since schema v91, issue #211) and the workspace's ACTIVE workflow_revision is the only runtime definition source — node override validation and settings schemas (workspace_node_config / workspace_settings_schemas), snapshot-less job fallbacks (job detail, run-to, rerun, preview), package artifact curation, and the worker scan list all resolve it; the catalog list/register HTTP APIs and the studio-agent register/list tools are gone, and the built-in demo definition stays in the repo (server/app/workflows/builtin.py). Schema v62 supersedes the creation semantics: workspace creation takes an explicit caller-provided id which IS the workflow key (bound and immutable, no demo/blank modes and no create-path seeding — demo workspaces are provisioned by `make import-demo` / scripts/seed_demo.py), the first-publish key adoption path is removed, and the v62 migration renames legacy workspace ids to their bound keys; see DB-WORKSPACE-KEY-BINDING-001. The v50 migration drops the catalog table after warning about registered keys no workspace references."
     owner: workspace-executor
     risk: high
     evidence:
@@ -1250,7 +1301,7 @@ invariants:
         gate: quick
 
   - id: DB-WORKSPACE-KEY-BINDING-001
-    statement: "Workspace id and workflow key are one identifier (schema v62, issue #211): POST /api/workspaces requires an explicit id (pattern ^[a-z0-9][a-z0-9_-]{0,63}$) that is written to default_workflow_key at creation and never changes afterwards — PATCH /api/workspaces and PUT /configuration reject any key change with 400, the publish guard (require_draft_workflow_key_match) rejects drafts whose key differs with 422, and the create path seeds nothing (demo provisioning lives in `make import-demo` / scripts/seed_demo.py, which pins the demo workspace id to its key). The v62 migration renames legacy workspaces to id == key (cascading workspace_id through every child table plus the FK-less auth_scoped_tokens and ops_metric_samples, fail-fast on id conflicts and on two workspaces sharing one key — both would rename onto a single id) and backfills never-published workspaces with key = id. The invariant is enforced at the HTTP service layer (workspace_configuration) and by the migration; JobQueries.create_workspace validates id == key and the id pattern only when the caller passes workspace_id explicitly, because the raw layer also serves test fixtures and low-level seeders that build pre-v62 shapes. default_workflow_key is deprecated as a separate concept pending full retirement (issue #211)."
+    statement: "The workspace id is the workflow key — one identifier, no separate key anywhere on the live schema or the API contract (terminal state of issue #211, schema v91): POST /api/workspaces requires an explicit id (pattern ^[a-z0-9][a-z0-9_-]{0,63}$) that never changes afterwards, the publish and compare guards (require_draft_workflow_key_match / compare_workflow_draft) reject drafts whose definition key differs from the workspace id (422 / schema error), and the create path seeds nothing (demo provisioning lives in `make import-demo` / scripts/seed_demo.py, whose workspace id is the demo key). History: the v62 migration renamed legacy workspaces onto their bound keys (cascading workspace_id through every child table plus the FK-less auth_scoped_tokens and ops_metric_samples, fail-fast on id conflicts and on two workspaces sharing one key), v68 aligned every stored key with the id, v70 dropped the execution tables' workflow_key columns, and v91 drops workspaces.default_workflow_key plus the quality_sample_batches.workflow_key mirror (guarded, idempotent; fresh databases never create them). The deprecated workflow_key / default_workflow_key / workflowKey contract fields, the workflows/{workflow_key} URL aliases and their mismatch guard are removed; internal call signatures that still name a workflow_key parameter receive the workspace id. Archaeology kept on purpose: workflow_node_codes / job_batches / workspace_node_bindings key columns (migration replay only) and the key prefix inside versioned_entities.entity_key."
     owner: workspace-executor
     risk: high
     evidence:

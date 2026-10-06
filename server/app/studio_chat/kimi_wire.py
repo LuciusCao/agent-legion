@@ -9,7 +9,8 @@ record of such a turn. Layout (Kimi Code 0.43):
 ``sessions/<workspace-id>/<acp-session-id>/agents/main/wire.jsonl`` — one JSON
 record per line, append-only.
 
-Reads are bounded and descriptor-anchored (no symlink traversal).
+Reads are bounded and descriptor-anchored through ``fs_safety`` (no symlink
+traversal, no hard-linked or non-regular journal).
 
 Where reading starts is never "the end at some instant" — every instant has a
 before, and a turn written there would be mistaken for history (#938 review
@@ -34,11 +35,11 @@ from __future__ import annotations
 import json
 import os
 import re
-import stat
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from server.app.studio_chat.task_metadata_files import directory
+from server.app.fs_safety import open_dir_nofollow as directory
+from server.app.fs_safety import open_regular_at
 
 if TYPE_CHECKING:
     from server.app.studio_chat.wire_baseline import WireBaseline
@@ -63,22 +64,31 @@ def kimi_code_homes(cwd: str) -> list[Path]:
     return homes
 
 
-def locate_wire(homes: list[Path], session_id: str) -> Path | None:
-    """The main-agent journal of one ACP session, or None until it exists."""
+def session_dirs(homes: list[Path], session_id: str) -> list[Path]:
+    """``<home>/sessions/<workspace-id>/<session_id>`` candidates (unchecked)."""
     if not _SESSION_ID.fullmatch(session_id):
-        return None
+        return []
+    candidates: list[Path] = []
     for home in homes:
         sessions = home / "sessions"
         try:
             names = sorted(os.listdir(sessions))
         except OSError:
             continue
-        for name in names:
-            if name.startswith(".") or not _SESSION_ID.fullmatch(name):
-                continue
-            candidate = sessions.joinpath(name, session_id, *_WIRE_PARTS)
-            if candidate.is_file():
-                return candidate
+        candidates.extend(
+            sessions / name / session_id
+            for name in names
+            if not name.startswith(".") and _SESSION_ID.fullmatch(name)
+        )
+    return candidates
+
+
+def locate_wire(homes: list[Path], session_id: str) -> Path | None:
+    """The main-agent journal of one ACP session, or None until it exists."""
+    for session_dir in session_dirs(homes, session_id):
+        candidate = session_dir.joinpath(*_WIRE_PARTS)
+        if candidate.is_file():
+            return candidate
     return None
 
 
@@ -97,15 +107,16 @@ class WireTail:
         return tail
 
     def _open(self) -> tuple[int, os.stat_result]:
+        # SECURITY-PATH-002 shared primitive: non-blocking, final component
+        # not followed, single-link regular files only (NotRegularFileError,
+        # a ValueError, otherwise).
         with directory(self.path.parent) as parent:
-            descriptor = os.open(
-                self.path.name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=parent
-            )
-        info = os.fstat(descriptor)
-        if not stat.S_ISREG(info.st_mode):
+            descriptor = open_regular_at(parent, self.path.name)
+        try:
+            return descriptor, os.fstat(descriptor)
+        except OSError:
             os.close(descriptor)
-            raise ValueError("kimi wire journal is not a regular file")
-        return descriptor, info
+            raise
 
     def baseline(self) -> None:
         """Pin identity and current end without reading content (stat only)."""

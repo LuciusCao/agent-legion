@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.services.job_errors import ConflictError, InvalidOperationError
 from server.app.studio_chat.background_baseline import capture_resume_baseline
 from server.app.studio_chat.callbacks import ServiceCallbacks
+from server.app.studio_chat.empty_turn_retry import retry_empty_turn
 from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.wire_baseline import capture_wire_baseline
 
@@ -34,7 +35,8 @@ def resume_session(
     ACP session plus the persisted transcript injected once into the
     first post-resume prompt (runtime.resume_transcript_pending).
     Resuming a session that is still live on this server is an idempotent
-    no-op.
+    no-op — except an idle session whose last turn was confirmed empty,
+    where it replays that message once (#882, empty_turn_retry).
     """
     from server.app.studio_chat import service as service_module
 
@@ -44,7 +46,12 @@ def resume_session(
         # claim SQL and the spawn fence refuse the stamp too).
         raise ConflictError(_ARCHIVED_DETAIL)
     if session["status"] not in ("closed", "error"):
-        if service.runtime(session_id) is not None:
+        runtime = service.runtime(session_id)
+        if runtime is not None:
+            # #882: on a live idle session 「继续对话」 replays a confirmed
+            # empty turn's message (at most once); otherwise a no-op.
+            if session["status"] == "idle" and retry_empty_turn(service, session_id, runtime):
+                return service.get_session(session_id)
             return session
         # Live status without a runtime must not be respawned blind: the
         # startup reaper owns that reconciliation (marks it error, after

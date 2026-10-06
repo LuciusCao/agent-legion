@@ -8,9 +8,11 @@ capability is unavailable" — the agent never even asked for permission.
 
 Security model: the agent-side Bash tool is permission-gated by
 ``session/request_permission`` BEFORE ``terminal/create`` reaches us (kimi
-requests approval, the human answers, only then does it spawn). The methods
-here therefore only run commands the human already approved (or that were
-auto-approved by the platform's read-only policy). Output is capped at
+requests approval, the human answers, only then does it spawn). The server
+does not take that ordering on trust: every create must consume a grant
+minted by a human-answered (or allow-all) permission, the child gets an
+allowlisted environment (never the server's own), and the cwd is confined
+to the session root — see terminal_policy.py / terminal_grants.py (#921). Output is capped at
 ``output_byte_limit`` (the agent sets 4 MiB) with head-truncation to keep the
 retained tail, mirroring the protocol's truncation contract.
 
@@ -34,9 +36,11 @@ import logging
 import os
 import signal as signal_module
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from acp import RequestError
 from acp.schema import (
     CreateTerminalResponse,
     KillTerminalResponse,
@@ -44,6 +48,13 @@ from acp.schema import (
     TerminalExitStatus,
     TerminalOutputResponse,
     WaitForTerminalExitResponse,
+)
+
+from server.app.studio_chat.terminal_grants import TerminalGrants
+from server.app.studio_chat.terminal_policy import (
+    enter_pinned_cwd,
+    pinned_cwd,
+    terminal_env,
 )
 
 if TYPE_CHECKING:
@@ -77,6 +88,8 @@ class AcpTerminalStore:
 
     def __init__(self) -> None:
         self._terminals: dict[str, _Terminal] = {}
+        # Minted by AcpClient.request_permission, consumed by create_terminal.
+        self.grants = TerminalGrants()
 
     async def create(
         self,
@@ -91,25 +104,26 @@ class AcpTerminalStore:
         terminal_id = uuid4().hex
         limit = output_byte_limit or DEFAULT_OUTPUT_BYTE_LIMIT
         limit = max(limit, MIN_OUTPUT_BYTE_LIMIT)
-        # env arrives as EnvVariable models (name/value); None means inherit.
-        # When present, merge over the inherited environment (keeping
-        # PATH/HOME/...) instead of replacing it, matching the ACP reference
-        # client's behaviour — an agent that sends only overrides must not
-        # lose the base environment.
-        process_env: dict[str, str] | None = None
-        if env:
-            process_env = {**os.environ, **{str(item.name): str(item.value) for item in env}}
-        process = await asyncio.create_subprocess_exec(
-            command,
-            *(args or []),
-            cwd=cwd or default_cwd,
-            env=process_env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            # Own process group: kill/release must take down the whole tree
-            # (pipelines, `&` background children), not just the direct child.
-            start_new_session=True,
-        )
+        # env arrives as EnvVariable models (name/value) and is layered over
+        # an allowlisted base (PATH/HOME/locale...), never over os.environ:
+        # the server environment carries deployment secrets (#921).
+        process_env = terminal_env(env)
+        # The cwd is a pinned descriptor walked without following links; the
+        # child fchdir()s to it so no path is re-resolved at spawn (#921).
+        with pinned_cwd(cwd, default_cwd) as cwd_fd:
+            process = await asyncio.create_subprocess_exec(
+                command,
+                *(args or []),
+                env=process_env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                pass_fds=(cwd_fd,),
+                preexec_fn=partial(enter_pinned_cwd, cwd_fd),
+                # Own process group: kill/release must take down the whole
+                # tree (pipelines, `&` background children), not just the
+                # direct child.
+                start_new_session=True,
+            )
         terminal = _Terminal(process=process, byte_limit=limit)
         self._terminals[terminal_id] = terminal
         terminal.drain_task = asyncio.get_running_loop().create_task(self._drain(terminal))
@@ -260,6 +274,10 @@ class TerminalClientMixin:
         **kwargs: Any,
     ) -> CreateTerminalResponse:
         del session_id  # one store per handle; the id adds nothing here
+        if not self.terminals.grants.consume(command, args):
+            raise RequestError.invalid_request(
+                {"reason": "terminal/create without an approved permission request"}
+            )
         return await self.terminals.create(
             command=command,
             args=args,

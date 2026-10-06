@@ -11,21 +11,13 @@ from server.app.routes.failed_node_run_contracts import (
     FailedNodeRunItem,
     FailedNodeRunsResponse,
 )
-from server.app.routes.job_http import (
-    raise_job_http_error,
-    reject_mismatched_workflow_key,
-)
 from server.app.routes.job_rerun_by_failure_contracts import (
     JobRerunByFailureRequest,
     JobRerunByFailureResponse,
     JobRerunByFailureResultResponse,
 )
 from server.app.services.failed_node_runs import FailedNodeRunQueryService
-from server.app.services.job_errors import JobServiceError
 from server.app.services.job_rerun import JobRerunService
-
-# #211 Phase 2: query-param deprecation wording (server-side default).
-_DEPRECATED_QUERY = "Deprecated: defaults to the workspace id from the path (equal since schema v62); removal is tracked in #211 (deprecated field drops by 2026-10-31)."
 
 
 def create_failed_node_runs_router(
@@ -46,26 +38,15 @@ def create_failed_node_runs_router(
         # the clause and return the unfiltered list.
         category: Annotated[str | None, Query(min_length=1)] = None,
         detail: Annotated[str | None, Query(min_length=1)] = None,
-        workflow_key: Annotated[
-            str | None,
-            Query(deprecated=True, description=_DEPRECATED_QUERY),
-        ] = None,
         since: datetime | None = None,
     ) -> FailedNodeRunsResponse:
-        # Codex P1 on #307 (guard parity): with the read-layer predicate gone,
-        # a mismatched explicit key can no longer narrow the list — reject it
-        # instead of silently widening the result.
-        reject_mismatched_workflow_key(workspace_id, workflow_key)
-        try:
-            rows = queries.list_failed_node_runs(
-                workspace_id,
-                category=category,
-                detail=detail,
-                since=since,
-            )
-            return FailedNodeRunsResponse(runs=[FailedNodeRunItem(**row) for row in rows])
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        rows = queries.list_failed_node_runs(
+            workspace_id,
+            category=category,
+            detail=detail,
+            since=since,
+        )
+        return FailedNodeRunsResponse(runs=[FailedNodeRunItem(**row) for row in rows])
 
     @router.post(
         "/workspaces/{workspace_id}/jobs/rerun-by-failure",
@@ -76,19 +57,11 @@ def create_failed_node_runs_router(
         workspace_id: str,
         payload: JobRerunByFailureRequest,
     ) -> JobRerunByFailureResponse:
-        # #211 Phase 2: absent workflow_key defaults to the path workspace_id
-        # (equal since v62); read via model_dump because the deprecated field
-        # attribute raises the deprecation warning the suite escalates.
-        body = payload.model_dump()
-        # Codex P1 on #307 (guard parity): reject a mismatched explicit key —
-        # the eligibility filter no longer narrows by it.
-        reject_mismatched_workflow_key(workspace_id, body.get("workflow_key"))
         results = job_rerun.rerun_by_failure_category(
             workspace_id,
             payload.category,
             strategy=payload.strategy,
             job_ids=payload.job_ids,
-            workflow_key=body.get("workflow_key") or workspace_id,
             job_filter=payload.filter.to_filter() if payload.filter is not None else None,
             exclude_ids=payload.exclude_ids,
             from_node_key=payload.from_node_key,

@@ -19,7 +19,6 @@ import tarfile
 import threading
 import time
 import uuid
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +46,7 @@ from server.app.services.runtime_reserved_config import TIMEOUT_BASE_MANIFEST_KE
 from server.app.settings import Settings
 from server.app.storage_paths import ensure_dir_once
 from server.app.workflows.definition import WorkflowNode
+from server.app.workflows.workflow_node_execution import node_execution_payload
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +268,10 @@ class CodeDispatchService:
             log_path=log_path,
             inputs=inputs,
             expected_outputs=tuple(node.outputs),
-            runtime={"node_execution": asdict(node.execution), **(shard_runtime or {})},
+            runtime={
+                "node_execution": node_execution_payload(node.execution),
+                **(shard_runtime or {}),
+            },
         )
         stage_agent_inputs(self.artifact_store, context, manifest)
         if self.broker.bundle_dir is None:

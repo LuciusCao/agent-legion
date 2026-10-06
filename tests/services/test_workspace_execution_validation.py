@@ -38,9 +38,8 @@ def _workflow() -> WorkflowDefinition:
     )
 
 
-def _limit(node_key: str, concurrency_limit: int, workflow_key: str = "demo_workflow") -> dict:
+def _limit(node_key: str, concurrency_limit: int) -> dict:
     return {
-        "workflow_key": workflow_key,
         "node_key": node_key,
         "concurrency_limit": concurrency_limit,
     }
@@ -77,12 +76,6 @@ def test_unknown_workflow_node_is_rejected() -> None:
         validate_workspace_node_limits(
             workflow=_workflow(),
             node_limits=[_limit("missing_node", 1)],
-            code_capacity=16,
-        )
-    with pytest.raises(InvalidOperationError, match="Unknown Workflow Node"):
-        validate_workspace_node_limits(
-            workflow=_workflow(),
-            node_limits=[_limit("fetch_items", 1, workflow_key="other_flow")],
             code_capacity=16,
         )
 

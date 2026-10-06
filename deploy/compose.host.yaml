@@ -164,6 +164,12 @@ services:
     volumes:
       - host-data:/var/lib/agent-legion
       - ${AGENT_SKILLS_DIR:-../skills}:/root/.agents/skills:ro
+    # 网络双挂（issue #489）：postgres/seaweedfs/rustfs 留在默认网络，
+    # worker 只挂专用 worker-ctrl 网络（隔离理由见 worker 服务注释）——
+    # host 是两个网络间唯一的桥，worker 的 host_url 出站不受影响。
+    networks:
+      - default
+      - worker-ctrl
     ports:
       - ${AGENT_LEGION_HOST_BIND:-127.0.0.1}:8000:8000
     stop_grace_period: 25s
@@ -204,6 +210,22 @@ services:
       - ${VELITES_CONFIG_DIR:-../velites-config}:/root/.velites:ro
       - worker-data:/var/lib/agent-legion-worker
       - worker-control:/var/lib/agent-legion-worker-control
+    # 网络隔离（issue #489 P1）：worker 控制台 GET / 无鉴权（token 内嵌页面
+    # 的设计前提），同网 peer 都能 curl http://worker:8787/ 提取 control
+    # token——默认回环发布下 service 会内嵌 token（判定只看宿主侧发布面），
+    # 若与 postgres/seaweedfs/rustfs 共享默认网络，「token 泄给同网段」在
+    # compose 内网上被重新引入。worker 的出站依赖只有 host 一个 peer：
+    # host_url（register/claim/heartbeat/result，含旧 CAS 产物通道）经
+    # worker-ctrl 解析 host；材料/产物直传 S3 走 AGENT_LEGION_S3_PUBLIC_
+    # ENDPOINT 签发的 presigned URL——宿主发布地址而非 compose 服务名
+    # （s3_settings.py：presign 必须按客户端可达地址签发），worker 也不持
+    # 有对象存储凭据（material_fetch.py）；LLM gateway 经 NAT 出网。把
+    # PUBLIC_ENDPOINT 覆盖为服务名（如 http://seaweedfs:8333）时 worker
+    # 将不可达：产物直传自动回落经 host 的 CAS 通道（upload 队列的既有
+    # 回落语义），覆盖值须用宿主发布地址。host 容器仍可达 worker 控制台
+    # ——它是控制面本体（scoped token 的签发方），属可信主体。
+    networks:
+      - worker-ctrl
     ports:
       - ${AGENT_WORKER_UI_BIND:-127.0.0.1}:8787:8787
     # Optional provider credentials referenced by /root/.velites/models.json.
@@ -225,6 +247,12 @@ services:
       # 监听地址不能推导浏览器可达地址；显式配置后才自报 labels.console_url。
       # 未配置或留空均不自报，避免把通配绑定或容器地址作为浏览器入口。
       AGENT_WORKER_CONSOLE_URL: ${AGENT_WORKER_CONSOLE_URL-}
+      # 宿主侧实际发布地址（issue #489）：容器内进程必绑 0.0.0.0（端口映射
+      # 前提），但控制面 token 是否内嵌页面取决于宿主侧发布面——与上方
+      # ports 行同一 ${AGENT_WORKER_UI_BIND} 插值（.env 一处改、两处同步），
+      # service 据此判定：发布回环 → token 内嵌；发布非回环 → 不内嵌 +
+      # warning（见 docs/agent-worker-deployment.md §控制面鉴权）。
+      AGENT_WORKER_UI_EFFECTIVE_BIND: ${AGENT_WORKER_UI_BIND:-127.0.0.1}
     stop_grace_period: 30s
     healthcheck:
       # Healthy = 服务可达，且控制面未进入 failed，且（Worker 进程在跑或尚未配置）。
@@ -242,6 +270,12 @@ secrets:
     file: ${POSTGRES_PGPASS_FILE:-./secrets/postgres_pgpass}
   vault_master_key:
     file: ${VAULT_MASTER_KEY_FILE:-./secrets/vault_master_key}
+
+networks:
+  # worker 专用网络（issue #489 P1）：host 双挂 default + worker-ctrl，
+  # worker 单挂 worker-ctrl——postgres/seaweedfs/rustfs 不可达无鉴权的
+  # worker 控制台（完整理由见 worker 服务的 networks 注释）。
+  worker-ctrl: {}
 
 volumes:
   postgres-data:

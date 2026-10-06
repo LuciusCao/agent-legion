@@ -60,7 +60,6 @@ const studioStub = {
 const REVISION = {
   id: 'rev-1',
   workspace_id: 'ws1',
-  workflow_key: 'demo',
   version: 1,
   status: 'active',
   definition_hash: 'abcdef1234567890',
@@ -288,7 +287,6 @@ describe('StudioCanvasIslands（#799 双浮岛 + #804 定案重组）', () => {
     const revision = {
       id: 'rev-1',
       workspace_id: 'ws1',
-      workflow_key: 'demo',
       version: 1,
       status: 'active',
       definition_hash: 'abcdef1234567890',

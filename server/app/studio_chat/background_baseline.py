@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from server.app.studio_chat.kimi_code_tasks import kimi_code_task_root
 from server.app.studio_chat.kimi_task_store import completed_tasks, task_root
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,11 @@ class CompletionBaseline:
 
 
 def capture_resume_baseline(cwd: str, acp_session_id: str | None) -> CompletionBaseline | None:
-    if not acp_session_id or (root := task_root(cwd, acp_session_id)) is None:
+    if not acp_session_id:
+        return None
+    # A Kimi Code session (#972) is found by its directory; otherwise V1.
+    root = kimi_code_task_root(cwd, acp_session_id) or task_root(cwd, acp_session_id)
+    if root is None:
         return None
     try:
         return CompletionBaseline(

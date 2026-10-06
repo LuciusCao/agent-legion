@@ -29,7 +29,7 @@ IMAGE_REPO="ghcr.io/luciuscao/agent-legion-worker"
 # 默认钉在已发布版本；--version / --velites-version 或同名环境变量覆盖。
 # 注意 compose 文件按 worker-v<version> tag ref 拉取：自定义版本必须存在
 # 对应 tag（即经过 worker-image-release workflow 发布过）。
-WORKER_VERSION="${AGENT_WORKER_VERSION:-0.7.15}"
+WORKER_VERSION="${AGENT_WORKER_VERSION:-0.7.16}"
 VELITES_VERSION="${VELITES_VERSION:-0.5.6}"
 TARGET="${AGENT_WORKER_INSTALL_DIR:-$HOME/agent-legion-worker}"
 HOST_URL=""
@@ -52,7 +52,7 @@ usage() {
   --name NAME           显示名（默认 "Worker on <hostname>"）
   --models-json FILE    安装该文件为 velites-config/models.json（已存在则
                         覆盖——显式传入即声明为本次的期望内容）
-  --version TAG         worker 镜像 tag（默认 0.7.15；须存在 worker-v<TAG>
+  --version TAG         worker 镜像 tag（默认 0.7.16；须存在 worker-v<TAG>
                         发布 tag）
   --velites-version VER velites 二进制版本（默认 0.5.6）
   --no-up               只组装文件，不执行 docker compose up
@@ -389,10 +389,71 @@ ui_host_final="${ui_host_final:-127.0.0.1}"
 ui_port_final="$(sed -n 's/^AGENT_WORKER_UI_PORT=//p' ./.env 2>/dev/null | tail -1)"
 ui_port_final="${ui_port_final:-8787}"
 
+# 控制台 token 体验按实际安装的版本分支：worker 0.7.16 起默认 loopback
+# 发布下控制 token 自动内嵌页面（以控制面 Host 头校验为前提）；旧版本
+# 页面恒要求手动输入，文案必须与产物行为一致。EFFECTIVE_BIND 判定是
+# compose 与镜像两侧的组合能力，两边同一 worker-v<version> tag 发布，比
+# 镜像版本即可。-rN 重发后缀（0.7.16-r1）被正则的 `.*` 吸收、基础版本
+# 比较不受影响；不匹配 major.minor.patch 形态的 tag（如 latest）保守按
+# 旧版处理（手动取 token 的文案永不错）。
+worker_version_cmp="$(printf '%s\n' "$WORKER_VERSION" | sed -n 's/^\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2 \3/p')"
+token_embedded=no
+if [ -n "$worker_version_cmp" ]; then
+  # shellcheck disable=SC2086 # 刻意按空白拆成三段
+  set -- $worker_version_cmp
+  if [ "$1" -gt 0 ] || [ "$2" -gt 7 ] || { [ "$2" -eq 7 ] && [ "$3" -ge 16 ]; }; then
+    token_embedded=yes
+  fi
+fi
+# 版本够但暴露面非回环（.env 的发布地址或控制台地址带非回环主机）时
+# service 不内嵌 token（#923），提示改走手动取 token 文案。
+console_url_final="$(sed -n 's/^AGENT_WORKER_CONSOLE_URL=//p' ./.env 2>/dev/null | tail -1)"
+console_host_final="${console_url_final#*://}"
+console_host_final="${console_host_final%%/*}"
+case "$console_host_final" in
+  \[*) console_host_final="${console_host_final%%]*}]" ;;
+  *) console_host_final="${console_host_final%%:*}" ;;
+esac
+is_loopback_host() {
+  case "$1" in
+    ''|localhost|127.*|'[::1]'|::1) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+if [ "$token_embedded" = "yes" ] && { ! is_loopback_host "$ui_host_final" || ! is_loopback_host "$console_host_final"; }; then
+  token_embedded=exposed
+fi
+
+print_token_help() {
+  # $1 = embedded|manual：token 获取指引的两种文案（命令相同，说明随版本）
+  if [ "$1" = "embedded" ]; then
+    echo "     默认 loopback 发布（${ui_host_final}）下控制 token 已内嵌页面（worker 0.7.16 起），"
+    echo "     打开即用，无需手动输入；若 .env 把 AGENT_WORKER_UI_BIND 改为非回环"
+    echo "     地址（页面不再内嵌 token），手动取一次："
+  elif [ "$1" = "exposed" ]; then
+    echo "     .env 中的发布地址（${ui_host_final}）或控制台地址非回环：页面不内嵌"
+    echo "     控制 token，手动取一次："
+  else
+    echo "     worker 0.7.16 起默认 loopback 发布会自动内嵌控制 token；当前安装的"
+    echo "     ${WORKER_VERSION} 页面仍需手动输入 token，取一次："
+  fi
+  echo "       docker compose exec worker cat /var/lib/agent-legion-worker-control/control_token"
+  echo "     （在 ${TARGET} 执行；页面会把它存进 localStorage，日常无需重复）"
+}
+
+if [ "$token_embedded" = "yes" ]; then
+  token_mode="embedded"
+elif [ "$token_embedded" = "exposed" ]; then
+  token_mode="exposed"
+else
+  token_mode="manual"
+fi
+
 cat <<EOF
 
 安装完成。后续步骤：
-  1. 打开 Worker 控制台 http://${ui_host_final}:${ui_port_final}（本机浏览器）；
+  1. 打开 Worker 控制台 http://${ui_host_final}:${ui_port_final}（本机浏览器）
+$(print_token_help "$token_mode")
   2. 在「Workspace 访问」粘贴 Host 签发的 scoped token（Host Web UI 的
      workspace 设置 → Agent 与 Worker）；
   3. 点「开始领取」（claim_enabled 每次进程启动都重置为关闭，刻意设计）；

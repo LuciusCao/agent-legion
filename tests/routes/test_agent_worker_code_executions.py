@@ -55,7 +55,7 @@ def _seed_code_request(
     """Enqueue a self-contained kind='code' request straight into the broker."""
     with write_transaction(app.state.job_db.dsn_identity) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'demo_workflow')"
+            "insert into workspaces(id, name) values ('test-workspace', 'Test')"
             " on conflict(id) do nothing"
         )
         conn.execute(

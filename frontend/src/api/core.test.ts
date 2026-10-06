@@ -120,3 +120,28 @@ describe('api 401 handling', () => {
     expect((error as { status?: number }).status).toBe(401)
   })
 })
+
+describe('api batch selection limit (#712)', () => {
+  it('localizes the oversized batch selection 422', async () => {
+    global.fetch = mockFetchResponse({
+      ok: false,
+      status: 422,
+      body: {
+        detail: {
+          message: 'Batch selection matches more than 5000 jobs',
+          code: 'batch_selection_too_large',
+          limit: 5000,
+        },
+      },
+    })
+
+    const error = await api('/api/workspaces/ws/jobs/batch-rerun', {
+      method: 'POST',
+      body: '{}',
+    }).catch((err: unknown) => err)
+    expect((error as Error).message).toBe(
+      '所选任务超过单次批量操作上限（5000 个），请缩小筛选范围或分批操作'
+    )
+    expect((error as { status?: number }).status).toBe(422)
+  })
+})

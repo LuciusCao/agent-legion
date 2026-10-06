@@ -78,7 +78,7 @@ def list_service(job_db, settings):
 def _make_workspace(job_db, slug: str) -> str:
     from tests.helpers import publish_builtin_revision
 
-    workspace = job_db.create_workspace(slug, default_workflow_key=slug)
+    workspace = job_db.create_workspace(slug)
     publish_builtin_revision(job_db, workspace["id"])
     return workspace["id"]
 

@@ -25,9 +25,13 @@ Version history:
   meets a pre-v5 Host gets 404 and falls back to per-execution beats.
 
 Field-level deprecations ride without a version bump while the wire shape is
-unchanged: the claim body's workflow_key is deprecated (#211 Phase 2 — equals
-workspace_id since schema v62); its removal is gated on the Phase 3/4 window
-and will carry a version bump.
+unchanged; a deprecated field's removal rides without one too once no
+supported Worker reads it. The claim body's workflow_key (#211, equal to
+workspace_id since schema v62) is removed in M3 without a bump: no Worker
+since the #303 release (v0.5.0) reads it — Workers key on workspace_id — and
+every Worker older than that is already outside the closed #547 window. The
+manifest's workflow_key (exposed to node code via the runtime dict) is a
+separate surface and stays.
 
 Response-shape retirement without a bump (#547): the claim endpoint answers
 ``BatchAgentClaimResponse`` (``{"claims": [...]}``, one element at the

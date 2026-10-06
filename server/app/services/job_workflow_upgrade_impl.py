@@ -43,10 +43,17 @@ claim 落列，本地池 code 节点与 Worker/Agent 节点同权可证明。
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.jobs import JobQueries
+from server.app.services.agent_node_profile import (
+    AgentNodeProfile,
+    build_capability_index,
+    resolve_agent_node_profile,
+)
+from server.app.services.agent_node_profile_catalog import fresh_legacy_agent_catalog
 from server.app.services.job_workflow_upgrade_skill import read_skill_lock, skill_excluded_nodes
 from server.app.services.node_config_runtime import runtime_mutable_keys
 from server.app.workflows.definition import WorkflowDefinition
@@ -74,24 +81,21 @@ def _latest_execution_identities(
     return job_db.latest_done_request_identities(job_id, node_keys)
 
 
-def _published_catalog(job_db: JobQueries, workspace_id: str) -> dict[str, AgentDefinition] | None:
+def _published_catalog(
+    job_db: JobQueries, workspace_id: str
+) -> Mapping[str, AgentDefinition] | None:
     """workspace 的 published Agent catalog（直读，绕过 5s 热路径缓存）。
 
-    P1-1 身份比较是安全敏感读（产物冒充检查）：``published_agent_definitions``
-    的 ~5s 缓存会把「重发布不可见」的 stale 窗口人为拉宽（复审 MEDIUM-1
-    注记）——升级是低频管理操作，这里直读 store（一次 DB 往返）消除该
-    拉宽面。plan 到应用阶段的 TOCTOU 由事务内重验收口；重验到提交的
-    窗口由 Agent/node-code 发布路径共享的 workspace 事务锁封闭。本函数
-    只去掉缓存这个额外放大器；读取失败返回 None（保守处理）。"""
-    from server.app.services.versioned_entities import EntityType, VersionedEntityStore
-
+    P1-1 身份比较是安全敏感读（产物冒充检查）：执行档案门面的缓存读
+    （``legacy_agent_catalog``）会把「重发布不可见」的 stale 窗口人为拉宽
+    （复审 MEDIUM-1 注记）——升级是低频管理操作，这里走门面的
+    ``fresh_legacy_agent_catalog``（经 JobQueries 直读，一次 DB 往返）消除
+    该拉宽面。plan 到应用阶段的
+    TOCTOU 由事务内重验收口；重验到提交的窗口由 Agent/node-code 发布路径
+    共享的 workspace 事务锁封闭。本函数只去掉缓存这个额外放大器；读取
+    失败返回 None（保守处理）。"""
     try:
-        entity_type: EntityType = "agent"
-        entities = VersionedEntityStore(job_db, entity_type).list_published(workspace_id)
-        return {
-            entity.entity_key: AgentDefinition.model_validate(entity.definition)
-            for entity in entities
-        }
+        return fresh_legacy_agent_catalog(job_db, workspace_id)
     except Exception:
         # #204 broad-except audit: catalog 读取失败（DB 断连等数据态故障）
         # 降级为「agent 面全部不可证明」——保守重跑，不让升级 500。
@@ -100,37 +104,34 @@ def _published_catalog(job_db: JobQueries, workspace_id: str) -> dict[str, Agent
 
 
 def _resolved_agent_nodes(
-    catalog: dict[str, AgentDefinition] | None, definition: WorkflowDefinition
-) -> dict[str, AgentDefinition]:
-    """node_key → agent 节点解析到的唯一 published Agent 定义。
+    catalog: Mapping[str, AgentDefinition] | None, definition: WorkflowDefinition
+) -> dict[str, AgentNodeProfile]:
+    """node_key → agent 节点的执行档案（#932 门面，与 dispatch 同款解析）。
 
-    与 ``derive_agent_routes`` 同款 capability → 唯一 published 解析；
+    legacy 来源 = capability → 唯一 published Agent（同 ``derive_agent_routes``）；
     0 个或多个 published（数据态漂移）、catalog 不可用都不解析（调用方
-    按不可证明处理）。
+    按不可证明处理）。自含节点（#933 ``source='node'``）不读 catalog，
+    catalog 不可用时仍按节点档案解析。
     """
     if catalog is None:
-        return {}
-    by_capability: dict[str, list[AgentDefinition]] = {}
-    for agent_definition in catalog.values():
-        by_capability.setdefault(agent_definition.capability, []).append(agent_definition)
-    resolved: dict[str, AgentDefinition] = {}
+        catalog = {}
+    index = build_capability_index(catalog)
+    resolved: dict[str, AgentNodeProfile] = {}
     for key, node in definition.executable_nodes.items():
-        if node.node_type != "agent":
-            continue
-        candidates = by_capability.get(node.capability, [])
-        if len(candidates) == 1:
-            resolved[key] = candidates[0]
+        profile = resolve_agent_node_profile(node, catalog, index=index)
+        if profile is not None:
+            resolved[key] = profile
     return resolved
 
 
 def _current_agent_identities(
-    catalog: dict[str, AgentDefinition] | None, definition: WorkflowDefinition
+    catalog: Mapping[str, AgentDefinition] | None, definition: WorkflowDefinition
 ) -> dict[str, str]:
-    """node_key → agent 节点当前 published 实现的定义哈希。"""
+    """node_key → agent 节点当前实现身份（legacy = 定义哈希，自含节点 = 档案哈希，#933）。"""
     identities: dict[str, str] = {}
-    for key, agent_definition in _resolved_agent_nodes(catalog, definition).items():
+    for key, profile in _resolved_agent_nodes(catalog, definition).items():
         try:
-            identities[key] = agent_definition.definition_hash()
+            identities[key] = profile.identity_hash()
         except Exception:
             # #204 broad-except audit: 纯内存序列化失败即数据态损坏，
             # 该节点按不可证明处理。
@@ -139,13 +140,13 @@ def _current_agent_identities(
 
 
 def _agent_definition_mutable_nodes(
-    catalog: dict[str, AgentDefinition] | None, definition: WorkflowDefinition
+    catalog: Mapping[str, AgentDefinition] | None, definition: WorkflowDefinition
 ) -> frozenset[str]:
-    """Agent 定义 schema 含 runtime_mutable 键的 agent 节点集（复审 HIGH-2）。"""
+    """执行档案 schema 含 runtime_mutable 键的 agent 节点集（复审 HIGH-2）。"""
     return frozenset(
         key
-        for key, agent_definition in _resolved_agent_nodes(catalog, definition).items()
-        if runtime_mutable_keys(agent_definition.config_schema)
+        for key, profile in _resolved_agent_nodes(catalog, definition).items()
+        if runtime_mutable_keys(profile.config_schema)
     )
 
 

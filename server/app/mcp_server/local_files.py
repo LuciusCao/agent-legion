@@ -12,14 +12,14 @@ import hashlib
 import json
 import os
 import re
-import stat
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import anyio
 
+from server.app import fs_safety
 from server.app.mcp_server.tool_client import ToolClient
 
 MAX_BYTES = 16 * 1024 * 1024
@@ -63,31 +63,27 @@ def _parent(workspace_id: str, path: str, *, create: bool = False):
     target = Path(path)
     if target.is_absolute():
         target = target.relative_to(root)
-    if not target.parts or ".." in target.parts:
-        raise ValueError("Local path must stay inside the workspace staging directory")
-    # data/ and studio-mcp-files/ are also opened without following links.
-    fd = os.open(Path.cwd().resolve(), os.O_RDONLY | os.O_DIRECTORY)
     try:
-        for part in ("data", "studio-mcp-files", workspace_id, *target.parts[:-1]):
-            if create:
-                with suppress(FileExistsError):
-                    os.mkdir(part, mode=0o700, dir_fd=fd)
-            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            os.close(fd)
-            fd = child
+        parts = fs_safety.relative_parts(target)
+    except fs_safety.PathEscapeError:
+        raise ValueError("Local path must stay inside the workspace staging directory") from None
+    # data/ and studio-mcp-files/ are also opened without following links.
+    with fs_safety.open_dir_beneath(
+        Path.cwd().resolve(),
+        ("data", "studio-mcp-files", workspace_id, *parts[:-1]),
+        create=create,
+    ) as fd:
         yield fd, target.name, root / target
-    finally:
-        os.close(fd)
 
 
 def read_text(workspace_id: str, path: str, *, max_bytes: int | None = None) -> str:
     limit = MAX_BYTES if max_bytes is None else max_bytes
     with _parent(workspace_id, path) as (parent, name, _):
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        try:
+            fd = fs_safety.open_regular_at(parent, name)
+        except fs_safety.NotRegularFileError:
+            raise ValueError("Local source must be a regular file without hard links") from None
         with os.fdopen(fd, "rb") as source:
-            info = os.fstat(source.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-                raise ValueError("Local source must be a regular file without hard links")
             data = source.read(limit + 1)
     if len(data) > limit:
         raise ValueError(f"Local source exceeds {limit} bytes")
@@ -113,9 +109,7 @@ def _export(workspace_id: str, output_path: str, response: str) -> str:
         raise ValueError(f"Export exceeds {MAX_JSON_BYTES} bytes")
     with _parent(workspace_id, output_path, create=True) as (parent, name, path):
         # Export never overwrites edits or follows an existing symlink.
-        fd = os.open(
-            name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent
-        )
+        fd = fs_safety.create_new_at(parent, name, 0o600)
         try:
             with os.fdopen(fd, "wb") as target:
                 target.write(data)

@@ -11,14 +11,12 @@ surface; membership/role checks come from the parent's ``secured()`` mount
 from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import reject_studio_agent_scope
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_chat_contracts import (
     StudioChatSessionDeleteResponse,
     StudioChatSessionRecord,
     StudioChatSessionResponse,
     StudioChatSessionUpdateRequest,
 )
-from server.app.services.job_errors import JobServiceError
 from server.app.studio_chat.service import StudioChatService
 
 
@@ -32,10 +30,7 @@ def create_studio_chat_session_manage_router(service: StudioChatService) -> APIR
     def rename_session(
         workspace_id: str, session_id: str, payload: StudioChatSessionUpdateRequest
     ) -> StudioChatSessionResponse:
-        try:
-            session = service.rename_session(session_id, workspace_id, payload.title.strip())
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        session = service.rename_session(session_id, workspace_id, payload.title.strip())
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
 
     # Soft delete (#872): DELETE on the session path already means *close*
@@ -47,10 +42,7 @@ def create_studio_chat_session_manage_router(service: StudioChatService) -> APIR
         response_model=StudioChatSessionDeleteResponse,
     )
     def delete_session(workspace_id: str, session_id: str) -> StudioChatSessionDeleteResponse:
-        try:
-            service.delete_session(session_id, workspace_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        service.delete_session(session_id, workspace_id)
         return StudioChatSessionDeleteResponse(deleted=session_id)
 
     # Archive (#924): the recoverable list cleanup, same verb style as
@@ -62,10 +54,7 @@ def create_studio_chat_session_manage_router(service: StudioChatService) -> APIR
         response_model=StudioChatSessionResponse,
     )
     def archive_session(workspace_id: str, session_id: str) -> StudioChatSessionResponse:
-        try:
-            session = service.archive_session(session_id, workspace_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        session = service.archive_session(session_id, workspace_id)
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
 
     @router.post(
@@ -73,10 +62,7 @@ def create_studio_chat_session_manage_router(service: StudioChatService) -> APIR
         response_model=StudioChatSessionResponse,
     )
     def unarchive_session(workspace_id: str, session_id: str) -> StudioChatSessionResponse:
-        try:
-            session = service.unarchive_session(session_id, workspace_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        session = service.unarchive_session(session_id, workspace_id)
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
 
     return router

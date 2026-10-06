@@ -5,7 +5,7 @@ from server.app.services.job_intake import JobIntakeService
 
 
 def test_create_batch_requires_existing_active_revision(job_db, settings, agent_manager):
-    workspace = job_db.create_workspace("ws-no-revision", default_workflow_key="demo_workflow")
+    workspace = job_db.create_workspace("ws-no-revision")
     service = JobIntakeService(
         job_db,
         settings,
@@ -34,9 +34,7 @@ def test_create_batch_compensation_failure_does_not_mask_original_error(
         seed_workspace_agent_definitions,
     )
 
-    workspace = job_db.create_workspace(
-        "ws-comp", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("ws-comp")
     seed_workspace_agent_definitions(workspace["id"])
     # The demo workflow retired intake modes (#154); the job-batches intake
     # path needs the legacy variant published as the active revision.
@@ -81,9 +79,7 @@ def test_create_batch_compensation_programming_error_propagates(
         seed_workspace_agent_definitions,
     )
 
-    workspace = job_db.create_workspace(
-        "ws-comp2", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = job_db.create_workspace("ws-comp2")
     seed_workspace_agent_definitions(workspace["id"])
     WorkflowRevisionService(job_db).ensure_active_revision(
         workspace["id"], load_demo_legacy_intake_definition()
@@ -126,7 +122,7 @@ def test_create_batch_chunk_failure_keeps_partial_run_failed(job_db, settings, a
         seed_workspace_agent_definitions,
     )
 
-    workspace = job_db.create_workspace("ws-chunk-fail", default_workflow_key="demo_workflow")
+    workspace = job_db.create_workspace("ws-chunk-fail")
     seed_workspace_agent_definitions(workspace["id"])
     WorkflowRevisionService(job_db).ensure_active_revision(
         workspace["id"], load_demo_legacy_intake_definition()
@@ -193,7 +189,7 @@ def test_create_batch_before_first_chunk_failure_deletes_run(
         seed_workspace_agent_definitions,
     )
 
-    workspace = job_db.create_workspace("ws-empty-fail", default_workflow_key="demo_workflow")
+    workspace = job_db.create_workspace("ws-empty-fail")
     seed_workspace_agent_definitions(workspace["id"])
     WorkflowRevisionService(job_db).ensure_active_revision(
         workspace["id"], load_demo_legacy_intake_definition()

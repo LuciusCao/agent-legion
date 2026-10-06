@@ -18,11 +18,9 @@ from server.app.routes.job_contracts import (
     WorkspaceStatsResponse,
     WorkspaceUpdateRequest,
 )
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workspace_contracts import WorkspaceRecord
 from server.app.routes.workspace_runtime_models import create_workspace_runtime_models_router
 from server.app.scheduler_wakeup import notify_schedulable_work, reload_worker_scan_entries
-from server.app.services.job_errors import JobServiceError
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.settings import Settings
 
@@ -53,12 +51,9 @@ def create_workspaces_router(
         # (enforce_scoped_workspace_binding's read-side rule). The identity
         # mapping is shared with the dashboard SSE stream (#881).
         member_user_id, bound_workspace_id = workspace_visibility_scope(user)
-        try:
-            visible = service.list_visible_workspaces(
-                member_user_id=member_user_id, bound_workspace_id=bound_workspace_id
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        visible = service.list_visible_workspaces(
+            member_user_id=member_user_id, bound_workspace_id=bound_workspace_id
+        )
         return WorkspacesResponse(workspaces=[WorkspaceRecord.model_validate(w) for w in visible])
 
     @guarded.post("/workspaces", response_model=WorkspaceResponse)
@@ -67,48 +62,32 @@ def create_workspaces_router(
         payload: WorkspaceCreateRequest,
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> WorkspaceResponse:
-        try:
-            workspace = service.create(payload.model_dump())
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
-        # A workspace with a workflow key is a worker scan target (schema
-        # v50): hot-reload the scan list so it is picked up without a
-        # restart, then wake the poll loop.
-        if str(workspace.get("default_workflow_key") or ""):
-            reload_worker_scan_entries(request)
-            notify_schedulable_work()
+        workspace = service.create(payload.model_dump())
+        # Every workspace is a worker scan target (schema v50): hot-reload
+        # the scan list so it is picked up without a restart, then wake the
+        # poll loop.
+        reload_worker_scan_entries(request)
+        notify_schedulable_work()
         return WorkspaceResponse(workspace=WorkspaceRecord.model_validate(workspace))
 
     @router.get("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
     def get_workspace(workspace_id: str) -> WorkspaceResponse:
-        try:
-            workspace = WorkspaceRecord.model_validate(service.get(workspace_id))
-            return WorkspaceResponse(workspace=workspace)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        workspace = WorkspaceRecord.model_validate(service.get(workspace_id))
+        return WorkspaceResponse(workspace=workspace)
 
     @guarded.patch("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
     def update_workspace(workspace_id: str, payload: WorkspaceUpdateRequest) -> WorkspaceResponse:
-        try:
-            workspace = service.update(workspace_id, payload.model_dump(exclude_unset=True))
-            return WorkspaceResponse(workspace=WorkspaceRecord.model_validate(workspace))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        workspace = service.update(workspace_id, payload.model_dump(exclude_unset=True))
+        return WorkspaceResponse(workspace=WorkspaceRecord.model_validate(workspace))
 
     @guarded.delete("/workspaces/{workspace_id}", response_model=DeleteWorkspaceResponse)
     def delete_workspace(workspace_id: str) -> DeleteWorkspaceResponse:
-        try:
-            service.delete(workspace_id)
-            return DeleteWorkspaceResponse(deleted=workspace_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        service.delete(workspace_id)
+        return DeleteWorkspaceResponse(deleted=workspace_id)
 
     @router.get("/workspaces/{workspace_id}/stats", response_model=WorkspaceStatsResponse)
     def get_workspace_stats(workspace_id: str) -> WorkspaceStatsResponse:
-        try:
-            return WorkspaceStatsResponse(**service.stats(workspace_id))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return WorkspaceStatsResponse(**service.stats(workspace_id))
 
     @router.get(
         "/workspaces/{workspace_id}/events",

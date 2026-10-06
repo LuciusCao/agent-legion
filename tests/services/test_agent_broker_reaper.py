@@ -23,7 +23,7 @@ def _insert_request(
 ) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'demo_workflow')"
+            "insert into workspaces(id, name) values ('test-workspace', 'Test')"
             " on conflict(id) do nothing"
         )
         conn.execute(

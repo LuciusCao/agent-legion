@@ -22,8 +22,8 @@ export async function fetchActiveRevisionOrNull(
 
 /**
  * Studio 空态模板：workspace 存在但从未发布 revision 时，注入最小单节点
- * YAML 作为草稿起点（key 钉在 workspace default_workflow_key，publish
- * 校验要求两者一致）。workspace 本身不存在时返回 null（按加载失败处理）。
+ * YAML 作为草稿起点（key 钉在 workspace id——schema v62 起 id 即 workflow
+ * key，publish 校验要求两者一致）。workspace 本身不存在时返回 null（按加载失败处理）。
  */
 export function resolveEmptyTemplateYaml(
   data: { active: unknown; workspaces: WorkspaceRecord[] } | undefined,
@@ -32,6 +32,6 @@ export function resolveEmptyTemplateYaml(
   if (!data || data.active !== null || !workspaceId) return null
   const workspace = data.workspaces.find((w) => w.id === workspaceId)
   if (!workspace) return null
-  const key = workspace.default_workflow_key
+  const key = workspace.id
   return `key: ${key}\nlabel: ${key}\nnodes:\n  _start:\n    type: start\n  intake:\n    type: code\n    capability: intake\n    after: [_start]\n`
 }

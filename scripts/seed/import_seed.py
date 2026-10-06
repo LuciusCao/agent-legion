@@ -185,7 +185,8 @@ def step1_workspaces(
     workspaces = listed.get("workspaces") or []
     bound: dict[str, list[str]] = {w["key"]: [] for w in seed["workflows"]}
     for workspace in workspaces:
-        key = str(workspace.get("default_workflow_key") or "")
+        # The workspace id is the workflow key (schema v62 / #211 M3).
+        key = str(workspace.get("id") or "")
         if key in bound:
             bound[key].append(str(workspace["id"]))
 
@@ -200,11 +201,7 @@ def step1_workspaces(
             continue
         # Blank creation: nothing seeds — the seed's own definition is
         # published as revision v1 in step 3 (and its agents in step 2).
-        body: dict[str, Any] = {
-            "name": name,
-            "default_workflow_key": workflow_key,
-            "workflow_mode": "blank",
-        }
+        body: dict[str, Any] = {"id": workflow_key, "name": name}
         if entity is not None:
             body["default_entity"] = entity
         created = client.mutate(
@@ -370,7 +367,9 @@ def step4_node_codes(
                     f"on new workspace of {workflow_key}"
                 )
                 continue
-            base = f"/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code"
+            # #211 M3: node code routes key on the workspace id alone (it IS
+            # the workflow key); the workflows/{key} alias is gone.
+            base = f"/api/workspaces/{workspace_id}/nodes/{node_key}/code"
             current = client.get(base, allow_404=True)
             if current is None:
                 failures.append(
@@ -482,7 +481,9 @@ def verify(client: Client, seed: dict[str, Any], bound: dict[str, list[str]]) ->
         for workspace_id in bound.get(workflow_key) or []:
             if workspace_id.startswith("<new:"):
                 continue
-            base = f"/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code"
+            # #211 M3: node code routes key on the workspace id alone (it IS
+            # the workflow key); the workflows/{key} alias is gone.
+            base = f"/api/workspaces/{workspace_id}/nodes/{node_key}/code"
             current = client.get(base, allow_404=True) or {}
             ok = current.get("origin") == "custom" and current.get("code") == entry["code"]
             check(

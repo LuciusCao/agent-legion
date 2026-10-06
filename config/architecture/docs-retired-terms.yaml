@@ -83,5 +83,20 @@ terms:
   - pattern: 'legacy (脚本|回落通道)'
     retired_in: '#834（术语收敛）'
     note: 中文语境的同类表述；现行说法是业务规则层 / 业务规则脚本
+  - pattern: '`capabilities:?`\s*(键|key|config key)'
+    retired_in: '#452（worker.yaml capabilities 兼容键移除；机制自 #284 起即 no-op）'
+    note: Worker 配置不再有 capabilities 键（存量残留读取即剥离并告警）；锚定
+      「键/key」表述，不误伤 Host 注册契约的 capabilities 字段与节点 capability
+  - pattern: '\bdefault_workflow_key\b'
+    retired_in: '#211 M3（schema v91 删列；契约字段同批移除）'
+    note: workspace id 即 workflow key（schema v62 绑定），独立的 key 列与
+      WorkspaceRecord 字段已删除；现行说法是 workspace id
+  - pattern: 'workflows/\{workflow_key\}'
+    retired_in: '#211 M3（deprecated URL 别名移除）'
+    note: 节点代码路由只挂 /workspaces/{workspace_id}/nodes/{node_key}/code*
+      （studio-agent 工具同形），旧 workflows/{workflow_key} 段别名已删除
+  - pattern: 'reject_mismatched_workflow_key'
+    retired_in: '#211 M3（deprecated 请求字段移除后守卫一并删除）'
+    note: 请求体/查询参数不再携带 workflow_key，key 不匹配守卫无对象可守
 
 exemptions: []

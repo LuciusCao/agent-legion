@@ -5,11 +5,12 @@ import {
   asText,
   statusEvent,
   streamingTextId,
-  type ChatMessage,
   type ToolCallView,
 } from './studioChatMessages'
 import { supersededCancelRequestIds } from './studioChatCancelVisibility'
+import { useQueuedMessageStates } from './studioChatTurnRecovery'
 import { MessageItem } from './StudioChatMessageItem'
+import { permissionRequestId } from './StudioChatPermission'
 import { StudioChatWindow } from './StudioChatWindow'
 import styles from './StudioChatPanel.module.css'
 
@@ -57,6 +58,8 @@ export function StudioChatMessageList(props: Props) {
     () => supersededCancelRequestIds(chat.messages),
     [chat.messages]
   )
+  // #882：后端入站排队消息的「已排队 / 未送达」标注（同样逐行下传为标量）。
+  const queuedStates = useQueuedMessageStates(chat.messages, chat.closed)
   const permissionById = useMemo(
     () => new Map(chat.permissions.map((view) => [view.requestId, view])),
     [chat.permissions]
@@ -103,6 +106,7 @@ export function StudioChatMessageList(props: Props) {
               key={message.id}
               message={message}
               streaming={message.id === streamingId}
+              queueState={queuedStates.get(message.id) ?? null}
               cancelSuperseded={supersededCancelIds.has(message.id)}
               toolCall={toolCallByFirstMessage.get(message.id) ?? null}
               permission={
@@ -128,10 +132,4 @@ export function StudioChatMessageList(props: Props) {
       <div ref={bottomRef} />
     </div>
   )
-}
-
-function permissionRequestId(message: ChatMessage): string {
-  if (message.kind !== 'permission') return ''
-  const content = message.content as Record<string, unknown>
-  return typeof content?.request_id === 'string' ? content.request_id : ''
 }

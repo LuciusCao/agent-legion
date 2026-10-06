@@ -110,8 +110,8 @@ class StressSimulator:
         if workspace is None:
             job_db.create_workspace(
                 name=self.workspace_id,
-                default_workflow_key=self.workspace_id,
                 default_entity="question",
+                workspace_id=self.workspace_id,
             )
             logger.info("Created workspace %s", self.workspace_id)
 

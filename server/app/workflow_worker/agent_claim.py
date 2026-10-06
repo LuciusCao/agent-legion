@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.executors.models import ConfigurationFailureRequest
-from server.app.services.agent_version_pins import (
-    agent_version_pin,
-    resolve_dispatch_agent_definition,
+from server.app.services.agent_node_profile_types import (
+    PROFILE_SOURCE_DEFINITION,
 )
+from server.app.services.agent_version_pins import agent_version_pin
 from server.app.services.node_config import dispatch_config_resolution
 from server.app.services.node_config_batch import run_frozen_payload
 from server.app.services.node_execution_config import (
@@ -22,6 +22,7 @@ from server.app.services.node_execution_config import (
     node_config_reserved_defaults,
 )
 from server.app.skills.errors import SkillRepoError
+from server.app.workflow_worker.agent_claim_profile import resolve_claim_profile
 from server.app.workflow_worker.agent_gate import agent_claim_allowed
 from server.app.workflows.definition import WorkflowNode
 
@@ -81,8 +82,13 @@ def claim_agent_node(
     workflow_key: str,
     *,
     execution_generation: int = 0,
+    profile_source: str = PROFILE_SOURCE_DEFINITION,
 ) -> bool:
-    """Enqueue an agent-routed candidate; False when it already has a request."""
+    """Enqueue an agent-routed candidate; False when it already has a request.
+
+    ``profile_source='node'`` (#933): *agent_id* is the node key and the
+    profile is the self-contained node's own (job snapshot), no catalog read.
+    """
     workspace_id = workspace["id"]
     if worker.agent_dispatch is None:
         raise RuntimeError("Agent dispatch service is not configured")
@@ -109,18 +115,10 @@ def claim_agent_node(
     # Quality replay (schema v29): a frozen per-run Agent version pin in the
     # run's frozen pins wins over the currently published definition.
     pin = agent_version_pin(run_payload, node.key)
-    try:
-        definition_config = resolve_dispatch_agent_definition(
-            worker.job_db, str(workspace_id), agent_id, pin
-        )
-    except ValueError as exc:
-        return fail_config(str(exc))
-    if definition_config is None:  # resolve_node_route already validated this
-        return fail_config(
-            f"Agent {agent_id!r} has no published definition in workspace {workspace_id!r};"
-            " agent definitions are workspace-scoped (schema v46) — create one in"
-            " Studio (Agent 管理) for this workspace"
-        )
+    profile = resolve_claim_profile(worker, str(workspace_id), agent_id, node, pin, profile_source)
+    if isinstance(profile, str):
+        return fail_config(profile)
+    definition_config = profile.dispatch_definition
     if pin is not None and definition_config.capability != node.capability:
         return fail_config(
             f"pinned Agent version capability {definition_config.capability!r}"
@@ -132,7 +130,7 @@ def claim_agent_node(
         # 声明的 config 值垫底（P-0.5）。#691：入队只定超时 base（默认 →
         # 节点 config），workspace 覆盖由 Worker claim 判定。
         node_config, timeout_base = dispatch_config_resolution(
-            agent_effective_schema(definition_config.config_schema),
+            agent_effective_schema(profile.config_schema),
             node,
             workflow_key,
             workspace,
@@ -162,6 +160,7 @@ def claim_agent_node(
                 timeout_base=timeout_base,
                 pinned_agent_version=int(pin["version"]) if pin is not None else None,
                 execution_generation=execution_generation,
+                profile_source=profile_source,
             )
         except (ValueError, SkillRepoError) as exc:
             # SkillRepoError (git clone/fetch/checkout 失败) 是 RuntimeError

@@ -11,9 +11,9 @@ export function nodesForJob(
 ): DagNode[] | null {
   // `type: start` entry nodes never execute and never appear in job_nodes;
   // hide them from job views (rerun / run-to pickers, DAG ordering).
-  // Matching key is workspace_id: job.workflow_key is deprecated (#211
-  // Phase 2) and always equals the workspace id since schema v62, and the
-  // catalog/definition keys are the workspace-bound workflow key.
+  // Matching key is workspace_id: the workspace id IS the workflow key
+  // (schema v62; the separate job.workflow_key field retired in #211 M3),
+  // and the catalog/definition keys are the workspace-bound workflow key.
   const executable = (nodes: DagNode[]) =>
     nodes.filter((node) => node.node_type !== 'start')
   if (workflowNodesByKey && job.workspace_id in workflowNodesByKey) {
@@ -47,8 +47,7 @@ export function computeOrderedNodes(
   if (jobsWithNodes.length === 0) return []
 
   const firstNodes = jobsWithNodes[0].nodes
-  // Distinct-workflow detection via workspace_id (deprecated workflow_key's
-  // identical twin, #211 Phase 2).
+  // Distinct-workflow detection via workspace_id (the workflow key, #211).
   const knownWorkflowKeys = new Set(
     jobsWithNodes.map((entry) => entry.job.workspace_id)
   )

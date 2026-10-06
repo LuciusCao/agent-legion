@@ -114,7 +114,7 @@ def _make_rerun_service(job_db, settings, storage) -> JobRerunService:
 
 def test_rerun_deletes_downstream_manifest_rows_and_objects(job_db, settings, chain_definition):
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job = _seed_job_with_manifest(
         job_db, settings, chain_definition, workspace=workspace, storage=storage
     )
@@ -135,7 +135,7 @@ def test_rerun_deletes_downstream_manifest_rows_and_objects(job_db, settings, ch
 
 def test_rerun_keeps_unaffected_nodes_manifest_rows(job_db, settings, chain_definition):
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job = _seed_job_with_manifest(
         job_db, settings, chain_definition, workspace=workspace, storage=storage
     )
@@ -164,7 +164,7 @@ def test_rerun_keeps_rmw_manifest_rows(job_db, settings):
         },
     )
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="rmw_workflow")
+    workspace = job_db.create_workspace("default")
     batch = job_db.create_run(
         "rmw_workflow",
         "batch_by_ids",
@@ -210,7 +210,7 @@ def test_run_to_deletes_start_closure_manifest_rows(job_db, settings, chain_defi
     """The run-to entry point shares the manifest GC: staging the start
     node's closure must remove those rows too."""
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job = _seed_job_with_manifest(
         job_db, settings, chain_definition, workspace=workspace, storage=storage
     )
@@ -254,7 +254,7 @@ def test_approval_rework_deletes_target_closure_manifest_rows(job_db, settings):
         ],
     }
     definition = workflow_definition_from_mapping(dag)
-    workspace = job_db.create_workspace(name="approval-gc-ws", default_workflow_key="approval_gc")
+    workspace = job_db.create_workspace(name="approval-gc-ws")
     WorkflowRevisionService(job_db).ensure_active_revision(str(workspace["id"]), definition)
     job = job_db.create_job(
         workflow_key="approval_gc",
@@ -319,7 +319,7 @@ def test_rerun_object_cleanup_spares_re_registered_authority_keys(
     快照删该键会让新清单行指向不存在的对象。清理前按当前清单重验：
     同键复现 = 新 attempt 的权威副本，跳过删除。"""
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job = _seed_job_with_manifest(
         job_db, settings, chain_definition, workspace=workspace, storage=storage
     )
@@ -379,7 +379,7 @@ def test_rerun_object_cleanup_revalidates_per_object_mid_delete(
     路径，时序经 live_keys_for 靶向探针注入（#706 review P2：重验不传输
     整份清单）。"""
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job = _seed_job_with_manifest(
         job_db, settings, chain_definition, workspace=workspace, storage=storage
     )
@@ -443,7 +443,7 @@ def test_rerun_post_commit_cleanup_failure_still_succeeds(
     结果仍 succeeded，清单行（事务内删除）保持已删。突变自检锚点：无兜底
     的实现会让 RuntimeError 冒出 rerun()，本用例变红。"""
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job = _seed_job_with_manifest(
         job_db, settings, chain_definition, workspace=workspace, storage=storage
     )
@@ -463,7 +463,7 @@ def test_run_to_post_commit_cleanup_failure_still_succeeds(
 ):
     """#759 P1：run-to 共享同一 post-commit 清理，抛错同样不反转结果。"""
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job = _seed_job_with_manifest(
         job_db, settings, chain_definition, workspace=workspace, storage=storage
     )
@@ -488,7 +488,7 @@ def test_batch_rerun_continues_when_post_commit_cleanup_fails(
     """#759 P1：批量 rerun 的每个 job 共享同一清理兜底——清理抛错不进入
     per-job 结果，也不中断整批（两个 job 都 succeeded）。"""
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job_a = _seed_job_with_manifest(
         job_db, settings, chain_definition, workspace=workspace, storage=storage
     )
@@ -521,7 +521,7 @@ def test_object_cleanup_skips_key_while_promote_holds_authority_lock(
     from server.app.services.job_staged_cleanup import delete_rerun_artifact_objects
 
     storage = FakeObjectStorage()
-    workspace = job_db.create_workspace("default", default_workflow_key="chain_workflow")
+    workspace = job_db.create_workspace("default")
     job = _seed_job_with_manifest(
         job_db, settings, chain_definition, workspace=workspace, storage=storage
     )

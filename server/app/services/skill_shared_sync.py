@@ -35,6 +35,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from server.app.fs_safety import PathEscapeError, resolve_within
 from server.app.services.skill_repo_edit import SkillEditValidationError
 from server.app.services.skill_shared_store import (
     MAP_PATH,
@@ -192,11 +193,9 @@ def _contained_source(shared_dir: Path, source: str) -> Path:
     intermediate symlink (``_shared/references -> /srv/private``) passes
     every lexical check, and without this the sync would commit host files
     into skill repos."""
-    root = shared_dir.resolve()
-    target = (root / source).resolve()
     try:
-        target.relative_to(root)
-    except ValueError as exc:
+        target = resolve_within(shared_dir, source, allow_root=True)
+    except PathEscapeError as exc:
         raise OSError(f"source {source!r} escapes _shared via a symlink") from exc
     return target
 

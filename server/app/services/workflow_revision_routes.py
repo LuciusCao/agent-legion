@@ -10,14 +10,19 @@ change only at revision publication.
 
 from __future__ import annotations
 
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_node_profile import build_capability_index, legacy_agent_candidates
+from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 
 
 def derive_agent_routes(
     job_db, workspace_id: str, definition: WorkflowDefinition
 ) -> dict[str, str]:
-    """Route every ``type: agent`` node to its one published Agent.
+    """Route every legacy ``type: agent`` node to its one published Agent.
+
+    Self-contained agent nodes (``execution.runtime`` declared, #933) get no
+    route: dispatch reads their profile straight from the job snapshot.
 
     Strictly workspace-scoped (schema v46), no global fallback. ``code``
     nodes never get a route row: they join the implicit code pool and the
@@ -25,15 +30,19 @@ def derive_agent_routes(
     an ambiguous mapping — a capability with more than one published Agent
     is a catalog error, never a silent pick.
     """
-    by_capability: dict[str, list[str]] = {}
-    catalog = published_agent_definitions(job_db, workspace_id)
-    for agent_id, agent_definition in catalog.items():
-        by_capability.setdefault(agent_definition.capability, []).append(agent_id)
+    catalog = legacy_agent_catalog(job_db, workspace_id)
+    index = build_capability_index(catalog)
     routes: dict[str, str] = {}
     for node in definition.nodes.values():
         if node.node_type != "agent":
             continue
-        candidates = by_capability.get(node.capability, [])
+        # #933: self-contained nodes dispatch from their own profile and
+        # never materialize a route (dual-track publish, #440 P2).
+        if is_self_contained_agent_node(node):
+            continue
+        # #932: routes materialize only legacy-sourced profiles (the target
+        # is a published Agent id); ambiguity stays a publish error here.
+        candidates = legacy_agent_candidates(node, catalog, index=index)
         if len(candidates) > 1:
             raise ValueError(
                 f"Agent node {node.key!r} capability {node.capability!r} must resolve to"

@@ -83,7 +83,6 @@ describe('workspace api', () => {
           workspace: {
             id: 'math',
             name: 'Math',
-            default_workflow_key: 'demo_workflow',
             default_entity: 'question',
             resource_config: {
               resources: { question_detail: { enabled: true, config: {} } },
@@ -123,7 +122,6 @@ describe('workspace api', () => {
           workspace: {
             id: 'math',
             name: 'Math',
-            default_workflow_key: 'demo_workflow',
             default_entity: 'knowledge',
           },
         }),
@@ -154,7 +152,6 @@ describe('workspace api', () => {
           workspace: {
             id: 'physics',
             name: 'Physics',
-            default_workflow_key: 'demo_workflow',
             default_entity: 'knowledge',
             resource_config: { storage: 's3' },
           },
@@ -218,7 +215,6 @@ describe('createJobBatch', () => {
 
     await createJobBatch('math', {
       async_processing: false,
-      workflow_key: 'demo_workflow',
       source_kind: 'question_ids',
       question_ids: ['q1', 'q2'],
       knowledge_codes: [],
@@ -230,7 +226,6 @@ describe('createJobBatch', () => {
         method: 'POST',
         body: JSON.stringify({
           async_processing: false,
-          workflow_key: 'demo_workflow',
           source_kind: 'question_ids',
           question_ids: ['q1', 'q2'],
           knowledge_codes: [],
@@ -253,7 +248,6 @@ describe('createJobBatch', () => {
 
     await createJobBatch('math', {
       async_processing: true,
-      workflow_key: 'demo_video_workflow',
       source_kind: 'knowledge_codes',
       knowledge_codes: ['k1'],
       question_ids: [],
@@ -265,7 +259,6 @@ describe('createJobBatch', () => {
         method: 'POST',
         body: JSON.stringify({
           async_processing: true,
-          workflow_key: 'demo_video_workflow',
           source_kind: 'knowledge_codes',
           knowledge_codes: ['k1'],
           question_ids: [],
@@ -284,7 +277,6 @@ describe('job helpers', () => {
           job: {
             id: 'j1',
             workspace_id: 'w1',
-            workflow_key: 'p1',
             source_id: 's1',
             title: 'T',
             status: 'running',
@@ -422,7 +414,6 @@ describe('workflow revisions api', () => {
           revision: {
             id: 'ws1:demo_workflow:v1',
             workspace_id: 'ws1',
-            workflow_key: 'demo_workflow',
             version: 1,
             status: 'active',
             definition_hash: 'abcdef123456',
@@ -460,7 +451,6 @@ describe('workflow revisions api', () => {
             {
               id: 'ws1:demo_workflow:v1',
               workspace_id: 'ws1',
-              workflow_key: 'demo_workflow',
               version: 1,
               status: 'active',
               definition_hash: 'abcdef123456',
@@ -489,7 +479,6 @@ describe('workflow revisions api', () => {
           revision: {
             id: 'rev-1',
             workspace_id: 'ws1',
-            workflow_key: 'demo_video_workflow',
             version: 1,
             status: 'archived',
             definition_hash: '17d8077e',

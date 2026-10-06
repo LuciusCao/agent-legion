@@ -16,10 +16,7 @@ nodes:
 def _app_and_workspace(tmp_path):
     """Blank-style workspace: row exists, no revision seeded."""
     app = create_app(data_dir=tmp_path, start_worker=False)
-    workspace = app.state.job_db.create_workspace(
-        "Publish WS",
-        default_workflow_key="test_publish_flow",
-    )
+    workspace = app.state.job_db.create_workspace("Publish WS", workspace_id="test_publish_flow")
     return app, workspace["id"]
 
 
@@ -31,7 +28,7 @@ def _publish(client: TestClient, workspace_id: str, definition_yaml: str):
 
 
 def test_publish_rejects_draft_key_mismatch_with_422(tmp_path):
-    """Publish enforces draft.key == workspace.default_workflow_key (堵缺口:
+    """Publish enforces draft.key == the workspace id (the workflow key) (堵缺口:
     compare already rejects foreign keys, publish previously did not)."""
     app, workspace_id = _app_and_workspace(tmp_path)
     foreign_yaml = _DRAFT_YAML.replace("test_publish_flow", "foreign_flow")

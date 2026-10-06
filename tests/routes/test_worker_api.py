@@ -61,9 +61,7 @@ def test_worker_control_requires_workspace_membership(client, job_db):
     """pause/resume take the workspace scope as a query parameter; the
     membership guard must still apply (require_workspace_access honours the
     workspace_id query parameter, not just the path one)."""
-    workspace_id = str(
-        job_db.create_workspace(default_workflow_key="demo_workflow", name="worker-ws")["id"]
-    )
+    workspace_id = str(job_db.create_workspace(name="worker-ws")["id"])
     member, _ = _member_client(client, job_db)
 
     assert (
@@ -79,9 +77,7 @@ def test_worker_control_requires_workspace_membership(client, job_db):
 
 
 def test_worker_control_viewer_reads_but_cannot_pause(client, job_db):
-    workspace_id = str(
-        job_db.create_workspace(default_workflow_key="demo_workflow", name="worker-ws")["id"]
-    )
+    workspace_id = str(job_db.create_workspace(name="worker-ws")["id"])
     member, member_id = _member_client(client, job_db)
     job_db.upsert_workspace_member(workspace_id, member_id, "viewer")
 
@@ -96,9 +92,7 @@ def test_worker_control_viewer_reads_but_cannot_pause(client, job_db):
 
 
 def test_worker_control_editor_can_pause_and_resume(client, job_db):
-    workspace_id = str(
-        job_db.create_workspace(default_workflow_key="demo_workflow", name="worker-ws")["id"]
-    )
+    workspace_id = str(job_db.create_workspace(name="worker-ws")["id"])
     member, member_id = _member_client(client, job_db)
     job_db.upsert_workspace_member(workspace_id, member_id, "editor")
 

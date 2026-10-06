@@ -71,7 +71,6 @@ describe('materialsApi', () => {
     global.fetch = fetchMock
 
     const result = await createRun('ws1', {
-      workflow_key: 'demo',
       items: [
         { type: 'material', material_id: 'm1' },
         { type: 'ref', connection_key: 'cms', external_id: 'q1' },
@@ -84,7 +83,6 @@ describe('materialsApi', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
-          workflow_key: 'demo',
           items: [
             { type: 'material', material_id: 'm1' },
             { type: 'ref', connection_key: 'cms', external_id: 'q1' },

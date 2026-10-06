@@ -59,6 +59,13 @@ class AgentExecutionRequest:
     # Expected jobs.execution_generation at enqueue time (EXEC-GENERATION-001);
     # persisted on the request row, CAS-checked at claim.
     execution_generation: int = 0
+    # Profile source (schema v92, #933): 'agent_definition' rows join the
+    # published Agent at claim; 'node' rows (self-contained agent nodes) skip
+    # route/definition validation and carry runtime + requires_labels on the
+    # row itself (agent_id = node_key, agent_definition_hash = profile hash).
+    profile_source: str = "agent_definition"
+    runtime: str | None = None
+    requires_labels: Mapping[str, str] | None = None
 
 
 class AgentExecutionBroker:

@@ -10,7 +10,7 @@ artifacts and state are never touched.
 Agent-routed nodes may pin an explicit Agent version (draft/published/
 archived — comparing old or candidate versions is the point); the pin is
 frozen into the copy batch's source payload and honored at dispatch time
-(``resolve_dispatch_agent_definition``). Executor-routed nodes replay as-is.
+(``resolve_dispatch_agent_profile``, #932). Executor-routed nodes replay as-is.
 
 Replay status is reconciled lazily from the copy job's node row on read —
 no hook into the completion path.
@@ -37,6 +37,7 @@ from server.app.services.quality_replay_setup import QualityReplaySetup
 from server.app.services.versioned_entities import VersionedEntityStore
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.definition import WorkflowNode
+from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +226,18 @@ class QualityReplayService:
         node: WorkflowNode,
         agent_version: int | None,
     ) -> tuple[str, dict[str, Any] | None]:
-        """Resolve the Agent version pin; executor nodes replay unpinned."""
+        """Resolve the Agent version pin; executor nodes replay unpinned.
+
+        Self-contained agent nodes (#933, ``execution.runtime``) have neither
+        a route nor an Agent version to pin: replaying them is P3 / D6 work
+        (pin by revision), so they fail with that reason, not as route-less.
+        """
+        if is_self_contained_agent_node(node):
+            raise InvalidOperationError(
+                f"node {node.key!r} is a self-contained agent node (execution.runtime);"
+                " quality replay of self-contained nodes is not supported yet"
+                " (replay pins by revision arrive with #440 P3)"
+            )
         route = conn.execute(
             """
             select target_kind, target_id from workspace_node_routes

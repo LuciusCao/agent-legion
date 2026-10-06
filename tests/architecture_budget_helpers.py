@@ -48,6 +48,9 @@ def write_neutral_budget_governance(root: Path) -> None:
     (config / "service-data-boundary-baseline.json").write_text(
         '{\n  "version": 1, "files": {}\n}\n', encoding="utf-8"
     )
+    (config / "agent-definition-catalog-callers.json").write_text(
+        '{\n  "version": 1, "symbols": [], "files": []\n}\n', encoding="utf-8"
+    )
     (config / "docs-retired-terms.yaml").write_text(
         "terms:\n  - pattern: '\\bopenclaw\\b'\n    retired_in: '#75'\nexemptions: []\n",
         encoding="utf-8",

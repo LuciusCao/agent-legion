@@ -1,13 +1,17 @@
 from typing import Any
 
 from server.app.db.rowmap import wire_batch_id
-from server.app.executors.models import CODE_EXECUTOR_ID
 from server.app.jobs import JobQueries
+from server.app.services.hydration_defer_board import (
+    HYDRATION_DEFER_BOARD,
+    defer_scope,
+    node_defer_view,
+)
 from server.app.services.job_artifact_names import is_plausible_job_id
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.job_node_executor_projection import node_executor_projector
 from server.app.services.job_node_ordering import ordered_job_nodes
-from server.app.services.job_node_worker_projection import agent_route_map, claimed_worker_map
 from server.app.services.job_patch_query_summaries import summarize_paginated_jobs
 from server.app.services.job_path_projection import resolve_record_paths
 from server.app.services.job_query_presenters import (
@@ -115,9 +119,6 @@ class JobQueryService:
         job = resolve_record_paths(job, self.settings.data_dir, {"storage_dir"})
         return {
             **job,
-            # #211 M2: the jobs column is gone (v70); the deprecated API field
-            # keeps the identity value until the M3 removal window closes.
-            "workflow_key": job.get("workflow_key", job["workspace_id"]),
             # Wire compatibility: the API field keeps the legacy name while
             # the column is jobs.run_id (schema v53); the value is the run id.
             "batch_id": wire_batch_id(job),
@@ -163,16 +164,17 @@ class JobQueryService:
         definition = self._definition_for_job(job)
         nodes = self.job_db.list_job_nodes(job_id)
         nodes_with_definition = job_nodes_with_definition(nodes, definition)
-        worker_map = claimed_worker_map(self.job_db, job_id)
-        agent_map = agent_route_map(self.job_db, str(job["workspace_id"]), str(job["workspace_id"]))
+        project_executor = node_executor_projector(self.job_db, job, definition)
+        # #887：hydration 悬挂行维持 defer 时，受阻等待节点带原因与建议重跑节点。
+        defers = HYDRATION_DEFER_BOARD.by_waiting_node(job_id)
+        if defers:
+            scope = defer_scope(definition, job)
+            defers = {key: notices for key, notices in defers.items() if key in scope}
         for node in nodes_with_definition:
-            # P-0.5: non-Agent-routed nodes always run on the implicit code
-            # pool; the projection is a constant, no configuration lookup.
-            is_agent = agent_map.get(node["node_key"]) is not None
-            node["executor_id"] = None if is_agent else CODE_EXECUTOR_ID
-            node["executor_kind"] = None if is_agent else "code"
-            node["worker_id"] = worker_map.get(node["node_key"])
-            node["agent_id"] = agent_map.get(node["node_key"])
+            node["hydration_defer"] = node_defer_view(
+                defers.get(node["node_key"]), str(node["status"])
+            )
+            node.update(project_executor(node))
         return {
             "job": self._job_summary(job, nodes, definition),
             "nodes": nodes_with_definition,

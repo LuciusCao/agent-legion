@@ -22,7 +22,7 @@ from server.app.routes.studio_agent_preview_contracts import (
     PreviewPanelStateResponse,
     PreviewPanelVersionResponse,
 )
-from server.app.services.job_errors import JobServiceError, NotFoundError
+from server.app.services.job_errors import NotFoundError
 from server.app.services.preview_panels import PreviewPanelService, get_preview_context
 from server.app.services.studio_agent_tools import studio_agent_created_by
 from server.app.settings import Settings
@@ -36,10 +36,7 @@ def create_studio_agent_preview_tools_router(job_db: JobQueries, settings: Setti
         response_model=PreviewContextResponse,
     )
     def preview_context(workspace_id: str, job_id: str | None = None) -> PreviewContextResponse:
-        try:
-            context = get_preview_context(job_db, settings, workspace_id, job_id)
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        context = get_preview_context(job_db, settings, workspace_id, job_id)
         return PreviewContextResponse.model_validate(context)
 
     @router.get(
@@ -64,15 +61,12 @@ def create_studio_agent_preview_tools_router(job_db: JobQueries, settings: Setti
     ) -> PreviewPanelVersionResponse:
         if job_db.get_workspace(workspace_id) is None:
             raise_job_http_error(NotFoundError("Workspace not found"))
-        try:
-            row = PreviewPanelService(job_db).save_draft(
-                workspace_id,
-                payload.html,
-                studio_agent_created_by(str(user["id"])),
-                payload.change_note,
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        row = PreviewPanelService(job_db).save_draft(
+            workspace_id,
+            payload.html,
+            studio_agent_created_by(str(user["id"])),
+            payload.change_note,
+        )
         return PreviewPanelVersionResponse.model_validate(row)
 
     return router

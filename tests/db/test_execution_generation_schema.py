@@ -73,7 +73,7 @@ def test_migrate_execution_generation_is_idempotent() -> None:
 def _seed_job(tmp_path: Path, *, statuses: tuple[str, ...] = ("completed",) * 3):
     """三节点 a/b/c 的 job，节点状态按 ``statuses`` 播种，job 置 completed。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("wsgen", default_workflow_key="wfgen")
+    workspace = queries.create_workspace("wsgen")
     job = queries.create_job(
         workflow_key="wfgen",
         source_type="question",
@@ -212,7 +212,7 @@ def test_lease_guarded_mutation_holds_job_mutation_advisory_lock(tmp_path: Path)
 def _seed_claimable_job(tmp_path: Path, node_keys: tuple[str, ...] = ("a", "b")):
     """节点全 pending、job 停在 queued 的可 claim job（不走 _seed_job 的 completed 收尾）。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("wsgen-claim", default_workflow_key="wfgen")
+    workspace = queries.create_workspace("wsgen-claim")
     job = queries.create_job(
         workflow_key="wfgen",
         source_type="question",

@@ -33,8 +33,8 @@ def _seed_queued_request(job_db, job_id: str, *, runtime: str = "pi") -> None:
     replace_agent_catalog("test-workspace", {"generator-v1": definition})
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('test-workspace', 'Test', 'demo_workflow') on conflict(id) do nothing"
+            "insert into workspaces(id, name)"
+            " values ('test-workspace', 'Test') on conflict(id) do nothing"
         )
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id)"
@@ -68,8 +68,7 @@ def _seed_queued_request(job_db, job_id: str, *, runtime: str = "pi") -> None:
 def _ensure_workspace(job_db, workspace_id: str) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, %s, 'demo_workflow') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, %s) on conflict(id) do nothing",
             (workspace_id, workspace_id),
         )
 
@@ -249,8 +248,8 @@ def test_scope_denied_emits_rejected(job_db, events) -> None:
     replace_agent_catalog("other-workspace", {"generator-v1": definition})
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values ('other-workspace', 'Other', 'demo_workflow') on conflict(id) do nothing"
+            "insert into workspaces(id, name)"
+            " values ('other-workspace', 'Other') on conflict(id) do nothing"
         )
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id)"

@@ -6,14 +6,10 @@ import type {
 } from '../types/failureTypes'
 
 export async function fetchFailedNodeRuns(
-  workspaceId: string,
-  options?: { workflowKey?: string | null }
+  workspaceId: string
 ): Promise<FailedNodeRunsResponse> {
-  const params = new URLSearchParams()
-  if (options?.workflowKey) params.set('workflow_key', options.workflowKey)
-  const query = params.toString()
   return api<FailedNodeRunsResponse>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/failed-node-runs${query ? `?${query}` : ''}`
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/failed-node-runs`
   )
 }
 

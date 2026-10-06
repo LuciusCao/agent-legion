@@ -13,7 +13,6 @@ every failure path.
 from __future__ import annotations
 
 import uuid
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -21,11 +20,13 @@ from server.app.agent_broker.agent_artifacts import stage_agent_inputs
 from server.app.agent_broker.agent_bundle import build_agent_bundle, cleanup_bundle_on_error
 from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
+from server.app.agent_broker.dispatch_profile import profile_row_fields
 from server.app.agent_broker.execution_resolution import resolve_execution_block
 from server.app.agent_catalog import AgentDefinition
 from server.app.agent_runtime.tools_validation import manifest_tools
 from server.app.config_schema import manifest_safe_config
 from server.app.executors.models import ExecutionContext
+from server.app.services.agent_node_profile_types import PROFILE_SOURCE_DEFINITION
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.runtime_reserved_config import TIMEOUT_BASE_MANIFEST_KEY
 from server.app.settings import Settings
@@ -33,6 +34,7 @@ from server.app.skills.checkout import checkout_node_skill
 from server.app.skills.runtime import build_skill_manager
 from server.app.workflows.pi_protocol import render_command_spec
 from server.app.workflows.schema import WorkflowNode
+from server.app.workflows.workflow_node_execution import node_execution_payload
 
 
 class AgentDispatchService:
@@ -72,7 +74,15 @@ class AgentDispatchService:
         pinned_agent_version: int | None = None,
         execution_generation: int = 0,
         timeout_base: dict[str, Any] | None = None,
+        profile_source: str = PROFILE_SOURCE_DEFINITION,
     ) -> bool:
+        """Freeze the manifest + bundle and queue one Agent request.
+
+        *definition* is the profile's dispatch definition: the published
+        Agent (legacy) or a self-contained node's projection
+        (``profile_source='node'``, #933 — *agent_id* is then the node key
+        and the row carries the profile's runtime / requires_labels).
+        """
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
         # #550：超时从 dispatch 解析后的节点 config 取（agent 节点的有效
@@ -80,7 +90,14 @@ class AgentDispatchService:
         # 由 Worker claim 叠加 workspace 覆盖后判定；缺省/畸形回落产品常量。
         timeout_raw = (node_config or {}).get("timeout_seconds")
         timeout = timeout_raw if isinstance(timeout_raw, int) and timeout_raw >= 1 else None
-        execution = resolve_execution_block(node, definition.runtime, timeout_seconds=timeout)
+        # #715：agent bash 工具的网络开关沿用节点保留键 sandbox_network（intake
+        # 冻结、默认 false）；只有字面 True 才放开（velites --allow-network）。
+        execution = resolve_execution_block(
+            node,
+            definition.runtime,
+            timeout_seconds=timeout,
+            sandbox_network=(node_config or {}).get("sandbox_network"),
+        )
         execution_id = str(uuid.uuid4())
         skill = checkout_node_skill(self.skill_manager, node, definition.skill, execution_id)
         try:
@@ -136,7 +153,7 @@ class AgentDispatchService:
                 log_path=log_path,
                 inputs=inputs,
                 expected_outputs=tuple(node.outputs),
-                runtime={"node_execution": asdict(node.execution)},
+                runtime={"node_execution": node_execution_payload(node.execution)},
             )
             stage_agent_inputs(self.artifact_store, context, manifest)
             # D12: the object-storage artifact channel (presigned PUT/GET) is
@@ -162,6 +179,7 @@ class AgentDispatchService:
                         execution_id=execution_id,
                         pinned_agent_version=pinned_agent_version,
                         execution_generation=execution_generation,
+                        **profile_row_fields(profile_source, definition),
                     )
                 )
                 if queued is None:

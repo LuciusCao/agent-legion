@@ -36,8 +36,8 @@ def storage() -> FakeStorage:
 def materials(job_db, storage) -> MaterialsService:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key)"
-            " values (%s, 'Bundles', 'demo_workflow'), (%s, 'Other', 'demo_workflow')"
+            "insert into workspaces(id, name)"
+            " values (%s, 'Bundles'), (%s, 'Other')"
             " on conflict(id) do nothing",
             (WORKSPACE_ID, OTHER_WORKSPACE_ID),
         )

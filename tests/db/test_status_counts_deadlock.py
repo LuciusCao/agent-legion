@@ -74,8 +74,7 @@ _B_BLOCK_WINDOW = 0.3
 def _seed(conn, workspace_id: str, runs: dict[str, tuple[str, ...]]) -> None:
     """Seed one workspace with the given runs (id -> job ids), all queued."""
     conn.execute(
-        "insert into workspaces(id, name, default_workflow_key)"
-        " values (%s, %s, 'question_comprehension_info') on conflict do nothing",
+        "insert into workspaces(id, name) values (%s, %s) on conflict do nothing",
         (workspace_id, workspace_id),
     )
     for run_id, job_ids in runs.items():

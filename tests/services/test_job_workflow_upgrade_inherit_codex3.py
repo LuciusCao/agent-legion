@@ -46,7 +46,7 @@ def _outputs_chain(a_out: str = "a_out.json", b_out: str = "b_out.json") -> Work
 
 def _setup(tmp_path: Path, definition: WorkflowDefinition):
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("wschain", default_workflow_key="wfchain")
+    workspace = queries.create_workspace("wschain")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
     return queries, workspace, revisions, original

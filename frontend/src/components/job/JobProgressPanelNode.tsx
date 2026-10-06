@@ -8,6 +8,7 @@ import {
   EXECUTOR_KIND_LABELS,
 } from '../jobProgressHelpers'
 import { TokenUsageRunDetail } from '../tokenUsage/TokenUsageRunDetail'
+import { JobNodeHydrationDefer } from './JobNodeHydrationDefer'
 import styles from './JobProgressPanel.module.css'
 
 const STATUS_ICONS: Record<string, string> = {
@@ -152,6 +153,13 @@ export function JobProgressPanelNode({
             </span>
           )}
         </div>
+
+        {node.hydration_defer && (
+          <JobNodeHydrationDefer
+            defer={node.hydration_defer}
+            allNodes={allNodes}
+          />
+        )}
 
         {run?.log_path && (
           <button

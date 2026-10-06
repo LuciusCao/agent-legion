@@ -111,3 +111,14 @@ class SessionRuntime:
         self.turn_update_count = 0
         self.turn_skip_empty_check = False
         self.empty_turn_timer: threading.Timer | None = None
+        # #882 (inbound_queue.py / empty_turn_retry.py): turn_background marks a
+        # platform-initiated turn (background wakeup); turn_retry_source is the
+        # (message_id, text, prompt) of the human message behind the open turn,
+        # promoted to empty_turn_retry when that turn is confirmed empty — the
+        # one replay 「继续对话」 may deliver (cleared by any new turn).
+        # inbound_pending counts human messages queued behind the turn in
+        # flight and not yet started.
+        self.turn_background = False
+        self.turn_retry_source: tuple[str, str, str] | None = None
+        self.empty_turn_retry: tuple[str, str, str] | None = None
+        self.inbound_pending = 0

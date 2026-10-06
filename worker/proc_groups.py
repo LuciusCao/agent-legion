@@ -31,6 +31,38 @@ def pgid_members(proc_root: Path = procfs.PROC_ROOT) -> dict[int, list[int]] | N
     return members
 
 
+class MemberIndex:
+    """``pgid -> pids`` index kept fresh right before each group's SIGTERM (#904).
+
+    Built by one full ``/proc`` scan; ``members_of`` re-lists ``/proc`` (one
+    directory read) and stat-reads only pids that appeared since the previous
+    refresh, so per-group freshness costs O(new processes) instead of a
+    full-table re-read per group. A process spawned into a later group after
+    the batch started is therefore still seen before that group's TERM. Entries
+    are candidates only — callers re-read each member's stat live.
+    """
+
+    def __init__(self, proc_root: Path = procfs.PROC_ROOT) -> None:
+        self._proc_root = proc_root
+        self._pgid_of: dict[int, int] = {}
+        self._by_pgid: dict[int, set[int]] = {}
+        self._refresh()
+
+    def _refresh(self) -> None:
+        live = set(procfs.iter_pids(self._proc_root))
+        for pid in self._pgid_of.keys() - live:
+            self._by_pgid[self._pgid_of.pop(pid)].discard(pid)
+        for pid in live - self._pgid_of.keys():
+            if (stat := procfs.read_stat(pid, self._proc_root)) is not None:
+                self._pgid_of[pid] = stat.pgid
+                self._by_pgid.setdefault(stat.pgid, set()).add(pid)
+
+    def members_of(self, pgid: int) -> dict[int, list[int]]:
+        """Refresh, then ``{pgid: [pid, ...]}`` in the ``pgid_members`` shape."""
+        self._refresh()
+        return {pgid: sorted(self._by_pgid.get(pgid, ()))}
+
+
 @dataclass(frozen=True)
 class GroupIdentity:
     """A verified process group, pinned to the exact processes seen at verification.

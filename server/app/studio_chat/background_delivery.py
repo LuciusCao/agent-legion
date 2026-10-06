@@ -35,6 +35,8 @@ def wake_session(
             or not runtime.background_wakeup_enabled
             or runtime.compacting
             or runtime.turn_open
+            # #882: queued human messages go first (inbound_queue.py).
+            or runtime.inbound_pending
         ):
             return False
         if not _token_alive(service, runtime.token):

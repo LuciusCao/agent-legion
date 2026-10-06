@@ -1,26 +1,20 @@
 import { TextField } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
 import { useWorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery'
+import { codeNodeKeys } from '../lib/codeNodes'
 
 export function LocalNodeLimitSection() {
   const { executionConfiguration, setNodeLimit } = useSettingStore()
-  const workspaceId = useSettingStore((s) => s.workspaceId)
   const { workflowDefinition, agentRoutes } = useWorkspaceSettingsSnapshot()
 
   if (!workflowDefinition) return null
 
-  const workflowKey = workflowDefinition.key
-  // P-0.5：无 Agent 路由的节点一律进入内置 code 池；并发上限保存时由后端
-  // 按实例 code_capacity 校验。agentRoutes 过滤键用 workspace_id
-  //（workflow_key 已 deprecated 且 v62 起恒等于 workspace id，#211）；
-  // workflowKey 仍用于 node_limits 过滤与 PUT 载荷（请求侧 Phase 2 后续批次）。
-  const agentRouted = new Set(
-    agentRoutes
-      .filter((route) => route.workflow_key === workspaceId)
-      .map((route) => route.node_key)
-  )
-  const codeNodes = workflowDefinition.nodes.filter(
-    (node) => !agentRouted.has(node.key)
+  // P-0.5：非 agent 节点一律进入内置 code 池；并发上限保存时由后端按实例
+  // code_capacity 校验。按显式类型判定（#933：自含 agent 节点无 Agent 路由，
+  // 不能按「无路由」当成 code 节点）；agentRoutes 只兜底缺 node_type 的旧 payload。
+  const codeKeys = codeNodeKeys(workflowDefinition.nodes, agentRoutes)
+  const codeNodes = workflowDefinition.nodes.filter((node) =>
+    codeKeys.has(node.key)
   )
 
   if (codeNodes.length === 0) return null
@@ -47,7 +41,7 @@ export function LocalNodeLimitSection() {
       >
         {codeNodes.map((node) => {
           const limit = executionConfiguration.node_limits.find(
-            (l) => l.workflow_key === workflowKey && l.node_key === node.key
+            (l) => l.node_key === node.key
           )
 
           return (
@@ -69,7 +63,6 @@ export function LocalNodeLimitSection() {
                   const raw = event.target.value
                   const value = Number(raw)
                   setNodeLimit(
-                    workflowKey,
                     node.key,
                     raw === '' || Number.isNaN(value) ? null : value
                   )

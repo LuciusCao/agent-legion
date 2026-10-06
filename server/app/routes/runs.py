@@ -25,17 +25,12 @@ from server.app.auth.api_intake import require_workspace_api_intake
 from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_TAG
 from server.app.auth.dependencies import get_current_user
 from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
-from server.app.routes.job_http import (
-    raise_job_http_error,
-    reject_mismatched_workflow_key,
-)
 from server.app.routes.run_contracts import (
     RunCreateRequest,
     RunCreateResponse,
     RunDetailResponse,
     RunListResponse,
 )
-from server.app.services.job_errors import JobServiceError
 from server.app.services.materials import MaterialStorageUnavailableError
 from server.app.services.run_service import RunService
 
@@ -64,7 +59,7 @@ def create_runs_router(service: RunService) -> APIRouter:
         # handshake uses for its audit trail. This first record is the
         # ATTEMPT (pre-validation observability); the success record below
         # only fires after service.create_run actually created the run, so
-        # a rejected submission (mismatched workflow_key, unknown material,
+        # a rejected submission (unknown material,
         # no active revision, duplicate) never logs a success.
         if user.get("actor_scope") == WORKSPACE_API_SCOPE:
             logger.info(
@@ -72,29 +67,20 @@ def create_runs_router(service: RunService) -> APIRouter:
                 user.get("api_token_id"),
                 workspace_id,
             )
-        # exclude_unset keeps input_json verbatim (no params={} filler); the
-        # same dump feeds the deprecated workflow_key read (accessing the
-        # field attribute itself would raise the deprecation warning, which
-        # the test suite escalates to an error).
-        # #211 Phase 2: absent workflow_key defaults to the path workspace_id
-        # (equal since v62).
+        # exclude_unset keeps input_json verbatim (no params={} filler).
         body = payload.model_dump(exclude_unset=True)
-        # Codex P1 on #307: a mismatched explicit key would flow verbatim
-        # into runs/jobs rows (violating the v62 binding) — reject before
-        # the service call.
-        reject_mismatched_workflow_key(workspace_id, body.get("workflow_key"))
         try:
             result = service.create_run(
                 workspace_id,
-                workflow_key=body.get("workflow_key") or workspace_id,
+                # #211 M3: the workspace id is the workflow identifier (it
+                # also feeds the deterministic run id, unchanged across M3).
+                workflow_key=workspace_id,
                 items=body["items"],
                 created_by=str(user.get("id") or ""),
             )
         except MaterialStorageUnavailableError as exc:
             # text items need the object store (same 503 as the materials API).
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
         if user.get("actor_scope") == WORKSPACE_API_SCOPE:
             logger.info(
                 "run submitted via workspace api token: token_id=%s workspace_id=%s run_id=%s",
@@ -113,12 +99,9 @@ def create_runs_router(service: RunService) -> APIRouter:
         workspace_id: str,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
     ) -> RunListResponse:
-        try:
-            return RunListResponse.model_validate(
-                {"runs": service.list_runs(workspace_id, limit=limit)}
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return RunListResponse.model_validate(
+            {"runs": service.list_runs(workspace_id, limit=limit)}
+        )
 
     @router.get(
         "/workspaces/{workspace_id}/runs/{run_id}",
@@ -126,9 +109,6 @@ def create_runs_router(service: RunService) -> APIRouter:
         tags=[API_SCOPE_INTAKE_TAG],
     )
     def get_run(workspace_id: str, run_id: str) -> RunDetailResponse:
-        try:
-            return RunDetailResponse(**service.get_run(workspace_id, run_id))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return RunDetailResponse(**service.get_run(workspace_id, run_id))
 
     return router

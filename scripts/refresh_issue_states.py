@@ -3,7 +3,8 @@
 
 Collects every ``issues/<open|closed>/github.com/<owner>/<repo>/issues/<n>``
 reference from the exemption registry and resolves the current state of each
-distinct issue via a single ``gh issue list`` call per repository. The result
+distinct issue via a single ``gh issue list`` call per repository (plus one
+``gh api`` lookup per anchor that list does not return, e.g. a PR). The result
 is written to ``config/architecture/issue-states.json``, the tracked manifest
 that ``scripts.check_invariants`` reads offline. Run via
 ``make architecture-issue-states`` (also the manual fallback for the nightly
@@ -26,6 +27,7 @@ from scripts.quality.exemptions import load_exemptions
 from scripts.quality.issue_state import (
     MANIFEST_RELATIVE_PATH,
     MANIFEST_VERSION,
+    VALID_STATES,
     parse_issue_reference,
 )
 
@@ -83,11 +85,33 @@ def fetch_issue_states(
         if result.returncode != 0:
             message = result.stderr.strip() or result.stdout.strip() or "unknown error"
             raise RuntimeError(f"gh issue list failed for {repo_key}: {message}")
+        resolved: set[int] = set()
         for issue in json.loads(result.stdout):
             if issue.get("number") in numbers:
                 reference = f"github.com/{repo_key}/issues/{issue['number']}"
                 states[reference] = str(issue["state"]).lower()
+                resolved.add(issue["number"])
+        # #926: `gh issue list` omits pull requests (anchors sometimes name
+        # the merged PR) and anything past --limit; resolve those one by one
+        # through the issues endpoint, which serves PRs too. A leftover
+        # unresolved anchor would otherwise fail the gate as uncached.
+        for number in sorted(numbers - resolved):
+            states[f"github.com/{repo_key}/issues/{number}"] = _fetch_single_state(repo_key, number)
     return states
+
+
+def _fetch_single_state(repo_key: str, number: int) -> str:
+    result = subprocess.run(
+        ["gh", "api", f"repos/{repo_key}/issues/{number}", "--jq", ".state"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    state = result.stdout.strip().lower()
+    if result.returncode != 0 or state not in VALID_STATES:
+        message = result.stderr.strip() or state or "unknown error"
+        raise RuntimeError(f"gh api failed for {repo_key}#{number}: {message}")
+    return state
 
 
 def refresh_issue_states(root: Path) -> dict[str, str]:

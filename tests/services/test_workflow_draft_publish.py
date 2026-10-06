@@ -1,8 +1,8 @@
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
+from server.app.agent_catalog import AgentDefinition
 from server.app.jobs.queries import JobQueries
 from server.app.services.job_errors import DraftWorkflowKeyMismatchError, NotFoundError
 from server.app.services.node_codes import NodeCodeService
@@ -79,7 +79,7 @@ nodes:
 
 
 def _workspace(queries: JobQueries) -> dict:
-    return queries.create_workspace("draft-publish-ws", default_workflow_key="test_publish_flow")
+    return queries.create_workspace("draft-publish-ws", workspace_id="test_publish_flow")
 
 
 def _seed_node_code(workspace_id: str) -> None:
@@ -96,16 +96,15 @@ def _seed_node_code(workspace_id: str) -> None:
 
 
 def _patch_agent_catalog(
-    monkeypatch: pytest.MonkeyPatch, agents: dict[str, SimpleNamespace]
+    monkeypatch: pytest.MonkeyPatch, agents: dict[str, AgentDefinition]
 ) -> None:
     """Stage a published Agent catalog without versioned_entities rows.
 
-    The publish gate only reads ``capability``/``skill`` off each definition,
-    and a skill-less Agent cannot be staged through AgentDefinition (skill is
-    min_length=1 there) — exactly the legacy shape the gate must still reject.
+    The publish gate resolves agent node profiles (#932) from this catalog;
+    skill-less Agents model the legacy shape the gate must still reject.
     """
     monkeypatch.setattr(
-        "server.app.services.workflow_draft_publish_gates.published_agent_definitions",
+        "server.app.services.workflow_draft_publish_gates.legacy_agent_catalog",
         lambda job_db, workspace_id: agents,
     )
 
@@ -271,7 +270,10 @@ def test_publish_rejects_agent_node_without_any_skill_binding(
     Agent also names none cannot publish (neither side binds the content)."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = _workspace(queries)
-    _patch_agent_catalog(monkeypatch, {"agent-1": SimpleNamespace(capability="do_thing", skill="")})
+    _patch_agent_catalog(
+        monkeypatch,
+        {"agent-1": AgentDefinition(capability="do_thing", runtime="velites", skill="")},
+    )
 
     errors = validate_workflow_draft_for_publish(queries, workspace["id"], _DRAFT_YAML_AGENT, True)
 
@@ -286,7 +288,10 @@ def test_publish_accepts_agent_node_with_node_skill(
     Agent definition names no skill. #322: the in-place repo must exist."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = _workspace(queries)
-    _patch_agent_catalog(monkeypatch, {"agent-1": SimpleNamespace(capability="do_thing", skill="")})
+    _patch_agent_catalog(
+        monkeypatch,
+        {"agent-1": AgentDefinition(capability="do_thing", runtime="velites", skill="")},
+    )
     skill_base = tmp_path / "skills"
     _make_skill_repo(skill_base / "education-video-problems-generation" / "review-questions")
 
@@ -309,7 +314,10 @@ def test_publish_rejects_agent_node_whose_skill_repo_is_missing(
     time instead of at first dispatch."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = _workspace(queries)
-    _patch_agent_catalog(monkeypatch, {"agent-1": SimpleNamespace(capability="do_thing", skill="")})
+    _patch_agent_catalog(
+        monkeypatch,
+        {"agent-1": AgentDefinition(capability="do_thing", runtime="velites", skill="")},
+    )
 
     errors = validate_workflow_draft_for_publish(
         queries,
@@ -329,7 +337,10 @@ def test_publish_rejects_agent_node_whose_skill_dir_is_not_a_git_repo(
     """A directory at the right path but without .git is not a skill repo."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = _workspace(queries)
-    _patch_agent_catalog(monkeypatch, {"agent-1": SimpleNamespace(capability="do_thing", skill="")})
+    _patch_agent_catalog(
+        monkeypatch,
+        {"agent-1": AgentDefinition(capability="do_thing", runtime="velites", skill="")},
+    )
     skill_base = tmp_path / "skills"
     (skill_base / "education-video-problems-generation" / "review-questions").mkdir(parents=True)
 
@@ -354,8 +365,9 @@ def test_publish_accepts_agent_node_without_skill_when_agent_binds_one(
     _patch_agent_catalog(
         monkeypatch,
         {
-            "agent-1": SimpleNamespace(
+            "agent-1": AgentDefinition(
                 capability="do_thing",
+                runtime="velites",
                 skill="education-video-problems-generation/review-questions",
             )
         },

@@ -7,8 +7,9 @@ transition rides the same transaction through the JobQueries facade
 (``jobs/queries/approval_decisions.py``), guarded on the node still being
 ``awaiting_approval`` so a concurrent decision or reset loses cleanly:
 
-- ``approved``  → the gate completes; the decision payload is written as the
-  ``{node_key}.approval.json`` job artifact first, so downstream conditional
+- ``approved``  → the gate completes; the decision payload is atomically
+  swapped in as the ``{node_key}.approval.json`` job artifact inside the
+  guarded transaction (never before the guard, #929), so downstream conditional
   edges can branch on ``$.verdict`` and downstream ``inputs`` can require it.
 - ``rework``    → the reviewer note (mandatory) is written as the gate's
   feedback artifact, then the target upstream node is reset through the
@@ -20,9 +21,10 @@ transition rides the same transaction through the JobQueries facade
 
 from __future__ import annotations
 
-import json
 import logging
+import os
 import uuid
+from pathlib import Path
 from typing import Any
 
 from server.app.events.aggregator import broadcast_job_update, record_job_update
@@ -35,6 +37,7 @@ from server.app.services.job_errors import (
     NotFoundError,
 )
 from server.app.services.job_rerun import JobRerunService
+from server.app.services.staged_json_artifact import stage_json, write_json_atomic
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.settings import Settings
@@ -108,13 +111,25 @@ class ApprovalDecisionService:
     ) -> dict[str, Any]:
         job_id = str(job["id"])
         decision = self._decision_row(job_id, node_key, "approved", note, "", decided_by)
-        # The decision artifact lands before the transaction: a failed commit
-        # leaves a harmless stale file (the gate stays awaiting and the next
-        # decision overwrites it), while the reverse order could complete the
-        # node with the artifact missing for downstream inputs.
+        # #929: the decision artifact is staged (fsynced temp file in the job
+        # dir) before the transaction but only swapped into place by
+        # ``os.replace`` inside it, after the job-mutation-locked status guard
+        # passes — a duplicate or late decision fails the guard before
+        # touching the committed artifact, and the gate never completes with
+        # the artifact missing for downstream inputs. A replace failure rolls
+        # the transaction back; a commit failure after the replace leaves a
+        # file the next decision on the still-awaiting gate overwrites.
         artifact_name = f"{node_key}.approval.json"
-        self._write_job_artifact(job, artifact_name, decision)
-        self._gate_transition(lambda: self.job_db.approve_gate_atomic(decision))
+        target = self._artifact_path(job, artifact_name)
+        staged = stage_json(target, decision)
+        try:
+            self._gate_transition(
+                lambda: self.job_db.approve_gate_atomic(
+                    decision, on_guarded=lambda: os.replace(staged, target)
+                )
+            )
+        finally:
+            staged.unlink(missing_ok=True)
         self._upload_artifact(job, node_key, artifact_name)
         # Downstream nodes just became dispatchable — wake the poll loop.
         notify_schedulable_work()
@@ -182,11 +197,12 @@ class ApprovalDecisionService:
         }
 
     def _write_job_artifact(self, job: dict[str, Any], name: str, payload: dict[str, Any]) -> None:
+        write_json_atomic(self._artifact_path(job, name), payload)
+
+    def _artifact_path(self, job: dict[str, Any], name: str) -> Path:
         job_dir = resolve_job_dir(job, self.settings.jobs_dir)
         job_dir.mkdir(parents=True, exist_ok=True)
-        (job_dir / name).write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        return job_dir / name
 
     def _upload_artifact(self, job: dict[str, Any], node_key: str, name: str) -> None:
         """Best-effort object-storage promotion, same stance as completion hooks."""

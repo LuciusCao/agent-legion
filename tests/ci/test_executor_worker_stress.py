@@ -53,9 +53,9 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
 
-    ws_a = job_db.create_workspace("Workspace A", default_workflow_key="demo_workflow")
-    ws_b = job_db.create_workspace("Workspace B", default_workflow_key="demo_workflow")
-    ws_c = job_db.create_workspace("Workspace C", default_workflow_key="demo_workflow")
+    ws_a = job_db.create_workspace("Workspace A")
+    ws_b = job_db.create_workspace("Workspace B")
+    ws_c = job_db.create_workspace("Workspace C")
 
     block_event = threading.Event()
     executor = BlockingExecutor("code", block_event=block_event)

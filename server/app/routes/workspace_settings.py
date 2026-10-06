@@ -5,9 +5,7 @@ from server.app.routes.job_contracts import (
     WorkspaceSettingsResponse,
     WorkspaceSettingsSectionRequest,
 )
-from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workspace_secrets import create_workspace_secrets_router
-from server.app.services.job_errors import JobServiceError
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.services.workspace_secrets import WorkspaceSecretsService
 from server.app.settings import Settings
@@ -20,10 +18,7 @@ def create_workspace_settings_router(
 
     @router.get("/workspaces/{workspace_id}/settings", response_model=WorkspaceSettingsResponse)
     def get_workspace_settings(workspace_id: str) -> WorkspaceSettingsResponse:
-        try:
-            return WorkspaceSettingsResponse(settings=service.settings_payload(workspace_id))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        return WorkspaceSettingsResponse(settings=service.settings_payload(workspace_id))
 
     @router.patch(
         "/workspaces/{workspace_id}/settings/{section}",
@@ -35,14 +30,11 @@ def create_workspace_settings_router(
         section: str,
         payload: WorkspaceSettingsSectionRequest,
     ) -> WorkspaceSettingsResponse:
-        try:
-            return WorkspaceSettingsResponse(
-                settings=service.update_section(
-                    workspace_id, section, payload.model_dump(exclude_unset=True)
-                )
+        return WorkspaceSettingsResponse(
+            settings=service.update_section(
+                workspace_id, section, payload.model_dump(exclude_unset=True)
             )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        )
 
     # Vault secrets live in the same workspace settings route family (spec D13).
     router.include_router(

@@ -23,26 +23,26 @@ def validate_workspace_node_limits(
     limits still apply to the global lease count (remote code claims are
     node-counted too), so they are accepted without the ceiling check.
     """
-    seen_limits: set[tuple[str, str]] = set()
+    seen_limits: set[str] = set()
     for node_limit in node_limits:
-        key = (str(node_limit["workflow_key"]), str(node_limit["node_key"]))
-        if key in seen_limits:
-            raise InvalidOperationError(f"Duplicate Node limit {key[0]}.{key[1]}")
-        seen_limits.add(key)
+        node_key = str(node_limit["node_key"])
+        if node_key in seen_limits:
+            raise InvalidOperationError(f"Duplicate Node limit {node_key}")
+        seen_limits.add(node_key)
         if code_capacity > 0 and int(node_limit["concurrency_limit"]) > code_capacity:
             raise InvalidOperationError(
-                f"Node limit for {key[0]}.{key[1]} exceeds the code pool capacity {code_capacity}"
+                f"Node limit for {node_key} exceeds the code pool capacity {code_capacity}"
             )
         # A registered workflow before its first publish has no catalog
         # definition: node existence/routing checks wait for publish-time
         # validation (validate_workflow_for_publish).
         if workflow is None:
             continue
-        if key[0] != workflow.key or key[1] not in workflow.nodes:
-            raise InvalidOperationError(f"Unknown Workflow Node {key[0]}.{key[1]}")
+        if node_key not in workflow.nodes:
+            raise InvalidOperationError(f"Unknown Workflow Node {workflow.key}.{node_key}")
         # Explicit node type decides (#284): a code node may share its
         # capability with a published Agent and still carry a node limit.
-        if workflow.nodes[key[1]].node_type == "agent":
+        if workflow.nodes[node_key].node_type == "agent":
             raise InvalidOperationError(
-                f"Agent-routed Node {key[0]}.{key[1]} cannot have a Node limit"
+                f"Agent-routed Node {workflow.key}.{node_key} cannot have a Node limit"
             )

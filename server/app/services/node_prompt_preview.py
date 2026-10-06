@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_node_profile import resolve_agent_node_profile
+from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.workflow_draft_store import save_workflow_draft
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
@@ -50,10 +51,7 @@ def _definition_for_preview(
     workspace = job_db.get_workspace(workspace_id)
     if workspace is None:
         raise NotFoundError("Workspace not found")
-    workflow_key = str(workspace.get("default_workflow_key") or "")
-    revision = (
-        job_db.get_active_workflow_revision(workspace_id, workflow_key) if workflow_key else None
-    )
+    revision = job_db.get_active_workflow_revision(workspace_id, workspace_id)
     if revision is None:
         raise NotFoundError("No active workflow revision")
     return workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
@@ -71,7 +69,7 @@ def _locate_executable_node(definition: WorkflowDefinition, node_key: str) -> Wo
 
 
 def _skill_key_for_node(job_db: JobQueries, workspace_id: str, node: WorkflowNode) -> str | None:
-    """Node skill binding wins (#76); the published Agent's skill is the legacy fallback.
+    """Node skill binding wins (#76); the node profile's skill is the legacy fallback.
 
     Only ``type: agent`` nodes dispatch through an Agent (#284): a code node
     never runs skill content, so even a declared binding is ignored here.
@@ -80,10 +78,8 @@ def _skill_key_for_node(job_db: JobQueries, workspace_id: str, node: WorkflowNod
         return None
     if node.skill is not None:
         return node.skill.key
-    for definition in published_agent_definitions(job_db, workspace_id).values():
-        if definition.capability == node.capability:
-            return definition.skill or None
-    return None
+    profile = resolve_agent_node_profile(node, legacy_agent_catalog(job_db, workspace_id))
+    return (profile.skill or None) if profile is not None else None
 
 
 def _preview_payload(job_db: JobQueries, workspace_id: str, node: WorkflowNode) -> dict[str, Any]:
@@ -168,12 +164,7 @@ def save_node_prompt(
         workspace = job_db.get_workspace(workspace_id)
         if workspace is None:
             raise NotFoundError("Workspace not found")
-        workflow_key = str(workspace.get("default_workflow_key") or "")
-        revision = (
-            job_db.get_active_workflow_revision(workspace_id, workflow_key)
-            if workflow_key
-            else None
-        )
+        revision = job_db.get_active_workflow_revision(workspace_id, workspace_id)
         if revision is None:
             raise NotFoundError("No workflow draft or active revision to edit")
         base_definition = workflow_definition_from_dict(

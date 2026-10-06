@@ -62,7 +62,7 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 | `install-git-hooks.sh` | 配置 worktree 兼容的版本化 pre-commit / pre-push 钩子。 |
 | `check-pi.sh` | Pi CLI 环境 smoke 检查。 |
 | `init-worktree.sh` | 一键初始化新 worktree（复制 .env、派生并创建专属 Postgres 库、生成 deploy/secrets、种子 worker 配置；幂等，macOS）。 |
-| `clean-worktree.sh` | worktree 收尾一键清理（worktree / 本地分支 / 派生库 / 派生 bucket；bucket 删除后经 SeaweedFS master 只读核对同名 collection 残留卷并给出手动回收命令，#824；幂等可重跑，自带护栏）。 |
+| `clean-worktree.sh` | worktree 收尾一键清理（worktree / 本地分支 / 派生库 / 派生 bucket；bucket 删除后经 SeaweedFS master 只读核对同名 collection 残留卷并给出手动回收命令，#824；幂等可重跑，自带护栏；`--delete-remote-branch` 拒删 main/master/develop/prod 与 `release/*`，#930）。 |
 | `seaweedfs_collection.py` | `clean-worktree.sh` 调用的 SeaweedFS collection 残留卷只读核查模块（只核查派生命名、非 develop/prod 的 collection，从不自动删除；master 地址见 `AGENT_LEGION_SEAWEEDFS_MASTER_URL`）。 |
 | `resume-workspaces.sh` | 按需恢复本 worktree 全部 workspace 调度（后端每次启动重置为暂停；须在后端首次启动建表后执行，未建表时退出码 1 并提示）。 |
 | `dev_stack.sh` | 开发环境一键启停（`make dev-up` / `dev-down` / `dev-status`）：后台编排 backend + frontend + worker（复用 Makefile `dev-*` target），幂等，日志在 `data/logs/dev-*.log`，up 完成后打印各服务 URL。 |
@@ -70,8 +70,10 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 | `dotenv-lib.sh` | 运维 shell 脚本共用的 dotenv 解析（仅供 `source`）：`dotenv_lookup` / `dotenv_lookup_first` / `dotenv_lookup_or`，`local-s3-decide.sh`、`dev_stack.sh`、`native-prod-*.sh` 共用一份实现，不要在脚本里再内嵌解析。 |
 | `stack-prod-up.sh` | 一键启动本地 Docker 生产 stack（PostgreSQL + Host + Worker）：secrets 预检、postgres 健康断言、全 stack 健康等待（仅 prod worktree 使用）。由 `make prod-up docker` 调用，停止用 `make prod-down docker`。 |
 | `seed_from_prod.py` | 从本地 prod Docker stack 的 Postgres 只读导出并种子 develop 库（目标库名为 prod 名或 host 非 loopback 时拒绝执行）。无 make target，直接 `uv run python scripts/seed_from_prod.py` 调用。 |
+| `seed_dump_projection.py` | `seed_from_prod.py` 第 1 层的 COPY 块列投影（纯函数）：源库落后目标库一个 schema 版本时，剥离目标库已删除的列（如 v91 删除的 workspace key 列）。 |
 | `gc_artifacts.py` | 报告/回收 content-addressed artifact store 中零引用且超过在途宽限期的孤儿 blob（默认 dry-run，`--apply` 回收）。 |
 | `gc-s3-jobs.py` | 报告/回收对象存储 `jobs/`、`jobs-staging/` 前缀的孤儿对象（job 删除失败残留、promote 中途失败、staging 滞留；对照 `job_artifacts` 清单行 + 宽限窗判定，#340；默认 dry-run，`--apply` 回收）。 |
+| `agent_backfill_dry_run.py` | Agent 定义退役回填 dry-run 报告（#934 / #440，只读：连接强制 `default_transaction_read_only`、不跑 `init_db`、不碰对象存储）：遍历各 workspace 的 active revision 与草稿，模拟回填每个 agent 节点的 runtime / tools / config_schema / skill / requires_labels，列出共享定义组、解析不到的节点与 config_schema 覆盖差异。`uv run python -m scripts.agent_backfill_dry_run [--workspace ID] [--output PATH]`；报告反映部署数据，只留本地、不进仓库。 |
 | `report-orphan-s3-buckets.py` | 报告孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已不存在；只报不删，逐个给出 `clean-worktree.sh` 收尾命令，#340）。 |
 
 ## 一次性与运维脚本

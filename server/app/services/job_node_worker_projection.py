@@ -29,11 +29,19 @@ def claimed_worker_map(connect_source: Any, job_id: str) -> dict[str, str]:
     return worker_map
 
 
-def agent_route_map(connect_source: Any, workspace_id: str, workflow_key: str) -> dict[str, str]:
+def node_route_rows(connect_source: Any, workspace_id: str) -> dict[str, dict[str, str]]:
+    """node_key → current ``workspace_node_routes`` row (input of the shared
+    route decision, ``services/node_route_decision``)."""
     with read_connection(connect_source) as conn:
         rows = conn.execute(
-            "select node_key, target_id from workspace_node_routes"
-            " where workspace_id=%s and target_kind='agent'",
+            "select node_key, target_kind, target_id from workspace_node_routes"
+            " where workspace_id=%s",
             (workspace_id,),
         ).fetchall()
-    return {str(row["node_key"]): str(row["target_id"]) for row in rows}
+    return {
+        str(row["node_key"]): {
+            "target_kind": str(row["target_kind"]),
+            "target_id": str(row["target_id"]),
+        }
+        for row in rows
+    }

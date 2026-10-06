@@ -16,13 +16,6 @@ class JobNodeSummaryResponse(BaseModel):
 class JobSummaryResponse(JobClientTokenFields, BaseModel):
     id: str
     workspace_id: str
-    workflow_key: str = Field(
-        description=(
-            "Deprecated: read workspace_id instead. Since schema v62 the two "
-            "are always equal; removal is tracked in #211 (deprecated field drops by 2026-10-31)."
-        ),
-        deprecated=True,
-    )
     source_type: str
     source_id: str
     batch_id: str
@@ -58,12 +51,14 @@ class JobsResponse(BaseModel):
     truncated: bool
 
 
-class JobsSnapshotResponse(BaseModel):
-    workspace_id: str
-    revision: int
-    stats: dict[str, int]
-    jobs: list[JobSummaryResponse]
-    next_cursor: str | None = None
+class HydrationDeferResponse(BaseModel):
+    """#887：节点因输入恢复不全（悬挂清单行）被挡，而非普通排队。"""
+
+    inputs: list[str]
+    reasons: list[str] = Field(
+        description="object_missing | hash_mismatch | corrupt（重试不会自愈的恢复失败）"
+    )
+    rerun_nodes: list[str] = Field(description="建议重跑以重新生成这些输入的生产节点 key")
 
 
 class JobNodeResponse(BaseModel):
@@ -85,6 +80,11 @@ class JobNodeResponse(BaseModel):
     executor_kind: Literal["code", "pi", "openclaw"] | None = None
     agent_id: str | None = None
     worker_id: str | None = None
+    # PR #1085: the shared route decision (same as dispatch) says this node
+    # would fail as a configuration error (e.g. a route to an unpublished
+    # Agent); executor_kind and agent_id are then both None.
+    route_error: str | None = None
+    hydration_defer: HydrationDeferResponse | None = None
 
 
 class NodeRunResponse(BaseModel):

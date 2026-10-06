@@ -74,13 +74,9 @@ def test_shared_capacity_and_round_robin_fairness(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
 
-    ws_a = job_db.create_workspace("Workspace A", default_workflow_key="test", workspace_id="test")
-    ws_b = job_db.create_workspace(
-        "Workspace B", default_workflow_key="test_b", workspace_id="test_b"
-    )
-    ws_c = job_db.create_workspace(
-        "Workspace C", default_workflow_key="test_c", workspace_id="test_c"
-    )
+    ws_a = job_db.create_workspace("Workspace A", workspace_id="test")
+    ws_b = job_db.create_workspace("Workspace B", workspace_id="test_b")
+    ws_c = job_db.create_workspace("Workspace C", workspace_id="test_c")
 
     events = {
         ws_a["id"]: threading.Event(),

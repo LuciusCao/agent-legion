@@ -223,7 +223,7 @@ publish, agent definition publish, and skill release actions stay human-only).
 ## 3. Workflow definition YAML
 
 ```yaml
-key: my_workflow            # = workspace default_workflow_key, snake_case
+key: my_workflow            # = the workspace id, snake_case
 label: 人类可读名称
 schema_version: 2           # 2 recommended; 1 derives edges from `after`
 intake:                     # optional; how jobs enter the workflow
@@ -336,7 +336,9 @@ to an implementation:
   not-yet-started nodes; an invalid one falls back to the node/platform
   value; defaults: agent 1800s, code 600s, CONFIG-RUNTIME-TIMEOUT-001), while
   `sandbox_network` stays frozen at intake — opening network egress ships
-  with a workflow revision.
+  with a workflow revision. Network is denied by default for code nodes'
+  sandbox and for the velites agent bash tool alike; `sandbox_network: true`
+  opens it for that node.
 - Node config `connection` keys reference instance-level external service
   connections (external APIs such as TTS or CMS; the boundary is
   SECURITY-EXTERNAL-CONNECTION-001). Those are admin-only and live in
@@ -441,6 +443,20 @@ runtime="velites", skill="keywords/review", tools=["read", "write"])` —
 the `review` node's `tools:` list of three tools wins over the
 definition's two; an agent node without `tools:` (say `report`, if it is
 agent-routed too) uses ITS Agent definition's default.
+
+### 5.3 Self-contained agent nodes (no Agent definition, #933)
+
+An agent node may carry its whole execution profile in the workflow YAML:
+`execution.runtime` (`pi` or `velites`; a workflow top-level
+`execution.runtime` is the default for every agent node) plus optional
+node-level `requires_labels: {key: value}` (Worker labels must include
+them). With a runtime set, the node needs NO Agent definition: its
+`tools` (default set when omitted), `config_schema` and `skill` binding are
+the profile, and publish does not require a published Agent. Leaving
+`runtime` empty keeps the Agent-definition path above; declaring
+`requires_labels` without a runtime fails publish. Write these fields via
+`save_workflow_draft` (the Studio inspector does not edit them yet); a
+runtime change takes effect for in-flight jobs only after「升级 workflow」.
 
 ## 6. Skill editing (create → read → edit → validate → tag)
 

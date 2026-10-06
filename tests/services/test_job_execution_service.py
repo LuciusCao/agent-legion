@@ -27,9 +27,7 @@ def execution_service(job_db: JobQueries, settings):
 
 @pytest.fixture
 def workspace(job_db: JobQueries):
-    created = job_db.create_workspace(
-        "exec-ws", default_workflow_key="education_video_problems_generation"
-    )
+    created = job_db.create_workspace("exec-ws")
     publish_builtin_revision(job_db, created["id"])
     return created
 
@@ -232,7 +230,7 @@ def _seed_implicit_workflow_job(
     definition_dict: dict,
     node_keys: list[str],
 ) -> tuple[dict, dict]:
-    workspace = job_db.create_workspace("exec-implicit", default_workflow_key="wf759_runto")
+    workspace = job_db.create_workspace("exec-implicit")
     definition = workflow_definition_from_dict(definition_dict)
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     batch = job_db.create_run(

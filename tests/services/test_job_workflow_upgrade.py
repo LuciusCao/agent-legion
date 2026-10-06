@@ -37,9 +37,7 @@ class _RecordingEventManager:
 
 def test_upgrade_job_workflow_updates_revision_and_rebuilds_nodes(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
@@ -84,9 +82,7 @@ def test_upgrade_job_workflow_stages_old_outputs_and_manifest_rows(tmp_path: Pat
     否则全节点 pending 期间作业仍从对象存储提供上一轮产物，且隐式消费者
     会被旧输入文件立即解锁、读到上一轮结果。"""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
@@ -142,9 +138,7 @@ def test_upgrade_job_workflow_cancels_queued_requests(tmp_path: Path) -> None:
     定义里）。
     """
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
@@ -191,9 +185,7 @@ def test_upgrade_job_workflow_cancels_queued_requests(tmp_path: Path) -> None:
 
 def test_upgrade_job_workflow_updates_null_version_job(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
     revisions = WorkflowRevisionService(queries)
     revisions.publish_workspace_revision(workspace["id"], definition)
@@ -226,9 +218,7 @@ def test_upgrade_job_workflow_updates_null_version_job(tmp_path: Path) -> None:
 
 def test_upgrade_job_workflow_skips_current_revision(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
     current = WorkflowRevisionService(queries).publish_workspace_revision(
         workspace["id"], definition
@@ -259,9 +249,7 @@ def test_upgrade_job_workflow_skips_current_revision(tmp_path: Path) -> None:
 
 def test_upgrade_job_workflow_fails_without_active_revision(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     job = queries.create_job(
         workflow_key="education_video_problems_generation",
         source_type="question",
@@ -284,9 +272,7 @@ def test_upgrade_job_workflow_fails_without_active_revision(tmp_path: Path) -> N
 
 def test_upgrade_job_workflow_skips_running_job(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
@@ -318,9 +304,7 @@ def test_upgrade_job_workflow_skips_running_job(tmp_path: Path) -> None:
 
 def test_upgrade_job_workflow_skips_active_lease(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
@@ -359,12 +343,8 @@ def test_upgrade_job_workflow_skips_active_lease(tmp_path: Path) -> None:
 
 def test_upgrade_job_workflow_fails_for_missing_or_wrong_workspace(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
-    other_workspace = queries.create_workspace(
-        "ws2", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
+    other_workspace = queries.create_workspace("ws2")
     job = queries.create_job(
         workflow_key="education_video_problems_generation",
         source_type="question",
@@ -390,9 +370,7 @@ def test_upgrade_job_workflow_fails_for_missing_or_wrong_workspace(tmp_path: Pat
 
 def test_upgrade_job_workflow_records_event_buffer_update(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
@@ -425,9 +403,7 @@ def test_upgrade_job_workflow_records_event_buffer_update(tmp_path: Path) -> Non
 
 def test_upgrade_job_workflow_broadcasts_via_event_manager(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
@@ -463,9 +439,7 @@ def test_upgrade_job_workflow_broadcasts_via_event_manager(tmp_path: Path) -> No
 
 def _batch_setup(tmp_path: Path):
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace(
-        "ws1", default_workflow_key="education_video_problems_generation"
-    )
+    workspace = queries.create_workspace("ws1")
     definition = load_builtin_definition("education_video_problems_generation")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
@@ -570,7 +544,7 @@ def _config_definition(config_schema: dict | None = None) -> WorkflowDefinition:
 
 def _config_setup(tmp_path: Path, config_schema: dict | None = None):
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws1", default_workflow_key="wf")
+    workspace = queries.create_workspace("ws1")
     current = WorkflowRevisionService(queries).publish_workspace_revision(
         workspace["id"], _config_definition(config_schema)
     )

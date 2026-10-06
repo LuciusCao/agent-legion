@@ -115,6 +115,18 @@ def test_velites_command_budget_flags_from_node_config() -> None:
     assert "--max-tokens" not in bare
 
 
+@pytest.mark.parametrize(
+    ("value", "emitted"), [(True, True), (False, False), ("true", False), (1, False)]
+)
+def test_velites_command_allow_network_only_for_literal_true(value: object, emitted: bool) -> None:
+    """#715: the bash tool's network stays isolated unless the node's
+    sandbox_network resolved to a literal True."""
+    cmd = _dispatch(_execution(MANIFEST, sandbox_network=value))
+    assert ("--allow-network" in cmd) is emitted
+    # Legacy manifests without the key keep the isolated default.
+    assert "--allow-network" not in _dispatch(MANIFEST)
+
+
 def test_velites_command_omits_empty_optional_flags() -> None:
     manifest = _execution(MANIFEST, provider="", model="", thinking="", timeout_seconds=0)
     cmd = _dispatch(manifest)
@@ -190,6 +202,7 @@ def test_resolve_execution_node_values_win() -> None:
         "thinking": "low",
         "timeout_seconds": 1800,
         "no_sandbox": False,
+        "sandbox_network": False,
     }
     # runtime 直接钉死命令构建器：pi → pi argv。
     assert resolve_execution_block(_node("p", "m"), "pi")["binary"] == "pi"

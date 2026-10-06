@@ -88,7 +88,7 @@ jobs/workspaces 均为 on delete cascade，行随删除物理消失。未被重�
 | approval 决策 | `approve_gate_atomic` / `reject_gate_atomic`（`server/app/jobs/queries/approval_decisions.py`） | 锁下状态守卫（`ApprovalGateConflict`）；**刻意不做代次比较**，见 2.4 |
 | lease 过期清扫 | `expire_stale_leases`（`server/app/executors/_lease_expiry.py` 等） | 过期代次的回写跳过 |
 | 孤儿 running 恢复 | `recover_orphaned_running_jobs`（`server/app/executors/_lease_write_paths.py`） | 只认盖了现值戳的 running 行，旧戳行拒绝复位（防永久卡 running 的闸门由 claim 盖戳保证） |
-| agent sweeper | `sweep_expired_claims`（`server/app/agent_broker/sweepers.py`） | 过期代次：lease/node_run 对账照常，请求**取消而非 requeue**（requeue 会双跑），`job_nodes` 绝不动 |
+| agent sweeper | `sweep_expired_claims`（`server/app/agent_broker/sweepers.py`） | 过期代次：lease/node_run 对账照常，请求**取消而非 requeue**（requeue 会双跑），`job_nodes` 绝不动；同代次超 requeue 上限的终态分支只翻仍 `running` 的节点，job 状态经 `sync_job_status` 推导（#943） |
 | 两个 queued-request sweeper | `fail_stale_definition_requests`（`server/app/agent_broker/sweeper_definitions.py`）、`fail_unclaimable_model_requests`（`server/app/agent_broker/unclaimable.py`） | 无锁扫描 + 逐候选 `sweep_generation.lock_sweep_candidate` 前奏（advisory 锁先于请求行 FOR UPDATE，防 AB-BA）；过期请求按突变侧语义取消，同代次保留原 fail 语义 |
 | 分片 fan-out | `materialize_shards_guarded`（`server/app/workflow_worker/shard_fanout.py`） | 锁 + CAS 在事务最前（先于任何 `node_shards` 写）；过期则跳过物化与空 fan-out 完成，节点等下一轮 |
 | ready-gate not_applicable 批写 | `mark_nodes_not_applicable_many`（`server/app/jobs/queries/job_node_lifecycle.py`） | 每条目携带评估时读到的代次，批内逐 job 锁下重读，过期条目跳过（跳过的条目下一轮重评估——bump 改了扫描 mark） |
@@ -630,6 +630,10 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
     `DANGLING_ESCALATION_PASSES` 轮 object_missing / hash_mismatch 后，
     会被在途生产者重写的名字退出 defer 集，否则维持 defer 并打一次带
     suggested action 的 WARNING（`workflow_worker/hydration_dangling.py`）。
+    #887 起维持 defer 的升级项同时上进程内公告板
+    （`services/hydration_defer_board.py`，与计数同生共死、不落库），
+    job 详情接口给受阻的等待节点下发 `hydration_defer`（原因 + 建议重跑
+    的生产节点），UI 据此区分普通排队与「输入恢复不全」。
     另：`.part` 固定暂存名在 hydration 与 claim
     侧 `restore_missing_inputs` 并发恢复同名时互相截断、双方 digest 失
     败后各自重试——自愈，仅浪费一次下载，不修。

@@ -122,6 +122,7 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
 | 2 | 登录限速 | `LoginRateLimiter`（`server/app/auth/rate_limit.py`） | 每副本各自计数，暴力破解配额被副本数稀释（N 副本 ≈ N×5 次失败窗口） |
 | 3 | Studio Chat 会话 | `StudioChatService._runtimes`（`server/app/studio_chat/service.py`） | 会话的 agent 子进程只活在创建它的副本里；请求被负载均衡到另一副本时该会话互不可见，表现为「会话时有时无 / 无法继续」 |
 | 4 | 暂停状态启动重置 | `WorkspaceWorkerControl.reset_all_to_paused`（`server/app/worker_control.py`，`main.py` 启动调用） | 副本 B 启动即把全部 workspace 重置为暂停，把副本 A 上刚由操作员恢复的调度一并打掉，两个副本的暂停语义互相打架 |
+| 5 | hydration defer 公告（#887） | `HydrationDeferBoard`（`server/app/services/hydration_defer_board.py`），由 workflow worker 线程写入 | 只有恰好评估到该 job 的副本知道「输入恢复不全」；请求落到另一副本时 job 详情不显示提示，节点看起来只是普通「等待中」 |
 
 ### 当前正确形态与护栏
 
@@ -141,6 +142,23 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
 - 若未来确实需要多副本，正确路径不是简单横向扩缩容，而是把上表逐项外置
   （事件总线走 pub/sub、限速与暂停状态本就以 DB 为权威、Chat 会话需要粘性路由或
   会话外置），每项都是独立的设计工作，不在本节展开。
+
+## 浏览器安全头与低权读面
+
+> Issue #752（#710 红队审计 P3 收口）。
+
+- **文档 CSP**：Host 对所有 `text/html` 响应（SPA 外壳与 catch-all）附加
+  `Content-Security-Policy`（`server/app/http_csp.py`），作为 DOMPurify 之后的第二层。
+  `script-src` 暂保留 `'unsafe-inline'`：`srcdoc` iframe 继承宿主文档的策略，预览面板
+  bundle 按契约是 inline 脚本，收紧会让面板整体失效；其余指令（`connect-src` 限同源 +
+  对象存储 presign 源、`frame-ancestors 'self'`、`object-src 'none'`、`base-uri`、
+  `form-action`）照常生效。改前端外链资源（字体、图源、上传直连）时同步改该模块。
+- **`GET /api/agent-workers`**：admin 全量；其他身份只见准入范围与自身可见 workspace
+  有交集的 Worker，`allowed_workspaces` 裁剪为交集、`register_token_ids` 置空，可见性
+  规则与 workspace 列表同源（`server/app/auth/workspace_visibility.py`）。
+- **`GET /api/connections/keys`**：有意对全部登录用户开放（#419，ref 条目与节点配置要选
+  key）。连接是实例级、无 workspace 归属，只回 key 名、不回配置；若将来引入按 workspace
+  归属的连接再改为按成员过滤。
 
 ## API Surface / Interface
 

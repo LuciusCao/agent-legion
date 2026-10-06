@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.db.dialect import ConnectSource
+from server.app.fs_safety import PathEscapeError, resolve_within
 from server.app.services import skill_detail, skill_repo
 from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_edit_detail import editing_detail
@@ -67,13 +68,10 @@ class SkillCatalogService:
         parts = skill_key.split("/")
         if len(parts) != 2 or not all(parts) or ".." in parts:
             raise NotFoundError("Invalid skill key")
-        root = self.base_dir.resolve()
-        candidate = (root / parts[0] / parts[1]).resolve()
         try:
-            candidate.relative_to(root)
-        except ValueError as exc:
+            return resolve_within(self.base_dir, Path(parts[0], parts[1]), allow_root=True)
+        except PathEscapeError as exc:
             raise NotFoundError("Invalid skill path") from exc
-        return candidate
 
     def _files(self, skill_dir: Path) -> list[dict[str, Any]]:
         # Root contract.yaml rides along (codex R4 P2): it is the normative

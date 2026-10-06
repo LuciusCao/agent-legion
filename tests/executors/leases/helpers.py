@@ -20,7 +20,7 @@ def _setup_workspace(
     # single implicit code pool needs no allocation/binding rows; only the
     # per-node limit insert survives.
     del executor_id, workspace_limit
-    workspace = queries.create_workspace(name=name, default_workflow_key=workflow_key)
+    workspace = queries.create_workspace(name=name)
     workspace_id = workspace["id"]
     job_id = _create_job_in_workspace(
         queries,

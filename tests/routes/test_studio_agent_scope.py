@@ -34,8 +34,7 @@ nodes:
     capability: clean_items
 """
 
-_NODE_CODE = "/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code"
-_NODE_CODE_SEGMENT_FREE = "/api/workspaces/{workspace_id}/nodes/{node_key}/code"
+_NODE_CODE = "/api/workspaces/{workspace_id}/nodes/{node_key}/code"
 _CHAT = "/api/workspaces/{workspace_id}/studio-chat"
 
 # Effecting write routes (path templates as they appear in the app's route
@@ -74,11 +73,6 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     # drafts via the tool surface; taking effect stays human-only.
     ("POST", "/api/workspaces/{workspace_id}/preview-panel/publish", None),
     ("POST", "/api/workspaces/{workspace_id}/preview-panel/archive", None),
-    # #211 Phase 2: segment-free aliases of the deprecated workflow-key paths
-    # carry the same effecting guards.
-    ("POST", f"{_NODE_CODE_SEGMENT_FREE}/publish", None),
-    ("POST", f"{_NODE_CODE_SEGMENT_FREE}/rollback", {"version": 1}),
-    ("DELETE", _NODE_CODE_SEGMENT_FREE, None),
     ("POST", "/api/agent-definitions/{agent_id}/publish?workspace_id={workspace_id}", None),
     (
         "POST",
@@ -232,7 +226,6 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/workspaces/{workspace_id}/workflow-drafts/validate"): "validate only",
     ("POST", "/api/workspaces/{workspace_id}/workflow-drafts/compare"): "read-only compare",
     ("PUT", f"{_NODE_CODE}"): "node code draft write",
-    ("PUT", f"{_NODE_CODE_SEGMENT_FREE}"): "node code draft write",
     ("POST", "/api/agent-definitions"): "creates a draft",
     ("PUT", "/api/agent-definitions/{agent_id}/draft"): "draft write",
     ("POST", "/api/agent-definitions/{agent_id}/copy"): "creates a draft",
@@ -257,11 +250,6 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
         "POST",
         "/api/studio-agent/tools/workspaces/{workspace_id}/workflow/compare",
     ): "scoped-only tool surface",
-    (
-        "PUT",
-        "/api/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft",
-    ): "scoped-only tool surface",
-    # #211 Phase 2: segment-free alias of the scoped tool draft route.
     (
         "PUT",
         "/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{node_key}/code/draft",
@@ -348,7 +336,6 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
 }
 
 _PATH_PARAM_VALUES = {
-    "workflow_key": "wf",
     "node_key": "node",
     "agent_id": "agent-x",
     "executor_id": "exec-x",
@@ -396,9 +383,7 @@ def test_scoped_token_authenticates_as_initiating_user(client, job_db) -> None:
 
 
 def test_scoped_token_rejected_on_all_effecting_endpoints(client, job_db) -> None:
-    workspace_id = str(
-        job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-guard-ws")["id"]
-    )
+    workspace_id = str(job_db.create_workspace(name="scope-guard-ws")["id"])
     # Seed a real job: asserting the 403 on a live target proves the scope
     # refusal fires for an existing job (the scoped effecting short-circuit
     # in require_job_workspace_access would also 403 a nonexistent id —
@@ -414,9 +399,7 @@ def test_scoped_token_rejected_on_all_effecting_endpoints(client, job_db) -> Non
 
 
 def test_scoped_token_allowed_on_draft_and_validate_endpoints(client, job_db) -> None:
-    workspace_id = str(
-        job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-draft-ws")["id"]
-    )
+    workspace_id = str(job_db.create_workspace(name="scope-draft-ws")["id"])
     scoped = _scoped_client(client, job_db)
 
     validate = scoped.post(
@@ -429,7 +412,7 @@ def test_scoped_token_allowed_on_draft_and_validate_endpoints(client, job_db) ->
     # later for business reasons (no active revision, invalid payload) — but a
     # 5xx here would be a server bug masquerading as a pass.
     node_draft = scoped.put(
-        f"/api/workspaces/{workspace_id}/workflows/wf/nodes/node/code",
+        f"/api/workspaces/{workspace_id}/nodes/node/code",
         json={"code": "def run(job, job_dir, runtime):\n    pass\n"},
     )
     assert node_draft.status_code not in (401, 403) and node_draft.status_code < 500
@@ -446,9 +429,7 @@ def test_unknown_scope_type_is_also_rejected_on_effecting_endpoints(client, job_
     """reject_studio_agent_scope refuses any non-empty actor_scope, aligned
     with require_admin: a future scope type must not silently inherit
     effecting rights."""
-    workspace_id = str(
-        job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-future-ws")["id"]
-    )
+    workspace_id = str(job_db.create_workspace(name="scope-future-ws")["id"])
     admin_id = str(job_db.get_user_credentials("admin")["id"])
     token = scoped_tokens.mint_scoped_token(job_db, admin_id, scope="future_scope")
     scoped = client.__class__(client.app)
@@ -460,9 +441,7 @@ def test_unknown_scope_type_is_also_rejected_on_effecting_endpoints(client, job_
 
 
 def test_full_session_still_reaches_effecting_endpoints(client, job_db) -> None:
-    workspace_id = str(
-        job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-admin-ws")["id"]
-    )
+    workspace_id = str(job_db.create_workspace(name="scope-admin-ws")["id"])
     # Same real-job requirement as the scoped-token inventory above (#710).
     # Seed the workspace once, then mint one fresh job per mutating endpoint:
     # the admin pass really deletes its job, and re-seeding the workspace
@@ -511,11 +490,7 @@ def test_scoped_token_rejected_on_admin_endpoints(client, job_db) -> None:
     """require_admin refuses scoped identities even though the scoped token
     inherits role=admin from the initiating user's row (P0: without the
     actor_scope check the token would pass every admin endpoint)."""
-    workspace_id = str(
-        job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-admin-guard-ws")[
-            "id"
-        ]
-    )
+    workspace_id = str(job_db.create_workspace(name="scope-admin-guard-ws")["id"])
     scoped = _scoped_client(client, job_db)
     endpoints = [
         *_ADMIN_ENDPOINTS,

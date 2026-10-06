@@ -55,7 +55,6 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
     def create_workspace(
         self,
         name: str,
-        default_workflow_key: str,
         resource_config: dict[str, Any] | None = None,
         default_entity: str = "question",
         description: str = "",
@@ -63,20 +62,16 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
     ) -> dict[str, Any]:
         """Create a workspace row.
 
-        ``workspace_id`` (schema v62) is the explicit caller-provided id; the
-        HTTP service layer always passes it equal to ``default_workflow_key``
-        (the id==key invariant lives there — this raw layer also serves test
-        fixtures and low-level seeders that build pre-v62 shapes). When
-        omitted the id is derived from the name with a dedup suffix.
+        ``workspace_id`` (schema v62) is the explicit caller-provided id — it
+        is also the workflow identifier (#211 M3 dropped the separate key
+        column, v91). When omitted the id is derived from the name with a
+        dedup suffix (test fixtures and low-level seeders).
         """
         clean_name = name.strip()
         if not clean_name:
             raise ValueError("Workspace name is required")
-        clean_workflow_key = (default_workflow_key or "").strip()
         if workspace_id is not None:
             workspace_id = workspace_id.strip()
-            if workspace_id != clean_workflow_key:
-                raise ValueError("Workspace id must equal default_workflow_key (schema v62)")
             if not _ID_PATTERN.match(workspace_id):
                 raise ValueError("Workspace id must match ^[a-z0-9][a-z0-9_-]{0,63}$ (schema v62)")
         resource_config_json = _json_column(resource_config or {})
@@ -101,16 +96,14 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
             conn.execute(
                 """
                 insert into workspaces(
-                  id, name, description, default_workflow_key, resource_config_json,
-                  default_entity
+                  id, name, description, resource_config_json, default_entity
                 )
-                values (%s, %s, %s, %s, %s, %s)
+                values (%s, %s, %s, %s, %s)
                 """,
                 (
                     workspace_id,
                     clean_name,
                     clean_description,
-                    clean_workflow_key,
                     resource_config_json,
                     clean_entity,
                 ),
@@ -136,7 +129,6 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
         *,
         name: str | None = None,
         description: str | None = None,
-        default_workflow_key: str | None = None,
         resource_config: dict[str, Any] | None = None,
         default_entity: str | None = None,
         node_config: dict[str, Any] | None = None,
@@ -150,8 +142,6 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
             fields["name"] = clean_name
         if description is not None:
             fields["description"] = description.strip()
-        if default_workflow_key is not None:
-            fields["default_workflow_key"] = default_workflow_key
         if resource_config is not None:
             fields["resource_config_json"] = _json_column(resource_config)
         if default_entity is not None:
@@ -191,7 +181,6 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
         *,
         name: str,
         description: str,
-        default_workflow_key: str,
         default_entity: str,
         resource_config: dict[str, Any],
         node_limits: Sequence[Mapping[str, Any]] | None = None,
@@ -211,7 +200,7 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
             conn.execute(
                 """
                 update workspaces
-                set name=%s, description=%s, default_workflow_key=%s, default_entity=%s,
+                set name=%s, description=%s, default_entity=%s,
                     resource_config_json=%s,
                     preview_config_json=coalesce(%s, preview_config_json),
                     updated_at=current_timestamp
@@ -220,7 +209,6 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
                 (
                     clean_name,
                     description.strip(),
-                    default_workflow_key,
                     default_entity,
                     _json_column(resource_config),
                     _json_column(preview_config) if preview_config is not None else None,

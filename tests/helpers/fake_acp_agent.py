@@ -28,7 +28,8 @@ Single-threaded message pump: ``pump_until`` re-enters dispatch so a prompt
 turn can await a permission response or a cancel notification while keeps
 reading.
 
-Terminal steps (``{"terminal": {"command": ..., "args": [...]}}``) exercise
+Terminal steps (``{"terminal": {"command": ..., "args": [...]}}``, optional
+``cwd`` / ``env``) exercise
 the client-side terminal protocol: the fake agent asks the backend to create
 a terminal, polls output, waits for exit, and releases it — mirroring how
 kimi runs its Bash tool. The received initialize params (clientCapabilities)
@@ -337,14 +338,17 @@ class _FakeAgent:
                     "sessionId": session_id,
                     "command": payload.get("command"),
                     "args": payload.get("args", []),
+                    **({"cwd": payload["cwd"]} if "cwd" in payload else {}),
+                    **({"env": payload["env"]} if "env" in payload else {}),
                 },
             }
         )
         self.pump_until(lambda: request_id in self.pending)
-        result = self.pending.pop(request_id).get("result", {})
+        response = self.pending.pop(request_id)
+        result = response.get("result", {})
         terminal_id = result.get("terminalId")
         if not terminal_id:
-            return {"error": "no terminalId in create response"}
+            return {"error": response.get("error") or "no terminalId in create response"}
 
         def _call(method: str, params: dict[str, Any]) -> dict[str, Any]:
             call_id = f"fake-{self._next_request_id}"

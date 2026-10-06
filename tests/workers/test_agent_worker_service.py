@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import logging
-import threading
-import time
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -13,13 +10,11 @@ import yaml
 from fastapi.testclient import TestClient
 
 import worker.service as service_module
-import worker.supervisor as state_module
 from tests.helpers import wait_for_predicate
 from worker.metrics_cache import WorkerMetricsCache, metrics_cache_key, metrics_cache_path
 from worker.registration.token import registration_token_configured
 from worker.runtime import catalog
 from worker.service import create_app
-from worker.service_bind import embed_control_token
 from worker.supervisor import (
     WorkerConfigStore,
     WorkerSupervisor,
@@ -28,23 +23,6 @@ from worker.supervisor import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-
-FAKE_WORKER = """
-import os, sys, time
-print("fake worker ready", flush=True)
-mode = os.environ.get("FAKE_WORKER_MODE", "sleep")
-if mode == "sleep":
-    time.sleep(30)
-sys.exit(2 if mode == "exit2" else 1)
-"""
-
-FAKE_WORKER_WITH_STATUS = """
-import json, os, time
-path = os.environ["AGENT_WORKER_STATUS_FILE"]
-with open(path, "w", encoding="utf-8") as handle:
-    json.dump({"pid": os.getpid(), "remote": {"host_reachable": True, "registered": True, "connected": True, "host_worker": {"worker_id": "worker-1", "name": "Test Worker"}, "connection_error": None}, "executions": {"exec-1": {"execution_id": "exec-1", "job_id": "job-1", "node_key": "node_a", "phase": "running", "started_at": "2026-07-23T00:00:00+00:00"}}}, handle)
-time.sleep(30)
-"""
 
 
 def _config() -> dict[str, Any]:
@@ -101,20 +79,6 @@ class FakeSupervisor:
 
     def logs(self, limit: int = 200) -> list[str]:
         return ["registered", "waiting"][-limit:]
-
-
-def _make_supervisor(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
-) -> WorkerSupervisor:
-    script = tmp_path / "fake_worker.py"
-    script.write_text(FAKE_WORKER, encoding="utf-8")
-    token_file = tmp_path / "register-token"
-    token_file.write_text("secret", encoding="utf-8")
-    store = WorkerConfigStore(tmp_path / "state")
-    store.write(validate_config({**_config(), "register_token_file": str(token_file)}))
-    monkeypatch.setattr(state_module, "_RESTART_BACKOFF_INITIAL", 0.05)
-    monkeypatch.setenv("FAKE_WORKER_MODE", mode)
-    return WorkerSupervisor(store, script)
 
 
 def test_config_store_bootstraps_yaml_and_writes_managed_copy(tmp_path: Path) -> None:
@@ -214,7 +178,7 @@ def test_local_api_returns_status_and_applies_configuration(tmp_path: Path) -> N
     supervisor = FakeSupervisor(store)
     app = create_app(supervisor, tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         headers = _auth(store)
         status = client.get("/api/status", headers=headers)
         response = client.put(
@@ -240,7 +204,7 @@ def test_local_api_stores_registration_token_without_returning_it(tmp_path: Path
     supervisor = FakeSupervisor(store)
     app = create_app(supervisor, tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.put(
             "/api/config",
             json={"register_token": "tok-1.host-issued-secret"},
@@ -260,7 +224,7 @@ def test_claim_switch_and_capacity_are_hot_updated_without_restart(tmp_path: Pat
     supervisor = FakeSupervisor(store)
     app = create_app(supervisor, tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.put(
             "/api/config",
             json={"claim_enabled": False, "max_concurrency": 9},
@@ -286,7 +250,7 @@ def test_ramp_up_null_disables_and_is_hot_updated(tmp_path: Path) -> None:
     supervisor = FakeSupervisor(store)
     app = create_app(supervisor, tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         headers = _auth(store)
         enabled = client.put(
             "/api/config",
@@ -319,7 +283,7 @@ def test_ramp_up_invalid_block_is_rejected_with_422(tmp_path: Path) -> None:
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.put(
             "/api/config",
             json={"ramp_up": {"initial": 0}},
@@ -337,7 +301,7 @@ def test_upload_max_concurrency_is_hot_updated_without_restart(tmp_path: Path) -
     supervisor = FakeSupervisor(store)
     app = create_app(supervisor, tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.put(
             "/api/config",
             json={"upload_max_concurrency": 12},
@@ -356,7 +320,7 @@ def test_max_code_concurrency_is_hot_updated_without_restart(tmp_path: Path) -> 
     supervisor = FakeSupervisor(store)
     app = create_app(supervisor, tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.put(
             "/api/config",
             json={"max_code_concurrency": 8},
@@ -374,7 +338,7 @@ def test_local_api_rejects_unknown_disabled_runtime(tmp_path: Path) -> None:
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.put(
             "/api/config",
             json={**public_config(store.read()), "disabled_runtimes": ["shell"]},
@@ -390,7 +354,7 @@ def test_local_api_rejects_retired_runtimes_field(tmp_path: Path) -> None:
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.put(
             "/api/config",
             json={"runtimes": ["pi"]},
@@ -414,7 +378,7 @@ def test_local_api_exposes_runtime_status_and_applies_disabled_runtimes(
     supervisor = FakeSupervisor(store)
     app = create_app(supervisor, tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         before = client.get("/api/config", headers=_auth(store))
         response = client.put(
             "/api/config",
@@ -458,7 +422,7 @@ def test_runtime_status_marks_pending_restart_against_host_registration(
 
     app = create_app(RegisteredSupervisor(store), tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.get("/api/config", headers=_auth(store))
 
     payload = response.json()
@@ -493,7 +457,7 @@ def test_local_api_partial_update_keeps_unspecified_fields(tmp_path: Path) -> No
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.put("/api/config", json={"max_concurrency": 9}, headers=_auth(store))
 
     assert response.status_code == 200
@@ -515,7 +479,7 @@ def test_put_config_worker_id_change_logs_revoke_hint_and_restarts(
 ) -> None:
     store, supervisor, app = _make_revoke_harness(tmp_path)
 
-    with caplog.at_level(logging.INFO), TestClient(app) as client:
+    with caplog.at_level(logging.INFO), TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.put(
             "/api/config",
             json={**public_config(store.read()), "worker_id": "worker-2"},
@@ -534,7 +498,7 @@ def test_put_config_without_worker_id_change_logs_no_revoke_hint(
 ) -> None:
     store, supervisor, app = _make_revoke_harness(tmp_path)
 
-    with caplog.at_level(logging.INFO), TestClient(app) as client:
+    with caplog.at_level(logging.INFO), TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.put(
             "/api/config",
             json={**public_config(store.read()), "name": "Renamed Worker"},
@@ -558,7 +522,7 @@ def test_api_requires_bearer_token_except_health(tmp_path: Path) -> None:
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         assert client.get("/api/status").status_code == 401
         assert client.get("/api/logs").status_code == 401
         assert client.post("/api/restart").status_code == 401
@@ -575,7 +539,7 @@ def test_metrics_overview_validates_query_params(tmp_path: Path) -> None:
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         headers = _auth(store)
         assert (
             client.get("/api/metrics/overview?granularity=second", headers=headers).status_code
@@ -607,7 +571,7 @@ def test_metrics_overview_reads_worker_authenticated_cache(tmp_path: Path) -> No
         {metrics_cache_key("24h"): payload}
     )
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.get("/api/metrics/overview?granularity=24h", headers=_auth(store))
 
     assert response.status_code == 200
@@ -619,7 +583,7 @@ def test_metrics_overview_without_cache_returns_503(tmp_path: Path) -> None:
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.get("/api/metrics/overview", headers=_auth(store))
 
     assert response.status_code == 503
@@ -632,55 +596,11 @@ def test_metrics_overview_cache_error_returns_503(tmp_path: Path) -> None:
     app = create_app(FakeSupervisor(store), tmp_path)
     WorkerMetricsCache(metrics_cache_path(store.state_dir)).publish({}, "6h: connection refused")
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.get("/api/metrics/overview", headers=_auth(store))
 
     assert response.status_code == 503
     assert "connection refused" in response.json()["detail"]
-
-
-def test_index_injects_control_token(tmp_path: Path) -> None:
-    ui = tmp_path / "ui"
-    ui.mkdir()
-    (ui / "index.html").write_text(
-        '<script>window.__WORKER_CONTROL_TOKEN__ = "__WORKER_CONTROL_TOKEN__";</script>',
-        encoding="utf-8",
-    )
-    store = WorkerConfigStore(tmp_path / "state")
-    app = create_app(FakeSupervisor(store), ui)
-
-    with TestClient(app) as client:
-        body = client.get("/").text
-
-    assert f'= "{store.control_token()}"' in body
-    assert '= "__WORKER_CONTROL_TOKEN__"' not in body
-
-
-def test_index_skips_control_token_when_embedding_disabled(tmp_path: Path) -> None:
-    ui = tmp_path / "ui"
-    ui.mkdir()
-    (ui / "index.html").write_text(
-        '<script>window.__WORKER_CONTROL_TOKEN__ = "__WORKER_CONTROL_TOKEN__";</script>',
-        encoding="utf-8",
-    )
-    store = WorkerConfigStore(tmp_path / "state")
-    app = create_app(FakeSupervisor(store), ui, embed_token=False)
-
-    with TestClient(app) as client:
-        body = client.get("/").text
-
-    assert store.control_token() not in body
-    assert '= "__WORKER_CONTROL_TOKEN__"' in body
-
-
-def test_embed_control_token_only_on_loopback(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.WARNING):
-        assert embed_control_token("127.0.0.1") is True
-        assert embed_control_token("::1") is True
-        assert embed_control_token("localhost") is True
-        assert embed_control_token("0.0.0.0") is False
-
-    assert any("非回环地址 0.0.0.0" in record.message for record in caplog.records)
 
 
 def test_worker_ui_serves_icon_sprite(tmp_path: Path) -> None:
@@ -691,7 +611,7 @@ def test_worker_ui_serves_icon_sprite(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     app = create_app(FakeSupervisor(store), ui)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.get("/assets/icons.svg")
 
     assert response.status_code == 200
@@ -726,7 +646,7 @@ def test_worker_ui_serves_ramp_up_module(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     app = create_app(FakeSupervisor(store), ui)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.get("/assets/ramp_up.js")
 
     assert response.status_code == 200
@@ -740,147 +660,17 @@ def test_index_disables_browser_caching(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     app = create_app(FakeSupervisor(store), ui)
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.get("/")
 
     assert response.headers["Cache-Control"] == "no-cache"
-
-
-def test_supervisor_starts_and_stops_worker_process(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    supervisor = _make_supervisor(tmp_path, monkeypatch, "sleep")
-    supervisor.store.update_public({"claim_enabled": True})
-
-    supervisor.start()
-    wait_for_predicate(lambda: supervisor.running())
-    wait_for_predicate(lambda: any("fake worker ready" in line for line in supervisor.logs()))
-    pid = supervisor.status()["pid"]
-    assert isinstance(pid, int)
-    assert supervisor.status()["claim_enabled"] is False
-    supervisor.store.update_public({"claim_enabled": True})
-    supervisor.restart()
-    wait_for_predicate(lambda: supervisor.running())
-    assert supervisor.status()["claim_enabled"] is False
-
-    supervisor.stop()
-    wait_for_predicate(lambda: not supervisor.running())
-    time.sleep(0.2)
-    assert supervisor.running() is False  # 手动停止后不自动重启
-
-
-def test_supervisor_restarts_after_crash_with_backoff(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    supervisor = _make_supervisor(tmp_path, monkeypatch, "crash")
-    try:
-        supervisor.start()
-        wait_for_predicate(lambda: supervisor.status()["restart_count"] >= 1)
-        status = supervisor.status()
-        assert status["failed"] is None
-        assert status["next_restart_delay"] is not None or status["worker_running"]
-    finally:
-        supervisor.stop()
-
-
-def test_supervisor_does_not_restart_after_exit_code_2(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    supervisor = _make_supervisor(tmp_path, monkeypatch, "exit2")
-
-    supervisor.start()
-    wait_for_predicate(lambda: supervisor.status()["failed"] is not None)
-
-    time.sleep(0.3)
-    status = supervisor.status()
-    assert "退出码 2" in status["failed"]
-    assert status["exit_code"] == 2
-    assert status["restart_count"] == 0
-    assert status["worker_running"] is False
-
-
-def test_supervisor_restart_and_stop_can_race_without_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    supervisor = _make_supervisor(tmp_path, monkeypatch, "sleep")
-    supervisor.start()
-    wait_for_predicate(lambda: supervisor.running())
-
-    errors: list[BaseException] = []
-
-    def run(action: Callable[[], None]) -> None:
-        try:
-            action()
-        except BaseException as exc:  # noqa: BLE001
-            errors.append(exc)
-
-    threads = [
-        threading.Thread(target=run, args=(supervisor.restart,)),
-        threading.Thread(target=run, args=(supervisor.stop,)),
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=30)
-
-    assert not errors
-    supervisor.stop()
-    assert supervisor.running() is False
-
-
-def test_compose_keeps_control_api_local_and_state_separate_from_executions() -> None:
-    standalone = (ROOT / "deploy/compose.worker.yaml").read_text(encoding="utf-8")
-    host = (ROOT / "deploy/compose.host.yaml").read_text(encoding="utf-8")
-    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-
-    for compose in (standalone, host):
-        assert "${AGENT_WORKER_UI_BIND:-127.0.0.1}:8787:8787" in compose
-        assert "worker-control:/var/lib/agent-legion-worker-control" in compose
-        assert "worker-data:/var/lib/agent-legion-worker" in compose
-        assert "${VELITES_PROVIDER_ENV_FILE:-./velites-provider.env}" in compose
-        assert "required: false" in compose
-    assert "deploy/velites-provider.env" in (ROOT / ".gitignore").read_text(encoding="utf-8")
-    assert "COPY shared /app/shared" in dockerfile
-    assert 'python3 -c "import worker.service' in dockerfile
-    assert "worker/cli_args.py /usr/local/bin/agent_worker_cli_args.py" in dockerfile
-
-
-def test_supervisor_injects_status_file_and_cleans_it_on_exit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    script = tmp_path / "fake_worker.py"
-    script.write_text(FAKE_WORKER_WITH_STATUS, encoding="utf-8")
-    token_file = tmp_path / "register-token"
-    token_file.write_text("secret", encoding="utf-8")
-    store = WorkerConfigStore(tmp_path / "state")
-    store.write(validate_config({**_config(), "register_token_file": str(token_file)}))
-    supervisor = WorkerSupervisor(store, script)
-    metrics_path = tmp_path / "state" / "ops_metrics.json"
-    metrics_path.write_text("stale", encoding="utf-8")
-    supervisor.start()
-    try:
-        assert not metrics_path.exists()
-        wait_for_predicate(lambda: supervisor.status()["current_executions"] != [])
-        metrics_path.write_text("runtime", encoding="utf-8")
-        status = supervisor.status()
-        executions = status["current_executions"]
-        assert [item["execution_id"] for item in executions] == ["exec-1"]
-        assert executions[0]["phase"] == "running"
-        assert status["host_reachable"] is True
-        assert status["registered"] is True
-        assert status["host_worker"]["worker_id"] == "worker-1"
-    finally:
-        supervisor.stop()
-    wait_for_predicate(lambda: supervisor.status()["current_executions"] == [])
-    assert not (tmp_path / "state" / "current_executions.json").exists()
-    assert not metrics_path.exists()
 
 
 def test_status_endpoint_exposes_current_executions(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.get("/api/status", headers=_auth(store))
     assert response.status_code == 200
     assert response.json()["current_executions"] == []
