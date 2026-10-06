@@ -100,8 +100,9 @@ where exists (
 
 第二条按节点判定，是保守上界：不声明产物的节点也会计入。它看不出「节点只
 登记了部分声明产物」（个别产物上传失败且已超出上面 7 天补传窗口；声明产物
-清单在 workflow 定义里，SQL 无从比对）。所以只有两条都为 0 时数据根才可按
-§1.4 当作缓存；任一非 0 就把 `artifacts/` 与**整个** `jobs/` 随数据库一起备份
+清单在 workflow 定义里，SQL 无从比对），也看不出「重跑节点上传失败、完成已超
+过 7 天」：旧的清单行仍在，SQL 计 0，但新内容只在本地 job 目录。所以只有两条都为 0 时数据根才可按
+§1.4 当作缓存；任一非 0、或对上面两种盲区有疑虑，就把 `artifacts/` 与**整个** `jobs/` 随数据库一起备份
 （第三条只用于了解涉及范围，不要据此只挑部分目录），命令见 §2.2.1。
 
 ### 1.3 建议备份
@@ -167,14 +168,22 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
   [materials-storage-deployment.md](materials-storage-deployment.md) §4）。
   恢复时**先**让目标后端运行并建好 bucket，**再**反向同步（`aws s3 sync` 不会
   建 bucket，目标 bucket 不存在时直接失败；bucket 的 CORS 配置也不随对象复制）：
-  1. 本地后端先拉起（`F` 见 §1.1）：`docker compose "${F[@]}" --profile materials-local up -d seaweedfs`
-     （rustfs 逃生舱为 `--profile materials-local-rustfs up -d rustfs`；外部 S3 跳过）；
+  1. 本地后端先拉起并等到 healthy（`F` 见 §1.1）：
+     `docker compose "${F[@]}" --profile materials-local up -d --wait seaweedfs`
+     （rustfs 逃生舱为 `--profile materials-local-rustfs up -d --wait rustfs`；外部
+     S3 跳过）。不带 `--wait` 时紧接的建 bucket 可能连不上；
   2. 建 bucket 与浏览器直传 CORS。Docker stack 用一次性 Host 容器执行——bucket、
      endpoint、凭据由 compose 按 `deploy/.env` 注入（宿主机直接读 `deploy/.env`
      时 bucket 未显式写出会被当作「未配置」静默跳过）：
-     `docker compose "${F[@]}" run --rm --no-deps host python scripts/ensure-s3-bucket.py`；
+     `docker compose "${F[@]}" run --rm --no-deps host python scripts/ensure-s3-bucket.py`。
+     Host 容器内 `AGENT_LEGION_S3_ENDPOINT` 默认是 `http://seaweedfs:8333`，rustfs
+     部署须已在 `deploy/.env` 覆盖为 `http://rustfs:9000`。全新机器上先按 §2.3
+     第 5 步放回 skill root（至少以当前用户 `mkdir -p "$SKILLS"`）再执行这条：
+     `run host` 会挂载 `${AGENT_SKILLS_DIR:-../skills}`，绑定源不存在时 Linux 上
+     Docker 以 root 创建它，之后普通用户解包会 EACCES；
      原生形态：`UV_CACHE_DIR=.uv-cache uv run python scripts/ensure-s3-bucket.py .env`；
-  3. 反向同步（本地后端从宿主机经 `http://127.0.0.1:8333` 访问）。
+  3. 反向同步（本地后端从宿主机访问：SeaweedFS 为 `http://127.0.0.1:8333`，rustfs
+     为 `http://127.0.0.1:9000`）。
 - **SeaweedFS 卷级冷备份**：先停对象存储容器，再打包整个 `/data`（filer
   元数据与 volume 文件都在其中，停机打包才自洽）：
 
