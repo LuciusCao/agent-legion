@@ -1,8 +1,8 @@
 """Persistence for studio chat sessions (schema v43, phase 3 chunk 4).
 
 Message CRUD lives in studio_chat_messages.py, the resume claim in
-studio_chat_resume.py and the delete/archive stamps in studio_chat_visibility.py
-(file budget splits); this mixin inherits them so the composed JobQueries
+studio_chat_resume.py, the delete/archive stamps in studio_chat_visibility.py and
+the retention purge (#1041) in studio_chat_retention.py (file budget splits); this mixin inherits them so the composed JobQueries
 surface is unchanged.
 """
 
@@ -16,6 +16,7 @@ from server.app.jobs.queries.studio_chat_resume import (
     _CAP_LOCK_KEY,
     StudioChatResumeQueriesMixin,
 )
+from server.app.jobs.queries.studio_chat_retention import StudioChatRetentionQueriesMixin
 from server.app.jobs.queries.studio_chat_visibility import StudioChatVisibilityQueriesMixin
 
 _SESSION_COLUMNS = (
@@ -69,7 +70,9 @@ def _build_session_updates(fields: dict[str, Any]) -> dict[str, Any]:
     return updates
 
 
-class StudioChatQueriesMixin(StudioChatResumeQueriesMixin, StudioChatVisibilityQueriesMixin):
+class StudioChatQueriesMixin(
+    StudioChatResumeQueriesMixin, StudioChatVisibilityQueriesMixin, StudioChatRetentionQueriesMixin
+):
     """CRUD for studio_chat_sessions (messages/resume/visibility stamps via
     inherited mixins)."""
 

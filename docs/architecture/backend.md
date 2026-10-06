@@ -584,7 +584,7 @@ server/app/
 | StudioChatSessionUpdateRequest | BaseModel | title: str | app/routes/studio_chat_contracts.py |
 | StudioChatSessionDeleteResponse | BaseModel | deleted: str | app/routes/studio_chat_contracts.py |
 | StudioChatSessionResponse | BaseModel | session: StudioChatSessionRecord | app/routes/studio_chat_contracts.py |
-| StudioChatSessionsResponse | BaseModel | sessions: list[StudioChatSessionRecord] | app/routes/studio_chat_contracts.py |
+| StudioChatSessionsResponse | BaseModel | sessions: list[StudioChatSessionRecord], retention_days: int | app/routes/studio_chat_contracts.py |
 | StudioChatMessageCreateRequest | BaseModel | text: str | app/routes/studio_chat_contracts.py |
 | StudioChatMessageRecord | BaseModel | id: str, session_id: str, kind: MessageKind, role: MessageRole, content: dict... | app/routes/studio_chat_contracts.py |
 | StudioChatMessageResponse | BaseModel | message: StudioChatMessageRecord | app/routes/studio_chat_contracts.py |

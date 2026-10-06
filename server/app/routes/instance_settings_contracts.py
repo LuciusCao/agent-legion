@@ -125,6 +125,13 @@ class InstanceSettingsDocument(BaseModel):
     # window, in small batches. Read fresh from the DB at sweep time, so
     # edits take effect without restart.
     execution_retention_days: int = Field(ge=0, le=36500)
+    # Studio chat session retention in days (#1041); 0 = disabled (archived
+    # / soft-deleted sessions are kept forever — the default). When enabled,
+    # the studio chat retention sweep physically removes closed sessions
+    # whose archive / soft-delete stamp is older than the window (messages
+    # cascade with the row). Read fresh at sweep / list time, so edits take
+    # effect without restart.
+    studio_chat_retention_days: int = Field(ge=0, le=36500)
     workflows: InstanceWorkflowsSettings
     agent_workers: InstanceAgentWorkersSettings
     # #509/#554: capacity knobs folded into the instance document;

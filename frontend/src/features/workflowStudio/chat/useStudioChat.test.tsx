@@ -6,6 +6,7 @@ import { useStudioChat } from './useStudioChat'
 import * as chatApi from './studioChatApi'
 import * as resumeApi from './studioChatResumeApi'
 import type { StudioChatSessionRecord } from './studioChatApi'
+import { studioChatRetentionKey } from './studioChatRetention'
 import { EventSourceMock } from '../../../testing/eventSourceMock'
 import { createTestQueryClient } from '../../../testing/testQueryClient'
 
@@ -743,5 +744,18 @@ describe('useStudioChat', () => {
     // 旧选中不得写进新 workspace 的记忆；旧 workspace 的记忆本身保留。
     expect(storage.getItem('studio-chat.active-session.ws2')).toBeNull()
     expect(storage.getItem('studio-chat.active-session.ws1')).toBe('s1')
+  })
+
+  it('the default list response feeds the retention cache (#1041)', async () => {
+    mockApi.fetchStudioChatSessions.mockImplementation(
+      async (_ws: string, onRetention?: (days: number) => void) => {
+        onRetention?.(14)
+        return [sessionRecord()]
+      }
+    )
+    renderHook(() => useStudioChat('ws1'), { wrapper })
+    await waitFor(() =>
+      expect(testClient.getQueryData(studioChatRetentionKey('ws1'))).toBe(14)
+    )
   })
 })

@@ -95,6 +95,16 @@
   font-size: 13px;
   color: #616161;
 }
+/* #1041：归档行的清理倒计时；临期（≤1 天）转警示色，提示可「恢复」。 */
+.countdown {
+  flex: none;
+  font-size: 11px;
+  color: #9e9e9e;
+  white-space: nowrap;
+}
+.countdown[data-imminent='true'] {
+  color: #e65100;
+}
 .restoreAction {
   flex: none;
   display: inline-flex;

@@ -16,6 +16,18 @@ from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.settings import Settings
 from server.app.storage import ObjectStorage
+from server.app.studio_chat.retention import StudioChatRetentionThread
+from server.app.studio_chat.service import StudioChatService
+
+# The composition root's handle on the slow sweeps (#1041: named here so a
+# new sweep extends this one tuple instead of the type in main.py).
+SweeperOwnedThreads = tuple[
+    ArtifactOrphanGcThread,
+    JobArtifactMaintenanceThread,
+    MaterialTtlSweeperThread,
+    ExecutionRetentionThread,
+    StudioChatRetentionThread,
+]
 
 
 def start_sweeper_owned_threads(
@@ -24,17 +36,14 @@ def start_sweeper_owned_threads(
     job_db: JobQueries,
     settings: Settings,
     object_storage: ObjectStorage | None,
-) -> tuple[
-    ArtifactOrphanGcThread,
-    JobArtifactMaintenanceThread,
-    MaterialTtlSweeperThread,
-    ExecutionRetentionThread,
-]:
-    """Start the four slow-cadence sweep threads the sweeper replica owns.
+    studio_chat_service: StudioChatService,
+) -> SweeperOwnedThreads:
+    """Start the five slow-cadence sweep threads the sweeper replica owns.
 
     Orphan GC / artifact maintenance / materials TTL (design §10) /
-    execution-plane row retention (#354) share the sweeper ownership rule:
-    exactly one replica (``sweeper_enabled``) runs them, the rest stay idle.
+    execution-plane row retention (#354) / studio chat session retention
+    (#1041) share the sweeper ownership rule: exactly one replica
+    (``sweeper_enabled``) runs them, the rest stay idle.
     """
     artifact_gc_thread = ArtifactOrphanGcThread(artifact_store)
     artifact_gc_thread.start()
@@ -48,9 +57,15 @@ def start_sweeper_owned_threads(
     # the instance setting is explicitly enabled.
     execution_retention_thread = ExecutionRetentionThread(job_db)
     execution_retention_thread.start()
+    # Studio chat session retention (#1041): disabled (purges nothing) until
+    # the instance setting is explicitly enabled. Needs the chat service so
+    # the purge can skip sessions that still hold an in-process runtime.
+    chat_retention_thread = StudioChatRetentionThread(studio_chat_service)
+    chat_retention_thread.start()
     return (
         artifact_gc_thread,
         artifact_maintenance_thread,
         material_ttl_thread,
         execution_retention_thread,
+        chat_retention_thread,
     )
