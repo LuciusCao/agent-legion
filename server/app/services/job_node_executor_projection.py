@@ -23,25 +23,29 @@ def node_executor_projection(
 ) -> dict[str, Any]:
     """Executor / Agent / Worker fields of one job-detail node.
 
-    P-0.5: non-agent nodes always run on the implicit code pool. When the
-    job has a frozen definition carrying the node, the frozen node decides
-    entirely (#284, #933 — routes are current-state and may since have been
-    added or removed for the same node key): code nodes never read a route,
-    a self-contained agent node's identity is its node key (what its
-    requests carry), and only a legacy agent node looks up its Agent route.
-    *definition* is None for snapshot-less legacy jobs, which (like a node
-    missing from the frozen definition) fall back to the current route.
+    The projection mirrors what dispatch actually does
+    (``workflow_worker/routing.resolve_node_route``):
+
+    - a frozen self-contained agent node (#933) dispatches from the job
+      snapshot, so its identity is the node key whatever routes exist now;
+    - every other node follows the current Agent route like dispatch does
+      — including a frozen ``code`` node that a later revision routed to an
+      Agent. Dispatch not honouring the frozen type is a pre-existing gap
+      tracked in #1091; once dispatch follows the frozen type, switch this
+      back to frozen-type-first (code never reads the route);
+    - a frozen legacy agent node with no route still is an agent node
+      (dispatch falls back to its capability, #1039).
+
+    *definition* is None for snapshot-less legacy jobs (current route only).
     """
     node_key = str(node["node_key"])
     frozen = definition.nodes.get(node_key) if definition is not None else None
-    if frozen is None:
-        agent_id = agent_map.get(node_key)
-        is_agent = agent_id is not None
-    elif frozen.node_type != "agent":
-        agent_id, is_agent = None, False
-    else:
+    if frozen is not None and is_self_contained_agent_node(frozen):
+        agent_id: str | None = node_key
         is_agent = True
-        agent_id = node_key if is_self_contained_agent_node(frozen) else agent_map.get(node_key)
+    else:
+        agent_id = agent_map.get(node_key)
+        is_agent = agent_id is not None or (frozen is not None and frozen.node_type == "agent")
     return {
         "executor_id": None if is_agent else CODE_EXECUTOR_ID,
         "executor_kind": None if is_agent else "code",

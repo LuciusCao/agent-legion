@@ -10,8 +10,11 @@ error), and the settings code-node set (frontend ``lib/codeNodes``).
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
+from server.app.agent_catalog import AgentDefinition
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.job_queries import JobQueryService
 from server.app.services.quality_replays import QualityReplayService
@@ -19,7 +22,9 @@ from server.app.services.workflow_revision_format import definition_hash, serial
 from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
 )
+from server.app.workflow_worker.routing import resolve_node_route
 from server.app.workflows.definition import workflow_definition_from_mapping
+from tests.helpers import replace_agent_catalog
 
 _DEFINITION = {
     "label": "Self-contained",
@@ -98,23 +103,36 @@ def _add_route(job_db, workspace_id: str, node_key: str, agent_id: str) -> None:
         )
 
 
-def test_frozen_node_type_wins_over_routes_added_later(job_db, settings) -> None:
-    """PR #1085 codex R1: routes are current state. A job frozen with
-    ``fetch`` as code stays code after a later revision routes ``fetch`` to
-    an Agent; a frozen self-contained node keeps its node-key identity after
-    a route for the same node key appears."""
+def test_detail_matches_dispatch_after_routes_are_added_later(job_db, settings) -> None:
+    """PR #1085 codex R1/R2: the detail projection mirrors dispatch.
+
+    A later revision routes the frozen ``code`` node ``fetch`` to an Agent:
+    dispatch (``resolve_node_route``) follows the current route — a
+    pre-existing gap tracked in #1091 — so the detail shows the Agent too.
+    The frozen self-contained ``draft`` keeps its node-key identity even
+    after a route for the same node key appears, exactly like dispatch.
+    """
     workspace = job_db.create_workspace("Frozen wins", workspace_id="sc_frozen")
     definition = workflow_definition_from_mapping({"key": workspace["id"], **_DEFINITION})
     job = _job(job_db, workspace["id"], definition, "Q1")
+    replace_agent_catalog(
+        workspace["id"], {"fetch-agent": AgentDefinition(capability="fetch", runtime="pi")}
+    )
     _add_route(job_db, workspace["id"], "fetch", "fetch-agent")
     _add_route(job_db, workspace["id"], "draft", "draft-agent")
     service = JobQueryService(job_db, settings, WorkspaceExecutionConfigurationService(job_db))
+    worker = MagicMock()
+    worker.job_db = job_db
+    worker.state.route_cache = {}
 
     nodes = {node["node_key"]: node for node in service.detail(job["id"])["nodes"]}
 
-    assert nodes["fetch"]["executor_kind"] == "code"
-    assert nodes["fetch"]["agent_id"] is None
-    assert nodes["draft"]["executor_kind"] is None
+    for key in ("fetch", "draft"):
+        route = resolve_node_route(worker, workspace["id"], workspace["id"], definition.nodes[key])
+        assert route.kind == "agent"
+        assert nodes[key]["executor_kind"] is None
+        assert nodes[key]["agent_id"] == route.target_id
+    assert nodes["fetch"]["agent_id"] == "fetch-agent"
     assert nodes["draft"]["agent_id"] == "draft"
 
 

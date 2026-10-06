@@ -1565,7 +1565,7 @@
     "server/app/services/job_log_raw.py": 51,
     "server/app/services/job_log_renderer.py": 241,
     "server/app/services/job_logs.py": 109,
-    "server/app/services/job_node_executor_projection.py": 38,
+    "server/app/services/job_node_executor_projection.py": 36,
     "server/app/services/job_node_ordering.py": 47,
     "server/app/services/job_node_worker_projection.py": 36,
     "server/app/services/job_operation_error.py": 59,
