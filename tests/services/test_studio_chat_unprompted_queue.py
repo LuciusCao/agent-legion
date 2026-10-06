@@ -250,6 +250,20 @@ def test_empty_turn_replay_is_refused_while_held(gated) -> None:
     assert _queue_items(runtime) == []
 
 
+def test_empty_turn_replay_refreshes_the_gate_before_deciding(gated) -> None:
+    service, _db, sid, _workspace, runtime, watcher, write, _path = gated
+    # The unprompted turn is on the wire but the watcher has not polled yet:
+    # the replay must step it first (as send_message does), not slip into it.
+    write(PROMPT)
+    assert watcher.open == frozenset()
+    runtime.empty_turn_retry = ("msg", "text", "prompt")
+    with pytest.raises(ConflictError, match="自发"):
+        retry_empty_turn(service, sid, runtime)
+    assert watcher.open == {"3"}
+    assert runtime.empty_turn_retry == ("msg", "text", "prompt")
+    assert _queue_items(runtime) == []
+
+
 def test_closed_runtime_never_flushes(gated) -> None:
     service, _db, sid, workspace, runtime, watcher, write, _path = gated
     write(PROMPT)
