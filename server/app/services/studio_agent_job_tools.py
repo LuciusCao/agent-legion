@@ -311,7 +311,11 @@ class StudioAgentJobToolsService:
         flaky-or-new signal for the diagnosis."""
         if not focus_node_key:
             return []
-        rows = self._failed_runs.list_failed_node_runs(workspace_id)
+        # #713: bounded at the query — the excluded job holds at most one
+        # latest run of the focus node, so limit + 1 always leaves enough.
+        rows = self._failed_runs.recent_failures_on_node(
+            workspace_id, focus_node_key, limit=_RECENT_FAILURES_LIMIT + 1
+        )
         failures = [
             {
                 "job_id": str(row["job_id"]),

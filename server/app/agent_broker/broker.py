@@ -207,20 +207,25 @@ class AgentExecutionBroker:
         manager = self.agent_status
         if manager is None:
             return
+        # #957: one round trip per poll — the all-workspaces id list rides the
+        # worker row as a scalar subquery, evaluated only for an unrestricted
+        # Worker ([] = all workspaces, EXEC-WORKERACL-001). Panel mirror only:
+        # dispatch admission/pause never reads this list, so no cache here.
         with read_connection(self.database_dsn) as conn:
             worker = conn.execute(
-                "select name, max_concurrency, allowed_workspaces_json from agent_workers"
-                " where worker_id=%s",
+                "select name, max_concurrency, allowed_workspaces_json,"
+                " case when coalesce(nullif(allowed_workspaces_json, ''), '[]')::jsonb = '[]'::jsonb"
+                " then array(select id from workspaces order by id) end as all_workspace_ids"
+                " from agent_workers where worker_id=%s",
                 (worker_id,),
             ).fetchone()
-            if worker is None:
-                return
-            allowed = set(json.loads(worker["allowed_workspaces_json"] or "[]"))
-            if allowed:
-                workspace_ids = sorted(allowed)
-            else:
-                rows = conn.execute("select id from workspaces").fetchall()
-                workspace_ids = [str(row["id"]) for row in rows]
+        if worker is None:
+            return
+        allowed = set(json.loads(worker["allowed_workspaces_json"] or "[]"))
+        if allowed:
+            workspace_ids = sorted(allowed)
+        else:
+            workspace_ids = [str(ws) for ws in worker["all_workspace_ids"] or []]
         max_tasks = int(worker["max_concurrency"])
         name = str(worker["name"] or worker_id)
         for workspace_id in workspace_ids:

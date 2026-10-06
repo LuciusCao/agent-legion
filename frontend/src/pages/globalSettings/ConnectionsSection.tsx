@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import { formatDateTime } from '../../lib/formatters'
 import { toErrorMessage } from '../../lib/queryError'
 import { useUiStore } from '../../stores/uiStore'
 import {
@@ -22,19 +23,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function formatTime(value: string | null | undefined): string {
-  if (!value) return ''
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN')
-}
-
 function tokenStatusLabel(connection: ConnectionView): string {
   const token = connection.token
   if (!token || (!token.expires_at && !token.refreshed_at)) return '未获取'
   const parts: string[] = []
-  if (token.expires_at) parts.push(`有效期至 ${formatTime(token.expires_at)}`)
+  if (token.expires_at)
+    parts.push(`有效期至 ${formatDateTime(token.expires_at)}`)
   if (token.refreshed_at)
-    parts.push(`上次刷新 ${formatTime(token.refreshed_at)}`)
+    parts.push(`上次刷新 ${formatDateTime(token.refreshed_at)}`)
   return parts.join(' · ')
 }
 
