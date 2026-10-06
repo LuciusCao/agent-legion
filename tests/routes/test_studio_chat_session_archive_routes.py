@@ -104,6 +104,26 @@ def test_archived_session_can_still_be_deleted(client, tmp_path) -> None:
     assert client.post(f"{url}/unarchive").status_code == 404
 
 
+def test_list_carries_the_instance_retention_window(client, tmp_path) -> None:
+    """#1041: both list views carry the chat retention window the archive
+    view's countdown is computed from; 0 (disabled) by default, and an admin
+    edit through the instance settings page takes effect without restart."""
+    register_fake_agent(client, tmp_path)
+    workspace_id = create_workspace(client)
+    sessions_url = f"/api/workspaces/{workspace_id}/studio-chat/sessions"
+    assert client.get(sessions_url).json()["retention_days"] == 0
+
+    document = client.get("/api/admin/instance-settings").json()
+    document.pop("skills_root")
+    assert document["studio_chat_retention_days"] == 0
+    document["studio_chat_retention_days"] = 14
+    assert client.put("/api/admin/instance-settings", json=document).status_code == 200
+
+    assert client.get(sessions_url).json()["retention_days"] == 14
+    archived = client.get(sessions_url, params={"archived": "true"}).json()
+    assert archived["retention_days"] == 14
+
+
 def test_archive_unknown_and_cross_workspace_is_404(client, tmp_path) -> None:
     register_fake_agent(client, tmp_path)
     workspace_a = create_workspace(client, "_a")

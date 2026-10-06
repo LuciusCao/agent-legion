@@ -93,6 +93,8 @@ def evaluate_candidate(
         (selected["job_id"],),
     ).fetchone()
     if job is None:
+        # 防御分支：请求行 job_id 外键 on delete cascade 且行已被本事务锁住，
+        # 现行 schema 下不可达；保留以防 schema 漂移时 job["…"] 取值崩溃（#955）。
         cancel_request(conn, selected["execution_id"])
         state.skip_reasons["job_missing"] += 1
         return None
