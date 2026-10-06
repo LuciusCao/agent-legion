@@ -9,7 +9,7 @@ GitHub 对段落内**单个换行**的渲染分两种表面，窄幅手工断行
 - Release 正文（同 issue/PR 评论）：单换行渲染为换行（`<br>`）——按约 32 个汉字宽断行的段落，渲染出来是参差的断口，句子被随机切断，悬挂缩进全部丢失；
 - 文件视图（CHANGELOG.md、docs）：单换行折叠为空格——中文句子中间被随机插入半角空格。
 
-这是 2026-09 之前 release 页面观感混乱的直接根因；CHANGELOG 的窄幅段落贴进 release 正文时，断口原样带过去。2026-09-16 已对存量 Release（11 个）与 CHANGELOG（0.1.0–0.7.12 段）做过一次全量重排，本文是防止回潮的规范。
+CHANGELOG 的窄幅段落贴进 release 正文时，断口也会原样带过去。下面的红线就是为了让两种表面都渲染整洁。
 
 ## 排版红线（硬规则）
 
@@ -54,7 +54,7 @@ velites v0.5.4 — 契约三档回落与迁移桥 deprecation
 
 ### 反例与正例
 
-反例（v0.7.12 原稿，硬换行 + 实现细节淹没重点）：
+反例（硬换行 + 实现细节淹没重点）：
 
 ```markdown
 - 状态计数触发器的跨语句死锁环（issue #659，v82 迁移）：v77（#437）
@@ -68,9 +68,6 @@ velites v0.5.4 — 契约三档回落与迁移桥 deprecation
 ```markdown
 - 状态计数触发器跨语句死锁（#659，含 v82 迁移）：claim/心跳/rerun 间歇性 500 的根因，计数触发器改为追加 delta + `pg_try_advisory_xact_lock` 选 folder 合并，写者不再等锁、读取汇总基表与待合并 delta；node 级同类计数族由后续 v88 收口。
 ```
-
-> 更正（#866）：此正例原稿写作「触发器入口改为分层 advisory lock 并统一锁序」，那是 #662 评审中途的形态；最终合入的 v82 是追加 delta + try-lock 选 folder 合并，已按迁移代码更正。
-
 ## 内容分层：release 写摘要，CHANGELOG 写深记录
 
 同一版本的两个层次，不要复制粘贴：
@@ -101,6 +98,7 @@ gh release edit vX.Y.Z -R LuciusCao/agent-legion \
   --title "<新标题>" --notes-file <notes.md>
 ```
 
+- 落版 commit 同时把 `scripts/install-worker.sh` 的默认 worker 版本（`AGENT_WORKER_VERSION` 默认值）钉到本次发布的 worker 版本，velites 落版时同步 `VELITES_VERSION` 默认值；一键安装文档默认从 `main` 拉脚本，依赖这一步保持默认版本最新。
 - Full Changelog 链接区间用**同产品线的上一个 tag**（worker 对 worker、velites 对 velites），不要跨线。
 - velites 版本线独立于仓库版本（`scripts/check_versions.py` 强制解耦），tag 必须与 `velites/Cargo.toml` 一致（workflow validate job 强制）。
 - `.github/release.yml` 配置了 GitHub 原生自动 notes 的 label → 分组映射（bug → 修复、enhancement → 新增等），作为 `--generate-notes` 的兜底格式；主仓正式 release 仍应手写摘要。
@@ -114,3 +112,4 @@ gh release edit vX.Y.Z -R LuciusCao/agent-legion \
 - [ ] 有迁移 / 配套升级 / 退役时，「升级注意」组单列。
 - [ ] 文末有 Full Changelog 链接，区间是同线上一 tag。
 - [ ] CHANGELOG 对应段落已落版（含 Unreleased 归位）。
+- [ ] `scripts/install-worker.sh` 的默认 worker / velites 版本已钉到本次发布。
