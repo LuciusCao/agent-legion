@@ -6,11 +6,13 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 
 from server.app.configuration.csp import load_csp_settings
+from server.app.configuration.env_overrides import _bool_parser
 from server.app.http_csp import (
     ContentSecurityPolicyMiddleware,
     build_spa_csp,
@@ -152,6 +154,21 @@ def test_csp_switch_env_drives_settings(tmp_path, monkeypatch):
         load_settings(data_dir=tmp_path / "data", config_path=config_path).csp.script_unsafe_inline
         is True
     )
+
+
+@pytest.mark.no_db
+def test_docker_host_stack_passes_the_csp_switch_through() -> None:
+    """compose's deploy/.env only feeds interpolation: the Host container sees
+    the switch only if compose.host.yaml forwards it, and the unset default
+    must still parse as a boolean (an empty string fails the settings load)."""
+    repo = Path(__file__).resolve().parents[2]
+    doc = yaml.safe_load((repo / "deploy/compose.host.yaml").read_text(encoding="utf-8"))
+    value = doc["services"]["host"]["environment"]["AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE"]
+    match = re.fullmatch(r"\$\{AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE:-(\w+)\}", value)
+    assert match is not None, value
+    assert load_csp_settings(
+        {"server": {"csp": {"script_unsafe_inline": _bool_parser(match.group(1))}}}
+    ) == load_csp_settings({})
 
 
 @pytest.mark.no_db
