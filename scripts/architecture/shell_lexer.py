@@ -14,7 +14,8 @@ This module tracks just enough lexical state to tell those apart — unquoted
 word-start ``#`` comments and heredocs (quoted delimiter → literal body,
 unquoted → expanding body with ``\\$`` escapes). It is deliberately not a
 parser: ``$(…)`` opens its own unquoted frame and ``$((…))`` / ``((…))``
-an arithmetic one (no comments, ``<<`` is a shift), while backticks and
+an arithmetic one (no comments or single quotes, ``<<`` is a shift; a
+``)`` not doubled means bash reparses it as subshells — fail closed), while backticks and
 ``${…}`` contents are lexed in the enclosing context, which errs towards
 reporting (every one of those contexts expands). ``$$`` is the PID parameter, never a ``$NAME`` prefix.
 
@@ -198,7 +199,7 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
             continue
         # unquoted context (top level or inside a command substitution)
         previous_word_start, word_start = word_start, byte in _WORD_BREAK
-        if byte == ord("'"):
+        if byte == ord("'") and state != "arith":  # bash expands ``$((… '$X' …))``
             stack.append(("single", 0, lineno))
         elif byte == ord('"'):
             stack.append(("double", 0, lineno))
@@ -211,13 +212,13 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
         elif byte == ord(")") and state != "plain":
             if depth:
                 stack[-1] = (state, depth - 1, opened)
+            elif state == "arith" and not content.startswith(b"))", i):
+                raise UnterminatedShellContext(opened)  # ``$((cmd) )``: nested subshells
             else:
                 stack.pop()
                 word_start = False  # ``$(…)#``: the substitution continues the word
                 i += state == "arith"  # arithmetic closes with ``))``
-        elif state == "arith":
-            pass  # ``<<`` is a shift and ``#`` a base prefix (``16#ff``), never syntax
-        elif byte == ord("#") and previous_word_start:
+        elif byte == ord("#") and previous_word_start and state != "arith":  # ``16#ff``
             end = content.find(b"\n", i)
             i = n if end < 0 else end
             continue
@@ -225,7 +226,7 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
             i += 3  # here-string: the word that follows is ordinary shell text
             word_start = True
             continue
-        elif content.startswith(b"<<", i):
+        elif content.startswith(b"<<", i) and state != "arith":  # arithmetic shift
             delimiter, quoted, strip_tabs, i = _read_heredoc_delimiter(content, i + 2)
             # ``let x<<2``-style digit operands outside a tracked ``((…))``.
             if delimiter and not delimiter.isdigit():

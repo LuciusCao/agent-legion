@@ -118,6 +118,12 @@ def test_non_expanding_contexts_are_not_flagged(content: str) -> None:
         ('echo $(printf foo)# "$X，"\n', 1),
         ('echo $((1 << S))# "$X，"\n', 1),
         ('echo "$((1 << S))" "$Y，"\n', 1),
+        # $((…)) expands $X even inside single quotes (bash: arithmetic text).
+        ("x=$((cd d; cat <<EOF\n'$X，'\nEOF\n))\n", 2),
+        # A single ) means bash reparses $(( / (( as nested subshells: the
+        # heredoc is real, so fail closed instead of skipping << as a shift.
+        ("x=$((cat <<EOF\n'$X，'\nEOF\n) )\n", 2),
+        ("((a)\ncat <<EOF\n'$X，'\nEOF\n)\n", 3),
     ],
 )
 def test_expanding_multiline_contexts_are_flagged(content: str, lineno: int) -> None:
