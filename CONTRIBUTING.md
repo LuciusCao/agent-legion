@@ -21,6 +21,12 @@ make install    # deps, uv sync, agent_legion_dev database, .env with random
 make dev-up     # local SeaweedFS + backend :8001 + console :5174 + worker :8789
 ```
 
+`make install` writes the vault master key to `deploy/secrets/vault_master_key`
+but does not point `.env` at it; the native backend reads the key only from
+env, so add `AGENT_LEGION_VAULT_MASTER_KEY_FILE=<absolute path to that file>`
+to `.env` before saving secrets or external-service connections (without a
+key the server starts, but vault writes fail).
+
 See [README.md](README.md) for the first-run walkthrough and the demo
 workflow. Additional git worktrees are initialized with
 `scripts/init-worktree.sh` right after creation (copies `.env`, derives a
@@ -45,7 +51,6 @@ mkdir -p deploy/secrets
 uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
   > deploy/secrets/vault_master_key && chmod 600 deploy/secrets/vault_master_key
 # .env: AGENT_LEGION_VAULT_MASTER_KEY_FILE=<absolute path to that file>
-#       (env-only; without a key, vault writes and secret_ref resolution fail)
 ./scripts/ensure-velites.sh --dest data/bin   # build velites (needs cargo)
 ./scripts/ensure-frontend-deps.sh             # npm ci when the lockfile changed
 ```
@@ -90,10 +95,11 @@ documented in
 
 ### PR target branch
 
-- Issue PRs target the current release integration branch
-  `release/<version>` (the newest `release/*` on the remote); the release
-  branch merges into `main` when the version is cut. Ask a maintainer when
-  unsure which release is open.
+- Issue PRs target the release integration branch of the version in
+  progress (`release/<version>`, e.g. the one recent merged PRs point at);
+  the release branch merges into `main` when the version is cut. Several
+  `release/*` branches can exist at once — ask a maintainer when unsure
+  which one is open.
 - Stacked PRs: express the dependency with the child PR's base branch; fix
   shared defects in the lowest affected layer first, then merge bottom-up
   (re-target the child onto the release branch and re-run CI on its new head
