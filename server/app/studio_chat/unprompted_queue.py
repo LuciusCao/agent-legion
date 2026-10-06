@@ -18,9 +18,10 @@ with #1028's ``before_start`` delivery (claim + ``queued_delivered``, or a
 visible ``queued_dropped``). While anything is held, later sends hold too
 (FIFO) and background wakeups stand back.
 
-The open state is the watcher projector's, adopted only once every projected
-row is persisted, under ``runtime.lock`` — the lock admission takes — so a
-send can never observe a turn as ended before its rows exist. Admission steps
+The open state follows the watcher projector under ``runtime.lock`` (the lock
+admission takes): a turn opens the gate as soon as it is projected, even if
+its rows are not yet durable, but closes it only once every projected row is
+persisted — a send never observes a turn as ended before its rows exist. Admission steps
 the watcher once first (``refresh``) to shrink the poll gap; the residual
 window (engine started, journal not yet written) is inherent and only falls
 back to the pre-#1029 behavior. A turn that never ends — journal replaced or
@@ -142,11 +143,13 @@ class GatedUnpromptedWatcher(UnpromptedTurnWatcher):
         with runtime.lock:
             if runtime.closed or self.service.runtime(self.session_id) is not runtime:
                 return
-            turns = self.projector.turns
-            if not self.pending:
-                # Adopt the projector's view only once its rows are durable.
-                self.expired &= turns
-                self.open = frozenset(turns) - self.expired
+            self.expired &= self.projector.turns
+            observed = frozenset(self.projector.turns) - self.expired
+            # Opening is conservative: a turn the projector has seen gates at
+            # once, even while its receipt is not yet durable. Closing (and so
+            # releasing held messages) waits until every projected row —
+            # the turn's end included — is persisted.
+            self.open = observed if not self.pending else self.open | observed
             stalled = time.monotonic() - self.activity >= IDLE_TIMEOUT_SECONDS
             if self.open and (broken or stalled):
                 self.expired |= self.open

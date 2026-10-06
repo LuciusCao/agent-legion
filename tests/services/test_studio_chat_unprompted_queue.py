@@ -163,6 +163,38 @@ def test_turn_end_not_yet_durable_keeps_holding(gated, monkeypatch) -> None:
     assert len(_queue_items(runtime)) == 1
 
 
+def test_turn_whose_receipt_write_failed_still_holds(gated, monkeypatch) -> None:
+    """PR #1076 review P2: the first record of a turn was projected but its
+    receipt append failed (pending backlog). The gate opens on what the
+    projector saw — admission's refresh swallows the retry failure — so the
+    message is held instead of reaching ACP and being swallowed."""
+    service, db, sid, workspace, runtime, watcher, write, _path = gated
+    append = service.store.append_message
+
+    def fail_receipt(session_id, kind, role, content):
+        if content.get("event") == "unprompted_turn":
+            raise RuntimeError("db blip")
+        return append(session_id, kind, role, content)
+
+    write(PROMPT)
+    with monkeypatch.context() as patch:
+        patch.setattr(service.store, "append_message", fail_receipt)
+        with pytest.raises(RuntimeError):
+            watcher.step()
+        assert watcher.pending and watcher.open == {"3"}
+        message = service.send_message(sid, workspace, "during blip")
+    assert message["content"]["queued"] is True
+    assert watcher.held[0][0] == message["id"]
+    assert _queue_items(runtime) == []
+    assert db.get_studio_chat_session(sid)["status"] == "idle"
+
+    write(ENDED)
+    watcher.step()  # backlog persisted, then the end: released in order
+    assert watcher.open == frozenset() and watcher.held == []
+    [(_prompt, start)] = _queue_items(runtime)
+    assert start()
+
+
 def test_truncated_journal_releases_the_gate_and_drops_held(gated) -> None:
     service, db, sid, workspace, runtime, watcher, write, path = gated
     write(PROMPT, REPORT)
