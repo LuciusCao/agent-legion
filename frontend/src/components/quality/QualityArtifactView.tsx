@@ -1,13 +1,9 @@
 import { Chip } from '@mui/material'
 import { JsonTree } from '../JsonTree'
 import { tryParseJson } from '../../lib/parsers'
+import { formatDateTime } from '../../lib/formatters'
 import type { QualityArtifactContent, QualityLabel } from '../../api/qualityApi'
 import styles from './QualityPanel.module.css'
-
-export function formatQualityDateTime(iso: string): string {
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString('zh-CN')
-}
 
 /** 单个产物内容：.json 且可解析时用 JsonTree，否则原文 <pre>。 */
 export function QualityArtifactView({
@@ -50,7 +46,7 @@ export function QualityLabelHistory({ labels }: { labels: QualityLabel[] }) {
           />
           <span>{label.labeled_by}</span>
           <span className={styles.muted}>
-            {formatQualityDateTime(label.created_at)}
+            {formatDateTime(label.created_at)}
           </span>
           {(label.reason_codes ?? []).length > 0 && (
             <span className={styles.muted}>

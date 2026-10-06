@@ -93,6 +93,7 @@ def node_defer_view(
     """job 详情的节点投影：只给仍在等待（可运行态）的节点，其余为 None。
 
     公告按 worker 上一轮的状态算出，节点此后已被派发/终态时不再显示。
+    ``node_status`` 由调用方按分片有效状态给出（#1021）。
     """
     if not notices or node_status not in RUNNABLE_STATUSES:
         return None

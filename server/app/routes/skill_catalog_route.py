@@ -5,6 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from server.app.auth.dependencies import get_current_user
+from server.app.auth.scope_binding import scoped_binding_mismatch
 from server.app.db.dialect import ConnectSource
 from server.app.jobs import JobQueries
 from server.app.routes.skill_contracts import SkillDetailResponse
@@ -26,8 +27,7 @@ def require_skill_scope_binding(
     workspace B's skills through these routes. The binding runs regardless
     of role: scoped tokens inherit the minter's role, so admin-minted
     bindings stay bound too (same shape as require_job_workspace_access)."""
-    bound = user.get("scoped_workspace_id")
-    if bound and str(bound) != str(workspace_id):
+    if scoped_binding_mismatch(user, workspace_id):
         # Same detail as the router guard's refusal: a differing string
         # would let callers distinguish refusal reasons.
         raise HTTPException(status_code=404, detail="Workspace not found")

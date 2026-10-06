@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Tag must match velites/Cargo.toml version
         run: |
@@ -56,7 +56,7 @@ jobs:
           - triple: aarch64-unknown-linux-gnu
             runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # container job 的默认 shell 是 sh（dash，无 pipefail）；脚本步骤统一
       # bash——首次触发即踩坑（sh: Illegal option -o pipefail）。
@@ -81,7 +81,7 @@ jobs:
           cp velites/target/release/velites "dist/${name}/velites"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: velites-${{ matrix.triple }}
           path: dist/*.tar.gz
@@ -93,9 +93,11 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
 
       - name: Build release binary
         run: cargo build --release --locked --manifest-path velites/Cargo.toml
@@ -111,7 +113,7 @@ jobs:
           cp velites/target/release/velites "dist/${name}/velites"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: velites-aarch64-apple-darwin
           path: dist/*.tar.gz
@@ -135,11 +137,11 @@ jobs:
       # codex P1 on #533：下方 notes 生成要 git ls-remote origin 查上一个
       # velites tag——GitHub-hosted runner 是全新环境，没有 checkout 就没有
       # origin；depth 1 即可（只查 tag 引用，不看历史）。
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 1
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
@@ -254,7 +256,7 @@ jobs:
           cat release-notes.md
           echo "--- title: ${title}"
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           name: ${{ steps.notes.outputs.title }}
           files: |

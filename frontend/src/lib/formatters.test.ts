@@ -1,9 +1,45 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
+  formatBytes,
   formatDateTime,
   formatInteractionStats,
+  formatNumber,
   formatRelativeTime,
 } from './formatters'
+
+describe('formatBytes (#966 统一单位阶梯)', () => {
+  it('formats human readable sizes across B/KB/MB/GB/TB', () => {
+    expect(formatBytes(0)).toBe('0 B')
+    expect(formatBytes(512)).toBe('512 B')
+    expect(formatBytes(1023)).toBe('1023 B')
+    expect(formatBytes(1024)).toBe('1 KB')
+    expect(formatBytes(2048)).toBe('2 KB')
+    expect(formatBytes(1536)).toBe('1.5 KB')
+    expect(formatBytes(5 * 1024 * 1024)).toBe('5 MB')
+    expect(formatBytes(3.25 * 1024 ** 3)).toBe('3.3 GB')
+    expect(formatBytes(2 * 1024 ** 4)).toBe('2 TB')
+  })
+
+  it('caps at TB instead of running off the unit table', () => {
+    expect(formatBytes(2048 * 1024 ** 4)).toBe('2048 TB')
+  })
+
+  it('returns a placeholder for invalid sizes', () => {
+    expect(formatBytes(-1)).toBe('—')
+    expect(formatBytes(Number.NaN)).toBe('—')
+    expect(formatBytes(Number.POSITIVE_INFINITY)).toBe('—')
+  })
+})
+
+describe('formatNumber', () => {
+  it('groups thousands with zh-CN and falls back to a placeholder', () => {
+    expect(formatNumber(1234567)).toBe('1,234,567')
+    expect(formatNumber(0)).toBe('0')
+    expect(formatNumber(null)).toBe('-')
+    expect(formatNumber(undefined)).toBe('-')
+    expect(formatNumber(undefined, '—')).toBe('—')
+  })
+})
 
 describe('formatRelativeTime', () => {
   beforeEach(() => {

@@ -10,7 +10,7 @@ import type { JobDetail } from '../../types/jobTypes'
 import { useApprovalAction } from './useApprovalAction'
 import { useContinueJobAction } from './useContinueJobAction'
 import { pageSubtitle } from './jobDetailTitle'
-import { POLLING_STATUSES } from './jobNodeHelpers'
+import { jobDetailPollInterval } from './jobDetailPolling'
 import { useClearPackedAction, usePackageAction } from './usePackageAction'
 import { useUpgradeWorkflowAction } from './useUpgradeWorkflowAction'
 
@@ -28,8 +28,9 @@ export function useJobDetail(
     queryKey: queryKeys.jobDetail(jobId ?? ''),
     queryFn: ({ signal }) => fetchJobDetail(jobId as string, signal),
     enabled: Boolean(jobId),
-    refetchInterval: (query) =>
-      POLLING_STATUSES.has(query.state.data?.job.status ?? '') ? 5000 : false,
+    // 档位按状态收敛（#965）：活跃 5s / 待审批 30s / 终态停；操作后的
+    // refreshDetail 让新状态立即落地并重新求值档位。
+    refetchInterval: (query) => jobDetailPollInterval(query.state.data),
   })
   const detail = detailQuery.data ?? null
   const detailRefetch = detailQuery.refetch

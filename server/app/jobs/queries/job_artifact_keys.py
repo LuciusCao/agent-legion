@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
-from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.artifact_reconcile import ArtifactReconcileQueriesMixin
 
 
-class JobArtifactKeyQueriesMixin(ConnectionQueriesMixin):
+# #714: the reconciler's batched reads ride this mixin's facade slot.
+class JobArtifactKeyQueriesMixin(ArtifactReconcileQueriesMixin):
     def job_artifact_manifest_names_for_nodes(
         self, job_id: str, node_keys: Collection[str]
     ) -> set[tuple[str, str]]:
