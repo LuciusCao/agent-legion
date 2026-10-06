@@ -19,6 +19,7 @@ import { ApiAccessSection } from '../components/settings/ApiAccessSection'
 import { WorkspaceWorkersSection } from '../components/settings/WorkspaceWorkersSection'
 import { WorkerConsoleGuide } from '../components/settings/WorkerConsoleGuide'
 import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
+import { codePoolNodes } from '../components/codePoolNodes'
 import { WorkspaceAgentsSection } from '../components/settings/WorkspaceAgentsSection'
 import styles from './SettingsPage.module.css'
 
@@ -46,17 +47,15 @@ export function SettingsPage() {
     useWorkflowDefinitionQuery(workspaceId)
   const workflowDefinition = workflowDefinitionData ?? null
 
-  // P-0.5：无 Agent 路由的节点一律进入隐含 code 池，节点级并发上限只对
-  // code 节点有意义。agentRoutes 按 workspace 取回，直接按 node_key 判定。
+  // P-0.5：节点级并发上限只对 code 池节点有意义（口径见 codePoolNodes，
+  // #1079 起按 node_type 排除自含 agent 节点）。
   const codeNodeKeys = useMemo(() => {
     if (!workflowDefinition) return new Set<string>()
-    const agentRouted = new Set(
-      (settingsSnapshot?.agentRoutes ?? []).map((r) => r.node_key)
-    )
     return new Set(
-      workflowDefinition.nodes
-        .filter((node) => !agentRouted.has(node.key))
-        .map((node) => node.key)
+      codePoolNodes(
+        workflowDefinition.nodes,
+        settingsSnapshot?.agentRoutes ?? []
+      ).map((node) => node.key)
     )
   }, [workflowDefinition, settingsSnapshot])
 

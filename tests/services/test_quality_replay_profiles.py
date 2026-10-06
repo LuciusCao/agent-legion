@@ -236,8 +236,12 @@ def test_replay_profile_choice_errors(job_db, tmp_path: Path) -> None:
         service.create_replay(env.workspace_id, "item-1", revision_id="missing")
     with pytest.raises(InvalidOperationError, match="no self-contained agent node"):
         service.create_replay(env.workspace_id, "item-1", revision_id=legacy_rev)
-    with pytest.raises(InvalidOperationError, match="no self-contained agent node"):
-        service.create_replay(env.workspace_id, "item-1", use_draft=True)  # no draft
+    with pytest.raises(InvalidOperationError, match="has no workflow draft"):
+        service.create_replay(env.workspace_id, "item-1", use_draft=True)
+    # A draft that does not load reports the loader error, not a missing node.
+    job_db.upsert_workspace_workflow_draft(env.workspace_id, "key: [unclosed")
+    with pytest.raises(InvalidOperationError, match="the workflow draft does not load"):
+        service.create_replay(env.workspace_id, "item-1", use_draft=True)
     with pytest.raises(InvalidOperationError, match="not both"):
         service.create_replay(env.workspace_id, "item-1", revision_id=legacy_rev, use_draft=True)
 

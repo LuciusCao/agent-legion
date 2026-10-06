@@ -10,9 +10,11 @@ versions: the copy run freezes ``node_profiles[node_key]`` as::
 ``revision_id`` names where the profile came from (``None`` = the Studio
 draft at replay creation); ``profile_hash`` is :func:`node_profile_hash` of
 the node the copy job's snapshot carries. The replay setup transplants the
-chosen profile into the copy job's own snapshot, so dispatch needs no extra
-resolution — the claim only re-verifies the hash and fails the node closed
-on any mismatch (mirroring the Agent-version pin, EXEC-QUALITY-REPLAY-001).
+chosen profile into the copy job's own snapshot; the workflow worker
+re-verifies the hash before enqueue (fail closed on mismatch) and copies the
+pin into the queued manifest (:data:`MANIFEST_KEY`), which exempts the
+request from the broker's live revision re-read of execution / prompt —
+the copy job keeps its original revision link (EXEC-QUALITY-REPLAY-001).
 
 The legacy ``agent_versions`` pin (``agent_version_pins``) stays honored
 for runs that already carry one; new replays never write it for
@@ -30,6 +32,12 @@ from typing import Any
 from server.app.workflows.schema import WorkflowNode
 
 PIN_KEY = "node_profiles"
+
+#: Manifest key carrying the pin into the queued request (audit + claim
+#: discriminator): a pinned replay's execution is frozen at enqueue and the
+#: claim must not re-read it from the job's revision (the copy job keeps the
+#: original revision link while its snapshot carries the chosen profile).
+MANIFEST_KEY = "node_profile_pin"
 
 #: The node fields a profile transplant replaces and the hash covers: the
 #: whole ``execution`` block (runtime + provider/model/thinking/prompt) and

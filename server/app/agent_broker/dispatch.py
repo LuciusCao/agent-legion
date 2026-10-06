@@ -13,6 +13,7 @@ every failure path.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from server.app.config_schema import manifest_safe_config
 from server.app.executors.models import ExecutionContext
 from server.app.services.agent_node_profile_types import PROFILE_SOURCE_DEFINITION
 from server.app.services.artifact_store import ArtifactStore
+from server.app.services.node_profile_pins import MANIFEST_KEY as NODE_PROFILE_PIN_MANIFEST_KEY
 from server.app.services.runtime_reserved_config import TIMEOUT_BASE_MANIFEST_KEY
 from server.app.settings import Settings
 from server.app.skills.checkout import checkout_node_skill
@@ -75,6 +77,7 @@ class AgentDispatchService:
         execution_generation: int = 0,
         timeout_base: dict[str, Any] | None = None,
         profile_source: str = PROFILE_SOURCE_DEFINITION,
+        node_profile_pin: Mapping[str, Any] | None = None,
     ) -> bool:
         """Freeze the manifest + bundle and queue one Agent request.
 
@@ -134,6 +137,10 @@ class AgentDispatchService:
             # produced this manifest (absent on the normal published path).
             if pinned_agent_version is not None:
                 manifest["agent_version"] = pinned_agent_version
+            # #1079（D6）：回放的执行档案 pin——execution / prompt 在入队时按副本
+            # 快照冻结，claim 不再从 job 关联的 revision 重读（见 live_claim_manifest）。
+            if node_profile_pin is not None:
+                manifest[NODE_PROFILE_PIN_MANIFEST_KEY] = dict(node_profile_pin)
             if timeout_base:
                 # #691: the claim decides the timeout from this base + live L2.
                 manifest[TIMEOUT_BASE_MANIFEST_KEY] = timeout_base

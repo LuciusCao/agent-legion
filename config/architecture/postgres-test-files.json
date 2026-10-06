@@ -155,6 +155,7 @@
     "tests/services/test_agent_broker_heartbeat_deferral.py",
     "tests/services/test_agent_broker_lease_reclaim_audit.py",
     "tests/services/test_agent_broker_profile_source.py",
+    "tests/services/test_agent_broker_replay_profile.py",
     "tests/services/test_agent_broker_reaper.py",
     "tests/services/test_agent_broker_sweep_generation.py",
     "tests/services/test_agent_bundle.py",

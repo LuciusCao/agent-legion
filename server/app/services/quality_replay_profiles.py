@@ -175,7 +175,7 @@ class ReplayProfileResolver:
         self, workspace_id: str, node_key: str, revision_id: str | None
     ) -> WorkflowNode:
         if revision_id is None:
-            definition = self._draft_definition(workspace_id)
+            definition = self._draft_definition(workspace_id, strict=True)
             where = "the workflow draft"
         else:
             row = self.job_db.get_workflow_revision(workspace_id, workspace_id, revision_id)
@@ -191,14 +191,27 @@ class ReplayProfileResolver:
             )
         return source
 
-    def _draft_definition(self, workspace_id: str) -> WorkflowDefinition | None:
+    def _draft_definition(
+        self, workspace_id: str, *, strict: bool = False
+    ) -> WorkflowDefinition | None:
+        """The Studio draft as a definition; None when absent or unloadable.
+
+        ``strict`` (replaying with the draft) reports the real reason instead:
+        no draft at all, or the loader error of a draft that does not load.
+        """
         draft = self.job_db.get_workspace_workflow_draft(workspace_id)
         if draft is None:
+            if strict:
+                raise InvalidOperationError("this workspace has no workflow draft to replay with")
             return None
         try:
             raw = yaml.safe_load(str(draft.get("definition_yaml") or ""))
-            return workflow_definition_from_mapping(raw) if isinstance(raw, dict) else None
-        except (yaml.YAMLError, ValueError):
+            if not isinstance(raw, dict):
+                raise ValueError("the draft YAML is not a mapping")
+            return workflow_definition_from_mapping(raw)
+        except (yaml.YAMLError, ValueError) as exc:
+            if strict:
+                raise InvalidOperationError(f"the workflow draft does not load: {exc}") from exc
             return None
 
     @staticmethod

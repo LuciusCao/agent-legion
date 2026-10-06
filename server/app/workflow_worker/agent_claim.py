@@ -166,6 +166,7 @@ def claim_agent_node(
                 pinned_agent_version=int(pin["version"]) if pin is not None else None,
                 execution_generation=execution_generation,
                 profile_source=profile_source,
+                node_profile_pin=profile_pin,
             )
         except (ValueError, SkillRepoError) as exc:
             # SkillRepoError (git clone/fetch/checkout 失败) 是 RuntimeError
