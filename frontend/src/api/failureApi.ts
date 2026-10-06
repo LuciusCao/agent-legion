@@ -5,11 +5,14 @@ import type {
   JobRerunByFailureResponse,
 } from '../types/failureTypes'
 
+/** 单页 failed-node-runs（#713 keyset 分页）；cursor 取上一页的 next_cursor。 */
 export async function fetchFailedNodeRuns(
-  workspaceId: string
+  workspaceId: string,
+  cursor?: string
 ): Promise<FailedNodeRunsResponse> {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
   return api<FailedNodeRunsResponse>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/failed-node-runs`
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/failed-node-runs${query}`
   )
 }
 

@@ -400,7 +400,7 @@ server/app/
 | ExternalArtifactEntry | BaseModel | name: str, storage: str, node_key: str, size_bytes: int | None, content_hash:... | app/routes/external_artifact_contracts.py |
 | ExternalArtifactListResponse | BaseModel | job_id: str, workspace_id: str, status: str, artifacts: list[ExternalArtifact... | app/routes/external_artifact_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, failure_category: str, failure_... | app/routes/failed_node_run_contracts.py |
-| FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
+| FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem], next_cursor: str | None | app/routes/failed_node_run_contracts.py |
 | DatabaseConnectionView | BaseModel | engine: str, host: str, port: int | None, name: str, user: str, password_set:... | app/routes/infra_connections_contracts.py |
 | StorageConnectionView | BaseModel | configured: bool, backend: str, endpoint_url: str, public_endpoint_url: str, ... | app/routes/infra_connections_contracts.py |
 | InfraConnectionsResponse | BaseModel | database: DatabaseConnectionView, storage: StorageConnectionView | app/routes/infra_connections_contracts.py |

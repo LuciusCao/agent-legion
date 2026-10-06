@@ -4,15 +4,11 @@ import { createRealtimeChannel } from '../../../lib/realtime'
 import { queryKeys } from '../../../lib/queryKeys'
 import {
   answerStudioChatPermission,
-  cancelStudioChatTurn,
   createStudioChatSession,
   fetchStudioChatAgents,
   fetchStudioChatMessages,
   fetchStudioChatSession,
   fetchStudioChatSessions,
-  sendStudioChatMessage,
-  setStudioChatAllowAll,
-  type StudioChatMessageRecord,
   type StudioChatSessionRecord,
 } from './studioChatApi'
 import {
@@ -25,7 +21,6 @@ import {
   deriveChatViews,
   lastTerminalEvent,
   maxSeq,
-  upsertMessage,
   type ChatMessage,
 } from './studioChatMessages'
 import { lastRunCancelled } from './studioChatCancelVisibility'
@@ -36,6 +31,7 @@ import {
   useStudioChatRunTiming,
 } from './useStudioChatRunTiming'
 import { useStudioChatSessionMemory } from './useStudioChatSessionMemory'
+import { useStudioChatSessionActions } from './useStudioChatSessionActions'
 
 /** Studio「Agent 助手」对话面板的状态与动作：会话/消息经 REST 拉取，
  * 实时更新走 SSE（message 按 id upsert，session 为状态快照）；SSE
@@ -220,36 +216,16 @@ export function useStudioChat(workspaceId: string | undefined) {
     }
   }
 
-  // 返回是否发送成功：busy 排队（useStudioChatQueue）flush 失败时要保留
-  // 队首，失败原因已置 actionError。
-  async function send(text: string) {
-    if (!workspaceId || !activeSessionId || !text.trim()) return false
-    const sent = await runAction(async () => {
-      const message: StudioChatMessageRecord = await sendStudioChatMessage(
-        workspaceId,
-        activeSessionId,
-        text.trim()
-      )
-      setMessages((current) => upsertMessage(current, message) ?? current)
-    })
-    return sent
-  }
-
-  async function cancel() {
-    if (!workspaceId || !activeSessionId) return
-    await runAction(async () => {
-      setSession(await cancelStudioChatTurn(workspaceId, activeSessionId))
-    })
-  }
-
-  async function setAllowAll(enabled: boolean) {
-    if (!workspaceId || !activeSessionId) return
-    await runAction(async () => {
-      setSession(
-        await setStudioChatAllowAll(workspaceId, activeSessionId, enabled)
-      )
-    })
-  }
+  // send / cancel / setAllowAll 带会话归属守卫（#962）：切换会话后旧会话
+  // 的迟到结果不写进新会话的状态。
+  const { send, cancel, setAllowAll } = useStudioChatSessionActions({
+    workspaceId,
+    activeSessionId,
+    activeSessionIdRef,
+    setActionError,
+    setMessages,
+    setSession,
+  })
 
   async function answerPermission(
     requestId: string,

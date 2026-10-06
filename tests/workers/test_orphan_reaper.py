@@ -428,6 +428,58 @@ def test_member_index_sees_new_and_drops_gone_pids_incrementally(tmp_path: Path)
     assert proc_groups.MemberIndex(tmp_path / "none").members_of(500) == {500: []}
 
 
+def test_member_index_reindexes_recycled_pid_by_starttime(tmp_path: Path) -> None:
+    """#982：pid 在两次刷新之间退出并被复用（starttime 变化）——即使 pid 一直
+    出现在列表里，也按新进程重新归组，不沿用缓存的旧 pgid。"""
+    _fake_proc_entry(tmp_path, 500, 500, ["velites"], start=1)
+    _fake_proc_entry(tmp_path, 600, 600, ["velites"], start=2)
+    _fake_proc_entry(tmp_path, 700, 700, ["unrelated"], start=3)
+    index = proc_groups.MemberIndex(tmp_path)
+    assert index.members_of(600) == {600: [600]}
+
+    # 700 退出、pid 回绕后被后序组 600 新派生的成员复用（中间没有刷新看到空档）
+    _fake_proc_entry(tmp_path, 700, 600, ["bwrap", "--ignore-term"], start=99)
+    assert index.members_of(600) == {600: [600, 700]}
+    assert index.members_of(700) == {700: []}
+
+    # 同一进程（starttime 不变）留在原组：不重复归组
+    assert index.members_of(600) == {600: [600, 700]}
+    assert index.members_of(500) == {500: [500]}
+
+
+def test_reap_kills_recycled_pid_spawned_into_later_group_mid_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#982：多组批量中，后序组忽略 TERM 的新成员复用了一个入口时属于别组的
+    pid——仍被钉住并收到 SIGKILL。"""
+    proc_root = tmp_path / "proc"
+    _fake_proc_entry(proc_root, 500, 500, ["velites", "--name", "agent-legion-exec-1"], start=111)
+    _fake_proc_entry(proc_root, 600, 600, ["velites", "--name", "agent-legion-exec-2"], start=222)
+    _fake_proc_entry(proc_root, 900, 900, ["unrelated"], start=5)
+    _write_record(tmp_path / "work", "exec-1", 500)
+    _write_record(tmp_path / "work", "exec-2", 600)
+    signals: list[tuple[int, int]] = []
+    _patch_reaper_proc(monkeypatch, proc_root, signals)
+
+    later: list[int] = []
+
+    def _killpg(pgid: int, sig: int) -> None:
+        signals.append((pgid, sig))
+        if sig == signal.SIGTERM and not later:  # 900 退出，pid 被后序组新成员复用
+            later.append(600 if pgid == 500 else 500)
+            _fake_proc_entry(proc_root, 900, later[0], ["bwrap", "--ignore-term"], start=333)
+
+    monkeypatch.setattr(os, "killpg", _killpg)
+    monkeypatch.setattr(
+        orphan_reaper.time, "sleep", lambda _s: shutil.rmtree(proc_root / str(later[0]))
+    )  # 后序组原钉住成员死于 TERM 并被立即收割；复用 pid 900 的成员忽略 TERM 存活
+
+    orphan_reaper.reap_orphaned_agents(tmp_path / "work", lambda _m: None)
+
+    assert signals[1] == (later[0], signal.SIGTERM)
+    assert (later[0], signal.SIGKILL) in signals
+
+
 def test_reap_kills_term_ignoring_member_spawned_into_later_group_mid_batch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
