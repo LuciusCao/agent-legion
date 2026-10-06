@@ -63,6 +63,10 @@ def _declared_paths(tool_call: dict[str, Any]) -> tuple[list[str], list[str]] | 
         for key, value in raw_input.items():
             values = value if isinstance(value, list) else [value]
             for item in values:
+                # Nested containers are an unknown shape: they could carry
+                # targets this check never sees, so take the human path.
+                if isinstance(item, (dict, list)):
+                    return None
                 if isinstance(item, str):
                     (targets if key in _PATH_KEYS else others).append(item)
     elif raw_input is not None:

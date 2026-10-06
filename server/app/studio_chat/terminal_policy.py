@@ -8,18 +8,25 @@ Three fences, applied before any subprocess is spawned:
   itself plus locale/tempdir basics (the ``shared/code_sandbox.child_env``
   idea), then only those agent overrides that cannot change which program
   runs or inject code ahead of it (``OVERRIDE_ENV_KEYS``).
-* **Working directory confinement** — the requested cwd must resolve
-  (symlinks followed) inside the session's working directory.
+* **Working directory pinning** — the requested cwd is walked from the
+  session root one component at a time with ``O_NOFOLLOW``
+  (``fs_safety.open_dir_beneath``); the child ``fchdir``s to that pinned
+  descriptor, so no path is re-resolved between the check and the spawn
+  and a component swapped for a symlink cannot move the cwd out of root.
 * **Permission linkage** — see terminal_grants.py.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import ExitStack, contextmanager
+from pathlib import PurePosixPath
 from typing import Any
 
 from acp import RequestError
+
+from server.app.fs_safety import PathEscapeError, open_dir_beneath
 
 # acp.transports.DEFAULT_INHERITED_ENV_VARS (what the SDK keeps for the agent
 # subprocess) plus TMPDIR; LANG/LC_* are added by prefix below.
@@ -53,16 +60,38 @@ def terminal_env(overrides: Iterable[Any] | None) -> dict[str, str]:
     return env
 
 
-def confined_cwd(requested: str | None, root: str) -> str:
-    """Resolve the terminal cwd; refuse anything outside the session root."""
-    real_root = os.path.realpath(root)
+def _cwd_parts(requested: str | None, real_root: str) -> list[str]:
     if not requested:
-        return real_root
-    resolved = os.path.realpath(os.path.join(real_root, os.path.expanduser(requested)))
-    try:
-        inside = os.path.commonpath([resolved, real_root]) == real_root
-    except ValueError:
-        inside = False
-    if not inside:
-        raise RequestError.invalid_params({"reason": "terminal cwd outside the session root"})
-    return resolved
+        return []
+    path = PurePosixPath(os.path.expanduser(requested))
+    if path.is_absolute():
+        root = PurePosixPath(real_root)
+        if path != root and root not in path.parents:
+            raise PathEscapeError("terminal cwd outside the session root")
+        path = path.relative_to(root)
+    parts = [part for part in path.parts if part != "."]
+    if ".." in parts:
+        raise PathEscapeError("terminal cwd must not contain '..'")
+    return parts
+
+
+@contextmanager
+def pinned_cwd(requested: str | None, root: str) -> Iterator[int]:
+    """Yield a directory descriptor for the terminal cwd inside the session
+    root; the child must ``fchdir`` to it (never re-resolve the path)."""
+    real_root = os.path.realpath(root)
+    with ExitStack() as stack:
+        try:
+            fd = stack.enter_context(open_dir_beneath(real_root, _cwd_parts(requested, real_root)))
+        except (PathEscapeError, OSError) as exc:
+            raise RequestError.invalid_params(
+                {"reason": "terminal cwd outside the session root or not a plain directory"}
+            ) from exc
+        yield fd
+
+
+def enter_pinned_cwd(fd: int) -> None:
+    """Child-side ``preexec_fn``: chdir to the pinned descriptor, then drop
+    it so the exec'd program does not inherit an extra open directory."""
+    os.fchdir(fd)
+    os.close(fd)
