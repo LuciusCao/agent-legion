@@ -324,8 +324,10 @@ def main() -> int:
                 # #1051：执行车道起线程失败（线程/pid 预算耗尽，资源类而非编程
                 # 错误）单独一臂退避——不并入 Host 不可用族、不放宽捕获。账目：
                 # 该条及本批余下执行未入池（不在 active、无心跳），租约过期后
-                # Host 重排队（claim_batch_pass 已逐条列出 execution_id）；已
-                # 提交的 future 照常 reap。退避期间不再领活，给资源回落留窗口。
+                # 由 Host sweep 重排队（claim_batch_pass 已逐条列出 execution_id；
+                # 每次丢弃消耗一次重排次数，超出 requeue_limit 节点判败）；已
+                # 提交的 future 照常 reap。退避期间不再领活，之后 claim_ctx 的
+                # lane_probe 熔断把每轮限为探测 1 条，直到再有 submit 成功。
                 backoff.wait_out(stop, worker_id, exc, "Agent execution lane exhausted")
                 continue
             backoff.reset()

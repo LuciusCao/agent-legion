@@ -90,6 +90,15 @@ class ClaimRunContext:
     ``active`` / ``active_kinds`` / ``pool_deferred`` are mutated in place by
     the loop (identity-stable), so they belong on the context; ``budget`` /
     ``declared`` are rebuilt per pass and ride the call instead.
+
+    ``lane_probe`` (#1051) is the lane-exhaustion circuit breaker: set when a
+    submit hit ``LaneSpawnError``, it clamps every claim round to ONE
+    execution (a probe) until a submit succeeds again. Without it a
+    sustained exhaustion re-claims a full batch after every backoff and
+    drops it again — each drop costs every one of those executions a Host
+    requeue attempt (past ``requeue_limit`` the node fails), so a long
+    outage would fail nodes wholesale. With it, at most one execution per
+    backed-off pass pays that price.
     """
 
     client: Any
@@ -102,6 +111,7 @@ class ClaimRunContext:
     active_kinds: dict[Any, str]
     pool_deferred: set[str]
     stop: Any
+    lane_probe: bool = False
 
 
 def make_claim_submitter(
@@ -153,12 +163,18 @@ def claim_batch_pass(
     the batch cannot get a lane thread, so they are logged by
     execution_id and re-raised for the executor's backoff arm. They never
     entered ``active`` and run no heartbeat — their leases expire and the
-    Host requeues them, the same recovery as a Worker crash before submit.
+    Host's lease sweep requeues them: the same recovery path as a Worker
+    crash before submit, NOT a free one — every claim increments the
+    request's ``attempt`` and the sweep only requeues while ``attempt <=
+    requeue_limit`` (past it the node fails; each sweep also records the
+    node_run as failed with an expired heartbeat), and recovery waits out
+    the lease TTL. Hence the ``lane_probe`` breaker (see ClaimRunContext):
+    the next rounds claim one execution at a time until a submit succeeds.
     Not retried locally: a third claimed-but-unsubmitted ledger would sit
-    outside ``pass_budget``'s view (over-claim) with no heartbeat (lease
-    expires mid-retry anyway). Not reported as failed: a Worker-local
-    resource fault must not fail the node or burn its retry budget.
+    outside ``pass_budget``'s view (over-claim) with no heartbeat (the
+    lease expires mid-retry anyway).
     """
+    batch_limit = 1 if ctx.lane_probe else batch_limit
     limit, agent_limit, code_limit = batch_request(budget, batch_limit)
     note_claim_attempt(ctx.worker_id, budget, upload_depth, claim_enabled, limit)
     started = time.monotonic()
@@ -179,13 +195,13 @@ def claim_batch_pass(
         try:
             submit(claim)
         except LaneSpawnError:
-            unsubmitted = [str(item.get("execution_id")) for item in claims[index:]]
-            print(
-                f"Agent execution lane exhausted; {len(unsubmitted)} claimed execution(s) "
-                f"left to lease expiry (Host requeues): {', '.join(unsubmitted)}",
-                flush=True,
-            )
+            ctx.lane_probe = True
+            ids = ", ".join(str(item.get("execution_id")) for item in claims[index:])
+            print(f"Agent execution lane exhausted; left to lease expiry: {ids}", flush=True)
             raise
+        # A submit got its lane thread: exhaustion is over, lift the breaker
+        # (later rounds of this same pass already ask for the full batch).
+        ctx.lane_probe = False
     return True, rtt
 
 
