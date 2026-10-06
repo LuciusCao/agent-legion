@@ -143,20 +143,32 @@ job / run 目录、`data/agent_bundles/`、`data/logs/`（日志按保留期轮�
 prod-up 入口存在即自动并入）可以把既有数据目录 bind-mount 到 `seaweedfs` 的
 `/data` 或 `host` 的 `/var/lib/agent-legion`，这时命名卷是空的或未被使用，照抄
 卷名会归档空卷、恢复时写回错误位置。因此这台机器有 `compose.local.yaml` 时要把它
-与 `deploy/.env` 一起备份、全新机器上一起先放回；下文的 `docker compose` 命令都用
-§1.1 的 `F`（不带它重建容器会退回命名卷），`docker run -v` 的卷源一律用下面解析
-出的变量：
+与 `deploy/.env` 一起备份、全新机器上一起先放回。**解析卷源之前先确认
+`compose.local.yaml` 已就位，`F` 必须在它就位之后计算**（§1.1 的 `F` 定义在它
+不存在时只含基础文件；放回后要重新执行一次，否则解析出的仍是命名卷）。下文的
+`docker compose` 命令都用这个 `F`（不带它重建容器会退回命名卷），`docker run -v`
+的卷源一律用下面解析出的变量：
 
 ```bash
 docker compose "${F[@]}" --profile materials-local config seaweedfs host \
   | grep -B2 -A2 -E 'target: /(data|var/lib/agent-legion)$'
-# type: volume 时 source 是卷键，实际卷名加项目前缀；type: bind 时 source 是宿主机绝对路径
-SW_SRC=<agent-legion_seaweedfs-data 或 bind 的绝对路径>
-HD_SRC=<agent-legion_host-data 或 bind 的绝对路径>
+# type: bind 时 source 是宿主机绝对路径，直接用；
+# type: volume 时 source 只是卷键，实际卷名不要手拼，读顶层 volumes 段该键下的 name:
+docker compose "${F[@]}" --profile materials-local config | sed -n '/^volumes:/,/^[a-z]/p'
+SW_SRC=<顶层 volumes 里的 name，或 bind 的绝对路径>
+HD_SRC=<顶层 volumes 里的 name，或 bind 的绝对路径>
+# 命名卷形态先确认卷存在：docker run -v 遇到不存在的卷名会静默新建空卷
+docker volume inspect "$SW_SRC" >/dev/null && docker volume inspect "$HD_SRC" >/dev/null
 ```
 
-容器已存在时可用 `docker inspect -f '{{range .Mounts}}{{.Type}} {{.Name}} {{.Source}} -> {{.Destination}}{{println}}{{end}}' "$(docker compose "${F[@]}" ps -aq seaweedfs)"`
+bind 形态跳过 `docker volume inspect`，改为确认该目录存在（`[ -d "$SW_SRC" ]`）。
+仅在容器已存在时（`docker compose "${F[@]}" ps -aq seaweedfs` 有输出；全新机器
+恢复前通常没有）可再用 `docker inspect -f '{{range .Mounts}}{{.Type}} {{.Name}} {{.Source}} -> {{.Destination}}{{println}}{{end}}' "$(docker compose "${F[@]}" ps -aq seaweedfs)"`
 （`host` 同理）交叉核对。`docker run -v "$SW_SRC":/data` 对卷名与绝对路径都适用。
+下文 tar 打包与解包前都应已通过上面的存在性检查。唯一例外是全新机器恢复：命名卷
+尚不存在，`docker volume inspect` 失败属预期，此时确认 `SW_SRC` / `HD_SRC` 与 config
+输出的 `name:` 逐字一致后跳过该检查，由 `docker run -v` 按该名称新建（compose 之后
+复用同名卷，可能警告该卷不是 compose 创建的，属预期）。
 
 ### 2.1 PostgreSQL 备份
 
@@ -271,8 +283,11 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
    放回原位（`chmod 600`；`deploy/.env` 若用 `POSTGRES_PASSWORD_FILE` /
    `POSTGRES_PGPASS_FILE` 改写了来源，放到改写后的路径）。`deploy/.env` 要先于
    下一步放回：它可能用 `VAULT_MASTER_KEY_FILE` 改写 key 路径。原机有
-   `deploy/compose.local.yaml` 的同样先放回（并按它重建 bind-mount 的宿主机目录），
-   再按 §2 开头解析 `SW_SRC` / `HD_SRC`。
+   `deploy/compose.local.yaml` 的同样先放回（并按它重建 bind-mount 的宿主机目录）。
+   **放回之后重新执行 §1.1 的 `F` 定义与 `KEY_FILE` 解析**（第 1 步时它可能还不
+   存在，旧 `F` 只含基础文件：用它解析卷源、拉起 postgres 会把数据恢复进命名卷，
+   而第 6 步入口读到 `compose.local.yaml` 改挂 bind 目录，恢复后数据为空）；之后
+   才按 §2 开头解析 `SW_SRC` / `HD_SRC`，第 3 步起的命令都用新 `F`。
 3. 恢复 vault 主密钥：把备份的 key 放回 Host 实际读取的位置（Docker stack 为
    §1.1 用 `docker compose … config` 解析出的 `KEY_FILE`，默认即
    `deploy/secrets/vault_master_key`，`chmod 600`；原生形态见 §1.1）。**不要**在
@@ -458,6 +473,8 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
    docker compose "${F[@]}" exec -T host cat /run/secrets/vault_master_key | shasum -a 256
    shasum -a 256 < "$KEY_FILE"
    ```
+
+   Linux 上没有 `shasum` 时两处都换成 `sha256sum`。
 3. **重新录入全部 secret**（按名称覆盖写入，名称不变，已冻结的 `secret_ref` 在
    重录后即可重新解析）：
    - 外部服务连接：admin 全局设置「外部服务连接」逐个编辑，在 secret 字段输入
