@@ -80,6 +80,14 @@ class FakeJobDB:
     def delete_job_in_transaction(conn, job_id):
         pass
 
+    def list_node_runs(self, job_id):
+        return []
+
+    @contextmanager
+    def job_mutation_lock(self, job_id):
+        # #958：删除提交后的本地清理在此锁下复核行；假库里行已删 → False。
+        yield False
+
 
 @pytest.fixture
 def manager():
