@@ -150,7 +150,7 @@ TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计�
 - 模型调用失败先内部重试（指数退避，上限可配）；每个失败的 transient attempt 在
   退避 sleep 前发出一对 pi 兼容事件：assistant `message_end`（`stopReason=error` +
   `errorMessage`，usage 为 0）+ `auto_retry_start`；恢复后续跑，最终 assistant message
-  `stopReason` 为 `stop`/`toolUse`——Host 据此清除瞬时错误（pi 无 `auto_retry_end`，
+  `stopReason` 为 `stop`/`toolUse`/`length`（无 `errorMessage` 时）——Host 据此清除瞬时错误（pi 无 `auto_retry_end`，
   velites 同样不发）；
 - 未恢复：最后一条 assistant message 带 `stopReason=error` + `errorMessage`，
   **exit 0**（复刻 Pi"模型 400 也 exit 0"，Host 靠事件流判失败）——但声明了
