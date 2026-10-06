@@ -119,14 +119,18 @@ def test_queue_wait_grows_under_lane_pressure(
         client, ExecutionStatusReporter(None), max_concurrency=1, heartbeat_interval=0.05
     )
     queue.submit(_task(tmp_path, "exec-1"))
-    assert client.entered.wait(10), "exec-1 never took the only lane"
-    queue.submit(_task(tmp_path, "exec-2"))
-    # 保留的墙钟等待：被测量的正是 queue_wait 时长，exec-2 必须真实排队一段时间
-    # （断言要求比 exec-1 多 >0.1s）——gate 放行前它进不了车道。
-    time.sleep(0.3)
-    client.gate.set()
-    wait_for_predicate(lambda: queue.depth == 0, timeout=10)
-    queue.shutdown()
+    try:
+        assert client.entered.wait(10), "exec-1 never took the only lane"
+        queue.submit(_task(tmp_path, "exec-2"))
+        # 保留的墙钟等待：被测量的正是 queue_wait 时长，exec-2 必须真实排队一段时间
+        # （断言要求比 exec-1 多 >0.1s）——gate 放行前它进不了车道。
+        time.sleep(0.3)
+        client.gate.set()
+        wait_for_predicate(lambda: queue.depth == 0, timeout=10)
+    finally:
+        # 等待失败也放行并收掉上传车道线程。
+        client.gate.set()
+        queue.shutdown()
 
     events = {e["execution_id"]: e for e in _reported_events(capsys)}
     assert events["exec-2"]["queue_wait_seconds"] > events["exec-1"]["queue_wait_seconds"] + 0.1

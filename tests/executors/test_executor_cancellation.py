@@ -180,10 +180,14 @@ class TestCodeExecutorIsolation:
 
         thread = threading.Thread(target=run)
         thread.start()
-        # 等子进程真正进入阻塞体（落 started 标记）再取消，而非固定 sleep 猜时序。
-        wait_for_predicate(lambda: (ctx.job_dir / "started").is_file(), timeout=10.0)
-        token.cancel()
-        thread.join(timeout=5.0)
+        try:
+            # 等子进程真正进入阻塞体（落 started 标记）再取消，而非固定 sleep 猜时序。
+            wait_for_predicate(lambda: (ctx.job_dir / "started").is_file(), timeout=10.0)
+        finally:
+            # 等待失败也必须取消并回收：节点体是无限循环、线程非 daemon，
+            # 漏掉 cancel 会让 pytest 进程无法退出（幂等，正常路径即本次取消）。
+            token.cancel()
+            thread.join(timeout=5.0)
         assert not thread.is_alive()
         assert result_holder["result"].status == "cancelled"
 
@@ -271,10 +275,13 @@ def test_runtime_passes_cancellation_token(tmp_path: Path) -> None:
 
     thread = threading.Thread(target=run)
     thread.start()
-    wait_for_predicate(lambda: bool(executor.tokens), timeout=5.0)
-    assert isinstance(executor.tokens[0], CancellationToken)
-    runtime.cancel(claim.execution_id)
-    thread.join(timeout=2.0)
+    try:
+        wait_for_predicate(lambda: bool(executor.tokens), timeout=5.0)
+        assert isinstance(executor.tokens[0], CancellationToken)
+    finally:
+        # 等待 / 断言失败也取消并回收运行线程（未注册时 cancel 为 no-op）。
+        runtime.cancel(claim.execution_id)
+        thread.join(timeout=2.0)
     assert not thread.is_alive()
     assert result_holder["result"].status == "cancelled"
     assert len(leases.finished) == 1

@@ -207,22 +207,26 @@ def test_kill_takes_down_the_whole_process_group() -> None:
                 if line.split() and line.split()[0] == str(pgid)
             ]
 
-        # The group already has the direct child plus two sleeps — observed
-        # via the per-group `ps` listing rather than a fixed sleep (a kill
-        # before the sleeps spawn would make the test vacuous).
-        deadline = time.monotonic() + 10
-        while len(_group_members()) < 3 and time.monotonic() < deadline:
-            await asyncio.sleep(0.02)
-        assert len(_group_members()) >= 3, _group_members()
-        await store.kill(created.terminalId)
-        awaited = await store.wait_for_exit(created.terminalId)
-        assert awaited.exit_code is None  # group SIGKILL reads as signal death
-        # After the group kill no member of the old pgid may survive (poll
-        # until the orphaned sleeps are reaped instead of a fixed sleep).
-        deadline = time.monotonic() + 10
-        while _group_members() and time.monotonic() < deadline:
-            await asyncio.sleep(0.02)
-        assert _group_members() == []
-        await store.release(created.terminalId)
+        try:
+            # The group already has the direct child plus two sleeps — observed
+            # via the per-group `ps` listing rather than a fixed sleep (a kill
+            # before the sleeps spawn would make the test vacuous).
+            deadline = time.monotonic() + 10
+            while len(_group_members()) < 3 and time.monotonic() < deadline:
+                await asyncio.sleep(0.02)
+            assert len(_group_members()) >= 3, _group_members()
+            await store.kill(created.terminalId)
+            awaited = await store.wait_for_exit(created.terminalId)
+            assert awaited.exit_code is None  # group SIGKILL reads as signal death
+            # After the group kill no member of the old pgid may survive (poll
+            # until the orphaned sleeps are reaped instead of a fixed sleep).
+            deadline = time.monotonic() + 10
+            while _group_members() and time.monotonic() < deadline:
+                await asyncio.sleep(0.02)
+            assert _group_members() == []
+            await store.release(created.terminalId)
+        finally:
+            # 等待 / 断言失败也收掉进程组（release 幂等，未结束则组 kill）。
+            await store.close_all()
 
     asyncio.run(_run())

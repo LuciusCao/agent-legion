@@ -183,6 +183,8 @@ def test_dead_pid_slots_do_not_count_and_get_reclaimed(repo: Path) -> None:
 
 def test_live_slots_count_and_capacity_wait(repo: Path, tmp_path: Path) -> None:
     holder = subprocess.Popen(["sleep", "60"])
+    waiter = None
+    err_handle = None
     try:
         _write_slot(repo, "gate-holder", pid=holder.pid, worktree="/holder-wt")
         out = _bash(
@@ -240,6 +242,12 @@ def test_live_slots_count_and_capacity_wait(repo: Path, tmp_path: Path) -> None:
     finally:
         holder.terminate()
         holder.wait()
+        if waiter is not None and waiter.poll() is None:
+            # 等待公告失败也不留下排队中的 waiter 进程。
+            waiter.kill()
+            waiter.wait()
+        if err_handle is not None:
+            err_handle.close()
 
 
 def test_default_max_parallel_gates_is_one(repo: Path) -> None:
@@ -273,6 +281,8 @@ def test_serialized_queue_gives_gate_full_machine_budget(repo: Path, tmp_path: P
     the holder exits runs with the full worker budget (N=1 slot), not the
     divided one — serialization trades queue wait for lone-gate speed."""
     holder = subprocess.Popen(["sleep", "60"])
+    waiter = None
+    err_handle = None
     try:
         _write_slot(repo, "gate-holder", pid=holder.pid)
         # Scrub the parent gate's slot env (same as _bash): an unscrubbed
@@ -314,6 +324,12 @@ def test_serialized_queue_gives_gate_full_machine_budget(repo: Path, tmp_path: P
     finally:
         holder.terminate()
         holder.wait()
+        if waiter is not None and waiter.poll() is None:
+            # 等待公告失败也不留下排队中的 waiter 进程。
+            waiter.kill()
+            waiter.wait()
+        if err_handle is not None:
+            err_handle.close()
 
 
 def test_reentrant_acquire_reuses_parent_slot(repo: Path) -> None:
@@ -490,6 +506,7 @@ done
 
 def test_waiter_survives_yielding_contender_churn(repo: Path, tmp_path: Path) -> None:
     holder = subprocess.Popen(["sleep", "60"])
+    err_handle = None
     churners = []
     waiter = None
     try:
@@ -545,6 +562,8 @@ def test_waiter_survives_yielding_contender_churn(repo: Path, tmp_path: Path) ->
         for churner in churners:
             churner.terminate()
             churner.wait()
+        if err_handle is not None:
+            err_handle.close()
 
 
 def test_gate_queue_script_passes_bash_syntax_check() -> None:
