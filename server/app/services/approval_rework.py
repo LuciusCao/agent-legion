@@ -71,13 +71,11 @@ def execute_rework(
     round_no = service.job_db.count_approval_decisions(job_id, node_key) + 1
     # The feedback artifact is the reviewer's note as machine input: the
     # regenerating skill declares it as an optional input and rewrites with
-    # it. Written INSIDE the critical section right after stage_outputs
-    # (#759 自审): staging has already swept, so the note can't be mistaken
-    # for a stale output; and it lands before commit, so no dispatch can
-    # observe the reworked target without the note (post-commit writes left
-    # a stale/missing-read window; pre-staging writes got swept). A rolled
-    # back rework leaves the note as a harmless stale file the next round
-    # overwrites.
+    # it. Swapped in INSIDE the critical section after the status guard and
+    # stage_outputs (#759 自审, #963): staging has already swept, so the note
+    # can't be mistaken for a stale output; it lands before commit, so no
+    # dispatch can observe the reworked target without the note; and a
+    # duplicate rework fails the guard before touching the committed note.
     return commit_rework(
         service,
         job,

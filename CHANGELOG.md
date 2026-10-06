@@ -29,6 +29,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- 重复 / 并发的 approval rework 不再先覆盖已提交的反馈产物（issue #963，#929 同族）：rework 的反馈产物（默认 `review_feedback.json`）改为锁外先写 fsync 临时文件、在 job-mutation 锁内状态守卫通过（并完成产物暂存与节点重置）之后才原子换入；迟到的重复决策在守卫处 409，本地反馈文件、对象存储上传与决策历史均保持首个决策的内容。换入、目录 fsync 或提交失败时 DB 与上游产物整笔回滚（gate 仍待审、无决策行、上游产物复原）；但若 `os.replace` 已成功、之后目录 fsync 或提交失败，本地反馈文件会保留这次未提交的内容，与 #951 approve 既有取舍一致，由下一次决策覆盖。
+- 审批决策产物换入后 fsync 目标目录（issue #975，#951 follow-up）：`{node}.approval.json` 与 rework 反馈产物统一经共享的 durable replace（`os.replace` + 父目录 fsync），且目录 fsync 在决策事务提交前完成，主机掉电 / 内核崩溃发生在提交之后时产物目录项不会丢失；目录 fsync 失败时决策事务回滚（gate 仍待审、无决策行），但已换入的本地产物文件会保留未提交内容，由下一次决策覆盖。
 - Worker claim 主循环不再把编程错误误判为 Host 不可用（issue #960，#917 P2）：此前 claim pass 外层 `except Exception` 把任何异常都按「Host 暂时不可用」指数退避重试，Worker 侧真实 bug（TypeError / KeyError 等）被吞成无限退避、日志只有一行 `Agent claim error … retrying`，排障方向被误导到网络。现收窄为传输错误（requests 族，含 `TransientHostError`）与新增的 `HostResponseError`（Host 应答非 200 状态，或 200 但 body 不可解码 / 不合契约，例如中间代理返回的 HTML 或 `{"error": ...}` JSON、`claims` 缺失或非列表、claim 项缺 `execution_id` / `node_key`）——这两族照旧退避；其余异常原样上抛，执行进程停池后以非 0 退出、traceback 进面板日志，由 supervisor 的崩溃重启策略接管（短时间内反复崩溃即自动关闭认领，待人工排查）。与 Worker 注册重试的异常族收窄同一做法。Host 侧应答行为与协议不变。
 - 直接以 `executor.py --config` 加载 Worker 配置时同样剥离已退役的 `capabilities` 键并每进程告警一次（issue #1023，#452 / #986 follow-up）：此前只有经 Worker 服务配置存储的读取路径会剥离并告警，直接加载路径静默忽略旧键。现两条路径共用同一退役键表与告警去重，同一进程内先后命中只告警一次；旧键对启动与执行无影响。
 - Worker 控制台在非默认回环别名下照常内嵌控制 token（issue #976，#953 follow-up）：发布地址或进程 bind 为 `127.0.0.2` 等 127/8 回环别名时，此前 Host 白名单收紧条件只认 `127.0.0.1` / `localhost` / `::1` 三个固定名，页面不内嵌 token、需手动输入一次，与 `embed_control_token` / 安装提示的判定不一致；现改为按回环语义逐个判定白名单成员（`localhost` 或回环 IP），白名单含任一非回环主机名（非回环暴露面或控制台地址）时仍不内嵌。
