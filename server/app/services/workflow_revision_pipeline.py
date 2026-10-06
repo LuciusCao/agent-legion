@@ -70,8 +70,8 @@ def publish_workflow_revision(
     # 只会发布全自含 revision——它不再 upsert workspace_node_routes，仍声明
     # 为 agent 的节点的存量行冻结只读（服务旧快照 legacy 节点的在途 job），
     # 已删除或改成 code 的节点的行照常删掉（R1：防止残留行把 code 节点路由
-    # 给 Agent）。仅内部种子路径（demo builtin / ensure_active_revision，
-    # P4 改 YAML 自含）仍可能带 legacy 节点并照旧物化。
+    # 给 Agent）。demo builtin 已自含（顶层 execution.runtime）；只有直接
+    # 发布 legacy 定义的内部 / 测试路径（不过门禁）仍会照旧物化，P4 删除。
     frozen_route_nodes: frozenset[str] | None = None
     if not has_legacy_agent_nodes(definition):
         agent_routes = None

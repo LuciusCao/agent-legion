@@ -22,6 +22,7 @@ from server.app.services.job_intake import JobIntakeService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_node_config import update_workspace_node_config
 from tests.helpers import load_demo_legacy_intake_definition
+from tests.helpers.node_profile import with_node_config_schema
 
 PLAINTEXT = "full-gate-secret-token"
 CONNECTION_KEY = "cms-full"
@@ -44,7 +45,15 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     seed_demo_workspace_node_codes(settings, workspace_id)
     # The demo workflow no longer declares intake modes (#154); this test
     # exercises the job-batches intake freeze, so seed the legacy variant.
-    definition = load_demo_legacy_intake_definition()
+    # The demo nodes declare no connection property; give write_script a
+    # ``connection`` field on the node itself (#935: self-contained profile,
+    # the node config_schema is the declaration point) so the schema chain
+    # accepts the workspace override.
+    definition = with_node_config_schema(
+        load_demo_legacy_intake_definition(),
+        "write_script",
+        {"type": "object", "properties": {"connection": {"type": "string"}}},
+    )
     WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
 
     # Create the connection; the token is diverted to the instance vault.
@@ -68,28 +77,6 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     assert raw["token"] == {"secret_ref": ref_name}
     assert raw["base_url"] == "http://cms.example.com"
     assert PLAINTEXT not in json.dumps(raw)
-
-    # The demo nodes declare no connection property; republish the write_script
-    # agent with a ``connection`` field so the schema chain accepts the
-    # workspace override (agent config_schema is the D15 declaration point).
-    from server.app.agent_catalog import AgentDefinition
-    from server.app.services.agent_service import AgentService
-
-    agent_service = AgentService(settings.database_url, workspace_id)
-    agent_service.save_draft(
-        "example-write-script-v1",
-        AgentDefinition(
-            capability="write_script",
-            runtime="velites",
-            skill="education-video-problems-generation/write-script",
-            config_schema={
-                "type": "object",
-                "properties": {"connection": {"type": "string"}},
-            },
-        ),
-        created_by="test-seed",
-    )
-    agent_service.publish("example-write-script-v1")
 
     # The node config references the connection by key only — no secret
     # material ever enters the workspace override.

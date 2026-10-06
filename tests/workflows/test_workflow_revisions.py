@@ -34,6 +34,7 @@ from tests.helpers import (
     seed_workspace_agent_definitions,
 )
 from tests.helpers.auth import authenticate_client
+from tests.helpers.node_profile import legacy_profile_variant
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -41,9 +42,12 @@ def test_publish_and_get_active_revision(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1")
     # Agent definitions are workspace-scoped (schema v46): seed the demo
-    # templates into this workspace so its routes resolve.
+    # templates into this workspace so its routes resolve. #935: the demo
+    # ships self-contained nodes; the legacy variant still materializes routes.
     seed_workspace_agent_definitions(workspace["id"])
-    definition = load_builtin_definition("education_video_problems_generation")
+    definition = legacy_profile_variant(
+        load_builtin_definition("education_video_problems_generation")
+    )
     service = WorkflowRevisionService(queries)
 
     revision = service.publish_workspace_revision(workspace["id"], definition)
@@ -400,7 +404,9 @@ def test_publish_validation_reports_missing_node_code(tmp_path: Path) -> None:
     """P-0.5: a code node without resolvable code fails publish."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1")
-    definition = load_builtin_definition("education_video_problems_generation")
+    definition = legacy_profile_variant(
+        load_builtin_definition("education_video_problems_generation")
+    )
 
     errors = validate_workflow_for_publish(
         definition=definition,
@@ -409,8 +415,8 @@ def test_publish_validation_reports_missing_node_code(tmp_path: Path) -> None:
         custom_nodes_enabled=True,
     )
 
-    # Bare JobQueries seeds no node code, and the demo's agent-typed nodes
-    # carry no execution profile (#935 gate flip): both error kinds report.
+    # Bare JobQueries seeds no node code, and the legacy variant's agent
+    # nodes carry no execution profile (#935 gate flip): both kinds report.
     assert any("no published node code" in error for error in errors)
     assert any("must declare its own execution profile" in error for error in errors)
 
@@ -756,7 +762,6 @@ def test_publish_revision_skips_pins_when_gate_disabled(tmp_path: Path) -> None:
 
 def test_runtime_only_update_preserves_node_code_pins(tmp_path: Path) -> None:
     """In-place (runtime settings only) revision updates keep node_code_pins."""
-    from server.app.workflows.schema import WorkflowNodeExecution
 
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws-pins-keep")
@@ -780,7 +785,10 @@ def test_runtime_only_update_preserves_node_code_pins(tmp_path: Path) -> None:
         nodes={
             **definition.nodes,
             "write_script": dc_replace(
-                node, execution=WorkflowNodeExecution(provider="deepseek", model="m2")
+                # #935: keep execution.runtime (a profile-source change is
+                # structural and would publish a new revision).
+                node,
+                execution=dc_replace(node.execution, provider="deepseek", model="m2"),
             ),
         },
     )

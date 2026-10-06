@@ -25,6 +25,12 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
     "key": DEMO_WORKFLOW_KEY,
     "label": "教学视频脚本与题目生成（示例）",
     "schema_version": 2,
+    # #935 (#440 P3): every agent node carries its own execution profile — the
+    # publish gate rejects one without execution.runtime. The workflow-level
+    # default gives all four demo agent nodes the runtime the demo Agent
+    # templates declared (velites, default tools, no labels/schema), so the
+    # profile is exactly what the legacy definitions ran (v93 rule).
+    "execution": {"runtime": "velites"},
     # No legacy intake modes (retired in #154): the demo's only path is
     # material/ref items — the user uploads (or picks the seeded sample)
     # knowledge-point markdown and each material becomes one job; the intake
