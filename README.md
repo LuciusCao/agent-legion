@@ -41,7 +41,7 @@ Agent Legion 是一个自托管控制台，把 AI agent 变成内容生产线的
 ### 前置要求
 
 - macOS + Homebrew：`make install` 会自动检测并安装缺失的依赖
-  （Python 3.11+、Node 18+、PostgreSQL 17、[`uv`](https://docs.astral.sh/uv/)、
+  （Python 3.11+、Node 20+、PostgreSQL 17、[`uv`](https://docs.astral.sh/uv/)、
   Rust 工具链、Docker）。其他平台请先手动安装这些依赖，`make install`
   会逐项检测并给出指引。
 - 一个 LLM provider 供 agent 节点使用（任何 OpenAI 兼容端点均可；
@@ -87,8 +87,8 @@ worker 按设计默认关闭任务领取，到 worker 控制台 http://127.0.0.1
 控制台」入口与接入三步说明（地址由 `make dev-up` 按 Worker 端口注入，见
 `.env.example` 的 `AGENT_LEGION_WORKER_CONSOLE_URL`）。
 
-worker 注册不再使用全局 token：启动后在 Host Web UI 的
-workspace「设置 → Agent 与 Worker」为 workspace 签发 scoped token，到 Worker
+worker 注册使用 workspace 级 scoped token：启动后在 Host Web UI 的
+workspace「设置 → Agent 与 Worker」为 workspace 签发，到 Worker
 控制台（`http://127.0.0.1:8789`）的「Workspace 访问」区块粘贴添加即可——token
 随时可以补，无需重启后端（详见
 [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md)）。
@@ -126,9 +126,11 @@ make import-demo      # 安装并锁定 demo skills；不存在时创建并 seed
   skill——demo 的接线方式见 `examples/README.md`。
 - **加更多机器当 worker**：
   [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md)。
-- **生产部署**（Docker stack、PostgreSQL）：
-  [docs/architecture/deployment.md](docs/architecture/deployment.md) 与
+- **生产部署**（原生或 Docker stack、PostgreSQL）：
+  [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md) 与
   [docs/postgresql-runbook.md](docs/postgresql-runbook.md)。
+- **跑测试、提交 PR**：[CONTRIBUTING.md](CONTRIBUTING.md)（首次跑测试、
+  质量门与 PR 目标分支约定）。
 
 ## 文档
 

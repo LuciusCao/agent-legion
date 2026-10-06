@@ -50,7 +50,7 @@ repeatable, auditable production process.
 ### Prerequisites
 
 - macOS with Homebrew: `make install` auto-detects and installs missing
-  prerequisites (Python 3.11+, Node 18+, PostgreSQL 17,
+  prerequisites (Python 3.11+, Node 20+, PostgreSQL 17,
   [`uv`](https://docs.astral.sh/uv/), a Rust toolchain, Docker). On other
   platforms install those manually first; `make install` still checks each
   one and prints guidance.
@@ -100,10 +100,14 @@ make dev-down       # stop everything
 
 Open http://127.0.0.1:5174 — the first visit redirects to `/setup` to
 create the admin user. Workers start with claiming disabled by design;
-enable it in the worker console at http://127.0.0.1:8789.
+enable it in the worker console at http://127.0.0.1:8789. In the main
+console, workspace Settings → 「Agent 与 Worker」 has an 「打开 Worker 控制台」
+(open Worker console) entry plus three onboarding steps at the top (the address is injected by
+`make dev-up` from the Worker port; see `AGENT_LEGION_WORKER_CONSOLE_URL` in
+`.env.example`).
 
-Worker registration no longer uses a global token: after startup, issue a
-scoped token per workspace in the Host Web UI (workspace Settings →
+Worker registration uses workspace-scoped tokens: after startup, issue a
+token per workspace in the Host Web UI (workspace Settings →
 「Agent 与 Worker」) and paste it into the "Workspace access" section of the
 Worker console (`http://127.0.0.1:8789`) — tokens can be added at any time,
 no backend restart needed (see
@@ -131,7 +135,9 @@ Then in the console:
    via `execution.*`; the input lists the provider/model options reported by
    online Workers for that node's Agent runtime, and free text works too).
 3. Enable automatic scheduling for the workspace and claiming in the Worker
-   console.
+   console (the main console marks Workers with claiming off as
+   「在线·未领取」 (online, not claiming); a new workspace's onboarding guide
+   covers both steps too).
 4. Submit a batch: in the workspace's **添加条目** (add) dialog, upload the
    knowledge-point markdown, or select the seeded example materials in the
    panel, then confirm to create the run — one material becomes one job.
@@ -146,9 +152,11 @@ Then in the console:
   own skills — see `examples/README.md` for how the demo is wired.
 - **Add more machines** as workers:
   [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md).
-- **Deploy for production** (Docker stacks, PostgreSQL):
-  [docs/architecture/deployment.md](docs/architecture/deployment.md) and
+- **Deploy for production** (native or Docker stacks, PostgreSQL):
+  [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md) and
   [docs/postgresql-runbook.md](docs/postgresql-runbook.md).
+- **Run the tests and open a PR**: [CONTRIBUTING.md](CONTRIBUTING.md)
+  (first test run, quality gates, and the PR target-branch convention).
 
 ## Documentation
 
