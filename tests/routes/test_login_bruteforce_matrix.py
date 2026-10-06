@@ -10,6 +10,7 @@ must be no instance-wide lockout: there is deliberately no IP-only key.
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -80,6 +81,37 @@ def test_distributed_guessing_on_one_account_locks_the_account(clock) -> None:
         _fail(limiter, "admin", f"192.0.2.{index}", 1)
     assert _locked(limiter, "admin", OWNER)
     assert not _locked(limiter, "someone-else", OWNER)
+
+
+@pytest.mark.no_db
+def test_concurrent_burst_from_one_source_cannot_lock_the_account(clock) -> None:
+    """Login runs check() -> PBKDF2 -> record_failure(), so a burst of
+    concurrent wrong passwords from ONE source all pass check() before any
+    failure is recorded. Failures landing after that source's pair lock must
+    not keep feeding the account key (20 in flight would lock the owner out
+    from every other source)."""
+    limiter = LoginRateLimiter()  # production thresholds: pair 5, account 20
+    in_flight = 20
+    checked = threading.Barrier(in_flight)
+    errors: list[BaseException] = []
+
+    def wrong_password() -> None:
+        try:
+            limiter.check("admin", ATTACKER)
+            checked.wait(timeout=10)  # every request is past check() (the PBKDF2 gap)
+            limiter.record_failure("admin", ATTACKER)
+        except BaseException as exc:  # surfaced below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=wrong_password) for _ in range(in_flight)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert errors == []
+    assert _locked(limiter, "admin", ATTACKER)
+    assert not _locked(limiter, "admin", OWNER)
+    assert limiter._entries[("account", "admin")][0] == 5
 
 
 @pytest.mark.no_db

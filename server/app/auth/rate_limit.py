@@ -85,11 +85,18 @@ class LoginRateLimiter:
         with self._lock:
             if len(self._entries) >= self._sweep_at:
                 self._sweep(now)
+            # The pair key comes first: once it is locked, failures still in
+            # flight from that source (they passed check() before the lock,
+            # then spent the PBKDF2 time) count toward NOTHING — otherwise one
+            # source's concurrent burst could push the account key over its
+            # threshold and lock the owner out everywhere. Checked and applied
+            # under the same lock, so the decision is atomic per failure.
             for key in self._keys(username, client_ip):
-                failures, started, _ = self._live(key, now) or (0, now, 0.0)
-                failures += 1
-                locked = now + self._lock_seconds if failures >= self._limits[key[0]] else 0.0
-                self._entries[key] = (failures, started, locked)
+                failures, started, locked_until = self._live(key, now) or (0, now, 0.0)
+                if locked_until > now:
+                    return
+                locked = now + self._lock_seconds if failures + 1 >= self._limits[key[0]] else 0.0
+                self._entries[key] = (failures + 1, started, locked)
 
     def record_success(self, username: str, client_ip: str | None = None) -> None:
         with self._lock:
