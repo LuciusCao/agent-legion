@@ -427,6 +427,7 @@ def test_update_waits_for_inflight_refresh_and_invalidates(services, monkeypatch
 
     updater = threading.Thread(target=_update)
     updater.start()
+    # 保留：负向观察窗——断言 update 在 refresh 持闸期间「不会」提交，无正向事件可等。
     time.sleep(0.3)
     assert not update_done.is_set(), "update committed while the refresh still held the gate"
     release_exchange.set()

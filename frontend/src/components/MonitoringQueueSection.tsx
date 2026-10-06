@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { OpsGranularity, OpsMetricsResponse } from '../api/metrics'
 import { useOpsMetrics } from '../hooks/useOpsMetrics'
 import { fillWindowBuckets } from '../lib/opsMetricsWindow'
+import { formatNumber } from '../lib/formatters'
 import { MetricsChart } from './MetricsChart'
 import type { ChartSeries } from '../lib/metricsChartOptions'
 import panelStyles from './MonitoringPanel.module.css'
@@ -60,7 +61,7 @@ export function QueueAlertBanner({
 }) {
   const alert = summary?.queue_alert
   if (!alert) return null
-  const count = (summary?.queue?.queued ?? 0).toLocaleString('zh-CN')
+  const count = formatNumber(summary?.queue?.queued ?? 0)
   if (alert.kind === 'blocked') {
     const reasons = formatReasons(alert.reasons)
     return (
@@ -94,9 +95,7 @@ export function QueueSummaryCards({
           className={panelStyles.metricValue}
           data-testid="queue-depth-summary"
         >
-          {typeof queue?.queued === 'number'
-            ? queue.queued.toLocaleString('zh-CN')
-            : '-'}
+          {formatNumber(queue?.queued)}
         </div>
         <div className={panelStyles.metricMeta}>
           队首最老{' '}
@@ -112,7 +111,7 @@ export function QueueSummaryCards({
           data-testid="queue-sweeper-summary"
         >
           {typeof queue?.recent_hour_unclaimable_failed === 'number'
-            ? queue.recent_hour_unclaimable_failed.toLocaleString('zh-CN')
+            ? formatNumber(queue.recent_hour_unclaimable_failed)
             : '-'}
         </div>
         <div className={panelStyles.metricMeta}>不可 claim 请求自动 fail</div>

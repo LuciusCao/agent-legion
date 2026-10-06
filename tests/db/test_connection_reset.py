@@ -354,6 +354,7 @@ def test_suppressed_leak_hits_are_counted(
             conn = connect_database(TEST_DATABASE_URL)
             conn.execute("select 1")
             conn.close()
+        # 保留的墙钟等待：被测的是限流去重窗口（_RESET_WARN_EVERY_SECONDS=0.05）本身，须真实跨过窗口。
         time.sleep(0.06)
         conn = connect_database(TEST_DATABASE_URL)  # outside the window now
         conn.execute("select 1")

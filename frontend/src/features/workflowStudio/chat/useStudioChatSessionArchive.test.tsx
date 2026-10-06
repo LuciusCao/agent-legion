@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { queryKeys } from '../../../lib/queryKeys'
+import { studioChatRetentionKey } from './studioChatRetention'
 import * as archiveApi from './studioChatSessionArchiveApi'
 import {
   archivedStudioChatSessionsKey,
@@ -43,24 +44,59 @@ function setup(initialActive: string | null) {
   return { result, client, key, cachedAtClear }
 }
 
+const EMPTY = { sessions: [], retentionDays: 0 }
+
 const RECORD = {} as Awaited<
   ReturnType<typeof archiveApi.archiveStudioChatSession>
 >
 
 describe('useStudioChatSessionArchive', () => {
   it('loads the archive view list', async () => {
-    mockApi.fetchArchivedStudioChatSessions.mockResolvedValue([
-      { id: 's9' } as never,
-    ])
+    mockApi.fetchArchivedStudioChatSessions.mockResolvedValue({
+      sessions: [{ id: 's9' } as never],
+      retentionDays: 30,
+    })
     const { result } = setup('s1')
     await waitFor(() =>
       expect(result.current.archive.archivedSessions).toEqual([{ id: 's9' }])
     )
+    // #1041：归档视图响应带回实例保留天数。
+    expect(result.current.archive.retentionDays).toBe(30)
     expect(mockApi.fetchArchivedStudioChatSessions).toHaveBeenCalledWith('ws1')
   })
 
+  it('retention is unknown (null, not "off") while neither list answered', () => {
+    mockApi.fetchArchivedStudioChatSessions.mockReturnValue(
+      new Promise(() => undefined)
+    )
+    const { result } = setup('s1')
+    expect(result.current.archive.retentionDays).toBeNull()
+  })
+
+  it('a failed archive view keeps retention unknown', async () => {
+    mockApi.fetchArchivedStudioChatSessions.mockRejectedValue(new Error('500'))
+    const { result, client } = setup('s1')
+    await waitFor(() =>
+      expect(
+        client.getQueryState(archivedStudioChatSessionsKey('ws1'))?.status
+      ).toBe('error')
+    )
+    expect(result.current.archive.retentionDays).toBeNull()
+  })
+
+  it('the default list response supplies retention before the archive view', async () => {
+    mockApi.fetchArchivedStudioChatSessions.mockReturnValue(
+      new Promise(() => undefined)
+    )
+    const { result, client } = setup('s1')
+    act(() => {
+      client.setQueryData(studioChatRetentionKey('ws1'), 14)
+    })
+    await waitFor(() => expect(result.current.archive.retentionDays).toBe(14))
+  })
+
   it('archiving the active session prunes the cache before clearing selection', async () => {
-    mockApi.fetchArchivedStudioChatSessions.mockResolvedValue([])
+    mockApi.fetchArchivedStudioChatSessions.mockResolvedValue(EMPTY)
     mockApi.archiveStudioChatSession.mockResolvedValue(RECORD)
     const { result, client, cachedAtClear } = setup('s1')
     const archivedKey = archivedStudioChatSessionsKey('ws1')
@@ -82,7 +118,7 @@ describe('useStudioChatSessionArchive', () => {
   })
 
   it('unarchive keeps the selection and refreshes both lists', async () => {
-    mockApi.fetchArchivedStudioChatSessions.mockResolvedValue([])
+    mockApi.fetchArchivedStudioChatSessions.mockResolvedValue(EMPTY)
     mockApi.unarchiveStudioChatSession.mockResolvedValue(RECORD)
     const { result, client, key } = setup('s2')
     await act(() => result.current.archive.unarchive('s9'))
@@ -92,7 +128,7 @@ describe('useStudioChatSessionArchive', () => {
   })
 
   it('a failed archive leaves cache and selection untouched', async () => {
-    mockApi.fetchArchivedStudioChatSessions.mockResolvedValue([])
+    mockApi.fetchArchivedStudioChatSessions.mockResolvedValue(EMPTY)
     mockApi.archiveStudioChatSession.mockRejectedValue(new Error('boom'))
     const { result, client, key, cachedAtClear } = setup('s1')
     await act(async () => {

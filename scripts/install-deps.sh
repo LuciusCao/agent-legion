@@ -6,7 +6,8 @@
 # 依赖任何既有 worktree，也不会派生隔离库。
 #   1. 检测前置工具：uv、Python 3.11+、Node 18+、PostgreSQL（psql/createdb）、
 #      cargo、docker、openssl（随机凭据生成）——macOS 缺失项用 brew 补装
-#      （先检测后装），其他平台打印安装指引后 fail-fast
+#      （先检测后装），其他平台打印安装指引后 fail-fast；Intel Mac 另确保
+#      Homebrew openssl@3 并导出 OPENSSL_DIR（cryptography 源码构建，#1089）
 #   2. uv sync（Python 依赖）
 #   3. createdb agent_legion_dev（已存在跳过；PG 未运行时先尝试 brew services 拉起。
 #      派生名而非裸名 agent_legion：裸名是共享/prod 库，init_db 的共享库 schema
@@ -95,6 +96,21 @@ else
     fi
     have cargo || brew_install "Rust 工具链（cargo）" "rust"
     have openssl || brew_install "OpenSSL" "openssl"
+    # Intel Mac（#1089）：cryptography 49+ 不再发布 x86_64 macOS wheel，uv sync
+    # 会从源码构建，需要 Homebrew OpenSSL 3 头文件——系统自带 /usr/bin/openssl
+    # 能让上面的 have openssl 通过，但 cryptography 不支持 Apple 自带的
+    # LibreSSL，故按架构单独确保 openssl@3，并导出 OPENSSL_DIR（openssl-sys
+    # 据此给出 DEP_OPENSSL_INCLUDE，cryptography-cffi 用它编译）。调用方已显式
+    # 设置 OPENSSL_DIR 时尊重之。Apple Silicon 有官方 wheel，不受影响。
+    if [[ "$(uname -m)" == "x86_64" ]]; then
+        brew list --formula openssl@3 >/dev/null 2>&1 \
+            || brew_install "OpenSSL 3（Intel Mac 源码构建 cryptography 用）" "openssl@3"
+        if [[ -z "${OPENSSL_DIR:-}" ]]; then
+            OPENSSL_DIR="$(brew --prefix openssl@3)"
+            export OPENSSL_DIR
+        fi
+        echo "Intel Mac：cryptography 将从源码构建（OPENSSL_DIR=${OPENSSL_DIR}）"
+    fi
     if ! have docker; then
         brew_install "Docker Desktop" "--cask docker"
         echo "提示: Docker Desktop 需手动启动一次完成授权；未启动时 make dev-up 会跳过本地 RustFS（材料 API 降级 503）"

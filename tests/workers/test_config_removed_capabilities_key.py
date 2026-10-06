@@ -1,7 +1,8 @@
 """`capabilities` 配置键已移除（issue #452；#284 起即 no-op）。
 
 存量 worker.yaml 残留该键时 Worker 仍须正常启动：读取时剥离、每进程告警一次、
-下次落盘即清除；控制面写入该键则按未知配置项拒绝。
+下次落盘即清除；控制面写入该键则按未知配置项拒绝。直接 `executor.py --config`
+加载路径（runtime.controls.load_config）共用同一剥离与告警（#1023）。
 """
 
 from __future__ import annotations
@@ -12,17 +13,17 @@ from pathlib import Path
 import pytest
 import yaml
 
-from worker import config_validation
 from worker.config_store import WorkerConfigStore, validate_config
+from worker.runtime import controls as runtime_controls
 
 pytestmark = pytest.mark.no_db
 
-_LOGGER = "worker.config_validation"
+_LOGGER = "worker.runtime.controls"
 
 
 @pytest.fixture(autouse=True)
 def _reset_warned(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config_validation, "_warned_removed", set())
+    monkeypatch.setattr(runtime_controls, "_warned_removed", set())
 
 
 def _base_config(**overrides):
@@ -92,3 +93,46 @@ def test_control_plane_update_rejects_removed_key(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="capabilities"):
         store.update_public({"capabilities": ["review"]})
+
+
+def _write_yaml(path: Path, config: dict) -> Path:
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    return path
+
+
+def test_direct_executor_config_load_strips_legacy_key_and_warns_once(
+    tmp_path: Path, caplog
+) -> None:
+    """#1023：直接 `executor.py --config` 读取路径不经 validate_config——
+    executor 每个 pass 热读 load_config，旧键须同样剥离且整进程只告警一次。"""
+    path = _write_yaml(tmp_path / "worker.yaml", _base_config(capabilities=["review"]))
+
+    with caplog.at_level(logging.WARNING, logger=_LOGGER):
+        first = runtime_controls.load_config(path)
+        second = runtime_controls.load_config(path)
+        assert runtime_controls.load_claim_controls(path) == (1, False, None)
+
+    assert "capabilities" not in first and "capabilities" not in second
+    assert first["worker_id"] == "w1"
+    assert len(caplog.records) == 1
+    assert "#452" in caplog.records[0].getMessage()
+
+
+def test_direct_and_store_paths_share_one_warning(tmp_path: Path, caplog) -> None:
+    """两条读取路径复用同一 _REMOVED_KEYS 与去重集合：同进程先后命中不重复告警。"""
+    path = _write_yaml(tmp_path / "worker.yaml", _base_config(capabilities=["*"]))
+
+    with caplog.at_level(logging.WARNING, logger=_LOGGER):
+        runtime_controls.load_config(path)
+        validate_config(_base_config(capabilities=["*"]))
+
+    assert len(caplog.records) == 1
+
+
+def test_direct_executor_config_without_legacy_key_stays_silent(tmp_path: Path, caplog) -> None:
+    path = _write_yaml(tmp_path / "worker.yaml", _base_config())
+
+    with caplog.at_level(logging.WARNING, logger=_LOGGER):
+        assert runtime_controls.load_config(path) == _base_config()
+
+    assert not caplog.records

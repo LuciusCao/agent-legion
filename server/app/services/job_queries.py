@@ -3,11 +3,7 @@ from typing import Any
 from server.app.db.rowmap import wire_batch_id
 from server.app.executors.models import CODE_EXECUTOR_ID
 from server.app.jobs import JobQueries
-from server.app.services.hydration_defer_board import (
-    HYDRATION_DEFER_BOARD,
-    defer_scope,
-    node_defer_view,
-)
+from server.app.services.hydration_defer_projection import job_defer_views
 from server.app.services.job_artifact_names import is_plausible_job_id
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
@@ -168,14 +164,9 @@ class JobQueryService:
         worker_map = claimed_worker_map(self.job_db, job_id)
         agent_map = agent_route_map(self.job_db, str(job["workspace_id"]), str(job["workspace_id"]))
         # #887：hydration 悬挂行维持 defer 时，受阻等待节点带原因与建议重跑节点。
-        defers = HYDRATION_DEFER_BOARD.by_waiting_node(job_id)
-        if defers:
-            scope = defer_scope(definition, job)
-            defers = {key: notices for key, notices in defers.items() if key in scope}
+        defer_views = job_defer_views(self.job_db, job, definition, nodes)
         for node in nodes_with_definition:
-            node["hydration_defer"] = node_defer_view(
-                defers.get(node["node_key"]), str(node["status"])
-            )
+            node["hydration_defer"] = defer_views.get(str(node["node_key"]))
             # P-0.5: non-Agent-routed nodes always run on the implicit code
             # pool; the projection is a constant, no configuration lookup.
             is_agent = agent_map.get(node["node_key"]) is not None
