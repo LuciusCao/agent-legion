@@ -226,6 +226,7 @@
     "tests/services/test_studio_chat_issue158.py",
     "tests/services/test_studio_chat_mcp_hint.py",
     "tests/services/test_studio_chat_resume_service.py",
+    "tests/services/test_studio_chat_retention.py",
     "tests/services/test_studio_chat_service_lifecycle.py",
     "tests/services/test_studio_chat_service_permissions.py",
     "tests/services/test_studio_chat_service_sessions.py",

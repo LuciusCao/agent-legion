@@ -14,14 +14,24 @@ function sessionUrl(workspaceId: string, sessionId: string): string {
   return `${sessionsUrl(workspaceId)}/${encodeURIComponent(sessionId)}`
 }
 
+export type ArchivedStudioChatSessions = {
+  sessions: StudioChatSessionRecord[]
+  /** 实例级对话保留天数（#1041）；0 = 未配置，永不清理、不显示倒计时。 */
+  retentionDays: number
+}
+
 /** 归档视图（#924）：默认会话列表不含已归档会话，这里只取已归档的。
+ * #1041：同一响应带回实例保留天数，归档行倒计时与归档/删除提示据此现算。
  * 独立成模块（studioChatApi.ts / studioChatSessionManageApi.ts 文件预算）。 */
 export function fetchArchivedStudioChatSessions(
   workspaceId: string
-): Promise<StudioChatSessionRecord[]> {
+): Promise<ArchivedStudioChatSessions> {
   return api<SessionsResponse>(
     `${sessionsUrl(workspaceId)}?archived=true`
-  ).then((response) => response.sessions)
+  ).then((response) => ({
+    sessions: response.sessions,
+    retentionDays: response.retention_days,
+  }))
 }
 
 /** 归档（#924，可恢复）：运行中的会话由后端先按「关闭」路径收尾（撤销
