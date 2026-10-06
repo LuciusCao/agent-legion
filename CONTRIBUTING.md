@@ -7,44 +7,99 @@ red lines) — read it before non-trivial changes.
 
 ## Development setup
 
-Prerequisites: Python 3.11+, Node 18+, PostgreSQL 17, and
-[`uv`](https://docs.astral.sh/uv/).
+Prerequisites: Python 3.11+, Node 20+ (Vitest 4 requires it; CI uses 22),
+PostgreSQL 17, [`uv`](https://docs.astral.sh/uv/), a Rust toolchain (builds
+the `velites` binary), Docker (local SeaweedFS object storage; optional —
+without it materials APIs return 503), and `openssl`. On macOS with Homebrew
+`make install` installs whatever is missing; on other platforms install them
+first — `make install` checks each one and fails fast with guidance.
 
 ```bash
-uv sync                                     # Python deps
-createdb agent_legion_dev                   # NOT the bare `agent_legion` name —
-                                            # init_db refuses to migrate that one
-                                            # without AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1
-                                            # (the shared-database schema guard)
-cp .env.example .env                        # adjust values as needed
-export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_dev
-cd frontend && npm install && cd ..
-make dev-up                                 # backend + frontend + worker, background
+make install    # deps, uv sync, agent_legion_dev database, .env with random
+                # local S3 credentials, vault master key, velites build,
+                # frontend deps, worker state copy — idempotent
+make dev-up     # local SeaweedFS + backend :8001 + console :5174 + worker :8789
 ```
 
-See [README.md](README.md) for the full quick start and the demo workflow.
+See [README.md](README.md) for the first-run walkthrough and the demo
+workflow. Additional git worktrees are initialized with
+`scripts/init-worktree.sh` right after creation (copies `.env`, derives a
+per-worktree database and bucket; see AGENTS.md §1), not with `make install`.
+
+### Manual setup (what `make install` does)
+
+Only needed when you want to run the steps by hand; they mirror
+`scripts/install-deps.sh`:
+
+```bash
+uv sync
+createdb agent_legion_dev            # NOT the bare `agent_legion` name — init_db
+                                     # refuses to migrate it without
+                                     # AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1
+cp .env.example .env && chmod 600 .env
+# .env: fill AGENT_LEGION_S3_ACCESS_KEY / AGENT_LEGION_S3_SECRET_KEY
+#       (e.g. `openssl rand -hex 20` / `openssl rand -hex 40`); the local
+#       SeaweedFS container is created with these credentials. The
+#       template's AGENT_LEGION_DATABASE_URL already points at agent_legion_dev.
+mkdir -p deploy/secrets
+uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
+  > deploy/secrets/vault_master_key && chmod 600 deploy/secrets/vault_master_key
+# .env: AGENT_LEGION_VAULT_MASTER_KEY_FILE=<absolute path to that file>
+#       (env-only; without a key, vault writes and secret_ref resolution fail)
+./scripts/ensure-velites.sh --dest data/bin   # build velites (needs cargo)
+./scripts/ensure-frontend-deps.sh             # npm ci when the lockfile changed
+```
+
+`scripts/install-deps.sh` also seeds the worker state copy
+`data/agent-worker-service/worker.yaml`; read its final step for the minimal
+dev values.
+
+## Running the tests for the first time
+
+The edit-test inner loop selects affected backend tests from a local coverage
+index, so build the index once per checkout/worktree (and again after
+dependency or `tests/conftest.py` changes):
+
+```bash
+GATE_TIER=aff-index ./scripts/check-quick-backend.sh   # one-off, a few minutes
+GATE_TIER=aff ./scripts/check-quick.sh                 # inner loop
+```
+
+The test database is derived and created automatically
+(`tests/postgres_support.py`); set `AGENT_LEGION_TEST_DATABASE_URL` only to
+override it. Gate tiers, the machine-wide gate queue, and what CI runs are
+documented in
+[docs/architecture/local-quality-gates.md](docs/architecture/local-quality-gates.md).
 
 ## Before you open a PR
 
-1. Run the affected-test feedback loop while editing:
+1. Run the affected-test feedback loop while editing
+   (`GATE_TIER=aff ./scripts/check-quick.sh`). It selects backend tests from
+   the local coverage index and uses `vitest related` for frontend changes;
+   missing or stale selection evidence falls back to the complete unit tier.
+   An aff pass is feedback, not a merge credential.
 
-   ```bash
-   GATE_TIER=aff ./scripts/check-quick.sh
-   ```
-
-   It selects backend tests from the local coverage index and uses
-   `vitest related` for frontend changes. Missing or stale selection evidence
-   falls back to the complete unit tier. The server-side PR gate remains the
-   merge credential.
-
-2. Optionally install the versioned local hooks (`make install-hooks`):
-   pre-commit runs fast checks, pre-push runs a smoke tier trimmed by the
-   pushed paths. Never bypass them with `--no-verify`.
+2. Install the versioned local hooks once (`make install-hooks`): pre-commit
+   runs the fast gate, pre-push runs the smoke tier trimmed by the pushed
+   paths. Never bypass them with `--no-verify`.
 
 3. The full gate runs on GitHub Actions for every PR
    (`.github/workflows/quality-gate.yml`). The stable `quality-gate` aggregate
    check is the required merge boundary; run `./scripts/check.sh` locally only
    when CI is unavailable or an offline release credential is required.
+
+### PR target branch
+
+- Issue PRs target the current release integration branch
+  `release/<version>` (the newest `release/*` on the remote); the release
+  branch merges into `main` when the version is cut. Ask a maintainer when
+  unsure which release is open.
+- Stacked PRs: express the dependency with the child PR's base branch; fix
+  shared defects in the lowest affected layer first, then merge bottom-up
+  (re-target the child onto the release branch and re-run CI on its new head
+  before merging it). The PR gate only triggers for PRs into trunk and
+  `release/*` branches, so dispatch `quality-gate.yml` manually for a PR
+  whose base is a feature branch.
 
 ## House rules
 
