@@ -448,6 +448,38 @@ def test_get_job_context_reports_other_jobs_failures_on_focus_node(tools_client)
     assert failures[0]["error_message"] == "same boom"
 
 
+def test_get_job_context_recent_failures_bounded_and_excludes_current_job(
+    tools_client,
+) -> None:
+    """#713: recent_failures is bounded by the query (limit + 1 so dropping
+    the current job still leaves a full list), not by slicing every failed
+    run of the workspace."""
+    job_db = tools_client.app.state.job_db
+    _seed_workspace(job_db, "ws-cap")
+    others = [f"job-o{index}" for index in range(7)]
+    for job_id in others:
+        _seed_job(
+            job_db, workspace_id="ws-cap", job_id=job_id, nodes=[("write_script", "failed", "")]
+        )
+        _seed_run(job_db, job_id=job_id, node_key="write_script", error=f"boom {job_id}")
+    _seed_job(
+        job_db, workspace_id="ws-cap", job_id="job-now", nodes=[("write_script", "failed", "")]
+    )
+    _seed_run(job_db, job_id="job-now", node_key="write_script", error="newest")
+    scoped, admin_id = _scoped_client(tools_client, job_db, workspace_id="ws-cap")
+    session_id = job_db.create_studio_chat_session("ws-cap", admin_id, "agent-x")
+
+    response = scoped.get(
+        f"/api/studio-agent/tools/chat-sessions/{session_id}/job-context"
+        "?job_id=job-now&node_key=write_script"
+    )
+
+    assert response.status_code == 200, response.text
+    failures = response.json()["recent_failures"]
+    # finished_at 全 NULL → 按 node_run_id 倒序：最新的 5 个其他 job。
+    assert [f["job_id"] for f in failures] == list(reversed(others))[:5]
+
+
 def test_get_job_context_404_for_cross_workspace_session_or_job(tools_client) -> None:
     job_db = tools_client.app.state.job_db
     _seed_workspace(job_db, "ws-home2")

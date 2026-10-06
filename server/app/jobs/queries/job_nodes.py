@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs.queries.job_bulk_sql import id_chunks
+from server.app.jobs.queries.job_list_columns import JOB_LIST_COLUMNS
 from server.app.jobs.queries.job_node_runs import JobNodeRunQueriesMixin
 from server.app.jobs.storage_layout import job_storage_dir
 from server.app.storage_paths import make_data_relative
@@ -129,7 +130,8 @@ class JobNodeQueriesMixin(JobNodeRunQueriesMixin):
         params.append(max(1, min(limit, 2001)))
         with self._connect_read() as conn:
             rows = conn.execute(
-                f"select * from jobs{where} order by created_at desc limit %s", params
+                f"select {JOB_LIST_COLUMNS} from jobs{where} order by created_at desc limit %s",
+                params,
             )
             return [dict(row) for row in rows]
 

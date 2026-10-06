@@ -209,7 +209,6 @@ describe('WorkspaceMainPage onboarding guide', () => {
     })
     useAgentsStore.setState({
       agents: [],
-      workerPausedByWorkspace: {},
     })
     useUiStore.setState({
       workspacePackageDialogOpen: false,
