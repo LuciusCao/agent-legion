@@ -29,6 +29,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Studio「Agent 助手」的发送 / 取消 / 全部允许加会话归属守卫（issue #962，#917 P2）：动作发起时记下会话 id，请求返回后（成功或失败）与当前选中会话复核，切换会话后旧会话的迟到结果（消息、会话快照、错误提示）不再写进新会话，丢弃时留 `console.warn` 日志；取消按钮与权限卡片的「全部允许」开关另附渲染时的会话 id 作为辅助断言。
+- Studio DAG 再次定位同一节点时镜头不移动（issue #964，#917 P2）：画布点击来源标记改为记录「节点 + 点击时的定位请求 nonce」，每个新定位请求消费即清；受控父组件未采纳点击时残留的标记不再把之后 bump 了 nonce 的外部定位请求误判为画布点击。
+- 顶栏 workspace 运行状态拉取失败不再显示「已暂停」（issue #961，#917 P2）：调度暂停位改为 React Query 缓存单一数据源（移除 zustand 侧的 `workerPausedByWorkspace` 副本及其「未知即已暂停」默认值），首次读取中显示「读取中」（按钮禁用），从未拿到状态且拉取失败时显示「状态未知」（点击重试拉取而非切换调度），后台刷新失败时继续显示上次已知值；暂停/恢复的服务端确认值直接写回缓存，读写排序语义不变。
 - 重复 / 并发的 approval rework 不再先覆盖已提交的反馈产物（issue #963，#929 同族）：rework 的反馈产物（默认 `review_feedback.json`）改为锁外先写 fsync 临时文件、在 job-mutation 锁内状态守卫通过（并完成产物暂存与节点重置）之后才原子换入；迟到的重复决策在守卫处 409，本地反馈文件、对象存储上传与决策历史均保持首个决策的内容。换入、目录 fsync 或提交失败时 DB 与上游产物整笔回滚（gate 仍待审、无决策行、上游产物复原）；但若 `os.replace` 已成功、之后目录 fsync 或提交失败，本地反馈文件会保留这次未提交的内容，与 #951 approve 既有取舍一致，由下一次决策覆盖。
 - 审批决策产物换入后 fsync 目标目录（issue #975，#951 follow-up）：`{node}.approval.json` 与 rework 反馈产物统一经共享的 durable replace（`os.replace` + 父目录 fsync），且目录 fsync 在决策事务提交前完成，主机掉电 / 内核崩溃发生在提交之后时产物目录项不会丢失；目录 fsync 失败时决策事务回滚（gate 仍待审、无决策行），但已换入的本地产物文件会保留未提交内容，由下一次决策覆盖。
 - Worker claim 主循环不再把编程错误误判为 Host 不可用（issue #960，#917 P2）：此前 claim pass 外层 `except Exception` 把任何异常都按「Host 暂时不可用」指数退避重试，Worker 侧真实 bug（TypeError / KeyError 等）被吞成无限退避、日志只有一行 `Agent claim error … retrying`，排障方向被误导到网络。现收窄为传输错误（requests 族，含 `TransientHostError`）与新增的 `HostResponseError`（Host 应答非 200 状态，或 200 但 body 不可解码 / 不合契约，例如中间代理返回的 HTML 或 `{"error": ...}` JSON、`claims` 缺失或非列表、claim 项缺 `execution_id` / `node_key`）——这两族照旧退避；其余异常原样上抛，执行进程停池后以非 0 退出、traceback 进面板日志，由 supervisor 的崩溃重启策略接管（短时间内反复崩溃即自动关闭认领，待人工排查）。与 Worker 注册重试的异常族收窄同一做法。Host 侧应答行为与协议不变。

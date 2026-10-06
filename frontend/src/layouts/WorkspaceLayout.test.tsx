@@ -93,7 +93,10 @@ describe('WorkspaceLayout', () => {
     fetchWorkerStatusMock.mockClear()
     setWorkspacePackageDialogOpenMock.mockClear()
     setTokenUsageDialogOpenMock.mockClear()
-    fetchWorkerStatusMock.mockResolvedValue(undefined)
+    fetchWorkerStatusMock.mockResolvedValue({
+      paused: false,
+      superseded: false,
+    })
     authState.user = { role: 'admin' }
   })
 
@@ -173,9 +176,9 @@ describe('WorkspaceLayout', () => {
     expect(header!.classList.contains(appBarStyles.scrolled)).toBe(true)
   })
 
-  it('renders the run/pause control in the app bar', () => {
+  it('renders the run/pause control in the app bar', async () => {
     renderLayout()
-    expect(screen.getByLabelText('暂停运行')).toBeInTheDocument()
+    expect(await screen.findByLabelText('暂停运行')).toBeInTheDocument()
   })
 
   it('opens workspace package history dialog from the more menu', () => {
