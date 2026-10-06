@@ -1231,6 +1231,9 @@ invariants:
       - kind: integration
         target: tests/services/test_agent_broker_replay_profile.py
         gate: quick
+      - kind: contract
+        target: tests/workers/test_agent_claim_replay_manifest.py
+        gate: quick
   - id: DB-ARTIFACT-GC-001
     statement: "An artifact blob is reclaimed only when its catalog row has zero artifact_refs and is older than the in-flight grace window. The orphan GC covers what job-deletion GC cannot see (zero-ref rows from lost result reports, crashed Workers, pre-claim cleanups): it scans the whole catalog keyset-paginated, delegates deletion to delete_unreferenced (transactional refcount + grace re-check, blob unlink after commit), and is driven hourly by the sweeper-owning replica or manually via scripts/gc_artifacts.py (dry-run default)."
     owner: jobs
