@@ -370,17 +370,17 @@ exemptions:
   reason: Studio chat session events are a Server-Sent Events stream (StreamingResponse, text/event-stream),
     same shape as the workspace job events route; there is no JSON response model to name.
   owner: workspace-executor
-  remove_when: docs/architecture/studio-phase3-implementation-plan.md
+  remove_when: docs/architecture/backend.md#agent-worker-协议响应形态response-model-豁免的依据
 - check: architecture.route_response_model
   path: server/app/routes/agent_workers.py:result
   reason: Agent Worker result acknowledgement returns an empty 204 response by protocol.
   owner: workspace-executor
-  remove_when: docs/architecture/backend.md#agent-worker-protocol-responses
+  remove_when: docs/architecture/backend.md#agent-worker-协议响应形态response-model-豁免的依据
 - check: architecture.route_response_model
   path: server/app/routes/agent_workers.py:release_slot
   reason: Agent Worker release-slot acknowledgement returns an empty 204 response by protocol.
   owner: workspace-executor
-  remove_when: docs/architecture/backend.md#agent-worker-protocol-responses
+  remove_when: docs/architecture/backend.md#agent-worker-协议响应形态response-model-豁免的依据
 - check: architecture.file_budget
   path: frontend/src/components/dag/dagNodeTypes.ts
   reason: 'The hover-highlight rework (#276) adds the two data-level boolean fields (active/dimmed)
