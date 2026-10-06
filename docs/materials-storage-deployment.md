@@ -42,9 +42,10 @@ gzip 对象的上传下载对后端完全透明。`Content-Encoding: gzip` 响�
 |---|---|---|
 | 服务 | compose `seaweedfs`（默认，挂 `materials-local` profile）/ compose `rustfs`（逃生舱，挂 `materials-local-rustfs` profile） | 两者均在 `deploy/compose.host.yaml`。seaweedfs：S3 API `:8333`、master UI `:9333`，数据卷 `seaweedfs-data`；rustfs：S3 API `:9000`、console `:9001`，数据卷 `rustfs-data`。默认 `docker compose up` 不拉起，由 prod-up 入口按 `AGENT_LEGION_LOCAL_S3` 决策后加对应 `--profile` |
 | `AGENT_LEGION_LOCAL_S3_BACKEND` | `seaweedfs`（默认）/ `rustfs` | 本地后端选择（#340）。切 rustfs 时同步覆盖 `AGENT_LEGION_S3_ENDPOINT=http://rustfs:9000` 与 `AGENT_LEGION_S3_PUBLIC_ENDPOINT=http://127.0.0.1:9000`；非法值 fail-fast |
-| `AGENT_LEGION_LOCAL_S3` | `auto`（默认）/ `always` / `never` | 本地对象存储三态开关，判断逻辑见 `scripts/local-s3-decide.sh`（所有 prod-up / stack 入口共用）。`auto`：endpoint 指向本机或未配置任何 S3 → 启动；endpoint 远程，或只配 bucket/凭据不配 endpoint（AWS 默认端点写法）→ 跳过并打一行原因日志 |
+| `AGENT_LEGION_LOCAL_S3` | `auto`（默认）/ `always` / `never` | 本地对象存储三态开关，判断逻辑见 `scripts/local-s3-decide.sh`（`make prod-up [docker]`、`make dev-up` 与底层 `make stack-host-up` 共用；各入口对决策失败的处理不同，见下文）。`auto`：endpoint 指向本机或未配置任何 S3 → 启动；endpoint 远程，或只配 bucket/凭据不配 endpoint（AWS 默认端点写法）→ 跳过并打一行原因日志 |
 | `AGENT_LEGION_S3_ENDPOINT` | docker stack 默认注入 `http://seaweedfs:8333`（可在 `deploy/.env` 覆盖；显式空值 = AWS S3 默认端点） | 后端直连地址；远程地址会让 `auto` 跳过本地后端。存量 rustfs 用户的 endpoint 仍指向 `http://rustfs:9000` 时，decide 脚本会提示显式配 `AGENT_LEGION_LOCAL_S3_BACKEND=rustfs` |
-| `AGENT_LEGION_S3_PUBLIC_ENDPOINT` | compose 默认 `http://127.0.0.1:8333` | presigned URL 的签发地址，必须浏览器 / remote worker 可达；留空则回落用内部 endpoint 签发。SigV4 把 Host 签进签名，签后不可改写——切后端时务必与实际服务的端口一致 |
+| `AGENT_LEGION_S3_PUBLIC_ENDPOINT` | compose 默认 `http://127.0.0.1:8333` | presigned URL 的签发地址，必须浏览器 / remote worker 可达；留空则回落用内部 endpoint 签发。SigV4 把 Host 签进签名，签后不可改写——切后端时务必与实际服务的端口一致；不能写 compose 服务名（如 `http://seaweedfs:8333`），宿主机外与隔离网络里的 worker 都解析不到 |
+| `AGENT_LEGION_S3_BIND` | 默认 `127.0.0.1` | 本地后端端口（seaweedfs `8333`/`9333`，rustfs `9000`/`9001`）在宿主机上的发布地址，两种 prod 形态都生效（端口发布始终由 compose 托管）。默认只有本机可达：远程 Worker 或其他设备的浏览器要访问时，设为部署机的 LAN / Tailnet 地址（或 `0.0.0.0`），并把 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向同一地址。设为具体 IP 后 `127.0.0.1` 映射消失：原生形态后端进程用的 `AGENT_LEGION_S3_ENDPOINT`（根 `.env`，默认 `http://127.0.0.1:8333`）要同步改成该地址，或改用 `0.0.0.0` 保住 loopback；docker 形态 host 走 compose 内网 `seaweedfs:8333`，不受影响。写在 `deploy/.env` |
 | `AGENT_LEGION_S3_BUCKET` | 默认 `agent-legion` | 每个部署实例一个 bucket；dev worktree 派生 `agent-legion-<worktree>` |
 | `AGENT_LEGION_S3_ACCESS_KEY` / `AGENT_LEGION_S3_SECRET_KEY` | 本地后端形态必填；外部 S3 走默认凭据链时留空 | compose 只做 `${}` 字面插值，`deploy/.env` 必须写字面值；`_FILE` 变体仅原生形态可用。compose 同时把它注入本地后端容器作为其 root 凭据 |
 | `AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES` | 默认 50GiB | 节点物化缓存（`data/materials_cache/`）容量上限，LRU 淘汰 |
@@ -54,9 +55,11 @@ tracked yaml、DB、API 或日志（MATERIAL-SECRET-001）。
 
 未配置 `AGENT_LEGION_S3_BUCKET` 时服务整体照常启动，只有 materials/runs
 上传相关 API 返回 503（优雅降级）。**Docker 形态下决策为启动本地后端
-但凭据未配齐时，prod-up 入口（`scripts/local-s3-decide.sh`）fail-fast**
-——两个后端留空凭据都会回落镜像默认的公开凭据，必须拦住；部署前先配好
-`deploy/.env`。
+但凭据未配齐时，`make prod-up docker`（`scripts/stack-prod-up.sh` 调
+`scripts/local-s3-decide.sh`）fail-fast**——两个后端留空凭据都会回落镜像
+默认的公开凭据，必须拦住；部署前先配好 `deploy/.env`。底层的
+`make stack-host-up` 把 decide 放在命令替换里、退出码被吞，凭据缺失时不会
+拦住，只会静默不带本地后端启动，部署一律走 `make prod-up docker`。
 
 ## 2. 开发形态（make install / make dev-up）
 
@@ -117,17 +120,16 @@ chmod 600 deploy/.env
 echo 'AGENT_LEGION_S3_PUBLIC_ENDPOINT=http://<宿主机地址>:8333' >> deploy/.env
 ```
 
-（原生形态 `make prod-up` 的后端/worker 是本机进程，不经 compose：把同名
-变量写进 prod worktree 根的 `.env`——原生加载支持 `_FILE` 变体；注意
-compose 插值只读 `deploy/.env`，本地后端容器的 root 凭据以 `deploy/.env`
-为准，两处要写同一组值。本地后端容器不用手工起：`native-prod-up.sh` 经
-`scripts/local-s3-decide.sh` 决策后自动按
-`AGENT_LEGION_LOCAL_S3_BACKEND`（默认 seaweedfs）执行
-`docker compose -f deploy/compose.host.yaml up -d <seaweedfs|rustfs>`
-（幂等；docker 不可用或启动失败仅告警，材料 API 降级为 503，其余功能
+（原生形态 `make prod-up` 的后端/worker 是本机进程，不经 compose：同名
+变量**只写 prod worktree 根的 `.env` 一份**——原生加载支持 `_FILE` 变体。
+本地后端容器不用手工起，也不用在 `deploy/.env` 重复凭据：`native-prod-up.sh`
+经 `scripts/local-s3-decide.sh` 决策为启动时，把根 `.env` 的凭据经子进程
+环境注入 `docker compose -f deploy/compose.host.yaml up -d <seaweedfs|rustfs>`
+（#624；幂等，docker 不可用或启动失败仅告警，材料 API 降级为 503，其余功能
 不受影响）。原生形态的 `AGENT_LEGION_S3_ENDPOINT` 默认指向
 `http://127.0.0.1:8333`（rustfs 逃生舱为 `:9000`），
-`AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向浏览器 / remote worker 可达的地址。）
+`AGENT_LEGION_S3_PUBLIC_ENDPOINT` 指向浏览器 / remote worker 可达的地址；
+端口发布地址仍由 `deploy/.env` 的 `AGENT_LEGION_S3_BIND` 控制，见 §1。）
 
 ### 3.1.1 使用外部对象存储（AWS S3 / MinIO / Garage）
 
@@ -155,89 +157,69 @@ git pull
 make prod-up            # 或 make prod-up docker
 ```
 
-首次启动本地后端后创建 bucket（一次性；dev 环境由 `init-worktree.sh`
-自动完成）：
+prod 入口只负责把本地后端容器带起来，**不建 bucket**（dev 环境由
+`init-worktree.sh` / `make dev-up` 自动完成）。首次启动后用
+`scripts/ensure-s3-bucket.py` 建 bucket 并配置浏览器直传 CORS——它幂等，
+已存在的 bucket 与已有 CORS 规则都保留，可随时重跑：
 
 ```bash
-cd <repo root>
-UV_CACHE_DIR=.uv-cache uv run python - <<'EOF'
-import boto3
-from botocore.exceptions import ClientError
-from server.app.storage import load_s3_settings
+# 原生形态：读根 .env 的 AGENT_LEGION_S3_*（endpoint 默认 http://127.0.0.1:8333）
+PYTHONPATH=. UV_CACHE_DIR=.uv-cache uv run python scripts/ensure-s3-bucket.py .env
 
-s = load_s3_settings()  # 读 .env 中的 AGENT_LEGION_S3_*
-kwargs = {"region_name": s.region}
-if s.endpoint_url:
-    kwargs["endpoint_url"] = s.endpoint_url
-if s.access_key:
-    kwargs.update(aws_access_key_id=s.access_key, aws_secret_access_key=s.secret_key)
-client = boto3.client("s3", **kwargs)
+# Docker 形态：在 host 容器里跑，直接用容器环境里 compose 注入的 endpoint
+# （compose 内网 http://seaweedfs:8333）与凭据；镜像里没有 .env，脚本跳过加载
+docker compose -f deploy/compose.host.yaml exec -T host python scripts/ensure-s3-bucket.py
+```
+
+Docker 形态也可以在宿主机上跑，但 `deploy/.env` 通常不含 endpoint（它由
+compose 注入），必须用进程环境显式给出宿主机侧的发布地址，否则脚本会按
+「endpoint 为空 = AWS 默认端点」去连 AWS：
+`AGENT_LEGION_S3_ENDPOINT=http://127.0.0.1:8333 uv run python scripts/ensure-s3-bucket.py deploy/.env`
+（`AGENT_LEGION_S3_BIND` 改过时换成对应地址）。
+
+**prod 页面的 CORS origin**：脚本只放行前端 dev server 的 origin
+（`5173` / `5174` / `DEV_FRONTEND_PORT` 的 `127.0.0.1` 与 `localhost`
+两种写法）。prod 前端由 Host 在 `:8000` 提供，浏览器直传的 origin 是用户
+实际访问 Host 的地址（如 `http://192.0.2.1:8000`），需要额外追加一条规则
+（与已有规则合并，重跑 `ensure-s3-bucket.py` 不会删掉它）：
+
+```bash
+# Docker 形态；原生形态把第一行换成
+#   ORIGIN=http://<部署机地址>:8000 PYTHONPATH=. uv run --env-file .env python - <<'EOF'
+docker compose -f deploy/compose.host.yaml exec -T -e ORIGIN=http://<部署机地址>:8000 host python - <<'EOF'
+import os, boto3
+from server.app.storage import load_s3_settings
+s = load_s3_settings()
+c = boto3.client("s3", region_name=s.region, endpoint_url=s.endpoint_url or None,
+                 aws_access_key_id=s.access_key or None, aws_secret_access_key=s.secret_key or None)
+origin = os.environ["ORIGIN"]
 try:
-    client.head_bucket(Bucket=s.bucket)
-    print("bucket 已存在")
-except ClientError:
-    client.create_bucket(Bucket=s.bucket)
-    print(f"已创建 bucket: {s.bucket}")
-# 浏览器直传要求 bucket CORS 放行前端 origin 的 PUT/GET 并暴露 ETag；
-# AllowedOrigins 按实际前端地址调整（prod 页面与 rustfs 不同源）。
-client.put_bucket_cors(
-    Bucket=s.bucket,
-    CORSConfiguration={"CORSRules": [{
-        "AllowedOrigins": ["http://127.0.0.1:8000"],
-        "AllowedMethods": ["PUT", "GET", "HEAD"],
-        "AllowedHeaders": ["*"],
-        "ExposeHeaders": ["ETag"],
-        "MaxAgeSeconds": 3600,
-    }]},
-)
-print("已配置 bucket CORS")
+    rules = c.get_bucket_cors(Bucket=s.bucket)["CORSRules"]
+except c.exceptions.ClientError:
+    rules = []
+if not any(origin in r.get("AllowedOrigins", []) for r in rules):
+    rules.append({"AllowedOrigins": [origin], "AllowedMethods": ["PUT", "GET", "HEAD"],
+                  "AllowedHeaders": ["*"], "ExposeHeaders": ["ETag"], "MaxAgeSeconds": 3600})
+    c.put_bucket_cors(Bucket=s.bucket, CORSConfiguration={"CORSRules": rules})
+print([r["AllowedOrigins"] for r in rules])
 EOF
 ```
 
-（等价地也可用 `aws s3 mb s3://<bucket> --endpoint-url <本地后端地址>`。）
-
 ### 3.3 启动后检查
 
-- 后端启动时自动执行 schema 迁移（`job_batches` → `runs`，旧 payload
-  解析下沉到 jobs）。**存量 jobs 较多时迁移 UPDATE 可能耗时数分钟，
-  务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
-  会继续。
-- 当前 schema 版本以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准
-  （目前 v92）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
-  v55（`material_bundles`）、v56（`job_node_status_counts` 触发器维护的
-  状态计数）、v57（`studio_chat_sessions.draft_yaml`）、v58（scoped worker
-  token——撤销存量全局 register token，行为变更）、v61（Studio workflow
-  草稿表）、v62（workspace id 与 workflow key 绑定，存量 id 重命名）、
-  v63（产物预览隐藏列表）、v64（workspace 级 Agent 默认配置三列退役
-  drop）、v65（`approval_decisions` 人工审批审计表）、v66（workflow 节点
-  显式类型 `code`/`agent`，数据归一）、v68/v70（workflow_key 列对齐与
-  退役 DDL，#211 Phase 3）、v71（预览面板实体类型）、v72/v78/v80/v81
-  （`ops_runtime_profile_samples` 执行管线观测列族）、v73/v77/v82
-  （job 状态计数：行触发器 → 语句级聚合 → advisory-lock delta fold，
-  #437/#659 死锁根治线）、v76（`studio_publish_requests` 发布握手表）、
-  v79（shard 感知的唯一活跃请求索引）、v83（studio_chat_sessions
-  上下文健康观测列，#694）、v84（workspace-scoped API intake token，
-  #626）、v85（`execution_generation` 执行代次列族，#759——全部重置
-  入口的 CAS 纪元）、v86（`node_runs.agent_definition_hash` 实现身份
-  镜像，#645）、v87（`agent_workers.claim_enabled` Worker 自报的领取
-  开关列，主控制台据此区分「在线·未领取」）、v88（job 节点状态计数改为
-  v82 同款 try-lock delta fold，#690）、v89（`studio_chat_sessions.deleted_at`
-  会话软删列，#872）、v90（`studio_chat_sessions.archived_at` 会话
-  归档列，#924）、v91（删除冗余的 workspace workflow key 列与质量抽样
-  批次的 key 镜像列——workspace id 即 workflow key，#211 M3；有守卫、幂等）、v92（`agent_execution_requests` 的 `profile_source` /
-  `runtime` / `requires_labels_json` 执行档案来源列，自含 agent 节点双读，
-  #933）。v59（`jobs(run_id)` 索引）与
-  v60（register token ids 列）与本部署面无直接关系。
-  迁移明细以 `server/app/db/migration_chain.py`（v87 起在
-  `migration_chain_recent.py`）为准。
+- 后端启动时在 PostgreSQL advisory 迁移锁下自动执行 schema 迁移；当前版本
+  以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准（目前 v92）——该数字由
+  `scripts/architecture/docs_consistency.py` 与代码对账，迁移链在
+  `server/app/db/migration_chain.py`（及其 `migration_chain_recent.py`）。
+  升级前先备份数据库，见 [postgresql-runbook.md](postgresql-runbook.md)。
 - bundle 条目（文件夹整体一个条目）复用同一 bucket 与材料缓存，无额外
   存储配置。
 - 上传一个文件验证闭环：`POST /api/workspaces/{id}/materials/presign`
   → PUT → `complete`，材料状态变 `ready`。
 - 恢复 workspace 调度（后端每次启动都会把全部 scope 重置为 paused，
-  `server/app/worker_control.py`）：经控制台或 init 脚本恢复。
-- worker 的 `claim_enabled` 默认关闭，经 worker 控制台或
-  `PUT /api/config` 打开。
+  `server/app/worker_control.py`）：经控制台或 `scripts/resume-workspaces.sh` 恢复。
+- worker 的 `claim_enabled` 默认关闭，打开方式见
+  [agent-worker-deployment.md §5](agent-worker-deployment.md#5-启动-worker-机器上的-worker)。
 
 ## 4. 运维
 
