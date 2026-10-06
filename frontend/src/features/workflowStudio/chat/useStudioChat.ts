@@ -269,8 +269,8 @@ export function useStudioChat(workspaceId: string | undefined) {
     })
   }
 
-  const { toolCalls, workflowDraft, agentDrafts, nodeDrafts, permissions } =
-    useMemo(() => deriveChatViews(messages), [messages])
+  const views = useMemo(() => deriveChatViews(messages), [messages])
+  const { toolCalls, workflowDraft, nodeDrafts, permissions } = views
   // #675：取消轮收尾视图在姊妹文件（studioChatCancelVisibility），与
   // deriveChatViews 的派生链分开 memo——它只被 RunBar 消费。
   const runCancelled = useMemo(() => lastRunCancelled(messages), [messages])
@@ -331,7 +331,6 @@ export function useStudioChat(workspaceId: string | undefined) {
     messages,
     toolCalls,
     workflowDraft,
-    agentDrafts,
     nodeDrafts,
     permissions,
     busy,

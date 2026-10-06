@@ -3,7 +3,7 @@ import type { ChatMessage } from './studioChatMessages'
 import { lastRunCancelled, stopReason } from './studioChatCancelVisibility'
 import {
   buildPermissionViews,
-  extractAgentDefinitionDrafts,
+  deriveChatViews,
   extractNodeCodeDrafts,
   extractWorkflowDraft,
   groupToolCalls,
@@ -164,48 +164,20 @@ describe('extractWorkflowDraft', () => {
   })
 })
 
-describe('agent / node draft extraction', () => {
-  it('extracts agent definition drafts', () => {
-    const calls = groupToolCalls([
-      toolCall('t1', {
-        title: 'save_agent_definition_draft',
-        status: 'completed',
-        rawInput: {
-          agent_id: 'assess_agent',
-          capability: 'assess',
-          runtime: 'velites',
-          skill: 'assess_comprehension_difficulty',
-        },
-      }),
-    ])
-    const drafts = extractAgentDefinitionDrafts(calls)
-    expect(drafts).toHaveLength(1)
-    expect(drafts[0].agentId).toBe('assess_agent')
-    expect(drafts[0].runtime).toBe('velites')
-    expect(drafts[0].status).toBe('completed')
-  })
-
-  // #935（#440 P3，D3）：deprecated 的 Agent 定义写工具只返回引导文本、
-  // 不写库——卡片按保存失败呈现，不提供发布入口。
-  it('marks a deprecated agent definition save as failed', () => {
-    const calls = groupToolCalls([
+describe('node draft extraction', () => {
+  // #1079（#440 P3b）：Agent 定义草稿卡已下线——save_agent_definition_draft
+  // 的 tool call 只剩通用卡，不再派生草稿视图。
+  it('derives no draft view from agent definition saves', () => {
+    const messages = [
       toolCall('t1', {
         title: 'save_agent_definition_draft',
         status: 'completed',
         rawInput: { agent_id: 'assess_agent', runtime: 'velites' },
-        rawOutput: {
-          content: [
-            {
-              type: 'text',
-              text: 'DEPRECATED (#440): Agent definitions no longer supply node execution profiles',
-            },
-          ],
-        },
       }),
-    ])
-    const [draft] = extractAgentDefinitionDrafts(calls)
-    expect(draft.saveFailed).toBe(true)
-    expect(draft.draftHash).toBeNull()
+    ]
+    const views = deriveChatViews(messages)
+    expect(views.nodeDrafts).toEqual([])
+    expect(Object.keys(views)).not.toContain('agentDrafts')
   })
 
   it('extracts node code drafts', () => {
@@ -236,9 +208,9 @@ describe('agent / node draft extraction', () => {
   it('draft views carry the tool call status even when pending or failed', () => {
     const calls = groupToolCalls([
       toolCall('t1', {
-        title: 'save_agent_definition_draft',
+        title: 'save_node_code_draft',
         status: 'failed',
-        rawInput: { agent_id: 'assess_agent' },
+        rawInput: { node_key: 'fetch_url' },
       }),
       toolCall('t2', {
         title: 'save_node_code_draft',
@@ -246,8 +218,11 @@ describe('agent / node draft extraction', () => {
         rawInput: { node_key: 'assess_difficulty' },
       }),
     ])
-    expect(extractAgentDefinitionDrafts(calls)[0].status).toBe('failed')
-    expect(extractNodeCodeDrafts(calls)[0].status).toBe('pending')
+    const drafts = extractNodeCodeDrafts(calls)
+    expect(drafts.find((d) => d.nodeKey === 'fetch_url')!.status).toBe('failed')
+    expect(drafts.find((d) => d.nodeKey === 'assess_difficulty')!.status).toBe(
+      'pending'
+    )
   })
 
   // #692 codex P1（第二轮）：同一实体连续保存只保留最新一张卡——发布
@@ -255,16 +230,6 @@ describe('agent / node draft extraction', () => {
   // 无提示地发布另一份（更新的）草稿。
   it('keeps only the latest draft card per entity across repeated saves', () => {
     const calls = groupToolCalls([
-      toolCall('t1', {
-        title: 'save_agent_definition_draft',
-        status: 'completed',
-        rawInput: { agent_id: 'assess_agent', runtime: 'velites' },
-      }),
-      toolCall('t2', {
-        title: 'save_agent_definition_draft',
-        status: 'completed',
-        rawInput: { agent_id: 'assess_agent', runtime: 'pi' },
-      }),
       toolCall('t3', {
         title: 'save_node_code_draft',
         status: 'completed',
@@ -281,20 +246,7 @@ describe('agent / node draft extraction', () => {
         rawInput: { node_key: 'other_node' },
       }),
     ])
-    // 每实体一张：assess_agent 是 t2（最新，runtime 已变）；节点两个
-    // key 各一张，assess_difficulty 是 t4。
-    expect(extractAgentDefinitionDrafts(calls)).toEqual([
-      {
-        toolCallId: 't2',
-        agentId: 'assess_agent',
-        capability: null,
-        runtime: 'pi',
-        skill: null,
-        status: 'completed',
-        draftHash: null,
-        saveFailed: false,
-      },
-    ])
+    // 节点两个 key 各一张，assess_difficulty 是 t4（最新）。
     const nodeDrafts = extractNodeCodeDrafts(calls)
     expect(nodeDrafts).toHaveLength(2)
     expect(
@@ -333,23 +285,10 @@ describe('agent / node draft extraction', () => {
   })
 
   // #692 codex P1（第三轮）：draft view 携带保存响应返回的草稿身份
-  // hash（rawOutput 的响应体 JSON：agent=definition_hash / code=code_hash），
-  // 发布前与服务端当前草稿比对。响应不可解析的旧转录为 null。
+  // hash（rawOutput 的响应体 JSON 的 code_hash），发布时交服务端原子
+  // 核对。响应不可解析的旧转录为 null。
   it('draft views carry the draft hash parsed from the save response', () => {
     const calls = groupToolCalls([
-      toolCall('t1', {
-        title: 'save_agent_definition_draft',
-        status: 'completed',
-        rawInput: { agent_id: 'writer' },
-        rawOutput: {
-          content: [
-            {
-              type: 'text',
-              text: '{"id":"v2","version":2,"status":"draft","definition_hash":"dh-1","created_by":"u","created_at":"2026-01-01T00:00:00Z"}',
-            },
-          ],
-        },
-      }),
       toolCall('t2', {
         title: 'save_node_code_draft',
         status: 'completed',
@@ -370,7 +309,6 @@ describe('agent / node draft extraction', () => {
         rawOutput: { content: [{ type: 'text', text: '草稿已保存' }] },
       }),
     ])
-    expect(extractAgentDefinitionDrafts(calls)[0].draftHash).toBe('dh-1')
     expect(
       extractNodeCodeDrafts(calls).find((d) => d.nodeKey === 'fetch_url')!
         .draftHash
@@ -385,29 +323,28 @@ describe('agent / node draft extraction', () => {
   // R3 P2-3：去重的保序前提——消息乱序喂入（SSE 增量补齐形态）时
   // upsertMessage 按 seq 整理，去重必须取 seq 较大的保存。
   it('dedup picks the higher-seq save even when messages arrive out of order', () => {
-    // 有意乱序构造：先喂 seq 大的消息，upsertMessage 应把它排到后面？
-    // 不——upsertMessage 插入即整体按 seq 排序，所以数组序恒 == seq
-    // 序；这里直接验证「seq 序 == 数组序」前提下去重取后者。
+    // upsertMessage 插入即整体按 seq 排序，所以数组序恒 == seq 序；
+    // 这里直接验证「seq 序 == 数组序」前提下去重取后者。
     const early = message('tool_call', 'agent', {
       id: 'm-early',
       toolCallId: 't1',
-      title: 'save_agent_definition_draft',
+      title: 'save_node_code_draft',
       status: 'completed',
-      rawInput: { agent_id: 'writer' },
+      rawInput: { node_key: 'writer' },
     })
     early.seq = 3
     const late = message('tool_call', 'agent', {
       id: 'm-late',
       toolCallId: 't2',
-      title: 'save_agent_definition_draft',
+      title: 'save_node_code_draft',
       status: 'completed',
-      rawInput: { agent_id: 'writer' },
+      rawInput: { node_key: 'writer' },
     })
     late.seq = 7
     // 乱序喂入：late 先进列表
     let messages = upsertMessage([early], late)
     if (!messages) messages = [early, late].sort((a, b) => a.seq - b.seq)
-    const drafts = extractAgentDefinitionDrafts(groupToolCalls(messages))
+    const drafts = extractNodeCodeDrafts(groupToolCalls(messages))
     expect(drafts).toHaveLength(1)
     expect(drafts[0].toolCallId).toBe('t2')
   })

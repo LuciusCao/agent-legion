@@ -1,9 +1,7 @@
-import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { fetchAgentDefinitions } from '../../../api/agentDefinitions'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
-import { useStudioNav } from '../shared/useStudioNavState'
 import type { AgentListItem } from '../../../types'
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 
@@ -58,33 +56,16 @@ function draftAgentFromListItem(item: AgentListItem): AgentDefinition | null {
 }
 
 /** 按 capability 解析节点绑定的 Agent：published 目录优先，查不到时回落
- * draft 列表。openAgent 的 pendingAgentId 优先命中并在解析后清除（codex
- * P1 on #391：同 capability 允许存在多个未发布草稿，保留用户点击的草稿
- * 身份，避免打开/发布成另一个草稿）。清除绑定「数据 settle + 命中确认或
- * 证伪」：列表还在加载（缓存滞后于 turn_end 失效重取）时保留 pending，
- * 命中同 capability 草稿或数据已 settle 仍未命中（草稿已删/跨 capability）
- * 才清除，避免竞态窗口内身份丢失（subagent review P2-1 on #391）。
- * isDraft 标记回落命中（该 capability 无 published 版本）。 */
+ * draft 列表。isDraft 标记回落命中（该 capability 无 published 版本）。 */
 export function useCapabilityAgent(props: {
   node: { capability: string }
   agentCatalog: AgentDefinition[]
 }) {
   const { workspaceId } = useParams<{ workspaceId: string }>()
-  const { agents, settled } = useAgentDefinitions(workspaceId)
-  const nav = useStudioNav()
+  const { agents } = useAgentDefinitions(workspaceId)
   const capability = props.node.capability
   const published = props.agentCatalog.find((a) => a.capability === capability)
-  // pending 为 null 时 find 不命中（undefined），等价于无偏好。
-  const preferred = agents.find((a) => a.agent_id === nav.pendingAgentId)
-  const preferredHit = preferred?.capability === capability
-  useEffect(() => {
-    // 清除绑定「数据 settle + 命中确认/证伪」，避免缓存滞后窗口丢身份。
-    if (nav.pendingAgentId && (preferredHit || settled))
-      nav.clearPendingAgentId()
-  }, [nav, preferredHit, settled])
-  const draftItem = preferredHit
-    ? preferred
-    : agents.find((a) => a.capability === capability)
+  const draftItem = agents.find((a) => a.capability === capability)
   const draft = draftItem ? draftAgentFromListItem(draftItem) : null
   return {
     agent: published ?? draft ?? undefined,

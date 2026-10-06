@@ -6,8 +6,6 @@ import { useSettingStore } from '../../../stores/settingStore'
 import { fetchAgentDefinitions } from '../../../api/agentDefinitions'
 import type { WorkflowNodeRecord } from '../../../types'
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
-import type { StudioNav } from '../shared/workflowStudioNav'
-import { StudioNavContext } from '../shared/useStudioNavState'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
 
 vi.mock('../../../api/agentCatalogApi', () => ({
@@ -90,13 +88,6 @@ const settledSettle = {
   definitionsFailed: false,
 }
 
-// 组件经 useStudioNav 读 openAgent 的目标草稿身份：默认无 pending。
-const navStub: StudioNav = {
-  openAgent: () => {},
-  pendingAgentId: null,
-  clearPendingAgentId: () => {},
-}
-
 function renderSection(
   props: Omit<
     React.ComponentProps<typeof WorkflowNodeExecutionSection>,
@@ -107,8 +98,7 @@ function renderSection(
         React.ComponentProps<typeof WorkflowNodeExecutionSection>,
         'agentCatalogSettle'
       >
-    >,
-  nav: StudioNav = navStub
+    >
 ) {
   return render(
     <MemoryRouter initialEntries={['/workspaces/ws1/studio']}>
@@ -116,7 +106,7 @@ function renderSection(
         <Route
           path="/workspaces/:workspaceId/studio"
           element={
-            <StudioNavContext.Provider value={nav}>
+            <>
               {/* #426 review P2：默认两份查询均 settle（本套件聚焦 section
                   分发，加载/错误占位的组合逻辑由 agentBindingStatus.test.ts
                   与 WorkflowNodeAgentEditor.test.tsx 覆盖）。 */}
@@ -124,7 +114,7 @@ function renderSection(
                 agentCatalogSettle={settledSettle}
                 {...props}
               />
-            </StudioNavContext.Provider>
+            </>
           }
         />
       </Routes>

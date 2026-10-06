@@ -114,7 +114,6 @@ export function StudioChatMessageList(props: Props) {
               }
               draftAnchorId={draftAnchorId}
               workflowDraft={chat.workflowDraft}
-              agentDrafts={chat.agentDrafts}
               nodeDrafts={chat.nodeDrafts}
               allowAllPermissions={chat.session?.allow_all_permissions ?? false}
               permissionDisabled={

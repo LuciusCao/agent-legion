@@ -4,10 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from '../../../testing/TestMemoryRouter'
 import { useSettingStore } from '../../../stores/settingStore'
 import { fetchAgentDefinitions } from '../../../api/agentDefinitions'
-import type { AgentListResponse, WorkflowNodeRecord } from '../../../types'
+import type { WorkflowNodeRecord } from '../../../types'
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
-import type { StudioNav } from '../shared/workflowStudioNav'
-import { StudioNavContext } from '../shared/useStudioNavState'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
 
 vi.mock('../../../api/agentCatalogApi', () => ({
@@ -90,13 +88,6 @@ const settledSettle = {
   definitionsFailed: false,
 }
 
-// 组件经 useStudioNav 读 openAgent 的目标草稿身份：默认无 pending。
-const navStub: StudioNav = {
-  openAgent: () => {},
-  pendingAgentId: null,
-  clearPendingAgentId: () => {},
-}
-
 function renderSection(
   props: Omit<
     React.ComponentProps<typeof WorkflowNodeExecutionSection>,
@@ -107,8 +98,7 @@ function renderSection(
         React.ComponentProps<typeof WorkflowNodeExecutionSection>,
         'agentCatalogSettle'
       >
-    >,
-  nav: StudioNav = navStub
+    >
 ) {
   return render(
     <MemoryRouter initialEntries={['/workspaces/ws1/studio']}>
@@ -116,7 +106,7 @@ function renderSection(
         <Route
           path="/workspaces/:workspaceId/studio"
           element={
-            <StudioNavContext.Provider value={nav}>
+            <>
               {/* #426 review P2：默认两份查询均 settle（本套件聚焦 section
                   分发，加载/错误占位的组合逻辑由 agentBindingStatus.test.ts
                   与 WorkflowNodeAgentEditor.test.tsx 覆盖）。 */}
@@ -124,7 +114,7 @@ function renderSection(
                 agentCatalogSettle={settledSettle}
                 {...props}
               />
-            </StudioNavContext.Provider>
+            </>
           }
         />
       </Routes>
@@ -208,7 +198,7 @@ describe('WorkflowNodeExecutionSection', () => {
           <Route
             path="/workspaces/:workspaceId/studio"
             element={
-              <StudioNavContext.Provider value={navStub}>
+              <>
                 <WorkflowNodeExecutionSection
                   agentCatalogSettle={settledSettle}
                   node={nodeWithProvider}
@@ -218,7 +208,7 @@ describe('WorkflowNodeExecutionSection', () => {
                     nextYaml = value
                   }}
                 />
-              </StudioNavContext.Provider>
+              </>
             }
           />
         </Routes>
@@ -338,105 +328,6 @@ describe('WorkflowNodeExecutionSection', () => {
       expect(screen.queryByText(/草稿 Agent 未发布/)).not.toBeInTheDocument()
     )
     expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
-  })
-
-  // codex P1 on #391：同 capability 允许存在多个未发布草稿（服务端只在
-  // publish 时校验冲突）——保留 openAgent 点击的草稿身份，不总取第一个。
-  it('honors the pending agent id when several drafts share the capability', async () => {
-    vi.mocked(fetchAgentDefinitions).mockResolvedValue({
-      agents: [
-        {
-          agent_id: 'first-draft',
-          capability: 'generate_key_info',
-          runtime: 'pi',
-          skill: '',
-          version: 1,
-          status: 'draft',
-          has_draft: true,
-          published_at: null,
-        },
-        {
-          agent_id: 'clicked-draft',
-          capability: 'generate_key_info',
-          runtime: 'pi',
-          skill: '',
-          version: 1,
-          status: 'draft',
-          has_draft: true,
-          published_at: null,
-        },
-      ],
-    })
-    const clearPending = vi.fn()
-    renderSection(
-      { node, ...editorProps, agentCatalog: [] },
-      {
-        ...navStub,
-        pendingAgentId: 'clicked-draft',
-        clearPendingAgentId: clearPending,
-      }
-    )
-
-    // 命中点击的草稿（而非列表第一个，汇总卡文本已随 #409 移除，经
-    // isDraft 提示断言解析成功），解析后清除 pending。
-    expect(await screen.findByText(/草稿 Agent 未发布/)).toBeInTheDocument()
-    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
-    await waitFor(() => expect(clearPending).toHaveBeenCalled())
-  })
-
-  // subagent review P2-1 on #391：pending 的清除绑定「数据 settle + 命中
-  // 确认」——列表还在加载（缓存滞后于 turn_end 失效重取）时保留 pending，
-  // 不能在未命中的首次渲染就清掉导致身份丢失、回落到列表第一个。
-  it('keeps the pending agent id while the definitions query is still loading', async () => {
-    let resolveDefinitions: (value: AgentListResponse) => void = () => {}
-    vi.mocked(fetchAgentDefinitions).mockReturnValue(
-      new Promise((resolve) => {
-        resolveDefinitions = resolve
-      }) as ReturnType<typeof fetchAgentDefinitions>
-    )
-    const clearPending = vi.fn()
-    renderSection(
-      { node, ...editorProps, agentCatalog: [] },
-      {
-        ...navStub,
-        pendingAgentId: 'clicked-draft',
-        clearPendingAgentId: clearPending,
-      }
-    )
-
-    // 未 settle：pending 不清除，草稿解析暂缺（显示暂无指引）。
-    expect(screen.getByText(/暂无 published Agent/)).toBeInTheDocument()
-    expect(clearPending).not.toHaveBeenCalled()
-
-    resolveDefinitions({
-      agents: [
-        {
-          agent_id: 'first-draft',
-          capability: 'generate_key_info',
-          runtime: 'pi',
-          skill: '',
-          version: 1,
-          status: 'draft',
-          has_draft: true,
-          published_at: null,
-        },
-        {
-          agent_id: 'clicked-draft',
-          capability: 'generate_key_info',
-          runtime: 'pi',
-          skill: '',
-          version: 1,
-          status: 'draft',
-          has_draft: true,
-          published_at: null,
-        },
-      ],
-    })
-
-    // settle 后命中点击的草稿并清除 pending。
-    expect(await screen.findByText(/草稿 Agent 未发布/)).toBeInTheDocument()
-    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
-    await waitFor(() => expect(clearPending).toHaveBeenCalled())
   })
 
   it('renders the node skill editor for agent-routed nodes only', () => {

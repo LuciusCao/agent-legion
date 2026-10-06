@@ -6,7 +6,6 @@ import {
   type ChatMessage,
   type ToolCallView,
   type WorkflowDraftView,
-  type AgentDefinitionDraftView,
   type NodeCodeDraftView,
   type PermissionView,
 } from './studioChatMessages'
@@ -16,10 +15,7 @@ import { StudioChatTextBubble } from './StudioChatTextBubble'
 import { StudioChatToolCallCard } from './StudioChatToolCallCard'
 import { StudioChatPermission } from './StudioChatPermission'
 import { StudioChatThought } from './StudioChatThought'
-import {
-  AgentDefinitionDraftCard,
-  NodeCodeDraftCard,
-} from './StudioChatDraftCards'
+import { NodeCodeDraftCard } from './StudioChatDraftCards'
 import { WorkflowDraftCard } from './WorkflowDraftCard'
 import styles from './StudioChatPanel.module.css'
 
@@ -32,7 +28,6 @@ export type MessageItemProps = {
   permission: PermissionView | null
   draftAnchorId: string | null
   workflowDraft: WorkflowDraftView | null
-  agentDrafts: AgentDefinitionDraftView[]
   nodeDrafts: NodeCodeDraftView[]
   allowAllPermissions: boolean
   permissionDisabled: boolean
@@ -49,7 +44,7 @@ export type MessageItemProps = {
 // Memoized per message: a streaming update appends/touches one message, and
 // the rest of the (potentially long) list should not re-render for it. The
 // props are split into per-message scalars / stable collections so the memo
-// actually hits; `agentDrafts`/`nodeDrafts`/`workflowDraft` come from derived
+// actually hits; `nodeDrafts`/`workflowDraft` come from derived
 // state whose references only change when their content changes.
 export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
   const {
@@ -61,7 +56,6 @@ export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
     permission,
     draftAnchorId,
     workflowDraft,
-    agentDrafts,
     nodeDrafts,
     allowAllPermissions,
     permissionDisabled,
@@ -97,15 +91,6 @@ export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
             onApply={onApplyWorkflowDraft}
           />
         )}
-        {agentDrafts
-          .filter((draft) => draft.toolCallId === toolCall.toolCallId)
-          .map((draft) => (
-            <AgentDefinitionDraftCard
-              key={draft.toolCallId}
-              draft={draft}
-              workspaceId={workspaceId}
-            />
-          ))}
         {nodeDrafts
           .filter((draft) => draft.toolCallId === toolCall.toolCallId)
           .map((draft) => (
