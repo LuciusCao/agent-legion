@@ -32,6 +32,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- 鉴权加固（issue #971，#917 安全 P2）：作用域 token 的 workspace 绑定裁决收口为单一实现（`server/app/auth/scope_binding.py`），通用 workspace 守卫与 job 守卫按同一顺序执行（机器身份臂 → 绑定 → admin → 成员检查）。绑定到某 workspace 的 token 访问其它 workspace 的受保护读接口时，现在统一返回 403 `Scoped token bound to another workspace`（与 studio-agent 工具面、chat 读面既有契约同形；job-id 路由维持 404 `Job not found`）；query 作用域的 skill 目录 / tags 读面对此类请求由 404 改为该 403。完整会话与未绑定 token 行为不变。
+- 登录限流与密码策略基线（issue #970，#917 安全 P2）：登录失败锁定从单一用户名维度扩展为「账号 + 来源 IP」（5 次）与「账号，任意来源」（20 次）两个维度，任一触发即 429：单一来源的猜测只锁住它自己这条来源，真实用户从别处登录不受影响；跨来源的分布式猜测由账号维度兜底。来源 IP 取连接对端地址，不读取客户端自带的转发头；多个客户端共享同一对端地址时（如容器端口映射），行为退化为与旧版相同的按账号锁定。失败计数有时间窗、过窗自动重开；内存表在达到清扫水位时剔除过窗条目，仍在窗口内的计数从不淘汰。新密码（bootstrap、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD` 种子、管理员建用户 / 重置密码）须至少 12 位且不在内置常见弱口令表中，否则 400；登录校验不受影响，已有账号照常登录。**升级注意：** 全新部署的 env 种子密码不满足策略时启动即报错（不再静默建出弱口令管理员）；已有用户的实例不读取种子。初始化页与用户管理页补充长度提示。
+- bootstrap 改为「先全部备齐、再单事务应用」（issue #968，#917 安全 P2）：首个管理员与其首个会话在同一事务内写入，事务内在锁下复核「尚无用户」前提——中断不留半初始化状态、重跑是干净的首次初始化或确定的 409，并发 bootstrap 只会成功一个。
 - job 详情的「输入恢复不全」提示覆盖扇出中的分片节点（issue #1021，#887 follow-up）：分片节点 DB 状态仍为 `running` 但还有待领取 shard 时，worker 在 hydration 前按分片有效状态把它视为等待中、公告也列为受阻节点，而详情投影此前按 DB 原始状态过滤掉 `running`，剩余 shard 被 hydration defer 挡住时 `hydration_defer` 缺失。现投影改用与 worker 同一判定（`running_shard_nodes` + `shard_effective_statuses`）；只在 job 确有公告时多一次 pending shard 查询，API 形状不变。分片仍属 Experimental 形态。
 - Studio「Agent 助手」的发送 / 取消 / 全部允许加会话归属守卫（issue #962，#917 P2）：动作发起时记下会话 id，请求返回后（成功或失败）与当前选中会话复核，切换会话后旧会话的迟到结果（消息、会话快照、错误提示）不再写进新会话，丢弃时留 `console.warn` 日志；取消按钮与权限卡片的「全部允许」开关另附渲染时的会话 id 作为辅助断言。
 - Studio DAG 再次定位同一节点时镜头不移动（issue #964，#917 P2）：画布点击来源标记改为记录「节点 + 点击时的定位请求 nonce」，每个新定位请求消费即清；受控父组件未采纳点击时残留的标记不再把之后 bump 了 nonce 的外部定位请求误判为画布点击。

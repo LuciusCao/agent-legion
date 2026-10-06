@@ -17,6 +17,38 @@ def _public_user(row: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
+def _insert_user(
+    conn: Any, username: str, display_name: str, password_hash: str | None, role: str
+) -> dict[str, Any]:
+    clean_username = username.strip()
+    if not clean_username:
+        raise ValueError("Username is required")
+    if role not in USER_ROLES:
+        raise ValueError(f"Unknown user role: {role}")
+    user_id = uuid.uuid4().hex
+    exists = conn.execute("select 1 from users where username=%s", (clean_username,)).fetchone()
+    if exists is not None:
+        raise ValueError("Username already exists")
+    conn.execute(
+        """
+        insert into users(id, username, display_name, password_hash, role)
+        values (%s, %s, %s, %s, %s)
+        """,
+        (user_id, clean_username, display_name.strip(), password_hash, role),
+    )
+    row = conn.execute("select * from users where id=%s", (user_id,)).fetchone()
+    if row is None:
+        raise RuntimeError("user insert did not return a row")
+    return _public_user(row)
+
+
+def _insert_session(conn: Any, token_hash: str, user_id: str) -> None:
+    conn.execute(
+        "insert into sessions(token_hash, user_id, expires_at) values (%s, %s, %s)",
+        (token_hash, user_id, session_expiry()),
+    )
+
+
 class AuthQueriesMixin(ConnectionQueriesMixin):
     """Persistence for users, sessions, and workspace membership."""
 
@@ -35,29 +67,33 @@ class AuthQueriesMixin(ConnectionQueriesMixin):
         password_hash: str | None = None,
         role: str = "member",
     ) -> dict[str, Any]:
-        clean_username = username.strip()
-        if not clean_username:
-            raise ValueError("Username is required")
-        if role not in USER_ROLES:
-            raise ValueError(f"Unknown user role: {role}")
-        user_id = uuid.uuid4().hex
         with self.connect() as conn:
-            exists = conn.execute(
-                "select 1 from users where username=%s", (clean_username,)
-            ).fetchone()
-            if exists is not None:
-                raise ValueError("Username already exists")
-            conn.execute(
-                """
-                insert into users(id, username, display_name, password_hash, role)
-                values (%s, %s, %s, %s, %s)
-                """,
-                (user_id, clean_username, display_name.strip(), password_hash, role),
-            )
-            row = conn.execute("select * from users where id=%s", (user_id,)).fetchone()
-        if row is None:
-            raise RuntimeError("user insert did not return a row")
-        return _public_user(row)
+            return _insert_user(conn, username, display_name, password_hash, role)
+
+    def bootstrap_first_admin(
+        self,
+        username: str,
+        *,
+        display_name: str = "",
+        password_hash: str,
+        session_token_hash: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Create the first admin (and optionally its session) atomically (#968).
+
+        One transaction: an advisory lock serializes concurrent bootstraps,
+        the "no users yet" precondition is re-checked under it, and the user
+        row plus the first session commit together — an interruption leaves
+        nothing behind, so a retry sees bootstrap still available. Returns
+        None when a user already exists (the caller answers 409).
+        """
+        with self.connect() as conn:
+            conn.execute("select pg_advisory_xact_lock(hashtext(%s))", ("auth:bootstrap",))
+            if conn.execute("select 1 from users limit 1").fetchone() is not None:
+                return None
+            user = _insert_user(conn, username, display_name, password_hash, "admin")
+            if session_token_hash is not None:
+                _insert_session(conn, session_token_hash, str(user["id"]))
+        return user
 
     def get_user(self, user_id: str) -> dict[str, Any] | None:
         with self._connect_read() as conn:
@@ -122,10 +158,7 @@ class AuthQueriesMixin(ConnectionQueriesMixin):
 
     def create_session(self, token_hash: str, user_id: str) -> None:
         with self.connect() as conn:
-            conn.execute(
-                "insert into sessions(token_hash, user_id, expires_at) values (%s, %s, %s)",
-                (token_hash, user_id, session_expiry()),
-            )
+            _insert_session(conn, token_hash, user_id)
 
     def get_session_user(self, token_hash: str) -> dict[str, Any] | None:
         """Resolve a session token digest to its user, sliding the expiry.
