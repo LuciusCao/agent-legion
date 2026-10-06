@@ -1,4 +1,4 @@
-"""CspCompatSwitch（#989）：TTL 缓存、invalidate、非 True 一律严格、读失败 fail closed。"""
+"""CspCompatSwitch（#989）：TTL 缓存、invalidate（含读期间 invalidate 不回填）、非 True 一律严格、读失败 fail closed。"""
 
 from __future__ import annotations
 
@@ -44,6 +44,30 @@ def test_value_is_cached_for_the_ttl_and_invalidate_refreshes() -> None:
     store.document = {"csp_script_unsafe_inline": True}
     switch.invalidate()
     assert switch.enabled() is True and store.reads == 3
+
+
+@pytest.mark.no_db
+def test_invalidate_during_read_does_not_backfill_stale_value() -> None:
+    """A page load that read the pre-save value must not re-cache it after the PUT's invalidate()."""
+    now = [100.0]
+    switch, store = _switch({"csp_script_unsafe_inline": False}, now)
+
+    class _RacingStore(_Store):
+        def get(self):
+            document = super().get()
+            # The admin PUT commits and invalidates while this read is in flight.
+            self.document = {"csp_script_unsafe_inline": True}
+            switch.invalidate()
+            return document
+
+    racing = _RacingStore({"csp_script_unsafe_inline": False})
+    switch._store = racing
+    # The in-flight reader still answers with what it read...
+    assert switch.enabled() is False
+    # ...but did not cache it: the next load (inside the TTL) re-reads the new value.
+    switch._store = store
+    store.document = {"csp_script_unsafe_inline": True}
+    assert switch.enabled() is True and store.reads == 1
 
 
 @pytest.mark.no_db

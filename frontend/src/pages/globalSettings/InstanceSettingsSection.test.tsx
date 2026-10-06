@@ -232,7 +232,9 @@ describe('InstanceSettingsSection', () => {
     expect(toggle).not.toBeChecked()
     expect(screen.getByText(/会降低平台页面的脚本防护/)).toBeInTheDocument()
     expect(
-      screen.getByText(/保存后页面将自动刷新以应用新的安全策略/)
+      screen.getByText(
+        /保存后当前页面将自动刷新以应用新的安全策略，其他已打开的标签页需手动刷新/
+      )
     ).toBeInTheDocument()
     fireEvent.click(toggle)
     fireEvent.click(screen.getByText('保存实例设置'))

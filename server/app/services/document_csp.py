@@ -19,6 +19,7 @@ instance per app (``app.state.csp_compat``), never module-global state.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -56,12 +57,19 @@ class CspCompatSwitch:
         # concurrent threadpool readers consistent without a lock (a race
         # costs at most one extra read).
         self._cached: tuple[bool, float] | None = None
+        # Invalidation generation: a reader that started its DB read before
+        # an invalidate() (e.g. a page load racing the admin PUT) must not
+        # backfill the pre-save value after it. The lock only guards the
+        # compare-and-store / bump pair, never the DB read.
+        self._generation = 0
+        self._lock = threading.Lock()
 
     def enabled(self) -> bool:
         cached = self._cached
         now = self._clock()
         if cached is not None and now < cached[1]:
             return cached[0]
+        generation = self._generation
         try:
             stored = self._store.get()
         except psycopg.Error:
@@ -72,8 +80,12 @@ class CspCompatSwitch:
             logger.warning("csp compat switch read failed; serving strict policy", exc_info=True)
             return False
         value = (stored or {}).get(CSP_COMPAT_SETTING_KEY) is True
-        self._cached = (value, now + self._ttl)
+        with self._lock:
+            if self._generation == generation:
+                self._cached = (value, now + self._ttl)
         return value
 
     def invalidate(self) -> None:
-        self._cached = None
+        with self._lock:
+            self._generation += 1
+            self._cached = None
