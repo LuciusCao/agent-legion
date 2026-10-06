@@ -19,7 +19,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]  # worker/ 包根
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from worker import events
 from worker.claim_backoff import CLAIM_BACKOFF_CAP_SECONDS, ClaimBackoffSequence
 from worker.claim_batch import (
     ClaimRunContext,
@@ -29,10 +28,10 @@ from worker.claim_batch import (
 from worker.claim_budget import pass_budget
 from worker.claim_pacing import ClaimPacing
 from worker.cleanup import clean_work_root
-from worker.execution.execution_lane import ExecutionLanePool
+from worker.execution.execution_lane import ExecutionLanePool, LaneSpawnError
 from worker.execution.exit_watch import ExitWatchReactor
 from worker.fd_limits import raise_fd_limit_startup
-from worker.host.client import Client, WorkerAuthError
+from worker.host.client import HOST_UNAVAILABLE_ERRORS, Client, WorkerAuthError
 from worker.host.status_sync import sync_host_status
 from worker.hot_controls import DynamicControls, reload_controls
 from worker.lease_snapshot import open_lease_channel
@@ -303,22 +302,33 @@ def main() -> int:
             except WorkerAuthError as exc:
                 print(f"Agent Worker rejected by server: {exc}; re-register required", flush=True)
                 return 2
-            except Exception as exc:
-                # #204 broad-except audit: claim 轮询的存活语义。try 体的
-                # 逃逸族混族——client.claim 的传输错误（requests 族）、非 200
-                # 状态的 RuntimeError、应答解码的 ValueError——统一语义都是
-                # "Host 暂时不可用"，唯一正确响应是指数退避（带上限）后重试；
-                # WorkerAuthError 是终态，已在上一臂单独 return 2。吞是对的：
-                # 主循环死亡 = worker 停摆。结果空间是本轮 claim 空转一次，
-                # 已提交的 future 不受影响。日志保全：print 记录异常与退避
-                # 时长。#437：等待时长经 ClaimBackoffSequence（首 1s 固定、
-                # 之后指数翻倍 ±20% jitter、上限 60s），fleet 不同步对齐。
-                wait = backoff.next_wait()
-                # #490 claim.backoff：#437 序列状态结构化落盘；HTTP 错误码/
-                # URL 已在 client.request 的 http.error 事件里。
-                events.note_claim_backoff(worker_id, exc, wait, backoff.failures)
-                print(f"Agent claim error: {exc}; retrying in {wait:.1f}s", flush=True)
-                stop.wait(wait)
+            except HOST_UNAVAILABLE_ERRORS as exc:
+                # #960：收窄到「Host 暂时不可用」族（同 registration/retry.py
+                # 的收窄）——传输错误（requests 族：连接/读超时等，
+                # TransientHostError 亦属此族）与 Host 不合契约应答
+                # （HostResponseError：非 200 状态、不可解码/形状不对的 body）。
+                # 唯一正确响应是指数退避（带上限）后重试；WorkerAuthError 是
+                # 终态，已在上一臂单独 return 2。Worker 侧编程错误（TypeError/
+                # KeyError/AttributeError…）不再被吞成退避：原样上抛出主循环，
+                # finally 停池后进程以非 0 退出、traceback 经 stderr 进面板
+                # 日志，由 supervisor 崩溃重启策略接管（短时反复崩溃即关认领，
+                # 见 restart_policy.claim_resume_verdict）——确定性 bug 无限
+                # 退避只会让 worker 空转且把排障方向误导到网络。已提交的
+                # future 不受退避影响。#437：等待时长经 ClaimBackoffSequence
+                # （首 1s 固定、之后指数翻倍 ±20% jitter、上限 60s），fleet
+                # 不同步对齐。#490 claim.backoff：#437 序列状态结构化落盘；
+                # HTTP 错误码/URL 已在 client.request 的 http.error 事件里。
+                backoff.wait_out(stop, worker_id, exc, "Agent claim error")
+                continue
+            except LaneSpawnError as exc:
+                # #1051：执行车道起线程失败（线程/pid 预算耗尽，资源类而非编程
+                # 错误）单独一臂退避——不并入 Host 不可用族、不放宽捕获。账目：
+                # 该条及本批余下执行未入池（不在 active、无心跳），租约过期后
+                # 由 Host sweep 重排队（claim_batch_pass 已逐条列出 execution_id；
+                # 每次丢弃消耗一次重排次数，超出 requeue_limit 节点判败）；已
+                # 提交的 future 照常 reap。退避期间不再领活，之后 claim_ctx 的
+                # lane_probe 熔断把每轮限为探测 1 条，直到再有 submit 成功。
+                backoff.wait_out(stop, worker_id, exc, "Agent execution lane exhausted")
                 continue
             backoff.reset()
             # #472：成功=自适应短等待，空队列=poll_interval；错误路径走 backoff。

@@ -253,3 +253,44 @@ def test_list_failed_node_runs_rejects_empty_string_filters(tmp_path):
             response = c.get(f"/api/workspaces/{ws_id}/failed-node-runs?{param}=")
             assert response.status_code == 422, (param, response.text)
         assert c.get(f"/api/workspaces/{ws_id}/failed-node-runs").status_code == 200
+
+
+def test_list_failed_node_runs_pages_with_next_cursor(tmp_path):
+    """#713: the list is keyset-paged — limit bounds one page, next_cursor
+    walks the rest, and the pages concatenate to the unpaged order."""
+    from fastapi.testclient import TestClient
+
+    app = _app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job_id = _create_job(c, ws_id, "Q930")
+        for node_key in ("write_script", "publish_content", "review_script"):
+            _fail_node(app, job_id, node_key, "technical", "provider_stream")
+
+        full = c.get(f"/api/workspaces/{ws_id}/failed-node-runs").json()
+        first = c.get(f"/api/workspaces/{ws_id}/failed-node-runs?limit=2").json()
+        second = c.get(
+            f"/api/workspaces/{ws_id}/failed-node-runs",
+            params={"limit": 2, "cursor": first["next_cursor"]},
+        ).json()
+
+    assert full["next_cursor"] is None
+    assert len(full["runs"]) == 3
+    assert len(first["runs"]) == 2 and first["next_cursor"]
+    assert second["next_cursor"] is None
+    assert first["runs"] + second["runs"] == full["runs"]
+
+
+def test_list_failed_node_runs_rejects_malformed_cursor_and_limit(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        bad_cursor = c.get(f"/api/workspaces/{ws_id}/failed-node-runs?cursor=nope")
+        bad_limit = c.get(f"/api/workspaces/{ws_id}/failed-node-runs?limit=0")
+        too_big = c.get(f"/api/workspaces/{ws_id}/failed-node-runs?limit=1001")
+
+    assert bad_cursor.status_code == 422
+    assert bad_limit.status_code == 422
+    assert too_big.status_code == 422

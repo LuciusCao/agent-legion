@@ -24,31 +24,30 @@ function mockWorkerStatusFetch(pausedByWorkspace: Record<string, boolean>) {
 
 describe('agentsStore', () => {
   beforeEach(() => {
-    useAgentsStore.setState({
-      agents: [],
-      workerPausedByWorkspace: {},
-    })
+    useAgentsStore.setState({ agents: [] })
   })
 
   afterEach(() => {
     global.fetch = originalFetch
   })
 
-  it('defaults worker paused to true for unknown workspaces', () => {
-    expect(useAgentsStore.getState().getWorkerPaused('unknown')).toBe(true)
-  })
-
-  it('keeps worker paused state isolated by workspace', async () => {
+  // #961：store 不再持有暂停位（唯一来源是 RQ 缓存），也就没有「未知
+  // workspace 默认已暂停」的兜底值；读取按 workspace 返回各自的服务端值。
+  it('returns worker paused state per workspace without caching it', async () => {
     global.fetch = mockWorkerStatusFetch({
       ws1: false,
       ws2: true,
     })
 
-    await useAgentsStore.getState().fetchWorkerStatus('ws1')
-    await useAgentsStore.getState().fetchWorkerStatus('ws2')
-
-    expect(useAgentsStore.getState().getWorkerPaused('ws1')).toBe(false)
-    expect(useAgentsStore.getState().getWorkerPaused('ws2')).toBe(true)
+    await expect(
+      useAgentsStore.getState().fetchWorkerStatus('ws1')
+    ).resolves.toEqual({ paused: false, superseded: false })
+    await expect(
+      useAgentsStore.getState().fetchWorkerStatus('ws2')
+    ).resolves.toEqual({ paused: true, superseded: false })
+    expect(useAgentsStore.getState()).not.toHaveProperty(
+      'workerPausedByWorkspace'
+    )
   })
 
   it('connectAgentsWs returns a cleanup function', () => {
