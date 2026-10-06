@@ -10,6 +10,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- cryptography 升到 50.0.0 后（issue #1089）上游自 49.0.0 起不再发布 x86_64（Intel）macOS wheel：在 Intel Mac 上裸机安装 Host 需本地有 Rust 工具链从源码构建；Docker 镜像（Linux）与 Apple Silicon Mac 不受影响。
 - schema 推进到 v91（issue #211 M3）：删除 `workspaces.default_workflow_key` 列与 `quality_sample_batches.workflow_key` 镜像列——v62 起二者都恒等于 workspace id，所有读取改用 id。迁移有守卫、幂等（列不存在即跳过；全新库从不创建该列），任何旧版本库可直接升到本版本（启动时按序跑完 v62 绑定、v68 对齐、v70 删列与 v91）；数据零丢失，历史 job / run / revision 按 workspace id 照常可查。`workflow_node_codes` / `job_batches` / `workspace_node_bindings` 的 key 列与 `versioned_entities.entity_key` 的 key 前缀属迁移考古层，按设计保留。
 - **Breaking (API):** 发布端点的 `expected_hash` 改为必填，无 hash 的兼容发布正式退役（issue #841，#749 收尾）：`POST /api/agent-definitions/{agent_id}/publish`、`POST /api/workspaces/{workspace_id}/nodes/{node_key}/code/publish`（同期 `workflows/{workflow_key}` 别名路径已随 #211 M3 移除，见 Removed）与 `POST /api/workspaces/{workspace_id}/preview-panel/publish` 的请求体 `{"expected_hash": "<草稿 hash>"}` 必须携带，缺 body 或缺字段返回 422（此前省略即按「不核对」发布当前草稿）。自写脚本/外部集成升级前改为先取草稿 hash 再发布：Agent 取保存响应或详情 `latest` 的 `definition_hash`，节点代码取保存响应的 `code_hash` 或读取响应的 `draft_code_hash`，预览面板取 `GET .../preview-panel` 的 `draft.html_hash`；hash 与当前草稿不符返回 409、零发布副作用。仓库自带的 `scripts/seed/import_seed.py` 已同步携带保存响应的 hash。
 - 后端内部：agent 节点的执行配置（runtime / tools / requires_labels / config_schema / legacy skill 兜底）统一经执行档案门面 `server/app/services/agent_node_profile.py` 解析（issue #932，#440 P1）：配置解析、发布门禁、路由物化、dispatch / claim、扫描开关与升级身份判定等读取方不再各自遍历已发布 Agent 定义；本版本门面的唯一来源仍是「capability → 唯一已发布 Agent 定义」，行为、API、manifest 与 schema 均不变。新增架构守卫：已发布 Agent 定义目录（`published_agent_definitions` / `has_published_agent_definitions`）只许门面调用（白名单 `config/architecture/agent-definition-catalog-callers.json`，只降不升），新增直连调用点即 `check_architecture` 失败。
@@ -34,6 +35,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Security
 
+- Python 依赖安全升级（issue #1089）：`uv.lock` 中 anyio 4.13.0 → 4.14.2、cryptography 48.0.0 → 50.0.0、pyjwt 2.13.0 → 2.15.0（mcp 的传递依赖）、starlette 1.0.1 → 1.3.1、urllib3 2.7.0 → 2.8.0；FastAPI 保持 0.136.1（其约束已兼容 starlette 1.3.1），`pyproject.toml` 未改动。`scripts/check-deps-audit.sh` 的 Python 侧审计归零。
 - Studio 对话 ACP 子进程权限模型与环境继承收敛（issue #921）：只读类工具调用的自动批准收窄到本 workspace 的 MCP 暂存目录（`data/studio-mcp-files/<workspace_id>`）内，其余只读调用改走人工确认；人工选择「本会话总是允许」在 ACP 线上收窄为单次允许，后续每次调用都重新经过权限请求（需要免确认时用会话的「全部允许」开关）。ACP terminal 子进程改为白名单环境（PATH / HOME / 语言区域等基础项 + agent 自带覆盖项），不再继承 server 进程环境；`terminal/create` 必须对应一条经人工或「全部允许」批准的权限请求（平台自动批准不算），工作目录约束在会话根目录内。前端 agent 气泡渲染 markdown 时不再自动加载任何图片，改为点击才打开的链接占位。
 - Worker 本机控制台加 Host 头白名单与变更请求来源校验（issue #923）：`worker/service.py` 控制面的页面、静态资产与全部 `/api/*` 只接受回环变体（`127.0.0.1` / `localhost` / `[::1]`，任意端口）∪ 实际暴露面地址 ∪ `AGENT_WORKER_CONSOLE_URL` 主机名的 Host 头，其余 403；变更类请求另校验 `Sec-Fetch-Site` / `Origin`（跨站或来源与 Host 不一致即 403，不带这两个头的 `workerctl` 不受影响）。控制 token 内嵌页面的前提收紧为「暴露面回环 ∧ Host 校验已启用 ∧ 白名单不含非回环主机名（含控制台地址）」；暴露面为通配地址时 Host 校验不启用、token 不内嵌。经自定义主机名访问控制台的部署需把该地址写进 `AGENT_WORKER_CONSOLE_URL`，详见 docs/agent-worker-deployment.md §控制面鉴权。
 
