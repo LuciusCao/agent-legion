@@ -83,30 +83,38 @@ def declared_ceiling_rejection(task: UploadTask, archive: Path) -> str | None:
 
 
 class ReportDegradeGate:
-    """report 循环对 4xx 判决的一次性判败降级闸（瞬时失败从不降级）。
+    """report 循环对 4xx 判决的判败降级闸（瞬时失败从不降级）。
 
     降级把 failed metadata 挂回 ``task.prepared_metadata``（调用方从那里
-    取下一次上报的载荷）。"""
+    取下一次上报的载荷）。闸只开一次，唯一例外：首次降级时归档保留（非
+    413 判决），判败重报又吃 413——Host 先验 metadata 再验 body 大小，
+    未下发 ``max_archive_bytes``（旧 Host / 崩溃恢复）时 64 MiB 兜底可能
+    高于 Host 实际上限——此时再清空归档重报一次。总重报次数仍有界（≤2）。"""
 
     def __init__(self, task: UploadTask, archive: Path) -> None:
         self._task = task
         self._archive = archive
         self.degraded = False
+        self._archive_emptied = False
 
     def on_rejection(self, status_code: int, rejection: str) -> bool:
         """True = 已降级、应重报判败；False = 终态（409 / 非 4xx / 已降级过）。"""
-        if not is_verdict_rejection(status_code) or self.degraded:
+        if not is_verdict_rejection(status_code):
             return False
-        self.degraded = True
+        if self.degraded and (status_code != 413 or self._archive_emptied):
+            return False
         reason = f"result report rejected by Host: {rejection}"
         # 413 清空归档；其余判决保留归档作证据，只按上限回收。
         if status_code == 413:
             write_empty_archive(self._archive)
+            self._archive_emptied = True
         else:
             ceiling = self._task.max_archive_bytes or ARCHIVE_EMBED_DEFAULT_CEILING_BYTES
             ensure_submittable_archive(self._archive, ceiling)
         print(
             f"result report for {self._task.execution_id}: {reason}; reporting failed", flush=True
         )
-        self._task.prepared_metadata = failed_metadata(self._task, reason)
+        if not self.degraded:
+            self.degraded = True
+            self._task.prepared_metadata = failed_metadata(self._task, reason)
         return True

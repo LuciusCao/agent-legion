@@ -109,6 +109,40 @@ def test_degraded_report_rejected_again_is_terminal(tmp_path: Path) -> None:
     assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
 
 
+def test_413_after_metadata_verdict_degrades_once_more_with_empty_archive(
+    tmp_path: Path,
+) -> None:
+    """codex R2 P2：Host 先验 metadata 再验 body 大小。未下发
+    max_archive_bytes（旧 Host / 崩溃恢复）时首个 400 降级按 64 MiB 兜底保留
+    归档，判败重报才吃到 413。修复前闸已关、删 marker 退化为租约过期重跑；
+    修复后清空归档再报一次，Host 收到显式判败。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = ScriptedReportClient([400, 413, 204])
+    _deliver(work_root, client)
+
+    assert len(client.calls) == 3
+    assert client.calls[1]["members"], "首次（非 413）降级保留归档作证据"
+    final = client.calls[2]
+    assert final["metadata"]["status"] == "failed"
+    # 判败原因保持首个判决（真实失败原因），不被 413 覆盖。
+    assert "HTTP 400" in final["metadata"]["error_message"]
+    assert final["members"] == []
+    assert not (work_root / "exec-1").exists()
+
+
+@pytest.mark.parametrize("script", [[400, 413, 413], [413, 413], [400, 413, 400]])
+def test_degrade_gate_stays_bounded_after_empty_archive(tmp_path: Path, script: list[int]) -> None:
+    """413 二次降级只在归档尚未清空时开放：空归档仍被拒即终态，重报有界。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = ScriptedReportClient(script)
+    _deliver(work_root, client)
+
+    assert len(client.calls) == len(script)
+    assert not (work_root / "exec-1" / PENDING_FILENAME).exists()
+
+
 def test_lease_conflict_409_never_degrades(tmp_path: Path) -> None:
     """409 = 租约已不归本 attempt（含提交已落地后的重报）：不降级、不重报。"""
     work_root = tmp_path / "work"
