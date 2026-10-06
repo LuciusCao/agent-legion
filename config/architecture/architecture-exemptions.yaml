@@ -433,20 +433,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/311
   ceiling: 139
 - check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/inspector/WorkflowNodeAgentConfigBody.tsx
-  reason: 'The PR 317 merge combines both sides of the agent-node inspector: develop''s type-gated
-    WorkflowNodeAgentConfigBody (#284, with the approval-gate section) and the node-level skill
-    binding editor (#76, WorkflowNodeSkillEditor between the definition card and the execution
-    details). Each side fit its own ceiling; the honest union is ~7 effective lines past develop''s
-    fresh 43-line registration. Same merge-growth class as the groups.py exemption; the body
-    shrinks back when the approval section or the skill editor moves to its own module. Re-anchored
-    by #926 from #300 (closed with this disposition) to #1014: the overage above is the shipped
-    feature itself and the removal condition above stands; #1014 tracks at most five entries
-    (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1014
-  ceiling: 55
-- check: architecture.file_budget
   path: server/app/db/migrations/jobs_workflow_key_alignment.py
   reason: The issue-211 Phase 3 v68 data migration aligns every stored workflow_key with the v62 binding
     across the live tables plus the node_code entity-key prefix. Each composite-unique surface carries
@@ -783,26 +769,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/996
   ceiling: 81
-- check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/inspector/AgentEditor.tsx
-  reason: '#476 makes the tool picker catalog-driven: option-surface derivation (selectable/forced/invalid
-    sets as memoized maps), the forced-tier locked-row hint, and the runtime-switch invalid-tool
-    banner join the existing form lifecycle. The catalog plumbing is already split out (useAgentRuntimes
-    hook); what stays here is the interaction itself — splitting render from state would separate
-    the two halves of every conditional being tested. Remove when the editor gains a shared
-    tool-picker component with WorkflowNodeToolsEditor. #749 re-signs the ceiling to 373: the
-    review fix (409 true two-branch — isCapabilityConflict distinguishes capability occupancy
-    from CAS rejection per the agent_service / _integrity_conflict detail signature, the former
-    shows the backend detail verbatim; the 404 branch copy; rollback no longer force-clears
-    the draft identity since VersionedEntityStore.rollback keeps the draft row) grew the module
-    past the 357+15 band. Time-boxed per #641; harvest at the #456 sweep or split the error
-    dispatch / versions orchestration. Re-anchored by #926 from #456 (closed) to #1001: the
-    overage above is the shipped feature itself and the removal condition above stands; #1001
-    tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1001
-  ceiling: 373
-  expires: 2026-12-31
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.ts
   reason: '#443/#476 add patchWorkflowNodeTools — one patchNode call site with the empty-means-undeclared

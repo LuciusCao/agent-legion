@@ -86,8 +86,6 @@ export const extraQueryKeys = {
   // Studio 节点运行 Prompt 预览；草稿 YAML 进 key（编辑 debounce 后重取）。
   studioNodePromptPreview: (ws: string, nodeKey: string, yaml: string) =>
     ['studioNodePromptPreview', ws, nodeKey, yaml] as const,
-  agentVersions: (workspaceId: string, agentId: string) =>
-    ['agentVersions', workspaceId, agentId] as const,
   qualityBatches: (workspaceId: string) =>
     ['qualityBatches', workspaceId] as const,
   qualityBatchDetail: (workspaceId: string, batchId: string) =>

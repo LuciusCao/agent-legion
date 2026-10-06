@@ -1,15 +1,10 @@
 import { api } from './core'
-import type {
-  AgentCreateRequest,
-  AgentDefinitionPayload,
-  AgentDetailResponse,
-  AgentListResponse,
-  AgentVersion,
-  AgentVersionsResponse,
-} from '../types'
+import type { AgentListResponse } from '../types'
 
 // Agent 定义目录是 workspace 作用域（schema v46）：所有端点都带
-// workspace_id 查询参数，后端同时用它做成员校验。
+// workspace_id 查询参数，后端同时用它做成员校验。#1079（#440 P3b）：
+// Studio 已无 Agent 定义编辑入口，前端只保留只读列表（设置页「历史
+// Agent 定义」）；写端点 wrapper 随 AgentEditor / 草稿卡一并删除。
 const base = '/api/agent-definitions'
 
 function scoped(path: string, workspaceId: string): string {
@@ -22,65 +17,6 @@ function item(agentId: string): string {
 
 export const fetchAgentDefinitions = (workspaceId: string) =>
   api<AgentListResponse>(scoped(base, workspaceId))
-
-export const fetchAgentDefinition = (workspaceId: string, agentId: string) =>
-  api<AgentDetailResponse>(scoped(item(agentId), workspaceId))
-
-export const fetchAgentVersions = (workspaceId: string, agentId: string) =>
-  api<AgentVersionsResponse>(scoped(`${item(agentId)}/versions`, workspaceId))
-
-export const createAgentDefinition = (
-  workspaceId: string,
-  payload: AgentCreateRequest
-) =>
-  api<AgentVersion>(scoped(base, workspaceId), {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-
-export const saveAgentDraft = (
-  workspaceId: string,
-  agentId: string,
-  payload: AgentDefinitionPayload
-) =>
-  api<AgentVersion>(scoped(`${item(agentId)}/draft`, workspaceId), {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  })
-
-// #692 codex P1 / #749：expectedHash 是调用方认定的草稿 definition_hash，
-// 服务端在发布事务内原子核对——不匹配 409 零副作用（TOCTOU 窗口的根治）。
-// #749 起必填：所有调用方（聊天草稿卡、AgentEditor 检查器面板）都从各自
-// 的保存响应/详情读取里带 hash，无 None 分支调用方。
-export const publishAgent = (
-  workspaceId: string,
-  agentId: string,
-  expectedHash: string
-) =>
-  api<AgentVersion>(scoped(`${item(agentId)}/publish`, workspaceId), {
-    method: 'POST',
-    body: JSON.stringify({ expected_hash: expectedHash }),
-  })
-
-export const rollbackAgent = (
-  workspaceId: string,
-  agentId: string,
-  version: number
-) =>
-  api<AgentVersion>(scoped(`${item(agentId)}/rollback`, workspaceId), {
-    method: 'POST',
-    body: JSON.stringify({ version }),
-  })
-
-export const copyAgent = (
-  workspaceId: string,
-  agentId: string,
-  newAgentId: string
-) =>
-  api<AgentVersion>(scoped(`${item(agentId)}/copy`, workspaceId), {
-    method: 'POST',
-    body: JSON.stringify({ new_agent_id: newAgentId }),
-  })
 
 export const archiveAgent = (workspaceId: string, agentId: string) =>
   api<{ archived: number }>(scoped(item(agentId), workspaceId), {
