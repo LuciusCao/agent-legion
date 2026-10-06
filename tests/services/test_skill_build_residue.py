@@ -286,3 +286,18 @@ def test_undecodable_status_output_is_a_conflict_not_a_crash(
         _service(repo, tmp_path).save_version(
             "wf/review", [SkillFileWrite("SKILL.md", "x\n")], "v1.0.1", "m"
         )
+
+
+@pytest.mark.parametrize("residue", ["references/data.pyc", "scripts/__pycache__/helper.py"])
+def test_create_rejects_residue_paths_before_any_write(
+    home: Path, tmp_path: Path, residue: str
+) -> None:
+    service = SkillCreationService(_FakeJobDB(), runs_dir=tmp_path / "runs")
+    with pytest.raises(SkillEditValidationError) as caught:
+        service.create_skill(
+            "ws-1", "dirty", [*_QUARTET, SkillFileWrite(residue, "x\n")], "v0.1.0", "init"
+        )
+    [error] = caught.value.errors
+    assert error["path"] == residue
+    assert "build residue" in error["error"] and "safe to remove" in error["error"]
+    assert not (home / "ws-1" / "dirty").exists()

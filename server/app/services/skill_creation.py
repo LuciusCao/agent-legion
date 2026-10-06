@@ -32,7 +32,11 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.services import skill_repo
 from server.app.services.job_errors import ConflictError, NotFoundError
-from server.app.services.skill_build_residue import BUILD_RESIDUE_GITIGNORE
+from server.app.services.skill_build_residue import (
+    BUILD_RESIDUE_GITIGNORE,
+    BUILD_RESIDUE_HINT,
+    is_build_residue,
+)
 from server.app.services.skill_edit_checks import (
     contract_errors,
     contract_yaml_errors,
@@ -114,7 +118,15 @@ class SkillCreationService:
             repo_dir, [(raw, content) for raw, content in files]
         )
         contract = self._proposed_contract_errors(targets, repo_dir)
-        errors = path_errors + contract
+        # #1038: build residue is never authored content (same rule and text
+        # as the shared PUT) — and the seeded .gitignore below would make
+        # `git add -A` silently drop it from the birth commit.
+        residue = [
+            {"path": raw, "error": f"{BUILD_RESIDUE_HINT}; omit it from the payload"}
+            for raw, _ in files
+            if is_build_residue(raw)
+        ]
+        errors = path_errors + residue + contract
         if errors:
             raise SkillEditValidationError("Invalid skill creation payload", errors)
         with edit_lock_for(repo_dir, skills_root(), self._runs_dir):
