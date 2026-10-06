@@ -3,7 +3,6 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestQueryClient } from '../testing/testQueryClient'
-import { useAgentsStore } from '../stores/agentsStore'
 import { useUiStore } from '../stores/uiStore'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { useWorkerReadiness } from './useWorkerReadiness'
@@ -45,7 +44,6 @@ beforeEach(() => {
   mocks.api.mockResolvedValue({ paused: false })
   mocks.workers.mockResolvedValue([])
   mocks.console.mockReturnValue('')
-  useAgentsStore.setState({ workerPausedByWorkspace: {} })
   useUiStore.setState({ toast: null })
 })
 
@@ -134,7 +132,7 @@ describe('Worker readiness lifecycle', () => {
     mocks.workers.mockImplementation((id: string) =>
       id === 'ws1' ? oldWorkers.promise : Promise.resolve([])
     )
-    const { result, rerender } = mount()
+    const { result, rerender, client } = mount()
     rerender({ workspaceId: 'ws2', enabled: true })
     await waitFor(() => expect(result.current.paused).toBe(false))
     await act(async () => {
@@ -143,10 +141,9 @@ describe('Worker readiness lifecycle', () => {
     })
     expect(result.current.paused).toBe(false)
     expect(result.current.workers).toEqual([])
-    expect(useAgentsStore.getState().workerPausedByWorkspace).toEqual({
-      ws1: true,
-      ws2: false,
-    })
+    // #961：暂停位唯一来源是按 workspace 分 key 的 RQ 缓存。
+    expect(client.getQueryData(['workerReadinessStatus', 'ws1'])).toBe(true)
+    expect(client.getQueryData(['workerReadinessStatus', 'ws2'])).toBe(false)
   })
 
   it('shows failure feedback when resume fails and preserves the pause state', async () => {

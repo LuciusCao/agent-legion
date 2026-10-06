@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { fetchRunTokenUsage } from '../../api/jobApi'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import { formatNumber } from '../../lib/formatters'
 import type { NodeRun } from '../../types/jobTypes'
 import type { RunUsage } from '../../types/tokenUsageTypes'
 import { MaterialIcon } from '../MaterialIcon'
@@ -36,7 +37,7 @@ export function TokenUsageRunDetail({ jobId, run }: TokenUsageRunDetailProps) {
       typeof costTotal === 'number' && currency
         ? formatCost(costTotal, currency)
         : undefined
-    return `Token: ${total.toLocaleString('zh-CN')}${costText ? ` · ${costText}` : ''}`
+    return `Token: ${formatNumber(total)}${costText ? ` · ${costText}` : ''}`
   })()
 
   return (
@@ -177,9 +178,7 @@ function TokenMetric({
       className={`${styles.metric} ${highlight ? styles.metricHighlight : ''}`}
     >
       <span className={styles.metricLabel}>{label}</span>
-      <span className={styles.metricValue}>
-        {value.toLocaleString('zh-CN')}
-      </span>
+      <span className={styles.metricValue}>{formatNumber(value)}</span>
     </div>
   )
 }

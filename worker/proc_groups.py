@@ -34,28 +34,39 @@ def pgid_members(proc_root: Path = procfs.PROC_ROOT) -> dict[int, list[int]] | N
 class MemberIndex:
     """``pgid -> pids`` index kept fresh right before each group's SIGTERM (#904).
 
-    Built by one full ``/proc`` scan; ``members_of`` re-lists ``/proc`` (one
-    directory read) and stat-reads only pids that appeared since the previous
-    refresh, so per-group freshness costs O(new processes) instead of a
-    full-table re-read per group. A process spawned into a later group after
-    the batch started is therefore still seen before that group's TERM. Entries
-    are candidates only — callers re-read each member's stat live.
+    Built by one full ``/proc`` scan; ``members_of`` re-lists ``/proc`` and
+    re-reads each live pid's stat (never cmdline), so a process spawned into a
+    later group after the batch started is still seen before that group's TERM.
+    Each pid is cached as ``(pgid, starttime)`` and a live pid whose identity
+    changed — the pid exited and was recycled between refreshes, or moved
+    group — is re-indexed as a new process (#982): only starttime proves a pid
+    is still the same process, so a mere listing cannot skip the stat read.
+    Entries are candidates only — callers re-read each member's stat live.
     """
 
     def __init__(self, proc_root: Path = procfs.PROC_ROOT) -> None:
         self._proc_root = proc_root
-        self._pgid_of: dict[int, int] = {}
+        self._identity_of: dict[int, tuple[int, int]] = {}
         self._by_pgid: dict[int, set[int]] = {}
         self._refresh()
 
     def _refresh(self) -> None:
         live = set(procfs.iter_pids(self._proc_root))
-        for pid in self._pgid_of.keys() - live:
-            self._by_pgid[self._pgid_of.pop(pid)].discard(pid)
-        for pid in live - self._pgid_of.keys():
-            if (stat := procfs.read_stat(pid, self._proc_root)) is not None:
-                self._pgid_of[pid] = stat.pgid
+        for pid in self._identity_of.keys() - live:
+            self._forget(pid)
+        for pid in live:
+            stat = procfs.read_stat(pid, self._proc_root)
+            identity = None if stat is None else (stat.pgid, stat.starttime)
+            if identity == self._identity_of.get(pid):
+                continue
+            self._forget(pid)
+            if stat is not None:
+                self._identity_of[pid] = (stat.pgid, stat.starttime)
                 self._by_pgid.setdefault(stat.pgid, set()).add(pid)
+
+    def _forget(self, pid: int) -> None:
+        if (cached := self._identity_of.pop(pid, None)) is not None:
+            self._by_pgid[cached[0]].discard(pid)
 
     def members_of(self, pgid: int) -> dict[int, list[int]]:
         """Refresh, then ``{pgid: [pid, ...]}`` in the ``pgid_members`` shape."""

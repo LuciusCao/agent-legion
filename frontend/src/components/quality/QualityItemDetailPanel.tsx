@@ -1,8 +1,5 @@
-import {
-  formatQualityDateTime,
-  QualityArtifactView,
-  QualityLabelHistory,
-} from './QualityArtifactView'
+import { formatDateTime } from '../../lib/formatters'
+import { QualityArtifactView, QualityLabelHistory } from './QualityArtifactView'
 import { QualityLabelForm } from './QualityLabelForm'
 import { QualityReplaySection } from './QualityReplaySection'
 import { toErrorMessage } from '../../lib/queryError'
@@ -48,7 +45,7 @@ export function QualityItemDetailPanel({
     ['失败详情', item.failure_detail || '-'],
     ['Job', item.job_id],
     ['Node Run', String(item.node_run_id)],
-    ['时间', formatQualityDateTime(item.created_at)],
+    ['时间', formatDateTime(item.created_at)],
   ]
 
   return (

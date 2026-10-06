@@ -217,7 +217,6 @@ describe('WorkspaceMainPage', () => {
           workspace_id: 'ws1',
         }),
       ],
-      workerPausedByWorkspace: {},
     })
     useUiStore.setState({
       workspacePackageDialogOpen: false,
