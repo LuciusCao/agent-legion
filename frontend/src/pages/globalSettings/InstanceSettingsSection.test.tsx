@@ -41,6 +41,7 @@ const settings: InstanceSettingsResponse = {
   result_unpack: { workers: 0 },
   result_validate: { workers: 0 },
   agent_claim: { worker_touch_interval_seconds: 30 },
+  csp_script_unsafe_inline: false,
   skills_root: '~/.agents/skills',
 }
 
@@ -200,6 +201,29 @@ describe('InstanceSettingsSection', () => {
     // Baseline updated: the form is clean again after a successful save.
     await waitFor(() => {
       expect(screen.getByText('保存实例设置')).toBeDisabled()
+    })
+  })
+
+  it('toggles the preview panel CSP compatibility mode online (#989)', async () => {
+    vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
+      ...settings,
+      ...payload,
+    }))
+
+    renderSection()
+    // 安全组直接可见（非高级参数），默认关闭，说明降低安全性的代价。
+    const toggle =
+      await screen.findByLabelText('预览面板兼容模式（允许内联事件属性）')
+    expect(toggle).not.toBeChecked()
+    expect(screen.getByText(/会降低平台页面的脚本防护/)).toBeInTheDocument()
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByText('保存实例设置'))
+
+    await waitFor(() => {
+      expect(updateInstanceSettings).toHaveBeenCalledWith({
+        ...updateBase,
+        csp_script_unsafe_inline: true,
+      })
     })
   })
 

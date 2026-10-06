@@ -18,10 +18,11 @@ behind DOMPurify, sized to what the shipped frontend actually loads:
   stay blocked — nonces cannot authorize them, and ``'unsafe-hashes'`` would
   need a hash per handler string of agent-authored bundles. Instances with
   published panels that still rely on them can fall back to the pre-#989
-  ``'self' 'unsafe-inline'`` with ``AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE=1``
-  (configuration/csp.py); the nonce is then left out of the header, since
-  its presence makes browsers ignore ``'unsafe-inline'``. HTML documents
-  without a nonce (the frontend-missing page) get plain ``'self'``.
+  ``'self' 'unsafe-inline'`` through the admin instance setting
+  ``csp_script_unsafe_inline`` (services/document_csp.py, default off); the
+  nonce is then left out of the header, since its presence makes browsers
+  ignore ``'unsafe-inline'``. HTML documents without a nonce (the
+  frontend-missing page) get plain ``'self'``.
 - ``style-src 'unsafe-inline'``: MUI/emotion inject ``<style>`` tags and
   KaTeX output carries inline ``style`` attributes. vite stamps the nonce on
   style tags too, but style-src deliberately lists no nonce (a nonce would
@@ -123,15 +124,9 @@ def _is_api_docs_path(path: str) -> bool:
 class ContentSecurityPolicyMiddleware:
     """Attach the document CSP to ``text/html`` responses lacking one."""
 
-    def __init__(
-        self,
-        app: ASGIApp,
-        connect_sources: Sequence[str] = (),
-        script_unsafe_inline: bool = False,
-    ) -> None:
+    def __init__(self, app: ASGIApp, connect_sources: Sequence[str] = ()) -> None:
         self.app = app
         self.connect_sources = tuple(connect_sources)
-        self.script_unsafe_inline = script_unsafe_inline
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or _is_api_docs_path(scope["path"]):
@@ -149,7 +144,7 @@ class ContentSecurityPolicyMiddleware:
                         self.connect_sources,
                         host,
                         script_nonce=slot.value,
-                        script_unsafe_inline=self.script_unsafe_inline,
+                        script_unsafe_inline=slot.unsafe_inline,
                     )
             await send(message)
 

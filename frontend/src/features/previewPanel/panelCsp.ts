@@ -43,8 +43,8 @@ export function readDocumentCspNonce(doc: Document = document): string {
  * 留零门槛 GET 外带通道——与 fetch/sendBeacon 同罪，一并闭合。
  *
  * 本策略的 script-src 保持 'unsafe-inline'（不写 nonce）：nonce 管控由继承
- * 的宿主头策略负责；这里若也写 nonce，实例回退开关
- * （AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE）就无法让 inline 事件属性复活。
+ * 的宿主头策略负责；这里若也写 nonce，实例设置的 CSP 兼容模式
+ * （csp_script_unsafe_inline）就无法让 inline 事件属性复活。
  */
 export function buildPanelCsp(): string {
   // 测试（node 环境）与浏览器都取当前 origin；取不到时退化为不含 origin

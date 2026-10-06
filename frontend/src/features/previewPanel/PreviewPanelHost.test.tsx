@@ -412,6 +412,8 @@ describe('PreviewPanelHost 宿主 CSP nonce（#989）', () => {
       type: 'csp-violation',
       directive: 'script-src-attr',
     })
-    expect(queryByRole('status')?.textContent).toContain('onclick=')
+    expect(queryByRole('status')?.textContent).toContain(
+      '全局设置 → 实例设置 → 安全'
+    )
   })
 })

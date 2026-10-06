@@ -66,6 +66,6 @@ test('严格文档 CSP 下生产构建与已发布预览面板可用（#989）',
   await expect(panel.locator('#status')).toHaveText('listener-ran')
   // inline 事件属性被拦截：状态不变，宿主显示拦截提示。
   await panel.locator('#inline-handler').click()
-  await expect(page.getByText('部分脚本被安全策略拦截')).toBeVisible()
+  await expect(page.getByText(/部分按钮或交互被安全策略拦截/)).toBeVisible()
   await expect(panel.locator('#status')).toHaveText('listener-ran')
 })

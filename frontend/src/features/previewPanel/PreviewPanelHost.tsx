@@ -60,6 +60,12 @@ const MIN_HEIGHT = 120
 const MAX_HEIGHT = 6000
 const DEFAULT_HEIGHT = 320
 
+// 面板对所有成员可见，提示面向成员（#989）：说明现象 + 找管理员的两条出路。
+const CSP_BLOCKED_HINT =
+  '此面板的部分按钮或交互被安全策略拦截，可能无法使用。请联系管理员：' +
+  '可让 agent 按最新面板规范（用 addEventListener 绑定事件）重写面板，' +
+  '或在「全局设置 → 实例设置 → 安全」中临时开启预览面板兼容模式。'
+
 export interface PreviewPanelHostProps {
   jobId: string
   /** 完整 HTML 文档 bundle（已发布版本或草稿预览）。 */
@@ -229,10 +235,7 @@ export function PreviewPanelHost({
       {loading && <div className={styles.loading}>预览加载中…</div>}
       {scriptBlocked && (
         <div className={styles.cspWarning} role="status">
-          面板的部分脚本被安全策略拦截（常见原因：使用了 onclick=
-          等内联事件属性），交互可能失效。请让 agent 改用 addEventListener
-          重写面板；管理员可临时设置 AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE=1
-          回退。
+          {CSP_BLOCKED_HINT}
         </div>
       )}
       <iframe

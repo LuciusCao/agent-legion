@@ -49,6 +49,7 @@ def _payload() -> dict:
         "result_unpack": {"workers": 0},
         "result_validate": {"workers": 0},
         "agent_claim": {"worker_touch_interval_seconds": 30},
+        "csp_script_unsafe_inline": False,
     }
 
 
@@ -373,3 +374,26 @@ def test_get_legacy_document_missing_capacity_blocks_falls_back(client) -> None:
     assert response.json()["result_unpack"] == {"workers": 0}
     assert response.json()["result_validate"] == {"workers": 0}
     assert response.json()["agent_claim"] == {"worker_touch_interval_seconds": 30}
+
+
+def test_csp_compat_switch_round_trips_and_applies_without_restart(client) -> None:
+    """#989: default strict; a save drops the serve-time cache immediately."""
+    switch = client.app.state.csp_compat
+    assert client.get(INSTANCE_SETTINGS_URL).json()["csp_script_unsafe_inline"] is False
+    assert switch.enabled() is False  # primes the 5 s cache with False
+
+    response = client.put(
+        INSTANCE_SETTINGS_URL, json={**_payload(), "csp_script_unsafe_inline": True}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["csp_script_unsafe_inline"] is True
+    assert client.get(INSTANCE_SETTINGS_URL).json()["csp_script_unsafe_inline"] is True
+    assert switch.enabled() is True
+
+    client.put(INSTANCE_SETTINGS_URL, json=_payload())
+    assert switch.enabled() is False
+
+
+def test_csp_compat_switch_rejects_non_boolean(client) -> None:
+    payload = {**_payload(), "csp_script_unsafe_inline": "yes"}
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422

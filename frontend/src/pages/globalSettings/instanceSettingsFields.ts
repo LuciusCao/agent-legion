@@ -8,10 +8,12 @@
 import type { FieldGroup, NumberFieldDef } from './instanceSettingsFieldTypes'
 import { CAPACITY_FIELD_GROUPS } from './instanceSettingsCapacityFields'
 import { RETENTION_FIELD_GROUPS } from './instanceSettingsRetentionFields'
+import { SECURITY_FIELD_GROUPS } from './instanceSettingsSecurityFields'
 
 export type { FieldGroup, NumberFieldDef } from './instanceSettingsFieldTypes'
 export { CAPACITY_FIELD_GROUPS } from './instanceSettingsCapacityFields'
 export { RETENTION_FIELD_GROUPS } from './instanceSettingsRetentionFields'
+export { SECURITY_FIELD_GROUPS } from './instanceSettingsSecurityFields'
 
 export const FIELD_GROUPS: FieldGroup[] = [
   {
@@ -111,6 +113,7 @@ export const FIELD_GROUPS: FieldGroup[] = [
   },
   ...RETENTION_FIELD_GROUPS,
   ...CAPACITY_FIELD_GROUPS,
+  ...SECURITY_FIELD_GROUPS,
   {
     title: 'Worker 限制',
     fields: [

@@ -2,9 +2,12 @@
 
 Split from http_csp.py (policy rationale there) for the file budget. The
 middleware plants one ``_NonceSlot`` per HTTP request; the SPA route that
-embeds the nonce in index.html fills it via ``issue_csp_nonce``; the
-middleware then renders the header from whatever the slot holds — so only a
-document that actually carries the nonce gets one in its policy.
+embeds the nonce in index.html fills it via ``issue_csp_nonce`` (and, when
+the instance-settings compatibility switch is on, flags it via
+``mark_script_unsafe_inline``); the middleware then renders the header from
+whatever the slot holds — so only a document that actually carries the
+nonce gets one in its policy. Deciding in the route keeps the settings read
+(a DB round trip on cache miss) on the threadpool, off the event loop.
 """
 
 from __future__ import annotations
@@ -24,10 +27,11 @@ class _NonceSlot:
     """Per-request holder; a mutable object (not a scope value) so the nonce
     survives any scope copy between the middleware and the endpoint."""
 
-    __slots__ = ("value",)
+    __slots__ = ("unsafe_inline", "value")
 
     def __init__(self) -> None:
         self.value: str | None = None
+        self.unsafe_inline = False
 
 
 def plant_nonce_slot(scope: Scope) -> _NonceSlot:
@@ -49,9 +53,16 @@ def issue_csp_nonce(scope: Scope) -> str:
     return slot.value
 
 
+def mark_script_unsafe_inline(scope: Scope) -> None:
+    """Serve this response with the pre-#989 compat script-src."""
+    slot = scope.get(_NONCE_SCOPE_KEY)
+    if isinstance(slot, _NonceSlot):
+        slot.unsafe_inline = True
+
+
 def script_src_directive(nonce: str | None, unsafe_inline: bool) -> str:
     """Compat mode drops the nonce: its presence makes browsers ignore
-    ``'unsafe-inline'``, which would defeat the instance switch."""
+    ``'unsafe-inline'``, which would defeat the compatibility switch."""
     if unsafe_inline:
         return "script-src 'self' 'unsafe-inline'"
     if nonce:

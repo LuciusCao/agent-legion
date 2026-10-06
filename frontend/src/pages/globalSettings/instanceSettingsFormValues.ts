@@ -56,5 +56,6 @@ export function toFormValues(doc: InstanceSettingsResponse): FormValues {
     'agent_claim.worker_touch_interval_seconds': String(
       doc.agent_claim.worker_touch_interval_seconds
     ),
+    csp_script_unsafe_inline: doc.csp_script_unsafe_inline,
   }
 }

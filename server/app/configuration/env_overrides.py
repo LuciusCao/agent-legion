@@ -81,12 +81,6 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     ),
     "AGENT_LEGION_CORS_ALLOW_ORIGINS": (("server", "cors", "allow_origins"), _csv_parser),
     "AGENT_LEGION_CORS_ALLOW_CREDENTIALS": (("server", "cors", "allow_credentials"), _bool_parser),
-    # #989: roll the document CSP script-src back to 'unsafe-inline' (published
-    # preview panels with inline onclick= handlers); see configuration/csp.py.
-    "AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE": (
-        ("server", "csp", "script_unsafe_inline"),
-        _bool_parser,
-    ),
     "AGENT_LEGION_VAULT_MASTER_KEY": (("vault", "master_key"), _str_parser),
     "AGENT_LEGION_VAULT_MASTER_KEY_FILE": (("vault", "master_key_file"), _path_parser),
     "AGENT_LEGION_SKILLS_RUNS_DIR": (("skills", "runs_dir"), _path_parser),

@@ -4495,6 +4495,8 @@ export interface components {
       cleanup: components['schemas']['InstanceCleanupSettings']
       /** Code Capacity */
       code_capacity: number
+      /** Csp Script Unsafe Inline */
+      csp_script_unsafe_inline: boolean
       /** Execution Retention Days */
       execution_retention_days: number
       /** Heartbeat Failure Threshold */
@@ -4527,6 +4529,8 @@ export interface components {
       cleanup: components['schemas']['InstanceCleanupSettings']
       /** Code Capacity */
       code_capacity: number
+      /** Csp Script Unsafe Inline */
+      csp_script_unsafe_inline: boolean
       /** Execution Retention Days */
       execution_retention_days: number
       /** Heartbeat Failure Threshold */

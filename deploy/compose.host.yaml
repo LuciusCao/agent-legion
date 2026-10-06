@@ -160,10 +160,6 @@ services:
       # 的凭据齐备性由 scripts/local-s3-decide.sh 在 prod-up 入口 fail-fast。
       AGENT_LEGION_S3_ACCESS_KEY: ${AGENT_LEGION_S3_ACCESS_KEY:-}
       AGENT_LEGION_S3_SECRET_KEY: ${AGENT_LEGION_S3_SECRET_KEY:-}
-      # 文档 CSP 回退开关（#989，env-only）：已发布预览面板依赖 onclick= 等
-      # 内联事件属性时在 deploy/.env 临时设 1。缺省写 false 而非空串：空值
-      # 不是合法布尔值，会让 Host 启动失败。
-      AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE: ${AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE:-false}
     secrets: [postgres_pgpass, vault_master_key]
     volumes:
       - host-data:/var/lib/agent-legion

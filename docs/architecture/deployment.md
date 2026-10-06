@@ -153,8 +153,9 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
   按响应替换为新 nonce（index.html 因此不带 ETag），前端从 `<meta property="csp-nonce">`
   读回并由预览面板宿主盖到 bundle 的 `<script>` 上——`srcdoc` iframe 继承宿主文档策略。
   面板里的内联事件属性（`onclick=`）与 `javascript:` URL 被拦截（宿主显示提示）；
-  已发布面板依赖它们的实例可临时设 `AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE=1` 回退到
-  `'self' 'unsafe-inline'`（默认关，env-only，`server/app/configuration/csp.py`）。其余指令
+  已发布面板依赖它们的实例可由管理员在「全局设置 → 实例设置 → 安全」开启预览面板兼容模式
+  （实例设置 `csp_script_unsafe_inline`，默认关）回退到 `'self' 'unsafe-inline'`；SPA 路由经
+  `server/app/services/document_csp.py` 的 5 秒缓存读取，保存即失效缓存、无需重启。其余指令
   （`connect-src` 限同源 + 对象存储 presign 源、`frame-ancestors 'self'`、`object-src 'none'`、
   `base-uri`、`form-action`）照常生效。vite dev server 不经 Host、不下发 CSP。改前端外链
   资源（字体、图源、上传直连）时同步改该模块。

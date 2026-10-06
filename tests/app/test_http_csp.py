@@ -6,22 +6,24 @@ import re
 from pathlib import Path
 
 import pytest
-import yaml
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 
-from server.app.configuration.csp import load_csp_settings
-from server.app.configuration.env_overrides import _bool_parser
 from server.app.http_csp import (
     ContentSecurityPolicyMiddleware,
     build_spa_csp,
     object_store_connect_sources,
 )
-from server.app.http_csp_nonce import CSP_NONCE_PLACEHOLDER, issue_csp_nonce
-from server.app.settings import load_settings
+from server.app.http_csp_nonce import (
+    CSP_NONCE_PLACEHOLDER,
+    issue_csp_nonce,
+    mark_script_unsafe_inline,
+)
+from server.app.services.instance_settings_store import InstanceSettingsStore
 from server.app.storage.s3_settings import S3Settings
 from tests.helpers import setup_spa_app
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _directives(policy: str) -> dict[str, list[str]]:
@@ -102,24 +104,26 @@ def test_index_nonce_matches_header_and_rotates_per_response(tmp_path, monkeypat
     assert len(seen) == 4
 
 
-def _probe_app(script_unsafe_inline: bool) -> FastAPI:
+def _probe_app() -> FastAPI:
     app = FastAPI()
 
     @app.get("/page", response_class=HTMLResponse)
     def page(request: Request) -> str:
+        if request.query_params.get("compat") == "1":
+            mark_script_unsafe_inline(request.scope)
         return issue_csp_nonce(request.scope) + "|" + issue_csp_nonce(request.scope)
 
     @app.get("/plain", response_class=HTMLResponse)
     def plain() -> str:
         return "<p>no nonce</p>"
 
-    app.add_middleware(ContentSecurityPolicyMiddleware, script_unsafe_inline=script_unsafe_inline)
+    app.add_middleware(ContentSecurityPolicyMiddleware)
     return app
 
 
 @pytest.mark.no_db
 def test_middleware_puts_the_issued_nonce_in_the_header() -> None:
-    with TestClient(_probe_app(script_unsafe_inline=False)) as client:
+    with TestClient(_probe_app()) as client:
         response = client.get("/page")
         first, second = response.text.split("|")
         # One nonce per response, however often the endpoint asks.
@@ -133,48 +137,40 @@ def test_middleware_puts_the_issued_nonce_in_the_header() -> None:
 
 
 @pytest.mark.no_db
-def test_instance_switch_rolls_script_src_back_to_unsafe_inline() -> None:
+def test_compat_flag_rolls_script_src_back_to_unsafe_inline() -> None:
     """Compat mode leaves the nonce out: its presence disables 'unsafe-inline'."""
-    with TestClient(_probe_app(script_unsafe_inline=True)) as client:
-        response = client.get("/page")
+    with TestClient(_probe_app()) as client:
+        response = client.get("/page?compat=1")
         script_src = _directives(response.headers["content-security-policy"])["script-src"]
         assert script_src == ["'self'", "'unsafe-inline'"]
 
 
-def test_csp_switch_env_drives_settings(tmp_path, monkeypatch):
-    config_path = tmp_path / "explicit.yaml"
-    config_path.write_text("{}\n", encoding="utf-8")
-    monkeypatch.delenv("AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE", raising=False)
-    assert (
-        load_settings(data_dir=tmp_path / "data", config_path=config_path).csp.script_unsafe_inline
-        is False
+def test_instance_setting_switches_the_served_policy(tmp_path, monkeypatch):
+    """#989: admin switch on → pre-#989 header without nonce; off → nonce back."""
+    from server.app import main
+
+    root_dir, data_dir = setup_spa_app(tmp_path, monkeypatch)
+    frontend_dist = root_dir / "frontend" / "dist"
+    (frontend_dist / "assets").mkdir(parents=True)
+    (frontend_dist / "index.html").write_text(
+        f'<meta property="csp-nonce" nonce="{CSP_NONCE_PLACEHOLDER}">', encoding="utf-8"
     )
-    monkeypatch.setenv("AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE", "1")
-    assert (
-        load_settings(data_dir=tmp_path / "data", config_path=config_path).csp.script_unsafe_inline
-        is True
-    )
+    app = main.create_app(data_dir=data_dir, start_worker=False)
+    store = InstanceSettingsStore(TEST_DATABASE_URL)
+    with TestClient(app) as client:
+        store.put({"csp_script_unsafe_inline": True})
+        app.state.csp_compat.invalidate()
+        response = client.get("/")
+        policy = response.headers["content-security-policy"]
+        assert _directives(policy)["script-src"] == ["'self'", "'unsafe-inline'"]
+        assert "nonce-" not in policy
+        # The body keeps a real nonce: stamped panels stay valid either way.
+        assert CSP_NONCE_PLACEHOLDER not in response.text
 
-
-@pytest.mark.no_db
-def test_docker_host_stack_passes_the_csp_switch_through() -> None:
-    """compose's deploy/.env only feeds interpolation: the Host container sees
-    the switch only if compose.host.yaml forwards it, and the unset default
-    must still parse as a boolean (an empty string fails the settings load)."""
-    repo = Path(__file__).resolve().parents[2]
-    doc = yaml.safe_load((repo / "deploy/compose.host.yaml").read_text(encoding="utf-8"))
-    value = doc["services"]["host"]["environment"]["AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE"]
-    match = re.fullmatch(r"\$\{AGENT_LEGION_CSP_SCRIPT_UNSAFE_INLINE:-(\w+)\}", value)
-    assert match is not None, value
-    assert load_csp_settings(
-        {"server": {"csp": {"script_unsafe_inline": _bool_parser(match.group(1))}}}
-    ) == load_csp_settings({})
-
-
-@pytest.mark.no_db
-def test_csp_settings_reject_non_boolean_switch() -> None:
-    with pytest.raises(ValueError, match="script_unsafe_inline must be a boolean"):
-        load_csp_settings({"server": {"csp": {"script_unsafe_inline": "yes"}}})
+        store.put({"csp_script_unsafe_inline": False})
+        app.state.csp_compat.invalidate()
+        script_src = _directives(client.get("/").headers["content-security-policy"])["script-src"]
+        assert script_src[0] == "'self'" and script_src[1].startswith("'nonce-")
 
 
 @pytest.mark.no_db
