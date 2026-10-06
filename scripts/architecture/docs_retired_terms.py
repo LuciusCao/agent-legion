@@ -10,7 +10,7 @@ describing pipeline nodes and external skills weeks after both were gone.
 ``generate_architecture --check`` only protects AUTO-GENERATED sections;
 prose and diagrams were the blind spot this check closes.
 
-Semantics (see docs/architecture/docs-governance-proposal.md):
+Semantics (see docs/architecture/docs-governance.md):
 
 - Scan only the ``_CURRENT_DOCS`` whitelist; point-in-time snapshots
   (risk reviews, PoC reports, ``docs/reviews/``) are exempt by design.
@@ -66,23 +66,25 @@ _CURRENT_DOCS = (
     "docs/data-layout.md",
     "docs/materials-storage-deployment.md",
     "docs/postgresql-runbook.md",
+    "docs/release-notes.md",
     "docs/remote-execution-runbook.md",
     "docs/studio-agent-mcp.md",
+    "docs/workspace-api-tokens.md",
     "scripts/README.md",
     "examples/README.md",
 )
 
 # Files under docs/ that read like current-state docs but are not: governance
-# proposals quote retired terms (they must NAME the concepts they retire);
+# docs quote retired terms (they must NAME the concepts they retire);
 # the time-point snapshot zone is wholesale exempt.
 _DOC_EXEMPT_PREFIXES = ("docs/reviews/",)
 _LEGACY_CONCEPTS_PROPOSAL = "docs/architecture/instance-settings-legacy-concepts-governance.md"
-# Both entries are governance proposals: they NAME the retired concepts they
+# Both entries are governance docs: they NAME the retired concepts they
 # propose to retire, so term hits inside them are quotes, not behavior.
-_DOC_EXEMPT_FILES = {"docs/architecture/docs-governance-proposal.md", _LEGACY_CONCEPTS_PROPOSAL}
+_DOC_EXEMPT_FILES = {"docs/architecture/docs-governance.md", _LEGACY_CONCEPTS_PROPOSAL}
 
 # Retirement-phrase context: a hit inside such a sentence is describing the
-# retirement itself. Known blind spot (recorded in the proposal §2.1): the
+# retirement itself. Known blind spot (recorded in docs-governance.md §1): the
 # phrase may sit in the same sentence while modifying something else.
 _RETIREMENT_PHRASE = re.compile(
     r"已退役|已随|退役|不再|已删除|已移除|改用|历史|遗留|legacy|retired|removed|replaced|no longer|superseded",
