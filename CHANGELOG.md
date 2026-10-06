@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Maintenance
+
+- velites 0.5.6 → 0.5.7 落版：velites-v0.5.6 tag 后 velites 子树积 1 个未发布的改动——#978 工具沙箱收敛系列（#922/#942/#715：bash 命名空间隔离对齐 `sandbox wrap`、网络默认隔离 + `sandbox_network` 开关、环境白名单、原子写随机临时文件、退出后有界 drain），即 0.7.16 Changed/Security 段所述「需随 velites 补丁版生效」的部分；三平台二进制经 velites-v0.5.7 tag 发布，`scripts/install-worker.sh` 默认版本同步到 0.5.7。升级顺序见 0.7.16 段：先升 Worker 上的 velites，再给节点开 `sandbox_network`。
+
 ## [0.7.16] - 2026-10-06
 
 主打安全审计收口与概念退役：#710 红队审计 P3 加固（worker 清单/dashboard 成员过滤、HTML 文档 CSP、ACP 子进程权限模型与环境继承收敛、velites 工具沙箱网络与命名空间隔离）叠加 review-1004 P1 收尾（sweeper 终态守卫、approval 原子换入、批量端点选择数上限、validator 异常路径产物逐出）；Studio Chat 会话生命周期收口（删除/归档 teardown 幂等、零内容空轮消息自愈与后台唤醒轮入站排队、后台任务回执适配 Kimi Code 存储布局）；概念退役推进 Agent 定义 P1/P2（执行档案并入节点自含声明，schema v90–v92）与 workflow_key 终态删除；job 详情区分「排队」与「输入恢复不全卡住」（#887）；治理面清退豁免锚点并收紧 CI 路径分道。
