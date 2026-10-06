@@ -105,6 +105,22 @@ describe('StudioChatSessionMenu retention (#1041)', () => {
     expect(screen.getByRole('alert')).not.toHaveTextContent('自动清理')
   })
 
+  it('unknown retention (null) is not "off": prompts carry a generic warning', async () => {
+    const props = renderMenu({ retentionDays: null })
+    const archived = openArchive()
+    expect(within(archived).queryByText(/天后清理/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('删除会话 旧对话'))
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '若管理员配置了保留策略，到期将被自动清理'
+    )
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    fireEvent.click(screen.getByLabelText('归档会话 旧对话'))
+    await waitFor(() => expect(props.onArchive).toHaveBeenCalledWith('s2'))
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '若管理员配置了保留策略，到期将被自动清理'
+    )
+  })
+
   it('archiving a closed session announces the cleanup date', async () => {
     const props = renderMenu()
     fireEvent.click(screen.getByLabelText('归档会话 旧对话'))

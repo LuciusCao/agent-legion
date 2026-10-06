@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { queryKeys } from '../../../lib/queryKeys'
+import { studioChatRetentionKey } from './studioChatRetention'
 import * as archiveApi from './studioChatSessionArchiveApi'
 import {
   archivedStudioChatSessionsKey,
@@ -64,12 +65,34 @@ describe('useStudioChatSessionArchive', () => {
     expect(mockApi.fetchArchivedStudioChatSessions).toHaveBeenCalledWith('ws1')
   })
 
-  it('retention is 0 (no countdown) until the archive view loads', () => {
+  it('retention is unknown (null, not "off") while neither list answered', () => {
     mockApi.fetchArchivedStudioChatSessions.mockReturnValue(
       new Promise(() => undefined)
     )
     const { result } = setup('s1')
-    expect(result.current.archive.retentionDays).toBe(0)
+    expect(result.current.archive.retentionDays).toBeNull()
+  })
+
+  it('a failed archive view keeps retention unknown', async () => {
+    mockApi.fetchArchivedStudioChatSessions.mockRejectedValue(new Error('500'))
+    const { result, client } = setup('s1')
+    await waitFor(() =>
+      expect(
+        client.getQueryState(archivedStudioChatSessionsKey('ws1'))?.status
+      ).toBe('error')
+    )
+    expect(result.current.archive.retentionDays).toBeNull()
+  })
+
+  it('the default list response supplies retention before the archive view', async () => {
+    mockApi.fetchArchivedStudioChatSessions.mockReturnValue(
+      new Promise(() => undefined)
+    )
+    const { result, client } = setup('s1')
+    act(() => {
+      client.setQueryData(studioChatRetentionKey('ws1'), 14)
+    })
+    await waitFor(() => expect(result.current.archive.retentionDays).toBe(14))
   })
 
   it('archiving the active session prunes the cache before clearing selection', async () => {

@@ -30,8 +30,9 @@ type Props = {
   onArchive?: (sessionId: string) => Promise<void>
   onUnarchive?: (sessionId: string) => Promise<void>
   /** 实例对话保留天数（#1041）；>0 时归档行显示倒计时，归档 / 删除提示
-   * 「将于 N 天后自动清理」。0 / 缺省 = 未配置，不显示任何清理信息。 */
-  retentionDays?: number
+   * 「将于 N 天后自动清理」。0 / 缺省 = 未配置，不显示任何清理信息。
+   * null = 未知（列表响应尚未拿到）：不当作关闭，提示给通用清理警告。 */
+  retentionDays?: number | null
 }
 
 type Mode = {
@@ -50,7 +51,9 @@ export function StudioChatSessionMenu(props: Props) {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const active = props.sessions.find((row) => row.id === props.activeSessionId)
-  const purge = retentionNotice(props.retentionDays ?? 0)
+  const retentionDays =
+    props.retentionDays === undefined ? 0 : props.retentionDays
+  const purge = retentionNotice(retentionDays)
 
   function close() {
     setAnchor(null)
@@ -99,7 +102,7 @@ export function StudioChatSessionMenu(props: Props) {
       return (
         <StudioChatSessionRowConfirm
           tone="danger"
-          text={deleteConfirmText(label, !closed, props.retentionDays)}
+          text={deleteConfirmText(label, !closed, retentionDays)}
           confirmLabel="永久删除"
           pending={pending}
           onConfirm={() => void run(() => props.onDelete!(session.id))}

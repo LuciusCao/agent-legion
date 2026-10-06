@@ -1,6 +1,7 @@
 /** #1041：归档倒计时现算（归档时间 + 保留天数 − 现在，向上取整、下限 0）。 */
 import { describe, expect, it } from 'vitest'
 import {
+  UNKNOWN_RETENTION_NOTICE,
   retentionCountdownLabel,
   retentionDaysLeft,
   retentionNotice,
@@ -28,5 +29,7 @@ describe('studioChatRetention', () => {
     expect(retentionCountdownLabel(3)).toBe('3 天后清理')
     expect(retentionCountdownLabel(0)).toBe('即将清理')
     expect(retentionNotice(30)).toBe('将于 30 天后自动清理')
+    // 未知（null）不等于关闭：给出通用清理警告。
+    expect(retentionNotice(null)).toBe(UNKNOWN_RETENTION_NOTICE)
   })
 })

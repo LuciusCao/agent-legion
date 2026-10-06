@@ -40,14 +40,17 @@ export function StudioChatSessionRowConfirm(props: Props) {
 }
 
 /** 删除确认文案（#924）：明确不可恢复，并指向可恢复的归档。
- * #1041：配置了对话保留策略时附「将于 N 天后自动清理」（物理清除时点）。 */
+ * #1041：配置了对话保留策略时附「将于 N 天后自动清理」（物理清除时点）；
+ * 保留策略未知（null）时附通用清理警告，不当作关闭静默。 */
 export function deleteConfirmText(
   label: string,
   live: boolean,
-  retentionDays = 0
+  retentionDays: number | null = 0
 ): string {
   const purge = retentionNotice(retentionDays)
-  return `永久删除「${label}」？${live ? '会先关闭运行中的会话，' : ''}删除后不可恢复${purge ? `，数据${purge}` : ''}；只想收起会话请改用归档`
+  const suffix =
+    retentionDays === null ? `；${purge}` : purge ? `，数据${purge}` : ''
+  return `永久删除「${label}」？${live ? '会先关闭运行中的会话，' : ''}删除后不可恢复${suffix}；只想收起会话请改用归档`
 }
 
 /** #924：删除是次要 danger 操作（红色），归档是主整理操作（悬停主色）。

@@ -26,8 +26,9 @@ type Props = {
   run: (action: () => Promise<void>) => Promise<boolean>
   onUnarchive: (sessionId: string) => Promise<void>
   onDelete?: (sessionId: string) => Promise<void>
-  /** 实例对话保留天数（#1041）；0 / 缺省 = 未配置，不显示倒计时。 */
-  retentionDays?: number
+  /** 实例对话保留天数（#1041）；0 / 缺省 = 未配置，不显示倒计时；
+   * null = 未知（无倒计时，删除确认给通用清理警告）。 */
+  retentionDays?: number | null
 }
 
 /** 会话菜单底部的「已归档（N）」折叠区（#924）：默认收起；展开后每条
@@ -39,11 +40,12 @@ export function StudioChatArchivedSessions(props: Props) {
   const [open, setOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   if (props.sessions.length === 0) return null
-  const retentionDays = props.retentionDays ?? 0
+  const retentionDays =
+    props.retentionDays === undefined ? 0 : props.retentionDays
 
   function renderRow(session: StudioChatSessionRecord) {
     const label = sessionLabel(session)
-    const daysLeft = retentionDaysLeft(session.archived_at, retentionDays)
+    const daysLeft = retentionDaysLeft(session.archived_at, retentionDays ?? 0)
     if (confirmDelete === session.id && props.onDelete) {
       const onDelete = props.onDelete
       return (
