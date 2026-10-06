@@ -36,23 +36,64 @@
   与 `deploy/.env`（S3 凭据等）。丢了可以重新生成，但要同步改 PostgreSQL 角色
   密码与对象存储 root 凭据，有备份更省事。
 
-### 1.2 建议备份
+**Docker stack 的 key 文件实际路径**：compose 的 secret 来源是
+`${VAULT_MASTER_KEY_FILE:-./secrets/vault_master_key}`（`deploy/compose.host.yaml`
+顶层 `secrets.vault_master_key.file`），变量可来自 shell 环境或 `deploy/.env`，
+相对路径以 compose 文件所在的 `deploy/` 为基准。不要自己拼路径，让 compose 解析：
+`docker compose -f deploy/compose.host.yaml config` 输出末尾顶层 `secrets:` 段里
+`vault_master_key` 的 `file:` 即解析后的绝对路径。下文记作 `KEY_FILE`：
 
-- Host 数据卷 `host-data` 下的 `artifacts/`：legacy 本地 CAS，存量 blob 仍可能被
-  旧清单行引用；Worker 直传缺上传规格、直传失败或崩溃恢复重进时也会回落到这条
-  CAS 旧通道写入（见 [data-layout.md](data-layout.md) §1）。正常路径下体量通常
-  很小，随数据库一起备份即可。
+```bash
+docker compose -f deploy/compose.host.yaml config | grep -A3 '^  vault_master_key:'
+KEY_FILE=<上面输出中 file: 后的绝对路径>
+```
+
+### 1.2 视实例情况必须备份：只在本地的 legacy 产物
+
+Host 数据根（Docker stack 为卷 `host-data`，挂在容器 `/var/lib/agent-legion`；
+原生形态为 `data/` 或 `AGENT_LEGION_DATA_DIR`）里有两类内容可能是**唯一副本**，
+无法从对象存储重新物化：
+
+- `jobs/` 下的 job 目录：产物读取先看本地 job_dir、再按 `job_artifacts` 清单行回退
+  对象存储（`server/app/services/job_artifacts.py`）。没有清单行的 job——实例启用
+  对象存储产物（schema v54）之前产生的历史 job，或从未配置
+  `AGENT_LEGION_S3_BUCKET` 的实例上的全部 job——产物只在本地 job_dir。
+- `artifacts/`：legacy 本地 CAS，`artifact_refs` 表引用的 blob 只存在这里；Worker
+  直传缺上传规格、直传失败或崩溃恢复重进时也会回落到这条旧通道写入（见
+  [data-layout.md](data-layout.md) §1）。
+
+用数据库判定本实例是否有这类数据（Docker stack 经
+`docker compose -f deploy/compose.host.yaml exec -T postgres psql -U agent_legion -d agent_legion -c '<SQL>'` 执行）：
+
+```sql
+-- > 0：artifact_refs 引用的 blob 只在 artifacts/，必须备份 artifacts/
+select count(*) from artifact_refs;
+-- > 0：这些 job 没有任何对象存储清单行，产物（若有）只在本地 job 目录
+select count(*) from jobs j
+where not exists (select 1 from job_artifacts a where a.job_id = j.id);
+-- 列出这些 job 的目录：storage_dir 相对数据根解析，为空时即 jobs/<id>
+select j.id, j.storage_dir from jobs j
+where not exists (select 1 from job_artifacts a where a.job_id = j.id);
+```
+
+第二条是保守上界：没有产出任何产物的 job（例如早期失败）也会计入。两条都为
+0 时数据根可按 §1.4 当作缓存；否则把 `artifacts/` 与第三条列出的 job 目录（不确定
+时直接整个 `jobs/`）随数据库一起备份，命令见 §2.2.1。
+
+### 1.3 建议备份
+
 - Worker 状态卷 `worker-control`（状态副本 `worker.yaml`、control token）：丢失
   可按 [agent-worker-deployment.md](agent-worker-deployment.md) 重新配置与注册，
   备份只为省去重配。
 
-### 1.3 不需要备份
+### 1.4 不需要备份
 
-`data/materials_cache/`、`data/jobs/` 下的本地 run 目录、`data/agent_bundles/`、
-`data/logs/`（日志按保留期轮转，有审计需求再自行归档）以及 Worker 的 work root
-都是缓存或在途文件，丢失后按需从对象存储重新物化或自动重建。
+在 §1.2 的判定结果为空的前提下，`data/materials_cache/`、`data/jobs/` 下的本地
+job / run 目录、`data/agent_bundles/`、`data/logs/`（日志按保留期轮转，有审计需求
+再自行归档）以及 Worker 的 work root 都是缓存或在途文件，丢失后按需从对象存储
+重新物化或自动重建。
 
-### 1.4 一致性：数据库与对象存储的时间差
+### 1.5 一致性：数据库与对象存储的时间差
 
 数据库与对象存储无法原子地同时快照。产物写入是「先写对象、后写清单行」，
 所以按下面的顺序做：
@@ -74,14 +115,23 @@
 
 ### 2.1 PostgreSQL 备份
 
+先写唯一的临时文件（`mktemp`，权限 0600），`pg_dump` 成功后再改名为最终文件；
+最终文件名带到秒，且已存在时拒绝覆盖——重试不会截断上一份成功的备份，失败只
+留下以 `.` 开头的临时文件（可直接删除）。命令在 bash 与 zsh 下通用（用函数包装
+`docker compose`，原因见 §2.3 第 3 步）：
+
 ```bash
-mkdir -p <备份目录>
-docker compose -f deploy/compose.host.yaml exec -T postgres \
-  pg_dump -U agent_legion -d agent_legion -Fc > <备份目录>/agent_legion-$(date +%Y%m%d%H%M).dump
+C() { docker compose -f deploy/compose.host.yaml exec -T postgres "$@"; }
+BK=<备份目录>
+mkdir -p "$BK"
+OUT="$BK/agent_legion-$(date +%Y%m%d%H%M%S).dump"
+TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
+  && C pg_dump -U agent_legion -d agent_legion -Fc > "$TMP" \
+  && [ ! -e "$OUT" ] && mv "$TMP" "$OUT" && echo "备份完成：$OUT"
 ```
 
-原生形态用本机 PostgreSQL 17 客户端：
-`pg_dump -Fc -d "$AGENT_LEGION_DATABASE_URL" -f <备份目录>/agent_legion-<时间戳>.dump`。
+原生形态用本机 PostgreSQL 17 客户端，同样先写临时文件：把上面的
+`C pg_dump … > "$TMP"` 换成 `pg_dump -Fc -d "$AGENT_LEGION_DATABASE_URL" -f "$TMP"`。
 
 ### 2.2 对象存储备份
 
@@ -98,14 +148,34 @@ docker compose -f deploy/compose.host.yaml exec -T postgres \
   元数据与 volume 文件都在其中，停机打包才自洽）：
 
   ```bash
+  TS="$(date +%Y%m%d%H%M%S)"
   docker compose -f deploy/compose.host.yaml stop seaweedfs
   docker run --rm -v agent-legion_seaweedfs-data:/data:ro -v <备份目录>:/backup \
-    busybox tar czf /backup/seaweedfs-data-<时间戳>.tar.gz -C /data .
+    busybox sh -c "tar czf /backup/.seaweedfs-data-$TS.partial -C /data . \
+      && [ ! -e /backup/seaweedfs-data-$TS.tar.gz ] \
+      && mv /backup/.seaweedfs-data-$TS.partial /backup/seaweedfs-data-$TS.tar.gz"
   docker compose -f deploy/compose.host.yaml --profile materials-local up -d seaweedfs
   ```
 
+  与数据库备份同理：先写临时文件、成功后再改名，不覆盖已有备份。
   `seaweedfs` 挂在 `materials-local` profile 下，单独拉起时要带
   `--profile`（或直接 `make prod-up docker`，由入口按决策加 profile）。
+
+### 2.2.1 legacy 本地产物备份（§1.2 判定非空时）
+
+Host 数据卷里的 `artifacts/` 与 `jobs/`（或 §1.2 第三条查询列出的 job 目录）随
+数据库一起打包，写法同上：
+
+```bash
+TS="$(date +%Y%m%d%H%M%S)"
+docker run --rm -v agent-legion_host-data:/src:ro -v <备份目录>:/backup \
+  busybox sh -c "cd /src && tar czf /backup/.host-data-$TS.partial artifacts jobs \
+    && [ ! -e /backup/host-data-$TS.tar.gz ] \
+    && mv /backup/.host-data-$TS.partial /backup/host-data-$TS.tar.gz"
+```
+
+热备份时这两处可能有正在写入的文件，强一致按 §1.5 先停 Host 与 Worker。原生
+形态直接打包数据根下的 `artifacts/` 与 `jobs/`。某个目录不存在（例如从未写过 legacy CAS）时从命令里去掉它。
 
 ### 2.3 恢复
 
@@ -118,6 +188,7 @@ docker compose -f deploy/compose.host.yaml exec -T postgres \
    先只拉起数据库：`docker compose -f deploy/compose.host.yaml up -d postgres`
    （后续 `exec` 需要容器在运行）。
 2. 恢复 vault 主密钥：把备份的 key 放回 Host 实际读取的位置（Docker stack 为
+   §1.1 用 `docker compose … config` 解析出的 `KEY_FILE`，默认即
    `deploy/secrets/vault_master_key`，`chmod 600`；原生形态见 §1.1）。**不要**在
    缺 key 文件的状态下运行 `scripts/install-deps.sh` 或 `scripts/init-worktree.sh`：
    二者在该文件缺失或为空时会生成一把新 key，新 key 解不开备份里的任何密文。
@@ -154,6 +225,9 @@ docker compose -f deploy/compose.host.yaml exec -T postgres \
 4. 恢复对象存储：S3 层反向同步，或停 `seaweedfs` 后清空卷内容再解包——用
    `find -mindepth 1 -delete` 清空（`rm -rf /data/*` 不会删隐藏文件）：
    `docker run --rm -v agent-legion_seaweedfs-data:/data -v <备份目录>:/backup busybox sh -c 'find /data -mindepth 1 -delete && tar xzf /backup/seaweedfs-data-<时间戳>.tar.gz -C /data'`。
+   有 §2.2.1 的 legacy 本地产物备份时一并放回 Host 数据卷：
+   `docker run --rm -v agent-legion_host-data:/dst -v <备份目录>:/backup busybox tar xzf /backup/host-data-<时间戳>.tar.gz -C /dst`
+   （原生形态解包到数据根）。
 5. `make prod-up docker` 拉起整个 stack；低于当前版本的 dump 会在启动时自动
    迁移到当前 schema。
 6. 后端每次启动都会把全部 workspace 调度重置为暂停（`server/app/main.py` 启动时
@@ -214,8 +288,8 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
 
 ### 4.2 处置流程
 
-1. **先找 key，不要急着生成新 key**。依次核对：`deploy/secrets/vault_master_key`
-   的备份、`VAULT_MASTER_KEY_FILE` 是否把 compose secret 指到了别的路径、原生
+1. **先找 key，不要急着生成新 key**。依次核对：§1.1 解析出的 `KEY_FILE`（及其
+   备份）、`VAULT_MASTER_KEY_FILE` 是否把 compose secret 指到了别的路径、原生
    形态根 `.env` 的 `AGENT_LEGION_VAULT_MASTER_KEY` / `AGENT_LEGION_VAULT_MASTER_KEY_FILE`、
    密钥保管处。只要找回原 key 放回原位并重启 Host，一切恢复，无需其他操作。
 2. **确认无法找回后再换新 key**。新 key 一旦开始用于写入，旧 key 即使事后找回也
@@ -224,14 +298,18 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
    先把现有 key 文件改名留存（万一判断有误还能退回），不要直接 `>` 覆盖：
 
    ```bash
-   mv deploy/secrets/vault_master_key deploy/secrets/vault_master_key.old
-   UV_CACHE_DIR=.uv-cache uv run python -c \
-     "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
-     > deploy/secrets/vault_master_key
-   chmod 600 deploy/secrets/vault_master_key
+   KEY_FILE=<§1.1 中 compose 解析出的绝对路径>
+   mv "$KEY_FILE" "$KEY_FILE.old" \
+     && (umask 077 && UV_CACHE_DIR=.uv-cache uv run python -c \
+          "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
+          > "$KEY_FILE") \
+     && chmod 600 "$KEY_FILE"
    ```
 
-   上面是 Docker stack 的位置。原生形态 Host 不读 `deploy/secrets/vault_master_key`：
+   上面是 Docker stack 的做法：`KEY_FILE` 必须是 compose 实际挂载的文件（部署用
+   `VAULT_MASTER_KEY_FILE` 覆盖过来源时，默认的 `deploy/secrets/vault_master_key`
+   根本不被读取），按 §1.1 用 `docker compose … config` 解析，不要假定默认路径。
+   原生形态 Host 不读 `deploy/secrets/vault_master_key`：
    在根 `.env` 里把 `AGENT_LEGION_VAULT_MASTER_KEY` 改为新 key，或让
    `AGENT_LEGION_VAULT_MASTER_KEY_FILE` 指向新 key 文件（二者择一；旧值 / 旧文件
    同样先留存）。然后重启 Host（`make prod-up docker`，或原生
