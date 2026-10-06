@@ -43,7 +43,7 @@ from server.app.workflows.definition import (
     workflow_definition_from_dict,
 )
 from server.app.workflows.loader import workflow_definition_from_mapping
-from server.app.workflows.revision_format import definition_hash
+from server.app.workflows.revision_format import definition_from_job_snapshot, definition_hash
 from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 
 if TYPE_CHECKING:
@@ -144,6 +144,16 @@ class ReplayProfileResolver:
             )
         return options
 
+    def options_for_job(
+        self, workspace_id: str, job: dict[str, Any], node_key: str
+    ) -> list[dict[str, Any]]:
+        """:meth:`options` for a sample's original job (none for non-agent nodes)."""
+        definition = definition_from_job_snapshot(job)
+        node = definition.nodes.get(node_key) if definition else None
+        if node is None or node.node_type != "agent":
+            return []
+        return self.options(workspace_id, node, str(job["workflow_revision_id"] or ""))
+
     def annotate(self, replays: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """*replays* with their frozen profile pin merged in (replay views)."""
         return [{**replay, **self.describe(replay)} for replay in replays]
@@ -240,6 +250,18 @@ class ReplayProfileResolver:
                 f" original snapshot ({', '.join(PROFILE_FIELDS)} differ after reload)"
             )
         return text
+
+
+def sampled_agent_version(node: WorkflowNode, item: dict[str, Any]) -> int | None:
+    """The Agent version a legacy node's sampled run ran (None = not recorded).
+
+    Quality sampling records it by definition hash (``quality_sample_items``);
+    a self-contained or code node never pins an Agent version.
+    """
+    if node.node_type != "agent" or is_self_contained_agent_node(node):
+        return None
+    recorded = item.get("agent_version")
+    return int(recorded) if recorded is not None else None
 
 
 def _load_stored(definition_json: Any) -> WorkflowDefinition | None:

@@ -20,6 +20,7 @@ import type {
 import {
   ORIGINAL_CHOICE,
   createBody,
+  originalChoiceLabel,
   optionLabel,
   optionValue,
   originalLabel,
@@ -208,7 +209,9 @@ export function QualityReplaySection({
           size="small"
           sx={{ minWidth: 280 }}
         >
-          <MenuItem value={ORIGINAL_CHOICE}>原运行的执行档案</MenuItem>
+          <MenuItem value={ORIGINAL_CHOICE}>
+            {originalChoiceLabel(originalAgentVersion)}
+          </MenuItem>
           {options.map((option) => (
             <MenuItem key={optionValue(option)} value={optionValue(option)}>
               {optionLabel(option)}

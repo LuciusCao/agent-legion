@@ -21,6 +21,14 @@ export function replayLabel(replay: QualityReplay): string {
   return '原执行档案'
 }
 
+/** 默认选项文案（#1079 review）：legacy 样本回放原运行实际跑的 Agent 版本
+ * （后端按样本记录的版本 pin），文案标明版本，不再隐式跑当前 published。 */
+export function originalChoiceLabel(agentVersion: number | null | undefined) {
+  return agentVersion != null
+    ? `原运行的执行档案（Agent v${agentVersion}）`
+    : '原运行的执行档案'
+}
+
 export const ORIGINAL_CHOICE = ''
 export const DRAFT_CHOICE = 'draft'
 

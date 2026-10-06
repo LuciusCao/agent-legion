@@ -119,7 +119,8 @@ class QualityReplayCreateRequest(BaseModel):
     revision_id: str | None = None
     use_draft: bool = False
     # Legacy Agent-version pin, only for not-yet-inlined agent nodes of older
-    # job snapshots (unset = the currently published Agent version).
+    # job snapshots (unset = the Agent version the sampled run ran, falling
+    # back to the currently published one when the sample recorded none).
     agent_version: int | None = Field(
         default=None,
         gt=0,

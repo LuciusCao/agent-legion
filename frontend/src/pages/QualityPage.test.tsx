@@ -346,6 +346,12 @@ describe('QualityPage', () => {
     expect(screen.queryByLabelText('Agent 版本')).not.toBeInTheDocument()
 
     await user.click(screen.getByLabelText('执行档案'))
+    // #1079 review：legacy 样本的默认选项标明原运行的 Agent 版本（v3）。
+    expect(
+      await screen.findByRole('option', {
+        name: '原运行的执行档案（Agent v3）',
+      })
+    ).toBeInTheDocument()
     await user.click(
       await screen.findByRole('option', {
         name: 'v7（当前生效） · velites / m2',

@@ -37,7 +37,10 @@ from server.app.services.job_errors import (
     NotFoundError,
 )
 from server.app.services.quality_artifact_contents import artifact_contents
-from server.app.services.quality_replay_profiles import ReplayProfileResolver
+from server.app.services.quality_replay_profiles import (
+    ReplayProfileResolver,
+    sampled_agent_version,
+)
 from server.app.services.quality_replay_setup import QualityReplaySetup
 from server.app.services.versioned_entities import VersionedEntityStore
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
@@ -94,9 +97,12 @@ class QualityReplayService:
             )
             if profile is not None and agent_version is not None:
                 raise InvalidOperationError(
-                    "agent_version pins apply to legacy Agent-definition nodes only;"
-                    " choose a workflow revision instead"
+                    "agent_version pins apply to legacy Agent-definition nodes only"
                 )
+            if profile is None and agent_version is None:
+                # #1079（D6 review）：legacy 节点「原运行的执行档案」= 原运行实际
+                # 跑的 Agent 版本，不是当前 published（前端已无手填版本入口）。
+                agent_version = sampled_agent_version(node, item)
             agent_id, pin = (
                 ("", None)
                 if profile is not None
@@ -161,13 +167,8 @@ class QualityReplayService:
         with self.job_db.write() as conn:
             item = self._get_item(conn, workspace_id, item_id)
             job = self._get_original_job(conn, workspace_id, str(item["job_id"]))
-        definition = definition_from_job_snapshot(job)
-        node = definition.nodes.get(str(item["node_key"])) if definition else None
-        if node is None or node.node_type != "agent":
-            return {"options": []}
         resolver = ReplayProfileResolver(self.job_db)
-        revision_id = str(job["workflow_revision_id"] or "")
-        return {"options": resolver.options(workspace_id, node, revision_id)}
+        return {"options": resolver.options_for_job(workspace_id, job, str(item["node_key"]))}
 
     def list_replays(self, workspace_id: str, item_id: str) -> list[dict[str, Any]]:
         with self.job_db.write() as conn:
@@ -222,7 +223,7 @@ class QualityReplayService:
     ) -> dict[str, Any]:
         row = conn.execute(
             """
-            select i.id, i.batch_id, i.job_id, i.node_key
+            select i.id, i.batch_id, i.job_id, i.node_key, i.agent_version
             from quality_sample_items i
             join quality_sample_batches b on b.id = i.batch_id
             where i.id = %s and b.workspace_id = %s
@@ -288,6 +289,7 @@ class QualityReplayService:
                 )
             raise NotFoundError(
                 f"Agent {agent_id!r} has no version {agent_version} in workspace {workspace_id!r}"
+                "; choose a workflow revision to replay with"
             )
         capability = str(entity.definition.get("capability") or "")
         if capability != node.capability:

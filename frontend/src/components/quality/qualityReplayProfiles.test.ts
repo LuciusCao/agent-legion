@@ -8,6 +8,7 @@ import {
   ORIGINAL_CHOICE,
   createBody,
   optionLabel,
+  originalChoiceLabel,
   optionValue,
   originalLabel,
   replayLabel,
@@ -73,5 +74,7 @@ describe('qualityReplayProfiles (#1079 D6)', () => {
     expect(replayLabel(replay({}))).toBe('原执行档案')
     expect(originalLabel(3)).toBe('Agent v3')
     expect(originalLabel(null)).toBe('原执行档案')
+    expect(originalChoiceLabel(3)).toBe('原运行的执行档案（Agent v3）')
+    expect(originalChoiceLabel(null)).toBe('原运行的执行档案')
   })
 })
