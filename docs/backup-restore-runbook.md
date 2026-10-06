@@ -5,7 +5,7 @@
 | 状态 | 位置（Docker stack，`deploy/compose.host.yaml`） | 内容 |
 |---|---|---|
 | PostgreSQL | 命名卷 `postgres-data`（服务 `postgres`，库 / 角色均为 `agent_legion`） | 全部业务与执行态：workspace、workflow revision、jobs / node_runs、`materials` 与 `job_artifacts` 清单行、vault 密文（`workspace_secrets` / `instance_secrets` / `connection_tokens`） |
-| 实例对象存储 | 默认 SeaweedFS 命名卷 `seaweedfs-data`（rustfs 逃生舱为 `rustfs-data`；外部 S3 则在对方服务里） | 材料对象（bucket 根）与产物权威副本（`jobs/` 前缀），清单行只存 key |
+| 实例对象存储 | 默认 SeaweedFS 命名卷 `seaweedfs-data`（`deploy/compose.local.yaml` 可改为 bind-mount，实际来源按 §2 解析；rustfs 逃生舱为 `rustfs-data`；外部 S3 则在对方服务里） | 材料对象（bucket 根）与产物权威副本（`jobs/` 前缀），清单行只存 key |
 | vault 主密钥 | `deploy/secrets/vault_master_key`（compose secret，以 `AGENT_LEGION_VAULT_MASTER_KEY_FILE` 注入 Host） | 解开上述全部 vault 密文的唯一 Fernet key，**不在数据库里** |
 | skill 仓库 | 宿主机目录 `${AGENT_SKILLS_DIR:-../skills}`（bind mount 到 Host 容器 `/root/.agents/skills`，不在任何命名卷里） | 各 skill 的本地 in-place Git 仓（含 `.git` 历史）与 workspace 的 `_shared` 材料；DB 的 `skill_lock` 只记录 commit，内容无法从 DB 或对象存储重建 |
 
@@ -62,7 +62,7 @@ KEY_FILE=<上面输出中 file: 后的绝对路径>
 
 ### 1.2 视实例情况必须备份：只在本地的 legacy 产物
 
-Host 数据根（Docker stack 为卷 `host-data`，挂在容器 `/var/lib/agent-legion`；
+Host 数据根（Docker stack 默认为卷 `host-data`，挂在容器 `/var/lib/agent-legion`，实际来源按 §2 解析；
 原生形态为 `data/` 或 `AGENT_LEGION_DATA_DIR`）里有两类内容可能是**唯一副本**，
 无法从对象存储重新物化：
 
@@ -127,7 +127,7 @@ job / run 目录、`data/agent_bundles/`、`data/logs/`（日志按保留期轮�
   但 dump 与复制之间被删除或被取代的对象（材料 TTL 回收、产物同名重登记后
   旧版本对象的清理）在复制时已不存在，恢复后表现为「行在、对象缺失」。
 - 要求强一致时做**冷备份**：先停 Host 与 Worker（Docker stack：
-  `docker compose -f deploy/compose.host.yaml stop host worker`；原生形态：
+  `docker compose "${F[@]}" stop host worker`；原生形态：
   `make prod-down`），再依次备份数据库与对象存储，完成后重新 `make prod-up`
   （或 `make prod-up docker`）。
 - 热备份可以接受时，恢复后按 §2.4 核对，缺失对象影响的 job 重跑即可。
@@ -137,6 +137,26 @@ job / run 目录、`data/agent_bundles/`、`data/logs/`（日志按保留期轮�
 以下命令在 prod worktree 根目录执行。compose 文件不是默认文件名，`-f` 不可省；
 命名卷的实际名称带 compose 项目名前缀（`agent-legion_`），以
 `docker volume ls` 为准。
+
+**先解析数据的实际挂载源**：`agent-legion_seaweedfs-data` / `agent-legion_host-data`
+只是基础编排的默认形态。`deploy/compose.local.yaml`（gitignored，Makefile 与
+prod-up 入口存在即自动并入）可以把既有数据目录 bind-mount 到 `seaweedfs` 的
+`/data` 或 `host` 的 `/var/lib/agent-legion`，这时命名卷是空的或未被使用，照抄
+卷名会归档空卷、恢复时写回错误位置。因此这台机器有 `compose.local.yaml` 时要把它
+与 `deploy/.env` 一起备份、全新机器上一起先放回；下文的 `docker compose` 命令都用
+§1.1 的 `F`（不带它重建容器会退回命名卷），`docker run -v` 的卷源一律用下面解析
+出的变量：
+
+```bash
+docker compose "${F[@]}" --profile materials-local config seaweedfs host \
+  | grep -B2 -A2 -E 'target: /(data|var/lib/agent-legion)$'
+# type: volume 时 source 是卷键，实际卷名加项目前缀；type: bind 时 source 是宿主机绝对路径
+SW_SRC=<agent-legion_seaweedfs-data 或 bind 的绝对路径>
+HD_SRC=<agent-legion_host-data 或 bind 的绝对路径>
+```
+
+容器已存在时可用 `docker inspect -f '{{range .Mounts}}{{.Type}} {{.Name}} {{.Source}} -> {{.Destination}}{{println}}{{end}}' "$(docker compose "${F[@]}" ps -aq seaweedfs)"`
+（`host` 同理）交叉核对。`docker run -v "$SW_SRC":/data` 对卷名与绝对路径都适用。
 
 ### 2.1 PostgreSQL 备份
 
@@ -189,13 +209,13 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
 
   ```bash
   TS="$(date +%Y%m%d%H%M%S)"
-  docker compose -f deploy/compose.host.yaml stop seaweedfs
-  docker run --rm -v agent-legion_seaweedfs-data:/data:ro -v <备份目录>:/backup \
+  docker compose "${F[@]}" stop seaweedfs
+  docker run --rm -v "$SW_SRC":/data:ro -v <备份目录>:/backup \
     busybox sh -c "tar czf /backup/.seaweedfs-data-$TS.partial -C /data . \
       && [ ! -e /backup/seaweedfs-data-$TS.tar.gz ] \
       && mv /backup/.seaweedfs-data-$TS.partial /backup/seaweedfs-data-$TS.tar.gz \
       || { echo '未完成：检查 <备份目录>/.seaweedfs-data-'$TS'.partial（tar 失败或目标已存在）' >&2; false; }"
-  docker compose -f deploy/compose.host.yaml --profile materials-local up -d seaweedfs
+  docker compose "${F[@]}" --profile materials-local up -d seaweedfs
   ```
 
   与数据库备份同理：先写临时文件、成功后再改名，不覆盖已有备份。
@@ -208,7 +228,7 @@ Host 数据卷里的 `artifacts/` 与整个 `jobs/` 随数据库一起打包，�
 
 ```bash
 TS="$(date +%Y%m%d%H%M%S)"
-docker run --rm -v agent-legion_host-data:/src:ro -v <备份目录>:/backup \
+docker run --rm -v "$HD_SRC":/src:ro -v <备份目录>:/backup \
   busybox sh -c "cd /src && tar czf /backup/.host-data-$TS.partial artifacts jobs \
     && [ ! -e /backup/host-data-$TS.tar.gz ] \
     && mv /backup/.host-data-$TS.partial /backup/host-data-$TS.tar.gz \
@@ -243,21 +263,23 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
 路径——把新版本 dump 恢复给旧代码属于不受支持的形态。
 
 1. 停 Host 与 Worker，避免恢复期间有写入：
-   `docker compose -f deploy/compose.host.yaml stop host worker`。
+   `docker compose "${F[@]}" stop host worker`。
 2. 全新机器先放回部署凭据：clean checkout 里没有 gitignored 的 `deploy/.env` 与
    `deploy/secrets/`，而 `postgres` 服务经 `POSTGRES_PASSWORD_FILE` 挂载
    compose secret `postgres_password`，文件缺失时容器起不来。把 §1.1 备份的
    `deploy/.env`、`deploy/secrets/postgres_password`、`deploy/secrets/postgres_pgpass`
    放回原位（`chmod 600`；`deploy/.env` 若用 `POSTGRES_PASSWORD_FILE` /
    `POSTGRES_PGPASS_FILE` 改写了来源，放到改写后的路径）。`deploy/.env` 要先于
-   下一步放回：它可能用 `VAULT_MASTER_KEY_FILE` 改写 key 路径。
+   下一步放回：它可能用 `VAULT_MASTER_KEY_FILE` 改写 key 路径。原机有
+   `deploy/compose.local.yaml` 的同样先放回（并按它重建 bind-mount 的宿主机目录），
+   再按 §2 开头解析 `SW_SRC` / `HD_SRC`。
 3. 恢复 vault 主密钥：把备份的 key 放回 Host 实际读取的位置（Docker stack 为
    §1.1 用 `docker compose … config` 解析出的 `KEY_FILE`，默认即
    `deploy/secrets/vault_master_key`，`chmod 600`；原生形态见 §1.1）。**不要**在
    缺 key 文件或部署凭据的状态下运行 `scripts/install-deps.sh` 或
    `scripts/init-worktree.sh`：二者在 key 文件缺失或为空时会生成一把新 key，新
    key 解不开备份里的任何密文。全新机器上这时再只拉起数据库：
-   `docker compose -f deploy/compose.host.yaml up -d postgres`（后续 `exec` 需要
+   `docker compose "${F[@]}" up -d postgres`（后续 `exec` 需要
    容器在运行）。
 4. 先预检 dump，再把现库**改名保留**（不要 drop），然后建空库、整事务导入。
    旧库保留期间新旧两份数据并存，PostgreSQL 数据卷所在磁盘需要约两倍库体积
@@ -295,15 +317,21 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
    现有卷原样不动；清空用 `find -mindepth 1 -delete`（`rm -rf /data/*` 不会删
    隐藏文件）。现有卷还有可能需要的数据时，先按 §2.2 再冷备一份当前卷，与
    数据库恢复保留旧库同理：
-   `docker run --rm -v agent-legion_seaweedfs-data:/data -v <备份目录>:/backup busybox sh -c 'A=/backup/seaweedfs-data-<时间戳>.tar.gz; tar tzf "$A" >/dev/null && find /data -mindepth 1 -delete && tar xzf "$A" -C /data'`。
+   `docker run --rm -v "$SW_SRC":/data -v <备份目录>:/backup busybox sh -c 'A=/backup/seaweedfs-data-<时间戳>.tar.gz; tar tzf "$A" >/dev/null && find /data -mindepth 1 -delete && tar xzf "$A" -C /data'`。
    有 §2.2.1 的 legacy 本地产物备份时一并放回 Host 数据卷：
-   `docker run --rm -v agent-legion_host-data:/dst -v <备份目录>:/backup busybox tar xzf /backup/host-data-<时间戳>.tar.gz -C /dst`
+   `docker run --rm -v "$HD_SRC":/dst -v <备份目录>:/backup busybox tar xzf /backup/host-data-<时间戳>.tar.gz -C /dst`
    （原生形态解包到数据根）。
    恢复 skill root：在宿主机上把 §2.2.2 的包解到 `SKILLS`（目标目录应为空或不存在；
    Docker stack 须是 compose 解析出的同一挂载源）：
    `mkdir -p "$SKILLS" && tar xzf <备份目录>/skills-<时间戳>.tar.gz -C "$SKILLS"`。
 6. `make prod-up docker` 拉起整个 stack；低于当前版本的 dump 会在启动时自动
-   迁移到当前 schema。
+   迁移到当前 schema。注意该入口（`scripts/stack-prod-up.sh`）启动前**无条件**检查
+   默认路径 `deploy/secrets/{postgres_password,postgres_pgpass,vault_master_key}`
+   非空，不看 `POSTGRES_PASSWORD_FILE` / `POSTGRES_PGPASS_FILE` /
+   `VAULT_MASTER_KEY_FILE` 覆盖（compose 实际挂载的仍是覆盖后的路径）。用了覆盖的
+   部署二选一：在默认路径也放一份同内容文件（`chmod 600`，仅为通过预检，换 key 后
+   要同步更新），或跳过入口直接执行它的等价命令（`F` 见 §1.1）：
+   `docker compose "${F[@]}" $(./scripts/local-s3-decide.sh --compose-flags --default-endpoint http://seaweedfs:8333 deploy/.env) up -d --build --wait`。
 7. 后端每次启动都会把全部 workspace 调度重置为暂停（`server/app/main.py` 启动时
    调用 `reset_all_to_paused`），恢复后先完成 §2.4 的核对，再经控制台恢复调度。
 
@@ -416,9 +444,20 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
    `AGENT_LEGION_VAULT_MASTER_KEY_FILE` 的，把 `KEY_FILE` 设为它指向的文件、执行
    同一段命令；用 `AGENT_LEGION_VAULT_MASTER_KEY` 字面值的，先把根 `.env` 留存一份
    （`B=".env.old-$(date +%Y%m%d%H%M%S)"; [ ! -e "$B" ] && cp -p .env "$B"`），再把该
-   变量改为新 key（二者择一）。然后重启 Host（`make prod-up docker`，或原生
-   `make prod-down && make prod-up`），记下换 key 的时间，并立刻把新 key 纳入
-   §1.1 的备份。
+   变量改为新 key（二者择一）。然后重启 Host，记下换 key 的时间，并立刻把新 key
+   纳入 §1.1 的备份。原生形态：`make prod-down && make prod-up`。Docker stack
+   **必须强制重建 Host 容器**：compose secret 是单文件 bind mount，上面的 `mv` 只
+   换了宿主机路径上的文件，运行中的容器仍挂着被改名的旧 inode；而 compose 的服务
+   配置哈希不含 secret 源文件内容，`make prod-up docker`（内部是
+   `docker compose … up -d --build`）在 Host 配置未变时不会重建它。用（`F` 见 §1.1）：
+
+   ```bash
+   docker compose "${F[@]}" $(./scripts/local-s3-decide.sh --compose-flags --default-endpoint http://seaweedfs:8333 deploy/.env) \
+     up -d --no-deps --force-recreate --wait host
+   # 两行输出一致才说明 Host 已读到新 key；不一致不要开始下一步重录
+   docker compose "${F[@]}" exec -T host cat /run/secrets/vault_master_key | shasum -a 256
+   shasum -a 256 < "$KEY_FILE"
+   ```
 3. **重新录入全部 secret**（按名称覆盖写入，名称不变，已冻结的 `secret_ref` 在
    重录后即可重新解析）：
    - 外部服务连接：admin 全局设置「外部服务连接」逐个编辑，在 secret 字段输入
