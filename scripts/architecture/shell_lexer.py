@@ -13,18 +13,11 @@ This module tracks just enough lexical state to tell those apart — unquoted
 / single-quoted / ``$'…'`` / double-quoted context, backslash escapes,
 word-start ``#`` comments and heredocs (quoted delimiter → literal body,
 unquoted → expanding body with ``\\$`` escapes). It is deliberately not a
-parser: command substitution, backticks and ``${…}`` contents are lexed in
-the enclosing context, which errs towards reporting (every one of those
-contexts expands). ``$$`` is the PID parameter, never a ``$NAME`` prefix.
+parser: ``$(…)`` opens its own unquoted frame, while backticks and
+``${…}`` contents are lexed in the enclosing context, which errs towards
+reporting (every one of those contexts expands). ``$$`` is the PID parameter, never a ``$NAME`` prefix.
 
-Makefiles are lexed by make semantics: recipe lines (tab-prefixed,
-backslash continuations joined) reach a shell; ``$$`` there becomes ``$``
-and every other make-level ``$`` reference is expanded by make — not by
-bash — so it is masked out. Make comment lines are skipped. Other
-non-recipe lines (rules, assignments) are not shell themselves, but an
-assignment value is pasted into recipes by ``$(VAR)``, so a ``$$NAME`` there
-still ends up as a shell ``$NAME``: those lines get the same masking (a
-single make ``$`` never reaches bash, so only ``$$`` can be reported).
+Fail-closed wrapper and Makefile handling live in ``shell_sources``.
 """
 
 from __future__ import annotations
@@ -39,7 +32,19 @@ _WORD_BREAK = frozenset(b" \t\n;&|()<>")
 _DELIM_END = frozenset(b" \t\n;&|()<>")
 # Bytes a backslash escapes inside an unquoted heredoc body.
 _HEREDOC_ESCAPABLE = frozenset(b"$`\\\n")
-_MAKE_MASK = b"_"
+
+
+class UnterminatedShellContext(Exception):
+    """A quote, command substitution or heredoc still open at end of input.
+
+    Usually a lexer blind spot rather than a real script error, and it would
+    swallow everything after ``lineno`` — ``dollar_offsets`` fails closed.
+    """
+
+    def __init__(self, lineno: int, hits: list[tuple[int, int]] | None = None) -> None:
+        super().__init__(lineno)
+        self.lineno = lineno
+        self.hits = hits or []
 
 
 def _read_heredoc_delimiter(content: bytes, i: int) -> tuple[bytes, bool, bool, int]:
@@ -58,6 +63,9 @@ def _read_heredoc_delimiter(content: bytes, i: int) -> tuple[bytes, bool, bool, 
     quoted = False
     while i < n and content[i] not in _DELIM_END:
         byte = content[i]
+        if byte == ord("$") and i + 1 < n and content[i + 1] in b"'\"":
+            i += 1  # ``$'EOF'`` / ``$"EOF"``: the quoting prefix is not part of WORD
+            continue
         if byte in b"'\"":
             quoted = True
             end = content.find(bytes([byte]), i + 1)
@@ -82,7 +90,9 @@ def _heredoc_body(
     """Consume one heredoc body starting at ``i`` (beginning of a line).
 
     Returns (expanding ``$`` offsets as (lineno, index), next_index, lineno).
+    A body that runs to end of input raises ``UnterminatedShellContext``.
     """
+    opened = lineno
     delimiter, quoted, strip_tabs = heredoc
     n = len(content)
     hits: list[tuple[int, int]] = []
@@ -106,7 +116,7 @@ def _heredoc_body(
                 j += 1
         i = end + 1
         lineno += 1
-    return hits, n, lineno
+    raise UnterminatedShellContext(opened, hits)
 
 
 def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[int, int]]:
@@ -119,16 +129,20 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
     n = len(content)
     i = 0
     lineno = first_lineno
-    # Frames: (kind, open_parens); kind is plain | subst | single | ansi | double.
-    stack: list[tuple[str, int]] = [("plain", 0)]
+    # Frames: (kind, open_parens, opened_lineno); kind is plain | subst |
+    # single | ansi | double. ``word_start``: an unquoted ``#`` here opens a
+    # comment (lexical state, not the previous raw byte: ``foo\ #`` is one word).
+    stack: list[tuple[str, int, int]] = [("plain", 0, lineno)]
     pending: list[tuple[bytes, bool, bool]] = []
+    word_start = True
     while i < n:
         byte = content[i]
-        state, depth = stack[-1]
+        state, depth, opened = stack[-1]
         unquoted = state in ("plain", "subst")
         if byte == ord("\n"):
             i += 1
             lineno += 1
+            word_start = True
             if unquoted and pending:
                 for heredoc in pending:
                     hits, i, lineno = _heredoc_body(content, i, lineno, heredoc)
@@ -145,6 +159,9 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
                 stack.pop()
             i += 1
             continue
+        if byte in b"\\$" or state == "double":
+            # Escapes, expansions and double-quoted text continue the word.
+            word_start = False
         if byte == ord("\\"):
             # Escaped byte (incl. ``\\$`` and line continuation) is literal;
             # a continuation newline still advances the line counter.
@@ -158,11 +175,12 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
                 i += 2
                 continue
             if unquoted and following == ord("'"):
-                stack.append(("ansi", 0))
+                stack.append(("ansi", 0, lineno))
                 i += 2
                 continue
             if following == ord("("):
-                stack.append(("subst", 0))
+                stack.append(("subst", 0, lineno))
+                word_start = True
                 i += 2
                 continue
             yield lineno, i
@@ -174,23 +192,25 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
             i += 1
             continue
         # unquoted context (top level or inside a command substitution)
+        previous_word_start, word_start = word_start, byte in _WORD_BREAK
         if byte == ord("'"):
-            stack.append(("single", 0))
+            stack.append(("single", 0, lineno))
         elif byte == ord('"'):
-            stack.append(("double", 0))
+            stack.append(("double", 0, lineno))
         elif byte == ord("(") and state == "subst":
-            stack[-1] = (state, depth + 1)
+            stack[-1] = (state, depth + 1, opened)
         elif byte == ord(")") and state == "subst":
             if depth:
-                stack[-1] = (state, depth - 1)
+                stack[-1] = (state, depth - 1, opened)
             else:
                 stack.pop()
-        elif byte == ord("#") and (i == 0 or content[i - 1] in _WORD_BREAK):
+        elif byte == ord("#") and previous_word_start:
             end = content.find(b"\n", i)
             i = n if end < 0 else end
             continue
         elif content.startswith(b"<<<", i):
             i += 3  # here-string: the word that follows is ordinary shell text
+            word_start = True
             continue
         elif content.startswith(b"<<", i):
             delimiter, quoted, strip_tabs, i = _read_heredoc_delimiter(content, i + 2)
@@ -199,42 +219,5 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
                 pending.append((delimiter, quoted, strip_tabs))
             continue
         i += 1
-
-
-def _mask_make_references(line: bytes) -> bytes:
-    """Recipe text as the shell receives it: ``$$`` → ``$``, other make
-    ``$`` references masked (make, not bash, expands them)."""
-    out = bytearray()
-    i = 0
-    while i < len(line):
-        if line[i] == ord("$"):
-            if line.startswith(b"$$", i):
-                out += b"$"
-            else:
-                out += _MAKE_MASK
-            i += 2 if i + 1 < len(line) else 1
-            continue
-        out.append(line[i])
-        i += 1
-    return bytes(out)
-
-
-def makefile_shell_text(content: bytes) -> Iterator[tuple[int, bytes]]:
-    """Yield (first_lineno, shell_text) per logical recipe line, plus each
-    non-comment non-recipe line (its ``$$`` may reach a recipe via ``$(VAR)``)."""
-    lines = content.split(b"\n")
-    index = 0
-    while index < len(lines):
-        if not lines[index].startswith(b"\t"):
-            if not lines[index].lstrip().startswith(b"#"):
-                yield index + 1, _mask_make_references(lines[index])
-            index += 1
-            continue
-        first = index
-        logical = [lines[index][1:]]
-        while logical[-1].endswith(b"\\") and index + 1 < len(lines):
-            index += 1
-            nxt = lines[index]
-            logical.append(nxt[1:] if nxt.startswith(b"\t") else nxt)
-        yield first + 1, _mask_make_references(b"\n".join(logical))
-        index += 1
+    if len(stack) > 1:
+        raise UnterminatedShellContext(stack[-1][2])

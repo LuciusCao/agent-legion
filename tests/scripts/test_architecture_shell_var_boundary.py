@@ -99,12 +99,32 @@ def test_non_expanding_contexts_are_not_flagged(content: str) -> None:
         ('printf \'%s\' "$(printf \'%s\' "$1" | sed "s/\'/x/")"\necho "$Y，"\n', 2),
         # A heredoc after a quoted one is still tracked line by line.
         ("cat <<'A'\n$X，\nA\ncat <<B\n$Z，\nB\n", 5),
+        # ANSI-C / locale quoted delimiters name EOF, not $EOF (#1060 review).
+        ("cat <<$'EOF'\n$X，\nEOF\necho \"$Y，\"\n", 4),
+        ('cat <<$"EOF"\n$X，\nEOF\necho "$Y，"\n', 4),
+        # An escaped blank keeps # inside the current word: not a comment.
+        ('echo foo\\ # "$X，"\n', 1),
+        ("echo a\\ #$X，\n", 1),
     ],
 )
 def test_expanding_multiline_contexts_are_flagged(content: str, lineno: int) -> None:
     """#1022：跨行双引号串 / 未加引号 heredoc 内以 # 开头的物理行仍会展开，不漏检。"""
     (error,) = find_violations("scripts/x.sh", _bytes(content))
     assert error.startswith(f"scripts/x.sh:{lineno}: bare $")
+
+
+@pytest.mark.parametrize(
+    ("content", "lineno"),
+    [
+        ('echo \'unclosed\necho "$X，"\n', 2),  # single quote never closes
+        ("cat <<'EOF'\nbody\necho \"$X，\"\n", 3),  # quoted heredoc never terminates
+        ('echo "$(printf x\necho $X，\n', 2),  # command substitution left open
+    ],
+)
+def test_unterminated_context_fails_closed(content: str, lineno: int) -> None:
+    """#1060 review：引号 / heredoc / 命令替换到文件末尾仍未闭合时回落逐行判定，不整段漏检。"""
+    errors = find_violations("scripts/x.sh", _bytes(content))
+    assert [e.split(" ")[0] for e in errors] == [f"scripts/x.sh:{lineno}:"]
 
 
 def test_makefile_recipes_follow_make_semantics() -> None:

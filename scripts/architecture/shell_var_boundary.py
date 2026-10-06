@@ -15,7 +15,8 @@ whose shebang names a shell. Only ``$`` the shell would expand are judged
 (#1022): comments, single quotes, ``\\$`` escapes, quoted heredoc bodies and
 make-level ``$`` references are skipped, while multi-line double-quoted
 strings and unquoted heredoc bodies are scanned on every physical line —
-lexical state lives in ``shell_lexer``.
+lexical state lives in ``shell_lexer`` (fail-closed scan and Makefile
+handling in ``shell_sources``).
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 
-from .shell_lexer import expanding_dollars, makefile_shell_text
+from .shell_sources import dollar_offsets, makefile_shell_text
 
 __test__ = False
 
@@ -58,7 +59,7 @@ def find_violations(path: str, content: bytes) -> list[str]:
     """Report each expanding bare ``$NAME`` that touches a non-ASCII byte."""
     errors: list[str] = []
     for first_lineno, text in _shell_chunks(path, content):
-        for lineno, offset in expanding_dollars(text, first_lineno):
+        for lineno, offset in dollar_offsets(text, first_lineno):
             match = BARE_VAR_BEFORE_NON_ASCII.match(text, offset)
             if match is None:
                 continue
