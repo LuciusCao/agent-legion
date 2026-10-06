@@ -602,8 +602,8 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
 14. **批/单发对 start 节点的拒绝 reason_code 不一致**；run-to 两臂与
     upgrade 提交后未 `notify_schedulable_work`（有周期扫描兜底则为延迟
     差异）；run-to 不清 `node_runs.run_dir/session_dir`（日志路径 404）。
-15. **迟到旧代次 Worker 结果的登记先于 finish 代次 CAS**（§4.2 的交互
-    放大）：cleanup 的「键复现 = 新 attempt」启发式会把旧代次迟到登记
+15. **迟到旧代次 Worker 结果的登记先于 finish 代次 CAS**（§2.8 产物字节
+    写面的交互放大）：cleanup 的「键复现 = 新 attempt」启发式会把旧代次迟到登记
     误判为新产物放过，陈旧行/对象在新一代重跑完成前可被服务。
 16. **legacy 无锁直写臂与 guarded promote 恢复臂的竞态**：无 lease 的
     upload（reconciler `reupload_missing`、approval 附件上传）直写

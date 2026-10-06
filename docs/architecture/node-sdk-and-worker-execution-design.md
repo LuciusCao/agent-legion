@@ -5,10 +5,11 @@
 （entrypoint / batch_payload / root_dir + http_client / media 姊妹模块）；
 path 绑定机制（EXEC-CODE-001 legacy）已退役——本文 §2（2026-08 盘点）整节、
 §5 的双路径对比与其中点名的内部实现、§7.2 的「内置读 repo 文件」均为历史记录：
-`workflow_nodes/` 内置节点目录、`_execute_isolated` / `_run_code_node` 裸子进程
-路径、`skill_version_fallbacks` 模块均已不存在。现行语义：所有节点代码以本
-workspace 的 DB 发布文本执行（无 global 兜底；demo 的 code 节点由 `make import-demo`
-发布进 demo workspace），一律经 `executors/code.py` → `_code_sandbox.py` 在 velites
+`_execute_isolated` / `_run_code_node` 裸子进程路径与 `skill_version_fallbacks`
+模块均已不存在；`workflow_nodes/` 不再是执行路径，仅保留为 demo code 节点经 git
+审阅的种子源（`services/demo_node_seed.py` 的 `DEMO_NODE_SOURCES`）。现行语义：
+所有节点代码以本 workspace 的 DB 发布文本执行（无 global 兜底；demo 的 code 节点
+由上述种子源发布进 demo workspace），一律经 `executors/code.py` → `_code_sandbox.py` 在 velites
 沙箱执行（Host 与 Worker 一致），父进程预取与 auth 失败标记处理在
 `executors/_code_runtime.py`，runtime 键集合见 §3。
 **2026-08-17 更新（P-0.5，schema v47）**：executor 定义 / allocation /
@@ -52,8 +53,9 @@ EXEC-CODE-001/002/003、CONFIG-MANIFEST-001、VAULT-SECRET-001、
 
 ## 2. 现状与关键事实（2026-08 盘点）
 
-> 历史记录：本节描述 #96 之前的双路径实现，其中内置节点路径（`workflow_nodes/`、裸
-> multiprocessing 子进程、子进程重建 `job_db`）已整体删除；现行执行链见文首状态段。
+> 历史记录：本节描述 #96 之前的双路径实现，其中内置节点执行路径（裸 multiprocessing
+> 子进程、子进程重建 `job_db`）已整体删除；`workflow_nodes/` 不再被直接执行，仅保留为
+> demo code 节点的种子源。现行执行链见文首状态段。
 
 执行链路：dispatch 解析 node_config（含连接注入，`dispatch_config.py`）与
 node_code（`services/node_codes.py`）→ `CodeExecutor.execute`
