@@ -1,6 +1,7 @@
 """Worker 控制面的主机名归一与控制台 origin（#923）。
 
 `normalize_host` 是 Host 白名单两侧（配置值与请求 Host 头）的唯一归一入口；
+`is_loopback_name` 是 token 内嵌收紧的回环判定；
 `console_origin` 给出 `AGENT_WORKER_CONSOLE_URL` 的 origin——反向代理改写上游
 Host 时，浏览器变更请求的 `Origin` 是该对外地址而非上游 Host。从
 `worker/service_host_guard.py` 拆出（体积预算）。
@@ -10,6 +11,8 @@ from __future__ import annotations
 
 import ipaddress
 from urllib.parse import urlsplit
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
 def normalize_host(value: str) -> str:
@@ -28,6 +31,18 @@ def normalize_host(value: str) -> str:
         return host
 
 
+def is_loopback_name(value: str) -> bool:
+    """主机名是否回环（`localhost` 或任一回环 IP，含 127/8 全段）。
+
+    与 `worker/service_bind.py::embed_control_token` 的回环语义一致（#976）。
+    """
+    host = normalize_host(value)
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host == "localhost"
+
+
 def console_origin(console_url: str | None) -> str | None:
     """控制台地址的 origin（scheme://host[:port]，IDNA 归一）；无法解析返回 None。"""
     if not console_url:
@@ -42,4 +57,8 @@ def console_origin(console_url: str | None) -> str | None:
     host = normalize_host(hostname)
     if ":" in host:
         host = f"[{host}]"
-    return f"{parts.scheme.lower()}://{host}" + (f":{port}" if port is not None else "")
+    scheme = parts.scheme.lower()
+    # 浏览器 Origin 省略协议默认端口（#979）：显式写 :80 / :443 的配置同样省略，否则与之比对不上
+    if _DEFAULT_PORTS.get(scheme) == port:
+        port = None
+    return f"{scheme}://{host}" + (f":{port}" if port is not None else "")

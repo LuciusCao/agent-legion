@@ -218,13 +218,51 @@ def test_approve_artifact_swap_failure_rolls_back_and_leaves_no_partial_file(
     def _fail_replace(_src, _dst):
         raise OSError("disk full")
 
-    monkeypatch.setattr("server.app.services.approval_decisions.os.replace", _fail_replace)
+    monkeypatch.setattr("server.app.services.staged_json_artifact.os.replace", _fail_replace)
     with pytest.raises(OSError, match="disk full"):
         service.decide(workspace_id, job_id, "gate", verdict="approved", decided_by="user:u1")
 
     assert _node_status(job_db, job_id, "gate") == "awaiting_approval"
     assert service.list_decisions(workspace_id, job_id) == []
     assert not (job_dir / "gate.approval.json").exists()
+    assert _staged_leftovers(job_dir) == []
+
+
+def _fail_dir_fsync(monkeypatch, target_dir) -> None:
+    """Make the post-replace directory fsync (#975) of ``target_dir`` fail."""
+    import server.app.services.staged_json_artifact as staged_mod
+
+    real_open, real_fsync = staged_mod.os.open, staged_mod.os.fsync
+    dir_fds: set[int] = set()
+
+    def _open(path, flags, *args):
+        fd = real_open(path, flags, *args)
+        if str(path) == str(target_dir):
+            dir_fds.add(fd)
+        return fd
+
+    def _fsync(fd):
+        if fd in dir_fds:
+            raise OSError("dir fsync failed")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(staged_mod.os, "open", _open)
+    monkeypatch.setattr(staged_mod.os, "fsync", _fsync)
+
+
+def test_approve_fsyncs_job_dir_before_commit(approval_setup, monkeypatch):
+    """#975: the job-dir fsync after the swap runs inside the guarded
+    transaction — its failure rolls the decision back instead of committing a
+    gate whose artifact entry may not survive a crash."""
+    job_db, leases, service, workspace_id, job_id, job_dir = approval_setup
+    leases.park_awaiting_approval(job_id, "gate")
+    _fail_dir_fsync(monkeypatch, job_dir)
+
+    with pytest.raises(OSError, match="dir fsync failed"):
+        service.decide(workspace_id, job_id, "gate", verdict="approved", decided_by="user:u1")
+
+    assert _node_status(job_db, job_id, "gate") == "awaiting_approval"
+    assert service.list_decisions(workspace_id, job_id) == []
     assert _staged_leftovers(job_dir) == []
 
 
@@ -507,3 +545,66 @@ def test_rework_feedback_survives_when_declared_as_node_output(approval_setup):
 
     feedback = json.loads((fb_dir / "review_feedback.json").read_text(encoding="utf-8"))
     assert feedback["note"] == "案例前置"
+
+
+def _bypass_rework_prechecks(job_db, monkeypatch) -> None:
+    """Let a second rework past the lock-free prechecks, as a concurrent
+    request that read the gate before the first one committed would."""
+    monkeypatch.setattr(job_db, "approval_gate_status", lambda *_a: "awaiting_approval")
+    monkeypatch.setattr(
+        "server.app.services.approval_rework.check_rerun_eligibility", lambda *_a: None
+    )
+
+
+def test_duplicate_rework_conflicts_without_touching_committed_feedback(
+    approval_setup, monkeypatch
+):
+    """#963: a repeated / concurrent rework is rejected by the in-lock status
+    guard before the committed feedback artifact (local copy or object-store
+    promotion) is rewritten, so its audit fields keep matching the DB."""
+    job_db, leases, service, workspace_id, job_id, job_dir = approval_setup
+    store = _RecordingObjectStore()
+    service.object_store = store
+    leases.park_awaiting_approval(job_id, "gate")
+    first = service.decide(
+        workspace_id, job_id, "gate", verdict="rework", note="案例前置", decided_by="user:u1"
+    )
+    feedback = job_dir / "review_feedback.json"
+    committed = feedback.read_bytes()
+    _bypass_rework_prechecks(job_db, monkeypatch)
+
+    with pytest.raises(ConflictError, match="not awaiting approval"):
+        service.decide(
+            workspace_id, job_id, "gate", verdict="rework", note="重复", decided_by="user:u2"
+        )
+
+    assert feedback.read_bytes() == committed
+    payload = json.loads(committed)
+    assert (payload["note"], payload["decided_by"], payload["round"]) == (
+        "案例前置",
+        "user:u1",
+        1,
+    )
+    assert [d["id"] for d in service.list_decisions(workspace_id, job_id)] == [first["id"]]
+    assert store.uploads == [("review_feedback.json", committed)]
+    assert _staged_leftovers(job_dir) == []
+
+
+def test_rework_feedback_swap_failure_rolls_back_everything(approval_setup, monkeypatch):
+    """#963 / #975: the feedback swap (incl. its directory fsync) runs inside
+    the guarded transaction — a failure leaves the gate awaiting, no decision
+    row, the upstream output restored and no temp file."""
+    job_db, leases, service, workspace_id, job_id, job_dir = approval_setup
+    leases.park_awaiting_approval(job_id, "gate")
+    _fail_dir_fsync(monkeypatch, job_dir)
+
+    with pytest.raises(OSError, match="dir fsync failed"):
+        service.decide(
+            workspace_id, job_id, "gate", verdict="rework", note="重写", decided_by="user:u1"
+        )
+
+    assert _node_status(job_db, job_id, "gate") == "awaiting_approval"
+    assert _node_status(job_db, job_id, "write") == "completed"
+    assert service.list_decisions(workspace_id, job_id) == []
+    assert (job_dir / "script.md").read_text(encoding="utf-8") == "# 逐字稿草稿"
+    assert _staged_leftovers(job_dir) == []
