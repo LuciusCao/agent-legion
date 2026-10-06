@@ -40,11 +40,14 @@
 `${VAULT_MASTER_KEY_FILE:-./secrets/vault_master_key}`（`deploy/compose.host.yaml`
 顶层 `secrets.vault_master_key.file`），变量可来自 shell 环境或 `deploy/.env`，
 相对路径以 compose 文件所在的 `deploy/` 为基准。不要自己拼路径，让 compose 解析：
-`docker compose -f deploy/compose.host.yaml config` 输出末尾顶层 `secrets:` 段里
-`vault_master_key` 的 `file:` 即解析后的绝对路径。下文记作 `KEY_FILE`：
+`docker compose … config` 输出末尾顶层 `secrets:` 段里 `vault_master_key` 的
+`file:` 即解析后的绝对路径。存在 `deploy/compose.local.yaml` 时要一并传入（prod-up
+入口同样会叠加它，它可能改写 secret 来源）。下文记作 `KEY_FILE`：
 
 ```bash
-docker compose -f deploy/compose.host.yaml config | grep -A3 '^  vault_master_key:'
+F=(-f deploy/compose.host.yaml)
+[ -f deploy/compose.local.yaml ] && F+=(-f deploy/compose.local.yaml)
+docker compose "${F[@]}" config | grep -A3 '^  vault_master_key:'
 KEY_FILE=<上面输出中 file: 后的绝对路径>
 ```
 
@@ -127,7 +130,8 @@ mkdir -p "$BK"
 OUT="$BK/agent_legion-$(date +%Y%m%d%H%M%S).dump"
 TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
   && C pg_dump -U agent_legion -d agent_legion -Fc > "$TMP" \
-  && [ ! -e "$OUT" ] && mv "$TMP" "$OUT" && echo "备份完成：$OUT"
+  && [ ! -e "$OUT" ] && mv "$TMP" "$OUT" && echo "备份完成：$OUT" \
+  || echo "未完成：检查临时文件 $TMP（pg_dump 失败，或目标 $OUT 已存在）"
 ```
 
 原生形态用本机 PostgreSQL 17 客户端，同样先写临时文件：把上面的
@@ -153,7 +157,8 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
   docker run --rm -v agent-legion_seaweedfs-data:/data:ro -v <备份目录>:/backup \
     busybox sh -c "tar czf /backup/.seaweedfs-data-$TS.partial -C /data . \
       && [ ! -e /backup/seaweedfs-data-$TS.tar.gz ] \
-      && mv /backup/.seaweedfs-data-$TS.partial /backup/seaweedfs-data-$TS.tar.gz"
+      && mv /backup/.seaweedfs-data-$TS.partial /backup/seaweedfs-data-$TS.tar.gz \
+      || echo '未完成：检查 <备份目录>/.seaweedfs-data-'$TS'.partial（tar 失败或目标已存在）'"
   docker compose -f deploy/compose.host.yaml --profile materials-local up -d seaweedfs
   ```
 
@@ -171,7 +176,8 @@ TS="$(date +%Y%m%d%H%M%S)"
 docker run --rm -v agent-legion_host-data:/src:ro -v <备份目录>:/backup \
   busybox sh -c "cd /src && tar czf /backup/.host-data-$TS.partial artifacts jobs \
     && [ ! -e /backup/host-data-$TS.tar.gz ] \
-    && mv /backup/.host-data-$TS.partial /backup/host-data-$TS.tar.gz"
+    && mv /backup/.host-data-$TS.partial /backup/host-data-$TS.tar.gz \
+    || echo '未完成：检查 <备份目录>/.host-data-'$TS'.partial（tar 失败或目标已存在）'"
 ```
 
 热备份时这两处可能有正在写入的文件，强一致按 §1.5 先停 Host 与 Worker。原生
@@ -295,24 +301,34 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
 2. **确认无法找回后再换新 key**。新 key 一旦开始用于写入，旧 key 即使事后找回也
    解不开新写入的密文（单 key 设计，两把 key 不能并存），所以这一步要一次决定。
    生成方式与首次部署相同（见 [agent-worker-deployment.md](agent-worker-deployment.md) §1）。
-   先把现有 key 文件改名留存（万一判断有误还能退回），不要直接 `>` 覆盖：
+   顺序是：先在同目录的临时文件里生成新 key 并确认非空，再把现有 key 文件（若
+   存在——key 丢失时它可能已经不在）改名为带时间戳、且事先不存在的 `.old-<时间戳>`
+   留存，最后把新 key 改名就位。任何一步失败都不会截断或覆盖旧 key，重跑也不会
+   拿空文件盖掉上一次留存的旧 key（失败留下的 `.vault_master_key.new.*` 临时文件可直接删除）：
 
    ```bash
    KEY_FILE=<§1.1 中 compose 解析出的绝对路径>
-   mv "$KEY_FILE" "$KEY_FILE.old" \
-     && (umask 077 && UV_CACHE_DIR=.uv-cache uv run python -c \
+   OLD="$KEY_FILE.old-$(date +%Y%m%d%H%M%S)"
+   NEW="$(mktemp "$(dirname "$KEY_FILE")/.vault_master_key.new.XXXXXX")" \
+     && UV_CACHE_DIR=.uv-cache uv run python -c \
           "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
-          > "$KEY_FILE") \
-     && chmod 600 "$KEY_FILE"
+          > "$NEW" \
+     && [ -s "$NEW" ] && chmod 600 "$NEW" \
+     && [ ! -e "$OLD" ] \
+     && { [ ! -e "$KEY_FILE" ] || mv "$KEY_FILE" "$OLD"; } \
+     && mv "$NEW" "$KEY_FILE" \
+     && echo "新 key 已就位：$KEY_FILE（原文件若存在已留存为 $OLD）" \
+     || echo "未完成：检查临时文件 $NEW 与 $KEY_FILE；旧 key 未被覆盖"
    ```
 
    上面是 Docker stack 的做法：`KEY_FILE` 必须是 compose 实际挂载的文件（部署用
    `VAULT_MASTER_KEY_FILE` 覆盖过来源时，默认的 `deploy/secrets/vault_master_key`
    根本不被读取），按 §1.1 用 `docker compose … config` 解析，不要假定默认路径。
-   原生形态 Host 不读 `deploy/secrets/vault_master_key`：
-   在根 `.env` 里把 `AGENT_LEGION_VAULT_MASTER_KEY` 改为新 key，或让
-   `AGENT_LEGION_VAULT_MASTER_KEY_FILE` 指向新 key 文件（二者择一；旧值 / 旧文件
-   同样先留存）。然后重启 Host（`make prod-up docker`，或原生
+   原生形态 Host 不读 `deploy/secrets/vault_master_key`：用
+   `AGENT_LEGION_VAULT_MASTER_KEY_FILE` 的，把 `KEY_FILE` 设为它指向的文件、执行
+   同一段命令；用 `AGENT_LEGION_VAULT_MASTER_KEY` 字面值的，先把根 `.env` 留存一份
+   （`B=".env.old-$(date +%Y%m%d%H%M%S)"; [ ! -e "$B" ] && cp -p .env "$B"`），再把该
+   变量改为新 key（二者择一）。然后重启 Host（`make prod-up docker`，或原生
    `make prod-down && make prod-up`），记下换 key 的时间，并立刻把新 key 纳入
    §1.1 的备份。
 3. **重新录入全部 secret**（按名称覆盖写入，名称不变，已冻结的 `secret_ref` 在
