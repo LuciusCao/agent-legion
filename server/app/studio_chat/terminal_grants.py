@@ -20,7 +20,10 @@ the terminal is created is refused — kimi always announces the command
 before spawning. A grant for a call never seen there (kimi subagents) stays
 unbound: one approved request per terminal, not command-bound — and is only
 spendable while no announced or bound grant is in flight, so a main-agent
-call cannot swap its approved command by borrowing a subagent's grant. A
+call cannot swap its approved command by borrowing a subagent's grant; and
+since a terminal is not attributable to a call, a bound grant taken by
+command match revokes the unbound grants in flight (a subagent running the
+bound command first must not leave the bound call an unbound grant). A
 command-less approval of a kind that never spawns a terminal mints none.
 """
 
@@ -112,18 +115,26 @@ class TerminalGrants:
         ]
         if bound:
             self._grants.remove(bound[0])
+            # A terminal is not attributable to a call: with never-announced
+            # unbound grants in flight, a subagent running the same command
+            # may have taken this bound grant, and the bound call's swapped
+            # command would then find only unbound grants. Revoke them so
+            # the fallback fails closed (cost: a racing subagent Bash is
+            # refused; the agent retries under a fresh approval).
+            self._grants = [g for g in self._grants if not self._unannounced(g)]
             return True
         # While any announced/bound grant is in flight, a non-matching command
         # fails closed instead of spending an unrelated subagent's unbound
         # grant (a main call swapping its approved command would otherwise
         # borrow it). Cost: a subagent Bash racing a main-agent Bash may be
         # refused (explicit error; the agent retries).
-        if not self._grants or any(
-            g.command is not None or self.calls.seen(g.tool_call_id) for g in self._grants
-        ):
+        if not self._grants or not all(self._unannounced(g) for g in self._grants):
             return False
         self._grants.pop(0)
         return True
+
+    def _unannounced(self, grant: _Grant) -> bool:
+        return grant.command is None and not self.calls.seen(grant.tool_call_id)
 
     def _granted_calls(self) -> list[str]:
         return [g.tool_call_id for g in self._grants if g.tool_call_id is not None]

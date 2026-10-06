@@ -9,7 +9,8 @@ before the answer (and showing it on the card), late binding to the first
 post-approval ``rawInput.command``, command-swap attempts (delta vs started
 mismatch, re-pointing after binding, incomplete or finished-call content),
 refusal of a still-unbound grant for an announced call, the unbound fallback
-for calls never announced (kimi subagents), no grant for command-less
+for calls never announced (kimi subagents) and its revocation once a bound
+grant is taken by command match, no grant for command-less
 approvals of non-terminal kinds, pinned observation eviction, and the real
 ACP stdio dispatch order. Pure in-process/subprocess tests — no database.
 """
@@ -205,7 +206,22 @@ def test_mismatched_main_call_cannot_borrow_a_subagent_unbound_grant() -> None:
     # unrelated unbound grant (the cost: a racing subagent Bash is refused).
     assert not grants.consume("/bin/bash", _kimi("rm -rf /w"), root=ROOT)
     assert grants.consume("/bin/bash", _kimi("ls"), root=ROOT)
-    # With no announced/bound grant left in flight the subagent runs again.
+    # That `ls` may have been the subagent's: its unbound grant is revoked.
+    assert not grants.consume("/bin/bash", _kimi("anything"), root=ROOT)
+
+
+def test_subagent_taking_the_main_bound_grant_cannot_free_the_unbound_fallback() -> None:
+    # A terminal is not attributable to a call: a subagent running the same
+    # `ls` first takes the main call's bound grant. The subagent's unbound
+    # grant must not then serve the main call's swapped command.
+    grants = TerminalGrants()
+    _stream(grants, "ls")
+    _approve(grants, _permission())  # main call, bound to `ls`
+    _approve(grants, _permission("7:sub_call"))  # subagent, never announced
+    assert grants.consume("/bin/bash", _kimi("ls"), root=ROOT)  # subagent's
+    assert not grants.consume("/bin/bash", _kimi("rm -rf /w"), root=ROOT)  # main's swap
+    # A later subagent approval is a fresh human answer and spends normally.
+    _approve(grants, _permission("8:sub_call"))
     assert grants.consume("/bin/bash", _kimi("anything"), root=ROOT)
 
 
@@ -217,7 +233,7 @@ def test_announced_unbound_grant_also_blocks_the_unbound_fallback() -> None:
     assert not grants.consume("/bin/bash", _kimi("rm -rf /w"), root=ROOT)
     grants.observe(_started("ls"))
     assert grants.consume("/bin/bash", _kimi("ls"), root=ROOT)
-    assert grants.consume("/bin/bash", _kimi("rm -rf build"), root=ROOT)
+    assert not grants.consume("/bin/bash", _kimi("rm -rf build"), root=ROOT)
 
 
 def test_cd_wrapper_tolerates_whitespace_around_the_bound_command() -> None:
