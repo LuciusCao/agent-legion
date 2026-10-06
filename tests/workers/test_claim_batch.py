@@ -291,3 +291,31 @@ class TestClaimBatchLimitConfigApi:
 
         assert response.status_code == 422
         assert store.read()["claim_batch_limit"] == 32, "校验失败不得半应用（保持默认值）"
+
+
+def test_lane_spawn_error_mid_batch_logs_unsubmitted_and_propagates(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#1051：批内第二条提交撞线程耗尽（LaneSpawnError）——已提交的第一条
+    保留，当前条与本批余下逐条按 execution_id 记日志（交租约过期由 Host
+    重排队），异常原样上抛给 executor 的专用退避臂，本 pass 不再发起 claim。"""
+    from worker.execution.execution_lane import LaneSpawnError
+
+    budget = {"agent": 3, "code": 0}
+    claims = [{"execution_id": f"e{i}", "kind": "agent"} for i in range(3)]
+    ctx, _, submitted = _ctx(_FakeBatchClient([claims]))
+    collect = _submitter(submitted, budget)
+
+    def submit(claim: dict) -> None:
+        if claim["execution_id"] == "e1":
+            raise LaneSpawnError("execution lane thread start failed: can't start new thread")
+        collect(claim)
+
+    with pytest.raises(LaneSpawnError):
+        drain_budget(ctx, budget, {"agent": 10, "code": 0}, 32, 0, True, submit)
+
+    assert [c["execution_id"] for c in submitted] == ["e0"]
+    assert len(ctx.client.calls) == 1
+    out = capsys.readouterr().out
+    assert "2 claimed execution(s) left to lease expiry" in out
+    assert "e1, e2" in out

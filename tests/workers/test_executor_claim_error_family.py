@@ -106,3 +106,56 @@ def test_main_programming_error_in_claim_pass_propagates(
     assert claim_calls == 1
     assert backoffs == []
     assert "Agent claim error" not in capsys.readouterr().out
+
+
+def test_main_backs_off_on_lane_spawn_error_without_tracking_execution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#1051：执行车道起线程失败（Thread.start 资源类 RuntimeError）在 lane
+    层包成 LaneSpawnError，claim 循环走专用退避臂存活——不当编程错误退出、
+    不并入 Host 不可用族；该执行未入池（run_execution 从未被调用），日志
+    点名交租约过期。"""
+    from worker.execution import execution_lane
+
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+    backoffs: list[str] = []
+    ran: list[object] = []
+
+    def claim(
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict | None:
+        nonlocal claim_calls
+        claim_calls += 1
+        if claim_calls == 1:
+            return {"execution_id": "exec-lane-1", "node_key": "n1", "kind": "agent"}
+        return None
+
+    def fail_start(self):  # noqa: ANN001
+        raise RuntimeError("can't start new thread")
+
+    fake.claim = claim  # type: ignore[attr-defined]
+    monkeypatch.setattr(execution_lane._LaneWorker, "start", fail_start)
+    monkeypatch.setattr(execution_run, "run_execution", lambda *a, **k: ran.append(a))
+    monkeypatch.setattr(
+        events,
+        "note_claim_backoff",
+        lambda worker_id, exc, wait, failures: backoffs.append(type(exc).__name__),
+    )
+    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, {"claim_enabled": True})
+    deadline = time.monotonic() + 10
+    while claim_calls < 2 and time.monotonic() < deadline:
+        time.sleep(0.02)
+    handlers[agent_worker.signal.SIGTERM]()
+    thread.join(timeout=10)
+
+    assert claim_calls >= 2, "claim loop must survive a lane spawn failure"
+    assert result == [0]
+    assert backoffs == ["LaneSpawnError"]
+    assert ran == []
+    out = capsys.readouterr().out
+    assert "Agent execution lane exhausted" in out
+    assert "exec-lane-1" in out
+    assert "Agent claim error" not in out
