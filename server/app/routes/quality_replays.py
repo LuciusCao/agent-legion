@@ -13,6 +13,7 @@ from server.app.routes.quality_contracts import (
     QualityReplayCreateRequest,
     QualityReplayDetailResponse,
     QualityReplayListResponse,
+    QualityReplayProfileOptionsResponse,
     QualityReplayResponse,
 )
 from server.app.services.quality_replays import QualityReplayService
@@ -36,9 +37,22 @@ def create_quality_replays_router(replays: QualityReplayService) -> APIRouter:
             workspace_id,
             item_id,
             agent_version=payload.agent_version,
+            revision_id=payload.revision_id,
+            use_draft=payload.use_draft,
             created_by=f"user:{user['id']}",
         )
         return QualityReplayResponse.model_validate({"replay": replay})
+
+    # #1079（#440 D6）：可选的回放执行档案（各 revision / 当前草稿中该节点的档案）。
+    @router.get(
+        "/workspaces/{workspace_id}/quality/sample-items/{item_id}/replay-profiles",
+        response_model=QualityReplayProfileOptionsResponse,
+    )
+    def list_replay_profiles(
+        workspace_id: str, item_id: str
+    ) -> QualityReplayProfileOptionsResponse:
+        options = replays.replay_profile_options(workspace_id, item_id)
+        return QualityReplayProfileOptionsResponse.model_validate(options)
 
     @router.get(
         "/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays",

@@ -198,6 +198,7 @@ server/app/
 | GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}` | `get_sample_item` | routes/quality.py |
 | POST | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/labels` | `add_sample_item_label` | routes/quality.py |
 | POST | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `create_replay` | routes/quality_replays.py |
+| GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replay-profiles` | `list_replay_profiles` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `list_replays` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/replays/{replay_id}` | `get_replay` | routes/quality_replays.py |
 | POST | `/workspaces/{workspace_id}/runs` | `create_run` | routes/runs.py |
@@ -499,10 +500,12 @@ server/app/
 | QualitySampleItemDetailResponse | BaseModel | item: QualitySampleItem, labels: list[QualityLabel], artifacts: list[QualityA... | app/routes/quality_contracts.py |
 | QualityLabelCreateRequest | BaseModel | verdict: LabelVerdict, reason_codes: list[str], note: str, replay_id: str | N... | app/routes/quality_contracts.py |
 | QualityLabelResponse | BaseModel | label: QualityLabel | app/routes/quality_contracts.py |
-| QualityReplayCreateRequest | BaseModel | agent_version: int | None | app/routes/quality_contracts.py |
-| QualityReplay | BaseModel | id: str, item_id: str, agent_id: str, agent_version: int | None, replay_job_i... | app/routes/quality_contracts.py |
+| QualityReplayCreateRequest | BaseModel | revision_id: str | None, use_draft: bool, agent_version: int | None | app/routes/quality_contracts.py |
+| QualityReplay | BaseModel | id: str, item_id: str, agent_id: str, agent_version: int | None, revision_id:... | app/routes/quality_contracts.py |
 | QualityReplayResponse | BaseModel | replay: QualityReplay | app/routes/quality_contracts.py |
 | QualityReplayListResponse | BaseModel | replays: list[QualityReplay] | app/routes/quality_contracts.py |
+| QualityReplayProfileOption | BaseModel | source: Literal['revision', 'draft'], revision_id: str | None, revision_versi... | app/routes/quality_contracts.py |
+| QualityReplayProfileOptionsResponse | BaseModel | options: list[QualityReplayProfileOption] | app/routes/quality_contracts.py |
 | QualityReplayDetailResponse | BaseModel | replay: QualityReplay, labels: list[QualityLabel], artifacts: list[QualityArt... | app/routes/quality_contracts.py |
 | QualityConfusionMatrix | BaseModel | tp: int, fp: int, fn: int, tn: int, precision: float | None, recall: float | ... | app/routes/quality_contracts.py |
 | QualityStatsGroup | BaseModel | node_key: str, skill_version: str, provider: str, model: str, runs: int, succ... | app/routes/quality_contracts.py |

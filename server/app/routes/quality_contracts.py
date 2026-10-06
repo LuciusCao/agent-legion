@@ -114,8 +114,18 @@ class QualityLabelResponse(BaseModel):
 
 
 class QualityReplayCreateRequest(BaseModel):
-    # Unset replays with the currently published Agent version.
-    agent_version: int | None = Field(default=None, gt=0)
+    # #1079（#440 D6）：agent 节点按 workflow revision（或当前草稿）选执行
+    # 档案回放；都不选 = 原运行自身的执行档案。
+    revision_id: str | None = None
+    use_draft: bool = False
+    # Legacy Agent-version pin, only for not-yet-inlined agent nodes of older
+    # job snapshots (unset = the currently published Agent version).
+    agent_version: int | None = Field(
+        default=None,
+        gt=0,
+        description="Deprecated (#440 D6): replay with a workflow revision instead.",
+        json_schema_extra={"deprecated": True},
+    )
 
 
 class QualityReplay(BaseModel):
@@ -123,6 +133,10 @@ class QualityReplay(BaseModel):
     item_id: str
     agent_id: str = ""
     agent_version: int | None = None
+    # #1079（D6）：副本 run 冻结的执行档案 pin（无 = legacy Agent 版本 / code 节点）。
+    revision_id: str | None = None
+    revision_version: int | None = None
+    profile_hash: str = ""
     replay_job_id: str = ""
     status: str
     error_message: str = ""
@@ -137,6 +151,24 @@ class QualityReplayResponse(BaseModel):
 
 class QualityReplayListResponse(BaseModel):
     replays: list[QualityReplay]
+
+
+class QualityReplayProfileOption(BaseModel):
+    """A revision (or the draft) whose node profile a replay can run with (#1079)."""
+
+    source: Literal["revision", "draft"]
+    revision_id: str | None = None
+    revision_version: int | None = None
+    revision_status: str = ""
+    is_original: bool = False
+    runtime: str = ""
+    provider: str = ""
+    model: str = ""
+    profile_hash: str = ""
+
+
+class QualityReplayProfileOptionsResponse(BaseModel):
+    options: list[QualityReplayProfileOption]
 
 
 class QualityReplayDetailResponse(BaseModel):

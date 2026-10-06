@@ -97,6 +97,8 @@ export const extraQueryKeys = {
     ['qualityItemDetail', workspaceId, itemId] as const,
   qualityReplays: (workspaceId: string, itemId: string) =>
     ['qualityReplays', workspaceId, itemId] as const,
+  qualityReplayProfiles: (workspaceId: string, itemId: string) =>
+    ['qualityReplayProfiles', workspaceId, itemId] as const,
   qualityReplayDetail: (workspaceId: string, replayId: string) =>
     ['qualityReplayDetail', workspaceId, replayId] as const,
   // Agent 发起的 workflow 发布请求（#416）：轮询 pending 弹确认对话框。

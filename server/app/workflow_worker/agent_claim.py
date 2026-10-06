@@ -21,6 +21,7 @@ from server.app.services.node_execution_config import (
     agent_effective_schema,
     node_config_reserved_defaults,
 )
+from server.app.services.node_profile_pins import node_profile_pin
 from server.app.skills.errors import SkillRepoError
 from server.app.workflow_worker.agent_claim_profile import resolve_claim_profile
 from server.app.workflow_worker.agent_gate import agent_claim_allowed
@@ -115,7 +116,11 @@ def claim_agent_node(
     # Quality replay (schema v29): a frozen per-run Agent version pin in the
     # run's frozen pins wins over the currently published definition.
     pin = agent_version_pin(run_payload, node.key)
-    profile = resolve_claim_profile(worker, str(workspace_id), agent_id, node, pin, profile_source)
+    # #1079（D6）：回放按 revision / 草稿选执行档案时冻结 node_profiles pin。
+    profile_pin = node_profile_pin(run_payload, node.key)
+    profile = resolve_claim_profile(
+        worker, str(workspace_id), agent_id, node, pin, profile_source, profile_pin
+    )
     if isinstance(profile, str):
         return fail_config(profile)
     definition_config = profile.dispatch_definition

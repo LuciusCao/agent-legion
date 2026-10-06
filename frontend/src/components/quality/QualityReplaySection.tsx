@@ -1,15 +1,30 @@
 import { useState } from 'react'
-import { Button, Chip, CircularProgress, TextField } from '@mui/material'
+import {
+  Button,
+  Chip,
+  CircularProgress,
+  MenuItem,
+  TextField,
+} from '@mui/material'
 import { toErrorMessage } from '../../lib/queryError'
 import {
   useCreateReplay,
   useQualityReplayDetail,
+  useQualityReplayProfiles,
   useQualityReplays,
 } from '../../hooks/useQuality'
 import type {
   QualityArtifactContent,
   QualityReplay,
 } from '../../api/qualityApi'
+import {
+  ORIGINAL_CHOICE,
+  createBody,
+  optionLabel,
+  optionValue,
+  originalLabel,
+  replayLabel,
+} from './qualityReplayProfiles'
 import {
   QualityArtifactView,
   QualityLabelHistory,
@@ -33,10 +48,6 @@ function ReplayStatusChip({ status }: { status: string }) {
       variant="outlined"
     />
   )
-}
-
-function versionLabel(version: number | null | undefined): string {
-  return version != null ? `v${version}` : '当前 published'
 }
 
 interface ReplayDetailViewProps {
@@ -92,10 +103,10 @@ function ReplayDetailView({
     <div className={styles.replayDetail}>
       <div className={styles.compareGrid} aria-label="新旧产物对比">
         <div className={styles.compareHeader}>
-          原产物（{versionLabel(originalAgentVersion)}）
+          原产物（{originalLabel(originalAgentVersion)}）
         </div>
         <div className={styles.compareHeader}>
-          Replay 产物（{versionLabel(replay.agent_version)}）
+          Replay 产物（{replayLabel(replay)}）
         </div>
         {names.map((name) => {
           const before = originalByName.get(name)
@@ -152,31 +163,29 @@ export interface QualityReplaySectionProps {
   originalAgentVersion: number | null | undefined
 }
 
-/** Replay 区：发起 replay（可 pin agent 版本）、replay 列表、对比与打标。 */
+/** Replay 区：发起 replay（#1079 / #440 D6：按 workflow revision 或当前草稿
+ * 选执行档案，默认原运行的执行档案）、replay 列表、对比与打标。 */
 export function QualityReplaySection({
   workspaceId,
   itemId,
   originalArtifacts,
   originalAgentVersion,
 }: QualityReplaySectionProps) {
-  const [versionInput, setVersionInput] = useState('')
+  const [choice, setChoice] = useState(ORIGINAL_CHOICE)
   const [selectedReplayId, setSelectedReplayId] = useState<string | null>(null)
   const [createError, setCreateError] = useState('')
   const replaysQuery = useQualityReplays(workspaceId, itemId)
+  const profilesQuery = useQualityReplayProfiles(workspaceId, itemId)
   const mutation = useCreateReplay(workspaceId, itemId)
 
   const replays = replaysQuery.data?.replays ?? []
-  const trimmed = versionInput.trim()
-  const versionValid =
-    trimmed === '' || (/^\d+$/.test(trimmed) && Number(trimmed) >= 1)
+  const options = profilesQuery.data?.options ?? []
 
   const handleCreate = async () => {
     setCreateError('')
     try {
-      const result = await mutation.mutateAsync({
-        agent_version: trimmed === '' ? null : Number(trimmed),
-      })
-      setVersionInput('')
+      const result = await mutation.mutateAsync(createBody(choice))
+      setChoice(ORIGINAL_CHOICE)
       setSelectedReplayId(result.replay.id)
     } catch (err) {
       const status = (err as { status?: number }).status
@@ -192,21 +201,25 @@ export function QualityReplaySection({
     <div>
       <div className={styles.createRow}>
         <TextField
-          label="Agent 版本"
-          value={versionInput}
-          onChange={(e) => setVersionInput(e.target.value)}
-          placeholder="留空 = 当前 published"
-          type="number"
+          select
+          label="执行档案"
+          value={choice}
+          onChange={(e) => setChoice(e.target.value)}
           size="small"
-          error={!versionValid}
-          inputProps={{ min: 1 }}
-          sx={{ width: 200 }}
-        />
+          sx={{ minWidth: 280 }}
+        >
+          <MenuItem value={ORIGINAL_CHOICE}>原运行的执行档案</MenuItem>
+          {options.map((option) => (
+            <MenuItem key={optionValue(option)} value={optionValue(option)}>
+              {optionLabel(option)}
+            </MenuItem>
+          ))}
+        </TextField>
         <Button
           variant="contained"
           size="small"
           onClick={handleCreate}
-          disabled={!versionValid || mutation.isPending}
+          disabled={mutation.isPending}
         >
           {mutation.isPending ? '发起中…' : '发起 Replay'}
         </Button>
@@ -231,7 +244,7 @@ export function QualityReplaySection({
               aria-current={replay.id === selectedReplayId || undefined}
             >
               <span className={styles.itemRowHeader}>
-                <strong>{versionLabel(replay.agent_version)}</strong>
+                <strong>{replayLabel(replay)}</strong>
                 <ReplayStatusChip status={replay.status} />
                 <span className={styles.itemMeta}>
                   {formatQualityDateTime(replay.created_at)}

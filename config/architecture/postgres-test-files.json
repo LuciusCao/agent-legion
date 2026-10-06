@@ -207,6 +207,7 @@
     "tests/services/test_material_ttl.py",
     "tests/services/test_ops_metrics.py",
     "tests/services/test_quality_labels.py",
+    "tests/services/test_quality_replay_profiles.py",
     "tests/services/test_quality_replays.py",
     "tests/services/test_quality_sampling.py",
     "tests/services/test_quality_stats.py",

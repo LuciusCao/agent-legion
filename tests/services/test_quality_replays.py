@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -73,6 +74,12 @@ class _Env:
         ws = job_db.create_workspace(name="Replay WS")
         self.workspace_id = str(ws["id"])
         definition = definition or _definition()
+        if route_kind == "agent" and definition.nodes[target_node].node_type != "agent":
+            # Route rows only bind snapshot nodes typed ``agent`` (#935 R1): the
+            # legacy Agent-version pin path needs a legacy (not inlined) agent node.
+            nodes = dict(definition.nodes)
+            nodes[target_node] = replace(nodes[target_node], node_type="agent")
+            definition = replace(definition, nodes=nodes)
         snapshot = serialize_definition(definition)
         self.job = job_db.create_job(
             workflow_key="test",

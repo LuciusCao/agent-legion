@@ -2773,6 +2773,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/quality/sample-items/{item_id}/replay-profiles': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Replay Profiles */
+    get: operations['list_replay_profiles_api_workspaces__workspace_id__quality_sample_items__item_id__replay_profiles_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays': {
     parameters: {
       query?: never
@@ -5678,17 +5695,37 @@ export interface components {
       /** Item Id */
       item_id: string
       /**
+       * Profile Hash
+       * @default
+       */
+      profile_hash: string
+      /**
        * Replay Job Id
        * @default
        */
       replay_job_id: string
+      /** Revision Id */
+      revision_id?: string | null
+      /** Revision Version */
+      revision_version?: number | null
       /** Status */
       status: string
     }
     /** QualityReplayCreateRequest */
     QualityReplayCreateRequest: {
-      /** Agent Version */
+      /**
+       * Agent Version
+       * @deprecated
+       * @description Deprecated (#440 D6): replay with a workflow revision instead.
+       */
       agent_version?: number | null
+      /** Revision Id */
+      revision_id?: string | null
+      /**
+       * Use Draft
+       * @default false
+       */
+      use_draft: boolean
     }
     /** QualityReplayDetailResponse */
     QualityReplayDetailResponse: {
@@ -5704,6 +5741,56 @@ export interface components {
     QualityReplayListResponse: {
       /** Replays */
       replays: components['schemas']['QualityReplay'][]
+    }
+    /**
+     * QualityReplayProfileOption
+     * @description A revision (or the draft) whose node profile a replay can run with (#1079).
+     */
+    QualityReplayProfileOption: {
+      /**
+       * Is Original
+       * @default false
+       */
+      is_original: boolean
+      /**
+       * Model
+       * @default
+       */
+      model: string
+      /**
+       * Profile Hash
+       * @default
+       */
+      profile_hash: string
+      /**
+       * Provider
+       * @default
+       */
+      provider: string
+      /** Revision Id */
+      revision_id?: string | null
+      /**
+       * Revision Status
+       * @default
+       */
+      revision_status: string
+      /** Revision Version */
+      revision_version?: number | null
+      /**
+       * Runtime
+       * @default
+       */
+      runtime: string
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: 'revision' | 'draft'
+    }
+    /** QualityReplayProfileOptionsResponse */
+    QualityReplayProfileOptionsResponse: {
+      /** Options */
+      options: components['schemas']['QualityReplayProfileOption'][]
     }
     /** QualityReplayResponse */
     QualityReplayResponse: {
@@ -14214,6 +14301,38 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['QualityLabelResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_replay_profiles_api_workspaces__workspace_id__quality_sample_items__item_id__replay_profiles_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['QualityReplayProfileOptionsResponse']
         }
       }
       /** @description Validation Error */
