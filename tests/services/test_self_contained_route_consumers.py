@@ -140,6 +140,9 @@ def test_frozen_legacy_agent_node_still_reads_its_route(job_db, settings) -> Non
     workspace = job_db.create_workspace("Legacy agent", workspace_id="sc_legacy")
     raw = {"key": workspace["id"], **_DEFINITION, "execution": {"provider": "p", "model": "m"}}
     job = _job(job_db, workspace["id"], workflow_definition_from_mapping(raw), "Q1")
+    replace_agent_catalog(
+        workspace["id"], {"draft-agent": AgentDefinition(capability="draft", runtime="pi")}
+    )
     _add_route(job_db, workspace["id"], "draft", "draft-agent")
     service = JobQueryService(job_db, settings, WorkspaceExecutionConfigurationService(job_db))
 
@@ -147,3 +150,4 @@ def test_frozen_legacy_agent_node_still_reads_its_route(job_db, settings) -> Non
 
     assert nodes["draft"]["executor_kind"] is None
     assert nodes["draft"]["agent_id"] == "draft-agent"
+    assert nodes["draft"]["route_error"] is None

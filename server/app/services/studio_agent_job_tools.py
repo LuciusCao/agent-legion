@@ -129,6 +129,7 @@ class StudioAgentJobToolsService:
                 "outputs": [str(item) for item in node.get("outputs") or []],
                 "executor_kind": node.get("executor_kind"),
                 "agent_id": node.get("agent_id"),
+                "route_error": node.get("route_error"),
             }
             for node in detail["nodes"]
         ]
