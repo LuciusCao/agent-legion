@@ -14,6 +14,11 @@ import json
 from typing import Any
 
 
+def call_id(tool_call: dict[str, Any]) -> str | None:
+    tool_call_id = tool_call.get("toolCallId")
+    return tool_call_id if isinstance(tool_call_id, str) else None
+
+
 def declared_command(tool_call: dict[str, Any]) -> str | None:
     """``rawInput.command`` (stripped), or None when absent/blank/not a string."""
     raw_input = tool_call.get("rawInput")

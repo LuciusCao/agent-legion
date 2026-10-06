@@ -196,6 +196,30 @@ def test_never_announced_call_keeps_the_unbound_one_shot_grant() -> None:
     assert not grants.consume("/bin/bash", _kimi("anything"), root=ROOT)
 
 
+def test_mismatched_main_call_cannot_borrow_a_subagent_unbound_grant() -> None:
+    grants = TerminalGrants()
+    _stream(grants, "ls")
+    _approve(grants, _permission())  # main call, bound to `ls`
+    _approve(grants, _permission("7:sub_call"))  # subagent, never announced
+    # Swapping the approved command fails closed instead of spending the
+    # unrelated unbound grant (the cost: a racing subagent Bash is refused).
+    assert not grants.consume("/bin/bash", _kimi("rm -rf /w"), root=ROOT)
+    assert grants.consume("/bin/bash", _kimi("ls"), root=ROOT)
+    # With no announced/bound grant left in flight the subagent runs again.
+    assert grants.consume("/bin/bash", _kimi("anything"), root=ROOT)
+
+
+def test_announced_unbound_grant_also_blocks_the_unbound_fallback() -> None:
+    grants = TerminalGrants()
+    grants.observe(_lazy("{"))
+    _approve(grants, _permission())  # main call awaiting its started command
+    _approve(grants, _permission("7:sub_call"))
+    assert not grants.consume("/bin/bash", _kimi("rm -rf /w"), root=ROOT)
+    grants.observe(_started("ls"))
+    assert grants.consume("/bin/bash", _kimi("ls"), root=ROOT)
+    assert grants.consume("/bin/bash", _kimi("rm -rf build"), root=ROOT)
+
+
 def test_cd_wrapper_tolerates_whitespace_around_the_bound_command() -> None:
     grants = TerminalGrants()
     _approve(grants, _permission())

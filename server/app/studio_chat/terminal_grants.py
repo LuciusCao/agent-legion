@@ -18,7 +18,9 @@ late-binds to that call's first ``rawInput.command`` (first write wins).
 A grant whose call was seen on ``session/update`` yet is still unbound when
 the terminal is created is refused — kimi always announces the command
 before spawning. A grant for a call never seen there (kimi subagents) stays
-unbound: one approved request per terminal, not command-bound. A
+unbound: one approved request per terminal, not command-bound — and is only
+spendable while no announced or bound grant is in flight, so a main-agent
+call cannot swap its approved command by borrowing a subagent's grant. A
 command-less approval of a kind that never spawns a terminal mints none.
 """
 
@@ -32,7 +34,7 @@ from typing import Any
 from acp import RequestError
 
 from server.app.studio_chat.terminal_policy import confined_cwd
-from server.app.studio_chat.tool_call_args import declared_command
+from server.app.studio_chat.tool_call_args import call_id, declared_command
 from server.app.studio_chat.tool_call_commands import ToolCallCommands
 
 # Grant lifetime: the agent spawns right after the answer; a stale grant must
@@ -79,17 +81,17 @@ class TerminalGrants:
 
     def begin(self, tool_call: dict[str, Any]) -> dict[str, Any]:
         """Bind a permission request before it is shown; pair with ``end``."""
-        self.calls.hold(_call_id(tool_call), True)
+        self.calls.hold(call_id(tool_call), True)
         return self.calls.bind(tool_call)
 
     def end(self, tool_call: dict[str, Any]) -> None:
-        self.calls.hold(_call_id(tool_call), False)
+        self.calls.hold(call_id(tool_call), False)
 
     def grant(self, tool_call: dict[str, Any]) -> None:
         """Mint for an approved request (the payload returned by ``begin``)."""
         if not self.calls.may_spawn_terminal(tool_call):
             return
-        tool_call_id = _call_id(tool_call)
+        tool_call_id = call_id(tool_call)
         self._prune()
         self._grants.append(
             _Grant(
@@ -108,13 +110,19 @@ class TerminalGrants:
             for g in self._grants
             if g.command is not None and _runs(g.command, command, args, root)
         ]
-        unbound = [
-            g for g in self._grants if g.command is None and not self.calls.seen(g.tool_call_id)
-        ]
-        candidates = bound or unbound
-        if not candidates:
+        if bound:
+            self._grants.remove(bound[0])
+            return True
+        # While any announced/bound grant is in flight, a non-matching command
+        # fails closed instead of spending an unrelated subagent's unbound
+        # grant (a main call swapping its approved command would otherwise
+        # borrow it). Cost: a subagent Bash racing a main-agent Bash may be
+        # refused (explicit error; the agent retries).
+        if not self._grants or any(
+            g.command is not None or self.calls.seen(g.tool_call_id) for g in self._grants
+        ):
             return False
-        self._grants.remove(candidates[0])
+        self._grants.pop(0)
         return True
 
     def _granted_calls(self) -> list[str]:
@@ -123,11 +131,6 @@ class TerminalGrants:
     def _prune(self) -> None:
         now = time.monotonic()
         self._grants = [g for g in self._grants if g.expires_at > now]
-
-
-def _call_id(tool_call: dict[str, Any]) -> str | None:
-    tool_call_id = tool_call.get("toolCallId")
-    return tool_call_id if isinstance(tool_call_id, str) else None
 
 
 def _runs(approved: str, command: str, args: list[str] | None, root: str) -> bool:
