@@ -66,8 +66,11 @@ export function SettingsPage() {
     () => [
       { id: 'basic-info', label: '基础信息' },
       { id: 'agent-workers', label: 'Agent 与 Worker' },
-      // Agent 定义端点 admin-only（studio_secured），非 admin 不给入口（#677）。
-      ...(isAdmin ? [{ id: 'workspace-agents', label: 'Agent 定义' }] : []),
+      // Agent 定义端点 admin-only（studio_secured），非 admin 不给入口（#677）；
+      // #1079（#440 D1）起为只读历史。
+      ...(isAdmin
+        ? [{ id: 'workspace-agents', label: '历史 Agent 定义' }]
+        : []),
       ...(isAdmin ? [{ id: 'api-access', label: '外部对接' }] : []),
       ...(isAdmin ? [{ id: 'workspace-members', label: '成员管理' }] : []),
       ...(hasCodeNodes

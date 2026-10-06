@@ -1820,6 +1820,23 @@ export interface paths {
     patch: operations['update_workspace_api_workspaces__workspace_id__patch']
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/agent-provenance': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Workspace Agent Provenance */
+    get: operations['get_workspace_agent_provenance_api_workspaces__workspace_id__agent_provenance_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/agent-routes': {
     parameters: {
       query?: never
@@ -7999,6 +8016,25 @@ export interface components {
        */
       template: string
     }
+    /**
+     * WorkspaceAgentProvenanceEntry
+     * @description An active-revision node carrying an inlined Agent profile (#1079, #440 D1).
+     */
+    WorkspaceAgentProvenanceEntry: {
+      /** Agent Id */
+      agent_id: string
+      /** Agent Version */
+      agent_version?: number | null
+      /** Node Key */
+      node_key: string
+      /** Node Label */
+      node_label: string
+    }
+    /** WorkspaceAgentProvenanceResponse */
+    WorkspaceAgentProvenanceResponse: {
+      /** Nodes */
+      nodes: components['schemas']['WorkspaceAgentProvenanceEntry'][]
+    }
     /** WorkspaceAgentRouteEntry */
     WorkspaceAgentRouteEntry: {
       /** Agent Id */
@@ -12012,6 +12048,37 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_workspace_agent_provenance_api_workspaces__workspace_id__agent_provenance_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceAgentProvenanceResponse']
         }
       }
       /** @description Validation Error */

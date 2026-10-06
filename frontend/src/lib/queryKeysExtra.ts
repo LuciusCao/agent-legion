@@ -61,6 +61,7 @@ export const extraQueryKeys = {
   workflowStudioDraft: (workspaceId: string) =>
     ['workflowStudioDraft', workspaceId] as const,
   agentDefinitions: (workspaceId: string) => k('agentDefinitions', workspaceId),
+  agentProvenance: (workspaceId: string) => k('agentProvenance', workspaceId),
   // Studio DAG/Inspector 共享的 Agent 目录（P-0.5：executors 半区已退役）；
   // 面板发布/归档后失效重取。
   studioAgentCatalog: (workspaceId: string) =>

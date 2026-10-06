@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { archiveAgent, fetchAgentDefinitions } from './agentDefinitions'
+import { fetchAgentDefinitions, fetchAgentProvenance } from './agentDefinitions'
 
 const originalFetch = global.fetch
 
@@ -36,17 +36,17 @@ describe('agentDefinitions api', () => {
     )
   })
 
-  it('archives an agent', async () => {
-    const payload = { archived: 3 }
+  it('fetches the inlined-node provenance of the active revision', async () => {
+    const payload = { nodes: [] }
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await archiveAgent(WS, 'agent-1')
+    const result = await fetchAgentProvenance('ws 1')
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/agent-definitions/agent-1${WS_QUERY}`,
-      expect.objectContaining({ method: 'DELETE' })
+      '/api/workspaces/ws%201/agent-provenance',
+      expect.anything()
     )
   })
 })

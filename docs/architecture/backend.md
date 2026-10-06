@@ -297,6 +297,7 @@ server/app/
 | GET | `/agent-catalog` | `get_agent_catalog` | routes/workspace_agent_catalog.py |
 | GET | `/workspaces/{workspace_id}/execution-configuration` | `get_workspace_execution_configuration` | routes/workspace_agent_catalog.py |
 | GET | `/workspaces/{workspace_id}/agent-routes` | `get_workspace_agent_routes` | routes/workspace_agent_routes.py |
+| GET | `/workspaces/{workspace_id}/agent-provenance` | `get_workspace_agent_provenance` | routes/workspace_agent_routes.py |
 | POST | `/workspaces/{workspace_id}/api-tokens` | `create_api_token` | routes/workspace_api_tokens.py |
 | GET | `/workspaces/{workspace_id}/api-tokens` | `list_api_tokens` | routes/workspace_api_tokens.py |
 | DELETE | `/workspaces/{workspace_id}/api-tokens/{token_id}` | `revoke_api_token` | routes/workspace_api_tokens.py |
@@ -664,6 +665,8 @@ server/app/
 | WorkspaceExecutionConfigurationResponse | BaseModel | node_limits: list[NodeLimitEntry], migration_warnings: list[str], agent_capac... | app/routes/workspace_execution_contracts.py |
 | WorkspaceAgentRouteEntry | BaseModel | node_key: str, node_label: str, capability: str, agent_id: str, agent_skill: ... | app/routes/workspace_execution_contracts.py |
 | WorkspaceAgentRoutesResponse | BaseModel | routes: list[WorkspaceAgentRouteEntry] | app/routes/workspace_execution_contracts.py |
+| WorkspaceAgentProvenanceEntry | BaseModel | node_key: str, node_label: str, agent_id: str, agent_version: int | None | app/routes/workspace_execution_contracts.py |
+| WorkspaceAgentProvenanceResponse | BaseModel | nodes: list[WorkspaceAgentProvenanceEntry] | app/routes/workspace_execution_contracts.py |
 | WorkspaceSettingsPayload | BaseModel | entityType: str, previewHidden: list[str] | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, previewHidden: list[str] | None | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/workspace_execution_contracts.py |

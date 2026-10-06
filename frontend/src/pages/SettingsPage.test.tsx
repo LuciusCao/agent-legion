@@ -65,7 +65,7 @@ vi.mock('../api', () => ({
   deleteRegisterToken: vi.fn(),
   deleteAgentWorker: vi.fn(),
   fetchAgentDefinitions: vi.fn().mockResolvedValue({ agents: [] }),
-  archiveAgent: vi.fn(),
+  fetchAgentProvenance: vi.fn().mockResolvedValue({ nodes: [] }),
   listWorkspaceApiTokens: vi.fn().mockResolvedValue({
     tokens: [],
     rate_limit: { requests_per_minute: 60, burst: 20 },
@@ -234,7 +234,7 @@ describe('SettingsPage', () => {
     expect(navButtons[1]).not.toHaveAttribute('aria-current')
   })
 
-  it('shows the Agent definitions section to admins only (#677)', async () => {
+  it('shows the historical Agent definitions section to admins only (#677, #1079)', async () => {
     useAuthStore.setState({
       user: { id: 'u1', username: 'admin', role: 'admin' },
     } as unknown as Parameters<typeof useAuthStore.setState>[0])
@@ -246,9 +246,9 @@ describe('SettingsPage', () => {
         within(nav)
           .getAllByRole('button')
           .map((b) => b.textContent)
-      ).toContain('Agent 定义')
+      ).toContain('历史 Agent 定义')
       expect(
-        screen.getByRole('heading', { level: 2, name: 'Agent 定义' })
+        screen.getByRole('heading', { level: 2, name: '历史 Agent 定义' })
       ).toBeInTheDocument()
     } finally {
       act(() => useAuthStore.setState({ user: null }))
@@ -572,7 +572,7 @@ describe('SettingsPage', () => {
       ).toEqual([
         '基础信息',
         'Agent 与 Worker',
-        'Agent 定义',
+        '历史 Agent 定义',
         '外部对接',
         '成员管理',
         '危险操作',
