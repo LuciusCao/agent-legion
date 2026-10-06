@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.16] - 2026-10-06
+
+主打安全审计收口与概念退役：#710 红队审计 P3 加固（worker 清单/dashboard 成员过滤、HTML 文档 CSP、ACP 子进程权限模型与环境继承收敛、velites 工具沙箱网络与命名空间隔离）叠加 review-1004 P1 收尾（sweeper 终态守卫、approval 原子换入、批量端点选择数上限、validator 异常路径产物逐出）；Studio Chat 会话生命周期收口（删除/归档 teardown 幂等、零内容空轮消息自愈与后台唤醒轮入站排队、后台任务回执适配 Kimi Code 存储布局）；概念退役推进 Agent 定义 P1/P2（执行档案并入节点自含声明，schema v90–v92）与 workflow_key 终态删除；job 详情区分「排队」与「输入恢复不全卡住」（#887）；治理面清退豁免锚点并收紧 CI 路径分道。
+
 ### Added
 
 - job 详情页区分「排队」与「输入恢复不全卡住」（issue #887，#827 follow-up）：workflow worker 对悬挂清单行（对象缺失 / 内容校验不符 / 压缩对象损坏）连续 defer 达到升级阈值、且没有在途生产者会重写该输入时，`GET /api/jobs/{job_id}` 的节点新增只读字段 `hydration_defer {inputs, reasons, rerun_nodes}`，只出现在受阻的等待中节点上；详情页时间线据此在该节点显示「输入恢复不全，建议重跑 <生产节点>」，悬停给出输入名与原因。状态与 worker 进程内的连续计数同生共死（不落库、无 schema 变更）：输入恢复、行身份变化或 job 离开可运行集即撤下，Host 重启后按阈值轮数重新出现。

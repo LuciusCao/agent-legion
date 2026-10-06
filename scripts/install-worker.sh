@@ -29,7 +29,7 @@ IMAGE_REPO="ghcr.io/luciuscao/agent-legion-worker"
 # 默认钉在已发布版本；--version / --velites-version 或同名环境变量覆盖。
 # 注意 compose 文件按 worker-v<version> tag ref 拉取：自定义版本必须存在
 # 对应 tag（即经过 worker-image-release workflow 发布过）。
-WORKER_VERSION="${AGENT_WORKER_VERSION:-0.7.15}"
+WORKER_VERSION="${AGENT_WORKER_VERSION:-0.7.16}"
 VELITES_VERSION="${VELITES_VERSION:-0.5.6}"
 TARGET="${AGENT_WORKER_INSTALL_DIR:-$HOME/agent-legion-worker}"
 HOST_URL=""
@@ -52,7 +52,7 @@ usage() {
   --name NAME           显示名（默认 "Worker on <hostname>"）
   --models-json FILE    安装该文件为 velites-config/models.json（已存在则
                         覆盖——显式传入即声明为本次的期望内容）
-  --version TAG         worker 镜像 tag（默认 0.7.15；须存在 worker-v<TAG>
+  --version TAG         worker 镜像 tag（默认 0.7.16；须存在 worker-v<TAG>
                         发布 tag）
   --velites-version VER velites 二进制版本（默认 0.5.6）
   --no-up               只组装文件，不执行 docker compose up
