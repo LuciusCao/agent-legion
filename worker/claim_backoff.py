@@ -17,6 +17,9 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable
+from typing import Any
+
+from worker import events
 
 # First failure waits this long regardless of poll_interval (seconds).
 CLAIM_BACKOFF_FIRST_SECONDS = 1.0
@@ -79,6 +82,17 @@ class ClaimBackoffSequence:
         )
         self.failures += 1
         return wait
+
+    def wait_out(self, stop: Any, worker_id: str, error: BaseException, label: str) -> None:
+        """One claim-loop failure's full backoff step: next wait, the #490
+        ``claim.backoff`` event, one log line, then an interruptible sleep on
+        ``stop``. Shared by the executor's Host-unavailable (#960) and
+        lane-spawn (#1051) arms so each arm stays one call in the budgeted
+        executor main."""
+        wait = self.next_wait()
+        events.note_claim_backoff(worker_id, error, wait, self.failures)
+        print(f"{label}: {error}; retrying in {wait:.1f}s", flush=True)
+        stop.wait(wait)
 
     def reset(self) -> None:
         self.failures = 0

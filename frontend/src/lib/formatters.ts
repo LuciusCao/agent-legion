@@ -1,44 +1,39 @@
 import { INTERACTION_TYPE_LABELS } from '../labels'
 import type { InteractionStats } from '../types'
 
-export function seconds(value: number): string {
-  const minutes = Math.floor(value / 60)
-  const secs = Math.floor(value % 60)
-  return `${minutes}:${secs.toString().padStart(2, '0')}`
+/**
+ * 前端格式化的唯一归口（#966）：文件大小、数字、日期时间、相对时间统一从
+ * 本模块取，不在组件里再写一份。locale 统一 `zh-CN`（中文 UI；既有调用
+ * 多数已显式写 zh-CN，少数用浏览器默认的已收敛到这里）。
+ */
+export const DISPLAY_LOCALE = 'zh-CN'
+
+const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const
+
+/**
+ * 字节数 → 人类可读大小：1024 进制，单位阶梯 B/KB/MB/GB/TB（超过 TB 仍按
+ * TB 计），保留至多 1 位小数且去掉多余的 `.0`（`2 KB`、`1.5 MB`）。
+ * 非法值（负数 / NaN / Infinity）显示占位符。
+ */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '—'
+  if (bytes < 1) return `${bytes} B`
+  const exponent = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    BYTE_UNITS.length - 1
+  )
+  const value = parseFloat((bytes / Math.pow(1024, exponent)).toFixed(1))
+  return `${value} ${BYTE_UNITS[exponent]}`
 }
 
-export function parseTimeSeconds(value: unknown): number {
-  if (typeof value === 'number') return value
-  if (typeof value !== 'string') return Number.NaN
-
-  const trimmed = value.trim()
-  if (!trimmed) return Number.NaN
-
-  const numeric = Number(trimmed)
-  if (Number.isFinite(numeric)) return numeric
-
-  const parts = trimmed.replace(',', '.').split(':')
-  if (parts.length === 2) {
-    const minutes = Number(parts[0])
-    const seconds = Number(parts[1])
-    if (Number.isFinite(minutes) && Number.isFinite(seconds)) {
-      return minutes * 60 + seconds
-    }
-  }
-  if (parts.length === 3) {
-    const hours = Number(parts[0])
-    const minutes = Number(parts[1])
-    const seconds = Number(parts[2])
-    if (
-      Number.isFinite(hours) &&
-      Number.isFinite(minutes) &&
-      Number.isFinite(seconds)
-    ) {
-      return hours * 3600 + minutes * 60 + seconds
-    }
-  }
-
-  return Number.NaN
+/** 千分位数字（zh-CN）；非数字显示占位符（默认 `-`，与监控/用量面板一致）。 */
+export function formatNumber(
+  value: number | null | undefined,
+  placeholder = '-'
+): string {
+  return typeof value === 'number'
+    ? value.toLocaleString(DISPLAY_LOCALE)
+    : placeholder
 }
 
 export function formatDuration(ms: number): string {
@@ -63,7 +58,9 @@ export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—'
   const hasOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value.trim())
   const date = new Date(hasOffset ? value : `${value.replace(' ', 'T')}Z`)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN')
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString(DISPLAY_LOCALE)
 }
 
 export function formatRelativeTime(isoDate: string): string {
@@ -77,7 +74,7 @@ export function formatRelativeTime(isoDate: string): string {
   if (hours < 24) return `${hours} 小时前`
   const days = Math.floor(hours / 24)
   if (days < 30) return `${days} 天前`
-  return date.toLocaleDateString('zh-CN')
+  return date.toLocaleDateString(DISPLAY_LOCALE)
 }
 
 export function durationSeconds(

@@ -84,7 +84,9 @@ def create_studio_chat_router(
             StudioChatSessionRecord.model_validate(row)
             for row in service.list_sessions(workspace_id, archived=archived)
         ]
-        return StudioChatSessionsResponse(sessions=sessions)
+        return StudioChatSessionsResponse(
+            sessions=sessions, retention_days=service.retention_days()
+        )
 
     @router.get(
         "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}",

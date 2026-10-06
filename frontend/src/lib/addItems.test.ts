@@ -4,7 +4,6 @@ import { webcrypto } from 'node:crypto'
 import {
   computeFileSha256,
   fileTypeGroup,
-  formatBytes,
   parseRefIds,
   runWithConcurrency,
   splitBundleRelativePath,
@@ -77,15 +76,6 @@ describe('fileTypeGroup', () => {
     expect(fileTypeGroup('a.txt', 'text/plain')).toBe('文本')
     expect(fileTypeGroup('data.csv', '')).toBe('.csv')
     expect(fileTypeGroup('README', '')).toBe('其他')
-  })
-})
-
-describe('formatBytes', () => {
-  it('formats human readable sizes', () => {
-    expect(formatBytes(0)).toBe('0 B')
-    expect(formatBytes(512)).toBe('512 B')
-    expect(formatBytes(2048)).toBe('2 KB')
-    expect(formatBytes(5 * 1024 * 1024)).toBe('5 MB')
   })
 })
 

@@ -13,8 +13,10 @@ def test_stop_cancels_and_awaits_background_tasks():
         job_intake_queue=object(),
     )
     settled: list[str] = []
+    started: list[str] = []
 
     async def _loop(name: str) -> None:
+        started.append(name)
         try:
             while True:
                 await asyncio.sleep(0.01)
@@ -30,7 +32,9 @@ def test_stop_cancels_and_awaits_background_tasks():
                 job_intake_queue_task=asyncio.create_task(_loop("intake")),
             )
         )
-        await asyncio.sleep(0.05)  # 让任务先跑起来再取消
+        # 三个任务都已真正进入循环体再取消（让出事件循环直到它们各自起跑）。
+        while len(started) < 3:
+            await asyncio.sleep(0)
         await background.stop(app, timeout_seconds=2.0)
         assert app.state.workspace_event_aggregator_task.cancelled()
         assert app.state.agent_status_flush_task.cancelled()

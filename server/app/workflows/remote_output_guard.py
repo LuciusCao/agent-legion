@@ -46,7 +46,7 @@ def find_remote_output_rewrites(view_dir: Path, snapshot: Mapping[str, str]) -> 
     fast-path: replacing a file with identical bytes is not flagged, while a
     same-size in-place rewrite within one timestamp tick (unchanged
     size/mtime) is. Each output is checked independently (#939): one that
-    cannot be hashed is recorded as unverifiable — treated as diverged — and
+    cannot be stat-ed or hashed is recorded as unverifiable — treated as diverged — and
     never stops the check of the others.
     """
     kinds = {name: _change_kind(view_dir / name, snapshot[name]) for name in sorted(snapshot)}
@@ -54,14 +54,17 @@ def find_remote_output_rewrites(view_dir: Path, snapshot: Mapping[str, str]) -> 
 
 
 def _change_kind(path: Path, digest: str) -> str | None:
-    if not path.is_file():
-        return "deleted"
     try:
+        # #1035: ``is_file()`` only swallows ENOENT-family errors — a stat
+        # failing with EIO / NFS ESTALE raises, so it sits inside the
+        # per-output isolation too instead of escaping the whole check.
+        if not path.is_file():
+            return "deleted"
         return None if file_sha256(path) == digest else "rewritten"
     except Exception:
-        # #204 broad-except audit: fail-closed — an unhashable copy is
-        # untrusted (diverged from the authority digest), never a reason to
-        # stop checking or evicting the others (#939).
+        # #204 broad-except audit: fail-closed — an unstattable or unhashable
+        # copy is untrusted (diverged from the authority digest), never a
+        # reason to stop checking or evicting the others (#939, #1035).
         return "unverifiable"
 
 

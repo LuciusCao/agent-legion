@@ -140,7 +140,7 @@ export default function UsersAdminPage() {
             />
             <input
               className={styles.input}
-              placeholder="密码"
+              placeholder="密码（至少 12 位）"
               aria-label="密码"
               type="password"
               value={password}

@@ -572,6 +572,7 @@ def test_marker_gate_is_reevaluated_inside_the_apply_critical_section(direct) ->
             )
             marker_thread.start()
             runtime.turn_may_compact = False
+            # 保留：threading 锁无可观测的等待者；即便线程晚到，锁内翻转后的拒绝语义不变（只影响是否覆盖到阻塞交错）。
             time.sleep(0.3)  # let the marker thread reach and block on the lock
         marker_thread.join(timeout=5)
 

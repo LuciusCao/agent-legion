@@ -3,27 +3,26 @@ import { createRealtimeChannel, type RealtimeChannel } from '../lib/realtime'
 import { parseAgentsWsMessage, upsertAgent } from '../lib/agentsWsMessages'
 import { useConnectionStatusStore } from './connectionStatusStore'
 import type { AgentStatus } from '../types'
-import { createWorkerStatusActions } from './workerSchedulingState'
+import {
+  createWorkerStatusActions,
+  type WorkerStatusRead,
+} from './workerSchedulingState'
 
+/** #961：workspace 暂停位不再存在本 store——唯一数据源是 React Query 缓存
+ * （hooks/useWorkerPausedStatus）；这里只保留请求排序动作，避免 zustand 与
+ * RQ 双源分叉（拉取失败时 store 默认值曾把运行中显示成「已暂停」）。 */
 export interface AgentsState {
   agents: AgentStatus[]
-  workerPausedByWorkspace: Record<string, boolean>
-  getWorkerPaused: (workspaceId: string) => boolean
   connectAgentsWs: () => () => void
-  fetchWorkerStatus: (workspaceId: string) => Promise<void>
-  setWorkerPaused: (paused: boolean, workspaceId: string) => Promise<void>
+  fetchWorkerStatus: (workspaceId: string) => Promise<WorkerStatusRead>
+  /** 返回服务端确认后的 paused；调用方负责写回 RQ 缓存。 */
+  setWorkerPaused: (paused: boolean, workspaceId: string) => Promise<boolean>
 }
 
 let agentsChannel: RealtimeChannel | null = null
 
-export const useAgentsStore = create<AgentsState>((set, get) => ({
+export const useAgentsStore = create<AgentsState>((set) => ({
   agents: [],
-  workerPausedByWorkspace: {},
-
-  getWorkerPaused: (workspaceId) => {
-    const paused = get().workerPausedByWorkspace[workspaceId]
-    return paused !== undefined ? paused : true
-  },
 
   connectAgentsWs: () => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -59,12 +58,5 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
     }
   },
 
-  ...createWorkerStatusActions((workspaceId, paused) => {
-    set((state) => ({
-      workerPausedByWorkspace: {
-        ...state.workerPausedByWorkspace,
-        [workspaceId]: paused,
-      },
-    }))
-  }),
+  ...createWorkerStatusActions(),
 }))
