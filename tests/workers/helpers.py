@@ -126,6 +126,25 @@ def _run_main(
     config_updates: dict | None = None,
 ) -> tuple[threading.Thread, dict, list]:
     """Run main() in a thread with a stubbed signal module and Client."""
+    handlers = _prepare_main(monkeypatch, tmp_path, fake, config_updates)
+    result: list[int] = []
+
+    def target() -> None:
+        result.append(agent_worker.main())
+
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    return thread, handlers, result
+
+
+def _prepare_main(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fake: FakeClient,
+    config_updates: dict | None = None,
+) -> dict:
+    """Stub signal/Client/PATH probe and write the config main() reads;
+    returns the captured signal handlers (callers may run main() inline)."""
     handlers: dict = {}
     monkeypatch.setattr(
         agent_worker.signal,
@@ -143,14 +162,7 @@ def _run_main(
         config.update(config_updates)
         config_path.write_text(json.dumps(config), encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["agent_worker.py", "--config", str(config_path)])
-    result: list[int] = []
-
-    def target() -> None:
-        result.append(agent_worker.main())
-
-    thread = threading.Thread(target=target, daemon=True)
-    thread.start()
-    return thread, handlers, result
+    return handlers
 
 
 def _make_definition(nodes: list[WorkflowNode]) -> WorkflowDefinition:

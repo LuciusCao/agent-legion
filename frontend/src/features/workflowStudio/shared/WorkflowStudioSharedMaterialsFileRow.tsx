@@ -5,6 +5,7 @@ import {
   isRowPropagatable,
   type SharedMaterialFileRow,
 } from './sharedMaterialsRows'
+import { formatBytes, formatDateTime } from '../../../lib/formatters'
 import styles from './WorkflowStudioSharedMaterialsDrawer.module.css'
 
 export const DRIFT_LABELS: Record<SharedMaterialDriftStatus, string> = {
@@ -19,16 +20,6 @@ const DRIFT_CHIP_CLASS: Record<SharedMaterialDriftStatus, string> = {
   pending_sync: styles.chipPending,
   missing_in_skill: styles.chipMissing,
   skill_not_found: styles.chipMissing,
-}
-
-function formatSize(size: number): string {
-  if (size < 1024) return `${size} B`
-  return `${(size / 1024).toFixed(1)} KB`
-}
-
-function formatTime(iso: string): string {
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
 }
 
 /**
@@ -72,9 +63,9 @@ export function SharedMaterialFileRowView({
           <span className={`${styles.chip} ${styles.chipMissing}`}>缺失源</span>
         ) : (
           <>
-            <span className={styles.chip}>{formatSize(row.size ?? 0)}</span>
+            <span className={styles.chip}>{formatBytes(row.size ?? 0)}</span>
             <span className={styles.chip}>
-              {formatTime(row.modifiedAt ?? '')}
+              {formatDateTime(row.modifiedAt)}
             </span>
           </>
         )}

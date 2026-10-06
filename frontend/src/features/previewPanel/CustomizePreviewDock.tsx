@@ -70,6 +70,7 @@ function CustomizePreviewChat({ workspaceId }: { workspaceId: string }) {
               archivedSessions={manage.archivedSessions}
               onArchiveSession={manage.archive}
               onUnarchiveSession={manage.unarchive}
+              retentionDays={manage.retentionDays}
             />
           }
           emptyState="选择 Agent，点「＋ 新对话」开始"

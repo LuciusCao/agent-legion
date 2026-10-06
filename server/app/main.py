@@ -35,16 +35,12 @@ from server.app.routes.job_http_handlers import register_job_http_exception_hand
 from server.app.routes.quality_deps import build_quality_loop
 from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.agent_catalog_projection import AgentCatalogService
-from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
-from server.app.services.execution_retention_sweeper import ExecutionRetentionThread
 from server.app.services.instance_settings import apply_instance_settings
-from server.app.services.job_artifact_maintenance import JobArtifactMaintenanceThread
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
-from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
@@ -61,7 +57,7 @@ from server.app.studio_chat.agent_catalog import spawn_startup_detection
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.service import StudioChatService
 from server.app.studio_chat.serving_address import ServingAddressMiddleware
-from server.app.sweeper_owned_startup import start_sweeper_owned_threads
+from server.app.sweeper_owned_startup import SweeperOwnedThreads, start_sweeper_owned_threads
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
 from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -146,15 +142,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     agent_worker_registry = agent_plane.worker_registry
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
-    slow_sweeps: (
-        tuple[
-            ArtifactOrphanGcThread,
-            JobArtifactMaintenanceThread,
-            MaterialTtlSweeperThread,
-            ExecutionRetentionThread,
-        ]
-        | None
-    ) = None
+    slow_sweeps: SweeperOwnedThreads | None = None
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
@@ -217,11 +205,17 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 # None in pure-remote mode (#389): no local executor stack.
                 app.state.code_executor = workflow_worker_thread.local_executor()
             # Orphan GC / artifact maintenance / materials TTL / execution
-            # retention share the sweeper ownership rule: exactly one replica
+            # retention / studio chat retention (#1041) share the sweeper
+            # ownership rule: exactly one replica
             # (sweeper_enabled) runs the slow sweeps, the rest stay idle.
             if settings.executor_runtime.sweeper_enabled:
                 slow_sweeps = start_sweeper_owned_threads(
-                    artifact_store, job_artifact_objects, job_db, settings, object_storage
+                    artifact_store,
+                    job_artifact_objects,
+                    job_db,
+                    settings,
+                    object_storage,
+                    studio_chat_service,
                 )
         background_tasks.start(app)
         studio_chat_service.reap_zombie_sessions()

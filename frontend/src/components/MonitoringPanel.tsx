@@ -6,7 +6,8 @@ import { queryKeys } from '../lib/queryKeys'
 import { useOpsMetrics } from '../hooks/useOpsMetrics'
 import { fillWindowBuckets } from '../lib/opsMetricsWindow'
 import { lastNonNullBucket } from '../lib/opsMetricsBuckets'
-import { fmt, fmtDuration, makeTimeFormatter } from '../lib/monitoringFormat'
+import { formatNumber } from '../lib/formatters'
+import { fmtDuration, makeTimeFormatter } from '../lib/monitoringFormat'
 import { MetricsChart } from './MetricsChart'
 import { MonitoringHeader } from './MonitoringHeader'
 import {
@@ -101,10 +102,10 @@ export function MonitoringPanel({ workspaceId }: { workspaceId?: string }) {
               className={styles.metricValue}
               data-testid="online-workers-summary"
             >
-              {fmt(summary?.online_workers)}
+              {formatNumber(summary?.online_workers)}
             </div>
             <div className={styles.metricMeta}>
-              窗口峰值 {fmt(latest?.online_workers_max)}
+              窗口峰值 {formatNumber(latest?.online_workers_max)}
             </div>
           </div>
         )}
@@ -114,10 +115,10 @@ export function MonitoringPanel({ workspaceId }: { workspaceId?: string }) {
             className={styles.metricValue}
             data-testid="active-executions-summary"
           >
-            {fmt(summary?.active_executions)}
+            {formatNumber(summary?.active_executions)}
           </div>
           <div className={styles.metricMeta}>
-            窗口峰值 {fmt(latest?.active_executions_max)}
+            窗口峰值 {formatNumber(latest?.active_executions_max)}
           </div>
         </div>
         <div className={styles.metric}>
@@ -126,21 +127,21 @@ export function MonitoringPanel({ workspaceId }: { workspaceId?: string }) {
             className={styles.metricValue}
             data-testid="hourly-tokens-summary"
           >
-            {fmt(hourlyTokens?.total_tokens)}
+            {formatNumber(hourlyTokens?.total_tokens)}
           </div>
           <div className={styles.metricMeta}>
-            输入 {fmt(hourlyTokens?.input_tokens)} · 输出{' '}
-            {fmt(hourlyTokens?.output_tokens)} · 缓存读{' '}
-            {fmt(hourlyTokens?.cache_read_tokens)}
+            输入 {formatNumber(hourlyTokens?.input_tokens)} · 输出{' '}
+            {formatNumber(hourlyTokens?.output_tokens)} · 缓存读{' '}
+            {formatNumber(hourlyTokens?.cache_read_tokens)}
           </div>
         </div>
         <div className={styles.metric}>
           <div className={styles.metricLabel}>近 1 小时 Agent Runs</div>
           <div className={styles.metricValue} data-testid="hourly-runs-summary">
-            完成 {fmt(hourlyRuns?.completed)}
+            完成 {formatNumber(hourlyRuns?.completed)}
           </div>
           <div className={styles.metricMeta}>
-            失败 {fmt(hourlyRuns?.failed)} · p50{' '}
+            失败 {formatNumber(hourlyRuns?.failed)} · p50{' '}
             {fmtDuration(hourlyRuns?.duration_p50_seconds)} · p95{' '}
             {fmtDuration(hourlyRuns?.duration_p95_seconds)}
           </div>

@@ -65,9 +65,14 @@ def _build_session_router(auth_service: AuthService) -> APIRouter:
     router = APIRouter(prefix="/auth", tags=["auth"])
 
     @router.post("/login", response_model=LoginResponse)
-    def login(payload: LoginRequest, response: Response) -> LoginResponse:
+    def login(payload: LoginRequest, request: Request, response: Response) -> LoginResponse:
+        # #970: the IP lockout keys use the transport peer. Behind a reverse
+        # proxy uvicorn's proxy-headers handling (forwarded_allow_ips, default
+        # loopback only) has already rewritten request.client from trusted
+        # proxies; a raw X-Forwarded-For from an untrusted peer is never read.
+        client_ip = request.client.host if request.client else None
         try:
-            token, user = auth_service.login(payload.username, payload.password)
+            token, user = auth_service.login(payload.username, payload.password, client_ip)
         except AuthError as exc:
             raise _auth_error(exc) from exc
         _set_session_cookie(response, token)
@@ -114,8 +119,9 @@ def _build_session_router(auth_service: AuthService) -> APIRouter:
     @router.post("/bootstrap", response_model=LoginResponse)
     def bootstrap(payload: BootstrapRequest, response: Response) -> LoginResponse:
         try:
-            user = auth_service.bootstrap(payload.username, payload.password, payload.display_name)
-            token, _ = auth_service.login(payload.username, payload.password)
+            token, user = auth_service.bootstrap(
+                payload.username, payload.password, payload.display_name
+            )
         except AuthError as exc:
             raise _auth_error(exc) from exc
         _set_session_cookie(response, token)

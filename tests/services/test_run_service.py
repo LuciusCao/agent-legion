@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 
 import pytest
 
@@ -16,6 +15,7 @@ from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.run_service import RunService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from tests.helpers import load_builtin_definition
+from tests.helpers.pg_waits import backend_pid, wait_until_blocked_by
 
 WORKFLOW_KEY = "education_video_problems_generation"
 WORKSPACE_ID = "ws-run-service"
@@ -369,7 +369,8 @@ def test_material_deleted_mid_creation_fails_and_compensates_run(service, job_db
             thread = threading.Thread(target=_create)
             thread.start()
             assert entered.wait(timeout=5)
-            time.sleep(0.5)  # create_run 线程应正阻塞在 FOR KEY SHARE 上
+            # create_run 线程应正阻塞在 FOR KEY SHARE 上：以 pg_blocking_pids 观测为准。
+            wait_until_blocked_by(backend_pid(holder), thread=thread)
             assert thread.is_alive()
         # holder 提交删除，释放行锁
         thread.join(timeout=15)

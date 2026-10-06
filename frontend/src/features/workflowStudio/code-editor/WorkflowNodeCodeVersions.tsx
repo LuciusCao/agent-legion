@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@mui/material'
 import { api } from '../../../api'
 import type { components } from '../../../generated/api'
+import { formatDateTime } from '../../../lib/formatters'
 import styles from './WorkflowNodeCodeSection.module.css'
 
 type VersionsResponse =
@@ -13,11 +14,6 @@ const STATUS_LABELS: Record<string, string> = {
   draft: '草稿',
   published: '已发布',
   archived: '已归档',
-}
-
-function formatTime(value: string) {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
 function VersionRow(props: {
@@ -50,7 +46,7 @@ function VersionRow(props: {
       <span className={styles.versionMeta}>
         {version.created_by}
         {version.change_note ? ` · ${version.change_note}` : ''} ·{' '}
-        {formatTime(version.created_at)}
+        {formatDateTime(version.created_at)}
       </span>
       <Button
         variant="text"

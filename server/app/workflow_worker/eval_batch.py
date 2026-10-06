@@ -18,7 +18,7 @@ from server.app.storage_paths import resolve_job_dir
 from server.app.workflow_worker.eval_hydration import hydrate_eval_contexts
 from server.app.workflow_worker.ready_cache import evaluate_job_ready, resolve_cached_definition
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.sharding_batch import has_pending_shards_many
+from server.app.workflows.sharding_batch import has_pending_shards_many, running_shard_nodes
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.ready_cache import ReadyCandidate
@@ -53,9 +53,8 @@ def evaluate_changed_jobs(
             logger.warning("skipping job %s: no workflow definition available", job["id"])
             continue
         statuses = {node["node_key"]: node["status"] for node in nodes_by_job.get(job["id"], [])}
-        for node in definition_to_run.nodes.values():
-            if node.shard is not None and statuses.get(node.key) == "running":
-                shard_node_pairs.append((job["id"], node.key))
+        for node_key in running_shard_nodes(definition_to_run, statuses):
+            shard_node_pairs.append((job["id"], node_key))
         eval_contexts.append(
             {
                 "mark": mark,

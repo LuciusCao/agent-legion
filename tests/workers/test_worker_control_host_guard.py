@@ -14,13 +14,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from worker.service import create_app
+from worker.service_bind import embed_control_token
 from worker.service_host_guard import (
     LOOPBACK_HOSTS,
     control_plane_allowed_hosts,
     host_header_name,
     request_rejection,
 )
-from worker.service_host_names import console_origin
+from worker.service_host_names import console_origin, is_loopback_name
 from worker.supervisor import WorkerConfigStore
 
 pytestmark = pytest.mark.no_db
@@ -205,3 +206,86 @@ def test_console_origin_accepted_for_mutation_behind_host_rewriting_proxy() -> N
     assert request_rejection("POST", other, LOOPBACK_HOSTS, trusted)
     assert console_origin("http://[::1]:8787") == "http://[::1]:8787"
     assert console_origin("") is None
+
+
+@pytest.mark.parametrize(
+    ("console_url", "expected"),
+    [
+        ("https://worker.example:443", "https://worker.example"),
+        ("http://worker.example:80/", "http://worker.example"),
+        ("HTTPS://Worker.Example:443/console", "https://worker.example"),
+        ("http://[::1]:80", "http://[::1]"),
+        # 非默认端口（含协议错配的默认端口）照常保留
+        ("https://worker.example:80", "https://worker.example:80"),
+        ("http://worker.example:443", "http://worker.example:443"),
+        ("https://worker.example:8443", "https://worker.example:8443"),
+    ],
+)
+def test_console_origin_omits_scheme_default_port(console_url: str, expected: str) -> None:
+    """浏览器 Origin 省略默认端口；显式写 :443 / :80 的控制台地址同样归一（#979）。"""
+    assert console_origin(console_url) == expected
+
+
+def test_explicit_default_port_console_origin_accepted_behind_proxy() -> None:
+    trusted = console_origin("https://worker.example:443")
+    headers = {
+        "host": "127.0.0.1:8787",
+        "sec-fetch-site": "same-origin",
+        "origin": "https://worker.example",
+    }
+    assert request_rejection("POST", headers, LOOPBACK_HOSTS, trusted) is None
+
+
+@pytest.mark.parametrize(
+    ("bind", "effective"),
+    [("127.0.0.2", None), ("0.0.0.0", "127.0.0.2"), ("127.1.2.3", None), ("::1", None)],
+)
+def test_token_embedded_for_non_default_loopback_alias(
+    tmp_path: Path, bind: str, effective: str | None
+) -> None:
+    """127/8 回环别名暴露面与 embed_control_token 判定一致，照常内嵌（#976）。"""
+    assert embed_control_token(bind, effective)
+    allowed = control_plane_allowed_hosts(bind, effective, None)
+    store, _sup, app = _app(tmp_path, embed_token=True, allowed_hosts=allowed)
+    exposure = effective or bind
+    host = f"[{exposure}]" if ":" in exposure else exposure
+    with TestClient(app, base_url="http://127.0.0.1:8787") as client:  # type: ignore[arg-type]
+        body = client.get("/", headers={"host": f"{host}:8787"}).text
+    assert f'= "{store.control_token()}"' in body
+
+
+@pytest.mark.parametrize(
+    ("bind", "effective", "console_url"),
+    [
+        ("127.0.0.2", None, "https://worker.example"),
+        ("0.0.0.0", "192.0.2.5", None),
+        ("192.0.2.5", None, None),
+        ("127.0.0.2", None, "http://128.0.0.1:8787"),
+        ("127.0.0.2", None, "http://localhost.example:8787"),
+    ],
+)
+def test_token_not_embedded_when_any_allowlist_member_is_not_loopback(
+    tmp_path: Path, bind: str, effective: str | None, console_url: str | None
+) -> None:
+    """回环语义只放宽到真正回环：白名单任一非回环成员仍 fail-closed（#976）。"""
+    allowed = control_plane_allowed_hosts(bind, effective, console_url)
+    store, _sup, app = _app(tmp_path, embed_token=True, allowed_hosts=allowed)
+    with TestClient(app, base_url="http://127.0.0.1:8787") as client:  # type: ignore[arg-type]
+        body = client.get("/").text
+    assert store.control_token() not in body
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("127.0.0.2", True),
+        ("[::1]", True),
+        ("LOCALHOST.", True),
+        ("128.0.0.1", False),
+        ("localhost.example", False),
+        ("worker.example", False),
+        ("0.0.0.0", False),
+    ],
+)
+def test_is_loopback_name(name: str, expected: bool) -> None:
+    assert is_loopback_name(name) is expected

@@ -35,6 +35,7 @@ from server.app.services.job_artifact_gzip import (
     size_certified,
 )
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from server.app.services.job_artifact_reconcile_definitions import ReconcileDefinitions
 from server.app.services.job_errors import NotFoundError
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
@@ -71,6 +72,12 @@ def job_cache_max_bytes(env: Any = None) -> int:
     return DEFAULT_JOB_CACHE_MAX_BYTES
 
 
+#: Jobs per prefetch batch (#714): one jobs read + one manifest read per
+#: batch. Kept well under the facade's 1000-id chunk — jobs rows carry the
+#: frozen definition snapshot, so a batch's rows are held in memory at once.
+_REUPLOAD_BATCH_JOBS = 200
+
+
 def reupload_missing(
     store: JobArtifactObjectStore,
     job_db: JobQueries,
@@ -81,87 +88,109 @@ def reupload_missing(
     """Upload declared outputs of recently completed nodes with no/stale row.
 
     Returns the number of artifacts (re)uploaded. Per-file failures are
-    logged and skipped — the next pass retries.
+    logged and skipped — the next pass retries. #714: jobs and manifest rows
+    are prefetched per ``_REUPLOAD_BATCH_JOBS`` batch and definitions cached
+    per pass, so the pass issues a constant number of reads per batch (plus
+    one per distinct fallback workspace) instead of several per job.
     """
     if not store.enabled:
         return 0
-    with job_db.read() as conn:
-        rows = conn.execute(
-            "select distinct job_id, node_key from node_runs"
-            " where status='completed'"
-            " and finished_at > now() - make_interval(days => %s)",
-            (window_days,),
-        ).fetchall()
-    completed_nodes: dict[str, set[str]] = {}
-    for row in rows:
-        completed_nodes.setdefault(str(row["job_id"]), set()).add(str(row["node_key"]))
+    completed_nodes = job_db.list_recent_completed_node_keys(window_days)
+    # Module-level names resolved per pass: tests patch them on this module.
+    definitions = ReconcileDefinitions(
+        job_db,
+        from_snapshot=definition_from_job_snapshot,
+        from_workspace=require_workspace_active_definition,
+        per_job_failures=_DEFINITION_FAILURES,
+    )
+    job_ids = list(completed_nodes)
     uploaded = 0
-    for job_id, node_keys in completed_nodes.items():
-        job = job_db.get_job(job_id)
-        if job is None:
-            continue
-        try:
-            definition = definition_from_job_snapshot(job) or require_workspace_active_definition(
-                job_db, str(job["workspace_id"]), str(job["workspace_id"])
-            )
-        except _DEFINITION_FAILURES as exc:
-            # #204: per-job definition failures only — corrupt revision JSON
-            # (#243 family incl. non-mapping top level) or no active revision.
-            # A plain ValueError/RuntimeError from a parser bug must propagate
-            # (codex round-3 on PR #251), not silently strand the job.
-            logger.debug("reconciler skips job %s: %s", job_id, exc)
-            continue
-        try:
-            job_dir = resolve_job_dir(job, settings.jobs_dir)
-        except _PATH_FAILURES as exc:
-            # Path resolution deliberately propagates OS errors (permissions,
-            # symlink loops) and raises ManagedPathError for unmappable
-            # storage_dir — both per-job expected here (same family as the
-            # cleanup_sweep branches, codex review on PR #251).
-            logger.debug("reconciler skips job %s: %s", job_id, exc)
-            continue
-        if not job_dir.is_dir():
-            continue
-        for node_key in node_keys:
-            node = definition.nodes.get(node_key)
-            if node is None:
+    for start in range(0, len(job_ids), _REUPLOAD_BATCH_JOBS):
+        batch = job_ids[start : start + _REUPLOAD_BATCH_JOBS]
+        jobs = {str(job["id"]): job for job in job_db.fetch_jobs_by_ids(batch)}
+        manifest = job_db.job_artifact_rows_for_jobs(batch)
+        for job_id in batch:
+            job = jobs.get(job_id)
+            if job is None:
                 continue
-            for name in node.outputs:
-                local_path = job_dir / name
-                if not local_path.is_file():
-                    continue
-                manifest_row = store.row_for_node(job_id, node_key, name)
-                if manifest_row is not None and not row_stale(manifest_row, local_path):
-                    continue
-                # 行缺失或已过期（rerun 产出新字节而上传失败）：（重新）上传，
-                # upsert 刷新清单行。
-                try:
-                    store.upload(
-                        workspace_id=str(job["workspace_id"]),
-                        job_id=job_id,
-                        node_key=node_key,
-                        name=name,
-                        local_path=local_path,
-                    )
-                    uploaded += 1
-                except Exception:
-                    # #204 broad-except audit: per-file best-effort re-upload.
-                    # The upload path's outcome space is genuinely mixed —
-                    # declared storage outages (botocore ClientError after the
-                    # bounded retries inside upload), DB errors from the
-                    # manifest upsert, and unexpected programming errors must
-                    # all leave this pass alive for the other artifacts: the
-                    # reconciler IS the retry mechanism (next pass re-finds
-                    # the still-missing/stale row). A narrow business family
-                    # cannot enumerate the storage layer; the traceback is
-                    # logged so the outage is diagnosable.
-                    logger.warning(
-                        "reconciler re-upload failed for job %s node %s artifact %s",
-                        job_id,
-                        node_key,
-                        name,
-                        exc_info=True,
-                    )
+            uploaded += _reupload_job(
+                store, settings, definitions, job, completed_nodes[job_id], manifest
+            )
+    return uploaded
+
+
+def _reupload_job(
+    store: JobArtifactObjectStore,
+    settings: Settings,
+    definitions: ReconcileDefinitions,
+    job: dict[str, Any],
+    node_keys: set[str],
+    manifest: dict[tuple[str, str, str], dict[str, Any]],
+) -> int:
+    job_id = str(job["id"])
+    try:
+        definition = definitions.for_job(job)
+    except _DEFINITION_FAILURES as exc:
+        # #204: per-job definition failures only — corrupt revision JSON
+        # (#243 family incl. non-mapping top level) or no active revision.
+        # A plain ValueError/RuntimeError from a parser bug must propagate
+        # (codex round-3 on PR #251), not silently strand the job.
+        logger.debug("reconciler skips job %s: %s", job_id, exc)
+        return 0
+    try:
+        job_dir = resolve_job_dir(job, settings.jobs_dir)
+    except _PATH_FAILURES as exc:
+        # Path resolution deliberately propagates OS errors (permissions,
+        # symlink loops) and raises ManagedPathError for unmappable
+        # storage_dir — both per-job expected here (same family as the
+        # cleanup_sweep branches, codex review on PR #251).
+        logger.debug("reconciler skips job %s: %s", job_id, exc)
+        return 0
+    if not job_dir.is_dir():
+        return 0
+    uploaded = 0
+    for node_key in node_keys:
+        node = definition.nodes.get(node_key)
+        if node is None:
+            continue
+        for name in node.outputs:
+            local_path = job_dir / name
+            if not local_path.is_file():
+                continue
+            # 批预取的清单行（#714）：本 pass 内每个 (job,node,name) 只判定
+            # 一次，上传 upsert 的新行不会被同一 pass 再读。
+            manifest_row = manifest.get((job_id, node_key, name))
+            if manifest_row is not None and not row_stale(manifest_row, local_path):
+                continue
+            # 行缺失或已过期（rerun 产出新字节而上传失败）：（重新）上传，
+            # upsert 刷新清单行。
+            try:
+                store.upload(
+                    workspace_id=str(job["workspace_id"]),
+                    job_id=job_id,
+                    node_key=node_key,
+                    name=name,
+                    local_path=local_path,
+                )
+                uploaded += 1
+            except Exception:
+                # #204 broad-except audit: per-file best-effort re-upload.
+                # The upload path's outcome space is genuinely mixed —
+                # declared storage outages (botocore ClientError after the
+                # bounded retries inside upload), DB errors from the
+                # manifest upsert, and unexpected programming errors must
+                # all leave this pass alive for the other artifacts: the
+                # reconciler IS the retry mechanism (next pass re-finds
+                # the still-missing/stale row). A narrow business family
+                # cannot enumerate the storage layer; the traceback is
+                # logged so the outage is diagnosable.
+                logger.warning(
+                    "reconciler re-upload failed for job %s node %s artifact %s",
+                    job_id,
+                    node_key,
+                    name,
+                    exc_info=True,
+                )
     return uploaded
 
 

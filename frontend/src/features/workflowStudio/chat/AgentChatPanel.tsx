@@ -142,7 +142,8 @@ export function AgentChatPanel(props: Props) {
         compacting={compacting}
         onCancel={
           chat.busy && chat.session?.status
-            ? () => void chat.cancel()
+            ? // 渲染时绑定会话 id（#962）：旧回调不得取消新会话的轮次。
+              () => void chat.cancel(chat.activeSessionId ?? undefined)
             : undefined
         }
       />

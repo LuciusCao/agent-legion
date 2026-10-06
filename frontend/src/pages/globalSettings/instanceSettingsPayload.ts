@@ -75,6 +75,10 @@ export function buildPayload(values: FormValues): InstanceSettingsUpdate {
     code_capacity: parseNumber(values, 'code_capacity'),
     materials_ttl_days: parseNumber(values, 'materials_ttl_days'),
     execution_retention_days: parseNumber(values, 'execution_retention_days'),
+    studio_chat_retention_days: parseNumber(
+      values,
+      'studio_chat_retention_days'
+    ),
     workflows: {
       max_items_per_run: parseNumber(values, 'workflows.max_items_per_run'),
       // 表单单位 KB（验收反馈 #786），上送换算回字节（契约 ge=1024 由

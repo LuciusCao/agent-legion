@@ -1,10 +1,10 @@
-import { useEffect } from 'react'
 import { Button } from '@mui/material'
 import { MaterialIcon } from './MaterialIcon'
 import { AgentConnectionDot } from './AgentConnectionDot'
-import { useAgentsStore } from '../stores/agentsStore'
 import { useWorkerScheduling } from '../hooks/useWorkerScheduling'
+import { useWorkerPausedStatus } from '../hooks/useWorkerPausedStatus'
 import { AgentWorkerStatusList } from './AgentWorkerStatusList'
+import { runControlView } from './workspaceRunControlView'
 import styles from './WorkspaceRunControl.module.css'
 
 export interface WorkspaceRunControlProps {
@@ -12,32 +12,29 @@ export interface WorkspaceRunControlProps {
 }
 
 export function WorkspaceRunControl({ workspaceId }: WorkspaceRunControlProps) {
-  const workerPaused = useAgentsStore((state) =>
-    state.getWorkerPaused(workspaceId)
-  )
-  const fetchWorkerStatus = useAgentsStore((state) => state.fetchWorkerStatus)
+  // #961：暂停位唯一来源是 RQ 缓存；拉取中/失败不得冒充「已暂停」。
+  // 无缓存值的失败态显示「状态未知」，点击重试拉取而不是盲目切换。
+  const status = useWorkerPausedStatus(workspaceId)
   const setWorkerPaused = useWorkerScheduling(workspaceId)
-
-  useEffect(() => {
-    // Intentionally silent: a paused-status refresh failure degrades to the
-    // last known state and the popover still renders. Unlike togglePause
-    // (a user action that needs feedback), this background read would only
-    // produce noise with a toast.
-    fetchWorkerStatus(workspaceId).catch(() => {})
-  }, [fetchWorkerStatus, workspaceId])
+  const view = runControlView(status)
+  const onClick = () => {
+    if (view.kind === 'unknown') void status.refetch()
+    else if (view.kind !== 'loading') void setWorkerPaused(!view.paused)
+  }
 
   return (
     <div className={styles.root}>
       <Button
         size="small"
-        aria-label={workerPaused ? '恢复运行' : '暂停运行'}
-        onClick={() => void setWorkerPaused(!workerPaused)}
+        aria-label={view.ariaLabel}
+        title={
+          view.kind === 'unknown' ? '运行状态拉取失败，点击重试' : undefined
+        }
+        disabled={view.kind === 'loading'}
+        onClick={onClick}
         startIcon={
           <span className={styles.iconWrap}>
-            <MaterialIcon
-              name={workerPaused ? 'play_arrow' : 'pause'}
-              sx={{ fontSize: 20 }}
-            />
+            <MaterialIcon name={view.icon} sx={{ fontSize: 20 }} />
             <AgentConnectionDot />
           </span>
         }
@@ -50,7 +47,7 @@ export function WorkspaceRunControl({ workspaceId }: WorkspaceRunControlProps) {
           '& .MuiButton-startIcon': { marginRight: '4px' },
         }}
       >
-        {workerPaused ? '已暂停' : '运行中'}
+        {view.label}
       </Button>
       <div className={styles.popover} role="status">
         <AgentWorkerStatusList workspaceId={workspaceId} />

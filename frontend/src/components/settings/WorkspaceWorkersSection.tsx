@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { listAgentWorkers } from '../../api'
 import type { AgentWorkerSummary } from '../../api'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import { formatDateTime } from '../../lib/formatters'
 import { useWorkerConsoleUrl } from '../../hooks/useWorkerConsoleUrl'
 import { workerConsoleUrl } from '../../lib/workerConsoleUrl'
 import {
@@ -12,11 +13,6 @@ import {
 } from '../../lib/workerPresence'
 import { WorkerConsoleLink } from '../WorkerConsoleLink'
 import styles from './WorkspaceWorkersSection.module.css'
-
-function formatLastSeen(iso: string): string {
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
-}
 
 /**
  * Read-only worker list scoped to one workspace (issue #35).
@@ -78,7 +74,7 @@ export function WorkspaceWorkersSection({
                 className={`${styles.chip} ${presenceChipClass(workerPresence(worker), styles)}`}
                 title={presenceTitle(
                   workerPresence(worker),
-                  `最近心跳 ${formatLastSeen(worker.last_seen_at)}`
+                  `最近心跳 ${formatDateTime(worker.last_seen_at)}`
                 )}
               >
                 {PRESENCE_LABEL[workerPresence(worker)]}

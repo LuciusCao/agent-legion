@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-import time
 import uuid
 from pathlib import Path
 
@@ -9,6 +8,7 @@ import pytest
 
 from server.app.executors.models import ClaimedExecution, ExecutionContext, ExecutionResult
 from server.app.executors.runtime import ExecutionRuntime
+from tests.helpers import wait_for_predicate
 
 
 class FakeExecutor:
@@ -253,9 +253,7 @@ def test_runtime_periodic_heartbeat(job_dir: Path) -> None:
     thread, holder = _run_in_thread(runtime, claim, context)
     try:
         assert executor.execute_started.wait(timeout=1.0), "executor did not start in time"
-        # Wait long enough for at least one heartbeat to fire.
-        time.sleep(0.05)
-        assert len(leases.heartbeats) >= 1
+        wait_for_predicate(lambda: len(leases.heartbeats) >= 1, timeout=5.0)
         assert all(hb[0] == claim.lease_id and hb[1] == 30 for hb in leases.heartbeats)
         executor.unblock()
     finally:
@@ -317,7 +315,8 @@ def test_runtime_tolerates_transient_heartbeat_failure(job_dir: Path) -> None:
     thread, holder = _run_in_thread(runtime, claim, context)
     try:
         assert executor.execute_started.wait(timeout=1.0), "executor did not start in time"
-        time.sleep(0.05)
+        # 失败拍 + 至少一次成功拍都已发生（失败计数被成功拍清零）再放行。
+        wait_for_predicate(lambda: len(leases.heartbeats) >= 2, timeout=5.0)
         executor.unblock()
     finally:
         thread.join(timeout=1.0)
@@ -357,7 +356,8 @@ def test_runtime_heartbeat_exception_counts_as_missed_heartbeat(job_dir: Path) -
     thread, holder = _run_in_thread(runtime, claim, context)
     try:
         assert executor.execute_started.wait(timeout=1.0), "executor did not start in time"
-        time.sleep(0.05)
+        # 两次抛错拍 + 一次成功拍都已发生（未达阈值 3）再放行。
+        wait_for_predicate(lambda: leases.heartbeats >= 3, timeout=5.0)
         executor.unblock()
     finally:
         thread.join(timeout=1.0)
