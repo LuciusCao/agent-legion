@@ -301,3 +301,25 @@ def test_create_rejects_residue_paths_before_any_write(
     assert error["path"] == residue
     assert "build residue" in error["error"] and "safe to remove" in error["error"]
     assert not (home / "ws-1" / "dirty").exists()
+
+
+@pytest.mark.parametrize("residue", ["references/data.pyc", "scripts/__pycache__/helper.py"])
+def test_save_rejects_residue_paths_before_any_write(
+    repo: Path, tmp_path: Path, residue: str
+) -> None:
+    # The committed editing snapshot skips residue, so a saved one could
+    # never be read back: refuse it before any write instead.
+    head = _git(repo, "rev-parse", "HEAD")
+    with pytest.raises(SkillEditValidationError) as caught:
+        _service(repo, tmp_path).save_version(
+            "wf/review",
+            [SkillFileWrite("SKILL.md", "# v2\n"), SkillFileWrite(residue, "x\n")],
+            "v1.0.1",
+            "m",
+        )
+    [error] = caught.value.errors
+    assert error["path"] == residue
+    assert "build residue" in error["error"] and "safe to remove" in error["error"]
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert not (repo / residue).exists()
+    assert (repo / "SKILL.md").read_text(encoding="utf-8") == "# Review\n"

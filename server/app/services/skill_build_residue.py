@@ -48,3 +48,14 @@ def is_residue_name(name: str) -> bool:
 def is_build_residue(path: str) -> bool:
     """A relative posix path lies inside / is build residue."""
     return any(is_residue_name(part) for part in PurePosixPath(path).parts)
+
+
+def residue_payload_errors(paths: list[str]) -> list[dict[str, str]]:
+    """422 entries for payload paths that are build residue: create_skill
+    and save_skill_version refuse them before any write (the editing
+    snapshots skip residue, so a stored one could never be read back)."""
+    return [
+        {"path": raw, "error": f"{BUILD_RESIDUE_HINT}; omit it from the payload"}
+        for raw in paths
+        if is_build_residue(raw)
+    ]
