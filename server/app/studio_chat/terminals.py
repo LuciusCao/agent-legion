@@ -36,6 +36,7 @@ import logging
 import os
 import signal as signal_module
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -50,7 +51,11 @@ from acp.schema import (
 )
 
 from server.app.studio_chat.terminal_grants import TerminalGrants
-from server.app.studio_chat.terminal_policy import confined_cwd, terminal_env
+from server.app.studio_chat.terminal_policy import (
+    enter_pinned_cwd,
+    pinned_cwd,
+    terminal_env,
+)
 
 if TYPE_CHECKING:
     from server.app.studio_chat.acp_session import AcpSessionHandle
@@ -103,17 +108,22 @@ class AcpTerminalStore:
         # an allowlisted base (PATH/HOME/locale...), never over os.environ:
         # the server environment carries deployment secrets (#921).
         process_env = terminal_env(env)
-        process = await asyncio.create_subprocess_exec(
-            command,
-            *(args or []),
-            cwd=confined_cwd(cwd, default_cwd),
-            env=process_env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            # Own process group: kill/release must take down the whole tree
-            # (pipelines, `&` background children), not just the direct child.
-            start_new_session=True,
-        )
+        # The cwd is a pinned descriptor walked without following links; the
+        # child fchdir()s to it so no path is re-resolved at spawn (#921).
+        with pinned_cwd(cwd, default_cwd) as cwd_fd:
+            process = await asyncio.create_subprocess_exec(
+                command,
+                *(args or []),
+                env=process_env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                pass_fds=(cwd_fd,),
+                preexec_fn=partial(enter_pinned_cwd, cwd_fd),
+                # Own process group: kill/release must take down the whole
+                # tree (pipelines, `&` background children), not just the
+                # direct child.
+                start_new_session=True,
+            )
         terminal = _Terminal(process=process, byte_limit=limit)
         self._terminals[terminal_id] = terminal
         terminal.drain_task = asyncio.get_running_loop().create_task(self._drain(terminal))
@@ -264,7 +274,7 @@ class TerminalClientMixin:
         **kwargs: Any,
     ) -> CreateTerminalResponse:
         del session_id  # one store per handle; the id adds nothing here
-        if not self.terminals.grants.consume(command, args, root=self._handle.cwd):
+        if not self.terminals.grants.consume(command, args):
             raise RequestError.invalid_request(
                 {"reason": "terminal/create without an approved permission request"}
             )
