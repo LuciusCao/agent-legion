@@ -18,7 +18,7 @@ Content-Disposition, ``Content-Encoding: gzip`` for #338 ``.gz`` objects) are
 signed in as S3 response overrides, so every object row — including the
 ``.gz`` outputs of v4+ Workers — gets a URL (see _presigned_headers). What
 the URL does NOT inherit from the Host (per-request auth, version pinning)
-is contracted in remote-execution-runbook §9.
+is contracted in docs/workspace-api-tokens.md「读取产物」.
 
 Signing stays OFF the status read path: ``status`` derives names from the
 unsigned listing parts (manifest rows + local names), so a broken signing
@@ -248,7 +248,7 @@ class ExternalArtifactAccessService:
             storage_key, expires_seconds=ttl, response_headers=_presigned_headers(name, gzipped)
         )
         # 上界而非保证：签名凭据先于 TTL 失效时 URL 提前 403，调用方按
-        # 403 重取清单（runbook §9）。
+        # 403 重取清单（docs/workspace-api-tokens.md「读取产物」）。
         expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
         return {
             "name": name,

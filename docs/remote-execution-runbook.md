@@ -82,17 +82,12 @@ public endpoint (`AGENT_LEGION_S3_PUBLIC_ENDPOINT`), all by tailnet
 address — per
 [agent-worker-deployment.md §7](agent-worker-deployment.md#7-tailnet-冒烟验证上线前必须执行).
 The storage endpoint is load-bearing: presigned GETs fetch materials and
-bundle members, presigned PUTs return artifacts; the compose-internal
-`seaweedfs:8333` (the default local backend; `rustfs:9000` on the legacy
-escape hatch) is unreachable from remote devices. When the Host uses the
-bundled object storage, setting `AGENT_LEGION_S3_PUBLIC_ENDPOINT` alone is
-not enough — `deploy/compose.host.yaml` publishes the backend port on
-`${AGENT_LEGION_S3_BIND:-127.0.0.1}` (8333 for SeaweedFS, 9000 for the
-RustFS escape hatch), so also set
-`AGENT_LEGION_S3_BIND=<laptop-tailnet-ip>` in `deploy/.env` (and
-`AGENT_LEGION_S3_PUBLIC_ENDPOINT=http://<laptop-tailnet-ip>:8333` with the
-default SeaweedFS backend;
-presigned URLs are signed with that host) before running the smoke test.
+bundle members, presigned PUTs return artifacts, and compose-internal names
+(`seaweedfs:8333`) are unreachable from remote devices. With the bundled
+object storage, set both `AGENT_LEGION_S3_BIND` and
+`AGENT_LEGION_S3_PUBLIC_ENDPOINT` to the laptop's tailnet address before
+the smoke test — the rules live in
+[materials-storage-deployment.md §1](materials-storage-deployment.md#1-组件与配置面).
 If the container cannot reach the tailnet, design a dedicated Tailscale
 sidecar; do not bake Tailscale into the Worker image.
 
@@ -109,10 +104,13 @@ LLM_GATEWAY_TOKEN="<random-shared-token>" \
   uv run python scripts/remote/llm_gateway.py --host <laptop-tailnet-ip> --port 8788
 ```
 
-Alternatively `make llm-gateway` reads the provider credentials from a Pi
-`models.json`; the path is machine-specific and must be passed explicitly
-(`make llm-gateway PI_MODELS_JSON=~/.pi/agent/models.json`, optionally with
-`LLM_GATEWAY_PROVIDER`). Both
+Alternatively `make llm-gateway` reads the upstream provider credentials
+from a Pi-format `models.json`; the path is machine-specific and must be
+passed explicitly. The target binds `127.0.0.1` by default, so a gateway
+meant for remote workers must also get `LLM_GATEWAY_HOST` (and the token
+in the environment):
+`LLM_GATEWAY_TOKEN=<random-shared-token> make llm-gateway PI_MODELS_JSON=~/.pi/agent/models.json LLM_GATEWAY_HOST=<laptop-tailnet-ip>`
+(optionally `LLM_GATEWAY_PROVIDER` / `LLM_GATEWAY_PORT`). Both
 `REMOTE_LLM_*` environment variables are required in the env-var form; the
 gateway refuses to start without them. Do not inline real keys into shared
 terminal history — export them from a local-only shell or a `.env` you
@@ -122,15 +120,17 @@ terminal history — export them from a local-only shell or a `.env` you
 request must present it as `X-Gateway-Token` or `Authorization: Bearer`. When
 unset the gateway is open — acceptable only on loopback. **Binding a tailnet
 (or any shared) interface without `LLM_GATEWAY_TOKEN` is a hard violation**:
-anyone who can reach the port would spend the provider credential. On each
+anyone who can reach the port would spend the provider credential (the
+gateway itself only logs a warning when the token is unset). On each
 worker machine, provide the same token to the Worker container via
 `deploy/.env` or the shell environment (`LLM_GATEWAY_TOKEN=...`; see the
-deployment doc, §2) and set the pi provider's `apiKey` to
-`"$LLM_GATEWAY_TOKEN"` in the mounted `models.json` — the pi CLI interpolates
-the variable and sends it as `Authorization: Bearer`, which the gateway
-accepts. `worker/execution/run.py::agent_subprocess_env` takes the token from the
-worker environment; a value in the config file is ignored. The variable is
-passed through to the pi subprocess environment.
+deployment doc, §2) and point the gateway provider in the mounted velites
+`models.json` at `http://<laptop-tailnet-ip>:8788/v1` with `apiKey:
+"$LLM_GATEWAY_TOKEN"` — velites interpolates the variable and sends it as
+`Authorization: Bearer`, which the gateway accepts (bare-metal pi works the
+same way). `worker/execution/run.py::agent_subprocess_env` takes the token
+from the worker environment and passes it to the agent subprocess; a value
+in the worker config file is ignored.
 
 Verify from a worker device (host OS first, then from inside the container per
 §3):
@@ -147,24 +147,22 @@ laptop could not reach the LLM provider (see §7).
 
 ## 5. Workers
 
-Worker setup, registration tokens, Compose stacks and verification are covered
-end-to-end by [agent-worker-deployment.md](agent-worker-deployment.md). The
-essentials, for orientation:
+Worker setup, registration tokens, the claim-off default, the code execution
+pool and where the velites binary comes from are covered end-to-end by
+[agent-worker-deployment.md](agent-worker-deployment.md) (the authority for
+those topics). This section is the authority for the **protocol**: versions,
+mixed-fleet compatibility and upgrade order.
 
 - One Worker **container** per machine; an internal supervisor runs up to
-  `max_concurrency` concurrent Agent executions.
-- The Worker registers with the Host using **scoped registration tokens**
-  issued per workspace in the admin UI (workspace 设置 → Agent 与 Worker,
-  issue #35). The global register token and the "all workspaces" token
-  variant are retired: tokens are pasted into the Worker console
-  (配置 → Workspace 访问) and every registration presents all configured
-  tokens at once — the Host resolves the union workspace scope and rejects
-  the whole registration if any token is unknown or deleted. Registration
-  returns the per-workspace rows (id + name) so the console can label each
-  token. Per-worker tokens are stored server-side as sha256 hashes only.
-  Deleting a key is the only way to cut access and it is immediate: the
-  Host cascade-deletes Workers bound solely to that key in the same
-  transaction (their worker_token dies on the next claim/heartbeat).
+  `max_concurrency` concurrent Agent executions plus up to
+  `max_code_concurrency` code executions (two independent pools, accounted
+  and enforced separately by the Host; code requests do not consume the
+  workspace Agent cap).
+- Registration uses workspace-scoped tokens; every registration presents all
+  configured tokens and the Host resolves their union scope (rejecting the
+  whole registration if any token is unknown or deleted). Issuing, importing
+  and deleting keys:
+  [agent-worker-deployment.md §4](agent-worker-deployment.md#4-worker-机器准备).
 - Protocol: `register → claim → heartbeat → result` over
   `/api/agent-workers/register`, `/api/agent-executions/claim`,
   `/api/agent-executions/{id}/heartbeat` and `/api/agent-executions/{id}/result`.
@@ -173,7 +171,8 @@ essentials, for orientation:
   `/api/admin/instance-settings`). Current protocol is **v5**: v2 added
   `kind: "code"` claims and heartbeat cancellation bodies; v3 adds
   runtime-scoped model declarations plus a `host_protocol_version`
-  registration handshake; v4 adds gzip-compressed artifact objects (v4+
+  registration handshake (the Host reads an old Worker's bare provider/model
+  declarations as runtime wildcards); v4 adds gzip-compressed artifact objects (v4+
   Workers receive `.gz`-suffixed upload specs and `content_encoding: gzip`
   input refs; older Workers keep bare keys); v5 adds the per-Worker batch
   heartbeat — `POST /api/agent-executions/heartbeats` renews every claimed
@@ -181,7 +180,8 @@ essentials, for orientation:
   scales with machine count, not slot count. The single execution endpoint is
   unchanged and serves mixed fleets; a v5 Worker that finds the batch route
   missing (404/405) falls back to per-execution beats with a 5s per-beat
-  timeout. Compatibility matrix:
+  timeout (transient errors do not trigger the fallback). Code capacity
+  only requires protocol ≥ v2. Compatibility matrix:
 
   | Host \ Worker | ≤ v3 Worker | v4 Worker | v5 Worker |
   | --- | --- | --- | --- |
@@ -191,75 +191,42 @@ essentials, for orientation:
 
   The Host's `min_protocol_version` remains 1; raising it is an emergency
   escape hatch, not part of a normal upgrade.
-- Concurrency is bounded in two independent pools per Worker: Agent executions
-  by the workflow's workspace-level `max_concurrency` and the Worker's local
-  `max_concurrency`; code executions by the Worker's local
-  `max_code_concurrency` only (code requests do not consume workspace Agent
-  capacity). The Host accounts and enforces the two pools separately, so long
-  code tasks never starve Agent claims. Upgrade order is Host first, then
-  Workers. A v3+ Worker treats a missing/older `host_protocol_version` as a
-  terminal registration error and exits 2, so it cannot let a pre-v3 Host
-  erase model runtimes and misroute claims.
+- **Upgrade order is Host first, then Workers** (same for pulled images:
+  confirm the Host is healthy, then restart Workers one by one). A v3+ Worker
+  treats a missing/older `host_protocol_version` as a terminal registration
+  error and exits 2, so it cannot let an old Host erase model runtimes and
+  misroute claims. Roll back Host and Workers together.
+- **Result header (#748).** `X-Agent-Result` carries raw UTF-8 bytes (CJK
+  error summaries are non-ASCII header values). Every reverse proxy / load
+  balancer / gateway between Worker and Host must pass non-ASCII header
+  values through unchanged — rewriting or rejecting them makes results
+  undeliverable and the lease expires into a requeue. This wire change did
+  not bump the protocol version, which is another reason for Host-first: a
+  new Worker against an old Host (including a Host-only rollback) shows the
+  CJK parts of `error_message` / `agent_stderr_tail` as mojibake (structure
+  and success/failure verdicts are unaffected). The header has a 14 KiB
+  budget; over budget the Worker sheds stderr tail → error_message →
+  command → the artifact list, moving a direct-upload artifact list into the
+  result archive (`result-output-artifacts.json`, #755) rather than
+  dropping it.
+- **`workflow_key` is gone from claim responses** (#211 M3): claims identify
+  the workflow by `workspace_id` only. Every supported Worker (batch-claim
+  era, #547) already ignores the field, so no Worker upgrade is required;
+  the manifest's `workflow_key` (visible to node code) is unchanged.
 
-**Capacity planning.** Budget ~200 MB RAM per concurrent Agent process
-(measured pi RSS: settled ~150 MB, peak ~187 MB, 90-second sample). Long-run
-peak RSS is still unmeasured — calibrate with full-duration jobs before
-raising `max_concurrency`, and keep OS headroom:
+**Capacity planning.** Budget RAM per concurrent Agent process from a
+measurement of the runtime you actually deploy (sample peak RSS over
+full-duration jobs, not a short window), keep OS headroom, and size
 `max_concurrency = floor((RAM - OS reserve) / measured peak)`.
 
-**Code execution pool (protocol v2).** Self-contained workflow code nodes
-(static import closure ⊆ `workspace_libs` + stdlib + `requests`;
-all in-repo demo nodes qualify) can be dispatched
-to Workers: the Host ships the node code text plus a sha256 `code_hash` and a
-`workspace_libs` snapshot in the bundle, and the Worker executes it inside the
-same `velites sandbox wrap` OS sandbox used for custom nodes. To opt a Worker
-in:
-
-- set `max_code_concurrency > 0` (0 = never receives code claims, the
-  default). Code claim admission is just protocol version >= v2, code-pool
-  headroom and the workspace token scope — no capability declaration is
-  needed (issue #284 retired capability matching). The field is hot (#123): `PUT /api/config` changes that touch
-  only hot fields (`claim_enabled`, `max_concurrency`,
-  `max_code_concurrency`, `upload_max_concurrency`, `ramp_up`,
-  `claim_batch_limit`) do not
-  restart the Worker (`worker/service.py`). Hot-opening code capacity from
-  0 to >0 requires a resolvable `velites` binary: with velites missing, the
-  in-loop hot guard rejects the change and logs it, and the new capacity
-  takes effect on the next loop iteration once velites is installed
-  (`worker/runtime/controls.py`). Editing the state-copy YAML
-  `data/agent-worker-service/worker.yaml` directly works the same way — that
-  is the bare-metal path; in container deployments the state copy lives in
-  the control volume.
-
-Since #381 the worker image ships **no** agent runtime executor: velites is
-an externally-mounted, platform-matched binary (compose binds `VELITES_BIN`
-to `/app/data/bin/velites`; releases come from the velites-release workflow's
-GitHub Releases, see agent-worker-deployment.md §5), and the
-`AGENT_WORKER_EXPECT_RUNTIMES` guard fail-closes a worker that cannot probe
-its expected runtimes. The code-node sandbox wrapper is separate (#383): the
-image bakes `velites-sandbox` in at `/usr/local/bin`, so code capacity never
-depends on the mounted velites. Bare-metal deployments keep
-`./scripts/ensure-velites.sh --dest data/bin` (fingerprint-gated rebuild;
-same OS/arch as the Worker) for both roles. `make prod-up` (native) refreshes
-**both** placements — PATH and the bundled `data/bin` copy — because
-resolution prefers the bundled copy, a PATH-only refresh never reaches the
-Worker (#831). Where to install and what counts as fresh is decided by the
-deploy planner (`scripts/velites_deploy_plan.py`), which derives targets from
-the **real resolvers** (`worker/binary_resolution.py`,
-`shared/code_sandbox.py`, `worker/runtime/catalog.py`) — the shell script
-holds no parallel lookup model of its own (the root cause behind the
-#831/#835 review rounds). Both Worker and Host startup log a WARNING when a
-consumed velites-family binary's source stamp differs from the repo's
-velites/ fingerprint — the check covers each consumer's *resolved* copy
-(agent-runtime surface and code-sandbox surface alike; direction-neutral:
-the copy may lag the repo, or come from a PATH-shared build of a newer
-line). Reconciliation needs a stamp next to the binary and a git tree in the
-deployment — hand-placed Release binaries without a stamp, and forms without
-a checkout (e.g. the docker image), have nothing to compare and the check
-stays silent.
-
+**Code execution on Workers.** Self-contained workflow code nodes are
+dispatched to Workers with `max_code_concurrency > 0` and run inside the
+`velites sandbox wrap` OS sandbox; the sandbox wrapper is baked into the
+worker image (#383), so code capacity does not depend on the mounted velites.
 When no online code-capable Worker exists, dispatch falls back to the local
-Host executor — code tasks never rot in a queue waiting for a Worker.
+Host executor. Setup, hot-update rules and velites placement (including the
+#831 two-placement refresh on native `make prod-up`):
+[agent-worker-deployment.md §5](agent-worker-deployment.md#5-启动-worker-机器上的-worker).
 
 **Pure-remote mode (#389).** Setting the instance's `code_capacity` to 0
 (admin 全局设置 → 本地执行, restart-effective) assembles **no** local
@@ -272,11 +239,7 @@ design); `/api/health` surfaces `execution_mode: pure_remote` plus the live
 count is 0. Shard executions follow the same rule: remote first, and in
 pure-remote mode there is no local fallback at all.
 
-**Secret boundary for code tasks.** Node secrets (vault-resolved connection
-credentials) are injected into the claim response only — queued manifests and
-bundles are stored secret-free. The Worker holds them in memory only, passes
-them to the sandboxed child via stdin, and scrubs them before any persistence;
-they never touch the Worker filesystem or logs.
+Secret handling for code tasks is summarized in §8 (Worker hygiene).
 
 ## 6. Migrating an Agent between runtimes (pi ↔ velites)
 
@@ -370,14 +333,14 @@ columns, which 0.7.15 ignores), but plan for these rows:
 | --- | --- | --- |
 | Worker stays up but reports registration unavailable | Host unreachable or returning 5xx | The Worker retries registration in-process; verify `host_url` and the §3 smoke test, then inspect Host logs if 5xx persists |
 | Worker becomes unhealthy with registration rejected | Registration token mismatch, or every key the Worker holds was deleted on the Host | `make stack-logs STACK=worker`; verify the configured keys still exist in the workspace settings and the Worker's registration status |
-| Worker exits with code 2 and logs `启动预检失败` / startup preflight failure | `max_code_concurrency > 0` without a resolvable `velites` binary (agent runtimes are auto-detected since issue #254 and can no longer fail preflight) | Install velites — either on PATH (`cargo build --release` in `velites/`) or as the bundled copy (`./scripts/ensure-velites.sh --dest data/bin`, per-platform) — or set `max_code_concurrency: 0`, then restart |
+| Worker exits with code 2 and logs `启动预检失败` / startup preflight failure | A runtime listed in `AGENT_WORKER_EXPECT_RUNTIMES` (compose default `velites`) is not detected, its model discovery fails (e.g. wrong-architecture binary), or it is listed in `disabled_runtimes`; or `max_code_concurrency > 0` without a resolvable sandbox wrapper (`velites-sandbox` / `velites`) | Docker: place the arch-matched binary at `<repo>/velites-bin/velites` (remove the empty directory docker created there first) and restart. Bare metal: `./scripts/ensure-velites.sh --dest data/bin` (same OS/arch; a plain `cargo build --release` leaves the binary in `velites/target/`, not on PATH). Or drop the runtime from the expected set / re-enable it, or set `max_code_concurrency: 0`; details in [agent-worker-deployment.md §5](agent-worker-deployment.md#5-启动-worker-机器上的-worker) |
 | Registration returns 401 | A scoped token is unknown or deleted on the Host (the Host rejects the whole registration when any token fails — deletion is the only lifecycle action, there is no revoke) | Issue a new key in the admin UI (workspace 设置 → Agent 与 Worker), add it in the Worker console (配置 → Workspace 访问), and delete the stale key — deletion cascade-cuts every Worker still bound to it |
 | Registration returns 400 `unsupported Agent Worker protocol` | Worker's `protocol_version` below `agent_workers.min_protocol_version` | Rebuild the worker image from the current repo; lower the minimum only as a short emergency escape hatch |
 | Claim returns 204 forever | No queued executions compatible with the worker's runtimes/labels | Check the workflow's Agent node routing and the worker's detected/enabled runtimes (配置 → Agent 运行时) plus `labels`; the Host-side `claim.empty` vs `claim.rejected` events (§7.1) distinguish a drained queue from an admission mismatch (reason code names the gate) |
 | Heartbeat/result 409 (`execution is not owned by this Worker`) | Network partition or Host restart — the execution lease expired and was reassigned/failed | Terminal for that execution; rerun the job. Persistent storms mean the tailnet is unstable |
 | Result upload 413 | Archive exceeds `agent_workers.max_archive_bytes` (default 64 MiB) | Investigate why artifacts ballooned; raise the limit only if legitimate |
-| pi "model call failed" inside the worker container | Gateway unreachable or token rejected | Re-run the §3 container smoke test; confirm `LLM_GATEWAY_TOKEN` is set in `deploy/.env` and matches the gateway |
-| Gateway 502 | LLM provider unreachable from the laptop (VPN dropped, network change) | Restore the laptop's network path to the provider; workers' pi runs fail fast and surface as failed executions |
+| Agent model calls fail inside the worker container | Gateway unreachable or token rejected | Re-run the §3 container smoke test; confirm `LLM_GATEWAY_TOKEN` is set in `deploy/.env`, matches the gateway, and is referenced as `$LLM_GATEWAY_TOKEN` in the mounted velites `models.json` |
+| Gateway 502 | LLM provider unreachable from the laptop (VPN dropped, network change) | Restore the laptop's network path to the provider; workers' agent runs fail fast and surface as failed executions |
 | Gateway 401/403 | `LLM_GATEWAY_TOKEN` missing or mismatched | Gateway and every worker must share the same token (§4); never run a tailnet-bound gateway without it |
 | Batched agent failures with `unexpected EOF during chunk size line` while other apps on the same machine also lose connectivity | Worker egress silently routed through a local proxy process (Clash/mihomo) inherited from the launch shell; the proxy's config reload/subscription refresh cuts every in-flight stream at once (#444) | The service strips inherited proxy env at startup (a one-line INFO log marks it). Production workers must not run behind a local proxy process; if egress through a proxy is genuinely required, declare it explicitly in the worker config (`proxy:` field / console 高级参数 → 出网代理) so the choice is visible and owned |
 | Worker claims steadily but concurrency "breathes" below configured capacity during recovery | Success-path claim pacing (#472) is adaptive: the wait after a successful claim is the last claim round-trip × 0.5, clamped to [10ms, 100ms] (the pre-0.7.0 fixed 0.2s wait is gone); since #546 one round-trip claims a batch (`claim_batch_limit`, default 32, hot) and pacing tracks the batch's equivalent per-claim RTT (batch RTT ÷ batch size); an empty queue resets to the floor, error paths keep the #437 exponential backoff | Expected behavior — the floor is a deliberate guard for claim-transaction lock contention. If recovery throughput still matters, check `worker claim pacing <N>ms` log lines for the current band; a cold-start burst can additionally be shaped with `ramp_up` (deployment doc §5) |
@@ -463,13 +426,14 @@ with its direct evidence — no more inferring from marker files.
   holder of the provider credential and must not be run with a widened bind
   address. It proxies only `POST /v1/*`. `LLM_GATEWAY_TOKEN` is mandatory for
   any non-loopback bind (§4). The token reaches workers only via
-  `deploy/.env`/environment passthrough and is referenced from the worker pi
-  provider config as `"$LLM_GATEWAY_TOKEN"` — never as a literal in
+  `deploy/.env`/environment passthrough and is referenced from the worker's
+  velites `models.json` as `"$LLM_GATEWAY_TOKEN"` — never as a literal in
   `models.json`, Compose YAML, or on a command line.
 - **Registration token handling:** registration uses workspace-scoped tokens
   (issue #35): issue them per workspace in the Host Web UI
   （workspace 设置 → Agent 与 Worker） and add them on each worker machine via
-  the Worker console or `workerctl configure --register-token-file` — never in
+  the Worker console or `workerctl configure --register-token-file` (fed via
+  stdin inside a container, see the deployment doc §5) — never in
   `config/*.yaml`, worker YAML, images (`.dockerignore` excludes `**/secrets`
   and `**/.env`), or logs. The former global
   `AGENT_LEGION_WORKER_REGISTER_TOKEN`（or `_FILE`）env vars are retired and
@@ -493,346 +457,9 @@ with its direct evidence — no more inferring from marker files.
 - **Policy:** precondition 1 (§2) is a hard blocker — encrypted transport is
   not policy approval.
 
-## 9. External artifact access: submit → poll → download (issue #631)
+## 9. External artifact access
 
-External systems that submit jobs through the workspace API read results back
-with three read-only endpoints, all scoped by the workspace in the URL path:
-
-| 端点 | 作用 |
-| --- | --- |
-| `GET /api/workspaces/{workspace_id}/jobs/{job_id}` | 轻量状态：status/outcome/进度/产物名单 |
-| `GET /api/workspaces/{workspace_id}/jobs/{job_id}/artifacts` | 产物清单（名字、形态、大小、content_hash、uploaded_at、媒体类型、#739 直连下载 URL 及其有效期） |
-| `GET /api/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw` | 产物字节流（支持 `Range`，媒体类型按白名单；直连 URL 的兜底通道） |
-
-前半程（签发 token、`POST /runs` 提交、按 `run_id` 列 job）与整条链路的
-幂等/重试语义、错误码表见
-[workspace-api-tokens.md](workspace-api-tokens.md)；本节只展开读取面，
-文末给出照抄可跑的全链路示例。
-
-**鉴权.** 与其它 workspace 端点同一守卫（`require_workspace_access`）：
-会话 cookie 或 #626 的 workspace API token（`Authorization: Bearer <token>`
-——Bearer 通道免 CSRF）。跨 workspace 的 job_id 一律 404（归属校验兼作
-存在性校验，不能枚举其它 workspace 的 job）。#626 落地前的 scoped Bearer
-token 同样可用：绑定了 `scoped_workspace_id` 的 token 只能读绑定 workspace
-（不匹配同样 404，防枚举语义一致）。
-
-**边界声明（legacy 裸路由）.** workspace 隔离原本只覆盖上表三个前缀端点，
-控制台前端仍在用的 legacy 裸路由（`GET /api/jobs/{job_id}`、
-`GET /api/jobs/{job_id}/artifacts/{name}`、`.../raw`、`/runs/{run_id}/log`、
-`/token-usage`）不带 workspace 前缀。#745 起 job 路由组统一挂
-`require_job_workspace_access`——按 job 行反查授权域，裸路由与前缀家族
-同一语义：绑定 `scoped_workspace_id` 的 scoped token 只读绑定 workspace
-（跨 workspace 与未知 job 一律 404，防枚举语义一致），成员按 membership
-（viewer 只读），全会话 admin 走 fast path。#631 攻击审查 H2 曾以路由级
-`reject_scoped_token_on_bare_job_route`（scoped 一律 404）收口，rebase
-#745 后该守卫唯一存留效果是误杀「绑定 token 读自己 workspace」（#745
-的 IDOR 矩阵钉为既有行为），已随 rebase 移除——防枚举与跨 workspace
-隔离由 router 级守卫以同一强度保证。剩余边界：裸路由对全会话用户的
-workspace 归属校验同样由 job 归属守卫覆盖（成员 404/200 与前缀端点一
-致）。外部系统的接入契约不变：只用上面三个前缀端点。
-
-**读取语义.**
-
-- 产物优先从对象存储权威副本读取（`job_artifacts` manifest）——有
-  manifest 行的产物，下载字节与清单公布的 `content_hash`/`uploaded_at`
-  对应（本地 job_dir 缓存可能滞后于 manifest）；本地副本仅服务从未
-  上传的 legacy 产物。对象存储未配置时清单降级为本地名并标
-  `object_storage_enabled: false`。
-- 产物名可以是 job_dir 相对子路径（`reports/final.json`）：清单列出
-  的名字即下载 URL 里的名字（`{artifact_name:path}`）——按路径段
-  percent-encode 后拼接（`#`/`?` 不编码会被客户端当 fragment/query
-  截断；`/` 编成 `%2F` 或保持字面均可，服务端解码后仍按多段名匹配）；
-  绝对名、`..` 段、反斜杠、`runs/` 前缀、点前缀段与含控制字符（含
-  `%00`）或超长段（>200 字节）的名字一律 400。
-- job 未完成时清单是空数组 + 当前 status（不是 404）——外部轮询以
-  status 为准。
-- 重跑后清单/读取都回答「当前最新」执行：`content_hash` 与
-  `uploaded_at` 标识这次下载对应哪次执行（#508）。
-- 对象被 bucket lifecycle 删除时 raw 下载 404（不是 500）。
-- manifest 行的 `storage_key` 读侧强制校验本 job 的
-  `jobs/{workspace}/{job_id}/` 前缀：行被污染/写歪（未来写入方失守、
-  运维 SQL 误操作）时按 404 处理并记 warning，绝不读穿 workspace 边界。
-
-**直连下载（#739）.** 清单里 `storage=object` 的条目带
-`download_url`（presigned GET URL，指向对象存储，签名按
-`AGENT_LEGION_S3_PUBLIC_ENDPOINT` 可达地址生成）和 `expires_at`（URL 失效
-时刻，TTL 由实例设置 `agent_workers.artifact_download_presign_ttl_seconds`
-控制，默认 3600 秒，重启生效）。大产物（视频等媒体）优先走 `download_url`
-直连——字节流由 S3 直接应答，不占 Host 的连接、线程池与出口带宽，
-与调度循环（claim/heartbeat）不再争资源：
-
-直连 URL 与 raw 端点是同一份产物表示的两条通道。下表列出直连**继承**和
-**不继承** raw 的哪些语义，对接方按此表实现，不要依赖表外行为：
-
-| 语义 | raw 端点 | `download_url` 直连 |
-| --- | --- | --- |
-| 响应头 | 白名单 Content-Type；非白名单 `attachment`；`.gz` 对象附 `Content-Encoding: gzip` | **相同**：这三个头作为 S3 响应覆盖参数签进 URL，持有者改不了 |
-| gzip 产物（#338，v4+ Worker 的产物都是这种） | 透传压缩字节 + `Content-Encoding: gzip` | **相同**；HTTP 客户端透明解码（`requests` 自动，curl 加 `--compressed`）。清单 `content_encoding: "gzip"` 标出存储形态 |
-| 字节对应关系 | 名字下的**当前**产物（#508 重跑语义） | **不继承**（#853）：URL 固定到签发时的那个产物版本。TTL 内 job 重跑产出同名新字节后，旧 URL 返回旧字节或 404，绝不返回新字节；新字节要重取清单拿新 URL。清单的 `content_hash`（未压缩内容的 sha256）仍可用于校验 |
-| 鉴权 | 每次请求校验 workspace API token | **不继承**：URL 是独立签名的持有者凭证。吊销 token 后 TTL 内仍可下载签发时的那个版本（不含之后重跑产生的同名新字节） |
-| 有效期 | 不适用 | `expires_at` 是**上界**：签名凭据先失效（如 STS 临时凭据）时会提前 403。收到 403 或到达 `expires_at` 都重取清单，每次清单请求重新签发，URL 不落库 |
-| Range | 支持（`.gz` 对象忽略 Range，返回全量） | 由 S3 处理；`.gz` 对象的 Range 落在压缩字节上（HTTP 语义如此），需要 seek 的媒体请走非 gzip 形态或 raw |
-
-- **何时不用直连**：`download_url` 为 null 时一律回落 raw 端点，包括
-  `local` 条目（从未上传对象存储）和未配置对象存储的实例
-  （`object_storage_enabled: false`）。
-- **public endpoint 未配置的形态**：实例只配 `AGENT_LEGION_S3_ENDPOINT`
-  （无 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`）时，`download_url` 非 null 但按
-  内部端点签名，部署网络外不可达（连接超时或拒绝）。外部调用方对该形态
-  应以 raw 端点兜底（直连请求失败即回落 raw），或由运维侧给实例配置
-  public endpoint 后重启。
-- **签名目标**：URL 的签名对象是服务端生成的 `storage_key`——#853 起每次
-  写入落一次性版本 key `jobs/{workspace_id}/{job_id}/.v/{version}/{name}`
-  （此前登记的存量产物保持 `jobs/{workspace_id}/{job_id}/{name}`，不迁移，
-  也不再被任何写入覆盖）；key 一律由服务端生成，请求输入除 job_id 与产物
-  名外无法影响签名目标；URL 只含 SigV4 签名参数，不含任何凭据。同名产物
-  重新登记后被取代的旧版本对象随即删除，旧 URL 答 404（`NoSuchKey`）——
-  与 403 一样按「重取清单」处理。设计与对象存储实测见
-  [artifact-direct-url-pinning.md](architecture/artifact-direct-url-pinning.md)。
-- **吊销 SOP**：吊销 token 不会让已签发 URL 失效。需要立即切断访问时，
-  先把实例 TTL 调到最小（60 秒，重启生效，只约束之后签发的 URL），再删除
-  相关 job。job 删除对对象存储是 **best-effort**：单个对象删除失败时 job
-  仍删除成功，遗留对象等 bucket lifecycle 清理，期间已签发 URL 在 TTL 内
-  仍可下载。因此真正的访问上限是「已签发 URL 的 TTL」，确认对象已删除
-  才算切断（可在对象存储侧按 `jobs/{workspace_id}/{job_id}/` 前缀核对）。
-
-**最小完整示例**（签发 token → 提交 → 轮询 → 下载）。端点全集、请求/
-响应形态、幂等与重试、错误码表见
-[workspace-api-tokens.md](workspace-api-tokens.md)，以下两段示例与之
-一一对应（`tests/routes/test_external_integration_docs_contract.py` 把
-示例里的每个端点钉在 OpenAPI 契约与 api token 权限面上）。下载一步按上表
-直连优先：`download_url` 为 null、已过 `expires_at` 或直连失败时回落 raw
-端点。#626 的
-workspace API token 唯一支持的提交面是 `POST /runs`：`/job-batches` 挂载
-`reject_studio_agent_scope`，对包括 `actor_scope='api'` 在内的全部
-scoped token 一律 403。
-
-```bash
-set -euo pipefail  # 任何一步失败立即停下，不带着空变量往下跑
-HOST="https://agent-legion.example.com"
-WS="my-workspace"
-# 0) 签发 token（管理员会话；或控制台 workspace 设置 → 外部对接）。
-#    明文只在这次响应里出现一次，落到调用方的密钥存储
-WORKSPACE_API_TOKEN=$(curl -sS -X POST "$HOST/api/workspaces/$WS/api-tokens" \
-  -H "Authorization: Bearer $ADMIN_SESSION" \
-  -H "Content-Type: application/json" \
-  -d '{"label": "cms-cron", "ttl_hours": 720}' \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["api_token"])')
-
-# 1) 提交（items 引用已就位的 material/bundle/ref；一项一个 job）。
-#    响应带 run.id 与本次新建的 job_ids（#735）；重复提交的 400 语义见
-#    workspace-api-tokens.md「幂等与重试」
-HTTP=$(curl -sS -o submit.json -w '%{http_code}' -X POST "$HOST/api/workspaces/$WS/runs" \
-  -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"items": [{"type": "material", "material_id": "mat-1"}]}')
-if [ "$HTTP" != 200 ]; then
-  # 400「No tasks were resolved from input」= 全部条目已有 job（不是失败），
-  # 按去重键反查已有 job 见下方 Python 示例的 find_existing_job；其它状态码
-  # 的处理见 workspace-api-tokens.md 错误码表
-  echo "submit HTTP $HTTP: $(cat submit.json)" >&2
-  exit 1
-fi
-RUN_ID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["run"]["id"])' < submit.json)
-# job_ids 可能为空：#501 失败 run 治愈（created_count=0），或并发重叠提交时
-# 条目归了别的 run——判空后按 run_id 读回
-JOB_ID=$(python3 -c 'import json,sys; ids=json.load(sys.stdin)["job_ids"]; print(ids[0] if ids else "")' < submit.json)
-
-# 2) 按 run 列 job（job_ids 为空或丢失时的读回路径；大 run 改用
-#    /jobs/snapshot?run_id=…&limit=500 按 next_cursor 分页）
-if [ -z "$JOB_ID" ]; then
-  JOB_ID=$(curl -sS --fail "$HOST/api/workspaces/$WS/jobs?run_id=$RUN_ID" \
-    -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
-    | python3 -c 'import json,sys; jobs=json.load(sys.stdin)["jobs"]; print(jobs[0]["id"] if jobs else "")')
-fi
-if [ -z "$JOB_ID" ]; then
-  # 该 run 下也没有 job：条目全被别的 run 抢走，按去重键反查（Python 示例）
-  echo "run $RUN_ID has no jobs; reconcile by (source_type, source_id)" >&2
-  exit 1
-fi
-
-# 3) 轮询状态直到终态 completed / failed（paused、awaiting_approval
-#    是等待态，继续轮询）
-while :; do
-  STATUS=$(curl -sS --fail "$HOST/api/workspaces/$WS/jobs/$JOB_ID" \
-    -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')
-  echo "status: $STATUS"
-  case "$STATUS" in completed|failed) break;; esac
-  sleep 15
-done
-if [ "$STATUS" = failed ]; then
-  # 失败 job 可能没有产物；error_summary 是失败原因摘要
-  curl -sS --fail "$HOST/api/workspaces/$WS/jobs/$JOB_ID" \
-    -H "Authorization: Bearer $WORKSPACE_API_TOKEN" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin)["error_summary"])' >&2
-  exit 1
-fi
-
-# 4) 取产物清单（content_hash / uploaded_at 区分执行；#739：object 条目
-#    另带 download_url 直连地址 + expires_at 有效期）；这里取第一个产物
-curl -sS --fail -o manifest.json "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts" \
-  -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
-ARTIFACT=$(python3 -c 'import json,sys; a=json.load(sys.stdin)["artifacts"]; print(a[0]["name"] if a else "")' < manifest.json)
-[ -n "$ARTIFACT" ] || { echo "job $JOB_ID has no artifacts" >&2; exit 1; }
-# 直连地址：null（local 条目 / 未配置对象存储）或已过 expires_at 时输出空串
-URL=$(python3 -c '
-import json, sys
-from datetime import datetime, timezone
-a = json.load(sys.stdin)["artifacts"]
-e = a[0] if a else None
-live = e and e["download_url"] and datetime.fromisoformat(
-    e["expires_at"].replace("Z", "+00:00")) > datetime.now(timezone.utc)
-print(e["download_url"] if live else "")' < manifest.json)
-
-# 5) 下载——直连优先（S3 直接应答，不穿 Host 代理），无直连地址或直连失败
-#    （403：过期或签名凭据提前失效；public endpoint 未配置时网络外不可达）
-#    回落 raw 端点。--compressed：gzip 产物两条通道都带 Content-Encoding:
-#    gzip，curl 默认不解码。-f：失败以非零退出，不把错误体（S3 错误 XML、
-#    lifecycle 回收后的 404）写成产物文件。
-#    产物名按 URL 路径段 percent-encode（safe=""）：清单名里的 # 或 ?
-#    不编码会被客户端当成 fragment/query 截断，服务端收到残缺名字。
-NAME=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' \
-  "$ARTIFACT")
-OUT=$(basename -- "$ARTIFACT")
-# 直连对象存储：不带 Authorization 头（S3 只按 URL 签名参数应答）
-if [ -z "$URL" ] || ! curl -fsSL --compressed -o "$OUT" "$URL"; then
-  curl -fsS --compressed -o "$OUT" \
-    "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts/$NAME/raw" \
-    -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
-fi
-```
-
-Python 等价（`requests`）：
-
-```python
-import hashlib, time, requests
-from datetime import datetime, timezone
-from urllib.parse import quote
-
-ALREADY_EXISTS = "No tasks were resolved from input"  # 全部条目已有 job 的 400
-
-s = requests.Session()
-s.headers["Authorization"] = f"Bearer {WORKSPACE_API_TOKEN}"  # #626
-
-def find_existing_job(
-    source_type: str, source_id: str | None = None, client_token: str | None = None
-) -> str | None:
-    """按去重键反查已有 job：material / bundle / ref 项传完整 source_id；
-    text 项的 material id 由服务端按内容派生、调用方不知道，带了
-    client_token 时传 client_token（按 job 的 client_token 字段比对）。
-    search 是子串匹配，须精确比对；结果按创建时间倒序分页，沿 next_cursor
-    翻完全部页。token 须在 workspace 内按内容版本唯一（#910）：命中多个
-    说明同一 token 复用于不同内容，无法判定对应哪份——报错，不取第一个。"""
-    hits, cursor = [], None
-    while True:
-        r = s.get(
-            f"{HOST}/api/workspaces/{WS}/jobs/snapshot",
-            params={"search": source_id or f"~{client_token}", "limit": 500, "cursor": cursor},
-        )
-        if r.status_code == 429:  # 翻全量会耗限流额度：按 Retry-After 退避后重取同一页
-            time.sleep(int(r.headers.get("Retry-After", "10")))
-            continue
-        r.raise_for_status()
-        page = r.json()
-        hits += [
-            j["id"] for j in page["jobs"]
-            if j["source_type"] == source_type
-            and (j["source_id"] == source_id if source_id else j["client_token"] == client_token)
-        ]
-        cursor = page["next_cursor"]
-        if cursor is None:
-            break
-    if len(hits) > 1:
-        raise RuntimeError(f"{client_token or source_id}: {len(hits)} jobs match; token reused")
-    return hits[0] if hits else None
-
-
-items = [{"type": "material", "material_id": "mat-1"}]
-resp = s.post(f"{HOST}/api/workspaces/{WS}/runs", json={"items": items}, timeout=60)
-if resp.status_code == 400 and resp.json().get("detail") == ALREADY_EXISTS:
-    # 「已存在」不是失败（超时重试撞上了上次已成功的提交）：反查已有 job
-    job_ids = []
-else:
-    resp.raise_for_status()
-    body = resp.json()
-    run_id, job_ids = body["run"]["id"], body["job_ids"]  # #735
-    if not job_ids:
-        # #501 治愈路径（created_count=0）：按 run_id 读回该 run 的 job
-        job_ids = [
-            j["id"] for j in s.get(
-                f"{HOST}/api/workspaces/{WS}/jobs", params={"run_id": run_id}
-            ).json()["jobs"]
-        ]
-if not job_ids:
-    # 400「已存在」，或并发重叠提交时条目归了别的 run：按去重键反查
-    # （带 client_token 的 text 项：find_existing_job("material", client_token=…)）
-    found = find_existing_job("material", "mat-1")
-    if found is None:
-        # 翻完也没有：该条目在本 workspace 没有 job（期间被删除等），
-        # 当作未提交处理——交给上层决定重提，不要当成已存在
-        raise RuntimeError("mat-1: no existing job found; resubmit")
-    job_ids = [found]
-job_id = job_ids[0]
-
-# 终态只有 completed / failed；paused、awaiting_approval 是等待态
-while True:
-    job = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}").json()
-    if job["status"] in {"completed", "failed"}:
-        break
-    time.sleep(15)
-if job["status"] == "failed":
-    # 失败 job 可能没有产物；error_summary 是失败原因摘要
-    raise RuntimeError(f"job {job_id} failed: {job['error_summary']}")
-
-def live_url(entry) -> str | None:
-    """直连地址：null（local 条目 / 未配置对象存储）或已过 expires_at 时为 None。"""
-    if not entry["download_url"]:
-        return None
-    expires = datetime.fromisoformat(entry["expires_at"].replace("Z", "+00:00"))
-    return entry["download_url"] if expires > datetime.now(timezone.utc) else None
-
-
-listing = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts")
-listing.raise_for_status()
-manifest = listing.json()
-for entry in manifest["artifacts"]:  # 可能为空数组：job 没有产出产物
-    # 两条通道分开走：Host API 用带 Bearer 的 session；presigned 直连下载
-    # 必须用不带任何会话头的独立请求——requests.Session 的会话级头会合并进
-    # 每个请求（不区分目标主机），直接 s.get(download_url) 会把 workspace
-    # API token 原样发给对象存储主机。S3 只按 URL 里的 SigV4 签名参数应答。
-    blob = None
-    url = live_url(entry)
-    if url is not None:
-        try:
-            direct = requests.get(url, timeout=60)  # 无鉴权头；gzip 产物自动解码
-            # 403 = 过期或签名凭据提前失效；404 = 签发后该版本已被重跑取代（#853）
-            if direct.status_code in (403, 404):  # 重取清单再试一次
-                fresh = s.get(f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts").json()
-                for e in fresh["artifacts"]:
-                    if e["name"] == entry["name"]:
-                        entry = e
-                url = live_url(entry)
-                direct = requests.get(url, timeout=60) if url else None
-            if direct is not None and direct.ok:
-                blob = direct.content
-        except requests.RequestException:
-            pass  # public endpoint 未配置时直连网络外不可达：回落 raw
-    if blob is None:
-        # safe=""：名字里的 # 或 ? 必须 percent-encode——否则 # 起被当作
-        # fragment、? 起被当作 query，服务端收到截断后的名字（子路径名的 /
-        # 被一并编成 %2F 也无妨：服务端解码后仍按多段名走 {artifact_name:path}）
-        raw = s.get(
-            f"{HOST}/api/workspaces/{WS}/jobs/{job_id}/artifacts/{quote(entry['name'], safe='')}/raw"
-        )
-        if raw.status_code == 404:
-            # 对象已被 bucket lifecycle 回收：记录后跳过，不要把错误体当产物存下
-            continue
-        raw.raise_for_status()
-        blob = raw.content
-    # content_hash 是未压缩内容的 sha256：raw 返回名字下的当前字节、直连
-    # 返回签发时的版本，期间若发生重跑 raw 就会与清单不一致，此时重取清单
-    # （local 条目没有 content_hash，跳过校验）
-    if entry["content_hash"] and hashlib.sha256(blob).hexdigest() != entry["content_hash"]:
-        raise RuntimeError(f"{entry['name']}: bytes changed since manifest (rerun?) — re-fetch")
-```
+The external read path (job status, artifact manifest, direct presigned
+download vs the raw endpoint, and the full copy-paste submit → poll →
+download scripts) lives in
+[workspace-api-tokens.md「读取产物」](workspace-api-tokens.md#读取产物清单直连下载与全链路示例).
