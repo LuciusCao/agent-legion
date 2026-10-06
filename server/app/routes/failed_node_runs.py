@@ -10,6 +10,7 @@ from server.app.jobs import JobQueries
 from server.app.routes.failed_node_run_contracts import (
     FailedNodeRunItem,
     FailedNodeRunsResponse,
+    FailedRunCursorParam,
 )
 from server.app.routes.job_rerun_by_failure_contracts import (
     JobRerunByFailureRequest,
@@ -39,14 +40,22 @@ def create_failed_node_runs_router(
         category: Annotated[str | None, Query(min_length=1)] = None,
         detail: Annotated[str | None, Query(min_length=1)] = None,
         since: datetime | None = None,
+        # #713: keyset-paged — one page never walks more than limit + 1
+        # matching runs; follow next_cursor for the rest.
+        limit: Annotated[int, Query(ge=1, le=1000)] = 500,
+        cursor: FailedRunCursorParam = None,
     ) -> FailedNodeRunsResponse:
-        rows = queries.list_failed_node_runs(
+        rows, next_cursor = queries.list_failed_node_runs_page(
             workspace_id,
+            limit=limit,
+            cursor=cursor,
             category=category,
             detail=detail,
             since=since,
         )
-        return FailedNodeRunsResponse(runs=[FailedNodeRunItem(**row) for row in rows])
+        return FailedNodeRunsResponse(
+            runs=[FailedNodeRunItem(**row) for row in rows], next_cursor=next_cursor
+        )
 
     @router.post(
         "/workspaces/{workspace_id}/jobs/rerun-by-failure",

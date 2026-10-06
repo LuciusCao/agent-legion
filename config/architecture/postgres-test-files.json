@@ -181,6 +181,7 @@
     "tests/services/test_execution_retention.py",
     "tests/services/test_global_settings_kv.py",
     "tests/services/test_job_artifact_maintenance.py",
+    "tests/services/test_job_artifact_reconcile_batching.py",
     "tests/services/test_job_log_service.py",
     "tests/services/test_job_rerun_batch.py",
     "tests/services/test_job_rerun_manifest_gc_closure.py",
