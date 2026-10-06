@@ -161,6 +161,35 @@ def test_runtime_registered_during_projection_rolls_the_stamp_back(
     assert _session_publishes(bus, sid) == []
 
 
+def test_rollback_never_undoes_a_new_runtime_real_failure(chat, job_db, monkeypatch) -> None:
+    """The resumed runtime the recheck sees can fail right after it (its
+    on_error / on_exit rewriting the row to error with its own detail); the
+    rollback must only undo this request's own orphan stamp, not resurrect
+    the stale observed status over that real failure."""
+    service, _bus, _register, workspace_id, user_id = chat
+    sid = _orphan(job_db, workspace_id, user_id, "running")
+    calls = 0
+
+    def runtime(session_id: str):
+        nonlocal calls
+        calls += 1
+        if calls == 2:  # recheck sees the new runtime, which then dies
+            job_db.update_studio_chat_session(
+                session_id, status="error", error_detail="agent process exited"
+            )
+            return object()
+        return None
+
+    monkeypatch.setattr(service, "runtime", runtime)
+
+    with pytest.raises(ConflictError):
+        service.send_message(sid, workspace_id, "hi")
+
+    row = job_db.get_studio_chat_session(sid)
+    assert row["status"] == "error"
+    assert row["error_detail"] == "agent process exited"
+
+
 def test_orphan_projected_by_send_is_resumable(chat, job_db) -> None:
     """End to end: runtime lost while the row says idle -> the send lands
     error, resume rebuilds the runtime, and the next send goes through."""

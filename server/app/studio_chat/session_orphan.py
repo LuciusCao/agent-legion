@@ -52,7 +52,10 @@ def reject_orphaned_session(
     moved the row in between is never overwritten. A runtime registered in
     the window between the absence check and the write (resume racing this
     request) rolls the write back to the observed status instead of
-    stamping a live session error; the timeline event is appended only while
+    stamping a live session error — and the rollback is pinned to this
+    write's own error stamp, so a real failure of that new runtime (its
+    on_error / on_exit rewriting the row to error with its own detail) is
+    never undone back to the stale observed status; the timeline event is appended only while
     the row still says error (atomic predicate), so a resume claiming the row
     after the recheck never inherits a stale error event.
     """
@@ -66,6 +69,7 @@ def reject_orphaned_session(
             service.db.update_studio_chat_session_if(
                 session_id,
                 status_in=("error",),
+                error_detail_is=ORPHAN_ERROR_DETAIL,
                 status=status,
                 error_detail=session.get("error_detail") or "",
             )
