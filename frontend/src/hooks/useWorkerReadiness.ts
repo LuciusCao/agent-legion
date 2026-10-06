@@ -3,9 +3,9 @@ import { useQuery } from '@tanstack/react-query'
 import { listAgentWorkers } from '../api'
 import type { AgentWorkerSummary } from '../api'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
-import { useAgentsStore } from '../stores/agentsStore'
 import { useWorkerConsoleUrl } from './useWorkerConsoleUrl'
 import { useWorkerScheduling } from './useWorkerScheduling'
+import { useWorkerPausedStatus } from './useWorkerPausedStatus'
 
 export interface WorkerReadiness {
   /** 本 workspace 视角的 Worker 列表；undefined = 尚无成功数据或刷新失败。 */
@@ -27,19 +27,7 @@ export function useWorkerReadiness(
   enabled = true,
   needsWorker = true
 ): WorkerReadiness {
-  const paused = useAgentsStore(
-    (s) => s.workerPausedByWorkspace[workspaceId ?? '']
-  )
-  const fetchWorkerStatus = useAgentsStore((s) => s.fetchWorkerStatus)
-  const status = useQuery({
-    queryKey: ['workerReadinessStatus', workspaceId],
-    queryFn: async () => {
-      await fetchWorkerStatus(workspaceId!)
-      return true
-    },
-    enabled: !!workspaceId && enabled,
-    staleTime: 0,
-  })
+  const status = useWorkerPausedStatus(workspaceId, enabled)
   const setWorkerPaused = useWorkerScheduling(workspaceId)
   const consoleUrl =
     useWorkerConsoleUrl(enabled && !!workspaceId && needsWorker) ?? ''
@@ -55,7 +43,7 @@ export function useWorkerReadiness(
   // 后台刷新期间保留已成功快照；明确失败后停止用旧数据推导就绪/阻塞。
   return {
     workers: needsWorker ? (workers.isSuccess ? workers.data : undefined) : [],
-    paused: enabled && status.isSuccess ? paused : undefined,
+    paused: enabled && status.isSuccess ? status.data : undefined,
     consoleUrl,
     resumeScheduling,
   }

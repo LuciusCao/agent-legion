@@ -26,7 +26,10 @@ export function DagSelectionViewport({
   /* 节点集合变化信号（DagGraph 的 rfNodes 引用）：选中先于布局同步到达时
      internal node 尚未入 store，等节点集合落地后重试定位。 */
   nodesVersion: readonly unknown[]
-  clickOriginRef: MutableRefObject<string | null>
+  /* 画布点击来源标记（#964）：被点节点与点击当时的定位请求 nonce。只有
+     key 与 nonce 都与当前定位请求一致才算画布点击——点击本身不 bump
+     nonce，nonce 变化即外部的显式定位请求，必须移动镜头。 */
+  clickOriginRef: MutableRefObject<{ key: string; nonce?: number } | null>
 }) {
   const { setCenter, getZoom, getInternalNode } = useReactFlow()
   const storeApi = useStoreApi()
@@ -69,9 +72,14 @@ export function DagSelectionViewport({
       focusedRef.current.nonce === selectionNonce
     )
       return
-    if (clickOriginRef.current === selectedNode) {
+    // 每个新定位请求（key 或 nonce 变化）都消费并清空来源标记（#964）：
+    // 标记只对紧随点击的那一次选中翻转有效，且 nonce 必须与点击时一致——
+    // 受控父组件未采纳点击（选中没翻转、effect 不跑）时残留的标记，遇到
+    // 之后 bump 了 nonce 的外部定位请求不再吞掉镜头移动。
+    const origin = clickOriginRef.current
+    clickOriginRef.current = null
+    if (origin?.key === selectedNode && origin.nonce === selectionNonce) {
       // 画布点击选中的节点必然在视口内（用户刚点过），不移动镜头。
-      clickOriginRef.current = null
       focusedRef.current = { key: selectedNode, nonce: selectionNonce }
       return
     }
@@ -89,7 +97,6 @@ export function DagSelectionViewport({
     if (!domNode || domNode.clientWidth === 0 || domNode.clientHeight === 0) {
       return
     }
-    clickOriginRef.current = null
     focusedRef.current = { key: selectedNode, nonce: selectionNonce }
     const { x, y } = internal.internals.positionAbsolute
     void setCenter(x + width / 2, y + height / 2, {

@@ -18,6 +18,7 @@ import pytest
 
 from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.jobs.queries import JobQueries
 from server.app.services import job_artifact_maintenance
 from server.app.services.job_artifact_maintenance import (
     evict_cache_to_capacity,
@@ -65,14 +66,22 @@ def _seed_job(status: str = "completed") -> dict[str, Any]:
 def _job_db(job: dict[str, Any]) -> Any:
     # The service reads job/manifest rows through the JobQueries read facade
     # (#187); the stub exposes a real read connection to the test database
-    # alongside the canned get_job.
+    # alongside the canned job row. #714: the reconciler's batched reads
+    # (recent completed nodes, manifest rows) delegate to a real facade; the
+    # job batch read returns the canned row so tests can shape it in memory.
     @contextmanager
     def _read():
         with read_connection(TEST_DATABASE_URL) as conn:
             yield conn
 
+    real = JobQueries(TEST_DATABASE_URL, Path("unused-jobs-dir"))
     return SimpleNamespace(
-        dsn_identity=TEST_DATABASE_URL, get_job=lambda job_id: dict(job), read=_read
+        dsn_identity=TEST_DATABASE_URL,
+        get_job=lambda job_id: dict(job),
+        fetch_jobs_by_ids=lambda ids: [dict(job)] if job["id"] in ids else [],
+        list_recent_completed_node_keys=real.list_recent_completed_node_keys,
+        job_artifact_rows_for_jobs=real.job_artifact_rows_for_jobs,
+        read=_read,
     )
 
 

@@ -581,10 +581,13 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
 7. **not_applicable 化已失效生产者困死纯隐式消费者**：rerun 重置并失效
    产物后，分支条件把生产者翻 not_applicable，文件永不再生、隐式消费者
    永久 pending。修复需 ready-gate 沿合并邻接传播 not_applicable（同上层）。
-8. **审批 approve 产物文件事务前写**：并发决策下败者的文件可能覆写胜者
-   的上传内容（窗口窄）；round_no 锁外计数可重号。rework 的 feedback
-   已在锁内紧随暂存之后写入（自审修复：提交后写有 stale/missing-read
-   窗口，事务前写会被暂存扫走），回滚残留的新 note 由下轮覆盖。
+8. **审批决策产物的换入残留与 round 计数**：approve 的 `approval.json`
+   （#929/#951）与 rework 的 feedback（#963）都已改为锁外写 fsync 临时
+   文件、锁内状态守卫通过后才 `replace_durable` 换入（#975：目录 fsync
+   先于提交；rework 换入在暂存与节点重置之后，不会被暂存扫走），重复 /
+   迟到决策在守卫处冲突、不碰已提交产物。仍接受的残余：`os.replace` 已
+   成功、之后目录 fsync 或提交失败时，本地文件保留未提交内容（gate 仍
+   待审），由下一次决策覆盖；round_no 锁外计数可重号。
 9. **单 claim 多候选单事务的 advisory 锁累积**：§2.5 的全序论证只覆盖
    批路径；单 claim 面靠 40P01 一次重试 + deadlock_timeout 缓解。
 10. **`mark_nodes_not_applicable_many` 翻 not_applicable 不盖代次戳**：

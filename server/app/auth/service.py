@@ -3,10 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.auth import scoped_tokens
+from server.app.auth.password_policy import WeakPasswordError, validate_new_password
 from server.app.auth.passwords import hash_password, verify_password
 from server.app.auth.rate_limit import LoginLockedError, LoginRateLimiter
 from server.app.auth.sessions import hash_token, issue_token
 from server.app.jobs.queries import JobQueries
+
+_BOOTSTRAP_CLOSED = "Bootstrap is only available before the first user exists"
 
 
 class AuthError(Exception):
@@ -22,6 +25,17 @@ class InvalidCredentialsError(AuthError):
         super().__init__("Invalid username or password", status_code=401)
 
 
+def _new_password_hash(password: str) -> str:
+    """Policy-check a NEW password (#970) and hash it; never used on login."""
+    if not password:
+        raise AuthError("Password is required", 400)
+    try:
+        validate_new_password(password)
+    except WeakPasswordError as exc:
+        raise AuthError(str(exc), 400) from exc
+    return hash_password(password)
+
+
 class AuthService:
     """User/session domain logic on top of the auth query mixins."""
 
@@ -31,10 +45,16 @@ class AuthService:
 
     # --- sessions ----------------------------------------------------------
 
-    def login(self, username: str, password: str) -> tuple[str, dict[str, Any]]:
-        """Verify credentials and issue a session; returns (token, user)."""
+    def login(
+        self, username: str, password: str, client_ip: str | None = None
+    ) -> tuple[str, dict[str, Any]]:
+        """Verify credentials and issue a session; returns (token, user).
+
+        ``client_ip`` feeds the (account, IP) and IP lockout keys (#970);
+        the route passes the transport peer, never a raw forwarding header.
+        """
         try:
-            self._rate_limiter.check(username)
+            self._rate_limiter.check(username, client_ip)
         except LoginLockedError as exc:
             raise AuthError(str(exc), status_code=429) from exc
         creds = self._queries.get_user_credentials(username)
@@ -43,9 +63,9 @@ class AuthService:
             or creds.get("disabled_at") is not None
             or not verify_password(password, creds.get("password_hash"))
         ):
-            self._rate_limiter.record_failure(username)
+            self._rate_limiter.record_failure(username, client_ip)
             raise InvalidCredentialsError()
-        self._rate_limiter.record_success(username)
+        self._rate_limiter.record_success(username, client_ip)
         token = issue_token()
         self._queries.create_session(hash_token(token), str(creds["id"]))
         user = dict(creds)
@@ -76,30 +96,47 @@ class AuthService:
     def bootstrap_available(self) -> bool:
         return self._queries.count_users() == 0
 
-    def bootstrap(self, username: str, password: str, display_name: str = "") -> dict[str, Any]:
-        """Create the very first admin; only while no users exist."""
+    def bootstrap(
+        self, username: str, password: str, display_name: str = ""
+    ) -> tuple[str, dict[str, Any]]:
+        """Create the very first admin and its session; returns (token, user).
+
+        #968: everything is prepared first (policy check, password hash,
+        session token) and applied in ONE transaction that re-checks the
+        no-users precondition under a lock — an interruption leaves no
+        half-initialized state, and a retry is either a clean first run or
+        a well-defined 409.
+        """
         if not self.bootstrap_available():
-            raise AuthError("Bootstrap is only available before the first user exists", 409)
-        if not password:
-            raise AuthError("Password is required", 400)
-        return self._queries.create_user(
+            raise AuthError(_BOOTSTRAP_CLOSED, 409)
+        password_hash = _new_password_hash(password)
+        token = issue_token()
+        user = self._queries.bootstrap_first_admin(
             username,
             display_name=display_name,
-            password_hash=hash_password(password),
-            role="admin",
+            password_hash=password_hash,
+            session_token_hash=hash_token(token),
         )
+        if user is None:
+            raise AuthError(_BOOTSTRAP_CLOSED, 409)
+        return token, user
 
     def seed_bootstrap_admin(self, password: str, username: str = "admin") -> bool:
-        """Env-seeded first admin for unattended deploys; no-op once users exist."""
+        """Env-seeded first admin for unattended deploys; no-op once users exist.
+
+        A seed password failing the policy (#970) is a startup error: the
+        deploy must not come up with a weak admin, nor silently without one.
+        """
         if not password or not self.bootstrap_available():
             return False
-        self._queries.create_user(
-            username,
-            display_name="Administrator",
-            password_hash=hash_password(password),
-            role="admin",
+        try:
+            password_hash = _new_password_hash(password)
+        except AuthError as exc:
+            raise ValueError(f"AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD rejected: {exc}") from exc
+        user = self._queries.bootstrap_first_admin(
+            username, display_name="Administrator", password_hash=password_hash
         )
-        return True
+        return user is not None
 
     # --- admin user management ----------------------------------------------
 
@@ -113,13 +150,12 @@ class AuthService:
         display_name: str = "",
         role: str = "member",
     ) -> dict[str, Any]:
-        if not password:
-            raise AuthError("Password is required", 400)
+        password_hash = _new_password_hash(password)
         try:
             return self._queries.create_user(
                 username,
                 display_name=display_name,
-                password_hash=hash_password(password),
+                password_hash=password_hash,
                 role=role,
             )
         except ValueError as exc:
@@ -134,12 +170,13 @@ class AuthService:
         password: str | None = None,
         disabled: bool | None = None,
     ) -> dict[str, Any]:
+        password_hash = _new_password_hash(password) if password else None
         try:
             return self._queries.update_user(
                 user_id,
                 display_name=display_name,
                 role=role,
-                password_hash=hash_password(password) if password else None,
+                password_hash=password_hash,
                 disabled=disabled,
             )
         except ValueError as exc:

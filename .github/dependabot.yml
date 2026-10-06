@@ -1,0 +1,10 @@
+# #969 供应链：workflow 里的 action 全部按 commit sha 钉死（`@<sha> # vX.Y.Z`），
+# Dependabot 识别这种写法，升级 PR 会同时改 sha 与版本注释——钉 sha 不等于
+# 冻结版本。只开 github-actions 生态；Python / npm / Docker 基础镜像的升级
+# 走人工流程（漏洞信号由 nightly-gate 的 deps-audit job 每周给出）。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

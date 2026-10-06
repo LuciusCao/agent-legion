@@ -60,6 +60,19 @@ def _lane_idle_timeout() -> float:
     return value if value > 0 else _DEFAULT_IDLE_TIMEOUT
 
 
+class LaneSpawnError(RuntimeError):
+    """A lane thread could not be started (#1051): ``Thread.start`` raised
+    its resource-class RuntimeError ("can't start new thread" — the
+    thread/pid budget is exhausted). Environmental, not a programming
+    error: the claim loop backs off on exactly this type (no broad catch).
+
+    Ledger contract when ``submit`` raises it: the spawn runs BEFORE the
+    put, so the task was never queued — no lane thread will ever run it,
+    no future reaches the caller, and the pool's ledger is unchanged
+    (the never-started thread is rolled back out of ``_live``). The
+    caller owns the claimed-but-unsubmitted execution."""
+
+
 class _LaneWorker(threading.Thread):
     """One pool thread: loop taking (future, fn, args) triples off the shared
     queue; exit after one idle-timeout round. Spawn policy ledger (codex P2,
@@ -95,7 +108,13 @@ class _LaneWorker(threading.Thread):
         take is not yet in ``_busy``), so the next take re-checks with the
         fresh ledger — a miss stalls one park-to-take handoff, not an
         execution's runtime. Post-shutdown spawn is forbidden (no sentinel
-        would ever reach it)."""
+        would ever reach it).
+
+        A belt spawn that hits thread exhaustion (``LaneSpawnError``, #1051)
+        is dropped: the belt is best-effort, and letting it escape would
+        land in ``run``'s task containment and fail the task this thread
+        just took WITHOUT running it. The queued surplus stays queued for
+        the next take; the submit path is where exhaustion is reported."""
         with self._pool._guard:
             self._pool._busy += 1
             undersupplied = (
@@ -104,7 +123,8 @@ class _LaneWorker(threading.Thread):
                 and len(self._pool._live) < self._pool._max_workers
             )
         if undersupplied:
-            self._pool._spawn()
+            with contextlib.suppress(LaneSpawnError):
+                self._pool._spawn()
 
     def run(self) -> None:
         while True:
@@ -212,7 +232,9 @@ class ExecutionLanePool:
         budget exhausted) rolls the live-set entry back: a never-started
         thread would ghost in ``_live`` forever (nothing joins it),
         permanently inflating live_threads() and squatting a max_workers
-        slot (self-review round 3)."""
+        slot (self-review round 3). The resource-class RuntimeError is
+        re-raised as ``LaneSpawnError`` (#1051) so callers can tell thread
+        exhaustion apart from programming errors."""
         if self._shutdown or len(self._live) >= self._max_workers:
             return
         self._serial += 1
@@ -220,14 +242,18 @@ class ExecutionLanePool:
         self._live.add(worker)
         try:
             worker.start()
-        except BaseException:
+        except BaseException as exc:
             # #204 broad-except audit: spawn 回滚臂（自审 round 3）。逃逸族
             # 是 Thread.start 的资源类 RuntimeError/线程系统异常；吞不是
-            # 目的——先回滚 _live 条目再原样 re-raise（submit 的调用方拿
-            # 原始异常，任务 future 尚未入队因此无人悬挂）。不回滚则
-            # 未启动的 ghost 线程永久虚高 live 计数。日志保全：异常向上
-            # 传播，不在此处打印。
+            # 目的——先回滚 _live 条目再上抛：RuntimeError（线程/pid 预算
+            # 耗尽）包成 LaneSpawnError（#1051，claim 循环据此单独退避），
+            # 其余原样 re-raise。账目：submit 先 spawn 后入队，失败时任务
+            # 尚未入队、future 未交给调用方，无人悬挂（见 submit）；不回滚
+            # 则未启动的 ghost 线程永久虚高 live 计数。日志保全：异常向上
+            # 传播（原异常挂 __cause__），不在此处打印。
             self._live.discard(worker)
+            if isinstance(exc, RuntimeError):
+                raise LaneSpawnError(f"execution lane thread start failed: {exc}") from exc
             raise
 
     def submit(self, fn, *args):  # type: ignore[no-untyped-def]
@@ -245,20 +271,27 @@ class ExecutionLanePool:
         instead has a churn flaw: a submit racing the previous task's
         slot-return sees idle=0 and spawns a thread that then parks for the
         full idle timeout — steady sequential traffic kept spawning strays
-        (codex P2 round 2)."""
+        (codex P2 round 2).
+
+        Spawn BEFORE put (#1051): a ``LaneSpawnError`` from the spawn then
+        leaves nothing queued — put-then-spawn would strand the task in the
+        queue with no future handed out (the caller cannot track or cancel
+        it), and a parked thread may already have taken it, so it could not
+        be rolled back either. The freshly started thread simply parks on
+        get() until the put below, microseconds later under the same guard."""
         future: Future = Future()
         with self._guard:
             if self._shutdown:
                 raise RuntimeError("cannot submit to a shutdown ExecutionLanePool")
             demand = self._busy + self._queue.qsize() + 1
+            if demand > len(self._live) and len(self._live) < self._max_workers:
+                self._spawn_locked()
             # The put stays INSIDE the critical section: releasing between
             # the flag check and the put lets shutdown's sentinels queue
             # first, stranding this task in a dead queue while shutdown
             # (wait=True) has already returned (subagent review P1;
             # ThreadPoolExecutor holds _shutdown_lock across both).
             self._queue.put((future, fn, args))
-            if demand > len(self._live) and len(self._live) < self._max_workers:
-                self._spawn_locked()
         return future
 
     def shutdown(self, wait: bool = True) -> None:
