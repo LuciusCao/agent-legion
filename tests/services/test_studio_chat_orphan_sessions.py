@@ -111,6 +111,35 @@ def test_mode_switch_on_orphan_uses_the_same_projection(chat, job_db) -> None:
     assert job_db.get_studio_chat_session(sid)["status"] == "error"
 
 
+def test_resume_claiming_between_recheck_and_append_gets_no_stale_error(
+    chat, job_db, monkeypatch
+) -> None:
+    """A resume that claims the freshly stamped row (error -> starting)
+    after the runtime recheck but before the timeline append must not get
+    the orphan's error event persisted or pushed into its timeline."""
+    service, bus, _register, workspace_id, user_id = chat
+    sid = _orphan(job_db, workspace_id, user_id)
+    calls = 0
+
+    def runtime(session_id: str):
+        nonlocal calls
+        calls += 1
+        if calls == 2:  # post-write recheck: a resume claims right after it
+            assert job_db.claim_studio_chat_resume(session_id, max_active=32)
+        return None
+
+    monkeypatch.setattr(service, "runtime", runtime)
+
+    with pytest.raises(StudioChatSessionInterruptedError):
+        service.send_message(sid, workspace_id, "hi")
+
+    assert calls == 2
+    assert job_db.get_studio_chat_session(sid)["status"] == "starting"
+    assert job_db.list_studio_chat_messages(sid) == []
+    assert _session_publishes(bus, sid) == []
+    assert not [p for c, p in bus.events if sid in c and p.get("type") == "message"]
+
+
 def test_runtime_registered_during_projection_rolls_the_stamp_back(
     chat, job_db, monkeypatch
 ) -> None:

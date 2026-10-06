@@ -52,7 +52,9 @@ def reject_orphaned_session(
     moved the row in between is never overwritten. A runtime registered in
     the window between the absence check and the write (resume racing this
     request) rolls the write back to the observed status instead of
-    stamping a live session error.
+    stamping a live session error; the timeline event is appended only while
+    the row still says error (atomic predicate), so a resume claiming the row
+    after the recheck never inherits a stale error event.
     """
     status = str(session["status"])
     if status == "starting":
@@ -68,8 +70,17 @@ def reject_orphaned_session(
                 error_detail=session.get("error_detail") or "",
             )
             raise ConflictError("Chat session was resumed concurrently; retry")
-        service.store.append_message(
-            session_id, "status", "system", {"event": "error", "detail": ORPHAN_ERROR_DETAIL}
-        )
-        service.store.publish_session(session_id)
+        # The event rides the #915 atomic live-guarded append: a resume that
+        # claimed the row (error -> starting) after the recheck above makes
+        # the insert a no-op, and one racing it waits on the FOR SHARE lock
+        # — a stale error never lands after (or is pushed into) a resumed
+        # session.
+        if service.store.append_message_if_live(
+            session_id,
+            "status",
+            "system",
+            {"event": "error", "detail": ORPHAN_ERROR_DETAIL},
+            ("error",),
+        ):
+            service.store.publish_session(session_id)
     raise StudioChatSessionInterruptedError(session_id)
