@@ -56,8 +56,9 @@ export function PreviewPanelSection(props: PreviewPanelSectionProps) {
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const publishedQuery = usePublishedPreviewPanel(workspaceId)
   // 治理面状态对 admin 常驻轮询（头部治理行需要草稿状态；原来只在面板
-  // 打开时启用）；非 admin 永远不发 403 轮询。
-  const stateQuery = usePreviewPanelState(workspaceId, isAdmin)
+  // 打开时启用）；非 admin 永远不发 403 轮询。#965：定制对话开着 3s、
+  // 关着 30s（档位见 previewPanelStatePollInterval）。
+  const stateQuery = usePreviewPanelState(workspaceId, isAdmin, customizing)
   const governance = usePreviewGovernance(workspaceId)
   const published = publishedQuery.data ?? null
   const draft = stateQuery.data?.draft ?? null

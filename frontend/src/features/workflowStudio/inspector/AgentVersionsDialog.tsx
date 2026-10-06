@@ -11,6 +11,7 @@ import {
 import { fetchAgentVersions, rollbackAgent } from '../../../api'
 import type { AgentVersionSummary } from '../../../types'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
+import { formatDateTime } from '../../../lib/formatters'
 import { toErrorMessage } from '../../../lib/queryError'
 import styles from './AgentsPanel.module.css'
 
@@ -83,7 +84,7 @@ export function AgentVersionsDialog({
             <li key={version.id} className={styles.listItemMeta}>
               <Chip size="small" label={`v${version.version}`} />
               <Chip size="small" label={statusLabels[version.status]} />
-              <span>{new Date(version.created_at).toLocaleString()}</span>
+              <span>{formatDateTime(version.created_at)}</span>
               <span>{version.created_by}</span>
               {version.status !== 'draft' && (
                 <Button

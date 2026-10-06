@@ -114,10 +114,29 @@ def job_facets(job_db: JobQueries, workspace_id: str, f: JobListFilter) -> dict[
     jobs without a running/failed node under the ``None`` key; serialization
     to response keys happens in the service layer.
     """
-    total = count_jobs_filtered(job_db, workspace_id, f)
-
-    status_where, status_params = _where(workspace_id, replace(f, status=None))
+    # #957: one read connection for every facet statement, and the filtered
+    # total shares one scan with the node dimension's base count (every filter
+    # except active_node_key): the active-node predicate rides a FILTER
+    # aggregate instead of a second count, and with no active_node_key the
+    # two counts are the same number — 5 serial queries on 5 connections
+    # become 4 on one.
+    node_where, node_params = _where(workspace_id, replace(f, active_node_key=None))
     with job_db._connect_read() as conn:
+        if f.active_node_key:
+            row = conn.execute(
+                f"select count(*) filter (where {_ACTIVE_NODE_CLAUSE}) as total,"
+                f" count(*) as node_base from jobs{node_where}",
+                [f.active_node_key, f.active_node_key, *node_params],
+            ).fetchone()
+        else:
+            row = conn.execute(
+                f"select count(*) as total, count(*) as node_base from jobs{node_where}",
+                node_params,
+            ).fetchone()
+        # An aggregate without GROUP BY always yields exactly one row.
+        total, node_base = (int(row["total"]), int(row["node_base"])) if row else (0, 0)
+
+        status_where, status_params = _where(workspace_id, replace(f, status=None))
         rows = conn.execute(
             f"select {_STATUS_BUCKET_SQL} as bucket, count(*) as cnt"
             f" from jobs{status_where} group by 1",
@@ -125,10 +144,9 @@ def job_facets(job_db: JobQueries, workspace_id: str, f: JobListFilter) -> dict[
         )
         status_counts = {str(row["bucket"]): int(row["cnt"]) for row in rows}
 
-    version_where, version_params = _where(
-        workspace_id, replace(f, workflow_version=None, workflow_version_none=False)
-    )
-    with job_db._connect_read() as conn:
+        version_where, version_params = _where(
+            workspace_id, replace(f, workflow_version=None, workflow_version_none=False)
+        )
         rows = conn.execute(
             f"select workflow_version, count(*) as cnt from jobs{version_where}"
             " group by workflow_version",
@@ -136,8 +154,6 @@ def job_facets(job_db: JobQueries, workspace_id: str, f: JobListFilter) -> dict[
         )
         version_counts = {row["workflow_version"]: int(row["cnt"]) for row in rows}
 
-    node_where, node_params = _where(workspace_id, replace(f, active_node_key=None))
-    with job_db._connect_read() as conn:
         # Resolve the active node from the job_nodes side: running/failed rows
         # are a tiny subset, so a per-job lateral over every filtered job is
         # needlessly expensive at 10万+ job scale (30s on a 259k-job workspace).
@@ -158,10 +174,8 @@ def job_facets(job_db: JobQueries, workspace_id: str, f: JobListFilter) -> dict[
         )
         node_counts = {row["active_node_key"]: int(row["cnt"]) for row in rows}
     # Jobs without any running/failed node fall into the None bucket; derive it
-    # from the filtered total instead of scanning every job.
-    no_node = count_jobs_filtered(job_db, workspace_id, replace(f, active_node_key=None)) - sum(
-        node_counts.values()
-    )
+    # from the node dimension's base count instead of scanning every job.
+    no_node = node_base - sum(node_counts.values())
     if no_node:
         node_counts[None] = no_node
 
