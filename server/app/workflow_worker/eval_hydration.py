@@ -14,6 +14,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from server.app.workflow_worker.input_hydration import hydrate_job_artifacts
+from server.app.workflows.sharding_batch import shard_effective_statuses
 from server.app.workflows.workflow_branching import RUNNABLE_STATUSES, evaluate_branches
 
 if TYPE_CHECKING:
@@ -66,9 +67,8 @@ def hydrate_eval_contexts(
         # shard node is never restored and the remaining shards can never be
         # claimed. The flip rides a copy: branch evaluation and the ready
         # gate keep their own established status handling.
-        flip = pending_shards_by_job.get(str(job["id"]))
-        hydration_statuses = (
-            {**statuses, **{node_key: "pending" for node_key in flip}} if flip else statuses
+        hydration_statuses = shard_effective_statuses(
+            statuses, pending_shards_by_job.get(str(job["id"]), ())
         )
         unrestored = hydrate_job_artifacts(
             worker.artifact_object_store,
