@@ -8,10 +8,10 @@
 
 ## 1. 背景与动机
 
-当前 worker 上每个节点执行 = 冷启动一个 Node Pi 进程。2026-07-31 实测（生产 64 并发形态）：
+当前 worker 上每个节点执行 = 冷启动一个 Node Pi 进程。高并发 worker 形态下的实测（2026-07-31）：
 
-- 58 个并发 pi 进程总 RSS ≈ 5.3 GB（均值 93 MB，峰值单进程 630 MB）；
-- 每周 ~5.3 万次节点执行，每次付 Node 启动 + 模块加载（实测 1.5–1.7 s CPU）；
+- 每个 pi 进程常驻数十至上百 MB、峰值可达数百 MB，数十并发即占用数 GB 内存；
+- 每次节点执行都要付 Node 启动 + 模块加载（实测 1.5–1.7 s CPU），执行量大时累积成显著开销；
 - `--mode json` 的 `message_update` delta 占 stdout 体积 99%+，Pi 侧序列化、worker 泵逐字节
   扫描后全部丢弃——协议层面的纯浪费，且无法通过配置关闭（PoC 已确认）。
 
@@ -61,15 +61,18 @@ velites/                 # Cargo crate（本仓库根下新目录）
     models.rs            # ~/.velites/models.json provider/model registry
     config.rs            # 旧 gateway 凭据迁移桥
     session.rs           # session.jsonl 镜像落盘（--session-dir）
-    tools/{mod,read,write,bash,uuid,json,validate,specs,catalog,command_guard,truncate}.rs
+    tools/               # read/write/bash/uuid/json/validate 工具本体，加 specs/catalog
+                         # 工具目录、command_guard/command_paths 命令守卫、bash_env/bash_proc
+                         # 子进程环境与生命周期、atomic_write、json_lenient/json_limits、truncate
     contract.rs          # 输出契约引擎（#443）
     contract_gate.rs     # 契约关卡/validate 子命令 glue（#443，自 contract.rs 预算拆分）
-    provider/{mod,openai_compat,anthropic,retry,stub}.rs
+    provider/            # mod/retry/stub + anthropic.rs + openai_compat/（mod、aggregate）
     skill.rs             # SKILL.md 加载
     budget.rs            # 预算治理
     cancel.rs            # 取消/信号
-    sandbox.rs           # 沙箱抽象（seatbelt / bubblewrap，§5）
+    sandbox/             # OS 沙箱：mod.rs（跨平台类型 + Linux bubblewrap）、macos.rs（seatbelt），§5
     bin/velites_schema.rs # 事件流 JSON Schema 导出（schemars）
+    bin/velites_sandbox.rs # 独立沙箱 wrapper 二进制（code 节点执行，#383）
   tests/                 # Rust 集成测试（含 golden event fixtures）
 ```
 
@@ -85,10 +88,13 @@ agent 框架；依赖清单评审纳入 PR。
 worker 侧进程模型不变：`worker/executor.py` 每个 claim 起一个 velites 子进程
 （`subprocess.Popen(cwd=job_dir, start_new_session=True)`），stdout 即事件流。
 二进制经 Dockerfile 新增 rust build stage 打进 worker 镜像；命令构建经
-Host 侧 runtime catalog（`server/app/agent_runtime/`，`AgentDefinition.runtime`
+Host 侧 runtime catalog（`server/app/agent_runtime/`，按节点执行档案的 runtime
 分发到各 adapter，EXEC-RUNTIME-DISPATCH-001）——pi → pi argv、
-velites → velites argv；pi 不退役、长期保留，
-灰度/回退均为单 agent 定义的单字段配置改动（详见 §9）。
+velites → velites argv。档案 runtime 处于双读过渡期（#440 P2，EXEC-AGENT-PROFILE-001，
+`server/app/services/agent_node_profile.py`）：自含节点取节点 `execution.runtime`
+（或 workflow 顶层 `execution.runtime` 默认），其余节点取按 capability 解析到的
+`AgentDefinition.runtime`。pi 不退役、长期保留，灰度/回退均为单字段配置改动
+（节点 `execution.runtime` 或 Agent 定义的 `runtime`，详见 §9）。
 
 ## 4. 事件 Schema v1：pi 兼容子集（velites/json1）
 
@@ -210,7 +216,7 @@ TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计�
 
 实现：
 
-- `Sandbox` 抽象（`velites/src/sandbox.rs`），按平台二选一：macOS 用
+- `Sandbox` 抽象（`velites/src/sandbox/`），按平台二选一：macOS 用
   `sandbox-exec`（运行时生成 seatbelt profile），Linux 用 `bubblewrap`
   （worker 镜像需验证 user namespace 可用性）；
 - 生效点：**bash 工具的子进程整体用沙箱包装**（OS 级强制，子进程再 fork 也受限）；
@@ -366,7 +372,7 @@ fail-closed 报错，内置节点不受影响。
 - `apiKey` 支持 `$ENV` / `${ENV}` 精确引用；模型发现即解析引用，缺失时 fail-closed，
   Worker 不会广播该 runtime 的模型；文件可能含字面 secret，因此权限应为 0600；
 - 旧 `~/.velites/config.json` 与 `VELITES_BASE_URL/VELITES_API_KEY` 是已进入 deprecation
-  的迁移桥（#602：直调时 stderr 打迁移指引，下一版本周期移除），仅在没有 models 文件
+  的迁移桥（#602：直调时 stderr 打迁移指引，移除时间未定），仅在没有 models 文件
   且直接运行 `gateway/openai_compat` 时兜底，不参与 Worker capability discovery——
   配置入口是 `~/.velites/models.json`；
 - secret 不上命令行或 Host manifest。
@@ -482,8 +488,12 @@ fail-closed 报错，内置节点不受影响。
 
 ## 9. 与 Agent Legion 的集成与切换
 
-**当前模型（2026-08-05 起，agent 配置治理 phase 3 落地）**：pi、velites
-是平级 runtime，由 `AgentDefinition.runtime` 声明（定义存
+**当前模型**：pi、velites 是平级 runtime，由 agent 节点执行档案的 runtime 声明。
+档案处于双读过渡期（#440 P2，EXEC-AGENT-PROFILE-001，统一经
+`server/app/services/agent_node_profile.py` 解析）：声明了 `execution.runtime`
+（节点值或 workflow 顶层 `execution.runtime` 默认）的自含节点直接用该值，随
+revision 发布、随 job 快照冻结，dispatch 把 runtime 写入请求行（`profile_source='node'`）；
+其余节点用按 capability 解析到的 `AgentDefinition.runtime`（定义存
 `versioned_entities` 表，Studio「Agent 管理」维护；yaml `agents:` 段与
 `workflows.pi` 块已退役，出现在 yaml 中启动即报错；openclaw 曾短暂接入，
 因无流式事件与 token 计量已于 #75 整体退役）。命令构建经 Host 侧
@@ -498,7 +508,9 @@ runtime catalog（`server/app/agent_runtime/`，runtime 全集的单一事实来
 fail-fast（issue #75 阶段 2）。
 manifest 的执行块统一为
 `execution.*`（`binary/provider/model/thinking/timeout_seconds/no_sandbox`），
-不再有 `pi.*` 键。灰度/回退粒度是单个 agent 定义的单字段改动，操作手册见
+不再有 `pi.*` 键。灰度/回退粒度是单字段改动——自含节点改节点
+`execution.runtime` 并发布新 revision（在途 job 经「升级 workflow」取新值），
+legacy 节点改对应 Agent 定义的 `runtime`；操作手册见
 `docs/remote-execution-runbook.md` §6。
 
 **flavor 的退役（2026-08-05）**：`workflows.pi.flavor` 实现选择层已随 yaml
@@ -513,16 +525,16 @@ pi_config/pi_command_builder/pi_prompt 链）已整体删除（#108）。
 （`runtime: pi` 即完整 pi 路径）。若未来仅出于卫生目的清理
 （如 command_spec version 升级），另行立项评估，与退役无关。
 
-**回退**：单 agent 异常把该定义迁回 `runtime: pi`（Studio 改一个字段即
-完成）；系统性异常将全部定义迁回 `runtime: pi`。沙箱异常当前需发版调整
+**回退**：单节点异常把该节点的 `execution.runtime`（自含节点）或对应 Agent
+定义的 `runtime`（legacy 节点）改回 `pi`；系统性异常同法全部迁回 `pi`。沙箱异常当前需发版调整
 （`velites_no_sandbox` 配置项已随 `workflows.pi` 退役；`execution.no_sandbox`
 在 manifest 恒为 false）。
 
 **历史灰度路径（已完成，存档）**：
 
 - Phase 0：契约测试 + 真二进制集成测试入库（M4）；
-- Phase 1 shadow = 抽样回放（`scripts/velites_replay.py` 离线双跑 pi 与
-  velites，diff 事件流与产出）；
+- Phase 1 shadow = 抽样回放（当时的离线回放脚本双跑 pi 与 velites，diff 事件流与
+  产出；该脚本已不在仓库中）；
 - Phase 2 金丝雀 = 全局 `flavor: velites` + worker capacity 压低起步，逐步
   恢复至生产量级并发（整夜跑批验证、成功率高）；
 - 升格落地（2026-08-03，PR #20/#21）：runtime 枚举/dispatch/sweeper/runtime
@@ -547,7 +559,8 @@ pi                      # 交互式完成认证
 ./scripts/check-pi.sh   # 验证安装与认证状态
 ```
 
-之后在 Studio「Agent 管理」把对应 agent 定义的 `runtime` 设为 `pi` 即可。
+之后把节点 `execution.runtime`（自含节点）或 Studio「Agent 管理」里对应 Agent 定义的
+`runtime`（legacy 节点）设为 `pi` 即可。
 
 ### 新增 agent runtime 接入指南
 
@@ -597,8 +610,8 @@ e2e），后按用户决策整体退役——实现与拆除过程见 git 历史
 - **测试**：velites 已交付真二进制 + stub provider 的集成测试（quick lane），
   pi runtime 仍保留其既有测试策略；
 - **压力门禁（未实施）**：并发 RSS/启动延迟基准纳入 stress lane（对照 PoC 基线：单发 RSS
-  <30 MB、冷启动 <50 ms）——截至 2026-08-04，`scripts/stress/` 与 CI stress lane
-  均无 velites 基准，仍为待落地项；
+  <30 MB、冷启动 <50 ms）——`scripts/stress/` 与 CI stress lane 目前均无 velites
+  基准，仍为待落地项；
 - **体积预算**：velites 为 Rust crate，不进 Python 体积预算；CI 新增 rust lane
   （`cargo fmt --check`、`clippy -D warnings`、`cargo test`），按路径裁剪；
 - **安全**：secret 不上命令行（`ps` 可见）这一条保留；凭据走 0600 配置文件 +
@@ -617,7 +630,7 @@ e2e），后按用户决策整体退役——实现与拆除过程见 git 历史
 | M3 可控性 | 预算/取消/输出自检 + 工具体积度量 | 三条 invariant 测试入库 |
 | M4 集成 | flavor 配置、Dockerfile rust stage、CI rust lane、集成测试 full lane | `./scripts/check-quick.sh` + full gate 绿 |
 | M4.5 沙箱 | §5 沙箱小节：Sandbox 抽象、macOS seatbelt 先行、Linux bwrap 在 worker 镜像验证、`EXEC-HARNESS-SANDBOX-001` | 沙箱集成测试入库（quick lane）；逃逸尝试全部被拒 |
-| M5 灰度 | shadow → 金丝雀 → 默认 | 生产 64 并发下 RSS/CPU 对比报告 |
+| M5 灰度 | shadow → 金丝雀 → 默认 | 生产高并发形态下 RSS/CPU 对比报告 |
 
 ## 12. 风险与开放问题
 
