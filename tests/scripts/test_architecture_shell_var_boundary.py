@@ -80,6 +80,10 @@ def test_safe_forms_are_not_flagged(line: str) -> None:
         "echo a # 行尾注释 $VAR，",
         "x=$(( 1 << 2 ))\necho ok $X\n",  # arithmetic shift, not a heredoc
         'grep -q x <<<"$S"\necho "ok"',  # here-string is not a heredoc
+        # Shifts by a variable inside arithmetic are not heredocs (#1060 review).
+        "x=$((1 << SHIFT))\necho '$X，'\n",
+        "((x << shift))\necho '$X，'\n",
+        "((16#ff))\necho '$X，'\n",  # base prefix, not a comment
     ],
 )
 def test_non_expanding_contexts_are_not_flagged(content: str) -> None:
@@ -110,6 +114,10 @@ def test_non_expanding_contexts_are_not_flagged(content: str) -> None:
         ('echo "a\nb"# "$X，"\n', 2),
         ("echo $'a\nb'# \"$X，\"\n", 2),
         ("x=$(echo 'a\nb'# \"$X，\"\n)\n", 2),
+        # A # right after $(…) / $((…)) still belongs to the word (#1060 review).
+        ('echo $(printf foo)# "$X，"\n', 1),
+        ('echo $((1 << S))# "$X，"\n', 1),
+        ('echo "$((1 << S))" "$Y，"\n', 1),
     ],
 )
 def test_expanding_multiline_contexts_are_flagged(content: str, lineno: int) -> None:

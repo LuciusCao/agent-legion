@@ -13,7 +13,8 @@ This module tracks just enough lexical state to tell those apart — unquoted
 / single-quoted / ``$'…'`` / double-quoted context, backslash escapes,
 word-start ``#`` comments and heredocs (quoted delimiter → literal body,
 unquoted → expanding body with ``\\$`` escapes). It is deliberately not a
-parser: ``$(…)`` opens its own unquoted frame, while backticks and
+parser: ``$(…)`` opens its own unquoted frame and ``$((…))`` / ``((…))``
+an arithmetic one (no comments, ``<<`` is a shift), while backticks and
 ``${…}`` contents are lexed in the enclosing context, which errs towards
 reporting (every one of those contexts expands). ``$$`` is the PID parameter, never a ``$NAME`` prefix.
 
@@ -130,7 +131,7 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
     i = 0
     lineno = first_lineno
     # Frames: (kind, open_parens, opened_lineno); kind is plain | subst |
-    # single | ansi | double. ``word_start``: an unquoted ``#`` here opens a
+    # arith | single | ansi | double. ``word_start``: an unquoted ``#`` here opens a
     # comment (lexical state, not the previous raw byte: ``foo\ #`` is one word).
     stack: list[tuple[str, int, int]] = [("plain", 0, lineno)]
     pending: list[tuple[bytes, bool, bool]] = []
@@ -138,7 +139,7 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
     while i < n:
         byte = content[i]
         state, depth, opened = stack[-1]
-        unquoted = state in ("plain", "subst")
+        unquoted = state in ("plain", "subst", "arith")
         if byte == ord("\n"):
             i += 1
             lineno += 1
@@ -182,9 +183,10 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
                 i += 2
                 continue
             if following == ord("("):
-                stack.append(("subst", 0, lineno))
+                arith = content.startswith(b"((", i + 1)
+                stack.append(("arith" if arith else "subst", 0, lineno))
                 word_start = True
-                i += 2
+                i += 3 if arith else 2
                 continue
             yield lineno, i
             i += 1
@@ -200,13 +202,21 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
             stack.append(("single", 0, lineno))
         elif byte == ord('"'):
             stack.append(("double", 0, lineno))
-        elif byte == ord("(") and state == "subst":
+        elif byte == ord("(") and previous_word_start and content.startswith(b"((", i):
+            stack.append(("arith", 0, lineno))  # ``(( … ))`` arithmetic command
+            i += 2
+            continue
+        elif byte == ord("(") and state != "plain":
             stack[-1] = (state, depth + 1, opened)
-        elif byte == ord(")") and state == "subst":
+        elif byte == ord(")") and state != "plain":
             if depth:
                 stack[-1] = (state, depth - 1, opened)
             else:
                 stack.pop()
+                word_start = False  # ``$(…)#``: the substitution continues the word
+                i += state == "arith"  # arithmetic closes with ``))``
+        elif state == "arith":
+            pass  # ``<<`` is a shift and ``#`` a base prefix (``16#ff``), never syntax
         elif byte == ord("#") and previous_word_start:
             end = content.find(b"\n", i)
             i = n if end < 0 else end
@@ -217,7 +227,7 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
             continue
         elif content.startswith(b"<<", i):
             delimiter, quoted, strip_tabs, i = _read_heredoc_delimiter(content, i + 2)
-            # ``(( x << 2 ))`` is an arithmetic shift, not a heredoc.
+            # ``let x<<2``-style digit operands outside a tracked ``((…))``.
             if delimiter and not delimiter.isdigit():
                 pending.append((delimiter, quoted, strip_tabs))
             continue
