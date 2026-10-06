@@ -72,3 +72,60 @@ def test_quality_replay_rejects_self_contained_nodes_with_the_unsupported_reason
         service._resolve_agent_pin(None, "ws", "ws", definition.nodes["draft"], None)
 
     assert "no workspace route" not in str(raised.value)
+
+
+def _job(job_db, workspace_id: str, definition, job_id_source: str) -> dict:
+    snapshot = serialize_definition(definition)
+    return job_db.create_job(
+        workflow_key=workspace_id,
+        source_type="question",
+        source_id=job_id_source,
+        run_id="",
+        title=job_id_source,
+        node_keys=list(definition.executable_nodes),
+        workspace_id=workspace_id,
+        workflow_definition_hash=definition_hash(snapshot),
+        workflow_definition_snapshot_json=snapshot,
+    )
+
+
+def _add_route(job_db, workspace_id: str, node_key: str, agent_id: str) -> None:
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
+            " values (%s, %s, 'agent', %s)",
+            (workspace_id, node_key, agent_id),
+        )
+
+
+def test_frozen_node_type_wins_over_routes_added_later(job_db, settings) -> None:
+    """PR #1085 codex R1: routes are current state. A job frozen with
+    ``fetch`` as code stays code after a later revision routes ``fetch`` to
+    an Agent; a frozen self-contained node keeps its node-key identity after
+    a route for the same node key appears."""
+    workspace = job_db.create_workspace("Frozen wins", workspace_id="sc_frozen")
+    definition = workflow_definition_from_mapping({"key": workspace["id"], **_DEFINITION})
+    job = _job(job_db, workspace["id"], definition, "Q1")
+    _add_route(job_db, workspace["id"], "fetch", "fetch-agent")
+    _add_route(job_db, workspace["id"], "draft", "draft-agent")
+    service = JobQueryService(job_db, settings, WorkspaceExecutionConfigurationService(job_db))
+
+    nodes = {node["node_key"]: node for node in service.detail(job["id"])["nodes"]}
+
+    assert nodes["fetch"]["executor_kind"] == "code"
+    assert nodes["fetch"]["agent_id"] is None
+    assert nodes["draft"]["executor_kind"] is None
+    assert nodes["draft"]["agent_id"] == "draft"
+
+
+def test_frozen_legacy_agent_node_still_reads_its_route(job_db, settings) -> None:
+    workspace = job_db.create_workspace("Legacy agent", workspace_id="sc_legacy")
+    raw = {"key": workspace["id"], **_DEFINITION, "execution": {"provider": "p", "model": "m"}}
+    job = _job(job_db, workspace["id"], workflow_definition_from_mapping(raw), "Q1")
+    _add_route(job_db, workspace["id"], "draft", "draft-agent")
+    service = JobQueryService(job_db, settings, WorkspaceExecutionConfigurationService(job_db))
+
+    nodes = {node["node_key"]: node for node in service.detail(job["id"])["nodes"]}
+
+    assert nodes["draft"]["executor_kind"] is None
+    assert nodes["draft"]["agent_id"] == "draft-agent"

@@ -165,7 +165,9 @@ class JobQueryService:
 
     def detail(self, job_id: str) -> dict[str, Any]:
         job = self._job_or_404(job_id)
-        definition = self._definition_for_job(job)
+        # Executor projection trusts only the job's own frozen snapshot.
+        frozen = definition_from_job_snapshot(job)
+        definition = frozen or self._definition_for_job(job)
         nodes = self.job_db.list_job_nodes(job_id)
         nodes_with_definition = job_nodes_with_definition(nodes, definition)
         worker_map = claimed_worker_map(self.job_db, job_id)
@@ -179,7 +181,7 @@ class JobQueryService:
             node["hydration_defer"] = node_defer_view(
                 defers.get(node["node_key"]), str(node["status"])
             )
-            node.update(node_executor_projection(definition, node, agent_map, worker_map))
+            node.update(node_executor_projection(frozen, node, agent_map, worker_map))
         return {
             "job": self._job_summary(job, nodes, definition),
             "nodes": nodes_with_definition,
