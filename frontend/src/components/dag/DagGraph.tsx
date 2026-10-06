@@ -155,7 +155,7 @@ export function DagGraph({
     [isControlled, onSelectedNodeChange]
   )
   // #667：记录「选中来自画布点击」的来源标记（DagSelectionViewport 消费）。
-  const clickOriginRef = useRef<string | null>(null)
+  const clickOriginRef = useRef<{ key: string; nonce?: number } | null>(null)
 
   useEffect(() => {
     setRfNodes(initialNodes)
@@ -170,12 +170,14 @@ export function DagGraph({
       // 变，focusedRef 去重会让 DagSelectionViewport 提前返回、标记不被
       // 消费而残留；之后 nonce 驱动的外部重定位请求会被误判为画布点击
       // 而吞掉镜头。只在选中确实会翻转时标记。
+      // #964：标记带上点击时的定位请求 nonce，外部请求 bump nonce 后不再
+      // 被误判为画布点击。
       if (node.id !== selectedNode) {
-        clickOriginRef.current = node.id
+        clickOriginRef.current = { key: node.id, nonce: selectionNonce }
       }
       setSelectedNode(node.id)
     },
-    [setSelectedNode, selectedNode]
+    [setSelectedNode, selectedNode, selectionNonce]
   )
 
   const onPaneClick = useCallback(() => {

@@ -8,6 +8,7 @@ import {
   Button,
 } from '@mui/material'
 import { toErrorMessage } from '../../lib/queryError'
+import { formatNumber } from '../../lib/formatters'
 import { MaterialIcon } from '../MaterialIcon'
 import {
   useWorkspaceTokenUsage,
@@ -23,10 +24,6 @@ const GROUPS: { key: GroupBy; label: string }[] = [
   { key: 'skill_version', label: '按技能版本' },
   { key: 'node_skill_version', label: '节点 + 技能版本' },
 ]
-
-function fmt(value: number | null | undefined) {
-  return typeof value === 'number' ? value.toLocaleString('zh-CN') : '-'
-}
 
 function money(currency: string, value: number | null | undefined) {
   if (typeof value !== 'number') return '-'
@@ -166,12 +163,12 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
             className={styles.metricValue}
             data-testid="total-tokens-summary"
           >
-            {fmt(summary?.total_tokens)}
+            {formatNumber(summary?.total_tokens)}
           </div>
           <div className={styles.metricMeta}>
-            输入 {fmt(summary?.input_tokens)} / 输出{' '}
-            {fmt(summary?.output_tokens)} / 缓存{' '}
-            {fmt(summary?.cache_read_tokens)}
+            输入 {formatNumber(summary?.input_tokens)} / 输出{' '}
+            {formatNumber(summary?.output_tokens)} / 缓存{' '}
+            {formatNumber(summary?.cache_read_tokens)}
           </div>
         </div>
         <div className={styles.metric}>
@@ -187,7 +184,9 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
         </div>
         <div className={styles.metric}>
           <div className={styles.metricLabel}>平均每 run</div>
-          <div className={styles.metricValue}>{fmt(avgTokensPerRun)}</div>
+          <div className={styles.metricValue}>
+            {formatNumber(avgTokensPerRun)}
+          </div>
           <div className={styles.metricMeta}>
             仅统计有 usage 的 {data?.runs_with_usage ?? 0} 次 run
           </div>
@@ -344,10 +343,12 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
                       </div>
                     </td>
                     <td>{group.runs}</td>
-                    <td>{fmt(Math.round(group.avg_input_tokens))}</td>
-                    <td>{fmt(Math.round(group.avg_output_tokens))}</td>
-                    <td>{fmt(Math.round(group.avg_cache_read_tokens))}</td>
-                    <td>{fmt(group.total_tokens)}</td>
+                    <td>{formatNumber(Math.round(group.avg_input_tokens))}</td>
+                    <td>{formatNumber(Math.round(group.avg_output_tokens))}</td>
+                    <td>
+                      {formatNumber(Math.round(group.avg_cache_read_tokens))}
+                    </td>
+                    <td>{formatNumber(group.total_tokens)}</td>
                     <td className={styles.money}>
                       {money(data?.currency ?? 'CNY', group.total_cost)}
                     </td>
@@ -394,7 +395,9 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
                                     }}
                                   />
                                 </div>
-                                <span>{fmt(group.total_input_tokens)}</span>
+                                <span>
+                                  {formatNumber(group.total_input_tokens)}
+                                </span>
                               </div>
                               <div className={styles.breakdownRow}>
                                 <span>Output</span>
@@ -407,7 +410,9 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
                                     }}
                                   />
                                 </div>
-                                <span>{fmt(group.total_output_tokens)}</span>
+                                <span>
+                                  {formatNumber(group.total_output_tokens)}
+                                </span>
                               </div>
                               <div className={styles.breakdownRow}>
                                 <span>Cache</span>
@@ -421,7 +426,7 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
                                   />
                                 </div>
                                 <span>
-                                  {fmt(group.total_cache_read_tokens)}
+                                  {formatNumber(group.total_cache_read_tokens)}
                                 </span>
                               </div>
                             </div>

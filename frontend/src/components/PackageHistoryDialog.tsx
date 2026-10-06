@@ -14,6 +14,7 @@ import {
   updateWorkspacePackage,
 } from '../api'
 import { triggerDownload } from '../lib/download'
+import { formatBytes, formatRelativeTime } from '../lib/formatters'
 import { useUiStore } from '../stores/uiStore'
 import type { WorkspacePackageItem } from '../types/packageTypes'
 import { MaterialIcon } from './MaterialIcon'
@@ -23,28 +24,6 @@ interface Props {
   open: boolean
   onClose: () => void
   workspaceId: string
-}
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
-}
-
-function formatRelativeTime(iso: string): string {
-  const date = new Date(iso)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  if (diffMins < 1) return '刚刚'
-  if (diffMins < 60) return `${diffMins}分钟前`
-  const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${diffHours}小时前`
-  const diffDays = Math.floor(diffHours / 24)
-  if (diffDays < 30) return `${diffDays}天前`
-  return date.toLocaleDateString('zh-CN')
 }
 
 export function PackageHistoryDialog({ open, onClose, workspaceId }: Props) {
@@ -175,7 +154,7 @@ export function PackageHistoryDialog({ open, onClose, workspaceId }: Props) {
                       </span>
                       <span className={styles.itemMeta}>
                         {`${pkg.video_count}个任务`} ·{' '}
-                        {formatSize(pkg.size_bytes)} ·{' '}
+                        {formatBytes(pkg.size_bytes)} ·{' '}
                         {formatRelativeTime(pkg.created_at)}
                       </span>
                     </>

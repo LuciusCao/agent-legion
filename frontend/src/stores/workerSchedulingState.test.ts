@@ -26,8 +26,7 @@ describe('workspace scheduling response ordering', () => {
     async (when) => {
       const read = deferred()
       const write = deferred()
-      const commit = vi.fn()
-      const actions = createWorkerStatusActions(commit)
+      const actions = createWorkerStatusActions()
       request.mockImplementation((url) =>
         String(url).includes('/status') ? read.promise : write.promise
       )
@@ -37,33 +36,32 @@ describe('workspace scheduling response ordering', () => {
       await Promise.resolve()
       const pendingRead = oldRead ?? actions.fetchWorkerStatus('a')
       write.resolve({ paused: false })
-      await mutation
+      await expect(mutation).resolves.toBe(false)
       read.resolve({ paused: true })
-      await pendingRead
-      expect(commit.mock.calls).toEqual([['a', false]])
+      await expect(pendingRead).resolves.toEqual({
+        paused: true,
+        superseded: true,
+      })
     }
   )
 
   it('does not let an older GET replace a more recent successful read', async () => {
     const old = deferred()
     const next = deferred()
-    const commit = vi.fn()
-    const actions = createWorkerStatusActions(commit)
+    const actions = createWorkerStatusActions()
     request.mockReturnValueOnce(old.promise).mockReturnValueOnce(next.promise)
     const first = actions.fetchWorkerStatus('a')
     const second = actions.fetchWorkerStatus('a')
     next.resolve({ paused: false })
-    await second
+    await expect(second).resolves.toEqual({ paused: false, superseded: false })
     old.resolve({ paused: true })
-    await first
-    expect(commit.mock.calls).toEqual([['a', false]])
+    await expect(first).resolves.toEqual({ paused: true, superseded: true })
   })
 
   it('recovers with a fresh GET and retry after mutation failure', async () => {
     const write = deferred()
     const read = deferred()
-    const commit = vi.fn()
-    const actions = createWorkerStatusActions(commit)
+    const actions = createWorkerStatusActions()
     request.mockImplementation((url) =>
       String(url).includes('/status') ? read.promise : write.promise
     )
@@ -74,38 +72,40 @@ describe('workspace scheduling response ordering', () => {
     write.reject(new Error('offline'))
     await failed
     read.resolve({ paused: false })
-    await pendingRead
-    expect(commit).not.toHaveBeenCalled()
+    await expect(pendingRead).resolves.toMatchObject({ superseded: true })
     request.mockResolvedValue({ paused: true })
-    await actions.fetchWorkerStatus('a')
-    expect(commit).toHaveBeenLastCalledWith('a', true)
+    await expect(actions.fetchWorkerStatus('a')).resolves.toEqual({
+      paused: true,
+      superseded: false,
+    })
     request.mockResolvedValue({ paused: false })
-    await actions.setWorkerPaused(false, 'a')
-    expect(commit).toHaveBeenLastCalledWith('a', false)
+    await expect(actions.setWorkerPaused(false, 'a')).resolves.toBe(false)
   })
 
   it('serializes same-workspace writes without blocking other workspaces', async () => {
     const first = deferred()
-    const commit = vi.fn()
-    const actions = createWorkerStatusActions(commit)
+    const actions = createWorkerStatusActions()
     request.mockImplementation((url) => {
       if (String(url).includes('/pause?workspace_id=a')) return first.promise
       return Promise.resolve({ paused: false })
     })
-    const pause = actions.setWorkerPaused(true, 'a')
-    const resume = actions.setWorkerPaused(false, 'a')
-    await actions.setWorkerPaused(false, 'b')
+    const order: string[] = []
+    const pause = actions
+      .setWorkerPaused(true, 'a')
+      .then((value) => order.push(`a:${value}`))
+    const resume = actions
+      .setWorkerPaused(false, 'a')
+      .then((value) => order.push(`a:${value}`))
+    await actions
+      .setWorkerPaused(false, 'b')
+      .then((value) => order.push(`b:${value}`))
     expect(request.mock.calls.map(([url]) => url)).not.toContain(
       '/api/worker/resume?workspace_id=a'
     )
-    expect(commit.mock.calls).toEqual([['b', false]])
+    expect(order).toEqual(['b:false'])
     first.resolve({ paused: true })
     await Promise.all([pause, resume])
-    expect(commit.mock.calls).toEqual([
-      ['b', false],
-      ['a', true],
-      ['a', false],
-    ])
+    expect(order).toEqual(['b:false', 'a:true', 'a:false'])
     expect(request.mock.calls.map(([url]) => url)).toContain(
       '/api/worker/resume?workspace_id=a'
     )
@@ -117,14 +117,19 @@ describe('workspace scheduling response ordering', () => {
       const first = deferred()
       const second = deferred()
       let paused = true
-      const actions = createWorkerStatusActions((_workspaceId, value) => {
-        paused = value
-      })
+      const actions = createWorkerStatusActions()
       request
         .mockReturnValueOnce(first.promise)
         .mockReturnValueOnce(second.promise)
+      // 调用方（useWorkerScheduling）把每个成功结果写回缓存：这里用局部
+      // 变量模拟缓存写回。
+      const commit = (value: boolean) => {
+        paused = value
+      }
       const resume = actions.setWorkerPaused(false, 'a')
       const pause = actions.setWorkerPaused(true, 'a')
+      void resume.then(commit, () => {})
+      void pause.then(commit, () => {})
       const failed = expect(firstFails ? resume : pause).rejects.toThrow(
         'offline'
       )
