@@ -23,8 +23,13 @@ spendable while no announced or bound grant is in flight, so a main-agent
 call cannot swap its approved command by borrowing a subagent's grant; and
 since a terminal is not attributable to a call, a bound grant taken by
 command match revokes the unbound grants in flight (a subagent running the
-bound command first must not leave the bound call an unbound grant). A
-command-less approval of a kind that never spawns a terminal mints none.
+bound command first must not leave the bound call an unbound grant).
+Residual boundary (inherent to unannounced subagent calls, pre-#954): an
+unbound grant is one terminal of any command — while every grant in flight
+is unbound (including subagent grants approved after a bound grant was
+consumed or expired) the oldest is spendable by any terminal; the invariant
+kept is approvals >= terminals. A command-less approval of a kind that
+never spawns a terminal mints none.
 """
 
 from __future__ import annotations
