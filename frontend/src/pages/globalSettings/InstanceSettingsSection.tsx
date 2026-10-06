@@ -29,6 +29,7 @@ function errorMessage(error: unknown): string {
 const RETENTION_TITLES = new Set(
   [...RETENTION_FIELD_GROUPS, ...SECURITY_FIELD_GROUPS].map((g) => g.title)
 )
+const CSP_COMPAT_PATH = 'csp_script_unsafe_inline'
 const VISIBLE_GROUPS = FIELD_GROUPS.filter((g) => RETENTION_TITLES.has(g.title))
 const ADVANCED_GROUPS = FIELD_GROUPS.filter(
   (g) => !RETENTION_TITLES.has(g.title)
@@ -58,12 +59,20 @@ function InstanceSettingsEditor({
     setError('')
     setSaving(true)
     try {
+      const savedCsp = (JSON.parse(baseline) as FormValues)[CSP_COMPAT_PATH]
       const result = await updateInstanceSettings(buildPayload(values))
       const next = toFormValues(result)
       setValues(next)
       setBaseline(JSON.stringify(next))
       // 同步 query cache：保存后 30s 内重进页面不得回显旧值（staleTime 窗口）。
       queryClient.setQueryData(extraQueryKeys.instanceSettings(), result)
+      // #989：CSP 响应头随当前 index.html 文档固定，客户端路由不会重读；
+      // 兼容模式真正变化时重载顶层文档，让本会话立即拿到新策略。其余字段
+      // 变化不重载。
+      if (Boolean(next[CSP_COMPAT_PATH]) !== Boolean(savedCsp)) {
+        window.location.reload()
+        return
+      }
       useUiStore
         .getState()
         .showToast(

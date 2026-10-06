@@ -50,6 +50,17 @@ const settings: InstanceSettingsResponse = {
 const updateBase: Record<string, unknown> = { ...settings }
 delete updateBase.skills_root
 
+/** jsdom 的 window.location.reload 不可 spyOn，用可配置属性替换整个 location。 */
+function mockLocationReload(): ReturnType<typeof vi.fn> {
+  const reload = vi.fn()
+  Object.defineProperty(globalThis, 'location', {
+    value: { ...globalThis.location, reload },
+    configurable: true,
+    writable: true,
+  })
+  return reload
+}
+
 function renderSection() {
   return render(
     <MemoryRouter>
@@ -162,6 +173,7 @@ describe('InstanceSettingsSection', () => {
   })
 
   it('saves edited values via PUT with integer rounding', async () => {
+    const reload = mockLocationReload()
     vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
       ...settings,
       ...payload,
@@ -202,10 +214,12 @@ describe('InstanceSettingsSection', () => {
     // Baseline updated: the form is clean again after a successful save.
     await waitFor(() => {
       expect(screen.getByText('保存实例设置')).toBeDisabled()
-    })
+    }) // 非 CSP 字段变化不重载文档。
+    expect(reload).not.toHaveBeenCalled()
   })
 
   it('toggles the preview panel CSP compatibility mode online (#989)', async () => {
+    const reload = mockLocationReload()
     vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
       ...settings,
       ...payload,
@@ -217,6 +231,9 @@ describe('InstanceSettingsSection', () => {
       await screen.findByLabelText('预览面板兼容模式（允许内联事件属性）')
     expect(toggle).not.toBeChecked()
     expect(screen.getByText(/会降低平台页面的脚本防护/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/保存后页面将自动刷新以应用新的安全策略/)
+    ).toBeInTheDocument()
     fireEvent.click(toggle)
     fireEvent.click(screen.getByText('保存实例设置'))
 
@@ -226,6 +243,54 @@ describe('InstanceSettingsSection', () => {
         csp_script_unsafe_inline: true,
       })
     })
+    // CSP 头随当前文档固定：开关真正变化时重载顶层文档（codex P1）。
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1))
+  })
+
+  it('does not reload when the CSP switch is toggled back before saving (#989)', async () => {
+    const reload = mockLocationReload()
+    vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
+      ...settings,
+      ...payload,
+    }))
+
+    renderSection()
+    const toggle =
+      await screen.findByLabelText('预览面板兼容模式（允许内联事件属性）')
+    // 改开再改回 + 改一个别的字段：保存成功，但开关值未变 → 不重载。
+    fireEvent.click(toggle)
+    fireEvent.click(toggle)
+    fireEvent.change(screen.getByLabelText('材料保留天数（0 关闭）'), {
+      target: { value: '5' },
+    })
+    fireEvent.click(screen.getByText('保存实例设置'))
+
+    await waitFor(() => {
+      expect(updateInstanceSettings).toHaveBeenCalledWith({
+        ...updateBase,
+        materials_ttl_days: 5,
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByText('保存实例设置')).toBeDisabled()
+    })
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('does not reload when the CSP switch save fails (#989)', async () => {
+    const reload = mockLocationReload()
+    vi.mocked(updateInstanceSettings).mockRejectedValue(
+      new Error('HTTP 500: boom')
+    )
+
+    renderSection()
+    fireEvent.click(
+      await screen.findByLabelText('预览面板兼容模式（允许内联事件属性）')
+    )
+    fireEvent.click(screen.getByText('保存实例设置'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 500: boom')
+    expect(reload).not.toHaveBeenCalled()
   })
 
   it('edits the Studio chat retention window online (#1041)', async () => {
