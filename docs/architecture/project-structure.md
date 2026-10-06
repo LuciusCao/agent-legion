@@ -97,4 +97,5 @@ agent-legion/
   `scripts/check_architecture.py` 与 `scripts/check_invariants.py` 在质量门执行。
 - `frontend/src/generated/api.ts` 由后端 OpenAPI 生成，禁止手写传输类型。
 - `data/` 与 `deploy/secrets/` 已 gitignore，禁止提交运行时数据或密钥。
-- 多 worktree 开发时每个 worktree 使用独立端口、`data/` 目录与派生数据库（见 AGENTS.md §1）。
+- 开发端口是固定默认值（8001 / 5174 / 8789），多 worktree 并行时用 `DEV_BACKEND_PORT` / `DEV_FRONTEND_PORT` /
+  `AGENT_WORKER_UI_PORT` 覆盖；数据库与 bucket 由 `scripts/init-worktree.sh` 按 worktree 名派生，`data/` 随 worktree 目录天然隔离（见 AGENTS.md §1）。

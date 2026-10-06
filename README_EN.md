@@ -50,7 +50,7 @@ repeatable, auditable production process.
 ### Prerequisites
 
 - macOS with Homebrew: `make install` auto-detects and installs missing
-  prerequisites (Python 3.11+, Node 20+, PostgreSQL 17,
+  prerequisites (Python 3.11+, Node 20.19+ / 22.13+ (22 recommended), PostgreSQL 17,
   [`uv`](https://docs.astral.sh/uv/), a Rust toolchain, Docker). On other
   platforms install those manually first; `make install` still checks each
   one and prints guidance.
@@ -68,6 +68,12 @@ make install    # install prerequisites, uv sync, create the agent_legion_dev
                 # install frontend deps, seed the worker config — idempotent,
                 # safe to re-run
 ```
+
+The vault master key lands in `deploy/secrets/vault_master_key`, but the
+native setup (`make dev-up`) reads it only from env: set
+`AGENT_LEGION_VAULT_MASTER_KEY_FILE=<absolute path to that file>` in `.env`,
+otherwise saving secrets or external-service connections fails (automatic
+wiring tracked in #1100; steps in [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 The development database uses the derived name `agent_legion_dev`, never the
 bare `agent_legion`: the bare name is the shared/prod database, and

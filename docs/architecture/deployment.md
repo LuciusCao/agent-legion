@@ -25,7 +25,8 @@
   运行时 split yaml 已全部退役，详见 [backend.md「Configuration Reference」](backend.md#configuration-reference)。
   Worker 唯一生效配置是状态副本 `data/agent-worker-service/worker.yaml`（控制台 / API 驱动），
   docker / 远程部署的可选 bootstrap 模板见 `deploy/worker.*.example.yaml`。
-- 多 worktree 开发时每个 worktree 用独立端口与 `data/`，`scripts/init-worktree.sh` 按 worktree
+- 开发端口是固定默认值，多 worktree 并行时用 `DEV_BACKEND_PORT` / `DEV_FRONTEND_PORT` /
+  `AGENT_WORKER_UI_PORT` 覆盖（`make dev-up` 透传）；`scripts/init-worktree.sh` 按 worktree
   名派生专属 Postgres 库与 S3 bucket。
 
 ## Worker 容器特权边界

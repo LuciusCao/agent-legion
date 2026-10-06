@@ -4,7 +4,7 @@
 # git worktree 场景的初始化走 scripts/init-worktree.sh（从基准 worktree
 # 复制 .env、按 worktree 名派生专属库/bucket），两者分工不同：本脚本不
 # 依赖任何既有 worktree，也不会派生隔离库。
-#   1. 检测前置工具：uv、Python 3.11+、Node 20+、PostgreSQL（psql/createdb）、
+#   1. 检测前置工具：uv、Python 3.11+、Node 20.19+ / 22.13+（eslint / vitest 引擎要求，排除 21 / 23）、PostgreSQL（psql/createdb）、
 #      cargo、docker、openssl（随机凭据生成）——macOS 缺失项用 brew 补装
 #      （先检测后装），其他平台打印安装指引后 fail-fast；Intel Mac 另确保
 #      Homebrew openssl@3 并导出 OPENSSL_DIR（cryptography 源码构建，#1089）
@@ -55,14 +55,14 @@ python_ok() {
 }
 
 node_ok() {
-    have node && node -e 'process.exit(parseInt(process.version.slice(1)) >= 20 ? 0 : 1)' 2>/dev/null
+    have node && node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit((a === 20 && b >= 19) || (a === 22 && b >= 13) || a >= 24 ? 0 : 1)' 2>/dev/null
 }
 
 if ! $IS_MACOS; then
     MISSING=()
     have uv || MISSING+=("uv: https://docs.astral.sh/uv/getting-started/installation/")
     python_ok || MISSING+=("Python 3.11+: https://www.python.org/downloads/")
-    node_ok || MISSING+=("Node 20+: https://nodejs.org/")
+    node_ok || MISSING+=("Node 20.19+ 或 22.13+（推荐 22 LTS）: https://nodejs.org/")
     { have psql && have createdb; } || MISSING+=("PostgreSQL 17: https://www.postgresql.org/download/")
     have cargo || MISSING+=("Rust 工具链: https://rustup.rs/")
     have docker || MISSING+=("Docker: https://docs.docker.com/get-docker/")
@@ -86,7 +86,7 @@ else
     # 实际 venv 由 uv 按 .python-version 自管，这行只服务缺 python3 的
     # macOS 全新机器。
     python_ok || brew_install "Python 3.13" "python@3.13"
-    node_ok || brew_install "Node 20+" "node"
+    node_ok || brew_install "Node 22+" "node"
     if ! { have psql && have createdb; }; then
         brew_install "PostgreSQL 17" "postgresql@17"
         # postgresql@17 是 keg-only：本进程内直接挂 bin 目录，并提示写入 shell 配置。

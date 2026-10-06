@@ -7,10 +7,12 @@ red lines) — read it before non-trivial changes.
 
 ## Development setup
 
-Prerequisites: Python 3.11+, Node 20+ (Vitest 4 requires it; CI uses 22),
+Prerequisites: Python 3.11+, Node 20.19+ or 22.13+ (22 recommended; ESLint and Vitest engine ranges exclude
+21 and 23; CI uses 22),
 PostgreSQL 17, [`uv`](https://docs.astral.sh/uv/), a Rust toolchain (builds
-the `velites` binary), Docker (local SeaweedFS object storage; optional —
-without it materials APIs return 503), and `openssl`. On macOS with Homebrew
+the `velites` binary), Docker (local SeaweedFS object storage; optional at
+runtime — without it materials APIs return 503 — but required by
+`make install` on non-macOS platforms), and `openssl`. On macOS with Homebrew
 `make install` installs whatever is missing; on other platforms install them
 first — `make install` checks each one and fails fast with guidance.
 
@@ -38,7 +40,10 @@ Only needed when you want to run the steps by hand; they mirror
 `scripts/install-deps.sh`:
 
 ```bash
+# Intel Mac only: cryptography builds from source (#1089)
+export OPENSSL_DIR="$(brew --prefix openssl@3)"   # after `brew install openssl@3 rust`
 uv sync
+# start PostgreSQL first (e.g. `brew services start postgresql@17`), then:
 createdb agent_legion_dev            # NOT the bare `agent_legion` name — init_db
                                      # refuses to migrate it without
                                      # AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1
@@ -105,7 +110,10 @@ documented in
   (re-target the child onto the release branch and re-run CI on its new head
   before merging it). The PR gate only triggers for PRs into trunk and
   `release/*` branches, so dispatch `quality-gate.yml` manually for a PR
-  whose base is a feature branch.
+  whose base is a feature branch. This repository squash-merges: after a
+  parent PR lands, the child's inherited parent commits are no longer
+  ancestors of the release branch, so check the merge-base and diff (and
+  replay only the child's own commits if needed) before re-targeting it.
 
 ## House rules
 

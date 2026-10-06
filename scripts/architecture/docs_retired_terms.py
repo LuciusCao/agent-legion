@@ -42,6 +42,7 @@ _CURRENT_DOCS = (
     "README.md",
     "README_EN.md",
     "AGENTS.md",
+    "CONTRIBUTING.md",
     "docs/README.md",
     "docs/architecture/README.md",
     "docs/architecture/studio-local-authoring-contract.md",

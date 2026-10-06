@@ -41,7 +41,7 @@ Agent Legion 是一个自托管控制台，把 AI agent 变成内容生产线的
 ### 前置要求
 
 - macOS + Homebrew：`make install` 会自动检测并安装缺失的依赖
-  （Python 3.11+、Node 20+、PostgreSQL 17、[`uv`](https://docs.astral.sh/uv/)、
+  （Python 3.11+、Node 20.19+ / 22.13+（推荐 22）、PostgreSQL 17、[`uv`](https://docs.astral.sh/uv/)、
   Rust 工具链、Docker）。其他平台请先手动安装这些依赖，`make install`
   会逐项检测并给出指引。
 - 一个 LLM provider 供 agent 节点使用（任何 OpenAI 兼容端点均可；
@@ -56,6 +56,10 @@ make install    # 装依赖、uv sync、建开发库 agent_legion_dev、生成 .
                 # 对象存储随机凭据）、生成 vault 主密钥、构建 velites、装前端
                 # 依赖、种子 worker 配置——幂等，可重跑
 ```
+
+vault 主密钥写在 `deploy/secrets/vault_master_key`，但原生形态（`make dev-up`）只从
+env 读取：需在 `.env` 设 `AGENT_LEGION_VAULT_MASTER_KEY_FILE=<该文件绝对路径>`，否则保存
+secret / 外部服务连接会失败（自动接线见 #1100，步骤见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
 
 开发库用派生名 `agent_legion_dev` 而非裸名 `agent_legion`：裸名是共享/prod
 库，`init_db` 在没有 `AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1` 时会拒绝迁移它
