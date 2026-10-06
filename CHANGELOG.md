@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 
 - job 详情页区分「排队」与「输入恢复不全卡住」（issue #887，#827 follow-up）：workflow worker 对悬挂清单行（对象缺失 / 内容校验不符 / 压缩对象损坏）连续 defer 达到升级阈值、且没有在途生产者会重写该输入时，`GET /api/jobs/{job_id}` 的节点新增只读字段 `hydration_defer {inputs, reasons, rerun_nodes}`，只出现在受阻的等待中节点上；详情页时间线据此在该节点显示「输入恢复不全，建议重跑 <生产节点>」，悬停给出输入名与原因。状态与 worker 进程内的连续计数同生共死（不落库、无 schema 变更）：输入恢复、行身份变化或 job 离开可运行集即撤下，Host 重启后按阈值轮数重新出现。
-- 新增备份与恢复 runbook `docs/backup-restore-runbook.md`（issue #956，#917 follow-up）：明确实例持久状态的三块（PostgreSQL、实例对象存储、vault 主密钥）各自的备份口径与数据库 / 对象存储时间差的一致性取舍（先 dump 后复制，或冷备份），给出 Docker stack 下 `pg_dump` / `pg_restore`、SeaweedFS 卷级冷备份与 S3 层同步的备份恢复步骤、恢复后核对项（外部服务连接测试验证 key 与库匹配、`scripts/gc-s3-jobs.py` 先 dry-run）与演练频率建议；新增 vault 主密钥丢失 / 泄露处置：单 key Fernet、无轮换或重新加密命令，丢失即全部 `secret_ref` 与外部服务连接凭据解析失败，处置为先找回原 key、确认无法找回后一次性换新 key 并按名称重录全部 secret（外部服务连接、节点 secret 字段、workspace secret API），泄露时还须在上游轮换凭据。docs/postgresql-runbook.md 与 docs/README.md 互链，现行文档白名单同步登记。
+- 新增备份与恢复 runbook `docs/backup-restore-runbook.md`（issue #956，#917 follow-up）：明确实例持久状态（PostgreSQL、实例对象存储、vault 主密钥、skill root 本地 Git 仓，以及视实例情况仅存于本地的 legacy 产物）各自的备份口径与数据库 / 对象存储时间差的一致性取舍（先 dump 后复制，或冷备份），给出 Docker stack 下 `pg_dump` / `pg_restore`、SeaweedFS 卷级冷备份与 S3 层同步的备份恢复步骤、恢复后核对项（外部服务连接测试验证 key 与库匹配、`scripts/gc-s3-jobs.py` 先 dry-run、`skill_lock` 锁定 commit 逐个 `git cat-file -e`）与演练频率建议；新增 vault 主密钥丢失 / 泄露处置：单 key Fernet、无轮换或重新加密命令，丢失即全部 `secret_ref` 与外部服务连接凭据解析失败，处置为先找回原 key、确认无法找回后一次性换新 key 并按名称重录全部 secret（外部服务连接、节点 secret 字段、workspace secret API），泄露时还须在上游轮换凭据。docs/postgresql-runbook.md 与 docs/README.md 互链，现行文档白名单同步登记。
 
 ### Changed
 

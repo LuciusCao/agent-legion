@@ -1,12 +1,13 @@
-# 备份与恢复 runbook（PostgreSQL / 实例对象存储 / vault 主密钥）
+# 备份与恢复 runbook（PostgreSQL / 实例对象存储 / vault 主密钥 / skill 仓库）
 
-一个 Agent Legion 实例的持久状态分三块，缺任何一块都不能完整恢复：
+一个 Agent Legion 实例的持久状态分以下几块，缺任何一块都不能完整恢复：
 
 | 状态 | 位置（Docker stack，`deploy/compose.host.yaml`） | 内容 |
 |---|---|---|
 | PostgreSQL | 命名卷 `postgres-data`（服务 `postgres`，库 / 角色均为 `agent_legion`） | 全部业务与执行态：workspace、workflow revision、jobs / node_runs、`materials` 与 `job_artifacts` 清单行、vault 密文（`workspace_secrets` / `instance_secrets` / `connection_tokens`） |
 | 实例对象存储 | 默认 SeaweedFS 命名卷 `seaweedfs-data`（rustfs 逃生舱为 `rustfs-data`；外部 S3 则在对方服务里） | 材料对象（bucket 根）与产物权威副本（`jobs/` 前缀），清单行只存 key |
 | vault 主密钥 | `deploy/secrets/vault_master_key`（compose secret，以 `AGENT_LEGION_VAULT_MASTER_KEY_FILE` 注入 Host） | 解开上述全部 vault 密文的唯一 Fernet key，**不在数据库里** |
+| skill 仓库 | 宿主机目录 `${AGENT_SKILLS_DIR:-../skills}`（bind mount 到 Host 容器 `/root/.agents/skills`，不在任何命名卷里） | 各 skill 的本地 in-place Git 仓（含 `.git` 历史）与 workspace 的 `_shared` 材料；DB 的 `skill_lock` 只记录 commit，内容无法从 DB 或对象存储重建 |
 
 原生形态（`make prod-up`）下 PostgreSQL 是 `AGENT_LEGION_DATABASE_URL` 指向的
 本机实例，vault 主密钥来自根 `.env` 中的 `AGENT_LEGION_VAULT_MASTER_KEY` /
@@ -32,6 +33,14 @@
   `deploy/secrets/vault_master_key`（`server/app/services/vault.py` 的
   `resolve_master_key`），备份的是该变量的值或它指向的文件。**与数据库备份分开存放**（例如单独的密钥保管处）：dump +
   key 放在一起，等于把全部 secret 明文交给拿到备份的人；但两者都必须可恢复。
+- **skill root**（整个目录，含每个 skill 仓的 `.git` 历史与 workspace 下的
+  `_shared`）：skill 只以 skill root 下的本地 in-place Git 仓存在（无注册表、无
+  远程 clone 通道），仓缺失即 dispatch 报错；DB `skill_lock` 冻结的是 commit
+  sha，pinned ref 的执行要求该 commit 仍在仓里，只备份工作树不够。位置：原生
+  形态为 `~/.agents/skills`（`server/app/skills/skill_roots.py`）；Docker stack 为
+  `AGENT_SKILLS_DIR` 解析出的宿主机目录，同样让 compose 解析：
+  `docker compose "${F[@]}" config | grep -B3 'target: /root/.agents/skills'` 输出的
+  `source:`（`F` 见下文 key 文件一段）。下文记作 `SKILLS`，备份命令见 §2.2.2。
 - **部署凭据**：`deploy/secrets/postgres_password`、`deploy/secrets/postgres_pgpass`
   与 `deploy/.env`（S3 凭据等）。丢了可以重新生成，但要同步改 PostgreSQL 角色
   密码与对象存储 root 凭据，有备份更省事。
@@ -131,7 +140,7 @@ OUT="$BK/agent_legion-$(date +%Y%m%d%H%M%S).dump"
 TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
   && C pg_dump -U agent_legion -d agent_legion -Fc > "$TMP" \
   && [ ! -e "$OUT" ] && mv "$TMP" "$OUT" && echo "备份完成：$OUT" \
-  || echo "未完成：检查临时文件 $TMP（pg_dump 失败，或目标 $OUT 已存在）"
+  || { echo "未完成：检查临时文件 $TMP（pg_dump 失败，或目标 $OUT 已存在）" >&2; false; }
 ```
 
 原生形态用本机 PostgreSQL 17 客户端，同样先写临时文件：把上面的
@@ -158,7 +167,7 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
     busybox sh -c "tar czf /backup/.seaweedfs-data-$TS.partial -C /data . \
       && [ ! -e /backup/seaweedfs-data-$TS.tar.gz ] \
       && mv /backup/.seaweedfs-data-$TS.partial /backup/seaweedfs-data-$TS.tar.gz \
-      || echo '未完成：检查 <备份目录>/.seaweedfs-data-'$TS'.partial（tar 失败或目标已存在）'"
+      || { echo '未完成：检查 <备份目录>/.seaweedfs-data-'$TS'.partial（tar 失败或目标已存在）' >&2; false; }"
   docker compose -f deploy/compose.host.yaml --profile materials-local up -d seaweedfs
   ```
 
@@ -177,11 +186,29 @@ docker run --rm -v agent-legion_host-data:/src:ro -v <备份目录>:/backup \
   busybox sh -c "cd /src && tar czf /backup/.host-data-$TS.partial artifacts jobs \
     && [ ! -e /backup/host-data-$TS.tar.gz ] \
     && mv /backup/.host-data-$TS.partial /backup/host-data-$TS.tar.gz \
-    || echo '未完成：检查 <备份目录>/.host-data-'$TS'.partial（tar 失败或目标已存在）'"
+    || { echo '未完成：检查 <备份目录>/.host-data-'$TS'.partial（tar 失败或目标已存在）' >&2; false; }"
 ```
 
 热备份时这两处可能有正在写入的文件，强一致按 §1.5 先停 Host 与 Worker。原生
 形态直接打包数据根下的 `artifacts/` 与 `jobs/`。某个目录不存在（例如从未写过 legacy CAS）时从命令里去掉它。
+
+### 2.2.2 skill root 备份
+
+在宿主机上直接打包 `SKILLS`（§1.1；Docker 的挂载是宿主机目录，不需要进容器），
+同样先写临时文件、成功后再改名：
+
+```bash
+SKILLS=<§1.1 解析出的 skill root>
+BK=<备份目录>
+OUT="$BK/skills-$(date +%Y%m%d%H%M%S).tar.gz"
+TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
+  && tar czf "$TMP" -C "$SKILLS" . \
+  && [ ! -e "$OUT" ] && mv "$TMP" "$OUT" && echo "备份完成：$OUT" \
+  || { echo "未完成：检查临时文件 $TMP（tar 失败，或目标 $OUT 已存在）" >&2; false; }
+```
+
+`-C "$SKILLS" .` 会带上 `.git` 等隐藏目录。打包期间不要
+经平台编辑 skill 文件或 `_shared` 材料（会写仓库），否则可能打进半提交的 Git 状态。
 
 ### 2.3 恢复
 
@@ -234,6 +261,9 @@ docker run --rm -v agent-legion_host-data:/src:ro -v <备份目录>:/backup \
    有 §2.2.1 的 legacy 本地产物备份时一并放回 Host 数据卷：
    `docker run --rm -v agent-legion_host-data:/dst -v <备份目录>:/backup busybox tar xzf /backup/host-data-<时间戳>.tar.gz -C /dst`
    （原生形态解包到数据根）。
+   恢复 skill root：在宿主机上把 §2.2.2 的包解到 `SKILLS`（目标目录应为空或不存在；
+   Docker stack 须是 compose 解析出的同一挂载源）：
+   `mkdir -p "$SKILLS" && tar xzf <备份目录>/skills-<时间戳>.tar.gz -C "$SKILLS"`。
 5. `make prod-up docker` 拉起整个 stack；低于当前版本的 dump 会在启动时自动
    迁移到当前 schema。
 6. 后端每次启动都会把全部 workspace 调度重置为暂停（`server/app/main.py` 启动时
@@ -252,6 +282,26 @@ docker run --rm -v agent-legion_host-data:/src:ro -v <备份目录>:/backup \
   是 dump 之后写入、清单里没有行的孤儿对象，确认无误后再加 `--apply`。「行在、
   对象缺失」的产物会让依赖它的下游节点停在等待中，job 详情页对应节点显示
   「输入恢复不全，建议重跑 <生产节点>」，按提示重跑生产节点即可。
+- skill 锁定 commit 可物化：DB `global_settings` 中 `skill_lock` 文档（JSON，
+  `skills.<skill key>.refs.<ref> = <commit>`）记录的每个 commit 都必须存在于
+  `SKILLS/<skill key>` 仓里（`server/app/skills/lock.py` 的仓位置约定）。逐个用
+  `git cat-file -e` 核对（`C` 为 §2.3 第 3 步定义的函数；`latest` ref 跟随 HEAD、
+  不进锁，仓存在即可）：
+
+  ```bash
+  C psql -U agent_legion -d agent_legion -At \
+      -c "select value from global_settings where key = 'skill_lock'" \
+    | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); [print(k, c) for k, s in d.get("skills", {}).items() for c in s.get("refs", {}).values()]' \
+    | while read -r key commit; do
+        git -C "$SKILLS/$key" cat-file -e "$commit^{commit}" \
+          && echo "ok $key $commit" || echo "缺失 $key $commit" >&2
+      done
+  ```
+
+  有「缺失」即说明 skill 备份不是锁定时刻之后的版本，或仓的历史被改写过，需要
+  找回含该 commit 的仓。**不要用 `make skills-lock` 做这项核对**：它会把每个已
+  pin 的 ref 重新解析到仓里的当前 commit 并改写锁（`server/app/skills/lock.py`），
+  等于用恢复后的仓覆盖锁定记录，掩盖缺失。
 
 ## 3. 演练频率建议
 
@@ -318,7 +368,7 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
      && { [ ! -e "$KEY_FILE" ] || mv "$KEY_FILE" "$OLD"; } \
      && mv "$NEW" "$KEY_FILE" \
      && echo "新 key 已就位：$KEY_FILE（原文件若存在已留存为 $OLD）" \
-     || echo "未完成：检查临时文件 $NEW 与 $KEY_FILE；旧 key 未被覆盖"
+     || { echo "未完成：检查临时文件 $NEW 与 $KEY_FILE；旧 key 未被覆盖" >&2; false; }
    ```
 
    上面是 Docker stack 的做法：`KEY_FILE` 必须是 compose 实际挂载的文件（部署用
