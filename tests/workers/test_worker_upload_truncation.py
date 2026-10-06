@@ -18,6 +18,7 @@ from shared.output_truncation import (
     output_truncation_error,
 )
 from shared.pi_events import scan_and_compress_pi_events
+from shared.pi_model_error import fold_model_error
 from tests.workers.upload_queue_testlib import QueueFakeClient, _execution_dir, _queue, _task
 
 # velites 产物契约的证据事件：exit 1 只有带它才可归因为触顶。
@@ -193,3 +194,43 @@ def test_exit_one_with_more_direct_cause_is_not_rewritten(
 def test_truncation_message_mentions_context_window() -> None:
     """Anthropic 的 model_context_window_exceeded 同样映射为 length，文案需覆盖。"""
     assert "context window" in output_truncation_error(1, ["a.json"])
+
+
+# 瞬态错误 → 内部自动重试 → 重试成功但以 length 结束（pi / velites 同形）。
+_RETRIED_INTO_LENGTH = [
+    _MODEL_ERROR,
+    {"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3, "delayMs": 10, "error": "429"},
+    _assistant("length"),
+]
+
+
+def test_length_after_retry_clears_stale_model_error() -> None:
+    """review P2：无 errorMessage 的 length 是一次成功返回的模型调用，清除旧的瞬态错误；
+    带 errorMessage 的 length 仍记为错误。"""
+    state: str | None = None
+    for event in _RETRIED_INTO_LENGTH:
+        state = fold_model_error(event, state)
+    assert state is None
+    failed_length = {"role": "assistant", "stopReason": "length", "errorMessage": "boom"}
+    assert fold_model_error({"type": "message_end", "message": failed_length}, None) == "boom"
+
+
+def test_retried_into_length_with_missing_outputs_reports_truncation(tmp_path: Path) -> None:
+    """error → auto_retry → length + 缺产物：归因为触顶，不上报已恢复的旧 provider 错误。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _drop_output(work_root)
+    _write_events(work_root, _RETRIED_INTO_LENGTH)
+    report = _report(work_root, exit_code=0)
+    assert report["status"] == "failed"
+    assert report["error_message"].startswith(OUTPUT_TRUNCATED_PREFIX)
+
+
+def test_retried_into_length_with_all_outputs_completes(tmp_path: Path) -> None:
+    """error → auto_retry → length + 产物齐全：exit 0 的 run 照常 completed。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _write_events(work_root, _RETRIED_INTO_LENGTH)
+    report = _report(work_root, exit_code=0)
+    assert report["status"] == "completed"
+    assert report["error_message"] == ""
