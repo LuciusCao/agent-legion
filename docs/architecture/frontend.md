@@ -7,7 +7,7 @@ Agent Legion 前端是 React 18 + TypeScript SPA，使用 Vite 构建。UI 基�
 核心职责：
 
 - Workspace 列表与详情展示
-- Job 列表、Job Detail（含 DAG、产物、日志、视频播放器）
+- Job 列表、Job Detail（含 DAG、产物预览与可定制预览面板、日志、排查助手）
 - Workflow Studio（工作流可视化编辑）
 - Token Usage 用量统计
 - Settings（Workspace / 全局设置 / 外部服务连接等）
@@ -42,8 +42,12 @@ frontend/src/
 │   ├── TokenUsagePage.tsx
 │   ├── WorkflowStudioPage.tsx   # 薄页面壳（实现体在 features/workflowStudio/）
 │   └── jobDetail/          # Job Detail 子组件
+├── routes/                 # 懒加载页面表与 admin 子路由（AdminRoutes）
 ├── features/               # 跨页面的大型功能域
-│   └── workflowStudio/     # Workflow Studio（canvas / inspector / code-editor / chat / validation / shared 子域）
+│   ├── workflowStudio/     # Workflow Studio（canvas / inspector / code-editor / chat / validation / shared 子域）
+│   ├── agentPanelDock/     # 可拖拽、可缩放的非模态 agent 对话面板容器（#795）
+│   ├── jobDiagnosis/       # Job Detail「排查助手」Dock 与动作建议卡
+│   └── previewPanel/       # 可定制预览面板（#328）：iframe 宿主、只读桥、「定制预览」Dock 与草稿治理
 ├── layouts/                # 布局组件
 │   ├── AppShell.tsx
 │   └── WorkspaceLayout.tsx
@@ -59,8 +63,8 @@ frontend/src/
 │   ├── AddItemsUploadPanel.tsx # 条目类型面板：material 上传
 │   ├── AddItemsRefPanel.tsx    # 条目类型面板：ref 外部引用
 │   ├── AddItemsBundlePanel.tsx # 条目类型面板：bundle 文件夹
-│   ├── AddDialog.tsx
-│   ├── VideoContentPanel.tsx     # Job Detail 视频内容面板
+│   ├── AddItemsTextPanel.tsx   # 条目类型面板：直接输入文本
+│   ├── preview/                # 通用产物预览（previewRegistry 渲染器注册表、预览卡片）
 │   ├── RichText.tsx              # CMS 富文本（HTML + LaTeX）统一渲染
 │   └── ...
 ├── stores/                 # Zustand 客户端状态管理
@@ -175,9 +179,9 @@ frontend/src/
 
 - 前端界面语言为中文。
 - Workspace 列表展示 job 统计、最近活动和快速操作。
-- Job Detail 包含 DAG 图、Stepper、产物（Artifact）面板、日志。左栏实体面板（`pages/jobDetail/EntityPanel`）三层结构（issue #11）：question 任务 = 结构化 `QuestionContentPanel`（gating 由 `questionPreviewManifest` 声明求值）+ 通用产物预览；其余 source_type 一律通用产物预览兜底（不再白屏）。通用预览 = 扩展名分类（`lib/previewKind`，.svg 强制 text 源码视图）→ 渲染器注册表（`components/preview/previewRegistry`，未命中兜底 text）→ 每产物一张卡片（文本类走 `queryKeys.jobArtifactText` 版本失效 + 512KB 截断；媒体类同源 raw URL 直连）；面板头勾选菜单与设置页 `PreviewConfigSection` 写同一份 workspace 级 `previewHidden` 配置（`useWorkspacePreviewConfig` 乐观更新）。
-- Workflow Studio 支持可视化编辑 workflow 节点、边与 intake modes，并与修订历史集成；Agent 节点按 capability 读取 Agent Catalog，显示 skill/tools 和全局运行默认值，并可编辑 provider/model/thinking/prompt 覆盖。画布区 DAG 是唯一常驻主视图：变更与校验结果在右侧 Drawer（顶栏状态 chip 点击、校验完成、发布前 review 打开），YAML 编辑降级为画布工具栏「编辑 YAML」按钮打开的全屏 Dialog（结构性编辑唯一入口）。顶栏状态收敛为单个 chip：无变更显示「已同步」、查看历史 revision 显示「只读 vN」、有变更显示「未发布变更 N」（颜色编码风险等级，明细在 tooltip，点击打开变更面板），compare 计算中与「已保留当前草稿」并入同一 chip。
-- 节点类型体系（`start | code | agent | approval`）在 Inspector 里有专属编辑面：类型选择器（`inspector/NodeTypeSelect.tsx`）切换前做前置校验 + 确认弹窗（含按目标类型的字段清洗），Inspector 的 section 集按节点类型注册；`type: code` 节点走结构化 schema 编辑 + config 双通道（revision 快照 vs workspace live 覆盖）面板，`type: agent` 节点的 schema 归 Agent Definition 编辑入口；approval 节点有画布徽标与节点创建入口（`WorkflowNodeApprovalConfigSection`）。
+- Job Detail 包含 DAG 图、Stepper、产物（Artifact）面板、日志。左栏实体面板（`pages/jobDetail/EntityPanel`）统一经 `features/previewPanel/PreviewPanelSection` 渲染：workspace 已发布可定制预览面板 bundle（#328）时由沙箱 iframe 宿主 `PreviewPanelHost` 接管整栏（`allow-scripts`、永不 `allow-same-origin`、注入 CSP，经只读 postMessage 桥取当前任务数据）；面板头的「定制预览」打开 `CustomizePreviewDock`，agent 经 MCP 预览面板工具写草稿，预览/发布/恢复默认等治理动作在 `PreviewPanelHeader`。无定制面板时回落内置三层结构（issue #11）：question 任务 = 结构化 `QuestionContentPanel`（gating 由 `questionPreviewManifest` 声明求值）+ 通用产物预览；其余 source_type 一律通用产物预览兜底（不再白屏）。通用预览 = 扩展名分类（`lib/previewKind`，.svg 强制 text 源码视图）→ 渲染器注册表（`components/preview/previewRegistry`，未命中兜底 text）→ 每产物一张卡片（文本类走 `queryKeys.jobArtifactText` 版本失效 + 512KB 截断；媒体类同源 raw URL 直连）；面板头勾选菜单与设置页 `PreviewConfigSection` 写同一份 workspace 级 `previewHidden` 配置（`useWorkspacePreviewConfig` 乐观更新）。
+- Workflow Studio 支持可视化编辑 workflow 节点与边，并与修订历史集成；Agent 节点按 capability 读取 Agent Catalog（legacy Agent 定义来源），显示 skill/tools，provider/model/thinking 的「继承默认」提示读草稿 YAML 的 workflow 顶层 `execution` 块，并可编辑 provider/model/thinking/prompt 覆盖。自含 agent 节点（节点 `execution.runtime` / `requires_labels`，EXEC-AGENT-PROFILE-001）的执行档案目前没有 Inspector 专属编辑面，经「编辑 YAML」声明。画布区 DAG 是唯一常驻主视图：变更与校验结果在右侧 Drawer（顶栏状态 chip 点击、校验完成、发布前 review 打开），YAML 编辑降级为画布工具栏「编辑 YAML」按钮打开的全屏 Dialog（结构性编辑唯一入口）。顶栏状态收敛为单个 chip：无变更显示「已同步」、查看历史 revision 显示「只读 vN」、有变更显示「未发布变更 N」（颜色编码风险等级，明细在 tooltip，点击打开变更面板），compare 计算中与「已保留当前草稿」并入同一 chip。
+- 节点类型体系（`start | code | agent | approval`）在 Inspector 里有专属编辑面：类型选择器（`inspector/NodeTypeSelect.tsx`）切换前做前置校验 + 确认弹窗（含按目标类型的字段清洗），Inspector 的 section 集按节点类型注册；`type: code` 节点走结构化 schema 编辑 + config 双通道（revision 快照 vs workspace live 覆盖）面板，`type: agent` 节点的 schema 归 Agent Definition 编辑入口（自含节点的 `config_schema` 声明在节点自身）；approval 节点有画布徽标与节点创建入口（`WorkflowNodeApprovalConfigSection`）。
 - Agent 发起的 workflow 发布请求（MCP `request_workflow_publish`）以 pending 确认对话框出现在 Studio——复用发布 review 组件展示 diff，用户确认/拒绝后 agent 经 `get_publish_request_status` 收到结果。
 - Skill 选择链路合一为「目录 + 版本」两控件并回显实际执行版本（`node_runs.skill`）；创建 Agent 表单隐藏 Agent ID（服务端按 capability 生成）。
 - Token Usage 页面展示 workspace / job / run 级别的 token 用量与成本。
