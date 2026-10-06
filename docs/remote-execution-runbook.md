@@ -89,7 +89,12 @@ loopback (`AGENT_LEGION_S3_BIND`: the tailnet address or `0.0.0.0` in the
 Docker form, `0.0.0.0` in the native form) and point
 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` at the laptop's tailnet address; leave
 `AGENT_LEGION_S3_ENDPOINT` on its local/compose address, otherwise the
-local backend is treated as external and not started — the rules live in
+local backend is treated as external and not started. The bind also
+publishes the SeaweedFS master UI (`:9333`; RustFS console `:9001`), so a
+`0.0.0.0` bind must be fenced with a host firewall or Tailnet ACL and never
+exposed to the public internet; the narrower option is binding the
+specific tailnet IP (native form: also point `AGENT_LEGION_S3_ENDPOINT` at
+it and set `AGENT_LEGION_LOCAL_S3=always`). The rules live in
 [materials-storage-deployment.md §1](materials-storage-deployment.md#1-组件与配置面).
 If the container cannot reach the tailnet, design a dedicated Tailscale
 sidecar; do not bake Tailscale into the Worker image.
