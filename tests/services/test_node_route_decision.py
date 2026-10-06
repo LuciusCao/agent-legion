@@ -92,3 +92,32 @@ def test_cached_routed_decision_is_reused_and_fallback_layered_on_top() -> None:
         _node(), _row("ignored"), workspace_id="ws", catalog=lambda: _CATALOG, routed=routed
     )
     assert (decision.kind, decision.target_id) == ("agent", "drafter")
+
+
+@pytest.mark.parametrize(
+    ("row", "expected_kind", "expected_agent"),
+    [
+        # A node dropped from the definition (drift) reads its route row
+        # alone — but only an ``agent`` row is an Agent, like the decision.
+        (_row("drafter"), None, "drafter"),
+        (_row("code-default", kind="handler_executor"), "code", None),
+        (None, "code", None),
+    ],
+)
+def test_drift_node_projects_only_agent_rows_as_agents(
+    row: dict[str, Any] | None, expected_kind: str | None, expected_agent: str | None
+) -> None:
+    from server.app.services.job_node_executor_projection import node_executor_projection
+    from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake
+
+    definition = WorkflowDefinition(key="wf", label="wf", intake=WorkflowIntake(), nodes={})
+    fields = node_executor_projection(
+        definition,
+        {"node_key": "gone"},
+        {"gone": row} if row is not None else {},
+        {},
+        workspace_id="ws",
+        catalog=lambda: {},
+    )
+    assert fields["executor_kind"] == expected_kind
+    assert fields["agent_id"] == expected_agent

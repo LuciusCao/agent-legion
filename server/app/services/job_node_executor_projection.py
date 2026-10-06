@@ -43,7 +43,11 @@ def node_executor_projection(
     target = definition.nodes.get(node_key)
     row = route_rows.get(node_key)
     if target is None:
-        agent_id = str(row["target_id"]) if row is not None else None
+        # Same predicate as the decision's routed branch: only an ``agent``
+        # row is an Agent; any other row (e.g. a handler_executor binding)
+        # projects to the implicit code pool.
+        is_agent_row = row is not None and row.get("target_kind") == "agent"
+        agent_id = str(row["target_id"]) if is_agent_row and row is not None else None
         return _fields(agent_id is not None, agent_id, worker_id, None)
     decision = decide_node_route(target, row, workspace_id=workspace_id, catalog=catalog)
     if decision.kind == "error":
