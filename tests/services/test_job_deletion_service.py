@@ -15,6 +15,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.artifact_store import ArtifactNotFoundError, ArtifactStore
 from server.app.services.job_deletion import JobDeleteResult, JobDeletionService
+from server.app.services.job_deletion_trash_sweep import sweep_deletion_trash
 from server.app.services.job_operation_error import JobOperationError
 from server.app.settings import Settings
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
@@ -454,6 +455,12 @@ def test_delete_succeeds_when_purging_staged_files_fails(
     staged = [p for p in (settings.jobs_dir / ".trash").rglob(storage_dir.name) if p.is_dir()]
     assert len(staged) == 1
     assert (staged[0] / "original.json").read_text(encoding="utf-8") == "original"
+    # 残留带已提交标记，超过 TTL 后由维护清扫回收。
+    assert (staged[0].parent / trash_module.COMMITTED_MARKER).is_file()
+    monkeypatch.undo()
+    later = datetime.now(UTC) + trash_module.DELETION_TRASH_TTL + timedelta(hours=1)
+    assert sweep_deletion_trash(settings, now=later) == 1
+    assert not staged[0].exists()
 
 
 def test_delete_skips_local_cleanup_when_path_revalidation_fails(

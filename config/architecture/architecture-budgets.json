@@ -1548,6 +1548,7 @@
     "server/app/services/job_artifacts.py": 72,
     "server/app/services/job_deletion.py": 119,
     "server/app/services/job_deletion_trash.py": 95,
+    "server/app/services/job_deletion_trash_sweep.py": 52,
     "server/app/services/job_dir_index.py": 65,
     "server/app/services/job_errors.py": 22,
     "server/app/services/job_execution.py": 177,

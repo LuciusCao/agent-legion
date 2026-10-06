@@ -12,11 +12,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from server.app.services.job_deletion_trash import (
+    COMMITTED_MARKER,
     DELETION_TRASH_TTL,
     jobs_trash_root,
     logs_trash_root,
-    sweep_deletion_trash,
 )
+from server.app.services.job_deletion_trash_sweep import sweep_deletion_trash
 from server.app.settings import Settings
 from server.app.workflow_worker.maintenance import WorkflowMaintenance
 
@@ -39,10 +40,14 @@ def _settings(tmp_path: Path) -> Settings:
     )
 
 
-def _op_dir(root: Path, name: str, age: timedelta, child: str = "payload") -> Path:
+def _op_dir(
+    root: Path, name: str, age: timedelta, child: str = "payload", *, committed: bool = True
+) -> Path:
     op = root / name
     (op / child).mkdir(parents=True)
     (op / child / "f.bin").write_bytes(b"x")
+    if committed:
+        (op / COMMITTED_MARKER).write_text("job\n", encoding="utf-8")
     stamp = (_NOW - age).timestamp()
     os.utime(op, (stamp, stamp))
     return op
@@ -62,7 +67,31 @@ def test_sweep_removes_only_entries_older_than_ttl(tmp_path: Path) -> None:
     assert (young_job / "payload" / "f.bin").exists()
 
 
-def test_sweep_unlinks_symlink_entries_without_following(tmp_path: Path) -> None:
+def test_sweep_never_purges_legacy_unmarked_rollback_copies(tmp_path: Path) -> None:
+    """P1：0.7.17 前 _restore_paths 回滚冲突留下的恢复副本无已提交标记，其
+    jobs 行仍在、可能是 legacy job 唯一的产物副本——超 TTL 也不自动删除。"""
+    settings = _settings(tmp_path)
+    legacy = _op_dir(
+        jobs_trash_root(settings),
+        "old-operation",
+        DELETION_TRASH_TTL * 10,
+        child="live-job",
+        committed=False,
+    )
+    legacy_log = _op_dir(
+        logs_trash_root(settings), "old-operation", DELETION_TRASH_TTL * 10, committed=False
+    )
+    marked = _op_dir(jobs_trash_root(settings), "op-new", DELETION_TRASH_TTL * 2)
+
+    removed = sweep_deletion_trash(settings, now=_NOW)
+
+    assert removed == 1
+    assert not marked.exists()
+    assert (legacy / "live-job" / "f.bin").exists()
+    assert (legacy_log / "payload" / "f.bin").exists()
+
+
+def test_sweep_never_touches_symlink_entries(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -74,9 +103,11 @@ def test_sweep_unlinks_symlink_entries_without_following(tmp_path: Path) -> None
     stamp = (_NOW - DELETION_TRASH_TTL * 2).timestamp()
     os.utime(link, (stamp, stamp), follow_symlinks=False)
 
-    assert sweep_deletion_trash(settings, now=_NOW) == 1
+    (outside / COMMITTED_MARKER).write_text("job\n", encoding="utf-8")
 
-    assert not link.is_symlink()
+    assert sweep_deletion_trash(settings, now=_NOW) == 0
+
+    assert link.is_symlink()
     assert (outside / "keep.txt").read_text(encoding="utf-8") == "keep"
 
 
@@ -96,7 +127,7 @@ def test_sweep_survives_single_entry_failure(tmp_path: Path) -> None:
             raise OSError("busy")
         real_rmtree(path, *args, **kwargs)
 
-    with patch("server.app.services.job_deletion_trash.shutil.rmtree", side_effect=_flaky):
+    with patch("server.app.services.job_deletion_trash_sweep.shutil.rmtree", side_effect=_flaky):
         removed = sweep_deletion_trash(settings, now=_NOW)
 
     assert removed == 1

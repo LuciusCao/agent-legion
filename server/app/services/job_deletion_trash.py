@@ -16,7 +16,7 @@ DB 是删除的唯一权威：``JobDeletionService`` 先在
   残留留在原路径（无自动回收；job id 由 workspace/workflow/source 确定性派生，
   同源重建的 job 会复用该路径，见 docs/data-layout.md）；
 - 移入 trash 成功、删除失败或进程崩溃：残留在 ``.trash/<operation_id>/``，
-  由 ``sweep_deletion_trash`` 按 TTL 回收；
+  由 ``job_deletion_trash_sweep.sweep_deletion_trash`` 按 TTL 回收（只回收带已提交标记的条目）；
 - 提交后、移入前同源 job 被重建（确定性 id，create_job 不取 job-mutation
   锁）：移入在 ``job-mutation:<id>`` 锁下复核 jobs 行仍不存在才执行，已重建就
   整体跳过（目录与日志归新 job，交给 retention），绝不移走新 job 的活目录。
@@ -34,7 +34,7 @@ import logging
 import os
 import shutil
 from collections.abc import Iterable, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -47,6 +47,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 TRASH_DIRNAME = ".trash"
+# 已提交删除的证明：本模块在提交后、移入任何文件前先写入 operation 目录。
+# TTL 回收只处理带此标记的条目——0.7.17 前 _restore_paths 在删除事务回滚、
+# 原目录被重建时留下的恢复副本没有标记，其 jobs 行仍在、对无 job_artifacts
+# 行的 legacy job 可能是唯一产物副本，一律不自动删除（只记日志提示人工处理）。
+COMMITTED_MARKER = ".committed-deletion"
 # 提交后 trash 里只有已删 job 的残留，TTL 仅是给仍在 rmtree 的删除操作留的
 # 宽限窗口（避免清扫与之抢删）；按 operation 目录 mtime（移入时刷新）计龄。
 DELETION_TRASH_TTL = timedelta(hours=24)
@@ -118,44 +123,12 @@ def purge_deleted_job_files(
     _prune_empty(logs_trash_root(settings) / operation_id)
 
 
-def sweep_deletion_trash(
-    settings: Settings,
-    now: datetime | None = None,
-    ttl: timedelta = DELETION_TRASH_TTL,
-) -> int:
-    """删除 mtime 早于 ``now - ttl`` 的 ``.trash/<operation_id>`` 条目，返回删除数。
-
-    jobs 与 logs 两个 trash 根都扫；条目无论内容一律按龄回收（含 0.7.17 前
-    回滚冲突保留的副本——本地只是缓存，权威在对象存储）。单条失败只记日志，
-    下一轮维护重试。
-    """
-    cutoff = ((now or datetime.now(UTC)) - ttl).timestamp()
-    removed = 0
-    for root in (jobs_trash_root(settings), logs_trash_root(settings)):
-        try:
-            entries = sorted(root.iterdir()) if root.is_dir() else []
-        except OSError:
-            logger.warning("Cannot list deletion trash %s", root, exc_info=True)
-            continue
-        for entry in entries:
-            try:
-                if entry.lstat().st_mtime >= cutoff:
-                    continue
-                if entry.is_dir() and not entry.is_symlink():
-                    shutil.rmtree(entry)
-                else:
-                    entry.unlink(missing_ok=True)
-            except OSError:
-                logger.warning("Failed to purge deletion trash %s", entry, exc_info=True)
-                continue
-            removed += 1
-    return removed
-
-
 def _stage(path: Path, trash_dir: Path, job_id: str) -> list[Path]:
     staged = trash_dir / path.name
     try:
         trash_dir.mkdir(parents=True, exist_ok=True)
+        # 先落已提交标记再移入：凡含本模块残留的 operation 目录必带标记。
+        (trash_dir / COMMITTED_MARKER).write_text(f"{job_id}\n", encoding="utf-8")
         # 锁下只做原子 rename；跨文件系统（EXDEV）不退化为拷贝，留原位残留。
         os.rename(path, staged)
     except OSError:
@@ -178,8 +151,10 @@ def _remove(path: Path, job_id: str) -> None:
 
 
 def _prune_empty(path: Path) -> None:
+    """operation 目录只剩已提交标记（或已空）时连同标记一起删掉。"""
     try:
-        if path.exists() and not any(path.iterdir()):
+        if path.exists() and all(child.name == COMMITTED_MARKER for child in path.iterdir()):
+            (path / COMMITTED_MARKER).unlink(missing_ok=True)
             path.rmdir()
             parent = path.parent
             if parent.exists() and not any(parent.iterdir()):

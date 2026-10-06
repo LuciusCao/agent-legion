@@ -5,7 +5,7 @@ import threading
 import time
 
 from server.app.jobs import JobQueries
-from server.app.services.job_deletion_trash import sweep_deletion_trash
+from server.app.services.job_deletion_trash_sweep import sweep_deletion_trash
 from server.app.services.log_cleanup import CleanupConfig, cleanup_old_logs
 from server.app.settings import Settings
 
