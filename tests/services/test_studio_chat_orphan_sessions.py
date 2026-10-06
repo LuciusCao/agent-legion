@@ -8,6 +8,8 @@ error with a structured, resume-pointing 409 instead of a bare string.
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 from fastapi import HTTPException
 
@@ -27,6 +29,14 @@ def _orphan(job_db, workspace_id: str, user_id: str, status: str = "idle") -> st
     session_id = job_db.create_studio_chat_session(workspace_id, user_id, "fake-agent")
     job_db.update_studio_chat_session(session_id, status=status)
     return session_id
+
+
+class _StubRuntime:
+    """Just the generation surface the rollback pins on (lock + closed)."""
+
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+        self.closed = False
 
 
 def _session_publishes(bus, session_id: str) -> list[dict]:
@@ -147,7 +157,8 @@ def test_runtime_registered_during_projection_rolls_the_stamp_back(
     error write must not leave its live session stamped error."""
     service, bus, _register, workspace_id, user_id = chat
     sid = _orphan(job_db, workspace_id, user_id, "running")
-    calls = iter([None, object()])  # admission sees none; post-write recheck sees one
+    rt = _StubRuntime()
+    calls = iter([None, rt, rt])  # admission sees none; post-write recheck sees one
     monkeypatch.setattr(service, "runtime", lambda session_id: next(calls))
 
     with pytest.raises(ConflictError) as caught:
@@ -177,7 +188,7 @@ def test_rollback_never_undoes_a_new_runtime_real_failure(chat, job_db, monkeypa
             job_db.update_studio_chat_session(
                 session_id, status="error", error_detail="agent process exited"
             )
-            return object()
+            return _StubRuntime()
         return None
 
     monkeypatch.setattr(service, "runtime", runtime)
@@ -188,6 +199,36 @@ def test_rollback_never_undoes_a_new_runtime_real_failure(chat, job_db, monkeypa
     row = job_db.get_studio_chat_session(sid)
     assert row["status"] == "error"
     assert row["error_detail"] == "agent process exited"
+
+
+def test_rollback_skips_a_new_runtime_that_exited_under_the_orphan_stamp(
+    chat, job_db, monkeypatch
+) -> None:
+    """on_exit of the resumed runtime skips its own write while the row
+    still carries this request's orphan stamp (status error) and only tears
+    down; the rollback must see that generation gone/closed and leave the row
+    on error rather than resurrect idle/running with no runtime behind it."""
+    service, _bus, _register, workspace_id, user_id = chat
+    sid = _orphan(job_db, workspace_id, user_id, "running")
+    rt = _StubRuntime()
+    calls = 0
+
+    def runtime(session_id: str):
+        nonlocal calls
+        calls += 1
+        if calls == 2:  # recheck sees the new runtime, which then exits
+            rt.closed = True  # on_exit teardown: closed + unregistered
+            return rt
+        return None
+
+    monkeypatch.setattr(service, "runtime", runtime)
+
+    with pytest.raises(ConflictError):
+        service.send_message(sid, workspace_id, "hi")
+
+    row = job_db.get_studio_chat_session(sid)
+    assert row["status"] == "error"
+    assert row["error_detail"] == ORPHAN_ERROR_DETAIL
 
 
 def test_orphan_projected_by_send_is_resumable(chat, job_db) -> None:
