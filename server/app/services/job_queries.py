@@ -10,12 +10,9 @@ from server.app.services.hydration_defer_board import (
 from server.app.services.job_artifact_names import is_plausible_job_id
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.job_node_executor_projection import node_executor_projection
 from server.app.services.job_node_ordering import ordered_job_nodes
-from server.app.services.job_node_worker_projection import (
-    agent_route_map,
-    claimed_worker_map,
-    node_executor_projection,
-)
+from server.app.services.job_node_worker_projection import agent_route_map, claimed_worker_map
 from server.app.services.job_patch_query_summaries import summarize_paginated_jobs
 from server.app.services.job_path_projection import resolve_record_paths
 from server.app.services.job_query_presenters import (
