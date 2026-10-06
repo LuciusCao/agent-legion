@@ -19,7 +19,7 @@ import requests
 from shared.protocol import PROTOCOL_VERSION
 from worker import events
 from worker.host.claim_ops import ClaimOperations
-from worker.host.errors import TransientHostError, WorkerAuthError
+from worker.host.errors import HOST_UNAVAILABLE_ERRORS, TransientHostError, WorkerAuthError
 from worker.host.heartbeat_ops import HeartbeatOperations
 from worker.host.transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
 
@@ -30,7 +30,7 @@ from worker.host.transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
 
 DEFAULT_TIMEOUT = 30
 
-__all__ = ["Client", "TransientHostError", "WorkerAuthError"]
+__all__ = ["HOST_UNAVAILABLE_ERRORS", "Client", "TransientHostError", "WorkerAuthError"]
 
 
 class Client(ClaimOperations, HeartbeatOperations, TransferOperations):

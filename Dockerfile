@@ -1,8 +1,11 @@
-# syntax=docker/dockerfile:1.7
-ARG NODE_VERSION=22.17.0
-ARG PYTHON_VERSION=3.13.5
-
-FROM node:${NODE_VERSION}-bookworm-slim AS frontend
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+# 基础镜像按 tag@digest 钉死（#969 供应链）：同一 tag 被上游重推不会悄悄换掉
+# 构建输入；digest 取多架构 index（registry 的 Docker-Content-Digest），
+# 多平台构建各自解析到对应架构。升级流程：改 tag 时同步换 digest（`docker
+# buildx imagetools inspect <image:tag>` 取 Digest 行），tag 只作可读注记——
+# 两者同时存在时 docker 只认 digest。版本因此不再走 ARG 插值，避免改了
+# --build-arg 却仍拉旧 digest 的假象。
+FROM node:22.17.0-bookworm-slim@sha256:b04ce4ae4e95b522112c2e5c52f781471a5cbc3b594527bcddedee9bc48c03a0 AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -14,12 +17,12 @@ RUN npm run build
 # agent harness (which #381 moved out of the image) and without a Rust
 # toolchain. The name is deliberately not `velites` so worker runtime
 # auto-detect (#254) cannot mistake it for the agent runtime executor.
-FROM rust:1-bookworm AS velites-sandbox-build
+FROM rust:1-bookworm@sha256:59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0 AS velites-sandbox-build
 WORKDIR /src
 COPY velites/ ./velites/
 RUN cargo build --release --locked --bin velites-sandbox --manifest-path velites/Cargo.toml
 
-FROM python:${PYTHON_VERSION}-slim-bookworm AS host
+FROM python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419 AS host
 ARG UV_VERSION=0.11.21
 ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
@@ -55,7 +58,7 @@ CMD ["uvicorn", "server.app.main:create_prod_app", "--factory", "--host", "0.0.0
 # 跑 pi 需自行构建含 node+pi 的镜像变体。
 # code 池沙箱是镜像基础设施（issue #383）：velites-sandbox 与 agent runtime
 # 无关，烤进镜像使 max_code_concurrency 不依赖外挂 velites。
-FROM python:${PYTHON_VERSION}-slim-bookworm AS worker
+FROM python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419 AS worker
 # bubblewrap is velites-sandbox' Linux sandbox backend (EXEC-HARNESS-SANDBOX-001);
 # the wrapper fails closed at startup without it unless --no-sandbox is set.
 # Runtime requirements: bwrap needs either its setuid bit or unprivileged

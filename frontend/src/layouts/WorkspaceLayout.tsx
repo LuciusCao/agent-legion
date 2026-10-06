@@ -1,8 +1,6 @@
-import { useEffect } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useCurrentWorkspace } from '../hooks/useWorkspaces'
 import { useJobStore } from '../stores/jobStore'
-import { useAgentsStore } from '../stores/agentsStore'
 import { useUiStore } from '../stores/uiStore'
 import { AppShell } from './AppShell'
 import { AppBar } from '../components/AppBar'
@@ -20,7 +18,6 @@ export default function WorkspaceLayout() {
   // Field selectors only: whole-store subscriptions here would re-render the
   // page skeleton + <Outlet/> subtree on every unrelated store write (agent
   // heartbeats, toast flags).
-  const fetchWorkerStatus = useAgentsStore((s) => s.fetchWorkerStatus)
   const setTokenUsageDialogOpen = useUiStore((s) => s.setTokenUsageDialogOpen)
   const addItemsDialogOpen = useUiStore((s) => s.addItemsDialogOpen)
   const setAddItemsDialogOpen = useUiStore((s) => s.setAddItemsDialogOpen)
@@ -32,11 +29,6 @@ export default function WorkspaceLayout() {
   const isDetailPage =
     workspaceId &&
     location.pathname.startsWith(`/workspaces/${workspaceId}/jobs/`)
-  useEffect(() => {
-    if (workspaceId) {
-      fetchWorkerStatus(workspaceId)
-    }
-  }, [fetchWorkerStatus, workspaceId])
   const title = pageTitle || currentWorkspace?.name || workspaceId || ''
   return (
     <AppShell

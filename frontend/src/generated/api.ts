@@ -4368,6 +4368,8 @@ export interface components {
     }
     /** FailedNodeRunsResponse */
     FailedNodeRunsResponse: {
+      /** Next Cursor */
+      next_cursor?: string | null
       /** Runs */
       runs: components['schemas']['FailedNodeRunItem'][]
     }
@@ -12277,6 +12279,8 @@ export interface operations {
         category?: string | null
         detail?: string | null
         since?: string | null
+        limit?: number
+        cursor?: string | null
       }
       header?: never
       path: {
