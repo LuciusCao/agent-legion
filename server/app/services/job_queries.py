@@ -1,7 +1,6 @@
 from typing import Any
 
 from server.app.db.rowmap import wire_batch_id
-from server.app.executors.models import CODE_EXECUTOR_ID
 from server.app.jobs import JobQueries
 from server.app.services.hydration_defer_board import (
     HYDRATION_DEFER_BOARD,
@@ -12,7 +11,11 @@ from server.app.services.job_artifact_names import is_plausible_job_id
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_node_ordering import ordered_job_nodes
-from server.app.services.job_node_worker_projection import agent_route_map, claimed_worker_map
+from server.app.services.job_node_worker_projection import (
+    agent_route_map,
+    claimed_worker_map,
+    node_executor_projection,
+)
 from server.app.services.job_patch_query_summaries import summarize_paginated_jobs
 from server.app.services.job_path_projection import resolve_record_paths
 from server.app.services.job_query_presenters import (
@@ -176,13 +179,7 @@ class JobQueryService:
             node["hydration_defer"] = node_defer_view(
                 defers.get(node["node_key"]), str(node["status"])
             )
-            # P-0.5: non-Agent-routed nodes always run on the implicit code
-            # pool; the projection is a constant, no configuration lookup.
-            is_agent = agent_map.get(node["node_key"]) is not None
-            node["executor_id"] = None if is_agent else CODE_EXECUTOR_ID
-            node["executor_kind"] = None if is_agent else "code"
-            node["worker_id"] = worker_map.get(node["node_key"])
-            node["agent_id"] = agent_map.get(node["node_key"])
+            node.update(node_executor_projection(definition, node, agent_map, worker_map))
         return {
             "job": self._job_summary(job, nodes, definition),
             "nodes": nodes_with_definition,

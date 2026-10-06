@@ -710,6 +710,7 @@
     "frontend/src/lib/agentWorkersInvalidation.ts": 21,
     "frontend/src/lib/agentsWsMessages.ts": 53,
     "frontend/src/lib/bundleFolder.ts": 57,
+    "frontend/src/lib/codeNodes.ts": 23,
     "frontend/src/lib/download.ts": 32,
     "frontend/src/lib/formatters.ts": 102,
     "frontend/src/lib/htmlText.ts": 26,
