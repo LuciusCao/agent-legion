@@ -1271,6 +1271,7 @@
     "server/app/jobs/queries/job_filtering.py": 133,
     "server/app/jobs/queries/job_keys.py": 20,
     "server/app/jobs/queries/job_list_columns.py": 18,
+    "server/app/jobs/queries/job_locked_rereads.py": 29,
     "server/app/jobs/queries/job_node_lifecycle.py": 111,
     "server/app/jobs/queries/job_node_runs.py": 173,
     "server/app/jobs/queries/job_nodes.py": 189,
