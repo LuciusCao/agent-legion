@@ -525,7 +525,7 @@ def test_delete_skips_cleanup_when_same_source_job_recreated_before_purge(
     storage_dir, log_path = _seed_job_files(settings, job)
     original_purge = job_deletion_module.purge_deleted_job_files
 
-    def _recreate_then_purge(*args: Any, **kwargs: Any) -> None:
+    def _recreate_then_purge(*args: Any, **kwargs: Any) -> bool:
         # 竞态本身：删除已提交、本地清理开始前，同源 job 被重建并写入。
         assert job_db.get_job(job["id"]) is None
         recreated = _create_job(job_db, "ws-recreate", "Q020")
@@ -533,7 +533,7 @@ def test_delete_skips_cleanup_when_same_source_job_recreated_before_purge(
         storage_dir.mkdir(parents=True, exist_ok=True)
         (storage_dir / "fresh.json").write_text("fresh", encoding="utf-8")
         log_path.write_text("fresh-log", encoding="utf-8")
-        original_purge(*args, **kwargs)
+        return original_purge(*args, **kwargs)
 
     monkeypatch.setattr(job_deletion_module, "purge_deleted_job_files", _recreate_then_purge)
 
@@ -544,6 +544,46 @@ def test_delete_skips_cleanup_when_same_source_job_recreated_before_purge(
     assert (storage_dir / "fresh.json").read_text(encoding="utf-8") == "fresh"
     assert log_path.read_text(encoding="utf-8") == "fresh-log"
     assert _trash_entries(settings) == []
+
+
+def test_delete_skips_id_scoped_cleanup_and_event_when_job_recreated(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#1065 codex P1：清理检测到同源 job 已重建时，不得再按 job id 删除
+    artifact refs（会删掉新 job 的引用）或广播删除事件（客户端会移除新 job）。"""
+    settings = _create_settings(tmp_path)
+    store = ArtifactStore(tmp_path / "artifacts", job_db.dsn_identity, gc_grace_seconds=0)
+    recorded: list[tuple[str, str]] = []
+
+    class _Buffer:
+        def record_job_deleted(self, workspace_id: str, job_id: str) -> None:
+            recorded.append((workspace_id, job_id))
+
+    service = JobDeletionService(
+        job_db,
+        ExecutorLeaseRepository(job_db, data_dir=tmp_path),
+        settings,
+        job_event_buffer=_Buffer(),
+        artifact_store=store,
+    )
+    job = _create_job(job_db, "ws-recreate-refs", "Q021", status="completed")
+    fresh_hash = store.put(b"fresh artifact")
+    original_purge = job_deletion_module.purge_deleted_job_files
+
+    def _recreate_then_purge(*args: Any, **kwargs: Any) -> bool:
+        recreated = _create_job(job_db, "ws-recreate-refs", "Q021")
+        assert recreated["id"] == job["id"]
+        store.add_ref(job["id"], "extract_question", "fresh.json", fresh_hash)
+        return original_purge(*args, **kwargs)
+
+    monkeypatch.setattr(job_deletion_module, "purge_deleted_job_files", _recreate_then_purge)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert [ref["hash"] for ref in store.refs_for_job(job["id"])] == [fresh_hash]
+    assert store.open(fresh_hash).read_bytes() == b"fresh artifact"
+    assert recorded == []
 
 
 def test_delete_purges_only_own_node_logs_not_sibling_prefix(

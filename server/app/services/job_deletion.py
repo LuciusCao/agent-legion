@@ -129,7 +129,11 @@ class JobDeletionService:
             logger.exception("Unexpected error deleting job %s", job_id)
             _fail(job_id, "delete_failed", str(exc))
 
-        purge_deleted_job_files(self.job_db, job, node_keys, self.settings, operation_id)
+        if purge_deleted_job_files(self.job_db, job, node_keys, self.settings, operation_id):
+            # 同源 job 已重建（同一 id）：按 id 的 refs / 对象清理与删除广播都会
+            # 打到新 job 上，一律跳过；旧 job 的孤儿 blob / 对象交给 unreferenced
+            # sweep 与 bucket lifecycle 兜底。
+            return self._result(job_id, "succeeded")
         gc_deleted_job_artifacts(self.artifact_store, job_id, artifact_candidates)
         if object_rows and self.object_store is not None:
             self.object_store.delete_objects(object_rows)

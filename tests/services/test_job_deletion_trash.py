@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -11,11 +12,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import server.app.services.job_deletion_trash as trash_module
 from server.app.services.job_deletion_trash import (
     COMMITTED_MARKER,
     DELETION_TRASH_TTL,
     jobs_trash_root,
     logs_trash_root,
+    purge_deleted_job_files,
 )
 from server.app.services.job_deletion_trash_sweep import sweep_deletion_trash
 from server.app.settings import Settings
@@ -149,3 +152,39 @@ def test_maintenance_runs_trash_sweep(tmp_path: Path) -> None:
         maintenance._run_cleanup()
 
     sweep.assert_called_once_with(settings)
+
+
+def test_purge_enumerates_log_paths_outside_job_mutation_lock(tmp_path: Path) -> None:
+    """#1065 codex P2：日志 glob 在锁外枚举，锁内只复核行并 rename。"""
+    settings = _settings(tmp_path)
+    log_dir = settings.logs_dir / "jobs"
+    log_dir.mkdir(parents=True)
+    (log_dir / "job-x-n1.log").write_text("log", encoding="utf-8")
+    (log_dir / "job-x-n1-shard-0.log").write_text("shard", encoding="utf-8")
+    in_lock = False
+    globbed_in_lock: list[bool] = []
+
+    class _JobDB:
+        @contextmanager
+        def job_mutation_lock(self, job_id: str) -> Any:
+            nonlocal in_lock
+            in_lock = True
+            try:
+                yield False
+            finally:
+                in_lock = False
+
+    real_glob = trash_module.glob.glob
+
+    def _spy_glob(pattern: str) -> list[str]:
+        globbed_in_lock.append(in_lock)
+        return real_glob(pattern)
+
+    with patch.object(trash_module.glob, "glob", _spy_glob):
+        recreated = purge_deleted_job_files(
+            _JobDB(), {"id": "job-x", "storage_dir": "job-x"}, ["n1"], settings, "op-1"
+        )
+
+    assert recreated is False
+    assert globbed_in_lock == [False]
+    assert sorted(p.name for p in log_dir.iterdir()) == []

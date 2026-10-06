@@ -19,7 +19,11 @@ DB 是删除的唯一权威：``JobDeletionService`` 先在
   由 ``job_deletion_trash_sweep.sweep_deletion_trash`` 按 TTL 回收（只回收带已提交标记的条目）；
 - 提交后、移入前同源 job 被重建（确定性 id，create_job 不取 job-mutation
   锁）：移入在 ``job-mutation:<id>`` 锁下复核 jobs 行仍不存在才执行，已重建就
-  整体跳过（目录与日志归新 job，交给 retention），绝不移走新 job 的活目录。
+  整体跳过（目录与日志归新 job，交给 retention），绝不移走新 job 的活目录；
+  并把「已重建」返回调用方，由其跳过按 job id 的后续清理与删除广播。
+
+日志路径的 glob 枚举在锁外完成（共享日志目录可能很大），锁内只复核行与
+rename——锁事务保持短，不阻塞重建后新 job 的 claim。
 
 锁下只做同文件系统原子 ``os.rename`` 进 trash（跨文件系统 EXDEV 即放弃、留
 残留，绝不在锁下拷贝），rmtree 在锁外：原路径瞬间腾空，同 id 重建的 job 不会
@@ -84,8 +88,11 @@ def purge_deleted_job_files(
     node_keys: Iterable[str],
     settings: Settings,
     operation_id: str,
-) -> None:
+) -> bool:
     """提交后把已删 job 的本地目录与日志移入 trash 再删除；失败只记日志。
+
+    返回 True 表示锁下复核发现同源 job 已重建：调用方必须跳过按 job id 的
+    后续清理（artifact refs、对象存储）与删除广播，否则会误删 / 误报新 job。
 
     跨事务动作前重新校验目标身份与状态：job_dir 按快照行重新解析（重走
     managed-root 包含校验）；移入在 ``job-mutation:<id>`` 短事务锁下复核 jobs
@@ -99,6 +106,9 @@ def purge_deleted_job_files(
     except ManagedPathError:
         logger.warning("Skip local cleanup of deleted job %s: storage_dir escapes", job_id)
         storage_dir = None
+    # glob 枚举放锁外：锁内只剩行复核与原子 rename（存在性在锁内再探一次）。
+    log_paths = deleted_job_log_paths(settings, job_id, node_keys)
+    recreated = False
     try:
         with job_db.job_mutation_lock(job_id) as recreated:
             if recreated:
@@ -106,8 +116,9 @@ def purge_deleted_job_files(
             else:
                 if storage_dir is not None and storage_dir.is_dir():
                     staged += _stage(storage_dir, jobs_trash_root(settings) / operation_id, job_id)
-                for log_path in deleted_job_log_paths(settings, job_id, node_keys):
-                    staged += _stage(log_path, logs_trash_root(settings) / operation_id, job_id)
+                for log_path in log_paths:
+                    if log_path.exists():
+                        staged += _stage(log_path, logs_trash_root(settings) / operation_id, job_id)
     except Exception:
         # #204 broad-except audit: the jobs row is already committed as
         # deleted, so the lock transaction is a best-effort recheck — its only
@@ -121,6 +132,7 @@ def purge_deleted_job_files(
         _remove(path, job_id)
     _prune_empty(jobs_trash_root(settings) / operation_id)
     _prune_empty(logs_trash_root(settings) / operation_id)
+    return recreated
 
 
 def _stage(path: Path, trash_dir: Path, job_id: str) -> list[Path]:
