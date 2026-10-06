@@ -20,8 +20,12 @@ class _Store:
         return self.document
 
 
+class _FacadeStub:
+    """Stands in for the JobQueries facade; the store is replaced below."""
+
+
 def _switch(document, now):
-    switch = CspCompatSwitch("postgresql://unused", ttl_seconds=5.0, clock=lambda: now[0])
+    switch = CspCompatSwitch(_FacadeStub(), ttl_seconds=5.0, clock=lambda: now[0])
     store = _Store(document)
     switch._store = store
     return switch, store
@@ -57,3 +61,10 @@ def test_read_failure_fails_closed_without_caching() -> None:
     assert switch.enabled() is False
     store.document = {"csp_script_unsafe_inline": True}
     assert switch.enabled() is True and store.reads == 2
+
+
+@pytest.mark.no_db
+def test_bare_dsn_is_rejected() -> None:
+    """BOUNDARY-DATA-001: only the JobQueries facade, never a DSN string."""
+    with pytest.raises(TypeError, match="JobQueries facade"):
+        CspCompatSwitch("postgresql://127.0.0.1/agent_legion")

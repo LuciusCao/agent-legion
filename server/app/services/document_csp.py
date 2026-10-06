@@ -21,11 +21,14 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import psycopg
 
-from server.app.db.dialect import ConnectSource
 from server.app.services.instance_settings_store import InstanceSettingsStore
+
+if TYPE_CHECKING:
+    from server.app.jobs import JobQueries
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +41,15 @@ class CspCompatSwitch:
 
     def __init__(
         self,
-        connect_source: ConnectSource,
+        job_db: JobQueries,
         ttl_seconds: float = DEFAULT_TTL_SECONDS,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._store = InstanceSettingsStore(connect_source)
+        # JobQueries facade only (BOUNDARY-DATA-001): a bare DSN would make
+        # the store build its own DB accessor around the facade.
+        if isinstance(job_db, str):
+            raise TypeError("CspCompatSwitch needs the JobQueries facade, not a DSN")
+        self._store = InstanceSettingsStore(job_db)
         self._ttl = ttl_seconds
         self._clock = clock
         # (value, expires_at); None = nothing cached. One tuple swap keeps
