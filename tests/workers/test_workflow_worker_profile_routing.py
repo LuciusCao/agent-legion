@@ -85,7 +85,7 @@ def test_route_less_legacy_agent_node_never_falls_into_the_code_pool(
     (no route row) while this job's frozen snapshot keeps the legacy node —
     resolve its Agent by capability, or fail with an actionable message."""
     from server.app.agent_catalog import AgentDefinition
-    from server.app.workflow_worker import routing_fallback
+    from server.app.workflow_worker import routing
     from server.app.workflow_worker.routing import NodeRoute
 
     definitions = {
@@ -96,10 +96,10 @@ def test_route_less_legacy_agent_node_never_falls_into_the_code_pool(
     worker.state.route_cache = {}
     with (
         patch(
-            "server.app.workflow_worker.routing._resolve_uncached",
+            "server.app.workflow_worker.routing_cache._resolve_uncached",
             return_value=NodeRoute("executor", target_id="code"),
         ),
-        patch.object(routing_fallback, "legacy_agent_catalog", return_value=definitions),
+        patch.object(routing, "legacy_agent_catalog", return_value=definitions),
     ):
         route = resolve_node_route(worker, "ws", "ws", _legacy_node())
 

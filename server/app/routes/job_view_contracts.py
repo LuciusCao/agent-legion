@@ -80,6 +80,10 @@ class JobNodeResponse(BaseModel):
     executor_kind: Literal["code", "pi", "openclaw"] | None = None
     agent_id: str | None = None
     worker_id: str | None = None
+    # PR #1085: the shared route decision (same as dispatch) says this node
+    # would fail as a configuration error (e.g. a route to an unpublished
+    # Agent); executor_kind and agent_id are then both None.
+    route_error: str | None = None
     hydration_defer: HydrationDeferResponse | None = None
 
 

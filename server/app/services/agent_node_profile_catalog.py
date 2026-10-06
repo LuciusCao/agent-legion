@@ -11,7 +11,7 @@ touching those readers again.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from server.app.agent_catalog import AgentDefinition
@@ -37,6 +37,21 @@ def legacy_agent_catalog(
 ) -> Mapping[str, AgentDefinition]:
     """The workspace's published Agent definitions keyed by agent_id (~5s cache, hot paths)."""
     return published_agent_definitions(connect_source, workspace_id)
+
+
+def lazy_legacy_agent_catalog(
+    connect_source: ConnectSource, workspace_id: str
+) -> Callable[[], Mapping[str, AgentDefinition]]:
+    """Memoized loader for the shared route decision: read at most once, only
+    if some node actually needs the catalog (PR #1085)."""
+    memo: list[Mapping[str, AgentDefinition]] = []
+
+    def load() -> Mapping[str, AgentDefinition]:
+        if not memo:
+            memo.append(legacy_agent_catalog(connect_source, workspace_id))
+        return memo[0]
+
+    return load
 
 
 def fresh_legacy_agent_catalog(
