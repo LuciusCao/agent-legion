@@ -1,15 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchJobTokenUsage } from '../../api/jobApi'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import { formatNumber } from '../../lib/formatters'
 import { toErrorMessage } from '../../lib/queryError'
 import styles from './TokenUsageJobPanel.module.css'
 
 interface Props {
   jobId: string
-}
-
-function fmt(value: number | null | undefined) {
-  return typeof value === 'number' ? value.toLocaleString('zh-CN') : '-'
 }
 
 function money(currency: string, value: number | null | undefined) {
@@ -43,10 +40,13 @@ export function TokenUsageJobPanel({ jobId }: Props) {
       <div className={styles.summaryGrid}>
         <div className={styles.metric}>
           <div className={styles.metricLabel}>总 Token</div>
-          <div className={styles.metricValue}>{fmt(total.total_tokens)}</div>
+          <div className={styles.metricValue}>
+            {formatNumber(total.total_tokens)}
+          </div>
           <div className={styles.metricMeta}>
-            输入 {fmt(total.input_tokens)} / 输出 {fmt(total.output_tokens)} /
-            缓存 {fmt(total.cache_read_tokens)}
+            输入 {formatNumber(total.input_tokens)} / 输出{' '}
+            {formatNumber(total.output_tokens)} / 缓存{' '}
+            {formatNumber(total.cache_read_tokens)}
           </div>
         </div>
         <div className={styles.metric}>
@@ -99,7 +99,7 @@ export function TokenUsageJobPanel({ jobId }: Props) {
                     ? `${run.usage.provider || '未知'} / ${run.usage.model || '未知'}`
                     : run.reason || '无数据'}
                 </td>
-                <td>{fmt(run.usage?.total_tokens)}</td>
+                <td>{formatNumber(run.usage?.total_tokens)}</td>
                 <td className={styles.money}>
                   {run.usage
                     ? money(data.currency, run.usage.cost?.total)

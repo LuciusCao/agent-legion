@@ -8,11 +8,11 @@ export function createMockAgentsState(
 ): AgentsState {
   return {
     agents: [],
-    workerPausedByWorkspace: {},
-    getWorkerPaused: vi.fn(() => false),
     connectAgentsWs: vi.fn(() => vi.fn()),
-    fetchWorkerStatus: vi.fn(),
-    setWorkerPaused: vi.fn(),
+    fetchWorkerStatus: vi.fn(() =>
+      Promise.resolve({ paused: false, superseded: false })
+    ),
+    setWorkerPaused: vi.fn(() => Promise.resolve(false)),
     ...partial,
   }
 }

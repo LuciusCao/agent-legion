@@ -12,6 +12,7 @@ from tests.postgres_support import (
     BASE_DATABASE_URL,
     TEST_DATABASE_URL,
     TEST_SCHEMA,
+    close_database_pools_settled,
     ensure_test_database,
 )
 
@@ -20,7 +21,6 @@ os.environ["AGENT_LEGION_DATABASE_URL"] = TEST_DATABASE_URL
 import psycopg
 from psycopg import sql
 
-from server.app.db.connection import close_database_pools
 from server.app.db.schema import init_db
 from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
@@ -185,7 +185,7 @@ def pytest_collection_modifyitems(config, items):
 def _rebuild_schema() -> None:
     """Drop and recreate the per-xdist-worker schema, then apply full DDL."""
     global _SEED_SNAPSHOT
-    close_database_pools()
+    close_database_pools_settled()
     try:
         with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as conn:
             conn.execute(
@@ -295,17 +295,22 @@ def _fail_on_leaked_locks(conn, phase: str) -> None:
     """Fail with attribution when the isolation pass hits the lock timeout.
 
     The blocker query must not itself inherit the lock_timeout wait: it
-    reads only pg_stat_activity (catalog), so it returns immediately.
+    reads only pg_locks / pg_stat_activity (catalog), so it returns
+    immediately. It lists sessions HOLDING locks on this worker's schema,
+    not pg_blocking_pids(): by the time it runs the timed-out statement was
+    cancelled, nobody waits any more, and the waiter-based probe always
+    answered "(none visible)" (#1045).
     """
     blockers = conn.execute(
         """
-        select pid, state, left(query, 90) as query
-        from pg_stat_activity
-        where datname = current_database()
-          and pid = any(
-            select unnest(pg_blocking_pids(pid)) from pg_stat_activity
-          )
-        """
+        select distinct a.pid, a.state, left(a.query, 90) as query
+        from pg_locks l
+        join pg_class c on c.oid = l.relation
+        join pg_namespace n on n.oid = c.relnamespace
+        join pg_stat_activity a on a.pid = l.pid
+        where n.nspname = %s and l.granted and l.pid <> pg_backend_pid()
+        """,
+        (TEST_SCHEMA,),
     ).fetchall()
     held = "\n".join(f"  pid {row[0]} ({row[1]}): {row[2]}" for row in blockers)
     pytest.fail(
@@ -416,7 +421,7 @@ def _session_test_schema():
     ensure_test_database()
     _rebuild_schema()
     yield
-    close_database_pools()
+    close_database_pools_settled()
 
 
 @pytest.fixture(autouse=True)
@@ -455,7 +460,7 @@ def _isolate_postgres_database(_assert_shared_app_invariants, request):
         reset_published_agent_cache()
         _capture_seed_snapshot()
     else:
-        close_database_pools()
+        close_database_pools_settled()
         replayed = _reset_schema_data()
         reset_published_agent_cache()
         if not replayed:
@@ -466,7 +471,7 @@ def _isolate_postgres_database(_assert_shared_app_invariants, request):
         # tests on this worker see the pristine schema.
         _rebuild_schema()
     else:
-        close_database_pools()
+        close_database_pools_settled()
 
 
 @pytest.fixture(autouse=True)
@@ -573,8 +578,15 @@ def _fake_cms_question_item(question_id: str) -> dict[str, object]:
 
 @pytest.fixture(autouse=True)
 def _fast_password_hashing(_assert_shared_app_invariants, monkeypatch):
-    """Tests mint a session per client; keep pbkdf2 cheap so the suite stays fast."""
+    """Tests mint a session per client; keep pbkdf2 cheap so the suite stays fast.
+
+    Same harness relaxation for the #970 new-password length floor: fixture
+    accounts across the suite use short throwaway passwords. The weak-list
+    rule stays live; tests/routes/test_password_policy.py re-tightens the
+    length to pin the production baseline.
+    """
     monkeypatch.setattr("server.app.auth.passwords._ITERATIONS", 1_000)
+    monkeypatch.setattr("server.app.auth.password_policy.MIN_PASSWORD_LENGTH", 1)
 
 
 @pytest.fixture

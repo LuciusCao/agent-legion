@@ -2,6 +2,7 @@
  * 预览面板查询 hooks（issue #328）。query key 留在本特性目录内定义
  * （previewPanel 是 #328 的自包含特性面，不扩散到 lib/queryKeys）。
  */
+import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   archivePreviewPanel,
@@ -26,22 +27,46 @@ export function usePublishedPreviewPanel(workspaceId: string | undefined) {
   })
 }
 
+/** 定制对话开着（agent 正在写草稿）时的轮询间隔：「改一版看一版」要跟手。 */
+export const PREVIEW_STATE_ACTIVE_POLL_MS = 3_000
+/** 对话关着时的轮询间隔（#965）：只为头部治理行的草稿状态，不需要跟手。 */
+export const PREVIEW_STATE_IDLE_POLL_MS = 30_000
+
+/** 治理面状态轮询档位（#965）：未启用不轮询；定制对话开着 3s，否则 30s。 */
+export function previewPanelStatePollInterval(
+  enabled: boolean,
+  customizing: boolean
+): number | false {
+  if (!enabled) return false
+  return customizing ? PREVIEW_STATE_ACTIVE_POLL_MS : PREVIEW_STATE_IDLE_POLL_MS
+}
+
 /**
  * 治理面状态（published + draft）。enabled 时轮询：agent 经 MCP 写草稿后
  * 左栏预览「改一版看一版」（仅当前用户可见——草稿渲染是本页面的客户端
  * 状态，不落任何共享通道）。#796 返工后由调用方按 admin 身份常驻开启
  * （头部治理行需要草稿状态，原来只在「定制预览」面板开着时启用）。
+ * #965：常驻 3s 与 job 详情轮询叠加过密——只有定制对话开着（agent 在写
+ * 草稿）时保持 3s，关着降到 30s；发布/归档成功后的 invalidate 不受影响。
  */
 export function usePreviewPanelState(
   workspaceId: string | undefined,
-  enabled: boolean
+  enabled: boolean,
+  customizing = false
 ) {
-  return useQuery({
+  const query = useQuery({
     queryKey: previewPanelKeys.state(workspaceId ?? ''),
     queryFn: ({ signal }) => fetchPreviewPanelState(workspaceId!, signal),
     enabled: Boolean(workspaceId) && enabled,
-    refetchInterval: enabled ? 3000 : false,
+    refetchInterval: previewPanelStatePollInterval(enabled, customizing),
   })
+  // 对话打开即刷新一次：空闲档最多 30s 前的帧不该成为「改一版看一版」的起点。
+  const { refetch } = query
+  const active = Boolean(workspaceId) && enabled && customizing
+  useEffect(() => {
+    if (active) void refetch()
+  }, [active, refetch])
+  return query
 }
 
 function useInvalidatePreviewPanel(workspaceId: string | undefined) {

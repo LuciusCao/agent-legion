@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,23 @@ import yaml
 
 from shared.code_sandbox import resolve_sandbox_binary
 from shared.concurrency_limits import MAX_DYNAMIC_CONCURRENCY
+
+logger = logging.getLogger(__name__)
+# 已移除的配置键（#452：`capabilities` 自 #284 起即 no-op）：存量 worker.yaml
+# 残留时剥离并每进程告警一次，不让 Worker 因旧键启动失败。两条读取路径共用
+# 这一处（#1023）：WorkerConfigStore 经 config_validation.validate_config，
+# 直接 `executor.py --config` 经下方 load_config——放在这一层是因为
+# config_validation 已依赖本模块（反向 import 成环）。
+_REMOVED_KEYS = frozenset({"capabilities"})
+_warned_removed: set[str] = set()
+
+
+def strip_removed_keys(raw: dict[str, Any]) -> dict[str, Any]:
+    """Drop retired keys (warning once per process per key); returns a copy."""
+    for key in sorted((_REMOVED_KEYS & raw.keys()) - _warned_removed):
+        _warned_removed.add(key)
+        logger.warning("config key %r was removed (issue #452) and is ignored; delete it", key)
+    return {key: value for key, value in raw.items() if key not in _REMOVED_KEYS}
 
 
 def validate_claim_controls(capacity: Any, enabled: Any) -> None:
@@ -26,7 +44,9 @@ def load_config(path: Path) -> dict[str, Any]:
     config = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(config, dict):
         raise ValueError("worker config must be a mapping")
-    return config
+    # #1023：executor 每个 pass 热读本函数，告警由 strip_removed_keys 的
+    # 进程级去重保证只出一次。
+    return strip_removed_keys(config)
 
 
 def load_claim_controls(path: Path) -> tuple[int, bool, Any]:

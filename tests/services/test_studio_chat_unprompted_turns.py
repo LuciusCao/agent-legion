@@ -259,6 +259,15 @@ def _agent_texts(service, session_id):
     ]
 
 
+def _published_unprompted_end(bus) -> bool:
+    return any(
+        payload.get("type") == "message"
+        and payload["message"]["content"].get("event") == "turn_end"
+        and payload["message"]["content"].get("unprompted") is True
+        for _channel, payload in list(bus.events)
+    )
+
+
 @pytest.fixture
 def kimi_home(tmp_path, monkeypatch):
     home = tmp_path / "kimi-code-home"
@@ -272,10 +281,17 @@ def test_unprompted_wire_turn_is_persisted_and_published(chat, kimi_home):
     register(_script(kimi_home, wire=TASK_TURN))
     session = service.create_session(workspace_id, user_id, "fake-agent")
     service.send_message(session["id"], workspace_id, "派一个后台子代理")
+    # The human turn settles on the ACP thread; wait for it rather than rely
+    # on the fake agent's unprompted delay outlasting it under load.
     wait_for_predicate(
-        lambda: "REPORT-938: 子代理已完成，结果 42" in _agent_texts(service, session["id"]),
-        timeout=15,
+        lambda: service.get_session(session["id"], workspace_id)["status"] == "idle", timeout=15
     )
+    # The watcher appends (DB insert, then publish) the turn's rows one by
+    # one; seeing the text row says nothing about the rows after it. Wait for
+    # the last one — the unprompted turn_end, published after its insert — so
+    # every earlier row is durable and published before asserting.
+    wait_for_predicate(lambda: _published_unprompted_end(bus), timeout=15)
+    assert "REPORT-938: 子代理已完成，结果 42" in _agent_texts(service, session["id"])
     messages = service.list_messages(session["id"], None)
     events = [m["content"].get("event") for m in messages if m["kind"] == "status"]
     assert "unprompted_turn" in events
@@ -388,15 +404,15 @@ def test_turn_written_during_session_load_is_persisted(chat, kimi_home):
     )
     resumed = service.resume_session(session["id"], workspace_id, user_id)
     assert resumed["acp_session_id"] == "session_938"
-    wait_for_predicate(
-        lambda: "CRON-REPORT-938: 定时检查完成" in _agent_texts(service, session["id"]), timeout=15
-    )
+    # Wait on the bus, not the DB: a row is inserted before it is published.
+    wait_for_predicate(lambda: _published_unprompted_end(bus), timeout=15)
     texts = _agent_texts(service, session["id"])
+    assert "CRON-REPORT-938: 定时检查完成" in texts
     assert "REPORT-938: 子代理已完成，结果 42" not in texts
     assert [m["content"]["origin"] for m in _receipts(service, session["id"])] == ["cron_job"]
     published = [
         payload["message"]["content"].get("text")
-        for _channel, payload in bus.events
+        for _channel, payload in list(bus.events)
         if payload.get("type") == "message"
     ]
     assert "CRON-REPORT-938: 定时检查完成" in published
