@@ -261,7 +261,6 @@ describe('WorkspaceMainPage batch operations', () => {
           workspace_id: 'ws1',
         }),
       ],
-      workerPausedByWorkspace: {},
     })
     useUiStore.setState({
       workspacePackageDialogOpen: false,

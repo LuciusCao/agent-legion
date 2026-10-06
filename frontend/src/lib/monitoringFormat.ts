@@ -1,10 +1,5 @@
 import type { OpsGranularity } from '../api/metrics'
 
-/** 千分位整数；无数据显示占位符。 */
-export function fmt(value: number | null | undefined) {
-  return typeof value === 'number' ? value.toLocaleString('zh-CN') : '-'
-}
-
 /** 耗时展示：不足 1 分钟按秒，否则「Xm YYs」；无数据（窗口内无完成 run）显示占位符。 */
 export function fmtDuration(seconds: number | null | undefined) {
   if (typeof seconds !== 'number') return '-'

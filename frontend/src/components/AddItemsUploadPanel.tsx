@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Button } from '@mui/material'
 
-import { formatBytes } from '../lib/addItems'
+import { formatBytes } from '../lib/formatters'
 import styles from './AddItemsDialog.module.css'
 import { STATUS_LABELS, type UploadEntry } from './useMaterialUploads'
 

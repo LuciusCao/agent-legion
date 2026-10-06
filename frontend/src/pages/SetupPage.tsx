@@ -62,6 +62,7 @@ export default function SetupPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="new-password"
+          helperText="至少 12 位，避免常见弱口令"
           fullWidth
         />
         <TextField
