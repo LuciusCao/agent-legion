@@ -37,6 +37,31 @@ def test_weak_passwords_are_refused(floor, password: str) -> None:
 
 
 @pytest.mark.no_db
+@pytest.mark.parametrize(
+    "password",
+    [" " * 16, "\t" * 12, " \t \n" * 4, "   short-pw   ", "  elevenchars  "],
+)
+def test_whitespace_never_satisfies_the_floor(floor, password: str) -> None:
+    """codex on #1062: whitespace-only passwords passed the raw length check
+    and slipped past the repeated-character rule (empty after strip);
+    surrounding whitespace does not count toward the floor either."""
+    with pytest.raises(WeakPasswordError, match="at least"):
+        validate_new_password(password)
+
+
+@pytest.mark.no_db
+def test_whitespace_only_is_refused_even_with_the_harness_floor(monkeypatch) -> None:
+    monkeypatch.setattr(password_policy, "MIN_PASSWORD_LENGTH", 1)
+    with pytest.raises(WeakPasswordError):
+        validate_new_password("    ")
+
+
+@pytest.mark.no_db
+def test_inner_whitespace_still_counts(floor) -> None:
+    validate_new_password("  correct horse battery  ")
+
+
+@pytest.mark.no_db
 @pytest.mark.parametrize("password", [STRONG, "twelve-chars", "correct horse battery"])
 def test_reasonable_passwords_pass(floor, password: str) -> None:
     validate_new_password(password)

@@ -46,10 +46,16 @@ def validate_new_password(password: str) -> None:
     Reads ``MIN_PASSWORD_LENGTH`` at call time (module attribute), so the
     test harness can relax the length for fixture accounts the same way it
     cheapens the pbkdf2 cost.
+
+    The length floor counts the password with surrounding whitespace
+    removed: leading/trailing spaces add no guessing cost, and a password
+    made only of whitespace must never pass. The stored secret is still the
+    exact string given (login compares it verbatim), and the policy only
+    runs on new-password paths, so existing accounts are unaffected.
     """
-    if len(password) < MIN_PASSWORD_LENGTH:
-        raise WeakPasswordError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
     normalized = password.strip().lower()
+    if not normalized or len(normalized) < MIN_PASSWORD_LENGTH:
+        raise WeakPasswordError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
     # A single repeated character ("111111111111") is as weak as any listed entry.
     if normalized in _COMMON_PASSWORDS or len(set(normalized)) == 1:
         raise WeakPasswordError("Password is too common; choose a less guessable one")
