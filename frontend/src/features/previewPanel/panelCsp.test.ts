@@ -63,6 +63,24 @@ describe('injectPanelCsp', () => {
     }
   })
 
+  it('bundle 自带 nonce 策略的脚本保留原 nonce（兼容模式可恢复），其余照常盖章', () => {
+    const out = parse(
+      injectPanelCsp(
+        '<!doctype html><html><head>' +
+          `<meta http-equiv="Content-Security-Policy" content="script-src 'nonce-panel'">` +
+          '<script nonce="panel">own()</script><script nonce="stale">x()</script>' +
+          '</head><body><script>y()</script></body></html>',
+        csp,
+        'n0nce'
+      )
+    )
+    const nonces = Array.from(out.querySelectorAll('script')).map((s) =>
+      s.getAttribute('nonce')
+    )
+    // 探针、bundle 自有 nonce 脚本、无匹配策略的 nonce、无 nonce 脚本。
+    expect(nonces).toEqual(['n0nce', 'panel', 'n0nce', 'n0nce'])
+  })
+
   it('无 nonce 时只注入 CSP meta，脚本原样', () => {
     const out = injectPanelCsp(
       '<!doctype html><html><head><script>var a=1</script></head><body></body></html>',

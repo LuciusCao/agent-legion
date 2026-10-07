@@ -61,7 +61,11 @@ Consequences for your markup:
   create at runtime with inline text needs `script.nonce =
   document.currentScript.nonce` to run (script `src` from the platform
   origin, e.g. `assets.katexJsUrl`, needs nothing). `eval` / `new
-  Function` / string `setTimeout` are blocked as well.
+  Function` / string `setTimeout` are blocked as well. Do not ship your own
+  nonce-based CSP (`script-src 'nonce-…'` plus matching `nonce=` attributes):
+  a script carries one nonce and cannot satisfy both your policy and the
+  host's, so such a bundle only runs while the instance CSP compatibility
+  mode is on.
 - Platform build assets the host explicitly offers (currently
   `assets.katexCssUrl` / `assets.katexJsUrl` for LaTeX) MAY be loaded; always
   degrade gracefully when absent.

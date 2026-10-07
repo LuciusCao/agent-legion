@@ -78,6 +78,24 @@ export function buildPanelCsp(): string {
  */
 const VIOLATION_PROBE = `(function(){var seen={};document.addEventListener('securitypolicyviolation',function(e){var d=e.effectiveDirective||e.violatedDirective||'';if(d.indexOf('script-src')!==0||seen[d])return;seen[d]=1;window.parent.postMessage({source:${JSON.stringify(PREVIEW_PANEL_SOURCE)},type:'csp-violation',directive:d},'*')})})()`
 
+/** bundle 自带 CSP meta 里声明的 `'nonce-…'` 值（在宿主 meta 插入前读取）。 */
+function bundlePolicyNonces(doc: Document): Set<string> {
+  const nonces = new Set<string>()
+  for (const meta of Array.from(doc.querySelectorAll('meta[http-equiv]'))) {
+    if (
+      meta.getAttribute('http-equiv')?.toLowerCase() !==
+      'content-security-policy'
+    )
+      continue
+    for (const m of (meta.getAttribute('content') ?? '').matchAll(
+      /'nonce-([^']+)'/g
+    )) {
+      nonces.add(m[1])
+    }
+  }
+  return nonces
+}
+
 /**
  * 把 CSP meta（与 nonce 探针）注入 bundle 文档的真实 <head> 顶部，并给
  * 每个 <script> 盖上宿主 nonce（nonce 为空时不盖章、不注入探针）。
@@ -89,7 +107,9 @@ const VIOLATION_PROBE = `(function(){var seen={};document.addEventListener('secu
  * 透明。bundle 自带的 CSP meta 若存在只会更严（多策略取交集）。
  * 序列化用 outerHTML 而非 XMLSerializer：保持 HTML 语法（自闭合、实体）。
  * 盖章同样走解析器语义：只有真实 <script> 元素拿到 nonce，字符串或注释里
- * 的伪 `<script>` 不受影响。
+ * 的伪 `<script>` 不受影响。bundle 自带 nonce 策略（自身 CSP meta 声明
+ * `'nonce-X'` 且脚本带 nonce="X"）的脚本保留原 nonce：只在实例 CSP 兼容
+ * 模式下可运行，严格模式不支持此形态（作者约束见 preview_guide.md）。
  */
 export function injectPanelCsp(html: string, csp: string, nonce = ''): string {
   const meta = document.createElement('meta')
@@ -97,7 +117,14 @@ export function injectPanelCsp(html: string, csp: string, nonce = ''): string {
   meta.setAttribute('content', csp)
   const doc = new DOMParser().parseFromString(html, 'text/html')
   if (nonce) {
+    const ownNonces = bundlePolicyNonces(doc)
     for (const script of Array.from(doc.querySelectorAll('script'))) {
+      // bundle 自带 nonce 策略且脚本 nonce 与之匹配时保留（codex P2）：
+      // 一个脚本只能有一个 nonce，宿主 nonce 必被 bundle 自身策略拒绝；
+      // 保留后兼容模式（宿主头 'unsafe-inline'）下该面板照常运行，严格
+      // 模式下覆盖与否都过不了两层策略，结果不变。
+      const own = script.getAttribute('nonce')
+      if (own && ownNonces.has(own)) continue
       script.setAttribute('nonce', nonce)
     }
     const probe = doc.createElement('script')
