@@ -164,8 +164,9 @@ impl Aggregated {
     /// Append a streamed delta to an aggregated string, rejecting the stream
     /// once the buffer passes the #637 defensive cap (see
     /// [`MAX_STREAMED_TEXT_CHARS`]) — without it a proxy/gateway streaming
-    /// junk forever (the OpenAI-compatible path sends no max_tokens, so
-    /// nothing else bounds the stream) would grow the aggregate unbounded.
+    /// junk forever (the OpenAI-compatible path sends no max_tokens unless
+    /// --max-output-tokens is set, and a hostile stream ignores it anyway)
+    /// would grow the aggregate unbounded.
     fn push_bounded(target: &mut String, delta: &str) -> Result<(), ProviderError> {
         if target.len() + delta.len() > MAX_STREAMED_TEXT_CHARS {
             return Err(ProviderError::Transient(format!(

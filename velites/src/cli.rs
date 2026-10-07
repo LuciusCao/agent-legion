@@ -79,6 +79,14 @@ pub struct Cli {
     #[arg(long)]
     pub max_tokens: Option<u64>,
 
+    /// Per-call output token cap for every model call, thinking included
+    /// (#952). Overrides the model's `maxOutputTokens` from models.json on
+    /// the Anthropic path and is sent as `max_tokens` on the
+    /// OpenAI-compatible path (which otherwise sends none and inherits the
+    /// server default). Unrelated to --max-tokens (cumulative run budget).
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    pub max_output_tokens: Option<u64>,
+
     /// Files that must exist when the run ends. Repeatable. Paths must
     /// resolve inside the working directory (same sandbox as the tools);
     /// missing files trigger one remediation turn, an `outputs_validation`
@@ -268,6 +276,7 @@ mod tests {
         assert_eq!(cli.timeout_seconds, 600);
         assert_eq!(cli.max_turns, None);
         assert_eq!(cli.max_tokens, None);
+        assert_eq!(cli.max_output_tokens, None);
         assert!(cli.require_output.is_empty());
         assert!(cli.skill.is_empty());
         assert!(!cli.no_sandbox);

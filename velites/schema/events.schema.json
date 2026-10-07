@@ -175,7 +175,7 @@
       "type": "object"
     },
     "AutoRetryStartEvent": {
-      "description": "`auto_retry_start` event (pi-compatible): emitted right after the error\n`message_end` of a failed transient attempt, before the backoff sleep.\nThere is intentionally no `auto_retry_end` — Pi doesn't have one either;\nthe Host's `fold_model_error` treats the next successful assistant\n`message_end` (`stopReason=stop|toolUse`) as \"recovered\".",
+      "description": "`auto_retry_start` event (pi-compatible): emitted right after the error\n`message_end` of a failed transient attempt, before the backoff sleep.\nThere is intentionally no `auto_retry_end` — Pi doesn't have one either;\nthe Host's `fold_model_error` treats the next successful assistant\n`message_end` (`stopReason=stop|toolUse|length`) as \"recovered\".",
       "type": "object",
       "properties": {
         "attempt": {
