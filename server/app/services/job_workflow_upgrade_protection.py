@@ -51,7 +51,7 @@ class InputProtectionPlan:
     freshness 均证明）。``unprovable``：两方向均不可证明——非空即 fail
     closed。``sweep``：``clean`` 全集——提交后需再扫一次本地文件
     （hydration 与提交交错可能在窗口内复活旧字节，见
-    docs/architecture/execution-generation.md §5 残余面）。``rmw_retire``：
+    docs/architecture/execution-generation.md §4 第 4 条残余面）。``rmw_retire``：
     ``clean`` 中的 RMW 附着名（codex #776 R8 P1-A）——暂存面的 RMW 排除
     （#114 启动输入保护）把它们留在删除面外，判定与删除面会脱节（旧文件
     与清单行存活、``_check_outputs`` 把旧字节当新输出）；调用方必须把它们

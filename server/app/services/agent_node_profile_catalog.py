@@ -20,6 +20,7 @@ from server.app.jobs.queries.agent_profile_scan import has_self_contained_agent_
 from server.app.services.agent_node_profile import (
     AgentNodeProfile,
     profile_from_definition,
+    resolve_agent_node_profile,
     resolve_routed_agent_profile,
 )
 from server.app.services.agent_service import (
@@ -37,6 +38,22 @@ def legacy_agent_catalog(
 ) -> Mapping[str, AgentDefinition]:
     """The workspace's published Agent definitions keyed by agent_id (~5s cache, hot paths)."""
     return published_agent_definitions(connect_source, workspace_id)
+
+
+def legacy_fallback_agent_id(
+    connect_source: ConnectSource, workspace_id: str, node: Any
+) -> str | None:
+    """Agent a route-less legacy agent node dispatches to, or None (#933, #1091).
+
+    Its capability's unique published Agent — exactly how revision publish
+    derived the route before the active revision pruned it. Shared by the
+    dispatch fallback (``workflow_worker.routing_fallback``) and the job
+    detail projection, so both name the same Agent for a frozen legacy node.
+    """
+    profile = resolve_agent_node_profile(node, legacy_agent_catalog(connect_source, workspace_id))
+    if profile is None or profile.legacy_ref is None:
+        return None
+    return profile.legacy_ref.agent_id
 
 
 def fresh_legacy_agent_catalog(

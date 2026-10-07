@@ -133,6 +133,7 @@ const instanceSettings: InstanceSettingsResponse = {
   result_unpack: { workers: 0 },
   result_validate: { workers: 0 },
   agent_claim: { worker_touch_interval_seconds: 30 },
+  csp_script_unsafe_inline: false,
   skills_root: '~/.agents/skills',
 }
 

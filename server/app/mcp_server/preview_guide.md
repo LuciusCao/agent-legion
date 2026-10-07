@@ -49,6 +49,23 @@ Consequences for your markup:
   blocks, no external script/style origins. CDN references are blocked by the
   host CSP (and may be unreachable on self-hosted deployments) — do not rely
   on them.
+- Script only in `<script>` elements. The frame also inherits the platform
+  page's own policy, whose `script-src` is nonce-based: the host stamps that
+  nonce on every `<script>` element of your bundle before rendering, but
+  inline event-handler attributes (`onclick="…"`, `onload=`, `oninput=` …,
+  including ones you build with `innerHTML`) and `javascript:` URLs can
+  NOT be authorized and are blocked — the panel renders but those controls
+  silently do nothing (the host shows a warning banner when it detects
+  this). Attach handlers with `addEventListener` (or `el.onclick = fn`
+  property assignment) from a `<script>` block instead. A `<script>` you
+  create at runtime with inline text needs `script.nonce =
+  document.currentScript.nonce` to run (script `src` from the platform
+  origin, e.g. `assets.katexJsUrl`, needs nothing). `eval` / `new
+  Function` / string `setTimeout` are blocked as well. Do not ship your own
+  nonce-based CSP (`script-src 'nonce-…'` plus matching `nonce=` attributes):
+  a script carries one nonce and cannot satisfy both your policy and the
+  host's, so such a bundle only runs while the instance CSP compatibility
+  mode is on.
 - Platform build assets the host explicitly offers (currently
   `assets.katexCssUrl` / `assets.katexJsUrl` for LaTeX) MAY be loaded; always
   degrade gracefully when absent.
@@ -147,3 +164,6 @@ rendering with graceful degradation.
   `source` marker field instead).
 - Blank panel after publish: you fetched the platform API directly instead of
   the bridge; the opaque origin carries no credentials.
+- Buttons/inputs do nothing (and a "部分脚本被安全策略拦截" banner shows above
+  the panel): the bundle uses inline event-handler attributes (`onclick=`)
+  or `javascript:` URLs; rebind them with `addEventListener`.

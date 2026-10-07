@@ -1,13 +1,29 @@
-"""Document Content-Security-Policy on served HTML (#752)."""
+"""Document Content-Security-Policy on served HTML (#752, nonce #989)."""
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 
-from server.app.http_csp import build_spa_csp, object_store_connect_sources
+from server.app.http_csp import (
+    ContentSecurityPolicyMiddleware,
+    build_spa_csp,
+    object_store_connect_sources,
+)
+from server.app.http_csp_nonce import (
+    CSP_NONCE_PLACEHOLDER,
+    issue_csp_nonce,
+    mark_script_unsafe_inline,
+)
+from server.app.services.instance_settings_store import InstanceSettingsStore
 from server.app.storage.s3_settings import S3Settings
 from tests.helpers import setup_spa_app
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _directives(policy: str) -> dict[str, list[str]]:
@@ -37,6 +53,8 @@ def test_spa_documents_carry_csp_and_other_responses_do_not(tmp_path, monkeypatc
             assert policy["object-src"] == ["'none'"]
             assert policy["frame-ancestors"] == ["'self'"]
             assert "'self'" in policy["connect-src"]
+            # A dist without vite's nonce placeholder gets no nonce at all.
+            assert policy["script-src"] == ["'self'"]
         assert "content-security-policy" not in client.get("/assets/main.js").headers
         assert "content-security-policy" not in client.get("/api/health").headers
         # FastAPI's built-in API docs pages keep their own CDN-loaded UI.
@@ -54,11 +72,123 @@ def test_spa_documents_carry_csp_and_other_responses_do_not(tmp_path, monkeypatc
             assert "default-src 'self'" in response.headers["content-security-policy"], path
 
 
+def test_index_nonce_matches_header_and_rotates_per_response(tmp_path, monkeypatch):
+    """#989: the placeholder vite writes is swapped for the header's nonce."""
+    from server.app import main
+
+    root_dir, data_dir = setup_spa_app(tmp_path, monkeypatch)
+    frontend_dist = root_dir / "frontend" / "dist"
+    (frontend_dist / "assets").mkdir(parents=True)
+    (frontend_dist / "index.html").write_text(
+        f'<meta property="csp-nonce" nonce="{CSP_NONCE_PLACEHOLDER}">'
+        f'<script type="module" src="/assets/i.js" nonce="{CSP_NONCE_PLACEHOLDER}"></script>',
+        encoding="utf-8",
+    )
+
+    app = main.create_app(data_dir=data_dir, start_worker=False)
+    seen: set[str] = set()
+    with TestClient(app) as client:
+        for path in ("/", "/jobs/x", "/index.html", "/../index.html"):
+            response = client.get(path)
+            assert response.status_code == 200, path
+            script_src = _directives(response.headers["content-security-policy"])["script-src"]
+            assert script_src[0] == "'self'" and len(script_src) == 2, path
+            nonce = re.fullmatch(r"'nonce-([A-Za-z0-9_-]{20,})'", script_src[1]).group(1)
+            assert CSP_NONCE_PLACEHOLDER not in response.text
+            assert response.text.count(f'nonce="{nonce}"') == 2, path
+            # Per-response body: no validator, so no 304 can pair a cached
+            # body's old nonce with a fresh header.
+            assert "etag" not in response.headers and "last-modified" not in response.headers
+            assert response.headers["cache-control"] == "no-cache"
+            seen.add(nonce)
+    assert len(seen) == 4
+
+
+def _probe_app() -> FastAPI:
+    app = FastAPI()
+
+    @app.get("/page", response_class=HTMLResponse)
+    def page(request: Request) -> str:
+        if request.query_params.get("compat") == "1":
+            mark_script_unsafe_inline(request.scope)
+        return issue_csp_nonce(request.scope) + "|" + issue_csp_nonce(request.scope)
+
+    @app.get("/plain", response_class=HTMLResponse)
+    def plain() -> str:
+        return "<p>no nonce</p>"
+
+    app.add_middleware(ContentSecurityPolicyMiddleware)
+    return app
+
+
+@pytest.mark.no_db
+def test_middleware_puts_the_issued_nonce_in_the_header() -> None:
+    with TestClient(_probe_app()) as client:
+        response = client.get("/page")
+        first, second = response.text.split("|")
+        # One nonce per response, however often the endpoint asks.
+        assert first == second
+        policy = response.headers["content-security-policy"]
+        assert _directives(policy)["script-src"] == ["'self'", f"'nonce-{first}'"]
+        assert "'unsafe-inline'" not in _directives(policy)["script-src"]
+        assert _directives(client.get("/plain").headers["content-security-policy"])[
+            "script-src"
+        ] == ["'self'"]
+
+
+@pytest.mark.no_db
+def test_compat_flag_rolls_script_src_back_to_unsafe_inline() -> None:
+    """Compat mode leaves the nonce out: its presence disables 'unsafe-inline'."""
+    with TestClient(_probe_app()) as client:
+        response = client.get("/page?compat=1")
+        script_src = _directives(response.headers["content-security-policy"])["script-src"]
+        assert script_src == ["'self'", "'unsafe-inline'"]
+
+
+def test_instance_setting_switches_the_served_policy(tmp_path, monkeypatch):
+    """#989: admin switch on → pre-#989 header without nonce; off → nonce back."""
+    from server.app import main
+
+    root_dir, data_dir = setup_spa_app(tmp_path, monkeypatch)
+    frontend_dist = root_dir / "frontend" / "dist"
+    (frontend_dist / "assets").mkdir(parents=True)
+    (frontend_dist / "index.html").write_text(
+        f'<meta property="csp-nonce" nonce="{CSP_NONCE_PLACEHOLDER}">', encoding="utf-8"
+    )
+    app = main.create_app(data_dir=data_dir, start_worker=False)
+    store = InstanceSettingsStore(TEST_DATABASE_URL)
+    with TestClient(app) as client:
+        store.put({"csp_script_unsafe_inline": True})
+        app.state.csp_compat.invalidate()
+        response = client.get("/")
+        policy = response.headers["content-security-policy"]
+        assert _directives(policy)["script-src"] == ["'self'", "'unsafe-inline'"]
+        assert "nonce-" not in policy
+        # The body keeps a real nonce: stamped panels stay valid either way.
+        assert CSP_NONCE_PLACEHOLDER not in response.text
+
+        store.put({"csp_script_unsafe_inline": False})
+        app.state.csp_compat.invalidate()
+        script_src = _directives(client.get("/").headers["content-security-policy"])["script-src"]
+        assert script_src[0] == "'self'" and script_src[1].startswith("'nonce-")
+
+
+@pytest.mark.no_db
+def test_nonce_placeholder_matches_vite_config_and_panel_host() -> None:
+    """The literal is shared by three files; drift would silently drop the nonce."""
+    repo = Path(__file__).resolve().parents[2]
+    for relative in ("frontend/vite.config.ts", "frontend/src/features/previewPanel/panelCsp.ts"):
+        assert f"'{CSP_NONCE_PLACEHOLDER}'" in (repo / relative).read_text(encoding="utf-8"), (
+            relative
+        )
+
+
 @pytest.mark.no_db
 def test_policy_keeps_what_the_shipped_frontend_loads() -> None:
-    policy = _directives(build_spa_csp())
-    # srcdoc preview panels inherit this policy and are inline-script bundles.
-    assert "'unsafe-inline'" in policy["script-src"]
+    policy = _directives(build_spa_csp(script_nonce="abc"))
+    # srcdoc preview panels inherit this policy: their inline scripts run on
+    # the stamped nonce, never on 'unsafe-inline' (#989).
+    assert policy["script-src"] == ["'self'", "'nonce-abc'"]
     assert "'unsafe-inline'" in policy["style-src"]
     assert "https://fonts.googleapis.com" in policy["style-src"]
     assert {"data:", "https://fonts.gstatic.com"} <= set(policy["font-src"])
@@ -71,7 +201,7 @@ def test_connect_src_lists_request_host_sockets_only_for_plain_hosts() -> None:
     assert "wss://legion.example:8443" in plain["connect-src"]
     smuggled = _directives(build_spa_csp(host="evil; script-src *"))
     assert smuggled["connect-src"] == ["'self'"]
-    assert smuggled["script-src"] == ["'self'", "'unsafe-inline'"]
+    assert smuggled["script-src"] == ["'self'"]
 
 
 @pytest.mark.no_db
