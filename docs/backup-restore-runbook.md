@@ -311,8 +311,10 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
 `filename`（`MaterialPresignRequest` 只限长度），客户端提交 `size_bytes=0` 的这类名字
 会留下一条 ready 材料行和一个零字节、以 `/` 结尾的 key。所以零字节的 `…/` key（无论
 是控制台建目录留下的标记，还是这种材料）不走文件系统：`CHK` 把它们从文件比对中剔除并
-报出个数，快照链把它们的名字写进 `markers.txt`，恢复时按名重建为零字节对象（§2.3
-第 5 步），行 → 对象的核对因此仍能通过。其余落不了盘的 key 让 `CHK` 判失败：大小写
+报出个数；它们的名字就在源清单 `objects.json` 里（与文件比对共用同一份清单，没有另外
+的旁文件可被单独截断或改写），恢复时 `PUT_MARKERS` 据此按名重建为零字节对象，并在
+清空 bucket 之后比对新清单与源清单的这一集合（§2.3 第 5 步），行 → 对象的核对因此仍能
+通过。key 含换行时逐行格式无法无损表达，`MARKERS` 判失败、备份不成立，先处理掉该对象。其余落不了盘的 key 让 `CHK` 判失败：大小写
 冲突换到大小写敏感的文件系统重做；末尾 `/` 且有内容的 key 不是平台数据，本地后端改用
 §2.2.2 卷级冷备份，外部 S3 先查明来源并处理掉再备份。SeaweedFS 本身不保存这类 key 的内容：写入末尾为 `/` 的 key 时后端把它
 存成零字节目录，内容被丢弃（实测 4.45），所以在 SeaweedFS 上它们都表现为目录标记。热备份期间对象仍在变化时，清单与下载之间的增删改同样会判失败，重试
@@ -334,11 +336,18 @@ export AWS_ACCESS_KEY_ID=<AGENT_LEGION_S3_ACCESS_KEY> \
        AWS_SECRET_ACCESS_KEY=<AGENT_LEGION_S3_SECRET_KEY> AWS_DEFAULT_REGION=us-east-1
 S3() { aws --endpoint-url "$EP" s3 "$@"; }
 LIST() { aws --endpoint-url "$EP" s3api list-objects-v2 --bucket "$B" --output json; }
-# MARKERS <清单 JSON>：列出零字节、以 / 结尾的 key（目录标记或以 / 结尾命名的空材料），
-# 每行一个；它们落不了文件系统，快照里以名字保存，恢复时由 PUT_MARKERS 按名重建
-MARKERS() { python3 -c 'import json,sys; t=open(sys.argv[1]).read().strip(); [print(o["Key"]) for o in ((json.loads(t) if t else {}).get("Contents") or []) if o["Key"].endswith("/") and o["Size"] == 0]' "$1"; }
-# PUT_MARKERS <markers.txt>：按名重建零字节对象；任一失败即返回非零
-PUT_MARKERS() { while IFS= read -r k; do [ -z "$k" ] || aws --endpoint-url "$EP" s3api put-object --bucket "$B" --key "$k" --content-length 0 >/dev/null || return 1; done < "$1"; }
+# MARKERS <清单 JSON>：从清单（objects.json，与文件比对共用同一份、无旁文件）列出零字节、
+# 以 / 结尾的 key（目录标记或以 / 结尾命名的空材料），排序后每行一个；它们落不了文件系统，
+# 恢复时由 PUT_MARKERS 按名重建。key 含换行时逐行格式无法无损表达，直接判失败让人处理
+MARKERS() { python3 -c '
+import json,sys
+t=open(sys.argv[1]).read().strip()
+ks=sorted(o["Key"] for o in ((json.loads(t) if t else {}).get("Contents") or []) if o["Key"].endswith("/") and o["Size"] == 0)
+bad=[k for k in ks if "\n" in k or "\r" in k]
+if bad: print("零字节 / 结尾的 key 含换行，无法按行表达:", repr(bad[0]), file=sys.stderr); sys.exit(1)
+print("\n".join(ks))' "$1"; }
+# PUT_MARKERS <清单 JSON>：按 MARKERS 的输出重建零字节对象；清单解析失败或任一 put 失败即返回非零
+PUT_MARKERS() { local ks k; ks="$(MARKERS "$1")" || return 1; while IFS= read -r k; do [ -z "$k" ] || aws --endpoint-url "$EP" s3api put-object --bucket "$B" --key "$k" --content-length 0 >/dev/null || return 1; done <<< "$ks"; }
 # 优先 shasum：macOS 自带的 BSD sha256sum 不转义含换行的文件名，CHK 会因此判失败
 command -v shasum >/dev/null && SHA=(shasum -a 256) || SHA=(sha256sum)
 # CHK <目录> <清单 JSON> [SHA256SUMS]：目录里的文件集合与清单的 key 集合逐字相等、大小
@@ -394,7 +403,7 @@ TS="$(date +%Y%m%d%H%M%S)"
 OUT="$BK/s3-$B-$TS"; TMP="$BK/.s3-$B-$TS.partial"
 mkdir -p "$TMP/objects" \
   && LIST > "$TMP/objects.json" \
-  && MARKERS "$TMP/objects.json" > "$TMP/markers.txt" \
+  && MARKERS "$TMP/objects.json" >/dev/null \
   && S3 sync "s3://$B" "$TMP/objects" --only-show-errors \
   && CHK "$TMP/objects" "$TMP/objects.json" \
   && (cd "$TMP/objects" && find . -type f -exec "${SHA[@]}" {} +) > "$TMP/SHA256SUMS" \
@@ -584,11 +593,12 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
       CHK "$SRC/objects" "$SRC/objects.json" "$SRC/SHA256SUMS" \
         && S3 rm "s3://$B" --recursive --only-show-errors \
         && S3 cp "$SRC/objects" "s3://$B" --recursive --only-show-errors \
-        && PUT_MARKERS "$SRC/markers.txt" \
+        && PUT_MARKERS "$SRC/objects.json" \
         && V="$(mktemp -d "$BK/.s3-verify.XXXXXX")" \
         && LIST > "$V.json" \
         && S3 sync "s3://$B" "$V" --only-show-errors \
         && CHK "$V" "$V.json" && CHK "$V" "$SRC/objects.json" "$SRC/SHA256SUMS" \
+        && [ "$(MARKERS "$V.json")" = "$(MARKERS "$SRC/objects.json")" ] \
         && rm -rf "$V" "$V.json" && echo "对象存储已按备份替换并逐对象核验" \
         || FAILED "快照校验失败时 bucket 未被改动；清空之后失败的，修复原因后重跑整段"
       ```
@@ -597,9 +607,10 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
       （快照目录被改动、或被拷到大小写不敏感的文件系统上丢了文件，都会在这里失败），
       `SHA256SUMS` 的路径集合与文件集合逐字一致、清单有对象时不为空，每个文件 sha256
       都对得上（清单被清空或删掉一行、文件被同大小改写，都会失败）；失败时 bucket 原样不动。`aws s3 cp --recursive`
-      无条件上传每个文件，不做大小 / 时间比较；快照 `markers.txt` 里的零字节 `…/` key
-      （落不了文件系统，见 §2.2.1）由 `PUT_MARKERS` 按名重建为零字节对象，以 `/` 结尾命名的
-      空材料行因此仍有对象可对。最后取 bucket 的新清单、把 bucket 下载到
+      无条件上传每个文件，不做大小 / 时间比较；源清单 `objects.json` 里零字节、以 `/` 结尾
+      的 key（落不了文件系统，见 §2.2.1）由 `PUT_MARKERS` 按名重建为零字节对象，恢复后再
+      比对新清单与源清单的这一集合逐字相等，以 `/` 结尾命名的空材料行因此仍有对象可对。
+      最后取 bucket 的新清单、把 bucket 下载到
       新的空目录：下载结果与新清单一致、与备份时的源清单一致（多出或缺少的 key 都会被
       发现，零字节目录标记除外），内容再逐对象对 `SHA256SUMS`。外部 S3 开了版本控制时，
       `rm` 只留下删除标记，旧版本仍占空间。
@@ -718,10 +729,36 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
   shasum -a 256 < "$KEY_FILE"
   ```
 
-  再对每个外部服务连接执行一次测试（admin 全局设置「外部服务连接」，或
-  `POST /api/admin/connections/{key}/test`）：它会解析实例 vault 中的凭据，
-  是验证 vault 主密钥与数据库匹配的最直接手段。key 对不上时该接口返回 HTTP 500
-  （凭据解析在探测之前抛错），而不是 `ok: false`。
+  指纹一致只说明 Host 读到的是放回的那个文件，不说明它能解开库里的密文。再让 Host
+  对**全部** `workspace_secrets` 与 `instance_secrets` 密文做一次解密核验（只计数、
+  不输出明文；任一条解不开即返回非零，并打印是哪张表的哪一条）：
+
+  ```bash
+  docker compose "${F[@]}" exec -T host python - <<'PY'
+  import os, psycopg
+  from cryptography.fernet import Fernet, InvalidToken
+  from server.app.services.vault import resolve_master_key
+  f = Fernet(resolve_master_key().encode())
+  ok = bad = 0
+  with psycopg.connect(os.environ["AGENT_LEGION_DATABASE_URL"]) as conn:
+      for table, cols in (("workspace_secrets", "workspace_id, name, ciphertext"),
+                          ("instance_secrets", "'', name, ciphertext")):
+          for scope, name, ciphertext in conn.execute(f"select {cols} from {table}"):
+              try:
+                  f.decrypt(ciphertext.encode()); ok += 1
+              except InvalidToken:
+                  bad += 1; print("无法解密:", table, scope, name)
+  print(f"可解密 {ok} 条、不可解密 {bad} 条")
+  raise SystemExit(1 if bad else 0)
+  PY
+  ```
+
+  原生形态在 prod worktree 里用 `uv run python - <<'PY' … PY` 执行同一段（进程环境里
+  有 `AGENT_LEGION_VAULT_MASTER_KEY*` 与 `AGENT_LEGION_DATABASE_URL`）。有外部服务连接
+  的实例再对每个连接执行一次测试（admin 全局设置「外部服务连接」，或
+  `POST /api/admin/connections/{key}/test`）：它会解析实例 vault 中的凭据并真的去连。
+  key 对不上时该接口返回 HTTP 500（凭据解析在探测之前抛错），而不是 `ok: false`。
+  只有解密核验为 0 条不可解密，才允许删除第 3 步与第 4 步的留存。
 - **对象存储内容**（D2–D4）：S3 层恢复已在第 5 步逐对象核验；卷级恢复把对象数与总
   大小和备份时的摘要比对（两者一致才算通过）：
   `S3 ls "s3://$B" --recursive --summarize | tail -2 | diff - <备份目录>/<seaweedfs|rustfs>-data-<时间戳>.summary`。
@@ -841,12 +878,17 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
    最后一份副本——在重启、重建或 `make prod-down` 之前先把它导出来：
 
    ```bash
-   docker compose "${F[@]}" ps --status running host >/dev/null 2>&1 \
-     && { umask 077; docker compose "${F[@]}" exec -T host cat /run/secrets/vault_master_key > "$BK/vault_master_key.from-running-host"; } \
-     && [ -s "$BK/vault_master_key.from-running-host" ] && echo "已从运行中的 Host 导出 key：$BK/vault_master_key.from-running-host"
+   OUT="$BK/vault_master_key.from-running-host-$(date +%Y%m%d%H%M%S)"
+   TMP="$(mktemp "$BK/.vault_master_key.rescue.XXXXXX")" \
+     && [ -n "$(docker compose "${F[@]}" ps -q --status running host)" ] \
+     && docker compose "${F[@]}" exec -T host cat /run/secrets/vault_master_key > "$TMP" \
+     && [ -s "$TMP" ] && PUBLISH "$TMP" "$OUT" \
+     || FAILED "未能从运行中的 Host 导出 key（容器未运行、读取失败或内容为空）；临时文件 $TMP 可删除"
    ```
 
-   导出成功即把它放回 `KEY_FILE`（`cp` + `chmod 600`），key 没有丢。然后再依次核对：
+   先写 `mktemp` 出来的 0600 临时文件、确认非空再 `PUBLISH` 到带时间戳的最终名：重试或
+   `exec` 中途失败都不会截断上一次成功导出的副本。导出成功即把它放回 `KEY_FILE`
+   （`cp` + `chmod 600`），key 没有丢。然后再依次核对：
    §1.1 解析出的 `KEY_FILE`（及其备份）、`VAULT_MASTER_KEY_FILE` 是否把 compose secret
    指到了别的路径、原生形态根 `.env` 的 `AGENT_LEGION_VAULT_MASTER_KEY` /
    `AGENT_LEGION_VAULT_MASTER_KEY_FILE`、密钥保管处。只要找回原 key 放回原位并重启
