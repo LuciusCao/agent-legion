@@ -49,19 +49,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/993
   ceiling: 68
 - check: architecture.file_budget
-  path: scripts/architecture/budget_monotonicity.py
-  reason: 'Issue #641 opens the exemption re-file channel: the exemption layer of ceiling_regression_errors
-    now admits a re-file within growth_allowance of the floor and an arbitrarily high one carrying
-    a future expires date (FrozenCeiling NamedTuple plus the banded judgment) — 4 effective
-    lines past the 81 baseline. The NamedTuple lives here rather than file_budgets to keep the
-    guard importing its producer only one way. Remove when the re-file judgment folds into budget_floor_errors
-    or a budget re-balance re-registers it. Re-anchored by #926 from #456 (closed) to #1008:
-    the overage above is the shipped feature itself and the removal condition above stands;
-    #1008 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1008
-  ceiling: 85
-- check: architecture.file_budget
   path: scripts/architecture/file_budgets.py
   reason: 'Issue #641 threads the growth_allowance band and the FrozenCeiling expiry through
     the budget evaluator: _build_frozen_ceilings returns ceiling+expires pairs and check_file_budgets
