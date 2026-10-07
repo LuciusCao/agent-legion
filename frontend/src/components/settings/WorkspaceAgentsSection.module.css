@@ -21,29 +21,7 @@
   color: #c62828;
   margin: 8px 0;
 }
-.filters {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.filterButton {
-  padding: 4px 12px;
-  border: 1px solid #c3c6cf;
-  border-radius: 999px;
-  background: #fff;
-  color: #43474e;
-  font-size: 13px;
-  cursor: pointer;
-}
-.filterButton[aria-pressed='true'] {
-  border-color: #1a73e8;
-  background: #e8f0fe;
-  color: #174ea6;
-}
-.filterButton:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
+
 .list {
   list-style: none;
   padding: 0;
@@ -88,34 +66,17 @@
   color: #43474e;
   flex-shrink: 0;
 }
+.chipMuted {
+  composes: chip;
+  color: #74777f;
+}
 .chipOrphan {
   composes: chip;
   background: #fff3e0;
   color: #b45309;
 }
-.dangerButton {
-  padding: 6px 12px;
-  border: 1px solid #c62828;
-  border-radius: 8px;
-  background: #fff;
-  color: #c62828;
-  font-size: 13px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
 .empty {
   font-size: 13px;
   color: #74777f;
   margin: 0;
-}
-.dialogText {
-  margin: 0 0 8px;
-}
-.warning {
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: #fff3e0;
-  color: #8a4b00;
-  font-size: 13px;
 }

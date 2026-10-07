@@ -20,6 +20,8 @@ from server.app.jobs.job_state_mutations import prepare_replay_copy
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_errors import InvalidOperationError, JobServiceError
 from server.app.services.node_config_batch import frozen_node_config, run_frozen_payload
+from server.app.services.node_profile_pins import PIN_KEY as NODE_PROFILES_PIN_KEY
+from server.app.services.quality_replay_profiles import ReplayProfile
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 from server.app.workflows.execution_control import ancestor_closure
@@ -50,6 +52,7 @@ class QualityReplaySetup:
         node: WorkflowNode,
         replay_id: str,
         pin: dict[str, Any] | None,
+        profile: ReplayProfile | None = None,
     ) -> str:
         """Create the isolated copy job and set its node states atomically."""
         workflow_key = str(job["workspace_id"])
@@ -59,6 +62,11 @@ class QualityReplaySetup:
             "definition_hash": str(job["workflow_definition_hash"] or ""),
             "definition_json": str(job["workflow_definition_snapshot_json"] or ""),
         }
+        if profile is not None and profile.snapshot_json is not None:
+            # #1079（D6）：所选 revision / 草稿的执行档案已移植进副本快照；
+            # 新快照配新哈希，worker 按哈希缓存的已解析定义不会与原 job 混用。
+            revision["definition_json"] = profile.snapshot_json
+            revision["definition_hash"] = profile.snapshot_hash
         # Frozen intake state keeps the replay faithful to the original run.
         original_payload = run_frozen_payload(self.job_db, job)
         frozen = frozen_node_config(original_payload, node.key)
@@ -69,6 +77,7 @@ class QualityReplaySetup:
         }
         node_code_versions = (original_payload or {}).get("node_code_versions") or {}
         agent_versions = {node.key: pin} if pin is not None else {}
+        node_profiles = {node.key: profile.pin} if profile is not None else {}
         # The digest payload mirrors the retired batch payload so the
         # deterministic run id is stable across the cutover; the authoritative
         # pins land on the run row and the frozen config on the copy job
@@ -79,6 +88,9 @@ class QualityReplaySetup:
             "node_code_versions": node_code_versions,
             "agent_versions": agent_versions,
         }
+        if node_profiles:
+            # Only when present: pre-#1079 replays keep their digest (run id).
+            digest_payload[NODE_PROFILES_PIN_KEY] = node_profiles
         batch = self.job_db.create_run(
             workflow_key,
             "quality_replay",
@@ -88,6 +100,7 @@ class QualityReplaySetup:
                 "quality_replay": quality_replay,
                 "node_code_versions": node_code_versions,
                 "agent_versions": agent_versions,
+                NODE_PROFILES_PIN_KEY: node_profiles,
             },
         )
         candidate = {

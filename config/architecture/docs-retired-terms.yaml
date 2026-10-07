@@ -1,6 +1,6 @@
 # 现行文档禁用的退役术语表（docs_retired_terms 检查的数据文件）。
 #
-# 维护纪律（AGENTS.md §5 / docs/architecture/docs-governance-proposal.md §4）：
+# 维护纪律（AGENTS.md §5 / docs/architecture/docs-governance.md §3）：
 # - 概念退役 PR 必须同步追加条目并清零现行文档命中。
 # - pattern 只增不删；确需删除（概念复活）须在注释里记录 issue 依据。
 # - 误伤走 exemptions（带 remove_when），不许删 pattern。
@@ -98,5 +98,18 @@ terms:
   - pattern: 'reject_mismatched_workflow_key'
     retired_in: '#211 M3（deprecated 请求字段移除后守卫一并删除）'
     note: 请求体/查询参数不再携带 workflow_key，key 不匹配守卫无对象可守
+  - pattern: 'Agent 管理'
+    retired_in: '#935（#440 P3 Agent 定义退役：门禁翻转、写面 deprecated）'
+    note: Agent 定义不再充当节点执行档案，执行配置写在 agent 节点上（执行档案，
+      EXEC-AGENT-PROFILE-001）；设置页目录在 P3b 改为只读「历史 Agent 定义」
+  - pattern: '(必须恰好解析到一个|resolve to exactly one) published Agent'
+    retired_in: '#935（#440 P3 门禁翻转）'
+    note: 发布门禁要求 agent 节点自含 execution.runtime，不再按 capability 解析
+      published Agent；legacy 解析只服务 v93 内联前冻结的旧快照
+  - pattern: 'agent_version_pins'
+    retired_in: '#1079（#440 P3b，D6：quality replay pin 改按 revision）'
+    note: 回放的执行档案按 workflow revision（或当前草稿）选，副本 run 冻结
+      node_profiles pin {revision_id, node_key, profile_hash}（EXEC-QUALITY-REPLAY-001）；
+      旧 agent_versions pin 只读兼容存量 run，不再为新回放写入
 
 exemptions: []

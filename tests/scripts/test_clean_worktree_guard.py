@@ -26,6 +26,8 @@ pytestmark = pytest.mark.no_db
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "clean-worktree.sh"
 DB_SCRIPT = ROOT / "scripts" / "drop-worktree-db.sh"
+# 派生名与撞名检测的共享库（#950），两个脚本都 source 它。
+NAMES_LIB = ROOT / "scripts" / "worktree-names-lib.sh"
 
 # git stub: worktree list reports main + .worktrees/{victim,other}; every
 # other subcommand is recorded to the stub log so the tests can assert the
@@ -78,6 +80,7 @@ def _setup(tmp_path: Path) -> tuple[Path, Path, Path]:
     scripts_dir.mkdir(parents=True)
     shutil.copy(SCRIPT, scripts_dir / "clean-worktree.sh")
     shutil.copy(DB_SCRIPT, scripts_dir / "drop-worktree-db.sh")
+    shutil.copy(NAMES_LIB, scripts_dir / NAMES_LIB.name)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     stub_log = tmp_path / "stub.log"
@@ -263,11 +266,18 @@ def _install_s3_fakes(main: Path, bin_dir: Path) -> None:
 
 
 def _init_derivations(name: str) -> tuple[str, str]:
-    """Evaluate init-worktree.sh's own NAME/DB/BUCKET lines for a worktree name."""
+    """Evaluate init-worktree.sh's own DB/BUCKET lines for a worktree name."""
     lines = _INIT_SCRIPT.read_text(encoding="utf-8").splitlines()
-    wanted = [ln for ln in lines if ln.startswith(("NAME=", "DB=", "BUCKET="))]
-    assert len(wanted) == 3, wanted
-    snippet = "\n".join([f'ROOT="/x/{name}"', *wanted, 'printf "%s\\n%s\\n" "$DB" "$BUCKET"'])
+    wanted = [ln for ln in lines if ln.startswith(("DB=", "BUCKET="))]
+    assert len(wanted) == 2, wanted
+    snippet = "\n".join(
+        [
+            f'source "{NAMES_LIB}"',
+            f'ROOT="/x/{name}"',
+            *wanted,
+            'printf "%s\\n%s\\n" "$DB" "$BUCKET"',
+        ]
+    )
     out = subprocess.run(["bash", "-c", snippet], capture_output=True, text=True, check=True)
     db, bucket = out.stdout.splitlines()
     return db, bucket

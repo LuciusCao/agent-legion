@@ -161,5 +161,35 @@ agent `text` / `thought`、ACP 形状的 `tool_call` / `tool_call_update`（id �
 message，不含 details / cause），与 ACP 路径 `on_turn_error` 的形态一致，前端按既有告警条
 显示，不写 `turn_end`。前端照常触发终止回取与草稿查询失效。写入在 runtime 锁内复核 runtime 身份与 closed，
 关闭 / 删除栅栏之后不再写；写失败的行保留到下一次轮询重试。会话状态、turn owner
-与 empty_turn 判定都不变：自发回合进行中用户发的消息由 Kimi 引擎排队，按既有
-running 语义在其后执行。kimi-cli V1 会话没有该 wire 文件，watcher 保持空转。
+与 empty_turn 判定都不变；自发回合进行中用户发的消息由 Studio 暂存，见下文 #1029。
+kimi-cli V1 会话没有该 wire 文件，watcher 保持空转。
+
+## 自发回合期间的入站排队（#1029）
+
+实测依据（Kimi Code 0.43.0 二进制内嵌源码）：ACP `session/prompt` 的忙检查
+`assertNoActiveTurn` 只看 ACP 自己的在途 driver，自发回合没有 driver，检查放行；随后
+`agent.prompt` 经 `AgentPromptChannel.submit` 把输入 FIFO 排进引擎队列，引擎处于
+running 时直接返回 `undefined`（不等待启动），`driveLaunch` 据此立即以 `end_turn`
+结算该 prompt，零内容。排队的输入随后作为 `origin: user` 的回合运行，ACP 已无 driver，
+事件被丢弃；watcher 又按 origin 视其为 Studio 发起的回合而跳过。结果是回复在 Studio 里
+完全不可见，empty_turn 的「继续对话」还会把同一句话再交给引擎一次。
+
+因此 `unprompted_queue.py` 的 `GatedUnpromptedWatcher`（#938 watcher 的子类）在 wire
+显示自发回合 open（见到 `turn.prompt`、未见 `turn.ended`）期间暂存人发的消息：消息照常
+落库为「已排队」（#1028 的 `content.queued` 行），但不送 ACP；该回合的结束行落库后，
+暂存消息按到达顺序交给 ACP 队列，走 #1028 的 `before_start` 投递（认领 + `queued_delivered`，
+无法接收时 `queued_dropped`）。暂存期间后到的消息一律跟在后面，后台唤醒（`wake_session`）
+让位，空轮「继续对话」返回 409 提示稍后再试。open 状态只在 projector 投影出的行全部落库后、
+于 runtime 锁内采纳（与发送准入同一把锁），不会出现「回合已结束但结束行尚未落库」时放行。
+发送准入前先同步推进一次 watcher，缩小每秒轮询的空窗；引擎已开回合但尚未写日志的残余窗口
+无法消除，落回 #1029 之前的行为。
+同类窗口还出现在两处且未刷新：一次释放多条暂存消息时它们同时进入 ACP 队列，
+前一条结束到下一条 `before_start` 之间（毫秒级、其间无轮询）引擎新开的自发回合看不到；
+`wake_session` 读的是上次轮询的门状态，但唤醒来源是 Kimi V1 任务目录，
+而门只在 Kimi Code wire 日志上打开，实际不会同时出现。在 `before_start` 内再查一次门不能收窄这两处
+（它紧随回合结束 / 认领执行，早于下一次轮询），彻底消除需让出队等待日志确认，
+属新机制，另开 follow-up。回合永不结束时不永久卡住：日志被替换或截断（重建基线后
+`turn.ended` 不可观测）立即解除，日志连续 `IDLE_TIMEOUT_SECONDS`（900 秒）无进展（含日志
+读取持续失败）超时解除，两者都把暂存消息记 `queued_dropped`（「agent 自发回合长时间无进展，
+排队消息未投递，请重发」）；引擎崩溃使 runtime 拆除时暂存消息不再投递，前端按 #1028 的
+既有语义在会话不再存活时标「未送达」。

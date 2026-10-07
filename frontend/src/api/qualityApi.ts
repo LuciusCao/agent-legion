@@ -31,6 +31,10 @@ export type QualityReplayListResponse =
   components['schemas']['QualityReplayListResponse']
 export type QualityReplayDetailResponse =
   components['schemas']['QualityReplayDetailResponse']
+export type QualityReplayProfileOption =
+  components['schemas']['QualityReplayProfileOption']
+export type QualityReplayProfileOptionsResponse =
+  components['schemas']['QualityReplayProfileOptionsResponse']
 
 /** 打标 reason 受控词表（与后端一致）。 */
 export const QUALITY_REASON_CODES = [
@@ -125,6 +129,18 @@ export async function createReplay(
   return api<QualityReplayResponse>(
     `${base(workspaceId)}/sample-items/${encodeURIComponent(itemId)}/replays`,
     { method: 'POST', body: JSON.stringify(body) }
+  )
+}
+
+/** #1079（#440 D6）：样本可选的回放执行档案（各 revision / 当前草稿）。 */
+export async function fetchReplayProfiles(
+  workspaceId: string,
+  itemId: string,
+  signal?: AbortSignal
+): Promise<QualityReplayProfileOptionsResponse> {
+  return api<QualityReplayProfileOptionsResponse>(
+    `${base(workspaceId)}/sample-items/${encodeURIComponent(itemId)}/replay-profiles`,
+    { signal }
   )
 }
 

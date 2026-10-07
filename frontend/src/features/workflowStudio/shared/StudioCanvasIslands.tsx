@@ -63,8 +63,7 @@ export function StudioCanvasIslands() {
   })
   // #812 对抗轮 D4 + P2-1：抽屉打开期间被 paper 物理遮住的岛触发器加
   // inert，堵住「Tab 聚焦被遮按钮并激活」的路径（inert 一次阻断指针/键盘/
-  // 读屏；React 18 类型与运行时都不识 inert，按未知属性透传空字符串，同
-  // WorkflowNodeAgentGate 的既有写法）。分级：宽屏 720px 抽屉只遮右岛，
+  // 读屏；React 18 类型与运行时都不识 inert，按未知属性透传空字符串）。分级：宽屏 720px 抽屉只遮右岛，
   // 可见的左岛（返回/版本/发布）保持可交互——persistent 抽屉是非模态的；
   // 窄屏抽屉全宽覆盖，双岛一起 inert。
   const drawerOpen = Boolean(studio.selectedNodeKey) || view.materialsOpen
