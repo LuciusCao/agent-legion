@@ -25,8 +25,9 @@ DB 是删除的唯一权威：``JobDeletionService`` 先在
   并按「已重建」返回，旧 job 的 refs / 对象泄漏交给 orphan GC 与
   ``scripts/gc-s3-jobs.py`` 回收。
 
-日志路径的 glob 枚举在锁外完成（共享日志目录可能很大），锁内只复核行与
-rename——锁事务保持短，不阻塞重建后新 job 的 claim。
+日志路径的枚举（含一次共享日志目录列举）在锁外完成，锁内只复核行与
+rename——锁事务保持短，不阻塞重建后新 job 的 claim。日志只删能由
+``job_node_log_name`` 精确生成的名字，见 ``deleted_job_log_paths``。
 
 锁下只做同文件系统原子 ``os.rename`` 进 trash（跨文件系统 EXDEV 即放弃、留
 残留，绝不在锁下拷贝），rmtree 在锁外：原路径瞬间腾空，同 id 重建的 job 不会
@@ -36,9 +37,9 @@ rename——锁事务保持短，不阻塞重建后新 job 的 claim。
 
 from __future__ import annotations
 
-import glob
 import logging
 import os
+import re
 import shutil
 from collections.abc import Iterable, Mapping
 from datetime import timedelta
@@ -46,7 +47,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.settings import Settings
-from server.app.storage_paths import ManagedPathError, resolve_job_dir
+from server.app.storage_paths import ManagedPathError, job_node_log_name, resolve_job_dir
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -72,16 +73,45 @@ def logs_trash_root(settings: Settings) -> Path:
     return settings.logs_dir / "jobs" / TRASH_DIRNAME
 
 
+# 分片日志名的反解析：贪婪 node_key 回溯到最后一个 ``-shard-<数字>.log``，
+# 拆分唯一；命中后还须与 job_node_log_name 重新生成的名字逐字相等（拒绝
+# 前导零等非本命名函数产出的形态）。DOTALL：node_key 允许任意字符。
+_SHARD_LOG_NAME = re.compile(r"(?P<node_key>.+)-shard-(?P<index>[0-9]+)\.log", re.DOTALL)
+
+
 def deleted_job_log_paths(settings: Settings, job_id: str, node_keys: Iterable[str]) -> list[Path]:
-    """按节点 key 精确列出 job 的节点日志（含分片日志），不用 ``{job_id}-*``
-    前缀 glob——那会命中 source_id 形如 ``<source>-xxx`` 的兄弟 job 的日志。"""
+    """列出已删 job 拥有的节点日志：只认 ``job_node_log_name(job_id, k[, i])``
+    能生成的文件名，``k`` 取自删除前的节点 key 快照。
+
+    删除路径模型（PR #1065）：job_id 与 node_key 都可含连字符（source_id 只把
+    ``/`` 换成 ``_``），``{job_id}-*`` 前缀 glob 会命中 source_id 为
+    ``<source>-...`` 的兄弟 job 的日志，绝不使用。
+
+    - 普通日志：按快照 key 精确生成路径，不列目录；
+    - 分片日志：shard 索引无法从行记录精确推导（rerun / workflow 升级会删掉
+      node_shards 行再按新代次重建，旧代次更大索引的日志仍属本 job），故锁外
+      列一次目录，对每个名字做「锚定反解析 + 用命名函数重新生成后全等」——
+      兄弟 job ``<source>-<k>-shard-0`` 的 ``…-shard-0-<node>.log`` 不满足；
+    - 残留风险只剩写入期即已共用同一文件名的命名碰撞（如 job ``A`` 节点
+      ``x-y`` 与 job ``A-x`` 节点 ``y`` 都写 ``A-x-y.log``），删除侧无从区分。
+    """
     log_dir = settings.logs_dir / "jobs"
-    paths: set[Path] = set()
-    for node_key in node_keys:
-        paths.add(log_dir / f"{job_id}-{node_key}.log")
-        # source_id 可含 glob 元字符（*?[）：前缀必须转义，否则会匹配兄弟 job。
-        shard_pattern = glob.escape(str(log_dir / f"{job_id}-{node_key}-shard-")) + "*.log"
-        paths.update(Path(p) for p in glob.glob(shard_pattern))
+    keys = set(node_keys)
+    paths = {log_dir / job_node_log_name(job_id, node_key) for node_key in keys}
+    prefix = f"{job_id}-"
+    try:
+        with os.scandir(log_dir) as entries:
+            names = [entry.name for entry in entries if entry.name.startswith(prefix)]
+    except OSError:
+        # 列目录失败只少删分片日志（留原位残留），不让已提交的删除变成 API 错误。
+        logger.warning("Cannot list %s for deleted job %s", log_dir, job_id, exc_info=True)
+        names = []
+    for name in names:
+        match = _SHARD_LOG_NAME.fullmatch(name, len(prefix))
+        if match is None or match["node_key"] not in keys:
+            continue
+        if name == job_node_log_name(job_id, match["node_key"], int(match["index"])):
+            paths.add(log_dir / name)
     return sorted(path for path in paths if path.exists())
 
 
@@ -112,7 +142,7 @@ def purge_deleted_job_files(
     except ManagedPathError:
         logger.warning("Skip local cleanup of deleted job %s: storage_dir escapes", job_id)
         storage_dir = None
-    # glob 枚举放锁外：锁内只剩行复核与原子 rename（存在性在锁内再探一次）。
+    # 日志枚举放锁外：锁内只剩行复核与原子 rename（存在性在锁内再探一次）。
     log_paths = deleted_job_log_paths(settings, job_id, node_keys)
     # None = 锁事务尚未给出存在性结果；yield 之后（如 commit）才失败时它已绑定
     # 真实复核值，照常返回。
