@@ -10,7 +10,11 @@ from server.app.db.connection import DatabaseConnection
 from server.app.db.rowmap import utc_datetime
 from server.app.db.transaction import write_transaction
 from server.app.jobs.artifact_row_retire import retire_artifact_rows_by_name
-from server.app.jobs.job_state_mutations import JobMutationConflict, delete_job
+from server.app.jobs.job_state_mutations import (
+    JobMutationConflict,
+    delete_job,
+    list_node_run_logs,
+)
 from server.app.jobs.run_to_mutation import apply_run_to, set_run_to_control
 from server.app.workflows.sharding import delete_shards
 
@@ -234,3 +238,9 @@ class AtomicJobMutationsMixin:
     @staticmethod
     def delete_job_in_transaction(conn: DatabaseConnection, job_id: str) -> None:
         delete_job(conn, job_id)
+
+    @staticmethod
+    def list_node_run_logs_in_transaction(
+        conn: DatabaseConnection, job_id: str
+    ) -> list[tuple[str, str]]:
+        return list_node_run_logs(conn, job_id)

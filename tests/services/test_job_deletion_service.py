@@ -700,3 +700,30 @@ def test_delete_shard_log_match_escapes_glob_metacharacters(
     assert result["status"] == "succeeded"
     assert not own_shard.exists()
     assert sibling_shard.read_text(encoding="utf-8") == "sibling"
+
+
+def test_delete_snapshots_run_logs_inside_delete_transaction(
+    job_db: JobQueries, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#958：分片在活动租约检查之后、删除事务之前 claim 并完成——其 node_runs
+    行只在事务内的快照里可见；快照若在事务前读取，该分片日志会遗留。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-late-shard", "Q040", status="completed")
+    late_shard_log = settings.logs_dir / "jobs" / f"{job['id']}-extract_question-shard-4.log"
+    late_shard_log.parent.mkdir(parents=True, exist_ok=True)
+    original_mutation = job_db.lease_guarded_mutation
+
+    def _shard_finishes_then_mutate(*args: Any, **kwargs: Any) -> Any:
+        late_shard_log.write_text("late", encoding="utf-8")
+        _record_finished_run(job_db, job["id"], late_shard_log)
+        return original_mutation(*args, **kwargs)
+
+    monkeypatch.setattr(job_db, "lease_guarded_mutation", _shard_finishes_then_mutate)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert not late_shard_log.exists()

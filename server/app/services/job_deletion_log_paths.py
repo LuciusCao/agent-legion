@@ -38,7 +38,8 @@ def deleted_job_log_paths(
 
     - 普通日志：快照节点 key（job_nodes ∪ node_runs）经 ``job_node_log_name``
       精确生成；
-    - 分片日志：取自删除前快照的 ``node_runs.(node_key, log_path)``——每次
+    - 分片日志：取自删除事务内（持 job-mutation 锁、删行之前）读取的
+      ``node_runs.(node_key, log_path)`` 快照——每次
       claim（本地 ``_lease_claims`` / 远端 ``claim_promote``）都先插入带该
       log_path 的 node_runs 行、之后才有日志写入，node_runs 只随 job 删除，
       rerun / workflow 升级删的是 node_shards 不是 node_runs，故覆盖每个写过

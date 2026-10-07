@@ -312,6 +312,44 @@ def test_purge_keeps_colliding_sibling_logs(tmp_path: Path, name: str) -> None:
     assert (jobs_dir / job_node_log_name(_JOB, "x")).is_file()
 
 
+def test_run_log_row_must_match_its_own_node_key(tmp_path: Path) -> None:
+    """node_key 等值守卫：快照行 ``("q", <J>-x-y-shard-0.log)`` 的文件名按 ``x-y``
+    才能生成，与该行 key ``q`` 不符——那是兄弟 job ``<J>-x`` 的节点 ``y-shard-0``
+    的日志，保留。"""
+    settings = _settings(tmp_path)
+    log_dir = settings.logs_dir / "jobs"
+    log_dir.mkdir(parents=True)
+    sibling = log_dir / job_node_log_name(f"{_JOB}-x", "y-shard-0")
+    sibling.write_text("sibling", encoding="utf-8")
+    assert sibling.name == job_node_log_name(_JOB, "x-y", 0)
+
+    paths = deleted_job_log_paths(settings, _JOB, ["q"], [("q", f"logs/jobs/{sibling.name}")])
+
+    assert paths == []
+    _purge_with(settings, ["q"], [("q", f"logs/jobs/{sibling.name}")])
+    assert sibling.read_text(encoding="utf-8") == "sibling"
+
+
+def test_run_log_row_outside_log_dir_is_not_mapped_to_log_dir(tmp_path: Path) -> None:
+    """父目录守卫：log_path 在 ``logs/jobs/sub/`` 下时不删，也不按同名映射到
+    ``logs/jobs`` 直属层（那里的同名文件属于兄弟 job ``<J>-x`` 的节点 shard-0）。"""
+    settings = _settings(tmp_path)
+    log_dir = settings.logs_dir / "jobs"
+    (log_dir / "sub").mkdir(parents=True)
+    name = job_node_log_name(_JOB, "x", 0)
+    (log_dir / "sub" / name).write_text("sub", encoding="utf-8")
+    (log_dir / name).write_text("sibling", encoding="utf-8")
+
+    _purge_with(settings, ["x"], [("x", f"logs/jobs/sub/{name}")])
+
+    assert (log_dir / name).read_text(encoding="utf-8") == "sibling"
+    assert (log_dir / "sub" / name).read_text(encoding="utf-8") == "sub"
+
+
+def _purge_with(settings: Settings, keys: list[str], run_logs: list[tuple[str, str]]) -> bool:
+    return purge_deleted_job_files(_UnlockedJobDB(), {"id": _JOB}, keys, settings, "op-1", run_logs)
+
+
 _LONG_KEY = "k" * 260  # 文件名超 NAME_MAX（255）：stat 抛 ENAMETOOLONG
 
 

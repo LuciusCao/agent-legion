@@ -98,15 +98,9 @@ class JobDeletionService:
             else []
         )
         operation_id = f"{self._now().strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
-        # 节点 key 快照（含已退出图的历史节点）：行级联消失后日志按它精确匹配。
-        # node_runs 的 (node_key, log_path) 快照：分片日志按它精确推导。
-        run_logs = [
-            (str(r["node_key"]), str(r["log_path"] or ""))
-            for r in self.job_db.list_node_runs(job_id)
-        ]
-        node_keys = {n["node_key"] for n in self.job_db.list_job_nodes(job_id)} | {
-            key for key, _ in run_logs
-        }
+        # job_nodes 的节点 key 快照（含已退出图的历史节点），与事务内 node_runs
+        # 快照合并后生成普通日志名。
+        job_node_keys = {n["node_key"] for n in self.job_db.list_job_nodes(job_id)}
 
         # #958：事务只做 DB 删除，不碰文件系统（文件 I/O 不再拉长 job-mutation
         # 锁的持有时间）；本地 job_dir / 日志在提交后由 purge_deleted_job_files
@@ -117,12 +111,17 @@ class JobDeletionService:
                 self._now(),
                 reject_running_nodes=True,
             ) as conn:
+                # node_runs (node_key, log_path) 快照在删行事务内、同一 conn 上读：
+                # 持 job-mutation 锁、行级联消失前的最终集合，覆盖租约检查后到
+                # 事务前才 claim 并完成的分片；分片日志按它精确推导。
+                run_logs = self.job_db.list_node_run_logs_in_transaction(conn, job_id)
                 self.job_db.delete_job_in_transaction(conn, job_id)
         except JobMutationConflict as exc:
             _fail(job_id, exc.reason_code, str(exc))
         except Exception as exc:
-            # #204 broad-except audit: the transaction now carries only the DB
-            # write (delete_job_in_transaction, whose ValueError carries the
+            # #204 broad-except audit: the transaction now carries only DB work
+            # (the node_runs log snapshot read plus delete_job_in_transaction,
+            # whose ValueError carries the
             # business refusals — a foreign-key rejection from a still-
             # referenced job, or a concurrent delete that already removed the
             # row — and is deliberately NOT caught before this arm so it is
@@ -134,6 +133,7 @@ class JobDeletionService:
             logger.exception("Unexpected error deleting job %s", job_id)
             _fail(job_id, "delete_failed", str(exc))
 
+        node_keys = job_node_keys | {key for key, _ in run_logs}
         if purge_deleted_job_files(
             self.job_db, job, node_keys, self.settings, operation_id, run_logs
         ):
