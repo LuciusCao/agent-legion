@@ -54,21 +54,21 @@ from __future__ import annotations
 
 import contextlib
 import threading
-import time
 
 import psycopg
 import pytest
 
 from server.app.db.rows import string_dict_row
+from tests.helpers.pg_waits import backend_pid, wait_until_blocked_by
 from tests.postgres_support import TEST_DATABASE_URL
 
 # Low deadlock_timeout: a reintroduced ring must be DETECTED fast (ms), not
 # after the 1s production default. lock_timeout bounds every unexpected wait.
 _TIMEOUTS = ("set deadlock_timeout='50ms'", "set lock_timeout='5s'")
 
-# Handshake window: keep A's transaction open long enough for B to exercise
-# the same overlap that used to block on A's counter-row/advisory lock.
-_B_BLOCK_WINDOW = 0.3
+# Handshake (#955): A's transaction stays open until B has either blocked on
+# A (pg_blocking_pids — the pre-fix overlap) or already committed (the
+# non-blocking delta shape) — observed, not guessed with a fixed sleep.
 
 
 def _seed(conn, workspace_id: str, runs: dict[str, tuple[str, ...]]) -> None:
@@ -185,7 +185,7 @@ def _race(
         sql, params = run_tx_partial[0]
         conn_a.execute(sql, params)
         thread_b.start()
-        time.sleep(_B_BLOCK_WINDOW)
+        wait_until_blocked_by(backend_pid(conn_a), thread=thread_b, finished_ok=True)
         for sql, params in run_tx_partial[1:]:
             conn_a.execute(sql, params)
         conn_a.commit()
@@ -368,7 +368,7 @@ def test_cross_family_ring_has_no_waiting_edge() -> None:
         conn_a.execute("update jobs set status='running' where id=%s", ("sc82-xf-1",))
         thread_b = threading.Thread(target=_b)
         thread_b.start()
-        time.sleep(_B_BLOCK_WINDOW)
+        wait_until_blocked_by(backend_pid(conn_a), thread=thread_b, finished_ok=True)
         # Touch run-b while B is active: this used to close the family ring.
         conn_a.execute("update jobs set status='completed' where id=%s", ("sc82-xf-4",))
         conn_a.commit()

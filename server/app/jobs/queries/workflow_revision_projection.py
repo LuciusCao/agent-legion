@@ -112,6 +112,30 @@ def write_agent_route_projection(
     )
 
 
+def prune_frozen_agent_routes(
+    conn: DatabaseConnection, workspace_id: str, keep_nodes: frozenset[str]
+) -> None:
+    """Route freeze (#935): drop agent rows whose node is no longer an agent node.
+
+    A fully self-contained revision never upserts routes; rows of nodes it
+    still declares ``type: agent`` stay frozen for in-flight legacy
+    snapshots, but rows of nodes it removed or turned ``code`` are deleted —
+    otherwise a stale row could route a code node to an Agent (R1).
+    """
+    if keep_nodes:
+        placeholders = ", ".join("%s" for _ in keep_nodes)
+        conn.execute(
+            "delete from workspace_node_routes where workspace_id=%s and target_kind='agent'"
+            f" and node_key not in ({placeholders})",
+            (workspace_id, *sorted(keep_nodes)),
+        )
+    else:
+        conn.execute(
+            "delete from workspace_node_routes where workspace_id=%s and target_kind='agent'",
+            (workspace_id,),
+        )
+
+
 def create_workflow_revision_with_projection(
     conn: DatabaseConnection,
     *,
@@ -123,6 +147,7 @@ def create_workflow_revision_with_projection(
     definition_json: str,
     definition_hash: str,
     agent_routes: dict[str, str] | None = None,
+    frozen_route_nodes: frozenset[str] | None = None,
 ) -> dict[str, Any] | None:
     """Insert one revision row and, for publishes, rewrite the projection.
 
@@ -174,4 +199,6 @@ def create_workflow_revision_with_projection(
             workflow_key=workflow_key,
             agent_routes=agent_routes,
         )
+    elif frozen_route_nodes is not None:
+        prune_frozen_agent_routes(conn, workspace_id, frozen_route_nodes)
     return conn.execute("select * from workflow_revisions where id=%s", (revision_id,)).fetchone()

@@ -36,6 +36,7 @@ from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.lifecycle import ServiceLifecycle, starting_operation
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.resume import resume_session
+from server.app.studio_chat.retention import studio_chat_retention_days
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.session_archive import archive_session, unarchive_session
 from server.app.studio_chat.session_close import close_session
@@ -162,6 +163,10 @@ class StudioChatService:
 
     def list_sessions(self, workspace_id: str, *, archived: bool = False) -> list[dict[str, Any]]:
         return self._db.list_studio_chat_sessions(workspace_id, archived=archived)
+
+    def retention_days(self) -> int:
+        """Instance chat retention window (#1041; 0 = disabled), read fresh."""
+        return studio_chat_retention_days(self._db)
 
     def get_session(
         self, session_id: str, workspace_id: str | None = None, *, include_deleted: bool = False

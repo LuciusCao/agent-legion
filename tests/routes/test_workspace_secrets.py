@@ -8,9 +8,7 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from server.app.agent_catalog import AgentDefinition
 from server.app.main import create_app
-from server.app.services.agent_service import AgentService
 from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -26,40 +24,28 @@ def vault_key(monkeypatch):
 
 
 def _publish_secret_node_schema(workspace_id: str) -> None:
-    """Publish a test agent version whose capability schema declares a secret field.
+    """Publish the demo revision with a secret field on write_script's schema.
 
     The demo nodes declare no secret fields, so the generic node-config vault
-    diversion mechanism is exercised through a republished write_script agent
-    declaring a ``secret: true`` field. Agent definitions are workspace-scoped
-    (schema v46); creation seeds nothing since schema v62, so this helper
-    first publishes the demo revision + factory agents, then publishes the
-    secret-carrying write_script v2 inside that workspace.
+    diversion mechanism is exercised through a write_script node declaring a
+    ``secret: true`` field. #935: the schema lives on the (self-contained)
+    node itself — Agent definitions no longer supply node profiles.
     """
     from pathlib import Path
 
     from server.app.jobs import JobQueries
-    from tests.helpers import publish_builtin_revision, seed_workspace_agent_definitions
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from tests.helpers import load_builtin_definition, publish_builtin_revision
+    from tests.helpers.node_profile import SECRET_NODE_SCHEMA, with_node_config_schema
 
-    publish_builtin_revision(JobQueries(TEST_DATABASE_URL, Path(tempfile.mkdtemp())), workspace_id)
-    seed_workspace_agent_definitions(workspace_id)
-    service = AgentService(TEST_DATABASE_URL, workspace_id)
-    service.save_draft(
-        "example-write-script-v1",
-        AgentDefinition(
-            capability="write_script",
-            runtime="velites",
-            skill="education-video-problems-generation/write-script",
-            config_schema={
-                "type": "object",
-                "properties": {
-                    "api_url": {"type": "string"},
-                    "token": {"type": "string", "secret": True},
-                },
-            },
-        ),
-        created_by="test-seed",
+    job_db = JobQueries(TEST_DATABASE_URL, Path(tempfile.mkdtemp()))
+    publish_builtin_revision(job_db, workspace_id)
+    definition = with_node_config_schema(
+        load_builtin_definition("education_video_problems_generation"),
+        "write_script",
+        SECRET_NODE_SCHEMA,
     )
-    service.publish("example-write-script-v1")
+    WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, definition)
 
 
 @pytest.fixture

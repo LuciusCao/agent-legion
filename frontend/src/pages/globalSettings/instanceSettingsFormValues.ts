@@ -25,6 +25,7 @@ export function toFormValues(doc: InstanceSettingsResponse): FormValues {
     code_capacity: String(doc.code_capacity),
     materials_ttl_days: String(doc.materials_ttl_days),
     execution_retention_days: String(doc.execution_retention_days),
+    studio_chat_retention_days: String(doc.studio_chat_retention_days),
     'workflows.max_items_per_run': String(doc.workflows.max_items_per_run),
     // 契约是字节，表单按 KB 展示（验收反馈 #786）：Math.round 对齐
     // WorkflowNodeCodeEditor 的 KB 展示先例；非 1024 倍数只能经 env/直调

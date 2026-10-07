@@ -275,7 +275,10 @@ function draftHashFromOutput(
 function saveFailedFromOutput(call: ToolCallView): boolean {
   return (
     call.outputText.startsWith('HTTP ') ||
-    call.outputText.startsWith('request failed: ')
+    call.outputText.startsWith('request failed: ') ||
+    // #935（#440 P3，D3）：Agent 定义写工具已 deprecated，不写库、只返回
+    // 引导文本——没有草稿可发布，卡片按失败呈现。
+    call.outputText.startsWith('DEPRECATED (#440)')
   )
 }
 

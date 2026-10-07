@@ -108,7 +108,7 @@ suite. Keep the tier under ~90 seconds: when adding tests for a new
 subsystem, add one core file to the smoke set rather than raising the budget.
 
 The unit tier (`GATE_TIER=unit`) runs the complete PostgreSQL-offline unit
-layer, selected with `-m "not postgres and not repository_gate"` against an
+layer, selected with `-m "not postgres"` against an
 unreachable loopback database URL, so an accidental database dependency fails
 the gate instead of silently using a developer database. CI runs it as the
 `backend-unit` job; the PostgreSQL integration layer (`GATE_TIER=postgres`)

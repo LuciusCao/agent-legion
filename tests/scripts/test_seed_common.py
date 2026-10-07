@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from scripts.seed.seed_agent_inline import inline_agent_profiles  # noqa: E402
 from scripts.seed.seed_common import (  # noqa: E402
     code_violations,
     content_equal,
@@ -226,3 +227,33 @@ class TestContentEqual:
 
     def test_list_order_sensitive(self):
         assert not content_equal({"a": [1, 2]}, {"a": [2, 1]})
+
+
+class TestInlineAgentProfiles:
+    """#935: legacy agent nodes get the seed Agent inlined before publish."""
+
+    def test_legacy_yaml_agent_node_is_inlined_sparsely(self):
+        definition = make_definition()
+        definition["nodes"]["summarize"]["type"] = "agent"
+
+        inlined, untouched = inline_agent_profiles(definition, make_seed()["agents"])
+
+        node = inlined["nodes"]["summarize"]
+        assert untouched == []
+        assert node["execution"] == {"runtime": "velites"}
+        assert node["tools"] == ["read", "write"]
+        assert node["skill"] == {"key": "acme/summarize", "ref": "latest"}
+        assert "requires_labels" not in node and "config_schema" not in node
+        # The input is never mutated; code nodes are left alone.
+        assert "execution" not in definition["nodes"]["summarize"]
+        assert "execution" not in inlined["nodes"]["fetch"]
+
+    def test_self_contained_and_unresolvable_nodes_are_left_alone(self):
+        definition = make_definition()
+        definition["nodes"]["summarize"].update(type="agent", execution={"runtime": "pi"})
+        definition["nodes"]["fetch"].update(type="agent", capability="no_such_agent")
+
+        inlined, untouched = inline_agent_profiles(definition, make_seed()["agents"])
+
+        assert inlined["nodes"]["summarize"]["execution"] == {"runtime": "pi"}
+        assert untouched == ["fetch"]

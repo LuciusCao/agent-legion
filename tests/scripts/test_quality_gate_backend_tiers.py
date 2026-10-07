@@ -94,7 +94,7 @@ def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PostgreSQL offline" in result.stdout
     calls = gate_log.read_text(encoding="utf-8")
-    assert "not postgres and not repository_gate" in calls
+    assert "-m not postgres" in calls
     assert "--durations=30" in calls
     assert f"--junitxml={results / 'quick-junit.xml'}" in calls
     assert "-p scripts.pytest_telemetry" in calls
@@ -252,7 +252,7 @@ def test_backend_full_coverage_defers_floor_to_combined_report(tmp_path: Path) -
     # via the environment, so the fake uv logs it separately). Without these
     # assertions a revert to the whole quick suite would pass silently while
     # the AGENTS.md discipline assumes the unit-tier default.
-    assert "not postgres and not repository_gate" in calls
+    assert "-m not postgres" in calls
     assert "agent_legion_unit_offline" in calls
 
 
@@ -307,7 +307,7 @@ def test_backend_aff_tier_falls_back_to_unit_without_index(tmp_path: Path) -> No
     calls, stdout = _run_backend_gate_with_fake_uv(tmp_path, {"GATE_TIER": "aff"}, capture="both")
 
     assert "aff fallback: no .pytest-aff-index.json" in stdout
-    assert "not postgres and not repository_gate" in calls
+    assert "-m not postgres" in calls
     assert "agent_legion_unit_offline" in calls
 
 
@@ -401,7 +401,7 @@ def test_backend_aff_tier_falls_back_when_selection_is_broad(tmp_path: Path) -> 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "aff fallback: no index or selection too broad" in result.stdout
     calls = gate_log.read_text(encoding="utf-8")
-    assert "not postgres and not repository_gate" in calls
+    assert "-m\nnot postgres\n" in calls
 
 
 def test_backend_aff_tier_falls_back_on_unmapped_source_files(tmp_path: Path) -> None:
@@ -446,8 +446,7 @@ def test_backend_aff_tier_falls_back_on_unmapped_source_files(tmp_path: Path) ->
     assert result.returncode == 0, result.stdout + result.stderr
     assert "aff fallback: changed source files missing from the index" in result.stdout
     calls = gate_log.read_text(encoding="utf-8")
-    assert "not postgres and not repository_gate" in calls
-    assert "not postgres and not repository_gate" in calls
+    assert "-m\nnot postgres\n" in calls
 
 
 def test_backend_aff_index_tier_uses_coverage_contexts(tmp_path: Path) -> None:
@@ -465,7 +464,7 @@ def test_backend_postgres_tier_loads_shard_plugin_when_gate_shard_set(tmp_path: 
 
     assert "-p scripts.pytest_gate_shard" in calls
     assert "shard:1/3" in calls
-    assert "postgres and not repository_gate" in calls
+    assert "-m postgres" in calls
 
 
 def test_backend_postgres_tier_has_no_shard_plugin_without_gate_shard(tmp_path: Path) -> None:
@@ -473,7 +472,7 @@ def test_backend_postgres_tier_has_no_shard_plugin_without_gate_shard(tmp_path: 
 
     assert "scripts.pytest_gate_shard" not in calls
     assert "shard:unset" in calls
-    assert "postgres and not repository_gate" in calls
+    assert "-m postgres" in calls
 
 
 def test_backend_test_workers_default_is_capped(tmp_path: Path) -> None:

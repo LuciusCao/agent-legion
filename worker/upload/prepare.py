@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from shared.pi_events import scan_and_compress_pi_events
+from worker.upload.report_policy import declared_ceiling_rejection
 from worker.upload.result_metadata import (
     MAX_ERROR_MESSAGE_CHARS,
     failed_metadata,
@@ -31,9 +32,11 @@ if TYPE_CHECKING:
 
 def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # prepare_result + 失败降级为 failed 上报；直传回落后按清空的
-    # artifact_uploads 重跑，tar 随之内嵌产物。
+    # artifact_uploads 重跑，tar 随之内嵌产物。#959：备妥的归档超 Host 下发
+    # 上限即诚实判败（空归档 + failed），不把注定 413 的归档送进 report 车道。
     try:
-        return prepare_result(task)
+        metadata, archive, outputs = prepare_result(task)
+        rejection = declared_ceiling_rejection(task, archive)
     except Exception as exc:
         # #204 broad-except audit: 归档准备的故意降级（prepare_result 的
         # docstring 契约："may raise — caller degrades"，镜像拆分前的内联
@@ -46,6 +49,9 @@ def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]
         archive = task.execution_dir / "result.tar.gz"
         write_empty_archive(archive)
         return failed_metadata(task, f"result preparation failed: {exc}"), archive, []
+    if rejection is not None:
+        return failed_metadata(task, rejection), archive, []
+    return metadata, archive, outputs
 
 
 def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:

@@ -65,13 +65,18 @@ def resolve_node_route(
         return NodeRoute("agent", target_id=node.key, profile_source=PROFILE_SOURCE_NODE)
     node_key = node.key
     capability = node.capability
-    key = (workspace_id, workflow_key, node_key)
+    is_agent = node.node_type == "agent"
+    # #935 R1: the snapshot's node type is part of the key — a frozen route
+    # row may outlive a node that this job's snapshot declares ``code``.
+    key = (workspace_id, workflow_key, node_key, is_agent)
     now = time.monotonic()
     cached = worker.state.route_cache.get(key)
     if cached is not None and now - cached[0] < ROUTE_CACHE_TTL_SECONDS:
         route = cached[1]
     else:
-        route = _resolve_uncached(worker, workspace_id, workflow_key, node_key, capability)
+        route = _resolve_uncached(
+            worker, workspace_id, workflow_key, node_key, capability, is_agent=is_agent
+        )
         worker.state.route_cache[key] = (now, route)
     if route.kind == "executor" and node.node_type == "agent":
         # A legacy (non-self-contained) agent node with no route row: its
@@ -89,6 +94,8 @@ def _resolve_uncached(
     workflow_key: str,
     node_key: str,
     capability: str,
+    *,
+    is_agent: bool,
 ) -> NodeRoute:
     # #211 Phase 3 (read-layer binding): the route predicate keys on
     # (workspace_id, node_key) — workflow_key equals the workspace id on
@@ -104,8 +111,10 @@ def _resolve_uncached(
             (workspace_id, node_key),
         ).fetchone()
         # Agent routing is decided by the materialized workspace_node_routes
-        # projection, not by any node-level declaration.
-        if route is not None and route["target_kind"] == "agent":
+        # projection — but only for nodes the job snapshot declares ``agent``
+        # (#935 R1): a row left behind for a node since turned ``code`` must
+        # never pull it off the code pool.
+        if is_agent and route is not None and route["target_kind"] == "agent":
             agent_id = str(route["target_id"])
             profile = resolve_dispatch_agent_profile(worker.job_db, workspace_id, agent_id, None)
             if profile is None or profile.legacy_ref is None:
@@ -114,7 +123,8 @@ def _resolve_uncached(
                     error_message=(
                         f"Agent {agent_id!r} has no published definition in workspace"
                         f" {workspace_id!r}; agent definitions are workspace-scoped"
-                        " (schema v46) — create one in Studio (Agent 管理) for this workspace"
+                        " (schema v46) — upgrade the job to the active revision, whose agent"
+                        " nodes carry their own execution profile"
                     ),
                 )
             if profile.legacy_ref.capability != capability:

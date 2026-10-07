@@ -88,7 +88,7 @@ def test_get_authoring_guide_is_served_locally(recorded) -> None:
         "From-scratch flow",
         "Workflow definition YAML",
         "Capabilities and node kinds",
-        "Agent definitions and tunables",
+        "Node execution profiles and tunables",
         "Common errors",
     ):
         assert section in text
@@ -111,7 +111,7 @@ def test_get_authoring_guide_returns_one_section(recorded) -> None:
     assert "From-scratch flow" not in text
     # Chapters keep their ### subsections (5.1/5.2 belong to agents).
     agents = _run_tool(server, "get_authoring_guide", {"section": "agents"})
-    assert agents.startswith("## Agent definitions and tunables")
+    assert agents.startswith("## Node execution profiles and tunables")
     assert "Configuring tools" in agents
 
 
@@ -299,58 +299,43 @@ def test_get_node_code(recorded) -> None:
     assert calls[0]["url"].endswith("/workspaces/ws-1/nodes/n/code")
 
 
-def test_save_agent_definition_draft_default_tools(recorded) -> None:
-    server, calls = recorded
-    _run_tool(
-        server,
-        "save_agent_definition_draft",
-        {
-            "workspace_id": "ws-1",
-            "agent_id": "a-1",
-            "capability": "cap",
-            "runtime": "pi",
-            "skill": "s/k",
-        },
-    )
-    assert calls[0]["method"] == "PUT"
-    assert calls[0]["url"].endswith("/workspaces/ws-1/agent-definitions/a-1/draft")
-    assert calls[0]["json"] == {
-        "capability": "cap",
-        "runtime": "pi",
-        "skill": "s/k",
-        "tools": ["read", "write", "bash"],
-        "requires_labels": {},
-        "config_schema": {},
-    }
-
-
-def test_save_agent_definition_draft_forwards_labels_and_config_schema(recorded) -> None:
-    # #633：requires_labels / config_schema 是 HTTP 契约的一部分（草稿保存
-    # 已支持），MCP 包装此前丢字段——现在原样透传。
-    server, calls = recorded
-    _run_tool(
-        server,
-        "save_agent_definition_draft",
-        {
-            "workspace_id": "ws-1",
-            "agent_id": "a-1",
-            "capability": "cap",
-            "runtime": "velites",
-            "skill": "s/k",
-            "tools": ["read"],
-            "requires_labels": {"gpu": "a100"},
-            "config_schema": {
-                "type": "object",
-                "properties": {"dry_run": {"type": "boolean"}},
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        (
+            "save_agent_definition_draft",
+            {
+                "workspace_id": "ws-1",
+                "agent_id": "a-1",
+                "capability": "cap",
+                "runtime": "pi",
+                "skill": "s/k",
+                "requires_labels": {"gpu": "a100"},
             },
-        },
-    )
-    assert calls[0]["json"]["requires_labels"] == {"gpu": "a100"}
-    assert calls[0]["json"]["config_schema"] == {
-        "type": "object",
-        "properties": {"dry_run": {"type": "boolean"}},
-    }
-    assert calls[0]["json"]["tools"] == ["read"]
+        ),
+        (
+            "create_agent_definition",
+            {
+                "workspace_id": "ws-1",
+                "capability": "review_keywords",
+                "runtime": "velites",
+                "skill": "g/s",
+            },
+        ),
+    ],
+)
+def test_agent_definition_write_tools_are_deprecated_guidance(recorded, tool, args) -> None:
+    """#935 (#440 P3, D3): the Agent definition write tools keep their names
+    (P4 removes them) but write nothing — they steer the agent to the node
+    execution profile saved through save_workflow_draft."""
+    server, calls = recorded
+
+    text = _run_tool(server, tool, args)
+
+    assert calls == []
+    assert text.startswith("DEPRECATED")
+    assert "save_workflow_draft" in text
+    assert "execution.runtime" in text
 
 
 def test_get_agent_definitions(recorded) -> None:
@@ -358,58 +343,6 @@ def test_get_agent_definitions(recorded) -> None:
     _run_tool(server, "get_agent_definitions", {"workspace_id": "ws-1"})
     assert calls[0]["method"] == "GET"
     assert calls[0]["url"].endswith("/workspaces/ws-1/agent-definitions")
-
-
-def test_create_agent_definition_posts_workspace_scoped_body(recorded) -> None:
-    # #635: the create derives agent_id from the capability — the path keys
-    # on the workspace alone, and the body mirrors the save tool's defaults.
-    server, calls = recorded
-    _run_tool(
-        server,
-        "create_agent_definition",
-        {
-            "workspace_id": "ws-1",
-            "capability": "review_keywords",
-            "runtime": "velites",
-            "skill": "g/s",
-        },
-    )
-    assert calls[0]["method"] == "POST"
-    assert calls[0]["url"].endswith("/workspaces/ws-1/agent-definitions")
-    assert calls[0]["json"] == {
-        "capability": "review_keywords",
-        "runtime": "velites",
-        "skill": "g/s",
-        "tools": ["read", "write", "bash"],
-        "requires_labels": {},
-        "config_schema": {},
-    }
-
-
-def test_create_agent_definition_forwards_optional_fields(recorded) -> None:
-    server, calls = recorded
-    _run_tool(
-        server,
-        "create_agent_definition",
-        {
-            "workspace_id": "ws-1",
-            "capability": "generate_questions",
-            "runtime": "pi",
-            "skill": "g/q",
-            "tools": ["read", "json"],
-            "requires_labels": {"gpu": "a100"},
-            "config_schema": {
-                "type": "object",
-                "properties": {"dry_run": {"type": "boolean"}},
-            },
-        },
-    )
-    assert calls[0]["json"]["tools"] == ["read", "json"]
-    assert calls[0]["json"]["requires_labels"] == {"gpu": "a100"}
-    assert calls[0]["json"]["config_schema"] == {
-        "type": "object",
-        "properties": {"dry_run": {"type": "boolean"}},
-    }
 
 
 def test_get_runtime_models(recorded) -> None:

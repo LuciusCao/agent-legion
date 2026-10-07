@@ -128,7 +128,10 @@ def test_aggregator_run_survives_flush_failure(monkeypatch):
         task = asyncio.create_task(
             aggregator.run(interval_seconds=0.01, failure_backoff_seconds=0.01)
         )
-        await asyncio.sleep(0.2)
+        # 失败后的下一次 flush 发生即证明循环存活（不靠固定 sleep 猜轮数）。
+        deadline = asyncio.get_running_loop().time() + 5
+        while calls < 2 and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.01)
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
