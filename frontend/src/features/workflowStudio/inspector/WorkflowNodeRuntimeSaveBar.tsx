@@ -24,8 +24,8 @@ function saveStatusText(save: DraftSaveState): string {
 }
 
 /**
- * 节点 execution 块（provider/model/thinking）的面板级保存（#769）：形态对齐
- * AgentEditor 的「保存草稿 / 发布」，编辑与保存收敛在同一空间。
+ * 节点 execution 块（provider/model/thinking）的面板级保存（#769）：面板内
+ * 「保存草稿 / 发布」，编辑与保存收敛在同一空间。
  * - 「保存草稿」复用整份草稿的保存通道（useWorkflowDraftPersistence 的
  *   flushNow：跳过 800ms debounce 立即 PUT，带 #633 CAS 基线）；冲突态
  *   禁用——冲突必须在顶部警示里显式二选一，面板不提供隐式 keep-mine。

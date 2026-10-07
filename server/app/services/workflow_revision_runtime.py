@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING
 from server.app.jobs.queries.upgrade_impl_identity import (
     acquire_implementation_publication_lock,
 )
+from server.app.services.agent_profile_provenance import (
+    embed_provenance,
+    provenance_from_revision_json,
+)
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
 
@@ -69,6 +73,10 @@ def save_revision_runtime_or_publish(
     new_hash = definition_hash(definition_json)
     current_pins = json.loads(str(active["definition_json"])).get("node_code_pins")
     definition_json = embed_node_code_pins(definition_json, current_pins or {})
+    # #935：结构未变 = 档案字段未变，v93 provenance 原样保留（同 pins）。
+    definition_json = embed_provenance(
+        definition_json, provenance_from_revision_json(str(active["definition_json"]))
+    )
     with job_db.connect() as conn:
         # #759 P2-A：runtime-only 原地编辑改写 active revision 的
         # definition_json/definition_hash，同属 implementation-publication

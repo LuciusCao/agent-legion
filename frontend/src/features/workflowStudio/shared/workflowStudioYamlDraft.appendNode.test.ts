@@ -59,7 +59,22 @@ describe('appendWorkflowNode', () => {
       label: '生成关键信息',
       capability: 'generate_key_info',
       after: [],
+      // #935：agent 节点自含执行档案——无顶层默认时写默认 runtime。
+      execution: { runtime: 'velites' },
     })
+  })
+
+  it('lets a new agent node inherit the workflow top-level runtime (#935)', () => {
+    const out = appendWorkflowNode(`execution:\n  runtime: pi\n${baseYaml}`, {
+      nodeType: 'agent',
+      key: 'gen',
+    })
+    expect(parseNodes(out).nodes?.gen).not.toHaveProperty('execution')
+  })
+
+  it('never writes a runtime onto a new code node (#935)', () => {
+    const out = appendWorkflowNode(baseYaml, { nodeType: 'code', key: 'c2' })
+    expect(parseNodes(out).nodes?.c2).not.toHaveProperty('execution')
   })
 
   it('rejects duplicate keys (fail-closed, draft untouched)', () => {

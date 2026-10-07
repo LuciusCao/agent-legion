@@ -175,14 +175,17 @@ class StudioChatQueriesMixin(
         *,
         status_in: tuple[str, ...] | None = None,
         status_not_in: tuple[str, ...] | None = None,
+        error_detail_is: str | None = None,
         **fields: Any,
     ) -> bool:
         """Guarded update: apply only while the current status matches (#158).
 
         The status predicate rides the same UPDATE (atomic check-and-set), so
         a concurrent close/error transition landing between a caller's read
-        and this write cannot be overwritten back to a live state. Returns
-        True when a row was actually updated.
+        and this write cannot be overwritten back to a live state.
+        ``error_detail_is`` additionally pins the current ``error_detail``
+        (e.g. undoing only one's own error stamp, not a later real failure).
+        Returns True when a row was actually updated.
         """
         updates = _build_session_updates(fields)
         if not updates:
@@ -198,6 +201,9 @@ class StudioChatQueriesMixin(
             placeholders = ",".join("%s" for _ in status_not_in)
             clauses.append(f"status not in ({placeholders})")
             params.extend(status_not_in)
+        if error_detail_is is not None:
+            clauses.append("error_detail=%s")
+            params.append(error_detail_is)
         with self.connect() as conn:
             row = conn.execute(
                 f"update studio_chat_sessions set {assignments},"
