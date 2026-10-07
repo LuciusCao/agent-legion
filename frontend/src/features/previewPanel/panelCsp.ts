@@ -78,22 +78,46 @@ export function buildPanelCsp(): string {
  */
 const VIOLATION_PROBE = `(function(){var seen={};document.addEventListener('securitypolicyviolation',function(e){var d=e.effectiveDirective||e.violatedDirective||'';if(d.indexOf('script-src')!==0||seen[d])return;seen[d]=1;window.parent.postMessage({source:${JSON.stringify(PREVIEW_PANEL_SOURCE)},type:'csp-violation',directive:d},'*')})})()`
 
-/** bundle 自带 CSP meta 里声明的 `'nonce-…'` 值（在宿主 meta 插入前读取）。 */
-function bundlePolicyNonces(doc: Document): Set<string> {
-  const nonces = new Set<string>()
-  for (const meta of Array.from(doc.querySelectorAll('meta[http-equiv]'))) {
+/**
+ * bundle 自带、浏览器实际会执行的 CSP meta 及其声明的 `'nonce-…'` 值（在
+ * 宿主 meta 插入前读取）。浏览器只认 <head> 直接子元素里的 CSP meta，且
+ * 策略自 meta 解析起才生效——body / head <noscript> 内的 meta 不计，脚本
+ * 之后的 meta 也管不到它（由 policyNonceFor 按文档顺序判断）。CSP 关键字
+ * 大小写不敏感，nonce 值本身原样比较。
+ */
+function bundlePolicyNonces(doc: Document): Array<[Element, Set<string>]> {
+  const policies: Array<[Element, Set<string>]> = []
+  for (const meta of Array.from(doc.head.children)) {
     if (
+      meta.tagName !== 'META' ||
       meta.getAttribute('http-equiv')?.toLowerCase() !==
-      'content-security-policy'
+        'content-security-policy'
     )
       continue
+    const nonces = new Set<string>()
     for (const m of (meta.getAttribute('content') ?? '').matchAll(
-      /'nonce-([^']+)'/g
+      /'nonce-([^']+)'/gi
     )) {
       nonces.add(m[1])
     }
+    policies.push([meta, nonces])
   }
-  return nonces
+  return policies
+}
+
+/** 脚本的 nonce 是否被位于它之前的 bundle 生效策略声明。 */
+function policyNonceFor(
+  script: Element,
+  own: string,
+  policies: Array<[Element, Set<string>]>
+): boolean {
+  return policies.some(
+    ([meta, nonces]) =>
+      nonces.has(own) &&
+      (meta.compareDocumentPosition(script) &
+        Node.DOCUMENT_POSITION_FOLLOWING) !==
+        0
+  )
 }
 
 /**
@@ -107,9 +131,10 @@ function bundlePolicyNonces(doc: Document): Set<string> {
  * 透明。bundle 自带的 CSP meta 若存在只会更严（多策略取交集）。
  * 序列化用 outerHTML 而非 XMLSerializer：保持 HTML 语法（自闭合、实体）。
  * 盖章同样走解析器语义：只有真实 <script> 元素拿到 nonce，字符串或注释里
- * 的伪 `<script>` 不受影响。bundle 自带 nonce 策略（自身 CSP meta 声明
- * `'nonce-X'` 且脚本带 nonce="X"）的脚本保留原 nonce：只在实例 CSP 兼容
- * 模式下可运行，严格模式不支持此形态（作者约束见 preview_guide.md）。
+ * 的伪 `<script>` 不受影响。bundle 自带 nonce 策略的脚本保留原 nonce：
+ * 条件是该脚本带 nonce="X"，且在它之前有一条 head 直接子元素的 CSP meta
+ * 声明了 `'nonce-X'`（即浏览器对它实际执行的 bundle 策略）。此形态只在实例
+ * CSP 兼容模式下可运行，严格模式不支持（作者约束见 preview_guide.md）。
  */
 export function injectPanelCsp(html: string, csp: string, nonce = ''): string {
   const meta = document.createElement('meta')
@@ -117,14 +142,15 @@ export function injectPanelCsp(html: string, csp: string, nonce = ''): string {
   meta.setAttribute('content', csp)
   const doc = new DOMParser().parseFromString(html, 'text/html')
   if (nonce) {
-    const ownNonces = bundlePolicyNonces(doc)
+    const policies = bundlePolicyNonces(doc)
     for (const script of Array.from(doc.querySelectorAll('script'))) {
-      // bundle 自带 nonce 策略且脚本 nonce 与之匹配时保留（codex P2）：
-      // 一个脚本只能有一个 nonce，宿主 nonce 必被 bundle 自身策略拒绝；
-      // 保留后兼容模式（宿主头 'unsafe-inline'）下该面板照常运行，严格
-      // 模式下覆盖与否都过不了两层策略，结果不变。
+      // 对该脚本生效的 bundle 策略声明了它的 nonce 时保留（codex P2）：
+      // 一个脚本只能有一个 nonce，宿主 nonce 必被那条策略拒绝；保留后兼容
+      // 模式（宿主头 'unsafe-inline'）下照常运行，严格模式下覆盖与否都过
+      // 不了两层策略，结果不变。不生效的 meta（body 内、脚本之后）不触发
+      // 保留，脚本照常盖宿主 nonce，严格模式下与修复前一样可运行。
       const own = script.getAttribute('nonce')
-      if (own && ownNonces.has(own)) continue
+      if (own && policyNonceFor(script, own, policies)) continue
       script.setAttribute('nonce', nonce)
     }
     const probe = doc.createElement('script')

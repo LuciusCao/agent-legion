@@ -81,6 +81,42 @@ describe('injectPanelCsp', () => {
     expect(nonces).toEqual(['n0nce', 'panel', 'n0nce', 'n0nce'])
   })
 
+  it('只认对脚本实际生效的 bundle 策略：body 内、head noscript 内、脚本之后的 meta 不触发保留', () => {
+    const out = parse(
+      injectPanelCsp(
+        '<!doctype html><html><head>' +
+          '<noscript><meta http-equiv="Content-Security-Policy" content="script-src \'nonce-ns\'"></noscript>' +
+          '<script nonce="late">a()</script><script nonce="ns">n()</script>' +
+          `<meta http-equiv="Content-Security-Policy" content="script-src 'nonce-late'">` +
+          '</head><body>' +
+          `<meta http-equiv="Content-Security-Policy" content="script-src 'nonce-body'">` +
+          '<script nonce="body">b()</script></body></html>',
+        csp,
+        'n0nce'
+      )
+    )
+    const nonces = Array.from(out.querySelectorAll('script')).map((s) =>
+      s.getAttribute('nonce')
+    )
+    expect(nonces).toEqual(['n0nce', 'n0nce', 'n0nce', 'n0nce'])
+  })
+
+  it('CSP 关键字大小写不敏感：NONCE-x 声明同样触发保留', () => {
+    const out = parse(
+      injectPanelCsp(
+        '<!doctype html><html><head>' +
+          `<meta http-equiv="content-security-policy" content="SCRIPT-SRC 'NONCE-Pa1'">` +
+          '<script nonce="Pa1">own()</script></head><body></body></html>',
+        csp,
+        'n0nce'
+      )
+    )
+    const nonces = Array.from(out.querySelectorAll('script')).map((s) =>
+      s.getAttribute('nonce')
+    )
+    expect(nonces).toEqual(['n0nce', 'Pa1'])
+  })
+
   it('无 nonce 时只注入 CSP meta，脚本原样', () => {
     const out = injectPanelCsp(
       '<!doctype html><html><head><script>var a=1</script></head><body></body></html>',
