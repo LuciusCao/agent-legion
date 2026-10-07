@@ -516,19 +516,18 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
 
    ```bash
    C() { docker compose "${F[@]}" exec -T postgres "$@"; }
-   DUMP=<备份目录>/agent_legion-<时间戳>.dump
+   DUMP="$BK/agent_legion-<时间戳>.dump"
+   PRE="agent_legion_pre_restore_$(date +%Y%m%d%H%M%S)"   # 留存库名带时间戳：再次恢复不会与上一次的留存相撞
    # 预检：把整个归档解码为 SQL 丢弃，能读完说明文件完整（--list 只读头部与目录）
    C pg_restore -f /dev/null < "$DUMP" \
      && C psql -U agent_legion -d postgres -v ON_ERROR_STOP=1 \
-          -c 'ALTER DATABASE agent_legion RENAME TO agent_legion_pre_restore' \
+          -c "ALTER DATABASE agent_legion RENAME TO $PRE" \
      && C createdb -U agent_legion -O agent_legion agent_legion \
      && C pg_restore -U agent_legion -d agent_legion --no-owner \
           --exit-on-error --single-transaction < "$DUMP"
+   echo "恢复前的库留存为 $PRE"
    ```
 
-   上一次恢复留下的 `agent_legion_pre_restore` 还在（§2.4 通过后没有删）时，改名会以
-   「数据库已存在」失败、链在此停住、现库不动：先确认它不再需要并
-   `C dropdb -U agent_legion agent_legion_pre_restore`（或改名为带时间戳的名字留存）再重跑。
    预检失败时后续步骤都不会执行，现库原样不动。`pg_restore` 默认遇错继续、只在
    结尾报错数，`--exit-on-error --single-transaction` 让任何一条失败都整体回滚，
    不会留下半导入的库。改名之后的步骤失败时，用下面两条命令回到恢复前状态：
@@ -536,13 +535,15 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
    ```bash
    C dropdb -U agent_legion agent_legion
    C psql -U agent_legion -d postgres -v ON_ERROR_STOP=1 \
-     -c 'ALTER DATABASE agent_legion_pre_restore RENAME TO agent_legion'
+     -c "ALTER DATABASE $PRE RENAME TO agent_legion"
    ```
 
-   旧库保留到 §2.4 全部核对通过后再删除：
-   `C dropdb -U agent_legion agent_legion_pre_restore`（`C` 即上面定义的函数）。
+   旧库保留到 §2.4 全部核对通过后再删除：`C dropdb -U agent_legion "$PRE"`（`C` 即上面
+   定义的函数）。历次恢复留下的库都以 `agent_legion_pre_restore_` 开头，
+   `C psql -U agent_legion -d postgres -Atc "select datname from pg_database where datname like 'agent_legion_pre_restore_%'"`
+   列出后逐个确认再删。
    原生形态用本机客户端走同样四步：`pg_restore -f /dev/null "$DUMP"` 预检；连同一
-   实例的 `postgres` 库执行 `ALTER DATABASE <库名> RENAME TO <库名>_pre_restore` 与
+   实例的 `postgres` 库执行 `ALTER DATABASE <库名> RENAME TO <库名>_pre_restore_<时间戳>` 与
    `CREATE DATABASE <库名> OWNER <角色>`（需 CREATEDB 权限，没有就用超级用户执行这
    两条）；再 `pg_restore -d "$AGENT_LEGION_DATABASE_URL" --no-owner --exit-on-error --single-transaction "$DUMP"`。
 5. 恢复对象存储（D2–D4）、Host 数据根（D7–D10、D18）、skill root（D11）与 Worker 状态（D14–D16）。
@@ -687,7 +688,8 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
 
 ### 2.4 恢复后核对
 
-逐项对应 §0 的「恢复后核验」列；全部通过后再删除各处留存的 `pre_restore` 副本。
+逐项对应 §0 的「恢复后核验」列；全部通过后再删除各处留存的 `pre_restore` 副本
+（数据库 `$PRE`、`KEEP_ASIDE` 留下的 `.pre-restore-*` 文件与目录）。
 
 - **数据库与对象存储可达**（D1–D4）：`GET /api/health` 的 `storage.reachable` 为真；
   admin 基础设施连接探测（`POST /api/admin/infra-connections/test`，`target` 分别取
