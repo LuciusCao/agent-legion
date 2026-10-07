@@ -30,7 +30,7 @@ IMAGE_REPO="ghcr.io/luciuscao/agent-legion-worker"
 # 注意 compose 文件按 worker-v<version> tag ref 拉取：自定义版本必须存在
 # 对应 tag（即经过 worker-image-release workflow 发布过）。
 WORKER_VERSION="${AGENT_WORKER_VERSION:-0.7.16}"
-VELITES_VERSION="${VELITES_VERSION:-0.5.7}"
+VELITES_VERSION="${VELITES_VERSION:-0.5.8}"
 TARGET="${AGENT_WORKER_INSTALL_DIR:-$HOME/agent-legion-worker}"
 HOST_URL=""
 WORKER_ID=""
