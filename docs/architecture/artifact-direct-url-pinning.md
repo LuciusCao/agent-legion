@@ -129,7 +129,7 @@ job 删除（`delete_objects`）均按行 `storage_key` 工作，不需要改动
 | 并发**首次**登记同一 `(job, node, name)`（无行可 `for update`）| 先提交者的版本 key 被后提交者改指后无行引用（孤儿）；其间若已签发 URL，该 URL 只返回先提交者自己的字节 | GC / lifecycle；验收不受影响 |
 | 被取代对象删除失败 / 锁被在途 promote 持有 | 旧 key 残留，只承载旧字节 | GC / lifecycle；验收不受影响 |
 | 闸拒 / 中途失败的 promote | 新版本 key 孤儿（无行、未签发） | GC / lifecycle |
-| 被取代对象删除前的进行中读取 | 旧 URL / raw 读到中途的对象被删，连接中断或 404 | 调用方重取清单（runbook §9） |
+| 被取代对象删除前的进行中读取 | 旧 URL / raw 读到中途的对象被删，连接中断或 404 | 调用方重取清单（[workspace-api-tokens.md「读取产物」](../workspace-api-tokens.md#读取产物清单直连下载与全链路示例)） |
 
 ## 6. Quality Impact
 

@@ -1,8 +1,9 @@
 # 零 agent runtime 形态 override（issue #381，codex P2）：
-# 基础 compose 无条件 bind mount velites（long syntax + create_host_path:
-# false，源缺失拒绝启动——这是给「常见形态忘了放二进制」的 fail-fast）；
-# 但纯 code 池 / 实验形态不挂任何 agent runtime 时，那条挂载反而成了
-# 「必须准备一个用不上的 velites 文件才能启动」的门槛。
+# 基础 compose 无条件 bind mount velites（long syntax；源缺失时 daemon 自动
+# 建空目录、容器照常启动，「忘了放二进制」由 AGENT_WORKER_EXPECT_RUNTIMES
+# 守卫 fail-fast，见 compose.worker.yaml 同段勘误）；纯 code 池 / 实验形态
+# 不挂任何 agent runtime 时，那条挂载只会在 velites-bin/ 下留一个无用的
+# 空目录，本 override 把它去掉。
 #
 # 用法（zero-runtime 形态专用；compose v2.24+ 的 !override 语义整列表替换，
 # 故此处需完整复制基础文件的全部挂载、仅去掉 velites 一条——新增挂载时
