@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from server.app.skills.skill_roots import SKILLS_ROOT_DISPLAY
 
@@ -140,6 +140,12 @@ class InstanceSettingsDocument(BaseModel):
     result_unpack: InstanceResultUnpackSettings
     result_validate: InstanceResultValidateSettings
     agent_claim: InstanceAgentClaimSettings
+    # #989: document CSP compatibility switch (default False = strict nonce
+    # script-src). True restores 'unsafe-inline' so published preview panels
+    # relying on inline onclick= handlers keep working during migration.
+    # Read at serve time (services/document_csp.py), no restart needed.
+    # Strict: a security switch must not flip on a coerced "yes" / 1.
+    csp_script_unsafe_inline: StrictBool
 
 
 class InstanceSettingsResponse(InstanceSettingsDocument):

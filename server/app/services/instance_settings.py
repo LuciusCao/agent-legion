@@ -81,6 +81,9 @@ def default_instance_document(
     document: dict[str, Any] = {
         "cleanup": dict(DEFAULT_CLEANUP_CONFIG),
         "monitoring": dict(DEFAULT_MONITORING_CONFIG),
+        # Document CSP compatibility switch (#989): False = strict; read at
+        # serve time through services/document_csp.py, never hydrated.
+        "csp_script_unsafe_inline": False,
         # Materials TTL (design §10): 0 = disabled; read fresh from the DB at
         # material completion/sweep time, never hydrated into Settings.
         "materials_ttl_days": 0,

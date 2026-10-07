@@ -15,7 +15,13 @@ from server.app.workflows.definition import (
 from server.app.workflows.revision_format import definition_to_yaml, serialize_definition
 from server.app.workflows.schema import WorkflowDefinitionError, WorkflowNodeExecution
 from server.app.workflows.workflow_node_execution import node_execution_payload
-from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
+from server.app.workflows.workflow_node_profile import (
+    FROZEN_NODE_CODE,
+    FROZEN_NODE_LEGACY_AGENT,
+    FROZEN_NODE_SELF_CONTAINED_AGENT,
+    frozen_node_execution_kind,
+    is_self_contained_agent_node,
+)
 
 pytestmark = pytest.mark.no_db
 
@@ -158,3 +164,28 @@ def test_response_contract_exposes_the_profile_fields_read_only() -> None:
     assert nodes["gen"].requires_labels == {"gpu": "yes"}
     assert nodes["legacy"].execution.runtime == ""
     assert nodes["legacy"].requires_labels == {}
+
+
+def test_frozen_node_execution_kind_follows_the_snapshot_node_type() -> None:
+    """#1091: one decision for dispatch routing and the job detail projection —
+    non-agent → code pool, runtime declared → own profile, else legacy route."""
+    definition = workflow_definition_from_mapping(
+        _raw(
+            {
+                "coded": {"type": "code", "capability": "coded", "outputs": ["c.json"]},
+                "legacy": _agent(after=["coded"]),
+                "inline": {**_agent(after=["coded"]), "execution": {"runtime": "pi"}},
+            }
+        )
+    )
+
+    kinds = {
+        key: frozen_node_execution_kind(definition.nodes[key])
+        for key in ("coded", "legacy", "inline")
+    }
+
+    assert kinds == {
+        "coded": FROZEN_NODE_CODE,
+        "legacy": FROZEN_NODE_LEGACY_AGENT,
+        "inline": FROZEN_NODE_SELF_CONTAINED_AGENT,
+    }

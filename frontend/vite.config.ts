@@ -20,6 +20,9 @@ const browserTestFiles = [
   'src/features/agentPanelDock/dockPlacement.test.ts',
   // previewDisplayMode.ts 同样触碰 window.localStorage（#528）。
   'src/features/previewPanel/previewDisplayMode.test.ts',
+  // panelCsp.ts 用 DOMParser/document 注入 CSP 与盖 nonce（#989）。
+  'src/features/previewPanel/panelCsp.test.ts',
+  'src/features/previewPanel/panelCspBundleNonce.test.ts',
   'src/hooks/useDashboardEvents.test.ts',
   'src/hooks/useDebouncedCallback.test.ts',
   'src/hooks/useWorkspaceEvents.test.ts',
@@ -70,6 +73,11 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     customLogger: logger,
+    // #989：构建产物的 <script>/<style> 与 <meta property="csp-nonce"> 带此
+    // 占位符；Host 的 SPA 路由按响应替换为 per-response nonce（与
+    // server/app/http_csp_nonce.py 的 CSP_NONCE_PLACEHOLDER、previewPanel/panelCsp.ts
+    // 同值）。vite dev/preview 不替换、也不下发 CSP，占位符无害。
+    html: { cspNonce: '__AGENT_LEGION_CSP_NONCE__' },
     css: {
       modules: {
         localsConvention: 'dashes',
