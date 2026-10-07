@@ -1,9 +1,11 @@
 # 材料（Materials）与运行（Runs）：输入模型重设计
 
-状态：v1 已实施（2026-08-22，worktree `.worktrees/materials-runs`，分支
-`feat/materials-and-runs`，schema v53 + materials/runs API + 物化缓存 +
-添加条目面板 + demo seed 迁移，quick gate 全绿）；v1.2（bundle 文件夹条目，
-#156/#164）已落地（schema v55）；v1.1/v2/future 待实施。
+状态：设计稿（实施进度以 §11 为准）。v1 已实施（schema v53 + materials/runs API +
+物化缓存 + 添加条目面板 + demo seed 迁移）；v1.2（bundle 文件夹条目，#156/#164）
+已落地（schema v55）；v1.3（text 条目「输入需求」，#761）与 v1.4（start 节点
+`text_input` 呈现配置，#764）已随 0.7.14 落地；v1.1/v2/future 待实施。
+本文是设计记录：现行行为以代码与 `config/architecture/architecture-invariants.yaml`
+（MATERIAL-* / RUN-FREEZE-001 等）为准。
 日期：2026-08-22
 关联：Issue #141（intake 仅支持 question/video 实体）、
 Issue #120（打包重设计：打包清单 + 批次追踪，本文档 §10 的衔接方）、
@@ -508,22 +510,25 @@ Host 沙箱 allow-read 碰巧含 `examples/`（Worker 上根本不存在该目�
 
 ## 11. 分阶段实施
 
-| 阶段 | 内容 | 用户可见变化 |
-|---|---|---|
-| v1 | materials 表 + S3 存储 + presigned 上传 + 物化缓存；ref 条目；run 概念与路线 A 迁移；「添加条目」面板；demo seed 迁移（§9） | 上传/粘贴 ID 提交任务，intake 消失 |
-| v1.1 | 场景 A 路径输入（拷贝进材料区） | 本地路径提交 |
-| v2 | workflow 输入契约声明；question/video 导入改造为 connector 形态；场景 C 原地引用 | workflow 声明更直白 |
-| 并行 | 产物上云后的打包重设计（Issue #120） | prod 体积受控、出站回传 |
-| v1.2 | 文件夹作为单 job 输入（bundle 条目，manifest 引用式，§5.4，#156） | 「添加条目」支持文件夹整体打包 |
-| v1.3 | 直接输入需求（text 条目，服务端落成 Markdown 材料，§4.1） | 「添加条目」支持直接输入需求文字启动 |
-| v1.4 | start 节点 `text_input`（输入框标题 / 落盘文件名 / 预填模板，§4.1） | 「输入需求」按工作流预填需求模板，模板未改不能提交 |
-| future | 需求文本 + 附件合成一个 bundle 条目 | — |
-| future | connector 实体化 | — |
-| future（已立项，方案待讨论） | **异步建 job 的进度与结果可见性**：万级 job 走异步队列创建时，界面只看到数量上涨，看不到创建进度与结果分布（成功 / 因重复被 dedup / 校验失败及原因）。需求：run 维度展示创建进度条与结果明细。具体方案另行讨论后补本节 | — |
+| 阶段 | 内容 | 用户可见变化 | 状态 |
+|---|---|---|---|
+| v1 | materials 表 + S3 存储 + presigned 上传 + 物化缓存；ref 条目；run 概念与路线 A 迁移；「添加条目」面板；demo seed 迁移（§9） | 上传/粘贴 ID 提交任务，intake 消失 | 已落地（schema v53） |
+| v1.1 | 场景 A 路径输入（拷贝进材料区） | 本地路径提交 | 待实施 |
+| v2 | workflow 输入契约声明；question/video 导入改造为 connector 形态；场景 C 原地引用 | workflow 声明更直白 | 待实施 |
+| 并行 | 产物上云后的打包重设计（Issue #120） | prod 体积受控、出站回传 | 见 Issue #120 |
+| v1.2 | 文件夹作为单 job 输入（bundle 条目，manifest 引用式，§5.4，#156） | 「添加条目」支持文件夹整体打包 | 已落地（schema v55） |
+| v1.3 | 直接输入需求（text 条目，服务端落成 Markdown 材料，§4.1） | 「添加条目」支持直接输入需求文字启动 | 已落地（0.7.14，#761） |
+| v1.4 | start 节点 `text_input`（输入框标题 / 落盘文件名 / 预填模板，§4.1） | 「输入需求」按工作流预填需求模板，模板未改不能提交 | 已落地（0.7.14，#764） |
+| future | 需求文本 + 附件合成一个 bundle 条目 | — | 待实施 |
+| future | connector 实体化 | — | 待实施 |
+| future（已立项，方案待讨论） | **异步建 job 的进度与结果可见性**：万级 job 走异步队列创建时，界面只看到数量上涨，看不到创建进度与结果分布（成功 / 因重复被 dedup / 校验失败及原因）。需求：run 维度展示创建进度条与结果明细。具体方案另行讨论后补本节 | — | 待讨论 |
 
 ## 12. Quality Impact
 
-- **新增 invariant 候选**（实施时同步 `config/architecture/`）：
+- **新增 invariant 候选**（实施时同步 `config/architecture/`）。登记现状：RUN-FREEZE-001、
+  MATERIAL-ACCESS-001、MATERIAL-SECRET-001、MATERIAL-BUNDLE-001 已注册（另有实施中新增的
+  MATERIAL-INLINE-OWNERSHIP-001）；INTAKE-RETIRE-001 未注册为 invariant；CONNECT-DIRECTION-001
+  未注册、连接方向字段未实施：
   - INTAKE-RETIRE-001：job 创建只经 RunService，禁止新增 source_kind /
     resolver 形态；
   - RUN-FREEZE-001：冻结配置与 pins 以 job/run 列为权威，禁止回读

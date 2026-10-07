@@ -73,9 +73,15 @@ def main() -> int:
     }
     # 与既有规则合并而非全量覆写：bucket 可能还有手工配置的其它 origin
     # （如 prod 页面地址），读出现有 rules 后只在缺 origin 时追加一条规则。
+    # put_bucket_cors 是整份替换：只有「bucket 还没有 CORS 配置」能当空规则
+    # 继续（#1111）。权限不足、限流、5xx 等读失败一律抛出（非零退出，调用方
+    # 降级为 warning）——当作空规则再写会用只含 dev origin 的规则覆盖掉既有
+    # 配置（如 prod 页面 origin）。
     try:
         rules = client.get_bucket_cors(Bucket=settings.bucket)["CORSRules"]
-    except ClientError:  # NoSuchCORSConfiguration：bucket 还没有 CORS 配置
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") != "NoSuchCORSConfiguration":
+            raise
         rules = []
     known = {origin for rule in rules for origin in rule.get("AllowedOrigins", [])}
     missing = sorted(wanted - known)

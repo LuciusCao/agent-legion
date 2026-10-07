@@ -1,10 +1,10 @@
 """外部对接文档示例 ↔ OpenAPI 契约对账（#736）。
 
-#736 的病根：runbook §9 的示例长期照抄着一个对 api token 一律 403 的
-提交端点（job-batches），解析的字段也早已不在响应里——文档示例没有任何
-机器守卫，代码一变就静默漂移。本测试把两份外部对接文档
-（docs/remote-execution-runbook.md §9、docs/workspace-api-tokens.md）里
-curl / requests 示例调用的每个 (method, URL 形态) 钉住：
+#736 的病根：外部对接示例（当时在 runbook §9）长期照抄着一个对 api token
+一律 403 的提交端点（job-batches），解析的字段也早已不在响应里——文档示例
+没有任何机器守卫，代码一变就静默漂移。本测试把外部对接文档
+docs/workspace-api-tokens.md（#1099 起含原 runbook §9 的产物读取与全链路
+示例）里 curl / requests 示例调用的每个 (method, URL 形态) 钉住：
 
 - 必须是 OpenAPI 契约里真实存在的 (path 模板, method)——契约取自
   frontend/src/generated/api.ts（由后端 OpenAPI 生成，「Generated API
@@ -30,7 +30,9 @@ import pytest
 pytestmark = pytest.mark.no_db
 
 ROOT = Path(__file__).resolve().parents[2]
-DOCS = ("docs/remote-execution-runbook.md", "docs/workspace-api-tokens.md")
+DOCS = ("docs/workspace-api-tokens.md",)
+# 全链路示例所在文档（#1099 前在 runbook §9）。
+_FULL_CHAIN_DOC = "docs/workspace-api-tokens.md"
 API_TS = ROOT / "frontend/src/generated/api.ts"
 
 # fence 只认行首（允许缩进：列表项里的代码块）：开 fence 必须带语言标记，
@@ -38,10 +40,9 @@ API_TS = ROOT / "frontend/src/generated/api.ts"
 # ```(bash|python)\n(.*?)``` 在丢了结尾 fence 时会跨块吞并，被吞的块
 # 不再独立解析，后续校验对它零访问恒绿。
 _FENCE = re.compile(r"^[ \t]*```(.*)$")
-# 示例解析范围：runbook 只看 §9（其余章节是运维命令，不是对接示例）；
-# workspace-api-tokens.md 全文就是对接契约。
-_DOC_SCOPE = {
-    "docs/remote-execution-runbook.md": "## 9. ",
+# 示例解析范围：值为章节标题前缀时只看该章节（混有运维命令的文档用），
+# None = 全文；workspace-api-tokens.md 全文就是对接契约。
+_DOC_SCOPE: dict[str, str | None] = {
     "docs/workspace-api-tokens.md": None,
 }
 _CURL_URL = re.compile(r'"\$HOST(/api/[^"]*)"')
@@ -268,7 +269,7 @@ def test_doc_examples_exist_in_openapi_and_token_surface() -> None:
 
 
 # --- 代码块清单（#857）--------------------------------------------------------
-# 「示例存在」按块钉住而不是按文档统计：#846 解冲突时 runbook §9 Python 段
+# 「示例存在」按块钉住而不是按文档统计：#846 解冲突时（当时的）runbook §9 Python 段
 # 的结尾 fence 一度丢失，Python 段被吞进相邻文本不再独立解析，但同文档的
 # bash 段仍有调用，按文档统计的守卫全绿。这里声明每份文档示例范围内应有的
 # 代码块（按出现顺序：语言、说明、该块自身必须覆盖的路由），逐块断言
@@ -284,13 +285,6 @@ _FULL_CHAIN = frozenset(
     }
 )
 _EXPECTED_BLOCKS: dict[str, tuple[tuple[str, str, frozenset[str]], ...]] = {
-    "docs/remote-execution-runbook.md": (
-        ("bash", "§9 全链路 curl 示例", _FULL_CHAIN),
-        # Python 段是 bash 段的「等价」续写：从已签发的 WORKSPACE_API_TOKEN
-        # 起步（签发是管理员一次性动作，不在调用方的 requests 会话里），
-        # 其余四环必须自带。
-        ("python", "§9 全链路 requests 示例", _FULL_CHAIN - {"create_api_token"}),
-    ),
     "docs/workspace-api-tokens.md": (
         ("bash", "最小示例 1. 签发", frozenset({"create_api_token"})),
         ("bash", "最小示例 2. 提交", frozenset({"create_run"})),
@@ -312,6 +306,11 @@ _EXPECTED_BLOCKS: dict[str, tuple[tuple[str, str, frozenset[str]], ...]] = {
             "最小示例 4. 下载",
             frozenset({"list_external_artifacts", "get_external_artifact_raw"}),
         ),
+        ("bash", "读取产物 全链路 curl 示例", _FULL_CHAIN),
+        # Python 段是 bash 段的「等价」续写：从已签发的 WORKSPACE_API_TOKEN
+        # 起步（签发是管理员一次性动作，不在调用方的 requests 会话里），
+        # 其余四环必须自带。
+        ("python", "读取产物 全链路 requests 示例", _FULL_CHAIN - {"create_api_token"}),
     ),
 }
 
@@ -542,8 +541,8 @@ def test_doc_idempotency_and_terminal_status_facts_match_code() -> None:
         text = (ROOT / doc).read_text(encoding="utf-8")
         assert already_exists in text, f"{doc}: 缺「已存在」400 的 detail 文本"
 
-    runbook = (ROOT / "docs/remote-execution-runbook.md").read_text(encoding="utf-8")
-    loop = re.search(r'case "\$STATUS" in ([\w|]+)\)', runbook)
+    full_chain = (ROOT / _FULL_CHAIN_DOC).read_text(encoding="utf-8")
+    loop = re.search(r'case "\$STATUS" in ([\w|]+)\)', full_chain)
     assert loop is not None
     assert set(loop.group(1).split("|")) == set(TERMINAL_JOB_STATUSES)
 
@@ -669,10 +668,10 @@ def test_doc_raw_downloads_are_encoded_fallbacks() -> None:
 
 
 def test_runbook_reconciliation_rejects_ambiguous_matches() -> None:
-    """#910：runbook §9 的 find_existing_job 翻完全部页收齐命中，多于一个即
+    """#910：全链路示例的 find_existing_job 翻完全部页收齐命中，多于一个即
     报错而不是返回第一个；text 项带 client_token 时按 job 的 client_token
     字段精确比对（不自己拆 source_id 后缀）。"""
-    blocks = [code for _, lang, code in _doc_blocks("docs/remote-execution-runbook.md")]
+    blocks = [code for _, lang, code in _doc_blocks(_FULL_CHAIN_DOC)]
     [block] = [code for code in blocks if "def find_existing_job(" in code]
     body = block[block.index("def find_existing_job(") : block.index("\nitems = ")]
     assert "client_token: str | None = None" in body

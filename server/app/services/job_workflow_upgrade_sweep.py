@@ -2,12 +2,12 @@
 
 hydration（``workflow_worker/input_hydration.py``）刻意不取 job-mutation
 锁：它可能在升级事务提交前从旧清单行复活本地产物且代次复查恰好通过
-（残余窗口，见 docs/architecture/execution-generation.md §5）。对三面
+（残余窗口，见 docs/architecture/execution-generation.md §4 第 4 条）。对三面
 已删的缺席判定名（保护计划的 ``sweep`` 集），提交后立即按名再删一次
 本地文件——恢复写先于代次复查（``hydrate_job_artifacts`` 的顺序），凡
 复查通过的复活必落在提交前，本 sweep 在提交后执行必然覆盖；复查落在
 提交后的恢复会自我丢弃。best-effort：单文件失败不中断其余（残留由
-§5 残余面论证兜底），绝不让已提交的成功升级抛错。
+§4 残余面论证兜底），绝不让已提交的成功升级抛错。
 
 codex #776 复审 P2-A：提交后作业立即可被调度，重置节点的新 attempt
 可能在 sweep 前已写出同名新字节——删除前必须锁内复核
@@ -65,6 +65,6 @@ def sweep_absent_input_files(
         # #204 broad-except audit: sweep 是已提交升级的 best-effort 收尾——
         # 保护集复核的 DB 读失败（连接/池故障，非业务异常族）时跳过整个
         # sweep 也不能让已提交的成功升级抛错（500 会误报成功、批量调用方
-        # 中断后续 job）；残留旧文件由 §5 残余面论证兜底（清单行已删，
+        # 中断后续 job）；残留旧文件由 §4 残余面论证兜底（清单行已删，
         # hydration 不再恢复）。logger.exception 保留 traceback。
         logger.exception("sweep guard failed for job %s; sweep skipped", job_id)
