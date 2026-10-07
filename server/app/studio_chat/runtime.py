@@ -84,8 +84,7 @@ class SessionRuntime:
         # send_message; compacting mirrors the kimi background-compaction
         # window (send guard + UI), self-clearing after
         # compaction.COMPACTING_TIMEOUT_SECONDS via compacting_since.
-        self.loading = False
-        self.compacting = False
+        self.loading = self.compacting = False
         self.compacting_since: float | None = None
         # Active self-clear timer for the current compaction window
         # (compaction.py #694 review P1); cancelled on completion/teardown.
@@ -122,3 +121,7 @@ class SessionRuntime:
         self.turn_retry_source: tuple[str, str, str] | None = None
         self.empty_turn_retry: tuple[str, str, str] | None = None
         self.inbound_pending = 0
+        # #1029: the Kimi Code wire watcher (unprompted_queue.GatedUnprompted-
+        # Watcher) that holds human messages while an unprompted turn runs;
+        # None for non-Kimi-Code runtimes.
+        self.unprompted_gate: Any = None

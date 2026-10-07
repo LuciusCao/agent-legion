@@ -29,20 +29,28 @@ from server.app.studio_chat import compaction
 from server.app.studio_chat.inbound_queue import publish_committed
 from server.app.studio_chat.token_admission import require_live_run_token
 from server.app.studio_chat.turn_state import open_turn
+from server.app.studio_chat.unprompted_queue import holding, refresh
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
 
 RETRY_DETAIL = "已重新投递上一条未被处理的消息"
+RETRY_HELD_DETAIL = "agent 正在自发处理后台结果，请在其结束后再点「继续对话」"
 
 
 def retry_empty_turn(service: StudioChatService, session_id: str, runtime: SessionRuntime) -> bool:
     """Re-deliver the armed empty-turn message; False when nothing is armed."""
+    # #1029: observe a just-started Kimi Code unprompted turn before deciding,
+    # as admission.send_message does (step lock → runtime.lock order).
+    refresh(runtime)
     with runtime.lock:
         if runtime.empty_turn_retry is None:
             return False
         require_live_run_token(service, session_id, runtime)
+        if holding(runtime):
+            # #1029: a replay into a Kimi Code unprompted turn is lost again.
+            raise ConflictError(RETRY_HELD_DETAIL)
         message_id, text, prompt = runtime.empty_turn_retry
         if compaction.send_blocked(service.db, session_id, runtime, text):
             raise ConflictError(compaction.SEND_BLOCKED_DETAIL)
