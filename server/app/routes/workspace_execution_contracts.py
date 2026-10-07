@@ -39,6 +39,19 @@ class WorkspaceAgentRoutesResponse(BaseModel):
     routes: list[WorkspaceAgentRouteEntry]
 
 
+class WorkspaceAgentProvenanceEntry(BaseModel):
+    """An active-revision node carrying an inlined Agent profile (#1079, #440 D1)."""
+
+    node_key: str
+    node_label: str
+    agent_id: str
+    agent_version: int | None = None
+
+
+class WorkspaceAgentProvenanceResponse(BaseModel):
+    nodes: list[WorkspaceAgentProvenanceEntry]
+
+
 class WorkspaceSettingsPayload(BaseModel):
     entityType: str
     previewHidden: list[str] = Field(default_factory=list)

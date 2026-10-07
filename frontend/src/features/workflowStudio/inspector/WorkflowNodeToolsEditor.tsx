@@ -9,17 +9,15 @@ import { useRuntimeToolEntries } from './useAgentRuntimes'
 import styles from './WorkflowStructuredEditor.module.css'
 
 /**
- * #443/#476：agent 节点的节点级 `tools:` 声明编辑入口。选项面与
- * AgentEditor 同源（per-runtime 工具目录）；空 = 未声明（dispatch 回落
- * Agent 定义的 tools）。forced 档不可选（激活由节点 outputs 声明驱动）。
- * #575：节点级「Tools 覆盖」是 tools 的主入口——未声明时用 helperText
- * 展示解析后的生效值（Agent 默认兜底），不再留裸空态。
+ * #443/#476：agent 节点的节点级 `tools:` 声明编辑入口。选项面是 per-runtime
+ * 工具目录；forced 档不可选（激活由节点 outputs 声明驱动）。#575：未声明时
+ * 用 helperText 展示解析后的生效值，不留裸空态。#935 / #1079（#440 P3）：
+ * 未声明 = 跟随 runtime 的 default 档（与后端 DEFAULT_TOOLS 同源）——Agent
+ * 定义不再是兜底来源。
  */
 export function WorkflowNodeToolsEditor(props: {
   node: WorkflowNodeRecord
   runtime: string
-  /** #575：Agent 定义层的兜底 tools，未声明时展示为当前生效值。 */
-  agentDefaultTools?: string[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
@@ -40,17 +38,22 @@ export function WorkflowNodeToolsEditor(props: {
     const names = new Set(selectableEntries.map((entry) => entry.name))
     return declared.filter((tool) => !names.has(tool))
   }, [declared, selectableEntries])
-  // #575：未声明 = 生效值为 Agent 默认兜底，helperText 直接展示来源与值。
+  // #575：未声明 = 生效值为 runtime default 档，helperText 直接展示来源与值
+  // （目录未加载时不出 hint——未知 ≠ 空）。
+  const fallbackTools = toolEntries
+    ?.filter((entry) => entry.tier === 'default')
+    .map((entry) => entry.name)
+  const fallbackName = 'runtime 默认档'
   const fallbackHint =
-    declared.length > 0 || props.agentDefaultTools === undefined
+    declared.length > 0 || fallbackTools === undefined
       ? undefined
-      : `当前生效（跟随 Agent 默认）：${props.agentDefaultTools.join(', ') || '（空）'}`
+      : `当前生效（跟随 ${fallbackName}）：${fallbackTools.join(', ') || '（空）'}`
 
   return (
     <div className={styles.fieldStack}>
       <TextField
         select
-        label="Tools 覆盖（留空 = 跟随 Agent 默认）"
+        label={`Tools 覆盖（留空 = 跟随 ${fallbackName}）`}
         variant="outlined"
         value={declared}
         onChange={(e) => {

@@ -30,11 +30,8 @@ from pathlib import Path
 
 from .budget_anchors import (
     anchor_revisions,
-    base_anchor_override,
     release_train_opt_out,
-    shallow_opt_out,
-    unresolvable_anchor_error,
-    unresolvable_base_anchor_error,
+    unresolvable_anchors_errors,
 )
 from .budget_git import BudgetGitUnavailable, GitHelper
 from .service_data_boundary_history import (
@@ -47,23 +44,6 @@ __test__ = False
 def _anchors() -> tuple[str, ...]:
     """HEAD / HEAD^, or HEAD + the base override (release train: HEAD only)."""
     return anchor_revisions(release_train=release_train_opt_out())
-
-
-def _unresolvable_anchor_errors(git: GitHelper) -> list[str]:
-    """Hard-fail on checkouts whose anchors do not resolve (shallow clone)."""
-    if not git.is_repository():
-        if git.has_git_failures():
-            return [f"boundary monotonicity: git failed to run; cause: {git.diagnostics()}"]
-        return []
-    errors: list[str] = []
-    for revision in _anchors():
-        if git.revision_resolvable(revision):
-            continue
-        if revision == base_anchor_override():
-            errors.append(unresolvable_base_anchor_error("boundary", revision))
-        elif not shallow_opt_out():
-            errors.append(unresolvable_anchor_error("boundary", revision, git.diagnostics()))
-    return errors
 
 
 def boundary_regression_errors(
@@ -86,7 +66,7 @@ def boundary_regression_errors(
             # Non-git checkouts have no committed anchor to compare
             # against; the guard stays quiet (mirrors the budget guard).
             return []
-        errors = _unresolvable_anchor_errors(git)
+        errors = unresolvable_anchors_errors(git, "boundary", _anchors())
         if errors:
             return errors
         floors, historic_paths = boundary_floors_and_history(git, _anchors())

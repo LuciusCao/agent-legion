@@ -4,6 +4,7 @@ import {
   createReplay,
   createSampleBatch,
   fetchReplayDetail,
+  fetchReplayProfiles,
   fetchReplays,
   fetchSampleBatchDetail,
   fetchSampleBatchStats,
@@ -112,6 +113,14 @@ export function useQualityReplays(workspaceId: string, itemId: string | null) {
       (query.state.data?.replays ?? []).some((r) => replayActive(r.status))
         ? 3000
         : false,
+  })
+}
+
+/** #1079（#440 D6）：回放可选的执行档案（各 revision / 当前草稿）。 */
+export function useQualityReplayProfiles(workspaceId: string, itemId: string) {
+  return useQuery({
+    queryKey: extraQueryKeys.qualityReplayProfiles(workspaceId, itemId),
+    queryFn: ({ signal }) => fetchReplayProfiles(workspaceId, itemId, signal),
   })
 }
 

@@ -158,8 +158,7 @@ export function WorkflowNodeCodeSection(props: {
     })
   // #749 修：保存/从模板创建后同步回填草稿 hash——PUT 响应（code_hash）
   // 就是刚写入的草稿身份，发布闭包立即拿到新令牌，消灭「保存→立即发布
-  // 拿旧 hash 撞假 409」的窗口（对齐 AgentEditor.handleSaveDraft 的
-  // saved.definition_hash 同步回填；reload 仍后台刷新其余字段）。
+  // 拿旧 hash 撞假 409」的窗口（reload 仍后台刷新其余字段）。
   const runSavingDraft = (
     action: () => Promise<NodeCodeVersionResponse>,
     success: string

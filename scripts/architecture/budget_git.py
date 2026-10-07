@@ -180,7 +180,7 @@ class GitHelper:
         on PR #238). A failed plain diff in a tracked-only worktree is NOT
         None-worthy: with no untracked files there is nothing a plain diff
         could miss, and an unresolvable anchor is already reported by
-        ``_unresolvable_anchor_errors`` — an empty map is the right answer.
+        ``budget_anchors.unresolvable_anchors_errors`` — an empty map is the right answer.
         """
         cached = self._rename_cache.get(revision)
         if cached is not None:

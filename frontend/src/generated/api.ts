@@ -223,7 +223,10 @@ export interface paths {
     /** List Agent Definitions */
     get: operations['list_agent_definitions_api_agent_definitions_get']
     put?: never
-    /** Create Agent Definition */
+    /**
+     * Create Agent Definition
+     * @deprecated
+     */
     post: operations['create_agent_definition_api_agent_definitions_post']
     delete?: never
     options?: never
@@ -242,7 +245,10 @@ export interface paths {
     get: operations['get_agent_definition_api_agent_definitions__agent_id__get']
     put?: never
     post?: never
-    /** Archive Agent Definition */
+    /**
+     * Archive Agent Definition
+     * @deprecated
+     */
     delete: operations['archive_agent_definition_api_agent_definitions__agent_id__delete']
     options?: never
     head?: never
@@ -258,7 +264,10 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Copy Agent Definition */
+    /**
+     * Copy Agent Definition
+     * @deprecated
+     */
     post: operations['copy_agent_definition_api_agent_definitions__agent_id__copy_post']
     delete?: never
     options?: never
@@ -274,7 +283,10 @@ export interface paths {
       cookie?: never
     }
     get?: never
-    /** Save Agent Definition Draft */
+    /**
+     * Save Agent Definition Draft
+     * @deprecated
+     */
     put: operations['save_agent_definition_draft_api_agent_definitions__agent_id__draft_put']
     post?: never
     delete?: never
@@ -292,7 +304,10 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Publish Agent Definition */
+    /**
+     * Publish Agent Definition
+     * @deprecated
+     */
     post: operations['publish_agent_definition_api_agent_definitions__agent_id__publish_post']
     delete?: never
     options?: never
@@ -309,7 +324,10 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Rollback Agent Definition */
+    /**
+     * Rollback Agent Definition
+     * @deprecated
+     */
     post: operations['rollback_agent_definition_api_agent_definitions__agent_id__rollback_post']
     delete?: never
     options?: never
@@ -1200,6 +1218,7 @@ export interface paths {
     put?: never
     /**
      * Create Agent Definition
+     * @deprecated
      * @description Start a NEW Agent definition draft: the agent_id derives from the
      *     capability (no explicit id on this surface — a colliding capability
      *     gets a 409 pointing at the existing Agent), the draft stamps
@@ -1223,6 +1242,7 @@ export interface paths {
     get?: never
     /**
      * Save Agent Definition Draft
+     * @deprecated
      * @description Draft-only write: a human publishes it in Studio (STUDIO-AGENT-001).
      */
     put: operations['save_agent_definition_draft_api_studio_agent_tools_workspaces__workspace_id__agent_definitions__agent_id__draft_put']
@@ -1798,6 +1818,23 @@ export interface paths {
     head?: never
     /** Update Workspace */
     patch: operations['update_workspace_api_workspaces__workspace_id__patch']
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/agent-provenance': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Workspace Agent Provenance */
+    get: operations['get_workspace_agent_provenance_api_workspaces__workspace_id__agent_provenance_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
     trace?: never
   }
   '/api/workspaces/{workspace_id}/agent-routes': {
@@ -2730,6 +2767,23 @@ export interface paths {
     put?: never
     /** Add Sample Item Label */
     post: operations['add_sample_item_label_api_workspaces__workspace_id__quality_sample_items__item_id__labels_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/quality/sample-items/{item_id}/replay-profiles': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Replay Profiles */
+    get: operations['list_replay_profiles_api_workspaces__workspace_id__quality_sample_items__item_id__replay_profiles_get']
+    put?: never
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -5651,17 +5705,37 @@ export interface components {
       /** Item Id */
       item_id: string
       /**
+       * Profile Hash
+       * @default
+       */
+      profile_hash: string
+      /**
        * Replay Job Id
        * @default
        */
       replay_job_id: string
+      /** Revision Id */
+      revision_id?: string | null
+      /** Revision Version */
+      revision_version?: number | null
       /** Status */
       status: string
     }
     /** QualityReplayCreateRequest */
     QualityReplayCreateRequest: {
-      /** Agent Version */
+      /**
+       * Agent Version
+       * @deprecated
+       * @description Deprecated (#440 D6): replay with a workflow revision instead.
+       */
       agent_version?: number | null
+      /** Revision Id */
+      revision_id?: string | null
+      /**
+       * Use Draft
+       * @default false
+       */
+      use_draft: boolean
     }
     /** QualityReplayDetailResponse */
     QualityReplayDetailResponse: {
@@ -5677,6 +5751,56 @@ export interface components {
     QualityReplayListResponse: {
       /** Replays */
       replays: components['schemas']['QualityReplay'][]
+    }
+    /**
+     * QualityReplayProfileOption
+     * @description A revision (or the draft) whose node profile a replay can run with (#1079).
+     */
+    QualityReplayProfileOption: {
+      /**
+       * Is Original
+       * @default false
+       */
+      is_original: boolean
+      /**
+       * Model
+       * @default
+       */
+      model: string
+      /**
+       * Profile Hash
+       * @default
+       */
+      profile_hash: string
+      /**
+       * Provider
+       * @default
+       */
+      provider: string
+      /** Revision Id */
+      revision_id?: string | null
+      /**
+       * Revision Status
+       * @default
+       */
+      revision_status: string
+      /** Revision Version */
+      revision_version?: number | null
+      /**
+       * Runtime
+       * @default
+       */
+      runtime: string
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: 'revision' | 'draft'
+    }
+    /** QualityReplayProfileOptionsResponse */
+    QualityReplayProfileOptionsResponse: {
+      /** Options */
+      options: components['schemas']['QualityReplayProfileOption'][]
     }
     /** QualityReplayResponse */
     QualityReplayResponse: {
@@ -7993,6 +8117,25 @@ export interface components {
        * @default
        */
       template: string
+    }
+    /**
+     * WorkspaceAgentProvenanceEntry
+     * @description An active-revision node carrying an inlined Agent profile (#1079, #440 D1).
+     */
+    WorkspaceAgentProvenanceEntry: {
+      /** Agent Id */
+      agent_id: string
+      /** Agent Version */
+      agent_version?: number | null
+      /** Node Key */
+      node_key: string
+      /** Node Label */
+      node_label: string
+    }
+    /** WorkspaceAgentProvenanceResponse */
+    WorkspaceAgentProvenanceResponse: {
+      /** Nodes */
+      nodes: components['schemas']['WorkspaceAgentProvenanceEntry'][]
     }
     /** WorkspaceAgentRouteEntry */
     WorkspaceAgentRouteEntry: {
@@ -12020,6 +12163,37 @@ export interface operations {
       }
     }
   }
+  get_workspace_agent_provenance_api_workspaces__workspace_id__agent_provenance_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceAgentProvenanceResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_workspace_agent_routes_api_workspaces__workspace_id__agent_routes_get: {
     parameters: {
       query?: never
@@ -14144,6 +14318,38 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['QualityLabelResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_replay_profiles_api_workspaces__workspace_id__quality_sample_items__item_id__replay_profiles_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['QualityReplayProfileOptionsResponse']
         }
       }
       /** @description Validation Error */

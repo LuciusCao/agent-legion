@@ -7,8 +7,7 @@ import json
 import pytest
 from cryptography.fernet import Fernet
 
-from server.app.agent_catalog import AgentDefinition
-from server.app.services.agent_service import AgentService, published_agent_definitions
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.node_secrets import node_secret_name
@@ -20,6 +19,7 @@ from server.app.services.vault import (
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_node_config import update_workspace_node_config
 from tests.helpers import load_demo_legacy_intake_definition
+from tests.helpers.node_profile import SECRET_NODE_SCHEMA, with_node_config_schema
 
 PLAINTEXT = "s3cr3t-cms-token"
 
@@ -159,30 +159,14 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
     seed_demo_workspace_node_codes(settings, workspace["id"])
     # The demo workflow no longer declares intake modes (#154); this test
     # exercises the job-batches intake freeze, so seed the legacy variant.
-    definition = load_demo_legacy_intake_definition()
-    # ensure_active_revision seeds the demo agents into this workspace (v46).
-    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
-    # The demo nodes declare no secret fields; republish the write_script
-    # agent with a secret field so the intake freeze chain still has a
-    # schema-declared node secret to divert into the vault.
-    agent_service = AgentService(settings.database_url, workspace["id"])
-    agent_service.save_draft(
-        "example-write-script-v1",
-        AgentDefinition(
-            capability="write_script",
-            runtime="velites",
-            skill="education-video-problems-generation/write-script",
-            config_schema={
-                "type": "object",
-                "properties": {
-                    "api_url": {"type": "string"},
-                    "token": {"type": "string", "secret": True},
-                },
-            },
-        ),
-        created_by="test-seed",
+    # The demo nodes declare no secret fields; give write_script a secret
+    # field on the node itself (#935: self-contained profile) so the intake
+    # freeze chain still has a schema-declared node secret to divert into
+    # the vault. ensure_active_revision seeds the demo agents (v46).
+    definition = with_node_config_schema(
+        load_demo_legacy_intake_definition(), "write_script", SECRET_NODE_SCHEMA
     )
-    agent_service.publish("example-write-script-v1")
+    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     update_workspace_node_config(
         job_db,
         settings,
