@@ -107,9 +107,12 @@ where exists (
 
 ### 1.3 建议备份
 
-- Worker 的 velites 模型配置：`VELITES_CONFIG_DIR` 目录（`models.json`）与
-  `deploy/velites-provider.env`（provider 凭据，0600），都是 gitignored 的本机文件，
-  丢失可按 [agent-worker-deployment.md](agent-worker-deployment.md) §2 重配。
+- Worker 的 velites 模型配置：`VELITES_CONFIG_DIR` 目录（`models.json`；compose
+  默认 `../velites-config`，按 `deploy/` 解析即 `<仓库根>/velites-config/`）与
+  `deploy/velites-provider.env`（provider 凭据，0600）。二者都是 clone 不会带上的
+  本机文件：`.gitignore` 登记了 `deploy/velites-provider.env`，但目录只登记了
+  `deploy/velites-config/`，默认位置 `<仓库根>/velites-config/` 并未被忽略，只是
+  未跟踪（不要提交它）。丢失可按 [agent-worker-deployment.md](agent-worker-deployment.md) §2 重配。
   velites 二进制本身不用备份，恢复时从 GitHub Release 重取（§2.3 第 6 步）。
 - Worker 状态卷 `worker-control`（状态副本 `worker.yaml`、control token）：丢失
   可按 [agent-worker-deployment.md](agent-worker-deployment.md) 重新配置与注册，
@@ -357,9 +360,16 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
    下载入口（`Makefile` 与 `scripts/stack-prod-up.sh` 不处理它，
    `scripts/ensure-velites.sh` 只为裸机形态从源码构建到 `data/bin`），按
    [agent-worker-deployment.md](agent-worker-deployment.md) §5「velites 二进制来源」
-   从 GitHub Release（`velites-v*`）取与宿主机架构一致的产物，放到上述路径并
-   `chmod +x`；`deploy/.env` 用 `VELITES_BIN` 改过位置的放到改写后的路径。已经在
-   缺文件的状态下启动过的，先 `rmdir` 掉 Docker 建的空目录再放文件。Worker 的
+   从 GitHub Release（`velites-v*` tag）取 Linux 产物
+   `velites-<ver>-<arch>-unknown-linux-gnu.tar.gz`：二进制在容器里运行，架构按
+   Docker 引擎而不是宿主机操作系统，x86_64 取 `x86_64`，arm64（含 Apple silicon
+   上的 Docker Desktop）取 `aarch64`；不要取 `aarch64-apple-darwin`，那是裸机
+   macOS 用的。产物是 tarball：先对照同一 Release 附带的 `sha256.txt` 校验
+   （`sha256sum -c --ignore-missing sha256.txt`，macOS 用 `shasum -a 256 -c`），再
+   解压，取出其中的 `velites-<ver>-<triple>/velites` 放到上述路径并 `chmod +x`；
+   `deploy/.env` 用 `VELITES_BIN` 改过位置的放到改写后的路径。已经在缺文件的状态
+   下启动过的，先删掉 Docker 建的空目录再放文件：Linux 上它由 daemon 以 root 创建，
+   `rmdir` 可能需要 `sudo`。Worker 的
    模型配置 `VELITES_CONFIG_DIR`（`models.json`）与 `deploy/velites-provider.env`
    同样不在仓库里，按 §1.3 的备份放回，或按 agent-worker-deployment.md §2 重配。
    原机本就是零 runtime 形态（去掉 velites 挂载的 override、`deploy/.env` 里
