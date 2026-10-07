@@ -305,13 +305,16 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
 的路径集合必须与文件集合逐字相等，清单有对象时不能为空），才把 `.partial` 目录改名
 为正式备份。这一步比对不能省：`aws s3 sync` 下载时有两类 key 落不了盘，却仍返回 0——
 末尾为 `/` 的 key 被当作目录，只差大小写的 key 在不区分大小写的文件系统上互相覆盖。
-这类不一致让备份失败，而不是让恢复时的「清空 bucket」变成不可逆丢失。平台自己写的
-key 不以 `/` 结尾（产物名不含 `/`：`job_artifact_objects.py` 的
-`valid_artifact_name`；材料 key 为 `{workspace_id}/{hash}/{filename}`）；零字节的
-`…/` 目录标记（控制台建目录留下的）不承载数据，`CHK` 跳过并报出个数，不备份也不恢复。
-其余落不了盘的 key 让 `CHK` 判失败：大小写冲突换到大小写敏感的文件系统重做；末尾
-`/` 且有内容的 key 不是平台数据，本地后端改用 §2.2.2 卷级冷备份，外部 S3 先查明来源
-并处理掉再备份。SeaweedFS 本身不保存这类 key 的内容：写入末尾为 `/` 的 key 时后端把它
+这类不一致让备份失败，而不是让恢复时的「清空 bucket」变成不可逆丢失。产物 key 不以
+`/` 结尾（产物名不含 `/`：`job_artifact_objects.py` 的 `valid_artifact_name`）；材料 key
+为 `{workspace_id}/{hash}/{filename}`，而材料 API 目前**不拒绝**以 `/` 结尾的
+`filename`（`MaterialPresignRequest` 只限长度），客户端提交 `size_bytes=0` 的这类名字
+会留下一条 ready 材料行和一个零字节、以 `/` 结尾的 key。所以零字节的 `…/` key（无论
+是控制台建目录留下的标记，还是这种材料）不走文件系统：`CHK` 把它们从文件比对中剔除并
+报出个数，快照链把它们的名字写进 `markers.txt`，恢复时按名重建为零字节对象（§2.3
+第 5 步），行 → 对象的核对因此仍能通过。其余落不了盘的 key 让 `CHK` 判失败：大小写
+冲突换到大小写敏感的文件系统重做；末尾 `/` 且有内容的 key 不是平台数据，本地后端改用
+§2.2.2 卷级冷备份，外部 S3 先查明来源并处理掉再备份。SeaweedFS 本身不保存这类 key 的内容：写入末尾为 `/` 的 key 时后端把它
 存成零字节目录，内容被丢弃（实测 4.45），所以在 SeaweedFS 上它们都表现为目录标记。热备份期间对象仍在变化时，清单与下载之间的增删改同样会判失败，重试
 或按 §1.5 停 Host 与 Worker 后再做。
 
@@ -331,6 +334,11 @@ export AWS_ACCESS_KEY_ID=<AGENT_LEGION_S3_ACCESS_KEY> \
        AWS_SECRET_ACCESS_KEY=<AGENT_LEGION_S3_SECRET_KEY> AWS_DEFAULT_REGION=us-east-1
 S3() { aws --endpoint-url "$EP" s3 "$@"; }
 LIST() { aws --endpoint-url "$EP" s3api list-objects-v2 --bucket "$B" --output json; }
+# MARKERS <清单 JSON>：列出零字节、以 / 结尾的 key（目录标记或以 / 结尾命名的空材料），
+# 每行一个；它们落不了文件系统，快照里以名字保存，恢复时由 PUT_MARKERS 按名重建
+MARKERS() { python3 -c 'import json,sys; t=open(sys.argv[1]).read().strip(); [print(o["Key"]) for o in ((json.loads(t) if t else {}).get("Contents") or []) if o["Key"].endswith("/") and o["Size"] == 0]' "$1"; }
+# PUT_MARKERS <markers.txt>：按名重建零字节对象；任一失败即返回非零
+PUT_MARKERS() { while IFS= read -r k; do [ -z "$k" ] || aws --endpoint-url "$EP" s3api put-object --bucket "$B" --key "$k" --content-length 0 >/dev/null || return 1; done < "$1"; }
 # 优先 shasum：macOS 自带的 BSD sha256sum 不转义含换行的文件名，CHK 会因此判失败
 command -v shasum >/dev/null && SHA=(shasum -a 256) || SHA=(sha256sum)
 # CHK <目录> <清单 JSON> [SHA256SUMS]：目录里的文件集合与清单的 key 集合逐字相等、大小
@@ -386,6 +394,7 @@ TS="$(date +%Y%m%d%H%M%S)"
 OUT="$BK/s3-$B-$TS"; TMP="$BK/.s3-$B-$TS.partial"
 mkdir -p "$TMP/objects" \
   && LIST > "$TMP/objects.json" \
+  && MARKERS "$TMP/objects.json" > "$TMP/markers.txt" \
   && S3 sync "s3://$B" "$TMP/objects" --only-show-errors \
   && CHK "$TMP/objects" "$TMP/objects.json" \
   && (cd "$TMP/objects" && find . -type f -exec "${SHA[@]}" {} +) > "$TMP/SHA256SUMS" \
@@ -575,6 +584,7 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
       CHK "$SRC/objects" "$SRC/objects.json" "$SRC/SHA256SUMS" \
         && S3 rm "s3://$B" --recursive --only-show-errors \
         && S3 cp "$SRC/objects" "s3://$B" --recursive --only-show-errors \
+        && PUT_MARKERS "$SRC/markers.txt" \
         && V="$(mktemp -d "$BK/.s3-verify.XXXXXX")" \
         && LIST > "$V.json" \
         && S3 sync "s3://$B" "$V" --only-show-errors \
@@ -587,7 +597,9 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
       （快照目录被改动、或被拷到大小写不敏感的文件系统上丢了文件，都会在这里失败），
       `SHA256SUMS` 的路径集合与文件集合逐字一致、清单有对象时不为空，每个文件 sha256
       都对得上（清单被清空或删掉一行、文件被同大小改写，都会失败）；失败时 bucket 原样不动。`aws s3 cp --recursive`
-      无条件上传每个文件，不做大小 / 时间比较。最后取 bucket 的新清单、把 bucket 下载到
+      无条件上传每个文件，不做大小 / 时间比较；快照 `markers.txt` 里的零字节 `…/` key
+      （落不了文件系统，见 §2.2.1）由 `PUT_MARKERS` 按名重建为零字节对象，以 `/` 结尾命名的
+      空材料行因此仍有对象可对。最后取 bucket 的新清单、把 bucket 下载到
       新的空目录：下载结果与新清单一致、与备份时的源清单一致（多出或缺少的 key 都会被
       发现，零字节目录标记除外），内容再逐对象对 `SHA256SUMS`。外部 S3 开了版本控制时，
       `rm` 只留下删除标记，旧版本仍占空间。
