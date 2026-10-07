@@ -12,6 +12,12 @@
 > 锁按 (skill, ref) 多值冻结 commit，manifest 增加 `skill_ref`、
 > `skill_version` 改为 `ref@commit12`（invariant EXEC-SKILL-NODE-001）。
 > 下文 §2/§5/§7 中「Agent 定义拥有 skill」的描述反映定稿时点。
+>
+> **2026-10 补注（#440）**：Agent 定义作为执行档案载体正在退役——P2（schema v92，
+> #933）起声明 `execution.runtime`（节点或 workflow 顶层默认）的自含 agent 节点以节点自身
+> runtime / `requires_labels` / tools / config_schema 为档案，不再要求 published Agent
+> （EXEC-AGENT-PROFILE-001）；其余节点仍走 Agent 定义（过渡中，EXEC-AGENTDEF-001）。
+> 文中以 Agent 定义为执行档案唯一载体的描述反映定稿时点。
 
 ## 背景与目标
 

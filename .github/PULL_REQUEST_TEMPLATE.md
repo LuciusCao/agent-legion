@@ -9,9 +9,12 @@
 
 ## Verification
 
-<!-- Commands you ran and their results, e.g.:
-     - [ ] ./scripts/check-quick.sh
+<!-- Commands you ran and their results (see CONTRIBUTING.md), e.g.:
+     - [ ] GATE_TIER=aff ./scripts/check-quick.sh (inner loop; plus the
+           directly related postgres tests when the change touches the DB)
      - [ ] New/changed tests cover the change
+     The `quality-gate` CI check on this PR is the merge credential; a local
+     ./scripts/check.sh is only needed when CI is unavailable.
 -->
 
 ## Docs Impact

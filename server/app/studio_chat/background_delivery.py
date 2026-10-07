@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
 from server.app.studio_chat.turn_state import open_turn
+from server.app.studio_chat.unprompted_queue import holding
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
@@ -37,6 +38,8 @@ def wake_session(
             or runtime.turn_open
             # #882: queued human messages go first (inbound_queue.py).
             or runtime.inbound_pending
+            # #1029: never prompt into a Kimi Code unprompted turn.
+            or holding(runtime)
         ):
             return False
         if not _token_alive(service, runtime.token):

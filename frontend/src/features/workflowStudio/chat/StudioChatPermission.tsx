@@ -39,6 +39,11 @@ export function StudioChatPermission(props: Props) {
         )}
         Agent 请求权限：<code>{permission.toolTitle}</code>
       </div>
+      {permission.command && (
+        <pre className={styles.permissionCommand} aria-label="将要运行的命令">
+          {permission.command}
+        </pre>
+      )}
       {permission.resolved ? (
         <div className={styles.permissionResolved}>
           {permission.decisionText ?? '已处理'}
