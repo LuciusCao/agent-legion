@@ -104,6 +104,8 @@ async fn streaming_chunks_aggregate_into_one_message() {
     );
     assert!(sent.get("tools").is_none());
     assert!(sent.get("reasoning_effort").is_none());
+    // #952: no per-call cap unless --max-output-tokens is set.
+    assert!(sent.get("max_tokens").is_none());
 }
 
 #[tokio::test]
@@ -118,6 +120,23 @@ async fn thinking_flag_maps_to_reasoning_effort() {
 
     let sent = server.recorded()[0].body_json();
     assert_eq!(sent["reasoning_effort"], "low");
+}
+
+#[tokio::test]
+async fn max_output_tokens_is_sent_as_max_tokens() {
+    // #952: --max-output-tokens rides the wire as the per-call `max_tokens`.
+    let body = sse_body(&[json!({"choices": [{"delta": {}, "finish_reason": "stop"}]})]);
+    let server = MockServer::start(vec![MockResponse::sse(body)]).await;
+
+    let messages = vec![Message::user("hi".into())];
+    provider(&server)
+        .with_max_output_tokens(Some(32000))
+        .complete(&request(&messages, &[]))
+        .await
+        .unwrap();
+
+    let sent = server.recorded()[0].body_json();
+    assert_eq!(sent["max_tokens"], 32000);
 }
 
 #[tokio::test]

@@ -105,14 +105,26 @@ def test_velites_command_preserves_named_provider_for_runtime_registry() -> None
 
 
 def test_velites_command_budget_flags_from_node_config() -> None:
-    manifest = {**MANIFEST, "config": {"max_turns": 8, "max_tokens": 120000}}
+    manifest = {
+        **MANIFEST,
+        "config": {"max_turns": 8, "max_tokens": 120000, "max_output_tokens": 32000},
+    }
     cmd = _dispatch(manifest)
     assert cmd[cmd.index("--max-turns") + 1] == "8"
     assert cmd[cmd.index("--max-tokens") + 1] == "120000"
+    # #952：单次调用输出预算与累计预算是两个独立 flag。
+    assert cmd[cmd.index("--max-output-tokens") + 1] == "32000"
     # 节点未配置预算 → 不发 flag（不硬编码默认值）。
     bare = _dispatch(MANIFEST)
     assert "--max-turns" not in bare
     assert "--max-tokens" not in bare
+    assert "--max-output-tokens" not in bare
+
+
+@pytest.mark.parametrize("value", [0, -1, True, "32000", 1.5])
+def test_velites_command_ignores_invalid_max_output_tokens(value: object) -> None:
+    cmd = _dispatch({**MANIFEST, "config": {"max_output_tokens": value}})
+    assert "--max-output-tokens" not in cmd
 
 
 @pytest.mark.parametrize(

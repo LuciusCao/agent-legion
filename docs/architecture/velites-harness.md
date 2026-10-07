@@ -153,7 +153,7 @@ TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计�
 - 模型调用失败先内部重试（指数退避，上限可配）；每个失败的 transient attempt 在
   退避 sleep 前发出一对 pi 兼容事件：assistant `message_end`（`stopReason=error` +
   `errorMessage`，usage 为 0）+ `auto_retry_start`；恢复后续跑，最终 assistant message
-  `stopReason` 为 `stop`/`toolUse`——Host 据此清除瞬时错误（pi 无 `auto_retry_end`，
+  `stopReason` 为 `stop`/`toolUse`/`length`（无 `errorMessage` 时）——Host 据此清除瞬时错误（pi 无 `auto_retry_end`，
   velites 同样不发）；
 - 未恢复：最后一条 assistant message 带 `stopReason=error` + `errorMessage`，
   **exit 0**（复刻 Pi"模型 400 也 exit 0"，Host 靠事件流判失败）——但声明了
@@ -306,7 +306,7 @@ velites --mode json \
         --skill <dir> \
         --tools read,write,bash \
         --provider <provider-key> --model <model-id> --thinking low \
-        [--max-turns N] [--max-tokens N] [--require-output f ...] \
+        [--max-turns N] [--max-tokens N] [--max-output-tokens N] [--require-output f ...] \
         [--no-sandbox] [--allow-network] \
         @<run>/prompt.md "Execute the attached node instructions."
 ```
@@ -316,7 +316,11 @@ velites --mode json \
   adapter 动态发现；
 - `--mode` 只有 `json`（headless 唯一形态）；
 - 未知 flag 直接报错退出（与 Pi/pi_agent_rust 的静默吞掉相反，防止配置漂移）；
-- `--name` 保留（仅标识用途，写入 `session` 事件）。
+- `--name` 保留（仅标识用途，写入 `session` 事件）；
+- `--max-output-tokens`（#952）是**单次**模型调用的输出上限（thinking 计入其中），
+  覆盖 models.json 的 `maxOutputTokens`，OpenAI 兼容路径作为请求体 `max_tokens`
+  下发；与累计预算 `--max-tokens` 无关。来源是节点 config 键 `max_output_tokens`，
+  触顶归因与续写草案见 [llm-output-budget-design.md](llm-output-budget-design.md)。
 
 ### `velites sandbox wrap`（EXEC-CODE-003）
 

@@ -7,6 +7,20 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
 
+from shared.output_truncation import OUTPUT_LIMIT_STOP_REASON
+
+# #952：thinking 与正文共享同一单次输出预算，触顶后本条回复被截断（未完成的
+# 工具调用不会执行）。velites 把 Anthropic 的 `model_context_window_exceeded` 也映射为
+# `length`（velites/src/provider/anthropic.rs），事件流无法区分，文案与 Worker 失败原因
+# （shared.output_truncation.output_truncation_error）一致，同时覆盖上下文窗口溢出。
+_OUTPUT_LIMIT_DETAIL = (
+    "stop_reason=length：本次回复达到单次输出上限（max_tokens，thinking 计入同一预算）被截断，"
+    "未完成的工具调用不会执行。可降低 execution.thinking 档位、让节点分多次写盘，"
+    "或调高节点 max_output_tokens（velites）。provider 也可能把上下文窗口溢出报为 "
+    "stop_reason=length：若输入已接近模型上下文窗口，应缩短输入（精简提示词 / 输入产物），"
+    "调高输出上限无效。"
+)
+
 
 class LogEntry(TypedDict):
     type: str
@@ -162,7 +176,18 @@ def _parse_pi_events(events_path: Path, agent_start_detail: str = "") -> list[Lo
 
                 stop_reason = message.get("stopReason")
                 error_message = message.get("errorMessage") or ""
-                if (stop_reason and stop_reason not in ("stop", "toolUse")) or error_message:
+                if stop_reason == OUTPUT_LIMIT_STOP_REASON and not error_message:
+                    # #952：单次输出触顶不是调用错误——给出可行动的告警而非
+                    # 「模型调用错误 stop_reason=length」。
+                    entries.append(
+                        {
+                            "type": "error",
+                            "title": f"Turn {turn_number} · 单次输出触顶",
+                            "detail": _OUTPUT_LIMIT_DETAIL,
+                            "truncated": False,
+                        }
+                    )
+                elif (stop_reason and stop_reason not in ("stop", "toolUse")) or error_message:
                     detail = error_message or f"stop_reason={stop_reason}"
                     entries.append(
                         {

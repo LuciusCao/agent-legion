@@ -339,7 +339,7 @@ pub struct MessageEndEvent {
 /// `message_end` of a failed transient attempt, before the backoff sleep.
 /// There is intentionally no `auto_retry_end` — Pi doesn't have one either;
 /// the Host's `fold_model_error` treats the next successful assistant
-/// `message_end` (`stopReason=stop|toolUse`) as "recovered".
+/// `message_end` (`stopReason=stop|toolUse|length`) as "recovered".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoRetryStartEvent {
