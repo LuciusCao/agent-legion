@@ -59,7 +59,8 @@ def register_preview_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
     @mcp.tool(structured_output=False)
     async def save_preview_panel_draft(workspace_id: str, html: str, change_note: str = "") -> str:
         """Save a preview panel draft: one self-contained HTML document
-        (inline <style>/<script>, no external origins) rendering the job
+        (inline <style>/<script>, no external origins, no inline on*=
+        event-handler attributes — use addEventListener) rendering the job
         detail left column via the read-only bridge (get_preview_guide).
         Draft only — a human publishes from the job detail page. The
         response carries the saved draft's html_hash."""
