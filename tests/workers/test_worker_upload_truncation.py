@@ -1,8 +1,9 @@
 """Worker 结果准备的单次输出触顶归因（#952）。
 
-触顶（assistant ``stopReason=length``）只在声明产物缺失时改写失败原因，
-不改变任何 run 的成败判定；崩溃/超时等其他退出码保持各自归因。共享桩见
-tests/workers/upload_queue_testlib.py。
+触顶（assistant ``stopReason=length``）只在**最后一次**模型调用触顶且声明产物
+缺失时改写失败原因，不改变任何 run 的成败判定。``_DECISION_TABLE`` 与
+docs/architecture/llm-output-budget-design.md「触顶归因决策表」逐行对应。
+共享桩见 tests/workers/upload_queue_testlib.py。
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from tests.workers.upload_queue_testlib import QueueFakeClient, _execution_dir, 
 
 # velites 产物契约的证据事件：exit 1 只有带它才可归因为触顶。
 _VALIDATION = {"type": "outputs_validation", "missing": ["output.json"]}
+_END = {"type": "agent_end"}
 
 
 def _contract_validation(*violations: str) -> dict:
@@ -74,6 +76,7 @@ def test_observer_counts_only_assistant_message_end(tmp_path: Path) -> None:
     truncation = OutputTruncation()
     model_error, _, _, _ = scan_and_compress_pi_events(events, event_observer=truncation.observe)
     assert truncation.count == 2
+    assert truncation.last_stop == "length"
     # 触顶不进 model_error（exit 0 时 model_error 直接判失败）。
     assert model_error is None
 
@@ -86,198 +89,196 @@ def test_truncation_error_caps_listed_missing_outputs() -> None:
     assert "(+2 more)" in message
 
 
-def test_exit_zero_truncated_with_missing_outputs_reports_truncation(tmp_path: Path) -> None:
-    """pi 形态：exit 0、触顶、产物缺失 → 失败原因点名触顶而非笼统 Missing outputs。"""
-    work_root = tmp_path / "work"
-    _execution_dir(work_root)
-    _drop_output(work_root)
-    _write_events(work_root, [_assistant("toolUse"), _assistant("length")])
-    report = _report(work_root, exit_code=0)
-    assert report["status"] == "failed"
-    assert report["error_message"].startswith(OUTPUT_TRUNCATED_PREFIX)
-    assert "output.json" in report["error_message"]
-    assert "execution.thinking" in report["error_message"]
-
-
-def test_truncated_run_with_all_outputs_still_completes(tmp_path: Path) -> None:
-    """触顶但产物齐全：归因不改判，照旧 completed。"""
-    work_root = tmp_path / "work"
-    _execution_dir(work_root)
-    _write_events(work_root, [_assistant("length")])
-    report = _report(work_root, exit_code=0)
-    assert report["status"] == "completed"
-    assert report["error_message"] == ""
-
-
-def test_velites_contract_exit_one_attributes_truncation(tmp_path: Path) -> None:
-    """velites 产物契约退出（exit 1）+ 触顶 + 缺产物：触顶归因取代 stderr 摘要，
-    stderr 尾部仍随 metadata 作为证据面。"""
-    work_root = tmp_path / "work"
-    _execution_dir(work_root)
-    _drop_output(work_root)
-    events = [_assistant("length"), _assistant("length"), _VALIDATION, {"type": "agent_end"}]
-    _write_events(work_root, events, ("velites: missing",))
-    report = _report(work_root, exit_code=1)
-    assert report["status"] == "failed"
-    assert report["exit_code"] == 1
-    assert report["error_message"].startswith(OUTPUT_TRUNCATED_PREFIX)
-    assert "2x" in report["error_message"]
-    assert report["agent_stderr_tail"] == "velites: missing"
-
-
-def test_contract_mode_missing_file_violation_still_attributes(tmp_path: Path) -> None:
-    """契约模式下缺文件会同时以 ``missing required file`` 违例复述：它可由触顶
-    解释，不应挡住归因（只有缺文件之外的违例才挡）。"""
-    work_root = tmp_path / "work"
-    _execution_dir(work_root)
-    _drop_output(work_root)
-    events = [
-        _assistant("length"),
-        _contract_validation("output.json: missing required file"),
-        {"type": "agent_end"},
-    ]
-    _write_events(work_root, events, ("velites: missing",))
-    report = _report(work_root, exit_code=1)
-    assert report["error_message"].startswith(OUTPUT_TRUNCATED_PREFIX)
-
-
-@pytest.mark.parametrize(
-    ("exit_code", "expected"),
-    [(2, "Agent process exited 2"), (124, "Agent process timed out")],
-)
-def test_other_exit_codes_keep_their_attribution(
-    tmp_path: Path, exit_code: int, expected: str
-) -> None:
-    """崩溃 / 超时退出不被触顶归因覆盖（它们有更直接的原因）。"""
-    work_root = tmp_path / "work"
-    _execution_dir(work_root)
-    _drop_output(work_root)
-    _write_events(work_root, [_assistant("length")])
-    report = _report(work_root, exit_code=exit_code)
-    assert report["status"] == "failed"
-    assert report["error_message"] == expected
-
-
-def test_missing_outputs_without_truncation_unchanged(tmp_path: Path) -> None:
-    """未触顶的缺产物 run：worker 侧照旧 completed（由 Host 判 Missing outputs）。"""
-    work_root = tmp_path / "work"
-    _execution_dir(work_root)
-    _drop_output(work_root)
-    _write_events(work_root, [_assistant("stop")])
-    report = _report(work_root, exit_code=0)
-    assert report["status"] == "completed"
-
-
-def test_unrecovered_model_error_keeps_precedence(tmp_path: Path) -> None:
-    """exit 0 时未恢复的模型调用错误比触顶更直接，归因保持 model_error。"""
-    work_root = tmp_path / "work"
-    _execution_dir(work_root)
-    _drop_output(work_root)
-    failed = {"role": "assistant", "stopReason": "error", "errorMessage": "401 unauthorized"}
-    _write_events(work_root, [_assistant("length"), {"type": "message_end", "message": failed}])
-    report = _report(work_root, exit_code=0)
-    assert report["status"] == "failed"
-    assert report["error_message"] == "401 unauthorized"
-
-
-_MODEL_ERROR = {
-    "type": "message_end",
-    "message": {"role": "assistant", "stopReason": "error", "errorMessage": "429 rate limited"},
-}
-
-
-@pytest.mark.parametrize(
-    "events",
-    [
-        # 早轮触顶 → 后续未恢复的模型错误（velites 出错直接 break，不发 outputs_validation）。
-        pytest.param([_assistant("length"), _MODEL_ERROR, {"type": "agent_end"}], id="model-error"),
-        # 早轮触顶 → max_turns 等预算耗尽（收尾轮后仍缺产物）。
-        pytest.param(
-            [
-                _assistant("length"),
-                _assistant("stop"),
-                _VALIDATION,
-                {"type": "agent_end", "reason": "budget_exceeded"},
-            ],
-            id="budget-exceeded",
-        ),
-        # pi 的 exit 1 是进程失败：没有 outputs_validation，不能归因为触顶。
-        pytest.param([_assistant("length")], id="pi-exit-1"),
-        # codex P2：契约违例（skill contract 无法解析）是确定性问题，提高预算也修不好。
-        pytest.param(
-            [
-                _assistant("length"),
-                _contract_validation("contract parse error: bad yaml"),
-                {"type": "agent_end"},
-            ],
-            id="contract-parse-error",
-        ),
-        # 缺文件之外再有任一内容违例，同样不归因为触顶。
-        pytest.param(
-            [
-                _assistant("length"),
-                _contract_validation(
-                    "output.json: missing required file", "report.md: missing heading ## Summary"
-                ),
-                {"type": "agent_end"},
-            ],
-            id="contract-content-violation",
-        ),
-    ],
-)
-def test_exit_one_with_more_direct_cause_is_not_rewritten(
-    tmp_path: Path, events: list[dict]
-) -> None:
-    """review B2：exit 1 下更直接的原因（模型错误 / 预算耗尽 / 非契约退出）不被改写。"""
-    work_root = tmp_path / "work"
-    _execution_dir(work_root)
-    _drop_output(work_root)
-    _write_events(work_root, events, ("velites: boom",))
-    report = _report(work_root, exit_code=1)
-    assert report["status"] == "failed"
-    assert report["error_message"] == "Agent process exited 1: velites: boom"
-
-
 def test_truncation_message_mentions_context_window() -> None:
     """Anthropic 的 model_context_window_exceeded 同样映射为 length，文案需覆盖。"""
     assert "context window" in output_truncation_error(1, ["a.json"])
 
 
-# 瞬态错误 → 内部自动重试 → 重试成功但以 length 结束（pi / velites 同形）。
-_RETRIED_INTO_LENGTH = [
-    _MODEL_ERROR,
+def _error(message: str) -> dict:
+    return {
+        "type": "message_end",
+        "message": {"role": "assistant", "stopReason": "error", "errorMessage": message},
+    }
+
+
+# 瞬态失败的一次重试（pi / velites 同形：error message_end + auto_retry_start）。
+_RETRY = [
+    _error("429 rate limited"),
     {"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3, "delayMs": 10, "error": "429"},
-    _assistant("length"),
 ]
+_LENGTH_WITH_ERROR = {
+    "type": "message_end",
+    "message": {"role": "assistant", "stopReason": "length", "errorMessage": "boom"},
+}
+_TRUNCATED = "truncated"
+_EXITED_1 = "Agent process exited 1: velites: boom"
+
+# (id, exit_code, events, 产物齐全, 期望 error_message；_TRUNCATED 表示触顶归因，
+# "" 表示 completed)。行号与设计文档决策表一致。
+_DECISION_TABLE = [
+    ("1-pi-stop-complete", 0, [_assistant("stop")], True, ""),
+    ("2-pi-stop-missing", 0, [_assistant("stop")], False, ""),
+    ("3-pi-length-complete", 0, [_assistant("length")], True, ""),
+    ("4-pi-length-missing", 0, [_assistant("toolUse"), _assistant("length")], False, _TRUNCATED),
+    (
+        "5-pi-length-then-stop",
+        0,
+        [_assistant("length"), _assistant("toolUse"), _assistant("stop")],
+        False,
+        "",
+    ),
+    ("6-pi-retry-into-length-missing", 0, [*_RETRY, _assistant("length")], False, _TRUNCATED),
+    ("7-pi-retry-into-length-complete", 0, [*_RETRY, _assistant("length")], True, ""),
+    (
+        "8-pi-length-retry-into-stop",
+        0,
+        [_assistant("length"), *_RETRY, _assistant("stop")],
+        False,
+        "",
+    ),
+    ("9-pi-length-then-model-error", 0, [_assistant("length"), _error("401 no")], False, "401 no"),
+    ("10-pi-model-error-complete", 0, [_error("401 no")], True, "401 no"),
+    ("11-pi-length-with-error-message", 0, [_LENGTH_WITH_ERROR], False, "boom"),
+    (
+        "12-velites-remediation-length",
+        1,
+        [_assistant("length"), _assistant("length"), _VALIDATION, _END],
+        False,
+        _TRUNCATED,
+    ),
+    # codex P2（4203615556）：补救轮正常完成仍缺产物 → 不是触顶。
+    (
+        "13-velites-remediation-stop",
+        1,
+        [_assistant("length"), _assistant("stop"), _VALIDATION, _END],
+        False,
+        _EXITED_1,
+    ),
+    (
+        "14-velites-remediation-tooluse",
+        1,
+        [_assistant("length"), _assistant("toolUse"), _VALIDATION, _END],
+        False,
+        _EXITED_1,
+    ),
+    (
+        "15-velites-remediation-retry-into-length",
+        1,
+        [_assistant("length"), *_RETRY, _assistant("length"), _VALIDATION, _END],
+        False,
+        _TRUNCATED,
+    ),
+    (
+        "16-velites-missing-file-violation-only",
+        1,
+        [
+            _assistant("length"),
+            _assistant("length"),
+            _contract_validation("output.json: missing required file"),
+            _END,
+        ],
+        False,
+        _TRUNCATED,
+    ),
+    (
+        "17-velites-contract-parse-error",
+        1,
+        [_assistant("length"), _contract_validation("contract parse error: bad yaml"), _END],
+        False,
+        _EXITED_1,
+    ),
+    (
+        "18-velites-content-violation",
+        1,
+        [
+            _assistant("length"),
+            _assistant("length"),
+            _contract_validation(
+                "output.json: missing required file", "report.md: missing heading ## Summary"
+            ),
+            _END,
+        ],
+        False,
+        _EXITED_1,
+    ),
+    (
+        "19-velites-budget-exceeded",
+        1,
+        [
+            _assistant("toolUse"),
+            _assistant("length"),
+            _VALIDATION,
+            {"type": "agent_end", "reason": "budget_exceeded"},
+        ],
+        False,
+        _EXITED_1,
+    ),
+    (
+        "20-velites-violation-outputs-present",
+        1,
+        [
+            _assistant("stop"),
+            _assistant("length"),
+            _contract_validation("report.md: missing heading ## Summary"),
+            _END,
+        ],
+        True,
+        _EXITED_1,
+    ),
+    (
+        "21-velites-unrecovered-model-error",
+        1,
+        [_assistant("length"), _error("429 rate limited"), _END],
+        False,
+        _EXITED_1,
+    ),
+    ("22-pi-exit-1", 1, [_assistant("length")], False, _EXITED_1),
+    ("23-exit-2", 2, [_assistant("length")], False, "Agent process exited 2: velites: boom"),
+    ("24-timeout", 124, [_assistant("length")], False, "Agent process timed out"),
+    ("25-cancelled", 130, [_assistant("length")], False, "Agent Worker is shutting down"),
+]
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "events", "outputs_complete", "expected"),
+    [pytest.param(*row[1:], id=row[0]) for row in _DECISION_TABLE],
+)
+def test_truncation_decision_table(
+    tmp_path: Path, exit_code: int, events: list[dict], outputs_complete: bool, expected: str
+) -> None:
+    """按决策表逐行核对 Worker 上报的 status / error_message（含 model_error 列）。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    if not outputs_complete:
+        _drop_output(work_root)
+    _write_events(work_root, events, ("velites: boom",))
+    report = _report(work_root, exit_code=exit_code)
+    assert report["exit_code"] == exit_code
+    if expected == _TRUNCATED:
+        assert report["status"] == "failed"
+        message = report["error_message"]
+        assert message.startswith(OUTPUT_TRUNCATED_PREFIX)
+        count = sum(event == _assistant("length") for event in events)
+        assert f"{count}x" in message and "output.json" in message
+        assert "execution.thinking" in message
+        # 归因只改失败原因，非零退出的 stderr 尾部仍作为证据面随 metadata 上报。
+        assert exit_code == 0 or report["agent_stderr_tail"] == "velites: boom"
+    elif exit_code == 130:
+        assert report["status"] == "cancelled"
+        assert report["error_message"] == expected
+    elif expected:
+        assert report["status"] == "failed"
+        assert report["error_message"] == expected
+    else:
+        assert report["status"] == "completed"
+        assert report["error_message"] == ""
 
 
 def test_length_after_retry_clears_stale_model_error() -> None:
     """review P2：无 errorMessage 的 length 是一次成功返回的模型调用，清除旧的瞬态错误；
     带 errorMessage 的 length 仍记为错误。"""
     state: str | None = None
-    for event in _RETRIED_INTO_LENGTH:
+    for event in [*_RETRY, _assistant("length")]:
         state = fold_model_error(event, state)
     assert state is None
-    failed_length = {"role": "assistant", "stopReason": "length", "errorMessage": "boom"}
-    assert fold_model_error({"type": "message_end", "message": failed_length}, None) == "boom"
-
-
-def test_retried_into_length_with_missing_outputs_reports_truncation(tmp_path: Path) -> None:
-    """error → auto_retry → length + 缺产物：归因为触顶，不上报已恢复的旧 provider 错误。"""
-    work_root = tmp_path / "work"
-    _execution_dir(work_root)
-    _drop_output(work_root)
-    _write_events(work_root, _RETRIED_INTO_LENGTH)
-    report = _report(work_root, exit_code=0)
-    assert report["status"] == "failed"
-    assert report["error_message"].startswith(OUTPUT_TRUNCATED_PREFIX)
-
-
-def test_retried_into_length_with_all_outputs_completes(tmp_path: Path) -> None:
-    """error → auto_retry → length + 产物齐全：exit 0 的 run 照常 completed。"""
-    work_root = tmp_path / "work"
-    _execution_dir(work_root)
-    _write_events(work_root, _RETRIED_INTO_LENGTH)
-    report = _report(work_root, exit_code=0)
-    assert report["status"] == "completed"
-    assert report["error_message"] == ""
+    assert fold_model_error(_LENGTH_WITH_ERROR, None) == "boom"

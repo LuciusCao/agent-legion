@@ -46,8 +46,9 @@
 
    pi runtime 无对应 flag，配置后被忽略（与 `max_turns` / `max_tokens` 一致）。
 2. **触顶失败归因**：Worker 结果准备（`worker/upload/prepare.py`）在同一遍
-   事件扫描里统计 `stopReason=length` 次数（`shared/output_truncation.py`
-   `OutputTruncation`）。仅当**声明产物缺失**、且退出确由产物缺失造成——exit 0
+   事件扫描里记录**最后一次** assistant 模型调用的 `stopReason`（另累计
+   `stopReason=length` 次数供文案使用，`shared/output_truncation.py`
+   `OutputTruncation`）。仅当**最后一次调用以 `length` 结束**、**声明产物缺失**、且退出确由产物缺失造成——exit 0
    （pi 正常退出、Host 判缺产物），或 exit 1 且事件流含 velites 的
    `outputs_validation`（产物契约退出；pi 的 exit 1 是进程失败，不归因）——
    并且没有更直接的原因（未恢复的模型调用错误、`agent_end.reason=budget_exceeded`、
@@ -58,6 +59,49 @@
    原归因。失败分类新增 `technical / output_truncated`。Anthropic 的
    `model_context_window_exceeded` 同样映射为 `length`，事件流无法区分，故文案
    同时提示上下文窗口溢出的可能。
+   归因只关联导致最终产物校验 / 退出的**最后一轮**模型调用：velites 首轮触顶后
+   进入补救轮（`velites/src/agent.rs` 正常停止分支），补救轮以 `stop` / `toolUse`
+   正常结束仍缺产物时，失败是补救轮没写齐产物，调高输出预算也无济于事，不归因
+   为触顶。
+
+   **触顶归因决策表**（`tests/workers/test_worker_upload_truncation.py`
+   `_DECISION_TABLE` 逐行参数化）。velites 事件形态：每次模型调用一个 assistant
+   `message_end`；瞬态失败的重试先发 `message_end{stopReason=error, errorMessage}` +
+   `auto_retry_start`，成功的重试再发一个 `message_end`；未恢复的模型错误发
+   `message_end{error}` 后直接结束，**不发** `outputs_validation`（缺产物时 exit 1）；
+   正常停止时缺产物 / 契约违例触发一次补救轮（契约解析失败跳过补救），补救轮或
+   预算收尾轮之后发 `outputs_validation`（`agent.rs` 三处发出点：收尾轮以 toolUse
+   结束后的循环顶、收尾轮正常停止、无需补救的正常停止），仍缺产物则 exit 1；取消
+   由 Worker 记为 130。「模型错误」列为与 `fold_model_error` 同一 fold 的未恢复错误。
+
+   | # | 运行时 / exit | 模型调用序列（`stopReason`） | 模型错误 | 其他旁证 | 产物 | 期望 |
+   |---|---|---|---|---|---|---|
+   | 1 | pi / 0 | stop | — | — | 齐全 | completed |
+   | 2 | pi / 0 | stop | — | — | 缺失 | completed（Host 判 Missing outputs） |
+   | 3 | pi / 0 | length | — | — | 齐全 | completed |
+   | 4 | pi / 0 | toolUse → length | — | — | 缺失 | output_truncated（1x） |
+   | 5 | pi / 0 | length → toolUse → stop | — | — | 缺失 | completed（最后一轮未触顶） |
+   | 6 | pi / 0 | error → retry → length | 已恢复 | — | 缺失 | output_truncated |
+   | 7 | pi / 0 | error → retry → length | 已恢复 | — | 齐全 | completed |
+   | 8 | pi / 0 | length → error → retry → stop | 已恢复 | — | 缺失 | completed（最后一轮未触顶） |
+   | 9 | pi / 0 | length → error（未恢复） | 有 | — | 缺失 | model_error |
+   | 10 | pi / 0 | error（未恢复） | 有 | — | 齐全 | model_error |
+   | 11 | pi / 0 | length（带 errorMessage） | 有 | — | 缺失 | model_error |
+   | 12 | velites / 1 | length → 补救 length | — | `outputs_validation` | 缺失 | output_truncated（2x） |
+   | 13 | velites / 1 | length → 补救 stop | — | `outputs_validation` | 缺失 | 原 exit 错误 |
+   | 14 | velites / 1 | length → 补救 toolUse（工具执行后校验） | — | `outputs_validation` | 缺失 | 原 exit 错误 |
+   | 15 | velites / 1 | length → 补救 error → retry → length | 已恢复 | `outputs_validation` | 缺失 | output_truncated |
+   | 16 | velites / 1 | length → 补救 length | — | 契约违例仅 `missing required file` | 缺失 | output_truncated |
+   | 17 | velites / 1 | length（契约解析失败，无补救轮） | — | `contract parse error` 违例 | 缺失 | 原 exit 错误 |
+   | 18 | velites / 1 | length → 补救 length | — | 缺文件之外的内容违例 | 缺失 | 原 exit 错误 |
+   | 19 | velites / 1 | toolUse → 预算收尾 length | — | `agent_end.reason=budget_exceeded` | 缺失 | 原 exit 错误 |
+   | 20 | velites / 1 | stop → 补救 length | — | 内容违例 | 齐全 | 原 exit 错误 |
+   | 21 | velites / 1 | length → 补救 error（未恢复，无 `outputs_validation`） | 有 | — | 缺失 | 原 exit 错误（model_error 只在 exit 0 采纳） |
+   | 22 | pi / 1 | length | — | 无 `outputs_validation` | 缺失 | 原 exit 错误 |
+   | 23 | 任一 / 2 | length | — | — | 缺失 | 原 exit 错误（`Agent process exited 2`） |
+   | 24 | 任一 / 124 | length | — | — | 缺失 | `Agent process timed out` |
+   | 25 | 任一 / 130 | length | — | — | 缺失 | cancelled |
+
 3. **日志告警**：job 日志渲染把 `stopReason=length` 从「模型调用错误
    stop_reason=length」改为「单次输出触顶」条目，说明 thinking 计入同一预算、
    未完成的工具调用未执行，以及可用的配平手段。即使后续轮次恢复、run 成功，
@@ -129,7 +173,7 @@ Anthropic 路径已有按档位的 `thinkingBudgets`；OpenAI 兼容路径只有
 - 正确性：归因只在「触顶 + 声明产物缺失」时改写失败原因，不改变任何 run 的
   成败判定；新参数未配置时 velites 请求体与 argv 均与改动前逐字节一致。
 - 可观测性：失败原因、失败分类、job 日志三处都能直接看出是触顶。
-- 测试：Python 侧覆盖 argv 映射、事件扫描计数、归因分支（含产物齐全不改判、
-  崩溃退出码不改写）、失败分类与日志渲染；Rust 侧 CLI 解析与 OpenAI 请求体
+- 测试：Python 侧覆盖 argv 映射、事件扫描计数、按上方决策表逐行参数化的归因
+  分支、失败分类与日志渲染；Rust 侧 CLI 解析与 OpenAI 请求体
   单测依赖 CI（开发机无 cargo）。
 - 风险：旧 velites 二进制不认识新 flag，仅影响显式声明该键的节点。

@@ -31,13 +31,17 @@ _MISSING_FILE_VIOLATION = ": missing required file"
 class OutputTruncation:
     """单遍扫描中累计的触顶事实；``observe`` 作为扫描的事件观察者。
 
-    除触顶次数外还记录排除归因所需的旁证：未恢复的模型调用错误（与扫描的
-    model_error 同一 fold，但不受 exit 0 门控）、velites 的预算耗尽
-    （``agent_end.reason``）、``outputs_validation`` 事件是否出现（证明
-    velites 的 exit 1 来自产物契约，而非崩溃 / 模型错误）以及其 ``violations``
-    里是否有缺文件之外的契约违例（提高输出预算也修不好，不能归因为触顶）。"""
+    归因只看**最后一次** assistant 模型调用（``last_stop``，即导致最终产物
+    校验 / 退出的那一轮）：velites 的补救轮或 pi 的后续轮以 ``stop`` /
+    ``toolUse`` 正常结束、或以模型错误结束时，更早的触顶不再解释最终缺产物；
+    ``count`` 只是文案里的累计次数。另记排除归因的旁证：未恢复的模型调用错误
+    （与扫描的 model_error 同一 fold，不受 exit 0 门控）、velites 预算耗尽
+    （``agent_end.reason``）、``outputs_validation`` 是否出现（证明 velites 的
+    exit 1 来自产物契约）及其 ``violations`` 里缺文件之外的契约违例。完整决策表
+    见 ``docs/architecture/llm-output-budget-design.md``「触顶归因决策表」。"""
 
     count: int = 0
+    last_stop: Any = None
     model_error: str | None = None
     budget_exceeded: bool = False
     outputs_validated: bool = False
@@ -58,10 +62,12 @@ class OutputTruncation:
             # 只看 message_end：message_start/turn_end 也携带同一条消息，重复计数。
             msg = event.get("message")
             if isinstance(msg, dict) and msg.get("role") == "assistant":
-                self.count += msg.get("stopReason") == OUTPUT_LIMIT_STOP_REASON
+                self.last_stop = msg.get("stopReason")
+                self.count += self.last_stop == OUTPUT_LIMIT_STOP_REASON
 
     def failure(self, expected: Sequence[str], produced: Sequence[str], exit_code: int) -> str:
-        """归因判定：触顶过、声明产物缺失且缺失确由触顶解释时返回失败原因，否则 ""。
+        """归因判定：最后一次模型调用触顶、声明产物缺失且缺失确由触顶解释时返回
+        失败原因，否则 ""。
 
         只改写失败原因、不改成败：产物齐全的触顶 run 照常完成。可归因的退出面
         只有两个：exit 0（pi 正常退出、Host 判缺产物）与带 ``outputs_validation``
@@ -70,7 +76,7 @@ class OutputTruncation:
         是更直接的原因，一律不改写。"""
         missing = [name for name in expected if name not in produced]
         contract_exit = exit_code == 0 or (exit_code == 1 and self.outputs_validated)
-        if not self.count or not missing or not contract_exit:
+        if self.last_stop != OUTPUT_LIMIT_STOP_REASON or not missing or not contract_exit:
             return ""
         if self.model_error or self.budget_exceeded or self.contract_violation:
             return ""
