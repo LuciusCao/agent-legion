@@ -1,141 +1,101 @@
 # 项目结构
 
-本文件列出 Agent Legion 仓库的高层目录结构。详细的模块说明见 [backend.md](backend.md) 和 [frontend.md](frontend.md)。
-
-> 具体文件清单以实际文件系统为准；本文件只记录稳定的顶层模块和关键入口。
+仓库目录地图：只列到有意义的层级，大包一行说明职责。文件级清单以实际文件系统为准；
+模块内部机制见 [backend.md](backend.md)、[frontend.md](frontend.md)、
+[velites-harness.md](velites-harness.md)，脚本清单见 [scripts/README.md](../../scripts/README.md)，
+运行时 `data/` 布局见 [data-layout.md](../data-layout.md)。
 
 ```text
 agent-legion/
-├── pyproject.toml              # Python project metadata, dependencies, tool config
-├── uv.lock                     # Locked Python dependency tree
-├── README.md                   # 项目入口文档（中文）
-├── README_EN.md                # 项目入口文档（English）
+├── README.md / README_EN.md    # 项目入口（中 / 英，双向同步）
 ├── AGENTS.md                   # Agent 操作手册与开发红线
-├── .env.example                # 运行时密钥与覆盖项模板
-├── Makefile                    # 常用命令快捷方式
-├── config/                     # 按领域拆分的配置
-│   └── architecture/           # 架构治理配置
-│       ├── architecture-invariants.yaml
-│       ├── architecture-exemptions.yaml
-│       ├── architecture-budget-policy.yaml
-│       ├── architecture-budgets.json
-│       ├── test-root-files-baseline.json
-│       └── sql-placeholders-baseline.json
-│   # 运行时 split 配置（app.yaml / workflow.yaml / agent_legion.yaml）已退役：
-│   # 代码默认值 + env 覆盖 + DB 实例设置文档，文件存在即启动报错。
-│   # skill 侧：skills.yaml / skills.lock 与全局 skill_sources 注册表均已退役
-│   # （#322）——skill 是 ~/.agents/skills/<group>/<name> 下的本地 in-place
-│   # git 仓库；pinned ref 的 commit 锁存 DB global_settings（skill_lock），
-│   # 经 make skills-lock 遍历锁内条目重解析。
-├── server/
-│   └── app/
-│       ├── main.py             # FastAPI app factory + lifespan worker
-│       ├── settings.py         # 配置加载与合并
-│       ├── routes/             # REST API 路由与合约
-│       ├── services/           # 业务逻辑服务层；下划线前缀簇已归真子包：
-│       │                       # job_rerun/（rerun 与批量 delete/run-to）、
-│       │                       # ops_metrics/（采样与读侧查询）、
-│       │                       # failure_classification/（失败分类规则）
-│       ├── db/                 # PostgreSQL schema、连接池、事务与共享查询构造
-│       ├── jobs/               # Job 领域查询与类型
-│       ├── executors/          # Code executor、lease 调度与 capacity 控制
-│       ├── workflows/          # Agent Legion DAG 定义与执行
-│       ├── configuration/      # 配置加载与 owned-keys 校验
-│       ├── quality/            # 架构不变量与豁免运行时检查
-│       ├── skills/             # skill 检出/执行副本与版本锁（skill_lock）管理
-│       ├── events/             # 事件子系统：sse.py SSE 广播、bus.py 进程内总线、
-│       │                       # buffer.py DB 持久化缓冲、aggregator.py 聚合器、
-│       │                       # agents.py Agent 发现与状态跟踪
-│       ├── workflow_worker/    # DAG workflow worker：thread.py 线程与 poll 循环、
-│       │                       # ready.py 每 pass 一次的 ready 候选收集、
-│       │                       # schedule.py ready 候选的 lease 认领与提交
-│       └── worker*.py          # Worker 控制与启动（worker_control.py / worker_startup.py）
-├── frontend/
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── vite.config.ts
-│   ├── index.html
-│   └── src/
-│       ├── main.tsx            # React entry point
-│       ├── App.tsx             # 应用级 Provider
-│       ├── AppRoutes.tsx       # 路由定义
-│       ├── api/                # 按领域拆分的 API 层（index.ts barrel 统一导出）
-│       ├── generated/api.ts    # OpenAPI 生成的传输类型
-│       ├── pages/              # 路由级页面
-│       ├── layouts/            # 布局组件
-│       ├── components/         # 可复用 UI 组件
-│       ├── stores/             # Zustand 客户端状态管理
-│       ├── hooks/              # React 自定义 Hooks
-│       ├── lib/                # 纯工具函数
-│       ├── types/              # 类型声明
-│       ├── testing/            # 测试辅助
-│       └── styles.css          # 全局样式
-├── worker/                     # Agent Worker 协议 v5 实现
-│   ├── service.py              # Worker Service 控制面入口
-│   ├── executor.py             # claim / 执行 / 结果上报主循环（claim pacing
-│   │                             # #472 与 ramp-up 爬坡预算 #471 的接线点）
-│   ├── claim_pacing.py         # 成功路径自适应 pacing 状态机（#472）
-│   ├── ramp_up.py              # 冷启动容量爬坡状态机（#471）
-│   ├── events.py               # Worker 侧结构化事件日志（#490）
+├── CONTRIBUTING.md             # 贡献流程：setup、首次跑测试、PR 约定
+├── CHANGELOG.md
+├── Makefile                    # 常用命令入口（make help 列全集）
+├── pyproject.toml / uv.lock    # Python 依赖与工具配置
+├── .python-version             # uv 管理的 Python 钉点
+├── .env.example                # env-only 配置模板（DB URL、S3、vault key 等）
+├── Dockerfile                  # host / worker 多阶段镜像
+├── .githooks/                  # 版本化 pre-commit / pre-push（make install-hooks 安装）
+├── .github/                    # CI workflow（quality-gate / nightly-gate / 镜像与 velites 发布）、
+│                               # issue / PR 模板、dependabot
+├── config/
+│   └── architecture/           # 架构治理注册表：invariants / exemptions / 体积预算与策略、
+│                               # 执行写面、测试放置与 smoke 清单、postgres 测试清单、
+│                               # 服务数据边界与 SQL 占位基线、退役术语表、issue 状态清单
+│   # 运行时 split yaml 已全部退役：配置 = 代码默认值 + env 覆盖 + DB 实例设置文档
+├── server/app/                 # FastAPI Host（控制面）
+│   ├── main.py                 # app factory + lifespan
+│   ├── bootstrap/              # composition root：按领域组装应用对象图
+│   ├── routes/                 # REST 路由与 contract（薄 HTTP 适配层）
+│   ├── services/               # 业务逻辑；子包 job_rerun/ ops_metrics/
+│   │                           # failure_classification/ runtime_profile/
+│   ├── jobs/                   # Job 领域类型与 JobQueries 门面（queries/）
+│   ├── db/                     # PostgreSQL schema、迁移链（migrations/）、连接池与事务
+│   ├── workflows/              # DAG 定义、loader、节点类型与发布校验
+│   ├── workflow_worker/        # DAG 调度线程：ready 收集、lease 认领、dispatch 配置注入
+│   ├── executors/              # 容量 lease、隐含 code 池与本地 code 执行
+│   ├── agent_broker/           # agent 执行队列：claim / sweep / dispatch
+│   ├── agent_control/          # Worker 注册、scoped register token、声明与在线管理
+│   ├── agent_catalog/          # Agent 定义模型（#440 过渡期）与 demo 模板
+│   ├── agent_runtime/          # runtime catalog（AGENT_RUNTIMES）与 adapter
+│   ├── auth/                   # 用户 / 会话 / 限流 / workspace 访问依赖注入
+│   ├── configuration/          # 配置合成与 owned-key / 退役文件校验
+│   ├── events/                 # SSE 广播、进程内总线、事件缓冲与聚合
+│   ├── skills/                 # skill root、执行副本导出与 skill_lock
+│   ├── storage/                # 实例对象存储（S3 设置与客户端）
+│   ├── studio_chat/            # Studio 对话：ACP agent 子进程、会话、后台接续
+│   ├── mcp_server/             # Studio agent 的 MCP 工具面（stdio / HTTP）
+│   └── worker_control*.py 等   # workspace 暂停/恢复控制、启动任务、HTTP 中间件
+├── worker/                     # Agent Worker（协议版本见 shared/protocol.py）
+│   ├── service.py / cli.py     # Worker Service 控制面与命令行入口
+│   ├── executor.py             # claim → 执行 → 结果上报主循环
 │   ├── execution/              # 单次执行：准备 / 运行 / 生命周期 / 心跳
-│   │                             # （heartbeat.py 单条 + heartbeat_batch.py
-│   │                             #   per-Worker 批量续期 #352）
-│   ├── runtime/                # 声明解析与热更控制 / 模型发现 / 启动预检
-│   ├── upload/                 # 产物直传队列与 lane 调度
+│   ├── runtime/                # 声明解析、热更控制、模型发现、启动预检
 │   ├── host/                   # Host 控制面 HTTP 客户端与状态同步
-│   ├── artifact/               # presigned GET/PUT 传输原语
 │   ├── registration/           # scoped token 与注册重试
-│   ├── status/                 # 执行状态文件写入/读取/聚合（包根为写入方）
-│   └── ...
+│   ├── artifact/ upload/       # presigned 传输原语与产物直传队列
+│   ├── status/                 # 执行状态文件
+│   └── ui/                     # Worker 控制台静态前端（node:test 覆盖）
+├── shared/                     # Host 与 Worker / 节点 SDK 共享的轻量契约（协议常量、
+│                               # 沙箱 env、材料缓存与 bundle 物化、脱敏等）
+├── workspace_libs/             # 节点 SDK（NodeContext）与 code 节点执行脚手架
+├── workflow_nodes/             # demo workflow 的内置 code 节点
 ├── velites/                    # 自研 Rust agent harness 与 OS 沙箱
+│   ├── src/                    # agent 循环、provider/、tools/、sandbox/、事件
+│   ├── schema/events.schema.json
+│   └── tests/
+├── frontend/                   # React SPA（Vite）
 │   ├── src/
-│   ├── tests/
-│   └── Cargo.toml
-├── shared/                     # Host 与 Worker/节点 SDK 共享的轻量契约
-│   ├── pi_events.py
-│   ├── pi_model_error.py
-│   ├── material_cache.py       # 材料物化缓存（内容寻址、原子写入、按字节预算淘汰）
-│   └── material_bundle.py      # bundle 文件夹条目的清单与确定性地址硬链接物化
-├── workspace_libs/             # 节点 SDK 与执行脚手架（code 节点沙箱/Worker 闭包白名单）
-├── scripts/                    # 质量门、迁移、生成器
-│   ├── check-quick.sh          # 快速质量门
-│   ├── check.sh                # 完整质量门
-│   ├── check-ci.sh             # CI 质量门
-│   ├── check_architecture.py   # 架构契约检查
-│   ├── check_invariants.py     # 不变量/豁免校验
-│   ├── ratchet_architecture_budgets.py # 架构预算基线更新
-│   ├── generate_architecture.py # 自动生成架构文档表格
-│   ├── generate-api-types.sh   # 生成前端 API 类型
-│   └── install-git-hooks.sh    # 预提交钩子安装
-├── tests/                      # pytest 测试套件
-│   ├── conftest.py
-│   ├── test_*.py               # 单元/集成测试（存量；新测试禁止放根目录——
-│   │                           # `scripts/architecture/test_placement.py` +
-│   │                           # `config/architecture/test-root-files-baseline.json`
-│   │                           # 强制，须进对应子系统子目录）
-│   ├── test_architecture_*.py  # 架构契约测试
-│   ├── routes/                 # 路由级测试
-│   ├── full/                   # 高保真完整门测试
-│   └── ci/                     # CI 扩展压力测试
-├── deploy/                     # Docker Compose 与部署模板
-│   ├── compose.host.yaml
-│   ├── compose.worker.yaml
-│   ├── worker.*.example.yaml   # Worker 可选 bootstrap 配置模板
-│   └── secrets/                # 本机密钥（gitignored，init-worktree.sh 生成）
-├── examples/                   # 示例 workflow 资源
-│   └── education-video-problems-generation/
-├── docs/
-│   └── architecture/           # 架构文档
-└── data/                       # 运行时数据（gitignored）
-    ├── videos/
-    ├── jobs/
-    ├── packages/
-    └── logs/
+│   │   ├── main.tsx / App.tsx / AppRoutes.tsx
+│   │   ├── routes/             # 路由表拆分（admin 路由、页面懒加载表）
+│   │   ├── pages/              # 路由级页面
+│   │   ├── features/           # 自成体系的功能域：workflowStudio / agentPanelDock /
+│   │   │                       # jobDiagnosis / previewPanel
+│   │   ├── components/ layouts/ hooks/ stores/ lib/ types/ testing/
+│   │   ├── api/                # 按领域拆分的 API 层
+│   │   └── generated/api.ts    # OpenAPI 生成的传输类型（禁止手写）
+│   ├── e2e/                    # Playwright 浏览器 smoke
+│   ├── stress/                 # workspace 压测 spec（nightly-e2e）
+│   └── scripts/                # 覆盖率清点等辅助脚本
+├── scripts/                    # 质量门、架构治理（architecture/、quality/）、dev/prod 启停、
+│                               # 迁移与种子、E2E / 压测、LLM 网关（remote/）
+├── tests/                      # pytest；新测试按子系统放子目录（routes/ services/ db/
+│                               # workers/ scripts/ workflows/ …），根目录只留 conftest
+│                               # 与共享支撑（test_placement.py 强制）；full/ 为高保真
+│                               # 证据层，ci/ 为 nightly 扩展压测
+├── deploy/                     # Docker Compose（host / worker 各形态）与配置模板
+│   └── secrets/                # 本机密钥（gitignored，install / init-worktree 生成）
+├── examples/                   # demo workflow 资源与 demo skills
+├── docs/                       # 文档（层级见 docs/README.md）
+└── data/                       # 运行时数据（gitignored，布局见 docs/data-layout.md）
 ```
 
 ## 关键约定
 
-- `config/architecture/` 下的预算是机器维护的（`architecture-budgets.json`）或人工维护的策略（`architecture-budget-policy.yaml`），通过 `scripts/check_architecture.py` 和 `scripts/check_invariants.py` 在质量门中执行。
-- `frontend/src/generated/api.ts` 由后端 OpenAPI 模式生成，禁止手写重复传输类型。
-- `data/` 目录已加入 `.gitignore`，禁止提交运行时数据或密钥。
-- 多 worktree 开发时，每个 worktree 应使用独立的后端端口和 `data/` 目录，避免状态互相覆盖。
+- `config/architecture/` 下的预算与基线由机器维护（ratchet 脚本），策略与注册表人工维护，经
+  `scripts/check_architecture.py` 与 `scripts/check_invariants.py` 在质量门执行。
+- `frontend/src/generated/api.ts` 由后端 OpenAPI 生成，禁止手写传输类型。
+- `data/` 与 `deploy/secrets/` 已 gitignore，禁止提交运行时数据或密钥。
+- 开发端口是固定默认值（8001 / 5174 / 8789），多 worktree 并行时用 `DEV_BACKEND_PORT` / `DEV_FRONTEND_PORT` /
+  `AGENT_WORKER_UI_PORT` 覆盖；数据库与 bucket 由 `scripts/init-worktree.sh` 按 worktree 名派生，`data/` 随 worktree 目录天然隔离（见 AGENTS.md §1）。
