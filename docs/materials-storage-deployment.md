@@ -105,18 +105,20 @@ compose 对 host 与两个本地后端都是 `${AGENT_LEGION_S3_ACCESS_KEY}` 字
 ```bash
 cd <prod worktree>
 umask 077
-# 只在首次配置时生成：deploy/.env 已有 S3 凭据时重复追加会让后出现的随机值
-# 生效（本地后端随之换凭据，外部 S3 直接失效）。随机值先落变量、生成失败
-# 即停，不把空值写进 .env
-if grep -q '^AGENT_LEGION_S3_ACCESS_KEY=' deploy/.env 2>/dev/null; then
-  echo 'deploy/.env 已有 AGENT_LEGION_S3_* 凭据，未改动' >&2
-else
-  ACCESS_KEY=$(openssl rand -hex 20) && SECRET_KEY=$(openssl rand -hex 40) &&
-    [ -n "$ACCESS_KEY" ] && [ -n "$SECRET_KEY" ] && cat >> deploy/.env <<EOF
+# 只在首次配置时生成：deploy/.env 里 bucket / endpoint / 凭据任一已配置就不
+# 追加——重复键会让后出现的随机值生效（本地后端随之换凭据，外部 S3 直接失效）。
+# 随机值先落变量并判非空，生成失败显式报错、不写 .env
+if grep -qE '^AGENT_LEGION_S3_(BUCKET|ENDPOINT|ACCESS_KEY|SECRET_KEY)=' deploy/.env 2>/dev/null; then
+  echo 'deploy/.env 已配置 AGENT_LEGION_S3_*，未改动（换凭据请手工编辑）' >&2
+elif ACCESS_KEY=$(openssl rand -hex 20) && SECRET_KEY=$(openssl rand -hex 40) &&
+    [ -n "$ACCESS_KEY" ] && [ -n "$SECRET_KEY" ]; then
+  cat >> deploy/.env <<EOF
 AGENT_LEGION_S3_BUCKET=agent-legion
 AGENT_LEGION_S3_ACCESS_KEY=$ACCESS_KEY
 AGENT_LEGION_S3_SECRET_KEY=$SECRET_KEY
 EOF
+else
+  echo '生成 S3 凭据失败，deploy/.env 未改动' >&2
 fi
 chmod 600 deploy/.env
 ```
@@ -125,7 +127,19 @@ chmod 600 deploy/.env
 覆盖为可达地址（默认 `http://127.0.0.1:8333`，匹配 seaweedfs 端口映射）：
 
 ```bash
-echo 'AGENT_LEGION_S3_PUBLIC_ENDPOINT=http://<宿主机地址>:8333' >> deploy/.env
+umask 077
+# 已有该键就替换那一行、没有才追加（重复键时哪一行生效不直观）；读不到
+# 现有 .env 时中止，不拿空内容覆盖它
+set_env() {  # set_env <文件> <键> <值>
+  if [ -e "$1" ]; then
+    grep -v "^$2=" "$1" > "$1.tmp"
+    [ $? -le 1 ] || { rm -f "$1.tmp"; echo "读取 $1 失败，未改动" >&2; return 1; }
+  else
+    : > "$1.tmp"
+  fi
+  printf '%s=%s\n' "$2" "$3" >> "$1.tmp" && mv "$1.tmp" "$1"
+}
+set_env deploy/.env AGENT_LEGION_S3_PUBLIC_ENDPOINT 'http://<宿主机地址>:8333'
 ```
 
 （原生形态 `make prod-up` 的后端/worker 是本机进程，不经 compose：同名
@@ -292,7 +306,8 @@ EOF
 - **迁移后端**（本地后端互迁或迁外部 S3）：改 `deploy/.env` 的
   endpoint/凭据（`AGENT_LEGION_LOCAL_S3=auto` 会据此自动启停本地后端），
   数据用 `aws s3 sync s3://old s3://new` 或 `rclone`
-  搬迁；`materials.storage_key` 与后端无关，无需改库。
+  搬迁（目标 bucket 须为空，或先加 `--dryrun` 核对：sync 会用源对象覆盖
+  目标里的同名对象；不要加 `--delete`）；`materials.storage_key` 与后端无关，无需改库。
 - **demo 材料播种**：S3 配好后，新建/绑定 demo workspace 时自动播种
   `examples/` 演示材料；`make import-demo` 同样触发。
 
@@ -375,6 +390,10 @@ master 日志出现 `no free volumes` 即命中本问题。
 
 ```bash
 docker restart <seaweedfs 容器>
+# 先不带 -apply 预览（simulation mode，只列出将被删除的 volume），确认都是
+# 预期的空 volume 后再执行带 -apply 的同一条命令
+docker exec <seaweedfs 容器> sh -c \
+  'printf "lock\nvolume.deleteEmpty -quietFor=1h\nunlock\n" | weed shell -master=localhost:9333'
 docker exec <seaweedfs 容器> sh -c \
   'printf "lock\nvolume.deleteEmpty -quietFor=1h -apply\nunlock\n" | weed shell -master=localhost:9333'
 ```

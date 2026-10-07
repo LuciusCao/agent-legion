@@ -109,7 +109,19 @@ NATIVE_WORKER_BIND=192.0.2.1
 如果 LLM gateway 绑定了 Tailnet 地址并设置了 `LLM_GATEWAY_TOKEN`（绑定非 loopback 地址时必须设置），Worker 容器也需要同一个 token 才能调用 gateway。Compose 通过环境变量透传它，把 token 写进 `deploy/.env`（该文件已被 `.gitignore` 与 `.dockerignore` 排除）或导出到 shell：
 
 ```bash
-echo 'LLM_GATEWAY_TOKEN=<gateway-token>' >> deploy/.env
+umask 077
+# 已有该键就替换那一行、没有才追加；读不到现有 .env 时中止，不覆盖它
+# （set_env 与 materials-storage-deployment.md §3.1 的同名函数相同）
+set_env() {  # set_env <文件> <键> <值>
+  if [ -e "$1" ]; then
+    grep -v "^$2=" "$1" > "$1.tmp"
+    [ $? -le 1 ] || { rm -f "$1.tmp"; echo "读取 $1 失败，未改动" >&2; return 1; }
+  else
+    : > "$1.tmp"
+  fi
+  printf '%s=%s\n' "$2" "$3" >> "$1.tmp" && mv "$1.tmp" "$1"
+}
+set_env deploy/.env LLM_GATEWAY_TOKEN '<gateway-token>'
 chmod 600 deploy/.env
 ```
 

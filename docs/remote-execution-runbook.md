@@ -209,6 +209,7 @@ mixed-fleet compatibility and upgrade order.
   | --- | --- | --- | --- | --- |
   | #546 batch claim: the Worker sends `limit` and reads `{"claims": [...]}` | v0.7.4 | worker-v0.7.4 | works (no `limit` → single-object body, until v0.7.12) | works (the older Host ignores the batch fields; the Worker's shape sniff wraps the single object, `worker/host/claim_ops.py`) |
   | #547 single-object claim body removed: every non-empty claim answers `{"claims": [...]}` (`server/app/routes/agent_worker_claims.py`) | v0.7.12 | — | **broken** for Workers before worker-v0.7.4: they read the wrapper as one claim, so every execution they claim stays leased without starting and requeues only when the lease expires | n/a |
+  | #657 concurrency ceiling 1024 → 2048 (`shared/concurrency_limits.py`; registration `max_concurrency` / `max_code_concurrency` and claim limits) | v0.7.12 (88f48f5cf) | worker-v0.7.12 | works (older Workers never declare more than 1024) | **rejected** when the Worker is configured above 1024: an older Host answers registration with 422 (and would reject such a claim body the same way); at ≤ 1024 it works |
   | #211 M3 `workflow_key` removed from claim responses | v0.7.16 | — | works for every `worker-v*` release (no Worker reads it since v0.5.0) | n/a |
   | #748 / #755 `X-Agent-Result` carries raw UTF-8; a direct-upload artifact list over the 14 KiB header budget moves into the result archive (`result-output-artifacts.json` + header flag) | v0.7.14 | worker-v0.7.14 | works (older Workers send ASCII-escaped JSON) | degraded: CJK `error_message` / `agent_stderr_tail` arrive as mojibake, and a run whose artifact list overflows the header fails with missing outputs |
 
@@ -223,16 +224,18 @@ mixed-fleet compatibility and upgrade order.
   | --- | --- | --- | --- | --- |
   | **v0.4.0-alpha and earlier** (≤ v3) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
   | **v0.5.0 – v0.6.0** (v4) | works (gzip artifacts, per-execution heartbeats) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
-  | **v0.7.0 – v0.7.11** (v5, single-object claims still served) | works (per-execution heartbeats) | works | works (batch claims from Host v0.7.4; per-claim fallback before) | degraded (#748 / #755 row above) |
+  | **v0.7.0 – v0.7.11** (v5, single-object claims still served) | works (per-execution heartbeats) | works | works (batch claims from Host v0.7.4; per-claim fallback before); worker-v0.7.12+ configured above 1024 concurrency is rejected at registration (#657) | degraded (#748 / #755 row above); above 1024 concurrency rejected (#657) |
   | **v0.7.12 – v0.7.13** (v5) | **broken** (#547) | **broken** (#547) | works | degraded (#748 / #755 row above) |
   | **v0.7.14 and later** (v5, current) | **broken** (#547) | **broken** (#547) | works | works |
 
   **Minimum supported Worker for a current Host (v0.7.12 and later):
   worker-v0.7.4.** The recommended pairing is the Worker release of the
-  same version as the Host. Images built from source older than
-  worker-v0.6.0 (protocol ≤ v3, never published as `worker-v*`) are not
-  supported: the Host accepts their registration but they hit the same
-  #547 claim break. `min_protocol_version` cannot express this floor —
+  same version as the Host. A locally built image counts as the release its
+  source belongs to, whatever protocol number it declares: source from
+  v0.5.0 on already declares v4, and any Worker built before the #546 batch
+  claim (worker-v0.7.4) registers fine on a current Host but hits the same
+  #547 claim break; source older than v0.5.0 (protocol ≤ v3) is likewise
+  unsupported. `min_protocol_version` cannot express this floor —
   worker-v0.7.0 already declares v5 — so enforce it by upgrading Workers,
   not by raising the setting. The v5 Worker's per-execution heartbeat
   fallback (it degrades for good when the batch route answers 404/405,
