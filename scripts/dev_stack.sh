@@ -198,14 +198,19 @@ stop_port() {
         kill "$ppid" 2>/dev/null || true
     fi
     kill "$pid" 2>/dev/null || true
+    # 等进程真正退出，而不是只等端口不再监听（#760）：uvicorn 先关 listener
+    # 再等 SSE 连接与 lifespan 收尾，只看端口会让紧随的 dev-up 与旧进程重叠
+    # ——新进程的单副本探测撞上旧进程的锁、启动期清扫也与旧进程的收尾交错。
+    # 与 native-prod-down.sh 的 stop_pid 同一 kill -0 轮询。
     for _ in $(seq 1 "$grace"); do
-        if ! port_listening "$port"; then
+        if ! kill -0 "$pid" 2>/dev/null \
+            && { [[ -z "$ppid" || "$ppid" == "1" ]] || ! kill -0 "$ppid" 2>/dev/null; }; then
             echo "$name 已停止"
             return 0
         fi
         sleep 1
     done
-    echo "警告：$name :$port ${grace}s 内仍在监听，请人工检查（日志 $LOG_DIR/dev-*.log）" >&2
+    echo "警告：$name :$port (pid $pid) ${grace}s 内未退出，请人工检查（日志 $LOG_DIR/dev-*.log）" >&2
     return 1
 }
 
@@ -213,7 +218,7 @@ cmd_down() {
     local rc=0
     # 先停 Worker（停止领新任务并上报在途结果），再停后端与前端
     stop_port "$WORKER_PORT" "Worker" 35 || rc=1
-    stop_port "$BACKEND_PORT" "后端" 15 || rc=1
+    stop_port "$BACKEND_PORT" "后端" 30 || rc=1
     stop_port "$FRONTEND_PORT" "前端" 10 || rc=1
     return "$rc"
 }

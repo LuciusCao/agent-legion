@@ -24,6 +24,7 @@ from tests.workers.upload_queue_testlib import (
     _queue,
     _task,
 )
+from worker.upload import prepare as upload_prepare
 from worker.upload import queue as upload_queue
 from worker.upload.queue import UploadTask
 
@@ -589,6 +590,9 @@ def test_overflow_ceiling_rejection_empties_oversized_original(
         raise ManifestEmbedExceedsArchiveCeiling("over the ceiling; original untouched")
 
     monkeypatch.setattr(report_module, "embed_output_artifacts_manifest", rejecting_embed)
+    # #959 起主路径 prepare 预检会先拦下超限原归档；绕过它专测 report 侧
+    # 判败通道的可提交性守卫（纵深防御，未下发上限的形态仍靠它）。
+    monkeypatch.setattr(upload_prepare, "declared_ceiling_rejection", lambda task, archive: None)
     task = _direct_upload_task(work_root, monkeypatch, ceiling)
     client = QueueFakeClient()
     captured: dict[str, Any] = {}
@@ -669,6 +673,9 @@ def test_direct_upload_fallback_restast_backstop_fails_honestly(
     report.py 的 embed 超限臂同形：回收成空归档诚实判败。"""
     # 强制预检放行（预检的放行/判败面由上一条族覆盖），专测换轨后兜底。
     monkeypatch.setattr(upload_queue, "embed_switch_rejection", lambda task: None)
+    # #959 起换轨重备的 prepare 预检会先拦下超限归档；绕过它专测换轨后
+    # re-stat 兜底（纵深防御，未下发上限时按 64 MiB 默认口径仍靠它）。
+    monkeypatch.setattr(upload_prepare, "declared_ceiling_rejection", lambda task, archive: None)
     _direct_upload_fails(monkeypatch)
     work_root = tmp_path / "work"
     _execution_dir(work_root)
