@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.17] - 2026-10-08
+
+主打 Agent 定义退役 P3 终局与 Studio Chat 会话治理：agent 节点执行档案并入节点自含声明、随 revision 版本化并随 job 快照冻结（#935，schema v93 原地回填 + 发布门禁 + 「升级 workflow」取新配置），质量回放改按 revision / 当前草稿选择执行档案（#1079）；Studio Chat 落地会话保留策略（#1041）、Kimi Code 自发回合期间的消息入站排队（#1029）与 ACP terminal 授权命令绑定（#954）；agent 单次输出触顶归因与显式 `max_output_tokens` 预算（#952，需 velites 0.5.8）；另含文档 CSP nonce 收紧（#989）、供应链钉死（#969）、登录限流与密码策略基线（#970）及一批稳定性修复。
+
 ### Added
 
 - Studio 对话会话保留策略（issue #1041）：admin 全局设置「保留策略」新增「归档/已删除对话保留天数」（实例设置文档键 `studio_chat_retention_days`，0 = 关闭，**默认关闭**、行为与此前完全一致；在线修改、保存即生效、重启不丢，无 schema 变更）。配置后 sweeper 副本上的慢速清理线程按小时扫描，把归档或软删时间（软删优先，即从归档区删除的会话按删除时间起算）超过窗口的已关闭会话连同全部消息物理删除（消息表随会话行级联、单语句原子删除，不留孤儿），每批在日志记录清理数量与时间窗；仍处于活跃状态（非 closed / error）或仍持有进程内 runtime 的会话永不清理，取消归档的会话不再被清理。会话列表响应新增 `retention_days`，归档视图每行显示「N 天后清理」倒计时（归档时间 + 保留天数现算，临期转警示色）并可一键「恢复」；归档与删除操作提示「将于 N 天后自动清理」。未配置时不显示任何倒计时或清理提示。软删会话的回收站视图不在本次范围（软删在 UI 上本就不可恢复，删除确认已提示清理时点）。
@@ -80,7 +84,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Maintenance
 
-- velites 0.5.6 → 0.5.7 落版：velites-v0.5.6 tag 后 velites 子树积 1 个未发布的改动——#978 工具沙箱收敛系列（#922/#942/#715：bash 命名空间隔离对齐 `sandbox wrap`、网络默认隔离 + `sandbox_network` 开关、环境白名单、原子写随机临时文件、退出后有界 drain），即 0.7.16 Changed/Security 段所述「需随 velites 补丁版生效」的部分；三平台二进制经 velites-v0.5.7 tag 发布，`scripts/install-worker.sh` 默认版本同步到 0.5.7。升级顺序见 0.7.16 段：先升 Worker 上的 velites，再给节点开 `sandbox_network`。
+- velites 0.5.7 → 0.5.8 落版：velites-v0.5.7 tag 后 velites 子树积 1 个未发布的改动——#952（#1075）新增 `--max-output-tokens` flag，供节点 `max_output_tokens` 预算下发（覆盖 Worker 本机 models.json 的 `maxOutputTokens`，OpenAI 兼容路径作为请求体 `max_tokens` 发送，语义见上方 Added 的 #952 条目）；0.5.7 已含 #978 工具沙箱收敛（命名空间隔离 / 网络默认隔离 / 环境白名单），0.5.8 在此之上叠加。三平台二进制经 velites-v0.5.8 tag 发布，`scripts/install-worker.sh` 默认版本同步到 0.5.8。升级顺序：先把 Worker 的 velites 升到 0.5.8，再给节点配 `max_output_tokens`——旧二进制遇未知 flag 报错（只影响声明了该键的节点）。
 
 ## [0.7.16] - 2026-10-06
 
