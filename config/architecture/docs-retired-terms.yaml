@@ -105,7 +105,9 @@ terms:
   - pattern: '(必须恰好解析到一个|resolve to exactly one) published Agent'
     retired_in: '#935（#440 P3 门禁翻转）'
     note: 发布门禁要求 agent 节点自含 execution.runtime，不再按 capability 解析
-      published Agent；legacy 解析只服务 v93 内联前冻结的旧快照
+      published Agent；legacy 解析只服务 v93 内联前冻结的旧快照，以及 active
+      revision 中 v93 未能内联的节点（新 job 仍按 capability 解析，直到节点补
+      runtime 并发布新 revision）
   - pattern: 'agent_version_pins'
     retired_in: '#1079（#440 P3b，D6：quality replay pin 改按 revision）'
     note: 回放的执行档案按 workflow revision（或当前草稿）选，副本 run 冻结
