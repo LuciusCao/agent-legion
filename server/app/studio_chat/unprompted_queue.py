@@ -24,7 +24,16 @@ its rows are not yet durable, but closes it only once every projected row is
 persisted — a send never observes a turn as ended before its rows exist. Admission steps
 the watcher once first (``refresh``) to shrink the poll gap; the residual
 window (engine started, journal not yet written) is inherent and only falls
-back to the pre-#1029 behavior. A turn that never ends — journal replaced or
+back to the pre-#1029 behavior. The same window, unrefreshed, sits at two
+more boundaries (PR #1076 review, follow-up issue): a flush hands every held
+message to the ACP queue at once, so a turn the engine opens between one
+delivered message's end and the next one's ``before_start`` (milliseconds,
+no poll in between) is not seen; and ``wake_session`` reads the last poll —
+there unreachable in practice, since wakeups come from the Kimi V1 task
+store while this gate only opens on Kimi Code wire journals. A gate check
+inside ``before_start`` would not narrow either (it runs right after the
+turn end / claim, before any poll); closing them needs the dequeue to wait
+for the journal, a new mechanism. A turn that never ends — journal replaced or
 truncated (re-baselined, its ``turn.ended`` unobservable), or no journal
 progress for ``IDLE_TIMEOUT_SECONDS`` — stops gating, and held messages are
 dropped with a visible notice (#1028's undelivered semantics). A runtime torn
