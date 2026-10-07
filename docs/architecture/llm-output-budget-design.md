@@ -51,10 +51,10 @@
    `OutputTruncation`）。仅当**最后一次调用以 `length` 结束**、**声明产物缺失**、且退出确由产物缺失造成——exit 0
    （pi 正常退出、Host 判缺产物），或 exit 1 且事件流含 velites 的
    `outputs_validation`（产物契约退出；pi 的 exit 1 是进程失败，不归因）——
-   并且没有更直接的原因（未恢复的模型调用错误、`agent_end.reason=budget_exceeded`、
+   并且没有更直接的原因（未恢复的模型调用错误、`agent_end.reason`（`budget_exceeded` / `cancelled`）、velites 自检 `missing` 为空、
    `outputs_validation.violations` 里缺文件之外的契约违例，如 skill contract 无法解析）
    时，失败原因改为
-   `Model output hit the per-call output token limit (stopReason=length, Nx) and declared outputs are missing: …`
+   `Model output hit the per-call output token limit (stopReason=length on the last model call; Nx in this run) and declared outputs are missing: …`
    并给出配平手段。触顶但产物齐全的 run 仍判完成；崩溃、超时等其他退出码保持
    原归因。失败分类新增 `technical / output_truncated`。Anthropic 的
    `model_context_window_exceeded` 同样映射为 `length`，事件流无法区分，故文案
@@ -72,7 +72,26 @@
    正常停止时缺产物 / 契约违例触发一次补救轮（契约解析失败跳过补救），补救轮或
    预算收尾轮之后发 `outputs_validation`（`agent.rs` 三处发出点：收尾轮以 toolUse
    结束后的循环顶、收尾轮正常停止、无需补救的正常停止），仍缺产物则 exit 1；取消
-   由 Worker 记为 130。「模型错误」列为与 `fold_model_error` 同一 fold 的未恢复错误。
+   由 Worker 记为 130（velites 自身被取消时 exit 0 + `agent_end.reason=cancelled`）。
+   「模型错误」列为与 `fold_model_error` 同一 fold 的未恢复错误。排除归因的
+   `agent_end.reason` 取值集合即 velites `EndReason`（`events.rs` 的
+   `budget_exceeded` / `cancelled`），正常结束不带 reason，故任一 reason 都排除。
+   pi 只在 assistant 消息含 toolCall 时继续下一轮（`length` 消息不带 toolCall
+   即结束），表中 pi 「length → …」的行都以该次 length 携带 toolCall 为前提。
+
+   velites **保证不会出现**的组合（表中标 ✗ 的行只用来钉住防御行为）：
+   - 收尾轮不叠加：预算收尾只在 `wrap_up.is_none()` 时注入（`agent.rs:183-190`），
+     收尾轮结束即发校验并 break（`agent.rs:172-177`、`:316-327`），补救轮只在
+     非收尾轮的正常停止里注入（`agent.rs:336-345`），一次 run 至多一个收尾轮；
+   - `outputs_validation` 每 run 至多一次，且其后不再有模型调用：三处发出点
+     （`agent.rs:176`、`:320`、`:347`）之后都紧跟 `break`，随后只发 `agent_end`
+     （`agent.rs:353`）；
+   - assistant `message_end` 必带 `stopReason`：成功路径由 provider 映射后必设
+     （`provider/anthropic.rs:160-181`、`provider/openai_compat/mod.rs:179-202`，
+     缺 stop/finish reason 时转为错误），失败路径为 `error`（`agent.rs:219`、
+     `events.rs:378`）；
+   - `errorMessage` 不与 `length` 并存：`errorMessage` 只在 `agent.rs:220` 与
+     `events.rs:379` 设置，两处都是 `stopReason=error`（`provider/stub.rs` 为测试桩）。
 
    | # | 运行时 / exit | 模型调用序列（`stopReason`） | 模型错误 | 其他旁证 | 产物 | 期望 |
    |---|---|---|---|---|---|---|
@@ -84,7 +103,7 @@
    | 6 | pi / 0 | error → retry → length | 已恢复 | — | 缺失 | output_truncated |
    | 7 | pi / 0 | error → retry → length | 已恢复 | — | 齐全 | completed |
    | 8 | pi / 0 | length → error → retry → stop | 已恢复 | — | 缺失 | completed（最后一轮未触顶） |
-   | 9 | pi / 0 | length → error（未恢复） | 有 | — | 缺失 | model_error |
+   | 9 | pi / 0 | length（带 toolCall，pi 才继续）→ error（未恢复） | 有 | — | 缺失 | model_error |
    | 10 | pi / 0 | error（未恢复） | 有 | — | 齐全 | model_error |
    | 11 | pi / 0 | length（带 errorMessage） | 有 | — | 缺失 | model_error |
    | 12 | velites / 1 | length → 补救 length | — | `outputs_validation` | 缺失 | output_truncated（2x） |
@@ -101,6 +120,24 @@
    | 23 | 任一 / 2 | length | — | — | 缺失 | 原 exit 错误（`Agent process exited 2`） |
    | 24 | 任一 / 124 | length | — | — | 缺失 | `Agent process timed out` |
    | 25 | 任一 / 130 | length | — | — | 缺失 | cancelled |
+   | 26 (G1) | velites / 0 | length → 补救轮调用中途取消（无 `message_end`） | — | `agent_end.reason=cancelled` | 缺失 | completed（不归因，Host 判缺产物） |
+   | 27 (G2) | velites / 1 | stop → 补救 length | — | `outputs_validation`，违例仅缺文件 | 缺失 | output_truncated（1x） |
+   | 28 (G3) | pi / 0 | length → toolUse → aborted（无 errorMessage） | — | — | 缺失 | completed（最后一轮未触顶） |
+   | 29 (G3b) | pi / 0 | length → aborted（带 errorMessage） | 有 | — | 缺失 | model_error |
+   | 30 (G4) | pi / 0 | toolUse → toolResult `message_end` → length → user `message_end` | — | — | 缺失 | output_truncated（非 assistant 不计入最后一轮） |
+   | 31 (G5 ✗) | pi / 0 | length → assistant `message_end` 无 stopReason | — | — | 缺失 | completed |
+   | 32 (G6) | velites / 1 | toolUse → 预算收尾轮 error（未恢复，无校验、无 reason） | 有 | — | 缺失 | 原 exit 错误 |
+   | 33 (G7) | velites / 1 | toolUse → 预算收尾 toolUse（工具执行后校验） | — | `budget_exceeded` | 缺失 | 原 exit 错误 |
+   | 34 (G8) | velites / 1 | length → 补救 length | — | `outputs_validation` 无 `violations` 键 | 缺失 | output_truncated |
+   | 35 (G9) | velites / 1 | length → 补救重试耗尽 error | 有 | `agent_end.error` | 缺失 | 原 exit 错误 |
+   | 36 (G10 ✗) | pi / 0 | error → retry → length（带 errorMessage） | 有 | — | 缺失 | model_error |
+   | 37 (G11) | velites / 0 | length | — | `outputs_validation.missing` 为空（velites `exists`，Worker `is_file`，如产物是目录） | 缺失 | completed（缺失非截断所致，Host 判缺产物） |
+   | 38 (G12 ✗) | velites / 1 | length → 补救 length | — | `cancelled`，无 `outputs_validation` | 缺失 | 原 exit 错误 |
+   | 39 (G13) | pi / 0 | length → toolUse → length | — | — | 缺失 | output_truncated（本次运行累计 2x） |
+   | 40 (G14) | pi / 0 | length → error → retry → length | 已恢复 | — | 缺失 | output_truncated（2x） |
+
+   文案中的 `Nx` 是本次运行累计触顶次数，归因前提是最后一次调用触顶：
+   `(stopReason=length on the last model call; Nx in this run)`。
 
 3. **日志告警**：job 日志渲染把 `stopReason=length` 从「模型调用错误
    stop_reason=length」改为「单次输出触顶」条目，说明 thinking 计入同一预算、

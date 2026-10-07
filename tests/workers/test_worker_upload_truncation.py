@@ -23,7 +23,12 @@ from shared.pi_model_error import fold_model_error
 from tests.workers.upload_queue_testlib import QueueFakeClient, _execution_dir, _queue, _task
 
 # velites 产物契约的证据事件：exit 1 只有带它才可归因为触顶。
-_VALIDATION = {"type": "outputs_validation", "missing": ["output.json"]}
+_VALIDATION = {
+    "type": "outputs_validation",
+    "missing": ["output.json"],
+    "mode": "existence",
+    "violations": [],
+}
 _END = {"type": "agent_end"}
 
 
@@ -110,11 +115,15 @@ _LENGTH_WITH_ERROR = {
     "type": "message_end",
     "message": {"role": "assistant", "stopReason": "length", "errorMessage": "boom"},
 }
+_TOOL_RESULT = {"type": "message_end", "message": {"role": "toolResult", "content": []}}
+_USER = {"type": "message_end", "message": {"role": "user", "content": []}}
+_NO_STOP_REASON = {"type": "message_end", "message": {"role": "assistant"}}
 _TRUNCATED = "truncated"
 _EXITED_1 = "Agent process exited 1: velites: boom"
 
 # (id, exit_code, events, 产物齐全, 期望 error_message；_TRUNCATED 表示触顶归因，
-# "" 表示 completed)。行号与设计文档决策表一致。
+# "" 表示 completed)。行号与设计文档决策表一致（G* 为表优先 review 补的格，
+# 标 ✗ 的是 velites 保证不会出现、只钉住防御行为的组合）。
 _DECISION_TABLE = [
     ("1-pi-stop-complete", 0, [_assistant("stop")], True, ""),
     ("2-pi-stop-missing", 0, [_assistant("stop")], False, ""),
@@ -236,6 +245,132 @@ _DECISION_TABLE = [
     ("23-exit-2", 2, [_assistant("length")], False, "Agent process exited 2: velites: boom"),
     ("24-timeout", 124, [_assistant("length")], False, "Agent process timed out"),
     ("25-cancelled", 130, [_assistant("length")], False, "Agent Worker is shutting down"),
+    # 补救轮调用中途被取消：没有 message_end，最后一轮仍是首轮 length，但取消更直接。
+    (
+        "26-G1-velites-cancelled",
+        0,
+        [_assistant("length"), {"type": "agent_end", "reason": "cancelled"}],
+        False,
+        "",
+    ),
+    (
+        "27-G2-velites-stop-then-remediation-length",
+        1,
+        [
+            _assistant("stop"),
+            _assistant("length"),
+            _contract_validation("output.json: missing required file"),
+            _END,
+        ],
+        False,
+        _TRUNCATED,
+    ),
+    (
+        "28-G3-pi-aborted",
+        0,
+        [_assistant("length"), _assistant("toolUse"), _assistant("aborted")],
+        False,
+        "",
+    ),
+    (
+        "29-G3b-pi-aborted-with-error",
+        0,
+        [
+            _assistant("length"),
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "stopReason": "aborted",
+                    "errorMessage": "aborted",
+                },
+            },
+        ],
+        False,
+        "aborted",
+    ),
+    # 角色过滤：最后一个 assistant length 之后的 toolResult / user message_end 不算一次调用。
+    (
+        "30-G4-pi-non-assistant-after-length",
+        0,
+        [_assistant("toolUse"), _TOOL_RESULT, _assistant("length"), _USER],
+        False,
+        _TRUNCATED,
+    ),
+    ("31-G5-no-stop-reason", 0, [_assistant("length"), _NO_STOP_REASON], False, ""),
+    (
+        "32-G6-velites-budget-wrap-up-error",
+        1,
+        [_assistant("toolUse"), _error("500 upstream"), {"type": "agent_end", "error": "500"}],
+        False,
+        _EXITED_1,
+    ),
+    (
+        "33-G7-velites-budget-wrap-up-tooluse",
+        1,
+        [
+            _assistant("toolUse"),
+            _assistant("toolUse"),
+            _VALIDATION,
+            {"type": "agent_end", "reason": "budget_exceeded"},
+        ],
+        False,
+        _EXITED_1,
+    ),
+    (
+        "34-G8-validation-without-violations-key",
+        1,
+        [
+            _assistant("length"),
+            _assistant("length"),
+            {"type": "outputs_validation", "missing": ["output.json"]},
+            _END,
+        ],
+        False,
+        _TRUNCATED,
+    ),
+    (
+        "35-G9-velites-remediation-retries-exhausted",
+        1,
+        [
+            _assistant("length"),
+            *_RETRY,
+            _error("429 rate limited"),
+            {"type": "agent_end", "error": "429"},
+        ],
+        False,
+        _EXITED_1,
+    ),
+    ("36-G10-pi-retry-into-length-with-error", 0, [*_RETRY, _LENGTH_WITH_ERROR], False, "boom"),
+    # velites 按 exists 判齐全（exit 0、missing 为空），Worker 按 is_file 判缺（如目录）。
+    (
+        "37-G11-velites-exists-vs-is-file",
+        0,
+        [_assistant("length"), {**_VALIDATION, "missing": []}, _END],
+        False,
+        "",
+    ),
+    (
+        "38-G12-velites-cancelled-exit-1",
+        1,
+        [_assistant("length"), _assistant("length"), {"type": "agent_end", "reason": "cancelled"}],
+        False,
+        _EXITED_1,
+    ),
+    (
+        "39-G13-pi-length-tooluse-length",
+        0,
+        [_assistant("length"), _assistant("toolUse"), _assistant("length")],
+        False,
+        _TRUNCATED,
+    ),
+    (
+        "40-G14-pi-length-retry-into-length",
+        0,
+        [_assistant("length"), *_RETRY, _assistant("length")],
+        False,
+        _TRUNCATED,
+    ),
 ]
 
 
@@ -259,7 +394,8 @@ def test_truncation_decision_table(
         message = report["error_message"]
         assert message.startswith(OUTPUT_TRUNCATED_PREFIX)
         count = sum(event == _assistant("length") for event in events)
-        assert f"{count}x" in message and "output.json" in message
+        assert f"on the last model call; {count}x in this run" in message
+        assert "output.json" in message
         assert "execution.thinking" in message
         # 归因只改失败原因，非零退出的 stderr 尾部仍作为证据面随 metadata 上报。
         assert exit_code == 0 or report["agent_stderr_tail"] == "velites: boom"
