@@ -849,7 +849,7 @@ server/app/
 
 - 任一 node 失败会把 Job 置为 `failed`，错误写入数据库与日志文件。
 - 支持从任意 node 重跑；重跑会清除该 node 及下游所有 artifacts。
-- `DELETE /api/jobs/{job_id}` 会级联删除 Job 记录、`node_runs`、本地 Job 目录与日志；删除服务还会快照 `job_artifacts` 清单行并删除对象存储副本（`server/app/services/job_deletion.py`）。
+- `DELETE /api/jobs/{job_id}` 会级联删除 Job 记录、`node_runs`、本地 Job 目录与日志；删除服务还会快照 `job_artifacts` 清单行并删除对象存储副本（`server/app/services/job_deletion.py`）。事务内只删 DB 行，本地目录与日志在提交后才移入 `.trash` 清除，失败点终态与 `.trash` 的 TTL 回收见 [data-layout.md](../data-layout.md)「Job 删除与 `.trash`」（#958）。
 
 ### Job Intake 资源解析（resolve phase）
 
@@ -899,7 +899,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
   `migration_registry.py` 是对外 re-export 面，DB-SCHEMA-001）；`db/migrations/__init__.py` 的平铺 re-export 随版本每次
   +2 行，长期收敛方向是从注册表派生该导出。
 - `JobQueries.connect()` 是上下文管理器（定义在 `ConnectionQueriesMixin`），确保 `conn.close()`；`read()`/`write()` 是 service 侧取连接的门面方法，workspace 侧查询由各 domain mixin 合并进统一的 `JobQueries`。门面构造参数 `path`（DSN）落私有属性 `_path`，公开只读出口是 `dsn_identity`（#187）。
-- `JobDeletionService` 级联删除 Job 记录、`node_runs`、本地 Job 目录与日志；同时快照 `job_artifacts` 清单行并删除对象存储副本（`server/app/services/job_deletion.py`）。
+- `JobDeletionService` 级联删除 Job 记录、`node_runs`、本地 Job 目录与日志；同时快照 `job_artifacts` 清单行并删除对象存储副本（`server/app/services/job_deletion.py`）。文件 I/O 不进删除事务：先提交后移动（`server/app/services/job_deletion_trash.py`，#958）。
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。
 - SQL 占位符约定：**新 SQL 一律写 psycopg 的 `%s`**，不要再写 SQLite 风格的 `?`。存量 `?` 由 `server/app/db/dialect.py` 盲替换为 `%s`，该层无法区分占位符与 Postgres JSON 的 `?`/`?|`/`?&` 操作符；`scripts/check_architecture.py` 的 SQL 占位符检查（基线 `config/architecture/sql-placeholders-baseline.json`）按 ratchet 方式只降不升，新文件出现任何 SQL `?` 即失败，改写存量后同步下调基线。
 - 服务层数据边界（BOUNDARY-DATA-001）：`server/app/services/` 下的新服务**必须经 `JobQueries` 门面访问数据库**（范式见 `services/job_pause.py` 等 38+ 个 facade-only 服务）；裸 SQL 字面量、`server.app.db.transaction`/`connection` 直接 import 与 DSN 逃逸引用（`.path`/`.dsn_identity` 属性读及其 `getattr` 形式）由 `scripts/architecture/service_data_boundary.py` 检查冻结（基线 `config/architecture/service-data-boundary-baseline.json`，只降不升）。存量服务迁移到门面后手动（或重跑 ratchet）下调基线；新文件出现任一绕行即失败。门面的 DSN 属性 `.path` 已私有化为 `_path`（#187 第三步）：`dsn_identity` 是唯一公开只读访问器（字符串 DSN），合法消费者仅数据层自身与经设计豁免的数据层毗邻组件（lease 仓储、artifact store）。

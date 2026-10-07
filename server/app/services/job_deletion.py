@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import glob
 import logging
-import os
-import shutil
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, NoReturn, TypedDict
 
 from server.app.events import JobEventManager
@@ -16,27 +12,13 @@ from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_artifact_gc import gc_deleted_job_artifacts, read_artifact_candidates
+from server.app.services.job_deletion_trash import purge_deleted_job_files
 from server.app.services.job_operation_error import JobOperationError
 from server.app.services.job_rerun.batch_ops import batch_delete as _batch_delete
 from server.app.settings import Settings
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
 
 logger = logging.getLogger(__name__)
-
-
-class DeletionRollbackConflict(RuntimeError):
-    """Raised when a deletion rollback cannot safely restore the staged path.
-
-    The staged recovery path is preserved so an operator can reconcile the
-    conflict manually.
-    """
-
-    def __init__(self, staged_path: Path, original_path: Path) -> None:
-        super().__init__(
-            f"Cannot restore {staged_path}: destination {original_path} already exists"
-        )
-        self.staged_path = staged_path
-        self.original_path = original_path
 
 
 class JobDeleteResult(TypedDict):
@@ -101,13 +83,9 @@ class JobDeletionService:
         if self.lease_repo.has_active_for_job(job_id, self._now()):
             _fail(job_id, "active_lease", "Cannot delete a job with an active executor lease")
 
-        log_paths = [
-            Path(log_path)
-            for log_path in glob.glob(str(self.settings.logs_dir / "jobs" / f"{job_id}-*.log"))
-        ]
-
         try:
-            storage_dir = resolve_job_dir(job, self.settings.jobs_dir)
+            # 事务前 fail-closed：路径逃逸就拒绝删除，行与文件都不动。
+            resolve_job_dir(job, self.settings.jobs_dir)
         except ManagedPathError as exc:
             _fail(job_id, "delete_failed", str(exc))
 
@@ -120,61 +98,50 @@ class JobDeletionService:
             else []
         )
         operation_id = f"{self._now().strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
-        staged_storage: Path | None = None
-        staged_logs: list[Path] = []
-        restore_paths: list[tuple[Path, Path]] = []
+        # job_nodes 的节点 key 快照（含已退出图的历史节点），与事务内 node_runs
+        # 快照合并后生成普通日志名。
+        job_node_keys = {n["node_key"] for n in self.job_db.list_job_nodes(job_id)}
 
+        # #958：事务只做 DB 删除，不碰文件系统（文件 I/O 不再拉长 job-mutation
+        # 锁的持有时间）；本地 job_dir / 日志在提交后由 purge_deleted_job_files
+        # 清理，失败点终态与「先提交后移动」的取舍见 job_deletion_trash 模块。
         try:
             with self.job_db.lease_guarded_mutation(
                 job_id,
                 self._now(),
                 reject_running_nodes=True,
             ) as conn:
-                if storage_dir.exists() and storage_dir.is_dir():
-                    trash_dir = self.settings.jobs_dir / ".trash" / operation_id
-                    trash_dir.mkdir(parents=True, exist_ok=True)
-                    staged_storage = trash_dir / storage_dir.name
-                    shutil.move(str(storage_dir), str(staged_storage))
-                    restore_paths.append((staged_storage, storage_dir))
-
-                if log_paths:
-                    log_trash_dir = self.settings.logs_dir / "jobs" / ".trash" / operation_id
-                    log_trash_dir.mkdir(parents=True, exist_ok=True)
-                    for log_path in log_paths:
-                        staged_log = log_trash_dir / log_path.name
-                        shutil.move(str(log_path), str(staged_log))
-                        staged_logs.append(staged_log)
-                        restore_paths.append((staged_log, log_path))
-
+                # node_runs (node_key, log_path) 快照在删行事务内、同一 conn 上读：
+                # 持 job-mutation 锁、行级联消失前的最终集合，覆盖租约检查后到
+                # 事务前才 claim 并完成的分片；分片日志按它精确推导。
+                run_logs = self.job_db.list_node_run_logs_in_transaction(conn, job_id)
                 self.job_db.delete_job_in_transaction(conn, job_id)
         except JobMutationConflict as exc:
-            try:
-                self._restore_paths(restore_paths)
-            except DeletionRollbackConflict as rollback_exc:
-                _fail(job_id, "rollback_conflict", str(rollback_exc))
             _fail(job_id, exc.reason_code, str(exc))
         except Exception as exc:
-            # #204 broad-except audit: the staging-then-mutation sequence
-            # spans the filesystem (shutil.move onto trash) and the DB write
-            # (delete_job_in_transaction, whose ValueError carries the
+            # #204 broad-except audit: the transaction now carries only DB work
+            # (the node_runs log snapshot read plus delete_job_in_transaction,
+            # whose ValueError carries the
             # business refusals — a foreign-key rejection from a still-
-            # referenced job — and is deliberately NOT caught before this
-            # arm so the original type reaches the route). Whatever fails,
-            # the staged paths must be restored to the pre-delete state
-            # before the failure is normalized to JobOperationError; the
-            # classification above (conflict → skipped) already peeled off
-            # the concurrency case. logger.exception keeps the traceback of
-            # the unexpected kind.
+            # referenced job, or a concurrent delete that already removed the
+            # row — and is deliberately NOT caught before this arm so it is
+            # normalized here). The filesystem has not been touched yet, so
+            # every failure leaves the row and the local files intact and is
+            # normalized to JobOperationError; the conflict arm above already
+            # peeled off the concurrency case. logger.exception keeps the
+            # traceback of the unexpected kind.
             logger.exception("Unexpected error deleting job %s", job_id)
-            try:
-                self._restore_paths(restore_paths)
-            except DeletionRollbackConflict as rollback_exc:
-                _fail(job_id, "rollback_conflict", str(rollback_exc))
             _fail(job_id, "delete_failed", str(exc))
 
-        self._cleanup_staged_paths(job_id, staged_storage, staged_logs)
-        self._prune_empty_trash(self.settings.jobs_dir / ".trash" / operation_id)
-        self._prune_empty_trash(self.settings.logs_dir / "jobs" / ".trash" / operation_id)
+        node_keys = job_node_keys | {key for key, _ in run_logs}
+        if purge_deleted_job_files(
+            self.job_db, job, node_keys, self.settings, operation_id, run_logs
+        ):
+            # 同源 job 已重建（同一 id），或锁下复核因 DB 错误未能确认未重建：
+            # 按 id 的 refs / 对象清理与删除广播可能打到新 job 上，一律跳过；
+            # 旧 job 的孤儿 blob 交给 orphan GC（artifact_orphan_gc），对象存储
+            # 侧孤儿由 scripts/gc-s3-jobs.py 回收。
+            return self._result(job_id, "succeeded")
         gc_deleted_job_artifacts(self.artifact_store, job_id, artifact_candidates)
         if object_rows and self.object_store is not None:
             self.object_store.delete_objects(object_rows)
@@ -190,49 +157,3 @@ class JobDeletionService:
     ) -> list[JobDeleteResult]:
         """Delete the selected jobs; kwargs take job_filter/exclude_ids."""
         return _batch_delete(self, workspace_id, job_ids, **kwargs)
-
-    @staticmethod
-    def _prune_empty_trash(path: Path) -> None:
-        try:
-            if path.exists() and not any(path.iterdir()):
-                path.rmdir()
-                parent = path.parent
-                if parent.exists() and not any(parent.iterdir()):
-                    parent.rmdir()
-        except OSError:
-            pass
-
-    @staticmethod
-    def _restore_paths(restore_paths: list[tuple[Path, Path]]) -> None:
-        """Restore staged paths atomically when the destination is absent.
-
-        If the destination already exists (e.g., a concurrent recreation), raise
-        ``DeletionRollbackConflict`` and leave both the destination and the staged
-        recovery path untouched.
-        """
-        for staged, original in reversed(restore_paths):
-            if not staged.exists():
-                continue
-            original.parent.mkdir(parents=True, exist_ok=True)
-            if original.exists():
-                raise DeletionRollbackConflict(staged, original)
-            os.replace(str(staged), str(original))
-
-    @staticmethod
-    def _cleanup_staged_paths(
-        job_id: str,
-        staged_storage: Path | None,
-        staged_logs: list[Path],
-    ) -> None:
-        try:
-            if staged_storage is not None and staged_storage.exists():
-                shutil.rmtree(staged_storage)
-            for staged_log in staged_logs:
-                if staged_log.exists():
-                    staged_log.unlink(missing_ok=True)
-        except OSError:
-            # #204: pure filesystem teardown of already-committed trash. A
-            # failure leaves a .trash/<operation_id> residue the operator can
-            # clear (or the disk-cleanup sweep); it must not turn a succeeded
-            # deletion into an API error. Only OSError escapes rmtree/unlink.
-            logger.exception("Failed to clean staged files after deleting job %s", job_id)
