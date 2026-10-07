@@ -524,11 +524,13 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
           -c "ALTER DATABASE agent_legion RENAME TO $PRE" \
      && C createdb -U agent_legion -O agent_legion agent_legion \
      && C pg_restore -U agent_legion -d agent_legion --no-owner \
-          --exit-on-error --single-transaction < "$DUMP"
-   echo "恢复前的库留存为 $PRE"
+          --exit-on-error --single-transaction < "$DUMP" \
+     && echo "恢复完成，恢复前的库留存为 $PRE" \
+     || FAILED "数据库未恢复：预检失败则现库未动；改名之后失败的，按下面两条命令回到恢复前状态（留存库 $PRE）"
    ```
 
-   预检失败时后续步骤都不会执行，现库原样不动。`pg_restore` 默认遇错继续、只在
+   整条命令的退出码就是恢复链的：成功提示在链内，任何一步失败都返回非零，不要在它
+   失败后继续恢复对象存储或启动 Host。预检失败时后续步骤都不会执行，现库原样不动。`pg_restore` 默认遇错继续、只在
    结尾报错数，`--exit-on-error --single-transaction` 让任何一条失败都整体回滚，
    不会留下半导入的库。改名之后的步骤失败时，用下面两条命令回到恢复前状态：
 
@@ -651,7 +653,9 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
    Docker 引擎而不是宿主机操作系统，x86_64 取 `x86_64`，arm64（含 Apple silicon
    上的 Docker Desktop）取 `aarch64`；不要取 `aarch64-apple-darwin`，那是裸机
    macOS 用的。产物是 tarball：先对照同一 Release 附带的 `sha256.txt` 校验
-   （`sha256sum -c --ignore-missing sha256.txt`，macOS 用 `shasum -a 256 -c`），再
+   （`sha256sum -c --ignore-missing sha256.txt`，macOS 用
+   `shasum -a 256 -c --ignore-missing sha256.txt`——清单列出全部平台的 tarball，不带
+   `--ignore-missing` 会因其余产物未下载而返回非零），再
    解压，取出其中的 `velites-<ver>-<triple>/velites` 放到上述路径并 `chmod +x`；
    `deploy/.env` 用 `VELITES_BIN` 改过位置的放到改写后的路径。已经在缺文件的状态
    下启动过的，先删掉 Docker 建的空目录再放文件：Linux 上它由 daemon 以 root 创建，
@@ -819,19 +823,36 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
 
 以下命令沿用 §1.1 的 `F` / `KEY_FILE` 与 §2「公共函数」块（`FAILED`），新开 shell 先执行它们。
 
-1. **先找 key，不要急着生成新 key**。依次核对：§1.1 解析出的 `KEY_FILE`（及其
-   备份）、`VAULT_MASTER_KEY_FILE` 是否把 compose secret 指到了别的路径、原生
-   形态根 `.env` 的 `AGENT_LEGION_VAULT_MASTER_KEY` / `AGENT_LEGION_VAULT_MASTER_KEY_FILE`、
-   密钥保管处。只要找回原 key 放回原位并重启 Host，一切恢复，无需其他操作。
+1. **先找 key，不要急着生成新 key**。Docker stack 上**第一件事**是看 Host 容器是否
+   还在运行：compose secret 是单文件 bind mount，宿主机上的 key 文件被删除或改名后，
+   运行中的容器仍挂着原来的 inode，`/run/secrets/vault_master_key` 很可能是原 key 的
+   最后一份副本——在重启、重建或 `make prod-down` 之前先把它导出来：
+
+   ```bash
+   docker compose "${F[@]}" ps --status running host >/dev/null 2>&1 \
+     && { umask 077; docker compose "${F[@]}" exec -T host cat /run/secrets/vault_master_key > "$BK/vault_master_key.from-running-host"; } \
+     && [ -s "$BK/vault_master_key.from-running-host" ] && echo "已从运行中的 Host 导出 key：$BK/vault_master_key.from-running-host"
+   ```
+
+   导出成功即把它放回 `KEY_FILE`（`cp` + `chmod 600`），key 没有丢。然后再依次核对：
+   §1.1 解析出的 `KEY_FILE`（及其备份）、`VAULT_MASTER_KEY_FILE` 是否把 compose secret
+   指到了别的路径、原生形态根 `.env` 的 `AGENT_LEGION_VAULT_MASTER_KEY` /
+   `AGENT_LEGION_VAULT_MASTER_KEY_FILE`、密钥保管处。只要找回原 key 放回原位并重启
+   Host，一切恢复，无需其他操作。
 2. **确认无法找回后再换新 key**。新 key 一旦开始用于写入，旧 key 即使事后找回也
    解不开新写入的密文（单 key 设计，两把 key 不能并存），所以这一步要一次决定。
    生成方式与首次部署相同（见 [agent-worker-deployment.md](agent-worker-deployment.md) §1）。
-   顺序是：先在同目录的临时文件里生成新 key 并确认非空，再把现有 key 文件（若
-   存在——key 丢失时它可能已经不在）改名为带时间戳、且事先不存在的 `.old-<时间戳>`
-   留存，最后把新 key 改名就位。任何一步失败都不会截断或覆盖旧 key，重跑也不会
-   拿空文件盖掉上一次留存的旧 key（失败留下的 `.vault_master_key.new.*` 临时文件可直接删除）：
+   顺序是：**先停 Host**（Docker stack：`docker compose "${F[@]}" stop host`；原生形态：
+   `make prod-down`）——运行中的 Host 仍持有旧 key（Docker 挂着旧 inode，原生进程持有
+   旧环境值），此时并发的 secret 重录或外部连接保存会把新密文写成旧 key 加密，换 key
+   后这些刚写入的数据就解不开了，所以在新 key 就位之前不能再有任何 vault 写入；然后
+   在同目录的临时文件里生成新 key 并确认非空，再把现有 key 文件（若存在——key 丢失时
+   它可能已经不在）改名为带时间戳、且事先不存在的 `.old-<时间戳>` 留存，最后把新 key
+   改名就位。任何一步失败都不会截断或覆盖旧 key，重跑也不会拿空文件盖掉上一次留存的
+   旧 key（失败留下的 `.vault_master_key.new.*` 临时文件可直接删除）：
 
    ```bash
+   docker compose "${F[@]}" stop host        # 原生形态：make prod-down
    KEY_FILE=<§1.1 中 compose 解析出的绝对路径>; KEY_FILE="${KEY_FILE%/}"
    OLD="$KEY_FILE.old-$(date +%Y%m%d%H%M%S)"
    NEW="$(mktemp "$(dirname "$KEY_FILE")/.vault_master_key.new.XXXXXX")" \
@@ -853,12 +874,12 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
    `AGENT_LEGION_VAULT_MASTER_KEY_FILE` 的，把 `KEY_FILE` 设为它指向的文件、执行
    同一段命令；用 `AGENT_LEGION_VAULT_MASTER_KEY` 字面值的，先把根 `.env` 留存一份
    （`B=".env.old-$(date +%Y%m%d%H%M%S)"; [ ! -e "$B" ] && cp -p .env "$B"`），再把该
-   变量改为新 key（二者择一）。然后重启 Host，记下换 key 的时间，并立刻把新 key
-   纳入 §1.1 的备份。原生形态：`make prod-down && make prod-up`。Docker stack
-   **必须强制重建 Host 容器**：compose secret 是单文件 bind mount，上面的 `mv` 只
-   换了宿主机路径上的文件，运行中的容器仍挂着被改名的旧 inode；而 compose 的服务
-   配置哈希不含 secret 源文件内容，`make prod-up docker`（内部是
-   `docker compose … up -d --build`）在 Host 配置未变时不会重建它。用（`F` 见 §1.1）：
+   变量改为新 key（二者择一）。然后启动 Host，记下换 key 的时间，并立刻把新 key
+   纳入 §1.1 的备份。原生形态：`make prod-up`。Docker stack **必须强制重建 Host 容器**，
+   不能只 `start`：compose secret 是单文件 bind mount，上面的 `mv` 只换了宿主机路径上的
+   文件，已停止的容器重新 start 仍挂着被改名的旧 inode；而 compose 的服务配置哈希不含
+   secret 源文件内容，`make prod-up docker`（内部是 `docker compose … up -d --build`）在
+   Host 配置未变时也不会重建它。用（`F` 见 §1.1）：
 
    ```bash
    docker compose "${F[@]}" $(./scripts/local-s3-decide.sh --compose-flags --default-endpoint http://seaweedfs:8333 deploy/.env) \
