@@ -121,10 +121,18 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
 
 - **文档 CSP**：Host 对所有 `text/html` 响应（SPA 外壳与 catch-all）附加
   `Content-Security-Policy`（`server/app/http_csp.py`），作为 DOMPurify 之后的第二层。
-  `script-src` 暂保留 `'unsafe-inline'`：`srcdoc` iframe 继承宿主文档的策略，预览面板
-  bundle 按契约是 inline 脚本，收紧会让面板整体失效；其余指令（`connect-src` 限同源 +
-  对象存储 presign 源、`frame-ancestors 'self'`、`object-src 'none'`、`base-uri`、
-  `form-action`）照常生效。改前端外链资源（字体、图源、上传直连）时同步改该模块。
+  `script-src` 是 `'self' 'nonce-…'`（#989）：SPA 路由把 vite `html.cspNonce` 占位符
+  按响应替换为新 nonce（index.html 因此不带 ETag），前端从 `<meta property="csp-nonce">`
+  读回并由预览面板宿主盖到 bundle 的 `<script>` 上——`srcdoc` iframe 继承宿主文档策略。
+  面板里的内联事件属性（`onclick=`）与 `javascript:` URL 被拦截（宿主显示提示）；
+  已发布面板依赖它们的实例可由管理员在「全局设置 → 实例设置 → 安全」开启预览面板兼容模式
+  （实例设置 `csp_script_unsafe_inline`，默认关）回退到 `'self' 'unsafe-inline'`；SPA 路由经
+  `server/app/services/document_csp.py` 的 5 秒缓存读取，保存即失效缓存、无需重启
+  （设置页在该开关变化时整页刷新所在标签页，CSP 头随已加载文档固定、客户端路由不重读；
+  其他已打开的标签页需手动刷新）。其余指令
+  （`connect-src` 限同源 + 对象存储 presign 源、`frame-ancestors 'self'`、`object-src 'none'`、
+  `base-uri`、`form-action`）照常生效。vite dev server 不经 Host、不下发 CSP。改前端外链
+  资源（字体、图源、上传直连）时同步改该模块。
 - **`GET /api/agent-workers`**：admin 全量；其他身份只见准入范围与自身可见 workspace
   有交集的 Worker，`allowed_workspaces` 裁剪为交集、`register_token_ids` 置空，可见性
   规则与 workspace 列表同源（`server/app/auth/workspace_visibility.py`）。

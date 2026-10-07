@@ -122,5 +122,6 @@ export function buildPayload(values: FormValues): InstanceSettingsUpdate {
         'agent_claim.worker_touch_interval_seconds'
       ),
     },
+    csp_script_unsafe_inline: Boolean(values.csp_script_unsafe_inline),
   }
 }
