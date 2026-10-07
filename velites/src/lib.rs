@@ -184,7 +184,8 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
                             resolved.name,
                             resolved.base_url,
                             resolved.api_key,
-                        )?;
+                        )?
+                        .with_max_output_tokens(cli.max_output_tokens);
                         run_real_provider(config, provider, cli.max_retries, &mut sink).await
                     }
                     models::ApiKind::AnthropicMessages => {
@@ -193,7 +194,9 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
                             resolved.base_url,
                             resolved.api_key,
                             resolved.anthropic_version,
-                            resolved.model.max_output_tokens,
+                            // #952: the node's per-call cap wins over the
+                            // registry's model default.
+                            cli.max_output_tokens.or(resolved.model.max_output_tokens),
                             resolved.model.thinking_budgets,
                         )?;
                         run_real_provider(config, provider, cli.max_retries, &mut sink).await
@@ -208,7 +211,8 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
                     provider_name.to_string(),
                     credentials.base_url,
                     credentials.api_key,
-                )?;
+                )?
+                .with_max_output_tokens(cli.max_output_tokens);
                 run_real_provider(config, provider, cli.max_retries, &mut sink).await
             } else {
                 Err(anyhow!(

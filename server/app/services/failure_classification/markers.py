@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 
+from shared.output_truncation import OUTPUT_TRUNCATED_PREFIX
+
 _REVIEW_REJECTED_MARKERS = (
     "review_rejected:",
     "content review rejected by skill",
@@ -33,6 +35,9 @@ _PROVIDER_CALL_STREAM_MARKERS = (
     "error decoding response body",
     "unexpected EOF",
 )
+# #952: per-call output truncation (stopReason=length) left declared outputs
+# missing — the Worker's attribution face, see shared/output_truncation.py.
+_OUTPUT_TRUNCATED_PREFIX = OUTPUT_TRUNCATED_PREFIX
 _MISSING_OUTPUTS_PREFIXES = ("missing outputs", "missing required file")
 _NO_OUTPUT_ARTIFACTS_PREFIX = "Agent Worker did not report output artifacts"
 _UNPACK_FAILURE = "failed to unpack Agent result"

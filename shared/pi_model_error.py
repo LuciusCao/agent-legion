@@ -15,14 +15,21 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# 无 errorMessage 时代表模型调用已成功返回的停止原因：清除此前的瞬态错误。
+_RECOVERED_STOP_REASONS = ("stop", "toolUse", "length")
+
 
 def fold_model_error(event: dict[str, Any], last_error: str | None) -> str | None:
     """Fold one parsed Pi event into the running model-error state.
 
     An assistant message carrying ``errorMessage`` sets the error; a later
-    assistant message ending with ``stopReason`` ``stop``/``toolUse``
+    assistant message ending with ``stopReason`` ``stop``/``toolUse``/``length``
     clears it (Pi auto-retries transient failures, so only an unrecovered
-    error counts). Returns the updated state.
+    error counts). ``length`` (#952) is a call that returned successfully but
+    hit the per-call output limit — the model call itself recovered, so a
+    stale transient error before it must not survive (output truncation is
+    attributed separately by ``shared/output_truncation.py``). Returns the
+    updated state.
     """
     messages: list[dict[str, Any]] = []
     # message_start / message_end / turn_end wrap the assistant msg
@@ -43,7 +50,7 @@ def fold_model_error(event: dict[str, Any], last_error: str | None) -> str | Non
     for msg in messages:
         if msg.get("errorMessage"):
             last_error = str(msg["errorMessage"])
-        elif msg.get("stopReason") in ("stop", "toolUse"):
+        elif msg.get("stopReason") in _RECOVERED_STOP_REASONS:
             last_error = None
     return last_error
 
