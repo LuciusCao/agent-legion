@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import shutil
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from server.app.services.job_deletion_trash import (
     COMMITTED_MARKER,
@@ -53,9 +54,27 @@ def sweep_deletion_trash(
                         entry,
                     )
                     continue
-                shutil.rmtree(entry)
+                _purge_entry(entry)
             except OSError:
                 logger.warning("Failed to purge deletion trash %s", entry, exc_info=True)
                 continue
             removed += 1
     return removed
+
+
+def _purge_entry(entry: Path) -> None:
+    """先删标记以外的内容，**最后**删标记与目录本身。
+
+    中途因瞬时 I/O / 权限错误中止时标记仍在，下一轮维护照常重试；若像
+    ``shutil.rmtree(entry)`` 那样让标记先消失，残余目录就会被当成 legacy 恢复副本
+    永久跳过、持续占盘。
+    """
+    for child in entry.iterdir():
+        if child.name == COMMITTED_MARKER:
+            continue
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    (entry / COMMITTED_MARKER).unlink()
+    entry.rmdir()

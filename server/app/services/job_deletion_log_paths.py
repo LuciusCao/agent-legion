@@ -78,8 +78,10 @@ def _owned_run_log_name(
         path = resolve_data_path(raw_log_path, settings.data_dir, allow_missing=True)
         if path.parent != (settings.logs_dir / "jobs").resolve():
             return None
-    except (OSError, ValueError):
-        # ManagedPathError 是 ValueError：越出 data 根 / 不可解析的历史路径不删。
+    except (OSError, ValueError, RuntimeError):
+        # ManagedPathError 是 ValueError：越出 data 根 / 不可解析的历史路径不删；
+        # Path.resolve 遇符号链接环抛 RuntimeError，同样按不可解析处理，不让单条
+        # 坏掉的历史 log_path 中断提交后的清理（与仓库其它路径清理一致）。
         return None
     name = path.name
     if name == job_node_log_name(job_id, node_key):

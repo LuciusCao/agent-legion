@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import server.app.services.job_deletion_log_paths as log_paths_module
 import server.app.services.job_deletion_trash as trash_module
 from server.app.services.job_deletion_trash import (
     COMMITTED_MARKER,
@@ -128,7 +129,7 @@ def test_sweep_survives_single_entry_failure(tmp_path: Path) -> None:
     real_rmtree = shutil.rmtree
 
     def _flaky(path: Any, *args: Any, **kwargs: Any) -> None:
-        if Path(path) == first:
+        if Path(path) == first or first in Path(path).parents:
             raise OSError("busy")
         real_rmtree(path, *args, **kwargs)
 
@@ -138,6 +139,36 @@ def test_sweep_survives_single_entry_failure(tmp_path: Path) -> None:
     assert removed == 1
     assert first.exists()
     assert not second.exists()
+
+
+def test_sweep_keeps_committed_marker_when_purge_fails_midway(tmp_path: Path) -> None:
+    """#1065 codex P2：子项删到一半因瞬时错误中止时，`.committed-deletion` 必须仍在
+    （标记最后删），否则残余目录会被当成 legacy 恢复副本永久跳过；下一轮照常回收。"""
+    settings = _settings(tmp_path)
+    entry = _op_dir(jobs_trash_root(settings), "op-flaky", DELETION_TRASH_TTL * 2)
+    (entry / "second").mkdir()
+    (entry / "second" / "g.bin").write_bytes(b"y")
+    stamp = (_NOW - DELETION_TRASH_TTL * 2).timestamp()
+    os.utime(entry, (stamp, stamp))  # 加子目录会刷新 entry 的 mtime，重新压回 TTL 之前
+    calls: list[Path] = []
+    real_rmtree = shutil.rmtree
+
+    def _fail_once(path: Any, *args: Any, **kwargs: Any) -> None:
+        calls.append(Path(path))
+        if len(calls) == 1:
+            raise OSError("transient")
+        real_rmtree(path, *args, **kwargs)
+
+    with patch(
+        "server.app.services.job_deletion_trash_sweep.shutil.rmtree", side_effect=_fail_once
+    ):
+        assert sweep_deletion_trash(settings, now=_NOW) == 0
+        assert entry.is_dir()
+        assert (entry / COMMITTED_MARKER).is_file()
+
+        assert sweep_deletion_trash(settings, now=_NOW) == 1
+
+    assert not entry.exists()
 
 
 def test_maintenance_runs_trash_sweep(tmp_path: Path) -> None:
@@ -367,6 +398,33 @@ def test_deleted_job_log_paths_treats_unprobeable_names_as_missing(tmp_path: Pat
         [_LONG_KEY, "n1"],
         [(_LONG_KEY, f"logs/jobs/{job_node_log_name(_JOB, _LONG_KEY, 0)}")],
     )
+
+    assert paths == [log_dir / job_node_log_name(_JOB, "n1")]
+
+
+def test_deleted_job_log_paths_skips_run_log_whose_parents_form_symlink_loop(
+    tmp_path: Path,
+) -> None:
+    """#1065 codex P2：历史 log_path 的父目录形成符号链接环时 Path.resolve 抛
+    RuntimeError，按不可解析处理（不删、不中断），其余日志照常推导。"""
+    settings = _settings(tmp_path)
+    log_dir = settings.logs_dir / "jobs"
+    log_dir.mkdir(parents=True)
+    (log_dir / job_node_log_name(_JOB, "n1")).write_text("log", encoding="utf-8")
+    real_resolve = log_paths_module.resolve_data_path
+
+    def _looping(raw: str, *args: Any, **kwargs: Any) -> Any:
+        if "loop" in raw:
+            raise RuntimeError("Symlink loop from '/data/logs/loop'")
+        return real_resolve(raw, *args, **kwargs)
+
+    with patch.object(log_paths_module, "resolve_data_path", _looping):
+        paths = deleted_job_log_paths(
+            settings,
+            _JOB,
+            ["n1", "n2"],
+            [("n2", f"logs/loop/jobs/{job_node_log_name(_JOB, 'n2', 0)}")],
+        )
 
     assert paths == [log_dir / job_node_log_name(_JOB, "n1")]
 
