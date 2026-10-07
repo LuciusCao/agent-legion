@@ -16,6 +16,7 @@ from shared.pi_events import scan_and_compress_pi_events
 from worker.upload.report_policy import declared_ceiling_rejection
 from worker.upload.result_metadata import (
     MAX_ERROR_MESSAGE_CHARS,
+    exit_verdict,
     failed_metadata,
     write_empty_archive,
 )
@@ -23,7 +24,6 @@ from worker.upload.stderr_evidence import (
     AGENT_STDERR_FILENAME,
     max_secret_chars,
     secret_spans,
-    stderr_error_message,
     stderr_tail_for_run,
 )
 
@@ -92,33 +92,17 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         secret_max_chars=max_secret_chars(),
         event_observer=(truncation := OutputTruncation()).observe,
     )
-    model_error = scanned_model_error if task.exit_code == 0 else None
     stderr_tail = stderr_tail_for_run(run_dir, scanned_tail)
     outputs = [name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()]
     # #952: attribution only — replaces the opaque "Missing outputs" (exit 0,
     # Host-judged) / "Agent process exited 1" (velites output contract) face;
     # a truncated run whose outputs all landed still completes, and model
-    # errors / budget exhaustion / crashes / timeouts keep their attribution
-    # (exclusion rules: OutputTruncation.failure).
-    truncated_error = truncation.failure(task.expected_outputs, outputs, task.exit_code)
-    if task.exit_code == 130:
-        result_status, error = "cancelled", "Agent Worker is shutting down"
-    elif truncated_error:
-        result_status, error = "failed", truncated_error
-    elif task.exit_code == 0:
-        if model_error:
-            result_status, error = "failed", model_error
-        else:
-            result_status, error = "completed", ""
-    elif task.exit_code == 124:
-        # Timeout kill (synthetic 124 from wait_for_exit): the attribution
-        # face (error_message) keeps the established timeout wording (#609)
-        # untouched — but the EVIDENCE face (agent_stderr_tail below) still
-        # rides along (#755 终审 P3-1): attribution and evidence are
-        # decoupled, the partial-run stderr stays available for diagnosis.
-        result_status, error = "failed", "Agent process timed out"
-    else:
-        result_status, error = "failed", stderr_error_message(task.exit_code, stderr_tail)
+    # errors / budget exhaustion / contract violations / crashes / timeouts
+    # keep their attribution (exclusion rules: OutputTruncation.failure).
+    failure = truncation.failure(task.expected_outputs, outputs, task.exit_code) or (
+        scanned_model_error if task.exit_code == 0 else None
+    )
+    result_status, error = exit_verdict(task.exit_code, failure, stderr_tail)
     metadata = {
         "status": result_status,
         "exit_code": task.exit_code,
