@@ -50,7 +50,8 @@
    `OutputTruncation`）。仅当**声明产物缺失**、且退出确由产物缺失造成——exit 0
    （pi 正常退出、Host 判缺产物），或 exit 1 且事件流含 velites 的
    `outputs_validation`（产物契约退出；pi 的 exit 1 是进程失败，不归因）——
-   并且没有更直接的原因（未恢复的模型调用错误、`agent_end.reason=budget_exceeded`）
+   并且没有更直接的原因（未恢复的模型调用错误、`agent_end.reason=budget_exceeded`、
+   `outputs_validation.violations` 里缺文件之外的契约违例，如 skill contract 无法解析）
    时，失败原因改为
    `Model output hit the per-call output token limit (stopReason=length, Nx) and declared outputs are missing: …`
    并给出配平手段。触顶但产物齐全的 run 仍判完成；崩溃、超时等其他退出码保持

@@ -25,6 +25,17 @@ from tests.workers.upload_queue_testlib import QueueFakeClient, _execution_dir, 
 _VALIDATION = {"type": "outputs_validation", "missing": ["output.json"]}
 
 
+def _contract_validation(*violations: str) -> dict:
+    """velites 契约模式（#443）的 outputs_validation，``violations`` 为渲染后的
+    ``<path>: <message>``（velites/src/events.rs OutputsValidationEvent）。"""
+    return {
+        "type": "outputs_validation",
+        "missing": ["output.json"],
+        "mode": "contract",
+        "violations": list(violations),
+    }
+
+
 def _assistant(stop_reason: str, event_type: str = "message_end") -> dict:
     return {"type": event_type, "message": {"role": "assistant", "stopReason": stop_reason}}
 
@@ -114,6 +125,22 @@ def test_velites_contract_exit_one_attributes_truncation(tmp_path: Path) -> None
     assert report["agent_stderr_tail"] == "velites: missing"
 
 
+def test_contract_mode_missing_file_violation_still_attributes(tmp_path: Path) -> None:
+    """契约模式下缺文件会同时以 ``missing required file`` 违例复述：它可由触顶
+    解释，不应挡住归因（只有缺文件之外的违例才挡）。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _drop_output(work_root)
+    events = [
+        _assistant("length"),
+        _contract_validation("output.json: missing required file"),
+        {"type": "agent_end"},
+    ]
+    _write_events(work_root, events, ("velites: missing",))
+    report = _report(work_root, exit_code=1)
+    assert report["error_message"].startswith(OUTPUT_TRUNCATED_PREFIX)
+
+
 @pytest.mark.parametrize(
     ("exit_code", "expected"),
     [(2, "Agent process exited 2"), (124, "Agent process timed out")],
@@ -176,6 +203,26 @@ _MODEL_ERROR = {
         ),
         # pi 的 exit 1 是进程失败：没有 outputs_validation，不能归因为触顶。
         pytest.param([_assistant("length")], id="pi-exit-1"),
+        # codex P2：契约违例（skill contract 无法解析）是确定性问题，提高预算也修不好。
+        pytest.param(
+            [
+                _assistant("length"),
+                _contract_validation("contract parse error: bad yaml"),
+                {"type": "agent_end"},
+            ],
+            id="contract-parse-error",
+        ),
+        # 缺文件之外再有任一内容违例，同样不归因为触顶。
+        pytest.param(
+            [
+                _assistant("length"),
+                _contract_validation(
+                    "output.json: missing required file", "report.md: missing heading ## Summary"
+                ),
+                {"type": "agent_end"},
+            ],
+            id="contract-content-violation",
+        ),
     ],
 )
 def test_exit_one_with_more_direct_cause_is_not_rewritten(

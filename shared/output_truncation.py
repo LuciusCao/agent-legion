@@ -21,6 +21,10 @@ OUTPUT_LIMIT_STOP_REASON = "length"
 OUTPUT_TRUNCATED_PREFIX = "Model output hit the per-call output token limit"
 _MAX_LISTED_MISSING = 10
 _BUDGET_EXCEEDED = "budget_exceeded"
+# velites 契约引擎对「声明文件不存在」的违例文案（``velites/src/contract.rs``，
+# 渲染为 ``<path>: missing required file``）：它只是 ``missing`` 的契约模式复述，
+# 本身可由触顶解释；其余违例（契约解析失败、内容/schema 规则）是确定性问题。
+_MISSING_FILE_VIOLATION = ": missing required file"
 
 
 @dataclass
@@ -29,19 +33,25 @@ class OutputTruncation:
 
     除触顶次数外还记录排除归因所需的旁证：未恢复的模型调用错误（与扫描的
     model_error 同一 fold，但不受 exit 0 门控）、velites 的预算耗尽
-    （``agent_end.reason``）以及 ``outputs_validation`` 事件是否出现（证明
-    velites 的 exit 1 来自产物契约，而非崩溃 / 模型错误）。"""
+    （``agent_end.reason``）、``outputs_validation`` 事件是否出现（证明
+    velites 的 exit 1 来自产物契约，而非崩溃 / 模型错误）以及其 ``violations``
+    里是否有缺文件之外的契约违例（提高输出预算也修不好，不能归因为触顶）。"""
 
     count: int = 0
     model_error: str | None = None
     budget_exceeded: bool = False
     outputs_validated: bool = False
+    contract_violation: bool = False
 
     def observe(self, event: dict[str, Any]) -> None:
         self.model_error = fold_model_error(event, self.model_error)
         kind = event.get("type")
         if kind == "outputs_validation":
             self.outputs_validated = True
+            violations = event.get("violations")
+            self.contract_violation = isinstance(violations, list) and any(
+                not (isinstance(v, str) and v.endswith(_MISSING_FILE_VIOLATION)) for v in violations
+            )
         elif kind == "agent_end":
             self.budget_exceeded |= event.get("reason") == _BUDGET_EXCEEDED
         elif kind == "message_end":
@@ -56,12 +66,13 @@ class OutputTruncation:
         只改写失败原因、不改成败：产物齐全的触顶 run 照常完成。可归因的退出面
         只有两个：exit 0（pi 正常退出、Host 判缺产物）与带 ``outputs_validation``
         的 exit 1（velites 产物契约退出）；pi 的 exit 1 是进程失败，不归因。未恢复
-        的模型错误、预算耗尽是更直接的原因，一律不改写。"""
+        的模型错误、预算耗尽、缺文件之外的契约违例（如 skill contract 无法解析）
+        是更直接的原因，一律不改写。"""
         missing = [name for name in expected if name not in produced]
         contract_exit = exit_code == 0 or (exit_code == 1 and self.outputs_validated)
         if not self.count or not missing or not contract_exit:
             return ""
-        if self.model_error or self.budget_exceeded:
+        if self.model_error or self.budget_exceeded or self.contract_violation:
             return ""
         return output_truncation_error(self.count, missing)
 
