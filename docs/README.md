@@ -29,7 +29,8 @@
 - **部署与运维** → 看 `docs/` 下的部署文档与 runbook（Host/Worker 见
   [agent-worker-deployment.md](agent-worker-deployment.md)；材料存储
   SeaweedFS/S3 见 [materials-storage-deployment.md](materials-storage-deployment.md)；
-  PostgreSQL 运维见 [postgresql-runbook.md](postgresql-runbook.md)；远程执行见
+  PostgreSQL 运维见 [postgresql-runbook.md](postgresql-runbook.md)；备份恢复与
+  vault 主密钥丢失处置见 [backup-restore-runbook.md](backup-restore-runbook.md)；远程执行见
   [remote-execution-runbook.md](remote-execution-runbook.md)）
 - **Studio**（编排、内置 agent 对话、MCP 集成）→ 先看 [architecture/README.md「Studio 文档导航」](architecture/README.md#studio-文档导航)；
   外部 agent 接入 MCP 工具面看 [studio-agent-mcp.md](studio-agent-mcp.md)

@@ -64,6 +64,7 @@ _CURRENT_DOCS = (
     "docs/architecture/studio-service-lifecycle.md",
     "docs/architecture/studio-kimi-background-wakeup.md",
     "docs/agent-worker-deployment.md",
+    "docs/backup-restore-runbook.md",
     "docs/data-layout.md",
     "docs/materials-storage-deployment.md",
     "docs/postgresql-runbook.md",

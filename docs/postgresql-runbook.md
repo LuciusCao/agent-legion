@@ -16,6 +16,15 @@ Upgrading an existing deployment from an older major requires a dump/restore
 before the maintenance window, and never point the stack at an old-major data
 volume in place (the on-disk format is not compatible across majors).
 
+## Backup and restore
+
+Routine backups, restore steps, drill cadence, and the vault master key
+(`deploy/secrets/vault_master_key`) are covered in
+[backup-restore-runbook.md](backup-restore-runbook.md). A database dump alone
+is not a complete backup: the instance object store holds the material and
+artifact bytes, and the vault ciphertext stored in PostgreSQL is useless
+without the master key, which never lives in the database.
+
 ## Local setup
 
 ```bash
