@@ -208,10 +208,12 @@ EOF
 ### 3.3 启动后检查
 
 - 后端启动时在 PostgreSQL advisory 迁移锁下自动执行 schema 迁移；当前版本
-  以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准（目前 v92）——该数字由
+  以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准（目前 v93）——该数字由
   `scripts/architecture/docs_consistency.py` 与代码对账，迁移链在
   `server/app/db/migration_chain.py`（及其 `migration_chain_recent.py`）。
-  升级前先备份数据库，见 [postgresql-runbook.md](postgresql-runbook.md)。
+  升级前先备份数据库，见 [postgresql-runbook.md](postgresql-runbook.md)。v93 会把
+  Agent 定义回填进 agent 节点执行档案，升级后核对回填报告，见
+  [remote-execution-runbook.md §6.2](remote-execution-runbook.md#62-agent-profile-backfill-schema-v93-and-rolling-back-to-0716-935)。
 - bundle 条目（文件夹整体一个条目）复用同一 bucket 与材料缓存，无额外
   存储配置。
 - 上传一个文件验证闭环：`POST /api/workspaces/{id}/materials/presign`

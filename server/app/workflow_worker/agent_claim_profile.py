@@ -4,7 +4,8 @@ Split from ``agent_claim`` (file budget). Two sources:
 
 - ``node`` — a self-contained agent node: the profile is projected from the
   job snapshot's node, no catalog read. A quality-replay Agent version pin
-  cannot apply (there is no Agent version), so it fails closed;
+  cannot apply (there is no Agent version), so it fails closed; a node
+  profile pin (#1079, D6) must match the snapshot node's profile hash;
 - ``agent_definition`` — the routed published Agent (or the pinned version,
   schema v29) through the profile facade.
 
@@ -22,6 +23,7 @@ from server.app.services.agent_node_profile_types import (
     AgentNodeProfile,
     profile_from_node,
 )
+from server.app.services.node_profile_pins import node_profile_pin_error
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -35,8 +37,20 @@ def resolve_claim_profile(
     node: WorkflowNode,
     pin: Mapping[str, Any] | None,
     profile_source: str,
+    profile_pin: Mapping[str, Any] | None = None,
 ) -> AgentNodeProfile | str:
     """The node's dispatch profile, or a configuration-failure message."""
+    if profile_pin is not None:
+        # #1079（D6）：回放副本的执行档案已移植进副本快照；claim 只复核
+        # 快照节点与冻结 pin 一致（不一致即节点失败，fail closed）。
+        if profile_source != PROFILE_SOURCE_NODE:
+            return (
+                f"node {node.key} carries a replay profile pin but its snapshot node is not"
+                " a self-contained agent node"
+            )
+        mismatch = node_profile_pin_error(node, profile_pin)
+        if mismatch is not None:
+            return mismatch
     if profile_source == PROFILE_SOURCE_NODE:
         if pin is not None:
             return (

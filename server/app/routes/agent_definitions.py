@@ -20,6 +20,7 @@ from server.app.routes.agent_definition_contracts import (
     AgentVersionsResponse,
     AgentVersionSummary,
 )
+from server.app.routes.agent_definition_deprecation import DEPRECATED_WRITE
 from server.app.services.agent_definition_create import create_agent_draft
 from server.app.services.agent_service import AgentService
 from server.app.services.versioned_entities import VersionedEntity
@@ -109,7 +110,7 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
             )
         return AgentListResponse(agents=items)
 
-    @router.post("/agent-definitions", response_model=AgentVersionResponse)
+    @router.post("/agent-definitions", response_model=AgentVersionResponse, **DEPRECATED_WRITE)
     def create_agent_definition(
         request: AgentCreateRequest, workspace_id: WorkspaceId, user: UserDep
     ) -> AgentVersionResponse:
@@ -143,7 +144,11 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
             raise HTTPException(status_code=404, detail=f"Unknown Agent: {agent_id}")
         return AgentVersionsResponse(versions=[_version_summary(v) for v in versions])
 
-    @router.put("/agent-definitions/{agent_id}/draft", response_model=AgentVersionResponse)
+    @router.put(
+        "/agent-definitions/{agent_id}/draft",
+        response_model=AgentVersionResponse,
+        **DEPRECATED_WRITE,
+    )
     def save_agent_definition_draft(
         agent_id: str, request: AgentDefinitionPayload, workspace_id: WorkspaceId, user: UserDep
     ) -> AgentVersionResponse:
@@ -151,7 +156,11 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
         entity = _service(workspace_id).save_draft(agent_id, definition, f"user:{user['id']}")
         return _version_response(entity)
 
-    @router.post("/agent-definitions/{agent_id}/publish", response_model=AgentVersionResponse)
+    @router.post(
+        "/agent-definitions/{agent_id}/publish",
+        response_model=AgentVersionResponse,
+        **DEPRECATED_WRITE,
+    )
     def publish_agent_definition(
         agent_id: str,
         workspace_id: WorkspaceId,
@@ -161,7 +170,11 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
         entity = _service(workspace_id).publish(agent_id, request.expected_hash)
         return _version_response(entity)
 
-    @router.post("/agent-definitions/{agent_id}/rollback", response_model=AgentVersionResponse)
+    @router.post(
+        "/agent-definitions/{agent_id}/rollback",
+        response_model=AgentVersionResponse,
+        **DEPRECATED_WRITE,
+    )
     def rollback_agent_definition(
         agent_id: str,
         request: AgentRollbackRequest,
@@ -172,14 +185,20 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
         entity = _service(workspace_id).rollback(agent_id, request.version, f"user:{user['id']}")
         return _version_response(entity)
 
-    @router.post("/agent-definitions/{agent_id}/copy", response_model=AgentVersionResponse)
+    @router.post(
+        "/agent-definitions/{agent_id}/copy",
+        response_model=AgentVersionResponse,
+        **DEPRECATED_WRITE,
+    )
     def copy_agent_definition(
         agent_id: str, request: AgentCopyRequest, workspace_id: WorkspaceId, user: UserDep
     ) -> AgentVersionResponse:
         entity = _service(workspace_id).copy(agent_id, request.new_agent_id, f"user:{user['id']}")
         return _version_response(entity)
 
-    @router.delete("/agent-definitions/{agent_id}", response_model=AgentArchiveResponse)
+    @router.delete(
+        "/agent-definitions/{agent_id}", response_model=AgentArchiveResponse, **DEPRECATED_WRITE
+    )
     def archive_agent_definition(
         agent_id: str, workspace_id: WorkspaceId, _guard: ScopeGuard = None
     ) -> AgentArchiveResponse:

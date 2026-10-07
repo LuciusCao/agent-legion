@@ -45,15 +45,6 @@ const draftYaml = [
   '',
 ].join('\n')
 
-// #426 codex 终轮 P2：settle 信号基线（两份查询均 settle）——本套件聚焦
-// ghost 节点解析，门控组合逻辑由 agentBindingStatus.test.tsx 覆盖。
-const settledSettle = {
-  catalogSettled: true,
-  catalogFailed: false,
-  definitionsSettled: true,
-  definitionsFailed: false,
-}
-
 function renderInspector(
   selectedNodeKey: string | null,
   options?: {
@@ -64,8 +55,6 @@ function renderInspector(
   return render(
     <WorkflowNodeInspector
       workflow={null}
-      agentCatalog={[]}
-      agentCatalogSettle={settledSettle}
       selectedNodeKey={selectedNodeKey}
       definitionYaml={options?.definitionYaml ?? draftYaml}
       setDefinitionYaml={() => {}}
@@ -145,8 +134,6 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     render(
       <WorkflowNodeInspector
         workflow={null}
-        agentCatalog={[]}
-        agentCatalogSettle={settledSettle}
         selectedNodeKey="intake"
         definitionYaml={yamlWithAgentFields}
         setDefinitionYaml={setDefinitionYaml}
@@ -184,8 +171,6 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     render(
       <WorkflowNodeInspector
         workflow={null}
-        agentCatalog={[]}
-        agentCatalogSettle={settledSettle}
         selectedNodeKey="intake"
         definitionYaml={draftYaml}
         setDefinitionYaml={setDefinitionYaml}
@@ -209,8 +194,6 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     render(
       <WorkflowNodeInspector
         workflow={null}
-        agentCatalog={[]}
-        agentCatalogSettle={settledSettle}
         selectedNodeKey="intake"
         definitionYaml={draftYaml}
         setDefinitionYaml={setDefinitionYaml}

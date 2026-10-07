@@ -24,13 +24,12 @@
 - `get_node_prompt`：预览节点运行 prompt（平台信封 + 节点指令段；`execution.prompt` 为空时是自动组装的默认指令，非空则整段替代）。
 - `save_node_prompt`：写进未发布 draft YAML 的 `nodes.<key>.execution.prompt`，空串清除回默认。
 
-**Agent 定义**（#633）
+**Agent 定义**（#633；#935 起 Agent 定义只读，见 [remote-execution-runbook.md §6](remote-execution-runbook.md#6-migrating-an-agent-node-between-runtimes-pi--velites)）
 
-- `get_agent_definitions`（只读）：workspace 的 Agent 定义清单，每个 Agent 取最新版本（待发布草稿优先于已发布行），携带 capability、runtime、skill、tools、requires_labels、config_schema 与版本元数据（version / status / definition_hash / created_by / created_at / published_at）。
+- `get_agent_definitions`（只读）：workspace 的历史 Agent 定义清单，每个 Agent 取最新版本，携带全部字段与版本元数据（version / status / definition_hash / created_by / created_at / published_at）；#440 起 Agent 定义不再充当节点执行档案，只读供追溯。
 - `get_runtime_models`（只读）：workspace 在线 Worker 声明聚合出的 `{runtime: {provider: [models]}}` 视图。
 - `get_agent_runtimes`（只读）：每个 runtime（pi / velites）的 agent 工具目录——工具名、三档 tier（default 预选 / opt-in 显式开启 / forced 带激活条件）与参数。
-- `save_agent_definition_draft`：编辑 Agent 定义草稿。
-- `create_agent_definition`（#635）：为尚无 Agent 的 capability 起新草稿。agent_id 由 capability 派生，不收显式 id；capability 已被占用（草稿/已发布/归档任一状态）返回 409 并指名既有 Agent，此时改用 `save_agent_definition_draft`；payload 与 save 相同，默认 `tools=["read","write","bash"]`；未知 workspace 404。发布仍是人在 Studio 里的操作。
+- `save_agent_definition_draft` / `create_agent_definition`（#635）：#935 起 deprecated——不再写库，只返回引导：agent 节点的执行档案（`execution.runtime`、`tools`、`requires_labels`、`config_schema`、`skill`）写在 workflow 草稿的节点上，经 `save_workflow_draft` 保存；工具名保留到 P4 删除。
 
 **Skill**
 
@@ -81,7 +80,11 @@ job 观测组没有任何生效工具：重跑类动作由 agent 引用 `suggest
 skill/shared 的路径导出使用后端 `for_edit=true` 编辑快照，不能用展示
 接口的投影代替。共享快照包含 `map.json` 原文及全部可写文件（不按扩展名
 筛选）；损坏 UTF-8、超过可写上限或不安全的共享目录会整体拒绝导出，
-避免重新保存时静默替换字节或删除遗漏文件。
+避免重新保存时静默替换字节或删除遗漏文件。Python 构建残留（`__pycache__/`、
+`*.pyc`）例外（#1038）：编辑导出按名跳过，全量保存把磁盘上的残留原样保留
+（不视为被省略的文件），payload 携带残留路径返回 422；其余非 UTF-8 文件的
+422 会提示删除或转换该二进制文件。`save_skill_version` 检查未提交改动时
+忽略未暂存的构建残留，提交只含本次声明的文件。
 
 路径只允许该 workspace 暂存目录内的普通 UTF-8 文件，禁止越界与链接。
 导出不会覆盖已有文件，读取后仍走原来的权限和内容校验；不会直接发布。

@@ -346,12 +346,13 @@ def test_base_registry_enforces_expiry_only_for_touched_entries(tmp_path: Path) 
         registered_on="2026-07-20",
     )
     registry = _write_registry(tmp_path / "registry.yaml", [untouched, redated, added])
-    # Old-schema base (no registered_on): parsed leniently.
+    # Old-schema base (no registered_on): parsed leniently; the backfilled
+    # registered_on on FLAKY-100 is a schema migration, not a touch (#1034).
     base = _write_registry(
         tmp_path / "base.yaml",
         [
-            {"id": "FLAKY-100", "deadline": "2026-08-01"},
-            {"id": "FLAKY-101", "deadline": "2026-07-30"},
+            {"id": "FLAKY-100", "nodeid": "tests/x/test_a.py::test_a", "deadline": "2026-08-01"},
+            {"id": "FLAKY-101", "nodeid": "tests/x/test_b.py::test_b", "deadline": "2026-07-30"},
         ],
     )
     report = _write_report(tmp_path / "clean.json", [])

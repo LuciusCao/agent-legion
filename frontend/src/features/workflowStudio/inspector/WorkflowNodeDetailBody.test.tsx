@@ -25,10 +25,6 @@ vi.mock('../../../api/agentCatalogApi', () => ({
   getWorkspaceExecutionConfiguration: vi.fn(),
 }))
 
-vi.mock('./AgentEditor', () => ({
-  AgentEditor: () => <div data-testid="agent-editor-stub" />,
-}))
-
 const mockApi = vi.mocked(api)
 const mockGetSkillDetail = vi.mocked(getSkillDetail)
 
@@ -108,8 +104,11 @@ const agentCatalog: AgentDefinition[] = [
   },
 ]
 
+// #1079：workflow 顶层 runtime 让节点自含——预览按钮在执行档案编辑区。
 const definitionYaml = [
   'key: demo_workflow',
+  'execution:',
+  '  runtime: pi',
   'nodes:',
   '  generate_key_info:',
   '    type: agent',
@@ -119,16 +118,6 @@ const definitionYaml = [
   '    capability: review',
   '',
 ].join('\n')
-
-// #426 codex 终轮 P2：settle 信号基线（两份查询均 settle；本套件的
-// agentCatalog 命中 generate_key_info/review 的 published Agent，节点级
-// 门控据此 ready）。门控组合逻辑由 agentBindingStatus.test.tsx 覆盖。
-const settledSettle = {
-  catalogSettled: true,
-  catalogFailed: false,
-  definitionsSettled: true,
-  definitionsFailed: false,
-}
 
 function renderBody(options?: {
   nodeKey?: string
@@ -141,7 +130,6 @@ function renderBody(options?: {
         workflow={workflow}
         nodeKey={options?.nodeKey ?? 'generate_key_info'}
         agentCatalog={agentCatalog}
-        agentCatalogSettle={settledSettle}
         definitionYaml={definitionYaml}
         setDefinitionYaml={() => {}}
         readOnly={false}
