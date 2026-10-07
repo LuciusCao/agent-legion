@@ -324,8 +324,11 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
 `http://127.0.0.1:9000`，`deploy/.env` 改过 `AGENT_LEGION_S3_BIND` 的换成该地址），
 外部 S3 用其 endpoint（AWS 默认端点去掉 `--endpoint-url`）。宿主机没装 AWS CLI 时可以
 用容器代替，其余命令不变：
-`aws() { docker run --rm -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -v "$BK":"$BK" amazon/aws-cli "$@"; }`，
-并把 `EP` 换成容器可达的宿主机地址（Docker Desktop 为 `http://host.docker.internal:8333`）；
+`aws() { docker run --rm --add-host=host.docker.internal:host-gateway -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -v "$BK":"$BK" amazon/aws-cli "$@"; }`，
+并把 `EP` 换成 `http://host.docker.internal:8333`（rustfs 为 `:9000`）：本地后端的端口只发布在
+宿主机回环地址上，容器里的 `127.0.0.1` 是容器自己，必须经宿主机别名访问——Docker Desktop
+自带该别名，Linux Docker Engine 由 `--add-host=…:host-gateway` 提供（Docker 20.10+）；也可
+改用 `--network host` 并保留 `EP=http://127.0.0.1:8333`。
 `-v "$BK":"$BK"` 让容器内外的备份路径一致，所以 `BK` 必须是绝对路径。下面定义的变量与函数在
 §2.2.2、§2.3 第 5 步、§2.4 中复用：
 
@@ -808,13 +811,16 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
       | python3 -c 'import json,sys; t=sys.stdin.read().strip(); d=json.loads(t) if t else {}; [print(k, c) for k, s in (d.get("skills") or {}).items() for c in ((s.get("refs") or ({s["ref"]: s["commit"]} if s.get("ref") and s.get("commit") else {})).values())]' \
       > "$BK/.skill-lock" \
     && echo "锁定 commit $(($(wc -l < "$BK/.skill-lock"))) 个" \
+    && missing=0 \
     && while read -r key commit; do
-         git -C "$SKILLS/$key" cat-file -e "$commit^{commit}" \
-           && echo "ok $key $commit" || echo "缺失 $key $commit" >&2
-       done < "$BK/.skill-lock" )
+         if git -C "$SKILLS/$key" cat-file -e "$commit^{commit}"; then echo "ok $key $commit"
+         else echo "缺失 $key $commit" >&2; missing=$((missing + 1)); fi
+       done < "$BK/.skill-lock" \
+    && [ "$missing" -eq 0 ] || FAILED "有 $missing 个锁定 commit 不在恢复出的 skill 仓里" )
   ```
 
-  有「缺失」即说明 skill 备份不是锁定时刻之后的版本，或仓的历史被改写过，需要
+  任一 commit 缺失时整段返回非零（`FAILED`），不要在它失败后删除 skill root 的
+  `.pre-restore-*` 留存。有「缺失」即说明 skill 备份不是锁定时刻之后的版本，或仓的历史被改写过，需要
   找回含该 commit 的仓。**不要用 `make skills-lock` 做这项核对**：它会把每个已
   pin 的 ref 重新解析到仓里的当前 commit 并改写锁（`server/app/skills/lock.py`），
   等于用恢复后的仓覆盖锁定记录，掩盖缺失。
