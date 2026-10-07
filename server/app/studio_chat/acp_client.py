@@ -18,18 +18,26 @@ class AcpClient(TerminalClientMixin):
 
     async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:
         payload = update.model_dump(by_alias=True, exclude_none=True, mode="json")
+        # Before any await: binds/late-binds this call's terminal grant
+        # (tool_call_commands.py, #954).
+        self.terminals.grants.observe(payload)
         self._handle.callbacks.on_update(payload)
 
     async def request_permission(
         self, session_id: str, tool_call: Any, options: list[Any], **kwargs: Any
     ) -> RequestPermissionResponse:
         tool_call_payload = tool_call.model_dump(by_alias=True, exclude_none=True, mode="json")
+        # The human sees (and the grant binds) the same command.
+        tool_call_payload = self.terminals.grants.begin(tool_call_payload)
         option_payloads = [
             option.model_dump(by_alias=True, exclude_none=True, mode="json") for option in options
         ]
-        decision = await asyncio.to_thread(
-            self._handle.callbacks.on_permission_request, tool_call_payload, option_payloads
-        )
+        try:
+            decision = await asyncio.to_thread(
+                self._handle.callbacks.on_permission_request, tool_call_payload, option_payloads
+            )
+        finally:
+            self.terminals.grants.end(tool_call_payload)
         # Only offered ids count; allow_always narrows to allow_once so each
         # later call asks again (permission_scope.py, #921).
         option_id = normalize_selected_option(option_payloads, decision.get("option_id"))

@@ -3,6 +3,10 @@
 状态：**设计草案**（本 PR 只落地 #354 的方案 1/2/4；方案 3 的 schema 迁移
 单独成 PR，本文是它的依据）。行号/文件名以本文撰写时的 develop 为准。
 
+> **编号补注（2026-10）**：方案 3 仍未实施。下文草拟的 schema v72 已被其他迁移占用
+> （`ops_runtime_profile_samples`，见 `server/app/db/migration_chain.py`），实施时按当时的
+> `SCHEMA_VERSION` 重新取号。
+
 ## 现状
 
 - `jobs.workflow_definition_snapshot_json`（多 KB TEXT）在 intake 时由

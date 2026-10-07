@@ -43,6 +43,9 @@ export type NodeCodeDraftView = {
 export type PermissionView = {
   requestId: string
   toolTitle: string
+  /** 授权绑定的命令（tool_call.rawInput.command，后端按 toolCallId 补齐，#954）：
+   * 卡片展示的就是 terminal 必须精确运行的那条。 */
+  command: string | null
   options: { optionId: string; name: string; kind: string }[]
   resolved: boolean
   decisionText: string | null
@@ -309,6 +312,7 @@ export function buildPermissionViews(
     views.push({
       requestId,
       toolTitle: asText(toolCall?.title) || '工具调用',
+      command: asText(asRecord(toolCall?.rawInput)?.command) || null,
       options: options
         .map((option) => asRecord(option))
         .filter((option): option is Record<string, unknown> => option !== null)

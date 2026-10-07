@@ -87,7 +87,7 @@ def write_index(
         + extra_current
         + "\n## 历史设计记录（时点快照，仅供溯源）\n\n"
         + historical
-        + "\n| 归档2 | [proposal](docs-governance-proposal.md) | x |\n",
+        + "\n| 归档2 | [proposal](docs-governance.md) | x |\n",
     )
 
 
@@ -309,7 +309,7 @@ def test_historical_section_entries_do_not_require_whitelist(tmp_path: Path) -> 
     # whitelist entry, and the proposal doc link is explicitly exempt.
     errors = check_docs_retired_terms(tmp_path)
     assert not any("old.md" in error for error in errors)
-    assert not any("docs-governance-proposal" in error for error in errors)
+    assert not any("docs-governance" in error for error in errors)
 
 
 def test_missing_index_file_skips_reconciliation(tmp_path: Path) -> None:
