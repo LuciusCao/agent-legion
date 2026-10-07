@@ -33,7 +33,7 @@ from server.app.db.transaction import write_transaction
 from server.app.executors.models import ConfigurationFailureRequest
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.jobs.queries.workspace_node_limits import get_local_node_limit
-from server.app.storage_paths import job_log_dir
+from server.app.storage_paths import job_log_dir, job_node_log_name
 from server.app.workflow_worker.code_claim import try_claim_code_worker_node
 from server.app.workflow_worker.shard_dispatch import claim_shard_locally
 from server.app.workflow_worker.shard_fanout import materialize_shards_guarded
@@ -67,7 +67,7 @@ def claim_shard_node(
     workflow_key = str(job["workspace_id"])
     node_key = node.key
     # #618: resolved+ensured once per process (schedule.py sibling comment).
-    log_path = job_log_dir(worker.settings.logs_dir) / f"{job['id']}-{node_key}.log"
+    log_path = job_log_dir(worker.settings.logs_dir) / job_node_log_name(job["id"], node_key)
 
     # Shard nodes join the implicit code pool like any other code node
     # (P-0.5): no binding/allocation lookup remains.
@@ -135,7 +135,7 @@ def claim_shard_node(
         if stock_budget is not None and submitted >= stock_budget:
             break  # this pass's remote budget is spent; the next pass continues
         shard_index = int(row["shard_index"])
-        shard_log_path = log_path.with_name(f"{job['id']}-{node_key}-shard-{shard_index}.log")
+        shard_log_path = log_path.with_name(job_node_log_name(job["id"], node_key, shard_index))
         shard_input = json.loads(row["input_json"])
 
         # Remote path first (#389): mirror the ordinary code-node routing —

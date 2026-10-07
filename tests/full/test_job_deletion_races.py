@@ -1,7 +1,9 @@
 """Concurrent deletion race scenarios for workspace DAG jobs.
 
-These tests exercise the conflict-safe deletion rollback path under realistic
-concurrent recreation of the destination directory.
+#958: the deletion transaction carries only the DB write; local files move
+after commit. These tests pin that a concurrent writer during the open
+transaction sees the job directory in place, and that a failed transaction
+leaves every byte (original and concurrently written) untouched.
 """
 
 from __future__ import annotations
@@ -21,12 +23,12 @@ from server.app.storage_paths import resolve_job_dir
 
 
 @pytest.mark.full_gate
-def test_delete_rollback_survives_concurrent_recreation(
+def test_failed_delete_transaction_never_touches_concurrent_writes(
     job_db: JobQueries, tmp_path: Path, monkeypatch
 ) -> None:
-    """If the destination is recreated while deletion is staged, rollback must
-    preserve the recreated destination byte-for-byte and keep the staged original
-    recoverable.
+    """While the deletion transaction is open the job directory stays in place
+    (no in-transaction staging); when the transaction fails, both the original
+    bytes and a concurrent writer's bytes survive and no trash is created.
     """
     data_dir = tmp_path
     jobs_dir = data_dir / "jobs"
@@ -72,15 +74,15 @@ def test_delete_rollback_survives_concurrent_recreation(
     lease_repo = ExecutorLeaseRepository(job_db, data_dir=data_dir)
     service = JobDeletionService(job_db, lease_repo, settings)
 
-    staged_event = threading.Event()
-    recreated_event = threading.Event()
+    in_tx_event = threading.Event()
+    written_event = threading.Event()
     result_holder: list[JobDeleteResult] = []
     exception_holder: list[BaseException] = []
 
     def _failing_after_race(*args: Any, **kwargs: Any) -> None:
-        staged_event.set()
-        if not recreated_event.wait(timeout=5.0):
-            raise TimeoutError("Destination was not recreated in time")
+        in_tx_event.set()
+        if not written_event.wait(timeout=5.0):
+            raise TimeoutError("Concurrent write did not happen in time")
         raise RuntimeError("db failure")
 
     monkeypatch.setattr(job_db, "delete_job_in_transaction", _failing_after_race)
@@ -93,13 +95,15 @@ def test_delete_rollback_survives_concurrent_recreation(
         except BaseException as exc:  # pragma: no cover - defensive
             exception_holder.append(exc)
 
+    dir_in_place_during_tx: list[bool] = []
+
     def _recreator() -> None:
-        if not staged_event.wait(timeout=5.0):
-            raise TimeoutError("Staging did not complete in time")
-        # Recreate the destination with different content while deletion is staged.
-        storage_dir.mkdir(parents=True, exist_ok=True)
-        (storage_dir / "sentinel.bin").write_bytes(b"recreated-bytes")
-        recreated_event.set()
+        if not in_tx_event.wait(timeout=5.0):
+            raise TimeoutError("Transaction did not open in time")
+        # The transaction is open: the directory must still be at its path.
+        dir_in_place_during_tx.append((storage_dir / "artifact.bin").exists())
+        (storage_dir / "sentinel.bin").write_bytes(b"concurrent-bytes")
+        written_event.set()
 
     deleter = threading.Thread(target=_deleter)
     recreator = threading.Thread(target=_recreator)
@@ -115,18 +119,10 @@ def test_delete_rollback_survives_concurrent_recreation(
 
     result = result_holder[0]
     assert result["status"] == "failed"
-    assert result["reason_code"] == "rollback_conflict"
+    assert result["reason_code"] == "delete_failed"
+    assert dir_in_place_during_tx == [True]
 
-    # The recreated destination must survive byte-for-byte.
-    assert storage_dir.exists()
-    sentinel = storage_dir / "sentinel.bin"
-    assert sentinel.exists()
-    assert sentinel.read_bytes() == b"recreated-bytes"
-
-    # The staged original must remain recoverable.
-    trash_root = settings.jobs_dir / ".trash"
-    assert trash_root.exists()
-    staged_dirs = [p for p in trash_root.rglob("*") if p.is_dir() and p.name == storage_dir.name]
-    assert staged_dirs, "Staged original directory not found in trash"
-    staged_storage = staged_dirs[0]
-    assert (staged_storage / "artifact.bin").read_bytes() == b"original-bytes"
+    assert job_db.get_job(job["id"]) is not None
+    assert original_artifact.read_bytes() == b"original-bytes"
+    assert (storage_dir / "sentinel.bin").read_bytes() == b"concurrent-bytes"
+    assert not (settings.jobs_dir / ".trash").exists()

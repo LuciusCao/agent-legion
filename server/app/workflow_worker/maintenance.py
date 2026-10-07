@@ -5,6 +5,7 @@ import threading
 import time
 
 from server.app.jobs import JobQueries
+from server.app.services.job_deletion_trash_sweep import sweep_deletion_trash
 from server.app.services.log_cleanup import CleanupConfig, cleanup_old_logs
 from server.app.settings import Settings
 
@@ -12,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowMaintenance:
-    """Periodic maintenance for the workflow worker: old-log cleanup, token purge."""
+    """Periodic maintenance for the workflow worker: old-log cleanup, deletion
+    trash TTL sweep (#958), token purge."""
 
     def __init__(self, job_db: JobQueries, settings: Settings) -> None:
         self.job_db = job_db
@@ -42,6 +44,9 @@ class WorkflowMaintenance:
             )
             if logs or run_dirs:
                 logger.info("Cleaned up %s old logs and %s old run directories", logs, run_dirs)
+            trash = sweep_deletion_trash(self.settings)
+            if trash:
+                logger.info("Purged %s expired job-deletion trash entries", trash)
             tokens = self.job_db.delete_expired_scoped_tokens()
             if tokens:
                 logger.info("Purged %s expired scoped tokens", tokens)
