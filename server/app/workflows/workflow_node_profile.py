@@ -68,3 +68,29 @@ def is_self_contained_agent_node(node: Any) -> bool:
         return False
     execution = getattr(node, "execution", None)
     return bool(getattr(execution, "runtime", ""))
+
+
+#: How a node of a job's frozen snapshot executes (#1091): every non-agent
+#: node on the implicit code pool; a self-contained agent node on its own
+#: profile; a legacy agent node through its Agent route (or the capability
+#: fallback once the route row is pruned).
+FROZEN_NODE_CODE = "code"
+FROZEN_NODE_SELF_CONTAINED_AGENT = "self_contained_agent"
+FROZEN_NODE_LEGACY_AGENT = "legacy_agent"
+
+
+def frozen_node_execution_kind(node: Any) -> str:
+    """The execution kind of *node*, taken from the job's frozen snapshot (#1091).
+
+    The single decision dispatch routing (``workflow_worker.routing``) and the
+    job detail / MCP executor projection (``job_node_agent_projection``)
+    share: the snapshot's node type comes first, a ``workspace_node_routes``
+    row only ever picks the Agent of a node frozen as a legacy agent node —
+    an in-flight job runs its snapshot even after a later revision retypes
+    the same node key.
+    """
+    if getattr(node, "node_type", "") != "agent":
+        return FROZEN_NODE_CODE
+    if is_self_contained_agent_node(node):
+        return FROZEN_NODE_SELF_CONTAINED_AGENT
+    return FROZEN_NODE_LEGACY_AGENT

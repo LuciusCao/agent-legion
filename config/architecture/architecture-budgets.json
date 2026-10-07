@@ -1901,7 +1901,7 @@
     "server/app/workflow_worker/ready.py": 47,
     "server/app/workflow_worker/ready_cache.py": 105,
     "server/app/workflow_worker/routing.py": 78,
-    "server/app/workflow_worker/routing_fallback.py": 36,
+    "server/app/workflow_worker/routing_fallback.py": 35,
     "server/app/workflow_worker/scan.py": 67,
     "server/app/workflow_worker/schedule.py": 62,
     "server/app/workflow_worker/shard_dispatch.py": 89,
