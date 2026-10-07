@@ -13,8 +13,10 @@ path 绑定机制（EXEC-CODE-001 legacy）已退役——本文 §2（2026-08 �
 但 Host 与 Worker 是两条独立入口：Host 侧经 `server/app/executors/code.py` →
 `_code_sandbox.py`（父进程预取与 auth 失败标记处理在 `executors/_code_runtime.py`）；
 远程 Worker 的 kind='code' claim 经 `worker/code_runner.py`（Worker 镜像只含
-`worker/` + `shared/`，不含 `server/app`）。两侧只共享 `shared/code_sandbox.py`
-的沙箱协议（velites argv、子进程 env、read roots、结果/错误解析、auth 失败标记路径），
+`worker/` + `shared/`，不含 `server/app`）。两侧不共享执行入口，只共享 `shared/` 下的
+模块：`shared/code_sandbox.py` 的沙箱协议（velites argv、子进程 env、read roots、
+结果/错误解析；bundle / 标记路径等常量单一定义在 `shared/code_contract.py`、经
+`code_sandbox` 再导出）与 `shared/material_cache.py`（材料缓存目录名、物化错误类型），
 改沙箱或运行时行为须两条入口一并核对；runtime 键集合见 §3。
 **2026-08-17 更新（P-0.5，schema v47）**：executor 定义 / allocation /
 binding 概念整体退役——非 Agent 路由节点一律进隐含 code 池（容量 =
@@ -174,7 +176,8 @@ SDK 不自定义异常类型，builtin 子进程与沙箱 child 的两种 token 
 > `skill_version_fallbacks` 均已删除；auth 失败标记在 Host 侧由 `_code_runtime.py` 在子进程
 > 退出后处理。远程 Worker（`worker/code_runner.py`）不经这两个模块：runtime dict 由
 > claim 响应 manifest 里预取好的 `runtime_context` 在 Worker 侧重建，auth 失败标记由
-> `code_runner.py` 自行处理，两侧只共享 `shared/code_sandbox.py`（含标记路径常量）。
+> `code_runner.py` 自行处理，两侧共享的只有 `shared/` 模块（标记路径常量定义在 `shared/code_contract.py`，经
+> `shared/code_sandbox.py` 再导出）。
 
 ### 5.1 预取上移
 
