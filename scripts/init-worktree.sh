@@ -21,6 +21,8 @@ replace_in_place() {
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# shellcheck source=worktree-names-lib.sh
+source "$ROOT/scripts/worktree-names-lib.sh"
 
 # 0. 嵌套防护（AGENTS.md §1）：worktree 一律是主仓库根的平级子目录，
 #    嵌套会让 data/、测试库派生与清理路径全部混乱，直接拒绝。
@@ -36,6 +38,11 @@ if [[ "$ROOT" == "$MAIN" ]]; then
     echo "当前就是主仓库根，无需初始化。" >&2
     exit 0
 fi
+
+# 0.5 派生名撞名防护（#950）：worktree 名到库/bucket 名的映射不是单射，
+#     与其他已注册 worktree 派生出同名资源时 fail-fast（在任何副作用之前），
+#     否则两个 worktree 会静默共用同一个库与 bucket。
+worktree_require_unique_derived_names "$ROOT" "$(basename "$ROOT")" "初始化（建库/建 bucket）" || exit 1
 
 BASE="${1:-}"
 if [[ -z "$BASE" ]]; then
@@ -81,8 +88,8 @@ fi
 chmod 600 .env
 
 # 2. 专属 Postgres 库
-NAME="$(printf '%s' "$(basename "$ROOT")" | tr -c 'a-zA-Z0-9_' '_')"
-DB="agent_legion_${NAME}"
+DB="$(worktree_derived_db "$(basename "$ROOT")")"
+NAME="${DB#agent_legion_}"
 DB_URL="postgresql://127.0.0.1:5432/${DB}"
 if [[ -f .env ]]; then
     if grep -qE '^(export )?AGENT_LEGION_DATABASE_URL=' .env; then
@@ -112,7 +119,7 @@ fi
 #     Postgres 库同一模式）；endpoint 与凭据随 .env 整体从基准 worktree 继承。
 #     endpoint 不可达时跳过建 bucket / 配 CORS（warning，不 fail——离线/CI
 #     场景），此后材料 API 仅降级为 503。
-BUCKET="agent-legion-$(printf '%s' "$(basename "$ROOT")" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-')"
+BUCKET="$(worktree_derived_bucket "$(basename "$ROOT")")"
 # 无条件改写为派生值（与上方 DATABASE_URL 块同一模式）：.env 是从基准
 # worktree 复制的，本就带着基准的 bucket，「保留原值」会让所有派生
 # worktree 共享基准 bucket，违背 per-worktree 隔离。

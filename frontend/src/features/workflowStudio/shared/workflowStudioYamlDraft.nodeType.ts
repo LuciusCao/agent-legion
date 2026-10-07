@@ -6,6 +6,10 @@ import {
   sanitizeNodeForType,
   validateNodeTypeSwitch,
 } from './workflowStudioYamlDraft.nodeTypeSwitch'
+import {
+  ensureAgentNodeRuntime,
+  stripAgentProfileFields,
+} from './workflowStudioYamlDraft.runtime'
 
 // 可切换的节点显式类型（#392）。start 是契约入口（每 DAG 恰一个、由
 // loader 保证），不进选择器也不可切入/切出；读侧遗留 `node` 已在 parse
@@ -31,5 +35,9 @@ export function patchWorkflowNodeType(
   const sourceType = node.type ?? 'code'
   node.type = nodeType
   sanitizeNodeForType(node, sourceType, nodeType)
+  // #935：agent 节点必须自含 runtime；非 agent 节点不得留 agent 专属档案
+  // 字段（loader 拒绝 runtime / requires_labels / tools 出现在非 agent 节点）。
+  if (nodeType === 'agent') ensureAgentNodeRuntime(draft, node)
+  else stripAgentProfileFields(node)
   return dumpWorkflowYaml(draft)
 }

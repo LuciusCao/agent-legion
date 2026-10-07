@@ -1,8 +1,10 @@
 import {
   dumpWorkflowYaml,
   parseWorkflowYamlStrictNodes,
+  type WorkflowYamlNode,
 } from './workflowStudioYamlDraft.parse'
 import type { SwitchableNodeType } from './workflowStudioYamlDraft.nodeType'
+import { ensureAgentNodeRuntime } from './workflowStudioYamlDraft.runtime'
 
 // 画布「添加节点」的入参（#392 Phase 3）。新节点默认不接线（after: []）
 // ——接线只能走 YAML 编辑器（「依赖关系」段是只读展示）。
@@ -50,14 +52,13 @@ export function appendWorkflowNode(
       `切换为 ${input.nodeType} 的节点需要非空 capability`
     )
   }
-  const next = {
-    ...nodes,
-    [key]: {
-      type: input.nodeType,
-      label: input.label?.trim() || key,
-      ...(input.nodeType === 'approval' ? {} : { capability }),
-      after: [] as string[],
-    },
+  const node: WorkflowYamlNode = {
+    type: input.nodeType,
+    label: input.label?.trim() || key,
+    ...(input.nodeType === 'approval' ? {} : { capability }),
+    after: [] as string[],
   }
-  return dumpWorkflowYaml({ ...draft, nodes: next })
+  // #935：agent 节点自含执行档案——无顶层默认可继承时写默认 runtime。
+  if (input.nodeType === 'agent') ensureAgentNodeRuntime(draft, node)
+  return dumpWorkflowYaml({ ...draft, nodes: { ...nodes, [key]: node } })
 }

@@ -17,7 +17,7 @@ from typing import Any, cast
 import pytest
 from acp import RequestError
 
-from server.app.studio_chat import terminal_grants, terminal_policy
+from server.app.studio_chat import permission_scope, terminal_grants, terminal_policy
 from server.app.studio_chat.acp_client import AcpClient
 from server.app.studio_chat.permission_scope import (
     is_staging_read_only_tool_call,
@@ -89,6 +89,31 @@ def test_read_outside_staging_takes_the_human_path(staging, tmp_path, tool_call)
 def test_symlink_out_of_staging_is_not_auto_approvable(staging, tmp_path) -> None:
     (staging / "link").symlink_to(tmp_path / ".env")
     assert not _scoped(_read(locations=[{"path": str(staging / "link")}]), tmp_path)
+
+
+@pytest.mark.parametrize(
+    "tool_call",
+    [
+        _read(locations=[{"path": "data/studio-mcp-files/ws-policy/a\x00b"}]),
+        _read(rawInput={"file_path": "data/studio-mcp-files/ws-policy/\x00"}),
+    ],
+)
+def test_unresolvable_path_string_fails_closed(staging, tmp_path, tool_call) -> None:
+    """#984: a path realpath refuses outright (embedded NUL) answers "not
+    auto-approvable" — the human path — instead of raising out of the
+    permission RPC."""
+    assert not _scoped(tool_call, tmp_path)
+
+
+def test_os_level_resolution_error_fails_closed(staging, tmp_path, monkeypatch) -> None:
+    """#984: an OS-level refusal while resolving (over-long name and the
+    like, platform-dependent) is the same fail-closed outcome."""
+
+    def refuse(raw: str, base: str) -> str:
+        raise OSError(63, "File name too long")
+
+    monkeypatch.setattr(permission_scope, "_resolve", refuse)
+    assert not _scoped(_read(locations=[{"path": str(staging / "draft.yaml")}]), tmp_path)
 
 
 def test_scoped_read_requires_a_one_shot_option(staging, tmp_path) -> None:

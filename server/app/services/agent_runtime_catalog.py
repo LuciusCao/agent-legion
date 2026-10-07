@@ -2,7 +2,7 @@
 
 纯投影 service：从 ``agent_runtime`` catalog 的 adapter 声明取数据，无 IO、
 无状态。数据源单一（adapter 的 ``tool_catalog``）——dispatch 期工具名校验
-（#449）与 Studio 动态选项面（AgentEditor）都从同一声明取，避免「UI 能选
+（#449）与 Studio 动态选项面（节点 Tools 编辑）都从同一声明取，避免「UI 能选
 但 dispatch 拒」或反之。
 """
 

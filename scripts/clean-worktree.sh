@@ -85,6 +85,13 @@ if [[ "$CALLER_CWD" == "$TARGET" || "$CALLER_CWD" == "$TARGET"/* ]]; then
     exit 1
 fi
 
+# 护栏（#950）：派生名映射不是单射，另一个仍存在的 worktree 派生出同名
+# 库/bucket 时整体拒绝——在第 1 步移除 worktree 之前判定，不留半清理状态。
+# drop-worktree-db.sh 用同一共享函数再兜底一次。
+# shellcheck source=worktree-names-lib.sh
+source "$ROOT/scripts/worktree-names-lib.sh"
+worktree_require_unique_derived_names "$ROOT" "$WT" "清理（删除派生库/bucket）" || exit 1
+
 # 1. git worktree remove（remove 前先解析该 worktree checkout 的分支，
 #    供第 2 步删本地分支用）。
 BRANCH=""

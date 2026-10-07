@@ -5,6 +5,7 @@ versions here; migration_chain asserts the combined registry stays sorted."""
 from __future__ import annotations
 
 from server.app.db.migration_entry import SchemaMigration
+from server.app.db.migrations.agent_profile_backfill import migrate_agent_profile_backfill
 from server.app.db.migrations.agent_request_profile_source import (
     migrate_agent_request_profile_source,
 )
@@ -58,4 +59,9 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # v91 (#211 M3) in merge order (#434 protocol).
     # DDL-only, same guarded-ALTER home rule as v87.
     SchemaMigration(92, "agent_request_profile_source", migrate_agent_request_profile_source),
+    # v93 (#935, #440 P3): inline each legacy agent node's published Agent
+    # definition into the node (active revisions + Studio drafts), backup
+    # table first, provenance sibling outside definition_hash. Data
+    # migration, idempotent (self-contained nodes skipped), no down.
+    SchemaMigration(93, "agent_profile_backfill", migrate_agent_profile_backfill),
 ]

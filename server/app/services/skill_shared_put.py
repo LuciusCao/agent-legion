@@ -13,6 +13,7 @@ import json
 from pathlib import Path, PurePosixPath
 
 from server.app.fs_safety import PathEscapeError, resolve_within
+from server.app.services.skill_build_residue import BUILD_RESIDUE_HINT, is_build_residue
 from server.app.services.skill_repo import MAX_FILE_BYTES
 from server.app.services.skill_repo_edit import SkillEditValidationError
 from server.app.services.skill_shared_sync import MAP_PATH, validate_materials
@@ -29,7 +30,9 @@ def validate_shared_put_payload(shared_dir: Path, files: list[tuple[str, str]]) 
     Rules (in order):
     - paths: map.json at the root, everything else under references/ or
       scripts/, no ``..``/absolute/``.git`` components, no duplicates
-      (codex R2 P1), no symlink escape after resolution;
+      (codex R2 P1), no symlink escape after resolution, no build
+      residue (``__pycache__/``, ``*.pyc`` — #1038: the swap keeps the
+      on-disk residue, the payload never authors it);
     - byte cap (codex R3 P1): content is measured in raw UTF-8 BYTES —
       the wire contract counts characters, a CJK/emoji-heavy file can
       pass it yet exceed the 128 KiB disk cap, and the sync would
@@ -68,6 +71,17 @@ def validate_shared_put_payload(shared_dir: Path, files: list[tuple[str, str]]) 
             errors.append({"path": raw_path, "error": "path escapes the _shared directory"})
             continue
         relative = resolved.relative_to(root).as_posix()
+        if is_build_residue(relative):
+            # #1038：构建残留不是可编写的共享材料——导出时被跳过、全量写时
+            # 由 staged swap 原样保留；payload 里带上它只会把字节缓存当文本写坏。
+            errors.append(
+                {
+                    "path": relative,
+                    "error": f"{BUILD_RESIDUE_HINT}; omit it from the payload "
+                    "(existing residue on disk is kept as-is)",
+                }
+            )
+            continue
         if relative in targets:
             errors.append(
                 {"path": relative, "error": "duplicate path in payload (map to ONE file)"}

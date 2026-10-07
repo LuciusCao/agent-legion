@@ -42,7 +42,6 @@ function fakeChat(overrides?: Record<string, unknown>): StudioChat {
     messages: [],
     toolCalls: [],
     workflowDraft: null,
-    agentDrafts: [],
     nodeDrafts: [],
     permissions: [],
     busy: false,

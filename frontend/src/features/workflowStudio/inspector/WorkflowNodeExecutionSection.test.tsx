@@ -1,32 +1,22 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from '../../../testing/TestMemoryRouter'
 import { useSettingStore } from '../../../stores/settingStore'
-import { fetchAgentDefinitions } from '../../../api/agentDefinitions'
-import type { AgentListResponse, WorkflowNodeRecord } from '../../../types'
-import type { AgentDefinition } from '../../../types/agentCatalogTypes'
-import type { StudioNav } from '../shared/workflowStudioNav'
-import { StudioNavContext } from '../shared/useStudioNavState'
+import type { WorkflowNodeRecord } from '../../../types'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
 
+// #1079（#440 P3b）：节点详情不再解析 capability → Agent 定义，Agent 目录 /
+// 定义 API 一律不应被调用（mock 成抛错，误调即测试失败）。
 vi.mock('../../../api/agentCatalogApi', () => ({
-  getAgentCatalog: vi.fn().mockResolvedValue({ agents: [] }),
+  getAgentCatalog: vi.fn(() => {
+    throw new Error('agent catalog must not be fetched by the section')
+  }),
 }))
-
-// #387：draft-only Agent 的节点解析回落 agent-definitions（含 draft）。
 vi.mock('../../../api/agentDefinitions', () => ({
-  fetchAgentDefinitions: vi.fn(),
-}))
-vi.mock('../../../stores/settingStore', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../../../stores/settingStore')>()
-  return actual
-})
-
-// 内嵌编辑器的完整行为由 WorkflowNodeAgentEditor.test.tsx 覆盖。
-vi.mock('./AgentEditor', () => ({
-  AgentEditor: () => <div data-testid="agent-editor-stub" />,
+  fetchAgentDefinitions: vi.fn(() => {
+    throw new Error('agent definitions must not be fetched by the section')
+  }),
 }))
 
 // 节点 skill 编辑行的交互由 WorkflowNodeSkillEditor.test.tsx 覆盖；此处 stub
@@ -59,109 +49,86 @@ const node: WorkflowNodeRecord = {
   terminal: null,
 }
 
-const agentCatalog: AgentDefinition[] = [
-  {
-    id: 'question-key-info-v1',
-    runtime: 'pi',
-    capability: 'generate_key_info',
-    skill: 'demo_workflow/generate_key_info',
-    tools: ['read', 'write', 'bash'],
-    requires_labels: {},
-    provider: 'deepseek',
-    model: 'your-model-b',
-    thinking: 'low',
-    skill_ref: 'v1.3.8',
-    skill_commit: '5c5eae72064abde37bfc4b07a4b2f7e9637c473d',
-  },
-]
+// 自含节点（节点级 execution.runtime）+ workflow 顶层执行默认。
+const selfContainedYaml = `execution:\n  provider: deepseek\n  model: your-model-b\n  thinking: low\nnodes:\n  generate_key_info:\n    type: agent\n    capability: generate_key_info\n    execution:\n      runtime: pi\n`
 
-const editorProps = {
-  definitionYaml: `execution:\n  provider: deepseek\n  model: your-model-b\n  thinking: low\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n`,
-  setDefinitionYaml: () => {},
-  agentCatalog,
-}
-
-// #426 codex 终轮 P2：settle 信号的工厂——两份查询均 settle 的基线，各
-// 门控用例按场景覆盖（catalog 在途/失败、definitions 在途/失败）。
-const settledSettle = {
-  catalogSettled: true,
-  catalogFailed: false,
-  definitionsSettled: true,
-  definitionsFailed: false,
-}
-
-// 组件经 useStudioNav 读 openAgent 的目标草稿身份：默认无 pending。
-const navStub: StudioNav = {
-  openAgent: () => {},
-  pendingAgentId: null,
-  clearPendingAgentId: () => {},
-}
+// legacy 节点：节点与 workflow 顶层都没有 runtime（v93 未能内联）。
+const legacyYaml = `execution:\n  provider: deepseek\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n`
 
 function renderSection(
-  props: Omit<
-    React.ComponentProps<typeof WorkflowNodeExecutionSection>,
-    'agentCatalogSettle'
-  > &
-    Partial<
-      Pick<
-        React.ComponentProps<typeof WorkflowNodeExecutionSection>,
-        'agentCatalogSettle'
-      >
-    >,
-  nav: StudioNav = navStub
+  props: React.ComponentProps<typeof WorkflowNodeExecutionSection>
 ) {
   return render(
     <MemoryRouter initialEntries={['/workspaces/ws1/studio']}>
       <Routes>
         <Route
           path="/workspaces/:workspaceId/studio"
-          element={
-            <StudioNavContext.Provider value={nav}>
-              {/* #426 review P2：默认两份查询均 settle（本套件聚焦 section
-                  分发，加载/错误占位的组合逻辑由 agentBindingStatus.test.ts
-                  与 WorkflowNodeAgentEditor.test.tsx 覆盖）。 */}
-              <WorkflowNodeExecutionSection
-                agentCatalogSettle={settledSettle}
-                {...props}
-              />
-            </StudioNavContext.Provider>
-          }
+          element={<WorkflowNodeExecutionSection {...props} />}
         />
       </Routes>
     </MemoryRouter>
   )
 }
 
-describe('WorkflowNodeExecutionSection', () => {
+describe('WorkflowNodeExecutionSection node profile (#935 / #1079)', () => {
+  // 节点 skill 编辑行按 settingStore 的 workspace 渲染（无 workspace 时隐藏）。
   beforeEach(() => {
     useSettingStore.setState({ workspaceId: 'ws1' })
-    vi.mocked(fetchAgentDefinitions).mockResolvedValue({ agents: [] })
   })
 
-  // #409：编辑态下汇总卡（Agent id/runtime/tools/skill 版本行）与开合
-  // 按钮一并移除——信息在内联展开的编辑面板里。
-  it('shows the inline editor without the duplicate summary card for the selected node capability', () => {
-    renderSection({ node, ...editorProps })
+  it('edits a self-contained node profile in place', () => {
+    renderSection({
+      node,
+      definitionYaml: selfContainedYaml,
+      setDefinitionYaml: () => {},
+    })
 
-    expect(screen.queryByText('question-key-info-v1')).not.toBeInTheDocument()
-    expect(screen.queryByText('v1.3.8 · 5c5eae7')).not.toBeInTheDocument()
-    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
+    expect(screen.queryByText(/尚未内联执行档案/)).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Runtime')).toBeInTheDocument()
+    expect(screen.getByTestId('skill-selector-stub')).toBeInTheDocument()
+    expect(screen.getByLabelText('Model')).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '查看 Prompt' })
     ).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '浏览技能文件' })
     ).toBeInTheDocument()
-    expect(screen.getByText(/your-model-b/)).toBeInTheDocument()
-    expect(screen.queryByText('code-default')).not.toBeInTheDocument()
+    // tools 未声明时兜底是 runtime 默认档，不再提「Agent 默认」。
+    expect(screen.queryByText(/Agent 默认/)).not.toBeInTheDocument()
+  })
+
+  it('treats the workflow top-level runtime as a self-contained profile', () => {
+    renderSection({
+      node,
+      definitionYaml: `execution:\n  runtime: pi\n  provider: deepseek\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n`,
+      setDefinitionYaml: () => {},
+    })
+
+    expect(screen.queryByText(/尚未内联执行档案/)).not.toBeInTheDocument()
+    expect(screen.getByText(/继承 workflow 默认（pi）/)).toBeInTheDocument()
+  })
+
+  it('writes the selected runtime onto the node execution block', () => {
+    let nextYaml = ''
+    renderSection({
+      node,
+      definitionYaml: selfContainedYaml,
+      setDefinitionYaml: (value) => {
+        nextYaml = value
+      },
+    })
+
+    fireEvent.mouseDown(screen.getByLabelText('Runtime'))
+    fireEvent.click(screen.getByRole('option', { name: 'velites' }))
+
+    expect(nextYaml).toContain('runtime: velites')
   })
 
   it('writes a node model override to workflow YAML', () => {
     let nextYaml = ''
     renderSection({
       node,
-      agentCatalog,
-      definitionYaml: editorProps.definitionYaml,
+      definitionYaml: selfContainedYaml,
       setDefinitionYaml: (value) => {
         nextYaml = value
       },
@@ -179,6 +146,7 @@ describe('WorkflowNodeExecutionSection', () => {
     const nodeWithProvider: WorkflowNodeRecord = {
       ...node,
       execution: {
+        runtime: 'pi',
         provider: 'deepseek',
         model: '',
         thinking: '',
@@ -186,10 +154,9 @@ describe('WorkflowNodeExecutionSection', () => {
         prompt_mode: '',
       },
     }
-    const initialYaml = `execution:\n  provider: deepseek\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n    execution:\n      provider: deepseek\n`
+    const initialYaml = `execution:\n  provider: deepseek\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n    execution:\n      runtime: pi\n      provider: deepseek\n`
     const { rerender } = renderSection({
       node: nodeWithProvider,
-      agentCatalog,
       definitionYaml: initialYaml,
       setDefinitionYaml: (value) => {
         nextYaml = value
@@ -208,17 +175,13 @@ describe('WorkflowNodeExecutionSection', () => {
           <Route
             path="/workspaces/:workspaceId/studio"
             element={
-              <StudioNavContext.Provider value={navStub}>
-                <WorkflowNodeExecutionSection
-                  agentCatalogSettle={settledSettle}
-                  node={nodeWithProvider}
-                  agentCatalog={agentCatalog}
-                  definitionYaml={nextYaml}
-                  setDefinitionYaml={(value) => {
-                    nextYaml = value
-                  }}
-                />
-              </StudioNavContext.Provider>
+              <WorkflowNodeExecutionSection
+                node={nodeWithProvider}
+                definitionYaml={nextYaml}
+                setDefinitionYaml={(value) => {
+                  nextYaml = value
+                }}
+              />
             }
           />
         </Routes>
@@ -229,13 +192,16 @@ describe('WorkflowNodeExecutionSection', () => {
   })
 
   it('offers datalist options from the runtime models of online workers', () => {
-    renderSection({ node, ...editorProps })
+    renderSection({
+      node,
+      definitionYaml: selfContainedYaml,
+      setDefinitionYaml: () => {},
+    })
 
     const providerInput = screen.getByLabelText('Provider') as HTMLInputElement
     const providerList = document.getElementById(
       providerInput.getAttribute('list')!
     ) as HTMLDataListElement
-    expect(providerList).not.toBeNull()
     expect(
       Array.from(providerList.options).map((option) => option.value)
     ).toEqual(['deepseek'])
@@ -251,7 +217,11 @@ describe('WorkflowNodeExecutionSection', () => {
   })
 
   it('shows the workflow thinking default on the empty option', () => {
-    renderSection({ node, ...editorProps })
+    renderSection({
+      node,
+      definitionYaml: selfContainedYaml,
+      setDefinitionYaml: () => {},
+    })
 
     const thinkingSelect = screen.getByLabelText(
       'Thinking'
@@ -261,361 +231,61 @@ describe('WorkflowNodeExecutionSection', () => {
     )
   })
 
+  // #1079（#440 P3b）：legacy 节点只提示补 runtime + runtime 下拉——不再
+  // 内嵌 AgentEditor / Agent 定义汇总卡，也不渲染 skill / 执行参数编辑
+  // （补上 runtime 后节点即自含，切到上方的执行档案编辑区）。
+  it('only asks a legacy node for a runtime', () => {
+    renderSection({
+      node,
+      definitionYaml: legacyYaml,
+      setDefinitionYaml: () => {},
+    })
+
+    expect(screen.getByText(/尚未内联执行档案/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Runtime')).toBeInTheDocument()
+    expect(screen.queryByTestId('skill-selector-stub')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Model')).not.toBeInTheDocument()
+    expect(screen.queryByText(/published Agent/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Agent ID')).not.toBeInTheDocument()
+  })
+
+  it('makes a legacy node self-contained once a runtime is picked', () => {
+    let nextYaml = ''
+    renderSection({
+      node,
+      definitionYaml: legacyYaml,
+      setDefinitionYaml: (value) => {
+        nextYaml = value
+      },
+    })
+
+    fireEvent.mouseDown(screen.getByLabelText('Runtime'))
+    fireEvent.click(screen.getByRole('option', { name: 'velites' }))
+
+    expect(nextYaml).toContain('runtime: velites')
+  })
+
   it('shows the code-pool state without any agent entry for a code node (#392)', () => {
     renderSection({
       node: { ...node, node_type: 'code', capability: 'missing' },
-      ...editorProps,
+      definitionYaml: selfContainedYaml,
+      setDefinitionYaml: () => {},
     })
 
     expect(screen.getByText('内置 code 池执行')).toBeInTheDocument()
-    // code 节点不再长出 Agent 编辑区（类型变更走头部类型选择器）。
-    expect(
-      screen.queryByRole('button', { name: '切换为 Agent 执行' })
-    ).not.toBeInTheDocument()
-    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
-  })
-
-  // #409：未绑定 Agent 的空态提示保留，创建入口即内联编辑面板（新建表单）。
-  it('points an agent node without a published Agent to the inline create form', () => {
-    renderSection({
-      node: { ...node, node_type: 'agent', capability: 'missing' },
-      ...editorProps,
-    })
-
-    expect(screen.getByText(/暂无 published Agent/)).toBeInTheDocument()
-    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
-  })
-
-  // #387：MCP 建的 draft-only Agent 不在 published 目录里，但节点详情要能
-  // 解析到它（内联编辑/发布可达），并明确提示「未发布」。
-  it('resolves a draft-only agent from agent-definitions and flags it unpublished', async () => {
-    vi.mocked(fetchAgentDefinitions).mockResolvedValue({
-      agents: [
-        {
-          agent_id: 'draft-agent',
-          capability: 'generate_key_info',
-          runtime: 'pi',
-          skill: 'demo_workflow/generate_key_info',
-          version: 1,
-          status: 'draft',
-          has_draft: true,
-          published_at: null,
-        },
-      ],
-    })
-    renderSection({ node, ...editorProps, agentCatalog: [] })
-
-    // 无 published 版本：isDraft 提示 + 草稿 Agent 的内联编辑面板
-    // （草稿经 react-query 异步解析，等待 resolve）。
-    expect(await screen.findByText(/草稿 Agent 未发布/)).toBeInTheDocument()
-    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
-    // #580 codex P2：draft 列表映射不含 tools（未知 ≠ 空）——节点级
-    // 「Tools 覆盖」字段不得声称「当前生效（跟随 Agent 默认）：（空）」。
-    expect(
-      screen.queryByText(/当前生效（跟随 Agent 默认）/)
-    ).not.toBeInTheDocument()
-  })
-
-  it('prefers the published catalog agent over a same-capability draft', async () => {
-    vi.mocked(fetchAgentDefinitions).mockResolvedValue({
-      agents: [
-        {
-          agent_id: 'draft-agent',
-          capability: 'generate_key_info',
-          runtime: 'pi',
-          skill: '',
-          version: 1,
-          status: 'draft',
-          has_draft: true,
-          published_at: null,
-        },
-      ],
-    })
-    renderSection({ node, ...editorProps })
-
-    // published 版本解析后草稿提示不出现（汇总卡已随 #409 移除，无 id 文本）。
-    await waitFor(() =>
-      expect(screen.queryByText(/草稿 Agent 未发布/)).not.toBeInTheDocument()
-    )
-    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
-  })
-
-  // codex P1 on #391：同 capability 允许存在多个未发布草稿（服务端只在
-  // publish 时校验冲突）——保留 openAgent 点击的草稿身份，不总取第一个。
-  it('honors the pending agent id when several drafts share the capability', async () => {
-    vi.mocked(fetchAgentDefinitions).mockResolvedValue({
-      agents: [
-        {
-          agent_id: 'first-draft',
-          capability: 'generate_key_info',
-          runtime: 'pi',
-          skill: '',
-          version: 1,
-          status: 'draft',
-          has_draft: true,
-          published_at: null,
-        },
-        {
-          agent_id: 'clicked-draft',
-          capability: 'generate_key_info',
-          runtime: 'pi',
-          skill: '',
-          version: 1,
-          status: 'draft',
-          has_draft: true,
-          published_at: null,
-        },
-      ],
-    })
-    const clearPending = vi.fn()
-    renderSection(
-      { node, ...editorProps, agentCatalog: [] },
-      {
-        ...navStub,
-        pendingAgentId: 'clicked-draft',
-        clearPendingAgentId: clearPending,
-      }
-    )
-
-    // 命中点击的草稿（而非列表第一个，汇总卡文本已随 #409 移除，经
-    // isDraft 提示断言解析成功），解析后清除 pending。
-    expect(await screen.findByText(/草稿 Agent 未发布/)).toBeInTheDocument()
-    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
-    await waitFor(() => expect(clearPending).toHaveBeenCalled())
-  })
-
-  // subagent review P2-1 on #391：pending 的清除绑定「数据 settle + 命中
-  // 确认」——列表还在加载（缓存滞后于 turn_end 失效重取）时保留 pending，
-  // 不能在未命中的首次渲染就清掉导致身份丢失、回落到列表第一个。
-  it('keeps the pending agent id while the definitions query is still loading', async () => {
-    let resolveDefinitions: (value: AgentListResponse) => void = () => {}
-    vi.mocked(fetchAgentDefinitions).mockReturnValue(
-      new Promise((resolve) => {
-        resolveDefinitions = resolve
-      }) as ReturnType<typeof fetchAgentDefinitions>
-    )
-    const clearPending = vi.fn()
-    renderSection(
-      { node, ...editorProps, agentCatalog: [] },
-      {
-        ...navStub,
-        pendingAgentId: 'clicked-draft',
-        clearPendingAgentId: clearPending,
-      }
-    )
-
-    // 未 settle：pending 不清除，草稿解析暂缺（显示暂无指引）。
-    expect(screen.getByText(/暂无 published Agent/)).toBeInTheDocument()
-    expect(clearPending).not.toHaveBeenCalled()
-
-    resolveDefinitions({
-      agents: [
-        {
-          agent_id: 'first-draft',
-          capability: 'generate_key_info',
-          runtime: 'pi',
-          skill: '',
-          version: 1,
-          status: 'draft',
-          has_draft: true,
-          published_at: null,
-        },
-        {
-          agent_id: 'clicked-draft',
-          capability: 'generate_key_info',
-          runtime: 'pi',
-          skill: '',
-          version: 1,
-          status: 'draft',
-          has_draft: true,
-          published_at: null,
-        },
-      ],
-    })
-
-    // settle 后命中点击的草稿并清除 pending。
-    expect(await screen.findByText(/草稿 Agent 未发布/)).toBeInTheDocument()
-    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
-    await waitFor(() => expect(clearPending).toHaveBeenCalled())
-  })
-
-  it('renders the node skill editor for agent-routed nodes only', () => {
-    const { unmount } = renderSection({ node, ...editorProps })
-
-    // Agent 路由节点：skill 编辑区（目录 + 版本两控件合一，#410）。
-    expect(screen.getByTestId('skill-selector-stub')).toBeInTheDocument()
-    unmount()
-
-    renderSection({
-      node: { ...node, node_type: 'code' },
-      ...editorProps,
-    })
+    expect(screen.queryByLabelText('Runtime')).not.toBeInTheDocument()
     expect(screen.queryByTestId('skill-selector-stub')).not.toBeInTheDocument()
-  })
-
-  it('omits the skill row and version line when the definition has no skill', () => {
-    const skillless: AgentDefinition[] = [
-      {
-        ...agentCatalog[0],
-        skill: '',
-        skill_ref: null,
-        skill_commit: null,
-      },
-    ]
-    renderSection({ node, ...editorProps, agentCatalog: skillless })
-
-    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
-    expect(screen.queryByText('Skill')).not.toBeInTheDocument()
-    expect(screen.queryByText(/5c5eae7/)).not.toBeInTheDocument()
   })
 
   it('renders nothing for approval nodes (#392 Phase 2: registry gates the section)', () => {
     const { container } = renderSection({
       node: { ...node, node_type: 'approval', capability: '' },
-      ...editorProps,
+      definitionYaml: selfContainedYaml,
+      setDefinitionYaml: () => {},
     })
 
     // 审批门由 WorkflowNodeApprovalConfigSection 承载；本 section 挂在
     // code/agent 类型（nodeTypeSections 注册表），直接喂 approval 渲染空。
     expect(container).toBeEmptyDOMElement()
-  })
-
-  // #409：开合按钮移除——绑定 Agent 的编辑面板随区块内联展开渲染。
-  it('renders the embedded agent editor inline for the bound agent', () => {
-    renderSection({ node, ...editorProps })
-
-    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: '编辑 Agent' })
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: '收起 Agent 编辑' })
-    ).not.toBeInTheDocument()
-  })
-
-  // #409：只读（历史版本查看）下编辑面板隐藏，只读汇总卡保留。
-  it('hides the agent editor but keeps the read-only summary card in read-only mode', () => {
-    renderSection({ node, ...editorProps, readOnly: true })
-
-    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
-    expect(screen.getByText('question-key-info-v1')).toBeInTheDocument()
-    expect(screen.getByText('pi')).toBeInTheDocument()
-    // #575：节点未覆盖时卡片 Tools 行标注「（节点未覆盖，当前生效）」；
-    // 节点级字段的 helperText 同步展示解析后的生效值与来源。
-    expect(
-      screen.getByText('read, write, bash（节点未覆盖，当前生效）')
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText('当前生效（跟随 Agent 默认）：read, write, bash')
-    ).toBeInTheDocument()
-    expect(screen.getByText('v1.3.8 · 5c5eae7')).toBeInTheDocument()
-  })
-
-  // #575：节点已声明 tools 覆盖时，卡片行标注「以节点为准」（定义值
-  // 不生效），节点级字段不再展示跟随 hint。
-  it('marks the card tools row as overridden when the node declares its own tools', () => {
-    const overriddenYaml = `execution:\n  provider: deepseek\n  model: your-model-b\n  thinking: low\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n    tools:\n      - read\n`
-    renderSection({
-      node,
-      ...editorProps,
-      definitionYaml: overriddenYaml,
-      readOnly: true,
-    })
-
-    expect(
-      screen.getByText('read, write, bash（节点已覆盖，以节点为准）')
-    ).toBeInTheDocument()
-    expect(
-      screen.queryByText(/当前生效（跟随 Agent 默认）/)
-    ).not.toBeInTheDocument()
-  })
-
-  // —— #426 codex 终轮 P2：门控组合（capability 命中 × 两份查询 settle）——
-
-  // 场景 1：catalog 空/未命中 + definitions 在途 → 占位——agentId=null 只是
-  // 「未知」（draft 可能仍在途），不能放出可操作的新建表单（codex 指出的
-  // 空列表竞态：先建表单后切真实 draft 会重挂丢输入、甚至先建出多余草稿）。
-  it('keeps the placeholder when the catalog settles empty while definitions are loading', () => {
-    renderSection({
-      node: { ...node, capability: 'missing' },
-      ...editorProps,
-      agentCatalog: [],
-      agentCatalogSettle: { ...settledSettle, definitionsSettled: false },
-    })
-
-    expect(screen.getByText('Agent 绑定解析中...')).toBeInTheDocument()
-    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Agent ID')).not.toBeInTheDocument()
-  })
-
-  // 场景 2：catalog 空 + definitions settle（无 draft）→ ready，新建表单。
-  it('renders the create form once both queries settle with no binding', () => {
-    renderSection({
-      node: { ...node, capability: 'missing' },
-      ...editorProps,
-      agentCatalog: [],
-      agentCatalogSettle: settledSettle,
-    })
-
-    expect(screen.queryByText('Agent 绑定解析中...')).not.toBeInTheDocument()
-    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
-  })
-
-  // 场景 3：catalog 空 + definitions settle（有 draft）→ ready，编辑该 draft。
-  // definitions 经 react-query 真实解析（本套件未 mock hook 本体）。
-  it('renders the draft editor once both queries settle with a draft fallback', async () => {
-    vi.mocked(fetchAgentDefinitions).mockResolvedValue({
-      agents: [
-        {
-          agent_id: 'draft-agent',
-          capability: 'generate_key_info',
-          runtime: 'pi',
-          skill: '',
-          version: 1,
-          status: 'draft',
-          has_draft: true,
-          published_at: null,
-        },
-      ],
-    })
-    renderSection({
-      node,
-      ...editorProps,
-      agentCatalog: [],
-      agentCatalogSettle: settledSettle,
-    })
-
-    expect(await screen.findByTestId('agent-editor-stub')).toBeInTheDocument()
-    expect(screen.queryByText('Agent 绑定解析中...')).not.toBeInTheDocument()
-  })
-
-  // 场景 4：catalog 命中 published → 不等 definitions 直接放行（编辑器按 ID
-  // 加载详情不依赖列表；definitions 在途只影响 loadError 横幅）。
-  it('renders the editor on a published hit without waiting for definitions', () => {
-    renderSection({
-      node,
-      ...editorProps,
-      agentCatalogSettle: { ...settledSettle, definitionsSettled: false },
-    })
-
-    expect(screen.queryByText('Agent 绑定解析中...')).not.toBeInTheDocument()
-    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
-  })
-
-  // 未命中 published + definitions 失败无数据 → 错误占位（不落回可操作表单）。
-  it('shows the error placeholder when an unhit capability loses the definitions query', () => {
-    renderSection({
-      node: { ...node, capability: 'missing' },
-      ...editorProps,
-      agentCatalog: [],
-      agentCatalogSettle: {
-        ...settledSettle,
-        definitionsSettled: true,
-        definitionsFailed: true,
-      },
-    })
-
-    expect(screen.getByText('Agent 目录加载失败')).toBeInTheDocument()
-    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
   })
 })

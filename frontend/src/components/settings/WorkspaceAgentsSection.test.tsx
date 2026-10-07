@@ -1,12 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from '@testing-library/react'
-import { archiveAgent, fetchAgentDefinitions } from '../../api'
+import { render, screen, within } from '@testing-library/react'
+import { fetchAgentDefinitions, fetchAgentProvenance } from '../../api'
 import type { AgentListItem, WorkflowDefinitionRecord } from '../../types'
 import { TestQueryProvider } from '../../testing/testQueryClient'
 import { WorkspaceAgentsSection } from './WorkspaceAgentsSection'
@@ -20,7 +14,7 @@ const workflowState = vi.hoisted(() => ({
 
 vi.mock('../../api', () => ({
   fetchAgentDefinitions: vi.fn(),
-  archiveAgent: vi.fn(),
+  fetchAgentProvenance: vi.fn(),
 }))
 
 vi.mock('../../hooks/useWorkflowDefinitionQuery', () => ({
@@ -28,7 +22,7 @@ vi.mock('../../hooks/useWorkflowDefinitionQuery', () => ({
 }))
 
 const mockFetch = vi.mocked(fetchAgentDefinitions)
-const mockArchive = vi.mocked(archiveAgent)
+const mockProvenance = vi.mocked(fetchAgentProvenance)
 
 const WORKSPACE_ID = 'polaris'
 
@@ -55,19 +49,29 @@ function agent(
   }
 }
 
+const RUNTIME = {
+  runtime: 'pi',
+  provider: '',
+  model: '',
+  thinking: '',
+  prompt: '',
+  prompt_mode: '',
+}
+
 function node(
   key: string,
   capability: string,
-  nodeType = 'agent'
+  options: { nodeType?: string; inlined?: boolean } = {}
 ): WorkflowDefinitionRecord['nodes'][number] {
   return {
     key,
-    label: key,
+    label: `${key} 节点`,
     capability,
-    node_type: nodeType,
+    node_type: options.nodeType ?? 'agent',
     inputs: [],
     outputs: [],
     after: [],
+    ...(options.inlined ? { execution: RUNTIME } : {}),
   }
 }
 
@@ -91,6 +95,11 @@ function renderSection() {
   )
 }
 
+async function rowOf(agentId: string) {
+  const list = await screen.findByRole('list', { name: '历史 Agent 定义列表' })
+  return within(list).getByRole('listitem', { name: agentId })
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mockFetch.mockResolvedValue({
@@ -101,219 +110,132 @@ beforeEach(() => {
       agent('old_retired', 'old_retired', 'archived'),
     ],
   })
-  mockArchive.mockResolvedValue({ archived: 2 })
+  mockProvenance.mockResolvedValue({
+    nodes: [
+      {
+        node_key: 'opening',
+        node_label: 'opening 节点',
+        agent_id: 'write_opening',
+        agent_version: 2,
+      },
+      {
+        node_key: 'opening_v2',
+        node_label: 'opening_v2 节点',
+        agent_id: 'write_opening',
+        agent_version: 2,
+      },
+    ],
+  })
   workflowState.current = {
     data: workflow([
-      node('opening', 'write_opening'),
+      node('opening', 'write_opening', { inlined: true }),
+      node('opening_v2', 'write_opening', { inlined: true }),
+      // 未内联的 legacy 节点仍按 capability 回读 Agent 定义。
+      node('bazi', 'analyze_bazi'),
       // code 节点同名 capability 不构成 Agent 引用。
-      node('assemble', 'write_synthesis', 'code'),
+      node('assemble', 'write_synthesis', { nodeType: 'code' }),
     ]),
     isError: false,
   }
 })
 
-describe('WorkspaceAgentsSection', () => {
-  it('shows the retirement notice while keeping the catalog usable', async () => {
+describe('WorkspaceAgentsSection（#1079 / #440 D1 只读历史）', () => {
+  it('is a read-only history without archive actions', async () => {
     renderSection()
+    expect(
+      screen.getByRole('heading', { name: '历史 Agent 定义' })
+    ).toBeInTheDocument()
     const notice = screen.getByRole('note')
-    expect(notice).toHaveTextContent('Agent 定义即将退役')
+    expect(notice).toHaveTextContent('Agent 定义已退役为只读历史')
     expect(
       within(notice).getByRole('link', { name: '查看退役计划' })
     ).toHaveAttribute(
       'href',
       'https://github.com/LuciusCao/agent-legion/issues/440'
     )
-    // D1：双读阶段目录与归档入口原样保留。
-    const list = await screen.findByRole('list', { name: 'Agent 定义列表' })
-    expect(within(list).getAllByRole('button', { name: /归档/ })).toHaveLength(
-      3
-    )
+    const list = await screen.findByRole('list', {
+      name: '历史 Agent 定义列表',
+    })
+    // 归档会让旧快照回读失败（D1）：列表上没有任何按钮。
+    expect(within(list).queryAllByRole('button')).toHaveLength(0)
+    expect(within(list).getAllByRole('listitem')).toHaveLength(3)
+    expect(within(list).queryByText('old_retired')).not.toBeInTheDocument()
   })
 
-  it('lists all non-archived agents and flags unreferenced ones', async () => {
+  it('shows how many active-revision nodes inlined each definition', async () => {
     renderSection()
-    const list = await screen.findByRole('list', { name: 'Agent 定义列表' })
-    const items = within(list).getAllByRole('listitem')
-    expect(items.map((li) => li.getAttribute('aria-label'))).toEqual([
-      'analyze_bazi',
-      'write_opening',
-      'write_synthesis',
-    ])
-    expect(mockFetch).toHaveBeenCalledWith(WORKSPACE_ID)
+    const opening = await rowOf('write_opening')
+    const chip = await within(opening).findByText('已内联到 2 个节点')
+    expect(chip).toHaveAttribute(
+      'title',
+      'opening 节点（opening）、opening_v2 节点（opening_v2）'
+    )
     expect(
-      within(screen.getByRole('listitem', { name: 'write_opening' })).getByText(
-        '被 1 个节点引用'
+      within(await rowOf('analyze_bazi')).getByText('未内联到当前 workflow')
+    ).toBeInTheDocument()
+    expect(mockProvenance).toHaveBeenCalledWith(WORKSPACE_ID)
+  })
+
+  it('flags definitions still read by legacy (not inlined) nodes', async () => {
+    renderSection()
+    expect(
+      within(await rowOf('analyze_bazi')).getByText('仍被 1 个未内联节点使用')
+    ).toBeInTheDocument()
+    // 已内联节点与 code 节点都不算回读引用。
+    expect(
+      within(await rowOf('write_opening')).queryByText(/未内联节点使用/)
+    ).not.toBeInTheDocument()
+    expect(
+      within(await rowOf('write_synthesis')).queryByText(/未内联节点使用/)
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows no inlined counts while provenance is unknown', async () => {
+    mockProvenance.mockRejectedValue(new Error('boom'))
+    renderSection()
+    const row = await rowOf('write_opening')
+    expect(within(row).queryByText(/已内联到/)).not.toBeInTheDocument()
+    expect(
+      within(row).queryByText('未内联到当前 workflow')
+    ).not.toBeInTheDocument()
+    expect(
+      await screen.findByText(
+        '当前 workflow 加载失败，暂无法判断内联与引用关系。'
       )
     ).toBeInTheDocument()
+  })
+
+  it('labels draft-only agents and shows the published version', async () => {
+    renderSection()
     expect(
-      within(screen.getByRole('listitem', { name: 'analyze_bazi' })).getByText(
-        '未被引用'
+      within(await rowOf('write_synthesis')).getByText('仅草稿（从未发布）')
+    ).toBeInTheDocument()
+    expect(
+      within(await rowOf('analyze_bazi')).getByText(
+        'capability：analyze_bazi · v2'
       )
     ).toBeInTheDocument()
-    expect(
-      within(
-        screen.getByRole('listitem', { name: 'write_synthesis' })
-      ).getByText('未被引用')
-    ).toBeInTheDocument()
   })
 
-  it('filters down to unreferenced agents', async () => {
-    renderSection()
-    await screen.findByRole('list', { name: 'Agent 定义列表' })
-    fireEvent.click(screen.getByRole('button', { name: '未被引用（2）' }))
-    const items = within(
-      screen.getByRole('list', { name: 'Agent 定义列表' })
-    ).getAllByRole('listitem')
-    expect(items.map((li) => li.getAttribute('aria-label'))).toEqual([
-      'analyze_bazi',
-      'write_synthesis',
-    ])
-    expect(
-      screen.getByRole('button', { name: '未被引用（2）' })
-    ).toHaveAttribute('aria-pressed', 'true')
-  })
-
-  it('archives an orphan agent after confirmation and refetches', async () => {
-    renderSection()
-    await screen.findByRole('list', { name: 'Agent 定义列表' })
-    fireEvent.click(screen.getByRole('button', { name: '归档 analyze_bazi' }))
-    const dialog = screen.getByRole('dialog')
-    expect(within(dialog).getByText(/analyze_bazi/)).toBeInTheDocument()
-    // 未被引用的 Agent 不出引用警告。
-    expect(within(dialog).queryByRole('alert')).toBeNull()
-    expect(mockArchive).not.toHaveBeenCalled()
-
-    fireEvent.click(within(dialog).getByRole('button', { name: '归档' }))
-    await waitFor(() =>
-      expect(mockArchive).toHaveBeenCalledWith(WORKSPACE_ID, 'analyze_bazi')
-    )
-    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2))
-  })
-
-  it('cancelling the confirmation does not archive', async () => {
-    renderSection()
-    await screen.findByRole('list', { name: 'Agent 定义列表' })
-    fireEvent.click(screen.getByRole('button', { name: '归档 analyze_bazi' }))
-    fireEvent.click(
-      within(screen.getByRole('dialog')).getByRole('button', { name: '取消' })
-    )
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(mockArchive).not.toHaveBeenCalled()
-  })
-
-  it('warns about referencing nodes before archiving a referenced agent', async () => {
-    renderSection()
-    await screen.findByRole('list', { name: 'Agent 定义列表' })
-    fireEvent.click(screen.getByRole('button', { name: '归档 write_opening' }))
-    const alert = within(screen.getByRole('dialog')).getByRole('alert')
-    expect(alert).toHaveTextContent(
-      '已发布版本仍被当前 workflow 的 1 个节点引用'
-    )
-    expect(alert).toHaveTextContent('opening')
-  })
-
-  it('surfaces archive errors', async () => {
-    mockArchive.mockRejectedValueOnce(new Error('Admin role required'))
-    renderSection()
-    await screen.findByRole('list', { name: 'Agent 定义列表' })
-    fireEvent.click(screen.getByRole('button', { name: '归档 analyze_bazi' }))
-    fireEvent.click(
-      within(screen.getByRole('dialog')).getByRole('button', { name: '归档' })
-    )
-    expect(await screen.findByText('Admin role required')).toBeInTheDocument()
-  })
-
-  it('treats every agent as unreferenced when no revision is published', async () => {
-    workflowState.current = { data: null, isError: false }
-    renderSection()
-    await screen.findByRole('list', { name: 'Agent 定义列表' })
-    expect(
-      screen.getByRole('button', { name: '未被引用（3）' })
-    ).toBeInTheDocument()
-  })
-
-  it('does not flag orphans while references are unknown', async () => {
-    workflowState.current = { data: undefined, isError: true }
-    renderSection()
-    await screen.findByRole('list', { name: 'Agent 定义列表' })
-    expect(screen.queryByText('未被引用')).toBeNull()
-    expect(screen.getByRole('button', { name: '未被引用（0）' })).toBeDisabled()
-    expect(screen.getByRole('status')).toHaveTextContent('暂无法判断引用关系')
-    fireEvent.click(screen.getByRole('button', { name: '归档 analyze_bazi' }))
-    expect(
-      within(screen.getByRole('dialog')).getByRole('alert')
-    ).toHaveTextContent('引用关系尚未确认')
-  })
-  it('judges references by the published capability behind a draft (#906)', async () => {
-    // 已发布 capability write_opening、草稿改成 renamed_opening：节点仍按
-    // 已发布的 write_opening 路由到它，不能被当成孤儿。
+  // #906：legacy 节点按已发布 capability 路由，草稿改名不影响引用判定。
+  it('judges legacy references by the published capability behind a draft', async () => {
     mockFetch.mockResolvedValue({
       agents: [
-        agent('write_opening', 'renamed_opening', 'draft', {
-          capability: 'write_opening',
+        agent('renamed', 'new_cap', 'draft', {
+          capability: 'bazi_cap',
           version: 1,
         }),
-        agent('analyze_bazi', 'analyze_bazi'),
       ],
     })
+    workflowState.current = {
+      data: workflow([node('bazi', 'bazi_cap')]),
+      isError: false,
+    }
     renderSection()
-    await screen.findByRole('list', { name: 'Agent 定义列表' })
-    const row = screen.getByRole('listitem', { name: 'write_opening' })
-    expect(within(row).getByText('被 1 个节点引用')).toBeInTheDocument()
-    expect(within(row).getByText('已发布 v1 · 有草稿')).toBeInTheDocument()
+    const row = await rowOf('renamed')
+    expect(within(row).getByText('仍被 1 个未内联节点使用')).toBeInTheDocument()
     expect(
-      within(row).getByText(
-        /capability：write_opening（草稿改为 renamed_opening/
-      )
+      within(row).getByText('capability：bazi_cap · v1')
     ).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '未被引用（1）' }))
-    const orphans = within(
-      screen.getByRole('list', { name: 'Agent 定义列表' })
-    ).getAllByRole('listitem')
-    expect(orphans.map((li) => li.getAttribute('aria-label'))).toEqual([
-      'analyze_bazi',
-    ])
-
-    fireEvent.click(screen.getByRole('button', { name: '全部（2）' }))
-    fireEvent.click(screen.getByRole('button', { name: '归档 write_opening' }))
-    const dialog = screen.getByRole('dialog')
-    expect(dialog).toHaveTextContent('capability：write_opening')
-    expect(dialog).toHaveTextContent('含已发布版本')
-    expect(dialog).toHaveTextContent('草稿已把 capability 改为 renamed_opening')
-    const alert = within(dialog).getByRole('alert')
-    expect(alert).toHaveTextContent(
-      '已发布版本仍被当前 workflow 的 1 个节点引用'
-    )
-    expect(alert).toHaveTextContent('opening')
-  })
-
-  it('labels draft-only agents and archives them normally', async () => {
-    renderSection()
-    await screen.findByRole('list', { name: 'Agent 定义列表' })
-    const row = screen.getByRole('listitem', { name: 'write_synthesis' })
-    expect(within(row).getByText('仅草稿（从未发布）')).toBeInTheDocument()
-    fireEvent.click(
-      screen.getByRole('button', { name: '归档 write_synthesis' })
-    )
-    const dialog = screen.getByRole('dialog')
-    expect(within(dialog).queryByRole('alert')).toBeNull()
-    expect(dialog).not.toHaveTextContent('含已发布版本')
-    fireEvent.click(within(dialog).getByRole('button', { name: '归档' }))
-    await waitFor(() =>
-      expect(mockArchive).toHaveBeenCalledWith(WORKSPACE_ID, 'write_synthesis')
-    )
-  })
-
-  it('judges draft-only agents by their draft capability', async () => {
-    mockFetch.mockResolvedValue({
-      agents: [agent('write_opening', 'write_opening', 'draft')],
-    })
-    renderSection()
-    await screen.findByRole('list', { name: 'Agent 定义列表' })
-    fireEvent.click(screen.getByRole('button', { name: '归档 write_opening' }))
-    const alert = within(screen.getByRole('dialog')).getByRole('alert')
-    expect(alert).toHaveTextContent('从未发布')
-    expect(alert).toHaveTextContent('opening')
   })
 })

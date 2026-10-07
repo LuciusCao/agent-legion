@@ -3,11 +3,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import { invalidateStudioTurnEndQueries } from './studioChatInvalidation'
 
-// #387：MCP 的 save_agent_definition_draft 新建 draft-only Agent 后，turn
-// 结束要失效 agent-definitions 缓存，节点详情的 draft 回落解析才能看到它。
+// #1079（#440 P3b）：Agent 定义写工具自 P3 起不写库——turn 结束不再失效
+// agent-definitions 缓存（原 #387 的 draft 回落解析已随 inspector 清理删除）。
 
 describe('invalidateStudioTurnEndQueries', () => {
-  it('invalidates workflow data, agent catalog, agent definitions, and skill detail', () => {
+  it('invalidates workflow data, agent catalog and skill detail, not agent definitions', () => {
     const queryClient = new QueryClient()
     const spy = vi.spyOn(queryClient, 'invalidateQueries')
 
@@ -19,7 +19,7 @@ describe('invalidateStudioTurnEndQueries', () => {
     expect(spy).toHaveBeenCalledWith({
       queryKey: extraQueryKeys.studioAgentCatalog('ws1'),
     })
-    expect(spy).toHaveBeenCalledWith({
+    expect(spy).not.toHaveBeenCalledWith({
       queryKey: extraQueryKeys.agentDefinitions('ws1'),
     })
     expect(spy).toHaveBeenCalledWith({ queryKey: ['studioSkillDetail'] })
