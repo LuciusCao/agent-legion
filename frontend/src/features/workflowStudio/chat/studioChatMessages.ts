@@ -20,37 +20,23 @@ export type WorkflowDraftView = {
   compareMeta: string | null
 }
 
-export type AgentDefinitionDraftView = {
+// #1079（#440 P3b）：Agent 定义草稿卡已下线——MCP 的 Agent 定义写工具
+// 自 P3 起只返回引导、不写库，节点执行档案随 workflow 草稿保存（WorkflowDraftCard）。
+export type NodeCodeDraftView = {
   toolCallId: string
-  agentId: string
-  capability: string | null
-  runtime: string | null
-  skill: string | null
+  nodeKey: string
   /** 来源 tool call 的状态（#692 R2 P2-1）：pending/failed 的保存不保证
    * 草稿落库成功，发布入口只对 completed 开放——否则失败的工具调用
-   * 也能发布出更早的旧草稿，用户误以为新定义已生效。 */
+   * 也能发布出更早的旧草稿，用户误以为新代码已生效。 */
   status: string
-  /** 保存响应返回的草稿身份（#692 codex P1 第三轮）：实体是 workspace
-   * 级状态，本会话的「最新」可能已被其他会话覆盖——发布前必须按它
-   * 与服务端当前草稿 hash 比对，不一致拦截。解析自 rawOutput 的响应
-   * 体（definition_hash 字段）。 */
+  /** 保存响应返回的草稿身份（#692 codex P1 第三轮，code_hash 字段）：
+   * 实体是 workspace 级状态，本会话的「最新」可能已被其他会话覆盖——
+   * 发布请求带它作 expected_hash，由服务端原子核对。 */
   draftHash: string | null
   /** 保存的 HTTP 层失败（R5 P2-1）：MCP ToolClient 对非 2xx 不抛异常、
    * 返回 "HTTP 4xx: …" / "request failed: …" 文本（tool_client.py:67-75），
    * 协议层 tool call 仍 completed——仅看 status 挡不住这类卡，发布会
-   * 静默发出服务端的旧草稿（saveFailed 卡也无 draftHash，双重跳过
-   * 核对与残窗警告）。 */
-  saveFailed: boolean
-}
-
-export type NodeCodeDraftView = {
-  toolCallId: string
-  nodeKey: string
-  /** 同 AgentDefinitionDraftView.status。 */
-  status: string
-  /** 同 AgentDefinitionDraftView.draftHash（code_hash 字段）。 */
-  draftHash: string | null
-  /** 同 AgentDefinitionDraftView.saveFailed。 */
+   * 静默发出服务端的旧草稿。 */
   saveFailed: boolean
 }
 
@@ -256,14 +242,14 @@ function keepLatestPerEntity<T>(drafts: T[], keyOf: (draft: T) => string): T[] {
   return [...latest.values()]
 }
 
-/** 保存响应体里的草稿身份 hash（#692 codex P1 第三轮）。save_*_draft
- * 工具的 HTTP 响应带 definition_hash / code_hash，MCP 把响应体文本放进
+/** 保存响应体里的草稿身份 hash（#692 codex P1 第三轮）。save_node_code_draft
+ * 工具的 HTTP 响应带 code_hash，MCP 把响应体文本放进
  * rawOutput 的 text block——与 extractWorkflowDraft 解析 outputText 同一
  * 先例。解析不到返回 null（旧转录/非 JSON 响应），调用方按「无法核对
  * 身份」处理。 */
 function draftHashFromOutput(
   call: ToolCallView,
-  hashKey: 'definition_hash' | 'code_hash'
+  hashKey: 'code_hash'
 ): string | null {
   const parsed = parseFirstJson(call.outputText)
   const value = parsed?.[hashKey]
@@ -280,28 +266,6 @@ function saveFailedFromOutput(call: ToolCallView): boolean {
     call.outputText.startsWith('HTTP ') ||
     call.outputText.startsWith('request failed: ')
   )
-}
-
-export function extractAgentDefinitionDrafts(
-  calls: ToolCallView[]
-): AgentDefinitionDraftView[] {
-  const drafts: AgentDefinitionDraftView[] = []
-  for (const call of calls) {
-    if (!toolNameMatches(call, 'save_agent_definition_draft')) continue
-    const agentId = asText(call.rawInput?.agent_id)
-    if (!agentId) continue
-    drafts.push({
-      toolCallId: call.toolCallId,
-      agentId,
-      capability: asText(call.rawInput?.capability) || null,
-      runtime: asText(call.rawInput?.runtime) || null,
-      skill: asText(call.rawInput?.skill) || null,
-      status: call.status,
-      draftHash: draftHashFromOutput(call, 'definition_hash'),
-      saveFailed: saveFailedFromOutput(call),
-    })
-  }
-  return keepLatestPerEntity(drafts, (draft) => draft.agentId)
 }
 
 export function extractNodeCodeDrafts(
@@ -451,7 +415,6 @@ export function deriveChatViews(messages: ChatMessage[]) {
   return {
     toolCalls,
     workflowDraft: extractWorkflowDraft(toolCalls),
-    agentDrafts: extractAgentDefinitionDrafts(toolCalls),
     nodeDrafts: extractNodeCodeDrafts(toolCalls),
     permissions: buildPermissionViews(messages),
   }

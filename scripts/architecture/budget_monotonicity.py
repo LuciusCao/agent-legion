@@ -23,12 +23,9 @@ from typing import NamedTuple
 from .budget_anchors import (
     anchor_budget_floors,
     anchor_revisions,
-    base_anchor_override,
     base_floor_anchor,
     release_train_opt_out,
-    shallow_opt_out,
-    unresolvable_anchor_error,
-    unresolvable_base_anchor_error,
+    unresolvable_anchors_errors,
 )
 from .budget_floor_errors import baseline_raise_error, exemption_raise_error
 from .budget_git import BudgetGitUnavailable, GitHelper
@@ -69,30 +66,6 @@ def _anchors() -> tuple[str, ...]:
     return anchor_revisions(release_train=release_train_opt_out())
 
 
-def _unresolvable_anchor_errors(git: GitHelper) -> list[str]:
-    """Hard-fail on git checkouts whose anchors do not resolve: a shallow
-    clone missing HEAD^ silently guts the committed-raise check exactly
-    where CI gates PRs (codex review on PR #231). The env opt-out covers
-    depth-1 checkouts that cannot fetch history — but never excuses an
-    explicitly configured base ref, which must resolve or be fixed. Non-git
-    checkouts stay quiet (nothing to compare against). Git execution
-    failures (missing binary, timeout, repository error) surface with their
-    real reason instead of posing as shallow clones (#236)."""
-    if not git.is_repository():
-        if git.has_git_failures():
-            return [f"budget monotonicity: git failed to run; cause: {git.diagnostics()}"]
-        return []
-    errors: list[str] = []
-    for revision in _anchors():
-        if git.revision_resolvable(revision):
-            continue
-        if revision == base_anchor_override():
-            errors.append(unresolvable_base_anchor_error("budget", revision))
-        elif not shallow_opt_out():
-            errors.append(unresolvable_anchor_error("budget", revision, git.diagnostics()))
-    return errors
-
-
 def ceiling_regression_errors(
     root: Path,
     baseline_files: dict[str, int],
@@ -116,7 +89,7 @@ def ceiling_regression_errors(
     """
     git = GitHelper(root)
     try:
-        errors = _unresolvable_anchor_errors(git)
+        errors = unresolvable_anchors_errors(git, "budget", _anchors())
         if errors:
             # Anchors already failed (shallow clone / unborn HEAD): rename
             # detection cannot run against a missing revision either, and

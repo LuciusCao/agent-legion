@@ -104,7 +104,6 @@ export function WorkflowNodeDetailDrawer() {
             workflow={studio.workflow}
             nodeKey={nodeKey}
             agentCatalog={studio.agentCatalog}
-            agentCatalogSettle={studio.agentCatalogSettle}
             definitionYaml={studio.definitionYaml}
             setDefinitionYaml={studio.setDefinitionYaml}
             compareSummary={studio.compareSummary}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -73,6 +74,12 @@ class _Env:
         ws = job_db.create_workspace(name="Replay WS")
         self.workspace_id = str(ws["id"])
         definition = definition or _definition()
+        if route_kind == "agent" and definition.nodes[target_node].node_type != "agent":
+            # Route rows only bind snapshot nodes typed ``agent`` (#935 R1): the
+            # legacy Agent-version pin path needs a legacy (not inlined) agent node.
+            nodes = dict(definition.nodes)
+            nodes[target_node] = replace(nodes[target_node], node_type="agent")
+            definition = replace(definition, nodes=nodes)
         snapshot = serialize_definition(definition)
         self.job = job_db.create_job(
             workflow_key="test",
@@ -379,6 +386,35 @@ def test_archived_version_pin_allowed(agent_env) -> None:
     pin = agent_env.copy_run_pins(replay)["agent_versions"]["generate"]
     assert pin["version"] == 1
     assert pin["definition_hash"] == published_v1.definition_hash
+
+
+def _record_sample_version(version: int) -> None:
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "update quality_sample_items set agent_version=%s where id='item-1'", (version,)
+        )
+
+
+def test_default_replays_the_sampled_runs_agent_version(agent_env) -> None:
+    """#1079 review：legacy 节点不选档案 = 原运行实际跑的版本，而非当前 published。"""
+    service = AgentService(TEST_DATABASE_URL, agent_env.workspace_id)
+    original_v1 = service.get_published(AGENT_ID)
+    _save_draft(agent_env.workspace_id)
+    service.publish(AGENT_ID)  # v2 published now
+    _record_sample_version(1)
+
+    replay = agent_env.service().create_replay(agent_env.workspace_id, "item-1")
+
+    assert replay["agent_version"] == 1
+    pin = agent_env.copy_run_pins(replay)["agent_versions"]["generate"]
+    assert pin["version"] == 1
+    assert pin["definition_hash"] == original_v1.definition_hash
+
+
+def test_default_reports_a_vanished_sampled_version(agent_env) -> None:
+    _record_sample_version(99)
+    with pytest.raises(NotFoundError, match="no version 99.*choose a workflow revision"):
+        agent_env.service().create_replay(agent_env.workspace_id, "item-1")
 
 
 def test_unknown_version_rejected(agent_env) -> None:

@@ -1,9 +1,9 @@
 """Run/job freeze helpers (schema v53, RUN-FREEZE-001).
 
 The retired intake batch payload split into authoritative columns: frozen
-pins (``node_code_versions`` / ``agent_versions`` / ``quality_replay``) live
-on the run row, the frozen node config and the job's input live on the job
-row. This module rebuilds the legacy payload-equivalent dict from those
+pins (``node_code_versions`` / ``agent_versions`` / ``node_profiles`` /
+``quality_replay``) live on the run row, the frozen node config and the
+job's input live on the job row. This module rebuilds the legacy payload-equivalent dict from those
 columns so the dispatch chain (``dispatch_effective_config``,
 ``frozen_dispatch_pin``, ``agent_version_pin``) and the node SDK
 (``ctx.batch_payload``) keep their contract without ever reading the old
@@ -21,7 +21,7 @@ from typing import Any
 from server.app.db.rowmap import parse_object
 from server.app.jobs.run_freeze import candidate_input as candidate_input
 
-_PIN_KEYS = ("node_code_versions", "agent_versions", "quality_replay")
+_PIN_KEYS = ("node_code_versions", "agent_versions", "node_profiles", "quality_replay")
 
 
 def reconstruct_batch_payload(

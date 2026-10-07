@@ -21,6 +21,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "init-worktree.sh"
 # init-worktree.sh 的 S3 建桶步骤委托给该脚本，合成布局里要一并复制。
 ENSURE_S3_SCRIPT = ROOT / "scripts" / "ensure-s3-bucket.py"
+# 派生名与撞名检测的共享库（#950），init-worktree.sh source 它。
+NAMES_LIB = ROOT / "scripts" / "worktree-names-lib.sh"
 
 _GIT_STUB = """#!/usr/bin/env bash
 if [[ "$1" == "worktree" && "$2" == "list" ]]; then
@@ -71,6 +73,7 @@ def _setup(tmp_path: Path, script_rel: str, git_stub: str = _GIT_STUB) -> tuple[
     script_path.parent.mkdir(parents=True)
     shutil.copy(SCRIPT, script_path)
     shutil.copy(ENSURE_S3_SCRIPT, script_path.parent / ENSURE_S3_SCRIPT.name)
+    shutil.copy(NAMES_LIB, script_path.parent / NAMES_LIB.name)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_stub(bin_dir / "git", git_stub.format(main=main))

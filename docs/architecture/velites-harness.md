@@ -85,10 +85,10 @@ agent 框架；依赖清单评审纳入 PR。
 worker 侧进程模型不变：`worker/executor.py` 每个 claim 起一个 velites 子进程
 （`subprocess.Popen(cwd=job_dir, start_new_session=True)`），stdout 即事件流。
 二进制经 Dockerfile 新增 rust build stage 打进 worker 镜像；命令构建经
-Host 侧 runtime catalog（`server/app/agent_runtime/`，`AgentDefinition.runtime`
-分发到各 adapter，EXEC-RUNTIME-DISPATCH-001）——pi → pi argv、
+Host 侧 runtime catalog（`server/app/agent_runtime/`，按 agent 节点执行档案的
+`execution.runtime` 分发到各 adapter，EXEC-RUNTIME-DISPATCH-001）——pi → pi argv、
 velites → velites argv；pi 不退役、长期保留，
-灰度/回退均为单 agent 定义的单字段配置改动（详见 §9）。
+灰度/回退均为单个 agent 节点的单字段配置改动、随 workflow 发布生效（详见 §9）。
 
 ## 4. 事件 Schema v1：pi 兼容子集（velites/json1）
 
@@ -483,8 +483,9 @@ fail-closed 报错，内置节点不受影响。
 ## 9. 与 Agent Legion 的集成与切换
 
 **当前模型（2026-08-05 起，agent 配置治理 phase 3 落地）**：pi、velites
-是平级 runtime，由 `AgentDefinition.runtime` 声明（定义存
-`versioned_entities` 表，Studio「Agent 管理」维护；yaml `agents:` 段与
+是平级 runtime，由 agent 节点执行档案的 `execution.runtime` 声明（#440 P3
+起随 workflow revision 发布；此前的 Agent 定义已只读、仅服务旧 job 快照，
+EXEC-AGENT-PROFILE-001；yaml `agents:` 段与
 `workflows.pi` 块已退役，出现在 yaml 中启动即报错；openclaw 曾短暂接入，
 因无流式事件与 token 计量已于 #75 整体退役）。命令构建经 Host 侧
 runtime catalog（`server/app/agent_runtime/`，runtime 全集的单一事实来源
@@ -498,7 +499,8 @@ runtime catalog（`server/app/agent_runtime/`，runtime 全集的单一事实来
 fail-fast（issue #75 阶段 2）。
 manifest 的执行块统一为
 `execution.*`（`binary/provider/model/thinking/timeout_seconds/no_sandbox`），
-不再有 `pi.*` 键。灰度/回退粒度是单个 agent 定义的单字段改动，操作手册见
+不再有 `pi.*` 键。灰度/回退粒度是单个 agent 节点的 `execution.runtime`
+单字段改动（在途 job 经「升级 workflow」生效），操作手册见
 `docs/remote-execution-runbook.md` §6。
 
 **flavor 的退役（2026-08-05）**：`workflows.pi.flavor` 实现选择层已随 yaml
@@ -539,7 +541,7 @@ worker 镜像——velites 经 compose 外挂（`AGENT_WORKER_EXPECT_RUNTIMES`
 （#383，与 harness 分家）。容器部署前置：bwrap setuid 仍在镜像内；容器
 seccomp 需放行 `unshare`（见 §5 沙箱小节的运行时要求）。
 
-**Pi CLI 安装与验证**（仅 `runtime: pi` 的 agent 需要）：
+**Pi CLI 安装与验证**（仅 `execution.runtime: pi` 的 agent 节点需要）：
 
 ```bash
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent
@@ -547,7 +549,7 @@ pi                      # 交互式完成认证
 ./scripts/check-pi.sh   # 验证安装与认证状态
 ```
 
-之后在 Studio「Agent 管理」把对应 agent 定义的 `runtime` 设为 `pi` 即可。
+之后把 workflow 中对应 agent 节点的 `execution.runtime`（或 workflow 顶层 `execution.runtime` 默认）设为 `pi` 并发布即可。
 
 ### 新增 agent runtime 接入指南
 

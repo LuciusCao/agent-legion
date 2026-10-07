@@ -48,6 +48,7 @@ from server.app.services.job_errors import (
     InvalidOperationError,
     NotFoundError,
 )
+from server.app.services.skill_build_residue import residue_payload_errors
 from server.app.services.skill_edit_checks import (
     graded_contract_check,
     resolve_targets_checked,
@@ -256,6 +257,10 @@ class SkillEditingService:
         targets, errors = resolve_targets_checked(
             repo_dir, [(raw, content) for raw, content in files]
         )
+        # #1038: build residue is never authored content (same rule and text
+        # as create_skill / the shared PUT); get_skill's editing snapshot
+        # skips it, so a committed .pyc would be saved but never read back.
+        errors += residue_payload_errors([raw for raw, _ in files])
         if errors:
             raise SkillEditValidationError("Invalid skill file paths", errors)
         return targets

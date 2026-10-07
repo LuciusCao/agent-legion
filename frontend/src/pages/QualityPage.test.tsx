@@ -103,6 +103,33 @@ const mockFetchReplays = vi.fn().mockResolvedValue({ replays: [] })
 const mockCreateReplay = vi.fn().mockResolvedValue({
   replay: { ...replay, id: 'r2', status: 'pending', finished_at: null },
 })
+// #1079（#440 D6）：回放执行档案候选（revision v7 当前生效 + 当前草稿）。
+const mockFetchReplayProfiles = vi.fn().mockResolvedValue({
+  options: [
+    {
+      source: 'revision',
+      revision_id: 'rev-7',
+      revision_version: 7,
+      revision_status: 'active',
+      is_original: false,
+      runtime: 'velites',
+      provider: 'p',
+      model: 'm2',
+      profile_hash: 'h7',
+    },
+    {
+      source: 'draft',
+      revision_id: null,
+      revision_version: null,
+      revision_status: 'draft',
+      is_original: false,
+      runtime: 'pi',
+      provider: '',
+      model: '',
+      profile_hash: 'hd',
+    },
+  ],
+})
 const mockFetchReplayDetail = vi.fn().mockResolvedValue({
   replay,
   labels: [],
@@ -134,6 +161,8 @@ vi.mock('../api/qualityApi', async (importOriginal) => {
     fetchReplays: (...args: unknown[]) => mockFetchReplays(...args),
     createReplay: (...args: unknown[]) => mockCreateReplay(...args),
     fetchReplayDetail: (...args: unknown[]) => mockFetchReplayDetail(...args),
+    fetchReplayProfiles: (...args: unknown[]) =>
+      mockFetchReplayProfiles(...args),
   }
 })
 
@@ -308,19 +337,37 @@ describe('QualityPage', () => {
     expect(screen.getByText(/暂无已打标的可分类样本/)).toBeInTheDocument()
   })
 
-  it('发起 replay：携带 agent_version 调用创建接口', async () => {
+  it('发起 replay：按所选 workflow revision 调用创建接口（#1079 D6）', async () => {
     const user = userEvent.setup()
     renderPage()
     await user.click(await screen.findByRole('button', { name: '去打标' }))
     expect(await screen.findByText('样本快照')).toBeInTheDocument()
     expect(screen.getByText('暂无 replay')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Agent 版本')).not.toBeInTheDocument()
 
-    await user.type(screen.getByLabelText('Agent 版本'), '5')
+    await user.click(screen.getByLabelText('执行档案'))
+    // #1079 review：legacy 样本的默认选项标明原运行的 Agent 版本（v3）。
+    expect(
+      await screen.findByRole('option', {
+        name: '原运行的执行档案（Agent v3）',
+      })
+    ).toBeInTheDocument()
+    await user.click(
+      await screen.findByRole('option', {
+        name: 'v7（当前生效） · velites / m2',
+      })
+    )
     await user.click(screen.getByRole('button', { name: '发起 Replay' }))
     await waitFor(() =>
       expect(mockCreateReplay).toHaveBeenCalledWith('ws1', 'i1', {
-        agent_version: 5,
+        revision_id: 'rev-7',
+        use_draft: false,
       })
+    )
+    expect(mockFetchReplayProfiles).toHaveBeenCalledWith(
+      'ws1',
+      'i1',
+      expect.anything()
     )
     // 创建成功使 replay 列表失效重取；等更新落地再结束，避免 act 警告
     await waitFor(() => expect(mockFetchReplays).toHaveBeenCalledTimes(2))
@@ -334,14 +381,45 @@ describe('QualityPage', () => {
     const user = userEvent.setup()
     renderPage()
     await user.click(await screen.findByRole('button', { name: '去打标' }))
-    await user.click(await screen.findByText('v5'))
+    await user.click(await screen.findByText('Agent v5'))
 
     const compare = await screen.findByLabelText('新旧产物对比')
-    expect(within(compare).getByText('原产物（v3）')).toBeInTheDocument()
-    expect(within(compare).getByText('Replay 产物（v5）')).toBeInTheDocument()
+    expect(within(compare).getByText('原产物（Agent v3）')).toBeInTheDocument()
+    expect(
+      within(compare).getByText('Replay 产物（Agent v5）')
+    ).toBeInTheDocument()
     // 同名产物左右并排：左侧原值 1、右侧 replay 新值 2（JsonTree 渲染）
     expect(within(compare).getByText('1')).toBeInTheDocument()
     expect(within(compare).getByText('2')).toBeInTheDocument()
+  })
+
+  it('replay 列表按 revision 显示执行档案来源（#1079 D6）', async () => {
+    mockFetchReplays.mockResolvedValue({
+      replays: [
+        {
+          ...replay,
+          agent_id: '',
+          agent_version: null,
+          revision_id: 'rev-7',
+          revision_version: 7,
+          profile_hash: 'h7',
+        },
+        {
+          ...replay,
+          id: 'r3',
+          agent_id: '',
+          agent_version: null,
+          revision_id: null,
+          revision_version: null,
+          profile_hash: 'hd',
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: '去打标' }))
+    expect(await screen.findByText('revision v7')).toBeInTheDocument()
+    expect(screen.getByText('草稿')).toBeInTheDocument()
   })
 
   it('replay 打标提交携带 replay_id', async () => {
@@ -349,7 +427,7 @@ describe('QualityPage', () => {
     const user = userEvent.setup()
     renderPage()
     await user.click(await screen.findByRole('button', { name: '去打标' }))
-    await user.click(await screen.findByText('v5'))
+    await user.click(await screen.findByText('Agent v5'))
     expect(await screen.findByLabelText('新旧产物对比')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '提交 Replay 打标' }))

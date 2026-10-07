@@ -198,6 +198,7 @@ server/app/
 | GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}` | `get_sample_item` | routes/quality.py |
 | POST | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/labels` | `add_sample_item_label` | routes/quality.py |
 | POST | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `create_replay` | routes/quality_replays.py |
+| GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replay-profiles` | `list_replay_profiles` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `list_replays` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/replays/{replay_id}` | `get_replay` | routes/quality_replays.py |
 | POST | `/workspaces/{workspace_id}/runs` | `create_run` | routes/runs.py |
@@ -297,6 +298,7 @@ server/app/
 | GET | `/agent-catalog` | `get_agent_catalog` | routes/workspace_agent_catalog.py |
 | GET | `/workspaces/{workspace_id}/execution-configuration` | `get_workspace_execution_configuration` | routes/workspace_agent_catalog.py |
 | GET | `/workspaces/{workspace_id}/agent-routes` | `get_workspace_agent_routes` | routes/workspace_agent_routes.py |
+| GET | `/workspaces/{workspace_id}/agent-provenance` | `get_workspace_agent_provenance` | routes/workspace_agent_routes.py |
 | POST | `/workspaces/{workspace_id}/api-tokens` | `create_api_token` | routes/workspace_api_tokens.py |
 | GET | `/workspaces/{workspace_id}/api-tokens` | `list_api_tokens` | routes/workspace_api_tokens.py |
 | DELETE | `/workspaces/{workspace_id}/api-tokens/{token_id}` | `revoke_api_token` | routes/workspace_api_tokens.py |
@@ -498,10 +500,12 @@ server/app/
 | QualitySampleItemDetailResponse | BaseModel | item: QualitySampleItem, labels: list[QualityLabel], artifacts: list[QualityA... | app/routes/quality_contracts.py |
 | QualityLabelCreateRequest | BaseModel | verdict: LabelVerdict, reason_codes: list[str], note: str, replay_id: str | N... | app/routes/quality_contracts.py |
 | QualityLabelResponse | BaseModel | label: QualityLabel | app/routes/quality_contracts.py |
-| QualityReplayCreateRequest | BaseModel | agent_version: int | None | app/routes/quality_contracts.py |
-| QualityReplay | BaseModel | id: str, item_id: str, agent_id: str, agent_version: int | None, replay_job_i... | app/routes/quality_contracts.py |
+| QualityReplayCreateRequest | BaseModel | revision_id: str | None, use_draft: bool, agent_version: int | None | app/routes/quality_contracts.py |
+| QualityReplay | BaseModel | id: str, item_id: str, agent_id: str, agent_version: int | None, revision_id:... | app/routes/quality_contracts.py |
 | QualityReplayResponse | BaseModel | replay: QualityReplay | app/routes/quality_contracts.py |
 | QualityReplayListResponse | BaseModel | replays: list[QualityReplay] | app/routes/quality_contracts.py |
+| QualityReplayProfileOption | BaseModel | source: Literal['revision', 'draft'], revision_id: str | None, revision_versi... | app/routes/quality_contracts.py |
+| QualityReplayProfileOptionsResponse | BaseModel | options: list[QualityReplayProfileOption] | app/routes/quality_contracts.py |
 | QualityReplayDetailResponse | BaseModel | replay: QualityReplay, labels: list[QualityLabel], artifacts: list[QualityArt... | app/routes/quality_contracts.py |
 | QualityConfusionMatrix | BaseModel | tp: int, fp: int, fn: int, tn: int, precision: float | None, recall: float | ... | app/routes/quality_contracts.py |
 | QualityStatsGroup | BaseModel | node_key: str, skill_version: str, provider: str, model: str, runs: int, succ... | app/routes/quality_contracts.py |
@@ -664,6 +668,8 @@ server/app/
 | WorkspaceExecutionConfigurationResponse | BaseModel | node_limits: list[NodeLimitEntry], migration_warnings: list[str], agent_capac... | app/routes/workspace_execution_contracts.py |
 | WorkspaceAgentRouteEntry | BaseModel | node_key: str, node_label: str, capability: str, agent_id: str, agent_skill: ... | app/routes/workspace_execution_contracts.py |
 | WorkspaceAgentRoutesResponse | BaseModel | routes: list[WorkspaceAgentRouteEntry] | app/routes/workspace_execution_contracts.py |
+| WorkspaceAgentProvenanceEntry | BaseModel | node_key: str, node_label: str, agent_id: str, agent_version: int | None | app/routes/workspace_execution_contracts.py |
+| WorkspaceAgentProvenanceResponse | BaseModel | nodes: list[WorkspaceAgentProvenanceEntry] | app/routes/workspace_execution_contracts.py |
 | WorkspaceSettingsPayload | BaseModel | entityType: str, previewHidden: list[str] | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, previewHidden: list[str] | None | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/workspace_execution_contracts.py |

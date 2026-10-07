@@ -92,9 +92,12 @@ def create_studio_agent_catalog_read_tools_router(
         entities = reads.list_agent_definitions(workspace_id)
         return StudioAgentAgentVersionsResponse(versions=[_version_response(e) for e in entities])
 
+    # #935（#440 P3，D3）：两个 Agent 定义写端点 deprecated——MCP 写工具
+    # 已改为返回引导、不再调用；P4 与工具一并删除。
     @router.put(
         "/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
         response_model=AgentVersionResponse,
+        deprecated=True,
     )
     def save_agent_definition_draft(
         workspace_id: str,
@@ -113,6 +116,7 @@ def create_studio_agent_catalog_read_tools_router(
         "/studio-agent/tools/workspaces/{workspace_id}/agent-definitions",
         response_model=AgentVersionResponse,
         status_code=201,
+        deprecated=True,
     )
     def create_agent_definition(
         workspace_id: str,

@@ -87,7 +87,7 @@ class WorkflowWorkerState:
         # reads for changed jobs), eval (per-changed-job ready evaluation).
         self.scan_phases: dict[str, float] = {}
         # Short-TTL route cache; see server.app.workflow_worker.routing.
-        self.route_cache: dict[tuple[str, str, str], tuple[float, NodeRoute]] = {}
+        self.route_cache: dict[tuple[str, str, str, bool], tuple[float, NodeRoute]] = {}
         # Per-pass state (cleared in _poll).
         self.batch_payload_cache: dict[str, dict[str, Any] | None] = {}
         self.pass_claim_counts: dict[str, int] = {}
