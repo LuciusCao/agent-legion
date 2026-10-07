@@ -306,8 +306,11 @@ Secret handling for code tasks is summarized in §8 (Worker hygiene).
 `pi` and `velites` are peer runtimes declared per agent node: since 0.7.17
 (#440 P3) every agent node carries its own execution profile in the workflow
 revision (`execution.runtime`, or the workflow top-level default) — Agent
-definitions are read-only history (their write API is deprecated) and only
-serve job snapshots frozen before the v93 inlining. The yaml `agents:` section
+definitions are read-only history (their write API is deprecated). The
+legacy capability resolution only serves job snapshots frozen before the v93
+inlining and the nodes of an active revision that v93 could not inline: new
+jobs on such a revision keep resolving those nodes by capability until the
+node declares `execution.runtime` and a new revision is published. The yaml `agents:` section
 and the `workflows.pi` block are retired (their presence in yaml fails Host
 startup), and `workflows.pi.flavor` no longer exists: the node's
 `execution.runtime` selects the adapter in the Host-side runtime catalog
