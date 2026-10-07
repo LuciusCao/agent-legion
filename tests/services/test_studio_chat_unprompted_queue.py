@@ -189,7 +189,9 @@ def test_turn_whose_receipt_write_failed_still_holds(gated, monkeypatch) -> None
     assert db.get_studio_chat_session(sid)["status"] == "idle"
 
     write(ENDED)
-    watcher.step()  # backlog persisted, then the end: released in order
+    watcher.step()  # #1044: the backlog is persisted before the journal is read
+    assert watcher.open == {"3"} and watcher.held
+    watcher.step()  # then the end is read: held messages released in order
     assert watcher.open == frozenset() and watcher.held == []
     [(_prompt, start)] = _queue_items(runtime)
     assert start()

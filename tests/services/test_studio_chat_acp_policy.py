@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
@@ -24,13 +25,12 @@ from server.app.studio_chat.permission_scope import (
     normalize_selected_option,
 )
 from server.app.studio_chat.terminal_grants import TerminalGrants
-from server.app.studio_chat.terminal_policy import confined_cwd
+from server.app.studio_chat.terminal_policy import pinned_cwd
 from server.app.studio_chat.terminals import AcpTerminalStore
 
 pytestmark = pytest.mark.no_db
 
 WS = "ws-policy"
-ROOT = "/w"
 OPTIONS = [
     {"optionId": "once", "name": "Approve once", "kind": "allow_once"},
     {"optionId": "always", "name": "Approve for session", "kind": "allow_always"},
@@ -78,6 +78,19 @@ def test_read_inside_staging_is_auto_approvable(staging, tmp_path) -> None:
         _read(rawInput={"path": "data/studio-mcp-files/ws-policy", "pattern": "/etc/*"}),
         _read(rawInput={"path": "data/studio-mcp-files/ws-policy", "glob": "../*"}),
         _read(rawInput="cat .env"),
+        # Nested containers are an unknown shape even beside a valid target.
+        _read(
+            locations=[{"path": "data/studio-mcp-files/ws-policy/draft.yaml"}],
+            rawInput={"options": [{"path": "/etc/passwd"}]},
+        ),
+        _read(
+            locations=[{"path": "data/studio-mcp-files/ws-policy/draft.yaml"}],
+            rawInput={"extra": {"path": "/etc/passwd"}},
+        ),
+        _read(
+            locations=[{"path": "data/studio-mcp-files/ws-policy/draft.yaml"}],
+            rawInput={"paths": [["/etc/passwd"]]},
+        ),
         {"kind": "execute", "rawInput": {"path": "data/studio-mcp-files/ws-policy"}},
         {"title": "Read", "rawInput": {"path": "data/studio-mcp-files/ws-policy"}},
     ],
@@ -228,16 +241,55 @@ def test_terminal_env_drops_program_selector_overrides() -> None:
 # -- terminal working-directory confinement ---------------------------------
 
 
-def test_terminal_cwd_is_confined_to_the_session_root(tmp_path) -> None:
+def _cwd_of(root: Path, requested: str | None) -> tuple[int, int]:
+    with pinned_cwd(requested, str(root)) as fd:
+        info = os.fstat(fd)
+    return info.st_dev, info.st_ino
+
+
+def _ident(path: Path) -> tuple[int, int]:
+    info = os.stat(path)
+    return info.st_dev, info.st_ino
+
+
+def test_terminal_cwd_is_pinned_inside_the_session_root(tmp_path) -> None:
     root = tmp_path / "root"
     (root / "sub").mkdir(parents=True)
     (root / "escape").symlink_to(tmp_path)
     real_root = os.path.realpath(root)
-    assert confined_cwd(None, str(root)) == real_root
-    assert confined_cwd("sub", str(root)) == os.path.join(real_root, "sub")
-    for outside in ("/", "..", str(tmp_path), "escape", "~"):
+    assert _cwd_of(root, None) == _ident(root)
+    assert _cwd_of(root, "sub") == _ident(root / "sub")
+    assert _cwd_of(root, os.path.join(real_root, "sub")) == _ident(root / "sub")
+    # Outside the root, '..', and any symlinked component (even one pointing
+    # back inside) are refused: the walk never follows links.
+    (root / "inner").symlink_to(root / "sub")
+    for outside in ("/", "..", "sub/..", str(tmp_path), "escape", "inner", "~", "missing"):
         with pytest.raises(RequestError):
-            confined_cwd(outside, str(root))
+            _cwd_of(root, outside)
+
+
+def test_terminal_child_runs_in_the_pinned_directory_after_a_swap(tmp_path, monkeypatch) -> None:
+    """Swap the checked path component for a symlink between pinning and
+    spawn: the child still starts in the originally pinned directory."""
+    root = tmp_path / "root"
+    (root / "work").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    real_pinned = pinned_cwd
+
+    @contextmanager
+    def pin_then_swap(requested, base):
+        with real_pinned(requested, base) as fd:
+            (root / "work").rename(root / "work-moved")
+            (root / "work").symlink_to(outside)
+            yield fd
+
+    monkeypatch.setattr("server.app.studio_chat.terminals.pinned_cwd", pin_then_swap)
+    output = _run_terminal(
+        AcpTerminalStore(), "import os; print(os.getcwd())", cwd="work", default_cwd=str(root)
+    )
+    assert os.path.realpath(output.strip()) == os.path.realpath(root / "work-moved")
+    assert str(os.path.realpath(outside)) not in output
 
 
 def test_terminal_store_refuses_cwd_outside_root(tmp_path) -> None:
@@ -250,24 +302,25 @@ def test_terminal_store_refuses_cwd_outside_root(tmp_path) -> None:
 
 def test_grants_are_one_shot_and_bound_to_the_approved_command() -> None:
     grants = TerminalGrants()
-    assert not grants.consume("sh", ["-c", "ls"], root=ROOT)
+    assert not grants.consume("sh", ["-c", "ls"])
     grants.grant({"rawInput": {"command": "ls -la"}})
-    # Bound grants match exactly: extending or prefixing the approved command
-    # (or an unquoted cd wrapper) does not consume them.
-    for mutated in ("cat secrets", "cat secrets; ls -la", "ls -la; cat secrets", "cd /w && ls -la"):
-        assert not grants.consume("sh", ["-c", mutated], root=ROOT)
-    assert not grants.consume("sh", ["-c", "cd '/w' && cat x; ls -la"], root=ROOT)
-    assert grants.consume("sh", ["-c", "cd '/w/a '\\''q' && ls -la"], root=ROOT)
-    assert not grants.consume("sh", ["-c", "cd '/w' && ls -la"], root=ROOT)
+    # Bound grants match exactly: extending, prefixing or cd-wrapping the
+    # approved command does not consume them.
+    for mutated in (
+        "cat secrets",
+        "cat secrets; ls -la",
+        "ls -la; cat secrets",
+        "cd /w && ls -la",
+        "cd '/w' && ls -la",
+        "cd '/outside' && ls -la",
+    ):
+        assert not grants.consume("sh", ["-c", mutated])
+    assert grants.consume("sh", ["-c", "ls -la"])
+    assert not grants.consume("sh", ["-c", "ls -la"])
     grants.grant({"rawInput": {"command": "ls -la"}})
-    assert grants.consume("ls", ["-la"], root=ROOT)
-    # The cd wrapper target is confined like the terminal cwd.
-    grants.grant({"rawInput": {"command": "cat target"}})
-    for outside in ("/", "/w/../etc", "/etc"):
-        assert not grants.consume("sh", ["-c", f"cd '{outside}' && cat target"], root=ROOT)
-    assert grants.consume("sh", ["-c", "cd '/w/sub' && cat target"], root=ROOT)
+    assert grants.consume("ls", ["-la"])
     grants.grant({"toolCallId": "tc-unbound"})
-    assert grants.consume("sh", ["-c", "anything"], root=ROOT)
+    assert grants.consume("sh", ["-c", "anything"])
 
 
 def test_grants_expire(monkeypatch) -> None:
@@ -277,7 +330,7 @@ def test_grants_expire(monkeypatch) -> None:
     grants.grant({"toolCallId": "tc-expired"})
     clock = terminal_grants.time.monotonic() + 10_000
     monkeypatch.setattr(terminal_grants.time, "monotonic", lambda: clock)
-    assert not grants.consume("sh", ["-c", "ls"], root=ROOT)
+    assert not grants.consume("sh", ["-c", "ls"])
 
 
 class _Handle:
@@ -335,7 +388,7 @@ def test_only_human_or_allow_all_approvals_mint_terminal_grants(decision, grants
         client.request_permission("s", _Model({"toolCallId": "tc"}), [_Model(o) for o in OPTIONS])
     )
     minted = 0
-    while client.terminals.grants.consume("sh", [], root=ROOT):
+    while client.terminals.grants.consume("sh", []):
         minted += 1
     assert minted == grants
     outcome = response.outcome

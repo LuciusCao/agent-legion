@@ -60,6 +60,8 @@ class StudioAgentJobNode(BaseModel):
     outputs: list[str]
     executor_kind: str | None
     agent_id: str | None
+    # Same decision as dispatch (PR #1085); set when it is a config error.
+    route_error: str | None = None
 
 
 class StudioAgentJobRun(BaseModel):

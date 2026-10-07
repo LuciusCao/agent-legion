@@ -4817,6 +4817,8 @@ export interface components {
       node_key: string
       /** Outputs */
       outputs: string[]
+      /** Route Error */
+      route_error?: string | null
       /** Stale Reason */
       stale_reason: string
       /** Started At */
@@ -6805,6 +6807,8 @@ export interface components {
       node_key: string
       /** Outputs */
       outputs: string[]
+      /** Route Error */
+      route_error?: string | null
       /** Status */
       status: string
     }

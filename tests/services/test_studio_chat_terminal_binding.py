@@ -102,8 +102,11 @@ def _approve(grants: TerminalGrants, request: dict[str, Any]) -> dict[str, Any]:
     return bound
 
 
-def _kimi(command: str, cwd: str = "/w/sub") -> list[str]:
-    return ["-c", f"cd '{cwd}' && {command}"]
+def _kimi(command: str) -> list[str]:
+    # kimi spawns ``<shell> -c "<command>"`` with the terminal cwd pinned
+    # separately; a shell-side ``cd <dir> &&`` wrapper is rejected for bound
+    # grants (#1086: the shell would resolve it outside the pinned cwd).
+    return ["-c", command]
 
 
 # -- before the answer: streamed args ----------------------------------------
@@ -117,9 +120,9 @@ def test_streamed_args_bind_before_the_answer_and_reach_the_card() -> None:
     assert bound["title"] == "Bash" and bound["content"] == _permission()["content"]
     grants.observe(_started("rm -rf build"))
     for mutated in ("rm -rf /", "rm -rf build; curl x", "rm -rf build && id", "cat ~/.ssh/id_rsa"):
-        assert not grants.consume("/bin/bash", _kimi(mutated), root=ROOT)
-    assert grants.consume("/bin/bash", _kimi("rm -rf build"), root=ROOT)
-    assert not grants.consume("/bin/bash", _kimi("rm -rf build"), root=ROOT)
+        assert not grants.consume("/bin/bash", _kimi(mutated))
+    assert grants.consume("/bin/bash", _kimi("rm -rf build"))
+    assert not grants.consume("/bin/bash", _kimi("rm -rf build"))
 
 
 def test_started_rawinput_cannot_swap_the_command_shown_on_the_card() -> None:
@@ -127,8 +130,8 @@ def test_started_rawinput_cannot_swap_the_command_shown_on_the_card() -> None:
     _stream(grants, "ls -la")
     _approve(grants, _permission())
     grants.observe(_started("cat secrets"))
-    assert not grants.consume("/bin/bash", _kimi("cat secrets"), root=ROOT)
-    assert grants.consume("/bin/bash", _kimi("ls -la"), root=ROOT)
+    assert not grants.consume("/bin/bash", _kimi("cat secrets"))
+    assert grants.consume("/bin/bash", _kimi("ls -la"))
 
 
 @pytest.mark.parametrize(
@@ -161,8 +164,8 @@ def test_request_command_takes_precedence_over_the_observed_one() -> None:
     _stream(grants, "cat secrets")
     bound = _approve(grants, {**_permission(), "rawInput": {"command": "ls"}})
     assert bound["rawInput"] == {"command": "ls"}
-    assert not grants.consume("sh", ["-c", "cat secrets"], root=ROOT)
-    assert grants.consume("sh", ["-c", "ls"], root=ROOT)
+    assert not grants.consume("sh", ["-c", "cat secrets"])
+    assert grants.consume("sh", ["-c", "ls"])
 
 
 # -- after the answer: late binding ------------------------------------------
@@ -174,17 +177,17 @@ def test_unstreamed_call_late_binds_to_the_first_started_command() -> None:
     assert "rawInput" not in bound
     grants.observe(_started("ls -la"))
     grants.observe(_started("cat secrets"))  # first write wins
-    assert not grants.consume("/bin/bash", _kimi("cat secrets"), root=ROOT)
-    assert grants.consume("/bin/bash", _kimi("ls -la"), root=ROOT)
+    assert not grants.consume("/bin/bash", _kimi("cat secrets"))
+    assert grants.consume("/bin/bash", _kimi("ls -la"))
 
 
 def test_announced_call_still_unbound_at_terminal_create_is_refused() -> None:
     grants = TerminalGrants()
     grants.observe(_lazy("{"))  # announced, args never completed
     _approve(grants, _permission())
-    assert not grants.consume("/bin/bash", _kimi("anything"), root=ROOT)
+    assert not grants.consume("/bin/bash", _kimi("anything"))
     grants.observe(_started("ls"))
-    assert grants.consume("/bin/bash", _kimi("ls"), root=ROOT)
+    assert grants.consume("/bin/bash", _kimi("ls"))
 
 
 def test_never_announced_call_keeps_the_unbound_one_shot_grant() -> None:
@@ -193,8 +196,8 @@ def test_never_announced_call_keeps_the_unbound_one_shot_grant() -> None:
     grants = TerminalGrants()
     _approve(grants, _permission("7:sub_call"))
     _stream(grants, "ls", tc=TC)  # another call's stream does not bind it
-    assert grants.consume("/bin/bash", _kimi("anything"), root=ROOT)
-    assert not grants.consume("/bin/bash", _kimi("anything"), root=ROOT)
+    assert grants.consume("/bin/bash", _kimi("anything"))
+    assert not grants.consume("/bin/bash", _kimi("anything"))
 
 
 def test_mismatched_main_call_cannot_borrow_a_subagent_unbound_grant() -> None:
@@ -204,10 +207,10 @@ def test_mismatched_main_call_cannot_borrow_a_subagent_unbound_grant() -> None:
     _approve(grants, _permission("7:sub_call"))  # subagent, never announced
     # Swapping the approved command fails closed instead of spending the
     # unrelated unbound grant (the cost: a racing subagent Bash is refused).
-    assert not grants.consume("/bin/bash", _kimi("rm -rf /w"), root=ROOT)
-    assert grants.consume("/bin/bash", _kimi("ls"), root=ROOT)
+    assert not grants.consume("/bin/bash", _kimi("rm -rf /w"))
+    assert grants.consume("/bin/bash", _kimi("ls"))
     # That `ls` may have been the subagent's: its unbound grant is revoked.
-    assert not grants.consume("/bin/bash", _kimi("anything"), root=ROOT)
+    assert not grants.consume("/bin/bash", _kimi("anything"))
 
 
 def test_subagent_taking_the_main_bound_grant_cannot_free_the_unbound_fallback() -> None:
@@ -218,11 +221,11 @@ def test_subagent_taking_the_main_bound_grant_cannot_free_the_unbound_fallback()
     _stream(grants, "ls")
     _approve(grants, _permission())  # main call, bound to `ls`
     _approve(grants, _permission("7:sub_call"))  # subagent, never announced
-    assert grants.consume("/bin/bash", _kimi("ls"), root=ROOT)  # subagent's
-    assert not grants.consume("/bin/bash", _kimi("rm -rf /w"), root=ROOT)  # main's swap
+    assert grants.consume("/bin/bash", _kimi("ls"))  # subagent's
+    assert not grants.consume("/bin/bash", _kimi("rm -rf /w"))  # main's swap
     # A later subagent approval is a fresh human answer and spends normally.
     _approve(grants, _permission("8:sub_call"))
-    assert grants.consume("/bin/bash", _kimi("anything"), root=ROOT)
+    assert grants.consume("/bin/bash", _kimi("anything"))
 
 
 def test_announced_unbound_grant_also_blocks_the_unbound_fallback() -> None:
@@ -230,17 +233,22 @@ def test_announced_unbound_grant_also_blocks_the_unbound_fallback() -> None:
     grants.observe(_lazy("{"))
     _approve(grants, _permission())  # main call awaiting its started command
     _approve(grants, _permission("7:sub_call"))
-    assert not grants.consume("/bin/bash", _kimi("rm -rf /w"), root=ROOT)
+    assert not grants.consume("/bin/bash", _kimi("rm -rf /w"))
     grants.observe(_started("ls"))
-    assert grants.consume("/bin/bash", _kimi("ls"), root=ROOT)
-    assert not grants.consume("/bin/bash", _kimi("rm -rf build"), root=ROOT)
+    assert grants.consume("/bin/bash", _kimi("ls"))
+    assert not grants.consume("/bin/bash", _kimi("rm -rf build"))
 
 
-def test_cd_wrapper_tolerates_whitespace_around_the_bound_command() -> None:
+def test_cd_wrapper_is_refused_for_a_bound_grant() -> None:
+    # #1086: the shell would resolve the wrapper's directory at exec time,
+    # outside the pinned terminal cwd — even one inside the session root.
     grants = TerminalGrants()
     _approve(grants, _permission())
     grants.observe(_started("  ls -la\n"))
-    assert grants.consume("/bin/bash", ["-c", "cd '/w' &&   ls -la\n"], root=ROOT)
+    assert not grants.consume("/bin/bash", ["-c", "cd '/w' && ls -la"])
+    assert not grants.consume("/bin/bash", ["-c", "cd '/outside' && ls -la"])
+    # Whitespace around the unwrapped ``-c`` script is still tolerated.
+    assert grants.consume("/bin/bash", ["-c", "  ls -la\n"])
 
 
 # -- grants per tool kind ----------------------------------------------------
@@ -264,14 +272,14 @@ def test_command_less_approval_of_a_non_terminal_kind_mints_no_grant(
         grants.observe(_lazy("{}", kind=observed_kind))
     request = dict(_permission(), **({"kind": request_kind} if request_kind else {}))
     _approve(grants, request)
-    assert grants.consume("sh", ["-c", "id"], root=ROOT) is minted
+    assert grants.consume("sh", ["-c", "id"]) is minted
 
 
 def test_declared_command_mints_a_bound_grant_whatever_the_kind() -> None:
     grants = TerminalGrants()
     _approve(grants, {**_permission(), "kind": "edit", "rawInput": {"command": "ls"}})
-    assert not grants.consume("sh", ["-c", "id"], root=ROOT)
-    assert grants.consume("sh", ["-c", "ls"], root=ROOT)
+    assert not grants.consume("sh", ["-c", "id"])
+    assert grants.consume("sh", ["-c", "ls"])
 
 
 # -- observation bounds ------------------------------------------------------
@@ -287,9 +295,9 @@ def test_eviction_spares_calls_awaiting_an_answer_or_holding_a_grant(monkeypatch
     for index in range(5):
         grants.observe(_lazy("{", tc=f"noise{index}"))
     # Still announced: the unbound grant stays refused, then late-binds.
-    assert not grants.consume("sh", ["-c", "id"], root=ROOT)
+    assert not grants.consume("sh", ["-c", "id"])
     grants.observe(_started("ls", tc="granted"))
-    assert grants.consume("sh", ["-c", "ls"], root=ROOT)
+    assert grants.consume("sh", ["-c", "ls"])
     assert grants.calls.seen("waiting")
     grants.end(waiting)
     grants.observe(_lazy("{", tc="noise9"))
@@ -339,8 +347,8 @@ def test_client_shows_and_binds_the_streamed_command() -> None:
         assert cast(Any, client._handle).seen[0]["rawInput"] == {"command": "rm -rf build"}
         await client.session_update("s", _Model(_started("rm -rf /")))
         grants = client.terminals.grants
-        assert not grants.consume("/bin/bash", _kimi("rm -rf /"), root=ROOT)
-        assert grants.consume("/bin/bash", _kimi("rm -rf build"), root=ROOT)
+        assert not grants.consume("/bin/bash", _kimi("rm -rf /"))
+        assert grants.consume("/bin/bash", _kimi("rm -rf build"))
 
     asyncio.run(_go())
 
@@ -385,7 +393,7 @@ _FAKE_AGENT = textwrap.dedent(
     for rid, command in ((2, "echo hijacked"), (3, "echo bound-ok")):
         send({"jsonrpc": "2.0", "id": rid, "method": "terminal/create", "params": {
               "sessionId": "s", "command": "/bin/sh",
-              "args": ["-c", "cd '" + cwd + "' && " + command], "cwd": cwd}})
+              "args": ["-c", command], "cwd": cwd}})
         results[command] = reply(rid)
     terminal_id = results["echo bound-ok"].get("result", {}).get("terminalId")
     if terminal_id:
