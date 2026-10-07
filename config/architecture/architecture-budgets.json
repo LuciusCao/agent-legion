@@ -2120,6 +2120,7 @@
     "worker/upload/queue.py": 235,
     "worker/upload/report.py": 83,
     "worker/upload/report_events.py": 49,
+    "worker/upload/report_policy.py": 57,
     "worker/upload/result_manifest.py": 51,
     "worker/upload/result_metadata.py": 28,
     "worker/upload/scheduler.py": 75,
