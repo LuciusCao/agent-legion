@@ -1,6 +1,6 @@
 # 现行文档禁用的退役术语表（docs_retired_terms 检查的数据文件）。
 #
-# 维护纪律（AGENTS.md §5 / docs/architecture/docs-governance-proposal.md §4）：
+# 维护纪律（AGENTS.md §5 / docs/architecture/docs-governance.md §3）：
 # - 概念退役 PR 必须同步追加条目并清零现行文档命中。
 # - pattern 只增不删；确需删除（概念复活）须在注释里记录 issue 依据。
 # - 误伤走 exemptions（带 remove_when），不许删 pattern。

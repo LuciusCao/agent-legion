@@ -1,5 +1,10 @@
 # Agent Legion 系统性 Review（develop @ ba7ecc4b，2026-08-30）
 
+> **时点快照（2026-08-30）**：本文 `path:line` 证据与结论反映审查时代码，其后多项
+> 发现已修复（如前端 ErrorBoundary 已落地，见 `frontend/src/components/ErrorBoundary.tsx`
+> 与 `App.tsx`）；当前状态以代码、现行文档与
+> `config/architecture/architecture-invariants.yaml` 为准，本文不随代码逐条更新。
+
 > 方法：4 个并行深度排查（后端架构/安全/性能、前端架构/性能/类型、Worker+Velites+部署、测试质量审计）+ 本人复核（静态工具全量运行、三套测试套件实跑、CI 历史与覆盖率核验、上次 2026-08-26 review 遗留项逐条对账）+ 关键发现抽样核验源码。
 
 ## 总体结论
