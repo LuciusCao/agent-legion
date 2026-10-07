@@ -8,6 +8,11 @@
 > （`EXEC-SKILL-NODE-001`），`AgentDefinition.skill` 降为可选 legacy 兜底；
 > 文中 AgentDefinition 携带 skill、manifest `skill_version` 为裸 commit 的
 > 描述均为历史方案，未逐段改写。
+> **2026-10 补注（#440）**：Agent 定义作为执行档案载体正在退役——P2（schema v92，
+> #933）起声明 `execution.runtime`（节点或 workflow 顶层默认）的自含 agent 节点以节点自身
+> runtime / `requires_labels` / tools / config_schema 为档案，不再要求 published Agent
+> （EXEC-AGENT-PROFILE-001）；其余节点仍走 Agent 定义（过渡中，EXEC-AGENTDEF-001）。
+> 文中以 Agent 定义为执行档案唯一载体的描述反映定稿时点。
 
 ## 总览
 
