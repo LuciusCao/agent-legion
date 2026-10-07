@@ -8,6 +8,7 @@ Preflight modes, paths and declared blob sizes before loading any content.
 from pathlib import Path
 from typing import Any
 
+from server.app.services.skill_build_residue import is_build_residue
 from server.app.services.skill_edit_checks import target_path_errors
 from server.app.services.skill_edit_snapshot import edit_file
 from server.app.services.skill_repo_edit import SkillEditValidationError
@@ -34,6 +35,12 @@ def commit_snapshot(
             meta, raw_path = entry.split(b"\t", 1)
             mode, kind, oid, raw_size = meta.split()
             path = raw_path.decode("utf-8")
+            if is_build_residue(path):
+                # #1038: committed bytecode cache (repos born without a
+                # .gitignore) is not editable content; skipping it keeps the
+                # snapshot exportable. Skill saves write only the declared
+                # files, so this omission never implies a deletion.
+                continue
             if mode not in (b"100644", b"100755") or kind != b"blob":
                 raise ValueError("snapshot requires regular Git blobs")
             if len(path) > 512 or target_path_errors([path]):
