@@ -1862,6 +1862,8 @@
     "server/app/studio_chat/terminals.py": 196,
     "server/app/studio_chat/token_admission.py": 31,
     "server/app/studio_chat/token_keepalive.py": 61,
+    "server/app/studio_chat/tool_call_args.py": 32,
+    "server/app/studio_chat/tool_call_commands.py": 66,
     "server/app/studio_chat/turn_state.py": 21,
     "server/app/studio_chat/unprompted_turns.py": 174,
     "server/app/studio_chat/wire_baseline.py": 43,
