@@ -231,7 +231,8 @@ release-train `HEAD`-only exception.
   unrelated PRs); the nightly `exemption-expiry` job enforces it. Every PR
   (any target branch; scheduled jobs only see the default branch and only
   after the merge) additionally passes the target branch's registry
-  (`--base-registry`) and fails on entries the PR itself adds or re-dates
+  (`--base-registry`) and fails on entries the PR itself adds or re-targets
+  (deadline, nodeid, scope, recurring, registered_on / extended_on — #1034)
   with an already expired deadline.
 - **frontend-logic / frontend-component-a/b / frontend-coverage** — frontend
   static checks and the two Vitest projects (node / jsdom) as parallel jobs;
@@ -272,7 +273,10 @@ In `nightly-gate.yml`:
 - **exemption-expiry** — refreshes the issue-state manifest and detects
   expired architecture exemptions; since #295 it also detects expired
   flaky-registry deadlines (`check_reruns.py --check-deadlines`, deadline
-  evidence without needing the extended rerun report). It is the only lane
+  evidence without needing the extended rerun report), and since #1024 on
+  every maintained branch too (`scripts/quality/flaky_branch_deadlines.py`:
+  `develop` plus each `release/X.Y.Z` above the default branch's version,
+  registries read leniently from the fetched branch tips). It is the only lane
   that fails on an expired deadline (#941) and annotates entries due within
   7 days as warnings; PR backend-coverage enforces observed reruns only. The
   registry's clock-free rules (one entry per nodeid, deadline at most 45

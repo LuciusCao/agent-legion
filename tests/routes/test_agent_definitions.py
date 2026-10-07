@@ -323,3 +323,27 @@ def test_skill_is_optional(client, ws) -> None:
 
     listed = client.get(BASE, params=ws).json()["agents"]
     assert next(a for a in listed if a["agent_id"] == "agent-bare")["skill"] == ""
+
+
+def test_write_endpoints_are_deprecated_and_reads_are_not(client, ws) -> None:
+    """#935 (#440 P3, D3): every write endpoint answers with a Deprecation
+    header pointing authors at node execution profiles and is flagged
+    deprecated in OpenAPI; read endpoints stay plain."""
+    created = client.post(BASE, params=ws, json={"agent_id": "agent-d", **PAYLOAD_V1})
+    saved = client.put(f"{BASE}/agent-d/draft", params=ws, json=PAYLOAD_V2)
+    published = _publish(client, "agent-d", ws)
+    copied = client.post(f"{BASE}/agent-d/copy", params=ws, json={"new_agent_id": "agent-e"})
+    rolled = client.post(f"{BASE}/agent-d/rollback", params=ws, json={"version": 1})
+    archived = client.delete(f"{BASE}/agent-e", params=ws)
+    for response in (created, saved, published, copied, rolled, archived):
+        assert response.status_code == 200, response.text
+        assert response.headers["Deprecation"] == "true"
+        assert "execution.runtime" in response.headers["X-Agent-Legion-Deprecation"]
+    for read in (client.get(BASE, params=ws), client.get(f"{BASE}/agent-d", params=ws)):
+        assert read.status_code == 200
+        assert "Deprecation" not in read.headers
+
+    paths = client.app.openapi()["paths"]
+    assert paths["/api/agent-definitions"]["post"]["deprecated"] is True
+    assert paths["/api/agent-definitions/{agent_id}/publish"]["post"]["deprecated"] is True
+    assert not paths["/api/agent-definitions"]["get"].get("deprecated", False)

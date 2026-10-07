@@ -43,8 +43,19 @@ nodes:
       ref: v1.1.0
 """
 
-# Agent 路由形态（#284 显式 type）：skill 门禁的三个用例使用。
+# Agent 节点形态（#284 显式 type；#935 起必须自含 execution.runtime）：
+# skill 门禁的用例使用。
 _DRAFT_YAML_AGENT = """
+key: test_publish_flow
+label: Test Publish Flow
+nodes:
+  do_thing:
+    type: agent
+    capability: do_thing
+    execution: {runtime: velites}
+"""
+
+_DRAFT_YAML_LEGACY_AGENT = """
 key: test_publish_flow
 label: Test Publish Flow
 nodes:
@@ -60,6 +71,7 @@ nodes:
   do_thing:
     type: agent
     capability: do_thing
+    execution: {runtime: velites}
     skill:
       key: education-video-problems-generation/review-questions
       ref: v1.1.0
@@ -355,11 +367,12 @@ def test_publish_rejects_agent_node_whose_skill_dir_is_not_a_git_repo(
     assert any("no in-place git repository" in error for error in errors)
 
 
-def test_publish_accepts_agent_node_without_skill_when_agent_binds_one(
+def test_publish_rejects_legacy_agent_node_even_when_agent_binds_skill(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Legacy fallback: existing revisions declare no node skill; the Agent
-    definition's skill keeps them publishable."""
+    """#935 gate flip (#440 P3): a node without its own execution profile no
+    longer publishes through a published Agent — not even one binding the
+    skill the node lacks (the legacy fallback is retired at publish)."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = _workspace(queries)
     _patch_agent_catalog(
@@ -375,12 +388,16 @@ def test_publish_accepts_agent_node_without_skill_when_agent_binds_one(
     skill_base = tmp_path / "skills"
     _make_skill_repo(skill_base / "education-video-problems-generation" / "review-questions")
 
-    assert (
-        validate_workflow_draft_for_publish(
-            queries, workspace["id"], _DRAFT_YAML_AGENT, True, skill_base_dir=skill_base
-        )
-        == []
+    errors = validate_workflow_draft_for_publish(
+        queries, workspace["id"], _DRAFT_YAML_LEGACY_AGENT, True, skill_base_dir=skill_base
     )
+
+    assert errors == [
+        "Agent node do_thing must declare its own execution profile: set execution.runtime"
+        " (pi | velites) on the node or as the workflow top-level execution.runtime default,"
+        " plus tools / requires_labels / config_schema / skill as needed — Agent definitions"
+        " no longer supply node profiles (#440)"
+    ]
 
 
 def test_publish_rejects_skill_on_code_routed_node(

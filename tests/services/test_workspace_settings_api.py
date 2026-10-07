@@ -2,9 +2,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from server.app.agent_catalog import AgentDefinition
 from server.app.main import create_app
-from server.app.services.agent_service import AgentService
 from tests.helpers import publish_builtin_revision, seed_workspace_agent_definitions
 from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
@@ -136,26 +134,31 @@ def test_workspace_settings_agent_defaults_section_retired(client):
 
 
 def _inject_write_script_config_schema(workspace_id: str) -> None:
-    """Publish a new example-write-script-v1 version carrying a config_schema.
+    """Republish the demo revision with a config_schema on write_script.
 
-    Agent definitions are workspace-scoped (schema v46): the workspace already
-    holds the seeded demo agent (workspaces binding the demo workflow get the
-    factory templates at binding time), so this publishes v2 inside it.
+    #935: the demo agent nodes are self-contained, so the tunables live on
+    the node itself — republishing the Agent definition would not reach it.
     """
+    import tempfile
+    from pathlib import Path
+
+    from server.app.jobs import JobQueries
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from tests.helpers import load_builtin_definition
+    from tests.helpers.node_profile import with_node_config_schema
+
     schema = {
         "type": "object",
         "properties": {
             "max_items": {"type": "integer", "default": 10, "minimum": 1, "maximum": 100}
         },
     }
-    service = AgentService(TEST_DATABASE_URL, workspace_id)
-    entity = service.get_published("example-write-script-v1")
-    assert entity is not None
-    updated = AgentDefinition.model_validate(entity.definition).model_copy(
-        update={"config_schema": schema}
+    definition = with_node_config_schema(
+        load_builtin_definition("education_video_problems_generation"), "write_script", schema
     )
-    service.save_draft("example-write-script-v1", updated, "user:test")
-    service.publish("example-write-script-v1")
+    WorkflowRevisionService(
+        JobQueries(TEST_DATABASE_URL, Path(tempfile.mkdtemp()))
+    ).publish_workspace_revision(workspace_id, definition)
 
 
 def test_workspace_settings_nodes_round_trip(tmp_path):

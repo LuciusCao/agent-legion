@@ -12,7 +12,9 @@ unrelated PRs red on the same day. Rerun-report mode merely lists expired
 entries. Deadline-only mode also warns ``DEADLINE_WARNING_DAYS`` ahead.
 
 The registry schema and its clock-free rules (nodeid uniqueness, deadline
-window) live in ``scripts/quality/flaky_registry.py``.
+window) live in ``scripts/quality/flaky_registry.py``; lenient reads of a
+base / other-branch registry (``touched_entry_ids``) in
+``scripts/quality/flaky_registry_lenient.py``.
 Registry: ``tests/flaky_registry.yaml``.
 """
 
@@ -37,8 +39,8 @@ from scripts.quality.flaky_registry import (  # noqa: E402  # sys.path first (ab
     RegistryEntry,
     RegistryError,
     load_registry,
-    touched_entry_ids,
 )
+from scripts.quality.flaky_registry_lenient import touched_entry_ids  # noqa: E402
 
 __all__ = [
     "MAX_DEADLINE_WINDOW_DAYS",

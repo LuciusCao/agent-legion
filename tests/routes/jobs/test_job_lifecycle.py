@@ -141,7 +141,9 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
     nodes = {node["node_key"]: node for node in response.json()["nodes"]}
     assert nodes["review_script"]["executor_id"] is None
     assert nodes["review_script"]["executor_kind"] is None
-    assert nodes["review_script"]["agent_id"] == "example-review-script-v1"
+    # #935: the demo agent nodes are self-contained — their Agent identity
+    # is the node key (the request row's agent_id), not a route target.
+    assert nodes["review_script"]["agent_id"] == "review_script"
     # P-0.5：非 Agent 路由节点投影为常量 code 池。
     assert nodes["publish_content"]["executor_id"] == "code"
     assert nodes["publish_content"]["executor_kind"] == "code"

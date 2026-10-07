@@ -205,6 +205,7 @@ server/app/
 | GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}` | `get_sample_item` | routes/quality.py |
 | POST | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/labels` | `add_sample_item_label` | routes/quality.py |
 | POST | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `create_replay` | routes/quality_replays.py |
+| GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replay-profiles` | `list_replay_profiles` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `list_replays` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/replays/{replay_id}` | `get_replay` | routes/quality_replays.py |
 | POST | `/workspaces/{workspace_id}/runs` | `create_run` | routes/runs.py |
@@ -304,6 +305,7 @@ server/app/
 | GET | `/agent-catalog` | `get_agent_catalog` | routes/workspace_agent_catalog.py |
 | GET | `/workspaces/{workspace_id}/execution-configuration` | `get_workspace_execution_configuration` | routes/workspace_agent_catalog.py |
 | GET | `/workspaces/{workspace_id}/agent-routes` | `get_workspace_agent_routes` | routes/workspace_agent_routes.py |
+| GET | `/workspaces/{workspace_id}/agent-provenance` | `get_workspace_agent_provenance` | routes/workspace_agent_routes.py |
 | POST | `/workspaces/{workspace_id}/api-tokens` | `create_api_token` | routes/workspace_api_tokens.py |
 | GET | `/workspaces/{workspace_id}/api-tokens` | `list_api_tokens` | routes/workspace_api_tokens.py |
 | DELETE | `/workspaces/{workspace_id}/api-tokens/{token_id}` | `revoke_api_token` | routes/workspace_api_tokens.py |
@@ -505,10 +507,12 @@ server/app/
 | QualitySampleItemDetailResponse | BaseModel | item: QualitySampleItem, labels: list[QualityLabel], artifacts: list[QualityA... | app/routes/quality_contracts.py |
 | QualityLabelCreateRequest | BaseModel | verdict: LabelVerdict, reason_codes: list[str], note: str, replay_id: str | N... | app/routes/quality_contracts.py |
 | QualityLabelResponse | BaseModel | label: QualityLabel | app/routes/quality_contracts.py |
-| QualityReplayCreateRequest | BaseModel | agent_version: int | None | app/routes/quality_contracts.py |
-| QualityReplay | BaseModel | id: str, item_id: str, agent_id: str, agent_version: int | None, replay_job_i... | app/routes/quality_contracts.py |
+| QualityReplayCreateRequest | BaseModel | revision_id: str | None, use_draft: bool, agent_version: int | None | app/routes/quality_contracts.py |
+| QualityReplay | BaseModel | id: str, item_id: str, agent_id: str, agent_version: int | None, revision_id:... | app/routes/quality_contracts.py |
 | QualityReplayResponse | BaseModel | replay: QualityReplay | app/routes/quality_contracts.py |
 | QualityReplayListResponse | BaseModel | replays: list[QualityReplay] | app/routes/quality_contracts.py |
+| QualityReplayProfileOption | BaseModel | source: Literal['revision', 'draft'], revision_id: str | None, revision_versi... | app/routes/quality_contracts.py |
+| QualityReplayProfileOptionsResponse | BaseModel | options: list[QualityReplayProfileOption] | app/routes/quality_contracts.py |
 | QualityReplayDetailResponse | BaseModel | replay: QualityReplay, labels: list[QualityLabel], artifacts: list[QualityArt... | app/routes/quality_contracts.py |
 | QualityConfusionMatrix | BaseModel | tp: int, fp: int, fn: int, tn: int, precision: float | None, recall: float | ... | app/routes/quality_contracts.py |
 | QualityStatsGroup | BaseModel | node_key: str, skill_version: str, provider: str, model: str, runs: int, succ... | app/routes/quality_contracts.py |
@@ -671,6 +675,8 @@ server/app/
 | WorkspaceExecutionConfigurationResponse | BaseModel | node_limits: list[NodeLimitEntry], migration_warnings: list[str], agent_capac... | app/routes/workspace_execution_contracts.py |
 | WorkspaceAgentRouteEntry | BaseModel | node_key: str, node_label: str, capability: str, agent_id: str, agent_skill: ... | app/routes/workspace_execution_contracts.py |
 | WorkspaceAgentRoutesResponse | BaseModel | routes: list[WorkspaceAgentRouteEntry] | app/routes/workspace_execution_contracts.py |
+| WorkspaceAgentProvenanceEntry | BaseModel | node_key: str, node_label: str, agent_id: str, agent_version: int | None | app/routes/workspace_execution_contracts.py |
+| WorkspaceAgentProvenanceResponse | BaseModel | nodes: list[WorkspaceAgentProvenanceEntry] | app/routes/workspace_execution_contracts.py |
 | WorkspaceSettingsPayload | BaseModel | entityType: str, previewHidden: list[str] | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, previewHidden: list[str] | None | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/workspace_execution_contracts.py |
@@ -969,7 +975,7 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码、work
 
 token 用量计价已产品化：定价存于 `global_settings` 表（`token_usage` 文档），由 admin 在「全局设置」页（`GET/PUT /api/admin/token-usage-pricing`）维护，成本按每条 run 的 provider + model 匹配定价逐行计算；不再有任何 yaml 侧配置。
 
-Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 schema v27 退役，出现在 yaml 中启动即报错）：AgentDefinition 存于 `versioned_entities` 表（schema v46 起 workspace 作用域，解析严格限定本 workspace、零全局兜底），经 Studio「Agent 管理」或 `/api/agent-definitions`（`workspace_id` 查询参数）做 draft → publish → archive 生命周期管理；热读路径经 `AgentService` 的短 TTL（5s）published 缓存。agent 节点的执行档案（runtime / tools / `requires_labels` / config_schema / legacy skill 兜底）处于双读过渡期（#440 P2，EXEC-AGENT-PROFILE-001），一律经 `server/app/services/agent_node_profile.py` 的 `resolve_agent_node_profile` 解析：节点有效 `execution.runtime`（节点值或 workflow 顶层 `execution.runtime` 默认）非空即为自含节点，档案取节点自身字段，不要求 published Agent、revision 发布不物化路由，dispatch 把 runtime / labels 冻结进请求行（`profile_source='node'`，schema v92）；其余 agent 节点仍按 capability 解析本 workspace 唯一的 published AgentDefinition（EXEC-AGENTDEF-001）。只填 `requires_labels` 不填 runtime 发布即报错。执行配置（provider/model/thinking）不含在 AgentDefinition 内，按严格链解析：节点 `execution.*` 覆盖 → workflow 顶层 `execution` 默认（loader 加载时合并进每个非 start 节点）→ 报错（workspace `default_agent_*` 已随 schema v64 退役，无全局兜底）；thinking 可空（空 = runtime 决定）。
+Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 schema v27 退役，出现在 yaml 中启动即报错）：AgentDefinition 存于 `versioned_entities` 表（schema v46 起 workspace 作用域，解析严格限定本 workspace、零全局兜底），经 Studio「Agent 管理」或 `/api/agent-definitions`（`workspace_id` 查询参数）做 draft → publish → archive 生命周期管理；热读路径经 `AgentService` 的短 TTL（5s）published 缓存。agent 节点的执行档案（runtime / tools / `requires_labels` / config_schema / 节点 skill 绑定）自 #440 P3（#935）起以节点为准（EXEC-AGENT-PROFILE-001），一律经 `server/app/services/agent_node_profile.py` 的 `resolve_agent_node_profile` 解析：节点有效 `execution.runtime`（节点值或 workflow 顶层 `execution.runtime` 默认）发布必填，档案取节点自身字段，不要求 published Agent、revision 发布不物化路由，dispatch 把 runtime / labels 冻结进请求行（`profile_source='node'`，schema v92）；schema v93 已把存量 legacy agent 节点回填为自含档案，上述 AgentDefinition 目录转为只读历史（写 API/MCP 已 deprecated），按 capability 解析 published AgentDefinition 的 legacy 路径只服务回填前冻结的 job 快照。只填 `requires_labels` 不填 runtime 发布即报错。执行配置（provider/model/thinking）不含在 AgentDefinition 内，按严格链解析：节点 `execution.*` 覆盖 → workflow 顶层 `execution` 默认（loader 加载时合并进每个非 start 节点）→ 报错（workspace `default_agent_*` 已随 schema v64 退役，无全局兜底）；thinking 可空（空 = runtime 决定）。
 
 其他配置文件：
 

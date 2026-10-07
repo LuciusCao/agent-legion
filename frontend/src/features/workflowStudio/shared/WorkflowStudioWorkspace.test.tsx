@@ -95,12 +95,6 @@ function renderWorkspaceLive() {
     workflow,
     executorCatalog,
     agentCatalog: [],
-    agentCatalogSettle: {
-      catalogSettled: true,
-      catalogFailed: false,
-      definitionsSettled: true,
-      definitionsFailed: false,
-    },
     selectedNodeKey: null,
     setSelectedNodeKey: vi.fn(),
     readOnly: false,
@@ -181,14 +175,6 @@ function renderWorkspace(
     workflow,
     executorCatalog,
     agentCatalog: [],
-    // #426 codex 终轮 P2：节点详情门控消费的 settle 信号（两份查询均
-    // settle 的基线；getAgentCatalog/agent-definitions 的 mock 均已返回）。
-    agentCatalogSettle: {
-      catalogSettled: true,
-      catalogFailed: false,
-      definitionsSettled: true,
-      definitionsFailed: false,
-    },
     selectedNodeKey: null,
     setSelectedNodeKey: vi.fn(),
     readOnly: false,

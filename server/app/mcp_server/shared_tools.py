@@ -32,7 +32,9 @@ def register_shared_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         references/ + scripts/ texts). No _shared → {"map": null, "files":
         []} — the signal to author them, not an error. output_path exports
         full JSON to a NEW file under data/studio-mcp-files/<workspace_id>/
-        on the MCP host; returns path/size/SHA-256 instead of the payload."""
+        on the MCP host; returns path/size/SHA-256 instead of the payload.
+        Build residue (__pycache__/, *.pyc) is skipped; other non-UTF-8
+        files fail the export (422) until deleted."""
         _, client = await client_factory()
         response = await client.call(
             "GET",
@@ -52,7 +54,8 @@ def register_shared_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         author its JSON. save_skill_version of a mapped skill syncs the
         shared sources into that skill's repo — never hand-supply a mapped
         path in the save payload (the shared copy wins; the save rejects
-        it). FULL state: omitted files are deleted. Supply files OR files_path
+        it). FULL state: omitted files are deleted (build residue such as
+        __pycache__/ stays on disk; never put it in files). Supply files OR files_path
         (UTF-8 JSON list or get_shared_materials export). File entries carry
         path and content OR file_path; local paths stay under
         data/studio-mcp-files/<workspace_id>/ on the MCP host."""

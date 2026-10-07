@@ -212,7 +212,7 @@ workspace_id
 workflow_key
 source_kind       legacy 展示用（退役 intake 后逐步废弃）
 status            created | queued | running | paused | finished（汇总）
-frozen_pins_json  node_code_versions / agent_versions / quality_replay 标记
+frozen_pins_json  node_code_versions / agent_versions / node_profiles（#1079 回放执行档案）/ quality_replay 标记
                   （从旧 source_payload_json 解析搬迁；新行直接写列）
 stats_json        状态汇总缓存（total/succeeded/failed）
 queue_payload_json 异步 intake 的工作状态（chunk 消费/重排队），

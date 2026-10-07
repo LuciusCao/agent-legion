@@ -6,7 +6,9 @@ so a second entry silently shadowed the first), and every non-recurring entry
 carries a ``registered_on`` date (plus ``extended_on`` after a reviewed
 extension) with its deadline at most ``MAX_DEADLINE_WINDOW_DAYS`` after that
 anchor. Nothing here reads today's date: whether a deadline has passed is the
-nightly ``check_reruns.py --check-deadlines`` job's call.
+nightly ``check_reruns.py --check-deadlines`` job's call. Registries of
+other revisions (PR base, maintained branches) are read leniently by
+``flaky_registry_lenient``.
 """
 
 from __future__ import annotations
@@ -146,25 +148,3 @@ def load_registry(path: Path) -> list[RegistryEntry]:
                 )
             nodeid_owner[entry.nodeid] = entry.entry_id
     return entries
-
-
-def touched_entry_ids(entries: list[RegistryEntry], base_path: Path) -> set[str]:
-    """Ids of entries added, or whose deadline changed, relative to a base
-    registry (#941 R3/R4). Every PR enforces expiry for these (the nightly
-    job sees only the default branch, and only after a merge), yet untouched
-    entries must not turn every PR red on their deadline day. The base is parsed
-    leniently because it may predate the current schema."""
-    try:
-        data = yaml.safe_load(base_path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        raise RegistryError(f"cannot read base registry {base_path}: {exc}") from exc
-    raw_entries = data.get("entries") if isinstance(data, dict) else None
-    base: dict[str, str] = {}
-    for raw in raw_entries if isinstance(raw_entries, list) else []:
-        if isinstance(raw, dict) and isinstance(raw.get("id"), str):
-            base[raw["id"].strip()] = str(raw.get("deadline"))
-    return {
-        entry.entry_id
-        for entry in entries
-        if base.get(entry.entry_id, "<absent>") != str(entry.deadline)
-    }

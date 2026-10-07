@@ -88,13 +88,10 @@ agent 框架；依赖清单评审纳入 PR。
 worker 侧进程模型不变：`worker/executor.py` 每个 claim 起一个 velites 子进程
 （`subprocess.Popen(cwd=job_dir, start_new_session=True)`），stdout 即事件流。
 二进制经 Dockerfile 新增 rust build stage 打进 worker 镜像；命令构建经
-Host 侧 runtime catalog（`server/app/agent_runtime/`，按节点执行档案的 runtime
-分发到各 adapter，EXEC-RUNTIME-DISPATCH-001）——pi → pi argv、
-velites → velites argv。档案 runtime 处于双读过渡期（#440 P2，EXEC-AGENT-PROFILE-001，
-`server/app/services/agent_node_profile.py`）：自含节点取节点 `execution.runtime`
-（或 workflow 顶层 `execution.runtime` 默认），其余节点取按 capability 解析到的
-`AgentDefinition.runtime`。pi 不退役、长期保留，灰度/回退均为单字段配置改动
-（节点 `execution.runtime` 或 Agent 定义的 `runtime`，详见 §9）。
+Host 侧 runtime catalog（`server/app/agent_runtime/`，按 agent 节点执行档案的
+`execution.runtime` 分发到各 adapter，EXEC-RUNTIME-DISPATCH-001）——pi → pi argv、
+velites → velites argv；pi 不退役、长期保留，
+灰度/回退均为单个 agent 节点的单字段配置改动、随 workflow 发布生效（详见 §9）。
 
 ## 4. 事件 Schema v1：pi 兼容子集（velites/json1）
 
@@ -488,13 +485,10 @@ fail-closed 报错，内置节点不受影响。
 
 ## 9. 与 Agent Legion 的集成与切换
 
-**当前模型**：pi、velites 是平级 runtime，由 agent 节点执行档案的 runtime 声明。
-档案处于双读过渡期（#440 P2，EXEC-AGENT-PROFILE-001，统一经
-`server/app/services/agent_node_profile.py` 解析）：声明了 `execution.runtime`
-（节点值或 workflow 顶层 `execution.runtime` 默认）的自含节点直接用该值，随
-revision 发布、随 job 快照冻结，dispatch 把 runtime 写入请求行（`profile_source='node'`）；
-其余节点用按 capability 解析到的 `AgentDefinition.runtime`（定义存
-`versioned_entities` 表，Studio「Agent 管理」维护；yaml `agents:` 段与
+**当前模型（2026-08-05 起，agent 配置治理 phase 3 落地）**：pi、velites
+是平级 runtime，由 agent 节点执行档案的 `execution.runtime` 声明（#440 P3
+起随 workflow revision 发布；此前的 Agent 定义已只读、仅服务旧 job 快照，
+EXEC-AGENT-PROFILE-001；yaml `agents:` 段与
 `workflows.pi` 块已退役，出现在 yaml 中启动即报错；openclaw 曾短暂接入，
 因无流式事件与 token 计量已于 #75 整体退役）。命令构建经 Host 侧
 runtime catalog（`server/app/agent_runtime/`，runtime 全集的单一事实来源
@@ -508,9 +502,8 @@ runtime catalog（`server/app/agent_runtime/`，runtime 全集的单一事实来
 fail-fast（issue #75 阶段 2）。
 manifest 的执行块统一为
 `execution.*`（`binary/provider/model/thinking/timeout_seconds/no_sandbox`），
-不再有 `pi.*` 键。灰度/回退粒度是单字段改动——自含节点改节点
-`execution.runtime` 并发布新 revision（在途 job 经「升级 workflow」取新值），
-legacy 节点改对应 Agent 定义的 `runtime`；操作手册见
+不再有 `pi.*` 键。灰度/回退粒度是单个 agent 节点的 `execution.runtime`
+单字段改动（在途 job 经「升级 workflow」生效），操作手册见
 `docs/remote-execution-runbook.md` §6。
 
 **flavor 的退役（2026-08-05）**：`workflows.pi.flavor` 实现选择层已随 yaml
@@ -525,8 +518,8 @@ pi_config/pi_command_builder/pi_prompt 链）已整体删除（#108）。
 （`runtime: pi` 即完整 pi 路径）。若未来仅出于卫生目的清理
 （如 command_spec version 升级），另行立项评估，与退役无关。
 
-**回退**：单节点异常把该节点的 `execution.runtime`（自含节点）或对应 Agent
-定义的 `runtime`（legacy 节点）改回 `pi`；系统性异常同法全部迁回 `pi`。沙箱异常当前需发版调整
+**回退**：单节点异常把该 agent 节点的 `execution.runtime` 改回 `pi` 并发布；
+系统性异常同法全部迁回 `pi`（或改 workflow 顶层 `execution.runtime` 默认）。沙箱异常当前需发版调整
 （`velites_no_sandbox` 配置项已随 `workflows.pi` 退役；`execution.no_sandbox`
 在 manifest 恒为 false）。
 
@@ -551,7 +544,7 @@ worker 镜像——velites 经 compose 外挂（`AGENT_WORKER_EXPECT_RUNTIMES`
 （#383，与 harness 分家）。容器部署前置：bwrap setuid 仍在镜像内；容器
 seccomp 需放行 `unshare`（见 §5 沙箱小节的运行时要求）。
 
-**Pi CLI 安装与验证**（仅 `runtime: pi` 的 agent 需要）：
+**Pi CLI 安装与验证**（仅 `execution.runtime: pi` 的 agent 节点需要）：
 
 ```bash
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent
@@ -559,8 +552,7 @@ pi                      # 交互式完成认证
 ./scripts/check-pi.sh   # 验证安装与认证状态
 ```
 
-之后把节点 `execution.runtime`（自含节点）或 Studio「Agent 管理」里对应 Agent 定义的
-`runtime`（legacy 节点）设为 `pi` 即可。
+之后把 workflow 中对应 agent 节点的 `execution.runtime`（或 workflow 顶层 `execution.runtime` 默认）设为 `pi` 并发布即可。
 
 ### 新增 agent runtime 接入指南
 

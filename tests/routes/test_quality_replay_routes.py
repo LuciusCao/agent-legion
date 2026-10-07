@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from server.app.db.transaction import write_transaction
 from server.app.jobs import JobQueries
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
 from server.app.storage_paths import resolve_job_dir
-from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake, WorkflowNode
+from server.app.workflows.schema import (
+    WorkflowDefinition,
+    WorkflowIntake,
+    WorkflowNode,
+    WorkflowNodeExecution,
+)
 from tests.postgres_support import TEST_DATABASE_URL
 
 pytestmark = pytest.mark.fresh_schema
@@ -24,8 +31,12 @@ def client(client_factory):
         yield c
 
 
-def _seed(client_tmp_path):
-    """Seed a workspace with one completed job + sample item; returns ids."""
+def _seed(client_tmp_path, *, agent: bool = False):
+    """Seed a workspace with one completed job + sample item; returns ids.
+
+    ``agent=True`` makes ``generate`` a self-contained agent node and adds an
+    active revision 2 carrying a different profile (#1079, D6).
+    """
     job_db = JobQueries(TEST_DATABASE_URL, client_tmp_path / "jobs")
     ws = job_db.create_workspace(name="Replay Routes WS")
     workspace_id = str(ws["id"])
@@ -50,6 +61,13 @@ def _seed(client_tmp_path):
             ),
         },
     )
+    if agent:
+        generate = replace(
+            definition.nodes["generate"],
+            node_type="agent",
+            execution=WorkflowNodeExecution(runtime="velites", model="m1"),
+        )
+        definition = replace(definition, nodes={**definition.nodes, "generate": generate})
     snapshot = serialize_definition(definition)
     job = job_db.create_job(
         workflow_key="test",
@@ -69,6 +87,24 @@ def _seed(client_tmp_path):
         '{"q": 1}', encoding="utf-8"
     )
     with write_transaction(TEST_DATABASE_URL) as conn:
+        if agent:
+            candidate = replace(
+                definition,
+                nodes={
+                    **definition.nodes,
+                    "generate": replace(
+                        definition.nodes["generate"],
+                        execution=WorkflowNodeExecution(runtime="pi", model="m2"),
+                    ),
+                },
+            )
+            text = serialize_definition(candidate)
+            conn.execute(
+                "insert into workflow_revisions(id, workspace_id, version, status,"
+                " definition_json, definition_hash, published_at)"
+                " values ('rev-2', %s, 2, 'active', %s, %s, current_timestamp)",
+                (workspace_id, text, definition_hash(text)),
+            )
         conn.execute(
             "insert into workspace_node_routes("
             "workspace_id, node_key, target_kind, target_id)"
@@ -169,6 +205,38 @@ def test_replay_agent_version_validation(client, tmp_path):
         client.post(f"{base}/sample-items/item-1/replays", json={"agent_version": 0}).status_code
         == 422
     )
+
+
+def test_replay_by_workflow_revision(client, tmp_path):
+    """#1079（#440 D6）：agent 节点按 revision 选执行档案回放。"""
+    workspace_id = _seed(tmp_path, agent=True)
+    base = f"/api/workspaces/{workspace_id}/quality"
+
+    options = client.get(f"{base}/sample-items/item-1/replay-profiles")
+    assert options.status_code == 200, options.text
+    [option] = options.json()["options"]
+    assert option["source"] == "revision"
+    assert (option["revision_id"], option["revision_version"]) == ("rev-2", 2)
+    assert (option["runtime"], option["model"]) == ("pi", "m2")
+
+    created = client.post(f"{base}/sample-items/item-1/replays", json={"revision_id": "rev-2"})
+    assert created.status_code == 200, created.text
+    replay = created.json()["replay"]
+    assert replay["revision_id"] == "rev-2"
+    assert replay["revision_version"] == 2
+    assert replay["profile_hash"] == option["profile_hash"]
+
+    listing = client.get(f"{base}/sample-items/item-1/replays").json()["replays"]
+    assert listing[0]["revision_version"] == 2
+
+
+def test_replay_profiles_empty_for_code_nodes(client, tmp_path):
+    workspace_id = _seed(tmp_path)
+    base = f"/api/workspaces/{workspace_id}/quality"
+    response = client.get(f"{base}/sample-items/item-1/replay-profiles")
+    assert response.json() == {"options": []}
+    created = client.post(f"{base}/sample-items/item-1/replays", json={"use_draft": True})
+    assert created.status_code == 400
 
 
 def test_replay_anonymous_access_rejected(anon_client):
