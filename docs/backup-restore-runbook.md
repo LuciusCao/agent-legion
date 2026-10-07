@@ -107,6 +107,10 @@ where exists (
 
 ### 1.3 建议备份
 
+- Worker 的 velites 模型配置：`VELITES_CONFIG_DIR` 目录（`models.json`）与
+  `deploy/velites-provider.env`（provider 凭据，0600），都是 gitignored 的本机文件，
+  丢失可按 [agent-worker-deployment.md](agent-worker-deployment.md) §2 重配。
+  velites 二进制本身不用备份，恢复时从 GitHub Release 重取（§2.3 第 6 步）。
 - Worker 状态卷 `worker-control`（状态副本 `worker.yaml`、control token）：丢失
   可按 [agent-worker-deployment.md](agent-worker-deployment.md) 重新配置与注册，
   备份只为省去重配。
@@ -333,13 +337,34 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
    隐藏文件）。现有卷还有可能需要的数据时，先按 §2.2 再冷备一份当前卷，与
    数据库恢复保留旧库同理：
    `docker run --rm -v "$SW_SRC":/data -v <备份目录>:/backup busybox sh -c 'A=/backup/seaweedfs-data-<时间戳>.tar.gz; tar tzf "$A" >/dev/null && find /data -mindepth 1 -delete && tar xzf "$A" -C /data'`。
-   有 §2.2.1 的 legacy 本地产物备份时一并放回 Host 数据卷：
-   `docker run --rm -v "$HD_SRC":/dst -v <备份目录>:/backup busybox tar xzf /backup/host-data-<时间戳>.tar.gz -C /dst`
-   （原生形态解包到数据根）。
+   有 §2.2.1 的 legacy 本地产物备份时一并放回 Host 数据卷，做法与上面对称：
+   先 `tar tzf` 完整校验，成功后再删掉卷里现有的 `artifacts/` 与 `jobs/`，最后解包。
+   不清空的话，备份之后才写入的文件会留在原处，而产物读取优先看本地 job_dir，
+   恢复后的数据库会读到新旧混合的内容；包损坏时也不会解到一半才失败。两个目录
+   按备份时的状态整体替换（备份里没有 `artifacts/` 说明当时就没有 legacy CAS，
+   删掉现有的同样正确）。现有卷里的这两个目录还可能有用时，先按 §2.2.1 再打一份：
+   `docker run --rm -v "$HD_SRC":/dst -v <备份目录>:/backup busybox sh -c 'A=/backup/host-data-<时间戳>.tar.gz; tar tzf "$A" >/dev/null && rm -rf /dst/artifacts /dst/jobs && tar xzf "$A" -C /dst'`。
+   原生形态同样在数据根上先校验、再删 `artifacts/` 与 `jobs/`、再解包。
    恢复 skill root：在宿主机上把 §2.2.2 的包解到 `SKILLS`（目标目录应为空或不存在；
    Docker stack 须是 compose 解析出的同一挂载源）：
    `mkdir -p "$SKILLS" && tar xzf <备份目录>/skills-<时间戳>.tar.gz -C "$SKILLS"`。
-6. `make prod-up docker` 拉起整个 stack；低于当前版本的 dump 会在启动时自动
+6. 全新机器先备好 Worker 的 velites 二进制：它不在仓库、镜像与本 runbook 的备份
+   里（`velites-bin/` 是 gitignored 目录），而 compose 把
+   `${VELITES_BIN:-../velites-bin/velites}`（默认即 `<仓库根>/velites-bin/velites`）
+   挂进 Worker。文件缺失时 Docker 会在该路径建一个空目录，容器照常创建，随后
+   期望 runtime 守卫（`AGENT_WORKER_EXPECT_RUNTIMES`，默认 `velites`）探测不到
+   velites，Worker 以退出码 2 退出，下面入口的 `--wait` 随之失败。仓库没有自动
+   下载入口（`Makefile` 与 `scripts/stack-prod-up.sh` 不处理它，
+   `scripts/ensure-velites.sh` 只为裸机形态从源码构建到 `data/bin`），按
+   [agent-worker-deployment.md](agent-worker-deployment.md) §5「velites 二进制来源」
+   从 GitHub Release（`velites-v*`）取与宿主机架构一致的产物，放到上述路径并
+   `chmod +x`；`deploy/.env` 用 `VELITES_BIN` 改过位置的放到改写后的路径。已经在
+   缺文件的状态下启动过的，先 `rmdir` 掉 Docker 建的空目录再放文件。Worker 的
+   模型配置 `VELITES_CONFIG_DIR`（`models.json`）与 `deploy/velites-provider.env`
+   同样不在仓库里，按 §1.3 的备份放回，或按 agent-worker-deployment.md §2 重配。
+   原机本就是零 runtime 形态（去掉 velites 挂载的 override、`deploy/.env` 里
+   `AGENT_WORKER_EXPECT_RUNTIMES=` 置空）的，这两处已随第 2 步放回，无需二进制。
+   然后 `make prod-up docker` 拉起整个 stack；低于当前版本的 dump 会在启动时自动
    迁移到当前 schema。注意该入口（`scripts/stack-prod-up.sh`）启动前**无条件**检查
    默认路径 `deploy/secrets/{postgres_password,postgres_pgpass,vault_master_key}`
    非空，不看 `POSTGRES_PASSWORD_FILE` / `POSTGRES_PGPASS_FILE` /
