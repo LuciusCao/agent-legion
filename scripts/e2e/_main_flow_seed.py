@@ -89,7 +89,14 @@ WORKFLOW_DEFINITION: dict[str, Any] = {
             "after": ["intake"],
             "inputs": [INTAKE_OUTPUT],
             "outputs": [DRAFT_OUTPUT],
-            "execution": {"provider": "gateway", "model": "stub-model", "thinking": "low"},
+            # #935 (#440 P3): self-contained execution profile — the runtime
+            # the seeded Agent definition declares (velites).
+            "execution": {
+                "runtime": "velites",
+                "provider": "gateway",
+                "model": "stub-model",
+                "thinking": "low",
+            },
         },
         "publish": {
             "label": "汇总",

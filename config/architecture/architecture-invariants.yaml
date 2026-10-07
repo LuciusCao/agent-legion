@@ -388,32 +388,8 @@ invariants:
         target: tests/full/test_agent_worker_control_plane.py::test_http_claim_cycle_releases_capacity_and_updates_panel
         gate: full
 
-  - id: EXEC-AGENTDEF-001
-    statement: "Status: in transition (#440 retirement, P2 dual read — self-contained agent nodes are governed by EXEC-AGENT-PROFILE-001 instead). Agent capability, runtime, skill, tools, and resource requirements are declared by the workspace-scoped Agent Catalog (versioned_entities with workspace_id set, published via AgentService; schema v46 — exactly one published Agent per capability per workspace, no global fallback at resolution); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability within the current workspace and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Since #76 the definition's skill field is optional and serves only as the legacy fallback at dispatch — the workflow node's own skill binding (EXEC-SKILL-NODE-001) takes precedence and owns the version pin. Workers separately declare node capabilities and runtime/provider/model triples derived from each selected runtime's local discovery intersected with its operator allowlist, alongside labels, protocol version, and machine-wide max_concurrency."
-    owner: workspace-executor
-    risk: critical
-    evidence:
-      - kind: integration
-        target: tests/services/test_agent_catalog.py
-        gate: quick
-      - kind: integration
-        target: tests/services/test_agent_catalog_service.py::test_catalog_exposes_published_agent_definitions
-        gate: quick
-      - kind: integration
-        target: tests/services/test_agent_service.py
-        gate: quick
-      - kind: integration
-        target: tests/db/test_agent_workspace_scope_migration.py
-        gate: quick
-      - kind: integration
-        target: tests/services/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
-        gate: quick
-      - kind: integration
-        target: tests/full/test_agent_worker_control_plane.py::test_agent_definition_catalog_snapshot_lifecycle
-        gate: full
-
   - id: EXEC-AGENT-PROFILE-001
-    statement: "Status: dual read (#440 P2, #933). Every agent node's execution profile (runtime, tools, requires_labels, config_schema, legacy skill fallback) is resolved only through services/agent_node_profile (resolve_agent_node_profile). A node whose effective execution.runtime is set (node value or the workflow top-level execution.runtime default, one of AGENT_RUNTIMES) is self-contained: source='node', no published Agent is required, revision publish materializes no workspace_node_routes row, and dispatch freezes the profile into agent_execution_requests (schema v92: profile_source='node', runtime, requires_labels_json; agent_id = node key, agent_definition_hash = profile hash). Claim reads runtime/labels from the row and never joins versioned_entities for such rows; the stale-definition sweep and _validate_agent_route skip them; the unclaimable sweep judges them by the row runtime. Other agent nodes keep the Agent-definition source unchanged. requires_labels without a runtime fails publish. The poll-loop scan gates (workflow_worker/thread.py, agent_gate.py) open when a published Agent exists OR a revision still dispatchable (the active one, or one a runnable job is pinned to) has a self-contained agent node."
+    statement: "Status: node profile authoritative (#440 P3, #935; supersedes the retired EXEC-AGENTDEF-001). Every agent node carries its own execution profile — execution.runtime (node value or the workflow top-level execution.runtime default, one of AGENT_RUNTIMES), tools, requires_labels, config_schema and the node skill binding — versioned with the workflow revision and frozen into each job snapshot; publish validation rejects an agent node without execution.runtime (and requires_labels without a runtime). Profiles are resolved only through services/agent_node_profile (resolve_agent_node_profile): a self-contained node is source='node', needs no published Agent and no workspace_node_routes row, and dispatch freezes the profile into agent_execution_requests (schema v92: profile_source='node', runtime, requires_labels_json; agent_id = node key, agent_definition_hash = profile hash); claim reads runtime/labels from the row and never joins versioned_entities for such rows, the stale-definition sweep and _validate_agent_route skip them, the unclaimable sweep judges them by the row runtime. Schema v93 inlined every resolvable legacy agent node of the active revisions and Studio drafts from the published Agent it ran (route target, else the capability's unique published Agent), backup table agent_profile_backfill_backups first, recording agent_profile_provenance {agent_id, version, definition_hash, restore} beside the definition (outside definition_hash, carried forward while the node profile is unchanged); inherit upgrade treats an old legacy node as unchanged only when it equals the inlined node's legacy view AND its executed identity equals the provenance definition_hash. The workspace Agent catalog (versioned_entities, entity_type 'agent') is read-only history: its write API/MCP surfaces are deprecated, publishes no longer reach inlined nodes, and the legacy definition source (capability → exactly one published Agent, materialized routes) only serves job snapshots frozen before the inlining; a revision without legacy agent nodes never upserts workspace_node_routes — rows of nodes it still declares type: agent stay frozen, rows of nodes it removed or turned code are pruned — and routing / job detail trust a route row only for a node the job snapshot declares agent. Workers separately declare runtime/provider/model triples, labels, protocol version and machine-wide max_concurrency. The poll-loop scan gates (workflow_worker/thread.py, agent_gate.py) open when a published Agent exists OR a revision still dispatchable (the active one, or one a runnable job is pinned to) has a self-contained agent node."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -439,7 +415,25 @@ invariants:
         target: tests/db/test_agent_request_profile_source_migration.py
         gate: quick
       - kind: integration
+        target: tests/db/test_agent_profile_backfill_migration.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_job_workflow_upgrade_profile_provenance.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_catalog.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_service.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
+        gate: quick
+      - kind: integration
         target: tests/full/test_agent_node_self_contained_e2e.py::test_workspace_without_agent_definitions_runs_a_self_contained_node
+        gate: full
+      - kind: integration
+        target: tests/full/test_agent_worker_control_plane.py::test_agent_definition_catalog_snapshot_lifecycle
         gate: full
 
   - id: EXEC-WORKERACL-001
@@ -503,7 +497,7 @@ invariants:
         gate: quick
 
   - id: EXEC-CODE-002
-    statement: "Workflow node code lives only in the DB (versioned_entities, entity_type 'node_code'), takes effect exclusively through the publish flow (draft → published → archived), versions are immutable, and no runtime path may write repo workflow_nodes/ files. All active node code is workspace-scoped; legacy global (workspace-NULL) rows are migration input and historical replay data only. Since #115 ordinary jobs no longer freeze the code version they started with: dispatch resolves only the workspace's currently published code, so a republish takes effect on the next node execution of an in-flight job — same for Agent definitions, which ordinary jobs never pinned (dispatch always resolved the workspace's currently published definition). The intake batch's node_code_versions and the revision snapshot's node_code_pins survive as audit records and as the pin source for quality replays: only a batch carrying the quality_replay marker dispatches its frozen pin (snapshot pins first, batch pins as the legacy fallback), failing closed on hash drift; historical replays may resolve an archived legacy-global pin by exact version and hash. A capability with no published workspace code fails the node with a config error. The feature is gated by workflows.custom_nodes_enabled."
+    statement: "Workflow node code lives only in the DB (versioned_entities, entity_type 'node_code'), takes effect exclusively through the publish flow (draft → published → archived), versions are immutable, and no runtime path may write repo workflow_nodes/ files. All active node code is workspace-scoped; legacy global (workspace-NULL) rows are migration input and historical replay data only. Since #115 ordinary jobs no longer freeze the code version they started with: dispatch resolves only the workspace's currently published code, so a republish takes effect on the next node execution of an in-flight job. Agent nodes are the opposite since #440 P3 (#935, EXEC-AGENT-PROFILE-001): their execution profile ships with the workflow revision and freezes with the job snapshot — an in-flight job picks up a new profile only through a workflow upgrade (only snapshots frozen before the v93 inlining still resolve the workspace's currently published Agent definition). The intake batch's node_code_versions and the revision snapshot's node_code_pins survive as audit records and as the pin source for quality replays: only a batch carrying the quality_replay marker dispatches its frozen pin (snapshot pins first, batch pins as the legacy fallback), failing closed on hash drift; historical replays may resolve an archived legacy-global pin by exact version and hash. A capability with no published workspace code fails the node with a config error. The feature is gated by workflows.custom_nodes_enabled."
     owner: workspace-executor
     risk: high
     evidence:
@@ -1448,7 +1442,7 @@ invariants:
         gate: quick
 
   - id: EXEC-WORKFLOW-NODE-TYPE-001
-    statement: "Non-start workflow nodes declare an explicit execution type (type: code|agent, #284 phase 2, schema v66): the loader normalizes the legacy 'node' spelling and an omitted type to 'code', and the v66 migration backfills stored active revisions and Studio drafts from the workspace_node_routes projection with the same rule so no ghost structural revision appears. Publish validation branches on the type — type=agent requires the capability to resolve to exactly one published Agent, type=code requires resolvable published workspace node code (an idle published Agent on the same capability is allowed). Revision publication materializes workspace_node_routes rows only for type=agent nodes; Agent publish/archive never rewrites routes (the startup reconcile is retired) — routes change only at revision publication."
+    statement: "Non-start workflow nodes declare an explicit execution type (type: code|agent, #284 phase 2, schema v66): the loader normalizes the legacy 'node' spelling and an omitted type to 'code', and the v66 migration backfills stored active revisions and Studio drafts from the workspace_node_routes projection with the same rule so no ghost structural revision appears. Publish validation branches on the type — type=agent requires a self-contained execution profile (EXEC-AGENT-PROFILE-001, #935), type=code requires resolvable published workspace node code (an idle published Agent on the same capability is allowed). Revision publication materializes workspace_node_routes rows only for legacy (non-self-contained) type=agent nodes, which only ungated internal/test publishes still produce (the built-in demo template ships a workflow top-level execution.runtime); a revision without them upserts nothing and prunes rows of nodes that are no longer agent nodes; a route row is honored only for nodes the job snapshot declares agent. Agent publish/archive never rewrites routes (the startup reconcile is retired)."
     owner: workspace-executor
     risk: high
     evidence:

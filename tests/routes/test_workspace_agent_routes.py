@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from server.app.jobs.queries import JobQueries
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from tests.helpers import load_builtin_definition, seed_workspace_agent_definitions
+from tests.helpers.node_profile import legacy_profile_variant
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -14,7 +15,11 @@ def _publish(client: TestClient, workspace_id: str = "ws-routes") -> None:
     # Agent definitions are workspace-scoped (schema v46): seed the demo
     # agents into this workspace before publishing so routes materialize.
     seed_workspace_agent_definitions(workspace_id)
-    definition = load_builtin_definition("education_video_problems_generation")
+    # #935: the demo ships self-contained nodes (no routes); this endpoint
+    # reports the legacy materialized routes, so publish the legacy variant.
+    definition = legacy_profile_variant(
+        load_builtin_definition("education_video_problems_generation")
+    )
     WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, definition)
 
 

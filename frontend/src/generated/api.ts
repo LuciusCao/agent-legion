@@ -223,7 +223,10 @@ export interface paths {
     /** List Agent Definitions */
     get: operations['list_agent_definitions_api_agent_definitions_get']
     put?: never
-    /** Create Agent Definition */
+    /**
+     * Create Agent Definition
+     * @deprecated
+     */
     post: operations['create_agent_definition_api_agent_definitions_post']
     delete?: never
     options?: never
@@ -242,7 +245,10 @@ export interface paths {
     get: operations['get_agent_definition_api_agent_definitions__agent_id__get']
     put?: never
     post?: never
-    /** Archive Agent Definition */
+    /**
+     * Archive Agent Definition
+     * @deprecated
+     */
     delete: operations['archive_agent_definition_api_agent_definitions__agent_id__delete']
     options?: never
     head?: never
@@ -258,7 +264,10 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Copy Agent Definition */
+    /**
+     * Copy Agent Definition
+     * @deprecated
+     */
     post: operations['copy_agent_definition_api_agent_definitions__agent_id__copy_post']
     delete?: never
     options?: never
@@ -274,7 +283,10 @@ export interface paths {
       cookie?: never
     }
     get?: never
-    /** Save Agent Definition Draft */
+    /**
+     * Save Agent Definition Draft
+     * @deprecated
+     */
     put: operations['save_agent_definition_draft_api_agent_definitions__agent_id__draft_put']
     post?: never
     delete?: never
@@ -292,7 +304,10 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Publish Agent Definition */
+    /**
+     * Publish Agent Definition
+     * @deprecated
+     */
     post: operations['publish_agent_definition_api_agent_definitions__agent_id__publish_post']
     delete?: never
     options?: never
@@ -309,7 +324,10 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Rollback Agent Definition */
+    /**
+     * Rollback Agent Definition
+     * @deprecated
+     */
     post: operations['rollback_agent_definition_api_agent_definitions__agent_id__rollback_post']
     delete?: never
     options?: never
@@ -1200,6 +1218,7 @@ export interface paths {
     put?: never
     /**
      * Create Agent Definition
+     * @deprecated
      * @description Start a NEW Agent definition draft: the agent_id derives from the
      *     capability (no explicit id on this surface — a colliding capability
      *     gets a 409 pointing at the existing Agent), the draft stamps
@@ -1223,6 +1242,7 @@ export interface paths {
     get?: never
     /**
      * Save Agent Definition Draft
+     * @deprecated
      * @description Draft-only write: a human publishes it in Studio (STUDIO-AGENT-001).
      */
     put: operations['save_agent_definition_draft_api_studio_agent_tools_workspaces__workspace_id__agent_definitions__agent_id__draft_put']

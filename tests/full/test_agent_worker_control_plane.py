@@ -27,6 +27,7 @@ from tests.helpers.agent_worker_api import (
 from tests.helpers.agent_worker_api import (
     seed_request as _seed_request,
 )
+from tests.helpers.node_profile import legacy_profile_variant
 from tests.helpers.postgres_schema import (
     assert_schema_initialization_is_idempotent as _assert_schema_idempotent,
 )
@@ -142,7 +143,11 @@ def test_startup_materializes_agent_routes(client, job_db) -> None:
     expected_agents = set(published_agent_definitions(TEST_DATABASE_URL, workspace_id))
     assert expected_agents, "test requires a non-empty published Agent catalog"
 
-    definition = load_builtin_definition("education_video_problems_generation")
+    # #935: the demo ships self-contained nodes (no routes); the legacy
+    # variant keeps exercising route materialization for pre-inlining shapes.
+    definition = legacy_profile_variant(
+        load_builtin_definition("education_video_problems_generation")
+    )
     revision_service = WorkflowRevisionService(job_db)
     revision_service.publish_workspace_revision(workspace_id, definition)
 

@@ -28,7 +28,8 @@ export function WorkflowNodeAgentConfigBody(props: Props) {
   if (!props.agentDefinition)
     return (
       <div className={inspectorStyles.empty}>
-        该 capability 暂无 published Agent；发布 workflow 前需新建并发布一个。
+        该 capability 暂无 published Agent；请在上方选择
+        runtime，把执行档案写在节点上。
       </div>
     )
   const draft =

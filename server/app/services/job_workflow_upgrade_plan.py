@@ -14,10 +14,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
+from server.app.services.agent_profile_provenance import upgrade_legacy_views
 from server.app.services.job_workflow_upgrade_impl import implementation_excluded_nodes
 from server.app.services.job_workflow_upgrade_inherit import unreachable_inherit_nodes
 from server.app.services.job_workflow_upgrade_propagation import (
@@ -36,6 +38,7 @@ def plan_inherit_nodes(
     *,
     custom_nodes_enabled: bool = True,
     require_manifest_rows: bool = False,
+    profile_provenance: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> frozenset[str]:
     """最终继承集 = 新定义可执行节点 −（S1–S5 种子 ∪ S6 可达性种子）的传播闭包。
 
@@ -106,13 +109,17 @@ def plan_inherit_nodes(
         job,
         new_definition,
         custom_nodes_enabled=custom_nodes_enabled,
+        profile_provenance=profile_provenance,
     )
+    # #935：目标 revision 的 provenance 把「旧快照 legacy 节点 vs v93 内联
+    # 后的自含节点」归一比较（S1 legacy 视图 + S4 定义哈希，见各模块）。
     seeds = collect_change_seeds(
         old_definition,
         old_frozen_config_json,
         new_definition,
         new_frozen_config_json,
         implementation_excluded,
+        legacy_views=upgrade_legacy_views(old_definition, new_definition, profile_provenance or {}),
     )
     reset_nodes = rerun_closure(new_definition, seeds)
     candidates = frozenset(new_definition.executable_nodes) - reset_nodes
