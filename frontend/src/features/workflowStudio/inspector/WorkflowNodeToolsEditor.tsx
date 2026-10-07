@@ -20,6 +20,10 @@ export function WorkflowNodeToolsEditor(props: {
   runtime: string
   /** #575：Agent 定义层的兜底 tools，未声明时展示为当前生效值。 */
   agentDefaultTools?: string[]
+  /** #935：自含节点（execution.runtime 已声明）未声明 tools 时回落 runtime
+   * 的 default 档（与后端 DEFAULT_TOOLS 同源），而非 Agent 定义。 */
+  fallbackSource?: 'agent' | 'runtime'
+
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
@@ -40,17 +44,25 @@ export function WorkflowNodeToolsEditor(props: {
     const names = new Set(selectableEntries.map((entry) => entry.name))
     return declared.filter((tool) => !names.has(tool))
   }, [declared, selectableEntries])
-  // #575：未声明 = 生效值为 Agent 默认兜底，helperText 直接展示来源与值。
+  // #575：未声明 = 生效值为兜底（Agent 默认，或 #935 起 runtime default
+  // 档），helperText 直接展示来源与值。
+  const runtimeFallback = props.fallbackSource === 'runtime'
+  const fallbackTools = runtimeFallback
+    ? toolEntries
+        ?.filter((entry) => entry.tier === 'default')
+        .map((entry) => entry.name)
+    : props.agentDefaultTools
+  const fallbackName = runtimeFallback ? 'runtime 默认档' : 'Agent 默认'
   const fallbackHint =
-    declared.length > 0 || props.agentDefaultTools === undefined
+    declared.length > 0 || fallbackTools === undefined
       ? undefined
-      : `当前生效（跟随 Agent 默认）：${props.agentDefaultTools.join(', ') || '（空）'}`
+      : `当前生效（跟随 ${fallbackName}）：${fallbackTools.join(', ') || '（空）'}`
 
   return (
     <div className={styles.fieldStack}>
       <TextField
         select
-        label="Tools 覆盖（留空 = 跟随 Agent 默认）"
+        label={`Tools 覆盖（留空 = 跟随 ${fallbackName}）`}
         variant="outlined"
         value={declared}
         onChange={(e) => {

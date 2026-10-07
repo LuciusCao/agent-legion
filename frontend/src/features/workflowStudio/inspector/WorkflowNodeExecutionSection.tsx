@@ -1,7 +1,10 @@
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
 import type { WorkflowNodeRecord } from '../../../types'
-import { WorkflowNodeAgentConfigBody } from './WorkflowNodeAgentConfigBody'
-import { WorkflowNodeAgentEditor } from './WorkflowNodeAgentEditor'
+import { WorkflowNodeLegacyAgentBody } from './WorkflowNodeLegacyAgentBody'
+import {
+  WorkflowNodeProfileBody,
+  useNodeRuntimeInfo,
+} from './WorkflowNodeProfileBody'
 import { bindingStatus, type AgentCatalogSettle } from './agentBindingStatus'
 import { useCapabilityAgent } from './useAgentDefinitions'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
@@ -28,6 +31,9 @@ export function WorkflowNodeExecutionSection(props: Props) {
   // bindingStatus）——命中 published 即 ready，未命中须等 definitions settle。
   const { agent, isDraft } = useCapabilityAgent(props)
   const status = bindingStatus({ agent, isDraft }, props.agentCatalogSettle)
+  // #935（#440 P3）：节点（或 workflow 顶层）声明了 execution.runtime 即
+  // 自含执行档案——Agent 定义不再参与，编辑全部写进节点草稿。
+  const runtimeInfo = useNodeRuntimeInfo(node, props.definitionYaml)
   // 防御：#392 Phase 2 起注册表只把本 section 挂在 code/agent 类型上，
   // approval 由 WorkflowNodeApprovalConfigSection 承载。直接喂 approval
   // 时渲染空（不落入误导性的「代码节点」文案）。hooks 在早退前调用。
@@ -41,23 +47,24 @@ export function WorkflowNodeExecutionSection(props: Props) {
       <div className={inspectorStyles.sectionTitle}>
         {isAgentNode ? 'Agent 配置' : '代码节点'}
       </div>
-      {isAgentNode ? (
-        <>
-          <WorkflowNodeAgentConfigBody
-            node={node}
-            agentDefinition={agent}
-            isDraft={isDraft}
-            definitionYaml={props.definitionYaml}
-            setDefinitionYaml={props.setDefinitionYaml}
-            readOnly={props.readOnly}
-          />
-          <WorkflowNodeAgentEditor
-            agentId={agent?.id ?? null}
-            capability={node.capability}
-            bindingStatus={status}
-            readOnly={props.readOnly}
-          />
-        </>
+      {isAgentNode && runtimeInfo.effectiveRuntime ? (
+        <WorkflowNodeProfileBody
+          node={node}
+          runtimeInfo={runtimeInfo}
+          definitionYaml={props.definitionYaml}
+          setDefinitionYaml={props.setDefinitionYaml}
+          readOnly={props.readOnly}
+        />
+      ) : isAgentNode ? (
+        <WorkflowNodeLegacyAgentBody
+          node={node}
+          agentDefinition={agent}
+          isDraft={isDraft}
+          bindingStatus={status}
+          definitionYaml={props.definitionYaml}
+          setDefinitionYaml={props.setDefinitionYaml}
+          readOnly={props.readOnly}
+        />
       ) : (
         // type=code：内置 code 池执行，无绑定可配。
         <div className={inspectorStyles.empty}>内置 code 池执行</div>

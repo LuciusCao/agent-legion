@@ -254,6 +254,7 @@ def test_main_hot_reloads_claim_switch(monkeypatch: pytest.MonkeyPatch, tmp_path
 
     fake.claim = no_work  # type: ignore[attr-defined]
     thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, {"claim_enabled": False})
+    # 保留：负向观察窗——claim 关闭期间主循环「不」调用 claim。
     time.sleep(0.2)
     assert claim_calls == 0
 
@@ -324,6 +325,7 @@ def test_main_hot_resizes_capacity_without_cancelling_active_work(
     config["max_concurrency"] = 1
     config_path.write_text(json.dumps(config), encoding="utf-8")
     releases["exec-1"].set()
+    # 保留：负向观察窗——调小并发后释放一单「不」触发新 claim。
     time.sleep(0.2)
     assert claim_calls == 3
 
@@ -388,6 +390,7 @@ def test_main_ramp_up_limits_claim_budget_until_target(
     }
     thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, updates)
     assert claimed_first.wait(timeout=5), "first claim never happened"
+    # 保留：负向观察窗——爬坡首档预算耗尽后「不」领第二单。
     time.sleep(0.3)
     # 爬坡首档：exec-1 在跑占满 initial=1，预算归零——没有第二单被领走。
     assert claim_calls == 1, f"ramp should clamp the pass budget, got {claim_calls} claims"

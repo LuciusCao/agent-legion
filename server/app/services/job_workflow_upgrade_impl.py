@@ -194,6 +194,7 @@ def implementation_excluded_nodes(
     *,
     custom_nodes_enabled: bool = True,
     skill_lock_domain_held: bool = False,
+    profile_provenance: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> frozenset[str]:
     """执行面排除集：实现身份不可证明/已漂移 + Agent 定义 runtime_mutable 键。
 
@@ -206,6 +207,12 @@ def implementation_excluded_nodes(
     ``skill_lock_domain_held``（#759 P2-B）：True 表示调用方已在 guard
     事务内持有 skill-lock advisory 锁（锁文档读不再自取）；plan 阶段
     为 False，``read_skill_lock`` 走短事务取锁+读。
+
+    ``profile_provenance``（#935 升级 diff 归一）：目标 revision 的
+    ``agent_profile_provenance``。v93 回填后的自含节点当前身份是档案
+    哈希，而旧 job 的执行身份是当时 Agent 定义的哈希——执行身份等于该
+    节点 provenance 的 ``definition_hash``（档案正是从这份定义内联而来）
+    同样证明相等；节点字段是否一致由 diff 层 legacy 视图另行核对。
     """
     executable = frozenset(definition.executable_nodes)
     if not executable:
@@ -241,6 +248,9 @@ def implementation_excluded_nodes(
         # 段的 kind 是空串哨兵（非 'code'）——口径选择必须只看 node_type，
         # 不能让哨兵值把 code 节点误路由到 agent catalog。
         current = agent_current.get(key) if node.node_type == "agent" else code_current.get(key)
+        inlined_from = (profile_provenance or {}).get(key, {}).get("definition_hash")
+        if node.node_type == "agent" and inlined_from and executed_hash == inlined_from:
+            continue
         if current is None or current != executed_hash:
             # 当前无 published 身份或与执行时身份不等 → 漂移/不可证明。
             excluded.add(key)

@@ -14,8 +14,8 @@ auto-approvable set is therefore:
   AND the request offers a one-shot ``allow_once`` option (an
   ``allow_always`` answer could let the agent stop asking for the kind).
 
-Anything else — no declared path, a path outside staging, an unknown
-shape — takes the human path; a false negative only costs a click.
+Anything else — no declared path, a path outside staging, a path string
+that cannot be resolved at all, an unknown shape — takes the human path; a false negative only costs a click.
 """
 
 from __future__ import annotations
@@ -92,7 +92,14 @@ def is_staging_read_only_tool_call(
         root = os.path.realpath(staging_root(workspace_id))
     except ValueError:
         return False
-    if not all(_within(_resolve(target, cwd), root) for target in targets):
+    try:
+        resolved = [_resolve(target, cwd) for target in targets]
+    except (ValueError, OSError):
+        # #984: an unresolvable path string (embedded NUL, OS-level refusal
+        # such as an over-long name) fails closed to the human path instead
+        # of erroring the permission RPC.
+        return False
+    if not all(_within(candidate, root) for candidate in resolved):
         return False
     return not any(_escapes(value) for value in others)
 

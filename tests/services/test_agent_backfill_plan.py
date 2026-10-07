@@ -227,3 +227,20 @@ def test_active_node_without_route_or_candidate_is_plain_unresolved() -> None:
 
     assert (entry["status"], entry["reason"]) == ("unresolved", "no_agent")
     assert "route_drift" not in entry
+
+
+def test_empty_definition_tools_without_node_tools_is_unresolved() -> None:
+    """#935 D1: an Agent published with ``tools: []`` cannot be inlined into a
+    node without tools — an empty node list means the default tier, which
+    would widen permissions. Same rule as the v93 migration."""
+    catalog = {"r": _agent("review", tools=())}
+    definition = workflow_definition_from_yaml_string(
+        "key: wf\nlabel: WF\nnodes:\n  n:\n    type: agent\n    capability: review\n"
+        "  m:\n    type: agent\n    capability: review\n    tools: [read]\n"
+    )
+    entries = plan_definition_backfill(definition, catalog, build_capability_index(catalog), {})
+    by_key = {entry["node_key"]: entry for entry in entries}
+
+    assert by_key["n"]["status"] == "unresolved"
+    assert by_key["n"]["reason"] == "tools_empty_unportable"
+    assert by_key["m"]["status"] == "backfill"  # the node's own tools win

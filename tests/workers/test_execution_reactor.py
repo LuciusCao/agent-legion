@@ -21,6 +21,7 @@ import threading
 import time
 from pathlib import Path
 
+from tests.helpers import wait_for_predicate
 from worker.event_filter import spawn_event_pump
 from worker.execution.reactor import EventPumpReactor, ReactorUnavailable
 
@@ -187,11 +188,14 @@ def test_reactor_partial_line_flushed_on_exit(tmp_path: Path) -> None:
     out = tmp_path / "events.jsonl"
     out.touch()
     reactor = _fresh_reactor()
+    written = tmp_path / "written"
     proc = subprocess.Popen(
         [
             sys.executable,
             "-c",
-            'import os, time\nos.write(1, b\'{\\"type\\":\\"agent_start\\"}\')\ntime.sleep(30)\n',
+            'import os, sys, time\nos.write(1, b\'{\\"type\\":\\"agent_start\\"}\')\n'
+            "open(sys.argv[1], 'w').close()\ntime.sleep(30)\n",
+            str(written),
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -199,7 +203,9 @@ def test_reactor_partial_line_flushed_on_exit(tmp_path: Path) -> None:
     )
     try:
         handle = reactor.register(proc, str(out))
-        time.sleep(0.3)
+        # 等子进程确实写出半行（写后落标记文件）再杀，而非固定 sleep 猜时序；
+        # 已写入管道的字节在 kill 后仍由 reactor 读到 EOF。
+        wait_for_predicate(written.exists, timeout=10)
         proc.kill()
         proc.wait(timeout=5)
         handle.join(timeout=10)

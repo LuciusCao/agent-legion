@@ -185,6 +185,29 @@ describe('agent / node draft extraction', () => {
     expect(drafts[0].status).toBe('completed')
   })
 
+  // #935（#440 P3，D3）：deprecated 的 Agent 定义写工具只返回引导文本、
+  // 不写库——卡片按保存失败呈现，不提供发布入口。
+  it('marks a deprecated agent definition save as failed', () => {
+    const calls = groupToolCalls([
+      toolCall('t1', {
+        title: 'save_agent_definition_draft',
+        status: 'completed',
+        rawInput: { agent_id: 'assess_agent', runtime: 'velites' },
+        rawOutput: {
+          content: [
+            {
+              type: 'text',
+              text: 'DEPRECATED (#440): Agent definitions no longer supply node execution profiles',
+            },
+          ],
+        },
+      }),
+    ])
+    const [draft] = extractAgentDefinitionDrafts(calls)
+    expect(draft.saveFailed).toBe(true)
+    expect(draft.draftHash).toBeNull()
+  })
+
   it('extracts node code drafts', () => {
     const calls = groupToolCalls([
       toolCall('t1', {

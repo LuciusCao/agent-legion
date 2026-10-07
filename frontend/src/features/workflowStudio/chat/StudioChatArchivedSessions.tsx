@@ -7,6 +7,10 @@ import {
   UnarchiveOutlined,
 } from '@mui/icons-material'
 import type { StudioChatSessionRecord } from './studioChatApi'
+import {
+  retentionCountdownLabel,
+  retentionDaysLeft,
+} from './studioChatRetention'
 import { sessionLabel } from './studioChatSessionLabel'
 import {
   StudioChatSessionRowConfirm,
@@ -22,24 +26,32 @@ type Props = {
   run: (action: () => Promise<void>) => Promise<boolean>
   onUnarchive: (sessionId: string) => Promise<void>
   onDelete?: (sessionId: string) => Promise<void>
+  /** 实例对话保留天数（#1041）；0 / 缺省 = 未配置，不显示倒计时；
+   * null = 未知（无倒计时，删除确认给通用清理警告）。 */
+  retentionDays?: number | null
 }
 
 /** 会话菜单底部的「已归档（N）」折叠区（#924）：默认收起；展开后每条
  * 归档会话可「恢复」（取消归档，回到列表、仍为已关闭，按「继续对话」
- * 恢复运行）或永久删除（danger + 行内二次确认）。归档会话不可直接选中。 */
+ * 恢复运行）或永久删除（danger + 行内二次确认）。归档会话不可直接选中。
+ * #1041：配置了对话保留策略时每行显示「N 天后清理」倒计时（归档时间 +
+ * 保留天数现算）；恢复后会话回到列表、不再被清理。 */
 export function StudioChatArchivedSessions(props: Props) {
   const [open, setOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   if (props.sessions.length === 0) return null
+  const retentionDays =
+    props.retentionDays === undefined ? 0 : props.retentionDays
 
   function renderRow(session: StudioChatSessionRecord) {
     const label = sessionLabel(session)
+    const daysLeft = retentionDaysLeft(session.archived_at, retentionDays ?? 0)
     if (confirmDelete === session.id && props.onDelete) {
       const onDelete = props.onDelete
       return (
         <StudioChatSessionRowConfirm
           tone="danger"
-          text={deleteConfirmText(label, false)}
+          text={deleteConfirmText(label, false, retentionDays)}
           confirmLabel="永久删除"
           pending={props.pending}
           onConfirm={() =>
@@ -56,6 +68,11 @@ export function StudioChatArchivedSessions(props: Props) {
         <span className={styles.archivedLabel} title={label}>
           {label}
         </span>
+        {daysLeft !== null && (
+          <span className={styles.countdown} data-imminent={daysLeft <= 1}>
+            {retentionCountdownLabel(daysLeft)}
+          </span>
+        )}
         <button
           type="button"
           className={styles.restoreAction}
