@@ -16,6 +16,14 @@ from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 
 
+def has_legacy_agent_nodes(definition: WorkflowDefinition) -> bool:
+    """True when some ``type: agent`` node still resolves its profile by capability."""
+    return any(
+        node.node_type == "agent" and not is_self_contained_agent_node(node)
+        for node in definition.nodes.values()
+    )
+
+
 def derive_agent_routes(
     job_db, workspace_id: str, definition: WorkflowDefinition
 ) -> dict[str, str]:

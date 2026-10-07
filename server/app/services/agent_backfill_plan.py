@@ -138,6 +138,15 @@ def _plan_node(
         reason, agent_ids = _unresolved_reason(node, candidates, unpublished)
         return {**base, "status": "unresolved", "reason": reason, "agent_ids": agent_ids}
     legacy = profile.legacy_ref
+    if not profile.tools and not node.tools:
+        # #935 D1: same rule as the v93 migration — an empty definition
+        # tools list cannot be inlined (empty node tools = default tier).
+        return {
+            **base,
+            "status": "unresolved",
+            "reason": "tools_empty_unportable",
+            "agent_ids": [legacy.agent_id],
+        }
     return {**base, **_backfill_fields(node, profile, legacy.agent_id, legacy.definition_hash())}
 
 

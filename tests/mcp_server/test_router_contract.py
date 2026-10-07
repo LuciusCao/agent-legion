@@ -116,4 +116,12 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
         )
         for call in calls
     }
-    assert recorded == table
+    # #935 (#440 P3, D3): the Agent definition write tools no longer call
+    # their routes (deprecated guidance only); the routes stay, deprecated,
+    # until P4 removes both sides together.
+    deprecated_unused = {
+        ("PUT", "/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft"),
+        ("POST", "/studio-agent/tools/workspaces/{workspace_id}/agent-definitions"),
+    }
+    assert deprecated_unused <= table
+    assert recorded == table - deprecated_unused

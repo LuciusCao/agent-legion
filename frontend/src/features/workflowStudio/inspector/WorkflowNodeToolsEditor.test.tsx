@@ -1,6 +1,6 @@
 /** #443/#476：agent 节点的节点级 tools 声明编辑入口（组件）。
  *  #575：主入口形态——label 点明覆盖层级，未声明时 helperText 展示
- *  解析后的生效值（Agent 默认兜底）。 */
+ *  解析后的生效值（#1079 起只有 runtime default 档兜底）。 */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -46,11 +46,7 @@ function catalogResponse() {
   }
 }
 
-function renderEditor(
-  definitionYaml: string,
-  setDefinitionYaml = vi.fn(),
-  agentDefaultTools?: string[]
-) {
+function renderEditor(definitionYaml: string, setDefinitionYaml = vi.fn()) {
   return {
     setDefinitionYaml,
     ...render(
@@ -58,7 +54,6 @@ function renderEditor(
         <WorkflowNodeToolsEditor
           node={node}
           runtime="velites"
-          agentDefaultTools={agentDefaultTools}
           definitionYaml={definitionYaml}
           setDefinitionYaml={setDefinitionYaml}
         />
@@ -67,7 +62,7 @@ function renderEditor(
   }
 }
 
-const toolsLabel = 'Tools 覆盖（留空 = 跟随 Agent 默认）'
+const toolsLabel = 'Tools 覆盖（留空 = 跟随 runtime 默认档）'
 
 /** 打开下拉前等目录加载（disabled 消失），再 mouseDown 打开。 */
 async function openToolsMenu() {
@@ -84,48 +79,32 @@ describe('WorkflowNodeToolsEditor (#443/#476/#575)', () => {
     mocks.fetchAgentRuntimes.mockResolvedValue(catalogResponse())
   })
 
-  it('shows the undeclared state with the followed Agent defaults as the effective-value hint', async () => {
-    // #575：未声明不再是裸空态——helperText 展示解析后的生效值与来源。
-    renderEditor('nodes:\n  gen:\n    type: agent\n', vi.fn(), [
-      'read',
-      'write',
-      'bash',
-    ])
-    const field = await screen.findByLabelText(toolsLabel)
-    expect(field).toBeInTheDocument()
-    expect(
-      screen.getByText('当前生效（跟随 Agent 默认）：read, write, bash')
-    ).toBeInTheDocument()
-  })
-
-  it('notes the empty effective value when the Agent definition declares no tools', async () => {
-    renderEditor('nodes:\n  gen:\n    type: agent\n', vi.fn(), [])
-    await screen.findByLabelText(toolsLabel)
-    expect(
-      screen.getByText('当前生效（跟随 Agent 默认）：（空）')
-    ).toBeInTheDocument()
-  })
-
-  // #580 codex P2：Agent tools 未知（draft-only Agent 的列表映射不含
-  // tools）时不出生效值 hint——未知 ≠ 空，不能声称「当前生效…（空）」。
-  it('shows no effective-value hint when the Agent tools are unknown', async () => {
+  it('shows the undeclared state with the runtime default tier as the effective-value hint', async () => {
+    // #575：未声明不再是裸空态——helperText 展示解析后的生效值与来源
+    // （#1079：只剩 runtime default 档，velites = read / write）。
     renderEditor('nodes:\n  gen:\n    type: agent\n')
     await screen.findByLabelText(toolsLabel)
     expect(
-      screen.queryByText(/当前生效（跟随 Agent 默认）/)
-    ).not.toBeInTheDocument()
+      await screen.findByText('当前生效（跟随 runtime 默认档）：read, write')
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Agent 默认/)).not.toBeInTheDocument()
+  })
+
+  // #580 codex P2：生效值未知（工具目录未加载）时不出 hint——未知 ≠ 空。
+  it('shows no effective-value hint while the runtime tool catalog is unknown', async () => {
+    mocks.fetchAgentRuntimes.mockReturnValue(new Promise(() => {}))
+    renderEditor('nodes:\n  gen:\n    type: agent\n')
+    await screen.findByLabelText(toolsLabel)
+    expect(screen.queryByText(/当前生效/)).not.toBeInTheDocument()
   })
 
   it('hides the fallback hint once the node declares its own tools', async () => {
-    renderEditor(
-      'nodes:\n  gen:\n    type: agent\n    tools:\n      - read\n',
-      vi.fn(),
-      ['read', 'write', 'bash']
-    )
+    renderEditor('nodes:\n  gen:\n    type: agent\n    tools:\n      - read\n')
     await screen.findByLabelText(toolsLabel)
-    expect(
-      screen.queryByText(/当前生效（跟随 Agent 默认）/)
-    ).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByLabelText(toolsLabel)).not.toBeDisabled()
+    )
+    expect(screen.queryByText(/当前生效/)).not.toBeInTheDocument()
   })
 
   it('patches the YAML declaration on selection', async () => {

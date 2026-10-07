@@ -13,6 +13,7 @@ from server.app.studio_chat import compaction, inbound_queue, unprompted_queue
 from server.app.studio_chat.background_wakeup import prepare_rearm
 from server.app.studio_chat.payloads import serialize_message
 from server.app.studio_chat.resume_context import prepare_resume_prompt
+from server.app.studio_chat.session_orphan import reject_orphaned_session
 from server.app.studio_chat.token_admission import require_live_run_token
 from server.app.studio_chat.turn_state import open_turn
 
@@ -30,7 +31,7 @@ def send_message(
         raise ConflictError("Chat session is closed")
     runtime = service.runtime(session_id)
     if runtime is None:
-        raise ConflictError("Chat session is not running on this server")
+        reject_orphaned_session(service, session_id, session)
     from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 
     # #1029: observe a just-started Kimi Code unprompted turn before deciding.

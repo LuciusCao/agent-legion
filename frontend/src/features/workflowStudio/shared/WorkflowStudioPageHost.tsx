@@ -1,5 +1,5 @@
 import { AppShell } from '../../../layouts/AppShell'
-import { WorkflowStudioPageContent } from './WorkflowStudioPageContent'
+import { WorkflowStudioLayout } from './WorkflowStudioLayout'
 import { StudioStateContext, StudioViewContext } from './studioStateContext'
 import { useWorkflowStudio } from './useWorkflowStudio'
 import { useWorkflowStudioPageView } from './useWorkflowStudioPageView'
@@ -16,11 +16,12 @@ export function WorkflowStudioPageHost({
   // 主体都消费同一份 studio/view 状态（如状态 chip 点击打开变更面板）。
   // #799：studio 去 AppBar 画布化——不传 appBar，AppShell 不渲染顶栏区，
   // 原顶栏内容拆为 DAG 上的浮动功能岛（StudioCanvasIslands）。
+  // #1079（#440 P3b）：「打开 Agent」nav 通道随 Agent 定义草稿卡下线。
   return (
     <StudioStateContext.Provider value={studio}>
       <StudioViewContext.Provider value={view}>
         <AppShell>
-          <WorkflowStudioPageContent studio={studio} />
+          <WorkflowStudioLayout />
         </AppShell>
       </StudioViewContext.Provider>
     </StudioStateContext.Provider>

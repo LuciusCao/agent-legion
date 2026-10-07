@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.events.aggregator import broadcast_job_update, record_job_update
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.jobs.workflow_upgrade_mutation_inherit import upgrade_job_workflow_inherit
+from server.app.services.agent_profile_provenance import provenance_from_revision_json
 from server.app.services.job_artifact_mutation import StagedOutputs
 from server.app.services.job_workflow_upgrade_cleanup import (
     finalize_upgrade_staged_outputs,
@@ -56,6 +57,8 @@ def apply_upgrade_once(
     # inherit 模式的继承集在事务外规划（读路径，纯函数见
     # job_workflow_upgrade_plan）；校验备妥后才进入统一应用。
     inherit_nodes: frozenset[str] = frozenset()
+    # #935：目标 revision 的 agent_profile_provenance（升级 diff 归一）。
+    provenance = provenance_from_revision_json(str(context.active["definition_json"]))
     if mode == "inherit":
         inherit_nodes = plan_inherit_nodes(
             service.job_db,
@@ -68,6 +71,7 @@ def apply_upgrade_once(
             require_manifest_rows=bool(
                 service.object_store is not None and getattr(service.object_store, "enabled", False)
             ),
+            profile_provenance=provenance,
         )
     staged: StagedOutputs | None = None
     try:
@@ -124,6 +128,7 @@ def apply_upgrade_once(
                     context.definition,
                     custom_nodes_enabled=service.custom_nodes_enabled,
                     skill_lock_domain_held=True,
+                    profile_provenance=provenance,
                 )
                 if revalidated:
                     # 重验得到的是新的变更种子，不只是要从 keep 集剔除

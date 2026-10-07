@@ -299,7 +299,7 @@ describe('WorkflowNodeCodeSection', () => {
 
   // #749 修（review P2-2）：保存→立即发布必须携带保存响应回填的新 hash
   // ——PUT 响应的 code_hash 同步进 state，不等 fire-and-forget 的 reload
-  // （对齐 AgentEditor.handleSaveDraft；修前闭包里还是旧 hash，撞假 409）。
+  // （修前闭包里还是旧 hash，撞假 409）。
   it('publishes immediately after saving, carrying the saved draft hash', async () => {
     mockApi.mockResolvedValue(customResponse)
     renderSection()
