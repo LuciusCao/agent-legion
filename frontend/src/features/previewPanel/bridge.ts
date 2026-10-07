@@ -44,10 +44,21 @@ export interface PreviewPanelRequestMessage {
   params?: { name?: string }
 }
 
+/**
+ * 面板 → 宿主：脚本被宿主严格 CSP 拦截（#989）。由宿主注入的探针脚本发出
+ * （panelCsp.ts），不是作者 API；宿主只据此显示提示，伪造无害。
+ */
+export interface PreviewPanelCspViolationMessage {
+  source: typeof PREVIEW_PANEL_SOURCE
+  type: 'csp-violation'
+  directive: string
+}
+
 export type PreviewPanelToHostMessage =
   | PreviewPanelReadyMessage
   | PreviewPanelResizeMessage
   | PreviewPanelRequestMessage
+  | PreviewPanelCspViolationMessage
 
 /** 宿主 → 面板：初始化（jobId + 主题变量 + 可选资源 URL）。 */
 export interface PreviewHostInitMessage {
@@ -93,6 +104,8 @@ export function isPanelToHostMessage(
       return true
     case 'resize':
       return typeof data.height === 'number' && Number.isFinite(data.height)
+    case 'csp-violation':
+      return typeof data.directive === 'string'
     case 'request':
       return (
         typeof data.id === 'number' &&

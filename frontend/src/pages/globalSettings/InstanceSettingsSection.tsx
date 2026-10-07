@@ -8,7 +8,11 @@ import {
   updateInstanceSettings,
 } from '../../api/instanceSettings'
 import type { InstanceSettingsResponse } from '../../api/instanceSettings'
-import { FIELD_GROUPS, RETENTION_FIELD_GROUPS } from './instanceSettingsFields'
+import {
+  FIELD_GROUPS,
+  RETENTION_FIELD_GROUPS,
+  SECURITY_FIELD_GROUPS,
+} from './instanceSettingsFields'
 import { GROUP_HINTS } from './instanceSettingsHints'
 import { FieldGroupFields } from './instanceSettingsForm'
 import { buildPayload, toFormValues } from './instanceSettingsPayload'
@@ -19,9 +23,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-// 保留策略组（材料 TTL、执行面保留——均为热读立即生效的业务参数）直接
-// 展示；其余调优参数默认折叠进「高级参数」，排障或容量调优时再展开。
-const RETENTION_TITLES = new Set(RETENTION_FIELD_GROUPS.map((g) => g.title))
+// 保留策略组（材料 TTL、执行面保留——均为热读立即生效的业务参数）与安全
+// 开关组（#989 CSP 兼容模式，同样热读）直接展示；其余调优参数默认折叠进
+// 「高级参数」，排障或容量调优时再展开。
+const RETENTION_TITLES = new Set(
+  [...RETENTION_FIELD_GROUPS, ...SECURITY_FIELD_GROUPS].map((g) => g.title)
+)
+const CSP_COMPAT_PATH = 'csp_script_unsafe_inline'
 const VISIBLE_GROUPS = FIELD_GROUPS.filter((g) => RETENTION_TITLES.has(g.title))
 const ADVANCED_GROUPS = FIELD_GROUPS.filter(
   (g) => !RETENTION_TITLES.has(g.title)
@@ -51,15 +59,26 @@ function InstanceSettingsEditor({
     setError('')
     setSaving(true)
     try {
+      const savedCsp = (JSON.parse(baseline) as FormValues)[CSP_COMPAT_PATH]
       const result = await updateInstanceSettings(buildPayload(values))
       const next = toFormValues(result)
       setValues(next)
       setBaseline(JSON.stringify(next))
       // 同步 query cache：保存后 30s 内重进页面不得回显旧值（staleTime 窗口）。
       queryClient.setQueryData(extraQueryKeys.instanceSettings(), result)
+      // #989：CSP 响应头随当前 index.html 文档固定，客户端路由不会重读；
+      // 兼容模式真正变化时重载顶层文档，让本会话立即拿到新策略。其余字段
+      // 变化不重载。
+      if (Boolean(next[CSP_COMPAT_PATH]) !== Boolean(savedCsp)) {
+        window.location.reload()
+        return
+      }
       useUiStore
         .getState()
-        .showToast('实例设置已保存，除保留策略外需重启生效', 'success')
+        .showToast(
+          '实例设置已保存，除保留策略与安全开关外需重启生效',
+          'success'
+        )
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -84,7 +103,7 @@ function InstanceSettingsEditor({
       <h3 className={styles.heading}>实例设置</h3>
       <p className={styles.hint}>
         默认值适用于绝大多数部署，仅在排障或容量调优时调整。除材料与执行面
-        保留期外，保存后需重启服务才能生效。
+        保留期、安全开关外，保存后需重启服务才能生效。
       </p>
       {error && (
         <p className={styles.error} role="alert">

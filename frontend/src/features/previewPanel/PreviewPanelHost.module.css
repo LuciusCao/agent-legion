@@ -20,3 +20,14 @@
   font-size: 13px;
   pointer-events: none;
 }
+
+.cspWarning {
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--warning-border, #ffe0b2);
+  background: var(--warning-bg, #fffaf0);
+  color: var(--color-text-secondary, #43474e);
+  font-size: 12px;
+  line-height: 1.5;
+}

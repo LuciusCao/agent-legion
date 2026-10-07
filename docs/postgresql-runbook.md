@@ -38,7 +38,7 @@ Use a derived database name (as above), not the bare `agent_legion`:
 `init_db` refuses to initialize/migrate the bare shared name without
 `AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1` — that name is the code-default DSN
 a misdirected process (worktree script without .env) would silently resolve,
-and the refusal is the 2026-08-27 incident's structural fix. The prod
+so the refusal keeps such a process from migrating the shared database. The prod
 launchers (`scripts/native-prod-up.sh`, `deploy/compose.host.yaml`) set the
 opt-in themselves; a manual `uvicorn` against the shared database must set
 it explicitly.
@@ -84,12 +84,12 @@ ALTER DATABASE <agent_legion_worktree> OWNER TO agent_legion_dev;
   drop anything — the guarantee covers the scripted routine path, not
   deliberate superuser operations.
 
-## Capacity for 200–300 agents
+## Capacity with hundreds of concurrent agents
 
 Agent count and database connection count are deliberately decoupled. Each API
-process uses a bounded pool (currently 32 connections, overridable via the
+process uses a bounded pool (default 32 connections, overridable via the
 `AGENT_LEGION_DB_POOL_MAX_SIZE` environment variable; see
-`server/app/db/pools.py:16-17`) and returns connections after short
+`server/app/db/pools.py`) and returns connections after short
 transactions. Connections are recycled explicitly: `AGENT_LEGION_DB_POOL_MAX_IDLE`
 (default 120s) bounds how long an idle connection stays in the pool — note the
 pool's idle shrink closes at most one connection per interval — and
@@ -99,11 +99,11 @@ when its connection closes, so under sustained load these knobs keep long-lived
 backends from ballooning; both default tighter than psycopg-pool's built-in
 600s/3600s. Remote queue claims use `FOR UPDATE SKIP LOCKED`, so
 different workers can claim different rows concurrently; an advisory lock per
-worker prevents its concurrent polls from exceeding `slots`. The local implicit
+worker (`agent-worker:<worker_id>`) prevents its concurrent polls from
+exceeding its declared capacity. The local implicit
 code pool uses a single advisory lock key (`pg_advisory_xact_lock(hashtext('code-pool'))`
 in `server/app/executors/_lease_claims.py`) so capacity checks stay correct
-across multiple scheduler replicas; per-executor locks retired with executor
-definitions at schema v47 (P-0.5).
+across multiple scheduler replicas.
 
 Do not raise every API replica's pool to the agent count. Budget total server
 connections across all replicas below PostgreSQL `max_connections`; use

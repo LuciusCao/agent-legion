@@ -3,10 +3,21 @@
 状态：批次 0/1 已实现；批次 2 已实施（§7，协议 v2 + schema v39，2026-08 落地）；
 批次 3 已取消（§9）。**2026-08-17 更新（#82/#96）**：§4.2 API 表面已扩展
 （entrypoint / batch_payload / root_dir + http_client / media 姊妹模块）；
-path 绑定机制（EXEC-CODE-001 legacy）已退役——本文 §2「内置节点」列、
-§5 的双路径对比、§7.2 的「内置读 repo 文件」均为历史记录，现行语义：
-所有节点代码以 DB 发布文本（workspace 版本或 demo 的 global 出厂种子）
-在 velites 沙箱执行（Host 与 Worker 一致），runtime 键集合见 §3。
+path 绑定机制（EXEC-CODE-001 legacy）已退役——本文 §2（2026-08 盘点）整节、
+§5 的双路径对比与其中点名的内部实现、§7.2 的「内置读 repo 文件」均为历史记录：
+`_execute_isolated` / `_run_code_node` 裸子进程路径与 `skill_version_fallbacks`
+模块均已不存在；`workflow_nodes/` 不再是执行路径，仅保留为 demo code 节点经 git
+审阅的种子源（`services/demo_node_seed.py` 的 `DEMO_NODE_SOURCES`）。现行语义：
+所有节点代码以本 workspace 的 DB 发布文本执行（无 global 兜底；demo 的 code 节点
+由上述种子源发布进 demo workspace），一律在 velites 沙箱执行（EXEC-CODE-003），
+但 Host 与 Worker 是两条独立入口：Host 侧经 `server/app/executors/code.py` →
+`_code_sandbox.py`（父进程预取与 auth 失败标记处理在 `executors/_code_runtime.py`）；
+远程 Worker 的 kind='code' claim 经 `worker/code_runner.py`（Worker 镜像只含
+`worker/` + `shared/`，不含 `server/app`）。两侧不共享执行入口，只共享 `shared/` 下的
+模块：`shared/code_sandbox.py` 的沙箱协议（velites argv、子进程 env、read roots、
+结果/错误解析；bundle / 标记路径等常量单一定义在 `shared/code_contract.py`、经
+`code_sandbox` 再导出）与 `shared/material_cache.py`（材料缓存目录名、物化错误类型），
+改沙箱或运行时行为须两条入口一并核对；runtime 键集合见 §3。
 **2026-08-17 更新（P-0.5，schema v47）**：executor 定义 / allocation /
 binding 概念整体退役——非 Agent 路由节点一律进隐含 code 池（容量 =
 实例设置 `code_capacity`），节点可调参数声明层只剩 agent 定义与节点
@@ -16,7 +27,7 @@ EXEC-CODE-POOL-001 / EXEC-CAPACITY-001 为准；本文「executor 契约」
 **2026-08-21 更新（#142）**：入队落盘的 `runtime_context` 只保留轻量审计
 引用（job/workspace id + `batch_id`/`batch_hash`，EXEC-CODE-MANIFEST-001，
 `server/app/agent_broker/code_manifest.py`）——完整 batch 负载曾导致
-`agent_execution_requests` TOAST 膨胀至 198G；完整的 job/workspace/batch/
+`agent_execution_requests` 的 TOAST 存储随请求量严重膨胀；完整的 job/workspace/batch/
 skill_versions 改在 claim 响应路径从 DB 重建（内存态，随 secret 注入一同
 下发，永不落盘），终态 code 行自动瘦身回引用。
 **2026-08-31 更新（#76，EXEC-SKILL-NODE-001）**：Agent manifest 的 skill
@@ -47,6 +58,10 @@ EXEC-CODE-001/002/003、CONFIG-MANIFEST-001、VAULT-SECRET-001、
 批次 2 扩展 Worker 执行协议；批次 3 演进部署形态（Host 内嵌 Worker 为默认）。
 
 ## 2. 现状与关键事实（2026-08 盘点）
+
+> 历史记录：本节描述 #96 之前的双路径实现，其中内置节点执行路径（裸 multiprocessing
+> 子进程、子进程重建 `job_db`）已整体删除；`workflow_nodes/` 不再被直接执行，仅保留为
+> demo code 节点的种子源。现行执行链见文首状态段。
 
 执行链路：dispatch 解析 node_config（含连接注入，`dispatch_config.py`）与
 node_code（`services/node_codes.py`）→ `CodeExecutor.execute`
@@ -155,6 +170,14 @@ checkpoint（写是最常见的「阶段提交点」，9 个节点全有写、�
 SDK 不自定义异常类型，builtin 子进程与沙箱 child 的两种 token 都兼容。
 
 ## 5. executor 契约收敛（`server/app/executors/code.py`）
+
+> 历史记录：本节是批次 1 的改造方案。落地后 Host 侧预取统一在 `_code_runtime.build_runtime`，
+> 文中的 `_execute_isolated`、`_run_code_node`、`collect_skill_versions`、
+> `skill_version_fallbacks` 均已删除；auth 失败标记在 Host 侧由 `_code_runtime.py` 在子进程
+> 退出后处理。远程 Worker（`worker/code_runner.py`）不经这两个模块：runtime dict 由
+> claim 响应 manifest 里预取好的 `runtime_context` 在 Worker 侧重建，auth 失败标记由
+> `code_runner.py` 自行处理，两侧共享的只有 `shared/` 模块（标记路径常量定义在 `shared/code_contract.py`，经
+> `shared/code_sandbox.py` 再导出）。
 
 ### 5.1 预取上移
 

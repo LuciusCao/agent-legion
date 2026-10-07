@@ -23,7 +23,7 @@
   - `worker_startup` 的总开关职责由 `code_capacity == 0`（纯控制面模式）+
     `sweeper_enabled=False` 逃生舱承担；
   - DB 布尔退役：契约删除该键、存量文档读时**键级剥离**（`workflows` 块的
-    `max_items_per_run` 活跃保留，`instance_settings.py::_strip_retired_blocks`），
+    `max_items_per_run` 活跃保留，`services/instance_settings_strip.py::strip_retired`），
     无数据迁移；旧前端在升级窗口内整文档 PUT 携带该键会 422（可接受的破坏性
     契约变更）。
 
