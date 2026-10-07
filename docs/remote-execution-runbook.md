@@ -186,16 +186,29 @@ mixed-fleet compatibility and upgrade order.
   heartbeat — `POST /api/agent-executions/heartbeats` renews every claimed
   lease of the machine in one write transaction, so heartbeat write traffic
   scales with machine count, not slot count. The single execution endpoint is
-  unchanged and serves mixed fleets; a v5 Worker that finds the batch route
-  missing (404/405) falls back to per-execution beats with a 5s per-beat
-  timeout (transient errors do not trigger the fallback). Code capacity
-  only requires protocol ≥ v2. Compatibility matrix:
+  unchanged and still serves older Workers. Code capacity only requires
+  protocol ≥ v2.
 
-  | Host \ Worker | ≤ v3 Worker | v4 Worker | v5 Worker |
-  | --- | --- | --- | --- |
-  | **pre-v3 Host** | unchanged / v2 behavior | rejected before claim — upgrade Host first | rejected before claim — upgrade Host first |
-  | **v3 Host** | full runtime-scoped Agent + code pools | rejected before claim (gzip objects) | rejected before claim |
-  | **≥ v4 Host** | full runtime-scoped Agent + code pools | + gzip artifact objects | + batch heartbeat; single-beat fallback |
+  The gate that decides mixed fleets is the Worker-side handshake
+  (`worker/host/client.py`): a v3+ Worker refuses to start unless the
+  registration response's `host_protocol_version` is **at least its own**
+  `PROTOCOL_VERSION` (`shared/protocol.py`; a pre-v3 Host omits the field,
+  read as 0) and exits 2 before its first claim. The Host never rejects an
+  older Worker (`min_protocol_version` is 1). Compatibility matrix:
+
+  | Host \ Worker | ≤ v2 Worker | v3 Worker | v4 Worker | v5 Worker |
+  | --- | --- | --- | --- | --- |
+  | **pre-v3 Host** | v2 behavior (bare provider/model) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
+  | **v3 Host** | works; bare provider/model read as runtime wildcards | runtime-scoped Agent + code pools | registration refused, exit 2 | registration refused, exit 2 |
+  | **v4 Host** | works; bare provider/model read as runtime wildcards | runtime-scoped Agent + code pools | + gzip artifact objects | registration refused, exit 2 |
+  | **v5 Host** | works; bare provider/model read as runtime wildcards | runtime-scoped Agent + code pools (no gzip) | + gzip artifact objects (per-execution heartbeats) | + gzip + batch heartbeat |
+
+  (v1 Workers never receive code claims; "code pools" needs v2+.) The v5
+  Worker's per-execution heartbeat fallback — it degrades for good when the
+  batch route answers 404/405, with a 5s per-beat timeout; transient errors
+  do not trigger it — is therefore not a mixed-fleet mode: it only covers a
+  Host rolled back underneath an already-registered v5 Worker, which then
+  exits 2 at its next registration (restart).
 
   The Host's `min_protocol_version` remains 1; raising it is an emergency
   escape hatch, not part of a normal upgrade.

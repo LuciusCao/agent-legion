@@ -2,7 +2,7 @@
 
 把平台的 studio-agent 工具面（`/api/studio-agent/tools/*`）以 MCP stdio server 的形式暴露给任意外部 agent（Kimi Code、Claude Code 等）。外部（自助）agent 拿到 33 个工具；Studio 对话内绑定会话时是 35 个（多 `get_studio_context` / `get_job_context` 两个会话绑定工具，无会话绑定时它们不注册，#660）。工具名的权威清单是 `server/app/mcp_server/tool_names.py`（与注册结果由测试钉成全等），下面按组说明语义。
 
-所有工具都是**读取 / 校验 / 草稿级**：发布、回滚、归档等生效操作永远由人在 Studio 里完成（见下方「权限边界」）。workflow 没有注册概念，它就是 workspace 内部的一份 DAG（workspace id 即 workflow key）。
+workflow、预览面板与节点代码 / prompt 相关工具都是**读取 / 校验 / 草稿级**：workflow 发布、回滚、归档与预览面板发布等生效操作永远由人在 Studio 里完成（见下方「权限边界」）。**Skill 写工具例外**（`save_skill_version`、`sync_shared_materials`，以及 `create_skill` 的初始 commit）：它们直接提交到 in-place skill 仓库并推进 HEAD，而节点 `skill.ref` 为空或 `latest` 时每次 dispatch 都现读该仓库 HEAD（`server/app/skills/manager.py` 的 `checkout_skill`），所以这些写入不经 Studio 发布、下一次 dispatch 即对引用该 skill 的 `latest` 节点生效；只有 pin 到具体 tag 的节点不受影响（重锁定仍是 `make skills-lock` 人操作）。workflow 没有注册概念，它就是 workspace 内部的一份 DAG（workspace id 即 workflow key）。
 
 **创作指引与会话上下文**
 
@@ -35,14 +35,14 @@
 
 - `get_skill`：读 skill；可选 `ref=<tag>` 预览某个 git tag 的内容而不动 lock，非法 tag 返回 404 结构化错误。
 - `validate_skill`：校验 SKILL.md + references/output-contract.md + scripts/validate_output.py 三件套，返回结构化错误清单。
-- `save_skill_version`：作用于 skill root 下的 in-place 仓库，先校验路径与三件套再写文件，写完校验失败整体回滚，随后 commit + tag；tag 冲突 409。不动锁——pin 节点的重锁定仍是 operator 人操作（`make skills-lock`），`latest` 节点下次 dispatch 自动跟随新 HEAD。保存时会把 `_shared/map.json` 映射到该 skill 的材料以相同相对路径拷进仓库并计入 commit（响应的 `synced_files` 列出）；映射路径由共享副本权威裁决，payload 里手工携带映射路径会被 422 拒绝并列出冲突路径，应剔除后重试。
+- `save_skill_version`：作用于 skill root 下的 in-place 仓库，先校验路径与三件套再写文件，写完校验失败整体回滚，随后 commit + tag；tag 冲突 409。不动锁——pin 节点的重锁定仍是 operator 人操作（`make skills-lock`）；但这是生效写：`latest`（含空 ref）节点下次 dispatch 即跟随新 HEAD，不经任何发布。保存时会把 `_shared/map.json` 映射到该 skill 的材料以相同相对路径拷进仓库并计入 commit（响应的 `synced_files` 列出）；映射路径由共享副本权威裁决，payload 里手工携带映射路径会被 422 拒绝并列出冲突路径，应剔除后重试。
 - `create_skill`（#633，workspace 作用域）：在 `~/.agents/skills/<workspace_id>/` 下新建 `<skill_name>` in-place 仓库。skill_name 必须匹配 `^[a-z0-9][a-z0-9_-]{0,63}$`，files 必须一次带齐三件套，目录已存在 409、未知 workspace 404；先校验后写盘，失败即删除半成品目录，可安全重试。初始 commit 以 agent-legion-studio 身份打 tag，同样不动锁、不发布。
 
 **共享 skill 材料**（#633，workspace 作用域）
 
 - `get_shared_materials`：读 workspace 的 `_shared`（map.json + references/ + scripts/）；无 `_shared` 时返回结构化空态 `{"map": null, "files": []}`。
 - `save_shared_materials`：全量写 `_shared`。map.json 只是其中一个文件，由 agent 直接编写 JSON；先整体校验（路径只允许根下 `map.json` 与 `references/` / `scripts/` 下文件、map schema、逐文件上限）再落盘。`_shared` 不是 git 仓库，审计轨迹就是各 skill 仓库里被同步的 commit。
-- `sync_shared_materials`（#673）：把映射材料主动传播进各 skill 仓库——拷入共享源、逐 skill commit 并打 +0.0.1 patch 新 tag（sources 省略即全部映射条目）；逐 skill 隔离返回 synced / skipped / failed + 新 tag，单 skill 失败不中断批次；只动本地 skill 仓库，DB skill lock 与节点 pin 不变。
+- `sync_shared_materials`（#673）：把映射材料主动传播进各 skill 仓库——拷入共享源、逐 skill commit 并打 +0.0.1 patch 新 tag（sources 省略即全部映射条目）；逐 skill 隔离返回 synced / skipped / failed + 新 tag，单 skill 失败不中断批次；只动本地 skill 仓库，DB skill lock 与节点 pin 不变——同样是生效写：`latest`（含空 ref）节点下次 dispatch 即取新 HEAD。
 
 **预览面板**（#328）
 
@@ -62,7 +62,7 @@
 
 job 观测组没有任何生效工具：重跑类动作由 agent 引用 `suggested_actions` payload 输出建议，UI 渲染确认卡片，人确认后由宿主会话走常规 job 路由执行（scoped token 直接调动作端点被拒）。
 
-**权限边界**：MCP server 只是薄转发，真正的约束在后端——scoped token 只能走工具面（草稿/校验/读取），发布、回滚、归档等生效操作永远由人在 Studio 里完成（STUDIO-AGENT-001）。token 只存 sha256 digest，明文只在铸造时返回一次。Studio 对话内铸造的 run token（origin='run'）还绑定会话所在 workspace（schema v45，绑定与 token 行同一条 INSERT 原子写入）：带 workspace 路径的工具端点对其它 workspace 一律 403；自助 token（origin='user'，本文档流程铸造的）不带绑定，按 workspace 成员关系校验（成员/admin 放行，非成员 404）。注意铸造端点自 P4 起 admin-only——「自助」仅指 admin 用户自助，member 无法铸造新 token（已铸造未过期的 token 在 TTL 内仍可用）。
+**权限边界**：MCP server 只是薄转发，真正的约束在后端——scoped token 只能走工具面（草稿/校验/读取，外加上文 Skill 写工具对本地 skill 仓库的提交——它们对 `latest` 节点立即生效），workflow 发布、回滚、归档与预览面板发布等生效操作永远由人在 Studio 里完成（STUDIO-AGENT-001）。token 只存 sha256 digest，明文只在铸造时返回一次。Studio 对话内铸造的 run token（origin='run'）还绑定会话所在 workspace（schema v45，绑定与 token 行同一条 INSERT 原子写入）：带 workspace 路径的工具端点对其它 workspace 一律 403；自助 token（origin='user'，本文档流程铸造的）不带绑定，按 workspace 成员关系校验（成员/admin 放行，非成员 404）。注意铸造端点自 P4 起 admin-only——「自助」仅指 admin 用户自助，member 无法铸造新 token（已铸造未过期的 token 在 TTL 内仍可用）。
 
 ## 大文件的字节精确编辑（#767/#768）
 
