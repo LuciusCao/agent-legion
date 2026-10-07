@@ -128,10 +128,12 @@ api-scope 准入面对账，改权限面表须同步 UI 端点清单。
    # 其余情况（gzip 对象、后缀/多区间/起点越界等）可能以 200 返回全量，
    # 客户端两种都要接受。对象被 bucket lifecycle 回收时答 404：用 --fail，
    # 别把错误体存成产物
-   if [ -z "$DOWNLOAD_URL" ] || ! curl -fsS --compressed -o "$OUT" "$DOWNLOAD_URL"; then
-     curl -fsS --compressed -o "$OUT" "$HOST/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID/artifacts/$ENCODED_NAME/raw" \
+   # 先写 $OUT.part，两条通道都失败时不改名——不会用残缺字节覆盖已有的同名文件
+   if [ -z "$DOWNLOAD_URL" ] || ! curl -fsS --compressed -o "$OUT.part" "$DOWNLOAD_URL"; then
+     curl -fsS --compressed -o "$OUT.part" "$HOST/api/workspaces/$WORKSPACE_ID/jobs/$JOB_ID/artifacts/$ENCODED_NAME/raw" \
        -H "Authorization: Bearer $API_TOKEN"
    fi
+   [ $? -eq 0 ] && mv "$OUT.part" "$OUT"  # $? 是上面整个 if 的结果：成功下载才改名
    ```
 
    直连与 raw 两条通道的语义对照（响应头、gzip、重跑、吊销、有效期）与
@@ -462,12 +464,15 @@ print(e["download_url"] if live else "")' < manifest.json)
 NAME=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' \
   "$ARTIFACT")
 OUT=$(basename -- "$ARTIFACT")
-# 直连对象存储：不带 Authorization 头（S3 只按 URL 签名参数应答）
-if [ -z "$URL" ] || ! curl -fsSL --compressed -o "$OUT" "$URL"; then
-  curl -fsS --compressed -o "$OUT" \
+# 直连对象存储：不带 Authorization 头（S3 只按 URL 签名参数应答）。
+# 先写 $OUT.part、成功才改名：直连中断后回落 raw 也失败时（set -e 在此退出），
+# 当前目录里已有的同名产物不会被残缺字节覆盖
+if [ -z "$URL" ] || ! curl -fsSL --compressed -o "$OUT.part" "$URL"; then
+  curl -fsS --compressed -o "$OUT.part" \
     "$HOST/api/workspaces/$WS/jobs/$JOB_ID/artifacts/$NAME/raw" \
     -H "Authorization: Bearer $WORKSPACE_API_TOKEN"
 fi
+mv "$OUT.part" "$OUT"
 ```
 
 Python 等价（`requests`）：

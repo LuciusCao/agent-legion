@@ -14,10 +14,19 @@ LLM gateway 是独立基础设施，不属于 Agent Worker 协议。Worker 容�
 
 ```bash
 mkdir -p deploy/secrets
-openssl rand -hex 32 > deploy/secrets/postgres_password
-UV_CACHE_DIR=.uv-cache uv run python -c \
-  "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
-  > deploy/secrets/vault_master_key
+umask 077
+# 只在文件不存在时生成：已部署实例重跑会覆盖 PostgreSQL 密码（数据库仍是旧
+# 密码，Host 连不上）与 vault 主密钥（已存 secret 全部无法解密）。先写临时
+# 文件，生成成功且非空才改名——失败不会留下空的密钥文件
+gen_secret() {  # gen_secret <目标文件> <生成命令...>
+  target=$1; shift
+  if [ -e "$target" ]; then echo "$target 已存在，未改动" >&2; return 0; fi
+  if "$@" > "$target.tmp" && [ -s "$target.tmp" ]; then mv "$target.tmp" "$target"
+  else rm -f "$target.tmp"; echo "生成 $target 失败" >&2; return 1; fi
+}
+gen_secret deploy/secrets/postgres_password openssl rand -hex 32
+gen_secret deploy/secrets/vault_master_key env UV_CACHE_DIR=.uv-cache uv run python -c \
+  "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
 把 PostgreSQL 密码写入 pgpass。以下命令中的 `<postgres-password>` 必须替换成 `deploy/secrets/postgres_password` 文件里的值：
@@ -57,7 +66,7 @@ Docker Worker 使用独立、git-ignored 的 env file 注入这些引用变量�
 `models.json` 实际引用的变量，并限制权限；也可以用绝对路径覆盖默认位置：
 
 ```bash
-cp deploy/velites-provider.env.example deploy/velites-provider.env
+cp -n deploy/velites-provider.env.example deploy/velites-provider.env  # -n：已填好的文件不被示例覆盖
 chmod 600 deploy/velites-provider.env
 # 编辑 deploy/velites-provider.env，填入 ANTHROPIC_API_KEY / SQAI_API_KEY 等引用变量
 export VELITES_PROVIDER_ENV_FILE="$PWD/deploy/velites-provider.env"
@@ -163,7 +172,7 @@ Worker 机器按以下顺序准备。部署机本地 Worker 由 §3 的 stack �
 2. **准备 velites 模型注册表**：同 §2，`VELITES_CONFIG_DIR` 指向含 `models.json` 的目录，gateway 设置了 token 时提供 `LLM_GATEWAY_TOKEN`。
 3. **决定引导配置**：`deploy/compose.worker.yaml` 默认把 `deploy/worker.remote.example.yaml` 挂为引导 YAML，Worker **首次启动时导入它**（`worker_id: remote-worker-1`、`host_url` 为文档示例地址、`labels.arch: arm64`）。二选一：
    - 直接启动，再在控制台把 Host 地址、Worker ID、标签改成本机的值（导入后以控制台为准，#323）；
-   - 或启动前复制一份修改：`cp deploy/worker.remote.example.yaml deploy/<my-worker>.yaml`，改好 `host_url` / `worker_id` / `labels`，再 `export AGENT_WORKER_CONFIG=./<my-worker>.yaml`——该路径按 compose 文件所在的 `deploy/` 目录解析。
+   - 或启动前复制一份修改：`cp -n deploy/worker.remote.example.yaml deploy/<my-worker>.yaml`（`-n`：重跑不覆盖已改好的文件），改好 `host_url` / `worker_id` / `labels`，再 `export AGENT_WORKER_CONFIG=./<my-worker>.yaml`——该路径按 compose 文件所在的 `deploy/` 目录解析。
 
    容器内运行的是 Linux，因此标签中的 `os: linux` 是有意的；`arch` 按宿主机架构填（Apple Silicon 为 `arm64`）。
 4. **签发并导入 workspace 注册 token**（下文「注册 token」）：Host 侧签发，Worker 侧在控制台添加或用 `workerctl` 导入。
@@ -424,7 +433,7 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8787/api/config
 curl -H "Authorization: Bearer $TOKEN" 'http://127.0.0.1:8787/api/logs?limit=100'
 ```
 
-CLI 修改配置的示例（`configure` 是部分更新：只覆盖显式传入的字段，未指定的字段保持现状，`--host-url`/`--worker-id` 均非必填）：
+CLI 修改配置的示例（`configure` 是部分更新：只覆盖显式传入的字段，未指定的字段保持现状，`--host-url`/`--worker-id` 均非必填；但列表字段整体替换——传了 `--model` 就以本次全部 `--model` 取代已声明的模型列表，`--label` 同理取代全部标签，改其中一项时要把想保留的项一并传入，先用 `wctl config` 读出现状）：
 
 ```bash
 wctl configure \

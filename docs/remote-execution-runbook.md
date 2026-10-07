@@ -189,26 +189,57 @@ mixed-fleet compatibility and upgrade order.
   unchanged and still serves older Workers. Code capacity only requires
   protocol ≥ v2.
 
-  The gate that decides mixed fleets is the Worker-side handshake
+  Two things decide whether a mixed fleet works, and the protocol number is
+  only one of them. The first is the Worker-side handshake
   (`worker/host/client.py`): a v3+ Worker refuses to start unless the
   registration response's `host_protocol_version` is **at least its own**
   `PROTOCOL_VERSION` (`shared/protocol.py`; a pre-v3 Host omits the field,
   read as 0) and exits 2 before its first claim. The Host never rejects an
-  older Worker (`min_protocol_version` is 1). Compatibility matrix:
+  older protocol (`min_protocol_version` is 1). The second is the set of
+  wire changes that shipped **without** a protocol bump (recorded in the
+  `shared/protocol.py` docstring): an old Worker whose protocol number the
+  Host accepts can still be unable to run anything. Support is therefore
+  stated per **Worker release** (`worker-v*` image tag; a locally built
+  `agent-legion-worker:local` counts as the release its source revision
+  belongs to), not per protocol number.
 
-  | Host \ Worker | ≤ v2 Worker | v3 Worker | v4 Worker | v5 Worker |
+  Wire changes between Host and Worker that did not bump the protocol:
+
+  | Change | Host side from | Worker side from | Older Worker × newer Host | Newer Worker × older Host |
   | --- | --- | --- | --- | --- |
-  | **pre-v3 Host** | v2 behavior (bare provider/model) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
-  | **v3 Host** | works; bare provider/model read as runtime wildcards | runtime-scoped Agent + code pools | registration refused, exit 2 | registration refused, exit 2 |
-  | **v4 Host** | works; bare provider/model read as runtime wildcards | runtime-scoped Agent + code pools | + gzip artifact objects | registration refused, exit 2 |
-  | **v5 Host** | works; bare provider/model read as runtime wildcards | runtime-scoped Agent + code pools (no gzip) | + gzip artifact objects (per-execution heartbeats) | + gzip + batch heartbeat |
+  | #546 batch claim: the Worker sends `limit` and reads `{"claims": [...]}` | v0.7.4 | worker-v0.7.4 | works (no `limit` → single-object body, until v0.7.12) | works (the older Host ignores the batch fields; the Worker's shape sniff wraps the single object, `worker/host/claim_ops.py`) |
+  | #547 single-object claim body removed: every non-empty claim answers `{"claims": [...]}` (`server/app/routes/agent_worker_claims.py`) | v0.7.12 | — | **broken** for Workers before worker-v0.7.4: they read the wrapper as one claim, so every execution they claim stays leased without starting and requeues only when the lease expires | n/a |
+  | #211 M3 `workflow_key` removed from claim responses | v0.7.16 | — | works for every `worker-v*` release (no Worker reads it since v0.5.0) | n/a |
+  | #748 / #755 `X-Agent-Result` carries raw UTF-8; a direct-upload artifact list over the 14 KiB header budget moves into the result archive (`result-output-artifacts.json` + header flag) | v0.7.14 | worker-v0.7.14 | works (older Workers send ASCII-escaped JSON) | degraded: CJK `error_message` / `agent_stderr_tail` arrive as mojibake, and a run whose artifact list overflows the header fails with missing outputs |
 
-  (v1 Workers never receive code claims; "code pools" needs v2+.) The v5
-  Worker's per-execution heartbeat fallback — it degrades for good when the
-  batch route answers 404/405, with a 5s per-beat timeout; transient errors
-  do not trigger it — is therefore not a mixed-fleet mode: it only covers a
-  Host rolled back underneath an already-registered v5 Worker, which then
-  exits 2 at its next registration (restart).
+  Additive fields (the batch heartbeat's `settled` list #590, the claim's
+  `execution_generation` #759 and `max_archive_bytes` #959) are tolerated
+  absent in both directions and are not breaking.
+
+  Compatibility matrix by release (rows: Host release and its protocol;
+  columns: Worker release; every `worker-v*` tag declares protocol v4 or v5):
+
+  | Host \ Worker | worker-v0.6.0 – v0.6.1 (v4) | worker-v0.7.0 (v5) | worker-v0.7.4 – v0.7.13 (v5) | worker-v0.7.14 and later (v5) |
+  | --- | --- | --- | --- | --- |
+  | **v0.4.0-alpha and earlier** (≤ v3) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
+  | **v0.5.0 – v0.6.0** (v4) | works (gzip artifacts, per-execution heartbeats) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
+  | **v0.7.0 – v0.7.11** (v5, single-object claims still served) | works (per-execution heartbeats) | works | works (batch claims from Host v0.7.4; per-claim fallback before) | degraded (#748 / #755 row above) |
+  | **v0.7.12 – v0.7.13** (v5) | **broken** (#547) | **broken** (#547) | works | degraded (#748 / #755 row above) |
+  | **v0.7.14 and later** (v5, current) | **broken** (#547) | **broken** (#547) | works | works |
+
+  **Minimum supported Worker for a current Host (v0.7.12 and later):
+  worker-v0.7.4.** The recommended pairing is the Worker release of the
+  same version as the Host. Images built from source older than
+  worker-v0.6.0 (protocol ≤ v3, never published as `worker-v*`) are not
+  supported: the Host accepts their registration but they hit the same
+  #547 claim break. `min_protocol_version` cannot express this floor —
+  worker-v0.7.0 already declares v5 — so enforce it by upgrading Workers,
+  not by raising the setting. The v5 Worker's per-execution heartbeat
+  fallback (it degrades for good when the batch route answers 404/405,
+  with a 5s per-beat timeout; transient errors do not trigger it) is not a
+  mixed-fleet mode: it only covers a Host rolled back underneath an
+  already-registered v5 Worker, which then exits 2 at its next
+  registration (restart) if that Host is pre-v5.
 
   The Host's `min_protocol_version` remains 1; raising it is an emergency
   escape hatch, not part of a normal upgrade.

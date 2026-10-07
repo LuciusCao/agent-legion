@@ -105,11 +105,19 @@ compose 对 host 与两个本地后端都是 `${AGENT_LEGION_S3_ACCESS_KEY}` 字
 ```bash
 cd <prod worktree>
 umask 077
-cat >> deploy/.env <<EOF
+# 只在首次配置时生成：deploy/.env 已有 S3 凭据时重复追加会让后出现的随机值
+# 生效（本地后端随之换凭据，外部 S3 直接失效）。随机值先落变量、生成失败
+# 即停，不把空值写进 .env
+if grep -q '^AGENT_LEGION_S3_ACCESS_KEY=' deploy/.env 2>/dev/null; then
+  echo 'deploy/.env 已有 AGENT_LEGION_S3_* 凭据，未改动' >&2
+else
+  ACCESS_KEY=$(openssl rand -hex 20) && SECRET_KEY=$(openssl rand -hex 40) &&
+    [ -n "$ACCESS_KEY" ] && [ -n "$SECRET_KEY" ] && cat >> deploy/.env <<EOF
 AGENT_LEGION_S3_BUCKET=agent-legion
-AGENT_LEGION_S3_ACCESS_KEY=$(openssl rand -hex 20)
-AGENT_LEGION_S3_SECRET_KEY=$(openssl rand -hex 40)
+AGENT_LEGION_S3_ACCESS_KEY=$ACCESS_KEY
+AGENT_LEGION_S3_SECRET_KEY=$SECRET_KEY
 EOF
+fi
 chmod 600 deploy/.env
 ```
 
@@ -181,13 +189,16 @@ compose 注入），必须用进程环境显式给出宿主机侧的发布地址
 （`5173` / `5174` / `DEV_FRONTEND_PORT` 的 `127.0.0.1` 与 `localhost`
 两种写法）。prod 前端由 Host 在 `:8000` 提供，浏览器直传的 origin 是用户
 实际访问 Host 的地址（如 `http://192.0.2.1:8000`），需要额外追加一条规则
-（与已有规则合并，重跑 `ensure-s3-bucket.py` 不会删掉它）：
+（与已有规则合并，重跑 `ensure-s3-bucket.py` 不会删掉它）。`put_bucket_cors`
+是整份替换，所以脚本只在读到现有规则、或明确得到 `NoSuchCORSConfiguration`
+（bucket 尚无 CORS）时才写；其它读失败直接报错退出，不写入：
 
 ```bash
 # Docker 形态；原生形态把第一行换成
 #   ORIGIN=http://<部署机地址>:8000 PYTHONPATH=. uv run --env-file .env python - <<'EOF'
 docker compose -f deploy/compose.host.yaml exec -T -e ORIGIN=http://<部署机地址>:8000 host python - <<'EOF'
 import os, boto3
+from botocore.exceptions import ClientError
 from server.app.storage import load_s3_settings
 s = load_s3_settings()
 c = boto3.client("s3", region_name=s.region, endpoint_url=s.endpoint_url or None,
@@ -195,7 +206,12 @@ c = boto3.client("s3", region_name=s.region, endpoint_url=s.endpoint_url or None
 origin = os.environ["ORIGIN"]
 try:
     rules = c.get_bucket_cors(Bucket=s.bucket)["CORSRules"]
-except c.exceptions.ClientError:
+except ClientError as exc:
+    # 只有「bucket 还没有 CORS 配置」可以当空规则继续；凭据 / 权限 / bucket
+    # 不存在 / 限流等读失败一律中止——否则下面的 put 会用只含新 origin 的
+    # 规则整体覆盖掉现有 CORS（含其它生产 origin）
+    if exc.response.get("Error", {}).get("Code") != "NoSuchCORSConfiguration":
+        raise
     rules = []
 if not any(origin in r.get("AllowedOrigins", []) for r in rules):
     rules.append({"AllowedOrigins": [origin], "AllowedMethods": ["PUT", "GET", "HEAD"],
