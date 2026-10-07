@@ -25,7 +25,7 @@ DB 是删除的唯一权威：``JobDeletionService`` 先在
   并按「已重建」返回，旧 job 的 refs / 对象泄漏交给 orphan GC 与
   ``scripts/gc-s3-jobs.py`` 回收。
 
-日志路径的枚举（含一次共享日志目录列举）在锁外完成，锁内只复核行与
+日志路径的枚举（按快照精确生成、逐个探测存在性）在锁外完成，锁内只复核行与
 rename——锁事务保持短，不阻塞重建后新 job 的 claim。日志只删能由
 ``job_node_log_name`` 精确生成的名字，见 ``deleted_job_log_paths``。
 
@@ -39,15 +39,15 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import shutil
 from collections.abc import Iterable, Mapping
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from server.app.services.job_deletion_log_paths import deleted_job_log_paths
 from server.app.settings import Settings
-from server.app.storage_paths import ManagedPathError, job_node_log_name, resolve_job_dir
+from server.app.storage_paths import ManagedPathError, resolve_job_dir
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -73,54 +73,13 @@ def logs_trash_root(settings: Settings) -> Path:
     return settings.logs_dir / "jobs" / TRASH_DIRNAME
 
 
-# 分片日志名的反解析：贪婪 node_key 回溯到最后一个 ``-shard-<数字>.log``，
-# 拆分唯一；命中后还须与 job_node_log_name 重新生成的名字逐字相等（拒绝
-# 前导零等非本命名函数产出的形态）。DOTALL：node_key 允许任意字符。
-_SHARD_LOG_NAME = re.compile(r"(?P<node_key>.+)-shard-(?P<index>[0-9]+)\.log", re.DOTALL)
-
-
-def deleted_job_log_paths(settings: Settings, job_id: str, node_keys: Iterable[str]) -> list[Path]:
-    """列出已删 job 拥有的节点日志：只认 ``job_node_log_name(job_id, k[, i])``
-    能生成的文件名，``k`` 取自删除前的节点 key 快照。
-
-    删除路径模型（PR #1065）：job_id 与 node_key 都可含连字符（source_id 只把
-    ``/`` 换成 ``_``），``{job_id}-*`` 前缀 glob 会命中 source_id 为
-    ``<source>-...`` 的兄弟 job 的日志，绝不使用。
-
-    - 普通日志：按快照 key 精确生成路径，不列目录；
-    - 分片日志：shard 索引无法从行记录精确推导（rerun / workflow 升级会删掉
-      node_shards 行再按新代次重建，旧代次更大索引的日志仍属本 job），故锁外
-      列一次目录，对每个名字做「锚定反解析 + 用命名函数重新生成后全等」——
-      兄弟 job ``<source>-<k>-shard-0`` 的 ``…-shard-0-<node>.log`` 不满足；
-    - 残留风险只剩写入期即已共用同一文件名的命名碰撞（如 job ``A`` 节点
-      ``x-y`` 与 job ``A-x`` 节点 ``y`` 都写 ``A-x-y.log``），删除侧无从区分。
-    """
-    log_dir = settings.logs_dir / "jobs"
-    keys = set(node_keys)
-    paths = {log_dir / job_node_log_name(job_id, node_key) for node_key in keys}
-    prefix = f"{job_id}-"
-    try:
-        with os.scandir(log_dir) as entries:
-            names = [entry.name for entry in entries if entry.name.startswith(prefix)]
-    except OSError:
-        # 列目录失败只少删分片日志（留原位残留），不让已提交的删除变成 API 错误。
-        logger.warning("Cannot list %s for deleted job %s", log_dir, job_id, exc_info=True)
-        names = []
-    for name in names:
-        match = _SHARD_LOG_NAME.fullmatch(name, len(prefix))
-        if match is None or match["node_key"] not in keys:
-            continue
-        if name == job_node_log_name(job_id, match["node_key"], int(match["index"])):
-            paths.add(log_dir / name)
-    return sorted(path for path in paths if path.exists())
-
-
 def purge_deleted_job_files(
     job_db: JobQueries,
     job: Mapping[str, Any],
     node_keys: Iterable[str],
     settings: Settings,
     operation_id: str,
+    run_logs: Iterable[tuple[str, str]] = (),
 ) -> bool:
     """提交后把已删 job 的本地目录与日志移入 trash 再删除；失败只记日志。
 
@@ -133,17 +92,21 @@ def purge_deleted_job_files(
     跨事务动作前重新校验目标身份与状态：job_dir 按快照行重新解析（重走
     managed-root 包含校验）；移入在 ``job-mutation:<id>`` 短事务锁下复核 jobs
     行仍不存在才执行（同源重建的 job 已落行即整体跳过）。``node_keys`` 是删除
-    前快照的节点 key（job_nodes ∪ node_runs），日志按它精确匹配。
+    前快照的节点 key（job_nodes ∪ node_runs），``run_logs`` 是快照的
+    node_runs ``(node_key, log_path)``，日志按二者精确推导（见
+    ``deleted_job_log_paths``）。单个路径的文件系统错误只跳过该路径。
     """
     job_id = str(job["id"])
     staged: list[Path] = []
     try:
         storage_dir: Path | None = resolve_job_dir(job, settings.jobs_dir)
-    except ManagedPathError:
-        logger.warning("Skip local cleanup of deleted job %s: storage_dir escapes", job_id)
+    except (ManagedPathError, OSError):
+        logger.warning(
+            "Skip local cleanup of deleted job %s: storage_dir unresolvable", job_id, exc_info=True
+        )
         storage_dir = None
     # 日志枚举放锁外：锁内只剩行复核与原子 rename（存在性在锁内再探一次）。
-    log_paths = deleted_job_log_paths(settings, job_id, node_keys)
+    log_paths = deleted_job_log_paths(settings, job_id, node_keys, run_logs)
     # None = 锁事务尚未给出存在性结果；yield 之后（如 commit）才失败时它已绑定
     # 真实复核值，照常返回。
     recreated: bool | None = None
@@ -152,11 +115,12 @@ def purge_deleted_job_files(
             if recreated:
                 logger.info("Skip local cleanup of deleted job %s: recreated", job_id)
             else:
-                if storage_dir is not None and storage_dir.is_dir():
-                    staged += _stage(storage_dir, jobs_trash_root(settings) / operation_id, job_id)
+                if storage_dir is not None:
+                    staged += _stage(
+                        storage_dir, jobs_trash_root(settings) / operation_id, job_id, is_dir=True
+                    )
                 for log_path in log_paths:
-                    if log_path.exists():
-                        staged += _stage(log_path, logs_trash_root(settings) / operation_id, job_id)
+                    staged += _stage(log_path, logs_trash_root(settings) / operation_id, job_id)
     except Exception:
         # #204 broad-except audit: the jobs row is already committed as
         # deleted, so the lock transaction is a best-effort recheck — its only
@@ -178,9 +142,12 @@ def purge_deleted_job_files(
     return True if recreated is None else recreated
 
 
-def _stage(path: Path, trash_dir: Path, job_id: str) -> list[Path]:
+def _stage(path: Path, trash_dir: Path, job_id: str, *, is_dir: bool = False) -> list[Path]:
     staged = trash_dir / path.name
     try:
+        # 存在性探测也在 try 内：超长名（ENAMETOOLONG）等 OSError 只跳过本路径。
+        if not (path.is_dir() if is_dir else path.exists()):
+            return []
         trash_dir.mkdir(parents=True, exist_ok=True)
         # 先落已提交标记再移入：凡含本模块残留的 operation 目录必带标记。
         (trash_dir / COMMITTED_MARKER).write_text(f"{job_id}\n", encoding="utf-8")
@@ -188,7 +155,7 @@ def _stage(path: Path, trash_dir: Path, job_id: str) -> list[Path]:
         os.rename(path, staged)
     except OSError:
         # 行已提交删除：移不走只留原位残留（见模块 docstring），不让成功的
-        # 删除变成 API 错误。os.rename / mkdir 只抛 OSError。
+        # 删除变成 API 错误。探测 / os.rename / mkdir 只抛 OSError。
         logger.exception("Failed to stage %s of deleted job %s into trash", path, job_id)
         return []
     return [staged]

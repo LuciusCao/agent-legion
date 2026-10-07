@@ -99,8 +99,13 @@ class JobDeletionService:
         )
         operation_id = f"{self._now().strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
         # 节点 key 快照（含已退出图的历史节点）：行级联消失后日志按它精确匹配。
+        # node_runs 的 (node_key, log_path) 快照：分片日志按它精确推导。
+        run_logs = [
+            (str(r["node_key"]), str(r["log_path"] or ""))
+            for r in self.job_db.list_node_runs(job_id)
+        ]
         node_keys = {n["node_key"] for n in self.job_db.list_job_nodes(job_id)} | {
-            r["node_key"] for r in self.job_db.list_node_runs(job_id)
+            key for key, _ in run_logs
         }
 
         # #958：事务只做 DB 删除，不碰文件系统（文件 I/O 不再拉长 job-mutation
@@ -129,7 +134,9 @@ class JobDeletionService:
             logger.exception("Unexpected error deleting job %s", job_id)
             _fail(job_id, "delete_failed", str(exc))
 
-        if purge_deleted_job_files(self.job_db, job, node_keys, self.settings, operation_id):
+        if purge_deleted_job_files(
+            self.job_db, job, node_keys, self.settings, operation_id, run_logs
+        ):
             # 同源 job 已重建（同一 id），或锁下复核因 DB 错误未能确认未重建：
             # 按 id 的 refs / 对象清理与删除广播可能打到新 job 上，一律跳过；
             # 旧 job 的孤儿 blob 交给 orphan GC（artifact_orphan_gc），对象存储

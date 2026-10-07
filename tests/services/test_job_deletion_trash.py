@@ -170,44 +170,77 @@ class _UnlockedJobDB:
             self.in_lock = False
 
 
-def test_purge_enumerates_log_paths_outside_job_mutation_lock(tmp_path: Path) -> None:
-    """#1065 codex P2：日志目录列举在锁外，锁内只复核行并 rename。"""
+def test_purge_derives_log_paths_outside_lock_and_never_lists_log_dir(tmp_path: Path) -> None:
+    """#1065 codex P2：日志路径在锁外推导，锁内只复核行并 rename；推导按快照
+    精确生成，从不列举共享日志目录。"""
     settings = _settings(tmp_path)
     log_dir = settings.logs_dir / "jobs"
     log_dir.mkdir(parents=True)
     (log_dir / "job-x-n1.log").write_text("log", encoding="utf-8")
     (log_dir / "job-x-n1-shard-0.log").write_text("shard", encoding="utf-8")
     job_db = _UnlockedJobDB()
-    listed_in_lock: list[bool] = []
+    derived_in_lock: list[bool] = []
+    listed: list[Path] = []
+    real_derive = trash_module.deleted_job_log_paths
     real_scandir = trash_module.os.scandir
 
+    def _spy_derive(*args: Any) -> list[Path]:
+        derived_in_lock.append(job_db.in_lock)
+        return real_derive(*args)
+
     def _spy_scandir(path: Any) -> Any:
-        listed_in_lock.append(job_db.in_lock)
+        listed.append(Path(path))
         return real_scandir(path)
 
-    with patch.object(trash_module.os, "scandir", _spy_scandir):
+    with (
+        patch.object(trash_module, "deleted_job_log_paths", _spy_derive),
+        patch.object(trash_module.os, "scandir", _spy_scandir),
+    ):
         recreated = purge_deleted_job_files(
-            job_db, {"id": "job-x", "storage_dir": "job-x"}, ["n1"], settings, "op-1"
+            job_db,
+            {"id": "job-x", "storage_dir": "job-x"},
+            ["n1"],
+            settings,
+            "op-1",
+            [("n1", "logs/jobs/job-x-n1-shard-0.log")],
         )
 
     assert recreated is False
-    # 锁外至少列举一次（日志枚举）；锁内一次都不列（_prune_empty 的 iterdir 在锁后）。
-    assert listed_in_lock and not any(listed_in_lock)
+    assert derived_in_lock == [False]
+    assert log_dir not in listed
     assert sorted(p.name for p in log_dir.iterdir()) == []
 
 
 # 删除路径模型（PR #1065 codex 4203283377）：被删 job 与按命名规则可能碰撞的
 # 兄弟 job。job id 照 _job_id 拼成 ``<workspace>_<workflow>_<source_id>``，
-# source_id 可含连字符；节点 key 也可含连字符与 ``-shard-<n>``。
+# source_id 可含连字符；节点 key 也可含连字符与 ``-shard-<n>``。分片日志只从
+# 快照的 node_runs.(node_key, log_path) 精确推导。
 _JOB = "ws_wf_Q030"
-_KEYS = ("extract_question", "split-shard-0")
+_KEYS = ("extract_question", "split-shard-0", "x")
 _OWN = {
     "普通节点日志": job_node_log_name(_JOB, "extract_question"),
+    "普通节点 x 的日志": job_node_log_name(_JOB, "x"),
     "分片日志 0": job_node_log_name(_JOB, "extract_question", 0),
     "分片日志多位索引": job_node_log_name(_JOB, "extract_question", 12),
+    "旧代次分片日志（node_shards 已删、node_runs 仍在）": job_node_log_name(
+        _JOB, "extract_question", 7
+    ),
     "含 -shard- 的节点 key 普通日志": job_node_log_name(_JOB, "split-shard-0"),
     "含 -shard- 的节点 key 分片日志": job_node_log_name(_JOB, "split-shard-0", 3),
 }
+_RUN_LOGS = (
+    ("extract_question", f"logs/jobs/{job_node_log_name(_JOB, 'extract_question')}"),
+    ("extract_question", f"logs/jobs/{job_node_log_name(_JOB, 'extract_question', 0)}"),
+    ("extract_question", f"logs/jobs/{job_node_log_name(_JOB, 'extract_question', 12)}"),
+    ("extract_question", f"logs/jobs/{job_node_log_name(_JOB, 'extract_question', 7)}"),
+    ("split-shard-0", f"logs/jobs/{job_node_log_name(_JOB, 'split-shard-0', 3)}"),
+    ("x", f"logs/jobs/{job_node_log_name(_JOB, 'x')}"),
+    # 不可推导 / 越界的历史 log_path 一律不删（下面的兄弟文件因此保留）。
+    ("x", ""),
+    ("x", "/outside/elsewhere.log"),
+    ("x", f"jobs/{job_node_log_name(_JOB, 'x')}"),
+    ("x", f"logs/jobs/sub/{job_node_log_name(_JOB, 'x')}"),
+)
 _SIBLING = {
     # codex 原例：source ``Q030-extract_question-shard-0`` 的普通 / 分片日志。
     "source 形如 <src>-<k>-shard-0 的普通日志": job_node_log_name(
@@ -218,10 +251,12 @@ _SIBLING = {
     ),
     "source 形如 <src>-x 的普通日志": job_node_log_name(f"{_JOB}-x", "extract_question"),
     "source 形如 <src>-x 的分片日志": job_node_log_name(f"{_JOB}-x", "extract_question", 0),
+    # 被删 job 有普通节点 x；兄弟 <src>-x 的节点 shard-1 写 <job>-x-shard-1.log。
+    "兄弟节点 key 形如 shard-<n> 的普通日志": job_node_log_name(f"{_JOB}-x", "shard-1"),
     "兄弟节点 key 也含 -shard-<n> 的分片日志": job_node_log_name(
         f"{_JOB}-extract_question-shard-0", "x-shard-1", 2
     ),
-    "节点 key 不在快照的 <src>-other": job_node_log_name(f"{_JOB}-other", "node", 0),
+    "被删 job 未写过的分片索引": job_node_log_name(_JOB, "extract_question", 5),
     "无连字符前缀相同的 job": job_node_log_name(f"{_JOB}1", "extract_question", 0),
     "非命名函数产出的前导零索引": f"{_JOB}-extract_question-shard-00.log",
     "非数字索引": f"{_JOB}-extract_question-shard-x.log",
@@ -230,12 +265,20 @@ _SIBLING = {
 
 def _seed_deletion_model(settings: Settings) -> tuple[Path, Path]:
     log_dir = settings.logs_dir / "jobs"
-    log_dir.mkdir(parents=True)
+    (log_dir / "sub").mkdir(parents=True)
     for name in (*_OWN.values(), *_SIBLING.values()):
         (log_dir / name).write_text(name, encoding="utf-8")
+    (log_dir / "sub" / job_node_log_name(_JOB, "x")).write_text("sub", encoding="utf-8")
     (settings.jobs_dir / _JOB).mkdir()
+    (settings.jobs_dir / job_node_log_name(_JOB, "x")).write_text("jobs-root", encoding="utf-8")
     (settings.jobs_dir / f"{_JOB}-x").mkdir()
     return log_dir, settings.jobs_dir
+
+
+def _purge_model(settings: Settings) -> bool:
+    return purge_deleted_job_files(
+        _UnlockedJobDB(), {"id": _JOB}, _KEYS, settings, "op-1", _RUN_LOGS
+    )
 
 
 def test_job_node_log_names_never_collide_across_model_rows() -> None:
@@ -249,7 +292,7 @@ def test_purge_removes_every_owned_log(tmp_path: Path, name: str) -> None:
     settings = _settings(tmp_path)
     log_dir, jobs_dir = _seed_deletion_model(settings)
 
-    purge_deleted_job_files(_UnlockedJobDB(), {"id": _JOB}, _KEYS, settings, "op-1")
+    assert _purge_model(settings) is False
 
     assert not (log_dir / name).exists()
     assert not (jobs_dir / _JOB).exists()
@@ -260,23 +303,52 @@ def test_purge_keeps_colliding_sibling_logs(tmp_path: Path, name: str) -> None:
     settings = _settings(tmp_path)
     log_dir, jobs_dir = _seed_deletion_model(settings)
 
-    purge_deleted_job_files(_UnlockedJobDB(), {"id": _JOB}, _KEYS, settings, "op-1")
+    assert _purge_model(settings) is False
 
     assert (log_dir / name).read_text(encoding="utf-8") == name
     assert (jobs_dir / f"{_JOB}-x").is_dir()
+    # 越界的 node_runs.log_path 不删（不在 logs/jobs 直属层的同名文件）。
+    assert (log_dir / "sub" / job_node_log_name(_JOB, "x")).is_file()
+    assert (jobs_dir / job_node_log_name(_JOB, "x")).is_file()
 
 
-def test_deleted_job_log_paths_survives_unlistable_log_dir(tmp_path: Path) -> None:
-    """列目录失败只放弃分片日志（留残留），普通日志照常精确删除、不抛错。"""
+_LONG_KEY = "k" * 260  # 文件名超 NAME_MAX（255）：stat 抛 ENAMETOOLONG
+
+
+def test_deleted_job_log_paths_treats_unprobeable_names_as_missing(tmp_path: Path) -> None:
+    """Python 3.13 的 Path.exists 对 ENAMETOOLONG 会抛：逐路径视为不存在并告警，
+    其余日志照常推导，不让已提交的删除变成 API 错误。"""
     settings = _settings(tmp_path)
     log_dir = settings.logs_dir / "jobs"
     log_dir.mkdir(parents=True)
     (log_dir / job_node_log_name(_JOB, "n1")).write_text("log", encoding="utf-8")
 
-    with patch.object(trash_module.os, "scandir", side_effect=PermissionError("denied")):
-        paths = deleted_job_log_paths(settings, _JOB, ["n1"])
+    paths = deleted_job_log_paths(
+        settings,
+        _JOB,
+        [_LONG_KEY, "n1"],
+        [(_LONG_KEY, f"logs/jobs/{job_node_log_name(_JOB, _LONG_KEY, 0)}")],
+    )
 
     assert paths == [log_dir / job_node_log_name(_JOB, "n1")]
+
+
+def test_purge_stages_remaining_logs_when_one_path_fails_under_lock(tmp_path: Path) -> None:
+    """锁内逐路径处理：某个路径的探测 / rename 抛 OSError 只跳过它本身。"""
+    settings = _settings(tmp_path)
+    log_dir = settings.logs_dir / "jobs"
+    log_dir.mkdir(parents=True)
+    good = log_dir / job_node_log_name(_JOB, "n1")
+    good.write_text("log", encoding="utf-8")
+    unprobeable = log_dir / job_node_log_name(_JOB, _LONG_KEY)
+
+    with patch.object(trash_module, "deleted_job_log_paths", return_value=[unprobeable, good]):
+        recreated = purge_deleted_job_files(
+            _UnlockedJobDB(), {"id": _JOB}, [_LONG_KEY, "n1"], settings, "op-1"
+        )
+
+    assert recreated is False
+    assert not good.exists()
 
 
 def test_purge_reports_recreated_when_lock_fails_before_recheck(tmp_path: Path) -> None:

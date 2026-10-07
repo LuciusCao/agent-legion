@@ -639,6 +639,17 @@ def test_delete_skips_id_scoped_cleanup_and_event_when_recheck_lock_fails(
     assert recorded == []
 
 
+def _record_finished_run(job_db: JobQueries, job_id: str, log_path: Path) -> None:
+    """node_runs 行携带分片日志路径：删除按快照的 node_runs.log_path 精确推导。"""
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into node_runs(job_id, node_key, status, command_json, log_path,"
+            " run_dir, session_dir, started_at) values (%s, 'extract_question',"
+            " 'succeeded', '[]', %s, '', '', %s)",
+            (job_id, f"logs/jobs/{log_path.name}", database_timestamp(datetime.now(UTC))),
+        )
+
+
 def test_delete_purges_only_own_node_logs_not_sibling_prefix(
     job_db: JobQueries, tmp_path: Path
 ) -> None:
@@ -653,6 +664,7 @@ def test_delete_purges_only_own_node_logs_not_sibling_prefix(
     _storage_dir, own_log = _seed_job_files(settings, job)
     own_shard_log = own_log.with_name(f"{job['id']}-extract_question-shard-0.log")
     own_shard_log.write_text("shard", encoding="utf-8")
+    _record_finished_run(job_db, job["id"], own_shard_log)
     sibling_log = settings.logs_dir / "jobs" / f"{sibling['id']}-extract_question.log"
     sibling_log.write_text("sibling", encoding="utf-8")
 
@@ -679,6 +691,7 @@ def test_delete_shard_log_match_escapes_glob_metacharacters(
     log_dir.mkdir(parents=True, exist_ok=True)
     own_shard = log_dir / f"{job['id']}-extract_question-shard-0.log"
     own_shard.write_text("own", encoding="utf-8")
+    _record_finished_run(job_db, job["id"], own_shard)
     sibling_shard = log_dir / f"{sibling['id']}-extract_question-shard-0.log"
     sibling_shard.write_text("sibling", encoding="utf-8")
 
