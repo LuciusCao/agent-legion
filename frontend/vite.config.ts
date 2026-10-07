@@ -22,6 +22,7 @@ const browserTestFiles = [
   'src/features/previewPanel/previewDisplayMode.test.ts',
   // panelCsp.ts 用 DOMParser/document 注入 CSP 与盖 nonce（#989）。
   'src/features/previewPanel/panelCsp.test.ts',
+  'src/features/previewPanel/panelCspBundleNonce.test.ts',
   'src/hooks/useDashboardEvents.test.ts',
   'src/hooks/useDebouncedCallback.test.ts',
   'src/hooks/useWorkspaceEvents.test.ts',
