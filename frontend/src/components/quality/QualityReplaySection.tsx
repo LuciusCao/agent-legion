@@ -17,6 +17,7 @@ import type {
   QualityArtifactContent,
   QualityReplay,
 } from '../../api/qualityApi'
+import { formatDateTime } from '../../lib/formatters'
 import {
   ORIGINAL_CHOICE,
   createBody,
@@ -26,11 +27,7 @@ import {
   originalLabel,
   replayLabel,
 } from './qualityReplayProfiles'
-import {
-  QualityArtifactView,
-  QualityLabelHistory,
-  formatQualityDateTime,
-} from './QualityArtifactView'
+import { QualityArtifactView, QualityLabelHistory } from './QualityArtifactView'
 import { QualityLabelForm } from './QualityLabelForm'
 import styles from './QualityPanel.module.css'
 
@@ -250,7 +247,7 @@ export function QualityReplaySection({
                 <strong>{replayLabel(replay)}</strong>
                 <ReplayStatusChip status={replay.status} />
                 <span className={styles.itemMeta}>
-                  {formatQualityDateTime(replay.created_at)}
+                  {formatDateTime(replay.created_at)}
                 </span>
               </span>
               {replay.status === 'failed' && replay.error_message && (

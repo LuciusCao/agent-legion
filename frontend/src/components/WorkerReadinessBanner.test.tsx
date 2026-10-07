@@ -23,8 +23,6 @@ vi.mock('../stores/agentsStore', () => ({
     selector?: (state: ReturnType<typeof createMockAgentsState>) => unknown
   ) => {
     const state = createMockAgentsState({
-      getWorkerPaused: () => mockPaused,
-      workerPausedByWorkspace: { ws1: mockPaused },
       fetchWorkerStatus: fetchWorkerStatusMock,
       setWorkerPaused: setWorkerPausedMock,
     })
@@ -76,7 +74,10 @@ function renderBanner(
 beforeEach(() => {
   vi.clearAllMocks()
   mockPaused = false
-  fetchWorkerStatusMock.mockResolvedValue(undefined)
+  // 暂停位经 RQ 查询读取（#961）：读取结果即服务端值。
+  fetchWorkerStatusMock.mockImplementation(() =>
+    Promise.resolve({ paused: mockPaused, superseded: false })
+  )
   mockListAgentWorkers.mockResolvedValue([worker()])
 })
 
@@ -85,8 +86,8 @@ describe('WorkerReadinessBanner', () => {
     let resolve!: () => void
     fetchWorkerStatusMock.mockImplementation(
       () =>
-        new Promise<void>((done) => {
-          resolve = done
+        new Promise((done) => {
+          resolve = () => done({ paused: true, superseded: false })
         })
     )
     mockPaused = true

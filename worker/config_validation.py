@@ -10,7 +10,6 @@ re-exports ``validate_config`` / ``public_config`` so existing callers
 
 from __future__ import annotations
 
-import logging
 import re
 import urllib.parse
 from typing import Any
@@ -20,13 +19,12 @@ from worker.claim_batch import DEFAULT_CLAIM_BATCH_LIMIT, MAX_CLAIM_BATCH_LIMIT
 from worker.proxy_config import validate_proxy
 from worker.ramp_up import normalized_ramp_up_block, validate_ramp_up
 from worker.runtime.catalog import SUPPORTED_RUNTIMES, resolve_config_runtimes
-from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY, validate_claim_controls
+from worker.runtime.controls import (
+    MAX_DYNAMIC_CONCURRENCY,
+    strip_removed_keys,
+    validate_claim_controls,
+)
 
-logger = logging.getLogger(__name__)
-# 已移除的配置键（#452：`capabilities` 自 #284 起即 no-op）：存量 worker.yaml
-# 残留时剥离并每进程告警一次，不让 Worker 因旧键启动失败；下次落盘即清除。
-_REMOVED_KEYS = frozenset({"capabilities"})
-_warned_removed: set[str] = set()
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _EDITABLE_FIELDS = {
     "claim_enabled",
@@ -84,10 +82,9 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     """Normalize a Worker config while rejecting surprising local control input."""
     if not isinstance(raw, dict):
         raise ValueError("配置必须是对象")
-    for key in sorted((_REMOVED_KEYS & raw.keys()) - _warned_removed):
-        _warned_removed.add(key)
-        logger.warning("config key %r was removed (issue #452) and is ignored; delete it", key)
-    config = {**_DEFAULTS, **{k: v for k, v in raw.items() if k not in _REMOVED_KEYS}}
+    # 已移除的配置键（#452）：剥离 + 每进程告警一次，下次落盘即清除；
+    # 规则单一来源在 runtime.controls（直接 --config 路径共用，#1023）。
+    config = {**_DEFAULTS, **strip_removed_keys(raw)}
     # 生效声明 = 本机探测到的已安装 runtime − 停用集合（issue #254：探测即
     # 默认启用，反选停用；旧 opt-in runtimes 键由 catalog 迁移为补集停用）。
     # 空集合合法：本机只承接 code 任务或暂不接 agent。

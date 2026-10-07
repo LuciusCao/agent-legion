@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Non-blocking dependency vulnerability audit: Python (uv.lock export + pip-audit)
-# and frontend (npm audit). Requires network access; failures are reported, not fatal
-# unless this script is run directly.
+# Dependency vulnerability audit: Python (uv.lock export + pip-audit) and frontend
+# (npm audit --omit=dev --audit-level=high). Requires network access (live advisory
+# databases). Both audits always run; the script exits 1 if either reports findings
+# or cannot run, so it fails `make audit` and the weekly nightly-gate deps-audit job
+# (#969). It is not part of the PR quality gate.
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

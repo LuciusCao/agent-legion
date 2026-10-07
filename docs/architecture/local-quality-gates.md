@@ -18,7 +18,7 @@ provide.
 | Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: unit-tier quick suite, lanes trimmed | `scripts/check-quick.sh` |
 | Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | `scripts/check.sh` |
 | PR to `develop`/`main`/`master`/`release/*`, push to `main`/`master` | Full | CI lanes run in parallel; stable aggregate check `quality-gate` is the merge boundary |
-| Weekly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` (`nightly-gate.yml`) |
+| Weekly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` + `exemption-expiry` + `deps-audit` (`nightly-gate.yml`) |
 
 The pre-push hook diffs the pushed commits against their remote base and runs
 only the affected quick-gate lanes locally: frontend-only changes skip the
@@ -108,7 +108,7 @@ suite. Keep the tier under ~90 seconds: when adding tests for a new
 subsystem, add one core file to the smoke set rather than raising the budget.
 
 The unit tier (`GATE_TIER=unit`) runs the complete PostgreSQL-offline unit
-layer, selected with `-m "not postgres and not repository_gate"` against an
+layer, selected with `-m "not postgres"` against an
 unreachable loopback database URL, so an accidental database dependency fails
 the gate instead of silently using a developer database. CI runs it as the
 `backend-unit` job; the PostgreSQL integration layer (`GATE_TIER=postgres`)
@@ -263,6 +263,12 @@ In `nightly-gate.yml`:
 - **ci-extended** — `tests/ci -m ci_extended` stress scenarios, with the
   unregistered-rerun (flaky governance) check. Runs only on the weekly
   schedule and manual dispatch.
+- **deps-audit** — dependency vulnerability audit via `make audit`
+  (`scripts/check-deps-audit.sh`: pip-audit over the frozen `uv.lock` export
+  plus `npm audit --omit=dev --audit-level=high`; #969). It queries live
+  advisory databases, so its verdict changes over time on an unchanged tree —
+  that is why it runs on the weekly schedule and manual dispatch instead of
+  the PR gate. Any finding fails the job; fixes land as dependency PRs.
 - **exemption-expiry** — refreshes the issue-state manifest and detects
   expired architecture exemptions; since #295 it also detects expired
   flaky-registry deadlines (`check_reruns.py --check-deadlines`, deadline

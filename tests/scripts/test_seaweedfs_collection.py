@@ -245,6 +245,7 @@ def _run_clean(tmp_path: Path, extra_env: dict[str, str]) -> subprocess.Complete
     for name in (
         "clean-worktree.sh",
         "drop-worktree-db.sh",
+        "worktree-names-lib.sh",
         "seaweedfs_collection.py",
         "__init__.py",
     ):

@@ -30,12 +30,16 @@ export function fetchStudioChatAgents(
   ).then((response) => response.agents)
 }
 
+/** 默认会话列表。#1041：响应同带实例对话保留天数，经 ``onRetention``
+ * 交给调用方写入保留天数缓存（列表缓存本身仍只存会话行）。 */
 export function fetchStudioChatSessions(
-  workspaceId: string
+  workspaceId: string,
+  onRetention?: (retentionDays: number) => void
 ): Promise<StudioChatSessionRecord[]> {
-  return api<SessionsResponse>(base(workspaceId)).then(
-    (response) => response.sessions
-  )
+  return api<SessionsResponse>(base(workspaceId)).then((response) => {
+    onRetention?.(response.retention_days)
+    return response.sessions
+  })
 }
 
 export function fetchStudioChatSession(

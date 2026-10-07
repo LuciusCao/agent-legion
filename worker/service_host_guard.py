@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
-from worker.service_host_names import console_origin, normalize_host
+from worker.service_host_names import console_origin, is_loopback_name, normalize_host
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +114,9 @@ def install_host_guard(
     """在 app 全部路由前挂 Host / 来源校验（中间件覆盖未匹配路由与 404）。
 
     返回收紧后的 token 内嵌判定：Host 校验已启用（None = 通配暴露面）且白名单
-    只含回环名——任一非回环主机名（暴露面或控制台地址）都意味着页面可经
-    非本机入口打开，此时不内嵌。
+    每个成员都按回环语义判定为回环（`localhost` 或回环 IP，含 `127.0.0.2` 等
+    127/8 别名，#976）——任一非回环主机名（暴露面或控制台地址）都意味着页面
+    可经非本机入口打开，此时不内嵌。
     """
 
     @app.middleware("http")
@@ -127,4 +128,8 @@ def install_host_guard(
             return JSONResponse({"detail": reason}, status_code=403)
         return await call_next(request)
 
-    return embed_token and allowed_hosts is not None and allowed_hosts <= LOOPBACK_HOSTS
+    return (
+        embed_token
+        and allowed_hosts is not None
+        and all(is_loopback_name(name) for name in allowed_hosts)
+    )
