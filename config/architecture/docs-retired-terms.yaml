@@ -106,5 +106,10 @@ terms:
     retired_in: '#935（#440 P3 门禁翻转）'
     note: 发布门禁要求 agent 节点自含 execution.runtime，不再按 capability 解析
       published Agent；legacy 解析只服务 v93 内联前冻结的旧快照
+  - pattern: 'agent_version_pins'
+    retired_in: '#1079（#440 P3b，D6：quality replay pin 改按 revision）'
+    note: 回放的执行档案按 workflow revision（或当前草稿）选，副本 run 冻结
+      node_profiles pin {revision_id, node_key, profile_hash}（EXEC-QUALITY-REPLAY-001）；
+      旧 agent_versions pin 只读兼容存量 run，不再为新回放写入
 
 exemptions: []

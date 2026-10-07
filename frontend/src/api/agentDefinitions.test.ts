@@ -1,16 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import {
-  archiveAgent,
-  copyAgent,
-  createAgentDefinition,
-  fetchAgentDefinition,
-  fetchAgentDefinitions,
-  fetchAgentVersions,
-  publishAgent,
-  rollbackAgent,
-  saveAgentDraft,
-} from './agentDefinitions'
+import { fetchAgentDefinitions, fetchAgentProvenance } from './agentDefinitions'
 
 const originalFetch = global.fetch
 
@@ -46,157 +36,17 @@ describe('agentDefinitions api', () => {
     )
   })
 
-  it('fetches an agent detail with an encoded id', async () => {
-    const payload = { agent_id: 'a b', latest: null, published: null }
+  it('fetches the inlined-node provenance of the active revision', async () => {
+    const payload = { nodes: [] }
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await fetchAgentDefinition(WS, 'a b')
+    const result = await fetchAgentProvenance('ws 1')
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/agent-definitions/a%20b${WS_QUERY}`,
+      '/api/workspaces/ws%201/agent-provenance',
       expect.anything()
-    )
-  })
-
-  it('lists agent versions', async () => {
-    const payload = { versions: [] }
-    const fetchMock = mockFetchJson(payload)
-    global.fetch = fetchMock
-
-    const result = await fetchAgentVersions(WS, 'agent-1')
-
-    expect(result).toEqual(payload)
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/agent-definitions/agent-1/versions${WS_QUERY}`,
-      expect.anything()
-    )
-  })
-
-  it('creates an agent definition', async () => {
-    const payload = { id: 'v1', agent_id: 'agent-1', version: 1 }
-    const fetchMock = mockFetchJson(payload)
-    global.fetch = fetchMock
-
-    const body = {
-      capability: 'generate_key_info',
-      runtime: 'pi' as const,
-      skill: 'demo_workflow/generate_key_info',
-      tools: ['read'],
-    }
-    const result = await createAgentDefinition(WS, body)
-
-    expect(result).toEqual(payload)
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/agent-definitions${WS_QUERY}`,
-      expect.objectContaining({ method: 'POST', body: JSON.stringify(body) })
-    )
-  })
-
-  it('creates an agent definition with an explicit agent_id (legacy payload)', async () => {
-    const payload = { id: 'v1', agent_id: 'agent-1', version: 1 }
-    const fetchMock = mockFetchJson(payload)
-    global.fetch = fetchMock
-
-    // #407：契约里 agent_id 变 Optional——显式传值的旧客户端照常工作。
-    const body = {
-      agent_id: 'agent-1',
-      capability: 'generate_key_info',
-      runtime: 'pi' as const,
-      skill: '',
-    }
-    const result = await createAgentDefinition(WS, body)
-
-    expect(result).toEqual(payload)
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/agent-definitions${WS_QUERY}`,
-      expect.objectContaining({ method: 'POST', body: JSON.stringify(body) })
-    )
-  })
-
-  it('saves a draft', async () => {
-    const payload = { id: 'v2', agent_id: 'agent-1', version: 2 }
-    const fetchMock = mockFetchJson(payload)
-    global.fetch = fetchMock
-
-    const body = {
-      capability: 'generate_key_info',
-      runtime: 'velites' as const,
-      skill: 'some/skill',
-    }
-    const result = await saveAgentDraft(WS, 'agent-1', body)
-
-    expect(result).toEqual(payload)
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/agent-definitions/agent-1/draft${WS_QUERY}`,
-      expect.objectContaining({ method: 'PUT', body: JSON.stringify(body) })
-    )
-  })
-
-  it('publishes an agent with the CAS draft hash', async () => {
-    const payload = { id: 'v2', status: 'published' }
-    const fetchMock = mockFetchJson(payload)
-    global.fetch = fetchMock
-
-    // #749：expectedHash 必填——发布事务内 CAS 核对的草稿身份。
-    const result = await publishAgent(WS, 'agent-1', 'hash-1')
-
-    expect(result).toEqual(payload)
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/agent-definitions/agent-1/publish${WS_QUERY}`,
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ expected_hash: 'hash-1' }),
-      })
-    )
-  })
-
-  it('rolls back to a version', async () => {
-    const payload = { id: 'v3', version: 3 }
-    const fetchMock = mockFetchJson(payload)
-    global.fetch = fetchMock
-
-    const result = await rollbackAgent(WS, 'agent-1', 2)
-
-    expect(result).toEqual(payload)
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/agent-definitions/agent-1/rollback${WS_QUERY}`,
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ version: 2 }),
-      })
-    )
-  })
-
-  it('copies an agent', async () => {
-    const payload = { id: 'v1', agent_id: 'agent-2' }
-    const fetchMock = mockFetchJson(payload)
-    global.fetch = fetchMock
-
-    const result = await copyAgent(WS, 'agent-1', 'agent-2')
-
-    expect(result).toEqual(payload)
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/agent-definitions/agent-1/copy${WS_QUERY}`,
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ new_agent_id: 'agent-2' }),
-      })
-    )
-  })
-
-  it('archives an agent', async () => {
-    const payload = { archived: 3 }
-    const fetchMock = mockFetchJson(payload)
-    global.fetch = fetchMock
-
-    const result = await archiveAgent(WS, 'agent-1')
-
-    expect(result).toEqual(payload)
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/agent-definitions/agent-1${WS_QUERY}`,
-      expect.objectContaining({ method: 'DELETE' })
     )
   })
 })

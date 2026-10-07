@@ -1209,7 +1209,7 @@ invariants:
         gate: quick
 
   - id: EXEC-QUALITY-REPLAY-001
-    statement: "A quality replay never touches the original job: it builds an isolated copy job from the original's frozen workflow snapshot, file-copies the target node's frozen inputs, marks upstream nodes completed and downstream nodes not_applicable (only the replayed node is ever scheduled, and the copy converges to completed), and dispatches the pinned immutable Agent version (draft/published/archived) via the frozen batch payload pin — the broker enqueue check, claim candidate join, and definition sweepers match the pinned version row instead of the currently published one. Replay status is derived lazily from the copy job's node row; at most one replay per sample item may be in flight."
+    statement: "A quality replay never touches the original job: it builds an isolated copy job from the original's frozen workflow snapshot, file-copies the target node's frozen inputs, marks upstream nodes completed and downstream nodes not_applicable (only the replayed node is ever scheduled, and the copy converges to completed). An agent node replays with an execution profile chosen by workflow revision or the current Studio draft (#440 D6): the chosen node's profile fields (execution, requires_labels, tools, config_schema, skill) are transplanted into the copy job's snapshot — which gets its own definition_hash — and the copy run freezes node_profiles[node_key] = {revision_id, node_key, profile_hash}; with no choice a self-contained node replays its original snapshot profile under the same pin. The workflow worker re-verifies the snapshot node against the pin before enqueue and fails the node closed on any mismatch; the queued manifest carries the pin, and the broker's live claim manifest never re-reads execution or prompt from the copy job's (original) revision for a pinned request, so the Worker runs exactly the chosen model/prompt/runtime (unpinned jobs keep the live revision re-read). The legacy agent_versions pin is read-only compatibility: existing runs carrying one still dispatch the pinned immutable Agent version (broker enqueue check, claim candidate join, and definition sweepers match the pinned version row), and new pins are only accepted for not-yet-inlined agent nodes of older snapshots. Replay status is derived lazily from the copy job's node row; at most one replay per sample item may be in flight."
     owner: workspace-executor
     risk: high
     evidence:
@@ -1221,6 +1221,18 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/routes/test_quality_replay_routes.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_quality_replay_profiles.py
+        gate: quick
+      - kind: contract
+        target: tests/workers/test_agent_claim_profile_pin.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_broker_replay_profile.py
+        gate: quick
+      - kind: contract
+        target: tests/workers/test_agent_claim_replay_manifest.py
         gate: quick
   - id: DB-ARTIFACT-GC-001
     statement: "An artifact blob is reclaimed only when its catalog row has zero artifact_refs and is older than the in-flight grace window. The orphan GC covers what job-deletion GC cannot see (zero-ref rows from lost result reports, crashed Workers, pre-claim cleanups): it scans the whole catalog keyset-paginated, delegates deletion to delete_unreferenced (transactional refcount + grace re-check, blob unlink after commit), and is driven hourly by the sweeper-owning replica or manually via scripts/gc_artifacts.py (dry-run default)."
