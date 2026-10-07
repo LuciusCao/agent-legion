@@ -364,6 +364,7 @@ describe('buildPermissionViews', () => {
   it('keeps a pending request unresolved until a resolved message arrives', () => {
     const [view] = buildPermissionViews([pending])
     expect(view.resolved).toBe(false)
+    expect(view.command).toBeNull()
     expect(view.options.map((option) => option.optionId)).toEqual(['o1', 'o2'])
 
     const resolved = message('permission', 'user', {

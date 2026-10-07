@@ -211,7 +211,7 @@ describe('StudioChatPanel', () => {
       chatMessage('m1', 1, 'permission', 'agent', {
         request_id: 'r1',
         status: 'pending',
-        tool_call: { title: 'Bash' },
+        tool_call: { title: 'Bash', rawInput: { command: 'rm -rf build' } },
         options: [{ optionId: 'o1', name: '允许一次', kind: 'allow_once' }],
       }),
     ])
@@ -221,6 +221,10 @@ describe('StudioChatPanel', () => {
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('需要你的确认')
     expect(alert).toHaveTextContent('Bash')
+    // 授权绑定的完整命令随卡展示（#954）：人批准的就是 terminal 要跑的那条。
+    expect(screen.getByLabelText('将要运行的命令')).toHaveTextContent(
+      'rm -rf build'
+    )
   })
 
   it('answers a permission request inline', async () => {
