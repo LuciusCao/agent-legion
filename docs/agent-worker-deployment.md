@@ -453,7 +453,8 @@ wctl configure --register-token-file /dev/stdin < ./marketing.token
 
 Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程内指数退避重试注册，不会打印 traceback，也不会触发 supervisor 重启。执行进程因其他原因崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2 不自动重启，进入 failed 状态，需修正后手动 `workerctl restart`。退出码 2 的来源：
 
-- Host 明确拒绝注册，例如持有的全部 key 已被删除；Host 协议版本低于 Worker（见 [remote-execution-runbook.md §5](remote-execution-runbook.md#5-workers)）。
+- Host 明确拒绝注册（注册请求返回 400 / 401 / 403 / 409 / 422），例如持有的全部 key 已被删除。
+- Worker 自行拒绝 Host：Host 注册成功（201），但响应里的 `host_protocol_version` 低于 Worker 自身协议版本（旧 Host 缺该字段按 0 处理），Worker 收到后以退出码 2 拒绝继续，不进入 claim（升级顺序与兼容矩阵见 [remote-execution-runbook.md §5](remote-execution-runbook.md#5-workers)）。
 - 启动预检失败：`AGENT_WORKER_EXPECT_RUNTIMES` 声明的 runtime 探测不到（Docker 形态最常见的是 `velites-bin/velites` 没放好，§3）、该 runtime 模型发现失败（含二进制架构错配）、或它被 `disabled_runtimes` 停用；`max_code_concurrency > 0` 但沙箱包装器（velites-sandbox 或 velites）在自带副本目录与 PATH 上都找不到（docker 形态该包装器内置镜像，此错误通常意味着镜像损坏）。
 
 `status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。

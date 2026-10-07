@@ -29,7 +29,7 @@ workflow、预览面板与节点代码 / prompt 相关工具都是**读取 / 校
 - `get_agent_definitions`（只读）：workspace 的历史 Agent 定义清单，每个 Agent 取最新版本，携带全部字段与版本元数据（version / status / definition_hash / created_by / created_at / published_at）；#440 起 Agent 定义不再充当节点执行档案，只读供追溯。
 - `get_runtime_models`（只读）：workspace 在线 Worker 声明聚合出的 `{runtime: {provider: [models]}}` 视图。
 - `get_agent_runtimes`（只读）：每个 runtime（pi / velites）的 agent 工具目录——工具名、三档 tier（default 预选 / opt-in 显式开启 / forced 带激活条件）与参数。
-- `save_agent_definition_draft` / `create_agent_definition`（#635）：#935 起 deprecated——不再写库，只返回引导：agent 节点的执行档案（`execution.runtime`、`tools`、`requires_labels`、`config_schema`、`skill`）写在 workflow 草稿的节点上，经 `save_workflow_draft` 保存；工具名保留到 P4 删除。
+- `save_agent_definition_draft` / `create_agent_definition`（#633）：#935 起 deprecated——不再写库，只返回引导：agent 节点的执行档案（`execution.runtime`、`tools`、`requires_labels`、`config_schema`、`skill`）写在 workflow 草稿的节点上，经 `save_workflow_draft` 保存；工具名保留到 P4 删除。
 
 **Skill**
 
