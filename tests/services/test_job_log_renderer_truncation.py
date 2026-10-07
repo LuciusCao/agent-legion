@@ -35,6 +35,15 @@ def test_length_stop_renders_output_limit_warning(tmp_path: Path) -> None:
     assert "max_output_tokens" in warning["detail"]
 
 
+def test_length_stop_warning_also_covers_context_window_overflow(tmp_path: Path) -> None:
+    """velites 把 Anthropic `model_context_window_exceeded` 也映射为 length，渲染文案须
+    与 Worker 失败原因一致，同时提示上下文窗口溢出与缩短输入，而非只建议调高输出上限。"""
+    entries = _entries(tmp_path, {"role": "assistant", "stopReason": "length"})
+    detail = entries[-1]["detail"]
+    assert "上下文窗口" in detail
+    assert "缩短输入" in detail
+
+
 def test_length_stop_with_error_message_keeps_model_error_entry(tmp_path: Path) -> None:
     entries = _entries(
         tmp_path, {"role": "assistant", "stopReason": "length", "errorMessage": "boom"}
