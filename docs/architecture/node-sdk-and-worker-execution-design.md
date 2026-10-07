@@ -9,9 +9,13 @@ path 绑定机制（EXEC-CODE-001 legacy）已退役——本文 §2（2026-08 �
 模块均已不存在；`workflow_nodes/` 不再是执行路径，仅保留为 demo code 节点经 git
 审阅的种子源（`services/demo_node_seed.py` 的 `DEMO_NODE_SOURCES`）。现行语义：
 所有节点代码以本 workspace 的 DB 发布文本执行（无 global 兜底；demo 的 code 节点
-由上述种子源发布进 demo workspace），一律经 `executors/code.py` → `_code_sandbox.py` 在 velites
-沙箱执行（Host 与 Worker 一致），父进程预取与 auth 失败标记处理在
-`executors/_code_runtime.py`，runtime 键集合见 §3。
+由上述种子源发布进 demo workspace），一律在 velites 沙箱执行（EXEC-CODE-003），
+但 Host 与 Worker 是两条独立入口：Host 侧经 `server/app/executors/code.py` →
+`_code_sandbox.py`（父进程预取与 auth 失败标记处理在 `executors/_code_runtime.py`）；
+远程 Worker 的 kind='code' claim 经 `worker/code_runner.py`（Worker 镜像只含
+`worker/` + `shared/`，不含 `server/app`）。两侧只共享 `shared/code_sandbox.py`
+的沙箱协议（velites argv、子进程 env、read roots、结果/错误解析、auth 失败标记路径），
+改沙箱或运行时行为须两条入口一并核对；runtime 键集合见 §3。
 **2026-08-17 更新（P-0.5，schema v47）**：executor 定义 / allocation /
 binding 概念整体退役——非 Agent 路由节点一律进隐含 code 池（容量 =
 实例设置 `code_capacity`），节点可调参数声明层只剩 agent 定义与节点
@@ -165,10 +169,12 @@ SDK 不自定义异常类型，builtin 子进程与沙箱 child 的两种 token 
 
 ## 5. executor 契约收敛（`server/app/executors/code.py`）
 
-> 历史记录：本节是批次 1 的改造方案。落地后预取统一在 `_code_runtime.build_runtime`，
+> 历史记录：本节是批次 1 的改造方案。落地后 Host 侧预取统一在 `_code_runtime.build_runtime`，
 > 文中的 `_execute_isolated`、`_run_code_node`、`collect_skill_versions`、
-> `skill_version_fallbacks` 均已删除；auth 失败标记由 `_code_runtime.py` 在子进程
-> 退出后处理。
+> `skill_version_fallbacks` 均已删除；auth 失败标记在 Host 侧由 `_code_runtime.py` 在子进程
+> 退出后处理。远程 Worker（`worker/code_runner.py`）不经这两个模块：runtime dict 由
+> claim 响应 manifest 里预取好的 `runtime_context` 在 Worker 侧重建，auth 失败标记由
+> `code_runner.py` 自行处理，两侧只共享 `shared/code_sandbox.py`（含标记路径常量）。
 
 ### 5.1 预取上移
 
