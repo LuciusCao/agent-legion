@@ -83,6 +83,11 @@ class FakeJobDB:
     def list_node_runs(self, job_id):
         return []
 
+    @staticmethod
+    def list_node_run_logs_in_transaction(conn, job_id):
+        # #958：删除事务内（删行之前）快照 node_runs.(node_key, log_path)；假库无节点运行。
+        return []
+
     @contextmanager
     def job_mutation_lock(self, job_id):
         # #958：删除提交后的本地清理在此锁下复核行；假库里行已删 → False。
