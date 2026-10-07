@@ -24,12 +24,12 @@
 | D6 | 部署配置与凭据 | 权威配置（丢了可重建，但须同步改 PG 角色密码与对象存储凭据） | `deploy/.env`、`deploy/secrets/postgres_password`、`deploy/secrets/postgres_pgpass`、`deploy/compose.local.yaml`（均 gitignored）/ 根 `.env` | §1.1：文件复制 | §2.3 第 2 步：全新机器整份放回（先于一切）；原机回退**保留现有**并与备份 `diff`——PG 角色密码存在 PG 集群（卷）里而不在 dump 里，现有文件与现有集群匹配 | `docker compose "${F[@]}" config` 解析成功；`postgres` healthy |
 | D7 | Host 数据根 `artifacts/` | 视实例：§1.2 判定 `artifact_refs` 非空时是 legacy CAS 唯一副本 | 卷 `host-data`（或 bind，`HD_SRC`）下 / `data/`（或 `AGENT_LEGION_DATA_DIR`）下 | §2.2.3（与 `jobs/` 同包） | §2.3 第 5 步：`tar tzf` → 删现有 `artifacts/` 与 `jobs/` → 解包 | §2.4：`artifact_refs` 引用的每个 blob 文件存在 |
 | D8 | Host 数据根 `jobs/` | 视实例：§1.2 判定非空时含唯一副本；否则是可淘汰缓存 | 同 D7 | 判定非空：§2.2.3；判定为空：不备份 | 有备份：同 D7；无备份：**原机回退也必须清空现有 `jobs/`**——产物读取本地优先且不对照清单（`server/app/services/job_artifacts.py` 的 `read`），留着会读到备份点之后的文件 | §2.4 抽查产物下载 |
-| D9 | Host 数据根 `logs/` | 非权威：按保留期轮转的执行日志；节点日志 `logs/jobs/<job_id>-<node_key>.log` 文件名固定，重跑时截断重写（`server/app/executors/_code_sandbox.py` 的 `O_TRUNC`） | 同 D7 | 有审计需求才归档：按 §2.2.3 的写法单独打包 `logs/jobs`（文件名前缀 `logs-jobs`） | §2.3 第 5 步。原机回退：有归档就 `tar tzf` 校验后用它整体替换 `logs/jobs/`，没有就清空 `logs/jobs/`——留着会让恢复后的 job 显示备份点之后的日志；代价是历史节点日志不再可看 | 不适用 |
+| D9 | Host 数据根 `logs/` | 非权威：按保留期轮转的执行日志；节点日志 `logs/jobs/<job_id>-<node_key>.log` 文件名固定，重跑时截断重写（`server/app/executors/_code_sandbox.py` 的 `O_TRUNC`） | 同 D7 | 有审计需求才归档：§2.2.3 末尾的 `BACKUP_VOL "$HD_SRC" logs-jobs logs/jobs` | §2.3 第 5 步。原机回退：有归档就 `tar tzf` 校验后用它整体替换 `logs/jobs/`，没有就清空 `logs/jobs/`——留着会让恢复后的 job 显示备份点之后的日志；代价是历史节点日志不再可看 | 不适用 |
 | D10 | Host 数据根 `materials_cache/`、`agent_bundles/`、`packages/`、`videos/`、`artifacts/.staging/`、`native-prod.state`、`bin/`；`AGENT_LEGION_SKILLS_RUNS_DIR`（执行快照与锁的临时目录） | 可再生：内容寻址缓存 / 在途传输包 / 可重新导出的包 / 平台不再读写的目录 / CAS 写入暂存 / 原生 prod-up 运行态（PID 与端口）/ 原生 velites 副本（`ensure-velites.sh` 重建）/ 临时目录 | 同 D7（`SKILLS_RUNS_DIR` 默认在系统临时目录） | 不备份 | 不恢复；原机保留（缓存按内容寻址，不会读错；在途包由 reaper 清扫；运行态与副本由 prod-up 重写） | 不适用 |
 | D11 | skill root（各 skill 的本地 Git 仓，含 `.git` 与 `_shared`） | 权威：DB `skill_lock` 只存 commit，内容无法从 DB 或对象存储重建 | `${AGENT_SKILLS_DIR:-../skills}` 解析出的宿主机目录（`SKILLS`）/ `~/.agents/skills` | §2.2.4 tar | §2.3 第 5 步：`tar tzf` → 现有目录改名 `.pre-restore-<时间戳>` → 解到新建的空目录 | §2.4：`skill_lock` 每个 commit `git cat-file -e` |
 | D12 | velites 二进制 | 可再生：GitHub Release 产物 | `${VELITES_BIN:-../velites-bin/velites}` / `data/bin` 与 PATH（`ensure-velites.sh` 构建） | 不备份 | §2.3 第 6 步：按 `sha256.txt` 校验 tarball → 解压放到该路径 | `make prod-up docker` 的 `--wait` 通过（Worker healthy） |
 | D13 | Worker runtime 配置 | 建议备份：丢了可重配 | `VELITES_CONFIG_DIR`（默认 `<仓库根>/velites-config/`，`models.json`）、`PI_CONFIG_DIR`（默认 `<仓库根>/pi-config/`）、`deploy/velites-provider.env`（0600） | §1.3 tar / 复制 | 全新机器：校验后整目录放回；原机保留 | `GET /api/agent-workers` 中 Worker 在线且上报 runtime |
-| D14 | Worker 状态目录 | 建议备份：丢了可重新注册 | 卷 `worker-control`（`WC_SRC`；`worker.yaml`、`control_token`、`register_tokens/`）/ `data/agent-worker-service` | §1.3（同 §2.2.3 写法） | 全新机器：`tar tzf` → 清空卷 → 解包；原机保留 | 同 D13；备份点之后才签发的 register token 不在恢复后的库里，需重新签发并注册 |
+| D14 | Worker 状态目录 | 建议备份：丢了可重新注册 | 卷 `worker-control`（`WC_SRC`；`worker.yaml`、`control_token`、`register_tokens/`）/ `data/agent-worker-service` | §1.3（§2.2.3 末尾的 `BACKUP_VOL`） | 全新机器：`RESTORE_INTO`（校验 → 清空卷 → 解包）；原机保留 | 同 D13；备份点之后才签发的 register token 不在恢复后的库里，需重新签发并注册 |
 | D15 | Worker work root | 在途 / 缓存：execution dir、`upload_pending.json`、Worker 侧 `materials_cache` | 卷 `worker-data`（`WD_SRC`）/ `worker.yaml` 的 `work_root` | 不备份 | 原机回退：清空（其中是备份点之后的执行，不属于恢复后的库） | 不适用 |
 | D16 | 远程 / standalone Worker 机器（`compose.worker.yaml` 等）的状态卷、work root 与 runtime 配置 | 同 D13–D15，在各自机器上 | 各 Worker 机器上的 `worker-control` / `worker-data` 卷与配置目录 | 同 D13–D14，在各机器上做 | 第 1 步停掉、恢复完成前不启动；原机回退在第 5 步「Worker 状态」清空其 work root；状态卷保留 | 同 D14 |
 | D17 | Studio「Agent 助手」的 agent 本地会话：`~/.kimi-code/sessions`（或 `KIMI_CODE_HOME`）、`~/.kimi/sessions`（或 `KIMI_SHARE_DIR`）及其它 ACP agent 的 home | 非权威：会话记录与转录在 PostgreSQL（`studio_chat_sessions` 等），本地是 agent 自己的续接状态（`server/app/studio_chat/kimi_wire.py`、`kimi_task_store.py`） | Docker：Host 容器的可写层（`/root`，不在任何卷里）/ 原生：运行 Host 的用户 home | 不备份 | 不恢复。Docker 原机回退在第 1 步删除 Host 容器，可写层随之清掉；原生形态这是用户自己的 home（个人 CLI 也用），不清理，**接受后果**：续接备份点之前就存在的会话时，agent 可能带着备份点之后的上下文，需要干净上下文的新建会话 | 不适用 |
@@ -147,8 +147,7 @@ where exists (
   velites 二进制本身不用备份，恢复时从 GitHub Release 重取（§2.3 第 6 步）。
 - Worker 状态卷 `worker-control`（D14：状态副本 `worker.yaml`、control token、
   register token）：丢失可按 [agent-worker-deployment.md](agent-worker-deployment.md)
-  重新配置与注册，备份只为省去重配。按 §2.2.3 的写法打包 `WC_SRC`（把
-  `HD_SRC` 换成 `WC_SRC`、`artifacts jobs` 换成 `.`、文件名前缀换成 `worker-control`）。
+  重新配置与注册，备份只为省去重配。打包命令见 §2.2.3 末尾（`BACKUP_VOL "$WC_SRC" worker-control`）。
 
 ### 1.4 不需要备份
 
@@ -224,22 +223,69 @@ bind 形态跳过 `docker volume inspect`，改为确认该目录存在（`[ -d 
 输出的 `name:` 逐字一致后跳过该检查，由 `docker run -v` 按该名称新建（compose 之后
 复用同名卷，可能警告该卷不是 compose 创建的，属预期）。
 
+**公共函数**：§2.1–§2.4 与 §4 的全部命令块只用下面这几个函数表达「失败分支」「原子
+发布」「收尾重启」「校验后整体替换」「留存现有」，不再各自手写——每种语义只有一处
+实现，新增一段命令时也只许调用它们。新开 shell 时与 `F` / `KEY_FILE` / 卷源一起重新
+执行这一块（`BK` 为备份目录绝对路径，与 §2.1 相同）：
+
+```bash
+BK=<备份目录，绝对路径（docker run -v 要求）>; mkdir -p "$BK"
+# FAILED <说明>：失败分支的唯一出口——打印到 stderr 并返回非零，定时任务按退出码告警
+FAILED() { echo "未完成：$*" >&2; return 1; }
+# PUBLISH <临时路径> <最终路径>：生产步骤成功后把临时文件 / 目录原子改名为正式备份；
+#   最终路径已存在则拒绝（重试不会截断上一份成功的备份），临时结果留在原处供检查
+PUBLISH() { [ ! -e "$2" ] && mv "$1" "$2" && echo "备份完成：$2"; }
+# BACKUP_VOL <卷名或 bind 绝对路径> <文件名前缀> [<卷内相对路径>…]：把卷（或其中给出的路径）
+#   打包为 $BK/<前缀>-$TS.tar.gz，先写 .partial 再 PUBLISH；不给路径则打包整个卷（含隐藏文件）。
+#   调用前先设 TS（同一轮备份的摘要等旁文件共用它）
+BACKUP_VOL() {
+  local src="$1" name="$2"; shift 2; : "${TS:?先执行 TS=\"\$(date +%Y%m%d%H%M%S)\"}"
+  local tmp="$BK/.$name-$TS.partial" out="$BK/$name-$TS.tar.gz"
+  [ $# -gt 0 ] || set -- .
+  docker run --rm -v "$src":/src:ro -v "$BK":/backup busybox tar czf "/backup/.$name-$TS.partial" -C /src "$@" \
+    && PUBLISH "$tmp" "$out" || FAILED "检查 $tmp（tar 失败，或目标 $out 已存在）"
+}
+# THEN_UP <服务…>：用 ; 接在一条命令链之后——无论链成败都重新拉起服务，并把链的退出码原样返回
+#   （链失败、重启也失败时打印警告，退出码仍是链的；成功的重启不会把失败的备份变成 0）
+THEN_UP() { local rc=$?; docker compose "${F[@]}" --profile "$OBJ_PROFILE" up -d "$@" || echo "警告：重新拉起 $* 失败" >&2; return "$rc"; }
+# RESTORE_INTO <卷名或 bind 绝对路径> <tar.gz 绝对路径> [<卷内相对路径>…]：先 tar tzf 读完整个
+#   gzip 流（截断、损坏在这里失败，目标原样不动）；通过后删除给出的卷内路径（不给则清空整个卷，
+#   含隐藏文件——rm -rf /dst/* 删不掉它们），再解包。整体替换、不做增量合并（§0 原则）
+RESTORE_INTO() {
+  local dst="$1" a="$2"; shift 2
+  docker run --rm -v "$dst":/dst -v "$(dirname "$a")":/backup:ro busybox sh -c '
+    a="/backup/$1"; shift
+    tar tzf "$a" >/dev/null || exit 2
+    if [ $# -eq 0 ]; then find /dst -mindepth 1 -delete; else cd /dst && rm -rf "$@"; fi && tar xzf "$a" -C /dst || exit 3
+  ' sh "$(basename "$a")" "$@"
+  case $? in
+    0) echo "已用 $a 整体替换 $dst${1:+ 下的 $*}" ;;
+    2) FAILED "$a 校验失败（tar tzf 未能读完整个包），$dst 未改动" ;;
+    *) FAILED "清空或解包 $a 失败，$dst 已被改动——修复原因后重跑这一条" ;;
+  esac
+}
+# KEEP_ASIDE <路径>：现有文件 / 目录改名为 <路径>.pre-restore-<时间戳> 留存（不存在则无事；
+#   留存名已存在则失败，不覆盖上一次的留存）
+KEEP_ASIDE() { [ ! -e "$1" ] || { local p="$1.pre-restore-$(date +%Y%m%d%H%M%S)"; [ ! -e "$p" ] && mv "$1" "$p" && echo "现有 $1 留存为 $p"; }; }
+```
+
+函数在 bash 与 zsh 下通用（`local` 两者都支持；`THEN_UP` 入口处的 `$?` 是前一条命令链的
+退出码）。busybox 内只用 `tar` / `find` / `rm`，不依赖宿主机的 tar 实现。
+
 ### 2.1 PostgreSQL 备份
 
-先写唯一的临时文件（`mktemp`，权限 0600），`pg_dump` 成功后再改名为最终文件；
+先写唯一的临时文件（`mktemp`，权限 0600），`pg_dump` 成功后再 `PUBLISH` 为最终文件；
 最终文件名带到秒，且已存在时拒绝覆盖——重试不会截断上一份成功的备份，失败只
 留下以 `.` 开头的临时文件（可直接删除）。命令在 bash 与 zsh 下通用（用函数包装
 `docker compose`，原因见 §2.3 第 4 步）：
 
 ```bash
 C() { docker compose "${F[@]}" exec -T postgres "$@"; }
-BK=<备份目录，绝对路径（下文 docker run -v 要求）>
-mkdir -p "$BK"
 OUT="$BK/agent_legion-$(date +%Y%m%d%H%M%S).dump"
 TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
   && C pg_dump -U agent_legion -d agent_legion -Fc > "$TMP" \
-  && [ ! -e "$OUT" ] && mv "$TMP" "$OUT" && echo "备份完成：$OUT" \
-  || { echo "未完成：检查临时文件 $TMP（pg_dump 失败，或目标 $OUT 已存在）" >&2; false; }
+  && PUBLISH "$TMP" "$OUT" \
+  || FAILED "检查临时文件 $TMP（pg_dump 失败，或目标 $OUT 已存在）"
 ```
 
 原生形态用本机 PostgreSQL 17 客户端，同样先写临时文件：把上面的
@@ -271,7 +317,11 @@ key 不以 `/` 结尾（产物名不含 `/`：`job_artifact_objects.py` 的
 
 本地后端从宿主机访问发布端口（SeaweedFS `http://127.0.0.1:8333`，rustfs
 `http://127.0.0.1:9000`，`deploy/.env` 改过 `AGENT_LEGION_S3_BIND` 的换成该地址），
-外部 S3 用其 endpoint（AWS 默认端点去掉 `--endpoint-url`）。下面定义的变量与函数在
+外部 S3 用其 endpoint（AWS 默认端点去掉 `--endpoint-url`）。宿主机没装 AWS CLI 时可以
+用容器代替，其余命令不变：
+`aws() { docker run --rm -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION -v "$BK":"$BK" amazon/aws-cli "$@"; }`，
+并把 `EP` 换成容器可达的宿主机地址（Docker Desktop 为 `http://host.docker.internal:8333`）；
+`-v "$BK":"$BK"` 让容器内外的备份路径一致，所以 `BK` 必须是绝对路径。下面定义的变量与函数在
 §2.2.2、§2.3 第 5 步、§2.4 中复用：
 
 ```bash
@@ -331,7 +381,7 @@ print(f"清单对象 {len(keys)}（另有零字节目录标记 {markers} 个，�
 sys.exit(1 if bad or diff else 0)
 PY
 }
-BK=<备份目录，绝对路径，在大小写敏感的文件系统上>
+# BK 须在大小写敏感的文件系统上（见本节开头）
 TS="$(date +%Y%m%d%H%M%S)"
 OUT="$BK/s3-$B-$TS"; TMP="$BK/.s3-$B-$TS.partial"
 mkdir -p "$TMP/objects" \
@@ -340,8 +390,8 @@ mkdir -p "$TMP/objects" \
   && CHK "$TMP/objects" "$TMP/objects.json" \
   && (cd "$TMP/objects" && find . -type f -exec "${SHA[@]}" {} +) > "$TMP/SHA256SUMS" \
   && CHK "$TMP/objects" "$TMP/objects.json" "$TMP/SHA256SUMS" \
-  && [ ! -e "$OUT" ] && mv "$TMP" "$OUT" && echo "备份完成：$OUT" \
-  || { echo "未完成：检查 $TMP（清单、下载或比对失败，或目标 $OUT 已存在）" >&2; false; }
+  && PUBLISH "$TMP" "$OUT" \
+  || FAILED "检查 $TMP（清单、下载或比对失败，或目标 $OUT 已存在）"
 ```
 
 目标是新建的空目录，`aws s3 sync` 会下载每一个对象，这里用它只是为了递归下载；
@@ -366,15 +416,12 @@ TS="$(date +%Y%m%d%H%M%S)"
 SUM="$(S3 ls "s3://$B" --recursive --summarize)" \
   && printf '%s\n' "$SUM" | tail -2 > "$BK/$OBJ_SVC-data-$TS.summary" \
   && docker compose "${F[@]}" stop "$OBJ_SVC" \
-  && docker run --rm -v "$OBJ_SRC":/data:ro -v "$BK":/backup \
-    busybox sh -c "tar czf /backup/.$OBJ_SVC-data-$TS.partial -C /data . \
-      && [ ! -e /backup/$OBJ_SVC-data-$TS.tar.gz ] \
-      && mv /backup/.$OBJ_SVC-data-$TS.partial /backup/$OBJ_SVC-data-$TS.tar.gz \
-      || { echo '未完成：检查 $BK/.$OBJ_SVC-data-$TS.partial（tar 失败或目标已存在）' >&2; false; }"
-docker compose "${F[@]}" --profile "$OBJ_PROFILE" up -d "$OBJ_SVC"
+  && BACKUP_VOL "$OBJ_SRC" "$OBJ_SVC-data"; THEN_UP "$OBJ_SVC"
 ```
 
-与数据库备份同理：先写临时文件、成功后再改名，不覆盖已有备份。`.summary` 摘要
+与数据库备份同理：先写临时文件、成功后再改名，不覆盖已有备份。整条命令的退出码
+是备份链的——`THEN_UP` 在摘要、停服、打包任一步失败后同样把服务拉起来，但不把
+失败变成 0，定时任务可以直接按退出码告警。`.summary` 摘要
 只对冷备份（Host 与 Worker 已按 §1.5 停止）有意义：热备份时摘要与打包之间仍可能
 有写入，§2.4 的摘要比对会不一致，此时以 tar 校验与清单行 → 对象核对为准。对象存储服务挂在各自
 profile 下，单独拉起时要带 `--profile`（或直接 `make prod-up docker`，由入口按
@@ -382,19 +429,18 @@ profile 下，单独拉起时要带 `--profile`（或直接 `make prod-up docker
 
 #### 2.2.3 legacy 本地产物备份（§1.2 判定非空时）
 
-Host 数据卷里的 `artifacts/` 与整个 `jobs/` 随数据库一起打包，写法同上：
+Host 数据卷里的 `artifacts/` 与整个 `jobs/` 随数据库一起打包（`BACKUP_VOL` 先写
+`.partial` 再 `PUBLISH`，与上面相同）：
 
 ```bash
 TS="$(date +%Y%m%d%H%M%S)"
-docker run --rm -v "$HD_SRC":/src:ro -v <备份目录>:/backup \
-  busybox sh -c "cd /src && tar czf /backup/.host-data-$TS.partial artifacts jobs \
-    && [ ! -e /backup/host-data-$TS.tar.gz ] \
-    && mv /backup/.host-data-$TS.partial /backup/host-data-$TS.tar.gz \
-    || { echo '未完成：检查 <备份目录>/.host-data-'$TS'.partial（tar 失败或目标已存在）' >&2; false; }"
+BACKUP_VOL "$HD_SRC" host-data artifacts jobs
 ```
 
 热备份时这两处可能有正在写入的文件，强一致按 §1.5 先停 Host 与 Worker。原生
-形态直接打包数据根下的 `artifacts/` 与 `jobs/`。某个目录不存在（例如从未写过 legacy CAS）时从命令里去掉它。
+形态直接打包数据根下的 `artifacts/` 与 `jobs/`。某个目录不存在（例如从未写过 legacy CAS）时从参数里去掉它。
+节点日志归档（D9，有审计需求时）与 Worker 状态卷（D14）同一写法：
+`BACKUP_VOL "$HD_SRC" logs-jobs logs/jobs`、`BACKUP_VOL "$WC_SRC" worker-control`。
 
 #### 2.2.4 skill root 备份
 
@@ -403,12 +449,11 @@ docker run --rm -v "$HD_SRC":/src:ro -v <备份目录>:/backup \
 
 ```bash
 SKILLS=<§1.1 解析出的 skill root>; SKILLS="${SKILLS%/}"   # 去掉末尾的 /，下文恢复时拼留存路径依赖这一点
-BK=<备份目录>
 OUT="$BK/skills-$(date +%Y%m%d%H%M%S).tar.gz"
 TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
   && tar czf "$TMP" -C "$SKILLS" . \
-  && [ ! -e "$OUT" ] && mv "$TMP" "$OUT" && echo "备份完成：$OUT" \
-  || { echo "未完成：检查临时文件 $TMP（tar 失败，或目标 $OUT 已存在）" >&2; false; }
+  && PUBLISH "$TMP" "$OUT" \
+  || FAILED "检查临时文件 $TMP（tar 失败，或目标 $OUT 已存在）"
 ```
 
 `-C "$SKILLS" .` 会带上 `.git` 等隐藏目录。打包期间不要
@@ -450,12 +495,10 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
 
    ```bash
    KEY_BK=<备份的 key 文件>
-   P="$KEY_FILE.pre-restore-$(date +%Y%m%d%H%M%S)"
-   if [ ! -s "$KEY_BK" ]; then echo "备份的 key 为空或不存在，停止" >&2; false
+   if [ ! -s "$KEY_BK" ]; then FAILED "备份的 key 为空或不存在，停止"
    elif [ -e "$KEY_FILE" ] && cmp -s "$KEY_BK" "$KEY_FILE"; then echo "现有 key 与备份一致"
-   else { [ ! -e "$KEY_FILE" ] || { [ ! -e "$P" ] && mv "$KEY_FILE" "$P"; }; } \
-       && cp "$KEY_BK" "$KEY_FILE" && chmod 600 "$KEY_FILE" && echo "已放回备份 key（原文件若存在留存为 $P）" \
-       || { echo "未完成：检查 $KEY_FILE 与 $P" >&2; false; }
+   else KEEP_ASIDE "$KEY_FILE" && cp "$KEY_BK" "$KEY_FILE" && chmod 600 "$KEY_FILE" && echo "已放回备份 key" \
+       || FAILED "检查 $KEY_FILE 及其 .pre-restore-* 留存"
    fi
    ```
 
@@ -483,6 +526,9 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
           --exit-on-error --single-transaction < "$DUMP"
    ```
 
+   上一次恢复留下的 `agent_legion_pre_restore` 还在（§2.4 通过后没有删）时，改名会以
+   「数据库已存在」失败、链在此停住、现库不动：先确认它不再需要并
+   `C dropdb -U agent_legion agent_legion_pre_restore`（或改名为带时间戳的名字留存）再重跑。
    预检失败时后续步骤都不会执行，现库原样不动。`pg_restore` 默认遇错继续、只在
    结尾报错数，`--exit-on-error --single-transaction` 让任何一条失败都整体回滚，
    不会留下半导入的库。改名之后的步骤失败时，用下面两条命令回到恢复前状态：
@@ -511,10 +557,11 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
       `deploy/.env` 时 bucket 未显式写出会被当作「未配置」静默跳过）：
       `docker compose "${F[@]}" run --rm --no-deps host python scripts/ensure-s3-bucket.py`。
       Host 容器内 `AGENT_LEGION_S3_ENDPOINT` 默认是 `http://seaweedfs:8333`，rustfs
-      部署须已在 `deploy/.env` 覆盖为 `http://rustfs:9000`。全新机器上先按下文放回
-      skill root（至少以当前用户 `mkdir -p "$SKILLS"`）再执行这条：
+      部署须已在 `deploy/.env` 覆盖为 `http://rustfs:9000`。全新机器上先执行下文
+      「skill root」一段把备份放回（`KEEP_ASIDE` 对不存在的目录无事）再执行这条：
       `run host` 会挂载 `${AGENT_SKILLS_DIR:-../skills}`，绑定源不存在时 Linux 上
-      Docker 以 root 创建它，之后普通用户解包会 EACCES；
+      Docker 以 root 创建它，之后普通用户解包会 EACCES。只先 `mkdir -p "$SKILLS"` 也行，
+      但放回时 `KEEP_ASIDE` 会把这个空目录留存为 `.pre-restore-*`，§2.4 通过后一并删除；
       原生形态：`UV_CACHE_DIR=.uv-cache uv run python scripts/ensure-s3-bucket.py .env`；
    3. 校验备份、清空 bucket、全量上传、核对 bucket 清单并下载回来逐对象校验（`B` /
       `EP` / `S3` / `LIST` / `CHK` / `SHA` / `BK` 同 §2.2.1）。现有 bucket 里的内容还可能
@@ -530,7 +577,7 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
         && S3 sync "s3://$B" "$V" --only-show-errors \
         && CHK "$V" "$V.json" && CHK "$V" "$SRC/objects.json" "$SRC/SHA256SUMS" \
         && rm -rf "$V" "$V.json" && echo "对象存储已按备份替换并逐对象核验" \
-        || { echo "未完成：快照校验失败时 bucket 未被改动；清空之后失败的，修复原因后重跑整段" >&2; false; }
+        || FAILED "快照校验失败时 bucket 未被改动；清空之后失败的，修复原因后重跑整段"
       ```
 
       第一项校验快照本身：文件集合与备份时的源清单 `objects.json` 逐 key、逐大小一致
@@ -542,29 +589,28 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
       发现，零字节目录标记除外），内容再逐对象对 `SHA256SUMS`。外部 S3 开了版本控制时，
       `rm` 只留下删除标记，旧版本仍占空间。
 
-   **对象存储·卷级冷备份**（§2.2.2 的备份）：停对象存储服务后清空卷内容再解包。
-   **先完整校验归档再删**：`tar tzf` 读完整个 gzip 流，截断或损坏的包会在这里失败，
-   `find` 不会执行、现有卷原样不动；清空用 `find -mindepth 1 -delete`（`rm -rf /data/*`
-   不会删隐藏文件）。现有卷还有可能需要的数据时，先按 §2.2.2 再冷备一份当前卷，与
-   数据库恢复保留旧库同理：
+   **对象存储·卷级冷备份**（§2.2.2 的备份）：停对象存储服务，`RESTORE_INTO` 校验后清空
+   整个卷再解包，`THEN_UP` 重新拉起（无论成败）。`RESTORE_INTO` **先完整校验归档再删**：
+   `tar tzf` 读完整个 gzip 流，截断或损坏的包会在这里失败，现有卷原样不动。现有卷还有
+   可能需要的数据时，先按 §2.2.2 再冷备一份当前卷，与数据库恢复保留旧库同理：
 
    ```bash
-   docker compose "${F[@]}" stop "$OBJ_SVC"
-   docker run --rm -v "$OBJ_SRC":/data -v <备份目录>:/backup busybox sh -c 'A=/backup/<seaweedfs|rustfs>-data-<时间戳>.tar.gz; tar tzf "$A" >/dev/null && find /data -mindepth 1 -delete && tar xzf "$A" -C /data'
+   docker compose "${F[@]}" stop "$OBJ_SVC" \
+     && RESTORE_INTO "$OBJ_SRC" "$BK/<seaweedfs|rustfs>-data-<时间戳>.tar.gz"; THEN_UP "$OBJ_SVC"
    ```
 
-   **Host 数据根**：有 §2.2.3 的 legacy 本地产物备份时放回 Host 数据卷，做法与上面
-   对称：先 `tar tzf` 完整校验，成功后再删掉卷里现有的 `artifacts/` 与 `jobs/`，最后解包。
+   **Host 数据根**：有 §2.2.3 的 legacy 本地产物备份时放回 Host 数据卷，同一函数、只换
+   参数：校验通过后删掉卷里现有的 `artifacts/` 与 `jobs/`，再解包。
    不清空的话，备份之后才写入的文件会留在原处，而产物读取优先看本地 job_dir，
    恢复后的数据库会读到新旧混合的内容；包损坏时也不会解到一半才失败。两个目录
    按备份时的状态整体替换（备份里没有 `artifacts/` 说明当时就没有 legacy CAS，
    删掉现有的同样正确）。现有卷里的这两个目录还可能有用时，先按 §2.2.3 再打一份：
-   `docker run --rm -v "$HD_SRC":/dst -v <备份目录>:/backup busybox sh -c 'A=/backup/host-data-<时间戳>.tar.gz; tar tzf "$A" >/dev/null && rm -rf /dst/artifacts /dst/jobs && tar xzf "$A" -C /dst'`。
+   `RESTORE_INTO "$HD_SRC" "$BK/host-data-<时间戳>.tar.gz" artifacts jobs`。
    **§1.2 判定为空、没有这份备份时，原机回退同样要清空 `jobs/`**（它是缓存，可以删；
    不删就是上面说的新旧混合）：`docker run --rm -v "$HD_SRC":/dst busybox rm -rf /dst/jobs`
    （Host 启动时会重建该目录）。节点日志同理（D9）：文件名按 `<job_id>-<node_key>` 固定、
    重跑时截断重写，留着会让恢复后的 job 显示备份点之后的日志。有归档就先校验、再整体替换：
-   `docker run --rm -v "$HD_SRC":/dst -v <备份目录>:/backup busybox sh -c 'A=/backup/logs-jobs-<时间戳>.tar.gz; tar tzf "$A" >/dev/null && rm -rf /dst/logs/jobs && tar xzf "$A" -C /dst'`；
+   `RESTORE_INTO "$HD_SRC" "$BK/logs-jobs-<时间戳>.tar.gz" logs/jobs`；
    没有归档就清空：`docker run --rm -v "$HD_SRC":/dst busybox rm -rf /dst/logs/jobs`。
    `materials_cache/`、`agent_bundles/`、`packages/`、`videos/` 等不动（§0 D10）。原生形态
    在数据根上同样操作，并删除 `<仓库根>/data/studio-mcp-files`（D18）。
@@ -575,13 +621,12 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
 
    ```bash
    SKILLS="${SKILLS%/}"   # 末尾带 / 时留存路径会落进目录内部
-   A=<备份目录>/skills-<时间戳>.tar.gz
-   P="$SKILLS.pre-restore-$(date +%Y%m%d%H%M%S)"
+   A="$BK/skills-<时间戳>.tar.gz"
    tar tzf "$A" >/dev/null \
-     && { [ ! -e "$SKILLS" ] || { [ ! -e "$P" ] && mv "$SKILLS" "$P"; }; } \
+     && KEEP_ASIDE "$SKILLS" \
      && mkdir -p "$SKILLS" && tar xzf "$A" -C "$SKILLS" \
-     && echo "skill root 已按备份替换（原目录若存在留存为 $P）" \
-     || { echo "未完成：检查 $A、$SKILLS 与 $P" >&2; false; }
+     && echo "skill root 已按备份替换" \
+     || FAILED "检查 $A、$SKILLS 及其 .pre-restore-* 留存"
    ```
 
    **Worker 状态**：原机回退时清空 work root（D15，其中是备份点之后的执行；恢复后
@@ -589,8 +634,8 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
    `docker run --rm -v "$WD_SRC":/w busybox find /w -mindepth 1 -delete`（原生形态清空
    Worker `worker.yaml` 中 `work_root` 指向的目录）；远程 / standalone Worker（D16）在
    各自机器上对其 `worker-data` 卷（或 `work_root`）做同样的清空；
-   `worker-control`（D14）保留现有。全新机器有 §1.3 的 `worker-control` 备份时，按
-   上面卷级恢复的写法（`tar tzf` → `find -mindepth 1 -delete` → 解包）放回 `WC_SRC`。
+   `worker-control`（D14）保留现有。全新机器有 §1.3 的 `worker-control` 备份时，
+   `RESTORE_INTO "$WC_SRC" "$BK/worker-control-<时间戳>.tar.gz"` 放回（校验 → 清空整个卷 → 解包）。
 6. 全新机器先备好 Worker 的 velites 二进制（D12）：它不在仓库、镜像与本 runbook 的备份
    里（`velites-bin/` 是 gitignored 目录），而 compose 把
    `${VELITES_BIN:-../velites-bin/velites}`（默认即 `<仓库根>/velites-bin/velites`）
@@ -615,7 +660,13 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
    原机本就是零 runtime 形态（去掉 velites 挂载的 override、`deploy/.env` 里
    `AGENT_WORKER_EXPECT_RUNTIMES=` 置空）的，这两处已随第 2 步放回，无需二进制。
    然后 `make prod-up docker` 拉起整个 stack；低于当前版本的 dump 会在启动时自动
-   迁移到当前 schema。注意该入口（`scripts/stack-prod-up.sh`）启动前**无条件**检查
+   迁移到当前 schema。入口等到 host 与 worker 都 healthy 才返回 0：Worker 的健康判定
+   要求执行进程在跑，而它只在拿到有效注册 token 后才启动——第 5 步放回了
+   `worker-control`（D14，含 `register_tokens/`）且恢复后的库里仍有该 Worker 的
+   注册记录时会自动重新注册；没有 D14 备份（§1.3 只是建议备份）或 token 是备份点
+   之后签发的，worker 保持 unhealthy、入口超时报错，但 Host 已正常起来，按
+   [agent-worker-deployment.md](agent-worker-deployment.md) §4 重新签发 token 并导入即可，
+   不必重跑恢复。注意该入口（`scripts/stack-prod-up.sh`）启动前**无条件**检查
    默认路径 `deploy/secrets/{postgres_password,postgres_pgpass,vault_master_key}`
    非空，不看 `POSTGRES_PASSWORD_FILE` / `POSTGRES_PGPASS_FILE` /
    `VAULT_MASTER_KEY_FILE` 覆盖（compose 实际挂载的仍是覆盖后的路径）。用了覆盖的
@@ -724,8 +775,10 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
 - 每次涉及 schema 迁移的升级前，确认有一份当天的数据库备份（迁移幂等可重入，
   但只向前）。
 - 每季度至少做一次完整恢复演练：在与生产隔离的环境（另一台机器，或开发机上
-  的派生库与派生 bucket，不要碰共享 / prod 库）用最近一份备份走完 §2.3 与
-  §2.4，其中必须包含「用备份的 vault 主密钥通过一次外部服务连接测试」——只恢复
+  用独立的 `COMPOSE_PROJECT_NAME` 起一套临时 stack，不要碰共享 / prod 库）用最近
+  一份备份走完 §2.3 与 §2.4，两条路径都要走：clean checkout 上的全新机器恢复，以及
+  在已有实例上先写入再回退（确认备份点之后的对象 / 行 / 文件 / skill 提交全部消失、
+  留存副本仍在）。其中必须包含「用备份的 vault 主密钥通过一次外部服务连接测试」——只恢复
   了数据库、key 却对不上，是演练最常暴露的问题。
 - 备份任务本身要有失败告警，并定期抽查备份可读：dump 用 `pg_restore --list`，
   S3 层快照用 §2.2.1 的 `CHK "$SRC/objects" "$SRC/objects.json" "$SRC/SHA256SUMS"`，
@@ -762,6 +815,8 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
 
 ### 4.2 处置流程
 
+以下命令沿用 §1.1 的 `F` / `KEY_FILE` 与 §2「公共函数」块（`FAILED`），新开 shell 先执行它们。
+
 1. **先找 key，不要急着生成新 key**。依次核对：§1.1 解析出的 `KEY_FILE`（及其
    备份）、`VAULT_MASTER_KEY_FILE` 是否把 compose secret 指到了别的路径、原生
    形态根 `.env` 的 `AGENT_LEGION_VAULT_MASTER_KEY` / `AGENT_LEGION_VAULT_MASTER_KEY_FILE`、
@@ -786,7 +841,7 @@ vault 是单 key 的 Fernet 加密：没有多 key 并存、没有重新加密�
      && { [ ! -e "$KEY_FILE" ] || mv "$KEY_FILE" "$OLD"; } \
      && mv "$NEW" "$KEY_FILE" \
      && echo "新 key 已就位：$KEY_FILE（原文件若存在已留存为 $OLD）" \
-     || { echo "未完成：检查临时文件 $NEW 与 $KEY_FILE；旧 key 未被覆盖" >&2; false; }
+     || FAILED "检查临时文件 $NEW 与 $KEY_FILE；旧 key 未被覆盖"
    ```
 
    上面是 Docker stack 的做法：`KEY_FILE` 必须是 compose 实际挂载的文件（部署用
