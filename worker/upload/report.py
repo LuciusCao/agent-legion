@@ -5,7 +5,6 @@ from __future__ import annotations
 import shutil
 import tarfile
 import threading
-from pathlib import Path
 from typing import Any
 
 from shared.code_contract import RESULT_OUTPUT_ARTIFACTS_FLAG
@@ -19,21 +18,17 @@ from worker.upload.cleanup import drop_marker
 from worker.upload.control import CombinedStop
 from worker.upload.embed_precheck import ARCHIVE_EMBED_DEFAULT_CEILING_BYTES
 from worker.upload.prepare import failed_metadata
+from worker.upload.report_policy import (
+    ReportDegradeGate,
+    ensure_submittable_archive,
+    is_transient_status,
+)
 from worker.upload.result_manifest import (
     ManifestEmbedExceedsArchiveCeiling,
     embed_output_artifacts_manifest,
 )
 from worker.upload.result_metadata import write_empty_archive
 from worker.upload.task import UploadTask
-
-
-def _ensure_submittable_archive(archive: Path, ceiling: int) -> None:
-    """诚实判败通道的归档必须可提交（#755 codex R8 P2 对抗复审）：头溢出
-    在任何大小检查之前抛出，原归档本身可能已超 Host 上限却从未过大小
-    门禁——此时重报原归档只会吃 413、被本循环当终态删 marker。超限即
-    回收成空归档（判败语义下证据让位于可提交性，同 prepare 失败臂）。"""
-    if archive.is_file() and archive.stat().st_size > ceiling:
-        write_empty_archive(archive)
 
 
 def report_task(
@@ -51,7 +46,10 @@ def report_task(
     #755 codex P1：结果头溢出（直传 ref 清单撞破头预算）的处置是「清单
     走归档成员」——产物字节已在 S3（presigned 通道，不重复传输），完整
     direct-ref 清单写成归档首成员 ``result-output-artifacts.json``，头里
-    只留 ``output_artifacts_in_archive`` 标记。"""
+    只留 ``output_artifacts_in_archive`` 标记。
+
+    #959：Host 应答分级（204 / 409 终态 / 其余 4xx 判决 / 5xx 与网络错误
+    瞬时）与一次性诚实判败降级见 ``worker.upload.report_policy``。"""
     metadata = task.prepared_metadata or {}
     archive = task.prepared_archive or (task.execution_dir / "result.tar.gz")
     upload_heartbeat.quiesce_task_heartbeat(task, heartbeat_join_seconds)
@@ -62,6 +60,9 @@ def report_task(
     # #748 R3：头溢出处置只走一次（序列化侧按 ref 形态判信号——标记臂已
     # 清空清单，重报不会再抛；此处的一次性闸是双保险）。
     overflow_fallback = False
+    # #959：应答分级见 report_policy——仅 4xx 判决走的一次性诚实判败降级闸
+    # （降级载荷挂回 task.prepared_metadata）；瞬时失败持租约持续重试。
+    degrade_gate = ReportDegradeGate(task, archive)
     while not shutdown.is_set():
         if task.ownership_lost.is_set():
             lost = True
@@ -80,6 +81,10 @@ def report_task(
                 status_code, body = client.report(
                     task.execution_id, task.lease_id, metadata, archive
                 )
+            if is_transient_status(status_code):
+                # 传输层已把 5xx 归一为 RuntimeError、4xx 原样透传；408/425/429
+                # 与非 TransferOperations 形态回传的 5xx 同归瞬时臂（持续重试）。
+                raise RuntimeError(f"HTTP {status_code}: {body[:200]!r}")
         except TransferStopped:
             if task.ownership_lost.is_set():
                 lost = True
@@ -127,14 +132,14 @@ def report_task(
                         f" reporting the run failed instead",
                         flush=True,
                     )
-                    _ensure_submittable_archive(archive, ceiling)
+                    ensure_submittable_archive(archive, ceiling)
                     metadata = failed_metadata(task, str(too_large))
                     task.prepared_metadata = metadata
                     continue
                 except (OSError, tarfile.TarError, ValueError) as embed_exc:
                     # embed 失败 = 清单无法随归档交付：诚实判败（同 prepare 预检
                     # 判败臂的形态）。embed 是原子替换，失败时原归档未动。
-                    _ensure_submittable_archive(archive, ceiling)
+                    ensure_submittable_archive(archive, ceiling)
                     metadata = failed_metadata(
                         task, f"output artifacts manifest embed failed: {embed_exc}"
                     )
@@ -174,6 +179,8 @@ def report_task(
                 upload_heartbeat.quiesce_task_heartbeat(task, heartbeat_join_seconds)
             continue
         except RuntimeError as exc:
+            # #959：瞬时失败从不判败——租约持有期间持续退避重试，由 204 /
+            # 409 / ownership_lost 终止（重试幂等见 report_policy）。
             print(f"result report retry for {task.execution_id}: {exc}", flush=True)
             task.heartbeat_thread = upload_heartbeat.resume_upload_heartbeat(
                 client, task, heartbeat_interval
@@ -184,10 +191,14 @@ def report_task(
             continue
         if status_code == 204:
             break
-        print(
-            f"result report rejected for {task.execution_id}: HTTP {status_code}: {body[:200]!r}",
-            flush=True,
-        )
+        rejection = f"HTTP {status_code}: {body[:200]!r}"
+        print(f"result report rejected for {task.execution_id}: {rejection}", flush=True)
+        if degrade_gate.on_rejection(status_code, rejection):
+            # #959：409 之外的 4xx 是确定性判决——直接删 marker 会让租约
+            # 过期后整次执行重跑、重跑再撞同一判决。降级一次为诚实判败上报，
+            # Host 记录显式失败。
+            metadata = task.prepared_metadata or metadata
+            continue
         break
     else:
         return "aborted"

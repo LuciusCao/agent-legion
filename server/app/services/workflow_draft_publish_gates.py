@@ -25,6 +25,7 @@ from server.app.services.node_code_resolution import resolve_dispatch_node_code
 from server.app.services.node_config import workflow_node_config_schemas
 from server.app.services.node_config_secret_guard import secret_gate_errors
 from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 from server.app.workflows.workflow_node_skill import node_skill_publish_error
 
 
@@ -37,10 +38,13 @@ def validate_workflow_for_publish(
 ) -> list[str]:
     """Publish validation, driven by each node's explicit ``type``.
 
-    ``type: agent`` nodes must resolve to exactly one published Agent for
-    their capability, unless they are self-contained (#933: ``execution.runtime``
-    declared — the node profile needs no Agent; ``requires_labels`` without a
-    runtime is a half-filled profile and fails). ``type: code`` nodes (the implicit code pool, P-0.5)
+    ``type: agent`` nodes must be self-contained (#935, #440 P3 gate flip:
+    ``execution.runtime`` declared on the node or as the workflow top-level
+    default) — Agent definitions are retired as a profile source, so a node
+    resolving its profile by capability no longer publishes; ``requires_labels``
+    without a runtime is a half-filled profile and fails. Their skill must be
+    bound on the node (a self-contained profile has no definition fallback).
+    ``type: code`` nodes (the implicit code pool, P-0.5)
     must have resolvable published workspace node code (EXEC-CODE-002) — a
     published Agent sharing the capability is simply unused, not an error.
     Start nodes carry no capability and never execute
@@ -59,19 +63,23 @@ def validate_workflow_for_publish(
         if node.node_type == "approval":
             continue
         is_agent = node.node_type == "agent"
-        # #933 双轨门禁：自含节点（execution.runtime 已声明）以节点档案为准，
-        # 不要求 published Agent；旧节点仍须恰好解析到一个 published Agent。
-        # 半填（只有 requires_labels 没有 runtime）直接拒绝。
+        # #935 门禁翻转（#440 P3）：agent 节点必须自含（execution.runtime 已
+        # 声明），不再按 capability 回落 published Agent；半填（只有
+        # requires_labels 没有 runtime）同样拒绝。
         partial = node_profile_error(node)
         if partial is not None:
             errors.append(partial)
             continue
-        profile = resolve_agent_node_profile(node, agents, index=index)
-        if is_agent and profile is None:
+        if is_agent and not is_self_contained_agent_node(node):
             errors.append(
-                f"Agent capability {node.capability} must resolve to exactly one published Agent"
-                " (or declare a self-contained profile: execution.runtime)"
+                f"Agent node {node.key} must declare its own execution profile:"
+                " set execution.runtime (pi | velites) on the node or as the workflow"
+                " top-level execution.runtime default, plus tools / requires_labels /"
+                " config_schema / skill as needed — Agent definitions no longer supply"
+                " node profiles (#440)"
             )
+            continue
+        profile = resolve_agent_node_profile(node, agents, index=index)
         # code 节点传 None：skill 绑定无意义，声明即拒绝；agent 节点的兜底取
         # 执行档案的 legacy skill（节点绑定优先）。
         agent_skill = profile.skill if profile is not None else None

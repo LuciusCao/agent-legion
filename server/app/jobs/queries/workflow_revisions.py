@@ -36,6 +36,7 @@ class WorkflowRevisionQueriesMixin(WorkflowRevisionReadQueriesMixin):
         definition_hash: str,
         agent_routes: dict[str, str] | None = None,
         on_commit: Callable[[DatabaseConnection], None] | None = None,
+        frozen_route_nodes: frozenset[str] | None = None,
     ) -> dict[str, Any]:
         """Insert one revision row; ``on_commit`` rides the same transaction.
 
@@ -59,6 +60,7 @@ class WorkflowRevisionQueriesMixin(WorkflowRevisionReadQueriesMixin):
                 definition_json=definition_json,
                 definition_hash=definition_hash,
                 agent_routes=agent_routes,
+                frozen_route_nodes=frozen_route_nodes,
             )
             if on_commit is not None:
                 on_commit(conn)

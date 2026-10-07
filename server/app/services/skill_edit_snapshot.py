@@ -8,6 +8,7 @@ import stat
 from pathlib import Path
 from typing import Any
 
+from server.app.services.skill_build_residue import binary_file_error, is_residue_name
 from server.app.services.skill_repo import MAX_FILE_BYTES
 from server.app.services.skill_repo_edit import SkillEditValidationError
 from server.app.services.skill_shared_put import validate_shared_put_payload
@@ -44,8 +45,11 @@ def edit_file(path: str, raw: bytes, *, max_bytes: int = MAX_FILE_BYTES) -> dict
             raise ValueError("file exceeds the editable byte limit")
         content = raw.decode("utf-8")
     except (UnicodeError, ValueError) as exc:
+        # #1038：只报解码错误时调用方不知道该怎么办——点明这是二进制、
+        # 只收 UTF-8 文本，并给出可执行的处置（构建残留本身已在遍历时跳过）。
+        error = binary_file_error(exc) if isinstance(exc, UnicodeError) else str(exc)
         raise SkillEditValidationError(
-            "Cannot export a lossless editing snapshot", [{"path": path, "error": str(exc)}]
+            "Cannot export a lossless editing snapshot", [{"path": path, "error": error}]
         ) from exc
     return {"path": path, "size": len(raw), "content": content, "truncated": False}
 
@@ -61,6 +65,11 @@ def edit_tree(root: Path) -> list[dict[str, Any]]:
 
     Refuse unreadable/unsupported trees as a whole: omission from a FULL-state
     payload means deletion. Walk directory descriptors without following links.
+
+    #1038: build residue (``__pycache__/``, ``*.pyc`` — ``skill_build_residue``)
+    is skipped by NAME before any stat/open, so it never reaches the UTF-8
+    check; the full-state write carries it over instead of deleting it
+    (``skill_shared_swap``), so skipping it here is not an implied deletion.
     """
     files: list[dict[str, Any]] = []
     visited = 0
@@ -78,6 +87,8 @@ def edit_tree(root: Path) -> list[dict[str, Any]]:
 
     def walk(directory: int, prefix: str = "") -> None:
         for name in names(directory):
+            if is_residue_name(name):
+                continue
             relative = prefix + name
             if len(relative) > 512:
                 raise ValueError("snapshot path exceeds editable limit")

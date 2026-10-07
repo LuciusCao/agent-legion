@@ -65,7 +65,7 @@ vi.mock('../api', () => ({
   deleteRegisterToken: vi.fn(),
   deleteAgentWorker: vi.fn(),
   fetchAgentDefinitions: vi.fn().mockResolvedValue({ agents: [] }),
-  archiveAgent: vi.fn(),
+  fetchAgentProvenance: vi.fn().mockResolvedValue({ nodes: [] }),
   listWorkspaceApiTokens: vi.fn().mockResolvedValue({
     tokens: [],
     rate_limit: { requests_per_minute: 60, burst: 20 },
@@ -234,7 +234,7 @@ describe('SettingsPage', () => {
     expect(navButtons[1]).not.toHaveAttribute('aria-current')
   })
 
-  it('shows the Agent definitions section to admins only (#677)', async () => {
+  it('shows the historical Agent definitions section to admins only (#677, #1079)', async () => {
     useAuthStore.setState({
       user: { id: 'u1', username: 'admin', role: 'admin' },
     } as unknown as Parameters<typeof useAuthStore.setState>[0])
@@ -246,9 +246,9 @@ describe('SettingsPage', () => {
         within(nav)
           .getAllByRole('button')
           .map((b) => b.textContent)
-      ).toContain('Agent 定义')
+      ).toContain('历史 Agent 定义')
       expect(
-        screen.getByRole('heading', { level: 2, name: 'Agent 定义' })
+        screen.getByRole('heading', { level: 2, name: '历史 Agent 定义' })
       ).toBeInTheDocument()
     } finally {
       act(() => useAuthStore.setState({ user: null }))
@@ -360,6 +360,40 @@ describe('SettingsPage', () => {
     expect(labels.indexOf('代码节点并发')).toBeGreaterThan(
       labels.indexOf('Agent 与 Worker')
     )
+  })
+
+  // #1079（#440 P3b）：自含 agent 节点没有路由行，按 node_type 排除——纯
+  // agent workflow 不出空的「代码节点并发」导航与标题。
+  it('hides the code-node concurrency section for an all-agent workflow', async () => {
+    setWorkflowDefinition({
+      key: 'sample_workflow',
+      label: '示例工作流',
+      intake: { modes: [] },
+      edges: [],
+      nodes: [
+        {
+          key: 'write',
+          label: '撰写',
+          capability: 'write',
+          node_type: 'agent',
+          after: [],
+          inputs: [],
+          outputs: [],
+        },
+      ],
+    })
+    setSnapshot({ agentRoutes: [] })
+    renderPage()
+    await act(async () => {})
+
+    const labels = screen.getAllByRole('heading').map((h) => h.textContent)
+    expect(labels).not.toContain('代码节点并发')
+    const nav = screen.getByRole('navigation')
+    expect(
+      within(nav)
+        .getAllByRole('button')
+        .map((b) => b.textContent)
+    ).not.toContain('代码节点并发')
   })
 
   it('saves node limits in one PUT request', async () => {
@@ -572,7 +606,7 @@ describe('SettingsPage', () => {
       ).toEqual([
         '基础信息',
         'Agent 与 Worker',
-        'Agent 定义',
+        '历史 Agent 定义',
         '外部对接',
         '成员管理',
         '危险操作',

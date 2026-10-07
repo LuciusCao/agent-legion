@@ -14,7 +14,7 @@ import type { InspectorSectionProps } from './WorkflowNodeInspectorSections'
 // 声明自己的 section 序列，新增类型 = 注册表加一行，不再触碰已有
 // section。section 组件全部复用现有组件，只是组合关系从「渲染全部 +
 // 内部分叉」收敛为「按类型挑序列」；组件只收窄到「单类型可渲染」的
-// props 切片（多数 section 不需要 agentCatalog/definitionYaml 全量）。
+// props 切片（多数 section 不需要 definitionYaml 全量）。
 type SectionSpec = {
   /** 该类型的 section 渲染序列（顺序即展示顺序）。 */
   sections: ComponentType<InspectorSectionProps>[]
@@ -34,10 +34,8 @@ export const NODE_TYPE_SECTIONS: Record<SwitchableNodeType, SectionSpec> = {
       DependencySection,
     ],
   },
-  // agent：基本设置 → 执行能力（Agent 配置 + 内联编辑面板，#409）→
-  // 节点配置（仅运行时覆盖通道——schema 归 Agent Definition）→
-  // 数据契约 → 依赖。Agent 的有效 config_schema 归 Agent
-  // Definition 管理，不渲染节点 YAML 的 schema 编辑区（#406）。
+  // agent：基本设置 → 执行能力（节点执行档案：runtime / skill / 执行
+  // 参数 / tools，#935）→ 节点配置（运行时覆盖通道）→ 数据契约 → 依赖。
   agent: {
     sections: [
       EditorSection,
@@ -86,15 +84,14 @@ function ConfigSchemaSection(props: InspectorSectionProps) {
     />
   )
 }
-// agent/code 的执行能力区。#426 review P2：目录查询 settle 信号经
-// InspectorSectionProps 透传给 ExecutionSection 的专属 prop（本文件的注册表
-// 组件按 name 拿 key，专属 prop 放在 spread 之后防同名覆盖）。
+// agent/code 的执行能力区（#1079：Agent 定义目录不再参与，只消费节点与草稿）。
 function ExecutionSection(props: InspectorSectionProps) {
   return (
     <WorkflowNodeExecutionSection
-      {...props}
       node={props.details.node}
-      agentCatalogSettle={props.agentCatalogSettle}
+      definitionYaml={props.definitionYaml}
+      setDefinitionYaml={props.setDefinitionYaml}
+      readOnly={props.readOnly}
     />
   )
 }

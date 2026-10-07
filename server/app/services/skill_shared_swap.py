@@ -16,6 +16,7 @@ import uuid
 from collections.abc import Sequence
 from pathlib import Path
 
+from server.app.services.skill_build_residue_io import carry_build_residue
 from server.app.services.skill_shared_store import (
     SHARED_DIR_NAME,
     SharedMaterialWriteError,
@@ -37,6 +38,11 @@ def write_shared_materials(
     the ONLY copy of the previous state — the cleanup must leave it on
     disk (a sibling ``.old-<uuid>`` dir) for manual recovery; the error
     message names it.
+
+    #1038: build residue in the live dir is carried into the staged tree
+    (``skill_build_residue_io.carry_build_residue``) — "files omitted from
+    the payload disappear" applies to authored files only, never to residue
+    the export skipped.
     """
     staging = shared_dir.parent / f"{SHARED_DIR_NAME}.tmp-{uuid.uuid4().hex[:12]}"
     retired = shared_dir.parent / f"{SHARED_DIR_NAME}.old-{uuid.uuid4().hex[:12]}"
@@ -49,6 +55,9 @@ def write_shared_materials(
         with shared_edit_lock(shared_dir, base_dir):
             had_previous = shared_dir.is_dir()
             if had_previous:
+                # #1038: carried under the lock, BEFORE the live dir moves —
+                # a copy failure aborts the write with the live dir untouched.
+                carry_build_residue(shared_dir, staging)
                 os.rename(shared_dir, retired)
             try:
                 os.rename(staging, shared_dir)

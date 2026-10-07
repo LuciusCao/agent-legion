@@ -203,7 +203,7 @@ EOF
   务必先备份数据库并在低峰执行**；迁移幂等可重入，中断后重启
   会继续。
 - 当前 schema 版本以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准
-  （目前 v92）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
+  （目前 v93）。近期迁移随启动自动执行：v54（`job_artifacts` 产物清单表）、
   v55（`material_bundles`）、v56（`job_node_status_counts` 触发器维护的
   状态计数）、v57（`studio_chat_sessions.draft_yaml`）、v58（scoped worker
   token——撤销存量全局 register token，行为变更）、v61（Studio workflow
@@ -226,7 +226,9 @@ EOF
   归档列，#924）、v91（删除冗余的 workspace workflow key 列与质量抽样
   批次的 key 镜像列——workspace id 即 workflow key，#211 M3；有守卫、幂等）、v92（`agent_execution_requests` 的 `profile_source` /
   `runtime` / `requires_labels_json` 执行档案来源列，自含 agent 节点双读，
-  #933）。v59（`jobs(run_id)` 索引）与
+  #933）、v93（Agent 定义内联进 agent 节点的执行档案回填：active revision
+  与 Studio 草稿原地改写，先写 `agent_profile_backfill_backups` 备份 + 报告，
+  解析不到的节点不改动；幂等、无 down，#935）。v59（`jobs(run_id)` 索引）与
   v60（register token ids 列）与本部署面无直接关系。
   迁移明细以 `server/app/db/migration_chain.py`（v87 起在
   `migration_chain_recent.py`）为准。

@@ -29,7 +29,6 @@ from mcp.server.fastmcp import FastMCP
 # Workflow read/validate/compare/publish-request tools (issue #416 grouped
 # them with their draft lifecycle) live in workflow_tools; skill/prompt/
 # preview/job tools in their sibling modules (file-size budget).
-from server.app.agent_catalog.definition import DEFAULT_TOOLS
 from server.app.mcp_server import (
     agent_tools,
     draft_tools,
@@ -42,6 +41,7 @@ from server.app.mcp_server import (
     skill_tools,
     workflow_tools,
 )
+from server.app.mcp_server.agent_tools import AGENT_DEFINITION_RETIRED
 from server.app.mcp_server.authoring_guide import guide_section
 from server.app.mcp_server.config import McpConfigError, McpServerConfig
 from server.app.mcp_server.tool_client import ToolClient
@@ -94,8 +94,7 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
             return await client.call("GET", f"/chat-sessions/{config.session_id}/context")
 
     # #749（开发者契约，不入工具 docstring——docstring 会进 LLM 上下文）：
-    # save_node_code_draft / save_agent_definition_draft 的响应携带刚写入
-    # 草稿的 code_hash / definition_hash。本工具面永不发布
+    # save_node_code_draft 的响应携带刚写入草稿的 code_hash。本工具面永不发布
     # （STUDIO-AGENT-001），但人的发布流（检查器面板 / 聊天草稿卡）已用
     # expected_hash 做事务内 CAS 核对——将来任何工具侧发布必须带保存响应
     # 的 hash 作为 expected_hash（不匹配 409），绝不 hash-less 发布。
@@ -147,8 +146,9 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         )
         return await local_files.export_response(workspace_id, output_path, response)
 
-    # 同 save_node_code_draft 上方的 #749 开发者契约（响应 hash 是未来
-    # 任何工具侧发布的必带 CAS 令牌）。
+    # #935（#440 P3，D3）：Agent 定义写工具 deprecate——不再写库，返回
+    # 改用 save_workflow_draft 写节点执行档案的引导；P4 删除（tool_names
+    # 契约同步）。
     @mcp.tool(structured_output=False)
     async def save_agent_definition_draft(
         workspace_id: str,
@@ -160,29 +160,12 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
         requires_labels: dict[str, str] | None = None,
         config_schema: dict | None = None,
     ) -> str:
-        """Save a draft Agent definition binding a capability to a runtime
-        (pi | velites) and skill (tunables: get_authoring_guide §5). WARNING:
-        FULL-PAYLOAD — omitted optional fields RESET to their defaults (tools
-        → catalog default tier, requires_labels → {}, config_schema → {}). To
-        change just one field on an existing Agent, first call
-        get_agent_definitions and echo back every current value you want
-        kept. Draft only — a human publishes it in Studio. The response
-        carries the saved draft's definition_hash."""
-        body: dict[str, Any] = {
-            "capability": capability,
-            "runtime": runtime,
-            "skill": skill,
-            # #476：默认三件套与 AgentDefinition 同源（catalog default 档）。
-            "tools": tools or list(DEFAULT_TOOLS),
-            "requires_labels": requires_labels or {},
-            "config_schema": config_schema or {},
-        }
-        _, client = await _client()
-        return await client.call(
-            "PUT",
-            f"/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
-            body,
-        )
+        """DEPRECATED — writes nothing. Agent execution profiles now live on
+        the workflow agent node (execution.runtime, tools, requires_labels,
+        config_schema, skill); edit them with save_workflow_draft."""
+        del workspace_id, agent_id, capability, runtime, skill
+        del tools, requires_labels, config_schema
+        return AGENT_DEFINITION_RETIRED
 
     # Skill read/validate/save-version tools (issue #217) and node prompt
     # preview/save tools, both split into sibling modules for the budget;
