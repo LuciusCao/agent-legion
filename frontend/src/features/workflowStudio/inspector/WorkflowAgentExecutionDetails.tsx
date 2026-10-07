@@ -18,6 +18,8 @@ export function WorkflowAgentExecutionDetails(props: {
    *  undefined = 未知（draft-only Agent 的列表映射不含 tools，#387），
    *  此时不出 hint——未知与「定义确为空」必须区分（codex P2 on #580）。 */
   agentDefaultTools?: string[]
+  /** #935：自含节点的 tools 兜底来源（runtime default 档）。 */
+  toolsFallbackSource?: 'agent' | 'runtime'
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
@@ -64,6 +66,7 @@ export function WorkflowAgentExecutionDetails(props: {
         node={props.node}
         runtime={props.runtime}
         agentDefaultTools={props.agentDefaultTools}
+        fallbackSource={props.toolsFallbackSource}
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
         readOnly={props.readOnly}

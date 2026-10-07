@@ -278,23 +278,26 @@ bundles are stored secret-free. The Worker holds them in memory only, passes
 them to the sandboxed child via stdin, and scrubs them before any persistence;
 they never touch the Worker filesystem or logs.
 
-## 6. Migrating an Agent between runtimes (pi ↔ velites)
+## 6. Migrating an agent node between runtimes (pi ↔ velites)
 
-`pi` and `velites` are peer runtimes declared per Agent definition.
-Definitions live in the `versioned_entities` table and are managed in Studio
-(「Agent 管理」) or via `/api/agent-definitions` — the yaml `agents:` section
+`pi` and `velites` are peer runtimes declared per agent node: since 0.7.17
+(#440 P3) every agent node carries its own execution profile in the workflow
+revision (`execution.runtime`, or the workflow top-level default) — Agent
+definitions are read-only history (their write API is deprecated) and only
+serve job snapshots frozen before the v93 inlining. The yaml `agents:` section
 and the `workflows.pi` block are retired (their presence in yaml fails Host
-startup), and `workflows.pi.flavor` no longer exists: `AgentDefinition.runtime`
-selects the adapter in the Host-side runtime catalog
+startup), and `workflows.pi.flavor` no longer exists: the node's
+`execution.runtime` selects the adapter in the Host-side runtime catalog
 (`server/app/agent_runtime/`), which pins the command builder (pi → pi argv,
 velites → velites argv). openclaw was briefly a third runtime and retired
 with #75 (no streaming events / token metering); new runtimes onboard via
 the same adapter mechanism — see the onboarding guide in
 `docs/architecture/velites-harness.md`.
-Migrating one agent to velites — or rolling it back — is a single-field edit
-plus publish; no Host restart is required (the published-catalog cache has a
-~5s TTL, and the claim path re-resolves per request). Facts to know before
-flipping the field:
+Migrating one agent node to velites — or rolling it back — is a single-field
+edit of the workflow plus a revision publish; no Host restart is required.
+New jobs pick it up immediately; in-flight jobs keep their frozen snapshot
+until they are upgraded (「升级 workflow」). Facts to know before flipping
+the field:
 
 - **Worker declarations first, definition migration second.** A queued request
   whose runtime no non-revoked Worker declares is failed by the unclaimable
@@ -313,15 +316,15 @@ flipping the field:
   `velites models list --json` backed by `~/.velites/models.json`; only the
   intersection with the runtime-scoped Worker allowlist is registered. A
   provider/model absent from that registry is therefore never claimable.
-- **Changing `runtime` changes `definition_hash`.** Queued requests pinned to
-  the old hash are failed as stale by the stale-definition sweeper. Migrate
-  off-peak with the queue drained; re-submit staled jobs under the normal
-  stale semantics.
+- **Changing `runtime` publishes a new revision.** Already queued requests
+  keep the profile they were enqueued with (`profile_source='node'` rows carry
+  their runtime), so nothing is failed as stale; upgrade in-flight jobs when
+  they should switch.
 - **In-flight executions are unaffected.** Manifests are frozen at enqueue;
   claimed/running executions finish on the frozen command spec.
-- **Rollback** is the same single-field operation: publish the definition back
-  with `runtime: pi`. A fleet-wide velites incident means migrating every
-  definition back to `runtime: pi`.
+- **Rollback** is the same single-field operation: publish the workflow back
+  with `execution.runtime: pi` (a workflow top-level default flips every agent
+  node that does not override it).
 - **Sandbox:** the `workflows.pi.velites_no_sandbox` escape hatch is retired
   with the yaml block; `execution.no_sandbox` is always false in manifests, so
   a sandbox incident currently requires a code change, not a config flip.
@@ -364,6 +367,51 @@ columns, which 0.7.15 ignores), but plan for these rows:
   claimed executions finish avoids failing queued rows at all; claimed and
   running executions finish on their frozen manifests either way.
 
+### 6.2 Agent profile backfill (schema v93) and rolling back to 0.7.16 (#935)
+
+On upgrade, schema v93 inlines each legacy agent node of every workspace's
+active revision and Studio draft from the published Agent definition it ran
+(its materialized route target, else the capability's unique published
+Agent): `execution.runtime`, `requires_labels`, `tools` (only when the node
+had none), `config_schema` (overwritten) and `skill` (only when the node had
+none). Before rewriting, the original text plus a per-node report lands in
+`agent_profile_backfill_backups`; nodes that could not be resolved (no or
+several published Agents, archived target, unportable skill) stay untouched,
+are listed in the report's `report_json`, and block the next publish until
+their profile is written on the node. Read the report after upgrading:
+
+```sql
+select workspace_id, source, report_json
+from agent_profile_backfill_backups
+where report_json like '%"unresolved"%';
+```
+
+From 0.7.17 publishing an Agent definition no longer changes what any
+inlined node runs (D4): change the node profile and publish the workflow.
+
+Differences from the 0.7.16 dry-run report (`scripts/agent_backfill_dry_run.py`,
+#934) — v93 follows what dispatch actually runs, so a few nodes are
+classified differently: an active-revision node whose route targets an
+archived or unpublished Agent is *unresolved* in v93 (the dry-run backfilled
+it from the archived definition); an active-revision node without a route
+row resolves by its capability's unique published Agent in v93 (the dry-run
+reported `no_route`). Both share `tools_empty_unportable` (an Agent published
+with an empty tools list cannot be inlined into a node without tools — an
+empty node list means the default tier) and `skill_unportable`.
+
+Not backfilled: Studio chat session drafts (`studio_chat_sessions.draft_yaml`)
+keep their legacy YAML, and pending publish requests
+(`studio_publish_requests`) snapshot the draft they were raised on — after
+the upgrade they fail with "Draft changed" (the workspace draft was
+rewritten); raise the publish request again from the migrated draft.
+
+**Rolling the Host back to 0.7.16** needs no schema step and has no down
+migration: 0.7.16 reads the inlined fields as a self-contained profile (it
+already supports them), so dispatch behaves the same. To restore the exact
+pre-v93 text of a revision or draft, copy `original_text` (and, for a
+revision, `original_hash` into `definition_hash`) from the backup table back
+into `workflow_revisions` / `workspace_workflow_drafts.definition_yaml`.
+
 ## 7. Troubleshooting
 
 | Symptom | Cause | Action |
@@ -375,7 +423,8 @@ columns, which 0.7.15 ignores), but plan for these rows:
 | Registration returns 400 `unsupported Agent Worker protocol` | Worker's `protocol_version` below `agent_workers.min_protocol_version` | Rebuild the worker image from the current repo; lower the minimum only as a short emergency escape hatch |
 | Claim returns 204 forever | No queued executions compatible with the worker's runtimes/labels | Check the workflow's Agent node routing and the worker's detected/enabled runtimes (配置 → Agent 运行时) plus `labels`; the Host-side `claim.empty` vs `claim.rejected` events (§7.1) distinguish a drained queue from an admission mismatch (reason code names the gate) |
 | Heartbeat/result 409 (`execution is not owned by this Worker`) | Network partition or Host restart — the execution lease expired and was reassigned/failed | Terminal for that execution; rerun the job. Persistent storms mean the tailnet is unstable |
-| Result upload 413 | Archive exceeds `agent_workers.max_archive_bytes` (default 64 MiB) | Investigate why artifacts ballooned; raise the limit only if legitimate |
+| Result upload 413, or node failed with `over the …-byte Host archive ceiling` / `result report rejected by Host: HTTP 413` | Archive exceeds `agent_workers.max_archive_bytes` (default 64 MiB). Since #959 the Worker prechecks the claim-delivered ceiling and reports the run failed instead of shipping the archive; a Host 413 (or any other 4xx verdict except 409 / 408 / 425 / 429) is degraded once into a failed report, so the execution is not silently rerun. Host 5xx / network errors are never degraded: the Worker keeps retrying while it holds the lease | Investigate why artifacts ballooned; raise the limit only if legitimate |
+| Execution failed with `Agent bundle has more than … members` / `unpacks to more than … bytes` | The execution bundle exceeds the Worker's extraction limits (20,000 members / 1 GiB unpacked, #967) | Inspect the bound skill repository / node libs for accidentally committed bulk data |
 | pi "model call failed" inside the worker container | Gateway unreachable or token rejected | Re-run the §3 container smoke test; confirm `LLM_GATEWAY_TOKEN` is set in `deploy/.env` and matches the gateway |
 | Gateway 502 | LLM provider unreachable from the laptop (VPN dropped, network change) | Restore the laptop's network path to the provider; workers' pi runs fail fast and surface as failed executions |
 | Gateway 401/403 | `LLM_GATEWAY_TOKEN` missing or mismatched | Gateway and every worker must share the same token (§4); never run a tailnet-bound gateway without it |

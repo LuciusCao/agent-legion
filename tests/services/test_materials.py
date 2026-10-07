@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-import time
 
 import pytest
 
@@ -18,6 +17,7 @@ from server.app.services.materials import (
     MaterialVerificationError,
 )
 from tests.fakes.storage import FakeObjectStorage
+from tests.helpers.pg_waits import backend_pid, wait_until_blocked_by
 
 FakeStorage = FakeObjectStorage
 
@@ -310,7 +310,8 @@ def test_delete_blocked_by_key_share_sees_committed_reference(service, storage, 
             thread = threading.Thread(target=_delete)
             thread.start()
             assert entered.wait(timeout=5)
-            time.sleep(0.5)  # delete 线程应正阻塞在 FOR UPDATE 上
+            # delete 线程应正阻塞在 FOR UPDATE 上：以 pg_blocking_pids 观测为准。
+            wait_until_blocked_by(backend_pid(holder), thread=thread)
             assert thread.is_alive()
             # 对方提交前，run 创建的引用 job 已落库并提交。
             _insert_job_referencing(job_db, material_id)

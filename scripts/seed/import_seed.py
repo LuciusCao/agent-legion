@@ -17,6 +17,8 @@ Steps:
      published into every workspace bound to a workflow that references its
      capability; identical published definitions are skipped)
   3. first workflow revision publish for bound workspaces that have none
+     (legacy agent nodes get the seed's Agent definitions inlined first —
+     the publish gate requires self-contained agent nodes since #935)
   4. node code publish (per bound workspace x node_codes[] entry; identical
      published code texts are skipped)
   5. skill source upsert + relock (skipped when ref and locked commit match)
@@ -50,6 +52,7 @@ from typing import Any
 import requests
 import yaml
 
+from scripts.seed.seed_agent_inline import inline_agent_profiles
 from scripts.seed.seed_common import (
     canonical_json,
     content_equal,
@@ -324,12 +327,19 @@ def step3_first_revisions(
                     f"  {workspace_id}/{workflow_key}: active revision v{revision.get('version')} ok"
                 )
                 continue
+            # #935：门禁要求 agent 节点自含——v93 前导出的 seed 仍按
+            # capability 解析 Agent，发布前按迁移同款规则内联 seed 的 Agent。
+            definition, untouched = inline_agent_profiles(
+                workflow_defs[workflow_key], seed.get("agents") or []
+            )
+            if untouched:
+                print(f"  {workspace_id}/{workflow_key}: agent nodes not inlined: {untouched}")
             result = client.mutate(
                 "POST",
                 f"/api/workspaces/{workspace_id}/workflow-drafts/publish",
                 {
                     "definition_yaml": yaml.safe_dump(
-                        workflow_defs[workflow_key], allow_unicode=True, sort_keys=False
+                        definition, allow_unicode=True, sort_keys=False
                     )
                 },
                 dry_note=f"publish first revision for {workspace_id}/{workflow_key}",

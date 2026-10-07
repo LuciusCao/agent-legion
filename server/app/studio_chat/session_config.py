@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from server.app.services.job_errors import ConflictError, InvalidOperationError
+from server.app.studio_chat.session_orphan import reject_orphaned_session
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
@@ -30,7 +31,7 @@ def _live_runtime(service: StudioChatService, session: dict[str, Any]) -> Sessio
         raise ConflictError("Chat session is closed")
     runtime = service.runtime(str(session["id"]))
     if runtime is None:
-        raise ConflictError("Chat session is not running on this server")
+        reject_orphaned_session(service, str(session["id"]), session)
     return runtime
 
 

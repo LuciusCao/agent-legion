@@ -36,6 +36,7 @@ from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.lifecycle import ServiceLifecycle, starting_operation
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.resume import resume_session
+from server.app.studio_chat.retention import studio_chat_retention_days
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.session_archive import archive_session, unarchive_session
 from server.app.studio_chat.session_close import close_session
@@ -162,6 +163,10 @@ class StudioChatService:
 
     def list_sessions(self, workspace_id: str, *, archived: bool = False) -> list[dict[str, Any]]:
         return self._db.list_studio_chat_sessions(workspace_id, archived=archived)
+
+    def retention_days(self) -> int:
+        """Instance chat retention window (#1041; 0 = disabled), read fresh."""
+        return studio_chat_retention_days(self._db)
 
     def get_session(
         self, session_id: str, workspace_id: str | None = None, *, include_deleted: bool = False
@@ -344,7 +349,10 @@ class StudioChatService:
         rows left in a live status by a crashed or killed backend are
         zombies — their runtimes, tokens' owners, and agent subprocesses are
         gone. Marking them error at startup keeps the active-session cap
-        honest and the session list truthful."""
+        honest and the session list truthful (and lets the UI offer resume
+        on open, #760). Unconditional on purpose: the control plane is
+        single-replica (#277), and a restart that overlaps the old process
+        (the probe then sees its lock) still leaves orphans to repair."""
         reaped = self._db.reap_zombie_studio_chat_sessions()
         if reaped:
             logger.warning("reaped %d zombie studio chat session(s) at startup", reaped)

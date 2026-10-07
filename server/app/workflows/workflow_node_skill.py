@@ -92,10 +92,9 @@ def effective_node_skill(node: WorkflowNode, agent_skill: str) -> tuple[str, str
 def node_skill_publish_error(node: WorkflowNode, agent_skill: str | None) -> str | None:
     """Publish-gate check for a node's skill binding.
 
-    ``agent_skill``: the resolved published Agent's skill for the node's
-    capability; ``None`` for code-routed nodes and agent nodes without a
-    single published Agent. Agent-routed: the binding may live on the node
-    or (legacy) on the Agent definition — at least one side must name one.
+    ``agent_skill``: the agent node profile's legacy skill (``""`` for the
+    self-contained profiles the #935 gate requires — the binding must then
+    live on the node); ``None`` for code-routed nodes.
     Code-routed: a declared skill is meaningless (never runs skill content).
     The #322 repo-existence check lives in ``workflows/skill_repo_gate``.
     """
@@ -108,8 +107,7 @@ def node_skill_publish_error(node: WorkflowNode, agent_skill: str | None) -> str
         return None
     if node.skill is None and not agent_skill:
         return (
-            f"Agent node {node.key} declares no skill and the published Agent for "
-            f"capability {node.capability} has none either: declare skill "
-            "(key + ref) on the node, or keep a skill on the Agent definition"
+            f"Agent node {node.key} declares no skill: declare skill (key + ref) on the"
+            " node (a self-contained execution profile has no Agent definition fallback)"
         )
     return None

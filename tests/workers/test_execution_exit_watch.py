@@ -126,7 +126,8 @@ def test_control_events_wake_parked_waiter(reactor: ExitWatchReactor) -> None:
 
     thread = threading.Thread(target=waiter)
     thread.start()
-    time.sleep(1.0)  # 让等待者先 park 一个完整 tick 以上
+    # 保留的墙钟等待：被测语义正是「park 跨过 tick 后仍可被唤醒」，必须真实等过一个 tick。
+    time.sleep(1.0)
     shutdown.set()
     thread.join(timeout=10)
     assert not thread.is_alive()
@@ -157,8 +158,8 @@ def test_externally_reaped_child_still_resolves(reactor: ExitWatchReactor) -> No
     """心跳线程可能先 poll/reap 掉子进程（zombie-stop）：pidfd 可读性与
     kqueue 已入队事件都是 sticky 的，等待者必须仍能定谳而不是悬挂。"""
     proc = _spawn_sleep(0.2)
-    time.sleep(1.0)  # 让子进程退出并由本线程 poll 收尸
-    assert proc.poll() == 0
+    # 由本线程 waitpid 收尸（等价于心跳线程先 reap），不靠固定 sleep 猜退出时刻。
+    assert proc.wait(timeout=10) == 0
     started = time.monotonic()
     code, report = _wait(reactor, proc, 5)
     assert (code, report) == (0, True)
@@ -168,17 +169,25 @@ def test_externally_reaped_child_still_resolves(reactor: ExitWatchReactor) -> No
 def test_watcher_death_degrades_to_local_polling(reactor: ExitWatchReactor) -> None:
     """fail-closed：watcher 死亡时已 park 的等待者被立即唤醒并退回
     process_lifecycle.poll_wait_locally（语义与旧版逐字节一致）。"""
-    proc = _spawn_sleep(0.3)
-    waiter = reactor.register(proc, 10, threading.Event(), threading.Event(), None)
-    woke = threading.Event()
-    threading.Thread(target=lambda: (waiter.done.wait(), woke.set())).start()
-    time.sleep(0.2)
-    started = time.monotonic()
-    reactor._fail_dead()
-    assert woke.wait(2), "parked waiter must be woken on watcher death"
-    assert waiter.watcher_dead
-    assert time.monotonic() - started < 1
-    proc.wait()
+    # 子进程寿命远长于观察窗：此前 0.3s 的子进程与 0.2s 的 park 窗只差 0.1s，
+    # 慢机上子进程先自然退出会让 done 由退出而非 watcher 死亡置位。
+    proc = _spawn_sleep(30)
+    try:
+        waiter = reactor.register(proc, 10, threading.Event(), threading.Event(), None)
+        woke = threading.Event()
+        threading.Thread(target=lambda: (waiter.done.wait(), woke.set())).start()
+        # 保留的墙钟窗：让 watcher 线程至少跑一个 tick 把新注册的 waiter 收入 park 集合
+        # （内部状态无公开可观测点）；即便未收入，_fail_dead 也须唤醒注册表内的 waiter。
+        time.sleep(0.2)
+        started = time.monotonic()
+        reactor._fail_dead()
+        assert woke.wait(2), "parked waiter must be woken on watcher death"
+        assert waiter.watcher_dead
+        assert time.monotonic() - started < 1
+    finally:
+        # 断言失败也收掉 30s 子进程，不留孤儿。
+        proc.kill()
+        proc.wait()
 
 
 def test_dead_reactor_registration_resolves_immediately() -> None:
@@ -324,7 +333,8 @@ def test_watcher_does_not_busy_spin_during_terminate_window(reactor: ExitWatchRe
         waiter = reactor2.register(proc, 0.1, threading.Event(), threading.Event(), None)
         waiter.timed_out = True
         waiter.done.set()
-        time.sleep(1.2)  # 跨过 deadline，确认它确在"过去"
+        # 保留的墙钟等待：deadline 是 monotonic 墙钟量，须真实跨过才能复现「过去时 deadline」。
+        time.sleep(1.2)
         # 修复前：min(过去时 deadline - now, 0.5) → 0 → watcher 空转。
         # 修复后：done-set waiter 被排除，无其他 waiter 时返回整 tick。
         timeout = reactor2._tick_timeout()

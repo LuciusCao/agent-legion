@@ -1,8 +1,8 @@
 """Persistence for studio chat sessions (schema v43, phase 3 chunk 4).
 
 Message CRUD lives in studio_chat_messages.py, the resume claim in
-studio_chat_resume.py and the delete/archive stamps in studio_chat_visibility.py
-(file budget splits); this mixin inherits them so the composed JobQueries
+studio_chat_resume.py, the delete/archive stamps in studio_chat_visibility.py and
+the retention purge (#1041) in studio_chat_retention.py (file budget splits); this mixin inherits them so the composed JobQueries
 surface is unchanged.
 """
 
@@ -16,6 +16,7 @@ from server.app.jobs.queries.studio_chat_resume import (
     _CAP_LOCK_KEY,
     StudioChatResumeQueriesMixin,
 )
+from server.app.jobs.queries.studio_chat_retention import StudioChatRetentionQueriesMixin
 from server.app.jobs.queries.studio_chat_visibility import StudioChatVisibilityQueriesMixin
 
 _SESSION_COLUMNS = (
@@ -69,7 +70,9 @@ def _build_session_updates(fields: dict[str, Any]) -> dict[str, Any]:
     return updates
 
 
-class StudioChatQueriesMixin(StudioChatResumeQueriesMixin, StudioChatVisibilityQueriesMixin):
+class StudioChatQueriesMixin(
+    StudioChatResumeQueriesMixin, StudioChatVisibilityQueriesMixin, StudioChatRetentionQueriesMixin
+):
     """CRUD for studio_chat_sessions (messages/resume/visibility stamps via
     inherited mixins)."""
 
@@ -172,14 +175,17 @@ class StudioChatQueriesMixin(StudioChatResumeQueriesMixin, StudioChatVisibilityQ
         *,
         status_in: tuple[str, ...] | None = None,
         status_not_in: tuple[str, ...] | None = None,
+        error_detail_is: str | None = None,
         **fields: Any,
     ) -> bool:
         """Guarded update: apply only while the current status matches (#158).
 
         The status predicate rides the same UPDATE (atomic check-and-set), so
         a concurrent close/error transition landing between a caller's read
-        and this write cannot be overwritten back to a live state. Returns
-        True when a row was actually updated.
+        and this write cannot be overwritten back to a live state.
+        ``error_detail_is`` additionally pins the current ``error_detail``
+        (e.g. undoing only one's own error stamp, not a later real failure).
+        Returns True when a row was actually updated.
         """
         updates = _build_session_updates(fields)
         if not updates:
@@ -195,6 +201,9 @@ class StudioChatQueriesMixin(StudioChatResumeQueriesMixin, StudioChatVisibilityQ
             placeholders = ",".join("%s" for _ in status_not_in)
             clauses.append(f"status not in ({placeholders})")
             params.extend(status_not_in)
+        if error_detail_is is not None:
+            clauses.append("error_detail=%s")
+            params.append(error_detail_is)
         with self.connect() as conn:
             row = conn.execute(
                 f"update studio_chat_sessions set {assignments},"

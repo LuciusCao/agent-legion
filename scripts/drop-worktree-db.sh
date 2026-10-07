@@ -31,10 +31,18 @@ if [[ ! "$WT" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
     exit 1
 fi
 
-NAME="$(printf '%s' "$WT" | tr -c 'a-zA-Z0-9_' '_')"
-DB="agent_legion_${NAME}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=worktree-names-lib.sh
+source "$SCRIPT_DIR/worktree-names-lib.sh"
+DB="$(worktree_derived_db "$WT")"
 # 测试库派生规则（tests/postgres_support.py）额外小写化
-TEST_DB="agent_legion_test_$(printf '%s' "$NAME" | tr 'A-Z' 'a-z')"
+TEST_DB="$(worktree_derived_test_db "$WT")"
+
+# 护栏 0（#950）：派生名映射不是单射，另一个仍存在的 worktree 派生出同名
+# 库时拒绝删除——那是对方正在用的库。clean-worktree.sh 转调本脚本前已在
+# 移除 worktree 之前做过同一检测（同一共享函数），这里再查一次是独立调用
+# 时的兜底，结果一致、开销可忽略。
+worktree_require_unique_derived_names "$SCRIPT_DIR" "$WT" "删除派生库" || exit 1
 
 command -v psql >/dev/null 2>&1 || { echo "错误: 未找到 psql" >&2; exit 1; }
 

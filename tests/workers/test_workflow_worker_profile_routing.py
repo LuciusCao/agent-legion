@@ -106,3 +106,27 @@ def test_route_less_legacy_agent_node_never_falls_into_the_code_pool(
     assert (route.kind, route.target_id) == expected
     if route.kind == "error":
         assert "upgrade the job" in route.error_message
+
+
+def test_stale_agent_route_row_never_routes_a_code_node_to_an_agent() -> None:
+    """#935 R1: a frozen ``workspace_node_routes`` row may outlive a node the
+    job snapshot declares ``code`` (node turned agent → code). The snapshot's
+    node type wins: the code node goes to the code pool, and the cache keys
+    on the node type so an agent-typed sibling snapshot is not affected."""
+    worker = MagicMock()
+    worker.state.route_cache = {}
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.return_value = {
+        "target_kind": "agent",
+        "target_id": "draft-agent",
+    }
+    worker.job_db._connect_read.return_value.__enter__.return_value = conn
+    code_node = WorkflowNode(
+        key="draft", label="draft", capability="draft", node_type="code", outputs=["o.json"]
+    )
+
+    with patch("server.app.workflow_worker.routing.get_local_node_limit", return_value=None):
+        route = resolve_node_route(worker, "ws", "ws", code_node)
+
+    assert route.kind == "executor"
+    assert list(worker.state.route_cache) == [("ws", "ws", "draft", False)]

@@ -87,6 +87,7 @@ def test_supervisor_starts_and_stops_worker_process(
 
     supervisor.stop()
     wait_for_predicate(lambda: not supervisor.running())
+    # 保留：负向观察窗——手动 stop 后「不」自动重启。
     time.sleep(0.2)
     assert supervisor.running() is False  # 手动停止后不自动重启
 
@@ -113,6 +114,7 @@ def test_supervisor_does_not_restart_after_exit_code_2(
     supervisor.start()
     wait_for_predicate(lambda: supervisor.status()["failed"] is not None)
 
+    # 保留：负向观察窗——退出码 2 后「不」重启。
     time.sleep(0.3)
     status = supervisor.status()
     assert "退出码 2" in status["failed"]

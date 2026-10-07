@@ -1,7 +1,8 @@
 import type { Dispatch, SetStateAction } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '../../../lib/queryKeys'
 import type { StudioChatSessionRecord } from './studioChatApi'
+import { studioChatRetentionKey } from './studioChatRetention'
 import {
   archiveStudioChatSession,
   fetchArchivedStudioChatSessions,
@@ -27,8 +28,20 @@ export function useStudioChatSessionArchive(
   const key = queryKeys.studioChatSessions(workspaceId ?? '')
   const archivedQuery = useQuery({
     queryKey: archivedStudioChatSessionsKey(workspaceId ?? ''),
-    queryFn: () => fetchArchivedStudioChatSessions(workspaceId!),
+    queryFn: async () => {
+      const view = await fetchArchivedStudioChatSessions(workspaceId!)
+      queryClient.setQueryData(
+        studioChatRetentionKey(workspaceId!),
+        view.retentionDays
+      )
+      return view
+    },
     enabled: Boolean(workspaceId),
+  })
+  // 只读缓存（skipToken：本身从不拉取），由两份列表响应写入。
+  const retentionQuery = useQuery<number>({
+    queryKey: studioChatRetentionKey(workspaceId ?? ''),
+    queryFn: skipToken,
   })
 
   async function archive(sessionId: string): Promise<void> {
@@ -47,5 +60,13 @@ export function useStudioChatSessionArchive(
     await queryClient.invalidateQueries({ queryKey: key })
   }
 
-  return { archivedSessions: archivedQuery.data ?? [], archive, unarchive }
+  return {
+    archivedSessions: archivedQuery.data?.sessions ?? [],
+    // #1041：实例对话保留天数。默认列表与归档列表的响应都会写入保留天数
+    // 缓存（谁先到用谁）；两者都未到 / 都失败时为 null（未知）——未知不当
+    // 作关闭，会话菜单在归档 / 删除提示里给通用清理警告（#1071 review）。
+    retentionDays: retentionQuery.data ?? null,
+    archive,
+    unarchive,
+  }
 }

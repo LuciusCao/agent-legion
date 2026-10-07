@@ -13,6 +13,7 @@ import {
   StudioChatSessionRowConfirm,
   deleteConfirmText,
 } from './StudioChatSessionRowConfirm'
+import { retentionNotice } from './studioChatRetention'
 import { sessionLabel } from './studioChatSessionLabel'
 import { ARCHIVE_ICON_SX, DANGER_ICON_SX } from './StudioChatSessionRowConfirm'
 import styles from './StudioChatSessionMenu.module.css'
@@ -28,6 +29,10 @@ type Props = {
   archivedSessions?: StudioChatSessionRecord[]
   onArchive?: (sessionId: string) => Promise<void>
   onUnarchive?: (sessionId: string) => Promise<void>
+  /** 实例对话保留天数（#1041）；>0 时归档行显示倒计时，归档 / 删除提示
+   * 「将于 N 天后自动清理」。0 / 缺省 = 未配置，不显示任何清理信息。
+   * null = 未知（列表响应尚未拿到）：不当作关闭，提示给通用清理警告。 */
+  retentionDays?: number | null
 }
 
 type Mode = {
@@ -44,17 +49,30 @@ export function StudioChatSessionMenu(props: Props) {
   const [mode, setMode] = useState<Mode>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const active = props.sessions.find((row) => row.id === props.activeSessionId)
+  const retentionDays =
+    props.retentionDays === undefined ? 0 : props.retentionDays
+  const purge = retentionNotice(retentionDays)
 
   function close() {
     setAnchor(null)
     setMode(null)
     setError(null)
+    setNotice(null)
+  }
+
+  /** 归档（#1041）：成功且配置了保留策略时，就地提示「将于 N 天后自动清理」。 */
+  function archive(sessionId: string) {
+    void run(() => props.onArchive!(sessionId)).then((ok) => {
+      if (ok && purge) setNotice(`已归档，${purge}；期间可在「已归档」中恢复`)
+    })
   }
 
   async function run(action: () => Promise<void>): Promise<boolean> {
     setPending(true)
     setError(null)
+    setNotice(null)
     try {
       await action()
       setMode(null)
@@ -84,7 +102,7 @@ export function StudioChatSessionMenu(props: Props) {
       return (
         <StudioChatSessionRowConfirm
           tone="danger"
-          text={deleteConfirmText(label, !closed)}
+          text={deleteConfirmText(label, !closed, retentionDays)}
           confirmLabel="永久删除"
           pending={pending}
           onConfirm={() => void run(() => props.onDelete!(session.id))}
@@ -96,10 +114,10 @@ export function StudioChatSessionMenu(props: Props) {
       return (
         <StudioChatSessionRowConfirm
           tone="primary"
-          text={`归档「${label}」？会先关闭运行中的会话，之后可在「已归档」中恢复`}
+          text={`归档「${label}」？会先关闭运行中的会话，之后可在「已归档」中恢复${purge ? `（${purge}）` : ''}`}
           confirmLabel="归档"
           pending={pending}
-          onConfirm={() => void run(() => props.onArchive!(session.id))}
+          onConfirm={() => archive(session.id)}
           onCancel={() => setMode(null)}
         />
       )
@@ -132,7 +150,9 @@ export function StudioChatSessionMenu(props: Props) {
           </Tooltip>
         )}
         {props.onArchive && (
-          <Tooltip title="归档（可恢复）">
+          <Tooltip
+            title={purge ? `归档（可恢复，${purge}）` : '归档（可恢复）'}
+          >
             <IconButton
               size="small"
               sx={ARCHIVE_ICON_SX}
@@ -142,7 +162,7 @@ export function StudioChatSessionMenu(props: Props) {
                 setError(null)
                 // 已关闭的会话直接归档（可恢复，无需确认）；运行中的会先
                 // 被关闭，行内确认一次。
-                if (closed) void run(() => props.onArchive!(session.id))
+                if (closed) archive(session.id)
                 else setMode({ kind: 'archive', sessionId: session.id })
               }}
             >
@@ -209,7 +229,13 @@ export function StudioChatSessionMenu(props: Props) {
             run={run}
             onUnarchive={props.onUnarchive}
             onDelete={props.onDelete}
+            retentionDays={props.retentionDays}
           />
+        )}
+        {notice && (
+          <div className={styles.notice} role="status">
+            {notice}
+          </div>
         )}
         {error && (
           <div className={styles.error} role="alert">

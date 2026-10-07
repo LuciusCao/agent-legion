@@ -317,6 +317,7 @@ def test_max_concurrency_hint_limits_claims_per_tick(tmp_path):
             worker, lambda: _active_lease_count(db_path, job["id"], "fan") == 2, timeout=5
         )
         assert ok, "前两个分片未被 claim"
+        # 保留：负向观察窗——再推进一轮 poll 后 lease 数「不」超过 hint。
         time.sleep(0.2)
         worker._poll()
         assert _active_lease_count(db_path, job["id"], "fan") == 2, "max_concurrency hint 失效"
@@ -361,6 +362,7 @@ def test_failed_shard_fails_node_and_reduce_never_ready(tmp_path):
     try:
         ok = _poll_until(worker, lambda: _node_status(job_db, job["id"], "review") == "failed")
         assert ok, "shard 节点未因分片失败而 failed"
+        # 保留：负向观察窗——分片失败后 reduce 节点「不」被调度。
         time.sleep(0.2)
         worker._poll()
         assert _node_status(job_db, job["id"], "aggregate") == "pending", "reduce 不应 ready"

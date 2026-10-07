@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRealtimeChannel } from '../../../lib/realtime'
 import { queryKeys } from '../../../lib/queryKeys'
+import { sessionsWithRetention } from './studioChatRetention'
 import {
   answerStudioChatPermission,
   createStudioChatSession,
   fetchStudioChatAgents,
   fetchStudioChatMessages,
   fetchStudioChatSession,
-  fetchStudioChatSessions,
   type StudioChatSessionRecord,
 } from './studioChatApi'
 import {
@@ -62,7 +62,8 @@ export function useStudioChat(workspaceId: string | undefined) {
   })
   const sessionsQuery = useQuery({
     queryKey: queryKeys.studioChatSessions(workspaceId ?? ''),
-    queryFn: () => fetchStudioChatSessions(workspaceId!),
+    // #1041：响应里的保留天数顺带写入保留天数缓存（会话菜单清理提示用）。
+    queryFn: ({ client }) => sessionsWithRetention(client, workspaceId!),
     enabled: Boolean(workspaceId),
   })
 

@@ -24,6 +24,7 @@ from fastapi import Depends, Request
 from fastapi.exceptions import HTTPException
 
 from server.app.auth.api_token_identity import resolve_api_token_identity
+from server.app.auth.scope_binding import refuse_foreign_binding
 from server.app.auth.scoped_tokens import STUDIO_AGENT_SCOPE
 from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
 
@@ -162,10 +163,8 @@ def require_studio_agent_workspace(
     contracts). Previously bound=None passed through with no workspace
     relation at all, which on the skill tools meant a leaked unbound token
     held read AND commit+tag rights over every workspace's skill repos."""
-    bound = user.get("scoped_workspace_id")
-    if bound and bound != workspace_id:
-        raise HTTPException(status_code=403, detail="Scoped token bound to another workspace")
-    if not bound and user.get("role") != "admin":
+    refuse_foreign_binding(user, workspace_id)
+    if not user.get("scoped_workspace_id") and user.get("role") != "admin":
         role = request.app.state.job_db.get_workspace_role(str(workspace_id), str(user["id"]))
         if role is None:
             # 404, matching the workspace guard's enumeration-safe refusal.
@@ -185,7 +184,5 @@ def enforce_scoped_workspace_binding(
     own session, but without this check a leaked run token could read every
     workspace the initiating user can see (messages and the SSE stream).
     """
-    bound = user.get("scoped_workspace_id")
-    if bound and bound != workspace_id:
-        raise HTTPException(status_code=403, detail="Scoped token bound to another workspace")
+    refuse_foreign_binding(user, workspace_id)
     return user
