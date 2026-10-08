@@ -4,9 +4,17 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.18] - 2026-10-08
+
+hotfix：修复 0.7.16 起 Studio 对话终端权限栅栏在引擎 auto 模式下让 Bash 整体不可用（issue #1136，线上事故）——默认恢复 0.7.15 及以前的直接执行（栅栏转为可选加固），被拒时原因贯穿到 agent 工具错误与会话卡片；另把实例设置 PUT 改为合并语义，结构性消除「旧客户端静默重置新设置键」簇。
+
+### Changed
+
+- 实例设置 `PUT /api/admin/instance-settings` 改为合并语义（#1138 codex review 收口）：旧契约是整份覆盖写，任何带默认值的新增设置键都会被未携带它的旧客户端（升级前打开的页面、旧自动化）在保存无关设置时静默重置。现改为「payload 实际携带的键覆盖、未携带的保留库存值」，行锁读改写事务内递归合并（嵌套块同规则；嵌套块仍整体校验、缺必需键 422 响亮失败），并发 PUT 不丢更新。管理界面行为不变（始终提交全表单）。
+
 ### Fixed
 
-- Studio 对话里 Bash 被权限栅栏拒绝时，可读原因改放进 JSON-RPC 错误的 message（issue #1136）：此前原因只放 `data` 字段，引擎（kimi）格式化工具结果时丢弃，agent 与用户只见「Invalid request」且无法区分「权限模型拒绝」与「工具损坏」——把引擎 permission 设为 auto 恰恰是结构性无效路径（grant 只由后端应答过的权限请求铸造）。现工具错误与 Studio 会话卡片直接给出原因与补救（无已批准授权、grant 一次性 300s TTL、改用 ask 模式或会话「全部允许」）；terminal cwd 越界的 `invalid_params` 拒绝同样处理。
+- Studio 对话里 Bash 被权限栅栏拒绝时，可读原因改放进 JSON-RPC 错误的 message（issue #1136）：此前原因只放 `data` 字段，引擎（kimi）格式化工具结果时丢弃，agent 与用户只见「Invalid request」且无法区分「权限模型拒绝」与「工具损坏」——把引擎 permission 设为 auto 恰恰是结构性无效路径（grant 只由后端应答过的权限请求铸造）。现工具错误与 Studio 会话卡片直接给出原因与补救（无已批准授权、grant 一次性 300s TTL、改用 ask 模式或会话「全部允许」）；terminal cwd 越界的 `invalid_params` 拒绝同样处理。栅栏关闭期间铸造的 grant 现在也会被正常消费（codex P2），不会在热开启栅栏后被重放。
 - Studio 对话终端的 grant 栅栏改为可选加固、默认恢复直接执行（issue #1136）：0.7.16 起 `terminal/create` 必须消耗人审（或会话「全部允许」）铸造的一次性 grant，而引擎 permission 为 auto（或命令预放行）时从不发起 `session/request_permission`，grant 永不铸造、Bash 必被拒——该形态下 Studio agent 的 shell 整体不可用。本版起默认恢复 0.7.15 及以前的直接执行；admin 全局设置「Studio 对话终端」组的「终端命令需人工批准」（实例设置文档键 `studio_chat_terminal_grant_required`）可重新开启栅栏，热读于每次 terminal/create，保存即生效，无 schema 变更。终端子进程的环境白名单与会话根目录钉住不受开关影响，始终生效。
 
 ## [0.7.17] - 2026-10-08
