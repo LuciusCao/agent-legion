@@ -312,6 +312,8 @@ class _Handle:
         self.cwd = cwd
         self.seen: list[dict[str, Any]] = []
         self.callbacks = self
+        # #1136: instance-level fence switch; default on (fail-closed).
+        self.terminal_grant_required = lambda: True
 
     def on_update(self, payload: dict[str, Any]) -> None:
         pass

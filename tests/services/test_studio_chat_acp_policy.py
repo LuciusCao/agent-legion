@@ -337,6 +337,10 @@ class _Handle:
     cwd = "."
     callbacks: Any = None
 
+    # #1136: instance-level fence switch; default on (fail-closed).
+    def terminal_grant_required(self) -> bool:
+        return True
+
 
 def _client() -> AcpClient:
     client = AcpClient()
@@ -368,6 +372,21 @@ def test_terminal_cwd_refusal_carries_reason_in_message(tmp_path) -> None:
         _run_terminal(AcpTerminalStore(), "print(1)", cwd="/", default_cwd=str(tmp_path))
     assert "outside the session root" in str(excinfo.value)
     assert excinfo.value.code == -32602
+
+
+def test_create_terminal_skips_grant_when_fence_disabled() -> None:
+    """#1136 escape hatch: fence off → no grant needed (engine auto mode)."""
+
+    async def _go() -> None:
+        client = _client()
+        client._handle.terminal_grant_required = lambda: False
+        created = await client.create_terminal("s", sys.executable, ["-c", "print(1)"])
+        await client.wait_for_terminal_exit("s", created.terminal_id)
+        state = await client.terminal_output("s", created.terminal_id)
+        assert "1" in state.output
+        await client.release_terminal("s", created.terminal_id)
+
+    asyncio.run(_go())
 
 
 @pytest.mark.parametrize(

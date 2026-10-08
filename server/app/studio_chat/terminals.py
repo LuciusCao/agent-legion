@@ -274,7 +274,9 @@ class TerminalClientMixin:
         **kwargs: Any,
     ) -> CreateTerminalResponse:
         del session_id  # one store per handle; the id adds nothing here
-        if not self.terminals.grants.consume(command, args):
+        if self._handle.terminal_grant_required() and not self.terminals.grants.consume(
+            command, args
+        ):
             reason = (
                 "terminal/create refused: no approved permission grant for this "
                 "command. Grants are one-shot (300s TTL) and minted only by a "

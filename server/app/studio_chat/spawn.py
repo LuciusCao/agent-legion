@@ -28,6 +28,7 @@ from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.teardown import revoke_minted_token_quietly, teardown_runtime
+from server.app.studio_chat.terminal_policy import terminal_grant_required
 from server.app.studio_chat.wire_baseline import WireBaseline
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,7 @@ def spawn_session_runtime(
             env=None,
             callbacks=callbacks,
             resume_acp_session_id=resume_acp_session_id,
+            terminal_grant_required=lambda: terminal_grant_required(db),
         )
         runtime = SessionRuntime(handle, token)
         runtime.background_baseline, runtime.wire_baseline = background_baseline, wire_baseline

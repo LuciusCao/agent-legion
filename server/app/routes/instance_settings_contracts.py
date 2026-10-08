@@ -132,6 +132,11 @@ class InstanceSettingsDocument(BaseModel):
     # cascade with the row). Read fresh at sweep / list time, so edits take
     # effect without restart.
     studio_chat_retention_days: int = Field(ge=0, le=36500)
+    # Studio chat ACP terminal grant fence (#1136); default on. Off restores
+    # pre-#921 behavior for engines in auto permission mode (they never send
+    # session/request_permission, so no grant can ever be minted and Bash is
+    # dead). Read fresh at terminal/create; edits take effect without restart.
+    studio_chat_terminal_grant_required: bool = True
     workflows: InstanceWorkflowsSettings
     agent_workers: InstanceAgentWorkersSettings
     # #509/#554: capacity knobs folded into the instance document;

@@ -4573,6 +4573,11 @@ export interface components {
       skills_root: string
       /** Studio Chat Retention Days */
       studio_chat_retention_days: number
+      /**
+       * Studio Chat Terminal Grant Required
+       * @default true
+       */
+      studio_chat_terminal_grant_required: boolean
       /** Sweeper Enabled */
       sweeper_enabled: boolean
       /** Sweeper Interval Seconds */
@@ -4604,6 +4609,11 @@ export interface components {
       result_validate: components['schemas']['InstanceResultValidateSettings']
       /** Studio Chat Retention Days */
       studio_chat_retention_days: number
+      /**
+       * Studio Chat Terminal Grant Required
+       * @default true
+       */
+      studio_chat_terminal_grant_required: boolean
       /** Sweeper Enabled */
       sweeper_enabled: boolean
       /** Sweeper Interval Seconds */

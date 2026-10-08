@@ -93,6 +93,12 @@ def default_instance_document(
         # Studio chat session retention (#1041): 0 = disabled; read fresh at
         # sweep / list time, never hydrated into Settings.
         "studio_chat_retention_days": 0,
+        # Studio chat ACP terminal grant fence (#1136): True = terminal/create
+        # must consume a human-minted grant (#921). False restores the pre-921
+        # behavior for deployments whose engine runs in auto permission mode
+        # (it never sends request_permission, so no grant can ever be minted
+        # and Bash is dead). env allowlist and cwd pinning stay on either way.
+        "studio_chat_terminal_grant_required": True,
     }
     for block, keys in _NESTED_BLOCK_KEYS:
         block_model = getattr(runtime, block)
