@@ -37,7 +37,7 @@ def _payload() -> dict:
         "materials_ttl_days": 0,
         "execution_retention_days": 0,
         "studio_chat_retention_days": 0,
-        "studio_chat_terminal_grant_required": True,
+        "studio_chat_terminal_grant_required": False,
         "workflows": {"max_items_per_run": 20_000, "node_code_max_bytes": 64 * 1024},
         "agent_workers": {
             "max_archive_bytes": 64 * 1024 * 1024,
@@ -143,6 +143,23 @@ def test_put_rejects_skills_root(client) -> None:
     payload = _payload()
     payload["skills_root"] = "/somewhere/else"
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+
+
+def test_put_without_terminal_grant_key_preserves_stored_value(client) -> None:
+    """codex P1 on #1138: the PUT is a full-document replace, so a pre-upgrade
+    client omitting the fence key must not silently reset an enabled fence."""
+    payload = _payload()
+    payload["studio_chat_terminal_grant_required"] = True
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
+
+    legacy_payload = _payload()
+    legacy_payload.pop("studio_chat_terminal_grant_required")
+    response = client.put(INSTANCE_SETTINGS_URL, json=legacy_payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["studio_chat_terminal_grant_required"] is True
+
+    response = client.get(INSTANCE_SETTINGS_URL)
+    assert response.json()["studio_chat_terminal_grant_required"] is True
 
 
 def test_put_rejects_unknown_keys(client) -> None:

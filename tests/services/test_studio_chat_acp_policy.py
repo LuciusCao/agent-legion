@@ -389,6 +389,23 @@ def test_create_terminal_skips_grant_when_fence_disabled() -> None:
     asyncio.run(_go())
 
 
+def test_grant_minted_while_fence_off_is_still_spent() -> None:
+    """codex P2 on #1138: a grant minted with the fence off is consumed by the
+    terminal run — it cannot be replayed after the fence toggles on."""
+
+    async def _go() -> None:
+        client = _client()
+        client._handle.terminal_grant_required = lambda: False
+        client.terminals.grants.grant({"toolCallId": "tc"})
+        created = await client.create_terminal("s", sys.executable, ["-c", "print(1)"])
+        await client.release_terminal("s", created.terminal_id)
+        client._handle.terminal_grant_required = lambda: True
+        with pytest.raises(RequestError):
+            await client.create_terminal("s", sys.executable, ["-c", "print(1)"])
+
+    asyncio.run(_go())
+
+
 @pytest.mark.parametrize(
     ("decision", "grants"),
     [

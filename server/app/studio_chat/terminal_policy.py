@@ -33,18 +33,19 @@ from server.app.services.instance_settings_store import InstanceSettingsStore
 def terminal_grant_required(connect_source: Any) -> bool:
     """Whether terminal/create must consume a grant (instance setting, #1136).
 
-    Read fresh on every terminal/create (same contract as
-    ``studio_chat_retention_days``): admin edits take effect without a
-    restart. Missing/invalid values fail closed (fence on). Off restores the
-    pre-#921 behavior for engines in auto permission mode (they never send
-    ``session/request_permission``, so no grant can ever be minted and Bash
-    is dead); the env allowlist and cwd pinning above are unaffected.
+    Default off (#1136: engines in auto permission mode never send
+    ``session/request_permission``, so with the fence on no grant can ever be
+    minted and Bash is dead — the fence is opt-in hardening); missing or
+    malformed values degrade to off. Read fresh on every terminal/create
+    (same contract as ``studio_chat_retention_days``), so admin edits take
+    effect without a restart. The env allowlist and cwd pinning above are
+    unaffected either way.
     """
     stored = InstanceSettingsStore(connect_source).get()
     if stored is None:
-        return True
-    value = stored.get("studio_chat_terminal_grant_required", True)
-    return value if isinstance(value, bool) else True
+        return False
+    value = stored.get("studio_chat_terminal_grant_required", False)
+    return value is True
 
 
 # acp.transports.DEFAULT_INHERITED_ENV_VARS (what the SDK keeps for the agent

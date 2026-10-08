@@ -47,12 +47,20 @@ def create_instance_settings_router(job_queries, settings: Settings) -> APIRoute
         request: Request,
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> InstanceSettingsResponse:
-        store.put(payload.model_dump())
+        document = payload.model_dump()
+        if document.get("studio_chat_terminal_grant_required") is None:
+            # codex P1 on #1138: a pre-upgrade client omitting the key must not
+            # silently disable an enabled fence via the full-document replace.
+            stored = store.get() or {}
+            document["studio_chat_terminal_grant_required"] = bool(
+                stored.get("studio_chat_terminal_grant_required", False)
+            )
+        store.put(document)
         # #989: the document CSP switch is read at serve time through a
         # short cache; drop it so the next page load sees the new value.
         csp_compat = getattr(request.app.state, "csp_compat", None)
         if csp_compat is not None:
             csp_compat.invalidate()
-        return InstanceSettingsResponse.model_validate(payload.model_dump())
+        return InstanceSettingsResponse.model_validate(document)
 
     return router

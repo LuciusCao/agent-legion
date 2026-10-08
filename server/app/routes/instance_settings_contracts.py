@@ -132,11 +132,12 @@ class InstanceSettingsDocument(BaseModel):
     # cascade with the row). Read fresh at sweep / list time, so edits take
     # effect without restart.
     studio_chat_retention_days: int = Field(ge=0, le=36500)
-    # Studio chat ACP terminal grant fence (#1136); default on. Off restores
-    # pre-#921 behavior for engines in auto permission mode (they never send
-    # session/request_permission, so no grant can ever be minted and Bash is
-    # dead). Read fresh at terminal/create; edits take effect without restart.
-    studio_chat_terminal_grant_required: bool = True
+    # Studio chat ACP terminal grant fence (#1136); default off = pre-#921
+    # direct execution (engines in auto permission mode never send
+    # session/request_permission, so with the fence on no grant can ever be
+    # minted and Bash is dead). True re-enables the #921 fence. Read fresh at
+    # terminal/create; edits take effect without restart.
+    studio_chat_terminal_grant_required: bool = False
     workflows: InstanceWorkflowsSettings
     agent_workers: InstanceAgentWorkersSettings
     # #509/#554: capacity knobs folded into the instance document;
@@ -160,4 +161,9 @@ class InstanceSettingsResponse(InstanceSettingsDocument):
     skills_root: str = SKILLS_ROOT_DISPLAY
 
 
-class InstanceSettingsUpdate(InstanceSettingsDocument): ...
+class InstanceSettingsUpdate(InstanceSettingsDocument):
+    # codex P1 on #1138: optional in the update contract — the PUT is a full
+    # document replace, so a pre-upgrade client omitting the key must not
+    # silently disable an enabled fence; absent preserves the stored value
+    # (route layer materializes it before store.put).
+    studio_chat_terminal_grant_required: bool | None = None  # type: ignore[assignment]

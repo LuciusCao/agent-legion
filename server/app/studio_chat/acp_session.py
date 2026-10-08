@@ -120,10 +120,10 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         self.mcp_server = mcp_server
         self.env = dict(env or {})
         self.callbacks = callbacks
-        # #1136: instance-level escape hatch for the #921 grant fence (engine
-        # in auto permission mode never sends request_permission, so no grant
-        # can ever be minted and Bash is dead). None = fence on.
-        self.terminal_grant_required = terminal_grant_required or (lambda: True)
+        # #1136: the #921 grant fence is opt-in (engine in auto permission
+        # mode never sends request_permission, so no grant can ever be minted
+        # and Bash is dead). None = fence off (pre-#921 direct execution).
+        self.terminal_grant_required = terminal_grant_required or (lambda: False)
         # Resume path: try session/load of this prior ACP session when the
         # freshly-initialized agent advertises loadSession (session_load.py).
         self._resume_acp_session_id = resume_acp_session_id
