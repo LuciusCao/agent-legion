@@ -161,7 +161,7 @@ jobs:
       # 见 validate job）：sha-<短哈希> tag 从这里取。
       COMMIT_SHA: ${{ needs.validate.outputs.commit_sha }}
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: ${{ runner.temp }}/digests
           pattern: digests-*
