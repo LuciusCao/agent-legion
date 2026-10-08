@@ -4609,8 +4609,11 @@ export interface components {
       result_validate: components['schemas']['InstanceResultValidateSettings']
       /** Studio Chat Retention Days */
       studio_chat_retention_days: number
-      /** Studio Chat Terminal Grant Required */
-      studio_chat_terminal_grant_required?: boolean | null
+      /**
+       * Studio Chat Terminal Grant Required
+       * @default false
+       */
+      studio_chat_terminal_grant_required: boolean
       /** Sweeper Enabled */
       sweeper_enabled: boolean
       /** Sweeper Interval Seconds */

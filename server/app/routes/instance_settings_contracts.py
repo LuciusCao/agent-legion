@@ -161,9 +161,4 @@ class InstanceSettingsResponse(InstanceSettingsDocument):
     skills_root: str = SKILLS_ROOT_DISPLAY
 
 
-class InstanceSettingsUpdate(InstanceSettingsDocument):
-    # codex P1 on #1138: optional in the update contract — the PUT is a full
-    # document replace, so a pre-upgrade client omitting the key must not
-    # silently disable an enabled fence; absent preserves the stored value
-    # (route layer materializes it before store.put).
-    studio_chat_terminal_grant_required: bool | None = None  # type: ignore[assignment]
+class InstanceSettingsUpdate(InstanceSettingsDocument): ...
