@@ -1303,5 +1303,6 @@ exemptions:
     budget baselines at HEAD, absorbing this overage; if the file has not shrunk by
     expiry, split spawn.py instead of renewing.'
   owner: studio-chat
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1140
   ceiling: 107
   expires: 2026-11-30
