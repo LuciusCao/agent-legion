@@ -998,7 +998,7 @@ jobs:
       # Android/dotnet 等无关负载。
       - uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2.0.0
         with:
-          tool-cache: true
+          preinstalled-runtimes: true  # v2 改名，旧名 v3 移除
           android: true
           dotnet: true
           haskell: true
