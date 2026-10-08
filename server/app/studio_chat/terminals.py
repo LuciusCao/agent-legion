@@ -275,9 +275,16 @@ class TerminalClientMixin:
     ) -> CreateTerminalResponse:
         del session_id  # one store per handle; the id adds nothing here
         if not self.terminals.grants.consume(command, args):
-            raise RequestError.invalid_request(
-                {"reason": "terminal/create without an approved permission request"}
+            reason = (
+                "terminal/create refused: no approved permission grant for this "
+                "command. Grants are one-shot (300s TTL) and minted only by a "
+                "human-answered session/request_permission (or the session "
+                "allow-all switch); engine-side auto approval cannot mint one. "
+                "Request permission first, or enable allow-all, then retry."
             )
+            # #1136: the reason must ride in the JSON-RPC error message — kimi
+            # formats tool failures from `message` and drops `data`.
+            raise RequestError(-32600, f"Invalid request: {reason}", {"reason": reason})
         return await self.terminals.create(
             command=command,
             args=args,

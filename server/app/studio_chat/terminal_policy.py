@@ -84,9 +84,9 @@ def pinned_cwd(requested: str | None, root: str) -> Iterator[int]:
         try:
             fd = stack.enter_context(open_dir_beneath(real_root, _cwd_parts(requested, real_root)))
         except (PathEscapeError, OSError) as exc:
-            raise RequestError.invalid_params(
-                {"reason": "terminal cwd outside the session root or not a plain directory"}
-            ) from exc
+            # #1136: reason rides in the message too — engines drop `data`.
+            reason = "terminal cwd outside the session root or not a plain directory"
+            raise RequestError(-32602, f"Invalid params: {reason}", {"reason": reason}) from exc
         yield fd
 
 

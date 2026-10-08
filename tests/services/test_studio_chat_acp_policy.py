@@ -347,15 +347,27 @@ def _client() -> AcpClient:
 def test_create_terminal_without_an_approved_permission_is_refused() -> None:
     async def _go() -> None:
         client = _client()
-        with pytest.raises(RequestError):
+        # #1136: the refusal reason must ride in the error message — kimi
+        # formats tool failures from `message` and drops `data`.
+        with pytest.raises(RequestError) as no_grant:
             await client.create_terminal("s", sys.executable, ["-c", "print(1)"])
+        assert "no approved permission grant" in str(no_grant.value)
+        assert no_grant.value.code == -32600
         client.terminals.grants.grant({"toolCallId": "tc"})
         created = await client.create_terminal("s", sys.executable, ["-c", "print(1)"])
         await client.release_terminal("s", created.terminal_id)
-        with pytest.raises(RequestError):
+        with pytest.raises(RequestError) as spent:
             await client.create_terminal("s", sys.executable, ["-c", "print(1)"])
+        assert "no approved permission grant" in str(spent.value)
 
     asyncio.run(_go())
+
+
+def test_terminal_cwd_refusal_carries_reason_in_message(tmp_path) -> None:
+    with pytest.raises(RequestError) as excinfo:
+        _run_terminal(AcpTerminalStore(), "print(1)", cwd="/", default_cwd=str(tmp_path))
+    assert "outside the session root" in str(excinfo.value)
+    assert excinfo.value.code == -32602
 
 
 @pytest.mark.parametrize(
