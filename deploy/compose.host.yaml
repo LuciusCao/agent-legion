@@ -200,8 +200,10 @@ services:
       # velites 二进制外挂（issue #381）：worker 镜像不含 agent runtime 执行器，
       # 同 compose.worker.yaml 的挂载说明——自带副本目录优先于 PATH，架构须与
       # 镜像一致，产物来自 velites-release workflow 的 GitHub Release。
-      # long syntax + create_host_path: false：源缺失时 compose 启动即拒绝，
-      # 不让 docker 静默建目录（详见 compose.worker.yaml 同段注释）。
+      # 默认源按本文件所在的 deploy/ 解析，即 <仓库根>/velites-bin/velites。
+      # 源缺失时 daemon 会在该路径自动建空目录、容器照常启动（long syntax
+      # 也不阻止，见 compose.worker.yaml 同段勘误）；真正的 fail-fast 层是
+      # AGENT_WORKER_EXPECT_RUNTIMES 守卫（探测不到 velites → worker 退出码 2）。
       - type: bind
         source: ${VELITES_BIN:-../velites-bin/velites}
         target: /app/data/bin/velites

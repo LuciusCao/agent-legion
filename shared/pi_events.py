@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,7 @@ def scan_and_compress_pi_events(
     stderr_sink: Path | None = None,
     secret_spans: SecretSpans | None = None,
     secret_max_chars: int = 0,
+    event_observer: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[str | None, int, int, bytes]:
     """One pass: fold the model-error state, capture the stderr tail, and
     rewrite the file compressed.
@@ -102,6 +104,10 @@ def scan_and_compress_pi_events(
     FILE. Best-effort: an unwritable sink is logged and never fails the
     compression (the in-memory tail still rides the return value).
 
+    ``event_observer`` (#952) sees every parsed JSON-object event in the same
+    pass (e.g. ``OutputTruncation.observe`` counting ``stopReason=length``),
+    so extra per-event facts never cost a second full scan.
+
     Returns ``(model_error, original_bytes, compressed_bytes, stderr_tail)``;
     ``stderr_tail`` is ``b""`` when there is none. If the file cannot be
     processed it is left unchanged and ``(None, 0, 0, b"")`` is returned,
@@ -128,6 +134,8 @@ def scan_and_compress_pi_events(
                     stderr.append(raw_line)
                     continue
                 model_error = fold_model_error(event, model_error)
+                if event_observer is not None:
+                    event_observer(event)
                 if event.get("type") in RELEVANT_EVENT_TYPES:
                     dst.write(line + "\n")
             # 对齐 worker/_atomic 标准：replace 前 flush + fsync，崩溃不留半截文件。

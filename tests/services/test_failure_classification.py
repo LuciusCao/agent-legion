@@ -4,6 +4,7 @@ from server.app.services.failure_classification import (
     is_transient_retryable,
     resolve_failure_fields,
 )
+from shared.output_truncation import output_truncation_error
 
 
 def test_category_vocabulary_is_fixed():
@@ -138,6 +139,13 @@ def test_missing_outputs_is_output_missing():
         "technical",
         "output_missing",
     )
+
+
+def test_output_truncation_is_technical_output_truncated():
+    # #952: the per-call output limit (thinking included) left outputs missing.
+    message = output_truncation_error(1, ["report.json"])
+    assert classify_failure(0, message) == ("technical", "output_truncated")
+    assert classify_failure(1, message) == ("technical", "output_truncated")
 
 
 def test_unpack_failure_is_technical_execution_error():

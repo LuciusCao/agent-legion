@@ -419,17 +419,20 @@ def test_skill_catalog_scoped_binding_is_enforced(client, tmp_path, monkeypatch)
     scoped.headers["authorization"] = f"Bearer {token}"
     # Bound to ws_reader: reading ws_victim's workspace-directory skill via
     # ws_victim's scope is refused (binding, before any role logic) — even
-    # though the minter is a member of ws_victim.
+    # though the minter is a member of ws_victim. #971: the router-level
+    # guard now owns the binding (auth/scope_binding.py), so the refusal is
+    # its uniform 403 — decided before any DB read, independent of whether
+    # the workspace exists or the minter is a member.
     response = scoped.get(f"/api/agent-catalog/skills/{skill_key}", params={"workspace_id": ws_a})
-    assert response.status_code == 404
-    assert response.json()["detail"] == "Workspace not found"
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Scoped token bound to another workspace"
     # The tags surface shares the binding guard.
     skill_path = str(base / skill_key)
     assert (
         scoped.get(
             "/api/skills/tags", params={"path": skill_path, "workspace_id": ws_a}
         ).status_code
-        == 404
+        == 403
     )
     # Sanity through the minter's own workspace: the ws_victim-directory key
     # is refused by the directory strictness (key belongs to ws_victim), and

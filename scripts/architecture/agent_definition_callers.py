@@ -8,6 +8,11 @@ may only be referenced from the baselined ``files``: a new direct caller in
 production code (``server/``, ``worker/``, ``scripts/``) is an error, and a
 baselined file that no longer references any symbol must be dropped from
 the baseline (the allowlist only shrinks). Tests are out of scope.
+
+"Only shrinks" is machine-checked against git anchors (#1033,
+``agent_definition_callers_history``): a ``files`` entry missing from an
+anchor's allowlist is rejected, and symbols dropped since an anchor stay in
+the caller scan, so neither edit can launder a same-commit new caller.
 """
 
 from __future__ import annotations
@@ -15,6 +20,8 @@ from __future__ import annotations
 import ast
 import json
 from pathlib import Path, PurePosixPath
+
+from .agent_definition_callers_history import anchored_allowlist
 
 BASELINE_RELATIVE_PATH = "config/architecture/agent-definition-catalog-callers.json"
 SCANNED_GLOBS = ("server/**/*.py", "worker/**/*.py", "scripts/**/*.py")
@@ -70,7 +77,8 @@ def check_agent_definition_callers(root: Path) -> list[str]:
         symbols, allowed = load_catalog_caller_baseline(root / BASELINE_RELATIVE_PATH)
     except _BaselineError as exc:
         return [f"agent definition caller baseline: {exc}"]
-    errors: list[str] = []
+    errors, anchor_symbols = anchored_allowlist(root, BASELINE_RELATIVE_PATH, allowed)
+    symbols = symbols | anchor_symbols
     referencing: set[str] = set()
     paths = sorted({path for pattern in SCANNED_GLOBS for path in root.glob(pattern)})
     for path in paths:

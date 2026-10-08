@@ -1,61 +1,33 @@
-# 部署与配置
+# 部署约束与配置来源
 
-## Overview
+本文只收部署形态的**硬约束**（Worker 容器特权边界、Host 单副本、浏览器安全头）与配置来源；
+操作步骤在运维 runbook：Host / Worker 部署见
+[../agent-worker-deployment.md](../agent-worker-deployment.md)，对象存储见
+[../materials-storage-deployment.md](../materials-storage-deployment.md)，PostgreSQL 见
+[../postgresql-runbook.md](../postgresql-runbook.md)。目录结构见
+[project-structure.md](project-structure.md)，质量门见
+[local-quality-gates.md](local-quality-gates.md)。
 
-Agent Legion 使用 PostgreSQL 作为唯一控制面数据库；开发机和生产环境使用同一数据库语义。
+## 运行形态
 
-## Directory Structure
+| 形态 | 入口 | 端口（默认） |
+|------|------|--------------|
+| 开发 | `make dev-up`（`scripts/dev_stack.sh`） | 后端 :8001、Vite 控制台 :5174（代理 `/api`）、Worker 控制台 :8789 |
+| 生产（原生） | `make prod-up`（`scripts/native-prod-up.sh`） | 后端 :8000（同时托管 `frontend/dist/` 构建产物）、Worker 控制台 :8787；`NATIVE_BACKEND_PORT` / `NATIVE_WORKER_PORT` 覆盖 |
+| 生产（Docker） | `make prod-up docker`（`scripts/stack-prod-up.sh` → `deploy/compose.host.yaml`） | Host :8000（`AGENT_LEGION_HOST_BIND` 控制绑定地址） |
 
-```
-config/
-└── architecture/             # 架构治理配置（不变量、豁免、体积预算）
-
-# worker 配置模板 config/agent-worker.example.yaml 已随 #323 退役：worker
-# 唯一生效配置是状态副本 data/agent-worker-service/worker.yaml（控制台/API
-# 驱动）；docker/远程部署的可选 bootstrap 模板见 deploy/worker.*.example.yaml。
-
-# 运行时 split 配置（app.yaml / workflow.yaml / agent_legion.yaml）已整体退役：
-# 代码默认值 + env 覆盖 + DB 实例设置文档，文件存在即启动报错（带迁移指引）。
-# skill 侧：skills.yaml / skills.lock 与全局 skill_sources 注册表均已退役
-# （#322）——skill 是 ~/.agents/skills/<group>/<name> 下的本地 in-place git
-# 仓库（唯一模式）；pinned ref 的 commit 锁存 DB global_settings
-# （skill_lock），经 make skills-lock 遍历锁内条目重解析。
-
-data/                       # 文件产物（gitignored）
-├── videos/                 # 下载的视频与产物
-├── jobs/                   # Workspace Job 产物
-├── packages/               # ZIP 输出
-└── logs/                   # 处理日志
-
-scripts/
-├── check-quick.sh          # 快速质量门
-└── check.sh                # 完整质量门
-```
-
-## Data Flow
-
-```
-开发者启动后端（uvicorn 8001）+ 前端（vite 5174）
-    → 前端通过 Vite proxy 访问后端 API
-    → 后端通过 PostgreSQL 协调任务，并读写 data/ 目录产物
-    → Job 运行产物存入 data/jobs/<workspace>/<shard>/<job_id>/（详见 ../data-layout.md）；
-      权威副本在实例对象存储（`jobs/{workspace_id}/{job_id}/.v/{version}/{name}` 不可变版本 key，#853；存量行为 `jobs/{workspace_id}/{job_id}/{name}` + `job_artifacts`
-      清单表），本地 job_dir 只是执行暂存与可淘汰缓存
-```
-
-产物对象存储依赖 `AGENT_LEGION_S3_*` env 配置（自建可用 SeaweedFS/RustFS），
-部署细节见 [../materials-storage-deployment.md](../materials-storage-deployment.md)。
-
-> 生产环境使用 8000/5173；dev worktree 默认 8001/5174，避免与 prod 端口冲突。
-
-生产构建时，前端 `npm run build` 输出到 `frontend/dist/`，由 FastAPI 静态文件中间件托管。
-
-## Key Decisions
-
-- 使用 `uv` 而非 `pip`/`poetry`，依赖锁定在 `uv.lock`。
-- PostgreSQL 是唯一运行时数据库；`server/` 与 `scripts/` 已无任何 SQLite 使用（曾用 SQLite 记录上传状态的 `tools/content-uploader` 已随业务清理退役删除）。
-- 质量门分三层：本地 pre-push 默认 smoke 级（`scripts/run-local-gate.sh`，由 `.githooks/pre-push` 调用）；本地完整门 `check.sh`（`AGENT_LEGION_GATE_LEVEL=full` 触发）；CI（`.github/workflows/quality-gate.yml`）分阶段调用 `scripts/check-quick-backend.sh` / `check-quick-frontend.sh`，不调用 `check.sh`。
-- 多 worktree 开发时，每个 worktree 使用独立的后端端口和 `data/` 目录；`scripts/init-worktree.sh` 会按 worktree 名派生并创建专属 Postgres 库与 S3 bucket（`AGENT_LEGION_S3_BUCKET`）。
+- PostgreSQL 是唯一控制面数据库，开发机与生产语义一致；`server/` 与 `scripts/` 不使用 SQLite。
+- Job 产物权威副本在实例对象存储（`AGENT_LEGION_S3_*`，默认本地 SeaweedFS），本地 job_dir
+  只是执行暂存与可淘汰缓存（EXEC-ARTIFACT-STORE-001；key 布局见
+  [artifact-direct-url-pinning.md](artifact-direct-url-pinning.md)，`data/` 布局见
+  [../data-layout.md](../data-layout.md)）。
+- 配置来源：代码默认值 + env 覆盖（机器路径、密钥、DB URL 等 env-only 项）+ DB 实例设置文档；
+  运行时 split yaml 已全部退役，详见 [backend.md「Configuration Reference」](backend.md#configuration-reference)。
+  Worker 唯一生效配置是状态副本 `data/agent-worker-service/worker.yaml`（控制台 / API 驱动），
+  docker / 远程部署的可选 bootstrap 模板见 `deploy/worker.*.example.yaml`。
+- 开发端口是固定默认值，多 worktree 并行时用 `DEV_BACKEND_PORT` / `DEV_FRONTEND_PORT` /
+  `AGENT_WORKER_UI_PORT` 覆盖（`make dev-up` 透传）；`scripts/init-worktree.sh` 按 worktree
+  名派生专属 Postgres 库与 S3 bucket。
 
 ## Worker 容器特权边界
 
@@ -119,7 +91,7 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
 | # | 状态 | 位置 | 多副本下的症状形态 |
 |---|------|------|--------------------|
 | 1 | 事件总线（SSE fan-out） | `InProcessEventBus`（`server/app/events/bus.py`） | 副本 A 写入的 job/agent 事件只广播给连在 A 上的 SSE 客户端；连在 B 上的浏览器收不到该事件，表现为「任务明明在跑但界面不动」 |
-| 2 | 登录限速 | `LoginRateLimiter`（`server/app/auth/rate_limit.py`） | 每副本各自计数，暴力破解配额被副本数稀释（N 副本 ≈ N×5 次失败窗口） |
+| 2 | 登录限速 | `LoginRateLimiter`（`server/app/auth/rate_limit.py`） | 每副本各自计数（账号 + IP / 账号两个维度，#970），暴力破解配额被副本数稀释（N 副本 ≈ 每把钥匙 N 倍失败窗口） |
 | 3 | Studio Chat 会话 | `StudioChatService._runtimes`（`server/app/studio_chat/service.py`） | 会话的 agent 子进程只活在创建它的副本里；请求被负载均衡到另一副本时该会话互不可见，表现为「会话时有时无 / 无法继续」 |
 | 4 | 暂停状态启动重置 | `WorkspaceWorkerControl.reset_all_to_paused`（`server/app/worker_control.py`，`main.py` 启动调用） | 副本 B 启动即把全部 workspace 重置为暂停，把副本 A 上刚由操作员恢复的调度一并打掉，两个副本的暂停语义互相打架 |
 | 5 | hydration defer 公告（#887） | `HydrationDeferBoard`（`server/app/services/hydration_defer_board.py`），由 workflow worker 线程写入 | 只有恰好评估到该 job 的副本知道「输入恢复不全」；请求落到另一副本时 job 详情不显示提示，节点看起来只是普通「等待中」 |
@@ -127,7 +99,7 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
 ### 当前正确形态与护栏
 
 - **当前部署形态（单 uvicorn 进程 × 每数据库一个副本）全部正确**：开发机
-  `make dev`、生产 `scripts/native-prod-up.sh` / `deploy/` compose 均如此。多 worktree
+  `make dev-up`、生产 `scripts/native-prod-up.sh` / `deploy/` compose 均如此。多 worktree
   开发也天然合规——`scripts/init-worktree.sh` 给每个 worktree 派生专属数据库，
   「两个进程、两个库」不触发本节任何症状。
 - **第二副本探测（`server/app/single_replica_probe.py`）**：lifespan 启动时在一条
@@ -149,10 +121,18 @@ agent 全部秒退——这是可用性层面的硬依赖，不是可选配置�
 
 - **文档 CSP**：Host 对所有 `text/html` 响应（SPA 外壳与 catch-all）附加
   `Content-Security-Policy`（`server/app/http_csp.py`），作为 DOMPurify 之后的第二层。
-  `script-src` 暂保留 `'unsafe-inline'`：`srcdoc` iframe 继承宿主文档的策略，预览面板
-  bundle 按契约是 inline 脚本，收紧会让面板整体失效；其余指令（`connect-src` 限同源 +
-  对象存储 presign 源、`frame-ancestors 'self'`、`object-src 'none'`、`base-uri`、
-  `form-action`）照常生效。改前端外链资源（字体、图源、上传直连）时同步改该模块。
+  `script-src` 是 `'self' 'nonce-…'`（#989）：SPA 路由把 vite `html.cspNonce` 占位符
+  按响应替换为新 nonce（index.html 因此不带 ETag），前端从 `<meta property="csp-nonce">`
+  读回并由预览面板宿主盖到 bundle 的 `<script>` 上——`srcdoc` iframe 继承宿主文档策略。
+  面板里的内联事件属性（`onclick=`）与 `javascript:` URL 被拦截（宿主显示提示）；
+  已发布面板依赖它们的实例可由管理员在「全局设置 → 实例设置 → 安全」开启预览面板兼容模式
+  （实例设置 `csp_script_unsafe_inline`，默认关）回退到 `'self' 'unsafe-inline'`；SPA 路由经
+  `server/app/services/document_csp.py` 的 5 秒缓存读取，保存即失效缓存、无需重启
+  （设置页在该开关变化时整页刷新所在标签页，CSP 头随已加载文档固定、客户端路由不重读；
+  其他已打开的标签页需手动刷新）。其余指令
+  （`connect-src` 限同源 + 对象存储 presign 源、`frame-ancestors 'self'`、`object-src 'none'`、
+  `base-uri`、`form-action`）照常生效。vite dev server 不经 Host、不下发 CSP。改前端外链
+  资源（字体、图源、上传直连）时同步改该模块。
 - **`GET /api/agent-workers`**：admin 全量；其他身份只见准入范围与自身可见 workspace
   有交集的 Worker，`allowed_workspaces` 裁剪为交集、`register_token_ids` 置空，可见性
   规则与 workspace 列表同源（`server/app/auth/workspace_visibility.py`）。

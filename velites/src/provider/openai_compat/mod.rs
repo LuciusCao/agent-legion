@@ -61,6 +61,9 @@ pub struct OpenAiCompatProvider {
     api_key: String,
     client: reqwest::Client,
     read_idle_timeout: Duration,
+    /// Per-call output cap sent as `max_tokens` (#952); `None` keeps the
+    /// historical wire shape (no `max_tokens`, server default applies).
+    max_output_tokens: Option<u64>,
 }
 
 impl OpenAiCompatProvider {
@@ -80,7 +83,14 @@ impl OpenAiCompatProvider {
             api_key,
             client,
             read_idle_timeout: DEFAULT_READ_IDLE_TIMEOUT,
+            max_output_tokens: None,
         })
+    }
+
+    /// Set the per-call output cap (`--max-output-tokens`, #952).
+    pub fn with_max_output_tokens(mut self, max_output_tokens: Option<u64>) -> Self {
+        self.max_output_tokens = max_output_tokens;
+        self
     }
 
     /// Override the per-read idle timeout (tests).
@@ -103,6 +113,9 @@ impl OpenAiCompatProvider {
         body.insert("messages".into(), Value::Array(messages));
         body.insert("stream".into(), json!(true));
         body.insert("stream_options".into(), json!({"include_usage": true}));
+        if let Some(max_output_tokens) = self.max_output_tokens {
+            body.insert("max_tokens".into(), json!(max_output_tokens));
+        }
         if !req.tools.is_empty() {
             body.insert(
                 "tools".into(),
@@ -597,8 +610,9 @@ mod tests {
         // #637: the per-completion aggregate is defensively bounded — a
         // stream whose accumulated text passes MAX_STREAMED_TEXT_CHARS is
         // rejected as transient (retryable), not grown without bound. The
-        // OpenAI-compatible path sends no max_tokens, so the client-side
-        // cap is the only bound on a runaway/garbage stream.
+        // OpenAI-compatible path sends no max_tokens by default (#952 makes
+        // it opt-in), so the client-side cap is the only bound on a
+        // runaway/garbage stream.
         let mut aggregated = Aggregated::default();
         let mut err = None;
         // 33 × 1 MiB deltas push the text buffer past the 32 MiB cap.

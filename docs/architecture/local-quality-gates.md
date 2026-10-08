@@ -14,11 +14,11 @@ provide.
 | --- | --- | --- |
 | Commit | Fast | `scripts/check-fast.sh` |
 | Edit-test iteration (agent inner loop) | Affected: backend affected-test selection over the unit tier + frontend `vitest related` | `GATE_TIER=aff ./scripts/check-quick.sh` |
-| Push (any branch) | Smoke (default): static checks + smoke test tier, lanes trimmed by pushed paths | `scripts/check-quick.sh` with `GATE_TIER=smoke` |
-| Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: unit-tier quick suite, lanes trimmed | `scripts/check-quick.sh` |
-| Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | `scripts/check.sh` |
+| Push (any branch) | Smoke (default): static checks + smoke test tier, lanes trimmed by pushed paths | `.githooks/pre-push` → `scripts/run-local-gate.sh` → `scripts/check-quick.sh` with `GATE_TIER=smoke` |
+| Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: unit-tier quick suite, lanes trimmed | same hook path → `scripts/check-quick.sh` |
+| Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | same hook path → `scripts/check.sh` |
 | PR to `develop`/`main`/`master`/`release/*`, push to `main`/`master` | Full | CI lanes run in parallel; stable aggregate check `quality-gate` is the merge boundary |
-| Weekly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` (`nightly-gate.yml`) |
+| Weekly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` + `exemption-expiry` + `deps-audit` (`nightly-gate.yml`) |
 
 The pre-push hook diffs the pushed commits against their remote base and runs
 only the affected quick-gate lanes locally: frontend-only changes skip the
@@ -101,14 +101,14 @@ unaffected when invoked standalone.
 
 The smoke tier (`GATE_TIER=smoke`) replaces the backend pytest lane with a
 curated subset — every architecture governance test plus one core behavioral
-file per subsystem, assigned by path in `tests/conftest.py`
-(`_SMOKE_TEST_FILES`) and selected with `-m "smoke"`.
+file per subsystem, listed in `config/architecture/smoke-test-files.json`
+(loaded by `tests/conftest.py`) and selected with `-m "smoke"`.
 It runs without coverage because the 85% floor only applies to the full
 suite. Keep the tier under ~90 seconds: when adding tests for a new
 subsystem, add one core file to the smoke set rather than raising the budget.
 
 The unit tier (`GATE_TIER=unit`) runs the complete PostgreSQL-offline unit
-layer, selected with `-m "not postgres and not repository_gate"` against an
+layer, selected with `-m "not postgres"` against an
 unreachable loopback database URL, so an accidental database dependency fails
 the gate instead of silently using a developer database. CI runs it as the
 `backend-unit` job; the PostgreSQL integration layer (`GATE_TIER=postgres`)
@@ -180,11 +180,11 @@ A `paths-ignore` trigger would keep the workflow from
 starting at all and leave required checks pending forever — the docs-only
 PR deadlock first hit on #316 (single jobs) and #319 (matrix shards).
 Workflow and composite-action changes force all four path flags on, so an
-edited Rust or Docker lane cannot skip its own validation. The weekly schedule lives in `.github/workflows/nightly-gate.yml` (issue
-#193), which runs only `ci-extended` and `nightly-e2e` — the stress jobs
-never run on PR/push, and a scheduled trunk run in the quality-gate file
-shared its concurrency group, so it could cancel an in-flight push gate for
-the same ref. Branch protection requires only the final `quality-gate` job.
+edited Rust or Docker lane cannot skip its own validation. The weekly schedule
+lives in `.github/workflows/nightly-gate.yml` (issue #193) and runs the four
+jobs listed below (`ci-extended`, `deps-audit`, `exemption-expiry`,
+`nightly-e2e`); none of them runs on PR/push, and keeping the schedule out of
+the quality-gate file keeps it out of that file's per-ref concurrency group. Branch protection requires only the final `quality-gate` job.
 It runs with `always()`, reads every lane result and the path-selection flags
 through `needs`, requires every selected lane to succeed, accepts skips only
 for unselected lanes, and rejects failures or cancellations. Internal job
@@ -231,7 +231,8 @@ release-train `HEAD`-only exception.
   unrelated PRs); the nightly `exemption-expiry` job enforces it. Every PR
   (any target branch; scheduled jobs only see the default branch and only
   after the merge) additionally passes the target branch's registry
-  (`--base-registry`) and fails on entries the PR itself adds or re-dates
+  (`--base-registry`) and fails on entries the PR itself adds or re-targets
+  (deadline, nodeid, scope, recurring, registered_on / extended_on — #1034)
   with an already expired deadline.
 - **frontend-logic / frontend-component-a/b / frontend-coverage** — frontend
   static checks and the two Vitest projects (node / jsdom) as parallel jobs;
@@ -263,10 +264,19 @@ In `nightly-gate.yml`:
 - **ci-extended** — `tests/ci -m ci_extended` stress scenarios, with the
   unregistered-rerun (flaky governance) check. Runs only on the weekly
   schedule and manual dispatch.
+- **deps-audit** — dependency vulnerability audit via `make audit`
+  (`scripts/check-deps-audit.sh`: pip-audit over the frozen `uv.lock` export
+  plus `npm audit --omit=dev --audit-level=high`; #969). It queries live
+  advisory databases, so its verdict changes over time on an unchanged tree —
+  that is why it runs on the weekly schedule and manual dispatch instead of
+  the PR gate. Any finding fails the job; fixes land as dependency PRs.
 - **exemption-expiry** — refreshes the issue-state manifest and detects
   expired architecture exemptions; since #295 it also detects expired
   flaky-registry deadlines (`check_reruns.py --check-deadlines`, deadline
-  evidence without needing the extended rerun report). It is the only lane
+  evidence without needing the extended rerun report), and since #1024 on
+  every maintained branch too (`scripts/quality/flaky_branch_deadlines.py`:
+  `develop` plus each `release/X.Y.Z` above the default branch's version,
+  registries read leniently from the fetched branch tips). It is the only lane
   that fails on an expired deadline (#941) and annotates entries due within
   7 days as warnings; PR backend-coverage enforces observed reruns only. The
   registry's clock-free rules (one entry per nodeid, deadline at most 45
@@ -353,26 +363,18 @@ Configure the repository on GitHub as follows:
 Until required status checks are configured, nothing server-side blocks a red
 merge — the protection is only as strong as this one-time setup.
 
-Drift incident (2026-09-13, PR #642): `develop` was in fact configured with a
-per-job context list (pre-sharding habit) while `main` follows rule 2 above
-(`quality-gate` only). The 0.7.11 CI hardening (8ab318c10) split
-`frontend-component` into the `frontend-component-a/b` matrix shards, and the
-renamed context stopped being reported — the stale `frontend-component` entry
-became a ghost check that no run could ever satisfy, leaving every
-develop-based PR stuck in "Expected / Waiting for status". Fixed by replacing
-the ghost entry with the two shard contexts. Two lessons: (a) renaming or
-sharding a job requires updating branch protection in the same change —
-the settings live outside the repo and no CI test can catch the drift;
-(b) prefer the stable `quality-gate` aggregate per rule 2, which is immune
-to job-name churn by construction; the per-job list is acceptable only if
-maintained in lockstep with workflow renames.
+A per-job required-context list drifts silently: renaming or sharding a job
+leaves a ghost context that no run reports, and every PR waits forever on
+"Expected" (#642). The branch-protection settings live outside the repo, so
+no CI test catches this — require only the `quality-gate` aggregate (rule 2),
+or update the per-job list in the same change as any workflow rename.
 
 ## Extended Gate Policy
 
 The `ci-extended` CI job covers the areas that previously required a manual
 `scripts/check-ci.sh` run:
 
-- PostgreSQL schema migration, offline SQLite import, backup, or restore;
+- PostgreSQL schema migration, backup, or restore;
 - executor leases, capacity, cancellation, or worker concurrency;
 - filesystem deletion, path validation, or artifact recovery;
 - release tags or a large multi-branch integration.

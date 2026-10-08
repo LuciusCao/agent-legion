@@ -26,13 +26,13 @@ server/app/
 │   ├── token_usage.py      # Token 用量统计
 │   ├── worker.py           # Worker 控制（暂停/恢复）
 │   ├── workflow_*.py       # 工作流修订、草稿对比与节点代码发布
-│   ├── workspace_*.py      # Workspace、执行器、设置
+│   ├── workspace_*.py      # Workspace、执行配置、设置、密钥、共享材料
 │   └── __init__.py         # 路由组装
 ├── services/               # 业务逻辑服务层
 │   ├── job_*.py            # Job 查询、执行、重跑、删除、打包
 │   ├── token_usage*.py     # Token 用量统计与定价
 │   ├── workflow_*.py       # 工作流草稿、修订、格式转换
-│   ├── workspace_*.py      # Workspace 配置与执行器配置
+│   ├── workspace_*.py      # Workspace 配置与执行配置
 │   └── ...
 ├── workflows/              # Agent Legion DAG 定义与执行
 │   ├── definition.py       # 工作流定义解析
@@ -53,7 +53,14 @@ server/app/
 │                         # worker_events.py 结构化事件日志（#490）、
 │                         # sweepers.py 租约回收、code_dispatch/code_manifest 分片派发
 ├── agent_catalog/          # Agent 定义目录：definition.py AgentDefinition 模型、
-│                         # builtin.py demo workflow 内置模板
+│                         # builtin.py demo workflow 的 Agent 定义模板（seed-if-absent）
+├── agent_runtime/          # Host 侧 runtime catalog（AGENT_RUNTIMES）与各 runtime adapter
+├── auth/                   # 用户鉴权：会话、scoped token、workspace 访问判定
+├── bootstrap/              # 组装根的分域装配组（main.py 调用）
+├── mcp_server/             # Studio agent MCP server（scoped token 下的创作工具面）
+├── studio_chat/            # Studio chat 后端（ACP client 会话面）
+├── storage/                # 实例对象存储：S3 设置与客户端
+├── skills/                 # skill root 解析、版本锁与执行副本物化
 ├── configuration/          # 配置加载与 owned-keys 校验；executor_runtime.py
 │                         # executor_runtime 配置模型（issue #188 中立化）
 ├── executors/              # Code executor、租赁调度与 capacity 控制
@@ -198,6 +205,7 @@ server/app/
 | GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}` | `get_sample_item` | routes/quality.py |
 | POST | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/labels` | `add_sample_item_label` | routes/quality.py |
 | POST | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `create_replay` | routes/quality_replays.py |
+| GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replay-profiles` | `list_replay_profiles` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `list_replays` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/replays/{replay_id}` | `get_replay` | routes/quality_replays.py |
 | POST | `/workspaces/{workspace_id}/runs` | `create_run` | routes/runs.py |
@@ -297,6 +305,7 @@ server/app/
 | GET | `/agent-catalog` | `get_agent_catalog` | routes/workspace_agent_catalog.py |
 | GET | `/workspaces/{workspace_id}/execution-configuration` | `get_workspace_execution_configuration` | routes/workspace_agent_catalog.py |
 | GET | `/workspaces/{workspace_id}/agent-routes` | `get_workspace_agent_routes` | routes/workspace_agent_routes.py |
+| GET | `/workspaces/{workspace_id}/agent-provenance` | `get_workspace_agent_provenance` | routes/workspace_agent_routes.py |
 | POST | `/workspaces/{workspace_id}/api-tokens` | `create_api_token` | routes/workspace_api_tokens.py |
 | GET | `/workspaces/{workspace_id}/api-tokens` | `list_api_tokens` | routes/workspace_api_tokens.py |
 | DELETE | `/workspaces/{workspace_id}/api-tokens/{token_id}` | `revoke_api_token` | routes/workspace_api_tokens.py |
@@ -400,7 +409,7 @@ server/app/
 | ExternalArtifactEntry | BaseModel | name: str, storage: str, node_key: str, size_bytes: int | None, content_hash:... | app/routes/external_artifact_contracts.py |
 | ExternalArtifactListResponse | BaseModel | job_id: str, workspace_id: str, status: str, artifacts: list[ExternalArtifact... | app/routes/external_artifact_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, failure_category: str, failure_... | app/routes/failed_node_run_contracts.py |
-| FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
+| FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem], next_cursor: str | None | app/routes/failed_node_run_contracts.py |
 | DatabaseConnectionView | BaseModel | engine: str, host: str, port: int | None, name: str, user: str, password_set:... | app/routes/infra_connections_contracts.py |
 | StorageConnectionView | BaseModel | configured: bool, backend: str, endpoint_url: str, public_endpoint_url: str, ... | app/routes/infra_connections_contracts.py |
 | InfraConnectionsResponse | BaseModel | database: DatabaseConnectionView, storage: StorageConnectionView | app/routes/infra_connections_contracts.py |
@@ -498,10 +507,12 @@ server/app/
 | QualitySampleItemDetailResponse | BaseModel | item: QualitySampleItem, labels: list[QualityLabel], artifacts: list[QualityA... | app/routes/quality_contracts.py |
 | QualityLabelCreateRequest | BaseModel | verdict: LabelVerdict, reason_codes: list[str], note: str, replay_id: str | N... | app/routes/quality_contracts.py |
 | QualityLabelResponse | BaseModel | label: QualityLabel | app/routes/quality_contracts.py |
-| QualityReplayCreateRequest | BaseModel | agent_version: int | None | app/routes/quality_contracts.py |
-| QualityReplay | BaseModel | id: str, item_id: str, agent_id: str, agent_version: int | None, replay_job_i... | app/routes/quality_contracts.py |
+| QualityReplayCreateRequest | BaseModel | revision_id: str | None, use_draft: bool, agent_version: int | None | app/routes/quality_contracts.py |
+| QualityReplay | BaseModel | id: str, item_id: str, agent_id: str, agent_version: int | None, revision_id:... | app/routes/quality_contracts.py |
 | QualityReplayResponse | BaseModel | replay: QualityReplay | app/routes/quality_contracts.py |
 | QualityReplayListResponse | BaseModel | replays: list[QualityReplay] | app/routes/quality_contracts.py |
+| QualityReplayProfileOption | BaseModel | source: Literal['revision', 'draft'], revision_id: str | None, revision_versi... | app/routes/quality_contracts.py |
+| QualityReplayProfileOptionsResponse | BaseModel | options: list[QualityReplayProfileOption] | app/routes/quality_contracts.py |
 | QualityReplayDetailResponse | BaseModel | replay: QualityReplay, labels: list[QualityLabel], artifacts: list[QualityArt... | app/routes/quality_contracts.py |
 | QualityConfusionMatrix | BaseModel | tp: int, fp: int, fn: int, tn: int, precision: float | None, recall: float | ... | app/routes/quality_contracts.py |
 | QualityStatsGroup | BaseModel | node_key: str, skill_version: str, provider: str, model: str, runs: int, succ... | app/routes/quality_contracts.py |
@@ -584,7 +595,7 @@ server/app/
 | StudioChatSessionUpdateRequest | BaseModel | title: str | app/routes/studio_chat_contracts.py |
 | StudioChatSessionDeleteResponse | BaseModel | deleted: str | app/routes/studio_chat_contracts.py |
 | StudioChatSessionResponse | BaseModel | session: StudioChatSessionRecord | app/routes/studio_chat_contracts.py |
-| StudioChatSessionsResponse | BaseModel | sessions: list[StudioChatSessionRecord] | app/routes/studio_chat_contracts.py |
+| StudioChatSessionsResponse | BaseModel | sessions: list[StudioChatSessionRecord], retention_days: int | app/routes/studio_chat_contracts.py |
 | StudioChatMessageCreateRequest | BaseModel | text: str | app/routes/studio_chat_contracts.py |
 | StudioChatMessageRecord | BaseModel | id: str, session_id: str, kind: MessageKind, role: MessageRole, content: dict... | app/routes/studio_chat_contracts.py |
 | StudioChatMessageResponse | BaseModel | message: StudioChatMessageRecord | app/routes/studio_chat_contracts.py |
@@ -664,6 +675,8 @@ server/app/
 | WorkspaceExecutionConfigurationResponse | BaseModel | node_limits: list[NodeLimitEntry], migration_warnings: list[str], agent_capac... | app/routes/workspace_execution_contracts.py |
 | WorkspaceAgentRouteEntry | BaseModel | node_key: str, node_label: str, capability: str, agent_id: str, agent_skill: ... | app/routes/workspace_execution_contracts.py |
 | WorkspaceAgentRoutesResponse | BaseModel | routes: list[WorkspaceAgentRouteEntry] | app/routes/workspace_execution_contracts.py |
+| WorkspaceAgentProvenanceEntry | BaseModel | node_key: str, node_label: str, agent_id: str, agent_version: int | None | app/routes/workspace_execution_contracts.py |
+| WorkspaceAgentProvenanceResponse | BaseModel | nodes: list[WorkspaceAgentProvenanceEntry] | app/routes/workspace_execution_contracts.py |
 | WorkspaceSettingsPayload | BaseModel | entityType: str, previewHidden: list[str] | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, previewHidden: list[str] | None | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/workspace_execution_contracts.py |
@@ -733,7 +746,7 @@ server/app/
   锚点由 HEAD/HEAD^ 变为 HEAD + 该 base ref，release-train opt-out 优先于
   该覆盖，base ref 无法解析硬失败（错误带 fetch 指引）。超出预算的文件必须拆分或回退。
   ceiling 按有效行数计
-  （排除注释行与空行，实现见 `scripts/architecture/effective_lines.py`，`.sql` 的
+  （排除注释行、空行与 Python docstring 行（#610），实现见 `scripts/architecture/effective_lines.py`，`.sql` 的
   `--` 注释行同样排除），压缩注释
   对预算没有帮助。此外 production 文件有
   800 行绝对上限（`production.max_lines`，按原始行数计），豁免也不能突破；#293 起
@@ -752,6 +765,10 @@ server/app/
   的确认按协议返回空 body 的 204 响应（`Response(status_code=204)`），无 JSON 可建模。
 - `POST /api/agent-executions/{execution_id}/release-slot`（routes/agent_workers.py）：
   释放槽位的确认同样按协议返回空 204 响应，无 body。
+
+同理，SSE 流端点（workspace / dashboard events、Studio chat `session_events`）返回
+`text/event-stream` 的 `StreamingResponse`，也没有 JSON response model 可命名；路由以
+`response_class=StreamingResponse` 声明响应形态。
 
 ### 批量 job 端点的选择上限（#712）
 
@@ -814,7 +831,7 @@ server/app/
   `owned_keys.py` 是「哪个文件拥有哪个顶层段」的权威。
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
   - `workflows.enabled` 已退役（#385/#389）：调度线程总是启动（API 面无门禁）；部署形态由实例设置 `code_capacity` 表达——0 = 纯控制面模式（本进程不组装本地执行栈，code 节点 100% 依赖远程 code Worker，`/api/health` 报在线 code Worker 数）。
-  - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003，demo 节点在 workspace 初始化时注入）优先派发远程 code Worker（在线且 payload 合格），否则回落本地 code 池（纯远程模式下无回落，任务挂起等待 Worker）；agent 节点（pi / velites runtime）经 broker 派发给 Worker；shard 节点的分片执行同样先远程后本地（#389）——分片身份随 kind='code' manifest 持久化，broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（单活跃请求索引自 schema v79 纳入分片身份（`coalesce(manifest_json->>'shard_index', -1)` 表达式索引，#401）——同一 shard 节点的多个分片可并发在飞，非 shard 节点的单活跃语义逐字保留；fan-out 受 `CodeStockGate.pass_budget`（`server/app/workflow_worker/code_stock.py`）单 pass 预算节流），分片输出以 `shard_output-<index>.json` 常规 expected_output 随结果归档回传（普通 `node.outputs` 不进 shard 的 expected_outputs，#401）。
+  - 节点按 capability 分发：DB 中按 workspace 发布的 code 节点（EXEC-CODE-002/003；demo 的 code 节点以 `workflow_nodes/` 为 git 审阅种子源，主要经 `make import-demo` 发布进 demo workspace，绑定 demo workflow 的配置保存（`workspace_configuration._ensure_active_revision`）与启动时的 legacy global 行迁移（`demo_node_migration`）也会 seed-if-absent）优先派发远程 code Worker（在线且 payload 合格），否则回落本地 code 池（纯远程模式下无回落，任务挂起等待 Worker）；agent 节点（pi / velites runtime）经 broker 派发给 Worker；shard 节点的分片执行同样先远程后本地（#389）——分片身份随 kind='code' manifest 持久化，broker claim 事务经 `try_start_shard` 绑定 `node_shards` 行（单活跃请求索引自 schema v79 纳入分片身份（`coalesce(manifest_json->>'shard_index', -1)` 表达式索引，#401）——同一 shard 节点的多个分片可并发在飞，非 shard 节点的单活跃语义逐字保留；fan-out 受 `CodeStockGate.pass_budget`（`server/app/workflow_worker/code_stock.py`）单 pass 预算节流），分片输出以 `shard_output-<index>.json` 常规 expected_output 随结果归档回传（普通 `node.outputs` 不进 shard 的 expected_outputs，#401）。
 - 调度暂停是 **workspace 级**状态：每个 workspace 默认暂停，恢复经
   `POST /api/worker/resume?workspace_id=<id>`（或对应控制台开关）开始处理。
 - 后端每次启动会把全部 workspace 重置为暂停（刻意设计，防失控自跑）；恢复调度走
@@ -832,7 +849,7 @@ server/app/
 
 - 任一 node 失败会把 Job 置为 `failed`，错误写入数据库与日志文件。
 - 支持从任意 node 重跑；重跑会清除该 node 及下游所有 artifacts。
-- `DELETE /api/jobs/{job_id}` 会级联删除 Job 记录、`node_runs`、本地 Job 目录与日志；删除服务还会快照 `job_artifacts` 清单行并删除对象存储副本（`server/app/services/job_deletion.py`）。
+- `DELETE /api/jobs/{job_id}` 会级联删除 Job 记录、`node_runs`、本地 Job 目录与日志；删除服务还会快照 `job_artifacts` 清单行并删除对象存储副本（`server/app/services/job_deletion.py`）。事务内只删 DB 行，本地目录与日志在提交后才移入 `.trash` 清除，失败点终态与 `.trash` 的 TTL 回收见 [data-layout.md](../data-layout.md)「Job 删除与 `.trash`」（#958）。
 
 ### Job Intake 资源解析（resolve phase）
 
@@ -877,11 +894,12 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
   - `run_job_status_counts` — run 级 job 状态计数快照（schema v73，#358：触发器维护，run 详情读取从 group-by 变 PK 点查）
   - `workspace_packages` — 已创建 package 路径
 - 初始化器在 PostgreSQL advisory lock 下按版本应用 schema。数据迁移经
-  `server/app/db/migration_registry.py` 的 `MIGRATIONS` 注册表按版本有序应用
-  （DB-SCHEMA-001）；`db/migrations/__init__.py` 的平铺 re-export 随版本每次
+  `MIGRATIONS` 注册表按版本有序应用（定义在 `server/app/db/migration_chain.py`，
+  v87 及以后的条目在 `migration_chain_recent.py` 的 `RECENT_MIGRATIONS` 并拼接到其尾部；
+  `migration_registry.py` 是对外 re-export 面，DB-SCHEMA-001）；`db/migrations/__init__.py` 的平铺 re-export 随版本每次
   +2 行，长期收敛方向是从注册表派生该导出。
 - `JobQueries.connect()` 是上下文管理器（定义在 `ConnectionQueriesMixin`），确保 `conn.close()`；`read()`/`write()` 是 service 侧取连接的门面方法，workspace 侧查询由各 domain mixin 合并进统一的 `JobQueries`。门面构造参数 `path`（DSN）落私有属性 `_path`，公开只读出口是 `dsn_identity`（#187）。
-- `JobDeletionService` 级联删除 Job 记录、`node_runs`、本地 Job 目录与日志；同时快照 `job_artifacts` 清单行并删除对象存储副本（`server/app/services/job_deletion.py`）。
+- `JobDeletionService` 级联删除 Job 记录、`node_runs`、本地 Job 目录与日志；同时快照 `job_artifacts` 清单行并删除对象存储副本（`server/app/services/job_deletion.py`）。文件 I/O 不进删除事务：先提交后移动（`server/app/services/job_deletion_trash.py`，#958）。
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。
 - SQL 占位符约定：**新 SQL 一律写 psycopg 的 `%s`**，不要再写 SQLite 风格的 `?`。存量 `?` 由 `server/app/db/dialect.py` 盲替换为 `%s`，该层无法区分占位符与 Postgres JSON 的 `?`/`?|`/`?&` 操作符；`scripts/check_architecture.py` 的 SQL 占位符检查（基线 `config/architecture/sql-placeholders-baseline.json`）按 ratchet 方式只降不升，新文件出现任何 SQL `?` 即失败，改写存量后同步下调基线。
 - 服务层数据边界（BOUNDARY-DATA-001）：`server/app/services/` 下的新服务**必须经 `JobQueries` 门面访问数据库**（范式见 `services/job_pause.py` 等 38+ 个 facade-only 服务）；裸 SQL 字面量、`server.app.db.transaction`/`connection` 直接 import 与 DSN 逃逸引用（`.path`/`.dsn_identity` 属性读及其 `getattr` 形式）由 `scripts/architecture/service_data_boundary.py` 检查冻结（基线 `config/architecture/service-data-boundary-baseline.json`，只降不升）。存量服务迁移到门面后手动（或重跑 ratchet）下调基线；新文件出现任一绕行即失败。门面的 DSN 属性 `.path` 已私有化为 `_path`（#187 第三步）：`dsn_identity` 是唯一公开只读访问器（字符串 DSN），合法消费者仅数据层自身与经设计豁免的数据层毗邻组件（lease 仓储、artifact store）。
@@ -894,13 +912,13 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 Workflow Studio 提供可视化 workflow 编辑能力，与版本修订历史集成。
 
 - **Routes**: `routes/workflow_revisions.py`, `routes/workflow_draft_compare.py`
-- **Services**: `services/workflow_drafts.py`, `services/workflow_draft_publish.py`, `services/workflow_revision_format.py`, `services/job_workflow_versions.py`, `services/job_workflow_upgrade.py`（issue #645 起升级支持 `mode: clean | inherit`——clean 为默认的全量重跑；inherit 按变更种子集 + 下游传播闭包判定（`services/job_workflow_upgrade_propagation.py`，702 重构）：局部种子（定义归一化哈希 `services/job_workflow_upgrade_diff.py`、冻结 config 段、入边 when 条件、排除规则 skill:latest/分片/审批门/runtime_mutable、实现身份）经三通道闭包传播——边通道（全部新图显式下游，严格传播：种子重跑即其下游全部重跑）+ 隐式消费边通道（#759：`inputs` 名的生产者→消费者边，loader 不要求显式边、调度器靠输入文件解锁，与显式边合并为一张邻接表 `workflows/workflow_consumption.py`；RMW 不自边、无生产者的外部 input 不产生边）+ 同名纯输出通道（对象键无 node 身份，同名生产者一起重跑）；实现身份以 `node_runs.agent_definition_hash`（schema v84，claim 时刻记录、retention 不清扫；请求行 fallback）对照当前 published，不可证明或漂移即重跑；继承节点的 `job_artifacts` 清单行原样保留，产物不可达时退化重跑）; `/api/agent-catalog` 同时返回已发布 Agent Catalog 投影（versioned_entities），供编辑器按 capability 获取 runtime、skill、tools；provider/model/thinking 的「继承默认」提示读 Studio 草稿 YAML 的顶层 `execution` 块（workspace 级 Agent 默认已随 schema v64 退役），可 claim 的选项来自 `GET /api/workspaces/{id}/runtime-models`（在线 Worker 声明聚合）
+- **Services**: `services/workflow_drafts.py`, `services/workflow_draft_publish.py`, `services/workflow_revision_format.py`, `services/job_workflow_versions.py`, `services/job_workflow_upgrade.py`（issue #645 起升级支持 `mode: clean | inherit`——clean 为默认的全量重跑；inherit 按变更种子集 + 下游传播闭包判定（`services/job_workflow_upgrade_propagation.py`，702 重构）：局部种子（定义归一化哈希 `services/job_workflow_upgrade_diff.py`、冻结 config 段、入边 when 条件、排除规则 skill:latest/分片/审批门/runtime_mutable、实现身份）经三通道闭包传播——边通道（全部新图显式下游，严格传播：种子重跑即其下游全部重跑）+ 隐式消费边通道（#759：`inputs` 名的生产者→消费者边，loader 不要求显式边、调度器靠输入文件解锁，与显式边合并为一张邻接表 `workflows/workflow_consumption.py`；RMW 不自边、无生产者的外部 input 不产生边）+ 同名纯输出通道（对象键无 node 身份，同名生产者一起重跑）；实现身份以 `node_runs.agent_definition_hash`（schema v84，claim 时刻记录、retention 不清扫；请求行 fallback）对照当前 published，不可证明或漂移即重跑；继承节点的 `job_artifacts` 清单行原样保留，产物不可达时退化重跑）; `/api/agent-catalog` 返回已发布 Agent 定义投影（versioned_entities，只读历史）；Studio 编辑器不再从中取 runtime / tools（执行档案就在节点 `execution.runtime` 等字段上，EXEC-AGENT-PROFILE-001），只用它在节点未绑定 skill 时为技能文件预览 / prompt 预览按 capability 兜底取 skill，以及画布节点路由摘要（`useStudioDag` → `resolveStudioNodeRouting`）；provider/model/thinking 的「继承默认」提示读 Studio 草稿 YAML 的顶层 `execution` 块（workspace 级 Agent 默认已随 schema v64 退役），可 claim 的选项来自 `GET /api/workspaces/{id}/runtime-models`（在线 Worker 声明聚合）
 - **DB**: PostgreSQL `workflow_revisions` 表与版本化 schema 初始化
 - **Frontend**: `pages/WorkflowStudioPage.tsx`, `features/workflowStudio/`
 
 ### Token Usage
 
-Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
+Token Usage 收集并展示 agent 节点（pi / velites runtime）运行时的 token 消耗与成本。
 
 - **Routes**: `routes/token_usage.py` (`/jobs/{job_id}/token-usage`, `/jobs/{job_id}/runs/{run_id}/token-usage`, `/workspaces/{workspace_id}/token-usage`)
 - **Services**: `services/token_usage*.py`
@@ -945,11 +963,11 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 `config/app.yaml` 已整体退役：bootstrap/安全类键转 env-only，实例级可调配置迁入 DB：
 
 - env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers.console_url` → `AGENT_LEGION_WORKER_CONSOLE_URL`（主控制台「打开 Worker 控制台」入口地址，随 `GET /api/agent-workers` 的 `console_url` 下发；部署拓扑而非运行时调优，不进实例设置文档，dev/prod 启动脚本按 Worker 端口注入，空串 = 不显示链接）；`agent_workers` 的全局 register token 已随 issue #35 退役（遗留的 `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 或 yaml `register_token[_file]` 会让启动直接报错）。
-- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`code_capacity`（本地兜底执行并发上限，0 = 纯控制面模式，#389）、`workflows.max_items_per_run`、`workflows.node_code_max_bytes`（节点代码体积上限，默认 64KB、`ge=1024`，#786 起实例设置管理，env `AGENT_LEGION_NODE_CODE_MAX_BYTES` 保留为默认值来源：实例设置 > env > 默认）、`agent_workers.max_archive_bytes` / `min_protocol_version` / `max_concurrent_result_commits`（result 提交削峰 gate，默认 16，0 = 关闭，#521）/ `result_commit_batching`（终态写组提交，默认开，False = 直连串行路径，#591）/ `artifact_spot_check_percent`（信任上报产物的抽检比例，默认 3，0 = 裸键全信任，100 = 全核验；`.gz` 引用永远全量核验不参与抽检，#356）、`agent_enqueue.workers`（默认 48，上限 256）/ `max_pending`（默认 1024）（Host 入队线程池，#509）、`result_unpack.workers`（result 解包进程池尺寸，0 = 自动 min(4, 核数)，上限 64；env `AGENT_LEGION_RESULT_UNPACK_WORKERS` 保留为覆盖通道，#554）、`result_validate.workers`（result 校验进程池尺寸，同 result_unpack 语义；env `AGENT_LEGION_RESULT_VALIDATE_WORKERS`，#569）、`agent_claim.worker_touch_interval_seconds`（claim/result 路径刷新 Worker 在线标记的节流间隔，默认 30s，0 = 逐次写恢复 0.7.5 行为，#561）。`openclaw` 块已随 openclaw runtime 一并退役（#75）：存量 DB 文档读取时整块剥离、写入返回 422，explicit 单文件配置里的残留块被忽略；`workflows.enabled` 已随 #385/#389 退役：存量文档读取时键级剥离（`workflows` 块的 `max_items_per_run` 活跃保留）。
+- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`code_capacity`（本地兜底执行并发上限，0 = 纯控制面模式，#389）、`workflows.max_items_per_run`、`workflows.node_code_max_bytes`（节点代码体积上限，默认 64KB、`ge=1024`，#786 起实例设置管理，env `AGENT_LEGION_NODE_CODE_MAX_BYTES` 保留为默认值来源：实例设置 > env > 默认）、`agent_workers.max_archive_bytes` / `min_protocol_version` / `max_concurrent_result_commits`（result 提交削峰 gate，默认 16，0 = 关闭，#521）/ `result_commit_batching`（终态写组提交，默认开，False = 直连串行路径，#591）/ `artifact_spot_check_percent`（信任上报产物的抽检比例，默认 3，0 = 裸键全信任，100 = 全核验；`.gz` 引用永远全量核验不参与抽检，#356）、`agent_enqueue.workers`（默认 48，上限 256）/ `max_pending`（默认 1024）（Host 入队线程池，#509）、`result_unpack.workers`（result 解包进程池尺寸，0 = 自动 min(4, 核数)，上限 64；env `AGENT_LEGION_RESULT_UNPACK_WORKERS` 保留为覆盖通道，#554）、`result_validate.workers`（result 校验进程池尺寸，同 result_unpack 语义；env `AGENT_LEGION_RESULT_VALIDATE_WORKERS`，#569）、`agent_claim.worker_touch_interval_seconds`（claim/result 路径刷新 Worker 在线标记的节流间隔，默认 30s，0 = 逐次写恢复 0.7.5 行为，#561）。`csp_script_unsafe_inline`（文档 CSP 兼容模式，默认 false，#989）不进 Settings hydration：SPA 路由按响应经 5 秒缓存读取（`server/app/services/document_csp.py`），PUT 即失效缓存，无需重启。`openclaw` 块已随 openclaw runtime 一并退役（#75）：存量 DB 文档读取时整块剥离、写入返回 422，explicit 单文件配置里的残留块被忽略；`workflows.enabled` 已随 #385/#389 退役：存量文档读取时键级剥离（`workflows` 块的 `max_items_per_run` 活跃保留）。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码、workspace API token 请求限流桶参数）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`、`AGENT_LEGION_API_TOKEN_RATE_LIMIT_PER_MINUTE` / `_BURST`，默认 60 / 20，#738）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
-外部服务集成走实例级外部服务连接（EXTERNAL-CONNECTION-001），不经全局 yaml 段配置（全局 `cms:` 段已退役，写进任何 split yaml 会撞退役文件校验报错）：连接由 admin 在全局设置「外部服务连接」或 admin API（`GET/POST /api/admin/connections`、`PUT/DELETE /api/admin/connections/{key}`、`POST /api/admin/connections/{key}/test`、`GET /api/admin/connection-types`）维护，存 DB `external_connections`（只存非敏感配置）；敏感字段转入实例 vault（`instance_secrets`，Fernet 加密，连接配置里只留 `conn:<key>:<field>` 引用），鉴权换来的 token 加密缓存在 `connection_tokens`，过期在父连接行锁下单飞刷新（`server/app/services/connection_tokens.py`）。平台内置 `static_bearer` 与通用 `hmac_token`（HMAC 签名换 token）adapter（`server/app/services/connection_adapters.py` / `connection_adapter_hmac.py`）；业务专属鉴权协议随业务节点迁出，不再由平台携带。节点 config 只写 `connection: "<key>"` 引用连接 + 业务参数（出厂默认值声明在 capability 的 `config_schema`，沿「schema defaults → 节点 config → workspace 覆盖」链解析，Settings UI 可改）。env `CMS_*` / `AGENT_LEGION_CMS_TOKEN` 运行时通道已退役：升级后首次启动由 schema v34 迁移（`server/app/db/migrations/external_connections.py`）把 env 凭据与 workspace 节点旧配置收编进连接，此后 env 不再被读取。explicit 单文件配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。
+外部服务集成走实例级外部服务连接（SECURITY-EXTERNAL-CONNECTION-001），不经全局 yaml 段配置（全局 `cms:` 段已退役，写进任何 split yaml 会撞退役文件校验报错）：连接由 admin 在全局设置「外部服务连接」或 admin API（`GET/POST /api/admin/connections`、`PUT/DELETE /api/admin/connections/{key}`、`POST /api/admin/connections/{key}/test`、`GET /api/admin/connection-types`）维护，存 DB `external_connections`（只存非敏感配置）；敏感字段转入实例 vault（`instance_secrets`，Fernet 加密，连接配置里只留 `conn:<key>:<field>` 引用），鉴权换来的 token 加密缓存在 `connection_tokens`，过期在父连接行锁下单飞刷新（`server/app/services/connection_tokens.py`）。平台内置 `static_bearer` 与通用 `hmac_token`（HMAC 签名换 token）adapter（`server/app/services/connection_adapters.py` / `connection_adapter_hmac.py`）；业务专属鉴权协议随业务节点迁出，不再由平台携带。节点 config 只写 `connection: "<key>"` 引用连接 + 业务参数（出厂默认值声明在 capability 的 `config_schema`，沿「schema defaults → 节点 config → workspace 覆盖」链解析，Settings UI 可改）。env `CMS_*` / `AGENT_LEGION_CMS_TOKEN` 运行时通道已退役：升级后首次启动由 schema v34 迁移（`server/app/db/migrations/external_connections.py`）把 env 凭据与 workspace 节点旧配置收编进连接，此后 env 不再被读取。explicit 单文件配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。
 
 `config/workflow.yaml` 的 `executors` 段已随 executor 概念整体退役（P-0.5，schema v47 drop 定义/allocation 两表，EXEC-CODE-POOL-001）：非 Agent 路由节点一律进隐含 code 池，池容量 = 实例设置 `code_capacity`（#389 改述：本地兜底执行并发上限——远程 code Worker 在线时任务优先远程执行，此值只约束宿主本地回落的并发；0 = 纯控制面模式，本地执行栈不组装），lease 行写常量 `'code'`；节点级并发经 `workspace_node_limits` 声明（远程 code claim 同样按节点计数）。code 节点的可调参数只剩一个声明层——节点 `config_schema:` 块（随 revision 快照版本化），平台保留执行键 `timeout_seconds` / `sandbox_network` 自动合并进每个 code 路由节点的有效 schema。
 
@@ -957,12 +975,12 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码、work
 
 token 用量计价已产品化：定价存于 `global_settings` 表（`token_usage` 文档），由 admin 在「全局设置」页（`GET/PUT /api/admin/token-usage-pricing`）维护，成本按每条 run 的 provider + model 匹配定价逐行计算；不再有任何 yaml 侧配置。
 
-Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 schema v27 退役，出现在 yaml 中启动即报错）：AgentDefinition 存于 `versioned_entities` 表（schema v46 起 workspace 作用域，解析严格限定本 workspace、零全局兜底），经 Studio「Agent 管理」或 `/api/agent-definitions`（`workspace_id` 查询参数）做 draft → publish → archive 生命周期管理；热读路径经 `AgentService` 的短 TTL（5s）published 缓存。执行配置（provider/model/thinking）不含在 AgentDefinition 内，按严格链解析：节点 `execution.*` 覆盖 → workflow 顶层 `execution` 默认（loader 加载时合并进每个非 start 节点）→ 报错（workspace `default_agent_*` 已随 schema v64 退役，无全局兜底）；thinking 可空（空 = runtime 决定）。
+Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 schema v27 退役，出现在 yaml 中启动即报错）：AgentDefinition 存于 `versioned_entities` 表（schema v46 起 workspace 作用域，解析严格限定本 workspace、零全局兜底），曾经 `/api/agent-definitions`（`workspace_id` 查询参数）做 draft → publish → archive 生命周期管理，#935 起写端点已 deprecated（响应带 `Deprecation` 头）、读端点保留，#1079 起设置页只剩只读的「历史 Agent 定义」列表、Studio 不再有 Agent 定义编辑入口；热读路径经 `AgentService` 的短 TTL（5s）published 缓存。agent 节点的执行档案（runtime / tools / `requires_labels` / config_schema / 节点 skill 绑定）自 #440 P3（#935）起以节点为准（EXEC-AGENT-PROFILE-001），一律经 `server/app/services/agent_node_profile.py` 的 `resolve_agent_node_profile` 解析：节点有效 `execution.runtime`（节点值或 workflow 顶层 `execution.runtime` 默认）发布必填，档案取节点自身字段，不要求 published Agent、revision 发布不物化路由，dispatch 把 runtime / labels 冻结进请求行（`profile_source='node'`，schema v92）；schema v93 已把存量 legacy agent 节点回填为自含档案，上述 AgentDefinition 目录转为只读历史（写 API/MCP 已 deprecated），按 capability 解析 published AgentDefinition 的 legacy 路径（`resolve_agent_node_profile` 对未声明有效 runtime 的节点回落 capability 唯一的已发布 Agent）仍服务两类节点：回填前冻结的 job 快照里的 legacy 节点，以及 active revision 里 v93 未能内联、尚未补 runtime 的节点——后者的新 job 照旧按 capability 解析，直到该节点补齐 runtime 并发布新 revision（发布门禁拒绝无 runtime 的 agent 节点）。只填 `requires_labels` 不填 runtime 发布即报错。执行配置（provider/model/thinking）不含在 AgentDefinition 内，按严格链解析：节点 `execution.*` 覆盖 → workflow 顶层 `execution` 默认（loader 加载时合并进每个非 start 节点）→ 报错（workspace `default_agent_*` 已随 schema v64 退役，无全局兜底）；thinking 可空（空 = runtime 决定）。
 
 其他配置文件：
 
 - Agent skill 是 skill root（`~/.agents/skills`，单一来源 `server/app/skills/skill_roots.py`）下的本地 in-place git 仓库（唯一模式，#322 起全局 skill_sources 注册表、远程 clone 通道与缓存缺失 re-clone 自愈均已退役；缓存缺失即报错并指引在 skill root 下创建）。节点 `skill.ref`：`latest`（空 ref 归一为它）= 跟随仓库 HEAD，每次 dispatch 现场解析、永不入锁；具体 tag = 首次 dispatch 把解析的 commit 冻结进 DB `global_settings` 的 `skill_lock` 文档（v2 多值：per-skill `{repo, refs: {ref → commit}}`，`repo` 仅审计），CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）遍历锁内已有条目重解析 pinned refs。启动一次性迁移 `server/app/skills/skill_sources_retirement.py` 幂等删除残留的 `skill_sources` 文档（保留 `skill_lock`）；tracked `config/skills.yaml` / `config/skills.lock` 早已退役。
-- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；schema v62 起创建 workspace 不再种子模板，demo workspace 由 `make import-demo`（`scripts/seed_demo.py`）提供，其 id 与 key 同为 `education_video_problems_generation`。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）。schema v62（DB-WORKSPACE-KEY-BINDING-001）起 workspace id 即 workflow key：创建时显式填写、终身不可变（发布/对比草稿 key 与 id 不符即拒绝）；v62 迁移把存量 workspace 的 id 改成已绑定的 key，#211 M3（schema v91）删除了独立的 key 列，契约面的 `workflow_key` 字段、`workflows/{key}` 路径别名与不匹配守卫一并移除。
+- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review；demo DAG 本体在 `builtin_demo.py`），节点声明 `type` / `capability`，`agent` 节点可声明 `skill` 绑定（#76）与自含执行档案（`execution.runtime` / `requires_labels`，EXEC-AGENT-PROFILE-001），不声明 `runner` / `agent` / 命令模板；schema v62 起创建 workspace 不再种子模板，demo workspace 由 `make import-demo`（`scripts/seed_demo.py`）提供，其 id 与 key 同为 `education_video_problems_generation`。workflow 没有全局注册表（schema v40 的 `workflow_catalog` 表已于 schema v50 退役，DB-WORKFLOW-CATALOG-001）：workflow 就是 workspace 内部的一份 DAG，权威定义是该 workspace 的 active revision（schema v50 起节点覆盖校验、settings schema、无快照 job 的定义回退、worker 扫描列表全部改读它）。schema v62（DB-WORKSPACE-KEY-BINDING-001）起 workspace id 即 workflow key：创建时显式填写、终身不可变（发布/对比草稿 key 与 id 不符即拒绝）；v62 迁移把存量 workspace 的 id 改成已绑定的 key，#211 M3（schema v91）删除了独立的 key 列，契约面的 `workflow_key` 字段、`workflows/{key}` 路径别名与不匹配守卫一并移除。
 - worker 配置：`config/agent-worker.example.yaml` 已随 #323 退役；worker 唯一生效配置是状态副本 `data/agent-worker-service/worker.yaml`（控制台/API 驱动，Worker 侧独立加载，不经 server 的 owned-key 校验），docker/远程部署的可选 bootstrap 模板见 `deploy/worker.host.example.yaml` / `deploy/worker.remote.example.yaml`。
 - `config/architecture/*`：架构不变量、豁免、源文件体积预算。
 
@@ -973,12 +991,7 @@ Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 sc
 - 覆盖率阈值 `fail_under = 85`（`pyproject.toml`）。
 - API 测试使用 `fastapi.testclient.TestClient`，`client` fixture 必须 `with TestClient(app) as c:`。
 
-常用命令：
-
-```bash
-UV_CACHE_DIR=.uv-cache uv run pytest -q
-UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
-```
+日常验证走分档 gate（`GATE_TIER=aff ./scripts/check-quick.sh` 等），测试分层、并行度与 postgres 测试库约定见 [local-quality-gates.md](local-quality-gates.md)；单跑相关测试用 `uv run pytest <files> -q`。
 
 ## Security Considerations
 

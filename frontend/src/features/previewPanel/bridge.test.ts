@@ -48,6 +48,20 @@ describe('isPanelToHostMessage', () => {
         height: '320',
       })
     ).toBe(false)
+    // #989 宿主探针消息：directive 必须是字符串。
+    expect(
+      isPanelToHostMessage({
+        source: PREVIEW_PANEL_SOURCE,
+        type: 'csp-violation',
+        directive: 'script-src-attr',
+      })
+    ).toBe(true)
+    expect(
+      isPanelToHostMessage({
+        source: PREVIEW_PANEL_SOURCE,
+        type: 'csp-violation',
+      })
+    ).toBe(false)
     expect(isPanelToHostMessage({ source: 'other', type: 'ready' })).toBe(false)
     expect(isPanelToHostMessage(null)).toBe(false)
     expect(isPanelToHostMessage('ready')).toBe(false)

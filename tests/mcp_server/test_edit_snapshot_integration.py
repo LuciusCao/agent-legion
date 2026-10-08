@@ -155,6 +155,26 @@ def test_maximum_shared_snapshot_round_trip_with_worst_case_json_escaping(snapsh
         assert (root / "_shared" / item["path"]).read_bytes() == item["content"].encode()
 
 
+def test_shared_round_trip_skips_and_keeps_build_residue(snapshot_channel):
+    """#1038 repro: a validator run left scripts/__pycache__/*.pyc in _shared;
+    the full export still succeeds and the files_path save keeps the cache."""
+    run, root = snapshot_channel
+    files = [
+        {"path": "map.json", "content": '{"version":1,"materials":[]}'},
+        {"path": "scripts/common.py", "content": "X = 1\n"},
+    ]
+    json.loads(run("save_shared_materials", files=files))
+    cache = root / "_shared" / "scripts" / "__pycache__" / "common.cpython-312.pyc"
+    cache.parent.mkdir()
+    cache.write_bytes(b"\xcb\r\r\nbytecode")
+    exported = json.loads(run("get_shared_materials", output_path="residue.json"))
+    snapshot = json.loads(Path(exported["output_path"]).read_bytes())
+    assert sorted(f["path"] for f in snapshot["files"]) == ["map.json", "scripts/common.py"]
+    receipt = json.loads(run("save_shared_materials", files_path=exported["output_path"]))
+    assert receipt["workspace_id"] == "edit-snapshot"
+    assert cache.read_bytes() == b"\xcb\r\r\nbytecode"
+
+
 @pytest.mark.parametrize("kind", ["skill", "shared"])
 @pytest.mark.parametrize(
     "bad", [b"bad\xff", b"x" * (128 * 1024 + 1)], ids=["invalid-utf8", "oversized"]

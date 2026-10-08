@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
 
 from server.app.services.job_reset_closure import shared_name_rerun_closure
@@ -37,6 +38,7 @@ from server.app.services.job_workflow_upgrade_diff import (
     node_is_inherit_excluded,
 )
 from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.schema import WorkflowNode
 from server.app.workflows.workflow_consumption import dependency_children, walk_downstream
 
 
@@ -46,8 +48,15 @@ def collect_change_seeds(
     new_definition: WorkflowDefinition,
     new_frozen_config_json: str | None,
     implementation_excluded: frozenset[str] | set[str] = frozenset(),
+    *,
+    legacy_views: Mapping[str, WorkflowNode] | None = None,
 ) -> set[str]:
     """新图可执行节点中的局部变更种子集（S1–S5，不含上游传播）。
+
+    ``legacy_views``（#935 升级 diff 归一）：v93 回填把 legacy agent 节点
+    内联成自含节点后，旧快照节点与新节点的档案字段必然不同。旧节点等于
+    新节点的 legacy 视图（档案字段按 provenance ``restore`` 还原）时 S1
+    视为未变；实现身份另由 S4 按 provenance 定义哈希独立核对。
 
       - S1 定义种子：key 不在旧快照可执行集（新增），或节点定义归一化
         哈希新旧不等（label 等展示字段仍排除）；
@@ -77,9 +86,13 @@ def collect_change_seeds(
         ]
 
     seeds: set[str] = set(implementation_excluded)
+    views = legacy_views or {}
     for key, node in new_definition.executable_nodes.items():
         old_node = old_executable.get(key)
-        if old_node is None or node_definition_hash(old_node) != node_definition_hash(node):
+        if old_node is None or node_definition_hash(old_node) not in {
+            node_definition_hash(node),
+            *([node_definition_hash(views[key])] if key in views else []),
+        }:
             # S1：新增节点或定义哈希漂移。
             seeds.add(key)
             continue

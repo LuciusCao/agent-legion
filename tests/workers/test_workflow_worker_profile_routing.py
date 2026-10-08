@@ -85,7 +85,6 @@ def test_route_less_legacy_agent_node_never_falls_into_the_code_pool(
     (no route row) while this job's frozen snapshot keeps the legacy node —
     resolve its Agent by capability, or fail with an actionable message."""
     from server.app.agent_catalog import AgentDefinition
-    from server.app.workflow_worker import routing
     from server.app.workflow_worker.routing import NodeRoute
 
     definitions = {
@@ -96,13 +95,37 @@ def test_route_less_legacy_agent_node_never_falls_into_the_code_pool(
     worker.state.route_cache = {}
     with (
         patch(
-            "server.app.workflow_worker.routing_cache._resolve_uncached",
+            "server.app.workflow_worker.routing._resolve_uncached",
             return_value=NodeRoute("executor", target_id="code"),
         ),
-        patch.object(routing, "legacy_agent_catalog", return_value=definitions),
+        patch.object(agent_node_profile_catalog, "legacy_agent_catalog", return_value=definitions),
     ):
         route = resolve_node_route(worker, "ws", "ws", _legacy_node())
 
     assert (route.kind, route.target_id) == expected
     if route.kind == "error":
         assert "upgrade the job" in route.error_message
+
+
+def test_stale_agent_route_row_never_routes_a_code_node_to_an_agent() -> None:
+    """#935 R1: a frozen ``workspace_node_routes`` row may outlive a node the
+    job snapshot declares ``code`` (node turned agent → code). The snapshot's
+    node type wins: the code node goes to the code pool, and the cache keys
+    on the node type so an agent-typed sibling snapshot is not affected."""
+    worker = MagicMock()
+    worker.state.route_cache = {}
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.return_value = {
+        "target_kind": "agent",
+        "target_id": "draft-agent",
+    }
+    worker.job_db._connect_read.return_value.__enter__.return_value = conn
+    code_node = WorkflowNode(
+        key="draft", label="draft", capability="draft", node_type="code", outputs=["o.json"]
+    )
+
+    with patch("server.app.workflow_worker.routing.get_local_node_limit", return_value=None):
+        route = resolve_node_route(worker, "ws", "ws", code_node)
+
+    assert route.kind == "executor"
+    assert list(worker.state.route_cache) == [("ws", "ws", "draft", False)]

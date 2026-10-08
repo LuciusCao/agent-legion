@@ -291,3 +291,86 @@ class TestClaimBatchLimitConfigApi:
 
         assert response.status_code == 422
         assert store.read()["claim_batch_limit"] == 32, "校验失败不得半应用（保持默认值）"
+
+
+def test_lane_spawn_error_mid_batch_logs_unsubmitted_and_propagates(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#1051：批内第二条提交撞线程耗尽（LaneSpawnError）——已提交的第一条
+    保留，当前条与本批余下逐条按 execution_id 记日志（交租约过期由 Host
+    重排队），异常原样上抛给 executor 的专用退避臂，本 pass 不再发起 claim。"""
+    from worker.execution.execution_lane import LaneSpawnError
+
+    budget = {"agent": 3, "code": 0}
+    claims = [{"execution_id": f"e{i}", "kind": "agent"} for i in range(3)]
+    ctx, _, submitted = _ctx(_FakeBatchClient([claims]))
+    collect = _submitter(submitted, budget)
+
+    def submit(claim: dict) -> None:
+        if claim["execution_id"] == "e1":
+            raise LaneSpawnError("execution lane thread start failed: can't start new thread")
+        collect(claim)
+
+    with pytest.raises(LaneSpawnError):
+        drain_budget(ctx, budget, {"agent": 10, "code": 0}, 32, 0, True, submit)
+
+    assert [c["execution_id"] for c in submitted] == ["e0"]
+    assert len(ctx.client.calls) == 1
+    out = capsys.readouterr().out
+    assert "left to lease expiry: e1, e2" in out
+    assert ctx.lane_probe is True
+
+
+def test_lane_exhaustion_clamps_each_pass_to_one_probe_until_submit_succeeds() -> None:
+    """#1051 熔断：撞 LaneSpawnError 后，耗尽期间每个退避后的 pass 至多领 1
+    条（每次丢弃都消耗该执行一次 Host 重排次数，满批再丢会成批烧光
+    requeue_limit 判败节点）；首次 submit 成功即解除，同一 pass 后续轮次
+    与之后的 pass 恢复满额批申请。"""
+    from worker.execution.execution_lane import LaneSpawnError
+
+    exhausted = True
+    submitted: list[str] = []
+    budget = {"agent": 5, "code": 0}
+
+    def submit(claim: dict) -> None:
+        if exhausted:
+            raise LaneSpawnError("execution lane thread start failed: can't start new thread")
+        budget["agent"] -= 1
+        submitted.append(claim["execution_id"])
+
+    def claims(prefix: str, n: int) -> list[dict]:
+        return [{"execution_id": f"{prefix}{i}", "kind": "agent"} for i in range(n)]
+
+    ctx, _, _ = _ctx(_FakeBatchClient([claims("a", 5)]))
+    with pytest.raises(LaneSpawnError):
+        drain_budget(ctx, {"agent": 5, "code": 0}, {"agent": 10, "code": 0}, 32, 0, True, submit)
+    assert ctx.client.calls[-1]["limit"] == 5
+    assert ctx.lane_probe is True
+
+    # 仍耗尽：退避后的两个 pass 各只探测 1 条。
+    for prefix in ("b", "c"):
+        ctx.client.script = [claims(prefix, 1)]
+        with pytest.raises(LaneSpawnError):
+            drain_budget(
+                ctx, {"agent": 5, "code": 0}, {"agent": 10, "code": 0}, 32, 0, True, submit
+            )
+        assert ctx.client.calls[-1]["limit"] == 1
+        assert ctx.client.calls[-1]["agent_limit"] == 1
+    assert submitted == []
+
+    # 资源恢复：探测 1 条成功 → 同一 pass 下一轮即恢复满额（剩余预算 4）。
+    exhausted = False
+    budget = {"agent": 5, "code": 0}
+    calls_before = len(ctx.client.calls)
+    ctx.client.script = [claims("d", 1), claims("e", 4)]
+    claimed, _ = drain_budget(ctx, budget, {"agent": 10, "code": 0}, 32, 0, True, submit)
+    assert claimed is True
+    assert [call["limit"] for call in ctx.client.calls[calls_before:]] == [1, 4]
+    assert ctx.lane_probe is False
+    assert submitted == ["d0", "e0", "e1", "e2", "e3"]
+
+    # 之后的 pass 直接满额。
+    budget = {"agent": 5, "code": 0}
+    ctx.client.script = [claims("f", 5)]
+    drain_budget(ctx, budget, {"agent": 10, "code": 0}, 32, 0, True, submit)
+    assert ctx.client.calls[-1]["limit"] == 5

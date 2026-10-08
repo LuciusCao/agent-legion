@@ -11,7 +11,7 @@ touching those readers again.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from server.app.agent_catalog import AgentDefinition
@@ -20,6 +20,7 @@ from server.app.jobs.queries.agent_profile_scan import has_self_contained_agent_
 from server.app.services.agent_node_profile import (
     AgentNodeProfile,
     profile_from_definition,
+    resolve_agent_node_profile,
     resolve_routed_agent_profile,
 )
 from server.app.services.agent_service import (
@@ -39,19 +40,20 @@ def legacy_agent_catalog(
     return published_agent_definitions(connect_source, workspace_id)
 
 
-def lazy_legacy_agent_catalog(
-    connect_source: ConnectSource, workspace_id: str
-) -> Callable[[], Mapping[str, AgentDefinition]]:
-    """Memoized loader for the shared route decision: read at most once, only
-    if some node actually needs the catalog (PR #1085)."""
-    memo: list[Mapping[str, AgentDefinition]] = []
+def legacy_fallback_agent_id(
+    connect_source: ConnectSource, workspace_id: str, node: Any
+) -> str | None:
+    """Agent a route-less legacy agent node dispatches to, or None (#933, #1091).
 
-    def load() -> Mapping[str, AgentDefinition]:
-        if not memo:
-            memo.append(legacy_agent_catalog(connect_source, workspace_id))
-        return memo[0]
-
-    return load
+    Its capability's unique published Agent — exactly how revision publish
+    derived the route before the active revision pruned it. Shared by the
+    dispatch fallback (``workflow_worker.routing_fallback``) and the job
+    detail projection, so both name the same Agent for a frozen legacy node.
+    """
+    profile = resolve_agent_node_profile(node, legacy_agent_catalog(connect_source, workspace_id))
+    if profile is None or profile.legacy_ref is None:
+        return None
+    return profile.legacy_ref.agent_id
 
 
 def fresh_legacy_agent_catalog(

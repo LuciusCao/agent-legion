@@ -28,6 +28,7 @@ const settings: InstanceSettingsResponse = {
   code_capacity: 16,
   materials_ttl_days: 0,
   execution_retention_days: 0,
+  studio_chat_retention_days: 0,
   workflows: { max_items_per_run: 20000, node_code_max_bytes: 65536 },
   agent_workers: {
     max_archive_bytes: 104857600,
@@ -41,12 +42,24 @@ const settings: InstanceSettingsResponse = {
   result_unpack: { workers: 0 },
   result_validate: { workers: 0 },
   agent_claim: { worker_touch_interval_seconds: 30 },
+  csp_script_unsafe_inline: false,
   skills_root: '~/.agents/skills',
 }
 
 // PUT 载荷不含只读字段 skills_root。
 const updateBase: Record<string, unknown> = { ...settings }
 delete updateBase.skills_root
+
+/** jsdom 的 window.location.reload 不可 spyOn，用可配置属性替换整个 location。 */
+function mockLocationReload(): ReturnType<typeof vi.fn> {
+  const reload = vi.fn()
+  Object.defineProperty(globalThis, 'location', {
+    value: { ...globalThis.location, reload },
+    configurable: true,
+    writable: true,
+  })
+  return reload
+}
 
 function renderSection() {
   return render(
@@ -160,6 +173,7 @@ describe('InstanceSettingsSection', () => {
   })
 
   it('saves edited values via PUT with integer rounding', async () => {
+    const reload = mockLocationReload()
     vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
       ...settings,
       ...payload,
@@ -200,6 +214,111 @@ describe('InstanceSettingsSection', () => {
     // Baseline updated: the form is clean again after a successful save.
     await waitFor(() => {
       expect(screen.getByText('保存实例设置')).toBeDisabled()
+    }) // 非 CSP 字段变化不重载文档。
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('toggles the preview panel CSP compatibility mode online (#989)', async () => {
+    const reload = mockLocationReload()
+    vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
+      ...settings,
+      ...payload,
+    }))
+
+    renderSection()
+    // 安全组直接可见（非高级参数），默认关闭，说明降低安全性的代价。
+    const toggle =
+      await screen.findByLabelText('预览面板兼容模式（允许内联事件属性）')
+    expect(toggle).not.toBeChecked()
+    expect(screen.getByText(/会降低平台页面的脚本防护/)).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /保存后当前页面将自动刷新以应用新的安全策略，其他已打开的标签页需手动刷新/
+      )
+    ).toBeInTheDocument()
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByText('保存实例设置'))
+
+    await waitFor(() => {
+      expect(updateInstanceSettings).toHaveBeenCalledWith({
+        ...updateBase,
+        csp_script_unsafe_inline: true,
+      })
+    })
+    // CSP 头随当前文档固定：开关真正变化时重载顶层文档（codex P1）。
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1))
+  })
+
+  it('does not reload when the CSP switch is toggled back before saving (#989)', async () => {
+    const reload = mockLocationReload()
+    vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
+      ...settings,
+      ...payload,
+    }))
+
+    renderSection()
+    const toggle =
+      await screen.findByLabelText('预览面板兼容模式（允许内联事件属性）')
+    // 改开再改回 + 改一个别的字段：保存成功，但开关值未变 → 不重载。
+    fireEvent.click(toggle)
+    fireEvent.click(toggle)
+    fireEvent.change(screen.getByLabelText('材料保留天数（0 关闭）'), {
+      target: { value: '5' },
+    })
+    fireEvent.click(screen.getByText('保存实例设置'))
+
+    await waitFor(() => {
+      expect(updateInstanceSettings).toHaveBeenCalledWith({
+        ...updateBase,
+        materials_ttl_days: 5,
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByText('保存实例设置')).toBeDisabled()
+    })
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('does not reload when the CSP switch save fails (#989)', async () => {
+    const reload = mockLocationReload()
+    vi.mocked(updateInstanceSettings).mockRejectedValue(
+      new Error('HTTP 500: boom')
+    )
+
+    renderSection()
+    fireEvent.click(
+      await screen.findByLabelText('预览面板兼容模式（允许内联事件属性）')
+    )
+    fireEvent.click(screen.getByText('保存实例设置'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 500: boom')
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('edits the Studio chat retention window online (#1041)', async () => {
+    vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
+      ...settings,
+      ...payload,
+    }))
+
+    renderSection()
+    // 保留策略组直接可见（非高级参数）：默认 0 = 永不清理。
+    const field =
+      await screen.findByLabelText('归档/已删除对话保留天数（0 关闭）')
+    expect(field).toHaveValue(0)
+    expect(field).toHaveAttribute('max', '36500')
+    // 开启即首轮清理存量超龄会话（含界面不可见的已删除会话）的警示。
+    expect(
+      screen.getByText(/首轮清理会删除已超龄的归档\/已删除会话/)
+    ).toBeInTheDocument()
+    fireEvent.change(field, { target: { value: '30' } })
+    fireEvent.click(screen.getByText('保存实例设置'))
+
+    await waitFor(() => {
+      expect(updateInstanceSettings).toHaveBeenCalledWith({
+        ...updateBase,
+        studio_chat_retention_days: 30,
+      })
     })
   })
 

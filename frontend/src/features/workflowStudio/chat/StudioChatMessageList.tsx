@@ -114,7 +114,6 @@ export function StudioChatMessageList(props: Props) {
               }
               draftAnchorId={draftAnchorId}
               workflowDraft={chat.workflowDraft}
-              agentDrafts={chat.agentDrafts}
               nodeDrafts={chat.nodeDrafts}
               allowAllPermissions={chat.session?.allow_all_permissions ?? false}
               permissionDisabled={
@@ -124,7 +123,10 @@ export function StudioChatMessageList(props: Props) {
               onApplyWorkflowDraft={props.onApplyWorkflowDraft}
               onSelectNode={props.onSelectNode}
               onAnswerPermission={chat.answerPermission}
-              onToggleAllowAll={chat.setAllowAll}
+              // 渲染时绑定会话 id（#962）：切会话后旧卡片的迟到点击被丢弃。
+              onToggleAllowAll={(enabled) =>
+                chat.setAllowAll(enabled, chat.activeSessionId ?? undefined)
+              }
             />
           )
         }}

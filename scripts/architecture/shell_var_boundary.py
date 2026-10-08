@@ -11,7 +11,12 @@ why Linux CI never sees it. Rule: in every tracked shell source, a bare
 
 Scope: ``*.sh`` / ``*.bash``, git hook directories, ``Makefile`` / ``*.mk``
 (recipe lines are shell; ``$$NAME`` hits as ``$NAME``) and any tracked file
-whose shebang names a shell. Full-line comments are skipped (never expanded).
+whose shebang names a shell. Only ``$`` the shell would expand are judged
+(#1022): comments, single quotes, ``\\$`` escapes, quoted heredoc bodies and
+make-level ``$`` references are skipped, while multi-line double-quoted
+strings and unquoted heredoc bodies are scanned on every physical line —
+lexical state lives in ``shell_lexer`` (fail-closed scan and Makefile
+handling in ``shell_sources``).
 """
 
 from __future__ import annotations
@@ -20,6 +25,8 @@ import re
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path
+
+from .shell_sources import dollar_offsets, makefile_shell_text
 
 __test__ = False
 
@@ -39,13 +46,23 @@ def is_shell_source(path: str, head: bytes) -> bool:
     return bool(_SHEBANG.match(head))
 
 
+def _is_makefile(path: str) -> bool:
+    return path.endswith(".mk") or path.rsplit("/", 1)[-1] == "Makefile"
+
+
+def _shell_chunks(path: str, content: bytes) -> list[tuple[int, bytes]]:
+    """(first_lineno, shell text) units: a Makefile's shell-bound lines, else the file."""
+    return list(makefile_shell_text(content)) if _is_makefile(path) else [(1, content)]
+
+
 def find_violations(path: str, content: bytes) -> list[str]:
-    """Report each line where a bare ``$NAME`` touches a non-ASCII byte."""
+    """Report each expanding bare ``$NAME`` that touches a non-ASCII byte."""
     errors: list[str] = []
-    for lineno, line in enumerate(content.split(b"\n"), start=1):
-        if line.lstrip().startswith(b"#"):
-            continue
-        for match in BARE_VAR_BEFORE_NON_ASCII.finditer(line):
+    for first_lineno, text in _shell_chunks(path, content):
+        for lineno, offset in dollar_offsets(text, first_lineno):
+            match = BARE_VAR_BEFORE_NON_ASCII.match(text, offset)
+            if match is None:
+                continue
             var = match.group()[:-1].decode("ascii")
             errors.append(
                 f"{path}:{lineno}: bare {var} directly followed by a non-ASCII "

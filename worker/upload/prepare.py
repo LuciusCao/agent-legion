@@ -11,9 +11,12 @@ import tarfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from shared.output_truncation import OutputTruncation
 from shared.pi_events import scan_and_compress_pi_events
+from worker.upload.report_policy import declared_ceiling_rejection
 from worker.upload.result_metadata import (
     MAX_ERROR_MESSAGE_CHARS,
+    exit_verdict,
     failed_metadata,
     write_empty_archive,
 )
@@ -21,7 +24,6 @@ from worker.upload.stderr_evidence import (
     AGENT_STDERR_FILENAME,
     max_secret_chars,
     secret_spans,
-    stderr_error_message,
     stderr_tail_for_run,
 )
 
@@ -31,9 +33,11 @@ if TYPE_CHECKING:
 
 def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # prepare_result + 失败降级为 failed 上报；直传回落后按清空的
-    # artifact_uploads 重跑，tar 随之内嵌产物。
+    # artifact_uploads 重跑，tar 随之内嵌产物。#959：备妥的归档超 Host 下发
+    # 上限即诚实判败（空归档 + failed），不把注定 413 的归档送进 report 车道。
     try:
-        return prepare_result(task)
+        metadata, archive, outputs = prepare_result(task)
+        rejection = declared_ceiling_rejection(task, archive)
     except Exception as exc:
         # #204 broad-except audit: 归档准备的故意降级（prepare_result 的
         # docstring 契约："may raise — caller degrades"，镜像拆分前的内联
@@ -46,6 +50,9 @@ def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]
         archive = task.execution_dir / "result.tar.gz"
         write_empty_archive(archive)
         return failed_metadata(task, f"result preparation failed: {exc}"), archive, []
+    if rejection is not None:
+        return failed_metadata(task, rejection), archive, []
+    return metadata, archive, outputs
 
 
 def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
@@ -77,31 +84,25 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # the longest literal's length as lookback, see shared/pi_events.py).
     # 崩溃/超时（非 0 退出）下 model_error 归因让位给退出码归因——扫描
     # 结论只在 exit 0 时采纳。
+    # #952: the same pass counts per-call output truncations (stopReason=length).
     scanned_model_error, _, _, scanned_tail = scan_and_compress_pi_events(
         events,
         stderr_sink=run_dir / AGENT_STDERR_FILENAME,
         secret_spans=secret_spans,
         secret_max_chars=max_secret_chars(),
+        event_observer=(truncation := OutputTruncation()).observe,
     )
-    model_error = scanned_model_error if task.exit_code == 0 else None
     stderr_tail = stderr_tail_for_run(run_dir, scanned_tail)
     outputs = [name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()]
-    if task.exit_code == 130:
-        result_status, error = "cancelled", "Agent Worker is shutting down"
-    elif task.exit_code == 0:
-        if model_error:
-            result_status, error = "failed", model_error
-        else:
-            result_status, error = "completed", ""
-    elif task.exit_code == 124:
-        # Timeout kill (synthetic 124 from wait_for_exit): the attribution
-        # face (error_message) keeps the established timeout wording (#609)
-        # untouched — but the EVIDENCE face (agent_stderr_tail below) still
-        # rides along (#755 终审 P3-1): attribution and evidence are
-        # decoupled, the partial-run stderr stays available for diagnosis.
-        result_status, error = "failed", "Agent process timed out"
-    else:
-        result_status, error = "failed", stderr_error_message(task.exit_code, stderr_tail)
+    # #952: attribution only — replaces the opaque "Missing outputs" (exit 0,
+    # Host-judged) / "Agent process exited 1" (velites output contract) face;
+    # a truncated run whose outputs all landed still completes, and model
+    # errors / budget exhaustion / contract violations / crashes / timeouts
+    # keep their attribution (exclusion rules: OutputTruncation.failure).
+    failure = truncation.failure(task.expected_outputs, outputs, task.exit_code) or (
+        scanned_model_error if task.exit_code == 0 else None
+    )
+    result_status, error = exit_verdict(task.exit_code, failure, stderr_tail)
     metadata = {
         "status": result_status,
         "exit_code": task.exit_code,

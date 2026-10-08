@@ -59,6 +59,15 @@ def prepare_replay_copy(
         )
 
 
+def list_node_run_logs(conn: DatabaseConnection, job_id: str) -> list[tuple[str, str]]:
+    """job 全部 node_runs 的 ``(node_key, log_path)``：job 删除在删行事务内、
+    ``delete_job`` 之前读取，作为分片日志精确推导的快照（#958）。"""
+    rows = conn.execute(
+        "select node_key, log_path from node_runs where job_id=%s order by id", (job_id,)
+    )
+    return [(str(row["node_key"]), str(row["log_path"] or "")) for row in rows]
+
+
 def delete_job(conn: DatabaseConnection, job_id: str) -> None:
     cursor = conn.execute("delete from jobs where id=%s", (job_id,))
     if cursor.rowcount == 0:

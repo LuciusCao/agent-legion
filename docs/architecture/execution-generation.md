@@ -147,8 +147,7 @@ run-to / approval rework 一律走它，不允许各自重遍历定义。hydrati
 （`input_hydration.live_probe_names`）以索引键集为全集、再按本轮 node
 statuses 收窄：只恢复「有可运行消费者的 inputs ∪ 可评估条件边（target 可运行
 或 source completed）的条件产物」——终态分支的历史消费名不再是全 job 屏障
-（#759 复审 P1）；upgrade inherit
-的输入保护计划在同一索引上判定（后续 upgrade-inherit 层接入）。
+（#759 复审 P1）；upgrade 的输入保护计划在同一索引上判定（§2.10）。
 
 这是代次协议的前提：闭包划错，CAS 护住的现场本身就是错的。
 
@@ -568,44 +567,45 @@ manifest 按 legacy 消耗规则兜底：Worker 按排序后键序物化、同�
    通过的复查之后提交——恢复写先于复查，本轮候选带旧代次会被 claim CAS 拒、
    下一轮评估不再恢复已删行的名字，残余为毫秒级提交窗口（详见
    `input_hydration.py` 模块 docstring）。
-5. **upgrade inherit 模式**（保留未变节点产物）与发布/skill 锁域接入同一
-   协议是后续 upgrade-inherit 层的内容。
 
 #759 五面对抗自审（2026-09）登记、经 triage 暂不修的残余项（多为
 pre-existing 或需后续层设计；评审时按现状接受，不许扩大）：
 
-6. **eviction 淘汰输入文件后 targeted rerun 永不 ready**：`restore` 挂在
+5. **eviction 淘汰输入文件后 targeted rerun 永不 ready**：`restore` 挂在
    claim 后的 `execute()`，而 `_inputs_exist` 在 ready 评估就把它挡死——
    恢复路径逻辑上不可达，job 静默卡 queued。修复需 hydration 下沉到
    ready/dispatch 评估前（归 artifact-dependency-model 层）。
-7. **not_applicable 化已失效生产者困死纯隐式消费者**：rerun 重置并失效
+6. **not_applicable 化已失效生产者困死纯隐式消费者**：rerun 重置并失效
    产物后，分支条件把生产者翻 not_applicable，文件永不再生、隐式消费者
    永久 pending。修复需 ready-gate 沿合并邻接传播 not_applicable（同上层）。
-8. **审批 approve 产物文件事务前写**：并发决策下败者的文件可能覆写胜者
-   的上传内容（窗口窄）；round_no 锁外计数可重号。rework 的 feedback
-   已在锁内紧随暂存之后写入（自审修复：提交后写有 stale/missing-read
-   窗口，事务前写会被暂存扫走），回滚残留的新 note 由下轮覆盖。
-9. **单 claim 多候选单事务的 advisory 锁累积**：§2.5 的全序论证只覆盖
+7. **审批决策产物的换入残留与 round 计数**：approve 的 `approval.json`
+   （#929/#951）与 rework 的 feedback（#963）都已改为锁外写 fsync 临时
+   文件、锁内状态守卫通过后才 `replace_durable` 换入（#975：目录 fsync
+   先于提交；rework 换入在暂存与节点重置之后，不会被暂存扫走），重复 /
+   迟到决策在守卫处冲突、不碰已提交产物。仍接受的残余：`os.replace` 已
+   成功、之后目录 fsync 或提交失败时，本地文件保留未提交内容（gate 仍
+   待审），由下一次决策覆盖；round_no 锁外计数可重号。
+8. **单 claim 多候选单事务的 advisory 锁累积**：§2.5 的全序论证只覆盖
    批路径；单 claim 面靠 40P01 一次重试 + deadlock_timeout 缓解。
-10. **`mark_nodes_not_applicable_many` 翻 not_applicable 不盖代次戳**：
+9. **`mark_nodes_not_applicable_many` 翻 not_applicable 不盖代次戳**：
     当前无任何按戳消费方，登记为不对称点；后续若按戳判别归属须先补戳。
-11. **run-to 两臂下游语义差**：with-start 把目标下游翻 stale，without-start
+10. **run-to 两臂下游语义差**：with-start 把目标下游翻 stale，without-start
     只重置 closure ∩ 非 completed（文档化差异，刻意性待产品确认）。
-12. **legacy 无快照 job 的 clean upgrade**：旧定义不可知，本地产物文件
+11. **legacy 无快照 job 的 clean upgrade**：旧定义不可知，本地产物文件
     无法暂存（清单行/对象仍失效），残留文件可能解锁无生产者 input。
-13. **sweeper 遗留**：lease 行消失后 claimed/reporting 请求无归属
+12. **sweeper 遗留**：lease 行消失后 claimed/reporting 请求无归属
     （`lease is None: continue`）；agent sweep requeue 守卫含 failed 可
     复活聚合判死的节点；unclaimable sweep 固定头 256 窗口尾部饿死。
-14. **retention**：keyset 游标无 skew 重叠窗（近同时提交的行可永久漏删）；
+13. **retention**：keyset 游标无 skew 重叠窗（近同时提交的行可永久漏删）；
     retention 删请求行与 reaper 删 bundle 文件无顺序保证（极端停摆下
     bundle 文件泄漏）。
-15. **批/单发对 start 节点的拒绝 reason_code 不一致**；run-to 两臂与
+14. **批/单发对 start 节点的拒绝 reason_code 不一致**；run-to 两臂与
     upgrade 提交后未 `notify_schedulable_work`（有周期扫描兜底则为延迟
     差异）；run-to 不清 `node_runs.run_dir/session_dir`（日志路径 404）。
-16. **迟到旧代次 Worker 结果的登记先于 finish 代次 CAS**（§4.2 的交互
-    放大）：cleanup 的「键复现 = 新 attempt」启发式会把旧代次迟到登记
+15. **迟到旧代次 Worker 结果的登记先于 finish 代次 CAS**（§2.8 产物字节
+    写面的交互放大）：cleanup 的「键复现 = 新 attempt」启发式会把旧代次迟到登记
     误判为新产物放过，陈旧行/对象在新一代重跑完成前可被服务。
-17. **legacy 无锁直写臂与 guarded promote 恢复臂的竞态**：无 lease 的
+16. **legacy 无锁直写臂与 guarded promote 恢复臂的竞态**：无 lease 的
     upload（reconciler `reupload_missing`、approval 附件上传）直写
     authority key、不进 `artifact-authority` 锁域——与 guarded promote
     的闸拒/失败恢复交错时，恢复可能把旧字节盖回直写臂刚写入的对象，
@@ -615,14 +615,14 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
     上传持久失败 + reconciler 已成功」的组合。后续方向：reconciler 加
     active-lease 复查（`_job_still_evictable` 同款）或 legacy 臂进同一
     按 key 锁域（锁-only，不过闸）。
-18. **镜像上传先于 finish 与闸内失败转换的张力**（codex #774 P2）：D12
+17. **镜像上传先于 finish 与闸内失败转换的张力**（codex #774 P2）：D12
     镜像必须在 finish 之前上传（写闸要求 lease 仍 active，finish 提交
     后闸即关闭），而 staged_file_moves 提升失败→completed 转 failed 的
     转换发生在 finish 闸内——转换后失败的节点已留下镜像清单行与对象，
     无补偿删除。窗口窄（需镜像全成功 + 落盘失败），后果惰性：失败节点
     的产物行不被下游消费（producer 失败即阻断下游 ready），rerun/reset
     按暂存名删除清单行自愈；补偿删除会让 finish 闸耦合镜像层，不修。
-19. **hydration defer 无退避**（#775 对抗复审 P2）：清单行在而对象永久
+18. **hydration defer 无退避**（#775 对抗复审 P2）：清单行在而对象永久
     缺失/hash 不符时，job 每个 poll 周期全量重试下载（不缓存即重试是
     刻意纪律——防 parked-forever）；方向 fail-closed 正确，代价是
     warning 与 S3 GET 的固定频率噪音。后续方向：只存 next-retry 时刻的
@@ -653,7 +653,8 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
   `thread.join(timeout)` 后断言线程已死防假绿；每案断言「双方合理收尾 + 最终
   状态 == 某种合法串行序的结果」。批序回归案带突变自检：在旧的纯 job_id 序下
   本案必死锁。
-- 产物写面闸：`tests/db/test_generation_write_gates.py`（字节闸交错案）与
+- 产物写面闸：`tests/db/test_generation_write_gates_{upload,finish,fanout}.py`
+  （字节闸交错案，按写面拆分，共用 `generation_write_gate_helpers.py`）与
   `tests/db/test_completion_generation_gates.py`（归档 staging + finish 闸内
   提升）、`tests/services/test_agent_completion_remote.py` 系列。
 - 协议成员名单与证据：`config/architecture/architecture-invariants.yaml` 的

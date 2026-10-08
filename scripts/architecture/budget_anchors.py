@@ -1,7 +1,7 @@
 """Shared anchor plumbing for the monotonic (only-down) guards.
 
-Both monotonicity guards (budget ceilings #209, service data-boundary
-baseline #292) compare the working tree against committed anchors —
+The monotonicity guards (budget ceilings #209, service data-boundary
+baseline #292, Agent catalog caller allowlist #1033) compare the working tree against committed anchors —
 ``HEAD`` / ``HEAD^`` by default. ``AGENT_LEGION_BUDGET_BASE`` (e.g.
 ``origin/develop``) replaces ``HEAD^`` with an explicit PR base so a local
 run reproduces CI's merge-ref judgement exactly: on the merge ref HEAD^ IS
@@ -81,6 +81,31 @@ def unresolvable_base_anchor_error(check: str, revision: str) -> str:
         "(e.g. git fetch origin develop) or fix the ref name, or unset "
         f"{BASE_ANCHOR_OVERRIDE_ENV}"
     )
+
+
+def unresolvable_anchors_errors(git: GitHelper, check: str, anchors: tuple[str, ...]) -> list[str]:
+    """Hard-fail on git checkouts whose anchors do not resolve: a shallow
+    clone missing HEAD^ silently guts the committed-raise check exactly
+    where CI gates PRs (codex review on PR #231). The env opt-out covers
+    depth-1 checkouts that cannot fetch history — but never excuses an
+    explicitly configured base ref, which must resolve or be fixed. Non-git
+    checkouts stay quiet (nothing to compare against). Git execution
+    failures (missing binary, timeout, repository error) surface with their
+    real reason instead of posing as shallow clones (#236). Shared by every
+    monotonic guard (budgets, boundary baseline, Agent catalog callers)."""
+    if not git.is_repository():
+        if git.has_git_failures():
+            return [f"{check} monotonicity: git failed to run; cause: {git.diagnostics()}"]
+        return []
+    errors: list[str] = []
+    for revision in anchors:
+        if git.revision_resolvable(revision):
+            continue
+        if revision == base_anchor_override():
+            errors.append(unresolvable_base_anchor_error(check, revision))
+        elif not shallow_opt_out():
+            errors.append(unresolvable_anchor_error(check, revision, git.diagnostics()))
+    return errors
 
 
 def base_floor_anchor(source: str | None) -> str | None:

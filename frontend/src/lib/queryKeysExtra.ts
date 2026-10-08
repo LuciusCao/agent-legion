@@ -61,6 +61,7 @@ export const extraQueryKeys = {
   workflowStudioDraft: (workspaceId: string) =>
     ['workflowStudioDraft', workspaceId] as const,
   agentDefinitions: (workspaceId: string) => k('agentDefinitions', workspaceId),
+  agentProvenance: (workspaceId: string) => k('agentProvenance', workspaceId),
   // Studio DAG/Inspector 共享的 Agent 目录（P-0.5：executors 半区已退役）；
   // 面板发布/归档后失效重取。
   studioAgentCatalog: (workspaceId: string) =>
@@ -86,8 +87,6 @@ export const extraQueryKeys = {
   // Studio 节点运行 Prompt 预览；草稿 YAML 进 key（编辑 debounce 后重取）。
   studioNodePromptPreview: (ws: string, nodeKey: string, yaml: string) =>
     ['studioNodePromptPreview', ws, nodeKey, yaml] as const,
-  agentVersions: (workspaceId: string, agentId: string) =>
-    ['agentVersions', workspaceId, agentId] as const,
   qualityBatches: (workspaceId: string) =>
     ['qualityBatches', workspaceId] as const,
   qualityBatchDetail: (workspaceId: string, batchId: string) =>
@@ -98,6 +97,8 @@ export const extraQueryKeys = {
     ['qualityItemDetail', workspaceId, itemId] as const,
   qualityReplays: (workspaceId: string, itemId: string) =>
     ['qualityReplays', workspaceId, itemId] as const,
+  qualityReplayProfiles: (workspaceId: string, itemId: string) =>
+    ['qualityReplayProfiles', workspaceId, itemId] as const,
   qualityReplayDetail: (workspaceId: string, replayId: string) =>
     ['qualityReplayDetail', workspaceId, replayId] as const,
   // Agent 发起的 workflow 发布请求（#416）：轮询 pending 弹确认对话框。

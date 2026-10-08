@@ -1,8 +1,5 @@
-import {
-  formatQualityDateTime,
-  QualityArtifactView,
-  QualityLabelHistory,
-} from './QualityArtifactView'
+import { formatDateTime } from '../../lib/formatters'
+import { QualityArtifactView, QualityLabelHistory } from './QualityArtifactView'
 import { QualityLabelForm } from './QualityLabelForm'
 import { QualityReplaySection } from './QualityReplaySection'
 import { toErrorMessage } from '../../lib/queryError'
@@ -38,17 +35,22 @@ export function QualityItemDetailPanel({
     ['节点', item.node_key],
     ['Capability', item.capability],
     ['技能版本', item.skill_version],
-    [
-      'Agent 版本',
-      item.agent_version != null ? String(item.agent_version) : '-',
-    ],
+    // #1079（#440 D6）：执行身份 = Agent 定义哈希（legacy）或节点执行档案
+    // 哈希（自含节点）；Agent 版本只对 legacy 节点的运行有值。
+    ['执行身份', item.agent_definition_hash.slice(0, 12) || '-'],
+    ...(item.agent_version != null
+      ? ([['Agent 版本（legacy）', String(item.agent_version)]] as [
+          string,
+          string,
+        ][])
+      : []),
     ['Provider / 模型', `${item.provider} / ${item.model}`],
     ['运行状态', item.run_status],
     ['失败类别', item.failure_category || '-'],
     ['失败详情', item.failure_detail || '-'],
     ['Job', item.job_id],
     ['Node Run', String(item.node_run_id)],
-    ['时间', formatQualityDateTime(item.created_at)],
+    ['时间', formatDateTime(item.created_at)],
   ]
 
   return (

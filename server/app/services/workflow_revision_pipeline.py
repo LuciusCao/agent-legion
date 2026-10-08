@@ -14,10 +14,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
+from server.app.services.agent_profile_provenance import (
+    carry_forward_provenance,
+    embed_provenance,
+)
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config_prune import override_prune_commit_hook
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
-from server.app.services.workflow_revision_routes import derive_agent_routes
+from server.app.services.workflow_revision_routes import (
+    derive_agent_routes,
+    has_legacy_agent_nodes,
+)
 from server.app.services.workflow_revision_runtime import embed_node_code_pins
 from server.app.workflows.definition import WorkflowDefinition
 
@@ -46,9 +53,31 @@ def publish_workflow_revision(
         list(definition.executable_nodes),
     )
     stored_json = embed_node_code_pins(definition_json, pins)
+    # #935：v93 回填写下的 agent_profile_provenance 对档案字段未变的节点
+    # 随新 revision 延续（同 node_code_pins，不计入 definition_hash）——
+    # 升级 diff 归一靠它识别「旧快照 legacy 节点 == 内联后的节点」。
+    previous = job_db.get_active_workflow_revision(workspace_id, definition.key)
+    stored_json = embed_provenance(
+        stored_json,
+        carry_forward_provenance(
+            str(previous["definition_json"]) if previous is not None else None, definition
+        ),
+    )
     version = job_db.next_workflow_revision_version(workspace_id, definition.key)
     revision_id = f"{workspace_id}:{definition.key}:v{version}"
-    agent_routes = derive_agent_routes(job_db, workspace_id, definition)
+    agent_routes: dict[str, str] | None = derive_agent_routes(job_db, workspace_id, definition)
+    # #935 route 停写（#440 P3）：门禁要求 agent 节点自含后，产品发布路径
+    # 只会发布全自含 revision——它不再 upsert workspace_node_routes，仍声明
+    # 为 agent 的节点的存量行冻结只读（服务旧快照 legacy 节点的在途 job），
+    # 已删除或改成 code 的节点的行照常删掉（R1：防止残留行把 code 节点路由
+    # 给 Agent）。demo builtin 已自含（顶层 execution.runtime）；只有直接
+    # 发布 legacy 定义的内部 / 测试路径（不过门禁）仍会照旧物化，P4 删除。
+    frozen_route_nodes: frozenset[str] | None = None
+    if not has_legacy_agent_nodes(definition):
+        agent_routes = None
+        frozen_route_nodes = frozenset(
+            key for key, node in definition.nodes.items() if node.node_type == "agent"
+        )
     # The new revision's schemas are the live truth for the workspace's
     # node overrides: keys/values it no longer accepts must go so intake
     # keeps working after a schema rename/removal (#428 二轮复审 P2-1).
@@ -69,4 +98,5 @@ def publish_workflow_revision(
         definition_hash=definition_hash(definition_json),
         agent_routes=agent_routes,
         on_commit=prune_hook,
+        frozen_route_nodes=frozen_route_nodes,
     )

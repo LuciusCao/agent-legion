@@ -86,6 +86,27 @@ describe('LocalNodeLimitSection', () => {
     expect(screen.queryByText('审核关键词')).not.toBeInTheDocument()
   })
 
+  // #1079（#440 P3b）：自含 agent 节点不再有可展示的路由行，按 node_type
+  // 判定仍不进 code 池并发列表。
+  it('hides self-contained agent nodes that have no route row', () => {
+    workflowDefinition.nodes.push({
+      key: 'write_summary',
+      label: '撰写摘要',
+      capability: 'write_summary',
+      node_type: 'agent',
+      after: [],
+      inputs: [],
+      outputs: ['summary.md'],
+    } as (typeof workflowDefinition.nodes)[number])
+    try {
+      render(<LocalNodeLimitSection />)
+      expect(screen.queryByText('撰写摘要')).not.toBeInTheDocument()
+      expect(screen.getByText('获取题目')).toBeInTheDocument()
+    } finally {
+      workflowDefinition.nodes.pop()
+    }
+  })
+
   it('updates the node limit through the store', async () => {
     render(<LocalNodeLimitSection />)
 

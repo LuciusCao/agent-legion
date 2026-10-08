@@ -3,7 +3,10 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchFailedNodeRuns } from '../../api'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import type { JobSummary } from '../../types'
-import type { FailureCategory } from '../../types/failureTypes'
+import type {
+  FailedNodeRunItem,
+  FailureCategory,
+} from '../../types/failureTypes'
 import {
   countJobsByFailureCategory,
   failedModeConfirmLabel,
@@ -35,6 +38,29 @@ export type FailureCategoryState = {
   confirmArgs: () => JobRerunConfirmArgs
 }
 
+/** 计数最多翻这么多页（每页服务端默认 500 条）；超出视为无法给出准确计数。 */
+export const MAX_FAILED_RUN_PAGES = 20
+
+/**
+ * 沿 next_cursor 翻页拉取 failed runs（#713：服务端单页有界）。超过页数上限
+ * 返回 null——计数不完整时宁可静默降级为不显示计数，也不显示偏小的数字。
+ */
+async function fetchFailedRunPages(
+  workspaceId: string
+): Promise<FailedNodeRunItem[] | null> {
+  const runs: FailedNodeRunItem[] = []
+  let cursor: string | undefined
+  for (let page = 0; page < MAX_FAILED_RUN_PAGES; page += 1) {
+    const data = cursor
+      ? await fetchFailedNodeRuns(workspaceId, cursor)
+      : await fetchFailedNodeRuns(workspaceId)
+    runs.push(...(data.runs ?? []))
+    if (!data.next_cursor) return runs
+    cursor = data.next_cursor
+  }
+  return null
+}
+
 /**
  * 失败类别子选项状态：failedMode 激活时懒加载类别计数，
  * 加载失败静默降级为不显示计数（counts 保持 null）。
@@ -52,10 +78,7 @@ export function useFailureCategories(
   // 加载失败时 error 不消费：chips 保持可见但不显示计数（静默降级）。
   const { data: failedRuns } = useQuery({
     queryKey: extraQueryKeys.failedNodeRuns(workspaceId ?? ''),
-    queryFn: async () => {
-      const data = await fetchFailedNodeRuns(workspaceId ?? '')
-      return data.runs ?? []
-    },
+    queryFn: () => fetchFailedRunPages(workspaceId ?? ''),
     enabled: failedMode && !!workspaceId,
   })
 

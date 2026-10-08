@@ -26,6 +26,7 @@ from server.app.services.failure_classification.markers import (
     _MISSING_OUTPUTS_PREFIXES,
     _NETWORK_MARKERS,
     _NO_OUTPUT_ARTIFACTS_PREFIX,
+    _OUTPUT_TRUNCATED_PREFIX,
     _PI_MODEL_CALL_PREFIX,
     _PROCESS_EXITED_RE,
     _PROVIDER_CALL_PREFIX,
@@ -97,6 +98,13 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
         return CATEGORY_BUSINESS, "transcription_input"
     if any(marker in message for marker in _SOURCE_MISSING_MARKERS):
         return CATEGORY_BUSINESS, "source_missing"
+
+    # #952: the model's single response hit the per-call output limit
+    # (thinking included) — probabilistic, so a rerun may pass, but the fix
+    # is node-side budgeting (thinking level / chunked writes / output cap).
+    # Before the timeout rule: the hint text must never fake another class.
+    if message.startswith(_OUTPUT_TRUNCATED_PREFIX):
+        return CATEGORY_TECHNICAL, "output_truncated"
 
     if (
         exit_code == TIMEOUT_EXIT_CODE

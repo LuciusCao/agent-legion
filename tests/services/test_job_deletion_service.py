@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -7,18 +8,17 @@ from typing import Any
 
 import pytest
 
+import server.app.services.job_deletion as job_deletion_module
+import server.app.services.job_deletion_trash as trash_module
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.artifact_store import ArtifactNotFoundError, ArtifactStore
-from server.app.services.job_deletion import (
-    DeletionRollbackConflict,
-    JobDeleteResult,
-    JobDeletionService,
-)
+from server.app.services.job_deletion import JobDeleteResult, JobDeletionService
+from server.app.services.job_deletion_trash_sweep import sweep_deletion_trash
 from server.app.services.job_operation_error import JobOperationError
 from server.app.settings import Settings
-from server.app.storage_paths import resolve_job_dir
+from server.app.storage_paths import ManagedPathError, resolve_job_dir
 
 
 def _create_settings(tmp_path: Path) -> Settings:
@@ -333,54 +333,157 @@ def test_batch_delete_returns_ordered_results(job_db: JobQueries, tmp_path: Path
     assert results[3]["reason_code"] == "not_found"
 
 
-def test_delete_rollback_preserves_recreated_destination(
-    job_db: JobQueries, tmp_path: Path, monkeypatch
-) -> None:
-    """Rollback must not overwrite a destination recreated after staging."""
-    settings = _create_settings(tmp_path)
-    lease_repo = ExecutorLeaseRepository(job_db, data_dir=tmp_path)
-    service = JobDeletionService(job_db, lease_repo, settings)
-    job = _create_job(job_db, "ws-rollback", "Q007", status="completed")
+def _trash_entries(settings: Settings) -> list[Path]:
+    roots = [settings.jobs_dir / ".trash", settings.logs_dir / "jobs" / ".trash"]
+    return [path for root in roots if root.exists() for path in root.rglob("*")]
+
+
+def _seed_job_files(settings: Settings, job: dict[str, Any]) -> tuple[Path, Path]:
     storage_dir = resolve_job_dir(job, settings.jobs_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
     (storage_dir / "original.json").write_text("original", encoding="utf-8")
+    log_path = settings.logs_dir / "jobs" / f"{job['id']}-extract_question.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("log", encoding="utf-8")
+    return storage_dir, log_path
 
-    captured_paths: list[tuple[Path, Path]] = []
-    original_restore = JobDeletionService._restore_paths
 
-    def _capture_and_skip(restore_paths: list[tuple[Path, Path]]) -> None:
-        captured_paths.extend(restore_paths)
+def test_delete_transaction_failure_leaves_files_untouched(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#958 失败点①：事务失败时文件系统零改动（不再有 trash 暂存与回滚）。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-txfail", "Q007", status="completed")
+    storage_dir, log_path = _seed_job_files(settings, job)
 
-    monkeypatch.setattr(JobDeletionService, "_restore_paths", staticmethod(_capture_and_skip))
-
-    def _fail_once(*args, **kwargs):
+    def _db_down(*args, **kwargs):
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(job_db, "delete_job_in_transaction", _fail_once)
+    monkeypatch.setattr(job_db, "delete_job_in_transaction", _db_down)
 
     with pytest.raises(JobOperationError) as exc_info:
         service.delete(job["workspace_id"], job["id"])
 
-    assert exc_info.value.status == "failed"
-    assert captured_paths
-    staged_storage, original_storage = captured_paths[0]
-    assert staged_storage.exists()
-    assert staged_storage != original_storage
-    assert not original_storage.exists()
+    assert exc_info.value.reason_code == "delete_failed"
+    assert job_db.get_job(job["id"]) is not None
+    assert (storage_dir / "original.json").read_text(encoding="utf-8") == "original"
+    assert log_path.read_text(encoding="utf-8") == "log"
+    assert _trash_entries(settings) == []
 
-    # Simulate a concurrent recreation of the destination with different content.
-    original_storage.mkdir(parents=True, exist_ok=True)
-    (original_storage / "sentinel.json").write_text("recreated", encoding="utf-8")
 
-    with pytest.raises(DeletionRollbackConflict) as exc_info:
-        original_restore(captured_paths)
+def test_delete_moves_files_only_after_commit(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#958：文件移动发生在提交之后——移动时另一条连接已读不到 jobs 行。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-order", "Q010", status="completed")
+    storage_dir, log_path = _seed_job_files(settings, job)
 
-    assert exc_info.value.original_path == original_storage
-    assert exc_info.value.staged_path == staged_storage
-    assert (original_storage / "sentinel.json").exists()
-    assert (original_storage / "sentinel.json").read_text(encoding="utf-8") == "recreated"
-    assert staged_storage.exists()
-    assert (staged_storage / "original.json").read_text(encoding="utf-8") == "original"
+    real_rename = trash_module.os.rename
+    row_visible_at_move: list[bool] = []
+
+    def _observing_move(src: Any, dst: Any) -> Any:
+        row_visible_at_move.append(job_db.get_job(job["id"]) is not None)
+        return real_rename(src, dst)
+
+    monkeypatch.setattr(trash_module.os, "rename", _observing_move)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert row_visible_at_move == [False, False]  # job_dir + 一个日志
+    assert not storage_dir.exists()
+    assert not log_path.exists()
+    assert _trash_entries(settings) == []
+    assert not (settings.jobs_dir / ".trash").exists()
+
+
+def test_delete_succeeds_when_staging_into_trash_fails(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#958 失败点②：提交成功、移入 trash 失败 → 删除仍成功，残留留在原位。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-stagefail", "Q011", status="completed")
+    storage_dir, log_path = _seed_job_files(settings, job)
+
+    def _move_fails(src: Any, dst: Any) -> None:
+        # 跨文件系统：锁下不退化为拷贝，直接放弃留残留。
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+    monkeypatch.setattr(trash_module.os, "rename", _move_fails)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert job_db.get_job(job["id"]) is None
+    assert (storage_dir / "original.json").exists()
+    assert log_path.exists()
+    # 空 operation 目录被剪掉，不留 trash 空壳。
+    assert _trash_entries(settings) == []
+
+
+def test_delete_succeeds_when_purging_staged_files_fails(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#958 失败点③：移入 trash 后删除失败 → 删除仍成功，残留在 .trash/<op>/。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-purgefail", "Q012", status="completed")
+    storage_dir, _log_path = _seed_job_files(settings, job)
+
+    def _rmtree_fails(path: Any, *args: Any, **kwargs: Any) -> None:
+        raise OSError("busy")
+
+    monkeypatch.setattr(trash_module.shutil, "rmtree", _rmtree_fails)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert job_db.get_job(job["id"]) is None
+    assert not storage_dir.exists()
+    staged = [p for p in (settings.jobs_dir / ".trash").rglob(storage_dir.name) if p.is_dir()]
+    assert len(staged) == 1
+    assert (staged[0] / "original.json").read_text(encoding="utf-8") == "original"
+    # 残留带已提交标记，超过 TTL 后由维护清扫回收。
+    assert (staged[0].parent / trash_module.COMMITTED_MARKER).is_file()
+    monkeypatch.undo()
+    later = datetime.now(UTC) + trash_module.DELETION_TRASH_TTL + timedelta(hours=1)
+    assert sweep_deletion_trash(settings, now=later) == 1
+    assert not staged[0].exists()
+
+
+def test_delete_skips_local_cleanup_when_path_revalidation_fails(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#958：提交后重新解析路径失败（逃逸）→ 不动文件，删除仍成功。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-revalidate", "Q013", status="completed")
+    storage_dir, _log_path = _seed_job_files(settings, job)
+
+    def _escapes(*args: Any, **kwargs: Any) -> Path:
+        raise ManagedPathError("Path escapes job root")
+
+    monkeypatch.setattr(trash_module, "resolve_job_dir", _escapes)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert job_db.get_job(job["id"]) is None
+    assert (storage_dir / "original.json").exists()
 
 
 def test_delete_raises_for_escaping_storage_dir(job_db: JobQueries, tmp_path: Path) -> None:
@@ -407,3 +510,220 @@ def test_delete_raises_for_escaping_storage_dir(job_db: JobQueries, tmp_path: Pa
     assert legitimate_storage.exists()
     assert (legitimate_storage / "artifact.json").exists()
     assert not (settings.jobs_dir / ".trash").exists()
+
+
+def test_delete_skips_cleanup_when_same_source_job_recreated_before_purge(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#958 B1：提交后、清理前同源 job（确定性 id）被重建并写入目录与日志，
+    锁下复核发现行已存在 → 整体跳过，新 job 的目录、文件与日志全部保留。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-recreate", "Q020", status="completed")
+    storage_dir, log_path = _seed_job_files(settings, job)
+    original_purge = job_deletion_module.purge_deleted_job_files
+
+    def _recreate_then_purge(*args: Any, **kwargs: Any) -> bool:
+        # 竞态本身：删除已提交、本地清理开始前，同源 job 被重建并写入。
+        assert job_db.get_job(job["id"]) is None
+        recreated = _create_job(job_db, "ws-recreate", "Q020")
+        assert recreated["id"] == job["id"]
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        (storage_dir / "fresh.json").write_text("fresh", encoding="utf-8")
+        log_path.write_text("fresh-log", encoding="utf-8")
+        return original_purge(*args, **kwargs)
+
+    monkeypatch.setattr(job_deletion_module, "purge_deleted_job_files", _recreate_then_purge)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert job_db.get_job(job["id"]) is not None
+    assert (storage_dir / "fresh.json").read_text(encoding="utf-8") == "fresh"
+    assert log_path.read_text(encoding="utf-8") == "fresh-log"
+    assert _trash_entries(settings) == []
+
+
+def test_delete_skips_id_scoped_cleanup_and_event_when_job_recreated(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#1065 codex P1：清理检测到同源 job 已重建时，不得再按 job id 删除
+    artifact refs（会删掉新 job 的引用）或广播删除事件（客户端会移除新 job）。"""
+    settings = _create_settings(tmp_path)
+    store = ArtifactStore(tmp_path / "artifacts", job_db.dsn_identity, gc_grace_seconds=0)
+    recorded: list[tuple[str, str]] = []
+
+    class _Buffer:
+        def record_job_deleted(self, workspace_id: str, job_id: str) -> None:
+            recorded.append((workspace_id, job_id))
+
+    service = JobDeletionService(
+        job_db,
+        ExecutorLeaseRepository(job_db, data_dir=tmp_path),
+        settings,
+        job_event_buffer=_Buffer(),
+        artifact_store=store,
+    )
+    job = _create_job(job_db, "ws-recreate-refs", "Q021", status="completed")
+    fresh_hash = store.put(b"fresh artifact")
+    original_purge = job_deletion_module.purge_deleted_job_files
+
+    def _recreate_then_purge(*args: Any, **kwargs: Any) -> bool:
+        recreated = _create_job(job_db, "ws-recreate-refs", "Q021")
+        assert recreated["id"] == job["id"]
+        store.add_ref(job["id"], "extract_question", "fresh.json", fresh_hash)
+        return original_purge(*args, **kwargs)
+
+    monkeypatch.setattr(job_deletion_module, "purge_deleted_job_files", _recreate_then_purge)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert [ref["hash"] for ref in store.refs_for_job(job["id"])] == [fresh_hash]
+    assert store.open(fresh_hash).read_bytes() == b"fresh artifact"
+    assert recorded == []
+
+
+def test_delete_skips_id_scoped_cleanup_and_event_when_recheck_lock_fails(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#1065 codex P2：提交后的锁下复核在产出存在性结果前因瞬时 DB 错误失败，
+    「未能复核」不得当成「确认未重建」——跳过按 id 的 refs/对象清理与删除广播。"""
+    settings = _create_settings(tmp_path)
+    recorded: list[tuple[str, str]] = []
+    gc_calls: list[str] = []
+    deleted_objects: list[Any] = []
+
+    class _Buffer:
+        def record_job_deleted(self, workspace_id: str, job_id: str) -> None:
+            recorded.append((workspace_id, job_id))
+
+    class _ObjectStore:
+        enabled = True
+
+        def rows_for_job(self, job_id: str) -> list[dict[str, Any]]:
+            return [{"job_id": job_id, "storage_key": f"jobs/ws/{job_id}/a.json"}]
+
+        def delete_objects(self, rows: list[dict[str, Any]]) -> None:
+            deleted_objects.extend(rows)
+
+    service = JobDeletionService(
+        job_db,
+        ExecutorLeaseRepository(job_db, data_dir=tmp_path),
+        settings,
+        job_event_buffer=_Buffer(),
+        object_store=_ObjectStore(),
+    )
+    job = _create_job(job_db, "ws-recheck-fail", "Q022", status="completed")
+
+    @contextmanager
+    def _failing_lock(job_id: str) -> Any:
+        raise RuntimeError("connection lost before recheck")
+        yield False  # pragma: no cover
+
+    monkeypatch.setattr(job_db, "job_mutation_lock", _failing_lock)
+    monkeypatch.setattr(
+        job_deletion_module,
+        "gc_deleted_job_artifacts",
+        lambda _store, job_id, _candidates: gc_calls.append(job_id),
+    )
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert job_db.get_job(job["id"]) is None
+    assert gc_calls == []
+    assert deleted_objects == []
+    assert recorded == []
+
+
+def _record_finished_run(job_db: JobQueries, job_id: str, log_path: Path) -> None:
+    """node_runs 行携带分片日志路径：删除按快照的 node_runs.log_path 精确推导。"""
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into node_runs(job_id, node_key, status, command_json, log_path,"
+            " run_dir, session_dir, started_at) values (%s, 'extract_question',"
+            " 'succeeded', '[]', %s, '', '', %s)",
+            (job_id, f"logs/jobs/{log_path.name}", database_timestamp(datetime.now(UTC))),
+        )
+
+
+def test_delete_purges_only_own_node_logs_not_sibling_prefix(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """#958：日志按节点 key 精确匹配（含分片日志），不误删 source_id 以
+    ``<source>-`` 开头的兄弟 job 的日志。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-sibling", "Q030", status="completed")
+    sibling = _create_job(job_db, "ws-sibling", "Q030-x", status="completed")
+    _storage_dir, own_log = _seed_job_files(settings, job)
+    own_shard_log = own_log.with_name(f"{job['id']}-extract_question-shard-0.log")
+    own_shard_log.write_text("shard", encoding="utf-8")
+    _record_finished_run(job_db, job["id"], own_shard_log)
+    sibling_log = settings.logs_dir / "jobs" / f"{sibling['id']}-extract_question.log"
+    sibling_log.write_text("sibling", encoding="utf-8")
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert not own_log.exists()
+    assert not own_shard_log.exists()
+    assert sibling_log.read_text(encoding="utf-8") == "sibling"
+
+
+def test_delete_shard_log_match_escapes_glob_metacharacters(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """#958：source_id 含 glob 元字符时分片日志前缀按字面匹配——``Q[12]`` 不能
+    当成字符类去命中兄弟 job ``Q1`` 的分片日志，自己的分片日志照删。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-glob", "Q[12]", status="completed")
+    sibling = _create_job(job_db, "ws-glob", "Q1", status="completed")
+    log_dir = settings.logs_dir / "jobs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    own_shard = log_dir / f"{job['id']}-extract_question-shard-0.log"
+    own_shard.write_text("own", encoding="utf-8")
+    _record_finished_run(job_db, job["id"], own_shard)
+    sibling_shard = log_dir / f"{sibling['id']}-extract_question-shard-0.log"
+    sibling_shard.write_text("sibling", encoding="utf-8")
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert not own_shard.exists()
+    assert sibling_shard.read_text(encoding="utf-8") == "sibling"
+
+
+def test_delete_snapshots_run_logs_inside_delete_transaction(
+    job_db: JobQueries, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#958：分片在活动租约检查之后、删除事务之前 claim 并完成——其 node_runs
+    行只在事务内的快照里可见；快照若在事务前读取，该分片日志会遗留。"""
+    settings = _create_settings(tmp_path)
+    service = JobDeletionService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
+    )
+    job = _create_job(job_db, "ws-late-shard", "Q040", status="completed")
+    late_shard_log = settings.logs_dir / "jobs" / f"{job['id']}-extract_question-shard-4.log"
+    late_shard_log.parent.mkdir(parents=True, exist_ok=True)
+    original_mutation = job_db.lease_guarded_mutation
+
+    def _shard_finishes_then_mutate(*args: Any, **kwargs: Any) -> Any:
+        late_shard_log.write_text("late", encoding="utf-8")
+        _record_finished_run(job_db, job["id"], late_shard_log)
+        return original_mutation(*args, **kwargs)
+
+    monkeypatch.setattr(job_db, "lease_guarded_mutation", _shard_finishes_then_mutate)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert not late_shard_log.exists()

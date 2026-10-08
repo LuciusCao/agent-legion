@@ -84,6 +84,11 @@ class StudioChatSessionResponse(BaseModel):
 
 class StudioChatSessionsResponse(BaseModel):
     sessions: list[StudioChatSessionRecord]
+    # Instance chat retention window in days (#1041; 0 = disabled). The
+    # archive view renders each row's countdown as archived_at + window, and
+    # archive / delete prompts announce it; non-admins cannot read the
+    # instance settings document, so the list carries the one value.
+    retention_days: int = 0
 
 
 class StudioChatMessageCreateRequest(BaseModel):

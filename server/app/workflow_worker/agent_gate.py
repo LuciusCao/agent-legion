@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from server.app.agent_broker import batch
 from server.app.services.agent_node_profile_catalog import agent_profiles_may_exist
 from server.app.workflow_worker.agent_stock_snapshot import StockSnapshot, load_stock_snapshot
+from server.app.workflow_worker.routing import route_cache_key
 
 if TYPE_CHECKING:
     from collections import deque
@@ -106,7 +107,7 @@ def _candidate_job_ids(
     for workspace_id, queue in queues.items():
         for candidate in queue:
             cached = worker.state.route_cache.get(
-                (workspace_id, candidate.definition.key, candidate.node.key)
+                route_cache_key(workspace_id, candidate.definition.key, candidate.node)
             )
             if cached is not None and cached[1].kind != "agent":
                 continue

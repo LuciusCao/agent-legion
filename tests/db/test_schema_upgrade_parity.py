@@ -43,24 +43,19 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v92, agent_request_profile_source) must
-# leave behind so the undo step rewinds a current-shape database to exactly
-# the previous recorded version. v92 adds three agent_execution_requests
-# columns plus the profile_source CHECK (#933); dropping the columns drops
-# the column-bound constraint with them. (v91, #211 M3, sits below: the
-# rewind leaves the database at v91, so its column drops stay applied.)
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("agent_execution_requests", "profile_source", "text"),
-    ("agent_execution_requests", "runtime", "text"),
-    ("agent_execution_requests", "requires_labels_json", "text"),
-)
+# Effects the newest migration (v93, agent_profile_backfill) must leave
+# behind so the undo step rewinds a current-shape database to exactly the
+# previous recorded version. v93 is a data migration whose only DDL is the
+# agent_profile_backfill_backups table (#935); dropping it rewinds to v92.
+# (v92, #933, sits below: its agent_execution_requests columns stay applied.)
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("agent_profile_backfill_backups",)
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "agent_request_profile_source"
+_NEWEST_MIGRATION_NAME = "agent_profile_backfill"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the rewound database is a faithful
-# v91 (v92 is a pure column add: nothing to recreate).
+# v92 (v93 only adds a table: nothing to recreate).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from server.app.skills.skill_roots import SKILLS_ROOT_DISPLAY
 
@@ -125,6 +125,13 @@ class InstanceSettingsDocument(BaseModel):
     # window, in small batches. Read fresh from the DB at sweep time, so
     # edits take effect without restart.
     execution_retention_days: int = Field(ge=0, le=36500)
+    # Studio chat session retention in days (#1041); 0 = disabled (archived
+    # / soft-deleted sessions are kept forever — the default). When enabled,
+    # the studio chat retention sweep physically removes closed sessions
+    # whose archive / soft-delete stamp is older than the window (messages
+    # cascade with the row). Read fresh at sweep / list time, so edits take
+    # effect without restart.
+    studio_chat_retention_days: int = Field(ge=0, le=36500)
     workflows: InstanceWorkflowsSettings
     agent_workers: InstanceAgentWorkersSettings
     # #509/#554: capacity knobs folded into the instance document;
@@ -133,6 +140,12 @@ class InstanceSettingsDocument(BaseModel):
     result_unpack: InstanceResultUnpackSettings
     result_validate: InstanceResultValidateSettings
     agent_claim: InstanceAgentClaimSettings
+    # #989: document CSP compatibility switch (default False = strict nonce
+    # script-src). True restores 'unsafe-inline' so published preview panels
+    # relying on inline onclick= handlers keep working during migration.
+    # Read at serve time (services/document_csp.py), no restart needed.
+    # Strict: a security switch must not flip on a coerced "yes" / 1.
+    csp_script_unsafe_inline: StrictBool
 
 
 class InstanceSettingsResponse(InstanceSettingsDocument):

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.executors.scheduling.capacity import CapacitySnapshot
-from server.app.storage_paths import job_log_dir
+from server.app.storage_paths import job_log_dir, job_node_log_name
 from server.app.workflow_worker.agent_claim import claim_agent_node, fail_node_config
 from server.app.workflow_worker.code_claim import try_claim_code_worker_node
 from server.app.workflow_worker.executor_claim import claim_executor_node
@@ -70,7 +70,7 @@ def try_claim_and_submit(
         inputs = (*inputs, f"{node.key}.shards.json")
     # #618: the jobs log dir is resolved+ensured once per process; the old
     # per-attempt resolve + mkdir pair was the top write-type fsevent item.
-    log_path = job_log_dir(worker.settings.logs_dir) / f"{job['id']}-{node_key}.log"
+    log_path = job_log_dir(worker.settings.logs_dir) / job_node_log_name(job["id"], node_key)
 
     def fail_config(message: str) -> bool:
         return fail_node_config(

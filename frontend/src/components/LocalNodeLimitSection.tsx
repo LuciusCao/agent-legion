@@ -1,7 +1,7 @@
 import { TextField } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
 import { useWorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery'
-import { codeNodeKeys } from '../lib/codeNodes'
+import { codePoolNodes } from './codePoolNodes'
 
 export function LocalNodeLimitSection() {
   const { executionConfiguration, setNodeLimit } = useSettingStore()
@@ -9,13 +9,8 @@ export function LocalNodeLimitSection() {
 
   if (!workflowDefinition) return null
 
-  // P-0.5：非 agent 节点一律进入内置 code 池；并发上限保存时由后端按实例
-  // code_capacity 校验。按显式类型判定（#933：自含 agent 节点无 Agent 路由，
-  // 不能按「无路由」当成 code 节点）；agentRoutes 只兜底缺 node_type 的旧 payload。
-  const codeKeys = codeNodeKeys(workflowDefinition.nodes, agentRoutes)
-  const codeNodes = workflowDefinition.nodes.filter((node) =>
-    codeKeys.has(node.key)
-  )
+  // 并发上限保存时由后端按实例 code_capacity 校验；判定口径见 codePoolNodes。
+  const codeNodes = codePoolNodes(workflowDefinition.nodes, agentRoutes)
 
   if (codeNodes.length === 0) return null
 

@@ -7,10 +7,14 @@ not_applicable, so only the target node is ever scheduled and the copy
 converges to ``completed`` once the target finishes. The original job's
 artifacts and state are never touched.
 
-Agent-routed nodes may pin an explicit Agent version (draft/published/
-archived — comparing old or candidate versions is the point); the pin is
-frozen into the copy batch's source payload and honored at dispatch time
-(``resolve_dispatch_agent_profile``, #932). Executor-routed nodes replay as-is.
+Agent nodes replay with an execution profile chosen by workflow revision
+(or the current Studio draft) — #1079 / #440 D6, ``quality_replay_profiles``:
+the profile is transplanted into the copy job's snapshot and the copy run
+freezes ``node_profiles[node_key] = {revision_id, node_key, profile_hash}``,
+re-verified at claim. Legacy (not inlined) agent nodes of older snapshots
+keep the read-only-compatible Agent-version pin (``agent_versions``, honored
+at dispatch through ``resolve_dispatch_agent_profile``, #932). Code nodes
+replay as-is.
 
 Replay status is reconciled lazily from the copy job's node row on read —
 no hook into the completion path.
@@ -33,11 +37,14 @@ from server.app.services.job_errors import (
     NotFoundError,
 )
 from server.app.services.quality_artifact_contents import artifact_contents
+from server.app.services.quality_replay_profiles import (
+    ReplayProfileResolver,
+    sampled_agent_version,
+)
 from server.app.services.quality_replay_setup import QualityReplaySetup
 from server.app.services.versioned_entities import VersionedEntityStore
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.definition import WorkflowNode
-from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +73,8 @@ class QualityReplayService:
         item_id: str,
         *,
         agent_version: int | None = None,
+        revision_id: str | None = None,
+        use_draft: bool = False,
         created_by: str = "",
     ) -> dict[str, Any]:
         """Create a replay copy job for one sample item; returns the row."""
@@ -83,8 +92,21 @@ class QualityReplayService:
                 raise InvalidOperationError(
                     f"node {node_key!r} is not part of the job's frozen workflow snapshot"
                 )
-            agent_id, pin = self._resolve_agent_pin(
-                conn, workspace_id, str(job["workspace_id"]), node, agent_version
+            profile = ReplayProfileResolver(self.job_db).resolve(
+                workspace_id, job, node, revision_id=revision_id, use_draft=use_draft
+            )
+            if profile is not None and agent_version is not None:
+                raise InvalidOperationError(
+                    "agent_version pins apply to legacy Agent-definition nodes only"
+                )
+            if profile is None and agent_version is None:
+                # #1079（D6 review）：legacy 节点「原运行的执行档案」= 原运行实际
+                # 跑的 Agent 版本，不是当前 published（前端已无手填版本入口）。
+                agent_version = sampled_agent_version(node, item)
+            agent_id, pin = (
+                ("", None)
+                if profile is not None
+                else self._resolve_agent_pin(conn, workspace_id, node, agent_version)
             )
             self._reconcile_item_rows(conn, item_id, node_key)
             active = conn.execute(
@@ -110,7 +132,7 @@ class QualityReplayService:
         setup = QualityReplaySetup(self.job_db, self.artifact_store)
         try:
             copy_job_id = setup.build_copy_job(
-                workspace_id, item, job, definition, node, replay_id, pin
+                workspace_id, item, job, definition, node, replay_id, pin, profile
             )
         except Exception as exc:
             # #204 broad-except audit: compensate-then-CLASSIFY (#233
@@ -138,7 +160,15 @@ class QualityReplayService:
             )
         notify_schedulable_work()
         replay["replay_job_id"] = copy_job_id
-        return replay
+        return ReplayProfileResolver(self.job_db).annotate([replay])[0]
+
+    def replay_profile_options(self, workspace_id: str, item_id: str) -> dict[str, Any]:
+        """Revisions / draft an item can replay with (#1079 D6) + the original profile."""
+        with self.job_db.write() as conn:
+            item = self._get_item(conn, workspace_id, item_id)
+            job = self._get_original_job(conn, workspace_id, str(item["job_id"]))
+        resolver = ReplayProfileResolver(self.job_db)
+        return {"options": resolver.options_for_job(workspace_id, job, str(item["node_key"]))}
 
     def list_replays(self, workspace_id: str, item_id: str) -> list[dict[str, Any]]:
         with self.job_db.write() as conn:
@@ -149,7 +179,7 @@ class QualityReplayService:
                 " where item_id = %s order by created_at desc, id desc",
                 (item_id,),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return ReplayProfileResolver(self.job_db).annotate([dict(row) for row in rows])
 
     def get_replay_detail(self, workspace_id: str, replay_id: str) -> dict[str, Any]:
         """Replay row (reconciled) plus its labels and copy-job artifacts."""
@@ -178,7 +208,7 @@ class QualityReplayService:
         node_key = str(row["item_node_key"])
         replay.pop("item_node_key", None)
         return {
-            "replay": replay,
+            "replay": ReplayProfileResolver(self.job_db).annotate([replay])[0],
             "labels": [dict(label) for label in labels],
             "artifacts": artifact_contents(
                 self.artifact_store, replay["replay_job_id"], node_key, self.object_store
@@ -193,7 +223,7 @@ class QualityReplayService:
     ) -> dict[str, Any]:
         row = conn.execute(
             """
-            select i.id, i.batch_id, i.job_id, i.node_key
+            select i.id, i.batch_id, i.job_id, i.node_key, i.agent_version
             from quality_sample_items i
             join quality_sample_batches b on b.id = i.batch_id
             where i.id = %s and b.workspace_id = %s
@@ -222,22 +252,10 @@ class QualityReplayService:
         self,
         conn: DatabaseConnection,
         workspace_id: str,
-        workflow_key: str,
         node: WorkflowNode,
         agent_version: int | None,
     ) -> tuple[str, dict[str, Any] | None]:
-        """Resolve the Agent version pin; executor nodes replay unpinned.
-
-        Self-contained agent nodes (#933, ``execution.runtime``) have neither
-        a route nor an Agent version to pin: replaying them is P3 / D6 work
-        (pin by revision), so they fail with that reason, not as route-less.
-        """
-        if is_self_contained_agent_node(node):
-            raise InvalidOperationError(
-                f"node {node.key!r} is a self-contained agent node (execution.runtime);"
-                " quality replay of self-contained nodes is not supported yet"
-                " (replay pins by revision arrive with #440 P3)"
-            )
+        """Legacy Agent version pin (read-only compat); code nodes replay unpinned."""
         route = conn.execute(
             """
             select target_kind, target_id from workspace_node_routes
@@ -245,9 +263,14 @@ class QualityReplayService:
             """,
             (workspace_id, node.key),
         ).fetchone()
-        if route is None:
-            raise InvalidOperationError(f"node {node.key!r} has no workspace route; cannot replay")
-        if str(route["target_kind"]) != "agent":
+        if route is None or str(route["target_kind"]) != "agent" or node.node_type != "agent":
+            if node.node_type == "agent":
+                # #1079：未内联的 legacy agent 节点没有路由行（定义已退役），
+                # 只能按 workflow revision 的执行档案回放。
+                raise InvalidOperationError(
+                    f"agent node {node.key!r} has no Agent route; choose a workflow revision"
+                    " to replay it with"
+                )
             if agent_version is not None:
                 raise InvalidOperationError("agent_version pins apply to Agent-routed nodes only")
             return "", None
@@ -262,11 +285,11 @@ class QualityReplayService:
             if agent_version is None:
                 raise InvalidOperationError(
                     f"Agent {agent_id!r} has no published version in workspace"
-                    f" {workspace_id!r} to replay with; agent definitions are"
-                    " workspace-scoped — create one in Studio (Agent 管理) first"
+                    f" {workspace_id!r} to replay with; choose a workflow revision instead"
                 )
             raise NotFoundError(
                 f"Agent {agent_id!r} has no version {agent_version} in workspace {workspace_id!r}"
+                "; choose a workflow revision to replay with"
             )
         capability = str(entity.definition.get("capability") or "")
         if capability != node.capability:

@@ -4,14 +4,15 @@
 # git worktree 场景的初始化走 scripts/init-worktree.sh（从基准 worktree
 # 复制 .env、按 worktree 名派生专属库/bucket），两者分工不同：本脚本不
 # 依赖任何既有 worktree，也不会派生隔离库。
-#   1. 检测前置工具：uv、Python 3.11+、Node 18+、PostgreSQL（psql/createdb）、
+#   1. 检测前置工具：uv、Python 3.11+、Node 20.19+ / 22.13+（eslint / vitest 引擎要求，排除 21 / 23）、PostgreSQL（psql/createdb）、
 #      cargo、docker、openssl（随机凭据生成）——macOS 缺失项用 brew 补装
-#      （先检测后装），其他平台打印安装指引后 fail-fast
+#      （先检测后装），其他平台打印安装指引后 fail-fast；Intel Mac 另确保
+#      Homebrew openssl@3 并导出 OPENSSL_DIR（cryptography 源码构建，#1089）
 #   2. uv sync（Python 依赖）
 #   3. createdb agent_legion_dev（已存在跳过；PG 未运行时先尝试 brew services 拉起。
 #      派生名而非裸名 agent_legion：裸名是共享/prod 库，init_db 的共享库 schema
 #      守卫会拒绝迁移它）
-#   4. .env 缺失时从 .env.example 复制并生成随机 S3 凭据写入（本地 RustFS
+#   4. .env 缺失时从 .env.example 复制并生成随机 S3 凭据写入（本地 SeaweedFS
 #      用）；.env 已存在但凭据为空时幂等补填（非空值不覆盖）
 #   5. deploy/secrets/vault_master_key 缺失时生成（同 init-worktree.sh）
 #   6. scripts/ensure-velites.sh --dest data/bin（指纹一致自动跳过）
@@ -54,14 +55,14 @@ python_ok() {
 }
 
 node_ok() {
-    have node && node -e 'process.exit(parseInt(process.version.slice(1)) >= 18 ? 0 : 1)' 2>/dev/null
+    have node && node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit((a === 20 && b >= 19) || (a === 22 && b >= 13) || a >= 24 ? 0 : 1)' 2>/dev/null
 }
 
 if ! $IS_MACOS; then
     MISSING=()
     have uv || MISSING+=("uv: https://docs.astral.sh/uv/getting-started/installation/")
     python_ok || MISSING+=("Python 3.11+: https://www.python.org/downloads/")
-    node_ok || MISSING+=("Node 18+: https://nodejs.org/")
+    node_ok || MISSING+=("Node 20.19+ 或 22.13+（推荐 22 LTS）: https://nodejs.org/")
     { have psql && have createdb; } || MISSING+=("PostgreSQL 17: https://www.postgresql.org/download/")
     have cargo || MISSING+=("Rust 工具链: https://rustup.rs/")
     have docker || MISSING+=("Docker: https://docs.docker.com/get-docker/")
@@ -85,7 +86,7 @@ else
     # 实际 venv 由 uv 按 .python-version 自管，这行只服务缺 python3 的
     # macOS 全新机器。
     python_ok || brew_install "Python 3.13" "python@3.13"
-    node_ok || brew_install "Node 18+" "node"
+    node_ok || brew_install "Node 22+" "node"
     if ! { have psql && have createdb; }; then
         brew_install "PostgreSQL 17" "postgresql@17"
         # postgresql@17 是 keg-only：本进程内直接挂 bin 目录，并提示写入 shell 配置。
@@ -95,9 +96,24 @@ else
     fi
     have cargo || brew_install "Rust 工具链（cargo）" "rust"
     have openssl || brew_install "OpenSSL" "openssl"
+    # Intel Mac（#1089）：cryptography 49+ 不再发布 x86_64 macOS wheel，uv sync
+    # 会从源码构建，需要 Homebrew OpenSSL 3 头文件——系统自带 /usr/bin/openssl
+    # 能让上面的 have openssl 通过，但 cryptography 不支持 Apple 自带的
+    # LibreSSL，故按架构单独确保 openssl@3，并导出 OPENSSL_DIR（openssl-sys
+    # 据此给出 DEP_OPENSSL_INCLUDE，cryptography-cffi 用它编译）。调用方已显式
+    # 设置 OPENSSL_DIR 时尊重之。Apple Silicon 有官方 wheel，不受影响。
+    if [[ "$(uname -m)" == "x86_64" ]]; then
+        brew list --formula openssl@3 >/dev/null 2>&1 \
+            || brew_install "OpenSSL 3（Intel Mac 源码构建 cryptography 用）" "openssl@3"
+        if [[ -z "${OPENSSL_DIR:-}" ]]; then
+            OPENSSL_DIR="$(brew --prefix openssl@3)"
+            export OPENSSL_DIR
+        fi
+        echo "Intel Mac：cryptography 将从源码构建（OPENSSL_DIR=${OPENSSL_DIR}）"
+    fi
     if ! have docker; then
         brew_install "Docker Desktop" "--cask docker"
-        echo "提示: Docker Desktop 需手动启动一次完成授权；未启动时 make dev-up 会跳过本地 RustFS（材料 API 降级 503）"
+        echo "提示: Docker Desktop 需手动启动一次完成授权；未启动时 make dev-up 会跳过本地 SeaweedFS（材料 API 降级 503）"
     fi
 fi
 
@@ -159,7 +175,7 @@ if [[ ! -f .env ]]; then
     fill_env_key AGENT_LEGION_S3_ACCESS_KEY "$ACCESS_KEY"
     fill_env_key AGENT_LEGION_S3_SECRET_KEY "$SECRET_KEY"
     chmod 600 .env
-    echo "已生成 .env <- .env.example（AGENT_LEGION_S3_ACCESS_KEY/SECRET_KEY 已填随机值，本地 RustFS 用）"
+    echo "已生成 .env <- .env.example（AGENT_LEGION_S3_ACCESS_KEY/SECRET_KEY 已填随机值，本地 SeaweedFS 用）"
 else
     FILLED=()
     if [[ -z "$(env_file_value AGENT_LEGION_S3_ACCESS_KEY)" ]]; then
@@ -217,10 +233,10 @@ fi
 
 cat <<EOF
 完成。下一步：
-  - 启动开发环境: make dev-up（自动起本地 RustFS 并建 bucket；未装/未启动
+  - 启动开发环境: make dev-up（自动起本地 SeaweedFS 并建 bucket；未装/未启动
     docker 时材料 API 降级 503，其余功能不受影响）
   - 查看状态: make dev-status；停止: make dev-down
   - （可选）安装本地质量门钩子: make install-hooks
   - 材料存储切云端 S3: 改 .env 的 AGENT_LEGION_S3_ENDPOINT/凭据/bucket 三样
-    即可，本地 RustFS 会被自动跳过（详见 docs/materials-storage-deployment.md）
+    即可，本地 SeaweedFS 会被自动跳过（详见 docs/materials-storage-deployment.md）
 EOF
