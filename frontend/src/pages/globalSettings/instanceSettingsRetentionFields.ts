@@ -47,4 +47,15 @@ export const RETENTION_FIELD_GROUPS: FieldGroup[] = [
     ],
     toggles: [],
   },
+  {
+    title: 'Studio 对话终端',
+    fields: [],
+    toggles: [
+      {
+        path: 'studio_chat_terminal_grant_required',
+        label:
+          '终端命令需人工批准（grant 栅栏，默认关闭；开启后引擎 auto 模式下命令必被拒）',
+      },
+    ],
+  },
 ]

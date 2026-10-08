@@ -79,6 +79,9 @@ export function buildPayload(values: FormValues): InstanceSettingsUpdate {
       values,
       'studio_chat_retention_days'
     ),
+    studio_chat_terminal_grant_required: Boolean(
+      values.studio_chat_terminal_grant_required
+    ),
     workflows: {
       max_items_per_run: parseNumber(values, 'workflows.max_items_per_run'),
       // 表单单位 KB（验收反馈 #786），上送换算回字节（契约 ge=1024 由

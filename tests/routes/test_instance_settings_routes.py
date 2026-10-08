@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from server.app.routes.instance_settings import _deep_merge
 from server.app.skills.skill_roots import SKILLS_ROOT_DISPLAY
 
 CSRF = {"x-agent-legion-request": "1"}
@@ -37,6 +38,7 @@ def _payload() -> dict:
         "materials_ttl_days": 0,
         "execution_retention_days": 0,
         "studio_chat_retention_days": 0,
+        "studio_chat_terminal_grant_required": False,
         "workflows": {"max_items_per_run": 20_000, "node_code_max_bytes": 64 * 1024},
         "agent_workers": {
             "max_archive_bytes": 64 * 1024 * 1024,
@@ -142,6 +144,35 @@ def test_put_rejects_skills_root(client) -> None:
     payload = _payload()
     payload["skills_root"] = "/somewhere/else"
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+
+
+def test_put_without_terminal_grant_key_preserves_stored_value(client) -> None:
+    """codex P1/P2 on #1138: PUT 改合并语义后，旧客户端未携带的键保留库存值，
+    不被默认值静默重置（行锁读改写内合并，并发 PUT 不丢更新）。"""
+    payload = _payload()
+    payload["studio_chat_terminal_grant_required"] = True
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200
+
+    legacy_payload = _payload()
+    legacy_payload.pop("studio_chat_terminal_grant_required")
+    response = client.put(INSTANCE_SETTINGS_URL, json=legacy_payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["studio_chat_terminal_grant_required"] is True
+
+    response = client.get(INSTANCE_SETTINGS_URL)
+    assert response.json()["studio_chat_terminal_grant_required"] is True
+
+
+def test_put_merges_nested_blocks_per_key() -> None:
+    """合并语义递归进嵌套块（单测合并原语；路由层嵌套块仍整体校验，
+    缺必需键 422 响亮失败——不产生静默重置）。"""
+    stored = {"workflows": {"max_items_per_run": 5000, "node_code_max_bytes": 64}}
+    patch = {"workflows": {"node_code_max_bytes": 128}}
+    assert _deep_merge(stored, patch) == {
+        "workflows": {"max_items_per_run": 5000, "node_code_max_bytes": 128}
+    }
+    assert _deep_merge({"a": {"x": 1}}, {"a": 5}) == {"a": 5}
+    assert _deep_merge(None, {"a": 1}) == {"a": 1}
 
 
 def test_put_rejects_unknown_keys(client) -> None:

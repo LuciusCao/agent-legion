@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from server.app.services.instance_settings_store import InstanceSettingsStore
 from server.app.studio_chat import permissions as permissions_module
 from server.app.studio_chat import prompt_turn
 from server.app.studio_chat.registry import StudioAgentRegistryStore
@@ -304,6 +305,20 @@ def test_terminal_roundtrip_runs_command_and_returns_output(chat) -> None:
     assert "terminal says hi" in outcomes[0]["output"]
 
 
+def test_terminal_runs_without_permission_request_when_fence_off(chat) -> None:
+    """#1136 默认形态（栅栏关闭）：引擎 auto 模式不发起任何权限请求，
+    terminal 直接执行成功——0.7.15 及以前的行为。"""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register({"on_prompt": [TERMINAL_STEP]})
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "run a command")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [e["terminal_outcome"] for e in _read_sink(script_path) if "terminal_outcome" in e]
+    assert outcomes and outcomes[0]["exitCode"] == 0
+    assert "terminal says hi" in outcomes[0]["output"]
+
+
 @pytest.mark.parametrize(
     "steps",
     [
@@ -312,9 +327,11 @@ def test_terminal_roundtrip_runs_command_and_returns_output(chat) -> None:
     ],
     ids=["unapproved", "auto-approved-mcp"],
 )
-def test_terminal_without_human_approval_is_refused(chat, steps) -> None:
-    """红队回归（ACP terminal，权限关联类）：未经人工/全部允许批准的 terminal
-    创建一律拒绝，子进程不启动。"""
+def test_terminal_without_human_approval_is_refused(chat, steps, job_db) -> None:
+    """红队回归（ACP terminal，权限关联类）：栅栏开启时，未经人工/全部允许批准
+    的 terminal 创建一律拒绝，子进程不启动。（#1136 起栅栏默认关闭，本用例
+    显式开启以钉住开启态语义。）"""
+    InstanceSettingsStore(job_db).put({"studio_chat_terminal_grant_required": True})
     service, _bus, register, workspace_id, user_id = chat
     script_path = register({"on_prompt": steps})
     session = service.create_session(workspace_id, user_id, "fake-agent")

@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Studio 对话里 Bash 被权限栅栏拒绝时，可读原因改放进 JSON-RPC 错误的 message（issue #1136）：此前原因只放 `data` 字段，引擎（kimi）格式化工具结果时丢弃，agent 与用户只见「Invalid request」且无法区分「权限模型拒绝」与「工具损坏」——把引擎 permission 设为 auto 恰恰是结构性无效路径（grant 只由后端应答过的权限请求铸造）。现工具错误与 Studio 会话卡片直接给出原因与补救（无已批准授权、grant 一次性 300s TTL、改用 ask 模式或会话「全部允许」）；terminal cwd 越界的 `invalid_params` 拒绝同样处理。
+- Studio 对话终端的 grant 栅栏改为可选加固、默认恢复直接执行（issue #1136）：0.7.16 起 `terminal/create` 必须消耗人审（或会话「全部允许」）铸造的一次性 grant，而引擎 permission 为 auto（或命令预放行）时从不发起 `session/request_permission`，grant 永不铸造、Bash 必被拒——该形态下 Studio agent 的 shell 整体不可用。本版起默认恢复 0.7.15 及以前的直接执行；admin 全局设置「Studio 对话终端」组的「终端命令需人工批准」（实例设置文档键 `studio_chat_terminal_grant_required`）可重新开启栅栏，热读于每次 terminal/create，保存即生效，无 schema 变更。终端子进程的环境白名单与会话根目录钉住不受开关影响，始终生效。
+
 ## [0.7.17] - 2026-10-08
 
 主打 Agent 定义退役 P3 终局与 Studio Chat 会话治理：agent 节点执行档案并入节点自含声明、随 revision 版本化并随 job 快照冻结（#935，schema v93 原地回填 + 发布门禁 + 「升级 workflow」取新配置），质量回放改按 revision / 当前草稿选择执行档案（#1079）；Studio Chat 落地会话保留策略（#1041）、Kimi Code 自发回合期间的消息入站排队（#1029）与 ACP terminal 授权命令绑定（#954）；agent 单次输出触顶归因与显式 `max_output_tokens` 预算（#952，需 velites 0.5.8）；另含文档 CSP nonce 收紧（#989）、供应链钉死（#969）、登录限流与密码策略基线（#970）及一批稳定性修复。

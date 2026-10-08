@@ -29,6 +29,7 @@ const settings: InstanceSettingsResponse = {
   materials_ttl_days: 0,
   execution_retention_days: 0,
   studio_chat_retention_days: 0,
+  studio_chat_terminal_grant_required: false,
   workflows: { max_items_per_run: 20000, node_code_max_bytes: 65536 },
   agent_workers: {
     max_archive_bytes: 104857600,
@@ -177,6 +178,11 @@ describe('InstanceSettingsSection', () => {
     vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
       ...settings,
       ...payload,
+      // InstanceSettingsUpdate 的该键可空（缺省=保留现值，#1138 codex P1）；
+      // mock 按相同语义物化为具体布尔值。
+      studio_chat_terminal_grant_required:
+        payload.studio_chat_terminal_grant_required ??
+        settings.studio_chat_terminal_grant_required,
     }))
 
     renderSection()
@@ -223,6 +229,11 @@ describe('InstanceSettingsSection', () => {
     vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
       ...settings,
       ...payload,
+      // InstanceSettingsUpdate 的该键可空（缺省=保留现值，#1138 codex P1）；
+      // mock 按相同语义物化为具体布尔值。
+      studio_chat_terminal_grant_required:
+        payload.studio_chat_terminal_grant_required ??
+        settings.studio_chat_terminal_grant_required,
     }))
 
     renderSection()
@@ -254,6 +265,11 @@ describe('InstanceSettingsSection', () => {
     vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
       ...settings,
       ...payload,
+      // InstanceSettingsUpdate 的该键可空（缺省=保留现值，#1138 codex P1）；
+      // mock 按相同语义物化为具体布尔值。
+      studio_chat_terminal_grant_required:
+        payload.studio_chat_terminal_grant_required ??
+        settings.studio_chat_terminal_grant_required,
     }))
 
     renderSection()
@@ -299,6 +315,11 @@ describe('InstanceSettingsSection', () => {
     vi.mocked(updateInstanceSettings).mockImplementation(async (payload) => ({
       ...settings,
       ...payload,
+      // InstanceSettingsUpdate 的该键可空（缺省=保留现值，#1138 codex P1）；
+      // mock 按相同语义物化为具体布尔值。
+      studio_chat_terminal_grant_required:
+        payload.studio_chat_terminal_grant_required ??
+        settings.studio_chat_terminal_grant_required,
     }))
 
     renderSection()

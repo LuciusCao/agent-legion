@@ -337,6 +337,10 @@ class _Handle:
     cwd = "."
     callbacks: Any = None
 
+    # #1136: instance-level fence switch; default on (fail-closed).
+    def terminal_grant_required(self) -> bool:
+        return True
+
 
 def _client() -> AcpClient:
     client = AcpClient()
@@ -347,11 +351,55 @@ def _client() -> AcpClient:
 def test_create_terminal_without_an_approved_permission_is_refused() -> None:
     async def _go() -> None:
         client = _client()
-        with pytest.raises(RequestError):
+        # #1136: the refusal reason must ride in the error message — kimi
+        # formats tool failures from `message` and drops `data`.
+        with pytest.raises(RequestError) as no_grant:
             await client.create_terminal("s", sys.executable, ["-c", "print(1)"])
+        assert "no approved permission grant" in str(no_grant.value)
+        assert no_grant.value.code == -32600
         client.terminals.grants.grant({"toolCallId": "tc"})
         created = await client.create_terminal("s", sys.executable, ["-c", "print(1)"])
         await client.release_terminal("s", created.terminal_id)
+        with pytest.raises(RequestError) as spent:
+            await client.create_terminal("s", sys.executable, ["-c", "print(1)"])
+        assert "no approved permission grant" in str(spent.value)
+
+    asyncio.run(_go())
+
+
+def test_terminal_cwd_refusal_carries_reason_in_message(tmp_path) -> None:
+    with pytest.raises(RequestError) as excinfo:
+        _run_terminal(AcpTerminalStore(), "print(1)", cwd="/", default_cwd=str(tmp_path))
+    assert "outside the session root" in str(excinfo.value)
+    assert excinfo.value.code == -32602
+
+
+def test_create_terminal_skips_grant_when_fence_disabled() -> None:
+    """#1136 escape hatch: fence off → no grant needed (engine auto mode)."""
+
+    async def _go() -> None:
+        client = _client()
+        client._handle.terminal_grant_required = lambda: False
+        created = await client.create_terminal("s", sys.executable, ["-c", "print(1)"])
+        await client.wait_for_terminal_exit("s", created.terminal_id)
+        state = await client.terminal_output("s", created.terminal_id)
+        assert "1" in state.output
+        await client.release_terminal("s", created.terminal_id)
+
+    asyncio.run(_go())
+
+
+def test_grant_minted_while_fence_off_is_still_spent() -> None:
+    """codex P2 on #1138: a grant minted with the fence off is consumed by the
+    terminal run — it cannot be replayed after the fence toggles on."""
+
+    async def _go() -> None:
+        client = _client()
+        client._handle.terminal_grant_required = lambda: False
+        client.terminals.grants.grant({"toolCallId": "tc"})
+        created = await client.create_terminal("s", sys.executable, ["-c", "print(1)"])
+        await client.release_terminal("s", created.terminal_id)
+        client._handle.terminal_grant_required = lambda: True
         with pytest.raises(RequestError):
             await client.create_terminal("s", sys.executable, ["-c", "print(1)"])
 

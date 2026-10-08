@@ -120,6 +120,7 @@ const instanceSettings: InstanceSettingsResponse = {
   materials_ttl_days: 0,
   execution_retention_days: 0,
   studio_chat_retention_days: 0,
+  studio_chat_terminal_grant_required: false,
   workflows: { max_items_per_run: 20000, node_code_max_bytes: 65536 },
   agent_workers: {
     max_archive_bytes: 104857600,

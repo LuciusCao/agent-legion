@@ -27,6 +27,26 @@ from typing import Any
 from acp import RequestError
 
 from server.app.fs_safety import PathEscapeError, open_dir_beneath
+from server.app.services.instance_settings_store import InstanceSettingsStore
+
+
+def terminal_grant_required(connect_source: Any) -> bool:
+    """Whether terminal/create must consume a grant (instance setting, #1136).
+
+    Default off (#1136: engines in auto permission mode never send
+    ``session/request_permission``, so with the fence on no grant can ever be
+    minted and Bash is dead — the fence is opt-in hardening); missing or
+    malformed values degrade to off. Read fresh on every terminal/create
+    (same contract as ``studio_chat_retention_days``), so admin edits take
+    effect without a restart. The env allowlist and cwd pinning above are
+    unaffected either way.
+    """
+    stored = InstanceSettingsStore(connect_source).get()
+    if stored is None:
+        return False
+    value = stored.get("studio_chat_terminal_grant_required", False)
+    return value is True
+
 
 # acp.transports.DEFAULT_INHERITED_ENV_VARS (what the SDK keeps for the agent
 # subprocess) plus TMPDIR; LANG/LC_* are added by prefix below.
@@ -84,9 +104,9 @@ def pinned_cwd(requested: str | None, root: str) -> Iterator[int]:
         try:
             fd = stack.enter_context(open_dir_beneath(real_root, _cwd_parts(requested, real_root)))
         except (PathEscapeError, OSError) as exc:
-            raise RequestError.invalid_params(
-                {"reason": "terminal cwd outside the session root or not a plain directory"}
-            ) from exc
+            # #1136: reason rides in the message too — engines drop `data`.
+            reason = "terminal cwd outside the session root or not a plain directory"
+            raise RequestError(-32602, f"Invalid params: {reason}", {"reason": reason}) from exc
         yield fd
 
 
