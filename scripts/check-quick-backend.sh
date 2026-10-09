@@ -246,11 +246,23 @@ run_tests() {
         echo "=== GATE_SHARD=${GATE_SHARD} (deterministic hash shard) ==="
         shard_args=(-p scripts.pytest_gate_shard)
       fi
+      # #1150 D2: CI postgres shards run on 2-core runners where xdist -n 2
+      # splits the same two cores with a postgres container and coverage
+      # tracing — the loaded-runner timing family (10 of 16 flaky registry
+      # entries) lives exactly there. Pin -n 1 on CI (serialized workers get
+      # the whole core budget; wall-time headroom verified: shards ran
+      # 6m-9m of a 20m timeout). Local gates keep the worktree-aware
+      # default — a big dev box has cores to spare.
+      pg_workers="$workers"
+      if [[ -n "${CI:-}" ]]; then
+        pg_workers=1
+        echo "=== CI detected: postgres tier pinned to -n 1 (#1150) ==="
+      fi
       UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
         -m "postgres" \
-        -n "$workers" --dist worksteal \
+        -n "$pg_workers" --dist worksteal \
         --reruns 1 \
         --reruns-delay 2 \
         ${shard_args[@]+"${shard_args[@]}"} \
