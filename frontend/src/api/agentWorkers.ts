@@ -22,7 +22,10 @@ export async function fetchAgentWorkers(
   signal?: AbortSignal
 ): Promise<AgentWorkersResponse> {
   // workspace_id narrows to workers registered with that workspace's scoped
-  // tokens (issue #35); omitting it keeps the admin full view.
+  // tokens (issue #35); omitting it returns the deployment-wide rows (the
+  // admin workspace view fetches them unfiltered and filters the rendering
+  // to the current workspace instead — #1141: the deletable gate needs the
+  // full worker↔key picture).
   const query = workspaceId
     ? `?workspace_id=${encodeURIComponent(workspaceId)}`
     : ''

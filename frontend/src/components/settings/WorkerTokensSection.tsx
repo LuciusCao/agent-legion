@@ -32,6 +32,12 @@ import styles from './WorkerTokensSection.module.css'
  * Deleting a key cuts access immediately — workers left without any live key
  * are cascade-deleted in the same transaction, survivors are narrowed to
  * their remaining keys' scope; there is no per-worker revoke.
+ *
+ * issue #1141: the admin view is workspace-isolated too. Both lists are
+ * fetched deployment-wide (the deletable gate and the delete-key dialog
+ * still need the full worker↔key picture) but rendered filtered to this
+ * workspace: workers whose allowed_workspaces contains it, keys bound to
+ * it, and only this workspace's key names on the worker rows.
  */
 export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
   const [label, setLabel] = useState('')
@@ -60,12 +66,18 @@ export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
   const listError = toErrorMessage(listQueryError)
   const allTokens = lists?.[0] ?? []
   const tokens = allTokens.filter((token) => token.workspace_id === workspaceId)
-  const workers = lists?.[1] ?? []
+  const allWorkers = lists?.[1] ?? []
+  // 展示层过滤（issue #1141）：数据仍全量拉取（deletable 判定与删 key
+  // 级联提示需要完整 worker↔key 画面），只把「承接本 workspace 任务」的
+  // worker 交给渲染层。
+  const workers = allWorkers.filter((worker) =>
+    worker.allowed_workspaces.includes(workspaceId)
+  )
 
   // The worker↔key binding (schema v59): which workers' latest registration
   // was admitted by this key.
   function tokenConsumers(tokenId: string): AgentWorkerSummary[] {
-    return workers.filter((worker) =>
+    return allWorkers.filter((worker) =>
       (worker.register_token_ids ?? []).includes(tokenId)
     )
   }
@@ -247,7 +259,9 @@ export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
 
       <AgentWorkerList
         workers={workers}
-        tokens={allTokens}
+        workspaceId={workspaceId}
+        tokens={tokens}
+        allTokens={allTokens}
         consoleUrl={consoleUrl}
         workspaceName={workspaceName}
         onChanged={refresh}

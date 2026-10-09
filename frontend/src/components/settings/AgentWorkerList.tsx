@@ -12,6 +12,7 @@ import {
 } from '../../lib/workerPresence'
 import { ConfirmDialog } from '../ConfirmDialog'
 import { WorkerConsoleLink } from '../WorkerConsoleLink'
+import { AgentWorkerScopeChips } from './AgentWorkerScopeChips'
 import styles from './WorkerTokensSection.module.css'
 
 export function workerName(worker: AgentWorkerSummary): string {
@@ -19,10 +20,20 @@ export function workerName(worker: AgentWorkerSummary): string {
 }
 
 interface AgentWorkerListProps {
+  // Workers whose allowed_workspaces contains the current workspace
+  // (WorkerTokensSection filters; the list itself stays dumb, issue #1141).
   workers: AgentWorkerSummary[]
-  // Every issued key (all workspaces), for rendering the worker↔key binding
-  // (schema v59) by label and for the delete gate below.
+  // The workspace this list is rendered for: passed through to the scope
+  // chips so the row reads as serving *this* workspace (+ others).
+  workspaceId: string
+  // Keys of the current workspace only: the「绑定 key」chip renders just the
+  // worker↔key binding (schema v59) of this workspace (issue #1141).
   tokens: AgentRegisterTokenSummary[]
+  // Every issued key (all workspaces): the deletable gate must keep judging
+  // "all bound keys are gone" against the full set — display filtering must
+  // not open the manual-delete path for a worker whose other-workspace keys
+  // are still alive (the backend re-gates with 409).
+  allTokens: AgentRegisterTokenSummary[]
   workspaceName: (workspaceId: string | null) => string
   onChanged: () => void
   onError: (message: string) => void
@@ -31,33 +42,36 @@ interface AgentWorkerListProps {
 }
 
 /**
- * Registered-worker list. There is no per-worker revoke: a worker's access is
- * cut by deleting its register keys — deleting a key cascade-deletes workers
- * left without any live key and narrows survivors to their remaining keys.
- * Manually deleting the registration record remains for legacy workers
- * without a recorded binding (the migration cleanup target); the backend
- * enforces the same gate with 409.
+ * Registered-worker list scoped to one workspace (issue #1141): the section
+ * only renders workers whose stored scope contains that workspace. There is
+ * no per-worker revoke: a worker's access is cut by deleting its register
+ * keys — deleting a key cascade-deletes workers left without any live key
+ * and narrows survivors to their remaining keys. Manually deleting the
+ * registration record remains for legacy workers without a recorded binding
+ * (the migration cleanup target); the backend enforces the same gate with
+ * 409. The worker↔key chip shows only keys bound to the listed workspace;
+ * the deletable gate still evaluates the full key set (see allTokens).
  */
 export function AgentWorkerList({
   workers,
+  workspaceId,
   tokens,
+  allTokens,
   workspaceName,
   onChanged,
   onError,
   consoleUrl = '',
 }: AgentWorkerListProps) {
-  const tokenById = new Map(tokens.map((token) => [token.token_id, token]))
+  const allTokenById = new Map(
+    allTokens.map((token) => [token.token_id, token])
+  )
   const [pendingDeleteWorker, setPendingDeleteWorker] =
     useState<AgentWorkerSummary | null>(null)
 
   function deletable(worker: AgentWorkerSummary): boolean {
-    return (worker.register_token_ids ?? []).every((id) => !tokenById.has(id))
-  }
-
-  function boundLabel(id: string): string {
-    const bound = tokenById.get(id)
-    if (!bound) return `${id.slice(0, 8)}（已删除）`
-    return bound.revoked ? `${bound.label}（已失效）` : bound.label
+    return (worker.register_token_ids ?? []).every(
+      (id) => !allTokenById.has(id)
+    )
   }
 
   async function handleDeleteWorker() {
@@ -100,29 +114,13 @@ export function AgentWorkerList({
               >
                 {PRESENCE_LABEL[workerPresence(worker)]}
               </span>
-              {worker.allowed_workspaces.length === 0 ? (
-                <span
-                  className={`${styles.chip} ${styles.chipRevoked}`}
-                  title="旧全局 token 注册的存量 Worker（scope=全部）。仅管理员可见；删除其注册记录后请为其签发 workspace key 并重新注册"
-                >
-                  待迁移（旧全局注册）
-                </span>
-              ) : (
-                <span className={styles.chipScope}>
-                  {worker.allowed_workspaces
-                    .map((id) => workspaceName(id))
-                    .join(', ')}
-                </span>
-              )}
-              {(worker.register_token_ids ?? []).length > 0 && (
-                <span
-                  className={styles.chip}
-                  title={`该 Worker 最近一次注册使用的 key：${(worker.register_token_ids ?? []).map(boundLabel).join('、')}`}
-                >
-                  绑定 key：
-                  {(worker.register_token_ids ?? []).map(boundLabel).join('、')}
-                </span>
-              )}
+              <AgentWorkerScopeChips
+                worker={worker}
+                workspaceId={workspaceId}
+                tokens={tokens}
+                allTokens={allTokens}
+                workspaceName={workspaceName}
+              />
               {worker.revoked && (
                 <span className={`${styles.chip} ${styles.chipRevoked}`}>
                   已失效（旧版吊销）

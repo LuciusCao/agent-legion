@@ -20,7 +20,10 @@ import styles from './WorkspaceWorkersSection.module.css'
  * Only workers registered with this workspace's scoped tokens are visible
  * (the backend filters by allowed_workspaces); revocation and token issuance
  * stay in the admin settings' WorkerTokensSection. Rendered for every
- * workspace member — the admin full view lives above it in the same page.
+ * workspace member. Since #1141 the admin's WorkerTokensSection renders the
+ * same workspace-scoped view (workers and keys filtered to this workspace),
+ * so both identities see this workspace's workers only — there is no
+ * deployment-wide worker listing on the workspace settings page anymore.
  */
 export function WorkspaceWorkersSection({
   workspaceId,

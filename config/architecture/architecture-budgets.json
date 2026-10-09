@@ -257,6 +257,7 @@
     "frontend/src/components/question/QuestionContentPanel.module.css": 304,
     "frontend/src/components/question/QuestionContentPanel.tsx": 24,
     "frontend/src/components/settings/AgentWorkerList.tsx": 129,
+    "frontend/src/components/settings/AgentWorkerScopeChips.tsx": 72,
     "frontend/src/components/settings/ApiAccess.module.css": 309,
     "frontend/src/components/settings/ApiAccessCopyButton.tsx": 52,
     "frontend/src/components/settings/ApiAccessInfoCard.tsx": 86,
