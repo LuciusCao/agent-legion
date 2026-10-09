@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from server.app.agent_broker import claim_node_limit
 from server.app.agent_broker.claim_admission import admit_candidate
 from server.app.agent_broker.claim_promote import promote_claim
 from server.app.agent_broker.claim_scan import (
@@ -58,19 +59,30 @@ def evaluate_candidate(
     kind = str(selected["kind"])
     state.attempts += 1
     # Fixed lock order across all capacity domains (issue #351), extended with
-    # the EXEC-GENERATION-001 job-mutation domain (#759 phase 1c):
-    # agent-ws (agent kind only — that domain is agent-only, so taking it for
-    # code would be pure queueing overhead) → agent-worker → job-mutation:<job>
-    # → request row. The request-row FOR UPDATE moved AFTER the job-mutation
-    # advisory lock: the mutation side (lease_guarded_mutation) holds
-    # job-mutation while cancelling queued request rows (_cancel_queued_sql),
-    # so the pre-#759 order (request row → …) would AB-BA against
-    # job-mutation → request row. The v82 counter folder uses non-blocking
-    # try-locks and adds no ordering edge.
+    # the EXEC-GENERATION-001 job-mutation domain (#759 phase 1c) and the
+    # #1149 code-pool entry: agent-ws (agent kind only — that domain is
+    # agent-only, so taking it for code would be pure queueing overhead) →
+    # agent-worker → code-pool (code kind with a configured node limit only,
+    # #1149) → job-mutation:<job> → request row. The code-pool lock is the one
+    # the local code pool takes first in claim_lease (_lease_claims.py), so
+    # its position here keeps the global order acyclic: the local path's
+    # code-pool → job-mutation is a subsequence of this total order (it takes
+    # no agent-worker lock, and nothing queues on agent-worker behind it).
+    # The request-row FOR UPDATE moved AFTER the job-mutation advisory lock:
+    # the mutation side (lease_guarded_mutation) holds job-mutation while
+    # cancelling queued request rows (_cancel_queued_sql), so the pre-#759
+    # order (request row → …) would AB-BA against job-mutation → request row.
+    # The v82 counter folder uses non-blocking try-locks and adds no ordering
+    # edge.
     if kind != "code":
         ws_domain = f"agent-ws:{selected['workspace_id']}"
         conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (ws_domain,))
     conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"agent-worker:{worker_id}",))
+    # #1149：候选带 workspace_node_limits 行的远程 code claim 必须与本地
+    # code 池共享全局 code-pool 锁——计数→插入的竞态跨本地/远程互斥
+    # （锁序与 probe 语义见 claim_node_limit 模块 docstring）。
+    if kind == "code":
+        claim_node_limit.lock_code_pool_for_node_limit(conn, selected)
     conn.execute(
         "select pg_advisory_xact_lock(hashtext(%s))",
         (f"job-mutation:{selected['job_id']}",),
@@ -133,6 +145,19 @@ def evaluate_candidate(
                 # Lost the race for this workspace's last slot; try the next.
                 state.skip_reasons["capacity_raced"] += 1
                 return None
+
+    # Node-level concurrency limit for remote code claims (issue #1149): the
+    # limit previously gated only the local code pool, so Worker-claimed code
+    # executions bypassed it entirely. The gate (claim_node_limit) reads the
+    # current limit value here — claim time, runtime-mutable setting, queued
+    # requests are never fail-fasted on a setting change — and counts the
+    # node's active executor_leases without filtering executor_id (local and
+    # remote claims merge on the same table; shard candidates included).
+    # Over-limit is a skip with the capacity_full semantics: the request
+    # stays queued and the unclaimable sweeper (runtime/model probes only)
+    # never reaps it.
+    if kind == "code" and not claim_node_limit.remote_node_limit_admits(conn, selected, state):
+        return None
 
     # Writes stage boundary (#448, #461 review): everything above is evaluate
     # (locks + admission checks); from here on the claim only writes. Close
