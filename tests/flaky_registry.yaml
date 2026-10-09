@@ -303,3 +303,21 @@ entries:
     registry check.
   registered_on: 2026-09-26
   deadline: 2026-10-26
+- id: FLAKY-021
+  nodeid: tests/services/test_studio_chat_empty_turn.py::test_trailing_content_after_turn_end_clears_the_verdict
+  owner: test-infra
+  reason: >-
+    Loaded-runner rerun absorbed on PR #1151 backend-coverage (run
+    37895139940, 2026-10-09): the trailing-content/turn-end verdict settle
+    assertion reads session state in the window before the async turn-end
+    write lands on the 2-core runner; the --reruns 1 retry passed. Same
+    loaded-runner timing family as FLAKY-009/010/011 — the PR diff
+    (workflows/scripts/docs only) cannot interact with studio chat. The
+    family-level fix (CI postgres tier pinned to xdist -n 1, #1150) lands in
+    the same PR; this entry bridges until a green nightly under -n 1
+    confirms the family is gone, then delete.
+  observed: >-
+    PR #1151 backend-coverage lane (run 37895139940), 2026-10-09, rerun
+    absorbed; the lane's only failure was the rerun-governance step.
+  registered_on: 2026-10-09
+  deadline: 2026-11-09
