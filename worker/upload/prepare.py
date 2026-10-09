@@ -22,8 +22,7 @@ from worker.upload.result_metadata import (
 )
 from worker.upload.stderr_evidence import (
     AGENT_STDERR_FILENAME,
-    max_secret_chars,
-    secret_spans,
+    secret_snapshot,
     stderr_tail_for_run,
 )
 
@@ -80,16 +79,19 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # file at scan time; stderr_tail_for_run reads it back when a re-entry
     # (direct-upload fallback / worker-restart restore) finds the events
     # file already compressed — a second scan would yield nothing.
-    # The scan redacts before any cut or durable write (secret_spans +
-    # the longest literal's length as lookback, see shared/pi_events.py).
+    # The scan redacts before any cut or durable write — the stderr tail AND
+    # the kept events' string values (#842: tool output echoing a secret must
+    # not ride the compressed events.jsonl to the Host renderer) — through
+    # ONE immutable registry snapshot (#844: the retired separate
+    # secret_spans / max_secret_chars reads raced register_secrets).
     # 崩溃/超时（非 0 退出）下 model_error 归因让位给退出码归因——扫描
     # 结论只在 exit 0 时采纳。
     # #952: the same pass counts per-call output truncations (stopReason=length).
+    snapshot = secret_snapshot()
     scanned_model_error, _, _, scanned_tail = scan_and_compress_pi_events(
         events,
         stderr_sink=run_dir / AGENT_STDERR_FILENAME,
-        secret_spans=secret_spans,
-        secret_max_chars=max_secret_chars(),
+        redactor=snapshot,
         event_observer=(truncation := OutputTruncation()).observe,
     )
     stderr_tail = stderr_tail_for_run(run_dir, scanned_tail)

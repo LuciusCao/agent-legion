@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from shared.pi_model_error import fold_model_error
-from shared.redaction import SecretSpans
+from shared.redaction import SecretRedactor
 from shared.stderr_tail import REDACT_WINDOW_MARGIN, StderrTail, persist_stderr_tail
 
 logger = logging.getLogger(__name__)
@@ -47,11 +47,36 @@ RELEVANT_EVENT_TYPES = frozenset(
 )
 
 
+def _dump_event(event: dict[str, Any]) -> str:
+    """Compact one-line serialization of a kept (redacted) event (#842) —
+    the real Pi stream is compact and the renderer accepts either form."""
+    return json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+
+
+def _kept_event_line(event: Any, line: str, redactor: SecretRedactor | None) -> str | None:
+    """The kept-event line with its string values redacted (#842), or
+    ``None`` when the span function raised — the caller drops that line
+    fail-closed (a raw event must never be written). ``redactor is None``
+    (Host path) and an unchanged event both keep the ORIGINAL line bytes,
+    so clean streams are byte-identical with and without the switch and
+    size accounting never drifts."""
+    try:
+        redacted = redactor.redact_json(event) if redactor is not None else event
+    except Exception:
+        # #204 broad-except audit: 脱敏器逃逸 = fail-closed——返回 None，调用方
+        # 该事件行整行丢弃，绝不以 raw 形态写进压缩文件（密钥随行交付 Host /
+        # 渲染进任务日志）。结果空间：渲染日志缺一条事件（纯观测面降级），
+        # 压缩、stderr 尾部与 model_error 归因照常完成。日志保全：堆栈随
+        # exception 落日志。
+        logger.exception("Secret redaction failed; dropping the event line")
+        return None
+    return line if redacted == event else _dump_event(redacted)
+
+
 def scan_and_compress_pi_events(
     events_path: Path,
     stderr_sink: Path | None = None,
-    secret_spans: SecretSpans | None = None,
-    secret_max_chars: int = 0,
+    redactor: SecretRedactor | None = None,
     event_observer: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[str | None, int, int, bytes]:
     """One pass: fold the model-error state, capture the stderr tail, and
@@ -68,7 +93,7 @@ def scan_and_compress_pi_events(
     compression rewrite is about to drop. It is kept RAW and verbatim (line
     separators, whitespace and blank lines untouched) in a keep-the-tail
     buffer bounded by ``STDERR_TAIL_BYTES + margin`` characters, ``margin =
-    max(REDACT_WINDOW_MARGIN, secret_max_chars)``; nothing is redacted or
+    max(REDACT_WINDOW_MARGIN, redactor.max_chars)``; nothing is redacted or
     normalized while streaming.
 
     Redaction (#755) runs exactly once, on that buffer at the end, and the
@@ -79,22 +104,38 @@ def scan_and_compress_pi_events(
       at ≤ ``margin`` characters its surviving fragment lies wholly inside
       the lookback.
     * Every secret that reaches the emitted window is therefore complete
-      in the buffer, so ``secret_spans`` sees it whole; the window start is
+      in the buffer, so the span function sees it whole; the window start is
       widened back to the start of any span straddling it, and spans are
       replaced before the text is encoded and byte-cut.
-    * Hence ``secret_max_chars`` must be ≥ the longest literal the caller
-      can match. Shape rules (``sk-…``, JWT) have no length bound; a shape
-      token longer than the lookback can be cut by the trim, so after any
-      cut the leading partial line (or, on a single line, partial token)
-      is dropped too.
+    * Hence ``redactor.max_chars`` must be ≥ the longest literal the
+      snapshot's span function can match — guaranteed by the snapshot being
+      ONE immutable registry read (#844; the two separate reads it replaced
+      could race a registration between them). Shape rules (``sk-…``, JWT)
+      have no length bound; a shape token longer than the lookback can be
+      cut by the trim, so after any cut the leading partial line (or, on a
+      single line, partial token) is dropped too.
 
-    ``secret_spans`` raising is fail-closed: the tail is dropped (``b""``)
-    and nothing reaches the sink. ``None`` keeps everything raw (tests and
-    Host callers with no secret registry). Matching domain: the file is
-    decoded as UTF-8 with ``errors="replace"`` and universal newlines, so
-    secrets are matched in that decoded form (``\\n`` line endings, U+FFFD
-    for undecodable bytes) — the Worker-side registry
-    (worker/upload/stderr_evidence.py) registers its values in that domain.
+    Events redaction (#842): with a ``redactor`` snapshot, the STRING
+    VALUES of kept events are redacted in the same pass — a
+    ``tool_execution_end`` whose tool output echoes a registered secret
+    (``bash env``, ``cat`` of a config file) would otherwise ride the
+    compressed file to the Host and the job-log renderer verbatim. Only
+    string values are rewritten (``SecretRedactor.redact_json``), so the
+    output line is re-serialized valid JSON with the same structure; the
+    returned ``model_error`` attribution string is redacted too (it flows
+    into result metadata / error_message). A span function that RAISES on
+    an event fails closed: that line is dropped from the output — never
+    written raw. ``None`` keeps the Host write path byte-verbatim (no
+    registry on that side, no per-line JSON cost).
+
+    ``redactor.spans`` raising on the stderr tail is fail-closed: the tail
+    is dropped (``b""``) and nothing reaches the sink. ``None`` keeps
+    everything raw (tests and Host callers with no secret registry).
+    Matching domain: the file is decoded as UTF-8 with
+    ``errors="replace"`` and universal newlines, so secrets are matched in
+    that decoded form (``\\n`` line endings, U+FFFD for undecodable bytes) —
+    the Worker-side registry (worker/upload/stderr_evidence.py) registers
+    its values in that domain.
 
     ``stderr_sink`` (#748 review P1) makes the capture durable AT SCAN TIME:
     a non-empty (already redacted) tail is persisted to the sink path BEFORE
@@ -118,7 +159,7 @@ def scan_and_compress_pi_events(
 
     compressed_path = events_path.with_suffix(".jsonl.compressing")
     model_error: str | None = None
-    stderr = StderrTail(max(REDACT_WINDOW_MARGIN, secret_max_chars))
+    stderr = StderrTail(max(REDACT_WINDOW_MARGIN, redactor.max_chars if redactor else 0))
     try:
         with (
             events_path.open("r", encoding="utf-8", errors="replace") as src,
@@ -136,8 +177,9 @@ def scan_and_compress_pi_events(
                 model_error = fold_model_error(event, model_error)
                 if event_observer is not None:
                     event_observer(event)
-                if event.get("type") in RELEVANT_EVENT_TYPES:
-                    dst.write(line + "\n")
+                relevant = event.get("type") in RELEVANT_EVENT_TYPES
+                if relevant and (kept := _kept_event_line(event, line, redactor)) is not None:
+                    dst.write(kept + "\n")
             # 对齐 worker/_atomic 标准：replace 前 flush + fsync，崩溃不留半截文件。
             dst.flush()
             os.fsync(dst.fileno())
@@ -147,7 +189,11 @@ def scan_and_compress_pi_events(
             compressed_path.unlink(missing_ok=True)
         return None, 0, 0, b""
 
-    tail = stderr.finish(secret_spans)
+    # #842：model_error 归因串流进 result metadata / error_message（外部
+    # error_summary 面），与压缩事件同一快照脱敏——provider 报错回显密钥
+    # （"invalid key sk-…"）不再外发。
+    model_error = redactor.redact(model_error) if model_error and redactor else model_error
+    tail = stderr.finish(redactor.spans if redactor is not None else None)
     if stderr_sink is not None and tail:
         # Best-effort AT THE CALL SITE: an unwritable sink must never fail
         # the compression (the in-memory tail still rides the return value).
@@ -166,8 +212,7 @@ def scan_and_compress_pi_events(
         logger.exception("Failed to replace events file: %s", events_path)
         return None, 0, 0, b""
 
-    compressed_size = events_path.stat().st_size
-    return model_error, original_size, compressed_size, tail
+    return model_error, original_size, events_path.stat().st_size, tail
 
 
 def compress_pi_events(events_path: Path) -> tuple[int, int]:

@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from shared.redaction import SecretRedactor
 from tests.helpers.secret_spans import literal_spans
 from tests.workers.upload_queue_testlib import (
     QueueFakeClient,
@@ -449,13 +450,13 @@ def test_redact_secrets_replaces_longest_value_first(
 ) -> None:
     """R2 P3-4：短密钥是长密钥前缀时，先替换长的——否则短值先替换掉前缀，
     长密钥只剩不可恢复的残段。"""
-    from worker.upload.stderr_evidence import redact_secrets
+    from worker.upload.stderr_evidence import secret_snapshot
 
     short, long = "tok-live-abc123", "tok-live-abc123def456ghi789"
     monkeypatch.setenv("SHORT_TOKEN", short)
     monkeypatch.setenv("LONG_TOKEN", long)
     text = f"keys: {short} and {long}"
-    redacted = redact_secrets(text)
+    redacted = secret_snapshot().redact(text)
     assert "def456ghi789" not in redacted  # 长密钥残段不可残留
     assert redacted.count("***") == 2
 
@@ -465,11 +466,11 @@ def test_redact_secrets_byte_threshold_covers_cjk_short_keys(
 ) -> None:
     """R2 P3-4：8 个 CJK 字 = 24 字节的真实密钥不再因「字符>8」阈值漏掉
     （阈值改为字节>8）。"""
-    from worker.upload.stderr_evidence import redact_secrets
+    from worker.upload.stderr_evidence import secret_snapshot
 
     cjk_secret = "九曜之门钥匙甲乙"  # 8 个 CJK 字符（24 字节）
     monkeypatch.setenv("GATEWAY_KEY", cjk_secret)
-    redacted = redact_secrets(f"gateway={cjk_secret}")
+    redacted = secret_snapshot().redact(f"gateway={cjk_secret}")
     assert cjk_secret not in redacted
 
 
@@ -480,7 +481,7 @@ def test_redact_secrets_matches_decoded_domain_variants(
     + 通用换行解码，注册值必须在同一域匹配。CRLF 形态的注册值在翻译后的
     流上以 \n 变体整值命中；带尾换行的值在「流恰好以值 − 尾换行收尾」时
     以 rstrip 变体命中。最长优先保证完整值先于变体替换。"""
-    from worker.upload.stderr_evidence import redact_secrets
+    from worker.upload.stderr_evidence import secret_snapshot
 
     crlf_pem = (
         "-----BEGIN PRIVATE KEY-----\r\n"
@@ -489,13 +490,13 @@ def test_redact_secrets_matches_decoded_domain_variants(
     )
     monkeypatch.setenv("LLM_GATEWAY_TOKEN", crlf_pem)
     # 流侧（文件解码后）只剩 \n 形态——CRLF 原值永远匹配不上。
-    redacted = redact_secrets("dump:\n" + crlf_pem.replace("\r\n", "\n"))
+    redacted = secret_snapshot().redact("dump:\n" + crlf_pem.replace("\r\n", "\n"))
     assert "PRIVATE KEY" not in redacted
     assert "ABCDEFGHIJKLMNOP" not in redacted
     assert "***" in redacted
 
     monkeypatch.setenv("LLM_GATEWAY_TOKEN", "zz-trailing-newline-token\n")
-    redacted = redact_secrets("echoed stripped: zz-trailing-newline-token")
+    redacted = secret_snapshot().redact("echoed stripped: zz-trailing-newline-token")
     assert "zz-trailing-newline-token" not in redacted
     assert redacted.endswith("***")
 
@@ -503,7 +504,7 @@ def test_redact_secrets_matches_decoded_domain_variants(
 def test_redact_secrets_covers_github_and_slack_shapes() -> None:
     """R2 P3-4：形态规则补 GitHub PAT/OAuth（ghp_/gho_）与 Slack
     bot/user/app token（xox[bap]-）三族。"""
-    from worker.upload.stderr_evidence import redact_secrets
+    from worker.upload.stderr_evidence import secret_snapshot
 
     for secret in (
         "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2",
@@ -512,7 +513,7 @@ def test_redact_secrets_covers_github_and_slack_shapes() -> None:
         "xoxa-" + "123456789012-abcdef",
         "xoxp-" + "123456789012-abcdef",
     ):
-        assert secret not in redact_secrets(f"echo {secret} failed")
+        assert secret not in secret_snapshot().redact(f"echo {secret} failed")
 
 
 def test_sink_persist_failure_cleans_staging_and_never_fails_scan(
@@ -545,7 +546,7 @@ def test_sink_persist_failure_cleans_staging_and_never_fails_scan(
     _, original, compressed, tail = pi_events.scan_and_compress_pi_events(
         events,
         stderr_sink=run_dir / AGENT_STDERR_FILENAME,
-        secret_spans=literal_spans(secret),
+        redactor=SecretRedactor(literal_spans(secret), len(secret)),
     )
     assert original > 0 and compressed > 0  # 压缩未因 sink 失败中断
     # #755 对抗复审 P1-1 起返回值同走脱敏后缓冲（调用方重脱敏退化为防御网）。
@@ -569,14 +570,14 @@ def test_sink_replace_success_leaves_no_staging(tmp_path: Path) -> None:
     assert list(run_dir.glob(".agent-stderr.*")) == []
 
 
-def test_max_secret_chars_reports_longest_registered_value(
+def test_secret_snapshot_reports_longest_registered_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#755 codex P1：已注册最长密钥的字符数——shared/ 侧 lookback 的对齐
-    口径（max(512, 本值)，与匹配域同为解码后字符）。无注册密钥时 0；短于
-    阈值（≤8 字节，阈值仍按字节）的值不参与脱敏、也不扩窗。"""
+    """#755 codex P1：快照的 max_chars——已注册最长密钥的字符数，shared/ 侧
+    lookback 的对齐口径（max(512, 本值)，与匹配域同为解码后字符）。无注册
+    密钥时 0；短于阈值（≤8 字节，阈值仍按字节）的值不参与脱敏、也不扩窗。"""
     from worker.upload import stderr_evidence
-    from worker.upload.stderr_evidence import max_secret_chars
+    from worker.upload.stderr_evidence import secret_snapshot
 
     monkeypatch.setattr(stderr_evidence, "_extra_secret_values", frozenset())
     # 只留受控 env：清掉可能含 TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL 命名的项。
@@ -586,16 +587,52 @@ def test_max_secret_chars_reports_longest_registered_value(
             for marker in ("TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL")
         ):
             monkeypatch.delenv(name)
-    assert max_secret_chars() == 0
+    assert secret_snapshot().max_chars == 0
 
     monkeypatch.setenv("CI_TOKEN", "t" * 8)  # ≤ 阈值，不参与
     monkeypatch.setenv("CI_KEY", "k" * 100)
-    assert max_secret_chars() == 100
+    assert secret_snapshot().max_chars == 100
 
     monkeypatch.setattr(
         stderr_evidence, "_extra_secret_values", frozenset({"密" * 150})
     )  # 150 字符 / 450 字节
-    assert max_secret_chars() == 150
+    assert secret_snapshot().max_chars == 150
+
+
+def test_secret_snapshot_is_one_immutable_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#844：注册表经 secret_snapshot 一次读出——区间函数与 max_chars 来自
+    同一份值表（两次分别读取的竞态窗口消除：读取间隙 register_secrets
+    注册更长值，旧形态会扩宽区间函数却不扩 lookback，切割可能劈开快照本可
+    整值覆盖的密钥）；快照不可变，读取后再注册不影响已持有的快照。"""
+    from worker.upload import stderr_evidence
+    from worker.upload.stderr_evidence import secret_snapshot
+
+    secret = "k" * 100
+    monkeypatch.setenv("CI_KEY", secret)
+    real_values = stderr_evidence._secret_values
+    calls: list[int] = []
+
+    def counting_values() -> list[str]:
+        calls.append(1)
+        return real_values()
+
+    monkeypatch.setattr(stderr_evidence, "_secret_values", counting_values)
+    snapshot = secret_snapshot()
+    assert calls == [1]  # 单次读取，两个面同源
+    assert snapshot.max_chars == 100
+    assert snapshot.redact(f"auth failed for {secret}") == "auth failed for ***"
+
+    # 读取后注册更长值：已持有的快照不变（不可变快照）。
+    monkeypatch.setenv("CI_KEY2", "z" * 300)
+    monkeypatch.setattr(stderr_evidence, "_secret_values", real_values)
+    assert snapshot.max_chars == 100
+    assert snapshot.redact("z" * 300) == "z" * 300  # 新值不在旧快照里
+    # 新快照读到新值。
+    fresh = secret_snapshot()
+    assert fresh.max_chars == 300
+    assert fresh.redact("z" * 300) == "***"
 
 
 # -- #755 codex P2-2：surrogateescape 形态的 env 密钥不炸不脱队 --
@@ -612,16 +649,16 @@ def test_surrogateescape_env_secret_neither_crashes_nor_leaks(
     走 surrogateescape 对称编码（忠实往返、不炸），且密钥在匹配域
     （errors="replace" 解码渲染）仍被脱敏覆盖——不静默丢弃（丢弃 = 泄漏
     通道）。"""
-    from worker.upload.stderr_evidence import max_secret_chars, redact_secrets
+    from worker.upload.stderr_evidence import secret_snapshot
 
     secret_bytes = b"gw-\xff-secret-material-" + bytes(range(0x80, 0x90))
     monkeypatch.setenv("LLM_GATEWAY_TOKEN", secret_bytes.decode("utf-8", "surrogateescape"))
 
     # 不炸；lookback 覆盖匹配域形态（流侧 UTF-8 errors="replace" 解码渲染）。
     echoed = secret_bytes.decode("utf-8", "replace")
-    assert max_secret_chars() >= len(echoed)
+    assert secret_snapshot().max_chars >= len(echoed)
     # 匹配域形态整值命中。
-    redacted = redact_secrets(f"auth failed for {echoed}")
+    redacted = secret_snapshot().redact(f"auth failed for {echoed}")
     assert redacted == "auth failed for ***"
     assert "secret-material" not in redacted
 
