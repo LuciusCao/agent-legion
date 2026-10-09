@@ -92,7 +92,7 @@ export function runTrackedSave(context: {
     yaml: string,
     keepalive: boolean,
     expectedAt: string
-  ) => Promise<{ updated_at?: string | null }>
+  ) => Promise<{ updated_at?: string | null; definition_hash?: string | null }>
   yaml: string
   requestId: number
   retriesLeft: number
@@ -103,10 +103,15 @@ export function runTrackedSave(context: {
   onBaseline: (
     saved: string,
     updatedAt: string | null,
-    current: boolean
+    current: boolean,
+    savedHash: string | null
   ) => void
   onSaving: () => void
-  onConflict: (serverYaml: string | null, serverAt: string | null) => void
+  onConflict: (
+    serverYaml: string | null,
+    serverAt: string | null,
+    serverHash: string | null
+  ) => void
   onTransientError: () => void
   armRetry: (timer: ReturnType<typeof setTimeout>) => void
   save: (
@@ -133,7 +138,11 @@ export function runTrackedSave(context: {
       onFailure: (error: unknown, resolveRetry: (ok: boolean) => void) => {
         if (error instanceof WorkflowDraftConflictError) {
           const current = error.currentDraft
-          context.onConflict(current.definition_yaml, current.updated_at)
+          context.onConflict(
+            current.definition_yaml,
+            current.updated_at,
+            current.definition_hash ?? null
+          )
           return resolveRetry(false)
         }
         context.onTransientError()

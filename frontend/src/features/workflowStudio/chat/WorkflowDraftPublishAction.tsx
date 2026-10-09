@@ -75,10 +75,24 @@ export function WorkflowDraftPublishButton() {
 /** 冲突提示：草稿卡 YAML 与编辑器当前内容不一致时（用户有未保存的本地
  * 编辑导致服务端草稿被挂起，或应用草稿后又改过），发布审的是编辑器里的
  * YAML。参考 AgentPublishRequestDialog 的 flush-first 模式只给提示，不
- * 强行 flush。 */
-export function WorkflowDraftStaleHint({ draftYaml }: { draftYaml: string }) {
+ * 强行 flush。
+ * #1143（方案 B）：分歧判定改为语义身份核对——卡上记录的 hash（validate/
+ * compare 响应带回）vs 编辑器已保存草稿的服务端身份（studio.draftSave
+ * .savedHash，PUT/GET 响应带回）。hash 相同 → 语义一致不提示（修复点：
+ * agent 原始串 vs 画布规范化重排字节不同但 hash 相同，不再误报）。逐字节
+ * 相同恒不提示；hash 不同（真实分歧）、任一侧缺失或不可核对（旧转录/
+ * 不可解析草稿）→ 保守保留提示（降级回字符串全等的既有行为）。 */
+export function WorkflowDraftStaleHint({
+  draftYaml,
+  draftHash,
+}: {
+  draftYaml: string
+  draftHash: string | null
+}) {
   const studio = useStudioStateOptional()
   if (!studio || studio.definitionYaml === draftYaml) return null
+  const savedHash = studio.draftSave?.savedHash ?? null
+  if (draftHash && savedHash && draftHash === savedHash) return null
   return (
     <div className={styles.draftHint} role="note">
       该草稿与编辑器当前内容不一致，发布将以编辑器中的 YAML 为准

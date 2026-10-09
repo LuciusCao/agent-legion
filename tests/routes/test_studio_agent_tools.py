@@ -248,7 +248,14 @@ nodes:
     codes.publish(workspace_id, "studio_validate_flow", "publish_content")
     valid = scoped.post(url, json={"definition_yaml": draft_yaml})
     assert valid.status_code == 200
-    assert valid.json() == {"valid": True, "errors": []}
+    # #1143：validate 响应携带草稿语义身份（草稿卡记录 hash 的来源）。
+    from server.app.services.workflow_drafts import workflow_draft_identity_hash
+
+    assert valid.json() == {
+        "valid": True,
+        "errors": [],
+        "definition_hash": workflow_draft_identity_hash(draft_yaml),
+    }
 
     # Parseable but structurally invalid (validate mirrors the Studio endpoint,
     # which reports definition errors rather than catching raw YAML errors).

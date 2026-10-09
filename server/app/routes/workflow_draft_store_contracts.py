@@ -42,3 +42,8 @@ class WorkflowDraftStoreRequest(BaseModel):
 class WorkflowDraftStoreResponse(BaseModel):
     definition_yaml: str | None = None
     updated_at: str | None = None
+    # #1143（方案 B）：草稿的语义身份（解析→归一化→sha256，服务端计算）。
+    # 同一语义的两份 YAML（agent 原始串 vs 画布重排）得到相同 hash；前端
+    # 用它与草稿卡记录的 hash 核对「是否与编辑器一致」，替代逐字节全等。
+    # 不可解析的草稿为 null（前端按「无法核对」降级到字符串比较）。
+    definition_hash: str | None = None

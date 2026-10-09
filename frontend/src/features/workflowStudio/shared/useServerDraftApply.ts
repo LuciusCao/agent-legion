@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ServerDraftApplyTracker } from './serverDraftReapply'
 
-export type ServerDraftConflict = { yaml: string; updatedAt: string }
+export type ServerDraftConflict = {
+  yaml: string
+  updatedAt: string
+  hash: string | null
+}
 
 export type ServerDraftApplyControls = {
   /* touched-aware setter：经它（用户编辑/聊天应用/重置/采用历史版本）的
@@ -24,7 +28,8 @@ export function useServerDraftApply(
   serverDraftYaml: string | null | undefined,
   serverDraftUpdatedAt: string | null | undefined,
   setDraftYamlState: (value: string) => void,
-  canvasYaml?: string
+  canvasYaml?: string,
+  serverDraftHash?: string | null
 ): ServerDraftApplyControls {
   // workspace 切换重建跟踪器（清空 appliedAt/touched/冲突挂起）；两个 effect
   // 的注册顺序保证 reset 先于 evaluate 跑。
@@ -39,13 +44,15 @@ export function useServerDraftApply(
       serverDraftYaml,
       serverDraftUpdatedAt,
       setDraftYamlState,
-      canvasYaml
+      canvasYaml,
+      serverDraftHash
     )
     // 冲突挂起需要一次重渲染让保存层 effect 跑起来；apply/no-op 不需要。
     if (outcome === 'conflict') forceRender((count) => count + 1)
   }, [
     serverDraftYaml,
     serverDraftUpdatedAt,
+    serverDraftHash,
     originalYaml,
     setDraftYamlState,
     canvasYaml,

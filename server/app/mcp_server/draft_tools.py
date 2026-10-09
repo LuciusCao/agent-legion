@@ -23,9 +23,13 @@ def register_draft_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
     @mcp.tool(structured_output=False)
     async def get_workflow_draft(workspace_id: str) -> str:
         """The workspace's unpublished workflow draft — the SAME canvas draft
-        the human editor autosaves: {"definition_yaml", "updated_at"}, both
-        null when never saved. Pass updated_at to save_workflow_draft as
-        expected_updated_at; null means "never-saved"."""
+        the human editor autosaves: {"definition_yaml", "updated_at",
+        "definition_hash"}, yaml/hash null when never saved. Pass updated_at
+        to save_workflow_draft as expected_updated_at; null means
+        "never-saved". definition_hash is the draft's semantic identity
+        (parse → normalize → sha256): two YAMLs that differ only in
+        serialization style (key order, explicit empty lists, block scalars)
+        hash the same (#1143)."""
         _, client = await client_factory()
         return await client.call("GET", f"/workspaces/{workspace_id}/workflow/draft")
 
@@ -41,8 +45,11 @@ def register_draft_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         draft_updated_at, or the literal "never-saved" — never invent a
         timestamp (wrong → 409, malformed → 422). A stale value → 409
         carrying the current draft (current_draft.definition_yaml +
-        current_draft.updated_at): rebase onto it and retry with its
-        updated_at. Draft only — the human confirms every publish."""
+        current_draft.updated_at + current_draft.definition_hash): rebase
+        onto it and retry with its updated_at. The response echoes
+        {"definition_yaml", "updated_at", "definition_hash"} — the semantic
+        identity of what you just saved (#1143). Draft only — the human
+        confirms every publish."""
         _, client = await client_factory()
         body: dict[str, Any] = {
             "definition_yaml": definition_yaml,

@@ -57,14 +57,16 @@ export class DraftSaveController {
      P1-2：服务端草稿前进且画布采用了它时再次调用）。#633：同时记下
      updated_at 作为后续 PUT 的 CAS 基线——冲突恢复采用服务端草稿与首次
      hydrate 走同一入口。kimi review P1-2：hydrate 即冲突的解除路径之一
-     （采用服务端版本），conflict 字段一并清零。 */
+     （采用服务端版本），conflict 字段一并清零。#1143：savedHash 是服务端
+     草稿的语义身份（GET/adopt 传入），随基线一并推进。 */
   hydrate = (
     persistedYaml: string,
-    updatedAt: string | null | undefined
+    updatedAt: string | null | undefined,
+    savedHash?: string | null
   ): void => {
     this.lastPersisted = persistedYaml
     this.lastPersistedAt = updatedAt ?? null
-    this.setState(conflictResolvedState(this.state, updatedAt))
+    this.setState(conflictResolvedState(this.state, updatedAt, savedHash))
   }
 
   /* #633 codex review P1-2/P2-1：进入 conflict 态的统一入口——409 冲突
@@ -76,13 +78,14 @@ export class DraftSaveController {
      计时器——计时器若存活，到期 save() 会以刚推进的基线成功覆盖 Agent
      版本，绕过「用户显式二选一」的保护。 */
   enterConflict = (
-    serverYaml: string | null,
-    serverAt: string | null
+    yaml: string | null,
+    at: string | null,
+    hash?: string | null
   ): void => {
     this.clearTimers()
     this.pendingSave = null
-    if (serverAt) this.lastPersistedAt = serverAt
-    this.setState(conflictEnteredState(this.state, serverYaml, serverAt))
+    if (at) this.lastPersistedAt = at
+    this.setState(conflictEnteredState(this.state, yaml, at, hash))
   }
 
   /* draftYaml 变化时调度一次 debounce 保存；空内容与「回退到已持久化值且
@@ -147,10 +150,12 @@ export class DraftSaveController {
   }
 
   /* kimi review P1-2：采用服务端草稿（Agent 的版本）——经 hydrate 入口
-     写入画布并推进基线，本页未保存编辑被放弃（调用方负责 UI 确认）。 */
-  adoptServerDraft(serverYaml: string, serverAt: string | null): void {
+     写入画布并推进基线，本页未保存编辑被放弃（调用方负责 UI 确认）。
+     #1143：hash 即被采用草稿的语义身份，随 hydrate 恢复成 savedHash
+     （画布内容=服务端草稿，草稿卡核对不应对它误报）。 */
+  adoptServerDraft(yaml: string, at: string | null, hash?: string | null) {
     this.abortPending()
-    this.hydrate(serverYaml, serverAt)
+    this.hydrate(yaml, at, hash)
   }
 
   /* 回退到已持久化值：撤销等待中的保存与失败重试（retryTimer 本身也有
@@ -241,10 +246,11 @@ export class DraftSaveController {
         this.drainQueued()
       },
       baseline: () => this.lastPersistedAt,
-      onBaseline: (saved, updatedAt, current) => {
+      onBaseline: (saved, at, current, hash) => {
         this.lastPersisted = saved
-        this.lastPersistedAt = updatedAt
-        if (current) this.setState({ status: 'saved', savedAt: updatedAt })
+        this.lastPersistedAt = at
+        if (current)
+          this.setState({ status: 'saved', savedAt: at, savedHash: hash })
       },
       onSaving: () => this.setState({ ...this.state, status: 'saving' }),
       onConflict: this.enterConflict.bind(this),

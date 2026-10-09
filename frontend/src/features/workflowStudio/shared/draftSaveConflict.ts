@@ -6,26 +6,34 @@
 import type { DraftSaveState } from './draftSaveTypes'
 
 /* 采用服务端版本（adoptServerDraft/hydrate 共用）：回到 idle、清除冲突，
-   savedAt 跟随服务端时间戳（无时间戳时保留原值）。 */
+   savedAt 跟随服务端时间戳（无时间戳时保留原值）。#1143：savedHash 同
+   步到服务端草稿身份（无 hash 时保留原值——旧服务端/不可解析草稿）。 */
 export function conflictResolvedState(
   current: DraftSaveState,
-  savedAt: string | null | undefined
+  savedAt: string | null | undefined,
+  savedHash?: string | null
 ): DraftSaveState {
   return {
     ...current,
     status: 'idle',
     savedAt: savedAt ?? current.savedAt,
+    savedHash: savedHash ?? current.savedHash,
     conflict: false,
     conflictDraftYaml: undefined,
+    conflictDraftHash: undefined,
   }
 }
 
 /* 进入冲突态（409 响应 / turn-end 服务端前进共用）：error 常驻 + 服务端
-   草稿暴露给 UI（采用入口），savedAt 显示服务端真值。 */
+   草稿暴露给 UI（采用入口），savedAt 显示服务端真值。#1143：serverHash
+   存进 conflictDraftHash（不进 savedHash——冲突期间编辑器有未落盘编辑，
+   发布以编辑器为准，草稿卡一致性提示应保留；采用服务端版本时才经
+   adopt 恢复成 savedHash）。 */
 export function conflictEnteredState(
   current: DraftSaveState,
   serverYaml: string | null,
-  serverAt: string | null
+  serverAt: string | null,
+  serverHash?: string | null
 ): DraftSaveState {
   return {
     ...current,
@@ -33,6 +41,7 @@ export function conflictEnteredState(
     savedAt: serverAt ?? current.savedAt,
     conflict: true,
     conflictDraftYaml: serverYaml,
+    conflictDraftHash: serverHash ?? undefined,
   }
 }
 
@@ -94,11 +103,14 @@ export function stopTimer(
   return null
 }
 
-/* 成功响应回调：作废与否都推进基线（R2 P1）；current 时才更新可见状态。 */
+/* 成功响应回调：作废与否都推进基线（R2 P1）；current 时才更新可见状态。
+   #1143：savedHash 是本次落盘内容的服务端语义身份（响应带回，旧服务端
+   或不可解析草稿为 null——调用方按「无法核对」降级）。 */
 export type OnSaveSuccess = (
   yaml: string,
   updatedAt: string | null,
-  current: boolean
+  current: boolean,
+  savedHash: string | null
 ) => void
 
 /* 失败回调：409 冲突（WorkflowDraftConflictError，携带 current_draft）
@@ -115,7 +127,7 @@ export function runSave(options: {
     yaml: string,
     keepalive: boolean,
     expectedAt: string
-  ) => Promise<{ updated_at?: string | null }>
+  ) => Promise<{ updated_at?: string | null; definition_hash?: string | null }>
   yaml: string
   keepalive: boolean
   expectedAt: string
@@ -136,7 +148,8 @@ export function runSave(options: {
       options.onSuccess(
         yaml,
         response.updated_at ?? null,
-        options.isCurrentRequest(requestId)
+        options.isCurrentRequest(requestId),
+        response.definition_hash ?? null
       )
       options.clearInFlight(requestId)
       options.resolve(true)
@@ -159,10 +172,12 @@ export function hasPendingWork(
   return hasPending || inFlight || errored || inConflict
 }
 
-/* kimi review P1-2 冲突出口的签名（persistence 与 serverSync 共享）。 */
+/* kimi review P1-2 冲突出口的签名（persistence 与 serverSync 共享）。
+   #1143：serverHash（可选）是被采用服务端草稿的语义身份。 */
 export type AdoptServerDraft = (
   serverYaml: string,
   serverAt: string | null,
-  onAdopt?: (serverYaml: string) => void
+  onAdopt?: (serverYaml: string) => void,
+  serverHash?: string | null
 ) => void
 export type ResolveConflict = (keepMine: boolean) => void

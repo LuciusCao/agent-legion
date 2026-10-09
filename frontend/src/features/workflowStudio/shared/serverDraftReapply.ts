@@ -9,7 +9,7 @@
 export type ServerDraftReapplyDecision =
   | { action: 'noop'; reason: 'not-ready' | 'same-or-older' | 'user-touched' }
   | { action: 'apply'; yaml: string; updatedAt: string }
-  | { action: 'conflict'; yaml: string; updatedAt: string }
+  | { action: 'conflict'; yaml: string; updatedAt: string; hash: string | null }
 
 /** 比较 CAS 时间戳：ISO 字符串按时间值比较（Postgres `+00` 与 Python
  * `+00:00`/`Z` 渲染差异不影响大小关系——`+NN` 裸偏移补成 `+NN:00`）。
@@ -43,6 +43,7 @@ function normalizeOffset(value: string): string {
 export function decideServerDraftReapply(input: {
   serverDraftYaml: string | null | undefined
   serverDraftUpdatedAt: string | null | undefined
+  serverDraftHash?: string | null
   appliedUpdatedAt: string | null | undefined
   userTouched: boolean
   canvasYaml?: string
@@ -50,6 +51,7 @@ export function decideServerDraftReapply(input: {
   const {
     serverDraftYaml,
     serverDraftUpdatedAt,
+    serverDraftHash,
     appliedUpdatedAt,
     userTouched,
     canvasYaml,
@@ -60,26 +62,15 @@ export function decideServerDraftReapply(input: {
   if (!isServerDraftNewer(serverDraftUpdatedAt, appliedUpdatedAt)) {
     return { action: 'noop', reason: 'same-or-older' }
   }
+  const base = { yaml: serverDraftYaml, updatedAt: serverDraftUpdatedAt ?? '' }
   // own-save 回显：服务端草稿即画布当前内容——不是外部变更，推进基线。
   if (canvasYaml !== undefined && serverDraftYaml === canvasYaml) {
-    return {
-      action: 'apply',
-      yaml: serverDraftYaml,
-      updatedAt: serverDraftUpdatedAt ?? '',
-    }
+    return { action: 'apply', ...base }
   }
   if (userTouched) {
-    return {
-      action: 'conflict',
-      yaml: serverDraftYaml,
-      updatedAt: serverDraftUpdatedAt ?? '',
-    }
+    return { action: 'conflict', ...base, hash: serverDraftHash ?? null }
   }
-  return {
-    action: 'apply',
-    yaml: serverDraftYaml,
-    updatedAt: serverDraftUpdatedAt ?? '',
-  }
+  return { action: 'apply', ...base }
 }
 
 /** 非React的应用跟踪器：记录已应用的 updated_at 与「用户碰过」标记，
@@ -88,14 +79,22 @@ export function decideServerDraftReapply(input: {
 export class ServerDraftApplyTracker {
   private appliedAt: string | null = null
   private touched = false
-  private conflict: { yaml: string; updatedAt: string } | null = null
+  private conflict: {
+    yaml: string
+    updatedAt: string
+    hash: string | null
+  } | null = null
 
   markTouched(): void {
     this.touched = true
     this.conflict = null
   }
 
-  consumeConflict(): { yaml: string; updatedAt: string } | null {
+  consumeConflict(): {
+    yaml: string
+    updatedAt: string
+    hash: string | null
+  } | null {
     const conflict = this.conflict
     this.conflict = null
     return conflict
@@ -104,16 +103,19 @@ export class ServerDraftApplyTracker {
   /** 评估一次服务端草稿：apply 时写画布并推进 appliedAt；conflict 时挂起
    * 冲突通知（由 consumeConflict 消费）。canvasYaml 参与 own-save 回显
    * 判定（kimi review P1-1）：服务端草稿与画布一致时走 apply（内容相同，
-   * 实际只是推进基线），不误报冲突。 */
+   * 实际只是推进基线），不误报冲突。#1143：serverDraftHash 随草稿传入，
+   * 冲突通知携带它（保存层存进 conflictDraftHash，采用服务端版本时恢复）。 */
   evaluate(
     serverDraftYaml: string | null | undefined,
     serverDraftUpdatedAt: string | null | undefined,
     applyToCanvas: (yaml: string) => void,
-    canvasYaml?: string
+    canvasYaml?: string,
+    serverDraftHash?: string | null
   ): 'apply' | 'conflict' | 'noop' {
     const decision = decideServerDraftReapply({
       serverDraftYaml,
       serverDraftUpdatedAt,
+      serverDraftHash,
       appliedUpdatedAt: this.appliedAt,
       userTouched: this.touched,
       canvasYaml,
@@ -131,7 +133,8 @@ export class ServerDraftApplyTracker {
       return 'apply'
     }
     if (decision.action === 'conflict') {
-      this.conflict = { yaml: decision.yaml, updatedAt: decision.updatedAt }
+      const { yaml, updatedAt, hash } = decision
+      this.conflict = { yaml, updatedAt, hash }
       return 'conflict'
     }
     return 'noop'

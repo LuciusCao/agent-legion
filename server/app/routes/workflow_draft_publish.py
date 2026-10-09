@@ -12,6 +12,7 @@ from server.app.services.workflow_draft_publish import (
     publish_workflow_draft,
     validate_workflow_draft_for_publish,
 )
+from server.app.services.workflow_drafts import workflow_draft_identity_hash
 from server.app.settings import Settings
 
 
@@ -34,7 +35,11 @@ def create_workflow_draft_publish_router(job_db: JobQueries, settings: Settings)
             request.definition_yaml,
             settings.executor_runtime.workflows.custom_nodes_enabled,
         )
-        return WorkflowDraftValidationResponse(valid=not errors, errors=errors)
+        return WorkflowDraftValidationResponse(
+            valid=not errors,
+            errors=errors,
+            definition_hash=workflow_draft_identity_hash(request.definition_yaml),
+        )
 
     @router.post(
         "/workspaces/{workspace_id}/workflow-drafts/publish",

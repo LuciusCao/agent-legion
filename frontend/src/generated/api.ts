@@ -7037,6 +7037,8 @@ export interface components {
      * @description Human draft-store mirror; both null when no draft (structured empty).
      */
     StudioAgentWorkflowDraftResponse: {
+      /** Definition Hash */
+      definition_hash?: string | null
       /** Definition Yaml */
       definition_yaml?: string | null
       /** Updated At */
@@ -7732,6 +7734,8 @@ export interface components {
        * @default false
        */
       creates_revision: boolean
+      /** Definition Hash */
+      definition_hash?: string | null
       draft_workflow?: components['schemas']['WorkflowDraftSummaryItem'] | null
       /**
        * Errors
@@ -7756,6 +7760,8 @@ export interface components {
     }
     /** WorkflowDraftStoreResponse */
     WorkflowDraftStoreResponse: {
+      /** Definition Hash */
+      definition_hash?: string | null
       /** Definition Yaml */
       definition_yaml?: string | null
       /** Updated At */
@@ -7772,6 +7778,8 @@ export interface components {
     }
     /** WorkflowDraftValidationResponse */
     WorkflowDraftValidationResponse: {
+      /** Definition Hash */
+      definition_hash?: string | null
       /** Errors */
       errors: string[]
       /** Valid */

@@ -16,7 +16,10 @@ from server.app.services.workflow_draft_compare_support import (
     higher_risk,
     yaml_error_to_dict,
 )
-from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
+from server.app.services.workflow_drafts import (
+    workflow_definition_from_yaml_string,
+    workflow_draft_identity_hash,
+)
 from server.app.services.workflow_revision_change import structural_revision_changed
 from server.app.workflows.definition import WorkflowDefinitionError, workflow_definition_from_dict
 from server.app.workflows.schema import (
@@ -500,6 +503,9 @@ def compare_workflow_draft(
 
     return {
         "valid": True,
+        # #1143（方案 B）：本次对比草稿的语义身份 hash——草稿卡从 compare
+        # 输出取身份，与编辑器已保存草稿核对一致性（与 validate 同源）。
+        "definition_hash": workflow_draft_identity_hash(definition_yaml),
         "creates_revision": creates_revision,
         "base_revision": _base_revision_summary(revision),
         "draft_workflow": {

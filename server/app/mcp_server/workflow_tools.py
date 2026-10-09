@@ -32,7 +32,9 @@ def register_workflow_tools(mcp: FastMCP, client_factory: ClientFactory) -> None
     async def validate_workflow(workspace_id: str, definition_yaml: str) -> str:
         """Validate a workflow definition YAML draft against the publish
         validation set. Persists nothing — always validate before asking the
-        human to review."""
+        human to review. The response carries definition_hash: the draft's
+        semantic identity (parse → normalize → sha256, #1143) — YAMLs that
+        differ only in serialization style hash the same."""
         _, client = await client_factory()
         return await client.call(
             "POST",

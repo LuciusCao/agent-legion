@@ -104,6 +104,7 @@ describe('decideServerDraftReapply', () => {
       action: 'conflict',
       yaml: 'key: demo\nlabel: Agent v2\n',
       updatedAt: '2026-08-27T02:00:00+00:00',
+      hash: null,
     })
   })
 
@@ -136,6 +137,7 @@ describe('decideServerDraftReapply', () => {
       action: 'conflict',
       yaml: 'key: demo\nlabel: Agent v2\n',
       updatedAt: '2026-08-27T02:00:00+00:00',
+      hash: null,
     })
   })
 })

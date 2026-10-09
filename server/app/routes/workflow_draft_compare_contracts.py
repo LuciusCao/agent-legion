@@ -96,3 +96,6 @@ class WorkflowDraftCompareResponse(BaseModel):
     draft_workflow: WorkflowDraftSummaryItem | None = None
     summary: WorkflowCompareSummary | None = None
     errors: list[WorkflowDraftCompareError] = []
+    # #1143（方案 B）：本次对比的 definition_yaml 的语义身份 hash（不可
+    # 解析 → None）——草稿卡从 compare 输出取 hash，与 validate 同源。
+    definition_hash: str | None = None

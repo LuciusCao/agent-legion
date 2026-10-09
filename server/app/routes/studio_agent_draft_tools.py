@@ -53,12 +53,16 @@ class StudioAgentWorkflowDraftResponse(BaseModel):
 
     definition_yaml: str | None = None
     updated_at: str | None = None
+    # #1143（方案 B）：草稿语义身份 hash（不可解析 → None），与人类面
+    # WorkflowDraftStoreResponse 同源——保存/读取响应带身份供卡核对。
+    definition_hash: str | None = None
 
 
 def _draft_response(draft: dict) -> StudioAgentWorkflowDraftResponse:
     return StudioAgentWorkflowDraftResponse(
         definition_yaml=draft["definition_yaml"],
         updated_at=str(draft["updated_at"]),
+        definition_hash=draft.get("definition_hash"),
     )
 
 

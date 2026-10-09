@@ -11,6 +11,14 @@ const mocks = {
   putWorkflowDraft: vi.fn(),
 }
 
+/* #633/#1143：PUT/GET 响应形状（definition_hash 由服务端语义身份计算；
+   旧服务端为 null）。 */
+type DraftStoreResponseMock = {
+  definition_yaml: string
+  updated_at: string
+  definition_hash: string | null
+}
+
 vi.mock('../../../api', () => ({
   fetchAgentRuntimes: vi.fn(() => Promise.resolve({ runtimes: {} })),
   fetchWorkflowDraft: (...args: unknown[]) => mocks.fetchWorkflowDraft(...args),
@@ -22,6 +30,7 @@ vi.mock('../../../api/workflowDraft', () => ({
     readonly currentDraft: {
       definition_yaml: string | null
       updated_at: string | null
+      definition_hash: string | null
     }
     constructor(detail: unknown) {
       super('workflow draft conflict')
@@ -32,26 +41,37 @@ vi.mock('../../../api/workflowDraft', () => ({
       const current = (payload.current_draft ?? {}) as {
         definition_yaml?: string | null
         updated_at?: string | null
+        definition_hash?: string | null
       }
       this.currentDraft = {
         definition_yaml: current.definition_yaml ?? null,
         updated_at: current.updated_at ?? null,
+        definition_hash: current.definition_hash ?? null,
       }
     }
   },
 }))
 
-const SERVER_DRAFT = {
+const SERVER_DRAFT: DraftStoreResponseMock = {
   definition_yaml: 'key: demo\nlabel: Server\n',
   updated_at: '2026-08-27T01:02:03+00:00',
+  definition_hash: null,
 }
-const NO_DRAFT = { definition_yaml: null, updated_at: null }
+const NO_DRAFT: {
+  definition_yaml: null
+  updated_at: null
+  definition_hash: null
+} = {
+  definition_yaml: null,
+  updated_at: null,
+  definition_hash: null,
+}
 
 type HookProps = {
   workspaceId: string | undefined
   draftYaml: string
   originalYaml: string
-  serverDraft: typeof SERVER_DRAFT | typeof NO_DRAFT | undefined
+  serverDraft: DraftStoreResponseMock | typeof NO_DRAFT | undefined
   loadError?: boolean
 }
 
@@ -138,6 +158,19 @@ describe('useWorkflowDraftPersistence', () => {
     })
   })
 
+  // #1143（方案 B）：服务端草稿的语义身份随 hydrate / PUT 成功进入
+  // state.savedHash，聊天草稿卡用它做一致性核对。
+  it('exposes the server draft identity hash after hydration', () => {
+    const { result } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: SERVER_DRAFT.definition_yaml,
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: { ...SERVER_DRAFT, definition_hash: 'hash-agent-v1' },
+    })
+
+    expect(result.current.state.savedHash).toBe('hash-agent-v1')
+  })
+
   it('PUTs edits after an 800ms debounce and reports saved', async () => {
     const { result, rerender } = renderPersistence({
       workspaceId: 'ws1',
@@ -170,6 +203,34 @@ describe('useWorkflowDraftPersistence', () => {
     expect(result.current.state.savedAt).toBe(SERVER_DRAFT.updated_at)
   })
 
+  it('reports the saved identity hash from the PUT response (#1143)', async () => {
+    // 保存响应带回 definition_hash：画布重排后的语义身份，供草稿卡核对。
+    mocks.putWorkflowDraft.mockResolvedValue({
+      ...SERVER_DRAFT,
+      definition_hash: 'hash-after-put',
+    })
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Base\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Edited\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000)
+    })
+
+    await waitFor(() => expect(result.current.state.status).toBe('saved'))
+    expect(result.current.state.savedHash).toBe('hash-after-put')
+  })
+
   it('overwrites the server draft after publish rebases the baseline', async () => {
     // 用户在 debounce 窗口内 publish：草稿 Y 尚未持久化，基线前进为 Y，
     // 效果仍必须把 Y PUT 上去（否则旧草稿 X 会在下次装载时复活）。
@@ -180,6 +241,7 @@ describe('useWorkflowDraftPersistence', () => {
       serverDraft: {
         definition_yaml: 'key: demo\nlabel: Base\n',
         updated_at: '2026-08-27T00:00:00+00:00',
+        definition_hash: null,
       },
     })
     rerender({
@@ -189,6 +251,7 @@ describe('useWorkflowDraftPersistence', () => {
       serverDraft: {
         definition_yaml: 'key: demo\nlabel: Base\n',
         updated_at: '2026-08-27T00:00:00+00:00',
+        definition_hash: null,
       },
     })
     // publish + reload：基线与草稿同为 Y（草稿未变，不再 rerender draftYaml）。
@@ -199,6 +262,7 @@ describe('useWorkflowDraftPersistence', () => {
       serverDraft: {
         definition_yaml: 'key: demo\nlabel: Base\n',
         updated_at: '2026-08-27T00:00:00+00:00',
+        definition_hash: null,
       },
     })
 
@@ -331,6 +395,7 @@ describe('useWorkflowDraftPersistence', () => {
       resolvePut({
         definition_yaml: 'key: demo\nlabel: B\n',
         updated_at: '2026-08-27T02:00:00+00:00',
+        definition_hash: null,
       })
     })
     // 回退后补存 A（last-write-wins 把服务端的 B 改回来）。#633 codex
@@ -356,6 +421,7 @@ describe('useWorkflowDraftPersistence', () => {
       resolvePut({
         definition_yaml: 'key: demo\nlabel: A\n',
         updated_at: '2026-08-27T01:02:03+00:00',
+        definition_hash: null,
       })
       await vi.advanceTimersByTimeAsync(0)
     })
@@ -421,6 +487,7 @@ describe('useWorkflowDraftPersistence', () => {
     resolveA({
       definition_yaml: 'key: demo\nlabel: A\n',
       updated_at: '2026-08-27T02:00:00+00:00',
+      definition_hash: null,
     })
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)

@@ -18,6 +18,12 @@ export type WorkflowDraftView = {
   yaml: string
   validated: boolean
   compareMeta: string | null
+  /** 保存/校验响应返回的草稿语义身份（#1143 方案 B，definition_hash）：
+   * validate/compare 的输出按本次提交的 definition_yaml 计算，与卡的
+   * yaml 严格绑定；发布卡的 stale hint 用它与编辑器已保存草稿的
+   * savedHash 核对——hash 相同即语义一致（画布规范化重排不产生误报）。
+   * 旧转录 / 不可解析草稿为 null（hint 降级回字符串比较）。 */
+  draftHash: string | null
 }
 
 // #1079（#440 P3b）：Agent 定义草稿卡已下线——MCP 的 Agent 定义写工具
@@ -177,7 +183,10 @@ function listCount(value: unknown): number {
 }
 
 /** 最近一次 validate_workflow / compare_workflow 携带的 definition_yaml
- * 即 agent 产出的 workflow 草稿；校验通过与对比摘要取自对应工具输出。 */
+ * 即 agent 产出的 workflow 草稿；校验通过与对比摘要取自对应工具输出。
+ * #1143 方案 B：同时从工具输出提取草稿语义身份（definition_hash），存进
+ * 草稿卡供 stale hint 做身份核对（与 yaml 变更同步重置；输出缺 hash 的
+ * 旧转录保持 null）。 */
 export function extractWorkflowDraft(
   calls: ToolCallView[]
 ): WorkflowDraftView | null {
@@ -185,23 +194,18 @@ export function extractWorkflowDraft(
   for (const call of calls) {
     const yaml = asText(call.rawInput?.definition_yaml)
     if (!yaml) continue
-    if (
-      !toolNameMatches(call, 'validate_workflow') &&
-      !toolNameMatches(call, 'compare_workflow')
-    ) {
-      continue
-    }
+    const isValidate = toolNameMatches(call, 'validate_workflow')
+    const isCompare = toolNameMatches(call, 'compare_workflow')
+    if (!isValidate && !isCompare) continue
     if (!draft || draft.yaml !== yaml) {
-      draft = { yaml, validated: false, compareMeta: null }
+      draft = { yaml, validated: false, compareMeta: null, draftHash: null }
     }
-    if (toolNameMatches(call, 'validate_workflow')) {
-      const parsed = parseFirstJson(call.outputText)
-      if (parsed?.valid === true) draft.validated = true
-    }
-    if (toolNameMatches(call, 'compare_workflow')) {
+    draft.draftHash =
+      draftHashFromOutput(call, 'definition_hash') ?? draft.draftHash
+    const parsed = parseFirstJson(call.outputText)
+    if (parsed?.valid === true) draft.validated = true
+    if (isCompare) {
       draft.compareMeta = compareMetaText(call.outputText) ?? draft.compareMeta
-      const parsed = parseFirstJson(call.outputText)
-      if (parsed?.valid === true) draft.validated = true
     }
   }
   return draft
@@ -242,14 +246,15 @@ function keepLatestPerEntity<T>(drafts: T[], keyOf: (draft: T) => string): T[] {
   return [...latest.values()]
 }
 
-/** 保存响应体里的草稿身份 hash（#692 codex P1 第三轮）。save_node_code_draft
- * 工具的 HTTP 响应带 code_hash，MCP 把响应体文本放进
+/** 保存/校验/对比响应体里的草稿身份 hash（#692 code_hash 先例 + #1143
+ * definition_hash）。save_node_code_draft 与 validate_workflow /
+ * compare_workflow 的 HTTP 响应都带 hash，MCP 把响应体文本放进
  * rawOutput 的 text block——与 extractWorkflowDraft 解析 outputText 同一
  * 先例。解析不到返回 null（旧转录/非 JSON 响应），调用方按「无法核对
  * 身份」处理。 */
 function draftHashFromOutput(
   call: ToolCallView,
-  hashKey: 'code_hash'
+  hashKey: 'code_hash' | 'definition_hash'
 ): string | null {
   const parsed = parseFirstJson(call.outputText)
   const value = parsed?.[hashKey]

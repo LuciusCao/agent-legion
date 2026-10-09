@@ -75,7 +75,7 @@ function renderPersistence(initial: HookProps) {
 /* consume 是稳定的闭包（内部读外部可变的 pending），rerender 只需换 props。 */
 function renderHookResult(
   initial: HookProps,
-  consume: () => { yaml: string; updatedAt: string } | null
+  consume: () => { yaml: string; updatedAt: string; hash: string | null } | null
 ) {
   return renderHook(
     (props: HookProps) =>
@@ -245,6 +245,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     const conflict = {
       yaml: 'key: demo\nlabel: Agent v2\n',
       updatedAt: '2026-08-27T03:00:00+00:00',
+      hash: null,
     }
     let pending: typeof conflict | null = null
     const consume = () => {
@@ -315,6 +316,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     const conflict = {
       yaml: 'key: demo\nlabel: Agent v2\n',
       updatedAt: '2026-08-27T03:00:00+00:00',
+      hash: null,
     }
     let pending: typeof conflict | null = null
     const consume = () => {

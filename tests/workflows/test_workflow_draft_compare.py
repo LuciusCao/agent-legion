@@ -114,6 +114,10 @@ def test_compare_no_op_draft_returns_none_risk(app_with_workspace):
 
     assert result["valid"] is True
     assert result["creates_revision"] is False
+    # #1143：compare 响应携带草稿语义身份（草稿卡 hash 的来源之一）。
+    from server.app.services.workflow_drafts import workflow_draft_identity_hash
+
+    assert result["definition_hash"] == workflow_draft_identity_hash(yaml_text)
     assert result["summary"]["risk_level"] == "none"
     assert result["summary"]["node_changes"] == []
     assert result["summary"]["edge_changes"] == []
@@ -454,6 +458,8 @@ def test_compare_invalid_yaml_returns_errors_and_no_summary(app_with_workspace):
     assert result["summary"] is None
     assert result["base_revision"] is None
     assert result["draft_workflow"] is None
+    # #1143：不可解析草稿没有语义身份（null，前端降级字符串比较）。
+    assert result["definition_hash"] is None
     assert len(result["errors"]) >= 1
     error = result["errors"][0]
     assert error["category"] == "yaml"

@@ -102,7 +102,13 @@ export function useDraftSaveConflictActions() {
         studio.resolveConflict(false)
         return
       }
-      studio.adoptServerDraft(conflict, studio.draftSave?.savedAt ?? null)
+      // #1143：带上冲突草稿的语义身份——采用后 savedHash 恢复为服务端
+      // 草稿身份，草稿卡核对不应对刚采用的内容误报不一致。
+      studio.adoptServerDraft(
+        conflict,
+        studio.draftSave?.savedAt ?? null,
+        studio.draftSave?.conflictDraftHash ?? undefined
+      )
     },
     onKeepMine: () => studio.resolveConflict(true),
     onRetrySave: () => void studio.flushDraftSave(),

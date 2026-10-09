@@ -25,6 +25,10 @@ from server.app.services.workflow_draft_cas_token import (
     CAS_TIMESTAMP_HINT,
     parse_cas_timestamp,
 )
+from server.app.services.workflow_draft_store import (
+    attach_draft_identity_hash,
+    get_workflow_draft,
+)
 
 
 def save_workflow_draft_if_unchanged(
@@ -49,11 +53,15 @@ def save_workflow_draft_if_unchanged(
     if job_db.get_workspace(workspace_id) is None:
         raise NotFoundError("Workspace not found")
     try:
-        return job_db.upsert_workspace_workflow_draft_if_unchanged(
-            workspace_id, definition_yaml, expected_updated_at
+        draft = attach_draft_identity_hash(
+            job_db.upsert_workspace_workflow_draft_if_unchanged(
+                workspace_id, definition_yaml, expected_updated_at
+            )
         )
     except CasDraftConflictError as exc:
-        current = job_db.get_workspace_workflow_draft(workspace_id)
+        # #1143: current_draft carries the semantic identity hash too — the
+        # adopting side (frontend adopt path) restores savedHash from it.
+        current = get_workflow_draft(job_db, workspace_id)
         raise DraftConflictError(
             {
                 "message": (
@@ -64,6 +72,9 @@ def save_workflow_draft_if_unchanged(
                 "current_draft": {
                     "definition_yaml": current["definition_yaml"] if current else None,
                     "updated_at": current["updated_at"] if current else None,
+                    "definition_hash": current.get("definition_hash") if current else None,
                 },
             }
         ) from exc
+    assert draft is not None  # the CAS upsert path returns a row or raises
+    return draft

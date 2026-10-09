@@ -5,6 +5,8 @@
 export type WorkflowDraftConflictDetail = {
   definition_yaml: string | null
   updated_at: string | null
+  /** #1143：服务端当前草稿的语义身份（不可解析 → null；旧服务端缺省）。 */
+  definition_hash?: string | null
 }
 
 export class WorkflowDraftConflictError extends Error {
@@ -21,6 +23,7 @@ export class WorkflowDraftConflictError extends Error {
     this.currentDraft = {
       definition_yaml: current.definition_yaml ?? null,
       updated_at: current.updated_at ?? null,
+      definition_hash: current.definition_hash ?? null,
     }
     this.name = 'WorkflowDraftConflictError'
   }

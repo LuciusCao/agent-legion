@@ -43,6 +43,7 @@ from server.app.routes.workflow_revisions_contracts import (
     WorkflowDraftValidationResponse,
 )
 from server.app.services.studio_agent_tools import StudioAgentToolsService
+from server.app.services.workflow_drafts import workflow_draft_identity_hash
 from server.app.settings import Settings
 
 
@@ -63,7 +64,14 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         workspace_id: str, payload: WorkflowDraftRequest
     ) -> WorkflowDraftValidationResponse:
         errors = _service().validate_workflow(workspace_id, payload.definition_yaml)
-        return WorkflowDraftValidationResponse(valid=not errors, errors=errors)
+        # #1143: the response carries the draft's semantic identity hash — the
+        # chat draft card (fed by validate/compare tool outputs) records it to
+        # check editor consistency by identity, not byte equality.
+        return WorkflowDraftValidationResponse(
+            valid=not errors,
+            errors=errors,
+            definition_hash=workflow_draft_identity_hash(payload.definition_yaml),
+        )
 
     @workspace_scoped.post(
         "/studio-agent/tools/workspaces/{workspace_id}/workflow/compare",

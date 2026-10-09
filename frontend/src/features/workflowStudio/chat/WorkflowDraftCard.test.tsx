@@ -16,6 +16,7 @@ const draft = {
   yaml: 'key: demo_video_workflow\nnodes: []\n',
   validated: true,
   compareMeta: null,
+  draftHash: null,
 }
 
 function makeStudio(overrides: Record<string, unknown> = {}) {
@@ -147,6 +148,108 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
     expect(
       screen.queryByText(/发布将以编辑器中的 YAML 为准/)
     ).not.toBeInTheDocument()
+  })
+
+  // #1143（方案 B）：hash 身份核对——修复「应用到编辑器后画布规范化重排
+  // 导致的字节不同」误报；hash 缺失时降级回字符串全等的既有行为。
+  describe('草稿卡一致性 hash 身份核对（#1143）', () => {
+    // 复现流：agent 保存草稿（hash H）→ 用户「应用到编辑器」→ 画布按自身
+    // 序列化规范重写 YAML（字节不同、语义相同、hash 相同）→ 不再误报。
+    it('hash 相同：编辑器重排后的 YAML 字节不同也不提示', () => {
+      const studio = makeStudio({
+        definitionYaml: 'nodes: []\nkey: demo_video_workflow\n',
+        draftSave: {
+          status: 'saved',
+          savedAt: '2026-10-10T01:00:00+00:00',
+          savedHash: 'h1',
+        },
+      })
+      render(
+        withStudioProviders(
+          studio,
+          makeStudioView(),
+          <WorkflowDraftCard
+            draft={{ ...draft, draftHash: 'h1' }}
+            workspaceId="ws1"
+            onApply={vi.fn()}
+          />
+        )
+      )
+      expect(
+        screen.queryByText(/发布将以编辑器中的 YAML 为准/)
+      ).not.toBeInTheDocument()
+    })
+
+    it('hash 不同：真实分歧仍提示', () => {
+      const studio = makeStudio({
+        definitionYaml: 'key: human-edited\n',
+        draftSave: {
+          status: 'saved',
+          savedAt: '2026-10-10T01:00:00+00:00',
+          savedHash: 'h2',
+        },
+      })
+      render(
+        withStudioProviders(
+          studio,
+          makeStudioView(),
+          <WorkflowDraftCard
+            draft={{ ...draft, draftHash: 'h1' }}
+            workspaceId="ws1"
+            onApply={vi.fn()}
+          />
+        )
+      )
+      expect(
+        screen.getByText(/发布将以编辑器中的 YAML 为准/)
+      ).toBeInTheDocument()
+    })
+
+    it('卡上无 hash（旧转录）：降级字符串比较，字节不同仍提示', () => {
+      const studio = makeStudio({
+        definitionYaml: 'key: other\n',
+        draftSave: {
+          status: 'saved',
+          savedAt: '2026-10-10T01:00:00+00:00',
+          savedHash: 'h1',
+        },
+      })
+      render(
+        withStudioProviders(
+          studio,
+          makeStudioView(),
+          <WorkflowDraftCard
+            draft={draft}
+            workspaceId="ws1"
+            onApply={vi.fn()}
+          />
+        )
+      )
+      expect(
+        screen.getByText(/发布将以编辑器中的 YAML 为准/)
+      ).toBeInTheDocument()
+    })
+
+    it('编辑器侧无 savedHash（未保存过/旧服务端）：降级字符串比较', () => {
+      const studio = makeStudio({
+        definitionYaml: 'key: other\n',
+        draftSave: { status: 'idle', savedAt: null },
+      })
+      render(
+        withStudioProviders(
+          studio,
+          makeStudioView(),
+          <WorkflowDraftCard
+            draft={{ ...draft, draftHash: 'h1' }}
+            workspaceId="ws1"
+            onApply={vi.fn()}
+          />
+        )
+      )
+      expect(
+        screen.getByText(/发布将以编辑器中的 YAML 为准/)
+      ).toBeInTheDocument()
+    })
   })
 })
 
