@@ -48,13 +48,17 @@ export function conflictEnteredState(
 /* 冲突解除（resolveConflict(keep-mine)/画布回退到已持久化值）：清冲突
    标记；#804 轮 6 H6：status 从 error（冲突态的占位，横幅语义靠
    conflict 标记而非 error 本身）收敛到 saved/idle——采用 Agent 版本成功
-   后不该留假 error 态。keep-mine 随后的保存会推进 savedAt/status。 */
+   后不该留假 error 态。keep-mine 随后的保存会推进 savedAt/status。
+   #1143 评审 P3-5：conflictDraftHash 与 conflictDraftYaml 对称清空（与
+   conflictResolvedState 一致；下次进冲突必然整体覆写，这里消除不对称
+   陷阱）。 */
 export function conflictClearedState(current: DraftSaveState): DraftSaveState {
   return {
     ...current,
     status: current.savedAt ? 'saved' : 'idle',
     conflict: false,
     conflictDraftYaml: undefined,
+    conflictDraftHash: undefined,
   }
 }
 

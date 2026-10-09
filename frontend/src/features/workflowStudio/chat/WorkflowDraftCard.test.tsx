@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowDraftCard } from './WorkflowDraftCard'
 import { compareWorkflowDraft } from '../../../api/workflowDraftCompare'
@@ -249,6 +256,64 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
       expect(
         screen.getByText(/发布将以编辑器中的 YAML 为准/)
       ).toBeInTheDocument()
+    })
+
+    // 评审 P2-1：hash 短路仅在编辑器当前内容已落盘（状态 settled）时
+    // 有效。pending（debounce 窗口）/saving（PUT 在途）/error（失败退避
+    // 或冲突挂起）= 编辑器有未落盘编辑——savedHash 停留在上次成功保存的
+    // 身份，字节已变（语义可能已变）而 hash 仍相同，必须回落提示，否则
+    // 发布 flush-first 发出编辑后的 YAML 却无警示。
+    it('hash 相同但编辑器有未保存编辑（pending/saving/error）→ 仍提示（评审 P2-1）', () => {
+      for (const status of ['pending', 'saving', 'error'] as const) {
+        const studio = makeStudio({
+          definitionYaml: 'nodes: []\nkey: demo_video_workflow\n',
+          draftSave: {
+            status,
+            savedAt: '2026-10-10T01:00:00+00:00',
+            savedHash: 'h1',
+          },
+        })
+        render(
+          withStudioProviders(
+            studio,
+            makeStudioView(),
+            <WorkflowDraftCard
+              draft={{ ...draft, draftHash: 'h1' }}
+              workspaceId="ws1"
+              onApply={vi.fn()}
+            />
+          )
+        )
+        expect(
+          screen.getByText(/发布将以编辑器中的 YAML 为准/)
+        ).toBeInTheDocument()
+        cleanup()
+      }
+    })
+
+    it('hash 相同且编辑器无未保存编辑（idle，hydrate/adopt 后内容=已落盘）→ 不提示', () => {
+      const studio = makeStudio({
+        definitionYaml: 'nodes: []\nkey: demo_video_workflow\n',
+        draftSave: {
+          status: 'idle',
+          savedAt: '2026-10-10T01:00:00+00:00',
+          savedHash: 'h1',
+        },
+      })
+      render(
+        withStudioProviders(
+          studio,
+          makeStudioView(),
+          <WorkflowDraftCard
+            draft={{ ...draft, draftHash: 'h1' }}
+            workspaceId="ws1"
+            onApply={vi.fn()}
+          />
+        )
+      )
+      expect(
+        screen.queryByText(/发布将以编辑器中的 YAML 为准/)
+      ).not.toBeInTheDocument()
     })
   })
 })

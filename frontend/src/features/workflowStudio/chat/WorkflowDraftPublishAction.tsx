@@ -81,7 +81,13 @@ export function WorkflowDraftPublishButton() {
  * .savedHash，PUT/GET 响应带回）。hash 相同 → 语义一致不提示（修复点：
  * agent 原始串 vs 画布规范化重排字节不同但 hash 相同，不再误报）。逐字节
  * 相同恒不提示；hash 不同（真实分歧）、任一侧缺失或不可核对（旧转录/
- * 不可解析草稿）→ 保守保留提示（降级回字符串全等的既有行为）。 */
+ * 不可解析草稿）→ 保守保留提示（降级回字符串全等的既有行为）。
+ * 评审 P2-1：hash 短路的前置是编辑器当前内容已落盘（draftSave 状态
+ * settled = saved/idle——内容一旦偏离已持久化值，controller 必然把状态
+ * 推进到 pending/saving/error）。pending（debounce 窗口）/saving（PUT
+ * 在途）/error（失败退避或冲突挂起）期间 savedHash 停留在上次成功保存
+ * 的身份，字节已变（语义可能已变）而 hash 仍相同——必须回落提示，否则
+ * 发布 flush-first 发出编辑后的 YAML 却无警示。 */
 export function WorkflowDraftStaleHint({
   draftYaml,
   draftHash,
@@ -91,8 +97,10 @@ export function WorkflowDraftStaleHint({
 }) {
   const studio = useStudioStateOptional()
   if (!studio || studio.definitionYaml === draftYaml) return null
-  const savedHash = studio.draftSave?.savedHash ?? null
-  if (draftHash && savedHash && draftHash === savedHash) return null
+  const save = studio.draftSave
+  const savedHash = save?.savedHash ?? null
+  const settled = save?.status === 'saved' || save?.status === 'idle'
+  if (draftHash && savedHash && settled && draftHash === savedHash) return null
   return (
     <div className={styles.draftHint} role="note">
       该草稿与编辑器当前内容不一致，发布将以编辑器中的 YAML 为准

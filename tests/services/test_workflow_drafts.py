@@ -98,3 +98,37 @@ def test_unparseable_drafts_have_no_identity() -> None:
     assert workflow_draft_identity_hash("key: [unclosed") is None
     assert workflow_draft_identity_hash("- a\n- b\n") is None
     assert workflow_draft_identity_hash("") is None
+
+
+def _deeply_nested_config_yaml(depth: int) -> str:
+    """字符串拼接构造 depth 层嵌套 config 的合法 YAML（不手写长文本）；
+    结构经 nodes.n.config 直通 loader（浅拷贝保留深结构）。"""
+    lines = [
+        "key: wf",
+        "label: Deep",
+        "nodes:",
+        "  n:",
+        "    capability: demo",
+        "    config:",
+    ]
+    indent = 6
+    for _ in range(depth):
+        lines.append(" " * indent + "nested:")
+        indent += 2
+    lines.append(" " * indent + "leaf: 1")
+    return "\n".join(lines) + "\n"
+
+
+def test_deeply_nested_draft_has_no_identity() -> None:
+    """评审 P3-1：千层嵌套 mapping 的合法 YAML 在解析/归一化链上抛
+    RecursionError（RuntimeError 族，非 ValueError）——身份计算必须降级
+    None，否则 draft GET/PUT（store 现在每次解析草稿文本）持续 500。
+    实测 ~3000 层在 yaml.safe_load 即抛出。"""
+    assert workflow_draft_identity_hash(_deeply_nested_config_yaml(3000)) is None
+
+
+def test_loader_dropped_unknown_keys_do_not_change_identity() -> None:
+    """身份口径（评审 P3-2）：loader 丢弃的未知顶层键不参与身份——两侧
+    一致的丢弃不构成语义分歧（「hash 相同 = loader 可见语义相同」）。"""
+    with_unknown = _AGENT_YAML + "future_top_level_key: value\n"
+    assert workflow_draft_identity_hash(with_unknown) == workflow_draft_identity_hash(_AGENT_YAML)
