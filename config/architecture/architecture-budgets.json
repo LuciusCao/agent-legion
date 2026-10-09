@@ -1188,6 +1188,7 @@
     "server/app/db/rows.py": 39,
     "server/app/db/schema.py": 57,
     "server/app/db/schema_guard.py": 44,
+    "server/app/db/schema_head_cache.py": 41,
     "server/app/db/transaction.py": 39,
     "server/app/events/__init__.py": 51,
     "server/app/events/agent_broadcast.py": 34,

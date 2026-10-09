@@ -22,6 +22,7 @@ import psycopg
 from psycopg import sql
 
 from server.app.db.schema import init_db
+from server.app.db.schema_head_cache import init_db_full_check, note_schema_rebuilt
 from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.agent_service import reset_published_agent_cache
@@ -197,6 +198,7 @@ def _rebuild_schema() -> None:
             "PostgreSQL is required for tests. Set AGENT_LEGION_TEST_DATABASE_URL to a reachable "
             f"test database: {exc}"
         )
+    note_schema_rebuilt()
     init_db(TEST_DATABASE_URL)
     _SEED_SNAPSHOT = None
 
@@ -472,6 +474,22 @@ def _isolate_postgres_database(_assert_shared_app_invariants, request):
         _rebuild_schema()
     else:
         close_database_pools_settled()
+
+
+@pytest.fixture(autouse=True)
+def _init_db_full_check_during_fresh_schema(_assert_shared_app_invariants, request):
+    """Keep init_db's process-local head memo out of DDL-mutating tests.
+
+    fresh_schema tests rewind ``schema_migrations`` mid-test and expect the
+    next ``init_db`` to re-run the upgrade; the memo (schema_head_cache)
+    must not short-circuit those calls. Non-fresh tests keep the memo: their
+    repeat ``init_db`` calls are the steady-state no-op it exists to skip.
+    """
+    if request.node.get_closest_marker("fresh_schema") is None:
+        yield
+        return
+    with init_db_full_check():
+        yield
 
 
 @pytest.fixture(autouse=True)
