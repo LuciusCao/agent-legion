@@ -29,17 +29,22 @@ state being the more accurate one). Files inside:
   reuses the same secret-registry snapshot (``secret_snapshot``) and
   redaction functions as the outbound faces (#842/#844): no plaintext
   secret may land in the worker state directory. A file that is already
-  gone is recorded absent instead; a scan failure deletes the raw copy
-  (fail-closed — an unprocessed copy never stays behind).
+  gone is recorded absent; an unreadable one (EACCES family — the agent
+  chmod'd its own run dir) records an ``unreadable`` note; a scan failure
+  deletes the raw copy (fail-closed — an unprocessed copy never stays
+  behind).
 - ``agent-stderr.log`` — the rescued stderr tail (already redacted), same
   rescue and bound as the delivery path (``stderr_tail_for_run``).
 - ``events-emergency.jsonl`` — the pump's diverted stream, redacted per
   line at write time (JSON events keep their structure via
-  ``redact_json``, non-JSON lines via span redaction).
+  ``redact_json``, non-JSON lines via span redaction); one unrenderable
+  line is dropped in isolation, never the batch, and oversized lines are
+  cut with an INLINE marker so one framed line stays one physical line.
 - ``listing.txt`` — what still existed under the execution dir at dump
-  time; with the run dir gone, this is the last-known directory listing.
+  time; with the run dir gone, this is the last-known directory listing
+  (an unwalkable tree records ``listing_failed`` instead).
 - ``incident.json`` — the machine-readable record (identity, exit code,
-  the redacted prepare error, which parts were absent).
+  the redacted prepare error, which parts were absent/unreadable/failed).
 
 Retention: these incidents are rare by construction (an agent must destroy
 its own working tree, or the events write path must fail); there is no TTL
@@ -51,7 +56,11 @@ registration), so no extra wiring exists. Tests configure it via
 
 Everything here is best-effort by contract: a dump failure logs and
 returns None / writes nothing — it must never turn a reportable result
-into a lost one, and it never retries on the critical path.
+into a lost one, and it never retries on the critical path. Within one
+prep dump every arm degrades independently (#1147 review P3-1: an agent
+chmod'ing its own run dir is this issue's family) — one unreadable piece
+records its note and the remaining arms still land, "capture whatever
+still exists" is the contract.
 """
 
 from __future__ import annotations
@@ -192,15 +201,26 @@ def dump_prep_evidence(task: UploadTask, exc: BaseException) -> Path | None:
 
 
 def _dump_prep_evidence(target: Path, task: UploadTask, exc: BaseException) -> Path:
+    """Every arm degrades independently (review P3-1): an unreadable run dir
+    (EACCES family) records its per-arm note and the remaining arms still
+    land — a chmod'd tree is half the forensic story, not a reason to keep
+    an empty incident directory."""
     target.mkdir(parents=True, exist_ok=True)
     redactor = secret_snapshot()
     run_dir = task.execution_dir / "job" / "runs" / task.node_key / "worker"
     events_state, scanned_tail = _dump_events_copy(target, run_dir / "events.jsonl", redactor)
     tail = _dump_stderr_tail(target, run_dir, scanned_tail)
-    dir_present = task.execution_dir.is_dir()
-    entries = _dump_listing(target, task.execution_dir) if dir_present else 0
+    try:
+        dir_present = task.execution_dir.is_dir()
+    except OSError:
+        dir_present = False
+    listing_state = (
+        _dump_listing(target, task.execution_dir)
+        if dir_present
+        else "skipped (execution dir absent)"
+    )
     _dump_incident_record(
-        target, task, exc, redactor, events_state, entries, dir_present, bool(tail)
+        target, task, exc, redactor, events_state, listing_state, dir_present, bool(tail)
     )
     return target
 
@@ -212,8 +232,14 @@ def _dump_events_copy(target: Path, events: Path, redactor: SecretRedactor) -> t
     face. Fail-closed on a scan failure: the staging rewrite leaves the
     copy untouched (raw), so the copy is deleted rather than kept — an
     unredacted file never stays in the state directory. An OSError on the
-    copy itself (the source vanished mid-read) degrades to a note."""
-    if not events.is_file():
+    probe or the copy itself (the source vanished mid-read, or the run dir
+    was chmod'd unreadable) degrades to an ``unreadable`` note with the
+    errno — distinct from the ENOENT family's plain ``absent``."""
+    try:
+        present = events.is_file()
+    except OSError as probe_exc:
+        return f"unreadable: {probe_exc}", b""
+    if not present:
         return "absent", b""
     copy = target / "events.jsonl"
     try:
@@ -232,24 +258,37 @@ def _dump_events_copy(target: Path, events: Path, redactor: SecretRedactor) -> t
 def _dump_stderr_tail(target: Path, run_dir: Path, scanned_tail: bytes) -> bytes:
     """The rescued stderr tail, redacted (both arms of the delivery-path
     rescue: the fresh scan's capture, or the scan-time anchor when the
-    events file was already compressed on a re-entry)."""
-    tail = stderr_tail_for_run(run_dir, scanned_tail)
-    if tail:
-        (target / AGENT_STDERR_FILENAME).write_bytes(tail)
-    return tail
+    events file was already compressed on a re-entry). An unreadable run
+    dir degrades to no tail — the other arms are unaffected."""
+    try:
+        tail = stderr_tail_for_run(run_dir, scanned_tail)
+        if tail:
+            (target / AGENT_STDERR_FILENAME).write_bytes(tail)
+        return tail
+    except OSError as exc:
+        print(f"prep evidence stderr tail unreadable: {exc!r}", flush=True)
+        return b""
 
 
-def _dump_listing(target: Path, execution_dir: Path) -> int:
+def _dump_listing(target: Path, execution_dir: Path) -> str:
+    """The surviving-tree listing as a record state: ``"<n> entries"`` or
+    ``"listing_failed"`` when the walk/write itself raised (EACCES family)
+    — ``rglob`` silently skips unreadable subtrees, so a failure here means
+    the walk itself died, not that a chmod'd child hid its files."""
     entries: list[str] = []
-    for path in execution_dir.rglob("*"):
-        entries.append(path.relative_to(execution_dir).as_posix())
-        if len(entries) >= _MAX_LISTING_ENTRIES:
-            break
-    entries.sort()
-    (target / LISTING_FILENAME).write_text(
-        "\n".join(entries) + ("\n" if entries else ""), encoding="utf-8"
-    )
-    return len(entries)
+    try:
+        for path in execution_dir.rglob("*"):
+            entries.append(path.relative_to(execution_dir).as_posix())
+            if len(entries) >= _MAX_LISTING_ENTRIES:
+                break
+        entries.sort()
+        (target / LISTING_FILENAME).write_text(
+            "\n".join(entries) + ("\n" if entries else ""), encoding="utf-8"
+        )
+    except OSError as exc:
+        print(f"prep evidence listing failed for {execution_dir}: {exc!r}", flush=True)
+        return "listing_failed"
+    return f"{len(entries)} entries"
 
 
 def _dump_incident_record(
@@ -258,7 +297,7 @@ def _dump_incident_record(
     exc: BaseException,
     redactor: SecretRedactor,
     events_state: str,
-    listing_entries: int,
+    listing_state: str,
     dir_present: bool,
     stderr_present: bool,
 ) -> None:
@@ -271,7 +310,7 @@ def _dump_incident_record(
         "events": events_state,
         "execution_dir_present": dir_present,
         "stderr_tail": stderr_present,
-        "listing_entries": listing_entries,
+        "listing": listing_state,
         "pump_emergency_dump": (target / EMERGENCY_EVENTS_FILENAME).is_file(),
         "dumped_at": time.time(),
     }
@@ -285,11 +324,15 @@ class EmergencyEventsSink:
     """Append-only, per-line-redacted sink for one stream's diverted events
     (#1147 pump write failure).
 
-    Per-batch open-append-close: crash-safe, no handle shared across pool
-    tasks. Both one line (after redaction) and the sink's total in-process
-    growth are capped, so the emergency path cannot fill the state volume.
-    All failures are swallowed after logging — the sink is an observation
-    face, never a control-flow input."""
+    Per-batch open-append-close (binary): crash-safe, no handle shared
+    across pool tasks. One line's render/redact/ENCODE failure is dropped
+    in isolation — never the batch (review P3-2: the encode used to sit
+    outside the per-line guard, so a lone-surrogate line killed its whole
+    batch; delivery's per-line semantics apply here too). Both one line
+    (after redaction) and the sink's total in-process growth are capped,
+    so the emergency path cannot fill the state volume. All failures are
+    swallowed after logging — the sink is an observation face, never a
+    control-flow input."""
 
     def __init__(self, path: Path, redactor: SecretRedactor) -> None:
         self.path = path
@@ -302,19 +345,20 @@ class EmergencyEventsSink:
             return
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a", encoding="utf-8") as dst:
+            with self.path.open("ab") as dst:
                 for line in lines:
                     try:
-                        rendered = _render_line(line, self._redactor)
+                        payload = _render_line(line, self._redactor).encode("utf-8")
                     except Exception:
-                        # #204 broad-except audit: 单行脱敏逃逸（span 函数抛
-                        # 出，机制同 shared/pi_events._write_kept_event 的
-                        # fail-closed）——整行丢弃，绝不把 raw 行写进 state
-                        # 目录，也绝不因一行炸掉整批应急转储。结果空间：转储
+                        # #204 broad-except audit: 单行渲染/脱敏/编码任一逃逸
+                        # （span 函数抛出，或 lone surrogate 的
+                        # UnicodeEncodeError；机制同 shared/pi_events.
+                        # _write_kept_event 的 fail-closed）——整行丢弃，绝不
+                        # 把 raw 行写进 state 目录，也绝不因一行炸掉整批应急
+                        # 转储（delivery 侧同款单行失败语义）。结果空间：转储
                         # 缺该行。日志保全：print。
-                        print("emergency dump dropped an unredactable line", flush=True)
+                        print("emergency dump dropped an unrenderable line", flush=True)
                         continue
-                    payload = rendered.encode("utf-8")
                     if self._written + len(payload) > _MAX_DUMP_TOTAL_BYTES:
                         self._capped = True
                         print(
@@ -323,7 +367,7 @@ class EmergencyEventsSink:
                             flush=True,
                         )
                         return
-                    dst.write(rendered)
+                    dst.write(payload)
                     self._written += len(payload)
         except Exception as exc:
             # #204 broad-except audit: 应急转储写失败（state 目录不可写、
@@ -337,7 +381,10 @@ def _render_line(line: bytes, redactor: SecretRedactor) -> str:
     """One framed line as redacted text: JSON events keep their structure
     (``redact_json`` — the same function the delivery path applies to
     archived events), non-JSON lines get span redaction. Capping happens
-    AFTER redaction (redact first, cut after — the #748 discipline)."""
+    AFTER redaction (redact first, cut after — the #748 discipline) and
+    with an INLINE marker: one framed line stays ONE physical line
+    (review P3-4 — a newline in the marker would split one event across
+    three lines and corrupt line-based json.loads tooling)."""
     text = line.decode("utf-8", "replace")
     try:
         event = json.loads(text)
@@ -354,7 +401,8 @@ def _render_line(line: bytes, redactor: SecretRedactor) -> str:
         out = redactor.redact(text)
     if len(out) > _MAX_DUMP_LINE_CHARS:
         keep = _MAX_DUMP_LINE_CHARS // 2
-        out = f"{out[:keep]}\n[...{len(out) - _MAX_DUMP_LINE_CHARS} chars truncated...]\n{out[-keep:]}"
+        dropped = len(out) - _MAX_DUMP_LINE_CHARS
+        out = f"{out[:keep]}[...{dropped} chars truncated...]{out[-keep:]}"
     return out + "\n"
 
 

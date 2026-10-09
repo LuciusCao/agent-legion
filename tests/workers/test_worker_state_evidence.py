@@ -3,10 +3,12 @@
 两条真实链路：
 - upload 队列的 prepare 降级分支——运行目录被删（agent 自删）时失败上报前
   把 events 压缩副本 / stderr tail / 目录清单转储进 state 目录（work_root
-  之外），脱敏后可检索；目录真缺失时转储「缺失说明」不崩溃；
+  之外），脱敏后可检索；目录真缺失时转储「缺失说明」不崩溃；chmod 自锁的
+  run 目录（EACCES 家族）各子步独立降级（评审 P3-1），扫描失败的 raw
+  副本删除不留未脱敏文件（评审 P3-6）；
 - reactor parse 池的 events 写失败——运行目录消失后流转向应急转储
   （积压与后续事件不再随目录灭失），未配置 evidence root 时保持既有
-  注销降级。
+  注销降级；sink 的单行失败隔离与超长行单行化截断（评审 P3-2/P3-4）。
 
 error_message 面：「运行目录缺失」（[work-dir-missing]，基建事故）与
 「agent 无产出」（output_missing 族，执行问题）可 grep 区分；Host 侧分类
@@ -17,6 +19,7 @@ tests/workers/upload_queue_testlib.py。
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -25,10 +28,12 @@ from typing import Any
 
 import pytest
 
+from shared.redaction import SecretRedactor
 from tests.helpers import wait_for_predicate
 from tests.workers.upload_queue_testlib import QueueFakeClient, _execution_dir, _queue, _task
 from worker import state_evidence
 from worker.execution.reactor import EventPumpReactor
+from worker.state_evidence import EmergencyEventsSink
 
 pytestmark = pytest.mark.no_db
 
@@ -156,6 +161,77 @@ def test_prep_failure_records_pump_emergency_dump_presence(
     assert record["pump_emergency_dump"] is True
 
 
+def test_prep_failure_eacces_run_dir_degrades_per_arm(tmp_path: Path, evidence_root: Path) -> None:
+    """#1147 评审 P3-1：agent chmod 000 自身 run 目录 → is_file 在 Python 3.13
+    对 EACCES 会抛，此前第一个 PermissionError 中止整个转储只留空 incident
+    目录。修复后各子步独立降级：events 记 unreadable（含 errno），其余可用
+    arm 照常产出（rglob 静默跳过不可读子树，job 侧清单仍在）。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    run_dir = work_root / "exec-1" / "job" / "runs" / "node_a" / "worker"
+    os.chmod(run_dir, 0)
+    client = QueueFakeClient()
+    queue = _queue(client)
+    try:
+        queue.submit(_task(work_root, exit_code=0))
+        queue.shutdown()
+    finally:
+        os.chmod(run_dir, 0o700)  # 让 tmp_path 收尾可清理
+
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert "result preparation failed" in report["error_message"]
+    assert "[Errno 13]" in report["error_message"]
+    assert not report["error_message"].startswith("[work-dir-missing]")  # 目录在，非缺失族
+    incident = evidence_root / "exec-1__node_a"
+    record = json.loads((incident / "incident.json").read_text(encoding="utf-8"))
+    assert record["events"].startswith("unreadable:")
+    assert "13" in record["events"]  # errno 随记
+    assert record["execution_dir_present"] is True
+    assert record["listing"].endswith("entries")
+    assert not (incident / "events.jsonl").exists()
+    assert not (incident / "agent-stderr.log").exists()
+    listing = (incident / "listing.txt").read_text(encoding="utf-8")
+    assert "job/output.json" in listing
+    assert "worker/events.jsonl" not in listing  # 不可读子树的内容不出现在清单里
+
+
+def test_prep_failure_scan_failure_discards_raw_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, evidence_root: Path
+) -> None:
+    """#1147 评审 P3-6 安全 arm：转储副本的扫描失败（size>0 而 original==0）
+    必须删除 raw 副本——未脱敏文件绝不留在 state 目录——并在 incident.json
+    记 scan failed 说明。"""
+    monkeypatch.setattr("worker.upload.prepare.prepare_result", _boom)
+    monkeypatch.setattr(
+        "worker.state_evidence.scan_and_compress_pi_events",
+        lambda *args, **kwargs: (None, 0, 0, b""),
+    )
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    run_dir = work_root / "exec-1" / "job" / "runs" / "node_a" / "worker"
+    secret = "sk-live-supersecretgatewaytoken123"
+    monkeypatch.setenv("LLM_GATEWAY_TOKEN", secret)
+    (run_dir / "events.jsonl").write_text(
+        json.dumps({"type": "tool_execution_end", "result": {"content": [{"text": secret}]}})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    client = QueueFakeClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=0))
+    queue.shutdown()
+
+    incident = evidence_root / "exec-1__node_a"
+    record = json.loads((incident / "incident.json").read_text(encoding="utf-8"))
+    assert record["events"].startswith("scan failed")
+    assert "raw copy discarded" in record["events"]
+    assert not (incident / "events.jsonl").exists()  # raw 副本已删
+    remaining = [p.name for p in incident.iterdir()]
+    assert set(remaining) == {"incident.json", "listing.txt"}
+
+
 def test_tree_missing_inside_only_for_missing_tree_errnos(tmp_path: Path) -> None:
     """分类检测只认 ENOENT/ENOTDIR 且路径落在本 execution 目录内：权限错误
     （目录仍在）与外部路径不贴 [work-dir-missing] 标记，非 OSError 不参与。"""
@@ -276,3 +352,52 @@ def test_pump_write_failure_without_evidence_root_keeps_legacy_degradation(
     assert handle._stream.parse_error is not None
     assert handle._stream.evidence is None
     assert not (tmp_path / "state").exists()
+
+
+# -- 应急转储 sink 的单行语义（#1147 评审 P3-2 / P3-4） --------------------------
+
+
+def test_emergency_sink_isolates_per_line_failures(tmp_path: Path) -> None:
+    """单行渲染/脱敏/编码失败只丢该行（delivery 同款单行 fail-closed 语义），
+    同批其余行照常落盘——不再让一个坏行炸掉整批（encode 曾在 per-line 守卫
+    之外）。坏行本身绝不以 raw 形态落盘。"""
+    secret = "sk-live-supersecretgatewaytoken123"
+
+    def spans(text: str):
+        if "poison" in text:
+            raise RuntimeError("span function escaped")
+        start = text.find(secret)
+        return [(start, start + len(secret))] if start >= 0 else []
+
+    redactor = SecretRedactor(spans, 0)
+    sink = EmergencyEventsSink(tmp_path / "dump" / "events-emergency.jsonl", redactor)
+    sink.write_lines(
+        [
+            b'{"type":"a","note":"poison line"}',
+            json.dumps(
+                {"type": "tool_execution_end", "result": {"content": [{"text": f"TOKEN={secret}"}]}}
+            ).encode(),
+            b"plain non-json line",
+        ]
+    )
+
+    content = (tmp_path / "dump" / "events-emergency.jsonl").read_text(encoding="utf-8")
+    lines = content.splitlines()
+    assert len(lines) == 2  # 毒行整行丢弃，不落盘
+    assert "poison" not in content
+    kept_event = json.loads(lines[0])
+    assert kept_event["result"]["content"][0]["text"] == "TOKEN=***"
+    assert lines[1] == "plain non-json line"
+
+
+def test_render_line_truncation_stays_one_physical_line() -> None:
+    """超长行截断用内联占位（无换行）：一条事件仍是一个物理行，逐行
+    json.loads 的取证工具不会把后续行误当续行。"""
+    redactor = SecretRedactor(lambda text: [], 0)
+    huge = json.dumps({"type": "x", "payload": "A" * 200_000})
+    out = state_evidence._render_line(huge.encode(), redactor)
+    assert out.count("\n") == 1  # 仅行尾换行
+    assert "chars truncated" in out
+    physical = out.rstrip("\n")
+    assert physical.startswith('{"type":')
+    assert physical.endswith('"}')
