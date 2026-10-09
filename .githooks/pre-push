@@ -18,7 +18,7 @@ say() {
 }
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
-# The full gate for protected branches (develop/main/release/tags) runs in
+# The full gate for protected branches (main/release/tags) runs in
 # GitHub Actions (.github/workflows/quality-gate.yml); local pre-push keeps
 # only the fast feedback loop on the maintainer machine.
 # AGENT_LEGION_GATE_LEVEL picks the local level:

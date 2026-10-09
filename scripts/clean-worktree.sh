@@ -14,7 +14,7 @@
 #   - 名字校验只允许 worktree 目录名字符集，派生 bucket 一律带
 #     agent-legion- 前缀，结构上碰不到共享/prod bucket；
 #   - 拒绝清理脚本当前所在的 worktree 自身与 prod（生产 worktree 禁止动）；
-#   - --delete-remote-branch 拒绝删除长期分支 main/master/develop/prod 与
+#   - --delete-remote-branch 拒绝删除长期分支 main/master/prod 与
 #     发布线 release/*（与 pre-push 的 protected 分支口径对齐，#930）；
 #   - bucket 删除前列出对象数量与总大小，无 --yes 时逐个打印摘要并交互确认；
 #   - endpoint 不可达/未配置 S3 时 warning 跳过（对齐 init-worktree.sh 的
@@ -113,7 +113,7 @@ fi
 # --delete-remote-branch。
 is_protected_remote_branch() {
     case "$1" in
-        main | master | develop | prod | release/*) return 0 ;;
+        main | master | prod | release/*) return 0 ;;
     esac
     return 1
 }
@@ -128,7 +128,7 @@ if [[ -n "$BRANCH" ]]; then
         echo "提示: 本地分支 $BRANCH 未合并，git branch -d 拒绝删除，已跳过" >&2
     fi
     if is_protected_remote_branch "$BRANCH"; then
-        echo "提示: $BRANCH 是受保护分支（main/master/develop/prod/release/*），不删除远端分支" >&2
+        echo "提示: $BRANCH 是受保护分支（main/master/prod/release/*），不删除远端分支" >&2
     elif [[ -n "$DELETE_REMOTE" ]]; then
         git push origin --delete "$BRANCH" && echo "已删除远端分支: origin/$BRANCH"
     else

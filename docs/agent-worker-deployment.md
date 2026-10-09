@@ -303,7 +303,7 @@ curl -fsSL https://raw.githubusercontent.com/LuciusCao/agent-legion/main/scripts
   | sh -s -- --host-url http://<部署机IP>:8000 --worker-id my-worker-1 --version <worker 版本>
 ```
 
-**版本**：脚本的默认 worker 版本（`AGENT_WORKER_VERSION` 默认值）由每次发版的落版 commit 钉为当次发布的版本，所以只有 `main` 上的脚本默认值等于最新正式发布；`develop` 或 release 分支上的副本可能落后若干版本。部署时显式传 `--version`，取值与部署机 Host 版本配套（须存在对应的 `worker-v<版本>` tag，见 GitHub Releases）。
+**版本**：脚本的默认 worker 版本（`AGENT_WORKER_VERSION` 默认值）由每次发版的落版 commit 钉为当次发布的版本，所以只有 `main` 上的脚本默认值等于最新正式发布；其他分支上的副本可能落后若干版本。部署时显式传 `--version`，取值与部署机 Host 版本配套（须存在对应的 `worker-v<版本>` tag，见 GitHub Releases）。
 
 幂等语义分层：脚本自有资产（compose 文件、velites 二进制、`.env` 的
 `AGENT_WORKER_IMAGE` 行）每次刷新到目标版本；**用户资产（`worker.yaml`、

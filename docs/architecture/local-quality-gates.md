@@ -17,7 +17,7 @@ provide.
 | Push (any branch) | Smoke (default): static checks + smoke test tier, lanes trimmed by pushed paths | `.githooks/pre-push` → `scripts/run-local-gate.sh` → `scripts/check-quick.sh` with `GATE_TIER=smoke` |
 | Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: unit-tier quick suite, lanes trimmed | same hook path → `scripts/check-quick.sh` |
 | Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | same hook path → `scripts/check.sh` |
-| PR to `develop`/`main`/`master`/`release/*`, push to `main`/`master` | Full | CI lanes run in parallel; stable aggregate check `quality-gate` is the merge boundary |
+| PR to `main`/`master`/`release/*`, push to `main`/`master` | Full | CI lanes run in parallel; stable aggregate check `quality-gate` is the merge boundary |
 | Weekly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` + `exemption-expiry` + `deps-audit` (`nightly-gate.yml`) |
 
 The pre-push hook diffs the pushed commits against their remote base and runs
@@ -164,9 +164,8 @@ unaffected. Passing evidence is shared through the same Git common directory.
 ## CI Workflow
 
 `.github/workflows/quality-gate.yml` runs on pull requests to
-`develop` / `main` / `master` / `release/*`, merge-queue synthetic commits,
-pushes to `main` / `master` (a `develop` merge is already covered by its PR
-gate, so push runs there were dropped to save Actions minutes), plus manual dispatch. Docs-only changes (`docs/**`,
+`main` / `master` / `release/*`, merge-queue synthetic commits,
+pushes to `main` / `master`, plus manual dispatch. Docs-only changes (`docs/**`,
 repository-root `*.md`, `LICENSE`) still trigger the workflow but every backend/frontend
 lane evaluates to false in the `changes` job and skips without acquiring a
 runner, including the complete `backend-postgres` matrix. The `docs-terms`
@@ -275,7 +274,7 @@ In `nightly-gate.yml`:
   flaky-registry deadlines (`check_reruns.py --check-deadlines`, deadline
   evidence without needing the extended rerun report), and since #1024 on
   every maintained branch too (`scripts/quality/flaky_branch_deadlines.py`:
-  `develop` plus each `release/X.Y.Z` above the default branch's version,
+  each `release/X.Y.Z` above the default branch's version,
   registries read leniently from the fetched branch tips). It is the only lane
   that fails on an expired deadline (#941) and annotates entries due within
   7 days as warnings; PR backend-coverage enforces observed reruns only. The
@@ -350,7 +349,7 @@ verification comes from the CI workflow, not from these files.
 
 Configure the repository on GitHub as follows:
 
-1. Protect `develop` and any release branches (Settings → Branches, or Rules → Rulesets).
+1. Protect `main` and any release branches (Settings → Branches, or Rules → Rulesets).
 2. Require only the stable `quality-gate` status check before merging. It
    validates selected internal lanes, including `docs-terms` for docs-only
    changes; do not require volatile shard names individually.

@@ -157,7 +157,7 @@ run_tests() {
       # pre-push/CI boundary.
       aff_args=()
       if command -v git >/dev/null 2>&1 && [[ -f "$ROOT_DIR/.pytest-aff-index.json" ]]; then
-        base_ref="$(git merge-base HEAD develop 2>/dev/null || git merge-base HEAD origin/develop 2>/dev/null || true)"
+        base_ref="$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD origin/main 2>/dev/null || true)"
         selected=""
         selection_status=0
         selected="$(UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.pytest_aff_selection select \

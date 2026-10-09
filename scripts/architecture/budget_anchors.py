@@ -3,7 +3,7 @@
 The monotonicity guards (budget ceilings #209, service data-boundary
 baseline #292, Agent catalog caller allowlist #1033) compare the working tree against committed anchors —
 ``HEAD`` / ``HEAD^`` by default. ``AGENT_LEGION_BUDGET_BASE`` (e.g.
-``origin/develop``) replaces ``HEAD^`` with an explicit PR base so a local
+``origin/main``) replaces ``HEAD^`` with an explicit PR base so a local
 run reproduces CI's merge-ref judgement exactly: on the merge ref HEAD^ IS
 the PR base, while a local HEAD^ is only the branch's own previous commit
 and cannot see a raise committed earlier in the branch. The floor stays
@@ -78,7 +78,7 @@ def unresolvable_base_anchor_error(check: str, revision: str) -> str:
     return (
         f"{check} monotonicity: base anchor {revision} from "
         f"{BASE_ANCHOR_OVERRIDE_ENV} does not resolve in this checkout; fetch it "
-        "(e.g. git fetch origin develop) or fix the ref name, or unset "
+        "(e.g. git fetch origin main) or fix the ref name, or unset "
         f"{BASE_ANCHOR_OVERRIDE_ENV}"
     )
 

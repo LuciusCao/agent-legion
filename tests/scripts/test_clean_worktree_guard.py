@@ -159,7 +159,7 @@ def test_cwd_outside_target_worktree_proceeds(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "branch",
-    ["main", "master", "develop", "prod", "release/0.7.16", "release/next"],
+    ["main", "master", "prod", "release/0.7.16", "release/next"],
 )
 def test_delete_remote_branch_refuses_protected_branches(tmp_path: Path, branch: str) -> None:
     main, bin_dir, stub_log = _setup(tmp_path)

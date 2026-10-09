@@ -742,7 +742,7 @@ server/app/
   内容相似才配对）；深克隆缺锚点时硬失败，git 超时/仓库损坏会在错误中携带真实
   原因（不再是纯浅克隆猜测），逃生口 env
   `AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW=1`。本地要跑和 CI merge ref
-  完全一致的判定时设 `AGENT_LEGION_BUDGET_BASE`（如 `origin/develop`）：
+  完全一致的判定时设 `AGENT_LEGION_BUDGET_BASE`（如 `origin/main`）：
   锚点由 HEAD/HEAD^ 变为 HEAD + 该 base ref，release-train opt-out 优先于
   该覆盖，base ref 无法解析硬失败（错误带 fetch 指引）。超出预算的文件必须拆分或回退。
   ceiling 按有效行数计

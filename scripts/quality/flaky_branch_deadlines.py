@@ -2,18 +2,20 @@
 
 GitHub runs scheduled workflows on the default branch only, so the nightly
 ``check_reruns.py --check-deadlines`` never saw entries that exist only on
-``develop`` or a ``release/*`` train. The PR gate catches entries a PR adds
+a ``release/*`` train. The PR gate catches entries a PR adds
 or re-targets (``--base-registry``, #941 R3/R4, #1034); this job covers the
 untouched rest by reading each maintained branch's registry from git.
 
 "Maintained" is the minimal rule that needs no hand-kept list:
 
-- ``develop``, when it exists;
 - every ``release/X.Y.Z`` whose version is ABOVE the version on the default
   branch (``pyproject.toml`` of the checkout) — a train at or below it has
   shipped into the default branch, whose own registry the nightly already
   checks; a ``release/*`` name that is not a version is kept (fail open
   towards checking, never towards skipping).
+
+The ``develop`` branch was retired with the trunk-based migration (#1150);
+only ``release/*`` trains remain as maintained non-default branches.
 
 Branch registries are read leniently (``flaky_registry_lenient``): trains
 cut before #941 have no ``registered_on`` and would fail the strict loader,
@@ -61,12 +63,10 @@ def released_version(pyproject: Path) -> tuple[int, ...]:
 
 
 def maintained_branches(branches: list[str], released: tuple[int, ...]) -> list[str]:
-    """Filter ``develop`` / ``release/*`` names down to the maintained ones."""
+    """Filter ``release/*`` names down to the maintained ones."""
     selected: list[str] = []
     for name in sorted(set(branches)):
-        if name == "develop":
-            selected.append(name)
-        elif name.startswith("release/"):
+        if name.startswith("release/"):
             version = _version(name.removeprefix("release/"))
             if version is None or version > released:
                 selected.append(name)
@@ -104,9 +104,7 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 def remote_branches(root: Path, remote: str) -> list[str]:
     prefix = f"refs/remotes/{remote}/"
-    proc = _git(
-        root, "for-each-ref", "--format=%(refname)", prefix + "develop", prefix + "release/"
-    )
+    proc = _git(root, "for-each-ref", "--format=%(refname)", prefix + "release/")
     if proc.returncode != 0:
         raise RegistryError(f"git for-each-ref failed: {proc.stderr.strip()}")
     return [line.removeprefix(prefix) for line in proc.stdout.splitlines() if line]
@@ -129,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"flaky branch deadlines error: {exc}", file=sys.stderr)
         return 1
     released_text = ".".join(map(str, released))
-    print(f"Maintained branches (develop + release/* above {released_text}, today {today}):")
+    print(f"Maintained branches (release/* above {released_text}, today {today}):")
     if not branches:
         print("  (none)")
     for branch in branches:

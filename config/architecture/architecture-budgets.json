@@ -958,7 +958,7 @@
     "scripts/quality/__init__.py": 10,
     "scripts/quality/exemption_age.py": 59,
     "scripts/quality/exemptions.py": 113,
-    "scripts/quality/flaky_branch_deadlines.py": 133,
+    "scripts/quality/flaky_branch_deadlines.py": 129,
     "scripts/quality/flaky_registry.py": 121,
     "scripts/quality/flaky_registry_lenient.py": 63,
     "scripts/quality/invariants.py": 162,

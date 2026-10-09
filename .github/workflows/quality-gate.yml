@@ -2,16 +2,16 @@ name: Quality Gate
 
 on:
   pull_request:
-    # release/* 是发版集成分支(issue PR 先入 release,封版时 release→main),
-    # 与 develop 同级对待——否则发版期内的 issue PR 完全没有 CI。
-    branches: [develop, main, master, "release/*"]
+    # release/* 是发版集成分支(issue PR 先入 release,封版时 release→main)，
+    # 与 main 同级对待——否则发版期内的 issue PR 完全没有 CI。
+    branches: [main, master, "release/*"]
   # Merge Queue validates the synthetic merge-group commit, not the stale PR
   # head. This event must exist before main enables the queue, otherwise the
   # required quality-gate context is never reported for queued entries.
   merge_group:
     types: [checks_requested]
   push:
-    # develop merges are already covered by the PR gate; keep push triggers
+    # trunk merges are already covered by the PR gate; keep push triggers
     # on the trunk branches only so a merge does not burn a second full gate.
     branches: [main, master]
   workflow_dispatch:
@@ -175,7 +175,7 @@ jobs:
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
         env:
-          # Release train（同仓 develop/release/* → main）与 main 合并后
+          # Release train（同仓 release/* → main）与 main 合并后
           # push 重跑：main 的预算 floor 落后发布分支整整一个发布周期，
           # HEAD^ 锚点会把刚合入
           # 的、已经过门禁的历史再拒一遍（0.4.0 的 PR #249 与其 main push
@@ -183,12 +183,12 @@ jobs:
           # （release train 走本 env，hotfix PR 走严格锚点），push 重跑
           # 只看 HEAD。merge group 必须保持 HEAD^：队列会以最新 main 和
           # 前序 PR 重建合成提交，旧 PR 的绿色结果不能替代新基线检查。
-          # feature→develop PR 同样保持 HEAD^ 完整严格性。
+          # feature→main PR 同样保持 HEAD^ 完整严格性。
           # 条件组必须整体括号闭合：GHA 的 && 优先级高于 ||，裸写
           # `A || B && '1' || '0'` 会让 release-train PR 一臂短路返回
           # 布尔 true 而非 '1'，opt-out 静默失效（#460 首撞，守卫按
           # == "1" 判定）。
-          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ ((github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository && (github.head_ref == 'develop' || startsWith(github.head_ref, 'release/'))) || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))) && '1' || '0' }}
+          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ ((github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'release/')) || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))) && '1' || '0' }}
 
       - name: Backend unit tests (PostgreSQL offline)
         run: |

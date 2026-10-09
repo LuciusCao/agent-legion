@@ -119,7 +119,7 @@ jobs:
         include:
           # amd64 与 quality-gate docker-build 共享 scope=host（同
           # context/target 的命名空间一致）。注意 GHA cache 按 ref 可见：
-          # PR run 写的缓存 tag run 恢复不到（默认分支 develop 的 push 不
+          # PR run 写的缓存 tag run 恢复不到（默认分支 main 的 push 不
           # 跑 docker-build），发布构建预期冷启动——host target 的
           # velites-sandbox Rust release 构建约 15 分钟，在 timeout 内；
           # cache-to 落在 tag ref 下，同 tag 重推可复用。arm64 独立 scope。
