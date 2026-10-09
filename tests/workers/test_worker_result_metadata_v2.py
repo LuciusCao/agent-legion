@@ -234,7 +234,7 @@ def test_prebuilt_task_reports_metadata_only_archive(tmp_path: Path) -> None:
     assert not (work_root / "exec-1").exists()
 
 
-# --- #1098：report 单次尝试的心跳空窗（验收：持续超时下空窗 < lease TTL） ---
+# --- #1098：report 单次尝试的心跳空窗（< 2×TTL 的 deferral 窗口） -------------
 
 
 class _StallingReportClient(Client):
@@ -260,18 +260,23 @@ class _StallingReportClient(Client):
         return 204, b""
 
 
-def test_report_persistent_timeout_keeps_heartbeat_gap_under_lease_ttl(
+def test_report_persistent_timeout_keeps_heartbeat_gap_under_deferral_window(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """#1098 验收：/result 持续超时（每次尝试停满超时窗口）、heartbeat 正常
-    时，两次 report 尝试之间的心跳空窗 < lease TTL（90s）。
+    时，两次 report 尝试之间的心跳空窗落在 Host 续期 deferral 窗口内
+    （< 2×TTL，真实尺度 90s TTL → 180s）。
 
-    尺度映射：真实 transfer_timeout=120s、lease TTL=90s；本用例按
-    stall=0.5s / interval=0.05s 等比缩放——修复前（内层 3 次连打）单次外层
-    尝试即产生 3×stall + 内层退避的静默窗（真实尺度 ≈360s > 90s，租约被
-    过期清扫、重报 409 丢结果）；修复后空窗 ≤ 单次尝试时长（真实尺度
-    ≤120s——单次在途停摆是「report 即最后存活证明」语义下的固有残差，
-    由 409/ownership_lost 终态收口）。"""
+    4d 数学结论（真实尺度）：单次在途尝试 ≤ transfer_timeout（120s），仍
+    可能超过一个 lease TTL（120 > 90）——「report 在飞即最后存活证明」的
+    固有残差；lease 靠 Host 的续期 deferral（#566：Worker 控制面新鲜即
+    推迟过期，硬截止 TTL + grace = 2×TTL）存活，重试臂 resume 心跳后
+    下一拍即续租。修复前（内层 3 次连打）单次外层尝试即产生 3×timeout +
+    内层退避的静默窗（≈360s，远超 2×TTL，租约被过期清扫、重报 409 丢
+    结果）。
+
+    尺度映射：真实 transfer_timeout=120s ↔ stall=0.5s（×240），lease
+    TTL=90s → 缩放 TTL=0.375s，按 2×TTL 口径断言。"""
     monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.2)
     stall = 0.5
     work_root = tmp_path / "work"
@@ -291,10 +296,10 @@ def test_report_persistent_timeout_keeps_heartbeat_gap_under_lease_ttl(
     assert len(client.beat_times) >= 4
     gaps = [b - a for a, b in pairwise(client.beat_times)]
     max_gap = max(gaps)
-    # 空窗上界：单次尝试停摆 + 一拍 interval + 调度余量（修复前 ≥ 3×stall）。
-    assert max_gap < 2 * stall, f"heartbeat stalled {max_gap:.3f}s across report attempts"
-    # issue 验收原文（真实尺度 < 90s）的等比断言：空窗远小于缩放后的 TTL。
-    assert max_gap < 90
+    # 空窗 = 单次在途停摆 + 一拍 interval + 调度余量；按 2×缩放 TTL 断言
+    # （修复前 ≥ 3×stall 的连打静默窗同尺度下即超本界）。
+    lease_ttl = stall * 90 / 120
+    assert max_gap < 2 * lease_ttl, f"heartbeat stalled {max_gap:.3f}s across report attempts"
     assert not (work_root / "exec-1").exists()
 
 
@@ -341,4 +346,112 @@ def test_degrade_rewrites_result_json_and_keeps_evidence(
     assert any(name.endswith("events.jsonl") for name in members)
     assert metadata["status"] == "failed"
     assert "HTTP 400" in metadata["error_message"]
+    assert not (work_root / "exec-1").exists()
+
+
+# --- #843 评审 P1：保留成员 result.json 与 expected output 同名碰撞 ----------
+
+
+def test_finalize_rejects_expected_output_named_result_json(tmp_path: Path) -> None:
+    """P1 机制（单元层）：expected 含 ``result.json`` 时，body 归档里该成员是
+    真产物字节，而 finalize 的换写循环会跳过它、把元数据写成唯一
+    result.json——真产物被静默吞掉。守卫先拒绝（ValueError → 判败臂），
+    归档回收成仅含判败 metadata 的可提交形态，真产物字节绝不以「产物」
+    面目外发。"""
+    from worker.upload.prepare import prepare_result
+    from worker.upload.result_manifest import finalize_result_metadata
+
+    work_root = tmp_path / "work"
+    _execution_dir(work_root, "exec-1")
+    (work_root / "exec-1" / "job" / "result.json").write_text(
+        '{"real": "artifact"}', encoding="utf-8"
+    )
+    task = _task(work_root, expected_outputs=("result.json",))
+    metadata, archive, _outputs = prepare_result(task)
+    with tarfile.open(archive) as tar:
+        assert "result.json" in tar.getnames()  # 前提：真产物在 body 归档里
+
+    final_metadata, final_archive = finalize_result_metadata(task, metadata, archive)
+
+    assert final_metadata["status"] == "failed"
+    assert "collides with an expected output" in final_metadata["error_message"]
+    payload, members = _archive_metadata_and_members(final_archive)
+    assert members == [RESULT_METADATA_MEMBER]
+    assert payload == final_metadata  # 成员是判败 metadata，不是真产物字节
+
+
+def test_expected_result_json_output_fails_honestly_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1 机制（队列级，CAS/embedded 车道）：节点声明 outputs: ["result.json"]
+    → Host 提升面会把 result.json（= 元数据）当产物落进 job_dir、真产物被
+    静默替换。守卫后整条链诚实判败：failed 上报点名冲突、判败 metadata 随
+    result.json 单成员归档交付、run 终态可见，绝不静默换产物。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root, "exec-1")
+    (work_root / "exec-1" / "job" / "result.json").write_text(
+        '{"real": "artifact"}', encoding="utf-8"
+    )
+    client = QueueFakeClient()
+    captured: dict[str, Any] = {}
+    _capturing_client(client, captured)
+    task = _task(work_root, expected_outputs=("result.json",))
+    queue = _queue(client)
+    queue.submit(task)
+    queue.shutdown()
+
+    assert len(client.reports) == 1
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert "collides with an expected output" in report["error_message"]
+    assert report["output_artifacts"] == {}
+    metadata, members = _archive_metadata_and_members(
+        _write_archive(tmp_path, captured["archives"][0])
+    )
+    assert members == [RESULT_METADATA_MEMBER]
+    assert metadata == report  # 上报载荷 = 归档成员（判败 metadata，非真产物）
+    # 判败上报成功（204）：marker 与执行目录照常收尾。
+    assert not (work_root / "exec-1").exists()
+
+
+def test_degrade_rewrite_window_keeps_heartbeat_beating(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """评审 P3-1（#755 R10 P2 同形）：降级换写（全档解压 + 重新 gzip）发生在
+    「心跳已 quiesce、判败重报未发出」窗口内——大归档/慢存储上可超过租约
+    TTL，租约被过期清扫后重报吃 409、整次执行重跑。修复后重写窗口内心跳
+    重新武装（计数断言确实在跳），完成后 quiesce 再重报 204 交付。"""
+    import time as _time
+
+    from worker.upload import report_policy
+
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = QueueFakeClient(report_status=400)
+    captured: dict[str, Any] = {}
+    original_report = _capturing_client(client, captured).report
+    beats_in_rewrite: list[int] = []
+    real_embed = report_policy.embed_result_metadata
+
+    def slow_embed(archive: Path, metadata: dict, max_bytes: int = 0) -> None:
+        before = client.heartbeats
+        _time.sleep(0.3)  # 模拟慢存储重写窗口；测试队列 heartbeat_interval=0.05
+        beats_in_rewrite.append(client.heartbeats - before)
+        real_embed(archive, metadata, max_bytes=max_bytes)
+
+    monkeypatch.setattr(report_policy, "embed_result_metadata", slow_embed)
+
+    def scripted(execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
+        client.report_status = 204 if captured.get("archives") else 400
+        return original_report(execution_id, lease_id, archive)
+
+    client.report = scripted  # type: ignore[method-assign]
+    queue = _queue(client)  # legacy 单拍模式：心跳线程真实跳动（0.05s 一拍）
+    queue.submit(_task(work_root))
+    queue.shutdown()
+
+    assert len(captured["archives"]) == 2  # 原报 400 → 换写 → 判败重报 204
+    # 重写窗口（0.3s ≫ 0.05s 一拍）内心跳确实在跳——修复前该窗口心跳停摆。
+    assert beats_in_rewrite and beats_in_rewrite[0] >= 2
+    assert client.reports[-1]["status"] == "failed"
     assert not (work_root / "exec-1").exists()

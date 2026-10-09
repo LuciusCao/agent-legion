@@ -24,7 +24,13 @@ from server.app.agent_broker.agent_bundle import (
 )
 from server.app.agent_broker.claim_paths import claim_log_path
 from server.app.storage_paths import ensure_dir_once
+from shared.code_contract import RESULT_METADATA_MEMBER, RESULT_OUTPUT_ARTIFACTS_MEMBER
 from shared.stderr_tail import AGENT_STDERR_FILENAME, STDERR_TAIL_BYTES
+
+# #843 评审 P1：不进提升面的协议成员（result.json = v2 元数据、
+# result-output-artifacts.json = v1 换轨清单）——expected 命中即拒绝提升；
+# node.log 走 completion_preflight 的既有保留源守卫（见 docstring）。
+_NON_PROMOTABLE_MEMBERS = frozenset({RESULT_METADATA_MEMBER, RESULT_OUTPUT_ARTIFACTS_MEMBER})
 
 
 def safe_relative_dir(value: str) -> PurePosixPath | None:
@@ -72,7 +78,15 @@ def plan_agent_result_moves(
     parsing are read-only consumers). The reserved
     ``result-output-artifacts.json`` member (#755 codex P1, the overflow
     fallback's direct-ref manifest) is therefore never promoted here — its
-    only reader is the commit layer (result_output_manifest.py).
+    only reader is the commit layer (result_output_manifest.py). #843 评审
+    P1（纵深防御）：``result.json`` / ``result-output-artifacts.json`` 是
+    不进提升面的协议成员（元数据 / v1 换轨清单——expected 命中它们的
+    静默提升此前完全无守卫），此处直接拒绝：AgentBundleError →
+    completion 的解包宽捕获 → 本节点诚实判败，绝不把归档成员（元数据）
+    静默提升成产物。``node.log`` 的期望名冲突**不在本臂**——它走既有
+    completion_preflight 的保留源守卫（#759 P2-B：失败路径仍落观测 log
+    move，语义已被测试钉住）；入队守卫（manifest_guard）在源头把三个
+    保留名一并拒绝。
     """
     moves: list[tuple[Path, Path]] = []
     produced: list[str] = []
@@ -80,6 +94,10 @@ def plan_agent_result_moves(
         relative = PurePosixPath(name)
         if relative.is_absolute() or ".." in relative.parts:
             raise AgentBundleError(f"unsafe expected output name: {name!r}")
+        if name in _NON_PROMOTABLE_MEMBERS:
+            raise AgentBundleError(
+                f"expected output name {name!r} is reserved for the result archive"
+            )
         source = staging_dir / relative
         if source.is_file():
             moves.append((job_dir / relative, source))

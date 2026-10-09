@@ -18,12 +18,34 @@ from collections.abc import Mapping
 from typing import Any
 
 from server.app.db.migrations.shard_identity_index import SHARD_IDENTITY_SQL
+from shared.code_contract import RESERVED_RESULT_ARCHIVE_MEMBERS
 
-__all__ = ["PLACEHOLDER_MODELS", "SHARD_IDENTITY_SQL", "require_routable_execution"]
+__all__ = [
+    "PLACEHOLDER_MODELS",
+    "SHARD_IDENTITY_SQL",
+    "require_routable_execution",
+    "require_unreserved_output_names",
+]
 
 # Template placeholders, not routable models: `your-model` is the historical
 # config/workflow.yaml default that deadlocked the production queue.
 PLACEHOLDER_MODELS = frozenset({"your-model"})
+
+
+def require_unreserved_output_names(manifest: Mapping[str, Any]) -> None:
+    """#843 评审 P1（c 层）：expected output 命中结果归档保留成员名即拒绝。
+
+    命中 ``result.json`` / ``node.log`` / ``result-output-artifacts.json``
+    的产物名会在归档与提升面与协议成员碰撞（v2 元数据换写吞掉真产物、
+    node.log 与捕获日志双写互覆）——入队即节点失败并点名冲突名，同
+    require_routable_execution 的 #13 fail-fast 形态（跑时守卫；发布侧
+    前移留待 follow-up）。"""
+    for name in map(str, manifest.get("expected_outputs") or []):
+        if name in RESERVED_RESULT_ARCHIVE_MEMBERS:
+            raise ValueError(
+                f"expected output {name!r} collides with the reserved result-archive"
+                " member; rename the node output"
+            )
 
 
 def require_routable_execution(manifest: Mapping[str, Any]) -> None:

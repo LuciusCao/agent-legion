@@ -24,6 +24,7 @@ from server.app.executors._lease_finish_batch import finish_many
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult
 from server.app.jobs import JobQueries
+from shared.code_contract import RESULT_METADATA_MEMBER
 from tests.db.completion_helpers import (
     _completion_handler,
     _finish_with_archive,
@@ -752,3 +753,40 @@ def test_completion_view_never_backfills_unreported_outputs_from_job_dir(
     assert store.row_for_node("gate27-job", "node_a", "b.json") is None
     # #853 版本 key 布局：任何 authority 形态（固定 / 版本 key）都不得出现 b.json。
     assert not [k for k in storage.objects if k.startswith("jobs/") and k.endswith("/b.json")]
+
+
+def test_completion_reserved_expected_output_name_fails_not_promotes(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """#843 评审 P1（Host 防线）：expected output 命中保留成员名
+    result.json——正常链路该形态已被入队守卫（manifest_guard）与 Worker
+    finalize 守卫拦下；升级前已入队的遗留行 / 畸形 Worker 归档到达此处时，
+    staging 提升面必须拒绝（AgentBundleError → 解包宽捕获 → 诚实判败），
+    绝不把归档成员（此处即元数据 JSON）静默提升成节点产物。"""
+    _seed_completion_job(job_db, workspace_id="gate28-ws", job_id="gate28-job")
+    storage = FakeObjectStorage()
+    handler, _store, jobs_dir = _completion_handler(job_db, tmp_path, storage)
+    job_dir = jobs_dir / "gate28-ws" / "gate28-job"
+    job_dir.mkdir(parents=True)
+    # 碰撞形态：归档里 result.json 是 v2 元数据成员（worker 侧守卫拦下的
+    # 真产物形态不会到达这里；此处模拟遗留行/畸形归档——成员就是元数据）。
+    _result_archive(
+        tmp_path / "bundles" / "result.tar.gz",
+        {RESULT_METADATA_MEMBER: b'{"status": "completed", "exit_code": 0}'},
+    )
+
+    ok = handler.finish(
+        lease_id="lease-1",
+        worker_id="worker-1",
+        job_id="gate28-job",
+        node_key="node_a",
+        manifest={"expected_outputs": ["result.json"], "execution_id": "exec-1"},
+        outcome=AgentOutcome(status="completed", exit_code=0, output_artifacts={}),
+        archive_name="result.tar.gz",
+    )
+
+    assert ok is True
+    assert _node_row("gate28-job", "node_a")["status"] == "failed"
+    assert "reserved" in _node_error("gate28-job", "node_a")
+    # 元数据成员绝不能以产物面目落进 job_dir。
+    assert not (job_dir / "result.json").exists()

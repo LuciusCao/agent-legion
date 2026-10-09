@@ -138,6 +138,10 @@ class ReportDegradeGate:
             except (ResultMetadataOverCeiling, OSError, tarfile.TarError, ValueError):
                 write_metadata_only_archive(self._archive, metadata)
                 self._archive_recycled = True
+        # 评审 P3-2：换写后的归档大小刷新计时器（纯观测面，别让操作者
+        # 看着换写前的尺寸排障——同 #755 对抗复审 P3 的旧刷新纪律）。
+        if self._task.report_timer is not None and self._archive.is_file():
+            self._task.report_timer.archive_bytes = self._archive.stat().st_size
         print(
             f"result report for {self._task.execution_id}: {reason}; reporting failed", flush=True
         )

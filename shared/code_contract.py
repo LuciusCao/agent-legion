@@ -50,6 +50,15 @@ RESULT_OUTPUT_ARTIFACTS_FLAG = "output_artifacts_in_archive"
 RESULT_METADATA_FORMAT_HEADER = "X-Agent-Result-Format"
 RESULT_METADATA_FORMAT_V2 = "2"
 RESULT_METADATA_MEMBER = "result.json"
+# 结果归档保留成员名全集（#843 评审 P1）：节点 expected output 命中任一即
+# 碰撞——v2 下 ``result.json`` 会被元数据换写静默吞掉真产物、``node.log``
+# 与 code 车道捕获日志双写同名互相覆盖、``result-output-artifacts.json``
+# 是 v1 换轨成员。入队守卫（agent_broker/manifest_guard）按全集拒绝；
+# Host staging 提升守卫（agent_broker/result_unpack）只拦前两个成员
+# （node.log 冲突走 completion_preflight 的既有保留源守卫）。
+RESERVED_RESULT_ARCHIVE_MEMBERS = frozenset(
+    {RESULT_METADATA_MEMBER, RESULT_OUTPUT_ARTIFACTS_MEMBER, CODE_RESULT_LOG_MEMBER}
+)
 # ``agent_workers.max_archive_bytes`` 的合法下限（#1082）：1 KiB 才能容纳
 # 空 tar.gz（判败降级路径的 metadata-only 归档），Host 配置模型
 # （server/app/configuration/executor_runtime.py）与实例设置 PUT 契约

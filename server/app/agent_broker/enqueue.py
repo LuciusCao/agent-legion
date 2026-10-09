@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 from psycopg import IntegrityError
 
+from server.app.agent_broker import manifest_guard
 from server.app.agent_broker.claim_node_limit import node_limit_audit_value
-from server.app.agent_broker.manifest_guard import require_routable_execution
 from server.app.db.transaction import write_transaction
 from server.app.executors._lease_control import lock_job_mutation_and_read_generation
 from server.app.services.agent_node_profile_types import (
@@ -33,8 +33,10 @@ def enqueue_request(broker: AgentExecutionBroker, request: AgentExecutionRequest
     review P1 — callers treat both with the existing skip semantics: the node
     stays pending and the next dispatch pass re-enqueues on the fresh epoch)."""
     # Fail fast on unroutable manifests (placeholder/empty model): they
-    # would otherwise poison the queue head forever (issue #13).
-    require_routable_execution(request.manifest)
+    # would otherwise poison the queue head forever (issue #13). #843 评审
+    # P1：保留成员名碰撞同点拒（节点失败点名冲突名）。
+    manifest_guard.require_routable_execution(request.manifest)
+    manifest_guard.require_unreserved_output_names(request.manifest)
     execution_id = request.execution_id or str(uuid.uuid4())
     try:
         with write_transaction(broker.database_dsn) as conn:
@@ -104,8 +106,7 @@ def enqueue_request(broker: AgentExecutionBroker, request: AgentExecutionRequest
         # Only the one-active-request-per-node unique index means "already
         # enqueued". Anything else (FK violations, other constraints) is a
         # real error and must surface.
-        diag = getattr(exc, "diag", None)
-        constraint = getattr(diag, "constraint_name", None) if diag is not None else None
+        constraint = getattr(getattr(exc, "diag", None), "constraint_name", None)
         if getattr(exc, "sqlstate", None) == "23505" and constraint == _ACTIVE_LEASE_CONSTRAINT:
             return None
         raise

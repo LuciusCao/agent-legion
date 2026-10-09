@@ -27,6 +27,7 @@ from worker.upload.report_policy import (
     AUTH_LOST_STATUS,
     ReportDegradeGate,
     is_transient_status,
+    is_verdict_rejection,
 )
 from worker.upload.task import UploadTask
 
@@ -107,11 +108,25 @@ def report_task(
             # 重启 → 重新注册），重注册后由租约归属决定重报或 409 终态。
             print(f"result report auth lost for {task.execution_id}; marker kept", flush=True)
             return "aborted"
-        if degrade_gate.on_rejection(status_code, rejection):
-            # #959：409/401 之外的 4xx 是确定性判决——直接删 marker 会让租约
-            # 过期后整次执行重跑、重跑再撞同一判决。降级一次为诚实判败上报
-            # （gate 已换写归档的 result.json 成员），Host 记录显式失败。
-            continue
+        if is_verdict_rejection(status_code):
+            # #755 R10 P2 同形（评审 P3-1）：降级换写（全档解压 + 重新 gzip）
+            # 是「心跳已 quiesce、判败重报未发出」窗口里的重活——大归档/慢
+            # 存储上可超过租约 TTL，租约被过期清扫后重报吃 409、删 marker、
+            # 整次执行重跑。重写期间重新武装心跳，完成后 quiesce 再重报；
+            # 401/409/非判决不经此臂。
+            task.heartbeat_thread = upload_heartbeat.resume_upload_heartbeat(
+                client, task, heartbeat_interval
+            )
+            try:
+                degraded = degrade_gate.on_rejection(status_code, rejection)
+            finally:
+                upload_heartbeat.quiesce_task_heartbeat(task, heartbeat_join_seconds)
+            if degraded:
+                # #959：409/401 之外的 4xx 是确定性判决——直接删 marker 会让
+                # 租约过期后整次执行重跑、重跑再撞同一判决。降级一次为诚实
+                # 判败上报（gate 已换写归档的 result.json 成员），Host 记录
+                # 显式失败。
+                continue
         break
     else:
         return "aborted"

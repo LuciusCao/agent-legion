@@ -77,20 +77,17 @@ def embed_result_metadata(
                 if not member.isfile():
                     dst.addfile(member)
                     continue
-                contents = src.extractfile(member)
-                if contents is None:  # 防御：isfile 成员在流模式必有数据面
+                if (contents := src.extractfile(member)) is None:  # isfile 必有数据面
                     dst.addfile(member)
                 else:
                     with contents:
                         dst.addfile(member, contents)
-        if max_bytes:
-            rewritten_size = staging_path.stat().st_size
-            if rewritten_size > max_bytes:
-                raise ResultMetadataOverCeiling(
-                    f"result archive with the embedded result.json member is"
-                    f" {rewritten_size} bytes, over the {max_bytes}-byte Host"
-                    f" archive ceiling; original archive left untouched"
-                )
+        if max_bytes and (rewritten_size := staging_path.stat().st_size) > max_bytes:
+            raise ResultMetadataOverCeiling(
+                f"result archive with the embedded result.json member is"
+                f" {rewritten_size} bytes, over the {max_bytes}-byte Host"
+                f" archive ceiling; original archive left untouched"
+            )
         os.replace(staging_path, archive)
     except BaseException:
         # #204 broad-except audit (BaseException)：staging 清理守卫而非吞
@@ -114,8 +111,16 @@ def finalize_result_metadata(
     归档（失败原因随 error_message 上报，同 prepare 降级臂的观测纪律）；
     判败语义下证据让位于可提交性。心跳纪律：本步在 bulk 车道执行（心跳
     仍武装），重写窗口不产生 #1098 形态的租约空窗。
-    """
+
+    保留成员碰撞守卫（#843 评审 P1，v1 旧 embed 同形）：expected output
+    命中 ``result.json`` 时，body 归档里该成员是真产物字节，而换写循环会
+    跳过它、把元数据写成唯一 result.json——Host 提升面再把这份元数据当
+    产物落进 job_dir，真产物被静默替换。此处先拒绝（ValueError → 下方
+    判败臂），真产物让位于诚实判败上报；上游入队守卫（manifest_guard）
+    在更早一层已把该形态拦成节点失败。"""
     try:
+        if RESULT_METADATA_MEMBER in task.expected_outputs:
+            raise ValueError(f"{RESULT_METADATA_MEMBER} collides with an expected output")
         embed_result_metadata(archive, metadata, max_bytes=task.max_archive_bytes)
     except (ResultMetadataOverCeiling, OSError, tarfile.TarError, ValueError) as exc:
         failed = failed_metadata(task, f"result metadata finalize failed: {exc}")
