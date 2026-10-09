@@ -314,7 +314,8 @@ jobs:
     name: backend-postgres-${{ matrix.shard }}
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    # #1142: pinned — ubuntu-latest migrates to Ubuntu 26 on 2026-10-19; unpin after validation
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -352,9 +353,10 @@ jobs:
 
       # velites' Linux filesystem sandbox (EXEC-HARNESS-SANDBOX-001) is
       # fail-closed: the postgres tier's velites sandbox tests need a real
-      # bubblewrap binary on the runner. Ubuntu 24.04 restricts unprivileged
-      # userns via AppArmor; current bubblewrap no longer supports the legacy
-      # setuid mode, so the disposable CI VM must explicitly enable userns.
+      # bubblewrap binary on the runner. Ubuntu 24.04 (this job's pinned
+      # runner, #1142) restricts unprivileged userns via AppArmor; current
+      # bubblewrap no longer supports the legacy setuid mode, so the
+      # disposable CI VM must explicitly enable userns.
       - name: Install bubblewrap (velites sandbox backend)
         run: |
           sudo apt-get update && sudo apt-get install -y bubblewrap
@@ -849,7 +851,8 @@ jobs:
       needs.changes.outputs.backend == 'true' ||
       needs.changes.outputs.frontend == 'true' ||
       needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    # #1142: pinned — ubuntu-latest migrates to Ubuntu 26 on 2026-10-19; unpin after validation
+    runs-on: ubuntu-24.04
     # 25 min: covers a cold velites release build when the shared rust-cache
     # misses (warm runs finish in a few minutes).
     timeout-minutes: 25
@@ -939,7 +942,8 @@ jobs:
     name: rust
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
+    # #1142: pinned — ubuntu-latest migrates to Ubuntu 26 on 2026-10-19; unpin after validation
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -987,7 +991,8 @@ jobs:
     name: docker-build
     needs: changes
     if: needs.changes.outputs.docker == 'true'
-    runs-on: ubuntu-latest
+    # #1142: pinned — ubuntu-latest migrates to Ubuntu 26 on 2026-10-19; unpin after validation
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

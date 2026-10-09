@@ -38,7 +38,8 @@ jobs:
   # sandbox + Worker agent runtime) and its sandbox backend.
   nightly-e2e:
     name: nightly-e2e
-    runs-on: ubuntu-latest
+    # #1142: pinned — ubuntu-latest migrates to Ubuntu 26 on 2026-10-19; unpin after validation
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
       postgres:

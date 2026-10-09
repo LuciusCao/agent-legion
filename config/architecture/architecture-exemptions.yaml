@@ -1295,15 +1295,3 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1002
   ceiling: 73
   expires: 2026-12-31
-- check: architecture.file_budget
-  path: server/app/studio_chat/spawn.py
-  reason: 'Issue #1136 hotfix: spawn_session_runtime wires the instance-level terminal
-    grant-fence switch into AcpSessionHandle (terminal_policy import + the provider
-    lambda) — 2 effective lines past the 90 ceiling with the 15-line growth band
-    already fully consumed by 0.7.17. Time-boxed: the 0.7.18 release train re-anchors
-    budget baselines at HEAD, absorbing this overage; if the file has not shrunk by
-    expiry, split spawn.py instead of renewing.'
-  owner: studio-chat
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1140
-  ceiling: 107
-  expires: 2026-11-30
