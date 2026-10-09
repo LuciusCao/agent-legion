@@ -62,6 +62,15 @@ _REV_PARSE_TIMEOUT_SECONDS = 5.0
 #: git 输出的合法形态（完整 sha）——其他输出一律按解析失败处理。
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
+#: 两段 skill key 的字符集白名单：ASCII 字母/数字起头，其后字母数字/
+#: 点/下划线/连字符（skill key 的现实字符集）。白名单外的任何形态
+#: （NUL、unicode、空格、``.``/``..`` 段、绝对前缀、非两段）→ 仓库不可
+#: 解析 → 保守排除（#1148 评审 P2-1：NUL key 会穿字符串结构校验、在
+#: subprocess 参数编码处抛 ValueError → 升级 500，失败语义回归）。白名单
+#: 同时封死路径逃逸形态——该字符集构造不出 ``..``/分隔符/绝对路径分量，
+#: 无需再做 symlink resolve / containment（评审 P3-3，选择白名单方案）。
+_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
 
 @dataclass(frozen=True)
 class SkillLatestHeads:
@@ -161,9 +170,14 @@ def _skill_repo_dir(root: Path, skill_key: str) -> Path | None:
     段规则与 ``SkillManager._parse_skill_key`` 一致（相对、两段、无
     ``..``）；loader 与 Agent 定义来源的 key 都已过校验，这里的防御性
     再验只防未校验值进 subprocess 参数（不合式 → None，不跑 git）。
+    字符集白名单（``_SEGMENT_RE``）在段规则之上：NUL 等 OS 级非法字符
+    会在 subprocess 参数编码处抛 ValueError（POSIX）——白名单先行拒绝
+    即不触发（评审 P2-1；``_rev_parse_head`` 的 except 兜底 ValueError
+    为双保险）。空段/绝对前缀/``.``/``..``/三段以上均不匹配白名单，
+    旧结构校验被完整覆盖。
     """
     parts = skill_key.split("/")
-    if skill_key.startswith("/") or ".." in parts or len(parts) != 2 or not all(parts):
+    if len(parts) != 2 or not all(_SEGMENT_RE.fullmatch(part) for part in parts):
         return None
     return root / parts[0] / parts[1]
 
@@ -171,10 +185,12 @@ def _skill_repo_dir(root: Path, skill_key: str) -> Path | None:
 def _rev_parse_head(repo: Path) -> str | None:
     """repo 当前 HEAD commit（40-hex）；任何失败 → None。
 
-    超时、git 不可用、非仓库、输出异常都归入 None——该 skill 的 latest
-    绑定保守排除，升级不因 skill 仓库状态 500。env 剔除 ``GIT_`` 前缀
-    变量（与 ``SkillManager._run_git`` 同款：防 git hook 环境的
-    ``GIT_DIR`` 等泄漏进临时仓库解析）。
+    超时、git 不可用、非仓库、输出异常、参数含 OS 级非法字符（NUL 兜底）
+    都归入 None——该 skill 的 latest 绑定保守排除，升级不因 skill 仓库
+    状态 500。env 剔除 ``GIT_`` 前缀变量（与 ``SkillManager._run_git``
+    同款：防 git hook 环境的 ``GIT_DIR`` 等泄漏进临时仓库解析）。各失败
+    分支带 debug 日志（与 ``_published_catalog`` / ``read_skill_lock`` 的
+    降级日志纪律对齐，评审 P3-2）。
     """
     try:
         result = subprocess.run(
@@ -184,9 +200,17 @@ def _rev_parse_head(repo: Path) -> str | None:
             timeout=_REV_PARSE_TIMEOUT_SECONDS,
             env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError):
+        # ValueError = 参数含 NUL 等编码非法字符（_skill_repo_dir 白名单
+        # 拒绝后的双保险）；OSError 含 git 不在 PATH；SubprocessError 含
+        # TimeoutExpired（超时预算）。
+        logger.debug("skill HEAD rev-parse failed for %s", repo, exc_info=True)
         return None
     if result.returncode != 0:
+        logger.debug("skill HEAD rev-parse exited %s for %s", result.returncode, repo)
         return None
     commit = result.stdout.strip()
-    return commit if _COMMIT_RE.fullmatch(commit) else None
+    if not _COMMIT_RE.fullmatch(commit):
+        logger.debug("skill HEAD output not a 40-hex commit for %s", repo)
+        return None
+    return commit
