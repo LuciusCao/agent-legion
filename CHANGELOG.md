@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- 分支模型收口为 trunk-based（issue #1150）：`main` 唯一常驻主干，feature/fix 一律从 main 分叉、PR 回 main，发布 = main 落版 + tag；`release/*` 降为可选逃生舱（发布确需稳定窗口时从 main 切出、只收 cherry-pick fix、发完即删），`develop` 分支退役删除（GitHub 默认分支此前已在 main）。quality-gate 的 PR 触发与 RELEASE_TRAIN 判定、nightly 的 flaky 分支扫描、gate 脚本 merge-base 回退链、clean-worktree 受保护分支名单、AGENTS.md 与现行文档全部同步；main 保护迁移为仓库 ruleset `trunk-protection-main`（required `quality-gate` + 禁删 + 禁 force-push，`github-actions[bot]` 与 owner bypass 供 nightly manifest 提交通道）。
+
+### Fixed
+
+- nightly gate 连续五周全红的两个根因（issue #1150）：其一，`test_fairness_under_randomized_insertion_order` 的 scan entries（`('test','test')`）与 job 所在 workspace（名字派生的 `workspace_a/b/c`）从未对齐——`bef9ad08d`（#211 Phase 3，08-31 合入）退役 by-key 扫描兜底后，无 scan entry 的 workspace 永不被扫、starved 断言必挂；测试改为显式 workspace id 与 scan entries 对齐（25 seeds 全过，此前 21 失败）。其二，exemption-expiry 的 issue-states manifest 人工提交仪式（`make architecture-issue-states`）断供五周——该 job 现在直接自动提交刷新后的 manifest 到默认分支（anchor issue 关闭时检测仍失败 job），并新增 failure-tracker job：schedule 失败按标题去重开/更新 `ops` issue（推送式提醒补上「周一红五周无人察觉」的反馈回路缺口）。发版检查清单（docs/release-notes.md）新增「nightly 绿或显式豁免」门槛。
+- pre-push 门禁通过后 `git push` 被 SIGPIPE 打死的「推两次」仪式（issue #1145）：根因是本机 ssh 无 keepalive（`ServerAliveInterval 0`），gate 期间空闲的 transport 被 NAT/防火墙约 350–370s 掐断（18 次失败诊断记录全部 ≥373s）；修复为本机 `~/.ssh/config` 为 github.com 配置 `ServerAliveInterval 60` + `ServerAliveCountMax 6`（6 分钟空闲容忍，覆盖最长 gate）。
+- CI postgres 分片 loaded-runner flaky 家族（flaky registry 16 条中 10 条同族，近 9 个失败 PR run 全部同类）：2-core runner 上 xdist `-n 2` 与 postgres 容器、coverage 追踪分抢同样的核，时序测试的 poll 窗口被饿穿。postgres tier 在 CI 钉 `-n 1`（单 worker 独占核预算；分片实测 6–13 分钟，timeout 20 分钟余量充足），本地不受影响；时序断言四条纪律（等信号非等时长、断言不变量非中间态、mock 返回真实形状、超时按 CI 负载预算）成文进 `docs/architecture/local-quality-gates.md` 并在 AGENTS.md §4 留指针，手搓 `_wait_for` 副本收敛到共享 `tests.helpers.wait_for_predicate`。
+
 ## [0.7.18] - 2026-10-08
 
 hotfix：修复 0.7.16 起 Studio 对话终端权限栅栏在引擎 auto 模式下让 Bash 整体不可用（issue #1136，线上事故）——默认恢复 0.7.15 及以前的直接执行（栅栏转为可选加固），被拒时原因贯穿到 agent 工具错误与会话卡片；另把实例设置 PUT 改为合并语义，结构性消除「旧客户端静默重置新设置键」簇。
