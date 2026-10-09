@@ -265,9 +265,6 @@ jobs:
             || echo "PR already open"
           gh pr merge --auto --squash "$branch" \
             || echo "auto-merge not enabled on this PR"
-          else
-            echo "manifest already current"
-          fi
 
       - name: Detect expired exemptions
         run: uv run python -m scripts.check_invariants
