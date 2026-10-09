@@ -120,6 +120,7 @@
     "tests/routes/test_agent_worker_reclaim_liveness.py",
     "tests/routes/test_agent_worker_registration.py",
     "tests/routes/test_agent_worker_result_gate.py",
+    "tests/routes/test_agent_worker_result_metadata_v2.py",
     "tests/routes/test_agent_worker_result_spool.py",
     "tests/routes/test_agent_workers.py",
     "tests/routes/test_agent_workers_listing_visibility.py",

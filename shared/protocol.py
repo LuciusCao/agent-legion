@@ -47,6 +47,15 @@ Additive field without a bump (#590): the batch heartbeat response carries a
 transaction). Old Workers ignore the unknown key; new Workers parse a
 settled-less body from an older Host as an empty list — both directions ride
 v5 safely.
+
+Result-metadata dual shape without a bump (#843): a report carrying
+``X-Agent-Result-Format: 2`` moves the metadata JSON from the
+``X-Agent-Result`` header into the result-archive member ``result.json``
+(header budget and the #748/#755 degrade chain do not apply; constants in
+shared/code_contract.py). The Host has read both shapes since v0.7.19; the
+Worker-side write switch rides a later PR, so every shipping Worker stays v1
+and mixed fleets are unaffected. A v2-writing Worker against a pre-v0.7.19
+Host is refused with 400 (no v1 header JSON to parse).
 """
 
 CODE_PROTOCOL_VERSION = 2

@@ -22,7 +22,7 @@ from server.app.routes.agent_worker_claims import create_agent_worker_claim_rout
 from server.app.routes.agent_worker_listing import VisibleWorkspaces, narrow_workers_to_visible
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
 from server.app.routes.agent_worker_presence import register_presence_route
-from server.app.routes.agent_worker_results import _recover_result_header, parse_result_metadata
+from server.app.routes.agent_worker_result_shapes import prespool_metadata, read_member
 from server.app.routes.agent_workers_contracts import (
     AgentWorkerConsoleResponse,
     AgentWorkerDeleteResponse,
@@ -270,17 +270,13 @@ def create_agent_workers_router(
         worker = await concurrency.run_in_threadpool(authorize_worker, request)
         worker_id = str(worker["worker_id"])
         lease_id = require_lease_id(request)
-        # Validate metadata fully BEFORE writing the archive: malformed input
-        # must produce a 400, never a 500 with an orphan file on disk.
-        try:
-            # #748 P2: the Worker ships the metadata as raw UTF-8 header
-            # bytes; Starlette hands it over latin-1-decoded, so reverse the
-            # transport decoding before parsing (no-op for legacy ASCII).
-            outcome, record = parse_result_metadata(
-                _recover_result_header(request.headers.get("x-agent-result", "{}"))
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="invalid Agent result metadata") from exc
+        # #843 PR-1 dual-shape metadata read (agent_worker_result_shapes.py):
+        # v1 = legacy X-Agent-Result header JSON, validated here (BEFORE the
+        # size gate / precheck / spool — the 400-first ordering is the wire
+        # contract); v2 = X-Agent-Result-Format: 2, metadata rides the archive
+        # member result.json and is parsed post-spool (a stub record feeds the
+        # precheck audit until then).
+        metadata_v2, outcome, record = prespool_metadata(request)
         # Size gate: reject on the declared length before spooling the body.
         declared = request.headers.get("content-length")
         if declared is not None and declared.isdigit() and int(declared) > config.max_archive_bytes:
@@ -300,16 +296,21 @@ def create_agent_workers_router(
         from server.app.services.runtime_profile import profile
 
         result_timer = profile.result_timer()
-        commit_args = (broker, completion, execution_id, worker_id, lease_id, outcome, record)
+        commit_args = (broker, completion, execution_id, worker_id, lease_id)
         try:
             staged = await spool_result_body(request, broker.bundle_dir, config.max_archive_bytes)
             try:
+                if metadata_v2:
+                    # v2 contract breach (missing member / bad JSON / invalid
+                    # fields) is a 400 here; the finally reclaims the staged
+                    # file, so no orphan lands on disk.
+                    outcome, record = await read_member(staged)
                 # The blocking commit runs in the threadpool (holding the
                 # loop would stall heartbeat/claim); the #521 gate
                 # (result_gate.py) bounds how many share it. Spooling
                 # stays outside the gate.
                 await run_gated_result_commit(
-                    result_commit_gate, commit_agent_result, *commit_args, staged
+                    result_commit_gate, commit_agent_result, *commit_args, outcome, record, staged
                 )
             finally:
                 # A successful commit atomically renamed the staging file into
