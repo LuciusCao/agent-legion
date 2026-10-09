@@ -206,6 +206,7 @@
     "tests/services/test_job_workflow_upgrade_inherit_rmw.py",
     "tests/services/test_job_workflow_upgrade_inherit_runtime_mutable.py",
     "tests/services/test_job_workflow_upgrade_inherit_skill.py",
+    "tests/services/test_job_workflow_upgrade_inherit_skill_latest.py",
     "tests/services/test_job_workflow_upgrade_profile_provenance.py",
     "tests/services/test_job_workflow_upgrade_protection.py",
     "tests/services/test_job_workflow_upgrade_staging.py",

@@ -1,9 +1,12 @@
 """inherit 升级的 skill 内容身份判定测试（issue #645 codex 五轮 P1-A，#759 收紧）。
 
-三态判定：latest（节点显式 / 空归一 / AgentDefinition legacy 兜底）恒定排除、
-pinned ref 与 DB 锁文档直读值比较、锁内无条目即排除；upgrade 全链路零 git
-I/O、永不触发首次 pin。自 ``test_job_workflow_upgrade_inherit_codex5.py``
-按主题拆出（零改动迁移）。
+三态判定：latest（节点显式 / 空归一 / AgentDefinition legacy 兜底）与 plan
+传入的 HEAD 常量精确比对（#1148，本文件不建 skill 仓库 → rev-parse 失败
+→ 保守排除，即与 #759 恒排除同向的结果面）、pinned ref 与 DB 锁文档直读
+值比较、锁内无条目即排除；upgrade 判定模块零 git I/O（HEAD 解析在 plan
+层，``job_workflow_upgrade_skill_heads``）、永不触发首次 pin。精确比对的
+正反用例见 ``test_job_workflow_upgrade_inherit_skill_latest.py``。自
+``test_job_workflow_upgrade_inherit_codex5.py`` 按主题拆出（零改动迁移）。
 """
 
 from pathlib import Path
@@ -22,21 +25,23 @@ from tests.helpers.job_workflow_upgrade import (
 )
 
 # ---------------------------------------------------------------------------
-# P1-A：skill 内容身份三态判定（#759 收紧：latest 恒排除 / pinned 锁比对 /
-# 无锁条目排除；upgrade 零 git I/O、永不 pin）
+# P1-A：skill 内容身份三态判定（#759 收紧 / #1148 latest 精确比对：本文件
+# 不建 skill 仓库 → HEAD 解析失败（None）→ 保守排除；pinned 锁比对；无锁
+# 条目排除；判定模块零 git I/O、永不 pin）
 # ---------------------------------------------------------------------------
 
 
 def test_skill_legacy_fallback_latest_binding_always_reruns_node(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """#759 P1 语义反转：legacy fallback（ref 恒 latest）恒定排除，零 git I/O。
+    """legacy fallback（ref 恒 latest）HEAD 解析失败 → 保守排除。
 
     旧语义（本用例前身 ``test_skill_legacy_fallback_matching_commit_keeps_node``
-    的反转）：执行记录 commit 与 live HEAD 解析相等即可继承——但 upgrade
-    判定之后 HEAD 仍可前进，commit 对比证明不了继承安全性，且判定本身要跑
-    git 子进程（rev-parse HEAD）。新语义：latest 绑定（含空 ref 归一与
-    AgentDefinition legacy 兜底）不做任何 git 解析，直接排除。
+    的反转）：执行记录 commit 与 live HEAD 解析相等即可继承——但判定之后
+    HEAD 仍可前进，当时的 commit 对比证明不了继承安全性，且判定本身要跑
+    git 子进程（rev-parse HEAD）。#759 反转为恒排除；#1148 恢复精确比对但
+    HEAD 值由 plan 阶段解析传入（本文件无 skill 仓库 → None → 保守排除，
+    结果面与 #759 一致）。正向用例见 skill_latest 姊妹文件。
     """
     git_calls = no_git_spy(monkeypatch)
     queries, workspace, job_id = skill_bound_job(
@@ -50,14 +55,16 @@ def test_skill_legacy_fallback_latest_binding_always_reruns_node(
     result = service.upgrade(workspace["id"], job_id, mode="inherit")
 
     statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
-    # b 的 latest 绑定恒定排除 → b 及下游 c 重跑；a 无 skill 面 → 继承。
+    # b 的 latest 绑定 HEAD 不可证明 → 保守排除（b 及下游 c 重跑）；
+    # a 无 skill 面 → 继承。
     assert result["kept_node_count"] == 1
     assert statuses == {"a": "completed", "b": "pending", "c": "pending"}
     assert git_calls == []
 
 
 def test_skill_explicit_latest_ref_always_reruns_node(tmp_path: Path, monkeypatch) -> None:
-    """节点显式 ``skill: latest``：S5 与 P1-A skill 面同向排除，零 git I/O。"""
+    """节点显式 ``skill: latest``（无 skill 仓库 → HEAD None）：S5 与 P1-A
+    skill 面同向保守排除，SkillManager 零调用。"""
     git_calls = no_git_spy(monkeypatch)
     queries, workspace, job_id = skill_bound_job(
         tmp_path,

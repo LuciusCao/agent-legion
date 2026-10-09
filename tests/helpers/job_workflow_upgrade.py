@@ -297,7 +297,13 @@ def put_skill_lock(queries: JobQueries, skills: dict) -> None:
 
 
 def no_git_spy(monkeypatch) -> list[list[str]]:
-    """钉住「upgrade 全链路零 git I/O」：_run_git 被调用即失败。"""
+    """钉住「upgrade 链路 SkillManager 零 git I/O」：_run_git 被调用即失败。
+
+    #1148 起 plan 阶段经 ``job_workflow_upgrade_skill_heads`` 有一次有界
+    rev-parse（subprocess 直调，不经 SkillManager）——本 spy 监视的是
+    SkillManager 侧（锁解析 / materialize 面），它们在 upgrade 全链路
+    （含 guard 事务内重验）保持零调用。
+    """
     calls: list[list[str]] = []
 
     def _spy(self, args, check: bool = True):
@@ -320,7 +326,8 @@ def seed_reachable_outputs(queries: JobQueries, job_id: str, names: list[str]) -
 
 
 SKILL_KEY = "wschain/sk"
-#: 假 commit（upgrade 判定零 git I/O，不需要真实仓库对象）。
+#: 假 commit（判定面零 git I/O：latest 的 HEAD 由 plan 传入，pinned 比对
+#: 锁文档——本文件族不建真实仓库对象）。
 COMMIT_V1 = "1" * 40
 COMMIT_V2 = "2" * 40
 

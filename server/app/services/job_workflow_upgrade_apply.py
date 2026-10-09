@@ -1,7 +1,8 @@
 """upgrade-workflow 的单次应用尝试（#759 4.4 的重试单元；文件预算拆分）。
 
-一次尝试 = ``resolve_upgrade_context`` → ``plan_inherit_nodes`` →
-lease guard 事务 → 提交后收尾。guard 事务**首步**取
+一次尝试 = ``resolve_upgrade_context`` → latest HEAD 解析（#1148，仅
+inherit）→ ``plan_inherit_nodes`` → lease guard 事务 → 提交后收尾。guard
+事务**首步**取
 ``implementation-publication`` workspace advisory 锁（无条件，#759 P2-A），
 随后在锁下重读 workspace 当前 active revision
 （``assert_context_revision_current``）：revision 发布不经 job-mutation
@@ -38,10 +39,12 @@ from server.app.services.job_workflow_upgrade_propagation import rerun_closure
 from server.app.services.job_workflow_upgrade_protection import UpgradeProtectionUnprovableError
 from server.app.services.job_workflow_upgrade_removed_outputs import deleted_node_keys
 from server.app.services.job_workflow_upgrade_result import upgrade_result
+from server.app.services.job_workflow_upgrade_skill_heads import resolve_latest_skill_heads
 from server.app.workflows.revision_format import definition_from_job_snapshot
 
 if TYPE_CHECKING:
     from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
+    from server.app.services.job_workflow_upgrade_skill_heads import SkillLatestHeads
 
 
 def apply_upgrade_once(
@@ -59,7 +62,12 @@ def apply_upgrade_once(
     inherit_nodes: frozenset[str] = frozenset()
     # #935：目标 revision 的 agent_profile_provenance（升级 diff 归一）。
     provenance = provenance_from_revision_json(str(context.active["definition_json"]))
+    # #1148：latest 绑定的 HEAD 常量在 plan 阶段（事务外）rev-parse 一次
+    # （job_workflow_upgrade_skill_heads）；guard 事务内重验沿用同一常量
+    # （#759 P1：事务内零 git 子进程）。
+    latest_heads: SkillLatestHeads | None = None
     if mode == "inherit":
+        latest_heads = resolve_latest_skill_heads(service.job_db, context.job, context.definition)
         inherit_nodes = plan_inherit_nodes(
             service.job_db,
             context.job,
@@ -72,6 +80,7 @@ def apply_upgrade_once(
                 service.object_store is not None and getattr(service.object_store, "enabled", False)
             ),
             profile_provenance=provenance,
+            latest_heads=latest_heads,
         )
     staged: StagedOutputs | None = None
     try:
@@ -99,8 +108,9 @@ def apply_upgrade_once(
             # （keep ∩ completed + shared_name 复算）同款风格：漂移节点
             # 放弃继承（降级重跑），传播面（下游/同名）由收敛层接管。
             # #759 P1：重验只剩纯 DB 读 + 字符串比较——skill 面直读锁
-            # 文档（绕 5s doc cache）、latest 恒定排除、upgrade 永不
-            # pin/不跑 git 子进程，事务回滚不留 skill 面副作用。
+            # 文档（绕 5s doc cache）、latest 沿用 plan 的 HEAD 常量
+            # （#1148，不重新 rev-parse）、upgrade 永不 pin，事务回滚
+            # 不留 skill 面副作用。
             # #759 P2-A（锁序：job-mutation → implementation-publication →
             # skill-lock，写进 EXEC-GENERATION-001）：publication 锁无条件
             # 取且在 active revision 重读之前（clean 模式/空继承候选同取，
@@ -129,6 +139,7 @@ def apply_upgrade_once(
                     custom_nodes_enabled=service.custom_nodes_enabled,
                     skill_lock_domain_held=True,
                     profile_provenance=provenance,
+                    latest_commits=latest_heads.commits if latest_heads else None,
                 )
                 if revalidated:
                     # 重验得到的是新的变更种子，不只是要从 keep 集剔除

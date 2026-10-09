@@ -135,8 +135,8 @@ def test_agent_definition_runtime_mutable_key_reruns_node(tmp_path: Path) -> Non
     current = revisions.publish_workspace_revision(workspace["id"], definition)
     # Agent 定义带 runtime_mutable 键（b 的节点级 config_schema 为空——
     # 旧缺陷：有效 schema 主体在 Agent 定义里，节点自声明判定覆盖不到）。
-    # 不携带 skill：latest 绑定在 #759 后恒定排除（codex5 P1-A 面），会
-    # 掩盖本用例的 HIGH-2 判别点。
+    # 不携带 skill：本用例无 skill 仓库，latest 绑定会保守排除
+    # （codex5 P1-A 面）而掩盖 HIGH-2 判别点。
     v1 = AgentDefinition(capability="cap_b", runtime="pi", config_schema=schema)
     replace_agent_catalog(workspace["id"], {"agent-b": v1})
     job_id = seed_wfchain_job(queries, workspace, original, ["a", "b", "c"])
@@ -190,9 +190,9 @@ def test_agent_definition_without_mutable_keys_stays_inheritable(tmp_path: Path)
         capability="cap_b",
         runtime="pi",
         # 有 schema、但无 runtime_mutable 键（对照组：排除判定不因
-        # 「定义携带 schema」而扩大）。不携带 skill：latest 绑定在 #759
-        # 后恒定排除（codex5 P1-A 面），会让 b 无法继承、掩盖本对照组的
-        # 判别点。
+        # 「定义携带 schema」而扩大）。不携带 skill：本用例无 skill 仓库，
+        # latest 绑定会保守排除（codex5 P1-A 面），让 b 无法继承、掩盖
+        # 本对照组的判别点。
         config_schema={
             "type": "object",
             "properties": {"threshold": {"type": "integer", "default": 1}},

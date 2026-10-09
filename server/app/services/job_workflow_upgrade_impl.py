@@ -27,14 +27,17 @@ workspace 当前 published 的 node_code（code 节点）或 Agent 定义（agen
   节点自声明判定覆盖不到定义侧键。定义 schema 含此类键的 agent 节点
   并入本排除集（恒重跑），解析不到唯一 published 的节点 P1-1 已排除、
   不重复计入。
-- **skill 内容身份**（codex 五轮 P1-A，#759 P1 收紧）：agent 节点的执行
-  内容还有 skill 绑定（``effective_node_skill``：节点绑定优先，
-  ``AgentDefinition.skill`` 的 legacy 兜底皆空即节点失败）。判定在姊妹
-  模块 ``job_workflow_upgrade_skill``（``skill_excluded_nodes``）：
-  latest 绑定（显式/空归一/legacy 兜底）恒定排除；pinned ref 与 DB 锁
-  文档直读值（``read_skill_lock``，绕开 SkillManager 的 5s doc cache）
-  比较；锁内无条目 → 不可证明 → 排除。skill 面零 git I/O、零锁文档写（upgrade 永不 pin），guard 事务内重验只剩纯 DB 读 +
-  字符串比较。
+- **skill 内容身份**（codex 五轮 P1-A，#759 P1 收紧；#1148 latest 精确
+  比对）：agent 节点的执行内容还有 skill 绑定（``effective_node_skill``：
+  节点绑定优先，``AgentDefinition.skill`` 的 legacy 兜底皆空即节点失败）。
+  判定在姊妹模块 ``job_workflow_upgrade_skill``（``skill_excluded_nodes``）：
+  latest 绑定（显式/空归一/legacy 兜底）与 plan 传入的 HEAD 常量
+  （``latest_commits``，plan 阶段事务外解析、guard 重验沿用同一值，
+  ``job_workflow_upgrade_skill_heads``）按前缀语义精确比对，缺值即保守
+  排除；pinned ref 与 DB 锁文档直读值（``read_skill_lock``，绕开
+  SkillManager 的 5s doc cache）比较；锁内无条目 → 不可证明 → 排除。
+  skill 判定面零 git I/O、零锁文档写（upgrade 永不 pin），guard 事务内
+  重验只剩纯 DB 读 + 字符串比较（含 HEAD 常量比较）。
 
 v85 之前本地 code 池执行无身份记录 → 一律「不可证明」恒重跑；v85 起
 claim 落列，本地池 code 节点与 Worker/Agent 节点同权可证明。
@@ -195,6 +198,7 @@ def implementation_excluded_nodes(
     custom_nodes_enabled: bool = True,
     skill_lock_domain_held: bool = False,
     profile_provenance: Mapping[str, Mapping[str, Any]] | None = None,
+    latest_commits: Mapping[str, str | None] | None = None,
 ) -> frozenset[str]:
     """执行面排除集：实现身份不可证明/已漂移 + Agent 定义 runtime_mutable 键。
 
@@ -207,6 +211,11 @@ def implementation_excluded_nodes(
     ``skill_lock_domain_held``（#759 P2-B）：True 表示调用方已在 guard
     事务内持有 skill-lock advisory 锁（锁文档读不再自取）；plan 阶段
     为 False，``read_skill_lock`` 走短事务取锁+读。
+
+    ``latest_commits``（#1148）：plan 阶段解析的 latest 绑定 skill key
+    → HEAD commit（``job_workflow_upgrade_skill_heads``）；plan 与 guard
+    重验传同一值（后者不重新 rev-parse），None = 未解析（latest 保守
+    排除，与 #759 同向）。
 
     ``profile_provenance``（#935 升级 diff 归一）：目标 revision 的
     ``agent_profile_provenance``。v93 回填后的自含节点当前身份是档案
@@ -224,11 +233,14 @@ def implementation_excluded_nodes(
     agent_current = _current_agent_identities(catalog, definition)
     code_current = _current_code_identities(job_db, custom_nodes_enabled, workspace_id, definition)
     excluded: set[str] = set(_agent_definition_mutable_nodes(catalog, definition))
-    # codex 五轮 P1-A（#759 收紧）：skill 内容身份（姊妹模块）——锁文档
-    # 直读 DB 权威值，latest 恒定排除，pinned 无锁条目即不可证明。
     resolved_agents = _resolved_agent_nodes(catalog, definition)
     skill_lock = read_skill_lock(job_db, domain_held=skill_lock_domain_held)
-    excluded |= skill_excluded_nodes(resolved_agents, definition, executed, skill_lock)
+    # codex 五轮 P1-A（#759 收紧；#1148 latest 精确比对）：skill 内容身份
+    # （姊妹模块）——锁文档直读 DB 权威值，latest 与 plan 传入的 HEAD
+    # 常量比较，pinned 无锁条目即不可证明。
+    excluded |= skill_excluded_nodes(
+        resolved_agents, definition, executed, skill_lock, latest_commits=latest_commits
+    )
     for key, node in definition.executable_nodes.items():
         record = executed.get(key)
         if record is None:

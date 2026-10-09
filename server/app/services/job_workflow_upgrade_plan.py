@@ -26,6 +26,10 @@ from server.app.services.job_workflow_upgrade_propagation import (
     collect_change_seeds,
     rerun_closure,
 )
+from server.app.services.job_workflow_upgrade_skill_heads import (
+    SkillLatestHeads,
+    latest_proven_nodes,
+)
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.definition import WorkflowDefinition
 
@@ -39,16 +43,25 @@ def plan_inherit_nodes(
     custom_nodes_enabled: bool = True,
     require_manifest_rows: bool = False,
     profile_provenance: Mapping[str, Mapping[str, Any]] | None = None,
+    latest_heads: SkillLatestHeads | None = None,
 ) -> frozenset[str]:
     """最终继承集 = 新定义可执行节点 −（S1–S5 种子 ∪ S6 可达性种子）的传播闭包。
 
     ``custom_nodes_enabled``（P1-1）与 dispatch 侧同一特性 gate
     （``workflows.custom_nodes_enabled``）：关闭时 code 节点当前身份
     不可解析，全部保守重跑（与「关闭特性时 dispatch 无 code 可跑」的
-    现实一致）。skill 内容身份（codex 五轮 P1-A，#759 收紧）由
-    ``implementation_excluded_nodes`` 直读 DB 锁文档判定（latest 恒定
-    排除、pinned 无锁条目即不可证明、upgrade 永不 pin/不跑 git），与
-    guard 事务内重验走同一权威读取。
+    现实一致）。skill 内容身份（codex 五轮 P1-A，#759 收紧；#1148 latest
+    精确比对）由 ``implementation_excluded_nodes`` 直读 DB 锁文档判定
+    （latest 与 ``latest_heads.commits`` 的 HEAD 常量比较、pinned 无锁
+    条目即不可证明、upgrade 永不 pin/判定面零 git I/O），与 guard 事务
+    内重验走同一权威读取。
+
+    ``latest_heads``（#1148）：plan 阶段（事务外）经
+    ``job_workflow_upgrade_skill_heads`` 解析的 latest 绑定 HEAD 快照
+    ——``commits`` 穿给 P1-A skill 面，``bound_nodes`` 派生 S5 的
+    ``latest_proven``（latest 绑定节点 − 执行面排除集，保守子集：被
+    其他执行面排除的节点已是 S4 种子，S5 重复排除对闭包结果无影响）。
+    None（未解析）= latest 全部保守排除（#759 旧行为）。
 
     ``require_manifest_rows``（codex #776 复审 P2）：对象存储权威层启用
     时 S6 可达性要求每个声明 output 都有 ``job_artifacts`` 清单行——
@@ -110,6 +123,7 @@ def plan_inherit_nodes(
         new_definition,
         custom_nodes_enabled=custom_nodes_enabled,
         profile_provenance=profile_provenance,
+        latest_commits=latest_heads.commits if latest_heads is not None else None,
     )
     # #935：目标 revision 的 provenance 把「旧快照 legacy 节点 vs v93 内联
     # 后的自含节点」归一比较（S1 legacy 视图 + S4 定义哈希，见各模块）。
@@ -120,6 +134,7 @@ def plan_inherit_nodes(
         new_frozen_config_json,
         implementation_excluded,
         legacy_views=upgrade_legacy_views(old_definition, new_definition, profile_provenance or {}),
+        latest_proven=latest_proven_nodes(latest_heads, implementation_excluded),
     )
     reset_nodes = rerun_closure(new_definition, seeds)
     candidates = frozenset(new_definition.executable_nodes) - reset_nodes

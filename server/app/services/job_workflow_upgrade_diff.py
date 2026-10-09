@@ -29,8 +29,10 @@ wrapper。
 
 排除规则（issue 边界 + codex 四轮，一律不继承、永远重跑）：
 
-- ``skill: latest`` 节点：HEAD 漂移永不入锁（#322），diff 无法观测其
-  内容变化，参与继承会掩盖 skill 更新；
+- ``skill: latest`` 节点（未证明时）：HEAD 漂移永不入锁（#322），diff
+  自身无法观测其内容变化——#1148 起由 plan 层在事务外解析当前 HEAD 并
+  与执行记录 commit 精确比对（``latest_proven``），证明一致才通过 S5；
+  未证明（未传集合 / 不在集合内）仍恒排除，防止继承掩盖 skill 更新；
 - 分片节点（声明 ``shard:`` / ``reduce:``）：``node_shards`` 行级状态
   是 fan-out 执行的一部分，继承聚合状态无法安全重放；
 - 审批门节点（``type: approval``）：人工决策语义（approve/rework）不
@@ -67,6 +69,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Collection
 from dataclasses import asdict
 from typing import Any
 
@@ -140,16 +143,23 @@ def runtime_mutable_excluded_nodes(definition: WorkflowDefinition) -> set[str]:
     }
 
 
-def node_is_inherit_excluded(node: WorkflowNode) -> bool:
-    """该节点不参与继承（issue #645 边界）：skill:latest / 分片 / 审批门
-    / 含 runtime_mutable config 键。
+def node_is_inherit_excluded(
+    node: WorkflowNode, *, latest_proven: Collection[str] | None = None
+) -> bool:
+    """该节点不参与继承（issue #645 边界）：skill:latest（未证明）/ 分片
+    / 审批门 / 含 runtime_mutable config 键。
 
     实现身份不可证明的排除（P1-1）不在此处：它需要执行记录与当前
     published 的解析结果，由 plan 层算好传进
     ``compute_inherit_reset_nodes``。
+
+    #1148：显式 ``skill: latest`` 不再无条件排除——``latest_proven``
+    （plan 层算好的「skill 内容身份已证明一致」节点集，来源见
+    ``job_workflow_upgrade_plan`` / ``job_workflow_upgrade_skill_heads``）
+    含该节点时通过 S5；None（默认）= 全部排除（#759 旧行为）。
     """
     if node.skill is not None and (node.skill.ref or LATEST_REF) == LATEST_REF:
-        return True
+        return latest_proven is None or node.key not in latest_proven
     if node.shard is not None or node.reduce is not None:
         return True
     if node.node_type == _APPROVAL_NODE_TYPE:
@@ -172,6 +182,8 @@ def compute_inherit_reset_nodes(
     new_definition: WorkflowDefinition,
     new_frozen_config_json: str | None,
     implementation_excluded: frozenset[str] | set[str] = frozenset(),
+    *,
+    latest_proven: Collection[str] | None = None,
 ) -> set[str]:
     """新 revision 下需要重跑的节点集（种子 + 三通道传播闭包）。
 
@@ -181,6 +193,9 @@ def compute_inherit_reset_nodes(
     / S5 排除规则的纯局部种子）→ ``rerun_closure``（通道 A 显式边传播
     + 通道 B 同名生产者 fixpoint + 通道 C 隐式消费边，#759）。上游一致性
     不再由 per-node 哈希链间接证明，而由「全部上游都不在重跑闭包里」直接定义。
+
+    ``latest_proven``（#1148，keyword-only，默认 None = 旧行为）：plan
+    层算好的 latest 证明集，透传给 S5 的 ``node_is_inherit_excluded``。
 
       - 节点在旧快照中不存在（新增节点）→ 变更；
       - 节点在新 revision 中不存在（删除节点）→ 不在结果里（job_nodes
@@ -198,5 +213,6 @@ def compute_inherit_reset_nodes(
         new_definition,
         new_frozen_config_json,
         implementation_excluded,
+        latest_proven=latest_proven,
     )
     return rerun_closure(new_definition, seeds)
