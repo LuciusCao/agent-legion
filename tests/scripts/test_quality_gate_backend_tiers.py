@@ -35,6 +35,7 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         "AGENT_LEGION_TEST_WORKERS",
         "BACKEND_GATE_PHASE",
         "BACKEND_SKIP_WORKER_UI_TESTS",
+        "CI",
         "COVERAGE_FILE",
         "FRONTEND_API_CHECK",
         "FRONTEND_COVERAGE_BLOB_DIR",
@@ -506,6 +507,22 @@ def test_backend_test_workers_env_override_wins(tmp_path: Path) -> None:
     calls = _run_backend_gate_with_fake_uv(tmp_path, {"AGENT_LEGION_TEST_WORKERS": "7"})
 
     assert re.search(r"(?:^|\s)-n 7(?:\s|$)", calls)
+
+
+def test_backend_postgres_tier_pins_one_worker_on_ci(tmp_path: Path) -> None:
+    """#1150 D2: CI postgres shards run -n 1 — the loaded-runner timing family
+    (10 of 16 flaky entries) lives on 2-core runners where -n 2 splits the
+    same cores with postgres and coverage. Local runs keep the default."""
+    calls = _run_backend_gate_with_fake_uv(tmp_path, {"CI": "true"})
+
+    assert re.search(r"(?:^|\s)-n 1(?:\s|$)", calls)
+    assert "-n 2" not in calls
+
+
+def test_backend_postgres_tier_keeps_default_workers_without_ci(tmp_path: Path) -> None:
+    calls = _run_backend_gate_with_fake_uv(tmp_path, {"AGENT_LEGION_TEST_WORKERS": "5"})
+
+    assert re.search(r"(?:^|\s)-n 5(?:\s|$)", calls)
 
 
 def test_frontend_gate_workers_env_override_wins(tmp_path: Path) -> None:

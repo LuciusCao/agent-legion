@@ -1,6 +1,6 @@
 # Worker 独立部署编排（无需克隆仓库；scripts/install-worker.sh 的拉取目标，
 # curl 一键安装的端点文件）：
-#   curl -fsSL https://raw.githubusercontent.com/LuciusCao/agent-legion/develop/scripts/install-worker.sh | sh -s -- --host-url http://<host>:8000 --worker-id <id>
+#   curl -fsSL https://raw.githubusercontent.com/LuciusCao/agent-legion/main/scripts/install-worker.sh | sh -s -- --host-url http://<host>:8000 --worker-id <id>
 # 安装脚本从 worker-v* tag ref 拉取本文件（与镜像版本解耦：镜像 tag 经
 # .env 的 AGENT_WORKER_IMAGE 插值选择，不锁定在文件内的默认值），并在
 # 安装目录生成配套的挂载资产（velites-bin / velites-config / worker.yaml）。

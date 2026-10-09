@@ -53,13 +53,18 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
 
-    ws_a = job_db.create_workspace("Workspace A")
-    ws_b = job_db.create_workspace("Workspace B")
-    ws_c = job_db.create_workspace("Workspace C")
+    ws_a = job_db.create_workspace("Workspace A", workspace_id="test_a")
+    ws_b = job_db.create_workspace("Workspace B", workspace_id="test_b")
+    ws_c = job_db.create_workspace("Workspace C", workspace_id="test_c")
 
     block_event = threading.Event()
     executor = BlockingExecutor("code", block_event=block_event)
-    definition = make_definition([local_node("fetch")])
+    # 扫描严格绑定 workspace_id（#211 Phase 3 退役 by-key 兜底）：scan entry
+    # 必须逐一覆盖每个 job workspace，否则该 workspace 的 job 永不被扫到。
+    definitions = [
+        make_definition([local_node("fetch")], key=ws_id, label=ws_id)
+        for ws_id in ("test_a", "test_b", "test_c")
+    ]
 
     workspaces = {
         "A": ws_a,
@@ -71,7 +76,7 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
     for ws in workspaces.values():
         # Post-#96 every code node needs published code to dispatch; the
         # BlockingExecutor never reads the text.
-        _seed_trivial_node_code(db_path, ws["id"], "test", "fetch")
+        _seed_trivial_node_code(db_path, ws["id"], ws["id"], "fetch")
 
     jobs_per_workspace = 4
     jobs: list[tuple[str, str]] = []
@@ -82,7 +87,7 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
     random.Random(seed).shuffle(jobs)
     for workspace_id, source_id in jobs:
         job_db.create_job(
-            workflow_key="test",
+            workflow_key=workspace_id,
             source_type="question",
             source_id=source_id,
             run_id="",
@@ -91,7 +96,7 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
             workspace_id=workspace_id,
         )
 
-    worker = make_worker(tmp_path, db_path, executor, [definition], code_capacity=10)
+    worker = make_worker(tmp_path, db_path, executor, definitions, code_capacity=10)
 
     # P-0.5: 单池 + round-robin —— 全局容量不突破、无 workspace 隔离，
     # 但每个 workspace 都必须在少量 pass 内拿到认领（不被饿死）。

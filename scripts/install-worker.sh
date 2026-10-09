@@ -1,7 +1,7 @@
 #!/bin/sh
 # Agent Legion Worker 一键安装脚本（curl | sh 形态，无需克隆仓库）：
 #
-#   curl -fsSL https://raw.githubusercontent.com/LuciusCao/agent-legion/develop/scripts/install-worker.sh \
+#   curl -fsSL https://raw.githubusercontent.com/LuciusCao/agent-legion/main/scripts/install-worker.sh \
 #     | sh -s -- --host-url http://<host-ip>:8000 --worker-id my-worker-1
 #
 # 在目标目录（默认 ~/agent-legion-worker）组装独立部署并启动：
@@ -101,7 +101,7 @@ esac
 
 # COMPOSE_REF 必须在参数解析后计算（codex P1）：--version 改变镜像版本时
 # compose ref 要同步跟随，否则升级会静默组合「新镜像 × 旧编排文件」。
-# AGENT_WORKER_COMPOSE_REF 可整体覆盖拉取 ref（如 develop），测试/逃生口。
+# AGENT_WORKER_COMPOSE_REF 可整体覆盖拉取 ref（如 release/0.7.18），测试/逃生口。
 COMPOSE_REF="${AGENT_WORKER_COMPOSE_REF:-worker-v${WORKER_VERSION}}"
 
 command -v docker >/dev/null 2>&1 || die "docker 未安装"

@@ -1,7 +1,7 @@
 """Tests for the AGENT_LEGION_BUDGET_BASE anchor override.
 
 The override replaces the HEAD^ anchor with an explicit PR base (e.g.
-``origin/develop``) so a local run reproduces CI's merge-ref judgement: on
+``origin/main``) so a local run reproduces CI's merge-ref judgement: on
 the merge ref HEAD^ IS the PR base, while a local HEAD^ is only the
 branch's own previous commit and cannot see a raise committed earlier in
 the branch. Shared git fixtures come from ``tests/architecture_budget_helpers``

@@ -11,6 +11,7 @@
 
 ## 1. Worktree & Isolation
 
+- 分支模型（#1150）：trunk-based——`main` 唯一常驻主干，feature/fix 一律从 main 分叉、PR 回 main，发布 = main 落版 + tag；`release/*` 仅当发布确需稳定窗口时从 main 切出、只收 cherry-pick fix、发完即删；develop 分支已退役，不要再创建。
 - 每次独立开发任务优先在新的 git worktree 中进行。
 - worktree 一律建为主仓库根的平级子目录：先 `cd` 到主仓库根（`git worktree list` 的第一个条目），再 `git worktree add .worktrees/<name> -b <branch> <base>`。禁止嵌套（在其他 worktree 里用相对路径 `git worktree add .worktrees/<name>` 会建进当前 worktree 内部）。
 - 不同 worktree 使用不同 backend/frontend 端口与独立 `data/` 目录，避免数据库、视频、日志、package 互相覆盖。
@@ -24,7 +25,7 @@
 - 测试并行度由 gate 自动均分：后端 pytest-xdist 与 rust `-j` 按机器级并发 gate 数 N 取 (核数−2)/N、夹 [2, 8]（`scripts/gate-jobs.sh`；`AGENT_LEGION_TEST_WORKERS` / `AGENT_LEGION_RUST_WORKERS` 覆盖），前端 vitest `--maxWorkers=4`（`AGENT_LEGION_FRONTEND_TEST_WORKERS` 覆盖）。
 - 同一 worktree 内不允许并发跑测试：`check-quick.sh` 已用 `.quick-gate.lock` 串行化；直接 `uv run pytest` 不受锁保护，必须自己确保没有其他测试进程在跑——测试库按 worktree 共享、xdist schema 固定，两个进程并发会互相 TRUNCATE（症状：单跑必过的随机 setup 错误）。
 - 不要污染主工作区或他人 worktree 的运行时数据。
-- 生产 worktree（如 `.worktrees/prod`）禁止 debug 与改代码：只允许 `git pull` 与 `make prod-up` / `make prod-down`（prod-up 经 `scripts/ensure-velites.sh` 自动重建过期 velites 二进制——PATH 与 `data/bin` 自带副本**两处安置点都刷新**，#831：Worker 解析自带副本优先，只刷 PATH 对它不生效。安置目标与判鲜由 `scripts/velites_deploy_plan.py` 从真实 resolver 推导，bash 不持有平行查找模型（#835）。重建需要 cargo：新 prod worktree 的 `data/` 为空，首次 prod-up 必经 `--dest` 构建路径，无 cargo 即 fail-fast——恢复路径见 ensure-velites.sh 错误提示或 agent-worker-deployment.md §5）。所有修复与调试必须在 develop worktree 进行，经 PR → main → prod pull 到达生产。生产命令只在 prod worktree 跑，在其他 worktree 跑会抢生产端口并连错数据库。
+- 生产 worktree（如 `.worktrees/prod`）禁止 debug 与改代码：只允许 `git pull` 与 `make prod-up` / `make prod-down`（prod-up 经 `scripts/ensure-velites.sh` 自动重建过期 velites 二进制——PATH 与 `data/bin` 自带副本**两处安置点都刷新**，#831：Worker 解析自带副本优先，只刷 PATH 对它不生效。安置目标与判鲜由 `scripts/velites_deploy_plan.py` 从真实 resolver 推导，bash 不持有平行查找模型（#835）。重建需要 cargo：新 prod worktree 的 `data/` 为空，首次 prod-up 必经 `--dest` 构建路径，无 cargo 即 fail-fast——恢复路径见 ensure-velites.sh 错误提示或 agent-worker-deployment.md §5）。所有修复与调试必须在开发 worktree（`.worktrees/develop`，检出 main）进行，经 PR → main → prod pull 到达生产。生产命令只在 prod worktree 跑，在其他 worktree 跑会抢生产端口并连错数据库。
 
 ## 2. Agent Tool Discipline
 
@@ -53,7 +54,8 @@
 - 禁止在适用的本地反馈检查失败时交接，或在 PR `quality-gate` 未通过时声明可合并/可发布。
 - 后端测试隔离基于 TRUNCATE：每个 xdist worker 每 session 只建一次 schema，每个测试清空所有表（`tests/conftest.py`）。改动 DDL 的测试必须加 `@pytest.mark.fresh_schema` 走完整重建。本地 quick gate 默认不带覆盖率（`AGENT_LEGION_COV=1` 开启；85% floor 由 CI 与 `./scripts/check.sh` 强制）。
 - 新测试必须放进对应子系统子目录（如 `tests/services/`、`tests/scripts/`），不要新增 `tests/` 根目录文件（静态检查 `scripts/architecture/test_placement.py` 强制，基线 `config/architecture/test-root-files-baseline.json`）；确定不碰数据库的纯静态测试可加 `@pytest.mark.no_db` 跳过 TRUNCATE 隔离。
-- 自动评审（codex）finding 按 [docs/architecture/review-convergence.md](docs/architecture/review-convergence.md) 分诊：P1、受支持形态下的目标缺陷残留/启动失败/数据或安全问题、回归才阻塞合并；只在人为异常环境状态下触发的转 follow-up issue。修 finding 只收窄或复用，不扩范围；某轮只剩非阻塞项时分诊后即合并，不再追加 `@codex review`。
+- 自动评审（codex）按 [docs/architecture/review-convergence.md](docs/architecture/review-convergence.md) 执行：单轮全量清单制（禁牙膏式逐条回应）、同类二次分流（焦点/栈序/视口/时序四类转 e2e）、第 5 轮熔断（三行复盘 + 四出口，决策记 PR 描述）；finding 分诊：P1、受支持形态下的目标缺陷残留/启动失败/数据或安全问题、回归才阻塞合并，其余转 follow-up issue。修 finding 只收窄或复用，不扩范围；某轮只剩非阻塞项时分诊后即合并，不再追加 `@codex review`。
+- 时序敏感测试遵守四条纪律（等信号非等时长、断言不变量非中间态、mock 返回真实形状、超时按 CI 负载预算），复审按边界规则执行；细则见 [docs/architecture/local-quality-gates.md](docs/architecture/local-quality-gates.md) 的 Timing-assertion discipline（#1150）。
 - 测试文件超过 800 行就应主动按被测主题拆分（同目录姊妹文件、用例零改动迁移）；gate 的 1000 行上限是硬底线。存量超 800 行的文件随下次触碰时顺手拆。
 
 ## 5. Architecture Governance
@@ -65,7 +67,7 @@
 - 概念退役 PR 必须同步在 `config/architecture/docs-retired-terms.yaml` 追加 pattern 条目，并清零现行文档命中（退役表述上下文豁免，语义见 `scripts/architecture/docs_retired_terms.py`）；现行文档白名单须与 `docs/architecture/README.md` 现行文档索引表同步。
 - 不要手写 frontend transport types，必须从 `frontend/src/generated/api.ts` 派生。
 - 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。ceiling 按有效行数计（排除注释行、空行与 docstring 行——#610 起 Python docstring 按文档免费，与 TS/Rust 的文档注释同权；与代码混行的 docstring 尾行仍计费，同尾注释纪律），不要为凑预算压缩注释或 docstring；`max_lines` 绝对上限按原始行数计（#293 起声明式产物 root 可覆盖：`server/app/db` 的 `.sql` 与 `worker/ui` 的 `.js/.css` 各有 root 级 `max_lines`）。#641 增长容忍带：有效行可超过注册表 ceiling `growth_allowance`（当前 15）行而不报错，用于吸收 prettier 80 列重排（实测 +5）与小型功能增长；带内超出**不注册新条目、永不被 ratchet 吸收**——与调大 buffer 的本质区别：buffer 是每次 ratchet 以 actual+buffer 重新灌满的可再生余量，allowance 是相对冻结天花板的一次性额度，文件收缩后由 staleness 检查自动回收。不要把容忍带当成常驻余量用：超出带即报错。
-- ceiling 单调只降不升（#209）：`check_architecture` 按 git 锚点拒绝**已跟踪条目**的任何上抬；baseline 的合法上抬通道是带 `remove_when` 的 `architecture.file_budget` 豁免。改名不重置 ceiling（git rename 检测沿用旧路径地板，#236）；真正的全新文件首次登记（actual + buffer）不受约束。已有豁免的重签（#641）：重签 ceiling 在 floor + growth_allowance 带内直接合法（无需任何仪式）；超出带必须带 `expires: YYYY-MM-DD`（时间盒上抬），到期 `check_invariants` 硬失败——续期须重新论证，否则收缩文件。release train（同仓库 develop 或 release/* → main）例外：CI 在对应 PR 与 main/master 合并后 push 重跑时设 `AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN=1` 让锚点只看 HEAD（#249）；外部 fork 与其他 PR、本地门禁保持基线锚点严格性。本地模拟 CI 的 PR 锚点判定：设 `AGENT_LEGION_BUDGET_BASE=origin/develop` 后锚点变为 HEAD + 该 base ref（release-train opt-out 优先；base ref 无法解析硬失败，按指引 fetch；边界基线守卫共用该覆盖）；注意这三个锚点环境变量会被 `tests/conftest.py` 在 pytest 会话启动时清除，需要它们的测试用 monkeypatch 自设。
+- ceiling 单调只降不升（#209）：`check_architecture` 按 git 锚点拒绝**已跟踪条目**的任何上抬；baseline 的合法上抬通道是带 `remove_when` 的 `architecture.file_budget` 豁免。改名不重置 ceiling（git rename 检测沿用旧路径地板，#236）；真正的全新文件首次登记（actual + buffer）不受约束。已有豁免的重签（#641）：重签 ceiling 在 floor + growth_allowance 带内直接合法（无需任何仪式）；超出带必须带 `expires: YYYY-MM-DD`（时间盒上抬），到期 `check_invariants` 硬失败——续期须重新论证，否则收缩文件。release train（同仓库 release/* → main）例外：CI 在对应 PR 与 main/master 合并后 push 重跑时设 `AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN=1` 让锚点只看 HEAD（#249）；外部 fork 与其他 PR、本地门禁保持基线锚点严格性。本地模拟 CI 的 PR 锚点判定：设 `AGENT_LEGION_BUDGET_BASE=origin/main` 后锚点变为 HEAD + 该 base ref（release-train opt-out 优先；base ref 无法解析硬失败，按指引 fetch；边界基线守卫共用该覆盖）；注意这三个锚点环境变量会被 `tests/conftest.py` 在 pytest 会话启动时清除，需要它们的测试用 monkeypatch 自设。
 
 ## 6. Boundary Rules（禁止模式摘要）
 

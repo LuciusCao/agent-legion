@@ -17,7 +17,7 @@ provide.
 | Push (any branch) | Smoke (default): static checks + smoke test tier, lanes trimmed by pushed paths | `.githooks/pre-push` → `scripts/run-local-gate.sh` → `scripts/check-quick.sh` with `GATE_TIER=smoke` |
 | Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: unit-tier quick suite, lanes trimmed | same hook path → `scripts/check-quick.sh` |
 | Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | same hook path → `scripts/check.sh` |
-| PR to `develop`/`main`/`master`/`release/*`, push to `main`/`master` | Full | CI lanes run in parallel; stable aggregate check `quality-gate` is the merge boundary |
+| PR to `main`/`master`/`release/*`, push to `main`/`master` | Full | CI lanes run in parallel; stable aggregate check `quality-gate` is the merge boundary |
 | Weekly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` + `exemption-expiry` + `deps-audit` (`nightly-gate.yml`) |
 
 The pre-push hook diffs the pushed commits against their remote base and runs
@@ -164,9 +164,8 @@ unaffected. Passing evidence is shared through the same Git common directory.
 ## CI Workflow
 
 `.github/workflows/quality-gate.yml` runs on pull requests to
-`develop` / `main` / `master` / `release/*`, merge-queue synthetic commits,
-pushes to `main` / `master` (a `develop` merge is already covered by its PR
-gate, so push runs there were dropped to save Actions minutes), plus manual dispatch. Docs-only changes (`docs/**`,
+`main` / `master` / `release/*`, merge-queue synthetic commits,
+pushes to `main` / `master`, plus manual dispatch. Docs-only changes (`docs/**`,
 repository-root `*.md`, `LICENSE`) still trigger the workflow but every backend/frontend
 lane evaluates to false in the `changes` job and skips without acquiring a
 runner, including the complete `backend-postgres` matrix. The `docs-terms`
@@ -271,11 +270,16 @@ In `nightly-gate.yml`:
   that is why it runs on the weekly schedule and manual dispatch instead of
   the PR gate. Any finding fails the job; fixes land as dependency PRs.
 - **exemption-expiry** — refreshes the issue-state manifest and detects
-  expired architecture exemptions; since #295 it also detects expired
+  expired architecture exemptions; the refreshed manifest is committed
+  straight to the default branch by the job itself (#1150: the manual
+  `make architecture-issue-states` ritual rots on a single-maintainer repo —
+  five weeks of red nightly proved it), while a closed anchor issue still
+  fails the job so the exemption gets fulfilled or re-anchored first. Since
+  #295 it also detects expired
   flaky-registry deadlines (`check_reruns.py --check-deadlines`, deadline
   evidence without needing the extended rerun report), and since #1024 on
   every maintained branch too (`scripts/quality/flaky_branch_deadlines.py`:
-  `develop` plus each `release/X.Y.Z` above the default branch's version,
+  each `release/X.Y.Z` above the default branch's version,
   registries read leniently from the fetched branch tips). It is the only lane
   that fails on an expired deadline (#941) and annotates entries due within
   7 days as warnings; PR backend-coverage enforces observed reruns only. The
@@ -285,9 +289,33 @@ In `nightly-gate.yml`:
 - **nightly-e2e** — multi-browser smoke E2E (the deterministic browser suite
   re-run on Chromium, Firefox, and WebKit via `scripts/e2e/run_browser_smoke.py`;
   PR/push stays Chromium-only) plus a workspace stress run
-  (`scripts/stress/run_e2e_stress.py`, 50 agents / 2000 jobs / 300s at 200
-  events/s, asserting p95 click latency and uploading the stress report).
+  (`scripts/stress/run_e2e_stress.py`, 50 agents / 2000 jobs / 300s at
+  200 events/s, asserting p95 click latency and uploading the stress report).
   Runs only on the weekly schedule and manual dispatch.
+
+### Timing-assertion discipline (#1150)
+
+The loaded-runner flaky family (10 of 16 registry entries at the time of
+writing) is not test bugs: it is timing-sensitive assertions meeting a 2-core
+CI runner. Every new or touched timing-adjacent test follows four rules —
+review checks them like a boundary rule:
+
+1. **Wait for signals, not durations.** Assert after an observable state
+   exists (`tests/helpers.wait_for_predicate`; never a fixed sleep, never an
+   assumption that a poll window of N seconds is enough). Local `_wait_for`
+   copies in test files should converge on the shared helper.
+2. **Assert the invariant, not the intermediate state.** When a race makes
+   several intermediate states legal, assert only the invariant (the
+   FLAKY-009 fix is the canonical example: exactly one pending row,
+   whichever request won).
+3. **Mocks must return real shapes.** A default-`undefined` mock walks the
+   error branch under CI timing and fails good code (#801's lesson).
+4. **Budget timeouts for CI load.** Set timeout values against the loaded
+   2-core runner, not the dev machine — or better, anchor on the signal
+   and not on time at all (rule 1 subsumes this when achievable).
+
+The postgres tier's CI `-n 1` pin (above) removes the resource contention
+that produced the family; these rules keep new tests from reintroducing it.
 
 The postgres tier shards are a deterministic `md5(nodeid) % 3` collection
 filter (`scripts/pytest_gate_shard.py`, `GATE_SHARD=i/n`). Every pytest shard
@@ -350,7 +378,7 @@ verification comes from the CI workflow, not from these files.
 
 Configure the repository on GitHub as follows:
 
-1. Protect `develop` and any release branches (Settings → Branches, or Rules → Rulesets).
+1. Protect `main` and any release branches (Settings → Branches, or Rules → Rulesets).
 2. Require only the stable `quality-gate` status check before merging. It
    validates selected internal lanes, including `docs-terms` for docs-only
    changes; do not require volatile shard names individually.

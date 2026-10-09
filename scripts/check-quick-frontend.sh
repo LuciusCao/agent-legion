@@ -42,7 +42,7 @@ run_static_checks() {
 # "no files" (vitest exits 0 with no tests) only when git itself fails.
 frontend_changed_sources() {
   local base
-  base="$(git merge-base HEAD develop 2>/dev/null || git merge-base HEAD origin/develop 2>/dev/null || true)"
+  base="$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD origin/main 2>/dev/null || true)"
   {
     git status --porcelain=v1 --untracked-files=all -- . 2>/dev/null \
       | sed -e 's/^...//' -e 's/.* -> //' || true

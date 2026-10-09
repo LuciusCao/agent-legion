@@ -213,7 +213,7 @@ def test_gate_evidence_is_not_shared_across_machines(
     assert "reusing cached evidence" not in second.stdout
 
 
-@pytest.mark.parametrize("remote_ref", ["refs/heads/develop", "refs/tags/v1.0.0"])
+@pytest.mark.parametrize("remote_ref", ["refs/heads/main", "refs/tags/v1.0.0"])
 def test_protected_ref_push_runs_quick_gate(hook_repo: tuple[Path, Path], remote_ref: str) -> None:
     # The full gate for protected refs runs in GitHub Actions CI; the local
     # pre-push hook always runs the quick gate.
