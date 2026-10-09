@@ -60,6 +60,20 @@ terms:
     retired_in: '#645/#702（inherit 传播闭包重构）'
     note: 中文语境的同义表述；旧实现的「对上游 (key, hash) 列表整体取
       摘要」已删除，上游维度由闭包直接定义
+  - pattern: '\borigin/develop\b'
+    retired_in: '#1150（develop 分支退役，trunk-based 迁移）'
+    note: develop 分支已退役，main 唯一常驻主干；git ref 语义的
+      origin/develop 不应再出现（BUDGET_BASE 等锚点示例一律 origin/main）。
+      pattern 只瞄准 ref 形态——`.worktrees/develop` 目录名与 seed 的
+      develop 库语义不在射程
+  - pattern: '\bdevelop 分支\b'
+    retired_in: '#1150（develop 分支退役，trunk-based 迁移）'
+    note: 中文分支语义表述；退役公告本身（含「已退役」上下文）按既有
+      豁免规则放行
+  - pattern: '`develop`'
+    retired_in: '#1150（develop 分支退役，trunk-based 迁移）'
+    note: 反引号整词 develop 在 markdown 里几乎总是分支/ ref 语义；
+      `.worktrees/develop`（整体一个反引号段）与动词 develop 不命中
   - pattern: '上游哈希链'
     retired_in: '#645/#702（inherit 传播闭包重构）'
     note: 「上游哈希链式传播」的简称变体，同 upstream chain
