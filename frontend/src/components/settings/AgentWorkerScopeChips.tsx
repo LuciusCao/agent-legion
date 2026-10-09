@@ -20,7 +20,10 @@ interface AgentWorkerScopeChipsProps {
  * (issue #1141). A rendered row always serves the current workspace (the
  * list filtered on it), but may serve others too: the scope chip leads with
  * the current workspace and folds the rest into a count instead of listing
- * other workspaces' names. The binding chip shows only keys issued by the
+ * other workspaces' names. The [] scope is allow-all (EXEC-WORKERACL-001,
+ * same predicate as claim admission): such legacy rows render the「待迁移」
+ * chip instead — no scope chip, no +N count (the row serves every workspace,
+ * including this one). The binding chip shows only keys issued by the
  * current workspace — the hover title still names every bound key across
  * workspaces, and only rows with at least one current-workspace key render
  * the chip at all.

@@ -43,14 +43,17 @@ interface AgentWorkerListProps {
 
 /**
  * Registered-worker list scoped to one workspace (issue #1141): the section
- * only renders workers whose stored scope contains that workspace. There is
+ * renders workers whose stored scope contains that workspace, plus the []
+ * allow-all legacy scope (EXEC-WORKERACL-001 — such workers serve every
+ * workspace and render the「待迁移」chip instead of a scope chip). There is
  * no per-worker revoke: a worker's access is cut by deleting its register
  * keys — deleting a key cascade-deletes workers left without any live key
  * and narrows survivors to their remaining keys. Manually deleting the
  * registration record remains for legacy workers without a recorded binding
- * (the migration cleanup target); the backend enforces the same gate with
- * 409. The worker↔key chip shows only keys bound to the listed workspace;
- * the deletable gate still evaluates the full key set (see allTokens).
+ * (the migration cleanup target — the [] rows' delete entry lives here);
+ * the backend enforces the same gate with 409. The worker↔key chip shows
+ * only keys bound to the listed workspace; the deletable gate still
+ * evaluates the full key set (see allTokens).
  */
 export function AgentWorkerList({
   workers,

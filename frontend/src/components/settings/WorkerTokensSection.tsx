@@ -36,8 +36,9 @@ import styles from './WorkerTokensSection.module.css'
  * issue #1141: the admin view is workspace-isolated too. Both lists are
  * fetched deployment-wide (the deletable gate and the delete-key dialog
  * still need the full worker↔key picture) but rendered filtered to this
- * workspace: workers whose allowed_workspaces contains it, keys bound to
- * it, and only this workspace's key names on the worker rows.
+ * workspace: workers whose allowed_workspaces contains it (plus the []
+ * allow-all legacy scope, EXEC-WORKERACL-001), keys bound to it, and only
+ * this workspace's key names on the worker rows.
  */
 export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
   const [label, setLabel] = useState('')
@@ -69,9 +70,14 @@ export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
   const allWorkers = lists?.[1] ?? []
   // 展示层过滤（issue #1141）：数据仍全量拉取（deletable 判定与删 key
   // 级联提示需要完整 worker↔key 画面），只把「承接本 workspace 任务」的
-  // worker 交给渲染层。
-  const workers = allWorkers.filter((worker) =>
-    worker.allowed_workspaces.includes(workspaceId)
+  // worker 交给渲染层。[] 是 allow-all（EXEC-WORKERACL-001，claim 准入与
+  // code_dispatch 的同一谓词，monitoring 面板 agentWorkerRows 同口径）：
+  // legacy 全局注册的存量 worker 实际承接本 ws 任务，必须显示（其「待
+  // 迁移」chip 提示 admin 删记录后重注册）。
+  const workers = allWorkers.filter(
+    (worker) =>
+      worker.allowed_workspaces.length === 0 ||
+      worker.allowed_workspaces.includes(workspaceId)
   )
 
   // The worker↔key binding (schema v59): which workers' latest registration
