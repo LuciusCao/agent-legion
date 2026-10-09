@@ -258,7 +258,11 @@ jobs:
           git checkout -B "$branch"
           git add config/architecture/issue-states.json
           git commit -m "chore(architecture): refresh issue-state manifest (nightly, #1150)"
-          git push --force-with-lease origin "$branch"
+          # --force (not --force-with-lease): auto-merge deletes the branch
+          # after landing, so the runner's remote-tracking cache is stale and
+          # a lease check spuriously rejects the next sync. The branch is a
+          # single-purpose sync pointer — force is the intended semantics.
+          git push --force origin "$branch"
           gh pr create --base main --head "$branch" \
             --title "chore(architecture): issue-state manifest refresh (nightly)" \
             --body "Machine-derived state refresh from the nightly exemption-expiry job (#1150). Auto-merge on green." \
