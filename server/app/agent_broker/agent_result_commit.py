@@ -58,13 +58,14 @@ def commit_agent_result(
     stage_timer = ResultStageTimer()
     try:
         publish_staged_result(staged_body, broker.bundle_dir / archive_name)
-        # #755 codex P1：清单走归档成员的新协议——Worker 头溢出时把头里
+        # #755 codex P1（v1 legacy 换轨形态，旧 Worker）：头溢出时把头里
         # 放不下的直传 ref 清单写成归档首成员，头里只带
         # output_artifacts_in_archive 标记。这里在 finish 之前读回清单并
         # enrich outcome：空清单翻转、HEAD 校验、staged promote 全部走
-        # 既有路径，finish 侧零改动。版本偏斜说明：新 worker + 不认识该
-        # 标记的旧 Host 会走空清单翻转诚实判败（completed + 空清单 →
-        # failed），不会静默错。
+        # 既有路径，finish 侧零改动。#843 PR-2 起新 Worker 不再发该标记
+        # （v2 读侧显式剥离）；本臂只服务旧 Worker 兼容窗。版本偏斜说明：
+        # 带 v1 换轨标记的新形态 + 不认识该标记的旧 Host 会走空清单翻转
+        # 诚实判败（completed + 空清单 → failed），不会静默错。
         if record.get("output_artifacts_in_archive") is True:
             outcome = enrich_outcome_from_archived_manifest(
                 outcome, record, broker.bundle_dir / archive_name

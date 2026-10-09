@@ -28,7 +28,7 @@ class _FakeClient:
     def upload_artifact(self, path: Path) -> str:
         return "sha256:0" * 1
 
-    def report(self, execution_id, lease_id, metadata, archive):  # type: ignore[no-untyped-def]
+    def report(self, execution_id, lease_id, archive):  # type: ignore[no-untyped-def]
         return self.report_status, b""
 
     def heartbeat(self, execution_id, lease_id):  # type: ignore[no-untyped-def]

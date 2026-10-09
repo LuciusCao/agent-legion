@@ -328,12 +328,10 @@ class BlockingReportClient(QueueFakeClient):
         self.entered = threading.Event()
         self.release = threading.Event()
 
-    def report(
-        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
+    def report(self, execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
         self.entered.set()
         assert self.release.wait(10)
-        return super().report(execution_id, lease_id, metadata, archive)
+        return super().report(execution_id, lease_id, archive)
 
 
 def _restore_two_pending(work_root: Path) -> None:

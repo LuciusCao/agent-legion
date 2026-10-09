@@ -429,3 +429,18 @@ def test_csp_compat_switch_round_trips_and_applies_without_restart(client) -> No
 def test_csp_compat_switch_rejects_non_boolean(client) -> None:
     payload = {**_payload(), "csp_script_unsafe_inline": "yes"}
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+
+
+def test_put_rejects_max_archive_bytes_below_floor(client) -> None:
+    """#1082：agent_workers.max_archive_bytes 下限 1 KiB（与运行时配置模型
+    同源，shared/code_contract.MIN_RESULT_ARCHIVE_BYTES）——装不下空 tar.gz
+    的上限在 PUT 上 422。"""
+    payload = _payload()
+    payload["agent_workers"]["max_archive_bytes"] = 1023
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    payload = _payload()
+    payload["agent_workers"]["max_archive_bytes"] = 0
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
+    payload = _payload()
+    payload["agent_workers"]["max_archive_bytes"] = 1024
+    assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 200

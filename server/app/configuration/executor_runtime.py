@@ -27,6 +27,7 @@ from server.app.configuration.executor_knobs import (
     ResultValidateConfig,
 )
 from server.app.configuration.worker_console import WorkerConsoleUrl
+from shared.code_contract import MIN_RESULT_ARCHIVE_BYTES
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,10 @@ class AgentWorkersRuntimeConfig(BaseModel):
     # The global register token (register_token / register_token_file) was
     # retired with issue #35: registration is scoped-token-only, so this
     # section no longer carries any credential.
-    max_archive_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
+    # 结果归档上限。#1082：下限 1 KiB（shared 契约单一来源）——空 tar.gz
+    # 也得装得下（判败降级路径的 metadata-only 归档是合法提交形态），
+    # ``gt=0`` 会接受装不下任何合法归档的配置。
+    max_archive_bytes: int = Field(default=64 * 1024 * 1024, ge=MIN_RESULT_ARCHIVE_BYTES)
     min_protocol_version: int = Field(default=1, ge=1)
     # #521 peak-shaving gate on the result commit: completion waves (a
     # DAG's same-phase nodes reporting together) otherwise occupy the

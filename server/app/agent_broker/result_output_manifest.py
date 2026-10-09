@@ -6,10 +6,12 @@ import（routes/__init__ 会拉起 agent_workers → agent_result_commit）：
 - ``parse_artifact_ref`` / ``MAX_OUTPUT_ARTIFACTS``：结果头清单的 ref 形态
   校验与条目上限（原 server/app/routes/agent_worker_result_refs.py，随
   本模块落地整体下沉；路由层 parse_result_metadata 从这里复用）。
-- ``load_archived_output_artifacts``：结果头溢出时 Worker 把完整直传 ref
-  清单写成归档首成员 ``result-output-artifacts.json``
+- ``load_archived_output_artifacts``：v1 legacy 换轨形态（worker-v0.7.18
+  及更早）的读回面——旧 Worker 结果头溢出时把完整直传 ref 清单写成归档
+  首成员 ``result-output-artifacts.json``
   （shared/code_contract.RESULT_OUTPUT_ARTIFACTS_MEMBER），头里只留
-  ``output_artifacts_in_archive`` 标记；本函数是 Host 侧的读回面。
+  ``output_artifacts_in_archive`` 标记。#843 PR-2 起新 Worker（v2
+  result.json）不再产生该形态，读侧保留旧 Worker 兼容窗。
 - ``enrich_outcome_from_archived_manifest``：commit 层（agent_result_commit）
   见标记后的 outcome/record 改写，含读回失败的诚实判败转换。
 

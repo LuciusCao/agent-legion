@@ -5,13 +5,11 @@ from __future__ import annotations
 import http.server
 import json
 import threading
-import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 import requests
-from fastapi import FastAPI, Request
 
 from worker.host.client import Client, WorkerAuthError
 from worker.host.transfer import HostRequestError, TransferStopped
@@ -251,12 +249,16 @@ def test_report_streams_archive_from_disk(monkeypatch: pytest.MonkeyPatch, tmp_p
         return 204, b""
 
     monkeypatch.setattr(Client, "request", fake_request)
-    assert Client("http://host").report("exec-1", "lease-1", {}, archive) == (204, b"")
+    assert Client("http://host").report("exec-1", "lease-1", archive) == (204, b"")
 
 
 def test_report_does_not_reopen_archive_after_stop(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Lease loss during the single attempt: the archive stream is opened
+    exactly once (#1098 — no internal reopen); the failure surfaces as the
+    exhaustion RuntimeError for the outer report loop, whose stop check ends
+    the delivery without another attempt."""
     stop = threading.Event()
     archive = tmp_path / "result.tar.gz"
     archive.write_bytes(b"old-attempt")
@@ -268,8 +270,8 @@ def test_report_does_not_reopen_archive_after_stop(
         raise requests.ConnectionError("lost while reporting")
 
     monkeypatch.setattr(Client, "request", fake_request)
-    with pytest.raises(TransferStopped):
-        Client("http://host").report("exec-1", "lease-1", {}, archive, stop=stop)
+    with pytest.raises(RuntimeError, match="result report failed"):
+        Client("http://host").report("exec-1", "lease-1", archive, stop=stop)
     assert seen == [b"old-attempt"]
 
 
@@ -361,349 +363,76 @@ def test_download_retries_mid_stream_connection_error(
     assert 0 <= sleeps[0] <= 1.0
 
 
-# -- #748 review P2：X-Agent-Result 头的 CJK 膨胀——序列化选型与真链路回读 --
+# -- #843 PR-2：结果上报 v2 请求头（format 头 + 租约头；无 X-Agent-Result） --
 
 
-def test_result_header_value_escapes_cjk_as_raw_utf8_bytes() -> None:
-    """选型证据：ensure_ascii=False + UTF-8 字节。4000 个 CJK 字符的 tail
-    序列化后必须 ~12KB（真 CJK 3 字节/字），而不是转义形态的 ~24KB——
-    转义形态会撞破 h11 的 16KB 单事件上限，让结果永久不可投递。"""
-    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
-
-    metadata = {
-        "status": "failed",
-        "exit_code": 1,
-        "error_message": "Agent process exited 1: 任务失败",
-        "command": ["pi"],
-        "output_artifacts": {},
-        "run_dir": "runs/node_a/worker",
-        "agent_stderr_tail": "错误" * 2000,  # 4000 个 CJK 字符
-    }
-    header = _result_header_value(metadata)
-    # 转义形态 ~24KB；非转义 + 字节预算 < 14KB 预算。
-    assert len(header) < _RESULT_HEADER_BUDGET
-    assert len(header) < 16 * 1024  # h11 max_incomplete_event 余量内
-    # 内容不丢骨架：CJK 原样（非 \uXXXX），error_message 完整保留。
-    decoded = json.loads(header.decode("utf-8"))
-    assert decoded["error_message"] == "Agent process exited 1: 任务失败"
-    assert "\\u" not in header.decode("utf-8")
-
-
-def test_result_header_value_shrinks_oversized_tail_under_budget() -> None:
-    """超预算时按 tail 优先收缩（error_message 是分类面，最后动）：收缩后
-    必须落在预算内，且 error_message 一字不动。产物清单为空（成功直传前
-    的元数据骨架），不触发第三级。#755 终审 P2-2：收缩保尾不保头——崩溃
-    栈在流末尾，头截会在满 tail 时把崩溃头整体丢掉。"""
-    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
-
-    metadata = {
-        "status": "failed",
-        "exit_code": 1,
-        "error_message": "Agent process exited 1: ValueError: boom",
-        "agent_stderr_tail": "错" * 8000 + "x" * 2000,  # 远超预算
-        "output_artifacts": {},
-    }
-    header = _result_header_value(metadata)
-    assert len(header) <= _RESULT_HEADER_BUDGET
-    decoded = json.loads(header.decode("utf-8"))
-    assert decoded["error_message"] == "Agent process exited 1: ValueError: boom"
-    assert len(decoded["agent_stderr_tail"]) > 0
-    # 保尾：末段（崩溃头所在的尾部）完整保留，丢的是头部噪音。
-    assert decoded["agent_stderr_tail"].endswith("x" * 2000)
-
-
-def test_result_header_value_stage_order_tail_error_then_artifact_signal() -> None:
-    """多级顺序：tail 先缩、error_message 次之、command（纯观测面）再次、
-    产物清单最后——各面同时超预算时前三级先收敛（分类面与产物清单都在
-    观测面之前保住），收敛后清单仍放不下时才抛回退信号（不是截断）。"""
-    from worker.host.transfer import ResultHeaderOverflow, _result_header_value
-
-    artifacts = {f"output-{i:03d}.json": _direct_ref(i) for i in range(128)}
-    metadata = {
-        "status": "failed",
-        "exit_code": 1,
-        "error_message": "Agent process exited 1: ValueError: boom",
-        "command": ["pi"],
-        "output_artifacts": artifacts,
-        "run_dir": "runs/node_a/worker",
-        "agent_stderr_tail": "错" * 8000 + "x" * 2000,
-    }
-    with pytest.raises(ResultHeaderOverflow):
-        _result_header_value(metadata)
-    # 前两级是真收缩（可观察面）：同载荷去掉产物清单后，tail/error 收敛
-    # 落预算且 error_message 完整——证明信号只在两级收缩之后才触发。
-    shrunk = dict(metadata, output_artifacts={})
-    decoded = json.loads(_result_header_value(shrunk).decode("utf-8"))
-    assert decoded["error_message"] == "Agent process exited 1: ValueError: boom"
-    assert len(decoded["agent_stderr_tail"]) > 0
-
-
-def test_result_header_value_drops_command_before_artifact_list() -> None:
-    """#755 对抗复审 P2-1b：command 是纯观测面（Host 只记录不判定）——动产
-    物清单之前先清空它。128 条 CAS 引用 + --require-output 重复的巨型 argv
-    （~7.7KB）：清空 command 后清单整体落预算，产物引用一条不丢、无截断
-    标记。"""
-    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
-
-    artifacts = {f"output-{i:03d}.json": f"sha256:{'a' * 64}" for i in range(128)}
-    metadata = {
-        "status": "completed",
-        "exit_code": 0,
-        "error_message": "",
-        "command": ["pi"] + [f"--require-output=output-{i:03d}.json" for i in range(128)],
-        "output_artifacts": artifacts,
-        "run_dir": "runs/node_a/worker",
-    }
-    header = _result_header_value(metadata)
-    assert len(header) <= _RESULT_HEADER_BUDGET
-    decoded = json.loads(header.decode("utf-8"))
-    assert decoded["command"] == []  # 观测面已降级
-    assert decoded["output_artifacts"] == artifacts  # 产物清单一字不丢
-    assert "output_artifacts_truncated" not in decoded
-    assert "output_artifacts_total" not in decoded
-
-
-def test_result_header_value_giant_direct_ref_still_signals_fallback() -> None:
-    """单条 ref 自身就超预算（超长 storage_key）的直传形态：同样抛回退信号
-    而非降级为空清单——回退后头里只剩 in_archive 标记（清单进归档成员），
-    CAS 形态才走最后手段截断，头永不因直传形态而直接不可投递。"""
-    from worker.host.transfer import ResultHeaderOverflow, _result_header_value
-
-    giant = {
-        "storage_key": "jobs-staging/" + "x" * 20_000,
-        "size_bytes": 1,
-        "content_hash": "a" * 64,
-    }
-    metadata = {
-        "status": "completed",
-        "exit_code": 0,
-        "error_message": "",
-        "command": ["pi"],
-        "output_artifacts": {"a.json": giant},
-        "run_dir": "runs/node_a/worker",
-    }
-    with pytest.raises(ResultHeaderOverflow):
-        _result_header_value(metadata)
-
-
-def test_result_header_value_ascii_metadata_unchanged() -> None:
-    """纯 ASCII metadata 的序列化与旧 ensure_ascii=True 形态逐字节一致——
-    旧 Worker/Host 兼容面不动。"""
-    from worker.host.transfer import _result_header_value
-
-    metadata = {"status": "failed", "exit_code": 3, "error_message": "x"}
-    assert _result_header_value(metadata) == json.dumps(metadata).encode()
-
-
-def _direct_ref(i: int) -> dict:
-    # #160 D12 直传产物 ref 形态（worker/artifact/upload.py 的返回值）。
-    return {
-        "storage_key": f"jobs-staging/ws-1/job-1/exec-1/output-{i:03d}.json",
-        "size_bytes": 12345,
-        "content_hash": "a" * 64,
-    }
-
-
-def test_result_header_value_signals_fallback_for_128_direct_refs() -> None:
-    """#748 R3（codex review P1）：128 个直传 ref（Host 侧 _MAX_OUTPUT_ARTIFACTS
-    上限）全 ref 形态 ~25KB，撞破 14KB 预算——成功运行同样中招（成功上报也带
-    产物清单）。修复前第三级截断为前缀 + 标记，但直传模式的归档不带产物字节、
-    Host 也不用截断标记恢复引用——前缀之外的产物进不了 job_dir，成功的执行被
-    改判 Missing outputs。修复后该形态抛 ResultHeaderOverflow 回退信号；#755
-    codex P1 起回退动作是「清单写进归档成员 + 头里只带 in_archive 标记」
-    （产物字节已在 S3，不再 CAS 重传）。"""
-    from worker.host.transfer import ResultHeaderOverflow, _result_header_value
-
-    artifacts = {f"output-{i:03d}.json": _direct_ref(i) for i in range(128)}
-    metadata = {
-        "status": "completed",
-        "exit_code": 0,
-        "error_message": "",
-        "command": ["pi"],
-        "output_artifacts": artifacts,
-        "run_dir": "runs/node_a/worker",
-    }
-    with pytest.raises(ResultHeaderOverflow, match="archive-manifest fallback"):
-        _result_header_value(metadata)
-    # 输入 dict 不被信号破坏（回退写归档成员用的是原始 metadata）。
-    assert metadata["output_artifacts"] == artifacts
-
-
-def test_result_header_value_cas_refs_fit_budget_without_truncation() -> None:
-    """#748 R3（codex review P1）：CAS 字符串引用（~78B/条，直传失败换轨
-    或旧通道的形态）128 条全量 ~12KB 天然落预算——无需任何截断/标记，
-    全部产物引用完整上报。"""
-    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
-
-    artifacts = {f"output-{i:03d}.json": f"sha256:{'a' * 64}" for i in range(128)}
-    metadata = {
-        "status": "completed",
-        "exit_code": 0,
-        "error_message": "",
-        "command": ["pi"],
-        "output_artifacts": artifacts,
-        "run_dir": "runs/node_a/worker",
-    }
-    header = _result_header_value(metadata)
-    assert len(header) <= _RESULT_HEADER_BUDGET
-    decoded = json.loads(header.decode("utf-8"))
-    assert decoded["output_artifacts"] == artifacts  # 128 条全量、逐字节原样
-    assert "output_artifacts_truncated" not in decoded
-    assert "output_artifacts_total" not in decoded
-
-
-def test_result_header_value_last_resort_truncates_cas_refs_to_empty() -> None:
-    """最后手段兜底（#755 后仅剩的清单不可缩形态：超长产物名的 CAS 清单）：
-    command 面已先清空（纯观测面），清单仍超预算时降级为空 + 截断标记。
-    标记语义（#755 对抗复审 P2-1a）：Host 见 truncated 跳过「空清单改判
-    failed」，从归档暂存视图判定 produced/missing（CAS 形态产物字节本来
-    就在归档里）；标记仍不用于恢复直传 ref。total 只 stamp 一次（128，
-    不是逐趟漂移后的残值）。截断后载荷回落预算内——R3 时代的巨型
-    command 残差面已随 command 降级阶段消失。"""
-    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
-
-    artifacts = {f"outputs/{i:03d}/" + "n" * 80 + ".json": f"sha256:{'a' * 64}" for i in range(128)}
-    metadata = {
-        "status": "completed",
-        "exit_code": 0,
-        "error_message": "",
-        "command": ["pi"],
-        "output_artifacts": artifacts,
-        "run_dir": "runs/node_a/worker",
-    }
-    header = _result_header_value(metadata)
-    assert len(header) <= _RESULT_HEADER_BUDGET  # 截断后回落预算内
-    decoded = json.loads(header.decode("utf-8"))
-    # 清单被整体降级为空（最后手段），标记 + 一次性 total；command 面已先降级。
-    assert decoded["command"] == []
-    assert decoded["output_artifacts"] == {}
-    assert decoded["output_artifacts_truncated"] is True
-    assert decoded["output_artifacts_total"] == 128
-
-
-def test_cjk_result_header_roundtrips_through_real_h11_uvicorn_starlette() -> None:
-    """真链路验证（#748 review P2 选型依据）：requests(字节头) → h11 →
-    uvicorn → Starlette latin-1 解码 → Host 侧 _recover_result_header 反解。
-    4000 字 CJK tail 在真实 uvicorn+h11 服务上原样读回——非 ASCII 头不被
-    拒收，json.loads 后逐字段相等。"""
-    import uvicorn
-
-    from server.app.routes.agent_worker_results import _recover_result_header
-    from worker.host.transfer import _result_header_value
-
-    metadata = {
-        "status": "failed",
-        "exit_code": 3,
-        "error_message": "Agent process exited 3: 任务执行失败",
-        "command": ["pi"],
-        "output_artifacts": {},
-        "run_dir": "runs/node_a/worker",
-        "agent_stderr_tail": "追踪" * 2000,  # 4000 个 CJK 字符
-    }
-    header_bytes = _result_header_value(metadata)
-    assert len(header_bytes) > 11 * 1024  # 真实的大头场景（4k CJK 字 ~12KB）
-    seen: dict[str, str] = {}
-
-    app = FastAPI()
-
-    @app.post("/result")
-    async def result(request: Request) -> object:
-        raw = request.headers.get("x-agent-result", "")
-        seen["latin1"] = raw
-        seen["recovered"] = _recover_result_header(raw)
-        return {"ok": True}
-
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning", access_log=False)
+def test_report_sends_v2_format_header_without_result_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """v2 线上形态：result 上报只带 X-Agent-Result-Format: 2 与租约头——
+    元数据在归档 result.json 成员里（头名/值取 shared/code_contract 单一
+    事实来源），绝不发送 X-Agent-Result（头预算与降级链已退役）。"""
+    from shared.code_contract import (
+        RESULT_METADATA_FORMAT_HEADER,
+        RESULT_METADATA_FORMAT_V2,
     )
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    port = None
-    for _ in range(200):
-        sockets = getattr(server, "servers", None)
-        if sockets:
-            port = sockets[0].sockets[0].getsockname()[1]
-            break
-        time.sleep(0.05)
-    assert port is not None, "uvicorn did not start"
-    try:
-        response = requests.post(
-            f"http://127.0.0.1:{port}/result",
-            data=b"",
-            headers={"X-Agent-Result": header_bytes, "X-Agent-Lease-Id": "lease-1"},
-            timeout=10,
-        )
-        assert response.status_code == 200, response.text
-        # Starlette 交出来的是 latin-1 解码视图（mojibake 形态）。
-        assert seen["latin1"] != metadata["agent_stderr_tail"][:100]
-        # 反解后逐字段还原。
-        assert json.loads(seen["recovered"]) == metadata
-    finally:
-        server.should_exit = True
-        thread.join(timeout=5)
+
+    archive = tmp_path / "result.tar.gz"
+    archive.write_bytes(b"archive-bytes")
+    seen: list[dict] = []
+
+    def fake_request(*args, **kwargs):
+        seen.append(kwargs.get("headers") or {})
+        return 204, b""
+
+    monkeypatch.setattr(Client, "request", fake_request)
+    assert Client("http://host").report("exec-1", "lease-9", archive) == (204, b"")
+    assert seen == [
+        {
+            RESULT_METADATA_FORMAT_HEADER: RESULT_METADATA_FORMAT_V2,
+            "X-Agent-Lease-Id": "lease-9",
+        }
+    ]
+    assert "X-Agent-Result" not in seen[0]
 
 
-def test_recover_result_header_keeps_legacy_ascii_and_mojibake_as_is() -> None:
-    """Host 侧反解的兜底：纯 ASCII（新旧编码同形）原样；已破坏（非合法
-    UTF-8 的 latin-1 序列）不炸、原样透传。"""
-    from server.app.routes.agent_worker_results import _recover_result_header
+def test_report_is_a_single_transport_attempt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#1098：/result 单次尝试——传输层内层不再连打（修复前 3×timeout +
+    退避 ≈ 360s 心跳停摆 > 90s 租约 TTL，租约被过期清扫、重报吃 409 丢
+    结果）。瞬时失败原样上抛给外层 report 循环（resume → 退避 → quiesce）。"""
+    archive = tmp_path / "result.tar.gz"
+    archive.write_bytes(b"archive-bytes")
+    calls = {"n": 0}
+    sleeps = _patch_sleep(monkeypatch)
 
-    assert _recover_result_header('{"status": "failed"}') == '{"status": "failed"}'
-    # 单字节 latin-1 扩展区（é = U+00E9）不是合法 UTF-8 多字节序列的起点
-    # 之列时保持原样——不抛错、不改写。
-    raw = "caf\xe9"
-    assert _recover_result_header(raw) == raw
+    def fake_request(*args, **kwargs):
+        calls["n"] += 1
+        raise requests.ConnectionError("connection reset")
 
-
-def _require_output_argv(count: int) -> list[str]:
-    # agent argv 形态：每个 expected output 以 --require-output <name> 重复。
-    argv = ["/usr/bin/velites", "run", "--provider", "p", "--model", "m"]
-    for i in range(count):
-        argv += ["--require-output", f"output-{i:03d}.json"]
-    return argv
-
-
-def test_result_header_value_caps_command_parts_without_budget_overflow() -> None:
-    """#822：45 个产物的 argv 超过 64 段但字节远未撞头预算（#755 的 command
-    降级不会触发）——序列化侧无条件把 command 收缩到 Host 段数上限（保前缀），
-    直传清单一条不丢、不抛回退信号，Host 解析不再 400。"""
-    from server.app.routes.agent_worker_results import (
-        _recover_result_header,
-        parse_result_metadata,
-    )
-    from shared.code_contract import MAX_RESULT_COMMAND_PARTS
-    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
-
-    argv = _require_output_argv(45)
-    assert len(argv) > MAX_RESULT_COMMAND_PARTS
-    artifacts = {f"output-{i:03d}.json": _direct_ref(i) for i in range(45)}
-    metadata = {
-        "status": "completed",
-        "exit_code": 0,
-        "error_message": "",
-        "command": argv,
-        "output_artifacts": artifacts,
-        "run_dir": "runs/node_a/worker",
-    }
-    header = _result_header_value(metadata)
-    assert len(header) <= _RESULT_HEADER_BUDGET
-    decoded = json.loads(header.decode("utf-8"))
-    assert decoded["command"] == argv[:MAX_RESULT_COMMAND_PARTS]
-    assert decoded["output_artifacts"] == artifacts
-    assert "output_artifacts_truncated" not in decoded
-    # 入参不被原地改写（调用方可能重试复用同一 metadata）。
-    assert metadata["command"] == argv
-    outcome, _ = parse_result_metadata(_recover_result_header(header.decode("latin-1")))
-    assert outcome.command == tuple(argv[:MAX_RESULT_COMMAND_PARTS])
-    assert outcome.output_artifacts == artifacts
+    monkeypatch.setattr(Client, "request", fake_request)
+    with pytest.raises(RuntimeError, match="result report failed: exec-1"):
+        Client("http://host").report("exec-1", "lease-9", archive)
+    # 单次尝试：无内层重试、无内层退避 sleep（artifact 通道仍是 3 次默认）。
+    assert calls["n"] == 1
+    assert sleeps == []
 
 
-def test_result_header_value_keeps_command_within_part_cap_untouched() -> None:
-    """#822 stage 0 只在超限时生效：段数恰为上限的 argv 原样保留。"""
-    from shared.code_contract import MAX_RESULT_COMMAND_PARTS
-    from worker.host.transfer import _result_header_value
+def test_upload_artifact_keeps_default_retry_attempts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#1098 的边界：单次尝试只收 /result 车道——artifact 上传保持既有
+    3 次内层重试（lease 心跳在 bulk 车道仍武装，重试无租约风险）。"""
+    sleeps = _patch_sleep(monkeypatch)
+    calls = {"n": 0}
 
-    argv = [f"arg-{i}" for i in range(MAX_RESULT_COMMAND_PARTS)]
-    metadata = {"status": "failed", "exit_code": 1, "command": argv, "output_artifacts": {}}
-    decoded = json.loads(_result_header_value(metadata).decode("utf-8"))
-    assert decoded["command"] == argv
+    def fake_request(*args, **kwargs):
+        calls["n"] += 1
+        return 500, b"err"
+
+    monkeypatch.setattr(Client, "request", fake_request)
+    with pytest.raises(RuntimeError, match="artifact upload failed: HTTP 500"):
+        Client("http://host").upload_artifact(_artifact(tmp_path))
+    assert calls["n"] == 3
+    assert len(sleeps) == 2

@@ -55,8 +55,9 @@ class Client(ClaimOperations, HeartbeatOperations, TransferOperations):
         path: str,
         *,
         data: bytes | BinaryIO | None = None,
-        # #748: X-Agent-Result ships as raw UTF-8 BYTES (CJK-heavy metadata
-        # is not latin-1-encodable as str; requests refuses the str form).
+        # 头值类型保留 str|bytes 联合：#748 的 X-Agent-Result UTF-8 字节头
+        # 已随 #843 v2 退役（结果元数据走归档成员，现行头全为 ASCII str），
+        # bytes 形态仅作 requests 传输层兼容留存。
         headers: dict[str, str | bytes] | None = None,
         timeout: float | None = None,
         stream_to: Path | None = None,

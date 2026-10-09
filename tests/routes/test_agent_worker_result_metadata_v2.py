@@ -423,11 +423,10 @@ def test_v2_invalid_metadata_field_is_400(tmp_path: Path) -> None:
 
 def test_v2_large_metadata_over_header_budget_passes(tmp_path: Path) -> None:
     """本 PR 的存在意义：16KiB+ 的 metadata 经 v2 正常通过（头预算不复
-    存在）。构造 128 条直传 dict ref 清单（~25KB 序列化）——同一载荷在
-    v1 头形态下被 Worker 序列化器以 ResultHeaderOverflow 拒绝（#755 换轨
-    语义），v2 形态 204 落库、清单全量入库、无截断标记。"""
-    from worker.host.transfer import ResultHeaderOverflow, _result_header_value
-
+    存在）。构造 128 条直传 dict ref 清单（~25KB 序列化）——v1 头形态下
+    该载荷撞破 14KiB 头预算（#748/#755 降级链的存在理由），v2 形态 204
+    落库、清单全量入库、无截断标记（PR-2 起 Worker 写侧同样直收：清单
+    整体留在 result.json，v1 序列化器已退役）。"""
     artifacts = {
         f"out-{i:03d}.json": {
             "storage_key": f"jobs-staging/ws-1/job-1/exec-1/out-{i:03d}.json",
@@ -446,8 +445,6 @@ def test_v2_large_metadata_over_header_budget_passes(tmp_path: Path) -> None:
     }
     serialized = json.dumps(metadata, ensure_ascii=False)
     assert len(serialized.encode("utf-8")) > 16 * 1024  # 真超头预算（h11 事件上限）
-    with pytest.raises(ResultHeaderOverflow):
-        _result_header_value(metadata)  # v1 头形态：装不下，须换轨
 
     app = _make_app(tmp_path)
     _seed_request(app.state.job_db, job_id="job-v2-large", limit=2)

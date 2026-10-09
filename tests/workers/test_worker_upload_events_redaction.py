@@ -65,9 +65,9 @@ def test_tool_output_secret_redacted_before_archive_leaves_worker(
     archived: dict[str, bytes] = {}
     original_report = client.report
 
-    def report_and_capture(execution_id, lease_id, metadata, archive):
+    def report_and_capture(execution_id, lease_id, archive):
         archived["events.jsonl"] = _capture_archived_events(archive)
-        return original_report(execution_id, lease_id, metadata, archive)
+        return original_report(execution_id, lease_id, archive)
 
     client.report = report_and_capture  # type: ignore[method-assign]
     queue = _queue(client)
@@ -108,9 +108,9 @@ def test_model_error_secret_redacted_into_metadata(tmp_path: Path, monkeypatch) 
     archived: dict[str, bytes] = {}
     original_report = client.report
 
-    def report_and_capture(execution_id, lease_id, metadata, archive):
+    def report_and_capture(execution_id, lease_id, archive):
         archived["events.jsonl"] = _capture_archived_events(archive)
-        return original_report(execution_id, lease_id, metadata, archive)
+        return original_report(execution_id, lease_id, archive)
 
     client.report = report_and_capture  # type: ignore[method-assign]
     queue = _queue(client)

@@ -4,6 +4,7 @@ import hashlib
 import json
 import shutil
 import sys
+import tarfile
 import threading
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from server.app.jobs import JobQueries
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
+from shared.code_contract import RESULT_METADATA_MEMBER
 from tests.helpers import scan_entries
 from worker import executor as agent_worker
 
@@ -93,10 +95,12 @@ class FakeClient:
         self.release_calls += 1
         return self._release_status
 
-    def report(
-        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
-        self.reports.append(metadata)
+    def report(self, execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
+        # v2（#843 PR-2）：上报元数据在归档 result.json 成员里——从归档读回。
+        with tarfile.open(archive) as tar:
+            member = tar.extractfile(RESULT_METADATA_MEMBER)
+            assert member is not None, "result archive is missing the result.json member"
+            self.reports.append(json.loads(member.read()))
         self.report_lease_ids.append(lease_id)
         return 204, b""
 

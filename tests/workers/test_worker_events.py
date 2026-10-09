@@ -272,8 +272,6 @@ class _CodeClaimClient:
     def upload_artifact(self, path: Path) -> str:
         return "sha256:0"
 
-    def report(
-        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
+    def report(self, execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
         self.reports.append(execution_id)
         return 204, b""

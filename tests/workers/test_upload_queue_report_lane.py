@@ -46,9 +46,7 @@ class LaneFakeClient:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         return f"sha256:{digest}"
 
-    def report(
-        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
+    def report(self, execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
         self.events.append(f"report:{execution_id}")
         return 204, b""
 
@@ -163,9 +161,7 @@ class GatedUploadClient:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         return f"sha256:{digest}"
 
-    def report(
-        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
+    def report(self, execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
         self.reports.append(execution_id)
         return 204, b""
 

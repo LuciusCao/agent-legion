@@ -1,12 +1,19 @@
-"""结果头溢出的直传清单归档通道（#755 codex P1）。
+"""结果元数据 v2 归档成员写入面（#843 PR-2，Worker 写侧）。
 
-结果头（X-Agent-Result，14 KiB 预算）装不下直传 dict ref 清单时，旧回退
-会把产物重新经 legacy ``/api/artifacts`` CAS 通道上传（违反
-EXEC-ARTIFACT-WORKER-001 的 presigned-only 约束，且字节双传）。新协议：
-产物字节不动（已在 S3），把完整 ``{"name": ref}`` 清单作为 tar 首成员
-``result-output-artifacts.json`` 写进结果归档，头里只带
-``output_artifacts_in_archive`` 布尔标记；Host 侧 commit 层从归档读回清单
-（server/app/agent_broker/result_output_manifest.py）。
+v2 形态（请求头 ``X-Agent-Result-Format: 2``）：结果元数据 JSON（含完整
+output_artifacts 清单）写成结果归档的保留首成员 ``result.json``
+（shared/code_contract.RESULT_METADATA_MEMBER，UTF-8 JSON 文本）。写入时点
+在 bulk 车道终点——产物引用（presigned dict ref / CAS 字符串 ref）此时才
+终态，prepare 阶段构建的 body 归档（产物 + run_dir / node.log）尚无元数据
+成员；``finalize_result_metadata`` 把终态 metadata 以「首成员 + 流式复制
+既有成员」的原子替换写入，产物字节零重传。v1 时代的换轨成员
+``result-output-artifacts.json`` 与 ``output_artifacts_in_archive`` 标记不再
+产生：清单整体留在 result.json 里，v2 契约（PR-1 评审 P3-2）明文禁止
+payload 携带该标记。
+
+大小治理：v2 无头预算，metadata 受归档单成员体积约束——``max_archive_bytes``
+（claim 下发）是唯一大小门；带上限调用时按 staging 实际大小拒写（原归档
+不动），调用方走既有诚实判败通道。
 """
 
 from __future__ import annotations
@@ -17,47 +24,42 @@ import os
 import tarfile
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from shared.code_contract import RESULT_OUTPUT_ARTIFACTS_MEMBER
+from shared.code_contract import RESULT_METADATA_MEMBER
+from worker.upload.result_metadata import failed_metadata, write_metadata_only_archive
 
-
-class ManifestEmbedExceedsArchiveCeiling(ValueError):
-    """重写后的归档超 Host 归档上限（claim 下发的 max_archive_bytes）。
-
-    #755 codex R8 P2：embed 新增清单成员会把「低于但接近上限」的原直传
-    归档推过 Host 大小门禁；staging 流式写完后、原子替换前先按实际大小
-    拒写，原归档字节未动（证据保全、仍是可提交体积），调用方走诚实判败
-    通道，而不是重报大归档吃 413 后被当终态删 marker。继承 ValueError，
-    与既有契约违例同族（report.py 的 embed 失败臂统一转诚实判败）。"""
+if TYPE_CHECKING:
+    from worker.upload.task import UploadTask
 
 
-def embed_output_artifacts_manifest(
+class ResultMetadataOverCeiling(ValueError):
+    """换写后的归档超 Host 归档上限（claim 下发的 max_archive_bytes）。
+
+    staging 流式写完后、原子替换前按实际大小拒写，原归档字节未动（证据
+    保全、仍是可提交体积），调用方走诚实判败通道，而不是重报大归档吃
+    413 后被当终态删 marker。继承 ValueError，与既有契约违例同族。"""
+
+
+def embed_result_metadata(
     archive: Path,
-    artifacts: dict[str, Any],
-    expected_outputs: tuple[str, ...] | list[str],
+    metadata: dict[str, Any],
     max_bytes: int = 0,
 ) -> None:
-    """把直传产物清单作为首成员写进结果归档（同目录临时文件 + os.replace 原子替换）。
+    """把 metadata 写成结果归档首成员 ``result.json``（同目录临时文件 +
+    os.replace 原子替换）。
 
-    溢出信号只在直传 ref 形态抛出，此时必有直传 ref：空清单或任何 ref 不是
-    dict 形态都是契约违例（ValueError）。成员名与 expected_outputs 碰撞同理
-    （实际上不可能——expected outputs 是节点业务产物名；防御性检查，调用方
-    转诚实判败）。除清单成员外原归档字节原样复制（流式 ``r|gz`` → ``w|gz``；
-    产物字节不在归档内，体量即 run_dir 日志级）。成员固定写在最前：Host 侧
-    流式扫描几 KB 即命中，不必解完整归档。
-
-    ``max_bytes``（#755 codex R8 P2）非 0 时是 Host 归档上限：staging
-    写完后、替换前按实际大小校验，超限抛
-    ``ManifestEmbedExceedsArchiveCeiling``，原归档保持未动。
+    既有成员流式复制（``r|gz`` → ``w|gz``）保持原样（非常规成员按引用
+    保真——流模式 extractfile 只对常规文件成员有效）；已存在的
+    ``result.json`` 成员跳过（换写语义：判败降级重写新 metadata 时旧成员
+    不得残留，Host 读回取首个命中）。成员固定写在最前：Host 侧流式扫描
+    即刻命中，不必解完整归档。``max_bytes`` 非 0 时是 Host 归档上限：
+    staging 写完后、替换前按实际大小校验，超限抛
+    ``ResultMetadataOverCeiling``，原归档保持未动。
     """
-    if not artifacts or not all(isinstance(ref, dict) for ref in artifacts.values()):
-        raise ValueError("output artifacts manifest requires direct-upload dict refs")
-    if RESULT_OUTPUT_ARTIFACTS_MEMBER in set(expected_outputs):
-        raise ValueError(f"{RESULT_OUTPUT_ARTIFACTS_MEMBER} collides with an expected output")
-    payload = json.dumps(artifacts, ensure_ascii=False).encode("utf-8")
+    payload = json.dumps(metadata, ensure_ascii=False).encode("utf-8")
     descriptor, staging = tempfile.mkstemp(
-        dir=archive.parent, prefix=".result-manifest-", suffix=".tar.gz"
+        dir=archive.parent, prefix=".result-metadata-", suffix=".tar.gz"
     )
     staging_path = Path(staging)
     try:
@@ -66,37 +68,57 @@ def embed_output_artifacts_manifest(
             tarfile.open(archive, "r|gz") as src,
             tarfile.open(fileobj=raw, mode="w|gz") as dst,
         ):
-            info = tarfile.TarInfo(RESULT_OUTPUT_ARTIFACTS_MEMBER)
+            info = tarfile.TarInfo(RESULT_METADATA_MEMBER)
             info.size = len(payload)
             dst.addfile(info, io.BytesIO(payload))
             for member in src:
-                # 只对常规文件成员取数据面：流模式下对 symlink/hardlink 成员
-                # 调 extractfile 抛 StreamError（#755 对抗复审 P2-1——run_dir
-                # 在 agent 工作目录树内，链接成员不可排除；extractfile 对目录
-                # 成员返回 None）。链接成员按引用原样复制，保真度不丢。
+                if member.name == RESULT_METADATA_MEMBER:
+                    continue
                 if not member.isfile():
                     dst.addfile(member)
                     continue
                 contents = src.extractfile(member)
-                if contents is None:  # 防御：isfile 成员在此必然有数据面
+                if contents is None:  # 防御：isfile 成员在流模式必有数据面
                     dst.addfile(member)
                 else:
                     with contents:
                         dst.addfile(member, contents)
         if max_bytes:
-            embedded_size = staging_path.stat().st_size
-            if embedded_size > max_bytes:
-                raise ManifestEmbedExceedsArchiveCeiling(
-                    f"archive with the embedded output artifacts manifest is"
-                    f" {embedded_size} bytes, over the {max_bytes}-byte Host"
+            rewritten_size = staging_path.stat().st_size
+            if rewritten_size > max_bytes:
+                raise ResultMetadataOverCeiling(
+                    f"result archive with the embedded result.json member is"
+                    f" {rewritten_size} bytes, over the {max_bytes}-byte Host"
                     f" archive ceiling; original archive left untouched"
                 )
         os.replace(staging_path, archive)
     except BaseException:
         # #204 broad-except audit (BaseException)：staging 清理守卫而非吞
-        # 异常——bare raise 原样上抛，调用方（report.py 的溢出臂）把
-        # OSError/tarfile.TarError/ValueError 转诚实判败。同
-        # persist_stderr_tail 的纪律：staging 与归档同目录，替换失败也不
-        # 能把半成品留在执行目录里（会随归档外发）。
+        # 异常——bare raise 原样上抛，调用方把 OSError / TarError /
+        # ValueError 族转诚实判败。staging 与归档同目录，替换失败也不能
+        # 把半成品留在执行目录里（会随归档外发）。
         staging_path.unlink(missing_ok=True)
         raise
+
+
+def finalize_result_metadata(
+    task: UploadTask, metadata: dict[str, Any], archive: Path
+) -> tuple[dict[str, Any], Path]:
+    """bulk 车道终点的 v2 落盘：终态 metadata（含产物清单）写成归档首成员。
+
+    产物引用在 artifact 上传完成后才终态，故该步在 ``_bulk_transfer`` 尾
+    （task.prepared_metadata / prepared_archive 挂载前）执行，此后归档即
+    最终形态（report 车道原样发送）。超限（罕见形态：body 贴着上限、
+    metadata 把它推过）或写失败（IO/压缩）时诚实判败：拒写（原归档不动
+    由 embed 的 staging 替换保证），随后回收成仅含判败 metadata 的可提交
+    归档（失败原因随 error_message 上报，同 prepare 降级臂的观测纪律）；
+    判败语义下证据让位于可提交性。心跳纪律：本步在 bulk 车道执行（心跳
+    仍武装），重写窗口不产生 #1098 形态的租约空窗。
+    """
+    try:
+        embed_result_metadata(archive, metadata, max_bytes=task.max_archive_bytes)
+    except (ResultMetadataOverCeiling, OSError, tarfile.TarError, ValueError) as exc:
+        failed = failed_metadata(task, f"result metadata finalize failed: {exc}")
+        write_metadata_only_archive(archive, failed)
+        return failed, archive
+    return metadata, archive

@@ -21,6 +21,7 @@ from typing import Any, BinaryIO
 import pytest
 import requests
 
+from shared.code_contract import RESULT_METADATA_MEMBER
 from worker.artifact import upload as artifact_upload
 from worker.artifact.upload import DirectUploadError, upload_artifact_direct
 from worker.result_archive import prepare_code_result
@@ -199,10 +200,12 @@ class QueueFakeClient:
         self.uploads[digest] = data
         return f"sha256:{digest}"
 
-    def report(
-        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
-        self.reports.append(metadata)
+    def report(self, execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
+        # v2（#843 PR-2）：上报元数据在归档 result.json 成员里——从归档读回。
+        with tarfile.open(archive) as tar:
+            member = tar.extractfile(RESULT_METADATA_MEMBER)
+            assert member is not None, "result archive is missing the result.json member"
+            self.reports.append(json.loads(member.read()))
         self._archive = archive.read_bytes()
         return 204, b""
 
