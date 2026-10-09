@@ -270,7 +270,12 @@ In `nightly-gate.yml`:
   that is why it runs on the weekly schedule and manual dispatch instead of
   the PR gate. Any finding fails the job; fixes land as dependency PRs.
 - **exemption-expiry** — refreshes the issue-state manifest and detects
-  expired architecture exemptions; since #295 it also detects expired
+  expired architecture exemptions; the refreshed manifest is committed
+  straight to the default branch by the job itself (#1150: the manual
+  `make architecture-issue-states` ritual rots on a single-maintainer repo —
+  five weeks of red nightly proved it), while a closed anchor issue still
+  fails the job so the exemption gets fulfilled or re-anchored first. Since
+  #295 it also detects expired
   flaky-registry deadlines (`check_reruns.py --check-deadlines`, deadline
   evidence without needing the extended rerun report), and since #1024 on
   every maintained branch too (`scripts/quality/flaky_branch_deadlines.py`:

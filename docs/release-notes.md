@@ -113,4 +113,5 @@ gh release edit vX.Y.Z -R LuciusCao/agent-legion \
 - [ ] 有迁移 / 配套升级 / 退役时，「升级注意」组单列。
 - [ ] 文末有 Full Changelog 链接，区间是同线上一 tag。
 - [ ] CHANGELOG 对应段落已落版（含 Unreleased 归位）。
+- [ ] 最近一次 nightly gate（nightly-gate.yml，周一跑）是绿的，或在 release 正文「升级注意」写明显式豁免与原因（#1150）。
 - [ ] `scripts/install-worker.sh` 的默认 worker / velites 版本已钉到本次发布。
