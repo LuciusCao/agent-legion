@@ -1222,8 +1222,9 @@ exemptions:
   path: worker/upload/stderr_evidence.py
   reason: '#748 Worker 侧密钥注册表：os.environ 秘密命名值 + register_secrets 注册的 worker 配置 environment
     块（secret 注入 agent 子进程的官方通道， 含线程安全锁）+ 匹配域变体（CRLF 归一、尾空白、surrogateescape 忠实字节） + sk-/ghp_/gho_/xox[bap]-/JWT/Bearer
-    形态族。#755 起以区间报告 （secret_spans）供 shared/stderr_tail 的一次脱敏单切点使用， max_secret_chars 给出 lookback
-    长度。防御性正确性代码使有效行 47→78 （带内）。时间盒：脱敏面若与 worker 配置加载统一收口（敏感值集中注册）， 此处重登预算。 Re-anchored by #926
+    形态族。#755/#844 起以区间快照（secret_snapshot：区间函数与 max_chars 同源一次读出）供 shared/pi_events 的 stderr
+    尾部与 events JSON 字符串值（#842）两处脱敏共用， 快照 max_chars 给出 lookback
+    长度。防御性正确性代码使有效行 47→74 （带内）。时间盒：脱敏面若与 worker 配置加载统一收口（敏感值集中注册）， 此处重登预算。 Re-anchored by #926
     from #748 (closed) to #844: the overage above is the shipped feature itself and the removal
     condition above stands; #844 tracks at most five entries (#917 A-2).'
   owner: workspace-executor

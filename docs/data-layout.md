@@ -38,7 +38,7 @@ Worker 不读写 Host 的 `data/`，它持有自己的目录：
 
 `upload_pending.json` 是 UploadQueue 的持久化标记：任务入队前写入 execution dir，Host 接受结果后才删除；Worker 重启时按标记恢复未上报的结果（`worker/upload/queue.py:1-17`）。
 
-execution dir 内 agent 执行的 run 目录（`job/runs/<node_key>/worker/`）除 `events.jsonl`（agent 事件流，上传前经 `shared/pi_events.py` 压缩）与 `session/`、`prompt.md` 外，还可能含 `agent-stderr.log`（#748）：agent 子进程的 stderr 在 spawn 侧合并进 stdout 管道、pump 原样落进 events.jsonl，而压缩 rewrite 会丢弃非 JSON 行——上传准备阶段（`worker/upload/prepare.py`）在同一次扫描里把这部分尾部（保尾，硬上限 8KB，`shared/stderr_tail.py` 的 `STDERR_TAIL_BYTES`；落盘前已脱敏）抢救到该文件，并随 run 目录整体进 result.tar.gz 交付 Host，Host 将其与 `events.jsonl` 一起提升进 job dir 的同一 run 目录（超过 8KB 的成员视为不可信、不提升）；进程非零退出（非 130 取消、非 124 超时）时 error_message 与 result metadata 的 `agent_stderr_tail` 字段同步携带该尾部，用于崩溃归因。
+execution dir 内 agent 执行的 run 目录（`job/runs/<node_key>/worker/`）除 `events.jsonl`（agent 事件流，上传前经 `shared/pi_events.py` 压缩，保留事件的字符串值与 model_error 归因串同趟经 Worker 侧密钥注册表快照脱敏——`worker/upload/stderr_evidence.py` 的 `secret_snapshot`，#842/#844）与 `session/`、`prompt.md` 外，还可能含 `agent-stderr.log`（#748）：agent 子进程的 stderr 在 spawn 侧合并进 stdout 管道、pump 原样落进 events.jsonl，而压缩 rewrite 会丢弃非 JSON 行——上传准备阶段（`worker/upload/prepare.py`）在同一次扫描里把这部分尾部（保尾，硬上限 8KB，`shared/stderr_tail.py` 的 `STDERR_TAIL_BYTES`；落盘前已脱敏）抢救到该文件，并随 run 目录整体进 result.tar.gz 交付 Host，Host 将其与 `events.jsonl` 一起提升进 job dir 的同一 run 目录（超过 8KB 的成员视为不可信、不提升）；进程非零退出（非 130 取消、非 124 超时）时 error_message 与 result metadata 的 `agent_stderr_tail` 字段同步携带该尾部，用于崩溃归因。
 
 ## 3. 部署形态映射
 

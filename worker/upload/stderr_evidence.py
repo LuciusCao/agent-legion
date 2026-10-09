@@ -17,10 +17,22 @@ covers provider key prefixes (sk-/sk-ant-/ghp_/gho_) and Slack bot/user/app
 tokens (``xox[bap]/``) plus JWTs and Bearer credentials. NOT covered: env
 values shorter than the byte threshold, secret-named values from OTHER
 machines not echoed through this process, and custom gateway tokens with
-no recognizable shape — a custom-token echo in stderr survives redaction
-(known best-effort boundary). The durable anchor is written ALREADY
-REDACTED: prepare hands ``secret_spans`` to the scan (#748 R3 codex review
-P1), so no plaintext secret touches disk on the anchor path.
+no recognizable shape — a custom-token echo survives redaction (known
+best-effort boundary). The SAME boundary covers the #842 events face: one
+snapshot's span function serves both the stderr tail and the events.jsonl
+string values. The durable anchor is written ALREADY REDACTED: prepare
+hands the snapshot to the scan (#748 R3 codex review P1, #842), so no
+plaintext secret touches disk on the anchor path or the compressed events.
+
+#844: the registry is read through ``secret_snapshot()`` — ONE immutable
+``shared.redaction.SecretRedactor`` carrying both the span function and the
+longest-literal length. The retired call-site shape (``secret_spans`` and
+``max_secret_chars`` read separately) raced ``register_secrets``: a value
+registered between the two reads widened the span function but not the
+lookback margin, so a cut could split a secret the spans would have
+matched whole. The snapshot's ``max_chars`` is by construction ≥ the
+longest matchable literal — the lookback contract, now enforced where the
+values are read instead of trusted at the call site.
 """
 
 from __future__ import annotations
@@ -30,7 +42,7 @@ import re
 import threading
 from pathlib import Path
 
-from shared.redaction import Span, apply_spans
+from shared.redaction import SecretRedactor, Span
 from shared.stderr_tail import AGENT_STDERR_FILENAME, STDERR_TAIL_BYTES
 
 # Secret-shaped literals redacted on top of the env-value pass: provider API
@@ -88,8 +100,8 @@ def _secret_bytes(value: str) -> bytes:
     解码（Linux 启动环境的非 UTF-8 字节经 surrogateescape 暴露为代理字符，
     如 \\udcff），对称的 surrogateescape 编码让字节忠实往返。严格 UTF-8
     在代理字符上抛 UnicodeEncodeError——prepare_result 对每次 agent 结果
-    无条件经 max_secret_chars 走到这里，一次逃逸即把成功执行改判 failed
-    并丢弃归档。"""
+    无条件经 secret_snapshot 的密钥长度计算走到这里，一次逃逸即把成功执行
+    改判 failed 并丢弃归档。"""
     return value.encode("utf-8", "surrogateescape")
 
 
@@ -127,50 +139,46 @@ def _secret_values() -> list[str]:
     variants = {
         candidate for candidate in candidates if len(_secret_bytes(candidate)) > _MIN_SECRET_BYTES
     }
-    return sorted(
-        variants,
-        key=lambda value: len(_secret_bytes(value)),
-        reverse=True,
-    )
+    return sorted(variants, key=lambda value: len(_secret_bytes(value)), reverse=True)
 
 
-def max_secret_chars() -> int:
-    """Length in characters of the longest registered literal (0 when none).
-
-    shared/pi_events.py keeps this much lookback ahead of the emitted
-    stderr window, so any literal reaching the window is complete in its
-    buffer (#755 codex P1: a fixed 512 could not hold a PEM or a long JWT).
-    The variants of _secret_values are already in the matching domain."""
-    values = _secret_values()
-    return max((len(value) for value in values), default=0)
-
-
-def secret_spans(text: str) -> list[Span]:
-    """Where secret material sits in ``text`` (best-effort, never raises).
-
-    Three rule families, all reported as spans and merged by the caller:
-    (1) literal occurrences of this process's secret env values plus the
-    registered worker-config environment values (every occurrence, so a
-    short key that prefixes or nests inside a longer one is covered by the
-    merge instead of leaving residue); (2) Bearer credentials (the scheme
-    word stays readable); (3) secret-shaped literals for secrets that did
-    not come from this process (e.g. provider keys echoed from a child's
-    own config). Values too short to be secrets (<= 8 BYTES) are skipped:
-    replacing short literals mangles ordinary text for zero secrecy gain."""
+def _value_spans(values: list[str], text: str) -> list[Span]:
+    """Spans of secret material in ``text`` against ONE frozen value list —
+    the snapshot's span function. Three rule families, all reported as
+    spans and merged by the caller: (1) every occurrence of each literal
+    value (a short key that prefixes or nests inside a longer one is
+    covered by the merge instead of leaving residue); (2) Bearer
+    credentials (the scheme word stays readable); (3) secret-shaped
+    literals for secrets that did not come from this process (e.g.
+    provider keys echoed from a child's own config). Values too short to
+    be secrets (<= 8 BYTES) never enter ``values``."""
     spans: list[Span] = []
-    for value in _secret_values():
-        index = text.find(value)
-        while index != -1:
+    for value in values:
+        start = 0
+        while (index := text.find(value, start)) != -1:
             spans.append((index, index + len(value)))
-            index = text.find(value, index + 1)
+            start = index + 1
     spans.extend(match.span(2) for match in _BEARER_SHAPE.finditer(text))
     spans.extend(match.span() for match in _SECRET_SHAPES.finditer(text))
     return spans
 
 
-def redact_secrets(text: str) -> str:
-    """``text`` with every ``secret_spans`` region replaced by ``***``."""
-    return apply_spans(text, secret_spans(text))
+def secret_snapshot() -> SecretRedactor:
+    """The registry as ONE immutable read (#844).
+
+    The span function and the longest-literal length come from the SAME
+    ``_secret_values()`` list, so the lookback margin a text-cutting caller
+    keeps (``max(REDACT_WINDOW_MARGIN, snapshot.max_chars)``) is by
+    construction ≥ every literal the span function can match — the retired
+    two-read shape could observe the registry at two different times and
+    register a longer value in between. A later ``register_secrets``
+    produces a NEW snapshot; one already in hand never changes. Single-shot
+    faces (error_message, the anchor read-back) take a fresh snapshot per
+    call — they do not cut text, so there is no margin to keep consistent.
+    """
+    values = _secret_values()
+    max_chars = max((len(value) for value in values), default=0)
+    return SecretRedactor(lambda text: _value_spans(values, text), max_chars)
 
 
 def stderr_tail_for_run(run_dir: Path, scanned_tail: bytes) -> bytes:
@@ -194,7 +202,8 @@ def stderr_tail_for_run(run_dir: Path, scanned_tail: bytes) -> bytes:
             tail = sink.read_bytes()
     if not tail:
         return b""
-    return redact_secrets(tail.decode("utf-8", "replace")).encode("utf-8")[-STDERR_TAIL_BYTES:]
+    redacted = secret_snapshot().redact(tail.decode("utf-8", "replace"))
+    return redacted.encode("utf-8")[-STDERR_TAIL_BYTES:]
 
 
 def stderr_error_message(exit_code: int, stderr_tail: bytes) -> str:
@@ -211,7 +220,7 @@ def stderr_error_message(exit_code: int, stderr_tail: bytes) -> str:
     external error_message face. Redaction replaces values with ``***``
     (shorter), so the 200-char cap keeps its meaning on the redacted text.
     """
-    summary = redact_secrets(stderr_tail.decode("utf-8", "replace")).strip()
+    summary = secret_snapshot().redact(stderr_tail.decode("utf-8", "replace")).strip()
     if not summary:
         return f"Agent process exited {exit_code}"
     last_line = " ".join(summary.splitlines()[-1].split())

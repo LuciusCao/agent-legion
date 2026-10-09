@@ -13,6 +13,7 @@ import random
 import pytest
 
 from shared.pi_events import scan_and_compress_pi_events
+from shared.redaction import SecretRedactor
 from shared.stderr_tail import STDERR_TAIL_BYTES
 from tests.helpers.secret_spans import literal_spans
 
@@ -30,8 +31,7 @@ def _scan(tmp_path, stderr_text: str, *secrets: str):
     _, _, _, tail = scan_and_compress_pi_events(
         events,
         stderr_sink=sink,
-        secret_spans=literal_spans(*secrets),
-        secret_max_chars=max(len(secret) for secret in secrets),
+        redactor=SecretRedactor(literal_spans(*secrets), max(len(secret) for secret in secrets)),
     )
     sink_bytes = sink.read_bytes() if sink.exists() else b""
     return tail, sink_bytes, events.read_bytes()
@@ -118,7 +118,7 @@ def test_randomized_streams_never_leak_registered_secrets(tmp_path, seed):
     multi-line with/without trailing newline, prefix pairs, CJK noise, very
     long lines), with each secret preceded by a random amount of noise so
     trims land anywhere relative to it — caller contract held
-    (``secret_max_chars`` = longest literal). No face may carry any 8-char
+    (``redactor.max_chars`` = longest literal). No face may carry any 8-char
     fragment of any secret, and the newest noise line survives."""
     rng = random.Random(seed)
     secrets = [_random_secret(rng) for _ in range(rng.randint(1, 3))]
