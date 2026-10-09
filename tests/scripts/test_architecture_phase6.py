@@ -7,8 +7,6 @@ from tests.architecture_budget_helpers import write_neutral_budget_governance
 
 pytestmark = pytest.mark.no_db
 
-ROOT = Path(__file__).resolve().parents[2]
-
 
 def write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -180,11 +178,10 @@ class TestSchemaMutationLocations:
         assert not any("schema mutation" in error for error in errors)
 
 
-def test_phase6_current_repository_has_no_errors():
-    errors = check_repository(ROOT)
+def test_phase6_current_repository_has_no_errors(real_repo_check_errors):
     phase6_errors = [
         error
-        for error in errors
+        for error in real_repo_check_errors
         if any(
             tag in error
             for tag in (

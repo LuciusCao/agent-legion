@@ -272,8 +272,9 @@ run_tests() {
       ;;
     full)
       # The local full tier is the unit layer — same selection as GATE_TIER=unit.
-      # The PostgreSQL layer (1711 of 3644 quick-suite tests, ~2.5x the unit
-      # tier's cost) moved out of the local default: CI re-runs all of it on
+      # The PostgreSQL layer (~3900 of ~9000 quick-suite tests, ~2.2x the unit
+      # tier's wall clock — 302s vs 140s measured 2026-10-09) moved out of the
+      # local default: CI re-runs all of it on
       # every PR (backend-postgres-a/b/c), so paying it on every local gate
       # bought little. Run GATE_TIER=postgres explicitly before handing off
       # database-touching work, or rely on CI; scripts/check.sh (the local
