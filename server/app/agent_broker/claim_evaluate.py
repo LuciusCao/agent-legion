@@ -42,12 +42,18 @@ def evaluate_candidate(
     view: WorkerView,
     state: ScanState,
     timer: ClaimStageTimer | None = None,
+    batch_code_pool_lock: bool | None = None,
 ) -> AgentClaim | None:
     """Try to claim one candidate; on a skip, record the cause in state.skip_reasons.
 
     ``timer`` (#448) closes the promote-write sequence below into the
     "writes" stage — the lock/validate prefix stays in "evaluate"; None keeps
     this importable from tests that predate the instrumentation.
+    ``batch_code_pool_lock`` (#1149 P2-2): None (single claim) — this
+    candidate probes the node-limit row and acquires the shared code-pool
+    lock itself; True/False (batch write phase) — the batch's
+    start-of-transaction probe already decided, per-candidate acquisition is
+    suppressed to keep the global lock order.
     """
     # Admission (claim_admission, #555): pause / contract / ACL / pools /
     # labels — lock-free, so the batch read phase runs the same gate. The
@@ -62,27 +68,31 @@ def evaluate_candidate(
     # the EXEC-GENERATION-001 job-mutation domain (#759 phase 1c) and the
     # #1149 code-pool entry: agent-ws (agent kind only — that domain is
     # agent-only, so taking it for code would be pure queueing overhead) →
-    # agent-worker → code-pool (code kind with a configured node limit only,
-    # #1149) → job-mutation:<job> → request row. The code-pool lock is the one
-    # the local code pool takes first in claim_lease (_lease_claims.py), so
-    # its position here keeps the global order acyclic: the local path's
-    # code-pool → job-mutation is a subsequence of this total order (it takes
-    # no agent-worker lock, and nothing queues on agent-worker behind it).
-    # The request-row FOR UPDATE moved AFTER the job-mutation advisory lock:
-    # the mutation side (lease_guarded_mutation) holds job-mutation while
-    # cancelling queued request rows (_cancel_queued_sql), so the pre-#759
-    # order (request row → …) would AB-BA against job-mutation → request row.
-    # The v82 counter folder uses non-blocking try-locks and adds no ordering
-    # edge.
+    # agent-worker → code-pool (code kind with a configured node limit only)
+    # → job-mutation:<job> → request row. The code-pool lock is the one the
+    # local code pool takes first in claim_lease (_lease_claims.py). The
+    # batch write phase acquires it once at transaction start
+    # (claim_batch_tx, #1149 P2-2) — before the per-candidate agent-ws /
+    # agent-worker rungs — which stays acyclic: agent-worker:<id> is a
+    # per-worker domain only same-worker claims enter, and those serialize
+    # on the agent_workers row lock (prepare_claim_view) before either path,
+    # so no cross-session pair ever contends on agent-worker while one side
+    # holds code-pool. The request-row FOR UPDATE moved AFTER the job-mutation
+    # advisory lock: the mutation side (lease_guarded_mutation) holds
+    # job-mutation while cancelling queued request rows (_cancel_queued_sql),
+    # so the pre-#759 order (request row → …) would AB-BA against
+    # job-mutation → request row. The v82 counter folder uses non-blocking
+    # try-locks and adds no ordering edge.
     if kind != "code":
         ws_domain = f"agent-ws:{selected['workspace_id']}"
         conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (ws_domain,))
     conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"agent-worker:{worker_id}",))
-    # #1149：候选带 workspace_node_limits 行的远程 code claim 必须与本地
-    # code 池共享全局 code-pool 锁——计数→插入的竞态跨本地/远程互斥
-    # （锁序与 probe 语义见 claim_node_limit 模块 docstring）。
-    if kind == "code":
-        claim_node_limit.lock_code_pool_for_node_limit(conn, selected)
+    # #1149：远程 code claim 与本地池共享 code-pool 锁（节点带 limit 行时）。
+    # 单条路径（batch_code_pool_lock=None）在此 probe+acquire——先于本候选的
+    # job-mutation 锁，序正确；批路径的锁决策由事务首句的集中 probe 冻结
+    # （P2-2），此处不获取——前序候选的 job-mutation 已持有，中途获取会倒置
+    # 全局锁序。probe/检查窗口的收口语义见 claim_node_limit 模块 docstring。
+    pool_held = claim_node_limit.enter_code_pool_domain(conn, selected, kind, batch_code_pool_lock)
     conn.execute(
         "select pg_advisory_xact_lock(hashtext(%s))",
         (f"job-mutation:{selected['job_id']}",),
@@ -153,10 +163,11 @@ def evaluate_candidate(
     # requests are never fail-fasted on a setting change — and counts the
     # node's active executor_leases without filtering executor_id (local and
     # remote claims merge on the same table; shard candidates included).
-    # Over-limit is a skip with the capacity_full semantics: the request
-    # stays queued and the unclaimable sweeper (runtime/model probes only)
-    # never reaps it.
-    if kind == "code" and not claim_node_limit.remote_node_limit_admits(conn, selected, state):
+    # Enforcement only under the code-pool lock: a row that appeared after
+    # the probe (first-config race, P2-1) skips with node_limit_appeared —
+    # never count unlocked. Over-limit keeps the request queued with the
+    # capacity_full semantics; the unclaimable sweeper never reaps it.
+    if not claim_node_limit.code_claim_admits(conn, selected, kind, state, pool_held):
         return None
 
     # Writes stage boundary (#448, #461 review): everything above is evaluate

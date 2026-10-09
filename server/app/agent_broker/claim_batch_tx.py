@@ -44,6 +44,7 @@ import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from server.app.agent_broker import claim_node_limit
 from server.app.agent_broker import claim_timing as _claim_timing
 from server.app.agent_broker.claim import report_claim_stages
 from server.app.agent_broker.claim_batch_select import BatchClaimSelection
@@ -86,6 +87,7 @@ def _promote_selected(
     view: WorkerView,
     state: ScanState,
     timer: _claim_timing.ClaimStageTimer,
+    code_pool_lock: bool,
 ) -> tuple[AgentClaim | None, bool]:
     """One savepoint-guarded promote attempt for a selected candidate.
 
@@ -99,11 +101,15 @@ def _promote_selected(
     head just proved unstable). Do not turn the ``break`` into ``continue``.
     A None claim without ``raced`` is a stale candidate (lost the SKIP
     LOCKED probe, paused, capacity filled since selection): skip and let the
-    loop take the next selected row.
+    loop take the next selected row. ``code_pool_lock`` is the frozen
+    start-of-transaction code-pool decision (#1149 P2-2) handed to
+    ``evaluate_candidate``.
     """
     conn.execute("savepoint claim_batch_item")
     try:
-        claimed = evaluate_candidate(broker, conn, worker_id, selected, view, state, timer)
+        claimed = evaluate_candidate(
+            broker, conn, worker_id, selected, view, state, timer, code_pool_lock
+        )
     except ClaimRacedError:
         conn.execute("rollback to savepoint claim_batch_item")
         conn.execute("release savepoint claim_batch_item")
@@ -162,8 +168,23 @@ def claim_batch_in_transaction(
         return BatchClaimOutcome((), view, {}, scan_skipped=True)
     claims: list[AgentClaim] = []
     state = ScanState()
+    # #1149 对抗评审 P2-2：批事务必须在任何候选取 job-mutation 锁之前统一
+    # 决定 code-pool——循环内逐候选获取时，候选 1（agent / 无 limit 行的
+    # code）的 job-mutation 已持有、候选 2 的 code-pool 请求倒序到达，与
+    # 「持 code-pool 等 job-mutation」的本地 claim 成环（PG 死锁检测 + 单次
+    # 重试兜底 ≈1s 停顿 + 整批重跑，但属 #1149 引入的倒置）。集中 probe
+    # 选中集全部 code 候选的 (workspace, node) 对（一条配对 unnest 查询）：
+    # 任一存在 limit 行即取锁一次、幂等持有到 COMMIT。选精确 probe 而非
+    # 「批内含 code 候选即无条件取锁」：无限流配置的常见形态保持零锁写入
+    # 段，批机队不会全局串行在 code-pool 上（MAX_BATCH_CLAIMS=256，逐对
+    # probe 会是 256 次往返，故合并为一条查询）。probe 之后新出现的 limit
+    # 行无法中途补锁（frozen 决策抑制逐候选获取）——该候选按
+    # node_limit_appeared skip，下一批在新事务里以正常锁序领取。
+    code_pool_lock = claim_node_limit.lock_code_pool_for_batch(conn, selection.candidates)
     for candidate in _lock_order_sorted(selection.candidates):
-        claimed, raced = _promote_selected(broker, conn, worker_id, candidate, view, state, timer)
+        claimed, raced = _promote_selected(
+            broker, conn, worker_id, candidate, view, state, timer, code_pool_lock
+        )
         if raced:
             break
         if claimed is None:

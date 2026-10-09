@@ -4,30 +4,57 @@
 （executors/_lease_claim_limits.check_claim_capacity）；远程路径
 （agent_broker/claim_evaluate.evaluate_candidate 的 code 分支）没有任何
 (workspace_id, node_key) 检查，同一节点被跨 job 并行 claim。本文件钉住
-修复后的三个面：
+修复的各个面：
 
 1. 跨 job 同节点：limit=1 时第二个请求 skip（node_limit_full）留队列，
-   第一个完成后（mark_done 收尾 lease）第三轮 claim 放行；
+   第一个完成后（finish + mark_done 收尾 lease）第三轮 claim 放行；
 2. 本地/远程混合计数：本地池 lease（executor_id='code'）占位时远程
    claim 被拒——计数不筛 executor_id，同一张 executor_leases 表合并；
 3. 批 claim（#546/#555）同节点多候选：批写阶段重跑 evaluate，批内
-   第二个候选 skip，第一个 claim 保留（savepoint 语义不受影响）。
+   第二个候选 skip，第一个 claim 保留（savepoint 语义不受影响）；
+4. 对抗评审 P2-1（claim 侧）：probe 判「无 limit 行、不取锁」后、检查前
+   另一会话插入 limit 并提交——claim 不得无锁计数（node_limit_appeared
+   skip 留队列），下一轮以正常锁序领取；
+5. 对抗评审 P2-1（写侧）：replace_workspace_node_limits 先取 code-pool
+   锁再写任何 limit 行——锁被他人持有时配置写阻塞（pg_locks 观测）；
+6. 对抗评审 P2-2：批写事务在首个 job-mutation 锁之前统一取 code-pool
+   （agent 候选在前、带 limit 的 code 候选在后的批序下，逐候选获取会
+   倒置全序）；
+7. shard 候选：检查位于 shard 分支之前，limit 满时 skip 不触发
+   try_start_shard 副作用；
+8. limit 运行时可变：现值 claim 时现读（2→1 按新值 skip、回调后放行；
+   请求行上的 enqueue 时 audit 值从不被强制）——与本地路径契约式校验
+   有意不同的核心语义。
 
-串行搭建（无交错线程）：每轮 claim 是独立提交的事务，计数在提交后
-对下一轮可见，无需 pg_locks 同步点。
+串行搭建（用例 1-3、7、8 无交错线程）：每轮 claim 是独立提交的事务，
+计数在提交后对下一轮可见，无需 pg_locks 同步点；用例 4-6 的交错用
+monkeypatch/线程 + pg_locks 观测构造确定性同步点（比照
+tests/db/test_execution_generation_races.py 的纪律）。
 """
 
 from __future__ import annotations
 
+import threading
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
+import psycopg
+
+from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest, claim_node_limit
 from server.app.agent_broker.claim_batch import claim_batch_with_retry
+from server.app.agent_broker.claim_batch_select import select_batch_candidates
+from server.app.agent_broker.claim_batch_tx import claim_batch_in_transaction
+from server.app.agent_broker.claim_evaluate import evaluate_candidate
+from server.app.agent_broker.claim_scan import SCAN_ROUNDS, ScanState, WorkerView, fetch_candidates
 from server.app.agent_control.registry import AgentWorkerRegistry
+from server.app.db.transaction import write_transaction
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import CODE_EXECUTOR_ID, ExecutionResult, LeaseClaimRequest
+from server.app.jobs.node_limits import replace_workspace_node_limits
 from shared.protocol import PROTOCOL_VERSION
+from tests.helpers.agent_worker_api import seed_request
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -46,12 +73,15 @@ def _register_code_worker(worker_id: str) -> None:
 
 
 def _seed_code_lane(
-    job_db, workspace_id: str, node_key: str, *, limit: int, job_ids: list[str]
+    job_db, workspace_id: str, node_key: str, *, limit: int | None, job_ids: list[str]
 ) -> None:
-    """workspace + jobs + node 行 + 节点 limit（limit 行有 FK 到 workspaces）。"""
+    """workspace + jobs + node 行 + 节点 limit（limit 行有 FK 到 workspaces）。
+
+    ``limit=None`` 只搭 job 面、不插 limit 行（P2-1 首配竞态用例的起点）。"""
     for job_id in job_ids:
         _seed_code_job(job_db, workspace_id, job_id, node_key)
-    _set_node_limit(job_db, workspace_id, node_key, limit)
+    if limit is not None:
+        _set_node_limit(job_db, workspace_id, node_key, limit)
 
 
 def _set_node_limit(job_db, workspace_id: str, node_key: str, limit: int) -> None:
@@ -79,7 +109,25 @@ def _seed_code_job(job_db, workspace_id: str, job_id: str, node_key: str) -> Non
         conn.execute("insert into job_nodes(job_id, node_key) values (%s, %s)", (job_id, node_key))
 
 
-def _enqueue_code(job_db, workspace_id: str, job_id: str, node_key: str, *, order: int = 0) -> str:
+def _enqueue_code(
+    job_db,
+    workspace_id: str,
+    job_id: str,
+    node_key: str,
+    *,
+    order: int = 0,
+    shard_index: int | None = None,
+) -> str:
+    manifest: dict[str, Any] = {
+        "kind": "code",
+        "capability": "package",
+        "code_hash": "abc123",
+        "job_id": job_id,
+        "log_path": f"logs/{job_id}-{node_key}.log",
+        "config": {"mode": "fast"},
+    }
+    if shard_index is not None:
+        manifest["shard_index"] = shard_index
     execution_id = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent).enqueue(
         AgentExecutionRequest(
             workspace_id=workspace_id,
@@ -88,14 +136,7 @@ def _enqueue_code(job_db, workspace_id: str, job_id: str, node_key: str, *, orde
             node_key=node_key,
             agent_id="package",
             agent_definition_hash="codehash",
-            manifest={
-                "kind": "code",
-                "capability": "package",
-                "code_hash": "abc123",
-                "job_id": job_id,
-                "log_path": f"logs/{job_id}-{node_key}.log",
-                "config": {"mode": "fast"},
-            },
+            manifest=manifest,
             kind="code",
         )
     )
@@ -231,3 +272,277 @@ def test_batch_claim_skips_second_candidate_of_same_node(job_db) -> None:
     assert _request_state(job_db, first) == "claimed"
     assert _request_state(job_db, second) == "queued"
     assert _active_node_lease_count(job_db, workspace_id, node_key) == 1
+
+
+# ---------------------------------------------------------------------------
+# 对抗评审 P2-1/P2-2：锁域收口的确定性交错用例
+# ---------------------------------------------------------------------------
+
+
+def _code_view() -> WorkerView:
+    """直连 evaluate_candidate 的 code-kind 视图（同
+    test_execution_generation_races._agent_view 的手法）。"""
+    return WorkerView(
+        runtimes=set(),
+        models=set(),
+        labels={},
+        allowed_workspaces=set(),
+        agent_capacity=0,
+        agent_active=0,
+        code_capacity=10,
+        code_active=0,
+        protocol_version=PROTOCOL_VERSION,
+    )
+
+
+def _start(fn: Callable[[], Any]) -> tuple[threading.Thread, dict[str, Any]]:
+    """B 侧线程：结果/异常都收进 outcome（比照 test_execution_generation_races）。"""
+    outcome: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            outcome["result"] = fn()
+        except Exception as exc:
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread, outcome
+
+
+def _join(thread: threading.Thread) -> None:
+    thread.join(timeout=30)
+    assert not thread.is_alive(), "write-side transaction never resolved"
+
+
+def _await_code_pool_waiter(timeout: float = 10.0) -> None:
+    """确定性同步点：等到有 backend 正等待 code-pool advisory 锁（比照
+    test_execution_generation_races._await_job_mutation_waiter 的手法：
+    pg_locks 观测，非裸 sleep）。"""
+    with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as probe:
+        row = probe.execute("select hashtext(%s)", ("code-pool",)).fetchone()
+        assert row is not None
+        expected = int(row[0]) & 0xFFFFFFFFFFFFFFFF
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            rows = probe.execute(
+                "select classid, objid from pg_locks"
+                " where locktype='advisory' and objsubid=1 and not granted"
+            ).fetchall()
+            for classid, objid in rows:
+                if ((int(classid) << 32) | int(objid)) & 0xFFFFFFFFFFFFFFFF == expected:
+                    return
+            time.sleep(0.02)
+    raise AssertionError(f"no backend waited on code-pool within {timeout}s")
+
+
+def test_first_config_insert_mid_claim_skips_unlocked_count(job_db, monkeypatch) -> None:
+    """P2-1（claim 侧）：probe 判「无 limit 行、不取锁」后、节点检查前，
+    配置插入在另一会话提交——claim 不得在无锁状态下计数新行（与并发持锁
+    claimant 竞态可超限 admit），按 node_limit_appeared skip 留队列；下一轮
+    probe 命中 → 取锁 → 正常 enforce → admit（skip 不产生 livelock）。"""
+    workspace_id, node_key = "ws-1149-p21c", "package"
+    _seed_code_lane(job_db, workspace_id, node_key, limit=None, job_ids=["job-p21c"])
+    execution_id = _enqueue_code(job_db, workspace_id, "job-p21c", node_key)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    inserted = {"done": False}
+    real_enter = claim_node_limit.enter_code_pool_domain
+
+    def enter_with_mid_claim_insert(conn, selected, kind, batch_code_pool_lock=None):
+        held = real_enter(conn, selected, kind, batch_code_pool_lock)
+        if kind == "code" and not held and not inserted["done"]:
+            inserted["done"] = True
+            # 竞态另一半：probe（无行、未取锁）与检查之间，另一会话插入并提交。
+            with job_db.connect() as writer:
+                writer.execute(
+                    "insert into workspace_node_limits(workspace_id, node_key, concurrency_limit)"
+                    " values (%s, %s, 1)",
+                    (workspace_id, node_key),
+                )
+        return held
+
+    monkeypatch.setattr(claim_node_limit, "enter_code_pool_domain", enter_with_mid_claim_insert)
+
+    state = ScanState()
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        selected = fetch_candidates(
+            conn, per_workspace=SCAN_ROUNDS[0][0], window=SCAN_ROUNDS[0][1], kind="code"
+        )[0]
+        claim = evaluate_candidate(broker, conn, "worker-p21c", selected, _code_view(), state)
+
+    assert claim is None
+    assert state.skip_reasons["node_limit_appeared"] == 1
+    assert _request_state(job_db, execution_id) == "queued"
+    assert _active_node_lease_count(job_db, workspace_id, node_key) == 0
+
+    state2 = ScanState()
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        selected = fetch_candidates(
+            conn, per_workspace=SCAN_ROUNDS[0][0], window=SCAN_ROUNDS[0][1], kind="code"
+        )[0]
+        claim2 = evaluate_candidate(broker, conn, "worker-p21c", selected, _code_view(), state2)
+
+    assert claim2 is not None
+    assert _request_state(job_db, execution_id) == "claimed"
+    assert _active_node_lease_count(job_db, workspace_id, node_key) == 1
+
+
+def _write_limit_rows(workspace_id: str, node_key: str) -> None:
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        replace_workspace_node_limits(
+            conn, workspace_id, [{"node_key": node_key, "concurrency_limit": 1}]
+        )
+
+
+def test_node_limit_config_write_takes_code_pool_lock_first(job_db) -> None:
+    """P2-1（写侧）：replace_workspace_node_limits 在写任何 limit 行之前取
+    code-pool 锁——锁被他人持有时配置写阻塞（与持锁 claim 串行化，持锁
+    claim 事务内的 limit 现值因此稳定）。去掉该锁时本用例的同步点超时
+    变红（写不阻塞、直接完成）。"""
+    workspace_id, node_key = "ws-1149-p21w", "package"
+    _seed_code_job(job_db, workspace_id, "job-seed", node_key)
+
+    holder = psycopg.connect(TEST_DATABASE_URL)
+    try:
+        holder.execute("select pg_advisory_xact_lock(hashtext('code-pool'))")
+        thread, outcome = _start(lambda: _write_limit_rows(workspace_id, node_key))
+        _await_code_pool_waiter()
+        holder.commit()
+    finally:
+        holder.close()
+    _join(thread)
+
+    assert outcome.get("error") is None
+    with job_db._connect_read() as conn:
+        row = conn.execute(
+            "select concurrency_limit from workspace_node_limits"
+            " where workspace_id=%s and node_key=%s",
+            (workspace_id, node_key),
+        ).fetchone()
+    assert row is not None
+    assert int(row["concurrency_limit"]) == 1
+
+
+def test_batch_takes_code_pool_lock_before_any_job_mutation(job_db) -> None:
+    """P2-2：批写事务在首个候选取 job-mutation 锁之前统一取 code-pool——
+    批序里 agent 候选（不取 code-pool）在前、带 limit 行的 code 候选在后
+    时，逐候选获取会把 code-pool 排到 job-mutation 之后（倒置全局锁序、
+    与「持 code-pool 等 job-mutation」的本地 claim 成环）；集中 probe 在
+    事务首句恢复全序。spy 记录全部 advisory 锁键的到达次序作断言。"""
+    workspace_id, node_key = "ws-1149-p22", "package"
+    seed_request(job_db, job_id="job-a-agent", workspace_id=workspace_id)
+    _seed_code_job(job_db, workspace_id, "job-z-code", node_key)
+    _set_node_limit(job_db, workspace_id, node_key, 1)
+    _enqueue_code(job_db, workspace_id, "job-z-code", node_key)
+    _register_code_worker("worker-1149-p22")
+    pool = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    selection = select_batch_candidates(pool, "worker-1149-p22", None, None, limit=2)
+    assert {str(row["kind"]) for row in selection.candidates} == {"agent", "code"}
+
+    advisory_keys: list[str] = []
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        real_execute = conn.execute
+
+        def spy(sql: Any, params: Any = None) -> Any:
+            cursor = real_execute(sql, params)
+            if "pg_advisory_xact_lock" in str(sql) and params:
+                advisory_keys.append(str(params[0]))
+            return cursor
+
+        conn.execute = spy  # type: ignore[method-assign]
+        outcome = claim_batch_in_transaction(
+            pool, conn, "worker-1149-p22", None, None, selection=selection
+        )
+
+    assert [claim.job_id for claim in outcome.claims] == ["job-a-agent", "job-z-code"]
+    assert "code-pool" in advisory_keys
+    first_job_mutation = next(
+        (i for i, key in enumerate(advisory_keys) if key.startswith("job-mutation:")), None
+    )
+    assert first_job_mutation is not None
+    assert advisory_keys.index("code-pool") < first_job_mutation
+
+
+# ---------------------------------------------------------------------------
+# P3-2：shard 候选与 limit 运行时可变
+# ---------------------------------------------------------------------------
+
+
+def test_shard_candidate_skips_on_node_limit_without_shard_side_effects(job_db) -> None:
+    """shard 候选：节点级检查位于 shard 分支（try_start_shard）之前——
+    limit 满时带 shard_index 的 code 请求 skip 留队列，node_shards 不绑定
+    execution_id、job_nodes 不翻 running、零 node_run 写入。"""
+    workspace_id, node_key = "ws-1149-shard", "package"
+    _seed_code_lane(job_db, workspace_id, node_key, limit=1, job_ids=["job-shard", "job-shard-occ"])
+    repo = ExecutorLeaseRepository(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+    # 名额占用：本地 claim（job-shard-occ，无 shard）。
+    assert repo.try_claim(_local_claim_request(workspace_id, "job-shard-occ", node_key, 1))
+    # shard 候选：node_shards 行待绑定 + manifest 带 shard_index。
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into node_shards(job_id, node_key, shard_index, status)"
+            " values (%s, %s, 0, 'pending')",
+            ("job-shard", node_key),
+        )
+    execution_id = _enqueue_code(job_db, workspace_id, "job-shard", node_key, shard_index=0)
+    _register_code_worker("worker-1149-shard")
+
+    claim = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent).claim(
+        "worker-1149-shard"
+    )
+
+    assert claim is None  # node_limit_full：检查在 shard 分支之前
+    assert _request_state(job_db, execution_id) == "queued"
+    with job_db._connect_read() as conn:
+        shard = conn.execute(
+            "select status, execution_id from node_shards"
+            " where job_id=%s and node_key=%s and shard_index=0",
+            ("job-shard", node_key),
+        ).fetchone()
+        node = conn.execute(
+            "select status from job_nodes where job_id=%s and node_key=%s",
+            ("job-shard", node_key),
+        ).fetchone()
+        runs = conn.execute(
+            "select count(*) as c from node_runs where job_id=%s", ("job-shard",)
+        ).fetchone()
+    assert shard is not None
+    assert shard["status"] == "pending"  # try_start_shard 未发生：未绑定
+    assert str(shard["execution_id"]) == ""
+    assert node is not None and node["status"] == "pending"
+    assert int(runs["c"]) == 0
+
+
+def test_node_limit_is_read_fresh_per_claim(job_db) -> None:
+    """limit 运行时可改：claim 时现读现值、排队请求不因设置变更被
+    fail-fast（与本地路径「请求携带值 vs 现值」契约式校验有意不同的核心
+    语义）——limit 2→1 后按新值 skip、回调 2 后放行；请求行上的 enqueue
+    时 audit 值（2）从不被强制。"""
+    workspace_id, node_key = "ws-1149-mut", "package"
+    _seed_code_lane(job_db, workspace_id, node_key, limit=2, job_ids=["job-m1", "job-m2"])
+    first = _enqueue_code(job_db, workspace_id, "job-m1", node_key, order=0)
+    second = _enqueue_code(job_db, workspace_id, "job-m2", node_key, order=1)
+    _register_code_worker("worker-1149-mut")
+    pool = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    round1 = claim_batch_with_retry(pool, "worker-1149-mut", None, None, limit=1, code_limit=1)
+    assert [claim.job_id for claim in round1.claims] == ["job-m1"]  # 占 1/2
+
+    _set_node_limit(job_db, workspace_id, node_key, 1)  # 收紧 2→1
+    round2 = claim_batch_with_retry(pool, "worker-1149-mut", None, None, limit=1, code_limit=1)
+    assert round2.claims == ()
+    assert round2.skip_reasons.get("node_limit_full") == 1  # 计数 1 >= 新值 1
+    assert _request_state(job_db, second) == "queued"  # 留队列，不 fail-fast
+    assert _request_state(job_db, first) == "claimed"
+    with job_db._connect_read() as conn:
+        row = conn.execute(
+            "select node_concurrency_limit from agent_execution_requests where execution_id=%s",
+            (second,),
+        ).fetchone()
+    assert int(row["node_concurrency_limit"]) == 2  # enqueue 时 audit 值，从不强制
+
+    _set_node_limit(job_db, workspace_id, node_key, 2)  # 放宽回 2
+    round3 = claim_batch_with_retry(pool, "worker-1149-mut", None, None, limit=1, code_limit=1)
+    assert [claim.job_id for claim in round3.claims] == ["job-m2"]  # 计数 1 < 2

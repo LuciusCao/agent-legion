@@ -109,7 +109,7 @@ brick。现行语义：决策写在 `job-mutation` 锁下只做状态守卫—�
 
 | 层级 | 锁域 | 持有者 |
 | --- | --- | --- |
-| 1（最外） | 池级锁：`code-pool` / `agent-ws:<workspace_id>` / `agent-worker:<worker_id>` | claim 与批路径；mutation 侧**永不取** |
+| 1（最外） | 池级锁：`code-pool` / `agent-ws:<workspace_id>` / `agent-worker:<worker_id>` | claim 与批路径（批的 code-pool 在写事务首句集中决策，#1149）；`workspace_node_limits` 配置写（#1149，共享 code-pool，先于任何 limit 行写）；mutation 侧**永不取** |
 | 1.5 | `artifact-authority:<key>` | promote 事务首句（多 key 升序），串行化产物字节面的备份/copy/登记/恢复；mutation 侧不取，与池锁无共持 |
 | 2 | `job-mutation:<job_id>` | mutation 侧首句；所有执行态写面在池锁之后（或无池锁直接）取 |
 | 3 | `implementation-publication:<workspace_id>` | upgrade guard 事务（无条件，先于 active revision 重读）；发布侧共享（见 2.9） |
@@ -119,7 +119,13 @@ brick。现行语义：决策写在 `job-mutation` 锁下只做状态守卫—�
 无环论证：mutation 侧不取池锁也不取 artifact 锁，发布侧不碰 job 行也不取
 job-mutation 锁，跨层只有单向边（artifact-authority → job-mutation；池锁 →
 job-mutation；job-mutation → implementation-publication → skill-lock）。
-enqueue 不持池锁、直接取 job-mutation，环保持无环。
+enqueue 不持池锁、直接取 job-mutation，环保持无环。#1149 的两个新持有者不
+破序：批 claim 的 code-pool 在写事务首句集中获取（先于全部 job-mutation），
+agent-worker 域是 per-worker 的且同 worker 的单条/批写事务都在
+agent_workers 行锁上先行串行化，无跨会话对在「一方持 code-pool」时争
+agent-worker；workspace_node_limits 配置写只取 code-pool（唯一调用方事务内
+的 workspaces 行锁先于它——全部 limit 写共享同一条固定内部序，且无其他
+code-pool 持有者请求 workspaces 行）。
 
 **批序全序**：每个跨 job 的批（finish_many、try_claim_many、expire、recover、
 agent sweep、两个 queued-request sweep、批 claim 的每个候选——code 也包括，
