@@ -211,8 +211,8 @@ mixed-fleet compatibility and upgrade order.
   | #547 single-object claim body removed: every non-empty claim answers `{"claims": [...]}` (`server/app/routes/agent_worker_claims.py`) | v0.7.12 | — | **broken** for Workers before worker-v0.7.4: they read the wrapper as one claim, so every execution they claim stays leased without starting and requeues only when the lease expires | n/a |
   | #657 concurrency ceiling 1024 → 2048 (`shared/concurrency_limits.py`; registration `max_concurrency` / `max_code_concurrency` and claim limits) | v0.7.12 (88f48f5cf) | worker-v0.7.12 | works (older Workers never declare more than 1024) | **rejected** when the Worker is configured above 1024: an older Host answers registration with 422 (and would reject such a claim body the same way); at ≤ 1024 it works |
   | #211 M3 `workflow_key` removed from claim responses | v0.7.16 | — | works for every `worker-v*` release (no Worker reads it since v0.5.0) | n/a |
-  | #748 / #755 `X-Agent-Result` carries raw UTF-8; a direct-upload artifact list over the 14 KiB header budget moves into the result archive (`result-output-artifacts.json` + header flag) | v0.7.14 | worker-v0.7.14 | works (older Workers send ASCII-escaped JSON) | degraded: CJK `error_message` / `agent_stderr_tail` arrive as mojibake, and a run whose artifact list overflows the header fails with missing outputs |
-  | #843 result metadata v2: `X-Agent-Result-Format: 2` — the metadata JSON moves into the result-archive member `result.json` (the header budget and the #748/#755 degrade chain do not apply to that shape) | v0.7.19 (dual-shape read; Host reads both shapes through the same validation) | worker PR-2 (not shipped yet) | works — older Workers keep sending the v1 header shape and never set the format marker | n/a until PR-2: a v2-writing Worker against a pre-v0.7.19 Host is refused with 400 (the old Host finds no v1 `X-Agent-Result` JSON and rejects the metadata); upgrade Host first |
+  | #748 / #755 `X-Agent-Result` carries raw UTF-8; a direct-upload artifact list over the 14 KiB header budget moves into the result archive (`result-output-artifacts.json` + header flag) — **v1 legacy shape**: workers before worker-v0.7.19 only | v0.7.14 | worker-v0.7.14 | works (older Workers send ASCII-escaped JSON) | degraded: CJK `error_message` / `agent_stderr_tail` arrive as mojibake, and a run whose artifact list overflows the header fails with missing outputs |
+  | #843 result metadata v2: `X-Agent-Result-Format: 2` — the metadata JSON moves into the result-archive member `result.json` (first member; the header budget and the #748/#755 degrade chain do not apply to that shape; the artifact manifest rides `result.json` too, so the v1 `result-output-artifacts.json` switch member is gone) | v0.7.19 (dual-shape read; Host reads both shapes through the same validation) | worker-v0.7.19 | works — older Workers keep sending the v1 header shape and never set the format marker | **not a supported shape**: a pre-v0.7.19 Host finds no v1 `X-Agent-Result` JSON and answers 400; the Worker degrades once into a failed report, that is 400 too, so the result is dropped and the lease expires into a re-run (each re-run fails the same way). The Host-first upgrade order is the guard |
 
   Additive fields (the batch heartbeat's `settled` list #590, the claim's
   `execution_generation` #759 and `max_archive_bytes` #959) are tolerated
@@ -221,13 +221,14 @@ mixed-fleet compatibility and upgrade order.
   Compatibility matrix by release (rows: Host release and its protocol;
   columns: Worker release; every `worker-v*` tag declares protocol v4 or v5):
 
-  | Host \ Worker | worker-v0.6.0 – v0.6.1 (v4) | worker-v0.7.0 (v5) | worker-v0.7.4 – v0.7.13 (v5) | worker-v0.7.14 and later (v5) |
-  | --- | --- | --- | --- | --- |
-  | **v0.4.0-alpha and earlier** (≤ v3) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
-  | **v0.5.0 – v0.6.0** (v4) | works (gzip artifacts, per-execution heartbeats) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
-  | **v0.7.0 – v0.7.11** (v5, single-object claims still served) | works (per-execution heartbeats) | works | works (batch claims from Host v0.7.4; per-claim fallback before); worker-v0.7.12+ configured above 1024 concurrency is rejected at registration (#657) | degraded (#748 / #755 row above); above 1024 concurrency rejected (#657) |
-  | **v0.7.12 – v0.7.13** (v5) | **broken** (#547) | **broken** (#547) | works | degraded (#748 / #755 row above) |
-  | **v0.7.14 and later** (v5, current) | **broken** (#547) | **broken** (#547) | works | works |
+  | Host \ Worker | worker-v0.6.0 – v0.6.1 (v4) | worker-v0.7.0 (v5) | worker-v0.7.4 – v0.7.13 (v5) | worker-v0.7.14 – v0.7.18 (v5) | worker-v0.7.19 and later (v5) |
+  | --- | --- | --- | --- | --- | --- |
+  | **v0.4.0-alpha and earlier** (≤ v3) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
+  | **v0.5.0 – v0.6.0** (v4) | works (gzip artifacts, per-execution heartbeats) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
+  | **v0.7.0 – v0.7.11** (v5, single-object claims still served) | works (per-execution heartbeats) | works | works (batch claims from Host v0.7.4; per-claim fallback before); worker-v0.7.12+ configured above 1024 concurrency is rejected at registration (#657) | degraded (#748 / #755 row above); above 1024 concurrency rejected (#657) | **broken** (#843 row above: no v1 `X-Agent-Result` JSON → 400 → drop → lease-expiry re-run); upgrade the Host first |
+  | **v0.7.12 – v0.7.13** (v5) | **broken** (#547) | **broken** (#547) | works | degraded (#748 / #755 row above) | **broken** (#843 row above: 400 → drop → re-run) |
+  | **v0.7.14 – v0.7.18** (v5) | **broken** (#547) | **broken** (#547) | works | works | **broken** (#843 row above: 400 → drop → re-run) |
+  | **v0.7.19 and later** (v5, current) | **broken** (#547) | **broken** (#547) | works | works (v1 header shape; the #843 dual-shape read) | works (result metadata v2) |
 
   **Minimum supported Worker for a current Host (v0.7.12 and later):
   worker-v0.7.4.** The recommended pairing is the Worker release of the
@@ -252,33 +253,47 @@ mixed-fleet compatibility and upgrade order.
   treats a missing/older `host_protocol_version` as a terminal registration
   error and exits 2, so it cannot let an old Host erase model runtimes and
   misroute claims. Roll back Host and Workers together.
-- **Result header (#748).** `X-Agent-Result` carries raw UTF-8 bytes (CJK
-  error summaries are non-ASCII header values). Every reverse proxy / load
-  balancer / gateway between Worker and Host must pass non-ASCII header
-  values through unchanged — rewriting or rejecting them makes results
-  undeliverable and the lease expires into a requeue. This wire change did
-  not bump the protocol version, which is another reason for Host-first: a
-  new Worker against an old Host (including a Host-only rollback) shows the
-  CJK parts of `error_message` / `agent_stderr_tail` as mojibake (structure
-  and success/failure verdicts are unaffected). The header has a 14 KiB
-  budget; over budget the Worker sheds stderr tail → error_message →
+- **Result header (#748, v1 legacy shape — workers before worker-v0.7.19).**
+  `X-Agent-Result` carries raw UTF-8 bytes (CJK error summaries are
+  non-ASCII header values). Every reverse proxy / load balancer / gateway
+  between Worker and Host must pass non-ASCII header values through
+  unchanged — rewriting or rejecting them makes results undeliverable and
+  the lease expires into a requeue. **This deployment requirement retires
+  with v2** (v0.7.19 Workers put no metadata in a header at all); it stays
+  load-bearing for older Workers for as long as the Host's v1 read path
+  remains (i.e. until the v1 read path is deleted). The v1 header has a
+  14 KiB budget; over budget the Worker sheds stderr tail → error_message →
   command → the artifact list, moving a direct-upload artifact list into the
   result archive (`result-output-artifacts.json`, #755) rather than
-  dropping it. Result delivery verdicts (#959): the Worker prechecks the
-  result archive against the claim-delivered `max_archive_bytes` and reports
-  an oversized run failed instead of shipping it; a Host 4xx other than
-  409 / 408 / 425 / 429 is degraded once into a failed report (no silent
+  dropping it — none of that degrade chain applies to v2 reports. Result
+  delivery verdicts (#959): the Worker prechecks the result archive against
+  the claim-delivered `max_archive_bytes` and reports an oversized run
+  failed instead of shipping it; a Host 4xx other than 409 / 401 / 408 /
+  425 / 429 is degraded once into a failed report (no silent
   lease-expiry rerun), while 5xx / network errors and 408 / 425 / 429 keep
-  retrying while the lease is held (§7).
-- **Result metadata v2 (#843, Host side since v0.7.19).** When a report carries
-  `X-Agent-Result-Format: 2`, the metadata JSON arrives as the reserved
-  result-archive member `result.json` (UTF-8) instead of the `X-Agent-Result`
-  header — the header budget and the #748/#755 degrade chain do not apply to
-  that shape, and a stray `X-Agent-Result` header is ignored. The Host reads
-  both shapes through the same validation (identical truncation caps); v1
-  reports without the marker behave exactly as before, so mixed fleets are
-  safe. The Worker-side write switch lands with PR-2 (#843); until then every
-  shipping Worker uses v1.
+  retrying while the lease is held (§7). #1098 (v0.7.19 Workers): each
+  report attempt is a single transport try — retries move to the report
+  loop, which re-arms the heartbeat between attempts, so a stalling Host no
+  longer holds the heartbeat silent for 3 × transfer-timeout (~360s, past
+  the 90s lease TTL). #1082 (v0.7.19 Workers): a 401 on `/result` is
+  worker auth loss, not a run verdict — the Worker keeps the pending
+  marker, abandons the attempt, exits via the status-sync auth path
+  (supervisor restart → re-registration) and redelivers after
+  re-registration if the lease still belongs to it.
+- **Result metadata v2 (#843, Host side and Worker side since v0.7.19).**
+  When a report carries `X-Agent-Result-Format: 2`, the metadata JSON
+  arrives as the reserved result-archive member `result.json` (first
+  member, UTF-8) instead of the `X-Agent-Result` header — the header
+  budget and the #748/#755 degrade chain do not apply to that shape, a
+  stray `X-Agent-Result` header is ignored, and the full artifact manifest
+  (including direct-upload refs) rides `result.json`, so the v1
+  `result-output-artifacts.json` switch member is no longer written. The
+  Host reads both shapes through the same validation (identical truncation
+  caps); v1 reports without the marker behave exactly as before, so mixed
+  fleets are safe. The unsupported mixed shape is a v2-writing Worker
+  against a pre-v0.7.19 Host (400 → result dropped after the one-shot
+  degrade → lease-expiry re-run; the Host-first upgrade order above is the
+  guard).
 - **`workflow_key` is gone from claim responses** (#211 M3): claims identify
   the workflow by `workspace_id` only. Every supported Worker (batch-claim
   era, #547) already ignores the field, so no Worker upgrade is required;

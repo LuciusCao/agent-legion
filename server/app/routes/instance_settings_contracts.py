@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from server.app.skills.skill_roots import SKILLS_ROOT_DISPLAY
+from shared.code_contract import MIN_RESULT_ARCHIVE_BYTES
 
 
 class InstanceCleanupSettings(BaseModel):
@@ -45,7 +46,10 @@ class InstanceWorkflowsSettings(BaseModel):
 class InstanceAgentWorkersSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    max_archive_bytes: int = Field(gt=0)
+    # #1082: ge=MIN_RESULT_ARCHIVE_BYTES（1 KiB）mirrors
+    # ExecutorRuntimeConfig — a ceiling that cannot hold even an empty
+    # tar.gz (the failed-degrade metadata-only archive) is a misconfiguration.
+    max_archive_bytes: int = Field(ge=MIN_RESULT_ARCHIVE_BYTES)
     min_protocol_version: int = Field(ge=1)
     # #521 peak-shaving gate on the result commit; restart-effective. 0 =
     # disabled (the kill-switch), ge=0 mirrors ExecutorRuntimeConfig.

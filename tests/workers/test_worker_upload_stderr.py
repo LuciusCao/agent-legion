@@ -41,16 +41,14 @@ def test_crash_exit_reports_stderr_summary_and_leaves_trace(tmp_path: Path) -> N
     archived: dict[str, bytes] = {}
     original_report = client.report
 
-    def report_and_capture(
-        execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
+    def report_and_capture(execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
         # 归档在 report 成功后随 execution dir 一起被清掉，必须在此刻取内容。
         with tarfile.open(archive, "r:gz") as tar:
             member = next(m for m in tar.getmembers() if m.name.endswith("agent-stderr.log"))
             extracted = tar.extractfile(member)
             assert extracted is not None
             archived[member.name] = extracted.read()
-        return original_report(execution_id, lease_id, metadata, archive)
+        return original_report(execution_id, lease_id, archive)
 
     client.report = report_and_capture  # type: ignore[method-assign]
     queue.submit(_task(work_root, exit_code=1))
@@ -212,15 +210,13 @@ def test_crash_stderr_redacts_secret_values(
     archived: dict[str, bytes] = {}
     original_report = client.report
 
-    def report_and_capture(
-        execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
+    def report_and_capture(execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
         with tarfile.open(archive, "r:gz") as tar:
             member = next(m for m in tar.getmembers() if m.name.endswith("agent-stderr.log"))
             extracted = tar.extractfile(member)
             assert extracted is not None
             archived[member.name] = extracted.read()
-        return original_report(execution_id, lease_id, metadata, archive)
+        return original_report(execution_id, lease_id, archive)
 
     client.report = report_and_capture  # type: ignore[method-assign]
     queue = _queue(client)
@@ -287,15 +283,13 @@ def test_crash_stderr_redacts_multiline_pem_with_trailing_newline(
     archived: dict[str, bytes] = {}
     original_report = client.report
 
-    def report_and_capture(
-        execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
+    def report_and_capture(execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
         with tarfile.open(archive, "r:gz") as tar:
             member = next(m for m in tar.getmembers() if m.name.endswith("agent-stderr.log"))
             extracted = tar.extractfile(member)
             assert extracted is not None
             archived[member.name] = extracted.read()
-        return original_report(execution_id, lease_id, metadata, archive)
+        return original_report(execution_id, lease_id, archive)
 
     client.report = report_and_capture  # type: ignore[method-assign]
     queue = _queue(client)
@@ -353,15 +347,13 @@ def test_cjk_single_line_straddling_secret_leaks_nowhere(
     archived: dict[str, bytes] = {}
     original_report = client.report
 
-    def report_and_capture(
-        execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
+    def report_and_capture(execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
         with tarfile.open(archive, "r:gz") as tar:
             member = next(m for m in tar.getmembers() if m.name.endswith("agent-stderr.log"))
             extracted = tar.extractfile(member)
             assert extracted is not None
             archived[member.name] = extracted.read()
-        return original_report(execution_id, lease_id, metadata, archive)
+        return original_report(execution_id, lease_id, archive)
 
     client.report = report_and_capture  # type: ignore[method-assign]
     queue = _queue(client)
@@ -424,15 +416,13 @@ def test_error_message_redacts_config_environment_secret(
     archived: dict[str, bytes] = {}
     original_report = client.report
 
-    def report_and_capture(
-        execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
+    def report_and_capture(execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
         with tarfile.open(archive, "r:gz") as tar:
             member = next(m for m in tar.getmembers() if m.name.endswith("agent-stderr.log"))
             extracted = tar.extractfile(member)
             assert extracted is not None
             archived[member.name] = extracted.read()
-        return original_report(execution_id, lease_id, metadata, archive)
+        return original_report(execution_id, lease_id, archive)
 
     client.report = report_and_capture  # type: ignore[method-assign]
     queue = _queue(client)
@@ -698,15 +688,13 @@ def test_crash_stderr_redacts_surrogateescape_env_secret(
     archived: dict[str, bytes] = {}
     original_report = client.report
 
-    def report_and_capture(
-        execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
+    def report_and_capture(execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
         with tarfile.open(archive, "r:gz") as tar:
             member = next(m for m in tar.getmembers() if m.name.endswith("agent-stderr.log"))
             extracted = tar.extractfile(member)
             assert extracted is not None
             archived[member.name] = extracted.read()
-        return original_report(execution_id, lease_id, metadata, archive)
+        return original_report(execution_id, lease_id, archive)
 
     client.report = report_and_capture  # type: ignore[method-assign]
     queue = _queue(client)

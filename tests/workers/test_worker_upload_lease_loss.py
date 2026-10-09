@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tarfile
 import threading
 import time
 from pathlib import Path
 
 import pytest
 
+from shared.code_contract import RESULT_METADATA_MEMBER
 from worker._atomic import atomic_write
 from worker.artifact.upload import DirectUploadError
 from worker.execution.heartbeat import start_lease_heartbeat
@@ -30,6 +32,13 @@ from worker.execution.ownership import OWNER_FILENAME, write_owner_marker
 from worker.status import ExecutionStatusReporter
 from worker.upload import queue as upload_queue
 from worker.upload.queue import PENDING_FILENAME, UploadQueue, UploadTask
+
+
+def _read_result_metadata(archive: Path) -> dict:
+    with tarfile.open(archive) as tar:
+        member = tar.extractfile(RESULT_METADATA_MEMBER)
+        assert member is not None, "result archive is missing the result.json member"
+        return json.loads(member.read())
 
 
 class QueueFakeClient:
@@ -47,14 +56,12 @@ class QueueFakeClient:
         self.uploads[digest] = data
         return f"sha256:{digest}"
 
-    def report(
-        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
+    def report(self, execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
         self.heartbeats_at_report.append(self.heartbeats)
         if self.report_errors > 0:
             self.report_errors -= 1
             raise RuntimeError("download failed: /x: timed out")
-        self.reports.append(metadata)
+        self.reports.append(_read_result_metadata(archive))
         return self.report_status, b""
 
     def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
@@ -143,10 +150,10 @@ def test_report_backoff_resume_does_not_resurrect_lost_lease(
     queue = _queue(client, registry=registry)
     original_report = client.report
 
-    def report_then_lose(execution_id, lease_id, metadata, archive):  # type: ignore[no-untyped-def]
+    def report_then_lose(execution_id, lease_id, archive):  # type: ignore[no-untyped-def]
         # 模拟批拍在退避窗口内带回 lost verdict：共享事件被置位。
         task.ownership_lost.set()
-        return original_report(execution_id, lease_id, metadata, archive)
+        return original_report(execution_id, lease_id, archive)
 
     client.report = report_then_lose  # type: ignore[method-assign]
     queue.submit(task)

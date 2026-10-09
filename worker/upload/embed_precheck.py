@@ -5,7 +5,9 @@ DirectUploadError 回退臂在清规格重跑 prepare 之前先过换轨预检�
 413 → 丢结果 → 租约过期全量重跑（每轮同样 413）。有效余量是上限的函数
 （embed_safety_margin，#755 codex P2-1：小上限是合法配置，固定余量与可
 配置上限直接做减法会在小上限下误杀任何产物）；预检是优化不是裁判，余量
-带内的误放行由换轨重备后的 re-stat 兜底（embed_restast_rejection）。上限
+带内的误放行由换轨后 bulk 车道终点的 v2 finalize 大小门收口
+（prepare.finalize 调 result_manifest.finalize_result_metadata——原
+embed_restast_rejection 的 re-stat 兜底面已并入该 ceiling 检查）。上限
 来自 claim 下发（Host 实例设置 agent_workers.max_archive_bytes，经
 agent_worker_claim_response 内存态注入，不持久化），旧 Host 未下发时
 （UploadTask.max_archive_bytes == 0）回落 64 MiB 默认。
@@ -13,10 +15,9 @@ agent_worker_claim_response 内存态注入，不持久化），旧 Host 未下�
 
 from __future__ import annotations
 
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
 from shared.code_contract import CODE_RESULT_LOG_MEMBER
-from worker.upload.result_metadata import write_empty_archive
 from worker.upload.task import UploadTask
 
 # 默认上限与 server/app/configuration/executor_runtime.py 的同值默认对齐；
@@ -33,7 +34,8 @@ def embed_safety_margin(ceiling: int) -> int:
     PUT 一次暂时失败就把装得进 Host 上限的结果直接判 failed。余量按
     min(固定余量, 上限/4) 收缩：默认 64 MiB 上限行为不变，任何合法上限
     下预算恒为正（≥ 3/4 上限）。预检是优化不是裁判：余量带内的误放行
-    由换轨后 re-stat 兜底（queue.py 的 DirectUploadError 臂），不可误杀。"""
+    由换轨后 bulk 车道终点的 v2 finalize 大小门兜底（result_manifest.
+    finalize_result_metadata 的 ceiling 检查），不可误杀。"""
     return min(EMBED_SAFETY_MARGIN_BYTES, ceiling // 4)
 
 
@@ -88,23 +90,4 @@ def embed_switch_rejection(task: UploadTask) -> str | None:
         f" budget ({ceiling} bytes Host ceiling less"
         f" {margin} bytes safety margin); cannot switch"
         f" to the archive-embedded channel"
-    )
-
-
-def embed_restast_rejection(task: UploadTask, archive: Path) -> str | None:
-    """换轨重备后的 re-stat 兜底（#755 codex P2-1）：预检是未压缩口径的
-    优化放行（小上限下余量按上限比例收缩，tar/gzip 开销占比不可忽略），
-    换轨重备的归档仍可能超 Host 上限——重报大归档只会吃 413 被 report
-    循环当终态删 marker。超限先把归档回收成可提交体积（空归档，判败语义
-    下证据让位于可提交性，同 report.py 的 embed 超限臂）并返回判败原因
-    （交给 failed_metadata）；未超限返回 None。"""
-    ceiling = task.max_archive_bytes or ARCHIVE_EMBED_DEFAULT_CEILING_BYTES
-    archive_bytes = archive.stat().st_size if archive.is_file() else 0
-    if archive_bytes <= ceiling:
-        return None
-    write_empty_archive(archive)
-    return (
-        f"archive-embedded fallback produced a {archive_bytes}-byte archive,"
-        f" over the {ceiling}-byte Host archive ceiling; cannot deliver"
-        f" the result archive"
     )

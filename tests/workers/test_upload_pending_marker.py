@@ -21,7 +21,7 @@ pytestmark = pytest.mark.no_db
 
 
 class _FakeClient:
-    def report(self, execution_id: str, lease_id: str, metadata: dict, archive: Path):
+    def report(self, execution_id: str, lease_id: str, archive: Path):
         return 204, b""
 
     def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:

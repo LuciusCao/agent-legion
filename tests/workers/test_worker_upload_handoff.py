@@ -34,10 +34,8 @@ class _GatedClient:
         self.uploads[digest] = data
         return f"sha256:{digest}"
 
-    def report(
-        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
-        self.reports.append(metadata)
+    def report(self, execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
+        self.reports.append({"execution_id": execution_id})
         return 204, b""
 
     def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:

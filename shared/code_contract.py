@@ -7,7 +7,8 @@ without a repo checkout.
 
 Lives here rather than only in code_sandbox because these constants are the
 Worker↔Host boundary itself: the Worker writes exactly these members/keys
-(``worker/code_runner.py``, ``worker/host/transfer.py``), the Host reads them
+(``worker/code_runner.py``, ``worker/upload/result_manifest.py`` for the v2
+``result.json`` member, #843), the Host reads them
 (``server/app/agent_broker/result_unpack.py`` for members,
 ``server/app/routes/agent_worker_results.py`` for metadata keys, #843 v2
 also ``server/app/agent_broker/result_metadata_reader.py`` for the
@@ -29,30 +30,47 @@ CODE_RESULT_LOG_MEMBER = "node.log"
 # 结果归档里携带直传产物清单的保留成员名（#755 codex P1）：结果头字节预算
 # 装不下直传 dict ref 清单时，Worker 把完整 {"name": ref} 映射写成该成员
 # （首成员），头里只留 output_artifacts_in_archive 标记；产物字节已在 S3
-# （presigned 通道），不重复传输。Worker 写入（worker/upload/report.py 经
-# result_manifest.py），Host 读取（server/app/agent_broker/
-# result_output_manifest.py）；该成员永不进 expected outputs 提升面。
+# （presigned 通道），不重复传输。#843 PR-2 起 Worker 写侧切 v2 后不再产生
+# 该成员（清单整体留在 result.json）；Host 读侧保留 v1 旧 Worker 兼容窗
+# （server/app/agent_broker/result_output_manifest.py）；该成员永不进
+# expected outputs 提升面。
 RESULT_OUTPUT_ARTIFACTS_MEMBER = "result-output-artifacts.json"
-# 与清单成员配套的头部布尔标记键（同 #755 codex P1 协议）：Worker 写
-# （worker/upload/report.py 溢出臂），Host 读（agent_worker_results.py 的
-# parse_result_metadata）；单一事实来源在此，两侧字面量漂移即断。
+# 与清单成员配套的头部布尔标记键（同 #755 codex P1 协议）：#843 PR-2 起
+# Worker 不再写它（v2 契约明文禁止 v2 payload 携带本标记）；Host 读侧保留
+# v1 旧 Worker 兼容窗，且 v2 形态下显式忽略（agent_worker_result_shapes 的
+# read_member 在 parse 前剥离）。单一事实来源在此，两侧字面量漂移即断。
 RESULT_OUTPUT_ARTIFACTS_FLAG = "output_artifacts_in_archive"
-# #843 结果元数据 v2 双形态（PR-1 Host 读侧）：头里的 v1 JSON 整体迁入
-# 结果归档的保留成员 ``result.json``（UTF-8 JSON 文本），请求头改为固定
-# ASCII 引导值 ``X-Agent-Result-Format: 2``。头名与值在此单一事实来源
-# （Worker 写侧随 PR-2 切换，Host 读侧即本 PR）；16KiB 头上限与
-# #748/#755 的降级链随之退役——v2 无头预算。成员名与
+# #843 结果元数据 v2 双形态：头里的 v1 JSON 整体迁入结果归档的保留成员
+# ``result.json``（UTF-8 JSON 文本，Worker 写侧在产物清单终态后由
+# worker/upload/result_manifest.py 写成首成员——含完整 output_artifacts），
+# 请求头改为固定 ASCII 引导值 ``X-Agent-Result-Format: 2``。头名与值在
+# 此单一事实来源（PR-1 Host 读侧、PR-2 Worker 写侧同用）；16KiB 头上限
+# 与 #748/#755 的降级链随 Worker 写侧切换退役——v2 无头预算。成员名与
 # RESULT_OUTPUT_ARTIFACTS_MEMBER 同属归档保留成员命名空间。
 RESULT_METADATA_FORMAT_HEADER = "X-Agent-Result-Format"
 RESULT_METADATA_FORMAT_V2 = "2"
 RESULT_METADATA_MEMBER = "result.json"
+# 结果归档保留成员名全集（#843 评审 P1）：节点 expected output 命中任一即
+# 碰撞——v2 下 ``result.json`` 会被元数据换写静默吞掉真产物、``node.log``
+# 与 code 车道捕获日志双写同名互相覆盖、``result-output-artifacts.json``
+# 是 v1 换轨成员。入队守卫（agent_broker/manifest_guard）按全集拒绝；
+# Host staging 提升守卫（agent_broker/result_unpack）只拦前两个成员
+# （node.log 冲突走 completion_preflight 的既有保留源守卫）。
+RESERVED_RESULT_ARCHIVE_MEMBERS = frozenset(
+    {RESULT_METADATA_MEMBER, RESULT_OUTPUT_ARTIFACTS_MEMBER, CODE_RESULT_LOG_MEMBER}
+)
+# ``agent_workers.max_archive_bytes`` 的合法下限（#1082）：1 KiB 才能容纳
+# 空 tar.gz（判败降级路径的 metadata-only 归档），Host 配置模型
+# （server/app/configuration/executor_runtime.py）与实例设置 PUT 契约
+# （server/app/routes/instance_settings_contracts.py）共用本单一来源。
+MIN_RESULT_ARCHIVE_BYTES = 1024
 # 结果元数据 ``command`` 面的段数上限（#822）。command 是纯观测面（Host 只
 # 记录、不参与完成判定），但 agent argv 会把每个 expected output 以
 # ``--require-output <name>`` 重复进去，产物一多段数即线性膨胀。两侧同一
-# 语义——超限截断保前缀、不拒收：Worker 序列化（worker/host/transfer.py 的
-# ``_result_header_value``）主动收缩，Host 解析（agent_worker_results.py 的
-# ``parse_result_metadata``）防御性截断。旧版 Host 对超限直接 400，Worker 4xx
-# 终态丢弃 marker → 租约过期重排队 → 同样产物再跑一遍的死循环即由此而来。
+# 语义——超限截断保前缀、不拒收：#843 PR-2 起 Worker 写侧不再主动收缩
+# （v1 头序列化器已退役，result.json 无段数预算），Host 解析
+# （agent_worker_results.py 的 ``parse_result_metadata``）防御性截断两形态
+# 同享。旧版 Host 对超限直接 400 的死循环历史见 v1 兼容窗说明。
 MAX_RESULT_COMMAND_PARTS = 64
 # Mirrors workspace_libs/node_sdk.py NODE_RUNTIME_DIR / AUTH_FAILURE_MARKER.
 # node_sdk must stay import-self-contained (the code bundle ships only the

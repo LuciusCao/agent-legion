@@ -3,6 +3,15 @@
 Split out of ``queue.py`` so the queue module stays within its size
 budget: this is the "process" task path that scans events, builds the result
 archive, and derives the report metadata before any byte leaves the Worker.
+
+#843 v2（PR-2）：本模块构建的归档是 **body 归档**（产物 + run_dir /
+node.log，不含元数据成员）——结果元数据整体（含产物清单）由
+``worker/upload/result_manifest.finalize_result_metadata`` 在 bulk 车道
+终点（产物引用终态后）写成保留首成员 ``result.json``（UTF-8 JSON 文本，
+shared/code_contract.RESULT_METADATA_MEMBER）。产物清单留在 result.json
+里，不再产生 v1 换轨成员 ``result-output-artifacts.json``；v2 契约
+（PR-1 评审 P3-2）明文禁止 payload 携带 ``output_artifacts_in_archive``
+标记。大小治理同归档成员：``max_archive_bytes`` 是唯一大小门。
 """
 
 from __future__ import annotations
@@ -60,8 +69,12 @@ def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]
 
 
 def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
-    """Build (metadata, archive, output names); may raise — caller degrades
-    to a failed-result report, mirroring the old inline catch-all."""
+    """Build (metadata, body archive, output names); may raise — caller
+    degrades to a failed-result report, mirroring the old inline catch-all.
+
+    #843 v2：返回的归档是 body 归档（产物 + run_dir，**无 result.json
+    成员**)——元数据在 bulk 车道终点由 finalize_result_metadata 写入；
+    中间归档永不外发（report 车道只见到 finalize 后的最终形态）。"""
     archive = task.execution_dir / "result.tar.gz"
     if task.kind == "prebuilt":
         metadata = dict(task.prebuilt_metadata or {})

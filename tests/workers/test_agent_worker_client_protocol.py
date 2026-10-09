@@ -224,13 +224,22 @@ def test_registration_unexpected_client_error_crashes_loudly() -> None:
 
 
 def test_client_heartbeat_and_report_send_lease_header() -> None:
+    """lease 头两车道同在；#843 PR-2 起 report 额外带 v2 format 头（常量
+    单一事实来源），且不再发送 X-Agent-Result 头。"""
+    from shared.code_contract import (
+        RESULT_METADATA_FORMAT_HEADER,
+        RESULT_METADATA_FORMAT_V2,
+    )
+
     client = agent_worker.Client("http://unused")
     seen: list[dict] = []
     client.request = lambda *a, **k: (seen.append(k.get("headers") or {}), (204, b""))[1]  # type: ignore[method-assign]
     client.heartbeat("exec-1", "lease-9")
     archive = Path(__file__)
-    client.report("exec-1", "lease-9", {"status": "completed"}, archive)
+    client.report("exec-1", "lease-9", archive)
     assert [call.get("X-Agent-Lease-Id") for call in seen] == ["lease-9", "lease-9"]
+    assert seen[1].get(RESULT_METADATA_FORMAT_HEADER) == RESULT_METADATA_FORMAT_V2
+    assert "X-Agent-Result" not in seen[1]
 
 
 # --- #352: 批量心跳 client 面 -------------------------------------------------

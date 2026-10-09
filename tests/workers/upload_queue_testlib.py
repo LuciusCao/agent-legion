@@ -8,13 +8,25 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tarfile
 import threading
 from pathlib import Path
+from typing import Any
 
+from shared.code_contract import RESULT_METADATA_MEMBER
 from worker.execution.heartbeat_batch import BatchHeartbeatRegistry
 from worker.status import ExecutionStatusReporter
 from worker.upload import queue as upload_queue  # noqa: F401  (调用方 monkeypatch 用)
 from worker.upload.queue import UploadQueue, UploadTask
+
+
+def read_result_metadata(archive: Path) -> dict[str, Any]:
+    """v2（#843 PR-2）：上报元数据在归档 ``result.json`` 成员里——fake 从归档
+    读回，钉住「写入链必须落成员」的契约（缺成员即断言失败，测试直接暴露）。"""
+    with tarfile.open(archive) as tar:
+        member = tar.extractfile(RESULT_METADATA_MEMBER)
+        assert member is not None, "result archive is missing the result.json member"
+        return json.loads(member.read())
 
 
 class QueueFakeClient:
@@ -34,9 +46,7 @@ class QueueFakeClient:
         self.uploads[digest] = data
         return f"sha256:{digest}"
 
-    def report(
-        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
+    def report(self, execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
         self.heartbeats_at_report.append(self.heartbeats)
         # #1147 评审 P3-1 关联：chmod 自锁的 run 目录下 is_file 对 EACCES
         # 会抛（pathlib 只豁免 ENOENT 族）——探针是纯观测面，OSError 一律
@@ -51,7 +61,7 @@ class QueueFakeClient:
         if self.report_errors > 0:
             self.report_errors -= 1
             raise RuntimeError("download failed: /x: timed out")
-        self.reports.append(metadata)
+        self.reports.append(read_result_metadata(archive))
         return self.report_status, b""
 
     def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:

@@ -7,12 +7,15 @@ The sibling test files import these; cases migrated verbatim.
 from __future__ import annotations
 
 import hashlib
+import json
 import stat
+import tarfile
 import threading
 from pathlib import Path
 from typing import Any
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
+from shared.code_contract import RESULT_METADATA_MEMBER
 from worker.execution.run import run_execution
 from worker.status import ExecutionStatusReporter
 from worker.upload.queue import UploadQueue
@@ -115,10 +118,12 @@ class FakeClient:
         self.release_calls += 1
         return self._release_status
 
-    def report(
-        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
-    ) -> tuple[int, bytes]:
-        self.reports.append(metadata)
+    def report(self, execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
+        # v2（#843 PR-2）：上报元数据在归档 result.json 成员里——从归档读回。
+        with tarfile.open(archive) as tar:
+            member = tar.extractfile(RESULT_METADATA_MEMBER)
+            assert member is not None, "result archive is missing the result.json member"
+            self.reports.append(json.loads(member.read()))
         self.report_lease_ids.append(lease_id)
         return 204, b""
 

@@ -531,3 +531,23 @@ def test_env_example_documents_worker_console_url():
     example_path = Path(__file__).resolve().parents[2] / ".env.example"
     example = example_path.read_text(encoding="utf-8")
     assert "AGENT_LEGION_WORKER_CONSOLE_URL=" in example
+
+
+def test_agent_workers_max_archive_bytes_floor():
+    """#1082：``agent_workers.max_archive_bytes`` 下限 1 KiB（shared 契约单一
+    来源）——空 tar.gz（判败降级的 metadata-only 归档）也装不下的上限是配置
+    错误，``gt=0`` 会接受它。"""
+    from pydantic import ValidationError
+
+    from server.app.configuration.executor_runtime import AgentWorkersRuntimeConfig
+    from shared.code_contract import MIN_RESULT_ARCHIVE_BYTES
+
+    assert MIN_RESULT_ARCHIVE_BYTES == 1024
+    assert AgentWorkersRuntimeConfig().max_archive_bytes == 64 * 1024 * 1024
+    assert (
+        AgentWorkersRuntimeConfig(max_archive_bytes=MIN_RESULT_ARCHIVE_BYTES).max_archive_bytes
+        == 1024
+    )
+    for bad in (0, 1, 1023):
+        with pytest.raises(ValidationError):
+            AgentWorkersRuntimeConfig(max_archive_bytes=bad)

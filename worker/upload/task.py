@@ -75,6 +75,9 @@ class UploadTask:
     finalize_started: bool = False
     # bulk 车道产物，交给 report 车道；运行时状态，不持久化——崩溃恢复的任务
     # 一律从 bulk 车道重进，prepare 与 artifact 上传会原样重做。
+    # #843 v2 起 prepared_metadata 是写状态（metadata 随归档 result.json 交
+    # 付，report 车道不再读它）；保留字段仅为降级闸（ReportDegradeGate）挂
+    # 判败载荷的调试/观测锚点。
     prepared_metadata: dict[str, Any] | None = None
     prepared_archive: Path | None = None
     # #551 观测：分段计时器（submit 时创建；运行态，不入 marker——崩溃恢复

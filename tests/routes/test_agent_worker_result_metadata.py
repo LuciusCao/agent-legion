@@ -169,15 +169,13 @@ def test_artifacts_in_archive_marker_normalized_into_record() -> None:
 
 @_parse_only
 def test_artifact_truncation_roundtrip_worker_header_to_host_parse() -> None:
-    """#748 R3（codex review P1）roundtrip：128 条产物清单超头预算时，Worker
-    侧不再截断直传 ref 前缀（Host 不用截断标记恢复引用，产物会 Missing），
-    直传形态抛 ResultHeaderOverflow（#755 codex P1 起清单走归档成员）；
-    本用例钉住 CAS 字符串 ref（~78B/条）全量 128 条 ~12KB 天然落预算的
-    形态：经真实传输形态（UTF-8 字节 → latin-1 视图
-    → _recover_result_header 反解）被 Host 读进 outcome/record：全量引用逐项
-    还原、无截断标记。"""
+    """#748 R3（codex review P1）roundtrip 的 v1 读侧钉子：128 条 CAS 字符串
+    ref（~12KB）经真实传输形态（UTF-8 字节 → latin-1 视图 →
+    _recover_result_header 反解）被 Host 读进 outcome/record：全量引用逐项
+    还原、无截断标记。（#843 PR-2 起 Worker 写侧不再产 v1 头——本用例钉
+    Host 对旧 Worker 头形态的读侧兼容窗，头载荷按旧 Worker 传输形态本地
+    构造。）"""
     from server.app.routes.agent_worker_results import _recover_result_header
-    from worker.host.transfer import _RESULT_HEADER_BUDGET, _result_header_value
 
     # CAS 形态：直传失败换轨后 prepare 重备、或旧通道任务的
     # output_artifacts 形态。
@@ -190,9 +188,8 @@ def test_artifact_truncation_roundtrip_worker_header_to_host_parse() -> None:
         "output_artifacts": artifacts,
         "run_dir": "runs/node_a/worker",
     }
-    header = _result_header_value(metadata)
-    assert len(header) > _RESULT_HEADER_BUDGET * 0.8  # 真实大头场景
-    assert len(header) <= _RESULT_HEADER_BUDGET  # CAS 形态天然落预算
+    header = json.dumps(metadata, ensure_ascii=False).encode("utf-8")
+    assert len(header) > 11 * 1024  # 真实大头场景（旧头预算形态的载荷）
     outcome, record = parse_result_metadata(_recover_result_header(header.decode("latin-1")))
     kept = outcome.output_artifacts
     # 全量 128 条 CAS 引用逐项还原——不截断、无标记。
@@ -209,24 +206,27 @@ def test_artifact_truncation_roundtrip_worker_header_to_host_parse() -> None:
 
 @_parse_only
 def test_artifact_truncation_markers_parse_for_last_resort_shape() -> None:
-    """最后手段形态（#755 后仅剩的清单不可缩形态：超长产物名的 CAS 清单——
-    R3 时代的巨型 command 残差面已随 #755 command 降级阶段消失）经真实传输
-    形态被 Host 读进 outcome/record：清单为空 + truncated/total 标记如实
-    记录。标记是完成契约的一部分：Host 见 truncated 跳过空清单改判、从归档
-    暂存视图判定产物（#755 P2-1a），但仍不用它恢复直传 ref。"""
+    """最后手段形态（#755 时代旧 Worker 序列化器的截断输出——超长产物名的
+    CAS 清单）经真实传输形态被 Host 读进 outcome/record：清单为空 +
+    truncated/total 标记如实记录。标记是完成契约的一部分：Host 见
+    truncated 跳过空清单改判、从归档暂存视图判定产物（#755 P2-1a），但仍
+    不用它恢复直传 ref。（#843 PR-2 起新 Worker 不再产生该形态——读侧
+    防御窗口按旧 Worker 线形态钉住，载荷本地构造。）"""
     from server.app.routes.agent_worker_results import _recover_result_header
-    from worker.host.transfer import _result_header_value
 
     artifacts = {f"outputs/{i:03d}/" + "n" * 80 + ".json": f"sha256:{_HASH}" for i in range(128)}
     metadata = {
         "status": "completed",
         "exit_code": 0,
         "error_message": "任务完成",
-        "command": ["pi"],
-        "output_artifacts": artifacts,
+        "command": [],
+        # 旧序列化器的最后手段输出：清单整体降级为空 + 一次性 total 标记。
+        "output_artifacts": {},
+        "output_artifacts_truncated": True,
+        "output_artifacts_total": len(artifacts),
         "run_dir": "runs/node_a/worker",
     }
-    header = _result_header_value(metadata)
+    header = json.dumps(metadata, ensure_ascii=False).encode("utf-8")
     outcome, record = parse_result_metadata(_recover_result_header(header.decode("latin-1")))
     assert outcome.output_artifacts == {}
     assert outcome.output_artifacts_truncated is True
@@ -332,10 +332,11 @@ def test_legacy_worker_oversized_argv_result_is_committed(tmp_path) -> None:
 
 @pytest.mark.postgres
 def test_cjk_result_header_lands_in_database_intact(tmp_path) -> None:
-    """#748 review P2 路由级验证：Worker 按「UTF-8 字节头」投递 CJK metadata
-    （worker.host.transfer._result_header_value 的形态），路由经
-    _recover_result_header 反解后 204 落库——outcome_json 里的 CJK
-    error_message / agent_stderr_tail 逐字符原样，latin-1 mojibake 不入库。"""
+    """#748 review P2 路由级验证（v1 读侧兼容窗）：旧 Worker 按「UTF-8 字节
+    头」投递 CJK metadata，路由经 _recover_result_header 反解后 204 落库
+    ——outcome_json 里的 CJK error_message / agent_stderr_tail 逐字符原样，
+    latin-1 mojibake 不入库。（#843 PR-2 起新 Worker 不再用头携带元数据，
+    头载荷按旧 Worker 传输形态本地构造。）"""
     from fastapi.testclient import TestClient
 
     from tests.helpers.agent_worker_api import (
@@ -353,7 +354,6 @@ def test_cjk_result_header_lands_in_database_intact(tmp_path) -> None:
     from tests.helpers.agent_worker_api import (
         seed_request as _seed_request,
     )
-    from worker.host.transfer import _result_header_value
 
     tail = "追踪" * 500  # 1000 个 CJK 字符（3 字节/字）
     metadata = {
@@ -365,7 +365,7 @@ def test_cjk_result_header_lands_in_database_intact(tmp_path) -> None:
         "run_dir": "runs/node_a/worker",
         "agent_stderr_tail": tail,
     }
-    header_bytes = _result_header_value(metadata)
+    header_bytes = json.dumps(metadata, ensure_ascii=False).encode("utf-8")
     assert len(header_bytes) > 3 * 1024  # 真实的 CJK 头场景，非 ASCII 转义
 
     app = _make_app(tmp_path)

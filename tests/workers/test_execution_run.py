@@ -343,13 +343,13 @@ def test_run_execution_compresses_events_before_report(tmp_path: Path) -> None:
     captured: list[str] = []
     original_report = client.report
 
-    def report_and_capture(execution_id, lease_id, metadata, archive):  # type: ignore[no-untyped-def]
+    def report_and_capture(execution_id, lease_id, archive):  # type: ignore[no-untyped-def]
         with tarfile.open(archive, "r:gz") as tar:
             member = next(m for m in tar.getmembers() if m.name.endswith("events.jsonl"))
             extracted = tar.extractfile(member)
             assert extracted is not None
             captured.append(extracted.read().decode("utf-8"))
-        original_report(execution_id, lease_id, metadata, archive)
+        original_report(execution_id, lease_id, archive)
 
     client.report = report_and_capture  # type: ignore[method-assign]
     _run(client, tmp_path / "work")
