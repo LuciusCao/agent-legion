@@ -86,8 +86,8 @@ def test_guard_revalidates_agent_identity_republished_after_plan(
     def plan_then_republish(job_db, job, new_definition, frozen_json, **kwargs):
         inherit = real_plan(job_db, job, new_definition, frozen_json, **kwargs)
         assert {"b", "c"} <= inherit  # plan 时 V1 与下游身份都匹配
-        # 不携带 skill：latest 绑定恒定排除（P1-A）会掩盖本用例的哈希
-        # 漂移判别点。
+        # 不携带 skill：本用例无 skill 仓库，latest 绑定会保守排除
+        # （P1-A 面）而掩盖哈希漂移判别点。
         v2 = AgentDefinition(
             capability="cap_b",
             runtime="pi",

@@ -27,7 +27,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import asdict
 
 from server.app.services.job_reset_closure import shared_name_rerun_closure
@@ -50,6 +50,7 @@ def collect_change_seeds(
     implementation_excluded: frozenset[str] | set[str] = frozenset(),
     *,
     legacy_views: Mapping[str, WorkflowNode] | None = None,
+    latest_proven: Collection[str] | None = None,
 ) -> set[str]:
     """新图可执行节点中的局部变更种子集（S1–S5，不含上游传播）。
 
@@ -67,8 +68,9 @@ def collect_change_seeds(
       - S4 实现身份种子：``implementation_excluded``（plan 层解析好的
         「实现身份不可证明或已漂移」+ Agent 定义侧 runtime_mutable 键，
         ``job_workflow_upgrade_impl``）；
-      - S5 排除规则种子：``node_is_inherit_excluded``（skill:latest /
-        分片 / 审批门 / 节点自声明 runtime_mutable 键）。
+      - S5 排除规则种子：``node_is_inherit_excluded``（skill:latest
+        未证明（``latest_proven``，#1148，默认 None = 全排除） / 分片 /
+        审批门 / 节点自声明 runtime_mutable 键）。
 
     旧快照中已删除的节点不进种子（job_nodes 由 mutation 按新定义重建，
     只保留新节点集）。
@@ -106,8 +108,8 @@ def collect_change_seeds(
             # S3：入边声明变化（含 when 条件与声明序，序敏感 = 保守方向）。
             seeds.add(key)
             continue
-        if node_is_inherit_excluded(node):
-            # S5：排除规则（skill:latest / 分片 / 审批门 / 自声明 mutable）。
+        if node_is_inherit_excluded(node, latest_proven=latest_proven):
+            # S5：排除规则（skill:latest 未证明 / 分片 / 审批门 / 自声明 mutable）。
             seeds.add(key)
     return seeds
 

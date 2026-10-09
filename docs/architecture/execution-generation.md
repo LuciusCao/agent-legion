@@ -335,9 +335,13 @@ already_current。有继承候选时再取全局
 
 skill 内容身份判定（`server/app/services/job_workflow_upgrade_skill.py`）是安全
 敏感读，纪律为：直读 DB 锁文档（`read_skill_lock` 经 `SkillLockStore` 绕开 5s
-doc cache）；`latest` 绑定**恒定排除**（跟随 live HEAD，不做 live rev-parse 就
-证明不了任何东西）；pinned ref 与锁文档 `refs[ref]` 比较才可继承；锁内无 ref /
-无锁文档 = 不可证明 → 排除；upgrade **永不触发首次 pin**、不跑 git 子进程，
+doc cache）；`latest` 绑定与 plan 阶段传入的 HEAD 常量**精确比对**（#1148：
+plan 在 guard 事务外经 `job_workflow_upgrade_skill_heads` 做一次有界
+`rev-parse HEAD`——超时/仓库缺失 → None → 保守排除；执行记录 commit 等于
+HEAD 才可继承，判定后 HEAD 前进不触发已继承节点重跑，残余窗口与 pinned ref
+的 relock 窗口同构）；pinned ref 与锁文档 `refs[ref]` 比较才可继承；锁内无 ref /
+无锁文档 = 不可证明 → 排除；upgrade **永不触发首次 pin**，判定模块零 git
+子进程（HEAD 由 plan 层解析为数据传入），guard 事务内重验沿用 plan 的同一常量，
 事务回滚不留 skill 面副作用。
 
 ### 2.10 升级输入保护计划（#759 复审 P1-A）

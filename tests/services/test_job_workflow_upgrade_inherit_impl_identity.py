@@ -158,7 +158,7 @@ def test_impl_identity_agent_republish_reruns_node(tmp_path: Path) -> None:
     )
     queries.update_job_status(job_id, "completed")
     # Agent 定义重发布：同 capability、config_schema 变化 → definition_hash
-    # 漂移。（不携带 skill：skill 绑定由 codex5 的 P1-A 面恒定排除 latest，
+    # 漂移。（不携带 skill：skill 绑定会引入 P1-A 面的 HEAD 比对判别，
     # 这里隔离哈希维度。）
     v2 = AgentDefinition(
         capability="cap_b",
