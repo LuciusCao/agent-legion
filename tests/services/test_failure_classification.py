@@ -141,6 +141,25 @@ def test_missing_outputs_is_output_missing():
     )
 
 
+def test_work_dir_missing_prep_failure_is_technical_work_dir_missing():
+    """#1147：Worker prep 降级标记的「运行目录缺失」是基建事故（agent/运维
+    删了运行目录），与「agent 无产出」（output_missing，执行问题）分流——
+    值班可按 detail 路由。errno 文案不得把它吞成 execution_error。"""
+    assert classify_failure(
+        1,
+        "[work-dir-missing] result preparation failed: [Errno 2] No such file or directory: "
+        "'/var/lib/agent-worker/exec-1/job/runs/node_a/worker'; "
+        "evidence preserved at /state/evidence/exec-1__node_a",
+    ) == ("technical", "work_dir_missing")
+
+
+def test_prep_failure_without_marker_stays_execution_error():
+    """无 marker 的 prep 失败（目录健在、构建失败）保持 execution_error 归因。"""
+    assert classify_failure(
+        1, "result preparation failed: [Errno 2] No such file or directory: '/etc/missing'"
+    ) == ("technical", "execution_error")
+
+
 def test_output_truncation_is_technical_output_truncated():
     # #952: the per-call output limit (thinking included) left outputs missing.
     message = output_truncation_error(1, ["report.json"])

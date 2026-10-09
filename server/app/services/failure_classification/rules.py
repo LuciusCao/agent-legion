@@ -38,6 +38,7 @@ from server.app.services.failure_classification.markers import (
     _SQLITE_MARKERS,
     _TERMINATED_WORD_RE,
     _UNPACK_FAILURE,
+    _WORK_DIR_MISSING_MARKER,
 )
 
 CATEGORY_TECHNICAL = "technical"
@@ -84,6 +85,15 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
     # "Connection error".
     if _CONNECTION_CONFIG_RE.match(message):
         return CATEGORY_TECHNICAL, "connection_config"
+
+    # #1147: the Worker's prep degradation marked the execution's local
+    # working tree as gone before the result could be prepared — an
+    # infrastructure accident (agent or operator deleted the run dir),
+    # distinct from an agent that ran and produced nothing (output_missing).
+    # Checked before the substring rules — the errno text inside would
+    # otherwise classify as a generic execution_error.
+    if message.startswith(_WORK_DIR_MISSING_MARKER):
+        return CATEGORY_TECHNICAL, "work_dir_missing"
 
     # Business: output quality / contract violations and unusable source data.
     if message.startswith("Output validation failed:"):

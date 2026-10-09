@@ -38,9 +38,16 @@ class QueueFakeClient:
         self, execution_id: str, lease_id: str, metadata: dict, archive: Path
     ) -> tuple[int, bytes]:
         self.heartbeats_at_report.append(self.heartbeats)
-        self.stderr_trace_seen.append(
-            (archive.parent / "job" / "runs" / "node_a" / "worker" / "agent-stderr.log").is_file()
-        )
+        # #1147 评审 P3-1 关联：chmod 自锁的 run 目录下 is_file 对 EACCES
+        # 会抛（pathlib 只豁免 ENOENT 族）——探针是纯观测面，OSError 一律
+        # 按 False 记，不得让 fake 自身炸掉 report 车道。
+        try:
+            stderr_seen = (
+                archive.parent / "job" / "runs" / "node_a" / "worker" / "agent-stderr.log"
+            ).is_file()
+        except OSError:
+            stderr_seen = False
+        self.stderr_trace_seen.append(stderr_seen)
         if self.report_errors > 0:
             self.report_errors -= 1
             raise RuntimeError("download failed: /x: timed out")

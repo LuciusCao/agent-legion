@@ -44,6 +44,7 @@ from worker.execution.reactor_stream import (
     stream_dropped,
     takeover_with_legacy_pump,
 )
+from worker.state_evidence import write_stream_batch
 
 # One read syscall's worth per ready fd; velites JSON lines fit comfortably
 # (message_end with the full final message is the largest and stays well
@@ -158,8 +159,17 @@ class EventPumpReactor:
 
     # -- registration ----------------------------------------------------
 
-    def register(self, proc: subprocess.Popen[bytes], output_path: str) -> ReactorPumpHandle:
-        stream = _Stream(proc, output_path)
+    def register(
+        self,
+        proc: subprocess.Popen[bytes],
+        output_path: str,
+        execution_id: str = "",
+        node_key: str = "",
+    ) -> ReactorPumpHandle:
+        """Register one stream; the identity pair scopes the #1147 emergency
+        evidence dump (``<state_dir>/evidence/<exec>__<node>``) when the
+        events path stops accepting writes."""
+        stream = _Stream(proc, output_path, execution_id, node_key)
         self._register_stream(stream)
         return ReactorPumpHandle(self, stream)
 
@@ -284,7 +294,11 @@ class EventPumpReactor:
         (the ``writer`` token's holder loops until empty — see _Stream). A
         ``dropped`` stream is abandoned before the next open(): a late writer
         must not append old-attempt lines into a path a re-claimed execution
-        may have truncated (#564 adjacency)."""
+        may have truncated (#564 adjacency). A write failure diverts the
+        stream into the #1147 state-dir evidence sink
+        (``worker.state_evidence.write_stream_batch``) instead of
+        unregistering it — the events face survives the run dir being
+        deleted mid-run."""
         with stream.lock:
             if stream.dropped or stream.writer:
                 stream.inflight -= 1
@@ -305,10 +319,7 @@ class EventPumpReactor:
                 # narrows it to the open→write gap only.
                 if stream_dropped(stream):
                     break
-                with open(stream.path, "ab") as output:
-                    for line in kept:
-                        output.write(line)
-                        output.write(b"\n")
+                write_stream_batch(stream, kept)
                 with stream.lock:
                     backlog = len(stream.pending)
                     was_paused = stream.paused
@@ -320,6 +331,9 @@ class EventPumpReactor:
             # stream.parse_error（观测面）并注销该流——事件面已不可信，
             # 该执行照常走退出/超时上报，损失的是 events.jsonl 完整性
             # （stderr trace 可判读）。日志保全：print。
+            # #1147：events 写失败（运行目录消失等）优先经 write_stream_batch
+            # 应急转储（state 目录、脱敏）——流保持注册、事件继续流动；
+            # 仅当转储不可用（未配置 evidence root）才落到本臂的注销降级。
             stream.parse_error = exc
             print(f"event-pump parse failed for {stream.path}: {exc!r}", flush=True)
             self.unregister(stream)
@@ -396,17 +410,21 @@ class ReactorPumpHandle:
         self._reactor._drop(self._stream)
 
 
-def spawn_agent_pump(proc: subprocess.Popen[bytes], output: Any, execution_id: str) -> Any:
+def spawn_agent_pump(
+    proc: subprocess.Popen[bytes], output: Any, execution_id: str, node_key: str = ""
+) -> Any:
     """Event pump facade for one spawned agent process (#578 phase 1).
 
     Default: the process-wide reactor (one selector thread + a core-count
     parse pool replaces one pump thread per execution). Opt-out
     ``AGENT_WORKER_EVENT_PUMP=thread`` keeps the legacy per-execution thread;
     a reactor that is disabled (or fails at registration) also falls back to
-    it — the pump surface, ``join(timeout)``, is identical either way."""
+    it — the pump surface, ``join(timeout)``, is identical either way. The
+    identity pair rides the registration for the #1147 emergency evidence
+    dump (see EventPumpReactor.register)."""
     if os.environ.get("AGENT_WORKER_EVENT_PUMP", "reactor") == "reactor":
         try:
-            return EventPumpReactor.get().register(proc, output.name)
+            return EventPumpReactor.get().register(proc, output.name, execution_id, node_key)
         except (ReactorUnavailable, OSError):
             print(
                 f"event-pump reactor unavailable for {execution_id}; using thread pump",

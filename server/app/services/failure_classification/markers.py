@@ -38,6 +38,12 @@ _PROVIDER_CALL_STREAM_MARKERS = (
 # #952: per-call output truncation (stopReason=length) left declared outputs
 # missing — the Worker's attribution face, see shared/output_truncation.py.
 _OUTPUT_TRUNCATED_PREFIX = OUTPUT_TRUNCATED_PREFIX
+# #1147: the Worker's prep-degradation marker for a vanished execution
+# working tree (worker/state_evidence.py::WORK_DIR_MISSING_MARKER — the
+# literal is duplicated here because the worker image never imports the
+# server side). An infrastructure accident, distinct from an agent that
+# ran and produced nothing (output_missing below).
+_WORK_DIR_MISSING_MARKER = "[work-dir-missing]"
 _MISSING_OUTPUTS_PREFIXES = ("missing outputs", "missing required file")
 _NO_OUTPUT_ARTIFACTS_PREFIX = "Agent Worker did not report output artifacts"
 _UNPACK_FAILURE = "failed to unpack Agent result"
