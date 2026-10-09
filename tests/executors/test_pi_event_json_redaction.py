@@ -5,13 +5,17 @@ Worker 上传前（压缩扫描同一趟）对保留事件的字符串值做脱�
 随压缩文件交付 Host、渲染进任务日志。只改字符串值（键名/数值/布尔/null
 原样），输出仍是合法 JSON；``redactor=None``（Host 侧）逐字保留、零 JSON
 改写开销；区间函数逃逸 fail-closed——该事件行整行丢弃，绝不以 raw 形态写出。
+评审 P3 补两族：命中行的重序列化无法 UTF-8 编码（JSON 转义 lone surrogate
+经 ``json.loads`` 解码为真实代理字符）同样整行丢弃——丢行优于整趟失败，整趟
+失败会把未压缩未脱敏的 events.jsonl 原样留给 result.tar.gz 外发；model_error
+归因串的脱敏逃逸降级为固定占位、不炸穿扫描。
 """
 
 import json
 
 import pytest
 
-from shared.pi_events import scan_and_compress_pi_events
+from shared.pi_events import MODEL_ERROR_REDACTION_FAILED, scan_and_compress_pi_events
 from shared.redaction import REDACTED, SecretRedactor
 from tests.helpers.secret_spans import literal_spans
 
@@ -218,3 +222,99 @@ def test_model_error_attribution_string_redacted(tmp_path):
     )
     assert model_error == f"401 invalid key {REDACTED}"
     assert secret not in events_path.read_text(encoding="utf-8")
+
+
+# -- #842 评审 P3-1/P3-2：脱敏引发的写失败 / 归因串脱敏逃逸的 fail-closed --
+
+
+def test_hit_line_with_lone_surrogate_dropped_fail_closed(tmp_path):
+    """P3-1 复现（评审机械复现形态）：命中行含 JSON 转义的 lone surrogate
+    （文件侧是 ASCII 转义序列，``json.loads`` 解码为真实代理字符）——命中后
+    ``ensure_ascii=False`` 重序列化产出真实代理字符，``dst.write`` 抛
+    UnicodeEncodeError。修复前该异常炸穿整趟扫描（返回 ``(None, 0, 0, b"")``），
+    未压缩未脱敏的 events.jsonl 原样留给 result.tar.gz 外发——失败恰与密钥
+    命中正相关。修复后该行整行丢弃（fail-closed）：扫描照常完成、密钥与
+    代理字符都不落盘、无 ``.compressing`` 残留。"""
+    secret = "sk-live-supersecretgatewaytoken123"
+    text = "junk:\udcff bin \udcfe\nLLM_GATEWAY_TOKEN=" + secret
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text(
+        '{"type": "session"}\n' + json.dumps(_tool_end(text)) + "\n" + '{"type": "agent_end"}\n',
+        encoding="utf-8",
+    )
+    assert "\\udcff" in events_path.read_text(encoding="utf-8")  # 转义形态落盘
+
+    model_error, original, compressed, tail = scan_and_compress_pi_events(
+        events_path, redactor=SecretRedactor(literal_spans(secret), len(secret))
+    )
+
+    assert original > 0 and compressed > 0  # 扫描整体完成（单行写失败未炸穿）
+    kept = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    assert [event["type"] for event in kept] == ["session", "agent_end"]  # 命中行被丢
+    assert secret not in events_path.read_text(encoding="utf-8")
+    assert list(tmp_path.glob("*.jsonl.compressing")) == []  # 无 staging 残留
+
+
+def test_surrogate_line_without_hit_kept_verbatim(tmp_path):
+    """对照（失败-命中正相关的反面）：同形态的 lone surrogate 行但无密钥
+    命中——走原行字节保真路径（转义形态本就是可编码 ASCII），不丢行、
+    不失败、代理字符按原转义形态保留。"""
+    text = "junk:\udcff bin \udcfe\nplain output"
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text(
+        '{"type": "session"}\n' + json.dumps(_tool_end(text)) + "\n", encoding="utf-8"
+    )
+
+    model_error, original, compressed, _ = scan_and_compress_pi_events(
+        events_path, redactor=SecretRedactor(literal_spans("zz-unregistered"), 16)
+    )
+
+    assert original > 0 and compressed > 0
+    kept = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    assert [event["type"] for event in kept] == ["session", "tool_execution_end"]
+    assert kept[1]["result"]["content"][0]["text"] == text
+
+
+def test_model_error_redaction_failure_degrades_attribution(tmp_path):
+    """P3-2：model_error 归因串的脱敏逃逸不得炸穿扫描——修复前异常直接
+    逃出函数（留下 ``.compressing`` 残留不清理、prepare 把 run 改判 failed
+    丢弃结果）。修复后降级为固定占位（非空：失败归因保住、状态不翻转为
+    completed；固定文本不携带原文）；压缩照常完成、事件面照常脱敏。"""
+    secret = "sk-live-supersecretgatewaytoken123"
+
+    def exploding_on_error_text(text: str) -> list[tuple[int, int]]:
+        if "invalid key" in text:
+            raise ValueError("redactor exploded")
+        return literal_spans(secret)(text)
+
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text(
+        '{"type": "session"}\n'
+        + json.dumps(
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "stopReason": "error",
+                    "errorMessage": f"401 invalid key {secret}",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    model_error, original, compressed, _ = scan_and_compress_pi_events(
+        events_path, redactor=SecretRedactor(exploding_on_error_text, len(secret))
+    )
+
+    assert original > 0 and compressed > 0  # 未炸穿：压缩照常完成
+    # 事件面：errorMessage 所在行同样过脱敏——逃逸行整行丢弃，密钥不落盘。
+    kept_types = [
+        json.loads(line)["type"] for line in events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert kept_types == ["session"]
+    assert secret not in events_path.read_text(encoding="utf-8")
+    # 归因面：降级占位（非空、固定文本）。
+    assert model_error == MODEL_ERROR_REDACTION_FAILED
+    assert list(tmp_path.glob("*.jsonl.compressing")) == []  # 无 staging 残留
