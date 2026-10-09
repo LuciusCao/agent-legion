@@ -1,7 +1,9 @@
 """Test-boundary pool close must not strand dirty returns (#1045).
 
-The per-test isolation closes every pool before TRUNCATE. With the #438
-``reset`` callback, psycopg_pool rolls back a dirty (INTRANS) return on a
+Schema rebuilds and session teardown close every pool (per-test isolation
+itself only settles, keeping pools alive across tests — see
+tests/postgres_support.settle_database_pools). With the #438 ``reset``
+callback, psycopg_pool rolls back a dirty (INTRANS) return on a
 maintenance worker; ``ConnectionPool.close()`` discards any such task that
 has not run yet, so the returned connection keeps its transaction (and
 locks) open server-side until GC finalizes it. The next test's TRUNCATE then

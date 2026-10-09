@@ -102,13 +102,15 @@ def _settle_pool_returns(pool) -> None:
     #1045: with a ``reset`` callback (server/app/db/pools.py, #438) the
     pool hands every returned connection to a maintenance worker
     (``ReturnConnection``), which rolls back a dirty (INTRANS) return
-    asynchronously. ``ConnectionPool.close()`` marks the pool closed first,
-    and a task that runs after that is silently discarded — the dirty
-    connection is neither rolled back nor closed, its server session keeps
-    the open transaction's locks until Python's cyclic GC finalizes the
-    connection object, and the next test's TRUNCATE hits the 30s
-    lock_timeout. Whether the worker wins the race against the per-test
-    close depends on CPU/GIL scheduling, hence the load-dependent flake.
+    asynchronously. Isolation must wait for those queued rollbacks before
+    running TRUNCATE: an unfinished dirty return keeps its open
+    transaction's locks server-side, and the TRUNCATE then waits out the
+    30s lock_timeout. Closing the pool makes the race strictly worse —
+    ``ConnectionPool.close()`` marks the pool closed first, and a task
+    that runs after that is silently discarded, so the dirty connection is
+    neither rolled back nor closed until Python's cyclic GC finalizes it.
+    Whether the worker wins the race against a close depends on CPU/GIL
+    scheduling, hence the load-dependent flake.
 
     One checkpoint per worker on a ``num_workers + 1`` barrier: the queue is
     FIFO and a parked worker cannot take a second checkpoint, so the barrier
@@ -125,21 +127,44 @@ def _settle_pool_returns(pool) -> None:
         barrier.wait(_POOL_SETTLE_TIMEOUT_SECONDS)
 
 
-def close_database_pools_settled() -> None:
-    """``close_database_pools`` for test boundaries: settle returns first.
+def settle_database_pools() -> None:
+    """Settle every live pool's queued returns WITHOUT closing the pools.
 
-    Pending dirty-return rollbacks finish before the pools close, so no
-    returned connection can outlive its test with an open transaction
-    (see ``_settle_pool_returns``).
+    This is the per-test isolation barrier: pools stay alive for the whole
+    worker session (per-test close/rebuild cost ~350ms/test under xdist
+    contention while the SQL it protected against is microseconds), and the
+    only synchronization TRUNCATE needs beforehand is that pending
+    dirty-return rollbacks have run — exactly what ``_settle_pool_returns``
+    guarantees. Idle pooled connections hold no open transaction and no
+    locks (the #438 ``reset`` callback verifies IDLE on return), so they
+    never block the TRUNCATE's AccessExclusive; the 30s lock_timeout plus
+    the leaked-lock diagnostic stay as the backstop for a genuinely leaked
+    checkout (never returned at all).
+
+    Pools are keyed by (pid, dsn); a pool inherited across fork has no
+    worker threads in this process and would only stall on the barrier.
     """
     from server.app.db import pools
 
-    # Pools are keyed by (pid, dsn); a pool inherited across fork has no
-    # worker threads in this process and would only stall on the barrier.
     with pools._POOLS_LOCK:
         live = [pool for (pid, _dsn), pool in pools._POOLS.items() if pid == os.getpid()]
     for pool in live:
         _settle_pool_returns(pool)
+
+
+def close_database_pools_settled() -> None:
+    """``close_database_pools`` with the settle barrier first.
+
+    Pending dirty-return rollbacks finish before the pools close, so no
+    returned connection can outlive its test with an open transaction
+    (see ``_settle_pool_returns``). Reserved for schema rebuilds (a pooled
+    connection's search_path points into the schema being dropped) and
+    session teardown; ordinary per-test isolation uses
+    ``settle_database_pools`` and keeps the pools alive.
+    """
+    from server.app.db import pools
+
+    settle_database_pools()
     pools.close_database_pools()
 
 
