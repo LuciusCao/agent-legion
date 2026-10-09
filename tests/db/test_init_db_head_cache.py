@@ -92,14 +92,34 @@ def test_failed_init_db_is_not_memoized(init_db_spy, monkeypatch: pytest.MonkeyP
         def __exit__(self, *args: object) -> None:
             return None
 
-    monkeypatch.setattr(schema_module, "write_transaction", lambda dsn: _FailingTransaction())
+    def failing_write_transaction(dsn: str) -> _FailingTransaction:
+        init_db_spy["transaction"] += 1
+        return _FailingTransaction()
+
+    def ok_write_transaction(dsn: str) -> _FakeTransaction:
+        init_db_spy["transaction"] += 1
+        return _FakeTransaction()
+
+    monkeypatch.setattr(schema_module, "write_transaction", failing_write_transaction)
     with pytest.raises(RuntimeError, match="database unreachable"):
         init_db(_DSN)
 
-    monkeypatch.setattr(schema_module, "write_transaction", lambda dsn: _FakeTransaction())
+    monkeypatch.setattr(schema_module, "write_transaction", ok_write_transaction)
     init_db(_DSN)
     init_db(_DSN)
 
-    # The failure left no memo entry: the retry ran the real check once and
-    # only the call after it was served from the memo.
+    # The failure left no memo entry: the failed attempt and the retry each
+    # opened a real transaction, and the third call was served from the memo.
+    assert init_db_spy["transaction"] == 2
     assert init_db_spy["guard"] == 3
+
+
+def test_full_check_window_success_does_not_write_the_memo(init_db_spy) -> None:
+    with init_db_full_check():
+        note_schema_rebuilt(_DSN)
+        init_db(_DSN)
+    init_db(_DSN)
+
+    # A success inside the window must not be recorded (a later in-window
+    # rewind would stale it), so the post-window call runs the full check.
+    assert init_db_spy["transaction"] == 2

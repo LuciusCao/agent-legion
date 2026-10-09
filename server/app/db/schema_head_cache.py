@@ -8,14 +8,17 @@ repeats no-ops. Another process migrating the database to a NEWER version
 early-returns through the same comparison, so skipping repeat work is
 semantically identical to running it.
 
-The only way a verified database falls behind again is an in-process schema
-rebuild or rewind, which today exists only in the test harness:
-``tests/conftest.py`` calls ``note_schema_rebuilt`` when it drops and
-recreates the per-worker schema, and wraps ``fresh_schema`` tests (which
-rewind ``schema_migrations`` mid-test and expect the next ``init_db`` to
-upgrade again) in ``init_db_full_check`` so the memo never short-circuits
-them. ``guard_shared_db`` is a pure per-DSN string check and still runs on
-every ``init_db`` call, memo hit or not.
+The only way a verified database falls behind again is an out-of-band
+schema rebuild or rewind. Within supported flows that exists only in the
+test harness: ``tests/conftest.py`` calls ``note_schema_rebuilt`` when it
+drops and recreates the per-worker schema, and wraps ``fresh_schema``
+tests (which rewind ``schema_migrations`` mid-test and expect the next
+``init_db`` to upgrade again) in ``init_db_full_check`` so the memo never
+short-circuits them. Out-of-band regressions outside supported flows
+(restoring an older backup, failover to a lagging instance) happen in
+full-stop windows where every process — and with it this memo — is gone
+before traffic resumes. ``guard_shared_db`` is a pure per-DSN string check
+and still runs on every ``init_db`` call, memo hit or not.
 """
 
 from __future__ import annotations

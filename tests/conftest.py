@@ -187,6 +187,9 @@ def _rebuild_schema() -> None:
     """Drop and recreate the per-xdist-worker schema, then apply full DDL."""
     global _SEED_SNAPSHOT
     close_database_pools_settled()
+    # Invalidate BEFORE the drop: a create-schema failure below must not
+    # leave the memo claiming "at head" over an empty schema.
+    note_schema_rebuilt()
     try:
         with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as conn:
             conn.execute(
@@ -198,7 +201,6 @@ def _rebuild_schema() -> None:
             "PostgreSQL is required for tests. Set AGENT_LEGION_TEST_DATABASE_URL to a reachable "
             f"test database: {exc}"
         )
-    note_schema_rebuilt()
     init_db(TEST_DATABASE_URL)
     _SEED_SNAPSHOT = None
 
