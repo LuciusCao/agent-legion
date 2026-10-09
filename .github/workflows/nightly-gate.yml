@@ -246,6 +246,10 @@ jobs:
           if ! git diff --exit-code config/architecture/issue-states.json; then
             git add config/architecture/issue-states.json
             git commit -m "chore(architecture): refresh issue-state manifest (nightly, #1150)"
+            # main can advance while the job's earlier steps run (dispatch
+            # concurrency, merges): rebase the single state commit on top
+            # before pushing instead of failing on a stale tip.
+            git pull --rebase origin main
             git push
             echo "manifest committed"
           else
