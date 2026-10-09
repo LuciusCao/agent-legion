@@ -19,9 +19,17 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from server.app.agent_broker.result_metadata_reader import read_archived_result_metadata
-from server.app.routes.agent_worker_result_shapes import header_is_v2, prespool_metadata
+from server.app.routes.agent_worker_result_shapes import (
+    header_is_v2,
+    prespool_metadata,
+    read_member,
+)
 from server.app.routes.agent_worker_results import parse_result_metadata
-from shared.code_contract import RESULT_METADATA_FORMAT_V2, RESULT_METADATA_MEMBER
+from shared.code_contract import (
+    RESULT_METADATA_FORMAT_V2,
+    RESULT_METADATA_MEMBER,
+    RESULT_OUTPUT_ARTIFACTS_MEMBER,
+)
 from tests.helpers.agent_worker_api import (
     claim as _claim,
 )
@@ -54,6 +62,21 @@ def _v2_archive(metadata: dict | bytes | None) -> bytes:
                 metadata if isinstance(metadata, bytes) else json.dumps(metadata).encode("utf-8")
             )
             info = tarfile.TarInfo(RESULT_METADATA_MEMBER)
+            info.size = len(payload)
+            tar.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+def _v2_archive_with_manifest(metadata: dict, manifest: dict) -> bytes:
+    """评审 P3-2 的畸形形态：归档同时带 v1 换轨清单成员与 v2 元数据成员。"""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for name, payload_obj in (
+            (RESULT_OUTPUT_ARTIFACTS_MEMBER, manifest),
+            (RESULT_METADATA_MEMBER, metadata),
+        ):
+            payload = json.dumps(payload_obj).encode("utf-8")
+            info = tarfile.TarInfo(name)
             info.size = len(payload)
             tar.addfile(info, io.BytesIO(payload))
     return buffer.getvalue()
@@ -169,9 +192,10 @@ def test_reader_directory_member_rejected(tmp_path: Path) -> None:
 
 @_parse_only
 def test_reader_corrupt_archive_converted_to_value_error(tmp_path: Path) -> None:
-    """坏归档（非 gzip/tar）转 ValueError → 路由 400：v2 元数据权威在归档，
-    归档解不开 = 元数据不可投递（对齐 v1 头非法 JSON）；#959 的 4xx 单次
-    降级接管，不进 5xx 重试 → 租约过期 → 毒归档重排队死循环。"""
+    """坏归档（非 gzip/tar）转 ValueError → 路由 400：v2 的契约违约判决
+    （承诺的 result.json 成员不可读），对齐 v1 头形态非法 JSON 的 4xx 语义。
+    v1 形态的毒归档不经 400——completion 层的解包宽捕获把它转成诚实判败
+    （204，failed + "failed to unpack Agent result: …"，租约终结、无重跑）。"""
     archive = tmp_path / "garbage.bin"
     archive.write_bytes(b"not-a-gzip-at-all")
     with pytest.raises(ValueError, match="unreadable"):
@@ -503,6 +527,111 @@ def test_v2_over_cap_artifact_manifest_rejected_like_v1(tmp_path: Path) -> None:
         assert response.status_code == 400, response.text
         assert "invalid Agent result metadata" in response.json()["detail"]
     assert _bundle_dir_clean(app)
+
+
+# --- v1 换轨标记在 v2 形态下显式忽略（#843 评审 P3-2）----------------------
+
+
+def _seed_artifact_hash(app, digest: str) -> None:
+    """CAS ref 的登记前置：artifact_refs.hash 外键引用 artifacts(hash)，路由
+    级 completed + 字符串 ref 会经 register_reported_output_refs 登记引用。"""
+    with app.state.job_db.connect() as conn:
+        conn.execute(
+            "insert into artifacts(hash, size) values (%s, 1) on conflict(hash) do nothing",
+            (digest,),
+        )
+
+
+@_parse_only
+def test_read_member_strips_v1_switch_track_flag(tmp_path: Path) -> None:
+    """read_member 剥离 v1 换轨标记：payload 带旗标解析后 record 旗标为
+    False——commit 层不会激活换轨（转读 result-output-artifacts.json /
+    替换 output_artifacts），output_artifacts 按 result.json 原值保留。"""
+    import asyncio
+
+    metadata = {
+        "status": "completed",
+        "exit_code": 0,
+        "command": [],
+        "output_artifacts": {"out.json": f"sha256:{_HASH}"},
+        "output_artifacts_in_archive": True,
+    }
+    archive = tmp_path / "flagged.tar.gz"
+    archive.write_bytes(_v2_archive(metadata))
+    outcome, record = asyncio.run(read_member(archive))
+    assert record["output_artifacts_in_archive"] is False
+    assert outcome.output_artifacts == {"out.json": f"sha256:{_HASH}"}
+
+
+def test_v2_switch_track_flag_without_manifest_member_is_ignored(tmp_path: Path) -> None:
+    """评审 P3-2 交互钉子：v2 payload 带 output_artifacts_in_archive=true 且
+    归档无清单成员 → 204、completed 不翻转、output_artifacts 按 result.json
+    原值入库。未剥离时的行为：commit 层见旗标转读清单 →「manifest member
+    is missing」→ completed 诚实翻 failed。"""
+    metadata = {
+        "status": "completed",
+        "exit_code": 0,
+        "command": [],
+        "output_artifacts": {"out.json": f"sha256:{_HASH}"},
+        "output_artifacts_in_archive": True,
+    }
+    app = _make_app(tmp_path)
+    _seed_request(app.state.job_db, job_id="job-v2-flag-nomember", limit=2)
+    _seed_artifact_hash(app, _HASH)
+    with TestClient(app) as client:
+        token = _register(client)["worker_token"]
+        claimed = _claim(client, token)
+        response = _report(
+            client,
+            token,
+            claimed,
+            _v2_archive(metadata),
+            **{"X-Agent-Result-Format": RESULT_METADATA_FORMAT_V2},
+        )
+        assert response.status_code == 204, response.text
+    state, stored = _outcome_row(app, claimed["execution_id"])
+    assert state == "done"
+    assert stored["status"] == "completed"
+    assert stored["output_artifacts"] == {"out.json": f"sha256:{_HASH}"}
+    assert stored["output_artifacts_in_archive"] is False
+
+
+def test_v2_switch_track_flag_with_manifest_member_keeps_result_json_values(
+    tmp_path: Path,
+) -> None:
+    """评审 P3-2 交互钉子：v2 payload 带旗标且归档也带清单成员 → 仍以
+    result.json 原值判定 output_artifacts（未剥离时 commit 层会用清单成员
+    内容替换），completed 不翻转——两通道在 v2 形态下不串扰。"""
+    other_hash = "b" * 64
+    metadata = {
+        "status": "completed",
+        "exit_code": 0,
+        "command": [],
+        "output_artifacts": {"out.json": f"sha256:{_HASH}"},
+        "output_artifacts_in_archive": True,
+    }
+    manifest = {"evil.json": f"sha256:{other_hash}"}
+    app = _make_app(tmp_path)
+    _seed_request(app.state.job_db, job_id="job-v2-flag-member", limit=2)
+    _seed_artifact_hash(app, _HASH)
+    with TestClient(app) as client:
+        token = _register(client)["worker_token"]
+        claimed = _claim(client, token)
+        response = _report(
+            client,
+            token,
+            claimed,
+            _v2_archive_with_manifest(metadata, manifest),
+            **{"X-Agent-Result-Format": RESULT_METADATA_FORMAT_V2},
+        )
+        assert response.status_code == 204, response.text
+    state, stored = _outcome_row(app, claimed["execution_id"])
+    assert state == "done"
+    assert stored["status"] == "completed"
+    # result.json 原值获胜——清单成员内容不得替换 output_artifacts。
+    assert stored["output_artifacts"] == {"out.json": f"sha256:{_HASH}"}
+    assert "evil.json" not in stored["output_artifacts"]
+    assert stored["output_artifacts_in_archive"] is False
 
 
 # --- v1 回归钉子（零行为变化）----------------------------------------------

@@ -18,12 +18,15 @@ result 路由（``agent_workers.py``）按请求头把元数据读取分派到�
 
 失败语义：v2 成员缺失 / 非 JSON / 字段非法 → ValueError → 路由 400，与
 v1 头非法 JSON 的 ValueError→400 语义对齐（v2 的 detail 带原因，可定位
-到归档侧）。``result-output-artifacts.json`` 清单通道（#755 换轨标记语义）
-与本通道互相独立、互不干扰。
+到归档侧）。两形态共享同一条 ``parse_result_metadata`` 校验链，而 v1
+头溢出的换轨标记 ``output_artifacts_in_archive`` 在 v2 形态下被显式忽略
+（``read_member`` 在 parse 前剥离）——正确 v2 writer 永不发它，PR-2 的
+Worker 契约将明文禁止。
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +39,11 @@ from server.app.routes.agent_worker_results import (
     _recover_result_header,
     parse_result_metadata,
 )
-from shared.code_contract import RESULT_METADATA_FORMAT_HEADER, RESULT_METADATA_FORMAT_V2
+from shared.code_contract import (
+    RESULT_METADATA_FORMAT_HEADER,
+    RESULT_METADATA_FORMAT_V2,
+    RESULT_OUTPUT_ARTIFACTS_FLAG,
+)
 
 # v1 头路径的 400 详情逐字保留（零行为变化纪律；Worker 侧对 4xx 终态的
 # 处理按 status 而非 detail，但 detail 变化仍属可观测面）。
@@ -81,9 +88,20 @@ async def read_member(staged: Path) -> tuple[AgentOutcome, dict[str, Any]]:
     被扫描占住（与 spool / commit 的下沉同一纪律）。ValueError（成员缺失 /
     非 JSON / 元数据字段非法）转换成 400，detail 带原因——与 v1 的固定
     detail 区分，排障可直接定位归档侧。归档解包自身的既有错误路径
-    （completion 侧 AgentBundleError → 诚实判败）不经此函数，不变。"""
+    （completion 侧 AgentBundleError → 诚实判败）不经此函数，不变。
+
+    v1 换轨标记 ``output_artifacts_in_archive`` 在 v2 形态下显式忽略
+    （#843 评审 P3-2）：commit 层见该标记会转读
+    ``result-output-artifacts.json`` 清单并替换 output_artifacts——那是
+    v1 头溢出的换轨语义，v2 的 result.json 里 output_artifacts 已是完整
+    字段。正确 v2 writer 永不发它（PR-2 的 Worker 契约将明文禁止）；
+    异构/畸形 payload 携带它时以 result.json 原值为准，不激活换轨。
+    """
     try:
         raw = await concurrency.run_in_threadpool(read_archived_result_metadata, staged)
-        return parse_result_metadata(raw)
+        payload = json.loads(raw)
+        if isinstance(payload, dict):
+            payload.pop(RESULT_OUTPUT_ARTIFACTS_FLAG, None)
+        return parse_result_metadata(json.dumps(payload, ensure_ascii=False))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"{_V1_INVALID_DETAIL}: {exc}") from exc

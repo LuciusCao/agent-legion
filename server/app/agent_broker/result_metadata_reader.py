@@ -16,10 +16,12 @@ code_contract.RESULT_METADATA_MEMBER），头里只带固定 ASCII 引导值—�
 - v1 头里的 ``X-Agent-Result``（若在 v2 请求中仍出现）由路由层忽略：
   v2 下权威在归档成员，本读回面即权威来源。
 
-与 ``result-output-artifacts.json`` 清单通道（#755）互相独立：那是 v1
-头溢出的换轨标记语义（头 ``output_artifacts_in_archive`` 布尔 + commit
-层读回 enrich）；v2 的 ``result.json`` 里 ``output_artifacts`` 就是完整
-字段（无换轨标记语义），同一 ``parse_result_metadata`` 校验链覆盖。
+与 ``result-output-artifacts.json`` 清单通道（#755）的关系：两形态共享
+同一条 ``parse_result_metadata`` 校验链，而 v1 头溢出的换轨标记
+``output_artifacts_in_archive`` 在 v2 读路径被显式忽略
+（agent_worker_result_shapes 的 read_member 在 parse 前剥离）——commit
+层见该标记会转读清单成员并替换 output_artifacts，那是 v1 专属语义；
+正确 v2 writer 永不发它，PR-2 的 Worker 契约将明文禁止。
 """
 
 from __future__ import annotations
@@ -43,11 +45,13 @@ def read_archived_result_metadata(archive: Path) -> str:
     返回原始文本（UTF-8 解码后）——校验链（parse_result_metadata）由调用
     方执行，本函数只负责成员定位、大小上限与 JSON 文本形态（先在这里
     拒掉非 JSON 文本，让「非 JSON」与「非法元数据」两类 400 可区分定位）。
-    坏归档（非 gzip/tar——tarfile.TarError）同样转 ValueError：v2 的元数据
-    权威在归档，归档解不开 = 元数据不可投递，语义对齐 v1 头非法 JSON 的
-    ValueError→400，也让 #959 的 4xx 单次降级接管（防 5xx 重试把毒归档
-    变成租约过期重排队死循环）。OSError（Host 磁盘面）不在此转换——那是
-    500/重试语义，不是 Worker 的错。
+    坏归档（非 gzip/tar——tarfile.TarError）同样转 ValueError → 400：这是
+    v2 的契约违约判决（承诺的 result.json 成员不可读），对齐 v1 头形态
+    非法 JSON 的 ValueError→4xx 语义。v1 形态的毒归档（头元数据合法、
+    归档解不开）不经 400：completion 层的解包宽捕获把它转成诚实判败的
+    ExecutionResult（failed + "failed to unpack Agent result: …"）→ 204、
+    租约终结、无重跑。OSError（Host 磁盘面）不在此转换——那是 500 语义
+    的 Host 侧故障，不是 Worker 的契约违约。
     """
     try:
         with tarfile.open(archive, "r|gz") as tar:
