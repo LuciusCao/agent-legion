@@ -270,12 +270,14 @@ In `nightly-gate.yml`:
   that is why it runs on the weekly schedule and manual dispatch instead of
   the PR gate. Any finding fails the job; fixes land as dependency PRs.
 - **exemption-expiry** — refreshes the issue-state manifest and detects
-  expired architecture exemptions; the refreshed manifest is committed
-  straight to the default branch by the job itself (#1150: the manual
+  expired architecture exemptions; the refreshed manifest is committed to a
+  dedicated `chore/issue-states-sync` branch and merged via an auto-merge PR
+  by the job itself (#1150: the manual
   `make architecture-issue-states` ritual rots on a single-maintainer repo —
   five weeks of red nightly proved it), while a closed anchor issue still
-  fails the job so the exemption gets fulfilled or re-anchored first. Since
-  #295 it also detects expired
+  fails the job so the exemption gets fulfilled or re-anchored first — the
+  docs-only lane (changes + docs-terms) gates the merge, so the bot never
+  bypasses the trunk ruleset. Since #295 it also detects expired
   flaky-registry deadlines (`check_reruns.py --check-deadlines`, deadline
   evidence without needing the extended rerun report), and since #1024 on
   every maintained branch too (`scripts/quality/flaky_branch_deadlines.py`:
@@ -378,7 +380,7 @@ verification comes from the CI workflow, not from these files.
 
 Configure the repository on GitHub as follows:
 
-1. Protect `main` via the **repository ruleset `trunk-protection-main`** (Settings → Rules → Rulesets): required status check `quality-gate`, deletion and non-fast-forward blocked. It replaced the legacy branch-protection object (#1150) so the nightly exemption-expiry job's manifest commit can reach `main` through the ruleset's workflow-pull path (the legacy object had no Actions carve-out and rejected the bot push with GH006). `release/*` trains get the same ruleset shape when they exist.
+1. Protect `main` via the **repository ruleset `trunk-protection-main`** (Settings → Rules → Rulesets): required status check `quality-gate`, deletion and non-fast-forward blocked. It replaced the legacy branch-protection object (#1150); the nightly exemption-expiry job's manifest refresh merges through an auto-merge PR on the docs-only lane instead of a direct push — the Actions bot has no clean Integration bypass on personal repos, and the PR path keeps the trunk ruleset intact. `release/*` trains get the same ruleset shape when they exist.
 2. Require only the stable `quality-gate` status check before merging. It
    validates selected internal lanes, including `docs-terms` for docs-only
    changes; do not require volatile shard names individually.
