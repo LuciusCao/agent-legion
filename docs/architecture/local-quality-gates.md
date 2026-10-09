@@ -289,9 +289,33 @@ In `nightly-gate.yml`:
 - **nightly-e2e** — multi-browser smoke E2E (the deterministic browser suite
   re-run on Chromium, Firefox, and WebKit via `scripts/e2e/run_browser_smoke.py`;
   PR/push stays Chromium-only) plus a workspace stress run
-  (`scripts/stress/run_e2e_stress.py`, 50 agents / 2000 jobs / 300s at 200
-  events/s, asserting p95 click latency and uploading the stress report).
+  (`scripts/stress/run_e2e_stress.py`, 50 agents / 2000 jobs / 300s at
+  200 events/s, asserting p95 click latency and uploading the stress report).
   Runs only on the weekly schedule and manual dispatch.
+
+### Timing-assertion discipline (#1150)
+
+The loaded-runner flaky family (10 of 16 registry entries at the time of
+writing) is not test bugs: it is timing-sensitive assertions meeting a 2-core
+CI runner. Every new or touched timing-adjacent test follows four rules —
+review checks them like a boundary rule:
+
+1. **Wait for signals, not durations.** Assert after an observable state
+   exists (`tests/helpers.wait_for_predicate`; never a fixed sleep, never an
+   assumption that a poll window of N seconds is enough). Local `_wait_for`
+   copies in test files should converge on the shared helper.
+2. **Assert the invariant, not the intermediate state.** When a race makes
+   several intermediate states legal, assert only the invariant (the
+   FLAKY-009 fix is the canonical example: exactly one pending row,
+   whichever request won).
+3. **Mocks must return real shapes.** A default-`undefined` mock walks the
+   error branch under CI timing and fails good code (#801's lesson).
+4. **Budget timeouts for CI load.** Set timeout values against the loaded
+   2-core runner, not the dev machine — or better, anchor on the signal
+   and not on time at all (rule 1 subsumes this when achievable).
+
+The postgres tier's CI `-n 1` pin (above) removes the resource contention
+that produced the family; these rules keep new tests from reintroducing it.
 
 The postgres tier shards are a deterministic `md5(nodeid) % 3` collection
 filter (`scripts/pytest_gate_shard.py`, `GATE_SHARD=i/n`). Every pytest shard

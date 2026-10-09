@@ -55,6 +55,7 @@
 - 后端测试隔离基于 TRUNCATE：每个 xdist worker 每 session 只建一次 schema，每个测试清空所有表（`tests/conftest.py`）。改动 DDL 的测试必须加 `@pytest.mark.fresh_schema` 走完整重建。本地 quick gate 默认不带覆盖率（`AGENT_LEGION_COV=1` 开启；85% floor 由 CI 与 `./scripts/check.sh` 强制）。
 - 新测试必须放进对应子系统子目录（如 `tests/services/`、`tests/scripts/`），不要新增 `tests/` 根目录文件（静态检查 `scripts/architecture/test_placement.py` 强制，基线 `config/architecture/test-root-files-baseline.json`）；确定不碰数据库的纯静态测试可加 `@pytest.mark.no_db` 跳过 TRUNCATE 隔离。
 - 自动评审（codex）finding 按 [docs/architecture/review-convergence.md](docs/architecture/review-convergence.md) 分诊：P1、受支持形态下的目标缺陷残留/启动失败/数据或安全问题、回归才阻塞合并；只在人为异常环境状态下触发的转 follow-up issue。修 finding 只收窄或复用，不扩范围；某轮只剩非阻塞项时分诊后即合并，不再追加 `@codex review`。
+- 时序敏感测试遵守四条纪律（等信号非等时长、断言不变量非中间态、mock 返回真实形状、超时按 CI 负载预算），复审按边界规则执行；细则见 [docs/architecture/local-quality-gates.md](docs/architecture/local-quality-gates.md) 的 Timing-assertion discipline（#1150）。
 - 测试文件超过 800 行就应主动按被测主题拆分（同目录姊妹文件、用例零改动迁移）；gate 的 1000 行上限是硬底线。存量超 800 行的文件随下次触碰时顺手拆。
 
 ## 5. Architecture Governance
