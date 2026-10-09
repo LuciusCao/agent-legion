@@ -53,7 +53,11 @@ def load_capacity_snapshot(db_path: str, code_capacity: int) -> CapacitySnapshot
 
     The global count covers only local code-pool leases (Worker-claimed
     executions are capacity-accounted on the Worker side); node-level counts
-    cover every active lease of the node, matching the claim transaction.
+    cover every active lease of the node regardless of executor — the local
+    pool and remote code claims write the same executor_leases rows, and
+    since #1149 both claim transactions enforce the node limit against that
+    merged count (the local claim in check_claim_capacity, the remote claim
+    in claim_evaluate under the shared code-pool lock).
     """
     with read_connection(db_path) as conn:
         now_str = database_timestamp(datetime.now(UTC))

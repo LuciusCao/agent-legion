@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from psycopg import IntegrityError
 
+from server.app.agent_broker.claim_node_limit import node_limit_audit_value
 from server.app.agent_broker.manifest_guard import require_routable_execution
 from server.app.db.transaction import write_transaction
 from server.app.executors._lease_control import lock_job_mutation_and_read_generation
@@ -53,8 +54,14 @@ def enqueue_request(broker: AgentExecutionBroker, request: AgentExecutionRequest
             # Self-contained agent nodes (profile_source='node', #933) have no
             # route row and no versioned definition: the frozen profile rides
             # the request row itself, so only the audit limit is read.
+            # #1149: the code branch's node_concurrency_limit is an audit
+            # snapshot of the workspace_node_limits row (1 = no configured
+            # limit), same audit-only discipline as the agent branches — the
+            # authoritative node-limit check is the claim transaction
+            # (claim_node_limit, called from claim_evaluate; current value
+            # per claim).
             if request.kind == "code":
-                stored_limit = 1
+                stored_limit = node_limit_audit_value(conn, request.workspace_id, request.node_key)
             elif request.profile_source == PROFILE_SOURCE_NODE:
                 stored_limit = _workspace_agent_limit(conn, request.workspace_id)
             else:

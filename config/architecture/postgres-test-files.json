@@ -21,6 +21,7 @@
     "tests/db/test_artifact_promotion_restore.py",
     "tests/db/test_auth_queries.py",
     "tests/db/test_auth_scoped_tokens_migration.py",
+    "tests/db/test_claim_node_limit_remote.py",
     "tests/db/test_claim_queue_wait_profile_migration.py",
     "tests/db/test_claim_stage_profile_migration.py",
     "tests/db/test_completion_generation_gates.py",

@@ -19,9 +19,11 @@ def validate_workspace_node_limits(
     never exceed the instance code_capacity. ``type: agent`` nodes run on
     Agent workers, not the code pool, and cannot carry a node limit (the
     explicit node type decides, #284). In pure-remote mode (#389,
-    ``code_capacity == 0``) there is no local pool to bound against — node
-    limits still apply to the global lease count (remote code claims are
-    node-counted too), so they are accepted without the ceiling check.
+    ``code_capacity == 0``) there is no local pool to bound against — the
+    node limit is still enforced for remote code claims: claim_evaluate
+    counts the node's active executor_leases and skips the request while the
+    limit is saturated (issue #1149), so limits are accepted without the
+    ceiling check.
     """
     seen_limits: set[str] = set()
     for node_limit in node_limits:

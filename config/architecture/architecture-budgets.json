@@ -1009,6 +1009,7 @@
     "server/app/agent_broker/claim_batch_select.py": 150,
     "server/app/agent_broker/claim_batch_tx.py": 91,
     "server/app/agent_broker/claim_evaluate.py": 121,
+    "server/app/agent_broker/claim_node_limit.py": 43,
     "server/app/agent_broker/claim_paths.py": 24,
     "server/app/agent_broker/claim_promote.py": 93,
     "server/app/agent_broker/claim_retry.py": 39,
