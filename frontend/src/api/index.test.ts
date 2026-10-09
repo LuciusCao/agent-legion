@@ -351,7 +351,9 @@ describe('job helpers', () => {
   })
 
   it('fetchJobArtifactRawBytes rejects when the body exceeds the limit without Content-Length', async () => {
-    const mediaBytes = new ArrayBuffer(512 * 1024 * 1024 + 1)
+    // CI 零大分配：maxBytes 收窄到 8，16 字节 body 即超限——与 512 MiB 上限
+    // 走同一条错误路径（断言不变），不必真造 512 MiB buffer。
+    const mediaBytes = new ArrayBuffer(16)
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       arrayBuffer: () => Promise.resolve(mediaBytes),
@@ -359,7 +361,7 @@ describe('job helpers', () => {
     } as unknown as Response)
     global.fetch = fetchMock
 
-    await expect(fetchJobArtifactRawBytes('j1', 'big.mp4')).rejects.toThrow(
+    await expect(fetchJobArtifactRawBytes('j1', 'big.mp4', 8)).rejects.toThrow(
       /exceed readArtifactBytes limit/
     )
   })

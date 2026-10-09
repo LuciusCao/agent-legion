@@ -7,12 +7,17 @@
 import { fetchJobArtifact, fetchJobArtifactRawBytes } from '../../api'
 import type { JobDetail } from '../../types/jobTypes'
 
-/** 宿主回包通道：与 request 按 id 配对（实现见 PreviewPanelHost）。 */
+/**
+ * 宿主回包通道：与 request 按 id 配对（实现见 PreviewPanelHost）。末位
+ * transfer 透传给 postMessage 第三参（structured clone 的零拷贝所有权
+ * 转移）——目前只有 readArtifactBytes 的 ArrayBuffer 用它。
+ */
 export type BridgeResponder = (
   id: number,
   ok: boolean,
   payload?: unknown,
-  error?: string
+  error?: string,
+  transfer?: Transferable[]
 ) => void
 
 export async function handleBridgeRequest(
@@ -49,7 +54,11 @@ export async function handleBridgeRequest(
           )
           return
         }
-        respond(id, true, await fetchJobArtifactRawBytes(jobId, params.name))
+        const artifact = await fetchJobArtifactRawBytes(jobId, params.name)
+        // 零拷贝 transfer（#1146 评审 P3-3）：把 bytes 所有权转给面板帧，
+        // structured clone 不再复制（512 MiB 媒体时宿主峰值省一份完整
+        // 拷贝）。transfer 后宿主侧该 buffer 已 detach——此后不得再读。
+        respond(id, true, artifact, undefined, [artifact.bytes])
         return
       }
       default:

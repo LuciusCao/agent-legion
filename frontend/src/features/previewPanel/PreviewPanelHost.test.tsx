@@ -292,6 +292,38 @@ describe('PreviewPanelHost 桥协议', () => {
     expect(new Uint8Array(bytes)).toEqual(new Uint8Array(mediaBytes))
   })
 
+  it('readArtifactBytes 的 bytes 经 postMessage transfer 零拷贝转移（评审 P3-3）', async () => {
+    const mediaBytes = Uint8Array.from([3, 1, 4, 1, 5]).buffer
+    mockFetchJobArtifactRawBytes.mockResolvedValue({
+      name: 'demo.mp4',
+      mediaType: 'video/mp4',
+      bytes: mediaBytes,
+    })
+    const { container } = renderHost()
+    const iframe = getIframe(container)
+    const postSpy = vi.spyOn(iframe.contentWindow!, 'postMessage')
+
+    emitPanelMessage(iframe, {
+      source: PREVIEW_PANEL_SOURCE,
+      type: 'request',
+      id: 36,
+      method: 'readArtifactBytes',
+      params: { name: 'demo.mp4' },
+    })
+
+    await waitFor(() => {
+      const call = (postSpy.mock.calls as unknown[][]).find(
+        ([data]) => (data as Record<string, unknown>)?.id === 36
+      )
+      expect(call).toBeDefined()
+      // 第三参即 transfer list：宿主把 payload 的 bytes 所有权转给面板帧
+      // （同一 buffer 对象，不是拷贝）。jsdom 不执行实际 transfer，源 buffer
+      // 保持可读——浏览器侧则随发送 detach，行为对收方面板透明。
+      expect(call![2]).toEqual([mediaBytes])
+      expect((call![2] as unknown[])[0]).toBe(mediaBytes)
+    })
+  })
+
   it('readArtifactBytes 超限与缺 name 走错误响应通道（不回传半读字节）', async () => {
     mockFetchJobArtifactRawBytes.mockRejectedValue(
       new Error(

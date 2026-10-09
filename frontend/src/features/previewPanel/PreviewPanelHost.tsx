@@ -39,7 +39,8 @@
  * - 桥只暴露只读方法（listArtifacts/readArtifact/readArtifactBytes/
  *   getJobDetail，方法体见 bridgeRequestHandler.ts），返回的都是当前页面
  *   用户本来就有权看到的数据（readArtifactBytes 复用 raw 端点的会话鉴权，
- *   512 MiB 内存护栏防大文件整读）；写操作（发布/归档/改配置）不走桥。
+ *   512 MiB 内存护栏防大文件整读；bytes 经 postMessage transfer 零拷贝
+ *   转移给面板帧）；写操作（发布/归档/改配置）不走桥。
  *   init 消息带 capabilities 声明（基础三法之外的增量方法，#1146）——
  *   守卫白名单对未知 method 静默丢弃，面板无法靠探测发现新方法。
  * - 消息鉴别：opaque origin 的 event.origin 恒为 "null"，不能用来鉴权——
@@ -155,11 +156,15 @@ export function PreviewPanelHost({
   }, [detail, initMessage])
 
   useEffect(() => {
+    // transfer（#1146 评审 P3-3）：readArtifactBytes 的 ArrayBuffer 走
+    // postMessage 第三参转移所有权——structured clone 零拷贝；宿主侧
+    // buffer 随即 detach，调用方（bridgeRequestHandler）不再引用它。
     function respond(
       id: number,
       ok: boolean,
       payload?: unknown,
-      error?: string
+      error?: string,
+      transfer?: Transferable[]
     ) {
       iframeRef.current?.contentWindow?.postMessage(
         {
@@ -169,7 +174,8 @@ export function PreviewPanelHost({
           ok,
           ...(ok ? { payload } : { error: error ?? 'unknown error' }),
         },
-        '*'
+        '*',
+        transfer
       )
     }
 
