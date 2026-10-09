@@ -509,7 +509,14 @@ def test_get_preview_guide_is_served_locally(recorded) -> None:
     text = _run_tool(server, "get_preview_guide", {})
     # The preview panel playbook ships with the MCP server: no HTTP call.
     assert calls == []
-    for section in ("Bridge API", "listArtifacts", "readArtifact", "getJobDetail"):
+    for section in (
+        "Bridge API",
+        "listArtifacts",
+        "readArtifact",
+        "readArtifactBytes",
+        "getJobDetail",
+        "media-src blob:",
+    ):
         assert section in text
 
 

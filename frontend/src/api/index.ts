@@ -5,6 +5,10 @@ export {
   fetchJobArtifact,
   fetchJobDetail,
 } from './jobsApi'
+// prettier-ignore
+export { fetchJobArtifactRawBytes, READ_ARTIFACT_BYTES_MAX_BYTES, ArtifactTooLargeError } from './jobArtifactBytes'
+// prettier-ignore
+export type { ArtifactBytesResponse } from './jobArtifactBytes'
 export {
   createWorkspace,
   deleteWorkspace,

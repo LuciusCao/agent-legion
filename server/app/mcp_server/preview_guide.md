@@ -33,8 +33,8 @@ The host also injects a Content-Security-Policy into your document before it
 parses (the meta lands in the real `<head>`, positioned by the HTML parser —
 you cannot preempt or remove it): `default-src 'none'`, inline
 `script-src`/`style-src` plus the platform origin (scripts, styles, fonts,
-and `connect-src`), `img-src data:` plus the platform origin,
-`form-action 'none'`. This tightens outbound network at the host, not by
+and `connect-src`), `img-src data:` plus the platform origin, `media-src
+blob:`, `form-action 'none'`. This tightens outbound network at the host, not by
 convention: `fetch()`, `sendBeacon()`, form submissions, subresource loads
 (including images) to any external origin will not fire. Known residual: CSP
 does not govern iframe self-navigation, so `location.href = …`-style
@@ -72,6 +72,10 @@ Consequences for your markup:
 - Images must be `data:` URIs inline in the HTML (or platform-origin assets);
   remote `https:` images do NOT load — the built-in question panel's
   sanitizer drops them rather than rendering remote sources.
+- `<video>` / `<audio>` sources: the ONLY permitted scheme is `blob:` URLs
+  your own script creates from bytes fetched through the bridge
+  (`readArtifactBytes` + `URL.createObjectURL`, see below). Remote media
+  URLs and `data:` media do not load.
 - Never `fetch()` the platform API directly: it fails (no credentials on an
   opaque origin, and `connect-src` only permits the platform origin) and is
   not the contract. Use the bridge.
@@ -89,6 +93,14 @@ Panel → host (`source: "agent-legion-preview-panel"`):
   - `listArtifacts()` → `string[]` — artifact names of the current job.
   - `readArtifact({name})` → `{name, content}` — UTF-8 text of one artifact
     (same data as `GET /api/jobs/{id}/artifacts/{name}`).
+  - `readArtifactBytes({name})` → `{name, mediaType, bytes}` — the artifact's
+    raw bytes as an `ArrayBuffer` (structured clone; NOT base64), plus the
+    media type the raw endpoint maps from the file extension
+    (`video/mp4`, `audio/mpeg`, … non-media files are
+    `application/octet-stream`). Size guard: artifacts above 512 MiB are
+    refused and arrive as an error response — read media files, not
+    entire archives. Available only when `init.capabilities` lists
+    `"readArtifactBytes"` (see below).
   - `getJobDetail()` → the job detail payload (`job`, `nodes` with
     `node_key`/`status`, `runs`, `artifacts`) — use node statuses to gate
     sections by execution progress.
@@ -97,13 +109,20 @@ Panel → host (`source: "agent-legion-preview-panel"`):
 
 Host → panel (`source: "agent-legion-preview-host"`):
 
-- `{type: "init", jobId, theme, assets}` — the panel's starting context.
-  `theme` maps CSS custom property names to values (`--pp-bg`,
+- `{type: "init", jobId, theme, assets, capabilities}` — the panel's starting
+  context. `theme` maps CSS custom property names to values (`--pp-bg`,
   `--pp-surface`, `--pp-text`, `--pp-text-secondary`, `--pp-accent`,
   `--pp-on-accent`, `--pp-error`, `--pp-border`, `--pp-radius`,
   `--pp-font-family`); apply them on `document.documentElement.style` so the
-  panel follows the platform look. The host RE-SENDS `init` when node
-  statuses change — treat every `init` as "re-fetch and re-render".
+  panel follows the platform look. `capabilities` is a string array of bridge
+  methods the host supports BEYOND the always-present base contract
+  (`listArtifacts` / `readArtifact` / `getJobDetail`) — currently
+  `["readArtifactBytes"]`. Feature-detect with
+  `data.capabilities && data.capabilities.indexOf("readArtifactBytes") !== -1`;
+  an older host sends no `capabilities` field at all (treat it as empty — you
+  cannot probe methods by sending unknown ones, the guard silently drops
+  them). The host RE-SENDS `init` when node statuses change — treat every
+  `init` as "re-fetch and re-render".
 - `{type: "response", id, ok, payload | error}` — answer to a `request`.
 
 Minimal client skeleton (copy and adapt):
@@ -136,6 +155,29 @@ window.addEventListener('message', function (event) {
 window.parent.postMessage({ source: PANEL_SOURCE, type: 'ready' }, '*')
 ```
 
+### Playing media artifacts (video/audio, issue #1146)
+
+Media bytes cannot ride `readArtifact` (it decodes UTF-8 text). When
+`init.capabilities` includes `"readArtifactBytes"`, fetch the bytes and build
+a blob URL for the `<video>`/`<audio>` element — `media-src blob:` is the
+only media scheme the panel CSP permits, and blob URLs can only be created by
+your own script in your own frame:
+
+```js
+callBridge('readArtifactBytes', { name: 'final.mp4' }).then(function (res) {
+  var url = URL.createObjectURL(new Blob([res.bytes], { type: res.mediaType }))
+  document.querySelector('video').src = url
+})
+```
+
+A common pattern for subtitled video: read the media via
+`readArtifactBytes`, read the subtitle track (SRT/VTT is text) via
+`readArtifact`, then drive an overlay `<div>` from the element's
+`timeupdate` event. Keep the panel's own seek/overlay logic in the `<script>`
+block (no inline event attributes). For over-512-MiB artifacts the bridge
+answers with `{ok: false, error: "… exceed readArtifactBytes limit …"}` —
+render that error instead of a player.
+
 The platform ships a complete working example — the built-in question panel
 bundle (`frontend/src/features/previewPanel/builtin/questionPanel.html` in
 the repository). Read it before writing your own: it implements the full
@@ -164,6 +206,9 @@ rendering with graceful degradation.
   `source` marker field instead).
 - Blank panel after publish: you fetched the platform API directly instead of
   the bridge; the opaque origin carries no credentials.
+- `<video>`/`<audio>` stays blank with no error: you used a remote or `data:`
+  media URL (only panel-created `blob:` URLs are permitted) or the artifact
+  exceeds the 512 MiB `readArtifactBytes` limit (check the error response).
 - Buttons/inputs do nothing (and a "部分脚本被安全策略拦截" banner shows above
   the panel): the bundle uses inline event-handler attributes (`onclick=`)
   or `javascript:` URLs; rebind them with `addEventListener`.

@@ -21,7 +21,9 @@
  *   外带通道，与 fetch/sendBeacon 同罪；收紧后图源只剩 data: 内联与平台
  *   origin，两处都是实际引用面：预览 bundle 无外链图（内置面板的消毒器
  *   只产出 https 远程图——收紧后这类图随 CSP 一起失效降级为空，属安全
- *   收敛的预期取舍））+ connect-src 限平台 origin。
+ *   收敛的预期取舍））+ media-src blob:（#1146：面板经桥 readArtifactBytes
+ *   取媒体字节后自建 blob URL 播放——blob 只能由面板本帧脚本创建，字节
+ *   全部来自桥，不构成出站面）+ connect-src 限平台 origin。
  *   宿主文档自身的 HTTP 头策略也被 srcdoc 继承：#989 起其 script-src 是
  *   per-response nonce，bundle 的 <script> 由 panelCsp.ts 盖章放行，inline
  *   事件属性（onclick=）被拦截并经 csp-violation 探针提示。
@@ -34,8 +36,12 @@
  *   fetch/sendBeacon/img/子资源/表单通道已闭合；导航/WebRTC/dns-prefetch
  *   通道作为接受的残留记录于此（均携带量有限——只能带出脚本已知的数据，
  *   不能读取响应）。
- * - 桥只暴露只读方法（listArtifacts/readArtifact/getJobDetail），返回的都是
- *   当前页面用户本来就有权看到的数据；写操作（发布/归档/改配置）不走桥。
+ * - 桥只暴露只读方法（listArtifacts/readArtifact/readArtifactBytes/
+ *   getJobDetail，方法体见 bridgeRequestHandler.ts），返回的都是当前页面
+ *   用户本来就有权看到的数据（readArtifactBytes 复用 raw 端点的会话鉴权，
+ *   512 MiB 内存护栏防大文件整读）；写操作（发布/归档/改配置）不走桥。
+ *   init 消息带 capabilities 声明（基础三法之外的增量方法，#1146）——
+ *   守卫白名单对未知 method 静默丢弃，面板无法靠探测发现新方法。
  * - 消息鉴别：opaque origin 的 event.origin 恒为 "null"，不能用来鉴权——
  *   宿主钉住 event.source === iframe.contentWindow 再校验 source 标记；
  *   回包 postMessage(..., '*') 的目标窗口由 contentWindow 引用钉死，不会
@@ -45,14 +51,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme, type Theme } from '@mui/material/styles'
 import katexCssUrl from 'katex/dist/katex.min.css?url'
 import katexJsUrl from 'katex/dist/katex.min.js?url'
-import { fetchJobArtifact } from '../../api'
 import { useJobDetailQuery } from '../../hooks/useJobDetailQuery'
-import type { JobDetail } from '../../types/jobTypes'
 import {
   isPanelToHostMessage,
+  PREVIEW_HOST_CAPABILITIES,
   PREVIEW_HOST_SOURCE,
   type PreviewHostInitMessage,
 } from './bridge'
+import { handleBridgeRequest } from './bridgeRequestHandler'
 import { buildPanelCsp, injectPanelCsp, readDocumentCspNonce } from './panelCsp'
 import styles from './PreviewPanelHost.module.css'
 
@@ -115,6 +121,8 @@ export function PreviewPanelHost({
         katexCssUrl: new URL(katexCssUrl, window.location.origin).href,
         katexJsUrl: new URL(katexJsUrl, window.location.origin).href,
       },
+      // 基础三法之外的增量能力（#1146）：面板据此同步分支，旧面板零影响。
+      capabilities: PREVIEW_HOST_CAPABILITIES,
     }),
     [jobId, theme]
   )
@@ -164,41 +172,6 @@ export function PreviewPanelHost({
         '*'
       )
     }
-    async function handleRequest(
-      id: number,
-      method: string,
-      params: { name?: string } | undefined,
-      currentDetail: JobDetail | undefined
-    ) {
-      try {
-        switch (method) {
-          case 'listArtifacts':
-            respond(id, true, currentDetail?.artifacts ?? [])
-            return
-          case 'getJobDetail':
-            respond(id, true, currentDetail ?? null)
-            return
-          case 'readArtifact': {
-            const name = params?.name
-            if (!name) {
-              respond(id, false, undefined, 'readArtifact requires params.name')
-              return
-            }
-            respond(id, true, await fetchJobArtifact(jobId, name))
-            return
-          }
-          default:
-            respond(id, false, undefined, `unknown bridge method: ${method}`)
-        }
-      } catch (error) {
-        respond(
-          id,
-          false,
-          undefined,
-          error instanceof Error ? error.message : String(error)
-        )
-      }
-    }
 
     function onMessage(event: MessageEvent) {
       const frame = iframeRef.current
@@ -223,7 +196,14 @@ export function PreviewPanelHost({
         )
         return
       }
-      void handleRequest(data.id, data.method, data.params, detail)
+      void handleBridgeRequest(
+        data.id,
+        data.method,
+        data.params,
+        jobId,
+        detail,
+        respond
+      )
     }
 
     window.addEventListener('message', onMessage)

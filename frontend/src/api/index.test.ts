@@ -8,6 +8,7 @@ import {
   deleteWorkspacePackage,
   fetchActiveWorkflowRevision,
   fetchJobArtifact,
+  fetchJobArtifactRawBytes,
   fetchJobDetail,
   fetchWorkflowRevisionDetail,
   fetchWorkflowRevisions,
@@ -15,6 +16,7 @@ import {
   updateWorkspace,
   updateWorkspacePackage,
 } from './index'
+import { ArtifactTooLargeError } from './jobArtifactBytes'
 import {
   getAgentCatalog,
   getSkillDetail,
@@ -305,6 +307,60 @@ describe('job helpers', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/jobs/j1/artifacts/log.txt',
       expect.any(Object)
+    )
+  })
+
+  it('fetchJobArtifactRawBytes reads raw bytes with media type (#1146)', async () => {
+    const mediaBytes = Uint8Array.from([0, 1, 2, 0xfd, 0xfe, 0xff]).buffer
+    const arrayBuffer = vi.fn().mockResolvedValue(mediaBytes)
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer,
+      headers: new Headers({
+        'Content-Length': '6',
+        'Content-Type': 'video/mp4',
+      }),
+    } as unknown as Response)
+    global.fetch = fetchMock
+
+    const result = await fetchJobArtifactRawBytes('j1', 'demo.mp4')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/jobs/j1/artifacts/demo.mp4/raw'
+    )
+    expect(result).toEqual({
+      name: 'demo.mp4',
+      mediaType: 'video/mp4',
+      bytes: mediaBytes,
+    })
+    expect(arrayBuffer).toHaveBeenCalled()
+  })
+
+  it('fetchJobArtifactRawBytes rejects on oversized Content-Length without reading the body', async () => {
+    const arrayBuffer = vi.fn()
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer,
+      headers: new Headers({ 'Content-Length': String(512 * 1024 * 1024 + 1) }),
+    } as unknown as Response)
+    global.fetch = fetchMock
+
+    await expect(
+      fetchJobArtifactRawBytes('j1', 'big.mp4')
+    ).rejects.toBeInstanceOf(ArtifactTooLargeError)
+    expect(arrayBuffer).not.toHaveBeenCalled()
+  })
+
+  it('fetchJobArtifactRawBytes rejects when the body exceeds the limit without Content-Length', async () => {
+    const mediaBytes = new ArrayBuffer(512 * 1024 * 1024 + 1)
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(mediaBytes),
+      headers: new Headers(),
+    } as unknown as Response)
+    global.fetch = fetchMock
+
+    await expect(fetchJobArtifactRawBytes('j1', 'big.mp4')).rejects.toThrow(
+      /exceed readArtifactBytes limit/
     )
   })
 })

@@ -52,7 +52,10 @@ async function serveHost(page: Page, lib: string, scriptSrc: string) {
     return route.fulfill({
       contentType: 'text/html',
       headers: {
-        'content-security-policy': `default-src 'self'; ${scriptSrc}; frame-src 'self' blob: data:`,
+        // 与生产宿主文档头（server/app/http_csp.py build_spa_csp）同形：
+        // #1146 起含 media-src 'self' data: blob:——srcdoc 面板继承该策略，
+        // 媒体播放的收紧层是面板自身 meta（media-src blob:）。
+        'content-security-policy': `default-src 'self'; ${scriptSrc}; frame-src 'self' blob: data:; media-src 'self' data: blob:`,
       },
       body: '<!doctype html><html><head></head><body><script src="/lib.js"></script></body></html>',
     })
@@ -102,3 +105,96 @@ for (const mode of ['strict', 'compat'] as const) {
     }
   })
 }
+
+/**
+ * #1146：面板 meta 策略的 media-src blob: 放行面板自建 blob 的媒体。
+ *
+ * 面板脚本把一段真实可解码的 WAV（帧内字节构造，无网络）包成 blob URL
+ * 喂 <audio>：宿主策略（buildPanelCsp 注入的 media-src blob:）下应真实
+ * 加载（loadedmetadata）；bundle 自带 media-src 'none' meta 时（多策略
+ * 取交集）应被拦并上报 media-src 违规——负例证明探针与断言非空转。
+ * 宿主文档头带生产同形的 media-src 'self' data: blob:（srcdoc 继承层）。
+ */
+test('media-src blob: 放行面板自建 blob 的 <audio>/<video>（#1146，Chromium 实测）', async ({
+  page,
+}) => {
+  await serveHost(page, await panelLib(), `script-src 'self' 'nonce-${H}'`)
+
+  const mediaBundle = (blockMedia: boolean) => `<!doctype html><html><head>${
+    blockMedia
+      ? `<meta http-equiv="Content-Security-Policy" content="media-src 'none'">`
+      : ''
+  }</head><body>
+<audio id="a"></audio><video id="v" controls muted></video>
+<script id="t">
+(function () {
+  function report(msg) { parent.postMessage(Object.assign({ __mediaProbe: 1 }, msg), '*') }
+  document.addEventListener('securitypolicyviolation', function (e) {
+    report({ type: 'media-violation', directive: e.violatedDirective })
+  })
+  var numSamples = 1600
+  var buf = new ArrayBuffer(44 + numSamples * 2)
+  var view = new DataView(buf)
+  function wstr(o, s) { for (var i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)) }
+  wstr(0, 'RIFF'); view.setUint32(4, 36 + numSamples * 2, true); wstr(8, 'WAVE')
+  wstr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true); view.setUint32(24, 8000, true)
+  view.setUint32(28, 16000, true); view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true); wstr(36, 'data'); view.setUint32(40, numSamples * 2, true)
+  for (var i = 0; i < numSamples; i++) view.setInt16(44 + i * 2, Math.round(Math.sin(i / 20) * 8000), true)
+  var url = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }))
+  var a = document.getElementById('a')
+  a.addEventListener('loadedmetadata', function () { report({ type: 'media-loaded' }) })
+  a.src = url
+  document.getElementById('v').src = URL.createObjectURL(
+    new Blob([new Uint8Array([0, 0, 0, 1])], { type: 'video/mp4' })
+  )
+})()
+</script></body></html>`
+
+  const run = (html: string) =>
+    page.evaluate(
+      async ([html, nonce]) => {
+        const result = { violations: [] as string[], loaded: false }
+        const onMessage = (event: MessageEvent) => {
+          const data = event.data as {
+            __mediaProbe?: number
+            type?: string
+            directive?: string
+          }
+          if (!data || data.__mediaProbe !== 1) return
+          if (data.type === 'media-loaded') result.loaded = true
+          if (data.type === 'media-violation' && data.directive)
+            result.violations.push(data.directive)
+        }
+        window.addEventListener('message', onMessage)
+        const lib = (
+          window as unknown as {
+            PanelCsp: {
+              buildPanelCsp(): string
+              injectPanelCsp(h: string, csp: string, n: string): string
+            }
+          }
+        ).PanelCsp
+        const frame = document.createElement('iframe')
+        frame.setAttribute('sandbox', 'allow-scripts')
+        frame.srcdoc = lib.injectPanelCsp(html, lib.buildPanelCsp(), nonce)
+        const loaded = new Promise((r) => frame.addEventListener('load', r))
+        document.body.appendChild(frame)
+        await loaded
+        await new Promise((r) => setTimeout(r, 400))
+        frame.remove()
+        window.removeEventListener('message', onMessage)
+        return result
+      },
+      [html, H] as const
+    )
+
+  const allowed = await run(mediaBundle(false))
+  expect(allowed.violations).toEqual([])
+  expect(allowed.loaded).toBe(true)
+
+  const blocked = await run(mediaBundle(true))
+  expect(blocked.violations).toContain('media-src')
+  expect(blocked.loaded).toBe(false)
+})

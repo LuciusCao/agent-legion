@@ -1,12 +1,15 @@
 /**
- * PreviewPanelHost 契约测试（issue #328 的质量红线）：
+ * PreviewPanelHost 契约测试（issue #328 的质量红线，#1146 增补媒体字节通道）：
  * - sandbox 属性恒为 "allow-scripts"，永不出现 allow-same-origin；
  * - 只认 event.source === iframe.contentWindow 且带面板 source 标记的消息
  *   （opaque origin 下 event.origin 恒为 "null"，不能用于鉴别）；
- * - 桥方法只读：listArtifacts / readArtifact / getJobDetail；
- * - ready → 下发 init（jobId + --pp-* 主题变量 + katex 资源 URL）；
+ * - 桥方法只读：listArtifacts / readArtifact / readArtifactBytes /
+ *   getJobDetail（后两者 payload 逐字节相等 / 超限走错误响应）；
+ * - ready → 下发 init（jobId + --pp-* 主题变量 + katex 资源 URL +
+ *   capabilities 能力声明）；
  * - resize 高度钳制在 [120, 6000]；
- * - #989：宿主文档有 CSP nonce 时 bundle 脚本盖章，拦截探针报告后显示提示。
+ * - #989：宿主文档有 CSP nonce 时 bundle 脚本盖章，拦截探针报告后显示提示；
+ * - #1146：面板 CSP 放行 media-src blob:（img-src 不放行 blob:）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, act, waitFor } from '@testing-library/react'
@@ -18,10 +21,13 @@ import { TestQueryProvider } from '../../testing/testQueryClient'
 
 const mockFetchJobArtifact = vi.fn()
 const mockFetchJobDetail = vi.fn()
+const mockFetchJobArtifactRawBytes = vi.fn()
 
 vi.mock('../../api', () => ({
   fetchJobArtifact: (...args: unknown[]) => mockFetchJobArtifact(...args),
   fetchJobDetail: (...args: unknown[]) => mockFetchJobDetail(...args),
+  fetchJobArtifactRawBytes: (...args: unknown[]) =>
+    mockFetchJobArtifactRawBytes(...args),
 }))
 
 const BUNDLE = '<!doctype html><html><body>panel</body></html>'
@@ -68,6 +74,7 @@ function hostReplies(
 beforeEach(() => {
   mockFetchJobArtifact.mockReset()
   mockFetchJobDetail.mockReset()
+  mockFetchJobArtifactRawBytes.mockReset()
   mockFetchJobDetail.mockResolvedValue(
     makeJobDetail([], { artifacts: ['questions.json', 'notes.md'] })
   )
@@ -110,6 +117,10 @@ describe('PreviewPanelHost 沙箱红线', () => {
     // 不放行。
     expect(policy).toContain(`img-src data: ${window.location.origin}`)
     expect(policy).not.toContain('https:')
+    // media（#1146）：只放行面板自建 blob（readArtifactBytes 字节 →
+    // URL.createObjectURL 喂 <video>/<audio>）；blob 归面板本帧命名空间，
+    // 不是出站面，故无需 origin 白名单。img-src 不得因此连带放行 blob:。
+    expect(policy).toContain('media-src blob:')
     expect(policy).toContain("form-action 'none'")
     // bundle 原文完整保留在注入结果里。
     expect(srcdoc).toContain('<body>panel</body>')
@@ -180,6 +191,8 @@ describe('PreviewPanelHost 桥协议', () => {
     expect((init!.assets as Record<string, string>).katexJsUrl).toContain(
       'katex'
     )
+    // #1146：init 带能力声明，面板据此对 readArtifactBytes 同步分支。
+    expect(init!.capabilities).toEqual(['readArtifactBytes'])
   })
 
   it('listArtifacts 返回 job detail 的产物清单', async () => {
@@ -237,6 +250,90 @@ describe('PreviewPanelHost 桥协议', () => {
       })
     })
     expect(mockFetchJobArtifact).toHaveBeenCalledWith('job-1', 'a.json')
+  })
+
+  it('readArtifactBytes 取 raw 字节并经结构化克隆回传 ArrayBuffer（逐字节相等，#1146）', async () => {
+    const mediaBytes = Uint8Array.from([0, 1, 2, 250, 251, 252]).buffer
+    mockFetchJobArtifactRawBytes.mockResolvedValue({
+      name: 'demo.mp4',
+      mediaType: 'video/mp4',
+      bytes: mediaBytes,
+    })
+    const { container } = renderHost()
+    const iframe = getIframe(container)
+    vi.spyOn(iframe.contentWindow!, 'postMessage')
+
+    emitPanelMessage(iframe, {
+      source: PREVIEW_PANEL_SOURCE,
+      type: 'request',
+      id: 31,
+      method: 'readArtifactBytes',
+      params: { name: 'demo.mp4' },
+    })
+
+    await waitFor(() => {
+      const reply = hostReplies(iframe).find(
+        (data) => data.type === 'response' && data.id === 31
+      )
+      expect(reply).toMatchObject({
+        ok: true,
+        payload: { name: 'demo.mp4', mediaType: 'video/mp4' },
+      })
+    })
+    expect(mockFetchJobArtifactRawBytes).toHaveBeenCalledWith(
+      'job-1',
+      'demo.mp4'
+    )
+    const reply = hostReplies(iframe).find(
+      (data) => data.type === 'response' && data.id === 31
+    )!
+    const bytes = (reply.payload as { bytes: ArrayBuffer }).bytes
+    expect(bytes).toBeInstanceOf(ArrayBuffer)
+    expect(new Uint8Array(bytes)).toEqual(new Uint8Array(mediaBytes))
+  })
+
+  it('readArtifactBytes 超限与缺 name 走错误响应通道（不回传半读字节）', async () => {
+    mockFetchJobArtifactRawBytes.mockRejectedValue(
+      new Error(
+        'artifact bytes 536870913 exceed readArtifactBytes limit 536870912'
+      )
+    )
+    const { container } = renderHost()
+    const iframe = getIframe(container)
+    vi.spyOn(iframe.contentWindow!, 'postMessage')
+
+    emitPanelMessage(iframe, {
+      source: PREVIEW_PANEL_SOURCE,
+      type: 'request',
+      id: 33,
+      method: 'readArtifactBytes',
+      params: { name: 'big.mp4' },
+    })
+    emitPanelMessage(iframe, {
+      source: PREVIEW_PANEL_SOURCE,
+      type: 'request',
+      id: 34,
+      method: 'readArtifactBytes',
+      params: {},
+    })
+
+    await waitFor(() => {
+      const overLimit = hostReplies(iframe).find(
+        (data) => data.type === 'response' && data.id === 33
+      )
+      expect(overLimit).toMatchObject({ ok: false })
+      expect(String(overLimit!.error)).toContain(
+        'exceed readArtifactBytes limit'
+      )
+      expect(overLimit!.payload).toBeUndefined()
+    })
+    await waitFor(() => {
+      const missing = hostReplies(iframe).find(
+        (data) => data.type === 'response' && data.id === 34
+      )
+      expect(missing).toMatchObject({ ok: false })
+      expect(String(missing!.error)).toContain('params.name')
+    })
   })
 
   it('readArtifact 缺 name 与未知方法回结构化错误', async () => {

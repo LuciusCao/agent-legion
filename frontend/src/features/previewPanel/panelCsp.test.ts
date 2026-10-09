@@ -131,4 +131,13 @@ describe('injectPanelCsp', () => {
     expect(csp).toContain("script-src 'unsafe-inline'")
     expect(csp).not.toContain('nonce-')
   })
+
+  it('media-src 只放行 blob:（#1146 面板自建 blob 的媒体播放）', () => {
+    // blob URL 归面板本帧的 opaque-origin 命名空间，只能由面板自身脚本
+    // 创建；不写 origin（媒体字节全部来自桥，无网络子资源引用面）。
+    expect(csp).toContain('media-src blob:')
+    // blob: 不得泄漏进其他指令——img-src 的引用面仍是 data: + 平台 origin。
+    expect(csp).not.toContain('img-src blob:')
+    expect(csp).not.toContain('connect-src blob:')
+  })
 })

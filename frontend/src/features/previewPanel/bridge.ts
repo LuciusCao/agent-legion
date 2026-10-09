@@ -8,9 +8,9 @@
  * - 宿主回包用 postMessage(response, '*')：目标窗口已被 contentWindow 引用
  *   钉死，'*' 只是绕开 opaque origin 的语法要求，不会投递到别的窗口。
  *
- * 桥只暴露只读能力（listArtifacts / readArtifact / getJobDetail）与主题
- * 变量；写操作（发布、改配置）永远不走桥。新增方法即公共契约变更，需同步
- * server/app/mcp_server/preview_guide.md 与本文件的测试。
+ * 桥只暴露只读能力（listArtifacts / readArtifact / readArtifactBytes /
+ * getJobDetail）与主题变量；写操作（发布、改配置）永远不走桥。新增方法即
+ * 公共契约变更，需同步 server/app/mcp_server/preview_guide.md 与本文件的测试。
  */
 
 export const PREVIEW_PANEL_SOURCE = 'agent-legion-preview-panel'
@@ -20,7 +20,19 @@ export const PREVIEW_HOST_SOURCE = 'agent-legion-preview-host'
 export type PreviewBridgeMethod =
   | 'listArtifacts'
   | 'readArtifact'
+  | 'readArtifactBytes'
   | 'getJobDetail'
+
+/**
+ * init.capabilities：宿主在基础契约（listArtifacts / readArtifact /
+ * getJobDetail，任意版本必有）之外额外支持的桥方法。#1146 起首个条目是
+ * readArtifactBytes（媒体字节 + blob 播放）。旧宿主不发该字段——面板把它
+ * 当作「仅基础契约」处理；方法级探测不可行（isPanelToHostMessage 白名单
+ * 对未知 method 静默丢弃，面板收不到错误响应），能力声明是唯一同步通道。
+ */
+export const PREVIEW_HOST_CAPABILITIES: readonly string[] = [
+  'readArtifactBytes',
+]
 
 /** 面板 → 宿主：就绪信号（宿主收到后下发 init）。 */
 export interface PreviewPanelReadyMessage {
@@ -35,7 +47,7 @@ export interface PreviewPanelResizeMessage {
   height: number
 }
 
-/** 面板 → 宿主：桥方法调用。readArtifact 需要 params.name。 */
+/** 面板 → 宿主：桥方法调用。readArtifact / readArtifactBytes 需要 params.name。 */
 export interface PreviewPanelRequestMessage {
   source: typeof PREVIEW_PANEL_SOURCE
   type: 'request'
@@ -60,7 +72,7 @@ export type PreviewPanelToHostMessage =
   | PreviewPanelRequestMessage
   | PreviewPanelCspViolationMessage
 
-/** 宿主 → 面板：初始化（jobId + 主题变量 + 可选资源 URL）。 */
+/** 宿主 → 面板：初始化（jobId + 主题变量 + 可选资源 URL + 能力声明）。 */
 export interface PreviewHostInitMessage {
   source: typeof PREVIEW_HOST_SOURCE
   type: 'init'
@@ -68,6 +80,8 @@ export interface PreviewHostInitMessage {
   theme: Record<string, string>
   /** 平台提供的可选资源（如 katexCssUrl/katexJsUrl）；面板必须能在缺失时降级。 */
   assets: Record<string, string>
+  /** 基础契约之外的桥方法（PREVIEW_HOST_CAPABILITIES）；旧宿主缺失该字段。 */
+  capabilities?: readonly string[]
 }
 
 /** 宿主 → 面板：桥方法响应（与 request 按 id 配对）。 */
@@ -87,6 +101,7 @@ export type PreviewHostToPanelMessage =
 const BRIDGE_METHODS: readonly string[] = [
   'listArtifacts',
   'readArtifact',
+  'readArtifactBytes',
   'getJobDetail',
 ]
 
