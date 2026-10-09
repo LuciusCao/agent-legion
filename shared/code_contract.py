@@ -7,11 +7,13 @@ without a repo checkout.
 
 Lives here rather than only in code_sandbox because these constants are the
 Worker↔Host boundary itself: the Worker writes exactly these members/keys
-(``worker/code_runner.py``), the Host reads them
+(``worker/code_runner.py``, ``worker/host/transfer.py``), the Host reads them
 (``server/app/agent_broker/result_unpack.py`` for members,
-``server/app/routes/agent_worker_results.py`` for metadata keys), and the
-guard tests in ``tests/workers/test_protocol_sync.py`` pin both sides to
-this single definition.
+``server/app/routes/agent_worker_results.py`` for metadata keys, #843 v2
+also ``server/app/agent_broker/result_metadata_reader.py`` for the
+``result.json`` member), and the guard tests in
+``tests/workers/test_protocol_sync.py`` pin both sides to this single
+definition.
 """
 
 from __future__ import annotations
@@ -35,6 +37,15 @@ RESULT_OUTPUT_ARTIFACTS_MEMBER = "result-output-artifacts.json"
 # （worker/upload/report.py 溢出臂），Host 读（agent_worker_results.py 的
 # parse_result_metadata）；单一事实来源在此，两侧字面量漂移即断。
 RESULT_OUTPUT_ARTIFACTS_FLAG = "output_artifacts_in_archive"
+# #843 结果元数据 v2 双形态（PR-1 Host 读侧）：头里的 v1 JSON 整体迁入
+# 结果归档的保留成员 ``result.json``（UTF-8 JSON 文本），请求头改为固定
+# ASCII 引导值 ``X-Agent-Result-Format: 2``。头名与值在此单一事实来源
+# （Worker 写侧随 PR-2 切换，Host 读侧即本 PR）；16KiB 头上限与
+# #748/#755 的降级链随之退役——v2 无头预算。成员名与
+# RESULT_OUTPUT_ARTIFACTS_MEMBER 同属归档保留成员命名空间。
+RESULT_METADATA_FORMAT_HEADER = "X-Agent-Result-Format"
+RESULT_METADATA_FORMAT_V2 = "2"
+RESULT_METADATA_MEMBER = "result.json"
 # 结果元数据 ``command`` 面的段数上限（#822）。command 是纯观测面（Host 只
 # 记录、不参与完成判定），但 agent argv 会把每个 expected output 以
 # ``--require-output <name>`` 重复进去，产物一多段数即线性膨胀。两侧同一

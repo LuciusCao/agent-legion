@@ -212,6 +212,7 @@ mixed-fleet compatibility and upgrade order.
   | #657 concurrency ceiling 1024 → 2048 (`shared/concurrency_limits.py`; registration `max_concurrency` / `max_code_concurrency` and claim limits) | v0.7.12 (88f48f5cf) | worker-v0.7.12 | works (older Workers never declare more than 1024) | **rejected** when the Worker is configured above 1024: an older Host answers registration with 422 (and would reject such a claim body the same way); at ≤ 1024 it works |
   | #211 M3 `workflow_key` removed from claim responses | v0.7.16 | — | works for every `worker-v*` release (no Worker reads it since v0.5.0) | n/a |
   | #748 / #755 `X-Agent-Result` carries raw UTF-8; a direct-upload artifact list over the 14 KiB header budget moves into the result archive (`result-output-artifacts.json` + header flag) | v0.7.14 | worker-v0.7.14 | works (older Workers send ASCII-escaped JSON) | degraded: CJK `error_message` / `agent_stderr_tail` arrive as mojibake, and a run whose artifact list overflows the header fails with missing outputs |
+  | #843 result metadata v2: `X-Agent-Result-Format: 2` — the metadata JSON moves into the result-archive member `result.json` (the header budget and the #748/#755 degrade chain do not apply to that shape) | v0.7.19 (dual-shape read; Host reads both shapes through the same validation) | worker PR-2 (not shipped yet) | works — older Workers keep sending the v1 header shape and never set the format marker | n/a until PR-2: a v2-writing Worker against a pre-v0.7.19 Host is refused with 400 (the old Host finds no v1 `X-Agent-Result` JSON and rejects the metadata); upgrade Host first |
 
   Additive fields (the batch heartbeat's `settled` list #590, the claim's
   `execution_generation` #759 and `max_archive_bytes` #959) are tolerated
@@ -269,6 +270,15 @@ mixed-fleet compatibility and upgrade order.
   409 / 408 / 425 / 429 is degraded once into a failed report (no silent
   lease-expiry rerun), while 5xx / network errors and 408 / 425 / 429 keep
   retrying while the lease is held (§7).
+- **Result metadata v2 (#843, Host side since v0.7.19).** When a report carries
+  `X-Agent-Result-Format: 2`, the metadata JSON arrives as the reserved
+  result-archive member `result.json` (UTF-8) instead of the `X-Agent-Result`
+  header — the header budget and the #748/#755 degrade chain do not apply to
+  that shape, and a stray `X-Agent-Result` header is ignored. The Host reads
+  both shapes through the same validation (identical truncation caps); v1
+  reports without the marker behave exactly as before, so mixed fleets are
+  safe. The Worker-side write switch lands with PR-2 (#843); until then every
+  shipping Worker uses v1.
 - **`workflow_key` is gone from claim responses** (#211 M3): claims identify
   the workflow by `workspace_id` only. Every supported Worker (batch-claim
   era, #547) already ignores the field, so no Worker upgrade is required;
