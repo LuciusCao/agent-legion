@@ -256,7 +256,7 @@ def run_execution(
                     atomic_write(pgid_record, str(proc.pid))
                     heartbeat.proc_ref["proc"] = proc
                     # Drop token-delta spam as it streams by; deltas are discarded at upload time anyway.
-                    pump = spawn_agent_pump(proc, output, execution_id)
+                    pump = spawn_agent_pump(proc, output, execution_id, node_key)
                     # Fallback aligns with the Host product constant
                     # (agent_runtime.execution.EXECUTION_TIMEOUT_SECONDS = 1800);
                     # manifests always carry timeout_seconds, so this only covers

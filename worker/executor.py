@@ -49,6 +49,7 @@ from worker.runtime import controls as runtime_controls
 from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY
 from worker.runtime.setup import prepare_runtime_models
 from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
+from worker.state_evidence import configure_evidence_root
 from worker.status import ExecutionStatusReporter
 from worker.transfer_controls import load_transfer_controls
 from worker.upload.queue import UploadQueue
@@ -69,6 +70,10 @@ def main() -> int:
     # fd 上限提升（含日志）在 fd_limits 内联；失败不致命（继续用默认值）。
     raise_fd_limit_startup()
     config = runtime_controls.load_config(args.config)
+    # #1147：state 目录（--config 父目录，同 WorkerConfigStore 的派生源）下
+    # 的 evidence/ 是 prep 失败与 pump 写失败的取证转储根；先于任何 claim
+    # 配置好，上传池与 reactor parse 池线程随后只读。
+    configure_evidence_root(args.config.resolve().parent)
     max_concurrency, claim_enabled, raw_ramp_up = runtime_controls.load_claim_controls(args.config)
     max_code_concurrency = runtime_controls.load_code_concurrency(args.config)
     if error := prepare_runtime_models(config, code_concurrency=max_code_concurrency):

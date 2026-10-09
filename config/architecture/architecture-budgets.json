@@ -2119,6 +2119,7 @@
     "worker/service_static.py": 39,
     "worker/service_tokens.py": 45,
     "worker/stale_sweep.py": 55,
+    "worker/state_evidence.py": 232,
     "worker/status/__init__.py": 88,
     "worker/status/aggregates.py": 27,
     "worker/status/projection.py": 69,

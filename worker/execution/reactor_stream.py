@@ -15,6 +15,7 @@ import threading
 from typing import BinaryIO, cast
 
 from worker.event_filter import pump_filtered_events
+from worker.state_evidence import EmergencyEventsSink
 
 
 class ReactorUnavailable(RuntimeError):
@@ -28,7 +29,13 @@ class _Stream:
     drains the queue in a loop: per-stream line order), ``finishing`` marks
     the fd unregistered, ``dropped`` fences late writers. ``done`` fires when
     finishing AND pending empty AND inflight 0 — checked by the leaving task,
-    making ``join`` race-free against a mid-write batch."""
+    making ``join`` race-free against a mid-write batch.
+
+    #1147: ``evidence`` is the emergency dump sink engaged by
+    ``worker.state_evidence.write_stream_batch`` when the events path stops
+    accepting writes (run dir deleted mid-run); the stream STAYS registered
+    and keeps draining into the sink, so the child's events are preserved
+    outside the work root instead of dying with the directory."""
 
     __slots__ = (
         "fd",
@@ -44,9 +51,18 @@ class _Stream:
         "inflight",
         "writer",
         "parse_error",
+        "execution_id",
+        "node_key",
+        "evidence",
     )
 
-    def __init__(self, proc: subprocess.Popen[bytes], path: str) -> None:
+    def __init__(
+        self,
+        proc: subprocess.Popen[bytes],
+        path: str,
+        execution_id: str = "",
+        node_key: str = "",
+    ) -> None:
         if proc.stdout is None:  # spawn contract: PIPE is always set here
             raise ReactorUnavailable("child has no stdout pipe")
         self.fd = proc.stdout.fileno()
@@ -67,6 +83,9 @@ class _Stream:
         self.inflight = 0
         self.writer = False
         self.parse_error: BaseException | None = None
+        self.execution_id = execution_id
+        self.node_key = node_key
+        self.evidence: EmergencyEventsSink | None = None
 
     def take_pending(self) -> list[bytes]:
         with self.lock:

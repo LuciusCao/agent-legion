@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from shared.output_truncation import OutputTruncation
 from shared.pi_events import scan_and_compress_pi_events
+from worker.state_evidence import dump_prep_evidence, prep_failure_message
 from worker.upload.report_policy import declared_ceiling_rejection
 from worker.upload.result_metadata import (
     MAX_ERROR_MESSAGE_CHARS,
@@ -46,9 +47,13 @@ def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]
         # result.tar.gz + failed_metadata，语义钉子即"准备失败 = run
         # failed"。日志保全：错误文本截断 4000 字符后随 error_message 报
         # 给 Host，随结果持久化、两侧可见。
+        # #1147：清场前先把证据转储进 state 目录（work_root 之外）——运行
+        # 目录被 agent 自删时 events.jsonl 随目录灭失，这里是最后的取证点。
+        # 转储先于空归档落盘：execution_dir 整个消失时空归档写入自身会抛。
+        evidence = dump_prep_evidence(task, exc)
         archive = task.execution_dir / "result.tar.gz"
         write_empty_archive(archive)
-        return failed_metadata(task, f"result preparation failed: {exc}"), archive, []
+        return failed_metadata(task, prep_failure_message(task, exc, evidence)), archive, []
     if rejection is not None:
         return failed_metadata(task, rejection), archive, []
     return metadata, archive, outputs
