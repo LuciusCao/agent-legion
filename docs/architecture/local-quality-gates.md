@@ -378,14 +378,15 @@ verification comes from the CI workflow, not from these files.
 
 Configure the repository on GitHub as follows:
 
-1. Protect `main` and any release branches (Settings → Branches, or Rules → Rulesets).
+1. Protect `main` via the **repository ruleset `trunk-protection-main`** (Settings → Rules → Rulesets): required status check `quality-gate`, deletion and non-fast-forward blocked. It replaced the legacy branch-protection object (#1150) so the nightly exemption-expiry job's manifest commit can reach `main` through the ruleset's workflow-pull path (the legacy object had no Actions carve-out and rejected the bot push with GH006). `release/*` trains get the same ruleset shape when they exist.
 2. Require only the stable `quality-gate` status check before merging. It
    validates selected internal lanes, including `docs-terms` for docs-only
    changes; do not require volatile shard names individually.
 3. On `main`, enable Merge Queue after the workflow contains the
    `merge_group: checks_requested` trigger. The queue validates the synthetic
    combined commit rather than relying on independently green, stale PR heads.
-4. Disable force-push and branch deletion for protected branches.
+4. Disable force-push and branch deletion for protected branches (covered by
+   the ruleset's non_fast_forward + deletion rules).
 5. Merge changes through a pull request; do not edit protected branches in the web UI.
 
 Until required status checks are configured, nothing server-side blocks a red
