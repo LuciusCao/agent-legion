@@ -217,6 +217,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -237,21 +238,33 @@ jobs:
       # Auto-commit the refreshed manifest (#1150 decision 2a): the manifest
       # is machine-derived state; a manual "make architecture-issue-states"
       # ritual on a single-maintainer repo rots silently (5 weeks of red
-      # nightly, #1150). Detection below still fails the job on a closed
-      # anchor, so this commit only ever carries routine state refreshes.
-      - name: Commit refreshed manifest
+      # nightly, #1150). Direct pushes to main are ruleset-blocked for the
+      # Actions bot (required quality-gate check; no clean Integration bypass
+      # exists on personal repos), so the commit rides a dedicated branch and
+      # a PR with auto-merge — the docs-only lane (changes + docs-terms) is
+      # exactly the gate this manifest change should pass. Detection below
+      # still fails the job on a closed anchor, before anything is proposed.
+      - name: Propose refreshed manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "agent-legion-nightly-bot"
           git config user.email "actions@github.com"
-          if ! git diff --exit-code config/architecture/issue-states.json; then
-            git add config/architecture/issue-states.json
-            git commit -m "chore(architecture): refresh issue-state manifest (nightly, #1150)"
-            # main can advance while the job's earlier steps run (dispatch
-            # concurrency, merges): rebase the single state commit on top
-            # before pushing instead of failing on a stale tip.
-            git pull --rebase origin main
-            git push
-            echo "manifest committed"
+          if git diff --exit-code config/architecture/issue-states.json; then
+            echo "manifest already current"
+            exit 0
+          fi
+          branch="chore/issue-states-sync"
+          git checkout -B "$branch"
+          git add config/architecture/issue-states.json
+          git commit -m "chore(architecture): refresh issue-state manifest (nightly, #1150)"
+          git push --force-with-lease origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore(architecture): issue-state manifest refresh (nightly)" \
+            --body "Machine-derived state refresh from the nightly exemption-expiry job (#1150). Auto-merge on green." \
+            || echo "PR already open"
+          gh pr merge --auto --squash "$branch" \
+            || echo "auto-merge not enabled on this PR"
           else
             echo "manifest already current"
           fi
