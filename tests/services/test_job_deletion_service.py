@@ -468,7 +468,9 @@ def test_delete_succeeds_when_purging_staged_files_fails(
     assert (staged[0].parent / trash_module.COMMITTED_MARKER).is_file()
     monkeypatch.undo()
     later = datetime.now(UTC) + trash_module.DELETION_TRASH_TTL + timedelta(hours=1)
-    assert sweep_deletion_trash(settings, now=later) == 1
+    # jobs/.trash 与 logs/jobs/.trash 各一个 operation 条目（#1113 起日志按 job
+    # 目录整体移入，rmtree 同样失败而残留）。
+    assert sweep_deletion_trash(settings, now=later) == 2
     assert not staged[0].exists()
 
 
