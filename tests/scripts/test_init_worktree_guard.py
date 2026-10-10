@@ -553,7 +553,7 @@ def test_uv_cache_prewarm_concurrent_init_discards_own_clone(tmp_path: Path) -> 
     assert (worktree / ".uv-cache/sibling-entry").is_dir()
     assert not (worktree / ".uv-cache/cloned-entry").exists()
     assert not list(worktree.glob(".uv-cache/.uv-cache.prewarm-incoming*"))
-    # 自己的克隆（pid 后缀中转目录）已丢弃。
+    # 自己的克隆（pid+nonce 中转目录）已丢弃。
     assert not list(worktree.glob(".uv-cache.prewarm-incoming*"))
     # init 其余步骤照常完成。
     assert (worktree / "deploy/secrets/vault_master_key").exists()
