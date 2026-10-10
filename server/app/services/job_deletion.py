@@ -98,9 +98,6 @@ class JobDeletionService:
             else []
         )
         operation_id = f"{self._now().strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
-        # job_nodes 的节点 key 快照（含已退出图的历史节点），与事务内 node_runs
-        # 快照合并后生成普通日志名。
-        job_node_keys = {n["node_key"] for n in self.job_db.list_job_nodes(job_id)}
 
         # #958：事务只做 DB 删除，不碰文件系统（文件 I/O 不再拉长 job-mutation
         # 锁的持有时间）；本地 job_dir / 日志在提交后由 purge_deleted_job_files
@@ -113,7 +110,8 @@ class JobDeletionService:
             ) as conn:
                 # node_runs (node_key, log_path) 快照在删行事务内、同一 conn 上读：
                 # 持 job-mutation 锁、行级联消失前的最终集合，覆盖租约检查后到
-                # 事务前才 claim 并完成的分片；分片日志按它精确推导。
+                # 事务前才 claim 并完成的分片；#1113 前的旧扁平名日志只按它
+                # 精确推导（新命名在 job 独占目录，整目录清理）。
                 run_logs = self.job_db.list_node_run_logs_in_transaction(conn, job_id)
                 self.job_db.delete_job_in_transaction(conn, job_id)
         except JobMutationConflict as exc:
@@ -133,10 +131,7 @@ class JobDeletionService:
             logger.exception("Unexpected error deleting job %s", job_id)
             _fail(job_id, "delete_failed", str(exc))
 
-        node_keys = job_node_keys | {key for key, _ in run_logs}
-        if purge_deleted_job_files(
-            self.job_db, job, node_keys, self.settings, operation_id, run_logs
-        ):
+        if purge_deleted_job_files(self.job_db, job, self.settings, operation_id, run_logs):
             # 同源 job 已重建（同一 id），或锁下复核因 DB 错误未能确认未重建：
             # 按 id 的 refs / 对象清理与删除广播可能打到新 job 上，一律跳过；
             # 旧 job 的孤儿 blob 交给 orphan GC（artifact_orphan_gc），对象存储

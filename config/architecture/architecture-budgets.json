@@ -1212,7 +1212,7 @@
     "server/app/executors/_artifact_restore.py": 52,
     "server/app/executors/_artifact_supersede.py": 26,
     "server/app/executors/_code_runtime.py": 96,
-    "server/app/executors/_code_sandbox.py": 185,
+    "server/app/executors/_code_sandbox.py": 184,
     "server/app/executors/_failed_node_recording.py": 61,
     "server/app/executors/_file_promotion.py": 72,
     "server/app/executors/_file_promotion_guard.py": 59,

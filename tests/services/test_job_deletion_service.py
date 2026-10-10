@@ -18,7 +18,12 @@ from server.app.services.job_deletion import JobDeleteResult, JobDeletionService
 from server.app.services.job_deletion_trash_sweep import sweep_deletion_trash
 from server.app.services.job_operation_error import JobOperationError
 from server.app.settings import Settings
-from server.app.storage_paths import ManagedPathError, resolve_job_dir
+from server.app.storage_paths import (
+    ManagedPathError,
+    job_log_dir,
+    job_node_log_name,
+    resolve_job_dir,
+)
 
 
 def _create_settings(tmp_path: Path) -> Settings:
@@ -43,7 +48,11 @@ def _create_settings(tmp_path: Path) -> Settings:
 
 
 def _create_job(
-    job_db: JobQueries, workspace_id: str, source_id: str, status: str = "queued"
+    job_db: JobQueries,
+    workspace_id: str,
+    source_id: str,
+    status: str = "queued",
+    node_keys: tuple[str, ...] = ("extract_question",),
 ) -> dict[str, Any]:
     job_db.create_workspace(workspace_id)
     batch = job_db.create_run(
@@ -55,7 +64,7 @@ def _create_job(
         source_id,
         batch["id"],
         f"Job {source_id}",
-        ["extract_question"],
+        list(node_keys),
         workspace_id=workspace_id,
     )
     if status != "queued":
@@ -342,7 +351,7 @@ def _seed_job_files(settings: Settings, job: dict[str, Any]) -> tuple[Path, Path
     storage_dir = resolve_job_dir(job, settings.jobs_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
     (storage_dir / "original.json").write_text("original", encoding="utf-8")
-    log_path = settings.logs_dir / "jobs" / f"{job['id']}-extract_question.log"
+    log_path = job_log_dir(settings.logs_dir) / job_node_log_name(job["id"], "extract_question")
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text("log", encoding="utf-8")
     return storage_dir, log_path
@@ -653,27 +662,41 @@ def _record_finished_run(job_db: JobQueries, job_id: str, log_path: Path) -> Non
 def test_delete_purges_only_own_node_logs_not_sibling_prefix(
     job_db: JobQueries, tmp_path: Path
 ) -> None:
-    """#958：日志按节点 key 精确匹配（含分片日志），不误删 source_id 以
-    ``<source>-`` 开头的兄弟 job 的日志。"""
+    """#958 / #1113：新命名的 job 独占目录整目录删除；#1113 前的扁平名存量按
+    node_runs 快照精确匹配（含分片日志）；不误删 source_id 以 ``<source>-`` 开头
+    的兄弟 job 的新旧日志——包括 job_nodes 里有、但从未运行过的节点 ``x-y``
+    的旧名 ``<job>-x-y.log``（它是兄弟 job ``<job>-x`` 节点 ``y`` 的日志）。"""
     settings = _create_settings(tmp_path)
     service = JobDeletionService(
         job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path), settings
     )
-    job = _create_job(job_db, "ws-sibling", "Q030", status="completed")
+    job = _create_job(
+        job_db, "ws-sibling", "Q030", status="completed", node_keys=("extract_question", "x-y")
+    )
     sibling = _create_job(job_db, "ws-sibling", "Q030-x", status="completed")
     _storage_dir, own_log = _seed_job_files(settings, job)
-    own_shard_log = own_log.with_name(f"{job['id']}-extract_question-shard-0.log")
-    own_shard_log.write_text("shard", encoding="utf-8")
-    _record_finished_run(job_db, job["id"], own_shard_log)
-    sibling_log = settings.logs_dir / "jobs" / f"{sibling['id']}-extract_question.log"
-    sibling_log.write_text("sibling", encoding="utf-8")
+    log_dir = settings.logs_dir / "jobs"
+    own_legacy_shard = log_dir / f"{job['id']}-extract_question-shard-0.log"
+    own_legacy_shard.write_text("shard", encoding="utf-8")
+    _record_finished_run(job_db, job["id"], own_legacy_shard)
+    sibling_legacy = log_dir / f"{sibling['id']}-extract_question.log"
+    sibling_legacy.write_text("sibling", encoding="utf-8")
+    sibling_legacy_y = log_dir / f"{sibling['id']}-y.log"
+    sibling_legacy_y.write_text("sibling-y", encoding="utf-8")
+    assert sibling_legacy_y.name == f"{job['id']}-x-y.log"
+    sibling_new = log_dir / job_node_log_name(sibling["id"], "y")
+    sibling_new.parent.mkdir(parents=True)
+    sibling_new.write_text("sibling-new", encoding="utf-8")
 
     result = service.delete(job["workspace_id"], job["id"])
 
     assert result["status"] == "succeeded"
     assert not own_log.exists()
-    assert not own_shard_log.exists()
-    assert sibling_log.read_text(encoding="utf-8") == "sibling"
+    assert not own_log.parent.exists()
+    assert not own_legacy_shard.exists()
+    assert sibling_legacy.read_text(encoding="utf-8") == "sibling"
+    assert sibling_legacy_y.read_text(encoding="utf-8") == "sibling-y"
+    assert sibling_new.read_text(encoding="utf-8") == "sibling-new"
 
 
 def test_delete_shard_log_match_escapes_glob_metacharacters(
