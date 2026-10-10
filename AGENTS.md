@@ -55,6 +55,8 @@
 - 后端测试隔离基于 TRUNCATE：每个 xdist worker 每 session 只建一次 schema，每个测试清空所有表（`tests/conftest.py`）。改动 DDL 的测试必须加 `@pytest.mark.fresh_schema` 走完整重建。本地 quick gate 默认不带覆盖率（`AGENT_LEGION_COV=1` 开启；85% floor 由 CI 与 `./scripts/check.sh` 强制）。
 - 新测试必须放进对应子系统子目录（如 `tests/services/`、`tests/scripts/`），不要新增 `tests/` 根目录文件（静态检查 `scripts/architecture/test_placement.py` 强制，基线 `config/architecture/test-root-files-baseline.json`）；确定不碰数据库的纯静态测试可加 `@pytest.mark.no_db` 跳过 TRUNCATE 隔离。
 - 自动评审（codex）按 [docs/architecture/review-convergence.md](docs/architecture/review-convergence.md) 执行：单轮全量清单制（禁牙膏式逐条回应）、同类二次分流（焦点/栈序/视口/时序四类转 e2e）、第 5 轮熔断（三行复盘 + 四出口，决策记 PR 描述）；finding 分诊：P1、受支持形态下的目标缺陷残留/启动失败/数据或安全问题、回归才阻塞合并，其余转 follow-up issue。修 finding 只收窄或复用，不扩范围；某轮只剩非阻塞项时分诊后即合并，不再追加 `@codex review`。
+- 修缺陷按族建模，不止修被点名的实例：finding 揭示的是机制级缺陷时，先全仓普查同机制/同形态的全部实例，逐个分类处置（本 PR 收 / 转 follow-up issue / 误命中说明理由），族清单与分诊写进 PR 描述；协议类家族的判定矩阵同步写进相关 docstring，评审按族清单逐格验收。细则见 [docs/architecture/review-convergence.md](docs/architecture/review-convergence.md)「缺陷族普查」。
+- 高风险面改动（并发、跨进程协议、清理/生命周期路径、时序同步）自验之外加一道对抗式复验：评审者独立于实现者、带攻击面清单找茬；返工须附故障注入/mutation 自检（人为破坏被测机制，证明测试真能抓到目标缺陷，只跑绿不算数）；修复由原评审复验后才放行。细则见 [docs/architecture/review-convergence.md](docs/architecture/review-convergence.md)「对抗式复验」。
 - 时序敏感测试遵守四条纪律（等信号非等时长、断言不变量非中间态、mock 返回真实形状、超时按 CI 负载预算），复审按边界规则执行；细则见 [docs/architecture/local-quality-gates.md](docs/architecture/local-quality-gates.md) 的 Timing-assertion discipline（#1150）。
 - 测试文件超过 800 行就应主动按被测主题拆分（同目录姊妹文件、用例零改动迁移）；gate 的 1000 行上限是硬底线。存量超 800 行的文件随下次触碰时顺手拆。
 

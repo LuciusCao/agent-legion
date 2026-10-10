@@ -51,7 +51,7 @@ agent nodes → velites / Pi CLI → skills (local in-place git, pins in DB skil
 | 前端 | [frontend.md](frontend.md) | React SPA、状态管理、UI 组件 |
 | 部署约束 | [deployment.md](deployment.md) | 部署形态的硬约束：Worker 容器特权边界、Host 单副本、浏览器安全头与低权读面；配置来源（部署步骤见 `docs/agent-worker-deployment.md`） |
 | 质量门 | [local-quality-gates.md](local-quality-gates.md) | 本地 hooks + GitHub Actions CI 的门禁层级、凭证与分支保护策略 |
-| 评审收敛 | [review-convergence.md](review-convergence.md) | 自动评审 finding 的阻塞/非阻塞分诊、回应方式与停止条件（#835） |
+| 评审收敛 | [review-convergence.md](review-convergence.md) | 自动评审 finding 的阻塞/非阻塞分诊、缺陷族普查、高风险面对抗式复验与停止条件（#835） |
 | 项目结构 | [project-structure.md](project-structure.md) | 仓库目录地图（列到有意义的层级） |
 | velites harness | [velites-harness.md](velites-harness.md) | 自研 Rust agent harness（velites 执行内核）设计 |
 | 证据矩阵 | [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md) | 架构承诺的反向审计证据矩阵（与 `config/architecture/` invariant registry 对齐） |
