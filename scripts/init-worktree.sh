@@ -121,11 +121,12 @@ fi
 #     vault key）在空 cache 上要从零拉整棵依赖树（分钟级，慢网更甚）。克隆
 #     基准 worktree 的 uv cache（内容寻址、append-only、路径无关）让后续 uv
 #     调用命中已缓存依赖。协议实现在 scripts/uv_cache_prewarm.py（纯
-#     stdlib：固定中转目录入口自洁 + clonefile/reflink 克隆 + os.rename
-#     原子 no-replace 落位），deliberately 用系统 python3 而非 uv 调用——
-#     uv run 会先同步项目环境并就地创建非空 cache，预暖永不生效（冷启动
-#     悖论，实测见脚本 docstring）。基准无 cache、目标已有 cache（幂等重
-#     跑）静默跳过；任何失败只提示不 fail-init（冷启动仍是合法路径）。
+#     stdlib：调用级独立中转目录 + 入口按 pid 判活清扫残留 + lstat 安全
+#     清理 + clonefile/reflink 克隆 + os.rename 原子 no-replace 落位），
+#     deliberately 用系统 python3 而非 uv 调用——uv run 会先同步项目环境
+#     并就地创建非空 cache，预暖永不生效（冷启动悖论，实测见脚本
+#     docstring）。基准无 cache、目标已有 cache（幂等重跑）静默跳过；任何
+#     失败只提示不 fail-init（冷启动仍是合法路径）。
 if [[ -n "$BASE" ]]; then
     if command -v python3 >/dev/null 2>&1; then
         python3 scripts/uv_cache_prewarm.py "$BASE" || true

@@ -512,8 +512,8 @@ def test_uv_cache_prewarm_failure_falls_back_to_cold_start(tmp_path: Path) -> No
     assert "预暖克隆失败" in result.stderr
     worktree = main / ".worktrees/flat"
     assert not (worktree / ".uv-cache").exists()
-    # 半成品中转目录必须清掉（helper 的 try/finally + 入口自洁）。
-    assert not (worktree / ".uv-cache.prewarm-incoming").exists()
+    # 半成品中转目录必须清掉（helper 的 try/finally 只清自己的 pid 目录）。
+    assert not list(worktree.glob(".uv-cache.prewarm-incoming*"))
     # init 其余步骤照常完成。
     assert (worktree / "deploy/secrets/vault_master_key").read_text().strip() == (
         "stub-vault-master-key"
@@ -522,7 +522,7 @@ def test_uv_cache_prewarm_failure_falls_back_to_cold_start(tmp_path: Path) -> No
 
 _CP_STUB_CONCURRENT = """#!/usr/bin/env bash
 # 模拟并发兄弟在克隆窗口内完成预暖：带选项调用（预暖克隆）先完成克隆
-# （落固定中转目录），同时抢先落位 .uv-cache——后到者的 os.rename 原子
+# （落调用级中转目录），同时抢先落位 .uv-cache——后到者的 os.rename 原子
 # 失败（EEXIST/ENOTEMPTY），必须丢弃自己的克隆走跳过路径，不得覆盖/
 # 嵌套/删除先到者成果。无选项调用委托真实 cp。
 if [[ "${1:-}" == -* ]]; then
@@ -552,9 +552,9 @@ def test_uv_cache_prewarm_concurrent_init_discards_own_clone(tmp_path: Path) -> 
     # 先到者落位的缓存原样保留：未被 rm 误删、未被克隆内容嵌套覆盖。
     assert (worktree / ".uv-cache/sibling-entry").is_dir()
     assert not (worktree / ".uv-cache/cloned-entry").exists()
-    assert not (worktree / ".uv-cache/.uv-cache.prewarm-incoming").exists()
-    # 自己的克隆（中转目录）已丢弃。
-    assert not (worktree / ".uv-cache.prewarm-incoming").exists()
+    assert not list(worktree.glob(".uv-cache/.uv-cache.prewarm-incoming*"))
+    # 自己的克隆（pid 后缀中转目录）已丢弃。
+    assert not list(worktree.glob(".uv-cache.prewarm-incoming*"))
     # init 其余步骤照常完成。
     assert (worktree / "deploy/secrets/vault_master_key").exists()
 
@@ -581,8 +581,9 @@ def test_uv_cache_prewarm_dereferences_symlink_base(tmp_path: Path) -> None:
 
 
 def test_uv_cache_prewarm_staging_leftover_is_self_cleaned_on_rerun(tmp_path: Path) -> None:
-    """中断（含 SIGKILL）残留的中转目录由 helper 入口自洁回收：预置垃圾
-    的 .uv-cache.prewarm-incoming 在重跑 init 后消失，预暖照常落位。"""
+    """中断（含 SIGKILL）残留的中转目录由 helper 入口判活清扫回收：预置
+    垃圾（首版固定名 + 死 pid 后缀两种形态）在重跑 init 后消失，预暖照
+    常落位。死 pid 现场制造（spawn+reap），不依赖宿主机进程表。"""
     main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
     develop = main / ".worktrees/develop"
     develop.mkdir(parents=True)
@@ -594,10 +595,15 @@ def test_uv_cache_prewarm_staging_leftover_is_self_cleaned_on_rerun(tmp_path: Pa
     garbage = worktree / ".uv-cache.prewarm-incoming/leftover"
     garbage.mkdir(parents=True)
     (garbage / "junk").write_text("junk\n")
+    with subprocess.Popen(["true"]) as proc:
+        dead_pid = proc.pid
+        proc.wait()
+    dead = worktree / f".uv-cache.prewarm-incoming.{dead_pid}"
+    dead.mkdir()
 
     result = _run(worktree / "scripts/init-worktree.sh", bin_dir)
 
     assert result.returncode == 0, result.stderr
     assert "已预暖 .uv-cache" in result.stdout
-    assert not (worktree / ".uv-cache.prewarm-incoming").exists()
+    assert not list(worktree.glob(".uv-cache.prewarm-incoming*"))
     assert (worktree / ".uv-cache/wheels-v6/marker").read_text() == "cached-wheel\n"

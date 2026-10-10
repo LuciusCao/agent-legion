@@ -1,7 +1,7 @@
 .venv/
 .env
 .uv-cache/
-.uv-cache.prewarm-incoming/
+.uv-cache.prewarm-incoming*
 .ruff_cache/
 .pytest_cache/
 __pycache__/
