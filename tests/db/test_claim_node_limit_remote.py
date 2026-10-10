@@ -393,6 +393,7 @@ def test_node_limit_config_write_takes_code_pool_lock_first(job_db) -> None:
     _seed_code_job(job_db, workspace_id, "job-seed", node_key)
 
     holder = psycopg.connect(TEST_DATABASE_URL)
+    thread: threading.Thread | None = None
     try:
         holder.execute("select pg_advisory_xact_lock(hashtext('code-pool'))")
         thread, outcome = _start(lambda: _write_limit_rows(workspace_id, node_key))
@@ -403,6 +404,11 @@ def test_node_limit_config_write_takes_code_pool_lock_first(job_db) -> None:
         holder.commit()
     finally:
         holder.close()
+        # 同权回收（对齐 two_phase 的 recheck 用例）：holder 关闭即释放
+        # advisory 锁，写线程解阻后必须有人 join——否则其异步提交会撞
+        # 下一测试的 TRUNCATE 归因。守卫覆盖探针先于 _start 失败的路径。
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=30)
     _join(thread)
 
     assert outcome.get("error") is None
