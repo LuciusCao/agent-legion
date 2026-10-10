@@ -5,6 +5,16 @@ logs its arguments: marker selections, offline database pinning, xdist
 worker distribution, telemetry artifacts, and the aff index fallbacks.
 Orchestrator-level behavior (rounds, staggering, lane trimming) lives in
 tests/scripts/test_quality_gate_scripts.py.
+
+Fixture discipline: the read-only majority runs against ONE module-scoped
+layout (backend_gate_layout) whose superset fake uv logs every observation
+channel (args / shard / db / rerun) at once — each run's behavior depends
+only on env and tier, both injected per case, and GATE_LOG points at the
+case's own tmp_path, so sharing the scripts copies and the stub cannot leak
+between cases. Cases that MUTATE the layout (writing .pytest-aff-index.json,
+adding worker/ui, replacing the uv stub with a selection script) keep their
+own per-case layouts below; they are exactly the aff-selection trio, the
+worker-ui skip case and the frontend lane case.
 """
 
 from __future__ import annotations
@@ -16,6 +26,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -23,6 +35,73 @@ def _write_executable(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+# Superset fake uv: logs every observation channel the read-only cases assert
+# on, so one stub serves all of them (per-case stubs only differed in which
+# channels they recorded, never in behavior).
+_SUPERSET_UV_STUB = (
+    "#!/usr/bin/env bash\n"
+    'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
+    'printf "shard:%s\\n" "${GATE_SHARD:-unset}" >>"$GATE_LOG"\n'
+    'printf "db:%s\\n" "${AGENT_LEGION_TEST_DATABASE_URL:-unset}" >>"$GATE_LOG"\n'
+    'printf "rerun:%s\\n" "${AGENT_LEGION_RERUN_REPORT:-unset}" >>"$GATE_LOG"\n'
+)
+
+
+@pytest.fixture(scope="module")
+def backend_gate_layout(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path, Path]:
+    """Module-scoped read-only layout: the real backend gate script, its two
+    sourced helpers and the superset fake uv. Read-only means: no case may
+    add/replace files under this root (the aff-index file and worker/ui live
+    at ROOT_DIR, so those cases build their own layouts) — the gate itself
+    only rm -f's its own transient .pytest-aff-coverage here, which no case
+    asserts on."""
+    root = tmp_path_factory.mktemp("backend-gate")
+    scripts = root / "scripts"
+    fake_bin = root / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", scripts)
+    # The backend lane sources the shared job-count helper.
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts)
+    _write_executable(fake_bin / "uv", _SUPERSET_UV_STUB)
+    return root, scripts, fake_bin
+
+
+def _run_shared_backend_gate(
+    layout: tuple[Path, Path, Path],
+    tmp_path: Path,
+    env: dict[str, str],
+    *,
+    capture: str = "log",
+) -> tuple[str, str] | str:
+    """Run the shared-layout backend gate with per-case env/tier.
+
+    ``capture="log"`` returns the fake-uv argument log; ``capture="both"``
+    returns ``(log, stdout)`` for tiers whose routing messages only appear on
+    stdout. GATE_LOG stays per-case (tmp_path), so concurrent-module cases
+    never share observation state.
+    """
+    root, scripts, fake_bin = layout
+    gate_log = tmp_path / "gate.log"
+    result = _run(
+        scripts / "check-quick-backend.sh",
+        cwd=root,
+        env={
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "postgres",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            **env,
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    if capture == "both":
+        return gate_log.read_text(encoding="utf-8"), result.stdout
+    return gate_log.read_text(encoding="utf-8")
 
 
 def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -60,41 +139,22 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
     )
 
 
-def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> None:
-    scripts = tmp_path / "scripts"
-    fake_bin = tmp_path / "bin"
+def test_backend_gate_emits_junit_durations_and_rerun_report(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
     results = tmp_path / "results"
-    scripts.mkdir()
-    fake_bin.mkdir()
-    backend_gate = scripts / "check-quick-backend.sh"
-    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
-    # The backend lane sources the shared job-count helper.
-    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
-    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
-    gate_log = tmp_path / "gate.log"
-    _write_executable(
-        fake_bin / "uv",
-        "#!/usr/bin/env bash\n"
-        'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
-        'printf "rerun:%s\\n" "${AGENT_LEGION_RERUN_REPORT:-unset}" >>"$GATE_LOG"\n',
-    )
-
-    result = _run(
-        backend_gate,
-        cwd=tmp_path,
-        env={
+    calls, stdout = _run_shared_backend_gate(
+        backend_gate_layout,
+        tmp_path,
+        {
             "AGENT_LEGION_TEST_RESULTS_DIR": str(results),
             "AGENT_LEGION_TEST_RESULT_NAME": "quick",
-            "BACKEND_GATE_PHASE": "test",
-            "GATE_LOG": str(gate_log),
             "GATE_TIER": "unit",
-            "PATH": f"{fake_bin}:{os.environ['PATH']}",
         },
+        capture="both",
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "PostgreSQL offline" in result.stdout
-    calls = gate_log.read_text(encoding="utf-8")
+    assert "PostgreSQL offline" in stdout
     assert "-m not postgres" in calls
     assert "--durations=30" in calls
     assert f"--junitxml={results / 'quick-junit.xml'}" in calls
@@ -102,7 +162,9 @@ def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> 
     assert f"rerun:{results / 'quick-reruns.json'}" in calls
 
 
-def test_backend_coverage_args_include_worker_for_partition_floor(tmp_path: Path) -> None:
+def test_backend_coverage_args_include_worker_for_partition_floor(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
     """Issue #275: the AGENT_LEGION_COV path must also collect --cov=worker.
     CI's backend-unit and backend-postgres shards run these tiers with
     AGENT_LEGION_COV=1 and upload the data files; backend-coverage then
@@ -110,7 +172,9 @@ def test_backend_coverage_args_include_worker_for_partition_floor(tmp_path: Path
     data. Losing --cov=worker here would make that partition see NO DATA
     (a violation in enforce mode only after the shards shipped empty worker
     data — better to pin the invocation itself)."""
-    calls = _run_backend_gate_with_fake_uv(tmp_path, {"GATE_TIER": "unit", "AGENT_LEGION_COV": "1"})
+    calls = _run_shared_backend_gate(
+        backend_gate_layout, tmp_path, {"GATE_TIER": "unit", "AGENT_LEGION_COV": "1"}
+    )
 
     assert "--cov=server" in calls
     assert "--cov=worker" in calls
@@ -119,38 +183,14 @@ def test_backend_coverage_args_include_worker_for_partition_floor(tmp_path: Path
     assert "--cov-fail-under=0" in calls
 
 
-def test_backend_smoke_tier_runs_the_curated_subset(tmp_path: Path) -> None:
-    scripts = tmp_path / "scripts"
-    fake_bin = tmp_path / "bin"
-    scripts.mkdir()
-    fake_bin.mkdir()
-    backend_gate = scripts / "check-quick-backend.sh"
-    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
-    # The backend lane sources the shared job-count helper.
-    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
-    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
-    gate_log = tmp_path / "gate.log"
-    _write_executable(
-        fake_bin / "uv",
-        "#!/usr/bin/env bash\n"
-        'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
-        'printf "db:%s\\n" "${AGENT_LEGION_TEST_DATABASE_URL:-unset}" >>"$GATE_LOG"\n',
+def test_backend_smoke_tier_runs_the_curated_subset(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
+    calls, stdout = _run_shared_backend_gate(
+        backend_gate_layout, tmp_path, {"GATE_TIER": "smoke"}, capture="both"
     )
 
-    result = _run(
-        backend_gate,
-        cwd=tmp_path,
-        env={
-            "BACKEND_GATE_PHASE": "test",
-            "GATE_LOG": str(gate_log),
-            "GATE_TIER": "smoke",
-            "PATH": f"{fake_bin}:{os.environ['PATH']}",
-        },
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "Python Smoke Tests" in result.stdout
-    calls = gate_log.read_text(encoding="utf-8")
+    assert "Python Smoke Tests" in stdout
     assert "-m smoke" in calls
     assert "not postgres" not in calls
     # The curated tier includes PostgreSQL-backed tests, so it must not be
@@ -213,38 +253,13 @@ def test_backend_gate_can_skip_worker_ui_tests(tmp_path: Path) -> None:
     assert "uv:run --frozen pytest" in skipped_calls
 
 
-def test_backend_full_coverage_defers_floor_to_combined_report(tmp_path: Path) -> None:
-    scripts = tmp_path / "scripts"
-    fake_bin = tmp_path / "bin"
-    scripts.mkdir()
-    fake_bin.mkdir()
-    backend_gate = scripts / "check-quick-backend.sh"
-    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
-    # The backend lane sources the shared job-count helper.
-    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
-    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
-    gate_log = tmp_path / "gate.log"
-    _write_executable(
-        fake_bin / "uv",
-        "#!/usr/bin/env bash\n"
-        'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
-        'printf "db:%s\\n" "${AGENT_LEGION_TEST_DATABASE_URL:-unset}" >>"$GATE_LOG"\n',
+def test_backend_full_coverage_defers_floor_to_combined_report(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
+    calls = _run_shared_backend_gate(
+        backend_gate_layout, tmp_path, {"AGENT_LEGION_COV": "1", "GATE_TIER": "full"}
     )
 
-    result = _run(
-        backend_gate,
-        cwd=tmp_path,
-        env={
-            "AGENT_LEGION_COV": "1",
-            "BACKEND_GATE_PHASE": "test",
-            "GATE_LOG": str(gate_log),
-            "GATE_TIER": "full",
-            "PATH": f"{fake_bin}:{os.environ['PATH']}",
-        },
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    calls = gate_log.read_text(encoding="utf-8")
     assert "--cov=server" in calls
     assert "--cov=worker" in calls
     assert "--cov-fail-under=0" in calls
@@ -257,55 +272,16 @@ def test_backend_full_coverage_defers_floor_to_combined_report(tmp_path: Path) -
     assert "agent_legion_unit_offline" in calls
 
 
-def _run_backend_gate_with_fake_uv(
-    tmp_path: Path, env: dict[str, str], *, capture: str = "log"
-) -> tuple[str, str] | str:
-    """Run the backend gate with a fake uv.
-
-    ``capture="log"`` returns the fake-uv argument log (the historical
-    behavior); ``capture="both"`` returns ``(log, stdout)`` for tiers whose
-    routing messages only appear on stdout.
-    """
-    scripts = tmp_path / "scripts"
-    fake_bin = tmp_path / "bin"
-    scripts.mkdir()
-    fake_bin.mkdir()
-    backend_gate = scripts / "check-quick-backend.sh"
-    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
-    # The backend lane sources the shared job-count helper.
-    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
-    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
-    gate_log = tmp_path / "gate.log"
-    _write_executable(
-        fake_bin / "uv",
-        "#!/usr/bin/env bash\n"
-        'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
-        'printf "shard:%s\\n" "${GATE_SHARD:-unset}" >>"$GATE_LOG"\n'
-        'printf "db:%s\\n" "${AGENT_LEGION_TEST_DATABASE_URL:-unset}" >>"$GATE_LOG"\n',
-    )
-
-    result = _run(
-        backend_gate,
-        cwd=tmp_path,
-        env={
-            "BACKEND_GATE_PHASE": "test",
-            "GATE_LOG": str(gate_log),
-            "GATE_TIER": "postgres",
-            "PATH": f"{fake_bin}:{os.environ['PATH']}",
-            **env,
-        },
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    if capture == "both":
-        return gate_log.read_text(encoding="utf-8"), result.stdout
-    return gate_log.read_text(encoding="utf-8")
-
-
-def test_backend_aff_tier_falls_back_to_unit_without_index(tmp_path: Path) -> None:
+def test_backend_aff_tier_falls_back_to_unit_without_index(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
     """GATE_TIER=aff without .pytest-aff-index.json must run the whole unit
-    tier against the offline database URL (fallback only widens what runs)."""
-    calls, stdout = _run_backend_gate_with_fake_uv(tmp_path, {"GATE_TIER": "aff"}, capture="both")
+    tier against the offline database URL (fallback only widens what runs).
+    Read-only shared layout is safe here: the shared root never gains an
+    index file (the with-index cases below build their own layouts)."""
+    calls, stdout = _run_shared_backend_gate(
+        backend_gate_layout, tmp_path, {"GATE_TIER": "aff"}, capture="both"
+    )
 
     assert "aff fallback: no .pytest-aff-index.json" in stdout
     assert "-m not postgres" in calls
@@ -450,51 +426,61 @@ def test_backend_aff_tier_falls_back_on_unmapped_source_files(tmp_path: Path) ->
     assert "-m\nnot postgres\n" in calls
 
 
-def test_backend_aff_index_tier_uses_coverage_contexts(tmp_path: Path) -> None:
+def test_backend_aff_index_tier_uses_coverage_contexts(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
     """The aff-index primer must trace per-test coverage contexts and build
     the index from the dedicated coverage file (not the default .coverage)."""
-    calls = _run_backend_gate_with_fake_uv(tmp_path, {"GATE_TIER": "aff-index"})
+    calls = _run_shared_backend_gate(backend_gate_layout, tmp_path, {"GATE_TIER": "aff-index"})
 
     assert "--cov-context=test" in calls
     assert "--cov-report=" in calls
     assert "pytest_aff_selection build" in calls
 
 
-def test_backend_postgres_tier_loads_shard_plugin_when_gate_shard_set(tmp_path: Path) -> None:
-    calls = _run_backend_gate_with_fake_uv(tmp_path, {"GATE_SHARD": "1/3"})
+def test_backend_postgres_tier_loads_shard_plugin_when_gate_shard_set(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
+    calls = _run_shared_backend_gate(backend_gate_layout, tmp_path, {"GATE_SHARD": "1/3"})
 
     assert "-p scripts.pytest_gate_shard" in calls
     assert "shard:1/3" in calls
     assert "-m postgres" in calls
 
 
-def test_backend_postgres_tier_has_no_shard_plugin_without_gate_shard(tmp_path: Path) -> None:
-    calls = _run_backend_gate_with_fake_uv(tmp_path, {})
+def test_backend_postgres_tier_has_no_shard_plugin_without_gate_shard(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
+    calls = _run_shared_backend_gate(backend_gate_layout, tmp_path, {})
 
     assert "scripts.pytest_gate_shard" not in calls
     assert "shard:unset" in calls
     assert "-m postgres" in calls
 
 
-def test_backend_test_workers_default_is_capped(tmp_path: Path) -> None:
+def test_backend_test_workers_default_is_capped(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
     """The pytest -n default is worktree-aware (scripts/gate-jobs.sh): capped
     at min(4, cores) while a sibling worktree runs a gate, cores-2 (capped at
     8) otherwise. In the fake-repo fixture no sibling gate lock exists, so the
     idle branch must hold; the busy branch is covered by the gate-jobs.sh
     unit tests (issue #91 keeps the busy-branch cap at 4)."""
-    calls = _run_backend_gate_with_fake_uv(tmp_path, {})
+    calls = _run_shared_backend_gate(backend_gate_layout, tmp_path, {})
 
     match = re.search(r"(?:^|\s)-n (\d+)(?:\s|$)", calls)
     assert match is not None, calls
     assert 1 <= int(match.group(1)) <= 8
 
 
-def test_backend_pytest_distributes_work_with_worksteal(tmp_path: Path) -> None:
+def test_backend_pytest_distributes_work_with_worksteal(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
     """Every xdist invocation uses --dist worksteal: the default `load`
     scheduler strands a slow test's whole batch on one worker while the rest
     idle, and that tail is where quick-gate wall time (and timeout flakes)
     came from. worksteal keeps idle workers stealing pending tests."""
-    calls = _run_backend_gate_with_fake_uv(tmp_path, {})
+    calls = _run_shared_backend_gate(backend_gate_layout, tmp_path, {})
 
     # Count the uv invocation ("run --frozen pytest ", issue #526), not the
     # "pytest" substring — telemetry mode (AGENT_LEGION_TEST_RESULTS_DIR, as
@@ -503,24 +489,34 @@ def test_backend_pytest_distributes_work_with_worksteal(tmp_path: Path) -> None:
     assert "--dist worksteal" in calls
 
 
-def test_backend_test_workers_env_override_wins(tmp_path: Path) -> None:
-    calls = _run_backend_gate_with_fake_uv(tmp_path, {"AGENT_LEGION_TEST_WORKERS": "7"})
+def test_backend_test_workers_env_override_wins(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
+    calls = _run_shared_backend_gate(
+        backend_gate_layout, tmp_path, {"AGENT_LEGION_TEST_WORKERS": "7"}
+    )
 
     assert re.search(r"(?:^|\s)-n 7(?:\s|$)", calls)
 
 
-def test_backend_postgres_tier_pins_one_worker_on_ci(tmp_path: Path) -> None:
+def test_backend_postgres_tier_pins_one_worker_on_ci(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
     """#1150 D2: CI postgres shards run -n 1 — the loaded-runner timing family
     (10 of 16 flaky entries) lives on 2-core runners where -n 2 splits the
     same cores with postgres and coverage. Local runs keep the default."""
-    calls = _run_backend_gate_with_fake_uv(tmp_path, {"CI": "true"})
+    calls = _run_shared_backend_gate(backend_gate_layout, tmp_path, {"CI": "true"})
 
     assert re.search(r"(?:^|\s)-n 1(?:\s|$)", calls)
     assert "-n 2" not in calls
 
 
-def test_backend_postgres_tier_keeps_default_workers_without_ci(tmp_path: Path) -> None:
-    calls = _run_backend_gate_with_fake_uv(tmp_path, {"AGENT_LEGION_TEST_WORKERS": "5"})
+def test_backend_postgres_tier_keeps_default_workers_without_ci(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
+    calls = _run_shared_backend_gate(
+        backend_gate_layout, tmp_path, {"AGENT_LEGION_TEST_WORKERS": "5"}
+    )
 
     assert re.search(r"(?:^|\s)-n 5(?:\s|$)", calls)
 

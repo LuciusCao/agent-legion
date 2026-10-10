@@ -448,14 +448,26 @@ def test_interrupted_backup_cleanup_keeps_committed_tree(tmp_path: Path) -> None
     assert not (main / "frontend" / ".node_modules.bak").exists()
 
 
-# 慢速 npm 桩：ci 时先声明「安装中」（写 marker 文件）再 sleep——供并发
-# 锁用例构造「持有锁的进程正处于安装中」的真实窗口。
+# 慢速 npm 桩：ci 时先声明「安装中」（写 marker 文件），再轮询等待测试主
+# 进程写放行文件——信号同步（等信号非等时长），取代原先的字面
+# STUB_NPM_SLEEP 睡眠：窗口语义不变（安装段一直占用到被显式放行， flock
+# 窗口由持有者真实占据），耗时从固定 15s 降到亚秒。两侧协议：
+#   桩侧：touch $STUB_INSTALLING_MARKER 后每 50ms 轮询 $STUB_INSTALL_RELEASE；
+#   测试侧：见到 marker（= 进程已持锁、已 mv 备份、npm 在跑）后驱动并发
+#           场景，放行文件由最外层 finally 保证必达（先于一切 wait）。
+# 桩内 600×50ms=30s 只是防挂兜底（与 rm 桩同形）：测试失联时桩不永久
+# 轮询，finally 里 kill 后的 communicate reap 因此有硬上限。正确性不依赖
+# 它——并发用例的 release 必达、sigkilled 用例的 killpg 亚秒级到达，
+# 都远早于 30s。
 _NPM_SLOW_STUB = """#!/usr/bin/env bash
 echo "npm $*" >> "${STUB_LOG}"
 if [[ "$1" == "ci" ]]; then
   rm -rf node_modules
   touch "${STUB_INSTALLING_MARKER}"
-  sleep "${STUB_NPM_SLEEP:-30}"
+  for ((i = 0; i < 600; i++)); do
+    [[ -f "${STUB_INSTALL_RELEASE}" ]] && break
+    sleep 0.05
+  done
   mkdir -p node_modules
 fi
 exit 0
@@ -466,13 +478,29 @@ def test_concurrent_install_serializes_on_lock(tmp_path: Path) -> None:
     """PR #832 codex P2：同 worktree 并发调用（dev-up + install + 手工）共享
     备份位与恢复逻辑——后启动者不得移走/删除前一进程的备份或其刚完成的
     安装。整个事务经 flock 串行化：A 持锁安装期间 B 阻塞在 flock 上（打印
-    等待提示）；A 完成退出、内核释放锁后 B 凭 stamp 跳过。"""
+    等待提示）；A 完成退出、内核释放锁后 B 凭 stamp 跳过。
+
+    A 的安装窗口由信号同步构造（见 _NPM_SLOW_STUB 注释）：marker = A 已
+    持锁进入安装段，release 文件 = 放行 A 完成安装。
+
+    清理路径三不变量（codex P2 / PR #1203，正例：test_gate_queue.py 的
+    finally kill-all、test_run_service_chunking_concurrency.py 的 finally
+    release_a.set()）：
+    1. release 在最外层 finally 必达，先于一切 wait——失败路径（B 启动
+       抛异常 / marker 不来）同样放行 A，first 的回收不再以 60s
+       TimeoutExpired 掩盖在飞的原异常；
+    2. 两个子进程同权 kill 兜底——kill 后 communicate reap，不留持锁孤儿；
+    3. 清理本身不抛新异常：kill/wait 的对象都已先 poll 判定。"""
     main, bin_dir = _setup(tmp_path)
     _write_stub(bin_dir / "npm", _NPM_SLOW_STUB)
     installing = tmp_path / "installing.marker"
+    release = tmp_path / "install.release"
     stub_log = tmp_path / "stub.log"
     env = _script_env(
-        main, bin_dir, stub_log, {"STUB_INSTALLING_MARKER": str(installing), "STUB_NPM_SLEEP": "15"}
+        main,
+        bin_dir,
+        stub_log,
+        {"STUB_INSTALLING_MARKER": str(installing), "STUB_INSTALL_RELEASE": str(release)},
     )
 
     first = subprocess.Popen(
@@ -482,6 +510,7 @@ def test_concurrent_install_serializes_on_lock(tmp_path: Path) -> None:
         text=True,
         env=env,
     )
+    second: subprocess.Popen[str] | None = None
     try:
         # 等 A 真正进入安装段（marker 出现 = A 已持锁、已 mv 备份、npm 在跑）。
         for _ in range(100):
@@ -490,19 +519,47 @@ def test_concurrent_install_serializes_on_lock(tmp_path: Path) -> None:
             time.sleep(0.1)
         assert installing.exists(), "首个进程未进入安装段"
         # 此时备份位/新装目录处于中间态：B 并发启动必须被 flock 挡住。
-        # B 的桩免 sleep——A 释放后 B 立即完成，等待窗口就是 A 的安装期。
-        second = subprocess.run(
-            [_BASH, str(main / "scripts" / SCRIPT.name)],
-            capture_output=True,
-            text=True,
-            env=_script_env(main, bin_dir, stub_log, {"STUB_NPM_SLEEP": "0"}),
-            timeout=90,
-        )
-        assert second.returncode == 0, second.stderr
-        assert "等待" in second.stderr  # B 的 flock 非阻塞探测失败后打印了等待提示
+        # 等信号非等时长：B 的等待提示打印于阻塞 flock 之前（flush=True），
+        # 它就是「B 已真实阻塞在锁上」的信号；见到后才放行 A。
+        second_stderr = tmp_path / "second.stderr.log"
+        with second_stderr.open("w") as stderr_file:
+            second = subprocess.Popen(
+                [_BASH, str(main / "scripts" / SCRIPT.name)],
+                stdout=subprocess.PIPE,
+                stderr=stderr_file,
+                text=True,
+                env=_script_env(
+                    main,
+                    bin_dir,
+                    stub_log,
+                    {
+                        "STUB_INSTALLING_MARKER": str(installing),
+                        "STUB_INSTALL_RELEASE": str(release),
+                    },
+                ),
+            )
+        try:
+            for _ in range(300):  # CI 负载预算 30s：正常亚秒内出现
+                if second.poll() is not None:
+                    break  # B 未阻塞就退出 = 锁没挡住（回归），交给断言报红
+                if second_stderr.exists() and "等待" in second_stderr.read_text():
+                    break
+                time.sleep(0.1)
+        finally:
+            release.touch()  # happy path 放行 A：必须在 second.wait 之前
+        second.wait(timeout=90)  # A 完成释锁后 B 凭 stamp 跳过，正常亚秒
+        assert second.returncode == 0, second_stderr.read_text()
+        assert "等待" in second_stderr.read_text()  # B 曾被 flock 挡住
     finally:
-        first.wait(timeout=60)
-    out, err = first.communicate()
+        # 不变量 1：release 必达且先于一切 wait（幂等；happy path 已 touch）。
+        release.touch()
+        # 不变量 2：失败路径同权回收——kill 兜底后 communicate reap。
+        if second is not None and second.poll() is None:
+            second.kill()
+            second.wait(timeout=10)
+        if first.poll() is None:
+            first.kill()
+        out, err = first.communicate()
     assert first.returncode == 0, err or out
     # A 完成、B 随后：A 安装一次，B 凭 stamp 跳过——npm ci 恰好一次，
     # 备份无残迹（锁文件残留无害：flock 归内核，文件存在不阻塞任何人）。
@@ -575,7 +632,13 @@ def test_sigkilled_holder_releases_lock_immediately(tmp_path: Path) -> None:
             main,
             bin_dir,
             stub_log,
-            {"STUB_INSTALLING_MARKER": str(installing), "STUB_NPM_SLEEP": "60"},
+            # 放行文件在本用例时间窗内不落地：持有者停在安装段直到被
+            # SIGKILL（killpg 亚秒级到达，远早于桩的 30s 防挂上界——与旧
+            # STUB_NPM_SLEEP=60 同语义，但没有 60s 的字面挂账）。
+            {
+                "STUB_INSTALLING_MARKER": str(installing),
+                "STUB_INSTALL_RELEASE": str(tmp_path / "never-released"),
+            },
         ),
     )
     try:
