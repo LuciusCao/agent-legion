@@ -10,7 +10,9 @@ split for the budget): an ``expected_updated_at`` that no longer matches
 the stored row raises ``DraftConflictError`` instead of overwriting a
 newer draft. #1221 adds the delete: a successful draft publish removes the
 row inside the revision write's own transaction, so the published revision
-is the single post-publish authority.
+is the single post-publish authority — conditional on the locked row still
+matching the published content's identity hash (#1226 P1: a concurrently
+saved newer draft survives as the unpublished draft).
 """
 
 from __future__ import annotations
@@ -74,13 +76,30 @@ class WorkflowDraftQueriesMixin(ConnectionQueriesMixin):
             raise RuntimeError("workflow draft upsert did not return a row")
         return dict(row)
 
+    def read_workspace_workflow_draft_for_update(
+        self, conn: DatabaseConnection, workspace_id: str
+    ) -> dict[str, Any] | None:
+        """The draft row under a row lock, inside the caller's transaction.
+
+        The publish delete hook reads here before deciding: ``for update``
+        serializes against a concurrent draft upsert (READ COMMITTED
+        re-evaluates after the lock wait), so the comparison the caller makes
+        on the returned content is race-safe. Never commits on its own.
+        """
+        row = conn.execute(
+            f"select {self._DRAFT_COLUMNS}"
+            " from workspace_workflow_drafts where workspace_id=%s for update",
+            (workspace_id,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
     def delete_workspace_workflow_draft(self, conn: DatabaseConnection, workspace_id: str) -> None:
         """Delete the workspace's draft row inside the caller's transaction (#1221).
 
-        Publish rides this on the revision write's commit hook: the draft row
-        dies atomically with the revision that replaces it as the single
-        authority (a delete failure rolls the whole publish back). Never
-        commits on its own; deleting an absent row is a no-op.
+        Callers decide whether the delete is warranted (publish compares the
+        locked row's identity hash against the published content first —
+        #1226 P1); this is the plain removal primitive. Never commits on its
+        own; deleting an absent row is a no-op.
         """
         conn.execute(
             "delete from workspace_workflow_drafts where workspace_id=%s",

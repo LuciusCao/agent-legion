@@ -700,3 +700,87 @@ def test_seed_ensure_active_revision_keeps_the_draft_row(tmp_path: Path) -> None
 
     assert queries.get_active_workflow_revision(workspace["id"], "test_publish_flow") is not None
     assert queries.get_workspace_workflow_draft(workspace["id"]) is not None
+
+
+# --- #1226 codex P1: the delete is conditional on the draft's identity hash ---
+
+
+def _rewrite_draft_before_revision_write(
+    monkeypatch: pytest.MonkeyPatch, queries: JobQueries, workspace_id: str, yaml: str
+) -> None:
+    """Interleave: validation passed on the submitted YAML; before the
+    revision write (and its draft-delete hook) land, another tab/agent saves
+    ``yaml`` into the draft store."""
+    real_save = WorkflowRevisionService.save_workspace_revision
+
+    def rewrite_then_save(self, ws_id, definition, on_commit=None):
+        queries.upsert_workspace_workflow_draft(ws_id, yaml)
+        return real_save(self, ws_id, definition, on_commit)
+
+    monkeypatch.setattr(WorkflowRevisionService, "save_workspace_revision", rewrite_then_save)
+
+
+def test_publish_with_concurrent_newer_draft_keeps_it(tmp_path: Path, monkeypatch) -> None:
+    """#1226 P1: a draft saved AFTER the publish's validation (different
+    content) must survive the publish — the delete only fires while the
+    stored draft still matches the published content's identity hash. The
+    publish itself still succeeds: the newer edit stays as the unpublished
+    draft (no 409, no abort)."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _seed_node_code(workspace["id"])
+    queries.upsert_workspace_workflow_draft(workspace["id"], _DRAFT_YAML)
+    newer = _DRAFT_YAML + "    label: 并发改写\n"
+    _rewrite_draft_before_revision_write(monkeypatch, queries, workspace["id"], newer)
+
+    ok, errors = publish_workflow_draft(queries, workspace["id"], _DRAFT_YAML)
+
+    assert (ok, errors) == (True, [])
+    assert queries.get_active_workflow_revision(workspace["id"], "test_publish_flow") is not None
+    draft = queries.get_workspace_workflow_draft(workspace["id"])
+    assert draft is not None
+    assert draft["definition_yaml"] == newer
+
+
+def test_publish_with_concurrent_identical_redraft_still_deletes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#1226 P1: a concurrent save of the SAME content (only updated_at
+    advanced — e.g. the canvas's trailing debounce PUT) still deletes: the
+    condition is the identity hash, not the timestamp."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _seed_node_code(workspace["id"])
+    queries.upsert_workspace_workflow_draft(workspace["id"], _DRAFT_YAML)
+    _rewrite_draft_before_revision_write(monkeypatch, queries, workspace["id"], _DRAFT_YAML)
+
+    ok, errors = publish_workflow_draft(queries, workspace["id"], _DRAFT_YAML)
+
+    assert (ok, errors) == (True, [])
+    assert queries.get_workspace_workflow_draft(workspace["id"]) is None
+
+
+def test_runtime_only_publish_with_concurrent_newer_draft_keeps_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#1226 P1 on the second write site: the runtime-only in-place edit's
+    delete is conditional the same way."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _seed_node_code(workspace["id"])
+    ok, _ = publish_workflow_draft(queries, workspace["id"], _DRAFT_YAML)
+    assert ok
+    runtime_edit = _DRAFT_YAML + "    execution:\n      model: glm-4.7\n"
+    queries.upsert_workspace_workflow_draft(workspace["id"], runtime_edit)
+    newer = runtime_edit + "    label: 并发改写\n"
+    _rewrite_draft_before_revision_write(monkeypatch, queries, workspace["id"], newer)
+
+    ok, errors = publish_workflow_draft(queries, workspace["id"], runtime_edit)
+
+    assert (ok, errors) == (True, [])
+    active = queries.get_active_workflow_revision(workspace["id"], "test_publish_flow")
+    assert active["version"] == 1
+    assert "glm-4.7" in str(active["definition_json"])
+    draft = queries.get_workspace_workflow_draft(workspace["id"])
+    assert draft is not None
+    assert draft["definition_yaml"] == newer
