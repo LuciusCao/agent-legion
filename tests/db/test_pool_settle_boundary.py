@@ -1,8 +1,10 @@
-"""Test-boundary pool close must not strand dirty returns (#1045).
+"""Pool close must not strand dirty returns (#1045, #1077).
 
-Schema rebuilds and session teardown close every pool (per-test isolation
+``server.app.db.pools.close_database_pools`` is the single close chokepoint:
+the production lifespan shutdown and the test boundaries (schema rebuilds,
+session teardown) both call it, so one test covers both (per-test isolation
 itself only settles, keeping pools alive across tests — see
-tests/postgres_support.settle_database_pools). With the #438 ``reset``
+``pools.settle_database_pools``). With the #438 ``reset``
 callback, psycopg_pool rolls back a dirty (INTRANS) return on a
 maintenance worker; ``ConnectionPool.close()`` discards any such task that
 has not run yet, so the returned connection keeps its transaction (and
@@ -25,13 +27,8 @@ import psycopg
 from psycopg.pq import TransactionStatus
 
 from server.app.db.connection import connect_database
-from server.app.db.pools import pool_for
-from tests.postgres_support import (
-    BASE_DATABASE_URL,
-    TEST_DATABASE_URL,
-    TEST_SCHEMA,
-    close_database_pools_settled,
-)
+from server.app.db.pools import close_database_pools, pool_for
+from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
 
 class _GatedTask:
@@ -78,7 +75,7 @@ def test_settled_close_rolls_back_dirty_return_queued_behind_busy_workers() -> N
         # unsettled close would already have flagged the pool closed, and the
         # queued rollback would be discarded.
         threading.Timer(0.3, gate.set).start()
-        close_database_pools_settled()
+        close_database_pools()
 
         # Rolled back (then closed with the pool) — never left INTRANS.
         assert raw.info.transaction_status != TransactionStatus.INTRANS

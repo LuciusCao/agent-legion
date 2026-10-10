@@ -1186,6 +1186,8 @@
     "server/app/db/migrations/workspace_secrets.py": 24,
     "server/app/db/migrations/workspace_settings_retirement.py": 19,
     "server/app/db/pool_reset.py": 72,
+    "server/app/db/pool_settle.py": 30,
+    "server/app/db/pool_sizing.py": 32,
     "server/app/db/pools.py": 49,
     "server/app/db/postgres_schema.sql": 816,
     "server/app/db/retry.py": 41,
