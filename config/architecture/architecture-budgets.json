@@ -1766,7 +1766,7 @@
     "server/app/services/workflow_draft_publish_gates.py": 59,
     "server/app/services/workflow_draft_store.py": 24,
     "server/app/services/workflow_drafts.py": 39,
-    "server/app/services/workflow_revision_change.py": 26,
+    "server/app/services/workflow_revision_change.py": 24,
     "server/app/services/workflow_revision_format.py": 26,
     "server/app/services/workflow_revision_pipeline.py": 53,
     "server/app/services/workflow_revision_routes.py": 31,

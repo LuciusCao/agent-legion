@@ -7,7 +7,7 @@ import {
 // code 节点 revision 作用域的 config 值读写（#418 后半）。node `config`
 // 是三层解析链（schema defaults → node config → workspace 覆盖）的中间
 // 层，随 workflow revision 版本化、发布时进入新版本（publish 的
-// _structural_payload 覆盖它）。与「运行时覆盖」通道（workspace
+// structural_payload 覆盖它）。与「运行时覆盖」通道（workspace
 // node_config，经 settings/nodes PATCH 写 live 设置）区分。
 
 /** 读侧防御：YAML 编辑中途的非法文本吞错返回空（仓库纪律同
