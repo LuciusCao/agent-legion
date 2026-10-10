@@ -9,6 +9,8 @@ describe('resetForWorkspace', () => {
       jobsWorkspaceId: 'ws1',
       isLoading: false,
       listLoadError: 'boom',
+      snapshotInFlight: true,
+      pendingPatchBuffer: [{ revision: 5, jobs: [], deletedJobIds: [] }],
       selectedIds: new Set(['j1']),
       filterConfig: {
         status: 'failed',
@@ -25,6 +27,9 @@ describe('resetForWorkspace', () => {
     expect(next.isLoading).toBe(true)
     expect(next.jobsWorkspaceId).toBe('ws2')
     expect(next.listLoadError).toBeNull()
+    // 跨 workspace 不残留在途快照的缓冲与置位（#1189 codex P1-c）。
+    expect(next.snapshotInFlight).toBe(false)
+    expect(next.pendingPatchBuffer).toEqual([])
     expect(next.selectedIds).toEqual(new Set())
     expect(next.filterConfig).toEqual({
       status: null,

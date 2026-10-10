@@ -43,6 +43,11 @@ export function resetJobListForFilterChange(
     loadingMore: false,
     isLoading: true,
     listLoadError: null,
+    // 列表基线作废即在途缓冲作废：snapshotInFlight 由 refreshFirstPage 在
+    // 调用本函数后显式重新置位，其余调用方（resetForWorkspace）直接清空、
+    // 跨 workspace 不残留。
+    snapshotInFlight: false,
+    pendingPatchBuffer: [],
   }
 }
 

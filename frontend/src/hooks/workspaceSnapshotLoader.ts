@@ -14,6 +14,11 @@ import { loadWorkspaceJobsSnapshot } from './workspaceEventHandlers'
  * isCurrent — without the staleness guard it would flip the shared
  * snapshotLoadingRef to false while the new workspace's snapshot is in
  * flight, and patches arriving in that window would no longer queue.
+ * Two queueing layers compose here: while an SSE snapshot load is in
+ * flight, events wait in pendingEventsRef; if a refreshFirstPage is in
+ * flight when they replay, the store-level patch buffer
+ * (jobStore.snapshotInFlight / pendingPatchBuffer) holds them again until
+ * the refresh's snapshot lands — neither layer needs to know the other.
  */
 export function createLoadSnapshot(
   queryClient: QueryClient,

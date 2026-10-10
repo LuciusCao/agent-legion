@@ -1,5 +1,6 @@
 import type { JobSummary } from '../../../types/jobTypes'
 import type { JobState, JobStoreSet } from '../state'
+import { failJobFetch } from './fetch'
 import { applyPatchToAccumulator } from '../filterLogic/optionAccumulator'
 import { applyVisiblePatchJobs } from '../filterLogic/patchVisibility'
 import {
@@ -115,6 +116,11 @@ export function applyJobPatchBatchUpdate(
   }
 }
 
+// snapshotInFlight 期间的 patch 缓冲上限：溢出说明 refresh 在途遭遇 patch
+// 风暴（每批可含数百任务），可靠收敛无望——清空缓冲并诚实走 failJobFetch
+// （错误页 + 重试按钮），不提交半应用状态。
+const MAX_PENDING_PATCH_BUFFER = 1000
+
 export function patchActions(set: JobStoreSet) {
   return {
     applyJobPatchBatch: (
@@ -123,8 +129,30 @@ export function patchActions(set: JobStoreSet) {
       patchJobs: JobSummary[],
       deletedJobIds: string[]
     ) =>
-      set(
-        (state) =>
+      set((state) => {
+        // #1189 codex P1-c：refreshFirstPage 在途期间 patch 进缓冲、
+        // revision 冻结——快照以真实 revision 落地后由 refreshFirstPage 在
+        // 同一 set 内按序重放（≤ 快照 revision 的被守卫幂等丢弃），水位与
+        // 内容恒一致，不完整基线永不提交。
+        if (state.snapshotInFlight && state.jobsWorkspaceId === workspaceId) {
+          if (state.pendingPatchBuffer.length >= MAX_PENDING_PATCH_BUFFER) {
+            return {
+              ...failJobFetch(
+                workspaceId,
+                '任务更新过于频繁，列表未能收敛，请重试'
+              )(state),
+              snapshotInFlight: false,
+              pendingPatchBuffer: [],
+            }
+          }
+          return {
+            pendingPatchBuffer: [
+              ...state.pendingPatchBuffer,
+              { revision, jobs: patchJobs, deletedJobIds },
+            ],
+          }
+        }
+        return (
           applyJobPatchBatchUpdate(
             state,
             workspaceId,
@@ -132,6 +160,7 @@ export function patchActions(set: JobStoreSet) {
             patchJobs,
             deletedJobIds
           ) ?? {}
-      ),
+        )
+      }),
   }
 }
