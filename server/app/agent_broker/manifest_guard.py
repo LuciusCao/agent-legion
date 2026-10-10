@@ -15,6 +15,7 @@ drift into two conventions.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import PurePosixPath
 from typing import Any
 
 from server.app.db.migrations.shard_identity_index import SHARD_IDENTITY_SQL
@@ -39,9 +40,19 @@ def require_unreserved_output_names(manifest: Mapping[str, Any]) -> None:
     的产物名会在归档与提升面与协议成员碰撞（v2 元数据换写吞掉真产物、
     node.log 与捕获日志双写互覆）——入队即节点失败并点名冲突名，同
     require_routable_execution 的 #13 fail-fast 形态（跑时守卫；发布侧
-    前移留待 follow-up）。"""
+    前移留待 follow-up）。
+
+    #1164 收口：按 ``PurePosixPath`` 归一化形态比对（``./result.json`` /
+    ``.//result.json`` 归一化即 ``result.json``，与提升守卫的 source 落点
+    同一路径）——原字符串精确比对放行这些别名拼写，提升守卫同样放行后
+    staging 的元数据成员会被静默提升成产物。嵌套名（``sub/result.json``）
+    归一化后仍是独立路径、是合法形态（#631 祝福形态），不受影响；绝对 /
+    ``..`` 形态不在此判（unsafe 家族由提升守卫的既有拒绝收口）。"""
     for name in map(str, manifest.get("expected_outputs") or []):
-        if name in RESERVED_RESULT_ARCHIVE_MEMBERS:
+        relative = PurePosixPath(name)
+        if relative.is_absolute() or ".." in relative.parts:
+            continue
+        if relative.as_posix() in RESERVED_RESULT_ARCHIVE_MEMBERS:
             raise ValueError(
                 f"expected output {name!r} collides with the reserved result-archive"
                 " member; rename the node output"

@@ -11,10 +11,15 @@ Contract, deliberately different from the local path
   settings: a queued request must not be fail-fasted because the setting
   changed after enqueue (the local path's carried-value vs current-value
   contract check is a dispatch-time violation detector, a different job).
-- The active count spans ``executor_leases`` without filtering executor_id:
-  the local pool and remote claims write the same table, so the merged count
-  covers both (shard candidates included — they run the same code branch in
-  ``evaluate_candidate``).
+- The active count spans ``executor_leases`` restricted to the code lease
+  forms (#1167): the local pool (``executor_id='code'``) and remote code
+  claims (``executor_id like 'agent:code:%'``) merge on the same table, so
+  the merged count covers both (shard candidates included — they run the
+  same code branch in ``evaluate_candidate``). Non-code ``agent:<id>``
+  leases never count: a node_key that turned agent→code across revisions
+  can have an old-revision agent job still running, and that execution is
+  not code-pool concurrency (limit=1 must not let one stale agent lease
+  block every new remote code claim).
 - Over-limit is a skip (``node_limit_full``), never a cancel: the request
   stays queued for the next pass with the same semantics as
   ``capacity_full``, and the unclaimable sweeper (runtime/model probes only)
@@ -136,9 +141,19 @@ def code_claim_admits(
     if not pool_held:
         state.skip_reasons["node_limit_appeared"] += 1
         return False
+    # #1167：计数只并「code 形态」租约（本地 'code' + 远程 'agent:code:%'，
+    # 前缀与 claim_promote / code_dispatch 的写侧字面量同形，测试钉住），
+    # 排除非 code 的 'agent:<id>'。口径对齐结论：本地路径
+    # ``executors/_lease_claim_limits.check_claim_capacity`` 的节点计数同样
+    # 不筛 executor_id（按 (workspace_id, node_key) 全计）——它自身的 claim
+    # 永远写 'code'，但同 node_key 的跨形态 agent 租约同样进入其计数
+    # （agent→code 跨 revision 的混合 node_key 是受支持形态，见 routing
+    # 的 route_cache_key）。该残留与 #1167 同形、方向保守（skip 重试、
+    # 永不超收），先于 #1149 存在、不属本 finding 范围，此处不动本地路径。
     active = conn.execute(
         "select count(*) as cnt from executor_leases where workspace_id=%s and node_key=%s"
-        " and status='active' and expires_at>current_timestamp",
+        " and status='active' and expires_at>current_timestamp"
+        " and (executor_id='code' or executor_id like 'agent:code:%%')",
         (selected["workspace_id"], selected["node_key"]),
     ).fetchone()
     if int(active["cnt"]) >= int(row["concurrency_limit"]):

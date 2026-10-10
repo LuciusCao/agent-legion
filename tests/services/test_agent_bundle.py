@@ -72,6 +72,34 @@ def test_result_unpack_promotes_only_expected_outputs(tmp_path: Path) -> None:
     assert [path.name for path in job_dir.iterdir()] == ["expected.json"]
 
 
+def test_result_unpack_refuses_reserved_expected_output_names(tmp_path: Path) -> None:
+    """#1164 收口（Host staging 提升面）：expected 命中保留成员名（``result.json``
+    ——v2 元数据成员，根级）时提升守卫判败不提升——归档里的元数据成员绝不
+    被静默提升成节点产物；别名拼写（``./result.json``，归一化即 ``result.json``
+    且与 source 落点同路径）同拒；嵌套名（``sub/result.json``）是独立归档
+    成员与落点、正常提升（精确语义而非前缀匹配——嵌套不误伤）。"""
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    archive = tmp_path / "result.tar.gz"
+    _write_result_archive(
+        archive,
+        {
+            "result.json": b'{"status": "completed"}',
+            "sub/result.json": b'{"nested": true}',
+        },
+    )
+
+    for name in ("result.json", "./result.json"):
+        with pytest.raises(AgentBundleError, match="reserved for the result archive"):
+            unpack_agent_result(archive, job_dir, (name,))
+        assert list(job_dir.iterdir()) == []
+
+    unpack_agent_result(archive, job_dir, ("sub/result.json",))
+    assert json.loads((job_dir / "sub" / "result.json").read_text()) == {"nested": True}
+    # 根级元数据成员从未进提升面：job_dir 只含嵌套产物。
+    assert [path.name for path in job_dir.iterdir()] == ["sub"]
+
+
 def test_result_unpack_promotes_capped_stderr_tail_beside_events(tmp_path: Path) -> None:
     """#755 codex R11 P2: the Worker's redacted agent-stderr.log is promoted
     with events.jsonl into the job dir's run dir (it used to be dropped with

@@ -161,8 +161,9 @@ def evaluate_candidate(
     # executions bypassed it entirely. The gate (claim_node_limit) reads the
     # current limit value here — claim time, runtime-mutable setting, queued
     # requests are never fail-fasted on a setting change — and counts the
-    # node's active executor_leases without filtering executor_id (local and
-    # remote claims merge on the same table; shard candidates included).
+    # node's active executor_leases across the code lease forms only (#1167:
+    # local 'code' and remote 'agent:code:%' merge on the same table; shard
+    # candidates included, non-code 'agent:<id>' leases excluded).
     # Enforcement only under the code-pool lock: a row that appeared after
     # the probe (first-config race, P2-1) skips with node_limit_appeared —
     # never count unlocked. Over-limit keeps the request queued with the

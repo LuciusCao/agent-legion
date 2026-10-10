@@ -9,7 +9,8 @@
 1. 跨 job 同节点：limit=1 时第二个请求 skip（node_limit_full）留队列，
    第一个完成后（finish + mark_done 收尾 lease）第三轮 claim 放行；
 2. 本地/远程混合计数：本地池 lease（executor_id='code'）占位时远程
-   claim 被拒——计数不筛 executor_id，同一张 executor_leases 表合并；
+   claim 被拒——计数只并 code 形态租约（'code' + 'agent:code:%'，
+   #1167），同一张 executor_leases 表合并；
 3. 批 claim（#546/#555）同节点多候选：批写阶段重跑 evaluate，批内
    第二个候选 skip，第一个 claim 保留（savepoint 语义不受影响）；
 4. 对抗评审 P2-1（claim 侧）：probe 判「无 limit 行、不取锁」后、检查前
@@ -24,7 +25,11 @@
    try_start_shard 副作用；
 8. limit 运行时可变：现值 claim 时现读（2→1 按新值 skip、回调后放行；
    请求行上的 enqueue 时 audit 值从不被强制）——与本地路径契约式校验
-   有意不同的核心语义。
+   有意不同的核心语义；
+9. #1167 P2：同 node_key 的 agent:<id> 租约（旧 revision 的 agent job
+   在跑）不占 code 节点额度——limit=1 且 agent 租约占位时远程 code
+   claim 仍放行；修前计数不筛执行类型，一个旧 agent 执行就能阻塞
+   所有新 code claim。
 
 串行搭建（用例 1-3、7、8 无交错线程）：每轮 claim 是独立提交的事务，
 计数在提交后对下一轮可见，无需 pg_locks 同步点；用例 4-6 的交错用
@@ -224,9 +229,10 @@ def test_remote_node_limit_skips_second_job_until_first_completes(job_db) -> Non
 
 
 def test_remote_claim_blocked_by_local_pool_lease(job_db) -> None:
-    """用例 2：本地/远程混合计数——本地 code 池 lease（executor_id='code'）
+    """用例 2：本地/远程合并计数——本地 code 池 lease（executor_id='code'）
     占位时，远程 claim 被同一 (workspace, node) 计数拒绝（单条 claim 路径，
-    请求留队列）；计数不筛 executor_id 是合并计数的语义核心。"""
+    请求留队列）；计数只并 code 形态租约（#1167，'code' + 'agent:code:%'），
+    非 code 形态的排除见用例 9。"""
     workspace_id, node_key = "ws-1149-b", "review"
     _seed_code_lane(job_db, workspace_id, node_key, limit=1, job_ids=["job-local", "job-remote"])
     _enqueue_code(job_db, workspace_id, "job-remote", node_key)
@@ -546,3 +552,47 @@ def test_node_limit_is_read_fresh_per_claim(job_db) -> None:
     _set_node_limit(job_db, workspace_id, node_key, 2)  # 放宽回 2
     round3 = claim_batch_with_retry(pool, "worker-1149-mut", None, None, limit=1, code_limit=1)
     assert [claim.job_id for claim in round3.claims] == ["job-m2"]  # 计数 1 < 2
+
+
+def test_agent_lease_at_same_node_does_not_block_remote_code_claim(job_db) -> None:
+    """用例 9（#1167 P2）：同 node_key 的 agent:<id> 租约（旧 revision 的
+    agent job 在跑）不计入 code 节点额度——limit=1 且 agent 租约占位时
+    远程 code claim 仍放行；修前计数不筛执行类型，一个旧 agent 执行就
+    阻塞所有新 remote code claim。"""
+    workspace_id, node_key = "ws-1167", "review"
+    _register_code_worker("worker-1167")
+    pool = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    # 旧 revision 的 agent job：同 node_key 的 agent 请求被认领，落下真实
+    # agent:<id> 租约（非 code 形态）。
+    seed_request(job_db, job_id="job-1167-agent", workspace_id=workspace_id, node_key=node_key)
+    round1 = claim_batch_with_retry(pool, "worker-1167", None, None, limit=1, code_limit=1)
+    assert [claim.job_id for claim in round1.claims] == ["job-1167-agent"]
+    with job_db._connect_read() as conn:
+        row = conn.execute(
+            "select executor_id from executor_leases where job_id=%s", ("job-1167-agent",)
+        ).fetchone()
+    assert row is not None
+    agent_executor_id = str(row["executor_id"])
+    assert agent_executor_id.startswith("agent:")
+    assert not agent_executor_id.startswith("agent:code:")
+    assert agent_executor_id != CODE_EXECUTOR_ID
+
+    # 新 revision 的 code job：同 node_key 配 limit=1——agent 租约不占
+    # code 额度，claim 放行（修前在此 skip node_limit_full）。
+    _seed_code_lane(job_db, workspace_id, node_key, limit=1, job_ids=["job-1167-code"])
+    code_execution = _enqueue_code(job_db, workspace_id, "job-1167-code", node_key)
+    round2 = claim_batch_with_retry(pool, "worker-1167", None, None, limit=1, code_limit=1)
+    assert [claim.job_id for claim in round2.claims] == ["job-1167-code"]
+    assert round2.skip_reasons.get("node_limit_full", 0) == 0
+    assert _request_state(job_db, code_execution) == "claimed"
+    # 合并计数语义不变：两张租约都在（无过滤计数=2），code 额度只看
+    # 自己的 code 形态租约（1/1 占满）。
+    assert _active_node_lease_count(job_db, workspace_id, node_key) == 2
+    with job_db._connect_read() as conn:
+        code_row = conn.execute(
+            "select executor_id from executor_leases where job_id=%s", ("job-1167-code",)
+        ).fetchone()
+    # code 形态的精确字面量（与计数 SQL 的 like 前缀同形，钉住两侧契约）。
+    assert code_row is not None
+    assert str(code_row["executor_id"]) == "agent:code:package"

@@ -11,18 +11,24 @@ sha + node_runs ``skill_version`` 的 ``ref@commit12`` 前缀，
 
 本模块是 upgrade 链路唯一允许 git I/O 的位置：plan 阶段（guard 事务外、
 lease guard 之前）对判定涉及的每个 latest 绑定 skill key 做一次有界
-``git rev-parse HEAD``——subprocess 超时 5 秒；仓库缺失、git 不可用、
+``git rev-parse HEAD``——subprocess 超时 5 秒、整批合计预算 30 秒
+（#1166 P2：剩余预算不足单次超时的后续 key 直接 None 保守排除，批级
+墙钟有界，管理请求不再先被 HTTP 超时杀掉）；仓库缺失、git 不可用、
 超时或输出非 40-hex 都归入 None（保守排除，不 500）。解析出的 HEAD 作为
 **数据**传给判定模块（``skill_excluded_nodes(latest_commits=...)``，零
 git I/O 纪律不变）；guard 事务内重验沿用 plan 的同一常量（#759 P1：
 事务内零 git 子进程、零副作用，重验只剩纯 DB 读 + 字符串比较——含 plan
 传入的 HEAD 常量比较）。
 
-残余窗口（与 pinned ref 的既有窗口同构，无害）：判定后 skill 仓库 HEAD
-仍可能前进；继承语义是「产物按当时执行的内容产出且此后未被重跑」，HEAD
-在判定后前进不触发已继承节点重跑——pinned ref 同样存在 guard 重验后、
-下次 dispatch 前 relock 的窗口。dispatch 下次执行自然消费新 HEAD
-（latest 永不入锁，#322）。
+残余窗口（#1166 P1 边缘项分诊为收窄，边界如实记录）：HEAD 在
+plan→guard→commit 期间前进不触发已继承节点重跑——继承语义是「产物按
+当时执行的内容产出且此后未被重跑」，dispatch 下次执行自然消费新 HEAD
+（latest 永不入锁，#322）。与 pinned relock 窗口的差异：pinned 在 guard
+事务内比对锁文档冻结 commit，plan→guard 间的 relock 被重验抓住（其窗口
+只剩 guard 重验后→下次 dispatch）；HEAD 无锁域保护、不入锁文档，guard
+事务内没有任何可比对信号（唯一真检测 = 事务内 rev-parse，被 #759 零 git
+纪律排除；锁文档 ``resolved_at`` 只随 relock/刷新移动、与 HEAD 前进相互
+独立，不可作代理信号），窗口为 plan 起到 commit 止。
 
 低频管理操作：catalog 在此与 ``job_workflow_upgrade_impl`` 各读一次
 （fresh 直读、同源 API）——升级非热路径，以重复读换模块独立（impl 不
@@ -35,6 +41,7 @@ import logging
 import os
 import re
 import subprocess
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,6 +65,13 @@ logger = logging.getLogger(__name__)
 #: rev-parse 的墙上预算（秒）：阻塞的 git 进程（大仓库 fsck、NFS 挂起）
 #: 只能吃满这一窗口，随后按解析失败处理（None → 保守排除）。
 _REV_PARSE_TIMEOUT_SECONDS = 5.0
+
+#: 整批 rev-parse 的墙钟总预算（秒，#1166 P2）：单 key 的 5s 只是局部
+#: 有界，串行循环 N 个 key 的理论最坏是 N×5s（NFS 挂起形态）——管理
+#: 请求会先被 HTTP 超时杀掉、走不到 None 保守降级。批级 deadline 封死
+#: 该形态：剩余预算不足一次满超时（``_REV_PARSE_TIMEOUT_SECONDS``）时
+#: 不再启动新 rev-parse，该 key 直接按解析失败处理（None → 保守排除）。
+_REV_PARSE_BUDGET_SECONDS = 30.0
 
 #: git 输出的合法形态（完整 sha）——其他输出一律按解析失败处理。
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -93,8 +107,11 @@ def resolve_latest_skill_heads(
 
     catalog 解析失败（DB 断连等数据态故障）→ 空结果（latest 绑定全部
     保守排除，与 #759 恒排除行为同向）；每个 key 的 rev-parse 失败独立
-    降级（该 skill 为 None），不影响其他 key。``base_dir``（测试注入）
-    默认 skill root（``~/.agents/skills``，``skill_roots`` 单一来源）。
+    降级（该 skill 为 None），不影响其他 key。整批解析受
+    ``_REV_PARSE_BUDGET_SECONDS`` deadline 约束（#1166）：预算耗尽后
+    未启动的 key 直接 None（保守排除），整轮墙钟有界。
+    ``base_dir``（测试注入）默认 skill root（``~/.agents/skills``，
+    ``skill_roots`` 单一来源）。
     """
     catalog = _published_catalog(job_db, str(job["workspace_id"]))
     if catalog is None:
@@ -113,9 +130,24 @@ def resolve_latest_skill_heads(
         keys.add(binding[0])
     root = Path(base_dir) if base_dir is not None else default_skill_base_dir()
     commits: dict[str, str | None] = {}
+    # #1166 P2 批级预算：见 ``_REV_PARSE_BUDGET_SECONDS`` 注释。只在
+    # ``deadline - now >= 单次超时`` 时启动 rev-parse——启动过的调用各自
+    # 受单次超时约束且不晚于 deadline 结束，整轮墙钟 ≤ 总预算。
+    deadline = time.monotonic() + _REV_PARSE_BUDGET_SECONDS
     for skill_key in sorted(keys):
         repo = _skill_repo_dir(root, skill_key)
-        commits[skill_key] = _rev_parse_head(repo) if repo is not None else None
+        if repo is None:
+            commits[skill_key] = None
+            continue
+        if deadline - time.monotonic() < _REV_PARSE_TIMEOUT_SECONDS:
+            logger.debug(
+                "skill HEAD rev-parse batch budget (%.1fs) exhausted before key %s",
+                _REV_PARSE_BUDGET_SECONDS,
+                skill_key,
+            )
+            commits[skill_key] = None
+            continue
+        commits[skill_key] = _rev_parse_head(repo)
     return SkillLatestHeads(commits, frozenset(bound))
 
 

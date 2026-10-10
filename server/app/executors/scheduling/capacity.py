@@ -55,9 +55,13 @@ def load_capacity_snapshot(db_path: str, code_capacity: int) -> CapacitySnapshot
     executions are capacity-accounted on the Worker side); node-level counts
     cover every active lease of the node regardless of executor — the local
     pool and remote code claims write the same executor_leases rows, and
-    since #1149 both claim transactions enforce the node limit against that
-    merged count (the local claim in check_claim_capacity, the remote claim
-    in claim_evaluate under the shared code-pool lock).
+    since #1149 both claim transactions enforce the node limit against the
+    merged code-lease count (the local claim in check_claim_capacity counts
+    every active lease of the node — conservative for mixed agent→code node
+    keys; since #1167 the remote claim in claim_evaluate counts only the code
+    lease forms, ``'code'`` and ``'agent:code:%'``). This snapshot fronts the
+    local scheduler path and matches the local claim's counting; it is a hint
+    only, the claim transactions remain authoritative.
     """
     with read_connection(db_path) as conn:
         now_str = database_timestamp(datetime.now(UTC))

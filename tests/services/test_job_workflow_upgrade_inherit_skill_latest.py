@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from pathlib import Path
 
 from server.app.workflows.schema import WorkflowNode, WorkflowNodeSkill
@@ -513,3 +514,77 @@ def test_revision_change_retry_re_resolves_latest_heads(tmp_path, monkeypatch) -
     assert result["status"] == "succeeded"
     assert result["kept_node_count"] == 1
     assert _statuses(queries, job_id) == {"a": "completed", "b": "pending", "c": "pending"}
+
+
+# ---------------------------------------------------------------------------
+# #1166 P2：整批 rev-parse 的批级总预算
+# ---------------------------------------------------------------------------
+
+
+def test_rev_parse_batch_budget_bounds_total_and_skips_rest(tmp_path, monkeypatch) -> None:
+    """#1166 P2：串行循环的单次 5s 超时只保证局部有界——N 个 key 在慢存储
+    （NFS 挂起）形态理论最坏 N×单次超时，管理请求会先被 HTTP 超时杀掉而
+    不是走 None 保守降级。注入每次吃满超时预算的慢 rev-parse（sleep），
+    断言批级 deadline 的三个面：整轮墙钟 ≤ 预算 + 余量、预算内前缀正常
+    解析、剩余预算不足单次超时的后续 key 保守 None（不再启动 git）。
+
+    计时常数选型（时序纪律：边界远离断言点）：budget=1.0s / 单次超时
+    0.25s / 首次 sleep 0.35s——第 3 个 key 启动门（t≤0.75s）与第 4 个
+    key 启动门（t≥0.85s，永不可达）之间留 0.15s 容忍 CI 抖动；无预算
+    形态的墙钟是 0.35+9×0.25=2.6s，与断言上界 1.4s 之间 1.2s 分离。
+    """
+    from server.app.jobs import JobQueries
+    from server.app.services import job_workflow_upgrade_skill_heads as heads
+    from server.app.workflows.schema import (
+        WorkflowDefinition,
+        WorkflowIntake,
+        WorkflowNodeExecution,
+    )
+    from tests.postgres_support import TEST_DATABASE_URL
+
+    budget, timeout, key_count = 1.0, 0.25, 10
+    monkeypatch.setattr(heads, "_REV_PARSE_TIMEOUT_SECONDS", timeout)
+    monkeypatch.setattr(heads, "_REV_PARSE_BUDGET_SECONDS", budget)
+    rev_calls: list[str] = []
+
+    def slow_rev(repo: Path) -> str | None:
+        rev_calls.append(str(repo))
+        time.sleep(0.35 if len(rev_calls) == 1 else timeout)
+        return "3" * 40
+
+    monkeypatch.setattr(heads, "_rev_parse_head", slow_rev)
+
+    nodes = {
+        f"n{index}": WorkflowNode(
+            key=f"n{index}",
+            label=f"N{index}",
+            capability=f"cap{index}",
+            node_type="agent",
+            skill=WorkflowNodeSkill(key=f"g/sk{index}", ref="latest"),
+            execution=WorkflowNodeExecution(runtime="pi"),
+        )
+        for index in range(key_count)
+    }
+    definition = WorkflowDefinition(
+        key="wfbudget", label="WF", intake=WorkflowIntake(), nodes=nodes
+    )
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("wsbudget")
+    job = {"workspace_id": workspace["id"]}
+
+    started = time.monotonic()
+    resolved_heads = heads.resolve_latest_skill_heads(
+        queries, job, definition, base_dir=tmp_path / "skills"
+    )
+    elapsed = time.monotonic() - started
+
+    sorted_keys = sorted(f"g/sk{index}" for index in range(key_count))
+    assert list(resolved_heads.commits) == sorted_keys  # 全 key 有槽位（含 None）
+    commits = [resolved_heads.commits[key] for key in sorted_keys]
+    # 预算内前缀 3 个 key 实际解析；预算耗尽后 7 个 key 保守 None。
+    assert commits == ["3" * 40] * 3 + [None] * 7
+    # 未启动的 key 不产生 git 调用（启动次数 = 非 None 数，封顶 floor(预算/超时)）。
+    assert len(rev_calls) == 3
+    # 整轮墙钟有界：≤ 预算 + 余量（无预算形态 = 2.6s，判别点）。
+    assert elapsed < budget + 0.4
+    assert resolved_heads.bound_nodes == frozenset(f"n{index}" for index in range(key_count))
