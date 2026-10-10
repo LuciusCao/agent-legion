@@ -86,7 +86,12 @@ def plan_agent_result_moves(
     静默提升成产物。``node.log`` 的期望名冲突**不在本臂**——它走既有
     completion_preflight 的保留源守卫（#759 P2-B：失败路径仍落观测 log
     move，语义已被测试钉住）；入队守卫（manifest_guard）在源头把三个
-    保留名一并拒绝。
+    保留名一并拒绝。保留名比对按 ``PurePosixPath`` 归一化形态（#1164
+    收口）：``./result.json`` 归一化即 ``result.json``、与 source 落点
+    同路径，原字符串精确比对会放行该别名拼写；嵌套名（``sub/result.json``）
+    归一化后仍是独立路径，不受影响。大小写变体（``RESULT.JSON``）不拦
+    ——大小写敏感文件系统（生产 Linux）上是真不同路径；dev 的 macOS
+    APFS 大小写不敏感形态不在守卫范围。
     """
     moves: list[tuple[Path, Path]] = []
     produced: list[str] = []
@@ -94,7 +99,11 @@ def plan_agent_result_moves(
         relative = PurePosixPath(name)
         if relative.is_absolute() or ".." in relative.parts:
             raise AgentBundleError(f"unsafe expected output name: {name!r}")
-        if name in _NON_PROMOTABLE_MEMBERS:
+        # #1164 收口：归一化形态比对——``./result.json`` 归一化即保留成员，
+        # 与下面的 source/job_dir join 是同一落点；原字符串精确比对会放行
+        # 该别名拼写并把 staging 的元数据成员提升成产物。嵌套名
+        # （``sub/result.json``）归一化后仍是独立路径，不受影响。
+        if relative.as_posix() in _NON_PROMOTABLE_MEMBERS:
             raise AgentBundleError(
                 f"expected output name {name!r} is reserved for the result archive"
             )

@@ -111,6 +111,14 @@ def apply_upgrade_once(
             # 文档（绕 5s doc cache）、latest 沿用 plan 的 HEAD 常量
             # （#1148，不重新 rev-parse）、upgrade 永不 pin，事务回滚
             # 不留 skill 面副作用。
+            # #1166 P1 边缘项收窄：HEAD 常量在 plan→本事务提交期间可能
+            # 过期（skill 仓库 HEAD 被外部推进）——与 pinned 的锁文档比对
+            # 不同，HEAD 无锁域保护、guard 事务内无可比对信号，不触发已
+            # 继承节点重跑（继承语义 = 按当时执行内容产出；下次 dispatch
+            # 自然消费新 HEAD）；窗口为 plan 起到 commit 止。upgrade 输入
+            # 面三维度（revision / pinned / latest）的 TOCTOU 封闭手段表
+            # 见 job_workflow_upgrade_skill_heads 模块 docstring（本文件
+            # 的 revision 重试链是其 latest 行的有利事实来源）。
             # #759 P2-A（锁序：job-mutation → implementation-publication →
             # skill-lock，写进 EXEC-GENERATION-001）：publication 锁无条件
             # 取且在 active revision 重读之前（clean 模式/空继承候选同取，

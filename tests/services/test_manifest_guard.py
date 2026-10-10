@@ -33,10 +33,32 @@ def test_all_reserved_names_rejected_together() -> None:
 
 
 def test_normal_and_nested_output_names_pass() -> None:
-    """合法名（含嵌套声明名 reports/final.json，#631 祝福形态）不受影响。"""
+    """合法名不受影响：嵌套声明名 reports/final.json（#631 祝福形态——
+    归一化后是独立路径）与非 JSON 产物名（output.txt；result.txt 是
+    result.json 的近邻名但不同名——守卫按归一化名字同一性判定，非
+    模式/子串匹配，.txt 不因形近被误伤）。"""
     require_unreserved_output_names(
         {"expected_outputs": ["out.json", "result-summary.json", "reports/final.json"]}
     )
+    require_unreserved_output_names({"expected_outputs": ["output.txt", "result.txt"]})
+
+
+def test_alias_spellings_of_reserved_names_rejected() -> None:
+    """#1164 收口：保留名的别名拼写（``./result.json``、``.//result.json``）
+    按归一化形态拒绝——它们与 ``result.json`` 是同一落盘路径（提升守卫的
+    source 落点即归一化形态），原字符串精确比对放行后 staging 的元数据
+    成员会被静默提升成产物。嵌套路径（``sub/result.json``）是独立路径、
+    合法形态，不误伤（精确语义而非前缀匹配）。"""
+    for name in ("./result.json", ".//result.json", "./node.log"):
+        with pytest.raises(ValueError, match="reserved result-archive member.*rename"):
+            require_unreserved_output_names({"expected_outputs": [name]})
+    require_unreserved_output_names({"expected_outputs": ["sub/result.json"]})
+
+
+def test_unsafe_spellings_skip_reserved_check_not_crash() -> None:
+    """绝对 / ``..`` 形态不在此判（unsafe 家族由提升守卫的既有拒绝收口），
+    归一化路径检查对它们只跳过比对、不抛不拦。"""
+    require_unreserved_output_names({"expected_outputs": ["/result.json", "sub/../result.json"]})
 
 
 def test_missing_or_empty_outputs_pass() -> None:

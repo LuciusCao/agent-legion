@@ -17,6 +17,16 @@ def check_claim_capacity(
 
     Raises ValueError for limit configuration mismatches (dispatch-time
     contract violations, surfaced as claim rejection upstream).
+
+    Counting scope (#1167 fallout, tracked in #1171): the node-level count
+    below spans every active lease of the node — it does NOT filter lease
+    forms. The local claim path only ever writes ``executor_id='code'`` rows
+    itself, but a node_key that turned agent→code across revisions can hold
+    a live ``agent:<id>`` lease, and that lease also lands in this count —
+    conservative on mixed node keys (the claim skips and retries next pass,
+    never over-admitting). The remote claim gate filters to the code lease
+    forms (``claim_node_limit``, #1167); aligning this local count with the
+    same predicate is the #1171 follow-up.
     """
     if request.local_node_limit is not None:
         # #211 Phase 3 (read-layer binding): predicates key on

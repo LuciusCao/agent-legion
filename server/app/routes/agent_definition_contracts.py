@@ -5,6 +5,16 @@ from pydantic import BaseModel, Field
 
 from server.app.agent_catalog.definition import DEFAULT_TOOLS
 
+# #1167 评审 P3-1：agent_id 的字符域契约（与 skill key 段同款
+# ``_SEGMENT_RE``——ASCII 起头 + 字母数字/点/下划线/连字符，天然排除
+# ``:``）。executor_id 的 ``agent:<id>`` 形态里 ``:`` 是形态分隔符：
+# 命名为 ``code:x`` 的 agent 会写出 ``agent:code:x`` 租约，命中
+# ``claim_node_limit`` 计数谓词的 ``agent:code:%`` 前缀——agent 车道
+# 租约被计为 code 形态、消耗 code 节点额度（#1167 症状回流）。约束只
+# 管创建/复制入口（新值）；存量已存在的非常规命名不动（口径表边界行
+# 如实记录，见 claim_node_limit docstring）。
+AGENT_ID_RE = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
+
 
 class AgentDefinitionPayload(BaseModel):
     """Editable Agent definition fields (pure: no provider/model/thinking)."""
@@ -21,12 +31,14 @@ class AgentDefinitionPayload(BaseModel):
 
 class AgentCreateRequest(AgentDefinitionPayload):
     # #407：agent_id 可选——省略（或 null）时服务端按 capability 生成（一个
-    # capability 一个主草稿）；显式传值保持旧客户端契约不变。
-    agent_id: str | None = Field(default=None, min_length=1)
+    # capability 一个主草稿）；显式传值保持旧客户端契约不变。#1167 评审
+    # P3-1：显式值须过字符域（防 ``:`` 撞 executor_id 形态前缀）；派生
+    # 路径（capability）的字符域同参 P3-1 的口径表边界行说明。
+    agent_id: str | None = Field(default=None, min_length=1, pattern=AGENT_ID_RE)
 
 
 class AgentCopyRequest(BaseModel):
-    new_agent_id: str = Field(min_length=1)
+    new_agent_id: str = Field(min_length=1, pattern=AGENT_ID_RE)
 
 
 class AgentRollbackRequest(BaseModel):

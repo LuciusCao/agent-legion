@@ -11,10 +11,57 @@ Contract, deliberately different from the local path
   settings: a queued request must not be fail-fasted because the setting
   changed after enqueue (the local path's carried-value vs current-value
   contract check is a dispatch-time violation detector, a different job).
-- The active count spans ``executor_leases`` without filtering executor_id:
-  the local pool and remote claims write the same table, so the merged count
-  covers both (shard candidates included — they run the same code branch in
-  ``evaluate_candidate``).
+- The active count spans ``executor_leases`` restricted to the code lease
+  forms (#1167): the local pool (``executor_id='code'``) and remote code
+  claims (``executor_id like 'agent:code:%'``) merge on the same table, so
+  the merged count covers both (shard candidates included — they run the
+  same code branch in ``evaluate_candidate``). Non-code ``agent:<id>``
+  leases never count: a node_key that turned agent→code across revisions
+  can have an old-revision agent job still running, and that execution is
+  not code-pool concurrency (limit=1 must not let one stale agent lease
+  block every new remote code claim).
+
+  Counting-scope table — the model #1167 pinned; the root cause was this
+  execution-kind dimension being absent from the original #1149 model
+  (form × counted × basis; matrix nail: 用例 10 in
+  ``tests/db/test_claim_node_limit_remote.py``):
+
+  ==================  =======  ==========================================
+  executor_id form    counted  basis
+  ==================  =======  ==========================================
+  ``code``            yes      local pool claim — the only form the
+                               local claim path ever writes
+                               (``_lease_claims.claim_lease``)
+  ``agent:code:%``    yes      remote code claim (``claim_promote``,
+                               kind=code; ``code_dispatch``'s mirror
+                               carries the same prefix)
+  ``agent:<id>``      no       Agent-lane execution — not code-pool
+                               concurrency
+  ``agent:code:<id>`` yes      boundary: an agent named ``code:<id>``
+  (id contains ``:``)          (or a capability-derived id doing so)
+                               rides the kind=agent claim path but
+                               writes a lease the prefix test cannot
+                               tell apart from a code claim — counted,
+                               so the error direction is one stale
+                               agent lease consuming code capacity
+                               (the #1167 symptom) instead of
+                               over-admitting
+  ==================  =======  ==========================================
+
+  Boundary premise (adversarial review P3-1): row 4 is unreachable for NEW
+  ids — ``agent_id`` is charset-gated at the create/copy contracts
+  (``routes/agent_definition_contracts.AGENT_ID_RE``, no ``:``) — and is
+  conservative, never over-admitting, for legacy pre-constraint rows; the
+  derivation path (agent_id omitted → the capability names the entity,
+  ``agent_definition_create``) inherits the capability's charset, which is
+  NOT gated: a ``:`` capability still derives a colliding id. Known
+  residual, direction-safe (counted = conservative), out of scope here.
+
+  The LOCAL path (``_lease_claim_limits.check_claim_capacity``) keeps a
+  same-shaped residual: its node count also spans every active lease of
+  the node (no form filter) — conservative on mixed agent→code node keys
+  (skip-and-retry, never over-admitting), predates #1149, out of #1167's
+  scope; tracked in #1171 with the same predicate spelled out for reuse.
 - Over-limit is a skip (``node_limit_full``), never a cancel: the request
   stays queued for the next pass with the same semantics as
   ``capacity_full``, and the unclaimable sweeper (runtime/model probes only)
@@ -136,9 +183,19 @@ def code_claim_admits(
     if not pool_held:
         state.skip_reasons["node_limit_appeared"] += 1
         return False
+    # #1167：计数只并「code 形态」租约（本地 'code' + 远程 'agent:code:%'，
+    # 前缀与 claim_promote / code_dispatch 的写侧字面量同形，测试钉住），
+    # 排除非 code 的 'agent:<id>'。口径对齐结论：本地路径
+    # ``executors/_lease_claim_limits.check_claim_capacity`` 的节点计数同样
+    # 不筛 executor_id（按 (workspace_id, node_key) 全计）——它自身的 claim
+    # 永远写 'code'，但同 node_key 的跨形态 agent 租约同样进入其计数
+    # （agent→code 跨 revision 的混合 node_key 是受支持形态，见 routing
+    # 的 route_cache_key）。该残留与 #1167 同形、方向保守（skip 重试、
+    # 永不超收），先于 #1149 存在、不属本 finding 范围，此处不动本地路径。
     active = conn.execute(
         "select count(*) as cnt from executor_leases where workspace_id=%s and node_key=%s"
-        " and status='active' and expires_at>current_timestamp",
+        " and status='active' and expires_at>current_timestamp"
+        " and (executor_id='code' or executor_id like 'agent:code:%%')",
         (selected["workspace_id"], selected["node_key"]),
     ).fetchone()
     if int(active["cnt"]) >= int(row["concurrency_limit"]):

@@ -173,6 +173,37 @@ def test_enqueue_rejects_unresolved_execution_model(job_db) -> None:
     assert row["c"] == 0
 
 
+def test_enqueue_rejects_reserved_output_name_pointing_at_conflict(job_db) -> None:
+    """#1164 收口（入队面接线）：expected output 恰为 ``result.json``（v2 结果
+    归档保留成员）的 manifest 在入队即拒——错误点名冲突名（守卫先于事务，
+    零请求行落库）；别名拼写（``./result.json``，归一化同落点）同拒。"""
+    definition = _seed_definition()
+    _insert_job_rows(job_db, job_id="job-rsv")
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    for name in ("result.json", "./result.json"):
+        with pytest.raises(ValueError, match="result.json.*reserved result-archive"):
+            broker.enqueue(
+                AgentExecutionRequest(
+                    workspace_id="test-workspace",
+                    job_id="job-rsv",
+                    workflow_key="questions",
+                    node_key="generate",
+                    agent_id="generator-v1",
+                    agent_definition_hash=definition.definition_hash(),
+                    manifest={
+                        "job_id": "job-rsv",
+                        "log_path": "logs/job-rsv.log",
+                        "execution": {"provider": "gateway", "model": _GOOD_MODEL},
+                        "expected_outputs": [name],
+                    },
+                )
+            )
+    with job_db._connect_read() as conn:
+        row = conn.execute("select count(*) as c from agent_execution_requests").fetchone()
+    assert row["c"] == 0
+
+
 def test_empty_claim_with_blocked_queue_logs_skip_reasons(job_db, caplog) -> None:
     definition = _seed_definition()
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)

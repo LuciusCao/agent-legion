@@ -14,7 +14,13 @@ import os
 import subprocess
 from pathlib import Path
 
-from server.app.workflows.schema import WorkflowNode, WorkflowNodeSkill
+from server.app.workflows.schema import (
+    WorkflowDefinition,
+    WorkflowIntake,
+    WorkflowNode,
+    WorkflowNodeExecution,
+    WorkflowNodeSkill,
+)
 from tests.helpers.job_workflow_upgrade import (
     SKILL_KEY,
     make_upgrade_service,
@@ -513,3 +519,175 @@ def test_revision_change_retry_re_resolves_latest_heads(tmp_path, monkeypatch) -
     assert result["status"] == "succeeded"
     assert result["kept_node_count"] == 1
     assert _statuses(queries, job_id) == {"a": "completed", "b": "pending", "c": "pending"}
+
+
+# ---------------------------------------------------------------------------
+# #1166 P2：整批 rev-parse 的批级总预算（预算矩阵：快路径 / 混合 / 慢存储）
+# ---------------------------------------------------------------------------
+
+
+def _budget_constants(monkeypatch, *, budget: float, timeout: float):
+    """注入预算模型常数（测试沙箱）；返回模块引用供 ``_rev_parse_head`` 替换。"""
+    from server.app.services import job_workflow_upgrade_skill_heads as heads
+
+    monkeypatch.setattr(heads, "_REV_PARSE_TIMEOUT_SECONDS", timeout)
+    monkeypatch.setattr(heads, "_REV_PARSE_BUDGET_SECONDS", budget)
+    return heads
+
+
+def _latest_nodes_definition(key_count: int) -> WorkflowDefinition:
+    """``key_count`` 个 latest 绑定 agent 节点的最小定义（预算矩阵公共构造）。"""
+    return WorkflowDefinition(
+        key="wfbudget",
+        label="WF",
+        intake=WorkflowIntake(),
+        nodes={
+            f"n{index}": WorkflowNode(
+                key=f"n{index}",
+                label=f"N{index}",
+                capability=f"cap{index}",
+                node_type="agent",
+                skill=WorkflowNodeSkill(key=f"g/sk{index}", ref="latest"),
+                execution=WorkflowNodeExecution(runtime="pi"),
+            )
+            for index in range(key_count)
+        },
+    )
+
+
+def _resolve_for_budget_matrix(heads, tmp_path: Path, definition, ws_name: str):
+    """独立 workspace 跑一次 resolve（预算矩阵公共入口）。"""
+    from server.app.jobs import JobQueries
+    from tests.postgres_support import TEST_DATABASE_URL
+
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(ws_name)
+    return heads.resolve_latest_skill_heads(
+        queries, {"workspace_id": workspace["id"]}, definition, base_dir=tmp_path / "skills"
+    )
+
+
+class _FakeClock:
+    """#1166 评审 P3-2：确定性门判定——预算循环只读 ``time.monotonic``
+    （门判定与 ``_rev_parse_head`` 内的 sleep 解耦），注入假时钟让每次
+    读数前进固定步长：门的开/关不再依赖真实墙钟，xdist 负载下零抖动。
+    被测代码引用 ``heads.time.monotonic``（模块属性），monkeypatch 替换。
+    """
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+        self.step = 0.0
+
+    def monotonic(self) -> float:
+        self.now += self.step
+        return self.now
+
+
+def test_rev_parse_batch_budget_single_fast_key_unaffected(tmp_path, monkeypatch) -> None:
+    """预算矩阵 {1 快 key}：预算层对快路径零影响——真实常数（30s 批预算 /
+    5s 单次超时）下单 key 即时 rev-parse 正常解析（非 None、恰好一次
+    调用、结果 commit 正确）。启动门只拦截「启动前剩余预算不足」，
+    启动后的快调用不会被截断。"""
+    from server.app.services import job_workflow_upgrade_skill_heads as heads
+
+    rev_calls: list[str] = []
+
+    def fast_rev(repo: Path) -> str | None:
+        rev_calls.append(str(repo))
+        return "a" * 40
+
+    monkeypatch.setattr(heads, "_rev_parse_head", fast_rev)
+    clock = _FakeClock()
+    monkeypatch.setattr(heads.time, "monotonic", clock.monotonic)
+
+    resolved = _resolve_for_budget_matrix(
+        heads, tmp_path, _latest_nodes_definition(1), "wsbudget-fast"
+    )
+
+    assert resolved.commits == {"g/sk0": "a" * 40}
+    assert len(rev_calls) == 1  # 无预算损耗：key 启动且只解析一次
+
+
+def test_rev_parse_batch_budget_mixed_fast_and_slow_keys(tmp_path, monkeypatch) -> None:
+    """预算矩阵 {混合快+慢} 两段（假时钟确定性形态，步长 = 每次门读数推
+    进量——「慢 key」即大步长）：
+
+    - 预算未耗尽段：慢 key 消耗预算后，其后的快 key 仍正确解析（快 key
+      不被慢邻居连坐——启动门只要剩余预算 ≥ 单次超时就放行）；
+    - 预算耗尽段：慢 key 吃光预算后，快 key 也保守 None 不启动——启动门
+      按「剩余预算」判定，与 key 自身快慢无关（快不是通行证）。
+
+    常数：budget=2.0 / timeout=0.25；段一慢步长 0.5（第 4 门剩余
+    2.0-1.5=0.5 ≥ 0.25，放行——门分离 0.25）；段二 budget=0.6、慢步长
+    0.5（第 2 门剩余 0.1 < 0.25，关门——门分离 0.15）。"""
+
+    def _run(budget: float, slow: float, key_count: int, ws_name: str, calls: list[str]):
+        heads = _budget_constants(monkeypatch, budget=budget, timeout=0.25)
+        clock = _FakeClock()
+
+        def fake_rev(repo: Path) -> str | None:
+            calls.append(str(repo))
+            clock.step = slow  # 慢 key：rev-parse 期间时钟走 slow
+            return "b" * 40
+
+        monkeypatch.setattr(heads, "_rev_parse_head", fake_rev)
+        monkeypatch.setattr(heads.time, "monotonic", clock.monotonic)
+        return _resolve_for_budget_matrix(
+            heads, tmp_path, _latest_nodes_definition(key_count), ws_name
+        )
+
+    # 段一：4 个慢 key（步长 0.5），预算 2.0 → 门序列 1.5/1.0/0.5 ≥ 0.25
+    # 全放行，第 5 门 0.0 < 0.25 关（但只有 4 个 key）→ 4 key 全解析。
+    phase_a_calls: list[str] = []
+    resolved_a = _run(2.0, 0.5, 4, "wsbudget-mix-a", phase_a_calls)
+    assert resolved_a.commits == {f"g/sk{index}": "b" * 40 for index in range(4)}
+    assert len(phase_a_calls) == 4  # 慢 key 之后快 key 仍启动并解析
+
+    # 段二：慢 key 吃光预算（budget 0.6 - 步长 0.5 = 剩 0.1 < 0.25）→
+    # 其后的快 key 保守 None（不启动、零 git 调用）。
+    phase_b_calls: list[str] = []
+    resolved_b = _run(0.6, 0.5, 2, "wsbudget-mix-b", phase_b_calls)
+    assert resolved_b.commits == {"g/sk0": "b" * 40, "g/sk1": None}
+    assert len(phase_b_calls) == 1  # 快 key 未启动：门按剩余预算，不看快慢
+
+
+def test_rev_parse_batch_budget_bounds_total_and_skips_rest(tmp_path, monkeypatch) -> None:
+    """#1166 P2：串行循环的单次 5s 超时只保证局部有界——N 个 key 在慢存储
+    （NFS 挂起）形态理论最坏 N×单次超时，管理请求会先被 HTTP 超时杀掉而
+    不是走 None 保守降级。慢 key（大时钟步长）逐 key 消耗批预算，断言
+    批级 deadline 的三个面：预算内前缀正常解析、剩余预算不足单次超时的
+    后续 key 保守 None（不再启动 git）、未启动 key 零 git 调用。
+
+    #1166 评审 P3-2：门判定改假时钟（``_FakeClock`` 确定性步长）——原
+    真实 sleep 形态的门分离只有 0.15s、elapsed 断言余量 0.55s，xdist
+    8 worker 共享单 PG 下可预见 flake；假时钟下门开/关与墙钟完全解耦。
+    常数：budget=1.5 / timeout=0.45 / 慢步长 0.45——第 1 门（读取时
+    时钟零步进、剩余 1.5）放行、rev-parse 内步进 0.45；门序列
+    1.05 / 0.60 ≥ 0.45 放行（门分离 0.15——假时钟下确定），第 4 门
+    0.15 < 0.45 永不可达。
+    """
+    heads = _budget_constants(monkeypatch, budget=1.5, timeout=0.45)
+    key_count = 10
+    rev_calls: list[str] = []
+    clock = _FakeClock()
+
+    def slow_rev(repo: Path) -> str | None:
+        rev_calls.append(str(repo))
+        clock.step = 0.45  # 每个 rev-parse 期间时钟走满单次超时
+        return "3" * 40
+
+    monkeypatch.setattr(heads, "_rev_parse_head", slow_rev)
+    monkeypatch.setattr(heads.time, "monotonic", clock.monotonic)
+
+    resolved_heads = _resolve_for_budget_matrix(
+        heads, tmp_path, _latest_nodes_definition(key_count), "wsbudget"
+    )
+
+    sorted_keys = sorted(f"g/sk{index}" for index in range(key_count))
+    assert list(resolved_heads.commits) == sorted_keys  # 全 key 有槽位（含 None）
+    commits = [resolved_heads.commits[key] for key in sorted_keys]
+    # 预算内前缀 3 个 key 实际解析；预算耗尽后 7 个 key 保守 None。
+    assert commits == ["3" * 40] * 3 + [None] * 7
+    # 未启动的 key 不产生 git 调用（启动次数 = 非 None 数，封顶 floor(预算/超时)）。
+    assert len(rev_calls) == 3
+    assert resolved_heads.bound_nodes == frozenset(f"n{index}" for index in range(key_count))

@@ -15,6 +15,7 @@ drift into two conventions.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import PurePosixPath
 from typing import Any
 
 from server.app.db.migrations.shard_identity_index import SHARD_IDENTITY_SQL
@@ -39,9 +40,24 @@ def require_unreserved_output_names(manifest: Mapping[str, Any]) -> None:
     的产物名会在归档与提升面与协议成员碰撞（v2 元数据换写吞掉真产物、
     node.log 与捕获日志双写互覆）——入队即节点失败并点名冲突名，同
     require_routable_execution 的 #13 fail-fast 形态（跑时守卫；发布侧
-    前移留待 follow-up）。"""
+    前移留待 follow-up）。
+
+    命名空间契约（一句话模型）：expected output 的**落盘路径**——
+    ``PurePosixPath(name).as_posix()`` 归一化后的形态——不得等于任一
+    保留成员名；比对是归一化后的**精确等值**，非前缀、非子串（
+    ``sub/result.json`` 是独立路径，合法）。#1164 收口根因：原实现按
+    原始字符串精确比对，模型里「名字」与「落盘路径」被当成同一个东西
+    ——``./result.json`` / ``.//result.json`` 是不同字符串、同一落盘
+    路径，穿过了字符串相等却命中归一化路径碰撞（提升守卫同款漏洞，
+    staging 元数据成员会被静默提升成产物）。大小写变体（``RESULT.JSON``）
+    不拦——大小写敏感文件系统（生产 Linux）上是真不同路径；dev 的
+    macOS APFS 大小写不敏感形态不在守卫范围。绝对 / ``..`` 形态不在此
+    判（unsafe 家族由提升守卫的既有拒绝收口）。"""
     for name in map(str, manifest.get("expected_outputs") or []):
-        if name in RESERVED_RESULT_ARCHIVE_MEMBERS:
+        relative = PurePosixPath(name)
+        if relative.is_absolute() or ".." in relative.parts:
+            continue
+        if relative.as_posix() in RESERVED_RESULT_ARCHIVE_MEMBERS:
             raise ValueError(
                 f"expected output {name!r} collides with the reserved result-archive"
                 " member; rename the node output"
