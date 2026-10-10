@@ -7,8 +7,6 @@ from tests.architecture_budget_helpers import write_neutral_budget_governance
 
 pytestmark = pytest.mark.no_db
 
-ROOT = Path(__file__).resolve().parents[2]
-
 
 def write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,11 +109,10 @@ class TestWorkspacePipelinePhaseImports:
         assert any("legacy video" in error or "legacy pipeline phase" in error for error in errors)
 
 
-def test_video_legacy_current_repository_has_no_errors():
-    errors = check_repository(ROOT)
+def test_video_legacy_current_repository_has_no_errors(real_repo_check_errors):
     video_legacy_errors = [
         error
-        for error in errors
+        for error in real_repo_check_errors
         if any(
             tag in error.lower()
             for tag in (

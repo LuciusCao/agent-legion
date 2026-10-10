@@ -93,8 +93,10 @@ Within a gate, the test round is staggered: the backend lane runs alone
 first, then frontend and rust run in parallel. Starting all three test
 lanes together oversubscribed the machine from the inside (~20 jobs on a
 10-core box) — the same CPU contention the machine-wide queue removed
-between gates. Measured on an idle machine: the backend unit tier alone
-takes ~44s, yet stretched past 10 minutes inside a fully parallel gate.
+between gates. Measured on an idle machine (2026-10-09, 10-core dev box,
+8 xdist workers): the backend unit tier alone (~5,100 tests) takes ~2m20s,
+and the PostgreSQL tier (~3,900 tests) ~5m — yet the unit tier stretched
+past 10 minutes inside a fully parallel gate.
 The static round stays fully parallel (lint/typecheck are light), and the
 `test` round inside `check-quick-frontend.sh`/`run_rust_round` lanes is
 unaffected when invoked standalone.
@@ -117,9 +119,9 @@ described below.
 
 The full tier (`GATE_TIER=full`, the default for `check-quick.sh` without a
 tier override) selects the same unit layer as `GATE_TIER=unit`: the
-PostgreSQL integration layer (~47% of the quick suite's tests and ~2.5x the
-unit tier's wall time) moved out of the local default because CI re-runs all
-of it on every PR — paying it on every local gate bought little. Database
+PostgreSQL integration layer (~3,900 of the quick suite's ~9,000 tests and
+~2.2x the unit tier's wall time) moved out of the local default because CI
+re-runs all of it on every PR — paying it on every local gate bought little. Database
 development runs directly related postgres tests in the inner loop and relies
 on the PR shards for the complete tier.
 `scripts/check.sh` — the local full-gate substitute — still pins both tiers
