@@ -63,6 +63,9 @@ RESERVED_RESULT_ARCHIVE_MEMBERS = frozenset(
 # 空 tar.gz（判败降级路径的 metadata-only 归档），Host 配置模型
 # （server/app/configuration/executor_runtime.py）与实例设置 PUT 契约
 # （server/app/routes/instance_settings_contracts.py）共用本单一来源。
+# #1174：Worker 侧 413 回收臂同源——无 claim 下限值（旧 Host / 旧 marker）
+# 时按本下限裁剪重报归档（「Host 拒过说明有上限，按协议保证的最小上限
+# 裁」），两侧对「任何合法配置必可提交」的口径由同一常量钉住。
 MIN_RESULT_ARCHIVE_BYTES = 1024
 # 结果元数据 ``command`` 面的段数上限（#822）。command 是纯观测面（Host 只
 # 记录、不参与完成判定），但 agent argv 会把每个 expected output 以

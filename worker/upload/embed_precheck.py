@@ -9,8 +9,9 @@ DirectUploadError 回退臂在清规格重跑 prepare 之前先过换轨预检�
 （prepare.finalize 调 result_manifest.finalize_result_metadata——原
 embed_restast_rejection 的 re-stat 兜底面已并入该 ceiling 检查）。上限
 来自 claim 下发（Host 实例设置 agent_workers.max_archive_bytes，经
-agent_worker_claim_response 内存态注入，不持久化），旧 Host 未下发时
-（UploadTask.max_archive_bytes == 0）回落 64 MiB 默认。
+agent_worker_claim_response 内存态注入；#1174 起随 pending marker 持久
+化，但预检口径只信在线值——precheck_ceiling，#1184：恢复任务的持久值
+归 0 不猜），未下发或恢复值（预检口径 == 0）回落 64 MiB 默认。
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 
 from shared.code_contract import CODE_RESULT_LOG_MEMBER
-from worker.upload.task import UploadTask
+from worker.upload.task import UploadTask, precheck_ceiling
 
 # 默认上限与 server/app/configuration/executor_runtime.py 的同值默认对齐；
 # 余量吸收 tar 头/gzip 开销——预检口径是未压缩字节，产物载荷占主导。
@@ -76,7 +77,7 @@ def embedded_artifacts_bytes(task: UploadTask) -> float:
 def embed_switch_rejection(task: UploadTask) -> str | None:
     """换轨判定：None = 可以换轨；否则是判败原因（交给 failed_metadata）。"""
     embedded_bytes = embedded_artifacts_bytes(task)
-    ceiling = task.max_archive_bytes or ARCHIVE_EMBED_DEFAULT_CEILING_BYTES
+    ceiling = precheck_ceiling(task) or ARCHIVE_EMBED_DEFAULT_CEILING_BYTES
     margin = embed_safety_margin(ceiling)
     if embedded_bytes <= ceiling - margin:
         return None

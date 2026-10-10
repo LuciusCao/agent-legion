@@ -2139,6 +2139,7 @@
     "worker/upload/constants.py": 11,
     "worker/upload/control.py": 29,
     "worker/upload/degraded_archive.py": 99,
+    "worker/upload/delivery_tombstone.py": 60,
     "worker/upload/embed_precheck.py": 52,
     "worker/upload/handoff.py": 65,
     "worker/upload/heartbeat.py": 45,

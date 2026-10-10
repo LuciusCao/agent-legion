@@ -7,6 +7,7 @@ stderr 归因/脱敏一族在姊妹文件 tests/workers/test_worker_upload_stder
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -309,7 +310,7 @@ def test_condemned_cleanup_failure_still_releases_handoff(
     task.ownership_lost.set()
     queue = _queue(QueueFakeClient())
 
-    def fail_cleanup(_task: UploadTask) -> bool:
+    def fail_cleanup(_task: UploadTask, _outcome: str) -> bool:
         raise OSError("cleanup failed")
 
     monkeypatch.setattr(upload_queue, "drop_marker", fail_cleanup)
@@ -366,6 +367,34 @@ def test_restore_backlog_visible_as_queued_upload(tmp_path: Path) -> None:
         client.release.set()
         queue.shutdown()
     assert len(client.reports) == 2
+
+
+def test_restore_isolates_unwritable_marker_dir(tmp_path: Path) -> None:
+    """#1174 二轮 P3-1：marker 目录不可写（state 侧兜底也写不进的整卷
+    EROFS 形态）时 restore 的 submit（marker 原子重写的 mkstemp）抛
+    PermissionError——修复前裸调用直穿 executor main()，退出码 1 →
+    supervisor 退避无限重启（启动崩溃循环）。修复后目录级隔离：坏目录
+    跳过记日志，其余照常恢复交付；marker 原样滞留（下次启动重试，24h
+    stale sweeper 兜底）。"""
+    work_root = tmp_path / "work"
+    for execution_id in ("exec-1", "exec-2"):
+        _execution_dir(work_root, execution_id)
+        task = _task(work_root, execution_id=execution_id)
+        (work_root / execution_id / PENDING_FILENAME).write_text(
+            json.dumps(task.to_json()), encoding="utf-8"
+        )
+    os.chmod(work_root / "exec-1", 0o500)  # mkstemp EACCES：marker 重写失败
+    client = QueueFakeClient()
+    queue = _queue(client)
+    try:
+        assert queue.restore(work_root) == 1  # exec-2 恢复；exec-1 隔离跳过
+        queue.shutdown()
+    finally:
+        os.chmod(work_root / "exec-1", 0o700)
+
+    assert len(client.reports) == 1  # exec-2 照常恢复并交付
+    assert queue.depth == 0  # exec-1 的 handoff 已撤销（submit 自清理后重抛）
+    assert (work_root / "exec-1" / PENDING_FILENAME).is_file()  # marker 原样
 
 
 def test_submit_existing_entry_only_updates_phase(tmp_path: Path) -> None:

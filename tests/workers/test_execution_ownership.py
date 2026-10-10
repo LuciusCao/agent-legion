@@ -64,6 +64,21 @@ def test_discard_refused_when_marker_missing_or_unreadable(tmp_path: Path) -> No
     assert not discard_owned_dir(execution_dir, "lease-1")
 
 
+def test_discard_refused_when_marker_is_non_object_json(tmp_path: Path) -> None:
+    """#1184 同族（形状面）：合法 JSON 但非对象（[]/null——人工清理残留/
+    损坏）与损坏 JSON 同语义：无 lease 归属可判，fail-closed 拒删。修复前
+    payload.get 抛 AttributeError 逃出 discard_owned_dir，破坏「不可读
+    标记不是归属证明」的防御契约。"""
+    execution_dir = tmp_path / "exec-1"
+    execution_dir.mkdir()
+
+    (execution_dir / OWNER_FILENAME).write_text("[]", encoding="utf-8")
+    assert not discard_owned_dir(execution_dir, "lease-1")
+
+    (execution_dir / OWNER_FILENAME).write_text("null", encoding="utf-8")
+    assert not discard_owned_dir(execution_dir, "lease-1")
+
+
 def test_discard_refused_when_pending_upload_marker_present(tmp_path: Path) -> None:
     """#203 否决优先：目录归 UploadQueue 所有时即使归属标记匹配也不删。"""
     execution_dir = tmp_path / "exec-1"

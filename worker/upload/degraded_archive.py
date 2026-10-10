@@ -27,7 +27,8 @@ finalize 拒写）都汇聚到本模块——判败可以丢证据，**绝不能
     原始 metadata
       → staging 实测（gzip 实际体积——高熵 error 不可压缩，估算不可信）
       → 限内：原子替换（载荷逐字段原样，零裁剪）
-      → 超限：裁 command（清空，纯观测字段）→ 复测
+      → 超限：裁 command（清空，纯观测字段）→ 复测（**完整** error——
+         #1174 F2：归因全文优先，清 command 后本可落限的形态不先截）
       → 仍超限：裁 error_message（2 KiB 起对半递减到 0——归因字段，
          尽量保前缀）→ 复测
       → 仍超限（极限形态：天花板 < 判定字段 + tar/gz 开销 ≈ 300B，
@@ -40,7 +41,9 @@ finalize 拒写）都汇聚到本模块——判败可以丢证据，**绝不能
     （归因——短 verdict 时 command 一裁即收，归因全文保留）。
 
 调用臂 × 产物形态（三个臂共享同一回收语义，均在各自失败面内收敛到
-``write_metadata_only_archive(archive, failed, task.max_archive_bytes)``）:
+``write_metadata_only_archive(archive, failed, degrade_ceiling(task, ...))``
+——口径见 task.py 的 degrade_ceiling / report_policy 的 #1184 矩阵：在线
+正值按值、0 / 恢复值 / 413 已到按协议下限）:
 
 - ``finalize_result_metadata`` 拒写臂（``ResultMetadataOverCeiling`` /
   OSError / TarError / ValueError——含保留成员碰撞守卫的 ValueError）；
@@ -176,6 +179,11 @@ def _metadata_only_bytes(metadata: dict[str, Any]) -> bytes:
 def _fit_ceiling(metadata: dict[str, Any], max_bytes: int) -> dict[str, Any]:
     """裁剪非判定字段直到 metadata-only 归档落在 ``max_bytes`` 内。
 
+    档序与声明一致（#1174 F2 对齐）：command 清空后**先按完整
+    error_message 复测**——归因全文优先，只在仍超限时才进 2 KiB 起的
+    递减 cap 档；修复前 cap 序第一档先截，完整 error 本可落限的形态被
+    无谓截短（错误归因信息不必要丢失）。
+
     高熵 error_message（413 回显的 verdict 正文、provider 报错回显）几乎
     不可压缩——gzip 实测体积是唯一可信口径，故每档 cap 重建归档实测而非
     估算。返回裁剪副本；调用方对返回形态照常实测（本函数返回值可能仍超
@@ -183,6 +191,9 @@ def _fit_ceiling(metadata: dict[str, Any], max_bytes: int) -> dict[str, Any]:
     slim = dict(metadata)
     slim["command"] = []
     message = str(slim.get("error_message") or "")
+    slim["error_message"] = message
+    if len(_metadata_only_bytes(slim)) <= max_bytes:
+        return slim
     for cap in _CEILING_MESSAGE_CAPS:
         slim["error_message"] = message[:cap]
         if len(_metadata_only_bytes(slim)) <= max_bytes:
