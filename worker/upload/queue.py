@@ -17,7 +17,9 @@ Durability: every task writes an ``upload_pending.json`` marker into its
 execution dir before entering the queue; the marker is removed only after
 the Host accepts the result. A crashed Worker rescans it on startup and
 re-enters through the bulk lane (artifact stores are content-addressed, so
-re-upload is harmless).
+re-upload is harmless). Markers that cannot be unlinked after a delivered
+terminal verdict (unwritable execution dir, #1174 F3) are skipped on rescan
+via the state-side tombstone instead of re-reporting forever.
 
 Lease ownership: the lease heartbeat keeps beating through the upload
 (per-execution threads before #352; the per-Worker batch registry after). It
@@ -38,7 +40,6 @@ the checks remain for prompt cancellation and bounded lane occupancy.
 from __future__ import annotations
 
 import json
-import shutil
 import threading
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -50,7 +51,7 @@ from worker.host.transfer import HostRequestError, TransferOperations
 from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY
 from worker.upload import heartbeat as upload_heartbeat
 from worker.upload import report_events
-from worker.upload.cleanup import drop_marker
+from worker.upload.cleanup import drop_marker, restore_task_from_marker
 from worker.upload.constants import PENDING_FILENAME as PENDING_FILENAME
 from worker.upload.control import BulkOutcome, CombinedStop
 from worker.upload.handoff import UploadHandoff
@@ -159,7 +160,14 @@ class UploadQueue:
         return self._handoff.wait_for_prior(execution_id, lease_id, stop, ownership_lost)
 
     def restore(self, work_root: Path) -> int:
-        """Re-queue executions whose results never reached the Host."""
+        """Re-queue executions whose results never reached the Host.
+
+        Marker intake goes through ``cleanup.restore_task_from_marker``
+        (#1174 F3): unreadable markers are discarded wholesale, and markers
+        whose terminal verdict was already delivered but whose unlink failed
+        (unwritable execution dir) are skipped via the state-side tombstone —
+        re-reporting them would only replay the Host's idempotent 204/409.
+        """
         restored = 0
         try:
             children = sorted(work_root.iterdir())
@@ -169,20 +177,8 @@ class UploadQueue:
             marker = child / PENDING_FILENAME
             if not child.is_dir() or not marker.is_file():
                 continue
-            try:
-                task = UploadTask.from_json(
-                    json.loads(marker.read_text(encoding="utf-8")), work_root
-                )
-            except Exception as exc:
-                # #204 broad-except audit: 逐目录遏制。marker 的逃逸族混族
-                # ——解码 ValueError、from_json 的 KeyError/TypeError（字段
-                # 畸形）、read_text 的 OSError——统一语义是"marker 已损坏"。
-                # 吞是对的：一个坏 marker 不得阻断其余待恢复结果重新入队；
-                # marker 经 atomic_write 落盘（tmp+fsync+replace），读不出
-                # 即真损坏而非半截写，rmtree 丢弃该目录是设计选择。日志
-                # 保全：print 记录 marker 路径与异常。
-                print(f"discarding unreadable upload marker {marker}: {exc}", flush=True)
-                shutil.rmtree(child, ignore_errors=True)
+            task = restore_task_from_marker(child, work_root)
+            if task is None:
                 continue
             self.submit(task)
             restored += 1

@@ -48,9 +48,13 @@ class UploadTask:
     # 崩溃恢复的任务从 bulk 车道重进时走旧通道（Host 两种形态都收）。
     artifact_uploads: dict[str, Any] = field(default_factory=dict)
     # #755 codex P1：Host 经 claim 下发的 agent_workers.max_archive_bytes
-    # 实际值（换轨预检的判定口径）；0 = 旧 Host 未下发 → 预检回落 64 MiB
-    # 默认。不持久化：与 artifact_uploads 同纪律（claim 响应内存态注入），
-    # 崩溃恢复的任务从 bulk 车道重进时按默认口径判定。
+    # 实际值（换轨预检的判定口径）；0 = 未知（旧 Host 未下发 / #1174 前的
+    # 旧 marker 无字段）——预检不猜上限、交 Host 413 判决，413 回收臂则按
+    # 协议下限裁剪（两个 0 的语义矩阵见 report_policy 模块 docstring）。
+    # #1174 F1 起随 marker 持久化（与 artifact_uploads 的不持久化纪律不同：
+    # presigned URL 会过期而纯 int 不会）——崩溃恢复的任务从 marker 读回
+    # claim 时点值，预检与回收裁剪与在线任务同一口径；旧版本 marker 缺
+    # 字段归 0（from_json 兼容）。
     max_archive_bytes: int = 0
     heartbeat_stop: threading.Event = field(default_factory=threading.Event)
     heartbeat_thread: threading.Thread | None = None
@@ -109,6 +113,9 @@ class UploadTask:
             "expected_outputs": list(self.expected_outputs),
             "command": list(self.command),
             "prebuilt_metadata": self.prebuilt_metadata,
+            # #1174 F1：随 marker 持久化（纯 int、无过期问题），恢复任务的
+            # 预检/回收裁剪与在线任务同口径；旧版本 marker 缺字段归 0。
+            "max_archive_bytes": int(self.max_archive_bytes),
         }
 
     @classmethod
@@ -129,4 +136,5 @@ class UploadTask:
             expected_outputs=tuple(str(name) for name in payload.get("expected_outputs", [])),
             command=tuple(str(part) for part in payload.get("command", [])),
             prebuilt_metadata=payload.get("prebuilt_metadata"),
+            max_archive_bytes=int(payload.get("max_archive_bytes") or 0),
         )

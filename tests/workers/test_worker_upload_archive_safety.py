@@ -1,6 +1,6 @@
-"""#1165/#1168/#1169：Worker 归档安全收口（codex 评审 0.7.19 后收口轮）。
+"""#1165/#1168/#1169/#1174：Worker 归档安全收口（codex 评审 0.7.19 后收口轮）。
 
-三条链路：
+四条链路：
 - 扫描失败防泄漏（#1165 P1）：pi_events 整趟失败时就地销毁未脱敏
   events.jsonl——队列级断言归档字节里没有密钥、结果照常上报；销毁失败
   （幸存者守卫）走诚实判败，raw 字节绝不进归档（pi_events 单元层用例见
@@ -11,6 +11,9 @@
 - 降级归档限内（#1169 P2）：metadata-only 归档受 claim 下发
   ``max_archive_bytes`` 约束，超限先裁非判定字段——重报不再吃 413、
   降级闸不再当终态删 marker 丢结果。
+- 裁剪档序与回收口径（#1174）：command 清空后先按完整 error 复测（归因
+  全文优先于 2048 档截断）；无上限（旧 Host / 旧 marker）的 413 回收按
+  协议下限 ``MIN_RESULT_ARCHIVE_BYTES`` 裁剪（两个 0 值语义的分界钉子）。
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from shared.code_contract import RESULT_METADATA_MEMBER
+from shared.code_contract import MIN_RESULT_ARCHIVE_BYTES, RESULT_METADATA_MEMBER
 from tests.workers.upload_queue_testlib import (
     QueueFakeClient,
     _execution_dir,
@@ -378,3 +381,47 @@ def test_degrade_gate_413_recycle_respects_declared_ceiling(tmp_path: Path) -> N
     assert metadata["error_message"]  # 前缀保留（判败归因可读）
     with tarfile.open(archive) as tar:
         assert tar.getnames() == [RESULT_METADATA_MEMBER]
+
+
+def test_degrade_gate_413_recycle_without_ceiling_uses_protocol_floor(tmp_path: Path) -> None:
+    """矩阵 {无上限 × 413 回收}：``max_archive_bytes == 0``（旧 Host / #1174
+    前落盘的旧 marker）时回收按协议下限 ``MIN_RESULT_ARCHIVE_BYTES`` 裁剪
+    ——Host 拒过 413 即证明它有上限，本地不知道具体值时按协议保证的最小
+    上限裁，重报归档对任何合法 Host 配置必可提交。修复前 0 上限直接跳过
+    裁剪（大 command 形态仍超限吃第二个 413）。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    task = _task(work_root, command=tuple(secrets.token_hex(32) for _ in range(64)))
+    archive = work_root / "exec-1" / "result.tar.gz"
+    write_empty_archive(archive)
+    gate = report_policy.ReportDegradeGate(task, archive)
+
+    assert gate.on_rejection(413, secrets.token_hex(100)) is True
+
+    assert archive.stat().st_size <= MIN_RESULT_ARCHIVE_BYTES
+    metadata = read_result_metadata(archive)
+    assert metadata["status"] == "failed"
+    assert metadata["command"] == []  # 观测字段先让位（归因可读优先）
+
+
+def test_metadata_only_archive_keeps_full_error_after_command_trim(tmp_path: Path) -> None:
+    """#1174 F2（裁剪档序）：「清空 command 后完整 error 落限」的形态——
+    归因全文保留，不先进 2048 档截短。修复前 cap 序第一档先截 error，
+    2500 字符高熵归因被无谓截掉尾部（错误归因信息不必要丢失），与档序
+    声明的优先级（command 让位后先按完整 error 复测）相悖。"""
+    work_root = tmp_path / "work"
+    (work_root / "exec-1").mkdir(parents=True)
+    command = tuple(secrets.token_hex(32) for _ in range(200))
+    task = _task(work_root, kind="prebuilt", command=command)
+    message = secrets.token_hex(1250)  # 2500 字符高熵（gzip 近乎不可压缩）
+    metadata = failed_metadata(task, message)
+    archive = work_root / "exec-1" / "result.tar.gz"
+
+    # 上限形态：带 command 的全形态 ~12.8 KiB 必超 4096；清 command 后
+    # 完整 error（2500 字符 + tar/gz 开销）本可落限内。
+    write_metadata_only_archive(archive, metadata, max_bytes=4096)
+
+    payload = read_result_metadata(archive)
+    assert payload["command"] == []  # 观测字段先裁
+    assert payload["error_message"] == message  # 归因全文：未被截到 2048
+    assert archive.stat().st_size <= 4096

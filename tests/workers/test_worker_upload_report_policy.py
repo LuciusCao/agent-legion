@@ -4,20 +4,23 @@
 等租约过期整次重跑）；5xx / 网络错误 / 408·425·429 从不降级、租约持有
 期间持续重试直到 204 / 409；401 走认证丢失处置（#1082：保 marker、不
 伪报 failed）；主路径 prepare 后按 Host 下发的 max_archive_bytes 预检，
-超限直接判败而不送出注定 413 的归档。共享桩/工具见
-tests/workers/upload_queue_testlib.py。
+超限直接判败而不送出注定 413 的归档。#1174 F1 再钉两维：上限随 marker
+往返（恢复任务预检不失明）、无上限的 413 回收按协议下限裁剪。共享桩/
+工具见 tests/workers/upload_queue_testlib.py。
 """
 
 from __future__ import annotations
 
+import json
 import os
+import secrets
 import tarfile
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from shared.code_contract import RESULT_METADATA_MEMBER
+from shared.code_contract import MIN_RESULT_ARCHIVE_BYTES, RESULT_METADATA_MEMBER
 from tests.workers.upload_queue_testlib import (
     QueueFakeClient,
     _execution_dir,
@@ -27,7 +30,7 @@ from tests.workers.upload_queue_testlib import (
 )
 from worker.upload import queue as upload_queue
 from worker.upload import report_policy
-from worker.upload.queue import PENDING_FILENAME
+from worker.upload.queue import PENDING_FILENAME, UploadTask
 
 pytestmark = pytest.mark.no_db
 
@@ -51,6 +54,20 @@ class ScriptedReportClient(QueueFakeClient):
         if status is None:
             raise RuntimeError("result report failed: exec-1: HTTP 503: b'unavailable'")
         return status, b"verdict body"
+
+
+class _SizeGatedClient(QueueFakeClient):
+    """按真实 Host 的归档大小闸行为回判（``agent_workers`` result 端点先验
+    ``max_archive_bytes``）：归档超限回 413，限内收下并记一条 report。"""
+
+    def __init__(self, ceiling: int) -> None:
+        super().__init__()
+        self.ceiling = ceiling
+
+    def report(self, execution_id: str, lease_id: str, archive: Path) -> tuple[int, bytes]:
+        if archive.stat().st_size > self.ceiling:
+            return 413, b"result archive over the configured ceiling"
+        return super().report(execution_id, lease_id, archive)
 
 
 @pytest.fixture(autouse=True)
@@ -252,3 +269,52 @@ def test_main_path_precheck_skipped_without_declared_ceiling(tmp_path: Path) -> 
     assert len(client.calls) == 1
     assert client.calls[0]["metadata"]["status"] == "completed"
     assert "output.json" in client.calls[0]["members"]
+
+
+def test_restored_task_prechecks_with_persisted_ceiling(tmp_path: Path) -> None:
+    """#1174 F1（持久化层，端到端）：marker 往返恢复的任务持真实上限——
+    prepare 预检与在线任务同口径（超限即本地诚实判败，零 413 往返）。
+    修复前 ``from_json`` 丢字段 → 恢复任务按 0 口径预检失明，大归档原样
+    送进 report 车道交 Host 判决。"""
+    work_root = tmp_path / "work"
+    execution_dir = _execution_dir(work_root)
+    (execution_dir / "job" / "output.json").write_bytes(os.urandom(64 * 1024))
+    client = ScriptedReportClient([204])
+    queue = _queue(client)
+    task = _task(work_root, max_archive_bytes=16 * 1024)
+    restored = UploadTask.from_json(
+        json.loads(json.dumps(task.to_json(), ensure_ascii=False)), work_root
+    )
+    queue.submit(restored)
+    queue.shutdown()
+
+    assert len(client.calls) == 1
+    report = client.calls[0]["metadata"]
+    assert report["status"] == "failed"
+    assert "over the 16384-byte Host archive ceiling" in report["error_message"]
+    assert report["output_artifacts"] == {}
+    assert client.calls[0]["members"] == [RESULT_METADATA_MEMBER]
+    assert client.uploads == {}
+
+
+def test_413_recycle_without_ceiling_trims_to_protocol_floor(tmp_path: Path) -> None:
+    """#1174 F1（语义层，端到端）：无 claim 上限（旧 Host / 旧 marker）的
+    413 回收臂按协议下限 ``MIN_RESULT_ARCHIVE_BYTES`` 裁剪——Host 拒过
+    413 即证明它有上限，本地按协议保证的最小上限（1 KiB）裁，重报归档对
+    任何合法 Host 配置必可提交。修复前 0 上限跳过裁剪：大 command 的
+    metadata-only 归档仍超 Host 的 1 KiB 配置 → 第二个 413 → 闸判终态删
+    marker，Host 从未记录结果、租约重跑。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    command = tuple(secrets.token_hex(32) for _ in range(64))
+    client = _SizeGatedClient(MIN_RESULT_ARCHIVE_BYTES)
+    queue = _queue(client)
+    queue.submit(_task(work_root, max_archive_bytes=0, command=command))
+    queue.shutdown()
+
+    assert len(client.reports) == 1  # 裁剪后的判败重报被 Host 收下
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert "HTTP 413" in report["error_message"]
+    assert report["command"] == []  # 观测字段让位（协议下限裁剪）
+    assert not (work_root / "exec-1").exists()  # delivered 收尾（非终态丢弃）

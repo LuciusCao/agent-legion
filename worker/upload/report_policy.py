@@ -35,6 +35,19 @@ run 的失败——降级成 failed 上报等于伪造执行结局。report 循�
 主路径的归档上限预检（``declared_ceiling_rejection``）同属这一判决面：
 prepare 备妥的归档超 Host 下发上限即诚实判败，不把注定 413 的归档送进
 report 车道。
+
+``max_archive_bytes`` 的取值状态机（#1174 F1——两个 0 的语义分界；
+#1174 起该值随 pending marker 持久化，崩溃恢复任务与在线任务同口径，
+0 只剩旧 Host 未下发与 #1174 前旧 marker 两个来源）：
+
+- claim 下发正值：prepare 预检（``declared_ceiling_rejection`` /
+  ``finalize_result_metadata`` 换写上限）与 413 回收臂都按值裁剪。
+- 0（未知）：prepare 预检**不猜**——不预检、不裁剪，交 Host 的 413
+  判决兜底（64 MiB 默认可能低于 Host 实际配置而误杀可交付结果）；
+  **已收到 413 之后**的回收臂按协议下限 ``MIN_RESULT_ARCHIVE_BYTES``
+  （1 KiB，Host 配置模型的合法下限，单一来源 shared/code_contract）裁剪
+  ——Host 拒过说明它有上限，本地不知道具体值时按协议保证的最小上限裁，
+  重报归档对任何合法 Host 配置必可提交。
 """
 
 from __future__ import annotations
@@ -43,6 +56,7 @@ import tarfile
 from pathlib import Path
 from typing import Any
 
+from shared.code_contract import MIN_RESULT_ARCHIVE_BYTES
 from worker.upload.degraded_archive import (
     failed_metadata,
     write_empty_archive,
@@ -83,10 +97,10 @@ def declared_ceiling_rejection(task: UploadTask, archive: Path) -> str | None:
     ``max_archive_bytes``即回收空归档并返回判败原因（交给 failed_metadata，
     终态 metadata 由 bulk 车道终点的 finalize 写入）。
 
-    只按 Host 实际下发值判定：未下发（旧 Host / 崩溃恢复的任务，
+    只按 Host 实际下发值判定：未下发（旧 Host / #1174 前落盘的旧 marker，
     ``max_archive_bytes == 0``）时本地不猜上限——64 MiB 默认可能低于 Host
     实际配置而误杀可交付结果，交给 Host 的 413 判决，由 report 循环的
-    4xx 降级臂兜底。"""
+    4xx 降级臂兜底（413 后的 0 按协议下限裁剪，矩阵见模块 docstring）。"""
     ceiling = task.max_archive_bytes
     archive_bytes = archive.stat().st_size if archive.is_file() else 0
     if ceiling <= 0 or archive_bytes <= ceiling:
@@ -105,9 +119,10 @@ class ReportDegradeGate:
     取下一次上报的载荷），并同步归档的 ``result.json`` 成员（#843 v2：
     上报的元数据在归档里，判败换写后重报才携带正确载荷）。闸只开一次，
     唯一例外：首次降级时归档保留（非 413 判决），判败重报又吃 413——
-    Host 先验归档大小，未下发 ``max_archive_bytes``（旧 Host / 崩溃恢复）
-    时本地口径可能低于 Host 实际上限——此时再回收归档重报一次。总重报
-    次数仍有界（≤2）。"""
+    Host 先验归档大小，未下发 ``max_archive_bytes``（旧 Host / #1174 前
+    旧 marker）时本地口径可能低于 Host 实际上限——此时再回收归档重报
+    一次（回收按模块 docstring 的状态机取值：正值按值、0 按协议下限）。
+    总重报次数仍有界（≤2）。"""
 
     def __init__(self, task: UploadTask, archive: Path) -> None:
         self._task = task
@@ -127,8 +142,12 @@ class ReportDegradeGate:
         if status_code == 413:
             # 413 = 归档不可提交：回收成仅含判败 metadata 的可提交归档
             # （#1169：按 claim 下发的 max_archive_bytes 自适应裁剪，重报
-            # 的 metadata-only 归档不再超限吃第二个 413）。
-            write_metadata_only_archive(self._archive, metadata, self._task.max_archive_bytes)
+            # 的 metadata-only 归档不再超限吃第二个 413）。#1174 F1：无
+            # claim 上限（旧 Host / #1174 前旧 marker，值 0）时按协议下限
+            # MIN_RESULT_ARCHIVE_BYTES 裁——Host 拒过即证明有上限，本地按
+            # 协议保证的最小上限裁（语义矩阵见模块 docstring）。
+            max_bytes = self._task.max_archive_bytes or MIN_RESULT_ARCHIVE_BYTES
+            write_metadata_only_archive(self._archive, metadata, max_bytes)
             self._archive_recycled = True
         else:
             # 非 413 判决：证据随归档保留，只换 result.json 成员；换写超限/
