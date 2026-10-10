@@ -1,6 +1,7 @@
 .venv/
 .env
 .uv-cache/
+.uv-cache.prewarm-incoming*
 .uv-cache.prewarm.*
 .ruff_cache/
 .pytest_cache/
