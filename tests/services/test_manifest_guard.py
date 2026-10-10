@@ -33,10 +33,14 @@ def test_all_reserved_names_rejected_together() -> None:
 
 
 def test_normal_and_nested_output_names_pass() -> None:
-    """合法名（含嵌套声明名 reports/final.json，#631 祝福形态）不受影响。"""
+    """合法名不受影响：嵌套声明名 reports/final.json（#631 祝福形态——
+    归一化后是独立路径）与非 JSON 产物名（output.txt；result.txt 是
+    result.json 的近邻名但不同名——守卫按归一化名字同一性判定，非
+    模式/子串匹配，.txt 不因形近被误伤）。"""
     require_unreserved_output_names(
         {"expected_outputs": ["out.json", "result-summary.json", "reports/final.json"]}
     )
+    require_unreserved_output_names({"expected_outputs": ["output.txt", "result.txt"]})
 
 
 def test_alias_spellings_of_reserved_names_rejected() -> None:

@@ -20,6 +20,30 @@ Contract, deliberately different from the local path
   can have an old-revision agent job still running, and that execution is
   not code-pool concurrency (limit=1 must not let one stale agent lease
   block every new remote code claim).
+
+  Counting-scope table — the model #1167 pinned; the root cause was this
+  execution-kind dimension being absent from the original #1149 model
+  (form × counted × basis; matrix nail: 用例 10 in
+  ``tests/db/test_claim_node_limit_remote.py``):
+
+  ==================  =======  ==========================================
+  executor_id form    counted  basis
+  ==================  =======  ==========================================
+  ``code``            yes      local pool claim — the only form the
+                               local claim path ever writes
+                               (``_lease_claims.claim_lease``)
+  ``agent:code:%``    yes      remote code claim (``claim_promote``,
+                               kind=code; ``code_dispatch``'s mirror
+                               carries the same prefix)
+  ``agent:<id>``      no       Agent-lane execution — not code-pool
+                               concurrency
+  ==================  =======  ==========================================
+
+  The LOCAL path (``_lease_claim_limits.check_claim_capacity``) keeps a
+  same-shaped residual: its node count also spans every active lease of
+  the node (no form filter) — conservative on mixed agent→code node keys
+  (skip-and-retry, never over-admitting), predates #1149, out of #1167's
+  scope; tracked in #1171 with the same predicate spelled out for reuse.
 - Over-limit is a skip (``node_limit_full``), never a cancel: the request
   stays queued for the next pass with the same semantics as
   ``capacity_full``, and the unclaimable sweeper (runtime/model probes only)

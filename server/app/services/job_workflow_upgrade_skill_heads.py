@@ -11,14 +11,23 @@ sha + node_runs ``skill_version`` 的 ``ref@commit12`` 前缀，
 
 本模块是 upgrade 链路唯一允许 git I/O 的位置：plan 阶段（guard 事务外、
 lease guard 之前）对判定涉及的每个 latest 绑定 skill key 做一次有界
-``git rev-parse HEAD``——subprocess 超时 5 秒、整批合计预算 30 秒
-（#1166 P2：剩余预算不足单次超时的后续 key 直接 None 保守排除，批级
-墙钟有界，管理请求不再先被 HTTP 超时杀掉）；仓库缺失、git 不可用、
-超时或输出非 40-hex 都归入 None（保守排除，不 500）。解析出的 HEAD 作为
-**数据**传给判定模块（``skill_excluded_nodes(latest_commits=...)``，零
-git I/O 纪律不变）；guard 事务内重验沿用 plan 的同一常量（#759 P1：
-事务内零 git 子进程、零副作用，重验只剩纯 DB 读 + 字符串比较——含 plan
-传入的 HEAD 常量比较）。
+``git rev-parse HEAD``。预算模型三层粒度（#1166，根因是原模型只有
+第一层——单次超时对串行批不够）：
+
+1. 单次 subprocess 超时 5 秒（``_REV_PARSE_TIMEOUT_SECONDS``）——单个
+   key 局部有界；
+2. 整批 deadline 30 秒（``_REV_PARSE_BUDGET_SECONDS``）——批级墙钟有界
+   （N 个 key 串行最坏 N×5s 的 NFS 挂起形态被封死，管理请求不再先被
+   HTTP 超时杀掉）；
+3. 超预算 key 保守 None 不再启动——启动门按「剩余预算 ≥ 单次超时」
+   判定（与 key 自身快慢无关），门后的 key 不产生 git 调用。
+
+仓库缺失、git 不可用、超时或输出非 40-hex 都归入 None（保守排除，不
+500）。解析出的 HEAD 作为**数据**传给判定模块
+（``skill_excluded_nodes(latest_commits=...)``，零 git I/O 纪律不变）；
+guard 事务内重验沿用 plan 的同一常量（#759 P1：事务内零 git 子进程、
+零副作用，重验只剩纯 DB 读 + 字符串比较——含 plan 传入的 HEAD 常量
+比较）。
 
 残余窗口（#1166 P1 边缘项分诊为收窄，边界如实记录）：HEAD 在
 plan→guard→commit 期间前进不触发已继承节点重跑——继承语义是「产物按
@@ -29,6 +38,23 @@ plan→guard→commit 期间前进不触发已继承节点重跑——继承语�
 事务内没有任何可比对信号（唯一真检测 = 事务内 rev-parse，被 #759 零 git
 纪律排除；锁文档 ``resolved_at`` 只随 relock/刷新移动、与 HEAD 前进相互
 独立，不可作代理信号），窗口为 plan 起到 commit 止。
+
+TOCTOU 封闭手段表（#1166 P1 收口记录：upgrade 输入面三个维度各自的
+封闭手段与残余窗口；latest 行的「重试链」指 ``apply_upgrade_once``
+每次尝试都全新调用 ``resolve_latest_skill_heads``——revision 变化触发
+的整体重试会拿到新 HEAD，有利事实）：
+
+==================  ================================================  ==========================
+维度                封闭手段                                          残余窗口
+==================  ================================================  ==========================
+revision（active）  guard 事务内 publication 锁下重读；不符抛          重读后→commit（同锁域
+                    ``ActiveRevisionChangedError`` 整体重试（重解      挡住发布，实际无窗口）
+                    context + 重 plan + 重解析 HEAD）                  → 提交后为「新升级」
+pinned ref          skill-lock 域：guard 事务内比对锁文档冻结          guard 重验后→下次
+                    commit，plan→guard 间的 relock 被重验抓住          dispatch（relock 窗口）
+latest HEAD         plan 常量（无锁域可比对信号）；revision 变化的      plan 起→commit 止
+                    重试链全新解析 HEAD                                （HEAD 前进不重跑）
+==================  ================================================  ==========================
 
 低频管理操作：catalog 在此与 ``job_workflow_upgrade_impl`` 各读一次
 （fresh 直读、同源 API）——升级非热路径，以重复读换模块独立（impl 不

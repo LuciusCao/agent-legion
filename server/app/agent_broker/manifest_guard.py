@@ -42,12 +42,15 @@ def require_unreserved_output_names(manifest: Mapping[str, Any]) -> None:
     require_routable_execution 的 #13 fail-fast 形态（跑时守卫；发布侧
     前移留待 follow-up）。
 
-    #1164 收口：按 ``PurePosixPath`` 归一化形态比对（``./result.json`` /
-    ``.//result.json`` 归一化即 ``result.json``，与提升守卫的 source 落点
-    同一路径）——原字符串精确比对放行这些别名拼写，提升守卫同样放行后
-    staging 的元数据成员会被静默提升成产物。嵌套名（``sub/result.json``）
-    归一化后仍是独立路径、是合法形态（#631 祝福形态），不受影响；绝对 /
-    ``..`` 形态不在此判（unsafe 家族由提升守卫的既有拒绝收口）。"""
+    命名空间契约（一句话模型）：expected output 的**落盘路径**——
+    ``PurePosixPath(name).as_posix()`` 归一化后的形态——不得等于任一
+    保留成员名；比对是归一化后的**精确等值**，非前缀、非子串（
+    ``sub/result.json`` 是独立路径，合法）。#1164 收口根因：原实现按
+    原始字符串精确比对，模型里「名字」与「落盘路径」被当成同一个东西
+    ——``./result.json`` / ``.//result.json`` 是不同字符串、同一落盘
+    路径，穿过了字符串相等却命中归一化路径碰撞（提升守卫同款漏洞，
+    staging 元数据成员会被静默提升成产物）。绝对 / ``..`` 形态不在此
+    判（unsafe 家族由提升守卫的既有拒绝收口）。"""
     for name in map(str, manifest.get("expected_outputs") or []):
         relative = PurePosixPath(name)
         if relative.is_absolute() or ".." in relative.parts:
