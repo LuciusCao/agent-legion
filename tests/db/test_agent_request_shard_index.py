@@ -131,6 +131,7 @@ def test_index_definition_is_shard_aware() -> None:
     assert "USING btree (job_id, node_key) WHERE" not in definition
 
 
+@pytest.mark.fresh_schema
 def test_migration_recorded_after_upgrade_from_v78(job_db) -> None:
     """A database recorded at v78 must gain the shard-aware index via the
     v79 migration: the schema-file replay recreates the NEW shape (drop +

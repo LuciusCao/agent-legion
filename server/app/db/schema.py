@@ -8,6 +8,7 @@ from server.app.db.migrations.workspace_settings_retirement import (
     drop_retired_workspace_setting_columns,
 )
 from server.app.db.schema_guard import guard_shared_db
+from server.app.db.schema_head_cache import note_verified_at_head, verified_at_head
 from server.app.db.transaction import write_transaction
 
 SCHEMA_VERSION = 93
@@ -25,8 +26,15 @@ def init_db(database_dsn: DatabaseDsn) -> None:
     migrations on upgrade. Databases recorded at the current version
     (including legacy single-row installs) are a no-op. The bare shared
     database additionally requires the schema_guard opt-in.
+
+    A process-local memo (``schema_head_cache``) skips the whole transaction
+    once this process has verified the DSN at ``SCHEMA_VERSION``; the test
+    harness invalidates it on schema rebuilds and disables it inside
+    ``fresh_schema`` tests.
     """
     guard_shared_db(database_dsn)
+    if verified_at_head(database_dsn, SCHEMA_VERSION):
+        return
     with write_transaction(database_dsn) as conn:
         # Serialize migrations per database, not cluster-wide: worktrees run
         # against dedicated databases (tests/postgres_support.py derives one
@@ -48,6 +56,7 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             for row in conn.execute("select version from schema_migrations").fetchall()
         }
         if applied_versions and max(applied_versions) >= SCHEMA_VERSION:
+            note_verified_at_head(database_dsn, SCHEMA_VERSION)
             return
         conn.execute(_SCHEMA_FILE.read_text(encoding="utf-8"))
         # Legacy single-row installs recorded only their final version, so a
@@ -79,3 +88,4 @@ def init_db(database_dsn: DatabaseDsn) -> None:
         # fresh ones (guarded by tests/db/test_schema_upgrade_parity.py).
         for retired in ("job_batches", "workspace_executor_allocations", "workspace_node_bindings"):
             conn.execute(f"drop table if exists {retired}")
+    note_verified_at_head(database_dsn, SCHEMA_VERSION)

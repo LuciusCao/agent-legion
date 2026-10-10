@@ -26,6 +26,7 @@ def test_v63_migration_record() -> None:
     assert row["name"] == "workspace_preview_config"
 
 
+@pytest.mark.fresh_schema
 def test_v63_upgrade_adds_preview_config_column() -> None:
     """A pre-v63 database gains preview_config_json via init_db replay."""
     with write_transaction(TEST_DATABASE_URL) as conn:

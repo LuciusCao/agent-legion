@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import psycopg
+import pytest
 
 from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
@@ -79,6 +80,7 @@ def test_stage_columns_round_trip_through_the_sampler() -> None:
     assert row["claim_writes_seconds_total"] == 0.02
 
 
+@pytest.mark.fresh_schema
 def test_upgrade_from_v77_adds_the_columns() -> None:
     # A database recorded at v77 replays the schema file (CREATE TABLE IF NOT
     # EXISTS is a no-op) and runs the v78 migration: the guarded ALTERs are

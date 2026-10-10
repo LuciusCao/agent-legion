@@ -51,7 +51,11 @@ Schema upgrades are per-version: `schema_migrations` records one row per
 registered version, and `init_db` only runs data migrations above
 `max(version)` (the DDL file still replays in full on upgrade — it is
 idempotent by construction). A database recorded at the current version is
-a no-op, including legacy single-row installs.
+a no-op, including legacy single-row installs. Once a process has verified
+a database at the current version, `init_db` skips the locked transaction
+entirely on later calls in that process (`db/schema_head_cache.py`); the
+test harness invalidates that memo on schema rebuilds and disables it
+inside `fresh_schema` tests.
 
 ## Dev-machine role isolation and worktree DB cleanup
 
