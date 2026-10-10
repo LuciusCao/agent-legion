@@ -43,9 +43,12 @@ report 车道。
 
 - claim 下发正值（在线，``max_archive_bytes_restored=False``）：prepare
   预检（``declared_ceiling_rejection`` / ``finalize_result_metadata``
-  换写上限，口径 ``precheck_ceiling``）按值判定——超限本地诚实判败，
-  Host 刚下发、可信窗口内。无 Host 大小信号的回收位（换写失败回落、
-  finalize 拒写臂，口径 ``degrade_ceiling``）按值裁剪。
+  换写上限，口径 ``precheck_ceiling``）按值判定——超限本地诚实判败。
+  注意这是** claim 时点快照**而非恒真值：``max_archive_bytes`` 是运行时
+  可改的实例设置（无需重启即可双向漂移），快照新鲜度窗口 = claim→report
+  的执行时长；窗口内 Host 上调时在线任务同样可能被旧值误杀（与恢复任务
+  同形、仅窗口量级不同——秒级 vs 恢复的无界）。无 Host 大小信号的回收位
+  （换写失败回落、finalize 拒写臂，口径 ``degrade_ceiling``）按值裁剪。
 - claim 下发正值，**413 已到**（``degrade_ceiling(task, snapshot_stale=
   True)``，#1184）：无条件按协议下限裁。413 本身就是「快照过期」的
   判决信号——Host 可能重启后下调了 ``agent_workers.max_archive_bytes``，

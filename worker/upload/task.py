@@ -87,9 +87,13 @@ class UploadTask:
     # 413 回收臂则按协议下限裁剪（语义矩阵见 report_policy 模块
     # docstring）。#1174 F1 起随 marker 持久化（与 artifact_uploads 的
     # 不持久化纪律不同：presigned URL 会过期而纯 int 不会）；#1184
-    # 复审起持久值只作诊断/观测锚点——快照双向可过期（Host 重启下调
-    # → 413 兜底；上调 → 预检误杀成功执行），预检与回收裁剪只信在线
-    # 值，恢复任务一律不预检（见 precheck_ceiling / degrade_ceiling）。
+    # 复审起持久值主要作诊断/观测锚点——快照双向可过期（Host 重启下调
+    # → 413 兜底；上调 → 预检误杀成功执行），预检（precheck_ceiling）
+    # 只信在线值、恢复任务一律不预检、回收位（degrade_ceiling）在快照
+    # 失效信号（413 / restored）下按下限；唯一例外是 report_policy 非
+    # 413 判决的换轨 embed 尝试仍沿用快照值做上限（失败即回落下限回收，
+    # 行为有界——超限回落保证证据归档，低值形态反而多保证据），分层
+    # 见该处注释。
     max_archive_bytes: int = 0
     # #1184 复审：max_archive_bytes 的来源标记——True = 从 pending
     # marker 读回（恢复任务，快照可双向过期）；False = 在线 claim 注入
