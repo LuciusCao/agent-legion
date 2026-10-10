@@ -41,10 +41,11 @@ report 车道。
 0 只剩旧 Host 未下发与 #1174 前旧 marker 两个来源）：
 
 - claim 下发正值：prepare 预检（``declared_ceiling_rejection`` /
-  ``finalize_result_metadata`` 换写上限）与 413 回收臂都按值裁剪。
+  ``finalize_result_metadata`` 换写上限）与全部回收位都按值裁剪。
 - 0（未知）：prepare 预检**不猜**——不预检、不裁剪，交 Host 的 413
   判决兜底（64 MiB 默认可能低于 Host 实际配置而误杀可交付结果）；
-  **已收到 413 之后**的回收臂按协议下限 ``MIN_RESULT_ARCHIVE_BYTES``
+  **已进入降级回收**（收到 413，或非 413 判决换写失败回落、finalize
+  拒写臂——三个回收位同口径）时按协议下限 ``MIN_RESULT_ARCHIVE_BYTES``
   （1 KiB，Host 配置模型的合法下限，单一来源 shared/code_contract）裁剪
   ——Host 拒过说明它有上限，本地不知道具体值时按协议保证的最小上限裁，
   重报归档对任何合法 Host 配置必可提交。
@@ -56,7 +57,6 @@ import tarfile
 from pathlib import Path
 from typing import Any
 
-from shared.code_contract import MIN_RESULT_ARCHIVE_BYTES
 from worker.upload.degraded_archive import (
     failed_metadata,
     write_empty_archive,
@@ -66,7 +66,7 @@ from worker.upload.result_manifest import (
     ResultMetadataOverCeiling,
     embed_result_metadata,
 )
-from worker.upload.task import UploadTask
+from worker.upload.task import UploadTask, degrade_ceiling
 
 # 「稍后再试」语义的 4xx：与 5xx 同归瞬时臂（持续重试），不是判决。
 RETRYABLE_CLIENT_STATUSES = frozenset({408, 425, 429})
@@ -144,20 +144,21 @@ class ReportDegradeGate:
             # （#1169：按 claim 下发的 max_archive_bytes 自适应裁剪，重报
             # 的 metadata-only 归档不再超限吃第二个 413）。#1174 F1：无
             # claim 上限（旧 Host / #1174 前旧 marker，值 0）时按协议下限
-            # MIN_RESULT_ARCHIVE_BYTES 裁——Host 拒过即证明有上限，本地按
-            # 协议保证的最小上限裁（语义矩阵见模块 docstring）。
-            max_bytes = self._task.max_archive_bytes or MIN_RESULT_ARCHIVE_BYTES
-            write_metadata_only_archive(self._archive, metadata, max_bytes)
+            # 裁——Host 拒过即证明有上限，本地按协议保证的最小上限裁
+            # （degrade_ceiling 单一口径，语义矩阵见模块 docstring）。
+            write_metadata_only_archive(self._archive, metadata, degrade_ceiling(self._task))
             self._archive_recycled = True
         else:
             # 非 413 判决：证据随归档保留，只换 result.json 成员；换写超限/
             # 失败时回收 metadata-only（判败语义下可提交性优先于证据）。
+            # #1174 二轮回落位同受下限矩阵覆盖（degrade_ceiling），与 413
+            # 臂、finalize 拒写臂同口径。
             try:
                 embed_result_metadata(
                     self._archive, metadata, max_bytes=self._task.max_archive_bytes
                 )
             except (ResultMetadataOverCeiling, OSError, tarfile.TarError, ValueError):
-                write_metadata_only_archive(self._archive, metadata, self._task.max_archive_bytes)
+                write_metadata_only_archive(self._archive, metadata, degrade_ceiling(self._task))
                 self._archive_recycled = True
         # 评审 P3-2：换写后的归档大小刷新计时器（纯观测面，别让操作者
         # 看着换写前的尺寸排障——同 #755 对抗复审 P3 的旧刷新纪律）。

@@ -12,6 +12,7 @@ roundtrip 见 tests/routes/test_agent_worker_result_metadata_v2_roundtrip.py。
 from __future__ import annotations
 
 import json
+import secrets
 import tarfile
 import time
 from itertools import pairwise
@@ -24,6 +25,7 @@ import requests
 from server.app.agent_broker.result_metadata_reader import read_archived_result_metadata
 from server.app.routes.agent_worker_results import parse_result_metadata
 from shared.code_contract import (
+    MIN_RESULT_ARCHIVE_BYTES,
     RESULT_METADATA_FORMAT_HEADER,
     RESULT_METADATA_FORMAT_V2,
     RESULT_METADATA_MEMBER,
@@ -378,6 +380,41 @@ def test_finalize_rejects_expected_output_named_result_json(tmp_path: Path) -> N
     payload, members = _archive_metadata_and_members(final_archive)
     assert members == [RESULT_METADATA_MEMBER]
     assert payload == final_metadata  # 成员是判败 metadata，不是真产物字节
+
+
+def test_finalize_rejection_recycle_uses_protocol_floor_without_ceiling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1174 二轮 P3-2：finalize 拒写臂的回收位同受下限矩阵覆盖——未下发
+    上限（0 值：旧 Host / #1174 前旧 marker）时判败回收按协议下限 1 KiB
+    裁剪，与 report_policy 两个回收位同口径（修复前传裸 0 跳过裁剪，
+    大 command 判败载荷重报吃 413）。"""
+    from worker.upload.result_manifest import finalize_result_metadata
+
+    work_root = tmp_path / "work"
+    _execution_dir(work_root, "exec-1")
+    task = _task(work_root, command=tuple(secrets.token_hex(32) for _ in range(64)))
+    metadata = {"status": "completed", "exit_code": 0, "command": list(task.command)}
+    archive = work_root / "exec-1" / "result.tar.gz"
+    archive.write_bytes(b"stale body archive")
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise OSError("simulated embed failure")
+
+    monkeypatch.setattr("worker.upload.result_manifest.embed_result_metadata", boom)
+
+    failed, final_archive = finalize_result_metadata(task, metadata, archive)
+
+    assert failed["status"] == "failed"
+    assert "result metadata finalize failed" in failed["error_message"]
+    assert final_archive.stat().st_size <= MIN_RESULT_ARCHIVE_BYTES
+    payload, members = _archive_metadata_and_members(final_archive)
+    assert members == [RESULT_METADATA_MEMBER]
+    # 归档载荷是裁剪副本（command 让位）；返回的 failed metadata 保留原
+    # command（观测锚点，#843 v2 起上报载荷以归档成员为准）。
+    assert payload["status"] == failed["status"]
+    assert payload["error_message"] == failed["error_message"]
+    assert payload["command"] == []  # 观测字段让位（协议下限裁剪）
 
 
 def test_expected_result_json_output_fails_honestly_end_to_end(

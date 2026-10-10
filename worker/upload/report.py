@@ -131,8 +131,11 @@ def report_task(
     else:
         return "aborted"
     if status_code == 204:
-        drop_marker(task)
+        # #1174 二轮 P3-3：收尾形态随 drop_marker 传入（tombstone 记录
+        # delivered/rejected/lost，滞留记录可区分「已交付」与「判决丢弃」）。
+        drop_marker(task, "delivered")
         shutil.rmtree(task.execution_dir, ignore_errors=True)
         return "delivered"
-    drop_marker(task)
-    return "lost" if lost else "rejected"
+    outcome = "lost" if lost else "rejected"
+    drop_marker(task, outcome)
+    return outcome

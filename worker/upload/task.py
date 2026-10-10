@@ -2,8 +2,8 @@
 
 The queue module owns the lanes and delivery; this module owns the task
 record: identity, persisted marker (de)serialization, the direct-upload
-verdict, and the runtime-only delivery state (prepared artifacts, heartbeat
-handles, the #551 stage timer).
+verdict, the degrade-recycle ceiling verdict (#1174), and the runtime-only
+delivery state (prepared artifacts, heartbeat handles, the #551 stage timer).
 """
 
 from __future__ import annotations
@@ -13,7 +13,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from shared.code_contract import MIN_RESULT_ARCHIVE_BYTES
+
 _PENDING_VERSION = 1
+
+
+def degrade_ceiling(task: UploadTask) -> int:
+    """降级回收位的归档上限口径（#1174 矩阵，三个回收位同源）：正值按
+    Host 经 claim 下发的实际值；0（旧 Host / #1174 前旧 marker——未下发的
+    未知）按协议下限 ``MIN_RESULT_ARCHIVE_BYTES``——Host 拒过即证明有
+    上限，本地按协议保证的最小上限裁。语义矩阵见 report_policy 模块
+    docstring。"""
+    return task.max_archive_bytes or MIN_RESULT_ARCHIVE_BYTES
 
 
 class PendingUploadExists(RuntimeError):

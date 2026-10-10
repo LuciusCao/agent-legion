@@ -17,9 +17,9 @@ Durability: every task writes an ``upload_pending.json`` marker into its
 execution dir before entering the queue; the marker is removed only after
 the Host accepts the result. A crashed Worker rescans it on startup and
 re-enters through the bulk lane (artifact stores are content-addressed, so
-re-upload is harmless). Markers that cannot be unlinked after a delivered
-terminal verdict (unwritable execution dir, #1174 F3) are skipped on rescan
-via the state-side tombstone instead of re-reporting forever.
+re-upload is harmless). Markers that cannot be unlinked after the upload's
+final outcome settled (unwritable execution dir, #1174 F3) are skipped on
+rescan via the state-side tombstone instead of re-reporting forever.
 
 Lease ownership: the lease heartbeat keeps beating through the upload
 (per-execution threads before #352; the per-Worker batch registry after). It
@@ -164,9 +164,15 @@ class UploadQueue:
 
         Marker intake goes through ``cleanup.restore_task_from_marker``
         (#1174 F3): unreadable markers are discarded wholesale, and markers
-        whose terminal verdict was already delivered but whose unlink failed
+        whose terminal outcome was already finalized but whose unlink failed
         (unwritable execution dir) are skipped via the state-side tombstone —
         re-reporting them would only replay the Host's idempotent 204/409.
+
+        #1174 二轮 P3-1：单目录隔离——marker 重写（submit 的原子写）在
+        不可写目录上抛 OSError 时跳过该 marker 记日志，本方法不再上抛：
+        restore 跑在 executor 启动路径上（main() 之前无兜底层），裸调用
+        的逃逸 = 退出码 1 = supervisor 退避无限重启（整卷 EROFS 下是启动
+        崩溃循环）。滞留 marker 留给下次启动重试 / 24h stale sweeper。
         """
         restored = 0
         try:
@@ -174,13 +180,24 @@ class UploadQueue:
         except OSError:
             return 0
         for child in children:
-            marker = child / PENDING_FILENAME
-            if not child.is_dir() or not marker.is_file():
+            try:
+                marker = child / PENDING_FILENAME
+                if not child.is_dir() or not marker.is_file():
+                    continue
+                task = restore_task_from_marker(child, work_root)
+                if task is None:
+                    continue
+                self.submit(task)
+            except OSError as exc:
+                # 窄捕获（OSError）：目录探测（is_dir/is_file 的 stat 在缺
+                # x 权限目录上抛 EACCES）与 submit 的 marker 重写（mkstemp/
+                # replace 的 EACCES/EROFS）失败族。吞是对的：submit 已自撤销
+                # handoff 后重抛，这里按目录隔离——一个坏目录不得阻断其余
+                # 恢复，更不得逃出启动路径（supervisor 重启循环）。marker
+                # 原样保留，语义退化为「下次启动再试」，与 tombstone 写失败
+                # 的 fail-open 同族。日志保全：print 记录目录与异常。
+                print(f"upload restore skipped {child}: {exc}", flush=True)
                 continue
-            task = restore_task_from_marker(child, work_root)
-            if task is None:
-                continue
-            self.submit(task)
             restored += 1
         return restored
 
@@ -232,7 +249,9 @@ class UploadQueue:
             outcome = "aborted"
         try:
             if outcome == "lost":
-                drop_marker(task)
+                # #1174 二轮 P3-3：lost 收尾形态随 drop_marker 传入（tombstone
+                # 记录 delivered/rejected/lost）。
+                drop_marker(task, outcome)
         except Exception as exc:
             # #204 broad-except audit: lost 已是终态，marker/目录清理失败不能
             # 卡死 handoff；记录失败并让 stale sweeper / 下一 attempt 收口。

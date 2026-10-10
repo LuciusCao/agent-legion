@@ -11,10 +11,11 @@ delivery_tombstone.py 与 cleanup.drop_marker）：
 
 - marker 可删（常规）：204 / 409 / 判决终态后 marker 即删，restore 不再
   见，零噪声。
-- marker 不可删（EACCES/EROFS 族）：交付已完成、本机无法用 marker 表达
-  「已交付」→ 在 state 侧 incident 目录写 ``upload-delivered.json``
-  tombstone（键 execution_id + lease_id），restore 读到即跳过重投、只做
-  best-effort 目录清理。
+- marker 不可删（EACCES/EROFS 族）：终态收尾已完成、本机无法用 marker 表达
+  「已收尾」→ 在 state 侧 incident 目录写 ``upload-delivered.json``
+  tombstone（键 execution_id + lease_id，另记 outcome：delivered=Host 已
+  收下 / rejected=判决终态未收下 / lost=租约死——三者重投都只会重放幂等
+  应答或同一判决），restore 读到即跳过重投、只做 best-effort 目录清理。
   - 204：重投本会吃 Host 幂等 204（重复提交侧无危害）——跳过同样正确。
   - 409：重投吃确定性 409，无数据风险但重复才是噪声——跳过即归零。
   - tombstone 自身写失败（state 目录也不可写）：退回既有形态（每重启
@@ -66,7 +67,8 @@ def test_drop_marker_unlink_failure_records_tombstone_without_raising(
     tmp_path: Path, evidence_root: Path
 ) -> None:
     """修复前形态：unlink 在不可写目录上抛 OSError 逃出 report 车道（结果
-    已交付却被当 aborted）。修复后不抛——state 侧记 tombstone，返回 False
+    已交付却被当 aborted）。修复后不抛——state 侧记 tombstone（含 outcome：
+    调用点交付形态 delivered / 判决丢弃 rejected / 租约死 lost），返回 False
     （marker 滞留但已被 tombstone 置为 inert）。"""
     work_root = tmp_path / "work"
     _execution_dir(work_root)
@@ -74,7 +76,7 @@ def test_drop_marker_unlink_failure_records_tombstone_without_raising(
     task = _task(work_root)
     os.chmod(task.execution_dir, 0o500)  # unlink EACCES：删 marker 需目录写权
     try:
-        assert drop_marker(task) is False
+        assert drop_marker(task, "delivered") is False
     finally:
         os.chmod(task.execution_dir, 0o700)
 
@@ -83,6 +85,7 @@ def test_drop_marker_unlink_failure_records_tombstone_without_raising(
     record = json.loads(tombstone.read_text(encoding="utf-8"))
     assert record["execution_id"] == "exec-1"
     assert record["lease_id"] == "lease-1"
+    assert record["outcome"] == "delivered"  # 204 已交付：与判决丢弃可区分
     assert (task.execution_dir / PENDING_FILENAME).is_file()  # 滞留（不可删）
 
 
@@ -100,7 +103,7 @@ def test_drop_marker_tombstone_write_failure_degrades_open(
     os.chmod(state_dir, 0o500)
     os.chmod(task.execution_dir, 0o500)
     try:
-        assert drop_marker(task) is False
+        assert drop_marker(task, "rejected") is False
     finally:
         os.chmod(task.execution_dir, 0o700)
         os.chmod(state_dir, 0o700)
@@ -134,7 +137,11 @@ def test_restore_skips_marker_with_delivered_tombstone(
 
     assert len(client.reports) == 1  # 终态已送达 Host（204 提交 / 409 幂等拒绝）
     assert (work_root / "exec-1" / PENDING_FILENAME).is_file()  # marker 删不掉
-    assert (evidence_root / "exec-1__node_a" / "upload-delivered.json").is_file()
+    tombstone = evidence_root / "exec-1__node_a" / "upload-delivered.json"
+    assert tombstone.is_file()
+    record = json.loads(tombstone.read_text(encoding="utf-8"))
+    # outcome 随调用点收尾形态记录：204 已交付 / 409 判决丢弃（可区分）。
+    assert record["outcome"] == ("delivered" if report_status == 204 else "rejected")
 
     client2 = QueueFakeClient(report_status=report_status)
     queue2 = _queue(client2)

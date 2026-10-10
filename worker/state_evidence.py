@@ -50,12 +50,14 @@ state being the more accurate one). Files inside:
   ``listing_failed`` instead).
 - ``incident.json`` — the machine-readable record (identity, exit code,
   the redacted prepare error, which parts were absent/unreadable/failed).
-- ``upload-delivered.json`` — the delivered-terminal tombstone (#1174 F3,
+- ``upload-delivered.json`` — the terminal-outcome tombstone (#1174 F3,
   ``worker/upload/delivery_tombstone.py``): recorded when a pending marker
-  cannot be unlinked after the terminal verdict reached the Host (unwritable
-  execution dir); ``UploadQueue.restore`` reads it to skip re-queueing the
-  stranded marker instead of replaying the Host's idempotent 204/409 on every
-  restart. Same no-TTL manual-cleanup semantics as the stranded archive.
+  cannot be unlinked after the upload's final outcome was settled (unwritable
+  execution dir); the record carries which outcome (``delivered`` /
+  ``rejected`` / ``lost``) completed, and ``UploadQueue.restore`` reads it to
+  skip re-queueing the stranded marker instead of replaying the Host's
+  idempotent 204/409 on every restart. Same no-TTL manual-cleanup semantics
+  as the stranded archive.
 
 Retention: these incidents are rare by construction (an agent must destroy
 its own working tree, or the events write path must fail); there is no TTL

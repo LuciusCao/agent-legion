@@ -404,6 +404,33 @@ def test_degrade_gate_413_recycle_without_ceiling_uses_protocol_floor(tmp_path: 
     assert metadata["command"] == []  # 观测字段先让位（归因可读优先）
 
 
+def test_degrade_gate_rewrite_failure_fallback_uses_protocol_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1174 二轮 P3-2：非 413 判决的换写失败回落位同受下限矩阵覆盖——
+    0 值（旧 Host / #1174 前旧 marker）时回落产物按协议下限 1 KiB 裁剪。
+    修复前回落传裸 0（跳过裁剪）：大 command 判败载荷重报吃 413，闸已置
+    ``_archive_recycled`` 拒绝二次回收 → 终态删 marker 丢结果。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    task = _task(work_root, command=tuple(secrets.token_hex(32) for _ in range(64)))
+    archive = work_root / "exec-1" / "result.tar.gz"
+    write_empty_archive(archive)
+    gate = report_policy.ReportDegradeGate(task, archive)
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise OSError("simulated embed rewrite failure")
+
+    monkeypatch.setattr(report_policy, "embed_result_metadata", boom)
+
+    assert gate.on_rejection(400, "HTTP 400: bad verdict") is True
+
+    assert archive.stat().st_size <= MIN_RESULT_ARCHIVE_BYTES
+    metadata = read_result_metadata(archive)
+    assert metadata["status"] == "failed"
+    assert metadata["command"] == []  # 观测字段让位（协议下限裁剪）
+
+
 def test_metadata_only_archive_keeps_full_error_after_command_trim(tmp_path: Path) -> None:
     """#1174 F2（裁剪档序）：「清空 command 后完整 error 落限」的形态——
     归因全文保留，不先进 2048 档截短。修复前 cap 序第一档先截 error，

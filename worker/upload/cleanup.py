@@ -1,8 +1,8 @@
 """Lease-aware filesystem cleanup for completed or moot upload tasks.
 
 #1174 F3 起本模块同时持有恢复入口的 marker 甄别（``restore_task_from_marker``
-——不可读丢弃 / 终态已交付跳过）与 unlink 失败臂的 tombstone 记录；终态
-tombstone 的状态机与落点见 ``worker/upload/delivery_tombstone.py``。
+——不可读丢弃 / 终态收尾已完成跳过）与 unlink 失败臂的 tombstone 记录；
+终态 tombstone 的状态机与落点见 ``worker/upload/delivery_tombstone.py``。
 """
 
 from __future__ import annotations
@@ -17,8 +17,12 @@ from worker.upload.delivery_tombstone import marker_delivery_finalized, record_u
 from worker.upload.task import UploadTask
 
 
-def drop_marker(task: UploadTask) -> bool:
+def drop_marker(task: UploadTask, outcome: str) -> bool:
     """Remove this lease's marker and owned directory after a final verdict.
+
+    ``outcome`` 是调用点的收尾形态（``delivered`` / ``rejected`` /
+    ``lost``——与 report_task 返回值、车道结局同一词汇），随 tombstone
+    记录：滞留记录上可区分「Host 已收下」与「判决后丢弃 / 租约死」。
 
     The UploadHandoff barrier prevents a new local attempt from touching this
     path until finalization signals ``delivery_done``. Marker lease validation
@@ -27,14 +31,15 @@ def drop_marker(task: UploadTask) -> bool:
     whether the directory itself may be deleted.
 
     #1174 F3：marker unlink 失败（EACCES/EROFS 族——目录无写权，marker 也
-    因此不可改写）不再上抛：调用点（report / lost 收尾）都已在 Host 终态
-    之后，上抛只会把已交付结果当 aborted、滞留 marker 每重启重投（重投
-    重放 Host 幂等 204/409——无数据风险、无限重复是噪声）。降级路径：state
-    侧记 ``upload-delivered.json`` tombstone（restore 读到即跳过重投，状态
-    机见 delivery_tombstone），目录清理仍走既有 rmtree(ignore_errors)——
-    失败即滞留，与滞留归档同一人工清理语义。返回 False 覆盖「marker 仍在
-    盘上」的全部形态：他 lease 的活 marker（新 attempt 所有）、tombstone
-    化的 inert 残留、ownership 守卫否决的目录。
+    因此不可改写）不再上抛：调用点（report / lost 收尾）都已在终态之后，
+    上抛只会把已收尾结果当 aborted、滞留 marker 每重启重投（重投重放
+    Host 幂等 204/409——无数据风险、无限重复是噪声）。降级路径：state
+    侧记 ``upload-delivered.json`` tombstone（含 outcome；restore 读到即
+    跳过重投，状态机见 delivery_tombstone），目录清理仍走既有
+    rmtree(ignore_errors)——失败即滞留，与滞留归档同一人工清理语义。
+    返回 False 覆盖「marker 仍在盘上」的全部形态：他 lease 的活 marker
+    （新 attempt 所有）、tombstone 化的 inert 残留、ownership 守卫否决的
+    目录。
     """
     marker = task.execution_dir / PENDING_FILENAME
     try:
@@ -49,12 +54,12 @@ def drop_marker(task: UploadTask) -> bool:
         marker.unlink(missing_ok=True)
     except OSError as exc:
         # 窄捕获（OSError）：unlink 在不可写目录上的 EACCES/EROFS。降级语义
-        # 见 docstring——终态已交付，收尾失败绝不重放 report 车道。
+        # 见 docstring——终态收尾已完成，收尾失败绝不重放 report 车道。
         print(
             f"pending marker undroppable for {task.execution_id}: {exc}; recording tombstone",
             flush=True,
         )
-        record_undroppable_marker(task, exc)
+        record_undroppable_marker(task, exc, outcome)
     if not discard_owned_dir(task.execution_dir, task.lease_id):
         return False
     shutil.rmtree(task.execution_dir, ignore_errors=True)
@@ -69,10 +74,10 @@ def restore_task_from_marker(child: Path, work_root: Path) -> UploadTask | None:
     - marker 不可读（截断 / 字段畸形 / IO 失败）：rmtree 丢弃该目录——
       marker 经 atomic_write 落盘，读不出即真损坏而非半截写（语义原样
       迁移自 queue.restore 的逐目录遏制臂）。
-    - 终态已交付（tombstone 命中同 execution_id + lease_id）：跳过重投、
-      best-effort 清目录——重投只会重放 Host 幂等应答（204 重复提交 /
-      409 租约拒绝），每重启一轮的重复是恢复噪声；目录不可写时滞留，
-      与滞留归档同一人工清理语义。
+    - 终态收尾已完成（tombstone 命中同 execution_id + lease_id）：跳过
+      重投、best-effort 清目录——重投只会重放 Host 幂等应答（204 重复
+      提交 / 409 租约拒绝），每重启一轮的重复是恢复噪声；目录不可写时
+      滞留，与滞留归档同一人工清理语义。
     """
     marker = child / PENDING_FILENAME
     try:
