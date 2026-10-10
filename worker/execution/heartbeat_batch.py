@@ -6,11 +6,16 @@ tasks alike) and renews them in a single ``POST /api/agent-executions/
 heartbeats``. The heartbeat write load stops scaling with the slot count and
 scales with the machine count instead.
 
-Mixed-fleet compatibility: a Host that predates the batch endpoint answers
-404/405, and this loop permanently degrades to per-execution beats — the
-identical HTTP traffic and semantics older Hosts see today, from the same
-loop (the registry stays authoritative, so prune/quiesce keep working). The
-Host keeps serving the single endpoint to older Workers unchanged.
+Host rollback fallback (not a mixed-fleet mode): a v5 Worker never reaches
+this loop against a pre-v5 Host — the registration handshake
+(``worker/host/client.py``) requires ``host_protocol_version >=
+PROTOCOL_VERSION`` and exits 2 first. The fallback only covers a Host rolled
+back underneath an already-registered Worker: the batch endpoint then
+answers 404/405 and this loop permanently degrades to per-execution beats
+(the registry stays authoritative, so prune/quiesce keep working) until the
+Worker restarts, where its next registration against that pre-v5 Host exits
+2 as well. The Host keeps serving the single endpoint to older Workers
+unchanged. Compatibility matrix: docs/remote-execution-runbook.md §5.
 
 Attempt-identity discipline: every lease-scoped mutation (prune/quiesce/
 resume/set_adopted) matches on the (execution_id, lease_id) pair. A Host
@@ -379,7 +384,7 @@ def _beat_batch(client: Any, registry: BatchHeartbeatRegistry, entries: list[_Le
         chunk = entries[start : start + MAX_BATCH_HEARTBEATS]
         outcome = _beat_batch_chunk(client, registry, chunk)
         if outcome is None:
-            return False  # 404/405: pre-v5 Host — degrade for good.
+            return False  # 404/405: Host rolled back to pre-v5 — degrade for good.
         if not outcome:
             return True  # transient: this tick is over, batch mode stays on.
     return True
@@ -407,8 +412,10 @@ def _beat_batch_chunk(
         print(f"batch heartbeat error ({len(entries)} leases): {exc}", flush=True)
         return False
     if outcome is None:
-        # 404/405: pre-v5 Host — degrade to per-execution beats for the life
-        # of the process. Old Hosts see exactly the old Worker's traffic.
+        # 404/405: Host rolled back to pre-v5 underneath this registered
+        # Worker — degrade to per-execution beats for the life of the
+        # process (the next registration exits 2). Old Hosts see exactly the
+        # old Worker's traffic.
         print(
             "Host lacks the batch heartbeat endpoint; using per-execution heartbeats",
             flush=True,

@@ -1,4 +1,4 @@
-"""Agent node profile dual read (#933, #440 P2): node vs agent_definition source."""
+"""Agent node profile sources (#933, EXEC-AGENT-PROFILE-001): node vs legacy agent_definition."""
 
 from __future__ import annotations
 
