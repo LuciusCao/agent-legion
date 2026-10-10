@@ -9,11 +9,8 @@ from __future__ import annotations
 
 import os
 import shutil
-import signal
 import stat
 import subprocess
-import time
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -24,6 +21,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "init-worktree.sh"
 # init-worktree.sh 的 S3 建桶步骤委托给该脚本，合成布局里要一并复制。
 ENSURE_S3_SCRIPT = ROOT / "scripts" / "ensure-s3-bucket.py"
+# .uv-cache 预暖协议实现（issue #1186）：init-worktree.sh 以系统 python3
+# 调用，合成布局里一并复制后走真实 helper（不再 stub cp/mv 协议细节）。
+PREWARM_SCRIPT = ROOT / "scripts" / "uv_cache_prewarm.py"
 # 派生名与撞名检测的共享库（#950），init-worktree.sh source 它。
 NAMES_LIB = ROOT / "scripts" / "worktree-names-lib.sh"
 
@@ -76,6 +76,7 @@ def _setup(tmp_path: Path, script_rel: str, git_stub: str = _GIT_STUB) -> tuple[
     script_path.parent.mkdir(parents=True)
     shutil.copy(SCRIPT, script_path)
     shutil.copy(ENSURE_S3_SCRIPT, script_path.parent / ENSURE_S3_SCRIPT.name)
+    shutil.copy(PREWARM_SCRIPT, script_path.parent / PREWARM_SCRIPT.name)
     shutil.copy(NAMES_LIB, script_path.parent / NAMES_LIB.name)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -511,8 +512,8 @@ def test_uv_cache_prewarm_failure_falls_back_to_cold_start(tmp_path: Path) -> No
     assert "预暖克隆失败" in result.stderr
     worktree = main / ".worktrees/flat"
     assert not (worktree / ".uv-cache").exists()
-    # 半成品临时目录（进程私有名）必须清掉。
-    assert not list(worktree.glob(".uv-cache.prewarm.*"))
+    # 半成品中转目录必须清掉（helper 的 try/finally + 入口自洁）。
+    assert not (worktree / ".uv-cache.prewarm-incoming").exists()
     # init 其余步骤照常完成。
     assert (worktree / "deploy/secrets/vault_master_key").read_text().strip() == (
         "stub-vault-master-key"
@@ -521,8 +522,9 @@ def test_uv_cache_prewarm_failure_falls_back_to_cold_start(tmp_path: Path) -> No
 
 _CP_STUB_CONCURRENT = """#!/usr/bin/env bash
 # 模拟并发兄弟在克隆窗口内完成预暖：带选项调用（预暖克隆）先完成克隆
-# （落进程私有临时目录），同时抢先落位 .uv-cache——后到者必须丢弃自己的
-# 克隆走跳过路径，不得覆盖/嵌套/删除先到者成果。无选项调用委托真实 cp。
+# （落固定中转目录），同时抢先落位 .uv-cache——后到者的 os.rename 原子
+# 失败（EEXIST/ENOTEMPTY），必须丢弃自己的克隆走跳过路径，不得覆盖/
+# 嵌套/删除先到者成果。无选项调用委托真实 cp。
 if [[ "${1:-}" == -* ]]; then
     target="${@: -1}"
     mkdir -p "$target/cloned-entry"
@@ -547,12 +549,12 @@ def test_uv_cache_prewarm_concurrent_init_discards_own_clone(tmp_path: Path) -> 
     assert result.returncode == 0, result.stderr
     assert "并发" in result.stderr
     worktree = main / ".worktrees/flat"
-    # 先到者落位的缓存原样保留：未被 rm -rf 误删、未被克隆内容嵌套覆盖。
+    # 先到者落位的缓存原样保留：未被 rm 误删、未被克隆内容嵌套覆盖。
     assert (worktree / ".uv-cache/sibling-entry").is_dir()
     assert not (worktree / ".uv-cache/cloned-entry").exists()
-    assert not (worktree / ".uv-cache/.uv-cache").exists()
-    # 自己的克隆（临时目录）已丢弃。
-    assert not list(worktree.glob(".uv-cache.prewarm.*"))
+    assert not (worktree / ".uv-cache/.uv-cache.prewarm-incoming").exists()
+    # 自己的克隆（中转目录）已丢弃。
+    assert not (worktree / ".uv-cache.prewarm-incoming").exists()
     # init 其余步骤照常完成。
     assert (worktree / "deploy/secrets/vault_master_key").exists()
 
@@ -578,9 +580,9 @@ def test_uv_cache_prewarm_dereferences_symlink_base(tmp_path: Path) -> None:
     assert (cloned / "wheels-v6/marker").read_text() == "cached-wheel\n"
 
 
-def test_uv_cache_prewarm_yields_to_held_landing_lock(tmp_path: Path) -> None:
-    """落位锁被并发 init 持有（holder 存活）：未持锁者丢弃克隆走跳过路径
-    ——不落地、不残留临时目录、不动他人活锁（PR #1182 codex P2）。"""
+def test_uv_cache_prewarm_staging_leftover_is_self_cleaned_on_rerun(tmp_path: Path) -> None:
+    """中断（含 SIGKILL）残留的中转目录由 helper 入口自洁回收：预置垃圾
+    的 .uv-cache.prewarm-incoming 在重跑 init 后消失，预暖照常落位。"""
     main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
     develop = main / ".worktrees/develop"
     develop.mkdir(parents=True)
@@ -589,194 +591,13 @@ def test_uv_cache_prewarm_yields_to_held_landing_lock(tmp_path: Path) -> None:
     marker.parent.mkdir(parents=True)
     marker.write_text("cached-wheel\n")
     worktree = main / ".worktrees/flat"
-    lock = worktree / ".uv-cache.prewarm.lock"
-    lock.mkdir(parents=True)
-    (lock / "pid").write_text(f"{os.getpid()}\n")  # 本测试进程存活，锁视为活锁
+    garbage = worktree / ".uv-cache.prewarm-incoming/leftover"
+    garbage.mkdir(parents=True)
+    (garbage / "junk").write_text("junk\n")
 
     result = _run(worktree / "scripts/init-worktree.sh", bin_dir)
 
     assert result.returncode == 0, result.stderr
-    assert "正由并发 init 预暖" in result.stderr
-    # 未持锁者不落地：.uv-cache 不存在；临时克隆已丢弃；他人活锁原样保留。
-    assert not (worktree / ".uv-cache").exists()
-    assert [p.name for p in worktree.glob(".uv-cache.prewarm.*")] == [lock.name]
-    assert (lock / "pid").read_text().strip() == str(os.getpid())
-    # init 其余步骤照常完成。
-    assert (worktree / "deploy/secrets/vault_master_key").exists()
-
-
-_MV_STUB_SIBLING_LANDS_IN_WINDOW = """#!/usr/bin/env bash
-# 模拟锁外 actor（同 worktree 的并发 uv 调用不拿落位锁）在「重判通过 →
-# mv」之间创建 .uv-cache：注入落位动作后委托真实 mv——BSD mv 对「目标是
-# 已存在目录」不报错，把临时目录挪成 .uv-cache/.uv-cache.prewarm.<pid>
-# 嵌套产物，被测脚本必须检出嵌套、回收克隆、保留先到者缓存。
-if [[ $# -eq 2 && "${1:-}" != -* ]]; then
-    mkdir -p "$2/sibling-entry"
-fi
-exec /bin/mv "$@"
-"""
-
-
-def test_uv_cache_prewarm_detects_nesting_when_sibling_lands_in_window(
-    tmp_path: Path,
-) -> None:
-    """重判通过 → mv 之间 .uv-cache 被锁外 actor 创建：检出 BSD mv 嵌套，
-    回收嵌套克隆走跳过路径，先到者缓存原样（PR #1182 codex P2）。"""
-    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
-    develop = main / ".worktrees/develop"
-    develop.mkdir(parents=True)
-    (develop / ".env").write_text("# stub env\n")
-    (develop / ".uv-cache").mkdir()
-    _write_stub(bin_dir / "mv", _MV_STUB_SIBLING_LANDS_IN_WINDOW)
-
-    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
-
-    assert result.returncode == 0, result.stderr
-    assert "落位期间被并发创建" in result.stderr
-    worktree = main / ".worktrees/flat"
-    # 先到者（锁外 actor）的缓存原样保留，未被克隆内容覆盖。
-    assert (worktree / ".uv-cache/sibling-entry").is_dir()
-    # 无嵌套产物：.uv-cache/.uv-cache.prewarm.* 已被回收。
-    assert not list(worktree.glob(".uv-cache/.uv-cache.prewarm.*"))
-    # 根目录无临时目录与锁残留（成功释放）。
-    assert not list(worktree.glob(".uv-cache.prewarm.*"))
-    # init 其余步骤照常完成。
-    assert (worktree / "deploy/secrets/vault_master_key").exists()
-
-
-def _popen(script_path: Path, bin_dir: Path) -> subprocess.Popen[str]:
-    """后台启动被测脚本：独立进程组，killpg 可模拟 Ctrl-C 到达前台进程组。"""
-    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": os.environ.get("HOME", "")}
-    return subprocess.Popen(
-        ["bash", str(script_path)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-        text=True,
-        start_new_session=True,
-    )
-
-
-def _wait_for(predicate: Callable[[], bool], timeout: float = 10.0) -> bool:
-    """等信号非等时长：轮询条件成立或超时。"""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.05)
-    return False
-
-
-def _sigterm(proc: subprocess.Popen[str]) -> None:
-    """SIGTERM 整个进程组并收敛；未被 trap 放行的异常路径用 SIGKILL 兜底。"""
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-        proc.communicate(timeout=10)
-    finally:
-        if proc.poll() is None:
-            os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
-
-
-_CP_STUB_SLOW = """#!/usr/bin/env bash
-# 克隆 stub：带选项调用造出临时克隆后长睡（给测试发送信号留窗口）；
-# 无选项调用（.env 复制）委托真实 cp。
-if [[ "${1:-}" == -* ]]; then
-    mkdir -p "${@: -1}/cloned-entry"
-    exec sleep 30
-fi
-exec /bin/cp "$@"
-"""
-
-_CP_STUB_FAST_CLONE = """#!/usr/bin/env bash
-# 克隆 stub：带选项调用造出临时克隆（秒回）；无选项调用委托真实 cp。
-if [[ "${1:-}" == -* ]]; then
-    mkdir -p "${@: -1}/cloned-entry"
-    exit 0
-fi
-exec /bin/cp "$@"
-"""
-
-_MV_STUB_SLOW = """#!/usr/bin/env bash
-# 落位 stub：长睡——被测脚本此时持锁等待 mv 返回（给测试发送信号留窗口）。
-exec sleep 30
-"""
-
-
-def test_uv_cache_prewarm_sigterm_cleans_own_temp_and_held_lock(tmp_path: Path) -> None:
-    """持锁落位中收到 SIGTERM：EXIT trap 清本进程临时目录与自持锁。"""
-    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
-    develop = main / ".worktrees/develop"
-    develop.mkdir(parents=True)
-    (develop / ".env").write_text("# stub env\n")
-    (develop / ".uv-cache").mkdir()
-    _write_stub(bin_dir / "cp", _CP_STUB_FAST_CLONE)
-    _write_stub(bin_dir / "mv", _MV_STUB_SLOW)
-    worktree = main / ".worktrees/flat"
-    lock_pid = worktree / ".uv-cache.prewarm.lock/pid"
-
-    proc = _popen(worktree / "scripts/init-worktree.sh", bin_dir)
-    # 等信号非等时长：确认持锁（pid 文件写入）后才发 SIGTERM。
-    assert _wait_for(lock_pid.exists), "脚本未在预算内持有落位锁"
-    _sigterm(proc)
-
-    assert proc.returncode != 0
-    # EXIT trap：本进程临时目录（pid 标记）与自持锁都已清。
-    assert not list(worktree.glob(".uv-cache.prewarm.[0-9]*"))
-    assert not (worktree / ".uv-cache.prewarm.lock").exists()
-
-
-def test_uv_cache_prewarm_sigterm_preserves_foreign_lock(tmp_path: Path) -> None:
-    """克隆进行中收到 SIGTERM 且锁被他人持有：trap 只清本进程临时目录，
-    他人活锁原样保留（LOCK_HELD 未置位——误删会破坏互斥协议）。"""
-    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
-    develop = main / ".worktrees/develop"
-    develop.mkdir(parents=True)
-    (develop / ".env").write_text("# stub env\n")
-    (develop / ".uv-cache").mkdir()
-    _write_stub(bin_dir / "cp", _CP_STUB_SLOW)
-    worktree = main / ".worktrees/flat"
-    foreign_lock = worktree / ".uv-cache.prewarm.lock"
-    foreign_lock.mkdir(parents=True)
-    (foreign_lock / "pid").write_text(f"{os.getpid()}\n")  # 本测试进程存活
-
-    proc = _popen(worktree / "scripts/init-worktree.sh", bin_dir)
-    assert _wait_for(lambda: list(worktree.glob(".uv-cache.prewarm.[0-9]*"))), (
-        "脚本未在预算内开始克隆"
-    )
-    _sigterm(proc)
-
-    assert proc.returncode != 0
-    assert not list(worktree.glob(".uv-cache.prewarm.[0-9]*"))
-    assert (foreign_lock / "pid").read_text().strip() == str(os.getpid())
-
-
-def test_uv_cache_prewarm_sweeps_dead_pid_leftovers(tmp_path: Path) -> None:
-    """SIGKILL 兜底清扫：只清「纯数字 pid 且已死」的临时目录；活 pid 目录
-    与非数字后缀（锁目录形态）一律不动。"""
-    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
-    develop = main / ".worktrees/develop"
-    develop.mkdir(parents=True)
-    (develop / ".env").write_text("# stub env\n")
-    (develop / ".uv-cache").mkdir()
-    worktree = main / ".worktrees/flat"
-    # 「确实已退出的 pid」现场制造：spawn 子进程并 wait 回收——reap 干净后
-    # 无 zombie，kill -0 对该 pid 必失败（不硬编码数值：pid_max 平台相关，
-    # Linux 常达 4194304，硬编码值可能恰好撞上活进程）。
-    with subprocess.Popen(["true"]) as proc:
-        dead_pid = proc.pid
-        proc.wait()
-    dead = worktree / f".uv-cache.prewarm.{dead_pid}"
-    dead.mkdir()
-    alive = worktree / f".uv-cache.prewarm.{os.getpid()}"
-    alive.mkdir()
-    named = worktree / ".uv-cache.prewarm.notapid"
-    named.mkdir()
-
-    result = _run(worktree / "scripts/init-worktree.sh", bin_dir)
-
-    assert result.returncode == 0, result.stderr
-    assert "已预暖 .uv-cache" in result.stdout  # 清扫不影响正常预暖落位
-    assert not dead.exists()
-    assert alive.is_dir()
-    assert named.is_dir()
+    assert "已预暖 .uv-cache" in result.stdout
+    assert not (worktree / ".uv-cache.prewarm-incoming").exists()
+    assert (worktree / ".uv-cache/wheels-v6/marker").read_text() == "cached-wheel\n"

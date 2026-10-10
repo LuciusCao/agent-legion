@@ -4,8 +4,9 @@
 #   1. 从基准 worktree 复制 .env（若本 worktree 缺失；无法复制则 fail-fast——
 #      缺 .env 会让后端回落共享默认库/prod）
 #   2. 把 AGENT_LEGION_DATABASE_URL 指向按 worktree 名派生的专属 Postgres 库并尝试建库
-#   2.2 预暖 .uv-cache：从基准 worktree 克隆 uv 缓存（clonefile/reflink，
-#       失败仅提示并回退冷启动），让首次 uv run 免于从零拉依赖树
+#   2.2 预暖 .uv-cache：克隆基准 worktree 的 uv 缓存（协议实现在
+#       scripts/uv_cache_prewarm.py，失败仅提示并回退冷启动），
+#       让首次 uv run 免于从零拉依赖树
 #   2.5 按 worktree 名派生 AGENT_LEGION_S3_BUCKET 写入 .env，endpoint 可达时
 #       建 bucket 并配置浏览器直传所需的前端 dev origin CORS
 #   3. 生成缺失的 deploy/secrets（vault_master_key；worker 全局注册 token 已退役，见 issue #35）
@@ -117,117 +118,19 @@ else
 fi
 
 # 2.2 预暖 per-worktree .uv-cache：下方第一次 `uv run`（建 bucket / 生成
-#     vault key）在空 cache 上要从零拉整棵依赖树（分钟级，慢网更甚）。uv
-#     cache 内容寻址、append-only、路径无关，克隆基准 worktree 的即可让
-#     后续 uv 调用命中已缓存依赖：APFS 走 clonefile、Linux 走
-#     --reflink=auto（写时复制，秒级零额外磁盘；不支持的卷上 cp 内部各自
-#     回退普通复制，仍是磁盘速度、远快于网络）。基准无 cache、目标已有
-#     cache（幂等重跑）静默跳过；克隆/落位失败只提示不 fail-init（冷启动
-#     仍是合法路径），半成品临时目录必须清掉，避免坏条目污染新 cache。
-if [[ ! -d .uv-cache && -n "$BASE" && -d "$BASE/.uv-cache" ]]; then
-    # symlink 基准解引用：cp 一个 symlink 会在新 worktree 复制出指向共享
-    # 目标的 symlink——「独立」cache 实为共享，目标随被清理的 worktree
-    # 消失时还留悬空链接。解引用后克隆实体目录（内容寻址、路径无关，
-    # 克隆本身无害），保住 per-worktree 隔离且不浪费现成的缓存；解引用
-    # 失败则跳过预暖（warn，不 fail-init）。
-    CACHE_SRC="$BASE/.uv-cache"
-    if [[ -L "$CACHE_SRC" ]]; then
-        CACHE_SRC="$(cd "$CACHE_SRC" 2>/dev/null && pwd -P || true)"
-    fi
-    if [[ -z "$CACHE_SRC" ]]; then
-        echo "提示: 基准 .uv-cache 为 symlink 且解引用失败，跳过预暖（首次 uv 调用将冷启动拉取依赖）" >&2
+#     vault key）在空 cache 上要从零拉整棵依赖树（分钟级，慢网更甚）。克隆
+#     基准 worktree 的 uv cache（内容寻址、append-only、路径无关）让后续 uv
+#     调用命中已缓存依赖。协议实现在 scripts/uv_cache_prewarm.py（纯
+#     stdlib：固定中转目录入口自洁 + clonefile/reflink 克隆 + os.rename
+#     原子 no-replace 落位），deliberately 用系统 python3 而非 uv 调用——
+#     uv run 会先同步项目环境并就地创建非空 cache，预暖永不生效（冷启动
+#     悖论，实测见脚本 docstring）。基准无 cache、目标已有 cache（幂等重
+#     跑）静默跳过；任何失败只提示不 fail-init（冷启动仍是合法路径）。
+if [[ -n "$BASE" ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+        python3 scripts/uv_cache_prewarm.py "$BASE" || true
     else
-        if [[ "$(uname)" == "Darwin" ]]; then
-            CLONE_FLAGS=(-Rc)
-        else
-            CLONE_FLAGS=(-R --reflink=auto)
-        fi
-        # 落位段互斥（PR #1182 codex P2）：重判与 mv 之间仍有窗口——两个
-        # init 都观察到 .uv-cache 不存在后先后 mv，BSD mv 对「目标是已存在
-        # 目录」不报错，而把后到者的临时目录挪进
-        # .uv-cache/.uv-cache.prewarm.<pid>，留下隐藏的完整重复缓存。
-        # mkdir 原子（目标已存在即失败）作互斥锁，只有持锁进程执行
-        # 「重判 + mv + 释放锁」，未持锁者丢弃克隆走跳过路径。锁目录在
-        # repo 根（不进 .uv-cache，不撞 uv bucket 命名），名字匹配
-        # .gitignore 的 .uv-cache.prewarm.*。残锁处理：锁内记录 holder
-        # pid，竞争者仅在 pid 文件非空且 kill -0 判死时才回收重试一次
-        # （pid 缺失/为空/读不出一律视为存活走丢弃——安全方向），避免
-        # 持锁进程被 SIGKILL 后预暖被残锁永久静默跳过。
-        TMP_CACHE=".uv-cache.prewarm.$$"
-        LOCK_DIR=".uv-cache.prewarm.lock"
-        # SIGKILL 兜底清扫：EXIT trap 覆盖不到 SIGKILL，被杀进程的临时目录
-        # 会残留（.gitignore 隐藏、可能数 GB 死重）。只清「名字后缀为纯数字
-        # pid 且该 pid 已死」的目录——活进程（含并发兄弟）与非数字后缀
-        # （锁目录 .uv-cache.prewarm.lock）一律不动；pid 复用只会让清扫
-        # 保守跳过（安全方向：最坏是保留死重，绝不误删活跃数据）。
-        for STALE in .uv-cache.prewarm.*; do
-            [[ -d "$STALE" ]] || continue
-            STALE_PID="${STALE##*.uv-cache.prewarm.}"
-            case "$STALE_PID" in
-                *[!0-9]* | "") continue ;;
-            esac
-            if ! kill -0 "$STALE_PID" 2>/dev/null; then
-                rm -rf "$STALE" || true
-            fi
-        done
-        # 区段级 EXIT trap（codex P2 第二轮）：克隆进行中或持锁落位前收到
-        # Ctrl-C/SIGTERM 时 bash 退出前会执行 EXIT trap（实证：非交互 bash
-        # 等待前台子进程时被 SIGTERM 仍跑 trap）——清理本进程临时目录
-        # （pid 标记，总是可清）与锁（仅 LOCK_HELD 置位即本进程持有时才
-        # 可清，误删他进程持有的锁会破坏互斥）。区段正常走完即 trap - EXIT
-        # 解除；本脚本无其他 EXIT trap（已 grep 确认），无需保存/恢复。
-        LOCK_HELD=""
-        prewarm_release_lock() {
-            if [[ -n "$LOCK_HELD" ]]; then
-                rm -rf "$LOCK_DIR" || true
-                LOCK_HELD=""
-            fi
-        }
-        prewarm_cleanup() {
-            rm -rf "$TMP_CACHE" || true
-            prewarm_release_lock
-        }
-        trap 'prewarm_cleanup' EXIT
-        if cp "${CLONE_FLAGS[@]}" "$CACHE_SRC" "$TMP_CACHE"; then
-            if mkdir "$LOCK_DIR" 2>/dev/null; then
-                echo $$ > "$LOCK_DIR/pid" || true
-                LOCK_HELD=1
-            elif [[ -s "$LOCK_DIR/pid" ]] && ! kill -0 "$(cat "$LOCK_DIR/pid")" 2>/dev/null; then
-                rm -rf "$LOCK_DIR" || true
-                if mkdir "$LOCK_DIR" 2>/dev/null; then
-                    echo $$ > "$LOCK_DIR/pid" || true
-                    LOCK_HELD=1
-                fi
-            fi
-            if [[ -z "$LOCK_HELD" ]]; then
-                prewarm_cleanup
-                echo "提示: .uv-cache 正由并发 init 预暖，丢弃重复克隆" >&2
-            elif [[ -d .uv-cache ]]; then
-                prewarm_cleanup
-                echo "提示: .uv-cache 已由并发 init 预暖，丢弃重复克隆" >&2
-            elif mv "$TMP_CACHE" .uv-cache; then
-                if [[ -e ".uv-cache/$TMP_CACHE" ]]; then
-                    # 锁外 actor（同 worktree 的并发 uv 调用不拿本锁）在
-                    # 重判与 mv 之间创建了 .uv-cache：BSD mv 已把临时目录
-                    # 挪进去——回收嵌套克隆，对方 cache 原样保留，走跳过。
-                    rm -rf ".uv-cache/$TMP_CACHE" || true
-                    prewarm_release_lock
-                    echo "提示: .uv-cache 在预暖落位期间被并发创建，丢弃重复克隆" >&2
-                else
-                    prewarm_release_lock
-                    echo "已预暖 .uv-cache <- ${BASE}（后续 uv 调用将命中已缓存依赖）"
-                fi
-            else
-                prewarm_cleanup
-                echo "提示: .uv-cache 预暖落位失败，已跳过——首次 uv 调用将冷启动拉取依赖（正常路径，仅较慢）" >&2
-            fi
-        else
-            prewarm_cleanup
-            echo "提示: .uv-cache 预暖克隆失败，已跳过——首次 uv 调用将冷启动拉取依赖（正常路径，仅较慢）" >&2
-        fi
-        # 区段正常走完：临时目录已落位/清理、锁已释放，解除 trap（此后
-        # 触发也是无害 no-op，但本区段已无可清理状态）。
-        trap - EXIT
+        echo "提示: 未找到 python3，跳过 .uv-cache 预暖（首次 uv 调用将冷启动拉取依赖）" >&2
     fi
 fi
 
