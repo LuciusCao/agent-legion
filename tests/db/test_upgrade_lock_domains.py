@@ -20,9 +20,11 @@ join(timeout=30) 后断言线程已死防假绿。
 4. P2-B 写→读：写侧持 skill-lock 锁且写入未提交（in-flight relock），
    get_lock_locked（plan 阶段读法）被阻塞至写提交并读到新值。
 
-xdist 兼容：同步走 pg_waits 的 holder-pid 探针（固定全域键场景）/
-pg_locks 键观测（键内嵌唯一 workspace id 场景）+ threading.Event +
-join 超时；每案 workspace id 独立，TRUNCATE 隔离照常。
+xdist 兼容：同步走 pg_waits 探针（固定全域键场景用双端
+waiter×holder 钉死——同键他 worker 等待者也被 holder 阻塞，单端会
+提前返回；键内嵌唯一 workspace id 场景用 pg_locks 键观测）+
+threading.Event + join 超时；每案 workspace id 独立，TRUNCATE 隔离
+照常。
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ import json
 import threading
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from typing import Any
 from urllib.parse import quote
 
@@ -38,6 +41,7 @@ import psycopg
 
 from server.app.db.connection import connect_database
 from server.app.jobs import JobQueries
+from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.jobs.queries.global_settings import (
     acquire_skill_lock_domain_lock,
 )
@@ -49,7 +53,7 @@ from server.app.jobs.queries.workflow_revision_projection import (
 )
 from server.app.services.skill_lock_store import SkillLockStore
 from server.app.skills.config import SkillsLock
-from tests.helpers.pg_waits import backend_pid, wait_until_blocked_by
+from tests.helpers.pg_waits import backend_pid, wait_until_waiter_blocked_by
 from tests.postgres_support import BASE_DATABASE_URL, TEST_SCHEMA
 
 # 与 test_execution_generation_races.py 同款纪律：50ms 让重引入的环在毫秒级
@@ -230,7 +234,7 @@ def test_guard_reread_waits_for_inflight_publish_and_sees_new_revision(job_db) -
 # ---------------------------------------------------------------------------
 
 
-def test_skill_lock_write_blocks_behind_guard_lock(job_db) -> None:
+def test_skill_lock_write_blocks_behind_guard_lock(job_db, monkeypatch) -> None:
     """钉住「relock 在 guard 重验的 skill-lock 锁下串行」（#759 P2-B）：A 持
     skill-lock 全域锁（模拟 guard 重验期间），B 的 SkillLockStore.put_lock
     必须阻塞至 A 提交；guard 提交后的 relock 对后续读可见（语义正确：
@@ -240,17 +244,45 @@ def test_skill_lock_write_blocks_behind_guard_lock(job_db) -> None:
     等待（探针的 thread= 早失败：写线程未阻塞即完成）——本用例变红。
     """
     lock = SkillsLock.model_validate({"skills": {"g/s": {"repo": "", "refs": {"v1": _COMMIT_V2}}}})
+    # waiter pid 接缝：put_lock 的连接埋在 KV mixin 的 write() 里，无法直接
+    # 回传——对 ConnectionQueriesMixin.write 做命名空间 spy（本仓库模块属性
+    # 替换先例），spy 窗口内 mixin 的 write 只被 B 线程的 put_lock 触发
+    # （主线程的 conn_a 走裸 connect_database，不经 mixin），被测写路径
+    # put_lock 原样保留。
+    waiter_pid: list[int] = []
+    waiter_ready = threading.Event()
+    real_write = ConnectionQueriesMixin.write
+
+    @contextmanager
+    def write_reporting(self):  # type: ignore[no-untyped-def]
+        with real_write(self) as conn:
+            # pid 回传握手（先例 test_sharding_concurrency.py）：先 append
+            # 后 set，主线程拿到的是即将阻塞在锁上的那个连接的 pid。
+            waiter_pid.append(backend_pid(conn))
+            waiter_ready.set()
+            yield conn
+
+    monkeypatch.setattr(ConnectionQueriesMixin, "write", write_reporting)
+
     conn_a = connect_database(TIMED_DATABASE_URL)
+    thread: threading.Thread | None = None
     try:
         acquire_skill_lock_domain_lock(conn_a)
         thread, outcome = _start(lambda: SkillLockStore(TIMED_DATABASE_URL).put_lock(lock))
-        # 钉 holder 的 backend pid 而非固定键的任意 waiter：
-        # SKILL_LOCK_ADVISORY_SCOPE 全域共享，worksteal 可把本案与案 4 分到
-        # 不同 worker 并发执行，键过滤探针会互相误命中（#1211 C-3）。
-        wait_until_blocked_by(backend_pid(conn_a), thread=thread)
+        assert waiter_ready.wait(timeout=10), "写线程未拿到连接"
+        # 双端钉死（#1211 C-3 / PR #1224 codex P2）：SKILL_LOCK_ADVISORY_SCOPE
+        # 全域共享且不被 xdist schema 隔离——同键他 worker 的等待者也被本
+        # holder 阻塞，单端「任意被 holder 阻塞者」探针会在目标 waiter 到达
+        # 锁点前提前返回；必须钉「目标 waiter pid 的阻塞列表含 holder」。
+        wait_until_waiter_blocked_by(waiter_pid[0], backend_pid(conn_a), thread=thread)
         conn_a.commit()
     finally:
         conn_a.close()
+        # 同权回收（对齐 claim_node_limit_remote 的同形修复）：holder 关闭
+        # 即释放全域锁，写线程解阻后必须有人 join，否则其异步提交撞下一
+        # 测试的 TRUNCATE 归因。
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=30)
     _join(thread)
 
     assert outcome.get("error") is None
@@ -264,7 +296,7 @@ def test_skill_lock_write_blocks_behind_guard_lock(job_db) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_locked_read_waits_for_inflight_write_and_sees_new_lock(job_db) -> None:
+def test_locked_read_waits_for_inflight_write_and_sees_new_lock(job_db, monkeypatch) -> None:
     """钉住「plan 阶段锁内读不旧于并发 relock」（#759 P2-B）：B 持
     skill-lock 锁且写入未提交（in-flight relock），A 的 get_lock_locked
     必须阻塞至 B 提交并读到新值——upgrade plan 不会基于将被取代的旧锁
@@ -303,10 +335,39 @@ def test_locked_read_waits_for_inflight_write_and_sees_new_lock(job_db) -> None:
 
     thread_b, outcome_b = _start(_relock_slow)
     assert written.wait(timeout=10), "relock thread never reached the write"
-    thread_a, outcome_a = _start(lambda: SkillLockStore(TIMED_DATABASE_URL).get_lock_locked())
-    wait_until_blocked_by(holder_pid[0], thread=thread_a)
-    release.set()
-    _join(thread_a)
+    # waiter 侧同一接缝：get_lock_locked 的连接埋在 KV mixin 的 connect()。
+    # spy 在 holder 就位后才安装，窗口内 mixin 的 connect 只被 A 线程的
+    # get_lock_locked 触发（holder 走裸 connect_database，不经 mixin）。
+    waiter_pid: list[int] = []
+    waiter_ready = threading.Event()
+    real_connect = ConnectionQueriesMixin.connect
+
+    @contextmanager
+    def connect_reporting(self):  # type: ignore[no-untyped-def]
+        with real_connect(self) as conn:
+            waiter_pid.append(backend_pid(conn))
+            waiter_ready.set()
+            yield conn
+
+    monkeypatch.setattr(ConnectionQueriesMixin, "connect", connect_reporting)
+    thread_a: threading.Thread | None = None
+    outcome_a: dict[str, Any] = {}
+    try:
+        thread_a, outcome_a = _start(lambda: SkillLockStore(TIMED_DATABASE_URL).get_lock_locked())
+        assert waiter_ready.wait(timeout=10), "读线程未拿到连接"
+        # 双端钉死（同案 3 注释，#1211 C-3 / PR #1224 codex P2）。
+        wait_until_waiter_blocked_by(waiter_pid[0], holder_pid[0], thread=thread_a)
+        release.set()
+        _join(thread_a)
+    finally:
+        # 三不变量（#1205）：release 必达——探针 thread= 早失败若跳过它，
+        # _relock_slow 会持锁空等 10s 撞 fixture teardown；两个线程同权
+        # 回收；清理不抛新异常、不掩盖在飞的原失败。
+        release.set()
+        if thread_a is not None and thread_a.is_alive():
+            thread_a.join(timeout=30)
+        if thread_b.is_alive():
+            thread_b.join(timeout=30)
     _join(thread_b)
 
     assert outcome_a.get("error") is None

@@ -63,7 +63,7 @@ from server.app.executors.models import CODE_EXECUTOR_ID, ExecutionResult, Lease
 from server.app.jobs.node_limits import replace_workspace_node_limits
 from shared.protocol import PROTOCOL_VERSION
 from tests.helpers.agent_worker_api import seed_request
-from tests.helpers.pg_waits import backend_pid, wait_until_blocked_by
+from tests.helpers.pg_waits import backend_pid, wait_until_waiter_blocked_by
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -377,8 +377,17 @@ def test_first_config_insert_mid_claim_skips_unlocked_count(job_db, monkeypatch)
     assert _active_node_lease_count(job_db, workspace_id, node_key) == 1
 
 
-def _write_limit_rows(workspace_id: str, node_key: str) -> None:
+def _write_limit_rows(
+    workspace_id: str,
+    node_key: str,
+    waiter_pid: list[int],
+    waiter_ready: threading.Event,
+) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
+        # pid 回传握手（先例 test_sharding_concurrency.py）：先 append 后
+        # set，主线程拿到的一定是即将阻塞在锁上的那个连接的 pid。
+        waiter_pid.append(backend_pid(conn))
+        waiter_ready.set()
         replace_workspace_node_limits(
             conn, workspace_id, [{"node_key": node_key, "concurrency_limit": 1}]
         )
@@ -396,11 +405,17 @@ def test_node_limit_config_write_takes_code_pool_lock_first(job_db) -> None:
     thread: threading.Thread | None = None
     try:
         holder.execute("select pg_advisory_xact_lock(hashtext('code-pool'))")
-        thread, outcome = _start(lambda: _write_limit_rows(workspace_id, node_key))
-        # 钉 holder 的 backend pid（pg_blocking_pids）而非「该 advisory 键的
-        # 任意 waiter」：xdist worker 共享同一 datname，固定键 + 无 pid 过滤
-        # 的探针会被其他 worker 的同名等待误命中（#1211 C-2）。
-        wait_until_blocked_by(backend_pid(holder), thread=thread)
+        waiter_pid: list[int] = []
+        waiter_ready = threading.Event()
+        thread, outcome = _start(
+            lambda: _write_limit_rows(workspace_id, node_key, waiter_pid, waiter_ready)
+        )
+        assert waiter_ready.wait(timeout=10), "写线程未拿到连接"
+        # 双端钉死（#1211 C-2 / PR #1224 codex P2）：advisory 全域键全实例
+        # 共享（不被 xdist schema 隔离），同键他 worker 的等待者也被本
+        # holder 阻塞——单端「任意被 holder 阻塞者」探针会在目标 waiter
+        # 到达锁点前提前返回；必须钉「目标 waiter pid 的阻塞列表含 holder」。
+        wait_until_waiter_blocked_by(waiter_pid[0], backend_pid(holder), thread=thread)
         holder.commit()
     finally:
         holder.close()
