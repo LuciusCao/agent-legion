@@ -186,8 +186,9 @@ def pytest_collection_modifyitems(config, items):
 
 def _rebuild_schema() -> None:
     """Drop and recreate the per-xdist-worker schema, then apply full DDL."""
-    global _SEED_SNAPSHOT
+    global _SEED_SNAPSHOT, _TABLE_LIST
     close_database_pools_settled()
+    _close_reset_connection()
     # Invalidate BEFORE the drop: a create-schema failure below must not
     # leave the memo claiming "at head" over an empty schema.
     note_schema_rebuilt()
@@ -204,6 +205,7 @@ def _rebuild_schema() -> None:
         )
     init_db(TEST_DATABASE_URL)
     _SEED_SNAPSHOT = None
+    _TABLE_LIST = None
 
 
 # Tables re-seeded after every reset (see _isolate_postgres_database). After
@@ -218,6 +220,45 @@ def _rebuild_schema() -> None:
 # presence/content, never recency, against seeded rows.
 _SEEDED_TABLES = ("job_event_seq", "global_settings", "versioned_entities")
 _SEED_SNAPSHOT: dict[str, tuple[list[str], list[tuple]]] | None = None
+# Cached pg_tables listing for the worker schema, same lifecycle as the seed
+# snapshot (both are invalidated by every schema rebuild). Tests that change
+# DDL must opt into fresh_schema, so the listing is stable inside a non-fresh
+# session; the dirty probe still re-counts pg_tables server-side on every
+# reset and the caller refetches on mismatch, so drift can never hide a dirty
+# table (detection errors keep falling back to "everything dirty").
+_TABLE_LIST: list[str] | None = None
+
+# Session-lifetime maintenance connection for per-test isolation. Reusing one
+# connection removes a fresh connect handshake from every test and lets
+# session-level settings be applied once:
+# - lock_timeout bounds every lock wait of the isolation pass: the TRUNCATE
+#   needs ACCESS EXCLUSIVE on every dirty table, and the dirty-probe EXISTS
+#   reads wait behind row locks — a leaked open transaction (observed shape:
+#   a TestClient anyio-threadpool request leaves `update agent_workers` open
+#   on a pooled connection) would otherwise hang both forever. The timeout
+#   turns that hang into a failure that names the blocking session (#1045).
+# - synchronous_commit=off drops the WAL-flush wait from the reset's commits.
+#   Profiling an 8-worker run showed the TRUNCATE stage dominating isolation
+#   cost with no lock queue behind it — the wait is the fsync=on flush, and
+#   durability of a scratch schema the next session rebuilds from DDL is
+#   irrelevant. Commit atomicity and visibility are unchanged.
+_RESET_CONN = None
+
+
+def _reset_connection():
+    global _RESET_CONN
+    if _RESET_CONN is None or _RESET_CONN.closed:
+        _RESET_CONN = psycopg.connect(BASE_DATABASE_URL, autocommit=True)
+        _RESET_CONN.execute("set lock_timeout = '30s'")
+        _RESET_CONN.execute("set synchronous_commit = 'off'")
+    return _RESET_CONN
+
+
+def _close_reset_connection() -> None:
+    global _RESET_CONN
+    if _RESET_CONN is not None:
+        _RESET_CONN.close()
+        _RESET_CONN = None
 
 
 def _capture_seed_snapshot() -> None:
@@ -251,16 +292,35 @@ def _restore_seed_rows(conn, tables: list[str]) -> None:
         )
 
 
-def _dirty_tables(conn, tables: list[str]) -> set[str]:
+def _list_tables(conn) -> list[str]:
+    """Fresh pg_tables listing for the worker schema (minus schema_migrations)."""
+    return [
+        row[0]
+        for row in conn.execute(
+            "select tablename from pg_tables where schemaname = %s", (TEST_SCHEMA,)
+        ).fetchall()
+        if row[0] != "schema_migrations"
+    ]
+
+
+def _dirty_tables(conn, tables: list[str]) -> set[str] | None:
     """Tables holding rows or owning an advanced identity sequence.
 
-    Row existence is an exact per-table EXISTS probe (one round trip), not a
-    stats-estimator read, so a freshly written table can never be misjudged as
-    clean. Sequence state matters because a table can be empty while its
-    identity sequence advanced (rows inserted, then deleted); only TRUNCATE
+    Row existence is an exact per-table EXISTS probe, not a stats-estimator
+    read, so a freshly written table can never be misjudged as clean.
+    Sequence state matters because a table can be empty while its identity
+    sequence advanced (rows inserted, then deleted); only TRUNCATE
     ... RESTART IDENTITY rewinds that, so such tables stay in the truncate
     set. Any detection error falls back to "everything dirty" — missing a
     dirty table would leak data between tests, which is worse than slow.
+
+    One round trip carries the row probes, the sequence probe, and a
+    staleness guard: the server-side pg_tables count must match the cached
+    ``tables`` listing (+1 for schema_migrations, which the listing
+    excludes). A mismatch means DDL happened without a schema rebuild, so
+    the listing cannot be trusted — the probe returns None and the caller
+    refetches the listing and re-probes instead of risking a missed dirty
+    table.
 
     Precondition: every sequence in the test schema is column-owned (serial /
     identity / owned default), so the pg_depend auto/internal join below
@@ -268,32 +328,35 @@ def _dirty_tables(conn, tables: list[str]) -> set[str]:
     here; the current schema has none — if one is ever added, it must be
     rewound explicitly in _reset_schema_data.
     """
-    try:
-        probes = sql.SQL(", ").join(
-            sql.SQL("exists(select 1 from {}) as {}").format(
-                sql.Identifier(TEST_SCHEMA, table), sql.Identifier(table)
-            )
-            for table in tables
+    probes = sql.SQL(", ").join(
+        sql.SQL("exists(select 1 from {}) as {}").format(
+            sql.Identifier(TEST_SCHEMA, table), sql.Identifier(table)
         )
-        row = conn.execute(sql.SQL("select {}").format(probes)).fetchone()
-        dirty = {table for table, has_rows in zip(tables, row, strict=True) if has_rows}
-        sequence_rows = conn.execute(
-            """
-            select t.relname
-            from pg_class s
-            join pg_namespace n on n.oid = s.relnamespace
-            join pg_depend d on d.objid = s.oid and d.deptype in ('a', 'i')
-            join pg_class t on t.oid = d.refobjid
-            join pg_sequences ps
-              on ps.schemaname = n.nspname and ps.sequencename = s.relname
-            where s.relkind = 'S' and n.nspname = %s and ps.last_value is not null
-            """,
-            (TEST_SCHEMA,),
-        ).fetchall()
-        dirty.update(seq_row[0] for seq_row in sequence_rows)
-        return dirty
+        for table in tables
+    )
+    query = sql.SQL(
+        "select"
+        " (select count(*) from pg_tables where schemaname = {schema}) as table_count,"
+        " coalesce((select array_agg(t.relname::text)"
+        "   from pg_class s"
+        "   join pg_namespace n on n.oid = s.relnamespace"
+        "   join pg_depend d on d.objid = s.oid and d.deptype in ('a', 'i')"
+        "   join pg_class t on t.oid = d.refobjid"
+        "   join pg_sequences ps"
+        "     on ps.schemaname = n.nspname and ps.sequencename = s.relname"
+        "   where s.relkind = 'S' and n.nspname = {schema}"
+        "     and ps.last_value is not null), array[]::text[]) as seq_dirty,"
+        " {probes}"
+    ).format(schema=sql.Literal(TEST_SCHEMA), probes=probes)
+    try:
+        row = conn.execute(query).fetchone()
     except psycopg.Error:
         return set(tables)
+    if row[0] != len(tables) + 1:
+        return None
+    dirty = {table for table, has_rows in zip(tables, row[2:], strict=True) if has_rows}
+    dirty.update(row[1])
+    return dirty
 
 
 def _fail_on_leaked_locks(conn, phase: str) -> None:
@@ -340,49 +403,55 @@ def _reset_schema_data() -> bool:
     the snapshot was captured from it. schema_migrations keeps its rows: it
     is constant after init_db, and tests that re-run init_db rely on it for
     idempotency.
+
+    The whole pass runs on the session maintenance connection (see
+    _reset_connection) inside one pipeline: psycopg wraps an autocommit
+    pipeline in a single implicit transaction, so the probe, TRUNCATE, and
+    seed replay cost a single commit instead of one per statement. Failure
+    semantics are unchanged in shape: a replay error now rolls the TRUNCATE
+    back instead of leaving empty tables behind, and either way the next
+    test's probe finds the same tables dirty and resets them again.
     """
+    global _TABLE_LIST
     try:
-        with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as conn:
-            # Session-level lock wait bound for the whole isolation pass:
-            # the TRUNCATE below needs ACCESS EXCLUSIVE on every dirty
-            # table, and the dirty-probe EXISTS reads wait behind row
-            # locks — a leaked open transaction (observed shape: a
-            # TestClient anyio-threadpool request leaves `update
-            # agent_workers` open on a pooled connection) would otherwise
-            # hang BOTH statements forever. The timeout turns that hang
-            # into a failure that names the blocking session, so the leak
-            # is attributable instead of silent.
-            conn.execute("set lock_timeout = '30s'")
-            tables = [
-                row[0]
-                for row in conn.execute(
-                    "select tablename from pg_tables where schemaname = %s", (TEST_SCHEMA,)
-                ).fetchall()
-                if row[0] != "schema_migrations"
-            ]
-            if _SEED_SNAPSHOT is None:
-                dirty = set(tables)
-            else:
-                try:
-                    dirty = _dirty_tables(conn, tables)
-                except psycopg.errors.LockNotAvailable:
-                    _fail_on_leaked_locks(conn, "dirty-table probe")
-                # Seeded tables are always re-truncated and replayed: a test
-                # that deleted seed rows without adding new ones would
-                # otherwise look "clean" to the row probe and lose its seeds.
-                dirty.update(t for t in _SEEDED_TABLES if t in tables)
-            if dirty:
-                try:
+        conn = _reset_connection()
+        phase = "dirty-table probe"
+        try:
+            with conn.pipeline():
+                if _SEED_SNAPSHOT is None or _TABLE_LIST is None:
+                    tables = _list_tables(conn)
+                    _TABLE_LIST = tables
+                    dirty = set(tables)
+                else:
+                    dirty = _dirty_tables(conn, _TABLE_LIST)
+                    if dirty is None:
+                        # Stale cached listing (the probe's count guard
+                        # tripped): refetch and re-probe once; a repeated
+                        # mismatch falls back to "everything dirty" per the
+                        # detection-error contract.
+                        tables = _list_tables(conn)
+                        _TABLE_LIST = tables
+                        dirty = _dirty_tables(conn, tables)
+                        if dirty is None:
+                            dirty = set(tables)
+                    # Seeded tables are always re-truncated and replayed: a
+                    # test that deleted seed rows without adding new ones
+                    # would otherwise look "clean" to the row probe and lose
+                    # its seeds.
+                    dirty.update(t for t in _SEEDED_TABLES if t in _TABLE_LIST)
+                phase = "TRUNCATE"
+                if dirty:
                     conn.execute(
                         sql.SQL("truncate {} restart identity cascade").format(
                             sql.SQL(", ").join(sql.Identifier(TEST_SCHEMA, t) for t in dirty)
                         )
                     )
-                except psycopg.errors.LockNotAvailable:
-                    _fail_on_leaked_locks(conn, "TRUNCATE")
+                if _SEED_SNAPSHOT is not None:
+                    _restore_seed_rows(conn, [t for t in _SEEDED_TABLES if t in dirty])
             if _SEED_SNAPSHOT is not None:
-                _restore_seed_rows(conn, [t for t in _SEEDED_TABLES if t in dirty])
                 return True
+        except psycopg.errors.LockNotAvailable:
+            _fail_on_leaked_locks(conn, phase)
     except psycopg.Error as exc:
         pytest.fail(
             "PostgreSQL is required for tests. Set AGENT_LEGION_TEST_DATABASE_URL to a reachable "
@@ -425,12 +494,14 @@ def _session_test_schema():
     next test's setup via the _SCHEMA_DIRTY flag, so consecutive
     fresh_schema tests share one rebuild and the session never pays for a
     rebuild nobody runs against. Pools stay open for the whole session and
-    are only closed here (and around schema rebuilds).
+    are only closed here (and around schema rebuilds); the isolation
+    maintenance connection (_reset_connection) follows the same lifecycle.
     """
     ensure_test_database()
     _rebuild_schema()
     yield
     close_database_pools_settled()
+    _close_reset_connection()
 
 
 @pytest.fixture(autouse=True)
