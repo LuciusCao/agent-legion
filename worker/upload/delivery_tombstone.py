@@ -103,13 +103,20 @@ def marker_delivery_finalized(task: UploadTask) -> bool:
     收尾已完成（delivered / rejected / lost——outcome 不影响跳过判定）且
     marker 本机删不掉——重投只会重放幂等应答或同一判决。键匹配含
     execution_id（incident 目录名经字符清洗，两个原始 id 可能折叠成同一
-    段名，载荷字段是精确语义）。"""
+    段名，载荷字段是精确语义）。
+
+    #1184：fail-open 读路径按载荷契约做类型级校验——合法 JSON 但非对象
+    （``[]`` / ``null`` / 标量——人工清理残留或损坏）按「未命中」处理；
+    只捕获 OSError/ValueError 的预想失败族接不住 ``payload.get`` 的
+    AttributeError，一个畸形 tombstone 会炸穿 restore/Worker 启动。"""
     incident = state_evidence.incident_dir(task.execution_id, task.node_key)
     if incident is None:
         return False
     try:
         payload = json.loads((incident / DELIVERED_TOMBSTONE_FILENAME).read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        return False
+    if not isinstance(payload, dict):
         return False
     return (
         str(payload.get("execution_id") or "") == task.execution_id

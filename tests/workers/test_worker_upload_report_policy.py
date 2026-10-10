@@ -271,6 +271,29 @@ def test_main_path_precheck_skipped_without_declared_ceiling(tmp_path: Path) -> 
     assert "output.json" in client.calls[0]["members"]
 
 
+def test_413_recycle_ignores_stale_persisted_ceiling(tmp_path: Path) -> None:
+    """#1184：413 = claim 快照过期的判决信号——即使 marker 持久化了正值
+    （8 KiB；Host claim 后重启把 max_archive_bytes 下调到 1 KiB 的形态），
+    413 回收也不复用旧值，无条件按协议下限裁。修复前 ``or`` 复用持久
+    正值：回收产物裁进已失效的口径（4 KiB 级 command 形态仍超 Host 实际
+    1 KiB）→ 重报吃第二个 413 → 闸判终态删 marker，Host 从未记录结果。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    command = tuple(secrets.token_hex(32) for _ in range(64))
+    # Host 实际上限 1 KiB；marker 持久的是 claim 时点的旧 8 KiB。
+    client = _SizeGatedClient(MIN_RESULT_ARCHIVE_BYTES)
+    queue = _queue(client)
+    queue.submit(_task(work_root, max_archive_bytes=8 * 1024, command=command))
+    queue.shutdown()
+
+    assert len(client.reports) == 1  # 按协议下限裁剪的判败重报被 Host 收下
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert "HTTP 413" in report["error_message"]
+    assert report["command"] == []  # 观测字段让位（协议下限裁剪）
+    assert not (work_root / "exec-1").exists()  # delivered 收尾（非终态丢弃）
+
+
 def test_restored_task_prechecks_with_persisted_ceiling(tmp_path: Path) -> None:
     """#1174 F1（持久化层，端到端）：marker 往返恢复的任务持真实上限——
     prepare 预检与在线任务同口径（超限即本地诚实判败，零 413 往返）。

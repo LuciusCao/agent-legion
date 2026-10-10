@@ -117,5 +117,10 @@ def discard_owned_dir(execution_dir: Path, lease_id: str) -> bool:
         payload = json.loads((execution_dir / OWNER_FILENAME).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
+    # #1184：合法 JSON 但非对象（[]/null——损坏/人工残留）同样不是归属
+    # 证明——fail-closed 拒删，同「不可读标记」语义；类型级校验不让
+    # payload.get 的 AttributeError 逃出防御路径。
+    if not isinstance(payload, dict):
+        return False
     owned = str(payload.get("lease_id") or "")
     return bool(owned) and owned == str(lease_id)

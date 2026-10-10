@@ -361,21 +361,24 @@ def test_metadata_only_archive_without_ceiling_kept_verbatim(tmp_path: Path) -> 
     assert payload["error_message"] == message
 
 
-def test_degrade_gate_413_recycle_respects_declared_ceiling(tmp_path: Path) -> None:
-    """降级闸 413 臂的调用点接线：回收按 task.max_archive_bytes 裁剪——
-    长回显 rejection（4000 字符高熵）+ 1 KiB 上限的重报归档落在限内，
-    Host 收到可提交的判败载荷（不再第二个 413 → 终态删 marker 丢结果）。"""
+def test_degrade_gate_413_recycle_uses_protocol_floor_despite_declared_ceiling(
+    tmp_path: Path,
+) -> None:
+    """降级闸 413 臂的调用点接线（#1184 语义）：413 = claim 快照过期的
+    判决信号——即使 task.max_archive_bytes 持久正值（4 KiB），回收也
+    无条件按协议下限 1 KiB 裁（不复用旧值；4000 字符高熵归因裁到限内），
+    重报归档对任何合法 Host 配置必可提交。"""
     work_root = tmp_path / "work"
     _execution_dir(work_root)
     task = _task(work_root)
-    task.max_archive_bytes = 1024
+    task.max_archive_bytes = 4 * 1024  # claim 时点快照：413 后已不可信
     archive = work_root / "exec-1" / "result.tar.gz"
     write_empty_archive(archive)
     gate = report_policy.ReportDegradeGate(task, archive)
 
     assert gate.on_rejection(413, secrets.token_hex(2000)) is True
 
-    assert archive.stat().st_size <= 1024
+    assert archive.stat().st_size <= MIN_RESULT_ARCHIVE_BYTES
     metadata = read_result_metadata(archive)
     assert metadata["status"] == "failed"
     assert metadata["error_message"]  # 前缀保留（判败归因可读）

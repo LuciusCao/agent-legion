@@ -37,6 +37,10 @@ def refuse_if_pending_upload(execution_dir: Path, claim: dict[str, Any]) -> None
         payload = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return  # 孤儿（损坏）marker：见 docstring，让 claim 照常进行
+    # #1184：合法 JSON 但非对象（[]/null）与损坏 JSON 同语义——按孤儿
+    # 处理（类型级校验，payload.get 的 AttributeError 不得炸穿 claim 路径）。
+    if not isinstance(payload, dict):
+        return
     owned = str(payload.get("lease_id") or "")
     current = str(claim.get("lease_id") or "")
     if owned and owned == current:

@@ -43,9 +43,13 @@ def drop_marker(task: UploadTask, outcome: str) -> bool:
     """
     marker = task.execution_dir / PENDING_FILENAME
     try:
-        payload = json.loads(marker.read_text(encoding="utf-8"))
+        loaded = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        payload = {}
+        loaded = None
+    # #1184：合法 JSON 但非对象（[]/null）与损坏 JSON 同语义（无 lease
+    # 归属可判的可清理孤儿）——fail-open 读路径按载荷契约做类型级校验，
+    # 不让 payload.get 的 AttributeError 逃出降级收尾车道。
+    payload = loaded if isinstance(loaded, dict) else {}
     owned = str(payload.get("lease_id") or "")
     if owned and owned != str(task.lease_id):
         print(f"keeping pending marker for {task.execution_id}: owned by {owned!r}", flush=True)

@@ -38,17 +38,23 @@ report 车道。
 
 ``max_archive_bytes`` 的取值状态机（#1174 F1——两个 0 的语义分界；
 #1174 起该值随 pending marker 持久化，崩溃恢复任务与在线任务同口径，
-0 只剩旧 Host 未下发与 #1174 前旧 marker 两个来源）：
+0 只剩旧 Host 未下发与 #1174 前旧 marker 两个来源；#1184 补「正值但已
+过期」行——413 信号使本地快照失效）：
 
-- claim 下发正值：prepare 预检（``declared_ceiling_rejection`` /
-  ``finalize_result_metadata`` 换写上限）与全部回收位都按值裁剪。
+- claim 下发正值，无 Host 大小信号（换写失败回落、finalize 拒写臂，
+  ``degrade_ceiling(task)``）：按值裁剪——快照仍是本地最好知识。
+- claim 下发正值，**413 已到**（``degrade_ceiling(task, snapshot_stale=
+  True)``，#1184）：无条件按协议下限裁。413 本身就是「快照过期」的
+  判决信号——Host 可能重启后下调了 ``agent_workers.max_archive_bytes``，
+  收到判决后本地任何上限知识都不可信；``or`` 复用持久正值会把回收
+  产物裁进已失效的口径（旧值 > Host 新值时重报吃第二个 413 → 闸判
+  终态删 marker 丢结果）。
 - 0（未知）：prepare 预检**不猜**——不预检、不裁剪，交 Host 的 413
-  判决兜底（64 MiB 默认可能低于 Host 实际配置而误杀可交付结果）；
-  **已进入降级回收**（收到 413，或非 413 判决换写失败回落、finalize
-  拒写臂——三个回收位同口径）时按协议下限 ``MIN_RESULT_ARCHIVE_BYTES``
-  （1 KiB，Host 配置模型的合法下限，单一来源 shared/code_contract）裁剪
-  ——Host 拒过说明它有上限，本地不知道具体值时按协议保证的最小上限裁，
-  重报归档对任何合法 Host 配置必可提交。
+  判决兜底（64 MiB 默认可能低于 Host 实际配置而误杀可交付结果）；进入
+  降级回收时按协议下限 ``MIN_RESULT_ARCHIVE_BYTES``（1 KiB，Host 配置
+  模型的合法下限，单一来源 shared/code_contract）裁剪——Host 拒过说明
+  它有上限，本地不知道具体值时按协议保证的最小上限裁，重报归档对任何
+  合法 Host 配置必可提交。
 """
 
 from __future__ import annotations
@@ -119,10 +125,8 @@ class ReportDegradeGate:
     取下一次上报的载荷），并同步归档的 ``result.json`` 成员（#843 v2：
     上报的元数据在归档里，判败换写后重报才携带正确载荷）。闸只开一次，
     唯一例外：首次降级时归档保留（非 413 判决），判败重报又吃 413——
-    Host 先验归档大小，未下发 ``max_archive_bytes``（旧 Host / #1174 前
-    旧 marker）时本地口径可能低于 Host 实际上限——此时再回收归档重报
-    一次（回收按模块 docstring 的状态机取值：正值按值、0 按协议下限）。
-    总重报次数仍有界（≤2）。"""
+    Host 先验归档大小，此时再回收归档重报一次（413 使快照过期：无条件下
+    协议下限，#1184 矩阵见模块 docstring）。总重报次数仍有界（≤2）。"""
 
     def __init__(self, task: UploadTask, archive: Path) -> None:
         self._task = task
@@ -141,18 +145,19 @@ class ReportDegradeGate:
         metadata = self._degraded_metadata or failed_metadata(self._task, reason)
         if status_code == 413:
             # 413 = 归档不可提交：回收成仅含判败 metadata 的可提交归档
-            # （#1169：按 claim 下发的 max_archive_bytes 自适应裁剪，重报
-            # 的 metadata-only 归档不再超限吃第二个 413）。#1174 F1：无
-            # claim 上限（旧 Host / #1174 前旧 marker，值 0）时按协议下限
-            # 裁——Host 拒过即证明有上限，本地按协议保证的最小上限裁
-            # （degrade_ceiling 单一口径，语义矩阵见模块 docstring）。
-            write_metadata_only_archive(self._archive, metadata, degrade_ceiling(self._task))
+            # （#1169：自适应裁剪，重报不再超限吃第二个 413）。#1184：413
+            # 本身就是「claim 快照过期」的判决信号（Host 可能重启后下调了
+            # max_archive_bytes），不复用持久正值——无条件按协议下限裁
+            # （矩阵见模块 docstring）。
+            max_bytes = degrade_ceiling(self._task, snapshot_stale=True)
+            write_metadata_only_archive(self._archive, metadata, max_bytes)
             self._archive_recycled = True
         else:
             # 非 413 判决：证据随归档保留，只换 result.json 成员；换写超限/
             # 失败时回收 metadata-only（判败语义下可提交性优先于证据）。
-            # #1174 二轮回落位同受下限矩阵覆盖（degrade_ceiling），与 413
-            # 臂、finalize 拒写臂同口径。
+            # #1174 二轮回落位同受下限矩阵覆盖（degrade_ceiling）；无
+            # Host 大小信号——按快照值/下限，与 413 臂的无条件下限分层
+            # 见模块 docstring。
             try:
                 embed_result_metadata(
                     self._archive, metadata, max_bytes=self._task.max_archive_bytes

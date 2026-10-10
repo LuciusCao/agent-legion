@@ -61,6 +61,17 @@ def test_unreadable_marker_is_orphan(tmp_path: Path) -> None:
     refuse_if_pending_upload(execution_dir, _claim())
 
 
+@pytest.mark.parametrize("body", ["[]", "null"])
+def test_non_object_marker_json_is_orphan(tmp_path: Path, body: str) -> None:
+    """#1184 同族（形状面）：合法 JSON 但非对象的 marker 与损坏 JSON 同
+    语义——按孤儿处理，claim 照常进行。修复前 payload.get 抛
+    AttributeError 逃出 refuse_if_pending_upload，炸穿 claim/prepare 路径
+    （孤儿契约只在 OSError/ValueError 上成立）。"""
+    execution_dir = tmp_path / "exec-1"
+    _marker(execution_dir, body)
+    refuse_if_pending_upload(execution_dir, _claim())  # 孤儿：不抛即通过
+
+
 def test_claim_without_lease_id_treats_marker_as_orphan(tmp_path: Path) -> None:
     """claim 缺 lease_id（异常入参）：不因空字符串巧合匹配空的 marker lease
     而误判所有权。"""

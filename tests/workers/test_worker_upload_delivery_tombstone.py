@@ -41,6 +41,7 @@ from tests.workers.upload_queue_testlib import (
     _task,
 )
 from worker import state_evidence
+from worker.execution.ownership import write_owner_marker
 from worker.upload.cleanup import drop_marker
 from worker.upload.constants import PENDING_FILENAME
 
@@ -185,3 +186,44 @@ def test_restore_requeues_new_lease_marker_despite_old_tombstone(
 
     assert queue.restore(work_root) == 1  # 新 lease（lease-1）照常重投
     queue.shutdown()
+
+
+@pytest.mark.parametrize("body", ["[]", "null", '"text"'])
+def test_malformed_tombstone_payload_is_a_miss_not_a_crash(
+    tmp_path: Path, evidence_root: Path, body: str
+) -> None:
+    """#1184 Finding 2：tombstone 文件是合法 JSON 但非对象（人工清理残留
+    / 损坏形态）→ 按「未命中」处理（isinstance 形状校验），restore 照常
+    重投该 marker。修复前 ``json.loads`` 合法但 ``payload.get`` 抛
+    AttributeError——restore 的 OSError 目录隔离接不住，一个畸形
+    tombstone 炸穿 Worker 启动（违背 fail-open 语义）。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _write_marker(work_root)
+    incident = evidence_root / "exec-1__node_a"
+    incident.mkdir(parents=True)
+    (incident / "upload-delivered.json").write_text(body, encoding="utf-8")
+    client = QueueFakeClient()
+    queue = _queue(client)
+
+    assert queue.restore(work_root) == 1  # 未命中：marker 照常重投
+    queue.shutdown()
+
+    assert len(client.reports) == 1
+
+
+def test_drop_marker_malformed_marker_json_is_removable_orphan(
+    tmp_path: Path, evidence_root: Path
+) -> None:
+    """同族自查（marker 读取面）：marker 是合法 JSON 但非对象 → 与损坏
+    JSON 同语义（可清理孤儿，无 lease 归属可判）。修复前 payload.get 抛
+    AttributeError 逃出 drop_marker，收尾车道把它当 crashed/aborted。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    task = _task(work_root)
+    (task.execution_dir / PENDING_FILENAME).write_text("[]", encoding="utf-8")
+    write_owner_marker(task.execution_dir, {"execution_id": "exec-1", "lease_id": "lease-1"})
+
+    assert drop_marker(task, "delivered") is True
+
+    assert not task.execution_dir.exists()

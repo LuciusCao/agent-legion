@@ -18,12 +18,21 @@ from shared.code_contract import MIN_RESULT_ARCHIVE_BYTES
 _PENDING_VERSION = 1
 
 
-def degrade_ceiling(task: UploadTask) -> int:
-    """降级回收位的归档上限口径（#1174 矩阵，三个回收位同源）：正值按
-    Host 经 claim 下发的实际值；0（旧 Host / #1174 前旧 marker——未下发的
-    未知）按协议下限 ``MIN_RESULT_ARCHIVE_BYTES``——Host 拒过即证明有
-    上限，本地按协议保证的最小上限裁。语义矩阵见 report_policy 模块
-    docstring。"""
+def degrade_ceiling(task: UploadTask, snapshot_stale: bool = False) -> int:
+    """降级回收位的归档上限口径（#1174/#1184 矩阵，三个回收位同源）：
+
+    - ``snapshot_stale=False``（无 Host 大小信号——换写失败回落、finalize
+      拒写臂）：正值按 claim 下发的实际值；0（旧 Host / #1174 前旧
+      marker）按协议下限 ``MIN_RESULT_ARCHIVE_BYTES``——快照仍是本地
+      最好知识。
+    - ``snapshot_stale=True``（已收到 413——唯一带 Host 大小判决的回收
+      位）：无条件协议下限。413 本身就是「claim 快照过期」的判决信号：
+      Host 可能重启后下调了 ``agent_workers.max_archive_bytes``（或
+      marker 持久值本就来自旧配置），收到判决后本地任何上限知识都
+      不可信；按协议保证的最小上限裁，重报归档对任何合法 Host 配置
+      必可提交。语义矩阵见 report_policy 模块 docstring。"""
+    if snapshot_stale:
+        return MIN_RESULT_ARCHIVE_BYTES
     return task.max_archive_bytes or MIN_RESULT_ARCHIVE_BYTES
 
 
