@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - `make prod-down docker` / `make stack-host-down` / `make stack-down` 不停 profile 下的本地对象存储容器（issue #1105，#1099 follow-up）：host stack 的 down 此前不带 `--profile`，seaweedfs / rustfs 容器留存、stack 网络移除报 "Resource is still in use"。现三个入口经 Makefile `COMPOSE_HOST_DOWN_PROFILES` 无条件带上 `materials-local` 与 `materials-local-rustfs`（未启动的 profile 服务 down 为 no-op）；刻意不复用 up 侧的 `local-s3-decide.sh --compose-flags`——down 时判定输入（`deploy/.env`、`AGENT_LEGION_LOCAL_S3*`）可能已不同于 up 时，决策失败的退出码也会被命令替换吞掉，都会漏停实际在跑的容器。`tests/scripts/test_stack_down_profiles.py` 以 `make -n` 渲染全部 compose down 入口，并从 compose 文件自身推导 profile 全集断言无遗漏；部署文档 §3/§8 的手动停止临时说明删除。
 
+### Removed
+
+- **Breaking (velites):** 移除 `~/.velites/config.json` 迁移桥（issue #1102，#602 deprecation 的收尾）：删除 `velites/src/config.rs` 与 lib.rs 的 gateway 兜底分支，velites 不再读取 `~/.velites/config.json` 与 `VELITES_BASE_URL` / `VELITES_API_KEY` env；`~/.velites/models.json`（或 `VELITES_MODELS_PATH`）成为唯一 provider 凭据来源，没有 registry 时 `gateway` / `openai_compat` 直调与其他 provider 一样以退出码 2 报错，错误信息给出 registry 路径并指向 `velites-model-registry.md` 的 0.1.x 迁移节。Worker 模型发现本就只读 `models.json`，经 Worker 领取的任务不受影响。**升级注意：** 仍靠旧文件或这两个 env 直调 velites 的环境，升级到包含本改动的 velites 版本前先按迁移节写好 `models.json`；随下一次 velites 落版发布，该版 release notes 须在「升级注意」组标 Breaking。
+
 ## [0.8.0] - 2026-10-19
 
 主打 Studio 长会话与草稿协作、材料内容身份与 Worker 容量治理：长对话单行合并与历史分页、会话自动恢复、草稿代次 CAS 与发布单一权威；材料上传代次和 ETag 全链核验（Worker 协议 v6）；Worker 节点级并发上限与一批执行面/UI 稳定性修复。
