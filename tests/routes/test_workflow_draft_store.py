@@ -196,18 +196,23 @@ def test_put_with_stale_expected_updated_at_gets_409_with_current_draft(client, 
     from server.app.services.workflow_drafts import workflow_draft_identity_hash
 
     assert detail["current_draft"]["definition_hash"] == workflow_draft_identity_hash(agent_yaml)
-    # #1177 codex P1：detail 形状与 OpenAPI 契约模型（路由 responses= 声明）
-    # 逐字段钉死——服务层 payload 构造与 contracts 模型由本断言同步，
-    # 前端 transport type 才能安全从生成的 api.ts 派生。
+    # #1177 codex P1/P2：整个 409 响应体与 OpenAPI 契约模型（路由
+    # responses= 声明的封套模型）逐字段钉死——FastAPI 原生 handler 的
+    # detail 外层也在契约内，服务层 payload 构造与 contracts 模型由本
+    # 断言同步，前端 transport type 才能安全从生成的 api.ts 派生。
     from server.app.routes.workflow_draft_store_contracts import (
         WorkflowDraftConflictCurrentDraft as ContractCurrentDraft,
     )
     from server.app.routes.workflow_draft_store_contracts import (
         WorkflowDraftConflictDetail as ContractDetail,
     )
+    from server.app.routes.workflow_draft_store_contracts import (
+        WorkflowDraftConflictResponse as ContractResponse,
+    )
 
-    contract = ContractDetail.model_validate(detail)
-    assert contract.message
+    envelope = ContractResponse.model_validate(conflict.json())
+    assert envelope.detail.message
+    assert set(conflict.json()) == set(ContractResponse.model_fields)
     assert set(detail) == set(ContractDetail.model_fields)
     assert set(detail["current_draft"]) == set(ContractCurrentDraft.model_fields)
     # The agent-saved draft was NOT overwritten.

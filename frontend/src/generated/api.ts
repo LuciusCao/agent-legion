@@ -7774,6 +7774,16 @@ export interface components {
       /** Message */
       message: string
     }
+    /**
+     * WorkflowDraftConflictResponse
+     * @description 409 响应体（#1177 codex P2）：app 级异常处理器把 payload 交给
+     *     ``HTTPException(detail=...)``，FastAPI 原生 handler 固定渲染为
+     *     ``{"detail": ...}``——OpenAPI 声明必须带这层封套，否则生成的
+     *     客户端（前端 transport type 由其派生）按错误的形状读响应。
+     */
+    WorkflowDraftConflictResponse: {
+      detail: components['schemas']['WorkflowDraftConflictDetail']
+    }
     /** WorkflowDraftRequest */
     WorkflowDraftRequest: {
       /** Definition Yaml */
@@ -11791,7 +11801,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['WorkflowDraftConflictDetail']
+          'application/json': components['schemas']['WorkflowDraftConflictResponse']
         }
       }
       /** @description Validation Error */
@@ -15659,7 +15669,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['WorkflowDraftConflictDetail']
+          'application/json': components['schemas']['WorkflowDraftConflictResponse']
         }
       }
       /** @description Validation Error */

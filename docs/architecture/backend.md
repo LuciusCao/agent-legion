@@ -642,6 +642,7 @@ server/app/
 | WorkflowDraftStoreResponse | BaseModel | definition_yaml: str | None, updated_at: str | None, definition_hash: str | N... | app/routes/workflow_draft_store_contracts.py |
 | WorkflowDraftConflictCurrentDraft | BaseModel | definition_yaml: str | None, updated_at: str | None, definition_hash: str | N... | app/routes/workflow_draft_store_contracts.py |
 | WorkflowDraftConflictDetail | BaseModel | message: str, expected_updated_at: str, current_draft: WorkflowDraftConflictC... | app/routes/workflow_draft_store_contracts.py |
+| WorkflowDraftConflictResponse | BaseModel | detail: WorkflowDraftConflictDetail | app/routes/workflow_draft_store_contracts.py |
 | WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom', 'none'], code: str, version: int | None,... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeTemplateResponse | BaseModel | code: str | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeDraftRequest | BaseModel | code: str, change_note: str | None | app/routes/workflow_node_code_contracts.py |

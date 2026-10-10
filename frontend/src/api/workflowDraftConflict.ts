@@ -1,8 +1,9 @@
 /** #633：workflow 草稿 PUT 的 CAS 失败（409）——服务端草稿已被 agent/其它
  * 会话推进，detail 携带当前草稿；编辑器据此提示用户而非静默覆盖。
  * 从 workflowDraft.ts 拆出（文件体积预算）。
- * #1177 codex P1：transport type 从生成的 OpenAPI 契约派生（后端
- * ``responses={409: WorkflowDraftConflictDetail}`` 立模）——不再手写字段。 */
+ * #1177 codex P1/P2：transport type 从生成的 OpenAPI 契约派生（后端
+ * ``responses={409: WorkflowDraftConflictResponse}`` 立模，detail 封套
+ * 内为 WorkflowDraftConflictDetail）——不再手写字段。 */
 
 import type { components } from '../generated/api'
 

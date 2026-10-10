@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from server.app.jobs import JobQueries
 from server.app.routes.workflow_draft_store_contracts import (
-    WorkflowDraftConflictDetail,
+    WorkflowDraftConflictResponse,
 )
 from server.app.services.workflow_draft_cas import save_workflow_draft_if_unchanged
 from server.app.services.workflow_draft_cas_token import (
@@ -27,11 +27,11 @@ from server.app.services.workflow_draft_cas_token import (
 )
 from server.app.services.workflow_draft_store import get_workflow_draft
 
-# 409 CAS 冲突的响应契约（#1177 codex P1）：与人侧 draft-store PUT 同一
+# 409 CAS 冲突的响应契约（#1177 codex P1/P2）：与人侧 draft-store PUT 同一
 # detail 形状（服务层同一 DraftConflictError.payload 渲染），contracts 立
-# 模型并经 responses= 进 OpenAPI。
+# 带 detail 封套的响应模型并经 responses= 进 OpenAPI。
 _DRAFT_CONFLICT_RESPONSES: dict[int | str, dict[str, Any]] = {
-    409: {"model": WorkflowDraftConflictDetail, "description": "Stale CAS base"}
+    409: {"model": WorkflowDraftConflictResponse, "description": "Stale CAS base"}
 }
 
 

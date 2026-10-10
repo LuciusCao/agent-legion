@@ -69,3 +69,12 @@ class WorkflowDraftConflictDetail(BaseModel):
     message: str
     expected_updated_at: str
     current_draft: WorkflowDraftConflictCurrentDraft
+
+
+class WorkflowDraftConflictResponse(BaseModel):
+    """409 响应体（#1177 codex P2）：app 级异常处理器把 payload 交给
+    ``HTTPException(detail=...)``，FastAPI 原生 handler 固定渲染为
+    ``{"detail": ...}``——OpenAPI 声明必须带这层封套，否则生成的
+    客户端（前端 transport type 由其派生）按错误的形状读响应。"""
+
+    detail: WorkflowDraftConflictDetail

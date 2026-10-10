@@ -32,10 +32,11 @@ from server.app.services.workflow_draft_store import (
 
 
 def _conflict_payload(expected_updated_at: str, current: dict[str, Any] | None) -> dict[str, Any]:
-    """409 detail 的契约化构造（#1177 codex P1）：字段集与
+    """409 detail 的契约化构造（#1177 codex P1/P2）：字段集与
     ``workflow_draft_store_contracts.WorkflowDraftConflictDetail``（路由侧
-    OpenAPI responses= 声明的模型）逐字段一致——路由测试以模型 dump 为
-    oracle 钉死两者同步，service 层不 import routes 包（分层方向）。
+    OpenAPI responses= 声明的响应模型的 detail 内层）逐字段一致——路由
+    测试以模型 dump 为 oracle 钉死两者同步，service 层不 import routes
+    包（分层方向）。
     #1143: current_draft carries the semantic identity hash — the adopting
     side (frontend adopt path) restores savedHash from it.
     """
