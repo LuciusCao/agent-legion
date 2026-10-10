@@ -67,16 +67,18 @@ rm -f "$tmp"
 velites models list --json
 ```
 
-旧 `config.json` 可以暂时保留；一旦 `models.json` 存在，Worker 发现只以新 registry
-为准。如果 `apiKey` 改用 `$ENV` 引用，原生 Worker 需在启动环境中提供该
-变量；Docker Worker 按上文使用 `VELITES_PROVIDER_ENV_FILE`。
+迁移完成后旧 `config.json` 不再被读取，可只留作备份。如果 `apiKey` 改用 `$ENV`
+引用，原生 Worker 需在启动环境中提供该变量；Docker Worker 按上文使用
+`VELITES_PROVIDER_ENV_FILE`。
 
-**Deprecation 状态（#602）**：`config.json`（连同 `VELITES_BASE_URL` /
-`VELITES_API_KEY` env 覆盖）是仅供直调 CLI 的迁移桥——结构上进不了 Worker
-模型发现。自 velites 0.5.4（主仓 0.7.12）起，直调使用该文件或 env 时 stderr 会打
-deprecation 警告（指回本节迁移方法）。桥目前仍在代码中，移除时间未定、届时另行公告
-（移除内容为 `config.rs` 与 lib.rs 的 gateway 兜底分支，gateway/openai_compat 直调
-报错直接指向 models.json）；新配置一律写 `models.json`。
+**Deprecation 状态（#602 → #1102，已移除）**：`config.json`（连同 `VELITES_BASE_URL` /
+`VELITES_API_KEY` env 覆盖）曾是仅供直调 CLI 的迁移桥——结构上进不了 Worker
+模型发现。velites 0.5.4（主仓 0.7.12）起直调使用该文件或 env 时 stderr 打
+deprecation 警告；#1102 起桥已移除（`config.rs` 与 lib.rs 的 gateway 兜底分支一并
+删除，随 0.5.8 之后的下一个 velites 版本发布）。此后 velites 不再读取该文件与这两个
+env：没有 `models.json` 时任何 provider（含 `gateway` / `openai_compat`）直调都以
+退出码 2 报错，错误信息指向 `models.json` 路径与本节迁移方法。仍依赖旧文件的直调
+环境须先按上文迁移再升级 velites。
 
 ## Runtime adapters
 
@@ -115,8 +117,8 @@ velites 保留 crate 内的 `Provider` trait，并实现：
   以及 thinking level 到模型 `thinkingBudgets` 的映射。
 
 Host 下发的 provider 名称原样传入 velites并记录到事件中；不再把 `sqai`、`deepseek` 等
-静默改写成 `gateway`。旧 `VELITES_BASE_URL/VELITES_API_KEY` 只作为无 models 文件时
-`gateway/openai_compat` 直跑的迁移桥，不参与 Worker 模型发现。
+静默改写成 `gateway`。`gateway` / `openai_compat` 与其他 provider 一样只从
+`models.json` 解析（旧 `VELITES_BASE_URL/VELITES_API_KEY` 迁移桥已随 #1102 移除）。
 
 ## Quality Impact
 

@@ -1994,7 +1994,6 @@
     "velites/src/budget.rs": 97,
     "velites/src/cancel.rs": 88,
     "velites/src/cli.rs": 91,
-    "velites/src/config.rs": 170,
     "velites/src/contract.rs": 513,
     "velites/src/contract_gate.rs": 82,
     "velites/src/event_sink.rs": 307,

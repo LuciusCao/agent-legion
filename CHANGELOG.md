@@ -29,6 +29,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Removed
 
+- **Breaking (velites):** 移除 `~/.velites/config.json` 迁移桥（issue #1102，#602 deprecation 的收尾）：删除 `velites/src/config.rs` 与 lib.rs 的 gateway 兜底分支，velites 不再读取 `~/.velites/config.json` 与 `VELITES_BASE_URL` / `VELITES_API_KEY` env；`~/.velites/models.json`（或 `VELITES_MODELS_PATH`）成为唯一 provider 凭据来源，没有 registry 时 `gateway` / `openai_compat` 直调与其他 provider 一样以退出码 2 报错，错误信息给出 registry 路径并指向 `velites-model-registry.md` 的 0.1.x 迁移节。Worker 模型发现本就只读 `models.json`，经 Worker 领取的任务不受影响。**升级注意：** 仍靠旧文件或这两个 env 直调 velites 的环境，升级到包含本改动的 velites 版本前先按迁移节写好 `models.json`；随下一次 velites 落版发布，该版 release notes 须在「升级注意」组标 Breaking。
 - `X-Agent-Result` 头承载结果元数据的写侧与 v1 头预算降级链退役（issue #843 PR-2）：`worker/host/transfer.py` 的 `_RESULT_HEADER_BUDGET` / 四段降级循环 / `ResultHeaderOverflow`、`worker/upload/report.py` 的 overflow 换轨臂（embed `result-output-artifacts.json` + 上限重校 + 重写窗口心跳）、写侧 `output_artifacts_truncated` / `output_artifacts_total` 标记（读侧防御保留——v1 兼容窗内旧 Worker 形态）。Worker 侧不再产生换轨成员 `result-output-artifacts.json`。Host 的 v1 头读路径（含 `_recover_result_header` latin-1→UTF-8 反解码）保留至协议版本门抬升（PR-3）。
 
 ### chores
