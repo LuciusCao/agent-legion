@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
 from server.app.studio_chat.turn_state import open_turn
-from server.app.studio_chat.unprompted_queue import holding
+from server.app.studio_chat.unprompted_queue import DEQUEUE_STEP_TIMEOUT_SECONDS, holding, refresh
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
@@ -77,6 +77,10 @@ def wake_session(
             return True
 
         def before_start() -> bool:
+            # #1109: the claim above read the last poll (our caller holds
+            # runtime.lock, so it cannot step); observe the journal here, at
+            # the send boundary, on the worker thread with no lock held.
+            observed = refresh(runtime, DEQUEUE_STEP_TIMEOUT_SECONDS)
             with runtime.lock:
                 try:
                     valid = (
@@ -87,6 +91,11 @@ def wake_session(
                         and runtime.background_epoch == epoch
                         and not runtime.compacting
                     )
+                    if valid and (holding(runtime) or not observed):
+                        # Stand back without burning the token: release()
+                        # re-arms the task ids and the cursor retries later.
+                        release()
+                        return False
                     if valid and _token_alive(service, runtime.token):
                         return True
                     release()
