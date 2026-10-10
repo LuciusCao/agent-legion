@@ -63,7 +63,7 @@ describe('useWorkspaceEvents', () => {
       jobIds: [],
       revision: 0,
       isLoading: false,
-      error: null,
+      listLoadError: null,
     })
     vi.clearAllMocks()
     mockFetchJobsSnapshot.mockResolvedValue({
@@ -235,8 +235,8 @@ describe('useWorkspaceEvents', () => {
     })
   })
 
-  it('clears a previous error after successful refresh', async () => {
-    useJobStore.setState({ error: 'previous error' })
+  it('clears a previous list load error after successful refresh', async () => {
+    useJobStore.setState({ listLoadError: 'previous error' })
 
     renderEvents('ws1')
     const source = EventSourceMock.instances[0]
@@ -246,7 +246,7 @@ describe('useWorkspaceEvents', () => {
     })
 
     await waitFor(() => {
-      expect(useJobStore.getState().error).toBeNull()
+      expect(useJobStore.getState().listLoadError).toBeNull()
     })
   })
 

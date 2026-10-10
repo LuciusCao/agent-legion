@@ -62,7 +62,7 @@ export default function WorkspaceMainPage() {
   // #1183：jobsError 是引导页判定的输入（失败空态不渲染引导），错误行
   // 由 JobList 渲染。
   const jobsLoading = useJobStore((state) => state.isLoading)
-  const jobsError = useJobStore((state) => state.error)
+  const jobsError = useJobStore((state) => state.listLoadError)
 
   useWorkspaceEvents(workspaceId)
   useJobFilterRefetch(workspaceId)

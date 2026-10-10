@@ -32,7 +32,6 @@ export function clearPackedActions(set: JobStoreSet, get: () => JobState) {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Clear packed status failed'
-        set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
       } finally {

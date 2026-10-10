@@ -11,7 +11,7 @@ export function JobList({ workspaceId }: { workspaceId: string }) {
   const toggleSelect = useJobStore((state) => state.toggleSelect)
   const selectMode = useJobStore((state) => state.selectMode)
   const isLoading = useJobStore((state) => state.isLoading)
-  const error = useJobStore((state) => state.error)
+  const error = useJobStore((state) => state.listLoadError)
   if (error) {
     return (
       <div className={styles.error}>
@@ -21,7 +21,16 @@ export function JobList({ workspaceId }: { workspaceId: string }) {
         />
         <p className="title-medium">任务列表加载失败</p>
         <p className={styles.errorMessage}>{error}</p>
-        <p className={styles.errorHint}>刷新页面可重试</p>
+        <button
+          type="button"
+          className={styles.retryButton}
+          onClick={() =>
+            void useJobStore.getState().refreshFirstPage(workspaceId)
+          }
+        >
+          重试
+        </button>
+        <p className={styles.errorHint}>也可刷新页面重试</p>
       </div>
     )
   }

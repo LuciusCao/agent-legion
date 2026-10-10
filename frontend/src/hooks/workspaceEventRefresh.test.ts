@@ -34,7 +34,7 @@ describe('refreshWorkspaceEvents', () => {
       jobsById: { j1: createJobSummary({ id: 'j1', workspace_id: 'ws1' }) },
       jobsWorkspaceId: 'ws1',
       isLoading: false,
-      error: null,
+      listLoadError: null,
     })
   })
 
@@ -56,7 +56,7 @@ describe('refreshWorkspaceEvents', () => {
     })
     const state = useJobStore.getState()
     expect(state.jobIds).toEqual(['j1'])
-    expect(state.error).toBeNull()
+    expect(state.listLoadError).toBeNull()
   })
 
   it('skips the refresh when the caller reports inactive', async () => {

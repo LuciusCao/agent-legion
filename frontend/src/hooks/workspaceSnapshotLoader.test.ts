@@ -126,6 +126,30 @@ describe('createLoadSnapshot', () => {
     expect(processEvent).not.toHaveBeenCalled()
     expect(failJobFetch).not.toHaveBeenCalled()
   })
+
+  it('a stale closure leaves the shared loading flag alone in finally', async () => {
+    // 跨 workspace 切换：旧 effect 闭包的 generation 是闭包私有、isCurrent
+    // 仍为真，但 isStale 已真——finally 不得动共享 snapshotLoadingRef，
+    // 否则旧快照把该 ref 提前置 false，新 workspace 快照在途期间 patch
+    // 不再排队（#1189 评审 P2）。
+    loadWorkspaceJobsSnapshot.mockResolvedValue(undefined)
+
+    const snapshotLoadingRef = { current: true }
+    const pendingEventsRef = { current: [] as MessageEvent[] }
+    const loadSnapshot = createLoadSnapshot(
+      queryClient,
+      'ws1',
+      snapshotLoadingRef,
+      pendingEventsRef,
+      () => {},
+      () => true
+    )
+
+    await loadSnapshot()
+
+    expect(snapshotLoadingRef.current).toBe(true)
+    expect(failJobFetch).not.toHaveBeenCalled()
+  })
 })
 
 describe('enqueuePendingEvent', () => {

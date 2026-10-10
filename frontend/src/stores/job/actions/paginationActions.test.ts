@@ -45,7 +45,7 @@ function resetJobListState(filterConfig: Partial<JobFilterConfig> = {}) {
     filteredJobIds: [],
     jobsWorkspaceId: 'ws1',
     isLoading: false,
-    error: null,
+    listLoadError: null,
     nextCursor: null,
     hasMore: false,
     totalJobs: null,
@@ -241,7 +241,7 @@ describe('paginationActions', () => {
 
     await useJobStore.getState().refreshFirstPage('ws1')
 
-    expect(useJobStore.getState().error).toBe('boom')
+    expect(useJobStore.getState().listLoadError).toBe('boom')
     expect(useJobStore.getState().isLoading).toBe(false)
   })
 })

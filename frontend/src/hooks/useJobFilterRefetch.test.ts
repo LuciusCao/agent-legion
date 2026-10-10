@@ -29,7 +29,7 @@ describe('useJobFilterRefetch', () => {
       revision: 0,
       jobsWorkspaceId: 'ws1',
       isLoading: false,
-      error: null,
+      listLoadError: null,
       nextCursor: null,
       hasMore: false,
       totalJobs: null,

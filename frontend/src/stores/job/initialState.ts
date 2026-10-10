@@ -22,7 +22,7 @@ export const initialJobDataState = {
   optionAccumulator: createOptionAccumulator([]),
   jobsWorkspaceId: null,
   isLoading: false,
-  error: null,
+  listLoadError: null,
   selectedIds: new Set<string>(),
   expandedId: null,
   filterConfig: { ...initialFilterConfig },

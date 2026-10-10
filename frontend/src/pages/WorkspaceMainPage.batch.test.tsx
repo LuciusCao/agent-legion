@@ -233,7 +233,7 @@ describe('WorkspaceMainPage batch operations', () => {
       revision: 0,
       jobsWorkspaceId: 'ws1',
       isLoading: false,
-      error: null,
+      listLoadError: null,
       selectedIds: new Set(),
       selectionMode: 'explicit',
       selectionFilter: null,

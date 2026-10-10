@@ -187,7 +187,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
       revision: 0,
       jobsWorkspaceId: 'ws1',
       isLoading: false,
-      error: null,
+      listLoadError: null,
       selectedIds: new Set(),
       selectionMode: 'explicit',
       selectionFilter: null,
@@ -394,7 +394,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
     })
 
     await waitFor(() => {
-      expect(useJobStore.getState().error).toBe('backend down')
+      expect(useJobStore.getState().listLoadError).toBe('backend down')
       expect(useJobStore.getState().isLoading).toBe(false)
     })
     expect(
@@ -403,7 +403,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
     // 错误态渲染在 JobList 的位置（列表区中央，#1183 review P3-1）。
     expect(await screen.findByText('任务列表加载失败')).toBeInTheDocument()
     expect(await screen.findByText('backend down')).toBeInTheDocument()
-    expect(screen.getByText('刷新页面可重试')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
     expect(screen.queryByText('暂无任务')).not.toBeInTheDocument()
   })
 
@@ -419,7 +419,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
       source.onopen?.()
     })
     await waitFor(() => {
-      expect(useJobStore.getState().error).toBe('backend down')
+      expect(useJobStore.getState().listLoadError).toBe('backend down')
     })
 
     source.emitMessage({
@@ -434,7 +434,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
     })
     await act(async () => new Promise((resolve) => setTimeout(resolve, 50)))
 
-    expect(useJobStore.getState().error).toBe('backend down')
+    expect(useJobStore.getState().listLoadError).toBe('backend down')
     expect(useJobStore.getState().jobIds).toEqual([])
     expect(useJobStore.getState().revision).toBe(0)
     expect(

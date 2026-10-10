@@ -35,9 +35,12 @@ export interface EmptyGuideVisibilityInput {
  * jobStore 初值 isLoading=false / totalJobs=null（按 0 计），stats 与
  * revision 未到时无法分辨「真空白」与「加载中」——不等 settle 会在有任务
  * 的 workspace 首帧闪现引导，还会误触发引导专属的设置快照请求。
- * 加载失败（jobsError 非空）同样不可见引导（#1183）：failJobFetch 会清空
- * jobs 并把 totalJobs 置 null（按 0 计），形态与「真空白」不可区分，需
- * error 显式区分，否则任务列表加载失败的 workspace 会整页替换为引导。
+ * 加载失败（jobsError 非空）同样不可见引导（#1183）：failJobFetch 清空
+ * jobs（totalJobs=null 来自初始态与 refreshFirstPage 的列表重置，按 0
+ * 计），失败终态与「真空白」形态不可区分，需 jobsError 显式区分，否则
+ * 任务列表加载失败的 workspace 会整页替换为引导。jobsError 由调用方读
+ * jobStore.listLoadError 传入——该字段是任务列表加载失败的唯一信号，
+ * mutation 错误只走 toast 不落 store。
  */
 export function shouldShowEmptyGuide(
   input: EmptyGuideVisibilityInput

@@ -8,7 +8,7 @@ describe('resetForWorkspace', () => {
       jobs: [createJobSummary({ id: 'j1', workspace_id: 'ws1' })],
       jobsWorkspaceId: 'ws1',
       isLoading: false,
-      error: 'boom',
+      listLoadError: 'boom',
       selectedIds: new Set(['j1']),
       filterConfig: {
         status: 'failed',
@@ -24,7 +24,7 @@ describe('resetForWorkspace', () => {
     expect(next.jobs).toEqual([])
     expect(next.isLoading).toBe(true)
     expect(next.jobsWorkspaceId).toBe('ws2')
-    expect(next.error).toBeNull()
+    expect(next.listLoadError).toBeNull()
     expect(next.selectedIds).toEqual(new Set())
     expect(next.filterConfig).toEqual({
       status: null,
@@ -98,7 +98,7 @@ describe('resetForWorkspace', () => {
 })
 
 describe('failJobFetch', () => {
-  it('sets error and clears loading/jobs when jobsWorkspaceId matches', () => {
+  it('sets listLoadError and clears loading/jobs when jobsWorkspaceId matches', () => {
     const state = createJobState({
       jobsWorkspaceId: 'ws1',
       isLoading: true,
@@ -107,7 +107,7 @@ describe('failJobFetch', () => {
 
     const next = failJobFetch('ws1', 'boom')(state)
 
-    expect(next.error).toBe('boom')
+    expect(next.listLoadError).toBe('boom')
     expect(next.isLoading).toBe(false)
     expect(next.jobs).toEqual([])
   })

@@ -84,8 +84,9 @@ describe('shouldShowEmptyGuide', () => {
   })
 
   it('hides the guide when the job list failed to load (#1183)', () => {
-    // failJobFetch 清空 jobs 并把 totalJobs 置 null（按 0 计），形态与
-    // 「真空白」不可区分——有任务的 workspace 加载失败时绝不渲染引导。
+    // failJobFetch 清空 jobs（totalJobs=null 来自初始态与筛选重试的列表
+    // 重置，按 0 计），形态与「真空白」不可区分——有任务的 workspace
+    // 加载失败时绝不渲染引导。
     expect(
       shouldShowEmptyGuide({ ...settled, jobsError: 'Request failed' })
     ).toBe(false)

@@ -42,7 +42,7 @@ export function resetJobListForFilterChange(
     totalJobs: null,
     loadingMore: false,
     isLoading: true,
-    error: null,
+    listLoadError: null,
   }
 }
 
@@ -51,7 +51,7 @@ export const failJobFetch =
   (state: JobState): Partial<JobState> =>
     state.jobsWorkspaceId === ws
       ? {
-          error: msg,
+          listLoadError: msg,
           isLoading: false,
           jobs: [],
           jobsById: {},

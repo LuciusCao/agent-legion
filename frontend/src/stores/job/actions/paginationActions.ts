@@ -141,7 +141,7 @@ export function paginationActions(set: JobStoreSet, get: () => JobState) {
         if (!isCurrent()) return
         const message =
           err instanceof Error ? err.message : 'Failed to load jobs'
-        set({ isLoading: false, error: message })
+        set({ isLoading: false, listLoadError: message })
       }
     },
   }

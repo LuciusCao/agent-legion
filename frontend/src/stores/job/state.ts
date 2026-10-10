@@ -34,7 +34,15 @@ export interface JobState
   optionAccumulator: import('./filterLogic/optionAccumulator').JobFilterOptionAccumulator
   jobsWorkspaceId: string | null
   isLoading: boolean
-  error: string | null
+  /**
+   * 任务列表加载失败的唯一信号（#1183）：只有整页快照/首屏加载的失败臂
+   * （failJobFetch、refreshFirstPage catch）可写入，成功快照/筛选重试/
+   * workspace 重置清除。批量与单项 mutation 的错误只走 toast 呈现、不落
+   * store——共享 error 通道被 mutation 复用时，一次批量操作失败即把健康
+   * 列表整页替换成错误页并冻结 SSE patch（PR #1189 评审 P1），新写入方
+   * 一律走 toast，不得复用本字段。
+   */
+  listLoadError: string | null
   selectedIds: Set<string>
   expandedId: string | null
   filterConfig: import('./filterConfig').JobFilterConfig
