@@ -112,7 +112,7 @@ export function runTrackedSave(context: {
     serverAt: string | null,
     serverHash: string | null
   ) => void
-  onTransientError: () => void
+  onTransientError: (terminal: boolean) => void
   armRetry: (timer: ReturnType<typeof setTimeout>) => void
   save: (
     yaml: string,
@@ -148,16 +148,16 @@ export function runTrackedSave(context: {
           )
           return resolveRetry(false)
         }
-        context.onTransientError()
         // #1196：4xx 是确定性的请求侧拒绝（如 422 校验失败——前后端空白
-        // 判定的 \x85/\x1c-\x1f 口径差可达），重试必然同样失败——直接终态
-        // error，不走退避（避免误导性的「将自动重试」与无效流量）。409 已
-        // 在上面的冲突分支终结；5xx/网络错误保持退避重试。
+        // 判定的 \x85/\x1c-\x1f 口径差可达），与退避耗尽同属终态：永不自行
+        // 重试——saveError=terminal 让文案不承诺「将自动重试」。409 已在
+        // 上面的冲突分支终结；5xx/网络错误保持退避重试。
         const status = (error as { status?: unknown } | null)?.status
-        if (typeof status === 'number' && status >= 400 && status < 500) {
-          return resolveRetry(false)
-        }
-        if (retriesLeft === 0) return resolveRetry(false)
+        const terminal =
+          (typeof status === 'number' && status >= 400 && status < 500) ||
+          retriesLeft === 0
+        context.onTransientError(terminal)
+        if (terminal) return resolveRetry(false)
         const attempt = MAX_PUT_RETRIES - retriesLeft + 1
         context.armRetry(
           setTimeout(() => {

@@ -12,6 +12,12 @@ export function draftSaveText(save: DraftSaveState | undefined): string | null {
     return 'Agent 已保存新的草稿版本；本页编辑未落盘，自动保存已暂停——请选择采用 Agent 版本或保留本页编辑'
   if (save.loadError) return '草稿服务不可用，编辑仅保留在本页内存'
   if (save.status === 'saving') return '草稿保存中…'
-  if (save.status === 'error') return '草稿保存失败，将自动重试'
+  // #1204：终态（4xx 客户端拒绝 / 退避耗尽）永不自行重试，文案不承诺
+  // 「将自动重试」，改指显式出口（修改内容或点重试按钮）。
+  if (save.status === 'error')
+    return save.saveError === 'terminal'
+      ? '草稿保存失败，不会自动重试——请修改内容或点击重试'
+      : '草稿保存失败，将自动重试'
+  return null
   return null
 }
