@@ -20,8 +20,9 @@ join(timeout=30) 后断言线程已死防假绿。
 4. P2-B 写→读：写侧持 skill-lock 锁且写入未提交（in-flight relock），
    get_lock_locked（plan 阶段读法）被阻塞至写提交并读到新值。
 
-xdist 兼容：同步全走 pg_locks 观测 + threading.Event + join 超时；每案
-workspace id 独立，TRUNCATE 隔离照常。
+xdist 兼容：同步走 pg_waits 的 holder-pid 探针（固定全域键场景）/
+pg_locks 键观测（键内嵌唯一 workspace id 场景）+ threading.Event +
+join 超时；每案 workspace id 独立，TRUNCATE 隔离照常。
 """
 
 from __future__ import annotations
@@ -38,7 +39,6 @@ import psycopg
 from server.app.db.connection import connect_database
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.global_settings import (
-    SKILL_LOCK_ADVISORY_SCOPE,
     acquire_skill_lock_domain_lock,
 )
 from server.app.jobs.queries.upgrade_impl_identity import (
@@ -49,6 +49,7 @@ from server.app.jobs.queries.workflow_revision_projection import (
 )
 from server.app.services.skill_lock_store import SkillLockStore
 from server.app.skills.config import SkillsLock
+from tests.helpers.pg_waits import backend_pid, wait_until_blocked_by
 from tests.postgres_support import BASE_DATABASE_URL, TEST_SCHEMA
 
 # 与 test_execution_generation_races.py 同款纪律：50ms 让重引入的环在毫秒级
@@ -90,6 +91,11 @@ def _await_advisory_waiter(scope: str, timeout: float = 10.0) -> None:
     单键 advisory 锁（objsubid=1）在 pg_locks 里拆成 (classid, objid) 两段
     32 位，按无符号 64 位还原后与 hashtext 比对（比照
     test_execution_generation_races 的 _await_job_mutation_waiter 手法）。
+
+    适用边界（#1211 C-3）：键过滤探针只在键全实例唯一时安全（本案 1/2 的
+    implementation-publication:<workspace_id> 每用例独立）。固定全域键
+    （SKILL_LOCK_ADVISORY_SCOPE）会被并发的兄弟用例误命中，必须走
+    pg_waits.wait_until_blocked_by 的 holder-pid 形态（本案 3/4）。
     """
     with psycopg.connect(TIMED_DATABASE_URL, autocommit=True) as probe:
         row = probe.execute("select hashtext(%s)", (scope,)).fetchone()
@@ -231,14 +237,17 @@ def test_skill_lock_write_blocks_behind_guard_lock(job_db) -> None:
     重验读到的锁文档 ≥ 任何在重验前已完成的 relock）。
 
     突变自检：摘掉 put_global_settings_document_under_lock 的取锁后 B 不再
-    等待（同步点超时）——本用例变红。
+    等待（探针的 thread= 早失败：写线程未阻塞即完成）——本用例变红。
     """
     lock = SkillsLock.model_validate({"skills": {"g/s": {"repo": "", "refs": {"v1": _COMMIT_V2}}}})
     conn_a = connect_database(TIMED_DATABASE_URL)
     try:
         acquire_skill_lock_domain_lock(conn_a)
         thread, outcome = _start(lambda: SkillLockStore(TIMED_DATABASE_URL).put_lock(lock))
-        _await_advisory_waiter(SKILL_LOCK_ADVISORY_SCOPE)
+        # 钉 holder 的 backend pid 而非固定键的任意 waiter：
+        # SKILL_LOCK_ADVISORY_SCOPE 全域共享，worksteal 可把本案与案 4 分到
+        # 不同 worker 并发执行，键过滤探针会互相误命中（#1211 C-3）。
+        wait_until_blocked_by(backend_pid(conn_a), thread=thread)
         conn_a.commit()
     finally:
         conn_a.close()
@@ -262,7 +271,8 @@ def test_locked_read_waits_for_inflight_write_and_sees_new_lock(job_db) -> None:
     文档规划继承。
 
     突变自检：摘掉 get_global_settings_document_under_lock 的取锁后 A 不再
-    等待（同步点超时）且读到旧值——两条断言同时变红。
+    等待（探针的 thread= 早失败：读线程未阻塞即完成）且读到旧值——两条
+    断言同时变红。
     """
     seed = SkillsLock.model_validate({"skills": {"g/s": {"repo": "", "refs": {"v1": _COMMIT_V1}}}})
     SkillLockStore(TIMED_DATABASE_URL).put_lock(seed)
@@ -270,12 +280,16 @@ def test_locked_read_waits_for_inflight_write_and_sees_new_lock(job_db) -> None:
 
     written = threading.Event()
     release = threading.Event()
+    holder_pid: list[int] = []
 
     def _relock_slow() -> None:
         conn_b = connect_database(TIMED_DATABASE_URL)
         try:
             # 模拟 put_lock 的持锁未提交窗口（in-flight relock）。
             acquire_skill_lock_domain_lock(conn_b)
+            # pid 回传握手（先例 test_sharding_concurrency.py）：holder 在 B
+            # 线程内，主线程钉 holder pid（#1211 C-3，见案 3 注释）需先拿到。
+            holder_pid.append(backend_pid(conn_b))
             conn_b.execute(
                 "insert into global_settings(key, value) values ('skill_lock', %s)"
                 " on conflict(key) do update set value=excluded.value",
@@ -290,7 +304,7 @@ def test_locked_read_waits_for_inflight_write_and_sees_new_lock(job_db) -> None:
     thread_b, outcome_b = _start(_relock_slow)
     assert written.wait(timeout=10), "relock thread never reached the write"
     thread_a, outcome_a = _start(lambda: SkillLockStore(TIMED_DATABASE_URL).get_lock_locked())
-    _await_advisory_waiter(SKILL_LOCK_ADVISORY_SCOPE)
+    wait_until_blocked_by(holder_pid[0], thread=thread_a)
     release.set()
     _join(thread_a)
     _join(thread_b)
