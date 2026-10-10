@@ -75,6 +75,7 @@ import json
 import re
 import shutil
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -240,7 +241,14 @@ def _dump_events_copy(target: Path, events: Path, redactor: SecretRedactor) -> t
     unredacted file never stays in the state directory. An OSError on the
     probe or the copy itself (the source vanished mid-read, or the run dir
     was chmod'd unreadable) degrades to an ``unreadable`` note with the
-    errno — distinct from the ENOENT family's plain ``absent``."""
+    errno — distinct from the ENOENT family's plain ``absent``.
+
+    评审 P3-2（收口轮，防御加固）：两个失败臂的副本删除各自 suppress——
+    unlink 再抛（同进程相邻 syscall 双 EACCES 的理论形态）时降级为「raw
+    副本滞留 + 状态照常返回」，而不是逃出到 dump_prep_evidence 的 broad
+    except 炸掉其余取证 arm。滞留副本的残留面：``_dump_incident_record``
+    照常落盘（其 error/incident 字段已脱敏），滞留文件本身按无 TTL 证据
+    人工清理路径处置（与 state 目录其余滞留物同一运维语义）。"""
     try:
         present = events.is_file()
     except OSError as probe_exc:
@@ -253,10 +261,12 @@ def _dump_events_copy(target: Path, events: Path, redactor: SecretRedactor) -> t
         size = copy.stat().st_size
         _, original, _, tail = scan_and_compress_pi_events(copy, redactor=redactor)
     except OSError as copy_exc:
-        copy.unlink(missing_ok=True)
+        with suppress(OSError):
+            copy.unlink(missing_ok=True)
         return f"unreadable: {copy_exc}", b""
     if size > 0 and original == 0:
-        copy.unlink(missing_ok=True)
+        with suppress(OSError):
+            copy.unlink(missing_ok=True)
         return f"scan failed (source was {size} bytes; raw copy discarded)", b""
     return "dumped", tail
 

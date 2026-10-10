@@ -195,10 +195,11 @@ def scan_and_compress_pi_events(
        ——Host compress 的既有语义（那侧无 registry、无脱敏承诺，保留
        大文件胜过破坏内容），prepare 不经过此态（恒传快照）。
     F. D 态的截空自身失败          → 返回形同 D 但 raw 文件**非空幸存**
-       （EACCES 族）；销毁失败被 suppress、绝不逃出函数——Worker 调用方
-       的幸存者守卫（prepare：original==0 且文件非空）检测到幸存即诚实
-       判败走空归档；state 取证副本同趟独立处理（扫描失败删自己的 raw
-       副本，见 ``_dump_events_copy``）。该态因此只对 Worker 侧成立，
+       （EACCES 族）；销毁失败被独立 suppress、绝不逃出函数（staging 清理
+       与截空各持 suppress——unlink 失败不连坐截空，反之亦然）——Worker
+       调用方的幸存者守卫（prepare：original==0 且文件非空）检测到幸存即
+       诚实判败走空归档；state 取证副本同趟独立处理（扫描失败删自己的
+       raw 副本，见 ``_dump_events_copy``）。该态因此只对 Worker 侧成立，
        E 态（redactor=None）永远不会进入截空臂。
 
     状态覆盖矩阵：tests/executors/test_pi_event_json_redaction.py（单元，
@@ -268,15 +269,19 @@ def scan_and_compress_pi_events(
         compressed_path.replace(events_path)
     except Exception:
         logger.exception("Failed to compress Pi events: %s", events_path)
+        # 评审 P3（收口轮）：staging 清理与截空各持独立 suppress——共用
+        # 一个块时 unlink 抛 OSError 会带出整个块，截空被连坐跳过（D 态
+        # 不必要退化为 F 态：安全为零——守卫接住——但降级扩大）。
         with suppress(OSError):
             compressed_path.unlink(missing_ok=True)
-            # #1165（#842 收口 P1）：带 redactor 的整趟失败必须就地销毁未脱敏
-            # 原文——截空比删除更可取（成员名保留、渲染面得到空流而非缺文件；
-            # 归档拿到的是零字节 events.jsonl，绝不是含密钥的原文）。截断自身
-            # 失败（EACCES 族）与 staging 清理同 suppress：销毁失败时调用方
-            # （prepare 的幸存者守卫）检测到非空原文件会诚实判败走空归档，
-            # raw 字节任何路径都进不了归档。
-            if redactor is not None:
+        # #1165（#842 收口 P1）：带 redactor 的整趟失败必须就地销毁未脱敏
+        # 原文——截空比删除更可取（成员名保留、渲染面得到空流而非缺文件；
+        # 归档拿到的是零字节 events.jsonl，绝不是含密钥的原文）。截断自身
+        # 失败（EACCES 族）同样 suppress 不逃逸：销毁失败时调用方（prepare
+        # 的幸存者守卫）检测到非空原文件会诚实判败走空归档，raw 字节任何
+        # 路径都进不了归档。
+        if redactor is not None:
+            with suppress(OSError):
                 events_path.write_text("")
         return None, 0, 0, b""
 

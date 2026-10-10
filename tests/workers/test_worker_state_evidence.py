@@ -233,6 +233,56 @@ def test_prep_failure_scan_failure_discards_raw_copy(
     assert set(remaining) == {"incident.json", "listing.txt"}
 
 
+def test_events_copy_unlink_failure_does_not_escape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, evidence_root: Path
+) -> None:
+    """评审 P3-2（收口轮，防御加固）：scan-failed 臂的副本删除自身再抛
+    OSError（同进程相邻 syscall 双 EACCES 的理论形态）——修复前该异常逃出
+    ``_dump_events_copy``、把 dump_prep_evidence 的 broad except 整臂炸掉
+    （其余取证 arm 全不落盘）；修复后 unlink 各自 suppress：状态照常返回
+    ``scan failed``（incident.json 照常落盘），raw 副本如实滞留（无 TTL
+    证据目录的人工清理路径），error_message 不受影响。"""
+    monkeypatch.setattr("worker.upload.prepare.prepare_result", _boom)
+    monkeypatch.setattr(
+        "worker.state_evidence.scan_and_compress_pi_events",
+        lambda *args, **kwargs: (None, 0, 0, b""),  # scan-failed 臂
+    )
+    real_unlink = Path.unlink
+
+    def failing_unlink(self: Path, missing_ok: bool = False):
+        # 只对 state 目录里的 raw 副本失败（源 run 目录的清理不受影响）。
+        if "evidence" in self.parts and self.name == "events.jsonl":
+            raise OSError(13, "Permission denied")
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    run_dir = work_root / "exec-1" / "job" / "runs" / "node_a" / "worker"
+    secret = "sk-live-supersecretgatewaytoken123"
+    (run_dir / "events.jsonl").write_text(
+        json.dumps({"type": "tool_execution_end", "result": {"content": [{"text": secret}]}})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    client = QueueFakeClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=0))
+    queue.shutdown()
+
+    # 失败被 _dump_events_copy 内部吞掉：其余 arm 照常落盘（修复前 broad
+    # except 炸掉整个转储，incident.json 缺失）。
+    incident = evidence_root / "exec-1__node_a"
+    record = json.loads((incident / "incident.json").read_text(encoding="utf-8"))
+    assert record["events"].startswith("scan failed")  # 状态如实（非 unreadable）
+    assert (incident / "listing.txt").is_file()  # 其余 arm 未被连坐
+    raw_copy = incident / "events.jsonl"  # raw 副本滞留（防御语义，如实记录）
+    assert raw_copy.is_file()
+    report = client.reports[0]
+    assert report["status"] == "failed"  # 结果仍可上报（不受取证臂影响）
+
+
 def test_listing_redacts_secret_bearing_filenames(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, evidence_root: Path
 ) -> None:

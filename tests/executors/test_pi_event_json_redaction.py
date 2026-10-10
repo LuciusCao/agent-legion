@@ -31,6 +31,9 @@ F    单元 test_discard_failure_is_suppressed_not_escaped（截空失败
           test_worker_upload_archive_safety.py::
           test_scan_failure_survivor_fails_honestly
 D/F  队列 test_worker_upload_archive_safety.py（归档后果 + 上报语义）
+P3   单元 test_staging_unlink_failure_does_not_skip_truncation（收口轮：
+          unlink 抛 + fsync 抛 → 截空仍可达——suppress 块拆分的连坐修复，
+          hit/no_hit/host_none 三列）
 ===  ===  =============================================================
 """
 
@@ -515,3 +518,52 @@ def test_missing_file_with_redactor_is_none_shape(tmp_path):
 
     assert result == (None, 0, 0, b"")
     assert not missing.exists()
+
+
+@pytest.mark.parametrize("redactor_mode", ["hit", "no_hit", "host_none"])
+def test_staging_unlink_failure_does_not_skip_truncation(redactor_mode, tmp_path, monkeypatch):
+    """评审 P3-1（收口轮）：staging unlink 抛 OSError + fsync 抛错的双重
+    失败形态——共用 suppress 块时 unlink 带出整个块、截空被连坐跳过（D 态
+    不必要退化为 F 态：raw 幸存 → 守卫判败 → 空归档，降级扩大）。修复后
+    两者独立 suppress：unlink 失败不阻断截空（文件变空）；Host 列对照——
+    redactor=None 时原样保留（E 态不受 unlink 失败影响）。staging 清理
+    失败的残留如实滞留（suppress 不消灭失败，只阻断连坐），残留内容只含
+    已脱敏的行（半截压缩产物）。"""
+    from shared import pi_events
+
+    secret = "sk-live-supersecretgatewaytoken123"
+    if redactor_mode == "no_hit":
+        events_path = _write_events_with_text(tmp_path, "plain output no secret")
+    else:
+        events_path = _write_events_with_secret(tmp_path, secret)
+    raw = events_path.read_bytes()
+
+    monkeypatch.setattr(
+        pi_events.os, "fsync", lambda _fd: (_ for _ in ()).throw(OSError(5, "I/O error"))
+    )
+    real_unlink = Path.unlink
+
+    def failing_unlink(self: Path, missing_ok: bool = False):
+        # 只对 staging（.compressing）失败——events 文件自身的截空不走 unlink。
+        if self.name.endswith(".compressing"):
+            raise OSError(13, "Permission denied")
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+
+    redactor = (
+        None if redactor_mode == "host_none" else SecretRedactor(literal_spans(secret), len(secret))
+    )
+    result = scan_and_compress_pi_events(events_path, redactor=redactor)
+
+    assert result == (None, 0, 0, b"")  # 失败形密闭（双重失败不逃逸）
+    if redactor is None:
+        assert events_path.read_bytes() == raw  # E：原样保留，不受 unlink 影响
+        # Host 列的 staging 是原行照写（无脱敏/过滤），残留含原文与 E 态
+        # 「原样保留」语义一致——那侧本来就不承诺脱敏。
+    else:
+        assert events_path.read_bytes() == b""  # D：截空可达（unlink 失败不连坐）
+        # staging 残留（unlink 失败如实滞留）不含密钥：Worker 列的半截
+        # 压缩产物只写已脱敏的行。
+        for staging in tmp_path.glob("*.jsonl.compressing"):
+            assert secret.encode() not in staging.read_bytes()

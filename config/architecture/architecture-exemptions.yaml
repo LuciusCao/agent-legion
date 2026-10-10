@@ -1218,6 +1218,21 @@ exemptions:
   ceiling: 67
   expires: 2026-12-31
 - check: architecture.file_budget
+  path: shared/pi_events.py
+  reason: 'Codex 收口轮（#1165，0.7.19 后）给整趟扫描失败臂加了就地销毁未脱敏 events.jsonl 的
+    fail-closed 动作，评审 P3 又把 staging 清理与截空拆成各持 suppress 的两个独立块（共用块
+    时 unlink 抛 OSError 连坐跳过截空，D 态不必要退化为 F 态）——三行防护代码使有效行
+    90→93（超 77+15 带恰好 1 行；两个提交 #1165 修复与状态机深化合计 +2 已占满带额，本
+    轮评审修复 +1 越界）。扫描失败臂的三个清理动作（log / staging unlink / 就地截空）是
+    #842 泄漏防线的完整性成本，不可再拆出文件（scan_and_compress 的单趟扫描契约是
+    Worker/Host 两消费方的性能前提）。时间盒：六态状态机若迁入独立模块（scan 器与
+    文件状态机分离），此处重登预算。anchor #843（结果元数据 v2 群）：同 PR 群的
+    归档契约面。'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/843
+  ceiling: 103
+  expires: 2026-12-31
+- check: architecture.file_budget
   path: server/app/routes/runs.py
   reason: '#734 tags the three runs routes with API_SCOPE_INTAKE_TAG so the api-scope admission
     surface derives from the matched route object (auth/api_scope_surface.py) instead of a second
