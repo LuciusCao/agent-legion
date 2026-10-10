@@ -174,8 +174,10 @@
       "note": "审批决策：job-mutation 锁下状态守卫，刻意不做代次比较（§2.4）"
     },
     "server/app/jobs/queries/job_bulk_sql.py": {
-      "via": [],
-      "note": "JobQueries 数据层门面：job 创建 INSERT（BOUNDARY-DATA-001）"
+      "via": [
+        "lock_job_mutations_sorted"
+      ],
+      "note": "JobQueries 数据层门面：job 创建 INSERT（BOUNDARY-DATA-001）；chunk 事务首句按 job_id 升序取 job-mutation 锁持到提交（#1083）"
     },
     "server/app/jobs/queries/job_node_lifecycle.py": {
       "via": [
@@ -189,8 +191,10 @@
       "note": "JobQueries 数据层门面：node_runs/job_nodes 记录读写（BOUNDARY-DATA-001）"
     },
     "server/app/jobs/queries/job_nodes.py": {
-      "via": [],
-      "note": "JobQueries 数据层门面：jobs/job_nodes CRUD（BOUNDARY-DATA-001）"
+      "via": [
+        "lock_job_mutations_sorted"
+      ],
+      "note": "JobQueries 数据层门面：jobs/job_nodes CRUD（BOUNDARY-DATA-001）；create_job 事务首句取 job-mutation 锁后再 mkdir / upsert（#1083）"
     },
     "server/app/jobs/queries/workspace_packages.py": {
       "via": [],

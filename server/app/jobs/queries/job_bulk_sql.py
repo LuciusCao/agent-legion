@@ -104,6 +104,29 @@ def insert_job_nodes_batched(conn: Any, pairs: list[tuple[str, str]]) -> None:
         conn.execute(JOB_NODES_BULK_INSERT_SQL, columns)
 
 
+def lock_job_mutations_sorted(conn: Any, job_ids: Iterable[str]) -> None:
+    """Take ``job-mutation:<id>`` for every id, sorted, held to COMMIT (#1083).
+
+    Job creation joins the EXEC-GENERATION-001 lock domain so the deletion
+    cleanup's "row absent under the lock → rename into .trash" step is atomic
+    against a same-id recreate: the creator takes the lock BEFORE its mkdir
+    and upsert, so it either committed its row before the cleanup's recheck
+    (cleanup skips) or waits until the rename is done (mkdir lands on an
+    empty path). Callers run this as the FIRST statement of the creating
+    transaction — level 2 of the global lock order, before any row lock
+    (the chunk's material/bundle FOR KEY SHARE probes, the jobs upsert).
+
+    Ascending ``job_id`` is the global batch order
+    ``(hashtext('agent-ws:' || workspace_id), job_id)`` restricted to one
+    workspace — every creating call is single-workspace — so a create chunk
+    never walks two jobs opposite to finish_many / claim batches / sweeps.
+    One statement per id (not a set-returning SELECT): acquisition order must
+    not depend on the planner's projection order.
+    """
+    for job_id in sorted(set(job_ids)):
+        conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"job-mutation:{job_id}",))
+
+
 def lock_rows_for_key_share(
     conn: Any, sql_template: str, ids: list[str], workspace_id: str, *, kind: str
 ) -> None:

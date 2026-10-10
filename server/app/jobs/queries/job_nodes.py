@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from server.app.jobs.queries.job_bulk_sql import id_chunks
+from server.app.jobs.queries.job_bulk_sql import id_chunks, lock_job_mutations_sorted
 from server.app.jobs.queries.job_list_columns import JOB_LIST_COLUMNS
 from server.app.jobs.queries.job_locked_rereads import JobLockedRereadQueriesMixin
 from server.app.jobs.queries.job_node_runs import JobNodeRunQueriesMixin
@@ -40,9 +40,13 @@ class JobNodeQueriesMixin(
     ) -> dict[str, Any]:
         job_id = _job_id(workspace_id, workflow_key, source_id)
         storage_dir = job_storage_dir(self.jobs_dir, workspace_id, job_id)
-        storage_dir.mkdir(parents=True, exist_ok=True)
 
         with self.connect() as conn:
+            # #1083: job-mutation lock first, then mkdir + upsert, all under
+            # it to COMMIT — same protocol as create_jobs_bulk (see
+            # lock_job_mutations_sorted).
+            lock_job_mutations_sorted(conn, [job_id])
+            storage_dir.mkdir(parents=True, exist_ok=True)
             existing = conn.execute("select * from jobs where id=%s", (job_id,)).fetchone()
             if existing is not None and (
                 existing["workspace_id"] != workspace_id

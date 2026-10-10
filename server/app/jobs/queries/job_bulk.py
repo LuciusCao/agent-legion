@@ -18,6 +18,7 @@ from server.app.jobs.queries.job_bulk_sql import (
     MATERIAL_LOCK_IN_SQL,
     insert_job_nodes_batched,
     insert_jobs_batched,
+    lock_job_mutations_sorted,
     lock_rows_for_key_share,
 )
 from server.app.jobs.run_freeze import candidate_input
@@ -94,7 +95,6 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
             else None
         )
         rows: dict[str, tuple[Any, ...]] = {}
-        job_ids: list[str] = []
         identities: dict[str, tuple[str, str]] = {}
         job_refs: dict[str, tuple[str, str]] = {}
         for candidate in candidates:
@@ -110,9 +110,8 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                 job_refs[job_id] = (input_type, str(input_doc.get(f"{input_type}_id") or ""))
             # dict-keyed insert = dedup by job id, last row wins (the
             # executemany shape's later-DO-UPDATE-wins semantics — see
-            # job_bulk_sql's JOBS_BULK_INSERT_SQL comment).
-            if job_id not in rows:
-                job_ids.append(job_id)
+            # job_bulk_sql's JOBS_BULK_INSERT_SQL comment; dict order keeps
+            # first-seen order).
             rows[job_id] = job_row_tuple(
                 self.jobs_dir,
                 workspace_id,
@@ -128,23 +127,20 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         owned_ids: list[str] = []
 
         with self.connect() as conn:
-            # Existence precheck over the WHOLE call, in chunked statements:
-            # ``by_id`` feeds the storage-dir skip (resubmits keep the stored
-            # dir). #501 removed the precheck's identity-comparison loop — a
-            # locked read cannot see concurrent in-flight same-id inserts
-            # (see fetch_identity_map), so the identity contract moved to the
-            # write side: verify_chunk_identities re-checks AFTER each chunk's
-            # INSERT settles, under every interleaving, and raises the
-            # structured identity error on any mismatch (committed or raced).
-            by_id = fetch_identity_map(conn, job_ids)
-            # One commit per ≤CHUNK_ROWS jobs+nodes; each chunk locks its own
-            # refs FOR KEY SHARE before its INSERT (P1-1) — a between-chunks
-            # delete makes the next chunk's probe fail on the missing row
-            # instead of letting a dangling reference in. Storage dirs are
-            # created AFTER the precheck (stray shard dirs would block the
-            # flat→sharded migration; resubmits keep the stored dir).
+            # One commit per ≤CHUNK_ROWS jobs+nodes. #1083: each chunk's FIRST
+            # statement takes its ids' job-mutation locks (sorted, held to the
+            # chunk's COMMIT) — creation joins the EXEC-GENERATION-001 lock
+            # domain, so a deleted same-id job's post-commit cleanup ("row
+            # absent under the lock → rename into .trash") can never move a
+            # directory this chunk is creating or adopting. Lock order: the
+            # job-mutation level precedes every row lock below. Then the chunk
+            # locks its own refs FOR KEY SHARE before its INSERT (P1-1) — a
+            # between-chunks delete makes the next chunk's probe fail on the
+            # missing row instead of letting a dangling reference in.
             for start in range(0, len(row_list), CHUNK_ROWS):
                 chunk = row_list[start : start + CHUNK_ROWS]
+                chunk_ids = [str(row[0]) for row in chunk]
+                lock_job_mutations_sorted(conn, chunk_ids)
                 lock_rows_for_key_share(
                     conn,
                     MATERIAL_LOCK_IN_SQL,
@@ -159,9 +155,17 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                     workspace_id,
                     kind="Material bundle",
                 )
-                for row in chunk:
-                    if str(row[0]) not in by_id:
-                        job_storage_dir(self.jobs_dir, workspace_id, str(row[0])).mkdir(
+                # Storage dirs only for ids with no row yet (stray shard dirs
+                # would block the flat→sharded migration; resubmits keep the
+                # stored dir). Read under the job-mutation locks, existence
+                # is settled against deletion: a row deleted after an
+                # unlocked precheck would otherwise get no dir. Not the
+                # identity check — #501 keeps that on the write side
+                # (verify_chunk_identities after the INSERT settles).
+                existing = fetch_identity_map(conn, chunk_ids)
+                for job_id in chunk_ids:
+                    if job_id not in existing:
+                        job_storage_dir(self.jobs_dir, workspace_id, job_id).mkdir(
                             parents=True, exist_ok=True
                         )
                 owned_chunk = insert_jobs_batched(conn, chunk)

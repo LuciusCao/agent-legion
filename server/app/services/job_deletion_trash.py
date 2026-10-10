@@ -17,16 +17,19 @@ DB 是删除的唯一权威：``JobDeletionService`` 先在
   同源重建的 job 会复用该路径，见 docs/data-layout.md）；
 - 移入 trash 成功、删除失败或进程崩溃：残留在 ``.trash/<operation_id>/``，
   由 ``job_deletion_trash_sweep.sweep_deletion_trash`` 按 TTL 回收（只回收带已提交标记的条目）；
-- 提交后、移入前同源 job 被重建（确定性 id，create_job 不取 job-mutation
-  锁）：移入在 ``job-mutation:<id>`` 锁下复核 jobs 行仍不存在才执行，已重建就
-  整体跳过（目录与日志归新 job，交给 retention），绝不移走新 job 的活目录；
-  并把「已重建」返回调用方，由其跳过按 job id 的后续清理与删除广播；
+- 提交后、移入前同源 job 被重建（确定性 id）：移入在 ``job-mutation:<id>``
+  锁下复核 jobs 行仍不存在才执行，已重建就整体跳过（目录与日志归新 job，交给
+  retention），绝不移走新 job 的活目录；并把「已重建」返回调用方，由其跳过按
+  job id 的后续清理与删除广播。创建路径（``create_job`` /
+  ``create_jobs_bulk``）在 mkdir 与 upsert 之前取同一把锁并持到提交（#1083），
+  所以「锁下复核不存在 → rename」对重建是原子的：重建要么已提交（复核跳过），
+  要么等到 rename 完成后才 mkdir 出空目录；
 - 锁事务在给出复核结果前失败（瞬时 DB 错误）：无法排除重建，同样整体跳过
   并按「已重建」返回，旧 job 的 refs / 对象泄漏交给 orphan GC 与
   ``scripts/gc-s3-jobs.py`` 回收。
 
 日志路径的枚举（按快照精确生成、逐个探测存在性）在锁外完成，锁内只复核行与
-rename——锁事务保持短，不阻塞重建后新 job 的 claim。日志只删能由
+rename——锁事务保持短，不长时间阻塞同源重建（及重建后新 job 的 claim）。日志只删能由
 ``job_node_log_name`` 精确生成的名字，见 ``deleted_job_log_paths``。
 
 锁下只做同文件系统原子 ``os.rename`` 进 trash（跨文件系统 EXDEV 即放弃、留
