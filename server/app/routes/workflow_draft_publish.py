@@ -71,6 +71,12 @@ def create_workflow_draft_publish_router(job_db: JobQueries, settings: Settings)
             # v50): reload the scan list and wake the poll loop.
             reload_worker_scan_entries(http_request)
             notify_schedulable_work()
-        return WorkflowDraftValidationResponse(valid=valid, errors=errors)
+        # #1143/#1177: 与 validate 同源携带草稿语义身份——发布审的正是该
+        # YAML；不可解析草稿为 null（发布失败时无身份语义）。
+        return WorkflowDraftValidationResponse(
+            valid=valid,
+            errors=errors,
+            definition_hash=workflow_draft_identity_hash(request.definition_yaml),
+        )
 
     return router

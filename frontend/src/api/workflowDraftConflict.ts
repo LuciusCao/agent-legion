@@ -1,16 +1,20 @@
 /** #633：workflow 草稿 PUT 的 CAS 失败（409）——服务端草稿已被 agent/其它
  * 会话推进，detail 携带当前草稿；编辑器据此提示用户而非静默覆盖。
- * 从 workflowDraft.ts 拆出（文件体积预算）。 */
+ * 从 workflowDraft.ts 拆出（文件体积预算）。
+ * #1177 codex P1：transport type 从生成的 OpenAPI 契约派生（后端
+ * ``responses={409: WorkflowDraftConflictDetail}`` 立模）——不再手写字段。 */
 
-export type WorkflowDraftConflictDetail = {
-  definition_yaml: string | null
-  updated_at: string | null
-  /** #1143：服务端当前草稿的语义身份（不可解析 → null；旧服务端缺省）。 */
-  definition_hash?: string | null
-}
+import type { components } from '../generated/api'
+
+type ApiSchemas = components['schemas']
+
+export type WorkflowDraftConflictDetail =
+  ApiSchemas['WorkflowDraftConflictDetail']
+export type WorkflowDraftConflictCurrentDraft =
+  ApiSchemas['WorkflowDraftConflictCurrentDraft']
 
 export class WorkflowDraftConflictError extends Error {
-  readonly currentDraft: WorkflowDraftConflictDetail
+  readonly currentDraft: WorkflowDraftConflictCurrentDraft
 
   constructor(detail: unknown) {
     super('workflow draft conflict')
@@ -19,7 +23,7 @@ export class WorkflowDraftConflictError extends Error {
         ? (detail as { current_draft?: unknown })
         : {}
     const current = (payload.current_draft ??
-      {}) as Partial<WorkflowDraftConflictDetail>
+      {}) as Partial<WorkflowDraftConflictCurrentDraft>
     this.currentDraft = {
       definition_yaml: current.definition_yaml ?? null,
       updated_at: current.updated_at ?? null,

@@ -138,9 +138,12 @@ export function runTrackedSave(context: {
       onFailure: (error: unknown, resolveRetry: (ok: boolean) => void) => {
         if (error instanceof WorkflowDraftConflictError) {
           const current = error.currentDraft
+          // #1177 codex P2：undefined（旧响应缺字段）→ null（明确无身份），
+          // 不经 onConflict 的「未传」臂（conflict 事件总是已发生——身份
+          // 缺失就是无身份，不是「不更新」）。
           context.onConflict(
-            current.definition_yaml,
-            current.updated_at,
+            current.definition_yaml ?? null,
+            current.updated_at ?? null,
             current.definition_hash ?? null
           )
           return resolveRetry(false)

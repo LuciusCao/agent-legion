@@ -171,6 +171,35 @@ describe('useWorkflowDraftPersistence', () => {
     expect(result.current.state.savedHash).toBe('hash-agent-v1')
   })
 
+  // #1177 codex P2：hydrate 的服务端草稿明确无身份（hash=null，不可解析
+  // 草稿）必须清除既有 savedHash——「已保存 H → 服务端推进为无身份草稿」
+  // 若保留旧 H，stale hint 会拿旧 H 误判「与卡相同」隐藏真实分歧提示。
+  it('clears the stale savedHash when the hydrated draft has no identity (hash=null)', () => {
+    // 先以带身份 H 的草稿 hydrate（保存链另会在 PUT 成功时推进 H——
+    // 这里直接经 serverDraft 首装 hydrate 建立旧值）。
+    const first = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: SERVER_DRAFT.definition_yaml,
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: { ...SERVER_DRAFT, definition_hash: 'hash-old' },
+    })
+    expect(first.result.current.state.savedHash).toBe('hash-old')
+
+    // 服务端草稿推进为不可解析内容（hash=null）：hydrate 显式 null 清除
+    // 旧 hash（stale hint 之后按「编辑器无身份」降级字符串比较，不误判）。
+    const { result } = renderPersistence({
+      workspaceId: 'ws2-null-hash',
+      draftYaml: 'key: demo\nlabel: Edited\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: {
+        ...SERVER_DRAFT,
+        definition_yaml: 'key: demo\nlabel: unparseable]]\n',
+        definition_hash: null,
+      },
+    })
+    expect(result.current.state.savedHash).toBeNull()
+  })
+
   it('PUTs edits after an 800ms debounce and reports saved', async () => {
     const { result, rerender } = renderPersistence({
       workspaceId: 'ws1',

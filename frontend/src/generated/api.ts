@@ -7746,6 +7746,34 @@ export interface components {
       /** Valid */
       valid: boolean
     }
+    /**
+     * WorkflowDraftConflictCurrentDraft
+     * @description 409 conflict payload 的 ``detail.current_draft``（#1177 codex P1：
+     *     契约模型化——此前是裸 dict，前端只能手写 transport type）。
+     *
+     *     与 ``WorkflowDraftStoreResponse`` 同一字段集（服务端 current draft 的
+     *     单一形状）：草稿不存在（never-saved 竞态删除后撞 CAS）时全 null。
+     */
+    WorkflowDraftConflictCurrentDraft: {
+      /** Definition Hash */
+      definition_hash?: string | null
+      /** Definition Yaml */
+      definition_yaml?: string | null
+      /** Updated At */
+      updated_at?: string | null
+    }
+    /**
+     * WorkflowDraftConflictDetail
+     * @description 409 detail 顶层（服务层 DraftConflictError.payload 的契约形态）：
+     *     message（人读指引）+ expected_updated_at（stale 基线）+ current_draft。
+     */
+    WorkflowDraftConflictDetail: {
+      current_draft: components['schemas']['WorkflowDraftConflictCurrentDraft']
+      /** Expected Updated At */
+      expected_updated_at: string
+      /** Message */
+      message: string
+    }
     /** WorkflowDraftRequest */
     WorkflowDraftRequest: {
       /** Definition Yaml */
@@ -11757,6 +11785,15 @@ export interface operations {
           'application/json': components['schemas']['StudioAgentWorkflowDraftResponse']
         }
       }
+      /** @description Stale CAS base */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowDraftConflictDetail']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -15614,6 +15651,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowDraftStoreResponse']
+        }
+      }
+      /** @description Stale CAS base */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowDraftConflictDetail']
         }
       }
       /** @description Validation Error */

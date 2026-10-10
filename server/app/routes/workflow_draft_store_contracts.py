@@ -47,3 +47,25 @@ class WorkflowDraftStoreResponse(BaseModel):
     # 用它与草稿卡记录的 hash 核对「是否与编辑器一致」，替代逐字节全等。
     # 不可解析的草稿为 null（前端按「无法核对」降级到字符串比较）。
     definition_hash: str | None = None
+
+
+class WorkflowDraftConflictCurrentDraft(BaseModel):
+    """409 conflict payload 的 ``detail.current_draft``（#1177 codex P1：
+    契约模型化——此前是裸 dict，前端只能手写 transport type）。
+
+    与 ``WorkflowDraftStoreResponse`` 同一字段集（服务端 current draft 的
+    单一形状）：草稿不存在（never-saved 竞态删除后撞 CAS）时全 null。
+    """
+
+    definition_yaml: str | None = None
+    updated_at: str | None = None
+    definition_hash: str | None = None
+
+
+class WorkflowDraftConflictDetail(BaseModel):
+    """409 detail 顶层（服务层 DraftConflictError.payload 的契约形态）：
+    message（人读指引）+ expected_updated_at（stale 基线）+ current_draft。"""
+
+    message: str
+    expected_updated_at: str
+    current_draft: WorkflowDraftConflictCurrentDraft

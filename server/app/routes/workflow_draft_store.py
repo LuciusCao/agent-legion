@@ -13,16 +13,27 @@ expected_updated_at (stale base → 409 with the current draft, mirroring the
 tool surface); an absent field keeps the legacy last-write-wins upsert.
 """
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.jobs import JobQueries
 from server.app.routes.workflow_draft_store_contracts import (
+    WorkflowDraftConflictDetail,
     WorkflowDraftStoreRequest,
     WorkflowDraftStoreResponse,
 )
 from server.app.services.workflow_draft_cas import save_workflow_draft_if_unchanged
 from server.app.services.workflow_draft_store import get_workflow_draft, save_workflow_draft
+
+# 409 CAS 冲突的响应契约（#1177 codex P1）：detail 由 app 级异常处理器
+# 从 DraftConflictError.payload 渲染，形状在 contracts 立模型并经
+# responses= 进 OpenAPI——前端 transport type 从生成的 api.ts 派生
+# （不再手写）。
+_DRAFT_CONFLICT_RESPONSES: dict[int | str, dict[str, Any]] = {
+    409: {"model": WorkflowDraftConflictDetail, "description": "Stale CAS base"}
+}
 
 
 def create_workflow_draft_store_router(job_db: JobQueries) -> APIRouter:
@@ -41,6 +52,7 @@ def create_workflow_draft_store_router(job_db: JobQueries) -> APIRouter:
     @router.put(
         "/workspaces/{workspace_id}/workflow-draft",
         response_model=WorkflowDraftStoreResponse,
+        responses=_DRAFT_CONFLICT_RESPONSES,
         dependencies=[Depends(reject_studio_agent_scope)],
     )
     def put_draft(

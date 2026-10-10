@@ -104,10 +104,13 @@ export function useDraftSaveConflictActions() {
       }
       // #1143：带上冲突草稿的语义身份——采用后 savedHash 恢复为服务端
       // 草稿身份，草稿卡核对不应对刚采用的内容误报不一致。
+      // #1177 codex P2：conflictDraftHash 的 undefined/null 分开传递——
+      // undefined（冲突事件未带 hash 字段）保持 hydrate 的「不动旧值」；
+      // null（服务端明确无身份）清除旧 hash。
       studio.adoptServerDraft(
         conflict,
         studio.draftSave?.savedAt ?? null,
-        studio.draftSave?.conflictDraftHash ?? undefined
+        studio.draftSave?.conflictDraftHash
       )
     },
     onKeepMine: () => studio.resolveConflict(true),

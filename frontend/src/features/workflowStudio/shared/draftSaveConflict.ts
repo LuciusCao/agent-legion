@@ -6,8 +6,11 @@
 import type { DraftSaveState } from './draftSaveTypes'
 
 /* 采用服务端版本（adoptServerDraft/hydrate 共用）：回到 idle、清除冲突，
-   savedAt 跟随服务端时间戳（无时间戳时保留原值）。#1143：savedHash 同
-   步到服务端草稿身份（无 hash 时保留原值——旧服务端/不可解析草稿）。 */
+   savedAt 跟随服务端时间戳（无时间戳时保留原值）。#1177 codex P2：
+   savedHash 形态 string | null | undefined——undefined = 调用方未传
+   （保留旧值，向后兼容）；显式 null = 服务端明确「无身份」（不可解析
+   草稿），必须清除旧 hash——否则 stale hint 拿旧 H 误判「与卡相同」，
+   隐藏真实分歧提示。 */
 export function conflictResolvedState(
   current: DraftSaveState,
   savedAt: string | null | undefined,
@@ -17,7 +20,7 @@ export function conflictResolvedState(
     ...current,
     status: 'idle',
     savedAt: savedAt ?? current.savedAt,
-    savedHash: savedHash ?? current.savedHash,
+    savedHash: savedHash === undefined ? current.savedHash : savedHash,
     conflict: false,
     conflictDraftYaml: undefined,
     conflictDraftHash: undefined,
@@ -28,7 +31,9 @@ export function conflictResolvedState(
    草稿暴露给 UI（采用入口），savedAt 显示服务端真值。#1143：serverHash
    存进 conflictDraftHash（不进 savedHash——冲突期间编辑器有未落盘编辑，
    发布以编辑器为准，草稿卡一致性提示应保留；采用服务端版本时才经
-   adopt 恢复成 savedHash）。 */
+   adopt 恢复成 savedHash）。#1177 codex P2：serverHash undefined =
+   未传（旧冲突事件不带 hash 时不清既有 conflictDraftHash）；显式 null =
+   服务端明确无身份。 */
 export function conflictEnteredState(
   current: DraftSaveState,
   serverYaml: string | null,
@@ -41,7 +46,7 @@ export function conflictEnteredState(
     savedAt: serverAt ?? current.savedAt,
     conflict: true,
     conflictDraftYaml: serverYaml,
-    conflictDraftHash: serverHash ?? undefined,
+    conflictDraftHash: serverHash === undefined ? undefined : serverHash,
   }
 }
 

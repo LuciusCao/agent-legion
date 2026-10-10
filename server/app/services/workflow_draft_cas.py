@@ -31,6 +31,28 @@ from server.app.services.workflow_draft_store import (
 )
 
 
+def _conflict_payload(expected_updated_at: str, current: dict[str, Any] | None) -> dict[str, Any]:
+    """409 detail 的契约化构造（#1177 codex P1）：字段集与
+    ``workflow_draft_store_contracts.WorkflowDraftConflictDetail``（路由侧
+    OpenAPI responses= 声明的模型）逐字段一致——路由测试以模型 dump 为
+    oracle 钉死两者同步，service 层不 import routes 包（分层方向）。
+    #1143: current_draft carries the semantic identity hash — the adopting
+    side (frontend adopt path) restores savedHash from it.
+    """
+    return {
+        "message": (
+            "Workflow draft conflict: another session saved a newer"
+            " draft. Re-read the draft, rebase your changes and retry."
+        ),
+        "expected_updated_at": expected_updated_at,
+        "current_draft": {
+            "definition_yaml": current["definition_yaml"] if current else None,
+            "updated_at": str(current["updated_at"]) if current else None,
+            "definition_hash": current.get("definition_hash") if current else None,
+        },
+    }
+
+
 def save_workflow_draft_if_unchanged(
     job_db: JobQueries,
     workspace_id: str,
@@ -61,20 +83,8 @@ def save_workflow_draft_if_unchanged(
     except CasDraftConflictError as exc:
         # #1143: current_draft carries the semantic identity hash too — the
         # adopting side (frontend adopt path) restores savedHash from it.
+        # #1177 codex P1: payload is contract-shaped (see _conflict_payload).
         current = get_workflow_draft(job_db, workspace_id)
-        raise DraftConflictError(
-            {
-                "message": (
-                    "Workflow draft conflict: another session saved a newer"
-                    " draft. Re-read the draft, rebase your changes and retry."
-                ),
-                "expected_updated_at": expected_updated_at,
-                "current_draft": {
-                    "definition_yaml": current["definition_yaml"] if current else None,
-                    "updated_at": current["updated_at"] if current else None,
-                    "definition_hash": current.get("definition_hash") if current else None,
-                },
-            }
-        ) from exc
+        raise DraftConflictError(_conflict_payload(expected_updated_at, current)) from exc
     assert draft is not None  # the CAS upsert path returns a row or raises
     return draft
