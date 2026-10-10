@@ -326,7 +326,7 @@ describe('job helpers', () => {
 
     const result = await fetchJobArtifactRawBytes('j1', 'demo.mp4')
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/jobs/j1/artifacts/demo.mp4/raw',
+      '/api/jobs/j1/raw-artifacts/demo.mp4',
       {
         // #1178 codex 复审：重取通道必须穿透 HTTP 缓存——同名产物重跑后
         // 字节已变而 URL 不变，freshness window 会播出旧字节。
@@ -454,31 +454,33 @@ describe('job helpers', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     for (const call of fetchMock.mock.calls) {
-      expect(call[0]).toBe('/api/jobs/j1/artifacts/final.mp4/raw')
+      expect(call[0]).toBe('/api/jobs/j1/raw-artifacts/final.mp4')
       expect(call[1]).toEqual({ cache: 'no-store' })
     }
     expect(new Uint8Array(after.bytes)).toEqual(new Uint8Array(second))
     expect(new Uint8Array(before.bytes)).toEqual(new Uint8Array(first))
   })
 
-  it('jobArtifactRawUrl 按路径段编码：嵌套产物名的 / 保持结构语义（#1178 codex 复审 P2）', () => {
-    // 整名 encodeURIComponent 会把 / 编成 %2F——ASGI 解码后变回分隔符，
-    // 与按段匹配的路由错配（此前嵌套名 404）。按段编码后 / 原样保留。
+  it('jobArtifactRawUrl 走独立前缀嵌套路由并按路径段编码（#1178 codex 复审 P2，第 6 轮收口）', () => {
+    // /raw-artifacts/ 前缀与文本路由 /artifacts/{name:path} 零撞形（贪婪
+    // 后缀形态会把名为 x/raw 的产物文本 URL 按前缀名吞掉）。整名
+    // encodeURIComponent 会把 / 编成 %2F——ASGI 解码后变回分隔符；按段
+    // 编码后 / 原样保留，层级结构语义不变。
     expect(jobArtifactRawUrl('j1', 'final.mp4')).toBe(
-      '/api/jobs/j1/artifacts/final.mp4/raw'
+      '/api/jobs/j1/raw-artifacts/final.mp4'
     )
     expect(jobArtifactRawUrl('j1', 'reports/final.mp4')).toBe(
-      '/api/jobs/j1/artifacts/reports/final.mp4/raw'
+      '/api/jobs/j1/raw-artifacts/reports/final.mp4'
     )
     expect(jobArtifactRawUrl('j1', 'deep/nested/dir/clip.mp4')).toBe(
-      '/api/jobs/j1/artifacts/deep/nested/dir/clip.mp4/raw'
+      '/api/jobs/j1/raw-artifacts/deep/nested/dir/clip.mp4'
     )
     // 段内特殊字符仍被编码（空格/#/中文），段间分隔符不受影响。
     expect(jobArtifactRawUrl('j 1', 'my clip.mp4')).toBe(
-      '/api/jobs/j%201/artifacts/my%20clip.mp4/raw'
+      '/api/jobs/j%201/raw-artifacts/my%20clip.mp4'
     )
     expect(jobArtifactRawUrl('j1', 'a#b/帧 1.mp4')).toBe(
-      '/api/jobs/j1/artifacts/a%23b/%E5%B8%A7%201.mp4/raw'
+      '/api/jobs/j1/raw-artifacts/a%23b/%E5%B8%A7%201.mp4'
     )
   })
 })

@@ -440,6 +440,70 @@ describe('PreviewPanelHost 桥协议', () => {
     })
   })
 
+  it('字节读取在每个 port 上串行化：并发请求排队执行（#1178 codex 复审 P1 内存护栏）', async () => {
+    // 第一次读取用 deferred 卡住：第二次 fetch 必须在它完成后才开始——
+    // 512 MiB 单次上限不约束并发总量，串行化把在途读取夹到 1。
+    let releaseFirst!: (value: {
+      name: string
+      mediaType: string
+      bytes: ArrayBuffer
+    }) => void
+    const firstGate = new Promise<{
+      name: string
+      mediaType: string
+      bytes: ArrayBuffer
+    }>((resolve) => {
+      releaseFirst = resolve
+    })
+    mockFetchJobArtifactRawBytes
+      .mockImplementationOnce(() => firstGate)
+      .mockResolvedValue({
+        name: 'b.mp4',
+        mediaType: 'video/mp4',
+        bytes: new ArrayBuffer(1),
+      })
+    const { container } = renderHost()
+    const iframe = getIframe(container)
+    await bridgeReady()
+    const { panelPort } = offerBytePort(iframe)
+    const inbox = portInbox(panelPort)
+
+    panelPort.postMessage({
+      type: 'request',
+      id: 71,
+      method: 'readArtifactBytes',
+      params: { name: 'a.mp4' },
+    })
+    panelPort.postMessage({
+      type: 'request',
+      id: 72,
+      method: 'readArtifactBytes',
+      params: { name: 'b.mp4' },
+    })
+
+    // 等信号非等时长（AGENTS.md §4）：第一次 fetch 发起后、未释放前，
+    // 第二次必须还没开始（断言不变量，不探中间态）。
+    await waitFor(() =>
+      expect(mockFetchJobArtifactRawBytes).toHaveBeenCalledTimes(1)
+    )
+    releaseFirst({
+      name: 'a.mp4',
+      mediaType: 'video/mp4',
+      bytes: new ArrayBuffer(1),
+    })
+    await waitFor(() =>
+      expect(mockFetchJobArtifactRawBytes).toHaveBeenCalledTimes(2)
+    )
+    // 两个响应按队列序到达（71 先于 72）且都成功。
+    await waitFor(() => {
+      const ids = inbox.filter((d) => d.type === 'response').map((d) => d.id)
+      expect(ids).toEqual([71, 72])
+    })
+    expect(
+      inbox.find((d) => d.id === 71)!.ok && inbox.find((d) => d.id === 72)!.ok
+    ).toBe(true)
+  })
+
   it('窗口通道的 readArtifactBytes 被拒并引导到注入全局（#1178 P1：高危方法只走字节桥 port，旧 window 形态拿到明确错误）', async () => {
     const { container } = renderHost()
     const iframe = getIframe(container)

@@ -41,13 +41,15 @@ export async function fetchJobArtifact(
  * 作 src 用（session cookie 自动携带，GET 免 CSRF）。不经 api() fetch——
  * 返回的是二进制流而非 JSON。
  *
- * 产物名按**路径段**编码（#1178 codex 复审 P2）：声明产物名可含 /（如
- * reports/final.mp4）。encodeURIComponent 整名编码会把 / 编成 %2F，ASGI
- * 解码后变回路径分隔符——服务端路由按段匹配，名字里的 / 必须保持结构
- * 语义（每段各自编码，段间的 / 原样保留，与 raw 路由的
- * {artifact_name:path} 形态对齐）。
+ * 走独立静态前缀的嵌套路由（/raw-artifacts/，#1178 codex 复审 P2 第 6 轮
+ * 收口）：产物名可含 /（如 reports/final.mp4），该形态与文本路由
+ * /artifacts/{name:path} 零撞形——旧 /artifacts/{name}/raw 后缀形态只在
+ * 根名上保留做兼容（贪婪后缀会把名为 x/raw 的产物文本 URL 按前缀名吞
+ * 掉）。产物名按**路径段**编码：encodeURIComponent 整名编码会把 / 编成
+ * %2F，ASGI 解码后变回路径分隔符——每段各自编码、段间的 / 原样保留，
+ * 名字的层级结构语义与路由的 {artifact_name:path} 形态对齐。
  */
 export function jobArtifactRawUrl(jobId: string, artifactName: string): string {
   const encodedName = artifactName.split('/').map(encodeURIComponent).join('/')
-  return `/api/jobs/${encodeURIComponent(jobId)}/artifacts/${encodedName}/raw`
+  return `/api/jobs/${encodeURIComponent(jobId)}/raw-artifacts/${encodedName}`
 }

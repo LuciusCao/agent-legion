@@ -12,36 +12,12 @@
  * 先于任何导航后文档可能发出的消息入队（排序即鉴别）；其后的上交（含
  * 攻击者伪造）一律拒绝并关闭。面板自导航销毁旧 global，闭包 port2 随之
  * 失效——能力绑定初始文档存活期，宿主永不重新发放（init 重发只带数据）。
+ *
+ * 已接受端口的 serving（含并发护栏的串行队列）在 bytePortServer.ts。
  */
 import { BYTE_PORT_OFFER_TYPE, isPanelToHostMessage } from './bridge'
-import {
-  handleBridgeRequest,
-  type BridgeResponder,
-} from './bridgeRequestHandler'
+import { serveBytePort } from './bytePortServer'
 import type { JobDetail } from '../../types/jobTypes'
-
-/** port 通道的面板 → 宿主 request（身份由端口持有证明，无 source 标记）。 */
-export interface PreviewPortRequestMessage {
-  type: 'request'
-  id: number
-  method: string
-  params?: { name?: string }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-/** 鉴别 port 通道的 request（无 source 标记——端口持有即身份）。 */
-export function isPortRequestMessage(
-  data: unknown
-): data is PreviewPortRequestMessage {
-  if (!isRecord(data) || data.type !== 'request') return false
-  return typeof data.id === 'number' && typeof data.method === 'string'
-}
-
-/** port 通道非 readArtifactBytes 方法的拒绝语（基础三法走窗口通道）。 */
-const NOT_SERVED_HERE = 'is not served on the byte bridge port'
 
 /**
  * 字节桥 port 的接受器（每 iframe 挂载一个，见 PreviewPanelHost）：只接受
@@ -61,37 +37,6 @@ export function createBytePortAcceptor(deps: {
   let accepted: MessagePort | null = null
   let closed = false
 
-  function attach(port: MessagePort): void {
-    const respond: BridgeResponder = (id, ok, payload, error, transfer) =>
-      port.postMessage(
-        {
-          type: 'response',
-          id,
-          ok,
-          ...(ok ? { payload } : { error: error ?? 'unknown error' }),
-        },
-        transfer ?? []
-      )
-    port.onmessage = (event: MessageEvent) => {
-      const data: unknown = event.data
-      if (!isPortRequestMessage(data)) return
-      // 字节桥只服务 readArtifactBytes；基础三法走窗口通道（面板契约）。
-      if (data.method !== 'readArtifactBytes') {
-        respond(data.id, false, undefined, `${data.method} ${NOT_SERVED_HERE}`)
-        return
-      }
-      void handleBridgeRequest(
-        data.id,
-        data.method,
-        data.params,
-        deps.jobId,
-        deps.getDetail(),
-        respond
-      )
-    }
-    port.start?.()
-  }
-
   return {
     handleMessage(event) {
       const data: unknown = event.data
@@ -106,7 +51,7 @@ export function createBytePortAcceptor(deps: {
         return true
       }
       accepted = offered
-      attach(offered)
+      serveBytePort(offered, deps)
       return true
     },
     close() {

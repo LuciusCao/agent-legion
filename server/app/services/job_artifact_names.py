@@ -35,13 +35,6 @@ def is_downloadable_artifact_name(artifact_name: str) -> bool:
     PurePosixPath 把它当普通字符）与超长段（会在文件系统调用里炸成 500
     而不是 4xx）一律拒绝。返回 False 时调用方按 InvalidOperationError
     （400）处理。
-
-    末段 ``raw`` 为保留名（#1178 codex 复审 P2）：raw 下载路由是
-    ``/artifacts/{artifact_name:path}/raw``，名为 ``x/raw`` 的产物其文本
-    URL 会被该路由按前缀名 ``x`` 吞掉（贪婪 :path 按尾部截断）。列入
-    拒绝后清单剪枝、远程 intake 与 serve 三处同一口径——这类名字在
-    系统里不存在，路由歧义随之消除。单段 ``raw`` 不撞形（其文本 URL
-    ``/artifacts/raw`` 不含 ``/raw`` 后缀），不受影响。
     """
     if (
         not artifact_name
@@ -51,8 +44,6 @@ def is_downloadable_artifact_name(artifact_name: str) -> bool:
         return False
     relative = PurePosixPath(artifact_name)
     if not relative.parts or relative.is_absolute() or ".." in relative.parts:
-        return False
-    if len(relative.parts) > 1 and relative.parts[-1] == "raw":
         return False
     return all(
         part not in NON_ARTIFACT_DIR_NAMES

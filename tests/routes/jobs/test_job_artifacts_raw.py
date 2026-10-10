@@ -39,20 +39,19 @@ def test_raw_endpoint_serves_image_with_media_type(client_factory):
 
 
 def test_raw_endpoint_serves_nested_artifact_name(client_factory):
-    """#1178 codex 复审 P2：声明产物名可含 /（reports/final.mp4——Worker
-    解包与 promote 保留子目录），raw 路由按 {artifact_name:path} 匹配。
-    修复前：前端整名编码把 / 编成 %2F，ASGI 解码后单段路由匹配失败，
-    落到后面的 {artifact_name:path} 文本路由按 "reports/final.mp4/raw"
-    查产物 → 404——媒体产物只能播根目录名。"""
+    """#1178 codex 复审 P2（第 6 轮收口形态）：声明产物名可含 /
+    （reports/final.mp4——Worker 解包与 promote 都保留子目录），嵌套名
+    的 raw 读取走独立静态前缀路由（与文本路由零撞形——贪婪后缀形态曾
+    把名为 x/raw 的产物文本 URL 按前缀名 x 吞掉）。
+    字面 / 形态（前端按段编码后的 URL）与 %2F 形态（整名编码的旧客户
+    端）都必须命中：ASGI 解码后两者同路径。"""
     with client_factory() as c:
         job_id, storage = _create_job(c)
         (storage / "reports").mkdir(parents=True, exist_ok=True)
         (storage / "reports" / "final.mp4").write_bytes(b"mp4-bytes")
 
-        # 字面 / 形态（前端按段编码后的 URL）与 %2F 形态（整名编码的
-        # 旧客户端）都必须命中 raw 路由：ASGI 解码后两者同路径。
-        literal = c.get(f"/api/jobs/{job_id}/artifacts/reports/final.mp4/raw")
-        encoded = c.get(f"/api/jobs/{job_id}/artifacts/reports%2Ffinal.mp4/raw")
+        literal = c.get(f"/api/jobs/{job_id}/raw-artifacts/reports/final.mp4")
+        encoded = c.get(f"/api/jobs/{job_id}/raw-artifacts/reports%2Ffinal.mp4")
 
     for response in (literal, encoded):
         assert response.status_code == 200
@@ -60,13 +59,32 @@ def test_raw_endpoint_serves_nested_artifact_name(client_factory):
         assert response.content == b"mp4-bytes"
 
 
+def test_raw_suffix_artifact_name_text_and_nested_raw_both_servable(client_factory):
+    """#1178 codex 复审 P2（第 6 轮收口）：名为 x/raw 的既有产物不受路由
+    形态影响——文本读取重新落入文本路由（贪婪后缀形态曾按前缀名 x 吞
+    掉=回归）；其 raw 读取经独立前缀路由照常服务。既有产物不被重新定
+    义为非法（对象存储清单是权威副本）。"""
+    with client_factory() as c:
+        job_id, storage = _create_job(c)
+        (storage / "reports" / "output").mkdir(parents=True, exist_ok=True)
+        (storage / "reports" / "output" / "raw").write_text('{"v": 1}', encoding="utf-8")
+
+        text = c.get(f"/api/jobs/{job_id}/artifacts/reports/output/raw")
+        raw = c.get(f"/api/jobs/{job_id}/raw-artifacts/reports/output/raw")
+
+    assert text.status_code == 200
+    assert text.json() == {"name": "reports/output/raw", "content": '{"v": 1}'}
+    assert raw.status_code == 200
+    assert raw.content == b'{"v": 1}'
+
+
 def test_raw_endpoint_rejects_nested_traversal(client_factory):
     """嵌套名形态下的穿越仍被服务层白名单拒绝（is_downloadable_artifact_name
-    拒 .. 段）——路由改 {artifact_name:path} 不新增穿越面。"""
+    拒 .. 段）——独立前缀路由同样不新增穿越面。"""
     with client_factory() as c:
         job_id, _ = _create_job(c)
 
-        response = c.get(f"/api/jobs/{job_id}/artifacts/reports/../../etc/passwd/raw")
+        response = c.get(f"/api/jobs/{job_id}/raw-artifacts/reports/../../etc/passwd")
 
     assert response.status_code == 400
 
@@ -85,24 +103,11 @@ def test_raw_endpoint_prefers_manifest_object_over_stale_local(client_factory, m
         _register_object_artifact(c, job, "final.mp4", payload, gzipped=False)
         (storage / "final.mp4").write_bytes(b"stale-local-bytes")
 
-        response = c.get(f"/api/jobs/{job_id}/artifacts/final.mp4/raw")
+        response = c.get(f"/api/jobs/{job_id}/raw-artifacts/final.mp4")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("video/mp4")
     assert response.content == payload
-
-
-def test_raw_endpoint_rejects_reserved_raw_suffix_name(client_factory):
-    """#1178 codex 复审 P2：末段为 raw 的产物名与 raw 路由撞形（其文本
-    URL 会被按前缀名吞掉）——serve 侧白名单拒绝（400），与清单剪枝/
-    远程 intake 同一口径（job_artifact_names.py）。裸名 raw 与非末段
-    raw 不撞形（见其服务层矩阵）。"""
-    with client_factory() as c:
-        job_id, _ = _create_job(c)
-
-        response = c.get(f"/api/jobs/{job_id}/artifacts/reports/output/raw/raw")
-
-    assert response.status_code == 400
 
 
 def test_raw_endpoint_serves_unknown_extension_as_download(client_factory):

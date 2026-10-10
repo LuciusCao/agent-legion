@@ -26,21 +26,16 @@ def register_raw_artifact_route(
 ) -> None:
     # raw 必须先于 {artifact_name:path} 注册（在 job_artifacts.py 的
     # create_job_artifacts_router 里调用），否则 "foo.json/raw" 会被吞成
-    # 名为 "foo.json/raw" 的 artifact 查询。
-    # {artifact_name:path}（#1178 codex 复审 P2，与外部 raw 路由同修）：
-    # 声明产物名可含 /（reports/final.mp4——Worker 解包与 promote 都保留
-    # 子目录），单段参数连 URL 编码的斜杠也匹配不上。/raw 后缀在 :path
-    # 贪婪匹配下取自尾部（fastapi 的 path convertor 按后缀截断），名字里
-    # 的 / 不再破坏匹配；路径安全在 service 层（open_raw →
-    # is_downloadable_artifact_name 拒绝 .. 段/绝对名与末段为 raw 的保留
-    # 名——后者与本路由撞形（其文本 URL 会被按前缀名吞掉），同一白名单
-    # 在清单剪枝与远程 intake 同步拒绝，见 job_artifact_names.py），路由
-    # 形态不新增穿越面。
+    # 名为 "foo.json/raw" 的 artifact 查询。单段参数是有意的（#1178 codex
+    # 复审 P2，第 6 轮收口）：本路由若用贪婪 :path，名为 x/raw 的产物其
+    # 文本 URL 会被按前缀名 x 吞掉——嵌套名的 raw 读取走独立前缀的
+    # job_artifact_raw_nested.py（与文本路由零撞形），本条只保留 main 上
+    # 既有的根名形态做兼容。
     # 206 声明（#703 codex round 4 P2-2，与外部 raw 路由同修）：Range 时
     # raw_response 答分段 206 + Content-Range，契约只写 200 会让生成客
     # 户端把分段下载当异常。
     @router.get(
-        "/jobs/{job_id}/artifacts/{artifact_name:path}/raw",
+        "/jobs/{job_id}/artifacts/{artifact_name}/raw",
         response_class=FileResponse,
         response_model=None,
         responses={
@@ -63,11 +58,7 @@ def register_raw_artifact_route(
         # Legacy bare route：scoped/成员/admin 语义由 job_group 的
         # require_job_workspace_access 统一裁决（#745 按 job 行反查授权域；
         # 见 jobs.py get_job 的注释——跨域与未知 job 同为 404，Range 行为
-        # 不变）。
-        # open_raw_current（#1178 codex 复审 P2）：manifest-first——远程
-        # Worker 重跑后对象存储已是新字节而宿主 job_dir 缓存还是旧的，
-        # 本地优先会让「init 重发 → 面板重取」通道静默播旧媒体；权威副本
-        # 在对象存储（EXEC-ARTIFACT-STORE-001），本地文件只在无 manifest
-        # 行的 legacy 形态下使用。Range 解析在 service 内（本地分支忽略，
-        # FileResponse 原生支持）。
+        # 不变）。Range 解析在 service 内（本地分支忽略，FileResponse 原生
+        # 支持）；open_raw_current 的 manifest-first 语义见嵌套路由注释
+        # （#1178 codex 复审 P2——两条路由同一服务变体）。
         return raw_response(service.open_raw_current(job_id, artifact_name, range_header))

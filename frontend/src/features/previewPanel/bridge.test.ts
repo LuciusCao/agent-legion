@@ -8,7 +8,7 @@ import {
   PREVIEW_HOST_SOURCE,
   PREVIEW_PANEL_SOURCE,
 } from './bridge'
-import { isPortRequestMessage } from './portBridge'
+import { isPortRequestMessage } from './bytePortServer'
 
 describe('isPanelToHostMessage', () => {
   it('接受 ready / resize / 四种只读 request', () => {
