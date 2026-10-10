@@ -149,6 +149,14 @@ export function runTrackedSave(context: {
           return resolveRetry(false)
         }
         context.onTransientError()
+        // #1196：4xx 是确定性的请求侧拒绝（如 422 校验失败——前后端空白
+        // 判定的 \x85/\x1c-\x1f 口径差可达），重试必然同样失败——直接终态
+        // error，不走退避（避免误导性的「将自动重试」与无效流量）。409 已
+        // 在上面的冲突分支终结；5xx/网络错误保持退避重试。
+        const status = (error as { status?: unknown } | null)?.status
+        if (typeof status === 'number' && status >= 400 && status < 500) {
+          return resolveRetry(false)
+        }
         if (retriesLeft === 0) return resolveRetry(false)
         const attempt = MAX_PUT_RETRIES - retriesLeft + 1
         context.armRetry(

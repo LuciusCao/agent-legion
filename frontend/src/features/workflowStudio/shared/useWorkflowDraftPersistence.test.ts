@@ -569,6 +569,24 @@ describe('useWorkflowDraftPersistence PUT retry', () => {
     expect(result.current.state.status).toBe('error')
   })
 
+  it('does not retry a client-error (4xx) rejection — terminal error immediately（#1196）', async () => {
+    // 4xx 是确定性的请求侧拒绝（如前后端空白判定口径差导致的 422）——
+    // 走退避重试必然同样失败，只产生误导性的「将自动重试」与无效流量。
+    mocks.putWorkflowDraft.mockRejectedValue(
+      Object.assign(new Error('HTTP 422'), { status: 422 })
+    )
+    const { result } = renderEdited()
+
+    // 初次 + 两个重试窗口全部推进：4xx 一次即终态，不发起任何重试。
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+      vi.advanceTimersByTime(2000)
+      vi.advanceTimersByTime(4000)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+    expect(result.current.state.status).toBe('error')
+  })
+
   it('recovers to saved when a retry succeeds', async () => {
     mocks.putWorkflowDraft.mockRejectedValueOnce(new Error('network'))
     const { result } = renderEdited()
