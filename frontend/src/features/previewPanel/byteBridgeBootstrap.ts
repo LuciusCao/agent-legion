@@ -11,8 +11,10 @@
  * bundle 任何代码与 meta refresh。bootstrap 自建 MessageChannel：port2
  * 存进闭包（面板只拿到 readArtifactBytes 函数，端口本体不可取出、不可
  * 转交），port1 经 byte-port-offer 消息上交宿主。宿主每个挂载只接受第
- * 一次上交（见 portBridge.ts）——初始文档的 offer 先于任何导航后文档
- * 可能发出的消息入队，排序即鉴别；其后的上交（含攻击者伪造）一律拒绝。
+ * 一次上交（见 portBridge.ts）——排序即鉴别：初始文档的 offer 先于任何
+ * 导航后文档可能发出的消息入队（成立前提：宿主监听挂在 useLayoutEffect、
+ * 先于 srcdoc 解析任务注册，真实 offer 不会因注册滞后而丢失——#1178
+ * 第 9 轮，见 PreviewPanelHost.tsx）；其后的上交（含攻击者伪造）一律拒绝。
  * 面板自导航销毁旧 global，闭包里的 port2 随之失效——能力由此绑定初始
  * 文档的存活期，而宿主侧永不重新发放（init 重发只带数据、不带端口）。
  *

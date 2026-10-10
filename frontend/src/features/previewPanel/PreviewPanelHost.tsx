@@ -55,13 +55,23 @@
  *   发放绑定初始 srcdoc 文档——宿主注入的 bootstrap（head 第一个脚本，
  *   先于 bundle 任何代码执行）自建 Channel、闭包持有面板侧端口、把另一端
  *   上交宿主（byteBridgeBootstrap.ts）；宿主每个挂载只接受第一次上交
- *   （portBridge.ts，排序即鉴别：导航后文档的伪造上交必然晚到被拒），
- *   init 重发只带数据、永不重新发放端口。面板自导航销毁初始文档 global，
- *   闭包端口随之失效；同挂载内的第二次 load（= 自导航——宿主改 srcdoc
- *   走 key 整树重挂）再触发纵深撤销：关端口、停窗口通道、下架帧内容。
+ *   （portBridge.ts，排序即鉴别：导航后文档的伪造上交必然晚到被拒——
+ *   该排序成立的前提是监听器先于 iframe 任何脚本注册：消息监听挂在
+ *   useLayoutEffect 上，DOM 提交同一任务内就位，先于 srcdoc 解析任务，
+ *   #1178 第 9 轮），init 重发只带数据、永不重新发放端口。面板自导航
+ *   销毁初始文档 global，闭包端口随之失效；同挂载内的第二次 load
+ *   （= 自导航——宿主改 srcdoc 走 key 整树重挂）再触发纵深撤销：
+ *   关端口、停窗口通道、下架帧内容。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useTheme, type Theme } from '@mui/material/styles'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { useTheme } from '@mui/material/styles'
 import katexCssUrl from 'katex/dist/katex.min.css?url'
 import katexJsUrl from 'katex/dist/katex.min.js?url'
 import { useJobDetailQuery } from '../../hooks/useJobDetailQuery'
@@ -73,6 +83,7 @@ import {
 import { createBytePortAcceptor, type BytePortAcceptor } from './portBridge'
 import { createWindowMessageListener } from './windowBridge'
 import { buildPanelCsp, injectPanelCsp, readDocumentCspNonce } from './panelCsp'
+import { buildPreviewThemeVariables } from './previewThemeVars'
 import type { JobDetail } from '../../types/jobTypes'
 import styles from './PreviewPanelHost.module.css'
 
@@ -96,22 +107,6 @@ export interface PreviewPanelHostProps {
   /** 完整 HTML 文档 bundle（已发布版本或草稿预览）。 */
   html: string
   title?: string
-}
-
-/** 桥注入的主题变量：面板 CSS 用 var(--pp-*) 跟随平台观感。 */
-function buildThemeVariables(theme: Theme): Record<string, string> {
-  return {
-    '--pp-bg': theme.palette.background.default,
-    '--pp-surface': theme.palette.background.paper,
-    '--pp-text': theme.palette.text.primary,
-    '--pp-text-secondary': theme.palette.text.secondary,
-    '--pp-accent': theme.palette.primary.main,
-    '--pp-on-accent': theme.palette.primary.contrastText,
-    '--pp-error': theme.palette.error.main,
-    '--pp-border': theme.palette.divider,
-    '--pp-radius': `${theme.shape.borderRadius * 2}px`,
-    '--pp-font-family': theme.typography.fontFamily ?? 'sans-serif',
-  }
 }
 
 export function PreviewPanelHost({
@@ -145,7 +140,7 @@ export function PreviewPanelHost({
       source: PREVIEW_HOST_SOURCE,
       type: 'init',
       jobId,
-      theme: buildThemeVariables(theme),
+      theme: buildPreviewThemeVariables(theme),
       assets: {
         // bundle 可按需懒加载平台构建产物（LaTeX 等）；缺失时必须自行降级。
         katexCssUrl: new URL(katexCssUrl, window.location.origin).href,
@@ -199,7 +194,15 @@ export function PreviewPanelHost({
   // 卸载即关闭字节桥端口（acceptor 惰性创建，可能从未接受过上交）。
   useEffect(() => () => acceptorRef.current?.close(), [])
 
-  useEffect(() => {
+  // 监听器注册用布局效应而非被动效应（#1178 codex 复审 P1，第 9 轮）：
+  // iframe 元素插入 DOM（提交阶段）即触发 srcdoc 解析任务排队，被动
+  // useEffect 的 flush 排在其后——bootstrap 的 byte-port-offer 会在注册
+  // 前投递并丢失，此后导航后文档的伪造 offer 就成了 acceptor 首次观察
+  // 到的 offer 被接受，「首次-only」边界被绕过。布局效应在 DOM 提交
+  // 同一任务内同步执行、先于 iframe 解析任务：真实 bootstrap 的 offer
+  // 永不丢失，首次观察到的一定是它（ready 握手的同源竞态一并消除——
+  // 早发 ready 曾可能同样丢失导致面板空白）。
+  useLayoutEffect(() => {
     // detail 进 ref：字节桥 port 的存活期跨多次 detail 刷新，port 通道的
     // 响应读当前快照（窗口通道每次 effect 重建本就用最新闭包）。
     detailRef.current = detail
