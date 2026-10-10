@@ -56,6 +56,8 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     agentCatalogError: catalog.loadError,
     retryAgentCatalog: catalog.retry,
     definitionYaml: draft.definitionYaml,
+    // #1196：保存状态机跟踪的草稿本体（revision 模式下 ≠ definitionYaml）。
+    draftYaml: draft.draftYaml,
     setDefinitionYaml: draft.setDraftYaml,
     selectedNodeKey,
     setSelectedNodeKey,
