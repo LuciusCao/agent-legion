@@ -86,8 +86,10 @@ export function revertedState(current: DraftSaveState): DraftSaveState {
   return current
 }
 
-/* schedule 的调度决策（kimi P1-2/P2-4）：空白内容 → skip；回退到已持久化
-   值且无在途 → revert；否则进入 pending（conflict 态挂起，不 arm 计时器）。 */
+/* schedule 的调度决策（kimi P1-2/P2-4）：空白内容 → skip（controller
+   侧的收口见 markBlankSkipped：清等待中的保存/重试 + 离开 settled）；
+   回退到已持久化值且无在途 → revert；否则进入 pending（conflict 态挂起，
+   不 arm 计时器）。 */
 export type ScheduleDecision =
   | { action: 'skip' }
   | { action: 'revert' }

@@ -260,6 +260,148 @@ describe('useWorkflowDraftPersistence', () => {
     expect(result.current.state.savedHash).toBe('hash-after-put')
   })
 
+  it('清空画布不发起 PUT 且离开 settled（#1177 评审 V1：空白 skip 的状态收口）', async () => {
+    // 保存成功后清空编辑器：空白永不落盘（服务端拒存），「已保存」的
+    // settled 状态不得原样保留——否则 stale hint 拿旧 savedHash 短路，
+    // 隐藏「编辑器已空白」的真实分歧。
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Base\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Edited\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(1000)
+    })
+    await waitFor(() => expect(result.current.state.status).toBe('saved'))
+
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: '',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(1000)
+    })
+
+    expect(result.current.state.status).toBe('pending')
+    // 清空后没有任何 PUT（仅之前 Edited 的一次落盘）。
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+  })
+
+  it('debounce 窗口内清空画布：窗口内的内容不落盘（#1177 评审 V2）', async () => {
+    // 输入 E 后在 800ms 窗口内全选删除：已 arm 的保存必须撤销——
+    // 「清空即放弃」，E 不得照旧到期落盘。
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Base\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Abandoned\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: '',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(mocks.putWorkflowDraft).not.toHaveBeenCalled()
+
+    // 重新输入照常调度落盘。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Retyped\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
+      'ws1',
+      'key: demo\nlabel: Retyped\n',
+      {
+        expectedUpdatedAt: DRAFT_NEVER_SAVED,
+      }
+    )
+    await waitFor(() => expect(result.current.state.status).toBe('saved'))
+  })
+
+  it('作废的成功响应同样推进 savedHash（#1177 评审 V6）——revert 后身份恰好正确', async () => {
+    let resolvePut: (value: DraftStoreResponseMock) => void = () => {}
+    mocks.putWorkflowDraft.mockImplementationOnce(
+      () =>
+        new Promise<DraftStoreResponseMock>((resolve) => {
+          resolvePut = resolve
+        })
+    )
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Base\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    // E1 落盘在途 → 用户继续输入 E2（pending 窗口）。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: E1\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
+      'ws1',
+      'key: demo\nlabel: E1\n',
+      {
+        expectedUpdatedAt: DRAFT_NEVER_SAVED,
+      }
+    )
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: E2\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    // E1 的响应在 E2 调度后到达：requestId 过期作废，但基线与语义身份
+    // 都是服务端真值——savedHash 一并推进（修复前停留 null/旧值）。
+    await act(async () => {
+      resolvePut({
+        definition_yaml: 'key: demo\nlabel: E1\n',
+        updated_at: '2026-08-27T02:00:00+00:00',
+        definition_hash: 'hash-e1',
+      })
+    })
+    expect(result.current.state.savedHash).toBe('hash-e1')
+
+    // 放弃 E2、画布逐字节改回 E1：revert 后 savedHash 恰好是已持久化
+    // 内容的身份，草稿卡核对不会拿陈旧身份短路。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: E1\n',
+      originalYaml: 'key: demo\nlabel: Base\n',
+      serverDraft: NO_DRAFT,
+    })
+    expect(['saved', 'idle']).toContain(result.current.state.status)
+    expect(result.current.state.savedHash).toBe('hash-e1')
+  })
+
   it('overwrites the server draft after publish rebases the baseline', async () => {
     // 用户在 debounce 窗口内 publish：草稿 Y 尚未持久化，基线前进为 Y，
     // 效果仍必须把 Y PUT 上去（否则旧草稿 X 会在下次装载时复活）。

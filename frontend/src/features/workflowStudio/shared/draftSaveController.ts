@@ -30,7 +30,12 @@ import {
    current_draft.updated_at（服务端真值），用户继续编辑后的下一次保存以新
    基线竞争；conflict 在用户采用服务端草稿（hydrate）或继续编辑（新调度）
    后解除。状态/常量在 draftSaveTypes.ts，提示文本在 draftSaveText.ts
-   （#633 拆出）。 */
+   （#633 拆出）。
+   #1177 评审缺陷族：核心不变量「内容偏离已持久化 ⇒ status 必离开 settled
+   （saved/idle）」由全部路径共同维护——调度（含空白 skip 的
+   markBlankSkipped）、冲突解除（resolveConflict 保留挂起编辑）、强制
+   写回（forceSave 空白护栏）。消费方（stale hint 短路/自动校验/保存徽章/
+   beforeunload 守卫）都建立在该不变量之上，新增路径不得绕过。 */
 export class DraftSaveController {
   private state: DraftSaveState = IDLE_DRAFT_SAVE
   private readonly listeners = new Set<(state: DraftSaveState) => void>()
@@ -100,7 +105,7 @@ export class DraftSaveController {
       this.inFlight !== 0,
       this.state.conflict === true
     )
-    if (decision.action === 'skip') return
+    if (decision.action === 'skip') return this.markBlankSkipped()
     if (decision.action === 'revert') return this.revertToPersisted()
     const requestId = (this.requestCounter += 1)
     this.pendingSave = { yaml, requestId }
@@ -128,9 +133,25 @@ export class DraftSaveController {
      no-op，编辑永不落盘、自动校验/发布门控随之锁死。 */
   resolveConflict(keepMine: boolean, currentYaml?: () => string): void {
     if (!this.state.conflict) return
+    if (!keepMine && this.pendingSave) {
+      // #1177 评审 V3：UI 只在无可采用草稿（conflictDraftYaml == null 的
+      // never-saved 竞态）时走这条「仅解除警示」路径——丢弃 pendingSave
+      // 会让画布上的未落盘编辑被状态机遗忘（status 收敛 saved、
+      // hasUnsaved=false，关页静默丢失）。按冲突挂起的既有形态保留
+      // pending（不 arm 计时器）：hasUnsaved 守卫有原料，下一次按键经
+      // schedule 重新 arm，flush-first 也可补发。
+      const suspended = this.pendingSave
+      this.setState({ ...conflictClearedState(this.state), status: 'pending' })
+      this.pendingSave = suspended
+      return
+    }
     const pending = pendingAfterResolve(this.pendingSave, keepMine)
     this.setState(conflictClearedState(this.state))
     if (pending) {
+      // #1177 评审 P3-1：补发前先把 status 推到 pending（与 schedule
+      // 对称）——否则 conflictCleared 收敛的 saved/idle 会覆盖整个
+      // debounce 窗口，窗口内「settled 但内容未落盘」的假状态重现。
+      this.setState({ ...this.state, status: 'pending' })
       this.armSave(pending.yaml, pending.requestId)
       return
     }
@@ -140,9 +161,14 @@ export class DraftSaveController {
   /* keep-mine 补救的强制写回（#804 轮 8 P1）：普通 schedule 的去重会把
      「内容 == 已持久化值」判成 revert 不发 PUT——但冲突语义是以新 CAS
      基线把画布内容写回服务端（Agent 已把服务端推进成别的内容），必须
-     绕过去重强制发，否则警示消失而内容从未写回，离页即丢。 */
+     绕过去重强制发，否则警示消失而内容从未写回，离页即丢。
+     #1177 评审 V5：空白无可落盘——conflictCleared 已把 status 收敛到
+     saved/idle，不把假 settled 留给空白画布（保持 pending）。 */
   private forceSave(yaml: string) {
-    if (!yaml.trim()) return
+    if (!yaml.trim()) {
+      this.setState({ ...this.state, status: 'pending' })
+      return
+    }
     const requestId = (this.requestCounter += 1)
     this.pendingSave = { yaml, requestId }
     this.setState({ ...this.state, status: 'pending' })
@@ -165,6 +191,24 @@ export class DraftSaveController {
   private revertToPersisted = (): void => {
     this.abortPending()
     this.setState(revertedState(this.state))
+  }
+
+  /* 空白 skip 的状态收口（#1177 评审缺陷族 V1/V2）：空白永不落盘（服务端
+     拒存），但「跳过 PUT」不等于「无事发生」——
+     1. V2：撤销等待中的保存/重试/排队——debounce 窗口内的旧内容不得在
+        用户清空画布后照旧到期落盘（「清空即放弃」的意图被静默违背）；
+     2. V1：上次成功保存的 settled 状态不得原样保留——settled ⇒ 当前
+        内容已落盘，而空白与任何已落盘内容都不同（stale hint 拿旧
+        savedHash 短路隐藏分歧提示正是此洞）。
+     冲突态不动 status（error 占位本就非 settled，横幅语义靠 conflict
+     标记）；从未保存过（无 savedAt）保持 idle——空画布没有可偏离的
+     基线。 */
+  private markBlankSkipped(): void {
+    this.abortPending()
+    if (this.state.conflict) return
+    if (this.state.savedAt && this.state.status !== 'pending') {
+      this.setState({ ...this.state, status: 'pending' })
+    }
   }
 
   /* 立即落盘：取消 pending 的 debounce 直接 PUT；无 pending 时是 no-op
@@ -249,8 +293,12 @@ export class DraftSaveController {
       onBaseline: (saved, at, current, hash) => {
         this.lastPersisted = saved
         this.lastPersistedAt = at
+        // #1177 评审 V6：作废响应同样推进 savedHash——它是服务端真值的
+        // 身份；pending 期间没有消费方按 settled 读它，而画布 revert 到
+        // 该内容后它恰好正确（否则一张记录旧 hash 的卡可短路隐藏提示）。
         if (current)
           this.setState({ status: 'saved', savedAt: at, savedHash: hash })
+        else this.setState({ ...this.state, savedHash: hash })
       },
       onSaving: () => this.setState({ ...this.state, status: 'saving' }),
       onConflict: this.enterConflict.bind(this),

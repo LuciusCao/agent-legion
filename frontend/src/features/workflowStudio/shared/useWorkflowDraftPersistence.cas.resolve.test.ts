@@ -238,6 +238,113 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     expect(result.current.state.status).toBe('saved')
   })
 
+  it('resolveConflict(false) 不遗忘冲突期间的未落盘编辑（#1177 评审 V3：保留挂起 pending）', async () => {
+    // UI 只在无可采用草稿（conflictDraftYaml == null 的 never-saved 竞态）
+    // 时走「仅解除警示」——丢弃挂起的 pendingSave 会让画布上的编辑被状态机
+    // 遗忘（status 假 saved、hasUnsaved=false，关页静默丢失）。
+    mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+
+    // 冲突期间继续编辑：挂起 autosave（不进 PUT），编辑进 pendingSave。
+    const callsBefore = mocks.putWorkflowDraft.mock.calls.length
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: During conflict\n',
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft.mock.calls.length).toBe(callsBefore)
+
+    act(() => result.current.resolveConflict(false))
+    expect(result.current.state.conflict).toBeFalsy()
+    // 未落盘编辑保留为 pending（不 arm 计时器）：离开假 settled，
+    // beforeunload 守卫有原料。
+    expect(result.current.state.status).toBe('pending')
+    expect(result.current.hasUnsavedChanges()).toBe(true)
+
+    // 下一次按键重新 arm 并以冲突推进后的基线落盘。
+    mocks.putWorkflowDraft.mockResolvedValue({
+      definition_yaml: 'key: demo\nlabel: Final\n',
+      updated_at: '2026-09-12T11:00:00+00:00',
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: Final\n',
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
+      'ws1',
+      'key: demo\nlabel: Final\n',
+      { expectedUpdatedAt: '2026-09-12T10:00:00+00:00' }
+    )
+  })
+
+  it('resolveConflict(true) 补发挂起保存前先把 status 推到 pending（#1177 评审 P3-1）', async () => {
+    // 修复前 conflictCleared 收敛的 saved 会覆盖整个补发 debounce 窗口——
+    // 窗口内「settled 但内容未落盘」的假状态与 schedule 路径不对称。
+    mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: 'key: demo\nlabel: During conflict\n',
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+
+    mocks.putWorkflowDraft.mockResolvedValue({
+      definition_yaml: 'key: demo\nlabel: During conflict\n',
+      updated_at: '2026-09-12T11:00:00+00:00',
+    })
+    act(() => result.current.resolveConflict(true))
+    // 补发 debounce 窗口内：status 已是 pending（非假 saved）。
+    expect(result.current.state.status).toBe('pending')
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
+      'ws1',
+      'key: demo\nlabel: During conflict\n',
+      { expectedUpdatedAt: '2026-09-12T10:00:00+00:00' }
+    )
+  })
+
   it('surfaces a server-advance conflict and preserves edits when the reapply conflict fires', async () => {
     // 服务端草稿前进且用户有本地编辑：surfaceServerConflict 进入 conflict
     // 态（conflictDraftYaml = 服务端草稿），编辑保留，基线已推进——用户
