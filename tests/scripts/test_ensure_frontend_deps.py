@@ -70,19 +70,27 @@ fi
 exit 0
 """
 
-# 定向慢速 rm 桩（codex P2 第四轮场景）：只有目标是备份位时才写 pid 并
-# 挂起（供测试 SIGKILL 精确中断「清备份的 rm -rf 进行中」），其余调用
-# 直接透传真实 /bin/rm——脚本与 npm 桩的其它 rm 不受影响。
-_RM_SLOW_ON_BAK_STUB = """#!/usr/bin/env bash
+# 定向 rm 桩（codex P2 第四轮场景；PR #1200 codex P2 改为握手形态）：只有
+# 目标是备份位时才写 pid 并等测试的 release 文件放行（等信号非等时长——窗口
+# 由测试显式控制，快慢机器都确定，高负载调度 stall 不会造成桩走完 exec rm 的
+# flake），其余调用直接透传真实 /bin/rm——脚本与 npm 桩的其它 rm 不受影响。
+_RM_HOLD_ON_BAK_STUB = """#!/usr/bin/env bash
 for arg in "$@"; do
   if [[ "$arg" == *".node_modules.bak" ]]; then
     printf '%s\\n' "$$" > "${STUB_RM_PID_FILE}"
-    sleep "${STUB_RM_SLEEP:-15}"
+    for ((i = 0; i < 600; i++)); do
+      [[ -e "${STUB_RM_RELEASE_FILE}" ]] && break
+      sleep 0.05
+    done
     break
   fi
 done
 exec /bin/rm "$@"
 """
+# 桩内 600×50ms=30s 只是防挂兜底（测试失联时 communicate() 不会永久等
+# EOF）；正确性不依赖它——测试在桩等待期间 SIGKILL，release 永远不来。
+# kill 落在某次 sleep 0.05 上时孤儿持管道 ≤50ms，可忽略（原 sleep 15s 形态
+# 的孤儿持管道问题随之消失）。
 
 
 def _write_stub(path: Path, content: str) -> None:
@@ -376,7 +384,8 @@ def test_interrupted_backup_cleanup_keeps_committed_tree(tmp_path: Path) -> None
     路径）——安装已成功、stamp 已写（事务已提交），无条件恢复的 EXIT trap
     会拿「半删除的备份」覆盖完整新树，把成功状态降级为半应用状态。trap
     必须以 modules_fresh 裁决：已提交则不恢复，残留备份由下次运行收编
-    （fresh → 弃备份）。定向慢速 rm 桩精确构造「rm 进行中」窗口后 SIGKILL。"""
+    （fresh → 弃备份）。定向 rm 桩以 release 文件握手精确构造「rm 进行中」
+    窗口后 SIGKILL。"""
     main, bin_dir = _setup(tmp_path)
     modules = main / "frontend" / "node_modules"
     # 预置旧依赖树（触发备份路径）：旧 marker + 旧 stamp。
@@ -384,7 +393,8 @@ def test_interrupted_backup_cleanup_keeps_committed_tree(tmp_path: Path) -> None
     (modules / "old-marker").write_text("old-deps")
     (modules / ".deps-stamp").write_text("stale-fingerprint\n")
     rm_pid_file = tmp_path / "rm.pid"
-    _write_stub(bin_dir / "rm", _RM_SLOW_ON_BAK_STUB)
+    rm_release_file = tmp_path / "rm.release"  # 永不创建：kill 前窗口恒开放
+    _write_stub(bin_dir / "rm", _RM_HOLD_ON_BAK_STUB)
     stub_log = tmp_path / "stub.log"
 
     proc = subprocess.Popen(
@@ -392,7 +402,18 @@ def test_interrupted_backup_cleanup_keeps_committed_tree(tmp_path: Path) -> None
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env=_script_env(main, bin_dir, stub_log, {"STUB_RM_PID_FILE": str(rm_pid_file)}),
+        env=_script_env(
+            main,
+            bin_dir,
+            stub_log,
+            # 握手（等信号非等时长，PR #1200 codex P2）：rm.pid = 桩已进入
+            # 「清备份进行中」窗口，release 文件不出现 = 窗口恒开放——测试
+            # 何时 SIGKILL 由自己控制，与机器负载无关。
+            {
+                "STUB_RM_PID_FILE": str(rm_pid_file),
+                "STUB_RM_RELEASE_FILE": str(rm_release_file),
+            },
+        ),
     )
     try:
         # rm 桩挂起 = npm ci 已成功、stamp 已写、正在清备份（提交点已过）。

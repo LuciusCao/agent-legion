@@ -66,7 +66,12 @@ def test_knob_on_shares_one_batcher(job_db, settings) -> None:
     assert batcher.mark_done_many.args == (plane.broker,)
     assert batcher.mark_done_many.func is mark_done_many_with_retry
     # The finish arm is the retry-wrapped batch module bound to the repo
-    # (partial — repo-method identity does not hold by design).
-    assert callable(batcher.finish_many)
+    # (partial — repo-method identity does not hold by design). Assert the
+    # partial identity itself: callable() would be vacuous (the attribute
+    # access alone already proves the arm is bound).
+    from server.app.executors._lease_finish_batch import finish_many_with_retry
+
+    assert batcher.finish_many.func is finish_many_with_retry
+    assert batcher.finish_many.args == (plane.executor_leases,)
     # The writer thread is NOT started by the plane (lifespan owns it).
     assert batcher._thread is None

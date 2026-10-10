@@ -2,10 +2,8 @@ import json
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import urlparse
 
 import pytest
-import requests
 from fastapi.testclient import TestClient
 
 from tests.isolation_support import (
@@ -90,10 +88,9 @@ _BUDGET_ANCHOR_ENV_KEYS = (
 
 
 def pytest_configure() -> None:
-    if os.environ.get("AGENT_LEGION_TEST_REAL_CMS") != "1":
-        os.environ.setdefault("AGENT_LEGION_SKIP_DOTENV", "1")
-        for key in _CMS_ENV_KEYS:
-            os.environ[key] = ""
+    os.environ.setdefault("AGENT_LEGION_SKIP_DOTENV", "1")
+    for key in _CMS_ENV_KEYS:
+        os.environ[key] = ""
     for key in _BUDGET_ANCHOR_ENV_KEYS:
         os.environ.pop(key, None)
 
@@ -345,76 +342,11 @@ def _assert_shared_app_invariants():
 def _isolate_project_dotenv(_assert_shared_app_invariants, monkeypatch):
     """Keep unit tests from inheriting real local credentials by default.
 
-    Production and local app runs still load the project .env normally. Tests
-    that intentionally exercise real CMS credentials can opt in with
-    AGENT_LEGION_TEST_REAL_CMS=1.
+    Production and local app runs still load the project .env normally.
     """
-    if os.environ.get("AGENT_LEGION_TEST_REAL_CMS") == "1":
-        return
     monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
     for key in _CMS_ENV_KEYS:
         monkeypatch.setenv(key, "")
-
-
-@pytest.fixture(autouse=True)
-def _block_real_cms_http(_assert_shared_app_invariants, monkeypatch):
-    if os.environ.get("AGENT_LEGION_TEST_REAL_CMS") == "1":
-        return
-    # The repo yaml no longer carries a global cms: section; tests loading the
-    # real settings get the fake CMS host below through the supported env
-    # channel (node/workspace config still overrides it, as in production).
-    monkeypatch.setenv("CMS_BASE_URL", "https://cms.example.com/v2")
-    original_request = requests.sessions.Session.request
-
-    def guarded_request(self, method, url, *args, **kwargs):
-        host = urlparse(str(url)).hostname or ""
-        if host == "cms.example.com":
-            return _fake_cms_response(method, url, kwargs.get("params"))
-        return original_request(self, method, url, *args, **kwargs)
-
-    monkeypatch.setattr(requests.sessions.Session, "request", guarded_request)
-
-
-def _fake_cms_response(method: str, url: object, params: object) -> requests.Response:
-    if str(method).upper() != "GET":
-        raise RuntimeError(
-            f"Real CMS HTTP is disabled in tests; mock the CMS boundary instead: {url}"
-        )
-    parsed = urlparse(str(url))
-    query_params = params if isinstance(params, dict) else {}
-    question_id = str(query_params.get("uuid") or "Q001")
-    knowledge_code = str(query_params.get("knowledge") or "K001")
-    if parsed.path.endswith("/question/list"):
-        payload = {
-            "code": 0,
-            "message": "success",
-            "data": {
-                "question_list": [
-                    _fake_cms_question_item(f"{knowledge_code}-Q1"),
-                    _fake_cms_question_item(f"{knowledge_code}-Q2"),
-                ],
-                "total": 2,
-            },
-        }
-    else:
-        payload = {"code": 0, "message": "success", "data": _fake_cms_question_item(question_id)}
-    response = requests.Response()
-    response.status_code = 200
-    response.url = str(url)
-    response.headers["Content-Type"] = "application/json"
-    response._content = json.dumps(payload).encode("utf-8")
-    return response
-
-
-def _fake_cms_question_item(question_id: str) -> dict[str, object]:
-    return {
-        "question_uuid": question_id,
-        "question_title": question_id,
-        "body": {"content": f"Stem for {question_id}"},
-        "option": [],
-        "answer": [],
-        "analyze": [],
-    }
 
 
 @pytest.fixture(autouse=True)

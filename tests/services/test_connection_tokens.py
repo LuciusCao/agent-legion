@@ -251,11 +251,15 @@ def test_report_node_auth_failure_silent_without_context(job_db) -> None:
     report_node_auth_failure({"node_config": {"connection": "c1"}, "job_db": object()})
     report_node_auth_failure({"_job_db_path": str(job_db.dsn_identity)})
     # Reporting must never mask the original failure: an unreachable DB is
-    # swallowed (logged), not raised.
+    # swallowed (logged), not raised. 用不可解析的 conninfo（psycopg 立即
+    # ProgrammingError）而不是不可达地址：被钉语义只是「except 吞掉不抛」，
+    # 与失败路径耗时无关——旧形态 postgresql://127.0.0.1:1 会走连接池重试到
+    # 10s PoolTimeout 才落入同一个吞掉分支，白等 10s 且不加覆盖（池重试预算
+    # 是 psycopg_pool 自有行为，非本仓语义）。
     report_node_auth_failure(
         {
             "node_config": {"connection": "c1"},
-            "_job_db_path": "postgresql://127.0.0.1:1/unreachable",
+            "_job_db_path": "not-a-dsn",
         }
     )
 

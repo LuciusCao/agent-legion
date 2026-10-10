@@ -6,9 +6,9 @@ row, the exact per-row cost the statement-level migration meant to remove.
 The unnest rewrite batches a whole run's inserts into one statement per
 1000 rows; these tests pin:
 
-- large-batch correctness: 10k rows land with both counter families
-  (run + workspace) exactly equal to the group-by truth, across the
-  batching boundary (1000-row chunks);
+- large-batch correctness: 2.5k rows (3 batches) land with both counter
+  families (run + workspace) exactly equal to the group-by truth, across
+  the batching boundary (1000-row chunks);
 - return-value equivalence: the returned rows keep the executemany
   contract (one row per unique id, in first-seen order, with the
   workflow_key identity shim);
@@ -37,8 +37,10 @@ _REVISION = {
     "definition_json": '{"nodes": {}}',
 }
 _NODE_KEYS = ["node_a", "node_b"]
-# Above the 1000-row batch boundary so the chunking path is exercised.
-_ROW_COUNT = 10_000
+# Above the 1000-row batch boundary so the chunking path is exercised:
+# 2500 = 3 batches (1000+1000+500), the same cross-boundary shape the
+# trigger-count test below already proves equivalent to the old 10k.
+_ROW_COUNT = 2_500
 
 
 def _candidate(index: int) -> dict[str, object]:
