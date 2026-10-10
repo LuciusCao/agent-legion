@@ -26,8 +26,9 @@ DB 是删除的唯一权威：``JobDeletionService`` 先在
   ``scripts/gc-s3-jobs.py`` 回收。
 
 日志路径的枚举（按快照精确生成、逐个探测存在性）在锁外完成，锁内只复核行与
-rename——锁事务保持短，不阻塞重建后新 job 的 claim。日志只删能由
-``job_node_log_name`` 精确生成的名字，见 ``deleted_job_log_paths``。
+rename——锁事务保持短，不阻塞重建后新 job 的 claim。日志只删本 job 独占的
+``logs/jobs/by-job/<job_id>/`` 目录与快照 node_runs 登记过的旧扁平名
+（#1113），见 ``deleted_job_log_paths``。
 
 锁下只做同文件系统原子 ``os.rename`` 进 trash（跨文件系统 EXDEV 即放弃、留
 残留，绝不在锁下拷贝），rmtree 在锁外：原路径瞬间腾空，同 id 重建的 job 不会
@@ -76,7 +77,6 @@ def logs_trash_root(settings: Settings) -> Path:
 def purge_deleted_job_files(
     job_db: JobQueries,
     job: Mapping[str, Any],
-    node_keys: Iterable[str],
     settings: Settings,
     operation_id: str,
     run_logs: Iterable[tuple[str, str]] = (),
@@ -91,10 +91,10 @@ def purge_deleted_job_files(
 
     跨事务动作前重新校验目标身份与状态：job_dir 按快照行重新解析（重走
     managed-root 包含校验）；移入在 ``job-mutation:<id>`` 短事务锁下复核 jobs
-    行仍不存在才执行（同源重建的 job 已落行即整体跳过）。``node_keys`` 是删除
-    前快照的节点 key（job_nodes ∪ node_runs），``run_logs`` 是快照的
-    node_runs ``(node_key, log_path)``，日志按二者精确推导（见
-    ``deleted_job_log_paths``）。单个路径的文件系统错误只跳过该路径。
+    行仍不存在才执行（同源重建的 job 已落行即整体跳过）。``run_logs`` 是删除
+    事务内快照的 node_runs ``(node_key, log_path)``；日志 = 本 job 独占的
+    分目录 + 快照登记过的旧扁平名（见 ``deleted_job_log_paths``）。单个路径的
+    文件系统错误只跳过该路径。
     """
     job_id = str(job["id"])
     staged: list[Path] = []
@@ -106,7 +106,7 @@ def purge_deleted_job_files(
         )
         storage_dir = None
     # 日志枚举放锁外：锁内只剩行复核与原子 rename（存在性在锁内再探一次）。
-    log_paths = deleted_job_log_paths(settings, job_id, node_keys, run_logs)
+    log_paths = deleted_job_log_paths(settings, job_id, run_logs)
     # None = 锁事务尚未给出存在性结果；yield 之后（如 commit）才失败时它已绑定
     # 真实复核值，照常返回。
     recreated: bool | None = None

@@ -125,8 +125,9 @@ def plan_agent_result_moves(
     if log_target is not None:
         log_source = staging_dir / CODE_RESULT_LOG_MEMBER
         if log_source.is_file():
-            # #618: code results land node.log in the shared logs/jobs dir
-            # (the claim insert already points node_runs there).
+            # #618: code results land node.log under logs/jobs (the claim
+            # insert already points node_runs there; #1113 per-job subdir is
+            # created by the promotion's parent mkdir).
             moves.append((log_target, log_source))
     return moves, tuple(produced)
 
