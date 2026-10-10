@@ -18,6 +18,9 @@ _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 def init_db(database_dsn: DatabaseDsn) -> None:
     """Initialize or upgrade the PostgreSQL schema under a migration lock.
 
+    The advisory lock is keyed per (database, effective schema) — see the
+    comment at the lock site.
+
     Fresh databases apply the whole idempotent ``postgres_schema.sql`` and
     every migration in order, recording one ``schema_migrations`` row per
     version. Databases at an older version still replay the full DDL file
@@ -36,11 +39,22 @@ def init_db(database_dsn: DatabaseDsn) -> None:
     if verified_at_head(database_dsn, SCHEMA_VERSION):
         return
     with write_transaction(database_dsn) as conn:
-        # Serialize migrations per database, not cluster-wide: worktrees run
-        # against dedicated databases (tests/postgres_support.py derives one
-        # per worktree) and must not queue on each other's schema lock.
+        # Serialize migrations per (database, effective schema), not
+        # cluster-wide and not per-database: worktrees run against dedicated
+        # databases (tests/postgres_support.py derives one per worktree) and
+        # must not queue on each other's schema lock, while xdist workers
+        # share one test database with per-worker schemas (TEST_SCHEMA) and
+        # must not queue on each other either. current_schema() resolves
+        # through search_path, so a plain prod DSN keys on public exactly as
+        # the database-level key did (one effective schema per database).
+        # Every object init_db writes is schema-local (unqualified DDL and
+        # DML resolve via search_path; the only schema-qualified reference in
+        # the whole chain is a read-only to_regclass probe), so same-schema
+        # serialization is sufficient and cross-schema collisions cannot
+        # exist.
         conn.execute(
-            "select pg_advisory_xact_lock(hashtext('agent-legion-schema-' || current_database()))"
+            "select pg_advisory_xact_lock(hashtext('agent-legion-schema-'"
+            " || current_database() || '-' || current_schema()))"
         )
         conn.execute(
             """
