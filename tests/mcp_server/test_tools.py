@@ -516,6 +516,9 @@ def test_get_preview_guide_is_served_locally(recorded) -> None:
         "readArtifactBytes",
         "getJobDetail",
         "media-src blob:",
+        # blob URL 生命周期归面板（#1178 codex P2）：示例必须带回收形态。
+        "revokeObjectURL",
+        "pagehide",
     ):
         assert section in text
 

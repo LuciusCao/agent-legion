@@ -152,10 +152,19 @@ test('media-src blob: 放行面板自建 blob 的 <audio>/<video>（#1146，Chro
 })()
 </script></body></html>`
 
+  // 等信号非等时长（AGENTS.md §4「时序敏感测试四纪律」/#1150，细则见
+  // docs/architecture/local-quality-gates.md）：run 的结束条件是
+  // media-loaded / media-violation 的先到者——CI 高负载下音频解码与
+  // loadedmetadata/违规事件投递都可能超过任何固定窗口；deadline 只作
+  // 失败出口（超时后断言按未收到信号判失败，不静默通过）。
   const run = (html: string) =>
     page.evaluate(
-      async ([html, nonce]) => {
+      async ([html, nonce, deadlineMs]) => {
         const result = { violations: [] as string[], loaded: false }
+        let signal: () => void = () => {}
+        const firstProbe = new Promise<void>((resolve) => {
+          signal = resolve
+        })
         const onMessage = (event: MessageEvent) => {
           const data = event.data as {
             __mediaProbe?: number
@@ -163,9 +172,14 @@ test('media-src blob: 放行面板自建 blob 的 <audio>/<video>（#1146，Chro
             directive?: string
           }
           if (!data || data.__mediaProbe !== 1) return
-          if (data.type === 'media-loaded') result.loaded = true
-          if (data.type === 'media-violation' && data.directive)
+          if (data.type === 'media-loaded') {
+            result.loaded = true
+            signal()
+          }
+          if (data.type === 'media-violation' && data.directive) {
             result.violations.push(data.directive)
+            signal()
+          }
         }
         window.addEventListener('message', onMessage)
         const lib = (
@@ -182,12 +196,15 @@ test('media-src blob: 放行面板自建 blob 的 <audio>/<video>（#1146，Chro
         const loaded = new Promise((r) => frame.addEventListener('load', r))
         document.body.appendChild(frame)
         await loaded
-        await new Promise((r) => setTimeout(r, 400))
+        await Promise.race([
+          firstProbe,
+          new Promise<void>((r) => setTimeout(r, deadlineMs)),
+        ])
         frame.remove()
         window.removeEventListener('message', onMessage)
         return result
       },
-      [html, H] as const
+      [html, H, 8_000] as const
     )
 
   const allowed = await run(mediaBundle(false))

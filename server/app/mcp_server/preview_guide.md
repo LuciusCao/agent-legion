@@ -164,11 +164,28 @@ only media scheme the panel CSP permits, and blob URLs can only be created by
 your own script in your own frame:
 
 ```js
+var playerUrl = null
+function setPlayer(bytes, mediaType) {
+  // Replacing the media (the host re-sends init on node-status changes and
+  // your re-fetch re-creates URLs): revoke the previous URL first — an
+  // object URL holds its Blob alive until revoked.
+  if (playerUrl !== null) URL.revokeObjectURL(playerUrl)
+  playerUrl = URL.createObjectURL(new Blob([bytes], { type: mediaType }))
+  document.querySelector('video').src = playerUrl
+}
+// The frame goes away with the page: release the last URL on unload too.
+window.addEventListener('pagehide', function () {
+  if (playerUrl !== null) URL.revokeObjectURL(playerUrl)
+})
 callBridge('readArtifactBytes', { name: 'final.mp4' }).then(function (res) {
-  var url = URL.createObjectURL(new Blob([res.bytes], { type: res.mediaType }))
-  document.querySelector('video').src = url
+  setPlayer(res.bytes, res.mediaType)
 })
 ```
+
+Object URL lifetime is the panel's responsibility, not the host's: each
+`createObjectURL` entry pins its Blob (up to the 512 MiB response cap) until
+`revokeObjectURL` — track the current URL and revoke it when replacing the
+media and on `pagehide`, or repeated re-renders accumulate memory.
 
 A common pattern for subtitled video: read the media via
 `readArtifactBytes`, read the subtitle track (SRT/VTT is text) via
