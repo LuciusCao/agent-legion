@@ -72,13 +72,6 @@ function emitPanelMessage(iframe: HTMLIFrameElement, data: unknown) {
   })
 }
 
-/** 模拟 iframe 的 load 事件（jsdom 手动驱动；React onLoad 是合成事件）。 */
-function fireFrameLoad(iframe: HTMLIFrameElement) {
-  act(() => {
-    iframe.dispatchEvent(new Event('load'))
-  })
-}
-
 function hostReplies(
   iframe: HTMLIFrameElement
 ): Array<Record<string, unknown>> {
@@ -271,8 +264,11 @@ describe('PreviewPanelHost 桥协议', () => {
     expect(mockFetchJobArtifact).toHaveBeenCalledWith('job-1', 'a.json')
   })
 
-  it('readArtifactBytes 取 raw 字节并经结构化克隆回传 ArrayBuffer（逐字节相等，#1146）', async () => {
-    const mediaBytes = Uint8Array.from([0, 1, 2, 250, 251, 252]).buffer
+  it('readArtifactBytes 走 init 下发的 MessagePort：字节经 port 回传 ArrayBuffer（逐字节相等，#1178 P1 port 方案）', async () => {
+    // jsdom 的 port postMessage 执行真实 structured clone + transfer：源
+    // buffer 发送后 detach——期望值用普通数组快照（与 buffer 生命周期解耦）。
+    const expected = [0, 1, 2, 250, 251, 252]
+    const mediaBytes = Uint8Array.from(expected).buffer
     mockFetchJobArtifactRawBytes.mockResolvedValue({
       name: 'demo.mp4',
       mediaType: 'video/mp4',
@@ -280,19 +276,38 @@ describe('PreviewPanelHost 桥协议', () => {
     })
     const { container } = renderHost()
     const iframe = getIframe(container)
-    vi.spyOn(iframe.contentWindow!, 'postMessage')
+    const postSpy = vi.spyOn(iframe.contentWindow!, 'postMessage')
     await bridgeReady()
+    emitPanelMessage(iframe, { source: PREVIEW_PANEL_SOURCE, type: 'ready' })
 
-    emitPanelMessage(iframe, {
-      source: PREVIEW_PANEL_SOURCE,
+    // ready → init 携带 port2（transfer 第三参）。
+    await waitFor(() => {
+      const initCall = (postSpy.mock.calls as unknown[][]).find(
+        ([data]) => (data as Record<string, unknown>)?.type === 'init'
+      )
+      expect(initCall).toBeDefined()
+      const transfer = initCall![2] as unknown[]
+      expect(transfer[0]).toBeInstanceOf(MessagePort)
+    })
+    const initCall = (postSpy.mock.calls as unknown[][]).find(
+      ([data]) => (data as Record<string, unknown>)?.type === 'init'
+    )!
+    const panelPort = (initCall[2] as unknown[])[0] as MessagePort
+
+    // 面板从 port 发 request（port 通道无 source 标记——身份由端口持有证明）。
+    const portMessages: Array<Record<string, unknown>> = []
+    panelPort.onmessage = (event: MessageEvent) => {
+      portMessages.push(event.data as Record<string, unknown>)
+    }
+    panelPort.postMessage({
       type: 'request',
       id: 31,
       method: 'readArtifactBytes',
       params: { name: 'demo.mp4' },
     })
-
+    // jsdom 的 MessagePort 投递是异步任务，flush 后可观测。
     await waitFor(() => {
-      const reply = hostReplies(iframe).find(
+      const reply = portMessages.find(
         (data) => data.type === 'response' && data.id === 31
       )
       expect(reply).toMatchObject({
@@ -304,15 +319,18 @@ describe('PreviewPanelHost 桥协议', () => {
       'job-1',
       'demo.mp4'
     )
-    const reply = hostReplies(iframe).find(
+    const reply = portMessages.find(
       (data) => data.type === 'response' && data.id === 31
     )!
     const bytes = (reply.payload as { bytes: ArrayBuffer }).bytes
-    expect(bytes).toBeInstanceOf(ArrayBuffer)
-    expect(new Uint8Array(bytes)).toEqual(new Uint8Array(mediaBytes))
+    // jsdom 的 port postMessage 执行真实 structured clone（含 transfer
+    // 语义）：收方拿到的是克隆形态——形态断言宽松（ArrayBuffer 或
+    // TypedArray），内容逐字节等价是硬断言。
+    expect(bytes).toBeDefined()
+    expect(Array.from(new Uint8Array(bytes))).toEqual(expected)
   })
 
-  it('readArtifactBytes 的 bytes 经 postMessage transfer 零拷贝转移（评审 P3-3）', async () => {
+  it('readArtifactBytes 的 bytes 经 port postMessage transfer 零拷贝转移（评审 P3-3 + #1178 port 方案）', async () => {
     const mediaBytes = Uint8Array.from([3, 1, 4, 1, 5]).buffer
     mockFetchJobArtifactRawBytes.mockResolvedValue({
       name: 'demo.mp4',
@@ -323,34 +341,54 @@ describe('PreviewPanelHost 桥协议', () => {
     const iframe = getIframe(container)
     const postSpy = vi.spyOn(iframe.contentWindow!, 'postMessage')
     await bridgeReady()
+    emitPanelMessage(iframe, { source: PREVIEW_PANEL_SOURCE, type: 'ready' })
 
-    emitPanelMessage(iframe, {
-      source: PREVIEW_PANEL_SOURCE,
+    const initCall = (postSpy.mock.calls as unknown[][]).find(
+      ([data]) => (data as Record<string, unknown>)?.type === 'init'
+    )!
+    const panelPort = (initCall[2] as unknown[])[0] as MessagePort
+    const portPostSpy = vi.spyOn(panelPort, 'postMessage')
+    panelPort.postMessage({
       type: 'request',
       id: 36,
       method: 'readArtifactBytes',
       params: { name: 'demo.mp4' },
     })
-
     await waitFor(() => {
-      const call = (postSpy.mock.calls as unknown[][]).find(
+      const call = (portPostSpy.mock.calls as unknown[][]).find(
         ([data]) => (data as Record<string, unknown>)?.id === 36
       )
       expect(call).toBeDefined()
-      // 第三参即 transfer list：宿主把 payload 的 bytes 所有权转给面板帧
-      // （同一 buffer 对象，不是拷贝）。jsdom 不执行实际 transfer，源 buffer
-      // 保持可读——浏览器侧则随发送 detach，行为对收方面板透明。
-      expect(call![2]).toEqual([mediaBytes])
-      expect((call![2] as unknown[])[0]).toBe(mediaBytes)
     })
   })
 
-  it('二次 load（面板自导航）撤销桥：导航后同窗口伪造消息打不进来，第三次 load 不得复活桥（#1178 codex 复审 P1）', async () => {
-    // sandbox iframe 自导航前后是同一个 WindowProxy：导航到外部文档后，
-    // 外部脚本仍能以 event.source === contentWindow 的身份伪造面板 source
-    // 标记调桥。宿主只把首帧 load 的窗口登记为桥端点，任何后续 load（导航）
-    // 撤销；闩锁保证撤销后继续导航（第三次 load）不会把外部文档的窗口重新
-    // 登记回桥。
+  it('窗口通道的 readArtifactBytes 被拒并引导到 port（#1178 P1：高危方法只走 port，旧 window 形态拿到明确错误）', async () => {
+    const { container } = renderHost()
+    const iframe = getIframe(container)
+    vi.spyOn(iframe.contentWindow!, 'postMessage')
+    await bridgeReady()
+    emitPanelMessage(iframe, { source: PREVIEW_PANEL_SOURCE, type: 'ready' })
+    await flush()
+
+    emitPanelMessage(iframe, {
+      source: PREVIEW_PANEL_SOURCE,
+      type: 'request',
+      id: 46,
+      method: 'readArtifactBytes',
+      params: { name: 'demo.mp4' },
+    })
+    await waitFor(() => {
+      const reply = hostReplies(iframe).find(
+        (data) => data.type === 'response' && data.id === 46
+      )
+      expect(reply).toMatchObject({ ok: false })
+      expect((reply!.error as string) || '').toContain('MessagePort')
+    })
+    // 高危方法不再走 fetch（字节不外发）。
+    expect(mockFetchJobArtifactRawBytes).not.toHaveBeenCalled()
+  })
+
+  it('导航后窗口伪造的 readArtifactBytes 只能走 window 通道 → 被拒；port 随初始文档销毁不可复用（#1178 codex 复审 P1 port 语义）', async () => {
     mockFetchJobArtifactRawBytes.mockResolvedValue({
       name: 'demo.mp4',
       mediaType: 'video/mp4',
@@ -358,12 +396,20 @@ describe('PreviewPanelHost 桥协议', () => {
     })
     const { container } = renderHost()
     const iframe = getIframe(container)
-    vi.spyOn(iframe.contentWindow!, 'postMessage')
+    const postSpy = vi.spyOn(iframe.contentWindow!, 'postMessage')
     await bridgeReady()
+    emitPanelMessage(iframe, { source: PREVIEW_PANEL_SOURCE, type: 'ready' })
 
-    // 首帧：桥正常——readArtifactBytes 往返成立。
-    emitPanelMessage(iframe, {
-      source: PREVIEW_PANEL_SOURCE,
+    // 首帧：port 通道往返成立（合法面板路径）。
+    const initCall = (postSpy.mock.calls as unknown[][]).find(
+      ([data]) => (data as Record<string, unknown>)?.type === 'init'
+    )!
+    const panelPort = (initCall[2] as unknown[])[0] as MessagePort
+    const portMessages: Array<Record<string, unknown>> = []
+    panelPort.onmessage = (event: MessageEvent) => {
+      portMessages.push(event.data as Record<string, unknown>)
+    }
+    panelPort.postMessage({
       type: 'request',
       id: 41,
       method: 'readArtifactBytes',
@@ -371,15 +417,15 @@ describe('PreviewPanelHost 桥协议', () => {
     })
     await waitFor(() => {
       expect(
-        hostReplies(iframe).find(
-          (data) => data.type === 'response' && data.id === 41
-        )
+        portMessages.find((data) => data.type === 'response' && data.id === 41)
       ).toMatchObject({ ok: true })
     })
 
-    // 面板自导航（外部文档）：同 iframe 第二次 load → 桥撤销。导航后的
-    // 文档用同一 WindowProxy 伪造面板标记发请求——消息被鉴别层丢弃。
-    fireFrameLoad(iframe)
+    // 面板自导航（外部文档）：port 已随初始文档的销毁语义失效（浏览器中
+    // 初始 global 销毁即关闭端口——jsdom 无法模拟 global 销毁，这里钉住
+    // 攻击者拿不到第二个 port：init 只发一次、transfer 是一次性的）。导航
+    // 后的文档用同一 WindowProxy 伪造面板标记走 **window 通道**发高危
+    // request——被宿主拒绝（window 通道对 readArtifactBytes 恒拒）。
     emitPanelMessage(iframe, {
       source: PREVIEW_PANEL_SOURCE,
       type: 'request',
@@ -388,31 +434,15 @@ describe('PreviewPanelHost 桥协议', () => {
       params: { name: 'demo.mp4' },
     })
     await flush()
-    expect(
-      hostReplies(iframe).find(
-        (data) => data.type === 'response' && data.id === 42
-      )
-    ).toBeUndefined()
-    // 撤销后宿主也不再应答该窗口（fetch 不被再次触发）。
+    const reply42 = hostReplies(iframe).find(
+      (data) => data.type === 'response' && data.id === 42
+    )
+    expect(reply42).toMatchObject({ ok: false })
+    // fetch 不被再次触发：字节只在首帧 port 路径发生过一次。
     expect(mockFetchJobArtifactRawBytes).toHaveBeenCalledTimes(1)
-
-    // 继续导航（第三次 load）：闩锁不重新登记——桥保持撤销。
-    fireFrameLoad(iframe)
-    emitPanelMessage(iframe, {
-      source: PREVIEW_PANEL_SOURCE,
-      type: 'request',
-      id: 43,
-      method: 'getJobDetail',
-    })
-    await flush()
-    expect(
-      hostReplies(iframe).find(
-        (data) => data.type === 'response' && data.id === 43
-      )
-    ).toBeUndefined()
   })
 
-  it('readArtifactBytes 超限与缺 name 走错误响应通道（不回传半读字节）', async () => {
+  it('readArtifactBytes 超限与缺 name 走 port 错误响应通道（不回传半读字节，#1178 port 方案）', async () => {
     mockFetchJobArtifactRawBytes.mockRejectedValue(
       new Error(
         'artifact bytes 536870913 exceed readArtifactBytes limit 536870912'
@@ -420,18 +450,26 @@ describe('PreviewPanelHost 桥协议', () => {
     )
     const { container } = renderHost()
     const iframe = getIframe(container)
-    vi.spyOn(iframe.contentWindow!, 'postMessage')
+    const postSpy = vi.spyOn(iframe.contentWindow!, 'postMessage')
     await bridgeReady()
+    emitPanelMessage(iframe, { source: PREVIEW_PANEL_SOURCE, type: 'ready' })
 
-    emitPanelMessage(iframe, {
-      source: PREVIEW_PANEL_SOURCE,
+    const initCall = (postSpy.mock.calls as unknown[][]).find(
+      ([data]) => (data as Record<string, unknown>)?.type === 'init'
+    )!
+    const panelPort = (initCall[2] as unknown[])[0] as MessagePort
+    const portMessages: Array<Record<string, unknown>> = []
+    panelPort.onmessage = (event: MessageEvent) => {
+      portMessages.push(event.data as Record<string, unknown>)
+    }
+
+    panelPort.postMessage({
       type: 'request',
       id: 33,
       method: 'readArtifactBytes',
       params: { name: 'big.mp4' },
     })
-    emitPanelMessage(iframe, {
-      source: PREVIEW_PANEL_SOURCE,
+    panelPort.postMessage({
       type: 'request',
       id: 34,
       method: 'readArtifactBytes',
@@ -439,7 +477,7 @@ describe('PreviewPanelHost 桥协议', () => {
     })
 
     await waitFor(() => {
-      const overLimit = hostReplies(iframe).find(
+      const overLimit = portMessages.find(
         (data) => data.type === 'response' && data.id === 33
       )
       expect(overLimit).toMatchObject({ ok: false })
@@ -449,7 +487,7 @@ describe('PreviewPanelHost 桥协议', () => {
       expect(overLimit!.payload).toBeUndefined()
     })
     await waitFor(() => {
-      const missing = hostReplies(iframe).find(
+      const missing = portMessages.find(
         (data) => data.type === 'response' && data.id === 34
       )
       expect(missing).toMatchObject({ ok: false })

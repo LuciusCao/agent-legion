@@ -84,37 +84,55 @@ Consequences for your markup:
 
 All messages are plain JSON objects with a `source` marker; the panel's
 origin is opaque, so the host identifies the frame by `event.source` and the
-marker — do not rely on `event.origin`. The bridge endpoint is bound to the
-**initial srcdoc document's window**: if the frame navigates itself away
-(`location.href = …`, `<meta refresh>`), the host revokes the bridge on the
-next load — bridge calls from the navigated-to page are dropped, in-flight
-responses are not delivered. A well-behaved panel never navigates; the frame
-is your rendering surface, not a router.
+marker — do not rely on `event.origin`. The bridge has **two channels**
+(#1178 review hardening):
 
-Panel → host (`source: "agent-legion-preview-panel"`):
+- **Window channel** (`window.parent.postMessage`, source-marked) carries
+  `ready`, `resize`, `csp-violation`, and the base text-magnitude methods
+  (`listArtifacts` / `readArtifact` / `getJobDetail`).
+- **MessagePort channel** carries `readArtifactBytes` — the host creates a
+  fresh `MessageChannel` per `init` and transfers the panel-side port to the
+  **initial srcdoc document** along with the `init` message (read it from
+  `event.ports[0]`). A sandboxed frame can navigate itself away
+  (`location.href = …`, `<meta refresh>`) and the navigated-to page shares
+  the same WindowProxy, so the window channel alone cannot authenticate
+  requests — but a port cannot survive that navigation: the initial
+  document's global is destroyed, the port closes with it, and no port is
+  ever delivered to the navigated document. `readArtifactBytes` requests
+  sent over the window channel get an explicit error response. A
+  well-behaved panel never navigates anyway — the frame is your rendering
+  surface, not a router.
 
-- `{type: "ready"}` — send once at startup; the host answers with `init`.
-  Send it after your document has loaded (scripts run after load anyway) —
-  the host registers the bridge endpoint on the frame's first load event.
-- `{type: "request", id, method, params}` — call a bridge method:
-  - `listArtifacts()` → `string[]` — artifact names of the current job.
-  - `readArtifact({name})` → `{name, content}` — UTF-8 text of one artifact
-    (same data as `GET /api/jobs/{id}/artifacts/{name}`).
-  - `readArtifactBytes({name})` → `{name, mediaType, bytes}` — the artifact's
-    raw bytes as an `ArrayBuffer` (structured clone; NOT base64), plus the
-    media type the raw endpoint maps from the file extension
-    (`video/mp4`, `audio/mpeg`, … non-media files are
-    `application/octet-stream`). Artifact names may contain `/` (nested
-    outputs like `reports/final.mp4`) — pass the manifest name verbatim.
-    Size guard: artifacts above 512 MiB are
-    refused and arrive as an error response — read media files, not
-    entire archives. Available only when `init.capabilities` lists
-    `"readArtifactBytes"` (see below).
-  - `getJobDetail()` → the job detail payload (`job`, `nodes` with
-    `node_key`/`status`, `runs`, `artifacts`) — use node statuses to gate
-    sections by execution progress.
-- `{type: "resize", height}` — ask the host to resize the frame (clamped to
-  [120, 6000] px); a ResizeObserver on the document is the usual driver.
+Panel → host:
+
+- Window channel (`source: "agent-legion-preview-panel"`):
+  - `{type: "ready"}` — send once at startup; the host answers with `init`
+    (carrying the port). Send it any time — scripts run before `load`, do
+    NOT wait for the load event.
+  - `{type: "request", id, method, params}` — base methods only:
+    - `listArtifacts()` → `string[]` — artifact names of the current job.
+    - `readArtifact({name})` → `{name, content}` — UTF-8 text of one
+      artifact (same data as `GET /api/jobs/{id}/artifacts/{name}`).
+    - `getJobDetail()` → the job detail payload (`job`, `nodes` with
+      `node_key`/`status`, `runs`, `artifacts`) — use node statuses to gate
+      sections by execution progress.
+  - `{type: "resize", height}` — ask the host to resize the frame (clamped
+    to [120, 6000] px); a ResizeObserver on the document is the usual
+    driver.
+- Port channel (the port delivered with `init`; requests carry NO source
+  marker — the port itself proves identity):
+  - `{type: "request", id, method: "readArtifactBytes", params: {name}}` →
+    `{name, mediaType, bytes}` — the artifact's raw bytes as an
+    `ArrayBuffer` (structured clone; NOT base64), plus the media type the
+    raw endpoint maps from the file extension (`video/mp4`, `audio/mpeg`,
+    … non-media files are `application/octet-stream`). Artifact names may
+    contain `/` (nested outputs like `reports/final.mp4`) — pass the
+    manifest name verbatim. Size guard: artifacts above 512 MiB are
+    refused and arrive as an error response — read media files, not entire
+    archives. Available only when `init.capabilities` lists
+    `"readArtifactBytes"` (see below). The host re-sends `init` (with a
+    fresh port) on node-status changes — switch to the new port on every
+    `init`; responses on an old port are not guaranteed after a re-init.
 
 Host → panel (`source: "agent-legion-preview-host"`):
 
@@ -141,6 +159,8 @@ var PANEL_SOURCE = 'agent-legion-preview-panel'
 var HOST_SOURCE = 'agent-legion-preview-host'
 var seq = 0
 var pending = {}
+var bytesPort = null // #1178: the port delivered with the latest init
+// Base methods (text magnitude) ride the window channel:
 function callBridge(method, params) {
   return new Promise(function (resolve, reject) {
     var id = ++seq
@@ -151,10 +171,32 @@ function callBridge(method, params) {
     )
   })
 }
+// readArtifactBytes rides the port channel (identity = port possession):
+function callBytes(method, params) {
+  return new Promise(function (resolve, reject) {
+    if (!bytesPort) { reject(new Error('no bridge port yet')); return }
+    var id = ++seq
+    pending[id] = { resolve: resolve, reject: reject }
+    bytesPort.postMessage({ type: 'request', id: id, method: method, params: params })
+  })
+}
 window.addEventListener('message', function (event) {
   var data = event.data
   if (!data || data.source !== HOST_SOURCE) return
-  if (data.type === 'init') { /* apply theme, (re)fetch, render */ }
+  if (data.type === 'init') {
+    // The port arrives with init (event.ports[0]) — switch to it on EVERY
+    // init: the host re-sends init (with a fresh port) on node-status changes.
+    bytesPort = event.ports[0]
+    bytesPort.onmessage = function (portEvent) {
+      var msg = portEvent.data
+      if (msg && msg.type === 'response' && pending[msg.id]) {
+        var entry = pending[msg.id]
+        delete pending[msg.id]
+        msg.ok ? entry.resolve(msg.payload) : entry.reject(new Error(msg.error))
+      }
+    }
+    /* apply theme, (re)fetch, render */
+  }
   if (data.type === 'response' && pending[data.id]) {
     var entry = pending[data.id]
     delete pending[data.id]
@@ -186,7 +228,7 @@ function setPlayer(bytes, mediaType) {
 window.addEventListener('pagehide', function () {
   if (playerUrl !== null) URL.revokeObjectURL(playerUrl)
 })
-callBridge('readArtifactBytes', { name: 'final.mp4' }).then(function (res) {
+callBytes('readArtifactBytes', { name: 'final.mp4' }).then(function (res) {
   setPlayer(res.bytes, res.mediaType)
 })
 ```

@@ -72,7 +72,16 @@ export type PreviewPanelToHostMessage =
   | PreviewPanelRequestMessage
   | PreviewPanelCspViolationMessage
 
-/** 宿主 → 面板：初始化（jobId + 主题变量 + 可选资源 URL + 能力声明）。 */
+/** 宿主 → 面板：初始化（jobId + 主题变量 + 可选资源 URL + 能力声明）。
+ *
+ * #1178 codex 复审 P1：init 经 window postMessage **transfer 一个
+ * MessagePort**（`[port2]`）——媒体字节通道（readArtifactBytes）的
+ * request/response 只走该 port（窗口通道对导航后窗口不可闭合，见文件头
+ * P1 注释）；基础方法保留 window 通道兼容存量面板（旧面板忽略 ports 数组
+ * 不受影响）。面板从 init 的 `event.ports[0]` 取 port。宿主在**每次**下发
+ * init（含节点状态变化的重发）时都建新 Channel 并随消息 transfer——重发
+ * 后面板应改用新 port（旧 port 对应的旧 global 若已导航销毁则自然关闭）。
+ */
 export interface PreviewHostInitMessage {
   source: typeof PREVIEW_HOST_SOURCE
   type: 'init'
@@ -98,7 +107,7 @@ export type PreviewHostToPanelMessage =
   | PreviewHostInitMessage
   | PreviewHostResponseMessage
 
-const BRIDGE_METHODS: readonly string[] = [
+export const BRIDGE_METHODS: readonly string[] = [
   'listArtifacts',
   'readArtifact',
   'readArtifactBytes',

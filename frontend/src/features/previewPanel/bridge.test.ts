@@ -7,6 +7,7 @@ import {
   PREVIEW_HOST_SOURCE,
   PREVIEW_PANEL_SOURCE,
 } from './bridge'
+import { isPortRequestMessage } from './portBridge'
 
 describe('isPanelToHostMessage', () => {
   it('接受 ready / resize / 四种只读 request', () => {
@@ -122,5 +123,49 @@ describe('isHostToPanelMessage', () => {
         ok: true,
       })
     ).toBe(false)
+  })
+})
+
+describe('isPortRequestMessage（#1178 codex 复审 P1：port 通道的 request 判定）', () => {
+  it('port request 无 source 标记——身份由端口持有本身证明', () => {
+    expect(
+      isPortRequestMessage({
+        type: 'request',
+        id: 1,
+        method: 'readArtifactBytes',
+      })
+    ).toBe(true)
+    expect(
+      isPortRequestMessage({
+        type: 'request',
+        id: 2,
+        method: 'getJobDetail',
+        params: {},
+      })
+    ).toBe(true)
+  })
+
+  it('拒绝缺字段；未知方法由 Host 层 methodGuard 拒（形态判定通过）', () => {
+    expect(
+      isPortRequestMessage({ type: 'request', method: 'listArtifacts' })
+    ).toBe(false)
+    expect(
+      isPortRequestMessage({
+        type: 'request',
+        id: 1,
+        method: 'destroyEverything',
+      })
+    ).toBe(true)
+    // port 通道判定不看 source（身份由端口本身证明）——window 形态带
+    // source 不会因此被拒，但宿主从未把 port 交给非初始文档，判定本身
+    // 无需 source 语义。
+    expect(
+      isPortRequestMessage({
+        source: 'agent-legion-preview-panel',
+        type: 'request',
+        id: 1,
+        method: 'readArtifact',
+      })
+    ).toBe(true)
   })
 })

@@ -45,28 +45,37 @@
  *   转移给面板帧）；写操作（发布/归档/改配置）不走桥。
  *   init 消息带 capabilities 声明（基础三法之外的增量方法，#1146）——
  *   守卫白名单对未知 method 静默丢弃，面板无法靠探测发现新方法。
- * - 消息鉴别：opaque origin 的 event.origin 恒为 "null"，不能用来鉴权——
- *   宿主钉住 event.source 与**初始 srcdoc 文档窗口**（bridgeWindowRef）一致
- *   再校验 source 标记；sandbox iframe 自导航前后 WindowProxy 同一
- *   （#1178 codex 复审 P1），纯 contentWindow 判别无法挡导航后的外部文档
- *   伪造 source 标记冒用桥——readArtifactBytes 会把任意产物字节交给外部
- *   页面外传。桥端点在 iframe 首帧 load 时登记、后续任何 load（导航）即撤
- *   销；回包 postMessage(..., '*') 的目标窗口由同一引用钉死。
+ * - 消息鉴别（#1178 codex 复审 P1 的 MessagePort 方案）：opaque origin 的
+ *   event.origin 恒为 "null"，不能用来鉴权；而 sandbox iframe 自导航前后
+ *   WindowProxy 同一——窗口通道（event.source === contentWindow + source
+ *   标记）对「导航后、load 前的伪造请求」**不可闭合**（恶意文档可悬挂
+ *   子资源令 load 永不触发）。因此按数据敏感度分通道：**媒体字节通道
+ *   （readArtifactBytes，可外传任意产物字节）只走 MessagePort**——宿主
+ *   建 Channel、port2 随 init transfer 给初始 srcdoc 文档（导航销毁旧
+ *   global 即关端口；端口无法转移到导航后的文档）；基础方法（文本量级，
+ *   泄漏面与修复前等价）与控制消息（ready/csp-violation/resize）保留
+ *   window 通道兼容存量面板。ready 的 init 回包用事件携带窗口（不依赖
+ *   登记时点——面板脚本先于 load 执行，ready 可能早于任何登记）。
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme, type Theme } from '@mui/material/styles'
 import katexCssUrl from 'katex/dist/katex.min.css?url'
 import katexJsUrl from 'katex/dist/katex.min.js?url'
 import { useJobDetailQuery } from '../../hooks/useJobDetailQuery'
 import {
-  isPanelToHostMessage,
+  BRIDGE_METHODS,
   PREVIEW_HOST_CAPABILITIES,
   PREVIEW_HOST_SOURCE,
   type PreviewHostInitMessage,
 } from './bridge'
-import { handleBridgeRequest } from './bridgeRequestHandler'
+import { createPortBridge } from './portBridge'
+import { createWindowMessageListener } from './windowBridge'
 import { buildPanelCsp, injectPanelCsp, readDocumentCspNonce } from './panelCsp'
 import styles from './PreviewPanelHost.module.css'
+
+/** port 通道的 method 白名单（与窗口通道共用 BRIDGE_METHODS）。 */
+const isPortMethod = (method: string): boolean =>
+  BRIDGE_METHODS.includes(method)
 
 const MIN_HEIGHT = 120
 const MAX_HEIGHT = 6000
@@ -115,18 +124,16 @@ export function PreviewPanelHost({
   // （替代 #11 时代面板内部的 artifact 重取；bundle 侧约定 init 即重渲染）。
   const readyRef = useRef(false)
   const nodeSignatureRef = useRef<string | null>(null)
-  // 桥窗口绑定（#1178 codex 复审 P1）：sandbox iframe 自导航前后是同一个
-  // WindowProxy（event.source === contentWindow 对导航后的外部文档依然成立），
-  // 导航后的文档可伪造 source 标记调桥——readArtifactBytes 会把任意产物字节
-  // 交给外部页面外传。修法：只把**初始 srcdoc 文档**的窗口记为桥端点，iframe
-  // 的后续 load（导航）即撤销桥。三态哨兵：undefined = 首帧未 load（发桥
-  // 无从谈起）；Window = 桥端点（首帧）；null = 已撤销（任何后续 load）——
-  // 区分「未登记」与「已撤销」防再注册：导航两次（第三次 load）不会把外部
-  // 文档的窗口重新登记回桥。React 更新 srcDoc 不走本路径——bundle 内容变化
-  // 经 PreviewPanelSection 的 key（jobId + html_hash）整树重挂 iframe（行为
-  // 由 PreviewPanelSection.remount.test.tsx 钉住），同一 Host 实例的 srcDoc
-  // 恒定，第二帧 load 只可能是面板自导航。
-  const bridgeWindowRef = useRef<Window | null | undefined>(undefined)
+  // 桥端口（#1178 codex 复审 P1 的 MessagePort 方案）：window 通道对
+  // request 的鉴别无法闭合（自导航前后 WindowProxy 同一、导航后 load 前
+  // 的伪造请求与合法请求不可区分、恶意文档可悬挂子资源令 load 永不触发）
+  // ——媒体字节通道（readArtifactBytes，可外传任意产物字节）只走 port：
+  // 宿主建 MessageChannel，port1 自留监听、port2 随 init transfer 给**初始
+  // srcdoc 文档**。port 无法转移到导航后的文档：旧 global 销毁即关闭、
+  // sandbox 无 allow-popups、宿主丢弃转发来的端口。基础方法（文本量级）
+  // 保留 window 通道兼容存量面板。每次下发 init 都建新 Channel（节点状态
+  // 变化的重发也一样）——面板收到新 init 应改用新 port。
+  const portRef = useRef<MessagePort | null>(null)
 
   const initMessage = useMemo<PreviewHostInitMessage>(
     () => ({
@@ -144,6 +151,18 @@ export function PreviewPanelHost({
     }),
     [jobId, theme]
   )
+
+  /** 下发 init：window 通道 + 新 Channel 的 port2（transfer，#1178 P1）。 */
+  const sendInit = useCallback(() => {
+    const frame = iframeRef.current
+    const target = frame?.contentWindow
+    if (!target) return
+    portRef.current?.close()
+    const { port1, port2 } = createPortBridge(jobId, detail, isPortMethod)
+    portRef.current = port1
+    port1.start?.()
+    target.postMessage(initMessage, '*', [port2])
+  }, [initMessage, jobId, detail])
 
   // 面板内脚本被宿主严格 CSP 拦截（多为 inline 事件属性，#989）——提示而
   // 非静默失效。
@@ -167,74 +186,38 @@ export function PreviewPanelHost({
       nodeSignatureRef.current !== null &&
       nodeSignatureRef.current !== signature
     ) {
-      bridgeWindowRef.current?.postMessage(initMessage, '*')
+      sendInit()
     }
     nodeSignatureRef.current = signature
-  }, [detail, initMessage])
+  }, [detail, initMessage, sendInit])
 
   useEffect(() => {
-    // transfer（#1146 评审 P3-3）：readArtifactBytes 的 ArrayBuffer 走
-    // postMessage 第三参转移所有权——structured clone 零拷贝；宿主侧
-    // buffer 随即 detach，调用方（bridgeRequestHandler）不再引用它。
-    function respond(
-      id: number,
-      ok: boolean,
-      payload?: unknown,
-      error?: string,
-      transfer?: Transferable[]
-    ) {
-      bridgeWindowRef.current?.postMessage(
-        {
-          source: PREVIEW_HOST_SOURCE,
-          type: 'response',
-          id,
-          ok,
-          ...(ok ? { payload } : { error: error ?? 'unknown error' }),
+    // 窗口通道消息处理在 windowBridge.ts（#1178 双通道分工）；本 effect
+    // 只钉来源（event.source === frame.contentWindow——基础方法与控制
+    // 消息的窗口级鉴别）并挂/卸 listener。
+    const onMessage = createWindowMessageListener(
+      {
+        onReady: () => {
+          readyRef.current = true
+          nodeSignatureRef.current = (detail?.nodes ?? [])
+            .map((node) => `${node.node_key}:${node.status}`)
+            .join('|')
+          sendInit()
         },
-        '*',
-        transfer
-      )
-    }
-
-    function onMessage(event: MessageEvent) {
+        onCspViolation: () => setScriptBlocked(true),
+        onResize: (h) =>
+          setHeight(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(h)))),
+      },
+      { jobId, detail }
+    )
+    const guarded = (event: MessageEvent) => {
       const frame = iframeRef.current
-      // 桥端点必须是初始 srcdoc 文档的窗口（#1178 codex 复审 P1）：
-      // contentWindow 跨导航存续，不能用 event.source === frame.contentWindow
-      // 单独判定——导航后的文档伪造 source 标记即冒用桥。
-      if (!frame || event.source !== bridgeWindowRef.current) return
-      const data: unknown = event.data
-      if (!isPanelToHostMessage(data)) return
-      if (data.type === 'ready') {
-        readyRef.current = true
-        nodeSignatureRef.current = (detail?.nodes ?? [])
-          .map((node) => `${node.node_key}:${node.status}`)
-          .join('|')
-        bridgeWindowRef.current?.postMessage(initMessage, '*')
-        return
-      }
-      if (data.type === 'csp-violation') {
-        setScriptBlocked(true)
-        return
-      }
-      if (data.type === 'resize') {
-        setHeight(
-          Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(data.height)))
-        )
-        return
-      }
-      void handleBridgeRequest(
-        data.id,
-        data.method,
-        data.params,
-        jobId,
-        detail,
-        respond
-      )
+      if (!frame || event.source !== frame.contentWindow) return
+      onMessage(event)
     }
-
-    window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
-  }, [jobId, detail, initMessage])
+    window.addEventListener('message', guarded)
+    return () => window.removeEventListener('message', guarded)
+  }, [jobId, detail, initMessage, sendInit])
 
   return (
     <div className={styles.wrapper} data-testid="preview-panel-host">
@@ -255,16 +238,14 @@ export function PreviewPanelHost({
         style={{ height }}
         onLoad={() => {
           setLoading(false)
-          // 桥端点绑定（#1178 codex 复审 P1）：undefined（首帧未 load）时
-          // 登记初始文档窗口为桥端点；其余任何 load（导航）一律置 null 撤销
-          // 桥——导航前后 WindowProxy 同一，窗口引用无法区分文档身份，只能
-          // 以 load 次数近似：srcdoc 注入只产生首帧 load，React 更新 srcDoc
-          // 走 key 重建整个 iframe，不产生第二帧。
-          if (bridgeWindowRef.current === undefined) {
-            bridgeWindowRef.current = iframeRef.current?.contentWindow ?? null
-          } else {
-            bridgeWindowRef.current = null
-          }
+          // #1178 codex 复审 P1（MessagePort 方案）：撤销动作改为关闭桥
+          // 端口——面板自导航销毁初始文档 global，port 随之关闭（无需宿主
+          // 观测 load 判别）；这里的 load 处理只剩 loading 态。若导航后的
+          // 新文档再次 ready，sendInit 会建新 Channel 并 transfer 给它——
+          // 但初始文档已销毁、port1 的新会话服务的是外部文档，其可调的
+          // 基础方法泄漏面等同修复前的 window 通道（文本量级），且
+          // readArtifactBytes 走的仍是「只有初始文档才拿得到 port2」的
+          // 通道——首次 transfer 已随导航销毁。
         }}
       />
     </div>
