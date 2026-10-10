@@ -15,6 +15,7 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
 from worker import service_host_guard as host_guard
+from worker.cli_args import default_state_dir
 from worker.config_response import public_config_response
 from worker.console_url import CONSOLE_URL_ENV, resolve_console_url
 from worker.heartbeat_relay import start_heartbeat_relay, stop_heartbeat_relay
@@ -159,7 +160,8 @@ def main() -> int:
         default=None,
         help="可选 bootstrap：仅状态副本缺失时导入一次的种子配置（docker/远程部署用）",
     )
-    parser.add_argument("--state-dir", type=Path, default=Path("data/agent-worker-service"))
+    # 与 workerctl 同源（#1106）：AGENT_WORKER_STATE_DIR > data/agent-worker-service。
+    parser.add_argument("--state-dir", type=Path, default=default_state_dir())
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
     args = parser.parse_args()

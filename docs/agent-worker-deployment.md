@@ -385,7 +385,7 @@ docker compose -f deploy/compose.host.yaml exec -T worker cat /var/lib/agent-leg
 
 独立 Worker 部署将 Compose 文件换成启动时使用的 `deploy/compose.worker.standalone.yaml` 或 `deploy/compose.worker.yaml`，保留相同项目名及其他 Compose 参数。原生部署从 Worker 的 `--state-dir` 目录读取 `control_token`；没有该机器访问权限时由 Worker 维护者完成登录。控制令牌不要放进控制台 URL、Host 配置或注册标签。
 
-Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-worker-control/control_token`（权限 0600）。除 `GET /api/health` 外，所有 `/api/*` 端点都要求 `Authorization: Bearer <token>`。`workerctl` 按以下顺序取 token：`--token` 参数 > `AGENT_WORKER_CONTROL_TOKEN` 环境变量 > `--state-dir` 目录下的 `control_token` 文件。`--state-dir` 的默认值是相对当前目录的 `data/agent-worker-service`（裸机/dev 布局），**容器内不会自动命中**：镜像的工作目录是 `/app`，状态卷挂在 `/var/lib/agent-legion-worker-control`，所以容器内调用必须显式传 `--state-dir /var/lib/agent-legion-worker-control`（全局参数，写在子命令之前），否则报「读不到控制令牌（data/agent-worker-service/control_token）」。
+Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-worker-control/control_token`（权限 0600）。除 `GET /api/health` 外，所有 `/api/*` 端点都要求 `Authorization: Bearer <token>`。`workerctl` 按以下顺序取 token：`--token` 参数 > `AGENT_WORKER_CONTROL_TOKEN` 环境变量 > `--state-dir` 目录下的 `control_token` 文件。`--state-dir` 的默认值读 `AGENT_WORKER_STATE_DIR` 环境变量，未设置时为相对当前目录的 `data/agent-worker-service`（裸机/dev 布局，与 Makefile 同名变量一致）；Worker Service 的 `--state-dir` 默认值同源。镜像的 worker 阶段已设 `ENV AGENT_WORKER_STATE_DIR=/var/lib/agent-legion-worker-control`（即状态卷挂载点，#1106），容器内 `workerctl` 无需任何参数即可读到控制令牌。早于 #1106 构建的旧镜像没有该 ENV，容器内需显式传 `--state-dir /var/lib/agent-legion-worker-control`（全局参数，写在子命令之前），否则报「读不到控制令牌（data/agent-worker-service/control_token）」。
 
 **页面内嵌判定（issue #489）**：控制台页面是否自动内嵌 token，由**实际暴露面**而非进程 bind 决定。Docker 形态下容器内进程必绑 `0.0.0.0`（端口映射前提），但页面真正从哪个地址被访问由 compose 的宿主侧发布地址（`AGENT_WORKER_UI_BIND`）决定——compose 把该值经 `AGENT_WORKER_UI_EFFECTIVE_BIND` 环境变量告知 service（与发布行同一插值源，`.env` 一处改、两处同步）。该机制随 **worker 0.7.16** 发布，且以下方「Host 头校验」已启用为前提：一键安装（`install-worker.sh`）在更低版本上安装时页面仍要求手动输入 token（脚本的成功提示会按实际版本区分）。判定矩阵（进程 bind × 宿主侧发布地址 × token 内嵌结果）：
 
@@ -414,12 +414,11 @@ docker compose exec -T worker cat /var/lib/agent-legion-worker-control/control_t
 
 #### 容器内 CLI（workerctl）
 
-终端查询或自动化用容器内的 `workerctl`。先定义一个 shell 函数，把 compose 文件与 `--state-dir` 固定下来（部署机本地 Worker 换成 `-f deploy/compose.host.yaml`，一键安装目录内去掉 `-f`）：
+终端查询或自动化用容器内的 `workerctl`。先定义一个 shell 函数，把 compose 文件固定下来（部署机本地 Worker 换成 `-f deploy/compose.host.yaml`，一键安装目录内去掉 `-f`；状态目录由镜像 ENV 提供，旧镜像的处理见上文）：
 
 ```bash
 wctl() {
-  docker compose -f deploy/compose.worker.yaml exec -T worker \
-    workerctl --state-dir /var/lib/agent-legion-worker-control "$@"
+  docker compose -f deploy/compose.worker.yaml exec -T worker workerctl "$@"
 }
 
 wctl status

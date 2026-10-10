@@ -88,6 +88,10 @@ COPY --chmod=755 worker/cli.py /usr/local/bin/workerctl
 # a missing COPY fails the build here instead of crash-looping at runtime.
 RUN python3 -c "import worker.service, worker.executor, worker.upload.queue"
 ENV PYTHONUNBUFFERED=1
+# Worker state dir (#1106): the single source for both the service and
+# `workerctl` (their --state-dir defaults read it), so `docker compose exec
+# worker workerctl status` finds control_token without extra flags.
+ENV AGENT_WORKER_STATE_DIR=/var/lib/agent-legion-worker-control
 EXPOSE 8787
 ENTRYPOINT ["python3", "-m", "worker.service"]
-CMD ["--config", "/etc/agent-legion/worker.yaml", "--state-dir", "/var/lib/agent-legion-worker-control", "--host", "0.0.0.0", "--port", "8787"]
+CMD ["--config", "/etc/agent-legion/worker.yaml", "--host", "0.0.0.0", "--port", "8787"]

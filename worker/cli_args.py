@@ -1,8 +1,24 @@
 """Argument parsing and configuration payloads for workerctl."""
 
 import argparse
+import os
 from pathlib import Path
 from typing import Any
+
+# Worker 状态目录的环境变量名与本地默认值（#1106）：workerctl 与
+# worker.service 的 --state-dir 默认值共用这一来源。与 Makefile 的
+# AGENT_WORKER_STATE_DIR 同名；镜像 worker 阶段经 Dockerfile ENV 设为
+# 容器内状态卷路径，使 `workerctl status` 在容器内无参数即可读到控制令牌。
+STATE_DIR_ENV = "AGENT_WORKER_STATE_DIR"
+LOCAL_STATE_DIR = "data/agent-worker-service"
+
+
+def default_state_dir() -> Path:
+    """--state-dir 默认值：AGENT_WORKER_STATE_DIR（非空时），否则本地默认。
+
+    在 build_parser 调用时求值（而非 import 时），测试可 monkeypatch 环境。
+    """
+    return Path(os.environ.get(STATE_DIR_ENV) or LOCAL_STATE_DIR)
 
 
 def _labels(values: list[str]) -> dict[str, str]:
@@ -35,7 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--url", default="http://127.0.0.1:8787")
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--token", help="控制令牌，默认读 state dir 或 AGENT_WORKER_CONTROL_TOKEN")
-    parser.add_argument("--state-dir", type=Path, default=Path("data/agent-worker-service"))
+    parser.add_argument(
+        "--state-dir",
+        type=Path,
+        default=default_state_dir(),
+        help=f"Worker 状态目录，默认读 {STATE_DIR_ENV}，未设置时为 {LOCAL_STATE_DIR}",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status", help="查看进程、Host 和登记状态")
     commands.add_parser("config", help="查看可编辑配置")
