@@ -26,7 +26,8 @@ export async function handleBridgeRequest(
   params: { name?: string } | undefined,
   jobId: string,
   detail: JobDetail | undefined,
-  respond: BridgeResponder
+  respond: BridgeResponder,
+  signal?: AbortSignal
 ): Promise<void> {
   try {
     switch (method) {
@@ -54,7 +55,9 @@ export async function handleBridgeRequest(
           )
           return
         }
-        const artifact = await fetchJobArtifactRawBytes(jobId, params.name)
+        const artifact = await fetchJobArtifactRawBytes(jobId, params.name, {
+          signal,
+        })
         // 零拷贝 transfer（#1146 评审 P3-3）：把 bytes 所有权转给面板帧，
         // structured clone 不再复制（512 MiB 媒体时宿主峰值省一份完整
         // 拷贝）。transfer 后宿主侧该 buffer 已 detach——此后不得再读。

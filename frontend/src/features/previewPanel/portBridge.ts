@@ -16,7 +16,7 @@
  * 已接受端口的 serving（含并发护栏的串行队列）在 bytePortServer.ts。
  */
 import { BYTE_PORT_OFFER_TYPE, isPanelToHostMessage } from './bridge'
-import { serveBytePort } from './bytePortServer'
+import { serveBytePort, type BytePortServer } from './bytePortServer'
 import type { JobDetail } from '../../types/jobTypes'
 
 /**
@@ -35,6 +35,7 @@ export function createBytePortAcceptor(deps: {
   getDetail: () => JobDetail | undefined
 }): BytePortAcceptor {
   let accepted: MessagePort | null = null
+  let server: BytePortServer | null = null
   let closed = false
 
   return {
@@ -51,11 +52,15 @@ export function createBytePortAcceptor(deps: {
         return true
       }
       accepted = offered
-      serveBytePort(offered, deps)
+      server = serveBytePort(offered, deps)
       return true
     },
     close() {
       closed = true
+      // 先取消再关端口：中止在途读取、丢弃排队项、抑制滞留响应
+      // （#1178 codex 复审 P2——帧下架后不再白耗带宽与内存）。
+      server?.cancel()
+      server = null
       accepted?.close()
       accepted = null
     },

@@ -382,10 +382,28 @@ describe('job helpers', () => {
     global.fetch = fetchMock
 
     await expect(
-      fetchJobArtifactRawBytes('j1', 'big.mp4', 8)
+      fetchJobArtifactRawBytes('j1', 'big.mp4', { maxBytes: 8 })
     ).rejects.toBeInstanceOf(ArtifactTooLargeError)
     expect(reader.read).toHaveBeenCalledTimes(2)
     expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('fetchJobArtifactRawBytes forwards the abort signal to fetch (#1178 codex 复审 P2 取消语义)', async () => {
+    const controller = new AbortController()
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(1)),
+      headers: new Headers(),
+    } as unknown as Response)
+    global.fetch = fetchMock
+
+    await fetchJobArtifactRawBytes('j1', 'demo.mp4', {
+      signal: controller.signal,
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/jobs/j1/raw-artifacts/demo.mp4',
+      { cache: 'no-store', signal: controller.signal }
+    )
   })
 
   it('fetchJobArtifactRawBytes assembles multi-chunk streamed bodies', async () => {
@@ -424,9 +442,9 @@ describe('job helpers', () => {
     } as unknown as Response)
     global.fetch = fetchMock
 
-    await expect(fetchJobArtifactRawBytes('j1', 'big.mp4', 8)).rejects.toThrow(
-      /exceed readArtifactBytes limit/
-    )
+    await expect(
+      fetchJobArtifactRawBytes('j1', 'big.mp4', { maxBytes: 8 })
+    ).rejects.toThrow(/exceed readArtifactBytes limit/)
   })
 
   it('fetchJobArtifactRawBytes re-fetches the same URL after an init resend — every call hits fetch with no-store (#1178 codex)', async () => {

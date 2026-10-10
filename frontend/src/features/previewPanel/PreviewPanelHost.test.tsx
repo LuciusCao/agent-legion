@@ -332,7 +332,8 @@ describe('PreviewPanelHost 桥协议', () => {
     })
     expect(mockFetchJobArtifactRawBytes).toHaveBeenCalledWith(
       'job-1',
-      'demo.mp4'
+      'demo.mp4',
+      { signal: expect.any(AbortSignal) }
     )
     const reply = inbox.find(
       (data) => data.type === 'response' && data.id === 31
@@ -502,6 +503,73 @@ describe('PreviewPanelHost 桥协议', () => {
     expect(
       inbox.find((d) => d.id === 71)!.ok && inbox.find((d) => d.id === 72)!.ok
     ).toBe(true)
+  })
+
+  it('关闭端口时中止在途读取、丢弃排队项并抑制滞留响应（#1178 codex 复审 P2）', async () => {
+    // 帧下架/自导航后若继续跑队列，每个最多 512 MiB 的响应会无处投递仍
+    // 耗尽带宽与内存——close 路径必须中止在途 fetch 并丢弃未开始的项。
+    let firstSignal: AbortSignal | undefined
+    let releaseFirst!: (value: {
+      name: string
+      mediaType: string
+      bytes: ArrayBuffer
+    }) => void
+    const firstGate = new Promise<{
+      name: string
+      mediaType: string
+      bytes: ArrayBuffer
+    }>((resolve) => {
+      releaseFirst = resolve
+    })
+    mockFetchJobArtifactRawBytes
+      .mockImplementationOnce(
+        (_jobId: string, _name: string, options?: { signal?: AbortSignal }) => {
+          firstSignal = options?.signal
+          return firstGate
+        }
+      )
+      .mockResolvedValue({
+        name: 'b.mp4',
+        mediaType: 'video/mp4',
+        bytes: new ArrayBuffer(1),
+      })
+    const { container } = renderHost()
+    const iframe = getIframe(container)
+    await bridgeReady()
+    const { panelPort } = offerBytePort(iframe)
+    const inbox = portInbox(panelPort)
+
+    panelPort.postMessage({
+      type: 'request',
+      id: 81,
+      method: 'readArtifactBytes',
+      params: { name: 'a.mp4' },
+    })
+    panelPort.postMessage({
+      type: 'request',
+      id: 82,
+      method: 'readArtifactBytes',
+      params: { name: 'b.mp4' },
+    })
+    await waitFor(() =>
+      expect(mockFetchJobArtifactRawBytes).toHaveBeenCalledTimes(1)
+    )
+
+    // 面板自导航 → 第二次 load → acceptor.close()（先取消再关端口）。
+    act(() => {
+      fireEvent.load(iframe)
+    })
+    expect(firstSignal?.aborted).toBe(true)
+
+    // 释放在途读取：响应被抑制（帧已下架）；排队项被丢弃、不再发起。
+    releaseFirst({
+      name: 'a.mp4',
+      mediaType: 'video/mp4',
+      bytes: new ArrayBuffer(1),
+    })
+    await flush()
+    expect(mockFetchJobArtifactRawBytes).toHaveBeenCalledTimes(1)
+    expect(inbox.filter((d) => d.type === 'response')).toEqual([])
   })
 
   it('窗口通道的 readArtifactBytes 被拒并引导到注入全局（#1178 P1：高危方法只走字节桥 port，旧 window 形态拿到明确错误）', async () => {

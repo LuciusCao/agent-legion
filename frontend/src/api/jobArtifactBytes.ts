@@ -45,12 +45,16 @@ export interface ArtifactBytesResponse {
 export async function fetchJobArtifactRawBytes(
   jobId: string,
   artifactName: string,
-  maxBytes: number = READ_ARTIFACT_BYTES_MAX_BYTES
+  options?: { maxBytes?: number; signal?: AbortSignal }
 ): Promise<ArtifactBytesResponse> {
+  const maxBytes = options?.maxBytes ?? READ_ARTIFACT_BYTES_MAX_BYTES
   // no-store：见文件头「缓存语义」——重取通道必须穿透 freshness window，
-  // 重跑后的同名产物不能从 HTTP 缓存里播出旧字节。
+  // 重跑后的同名产物不能从 HTTP 缓存里播出旧字节。signal：字节桥在端口
+  // 关闭/帧卸载时中止在途下载（#1178 codex 复审 P2），避免响应无处投递
+  // 仍耗尽带宽与内存。
   const response = await fetch(jobArtifactRawUrl(jobId, artifactName), {
     cache: 'no-store',
+    ...(options?.signal ? { signal: options.signal } : {}),
   })
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${await response.text()}`)
