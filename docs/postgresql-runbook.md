@@ -99,7 +99,7 @@ ALTER DATABASE <agent_legion_worktree> OWNER TO agent_legion_dev;
 Agent count and database connection count are deliberately decoupled. Each API
 process uses a bounded pool (default 32 connections, overridable via the
 `AGENT_LEGION_DB_POOL_MAX_SIZE` environment variable; see
-`server/app/db/pools.py`) and returns connections after short
+`server/app/db/pool_sizing.py`) and returns connections after short
 transactions. Connections are recycled explicitly: `AGENT_LEGION_DB_POOL_MAX_IDLE`
 (default 120s) bounds how long an idle connection stays in the pool — note the
 pool's idle shrink closes at most one connection per interval — and
