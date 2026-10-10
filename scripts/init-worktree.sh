@@ -45,6 +45,10 @@ fi
 # 0.5 派生名撞名防护（#950）：worktree 名到库/bucket 名的映射不是单射，
 #     与其他已注册 worktree 派生出同名资源时 fail-fast（在任何副作用之前），
 #     否则两个 worktree 会静默共用同一个库与 bucket。
+#     检查到建库/建 bucket（2.5 末尾）持派生名锁（#1084）：并发的 clean/drop
+#     要么在本次检查前删完，要么在建完后才重新检查（届时本 worktree 已注册，
+#     对方撞名拒绝）。本脚本无交互，持锁期间不等用户输入。
+worktree_name_lock_acquire "$ROOT" "初始化 $(basename "$ROOT")（建库/建 bucket）" || exit 1
 worktree_require_unique_derived_names "$ROOT" "$(basename "$ROOT")" "初始化（建库/建 bucket）" || exit 1
 
 BASE="${1:-}"
@@ -164,6 +168,8 @@ else
     echo "提示: S3 endpoint 不可达或未配置，跳过建 bucket（材料 API 将降级为 503；" >&2
     echo "      启动共享 RustFS 后重跑本脚本即可补齐）。" >&2
 fi
+# 派生资源已建完，其余步骤（vault key、worker 状态副本）与派生名无关。
+worktree_name_lock_release
 
 # 3. deploy/secrets
 mkdir -p deploy/secrets

@@ -37,6 +37,10 @@ if [[ "$1" == "worktree" && "$2" == "list" ]]; then
   echo "branch refs/heads/develop"
   exit 0
 fi
+if [[ "$1" == "rev-parse" && "$2" == "--git-common-dir" ]]; then
+  echo "{main}/.git"
+  exit 0
+fi
 echo "unexpected git call: $*" >&2
 exit 1
 """
@@ -59,6 +63,10 @@ if [[ "$1" == "worktree" && "$2" == "list" ]]; then
   echo "branch refs/heads/develop"
   exit 0
 fi
+if [[ "$1" == "rev-parse" && "$2" == "--git-common-dir" ]]; then
+  echo "{main}/.git"
+  exit 0
+fi
 echo "unexpected git call: $*" >&2
 exit 1
 """
@@ -74,6 +82,8 @@ def _setup(tmp_path: Path, script_rel: str, git_stub: str = _GIT_STUB) -> tuple[
     main = tmp_path / "main"
     script_path = main / script_rel
     script_path.parent.mkdir(parents=True)
+    # 派生名锁（#1084）落在 git common dir 下，stub 的 rev-parse 指向这里。
+    (main / ".git").mkdir()
     shutil.copy(SCRIPT, script_path)
     shutil.copy(ENSURE_S3_SCRIPT, script_path.parent / ENSURE_S3_SCRIPT.name)
     shutil.copy(PREWARM_SCRIPT, script_path.parent / PREWARM_SCRIPT.name)

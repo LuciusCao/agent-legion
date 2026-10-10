@@ -51,6 +51,11 @@ if [[ "$1" == "worktree" && "$2" == "list" ]]; then
     "branch refs/heads/feat/other"
   exit 0
 fi
+# 派生名锁（#1084）落在 git common dir 下；只读查询，不记入 stub 日志。
+if [[ "$1" == "rev-parse" && "$2" == "--git-common-dir" ]]; then
+  echo "__MAIN__/.git"
+  exit 0
+fi
 printf 'git %s\\n' "$*" >>"${STUB_LOG:-/dev/null}"
 exit 0
 """
@@ -78,6 +83,7 @@ def _setup(tmp_path: Path) -> tuple[Path, Path, Path]:
     main = tmp_path / "main"
     scripts_dir = main / ".worktrees" / "other" / "scripts"
     scripts_dir.mkdir(parents=True)
+    (main / ".git").mkdir()
     shutil.copy(SCRIPT, scripts_dir / "clean-worktree.sh")
     shutil.copy(DB_SCRIPT, scripts_dir / "drop-worktree-db.sh")
     shutil.copy(NAMES_LIB, scripts_dir / NAMES_LIB.name)

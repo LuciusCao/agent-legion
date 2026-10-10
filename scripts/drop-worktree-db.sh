@@ -8,7 +8,9 @@
 #   2. 集群里存在 agent_legion_dev role 时以它连接（非 superuser、只拥有
 #      派生库）——此时对任何非派生库的 DROP 会被 Postgres 直接拒绝，
 #      不依赖调用者小心；
-#   3. 执行前打印每个目标库的 owner 与大小，交互确认（--yes 跳过）。
+#   3. 执行前打印每个目标库的 owner 与大小，交互确认（--yes 跳过）；
+#   4. 确认之后才取派生名锁（#1084，持锁等用户输入会卡住别的 init），
+#      持锁重新做撞名检查，只删确认时列出且仍存在的库。
 #
 # 用法: scripts/drop-worktree-db.sh <worktree名> [--yes]
 set -euo pipefail
@@ -41,7 +43,8 @@ TEST_DB="$(worktree_derived_test_db "$WT")"
 # 护栏 0（#950）：派生名映射不是单射，另一个仍存在的 worktree 派生出同名
 # 库时拒绝删除——那是对方正在用的库。clean-worktree.sh 转调本脚本前已在
 # 移除 worktree 之前做过同一检测（同一共享函数），这里再查一次是独立调用
-# 时的兜底，结果一致、开销可忽略。
+# 时的兜底，结果一致、开销可忽略。这里是不持锁的预检（尽早拒绝、免得白
+# 问一次确认），真正的判定在下方取锁之后重做。
 worktree_require_unique_derived_names "$SCRIPT_DIR" "$WT" "删除派生库" || exit 1
 
 command -v psql >/dev/null 2>&1 || { echo "错误: 未找到 psql" >&2; exit 1; }
@@ -54,8 +57,10 @@ else
     echo "提示: 集群无 $DEV_ROLE role，以当前用户（$(whoami)）连接——仅靠名字护栏保护。" >&2
 fi
 
-# 收集存在的目标库（owner + 大小）
+# 收集存在的目标库（owner + 大小）。CONFIRMED 是确认时展示的集合，下方
+# 只删其中的库（空格分隔；库名由派生规则保证不含空白）。
 FOUND=0
+CONFIRMED=""
 for db in "$DB" "$TEST_DB"; do
     row="$(psql -d postgres -tAc \
         "select r.rolname || '|' || pg_size_pretty(pg_database_size(d.datname)) from pg_database d join pg_roles r on r.oid=d.datdba where d.datname='$db'" \
@@ -63,6 +68,7 @@ for db in "$DB" "$TEST_DB"; do
     if [[ -n "$row" ]]; then
         echo "待删除: $db (owner=${row%%|*}, size=${row##*|})"
         FOUND=$((FOUND + 1))
+        CONFIRMED="${CONFIRMED} ${db}"
     else
         echo "不存在（跳过）: $db"
     fi
@@ -73,14 +79,22 @@ if [[ "$FOUND" -eq 0 ]]; then
 fi
 
 if [[ "$ASSUME_YES" != "--yes" ]]; then
-    read -r -p "确认删除以上 $FOUND 个库？输入 worktree 名 '$WT' 确认: " reply
+    reply=""
+    read -r -p "确认删除以上 $FOUND 个库？输入 worktree 名 '$WT' 确认: " reply || true
     if [[ "$reply" != "$WT" ]]; then
         echo "已取消。" >&2
         exit 1
     fi
 fi
 
-for db in "$DB" "$TEST_DB"; do
+# 护栏 0'（#1084）：确认后取派生名锁并重新检查撞名——确认期间可能有派生
+# 名相同的新 worktree 完成了 init（库名相同，删掉就是删它的库）。持锁后
+# 并发的 init 只能在本次删除完成后再建库。锁在脚本退出（含报错/信号）时由
+# trap 释放；被 clean-worktree.sh 转调且父进程已持锁时直接复用。
+worktree_name_lock_acquire "$SCRIPT_DIR" "删除派生库 ${WT}" || exit 1
+worktree_require_unique_derived_names "$SCRIPT_DIR" "$WT" "删除派生库" || exit 1
+
+for db in $CONFIRMED; do
     if psql -d postgres -tAc "select 1 from pg_database where datname='$db'" 2>/dev/null | grep -q 1; then
         # 不用 --if-exists：存在性已显式检查，dropdb 的任何报错（含
         # 「must be owner」权限护栏）都应原样失败暴露。
