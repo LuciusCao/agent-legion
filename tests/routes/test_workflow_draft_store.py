@@ -298,6 +298,34 @@ def test_put_with_never_saved_conflicts_when_a_draft_already_exists(client, job_
     assert conflict.json()["detail"]["current_draft"]["definition_yaml"] == _DRAFT_YAML
 
 
+def test_put_with_stale_base_over_a_deleted_row_recreates_the_draft(client, job_db) -> None:
+    """#1221 §4 (方案 B): publish deletes the draft row; a CAS save holding a
+    pre-publish ``updated_at`` then silently RECREATES the draft instead of
+    409-ing — the CAS ``where`` gates only the conflict-update branch, so an
+    absent row is a plain insert. The recreation reads as a brand-new draft
+    (fresh timestamps), which is the intended post-publish semantics."""
+    workspace = job_db.create_workspace("ws-store-cas-deleted")
+    first = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
+    assert first.status_code == 200
+    stale_base = first.json()["updated_at"]
+
+    # Publish (or any deleter) removes the row underneath the held timestamp.
+    with job_db.connect() as conn:
+        conn.execute(
+            "delete from workspace_workflow_drafts where workspace_id=%s",
+            (workspace["id"],),
+        )
+
+    recreated = client.put(
+        _url(workspace["id"]),
+        json={"definition_yaml": _DRAFT_YAML, "expected_updated_at": stale_base},
+    )
+
+    assert recreated.status_code == 200, recreated.text
+    assert recreated.json()["definition_yaml"] == _DRAFT_YAML
+    assert recreated.json()["updated_at"] != stale_base
+
+
 # --- #633 codex review P2-2: an unparseable CAS token is a 422 (input
 # error), never a DB error (500) from the timestamptz cast.
 

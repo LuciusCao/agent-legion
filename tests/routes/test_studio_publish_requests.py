@@ -122,6 +122,39 @@ def test_human_confirm_publishes_and_records_revision(client, job_db) -> None:
     assert _pending(client, workspace_id).json()["request"] is None
 
 
+def test_human_confirm_deletes_the_draft_row(client, job_db) -> None:
+    """#1221: the confirm action IS a publish — the draft row is deleted with
+    the revision write, so no surviving draft can race the new canonical
+    baseline when the canvas reloads."""
+    workspace_id = _seed_workspace(client, job_db)
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 调整后的节点\n")
+    scoped = _scoped_client(client, job_db, workspace_id)
+    request = _request_publish(scoped, workspace_id).json()["request"]
+
+    confirmed = client.post(
+        f"/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request['id']}/confirm"
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["request"]["status"] == "confirmed"
+    draft = client.get(f"/api/workspaces/{workspace_id}/workflow-draft")
+    assert draft.json()["definition_yaml"] is None
+
+
+def test_confirm_without_draft_row_404s(client, job_db) -> None:
+    """#1221 pins the existing guard: with no draft row there is nothing to
+    publish — confirm 404s even when a pending request row exists (the row is
+    parked directly here: the request tool itself 409s without a draft)."""
+    workspace_id = _seed_workspace(client, job_db)
+    request = job_db.create_pending_publish_request(workspace_id, "studio-agent:test")
+
+    confirmed = client.post(
+        f"/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request['id']}/confirm"
+    )
+
+    assert confirmed.status_code == 404, confirmed.text
+
+
 def test_human_cancel_rejects_and_keeps_draft(client, job_db) -> None:
     workspace_id = _seed_workspace(client, job_db)
     _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 调整后的节点\n")

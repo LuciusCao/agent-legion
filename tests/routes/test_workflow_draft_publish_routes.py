@@ -21,6 +21,18 @@ def _app_and_workspace(tmp_path):
     return app, workspace["id"]
 
 
+def _seed_node_code(app, workspace_id: str) -> None:
+    codes = NodeCodeService(app.state.job_db.dsn_identity)
+    codes.save_draft(
+        workspace_id,
+        "test_publish_flow",
+        "do_thing",
+        "def run(job, job_dir, runtime):\n    pass\n",
+        "test seed",
+    )
+    codes.publish(workspace_id, "test_publish_flow", "do_thing")
+
+
 def _publish(client: TestClient, workspace_id: str, definition_yaml: str):
     return client.post(
         f"/api/workspaces/{workspace_id}/workflow-drafts/publish",
@@ -68,15 +80,7 @@ def test_publish_first_revision_for_blank_workspace(tmp_path):
     """End of the blank flow: a workspace without any revision publishes v1
     once the draft key matches and the capability resolves."""
     app, workspace_id = _app_and_workspace(tmp_path)
-    codes = NodeCodeService(app.state.job_db.dsn_identity)
-    codes.save_draft(
-        workspace_id,
-        "test_publish_flow",
-        "do_thing",
-        "def run(job, job_dir, runtime):\n    pass\n",
-        "test seed",
-    )
-    codes.publish(workspace_id, "test_publish_flow", "do_thing")
+    _seed_node_code(app, workspace_id)
 
     with authenticate_client(TestClient(app)) as client:
         response = _publish(client, workspace_id, _DRAFT_YAML)
@@ -92,3 +96,46 @@ def test_publish_first_revision_for_blank_workspace(tmp_path):
     }
     assert active.status_code == 200
     assert active.json()["revision"]["version"] == 1
+
+
+def test_publish_success_deletes_the_stored_draft_row(tmp_path):
+    """#1221: after a successful manual publish the draft store reads empty —
+    the active revision is the single authority, so no surviving draft row
+    can race the new canonical baseline on the next canvas load."""
+    app, workspace_id = _app_and_workspace(tmp_path)
+    _seed_node_code(app, workspace_id)
+
+    with authenticate_client(TestClient(app)) as client:
+        put = client.put(
+            f"/api/workspaces/{workspace_id}/workflow-draft",
+            json={"definition_yaml": _DRAFT_YAML},
+        )
+        assert put.status_code == 200, put.text
+        response = _publish(client, workspace_id, _DRAFT_YAML)
+        draft = client.get(f"/api/workspaces/{workspace_id}/workflow-draft")
+
+    assert response.status_code == 200 and response.json()["valid"], response.text
+    assert draft.json() == {
+        "definition_yaml": None,
+        "updated_at": None,
+        "definition_hash": None,
+    }
+
+
+def test_publish_validation_failure_keeps_the_stored_draft_row(tmp_path):
+    """#1221: a refused publish (validation errors) leaves the draft row
+    untouched — the deletion only rides a successful revision write."""
+    app, workspace_id = _app_and_workspace(tmp_path)
+    # No published node code: the publish validation set refuses the draft.
+
+    with authenticate_client(TestClient(app)) as client:
+        put = client.put(
+            f"/api/workspaces/{workspace_id}/workflow-draft",
+            json={"definition_yaml": _DRAFT_YAML},
+        )
+        assert put.status_code == 200, put.text
+        response = _publish(client, workspace_id, _DRAFT_YAML)
+        draft = client.get(f"/api/workspaces/{workspace_id}/workflow-draft")
+
+    assert response.status_code == 200 and response.json()["valid"] is False
+    assert draft.json()["definition_yaml"] == _DRAFT_YAML

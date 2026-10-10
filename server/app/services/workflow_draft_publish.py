@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from server.app.services.workflow_drafts import (
     validate_workflow_definition,
     validate_workflow_for_publish,
     workflow_definition_from_yaml_string,
+    workflow_draft_identity_hash,
 )
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.skill_repo_gate import skill_repo_publish_errors
@@ -42,13 +43,47 @@ def publish_workflow_draft(
     definition_yaml: str,
     custom_nodes_enabled: bool = True,
 ) -> tuple[bool, list[str]]:
+    """Validate, then publish — deleting the stored draft row on success (#1221).
+
+    The deletion rides the revision write's own transaction (the structural
+    path's ``create_workflow_revision`` commit hook; the runtime-only path's
+    in-place edit block), so a refused or failed publish keeps the draft,
+    and after a successful one the active revision is the single authority —
+    no surviving draft row can race the new canonical baseline. Shared by the
+    manual publish route and the agent publish-request confirm.
+
+    The removal is conditional (#1226 codex P1): the hook locks the draft row
+    and removes it only while its content still hashes to the published
+    YAML's identity hash (same chain as the revision's definition hash). A
+    draft saved concurrently with DIFFERENT content survives as the
+    unpublished draft — the publish still succeeds (no 409, no abort); a
+    same-content re-save (trailing autosave) hashes equal and is removed.
+    """
     errors = validate_workflow_draft_for_publish(
         job_db, workspace_id, definition_yaml, custom_nodes_enabled
     )
     if errors:
         return False, errors
+    published_hash = workflow_draft_identity_hash(definition_yaml)
+
+    def _delete_draft(conn: Any) -> None:
+        # Any: the concrete connection type must not be imported in services
+        # (BOUNDARY-DATA-001) — the revision transaction hands over the
+        # facade's connection.
+        stored = job_db.read_workspace_workflow_draft_for_update(conn, workspace_id)
+        if stored is None:
+            return
+        if workflow_draft_identity_hash(str(stored["definition_yaml"])) != published_hash:
+            # A concurrent save advanced the draft past the published content
+            # (#1226 P1): keep the row — the newer edit is the unpublished
+            # draft now; wiping it would lose it behind the old revision.
+            return
+        job_db.delete_workspace_workflow_draft(conn, workspace_id)
+
     WorkflowRevisionService(job_db, custom_nodes_enabled).save_workspace_revision(
-        workspace_id, workflow_definition_from_yaml_string(definition_yaml)
+        workspace_id,
+        workflow_definition_from_yaml_string(definition_yaml),
+        on_commit=_delete_draft,
     )
     # Schema v62: the workflow key is bound to the workspace id at creation
     # and immutable — no first-publish adoption path anymore.
