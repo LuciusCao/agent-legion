@@ -353,6 +353,7 @@
     "frontend/src/features/previewPanel/panelCspDirectives.ts": 47,
     "frontend/src/features/previewPanel/portBridge.ts": 46,
     "frontend/src/features/previewPanel/previewDisplayMode.ts": 31,
+    "frontend/src/features/previewPanel/previewHostTestlib.tsx": 83,
     "frontend/src/features/previewPanel/previewPanelApi.ts": 46,
     "frontend/src/features/previewPanel/rawAssets.d.ts": 31,
     "frontend/src/features/previewPanel/useDraftAuthorization.ts": 44,
