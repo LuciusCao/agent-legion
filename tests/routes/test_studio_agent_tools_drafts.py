@@ -109,6 +109,13 @@ def test_save_workflow_draft_cas_roundtrip_and_conflict(client, job_db) -> None:
     from server.app.services.workflow_drafts import workflow_draft_identity_hash
 
     assert detail["current_draft"]["definition_hash"] == workflow_draft_identity_hash(human_edit)
+    # #1177 codex P2：与人侧 PUT 同一契约——整个 409 响应体（含 FastAPI
+    # 原生 handler 的 detail 外层）过封套模型校验。
+    from server.app.routes.workflow_draft_store_contracts import (
+        WorkflowDraftConflictResponse as ContractResponse,
+    )
+
+    ContractResponse.model_validate(conflict.json())
     # The stored draft was NOT overwritten.
     assert scoped.get(_draft_url(workspace_id)).json()["definition_yaml"] == human_edit
 

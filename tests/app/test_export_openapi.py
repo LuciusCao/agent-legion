@@ -5,7 +5,11 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
 from scripts import export_openapi
-from scripts.export_openapi import build_openapi_schema, validate_response_contracts
+from scripts.export_openapi import build_openapi_schema
+from scripts.export_openapi_contracts import (
+    validate_error_response_envelopes,
+    validate_response_contracts,
+)
 
 
 def test_build_openapi_schema_is_deterministic_and_portable(tmp_path):
@@ -117,6 +121,102 @@ def test_validate_response_contracts_matches_exact_operation_id():
 
     assert "shared_api_protocol_get" not in str(exc_info.value)
     assert "shared_api_json_get" in str(exc_info.value)
+
+
+def test_validate_error_response_envelopes_rejects_bare_payload_model():
+    # #1177 codex P2: the service-layer detail object declared as the whole
+    # 4xx body — the wire always wraps it in {"detail": ...}.
+    schema = {
+        "paths": {
+            "/api/conflict": {
+                "put": {
+                    "operationId": "conflict_api_conflict_put",
+                    "responses": {
+                        "409": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/ConflictDetail"}
+                                }
+                            }
+                        }
+                    },
+                }
+            }
+        },
+        "components": {
+            "schemas": {
+                "ConflictDetail": {
+                    "type": "object",
+                    "properties": {"message": {"type": "string"}},
+                }
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="conflict_api_conflict_put"):
+        validate_error_response_envelopes(schema)
+
+
+def test_validate_error_response_envelopes_accepts_envelope_and_skips():
+    schema = {
+        "paths": {
+            "/api/ok": {
+                "get": {
+                    "operationId": "ok_api_ok_get",
+                    "responses": {
+                        # 2xx is out of scope.
+                        "200": {"content": {"application/json": {"schema": {"type": "object"}}}},
+                        # The auto-declared validation error already complies.
+                        "422": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
+                                }
+                            }
+                        },
+                        # No JSON body: nothing to check.
+                        "503": {"description": "backends draining"},
+                        # Free-form schema (no properties): no shape claim.
+                        "502": {"content": {"application/json": {"schema": {"type": "object"}}}},
+                    },
+                }
+            }
+        },
+        "components": {
+            "schemas": {
+                "HTTPValidationError": {
+                    "type": "object",
+                    "properties": {"detail": {"type": "array"}},
+                }
+            }
+        },
+    }
+
+    validate_error_response_envelopes(schema)
+
+
+def test_validate_error_response_envelopes_flags_unresolvable_ref():
+    schema = {
+        "paths": {
+            "/api/gone": {
+                "delete": {
+                    "operationId": "gone_api_gone_delete",
+                    "responses": {
+                        "410": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Missing"}
+                                }
+                            }
+                        }
+                    },
+                }
+            }
+        }
+    }
+
+    with pytest.raises(ValueError, match="unresolvable"):
+        validate_error_response_envelopes(schema)
 
 
 def test_protocol_operation_ids_distinguish_duplicate_endpoint_names():
