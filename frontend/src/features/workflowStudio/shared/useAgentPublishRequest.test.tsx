@@ -1,12 +1,13 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider, useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { useAgentPublishRequest } from './useAgentPublishRequest'
 import {
   createTestQueryClient,
   TestQueryProvider,
 } from '../../../testing/testQueryClient'
+import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import { useUiStore } from '../../../stores/uiStore'
 import { useAgentPublishNoticeStore } from './agentPublishNoticeStore'
 import type { StudioPublishRequestRecord } from '../../../api/studioPublishRequestApi'
@@ -388,6 +389,105 @@ describe('useAgentPublishRequest', () => {
 
       expect(result.current.pendingRequest).toBeNull()
       expect(result.current.resolvedNotice).toContain('已消解')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('confirm invokes onConfirmed before the studio-data refetch lands, and also invalidates the server-draft query (#1122)', async () => {
+    // #1122 根因钉：confirm 必须把「登记发布原文」排在 invalidate 触发的
+    // studio 数据重取之前——基线变化随重取落地，baseline sync 靠
+    // justPublishedRef 区分「自己刚发布」与「外部变更」，晚于重取登记
+    // 等于没登记（dirty 永真）。顺序钉：endpoint → onConfirmed →
+    // workflowStudioData 重取。次要缺口同钉：invalidate 覆盖
+    // workflowStudioDraft（服务端草稿查询）。
+    const order: string[] = []
+    mocks.fetchPendingPublishRequest.mockResolvedValue(requestRecord())
+    mocks.confirmPublishRequest.mockImplementation(async () => {
+      order.push('endpoint')
+      return requestRecord({
+        status: 'confirmed',
+        result_revision_id: 'ws1:publish_flow_ws:v2',
+        resolved_at: '2026-09-03T10:02:00Z',
+      })
+    })
+    const client = createTestQueryClient()
+    // 测试 QueryClient gcTime=0：非活跃查询立即回收，失效面断言只能挂
+    // 活跃 useQuery 间谍看重取（不能 setQueryData + getQueryState）。
+    const draftFetch = vi.fn(async () => null)
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    const { result } = renderHook(
+      () => {
+        useQuery({
+          queryKey: extraQueryKeys.workflowStudioData('ws1'),
+          queryFn: async () => {
+            order.push('studio-data-refetch')
+            return null
+          },
+        })
+        useQuery({
+          queryKey: extraQueryKeys.workflowStudioDraft('ws1'),
+          queryFn: draftFetch,
+        })
+        return useAgentPublishRequest('ws1')
+      },
+      { wrapper }
+    )
+    await waitFor(() => expect(result.current.pendingRequest?.id).toBe('req-1'))
+    // 初始装载的取数不计入 confirm 段。
+    order.length = 0
+    draftFetch.mockClear()
+
+    await act(async () => {
+      await result.current.confirm(() => {
+        order.push('onConfirmed')
+      })
+    })
+
+    expect(order).toEqual(['endpoint', 'onConfirmed', 'studio-data-refetch'])
+    // 次要缺口：invalidate 覆盖 workflowStudioDraft（重取一次）。
+    expect(draftFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('an external pending→null jump also invalidates the studio data query (#1122)', async () => {
+    // #1122 次要缺口：旁观路径（另一 tab 手动发布把 pending 顶替掉）此前
+    // 不失效 workflowStudioData——本 tab 的 revision/状态 chip 要等别的
+    // 触发才刷新。跳变着陆「已消解」回执的同时必须失效 studio 数据查询。
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const client = createTestQueryClient()
+      // gcTime=0 下同上：挂活跃 useQuery 间谍观察失效重取。
+      const studioDataFetch = vi.fn(async () => null)
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      )
+      mocks.fetchPendingPublishRequest.mockResolvedValueOnce(requestRecord())
+      const { result } = renderHook(
+        () => {
+          useQuery({
+            queryKey: extraQueryKeys.workflowStudioData('ws1'),
+            queryFn: studioDataFetch,
+          })
+          return useAgentPublishRequest('ws1')
+        },
+        { wrapper }
+      )
+      await waitFor(() =>
+        expect(result.current.pendingRequest?.id).toBe('req-1')
+      )
+      studioDataFetch.mockClear()
+
+      // 下一轮轮询：请求没了（被手动发布顶替）。
+      mocks.fetchPendingPublishRequest.mockResolvedValue(null)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_100)
+      })
+
+      expect(result.current.pendingRequest).toBeNull()
+      expect(result.current.resolvedNotice).toContain('已消解')
+      await waitFor(() => expect(studioDataFetch).toHaveBeenCalledTimes(1))
     } finally {
       vi.useRealTimers()
     }

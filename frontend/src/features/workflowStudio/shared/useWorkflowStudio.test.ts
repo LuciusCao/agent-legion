@@ -12,6 +12,9 @@ function queryClientWrapper({ children }: { children: ReactNode }) {
 }
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useWorkflowStudio } from './useWorkflowStudio'
+import { useAgentPublishRequest } from './useAgentPublishRequest'
+import { useAgentPublishNoticeStore } from './agentPublishNoticeStore'
+import type { StudioPublishRequestRecord } from '../../../api/studioPublishRequestApi'
 
 const activeRevisionPayload = {
   revision: {
@@ -54,6 +57,9 @@ const mocks = {
   fetchWorkflowDraft: vi.fn(),
   putWorkflowDraft: vi.fn(),
   getAgentCatalog: vi.fn(),
+  fetchPendingPublishRequest: vi.fn(),
+  confirmPublishRequest: vi.fn(),
+  cancelPublishRequest: vi.fn(),
 }
 
 vi.mock('../../../api', () => ({
@@ -79,6 +85,34 @@ vi.mock('../../../api/agentCatalogApi', () => ({
   getAgentCatalog: (...args: unknown[]) => mocks.getAgentCatalog(...args),
 }))
 
+vi.mock('../../../api/studioPublishRequestApi', () => ({
+  fetchPendingPublishRequest: (...args: unknown[]) =>
+    mocks.fetchPendingPublishRequest(...args),
+  confirmPublishRequest: (...args: unknown[]) =>
+    mocks.confirmPublishRequest(...args),
+  cancelPublishRequest: (...args: unknown[]) =>
+    mocks.cancelPublishRequest(...args),
+}))
+
+function publishRequestRecord(
+  overrides: Partial<StudioPublishRequestRecord> = {}
+): StudioPublishRequestRecord {
+  return {
+    id: 'req-1',
+    workspace_id: 'ws1',
+    chat_session_id: 's1',
+    status: 'pending',
+    created_by: 'studio-agent:u1',
+    result_revision_id: null,
+    draft_hash: null,
+    created_at: '2026-09-03T10:00:00Z',
+    expires_at: '2026-09-03T10:10:00Z',
+    resolved_at: null,
+    claimed_at: null,
+    ...overrides,
+  }
+}
+
 // compare/DAG/空态/选择相关用例；草稿应用/revision 切换/持久化用例在姊妹
 // 文件 useWorkflowStudio.draft.test.ts（测试文件体积纪律拆分）。
 describe('useWorkflowStudio', () => {
@@ -101,6 +135,11 @@ describe('useWorkflowStudio', () => {
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: 'key: demo\n',
       updated_at: '2026-08-27T00:00:00+00:00',
+    })
+    mocks.fetchPendingPublishRequest.mockResolvedValue(null)
+    useAgentPublishNoticeStore.setState({
+      resolvedNotice: null,
+      lastResolvedRequestId: null,
     })
   })
 
@@ -600,5 +639,73 @@ describe('useWorkflowStudio', () => {
     })
 
     await waitFor(() => expect(result.current.loadState).toBe('error'))
+  })
+
+  it('agent publish confirm resets the draft to the canonical baseline instead of staying dirty (#1122)', async () => {
+    // #1122 回归钉（dirty chip 永真）：复刻 AgentPublishRequestDialog 的
+    // 确认管道——confirm 的 onConfirmed 回调把发布的草稿原文登记进
+    // justPublishedRef（与手动 publishDraft 同一收尾机制）。修复前 confirm
+    // 无登记通道：发布存库的 revision 是 canonical 重建 YAML（重排 key），
+    // 紧随的基线变化被 baseline sync 误判为外部变更，preserveDirtyDraft
+    // 永真，chip 卡在「有未发布变更」。发布后草稿必须 reset 到新基线且
+    // dirty/hasPreservedDraft 都消退。
+    const editedYaml = 'key: demo\nlabel: My Draft\n'
+    const canonicalYaml = 'label: My Draft\nkey: demo\n'
+    const v2Payload = {
+      revision: {
+        ...activeRevisionPayload.revision,
+        id: 'ws1:demo:v2',
+        version: 2,
+        definition_hash: 'hash5678',
+      },
+      workflow: activeRevisionPayload.workflow,
+      definition_yaml: canonicalYaml,
+    }
+    mocks.fetchPendingPublishRequest.mockResolvedValue(publishRequestRecord())
+    mocks.confirmPublishRequest.mockResolvedValue(
+      publishRequestRecord({
+        status: 'confirmed',
+        result_revision_id: 'ws1:demo:v2',
+        resolved_at: '2026-09-03T10:02:00Z',
+      })
+    )
+    // 对话框与栏顶的生产拓扑：同一 QueryClient 下 studio hook 与 agent
+    // 发布请求 hook 并存。
+    const { result } = renderHook(
+      () => {
+        const studio = useWorkflowStudio('ws1')
+        const agentRequest = useAgentPublishRequest('ws1')
+        return { studio, agentRequest }
+      },
+      { wrapper: queryClientWrapper }
+    )
+    await waitFor(() => expect(result.current.studio.loadState).toBe('ready'))
+    await waitFor(() =>
+      expect(result.current.agentRequest.pendingRequest?.id).toBe('req-1')
+    )
+
+    act(() => {
+      result.current.studio.setDefinitionYaml(editedYaml)
+    })
+    expect(result.current.studio.dirty).toBe(true)
+
+    // 确认成功：active revision 换成 canonical 重建的 v2（与画布原文
+    // 纯文本不等）——这正是手动发布路径靠 markDraftPublished 消化、
+    // agent 路径此前漏掉的形态。
+    mocks.fetchActiveWorkflowRevision.mockResolvedValue(v2Payload)
+    mocks.fetchWorkflowRevisions.mockResolvedValue({
+      revisions: [v2Payload.revision],
+    })
+    await act(async () => {
+      await result.current.agentRequest.confirm(() =>
+        result.current.studio.markDraftPublished(editedYaml)
+      )
+    })
+
+    await waitFor(() =>
+      expect(result.current.studio.definitionYaml).toBe(canonicalYaml)
+    )
+    expect(result.current.studio.dirty).toBe(false)
+    expect(result.current.studio.hasPreservedDraft).toBe(false)
   })
 })
