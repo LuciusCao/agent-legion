@@ -6,6 +6,14 @@
  * structured clone 把 ArrayBuffer 回传面板——不走 base64。安全语义与
  * readArtifact 完全一致：只回当前查看者已有权看到的数据，桥无写面。
  *
+ * 缓存语义（#1178 codex 复审）：本方法承担「init 重发 → 面板重取」的重取
+ * 通道，必须穿透 HTTP 缓存——同名产物重跑覆盖后字节已变而 URL 不变，
+ * freshness window 内浏览器会直接复用旧响应（本地 FileResponse 带
+ * ETag/Last-Modified），面板就继续播放重跑前的字节。fetch 固定
+ * `cache: 'no-store'`：总是打到服务端（ETag 仍可协商省带宽，但 freshness
+ * window 不再截流）。版本参数形态留给后续（需要宿主 assets 携带产物版本
+ * 号——内置媒体渲染器走 artifact version 查询参数的同一思路）。
+ *
  * 内存护栏：读取前按 Content-Length 预检（对象存储流式分支可能不带该
  * 头），读取后按实际字节数复核，超限抛 ArtifactTooLargeError 走桥的
  * 错误响应通道——避免面板把大文件整体读进内存。媒体类型过滤
@@ -44,7 +52,11 @@ export async function fetchJobArtifactRawBytes(
   artifactName: string,
   maxBytes: number = READ_ARTIFACT_BYTES_MAX_BYTES
 ): Promise<ArtifactBytesResponse> {
-  const response = await fetch(jobArtifactRawUrl(jobId, artifactName))
+  // no-store：见文件头「缓存语义」——重取通道必须穿透 freshness window，
+  // 重跑后的同名产物不能从 HTTP 缓存里播出旧字节。
+  const response = await fetch(jobArtifactRawUrl(jobId, artifactName), {
+    cache: 'no-store',
+  })
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${await response.text()}`)
   }

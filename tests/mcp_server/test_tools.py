@@ -519,6 +519,8 @@ def test_get_preview_guide_is_served_locally(recorded) -> None:
         # blob URL 生命周期归面板（#1178 codex P2）：示例必须带回收形态。
         "revokeObjectURL",
         "pagehide",
+        # 重跑后的重取语义（#1178 codex 复审）：桥通道穿透缓存。
+        "no-store",
     ):
         assert section in text
 

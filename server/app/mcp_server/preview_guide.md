@@ -187,6 +187,14 @@ Object URL lifetime is the panel's responsibility, not the host's: each
 `revokeObjectURL` — track the current URL and revoke it when replacing the
 media and on `pagehide`, or repeated re-renders accumulate memory.
 
+Re-fetches after a rerun: when a media artifact is regenerated under the same
+name, the host's `init` resend triggers your re-fetch through
+`readArtifactBytes`, and that bridge channel is set up to bypass the browser's
+HTTP cache (`cache: 'no-store'` on the host side) — you always receive the
+current bytes. Requests the panel makes on its own (if any) do NOT get this
+guarantee: a panel reading text artifacts directly should not rely on cache
+freshness either.
+
 A common pattern for subtitled video: read the media via
 `readArtifactBytes`, read the subtitle track (SRT/VTT is text) via
 `readArtifact`, then drive an overlay `<div>` from the element's

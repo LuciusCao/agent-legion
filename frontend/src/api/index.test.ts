@@ -325,7 +325,12 @@ describe('job helpers', () => {
 
     const result = await fetchJobArtifactRawBytes('j1', 'demo.mp4')
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/jobs/j1/artifacts/demo.mp4/raw'
+      '/api/jobs/j1/artifacts/demo.mp4/raw',
+      {
+        // #1178 codex 复审：重取通道必须穿透 HTTP 缓存——同名产物重跑后
+        // 字节已变而 URL 不变，freshness window 会播出旧字节。
+        cache: 'no-store',
+      }
     )
     expect(result).toEqual({
       name: 'demo.mp4',
@@ -364,6 +369,38 @@ describe('job helpers', () => {
     await expect(fetchJobArtifactRawBytes('j1', 'big.mp4', 8)).rejects.toThrow(
       /exceed readArtifactBytes limit/
     )
+  })
+
+  it('fetchJobArtifactRawBytes re-fetches the same URL after an init resend — every call hits fetch with no-store (#1178 codex)', async () => {
+    // 重跑覆盖后的重取语义：宿主 init 重发 → 面板重调同名产物 → URL 不变
+    // ——通道必须每次真实打到服务端（no-store），浏览器不得用 freshness
+    // window 的旧响应截流。
+    const first = Uint8Array.from([1]).buffer
+    const second = Uint8Array.from([2]).buffer
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(first),
+        headers: new Headers({ 'Content-Type': 'video/mp4' }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(second),
+        headers: new Headers({ 'Content-Type': 'video/mp4' }),
+      } as unknown as Response)
+    global.fetch = fetchMock
+
+    const before = await fetchJobArtifactRawBytes('j1', 'final.mp4')
+    const after = await fetchJobArtifactRawBytes('j1', 'final.mp4')
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    for (const call of fetchMock.mock.calls) {
+      expect(call[0]).toBe('/api/jobs/j1/artifacts/final.mp4/raw')
+      expect(call[1]).toEqual({ cache: 'no-store' })
+    }
+    expect(new Uint8Array(after.bytes)).toEqual(new Uint8Array(second))
+    expect(new Uint8Array(before.bytes)).toEqual(new Uint8Array(first))
   })
 })
 
