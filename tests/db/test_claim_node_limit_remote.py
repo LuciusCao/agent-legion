@@ -44,7 +44,6 @@ tests/db/test_execution_generation_races.py 的纪律）。
 from __future__ import annotations
 
 import threading
-import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -64,6 +63,7 @@ from server.app.executors.models import CODE_EXECUTOR_ID, ExecutionResult, Lease
 from server.app.jobs.node_limits import replace_workspace_node_limits
 from shared.protocol import PROTOCOL_VERSION
 from tests.helpers.agent_worker_api import seed_request
+from tests.helpers.pg_waits import backend_pid, wait_until_waiter_blocked_by
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -325,27 +325,6 @@ def _join(thread: threading.Thread) -> None:
     assert not thread.is_alive(), "write-side transaction never resolved"
 
 
-def _await_code_pool_waiter(timeout: float = 10.0) -> None:
-    """确定性同步点：等到有 backend 正等待 code-pool advisory 锁（比照
-    test_execution_generation_races._await_job_mutation_waiter 的手法：
-    pg_locks 观测，非裸 sleep）。"""
-    with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as probe:
-        row = probe.execute("select hashtext(%s)", ("code-pool",)).fetchone()
-        assert row is not None
-        expected = int(row[0]) & 0xFFFFFFFFFFFFFFFF
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            rows = probe.execute(
-                "select classid, objid from pg_locks"
-                " where locktype='advisory' and objsubid=1 and not granted"
-            ).fetchall()
-            for classid, objid in rows:
-                if ((int(classid) << 32) | int(objid)) & 0xFFFFFFFFFFFFFFFF == expected:
-                    return
-            time.sleep(0.02)
-    raise AssertionError(f"no backend waited on code-pool within {timeout}s")
-
-
 def test_first_config_insert_mid_claim_skips_unlocked_count(job_db, monkeypatch) -> None:
     """P2-1（claim 侧）：probe 判「无 limit 行、不取锁」后、节点检查前，
     配置插入在另一会话提交——claim 不得在无锁状态下计数新行（与并发持锁
@@ -398,8 +377,17 @@ def test_first_config_insert_mid_claim_skips_unlocked_count(job_db, monkeypatch)
     assert _active_node_lease_count(job_db, workspace_id, node_key) == 1
 
 
-def _write_limit_rows(workspace_id: str, node_key: str) -> None:
+def _write_limit_rows(
+    workspace_id: str,
+    node_key: str,
+    waiter_pid: list[int],
+    waiter_ready: threading.Event,
+) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
+        # pid 回传握手（先例 test_sharding_concurrency.py）：先 append 后
+        # set，主线程拿到的一定是即将阻塞在锁上的那个连接的 pid。
+        waiter_pid.append(backend_pid(conn))
+        waiter_ready.set()
         replace_workspace_node_limits(
             conn, workspace_id, [{"node_key": node_key, "concurrency_limit": 1}]
         )
@@ -408,19 +396,34 @@ def _write_limit_rows(workspace_id: str, node_key: str) -> None:
 def test_node_limit_config_write_takes_code_pool_lock_first(job_db) -> None:
     """P2-1（写侧）：replace_workspace_node_limits 在写任何 limit 行之前取
     code-pool 锁——锁被他人持有时配置写阻塞（与持锁 claim 串行化，持锁
-    claim 事务内的 limit 现值因此稳定）。去掉该锁时本用例的同步点超时
-    变红（写不阻塞、直接完成）。"""
+    claim 事务内的 limit 现值因此稳定）。去掉该锁时本用例经探针的
+    thread= 早失败变红（写线程不阻塞、直接完成）。"""
     workspace_id, node_key = "ws-1149-p21w", "package"
     _seed_code_job(job_db, workspace_id, "job-seed", node_key)
 
     holder = psycopg.connect(TEST_DATABASE_URL)
+    thread: threading.Thread | None = None
     try:
         holder.execute("select pg_advisory_xact_lock(hashtext('code-pool'))")
-        thread, outcome = _start(lambda: _write_limit_rows(workspace_id, node_key))
-        _await_code_pool_waiter()
+        waiter_pid: list[int] = []
+        waiter_ready = threading.Event()
+        thread, outcome = _start(
+            lambda: _write_limit_rows(workspace_id, node_key, waiter_pid, waiter_ready)
+        )
+        assert waiter_ready.wait(timeout=10), "写线程未拿到连接"
+        # 双端钉死（#1211 C-2 / PR #1224 codex P2）：advisory 全域键全实例
+        # 共享（不被 xdist schema 隔离），同键他 worker 的等待者也被本
+        # holder 阻塞——单端「任意被 holder 阻塞者」探针会在目标 waiter
+        # 到达锁点前提前返回；必须钉「目标 waiter pid 的阻塞列表含 holder」。
+        wait_until_waiter_blocked_by(waiter_pid[0], backend_pid(holder), thread=thread)
         holder.commit()
     finally:
         holder.close()
+        # 同权回收（对齐 two_phase 的 recheck 用例）：holder 关闭即释放
+        # advisory 锁，写线程解阻后必须有人 join——否则其异步提交会撞
+        # 下一测试的 TRUNCATE 归因。守卫覆盖探针先于 _start 失败的路径。
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=30)
     _join(thread)
 
     assert outcome.get("error") is None
