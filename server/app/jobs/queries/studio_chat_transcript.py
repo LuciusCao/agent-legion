@@ -12,10 +12,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from server.app.jobs.queries.studio_chat_messages import StudioChatMessageQueriesMixin
+from server.app.jobs.queries.studio_chat_message_merge import StudioChatMessageMergeQueriesMixin
 
 
-class StudioChatTranscriptQueriesMixin(StudioChatMessageQueriesMixin):
+class StudioChatTranscriptQueriesMixin(StudioChatMessageMergeQueriesMixin):
     """Most-recent window read for transcript rebuilds (resume context)."""
 
     def list_studio_chat_messages_tail(

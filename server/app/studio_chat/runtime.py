@@ -53,6 +53,14 @@ class SessionRuntime:
         # (send_message), so trailing chunks of a finished turn still fold
         # into that turn's rows (#98).
         self.stream = TurnStreamState()
+        # #1120 tool_call coalescing ownership map: toolCallId → the call's
+        # single message row id, so tool_call_update frames merge into the
+        # first frame's row instead of appending full-snapshot duplicates.
+        # In-memory only, guarded by ``lock``: a resume/restart starts empty
+        # and an update for a pre-restart toolCallId degrades to a fresh row
+        # (behavioural fallback, never data loss). Entries drop at terminal
+        # status (completed/failed), bounding the map to in-flight calls.
+        self.tool_call_messages: dict[str, str] = {}
         self.mcp_observed = False
         # Set by resume_session when the fresh agent could not reload the
         # prior ACP session: the first post-resume prompt gets the persisted
@@ -93,8 +101,7 @@ class SessionRuntime:
         # from the registry agent id / ACP agentInfo name; turn_open spans a
         # prompt turn (send_message → turn close), and turn_may_compact marks
         # a /compact turn (manual compaction emits its markers in-turn).
-        self.kimi_agent = False
-        self.turn_open = False
+        self.kimi_agent = self.turn_open = False
         self.turn_owner: object | None = None
         self.turn_may_compact = False
         # compaction_seen: an accepted compaction start marker in this

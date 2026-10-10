@@ -98,7 +98,7 @@ class AcpEventHandlers:
                     if not runtime.mcp_observed:
                         runtime.mcp_observed = True
                 self._backend.store.mark_mcp_verified(session_id)
-            self._backend.store.append_message(session_id, "tool_call", "agent", update)
+            self._backend.store.append_tool_call(session_id, runtime, update)
             # The agent is actively using the tool channel: slide the run
             # token forward so a long turn cannot outlive it, and surface a
             # timeline notice when the token is already dead (#411). AFTER
