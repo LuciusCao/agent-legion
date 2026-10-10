@@ -40,6 +40,7 @@
     "tests/db/test_generation_write_gates_upload.py",
     "tests/db/test_hmac_connection_type_migration.py",
     "tests/db/test_init_db_schema_lock.py",
+    "tests/db/test_isolation_reset_fallback.py",
     "tests/db/test_job_artifacts_schema.py",
     "tests/db/test_job_bulk_set_based.py",
     "tests/db/test_job_facets_single_scan.py",

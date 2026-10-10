@@ -3,6 +3,7 @@
   "files": [
     "tests/architecture_budget_helpers.py",
     "tests/conftest.py",
+    "tests/isolation_support.py",
     "tests/postgres_support.py"
   ]
 }
