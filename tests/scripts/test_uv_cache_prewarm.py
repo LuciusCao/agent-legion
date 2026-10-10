@@ -352,7 +352,9 @@ def test_sweep_in_flight_pid_reuse_never_deletes_reuser_clone(
     """格 7 结构性关闭（#1194）构造性回归：判死后、_remove_path 执行前
     pid 被同 worktree 新 prewarm 复用——复用者用同 pid + 不同 nonce 的
     新目录开始克隆，该目录不落在被清扫路径上 ⇒ 在飞 rmtree 与复用者的
-    cp 交叠也零误删；清扫只命中真正的死残留（旧 nonce 目录）。"""
+    cp 交叠也零误删；清扫只命中真正的死残留（旧 nonce 目录）。后半段
+    以同一复用 pid 跑真实 prewarm，端到端钉住「nonce 不同 ⇒ 真实生成
+    的 staging 路径永不相同」这一结构命题（非仅靠构造目录名演示）。"""
     worktree = tmp_path / "worktree"
     worktree.mkdir()
     base = tmp_path / "base"
@@ -379,6 +381,55 @@ def test_sweep_in_flight_pid_reuse_never_deletes_reuser_clone(
 
     assert not stale.exists()  # 真正的死残留被回收
     assert (active / "clone-in-flight").is_dir()  # 复用者的活跃克隆零损失
+
+    # 端到端结构钉（review M1）：以复用 pid 跑真实 prewarm，截获 cp 目的地
+    # ——真实生成的 staging 必带 -<nonce> 段，且永不等于 stale/active 两路径。
+    _seed_base_cache(base)
+    monkeypatch.setattr(prewarm_mod, "_remove_path", real_remove)
+    monkeypatch.setattr(os, "getpid", lambda: reused_pid)
+    generated: list[str] = []
+
+    def recording_cp(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        generated.append(Path(cmd[-1]).name)
+        return _fake_cp_creates_staging(cmd, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", recording_cp)
+
+    assert prewarm(worktree, base) == "prewarmed"
+
+    (generated_name,) = generated
+    assert generated_name.startswith(f"{STAGING_PREFIX}.{reused_pid}-")
+    assert generated_name.removeprefix(f"{STAGING_PREFIX}.{reused_pid}-")
+    assert generated_name not in {stale.name, active.name}
+
+
+def test_consecutive_calls_generate_distinct_staging_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """nonce 每次调用新生成（#1194 review N2）：同进程同 pid 下两次连续
+    prewarm 的 staging 路径名必须不同且都带 -<nonce> 段——「同 pid 异
+    nonce ⇒ 路径不同」对真实调用成立（截获 cp 目的地取证）。"""
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    base = tmp_path / "base"
+    _seed_base_cache(base)
+    names: list[str] = []
+
+    def recording_cp(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        names.append(Path(cmd[-1]).name)
+        return _fake_cp_creates_staging(cmd, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", recording_cp)
+
+    assert prewarm(worktree, base) == "prewarmed"
+    shutil.rmtree(worktree / ".uv-cache")  # 让第二次调用重新走克隆路径
+    assert prewarm(worktree, base) == "prewarmed"
+
+    assert len(names) == 2
+    assert names[0] != names[1]  # 同 pid 下 nonce 段是唯一区分 ⇒ 必须不同
+    for name in names:
+        nonce = name.removeprefix(f"{STAGING_PREFIX}.{os.getpid()}-")
+        assert len(nonce) == 8  # token_hex(4) = 8 字符
 
 
 def test_sweep_huge_pid_suffix_treated_as_dead_not_warn_degraded(tmp_path: Path) -> None:

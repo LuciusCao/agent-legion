@@ -65,10 +65,11 @@ staging 生命周期 × 危害源矩阵（族级模型；review 请按格查证�
    warn 降级冷启动，不 fail-init。
 9. 基准 cache 克隆期被 base worktree 并发 uv 写入——**登记，不改代码**
    （继承自 #1182 的同类面，定性记录）：cp 读取基准期间 uv 可并发向
-   基准 cache 发布新条目；uv cache 为 append-only + 原子 rename 发布，
-   截断条目风险与 uv 自身的发布原子性绑定，克隆副本至多少条目——
-   少条目表现为后续 miss 重拉、内容寻址下可自愈，方向安全（冷启动
-   退化级）。
+   基准 cache 发布新条目；uv 正常写入路径为 append-only + 原子
+   rename 发布，截断条目风险与 uv 自身的发布原子性绑定，克隆副本
+   至多少条目——少条目表现为后续 miss 重拉、内容寻址下可自愈；
+   并发 prune/GC（`uv cache clean` 等删除源）造成的读取失败归格 8
+   的 cp 失败降级路径，方向安全（冷启动退化级）。
 """
 
 from __future__ import annotations
