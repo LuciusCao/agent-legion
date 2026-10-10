@@ -760,7 +760,13 @@ def test_uv_cache_prewarm_sweeps_dead_pid_leftovers(tmp_path: Path) -> None:
     (develop / ".env").write_text("# stub env\n")
     (develop / ".uv-cache").mkdir()
     worktree = main / ".worktrees/flat"
-    dead = worktree / ".uv-cache.prewarm.999999"  # 超出 pid_max（99999）：必为死 pid
+    # 「确实已退出的 pid」现场制造：spawn 子进程并 wait 回收——reap 干净后
+    # 无 zombie，kill -0 对该 pid 必失败（不硬编码数值：pid_max 平台相关，
+    # Linux 常达 4194304，硬编码值可能恰好撞上活进程）。
+    with subprocess.Popen(["true"]) as proc:
+        dead_pid = proc.pid
+        proc.wait()
+    dead = worktree / f".uv-cache.prewarm.{dead_pid}"
     dead.mkdir()
     alive = worktree / f".uv-cache.prewarm.{os.getpid()}"
     alive.mkdir()
