@@ -148,7 +148,9 @@ def test_reap_incremental_query_never_seq_scans(job_db, tmp_path) -> None:
     with job_db.connect() as conn:
         # enable_seqscan=off：见 test_agent_stock.py 同名钉扎测试的注释——
         # 小表上裸 EXPLAIN 会随统计/调度抖动，本测试钉的是索引可用性。
-        conn.execute("set enable_seqscan=off")
+        # set local 而非 set：连接池跨测试存活，会话级 SET 会随干净退出
+        # commit 固化到连接会话并泄漏给后续测试（详见 test_agent_stock.py）。
+        conn.execute("set local enable_seqscan=off")
         rows = conn.execute(f"explain {query}", (watermark, watermark)).fetchall()
 
     plan = "\n".join(str(row[0]) for row in rows)

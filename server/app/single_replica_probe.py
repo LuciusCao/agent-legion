@@ -27,10 +27,11 @@ that is held until shutdown:
   probe checks out one connection in the lifespan and keeps it until
   shutdown — exactly one pool slot for the process's lifetime, returned
   via ``close()`` in the lifespan finally. Tests interleave this with
-  ``close_database_pools`` (per-test isolation), where a checked-out
-  connection simply gets discarded: psycopg_pool's close() leaves
-  out-standing connections alone and putconn-on-closed-pool closes them,
-  so no leak and no crash either way.
+  ``close_database_pools`` (app-lifespan shutdown of function-scoped apps
+  and session teardown), where a checked-out connection simply gets
+  discarded: psycopg_pool's close() leaves out-standing connections alone
+  and putconn-on-closed-pool closes them, so no leak and no crash either
+  way.
 
 Warning, not fail-fast: in a self-hosted single-machine deployment an
 operator may legitimately run two Host instances (two worktrees) against
@@ -159,11 +160,12 @@ class SingleReplicaProbe:
         """Release the lock and return the connection to the pool.
 
         Best-effort by design: a broken connection drops the advisory lock
-        server-side anyway (session locks die with the session), and the
-        tests' per-test ``close_database_pools`` may have already discarded
-        the pool — ``putconn`` on a closed pool just closes the connection
-        (psycopg_pool semantics), so the return path degrades gracefully
-        instead of raising during shutdown.
+        server-side anyway (session locks die with the session), and a test
+        session may have already closed the pool (app-lifespan shutdown of
+        a function-scoped app, or session teardown) — ``putconn`` on a
+        closed pool just closes the connection (psycopg_pool semantics), so
+        the return path degrades gracefully instead of raising during
+        shutdown.
         """
         conn = self._connection
         self._connection = None
@@ -191,7 +193,7 @@ class SingleReplicaProbe:
                 # on an already-torn-down pool raises arbitrary errors, and
                 # close() must complete silently (the connection is discarded
                 # either way; the session lock dies server-side). Debug level:
-                # per-test teardown hits this by design, it is not an error.
+                # test-session pool closes hit this by design, not an error.
                 logger.debug(
                     "single-replica probe: connection return during shutdown failed",
                     exc_info=True,

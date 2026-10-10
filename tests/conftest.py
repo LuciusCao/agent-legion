@@ -14,6 +14,7 @@ from tests.postgres_support import (
     TEST_SCHEMA,
     close_database_pools_settled,
     ensure_test_database,
+    settle_database_pools,
 )
 
 os.environ["AGENT_LEGION_DATABASE_URL"] = TEST_DATABASE_URL
@@ -416,7 +417,11 @@ def _session_test_schema():
     Per-test isolation is TRUNCATE-based (see _isolate_postgres_database); a
     full rebuild per test cost ~2.3s and buried the shared Postgres under DDL
     churn. Tests that mutate DDL must opt into a real rebuild via
-    @pytest.mark.fresh_schema.
+    @pytest.mark.fresh_schema; their post-test rebuild is deferred to the
+    next test's setup via the _SCHEMA_DIRTY flag, so consecutive
+    fresh_schema tests share one rebuild and the session never pays for a
+    rebuild nobody runs against. Pools stay open for the whole session and
+    are only closed here (and around schema rebuilds).
     """
     ensure_test_database()
     _rebuild_schema()
@@ -442,6 +447,31 @@ def _reset_result_unpack_pool(_assert_shared_app_invariants):
     result_validate_pool.configure(0)
 
 
+# Set by a fresh_schema test's teardown instead of rebuilding the schema
+# there; the next postgres test on this worker (fresh or plain) rebuilds
+# once at the start of its isolation setup and clears the flag. Deferring
+# the rebuild halves fresh_schema isolation cost (consecutive fresh tests
+# share one rebuild, and a dirty flag left at session end triggers no
+# rebuild nobody will use). Module-level is correct: this conftest is
+# imported once per xdist worker process.
+_SCHEMA_DIRTY = False
+
+# Tracks which session-scoped shared clients have been instantiated (the
+# fixture names of _shared_authed_client / _shared_anon_client). Guards one
+# dirty-window interleave: session fixtures instantiate BEFORE the
+# function-scoped autouse isolation setup of their first requesting test,
+# so if a fresh_schema test leaves drift and the NEXT test is the first to
+# request EITHER shared client, create_app (init_db, plus the lifespan's
+# reap_zombie_sessions write) would run against the drifted schema before
+# the deferred rebuild fires. Tracking each client separately matters: with
+# only one of them created, the other can still instantiate for the first
+# time later in the session, so the teardown defers the rebuild only once
+# BOTH exist; until then it rebuilds eagerly (early-fresh is rare, so the
+# eager cost almost never lands).
+_SHARED_SESSION_CLIENTS_CREATED: set[str] = set()
+_ALL_SHARED_SESSION_CLIENTS = frozenset({"_shared_authed_client", "_shared_anon_client"})
+
+
 @pytest.fixture(autouse=True)
 def _isolate_postgres_database(_assert_shared_app_invariants, request):
     if request.node.get_closest_marker("no_db") is not None:
@@ -455,23 +485,45 @@ def _isolate_postgres_database(_assert_shared_app_invariants, request):
 
     request.getfixturevalue("_session_test_schema")
     fresh = request.node.get_closest_marker("fresh_schema") is not None
-    if fresh:
+    global _SCHEMA_DIRTY
+    if _SCHEMA_DIRTY or fresh:
+        # Restore the pristine baseline schema: either a previous
+        # fresh_schema test left DDL drift behind (dirty flag), or this
+        # test opted into a guaranteed-fresh schema. The flag must fire for
+        # the next test of ANY kind — plain tests assume the baseline
+        # schema for their TRUNCATE isolation. A single rebuild covers both
+        # conditions. _rebuild_schema closes the pools first (settled): a
+        # pooled connection's search_path points into the schema being
+        # dropped, and fresh_schema tests are rare enough that the
+        # close/rebuild cost is acceptable there.
         _rebuild_schema()
+        _SCHEMA_DIRTY = False
+    if fresh:
         reset_published_agent_cache()
         _capture_seed_snapshot()
     else:
-        close_database_pools_settled()
+        # Pools stay alive across tests: the settle barrier is the only
+        # per-test synchronization TRUNCATE needs (queued dirty-return
+        # rollbacks must have run before it takes AccessExclusive — #1045).
+        settle_database_pools()
         replayed = _reset_schema_data()
         reset_published_agent_cache()
         if not replayed:
             _capture_seed_snapshot()
     yield
     if fresh:
-        # Erase any DDL drift the test left behind so later TRUNCATE-isolated
-        # tests on this worker see the pristine schema.
-        _rebuild_schema()
-    else:
-        close_database_pools_settled()
+        # Defer the post-test rebuild to the next test's setup (see
+        # _SCHEMA_DIRTY): consecutive fresh_schema tests share one rebuild,
+        # and the session never pays for a rebuild nobody runs against.
+        # Exception: until BOTH session-scoped shared clients have been
+        # instantiated, rebuild NOW — a not-yet-created client's first
+        # instantiation would otherwise run against the drifted schema
+        # before the deferred rebuild fires (see
+        # _SHARED_SESSION_CLIENTS_CREATED).
+        if _SHARED_SESSION_CLIENTS_CREATED >= _ALL_SHARED_SESSION_CLIENTS:
+            _SCHEMA_DIRTY = True
+        else:
+            _rebuild_schema()
 
 
 @pytest.fixture(autouse=True)
@@ -688,6 +740,7 @@ def _shared_authed_client(tmp_path_factory, _session_test_schema):
     client = TestClient(app)
     with _no_background_tasks():
         client.__enter__()
+    _SHARED_SESSION_CLIENTS_CREATED.add("_shared_authed_client")
     try:
         yield client, dict(client.headers)
     finally:
@@ -703,6 +756,7 @@ def _shared_anon_client(tmp_path_factory, _session_test_schema):
     client = TestClient(app)
     with _no_background_tasks():
         client.__enter__()
+    _SHARED_SESSION_CLIENTS_CREATED.add("_shared_anon_client")
     try:
         yield client, dict(client.headers)
     finally:

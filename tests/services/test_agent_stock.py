@@ -308,7 +308,10 @@ def test_tier_rows_query_never_seq_scans(job_db) -> None:
         # 裸 EXPLAIN 的断言会随残留统计与调度顺序抖动；本测试钉的是索引
         # 可用性（谓词退化到无索引可用时仍会回落 seq scan 并在此失败），
         # 与 tests/db/test_job_nodes_unclaimable_index.py 同一手法。
-        conn.execute("set enable_seqscan=off")
+        # set local：连接池跨测试存活（#1045 后 per-test 不再关池），
+        # 会话级 SET 会经干净退出 commit 固化到连接会话、污染后续抽到
+        # 该连接的测试；LOCAL 限定本事务，commit 即失效。
+        conn.execute("set local enable_seqscan=off")
         rows = conn.execute(f"explain {TIER_ROWS_SQL}", (1800, 1800)).fetchall()
 
     plan = "\n".join(str(row[0]) for row in rows)
