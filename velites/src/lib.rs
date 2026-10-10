@@ -8,7 +8,6 @@ pub mod agent;
 pub mod budget;
 pub mod cancel;
 pub mod cli;
-pub mod config;
 pub mod contract;
 pub mod contract_gate;
 pub mod event_sink;
@@ -31,8 +30,8 @@ use crate::{event_sink::StdoutJsonlSink, events::EventSink};
 /// SIGTERM-cancelled runs (cancellation is a deliberate Host action, not a
 /// harness fault); 1 when declared `--require-output` artifacts are still
 /// missing at the end of a non-cancelled run (output contract violation);
-/// 2 for harness failures (bad args, fixture errors, I/O, missing gateway
-/// credentials).
+/// 2 for harness failures (bad args, fixture errors, I/O, missing models
+/// registry or credentials).
 pub async fn run(cli: Cli) -> anyhow::Result<u8> {
     let cwd = std::env::current_dir()
         .context("failed to resolve current directory")?
@@ -202,23 +201,11 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
                         run_real_provider(config, provider, cli.max_retries, &mut sink).await
                     }
                 }
-            } else if matches!(provider_name, "gateway" | "openai_compat") {
-                // One-release migration bridge for direct invocations. Worker
-                // discovery never advertises this implicit provider because it
-                // has no bounded model catalog.
-                let credentials = config::resolve()?;
-                let provider = provider::openai_compat::OpenAiCompatProvider::new(
-                    provider_name.to_string(),
-                    credentials.base_url,
-                    credentials.api_key,
-                )?
-                .with_max_output_tokens(cli.max_output_tokens);
-                run_real_provider(config, provider, cli.max_retries, &mut sink).await
             } else {
-                Err(anyhow!(
-                    "models registry {} does not exist; configure provider/model there",
-                    path.display()
-                ))
+                // #1102: the registry is the only credential source — the
+                // legacy config.json / env bridge for gateway/openai_compat
+                // is gone, so every provider fails here alike.
+                Err(models::missing_registry_error(&path, provider_name))
             }
         }
     }

@@ -797,30 +797,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/995
   ceiling: 112
 - check: architecture.file_budget
-  path: velites/src/config.rs
-  reason: '#602 adds the deprecation notice pair (file-present + env-override arms, ~20 effective
-    lines: the migration-target message, the models.json pointer, and the removal-window statement)
-    to a file that is scheduled for wholesale deletion in the next release cycle — the issue''s
-    removal phase drops config.rs and the lib.rs gateway fallback branch together. Ceiling at
-    actual + 10 per the dated-exemption convention; harvest together with the deletion. Re-anchored
-    by #926 from #602 (closed) to #996: the overage above is the shipped feature itself and
-    the removal condition above stands; #996 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/996
-  ceiling: 200
-- check: architecture.file_budget
-  path: velites/src/lib.rs
-  reason: '#476/#518: lib.rs carries the forced-tool activation at the one point where all three
-    inputs exist (parsed --tools, canonicalized skill dirs, --require-output) and the tools-listing
-    error message that must name the full tool set. The activation is a harness run-assembly
-    concern, not a tool-module one. Remove if the run assembler is extracted from the provider
-    wiring. Re-anchored by #926 from #456 (closed) to #996: the overage above is the shipped
-    feature itself and the removal condition above stands; #996 tracks at most five entries
-    (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/996
-  ceiling: 211
-- check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/WorkflowNodePromptEditor.tsx
   reason: '#513 adds the prompt-mode selector (append/overwrite) to the custom prompt editor:
     one TextField select with two labeled options plus the state-switching hint line — the interaction

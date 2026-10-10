@@ -58,8 +58,7 @@ velites/                 # Cargo crate（本仓库根下新目录）
     agent.rs             # agent loop
     events.rs            # 事件 schema 定义（serde）+ EventSink 契约/测试 sink
     event_sink.rs        # stdout 事件落盘 sink（BufWriter 攒批，#577）
-    models.rs            # ~/.velites/models.json provider/model registry
-    config.rs            # 旧 gateway 凭据迁移桥
+    models.rs            # ~/.velites/models.json provider/model registry（唯一凭据来源）
     session.rs           # session.jsonl 镜像落盘（--session-dir）
     tools/               # read/write/bash/uuid/json/validate 工具本体，加 specs/catalog
                          # 工具目录、command_guard/command_paths 命令守卫、bash_env/bash_proc
@@ -372,10 +371,10 @@ fail-closed 报错，内置节点不受影响。
   动态发现见 [velites-model-registry.md](./velites-model-registry.md)；
 - `apiKey` 支持 `$ENV` / `${ENV}` 精确引用；模型发现即解析引用，缺失时 fail-closed，
   Worker 不会广播该 runtime 的模型；文件可能含字面 secret，因此权限应为 0600；
-- 旧 `~/.velites/config.json` 与 `VELITES_BASE_URL/VELITES_API_KEY` 是已进入 deprecation
-  的迁移桥（#602：直调时 stderr 打迁移指引，移除时间未定），仅在没有 models 文件
-  且直接运行 `gateway/openai_compat` 时兜底，不参与 Worker capability discovery——
-  配置入口是 `~/.velites/models.json`；
+- 旧 `~/.velites/config.json` 与 `VELITES_BASE_URL/VELITES_API_KEY` 迁移桥已移除
+  （#602 deprecation → #1102 删除 `config.rs` 与 lib.rs gateway 兜底分支）：没有
+  models 文件时 `gateway/openai_compat` 直调与其他 provider 一样以退出码 2 报错、
+  指向 `models.json` 与迁移文档，配置入口只有 `~/.velites/models.json`；
 - secret 不上命令行或 Host manifest。
 
 ## 8. 工具实现

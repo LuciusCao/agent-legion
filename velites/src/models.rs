@@ -90,6 +90,21 @@ pub fn default_path() -> anyhow::Result<PathBuf> {
     Ok(home.join(".velites").join("models.json"))
 }
 
+/// The run-time error when no registry file exists (#1102). Every provider,
+/// `gateway` / `openai_compat` included, is configured only here; the
+/// pre-0.2.0 `~/.velites/config.json` and `VELITES_BASE_URL` /
+/// `VELITES_API_KEY` env bridge was removed, so the message names it for
+/// operators still relying on it and points at the migration section.
+pub fn missing_registry_error(path: &Path, provider: &str) -> anyhow::Error {
+    anyhow!(
+        "models registry {} does not exist; configure provider {provider:?} and its model \
+         there (see docs/architecture/velites-model-registry.md). The legacy \
+         ~/.velites/config.json and VELITES_BASE_URL/VELITES_API_KEY are no longer \
+         read — migrate them per that doc's 'migrating from 0.1.x' section",
+        path.display(),
+    )
+}
+
 pub fn load_default() -> anyhow::Result<ModelsFile> {
     load(&default_path()?)
 }
