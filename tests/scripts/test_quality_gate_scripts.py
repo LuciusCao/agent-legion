@@ -367,10 +367,12 @@ def test_quick_gate_heartbeat_prints_running_lane_progress(tmp_path: Path) -> No
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
     # Minimal sufficient timing (was sleep 6 + heartbeat 2): the heartbeat loop
     # polls every 1s and prints once SECONDS-last_heartbeat >= interval, so
-    # interval 1 fires the first heartbeat ~1s into the round; a 3s lane is
-    # still alive for the ~1s and ~2s ticks with a full second of margin.
-    # The pinned invariant is unchanged: a heartbeat line carrying the running
-    # lane's latest log line appears.
+    # interval 1 gives the 3s lane two heartbeat chances (~1s and ~2s ticks).
+    # Margin note (honest accounting): the safety margin is ~1s, not the old
+    # ~3s — heartbeat is wall-clock behavior that cannot be fully signal-driven
+    # (the thing under test IS the 1s poll cadence), so the budget is kept
+    # bounded (sleep 3, one round) and the failure mode is loud and diagnosable
+    # (heartbeat_lines empty → assertion diff shows the whole gate stdout).
     _write_executable(
         scripts / "check-quick-backend.sh",
         '#!/usr/bin/env bash\necho "backend lane working"\nsleep 3\n',

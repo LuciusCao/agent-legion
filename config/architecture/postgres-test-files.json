@@ -152,6 +152,7 @@
     "tests/services/test_agent_broker.py",
     "tests/services/test_agent_broker_batch.py",
     "tests/services/test_agent_broker_claim_batch.py",
+    "tests/services/test_agent_broker_claim_batch_two_phase.py",
     "tests/services/test_agent_broker_claim_cancel_branches.py",
     "tests/services/test_agent_broker_claim_deadlock_retry.py",
     "tests/services/test_agent_broker_claim_generation.py",

@@ -9,19 +9,21 @@ and ``velites/schema/**`` must also run the backend lane.
 
 Test shape: the full 12-case matrix runs end-to-end through ONE entry point
 (the CI ``changes`` job, whose ``run:`` script is the most intricate wiring).
-The two local entry points each carry two cheap wiring pins instead of the
-full matrix — one consistency case on the subtle nested-markdown rule, and
-one runtime-consultation case that patches the committed classifier copy and
-watches the verdict flip. This is value-equivalent because all three entries
-classify through the single sourced ``scripts/lane-paths.sh``: any rule drift
-breaks the CI matrix, any local entry that stops consulting the shared file
-breaks its consultation pin, and the cross-entry semantic contract is pinned
-statically by ``test_case_table_agrees_on_docs_between_ci_and_local`` (plus
-the docs/static mappings already covered e2e for the quick gate in
-tests/scripts/test_quality_gate_scripts.py and for pre-push in
-tests/scripts/test_local_git_hooks.py). Running the same 12 cases through
-three wirings paid ~24 nested-gate runs for coverage of a fact — one shared
-classifier — that the wiring pins prove directly.
+The two local entry points each carry cheap wiring pins instead of the full
+matrix — consistency cases (WIRING_CASES below), and one runtime-consultation
+case that patches the committed classifier copy and watches the verdict flip.
+The classification RULES drift-safe because all three entries source the
+single ``scripts/lane-paths.sh``: any rule drift breaks the CI matrix, and
+any local entry that stops consulting the shared file breaks its consultation
+pin. The MAPPING from verdicts to lanes, though, is each entry's own case
+block (check-quick.sh / pre-push keep their own ``frontend/*``, ``velites/*``
+and shared-file branches outside lane-paths.sh), so WIRING_CASES must
+exercise those branches per local entry — the docs/static derivations are
+already pinned e2e for the quick gate in
+tests/scripts/test_quality_gate_scripts.py (backend + static only) and for
+pre-push in tests/scripts/test_local_git_hooks.py. Running the same 12 cases
+through three wirings paid ~24 nested-gate runs for coverage of a fact — one
+shared classifier — that the wiring pins prove directly.
 """
 
 from __future__ import annotations
@@ -59,12 +61,22 @@ CASES: list[tuple[str, set[str], str]] = [
 ]
 PATH_IDS = [case[0] for case in CASES]
 
-# Local-entry wiring pins: one consistency case on the subtle rule (nested
-# runtime markdown is NOT docs — only the shared classifier's `*/*` branch
-# gets this right; a naive `*.md`-is-docs parallel implementation would
-# misclassify it), plus one runtime-consultation case per entry below.
+# Local-entry wiring pins (see module docstring): the consistency cases must
+# cover both the shared classifier's subtle rule AND each local entry's own
+# verdict→lane case block (check-quick.sh / pre-push keep frontend/* and
+# velites/* branches outside lane-paths.sh):
+# - nested runtime markdown is NOT docs — only the shared classifier's `*/*`
+#   branch gets this right; a naive `*.md`-is-docs parallel implementation
+#   would misclassify it;
+# - frontend/* maps to the frontend lane alone (the entry's own branch);
+# - velites/src/main.rs maps to rust WITHOUT backend — the rename pins below
+#   only exercise the feeds-backend=true form (velites/schema/**), so this
+#   pin is what keeps the plain velites/* branch honest;
+# plus one runtime-consultation case per entry below.
 WIRING_CASES: list[tuple[str, str]] = [
     ("server/app/studio_chat/authoring_bootstrap.md", "backend"),
+    ("frontend/README.md", "frontend"),
+    ("velites/src/main.rs", "rust"),
 ]
 
 # Consultation probe: a copy of the shared classifier with LICENSE flipped to
@@ -329,11 +341,15 @@ def test_ci_classifier_guard_survives_large_diffs(tmp_path: Path) -> None:
     # How many files that takes is a threshold question, not a volume one:
     # the regression (a `git diff | grep -q` consumer closing the pipe after
     # the first match — scripts/ sorts before zz/) only kills the producer
-    # once its pending output exceeds the pipe buffer, so the diff must be
-    # larger than the biggest buffer in play: 64 KiB on Linux CI (16 KiB on
-    # macOS dev machines). 2,000 files with ~50-byte paths yield ~100 KB of
-    # --name-only output — over the threshold with ~1.5x margin — at a tenth
-    # of the inode cost of the original 20,000 short-named files.
+    # once its pending output exceeds the pipe buffer, and the adversarial
+    # bound is TWO buffers, not one: grep's first read() can drain a full
+    # buffer (the matching line sits at line 1), and before grep's close
+    # lands, git may be woken once more and refill the pipe. So the diff must
+    # exceed 2x the biggest buffer in play: 2x64 KiB = 128 KiB on Linux CI
+    # (macOS dev machines are 2x16 KiB). 3,000 files with ~51-byte paths yield
+    # ~153 KB of --name-only output — over the bound deterministically — at
+    # well under a fifth of the inode cost of the original 20,000 short-named
+    # files (which at ~240 KB also cleared it, by accident of volume).
     repo = tmp_path / "ci"
     (repo / "scripts").mkdir(parents=True)
     shutil.copy2(PROJECT_ROOT / "scripts" / "lane-paths.sh", repo / "scripts" / "lane-paths.sh")
@@ -341,7 +357,7 @@ def test_ci_classifier_guard_survives_large_diffs(tmp_path: Path) -> None:
     (repo / "scripts" / "lane-paths.sh").write_text(BROKEN_CLASSIFIER, encoding="utf-8")
     bulk = repo / "zz"
     bulk.mkdir()
-    for i in range(2000):
+    for i in range(3000):
         (bulk / f"f{i:05d}{'x' * 38}.md").write_text("x\n", encoding="utf-8")
     _git(["add", "-A"], cwd=repo)
     _git(["commit", "-qm", "break classifier + bulk"], cwd=repo)
