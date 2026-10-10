@@ -291,6 +291,38 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
       }
     })
 
+    // #1177 codex R3 P2：空白编辑器永不命中 hash 短路——decideSchedule 对
+    // 空白 skip（服务端拒存空白草稿），状态停留在 saved、savedHash 仍是旧
+    // H；短路前置「当前内容已落盘」对空白恒为假，必须回落提示（字节比较
+    // 时代此处本就提示，属回归）。
+    it('hash 相同但编辑器内容被清空/纯空白（skip 保存）→ 仍提示（#1177 codex R3 P2）', () => {
+      for (const blank of ['', '  \n\t ']) {
+        const studio = makeStudio({
+          definitionYaml: blank,
+          draftSave: {
+            status: 'saved',
+            savedAt: '2026-10-10T01:00:00+00:00',
+            savedHash: 'h1',
+          },
+        })
+        render(
+          withStudioProviders(
+            studio,
+            makeStudioView(),
+            <WorkflowDraftCard
+              draft={{ ...draft, draftHash: 'h1' }}
+              workspaceId="ws1"
+              onApply={vi.fn()}
+            />
+          )
+        )
+        expect(
+          screen.getByText(/发布将以编辑器中的 YAML 为准/)
+        ).toBeInTheDocument()
+        cleanup()
+      }
+    })
+
     it('hash 相同且编辑器无未保存编辑（idle，hydrate/adopt 后内容=已落盘）→ 不提示', () => {
       const studio = makeStudio({
         definitionYaml: 'nodes: []\nkey: demo_video_workflow\n',

@@ -87,7 +87,11 @@ export function WorkflowDraftPublishButton() {
  * 推进到 pending/saving/error）。pending（debounce 窗口）/saving（PUT
  * 在途）/error（失败退避或冲突挂起）期间 savedHash 停留在上次成功保存
  * 的身份，字节已变（语义可能已变）而 hash 仍相同——必须回落提示，否则
- * 发布 flush-first 发出编辑后的 YAML 却无警示。 */
+ * 发布 flush-first 发出编辑后的 YAML 却无警示。
+ * #1177 codex R3 P2：上述「偏离必然推进状态」有一个例外——空白内容。
+ * decideSchedule 对空白 skip（服务端拒存空白草稿），状态停在上次成功
+ * 保存的 settled、savedHash 仍是旧 H；用户清空编辑器后短路前置并不成立。
+ * 空白永不落盘 ⇒ 对空白内容禁用短路，回落提示（恢复字节比较时代的行为）。 */
 export function WorkflowDraftStaleHint({
   draftYaml,
   draftHash,
@@ -99,7 +103,9 @@ export function WorkflowDraftStaleHint({
   if (!studio || studio.definitionYaml === draftYaml) return null
   const save = studio.draftSave
   const savedHash = save?.savedHash ?? null
-  const settled = save?.status === 'saved' || save?.status === 'idle'
+  const settled =
+    studio.definitionYaml.trim() !== '' &&
+    (save?.status === 'saved' || save?.status === 'idle')
   if (draftHash && savedHash && settled && draftHash === savedHash) return null
   return (
     <div className={styles.draftHint} role="note">
