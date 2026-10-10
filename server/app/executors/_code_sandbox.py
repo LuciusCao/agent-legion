@@ -32,7 +32,6 @@ from server.app.executors._code_runtime import (
 )
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.models import ExecutionContext, ExecutionResult
-from server.app.storage_paths import ensure_dir_once
 from shared.code_sandbox import (
     build_sandbox_argv,
     child_env,
@@ -141,8 +140,11 @@ def execute_custom_sandboxed(
         )
 
     context.job_dir.mkdir(parents=True, exist_ok=True)
-    # #618: log_path.parent is the shared logs/jobs dir; mkdir once.
-    ensure_dir_once(context.log_path.parent)
+    # #1113: log_path.parent is the job's own logs/jobs/by-job/<job_id> dir,
+    # which job deletion removes wholesale and a same-source re-intake (same
+    # deterministic id) needs again — so no #618 process-lifetime memo here;
+    # one mkdir per execution (not per claim attempt).
+    context.log_path.parent.mkdir(parents=True, exist_ok=True)
     result_path = context.job_dir / _RESULT_BASENAME
     # A leftover result from a previous attempt must never fake a success.
     result_path.unlink(missing_ok=True)

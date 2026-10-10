@@ -87,8 +87,11 @@ def derive_run_dir_from_log_path(
 ) -> Path | None:
     """Find the Pi token directory from the legacy log file path.
 
-    The log file lives at ``logs/jobs/<job_id>-<node_key>.log`` while run
-    artifacts live under the job dir. When no authoritative job dir is known,
+    The log file lives under ``logs/jobs`` (``storage_paths.job_node_log_name``
+    since #1113; the legacy flat ``<job_id>-<node_key>.log`` before) while run
+    artifacts live under the job dir. The log path's name is never parsed —
+    ``node_key`` / ``job_id`` come from the node_runs row, so both naming
+    generations resolve identically. When no authoritative job dir is known,
     scan every workspace under ``jobs_dir`` — probing the sharded path first,
     then the legacy flat one — and pick the most recently modified token
     directory. Prefer ``derive_run_dir_from_job_dirs`` with

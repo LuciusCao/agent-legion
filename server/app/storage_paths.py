@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from server.app.services.path_hygiene import warn_legacy_absolute
 
@@ -35,12 +36,53 @@ def job_log_dir(logs_dir: Path) -> Path:
     return ensure_dir_once(logs_dir.resolve() / "jobs")
 
 
-def job_node_log_name(job_id: str, node_key: str, shard_index: int | None = None) -> str:
-    """``<logs_dir>/jobs`` 下节点日志的唯一命名规则：普通节点
-    ``<job_id>-<node_key>.log``，分片 ``<job_id>-<node_key>-shard-<i>.log``。
+# #1113：节点日志按 job 分目录的根（``<logs_dir>/jobs/by-job/<job_id>/``）。
+# 旧扁平名一律以 ``.log`` 结尾，此目录名不可能与任何旧日志文件同名，新旧
+# 命名空间物理上不相交。
+JOB_NODE_LOG_ROOT = "by-job"
 
-    写入方（claim_submit / shards）与 job 删除（job_deletion_trash 按它反推
-    已删 job 拥有的日志）共用此函数——删除只认它能生成的文件名。
+
+def _encode_node_log_key(node_key: str) -> str:
+    """node_key 的可逆文件名编码：百分号编码（``/`` 与 ``%`` 也编码），
+    再把 ``.`` 编码为 ``%2E``——编码结果不含 ``/`` 与 ``.``，故不会产生子目录、
+    ``.`` / ``..`` 分量，``.shard-<i>`` 后缀也不可能出现在 key 部分。
+    ``urllib.parse.unquote`` 即可还原。"""
+    return quote(node_key, safe="-_~").replace(".", "%2E")
+
+
+def job_node_log_dir_name(job_id: str) -> str:
+    """``<logs_dir>/jobs`` 下某 job 独占的日志目录（POSIX 相对路径）。
+
+    job_id = ``<ws>_<wf>_<source_id>``（source_id 的 ``/`` 已换成 ``_``），不含
+    ``/``、恒带前缀，不会是 ``.`` / ``..``；不满足即违反不变式，直接拒绝。
+    """
+    if not job_id or "/" in job_id or "\0" in job_id or job_id in {".", ".."}:
+        raise ValueError(f"job id cannot name a log directory: {job_id!r}")
+    return f"{JOB_NODE_LOG_ROOT}/{job_id}"
+
+
+def job_node_log_name(job_id: str, node_key: str, shard_index: int | None = None) -> str:
+    """``<logs_dir>/jobs`` 下节点日志的唯一命名规则（#1113，POSIX 相对路径）：
+    普通节点 ``by-job/<job_id>/<enc(node_key)>.log``，分片
+    ``by-job/<job_id>/<enc(node_key)>.shard-<i>.log``。
+
+    job_id 独占目录、node_key 经 ``_encode_node_log_key`` 编码（不含 ``.``），
+    故 (job_id, node_key, shard_index) → 路径是单射：旧扁平名
+    ``<job_id>-<node_key>[-shard-<i>].log`` 在 job_id 与 node_key 都可含连字符时
+    跨 job 碰撞的问题不再存在。写入方（claim_submit / shards）唯一入口；job
+    删除按 ``job_node_log_dir_name`` 整目录清理，旧扁平名见
+    ``legacy_job_node_log_name``。
+    """
+    stem = _encode_node_log_key(node_key)
+    suffix = "" if shard_index is None else f".shard-{shard_index}"
+    return f"{job_node_log_dir_name(job_id)}/{stem}{suffix}.log"
+
+
+def legacy_job_node_log_name(job_id: str, node_key: str, shard_index: int | None = None) -> str:
+    """#1113 之前的扁平命名 ``<job_id>-<node_key>[-shard-<i>].log``。
+
+    只供 job 删除识别升级前写下的存量日志（读取侧按 node_runs.log_path 原样
+    读取，不需要它）；新写入一律走 ``job_node_log_name``。
     """
     if shard_index is None:
         return f"{job_id}-{node_key}.log"
