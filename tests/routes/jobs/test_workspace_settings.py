@@ -81,7 +81,7 @@ def test_patch_settings_nodes_saves_node_config(client_factory):
         )
         fetched = c.get(f"/api/workspaces/{ws_id}/settings")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert (
         fetched.json()["settings"]["nodeConfig"]["intake_knowledge_points"]["timeout_seconds"]
         == 120

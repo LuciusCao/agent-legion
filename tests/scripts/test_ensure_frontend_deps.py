@@ -398,7 +398,12 @@ def test_interrupted_backup_cleanup_keeps_committed_tree(tmp_path: Path) -> None
             stub_log,
             # STUB_RM_SLEEP=2：SIGKILL 桩 bash 后孤儿 sleep 仍持有 stdout/stderr
             # 管道，communicate() 要等它退出才见 EOF——2s 窗口足以覆盖「rm 进行
-            # 中」的 kill 时序，又不必白等桩默认的 15s。
+            # 中」的 kill 时序，又不必白等桩默认的 15s。取值备案（时序纪律第 4
+            # 条，超时按 CI 负载预算）：桩写 rm.pid 到 sleep 结束之间测试只需
+            # 发现 pid 文件 + 一次 kill，工作量微秒级，且 gate 机器级串行保证
+            # CPU 预算；即使极端调度 stall 超窗（桩走完 exec rm），失败形态是
+            # returncode 的响亮断言（可重跑）而非挂死——proc.wait(timeout=60)
+            # 兜底。
             {"STUB_RM_PID_FILE": str(rm_pid_file), "STUB_RM_SLEEP": "2"},
         ),
     )
