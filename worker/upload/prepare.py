@@ -23,13 +23,13 @@ from typing import TYPE_CHECKING, Any
 from shared.output_truncation import OutputTruncation
 from shared.pi_events import scan_and_compress_pi_events
 from worker.state_evidence import dump_prep_evidence, prep_failure_message
-from worker.upload.report_policy import declared_ceiling_rejection
-from worker.upload.result_metadata import (
-    MAX_ERROR_MESSAGE_CHARS,
-    exit_verdict,
+from worker.upload.degraded_archive import (
     failed_metadata,
+    write_degraded_empty_archive,
     write_empty_archive,
 )
+from worker.upload.report_policy import declared_ceiling_rejection
+from worker.upload.result_metadata import MAX_ERROR_MESSAGE_CHARS, exit_verdict
 from worker.upload.stderr_evidence import (
     AGENT_STDERR_FILENAME,
     secret_snapshot,
@@ -41,9 +41,38 @@ if TYPE_CHECKING:
 
 
 def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
-    # prepare_result + 失败降级为 failed 上报；直传回落后按清空的
-    # artifact_uploads 重跑，tar 随之内嵌产物。#959：备妥的归档超 Host 下发
-    # 上限即诚实判败（空归档 + failed），不把注定 413 的归档送进 report 车道。
+    """prepare_result + 失败降级为 failed 上报；直传回落后按清空的
+    artifact_uploads 重跑，tar 随之内嵌产物。#959：备妥的归档超 Host 下发
+    上限即诚实判败（空归档 + failed），不把注定 413 的归档送进 report 车道。
+
+    失败臂（except）的子步序与前置条件模型（#1168 深化；每步独立降级，
+    「结果必须可上报」压倒一切——任何一步逃逸 = bulk 车道在 except 外炸出
+    = failed 结果报不上 = 卡租约重跑）：
+
+    1. ``dump_prep_evidence``（取证，先于清场）——前置：evidence root 已由
+       executor 启动配置 + state 目录可写。失败 = 函数内部自吞返回 None
+       （其自身对一切子 arm 独立降级），error_message 不带证据指针；
+       **永不**把失败传给下一步。目录形态全覆盖：run_dir 子目录消失 →
+       events 记 absent；execution_dir 整体/父链消失 → listing 记
+       skipped、incident.json 记 execution_dir_present=False；EACCES →
+       各面记 unreadable。
+    2. ``write_degraded_empty_archive``（可上报归档）——内部子步序见
+       ``degraded_archive.py``：a) mkdir(parents=True) 重建 execution_dir
+       及其父链（agent 自删整棵树后的空归档写入点）；b) 写 tar（前置
+       execution_dir 可写），EACCES 族立即重试一次（瞬时锁形态）；c) 仍
+       失败 → state 兜底落盘 incident 目录（前置同 1，root 未配置则跳过）；
+       d) 两处都写不进 → OSError 上抛——本臂唯一允许的逃逸形态，交
+       ``_deliver_bulk`` 的存活安全网（marker 保留 → 崩溃-恢复 restore
+       重投），强于带不存在的归档路径进 report 车道空转重试。
+    3. ``failed_metadata``——纯计算（截断 error_message 到 4000 字符），
+       无失败面。
+
+    归档位置两形态：常规 = execution_dir/result.tar.gz（随 204 收尾
+    rmtree 清理）；滞留 = <state>/evidence/<exec>__<node>/result.tar.gz
+    （无 TTL，随 incident 人工清理）。report 车道只按路径读字节，不区分
+    两者（滞留形态的矩阵用例见
+    tests/workers/test_worker_upload_archive_safety.py）。
+    """
     try:
         metadata, archive, outputs = prepare_result(task)
         rejection = declared_ceiling_rejection(task, archive)
@@ -55,13 +84,15 @@ def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]
         # 否则执行会卡到租约过期被 Host 重调度。吞是对的：降级产物是空
         # result.tar.gz + failed_metadata，语义钉子即"准备失败 = run
         # failed"。日志保全：错误文本截断 4000 字符后随 error_message 报
-        # 给 Host，随结果持久化、两侧可见。
+        # 给 Host，随结果持久化、两侧可见。子步序前置条件见本函数 docstring。
         # #1147：清场前先把证据转储进 state 目录（work_root 之外）——运行
         # 目录被 agent 自删时 events.jsonl 随目录灭失，这里是最后的取证点。
         # 转储先于空归档落盘：execution_dir 整个消失时空归档写入自身会抛。
+        # #1168 P1：空归档经 write_degraded_empty_archive 落盘——写前重建
+        # 父目录、execution_dir 不可写时兜底 state 目录，失败臂的 I/O 不再
+        # 逃出 except（逃出 = bulk 车道异常退出、failed 结果报不上）。
         evidence = dump_prep_evidence(task, exc)
-        archive = task.execution_dir / "result.tar.gz"
-        write_empty_archive(archive)
+        archive = write_degraded_empty_archive(task)
         return failed_metadata(task, prep_failure_message(task, exc, evidence)), archive, []
     if rejection is not None:
         return failed_metadata(task, rejection), archive, []
@@ -106,12 +137,19 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # 结论只在 exit 0 时采纳。
     # #952: the same pass counts per-call output truncations (stopReason=length).
     snapshot = secret_snapshot()
-    scanned_model_error, _, _, scanned_tail = scan_and_compress_pi_events(
+    scanned_model_error, scanned_original, _, scanned_tail = scan_and_compress_pi_events(
         events,
         stderr_sink=run_dir / AGENT_STDERR_FILENAME,
         redactor=snapshot,
         event_observer=(truncation := OutputTruncation()).observe,
     )
+    # #1165 belt-and-braces：带 redactor 的整趟扫描失败已在 pi_events 内把
+    # 原文件就地截空（见其失败臂）；original==0 而文件仍在且非空 = 截断也
+    # 失败（EACCES 族），此时绝不让未脱敏字节随 run_dir 进归档——诚实判败
+    # 走空归档（#959 语义保持：failed 是可上报的降级，不是丢结果）。
+    # original==0 的另外两形态（文件缺失 / 空文件）不触发本守卫。
+    if scanned_original == 0 and events.is_file() and events.stat().st_size > 0:
+        raise RuntimeError(f"pi events scan failed; the raw events file survived: {events}")
     stderr_tail = stderr_tail_for_run(run_dir, scanned_tail)
     outputs = [name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()]
     # #952: attribution only — replaces the opaque "Missing outputs" (exit 0,

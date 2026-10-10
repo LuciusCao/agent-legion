@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from shared.code_contract import RESULT_METADATA_MEMBER
-from worker.upload.result_metadata import failed_metadata, write_metadata_only_archive
+from worker.upload.degraded_archive import failed_metadata, write_metadata_only_archive
 
 if TYPE_CHECKING:
     from worker.upload.task import UploadTask
@@ -124,6 +124,8 @@ def finalize_result_metadata(
         embed_result_metadata(archive, metadata, max_bytes=task.max_archive_bytes)
     except (ResultMetadataOverCeiling, OSError, tarfile.TarError, ValueError) as exc:
         failed = failed_metadata(task, f"result metadata finalize failed: {exc}")
-        write_metadata_only_archive(archive, failed)
+        # #1169：判败回收同样受 claim 上限约束——metadata-only 归档按上限
+        # 自适应裁剪（command 清空 / error_message 截断），重报不再吃 413。
+        write_metadata_only_archive(archive, failed, task.max_archive_bytes)
         return failed, archive
     return metadata, archive

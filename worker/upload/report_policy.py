@@ -43,14 +43,14 @@ import tarfile
 from pathlib import Path
 from typing import Any
 
-from worker.upload.result_manifest import (
-    ResultMetadataOverCeiling,
-    embed_result_metadata,
-)
-from worker.upload.result_metadata import (
+from worker.upload.degraded_archive import (
     failed_metadata,
     write_empty_archive,
     write_metadata_only_archive,
+)
+from worker.upload.result_manifest import (
+    ResultMetadataOverCeiling,
+    embed_result_metadata,
 )
 from worker.upload.task import UploadTask
 
@@ -125,8 +125,10 @@ class ReportDegradeGate:
         reason = f"result report rejected by Host: {rejection}"
         metadata = self._degraded_metadata or failed_metadata(self._task, reason)
         if status_code == 413:
-            # 413 = 归档不可提交：回收成仅含判败 metadata 的可提交归档。
-            write_metadata_only_archive(self._archive, metadata)
+            # 413 = 归档不可提交：回收成仅含判败 metadata 的可提交归档
+            # （#1169：按 claim 下发的 max_archive_bytes 自适应裁剪，重报
+            # 的 metadata-only 归档不再超限吃第二个 413）。
+            write_metadata_only_archive(self._archive, metadata, self._task.max_archive_bytes)
             self._archive_recycled = True
         else:
             # 非 413 判决：证据随归档保留，只换 result.json 成员；换写超限/
@@ -136,7 +138,7 @@ class ReportDegradeGate:
                     self._archive, metadata, max_bytes=self._task.max_archive_bytes
                 )
             except (ResultMetadataOverCeiling, OSError, tarfile.TarError, ValueError):
-                write_metadata_only_archive(self._archive, metadata)
+                write_metadata_only_archive(self._archive, metadata, self._task.max_archive_bytes)
                 self._archive_recycled = True
         # 评审 P3-2：换写后的归档大小刷新计时器（纯观测面，别让操作者
         # 看着换写前的尺寸排障——同 #755 对抗复审 P3 的旧刷新纪律）。

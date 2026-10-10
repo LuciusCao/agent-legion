@@ -38,11 +38,16 @@ state being the more accurate one). Files inside:
 - ``events-emergency.jsonl`` — the pump's diverted stream, redacted per
   line at write time (JSON events keep their structure via
   ``redact_json``, non-JSON lines via span redaction); one unrenderable
-  line is dropped in isolation, never the batch, and oversized lines are
-  cut with an INLINE marker so one framed line stays one physical line.
+  line is dropped in isolation, never the batch, and oversized lines stay
+  ONE physical line AND parseable JSON (rendering lives in the sister
+  module ``worker/state_evidence_lines.py``: #1168 F4 — a JSON line over
+  the cap is re-serialized with capped string values, never middle-cut).
 - ``listing.txt`` — what still existed under the execution dir at dump
-  time; with the run dir gone, this is the last-known directory listing
-  (an unwalkable tree records ``listing_failed`` instead).
+  time; every entry is span-redacted before persisting (#1168 F3: an
+  agent that put a secret literal in a FILENAME must not leak it into
+  the no-TTL state snapshot); with the run dir gone, this is the
+  last-known directory listing (an unwalkable tree records
+  ``listing_failed`` instead).
 - ``incident.json`` — the machine-readable record (identity, exit code,
   the redacted prepare error, which parts were absent/unreadable/failed).
 
@@ -70,12 +75,14 @@ import json
 import re
 import shutil
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from shared.pi_events import scan_and_compress_pi_events
 from shared.stderr_tail import AGENT_STDERR_FILENAME
 from worker._atomic import atomic_write
+from worker.state_evidence_lines import render_line
 from worker.upload.stderr_evidence import secret_snapshot, stderr_tail_for_run
 
 if TYPE_CHECKING:
@@ -91,10 +98,10 @@ EMERGENCY_EVENTS_FILENAME = "events-emergency.jsonl"
 INCIDENT_RECORD_FILENAME = "incident.json"
 LISTING_FILENAME = "listing.txt"
 _MAX_LISTING_ENTRIES = 2000
-# One dump line after redaction, and one sink's total in-process growth:
-# bounded so a pathological agent cannot fill the state volume through the
-# emergency path (the delivery-side bound is the pump's stream filter).
-_MAX_DUMP_LINE_CHARS = 64 * 1024
+# One sink's total in-process growth is bounded so a pathological agent
+# cannot fill the state volume through the emergency path (the delivery-side
+# bound is the pump's stream filter; the per-LINE cap lives in the sister
+# module worker/state_evidence_lines.py with the rendering it bounds).
 _MAX_DUMP_TOTAL_BYTES = 64 * 1024 * 1024
 # errno family that means "the working tree is gone" (as opposed to e.g.
 # PermissionError, where the tree exists but is unreadable).
@@ -215,7 +222,7 @@ def _dump_prep_evidence(target: Path, task: UploadTask, exc: BaseException) -> P
     except OSError:
         dir_present = False
     listing_state = (
-        _dump_listing(target, task.execution_dir)
+        _dump_listing(target, task.execution_dir, redactor)
         if dir_present
         else "skipped (execution dir absent)"
     )
@@ -234,7 +241,14 @@ def _dump_events_copy(target: Path, events: Path, redactor: SecretRedactor) -> t
     unredacted file never stays in the state directory. An OSError on the
     probe or the copy itself (the source vanished mid-read, or the run dir
     was chmod'd unreadable) degrades to an ``unreadable`` note with the
-    errno — distinct from the ENOENT family's plain ``absent``."""
+    errno — distinct from the ENOENT family's plain ``absent``.
+
+    评审 P3-2（收口轮，防御加固）：两个失败臂的副本删除各自 suppress——
+    unlink 再抛（同进程相邻 syscall 双 EACCES 的理论形态）时降级为「raw
+    副本滞留 + 状态照常返回」，而不是逃出到 dump_prep_evidence 的 broad
+    except 炸掉其余取证 arm。滞留副本的残留面：``_dump_incident_record``
+    照常落盘（其 error/incident 字段已脱敏），滞留文件本身按无 TTL 证据
+    人工清理路径处置（与 state 目录其余滞留物同一运维语义）。"""
     try:
         present = events.is_file()
     except OSError as probe_exc:
@@ -247,10 +261,12 @@ def _dump_events_copy(target: Path, events: Path, redactor: SecretRedactor) -> t
         size = copy.stat().st_size
         _, original, _, tail = scan_and_compress_pi_events(copy, redactor=redactor)
     except OSError as copy_exc:
-        copy.unlink(missing_ok=True)
+        with suppress(OSError):
+            copy.unlink(missing_ok=True)
         return f"unreadable: {copy_exc}", b""
     if size > 0 and original == 0:
-        copy.unlink(missing_ok=True)
+        with suppress(OSError):
+            copy.unlink(missing_ok=True)
         return f"scan failed (source was {size} bytes; raw copy discarded)", b""
     return "dumped", tail
 
@@ -270,15 +286,28 @@ def _dump_stderr_tail(target: Path, run_dir: Path, scanned_tail: bytes) -> bytes
         return b""
 
 
-def _dump_listing(target: Path, execution_dir: Path) -> str:
+def _dump_listing(target: Path, execution_dir: Path, redactor: SecretRedactor) -> str:
     """The surviving-tree listing as a record state: ``"<n> entries"`` or
     ``"listing_failed"`` when the walk/write itself raised (EACCES family)
     — ``rglob`` silently skips unreadable subtrees, so a failure here means
-    the walk itself died, not that a chmod'd child hid its files."""
+    the walk itself died, not that a chmod'd child hid its files. Each
+    entry is span-redacted BEFORE persisting (#1168 F3): a secret literal
+    in a FILENAME (`LLM_GATEWAY_TOKEN=sk-…` as a path component) must not
+    land in the no-TTL state snapshot; an entry whose redaction escapes
+    (span function raising) degrades to a fixed placeholder, never to the
+    raw path."""
     entries: list[str] = []
     try:
         for path in execution_dir.rglob("*"):
-            entries.append(path.relative_to(execution_dir).as_posix())
+            try:
+                entries.append(redactor.redact(path.relative_to(execution_dir).as_posix()))
+            except Exception:
+                # #204 broad-except audit: 单条目脱敏逃逸（span 函数抛出族）
+                # fail-closed：该条目不得以未脱敏路径落盘，替换为固定占位
+                # （不携带任何原文）；清单其余条目与后续 arm 照常——"capture
+                # whatever still exists" 的逐条降级形态。结果空间：清单缺
+                # 该原始路径（取证面降级，占位条目本身即逃逸计数记录）。
+                entries.append("<listing entry dropped: redaction failed>")
             if len(entries) >= _MAX_LISTING_ENTRIES:
                 break
         entries.sort()
@@ -348,7 +377,7 @@ class EmergencyEventsSink:
             with self.path.open("ab") as dst:
                 for line in lines:
                     try:
-                        payload = _render_line(line, self._redactor).encode("utf-8")
+                        payload = render_line(line, self._redactor).encode("utf-8")
                     except Exception:
                         # #204 broad-except audit: 单行渲染/脱敏/编码任一逃逸
                         # （span 函数抛出，或 lone surrogate 的
@@ -375,35 +404,6 @@ class EmergencyEventsSink:
             # 行为（注销流）一致但不更糟；转储失败不得让 parse-pool 任务
             # 异常逃逸（那会注销流并丢掉后续全部事件）。日志保全：print。
             print(f"emergency events dump write failed for {self.path}: {exc!r}", flush=True)
-
-
-def _render_line(line: bytes, redactor: SecretRedactor) -> str:
-    """One framed line as redacted text: JSON events keep their structure
-    (``redact_json`` — the same function the delivery path applies to
-    archived events), non-JSON lines get span redaction. Capping happens
-    AFTER redaction (redact first, cut after — the #748 discipline) and
-    with an INLINE marker: one framed line stays ONE physical line
-    (review P3-4 — a newline in the marker would split one event across
-    three lines and corrupt line-based json.loads tooling)."""
-    text = line.decode("utf-8", "replace")
-    try:
-        event = json.loads(text)
-    except ValueError:
-        event = None
-    if isinstance(event, dict):
-        redacted = redactor.redact_json(event)
-        out = (
-            text
-            if redacted == event
-            else json.dumps(redacted, ensure_ascii=False, separators=(",", ":"))
-        )
-    else:
-        out = redactor.redact(text)
-    if len(out) > _MAX_DUMP_LINE_CHARS:
-        keep = _MAX_DUMP_LINE_CHARS // 2
-        dropped = len(out) - _MAX_DUMP_LINE_CHARS
-        out = f"{out[:keep]}[...{dropped} chars truncated...]{out[-keep:]}"
-    return out + "\n"
 
 
 def emergency_sink(
