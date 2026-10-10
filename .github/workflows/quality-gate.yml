@@ -471,6 +471,42 @@ jobs:
         env:
           PYTHONPATH: .
 
+  # Repo-wide governance guard (issue #1201): check_invariants /
+  # check_versions / check_architecture / generate_architecture govern
+  # frontend, velites and docs files too (frontend file budgets, the
+  # *.test.ts 1000-line cap, version manifests, docs freshness), but they run
+  # inside backend-unit's static step — a frontend-only / velites-only /
+  # docs-only diff sets backend=false and would merge a budget violation with
+  # no lane ever running them (PR #1177's over-ceiling frontend files were
+  # only caught because the PR also touched config/). Same complement pattern
+  # as docs-terms: backend-unit's static phase includes the set whenever the
+  # backend lane is on, so per run the checks execute exactly once. Unlike
+  # docs-terms this needs the project env (check_architecture imports
+  # server.app) and full history (budget monotonicity anchors on HEAD^).
+  governance-guard:
+    name: governance-guard
+    needs: changes
+    if: needs.changes.outputs.backend == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      - name: Repo-wide governance checks
+        run: BACKEND_GATE_PHASE=governance ./scripts/check-quick-backend.sh
+        env:
+          # Same release-train anchor opt-out as backend-unit's static step.
+          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ ((github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'release/')) || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))) && '1' || '0' }}
+
   # Combined coverage floor + aggregate backend evidence (issue #193): the
   # needs-DAG guarantees backend-unit and every backend-postgres shard
   # finished before this job starts, replacing the old 40x15s `gh api`
@@ -1046,6 +1082,7 @@ jobs:
       - api-check
       - backend-postgres
       - docs-terms
+      - governance-guard
       - backend-coverage
       - frontend-logic
       - frontend-component
@@ -1072,7 +1109,7 @@ jobs:
             (.changes.result == "success") and
             require_selected(
               .changes.outputs.backend != "true";
-              ["docs-terms"]
+              ["docs-terms", "governance-guard"]
             ) and
             require_selected(
               .changes.outputs.backend == "true";

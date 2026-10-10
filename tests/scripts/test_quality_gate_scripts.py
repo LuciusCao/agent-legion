@@ -45,6 +45,7 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         "FRONTEND_TEST_PROJECT",
         "GATE_LANES",
         "GATE_SHARD",
+        "GATE_SKIP_GOVERNANCE",
         "GATE_SKIP_STATIC",
         "GATE_TIER",
         "KEEP_COVERAGE",
@@ -432,6 +433,128 @@ def test_quick_gate_explicit_lanes_skip_derivation(tmp_path: Path) -> None:
     assert "Derived lanes" not in result.stdout
 
 
+def _governance_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    """Quick-gate fixture whose lane stubs log every phase they are called with."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    quick_gate = scripts / "check-quick.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    _copy_lane_paths(scripts)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
+    phase_log = tmp_path / "phase.log"
+    _write_executable(
+        scripts / "check-quick-backend.sh",
+        '#!/usr/bin/env bash\nprintf "backend:%s\\n" "${BACKEND_GATE_PHASE:-unset}" >>"$PHASE_LOG"\n',
+    )
+    _write_executable(
+        scripts / "check-quick-frontend.sh",
+        '#!/usr/bin/env bash\nprintf "frontend:%s\\n" "${FRONTEND_GATE_PHASE:-unset}" >>"$PHASE_LOG"\n',
+    )
+    return quick_gate, phase_log
+
+
+def test_quick_gate_runs_governance_checks_when_backend_lane_trimmed(tmp_path: Path) -> None:
+    """Issue #1201: the budget/invariant checks govern frontend files too but
+    live in the backend lane's static phase — a gate trimmed to the frontend
+    lane must still run them via the governance phase, otherwise local lanes
+    stay green where CI's governance-guard job would go red."""
+    quick_gate, phase_log = _governance_fixture(tmp_path)
+
+    result = _run(
+        quick_gate,
+        cwd=tmp_path,
+        env={"GATE_LANES": "frontend", "PHASE_LOG": str(phase_log)},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    phases = phase_log.read_text(encoding="utf-8").splitlines()
+    # The governance phase is the backend script's only call — the trimmed
+    # lane never runs its own static/test phases.
+    assert sorted(phases) == ["backend:governance", "frontend:static", "frontend:test"]
+    assert "governance checks" in result.stdout
+
+
+def test_quick_gate_runs_no_governance_phase_when_backend_lane_enabled(tmp_path: Path) -> None:
+    """With the backend lane on, its static phase already includes the
+    governance set — the guard must not double-run it."""
+    quick_gate, phase_log = _governance_fixture(tmp_path)
+
+    result = _run(
+        quick_gate,
+        cwd=tmp_path,
+        env={"GATE_LANES": "backend", "PHASE_LOG": str(phase_log)},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert phase_log.read_text(encoding="utf-8").splitlines() == ["backend:static", "backend:test"]
+
+
+def test_quick_gate_static_lanes_run_governance_inside_backend_static(tmp_path: Path) -> None:
+    """GATE_LANES=static (docs-only) enables every lane's static phase, so the
+    backend static phase covers the governance set and the guard stays off."""
+    quick_gate, phase_log = _governance_fixture(tmp_path)
+
+    result = _run(
+        quick_gate,
+        cwd=tmp_path,
+        env={"GATE_LANES": "static", "PHASE_LOG": str(phase_log)},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    phases = phase_log.read_text(encoding="utf-8").splitlines()
+    assert "backend:governance" not in phases
+    assert sorted(phases) == ["backend:static", "frontend:api-contract", "frontend:static"]
+
+
+def test_quick_gate_governance_failure_fails_the_gate(tmp_path: Path) -> None:
+    """A failing governance guard must fail the gate with its diagnostics
+    surfaced, not just a bare exit code."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    quick_gate = scripts / "check-quick.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    _copy_lane_paths(scripts)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
+    _write_executable(
+        scripts / "check-quick-backend.sh",
+        "#!/usr/bin/env bash\n"
+        'if [[ "${BACKEND_GATE_PHASE:-}" == "governance" ]]; then\n'
+        '  echo "budget blown"\n'
+        "  exit 3\n"
+        "fi\n",
+    )
+    _write_executable(scripts / "check-quick-frontend.sh", "#!/usr/bin/env bash\nexit 0\n")
+
+    result = _run(quick_gate, cwd=tmp_path, env={"GATE_LANES": "frontend"})
+
+    assert result.returncode == 1
+    assert "Repo-wide governance checks failed (status=3)" in result.stderr
+    assert "budget blown" in result.stdout
+
+
+def test_quick_gate_skip_governance_env_suppresses_the_guard(tmp_path: Path) -> None:
+    """GATE_SKIP_GOVERNANCE=1 (set only by check.sh's frontend+rust segment,
+    whose backend segment already ran the set) keeps the guard off even with
+    the backend lane trimmed."""
+    quick_gate, phase_log = _governance_fixture(tmp_path)
+
+    result = _run(
+        quick_gate,
+        cwd=tmp_path,
+        env={
+            "GATE_LANES": "frontend",
+            "GATE_SKIP_GOVERNANCE": "1",
+            "PHASE_LOG": str(phase_log),
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    phases = phase_log.read_text(encoding="utf-8").splitlines()
+    assert phases == ["frontend:static", "frontend:test"]
+
+
 def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
     frontend = tmp_path / "frontend"
@@ -446,11 +569,12 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     _write_executable(
         scripts / "check-quick.sh",
         "#!/usr/bin/env bash\n"
-        'printf "quick:lanes=%s,cov=%s,mode=%s,tier=%s,append=%s,skip_static=%s,skip_worker_ui=%s\\n" '
+        'printf "quick:lanes=%s,cov=%s,mode=%s,tier=%s,append=%s,skip_static=%s,skip_worker_ui=%s,skip_governance=%s\\n" '
         '"${GATE_LANES:-unset}" "${AGENT_LEGION_COV:-unset}" '
         '"${FRONTEND_TEST_MODE:-unset}" "${GATE_TIER:-unset}" '
         '"${AGENT_LEGION_COV_APPEND:-0}" '
-        '"${GATE_SKIP_STATIC:-unset}" "${BACKEND_SKIP_WORKER_UI_TESTS:-unset}" >>"$GATE_LOG"\n',
+        '"${GATE_SKIP_STATIC:-unset}" "${BACKEND_SKIP_WORKER_UI_TESTS:-unset}" '
+        '"${GATE_SKIP_GOVERNANCE:-unset}" >>"$GATE_LOG"\n',
     )
     _write_executable(scripts / "check-deps-audit.sh", "#!/usr/bin/env bash\nexit 0\n")
     for command in ("uv", "npm"):
@@ -481,11 +605,14 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     # The postgres segment re-enters the quick gate for its test round only
     # (GATE_SKIP_STATIC=1, BACKEND_SKIP_WORKER_UI_TESTS=1): segment 1a already
     # ran the static checks and the tier-independent worker UI tests, so every
-    # check still runs exactly once per full gate.
+    # check still runs exactly once per full gate. Segment 2 trims the backend
+    # lane, which would trigger the repo-wide governance guard (issue #1201) —
+    # GATE_SKIP_GOVERNANCE=1 keeps the set at exactly one run (segment 1a's
+    # backend static phase already included it).
     assert quick_calls == [
-        "quick:lanes=backend,cov=1,mode=unset,tier=unit,append=0,skip_static=unset,skip_worker_ui=unset",
-        "quick:lanes=backend,cov=1,mode=unset,tier=postgres,append=1,skip_static=1,skip_worker_ui=1",
-        "quick:lanes=frontend rust,cov=unset,mode=coverage,tier=unset,append=0,skip_static=unset,skip_worker_ui=unset",
+        "quick:lanes=backend,cov=1,mode=unset,tier=unit,append=0,skip_static=unset,skip_worker_ui=unset,skip_governance=unset",
+        "quick:lanes=backend,cov=1,mode=unset,tier=postgres,append=1,skip_static=1,skip_worker_ui=1,skip_governance=unset",
+        "quick:lanes=frontend rust,cov=unset,mode=coverage,tier=unset,append=0,skip_static=unset,skip_worker_ui=unset,skip_governance=1",
     ]
     assert calls.count("npm:run build:bundle") == 1
     assert not any("test:coverage" in call for call in calls)

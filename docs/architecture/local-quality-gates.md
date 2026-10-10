@@ -34,6 +34,23 @@ the backend lane (Python contract tests read it). The rule lives in
 the pre-push hook, and `tests/scripts/test_lane_paths.py` pins all three to
 one path table (#941). CI always runs every lane
 of the full quick suite, so trimming never weakens the server-side boundary.
+
+Lane trimming never covers the repo-wide governance checks (issue #1201):
+`check_invariants`, `check_versions`, `check_architecture` and
+`generate_architecture --check` govern frontend, velites and docs files too
+(frontend file budgets, the `*.test.ts` 1000-line cap, version manifests,
+docs freshness), but they run inside the backend lane's static phase — a
+frontend-only trim would silence them locally (PR #1177 shipped two
+over-ceiling frontend files through two green local gates). When the backend
+lane is trimmed away, `check-quick.sh` runs the set alongside the static
+round via `BACKEND_GATE_PHASE=governance`; when the lane is on, its static
+phase already includes the set, so it runs exactly once either way
+(`GATE_SKIP_GOVERNANCE=1` is the `check.sh` frontend+rust segment's dedup
+knob, same idiom as `BACKEND_SKIP_WORKER_UI_TESTS`). Within the set, failures
+aggregate — every section reports before the phase fails, so one violation
+cannot mask the next. CI covers the same gap with the `governance-guard`
+job (see below), the exact complement of `backend-unit`'s static step.
+
 The lane set and the test tier are part of the local evidence fingerprint, so
 evidence from a trimmed run is never reused for a different lane set or tier.
 Local checks are feedback rather than the trust boundary: parallel worktrees
@@ -252,6 +269,15 @@ release-train `HEAD`-only exception.
   job (`uv run --no-project --with pyyaml`, no uv sync). It runs when the
   backend lane is off and skips otherwise — the exact complement of the
   `check_architecture` static round inside `backend-unit`.
+- **governance-guard** — the repo-wide governance checks
+  (`BACKEND_GATE_PHASE=governance`: `check_invariants`, `check_versions`,
+  `check_architecture`, `generate_architecture --check`) as a standalone job
+  (issue #1201). They govern frontend/velites/docs files too, so they must
+  run even when a path trim turns the backend lane off; when the lane is on,
+  `backend-unit`'s static phase already includes them (exactly once either
+  way). Needs the full project env (`check_architecture` imports
+  `server.app`) and full history (budget monotonicity anchors on `HEAD^`),
+  and carries the same release-train anchor opt-out as `backend-unit`.
 - **docker-build** — CI-only image build lane (host + worker targets). It runs
   only when the `changes` job detects image-relevant path changes
   (`Dockerfile`, `.dockerignore`, dependency locks, `worker/`, `shared/`,
