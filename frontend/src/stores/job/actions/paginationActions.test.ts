@@ -89,10 +89,11 @@ describe('paginationActions', () => {
     expect(state.isLoading).toBe(false)
   })
 
-  it('setJobsPage lands a snapshot superseded by a higher-revision patch (#1183)', () => {
-    // 快照在途期间 job_patch_batch（更高 revision）先落地：单调取 max 让
-    // 快照整页替换列表；不取 max 时快照被 revision 守卫静默丢弃，列表
-    // 永远停在 patch 增量（前插序、totalJobs 停在旧值）。
+  it('setJobsPage drops a snapshot superseded by a higher-revision patch (#1189 P1-a)', () => {
+    // 水位与内容绑定：快照在途期间 job_patch_batch（更高 revision）先落地，
+    // 旧快照不再被 Math.max 抬水位整页覆盖——否则服务端采样 revision 先于
+    // 读 jobs 的窗口内产生的 patch 会被 revision 守卫永久丢弃。陈旧快照
+    // 整体丢弃，列表保持 patch 落地后的内容、水位不前进。
     useJobStore
       .getState()
       .setJobsPage('ws1', 1, [createJobSummary({ id: 'j1' })], 1, null)
@@ -115,8 +116,8 @@ describe('paginationActions', () => {
       )
 
     const state = useJobStore.getState()
-    expect(state.jobIds).toEqual(['j1', 'j2'])
-    expect(state.totalJobs).toBe(2)
+    expect(state.jobIds).toEqual(['j2', 'j1'])
+    expect(state.totalJobs).toBe(1)
     expect(state.revision).toBe(3)
     expect(state.isLoading).toBe(false)
   })
@@ -243,6 +244,67 @@ describe('paginationActions', () => {
 
     expect(useJobStore.getState().listLoadError).toBe('boom')
     expect(useJobStore.getState().isLoading).toBe(false)
+  })
+
+  it('refreshFirstPage re-pulls when the response is staler than an in-flight patch (#1189 P1-a)', async () => {
+    // 快照在途期间 patch 落地抬了水位：低 revision 响应不应用、直接重拉，
+    // 最终列表来自第二次响应——旧内容整页覆盖新内容的回归钉住。
+    let resolveFirst!: (value: ReturnType<typeof page>) => void
+    mockFetchJobsSnapshot
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (resolveFirst = resolve))
+      )
+      .mockResolvedValueOnce(
+        page([createJobSummary({ id: 'j1' }), createJobSummary({ id: 'j2' })], {
+          revision: 3,
+          total: 2,
+        })
+      )
+    mockFetchJobFacets.mockResolvedValueOnce(sampleFacets)
+
+    const pending = useJobStore.getState().refreshFirstPage('ws1')
+    useJobStore
+      .getState()
+      .applyJobPatchBatch(
+        'ws1',
+        2,
+        [createJobSummary({ id: 'j9', status: 'running' })],
+        []
+      )
+    resolveFirst(page([createJobSummary({ id: 'old' })], { revision: 1 }))
+    await pending
+
+    expect(mockFetchJobsSnapshot).toHaveBeenCalledTimes(2)
+    const state = useJobStore.getState()
+    expect(state.jobIds).toEqual(['j1', 'j2'])
+    expect(state.revision).toBe(3)
+    expect(state.listLoadError).toBeNull()
+    expect(state.isLoading).toBe(false)
+  })
+
+  it('refreshFirstPage keeps the loaded list when the facets fetch fails (#1189 P1-b)', async () => {
+    mockFetchJobsSnapshot.mockResolvedValueOnce(
+      page([createJobSummary({ id: 'j1' })], { revision: 1 })
+    )
+    mockFetchJobFacets.mockRejectedValueOnce(new Error('facets down'))
+
+    await useJobStore.getState().refreshFirstPage('ws1')
+
+    const state = useJobStore.getState()
+    expect(state.jobIds).toEqual(['j1'])
+    expect(state.listLoadError).toBeNull()
+    expect(state.facets).toBeNull()
+    expect(state.isLoading).toBe(false)
+    // patch 守卫未被冻结，后续 patch 正常落地。
+    useJobStore
+      .getState()
+      .applyJobPatchBatch(
+        'ws1',
+        2,
+        [createJobSummary({ id: 'j1', status: 'running' })],
+        []
+      )
+    expect(useJobStore.getState().jobsById.j1.status).toBe('running')
   })
 })
 
