@@ -1,27 +1,20 @@
-# velites：Agent Legion 自研轻量 Agent Harness 设计
-
-日期：2026-07-31 ｜ 状态：已落地（现行设计文档；2026-08-03 升格落地、2026-08-04 金丝雀关闭，见 §9）｜ 前置：[PoC 报告](./velites-poc-report.md)（worktree `poc-rust-pi`）
+# velites：Agent Legion 自研轻量 Agent Harness 现行规格
 
 > velites（罗马军团轻步兵）是 Agent Legion 的专用 agent 执行内核：Rust 实现、单静态二进制、
 > 极简上下文、可控性（controllability）作为第一特性。它替代 Node 版 Pi CLI 承担
 > workflow 节点的 headless 执行。
 
+本文是 velites 的**现行规格**：事件 schema（§4）、可控性与沙箱（§5）、CLI（§6）、
+provider（§7）、工具（§8）、集成形态与 runtime 接入指南（§9）、Quality Impact（§10）。
+立项动机、升格期灰度路径、里程碑与立项时的开放问题已拆入
+[velites-harness-design-history.md](velites-harness-design-history.md)（#1103），
+章节号保持不变以兼容代码注释中的 `§N` 引用。
+
 ## 1. 背景与动机
 
-当前 worker 上每个节点执行 = 冷启动一个 Node Pi 进程。高并发 worker 形态下的实测（2026-07-31）：
-
-- 每个 pi 进程常驻数十至上百 MB、峰值可达数百 MB，数十并发即占用数 GB 内存；
-- 每次节点执行都要付 Node 启动 + 模块加载（实测 1.5–1.7 s CPU），执行量大时累积成显著开销；
-- `--mode json` 的 `message_update` delta 占 stdout 体积 99%+，Pi 侧序列化、worker 泵逐字节
-  扫描后全部丢弃——协议层面的纯浪费，且无法通过配置关闭（PoC 已确认）。
-
-PoC（pi_agent_rust 替换验证）同时证明了两件事：
-
-1. 收益空间是真实的：同负载 Rust 实现 RSS ≈ 1/6.5、启动 CPU ≈ 0；
-2. 但我们对 harness 的需求面极窄（3 个工具 + skill 注入 + 事件流 + 一个 OpenAI 兼容
-   provider），fork 一个 30 万行、以插件/TUI 为主体的移植版是背着债务起步。
-
-因此决策：**自研 velites**，范围严格限定在 Agent Legion 的真实消费面内。
+见 [velites-harness-design-history.md §1](velites-harness-design-history.md#1-背景与动机)：
+Node Pi 冷启动与 delta 事件开销过大，PoC 证实 Rust 实现收益真实而需求面极窄，故自研、
+范围严格限定在 Agent Legion 的真实消费面内。
 
 ## 2. 目标与非目标
 
@@ -317,6 +310,10 @@ velites --mode json \
 - `--mode` 只有 `json`（headless 唯一形态）；
 - 未知 flag 直接报错退出（与 Pi/pi_agent_rust 的静默吞掉相反，防止配置漂移）；
 - `--name` 保留（仅标识用途，写入 `session` 事件）；
+- `--session-dir`：保留 flag（CLI 兼容），velites 落一个自有格式的 `session.jsonl`
+  （消息历史的镜像落盘，成本≈0），但**不提供 resume 入口**。注意区分：`events.jsonl`
+  （stdout 归档）是 UI 过程预览/token 计量/失败判定的数据源，必须完整；`session.jsonl`
+  只是为将来「中断恢复（resume）」特性预留的素材，resume 需单独立项设计；
 - `--max-output-tokens`（#952）是**单次**模型调用的输出上限（thinking 计入其中），
   覆盖 models.json 的 `maxOutputTokens`，OpenAI 兼容路径作为请求体 `max_tokens`
   下发；与累计预算 `--max-tokens` 无关。来源是节点 config 键 `max_output_tokens`，
@@ -510,35 +507,15 @@ manifest 的执行块统一为
 单字段改动（在途 job 经「升级 workflow」生效），操作手册见
 `docs/remote-execution-runbook.md` §6。
 
-**flavor 的退役（2026-08-05）**：`workflows.pi.flavor` 实现选择层已随 yaml
-块一并删除。此前保持 `runtime: pi` 的 4 个业务视频 agent 已由
-schema v27 migration 翻转为 `runtime: velites`（新发 published 版本、归档
-旧版）。`PiRuntimeConfig` 当时只剩硬编码默认（flavor="pi"，该配置类亦已于 2026-08-26 死代码清理中删除）；此前专供的本地
-pi executor 死路径（`executors/pi.py` + `PiRunner` 及
-pi_config/pi_command_builder/pi_prompt 链）已整体删除（#108）。
-
-**pi 的定位（2026-08-04 用户决策）**：pi **不退役**，作为可选 runtime 长期
-保留——velites 是生产主力，pi 作为备选实现与对照基线继续可用
-（`runtime: pi` 即完整 pi 路径）。若未来仅出于卫生目的清理
-（如 command_spec version 升级），另行立项评估，与退役无关。
+**pi 的定位**：pi 不退役，作为可选 runtime 长期保留——velites 是生产主力，
+pi 作为备选实现与对照基线继续可用（`runtime: pi` 即完整 pi 路径）。flavor
+实现选择层的退役与 pi 定位决策的经过见
+[设计历史 §2](velites-harness-design-history.md#2-切换期决策原-9-历史段落)。
 
 **回退**：单节点异常把该 agent 节点的 `execution.runtime` 改回 `pi` 并发布；
 系统性异常同法全部迁回 `pi`（或改 workflow 顶层 `execution.runtime` 默认）。沙箱异常当前需发版调整
 （`velites_no_sandbox` 配置项已随 `workflows.pi` 退役；`execution.no_sandbox`
 在 manifest 恒为 false）。
-
-**历史灰度路径（已完成，存档）**：
-
-- Phase 0：契约测试 + 真二进制集成测试入库（M4）；
-- Phase 1 shadow = 抽样回放（当时的离线回放脚本双跑 pi 与 velites，diff 事件流与
-  产出；该脚本已不在仓库中）；
-- Phase 2 金丝雀 = 全局 `flavor: velites` + worker capacity 压低起步，逐步
-  恢复至生产量级并发（整夜跑批验证、成功率高）；
-- 升格落地（2026-08-03，PR #20/#21）：runtime 枚举/dispatch/sweeper/runtime
-  维度 + Worker UI/预检；审题链路迁 `runtime: velites` 并整夜跑批验证
-  （生产量级节点量）；
-- 金丝雀关闭（2026-08-04，`14ec130f`）：`flavor: velites` 与审题链路
-  `runtime: velites` 落为 tracked 默认值。
 
 **worker bundle 与部署**：二进制不打进 bundle（bundle 只带 skill + prompt）。
 #254 起 runtime 声明 = 启动时自动探测（自带副本 `data/bin/` 优先、PATH
@@ -586,8 +563,8 @@ pi                      # 交互式完成认证
    计量都消费它；产不出流式事件的 runtime 不接（openclaw 即因此退役，
    其一次性 envelope 无中间事件、无 token usage）。
 
-历史参考：openclaw 曾按上述步骤完整接入（adapter、Worker 事件合成层、
-e2e），后按用户决策整体退役——实现与拆除过程见 git 历史（#75）。
+历史参考：openclaw 曾按上述步骤完整接入后整体退役（#75），见
+[设计历史 §2](velites-harness-design-history.md#2-切换期决策原-9-历史段落)。
 
 ## 10. Quality Impact
 
@@ -617,38 +594,7 @@ e2e），后按用户决策整体退役——实现与拆除过程见 git 历史
 - **文档**：README 增 velites 章节；本文件进 `docs/architecture/`；
   AGENTS.md 第 6 节 executor 扩展链补 velites 边界说明。
 
-## 11. 里程碑
+## 11. 里程碑 / 12. 风险与开放问题
 
-| 里程碑 | 内容 | 验收 |
-|---|---|---|
-| M1 骨架 | crate 初始化、CLI、事件 emitter、stub provider 的 agent loop（read/write/bash） | cargo test 绿；stub 下 golden 事件序列 |
-| M2 契约对齐 | OpenAI 兼容 SSE provider、skill 加载、错误/重试语义 | 真 gateway 跑 `review_subtitles` fixture，与 Node Pi diff 通过 |
-| M3 可控性 | 预算/取消/输出自检 + 工具体积度量 | 三条 invariant 测试入库 |
-| M4 集成 | flavor 配置、Dockerfile rust stage、CI rust lane、集成测试 full lane | `./scripts/check-quick.sh` + full gate 绿 |
-| M4.5 沙箱 | §5 沙箱小节：Sandbox 抽象、macOS seatbelt 先行、Linux bwrap 在 worker 镜像验证、`EXEC-HARNESS-SANDBOX-001` | 沙箱集成测试入库（quick lane）；逃逸尝试全部被拒 |
-| M5 灰度 | shadow → 金丝雀 → 默认 | 生产高并发形态下 RSS/CPU 对比报告 |
-
-## 12. 风险与开放问题
-
-- **上下文体积护栏（已拍板：pi 对齐截断）**：原疑虑是截断可能伤 agent 表现、且
-  阈值缺乏依据。2026-08-01 决策：直接对齐 pi 的成熟策略——2000 行 / 50KB
-  （50×1024 字节）双阈值先到即截，read 截头、bash 截尾并落临时文件，提示语与
-  pi 一致（细节见 §8）；截断不切断行（bash 末行单行超限除外）。`output_bytes`
-  继续记录截断前体积，金丝雀期间观察截断触发率与 agent 表现，必要时再调阈值；
-- **SSE 方言**：gateway 背后不同模型的 SSE 细节差异（PoC P2）——M2 用真实模型矩阵
-  验证；缓解：解析器对非标准 event 行容错跳过；
-- **thinking 参数映射**：不同后端 wire 参数不同——初期只支持 gateway 当前映射，
-  新后端接入时显式扩展；
-- **prompt 兼容性**：SKILL.md 中的指令对模型行为的引导经 Pi 验证过，velites 的
-  system prompt 拼装顺序不同可能改变行为——M2 diff 不仅比事件结构，也抽查产出质量；
-- **工作量估计**：M1–M3 约 1.5–2 周（loop 本身小，成本在工具鲁棒性与 provider 兼容），
-  M4–M5 约 1 周。
-
-### 已决项
-
-- **`--session-dir`（评审已决）**：保留 flag（CLI 兼容），velites 落一个自有格式的
-  `session.jsonl`（消息历史的镜像落盘，成本≈0），但**不提供 resume 入口**。
-  注意区分：`events.jsonl`（stdout 归档）是 UI 过程预览/token 计量/失败判定的
-  数据源，必须完整；`session.jsonl` 只是为将来"中断恢复（resume）"特性预留的
-  素材。resume 作为可控性家族的候选第八特性，待 velites 切换稳定后单独立项
-  （涉及 session 格式 v1、Host 重跑链路、上下文信任边界，需独立设计）。
+已拆入 [velites-harness-design-history.md](velites-harness-design-history.md) §3/§4（立项时的
+里程碑计划与开放问题，均已落地或已决）。

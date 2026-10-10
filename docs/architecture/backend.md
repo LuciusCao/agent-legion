@@ -974,6 +974,8 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码、work
 
 `config/workflow.yaml` 的 `executors` 段已随 executor 概念整体退役（P-0.5，schema v47 drop 定义/allocation 两表，EXEC-CODE-POOL-001）：非 Agent 路由节点一律进隐含 code 池，池容量 = 实例设置 `code_capacity`（#389 改述：本地兜底执行并发上限——远程 code Worker 在线时任务优先远程执行，此值只约束宿主本地回落的并发；0 = 纯控制面模式，本地执行栈不组装），lease 行写常量 `'code'`；节点级并发经 `workspace_node_limits` 声明（远程 code claim 同样按节点计数）。code 节点的可调参数只剩一个声明层——节点 `config_schema:` 块（随 revision 快照版本化），平台保留执行键 `timeout_seconds` / `sandbox_network` 自动合并进每个 code 路由节点的有效 schema。
 
+**容量三层与纯控制面模式（#385/#386/#389）**：三层容量各管各的、无跨层开关——实例 `code_capacity`（宿主本地兜底执行并发上限，默认 16，同时是本地池大小与本地 lease 上限）→ Worker `max_code_concurrency`（远程 code 执行容量，各 Worker 自报、经 worker 控制台热更，agent-only Worker 默认 0；与实例 `code_capacity` 只是恰好同名、无关联）→ workspace `node_limits` / `agent_capacity`（节点 / workspace 级并发）。`code_capacity = 0` 时宿主不组装本地执行栈（CodeExecutor / ExecutionRuntime / 线程池都不建，velites 二进制依赖从该部署形态中消失），调度线程照常运行（pass 级早退含「无在线 code Worker」维度），code 节点与 shard 分片不回落本地。产品责任点：纯控制面 + 无在线 Worker = workflow 静默停摆（任务排队、无错误），配套健康信号为 `/api/health` 的 `workers` map 实时报告 `execution_mode=pure_remote` 与 `online_code_workers`（启动时为 0 打 WARNING 日志）。admin UI 标签为「本地执行并发上限（0 = 纯远程模式）」；扩容走 Worker 而非调大宿主本地池。退役的 `workflows.enabled` 总开关职责由 `code_capacity = 0` + `sweeper_enabled=False` 逃生舱承担；治理过程与历史调研见 [instance-settings-legacy-concepts-governance.md](instance-settings-legacy-concepts-governance.md)（历史设计记录）。
+
 实例级运行时设置（`agent_workers` 限额、`workflows.max_items_per_run`、lease/heartbeat/sweeper 时序、`code_capacity`、`agent_enqueue` 与 `result_unpack` 容量旋钮、`agent_claim` 在线标记写入节流）不再出现在 yaml，见上文「DB 实例设置」。
 
 token 用量计价已产品化：定价存于 `global_settings` 表（`token_usage` 文档），由 admin 在「全局设置」页（`GET/PUT /api/admin/token-usage-pricing`）维护，成本按每条 run 的 provider + model 匹配定价逐行计算；不再有任何 yaml 侧配置。
@@ -999,7 +1001,7 @@ Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 sc
 ## Security Considerations
 
 - 节点代码执行统一在 `velites sandbox wrap` OS 沙箱（seatbelt / bubblewrap）内进行，网络默认拒绝，文件系统默认只放行 job_dir、`/tmp` 与显式 allow-list；沙箱后端不可用时执行 fail-closed（EXEC-CODE-003）。
-- OpenClaw runtime 已退役（#75）：曾短暂经 runtime catalog adapter 接入（`openclaw agent --local --json`），因其 stdout 无流式事件与 token 计量整体移除；新 runtime 按同一 adapter 机制接入（见 `docs/architecture/velites-harness.md` 的接入指南）。
+- OpenClaw runtime 已退役（#75）：曾短暂经 runtime catalog adapter 接入（`openclaw agent --local --json`），因其 stdout 无流式事件与 token 计量整体移除；新 runtime 按同一 adapter 机制接入（见 [velites-harness.md 的接入指南](velites-harness.md#新增-agent-runtime-接入指南)）。
 - PostgreSQL 与文件存储部署在受信网络内；业务 API 均需登录（cookie session 或 Bearer token，见 README 的「快速开始 / 登录」章节），uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何通过鉴权的用户都可删除 job、下载产物、触发执行。
 - Workspace 凭证经 vault 加密落库（`workspace_secrets`，Fernet），API 永不返回明文，配置与 intake 快照只存 `secret_ref`；实例级外部服务连接凭据与鉴权 token 同样 Fernet 加密落 `instance_secrets` / `connection_tokens`（实例 vault），只在 dispatch 注入与连接探测时于内存解析；master key 走 env / 文件注入，不进 DB、不进日志（VAULT-SECRET-001）。
 - `data/` 已加入 `.gitignore`，禁止提交运行时数据或密钥。
