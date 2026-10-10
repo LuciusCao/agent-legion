@@ -1,5 +1,9 @@
 # 实例设置旧概念治理方案（已实施定稿）
 
+> **历史设计记录**（#1103）：现行参考（容量三层、`code_capacity = 0` 纯控制面模式、健康信号、
+> `workflows.enabled` 剥离语义）已并入 [backend.md](backend.md) 的「Configuration Reference」；
+> 本文保留语义漂移史与处置定稿，供溯源。
+
 状态：**已实施**（#385 / #386 / #389，feat/host-control-plane-389）
 原提案（「UI 下线 + env 兜底」方向）经历史调研推翻，本文按实际落地定性重写；
 实施前的原始提案表述见 git 历史（本文件在本 PR 之前的状态）。
