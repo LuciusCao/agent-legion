@@ -127,5 +127,9 @@ terms:
     note: 回放的执行档案按 workflow revision（或当前草稿）选，副本 run 冻结
       node_profiles pin {revision_id, node_key, profile_hash}（EXEC-QUALITY-REPLAY-001）；
       旧 agent_versions pin 只读兼容存量 run，不再为新回放写入
+  - pattern: 'workspace-executor-evidence-matrix'
+    retired_in: '#1103（证据矩阵改名）'
+    note: 证据矩阵文件名沿用了已退役的 executor 概念（schema v47），已改名为
+      docs/architecture/architecture-evidence-matrix.md；现行文档一律链接新路径
 
 exemptions: []
