@@ -248,22 +248,22 @@ def test_residue_vanishing_mid_copy_is_skipped_other_errors_abort(
     targets = validate_shared_put_payload(
         root, [(item["path"], item["content"]) for item in shared_edit_snapshot(root)]
     )
-    real_copy = skill_build_residue_io.shutil.copy2
+    real_copy = skill_build_residue_io.copy_residue_file
 
-    def vanishing_copy(source, target, **kwargs):
-        if Path(source).name == "stray.pyc":
-            Path(source).unlink()  # a validator outside the lock cleaned it
-        return real_copy(source, target, **kwargs)
+    def vanishing_copy(dir_fd, name, target):
+        if name == "stray.pyc":
+            os.unlink(name, dir_fd=dir_fd)  # a validator outside the lock cleaned it
+        return real_copy(dir_fd, name, target)
 
-    monkeypatch.setattr(skill_build_residue_io.shutil, "copy2", vanishing_copy)
+    monkeypatch.setattr(skill_build_residue_io, "copy_residue_file", vanishing_copy)
     write_shared_materials(root, list(targets.items()), tmp_path)
     assert not (root / "scripts" / "stray.pyc").exists()
     assert (root / "scripts" / "__pycache__" / "common.cpython-312.pyc").read_bytes() == _PYC
 
-    def denied_copy(source, target, **kwargs):
+    def denied_copy(dir_fd, name, target):
         raise PermissionError("denied")
 
-    monkeypatch.setattr(skill_build_residue_io.shutil, "copy2", denied_copy)
+    monkeypatch.setattr(skill_build_residue_io, "copy_residue_file", denied_copy)
     with pytest.raises(SharedMaterialWriteError):
         write_shared_materials(root, [*targets.items(), ("scripts/new.py", "Y\n")], tmp_path)
     assert not (root / "scripts" / "new.py").exists()  # live dir untouched

@@ -70,15 +70,21 @@ invariants:
         gate: full
 
   - id: SECURITY-PATH-002
-    statement: "Server-side containment of untrusted path names goes through the shared primitives in server/app/fs_safety.py (#928): I/O on untrusted-writable trees walks directory descriptors from a trusted root with O_NOFOLLOW on every component below it (open_dir_beneath / open_dir_nofollow / open_regular_at / create_new_at); name-to-path containment uses resolve_within (resolve, then require the result under the resolved root). Switched modules are listed in the evidence test and may not reintroduce hand-rolled is_relative_to / relative_to-ValueError / commonpath / O_NOFOLLOW checks; worker/ and velites/ are separate process boundaries and are out of scope."
+    statement: "Server-side containment of untrusted path names goes through the shared primitives in server/app/fs_safety.py (#928): I/O on untrusted-writable trees walks directory descriptors from a trusted root with O_NOFOLLOW on every component below it (open_dir_beneath / open_dir_nofollow / open_regular_at / create_new_at); name-to-path containment uses resolve_within (resolve, then require the result under the resolved root). Check-then-move flows on such trees pin directory identity with server/app/fs_dir_identity.py (#1097): lstat (st_dev, st_ino) relative to a pinned parent descriptor, only real directories have an identity, mismatches fail closed. Switched modules are listed in the evidence test and may not reintroduce hand-rolled is_relative_to / relative_to-ValueError / commonpath / O_NOFOLLOW checks; worker/ and velites/ are separate process boundaries and are out of scope."
     owner: security
     risk: high
     evidence:
       - kind: contract
         target: tests/app/test_fs_safety.py
         gate: quick
+      - kind: contract
+        target: tests/app/test_fs_dir_identity.py
+        gate: quick
       - kind: integration
         target: tests/mcp_server/test_local_files.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_skill_shared_swap_identity.py
         gate: quick
 
   - id: DB-MUTATION-001
