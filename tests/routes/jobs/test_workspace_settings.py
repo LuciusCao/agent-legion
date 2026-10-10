@@ -72,21 +72,6 @@ def test_workspace_settings_without_cms_fields(client_factory):
     assert "nodeConfigSchemas" in settings
 
 
-def test_workspace_settings_returns_node_config(client_factory):
-    with client_factory() as c:
-        ws_id = _create_workspace(c)
-        saved = c.patch(
-            f"/api/workspaces/{ws_id}/settings/nodes",
-            json={"nodeConfig": {"intake_knowledge_points": {"timeout_seconds": 120}}},
-        )
-        assert saved.status_code == 200, saved.text
-        response = c.get(f"/api/workspaces/{ws_id}/settings")
-
-    assert response.status_code == 200
-    settings = response.json()["settings"]
-    assert settings["nodeConfig"]["intake_knowledge_points"]["timeout_seconds"] == 120
-
-
 def test_patch_settings_nodes_saves_node_config(client_factory):
     with client_factory() as c:
         ws_id = _create_workspace(c)

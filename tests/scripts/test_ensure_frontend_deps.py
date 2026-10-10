@@ -392,7 +392,15 @@ def test_interrupted_backup_cleanup_keeps_committed_tree(tmp_path: Path) -> None
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env=_script_env(main, bin_dir, stub_log, {"STUB_RM_PID_FILE": str(rm_pid_file)}),
+        env=_script_env(
+            main,
+            bin_dir,
+            stub_log,
+            # STUB_RM_SLEEP=2：SIGKILL 桩 bash 后孤儿 sleep 仍持有 stdout/stderr
+            # 管道，communicate() 要等它退出才见 EOF——2s 窗口足以覆盖「rm 进行
+            # 中」的 kill 时序，又不必白等桩默认的 15s。
+            {"STUB_RM_PID_FILE": str(rm_pid_file), "STUB_RM_SLEEP": "2"},
+        ),
     )
     try:
         # rm 桩挂起 = npm ci 已成功、stamp 已写、正在清备份（提交点已过）。
