@@ -353,12 +353,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/843
   ceiling: 48
 - check: architecture.route_response_model
-  path: server/app/routes/studio_chat.py:session_events
-  reason: Studio chat session events are a Server-Sent Events stream (StreamingResponse, text/event-stream),
-    same shape as the workspace job events route; there is no JSON response model to name.
-  owner: workspace-executor
-  remove_when: docs/architecture/backend.md#agent-worker-协议响应形态response-model-豁免的依据
-- check: architecture.route_response_model
   path: server/app/routes/agent_workers.py:result
   reason: Agent Worker result acknowledgement returns an empty 204 response by protocol.
   owner: workspace-executor

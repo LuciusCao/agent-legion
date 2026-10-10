@@ -1,6 +1,9 @@
-# Phase 1-5 Workspace Executor Evidence Matrix
+# Architecture Evidence Matrix
 
-This matrix records the reverse audit of Phase 1-5 Workspace Executor architecture promises.
+This matrix records the reverse audit of architecture promises against the invariant registry
+(`config/architecture/architecture-invariants.yaml`). It started as the Phase 1-5 reverse audit
+of the workspace execution plane; the file was renamed from the retired-executor-era name
+`workspace-executor-evidence-matrix.md` in #1103 (the executor concept was retired in schema v47).
 
 - `Verified` — the promise already meets the evidence rule and is registered as an invariant.
 - `Gap` — the promise is approved but evidence is missing; linked to the task that will close it.

@@ -4,7 +4,7 @@ Agent Legion 把服务拆成两个角色：Host 负责工作流、数据库与�
 
 Worker Service 宿主机发布面默认只绑定 `127.0.0.1:8787`（控制台和查询 API）；compose 网络内其它容器可以到达该端口，但除 `GET /api/health` 外所有端点都要求本地 control token 鉴权。首次启动会把挂载的只读引导 YAML 导入独立的可写控制卷；此后配置一律在控制台或 API 中修改，不再编辑 YAML。注册密钥（workspace scoped token）在本机控制台或 `workerctl` 中添加；页面和 API 只接受写入、不回显明文，托管副本以 `0600` 权限保存在控制卷中。
 
-本文是部署操作的权威出处：Docker 部署机入口、Worker 注册 token、claim 默认关闭、code 节点执行池与 velites 二进制来源都以本文为准。协议版本与跨机网络见 [remote-execution-runbook.md](remote-execution-runbook.md)，对象存储 endpoint 与端口发布见 [materials-storage-deployment.md](materials-storage-deployment.md)。
+本文是部署操作的权威出处：Docker 部署机入口、Worker 注册 token、claim 默认关闭、code 节点执行池与 velites 二进制来源都以本文为准。协议版本与跨机网络见 [remote-execution-runbook.md](remote-execution-runbook.md)，对象存储 endpoint 与端口发布见 [materials-storage-deployment.md](materials-storage-deployment.md)。本文只收操作步骤；Worker 准入语义、velites 安置与升级设计（#831）、控制面鉴权判定模型、控制台入口与引导判定等设计 / 实现细节见 [architecture/agent-worker.md](architecture/agent-worker.md)。
 
 LLM gateway 是独立基础设施，不属于 Agent Worker 协议。Worker 容器内的 velites 通过挂载的 `models.json`（provider `baseUrl` 指向 gateway）访问它。
 
@@ -250,18 +250,7 @@ curl -sS -b ./al-cookies.txt -H 'x-agent-legion-request: 1' \
 
 **claim 默认关闭**（本节是该规则的权威出处）：Worker 执行进程每次启动（服务启动、手动重启）都先把 `claim_enabled` 置为 false，即使上次退出前是开启状态；必须在控制台点击「开始领取」或执行 `workerctl claim enable` / `PUT /api/config {"claim_enabled": true}`，Worker 才会按本机容量拉取任务。唯一例外是执行进程崩溃（如被 OOM killer 杀掉）后由 supervisor 自动重启（#681）：保留操作员已打开的 claim，新进程按 `ramp_up` 重新爬坡；但上一个执行进程运行不足 60 秒（崩溃循环），或 1 小时内已这样保留过 3 次时，仍回落为关闭，控制台日志写明原因（`worker/restart_policy.py`）。
 
-Worker 不声明 `capabilities`（issue #284 起 claim 准入不再按 capability 匹配；
-worker.yaml 的 `capabilities:` 键已于 issue #452 移除：存量状态副本残留该键时读取即
-剥离、进程内告警一次，下次保存配置时从文件清除；`PUT /api/config` 与
-`workerctl configure` 不再接受该字段）。`models` 是可选的 runtime-scoped allowlist，不再是
-模型事实源。Agent runtime 声明由本机探测推导（issue #254）：启动时按二进制解析
-（自带副本 `data/bin/` 优先、PATH 兜底）探测已安装的 runtime 并默认全部启用，
-`disabled_runtimes`（控制台「配置 → Agent 运行时」或 `workerctl configure
---disable-runtime`）反选停用。Worker 对每个生效的 runtime 执行其发现 adapter
-（velites 使用
-`velites models list --json`），最终注册集合 = 发现结果 ∩ allowlist；该 runtime 没有
-allowlist 条目时允许其全部发现结果。Agent 任务的准入条件：workspace token 授权、
-runtime 匹配、provider/model 命中 allowlist、labels 满足 `requires_labels`。
+Worker 不需要声明 `capabilities`；runtime 由本机二进制探测自动启用（`disabled_runtimes` 反选），`models` 是可选的 allowlist。agent 任务准入条件（token 授权、runtime、provider/model allowlist、`requires_labels`）与发现语义见 [architecture/agent-worker.md §1](architecture/agent-worker.md#1-runtime-声明与-agent-任务准入)。
 
 ### 拉取式部署（worker-v* 镜像发布）
 
@@ -365,11 +354,11 @@ Worker 默认**直连出网**：service 入口会剥离启动 shell 继承的代
 
 - **Docker 部署**：从 GitHub Release（`velites-v*` tag，velites-release workflow 产出）下载与宿主机架构一致的 tarball，解出的 `velites` 放到 compose 的 `VELITES_BIN`（默认 `../velites-bin/velites`，按 `deploy/` 解析，即 `<仓库根>/velites-bin/velites`；一键安装形态为安装目录下的 `velites-bin/velites`）——compose 把它 bind mount 到容器内 `/app/data/bin/velites`（自带副本目录，优先于 PATH）。源文件缺失时 docker 会在该路径自动建空目录并照常启动容器，由下述期望 runtime 守卫让 Worker 启动失败（§3）。架构必须与 worker 镜像一致（x86_64 取 `*-x86_64-unknown-linux-gnu`，arm64 取 `*-aarch64-unknown-linux-gnu`）；挂载了错误架构的二进制能通过存在性探测，但执行时以 exec format error 失败——期望 runtime 守卫会把它转成启动失败（见下）。**防漏挂载守卫**：compose 默认注入 `AGENT_WORKER_EXPECT_RUNTIMES=velites`（`deploy/.env` 可覆盖：多值逗号分隔；显式置空禁用守卫，零 runtime 注册合法——零 runtime / 纯 code 池形态同时叠加 `deploy/compose.worker.zero-runtime.yaml` override 去掉 velites bind mount，否则无条件挂载会在 `velites-bin/` 下留一个无用的空目录），启动时探测不到期望 runtime、或期望 runtime 模型发现失败（含架构错配）即 fail-fast（退出码 2，supervisor 不自动重启、healthcheck 变 unhealthy）。**pi 在 docker 镜像内不可用**：pi 的入口是 npm 包脚本，依赖 node 运行时与包树，而 #381 已把它们移出镜像——pi 部署走裸机形态（PATH 或 `data/bin/`），需要在 docker 跑 pi 时自行构建含 node+pi 的镜像变体；
 - **裸机/开发部署**（直接跑 `worker.executor`，如 `make dev-worker`）：在**与 Worker 同 OS/架构**的机器上、仓库根执行 `./scripts/ensure-velites.sh --dest data/bin`，脚本按 velites/ 源码指纹决定是否需要 `cargo build --release`（指纹不变的重复执行直接跳过），产物原子安置到 `data/bin/velites`。无源码/工具链的纯执行节点可直接取 Release 产物安置到同一目录（此时不要跑 `make prod-up`——见下条升级语义）。**注意不要给 Release 产物手写 `.src-stamp`**：产物不带 stamp、Release 也不发布其构建 tree hash，而 velites 与仓库版本线解耦——产物源码往往旧于本 checkout，手写当前 HEAD 指纹（`git rev-parse HEAD:velites > data/bin/velites.src-stamp`）会给旧二进制伪造新鲜度，使 prod-up 永久跳过重建、启动对账（staleness）不再报漂移，比 #831 更彻底地静默。无 cargo 但需要刷新 `data/bin` 的合法出路只有两条：装 Rust 工具链重建，或在与本机同 OS/架构、同一仓库状态的机器上跑 `ensure-velites.sh --dest data/bin` 后**把二进制与 stamp 一起拷贝**（stamp 与产物同源才可信）。macOS 产物用 seatbelt、Linux 产物用 bubblewrap（Linux 主机需可用的 bwrap：setuid 或非特权 user namespace），沙箱后端不可用同样 fail-closed。裸机部署同样可设 `AGENT_WORKER_EXPECT_RUNTIMES`（如 systemd 单元的 `Environment=`）启用期望 runtime 守卫；不设时保持「探测到什么声明什么」的默认语义。
-- **升级语义（#831）**：原生形态 `make prod-up` 对 velites 的两个安置点**都**做新鲜度刷新——先 PATH 模式（`ensure-velites.sh` 默认模式），再 `--dest data/bin`（自带副本，各自按指纹独立跳过/重建）。历史版本只刷 PATH，而「自带副本优先」的解析顺序让 install-deps 首次安置的 `data/bin` 副本永久优先命中，velites 升级静默失效。「安置在哪、什么算新鲜」由部署 planner（`scripts/velites_deploy_plan.py`）从**真实 resolver**（`worker/binary_resolution.py` / `shared/code_sandbox.py` / `worker/runtime/catalog.py`）推导，脚本只做构建与原子安置——bash 不再持有平行的查找模型（四轮 codex 同构 finding 的根源）。PATH 模式的主目标跟随 `which velites` 就地刷新（无 PATH 副本时落 `VELITES_INSTALL_DIR` 或 `~/.local/bin`），并对 PATH 上按名独立发现的家族成员位置（`velites` 与 `velites-sandbox` 可来自不同目录，#835 codex P2）一并刷新。沙箱包装器 `velites-sandbox` 同批刷新（解析候选序它优先于 velites，目录里存在旧包装器时只刷 velites 会让 code 沙箱继续用旧版——与 #831 同构的漂移；判鲜是**家族级**的：velites 本体全新鲜但包装器陈旧同样触发重建，fast-path 不会短路掉它；不存在时不主动创造，裸机默认走 velites 兜底）。重建需要 cargo——新 worktree 的 `data/` 为空，首次 prod-up 必经 `--dest` 构建路径，无 cargo 即 fail-fast（错误提示给出合法出路：装工具链，或从同 OS/架构、同仓库状态的机器连 stamp 一起拷贝；不得给 Release 产物手写当前指纹，见上一条）。启动对账（软告警）覆盖**每个消费角色实际解析到的**二进制：Worker 侧组合 agent runtime 面（自带副本优先解析）与 code 沙箱面（`velites-sandbox` 优先候选序）；Host 侧 lifespan 也对 code 沙箱面（经 `shared` 解析）与本地 agent runtime 面（PATH 裸名）对账——`data/bin` 副本漂移时两侧启动日志都打 WARNING。方向中性（副本可能落后于源码，也可能来自领先版本线的 PATH 共享副本；不 fail-closed，velites 版本线独立，允许刻意落后；无 stamp、stamp 损坏或无 git/源码树的形态无从对账，静默跳过）。对账核心在 `shared/velites_staleness.py`（Host 侧钩子不 import worker 包，两侧共用）。
+- **升级（#831）**：原生形态 `make prod-up` 对 velites 的两个安置点（PATH 与 `data/bin` 自带副本）**都**按源码指纹刷新，沙箱包装器 `velites-sandbox` 同批刷新；重建需要 cargo，新 worktree 首次 prod-up 无 cargo 即 fail-fast（合法出路见上一条）。`data/bin` 副本与源码漂移时 Host / Worker 启动日志打 WARNING（软告警，不 fail-closed）。planner 推导、家族级判鲜与启动对账的设计见 [architecture/agent-worker.md §3](architecture/agent-worker.md#3-velites-安置点与升级语义831)。
 
   运行时监督的灰度/回退开关（同 family 的 stdout 事件泵开关 `AGENT_WORKER_EVENT_PUMP` 一并适用）：`AGENT_WORKER_EXIT_WATCH=kqueue|pidfd|scan|auto`（默认 auto：macOS 选 kqueue、Linux 选 pidfd、都不可用回落 scan——单根 watcher 线程监听全部在飞子进程的退出；显式指定可用即遵守、不可用回落 scan 并打印原因）；`AGENT_WORKER_LANE_IDLE_TIMEOUT=<秒>`（默认 30，执行车道线程的空闲退出时限）。两者只在出现监督面异常时需要动——slots 心跳行会持续打印 `exit <mode>` 与 `lane <n>` 供核对。
 
-**secret 边界**：节点 secret（vault 解出的连接凭据）只在 claim 响应里经既有 HTTPS 通道注入——落库的 manifest 与 bundle 都不含 secret；Worker 仅内存持有、经 stdin 传给沙箱子进程——secret 标记键在 Host 侧 `split_manifest_config` 就不进下发 manifest，Worker 侧没有任何 config 派生数据落盘，secret 不接触 Worker 文件系统与日志。随 manifest 下发的 settings 快照按 section 白名单过滤（`node_safe_settings_config`）——白名单当前为空（`NODE_SETTINGS_CONFIG_SECTIONS = ()`，业务 section 已随业务节点迁出），vault/auth/database/agent_workers 等实例级 section 不落库、不下发、不进沙箱 stdin。
+**secret 边界**：节点 secret 只经 claim 响应的 HTTPS 通道下发、Worker 仅内存持有，不落盘、不进日志，部署侧无需额外配置；实现见 [architecture/agent-worker.md §2](architecture/agent-worker.md#2-code-任务的-secret-边界)。
 
 **协议兼容与升级顺序**：当前协议版本、各版本能力、混合舰队兼容矩阵、结果上报头对反向代理的要求与 **Host first, Worker second** 升级纪律的权威出处是 [remote-execution-runbook.md §5](remote-execution-runbook.md#5-workers)。镜像形态同样适用：先升级部署机 Host 并确认健康，再逐台 pull 新 worker 镜像重启；回滚时 Host 与 Worker 一起退。
 
@@ -377,7 +366,7 @@ Worker 默认**直连出网**：service 入口会剥离启动 shell 继承的代
 
 ### 控制面鉴权
 
-控制令牌（登录 Worker 控制台）与 workspace 注册 Key（授权 Worker 接入 Host）用途不同。页面没有内嵌控制令牌时（非回环发布或 worker < 0.7.16，判定见下方矩阵），部署机 Host Compose 在项目根目录运行以下命令取得控制令牌，粘贴到 Worker 登录框后，再到「配置 → Workspace 访问」添加注册 Key：
+控制令牌（登录 Worker 控制台）与 workspace 注册 Key（授权 Worker 接入 Host）用途不同。页面没有内嵌控制令牌时（非回环发布或 worker < 0.7.16，判定见下文），部署机 Host Compose 在项目根目录运行以下命令取得控制令牌，粘贴到 Worker 登录框后，再到「配置 → Workspace 访问」添加注册 Key：
 
 ```bash
 docker compose -f deploy/compose.host.yaml exec -T worker cat /var/lib/agent-legion-worker-control/control_token
@@ -387,30 +376,19 @@ docker compose -f deploy/compose.host.yaml exec -T worker cat /var/lib/agent-leg
 
 Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-worker-control/control_token`（权限 0600）。除 `GET /api/health` 外，所有 `/api/*` 端点都要求 `Authorization: Bearer <token>`。`workerctl` 按以下顺序取 token：`--token` 参数 > `AGENT_WORKER_CONTROL_TOKEN` 环境变量 > `--state-dir` 目录下的 `control_token` 文件。`--state-dir` 的默认值是相对当前目录的 `data/agent-worker-service`（裸机/dev 布局），**容器内不会自动命中**：镜像的工作目录是 `/app`，状态卷挂在 `/var/lib/agent-legion-worker-control`，所以容器内调用必须显式传 `--state-dir /var/lib/agent-legion-worker-control`（全局参数，写在子命令之前），否则报「读不到控制令牌（data/agent-worker-service/control_token）」。
 
-**页面内嵌判定（issue #489）**：控制台页面是否自动内嵌 token，由**实际暴露面**而非进程 bind 决定。Docker 形态下容器内进程必绑 `0.0.0.0`（端口映射前提），但页面真正从哪个地址被访问由 compose 的宿主侧发布地址（`AGENT_WORKER_UI_BIND`）决定——compose 把该值经 `AGENT_WORKER_UI_EFFECTIVE_BIND` 环境变量告知 service（与发布行同一插值源，`.env` 一处改、两处同步）。该机制随 **worker 0.7.16** 发布，且以下方「Host 头校验」已启用为前提：一键安装（`install-worker.sh`）在更低版本上安装时页面仍要求手动输入 token（脚本的成功提示会按实际版本区分）。判定矩阵（进程 bind × 宿主侧发布地址 × token 内嵌结果）：
+**页面何时内嵌 token**（判定矩阵、Host 头校验与 `compose.host.yaml` 的 `worker-ctrl` 网络隔离设计见 [architecture/agent-worker.md §4](architecture/agent-worker.md#4-控制面鉴权的判定模型)）：宿主侧发布地址 `AGENT_WORKER_UI_BIND` 为回环（默认）时内嵌、打开即用；发布到非回环地址，或 `AGENT_WORKER_CONSOLE_URL` 含非回环主机名时不内嵌，需手动输入一次 token。经主机名（反向代理、MagicDNS 名等）访问控制台时，必须把该地址写进 `AGENT_WORKER_CONSOLE_URL`，否则 Host 头校验返回 403。内嵌机制随 **worker 0.7.16** 发布，更旧版本始终需手动输入。
 
-| 进程 bind（`--host`） | 宿主侧发布（`AGENT_WORKER_UI_BIND`） | token 内嵌 | 说明 |
-| --- | --- | --- | --- |
-| `127.0.0.1` 等回环 | （无发布层，裸机/dev 形态） | 是 | `AGENT_WORKER_UI_EFFECTIVE_BIND` 未设置，按进程 bind 判定 |
-| `0.0.0.0`（容器内） | `127.0.0.1`（默认） / `[::1]` | 是 | 容器内 bind 仅为端口映射前提；宿主发布回环 = 页面仅本机可达，内嵌不扩大风险面，日志打 info 说明判定链。compose.host.yaml 形态另需网络隔离成立（见下方网络拓扑） |
-| `0.0.0.0`（容器内） | `0.0.0.0` / `192.0.2.1` 等非回环 | 否 | 同网段浏览器都能打开页面，不内嵌 + warning，需手动输入 token（见下方取 token 命令） |
-| 回环 | 非回环 | 否 | 复合形态兜底：设置了 `AGENT_WORKER_UI_EFFECTIVE_BIND` 时判定只看发布面（发布非回环即不内嵌，覆盖发布层与进程 bind 不一致的场景） |
-
-**Host 头校验（issue #923）**：控制面全部路由（`GET /`、`/assets/*` 与全部 `/api/*`，含 `/api/health`）只接受 Host 头属于白名单的请求，其余一律 403。白名单 = 回环变体（`127.0.0.1` / `localhost` / `[::1]`，任意端口）∪ 实际暴露面地址（`AGENT_WORKER_UI_EFFECTIVE_BIND`，未设置时取进程 bind）∪ `AGENT_WORKER_CONSOLE_URL` 的主机名。经主机名（反向代理、MagicDNS 名等）访问控制台时，把该地址写进 `AGENT_WORKER_CONSOLE_URL`。白名单中只要出现非回环主机名（暴露面或控制台地址），页面就不内嵌 token，需手动输入一次。暴露面为通配地址（`0.0.0.0` / `::`）时无法枚举合法主机名，Host 校验不启用、页面也不内嵌 token（API 仍由 control token 把守）。变更类请求（`PUT` / `POST` / `DELETE`）另做来源校验：浏览器带 `Sec-Fetch-Site` 时只放行 `same-origin` / `none`，带 `Origin` 时须与 Host 头一致或等于 `AGENT_WORKER_CONSOLE_URL` 的 origin（反向代理改写上游 Host 的形态）；`workerctl` 等不带这两个头的客户端不受影响。
-
-两个运维注意：
+运维注意：
 
 - **compose override 改发布地址时必须同步设置 `AGENT_WORKER_UI_BIND`**：compose 合并 override 时 `ports` 列表整体替换、`environment` 按 key 合并——只在 override 里改 `ports` 发布地址（或加新条目）而不同步 `.env` 的 `AGENT_WORKER_UI_BIND`，两个插值源就会漂移，service 会按旧的 EFFECTIVE_BIND 判定内嵌（页面实际已发布到非回环地址 = 泄漏）或反向多要一次手动 token。仓库内两个 worker compose 的 `ports` 行与 `EFFECTIVE_BIND` 同用 `${AGENT_WORKER_UI_BIND}` 插值，`.env` 一处改两处同步就是为此。
-- **网络拓扑差异（`compose.host.yaml` 形态）**：部署机 stack 里 postgres / seaweedfs / rustfs / host / worker 原本同挂一个默认 compose 网络——而 worker 控制台 `GET /` 无鉴权，同网 peer 容器 `curl http://worker:8787/` 即可提取内嵌的 control token（issue #489 讨论里担心的「token 泄给同网段」在 docker 内网上被重新引入）。该 compose 现已把 worker 隔离到专用 `worker-ctrl` 网络：host 双挂默认网络与 `worker-ctrl`（仍是 worker 唯一需要直连的 peer——register/claim/heartbeat/result 与旧 CAS 产物通道都走它），worker 只挂 `worker-ctrl`，postgres/seaweedfs/rustfs 不可达无鉴权的控制台。worker 的材料下载与产物直传本就走 Host 按 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`（宿主发布地址，非 compose 服务名）签发的 presigned URL 且 worker 不持对象存储凭据，网络隔离不改变该通道；但把 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 覆盖为 compose 服务名（如 `http://seaweedfs:8333`）在这种形态下会不可达——产物直传自动回落经 host 的 CAS 通道，材料任务会失败，覆盖值必须用宿主侧发布地址。无 peer 的 `compose.worker.yaml` / standalone 形态不需要（也从未需要）该隔离。
+- **`compose.host.yaml` 形态的 `AGENT_LEGION_S3_PUBLIC_ENDPOINT` 必须用宿主侧发布地址**：worker 被隔离在 `worker-ctrl` 网络，覆盖为 compose 服务名（如 `http://seaweedfs:8333`）会不可达——产物直传回落经 host 的 CAS 通道，材料任务会失败。
 
-发布非回环时（后两行），从容器内手动取一次 token，页面会把它存进 localStorage，日常无需重复：
+发布非回环时，从容器内手动取一次 token，页面会把它存进 localStorage，日常无需重复：
 
 ```bash
 # 一键安装目录内（compose 文件为 docker-compose.yaml）；仓库形态加 -f deploy/compose.worker.yaml
 docker compose exec -T worker cat /var/lib/agent-legion-worker-control/control_token
 ```
-
-裸机/dev 形态不设 `AGENT_WORKER_UI_EFFECTIVE_BIND`，按进程 bind 判定。
 
 #### 容器内 CLI（workerctl）
 
@@ -487,7 +465,7 @@ Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程�
 - 用 `workerctl configure`（或控制台）把新值写入状态副本并重启执行进程；
 - 或删除状态卷中的 `worker.yaml` 后重启容器，重新导入挂载配置。
 
-默认端口只绑定宿主机 loopback；compose 网络内其它容器可达 `http://worker:8787`，但所有端点（除 `/api/health`）都要求 control token；`compose.host.yaml` 形态下同 stack 的其它服务更被网络隔离挡在控制台之外（见 §「控制面鉴权」的网络拓扑说明），只有 host 容器可达。需要从 Tailnet 上的另一台管理机访问时，显式设置 `AGENT_WORKER_UI_BIND`，并先在主机防火墙或 Tailnet ACL 中限制来源；不要把控制面暴露到公网。非回环发布下控制台不再内嵌 token（判定矩阵与取 token 命令见 §「控制面鉴权」）。
+默认端口只绑定宿主机 loopback；compose 网络内其它容器可达 `http://worker:8787`，但所有端点（除 `/api/health`）都要求 control token；`compose.host.yaml` 形态下同 stack 的其它服务更被网络隔离挡在控制台之外（网络拓扑见 [architecture/agent-worker.md §4](architecture/agent-worker.md#4-控制面鉴权的判定模型)），只有 host 容器可达。需要从 Tailnet 上的另一台管理机访问时，显式设置 `AGENT_WORKER_UI_BIND`，并先在主机防火墙或 Tailnet ACL 中限制来源；不要把控制面暴露到公网。非回环发布下控制台不再内嵌 token（判定矩阵与取 token 命令见 §「控制面鉴权」）。
 
 ### 全新克隆的本地 Worker（无 init-worktree.sh）
 
@@ -513,13 +491,9 @@ Host 设置页顶部的「Worker 与 Worker 控制台」卡片、签发成功后
 
 - **部署级入口**：地址来自后端 env `AGENT_LEGION_WORKER_CONSOLE_URL`。`make dev-up` 按 Worker 端口、`native-prod-up.sh` / Host compose 按 `:8787` 注入默认值（dev/native 脚本只设置内部的 `AGENT_LEGION_WORKER_CONSOLE_DEFAULT_URL`，后端按「进程环境 → 根 `.env` → 脚本默认值」选择，显式空值始终有效）。Worker 控制台经其它地址暴露时在 `.env` 显式配置；显式留空则不显示链接。回环地址只能在 Worker 所在机器的浏览器里打开，链接的悬停提示会说明这一点。
 - **Worker 自报入口**：原生 Worker Service 按自己的控制面绑定地址推导（通配 `0.0.0.0` 回落 `127.0.0.1`，IPv6 `::` 回落 `[::1]`），经 `AGENT_WORKER_CONSOLE_URL` 交给执行进程，注册时作为可选标签 `console_url` 上报（`worker/console_url.py`）。三份 Compose 都要求在部署环境中显式配置浏览器可达 URL（如 `https://worker.example/console`），不从 `AGENT_WORKER_UI_BIND` 猜测，缺省或显式空串均不自报；旧版 Worker 不上报，对应行只保留部署级入口。
-- **标签保留**：已配置的 `console_url` 与其他自定义标签始终原样保留（可能用于 `requires_labels` 调度），环境地址不覆盖它；自定义标签已占满 32 项或自报 URL 超过 256 字符时跳过该可选标签，避免控制台入口使注册失败（不截断 URL）。
-- **地址校验**：非空配置必须是绝对 HTTP(S) 地址，支持 IPv6、反向代理路径与 query；空白、反斜杠、非法端口或 URL 用户名/密码在创建服务前报错，诊断不回显原值。地址是公开导航信息，控制令牌在 Worker 控制台中输入，不放进该地址。
-- **前端行为**：入口通过已登录用户可读的 `GET /api/agent-workers/console` 获取部署地址，不下载 Worker 清单；首次请求失败显示可重试错误，只有成功返回空地址才表示未配置；后台刷新失败保留最近成功的配置。
+- **地址要求**：非空配置必须是绝对 HTTP(S) 地址（支持 IPv6、反向代理路径与 query，不得含 URL 用户名/密码），非法值在服务创建前报错；控制令牌不放进该地址。标签保留、校验细节与前端获取行为见 [architecture/agent-worker.md §5](architecture/agent-worker.md#5-打开-worker-控制台入口的实现约束)。
 
 ### 开发 worktree 的本地 Worker 检查单
-
-新 workspace 引导只有在 workflow 已发布、所需 Worker 已就绪且调度确认运行后才解锁添加任务。暂停状态未加载或请求失败时不推断为暂停，也不显示确定性的阻塞警告；纯 code workflow 不要求接入 Worker，只检查调度开关。
 
 在开发 worktree 里起本地栈（`make dev-up`，或分开 `make dev-backend` + `make dev-worker`）时，job 一直停在 `queued` 或秒败，按顺序查这三处——`scripts/init-worktree.sh` 已尽量自动化，但各自有时机前提：
 
@@ -527,9 +501,7 @@ Host 设置页顶部的「Worker 与 Worker 控制台」卡片、签发成功后
 2. **Worker 的 models allowlist 不含任务所需模型**：agent 任务的 claim 准入按「runtime + provider/model」逐 Worker 匹配（capability 已不参与匹配，issue #284），全部 Worker 都不满足即判「无 Worker 可认领」，job 秒败并带 `not declared by any Worker` 错误。注意生效配置是状态副本 `data/agent-worker-service/worker.yaml`，首次导入后改 config 文件不生效，要走控制台或 `PUT /api/config`。
 3. **`claim_enabled` 默认 false**（规则见 §5「claim 默认关闭」）：只注册心跳、不领任务，症状是后端日志没有任何 `POST /api/agent-executions/claim`。经 worker 控制台或 `PUT /api/config`（`{"claim_enabled": true}`，热字段立即生效）打开。Worker 随每次状态同步（`POST /api/agent-workers/self/presence`）上报该开关，主控制台的 Worker 行会直接标成「在线·未领取」并带「控制台」入口；任务列表有「等待中」任务而无 Worker 领取时顶部还会出排查横幅。旧版 Worker 不上报（`claim_enabled: null`），仍显示为普通「在线」。崩溃自动重启的例外见 §5「claim 默认关闭」。
 
-领取状态属于当前注册凭据：重注册生成新 token 时清回 `null`，旧 token 的在途 presence/claim 请求不能改变新注册的状态或在线时间。presence 与 claim 在写事务中锁定当前 Worker 行并复核凭据，状态未变化时也必须完成这一步。
-
-引导只在空态可见时请求准备状态；等待任务的排查横幅按需请求。首次未返回或刷新失败都视为未知，不据此宣称已暂停、无 Worker 或可执行；正常后台刷新保留上次成功快照。排查入口优先使用当前在线且未撤销的 Worker 地址，暂停／恢复失败会明确提示并允许重试。
+新 workspace 引导、排查横幅与「在线·未领取」状态的判定规则（未知状态不推断、领取状态绑定当前注册凭据）见 [architecture/agent-worker.md §6](architecture/agent-worker.md#6-领取状态与引导--排查横幅的判定)。
 
 ## 6. 验证两个 Worker
 

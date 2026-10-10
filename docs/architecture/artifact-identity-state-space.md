@@ -10,7 +10,7 @@ completion、GC 五个进程域，单点修复会按下葫芦浮起瓢——#876
 
 RELATED: [execution-generation.md](execution-generation.md) §2.11
 （EXEC-INPUT-IDENTITY-001 的协议正文）、
-[workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)
+[architecture-evidence-matrix.md](architecture-evidence-matrix.md)
 （不变量 ↔ 证据的反向审计矩阵）。
 
 ## 1. 生命周期六阶段

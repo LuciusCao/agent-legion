@@ -29,7 +29,7 @@ agent nodes → velites / Pi CLI → skills (local in-place git, pins in DB skil
   pytest + Vitest + cargo test
 
 关键设计规则（由架构检查强制，见仓库根 [AGENTS.md](../../AGENTS.md) 与
-[workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)）：
+[architecture-evidence-matrix.md](architecture-evidence-matrix.md)）：
 
 - Workflow 节点声明 `capability` 与显式执行类型（`type: code | agent`，另有
   `start` / `approval`）。agent 节点的执行档案优先取节点自含的
@@ -50,11 +50,12 @@ agent nodes → velites / Pi CLI → skills (local in-place git, pins in DB skil
 | 后端 | [backend.md](backend.md) | FastAPI 服务、数据库、外部服务连接、配置治理 |
 | 前端 | [frontend.md](frontend.md) | React SPA、状态管理、UI 组件 |
 | 部署约束 | [deployment.md](deployment.md) | 部署形态的硬约束：Worker 容器特权边界、Host 单副本、浏览器安全头与低权读面；配置来源（部署步骤见 `docs/agent-worker-deployment.md`） |
+| Agent Worker | [agent-worker.md](agent-worker.md) | Worker 设计与实现细节：runtime 声明与 agent 准入、code 任务 secret 边界、velites 安置与升级语义（#831）、控制面鉴权判定模型（#489/#923）、控制台入口与引导判定（操作步骤见 `docs/agent-worker-deployment.md`） |
 | 质量门 | [local-quality-gates.md](local-quality-gates.md) | 本地 hooks + GitHub Actions CI 的门禁层级、凭证与分支保护策略 |
 | 评审收敛 | [review-convergence.md](review-convergence.md) | 自动评审 finding 的阻塞/非阻塞分诊、回应方式与停止条件（#835） |
 | 项目结构 | [project-structure.md](project-structure.md) | 仓库目录地图（列到有意义的层级） |
 | velites harness | [velites-harness.md](velites-harness.md) | 自研 Rust agent harness（velites 执行内核）设计 |
-| 证据矩阵 | [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md) | 架构承诺的反向审计证据矩阵（与 `config/architecture/` invariant registry 对齐） |
+| 证据矩阵 | [architecture-evidence-matrix.md](architecture-evidence-matrix.md) | 架构承诺的反向审计证据矩阵（与 `config/architecture/` invariant registry 对齐） |
 | 执行代次协议 | [execution-generation.md](execution-generation.md) | EXEC-GENERATION-001 执行代次协议（#759/#645）：代次列与 bump/CAS 面、锁序与批序全序、三平面一致性与并发对抗审查 checklist |
 | 产物身份状态空间 | [artifact-identity-state-space.md](artifact-identity-state-space.md) | 产物身份协议的网格模型（#876）：生命周期六阶段 × 八变异轴 × 八不变量（EXEC-INPUT-IDENTITY-001 / EXEC-VALIDATION-VIEW-001）逐格钉测试/论证，一致性检查防腐 |
 | 产物直连 URL 版本固定 | [artifact-direct-url-pinning.md](artifact-direct-url-pinning.md) | 不可变版本 key 布局与被取代对象清理（#853）：方案对比、SeaweedFS 实测、存量兼容与残余面 |
