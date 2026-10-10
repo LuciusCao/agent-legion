@@ -248,4 +248,58 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突呈现与挂起', () =>
     })
     expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1) // 无覆盖性 PUT
   })
+
+  it('冲突期间把画布改回冲突前内容不再自动解除冲突（#1195：须显式二选一）', async () => {
+    // enterConflict 已把 CAS 基线推进到服务端 updated_at（Agent 版本 D2）。
+    // 此时画布逐字节回到冲突前的本地内容 D1，「画布 == D1」≠「画布 == 服务端
+    // D2」——自动解除冲突会让 savedAt（服务端 t2）与画布内容（D1）身份自相
+    // 矛盾，且下一次编辑以 t2 基线静默覆盖 D2。
+    mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+
+    // 画布改回冲突前内容：冲突横幅保留（revert 不再自动解除），不发 PUT。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(result.current.state.conflict).toBe(true)
+    expect(result.current.state.status).toBe('error')
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+
+    // 显式 keep-mine 才解除冲突：以推进后的基线把画布内容写回（用户已看过
+    // 警示，覆盖 Agent 版本是显式选择而非静默发生）。
+    mocks.putWorkflowDraft.mockResolvedValue({
+      definition_yaml: BASE,
+      updated_at: '2026-09-12T11:00:00+00:00',
+    })
+    act(() => result.current.resolveConflict(true))
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith('ws1', BASE, {
+      expectedUpdatedAt: '2026-09-12T10:00:00+00:00',
+    })
+    await waitFor(() => expect(result.current.state.status).toBe('saved'))
+    expect(result.current.state.conflict).toBeFalsy()
+  })
 })
