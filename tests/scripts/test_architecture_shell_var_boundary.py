@@ -84,6 +84,18 @@ def test_safe_forms_are_not_flagged(line: str) -> None:
         "x=$((1 << SHIFT))\necho '$X，'\n",
         "((x << shift))\necho '$X，'\n",
         "((16#ff))\necho '$X，'\n",  # base prefix, not a comment
+        # Digit shifts stay shifts inside arithmetic frames (#1096).
+        "x=$((1<<2))\necho '$X，'\n",
+        "((x<<=1))\necho '$X，'\n",
+        "echo \"$((1<<2))\" '$X，'\n",
+        # Grouping parens inside arithmetic are not a nested (( command (#1096).
+        "y=$(( ((1+2)*3) ))\necho '$X，'\n",
+        "echo \"$(( ((1<<2)) ))\" '$X，'\n",
+        "(( ((x<<1)) ))\necho '$X，'\n",
+        # A quoted digit delimiter keeps the body literal; a braced name is safe.
+        "cat <<'123'\n$X，\n123\n",
+        "cat <<\\9\n$X，\n9\n",
+        "cat <<123\n${X}，\n123\n",
     ],
 )
 def test_non_expanding_contexts_are_not_flagged(content: str) -> None:
@@ -124,6 +136,13 @@ def test_non_expanding_contexts_are_not_flagged(content: str) -> None:
         # heredoc is real, so fail closed instead of skipping << as a shift.
         ("x=$((cat <<EOF\n'$X，'\nEOF\n) )\n", 2),
         ("((a)\ncat <<EOF\n'$X，'\nEOF\n)\n", 3),
+        # An all-digit delimiter is still a heredoc outside arithmetic (#1096):
+        # its body quotes are plain text, so '$X，' expands.
+        ("cat <<123\n'$X，'\n123\necho '$Y，'\n", 2),
+        ("cat << 42\n# $X，\n42\necho '$Y，'\n", 2),
+        ("cat <<-0\n\t'$X，'\n\t0\necho '$Y，'\n", 2),
+        ("x=$(cat <<7\n'$X，'\n7\n)\necho '$Y，'\n", 2),
+        ("y=$(( ((1+2)*3) ))\ncat <<1\n'$X，'\n1\n", 3),
     ],
 )
 def test_expanding_multiline_contexts_are_flagged(content: str, lineno: int) -> None:
@@ -138,6 +157,8 @@ def test_expanding_multiline_contexts_are_flagged(content: str, lineno: int) -> 
         ('echo \'unclosed\necho "$X，"\n', 2),  # single quote never closes
         ("cat <<'EOF'\nbody\necho \"$X，\"\n", 3),  # quoted heredoc never terminates
         ('echo "$(printf x\necho $X，\n', 2),  # command substitution left open
+        # bash reads ``let x<<2`` as a heredoc too; it never ends (#1096).
+        ("let x<<2\necho '$X，'\n", 2),
     ],
 )
 def test_unterminated_context_fails_closed(content: str, lineno: int) -> None:
@@ -166,6 +187,28 @@ def test_makefile_recipes_follow_make_semantics() -> None:
         "Makefile:7: $STATE_COPY",
         "Makefile:9: $CONT",
     ]
+
+
+@pytest.mark.parametrize(
+    ("value", "flagged"),
+    [
+        # Make assignment quotes are plain text; the pasting recipe decides.
+        ("'$$X，'", True),
+        ('"$$X，"', True),
+        ("\\$$X，", True),
+        ("$$X，", True),
+        # Equivalent safe rewrites stay green.
+        ("'$${X}，'", False),
+        ("'$$$$X，'", False),  # shell $$ (PID) followed by literal X
+        ("'$(X)，'", False),  # make reference, expanded by make
+    ],
+)
+def test_makefile_assignment_quotes_are_plain_text(value: str, flagged: bool) -> None:
+    """#1096：Make 赋值行里的引号只是普通字符——值经 echo "$(MSG)" 粘进 recipe 后
+    $$NAME 会被 shell 展开，不能把赋值行的单引号当保护。"""
+    content = _bytes(f'MSG = {value}\nall:\n\t@echo "$(MSG)"\n')
+    errors = find_violations("Makefile", content)
+    assert [e.split(" ")[0] for e in errors] == (["Makefile:1:"] if flagged else [])
 
 
 def test_violation_reports_line_number_and_braced_fix() -> None:

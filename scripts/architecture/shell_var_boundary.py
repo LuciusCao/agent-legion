@@ -26,7 +26,7 @@ import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 
-from .shell_sources import dollar_offsets, makefile_shell_text
+from .shell_sources import dollar_offsets, makefile_shell_units
 
 __test__ = False
 
@@ -50,16 +50,18 @@ def _is_makefile(path: str) -> bool:
     return path.endswith(".mk") or path.rsplit("/", 1)[-1] == "Makefile"
 
 
-def _shell_chunks(path: str, content: bytes) -> list[tuple[int, bytes]]:
-    """(first_lineno, shell text) units: a Makefile's shell-bound lines, else the file."""
-    return list(makefile_shell_text(content)) if _is_makefile(path) else [(1, content)]
+def _shell_units(path: str, content: bytes) -> list[tuple[bytes, list[tuple[int, int]]]]:
+    """(shell text, expanding ``$`` offsets) units: a Makefile's shell-bound lines, else the file."""
+    if _is_makefile(path):
+        return list(makefile_shell_units(content))
+    return [(content, dollar_offsets(content))]
 
 
 def find_violations(path: str, content: bytes) -> list[str]:
     """Report each expanding bare ``$NAME`` that touches a non-ASCII byte."""
     errors: list[str] = []
-    for first_lineno, text in _shell_chunks(path, content):
-        for lineno, offset in dollar_offsets(text, first_lineno):
+    for text, offsets in _shell_units(path, content):
+        for lineno, offset in offsets:
             match = BARE_VAR_BEFORE_NON_ASCII.match(text, offset)
             if match is None:
                 continue
