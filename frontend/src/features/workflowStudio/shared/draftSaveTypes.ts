@@ -14,6 +14,11 @@ export type DraftSaveState = {
    * 字节差异干扰。冲突挂起期间刻意不推进（编辑器有未保存编辑，发布以
    * 编辑器为准——此时提示应保留）。 */
   savedHash?: string | null
+  /** #1196：savedHash 所描述的内容本体（= controller 的已持久化基线
+   * lastPersisted，由 setState 单点注入，与 savedHash 同一快照原子推进）。
+   * 「当前内容已落盘」的真值是逐字节 content === savedYaml，而不是从
+   * status 推断——status 与画布写入分属不同 effect 链，可错开一帧。 */
+  savedYaml?: string | null
   /** GET 草稿查询失败（仅内存模式）时由组合层合并进来，供 UI 警示。 */
   loadError?: boolean
   /** #633：CAS 冲突——服务端草稿已被 agent/其它会话推进，本页未保存的
@@ -28,6 +33,27 @@ export type DraftSaveState = {
 }
 
 export const IDLE_DRAFT_SAVE: DraftSaveState = { status: 'idle', savedAt: null }
+
+/** #1143/#1196：草稿卡 hash 短路的唯一判据——「编辑器内容 content 的服务端
+ * 语义身份就是 savedHash」须由真值确认：content 逐字节等于 savedHash 描述
+ * 的已落盘内容（savedYaml）。在此之上保留既有前置（settled、非空白、两侧
+ * hash 均存在且相等）。hydrate/adopt 时状态推进与画布写入不在同一批次，
+ * 可出现一帧「settled + savedHash=H_D 但画布 ≠ D」——仅凭 status 会误短路
+ * 隐藏分歧提示；有 savedYaml 核对后该帧回落提示。 */
+export function savedIdentityConfirms(
+  save: DraftSaveState | undefined,
+  content: string,
+  cardHash: string | null
+): boolean {
+  if (!save || !cardHash || !save.savedHash) return false
+  const settled = save.status === 'saved' || save.status === 'idle'
+  return (
+    settled &&
+    content.trim() !== '' &&
+    content === save.savedYaml &&
+    cardHash === save.savedHash
+  )
+}
 
 export const DEBOUNCE_MS = 800
 export const MAX_PUT_RETRIES = 2
