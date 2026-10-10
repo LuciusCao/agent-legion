@@ -64,10 +64,12 @@ def _write_kept_event(dst: TextIO, event: Any, line: str, redactor: SecretRedact
     ANY per-line failure — the span function escaping, the re-serialization,
     or the write itself — drops the whole line fail-closed. A raw line must
     never be written, and a per-line failure must never escalate to a
-    whole-scan failure: the scan-wide path leaves the events file
-    UNCOMPRESSED and UNREDACTED for the result archive, and the failure
-    family only redaction can trigger (a hit line with JSON-escaped lone
-    surrogates — ``json.loads`` yields real surrogate characters that
+    whole-scan failure: a whole-scan failure discards the raw events file
+    outright when a redactor was supplied (#1165, see
+    ``scan_and_compress_pi_events``), so dropping the line keeps the scan
+    semantics AND the remaining events. The failure family only redaction
+    can trigger (a hit line with JSON-escaped lone surrogates —
+    ``json.loads`` yields real surrogate characters that
     ``ensure_ascii=False`` cannot UTF-8-encode on write) correlates exactly
     with a secret hit. ``redactor is None`` (Host path) and an unchanged
     event keep the ORIGINAL line bytes, so clean streams are byte-identical
@@ -79,9 +81,10 @@ def _write_kept_event(dst: TextIO, event: Any, line: str, redactor: SecretRedact
     except Exception:
         # #204 broad-except audit: 单事件行的脱敏/重序列化/写出任一逃逸一律
         # 整行丢弃 fail-closed（机制见 docstring）：绝不把 raw 行写进压缩
-        # 文件，也绝不升级成整趟扫描失败（整趟失败会让未压缩未脱敏的
-        # events.jsonl 原样留给归档外发）。结果空间：渲染日志缺该事件（纯
-        # 观测面降级），压缩与其余事件照常。日志保全：exception 带堆栈。
+        # 文件，也绝不升级成整趟扫描失败（带 redactor 的整趟失败现在会把
+        # 原文件就地截空，#1165——丢行仍优于炸穿，保住扫描语义与其余事件）。
+        # 结果空间：渲染日志缺该事件（纯观测面降级），压缩与其余事件照常。
+        # 日志保全：exception 带堆栈。
         logger.exception("Failed to write the redacted event line; dropping it")
 
 
@@ -172,7 +175,14 @@ def scan_and_compress_pi_events(
     ``stderr_tail`` is ``b""`` when there is none. If the file cannot be
     processed it is left unchanged, the ``.jsonl.compressing`` staging file
     is removed on every failure path, and ``(None, 0, 0, b"")`` is returned,
-    matching the individual failure modes of the two-function equivalent.
+    matching the individual failure modes of the two-function equivalent —
+    EXCEPT with a ``redactor`` supplied (#1165): the raw, unredacted stream
+    must never survive a failed scan into the result archive, so the file is
+    truncated to zero bytes in the failure arm (fail-closed; the truncation
+    itself failing is suppressed — the delivery caller detects the surviving
+    non-empty file and fails the run honestly instead of archiving it).
+    ``redactor is None`` (the Host write path) keeps the legacy
+    "left unchanged" semantics exactly.
     """
     if not events_path.is_file() or (original_size := events_path.stat().st_size) == 0:
         return None, 0, 0, b""
@@ -237,6 +247,14 @@ def scan_and_compress_pi_events(
         logger.exception("Failed to compress Pi events: %s", events_path)
         with suppress(OSError):
             compressed_path.unlink(missing_ok=True)
+            # #1165（#842 收口 P1）：带 redactor 的整趟失败必须就地销毁未脱敏
+            # 原文——截空比删除更可取（成员名保留、渲染面得到空流而非缺文件；
+            # 归档拿到的是零字节 events.jsonl，绝不是含密钥的原文）。截断自身
+            # 失败（EACCES 族）与 staging 清理同 suppress：销毁失败时调用方
+            # （prepare 的幸存者守卫）检测到非空原文件会诚实判败走空归档，
+            # raw 字节任何路径都进不了归档。
+            if redactor is not None:
+                events_path.write_text("")
         return None, 0, 0, b""
 
     return model_error, original_size, events_path.stat().st_size, tail

@@ -125,7 +125,7 @@ def _member_names(raw: bytes) -> list[str]:
 def test_worker_prebuilt_metadata_only_archive_roundtrips(tmp_path: Path) -> None:
     """判败/预构建形态：仅含 result.json 的最小归档照常提交（204 落库，
     failed 判决显式可见）。"""
-    from worker.upload.result_metadata import write_metadata_only_archive
+    from worker.upload.degraded_archive import write_metadata_only_archive
 
     work_root = tmp_path / "worker"
     (work_root / "exec-1").mkdir(parents=True)

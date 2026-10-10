@@ -129,12 +129,22 @@ def _run_main(
     fake: FakeClient,
     config_updates: dict | None = None,
 ) -> tuple[threading.Thread, dict, list]:
-    """Run main() in a thread with a stubbed signal module and Client."""
+    """Run main() in a thread with a stubbed signal module and Client.
+
+    main() 启动时配置进程级 evidence dump 根（executor.py）；线程退出时
+    复位——否则模块全局泄漏给同进程后续用例（state_evidence 的「未配置
+    根 = legacy 降级」类断言会被邻测的 tmp_path 劫持，xdist 调度相关的
+    隔离 flake）。"""
     handlers = _prepare_main(monkeypatch, tmp_path, fake, config_updates)
     result: list[int] = []
 
     def target() -> None:
-        result.append(agent_worker.main())
+        from worker import state_evidence
+
+        try:
+            result.append(agent_worker.main())
+        finally:
+            state_evidence.reset_evidence_root()
 
     thread = threading.Thread(target=target, daemon=True)
     thread.start()

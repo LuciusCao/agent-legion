@@ -1,58 +1,20 @@
-"""Failed-result metadata helpers for the upload bulk lane.
+"""Exit-code verdicts and the shared error_message bound for the upload
+bulk lane.
 
-Split out of ``prepare.py`` for the file budget: the empty-archive writer,
-the uniform failed-report payload (shared by prepare failures and CAS
-4xx terminal states) and the exit-code verdict carry no event-scan /
-archive-build logic of their own. #843 PR-2 adds the metadata-only archive
-writer (the v2 recycle target: every reported archive must carry the
-metadata being reported as its ``result.json`` member).
+Split out of ``prepare.py`` for the file budget. The failed-result payload
+writers and the degraded archive writers (the v2 recycle targets: every
+reported archive must carry the metadata being reported as its
+``result.json`` member) moved one step further into
+``worker/upload/degraded_archive.py`` (#1168/#1169 收口轮的按主题拆分)；
+this module keeps the exit-code verdict face and the error_message
+truncation bound both sides share.
 """
 
 from __future__ import annotations
 
-import io
-import json
-import tarfile
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-from shared.code_contract import RESULT_METADATA_MEMBER
 from worker.upload.stderr_evidence import stderr_error_message
 
-if TYPE_CHECKING:
-    from worker.upload.queue import UploadTask
-
 MAX_ERROR_MESSAGE_CHARS = 4000
-
-
-def write_empty_archive(archive: Path) -> None:
-    with tarfile.open(archive, "w:gz"):
-        pass
-
-
-def write_metadata_only_archive(archive: Path, metadata: dict[str, Any]) -> None:
-    """覆写为仅含 result.json 成员的归档（v2 判败降级的回收目标）。
-
-    413 / 换写拒写等「归档不可提交」臂把证据归档回收成本形态：判败
-    metadata 随首成员交付（否则 Host 400 缺成员）、体积必然远低于
-    ``agent_workers.max_archive_bytes`` 下限（1 KiB）——可提交性优先。
-    """
-    payload = json.dumps(metadata, ensure_ascii=False).encode("utf-8")
-    with tarfile.open(archive, "w:gz") as tar:
-        info = tarfile.TarInfo(RESULT_METADATA_MEMBER)
-        info.size = len(payload)
-        tar.addfile(info, io.BytesIO(payload))
-
-
-def failed_metadata(task: UploadTask, error_message: str) -> dict[str, Any]:
-    # failed 上报的统一载荷（prepare 失败 / CAS 4xx 终态共用）。
-    return {
-        "status": "failed",
-        "exit_code": 1,
-        "error_message": error_message[:MAX_ERROR_MESSAGE_CHARS],
-        "command": list(task.command),
-        "output_artifacts": {},
-    }
 
 
 def exit_verdict(exit_code: int, failure: str | None, stderr_tail: bytes) -> tuple[str, str]:

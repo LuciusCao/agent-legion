@@ -12,6 +12,7 @@ Worker 上传前（压缩扫描同一趟）对保留事件的字符串值做脱�
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -318,3 +319,85 @@ def test_model_error_redaction_failure_degrades_attribution(tmp_path):
     # 归因面：降级占位（非空、固定文本）。
     assert model_error == MODEL_ERROR_REDACTION_FAILED
     assert list(tmp_path.glob("*.jsonl.compressing")) == []  # 无 staging 残留
+
+
+# -- #1165（#842 收口 P1）：整趟扫描失败的未脱敏原文件不得存活 ----------
+
+
+def _write_events_with_secret(tmp_path: Path, secret: str, name: str = "events.jsonl") -> Path:
+    events_path = tmp_path / name
+    events_path.write_text(
+        json.dumps({"type": "session"})
+        + "\n"
+        + json.dumps(_tool_end(f"LLM_GATEWAY_TOKEN={secret}"))
+        + "\n",
+        encoding="utf-8",
+    )
+    return events_path
+
+
+def test_whole_scan_failure_with_redactor_discards_raw_events(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    """#1165 复现（修复前泄漏形态）：replace/fsync 抛错 → 整趟失败返回
+    ``(None, 0, 0, b"")``，但含密钥的未脱敏 events.jsonl 原样留在原位，
+    调用方忽略返回值继续 tar——#842 要堵的泄漏从失败路径重开。修复后带
+    redactor 的整趟失败就地截空原文件：归档最多拿到零字节成员，密钥字节
+    任何路径都不再存活。"""
+    secret = "sk-live-supersecretgatewaytoken123"
+    events_path = _write_events_with_secret(tmp_path, secret)
+    assert b"LLM_GATEWAY_TOKEN" in events_path.read_bytes()
+
+    def failing_replace(self: Path, target: Path):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "replace", failing_replace)
+    result = scan_and_compress_pi_events(
+        events_path, redactor=SecretRedactor(literal_spans(secret), len(secret))
+    )
+
+    assert result == (None, 0, 0, b"")  # 整趟失败形（#959：仍可上报的降级）
+    assert events_path.read_bytes() == b""  # 未脱敏原文已就地销毁
+    assert list(tmp_path.glob("*.jsonl.compressing")) == []  # 无 staging 残留
+
+
+def test_whole_scan_failure_without_redactor_keeps_file_unchanged(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    """Host 路径对照（redactor=None）：整趟失败保持既有「原样保留」语义——
+    Host 侧无脱敏需求（无 registry），炸穿即留大文件但不破坏内容。"""
+    events_path = _write_events_with_secret(tmp_path, "sk-unregistered-value-123456")
+    raw = events_path.read_bytes()
+
+    def failing_replace(self: Path, target: Path):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "replace", failing_replace)
+    result = scan_and_compress_pi_events(events_path)
+
+    assert result == (None, 0, 0, b"")
+    assert events_path.read_bytes() == raw
+
+
+def test_discard_failure_is_suppressed_not_escaped(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    """销毁自身失败（EACCES 族：截空也写不进）不得逃出扫描——返回值仍是
+    整趟失败形，由调用方（prepare 的幸存者守卫）检测非空原文件后诚实判败；
+    扫描函数自身的「失败 → 返回 None 形」契约保持密闭。"""
+    secret = "sk-live-supersecretgatewaytoken123"
+    events_path = _write_events_with_secret(tmp_path, secret)
+    raw = events_path.read_bytes()
+
+    def failing_replace(self: Path, target: Path):
+        raise OSError(28, "No space left on device")
+
+    def failing_write(self: Path, data: str, **_kwargs):
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "replace", failing_replace)
+    monkeypatch.setattr(Path, "write_text", failing_write)
+    result = scan_and_compress_pi_events(
+        events_path, redactor=SecretRedactor(literal_spans(secret), len(secret))
+    )
+
+    assert result == (None, 0, 0, b"")  # 不逃逸：销毁失败只降级为失败返回
+    assert events_path.read_bytes() == raw  # 原文幸存（守卫交调用方处置）

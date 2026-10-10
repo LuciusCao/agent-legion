@@ -23,13 +23,13 @@ from typing import TYPE_CHECKING, Any
 from shared.output_truncation import OutputTruncation
 from shared.pi_events import scan_and_compress_pi_events
 from worker.state_evidence import dump_prep_evidence, prep_failure_message
-from worker.upload.report_policy import declared_ceiling_rejection
-from worker.upload.result_metadata import (
-    MAX_ERROR_MESSAGE_CHARS,
-    exit_verdict,
+from worker.upload.degraded_archive import (
     failed_metadata,
+    write_degraded_empty_archive,
     write_empty_archive,
 )
+from worker.upload.report_policy import declared_ceiling_rejection
+from worker.upload.result_metadata import MAX_ERROR_MESSAGE_CHARS, exit_verdict
 from worker.upload.stderr_evidence import (
     AGENT_STDERR_FILENAME,
     secret_snapshot,
@@ -59,9 +59,11 @@ def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]
         # #1147：清场前先把证据转储进 state 目录（work_root 之外）——运行
         # 目录被 agent 自删时 events.jsonl 随目录灭失，这里是最后的取证点。
         # 转储先于空归档落盘：execution_dir 整个消失时空归档写入自身会抛。
+        # #1168 P1：空归档经 write_degraded_empty_archive 落盘——写前重建
+        # 父目录、execution_dir 不可写时兜底 state 目录，失败臂的 I/O 不再
+        # 逃出 except（逃出 = bulk 车道异常退出、failed 结果报不上）。
         evidence = dump_prep_evidence(task, exc)
-        archive = task.execution_dir / "result.tar.gz"
-        write_empty_archive(archive)
+        archive = write_degraded_empty_archive(task)
         return failed_metadata(task, prep_failure_message(task, exc, evidence)), archive, []
     if rejection is not None:
         return failed_metadata(task, rejection), archive, []
@@ -106,12 +108,19 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # 结论只在 exit 0 时采纳。
     # #952: the same pass counts per-call output truncations (stopReason=length).
     snapshot = secret_snapshot()
-    scanned_model_error, _, _, scanned_tail = scan_and_compress_pi_events(
+    scanned_model_error, scanned_original, _, scanned_tail = scan_and_compress_pi_events(
         events,
         stderr_sink=run_dir / AGENT_STDERR_FILENAME,
         redactor=snapshot,
         event_observer=(truncation := OutputTruncation()).observe,
     )
+    # #1165 belt-and-braces：带 redactor 的整趟扫描失败已在 pi_events 内把
+    # 原文件就地截空（见其失败臂）；original==0 而文件仍在且非空 = 截断也
+    # 失败（EACCES 族），此时绝不让未脱敏字节随 run_dir 进归档——诚实判败
+    # 走空归档（#959 语义保持：failed 是可上报的降级，不是丢结果）。
+    # original==0 的另外两形态（文件缺失 / 空文件）不触发本守卫。
+    if scanned_original == 0 and events.is_file() and events.stat().st_size > 0:
+        raise RuntimeError(f"pi events scan failed; the raw events file survived: {events}")
     stderr_tail = stderr_tail_for_run(run_dir, scanned_tail)
     outputs = [name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()]
     # #952: attribution only — replaces the opaque "Missing outputs" (exit 0,

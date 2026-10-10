@@ -31,7 +31,7 @@ import pytest
 from shared.redaction import SecretRedactor
 from tests.helpers import wait_for_predicate
 from tests.workers.upload_queue_testlib import QueueFakeClient, _execution_dir, _queue, _task
-from worker import state_evidence
+from worker import state_evidence, state_evidence_lines
 from worker.execution.reactor import EventPumpReactor
 from worker.state_evidence import EmergencyEventsSink
 
@@ -232,6 +232,56 @@ def test_prep_failure_scan_failure_discards_raw_copy(
     assert set(remaining) == {"incident.json", "listing.txt"}
 
 
+def test_listing_redacts_secret_bearing_filenames(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, evidence_root: Path
+) -> None:
+    """#1168 F3 复现（修复前泄漏形态）：agent 把密钥写进文件名
+    （``LLM_GATEWAY_TOKEN=sk-…`` 作为路径组件）→ 相对路径原样进无 TTL 的
+    listing.txt，明文密钥长留 state 证据快照。修复后每条 entry 持久化前过
+    span 脱敏，文件名里只剩 ``***``。"""
+    monkeypatch.setenv("LLM_GATEWAY_TOKEN", SECRET)
+    monkeypatch.setattr("worker.upload.prepare.prepare_result", _boom)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    (work_root / "exec-1" / "job" / f"LLM_GATEWAY_TOKEN={SECRET}").write_text("x", encoding="utf-8")
+
+    client = QueueFakeClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=0))
+    queue.shutdown()
+
+    listing = (evidence_root / "exec-1__node_a" / "listing.txt").read_text(encoding="utf-8")
+    assert SECRET not in listing
+    assert f"job/LLM_GATEWAY_TOKEN={'*' * 3}" in listing
+    assert "job/output.json" in listing  # 其余条目照常（可读形态保留）
+
+
+def test_listing_entry_redaction_failure_degrades_entry(tmp_path: Path) -> None:
+    """单条目脱敏逃逸（span 函数抛出族）fail-closed：该条目不得以未脱敏
+    路径落盘——降级为固定占位（不携带任何原文），清单其余条目照常。"""
+    secret = "sk-live-supersecretgatewaytoken123"
+
+    def exploding_on_secret(text: str):
+        if secret in text:
+            raise ValueError("span function escaped")
+        return []
+
+    redactor = SecretRedactor(exploding_on_secret, 0)
+    execution_dir = tmp_path / "exec"
+    execution_dir.mkdir()
+    (execution_dir / "plain.txt").write_text("x", encoding="utf-8")
+    (execution_dir / f"token={secret}").write_text("x", encoding="utf-8")
+    incident = tmp_path / "incident"
+    incident.mkdir()  # 真实调用点由 _dump_prep_evidence 先建目录
+
+    state_evidence._dump_listing(incident, execution_dir, redactor)
+
+    listing = (incident / "listing.txt").read_text(encoding="utf-8")
+    assert secret not in listing
+    assert "plain.txt" in listing
+    assert listing.count("<listing entry dropped: redaction failed>") == 1
+
+
 def test_tree_missing_inside_only_for_missing_tree_errnos(tmp_path: Path) -> None:
     """分类检测只认 ENOENT/ENOTDIR 且路径落在本 execution 目录内：权限错误
     （目录仍在）与外部路径不贴 [work-dir-missing] 标记，非 OSError 不参与。"""
@@ -331,6 +381,9 @@ def test_pump_write_failure_without_evidence_root_keeps_legacy_degradation(
 ) -> None:
     """未配置 evidence root：写失败保持既有降级（parse_error + 流注销，
     事件面丢失），不产生任何 state 目录副作用。"""
+    # 前提自持（防 xdist 邻测泄漏）：同进程跑过 executor main 的用例会把
+    # 进程级 evidence 根留在模块全局上——本用例的「未配置」前提必须显式建立。
+    state_evidence.reset_evidence_root()
     run_dir = tmp_path / "work" / "exec-x" / "job" / "runs" / "node_a" / "worker"
     run_dir.mkdir(parents=True)
     events = run_dir / "events.jsonl"
@@ -395,9 +448,58 @@ def test_render_line_truncation_stays_one_physical_line() -> None:
     json.loads 的取证工具不会把后续行误当续行。"""
     redactor = SecretRedactor(lambda text: [], 0)
     huge = json.dumps({"type": "x", "payload": "A" * 200_000})
-    out = state_evidence._render_line(huge.encode(), redactor)
+    out = state_evidence_lines.render_line(huge.encode(), redactor)
     assert out.count("\n") == 1  # 仅行尾换行
     assert "chars truncated" in out
     physical = out.rstrip("\n")
     assert physical.startswith('{"type":')
     assert physical.endswith('"}')
+
+
+def test_render_line_truncated_json_stays_parseable() -> None:
+    """#1168 F4 复现（修复前形态）：>64KB 的 JSON 事件行中切后截断点落在
+    字符串值中间，产物不再是合法 JSON（逐行 json.loads 报废）。修复后按
+    「截字段值 + 重序列化」：转储行仍可 json.loads，事件结构与其余字段
+    原样，超长字段带内联截断标记。"""
+    redactor = SecretRedactor(lambda text: [], 0)
+    huge = json.dumps(
+        {
+            "type": "tool_execution_end",
+            "toolCallId": "call-1",
+            "result": {"content": [{"type": "text", "text": "A" * 200_000}]},
+        }
+    )
+    out = state_evidence_lines.render_line(huge.encode(), redactor)
+    physical = out.rstrip("\n")
+    assert out.count("\n") == 1
+    event = json.loads(physical)  # 修复前：ValueError（截断破坏 JSON 语法）
+    assert event["type"] == "tool_execution_end"
+    assert event["toolCallId"] == "call-1"
+    assert "chars truncated" in event["result"]["content"][0]["text"]
+    assert len(physical) <= state_evidence_lines.MAX_DUMP_LINE_CHARS + 64
+
+
+def test_render_line_placeholder_when_structure_bloats() -> None:
+    """结构超限（海量小字段：任何字符串 cap 下序列化都超 64KB）整体降级为
+    单行占位事件 ``{"truncated": true, "original_bytes": N}``——仍是合法
+    JSON、仍是单物理行，逐行解析工具不报废。"""
+    redactor = SecretRedactor(lambda text: [], 0)
+    bloated = json.dumps({"type": "x", **{f"k{i}": "v" * 64 for i in range(2000)}})
+    assert len(bloated) > state_evidence_lines.MAX_DUMP_LINE_CHARS
+    out = state_evidence_lines.render_line(bloated.encode(), redactor)
+    physical = out.rstrip("\n")
+    assert out.count("\n") == 1
+    placeholder = json.loads(physical)
+    assert placeholder == {"truncated": True, "original_bytes": len(bloated)}
+
+
+def test_render_line_truncates_non_json_lines_inline() -> None:
+    """非 JSON 行保持既有中切形态（首尾各半 + 内联标记）：单物理行、标记
+    无换行——JSON 行的新语义不外溢到文本行。"""
+    redactor = SecretRedactor(lambda text: [], 0)
+    plain = "panic: " + "B" * 200_000
+    out = state_evidence_lines.render_line(plain.encode(), redactor)
+    assert out.count("\n") == 1
+    assert "chars truncated" in out
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(out.rstrip("\n"))  # 文本行本来就不是 JSON
