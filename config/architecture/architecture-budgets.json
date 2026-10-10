@@ -2002,6 +2002,8 @@
     "velites/src/lib.rs": 209,
     "velites/src/main.rs": 64,
     "velites/src/models.rs": 247,
+    "velites/src/models/output_tokens.rs": 27,
+    "velites/src/models/output_tokens_param_tests.rs": 54,
     "velites/src/provider/anthropic.rs": 567,
     "velites/src/provider/anthropic/sse_line_tests.rs": 63,
     "velites/src/provider/mod.rs": 47,

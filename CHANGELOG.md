@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- velites OpenAI 兼容路径的单次输出上限字段按模型方言选择（issue #1093，#952/#1075 follow-up）：models.json 模型条目新增可选键 `outputTokensParam`（`max_tokens` | `max_completion_tokens`，仅 `openai-completions` provider），节点下发 `--max-output-tokens` 时上限写进声明的字段——OpenAI o-series 等推理模型声明 `max_completion_tokens` 后不再因收到 `max_tokens` 被拒。缺省仍发 `max_tokens`，未配置上限时两个字段都不发，存量 registry 与请求形状不变；未知取值或在 `anthropic-messages` provider 上声明非缺省值会让 registry 加载失败（fail-closed，不静默忽略）。旧版 velites 遇到该键会按未知字段拒绝整个 models.json，需先升级 Worker 上的 velites 再写入该键。
 - 预览面板（自定义 preview panel）支持媒体产物播放（issue #1146，PR 面向面板作者的桥契约扩展）：宿主桥新增只读方法 `readArtifactBytes`——面板以 `{method:"readArtifactBytes", params:{name}}` 请求，宿主用自身会话经 raw 端点取回字节、以 postMessage transfer（零拷贝）回传 `ArrayBuffer` + `mediaType`，面板侧 `URL.createObjectURL(new Blob([buf], {type}))` 建 blob URL 喂 `<video>`/`<audio>`；读取上限 512 MiB（Content-Length 预检 + 实际字节数复核，超限走桥错误响应通道）。面板 CSP 增加 `media-src blob:`（只加 blob:，无网络出站面——blob URL 只能由面板本帧脚本创建；宿主文档头层的 media-src 本就放行，此条只解开面板 `default-src 'none'` 的压制）。init 消息新增 `capabilities: ["readArtifactBytes"]` 能力声明（旧面板零影响、新面板可同步分支）。面板作者指南（`server/app/mcp_server/preview_guide.md`）补方法签名、blob 播放与字幕叠加示例（`readArtifact` 读文本字幕轨 + `timeupdate` 叠加）。**注意：本条为 UI 改动，随 0.7.19 的 UI 验收批次交付，用户验收后合入。**
 
 ### Changed
