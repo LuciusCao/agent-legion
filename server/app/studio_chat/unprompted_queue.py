@@ -22,18 +22,24 @@ The open state follows the watcher projector under ``runtime.lock`` (the lock
 admission takes): a turn opens the gate as soon as it is projected, even if
 its rows are not yet durable, but closes it only once every projected row is
 persisted — a send never observes a turn as ended before its rows exist. Admission steps
-the watcher once first (``refresh``) to shrink the poll gap; the residual
-window (engine started, journal not yet written) is inherent and only falls
-back to the pre-#1029 behavior. The same window, unrefreshed, sits at two
-more boundaries (PR #1076 review, follow-up issue): a flush hands every held
-message to the ACP queue at once, so a turn the engine opens between one
-delivered message's end and the next one's ``before_start`` (milliseconds,
-no poll in between) is not seen; and ``wake_session`` reads the last poll —
-there unreachable in practice, since wakeups come from the Kimi V1 task
-store while this gate only opens on Kimi Code wire journals. A gate check
-inside ``before_start`` would not narrow either (it runs right after the
-turn end / claim, before any poll); closing them needs the dequeue to wait
-for the journal, a new mechanism. A turn that never ends — journal replaced or
+the watcher once first (``refresh``) to shrink the poll gap.
+
+Every dequeue re-observes the journal too (#1109): a flush hands all held
+messages to the ACP queue at once, and the engine may open a turn between
+one delivered message's end and the next one's start. So each queued
+message's ``before_start`` (run off the ACP event loop, prompt_turn.py)
+steps the watcher itself — waiting at most ``DEQUEUE_STEP_TIMEOUT_SECONDS``
+for a concurrent step — and, if a turn is open, an older message was put
+back, or no step could run, returns the message to ``held`` (behind the
+messages already put back, ahead of later arrivals) instead of sending it;
+``inbound_pending`` still counts it. Held messages are released only once
+no queued message is left in the ACP queue
+(``inbound_pending == len(held)``), so a release never lands behind a
+younger message. ``wake_session``'s ``before_start`` re-observes the same
+way and stands back. The residual window (engine started, journal not yet
+written) is inherent and only falls back to the pre-#1029 behavior.
+
+A turn that never ends — journal replaced or
 truncated (re-baselined, its ``turn.ended`` unobservable), or no journal
 progress for ``IDLE_TIMEOUT_SECONDS`` — stops gating, and held messages are
 dropped with a visible notice (#1028's undelivered semantics). A runtime torn
@@ -60,6 +66,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 IDLE_TIMEOUT_SECONDS = 900.0
+# A dequeue waits this long for a concurrent watcher step before it puts the
+# message back (a journal step is a read plus a few appends).
+DEQUEUE_STEP_TIMEOUT_SECONDS = 5.0
 DROPPED_STALLED = "agent 自发回合长时间无进展，排队消息未投递，请重发"
 _LIVE_STATUSES = ("idle", "running", "awaiting_permission")
 
@@ -74,18 +83,24 @@ def should_hold(runtime: SessionRuntime, status: str) -> bool:
     return status in _LIVE_STATUSES and holding(runtime)
 
 
-def refresh(runtime: SessionRuntime) -> None:
-    """Caller does NOT hold runtime.lock (step lock → runtime.lock order)."""
+def refresh(runtime: SessionRuntime, timeout: float = -1) -> bool:
+    """Caller does NOT hold runtime.lock (step lock → runtime.lock order).
+    False only when ``timeout`` passed while another step held the lock."""
     gate = runtime.unprompted_gate
-    if gate is None:
-        return
+    if gate is None or not gate.step_lock.acquire(timeout=timeout):
+        return gate is None
     try:
-        gate.step()
+        gate.step()  # re-enters step_lock (an RLock)
     except Exception:
-        # #204 broad-except audit: an admission-time refresh only narrows the
-        # poll gap; journal/DB failures are retried by the watcher thread and
-        # admission proceeds on the last settled state. Traceback retained.
+        # #204 broad-except audit: a refresh only narrows the poll gap; the
+        # failed step still settled the gate in its finally, journal/DB
+        # failures are retried by the watcher thread, and the caller decides
+        # on that settled state (a dequeue deferring here would bounce
+        # forever on a broken journal). Traceback retained.
         logger.warning("unprompted-turn refresh failed for %s", gate.session_id, exc_info=True)
+    finally:
+        gate.step_lock.release()
+    return True
 
 
 def hold(
@@ -114,13 +129,16 @@ class GatedUnpromptedWatcher(UnpromptedTurnWatcher):
 
     def __init__(self, *args: Any) -> None:
         super().__init__(*args)
-        # Serializes steps (watcher thread + admission refresh); taken before
-        # runtime.lock, never inside it.
-        self.step_lock = threading.Lock()
+        # Serializes steps (watcher thread + admission/dequeue refresh); taken
+        # before runtime.lock, never inside it. Reentrant only so refresh()
+        # can take it with a timeout and then step.
+        self.step_lock = threading.RLock()
         # Guarded by runtime.lock: open unprompted turn ids, and held
-        # (message_id, text, prompt) in arrival order.
+        # (message_id, text, prompt) in arrival order; the first ``front``
+        # of them were put back at dequeue (#1109).
         self.open: frozenset[str] = frozenset()
         self.held: list[tuple[str, str, str]] = []
+        self.front = 0
         self.expired: set[str] = set()
         self.activity = time.monotonic()
         self.runtime.unprompted_gate = self
@@ -147,6 +165,23 @@ class GatedUnpromptedWatcher(UnpromptedTurnWatcher):
                     self.activity = time.monotonic()
                 self._settle(broken)
 
+    def defer(self, message_id: str, text: str, prompt: str) -> bool:
+        """``before_start`` of a queued message, no lock held (#1109): observe
+        the journal, then True = put back into ``held`` instead of sent."""
+        observed = refresh(runtime := self.runtime, DEQUEUE_STEP_TIMEOUT_SECONDS)
+        with runtime.lock:
+            if runtime.closed or self.service.runtime(self.session_id) is not runtime:
+                return False  # _deliver drops it as before
+            if observed and not self.open and not self.front:
+                return False
+            # Older put-back messages stay ahead; later arrivals (hold())
+            # are younger than anything that was already in the ACP queue.
+            self.held.insert(self.front, (message_id, text, prompt))
+            self.front += 1
+            if observed:
+                self._flush()
+            return True
+
     def _settle(self, broken: bool) -> None:
         runtime = self.runtime
         with runtime.lock:
@@ -164,20 +199,24 @@ class GatedUnpromptedWatcher(UnpromptedTurnWatcher):
                 self.expired |= self.open
                 self.open = frozenset()
                 self._drop_held(DROPPED_STALLED)
-            elif not self.open and self.held:
-                self._flush()
+            self._flush()  # no-op unless the gate closed with messages held
 
     def _drop_held(self, detail: str) -> None:
-        held, self.held = self.held, []
+        held, self.held, self.front = self.held, [], 0
         for message_id, _text, _prompt in held:
             self.runtime.inbound_pending -= 1
             _note_dropped(self.service, self.session_id, message_id, detail)
 
     def _flush(self) -> None:
         """Caller holds runtime.lock: hand held messages to the ACP queue in
-        order; #1028's ``before_start`` claims each at its turn."""
+        order; #1028's ``before_start`` claims each at its turn. Only once
+        the gate is closed and no queued message is left in the ACP queue
+        (each will start or come back via ``defer``, #1109): a release never
+        lands behind a younger message."""
         service, session_id, runtime = self.service, self.session_id, self.runtime
-        held, self.held = self.held, []
+        if self.open or not self.held or runtime.inbound_pending != len(self.held):
+            return
+        held, self.held, self.front = self.held, [], 0
         for message_id, text, prompt in held:
 
             def before_start(m: str = message_id, t: str = text, p: str = prompt) -> bool:

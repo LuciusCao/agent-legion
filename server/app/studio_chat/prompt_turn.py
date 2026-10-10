@@ -86,7 +86,10 @@ async def run_prompt_turn(
     """
 
     async def start() -> Any:
-        if before_start is not None and not before_start():
+        # The dequeue guard takes runtime.lock and may step the Kimi wire
+        # watcher (journal read + DB writes, #1109): run it on a worker
+        # thread, never on the ACP event loop.
+        if before_start is not None and not await asyncio.to_thread(before_start):
             return None
         return await conn.prompt(acp_session_id, [TextContentBlock(type="text", text=text)])
 
