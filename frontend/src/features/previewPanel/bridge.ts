@@ -16,6 +16,12 @@
 export const PREVIEW_PANEL_SOURCE = 'agent-legion-preview-panel'
 export const PREVIEW_HOST_SOURCE = 'agent-legion-preview-host'
 
+/** 面板 window 上的字节桥注入全局名（preview_guide.md 的作者契约同名）。 */
+export const PREVIEW_BYTE_BRIDGE_GLOBAL = '__agentLegionPreviewBytes'
+
+/** byte-port-offer 消息类型（bootstrap 上交字节桥端口；鉴别见 acceptor）。 */
+export const BYTE_PORT_OFFER_TYPE = 'byte-port-offer'
+
 /** 桥目前支持的方法（只读）。 */
 export type PreviewBridgeMethod =
   | 'listArtifacts'
@@ -66,21 +72,32 @@ export interface PreviewPanelCspViolationMessage {
   directive: string
 }
 
+/**
+ * 面板 → 宿主：字节桥 port 上交（#1178 codex 复审 P1 第 4 轮修复）。
+ * 由宿主注入的 bootstrap 脚本发出（byteBridgeBootstrap.ts），不是作者
+ * API；端口本体在消息的 `event.ports`（transfer），不在 data 里。宿主
+ * 每个 iframe 挂载只接受第一次上交（portBridge.ts），其后的上交（含
+ * 面板自导航后外部文档的伪造）一律拒绝并关闭。
+ */
+export interface PreviewPanelBytePortOfferMessage {
+  source: typeof PREVIEW_PANEL_SOURCE
+  type: 'byte-port-offer'
+}
+
 export type PreviewPanelToHostMessage =
   | PreviewPanelReadyMessage
   | PreviewPanelResizeMessage
   | PreviewPanelRequestMessage
   | PreviewPanelCspViolationMessage
+  | PreviewPanelBytePortOfferMessage
 
 /** 宿主 → 面板：初始化（jobId + 主题变量 + 可选资源 URL + 能力声明）。
  *
- * #1178 codex 复审 P1：init 经 window postMessage **transfer 一个
- * MessagePort**（`[port2]`）——媒体字节通道（readArtifactBytes）的
- * request/response 只走该 port（窗口通道对导航后窗口不可闭合，见文件头
- * P1 注释）；基础方法保留 window 通道兼容存量面板（旧面板忽略 ports 数组
- * 不受影响）。面板从 init 的 `event.ports[0]` 取 port。宿主在**每次**下发
- * init（含节点状态变化的重发）时都建新 Channel 并随消息 transfer——重发
- * 后面板应改用新 port（旧 port 对应的旧 global 若已导航销毁则自然关闭）。
+ * init 只携带数据，永不携带端口等能力（#1178 codex 复审 P1）：字节桥
+ * （readArtifactBytes）的 MessagePort 由注入 bootstrap 在初始文档解析期
+ * 自建并上交宿主（见 byteBridgeBootstrap.ts / portBridge.ts），在面板文档
+ * 存活期内持续有效——节点状态变化触发的 init 重发是「重取数据」信号，
+ * 面板沿用既有全局桥函数即可，不要期待新的端口。
  */
 export interface PreviewHostInitMessage {
   source: typeof PREVIEW_HOST_SOURCE
@@ -130,6 +147,10 @@ export function isPanelToHostMessage(
       return typeof data.height === 'number' && Number.isFinite(data.height)
     case 'csp-violation':
       return typeof data.directive === 'string'
+    case 'byte-port-offer':
+      // 端口本体在 event.ports（data 不含可校验字段）；首次-only 接受与
+      // 伪造拒绝在 portBridge.ts 的 acceptor。
+      return true
     case 'request':
       return (
         typeof data.id === 'number' &&

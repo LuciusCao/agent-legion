@@ -13,8 +13,14 @@
  *
  * nonce 交给面板是可接受的：面板本就获准执行脚本、只能在自己的 opaque
  * origin 文档里用它；它写不进宿主 DOM，而 nonce 每次页面加载都换新。
+ *
+ * 同一注入管道还负责字节桥 bootstrap（byteBridgeBootstrap.ts，#1178
+ * codex 复审 P1）：作为 head 第一个脚本在解析期同步执行，先于 bundle
+ * 任何代码——它自建 MessageChannel 并把一端上交宿主，宿主每个挂载只
+ * 接受这第一次上交（排序即鉴别），字节桥能力由此绑定初始 srcdoc 文档。
  */
 import { PREVIEW_PANEL_SOURCE } from './bridge'
+import { BYTE_BRIDGE_BOOTSTRAP } from './byteBridgeBootstrap'
 import { stampScriptNonces } from './panelCspBundleNonce'
 
 /**
@@ -89,8 +95,9 @@ export function buildPanelCsp(): string {
 const VIOLATION_PROBE = `(function(){var seen={};document.addEventListener('securitypolicyviolation',function(e){var d=e.effectiveDirective||e.violatedDirective||'';if(d.indexOf('script-src')!==0||seen[d])return;seen[d]=1;window.parent.postMessage({source:${JSON.stringify(PREVIEW_PANEL_SOURCE)},type:'csp-violation',directive:d},'*')})})()`
 
 /**
- * 把 CSP meta（与 nonce 探针）注入 bundle 文档的真实 <head> 顶部，并给
- * 每个 <script> 盖上宿主 nonce（nonce 为空时不盖章、不注入探针）。
+ * 把 CSP meta、字节桥 bootstrap（与 nonce 探针）注入 bundle 文档的真实
+ * <head> 顶部，并给每个 <script> 盖上宿主 nonce（nonce 为空时不盖章、
+ * 不注入探针；bootstrap 无条件注入——无 CSP 头的 dev 环境同样需要字节桥）。
  *
  * 落点必须用 DOMParser 按解析器语义定位：正则找 `<head` 会被攻击者文本
  * 抢占——注释（`<!-- <head> -->`）、JS 字符串字面量、属性值里的伪 `<head>`
@@ -101,6 +108,10 @@ const VIOLATION_PROBE = `(function(){var seen={};document.addEventListener('secu
  * 盖章同样走解析器语义：只有真实 <script> 元素拿到 nonce，字符串或注释里
  * 的伪 `<script>` 不受影响；bundle 自带 nonce 策略的脚本保留原 nonce（规则
  * 见 panelCspBundleNonce.ts）。
+ *
+ * 注入顺序即安全前提（#1178）：head 自上而下为 meta → bootstrap → 探针 →
+ * bundle 原内容——bootstrap 必须先于 bundle 任何脚本执行（其 port 上交
+ * 才会先于攻击者可控代码发出的任何消息到达宿主，见 byteBridgeBootstrap.ts）。
  */
 export function injectPanelCsp(html: string, csp: string, nonce = ''): string {
   const meta = document.createElement('meta')
@@ -114,6 +125,10 @@ export function injectPanelCsp(html: string, csp: string, nonce = ''): string {
     probe.textContent = VIOLATION_PROBE
     doc.head.insertBefore(probe, doc.head.firstChild)
   }
+  const bootstrap = doc.createElement('script')
+  if (nonce) bootstrap.setAttribute('nonce', nonce)
+  bootstrap.textContent = BYTE_BRIDGE_BOOTSTRAP
+  doc.head.insertBefore(bootstrap, doc.head.firstChild)
   // 无 <head> 时 DOMParser 会隐式建一个（如纯片段输入），插入仍然成立。
   doc.head.insertBefore(meta, doc.head.firstChild)
   return `<!doctype html>${doc.documentElement.outerHTML}`

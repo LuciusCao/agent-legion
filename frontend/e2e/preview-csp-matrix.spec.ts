@@ -215,3 +215,72 @@ test('media-src blob: 放行面板自建 blob 的 <audio>/<video>（#1146，Chro
   expect(blocked.violations).toContain('media-src')
   expect(blocked.loaded).toBe(false)
 })
+
+/**
+ * #1178 codex 复审 P1（第 4 轮收口）的排序前提实测：注入 bootstrap 必须
+ * 先于 bundle 任何代码执行——它上交字节桥端口的 byte-port-offer 消息先于
+ * bundle 脚本发出的任何消息到达宿主，宿主「每个挂载只接受第一次上交」
+ * （portBridge.ts）由此可信。若顺序翻转（bootstrap 落到 bundle 之后），
+ * 攻击者可控代码就能抢跑上交伪造端口，能力绑定初始文档的保证整体失效。
+ * 同时钉住 offer 恰好 transfer 一个端口（消息形状契约）。
+ *
+ * 等信号非等时长：结束条件是 offer 与 bundle marker 双到齐，deadline 只
+ * 作失败出口（AGENTS.md §4 时序纪律）。
+ */
+test('字节桥 bootstrap 先于 bundle 代码执行并上交恰好一个端口（#1178 P1，Chromium 实测）', async ({
+  page,
+}) => {
+  await serveHost(page, await panelLib(), `script-src 'self' 'nonce-${H}'`)
+
+  // bundle 正文脚本一进解析就发 marker：bootstrap 的 offer 必须先于它到达。
+  const bundle = `<!doctype html><html><head></head><body><script>
+parent.postMessage({ __probe: 1, type: 'bundle-marker' }, '*')
+</script></body></html>`
+
+  const got = await page.evaluate(
+    async ([html, nonce, deadlineMs]) => {
+      const order: string[] = []
+      let offerPorts = -1
+      let signal: () => void = () => {}
+      const bothSeen = new Promise<void>((resolve) => {
+        signal = resolve
+      })
+      const onMessage = (event: MessageEvent) => {
+        const data = event.data as { __probe?: number; type?: string } | null
+        if (!data) return
+        if (data.type === 'byte-port-offer') {
+          order.push('offer')
+          offerPorts = event.ports.length
+          if (order.includes('bundle')) signal()
+        }
+        if (data.__probe === 1 && data.type === 'bundle-marker') {
+          order.push('bundle')
+          if (order.includes('offer')) signal()
+        }
+      }
+      window.addEventListener('message', onMessage)
+      const lib = (
+        window as unknown as {
+          PanelCsp: {
+            buildPanelCsp(): string
+            injectPanelCsp(h: string, csp: string, n: string): string
+          }
+        }
+      ).PanelCsp
+      const frame = document.createElement('iframe')
+      frame.setAttribute('sandbox', 'allow-scripts')
+      frame.srcdoc = lib.injectPanelCsp(html, lib.buildPanelCsp(), nonce)
+      document.body.appendChild(frame)
+      await Promise.race([
+        bothSeen,
+        new Promise<void>((r) => setTimeout(r, deadlineMs)),
+      ])
+      frame.remove()
+      window.removeEventListener('message', onMessage)
+      return { order, offerPorts }
+    },
+    [bundle, H, 8_000] as const
+  )
+  expect(got.order).toEqual(['offer', 'bundle'])
+  expect(got.offerPorts).toBe(1)
+})

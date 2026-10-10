@@ -343,9 +343,11 @@ describe('job helpers', () => {
 
   it('fetchJobArtifactRawBytes rejects on oversized Content-Length without reading the body', async () => {
     const arrayBuffer = vi.fn()
+    const cancel = vi.fn().mockResolvedValue(undefined)
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       arrayBuffer,
+      body: { cancel, getReader: vi.fn() },
       headers: new Headers({ 'Content-Length': String(512 * 1024 * 1024 + 1) }),
     } as unknown as Response)
     global.fetch = fetchMock
@@ -354,6 +356,61 @@ describe('job helpers', () => {
       fetchJobArtifactRawBytes('j1', 'big.mp4')
     ).rejects.toBeInstanceOf(ArtifactTooLargeError)
     expect(arrayBuffer).not.toHaveBeenCalled()
+    // 预检命中即取消流，不读取任何正文。
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('fetchJobArtifactRawBytes enforces the limit incrementally on streamed bodies and cancels mid-stream (#1178 codex)', async () => {
+    // Content-Length 缺失（或 gzip 声明的是压缩后长度）时，上限必须在读取
+    // 途中触发——不能把超限正文完整分配进内存才复核。maxBytes 收窄到 8：
+    // 第二个 6 字节块累计 12 > 8 即取消，第三个块永远不该被读取。
+    const chunk = (n: number) => new Uint8Array(n).fill(1)
+    const cancel = vi.fn().mockResolvedValue(undefined)
+    const reader = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({ done: false, value: chunk(6) })
+        .mockResolvedValueOnce({ done: false, value: chunk(6) })
+        .mockResolvedValueOnce({ done: false, value: chunk(6) }),
+      cancel,
+    }
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: { getReader: () => reader },
+      headers: new Headers(),
+    } as unknown as Response)
+    global.fetch = fetchMock
+
+    await expect(
+      fetchJobArtifactRawBytes('j1', 'big.mp4', 8)
+    ).rejects.toBeInstanceOf(ArtifactTooLargeError)
+    expect(reader.read).toHaveBeenCalledTimes(2)
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('fetchJobArtifactRawBytes assembles multi-chunk streamed bodies', async () => {
+    const reader = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({ done: false, value: Uint8Array.from([1, 2]) })
+        .mockResolvedValueOnce({
+          done: false,
+          value: Uint8Array.from([3, 4, 5]),
+        })
+        .mockResolvedValueOnce({ done: true, value: undefined }),
+      cancel: vi.fn(),
+    }
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: { getReader: () => reader },
+      headers: new Headers({ 'Content-Type': 'video/mp4' }),
+    } as unknown as Response)
+    global.fetch = fetchMock
+
+    const result = await fetchJobArtifactRawBytes('j1', 'demo.mp4')
+    expect(Array.from(new Uint8Array(result.bytes))).toEqual([1, 2, 3, 4, 5])
+    expect(result.mediaType).toBe('video/mp4')
+    expect(reader.cancel).not.toHaveBeenCalled()
   })
 
   it('fetchJobArtifactRawBytes rejects when the body exceeds the limit without Content-Length', async () => {

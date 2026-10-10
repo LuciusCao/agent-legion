@@ -90,25 +90,29 @@ marker — do not rely on `event.origin`. The bridge has **two channels**
 - **Window channel** (`window.parent.postMessage`, source-marked) carries
   `ready`, `resize`, `csp-violation`, and the base text-magnitude methods
   (`listArtifacts` / `readArtifact` / `getJobDetail`).
-- **MessagePort channel** carries `readArtifactBytes` — the host creates a
-  fresh `MessageChannel` per `init` and transfers the panel-side port to the
-  **initial srcdoc document** along with the `init` message (read it from
-  `event.ports[0]`). A sandboxed frame can navigate itself away
-  (`location.href = …`, `<meta refresh>`) and the navigated-to page shares
-  the same WindowProxy, so the window channel alone cannot authenticate
-  requests — but a port cannot survive that navigation: the initial
-  document's global is destroyed, the port closes with it, and no port is
-  ever delivered to the navigated document. `readArtifactBytes` requests
-  sent over the window channel get an explicit error response. A
-  well-behaved panel never navigates anyway — the frame is your rendering
-  surface, not a router.
+- **Byte bridge** carries `readArtifactBytes`. The host injects a tiny
+  bootstrap as the first `<head>` script of your bundle (same pipeline that
+  injects the CSP meta — it runs before any of your code). The bootstrap
+  creates a `MessageChannel`, keeps the panel-side port in a closure, exposes
+  `window.__agentLegionPreviewBytes.readArtifactBytes(name)`, and hands the
+  other port to the host. The host accepts only the FIRST offered port per
+  frame mount: a sandboxed frame can navigate itself away (`location.href =
+  …`, `<meta refresh>`) and the navigated-to page shares the same
+  WindowProxy, so the window channel alone cannot authenticate requests —
+  but the bootstrap's offer always precedes any message a navigated-to page
+  could send, later offers are refused and closed, and the port inside the
+  closure dies with your document. `init` re-sends never carry ports: the
+  byte bridge stays valid for the lifetime of your document. A well-behaved
+  panel never navigates anyway — the frame is your rendering surface, not a
+  router. `readArtifactBytes` requests sent over the window channel get an
+  explicit error response.
 
 Panel → host:
 
 - Window channel (`source: "agent-legion-preview-panel"`):
-  - `{type: "ready"}` — send once at startup; the host answers with `init`
-    (carrying the port). Send it any time — scripts run before `load`, do
-    NOT wait for the load event.
+  - `{type: "ready"}` — send once at startup; the host answers with `init`.
+    Send it any time — scripts run before `load`, do NOT wait for the load
+    event.
   - `{type: "request", id, method, params}` — base methods only:
     - `listArtifacts()` → `string[]` — artifact names of the current job.
     - `readArtifact({name})` → `{name, content}` — UTF-8 text of one
@@ -119,20 +123,17 @@ Panel → host:
   - `{type: "resize", height}` — ask the host to resize the frame (clamped
     to [120, 6000] px); a ResizeObserver on the document is the usual
     driver.
-- Port channel (the port delivered with `init`; requests carry NO source
-  marker — the port itself proves identity):
-  - `{type: "request", id, method: "readArtifactBytes", params: {name}}` →
-    `{name, mediaType, bytes}` — the artifact's raw bytes as an
-    `ArrayBuffer` (structured clone; NOT base64), plus the media type the
-    raw endpoint maps from the file extension (`video/mp4`, `audio/mpeg`,
-    … non-media files are `application/octet-stream`). Artifact names may
-    contain `/` (nested outputs like `reports/final.mp4`) — pass the
-    manifest name verbatim. Size guard: artifacts above 512 MiB are
-    refused and arrive as an error response — read media files, not entire
-    archives. Available only when `init.capabilities` lists
-    `"readArtifactBytes"` (see below). The host re-sends `init` (with a
-    fresh port) on node-status changes — switch to the new port on every
-    `init`; responses on an old port are not guaranteed after a re-init.
+- Byte bridge (host-injected global `window.__agentLegionPreviewBytes`;
+  available when `init.capabilities` lists `"readArtifactBytes"`):
+  - `readArtifactBytes(name)` → Promise of `{name, mediaType, bytes}` — the
+    artifact's raw bytes as an `ArrayBuffer` (structured clone; NOT base64),
+    plus the media type the raw endpoint maps from the file extension
+    (`video/mp4`, `audio/mpeg`, … non-media files are
+    `application/octet-stream`). Artifact names may contain `/` (nested
+    outputs like `reports/final.mp4`) — pass the manifest name verbatim.
+    Size guard: artifacts above 512 MiB are refused (the promise rejects) —
+    read media files, not entire archives. The bridge stays valid across
+    `init` re-sends; just call it again to re-fetch.
 
 Host → panel (`source: "agent-legion-preview-host"`):
 
@@ -148,8 +149,11 @@ Host → panel (`source: "agent-legion-preview-host"`):
   `data.capabilities && data.capabilities.indexOf("readArtifactBytes") !== -1`;
   an older host sends no `capabilities` field at all (treat it as empty — you
   cannot probe methods by sending unknown ones, the guard silently drops
-  them). The host RE-SENDS `init` when node statuses change — treat every
-  `init` as "re-fetch and re-render".
+  them). When `"readArtifactBytes"` is listed, the host has also injected
+  the `window.__agentLegionPreviewBytes` global (see the byte bridge above)
+  — that global is the call surface, no port plumbing of your own. The host
+  RE-SENDS `init` when node statuses change — treat every `init` as
+  "re-fetch and re-render" (the byte bridge needs no re-setup).
 - `{type: "response", id, ok, payload | error}` — answer to a `request`.
 
 Minimal client skeleton (copy and adapt):
@@ -159,7 +163,6 @@ var PANEL_SOURCE = 'agent-legion-preview-panel'
 var HOST_SOURCE = 'agent-legion-preview-host'
 var seq = 0
 var pending = {}
-var bytesPort = null // #1178: the port delivered with the latest init
 // Base methods (text magnitude) ride the window channel:
 function callBridge(method, params) {
   return new Promise(function (resolve, reject) {
@@ -171,31 +174,19 @@ function callBridge(method, params) {
     )
   })
 }
-// readArtifactBytes rides the port channel (identity = port possession):
-function callBytes(method, params) {
-  return new Promise(function (resolve, reject) {
-    if (!bytesPort) { reject(new Error('no bridge port yet')); return }
-    var id = ++seq
-    pending[id] = { resolve: resolve, reject: reject }
-    bytesPort.postMessage({ type: 'request', id: id, method: method, params: params })
-  })
+// Media bytes ride the host-injected byte bridge (promise-based, no port
+// plumbing of your own):
+function readBytes(name) {
+  if (!window.__agentLegionPreviewBytes) {
+    return Promise.reject(new Error('byte bridge unavailable on this host'))
+  }
+  return window.__agentLegionPreviewBytes.readArtifactBytes(name)
 }
 window.addEventListener('message', function (event) {
   var data = event.data
   if (!data || data.source !== HOST_SOURCE) return
   if (data.type === 'init') {
-    // The port arrives with init (event.ports[0]) — switch to it on EVERY
-    // init: the host re-sends init (with a fresh port) on node-status changes.
-    bytesPort = event.ports[0]
-    bytesPort.onmessage = function (portEvent) {
-      var msg = portEvent.data
-      if (msg && msg.type === 'response' && pending[msg.id]) {
-        var entry = pending[msg.id]
-        delete pending[msg.id]
-        msg.ok ? entry.resolve(msg.payload) : entry.reject(new Error(msg.error))
-      }
-    }
-    /* apply theme, (re)fetch, render */
+    /* apply theme, (re)fetch, render — the byte bridge needs no re-setup */
   }
   if (data.type === 'response' && pending[data.id]) {
     var entry = pending[data.id]
@@ -228,7 +219,7 @@ function setPlayer(bytes, mediaType) {
 window.addEventListener('pagehide', function () {
   if (playerUrl !== null) URL.revokeObjectURL(playerUrl)
 })
-callBytes('readArtifactBytes', { name: 'final.mp4' }).then(function (res) {
+window.__agentLegionPreviewBytes.readArtifactBytes('final.mp4').then(function (res) {
   setPlayer(res.bytes, res.mediaType)
 })
 ```
@@ -250,8 +241,8 @@ A common pattern for subtitled video: read the media via
 `readArtifactBytes`, read the subtitle track (SRT/VTT is text) via
 `readArtifact`, then drive an overlay `<div>` from the element's
 `timeupdate` event. Keep the panel's own seek/overlay logic in the `<script>`
-block (no inline event attributes). For over-512-MiB artifacts the bridge
-answers with `{ok: false, error: "… exceed readArtifactBytes limit …"}` —
+block (no inline event attributes). For over-512-MiB artifacts the byte
+bridge's promise rejects with `… exceed readArtifactBytes limit …` —
 render that error instead of a player.
 
 The platform ships a complete working example — the built-in question panel

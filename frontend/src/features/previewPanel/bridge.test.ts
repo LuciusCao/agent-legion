@@ -1,6 +1,7 @@
 /** 桥协议消息守卫的纯单测（issue #328，#1146 增补）：协议字段变更在这里炸出来。 */
 import { describe, it, expect } from 'vitest'
 import {
+  BYTE_PORT_OFFER_TYPE,
   isHostToPanelMessage,
   isPanelToHostMessage,
   PREVIEW_HOST_CAPABILITIES,
@@ -72,6 +73,28 @@ describe('isPanelToHostMessage', () => {
     expect(isPanelToHostMessage({ source: 'other', type: 'ready' })).toBe(false)
     expect(isPanelToHostMessage(null)).toBe(false)
     expect(isPanelToHostMessage('ready')).toBe(false)
+  })
+
+  it('接受 byte-port-offer（#1178 P1：bootstrap 上交字节桥端口；端口在 event.ports，data 仅类型标记）', () => {
+    expect(
+      isPanelToHostMessage({
+        source: PREVIEW_PANEL_SOURCE,
+        type: 'byte-port-offer',
+      })
+    ).toBe(true)
+    expect(
+      isPanelToHostMessage({ source: 'other', type: 'byte-port-offer' })
+    ).toBe(false)
+  })
+
+  it('BYTE_PORT_OFFER_TYPE 常量与守卫判定同源（防字面量漂移）', () => {
+    expect(BYTE_PORT_OFFER_TYPE).toBe('byte-port-offer')
+    expect(
+      isPanelToHostMessage({
+        source: PREVIEW_PANEL_SOURCE,
+        type: BYTE_PORT_OFFER_TYPE,
+      })
+    ).toBe(true)
   })
 })
 

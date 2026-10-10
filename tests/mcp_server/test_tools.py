@@ -521,6 +521,8 @@ def test_get_preview_guide_is_served_locally(recorded) -> None:
         "pagehide",
         # 重跑后的重取语义（#1178 codex 复审）：桥通道穿透缓存。
         "no-store",
+        # 字节桥调用面（#1178 codex 复审 P1 收口）：宿主注入全局，非端口下发。
+        "__agentLegionPreviewBytes",
     ):
         assert section in text
 

@@ -14,30 +14,23 @@
  * window 不再截流）。版本参数形态留给后续（需要宿主 assets 携带产物版本
  * 号——内置媒体渲染器走 artifact version 查询参数的同一思路）。
  *
- * 内存护栏：读取前按 Content-Length 预检（对象存储流式分支可能不带该
- * 头），读取后按实际字节数复核，超限抛 ArtifactTooLargeError 走桥的
- * 错误响应通道——避免面板把大文件整体读进内存。媒体类型过滤
- * （按 manifest/content-type 限定媒体类）留给后续：raw 端点的
- * content-type 白名单已是服务端边界（非媒体一律 octet-stream+attachment），
- * 桥按 readArtifact 同语义放行任意产物名，上限护栏先行。
+ * 内存护栏（#1178 codex 复审 P2）：读取前按 Content-Length 预检（对象
+ * 存储流式分支可能不带该头，gzip 时声明的还是压缩后长度），读取走
+ * `response.body` 流式累积、累计超限即 cancel（artifactByteStream.ts）——
+ * 不能在 arrayBuffer() 全量分配后才复核（超限字节会完整落进宿主标签页
+ * 内存）。媒体类型过滤（按 manifest/content-type 限定媒体类）留给后续：
+ * raw 端点的 content-type 白名单已是服务端边界（非媒体一律
+ * octet-stream+attachment），桥按 readArtifact 同语义放行任意产物名，
+ * 上限护栏先行。
  */
 
 import { jobArtifactRawUrl } from './jobsApi'
+import { ArtifactTooLargeError, readBodyWithLimit } from './artifactByteStream'
+
+export { ArtifactTooLargeError }
 
 /** 单次 readArtifactBytes 允许进内存的字节上限（512 MiB）。 */
 export const READ_ARTIFACT_BYTES_MAX_BYTES = 512 * 1024 * 1024
-
-export class ArtifactTooLargeError extends Error {
-  constructor(
-    readonly sizeBytes: number,
-    readonly maxBytes: number
-  ) {
-    super(
-      `artifact bytes ${sizeBytes} exceed readArtifactBytes limit ${maxBytes}`
-    )
-    this.name = 'ArtifactTooLargeError'
-  }
-}
 
 export interface ArtifactBytesResponse {
   name: string
@@ -62,12 +55,10 @@ export async function fetchJobArtifactRawBytes(
   }
   const declared = Number(response.headers.get('Content-Length'))
   if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel()
     throw new ArtifactTooLargeError(declared, maxBytes)
   }
-  const bytes = await response.arrayBuffer()
-  if (bytes.byteLength > maxBytes) {
-    throw new ArtifactTooLargeError(bytes.byteLength, maxBytes)
-  }
+  const bytes = await readBodyWithLimit(response, maxBytes)
   return {
     name: artifactName,
     mediaType:
