@@ -53,20 +53,17 @@ agent nodes → velites / Pi CLI → skills (local in-place git, pins in DB skil
 | 质量门 | [local-quality-gates.md](local-quality-gates.md) | 本地 hooks + GitHub Actions CI 的门禁层级、凭证与分支保护策略 |
 | 评审收敛 | [review-convergence.md](review-convergence.md) | 自动评审 finding 的阻塞/非阻塞分诊、回应方式与停止条件（#835） |
 | 项目结构 | [project-structure.md](project-structure.md) | 仓库目录地图（列到有意义的层级） |
-| velites harness | [velites-harness.md](velites-harness.md) | 自研 Rust agent harness（velites 执行内核）设计 |
+| velites harness | [velites-harness.md](velites-harness.md) | 自研 Rust agent harness（velites 执行内核）现行规格：事件 schema、可控性与沙箱、CLI、provider、工具、runtime 接入指南 |
 | 证据矩阵 | [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md) | 架构承诺的反向审计证据矩阵（与 `config/architecture/` invariant registry 对齐） |
 | 执行代次协议 | [execution-generation.md](execution-generation.md) | EXEC-GENERATION-001 执行代次协议（#759/#645）：代次列与 bump/CAS 面、锁序与批序全序、三平面一致性与并发对抗审查 checklist |
 | 产物身份状态空间 | [artifact-identity-state-space.md](artifact-identity-state-space.md) | 产物身份协议的网格模型（#876）：生命周期六阶段 × 八变异轴 × 八不变量（EXEC-INPUT-IDENTITY-001 / EXEC-VALIDATION-VIEW-001）逐格钉测试/论证，一致性检查防腐 |
-| 产物直连 URL 版本固定 | [artifact-direct-url-pinning.md](artifact-direct-url-pinning.md) | 不可变版本 key 布局与被取代对象清理（#853）：方案对比、SeaweedFS 实测、存量兼容与残余面 |
 | Studio 草稿-校验-发布契约 | [studio-draft-publish-contract.md](studio-draft-publish-contract.md) | studio 草稿编辑的三台协作状态机（保存/自动校验/发布）迁移表 + 组合 invariant 表与变更纪律（#633/#804） |
 | Studio 本地文件编辑 | [studio-local-authoring-contract.md](studio-local-authoring-contract.md) | Git 内容归属、shared 全量状态、传输预算与测试矩阵（#820） |
-| Kimi 后台任务接续 | [studio-kimi-background-wakeup.md](studio-kimi-background-wakeup.md) | 后台终态回执、空闲接续及 Kimi V1 存储兼容边界（#806） |
-| Studio 服务生命周期 | [studio-service-lifecycle.md](studio-service-lifecycle.md) | create/resume 准入、在途启动排空与 shutdown 清理顺序（STUDIO-RUNTIME-001） |
-| 节点 SDK / Worker 执行 | [node-sdk-and-worker-execution-design.md](node-sdk-and-worker-execution-design.md) | 节点 SDK（NodeContext）与 code 节点执行迁移 Worker 的合并设计（Issue #30/#82） |
-| 材料与 runs | [materials-and-runs-design.md](materials-and-runs-design.md) | runs / 材料 / bundle 文件夹条目 / 产物对象存储的输入模型与治理设计 |
+| Studio chat 会话运行时 | [studio-chat-session-runtime.md](studio-chat-session-runtime.md) | 服务层 create/resume 准入、在途启动排空与 shutdown 清理（STUDIO-RUNTIME-001）；会话层 Kimi 后台任务回执、空闲接续、自发回合与入站排队（#772/#806/#938/#972/#1029） |
+| 节点 SDK / code 执行 | [node-sdk-and-worker-execution.md](node-sdk-and-worker-execution.md) | code 节点执行链（Host / Worker 两入口）、运行时契约、节点 SDK API、Worker code 协议、节点代码体积上限配置 |
+| 材料与 runs | [materials-and-runs.md](materials-and-runs.md) | 条目 / 材料 / bundle / text / run 输入模型、start 入口契约、对象存储与物化缓存、产物版本 key 与直连 URL 固定（#853） |
 | velites 模型注册 | [velites-model-registry.md](velites-model-registry.md) | runtime-owned 模型发现与 velites provider registry（Worker 侧发现、Host 侧三元组路由） |
 | 文档治理 | [docs-governance.md](docs-governance.md) | 文档漂移检查（退役术语基线 `docs_retired_terms` + 事实一致性 `docs_consistency`）的机制说明与维护指引 |
-| 实例设置旧概念治理 | [instance-settings-legacy-concepts-governance.md](instance-settings-legacy-concepts-governance.md) | `workflows.enabled` 退役与 `code_capacity` 改述（0 = 纯控制面模式）的实施定稿（#385/#386/#389） |
 
 ## 历史设计记录（时点快照，仅供溯源）
 
@@ -90,6 +87,11 @@ banner 标注了后续演进对其中结论的修订。
 | [risk-review-2026-07-18.md](risk-review-2026-07-18.md) | 2026-07-18 架构 Review：扩展性、可维护性与分布式演进路线 |
 | [workflow-key-retirement-inventory.md](workflow-key-retirement-inventory.md) | `workflow_key` 退役盘点（issue #211 Phase 1 产出，退役执行的输入清单） |
 | [llm-output-budget-design.md](llm-output-budget-design.md) | LLM 节点单次输出预算与触顶续写（#952）：P0 显式输出预算参数 + 触顶归因已落地，自动续写为设计草案（待 owner 决策） |
+| [velites-harness-design-history.md](velites-harness-design-history.md) | velites 立项动机、升格期灰度路径、里程碑与立项时开放问题（#1103 自 velites-harness.md 拆出） |
+| [node-sdk-and-worker-execution-design.md](node-sdk-and-worker-execution-design.md) | 节点 SDK（NodeContext）与 code 节点执行迁移 Worker 的合并设计（Issue #30/#82，批次 1/2 已实施、批次 3 已取消；现行参考见 node-sdk-and-worker-execution.md） |
+| [materials-and-runs-design.md](materials-and-runs-design.md) | 材料与 runs 输入模型重设计：决策表、场景、路线 A 迁移与分阶段实施（现行参考见 materials-and-runs.md） |
+| [artifact-direct-url-pinning.md](artifact-direct-url-pinning.md) | 产物直连 URL 版本固定（#853）：候选方案对比与 SeaweedFS 实测（现行参考见 materials-and-runs.md §4.5） |
+| [instance-settings-legacy-concepts-governance.md](instance-settings-legacy-concepts-governance.md) | `workflows.enabled` 退役与 `code_capacity` 改述（0 = 纯控制面模式）的治理定稿（#385/#386/#389；现行参考见 backend.md） |
 | [execution-snapshot-retirement-draft.md](execution-snapshot-retirement-draft.md) | `jobs.workflow_definition_snapshot_json` 瘦身（#354 方案 3）的评估结论与迁移草案（设计草案，未实施；草拟的 v72 编号已被占用，见文首补注） |
 
 ## Studio 文档导航
@@ -100,8 +102,7 @@ Studio（可视化编排 + 内置 agent 对话）的文档分散在上面两张�
 |------|------|------|
 | 草稿-校验-发布状态机 | [studio-draft-publish-contract.md](studio-draft-publish-contract.md) | 现行契约 |
 | 本地文件编辑与 Git 内容归属 | [studio-local-authoring-contract.md](studio-local-authoring-contract.md) | 现行契约 |
-| 后台任务接续（Kimi） | [studio-kimi-background-wakeup.md](studio-kimi-background-wakeup.md) | 现行契约 |
-| 会话服务生命周期 | [studio-service-lifecycle.md](studio-service-lifecycle.md) | 现行契约 |
+| 会话运行时（服务生命周期 + Kimi 后台任务接续） | [studio-chat-session-runtime.md](studio-chat-session-runtime.md) | 现行契约 |
 | MCP 工具面与外部 agent 接入 | [../studio-agent-mcp.md](../studio-agent-mcp.md) | 现行运维/集成文档 |
 | 定位与阶段路线 | [workflow-studio-evolution-design.md](workflow-studio-evolution-design.md) | 历史设计记录 |
 | 内置 agent（MCP/ACP 三层分离） | [studio-phase3-implementation-plan.md](studio-phase3-implementation-plan.md) | 历史设计记录 |

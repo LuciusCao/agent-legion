@@ -1,4 +1,57 @@
-# Kimi 后台任务活动与完成接续（#772/#806）
+# Studio chat 会话运行时
+
+Studio 内置 agent 对话（`server/app/studio_chat/`）的会话运行时现行契约，按生命周期分两层：
+
+- **服务层**：`StudioChatService` 的 create/resume 准入、shutdown 排空与清理顺序（STUDIO-RUNTIME-001），见下文「服务启动准入与关闭排空」。
+- **会话层**：Kimi 运行时的后台任务活动回执、完成接续、自发回合与入站排队（#772/#806/#938/#972/#1029），见「Kimi 后台任务活动与完成接续」及其后各节。
+
+本文由 `studio-service-lifecycle.md` 与 `studio-kimi-background-wakeup.md` 合并而成（#1103）。
+
+## 服务启动准入与关闭排空（STUDIO-RUNTIME-001）
+
+`ServiceLifecycle` owns process-local startup admission for `StudioChatService`.
+Both public create and resume entry points acquire a startup permit before
+reading or mutating session state. The permit covers claim, old-generation
+teardown, token creation, registration, handle start, readiness, compensation,
+and final response publication. Its `finally` releases the permit on success
+and on failure.
+
+Shutdown atomically seals admission, waits for every admitted operation to
+finish, and only then snapshots the runtime registry. No startup producer can
+register after that snapshot. Admitted operations may finish successfully
+while shutdown is waiting; shutdown then cleans their resulting runtimes.
+Requests arriving after the seal receive a conflict before creating a row or
+token. This is a drain protocol, not cancellation of in-flight database work.
+
+The condition is held only for permit accounting and sealing. Waiting releases
+it, and neither the runtime lock nor the registry lock is held while draining.
+Readiness callbacks therefore remain free to finish startup. A separate lock
+serializes shutdown calls through cleanup, so a second shutdown cannot return
+while the first is still draining or cleaning up. Repeated shutdown is safe.
+
+Runtime identity checks remain necessary for normal close/resume and late
+callbacks. They do not replace the service-wide producer barrier: identity
+checks prevent an old callback from destroying a successor, while the barrier
+ensures shutdown includes every successor produced by an admitted operation.
+
+Shutdown waits for admitted operations, including the existing ACP startup
+timeout; it does not invent a timeout that would return with producers still
+active. Database/network stalls can consequently delay shutdown. Existing
+best-effort database cleanup behavior is unchanged: a failed status write is
+logged and repaired by startup reconciliation, and failed token revocation is
+logged with token TTL as the fallback.
+
+### Quality Impact（服务层）
+
+`tests/services/test_studio_chat_shutdown_races.py` pauses real create/resume
+operations before token minting and after registration, then starts concurrent
+shutdown calls. Success and injected startup failure cases assert rejection of
+new admission, draining of existing work, empty registry, revoked tokens,
+terminated handles, and absence of durable starting/running rows. Existing
+admission, resume, generation-bound callbacks and fatal-loop tests retain their
+separate per-runtime guarantees. The invariant is `STUDIO-RUNTIME-001`.
+
+## Kimi 后台任务活动与完成接续（#772/#806）
 
 Kimi 的 ACP `ACPSession.prompt()` 只在 prompt 请求内迭代通知流。Studio
 在 idle 时保持 ACP 连接，并不能使 Kimi 开始消费已经生成的后台完成通知。
@@ -54,7 +107,7 @@ Kimi 的通知消费状态。普通轮询忽略链接、过大文件、不完整
 
 | 维度 | 状态/身份 | 负责的边界 |
 |---|---|---|
-| 服务 | 接受启动 → 封闭入口 → 排空在途启动 → 清理 | shutdown 快照之后不能再注册后继；详见 [服务生命周期](studio-service-lifecycle.md) |
+| 服务 | 接受启动 → 封闭入口 → 排空在途启动 → 清理 | shutdown 快照之后不能再注册后继；详见上文[服务启动准入与关闭排空](#服务启动准入与关闭排空studio-runtime-001) |
 | runtime | 注册对象身份，closed，ACP handle 停止状态 | 旧回调、旧 watcher、退出回收不得写入后继 |
 | 接续 | enabled；disabled；disabled + rearm epoch | 取消立即生效，已接受的人工消息请求重新建立基线 |
 | turn | owner 对象与入队时的取消 epoch | 队列消费前复核，旧队列清理不得释放新人工 turn |
