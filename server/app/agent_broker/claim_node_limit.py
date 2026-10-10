@@ -37,7 +37,25 @@ Contract, deliberately different from the local path
                                carries the same prefix)
   ``agent:<id>``      no       Agent-lane execution — not code-pool
                                concurrency
+  ``agent:code:<id>`` yes      boundary: an agent named ``code:<id>``
+  (id contains ``:``)          (or a capability-derived id doing so)
+                               rides the kind=agent claim path but
+                               writes a lease the prefix test cannot
+                               tell apart from a code claim — counted,
+                               so the error direction is one stale
+                               agent lease consuming code capacity
+                               (the #1167 symptom) instead of
+                               over-admitting
   ==================  =======  ==========================================
+
+  Boundary premise (adversarial review P3-1): row 4 is unreachable for NEW
+  ids — ``agent_id`` is charset-gated at the create/copy contracts
+  (``routes/agent_definition_contracts.AGENT_ID_RE``, no ``:``) — and is
+  conservative, never over-admitting, for legacy pre-constraint rows; the
+  derivation path (agent_id omitted → the capability names the entity,
+  ``agent_definition_create``) inherits the capability's charset, which is
+  NOT gated: a ``:`` capability still derives a colliding id. Known
+  residual, direction-safe (counted = conservative), out of scope here.
 
   The LOCAL path (``_lease_claim_limits.check_claim_capacity``) keeps a
   same-shaped residual: its node count also spans every active lease of

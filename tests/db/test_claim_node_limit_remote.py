@@ -674,3 +674,57 @@ def test_node_limit_counting_matrix_by_lease_form(job_db) -> None:
     assert [claim.job_id for claim in round5.claims] == ["job-m3-code"]
     assert round5.skip_reasons.get("node_limit_full", 0) == 0
     assert _lease_executor_id(job_db, "job-m3-code").startswith("agent:code:")
+
+
+def test_node_limit_matrix_boundary_legacy_agent_id_with_colon_counts(job_db) -> None:
+    """用例 11（#1167 口径表边界行，评审 P3-1）：named ``code:x`` 的存量
+    Agent 走 kind=agent claim 会写出 ``agent:code:x`` 租约——``like
+    'agent:code:%'`` 前缀无法区分，该租约**被计入** code 额度（本用例
+    直接 INSERT 模拟存量形态租约，契约层 ``AGENT_ID_RE`` 只封新值、不
+    迁移存量）。
+
+    断言方向 = 计入（诚实边界而非缺陷修复）：错误方向是「一个存量
+    agent 租约消耗一个 code 名额」——保守方向（占位 → 拒 → 留队列重
+    试），永不超收；前提不成立时行为如实钉住。"""
+    ws, node = "ws-1167-b4", "review"
+    _seed_code_lane(job_db, ws, node, limit=1, job_ids=["job-b4-occ", "job-b4-probe"])
+    probe_execution = _enqueue_code(job_db, ws, "job-b4-probe", node)
+    _register_code_worker("worker-1167-b4")
+    pool = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    # 模拟存量：named ``code:x`` 的 agent job 已有 kind=agent 租约在跑
+    # （claim_promote 的 kind=agent 分支写 ``agent:<agent_id>``）。
+    _seed_code_job(job_db, ws, "job-b4-legacy", node)
+    with job_db.connect() as conn:
+        legacy_run = conn.execute(
+            "insert into node_runs(job_id, node_key, status, command_json, log_path,"
+            " run_dir, session_dir, started_at, execution_generation)"
+            " values (%s, %s, 'running', '[]', 'logs/legacy.log', '', '',"
+            " current_timestamp, 0) returning id",
+            ("job-b4-legacy", node),
+        ).fetchone()
+        conn.execute(
+            """
+            insert into executor_leases(
+              id, execution_id, executor_id, workspace_id, job_id,
+              node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at,
+              execution_generation)
+            values (%s, %s, 'agent:code:x', %s, %s, %s, %s, 'active',
+                    current_timestamp, current_timestamp, current_timestamp + interval '60s', 0)
+            """,
+            (
+                "lease-1167-b4",
+                "exec-1167-b4",
+                ws,
+                "job-b4-legacy",
+                node,
+                int(legacy_run["id"]),
+            ),
+        )
+    assert _lease_executor_id(job_db, "job-b4-legacy") == "agent:code:x"
+
+    # 前缀命中 → 计入 code 额度 → limit=1 下远程 code claim 被拒（保守）。
+    round = claim_batch_with_retry(pool, "worker-1167-b4", None, None, limit=1, code_limit=1)
+    assert round.claims == ()
+    assert round.skip_reasons.get("node_limit_full") == 1
+    assert _request_state(job_db, probe_execution) == "queued"

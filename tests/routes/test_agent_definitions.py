@@ -275,6 +275,32 @@ def test_copy_creates_draft(client, ws) -> None:
     assert missing.status_code == 404
 
 
+def test_agent_id_charset_rejects_executor_id_form_collision(client, ws) -> None:
+    """#1167 评审 P3-1：agent_id 字符域契约——``agent:<id>`` 形态里 ``:`` 是
+    形态分隔符，命名为 ``code:x`` 的 agent 会写出 ``agent:code:x`` 租约、
+    命中节点限额计数的 ``agent:code:%`` 前缀（agent 车道租约消耗 code
+    额度，#1167 症状回流）。创建与复制两个新键入口（AgentCreateRequest /
+    AgentCopyRequest）都按 ``AGENT_ID_RE`` 拒绝含 ``:`` 及其他越域形态
+    （422 契约层拦截，零落库）；合法字符域内形态照常放行。存量
+    pre-constraint 命名不迁移（口径表边界行如实记录，行为钉子见
+    tests/db/test_claim_node_limit_remote.py 用例 11）。"""
+    for bad in ("code:x", ":x", "a:b", "agent-b-c:extra", " agent", "agent ", "名", "a/b"):
+        rejected = client.post(BASE, params=ws, json={"agent_id": bad, **PAYLOAD_V1})
+        assert rejected.status_code == 422, (bad, rejected.text)
+
+    created = client.post(BASE, params=ws, json={"agent_id": "agent-ok.v2_x", **PAYLOAD_V1})
+    assert created.status_code == 200
+    assert created.json()["agent_id"] == "agent-ok.v2_x"
+
+    client.post(BASE, params=ws, json={"agent_id": "agent-src", **PAYLOAD_V2})
+    _publish(client, "agent-src", ws)
+    bad_copy = client.post(f"{BASE}/agent-src/copy", params=ws, json={"new_agent_id": "code:y"})
+    assert bad_copy.status_code == 422
+    ok_copy = client.post(f"{BASE}/agent-src/copy", params=ws, json={"new_agent_id": "agent-cpy1"})
+    assert ok_copy.status_code == 200
+    assert ok_copy.json()["agent_id"] == "agent-cpy1"
+
+
 def test_archive_all(client, ws) -> None:
     client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
     _publish(client, "agent-a", ws)
