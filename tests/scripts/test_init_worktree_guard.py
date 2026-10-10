@@ -1,4 +1,4 @@
-"""Contract tests for scripts/init-worktree.sh nested-worktree guard.
+"""Contract tests for scripts/init-worktree.sh guards and seeding steps.
 
 The script resolves ROOT from its own location, so tests copy it into a
 synthetic repo layout and run it with stubbed ``git``/``uv`` on a restricted
@@ -423,3 +423,92 @@ def test_s3_bucket_step_loads_dotenv_with_explicit_path(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "head_bucket agent-legion-flat" in stub_log.read_text()
+
+
+def test_uv_cache_prewarmed_from_base(tmp_path: Path) -> None:
+    """基准 worktree 有 .uv-cache 时克隆预暖：首次 uv run 免于冷启动拉依赖。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    base_entry = develop / ".uv-cache/wheels-v6/marker"
+    base_entry.parent.mkdir(parents=True)
+    base_entry.write_text("cached-wheel\n")
+
+    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert "已预暖 .uv-cache" in result.stdout
+    cloned = main / ".worktrees/flat/.uv-cache/wheels-v6/marker"
+    assert cloned.read_text() == "cached-wheel\n"
+
+
+def test_uv_cache_prewarm_skipped_when_base_has_no_cache(tmp_path: Path) -> None:
+    """基准无 .uv-cache（本机第一个 worktree）时静默跳过——冷启动是合法路径。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+
+    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert not (main / ".worktrees/flat/.uv-cache").exists()
+    # init 其余步骤照常完成。
+    assert (main / ".worktrees/flat/deploy/secrets/vault_master_key").exists()
+
+
+def test_uv_cache_prewarm_skipped_when_target_cache_exists(tmp_path: Path) -> None:
+    """幂等：目标已有 .uv-cache（重跑 init）时不覆盖、不重复克隆。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    base_only = develop / ".uv-cache/base-only"
+    base_only.parent.mkdir(parents=True)
+    base_only.write_text("base\n")
+    existing = main / ".worktrees/flat/.uv-cache/mine"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("mine\n")
+
+    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert "已预暖" not in result.stdout
+    assert existing.read_text() == "mine\n"
+    assert not (main / ".worktrees/flat/.uv-cache/base-only").exists()
+
+
+_CP_STUB_CLONE_FAIL = """#!/usr/bin/env bash
+# 带选项的 cp 调用即预暖克隆（cp -Rc / cp -R --reflink=auto）：模拟 I/O
+# 失败并留下半成品目录——被测脚本必须清掉半成品并降级冷启动，不得
+# fail-init。无选项调用（.env 复制）委托真实 cp。
+if [[ "${1:-}" == -* ]]; then
+    target="${@: -1}"
+    mkdir -p "$target/partial-entry"
+    echo "cp: clonefile: No space left on device" >&2
+    exit 1
+fi
+exec /bin/cp "$@"
+"""
+
+
+def test_uv_cache_prewarm_failure_falls_back_to_cold_start(tmp_path: Path) -> None:
+    """克隆 I/O 失败只警告不 fail-init，且半成品目录必须清掉不污染新 cache。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    (develop / ".uv-cache").mkdir()
+    _write_stub(bin_dir / "cp", _CP_STUB_CLONE_FAIL)
+
+    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert "预暖克隆失败" in result.stderr
+    worktree = main / ".worktrees/flat"
+    assert not (worktree / ".uv-cache").exists()
+    # init 其余步骤照常完成。
+    assert (worktree / "deploy/secrets/vault_master_key").read_text().strip() == (
+        "stub-vault-master-key"
+    )

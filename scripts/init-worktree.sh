@@ -4,6 +4,8 @@
 #   1. 从基准 worktree 复制 .env（若本 worktree 缺失；无法复制则 fail-fast——
 #      缺 .env 会让后端回落共享默认库/prod）
 #   2. 把 AGENT_LEGION_DATABASE_URL 指向按 worktree 名派生的专属 Postgres 库并尝试建库
+#   2.2 预暖 .uv-cache：从基准 worktree 克隆 uv 缓存（clonefile/reflink，
+#       失败仅提示并回退冷启动），让首次 uv run 免于从零拉依赖树
 #   2.5 按 worktree 名派生 AGENT_LEGION_S3_BUCKET 写入 .env，endpoint 可达时
 #       建 bucket 并配置浏览器直传所需的前端 dev origin CORS
 #   3. 生成缺失的 deploy/secrets（vault_master_key；worker 全局注册 token 已退役，见 issue #35）
@@ -112,6 +114,28 @@ if command -v createdb >/dev/null 2>&1; then
     fi
 else
     echo "提示: 未找到 createdb，请手动创建数据库 ${DB}" >&2
+fi
+
+# 2.2 预暖 per-worktree .uv-cache：下方第一次 `uv run`（建 bucket / 生成
+#     vault key）在空 cache 上要从零拉整棵依赖树（分钟级，慢网更甚）。uv
+#     cache 内容寻址、append-only、路径无关，直接克隆基准 worktree 的即可让
+#     首次 uv run 全部命中：APFS 走 clonefile、Linux 走 --reflink=auto
+#     （写时复制，秒级零额外磁盘；不支持的卷上 cp 内部各自回退普通复制，
+#     仍是磁盘速度、远快于网络）。基准无 cache、目标已有 cache（幂等重跑）
+#     静默跳过；克隆 I/O 失败只提示不 fail-init（冷启动仍是合法路径），
+#     半成品目录必须清掉，避免坏条目污染新 cache。
+if [[ ! -d .uv-cache && -n "$BASE" && -d "$BASE/.uv-cache" ]]; then
+    if [[ "$(uname)" == "Darwin" ]]; then
+        CLONE_FLAGS=(-Rc)
+    else
+        CLONE_FLAGS=(-R --reflink=auto)
+    fi
+    if cp "${CLONE_FLAGS[@]}" "$BASE/.uv-cache" .uv-cache; then
+        echo "已预暖 .uv-cache <- ${BASE}（后续 uv 调用全部命中缓存）"
+    else
+        rm -rf .uv-cache
+        echo "提示: .uv-cache 预暖克隆失败，已跳过——首次 uv 调用将冷启动拉取依赖（正常路径，仅较慢）" >&2
+    fi
 fi
 
 # 2.5 专属 S3 bucket（材料存储，materials-and-runs 设计 §6.3）：开发机共享一个
