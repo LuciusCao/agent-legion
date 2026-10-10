@@ -50,8 +50,8 @@ export function conflictEnteredState(
   }
 }
 
-/* 冲突解除（resolveConflict(keep-mine)/画布回退到已持久化值）：清冲突
-   标记；#804 轮 6 H6：status 从 error（冲突态的占位，横幅语义靠
+/* 冲突解除（resolveConflict 显式二选一；#1195 起画布回退不再自动解除）：
+   清冲突标记；#804 轮 6 H6：status 从 error（冲突态的占位，横幅语义靠
    conflict 标记而非 error 本身）收敛到 saved/idle——采用 Agent 版本成功
    后不该留假 error 态。keep-mine 随后的保存会推进 savedAt/status。
    #1143 评审 P3-5：conflictDraftHash 与 conflictDraftYaml 对称清空（与
@@ -75,11 +75,12 @@ export function pendingAfterResolve(
   return keepMine ? pendingSave : null
 }
 
-/* 回退到已持久化值后的可见状态：pending/error 收回 saved/idle；冲突态
-   （画布回到服务端一致内容）一并清标记（kimi P2-3）。 */
+/* 回退到已持久化值后的可见状态：pending/error 收回 saved/idle。
+   #1195：冲突态不经此路径——CAS 基线已被冲突推进时「画布 == 冲突前
+   基线」不等于「画布 == 服务端」，自动解除会让下一次编辑静默覆盖
+   Agent 版本；冲突只能显式解除（controller 的 revertToPersisted 门控）。 */
 export function revertedState(current: DraftSaveState): DraftSaveState {
   const status = current.savedAt ? 'saved' : 'idle'
-  if (current.conflict) return conflictClearedState({ ...current, status })
   if (current.status === 'pending' || current.status === 'error') {
     return { ...current, status }
   }

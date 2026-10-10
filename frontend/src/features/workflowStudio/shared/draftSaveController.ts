@@ -186,10 +186,15 @@ export class DraftSaveController {
 
   /* 回退到已持久化值：撤销等待中的保存与失败重试（retryTimer 本身也有
      requestId 护栏，这里显式清理），并把可见状态从 pending/error 收回。
-     kimi review P2-3：画布回到已持久化内容即冲突已消解（本页与服务端
-     一致），conflict 标记一并清除，避免红字常驻 + 保存按钮卡死。 */
+     #1195：冲突态不再经此路径解除——enterConflict 已把 CAS 基线推进到
+     服务端 updated_at，「画布 == 冲突前基线」≠「画布 == 服务端」；此时
+     自动解除会让身份自相矛盾（savedAt=服务端时间戳 / savedHash=本地旧值），
+     且下一次编辑以新基线静默覆盖 Agent 版本。冲突只能经显式二选一
+     （resolveConflict / adoptServerDraft）解除——横幅在此场景是诚实的，
+     不构成 kimi P2-3 要避免的「内容已一致却红字常驻」。 */
   private revertToPersisted = (): void => {
     this.abortPending()
+    if (this.state.conflict) return
     this.setState(revertedState(this.state))
   }
 
