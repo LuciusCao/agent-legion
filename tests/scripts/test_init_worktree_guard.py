@@ -508,7 +508,68 @@ def test_uv_cache_prewarm_failure_falls_back_to_cold_start(tmp_path: Path) -> No
     assert "预暖克隆失败" in result.stderr
     worktree = main / ".worktrees/flat"
     assert not (worktree / ".uv-cache").exists()
+    # 半成品临时目录（进程私有名）必须清掉。
+    assert not list(worktree.glob(".uv-cache.prewarm.*"))
     # init 其余步骤照常完成。
     assert (worktree / "deploy/secrets/vault_master_key").read_text().strip() == (
         "stub-vault-master-key"
     )
+
+
+_CP_STUB_CONCURRENT = """#!/usr/bin/env bash
+# 模拟并发兄弟在克隆窗口内完成预暖：带选项调用（预暖克隆）先完成克隆
+# （落进程私有临时目录），同时抢先落位 .uv-cache——后到者必须丢弃自己的
+# 克隆走跳过路径，不得覆盖/嵌套/删除先到者成果。无选项调用委托真实 cp。
+if [[ "${1:-}" == -* ]]; then
+    target="${@: -1}"
+    mkdir -p "$target/cloned-entry"
+    mkdir -p "$(dirname "$target")/.uv-cache/sibling-entry"
+    exit 0
+fi
+exec /bin/cp "$@"
+"""
+
+
+def test_uv_cache_prewarm_concurrent_init_discards_own_clone(tmp_path: Path) -> None:
+    """并发 init 同一 worktree：后到者不嵌套、不误删先到者落位的缓存。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    (develop / ".uv-cache").mkdir()
+    _write_stub(bin_dir / "cp", _CP_STUB_CONCURRENT)
+
+    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert "并发" in result.stderr
+    worktree = main / ".worktrees/flat"
+    # 先到者落位的缓存原样保留：未被 rm -rf 误删、未被克隆内容嵌套覆盖。
+    assert (worktree / ".uv-cache/sibling-entry").is_dir()
+    assert not (worktree / ".uv-cache/cloned-entry").exists()
+    assert not (worktree / ".uv-cache/.uv-cache").exists()
+    # 自己的克隆（临时目录）已丢弃。
+    assert not list(worktree.glob(".uv-cache.prewarm.*"))
+    # init 其余步骤照常完成。
+    assert (worktree / "deploy/secrets/vault_master_key").exists()
+
+
+def test_uv_cache_prewarm_dereferences_symlink_base(tmp_path: Path) -> None:
+    """基准 .uv-cache 是 symlink 时解引用克隆实体目录：新 cache 必须是真实
+    目录而非指向共享目标的 symlink（per-worktree 隔离），内容一致。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    shared = develop / "shared-uv-cache/wheels-v6"
+    shared.mkdir(parents=True)
+    (shared / "marker").write_text("cached-wheel\n")
+    (develop / ".uv-cache").symlink_to("shared-uv-cache")
+
+    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert "已预暖 .uv-cache" in result.stdout
+    cloned = main / ".worktrees/flat/.uv-cache"
+    assert cloned.is_dir() and not cloned.is_symlink()
+    assert (cloned / "wheels-v6/marker").read_text() == "cached-wheel\n"

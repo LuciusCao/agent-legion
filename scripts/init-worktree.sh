@@ -118,23 +118,49 @@ fi
 
 # 2.2 预暖 per-worktree .uv-cache：下方第一次 `uv run`（建 bucket / 生成
 #     vault key）在空 cache 上要从零拉整棵依赖树（分钟级，慢网更甚）。uv
-#     cache 内容寻址、append-only、路径无关，直接克隆基准 worktree 的即可让
-#     首次 uv run 全部命中：APFS 走 clonefile、Linux 走 --reflink=auto
-#     （写时复制，秒级零额外磁盘；不支持的卷上 cp 内部各自回退普通复制，
-#     仍是磁盘速度、远快于网络）。基准无 cache、目标已有 cache（幂等重跑）
-#     静默跳过；克隆 I/O 失败只提示不 fail-init（冷启动仍是合法路径），
-#     半成品目录必须清掉，避免坏条目污染新 cache。
+#     cache 内容寻址、append-only、路径无关，克隆基准 worktree 的即可让
+#     后续 uv 调用命中已缓存依赖：APFS 走 clonefile、Linux 走
+#     --reflink=auto（写时复制，秒级零额外磁盘；不支持的卷上 cp 内部各自
+#     回退普通复制，仍是磁盘速度、远快于网络）。基准无 cache、目标已有
+#     cache（幂等重跑）静默跳过；克隆/落位失败只提示不 fail-init（冷启动
+#     仍是合法路径），半成品临时目录必须清掉，避免坏条目污染新 cache。
 if [[ ! -d .uv-cache && -n "$BASE" && -d "$BASE/.uv-cache" ]]; then
-    if [[ "$(uname)" == "Darwin" ]]; then
-        CLONE_FLAGS=(-Rc)
-    else
-        CLONE_FLAGS=(-R --reflink=auto)
+    # symlink 基准解引用：cp 一个 symlink 会在新 worktree 复制出指向共享
+    # 目标的 symlink——「独立」cache 实为共享，目标随被清理的 worktree
+    # 消失时还留悬空链接。解引用后克隆实体目录（内容寻址、路径无关，
+    # 克隆本身无害），保住 per-worktree 隔离且不浪费现成的缓存；解引用
+    # 失败则跳过预暖（warn，不 fail-init）。
+    CACHE_SRC="$BASE/.uv-cache"
+    if [[ -L "$CACHE_SRC" ]]; then
+        CACHE_SRC="$(cd "$CACHE_SRC" 2>/dev/null && pwd -P || true)"
     fi
-    if cp "${CLONE_FLAGS[@]}" "$BASE/.uv-cache" .uv-cache; then
-        echo "已预暖 .uv-cache <- ${BASE}（后续 uv 调用全部命中缓存）"
+    if [[ -z "$CACHE_SRC" ]]; then
+        echo "提示: 基准 .uv-cache 为 symlink 且解引用失败，跳过预暖（首次 uv 调用将冷启动拉取依赖）" >&2
     else
-        rm -rf .uv-cache
-        echo "提示: .uv-cache 预暖克隆失败，已跳过——首次 uv 调用将冷启动拉取依赖（正常路径，仅较慢）" >&2
+        if [[ "$(uname)" == "Darwin" ]]; then
+            CLONE_FLAGS=(-Rc)
+        else
+            CLONE_FLAGS=(-R --reflink=auto)
+        fi
+        # 先克隆到进程私有临时名再原子 mv：并发 init 同一 worktree 时，
+        # 后到者的 cp 不会嵌套成 .uv-cache/.uv-cache（dst 已存在时 BSD cp
+        # 的实测语义），mv 前重判后到者丢弃自己的克隆走跳过路径，也不会
+        # rm -rf 误删先到者刚落位的完整缓存。
+        TMP_CACHE=".uv-cache.prewarm.$$"
+        if cp "${CLONE_FLAGS[@]}" "$CACHE_SRC" "$TMP_CACHE"; then
+            if [[ -d .uv-cache ]]; then
+                rm -rf "$TMP_CACHE" || true
+                echo "提示: .uv-cache 已由并发 init 预暖，丢弃重复克隆" >&2
+            elif mv "$TMP_CACHE" .uv-cache; then
+                echo "已预暖 .uv-cache <- ${BASE}（后续 uv 调用将命中已缓存依赖）"
+            else
+                rm -rf "$TMP_CACHE" || true
+                echo "提示: .uv-cache 预暖落位失败，已跳过——首次 uv 调用将冷启动拉取依赖（正常路径，仅较慢）" >&2
+            fi
+        else
+            rm -rf "$TMP_CACHE" || true
+            echo "提示: .uv-cache 预暖克隆失败，已跳过——首次 uv 调用将冷启动拉取依赖（正常路径，仅较慢）" >&2
+        fi
     fi
 fi
 
