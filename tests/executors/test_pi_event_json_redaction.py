@@ -9,6 +9,29 @@ Worker 上传前（压缩扫描同一趟）对保留事件的字符串值做脱�
 经 ``json.loads`` 解码为真实代理字符）同样整行丢弃——丢行优于整趟失败，整趟
 失败会把未压缩未脱敏的 events.jsonl 原样留给 result.tar.gz 外发；model_error
 归因串的脱敏逃逸降级为固定占位、不炸穿扫描。
+
+#1165 深化——文件终态（见 shared/pi_events.py docstring 的状态机 A–F）
+的用例覆盖对照：
+
+===  ===  =============================================================
+态   层   钉住它的用例
+===  ===  =============================================================
+A    单元 test_compress_pi_events_skips_missing_file（compression 族，
+          None 形同款）+ test_missing_file_with_redactor_is_none_shape
+B    单元 test_whole_scan_empty_file_short_circuits
+C    单元 本文件 #842 族（命中/无命中/None 三列）+ compression 族
+D    单元 test_whole_scan_failure_matrix[fail × hit/no_hit]（fsync /
+          replace / 读失败三注入 × redactor 两形态）+
+          test_whole_scan_failure_with_redactor_discards_raw_events
+E    单元 test_whole_scan_failure_matrix[fail × host_none] +
+          test_whole_scan_failure_without_redactor_keeps_file_unchanged
+          （Host 对照钉子：_lease_write_paths 语义零变化）
+F    单元 test_discard_failure_is_suppressed_not_escaped（截空失败
+          suppressed）；队列级幸存者守卫见 workers 侧
+          test_worker_upload_archive_safety.py::
+          test_scan_failure_survivor_fails_honestly
+D/F  队列 test_worker_upload_archive_safety.py（归档后果 + 上报语义）
+===  ===  =============================================================
 """
 
 import json
@@ -401,3 +424,94 @@ def test_discard_failure_is_suppressed_not_escaped(tmp_path, monkeypatch: pytest
 
     assert result == (None, 0, 0, b"")  # 不逃逸：销毁失败只降级为失败返回
     assert events_path.read_bytes() == raw  # 原文幸存（守卫交调用方处置）
+
+
+def _write_events_with_text(tmp_path: Path, text: str, name: str = "events.jsonl") -> Path:
+    """无密钥形态的种子（矩阵的 no_hit 列：redactor 在场但内容干净）。"""
+    events_path = tmp_path / name
+    events_path.write_text(
+        json.dumps({"type": "session"}) + "\n" + json.dumps(_tool_end(text)) + "\n",
+        encoding="utf-8",
+    )
+    return events_path
+
+
+def _inject_scan_failure(
+    monkeypatch: pytest.MonkeyPatch, events_path: Path, fail_step: str
+) -> None:
+    """在扫描链的指定环节注入整趟失败：fsync（落盘校验）/ replace（原子
+    替换）/ read（源读取）——三处都在统一 except 的覆盖面内。"""
+    from shared import pi_events
+
+    if fail_step == "fsync":
+        monkeypatch.setattr(
+            pi_events.os, "fsync", lambda _fd: (_ for _ in ()).throw(OSError(5, "I/O error"))
+        )
+    elif fail_step == "replace":
+        monkeypatch.setattr(
+            Path,
+            "replace",
+            lambda self, target: (_ for _ in ()).throw(OSError(28, "No space left on device")),
+        )
+    else:  # read：只断源读取（mode="r" 且路径即 events 文件），写路径放行
+        real_open = Path.open
+
+        def failing_read_open(self: Path, mode: str = "r", **_kwargs):
+            if mode == "r" and self == events_path:
+                raise OSError(5, "Input/output error")
+            return real_open(self, mode, **_kwargs)
+
+        monkeypatch.setattr(Path, "open", failing_read_open)
+
+
+@pytest.mark.parametrize("fail_step", ["fsync", "replace", "read"])
+@pytest.mark.parametrize("redactor_mode", ["hit", "no_hit", "host_none"])
+def test_whole_scan_failure_matrix(fail_step, redactor_mode, tmp_path, monkeypatch):
+    """#1165 状态机矩阵：{fsync / replace / 读失败} × {redactor 有命中 /
+    无命中 / Host 无 redactor}——redactor 在场的 6 格一律就地截空（截空
+    门控是 redactor 的**在场性**而非命中：无命中同样承诺过脱敏）；Host 列
+    （redactor=None）一律原样保留——``_lease_write_paths`` 消费语义零变化
+    的对照钉子（状态机 E 态）。任何组合都返回整趟失败形且无 staging 残留。"""
+    secret = "sk-live-supersecretgatewaytoken123"
+    if redactor_mode == "no_hit":
+        events_path = _write_events_with_text(tmp_path, "plain output no secret")
+    else:
+        events_path = _write_events_with_secret(tmp_path, secret)
+    raw = events_path.read_bytes()
+    _inject_scan_failure(monkeypatch, events_path, fail_step)
+
+    redactor = (
+        None if redactor_mode == "host_none" else SecretRedactor(literal_spans(secret), len(secret))
+    )
+    result = scan_and_compress_pi_events(events_path, redactor=redactor)
+
+    assert result == (None, 0, 0, b"")  # 一切失败形态的统一返回
+    if redactor is None:
+        assert events_path.read_bytes() == raw  # E：Host 语义零变化
+    else:
+        assert events_path.read_bytes() == b""  # D：就地截空（无命中亦然）
+    assert list(tmp_path.glob("*.jsonl.compressing")) == []
+
+
+def test_whole_scan_empty_file_short_circuits(tmp_path):
+    """状态 B：空文件——早退返回 ``(None, 0, 0, b"")``、文件保持零字节
+    （归档面即空成员，无原文可泄漏）；redactor 在场与否同形（早退先于
+    一切扫描与脱敏）。"""
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text("", encoding="utf-8")
+
+    for redactor in (None, SecretRedactor(lambda _text: [], 0)):
+        result = scan_and_compress_pi_events(events_path, redactor=redactor)
+        assert result == (None, 0, 0, b"")
+    assert events_path.read_bytes() == b""
+
+
+def test_missing_file_with_redactor_is_none_shape(tmp_path):
+    """状态 A × redactor 在场：缺失早退在脱敏判定之前——无文件即无泄漏面，
+    返回形与 redactor=None 完全一致（A 态对三方消费方同形）。"""
+    missing = tmp_path / "absent.jsonl"
+
+    result = scan_and_compress_pi_events(missing, redactor=SecretRedactor(lambda _text: [], 0))
+
+    assert result == (None, 0, 0, b"")
+    assert not missing.exists()

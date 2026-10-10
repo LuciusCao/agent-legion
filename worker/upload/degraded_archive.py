@@ -19,6 +19,34 @@ finalize 拒写）都汇聚到本模块——判败可以丢证据，**绝不能
 - ``write_degraded_empty_archive``：失败臂的最终兜底写入器——execution_dir
   不可写（EACCES/EROFS 族）时把空归档落进 state 目录取证结构（work_root
   之外），结果仍可上报；两处都写不进才上抛（崩溃-恢复语义兜底）。
+
+降级产物状态机（#1169 深化——裁剪序是确定性的，且**判定必需字段在任何
+一档都不参与**；根因是修复前模型只有「写归档」一态、没有「写出来的东西
+本身可能不可提交」这态，413 循环从缺口重开）::
+
+    原始 metadata
+      → staging 实测（gzip 实际体积——高熵 error 不可压缩，估算不可信）
+      → 限内：原子替换（载荷逐字段原样，零裁剪）
+      → 超限：裁 command（清空，纯观测字段）→ 复测
+      → 仍超限：裁 error_message（2 KiB 起对半递减到 0——归因字段，
+         尽量保前缀）→ 复测
+      → 仍超限（极限形态：天花板 < 判定字段 + tar/gz 开销 ≈ 300B，
+         生产配置下限 1 KiB 之上不可达）：落盘最后形态（command 空、
+         error_message 空）并记日志——写入永不失败，可提交性优先。
+
+    判定必需字段（永不裁）:``status`` / ``exit_code`` / ``output_artifacts``
+    ——Host 侧结果落库与终态推进只依赖这三个键。
+    裁剪序的观测字段优先级:``command``（纯观测）先于 ``error_message``
+    （归因——短 verdict 时 command 一裁即收，归因全文保留）。
+
+调用臂 × 产物形态（三个臂共享同一回收语义，均在各自失败面内收敛到
+``write_metadata_only_archive(archive, failed, task.max_archive_bytes)``）:
+
+- ``finalize_result_metadata`` 拒写臂（``ResultMetadataOverCeiling`` /
+  OSError / TarError / ValueError——含保留成员碰撞守卫的 ValueError）；
+- ``ReportDegradeGate`` 413 臂（归档不可提交，直接回收）；
+- ``ReportDegradeGate`` 非 413 判决臂的换写失败回落（embed 抛出族 →
+  回收为 metadata-only）。
 """
 
 from __future__ import annotations

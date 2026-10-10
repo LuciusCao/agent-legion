@@ -41,9 +41,38 @@ if TYPE_CHECKING:
 
 
 def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
-    # prepare_result + 失败降级为 failed 上报；直传回落后按清空的
-    # artifact_uploads 重跑，tar 随之内嵌产物。#959：备妥的归档超 Host 下发
-    # 上限即诚实判败（空归档 + failed），不把注定 413 的归档送进 report 车道。
+    """prepare_result + 失败降级为 failed 上报；直传回落后按清空的
+    artifact_uploads 重跑，tar 随之内嵌产物。#959：备妥的归档超 Host 下发
+    上限即诚实判败（空归档 + failed），不把注定 413 的归档送进 report 车道。
+
+    失败臂（except）的子步序与前置条件模型（#1168 深化；每步独立降级，
+    「结果必须可上报」压倒一切——任何一步逃逸 = bulk 车道在 except 外炸出
+    = failed 结果报不上 = 卡租约重跑）：
+
+    1. ``dump_prep_evidence``（取证，先于清场）——前置：evidence root 已由
+       executor 启动配置 + state 目录可写。失败 = 函数内部自吞返回 None
+       （其自身对一切子 arm 独立降级），error_message 不带证据指针；
+       **永不**把失败传给下一步。目录形态全覆盖：run_dir 子目录消失 →
+       events 记 absent；execution_dir 整体/父链消失 → listing 记
+       skipped、incident.json 记 execution_dir_present=False；EACCES →
+       各面记 unreadable。
+    2. ``write_degraded_empty_archive``（可上报归档）——内部子步序见
+       ``degraded_archive.py``：a) mkdir(parents=True) 重建 execution_dir
+       及其父链（agent 自删整棵树后的空归档写入点）；b) 写 tar（前置
+       execution_dir 可写），EACCES 族立即重试一次（瞬时锁形态）；c) 仍
+       失败 → state 兜底落盘 incident 目录（前置同 1，root 未配置则跳过）；
+       d) 两处都写不进 → OSError 上抛——本臂唯一允许的逃逸形态，交
+       ``_deliver_bulk`` 的存活安全网（marker 保留 → 崩溃-恢复 restore
+       重投），强于带不存在的归档路径进 report 车道空转重试。
+    3. ``failed_metadata``——纯计算（截断 error_message 到 4000 字符），
+       无失败面。
+
+    归档位置两形态：常规 = execution_dir/result.tar.gz（随 204 收尾
+    rmtree 清理）；滞留 = <state>/evidence/<exec>__<node>/result.tar.gz
+    （无 TTL，随 incident 人工清理）。report 车道只按路径读字节，不区分
+    两者（滞留形态的矩阵用例见
+    tests/workers/test_worker_upload_archive_safety.py）。
+    """
     try:
         metadata, archive, outputs = prepare_result(task)
         rejection = declared_ceiling_rejection(task, archive)
@@ -55,7 +84,7 @@ def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]
         # 否则执行会卡到租约过期被 Host 重调度。吞是对的：降级产物是空
         # result.tar.gz + failed_metadata，语义钉子即"准备失败 = run
         # failed"。日志保全：错误文本截断 4000 字符后随 error_message 报
-        # 给 Host，随结果持久化、两侧可见。
+        # 给 Host，随结果持久化、两侧可见。子步序前置条件见本函数 docstring。
         # #1147：清场前先把证据转储进 state 目录（work_root 之外）——运行
         # 目录被 agent 自删时 events.jsonl 随目录灭失，这里是最后的取证点。
         # 转储先于空归档落盘：execution_dir 整个消失时空归档写入自身会抛。

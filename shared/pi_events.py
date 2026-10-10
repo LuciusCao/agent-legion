@@ -172,17 +172,40 @@ def scan_and_compress_pi_events(
     so extra per-event facts never cost a second full scan.
 
     Returns ``(model_error, original_bytes, compressed_bytes, stderr_tail)``;
-    ``stderr_tail`` is ``b""`` when there is none. If the file cannot be
-    processed it is left unchanged, the ``.jsonl.compressing`` staging file
-    is removed on every failure path, and ``(None, 0, 0, b"")`` is returned,
-    matching the individual failure modes of the two-function equivalent —
-    EXCEPT with a ``redactor`` supplied (#1165): the raw, unredacted stream
-    must never survive a failed scan into the result archive, so the file is
-    truncated to zero bytes in the failure arm (fail-closed; the truncation
-    itself failing is suppressed — the delivery caller detects the surviving
-    non-empty file and fails the run honestly instead of archiving it).
-    ``redactor is None`` (the Host write path) keeps the legacy
-    "left unchanged" semantics exactly.
+    ``stderr_tail`` is ``b""`` when there is none.
+
+    FILE-STATE MACHINE (#1165 深化——每个终态、归档后果与消费方；根因是
+    修复前模型只有「成功 / 整趟失败」两态，失败态的文件去向未建模，泄漏
+    从缺口重开)。消费方三方：Worker prepare（``worker/upload/prepare.py``
+    的归档构建 + 幸存者守卫）、Host ``server/app/executors/_lease_write_paths.py``
+    的 ``finish_events_post_processing``（经 ``compress_pi_events``，恒
+    ``redactor=None``）、state 目录取证副本 ``worker/state_evidence.py::
+    _dump_events_copy``（自带 redactor，工作在独立副本上）：
+
+    A. 文件不存在（早退）          → ``(None, 0, 0, b"")``；无文件可归档，
+       run_dir 整树进 tar 时成员缺席（渲染面缺文件，不是泄漏）。三方同形。
+    B. 空文件（早退，size==0）     → 同 A 返回形；零字节成员随归档，无原文。
+    C. 扫描成功                    → 全量返回值；文件被脱敏+压缩原地替换
+       （staging fsync + 原子 replace）；归档携带脱敏压缩成员。
+    D. 整趟失败 × redactor 在场    → ``(None, 0, 0, b"")``；文件**就地截空**
+       （#1165：门控是 redactor 的在场性、不是命中——无命中的失败同样
+       截空，模型只认「这次扫描承诺过脱敏」）；归档拿到零字节成员，
+       raw 字节任何路径不外发；prepare 照常上报（#959 降级语义）。
+    E. 整趟失败 × redactor 缺席    → ``(None, 0, 0, b"")``；文件**原样保留**
+       ——Host compress 的既有语义（那侧无 registry、无脱敏承诺，保留
+       大文件胜过破坏内容），prepare 不经过此态（恒传快照）。
+    F. D 态的截空自身失败          → 返回形同 D 但 raw 文件**非空幸存**
+       （EACCES 族）；销毁失败被 suppress、绝不逃出函数——Worker 调用方
+       的幸存者守卫（prepare：original==0 且文件非空）检测到幸存即诚实
+       判败走空归档；state 取证副本同趟独立处理（扫描失败删自己的 raw
+       副本，见 ``_dump_events_copy``）。该态因此只对 Worker 侧成立，
+       E 态（redactor=None）永远不会进入截空臂。
+
+    状态覆盖矩阵：tests/executors/test_pi_event_json_redaction.py（单元，
+    A/B/D/E/F + 失败注入 × redactor 形态全组合）与
+    tests/workers/test_worker_upload_archive_safety.py（队列级，D/F 的
+    归档与上报后果）。一切失败路径（D/E/F 亦然）都清理
+    ``.jsonl.compressing`` staging——staging 残留会随 run_dir 进归档。
     """
     if not events_path.is_file() or (original_size := events_path.stat().st_size) == 0:
         return None, 0, 0, b""

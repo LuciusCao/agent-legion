@@ -30,6 +30,7 @@ import pytest
 
 from shared.redaction import SecretRedactor
 from tests.helpers import wait_for_predicate
+from tests.helpers.secret_spans import literal_spans
 from tests.workers.upload_queue_testlib import QueueFakeClient, _execution_dir, _queue, _task
 from worker import state_evidence, state_evidence_lines
 from worker.execution.reactor import EventPumpReactor
@@ -282,6 +283,47 @@ def test_listing_entry_redaction_failure_degrades_entry(tmp_path: Path) -> None:
     assert listing.count("<listing entry dropped: redaction failed>") == 1
 
 
+# -- #1168 F3 矩阵：密钥在 entry 的每个位置都被整条脱敏 ------------------------
+
+
+@pytest.mark.parametrize(
+    "secret_relative",
+    [
+        "job/token={secret}.txt",  # 密钥在文件名（叶子）
+        "job/token={secret}/out.json",  # 密钥在子目录名
+        "job/a/token={secret}/b/c.txt",  # 密钥在深层路径段（中间段）
+    ],
+    ids=["filename", "subdir", "deep-segment"],
+)
+def test_listing_redacts_secret_in_every_path_position(
+    tmp_path: Path, secret_relative: str
+) -> None:
+    """#1168 F3 矩阵：redact 作用于**完整相对路径串**（``as_posix()`` 整条），
+    不是只对最后一段——密钥出现在文件名 / 子目录名 / 深层中间段都被整条
+    命中替换为 ``***``；命中位置之外的路径结构（前后缀段）保留可读。"""
+    secret = "sk-live-supersecretgatewaytoken123"
+    redactor = SecretRedactor(literal_spans(secret), len(secret))
+    execution_dir = tmp_path / "exec"
+    target = execution_dir / secret_relative.format(secret=secret)
+    target.parent.mkdir(parents=True)
+    target.write_text("x", encoding="utf-8")
+    (execution_dir / "plain.txt").write_text("x", encoding="utf-8")  # 对照条目
+    incident = tmp_path / "incident"
+    incident.mkdir()
+
+    state_evidence._dump_listing(incident, execution_dir, redactor)
+
+    listing = (incident / "listing.txt").read_text(encoding="utf-8")
+    assert secret not in listing
+    assert "plain.txt" in listing  # 对照：普通文件条目不受影响
+    lines = [line for line in listing.splitlines() if "job/" in line]
+    # 命中段的条目（目录与文件）全替换为 ***；干净前缀段（如 job/a）原样。
+    hit_lines = [line for line in lines if "token=" in line]
+    assert hit_lines and all("***" in line and "token=sk" not in line for line in hit_lines)
+    # 文件条目整条在场：命中段替换为 ***，其余路径结构（前后缀段）保留。
+    assert secret_relative.format(secret="*" * 3) in lines
+
+
 def test_tree_missing_inside_only_for_missing_tree_errnos(tmp_path: Path) -> None:
     """分类检测只认 ENOENT/ENOTDIR 且路径落在本 execution 目录内：权限错误
     （目录仍在）与外部路径不贴 [work-dir-missing] 标记，非 OSError 不参与。"""
@@ -477,6 +519,41 @@ def test_render_line_truncated_json_stays_parseable() -> None:
     assert event["toolCallId"] == "call-1"
     assert "chars truncated" in event["result"]["content"][0]["text"]
     assert len(physical) <= state_evidence_lines.MAX_DUMP_LINE_CHARS + 64
+
+
+def test_render_line_truncation_at_escape_boundaries_stays_parseable() -> None:
+    """#1168 F4 矩阵（转义边界格）：超长字符串密布 JSON 转义序列（``\\"`` /
+    ``\\n`` / surrogate-pair ``\\ud83d\\ude00`` / ``\\\\``）——任何 32KB 处的
+    中切都会劈开某个转义序列（悬空 ``\\`` / 半个 ``\\uXXXX`` 即非法 JSON）；
+    重序列化路径的结构由 ``json.dumps`` 保证合法，截断标记落在值内。"""
+    redactor = SecretRedactor(lambda text: [], 0)
+    payload = ('quote " newline\n emoji 😀 backslash\\ tail ' + "B" * 64) * 900
+    huge = json.dumps({"type": "x", "text": payload})
+    assert "\\n" in huge and '\\"' in huge and "\\ud83d" in huge  # 转义序列确实密集在场
+    assert len(huge) > state_evidence_lines.MAX_DUMP_LINE_CHARS
+
+    out = state_evidence_lines.render_line(huge.encode(), redactor)
+
+    event = json.loads(out.rstrip("\n"))  # 修复前：中切劈开转义 → JSONDecodeError
+    assert event["type"] == "x"
+    assert "chars truncated" in event["text"]
+
+
+def test_render_line_deeply_nested_over_cap_stays_parseable() -> None:
+    """#1168 F4 矩阵（深嵌套格）：深嵌套结构（300 层 dict + 每层长字符串）
+    超过 64KB——``_capped_strings`` 的递归截值对任意深度保持结构合法，
+    重序列化后仍可解析（深度本身不是截断失败面）。"""
+    redactor = SecretRedactor(lambda text: [], 0)
+    node: object = {"leaf": "C" * 500}
+    for _ in range(300):
+        node = {"child": node, "pad": "D" * 240}
+    huge = json.dumps(node)
+    assert len(huge) > state_evidence_lines.MAX_DUMP_LINE_CHARS
+
+    out = state_evidence_lines.render_line(huge.encode(), redactor)
+
+    parsed = json.loads(out.rstrip("\n"))  # 深嵌套 + 超限：结构合法可解析
+    assert isinstance(parsed, dict)
 
 
 def test_render_line_placeholder_when_structure_bloats() -> None:

@@ -187,6 +187,43 @@ def test_prep_failure_whole_execution_dir_gone_still_reports(
     assert record["execution_dir_present"] is False
 
 
+def test_prep_failure_parent_chain_gone_still_reports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, evidence_root: Path
+) -> None:
+    """#1168 矩阵（父链形态）：work_root 整棵消失（execution_dir 连同其
+    父目录）——mkdir(parents=True) 重建全链后失败臂照常产出可上报结果；
+    取证侧 execution_dir 缺席与「execution_dir 消失」同形（listing skipped、
+    incident.json 记 execution_dir_present=False）。修复前的模型只考虑了
+    单层目录消失，父链整删是 agent ``rm -rf`` 更常见的真实形态。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+
+    def rmtree_root_and_boom(task: Any) -> None:
+        shutil.rmtree(work_root, ignore_errors=True)  # 父链整体消失（含 execution_dir 与 marker）
+        raise FileNotFoundError(
+            2,
+            "No such file or directory",
+            str(task.execution_dir / "job" / "runs" / "node_a" / "worker" / "events.jsonl"),
+        )
+
+    monkeypatch.setattr("worker.upload.prepare.prepare_result", rmtree_root_and_boom)
+    client = QueueFakeClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=0))
+    queue.shutdown()
+
+    assert len(client.reports) == 1  # 失败臂 I/O 不逃出 except：结果照常上报
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert report["error_message"].startswith("[work-dir-missing] result preparation failed:")
+    assert f"evidence preserved at {evidence_root / 'exec-1__node_a'}" in report["error_message"]
+    record = json.loads((evidence_root / "exec-1__node_a" / "incident.json").read_text("utf-8"))
+    assert record["execution_dir_present"] is False
+    assert not (
+        evidence_root / "exec-1__node_a" / "result.tar.gz"
+    ).exists()  # 常规路径成功（无需 state 兜底）
+
+
 def test_prep_failure_unwritable_execution_dir_strands_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, evidence_root: Path
 ) -> None:
@@ -242,6 +279,66 @@ def test_metadata_only_archive_fits_declared_ceiling(tmp_path: Path) -> None:
     trimmed = payload["error_message"]
     assert trimmed  # 归因头前缀保留（截断从头截，非空）
     assert message.startswith(trimmed)  # 前缀性质：截断只去尾
+
+
+def test_metadata_only_archive_large_ceiling_trims_nothing(tmp_path: Path) -> None:
+    """矩阵 {max=真实大上限}：64 MiB（默认量级）× 4000 字符高熵 error +
+    高熵长 command——远在限内，零裁剪、载荷逐字段原样（含 command 全文）。
+    与「未下发上限」用例的区别：这里走的是真下发值的限内判定路径。"""
+    work_root = tmp_path / "work"
+    (work_root / "exec-1").mkdir(parents=True)
+    task = _task(work_root, kind="prebuilt", command=tuple(secrets.token_hex(8) for _ in range(64)))
+    metadata = failed_metadata(task, secrets.token_hex(2000))
+    archive = work_root / "exec-1" / "result.tar.gz"
+
+    write_metadata_only_archive(archive, metadata, max_bytes=64 * 1024 * 1024)
+
+    payload = read_result_metadata(archive)
+    assert payload == metadata  # 逐字段原样：command / error_message 都未被裁
+
+
+def test_metadata_only_archive_trims_command_before_error(tmp_path: Path) -> None:
+    """矩阵 {max=1KiB × 高熵长 command × 短 error}：裁剪序先 command——
+    command 清空后即落限内即收，error_message 全文保留（归因完整性优先于
+    命令观测；状态机的字段优先级钉子）。"""
+    work_root = tmp_path / "work"
+    (work_root / "exec-1").mkdir(parents=True)
+    task = _task(
+        work_root, kind="prebuilt", command=tuple(secrets.token_hex(8) for _ in range(200))
+    )
+    metadata = failed_metadata(task, "short verdict")  # 短归因：不应被裁
+    archive = work_root / "exec-1" / "result.tar.gz"
+
+    write_metadata_only_archive(archive, metadata, max_bytes=1024)
+
+    assert archive.stat().st_size <= 1024
+    payload = read_result_metadata(archive)
+    assert payload["status"] == "failed"
+    assert payload["exit_code"] == 1
+    assert payload["command"] == []  # 观测字段先裁
+    assert payload["error_message"] == "short verdict"  # 归因字段全文保留
+
+
+def test_metadata_only_archive_floor_form_keeps_verdict_fields(tmp_path: Path) -> None:
+    """矩阵极限形态：天花板低于「判定字段 + tar/gz 开销」的地板（≈300B；
+    生产配置下限 1 KiB 之上不可达，此用例是防回归钉）——裁剪序走完后仍
+    超限，落盘最后形态（command 空、error_message 空）并记日志，写入永不
+    失败；status / exit_code / output_artifacts 判定必需字段保留。"""
+    work_root = tmp_path / "work"
+    (work_root / "exec-1").mkdir(parents=True)
+    task = _task(work_root, kind="prebuilt", command=("pi",))
+    metadata = failed_metadata(task, "v" * 4000)
+    archive = work_root / "exec-1" / "result.tar.gz"
+
+    write_metadata_only_archive(archive, metadata, max_bytes=64)
+
+    payload = read_result_metadata(archive)  # 归档存在、可解析（写入未失败）
+    assert payload["status"] == "failed"
+    assert payload["exit_code"] == 1
+    assert payload["command"] == []
+    assert payload["error_message"] == ""
+    assert payload["output_artifacts"] == {}
+    assert archive.stat().st_size > 64  # 超限形态如实落盘（极限形态不伪造体积）
 
 
 def test_metadata_only_archive_without_ceiling_kept_verbatim(tmp_path: Path) -> None:
