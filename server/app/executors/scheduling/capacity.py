@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 
 from server.app.db.transaction import read_connection
 from server.app.executors._lease_transactions import database_timestamp
-from server.app.executors.models import CODE_EXECUTOR_ID
+from server.app.executors.models import CODE_EXECUTOR_ID, CODE_LEASE_FORMS_PREDICATE
 
 
 @dataclass
@@ -53,19 +53,15 @@ def load_capacity_snapshot(db_path: str, code_capacity: int) -> CapacitySnapshot
 
     The global count covers only local code-pool leases (Worker-claimed
     executions are capacity-accounted on the Worker side); node-level counts
-    cover every active lease of the node regardless of executor — the local
-    pool and remote code claims write the same executor_leases rows, and
-    since #1149 both claim transactions enforce the node limit. Their scopes
-    now differ on lease forms (#1167): the remote claim (claim_evaluate)
-    counts only the code lease forms (``'code'`` and ``'agent:code:%'`` —
-    a stale ``agent:<id>`` lease on a mixed node key never blocks a remote
-    code claim), while the LOCAL claim (check_claim_capacity) — and this
-    snapshot, which fronts the local scheduler path and matches its
-    counting — still spans every active lease of the node: on mixed
-    agent→code node keys that is CONSERVATIVE (a stale agent lease skips
-    the local claim, retried next pass, never over-admitting); the residual
-    is same-shaped with #1167, predates #1149, and is tracked in #1171.
-    Hint-only either way: the claim transactions remain authoritative.
+    filter to the code lease forms via the shared
+    ``CODE_LEASE_FORMS_PREDICATE`` (#1167 口径表, #1171 alignment) — the
+    local pool's ``'code'`` and remote code claims' ``'agent:code:%'`` merge
+    on the same executor_leases rows, while a stale ``agent:<id>`` lease on a
+    mixed agent→code node key is agent-lane execution and never consumes the
+    node's limit. The remote claim gate (claim_node_limit) and the local
+    claim gate (check_claim_capacity) count with the same predicate, so this
+    hint matches both. Hint-only either way: the claim transactions remain
+    authoritative.
     """
     with read_connection(db_path) as conn:
         now_str = database_timestamp(datetime.now(UTC))
@@ -78,12 +74,10 @@ def load_capacity_snapshot(db_path: str, code_capacity: int) -> CapacitySnapshot
             (CODE_EXECUTOR_ID, now_str),
         ).fetchone()
         node_rows = conn.execute(
-            """
-            select workspace_id, node_key, count(*) as cnt
-            from executor_leases
-            where status='active' and expires_at>%s
-            group by workspace_id, node_key
-            """,
+            "select workspace_id, node_key, count(*) as cnt from executor_leases"
+            " where status='active' and expires_at>%s"
+            f" and {CODE_LEASE_FORMS_PREDICATE}"
+            " group by workspace_id, node_key",
             (now_str,),
         ).fetchall()
         limit_rows = conn.execute(
