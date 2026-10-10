@@ -25,6 +25,7 @@ vi.mock('../../../api/workflowDraft', () => ({
     readonly currentDraft: {
       definition_yaml: string | null
       updated_at: string | null
+      definition_hash: string | null
     }
     constructor(detail: unknown) {
       super('workflow draft conflict')
@@ -35,10 +36,12 @@ vi.mock('../../../api/workflowDraft', () => ({
       const current = (payload.current_draft ?? {}) as {
         definition_yaml?: string | null
         updated_at?: string | null
+        definition_hash?: string | null
       }
       this.currentDraft = {
         definition_yaml: current.definition_yaml ?? null,
         updated_at: current.updated_at ?? null,
+        definition_hash: current.definition_hash ?? null,
       }
     }
   },

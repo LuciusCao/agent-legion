@@ -307,7 +307,12 @@ export class DraftSaveController {
       },
       onSaving: () => this.setState({ ...this.state, status: 'saving' }),
       onConflict: this.enterConflict.bind(this),
-      onTransientError: () => this.setState({ ...this.state, status: 'error' }),
+      onTransientError: (terminal) =>
+        this.setState({
+          ...this.state,
+          status: 'error',
+          saveError: terminal ? 'terminal' : 'retrying',
+        }),
       armRetry: (timer) => {
         this.retryTimer = timer
       },
