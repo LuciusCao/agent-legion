@@ -11,6 +11,7 @@ use velites::events::{
     AutoRetryStartEvent, ContentBlock, Event, EventSink, MemorySink, Message, SharedMemorySink,
     StopReason,
 };
+use velites::models::OutputTokensParam;
 use velites::provider::openai_compat::OpenAiCompatProvider;
 use velites::provider::retry::RetryProvider;
 use velites::provider::{CompletionRequest, Provider, ToolSpec};
@@ -137,6 +138,51 @@ async fn max_output_tokens_is_sent_as_max_tokens() {
 
     let sent = server.recorded()[0].body_json();
     assert_eq!(sent["max_tokens"], 32000);
+    assert!(sent.get("max_completion_tokens").is_none());
+}
+
+#[tokio::test]
+async fn reasoning_model_sends_cap_as_max_completion_tokens() {
+    // #1093: OpenAI reasoning models (o-series) reject `max_tokens`; a
+    // registry declaring `outputTokensParam: max_completion_tokens` moves
+    // the cap to that field and never sends both.
+    let body = sse_body(&[json!({"choices": [{"delta": {}, "finish_reason": "stop"}]})]);
+    let server = MockServer::start(vec![MockResponse::sse(body)]).await;
+
+    let messages = vec![Message::user("hi".into())];
+    let mut req = request(&messages, &[]);
+    req.model = "o3-mini";
+    req.thinking = Some("high");
+    provider(&server)
+        .with_max_output_tokens(Some(32000))
+        .with_output_tokens_param(OutputTokensParam::MaxCompletionTokens)
+        .complete(&req)
+        .await
+        .unwrap();
+
+    let sent = server.recorded()[0].body_json();
+    assert_eq!(sent["max_completion_tokens"], 32000);
+    assert!(sent.get("max_tokens").is_none());
+    assert_eq!(sent["reasoning_effort"], "high");
+}
+
+#[tokio::test]
+async fn output_tokens_param_without_cap_sends_neither_field() {
+    // #1093: the declaration only picks the field; without a cap the wire
+    // shape stays the historical one (no cap field at all).
+    let body = sse_body(&[json!({"choices": [{"delta": {}, "finish_reason": "stop"}]})]);
+    let server = MockServer::start(vec![MockResponse::sse(body)]).await;
+
+    let messages = vec![Message::user("hi".into())];
+    provider(&server)
+        .with_output_tokens_param(OutputTokensParam::MaxCompletionTokens)
+        .complete(&request(&messages, &[]))
+        .await
+        .unwrap();
+
+    let sent = server.recorded()[0].body_json();
+    assert!(sent.get("max_tokens").is_none());
+    assert!(sent.get("max_completion_tokens").is_none());
 }
 
 #[tokio::test]
