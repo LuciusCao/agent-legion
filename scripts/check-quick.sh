@@ -379,7 +379,12 @@ else
       echo "check-quick-backend.sh not present; skipping repo-wide governance checks."
     fi
   fi
-  run_round "static-check" "static" "static" "static"
+  # 静态轮与 guard 任一失败都统一收口：run_round 的失败不能让 set -e 在
+  # wait 之前杀掉门禁——后台治理进程会越过 worktree 锁与机器级 slot 的释放
+  # 继续运行，诊断也随之丢失（codex #1223 R1 P2）；先收状态、等齐治理进程、
+  # 两边诊断都落地后再统一退出。
+  static_status=0
+  run_round "static-check" "static" "static" "static" || static_status=$?
   if [[ -n "$governance_pid" ]]; then
     governance_status=0
     wait "$governance_pid" || governance_status=$?
@@ -387,8 +392,11 @@ else
     if [[ "$governance_status" -ne 0 ]]; then
       keep_log_dir="$log_dir"
       echo "Repo-wide governance checks failed (status=$governance_status)." >&2
-      exit 1
+      [[ "$static_status" -eq 0 ]] && static_status=1
     fi
+  fi
+  if [[ "$static_status" -ne 0 ]]; then
+    exit "$static_status"
   fi
 fi
 # Integration step: the OpenAPI contract spans backend (schema export boots the

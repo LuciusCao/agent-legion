@@ -534,6 +534,41 @@ def test_quick_gate_governance_failure_fails_the_gate(tmp_path: Path) -> None:
     assert "budget blown" in result.stdout
 
 
+def test_quick_gate_waits_for_governance_when_static_round_fails(tmp_path: Path) -> None:
+    """A failing static lane must not let set -e kill the gate before the
+    governance guard is collected: the guard would outlive the worktree lock
+    and machine slot release, and its diagnostics would be lost (codex #1223
+    R1). The gate waits for the guard, prints its output, then exits with
+    the round's failure."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    quick_gate = scripts / "check-quick.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    _copy_lane_paths(scripts)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
+    _write_executable(
+        scripts / "check-quick-backend.sh",
+        "#!/usr/bin/env bash\n"
+        'if [[ "${BACKEND_GATE_PHASE:-}" == "governance" ]]; then\n'
+        "  sleep 2\n"
+        '  echo "governance-finished-marker"\n'
+        "fi\n",
+    )
+    _write_executable(
+        scripts / "check-quick-frontend.sh",
+        '#!/usr/bin/env bash\n[[ "${FRONTEND_GATE_PHASE:-}" != "static" ]] || exit 4\n',
+    )
+
+    result = _run(quick_gate, cwd=tmp_path, env={"GATE_LANES": "frontend"})
+
+    assert result.returncode == 1
+    assert "Parallel static-check round failed" in result.stderr
+    # The guard's output was collected and printed despite the round failure —
+    # without the wait, the gate would exit before the marker could land.
+    assert "governance-finished-marker" in result.stdout
+
+
 def test_quick_gate_skip_governance_env_suppresses_the_guard(tmp_path: Path) -> None:
     """GATE_SKIP_GOVERNANCE=1 (set only by check.sh's frontend+rust segment,
     whose backend segment already ran the set) keeps the guard off even with
