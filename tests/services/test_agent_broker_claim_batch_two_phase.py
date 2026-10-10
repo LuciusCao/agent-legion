@@ -2,8 +2,9 @@
 
 同目录姊妹文件拆分（800 行主动拆分线）：本文件收 #555 两阶段拆分与锁面
 收窄的回归钉子——写段重校验（stale selection / 选择后落 pause / 容量
-收紧）、promote 重读与在飞 pause 的行锁串行化（pg_stat_activity 信号
-等待）、锁面收窄（不重写已 running 的 jobs 行）、last_seen_at 节流与
+收紧）、promote 重读与在飞 pause 的行锁串行化（pg_blocking_pids 钉
+holder pid 的阻塞信号）、锁面收窄（不重写已 running 的 jobs 行）、
+last_seen_at 节流与
 审批门 park 期间的 promote；用例自 test_agent_broker_claim_batch.py 零
 改动迁入，#546 批额度族（per-pool caps / SAVEPOINT 围堵 / 空队列与扫描
 跳过判定）留在原文件。_register_worker / _seed_agent_jobs 两个夹具辅助
@@ -22,6 +23,7 @@ from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.db.transaction import write_transaction
 from shared.protocol import PROTOCOL_VERSION
 from tests.helpers.agent_worker_api import broker, seed_request
+from tests.helpers.pg_waits import wait_until_blocked_by
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -130,36 +132,6 @@ def test_batch_write_phase_skips_candidate_paused_after_selection(job_db) -> Non
     assert row["state"] == "queued"
 
 
-def _await_recheck_lock_wait(*, timeout: float = 20.0) -> None:
-    """等信号非等时长：轮询 pg_stat_activity，直到写段的重读 SELECT ...
-    FOR NO KEY UPDATE 真实进入锁等待（wait_event_type='Lock'）。替代原先
-    字面 join(timeout=5) 的「等满 5 秒大概率已阻塞」——信号出现即确证
-    阻塞在 jobs 行锁上，与机器快慢无关；20s 预算按 CI 负载给足余量，
-    超时即「未阻塞」的可诊断失败。查询文本（for no key update）在本测试
-    库内唯一：postgres tier 每个用例只跑一份，无跨用例同名等待。"""
-    import time
-
-    import psycopg
-
-    deadline = time.monotonic() + timeout
-    with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as probe:
-        while True:
-            row = probe.execute(
-                "select count(*) from pg_stat_activity"
-                " where datname = current_database()"
-                " and pid <> pg_backend_pid()"
-                " and wait_event_type = 'Lock'"
-                " and query ilike '%for no key update%'"
-            ).fetchone()
-            if row[0] > 0:
-                return
-            if time.monotonic() >= deadline:
-                raise AssertionError(
-                    "promote 未进入行锁等待——FOR NO KEY UPDATE 串行化退回了裸 SELECT"
-                )
-            time.sleep(0.05)
-
-
 def test_batch_promote_recheck_serializes_with_inflight_pause(job_db) -> None:
     """codex P1（#555 review）：rowcount=0 的重读带 FOR NO KEY UPDATE——
     已 running 的 job 上，pause 事务在飞（第二连接持未提交的 pause UPDATE）
@@ -169,8 +141,10 @@ def test_batch_promote_recheck_serializes_with_inflight_pause(job_db) -> None:
 
     多连接并发写法跟随 test_agent_broker_claim_locks.py 的 holder-conn +
     join-timeout 先例：join 超时把「回归导致的挂死」变成快速可诊断的失败。
-    「仍阻塞」的判定是锁等待信号（_await_recheck_lock_wait）+ 短窗口存活
-    断言，不再字面等满 5s。
+    「仍阻塞」的判定钉 holder 的 backend pid（pg_blocking_pids 经
+    tests/helpers/pg_waits.py，thread= 带未阻塞即失败的早失败）而非查询
+    文本过滤 pg_stat_activity：xdist worker 共享同一 datname，文本/库名
+    过滤存在跨 worker 误命中通道，backend pid 全实例唯一。
     """
     import threading
 
@@ -194,16 +168,20 @@ def test_batch_promote_recheck_serializes_with_inflight_pause(job_db) -> None:
     outcome_box: dict[str, Any] = {}
 
     def run_write_phase() -> None:
-        with write_transaction(TEST_DATABASE_URL) as conn:
-            outcome_box["outcome"] = claim_batch_in_transaction(
-                pool, conn, "worker-1", None, None, selection=selection
-            )
+        try:
+            with write_transaction(TEST_DATABASE_URL) as conn:
+                outcome_box["outcome"] = claim_batch_in_transaction(
+                    pool, conn, "worker-1", None, None, selection=selection
+                )
+        except Exception as exc:  # 线程内失败带回主线程，防取键 KeyError 掩盖
+            outcome_box["error"] = exc
 
+    write_thread = threading.Thread(target=run_write_phase)
     try:
-        write_thread = threading.Thread(target=run_write_phase)
         write_thread.start()
-        # 等信号：写段真实阻塞在 holder 持有的行锁上（见 helper 注释）。
-        _await_recheck_lock_wait()
+        # 等信号：写段真实阻塞在 holder 持有的行锁上（holder 的 UPDATE 同步
+        # 返回即持锁，正确实现下写线程必须阻塞，thread= 早失败是严格改进）。
+        wait_until_blocked_by(holder.info.backend_pid, thread=write_thread, timeout=20.0)
         # 短窗口不变量：信号出现后线程仍然存活（阻塞是持续态而非一闪而过）。
         write_thread.join(timeout=1)
         assert write_thread.is_alive(), (
@@ -213,8 +191,16 @@ def test_batch_promote_recheck_serializes_with_inflight_pause(job_db) -> None:
         write_thread.join(timeout=30)
         assert not write_thread.is_alive(), "pause 提交后写段未放行"
     finally:
+        # 对齐并发用例三不变量：显式回滚释放行锁（不依赖会话终止）、
+        # holder 关闭后写线程即解阻塞，必须有人 join 回收——否则其异步
+        # 提交会撞下一测试的 TRUNCATE 归因。
+        holder.rollback()
         holder.close()
+        if write_thread.is_alive():
+            write_thread.join(timeout=30)
 
+    if "error" in outcome_box:
+        raise outcome_box["error"]
     outcome = outcome_box["outcome"]
     assert outcome.claims == ()
     with job_db._connect_read() as conn:
