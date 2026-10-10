@@ -14,9 +14,10 @@ init 永不因预暖失败（冷启动是合法路径）。
 
 落位协议（issue #1186，替代原 bash 的 pid 标记临时目录 + mkdir 互斥锁 +
 EXIT trap + 死 pid 清扫器整个协议族）：调用级独立中转目录
-``.uv-cache.prewarm-incoming.<pid>/`` → cp 克隆完整 → ``os.rename`` 原子
-落位 → finally 清理。staging 生命周期阶段：S0 入口判活清扫 → S1 克隆写入
-（危险区）→ S2 rename 落位 → S3 finally 清理 → S4 下次调用的 S0。
+``.uv-cache.prewarm-incoming.<pid>-<nonce>/``（nonce 为每次调用新生成
+的随机短串，#1194）→ cp 克隆完整 → ``os.rename`` 原子落位 → finally
+清理。staging 生命周期阶段：S0 入口判活清扫 → S1 克隆写入（危险区）
+→ S2 rename 落位 → S3 finally 清理 → S4 下次调用的 S0。
 
 staging 生命周期 × 危害源矩阵（族级模型；review 请按格查证，勿逐格发现）：
 
@@ -51,18 +52,31 @@ staging 生命周期 × 危害源矩阵（族级模型；review 请按格查证�
    lstat 区分，symlink/普通文件 unlink、真实目录才 rmtree——
    rmtree(ignore_errors=True) 对 symlink 静默保留会让 cp 穿透写入链接
    目标（可为任意目录）、rename 把 symlink 本身落位成 .uv-cache。
-7. pid 复用 vs 在飞清扫窗口——**登记，不改代码**（reviewer minor 2）：
-   死 pid 的 staging 被判活清扫时 pid 恰好被复用 → kill -0 成功 → 保留
-   死重。与已合并 #1182 bash 版同性质；方向安全（绝不误删活跃数据），
-   残留由该 pid 真正死亡后的 S4 回收。
+7. pid 复用 vs 在飞清扫窗口——**本轮修复**（#1194，PR #1188 codex P3
+   转 follow-up）：旧命名下判死后、rmtree 执行前 pid 被同 worktree 新
+   prewarm 复用并复用同一路径开始克隆，清扫方的在飞 rmtree 与复用者
+   的 cp 交叠可误删活跃克隆——worst case 不止保留死重：对方
+   cp/rename 失败退化冷启动，或部分文件被删后 cp 仍退出 0 → 有界
+   部分落位（内容寻址可自愈、少条目表现为 miss 重拉）。staging 名加
+   调用级 nonce 后 pid 复用者的新目录永不落在被清扫路径上，窗口在
+   结构上关闭；判活仍只看 pid 段（check-time 复用方向照旧只保留死重，
+   安全方向不变）。
 8. cp I/O 失败（磁盘满/读写错）——**设计路径**：S3 finally 清 staging，
    warn 降级冷启动，不 fail-init。
+9. 基准 cache 克隆期被 base worktree 并发 uv 写入——**登记，不改代码**
+   （继承自 #1182 的同类面，定性记录）：cp 读取基准期间 uv 可并发向
+   基准 cache 发布新条目；uv 正常写入路径为 append-only + 原子
+   rename 发布，截断条目风险与 uv 自身的发布原子性绑定，克隆副本
+   至多少条目——少条目表现为后续 miss 重拉、内容寻址下可自愈；
+   并发 prune/GC（`uv cache clean` 等删除源）造成的读取失败归格 8
+   的 cp 失败降级路径，方向安全（冷启动退化级）。
 """
 
 from __future__ import annotations
 
 import errno
 import os
+import secrets
 import shutil
 import signal
 import subprocess
@@ -71,6 +85,8 @@ from pathlib import Path
 
 FINAL_NAME = ".uv-cache"
 STAGING_PREFIX = ".uv-cache.prewarm-incoming"
+# 三处降级 warn 共用的尾部（冷启动是合法路径，仅较慢）。
+_COLD_HINT = "首次 uv 调用将冷启动拉取依赖（正常路径，仅较慢）"
 
 
 def _warn(message: str) -> None:
@@ -93,6 +109,8 @@ def _pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
         return True
+    except OverflowError:  # 后缀数字超 pid 上限（如 30 位）：非法 pid → 视为死（#1194）
+        return False
     except OSError as exc:  # 不存在→死；权限错=存在但属他人→视为活跃（安全方向）
         return not isinstance(exc, ProcessLookupError)
 
@@ -101,9 +119,11 @@ def _sweep_staging_leftovers(root: Path) -> None:
     # 首版脚本固定名残留（无 pid 后缀，glob 匹配不到）一并清，lstat 安全。
     _remove_path(root / STAGING_PREFIX)
     for stale in root.glob(f"{STAGING_PREFIX}.*"):
-        suffix = stale.name.removeprefix(f"{STAGING_PREFIX}.")
-        # 纯数字后缀且（本进程 pid 重入 或 判死）才清；其余一律保留。
-        if suffix.isdigit() and (int(suffix) == os.getpid() or not _pid_alive(int(suffix))):
+        # 后缀 = <pid>[-<nonce>]（旧协议残留无 nonce 段，partition 兼容）：
+        # 按 pid 段判活；本进程 pid（重入）连 nonce 不同的一律清——活 pid
+        # 唯一属于本进程，带本进程 pid 的目录只可能是自己留下的。
+        pid_part = stale.name.removeprefix(f"{STAGING_PREFIX}.").partition("-")[0]
+        if pid_part.isdigit() and (int(pid_part) == os.getpid() or not _pid_alive(int(pid_part))):
             _remove_path(stale)
 
 
@@ -115,7 +135,9 @@ def prewarm(worktree_root: Path, base: Path) -> str:
     stdout）。调用方（init-worktree.sh）忽略状态——预暖失败不 fail-init。
     """
     final = worktree_root / FINAL_NAME
-    staging = worktree_root / f"{STAGING_PREFIX}.{os.getpid()}"
+    # <pid>-<nonce>（格 7，#1194）：nonce 为调用级随机串，pid 被复用时
+    # 复用者的新目录与本路径永不相同，在飞清扫不可能落在本目录上。
+    staging = worktree_root / f"{STAGING_PREFIX}.{os.getpid()}-{secrets.token_hex(4)}"
     # SIGTERM → SystemExit（矩阵格 3）：Python 默认动作不跑 finally，在飞
     # 克隆会残留到下次 init。finally 恢复原 handler，不泄漏进程状态。
     prev_term = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
@@ -146,16 +168,12 @@ def prewarm(worktree_root: Path, base: Path) -> str:
         # 否则 cp 对已存在目录走「拷入」语义会把嵌套落位成 final。lexists
         # 不跟随 symlink（exists() 对悬空链接返回 False，会漏判）。
         if os.path.lexists(staging):
-            _warn(
-                "提示: .uv-cache 预暖中转目录清理失败，已跳过——首次 uv 调用将冷启动拉取依赖（正常路径，仅较慢）"
-            )
+            _warn(f"提示: .uv-cache 预暖中转目录清理失败，已跳过——{_COLD_HINT}")
             return "failed-staging-dirty"
         flags = ["-Rc"] if sys.platform == "darwin" else ["-R", "--reflink=auto"]
         # cp 失败（I/O 错误、磁盘满）：中转目录由 finally 清掉，降级冷启动。
         if subprocess.run(["cp", *flags, str(source), str(staging)], check=False).returncode != 0:
-            _warn(
-                "提示: .uv-cache 预暖克隆失败，已跳过——首次 uv 调用将冷启动拉取依赖（正常路径，仅较慢）"
-            )
+            _warn(f"提示: .uv-cache 预暖克隆失败，已跳过——{_COLD_HINT}")
             return "failed-clone"
         try:
             os.rename(staging, final)
@@ -164,9 +182,7 @@ def prewarm(worktree_root: Path, base: Path) -> str:
                 # 并发落败：final 已被兄弟 init / uv 落位，丢弃自己的克隆。
                 _warn("提示: .uv-cache 已由并发 init 预暖，丢弃重复克隆")
                 return "skipped-concurrent"
-            _warn(
-                "提示: .uv-cache 预暖落位失败，已跳过——首次 uv 调用将冷启动拉取依赖（正常路径，仅较慢）"
-            )
+            _warn(f"提示: .uv-cache 预暖落位失败，已跳过——{_COLD_HINT}")
             return "failed-landing"
         print(f"已预暖 .uv-cache <- {base}（后续 uv 调用将命中已缓存依赖）")
         return "prewarmed"

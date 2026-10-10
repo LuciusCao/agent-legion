@@ -275,7 +275,9 @@ def test_landing_failure_cleans_staging_and_reports(
     assert _staging_leftovers(worktree) == []
 
 
-def test_symlink_staging_is_unlinked_never_followed(tmp_path: Path) -> None:
+def test_symlink_staging_is_unlinked_never_followed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """codex P2：残留中转路径是指向目录的 symlink 时必须 unlink 而非
     rmtree 保留——cp 不得穿透写入链接目标（可为任意目录/其他 worktree），
     落位的 .uv-cache 必须是真实目录而非 symlink 本身。"""
@@ -286,8 +288,10 @@ def test_symlink_staging_is_unlinked_never_followed(tmp_path: Path) -> None:
     victim = tmp_path / "victim"
     victim.mkdir()
     (victim / "canary").write_text("untouched\n")
-    # 残留 symlink 占住本进程的中转路径（如上一轮被手工/异常放置）。
-    (worktree / f"{STAGING_PREFIX}.{os.getpid()}").symlink_to(victim)
+    # 残留 symlink 占住本进程的中转路径（如上一轮被手工/异常放置）；
+    # 钉住 nonce 让预置路径恰好是本次调用的 staging。
+    monkeypatch.setattr(prewarm_mod.secrets, "token_hex", lambda _n: "5ymlink0")
+    (worktree / f"{STAGING_PREFIX}.{os.getpid()}-5ymlink0").symlink_to(victim)
 
     assert prewarm(worktree, base) == "prewarmed"
 
@@ -302,8 +306,10 @@ def test_symlink_staging_is_unlinked_never_followed(tmp_path: Path) -> None:
 
 
 def test_sweep_removes_only_dead_pid_and_own_leftovers(tmp_path: Path) -> None:
-    """入口判活清扫：死 pid（spawn+reap 现场制造）与本进程 pid（重入）的
-    残留清掉；活跃 pid 与非数字后缀一律保留（失败方向 = 保留死重）。"""
+    """入口判活清扫：死 pid（spawn+reap 现场制造）与本进程 pid（重入，含
+    异 nonce 旧目录）的残留清掉；活跃 pid 与非数字 pid 段一律保留（失败
+    方向 = 保留死重）。命名兼容：<pid>-<nonce> 新形态与旧协议无 nonce
+    残留都在清扫面内。"""
     worktree = tmp_path / "worktree"
     worktree.mkdir()
     base = tmp_path / "base"
@@ -311,27 +317,138 @@ def test_sweep_removes_only_dead_pid_and_own_leftovers(tmp_path: Path) -> None:
     with subprocess.Popen(["true"]) as proc:
         dead_pid = proc.pid
         proc.wait()
-    dead = worktree / f"{STAGING_PREFIX}.{dead_pid}"
+    dead = worktree / f"{STAGING_PREFIX}.{dead_pid}-dead0000"
     dead.mkdir()
-    own = worktree / f"{STAGING_PREFIX}.{os.getpid()}"
+    legacy = worktree / f"{STAGING_PREFIX}.{dead_pid}"  # 旧协议无 nonce 残留
+    legacy.mkdir()
+    own = worktree / f"{STAGING_PREFIX}.{os.getpid()}-0wn00000"
     own.mkdir()
     named = worktree / f"{STAGING_PREFIX}.notapid"
     named.mkdir()
+    named_nonce = worktree / f"{STAGING_PREFIX}.notapid-x1"
+    named_nonce.mkdir()
     # 活跃「他人」pid：spawn 存活子进程承载（断言期间必然存活，非时长假设）。
     alive_proc = subprocess.Popen(["sleep", "30"])
     try:
-        alive = worktree / f"{STAGING_PREFIX}.{alive_proc.pid}"
+        alive = worktree / f"{STAGING_PREFIX}.{alive_proc.pid}-a11ve000"
         alive.mkdir()
 
         assert prewarm(worktree, base) == "skipped-no-base"
 
         assert not dead.exists()
+        assert not legacy.exists()
         assert not own.exists()
         assert alive.is_dir()
         assert named.is_dir()
+        assert named_nonce.is_dir()
     finally:
         alive_proc.terminate()
         alive_proc.wait()
+
+
+def test_sweep_in_flight_pid_reuse_never_deletes_reuser_clone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """格 7 结构性关闭（#1194）构造性回归：判死后、_remove_path 执行前
+    pid 被同 worktree 新 prewarm 复用——复用者用同 pid + 不同 nonce 的
+    新目录开始克隆，该目录不落在被清扫路径上 ⇒ 在飞 rmtree 与复用者的
+    cp 交叠也零误删；清扫只命中真正的死残留（旧 nonce 目录）。后半段
+    以同一复用 pid 跑真实 prewarm，端到端钉住「nonce 不同 ⇒ 真实生成
+    的 staging 路径永不相同」这一结构命题（非仅靠构造目录名演示）。"""
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    base = tmp_path / "base"
+    base.mkdir()  # 无 cache：早退路径，聚焦 S0 清扫语义
+    reused_pid = 987654  # 合成 pid：_pid_alive 全程被时序 mock，不触宿主进程表
+    stale = worktree / f"{STAGING_PREFIX}.{reused_pid}-dead0000"
+    (stale / "old-junk").mkdir(parents=True)
+    active = worktree / f"{STAGING_PREFIX}.{reused_pid}-newc0ffe"
+
+    alive_now = {"value": False}
+    monkeypatch.setattr(prewarm_mod, "_pid_alive", lambda _pid: alive_now["value"])
+    real_remove = prewarm_mod._remove_path
+
+    def remove_with_in_flight_reuse(path: Path) -> None:
+        # 判死之后、rmtree 执行前：pid 被复用，新进程开始克隆（活跃写入）。
+        if path == stale:
+            alive_now["value"] = True
+            (active / "clone-in-flight").mkdir(parents=True)
+        real_remove(path)
+
+    monkeypatch.setattr(prewarm_mod, "_remove_path", remove_with_in_flight_reuse)
+
+    assert prewarm(worktree, base) == "skipped-no-base"
+
+    assert not stale.exists()  # 真正的死残留被回收
+    assert (active / "clone-in-flight").is_dir()  # 复用者的活跃克隆零损失
+
+    # 端到端结构钉（review M1）：以复用 pid 跑真实 prewarm，截获 cp 目的地
+    # ——真实生成的 staging 必带 -<nonce> 段，且永不等于 stale/active 两路径。
+    _seed_base_cache(base)
+    monkeypatch.setattr(prewarm_mod, "_remove_path", real_remove)
+    monkeypatch.setattr(os, "getpid", lambda: reused_pid)
+    generated: list[str] = []
+
+    def recording_cp(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        generated.append(Path(cmd[-1]).name)
+        return _fake_cp_creates_staging(cmd, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", recording_cp)
+
+    assert prewarm(worktree, base) == "prewarmed"
+
+    (generated_name,) = generated
+    assert generated_name.startswith(f"{STAGING_PREFIX}.{reused_pid}-")
+    assert generated_name.removeprefix(f"{STAGING_PREFIX}.{reused_pid}-")
+    assert generated_name not in {stale.name, active.name}
+
+
+def test_consecutive_calls_generate_distinct_staging_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """nonce 每次调用新生成（#1194 review N2）：同进程同 pid 下两次连续
+    prewarm 的 staging 路径名必须不同且都带 -<nonce> 段——「同 pid 异
+    nonce ⇒ 路径不同」对真实调用成立（截获 cp 目的地取证）。"""
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    base = tmp_path / "base"
+    _seed_base_cache(base)
+    names: list[str] = []
+
+    def recording_cp(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        names.append(Path(cmd[-1]).name)
+        return _fake_cp_creates_staging(cmd, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", recording_cp)
+
+    assert prewarm(worktree, base) == "prewarmed"
+    shutil.rmtree(worktree / ".uv-cache")  # 让第二次调用重新走克隆路径
+    assert prewarm(worktree, base) == "prewarmed"
+
+    assert len(names) == 2
+    assert names[0] != names[1]  # 同 pid 下 nonce 段是唯一区分 ⇒ 必须不同
+    for name in names:
+        nonce = name.removeprefix(f"{STAGING_PREFIX}.{os.getpid()}-")
+        assert len(nonce) == 8  # token_hex(4) = 8 字符
+
+
+def test_sweep_huge_pid_suffix_treated_as_dead_not_warn_degraded(tmp_path: Path) -> None:
+    """_pid_alive 补捕 OverflowError（#1194 顺手项）：残留后缀为超大数字
+    （如 30 位）时 os.kill 抛 OverflowError 而非 OSError（reviewer 本机
+    实证）——穿透 sweep 会让每次 prewarm 走 warn 降级直到手工删除；必须
+    视为死 pid 正常清扫。合成数字远超 pid 上限，不依赖宿主进程表。"""
+    assert prewarm_mod._pid_alive(int("9" * 30)) is False  # 单元级钉住
+
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    base = tmp_path / "base"
+    base.mkdir()
+    huge = worktree / f"{STAGING_PREFIX}.{'9' * 30}-dead0000"
+    huge.mkdir()
+
+    assert prewarm(worktree, base) == "skipped-no-base"
+
+    assert not huge.exists()
 
 
 def test_dirty_staging_after_failed_cleanup_degrades(
@@ -346,7 +463,9 @@ def test_dirty_staging_after_failed_cleanup_degrades(
     worktree.mkdir()
     base = tmp_path / "base"
     _seed_base_cache(base)
-    staging = worktree / f"{STAGING_PREFIX}.{os.getpid()}"
+    # 钉住 nonce 让预置目录恰好占住本次调用的 staging 路径。
+    monkeypatch.setattr(prewarm_mod.secrets, "token_hex", lambda _n: "d1rty000")
+    staging = worktree / f"{STAGING_PREFIX}.{os.getpid()}-d1rty000"
     (staging / "leftover").mkdir(parents=True)
     monkeypatch.setattr(prewarm_mod, "_remove_path", lambda _path: None)  # 清理失败
 
