@@ -37,24 +37,35 @@ prepare 备妥的归档超 Host 下发上限即诚实判败，不把注定 413 �
 report 车道。
 
 ``max_archive_bytes`` 的取值状态机（#1174 F1——两个 0 的语义分界；
-#1174 起该值随 pending marker 持久化，崩溃恢复任务与在线任务同口径，
-0 只剩旧 Host 未下发与 #1174 前旧 marker 两个来源；#1184 补「正值但已
-过期」行——413 信号使本地快照失效）：
+#1174 起该值随 pending marker 持久化，0 只剩旧 Host 未下发与 #1174 前
+旧 marker 两个来源；#1184 补「正值但已过期」两行——413 信号与恢复值
+都使本地快照失效，时效性双向漂移完整建模）：
 
-- claim 下发正值，无 Host 大小信号（换写失败回落、finalize 拒写臂，
-  ``degrade_ceiling(task)``）：按值裁剪——快照仍是本地最好知识。
+- claim 下发正值（在线，``max_archive_bytes_restored=False``）：prepare
+  预检（``declared_ceiling_rejection`` / ``finalize_result_metadata``
+  换写上限，口径 ``precheck_ceiling``）按值判定——超限本地诚实判败，
+  Host 刚下发、可信窗口内。无 Host 大小信号的回收位（换写失败回落、
+  finalize 拒写臂，口径 ``degrade_ceiling``）按值裁剪。
 - claim 下发正值，**413 已到**（``degrade_ceiling(task, snapshot_stale=
   True)``，#1184）：无条件按协议下限裁。413 本身就是「快照过期」的
   判决信号——Host 可能重启后下调了 ``agent_workers.max_archive_bytes``，
   收到判决后本地任何上限知识都不可信；``or`` 复用持久正值会把回收
   产物裁进已失效的口径（旧值 > Host 新值时重报吃第二个 413 → 闸判
   终态删 marker 丢结果）。
-- 0（未知）：prepare 预检**不猜**——不预检、不裁剪，交 Host 的 413
-  判决兜底（64 MiB 默认可能低于 Host 实际配置而误杀可交付结果）；进入
-  降级回收时按协议下限 ``MIN_RESULT_ARCHIVE_BYTES``（1 KiB，Host 配置
-  模型的合法下限，单一来源 shared/code_contract）裁剪——Host 拒过说明
-  它有上限，本地不知道具体值时按协议保证的最小上限裁，重报归档对任何
-  合法 Host 配置必可提交。
+- **恢复任务的持久值**（``max_archive_bytes_restored=True``，#1184 复审）：
+  预检不猜（``precheck_ceiling`` 归 0）——快照同样可**上调**过期：Host
+  重启调大后按旧值预检会把 Host 现在完全能收的归档误杀为 failed
+  （成功执行被永久判败），只能照发交 Host 的 413 判决 + 回收臂兜底；
+  持久字段保留作诊断/观测锚点。回收位一律按协议下限（``degrade_ceiling``
+  归下限）——与 413 行同族：非 413 回收位用它裁会撞「裁进已失效口径 →
+  重报 413 → 闸已回收拒绝二次 → 终态删 marker 丢结果」的角落链。
+- 0（未知，在线旧 Host 或恢复皆同）：prepare 预检**不猜**——不预检、
+  不裁剪，交 Host 的 413 判决兜底（64 MiB 默认可能低于 Host 实际配置
+  而误杀可交付结果）；进入降级回收时按协议下限
+  ``MIN_RESULT_ARCHIVE_BYTES``（1 KiB，Host 配置模型的合法下限，单一
+  来源 shared/code_contract）裁剪——Host 拒过说明它有上限，本地不知道
+  具体值时按协议保证的最小上限裁，重报归档对任何合法 Host 配置必可
+  提交。
 """
 
 from __future__ import annotations
@@ -72,7 +83,7 @@ from worker.upload.result_manifest import (
     ResultMetadataOverCeiling,
     embed_result_metadata,
 )
-from worker.upload.task import UploadTask, degrade_ceiling
+from worker.upload.task import UploadTask, degrade_ceiling, precheck_ceiling
 
 # 「稍后再试」语义的 4xx：与 5xx 同归瞬时臂（持续重试），不是判决。
 RETRYABLE_CLIENT_STATUSES = frozenset({408, 425, 429})
@@ -103,11 +114,13 @@ def declared_ceiling_rejection(task: UploadTask, archive: Path) -> str | None:
     ``max_archive_bytes``即回收空归档并返回判败原因（交给 failed_metadata，
     终态 metadata 由 bulk 车道终点的 finalize 写入）。
 
-    只按 Host 实际下发值判定：未下发（旧 Host / #1174 前落盘的旧 marker，
-    ``max_archive_bytes == 0``）时本地不猜上限——64 MiB 默认可能低于 Host
-    实际配置而误杀可交付结果，交给 Host 的 413 判决，由 report 循环的
-    4xx 降级臂兜底（413 后的 0 按协议下限裁剪，矩阵见模块 docstring）。"""
-    ceiling = task.max_archive_bytes
+    只信在线 claim 值（``precheck_ceiling``，#1184 复审）：恢复任务读出
+    的持久值不预检（0 = 不猜）——快照双向可过期，Host 重启**上调**后，
+    按旧值预检会把 Host 现在完全能收的归档误杀为 failed（成功执行被
+    永久判败），只能照发交 Host 的 413 判决 + 回收臂兜底。在线值未
+    下发（0）时同样不猜——64 MiB 默认可能低于 Host 实际配置而误杀，
+    交 Host 判决（413 后按协议下限裁剪，矩阵见模块 docstring）。"""
+    ceiling = precheck_ceiling(task)
     archive_bytes = archive.stat().st_size if archive.is_file() else 0
     if ceiling <= 0 or archive_bytes <= ceiling:
         return None

@@ -2,8 +2,9 @@
 
 The queue module owns the lanes and delivery; this module owns the task
 record: identity, persisted marker (de)serialization, the direct-upload
-verdict, the degrade-recycle ceiling verdict (#1174), and the runtime-only
-delivery state (prepared artifacts, heartbeat handles, the #551 stage timer).
+verdict, the archive-ceiling verdicts (precheck vs. degrade-recycle and
+their snapshot-trust split, #1174/#1184), and the runtime-only delivery
+state (prepared artifacts, heartbeat handles, the #551 stage timer).
 """
 
 from __future__ import annotations
@@ -21,19 +22,32 @@ _PENDING_VERSION = 1
 def degrade_ceiling(task: UploadTask, snapshot_stale: bool = False) -> int:
     """降级回收位的归档上限口径（#1174/#1184 矩阵，三个回收位同源）：
 
-    - ``snapshot_stale=False``（无 Host 大小信号——换写失败回落、finalize
-      拒写臂）：正值按 claim 下发的实际值；0（旧 Host / #1174 前旧
-      marker）按协议下限 ``MIN_RESULT_ARCHIVE_BYTES``——快照仍是本地
-      最好知识。
     - ``snapshot_stale=True``（已收到 413——唯一带 Host 大小判决的回收
       位）：无条件协议下限。413 本身就是「claim 快照过期」的判决信号：
       Host 可能重启后下调了 ``agent_workers.max_archive_bytes``（或
       marker 持久值本就来自旧配置），收到判决后本地任何上限知识都
       不可信；按协议保证的最小上限裁，重报归档对任何合法 Host 配置
-      必可提交。语义矩阵见 report_policy 模块 docstring。"""
-    if snapshot_stale:
+      必可提交。
+    - 恢复任务的持久值（``max_archive_bytes_restored``，#1184 复审）：
+      同样无条件下限——快照双向可过期，非 413 回收位用它裁会撞
+      「裁进已失效口径 → 重报 413 → 闸已回收拒绝二次 → 终态删 marker
+      丢结果」的角落链；下限的代价只是归因观测面被多裁。
+    - 其余（在线值、无 Host 大小信号——换写失败回落、finalize 拒写
+      臂）：正值按 claim 下发的实际值；0（旧 Host / #1174 前旧
+      marker）按协议下限——快照仍是本地最好知识。
+    语义矩阵见 report_policy 模块 docstring。"""
+    if snapshot_stale or task.max_archive_bytes_restored:
         return MIN_RESULT_ARCHIVE_BYTES
     return task.max_archive_bytes or MIN_RESULT_ARCHIVE_BYTES
+
+
+def precheck_ceiling(task: UploadTask) -> int:
+    """预检位的归档上限口径（#1184 复审矩阵）：只信在线 claim 值（Host
+    刚随 claim 下发，可信窗口内）；恢复任务读出的持久值不参与预检
+    （0 = 不猜）——快照双向可过期，上调后本地预检会把 Host 现在完全
+    能收的归档误杀为 failed（成功执行被永久判败），只能照发交 Host
+    的 413 判决 + 报告循环回收臂兜底。"""
+    return 0 if task.max_archive_bytes_restored else task.max_archive_bytes
 
 
 class PendingUploadExists(RuntimeError):
@@ -68,14 +82,20 @@ class UploadTask:
     # 崩溃恢复的任务从 bulk 车道重进时走旧通道（Host 两种形态都收）。
     artifact_uploads: dict[str, Any] = field(default_factory=dict)
     # #755 codex P1：Host 经 claim 下发的 agent_workers.max_archive_bytes
-    # 实际值（换轨预检的判定口径）；0 = 未知（旧 Host 未下发 / #1174 前的
-    # 旧 marker 无字段）——预检不猜上限、交 Host 413 判决，413 回收臂则按
-    # 协议下限裁剪（两个 0 的语义矩阵见 report_policy 模块 docstring）。
-    # #1174 F1 起随 marker 持久化（与 artifact_uploads 的不持久化纪律不同：
-    # presigned URL 会过期而纯 int 不会）——崩溃恢复的任务从 marker 读回
-    # claim 时点值，预检与回收裁剪与在线任务同一口径；旧版本 marker 缺
-    # 字段归 0（from_json 兼容）。
+    # 实际值（在线任务预检/换轨的判定口径）；0 = 未知（旧 Host 未下发 /
+    # #1174 前的旧 marker 无字段）——预检不猜上限、交 Host 413 判决，
+    # 413 回收臂则按协议下限裁剪（语义矩阵见 report_policy 模块
+    # docstring）。#1174 F1 起随 marker 持久化（与 artifact_uploads 的
+    # 不持久化纪律不同：presigned URL 会过期而纯 int 不会）；#1184
+    # 复审起持久值只作诊断/观测锚点——快照双向可过期（Host 重启下调
+    # → 413 兜底；上调 → 预检误杀成功执行），预检与回收裁剪只信在线
+    # 值，恢复任务一律不预检（见 precheck_ceiling / degrade_ceiling）。
     max_archive_bytes: int = 0
+    # #1184 复审：max_archive_bytes 的来源标记——True = 从 pending
+    # marker 读回（恢复任务，快照可双向过期）；False = 在线 claim 注入
+    # （execution/run 与 code_runner 的构造路径，可信）。运行态、不持久
+    # 化（from_json 读回的值按定义就是恢复值，无需往返）。
+    max_archive_bytes_restored: bool = False
     heartbeat_stop: threading.Event = field(default_factory=threading.Event)
     heartbeat_thread: threading.Thread | None = None
     # #352: 本任务租约归属的批量心跳 registry（_deliver_bulk 接管/恢复时
@@ -157,4 +177,8 @@ class UploadTask:
             command=tuple(str(part) for part in payload.get("command", [])),
             prebuilt_metadata=payload.get("prebuilt_metadata"),
             max_archive_bytes=int(payload.get("max_archive_bytes") or 0),
+            # #1184 复审：marker 读回的上限是可过期快照（来源标记，运行态
+            # 不持久化）——预检不猜、回收按下限（precheck_ceiling /
+            # degrade_ceiling 读此标记分流）。
+            max_archive_bytes_restored=True,
         )

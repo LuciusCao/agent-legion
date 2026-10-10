@@ -44,6 +44,7 @@ from worker.upload.degraded_archive import (
     write_empty_archive,
     write_metadata_only_archive,
 )
+from worker.upload.queue import UploadTask
 
 pytestmark = pytest.mark.no_db
 
@@ -432,6 +433,37 @@ def test_degrade_gate_rewrite_failure_fallback_uses_protocol_floor(
     metadata = read_result_metadata(archive)
     assert metadata["status"] == "failed"
     assert metadata["command"] == []  # 观测字段让位（协议下限裁剪）
+
+
+def test_degrade_gate_rewrite_failure_floors_restored_ceiling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1184 复审（恢复值 × 非 413 换写失败回落）：恢复任务读出的持久
+    8 KiB 是可过期快照——回落回收按下限（不用持久值：Host 实际 1 KiB
+    的下调形态下裁到 8 KiB 仍超限 → 重报 413 → 闸已回收拒绝二次 → 终态
+    删 marker 丢结果）。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    seed = _task(work_root, command=tuple(secrets.token_hex(32) for _ in range(64)))
+    seed.max_archive_bytes = 8 * 1024
+    task = UploadTask.from_json(
+        json.loads(json.dumps(seed.to_json(), ensure_ascii=False)), work_root
+    )
+    archive = work_root / "exec-1" / "result.tar.gz"
+    write_empty_archive(archive)
+    gate = report_policy.ReportDegradeGate(task, archive)
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise OSError("simulated embed rewrite failure")
+
+    monkeypatch.setattr(report_policy, "embed_result_metadata", boom)
+
+    assert gate.on_rejection(400, "HTTP 400: bad verdict") is True
+
+    assert archive.stat().st_size <= MIN_RESULT_ARCHIVE_BYTES
+    metadata = read_result_metadata(archive)
+    assert metadata["status"] == "failed"
+    assert metadata["command"] == []  # 协议下限裁剪（非持久 8 KiB 口径）
 
 
 def test_metadata_only_archive_keeps_full_error_after_command_trim(tmp_path: Path) -> None:

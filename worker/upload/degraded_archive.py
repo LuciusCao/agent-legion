@@ -41,7 +41,9 @@ finalize 拒写）都汇聚到本模块——判败可以丢证据，**绝不能
     （归因——短 verdict 时 command 一裁即收，归因全文保留）。
 
 调用臂 × 产物形态（三个臂共享同一回收语义，均在各自失败面内收敛到
-``write_metadata_only_archive(archive, failed, task.max_archive_bytes)``）:
+``write_metadata_only_archive(archive, failed, degrade_ceiling(task, ...))``
+——口径见 task.py 的 degrade_ceiling / report_policy 的 #1184 矩阵：在线
+正值按值、0 / 恢复值 / 413 已到按协议下限）:
 
 - ``finalize_result_metadata`` 拒写臂（``ResultMetadataOverCeiling`` /
   OSError / TarError / ValueError——含保留成员碰撞守卫的 ValueError）；

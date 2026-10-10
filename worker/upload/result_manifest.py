@@ -13,9 +13,11 @@ payload 携带该标记。
 
 大小治理：v2 无头预算，metadata 受归档单成员体积约束——``max_archive_bytes``
 （claim 下发）是唯一大小门；带上限调用时按 staging 实际大小拒写（原归档
-不动），调用方走既有诚实判败通道。判败回收（下方拒写臂）的口径：
-正值按值、0（未下发）按协议下限 ``MIN_RESULT_ARCHIVE_BYTES``——与
-``report_policy`` 的两个回收位同口径（#1174 二轮，矩阵见其模块 docstring）。
+不动），调用方走既有诚实判败通道。上限口径（#1184 矩阵，见
+report_policy 模块 docstring）：预检只信在线值（恢复任务的持久值归 0
+不猜，归档照发交 Host 判决）；判败回收（下方拒写臂）正值按值、0 与
+恢复值按协议下限 ``MIN_RESULT_ARCHIVE_BYTES``——与 report_policy 的两个
+回收位同口径。
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from shared.code_contract import RESULT_METADATA_MEMBER
 from worker.upload.degraded_archive import failed_metadata, write_metadata_only_archive
-from worker.upload.task import degrade_ceiling
+from worker.upload.task import degrade_ceiling, precheck_ceiling
 
 if TYPE_CHECKING:
     from worker.upload.task import UploadTask
@@ -124,7 +126,9 @@ def finalize_result_metadata(
     try:
         if RESULT_METADATA_MEMBER in task.expected_outputs:
             raise ValueError(f"{RESULT_METADATA_MEMBER} collides with an expected output")
-        embed_result_metadata(archive, metadata, max_bytes=task.max_archive_bytes)
+        # #1184 复审：预检口径只信在线值（precheck_ceiling）——恢复任务的
+        # 持久值归 0（不猜，归档照发交 Host 判决）；在线值超限在此拒写。
+        embed_result_metadata(archive, metadata, max_bytes=precheck_ceiling(task))
     except (ResultMetadataOverCeiling, OSError, tarfile.TarError, ValueError) as exc:
         failed = failed_metadata(task, f"result metadata finalize failed: {exc}")
         # #1169：判败回收同样受 claim 上限约束——metadata-only 归档按上限
