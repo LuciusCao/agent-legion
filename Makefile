@@ -82,6 +82,13 @@ llm-gateway: ## 启动远程 LLM 网关（凭据来自 PI_MODELS_JSON 指定的 
 # 机器特定配置）：存在即自动并入 stack 命令，不存在则只用基础编排。
 COMPOSE_HOST_FILES  := -f deploy/compose.host.yaml $(if $(wildcard deploy/compose.local.yaml),-f deploy/compose.local.yaml,)
 COMPOSE_WORKER_FILES := -f deploy/compose.worker.yaml $(if $(wildcard deploy/compose.worker.local.yaml),-f deploy/compose.worker.local.yaml,)
+# host stack 的 down 无条件带上全部本地对象存储 profile（#1105）：compose down
+# 不带 profile 时跳过 profile 下的服务，seaweedfs/rustfs 容器留存、网络删不掉。
+# 不复用 up 侧的 local-s3-decide.sh：down 时的判定输入（deploy/.env、
+# AGENT_LEGION_LOCAL_S3*）可能已不同于 up 时，且决策失败的退出码会被命令替换
+# 吞掉，两者都会漏停实际在跑的容器；对未启动的 profile 服务 down 是 no-op。
+# profile 全集由 tests/scripts/test_stack_down_profiles.py 对照 compose 文件钉住。
+COMPOSE_HOST_DOWN_PROFILES := --profile materials-local --profile materials-local-rustfs
 
 .PHONY: stack-host-up
 stack-host-up: ## 部署机：启动 PostgreSQL + Agent Legion Host + 本机 Worker（本地对象存储由 local-s3-decide.sh 按 AGENT_LEGION_LOCAL_S3/BACKEND 决策，skip 时输出为空）
@@ -109,14 +116,14 @@ endif
 .PHONY: prod-down
 prod-down: ## 停止生产环境（默认原生形态，SIGTERM 优雅停机；`make prod-down docker` 停 Docker stack）
 ifeq ($(filter docker,$(MAKECMDGOALS)),docker)
-	docker compose $(COMPOSE_HOST_FILES) down
+	docker compose $(COMPOSE_HOST_FILES) $(COMPOSE_HOST_DOWN_PROFILES) down
 else
 	./scripts/native-prod-down.sh
 endif
 
 .PHONY: stack-host-down
-stack-host-down: ## 停止部署机 Agent Legion stack
-	docker compose $(COMPOSE_HOST_FILES) down
+stack-host-down: ## 停止部署机 Agent Legion stack（含 profile 下的本地对象存储）
+	docker compose $(COMPOSE_HOST_FILES) $(COMPOSE_HOST_DOWN_PROFILES) down
 
 .PHONY: stack-worker-up
 stack-worker-up: ## Worker 机器：仅启动 Agent Legion Worker
@@ -129,7 +136,7 @@ stack-worker-down: ## 停止 Worker 机器上的 Agent Legion Worker
 STACK ?= host
 .PHONY: stack-down
 stack-down: ## 停止本机所有 Agent Legion stack（host 与 worker）
-	-docker compose $(COMPOSE_HOST_FILES) down
+	-docker compose $(COMPOSE_HOST_FILES) $(COMPOSE_HOST_DOWN_PROFILES) down
 	-docker compose $(COMPOSE_WORKER_FILES) down
 
 .PHONY: stack-logs
