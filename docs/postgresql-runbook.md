@@ -44,7 +44,8 @@ opt-in themselves; a manual `uvicorn` against the shared database must set
 it explicitly.
 
 The server creates the current schema under a PostgreSQL advisory migration
-lock. The configured role needs permission to connect and to create/alter
+lock keyed per (database, effective schema) — see `server/app/db/schema.py`.
+The configured role needs permission to connect and to create/alter
 objects in its application schema.
 
 Schema upgrades are per-version: `schema_migrations` records one row per
