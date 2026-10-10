@@ -11,8 +11,10 @@ shared route derivation (workflow_revision_routes.py);
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
+from server.app.jobs.queries.workflow_revisions import compose_commit_hooks
 from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.agent_profile_provenance import (
     carry_forward_provenance,
@@ -37,6 +39,7 @@ def publish_workflow_revision(
     custom_nodes_enabled: bool,
     workspace_id: str,
     definition: WorkflowDefinition,
+    on_commit: Callable[[Any], None] | None = None,
 ) -> dict:
     definition_json = serialize_definition(definition)
     # node_code_pins snapshot the published custom code versions at publish
@@ -88,6 +91,10 @@ def publish_workflow_revision(
     prune_hook = override_prune_commit_hook(
         job_db, workspace_id, definition, legacy_agent_catalog(job_db, workspace_id)
     )
+    # #1221: the caller's hook (draft-row delete on draft publish — never on
+    # the ensure_active_revision seed path) stacks AFTER the prune, inside the
+    # same revision transaction. Callable[[Any], ...]: the concrete connection
+    # type must not be imported in services (BOUNDARY-DATA-001).
     return job_db.create_workflow_revision(
         revision_id=revision_id,
         workspace_id=workspace_id,
@@ -97,6 +104,6 @@ def publish_workflow_revision(
         definition_json=stored_json,
         definition_hash=definition_hash(definition_json),
         agent_routes=agent_routes,
-        on_commit=prune_hook,
+        on_commit=compose_commit_hooks(prune_hook, on_commit),
         frozen_route_nodes=frozen_route_nodes,
     )

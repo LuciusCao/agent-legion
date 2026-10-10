@@ -235,6 +235,9 @@ def test_new_request_during_confirm_window_is_refused(client, job_db, monkeypatc
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["request"]["status"] == "confirmed"
     # The confirm window closed: re-requests work again (no confirming row).
+    # #1221: the publish deleted the draft row, so the follow-up request needs
+    # a fresh draft first (the agent re-saves from the new canonical baseline).
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 再次调整\n")
     followup = _request_publish(scoped, workspace_id)
     assert followup.status_code == 200, followup.text
 
@@ -388,9 +391,10 @@ def test_stale_confirming_row_recovers_via_sweep(client, job_db, monkeypatch) ->
 
     def claim_then_die(job_db_, workspace_id_, yaml, enabled):
         # Simulate the process dying between claim and resolve: age the claim
-        # past the threshold, publish (the effect is real and on disk — keeps
-        # the draft's post-publish state coherent with the follow-up request
-        # below), then die — the resolve never runs.
+        # past the threshold, publish (the effect is real and on disk — #1221
+        # deletes the draft row with it, which the follow-up request below
+        # accounts for by parking a fresh draft), then die — the resolve
+        # never runs.
         with job_db_.connect() as conn:
             conn.execute(
                 "update studio_publish_requests set claimed_at = current_timestamp"
@@ -422,6 +426,8 @@ def test_stale_confirming_row_recovers_via_sweep(client, job_db, monkeypatch) ->
     status = scoped.get(f"/api/studio-agent/tools/publish-requests/{request_id}")
     assert status.json()["request"]["status"] == "expired"
     # And the workspace is unwedged: a fresh request can be parked.
+    # #1221: the in-flight publish deleted the draft row — park a fresh one.
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 再次调整\n")
     followup = _request_publish(scoped, workspace_id)
     assert followup.status_code == 200, followup.text
 
@@ -497,6 +503,8 @@ def test_concurrent_create_during_claim_never_parks_a_second_request(
             (workspace_id,),
         ).fetchone()
     assert pendings["count"] == 0
+    # #1221: the publish deleted the draft row — park a fresh one first.
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 再次调整\n")
     followup = _request_publish(scoped, workspace_id)
     assert followup.status_code == 200, followup.text
 

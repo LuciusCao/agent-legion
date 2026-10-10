@@ -11,6 +11,8 @@ from server.app.services.workflow_draft_publish import (
     publish_workflow_draft,
     validate_workflow_draft_for_publish,
 )
+from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
+from server.app.services.workflow_revisions import WorkflowRevisionService
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -625,3 +627,76 @@ def test_publish_rejects_secret_schema_default(
     # The error never echoes the default's value; nothing was published.
     assert all("schema-default-cred" not in error for error in errors)
     assert queries.get_active_workflow_revision(workspace["id"], "test_publish_flow") is None
+
+
+# --- #1221: a successful publish deletes the draft row (single authority) ---
+
+
+def test_publish_success_deletes_the_draft_row(tmp_path: Path) -> None:
+    """#1221: the draft row dies in the same transaction as the revision
+    publish — after publish the active revision is the single authority and
+    no surviving draft row can race the new canonical baseline."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _seed_node_code(workspace["id"])
+    queries.upsert_workspace_workflow_draft(workspace["id"], _DRAFT_YAML)
+
+    ok, errors = publish_workflow_draft(queries, workspace["id"], _DRAFT_YAML)
+
+    assert (ok, errors) == (True, [])
+    assert queries.get_workspace_workflow_draft(workspace["id"]) is None
+
+
+def test_publish_validation_failure_keeps_the_draft_row(tmp_path: Path) -> None:
+    """#1221: a refused publish never touches the draft row — the deletion
+    rides the revision transaction, which a validation failure never opens."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    # No published node code: the publish validation set refuses the draft.
+    queries.upsert_workspace_workflow_draft(workspace["id"], _DRAFT_YAML)
+
+    ok, errors = publish_workflow_draft(queries, workspace["id"], _DRAFT_YAML)
+
+    assert ok is False
+    assert errors
+    draft = queries.get_workspace_workflow_draft(workspace["id"])
+    assert draft is not None
+    assert draft["definition_yaml"] == _DRAFT_YAML
+
+
+def test_runtime_only_publish_deletes_the_draft_row(tmp_path: Path) -> None:
+    """#1221: the runtime-only in-place save (no structural diff → no new
+    revision) is still a publish — the draft row is deleted inside the
+    revision-update transaction too."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _seed_node_code(workspace["id"])
+    ok, _ = publish_workflow_draft(queries, workspace["id"], _DRAFT_YAML)
+    assert ok
+    runtime_edit = _DRAFT_YAML + "    execution:\n      model: glm-4.7\n"
+    queries.upsert_workspace_workflow_draft(workspace["id"], runtime_edit)
+
+    ok, errors = publish_workflow_draft(queries, workspace["id"], runtime_edit)
+
+    assert (ok, errors) == (True, [])
+    active = queries.get_active_workflow_revision(workspace["id"], "test_publish_flow")
+    # Runtime-only: no new version; the in-place edit landed.
+    assert active["version"] == 1
+    assert "glm-4.7" in str(active["definition_json"])
+    assert queries.get_workspace_workflow_draft(workspace["id"]) is None
+
+
+def test_seed_ensure_active_revision_keeps_the_draft_row(tmp_path: Path) -> None:
+    """#1221 guard: the seed path (``ensure_active_revision``, e.g. workspace
+    creation) publishes WITHOUT touching the draft row — a workspace holding
+    a draft but no revision yet keeps its unpublished edits."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    queries.upsert_workspace_workflow_draft(workspace["id"], _DRAFT_YAML)
+
+    WorkflowRevisionService(queries).ensure_active_revision(
+        workspace["id"], workflow_definition_from_yaml_string(_DRAFT_YAML)
+    )
+
+    assert queries.get_active_workflow_revision(workspace["id"], "test_publish_flow") is not None
+    assert queries.get_workspace_workflow_draft(workspace["id"]) is not None

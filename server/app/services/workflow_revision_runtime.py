@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import asdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from server.app.jobs.queries.upgrade_impl_identity import (
     acquire_implementation_publication_lock,
@@ -58,14 +58,23 @@ def save_revision_runtime_or_publish(
     job_db: JobQueries,
     workspace_id: str,
     definition: WorkflowDefinition,
-    publish: Callable[[str, WorkflowDefinition], dict],
+    publish: Callable[[str, WorkflowDefinition, Callable[[Any], None] | None], dict],
+    on_commit: Callable[[Any], None] | None = None,
 ) -> dict:
+    """Runtime edit in place, or delegate to ``publish`` on structural change.
+
+    ``on_commit`` rides whichever write wins (#1221: draft publish passes the
+    draft-row removal): forwarded to ``publish`` (the revision commit hook)
+    on the structural/first-publish paths, or run inside the in-place edit's
+    own transaction below. ``Callable[[Any], ...]`` because the concrete
+    connection type must not be imported here (BOUNDARY-DATA-001).
+    """
     active = job_db.get_active_workflow_revision(workspace_id, definition.key)
     if active is None:
-        return publish(workspace_id, definition)
+        return publish(workspace_id, definition, on_commit)
     current = workflow_definition_from_dict(json.loads(str(active["definition_json"])))
     if _structural_payload(current) != _structural_payload(definition):
-        return publish(workspace_id, definition)
+        return publish(workspace_id, definition, on_commit)
     definition_json = serialize_definition(definition)
     # Runtime-only updates must not drop the publish-time node_code_pins
     # snapshot (EXEC-CODE-002): carry it over from the stored payload. The
@@ -88,6 +97,10 @@ def save_revision_runtime_or_publish(
             " where id=%s returning *",
             (definition_json, new_hash, active["id"]),
         ).fetchone()
-    if row is None:
-        raise ValueError("workflow revision not found")
+        if row is None:
+            raise ValueError("workflow revision not found")
+        # #1221: the caller's hook (draft-row delete on draft publish) rides
+        # this transaction too — a hook failure rolls the in-place edit back.
+        if on_commit is not None:
+            on_commit(conn)
     return dict(row)

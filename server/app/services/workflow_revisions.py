@@ -11,7 +11,8 @@ point. The startup route reconcile retired with explicit node types
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from server.app.agent_catalog.builtin import (
     DEMO_WORKFLOW_KEY,
@@ -30,15 +31,30 @@ class WorkflowRevisionService:
         self.job_db = job_db
         self.custom_nodes_enabled = custom_nodes_enabled
 
-    def publish_workspace_revision(self, workspace_id: str, definition: WorkflowDefinition) -> dict:
+    def publish_workspace_revision(
+        self,
+        workspace_id: str,
+        definition: WorkflowDefinition,
+        on_commit: Callable[[Any], None] | None = None,
+    ) -> dict:
         return publish_workflow_revision(
-            self.job_db, self.custom_nodes_enabled, workspace_id, definition
+            self.job_db, self.custom_nodes_enabled, workspace_id, definition, on_commit=on_commit
         )
 
-    def save_workspace_revision(self, workspace_id: str, definition: WorkflowDefinition) -> dict:
-        """Update runtime settings in-place, or publish a structural revision."""
+    def save_workspace_revision(
+        self,
+        workspace_id: str,
+        definition: WorkflowDefinition,
+        on_commit: Callable[[Any], None] | None = None,
+    ) -> dict:
+        """Update runtime settings in-place, or publish a structural revision.
+
+        ``on_commit`` rides whichever write wins (#1221: draft publish passes
+        the draft-row removal). The seed path (``ensure_active_revision``)
+        never passes one, so seeding never touches a stored draft.
+        """
         return save_revision_runtime_or_publish(
-            self.job_db, workspace_id, definition, self.publish_workspace_revision
+            self.job_db, workspace_id, definition, self.publish_workspace_revision, on_commit
         )
 
     def get_active(self, workspace_id: str, workflow_key: str) -> dict:

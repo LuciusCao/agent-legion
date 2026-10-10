@@ -3,8 +3,11 @@
 Split from ``workflow_drafts.py`` (budget): the CAS upsert serves the agent
 draft-save tool — an ``expected_updated_at`` that no longer matches the
 stored row raises ``DraftConflictError`` instead of overwriting a newer
-draft. Constants (``DRAFT_NEVER_SAVED``) and the exception stay importable
-from ``workflow_drafts`` for the existing import surface.
+draft. A row DELETED underneath the caller (publish deletes the draft row,
+#1221) is instead silently recreated by the insert branch — allowed on
+purpose (#1221 §4 方案 B). Constants (``DRAFT_NEVER_SAVED``) and the
+exception stay importable from ``workflow_drafts`` for the existing import
+surface.
 """
 
 from __future__ import annotations
@@ -32,10 +35,12 @@ class WorkflowDraftCasQueriesMixin:
         expected value — text renderings differ across channels (Postgres
         ``::text`` emits ``+00``, Python str() emits ``+00:00``), so a strict
         text match would reject the very value the caller just read. The
-        insert branch (no draft yet) is accepted only when
-        ``expected_updated_at`` is the ``never-saved`` marker: a caller that
-        last saw a real draft must not insert over its absence (the row was
-        deleted out from under them). Unparseable timestamps never match —
+        ``where`` clause gates only the ON CONFLICT update branch: when no
+        row exists at all, the plain INSERT always succeeds — a caller
+        holding a stale timestamp whose row was deleted underneath it
+        (publish deletes the draft row, #1221) silently recreates the draft,
+        which reads as a brand-new draft rather than a conflict (#1221 §4
+        方案 B: deliberately allowed). Unparseable timestamps never match —
         a malformed CAS token must not degrade into a blind overwrite.
         """
         with self.connect() as conn:  # type: ignore[attr-defined]
