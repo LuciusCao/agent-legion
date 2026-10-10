@@ -76,9 +76,15 @@ export class DraftSaveController {
        到 canonical 的尾随 schedule 已 arm）——该保存已成 no-op，作废它，
        否则到期 PUT 按 CAS-over-absence 语义立刻重建刚删的草稿行。 */
     if (this.pendingSave?.yaml === persistedYaml) this.abortPending()
+    // #1196：savedHash 必须描述 savedYaml——基线内容变了而调用方未给身份
+    // （undefined）时旧 hash 已不对应新内容，按「无身份」清除。
+    const hash =
+      savedHash === undefined && persistedYaml !== this.lastPersisted
+        ? null
+        : savedHash
     this.lastPersisted = persistedYaml
     this.lastPersistedGeneration = generation
-    const next = conflictResolvedState(this.state, updatedAt, savedHash)
+    const next = conflictResolvedState(this.state, updatedAt, hash)
     /* 内容不同的挂起保存（用户在窗口内的真实编辑）保留 pending——内容偏离
        新基线，status 不得收敛 settled（#1177 不变量）。 */
     this.setState(this.pendingSave ? { ...next, status: 'pending' } : next)
@@ -365,9 +371,12 @@ export class DraftSaveController {
     return { ok, state: this.state }
   }
 
+  /* #1196：savedYaml 单点注入——所有状态转换都经此，lastPersisted 在调用前
+     已更新（hydrate/onBaseline），故快照里 savedYaml 与 savedHash 原子成对。 */
   private setState(next: DraftSaveState) {
-    this.state = next
-    this.listeners.forEach((listener) => listener(next))
+    const state = { ...next, savedYaml: this.lastPersisted }
+    this.state = state
+    this.listeners.forEach((listener) => listener(state))
   }
 
   /* 作废 pending 保存：双清计时器 + 递增 requestId（在途响应作废）；排队

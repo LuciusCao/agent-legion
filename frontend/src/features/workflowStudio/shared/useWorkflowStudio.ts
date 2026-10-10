@@ -59,6 +59,8 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     /* #1226 复审 P1：空内容冲突（发布删行后的 409）的「采用」需要
        canonical 原文——服务端无草稿可采用时，采用 = 回到已发布版本。 */
     originalYaml,
+    // #1196：保存状态机跟踪的草稿本体（revision 模式下 ≠ definitionYaml）。
+    draftYaml: draft.draftYaml,
     setDefinitionYaml: draft.setDraftYaml,
     selectedNodeKey,
     setSelectedNodeKey,
