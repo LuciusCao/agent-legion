@@ -51,7 +51,10 @@ def init_db(database_dsn: DatabaseDsn) -> None:
         # DML resolve via search_path; the only schema-qualified reference in
         # the whole chain is a read-only to_regclass probe), so same-schema
         # serialization is sufficient and cross-schema collisions cannot
-        # exist.
+        # exist. Not mutually exclusive with the old database-level key by
+        # design: mixed-version concurrent migrators are excluded by the
+        # single-replica constraint (deployment docs) and full-stop upgrade
+        # windows, not by lock-key compatibility.
         conn.execute(
             "select pg_advisory_xact_lock(hashtext('agent-legion-schema-'"
             " || current_database() || '-' || current_schema()))"

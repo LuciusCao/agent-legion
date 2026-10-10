@@ -37,8 +37,11 @@ from tests.postgres_support import BASE_DATABASE_URL, TEST_SCHEMA
 pytestmark = pytest.mark.postgres
 
 _separator = "&" if "?" in BASE_DATABASE_URL else "?"
-# lock_timeout=5s：协议正确时锁等待 = 对方持锁窗口；回归（键退化）时有界炸红
-# 而非挂死整个测试会话（比照 tests/db/test_upgrade_lock_domains.py 的纪律）。
+# lock_timeout=5s 只对裸连接（conn_a / probe）生效：B 走真实 init_db →
+# write_transaction → 池化连接，configure_connection（rows.py:60）的
+# set lock_timeout='30s' 会覆盖 DSN options——回归（键退化）时 B 侧由池
+# 钩子的 30s 兜底炸红，仍小于 _join 的 60s 上限，不会挂死测试会话
+# （比照 tests/db/test_upgrade_lock_domains.py 的纪律）。
 _TIMED_SUFFIX = " -clock_timeout=5s"
 
 _SCRATCH_SCHEMA = f"{TEST_SCHEMA}_lockprobe"
@@ -105,8 +108,10 @@ def _await_advisory_waiter(key_sql: str, timeout: float = 10.0) -> None:
 
 
 def _init_db_full_path(dsn: str) -> None:
-    # 会话 fixture 已在本进程验证过该 DSN（head memo 会短路掉锁），强制走
-    # 全路径才能保证 B 一定取到 advisory 锁。
+    # 防御纵深：head memo 按 DSN 字符串做键，本测试的 timed DSN（追加了
+    # lock_timeout options）本就不会命中会话 fixture 验证过的
+    # TEST_DATABASE_URL；包 init_db_full_check 是防未来调用形态变化让
+    # memo 真的命中、短路掉 B 必须取的 advisory 锁。
     with init_db_full_check():
         init_db(dsn)
 
