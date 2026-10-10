@@ -505,6 +505,36 @@ def test_batch_write_phase_skips_candidate_paused_after_selection(job_db) -> Non
     assert row["state"] == "queued"
 
 
+def _await_recheck_lock_wait(*, timeout: float = 20.0) -> None:
+    """等信号非等时长：轮询 pg_stat_activity，直到写段的重读 SELECT ...
+    FOR NO KEY UPDATE 真实进入锁等待（wait_event_type='Lock'）。替代原先
+    字面 join(timeout=5) 的「等满 5 秒大概率已阻塞」——信号出现即确证
+    阻塞在 jobs 行锁上，与机器快慢无关；20s 预算按 CI 负载给足余量，
+    超时即「未阻塞」的可诊断失败。查询文本（for no key update）在本测试
+    库内唯一：postgres tier 每个用例只跑一份，无跨用例同名等待。"""
+    import time
+
+    import psycopg
+
+    deadline = time.monotonic() + timeout
+    with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as probe:
+        while True:
+            row = probe.execute(
+                "select count(*) from pg_stat_activity"
+                " where datname = current_database()"
+                " and pid <> pg_backend_pid()"
+                " and wait_event_type = 'Lock'"
+                " and query ilike '%for no key update%'"
+            ).fetchone()
+            if row[0] > 0:
+                return
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    "promote 未进入行锁等待——FOR NO KEY UPDATE 串行化退回了裸 SELECT"
+                )
+            time.sleep(0.05)
+
+
 def test_batch_promote_recheck_serializes_with_inflight_pause(job_db) -> None:
     """codex P1（#555 review）：rowcount=0 的重读带 FOR NO KEY UPDATE——
     已 running 的 job 上，pause 事务在飞（第二连接持未提交的 pause UPDATE）
@@ -514,6 +544,8 @@ def test_batch_promote_recheck_serializes_with_inflight_pause(job_db) -> None:
 
     多连接并发写法跟随 test_agent_broker_claim_locks.py 的 holder-conn +
     join-timeout 先例：join 超时把「回归导致的挂死」变成快速可诊断的失败。
+    「仍阻塞」的判定是锁等待信号（_await_recheck_lock_wait）+ 短窗口存活
+    断言，不再字面等满 5s。
     """
     import threading
 
@@ -545,7 +577,10 @@ def test_batch_promote_recheck_serializes_with_inflight_pause(job_db) -> None:
     try:
         write_thread = threading.Thread(target=run_write_phase)
         write_thread.start()
-        write_thread.join(timeout=5)
+        # 等信号：写段真实阻塞在 holder 持有的行锁上（见 helper 注释）。
+        _await_recheck_lock_wait()
+        # 短窗口不变量：信号出现后线程仍然存活（阻塞是持续态而非一闪而过）。
+        write_thread.join(timeout=1)
         assert write_thread.is_alive(), (
             "promote 未阻塞在在飞 pause 上——FOR NO KEY UPDATE 串行化退回了裸 SELECT"
         )

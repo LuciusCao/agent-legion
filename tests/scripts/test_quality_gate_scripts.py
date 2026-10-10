@@ -365,13 +365,28 @@ def test_quick_gate_heartbeat_prints_running_lane_progress(tmp_path: Path) -> No
     # The quick gate sources the shared job-count helper.
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
+    # Minimal sufficient timing (was sleep 6 + heartbeat 2): the heartbeat loop
+    # polls every 1s and prints once SECONDS-last_heartbeat >= interval, so
+    # interval 1 fires the first heartbeat ~1s into the round; a 3s lane is
+    # still alive for the ~1s and ~2s ticks with a full second of margin.
+    # The pinned invariant is unchanged: a heartbeat line carrying the running
+    # lane's latest log line appears.
     _write_executable(
         scripts / "check-quick-backend.sh",
-        '#!/usr/bin/env bash\necho "backend lane working"\nsleep 6\n',
+        '#!/usr/bin/env bash\necho "backend lane working"\nsleep 3\n',
     )
     _write_executable(scripts / "check-quick-frontend.sh", "#!/usr/bin/env bash\nexit 0\n")
 
-    result = _run(quick_gate, cwd=tmp_path, env={"GATE_HEARTBEAT_SECONDS": "2"})
+    # GATE_SKIP_STATIC=1 confines the run to the test rounds: the heartbeat
+    # loop lives in run_round and is identical across rounds, so one slow-lane
+    # round (test-backend) exercises it fully — the static round's duplicate
+    # 3s bought no extra coverage. The full-rounds path stays pinned by
+    # test_quick_gate_fast_lanes_are_not_padded_by_heartbeat_sleep above.
+    result = _run(
+        quick_gate,
+        cwd=tmp_path,
+        env={"GATE_HEARTBEAT_SECONDS": "1", "GATE_SKIP_STATIC": "1", "GATE_LANES": "backend"},
+    )
 
     assert result.returncode == 0, result.stdout + result.stderr
     heartbeat_lines = [line for line in result.stdout.splitlines() if line.startswith("[gate:")]
