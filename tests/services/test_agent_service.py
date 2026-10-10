@@ -20,6 +20,9 @@ DEFINITION_V2 = AgentDefinition(
     skill="question/review_key_info",
     tools=("read",),
 )
+# #1173 codex 二轮：含 ``:`` 的 capability——派生 id 的越域形态（``:`` 撞
+# executor_id ``agent:<id>`` 形态前缀，#1167）。
+COLON_CAPABILITY = AgentDefinition(capability="code:x", runtime="velites", skill="q/code")
 
 
 @pytest.fixture
@@ -91,6 +94,45 @@ def test_save_draft_rejects_empty_agent_id(service) -> None:
         service.save_draft("", DEFINITION_V1, "user:u1")
 
 
+# #1173 codex 二轮：agent_id 字符域下沉 service 写边界（单一来源
+# ``agent_catalog.definition.AGENT_ID_RE``）——新建实体即拒、存量原位放行。
+def test_save_draft_rejects_new_entity_id_outside_charset(service) -> None:
+    """写边界路径全集的兜底点：显式字段/PUT 路径参数/Studio 端点全部经
+    save_draft，非法形态的新实体键在此单点被拒（InvalidOperationError），零落库。"""
+    for bad in ("code:x", "a:b", ":x", " leading", "a/b", "名"):
+        with pytest.raises(InvalidOperationError, match="不在合法字符域"):
+            service.save_draft(bad, DEFINITION_V1, "user:u1")
+    assert service.list_latest() == []
+
+
+def test_save_draft_grandfathers_stock_illegal_id_in_place(service, job_db, workspace_id) -> None:
+    """存量兼容（#1173 选型「新建不允许、原位更新放行」）：pre-constraint
+    非常规键经 store 层直写预置（store 是通用引擎、不受 AgentService 门
+    约束，即存量形态的来路）后，原位编辑、发布、读取照常——不被写边界门
+    锁死，存量 Agent 的迁移路径（补 runtime / 调定义后发布）保持可用。"""
+    from server.app.services.versioned_entities import VersionedEntityStore
+
+    store = VersionedEntityStore(job_db.dsn_identity, "agent")
+    store.save_draft(
+        "code:x",
+        DEFINITION_V1.model_dump(mode="json"),
+        DEFINITION_V1.definition_hash(),
+        workspace_id,
+        "legacy-seed",
+    )
+
+    updated = service.save_draft("code:x", DEFINITION_V2, "user:u1")  # 原位更新放行
+
+    assert updated.entity_key == "code:x"
+    assert updated.version == 1  # 覆盖草稿而非另开新版本
+    assert updated.created_by == "user:u1"
+
+    published = service.publish("code:x", updated.definition_hash)  # 发布不受影响
+    assert published.status == "published"
+    assert service.get_published_definition("code:x") == DEFINITION_V2
+    assert service.list_versions("code:x")  # 读取不受影响
+
+
 # #407：创建入口缺省 agent_id——按 capability 生成，占用即冲突
 # （create-entry policy 在 agent_definition_create.py，这里经服务对象验证）。
 def test_create_draft_derives_agent_id_from_capability(service) -> None:
@@ -99,6 +141,22 @@ def test_create_draft_derives_agent_id_from_capability(service) -> None:
     assert entity.entity_key == "review_keywords"
     assert entity.status == "draft"
     assert service.get_published_definition("review_keywords") is None
+
+
+def test_create_draft_derived_id_outside_charset_guides_explicit_agent_id(service) -> None:
+    """#1173 codex 二轮（capability 派生路径）：含 ``:`` 的 capability 派生
+    id 不合法——显式报错引导（改用合法 capability 命名，或显式指定合法
+    agent_id），而不是静默拒 capability（capability 字符域本身不收紧，
+    #1173 上轮论证：它是路由/节点声明的语义键，牵连面大）。"""
+    with pytest.raises(InvalidOperationError, match="显式指定合法 agent_id") as exc_info:
+        create_agent_draft(service, None, COLON_CAPABILITY, "user:u1")
+    assert "code:x" in str(exc_info.value)
+    assert service.list_latest() == []  # 派生失败零落库
+
+    # capability 本身没被拒：显式合法 agent_id + 同 capability 照常创建。
+    entity = create_agent_draft(service, "agent-legal", COLON_CAPABILITY, "user:u1")
+    assert entity.entity_key == "agent-legal"
+    assert entity.definition["capability"] == "code:x"
 
 
 def test_create_draft_derivation_conflicts_with_any_existing_entity(service) -> None:
@@ -349,6 +407,15 @@ def test_copy_rejects_empty_new_id(service) -> None:
     service.save_draft("agent-a", DEFINITION_V1, "user:u1")
     with pytest.raises(InvalidOperationError):
         service.copy("agent-a", "", "user:u1")
+
+
+def test_copy_rejects_new_id_outside_charset(service) -> None:
+    """#1173 codex 二轮（copy 路径，唯一不经 save_draft 的写面）：新键
+    无条件过字符域——copy 直插 v1、永远是新建实体，不存在 grandfather 面。"""
+    service.save_draft("agent-a", DEFINITION_V1, "user:u1")
+    with pytest.raises(InvalidOperationError, match="不在合法字符域"):
+        service.copy("agent-a", "code:y", "user:u1")
+    assert all(e.entity_key != "code:y" for e in service.list_latest())
 
 
 def test_list_latest_and_published_definitions(service) -> None:

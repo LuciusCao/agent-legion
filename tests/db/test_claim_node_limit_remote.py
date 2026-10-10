@@ -680,8 +680,8 @@ def test_node_limit_matrix_boundary_legacy_agent_id_with_colon_counts(job_db) ->
     """用例 11（#1167 口径表边界行，评审 P3-1）：named ``code:x`` 的存量
     Agent 走 kind=agent claim 会写出 ``agent:code:x`` 租约——``like
     'agent:code:%'`` 前缀无法区分，该租约**被计入** code 额度（本用例
-    直接 INSERT 模拟存量形态租约，契约层 ``AGENT_ID_RE`` 只封新值、不
-    迁移存量）。
+    直接 INSERT 模拟存量形态租约，service 写边界只封新值、不迁移存量，
+    #1173）。
 
     断言方向 = 计入（诚实边界而非缺陷修复）：错误方向是「一个存量
     agent 租约消耗一个 code 名额」——保守方向（占位 → 拒 → 留队列重

@@ -16,6 +16,7 @@ from __future__ import annotations
 import time
 
 from server.app.agent_catalog import AgentDefinition
+from server.app.agent_catalog.definition import agent_id_charset_error, is_valid_agent_id
 from server.app.db.connection import DatabaseDsn
 from server.app.db.dialect import ConnectSource, resolve_dsn
 from server.app.db.transaction import read_connection
@@ -106,8 +107,19 @@ class AgentService:
     def save_draft(
         self, agent_id: str, definition: AgentDefinition, created_by: str
     ) -> VersionedEntity:  # Create/overwrite draft (legacy explicit-id semantics).
+        # #1173 codex 二轮（#1167 P3-1 根因收口）：字符域校验下沉到本写边界
+        # ——产生路径×校验点矩阵见 ``agent_catalog.definition.AGENT_ID_RE``。
+        # 只挡「新建实体」：合法 id 零额外读直接放行；非法形态且该键无任何
+        # 版本行（=新建，派生路径的省略形态也在此收敛）才拒。存量
+        # pre-constraint 非常规键原位更新、发布、回滚、归档与读取不受影响
+        # （grandfather：若版本行已存在，该键或早于约束、或由受控写面以同键
+        # 创建——非法键首行不可能经本面进入）。
         if not agent_id:
             raise InvalidOperationError("agent id must be a non-empty string")
+        if not is_valid_agent_id(agent_id) and not self._store.list_versions(
+            agent_id, self._workspace_id
+        ):
+            raise InvalidOperationError(agent_id_charset_error(agent_id))
         entity = self._store.save_draft(
             agent_id,
             definition.model_dump(mode="json"),
@@ -180,9 +192,14 @@ class AgentService:
         return archived
 
     def copy(self, source_agent_id: str, new_agent_id: str, created_by: str) -> VersionedEntity:
-        """Copy the latest source definition into a new Agent as draft v1."""
+        """Copy the latest source definition into a new Agent as draft v1.
+
+        #1173 codex 二轮：新键无条件过字符域（copy 直插 v1、永远是新建实体，
+        # 不存在 grandfather 面；同键已有版本行时由 store 层 409 兜底）。"""
         if not new_agent_id:
             raise InvalidOperationError("agent id must be a non-empty string")
+        if not is_valid_agent_id(new_agent_id):
+            raise InvalidOperationError(agent_id_charset_error(new_agent_id))
         entity = self._store.copy(source_agent_id, new_agent_id, self._workspace_id, created_by)
         _invalidate_published_cache(self._store.dsn, self._workspace_id)
         return entity

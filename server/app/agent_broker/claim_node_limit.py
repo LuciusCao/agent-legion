@@ -48,14 +48,18 @@ Contract, deliberately different from the local path
                                over-admitting
   ==================  =======  ==========================================
 
-  Boundary premise (adversarial review P3-1): row 4 is unreachable for NEW
-  ids — ``agent_id`` is charset-gated at the create/copy contracts
-  (``routes/agent_definition_contracts.AGENT_ID_RE``, no ``:``) — and is
-  conservative, never over-admitting, for legacy pre-constraint rows; the
-  derivation path (agent_id omitted → the capability names the entity,
-  ``agent_definition_create``) inherits the capability's charset, which is
-  NOT gated: a ``:`` capability still derives a colliding id. Known
-  residual, direction-safe (counted = conservative), out of scope here.
+  Boundary premise (adversarial review P3-1; closed at the root by #1173
+  codex round 2): row 4 is unreachable for NEW ids — the agent_id charset
+  is enforced at the SERVICE write boundary, which closes every write
+  entry (explicit request fields, capability-derived ids, PUT path
+  params, Studio endpoints, copy new keys; single source
+  ``agent_catalog.definition.AGENT_ID_RE``, gates
+  ``AgentService.save_draft``/``copy``/``create_agent_draft``, the
+  path×gate matrix lives in the constant's comment). Legacy
+  pre-constraint rows are grandfathered in place (draft edits, publish,
+  rollback and reads keep working; no new illegal key can enter through
+  a supported write face) and stay conservative, never over-admitting —
+  the residual is stock data only.
 
   The LOCAL path (``_lease_claim_limits.check_claim_capacity``) keeps a
   same-shaped residual: its node count also spans every active lease of
