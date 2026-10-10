@@ -573,3 +573,69 @@ def test_uv_cache_prewarm_dereferences_symlink_base(tmp_path: Path) -> None:
     cloned = main / ".worktrees/flat/.uv-cache"
     assert cloned.is_dir() and not cloned.is_symlink()
     assert (cloned / "wheels-v6/marker").read_text() == "cached-wheel\n"
+
+
+def test_uv_cache_prewarm_yields_to_held_landing_lock(tmp_path: Path) -> None:
+    """落位锁被并发 init 持有（holder 存活）：未持锁者丢弃克隆走跳过路径
+    ——不落地、不残留临时目录、不动他人活锁（PR #1182 codex P2）。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    marker = develop / ".uv-cache/wheels-v6/marker"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("cached-wheel\n")
+    worktree = main / ".worktrees/flat"
+    lock = worktree / ".uv-cache.prewarm.lock"
+    lock.mkdir(parents=True)
+    (lock / "pid").write_text(f"{os.getpid()}\n")  # 本测试进程存活，锁视为活锁
+
+    result = _run(worktree / "scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert "正由并发 init 预暖" in result.stderr
+    # 未持锁者不落地：.uv-cache 不存在；临时克隆已丢弃；他人活锁原样保留。
+    assert not (worktree / ".uv-cache").exists()
+    assert [p.name for p in worktree.glob(".uv-cache.prewarm.*")] == [lock.name]
+    assert (lock / "pid").read_text().strip() == str(os.getpid())
+    # init 其余步骤照常完成。
+    assert (worktree / "deploy/secrets/vault_master_key").exists()
+
+
+_MV_STUB_SIBLING_LANDS_IN_WINDOW = """#!/usr/bin/env bash
+# 模拟锁外 actor（同 worktree 的并发 uv 调用不拿落位锁）在「重判通过 →
+# mv」之间创建 .uv-cache：注入落位动作后委托真实 mv——BSD mv 对「目标是
+# 已存在目录」不报错，把临时目录挪成 .uv-cache/.uv-cache.prewarm.<pid>
+# 嵌套产物，被测脚本必须检出嵌套、回收克隆、保留先到者缓存。
+if [[ $# -eq 2 && "${1:-}" != -* ]]; then
+    mkdir -p "$2/sibling-entry"
+fi
+exec /bin/mv "$@"
+"""
+
+
+def test_uv_cache_prewarm_detects_nesting_when_sibling_lands_in_window(
+    tmp_path: Path,
+) -> None:
+    """重判通过 → mv 之间 .uv-cache 被锁外 actor 创建：检出 BSD mv 嵌套，
+    回收嵌套克隆走跳过路径，先到者缓存原样（PR #1182 codex P2）。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    (develop / ".uv-cache").mkdir()
+    _write_stub(bin_dir / "mv", _MV_STUB_SIBLING_LANDS_IN_WINDOW)
+
+    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert "落位期间被并发创建" in result.stderr
+    worktree = main / ".worktrees/flat"
+    # 先到者（锁外 actor）的缓存原样保留，未被克隆内容覆盖。
+    assert (worktree / ".uv-cache/sibling-entry").is_dir()
+    # 无嵌套产物：.uv-cache/.uv-cache.prewarm.* 已被回收。
+    assert not list(worktree.glob(".uv-cache/.uv-cache.prewarm.*"))
+    # 根目录无临时目录与锁残留（成功释放）。
+    assert not list(worktree.glob(".uv-cache.prewarm.*"))
+    # init 其余步骤照常完成。
+    assert (worktree / "deploy/secrets/vault_master_key").exists()

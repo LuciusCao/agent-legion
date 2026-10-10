@@ -142,19 +142,53 @@ if [[ ! -d .uv-cache && -n "$BASE" && -d "$BASE/.uv-cache" ]]; then
         else
             CLONE_FLAGS=(-R --reflink=auto)
         fi
-        # 先克隆到进程私有临时名再原子 mv：并发 init 同一 worktree 时，
-        # 后到者的 cp 不会嵌套成 .uv-cache/.uv-cache（dst 已存在时 BSD cp
-        # 的实测语义），mv 前重判后到者丢弃自己的克隆走跳过路径，也不会
-        # rm -rf 误删先到者刚落位的完整缓存。
+        # 落位段互斥（PR #1182 codex P2）：重判与 mv 之间仍有窗口——两个
+        # init 都观察到 .uv-cache 不存在后先后 mv，BSD mv 对「目标是已存在
+        # 目录」不报错，而把后到者的临时目录挪进
+        # .uv-cache/.uv-cache.prewarm.<pid>，留下隐藏的完整重复缓存。
+        # mkdir 原子（目标已存在即失败）作互斥锁，只有持锁进程执行
+        # 「重判 + mv + 释放锁」，未持锁者丢弃克隆走跳过路径。锁目录在
+        # repo 根（不进 .uv-cache，不撞 uv bucket 命名），名字匹配
+        # .gitignore 的 .uv-cache.prewarm.*。残锁处理：锁内记录 holder
+        # pid，竞争者仅在 pid 文件非空且 kill -0 判死时才回收重试一次
+        # （pid 缺失/为空/读不出一律视为存活走丢弃——安全方向），避免
+        # 持锁进程被 SIGKILL 后预暖被残锁永久静默跳过。
         TMP_CACHE=".uv-cache.prewarm.$$"
+        LOCK_DIR=".uv-cache.prewarm.lock"
         if cp "${CLONE_FLAGS[@]}" "$CACHE_SRC" "$TMP_CACHE"; then
-            if [[ -d .uv-cache ]]; then
+            LOCKED=""
+            if mkdir "$LOCK_DIR" 2>/dev/null; then
+                echo $$ > "$LOCK_DIR/pid" || true
+                LOCKED=1
+            elif [[ -s "$LOCK_DIR/pid" ]] && ! kill -0 "$(cat "$LOCK_DIR/pid")" 2>/dev/null; then
+                rm -rf "$LOCK_DIR" || true
+                if mkdir "$LOCK_DIR" 2>/dev/null; then
+                    echo $$ > "$LOCK_DIR/pid" || true
+                    LOCKED=1
+                fi
+            fi
+            if [[ -z "$LOCKED" ]]; then
                 rm -rf "$TMP_CACHE" || true
+                echo "提示: .uv-cache 正由并发 init 预暖，丢弃重复克隆" >&2
+            elif [[ -d .uv-cache ]]; then
+                rm -rf "$TMP_CACHE" || true
+                rm -rf "$LOCK_DIR" || true
                 echo "提示: .uv-cache 已由并发 init 预暖，丢弃重复克隆" >&2
             elif mv "$TMP_CACHE" .uv-cache; then
-                echo "已预暖 .uv-cache <- ${BASE}（后续 uv 调用将命中已缓存依赖）"
+                if [[ -e ".uv-cache/$TMP_CACHE" ]]; then
+                    # 锁外 actor（同 worktree 的并发 uv 调用不拿本锁）在
+                    # 重判与 mv 之间创建了 .uv-cache：BSD mv 已把临时目录
+                    # 挪进去——回收嵌套克隆，对方 cache 原样保留，走跳过。
+                    rm -rf ".uv-cache/$TMP_CACHE" || true
+                    rm -rf "$LOCK_DIR" || true
+                    echo "提示: .uv-cache 在预暖落位期间被并发创建，丢弃重复克隆" >&2
+                else
+                    rm -rf "$LOCK_DIR" || true
+                    echo "已预暖 .uv-cache <- ${BASE}（后续 uv 调用将命中已缓存依赖）"
+                fi
             else
                 rm -rf "$TMP_CACHE" || true
+                rm -rf "$LOCK_DIR" || true
                 echo "提示: .uv-cache 预暖落位失败，已跳过——首次 uv 调用将冷启动拉取依赖（正常路径，仅较慢）" >&2
             fi
         else
