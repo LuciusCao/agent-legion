@@ -3,17 +3,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from server.app.agent_catalog.definition import DEFAULT_TOOLS
+from server.app.agent_catalog.definition import AGENT_ID_RE, DEFAULT_TOOLS
 
-# #1167 评审 P3-1：agent_id 的字符域契约（与 skill key 段同款
-# ``_SEGMENT_RE``——ASCII 起头 + 字母数字/点/下划线/连字符，天然排除
-# ``:``）。executor_id 的 ``agent:<id>`` 形态里 ``:`` 是形态分隔符：
-# 命名为 ``code:x`` 的 agent 会写出 ``agent:code:x`` 租约，命中
-# ``claim_node_limit`` 计数谓词的 ``agent:code:%`` 前缀——agent 车道
-# 租约被计为 code 形态、消耗 code 节点额度（#1167 症状回流）。约束只
-# 管创建/复制入口（新值）；存量已存在的非常规命名不动（口径表边界行
-# 如实记录，见 claim_node_limit docstring）。
-AGENT_ID_RE = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
+# #1167 评审 P3-1 / #1173 codex 二轮：``AGENT_ID_RE`` 的单一事实来源在
+# ``agent_catalog.definition``（字符域语义、产生路径×校验点矩阵与存量兼容
+# 选型见其注释）。权威校验在 service 写边界（``AgentService.save_draft``/
+# ``copy``：新建实体即拒、存量非常规键原位更新放行）——契约层 pattern 只是
+# 提前的 422 UX（省一次 DB 往返），不再是防线本身。
 
 
 class AgentDefinitionPayload(BaseModel):
@@ -32,8 +28,10 @@ class AgentDefinitionPayload(BaseModel):
 class AgentCreateRequest(AgentDefinitionPayload):
     # #407：agent_id 可选——省略（或 null）时服务端按 capability 生成（一个
     # capability 一个主草稿）；显式传值保持旧客户端契约不变。#1167 评审
-    # P3-1：显式值须过字符域（防 ``:`` 撞 executor_id 形态前缀）；派生
-    # 路径（capability）的字符域同参 P3-1 的口径表边界行说明。
+    # P3-1：显式值须过字符域（防 ``:`` 撞 executor_id 形态前缀）——契约层
+    # 422 只是提前 UX；显式、派生（create_agent_draft 引导报错）、PUT 路径
+    # 参数、Studio 端点与 copy 全部由 service 写边界单点封死（#1173 codex
+    # 二轮，矩阵见 agent_catalog.definition）。
     agent_id: str | None = Field(default=None, min_length=1, pattern=AGENT_ID_RE)
 
 

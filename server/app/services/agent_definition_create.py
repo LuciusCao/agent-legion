@@ -31,8 +31,9 @@ be merged or re-split in one move.
 from __future__ import annotations
 
 from server.app.agent_catalog import AgentDefinition
+from server.app.agent_catalog.definition import AGENT_ID_CHARSET_RULE, is_valid_agent_id
 from server.app.services.agent_service import AgentService
-from server.app.services.job_errors import ConflictError
+from server.app.services.job_errors import ConflictError, InvalidOperationError
 from server.app.services.versioned_entities import VersionedEntity
 
 
@@ -52,7 +53,18 @@ def create_agent_draft(
             raise ConflictError(
                 f"该 capability 已有 Agent「{occupant.entity_key}」（状态：{occupant.status}），请直接编辑该 Agent；如确需另建变体，请通过 API 或 MCP 显式指定 agent_id"
             )
+        # #1173 codex 二轮：派生 id 同过字符域——只拦「派生结果作为
+        # agent_id」的形态，capability 字符域本身不收紧（路由/节点声明的
+        # 语义键，牵连面大，上轮论证）：非法派生显式报错引导，合法派生
+        # 照旧落 save_draft 写边界。
         agent_id = definition.capability
+        if not is_valid_agent_id(agent_id):
+            raise InvalidOperationError(
+                f"capability {definition.capability!r} 不能派生 agent id：派生结果不在"
+                f"合法字符域（{AGENT_ID_CHARSET_RULE}；':' 会撞 executor_id "
+                "'agent:<id>' 的形态前缀，#1167）。请改用合法字符的 capability 命名，"
+                "或显式指定合法 agent_id"
+            )
     return service.save_draft(agent_id, definition, created_by)
 
 

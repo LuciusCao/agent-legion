@@ -301,6 +301,65 @@ def test_agent_id_charset_rejects_executor_id_form_collision(client, ws) -> None
     assert ok_copy.json()["agent_id"] == "agent-cpy1"
 
 
+# #1173 codex 二轮（codex finding：契约层只封了两个请求字段，其余三条
+# 受支持路径可产生 ``code:x`` 形态 id）：根因修法 = 校验下沉 service 写边界，
+# 下述用例钉住剩余路径——capability 派生、PUT 路径参数、存量兼容。
+def test_create_derivation_rejects_capability_outside_agent_id_charset(client, ws) -> None:
+    """路径② capability 派生：``code:x`` 形态 capability 派生的 agent_id 撞
+    executor_id 形态前缀（#1167）——service 写边界拒绝（400）并引导显式
+    指定合法 agent_id；同 capability 显式合法 id 照常创建（capability 不收紧）。"""
+    derived = client.post(BASE, params=ws, json={"capability": "code:x", "runtime": "velites"})
+    assert derived.status_code == 400, derived.text
+    assert "显式指定合法 agent_id" in derived.json()["detail"]
+    assert "code:x" in derived.json()["detail"]
+
+    explicit = client.post(
+        BASE,
+        params=ws,
+        json={"agent_id": "agent-legal", "capability": "code:x", "runtime": "velites"},
+    )
+    assert explicit.status_code == 200, explicit.text
+    assert explicit.json()["agent_id"] == "agent-legal"
+    assert explicit.json()["definition"]["capability"] == "code:x"
+
+
+def test_put_draft_path_param_rejects_new_illegal_agent_id(client, ws) -> None:
+    """路径③ PUT 路径参数：新实体的 ``code:x`` 键在 service 写边界被拒
+    （400，InvalidOperationError 语义），零落库。"""
+    saved = client.put(f"{BASE}/code:x/draft", params=ws, json=PAYLOAD_V1)
+    assert saved.status_code == 400, saved.text
+    assert "不在合法字符域" in saved.json()["detail"]
+    assert client.get(f"{BASE}/code:x", params=ws).status_code == 404
+
+
+def test_stock_illegal_agent_id_reads_edits_and_publishes_in_place(client, job_db, ws) -> None:
+    """存量兼容（#1173 选型「新建不允许、原位更新放行」）：直写预置的
+    pre-constraint 非常规键——读取、原位编辑、发布照常，不被写边界门锁死
+    （存量 Agent 的迁移路径保持可用）。"""
+    import json as _json
+
+    canonical = _json.dumps(PAYLOAD_V1, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    with job_db.connect() as conn:  # 写面门之外的直写预置（存量形态的来路）
+        conn.execute(
+            "insert into versioned_entities("
+            "id, entity_type, workspace_id, entity_key, version, status,"
+            " definition_json, definition_hash, created_by)"
+            " values ('agent:legacy:code-x:v1', 'agent', %s, 'code:x', 1, 'draft',"
+            " %s, 'legacy-hash', 'legacy-seed')",
+            (ws["workspace_id"], canonical),
+        )
+
+    assert client.get(f"{BASE}/code:x", params=ws).status_code == 200  # 读取不受影响
+
+    saved = client.put(f"{BASE}/code:x/draft", params=ws, json=PAYLOAD_V2)  # 原位更新放行
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["version"] == 1
+
+    published = _publish(client, "code:x", ws)
+    assert published.status_code == 200, published.text
+    assert published.json()["status"] == "published"
+
+
 def test_archive_all(client, ws) -> None:
     client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
     _publish(client, "agent-a", ws)
