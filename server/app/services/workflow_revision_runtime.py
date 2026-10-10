@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from server.app.jobs.queries.upgrade_impl_identity import (
@@ -14,29 +13,12 @@ from server.app.services.agent_profile_provenance import (
     embed_provenance,
     provenance_from_revision_json,
 )
+from server.app.services.workflow_revision_change import revision_structurally_changed
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
-
-
-def _structural_payload(definition: WorkflowDefinition) -> dict:
-    payload = asdict(definition)
-    # ``execution.runtime`` (#933) is NOT a runtime setting: it selects the
-    # node's execution-profile source and is frozen with the revision/job
-    # snapshot, so changing it must publish a new revision (in-flight jobs
-    # keep the old one — PR #1039 codex R5). Only the remaining keys
-    # (provider/model/thinking/prompt) stay editable in place.
-    for node in payload["nodes"].values():
-        execution = node.pop("execution", None) or {}
-        node["profile_runtime"] = execution.get("runtime", "")
-    # Top-level execution defaults are runtime settings like the node-level
-    # block: editing them updates the active revision in place instead of
-    # publishing a structural revision (its runtime default is already baked
-    # into every agent node above).
-    payload.pop("execution", None)
-    return payload
 
 
 def embed_node_code_pins(definition_json: str, pins: dict) -> str:
@@ -64,7 +46,8 @@ def save_revision_runtime_or_publish(
     if active is None:
         return publish(workspace_id, definition)
     current = workflow_definition_from_dict(json.loads(str(active["definition_json"])))
-    if _structural_payload(current) != _structural_payload(definition):
+    # #1114：与草稿对比的 creates_revision 同一判定函数（runtime 属结构）。
+    if revision_structurally_changed(current, definition):
         return publish(workspace_id, definition)
     definition_json = serialize_definition(definition)
     # Runtime-only updates must not drop the publish-time node_code_pins

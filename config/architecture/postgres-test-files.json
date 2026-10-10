@@ -281,6 +281,7 @@
     "tests/workflows/test_upgrade_input_protection.py",
     "tests/workflows/test_workflow_draft_compare.py",
     "tests/workflows/test_workflow_draft_compare_fields.py",
+    "tests/workflows/test_workflow_draft_compare_runtime.py",
     "tests/workflows/test_workflow_execution_control.py",
     "tests/workflows/test_workflow_revision_prune.py",
     "tests/workflows/test_workflow_revisions.py",

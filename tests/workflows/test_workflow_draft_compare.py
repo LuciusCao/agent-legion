@@ -9,7 +9,6 @@ from server.app.services.workflow_draft_compare import (
     compare_workflow_draft,
 )
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
-from server.app.services.workflow_revision_change import structural_revision_changed
 from server.app.services.workflow_revision_format import definition_to_yaml
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import WorkflowCondition
@@ -86,22 +85,6 @@ def test_node_change_fields_config_schema_value_change_is_change():
         },
     )
     assert _node_change_fields(base, draft) == ["config_schema"]
-
-
-def test_structural_revision_changed_for_config_fields():
-    """Issue #418 传导链：_node_change_fields 产出的 config/config_schema
-    变更记录必须让 structural_revision_changed 判定为真（creates_revision
-    的数据源），对齐后端 publish 的实际行为。"""
-    for field in ("config", "config_schema"):
-        node_change = {"type": "modified", "fields": [field]}
-        assert structural_revision_changed([node_change], [], [], []) is True
-    # execution-only stays the runtime exception (regression guard).
-    assert (
-        structural_revision_changed([{"type": "modified", "fields": ["execution"]}], [], [], [])
-        is False
-    )
-    # No node changes at all: unchanged.
-    assert structural_revision_changed([], [], [], []) is False
 
 
 def test_compare_no_op_draft_returns_none_risk(app_with_workspace):
