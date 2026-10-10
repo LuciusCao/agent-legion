@@ -258,6 +258,13 @@ def test_job_artifact_service_open_raw_rejects_traversal(artifact_service, job):
         ("..\\..\\etc", False),
         ("x" * 201, False),
         ("é" * 101, False),  # 202 bytes
+        # 末段 raw 保留名（#1178 codex 复审 P2）：与 raw 下载路由
+        # （/artifacts/{name:path}/raw）撞形——清单剪枝/远程 intake/serve
+        # 同口径拒绝；单段 raw 与非末段 raw 不撞形，不受影响。
+        ("reports/output/raw", False),
+        ("a/b/raw", False),
+        ("raw", True),
+        ("raw/final.mp4", True),
         # 绝对名。
         ("/abs/path", False),
     ],
@@ -278,6 +285,7 @@ def test_is_downloadable_artifact_name_matrix(name, expected):
         "a\x00b",
         "x" * 300,
         "x" * 201,
+        "reports/output/raw",
     ],
 )
 def test_job_artifact_service_rejects_non_artifact_names(artifact_service, job, name):

@@ -11,8 +11,10 @@
  * freshness window 内浏览器会直接复用旧响应（本地 FileResponse 带
  * ETag/Last-Modified），面板就继续播放重跑前的字节。fetch 固定
  * `cache: 'no-store'`：总是打到服务端（ETag 仍可协商省带宽，但 freshness
- * window 不再截流）。版本参数形态留给后续（需要宿主 assets 携带产物版本
- * 号——内置媒体渲染器走 artifact version 查询参数的同一思路）。
+ * window 不再截流）；服务端 raw 路由侧为 manifest-first（对象存储权威
+ * 副本优先于宿主 job_dir 缓存，#1178 codex 复审 P2），链路两端合起来
+ * 保证重取到的是当前字节。版本参数形态留给后续（需要宿主 assets 携带
+ * 产物版本号——内置媒体渲染器走 artifact version 查询参数的同一思路）。
  *
  * 内存护栏（#1178 codex 复审 P2）：读取前按 Content-Length 预检（对象
  * 存储流式分支可能不带该头，gzip 时声明的还是压缩后长度），读取走

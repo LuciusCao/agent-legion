@@ -3,7 +3,9 @@
 from pathlib import Path
 
 from server.app.routes.job_artifact_raw import raw_media_type
+from tests.fakes.storage import FakeObjectStorage
 from tests.helpers import publish_legacy_intake_revision, seed_workspace_agent_definitions
+from tests.routes.jobs.external_artifact_testlib import _register_object_artifact
 
 
 def _create_job(c) -> tuple[str, Path]:
@@ -65,6 +67,40 @@ def test_raw_endpoint_rejects_nested_traversal(client_factory):
         job_id, _ = _create_job(c)
 
         response = c.get(f"/api/jobs/{job_id}/artifacts/reports/../../etc/passwd/raw")
+
+    assert response.status_code == 400
+
+
+def test_raw_endpoint_prefers_manifest_object_over_stale_local(client_factory, monkeypatch):
+    """#1178 codex 复审 P2（重取语义）：远程 Worker 重跑后对象存储已是新
+    字节而宿主 job_dir 缓存还是旧的——raw 路由 manifest-first（权威副本
+    在对象存储，EXEC-ARTIFACT-STORE-001），本地文件只在无 manifest 行的
+    legacy 形态下使用；前端字节桥（cache: no-store）的重取通道不会静默
+    播旧媒体。"""
+    with client_factory() as c:
+        monkeypatch.setattr(c.app.state.job_artifact_objects, "storage", FakeObjectStorage())
+        job_id, storage = _create_job(c)
+        payload = b"current-object-bytes"
+        job = c.app.state.job_db.get_job(job_id)
+        _register_object_artifact(c, job, "final.mp4", payload, gzipped=False)
+        (storage / "final.mp4").write_bytes(b"stale-local-bytes")
+
+        response = c.get(f"/api/jobs/{job_id}/artifacts/final.mp4/raw")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("video/mp4")
+    assert response.content == payload
+
+
+def test_raw_endpoint_rejects_reserved_raw_suffix_name(client_factory):
+    """#1178 codex 复审 P2：末段为 raw 的产物名与 raw 路由撞形（其文本
+    URL 会被按前缀名吞掉）——serve 侧白名单拒绝（400），与清单剪枝/
+    远程 intake 同一口径（job_artifact_names.py）。裸名 raw 与非末段
+    raw 不撞形（见其服务层矩阵）。"""
+    with client_factory() as c:
+        job_id, _ = _create_job(c)
+
+        response = c.get(f"/api/jobs/{job_id}/artifacts/reports/output/raw/raw")
 
     assert response.status_code == 400
 

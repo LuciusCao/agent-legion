@@ -32,8 +32,10 @@ def register_raw_artifact_route(
     # 子目录），单段参数连 URL 编码的斜杠也匹配不上。/raw 后缀在 :path
     # 贪婪匹配下取自尾部（fastapi 的 path convertor 按后缀截断），名字里
     # 的 / 不再破坏匹配；路径安全在 service 层（open_raw →
-    # is_downloadable_artifact_name 拒绝 .. 段/绝对名，resolve_within 做
-    # 包含性校验——见 job_artifact_names.py），路由形态不新增穿越面。
+    # is_downloadable_artifact_name 拒绝 .. 段/绝对名与末段为 raw 的保留
+    # 名——后者与本路由撞形（其文本 URL 会被按前缀名吞掉），同一白名单
+    # 在清单剪枝与远程 intake 同步拒绝，见 job_artifact_names.py），路由
+    # 形态不新增穿越面。
     # 206 声明（#703 codex round 4 P2-2，与外部 raw 路由同修）：Range 时
     # raw_response 答分段 206 + Content-Range，契约只写 200 会让生成客
     # 户端把分段下载当异常。
@@ -62,5 +64,10 @@ def register_raw_artifact_route(
         # require_job_workspace_access 统一裁决（#745 按 job 行反查授权域；
         # 见 jobs.py get_job 的注释——跨域与未知 job 同为 404，Range 行为
         # 不变）。
-        # Range 解析在 service.open_raw 内（本地分支忽略，FileResponse 原生支持）。
-        return raw_response(service.open_raw(job_id, artifact_name, range_header))
+        # open_raw_current（#1178 codex 复审 P2）：manifest-first——远程
+        # Worker 重跑后对象存储已是新字节而宿主 job_dir 缓存还是旧的，
+        # 本地优先会让「init 重发 → 面板重取」通道静默播旧媒体；权威副本
+        # 在对象存储（EXEC-ARTIFACT-STORE-001），本地文件只在无 manifest
+        # 行的 legacy 形态下使用。Range 解析在 service 内（本地分支忽略，
+        # FileResponse 原生支持）。
+        return raw_response(service.open_raw_current(job_id, artifact_name, range_header))

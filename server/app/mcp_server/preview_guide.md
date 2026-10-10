@@ -130,7 +130,8 @@ Panel → host:
     plus the media type the raw endpoint maps from the file extension
     (`video/mp4`, `audio/mpeg`, … non-media files are
     `application/octet-stream`). Artifact names may contain `/` (nested
-    outputs like `reports/final.mp4`) — pass the manifest name verbatim.
+    outputs like `reports/final.mp4`) — pass the manifest name verbatim
+    (names ending in `/raw` are reserved and never appear in the manifest).
     Size guard: artifacts above 512 MiB are refused (the promise rejects) —
     read media files, not entire archives. The bridge stays valid across
     `init` re-sends; just call it again to re-fetch.
