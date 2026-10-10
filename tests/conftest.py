@@ -456,17 +456,20 @@ def _reset_result_unpack_pool(_assert_shared_app_invariants):
 # imported once per xdist worker process.
 _SCHEMA_DIRTY = False
 
-# Tracks whether the session-scoped shared clients have been instantiated
-# yet (set by _shared_authed_client / _shared_anon_client). Guards one
+# Tracks which session-scoped shared clients have been instantiated (the
+# fixture names of _shared_authed_client / _shared_anon_client). Guards one
 # dirty-window interleave: session fixtures instantiate BEFORE the
 # function-scoped autouse isolation setup of their first requesting test,
 # so if a fresh_schema test leaves drift and the NEXT test is the first to
-# request a shared client, create_app (init_db, plus the lifespan's
+# request EITHER shared client, create_app (init_db, plus the lifespan's
 # reap_zombie_sessions write) would run against the drifted schema before
-# the deferred rebuild fires. While the clients do not exist yet, the
-# teardown rebuilds eagerly instead of deferring (early-fresh is rare, so
-# the eager cost almost never lands).
-_SHARED_SESSION_CLIENTS_CREATED = False
+# the deferred rebuild fires. Tracking each client separately matters: with
+# only one of them created, the other can still instantiate for the first
+# time later in the session, so the teardown defers the rebuild only once
+# BOTH exist; until then it rebuilds eagerly (early-fresh is rare, so the
+# eager cost almost never lands).
+_SHARED_SESSION_CLIENTS_CREATED: set[str] = set()
+_ALL_SHARED_SESSION_CLIENTS = frozenset({"_shared_authed_client", "_shared_anon_client"})
 
 
 @pytest.fixture(autouse=True)
@@ -512,11 +515,12 @@ def _isolate_postgres_database(_assert_shared_app_invariants, request):
         # Defer the post-test rebuild to the next test's setup (see
         # _SCHEMA_DIRTY): consecutive fresh_schema tests share one rebuild,
         # and the session never pays for a rebuild nobody runs against.
-        # Exception: while the session-scoped shared clients have not been
-        # instantiated yet, rebuild NOW — their creation would otherwise
-        # run against the drifted schema before the deferred rebuild fires
-        # (see _SHARED_SESSION_CLIENTS_CREATED).
-        if _SHARED_SESSION_CLIENTS_CREATED:
+        # Exception: until BOTH session-scoped shared clients have been
+        # instantiated, rebuild NOW — a not-yet-created client's first
+        # instantiation would otherwise run against the drifted schema
+        # before the deferred rebuild fires (see
+        # _SHARED_SESSION_CLIENTS_CREATED).
+        if _SHARED_SESSION_CLIENTS_CREATED >= _ALL_SHARED_SESSION_CLIENTS:
             _SCHEMA_DIRTY = True
         else:
             _rebuild_schema()
@@ -729,7 +733,6 @@ def _shared_authed_client(tmp_path_factory, _session_test_schema):
     # _session_test_schema is an explicit dependency: session fixtures run
     # before the function-scoped autouse isolation fixture, and create_app
     # needs the worker schema to already exist (JobQueries runs init_db).
-    global _SHARED_SESSION_CLIENTS_CREATED
     app = _build_shared_client(tmp_path_factory, "shared-app")
     # The patch must cover only __enter__ (the lifespan start): keeping it
     # active across the yield would neuter background tasks on every
@@ -737,7 +740,7 @@ def _shared_authed_client(tmp_path_factory, _session_test_schema):
     client = TestClient(app)
     with _no_background_tasks():
         client.__enter__()
-    _SHARED_SESSION_CLIENTS_CREATED = True
+    _SHARED_SESSION_CLIENTS_CREATED.add("_shared_authed_client")
     try:
         yield client, dict(client.headers)
     finally:
@@ -749,12 +752,11 @@ def _shared_anon_client(tmp_path_factory, _session_test_schema):
     # A second app (not a second client on the same app): entering two
     # TestClients on one app would run the lifespan twice and re-attach the
     # event bus to the wrong loop.
-    global _SHARED_SESSION_CLIENTS_CREATED
     app = _build_shared_client(tmp_path_factory, "shared-anon-app")
     client = TestClient(app)
     with _no_background_tasks():
         client.__enter__()
-    _SHARED_SESSION_CLIENTS_CREATED = True
+    _SHARED_SESSION_CLIENTS_CREATED.add("_shared_anon_client")
     try:
         yield client, dict(client.headers)
     finally:
