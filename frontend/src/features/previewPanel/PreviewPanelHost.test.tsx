@@ -51,6 +51,16 @@ async function flush() {
   })
 }
 
+/**
+ * 等待桥端点登记（#1178 codex 复审 P1）：宿主只在 iframe **首帧 load** 时把
+ * contentWindow 登记为桥端点（jsdom 对 srcdoc 异步 fire load）；发桥消息前
+ * 必须等它完成，否则 bridgeWindowRef 尚为 null、消息被鉴别层丢弃——生产
+ * 语义一致（面板脚本只在其文档 load 后才运行）。
+ */
+async function bridgeReady() {
+  await flush()
+}
+
 /** 以面板身份向宿主派发消息（jsdom 的 MessageEvent 支持 source 字段）。 */
 function emitPanelMessage(iframe: HTMLIFrameElement, data: unknown) {
   const event = new MessageEvent('message', {
@@ -59,6 +69,13 @@ function emitPanelMessage(iframe: HTMLIFrameElement, data: unknown) {
   })
   act(() => {
     window.dispatchEvent(event)
+  })
+}
+
+/** 模拟 iframe 的 load 事件（jsdom 手动驱动；React onLoad 是合成事件）。 */
+function fireFrameLoad(iframe: HTMLIFrameElement) {
+  act(() => {
+    iframe.dispatchEvent(new Event('load'))
   })
 }
 
@@ -177,6 +194,7 @@ describe('PreviewPanelHost 桥协议', () => {
     const { container } = renderHost()
     const iframe = getIframe(container)
     const postSpy = vi.spyOn(iframe.contentWindow!, 'postMessage')
+    await bridgeReady()
 
     emitPanelMessage(iframe, { source: PREVIEW_PANEL_SOURCE, type: 'ready' })
 
@@ -231,6 +249,7 @@ describe('PreviewPanelHost 桥协议', () => {
     const { container } = renderHost()
     const iframe = getIframe(container)
     vi.spyOn(iframe.contentWindow!, 'postMessage')
+    await bridgeReady()
 
     emitPanelMessage(iframe, {
       source: PREVIEW_PANEL_SOURCE,
@@ -262,6 +281,7 @@ describe('PreviewPanelHost 桥协议', () => {
     const { container } = renderHost()
     const iframe = getIframe(container)
     vi.spyOn(iframe.contentWindow!, 'postMessage')
+    await bridgeReady()
 
     emitPanelMessage(iframe, {
       source: PREVIEW_PANEL_SOURCE,
@@ -302,6 +322,7 @@ describe('PreviewPanelHost 桥协议', () => {
     const { container } = renderHost()
     const iframe = getIframe(container)
     const postSpy = vi.spyOn(iframe.contentWindow!, 'postMessage')
+    await bridgeReady()
 
     emitPanelMessage(iframe, {
       source: PREVIEW_PANEL_SOURCE,
@@ -324,6 +345,73 @@ describe('PreviewPanelHost 桥协议', () => {
     })
   })
 
+  it('二次 load（面板自导航）撤销桥：导航后同窗口伪造消息打不进来，第三次 load 不得复活桥（#1178 codex 复审 P1）', async () => {
+    // sandbox iframe 自导航前后是同一个 WindowProxy：导航到外部文档后，
+    // 外部脚本仍能以 event.source === contentWindow 的身份伪造面板 source
+    // 标记调桥。宿主只把首帧 load 的窗口登记为桥端点，任何后续 load（导航）
+    // 撤销；闩锁保证撤销后继续导航（第三次 load）不会把外部文档的窗口重新
+    // 登记回桥。
+    mockFetchJobArtifactRawBytes.mockResolvedValue({
+      name: 'demo.mp4',
+      mediaType: 'video/mp4',
+      bytes: Uint8Array.from([9, 9]).buffer,
+    })
+    const { container } = renderHost()
+    const iframe = getIframe(container)
+    vi.spyOn(iframe.contentWindow!, 'postMessage')
+    await bridgeReady()
+
+    // 首帧：桥正常——readArtifactBytes 往返成立。
+    emitPanelMessage(iframe, {
+      source: PREVIEW_PANEL_SOURCE,
+      type: 'request',
+      id: 41,
+      method: 'readArtifactBytes',
+      params: { name: 'demo.mp4' },
+    })
+    await waitFor(() => {
+      expect(
+        hostReplies(iframe).find(
+          (data) => data.type === 'response' && data.id === 41
+        )
+      ).toMatchObject({ ok: true })
+    })
+
+    // 面板自导航（外部文档）：同 iframe 第二次 load → 桥撤销。导航后的
+    // 文档用同一 WindowProxy 伪造面板标记发请求——消息被鉴别层丢弃。
+    fireFrameLoad(iframe)
+    emitPanelMessage(iframe, {
+      source: PREVIEW_PANEL_SOURCE,
+      type: 'request',
+      id: 42,
+      method: 'readArtifactBytes',
+      params: { name: 'demo.mp4' },
+    })
+    await flush()
+    expect(
+      hostReplies(iframe).find(
+        (data) => data.type === 'response' && data.id === 42
+      )
+    ).toBeUndefined()
+    // 撤销后宿主也不再应答该窗口（fetch 不被再次触发）。
+    expect(mockFetchJobArtifactRawBytes).toHaveBeenCalledTimes(1)
+
+    // 继续导航（第三次 load）：闩锁不重新登记——桥保持撤销。
+    fireFrameLoad(iframe)
+    emitPanelMessage(iframe, {
+      source: PREVIEW_PANEL_SOURCE,
+      type: 'request',
+      id: 43,
+      method: 'getJobDetail',
+    })
+    await flush()
+    expect(
+      hostReplies(iframe).find(
+        (data) => data.type === 'response' && data.id === 43
+      )
+    ).toBeUndefined()
+  })
+
   it('readArtifactBytes 超限与缺 name 走错误响应通道（不回传半读字节）', async () => {
     mockFetchJobArtifactRawBytes.mockRejectedValue(
       new Error(
@@ -333,6 +421,7 @@ describe('PreviewPanelHost 桥协议', () => {
     const { container } = renderHost()
     const iframe = getIframe(container)
     vi.spyOn(iframe.contentWindow!, 'postMessage')
+    await bridgeReady()
 
     emitPanelMessage(iframe, {
       source: PREVIEW_PANEL_SOURCE,
@@ -372,6 +461,7 @@ describe('PreviewPanelHost 桥协议', () => {
     const { container } = renderHost()
     const iframe = getIframe(container)
     vi.spyOn(iframe.contentWindow!, 'postMessage')
+    await bridgeReady()
 
     emitPanelMessage(iframe, {
       source: PREVIEW_PANEL_SOURCE,

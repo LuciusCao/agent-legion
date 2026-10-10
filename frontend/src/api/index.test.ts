@@ -17,6 +17,7 @@ import {
   updateWorkspacePackage,
 } from './index'
 import { ArtifactTooLargeError } from './jobArtifactBytes'
+import { jobArtifactRawUrl } from './jobsApi'
 import {
   getAgentCatalog,
   getSkillDetail,
@@ -401,6 +402,27 @@ describe('job helpers', () => {
     }
     expect(new Uint8Array(after.bytes)).toEqual(new Uint8Array(second))
     expect(new Uint8Array(before.bytes)).toEqual(new Uint8Array(first))
+  })
+
+  it('jobArtifactRawUrl 按路径段编码：嵌套产物名的 / 保持结构语义（#1178 codex 复审 P2）', () => {
+    // 整名 encodeURIComponent 会把 / 编成 %2F——ASGI 解码后变回分隔符，
+    // 与按段匹配的路由错配（此前嵌套名 404）。按段编码后 / 原样保留。
+    expect(jobArtifactRawUrl('j1', 'final.mp4')).toBe(
+      '/api/jobs/j1/artifacts/final.mp4/raw'
+    )
+    expect(jobArtifactRawUrl('j1', 'reports/final.mp4')).toBe(
+      '/api/jobs/j1/artifacts/reports/final.mp4/raw'
+    )
+    expect(jobArtifactRawUrl('j1', 'deep/nested/dir/clip.mp4')).toBe(
+      '/api/jobs/j1/artifacts/deep/nested/dir/clip.mp4/raw'
+    )
+    // 段内特殊字符仍被编码（空格/#/中文），段间分隔符不受影响。
+    expect(jobArtifactRawUrl('j 1', 'my clip.mp4')).toBe(
+      '/api/jobs/j%201/artifacts/my%20clip.mp4/raw'
+    )
+    expect(jobArtifactRawUrl('j1', 'a#b/帧 1.mp4')).toBe(
+      '/api/jobs/j1/artifacts/a%23b/%E5%B8%A7%201.mp4/raw'
+    )
   })
 })
 

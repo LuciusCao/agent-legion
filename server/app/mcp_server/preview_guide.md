@@ -84,11 +84,18 @@ Consequences for your markup:
 
 All messages are plain JSON objects with a `source` marker; the panel's
 origin is opaque, so the host identifies the frame by `event.source` and the
-marker — do not rely on `event.origin`.
+marker — do not rely on `event.origin`. The bridge endpoint is bound to the
+**initial srcdoc document's window**: if the frame navigates itself away
+(`location.href = …`, `<meta refresh>`), the host revokes the bridge on the
+next load — bridge calls from the navigated-to page are dropped, in-flight
+responses are not delivered. A well-behaved panel never navigates; the frame
+is your rendering surface, not a router.
 
 Panel → host (`source: "agent-legion-preview-panel"`):
 
 - `{type: "ready"}` — send once at startup; the host answers with `init`.
+  Send it after your document has loaded (scripts run after load anyway) —
+  the host registers the bridge endpoint on the frame's first load event.
 - `{type: "request", id, method, params}` — call a bridge method:
   - `listArtifacts()` → `string[]` — artifact names of the current job.
   - `readArtifact({name})` → `{name, content}` — UTF-8 text of one artifact
@@ -97,7 +104,9 @@ Panel → host (`source: "agent-legion-preview-panel"`):
     raw bytes as an `ArrayBuffer` (structured clone; NOT base64), plus the
     media type the raw endpoint maps from the file extension
     (`video/mp4`, `audio/mpeg`, … non-media files are
-    `application/octet-stream`). Size guard: artifacts above 512 MiB are
+    `application/octet-stream`). Artifact names may contain `/` (nested
+    outputs like `reports/final.mp4`) — pass the manifest name verbatim.
+    Size guard: artifacts above 512 MiB are
     refused and arrive as an error response — read media files, not
     entire archives. Available only when `init.capabilities` lists
     `"readArtifactBytes"` (see below).

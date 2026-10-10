@@ -35,7 +35,9 @@
  *   数据）与 `<link rel="dns-prefetch">`/`rel="preconnect"` 的域名探测。
  *   fetch/sendBeacon/img/子资源/表单通道已闭合；导航/WebRTC/dns-prefetch
  *   通道作为接受的残留记录于此（均携带量有限——只能带出脚本已知的数据，
- *   不能读取响应）。
+ *   不能读取响应）。#1178 复审 P1 起**导航本身即撤销桥**：导航后的文档
+ *   （同 WindowProxy）不再能冒用桥读取任务数据，导航残留只剩 URL query
+ *   携带的、导航前脚本已知的数据。
  * - 桥只暴露只读方法（listArtifacts/readArtifact/readArtifactBytes/
  *   getJobDetail，方法体见 bridgeRequestHandler.ts），返回的都是当前页面
  *   用户本来就有权看到的数据（readArtifactBytes 复用 raw 端点的会话鉴权，
@@ -44,9 +46,12 @@
  *   init 消息带 capabilities 声明（基础三法之外的增量方法，#1146）——
  *   守卫白名单对未知 method 静默丢弃，面板无法靠探测发现新方法。
  * - 消息鉴别：opaque origin 的 event.origin 恒为 "null"，不能用来鉴权——
- *   宿主钉住 event.source === iframe.contentWindow 再校验 source 标记；
- *   回包 postMessage(..., '*') 的目标窗口由 contentWindow 引用钉死，不会
- *   投递到其他窗口。
+ *   宿主钉住 event.source 与**初始 srcdoc 文档窗口**（bridgeWindowRef）一致
+ *   再校验 source 标记；sandbox iframe 自导航前后 WindowProxy 同一
+ *   （#1178 codex 复审 P1），纯 contentWindow 判别无法挡导航后的外部文档
+ *   伪造 source 标记冒用桥——readArtifactBytes 会把任意产物字节交给外部
+ *   页面外传。桥端点在 iframe 首帧 load 时登记、后续任何 load（导航）即撤
+ *   销；回包 postMessage(..., '*') 的目标窗口由同一引用钉死。
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme, type Theme } from '@mui/material/styles'
@@ -110,6 +115,18 @@ export function PreviewPanelHost({
   // （替代 #11 时代面板内部的 artifact 重取；bundle 侧约定 init 即重渲染）。
   const readyRef = useRef(false)
   const nodeSignatureRef = useRef<string | null>(null)
+  // 桥窗口绑定（#1178 codex 复审 P1）：sandbox iframe 自导航前后是同一个
+  // WindowProxy（event.source === contentWindow 对导航后的外部文档依然成立），
+  // 导航后的文档可伪造 source 标记调桥——readArtifactBytes 会把任意产物字节
+  // 交给外部页面外传。修法：只把**初始 srcdoc 文档**的窗口记为桥端点，iframe
+  // 的后续 load（导航）即撤销桥。三态哨兵：undefined = 首帧未 load（发桥
+  // 无从谈起）；Window = 桥端点（首帧）；null = 已撤销（任何后续 load）——
+  // 区分「未登记」与「已撤销」防再注册：导航两次（第三次 load）不会把外部
+  // 文档的窗口重新登记回桥。React 更新 srcDoc 不走本路径——bundle 内容变化
+  // 经 PreviewPanelSection 的 key（jobId + html_hash）整树重挂 iframe（行为
+  // 由 PreviewPanelSection.remount.test.tsx 钉住），同一 Host 实例的 srcDoc
+  // 恒定，第二帧 load 只可能是面板自导航。
+  const bridgeWindowRef = useRef<Window | null | undefined>(undefined)
 
   const initMessage = useMemo<PreviewHostInitMessage>(
     () => ({
@@ -150,7 +167,7 @@ export function PreviewPanelHost({
       nodeSignatureRef.current !== null &&
       nodeSignatureRef.current !== signature
     ) {
-      iframeRef.current?.contentWindow?.postMessage(initMessage, '*')
+      bridgeWindowRef.current?.postMessage(initMessage, '*')
     }
     nodeSignatureRef.current = signature
   }, [detail, initMessage])
@@ -166,7 +183,7 @@ export function PreviewPanelHost({
       error?: string,
       transfer?: Transferable[]
     ) {
-      iframeRef.current?.contentWindow?.postMessage(
+      bridgeWindowRef.current?.postMessage(
         {
           source: PREVIEW_HOST_SOURCE,
           type: 'response',
@@ -181,7 +198,10 @@ export function PreviewPanelHost({
 
     function onMessage(event: MessageEvent) {
       const frame = iframeRef.current
-      if (!frame || event.source !== frame.contentWindow) return
+      // 桥端点必须是初始 srcdoc 文档的窗口（#1178 codex 复审 P1）：
+      // contentWindow 跨导航存续，不能用 event.source === frame.contentWindow
+      // 单独判定——导航后的文档伪造 source 标记即冒用桥。
+      if (!frame || event.source !== bridgeWindowRef.current) return
       const data: unknown = event.data
       if (!isPanelToHostMessage(data)) return
       if (data.type === 'ready') {
@@ -189,7 +209,7 @@ export function PreviewPanelHost({
         nodeSignatureRef.current = (detail?.nodes ?? [])
           .map((node) => `${node.node_key}:${node.status}`)
           .join('|')
-        frame.contentWindow?.postMessage(initMessage, '*')
+        bridgeWindowRef.current?.postMessage(initMessage, '*')
         return
       }
       if (data.type === 'csp-violation') {
@@ -233,7 +253,19 @@ export function PreviewPanelHost({
         sandbox="allow-scripts"
         srcDoc={framedHtml}
         style={{ height }}
-        onLoad={() => setLoading(false)}
+        onLoad={() => {
+          setLoading(false)
+          // 桥端点绑定（#1178 codex 复审 P1）：undefined（首帧未 load）时
+          // 登记初始文档窗口为桥端点；其余任何 load（导航）一律置 null 撤销
+          // 桥——导航前后 WindowProxy 同一，窗口引用无法区分文档身份，只能
+          // 以 load 次数近似：srcdoc 注入只产生首帧 load，React 更新 srcDoc
+          // 走 key 重建整个 iframe，不产生第二帧。
+          if (bridgeWindowRef.current === undefined) {
+            bridgeWindowRef.current = iframeRef.current?.contentWindow ?? null
+          } else {
+            bridgeWindowRef.current = null
+          }
+        }}
       />
     </div>
   )

@@ -156,7 +156,7 @@ server/app/
 | PUT | `/admin/instance-settings` | `put_instance_settings` | routes/instance_settings.py |
 | POST | `/workspaces/{workspace_id}/jobs/{job_id}/nodes/{node_key}/approval` | `decide_approval` | routes/job_approvals.py |
 | GET | `/workspaces/{workspace_id}/jobs/{job_id}/approvals` | `list_approval_decisions` | routes/job_approvals.py |
-| GET | `/jobs/{job_id}/artifacts/{artifact_name}/raw` | `get_artifact_raw` | routes/job_artifact_raw.py |
+| GET | `/jobs/{job_id}/artifacts/{artifact_name:path}/raw` | `get_artifact_raw` | routes/job_artifact_raw.py |
 | GET | `/jobs/{job_id}/artifacts/{artifact_name:path}` | `get_artifact` | routes/job_artifacts.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/log` | `get_job_run_log` | routes/job_artifacts.py |
 | POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/job_batches.py |

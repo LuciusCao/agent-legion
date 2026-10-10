@@ -36,6 +36,39 @@ def test_raw_endpoint_serves_image_with_media_type(client_factory):
     assert response.content == b"\x89PNG\r\n\x1a\nfake-bytes"
 
 
+def test_raw_endpoint_serves_nested_artifact_name(client_factory):
+    """#1178 codex 复审 P2：声明产物名可含 /（reports/final.mp4——Worker
+    解包与 promote 保留子目录），raw 路由按 {artifact_name:path} 匹配。
+    修复前：前端整名编码把 / 编成 %2F，ASGI 解码后单段路由匹配失败，
+    落到后面的 {artifact_name:path} 文本路由按 "reports/final.mp4/raw"
+    查产物 → 404——媒体产物只能播根目录名。"""
+    with client_factory() as c:
+        job_id, storage = _create_job(c)
+        (storage / "reports").mkdir(parents=True, exist_ok=True)
+        (storage / "reports" / "final.mp4").write_bytes(b"mp4-bytes")
+
+        # 字面 / 形态（前端按段编码后的 URL）与 %2F 形态（整名编码的
+        # 旧客户端）都必须命中 raw 路由：ASGI 解码后两者同路径。
+        literal = c.get(f"/api/jobs/{job_id}/artifacts/reports/final.mp4/raw")
+        encoded = c.get(f"/api/jobs/{job_id}/artifacts/reports%2Ffinal.mp4/raw")
+
+    for response in (literal, encoded):
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("video/mp4")
+        assert response.content == b"mp4-bytes"
+
+
+def test_raw_endpoint_rejects_nested_traversal(client_factory):
+    """嵌套名形态下的穿越仍被服务层白名单拒绝（is_downloadable_artifact_name
+    拒 .. 段）——路由改 {artifact_name:path} 不新增穿越面。"""
+    with client_factory() as c:
+        job_id, _ = _create_job(c)
+
+        response = c.get(f"/api/jobs/{job_id}/artifacts/reports/../../etc/passwd/raw")
+
+    assert response.status_code == 400
+
+
 def test_raw_endpoint_serves_unknown_extension_as_download(client_factory):
     with client_factory() as c:
         job_id, storage = _create_job(c)

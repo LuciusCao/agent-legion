@@ -27,11 +27,18 @@ def register_raw_artifact_route(
     # raw 必须先于 {artifact_name:path} 注册（在 job_artifacts.py 的
     # create_job_artifacts_router 里调用），否则 "foo.json/raw" 会被吞成
     # 名为 "foo.json/raw" 的 artifact 查询。
+    # {artifact_name:path}（#1178 codex 复审 P2，与外部 raw 路由同修）：
+    # 声明产物名可含 /（reports/final.mp4——Worker 解包与 promote 都保留
+    # 子目录），单段参数连 URL 编码的斜杠也匹配不上。/raw 后缀在 :path
+    # 贪婪匹配下取自尾部（fastapi 的 path convertor 按后缀截断），名字里
+    # 的 / 不再破坏匹配；路径安全在 service 层（open_raw →
+    # is_downloadable_artifact_name 拒绝 .. 段/绝对名，resolve_within 做
+    # 包含性校验——见 job_artifact_names.py），路由形态不新增穿越面。
     # 206 声明（#703 codex round 4 P2-2，与外部 raw 路由同修）：Range 时
     # raw_response 答分段 206 + Content-Range，契约只写 200 会让生成客
     # 户端把分段下载当异常。
     @router.get(
-        "/jobs/{job_id}/artifacts/{artifact_name}/raw",
+        "/jobs/{job_id}/artifacts/{artifact_name:path}/raw",
         response_class=FileResponse,
         response_model=None,
         responses={
