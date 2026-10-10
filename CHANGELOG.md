@@ -34,6 +34,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### chores
 
 - 回收 `server/app/studio_chat/spawn.py` 的 dated 预算豁免（issue #1140）：豁免登记时预期的「0.7.18 落版重锚吸收」并未发生（基线一直是 90、从未 ratchet），拆分 `build_mcp_server_spec` 逐字迁出为姊妹模块 `mcp_server_spec.py`（spawn.py 有效行 107 → 95，落在 90+15 容忍带内、未被 ratchet 吸收），豁免完整删除；新文件首次登记 24（14 + buffer）。v2 读回扫描解压上限加固转 issue #1163。
+- 0.7.19 六个已合入 PR 的 codex 评审评论（4×P1 + 6×P2）合并后收口（PR #1173 Host 侧 / #1174 Worker 侧）：每个 finding 按根因级要求三段落地——表面修法 → 根因建模（状态机/计数维度/前置条件表沉淀 docstring）→ 测试矩阵补全（含红灯复验的判别力）。Host 侧：节点限额计数排除 agent 租约（根因=执行类型维度缺席）+ agent_id 字符域约束封 `code:` 前缀碰撞后门、rev-parse 批级 30s 预算（根因=超时模型只有单次粒度）、保留名守卫归一化比对（根因=「名字」与「落盘路径」混同，`./result.json` 别名绕过）、TOCTOU 三维度手段表。Worker 侧：scan 整趟失败就地截空 + 幸存者守卫双层防泄漏（根因=events 六态状态机的失败态文件去向未建模；Host None 语义逐字节零变化）、execution_dir 消失可上报（mkdir 重建 + state 滞留兜底）、listing 路径脱敏、JSON 截断保语法、降级归档 staging 实测 + 裁剪序 + 判定字段永不裁（根因=降级闸缺「产物自身可提交性」态）、suppress 块拆分。本地路径计数对齐转 #1171、redact_json key 豁免边界转 #1175。
 
 ### Fixed
 
