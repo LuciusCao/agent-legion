@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import stat
 import subprocess
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -639,3 +642,135 @@ def test_uv_cache_prewarm_detects_nesting_when_sibling_lands_in_window(
     assert not list(worktree.glob(".uv-cache.prewarm.*"))
     # init 其余步骤照常完成。
     assert (worktree / "deploy/secrets/vault_master_key").exists()
+
+
+def _popen(script_path: Path, bin_dir: Path) -> subprocess.Popen[str]:
+    """后台启动被测脚本：独立进程组，killpg 可模拟 Ctrl-C 到达前台进程组。"""
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": os.environ.get("HOME", "")}
+    return subprocess.Popen(
+        ["bash", str(script_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        text=True,
+        start_new_session=True,
+    )
+
+
+def _wait_for(predicate: Callable[[], bool], timeout: float = 10.0) -> bool:
+    """等信号非等时长：轮询条件成立或超时。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _sigterm(proc: subprocess.Popen[str]) -> None:
+    """SIGTERM 整个进程组并收敛；未被 trap 放行的异常路径用 SIGKILL 兜底。"""
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.communicate(timeout=10)
+    finally:
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+
+
+_CP_STUB_SLOW = """#!/usr/bin/env bash
+# 克隆 stub：带选项调用造出临时克隆后长睡（给测试发送信号留窗口）；
+# 无选项调用（.env 复制）委托真实 cp。
+if [[ "${1:-}" == -* ]]; then
+    mkdir -p "${@: -1}/cloned-entry"
+    exec sleep 30
+fi
+exec /bin/cp "$@"
+"""
+
+_CP_STUB_FAST_CLONE = """#!/usr/bin/env bash
+# 克隆 stub：带选项调用造出临时克隆（秒回）；无选项调用委托真实 cp。
+if [[ "${1:-}" == -* ]]; then
+    mkdir -p "${@: -1}/cloned-entry"
+    exit 0
+fi
+exec /bin/cp "$@"
+"""
+
+_MV_STUB_SLOW = """#!/usr/bin/env bash
+# 落位 stub：长睡——被测脚本此时持锁等待 mv 返回（给测试发送信号留窗口）。
+exec sleep 30
+"""
+
+
+def test_uv_cache_prewarm_sigterm_cleans_own_temp_and_held_lock(tmp_path: Path) -> None:
+    """持锁落位中收到 SIGTERM：EXIT trap 清本进程临时目录与自持锁。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    (develop / ".uv-cache").mkdir()
+    _write_stub(bin_dir / "cp", _CP_STUB_FAST_CLONE)
+    _write_stub(bin_dir / "mv", _MV_STUB_SLOW)
+    worktree = main / ".worktrees/flat"
+    lock_pid = worktree / ".uv-cache.prewarm.lock/pid"
+
+    proc = _popen(worktree / "scripts/init-worktree.sh", bin_dir)
+    # 等信号非等时长：确认持锁（pid 文件写入）后才发 SIGTERM。
+    assert _wait_for(lock_pid.exists), "脚本未在预算内持有落位锁"
+    _sigterm(proc)
+
+    assert proc.returncode != 0
+    # EXIT trap：本进程临时目录（pid 标记）与自持锁都已清。
+    assert not list(worktree.glob(".uv-cache.prewarm.[0-9]*"))
+    assert not (worktree / ".uv-cache.prewarm.lock").exists()
+
+
+def test_uv_cache_prewarm_sigterm_preserves_foreign_lock(tmp_path: Path) -> None:
+    """克隆进行中收到 SIGTERM 且锁被他人持有：trap 只清本进程临时目录，
+    他人活锁原样保留（LOCK_HELD 未置位——误删会破坏互斥协议）。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    (develop / ".uv-cache").mkdir()
+    _write_stub(bin_dir / "cp", _CP_STUB_SLOW)
+    worktree = main / ".worktrees/flat"
+    foreign_lock = worktree / ".uv-cache.prewarm.lock"
+    foreign_lock.mkdir(parents=True)
+    (foreign_lock / "pid").write_text(f"{os.getpid()}\n")  # 本测试进程存活
+
+    proc = _popen(worktree / "scripts/init-worktree.sh", bin_dir)
+    assert _wait_for(lambda: list(worktree.glob(".uv-cache.prewarm.[0-9]*"))), (
+        "脚本未在预算内开始克隆"
+    )
+    _sigterm(proc)
+
+    assert proc.returncode != 0
+    assert not list(worktree.glob(".uv-cache.prewarm.[0-9]*"))
+    assert (foreign_lock / "pid").read_text().strip() == str(os.getpid())
+
+
+def test_uv_cache_prewarm_sweeps_dead_pid_leftovers(tmp_path: Path) -> None:
+    """SIGKILL 兜底清扫：只清「纯数字 pid 且已死」的临时目录；活 pid 目录
+    与非数字后缀（锁目录形态）一律不动。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    (develop / ".uv-cache").mkdir()
+    worktree = main / ".worktrees/flat"
+    dead = worktree / ".uv-cache.prewarm.999999"  # 超出 pid_max（99999）：必为死 pid
+    dead.mkdir()
+    alive = worktree / f".uv-cache.prewarm.{os.getpid()}"
+    alive.mkdir()
+    named = worktree / ".uv-cache.prewarm.notapid"
+    named.mkdir()
+
+    result = _run(worktree / "scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert "已预暖 .uv-cache" in result.stdout  # 清扫不影响正常预暖落位
+    assert not dead.exists()
+    assert alive.is_dir()
+    assert named.is_dir()

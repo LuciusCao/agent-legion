@@ -155,24 +155,55 @@ if [[ ! -d .uv-cache && -n "$BASE" && -d "$BASE/.uv-cache" ]]; then
         # 持锁进程被 SIGKILL 后预暖被残锁永久静默跳过。
         TMP_CACHE=".uv-cache.prewarm.$$"
         LOCK_DIR=".uv-cache.prewarm.lock"
+        # SIGKILL 兜底清扫：EXIT trap 覆盖不到 SIGKILL，被杀进程的临时目录
+        # 会残留（.gitignore 隐藏、可能数 GB 死重）。只清「名字后缀为纯数字
+        # pid 且该 pid 已死」的目录——活进程（含并发兄弟）与非数字后缀
+        # （锁目录 .uv-cache.prewarm.lock）一律不动；pid 复用只会让清扫
+        # 保守跳过（安全方向：最坏是保留死重，绝不误删活跃数据）。
+        for STALE in .uv-cache.prewarm.*; do
+            [[ -d "$STALE" ]] || continue
+            STALE_PID="${STALE##*.uv-cache.prewarm.}"
+            case "$STALE_PID" in
+                *[!0-9]* | "") continue ;;
+            esac
+            if ! kill -0 "$STALE_PID" 2>/dev/null; then
+                rm -rf "$STALE" || true
+            fi
+        done
+        # 区段级 EXIT trap（codex P2 第二轮）：克隆进行中或持锁落位前收到
+        # Ctrl-C/SIGTERM 时 bash 退出前会执行 EXIT trap（实证：非交互 bash
+        # 等待前台子进程时被 SIGTERM 仍跑 trap）——清理本进程临时目录
+        # （pid 标记，总是可清）与锁（仅 LOCK_HELD 置位即本进程持有时才
+        # 可清，误删他进程持有的锁会破坏互斥）。区段正常走完即 trap - EXIT
+        # 解除；本脚本无其他 EXIT trap（已 grep 确认），无需保存/恢复。
+        LOCK_HELD=""
+        prewarm_release_lock() {
+            if [[ -n "$LOCK_HELD" ]]; then
+                rm -rf "$LOCK_DIR" || true
+                LOCK_HELD=""
+            fi
+        }
+        prewarm_cleanup() {
+            rm -rf "$TMP_CACHE" || true
+            prewarm_release_lock
+        }
+        trap 'prewarm_cleanup' EXIT
         if cp "${CLONE_FLAGS[@]}" "$CACHE_SRC" "$TMP_CACHE"; then
-            LOCKED=""
             if mkdir "$LOCK_DIR" 2>/dev/null; then
                 echo $$ > "$LOCK_DIR/pid" || true
-                LOCKED=1
+                LOCK_HELD=1
             elif [[ -s "$LOCK_DIR/pid" ]] && ! kill -0 "$(cat "$LOCK_DIR/pid")" 2>/dev/null; then
                 rm -rf "$LOCK_DIR" || true
                 if mkdir "$LOCK_DIR" 2>/dev/null; then
                     echo $$ > "$LOCK_DIR/pid" || true
-                    LOCKED=1
+                    LOCK_HELD=1
                 fi
             fi
-            if [[ -z "$LOCKED" ]]; then
-                rm -rf "$TMP_CACHE" || true
+            if [[ -z "$LOCK_HELD" ]]; then
+                prewarm_cleanup
                 echo "提示: .uv-cache 正由并发 init 预暖，丢弃重复克隆" >&2
             elif [[ -d .uv-cache ]]; then
-                rm -rf "$TMP_CACHE" || true
-                rm -rf "$LOCK_DIR" || true
+                prewarm_cleanup
                 echo "提示: .uv-cache 已由并发 init 预暖，丢弃重复克隆" >&2
             elif mv "$TMP_CACHE" .uv-cache; then
                 if [[ -e ".uv-cache/$TMP_CACHE" ]]; then
@@ -180,21 +211,23 @@ if [[ ! -d .uv-cache && -n "$BASE" && -d "$BASE/.uv-cache" ]]; then
                     # 重判与 mv 之间创建了 .uv-cache：BSD mv 已把临时目录
                     # 挪进去——回收嵌套克隆，对方 cache 原样保留，走跳过。
                     rm -rf ".uv-cache/$TMP_CACHE" || true
-                    rm -rf "$LOCK_DIR" || true
+                    prewarm_release_lock
                     echo "提示: .uv-cache 在预暖落位期间被并发创建，丢弃重复克隆" >&2
                 else
-                    rm -rf "$LOCK_DIR" || true
+                    prewarm_release_lock
                     echo "已预暖 .uv-cache <- ${BASE}（后续 uv 调用将命中已缓存依赖）"
                 fi
             else
-                rm -rf "$TMP_CACHE" || true
-                rm -rf "$LOCK_DIR" || true
+                prewarm_cleanup
                 echo "提示: .uv-cache 预暖落位失败，已跳过——首次 uv 调用将冷启动拉取依赖（正常路径，仅较慢）" >&2
             fi
         else
-            rm -rf "$TMP_CACHE" || true
+            prewarm_cleanup
             echo "提示: .uv-cache 预暖克隆失败，已跳过——首次 uv 调用将冷启动拉取依赖（正常路径，仅较慢）" >&2
         fi
+        # 区段正常走完：临时目录已落位/清理、锁已释放，解除 trap（此后
+        # 触发也是无害 no-op，但本区段已无可清理状态）。
+        trap - EXIT
     fi
 fi
 
