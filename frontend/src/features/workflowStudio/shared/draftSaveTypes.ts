@@ -8,6 +8,12 @@ export type DraftSaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error'
 export type DraftSaveState = {
   status: DraftSaveStatus
   savedAt: string | null
+  /** #1143（方案 B）：服务端当前已保存草稿的语义身份（definition_hash，
+   * PUT/GET 响应带回；不可解析草稿为 null）。聊天草稿卡用它核对「编辑器
+   * 内容与卡是否一致」——hash 相同即语义一致，不再受画布规范化重排的
+   * 字节差异干扰。冲突挂起期间刻意不推进（编辑器有未保存编辑，发布以
+   * 编辑器为准——此时提示应保留）。 */
+  savedHash?: string | null
   /** GET 草稿查询失败（仅内存模式）时由组合层合并进来，供 UI 警示。 */
   loadError?: boolean
   /** #633：CAS 冲突——服务端草稿已被 agent/其它会话推进，本页未保存的
@@ -16,6 +22,9 @@ export type DraftSaveState = {
   conflict?: boolean
   /** 冲突时服务端当前的草稿（采用/查看用；解析失败时为 null）。 */
   conflictDraftYaml?: string | null
+  /** #1143：冲突时服务端草稿的语义身份——「采用服务端版本」后作为
+   * savedHash 恢复（画布内容即服务端草稿，卡核对不应对它误报）。 */
+  conflictDraftHash?: string | null
 }
 
 export const IDLE_DRAFT_SAVE: DraftSaveState = { status: 'idle', savedAt: null }

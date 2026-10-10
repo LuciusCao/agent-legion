@@ -16,9 +16,11 @@ from typing import Any
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.workflow_drafts import DRAFT_NEVER_SAVED as _NEVER_SAVED
 from server.app.services.job_errors import NotFoundError
+from server.app.services.workflow_drafts import workflow_draft_identity_hash
 
 __all__ = [
     "DRAFT_NEVER_SAVED",
+    "attach_draft_identity_hash",
     "get_workflow_draft",
     "save_workflow_draft",
 ]
@@ -26,10 +28,21 @@ __all__ = [
 DRAFT_NEVER_SAVED = _NEVER_SAVED
 
 
+def attach_draft_identity_hash(draft: dict[str, Any] | None) -> dict[str, Any] | None:
+    """#1143：draft 行补上语义身份 hash（不可解析 → None），响应契约直接
+    model_validate 拾取；GET/PUT/工具面/409 current_draft 共用同一身份源。"""
+    if draft is None:
+        return None
+    return {
+        **draft,
+        "definition_hash": workflow_draft_identity_hash(str(draft["definition_yaml"])),
+    }
+
+
 def get_workflow_draft(job_db: JobQueries, workspace_id: str) -> dict[str, Any] | None:
     if job_db.get_workspace(workspace_id) is None:
         raise NotFoundError("Workspace not found")
-    return job_db.get_workspace_workflow_draft(workspace_id)
+    return attach_draft_identity_hash(job_db.get_workspace_workflow_draft(workspace_id))
 
 
 def save_workflow_draft(
@@ -37,4 +50,8 @@ def save_workflow_draft(
 ) -> dict[str, Any]:
     if job_db.get_workspace(workspace_id) is None:
         raise NotFoundError("Workspace not found")
-    return job_db.upsert_workspace_workflow_draft(workspace_id, definition_yaml)
+    draft = attach_draft_identity_hash(
+        job_db.upsert_workspace_workflow_draft(workspace_id, definition_yaml)
+    )
+    assert draft is not None  # the upsert always returns a row
+    return draft

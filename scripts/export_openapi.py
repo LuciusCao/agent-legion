@@ -9,29 +9,13 @@ from typing import Any
 import yaml
 
 from scripts.architecture.route_contracts import has_protocol_response_endpoint
+from scripts.export_openapi_contracts import (
+    validate_error_response_envelopes,
+    validate_response_contracts,
+)
 from server.app.main import create_app
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-
-def validate_response_contracts(schema: dict[str, Any], exempt_operation_ids: set[str]) -> None:
-    errors = []
-    for path, path_item in schema.get("paths", {}).items():
-        for method, operation in path_item.items():
-            if method not in {"get", "post", "put", "patch", "delete"}:
-                continue
-            operation_id = operation.get("operationId", f"{method} {path}")
-            if operation_id in exempt_operation_ids:
-                continue
-            for status, response in operation.get("responses", {}).items():
-                if not str(status).startswith("2"):
-                    continue
-                content = response.get("content", {})
-                json_schema = content.get("application/json", {}).get("schema")
-                if json_schema is not None and "$ref" not in json_schema:
-                    errors.append(f"{operation_id} has inline JSON response schema")
-    if errors:
-        raise ValueError("; ".join(errors))
 
 
 def validate_unique_api_routes(app: Any) -> None:
@@ -99,6 +83,7 @@ def build_openapi_schema(data_dir: Path) -> dict[str, Any]:
     }
     exempt_operation_ids = response_contract_exempt_operation_ids(app, exempt_route_handlers)
     validate_response_contracts(schema, exempt_operation_ids)
+    validate_error_response_envelopes(schema)
     return schema
 
 

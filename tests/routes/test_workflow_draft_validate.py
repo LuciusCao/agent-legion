@@ -53,4 +53,11 @@ def test_validate_clean_with_published_node_code(client, job_db) -> None:
     response = client.post(validate_url, json={"definition_yaml": _DRAFT_YAML})
 
     assert response.status_code == 200
-    assert response.json() == {"valid": True, "errors": []}
+    # #1143：validate 响应携带草稿语义身份（草稿卡记录 hash 的来源）。
+    from server.app.services.workflow_drafts import workflow_draft_identity_hash
+
+    assert response.json() == {
+        "valid": True,
+        "errors": [],
+        "definition_hash": workflow_draft_identity_hash(_DRAFT_YAML),
+    }

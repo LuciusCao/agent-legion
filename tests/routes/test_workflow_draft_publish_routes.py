@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from server.app.main import create_app
 from server.app.services.node_codes import NodeCodeService
+from server.app.services.workflow_drafts import workflow_draft_identity_hash
 from tests.helpers.auth import authenticate_client
 
 _DRAFT_YAML = """
@@ -82,6 +83,12 @@ def test_publish_first_revision_for_blank_workspace(tmp_path):
         active = client.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
 
     assert response.status_code == 200
-    assert response.json() == {"valid": True, "errors": []}
+    # #1143：publish 响应携带草稿语义身份（与 validate 同源）——断言跟随
+    # 精确三键形态（CI 曾因严格全等漏掉新字段挂用例）。
+    assert response.json() == {
+        "valid": True,
+        "errors": [],
+        "definition_hash": workflow_draft_identity_hash(_DRAFT_YAML),
+    }
     assert active.status_code == 200
     assert active.json()["revision"]["version"] == 1

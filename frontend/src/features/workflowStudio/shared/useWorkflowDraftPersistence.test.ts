@@ -11,6 +11,14 @@ const mocks = {
   putWorkflowDraft: vi.fn(),
 }
 
+/* #633/#1143：PUT/GET 响应形状（definition_hash 由服务端语义身份计算；
+   旧服务端为 null）。 */
+type DraftStoreResponseMock = {
+  definition_yaml: string
+  updated_at: string
+  definition_hash: string | null
+}
+
 vi.mock('../../../api', () => ({
   fetchAgentRuntimes: vi.fn(() => Promise.resolve({ runtimes: {} })),
   fetchWorkflowDraft: (...args: unknown[]) => mocks.fetchWorkflowDraft(...args),
@@ -22,6 +30,7 @@ vi.mock('../../../api/workflowDraft', () => ({
     readonly currentDraft: {
       definition_yaml: string | null
       updated_at: string | null
+      definition_hash: string | null
     }
     constructor(detail: unknown) {
       super('workflow draft conflict')
@@ -32,26 +41,37 @@ vi.mock('../../../api/workflowDraft', () => ({
       const current = (payload.current_draft ?? {}) as {
         definition_yaml?: string | null
         updated_at?: string | null
+        definition_hash?: string | null
       }
       this.currentDraft = {
         definition_yaml: current.definition_yaml ?? null,
         updated_at: current.updated_at ?? null,
+        definition_hash: current.definition_hash ?? null,
       }
     }
   },
 }))
 
-const SERVER_DRAFT = {
+const SERVER_DRAFT: DraftStoreResponseMock = {
   definition_yaml: 'key: demo\nlabel: Server\n',
   updated_at: '2026-08-27T01:02:03+00:00',
+  definition_hash: null,
 }
-const NO_DRAFT = { definition_yaml: null, updated_at: null }
+const NO_DRAFT: {
+  definition_yaml: null
+  updated_at: null
+  definition_hash: null
+} = {
+  definition_yaml: null,
+  updated_at: null,
+  definition_hash: null,
+}
 
 type HookProps = {
   workspaceId: string | undefined
   draftYaml: string
   originalYaml: string
-  serverDraft: typeof SERVER_DRAFT | typeof NO_DRAFT | undefined
+  serverDraft: DraftStoreResponseMock | typeof NO_DRAFT | undefined
   loadError?: boolean
 }
 
@@ -180,6 +200,7 @@ describe('useWorkflowDraftPersistence', () => {
       serverDraft: {
         definition_yaml: 'key: demo\nlabel: Base\n',
         updated_at: '2026-08-27T00:00:00+00:00',
+        definition_hash: null,
       },
     })
     rerender({
@@ -189,6 +210,7 @@ describe('useWorkflowDraftPersistence', () => {
       serverDraft: {
         definition_yaml: 'key: demo\nlabel: Base\n',
         updated_at: '2026-08-27T00:00:00+00:00',
+        definition_hash: null,
       },
     })
     // publish + reload：基线与草稿同为 Y（草稿未变，不再 rerender draftYaml）。
@@ -199,6 +221,7 @@ describe('useWorkflowDraftPersistence', () => {
       serverDraft: {
         definition_yaml: 'key: demo\nlabel: Base\n',
         updated_at: '2026-08-27T00:00:00+00:00',
+        definition_hash: null,
       },
     })
 
@@ -331,6 +354,7 @@ describe('useWorkflowDraftPersistence', () => {
       resolvePut({
         definition_yaml: 'key: demo\nlabel: B\n',
         updated_at: '2026-08-27T02:00:00+00:00',
+        definition_hash: null,
       })
     })
     // 回退后补存 A（last-write-wins 把服务端的 B 改回来）。#633 codex
@@ -356,6 +380,7 @@ describe('useWorkflowDraftPersistence', () => {
       resolvePut({
         definition_yaml: 'key: demo\nlabel: A\n',
         updated_at: '2026-08-27T01:02:03+00:00',
+        definition_hash: null,
       })
       await vi.advanceTimersByTimeAsync(0)
     })
@@ -421,6 +446,7 @@ describe('useWorkflowDraftPersistence', () => {
     resolveA({
       definition_yaml: 'key: demo\nlabel: A\n',
       updated_at: '2026-08-27T02:00:00+00:00',
+      definition_hash: null,
     })
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
@@ -486,133 +512,6 @@ describe('draftSaveText', () => {
     expect(
       draftSaveText({ status: 'idle', savedAt: null, loadError: true })
     ).toBe('草稿服务不可用，编辑仅保留在本页内存')
-  })
-})
-
-describe('useWorkflowDraftPersistence flushNow', () => {
-  const BASE = 'key: demo\nlabel: Base\n'
-  const EDITED = 'key: demo\nlabel: Edited\n'
-
-  beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true })
-    vi.clearAllMocks()
-    mocks.putWorkflowDraft.mockResolvedValue(SERVER_DRAFT)
-  })
-
-  it('saves pending edits immediately without waiting for the debounce', async () => {
-    const { result, rerender } = renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-    rerender({
-      workspaceId: 'ws1',
-      draftYaml: EDITED,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-
-    let flushed: { ok: boolean } | undefined
-    await act(async () => {
-      flushed = await result.current.flushNow()
-    })
-
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
-      expectedUpdatedAt: DRAFT_NEVER_SAVED,
-    })
-    await waitFor(() => expect(result.current.state.status).toBe('saved'))
-    // #429 收尾 P2-1：resolve 值携带本次落盘的终态（成功 → ok=true）。
-    expect(flushed?.ok).toBe(true)
-  })
-
-  it('is a no-op when there is nothing unsaved', async () => {
-    const { result } = renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-
-    let flushed: { ok: boolean } | undefined
-    await act(async () => {
-      flushed = await result.current.flushNow()
-    })
-
-    expect(mocks.putWorkflowDraft).not.toHaveBeenCalled()
-    // no-op（无 pending）的 resolve 值：无内容需要落盘 = 无失败。
-    expect(flushed?.ok).toBe(true)
-  })
-
-  it('flushNow resolves {ok: false} when the PUT fails through all retries (live terminal result)', async () => {
-    // #429 收尾 P2-1 契约钉：DraftSaveController 全路径 resolve 不 reject，
-    // 失败的终态只能经返回值传递（controller 的 live state 同步携带）——
-    // 调用方（发布确认守卫）读 result.ok，不读 React useState 快照（闭包
-    // 捕获的是调用前的值，await 期间落定的 error 态快照链路看不见）。
-    mocks.putWorkflowDraft.mockRejectedValue(new Error('network down'))
-    const { result, rerender } = renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-    rerender({
-      workspaceId: 'ws1',
-      draftYaml: EDITED,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-
-    let flushed: { ok: boolean; state: { status: string } } | undefined
-    await act(async () => {
-      // 初次（debounce 立即发）+ 两次重试（2s/4s）全部失败。
-      vi.advanceTimersByTime(850)
-      vi.advanceTimersByTime(2000)
-      vi.advanceTimersByTime(4000)
-      flushed = await result.current.flushNow()
-    })
-
-    expect(flushed?.ok).toBe(false)
-    expect(flushed?.state.status).toBe('error')
-  })
-
-  it('re-saves the current draft when clicked after retries ran out', async () => {
-    mocks.putWorkflowDraft.mockRejectedValue(new Error('network'))
-    const { result, rerender } = renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-    rerender({
-      workspaceId: 'ws1',
-      draftYaml: EDITED,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-    // 初次 + 两次重试全部失败（1 + 2s + 4s）。
-    await act(async () => {
-      vi.advanceTimersByTime(850)
-    })
-    await act(async () => {
-      vi.advanceTimersByTime(2000)
-    })
-    await act(async () => {
-      vi.advanceTimersByTime(4000)
-    })
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(3)
-    expect(result.current.state.status).toBe('error')
-
-    mocks.putWorkflowDraft.mockResolvedValue(SERVER_DRAFT)
-    await act(async () => {
-      result.current.flushNow()
-    })
-
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(4)
-    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith('ws1', EDITED, {
-      expectedUpdatedAt: DRAFT_NEVER_SAVED,
-    })
-    await waitFor(() => expect(result.current.state.status).toBe('saved'))
   })
 })
 
@@ -718,156 +617,5 @@ describe('useWorkflowDraftPersistence PUT retry', () => {
       'key: demo\nlabel: Two\n',
       { expectedUpdatedAt: DRAFT_NEVER_SAVED }
     )
-  })
-})
-
-describe('useWorkflowDraftPersistence unload guard', () => {
-  const BASE = 'key: demo\nlabel: Base\n'
-  const EDITED = 'key: demo\nlabel: Edited\n'
-
-  function renderEdited() {
-    const rendered = renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-    rendered.rerender({
-      workspaceId: 'ws1',
-      draftYaml: EDITED,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-    return rendered
-  }
-
-  function dispatchBeforeUnload() {
-    const event = new Event('beforeunload', { cancelable: true })
-    act(() => {
-      window.dispatchEvent(event)
-    })
-    return event
-  }
-
-  beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true })
-    vi.clearAllMocks()
-    mocks.putWorkflowDraft.mockResolvedValue(SERVER_DRAFT)
-  })
-
-  it('flushes pending edits when the page becomes hidden', async () => {
-    renderEdited()
-    const visibility = vi
-      .spyOn(document, 'visibilityState', 'get')
-      .mockReturnValue('hidden')
-
-    await act(async () => {
-      document.dispatchEvent(new Event('visibilitychange'))
-    })
-
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
-      expectedUpdatedAt: DRAFT_NEVER_SAVED,
-    })
-    visibility.mockRestore()
-  })
-
-  it('flushes pending edits with keepalive on pagehide', async () => {
-    renderEdited()
-
-    await act(async () => {
-      window.dispatchEvent(new Event('pagehide'))
-    })
-
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
-      keepalive: true,
-      expectedUpdatedAt: DRAFT_NEVER_SAVED,
-    })
-  })
-
-  it('does not flush on pagehide when the draft is clean', () => {
-    renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-
-    act(() => {
-      window.dispatchEvent(new Event('pagehide'))
-    })
-
-    expect(mocks.putWorkflowDraft).not.toHaveBeenCalled()
-  })
-
-  it('falls back to a plain PUT on pagehide when the UTF-8 body exceeds the keepalive limit', async () => {
-    // 中文按 UTF-8 三字节计：2.5 万字符的草稿 body 超 60KiB 安全阈值，但
-    // UTF-16 码元数远低于它——按码元数判断会误用 keepalive 导致发送失败。
-    const hugeDraft = `key: demo\nlabel: ${'题'.repeat(25_000)}\n`
-    const rendered = renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-    rendered.rerender({
-      workspaceId: 'ws1',
-      draftYaml: hugeDraft,
-      originalYaml: BASE,
-      serverDraft: NO_DRAFT,
-    })
-
-    await act(async () => {
-      window.dispatchEvent(new Event('pagehide'))
-    })
-
-    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', hugeDraft, {
-      expectedUpdatedAt: DRAFT_NEVER_SAVED,
-    })
-  })
-
-  it('blocks page unload while edits are unsaved and stays quiet once saved', async () => {
-    renderEdited()
-
-    expect(dispatchBeforeUnload().defaultPrevented).toBe(true)
-
-    await act(async () => {
-      vi.advanceTimersByTime(850)
-    })
-
-    expect(dispatchBeforeUnload().defaultPrevented).toBe(false)
-  })
-
-  it('blocks page unload for in-memory edits while the draft query has not resolved', () => {
-    renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: EDITED,
-      originalYaml: BASE,
-      serverDraft: undefined,
-    })
-
-    expect(dispatchBeforeUnload().defaultPrevented).toBe(true)
-  })
-
-  it('does not block page unload before hydration when the draft matches the baseline', () => {
-    renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: undefined,
-    })
-
-    expect(dispatchBeforeUnload().defaultPrevented).toBe(false)
-  })
-
-  it('merges the draft query error into the exposed state', () => {
-    const { result } = renderPersistence({
-      workspaceId: 'ws1',
-      draftYaml: BASE,
-      originalYaml: BASE,
-      serverDraft: undefined,
-      loadError: true,
-    })
-
-    expect(result.current.state.loadError).toBe(true)
   })
 })

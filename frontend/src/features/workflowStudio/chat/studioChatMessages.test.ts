@@ -162,6 +162,102 @@ describe('extractWorkflowDraft', () => {
     ])
     expect(extractWorkflowDraft(calls)!.validated).toBe(false)
   })
+
+  // #1143（方案 B）：草稿卡的语义身份 hash 取自 validate/compare 输出
+  // （后端按本次提交的 definition_yaml 计算），与卡的 yaml 绑定。
+  it('records the draft identity hash from the validate output', () => {
+    const calls = groupToolCalls([
+      toolCall('t1', {
+        title: 'validate_workflow',
+        status: 'completed',
+        rawInput: validateInput,
+        rawOutput: {
+          content: [
+            {
+              type: 'text',
+              text: '{"valid": true, "errors": [], "definition_hash": "h1"}',
+            },
+          ],
+        },
+      }),
+    ])
+    expect(extractWorkflowDraft(calls)!.draftHash).toBe('h1')
+  })
+
+  it('records the hash from the compare output when validate omits it', () => {
+    const calls = groupToolCalls([
+      toolCall('t1', {
+        title: 'validate_workflow',
+        status: 'completed',
+        rawInput: validateInput,
+        rawOutput: {
+          content: [{ type: 'text', text: '{"valid": true, "errors": []}' }],
+        },
+      }),
+      toolCall('t2', {
+        title: 'compare_workflow',
+        status: 'completed',
+        rawInput: validateInput,
+        rawOutput: {
+          content: [
+            {
+              type: 'text',
+              text: '{"valid": true, "summary": null, "definition_hash": "h2"}',
+            },
+          ],
+        },
+      }),
+    ])
+    expect(extractWorkflowDraft(calls)!.draftHash).toBe('h2')
+  })
+
+  it('keeps the hash null for legacy transcripts without definition_hash', () => {
+    const calls = groupToolCalls([
+      toolCall('t1', {
+        title: 'validate_workflow',
+        status: 'completed',
+        rawInput: validateInput,
+        rawOutput: {
+          content: [{ type: 'text', text: '{"valid": true, "errors": []}' }],
+        },
+      }),
+    ])
+    expect(extractWorkflowDraft(calls)!.draftHash).toBeNull()
+  })
+
+  it('resets the hash when the draft yaml changes', () => {
+    const calls = groupToolCalls([
+      toolCall('t1', {
+        title: 'validate_workflow',
+        status: 'completed',
+        rawInput: { workspace_id: 'ws1', definition_yaml: 'key: v1\n' },
+        rawOutput: {
+          content: [
+            {
+              type: 'text',
+              text: '{"valid": true, "errors": [], "definition_hash": "h1"}',
+            },
+          ],
+        },
+      }),
+      toolCall('t2', {
+        title: 'validate_workflow',
+        status: 'completed',
+        rawInput: { workspace_id: 'ws1', definition_yaml: 'key: v2\n' },
+        rawOutput: {
+          content: [
+            {
+              type: 'text',
+              text: '{"valid": true, "errors": [], "definition_hash": "h2"}',
+            },
+          ],
+        },
+      }),
+    ])
+    const draft = extractWorkflowDraft(calls)
+    expect(draft!.yaml).toBe('key: v2\n')
+    expect(draft!.draftHash).toBe('h2')
+  })
 })
 
 describe('node draft extraction', () => {

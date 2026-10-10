@@ -11,16 +11,28 @@ are workspace-bound and mount on the workspace_scoped router inside
 for the file-size budget (same pattern as ``studio_agent_prompt_tools``).
 """
 
+from typing import Any
+
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, field_validator
 
 from server.app.jobs import JobQueries
+from server.app.routes.workflow_draft_store_contracts import (
+    WorkflowDraftConflictResponse,
+)
 from server.app.services.workflow_draft_cas import save_workflow_draft_if_unchanged
 from server.app.services.workflow_draft_cas_token import (
     CAS_TIMESTAMP_HINT,
     parse_cas_timestamp,
 )
 from server.app.services.workflow_draft_store import get_workflow_draft
+
+# 409 CAS 冲突的响应契约（#1177 codex P1/P2）：与人侧 draft-store PUT 同一
+# detail 形状（服务层同一 DraftConflictError.payload 渲染），contracts 立
+# 带 detail 封套的响应模型并经 responses= 进 OpenAPI。
+_DRAFT_CONFLICT_RESPONSES: dict[int | str, dict[str, Any]] = {
+    409: {"model": WorkflowDraftConflictResponse, "description": "Stale CAS base"}
+}
 
 
 # #633 CAS draft save: expected_updated_at is the updated_at the last read
@@ -53,12 +65,16 @@ class StudioAgentWorkflowDraftResponse(BaseModel):
 
     definition_yaml: str | None = None
     updated_at: str | None = None
+    # #1143（方案 B）：草稿语义身份 hash（不可解析 → None），与人类面
+    # WorkflowDraftStoreResponse 同源——保存/读取响应带身份供卡核对。
+    definition_hash: str | None = None
 
 
 def _draft_response(draft: dict) -> StudioAgentWorkflowDraftResponse:
     return StudioAgentWorkflowDraftResponse(
         definition_yaml=draft["definition_yaml"],
         updated_at=str(draft["updated_at"]),
+        definition_hash=draft.get("definition_hash"),
     )
 
 
@@ -78,6 +94,7 @@ def create_studio_agent_draft_tools_router(job_db: JobQueries) -> APIRouter:
     @router.put(
         "/studio-agent/tools/workspaces/{workspace_id}/workflow/draft",
         response_model=StudioAgentWorkflowDraftResponse,
+        responses=_DRAFT_CONFLICT_RESPONSES,
     )
     def save_workflow_draft_route(
         workspace_id: str, payload: StudioAgentWorkflowDraftSaveRequest

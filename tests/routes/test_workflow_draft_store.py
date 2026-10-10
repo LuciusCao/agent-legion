@@ -15,7 +15,11 @@ def test_get_returns_structured_empty_state(client, job_db) -> None:
     response = client.get(_url(workspace["id"]))
 
     assert response.status_code == 200
-    assert response.json() == {"definition_yaml": None, "updated_at": None}
+    assert response.json() == {
+        "definition_yaml": None,
+        "updated_at": None,
+        "definition_hash": None,
+    }
 
 
 def test_put_then_get_roundtrip(client, job_db) -> None:
@@ -29,6 +33,45 @@ def test_put_then_get_roundtrip(client, job_db) -> None:
     got = client.get(_url(workspace["id"]))
     assert got.json()["definition_yaml"] == _DRAFT_YAML
     assert got.json()["updated_at"] == put.json()["updated_at"]
+
+
+def test_put_then_get_echo_the_semantic_identity_hash(client, job_db) -> None:
+    """#1143：draft 存取响应携带语义身份 hash——同一身份在 PUT/GET 间一致，
+    语义等价（仅序列化风格不同）的 YAML 产生相同 hash，语义变化产生新
+    hash。"""
+    from server.app.services.workflow_drafts import workflow_draft_identity_hash
+
+    workspace = job_db.create_workspace("ws-store-hash")
+    put = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
+    expected = workflow_draft_identity_hash(_DRAFT_YAML)
+    assert put.status_code == 200
+    assert put.json()["definition_hash"] == expected
+    got = client.get(_url(workspace["id"]))
+    assert got.json()["definition_hash"] == expected
+
+    # 语义等价重排（键序差异）：同一身份。
+    reordered = "label: Draft\nkey: wf\nnodes:\n  intake:\n    capability: intake\n"
+    reordered_put = client.put(_url(workspace["id"]), json={"definition_yaml": reordered})
+    assert reordered_put.json()["definition_hash"] == expected
+
+    # 语义变化：不同身份。
+    changed = client.put(
+        _url(workspace["id"]),
+        json={"definition_yaml": "key: wf\nlabel: V2\n"},
+    )
+    assert changed.json()["definition_hash"] != expected
+
+
+def test_unparseable_draft_carries_null_identity(client, job_db) -> None:
+    """draft store 允许暂存未通过校验的 YAML：不可解析 → definition_hash
+    为 null（前端按「无法核对」降级），不影响存取。"""
+    workspace = job_db.create_workspace("ws-store-unparseable")
+    put = client.put(_url(workspace["id"]), json={"definition_yaml": "key: [unclosed"})
+
+    assert put.status_code == 200
+    assert put.json()["definition_yaml"] == "key: [unclosed"
+    assert put.json()["definition_hash"] is None
+    assert client.get(_url(workspace["id"])).json()["definition_hash"] is None
 
 
 def test_put_overwrites_the_previous_draft(client, job_db) -> None:
@@ -65,6 +108,7 @@ def test_drafts_are_isolated_between_workspaces(client, job_db) -> None:
     assert client.get(_url(second["id"])).json() == {
         "definition_yaml": None,
         "updated_at": None,
+        "definition_hash": None,
     }
 
 
@@ -147,6 +191,30 @@ def test_put_with_stale_expected_updated_at_gets_409_with_current_draft(client, 
     assert detail["expected_updated_at"] == stale_base
     assert detail["current_draft"]["definition_yaml"] == agent_yaml
     assert detail["current_draft"]["updated_at"]
+    # #1143：current_draft 携带语义身份（采用服务端版本的一侧据此恢复
+    # savedHash，草稿卡核对不误报）。
+    from server.app.services.workflow_drafts import workflow_draft_identity_hash
+
+    assert detail["current_draft"]["definition_hash"] == workflow_draft_identity_hash(agent_yaml)
+    # #1177 codex P1/P2：整个 409 响应体与 OpenAPI 契约模型（路由
+    # responses= 声明的封套模型）逐字段钉死——FastAPI 原生 handler 的
+    # detail 外层也在契约内，服务层 payload 构造与 contracts 模型由本
+    # 断言同步，前端 transport type 才能安全从生成的 api.ts 派生。
+    from server.app.routes.workflow_draft_store_contracts import (
+        WorkflowDraftConflictCurrentDraft as ContractCurrentDraft,
+    )
+    from server.app.routes.workflow_draft_store_contracts import (
+        WorkflowDraftConflictDetail as ContractDetail,
+    )
+    from server.app.routes.workflow_draft_store_contracts import (
+        WorkflowDraftConflictResponse as ContractResponse,
+    )
+
+    envelope = ContractResponse.model_validate(conflict.json())
+    assert envelope.detail.message
+    assert set(conflict.json()) == set(ContractResponse.model_fields)
+    assert set(detail) == set(ContractDetail.model_fields)
+    assert set(detail["current_draft"]) == set(ContractCurrentDraft.model_fields)
     # The agent-saved draft was NOT overwritten.
     assert client.get(_url(workspace["id"])).json()["definition_yaml"] == agent_yaml
 

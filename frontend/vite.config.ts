@@ -43,6 +43,10 @@ const browserTestFiles = [
   // #809：cas 测试文件超 800 行纪律线拆出的姊妹文件，同走 jsdom 项目。
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.cas.conflict.test.ts',
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.cas.resolve.test.ts',
+  // #1177：savedHash/空白 skip 主题姊妹文件（同超 1000 行硬上限纪律拆出）。
+  'src/features/workflowStudio/shared/useWorkflowDraftPersistence.draftHash.test.ts',
+  // #1177 codex R5：flushNow/卸载护栏主题姊妹文件（存量超 800 随触碰拆分）。
+  'src/features/workflowStudio/shared/useWorkflowDraftPersistence.flush.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudioActions.test.ts',
   'src/stores/agentsStore.test.ts',
 ]

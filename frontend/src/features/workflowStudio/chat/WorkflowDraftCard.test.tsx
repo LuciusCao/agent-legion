@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowDraftCard } from './WorkflowDraftCard'
 import { compareWorkflowDraft } from '../../../api/workflowDraftCompare'
@@ -16,6 +23,7 @@ const draft = {
   yaml: 'key: demo_video_workflow\nnodes: []\n',
   validated: true,
   compareMeta: null,
+  draftHash: null,
 }
 
 function makeStudio(overrides: Record<string, unknown> = {}) {
@@ -147,6 +155,198 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
     expect(
       screen.queryByText(/发布将以编辑器中的 YAML 为准/)
     ).not.toBeInTheDocument()
+  })
+
+  // #1143（方案 B）：hash 身份核对——修复「应用到编辑器后画布规范化重排
+  // 导致的字节不同」误报；hash 缺失时降级回字符串全等的既有行为。
+  describe('草稿卡一致性 hash 身份核对（#1143）', () => {
+    // 复现流：agent 保存草稿（hash H）→ 用户「应用到编辑器」→ 画布按自身
+    // 序列化规范重写 YAML（字节不同、语义相同、hash 相同）→ 不再误报。
+    it('hash 相同：编辑器重排后的 YAML 字节不同也不提示', () => {
+      const studio = makeStudio({
+        definitionYaml: 'nodes: []\nkey: demo_video_workflow\n',
+        draftSave: {
+          status: 'saved',
+          savedAt: '2026-10-10T01:00:00+00:00',
+          savedHash: 'h1',
+        },
+      })
+      render(
+        withStudioProviders(
+          studio,
+          makeStudioView(),
+          <WorkflowDraftCard
+            draft={{ ...draft, draftHash: 'h1' }}
+            workspaceId="ws1"
+            onApply={vi.fn()}
+          />
+        )
+      )
+      expect(
+        screen.queryByText(/发布将以编辑器中的 YAML 为准/)
+      ).not.toBeInTheDocument()
+    })
+
+    it('hash 不同：真实分歧仍提示', () => {
+      const studio = makeStudio({
+        definitionYaml: 'key: human-edited\n',
+        draftSave: {
+          status: 'saved',
+          savedAt: '2026-10-10T01:00:00+00:00',
+          savedHash: 'h2',
+        },
+      })
+      render(
+        withStudioProviders(
+          studio,
+          makeStudioView(),
+          <WorkflowDraftCard
+            draft={{ ...draft, draftHash: 'h1' }}
+            workspaceId="ws1"
+            onApply={vi.fn()}
+          />
+        )
+      )
+      expect(
+        screen.getByText(/发布将以编辑器中的 YAML 为准/)
+      ).toBeInTheDocument()
+    })
+
+    it('卡上无 hash（旧转录）：降级字符串比较，字节不同仍提示', () => {
+      const studio = makeStudio({
+        definitionYaml: 'key: other\n',
+        draftSave: {
+          status: 'saved',
+          savedAt: '2026-10-10T01:00:00+00:00',
+          savedHash: 'h1',
+        },
+      })
+      render(
+        withStudioProviders(
+          studio,
+          makeStudioView(),
+          <WorkflowDraftCard
+            draft={draft}
+            workspaceId="ws1"
+            onApply={vi.fn()}
+          />
+        )
+      )
+      expect(
+        screen.getByText(/发布将以编辑器中的 YAML 为准/)
+      ).toBeInTheDocument()
+    })
+
+    it('编辑器侧无 savedHash（未保存过/旧服务端）：降级字符串比较', () => {
+      const studio = makeStudio({
+        definitionYaml: 'key: other\n',
+        draftSave: { status: 'idle', savedAt: null },
+      })
+      render(
+        withStudioProviders(
+          studio,
+          makeStudioView(),
+          <WorkflowDraftCard
+            draft={{ ...draft, draftHash: 'h1' }}
+            workspaceId="ws1"
+            onApply={vi.fn()}
+          />
+        )
+      )
+      expect(
+        screen.getByText(/发布将以编辑器中的 YAML 为准/)
+      ).toBeInTheDocument()
+    })
+
+    // 评审 P2-1：hash 短路仅在编辑器当前内容已落盘（状态 settled）时
+    // 有效。pending（debounce 窗口）/saving（PUT 在途）/error（失败退避
+    // 或冲突挂起）= 编辑器有未落盘编辑——savedHash 停留在上次成功保存的
+    // 身份，字节已变（语义可能已变）而 hash 仍相同，必须回落提示，否则
+    // 发布 flush-first 发出编辑后的 YAML 却无警示。
+    it('hash 相同但编辑器有未保存编辑（pending/saving/error）→ 仍提示（评审 P2-1）', () => {
+      for (const status of ['pending', 'saving', 'error'] as const) {
+        const studio = makeStudio({
+          definitionYaml: 'nodes: []\nkey: demo_video_workflow\n',
+          draftSave: {
+            status,
+            savedAt: '2026-10-10T01:00:00+00:00',
+            savedHash: 'h1',
+          },
+        })
+        render(
+          withStudioProviders(
+            studio,
+            makeStudioView(),
+            <WorkflowDraftCard
+              draft={{ ...draft, draftHash: 'h1' }}
+              workspaceId="ws1"
+              onApply={vi.fn()}
+            />
+          )
+        )
+        expect(
+          screen.getByText(/发布将以编辑器中的 YAML 为准/)
+        ).toBeInTheDocument()
+        cleanup()
+      }
+    })
+
+    // #1177 codex R3 P2：空白编辑器永不命中 hash 短路——decideSchedule 对
+    // 空白 skip（服务端拒存空白草稿），状态停留在 saved、savedHash 仍是旧
+    // H；短路前置「当前内容已落盘」对空白恒为假，必须回落提示（字节比较
+    // 时代此处本就提示，属回归）。
+    it('hash 相同但编辑器内容被清空/纯空白（skip 保存）→ 仍提示（#1177 codex R3 P2）', () => {
+      for (const blank of ['', '  \n\t ']) {
+        const studio = makeStudio({
+          definitionYaml: blank,
+          draftSave: {
+            status: 'saved',
+            savedAt: '2026-10-10T01:00:00+00:00',
+            savedHash: 'h1',
+          },
+        })
+        render(
+          withStudioProviders(
+            studio,
+            makeStudioView(),
+            <WorkflowDraftCard
+              draft={{ ...draft, draftHash: 'h1' }}
+              workspaceId="ws1"
+              onApply={vi.fn()}
+            />
+          )
+        )
+        expect(
+          screen.getByText(/发布将以编辑器中的 YAML 为准/)
+        ).toBeInTheDocument()
+        cleanup()
+      }
+    })
+
+    it('hash 相同且编辑器无未保存编辑（idle，hydrate/adopt 后内容=已落盘）→ 不提示', () => {
+      const studio = makeStudio({
+        definitionYaml: 'nodes: []\nkey: demo_video_workflow\n',
+        draftSave: {
+          status: 'idle',
+          savedAt: '2026-10-10T01:00:00+00:00',
+          savedHash: 'h1',
+        },
+      })
+      render(
+        withStudioProviders(
+          studio,
+          makeStudioView(),
+          <WorkflowDraftCard
+            draft={{ ...draft, draftHash: 'h1' }}
+            workspaceId="ws1"
+            onApply={vi.fn()}
+          />
+        )
+      )
+      expect(
+        screen.queryByText(/发布将以编辑器中的 YAML 为准/)
+      ).not.toBeInTheDocument()
+    })
   })
 })
 

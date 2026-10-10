@@ -111,6 +111,8 @@ describe('workflowDraft api', () => {
     expect((error as WorkflowDraftConflictError).currentDraft).toEqual({
       definition_yaml: 'key: wf\nlabel: agent\n',
       updated_at: '2026-09-12T00:00:00+00:00',
+      // #1143：current_draft 现携带语义身份（此 mock detail 未带 → null）。
+      definition_hash: null,
     })
   })
 })

@@ -25,6 +25,33 @@ from server.app.services.workflow_draft_cas_token import (
     CAS_TIMESTAMP_HINT,
     parse_cas_timestamp,
 )
+from server.app.services.workflow_draft_store import (
+    attach_draft_identity_hash,
+    get_workflow_draft,
+)
+
+
+def _conflict_payload(expected_updated_at: str, current: dict[str, Any] | None) -> dict[str, Any]:
+    """409 detail 的契约化构造（#1177 codex P1/P2）：字段集与
+    ``workflow_draft_store_contracts.WorkflowDraftConflictDetail``（路由侧
+    OpenAPI responses= 声明的响应模型的 detail 内层）逐字段一致——路由
+    测试以模型 dump 为 oracle 钉死两者同步，service 层不 import routes
+    包（分层方向）。
+    #1143: current_draft carries the semantic identity hash — the adopting
+    side (frontend adopt path) restores savedHash from it.
+    """
+    return {
+        "message": (
+            "Workflow draft conflict: another session saved a newer"
+            " draft. Re-read the draft, rebase your changes and retry."
+        ),
+        "expected_updated_at": expected_updated_at,
+        "current_draft": {
+            "definition_yaml": current["definition_yaml"] if current else None,
+            "updated_at": str(current["updated_at"]) if current else None,
+            "definition_hash": current.get("definition_hash") if current else None,
+        },
+    }
 
 
 def save_workflow_draft_if_unchanged(
@@ -49,21 +76,16 @@ def save_workflow_draft_if_unchanged(
     if job_db.get_workspace(workspace_id) is None:
         raise NotFoundError("Workspace not found")
     try:
-        return job_db.upsert_workspace_workflow_draft_if_unchanged(
-            workspace_id, definition_yaml, expected_updated_at
+        draft = attach_draft_identity_hash(
+            job_db.upsert_workspace_workflow_draft_if_unchanged(
+                workspace_id, definition_yaml, expected_updated_at
+            )
         )
     except CasDraftConflictError as exc:
-        current = job_db.get_workspace_workflow_draft(workspace_id)
-        raise DraftConflictError(
-            {
-                "message": (
-                    "Workflow draft conflict: another session saved a newer"
-                    " draft. Re-read the draft, rebase your changes and retry."
-                ),
-                "expected_updated_at": expected_updated_at,
-                "current_draft": {
-                    "definition_yaml": current["definition_yaml"] if current else None,
-                    "updated_at": current["updated_at"] if current else None,
-                },
-            }
-        ) from exc
+        # #1143: current_draft carries the semantic identity hash too — the
+        # adopting side (frontend adopt path) restores savedHash from it.
+        # #1177 codex P1: payload is contract-shaped (see _conflict_payload).
+        current = get_workflow_draft(job_db, workspace_id)
+        raise DraftConflictError(_conflict_payload(expected_updated_at, current)) from exc
+    assert draft is not None  # the CAS upsert path returns a row or raises
+    return draft

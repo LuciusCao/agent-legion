@@ -82,7 +82,10 @@ export function WorkflowDraftCard(props: WorkflowProps) {
         </button>
         <WorkflowDraftPublishButton />
       </div>
-      <WorkflowDraftStaleHint draftYaml={props.draft.yaml} />
+      <WorkflowDraftStaleHint
+        draftYaml={props.draft.yaml}
+        draftHash={props.draft.draftHash}
+      />
       <Dialog
         open={diffOpen}
         onClose={() => setDiffOpen(false)}

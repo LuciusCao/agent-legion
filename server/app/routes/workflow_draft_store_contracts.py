@@ -42,3 +42,39 @@ class WorkflowDraftStoreRequest(BaseModel):
 class WorkflowDraftStoreResponse(BaseModel):
     definition_yaml: str | None = None
     updated_at: str | None = None
+    # #1143（方案 B）：草稿的语义身份（解析→归一化→sha256，服务端计算）。
+    # 同一语义的两份 YAML（agent 原始串 vs 画布重排）得到相同 hash；前端
+    # 用它与草稿卡记录的 hash 核对「是否与编辑器一致」，替代逐字节全等。
+    # 不可解析的草稿为 null（前端按「无法核对」降级到字符串比较）。
+    definition_hash: str | None = None
+
+
+class WorkflowDraftConflictCurrentDraft(BaseModel):
+    """409 conflict payload 的 ``detail.current_draft``（#1177 codex P1：
+    契约模型化——此前是裸 dict，前端只能手写 transport type）。
+
+    与 ``WorkflowDraftStoreResponse`` 同一字段集（服务端 current draft 的
+    单一形状）：草稿不存在（never-saved 竞态删除后撞 CAS）时全 null。
+    """
+
+    definition_yaml: str | None = None
+    updated_at: str | None = None
+    definition_hash: str | None = None
+
+
+class WorkflowDraftConflictDetail(BaseModel):
+    """409 detail 顶层（服务层 DraftConflictError.payload 的契约形态）：
+    message（人读指引）+ expected_updated_at（stale 基线）+ current_draft。"""
+
+    message: str
+    expected_updated_at: str
+    current_draft: WorkflowDraftConflictCurrentDraft
+
+
+class WorkflowDraftConflictResponse(BaseModel):
+    """409 响应体（#1177 codex P2）：app 级异常处理器把 payload 交给
+    ``HTTPException(detail=...)``，FastAPI 原生 handler 固定渲染为
+    ``{"detail": ...}``——OpenAPI 声明必须带这层封套，否则生成的
+    客户端（前端 transport type 由其派生）按错误的形状读响应。"""
+
+    detail: WorkflowDraftConflictDetail

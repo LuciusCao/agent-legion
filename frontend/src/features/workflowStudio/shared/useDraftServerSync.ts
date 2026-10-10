@@ -52,7 +52,11 @@ export function useDraftServerSync(
     if (!hydrated) setHydrated(true)
     const conflict = hydrated ? consumeConflict() : null
     if (conflict) {
-      controllerRef.current?.enterConflict(conflict.yaml, conflict.updatedAt)
+      controllerRef.current?.enterConflict(
+        conflict.yaml,
+        conflict.updatedAt,
+        conflict.hash
+      )
       hydratedAtRef.current = conflict.updatedAt || null
       return
     }
@@ -64,20 +68,23 @@ export function useDraftServerSync(
     }
     controllerRef.current?.hydrate(
       serverDraft.definition_yaml ?? originalYaml,
-      serverDraft.updated_at
+      serverDraft.updated_at,
+      serverDraft.definition_hash ?? null
     )
     hydratedAtRef.current = serverDraft.updated_at ?? null
     hydratedRef.current = true
   }, [hydrated, serverDraft, originalYaml, controllerRef, consumeConflict])
   /* kimi review P1-2：冲突出口——采用服务端（Agent）版本（hydrate 推进
-     基线、清除冲突；onAdopt 写画布）或显式 keep-mine 继续保存。 */
+     基线、清除冲突；onAdopt 写画布）或显式 keep-mine 继续保存。#1143：
+     serverHash 是被采用草稿的语义身份，随 hydrate 恢复成 savedHash。 */
   const adoptServerDraft = useCallback(
     (
       serverYaml: string,
       serverAt: string | null,
-      onAdopt?: (yaml: string) => void
+      onAdopt?: (yaml: string) => void,
+      serverHash?: string | null
     ) => {
-      controllerRef.current?.adoptServerDraft(serverYaml, serverAt)
+      controllerRef.current?.adoptServerDraft(serverYaml, serverAt, serverHash)
       onAdopt?.(serverYaml)
     },
     [controllerRef]

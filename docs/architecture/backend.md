@@ -541,7 +541,7 @@ server/app/
 | StudioContextWorkflow | BaseModel | workflow_key: str, version: int, nodes: list[StudioContextNode], edges: list[... | app/routes/studio_agent_context_contracts.py |
 | StudioChatContextResponse | BaseModel | workspace_id: str, selected_node_key: str | None, draft_yaml: str | None, dra... | app/routes/studio_agent_context_contracts.py |
 | StudioAgentWorkflowDraftSaveRequest | BaseModel | definition_yaml: str, expected_updated_at: str | app/routes/studio_agent_draft_tools.py |
-| StudioAgentWorkflowDraftResponse | BaseModel | definition_yaml: str | None, updated_at: str | None | app/routes/studio_agent_draft_tools.py |
+| StudioAgentWorkflowDraftResponse | BaseModel | definition_yaml: str | None, updated_at: str | None, definition_hash: str | N... | app/routes/studio_agent_draft_tools.py |
 | StudioAgentJobSummaryNode | BaseModel | node_key: str, label: str, status: str, error_message: str | app/routes/studio_agent_job_tool_contracts.py |
 | StudioAgentJobView | BaseModel | id: str, title: str, status: str, outcome: str, created_at: datetime | None, ... | app/routes/studio_agent_job_tool_contracts.py |
 | StudioAgentJobListResponse | BaseModel | jobs: list[StudioAgentJobView], returned: int, limit: int | app/routes/studio_agent_job_tool_contracts.py |
@@ -639,7 +639,10 @@ server/app/
 | WorkflowDraftCompareResponse | BaseModel | valid: bool, creates_revision: bool, base_revision: WorkflowRevisionSummaryIt... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowMetadataChange | BaseModel | type: Literal['modified'], field: str, before_value: str | None, after_value:... | app/routes/workflow_draft_compare_metadata_contracts.py |
 | WorkflowDraftStoreRequest | BaseModel | definition_yaml: str, expected_updated_at: str | None | app/routes/workflow_draft_store_contracts.py |
-| WorkflowDraftStoreResponse | BaseModel | definition_yaml: str | None, updated_at: str | None | app/routes/workflow_draft_store_contracts.py |
+| WorkflowDraftStoreResponse | BaseModel | definition_yaml: str | None, updated_at: str | None, definition_hash: str | N... | app/routes/workflow_draft_store_contracts.py |
+| WorkflowDraftConflictCurrentDraft | BaseModel | definition_yaml: str | None, updated_at: str | None, definition_hash: str | N... | app/routes/workflow_draft_store_contracts.py |
+| WorkflowDraftConflictDetail | BaseModel | message: str, expected_updated_at: str, current_draft: WorkflowDraftConflictC... | app/routes/workflow_draft_store_contracts.py |
+| WorkflowDraftConflictResponse | BaseModel | detail: WorkflowDraftConflictDetail | app/routes/workflow_draft_store_contracts.py |
 | WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom', 'none'], code: str, version: int | None,... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeTemplateResponse | BaseModel | code: str | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeDraftRequest | BaseModel | code: str, change_note: str | None | app/routes/workflow_node_code_contracts.py |
@@ -661,7 +664,7 @@ server/app/
 | WorkflowRevisionSummary | BaseModel | id: str, workspace_id: str, version: int, status: str, definition_hash: str, ... | app/routes/workflow_revisions_contracts.py |
 | WorkflowRevisionsResponse | BaseModel | revisions: list[WorkflowRevisionSummary] | app/routes/workflow_revisions_contracts.py |
 | WorkflowDraftRequest | BaseModel | definition_yaml: str | app/routes/workflow_revisions_contracts.py |
-| WorkflowDraftValidationResponse | BaseModel | valid: bool, errors: list[str] | app/routes/workflow_revisions_contracts.py |
+| WorkflowDraftValidationResponse | BaseModel | valid: bool, errors: list[str], definition_hash: str | None | app/routes/workflow_revisions_contracts.py |
 | ActiveWorkflowRevisionResponse | BaseModel | revision: WorkflowRevisionSummary, workflow: workflow_contracts.WorkflowDefin... | app/routes/workflow_revisions_contracts.py |
 | WorkflowRevisionDetailResponse | BaseModel | revision: WorkflowRevisionSummary, workflow: workflow_contracts.WorkflowDefin... | app/routes/workflow_revisions_contracts.py |
 | CreateWorkspaceApiTokenRequest | BaseModel | label: str, ttl_hours: int | None | app/routes/workspace_api_token_contracts.py |

@@ -1016,10 +1016,17 @@ exemptions:
     #633 is the planned draft-save wiring rework this exemption waited for). Remove when the
     queue module absorbs the remaining save wiring or a budget re-balance re-registers it. Re-anchored
     by #926 from #429 (closed) to #1000: the overage above is the shipped feature itself and
-    the removal condition above stands; #1000 tracks at most five entries (#917 A-2).'
+    the removal condition above stands; #1000 tracks at most five entries (#917 A-2). #1177
+    defect-family closing (fake-settled: blank-skip markBlankSkipped, conflict-resolve suspended
+    pending, stale savedHash advance) adds guard transitions that mutate the same
+    timers/CAS/pendingSave this file holds — they cannot move to draftSaveConflict.ts (pure
+    state transitions only) without forking the invariants. Time-boxed 182→224 (actual 214 +
+    10) per the #641 re-sign convention (expires below); renewed justification is the defect
+    family itself, removal condition unchanged.'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1000
-  ceiling: 182
+  ceiling: 224
+  expires: 2026-11-30
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/useDraftServerSync.ts
   reason: 'Issue #633 kimi review P1-2 adds the conflict exits (adoptServerDraft / resolveConflict)

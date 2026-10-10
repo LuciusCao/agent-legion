@@ -75,10 +75,38 @@ export function WorkflowDraftPublishButton() {
 /** 冲突提示：草稿卡 YAML 与编辑器当前内容不一致时（用户有未保存的本地
  * 编辑导致服务端草稿被挂起，或应用草稿后又改过），发布审的是编辑器里的
  * YAML。参考 AgentPublishRequestDialog 的 flush-first 模式只给提示，不
- * 强行 flush。 */
-export function WorkflowDraftStaleHint({ draftYaml }: { draftYaml: string }) {
+ * 强行 flush。
+ * #1143（方案 B）：分歧判定改为语义身份核对——卡上记录的 hash（validate/
+ * compare 响应带回）vs 编辑器已保存草稿的服务端身份（studio.draftSave
+ * .savedHash，PUT/GET 响应带回）。hash 相同 → 语义一致不提示（修复点：
+ * agent 原始串 vs 画布规范化重排字节不同但 hash 相同，不再误报）。逐字节
+ * 相同恒不提示；hash 不同（真实分歧）、任一侧缺失或不可核对（旧转录/
+ * 不可解析草稿）→ 保守保留提示（降级回字符串全等的既有行为）。
+ * 评审 P2-1：hash 短路的前置是编辑器当前内容已落盘（draftSave 状态
+ * settled = saved/idle——内容一旦偏离已持久化值，controller 必然把状态
+ * 推进到 pending/saving/error）。pending（debounce 窗口）/saving（PUT
+ * 在途）/error（失败退避或冲突挂起）期间 savedHash 停留在上次成功保存
+ * 的身份，字节已变（语义可能已变）而 hash 仍相同——必须回落提示，否则
+ * 发布 flush-first 发出编辑后的 YAML 却无警示。
+ * #1177 codex R3 P2：上述「偏离必然推进状态」有一个例外——空白内容。
+ * decideSchedule 对空白 skip（服务端拒存空白草稿），状态停在上次成功
+ * 保存的 settled、savedHash 仍是旧 H；用户清空编辑器后短路前置并不成立。
+ * 空白永不落盘 ⇒ 对空白内容禁用短路，回落提示（恢复字节比较时代的行为）。 */
+export function WorkflowDraftStaleHint({
+  draftYaml,
+  draftHash,
+}: {
+  draftYaml: string
+  draftHash: string | null
+}) {
   const studio = useStudioStateOptional()
   if (!studio || studio.definitionYaml === draftYaml) return null
+  const save = studio.draftSave
+  const savedHash = save?.savedHash ?? null
+  const settled =
+    studio.definitionYaml.trim() !== '' &&
+    (save?.status === 'saved' || save?.status === 'idle')
+  if (draftHash && savedHash && settled && draftHash === savedHash) return null
   return (
     <div className={styles.draftHint} role="note">
       该草稿与编辑器当前内容不一致，发布将以编辑器中的 YAML 为准

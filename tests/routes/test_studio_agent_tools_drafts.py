@@ -31,20 +31,26 @@ def _draft_url(workspace_id: str) -> str:
 
 
 def test_get_workflow_draft_empty_state(client, job_db) -> None:
-    """#633：读工具的结构化空态与人侧 GET 一致——无草稿 200 + 双 null，
-    不是 404（agent 可据此走 from-scratch 流）。"""
+    """#633：读工具的结构化空态与人侧 GET 一致——无草稿 200 + 三 null，
+    不是 404（agent 可据此走 from-scratch 流）。#1143：definition_hash
+    一并入空态。"""
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
 
     response = scoped.get(_draft_url(workspace_id))
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"definition_yaml": None, "updated_at": None}
+    assert response.json() == {
+        "definition_yaml": None,
+        "updated_at": None,
+        "definition_hash": None,
+    }
 
 
 def test_save_workflow_draft_roundtrip_with_canvas(client, job_db) -> None:
     """#633 核心验收：agent 保存的草稿落到画布同一份草稿行——人侧
-    workflow-draft GET 读到同一 YAML/updated_at。"""
+    workflow-draft GET 读到同一 YAML/updated_at。#1143：两侧读到的语义
+    身份 hash 一致（草稿卡核对用）。"""
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
     draft_yaml = _active_yaml(scoped, workspace_id).replace("label: ", "label: v2 ", 1)
@@ -57,11 +63,13 @@ def test_save_workflow_draft_roundtrip_with_canvas(client, job_db) -> None:
     assert saved.status_code == 200, saved.text
     assert saved.json()["definition_yaml"] == draft_yaml
     assert saved.json()["updated_at"]
-    # The human editor's draft store reads the SAME row.
+    assert saved.json()["definition_hash"]
+    # The human editor's draft store reads the SAME row (identity included).
     human = client.get(f"/api/workspaces/{workspace_id}/workflow-draft")
     assert human.status_code == 200
     assert human.json()["definition_yaml"] == draft_yaml
     assert human.json()["updated_at"] == saved.json()["updated_at"]
+    assert human.json()["definition_hash"] == saved.json()["definition_hash"]
 
     got = scoped.get(_draft_url(workspace_id))
     assert got.json() == saved.json()
@@ -97,6 +105,17 @@ def test_save_workflow_draft_cas_roundtrip_and_conflict(client, job_db) -> None:
     assert detail["expected_updated_at"] == updated_at
     assert detail["current_draft"]["definition_yaml"] == human_edit
     assert detail["current_draft"]["updated_at"]
+    # #1143：current_draft 携带语义身份（采用服务端版本的一侧恢复 savedHash）。
+    from server.app.services.workflow_drafts import workflow_draft_identity_hash
+
+    assert detail["current_draft"]["definition_hash"] == workflow_draft_identity_hash(human_edit)
+    # #1177 codex P2：与人侧 PUT 同一契约——整个 409 响应体（含 FastAPI
+    # 原生 handler 的 detail 外层）过封套模型校验。
+    from server.app.routes.workflow_draft_store_contracts import (
+        WorkflowDraftConflictResponse as ContractResponse,
+    )
+
+    ContractResponse.model_validate(conflict.json())
     # The stored draft was NOT overwritten.
     assert scoped.get(_draft_url(workspace_id)).json()["definition_yaml"] == human_edit
 
@@ -210,17 +229,16 @@ def test_compare_workflow_without_baseline_returns_full_draft_preview(client, jo
     workspace = job_db.create_workspace("ws-fresh", workspace_id="studio_fresh_flow")
     workspace_id = str(workspace["id"])
 
+    compare_yaml = (
+        "key: studio_fresh_flow\n"
+        "label: Studio Fresh Flow\n"
+        "nodes:\n"
+        "  publish_content:\n"
+        "    capability: publish_content\n"
+    )
     response = scoped.post(
         f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/compare",
-        json={
-            "definition_yaml": (
-                "key: studio_fresh_flow\n"
-                "label: Studio Fresh Flow\n"
-                "nodes:\n"
-                "  publish_content:\n"
-                "    capability: publish_content\n"
-            )
-        },
+        json={"definition_yaml": compare_yaml},
     )
 
     assert response.status_code == 200, response.text
@@ -228,6 +246,11 @@ def test_compare_workflow_without_baseline_returns_full_draft_preview(client, jo
     assert payload["valid"] is True
     assert payload["errors"] == []
     assert payload["base_revision"] is None
+    # #1143：compare 响应携带草稿语义身份（与 validate 同源，草稿卡取
+    # hash 的另一半入口）；无基线预览同样携带。
+    from server.app.services.workflow_drafts import workflow_draft_identity_hash
+
+    assert payload["definition_hash"] == workflow_draft_identity_hash(compare_yaml)
     assert payload["draft_workflow"] == {
         "key": "studio_fresh_flow",
         "label": "Studio Fresh Flow",

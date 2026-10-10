@@ -7037,6 +7037,8 @@ export interface components {
      * @description Human draft-store mirror; both null when no draft (structured empty).
      */
     StudioAgentWorkflowDraftResponse: {
+      /** Definition Hash */
+      definition_hash?: string | null
       /** Definition Yaml */
       definition_yaml?: string | null
       /** Updated At */
@@ -7732,6 +7734,8 @@ export interface components {
        * @default false
        */
       creates_revision: boolean
+      /** Definition Hash */
+      definition_hash?: string | null
       draft_workflow?: components['schemas']['WorkflowDraftSummaryItem'] | null
       /**
        * Errors
@@ -7741,6 +7745,44 @@ export interface components {
       summary?: components['schemas']['WorkflowCompareSummary'] | null
       /** Valid */
       valid: boolean
+    }
+    /**
+     * WorkflowDraftConflictCurrentDraft
+     * @description 409 conflict payload 的 ``detail.current_draft``（#1177 codex P1：
+     *     契约模型化——此前是裸 dict，前端只能手写 transport type）。
+     *
+     *     与 ``WorkflowDraftStoreResponse`` 同一字段集（服务端 current draft 的
+     *     单一形状）：草稿不存在（never-saved 竞态删除后撞 CAS）时全 null。
+     */
+    WorkflowDraftConflictCurrentDraft: {
+      /** Definition Hash */
+      definition_hash?: string | null
+      /** Definition Yaml */
+      definition_yaml?: string | null
+      /** Updated At */
+      updated_at?: string | null
+    }
+    /**
+     * WorkflowDraftConflictDetail
+     * @description 409 detail 顶层（服务层 DraftConflictError.payload 的契约形态）：
+     *     message（人读指引）+ expected_updated_at（stale 基线）+ current_draft。
+     */
+    WorkflowDraftConflictDetail: {
+      current_draft: components['schemas']['WorkflowDraftConflictCurrentDraft']
+      /** Expected Updated At */
+      expected_updated_at: string
+      /** Message */
+      message: string
+    }
+    /**
+     * WorkflowDraftConflictResponse
+     * @description 409 响应体（#1177 codex P2）：app 级异常处理器把 payload 交给
+     *     ``HTTPException(detail=...)``，FastAPI 原生 handler 固定渲染为
+     *     ``{"detail": ...}``——OpenAPI 声明必须带这层封套，否则生成的
+     *     客户端（前端 transport type 由其派生）按错误的形状读响应。
+     */
+    WorkflowDraftConflictResponse: {
+      detail: components['schemas']['WorkflowDraftConflictDetail']
     }
     /** WorkflowDraftRequest */
     WorkflowDraftRequest: {
@@ -7756,6 +7798,8 @@ export interface components {
     }
     /** WorkflowDraftStoreResponse */
     WorkflowDraftStoreResponse: {
+      /** Definition Hash */
+      definition_hash?: string | null
       /** Definition Yaml */
       definition_yaml?: string | null
       /** Updated At */
@@ -7772,6 +7816,8 @@ export interface components {
     }
     /** WorkflowDraftValidationResponse */
     WorkflowDraftValidationResponse: {
+      /** Definition Hash */
+      definition_hash?: string | null
       /** Errors */
       errors: string[]
       /** Valid */
@@ -11749,6 +11795,15 @@ export interface operations {
           'application/json': components['schemas']['StudioAgentWorkflowDraftResponse']
         }
       }
+      /** @description Stale CAS base */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowDraftConflictResponse']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -15606,6 +15661,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowDraftStoreResponse']
+        }
+      }
+      /** @description Stale CAS base */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowDraftConflictResponse']
         }
       }
       /** @description Validation Error */
