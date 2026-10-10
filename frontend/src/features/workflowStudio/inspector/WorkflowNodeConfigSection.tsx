@@ -13,8 +13,10 @@ import { WorkflowNodeRuntimeOverrideCard } from './WorkflowNodeRuntimeOverrideCa
 //   WorkflowNodeRuntimeOverrideCard）：立即生效、不产生新版本——非
 //   runtime_mutable 键影响之后 intake 的新 job，runtime_mutable 键对已在
 //   跑的 job 下一次 dispatch 即生效（CONFIG-RUNTIME-MUTABLE-001）。
-// registry 只挂 code/agent；agent 节点无节点 YAML schema 编辑区（#406），
-// 但 live 覆盖通道对 agent 同样有效（Agent Definition 的 config_schema）。
+// registry 只挂 code/agent；agent 节点的 config_schema / config 值同样经
+// 节点 YAML 声明（EXEC-AGENT-PROFILE-001），本区块暂不为其提供版本值
+// 表单（走 YAML 源码编辑），但 live 覆盖通道对 agent 同样有效（schema
+// 取自服务端解析的节点执行档案）。
 export function WorkflowNodeConfigSection(props: {
   node: WorkflowNodeRecord
   definitionYaml: string
@@ -23,7 +25,7 @@ export function WorkflowNodeConfigSection(props: {
 }) {
   const { node, definitionYaml, setDefinitionYaml, readOnly } = props
   // code 节点：版本值表单按草稿 YAML 的 config_schema 生成；agent 节点
-  // 的 schema 归 Agent Definition（不在节点 YAML），无版本值通道。
+  // 的 schema 虽也在节点 YAML，本区块暂不渲染其版本值表单。
   const isCodeNode = !node.node_type || node.node_type === 'code'
   const draftSchema = isCodeNode
     ? parseWorkflowNode(definitionYaml, node.key)?.config_schema
