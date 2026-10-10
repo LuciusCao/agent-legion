@@ -14,7 +14,17 @@ export function setJobsPageUpdate(
   total: number | null | undefined,
   nextCursor: string | null | undefined
 ): Partial<JobState> {
-  const base = setJobsSnapshotUpdate(state, workspaceId, revision, jobs)
+  // #1183：快照在途期间可能有更高 revision 的 patch 已落地（或上一个
+  // workspace 残留的 revision 未清零）。单调取 max 让快照响应总是能整页
+  // 替换列表、不被 revision 守卫静默丢弃——此前只有 refreshFirstPage 在
+  // 调用点各自为政地取 max，SSE 快照路径（loadWorkspaceJobsSnapshot）漏
+  // 掉，跨 workspace 切换后快照会被残留 revision 丢弃、页面卡 skeleton。
+  const base = setJobsSnapshotUpdate(
+    state,
+    workspaceId,
+    Math.max(revision, state.revision),
+    jobs
+  )
   if (Object.keys(base).length === 0) return {}
   return {
     ...base,
@@ -118,9 +128,7 @@ export function paginationActions(set: JobStoreSet, get: () => JobState) {
           setJobsPageUpdate(
             state,
             workspaceId,
-            // A patch may have landed while the page was in flight; keep the
-            // revision monotonic so the fresh page always replaces the list.
-            Math.max(page.revision, state.revision),
+            page.revision,
             page.jobs,
             page.total,
             page.next_cursor

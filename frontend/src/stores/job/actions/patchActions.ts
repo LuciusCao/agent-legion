@@ -58,7 +58,16 @@ export function applyJobPatchBatchUpdate(
   patchJobs: JobSummary[],
   deletedJobIds: string[]
 ): Partial<JobState> | null {
-  if (state.jobsWorkspaceId !== workspaceId || revision <= state.revision)
+  // #1183：失败空态（failJobFetch / refreshFirstPage 失败终态）没有已加载
+  // 基线——增量 patch 套在空列表上会拼出假的部分列表，且其无条件的
+  // error: null 会让「加载失败→假空白」重新满足引导页判定，#1183 症状
+  // 复发。丢弃 patch；error 只由整页快照成功、筛选重试或 workspace
+  // 重置清除（被丢弃 patch 的 revision 由服务端单调的后续快照覆盖）。
+  if (
+    state.jobsWorkspaceId !== workspaceId ||
+    revision <= state.revision ||
+    state.error !== null
+  )
     return null
   const deleted = new Set(deletedJobIds)
   const oldJobsById = state.jobsById

@@ -89,6 +89,38 @@ describe('paginationActions', () => {
     expect(state.isLoading).toBe(false)
   })
 
+  it('setJobsPage lands a snapshot superseded by a higher-revision patch (#1183)', () => {
+    // 快照在途期间 job_patch_batch（更高 revision）先落地：单调取 max 让
+    // 快照整页替换列表；不取 max 时快照被 revision 守卫静默丢弃，列表
+    // 永远停在 patch 增量（前插序、totalJobs 停在旧值）。
+    useJobStore
+      .getState()
+      .setJobsPage('ws1', 1, [createJobSummary({ id: 'j1' })], 1, null)
+    useJobStore
+      .getState()
+      .applyJobPatchBatch(
+        'ws1',
+        3,
+        [createJobSummary({ id: 'j2', status: 'running' })],
+        []
+      )
+    useJobStore
+      .getState()
+      .setJobsPage(
+        'ws1',
+        2,
+        [createJobSummary({ id: 'j1' }), createJobSummary({ id: 'j2' })],
+        2,
+        null
+      )
+
+    const state = useJobStore.getState()
+    expect(state.jobIds).toEqual(['j1', 'j2'])
+    expect(state.totalJobs).toBe(2)
+    expect(state.revision).toBe(3)
+    expect(state.isLoading).toBe(false)
+  })
+
   it('loadMoreJobs fetches the cursor page and appends it', async () => {
     useJobStore
       .getState()

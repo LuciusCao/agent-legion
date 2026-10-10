@@ -35,6 +35,33 @@ describe('resetForWorkspace', () => {
     })
   })
 
+  it('resets the revision counter so the new workspace starts comparing from zero (#1183)', () => {
+    // 切换 workspace 不重置 revision 时，上一个 workspace 残留的高 revision
+    // 会把新 workspace 的合法快照全部丢弃（setJobsSnapshotUpdate 守卫），
+    // 页面卡 skeleton。
+    const state = createJobState({
+      jobsWorkspaceId: 'ws1',
+      jobs: [createJobSummary({ id: 'j1', workspace_id: 'ws1' })],
+      revision: 11922503,
+    })
+
+    const next = resetForWorkspace('ws2')(state)
+
+    expect(next.revision).toBe(0)
+  })
+
+  it('resets the revision counter when re-entering the same workspace', () => {
+    const state = createJobState({
+      jobsWorkspaceId: 'ws1',
+      jobs: [createJobSummary({ id: 'j1', workspace_id: 'ws1' })],
+      revision: 42,
+    })
+
+    const next = resetForWorkspace('ws1')(state)
+
+    expect(next.revision).toBe(0)
+  })
+
   it('preserves selection and filters when jobsWorkspaceId matches target workspace', () => {
     const state = createJobState({
       jobsWorkspaceId: 'ws1',

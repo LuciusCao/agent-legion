@@ -1,9 +1,23 @@
+import type { JobFilterConfig } from '../stores/jobStore'
 import type { WorkflowDefinitionRecord } from '../types'
+
+/** 任一筛选维度被设置（#1183 从 WorkspaceMainPage 下沉，纯函数便于测试）。 */
+export function anyFilterActive(filterConfig: JobFilterConfig): boolean {
+  return (
+    filterConfig.status !== null ||
+    filterConfig.search.trim() !== '' ||
+    filterConfig.workflowVersion !== null ||
+    filterConfig.activeNodeKey !== null ||
+    filterConfig.paused !== null
+  )
+}
 
 export interface EmptyGuideVisibilityInput {
   filteredJobIds: string[]
   totalJobs: number
   jobsLoading: boolean
+  /** 任务列表加载失败时的错误消息（#1183）：失败终态不是「真空白」，绝不渲染引导。 */
+  jobsError: string | null
   filtersActive: boolean
   /**
    * stats 未到时为 undefined；后端无 published workflow 时是 null（生成
@@ -21,6 +35,9 @@ export interface EmptyGuideVisibilityInput {
  * jobStore 初值 isLoading=false / totalJobs=null（按 0 计），stats 与
  * revision 未到时无法分辨「真空白」与「加载中」——不等 settle 会在有任务
  * 的 workspace 首帧闪现引导，还会误触发引导专属的设置快照请求。
+ * 加载失败（jobsError 非空）同样不可见引导（#1183）：failJobFetch 会清空
+ * jobs 并把 totalJobs 置 null（按 0 计），形态与「真空白」不可区分，需
+ * error 显式区分，否则任务列表加载失败的 workspace 会整页替换为引导。
  */
 export function shouldShowEmptyGuide(
   input: EmptyGuideVisibilityInput
@@ -29,6 +46,7 @@ export function shouldShowEmptyGuide(
     input.filteredJobIds.length === 0 &&
     input.totalJobs === 0 &&
     !input.jobsLoading &&
+    !input.jobsError &&
     !input.filtersActive &&
     input.workflowKey !== undefined &&
     input.workflowDefinitionLoaded

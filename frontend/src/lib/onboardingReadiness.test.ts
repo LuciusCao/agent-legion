@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  anyFilterActive,
   buildOnboardingSteps,
   shouldShowEmptyGuide,
 } from './onboardingReadiness'
@@ -14,6 +15,29 @@ function makeDefinition(): WorkflowDefinitionRecord {
     nodes: [],
   } as unknown as WorkflowDefinitionRecord
 }
+
+describe('anyFilterActive', () => {
+  const cleared = {
+    status: null,
+    search: '',
+    workflowVersion: null,
+    activeNodeKey: null,
+    paused: null,
+  } as const
+
+  it('reports no active filters for a cleared filter config', () => {
+    expect(anyFilterActive(cleared)).toBe(false)
+  })
+
+  it('reports active filters for each set dimension', () => {
+    expect(anyFilterActive({ ...cleared, status: 'failed' })).toBe(true)
+    expect(anyFilterActive({ ...cleared, search: 'algebra' })).toBe(true)
+    expect(anyFilterActive({ ...cleared, search: '   ' })).toBe(false)
+    expect(anyFilterActive({ ...cleared, workflowVersion: 4 })).toBe(true)
+    expect(anyFilterActive({ ...cleared, activeNodeKey: 'review' })).toBe(true)
+    expect(anyFilterActive({ ...cleared, paused: true })).toBe(true)
+  })
+})
 
 function buildSteps(overrides: {
   definition?: ReturnType<typeof makeDefinition> | null
@@ -33,6 +57,7 @@ describe('shouldShowEmptyGuide', () => {
     filteredJobIds: [] as string[],
     totalJobs: 0,
     jobsLoading: false,
+    jobsError: null,
     filtersActive: false,
     workflowKey: null,
     workflowDefinitionLoaded: true,
@@ -56,6 +81,14 @@ describe('shouldShowEmptyGuide', () => {
 
   it('hides the guide while jobs are loading', () => {
     expect(shouldShowEmptyGuide({ ...settled, jobsLoading: true })).toBe(false)
+  })
+
+  it('hides the guide when the job list failed to load (#1183)', () => {
+    // failJobFetch 清空 jobs 并把 totalJobs 置 null（按 0 计），形态与
+    // 「真空白」不可区分——有任务的 workspace 加载失败时绝不渲染引导。
+    expect(
+      shouldShowEmptyGuide({ ...settled, jobsError: 'Request failed' })
+    ).toBe(false)
   })
 
   it('hides the guide when jobs or filters exist', () => {

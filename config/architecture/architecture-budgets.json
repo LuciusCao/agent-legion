@@ -696,7 +696,7 @@
     "frontend/src/hooks/useWorkspaceStats.ts": 20,
     "frontend/src/hooks/useWorkspaces.ts": 26,
     "frontend/src/hooks/workspaceEventHandlers.ts": 72,
-    "frontend/src/hooks/workspaceEventRefresh.ts": 41,
+    "frontend/src/hooks/workspaceEventRefresh.ts": 33,
     "frontend/src/hooks/workspaceFacetsRefresh.ts": 30,
     "frontend/src/hooks/workspaceSnapshotLoader.ts": 57,
     "frontend/src/labels.ts": 65,

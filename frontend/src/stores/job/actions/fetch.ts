@@ -70,6 +70,11 @@ export const resetForWorkspace =
     const filterConfig = filtersForWorkspace(state, ws)
     return {
       ...resetJobListForFilterChange({ ...state, filterConfig }),
+      // #1183：revision 归零——revision 是跨 workspace 单调计数器语义，
+      // 切换 workspace 后新库的快照从 0 重新比较；不重置时上一个
+      // workspace 残留的高 revision 会把新 workspace 的合法快照全部
+      // 丢弃（setJobsSnapshotUpdate 的 revision 守卫），页面卡 skeleton。
+      revision: 0,
       jobsWorkspaceId: ws,
       ...(keep ? { selectedIds: state.selectedIds } : clearedSelectionState()),
       filterConfig,
