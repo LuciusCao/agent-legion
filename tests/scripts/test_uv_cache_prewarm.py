@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -19,6 +22,8 @@ import scripts.uv_cache_prewarm as prewarm_mod
 from scripts.uv_cache_prewarm import STAGING_PREFIX, main, prewarm
 
 pytestmark = pytest.mark.no_db
+
+HELPER = Path(__file__).resolve().parents[2] / "scripts" / "uv_cache_prewarm.py"
 
 
 def _seed_base_cache(base: Path, marker: str = "cached-wheel\n") -> Path:
@@ -327,6 +332,104 @@ def test_sweep_removes_only_dead_pid_and_own_leftovers(tmp_path: Path) -> None:
     finally:
         alive_proc.terminate()
         alive_proc.wait()
+
+
+def test_dirty_staging_after_failed_cleanup_degrades(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """清理失败加固（矩阵格 5，reviewer minor 1）：清理留下预存 staging
+    时走 warn 降级，不让 cp 以「拷入」语义把 staging/.uv-cache 嵌套落位
+    成 final。"""
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    base = tmp_path / "base"
+    _seed_base_cache(base)
+    staging = worktree / f"{STAGING_PREFIX}.{os.getpid()}"
+    (staging / "leftover").mkdir(parents=True)
+    monkeypatch.setattr(prewarm_mod, "_remove_path", lambda _path: None)  # 清理失败
+
+    assert prewarm(worktree, base) == "failed-staging-dirty"
+
+    assert "清理失败" in capsys.readouterr().err
+    assert not (worktree / ".uv-cache").exists()  # 无嵌套落位
+    assert (staging / "leftover").is_dir()  # 预存内容原样（保留死重方向）
+    assert not (staging / ".uv-cache").exists()  # cp 未执行
+
+
+def test_sigterm_handler_is_restored_after_prewarm(tmp_path: Path) -> None:
+    """helper 可被库式调用：prewarm 返回后 SIGTERM handler 必须恢复原值，
+    不泄漏进程状态。"""
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    base = tmp_path / "base"
+    _seed_base_cache(base)
+    before = signal.getsignal(signal.SIGTERM)
+
+    assert prewarm(worktree, base) == "prewarmed"
+
+    assert signal.getsignal(signal.SIGTERM) == before
+
+
+_CHILD_BLOCKING_CP = """
+import importlib.util
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("prewarm_mod", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+
+def fake_run(cmd, **kwargs):
+    (Path(cmd[-1]) / "partial").mkdir(parents=True)
+    time.sleep(30)  # 阻塞在「克隆进行中」，给 SIGTERM 留窗口
+    return subprocess.CompletedProcess(cmd, 0)
+
+
+mod.subprocess.run = fake_run
+print(mod.prewarm(Path(sys.argv[2]), Path(sys.argv[3])), flush=True)
+"""
+
+
+def test_sigterm_during_clone_runs_finally_cleanup(tmp_path: Path) -> None:
+    """codex P2 第三轮：SIGTERM 默认动作不跑 finally——handler 转
+    SystemExit(143) 后清理路径必须执行：真实 SIGTERM 投递给跑阻塞 cp 的
+    helper 子进程，断言退出码 143 且中转目录被清（等信号非等时长）。"""
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    base = tmp_path / "base"
+    _seed_base_cache(base)
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _CHILD_BLOCKING_CP, str(HELPER), str(worktree), str(base)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        # 等信号：中转目录出现且已有部分内容，确认子进程在「克隆进行中」。
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if any((p / "partial").exists() for p in worktree.glob(f"{STAGING_PREFIX}.*")):
+                break
+            assert proc.poll() is None, f"子进程提前退出: {proc.communicate()}"
+            time.sleep(0.01)
+        else:
+            pytest.fail("子进程未在预算内开始克隆")
+        proc.send_signal(signal.SIGTERM)
+        proc.communicate(timeout=10)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+    assert proc.returncode == 143  # 128+15：handler 的 sys.exit(143)
+    assert _staging_leftovers(worktree) == []  # finally 已清
+    assert not (worktree / ".uv-cache").exists()  # 未落位
 
 
 def test_legacy_bare_staging_name_is_self_cleaned_on_skip(tmp_path: Path) -> None:
