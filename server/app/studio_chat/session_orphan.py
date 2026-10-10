@@ -11,11 +11,12 @@ bare "not running" string.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Never
+from typing import TYPE_CHECKING, Any, Literal, Never
 
 from server.app.services.job_errors import ConflictError
 
 if TYPE_CHECKING:
+    from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
 
 SESSION_INTERRUPTED_CODE = "studio_chat_session_interrupted"
@@ -58,7 +59,9 @@ def reject_orphaned_session(
     runtime is still registered and open, so a new runtime that fails
     (on_error rewriting the detail) or exits (on_exit tearing down while the
     row still carries this stamp) is never rolled back to the stale observed
-    status with no runtime behind it. The timeline event is appended only
+    status with no runtime behind it; such a gone generation leaves the stamp
+    owned by this request, which then completes the projection like the
+    no-runtime case (event + snapshot + structured 409, #1095). The timeline event is appended only
     while the row still says error (atomic predicate), so a resume claiming
     the row after the recheck never inherits a stale error event.
     """
@@ -69,17 +72,17 @@ def reject_orphaned_session(
         session_id, status_in=(status,), status="error", error_detail=ORPHAN_ERROR_DETAIL
     ):
         rt = service.runtime(session_id)
-        if rt is not None:
-            with rt.lock:
-                if service.runtime(session_id) is rt and not rt.closed:
-                    service.db.update_studio_chat_session_if(
-                        session_id,
-                        status_in=("error",),
-                        error_detail_is=ORPHAN_ERROR_DETAIL,
-                        status=status,
-                        error_detail=session.get("error_detail") or "",
-                    )
+        verdict = (
+            "owned" if rt is None else _settle_against_generation(service, session_id, rt, session)
+        )
+        if verdict == "live":
             raise ConflictError("Chat session was resumed concurrently; retry")
+        if verdict == "superseded":
+            raise StudioChatSessionInterruptedError(session_id)
+        # No live generation behind the stamp: either none was registered, or
+        # the one the recheck saw exited before its lock was taken (#1095) —
+        # its on_exit skipped the projection because the row already carried
+        # this stamp, so this request owns the event + snapshot.
         # The event rides the #915 atomic live-guarded append: a resume that
         # claimed the row (error -> starting) after the recheck above makes
         # the insert a no-op, and one racing it waits on the FOR SHARE lock
@@ -94,3 +97,39 @@ def reject_orphaned_session(
         ):
             service.store.publish_session(session_id)
     raise StudioChatSessionInterruptedError(session_id)
+
+
+def _settle_against_generation(
+    service: StudioChatService,
+    session_id: str,
+    rt: SessionRuntime,
+    session: dict[str, Any],
+) -> Literal["live", "owned", "superseded"]:
+    """Decide the orphan stamp's fate against the generation the recheck saw,
+    under its lock (on_exit holds it end to end, so a gone generation's own
+    projection writes are complete once it is taken).
+
+    ``live``: ``rt`` is still the registered, open generation — undo this
+    request's own stamp (pinned by ``error_detail_is``, never a real failure
+    rewritten over it) and let the caller answer a retry conflict.
+    ``owned``: the generation exited/was replaced and the row still carries
+    this request's stamp — nobody else projects it (on_exit skips an error
+    row), so the caller appends the event and publishes the snapshot.
+    ``superseded``: the row moved on (its on_error stamped a real failure and
+    already appended/published, or a further resume claimed it) — the caller
+    only answers the structured refusal.
+    """
+    with rt.lock:
+        current = service.runtime(session_id)
+        if current is rt and not rt.closed:
+            service.db.update_studio_chat_session_if(
+                session_id,
+                status_in=("error",),
+                error_detail_is=ORPHAN_ERROR_DETAIL,
+                status=str(session["status"]),
+                error_detail=session.get("error_detail") or "",
+            )
+            return "live"
+        row = service.db.get_studio_chat_session(session_id) or {}
+    owned = row.get("status") == "error" and row.get("error_detail") == ORPHAN_ERROR_DETAIL
+    return "owned" if owned else "superseded"
