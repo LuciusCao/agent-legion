@@ -29,7 +29,7 @@ pytestmark = pytest.mark.no_db
 
 ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / "scripts" / "worktree-names-lib.sh"
-_SCRIPTS = ("drop-worktree-db.sh", "worktree-names-lib.sh")
+_SCRIPTS = ("clean-worktree.sh", "drop-worktree-db.sh", "worktree-names-lib.sh")
 _GIT = shutil.which("git")
 _BUSY = "派生名锁被占用"
 _DEADLINE = 30.0
@@ -64,8 +64,27 @@ done
 exit 0
 """
 
+# dropdb 桩：记录调用与「此刻锁是否被持有」；RECREATE_WT 非空时模拟并发方
+# 在删库之后、删 bucket 之前用同名重建 worktree（只做 git worktree add——
+# 其 init 会被锁挡住）。
 _DROPDB_STUB = """#!/usr/bin/env bash
 printf 'dropdb %s\\n' "$*" >>"$STUB_LOG"
+if ls "$LOCK_DIR"/holder-* >/dev/null 2>&1; then echo "dropdb-under-lock" >>"$STUB_LOG"; fi
+if [[ -n "${RECREATE_WT:-}" && ! -d "$REPO/.worktrees/$RECREATE_WT" ]]; then
+    git -C "$REPO" worktree add -q -b "recreated-$RECREATE_WT" "$REPO/.worktrees/$RECREATE_WT"
+fi
+"""
+
+# uv 桩：clean 的 bucket 两阶段（probe 报待删、delete 记录是否持锁）；其余
+# 调用（init 的 vault key）输出一行。
+_UV_STUB = """#!/usr/bin/env bash
+case "${CLEAN_WORKTREE_PHASE:-}" in
+    probe) echo "待删除 bucket: stub"; exit 10 ;;
+    delete)
+        if ls "$LOCK_DIR"/holder-* >/dev/null 2>&1; then echo "bucket-delete-under-lock" >>"$STUB_LOG"; fi
+        echo "stub delete_bucket"; exit 0 ;;
+esac
+echo "stub-vault-master-key"
 """
 
 
@@ -105,6 +124,7 @@ class _Env:
         _exe(self.bin / "git", f'#!/usr/bin/env bash\nexec "{_GIT}" "$@"\n')
         _exe(self.bin / "psql", _PSQL_STUB)
         _exe(self.bin / "dropdb", _DROPDB_STUB)
+        _exe(self.bin / "uv", _UV_STUB)
         self._git("init", "-q", str(self.main))
         self._git("-C", str(self.main), "commit", "-q", "--allow-empty", "-m", "init")
         self.lock_dir = self.main / ".git" / "worktree-derived-names.lock"
@@ -124,6 +144,7 @@ class _Env:
             "LIB": str(LIB),
             "REPO": str(self.main),
             "EVENTS": str(self.events),
+            "LOCK_DIR": str(self.main / ".git" / "worktree-derived-names.lock"),
             **extra,
         }
 
@@ -258,9 +279,10 @@ def test_nested_drop_reuses_parent_lock_without_deadlock(env: _Env) -> None:
     assert env.holders() == []
 
 
-@pytest.mark.parametrize("conflict_appears", [True, False])
-def test_drop_confirms_unlocked_then_rechecks_under_lock(env: _Env, conflict_appears: bool) -> None:
-    """#1084 时序：drop 确认后等锁期间，派生名相同的新 worktree 完成注册。"""
+# None = 无人插队；"foo-bar" = 派生名相同的新 worktree；"foo_bar" = 同名重建。
+@pytest.mark.parametrize("appears", ["foo-bar", "foo_bar", None])
+def test_drop_confirms_unlocked_then_rechecks_under_lock(env: _Env, appears: str | None) -> None:
+    """#1084 时序：drop 确认后等锁期间，派生名相同（含同名重建）的 worktree 注册。"""
     scripts = env.runner()
     first, release_a = env.start_holder("a")
     _wait_for(lambda: "acquired a" in env.events_lines(), "a acquires")
@@ -282,17 +304,17 @@ def test_drop_confirms_unlocked_then_rechecks_under_lock(env: _Env, conflict_app
     _wait_for(lambda: _BUSY in drop_err.read_text(), "drop waits for the lock")
     assert "dropdb" not in env.log.read_text()
 
-    if conflict_appears:
-        env.add("foo-bar")  # 同派生名的新 worktree 在确认后、取锁前注册
+    if appears is not None:
+        env.add(appears)  # 确认后、取锁前注册
     release_a.touch()
     assert first.wait(timeout=_DEADLINE) == 0
     stdout, _ = drop.communicate(timeout=_DEADLINE)
 
     log = env.log.read_text()
-    if conflict_appears:
+    if appears is not None:
         assert drop.returncode == 1, stdout
         assert "拒绝删除派生库" in drop_err.read_text()
-        assert "foo-bar -> agent_legion_foo_bar" in drop_err.read_text()
+        assert f"{appears} -> agent_legion_foo_bar" in drop_err.read_text()
         assert "dropdb" not in log
     else:
         assert drop.returncode == 0, drop_err.read_text()
@@ -331,7 +353,6 @@ def test_init_holds_lock_across_collision_check(env: _Env) -> None:
     for name in ("init-worktree.sh", "worktree-names-lib.sh", "ensure-s3-bucket.py"):
         shutil.copy(ROOT / "scripts" / name, target / "scripts" / name)
     (target / ".env").write_text("# stub env\n")
-    _exe(env.bin / "uv", '#!/usr/bin/env bash\necho "stub-vault-master-key"\n')
     first, release_a = env.start_holder("a")
     _wait_for(lambda: "acquired a" in env.events_lines(), "a acquires")
 
@@ -373,3 +394,109 @@ def test_pid_alive_helper_rejects_garbage(env: _Env) -> None:
     lines = result.stdout.splitlines()
     assert lines[:3] == ["dead:", "dead:abc", "dead:1 2"]
     assert lines[3].startswith("alive:") and lines[3] != "alive:"
+
+
+# --- clean-worktree.sh ---------------------------------------------------------
+
+_VICTIM_DBS = "agent_legion_victim agent_legion_test_victim"
+
+
+def test_clean_takes_lock_before_removing_worktree(env: _Env) -> None:
+    """锁在第 1 步之前取得、持有到删库与删 bucket 结束（codex #1246 R1 P1）。"""
+    scripts = env.runner()
+    victim = env.add("victim")
+    first, release_a = env.start_holder("a")
+    _wait_for(lambda: "acquired a" in env.events_lines(), "a acquires")
+
+    clean_err = env.tmp / "clean.err"
+    clean = subprocess.Popen(
+        ["bash", str(scripts / "clean-worktree.sh"), "victim", "--yes"],
+        env=env.env(STUB_DBS=_VICTIM_DBS),
+        stdout=subprocess.PIPE,
+        stderr=clean_err.open("w"),
+        text=True,
+        cwd=env.main,
+    )
+    _wait_for(lambda: _BUSY in clean_err.read_text(), "clean waits for the lock")
+    assert victim.is_dir()  # 等锁时还没动 worktree
+    assert "dropdb" not in env.log.read_text()
+
+    release_a.touch()
+    assert first.wait(timeout=_DEADLINE) == 0
+    stdout, _ = clean.communicate(timeout=_DEADLINE)
+
+    assert clean.returncode == 0, clean_err.read_text()
+    assert not victim.exists()
+    log = env.log.read_text()
+    assert "dropdb agent_legion_victim\n" in log
+    assert "dropdb-under-lock" in log
+    assert "bucket-delete-under-lock" in log
+    assert "stub delete_bucket" in stdout
+    assert env.holders() == []
+
+
+def test_clean_refuses_bucket_when_same_name_worktree_is_recreated(env: _Env) -> None:
+    """删库后同名 worktree 被重建：删 bucket 前的重查把它算作冲突。"""
+    scripts = env.runner()
+    env.add("victim")
+
+    result = subprocess.run(
+        ["bash", str(scripts / "clean-worktree.sh"), "victim", "--yes"],
+        env=env.env(STUB_DBS=_VICTIM_DBS, RECREATE_WT="victim"),
+        capture_output=True,
+        text=True,
+        cwd=env.main,
+        timeout=_DEADLINE,
+    )
+
+    assert result.returncode == 1, result.stdout
+    assert "拒绝删除派生 bucket" in result.stderr
+    assert "同名 worktree 本身" in result.stderr
+    assert "stub delete_bucket" not in result.stdout
+    assert "bucket-delete-under-lock" not in env.log.read_text()
+    assert env.holders() == []
+
+
+def test_clean_single_confirmation_happens_before_lock(env: _Env) -> None:
+    """无 --yes：一次确认覆盖库与 bucket，取消时既不取锁也不动 worktree。"""
+    scripts = env.runner()
+    victim = env.add("victim")
+    first, release_a = env.start_holder("a")
+    _wait_for(lambda: "acquired a" in env.events_lines(), "a acquires")
+
+    result = subprocess.run(
+        ["bash", str(scripts / "clean-worktree.sh"), "victim"],
+        env=env.env(STUB_DBS=_VICTIM_DBS),
+        input="nope\n",
+        capture_output=True,
+        text=True,
+        cwd=env.main,
+        timeout=_DEADLINE,
+    )
+    release_a.touch()
+    assert first.wait(timeout=_DEADLINE) == 0
+
+    assert result.returncode == 1
+    assert "已取消" in result.stderr
+    assert _BUSY not in result.stderr
+    assert victim.is_dir()
+    assert "dropdb" not in env.log.read_text()
+
+
+def test_drop_refuses_while_same_name_worktree_is_registered(env: _Env) -> None:
+    scripts = env.runner()
+    env.add("foo_bar")
+
+    result = subprocess.run(
+        ["bash", str(scripts / "drop-worktree-db.sh"), "foo_bar", "--yes"],
+        env=env.env(STUB_DBS="agent_legion_foo_bar"),
+        capture_output=True,
+        text=True,
+        cwd=env.main,
+        timeout=_DEADLINE,
+    )
+
+    assert result.returncode == 1
+    assert "foo_bar -> agent_legion_foo_bar" in result.stderr
+    assert "同名 worktree 本身" in result.stderr
+    assert "dropdb" not in env.log.read_text()
