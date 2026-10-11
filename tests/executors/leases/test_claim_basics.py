@@ -89,18 +89,11 @@ def test_workspace_limit_blocks_second_claim(
     )
     job_id_b = _create_job_in_workspace(queries, workspace_id)
 
-    executor_id = "code-default"
-    claim_a = repo_a.try_claim(
-        _claim_request(workspace_id, job_id_a, executor_id=executor_id, global_capacity=10)
-    )
-    claim_b = repo_b.try_claim(
-        _claim_request(
-            workspace_id,
-            job_id_b,
-            executor_id=executor_id,
-            global_capacity=10,
-        )
-    )
+    # executor_id 用默认的 CODE_EXECUTOR_ID（'code'）——与生产路径一致
+    # （routing.py 对 code 节点解析 target_id=CODE_EXECUTOR_ID）；#1171 起
+    # 节点限额计数只并 code 形态租约，历史遗留 id 不再计入。
+    claim_a = repo_a.try_claim(_claim_request(workspace_id, job_id_a, global_capacity=10))
+    claim_b = repo_b.try_claim(_claim_request(workspace_id, job_id_b, global_capacity=10))
 
     assert claim_a is not None
     assert claim_b is None

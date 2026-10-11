@@ -89,6 +89,7 @@
     "tests/db/test_workspace_secrets_migration.py",
     "tests/events/test_job_event_buffer_db.py",
     "tests/events/test_job_events.py",
+    "tests/executors/leases/test_capacity_limits.py",
     "tests/executors/leases/test_expire_race.py",
     "tests/executors/leases/test_shard_expiry.py",
     "tests/executors/test_executor_recovery.py",
