@@ -144,6 +144,7 @@ def claim_batch_in_transaction(
     declared_max_code_concurrency: int | None = None,
     *,
     selection: BatchClaimSelection,
+    declared_node_limits: dict[str, int] | None = None,
 ) -> BatchClaimOutcome:
     """Promote the read-phase selection inside the caller's write transaction.
 
@@ -156,7 +157,12 @@ def claim_batch_in_transaction(
     """
     timer = selection.timer
     view = prepare_claim_view(
-        conn, worker_id, declared_max_concurrency, declared_max_code_concurrency, timer
+        conn,
+        worker_id,
+        declared_max_concurrency,
+        declared_max_code_concurrency,
+        timer,
+        declared_node_limits=declared_node_limits,
     )
     if selection.scan_skipped:
         # Both pools exhausted (or code-only headroom on a pre-v2 Worker) at

@@ -246,7 +246,7 @@ curl -sS -b ./al-cookies.txt -H 'x-agent-legion-request: 1' \
 - 注册令牌允许接入的 Workspace 范围；
 - 运行时、并发数、标签和最近日志。
 
-页面保存配置后会原子写入控制卷。身份、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和热字段（`max_concurrency` / `max_code_concurrency` / `upload_max_concurrency` / `ramp_up` / `claim_batch_limit`）都会热更新，无需重启。
+页面保存配置后会原子写入控制卷。身份、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和热字段（`max_concurrency` / `max_code_concurrency` / `node_concurrency_limits` / `upload_max_concurrency` / `ramp_up` / `claim_batch_limit`）都会热更新，无需重启。
 
 **claim 默认关闭**（本节是该规则的权威出处）：Worker 执行进程每次启动（服务启动、手动重启）都先把 `claim_enabled` 置为 false，即使上次退出前是开启状态；必须在控制台点击「开始领取」或执行 `workerctl claim enable` / `PUT /api/config {"claim_enabled": true}`，Worker 才会按本机容量拉取任务。唯一例外是执行进程崩溃（如被 OOM killer 杀掉）后由 supervisor 自动重启（#681）：保留操作员已打开的 claim，新进程按 `ramp_up` 重新爬坡；但上一个执行进程运行不足 60 秒（崩溃循环），或 1 小时内已这样保留过 3 次时，仍回落为关闭，控制台日志写明原因（`worker/restart_policy.py`）。
 
@@ -359,6 +359,7 @@ Worker 默认**直连出网**：service 入口会剥离启动 shell 继承的代
 
 - **容量**：`max_code_concurrency`（默认 0 = 不领取 code 任务），与 `max_concurrency` 是两个独立池，Host 分开记账、分开强制，长 code 任务不会挤占 agent 容量；code 任务也不占 workspace 级 Agent 并发上限。code 任务的准入只需要协议版本 ≥ v2、code 池有余量、workspace 在 token 授权范围内，无需任何 capability 声明（issue #284）。code 沙箱包装器（`velites-sandbox`）自 #383 起内置在 worker 镜像里——code 池不依赖外挂 velites，纯 pi worker 或什么都不挂的 worker 也能开 code 池；host 侧的 code 本地兜底在 docker 形态下禁用（详见下文 velites 小节的 host 说明）；
 - **热更新**：`max_code_concurrency` 与 `max_concurrency` 一样经控制台或 `PUT /api/config` 热生效，不重启执行进程、不打断在跑执行；调大立即放行新 claim，调小在运行数降到新上限以下前停止继续 claim。唯一例外是 0→>0 的热开启要求本机可解析 `velites` 二进制（启动预检的同一道 fail-closed 守卫，EXEC-CODE-003）：缺失时循环内拒绝热开并打日志提示，装好 velites 后下一轮循环自动生效，避免热开后 code 任务在 Host 侧空转重试；
+- **节点级并发上限**（`node_concurrency_limits`，#1158）：`{node_key: N}` 的机器资源保护层——在 workspace 全局上限（`workspace_node_limits`，跨全部机器合并计数）之外，按「本机 × 裸 node_key」限制同时在跑的执行数（agent 与 code 都计数）。每次 claim 随容量声明热同步到 Host（改配置下一次 claim 生效，无需重注册）；key 不带 workspace——机器不关心哪个 workspace 的同名节点在烧 CPU，跨 workspace 撞名向保守方向收敛。code 节点的单机有效上限 = min(本机声明上限, workspace 全局余量），两道门独立判定；workspace 全局门只管 code，agent 节点的有效上限即本机声明值。空 map / 未配置 = 不限制；
 - **回落语义**：没有在线 code Worker（协议 ≥ v2、code 池有余量、workspace 已授权）时，dispatch 直接回落 Host 本地 executor 执行，code 任务不会滞留在队列里等 Worker。
 
 **velites 二进制来源（Worker 自带沙箱）**：Worker 解析 velites 的顺序是「自带副本 `<仓库根>/data/bin/velites` 优先，PATH 兜底」，启动预检与 code 执行共用同一解析逻辑；两处都找不到才 fail-closed。worker 镜像**不含任何 agent runtime 执行器**（issue #381）——velites 与 pi 都由部署方以外挂二进制提供，本机装什么 runtime 就声明什么：

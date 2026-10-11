@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import os
 import shutil
 import stat
@@ -43,9 +44,12 @@ def _write_executable(path: Path, content: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
-@pytest.fixture
-def hook_repo(tmp_path: Path) -> tuple[Path, Path]:
-    repo = tmp_path / "repo"
+@pytest.fixture(scope="module")
+def hook_repo_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Module 级共享仓库：建仓（git init + config + add + commit + 脚本/桩
+    拷贝）从每用例一次摊到每 module 一次。用例级隔离由 hook_repo 提供，
+    零串味论证写在其 docstring 上。"""
+    repo = tmp_path_factory.mktemp("hook-repo") / "repo"
     repo.mkdir()
     (repo / ".githooks").mkdir()
     (repo / "scripts").mkdir()
@@ -56,7 +60,6 @@ def hook_repo(tmp_path: Path) -> tuple[Path, Path]:
     )
     # The hook sources the shared lane path rules (#941).
     shutil.copy2(PROJECT_ROOT / "scripts" / "lane-paths.sh", repo / "scripts" / "lane-paths.sh")
-    gate_log = tmp_path / "gate.log"
     for gate, script_name in (("quick", "check-quick.sh"), ("full", "check.sh")):
         _write_executable(
             repo / "scripts" / script_name,
@@ -70,6 +73,31 @@ def hook_repo(tmp_path: Path) -> tuple[Path, Path]:
     _run(["git", "config", "user.name", "Local Gate Test"], cwd=repo)
     _run(["git", "add", "."], cwd=repo)
     _run(["git", "commit", "-qm", "fixture"], cwd=repo)
+    return repo
+
+
+@pytest.fixture
+def hook_repo(
+    hook_repo_template: Path, tmp_path: Path, request: pytest.FixtureRequest
+) -> tuple[Path, Path]:
+    """共享仓库的 per-test 隔离视图。零串味论证（替代原先每用例新仓）：
+
+    1. 证据缓存（.git/local-gates/<sha>/<gate>-<fingerprint>.pass）的指纹
+       含机器身份（#206 的多机隔离机制）：每用例经 _hook_env 注入以
+       nodeid 为内容的唯一 AGENT_LEGION_MACHINE_ID_FILE，同 SHA 也永不
+       读到其他用例缓存的证据——「首次 push 必跑 gate」的判断不串味。
+    2. lane 派生只看推送范围 base..head 的显式 diff：用例自己记录的 base
+       与新增的 commit 构成判定全集，共享历史上累积的提交不进入任何判定。
+    3. 工作区洁净度作为不变量断言：setup 时 git status --porcelain 必须为
+       空，前序用例若有残留立即失败并指认（唯一会弄脏工作区的
+       rejects_dirty_worktree 用例自行 finally 清理）。
+    """
+    repo = hook_repo_template
+    status = _run(["git", "status", "--porcelain"], cwd=repo).stdout
+    assert not status, f"共享仓库工作区被前序用例弄脏: {status}"
+    machine_id = tmp_path / "machine-id"
+    machine_id.write_text(f"machine:{request.node.nodeid}\n", encoding="utf-8")
+    gate_log = tmp_path / "gate.log"
     return repo, gate_log
 
 
@@ -83,17 +111,30 @@ def _push_input_from(repo: Path, remote_ref: str, remote_sha: str) -> str:
     return f"refs/heads/local {head} {remote_ref} {remote_sha}\n"
 
 
+_commit_counter = itertools.count()
+
+
 def _commit_paths(repo: Path, paths: list[str]) -> None:
+    # 共享仓库下不同参数化用例会向同一路径提交：内容带全局递增序号，保证
+    # 每次都是真实变更（前序用例已提交过同内容时 git 会报 nothing to
+    # commit）。序号不进任何判定——lane 派生只看 base..head 的路径集。
+    nonce = next(_commit_counter)
     for path in paths:
         target = repo / path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(f"change {path}\n", encoding="utf-8")
+        target.write_text(f"change {path} #{nonce}\n", encoding="utf-8")
     _run(["git", "add", *paths], cwd=repo)
     _run(["git", "commit", "-qm", f"touch {', '.join(paths)}"], cwd=repo)
 
 
 def _hook_env(gate_log: Path) -> dict[str, str]:
-    return {"GATE_LOG": str(gate_log)}
+    # gate_log 与 per-test machine-id 同目录（hook_repo 写入）：机器身份进
+    # 证据指纹，per-test 唯一 id = 每用例独立的证据命名空间（#206 的机制，
+    # 共享仓库下用它替代「每用例新仓」的隔离）。
+    return {
+        "GATE_LOG": str(gate_log),
+        "AGENT_LEGION_MACHINE_ID_FILE": str(gate_log.parent / "machine-id"),
+    }
 
 
 def test_git_commands_ignore_inherited_repository_environment(
@@ -264,15 +305,20 @@ def test_pre_push_selects_lanes_from_pushed_paths(
 
 def test_pre_push_rejects_dirty_worktree(hook_repo: tuple[Path, Path]) -> None:
     repo, gate_log = hook_repo
-    (repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
-
-    result = _run(
-        [repo / ".githooks" / "pre-push"],
-        cwd=repo,
-        input_text=_push_input(repo, "refs/heads/feature/test"),
-        env=_hook_env(gate_log),
-        check=False,
-    )
+    dirty = repo / "dirty.txt"
+    dirty.write_text("dirty\n", encoding="utf-8")
+    try:
+        result = _run(
+            [repo / ".githooks" / "pre-push"],
+            cwd=repo,
+            input_text=_push_input(repo, "refs/heads/feature/test"),
+            env=_hook_env(gate_log),
+            check=False,
+        )
+    finally:
+        # 共享仓库纪律：弄脏工作区的用例自行还原（hook_repo 的 setup 不变量
+        # 是 status --porcelain 为空）。
+        dirty.unlink()
 
     assert result.returncode == 1
     assert "worktree is not clean" in result.stderr

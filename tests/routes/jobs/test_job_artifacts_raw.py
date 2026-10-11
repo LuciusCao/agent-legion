@@ -3,7 +3,9 @@
 from pathlib import Path
 
 from server.app.routes.job_artifact_raw import raw_media_type
+from tests.fakes.storage import FakeObjectStorage
 from tests.helpers import publish_legacy_intake_revision, seed_workspace_agent_definitions
+from tests.routes.jobs.external_artifact_testlib import _register_object_artifact
 
 
 def _create_job(c) -> tuple[str, Path]:
@@ -34,6 +36,78 @@ def test_raw_endpoint_serves_image_with_media_type(client_factory):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/png")
     assert response.content == b"\x89PNG\r\n\x1a\nfake-bytes"
+
+
+def test_raw_endpoint_serves_nested_artifact_name(client_factory):
+    """#1178 codex 复审 P2（第 6 轮收口形态）：声明产物名可含 /
+    （reports/final.mp4——Worker 解包与 promote 都保留子目录），嵌套名
+    的 raw 读取走独立静态前缀路由（与文本路由零撞形——贪婪后缀形态曾
+    把名为 x/raw 的产物文本 URL 按前缀名 x 吞掉）。
+    字面 / 形态（前端按段编码后的 URL）与 %2F 形态（整名编码的旧客户
+    端）都必须命中：ASGI 解码后两者同路径。"""
+    with client_factory() as c:
+        job_id, storage = _create_job(c)
+        (storage / "reports").mkdir(parents=True, exist_ok=True)
+        (storage / "reports" / "final.mp4").write_bytes(b"mp4-bytes")
+
+        literal = c.get(f"/api/jobs/{job_id}/raw-artifacts/reports/final.mp4")
+        encoded = c.get(f"/api/jobs/{job_id}/raw-artifacts/reports%2Ffinal.mp4")
+
+    for response in (literal, encoded):
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("video/mp4")
+        assert response.content == b"mp4-bytes"
+
+
+def test_raw_suffix_artifact_name_text_and_nested_raw_both_servable(client_factory):
+    """#1178 codex 复审 P2（第 6 轮收口）：名为 x/raw 的既有产物不受路由
+    形态影响——文本读取重新落入文本路由（贪婪后缀形态曾按前缀名 x 吞
+    掉=回归）；其 raw 读取经独立前缀路由照常服务。既有产物不被重新定
+    义为非法（对象存储清单是权威副本）。"""
+    with client_factory() as c:
+        job_id, storage = _create_job(c)
+        (storage / "reports" / "output").mkdir(parents=True, exist_ok=True)
+        (storage / "reports" / "output" / "raw").write_text('{"v": 1}', encoding="utf-8")
+
+        text = c.get(f"/api/jobs/{job_id}/artifacts/reports/output/raw")
+        raw = c.get(f"/api/jobs/{job_id}/raw-artifacts/reports/output/raw")
+
+    assert text.status_code == 200
+    assert text.json() == {"name": "reports/output/raw", "content": '{"v": 1}'}
+    assert raw.status_code == 200
+    assert raw.content == b'{"v": 1}'
+
+
+def test_raw_endpoint_rejects_nested_traversal(client_factory):
+    """嵌套名形态下的穿越仍被服务层白名单拒绝（is_downloadable_artifact_name
+    拒 .. 段）——独立前缀路由同样不新增穿越面。"""
+    with client_factory() as c:
+        job_id, _ = _create_job(c)
+
+        response = c.get(f"/api/jobs/{job_id}/raw-artifacts/reports/../../etc/passwd")
+
+    assert response.status_code == 400
+
+
+def test_raw_endpoint_prefers_manifest_object_over_stale_local(client_factory, monkeypatch):
+    """#1178 codex 复审 P2（重取语义）：远程 Worker 重跑后对象存储已是新
+    字节而宿主 job_dir 缓存还是旧的——raw 路由 manifest-first（权威副本
+    在对象存储，EXEC-ARTIFACT-STORE-001），本地文件只在无 manifest 行的
+    legacy 形态下使用；前端字节桥（cache: no-store）的重取通道不会静默
+    播旧媒体。"""
+    with client_factory() as c:
+        monkeypatch.setattr(c.app.state.job_artifact_objects, "storage", FakeObjectStorage())
+        job_id, storage = _create_job(c)
+        payload = b"current-object-bytes"
+        job = c.app.state.job_db.get_job(job_id)
+        _register_object_artifact(c, job, "final.mp4", payload, gzipped=False)
+        (storage / "final.mp4").write_bytes(b"stale-local-bytes")
+
+        response = c.get(f"/api/jobs/{job_id}/raw-artifacts/final.mp4")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("video/mp4")
+    assert response.content == payload
 
 
 def test_raw_endpoint_serves_unknown_extension_as_download(client_factory):

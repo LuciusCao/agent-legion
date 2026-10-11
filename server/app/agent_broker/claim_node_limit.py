@@ -61,11 +61,13 @@ Contract, deliberately different from the local path
   a supported write face) and stay conservative, never over-admitting —
   the residual is stock data only.
 
-  The LOCAL path (``_lease_claim_limits.check_claim_capacity``) keeps a
-  same-shaped residual: its node count also spans every active lease of
+  The LOCAL path (``_lease_claim_limits.check_claim_capacity``) shared this
+  residual until #1171: its node count also spanned every active lease of
   the node (no form filter) — conservative on mixed agent→code node keys
-  (skip-and-retry, never over-admitting), predates #1149, out of #1167's
-  scope; tracked in #1171 with the same predicate spelled out for reuse.
+  (skip-and-retry, never over-admitting), predating #1149. #1171 aligned it
+  (and the scheduler hint snapshot in ``executors/scheduling/capacity.py``)
+  to the same predicate, now shared as ``CODE_LEASE_FORMS_PREDICATE``
+  (``executors.models``) so the three consumers cannot drift apart.
 - Over-limit is a skip (``node_limit_full``), never a cancel: the request
   stays queued for the next pass with the same semantics as
   ``capacity_full``, and the unclaimable sweeper (runtime/model probes only)
@@ -104,6 +106,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
+
+from server.app.executors.models import CODE_LEASE_FORMS_PREDICATE
 
 
 def lock_code_pool(conn: Any) -> None:
@@ -150,8 +154,7 @@ def lock_code_pool_for_batch(conn: Any, candidates: Sequence[Any]) -> bool:
     actually configured. Returns whether the lock was acquired (held to
     COMMIT).
     """
-    code_candidates = [row for row in candidates if str(row["kind"]) == "code"]
-    if not code_candidates:
+    if not (code_candidates := [row for row in candidates if str(row["kind"]) == "code"]):
         return False
     pairs = sorted({(str(r["workspace_id"]), str(r["node_key"])) for r in code_candidates})
     row = conn.execute(
@@ -189,17 +192,13 @@ def code_claim_admits(
         return False
     # #1167：计数只并「code 形态」租约（本地 'code' + 远程 'agent:code:%'，
     # 前缀与 claim_promote / code_dispatch 的写侧字面量同形，测试钉住），
-    # 排除非 code 的 'agent:<id>'。口径对齐结论：本地路径
-    # ``executors/_lease_claim_limits.check_claim_capacity`` 的节点计数同样
-    # 不筛 executor_id（按 (workspace_id, node_key) 全计）——它自身的 claim
-    # 永远写 'code'，但同 node_key 的跨形态 agent 租约同样进入其计数
-    # （agent→code 跨 revision 的混合 node_key 是受支持形态，见 routing
-    # 的 route_cache_key）。该残留与 #1167 同形、方向保守（skip 重试、
-    # 永不超收），先于 #1149 存在、不属本 finding 范围，此处不动本地路径。
+    # 排除非 code 的 'agent:<id>'。#1171 起三处消费点（本门 / 本地路径
+    # check_claim_capacity / 调度快照 load_capacity_snapshot）共用
+    # executors.models.CODE_LEASE_FORMS_PREDICATE，谓词不再逐处持有字面量。
     active = conn.execute(
         "select count(*) as cnt from executor_leases where workspace_id=%s and node_key=%s"
         " and status='active' and expires_at>current_timestamp"
-        " and (executor_id='code' or executor_id like 'agent:code:%%')",
+        f" and {CODE_LEASE_FORMS_PREDICATE}",
         (selected["workspace_id"], selected["node_key"]),
     ).fetchone()
     if int(active["cnt"]) >= int(row["concurrency_limit"]):

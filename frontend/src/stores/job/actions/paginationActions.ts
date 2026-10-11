@@ -1,29 +1,13 @@
-import { fetchJobFacets, fetchJobsSnapshot } from '../../../api'
+import { fetchJobsSnapshot } from '../../../api'
 import type { JobFacetsResponse, JobSummary } from '../../../types/jobTypes'
 import { toJobListFilterParams } from '../listFilterParams'
 import type { JobState, JobStoreSet } from '../state'
 import { appendJobsSnapshotUpdate } from './appendActions'
-import { resetJobListForFilterChange } from './fetch'
-import { setJobsSnapshotUpdate } from './snapshotActions'
-
-export function setJobsPageUpdate(
-  state: JobState,
-  workspaceId: string,
-  revision: number,
-  jobs: JobSummary[],
-  total: number | null | undefined,
-  nextCursor: string | null | undefined
-): Partial<JobState> {
-  const base = setJobsSnapshotUpdate(state, workspaceId, revision, jobs)
-  if (Object.keys(base).length === 0) return {}
-  return {
-    ...base,
-    nextCursor: nextCursor ?? null,
-    hasMore: Boolean(nextCursor),
-    totalJobs: total ?? null,
-    loadingMore: false,
-  }
-}
+import {
+  createRefreshFirstPage,
+  PAGE_SIZE,
+  setJobsPageUpdate,
+} from './refreshFirstPage'
 
 export function appendJobsPageUpdate(
   state: JobState,
@@ -39,13 +23,12 @@ export function appendJobsPageUpdate(
   }
 }
 
-const PAGE_SIZE = 500
-
 // Generation counters invalidate in-flight loads when a newer list load
 // (filter refetch, workspace switch via jobsWorkspaceId guard) supersedes
-// them, so stale pages never append to or replace the current list.
+// them, so stale pages never append to or replace the current list. The
+// refresh generation lives in refreshFirstPage.ts; it cancels in-flight
+// appends through the cancelLoadMore callback.
 let loadMoreGeneration = 0
-let refreshGeneration = 0
 
 export function paginationActions(set: JobStoreSet, get: () => JobState) {
   return {
@@ -95,46 +78,8 @@ export function paginationActions(set: JobStoreSet, get: () => JobState) {
       }
     },
 
-    async refreshFirstPage(workspaceId: string) {
-      if (get().jobsWorkspaceId !== workspaceId) return
-      const generation = ++refreshGeneration
-      // Cancel any in-flight page append; the list is about to be replaced.
+    refreshFirstPage: createRefreshFirstPage(set, get, () => {
       loadMoreGeneration += 1
-      const isCurrent = () =>
-        generation === refreshGeneration &&
-        get().jobsWorkspaceId === workspaceId
-      set((state) => resetJobListForFilterChange(state))
-      const filterConfig = get().filterConfig
-      const params = toJobListFilterParams(filterConfig)
-      try {
-        const page = await fetchJobsSnapshot(
-          workspaceId,
-          PAGE_SIZE,
-          undefined,
-          params
-        )
-        if (!isCurrent() || get().filterConfig !== filterConfig) return
-        set((state) =>
-          setJobsPageUpdate(
-            state,
-            workspaceId,
-            // A patch may have landed while the page was in flight; keep the
-            // revision monotonic so the fresh page always replaces the list.
-            Math.max(page.revision, state.revision),
-            page.jobs,
-            page.total,
-            page.next_cursor
-          )
-        )
-        const facets = await fetchJobFacets(workspaceId, params)
-        if (!isCurrent() || get().filterConfig !== filterConfig) return
-        set({ facets })
-      } catch (err) {
-        if (!isCurrent()) return
-        const message =
-          err instanceof Error ? err.message : 'Failed to load jobs'
-        set({ isLoading: false, error: message })
-      }
-    },
+    }),
   }
 }
