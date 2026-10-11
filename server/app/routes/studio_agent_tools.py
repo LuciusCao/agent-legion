@@ -7,6 +7,8 @@ reads; effecting operations (publish/rollback/archive) stay on the
 human-facing routers behind ``reject_studio_agent_scope`` (STUDIO-AGENT-001).
 """
 
+from __future__ import annotations
+
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Request
@@ -48,11 +50,11 @@ from server.app.services.studio_agent_tools import StudioAgentToolsService
 from server.app.services.workflow_drafts import workflow_draft_identity_hash
 from server.app.settings import Settings
 from server.app.studio_chat import draft_events
-from server.app.studio_chat.draft_events import DraftCardBackend
+from server.app.studio_chat.service import StudioChatService
 
 
 def create_studio_agent_tools_router(
-    job_db: JobQueries, settings: Settings, chat_backend: DraftCardBackend | None = None
+    job_db: JobQueries, settings: Settings, chat_service: StudioChatService | None = None
 ) -> APIRouter:
     router = APIRouter(dependencies=[Depends(require_studio_agent_scope)])
     # Workspace-path endpoints additionally enforce the run token's workspace
@@ -114,7 +116,7 @@ def create_studio_agent_tools_router(
         # the header session must own the presented run token (codex P2).
         bearer, _ = extract_session_token(request)
         draft_events.emit_node_code_draft_saved(
-            chat_backend, mcp_session_id, bearer, workspace_id, node_key, row
+            chat_service, mcp_session_id, bearer, workspace_id, node_key, row
         )
         return WorkflowNodeCodeVersionResponse(**row)
 
@@ -136,7 +138,7 @@ def create_studio_agent_tools_router(
 
     router.include_router(create_studio_agent_skill_tools_router(job_db, settings))
     workspace_scoped.include_router(create_studio_agent_prompt_tools_router(job_db))
-    workspace_scoped.include_router(create_studio_agent_draft_tools_router(job_db, chat_backend))
+    workspace_scoped.include_router(create_studio_agent_draft_tools_router(job_db, chat_service))
     # Skill creation tool (#633), workspace-scoped (the created repo lives
     # under the calling workspace's skill dir); preview panel tools (#328),
     # workspace-bound draft reads/write.

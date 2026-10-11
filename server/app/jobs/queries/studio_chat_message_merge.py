@@ -12,10 +12,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from server.app.jobs.queries.studio_chat_messages import StudioChatMessageQueriesMixin
+from server.app.jobs.queries.studio_chat_draft_events import (
+    StudioChatDraftEventQueriesMixin,
+)
 
 
-class StudioChatMessageMergeQueriesMixin(StudioChatMessageQueriesMixin):
+class StudioChatMessageMergeQueriesMixin(StudioChatDraftEventQueriesMixin):
     """Merge-style content update for studio_chat_messages."""
 
     def merge_studio_chat_message_content(

@@ -259,6 +259,207 @@ def test_save_with_closed_session_appends_nothing(client, job_db, registered_run
     assert _draft_messages(job_db, session_id) == []
 
 
+def test_archive_stamp_window_gets_no_card(client, job_db, registered_runtimes) -> None:
+    """#1123 codex P2-c：归档先盖 archived_at、后翻 closed——盖章即拒写，
+    戳→关闭窗口内的保存不得落卡（共享 append_message_if_live 同谓词）。"""
+    workspace_id = _create_workspace(client)
+    _, admin_id = _unbound_client(client, job_db)
+    scoped, session_id = _mint_bound_session(
+        client, job_db, workspace_id, admin_id, registered_runtimes[1]
+    )
+    job_db.set_studio_chat_session_archived(session_id, True)
+    # 窗口形态：归档戳已落、状态仍是 live（关闭尚未完成）。
+    assert job_db.get_studio_chat_session(session_id)["status"] == "starting"
+
+    response = scoped.put(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
+        json={"code": "def run(ctx):\n    return {}\n"},
+        headers={_SESSION_HEADER: session_id},
+    )
+
+    assert response.status_code == 200, response.text
+    assert _draft_messages(job_db, session_id) == []
+    # 族修复同谓词：共享 append_message_if_live 也拒已归档会话。
+    service = client.app.state.studio_chat_service
+    assert (
+        service.store.append_message_if_live(
+            session_id, "status", "system", {"event": "mcp_callback_unreachable"}, ("starting",)
+        )
+        is None
+    )
+
+
+def test_stale_run_token_gets_no_card_after_runtime_swap(
+    client, job_db, registered_runtimes
+) -> None:
+    """#1123 codex P2-a：resume/重铸后旧 run token（仍有效、同 workspace）
+    不得写入新代次会话的时间线——绑定按 registry 当前 runtime 校验。"""
+    workspace_id = _create_workspace(client)
+    _, admin_id = _unbound_client(client, job_db)
+    scoped, session_id = _mint_bound_session(
+        client, job_db, workspace_id, admin_id, registered_runtimes[1]
+    )
+    # Resume 形态：registry 换上持新 token 的新 runtime（旧 token 未吊销）。
+    new_token = scoped_tokens.mint_scoped_token(job_db, admin_id, workspace_id=workspace_id)
+    handle = AcpSessionHandle(
+        command="unused", args=[], cwd="/tmp", mcp_server=None, env=None, callbacks=Mock()
+    )
+    client.app.state.studio_chat_service._runtimes[session_id] = SessionRuntime(handle, new_token)
+
+    response = scoped.put(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
+        json={"code": "def run(ctx):\n    return {}\n"},
+        headers={_SESSION_HEADER: session_id},
+    )
+
+    assert response.status_code == 200, response.text
+    assert _draft_messages(job_db, session_id) == []
+
+
+def test_emit_holds_runtime_registry_lock_across_guarded_insert(
+    client, job_db, registered_runtimes, monkeypatch
+) -> None:
+    """#1123 codex P2-a：token 校验与受保护 INSERT 在同一把 registry 锁内
+    （close/resume 的代次切换都在这把锁下）。故障注入：INSERT 阻塞期间
+    registry 锁必须被持有——这是确定性断言（insert 只有主线程放行后才返回，
+    探测时 emit 必然仍在临界区内），不是时序试探。"""
+    import threading
+
+    workspace_id = _create_workspace(client)
+    _, admin_id = _unbound_client(client, job_db)
+    scoped, session_id = _mint_bound_session(
+        client, job_db, workspace_id, admin_id, registered_runtimes[1]
+    )
+    service = client.app.state.studio_chat_service
+    entered = threading.Event()
+    release = threading.Event()
+    original = service.db.append_studio_chat_node_code_draft_event
+
+    def blocking_insert(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=30)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(service.db, "append_studio_chat_node_code_draft_event", blocking_insert)
+    responses: list = []
+    saver = threading.Thread(
+        target=lambda: responses.append(
+            scoped.put(
+                f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
+                json={"code": "def run(ctx):\n    return {}\n"},
+                headers={_SESSION_HEADER: session_id},
+            )
+        )
+    )
+    saver.start()
+    assert entered.wait(timeout=30)
+    # emit 持有 registry 锁横穿受保护 INSERT：非阻塞获取必然失败。
+    # （探测成功也必须立刻释放——失败形态下不留锁残渣拖死 teardown。）
+    probed = service._runtimes_lock.acquire(blocking=False)
+    if probed:
+        service._runtimes_lock.release()
+    release.set()
+    saver.join(timeout=30)
+    assert not probed
+    assert responses[0].status_code == 200
+    assert len(_draft_messages(job_db, session_id)) == 1
+    assert service._runtimes_lock.acquire(blocking=False)
+    service._runtimes_lock.release()
+
+
+def test_stalled_node_code_save_event_is_dropped_after_overwrite(
+    client, job_db, registered_runtimes
+) -> None:
+    """#1123 codex P2-b：并发保存同一节点——A 先提交草稿后停滞，B 覆盖并
+    落事件，A 的迟到事件被草稿代次闸（row id + code_hash）丢弃，时间线
+    顺序即权威草稿写入顺序。"""
+    workspace_id = _create_workspace(client)
+    _, admin_id = _unbound_client(client, job_db)
+    scoped, session_id = _mint_bound_session(
+        client, job_db, workspace_id, admin_id, registered_runtimes[1]
+    )
+    url = f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft"
+
+    save_a = scoped.put(
+        url,
+        json={"code": "def run(ctx):\n    return {'v': 'a'}\n"},
+        headers={_SESSION_HEADER: session_id},
+    )
+    assert save_a.status_code == 200
+    row_a = save_a.json()
+    save_b = scoped.put(
+        url,
+        json={"code": "def run(ctx):\n    return {'v': 'b'}\n"},
+        headers={_SESSION_HEADER: session_id},
+    )
+    assert save_b.status_code == 200
+
+    # A 的保存响应在 B 落库后才走到事件写入（post-commit 停滞形态）。
+    from server.app.studio_chat import draft_events
+
+    token = scoped.headers["authorization"].removeprefix("Bearer ")
+    draft_events.emit_node_code_draft_saved(
+        client.app.state.studio_chat_service, session_id, token, workspace_id, _NODE_KEY, row_a
+    )
+
+    events = _draft_messages(job_db, session_id)
+    assert [event["content"]["code_hash"] for event in events] == [
+        row_a["code_hash"],
+        save_b.json()["code_hash"],
+    ]
+    # A 的迟到事件没有第三条：时间线只认当前草稿。
+    assert len(events) == 2
+
+
+def test_stalled_workflow_save_event_is_dropped_after_overwrite(
+    client, job_db, registered_runtimes
+) -> None:
+    """#1123 codex P2-b（workflow 族）：迟到事件被 updated_at 代次闸丢弃。"""
+    workspace_id = _create_workspace(client)
+    _, admin_id = _unbound_client(client, job_db)
+    scoped, session_id = _mint_bound_session(
+        client, job_db, workspace_id, admin_id, registered_runtimes[1]
+    )
+    url = f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/draft"
+    yaml_a = _active_yaml(scoped, workspace_id)
+
+    save_a = scoped.put(
+        url,
+        json={"definition_yaml": yaml_a, "expected_updated_at": "never-saved"},
+        headers={_SESSION_HEADER: session_id},
+    )
+    assert save_a.status_code == 200
+    yaml_b = yaml_a.replace("label: ", "label: v2 ", 1)
+    save_b = scoped.put(
+        url,
+        json={
+            "definition_yaml": yaml_b,
+            "expected_updated_at": save_a.json()["updated_at"],
+        },
+        headers={_SESSION_HEADER: session_id},
+    )
+    assert save_b.status_code == 200
+
+    from server.app.studio_chat import draft_events
+
+    token = scoped.headers["authorization"].removeprefix("Bearer ")
+    draft_events.emit_workflow_draft_saved(
+        client.app.state.studio_chat_service,
+        session_id,
+        token,
+        workspace_id,
+        {
+            "definition_yaml": yaml_a,
+            "definition_hash": save_a.json()["definition_hash"],
+            "updated_at": save_a.json()["updated_at"],
+        },
+    )
+
+    events = _draft_messages(job_db, session_id)
+    assert len(events) == 2
+    assert events[-1]["content"]["definition_yaml"] == yaml_b
+
+
 def test_failed_saves_append_nothing(client, job_db, registered_runtimes) -> None:
     """Only the success path emits: a 409 CAS conflict and a 404 unknown node
     leave the timeline untouched."""

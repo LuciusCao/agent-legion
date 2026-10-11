@@ -29,7 +29,7 @@ from server.app.services.workflow_draft_cas_token import (
 )
 from server.app.services.workflow_draft_store import get_workflow_draft
 from server.app.studio_chat import draft_events
-from server.app.studio_chat.draft_events import DraftCardBackend
+from server.app.studio_chat.service import StudioChatService
 
 # 409 CAS 冲突的响应契约（#1177 codex P1/P2）：与人侧 draft-store PUT 同一
 # detail 形状（服务层同一 DraftConflictError.payload 渲染），contracts 立
@@ -83,7 +83,7 @@ def _draft_response(draft: dict) -> StudioAgentWorkflowDraftResponse:
 
 
 def create_studio_agent_draft_tools_router(
-    job_db: JobQueries, chat_backend: DraftCardBackend | None = None
+    job_db: JobQueries, chat_service: StudioChatService | None = None
 ) -> APIRouter:
     router = APIRouter()
 
@@ -115,7 +115,7 @@ def create_studio_agent_draft_tools_router(
         # the header session must own the presented run token (codex P2).
         bearer, _ = extract_session_token(request)
         draft_events.emit_workflow_draft_saved(
-            chat_backend, mcp_session_id, bearer, workspace_id, draft
+            chat_service, mcp_session_id, bearer, workspace_id, draft
         )
         return _draft_response(draft)
 
