@@ -32,6 +32,7 @@ import {
 } from './useStudioChatRunTiming'
 import { useStudioChatSessionMemory } from './useStudioChatSessionMemory'
 import { useStudioChatSessionActions } from './useStudioChatSessionActions'
+import { useStudioChatHistory } from './useStudioChatHistory'
 
 /** Studio「Agent 助手」对话面板的状态与动作：会话/消息经 REST 拉取，
  * 实时更新走 SSE（message 按 id upsert，session 为状态快照）；SSE
@@ -298,6 +299,15 @@ export function useStudioChat(workspaceId: string | undefined) {
 
   const busy = session ? isStudioChatBusy(session.status) : false
 
+  // #1120 PR-4：滚动到顶自动加载更早消息（状态机在姊妹 hook）。
+  const { hasMoreHistory, loadOlderHistory } = useStudioChatHistory({
+    workspaceId,
+    activeSessionId,
+    activeSessionIdRef,
+    messagesRef,
+    setMessages,
+  })
+
   return {
     agents: agentsQuery.data ?? [],
     agentsLoading: agentsQuery.isLoading,
@@ -321,6 +331,8 @@ export function useStudioChat(workspaceId: string | undefined) {
     lastRunMs: runTiming.lastMs,
     lastTerminalEvent: terminalEvent,
     lastRunCancelled: runCancelled,
+    hasMoreHistory,
+    loadOlderHistory,
     resume,
     resuming,
     selectSession: setActiveSessionId,

@@ -24,7 +24,7 @@ type Props = {
 export function StudioChatMessageList(props: Props) {
   const { chat } = props
   const { bottomRef, listRef, handleScroll, pinnedToBottomRef } =
-    useChatAutoScroll(chat.messages)
+    useChatAutoScroll(chat.messages, chat.loadOlderHistory)
   // Memoized: during streaming every SSE message event re-renders this list;
   // the toolCall lookup is O(messages × toolCalls) if rebuilt naively, and a
   // Map keyed by toolCallId makes it O(messages + toolCalls).

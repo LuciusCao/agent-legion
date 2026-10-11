@@ -430,6 +430,7 @@
     "frontend/src/features/workflowStudio/chat/useInFlightSend.ts": 29,
     "frontend/src/features/workflowStudio/chat/useStudioChat.ts": 273,
     "frontend/src/features/workflowStudio/chat/useStudioChatAgentConfig.ts": 76,
+    "frontend/src/features/workflowStudio/chat/useStudioChatHistory.ts": 81,
     "frontend/src/features/workflowStudio/chat/useStudioChatQueue.ts": 49,
     "frontend/src/features/workflowStudio/chat/useStudioChatResume.ts": 21,
     "frontend/src/features/workflowStudio/chat/useStudioChatRunTiming.ts": 29,

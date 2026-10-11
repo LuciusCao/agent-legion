@@ -9,6 +9,7 @@ vi.mock('../../features/workflowStudio/chat/studioChatApi', () => ({
   fetchStudioChatAgents: vi.fn().mockResolvedValue([]),
   fetchStudioChatSessions: vi.fn().mockResolvedValue([]),
   fetchStudioChatMessages: vi.fn().mockResolvedValue([]),
+  fetchStudioChatHistoryPage: vi.fn(),
   fetchStudioChatSession: vi.fn(),
   createStudioChatSession: vi.fn(),
   sendStudioChatMessage: vi.fn(),
