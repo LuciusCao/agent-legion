@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Studio 发布请求 confirming 状态 300s 超时误回收（issue #464）：confirm 执行期（门禁 → before/after 探测 → publish → resolve 全程，含失败回滚分支）由守护线程按 CONFIRMING_STALE_SECONDS/5（60s）周期续租 claimed_at，谓词骑在 UPDATE 上（status='confirming'，失配 rowcount=0 即停跳），慢发布不再被轮询侧的 stale-confirming 谓词误改成 expired；无心跳的死进程行仍按原谓词被清扫为 expired（owner-liveness 语义，非豁免）。
+
 ## [0.7.19] - 2026-10-11
 
 Worker 结果上报协议 v2（元数据移出 HTTP 头改走归档 `result.json`，**部署硬约束 Host 先升**）+ 执行面系统性收口：节点级并发限制覆盖远程 code Worker、`latest` 绑定 skill 的升级不再误重跑、events.jsonl 工具输出全链脱敏（P1 安全）、worker 上报心跳停摆/401/降级归档族收口；前端 workspace 主页加载失败误判引导页修复（#1183）、预览面板支持媒体产物播放（#1146）；分支模型收口为 trunk-based（#1150）。
