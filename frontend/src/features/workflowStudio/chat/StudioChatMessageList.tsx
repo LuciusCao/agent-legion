@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import type { StudioChat } from './useStudioChat'
 import { useChatAutoScroll } from './useChatAutoScroll'
 import {
@@ -64,6 +64,14 @@ export function StudioChatMessageList(props: Props) {
     () => new Map(chat.permissions.map((view) => [view.requestId, view])),
     [chat.permissions]
   )
+  // #1120（codex P1）：onToggleAllowAll 是 MessageItem 全行 prop，必须稳定
+  // 引用——内联箭头每个流式 chunk 都建新函数，memo 直接穿透。
+  // 渲染时绑定会话 id（#962）：切会话后旧卡片的迟到点击被丢弃。
+  const { setAllowAll, activeSessionId } = chat
+  const handleToggleAllowAll = useCallback(
+    (enabled: boolean) => setAllowAll(enabled, activeSessionId ?? undefined),
+    [setAllowAll, activeSessionId]
+  )
 
   // workflow 草稿卡的工具卡锚点由派生视图自带（mergeWorkflowDraft 记录；
   // 合成事件锚点走 anchorMessageId，见下）。
@@ -123,10 +131,7 @@ export function StudioChatMessageList(props: Props) {
               onApplyWorkflowDraft={props.onApplyWorkflowDraft}
               onSelectNode={props.onSelectNode}
               onAnswerPermission={chat.answerPermission}
-              // 渲染时绑定会话 id（#962）：切会话后旧卡片的迟到点击被丢弃。
-              onToggleAllowAll={(enabled) =>
-                chat.setAllowAll(enabled, chat.activeSessionId ?? undefined)
-              }
+              onToggleAllowAll={handleToggleAllowAll}
             />
           )
         }}

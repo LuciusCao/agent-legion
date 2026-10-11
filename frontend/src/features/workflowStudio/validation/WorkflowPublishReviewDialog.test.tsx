@@ -66,7 +66,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -85,7 +84,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -98,15 +96,16 @@ describe('WorkflowPublishReviewDialog', () => {
     expect(screen.getByText('发布 workflow revision')).toBeInTheDocument()
     expect(screen.getByText(/当前 active v1/)).toBeInTheDocument()
     expect(screen.getByText(/新 revision v2/)).toBeInTheDocument()
-    expect(screen.getByText('demo')).toBeInTheDocument()
     expect(screen.getByText('abcdef12')).toBeInTheDocument()
+    // #1127：「Workflow Key」概念已退役（DB-WORKSPACE-KEY-BINDING-001，
+    // workspace id 即 workflow 身份），meta 网格不再展示该行。
+    expect(screen.queryByText('Workflow Key')).not.toBeInTheDocument()
   })
 
   it('explains that runtime-only changes keep the current revision', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         createsRevision={false}
@@ -144,7 +143,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -185,7 +183,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -234,7 +231,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -282,7 +278,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -330,7 +325,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -380,7 +374,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -422,7 +415,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -461,7 +453,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"

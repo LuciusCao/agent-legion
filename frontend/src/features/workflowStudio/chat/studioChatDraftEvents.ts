@@ -75,8 +75,30 @@ function toolCallLastSeq(messages: ChatMessage[]): Map<string, number> {
   return lastSeq
 }
 
+/** workflow 草稿卡的锚定工具调用：最后一个携带该 yaml 的 validate/compare
+ * 调用——草稿卡挂在它后面（#1120 codex P1 轮自 StudioChatMessageList 移出，
+ * #1123 合并后由 mergeWorkflowDraft 消费）。 */
+export function draftAnchorToolCallId(
+  toolCalls: ToolCallView[],
+  draft: WorkflowDraftView | null
+): string | null {
+  if (!draft) return null
+  const anchor = toolCalls
+    .filter(
+      (call) =>
+        call.rawInput?.definition_yaml === draft.yaml &&
+        (call.title.toLowerCase().includes('validate_workflow') ||
+          call.title.toLowerCase().includes('compare_workflow'))
+    )
+    .slice(-1)[0]
+  return anchor?.toolCallId ?? null
+}
+
 /** 节点代码草稿按实体合并两个来源：同实体取证据时刻最新的一份（主 agent
- * 路径下 tool call 的 completed 更新恒晚于合成事件，卡片锚点保持现状）。 */
+ * 路径下 tool call 的 completed 更新恒晚于合成事件，卡片锚点保持现状）。
+ * #1240 codex P2-b：合成事件只在「它宣告的草稿仍是当前草稿」时落库
+ * （后端 INSERT 内原子校验 code_hash/updated_at），迟到的停滞写者事件
+ * 根本不会出现——seq 顺序因此等于权威草稿写入顺序。 */
 export function mergeNodeCodeDrafts(
   base: NodeCodeDraftView[],
   messages: ChatMessage[]
@@ -109,27 +131,16 @@ export function mergeNodeCodeDrafts(
 
 /** Workflow 草稿合并：先按现状从 validate/compare 派生（锚点 = 最后一个携带
  * 该 yaml 的校验/对比调用），再用更晚到达的合成保存事件覆盖——合成事件携带
- * 的是服务端已落库的草稿内容（yaml + definition_hash），比「agent 曾校验过
- * 的输入」更权威。yaml 相同的合成事件不覆盖：内容一致，保留已有的
+ * 的是服务端已落库的草稿内容（yaml + definition_hash），且只在落库时仍是
+ * 当前草稿才写入（#1240 codex P2-b 的 updated_at 代次闸），比「agent 曾校验
+ * 过的输入」更权威。yaml 相同的合成事件不覆盖：内容一致，保留已有的
  * validated/compareMeta 与工具卡锚点。 */
 export function mergeWorkflowDraft(
   base: WorkflowDraftView | null,
   calls: ToolCallView[],
   messages: ChatMessage[]
 ): MergedWorkflowDraft | null {
-  let anchorToolCallId: string | null = null
-  if (base) {
-    for (const call of calls) {
-      if (call.rawInput?.definition_yaml !== base.yaml) continue
-      const title = call.title.toLowerCase()
-      if (
-        !title.includes('validate_workflow') &&
-        !title.includes('compare_workflow')
-      )
-        continue
-      anchorToolCallId = call.toolCallId
-    }
-  }
+  const anchorToolCallId = draftAnchorToolCallId(calls, base)
   const baseSeq =
     (anchorToolCallId && toolCallLastSeq(messages).get(anchorToolCallId)) || -1
   let latestSave: DraftSavedEvent | null = null

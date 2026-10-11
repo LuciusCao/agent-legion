@@ -18,15 +18,10 @@ import {
   type SsePayload,
 } from './studioChatEvents'
 import {
-  deriveChatViews,
   lastTerminalEvent,
   maxSeq,
   type ChatMessage,
 } from './studioChatMessages'
-import {
-  mergeNodeCodeDrafts,
-  mergeWorkflowDraft,
-} from './studioChatDraftEvents'
 import { lastRunCancelled } from './studioChatCancelVisibility'
 import { mergeMessages } from './studioChatRefill'
 import { useStudioChatResume } from './useStudioChatResume'
@@ -36,6 +31,7 @@ import {
 } from './useStudioChatRunTiming'
 import { useStudioChatSessionMemory } from './useStudioChatSessionMemory'
 import { useStudioChatSessionActions } from './useStudioChatSessionActions'
+import { useStudioChatViews } from './useStudioChatViews'
 
 /** Studio「Agent 助手」对话面板的状态与动作：会话/消息经 REST 拉取，
  * 实时更新走 SSE（message 按 id upsert，session 为状态快照）；SSE
@@ -178,7 +174,9 @@ export function useStudioChat(workspaceId: string | undefined) {
     return () => channel.close()
   }, [workspaceId, activeSessionId, refillMessages, queryClient, setSession])
 
-  async function runAction(action: () => Promise<void>) {
+  // useCallback 稳定化（#1120 codex P1）：runAction 是 answerPermission /
+  // resume 的依赖，每 render 新建会把不稳定逐层传导到 MessageItem 的 props。
+  const runAction = useCallback(async (action: () => Promise<void>) => {
     setActionError(null)
     try {
       await action()
@@ -187,7 +185,7 @@ export function useStudioChat(workspaceId: string | undefined) {
       setActionError(error instanceof Error ? error.message : '操作失败')
       return false
     }
-  }
+  }, [])
 
   // 返回本次创建的成败（#801 codex 轮 7 根因方案）：useJobDiagnosis 的
   // 失败闩锁只采信本次尝试的失败——无关的历史加载错误（恢复会话的消息
@@ -232,38 +230,30 @@ export function useStudioChat(workspaceId: string | undefined) {
     setSession,
   })
 
-  async function answerPermission(
-    requestId: string,
-    answer: { option_id?: string; deny?: boolean }
-  ) {
-    if (!workspaceId || !activeSessionId) return
-    await runAction(async () => {
-      await answerStudioChatPermission(
-        workspaceId,
-        activeSessionId,
-        requestId,
-        {
-          deny: answer.deny ?? false,
-          option_id: answer.option_id ?? null,
-        }
-      )
-    })
-  }
+  const answerPermission = useCallback(
+    async (
+      requestId: string,
+      answer: { option_id?: string; deny?: boolean }
+    ) => {
+      if (!workspaceId || !activeSessionId) return
+      await runAction(async () => {
+        await answerStudioChatPermission(
+          workspaceId,
+          activeSessionId,
+          requestId,
+          {
+            deny: answer.deny ?? false,
+            option_id: answer.option_id ?? null,
+          }
+        )
+      })
+    },
+    [workspaceId, activeSessionId, runAction]
+  )
 
-  // #1123：草稿视图在 tool_call 派生之上再合并合成 draft_saved 事件
-  // （子代理保存的唯一卡片数据源；同实体按证据时刻取最新，不重复出卡）。
-  const views = useMemo(() => {
-    const base = deriveChatViews(messages)
-    return {
-      ...base,
-      workflowDraft: mergeWorkflowDraft(
-        base.workflowDraft,
-        base.toolCalls,
-        messages
-      ),
-      nodeDrafts: mergeNodeCodeDrafts(base.nodeDrafts, messages),
-    }
-  }, [messages])
+  // #1120：toolCalls 增量归并 + 草稿视图引用稳定化（见 useStudioChatViews；
+  // 合成 draft_saved 事件的合并也在那里完成，#1123）。
+  const views = useStudioChatViews(messages)
   const { toolCalls, workflowDraft, nodeDrafts, permissions } = views
   // #675：取消轮收尾视图在姊妹文件（studioChatCancelVisibility），与
   // deriveChatViews 的派生链分开 memo——它只被 RunBar 消费。
