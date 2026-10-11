@@ -53,6 +53,92 @@ edges:
 `
 
 describe('workflowYamlToDefinitionRecord', () => {
+  it('materializes v1 after into edges like loader._load_edges (#1258 codex P2)', () => {
+    // v1（schema_version 缺省或显式 1）：依赖只存于节点 after，loader
+    // 物化为边（loader._load_edges）。草稿 record 不同构物化时，画布与
+    // inspector 依赖关系退化为 0 入/0 出。
+    const v1Yaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  fetch:',
+      '    capability: fetch',
+      '    after: [_start]',
+      '  review:',
+      '    capability: review',
+      '    after: [fetch]',
+      '  dangling:',
+      '    capability: dangling',
+      '    after: [missing_node]',
+      '',
+    ].join('\n')
+    const expected = [
+      { source: '_start', target: 'fetch', condition: null },
+      { source: 'fetch', target: 'review', condition: null },
+    ]
+    expect(workflowYamlToDefinitionRecord(v1Yaml)?.edges).toEqual(expected)
+    // 显式 schema_version: 1 同语义（loader 缺省即 1）。
+    expect(
+      workflowYamlToDefinitionRecord(
+        v1Yaml.replace('key: demo', 'key: demo\nschema_version: 1')
+      )?.edges
+    ).toEqual(expected)
+    // 指向不存在节点的 after 不派生边（loader 发布侧另拒未知依赖；
+    // 展示模型不画幽灵端点）。
+    expect(
+      workflowYamlToDefinitionRecord(v1Yaml)?.edges.some(
+        (edge) => edge.source === 'missing_node'
+      )
+    ).toBe(false)
+  })
+
+  it('unions explicit edges with derived after edges on v1, dedup by (source, target)', () => {
+    // loader v1：after 派生边在先；raw edges 追加，(from,to) 已在派生集合
+    // 的跳过（其 when 条件随之不生效——严格同构 _load_edges）。
+    const v1Mixed = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  fetch:',
+      '    capability: fetch',
+      '    after: [_start]',
+      '  review:',
+      '    capability: review',
+      '    after: [fetch]',
+      'edges:',
+      '  - from: fetch',
+      '    to: review',
+      '    when: {artifact: r.json, path: $.ok, equals: true}',
+      '  - from: review',
+      '    to: fetch',
+      '',
+    ].join('\n')
+    expect(workflowYamlToDefinitionRecord(v1Mixed)?.edges).toEqual([
+      { source: '_start', target: 'fetch', condition: null },
+      { source: 'fetch', target: 'review', condition: null },
+      { source: 'review', target: 'fetch', condition: null },
+    ])
+  })
+
+  it('does not materialize after on v2 (after is an echo field)', () => {
+    // v2+ 完全以 edges 列表为准；after 只是 echo，不得物化。
+    const v2Yaml = [
+      'key: demo',
+      'schema_version: 2',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  fetch:',
+      '    capability: fetch',
+      '    after: [_start]',
+      'edges: []',
+      '',
+    ].join('\n')
+    expect(workflowYamlToDefinitionRecord(v2Yaml)?.edges).toEqual([])
+  })
+
   it('maps all node, edge and metadata fields', () => {
     const record = workflowYamlToDefinitionRecord(FULL_YAML)
     expect(record).not.toBeNull()

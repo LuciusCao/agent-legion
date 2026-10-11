@@ -450,6 +450,31 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     expect(selector).toHaveValue('approval')
   })
 
+  it('shows v1 draft dependencies materialized from after (#1258 codex P2)', async () => {
+    // v1 草稿（无 schema_version、无顶层 edges）：依赖只存于节点
+    // after——inspector 草稿详情必须与 loader._load_edges 物化同构，
+    // 否则依赖关系段从正确关系退化为 0 入/0 出。
+    const v1Yaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  fetch:',
+      '    label: 抓取',
+      '    capability: fetch',
+      '    after: [_start]',
+      '  review:',
+      '    label: 评审',
+      '    capability: review',
+      '    after: [fetch]',
+      '',
+    ].join('\n')
+    renderInspector('fetch', { definitionYaml: v1Yaml })
+
+    // fetch：入 _start、出 review（均为 after 物化边）。
+    expect(await screen.findByText('1 入 / 1 出')).toBeInTheDocument()
+  })
+
   it('skips the prompt for an approval node that already has capability (#405 审核 P3)', async () => {
     // 手写 approval+capability 是合法瞬态——切出必须维持修复前的直通
     // 语义，不得被 prompt 拦下（cancel 会放弃合法切换）。

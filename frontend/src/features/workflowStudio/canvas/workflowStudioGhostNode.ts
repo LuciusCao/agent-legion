@@ -2,11 +2,12 @@ import type { components } from '../../../generated/api'
 import type { WorkflowNodeRecord } from '../../../types'
 import type { SelectedWorkflowNodeDetails } from '../shared/workflowStudioModel'
 import {
-  parseWorkflowEdgeConditions,
   parseWorkflowNode,
+  parseWorkflowYaml,
 } from '../shared/workflowStudioYamlDraft.parse'
 import { normalizeTextInput } from '../shared/workflowStudioYamlDraft.textInput'
 import { readDraftStartTypes } from '../shared/workflowStudioTextInputEditable'
+import { materializeDraftEdges } from './workflowStudioDraftEdges'
 
 type WorkflowEdgeResponse = components['schemas']['WorkflowEdgeResponse']
 
@@ -15,7 +16,9 @@ type WorkflowEdgeResponse = components['schemas']['WorkflowEdgeResponse']
  * workspace 的空态模板）：从草稿 YAML 还原详情，让 draft-only 节点在
  * inspector 里可编辑。YAML 驱动的段（基本设置/执行/数据契约/依赖）直接
  * 可用；节点代码段走后端（draft-only 节点已放开）；节点配置段无 schema
- * 时自动隐藏。
+ * 时自动隐藏。incoming/outgoing 经 materializeDraftEdges 归一化——与
+ * loader._load_edges 同构：v1 草稿（schema_version 缺省/1）物化节点
+ * after，v2+ 只认顶层 edges（#1258 codex P2）。
  */
 export function ghostDraftNodeDetails(
   definitionYaml: string,
@@ -31,21 +34,14 @@ export function ghostDraftNodeDetails(
       readDraftStartTypes(definitionYaml, selectedNodeKey) === null)
   )
     return null
-  const edges: WorkflowEdgeResponse[] = parseWorkflowEdgeConditions(
-    definitionYaml
-  )
-    .filter((edge) => edge.from && edge.to)
-    .map((edge) => ({
-      source: edge.from as string,
-      target: edge.to as string,
-      condition: edge.when?.path
-        ? {
-            artifact: edge.when.artifact ?? '',
-            path: edge.when.path,
-            equals: edge.when.equals,
-          }
-        : null,
-    }))
+  // 语法非法的草稿在上面的 parseWorkflowNode 已落空返回；这里是读侧防御
+  // （inspector 链另由形状守卫整体回退，#405 codex P1）。
+  let edges: WorkflowEdgeResponse[]
+  try {
+    edges = materializeDraftEdges(parseWorkflowYaml(definitionYaml))
+  } catch {
+    edges = []
+  }
   const node: WorkflowNodeRecord = {
     key: selectedNodeKey,
     label: parsed.label ?? selectedNodeKey,

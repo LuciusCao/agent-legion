@@ -15,6 +15,7 @@ import { normalizeNodeSkill } from '../shared/workflowStudioYamlDraft.skill'
 import { normalizeTextInput } from '../shared/workflowStudioYamlDraft.textInput'
 import { readDraftStartTypes } from '../shared/workflowStudioTextInputEditable'
 import { mergeNodeExecution } from './workflowStudioExecutionWarnings'
+import { materializeDraftEdges } from './workflowStudioDraftEdges'
 
 /** 草稿 YAML → WorkflowDefinitionRecord：让画布/inspector 直接以草稿为数据
  * 源（近实时随 draftYaml 重算）。解析失败（编辑中途的非法 YAML）返回 null，
@@ -57,19 +58,7 @@ export function workflowYamlToDefinitionRecord(
     label: parsed.label ?? parsed.key ?? '',
     intake: mapIntake(parsed.intake),
     nodes: rawNodes.map(([key, node]) => mapNode(key, node, defaults)),
-    edges: rawEdges
-      .filter((edge) => edge.from && edge.to)
-      .map((edge) => ({
-        source: edge.from as string,
-        target: edge.to as string,
-        condition: edge.when?.path
-          ? {
-              artifact: edge.when.artifact ?? '',
-              path: edge.when.path,
-              equals: edge.when.equals,
-            }
-          : null,
-      })),
+    edges: materializeDraftEdges(parsed),
   }
 }
 
