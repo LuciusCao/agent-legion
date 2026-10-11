@@ -18,7 +18,6 @@ import {
   type SsePayload,
 } from './studioChatEvents'
 import {
-  deriveChatViews,
   lastTerminalEvent,
   maxSeq,
   type ChatMessage,
@@ -32,6 +31,7 @@ import {
 } from './useStudioChatRunTiming'
 import { useStudioChatSessionMemory } from './useStudioChatSessionMemory'
 import { useStudioChatSessionActions } from './useStudioChatSessionActions'
+import { useStudioChatViews } from './useStudioChatViews'
 
 /** Studio「Agent 助手」对话面板的状态与动作：会话/消息经 REST 拉取，
  * 实时更新走 SSE（message 按 id upsert，session 为状态快照）；SSE
@@ -246,7 +246,8 @@ export function useStudioChat(workspaceId: string | undefined) {
     })
   }
 
-  const views = useMemo(() => deriveChatViews(messages), [messages])
+  // #1120：toolCalls 增量归并 + 草稿视图引用稳定化（见 useStudioChatViews）。
+  const views = useStudioChatViews(messages)
   const { toolCalls, workflowDraft, nodeDrafts, permissions } = views
   // #675：取消轮收尾视图在姊妹文件（studioChatCancelVisibility），与
   // deriveChatViews 的派生链分开 memo——它只被 RunBar 消费。

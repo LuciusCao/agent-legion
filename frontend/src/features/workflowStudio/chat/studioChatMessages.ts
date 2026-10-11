@@ -132,7 +132,9 @@ export function groupToolCalls(messages: ChatMessage[]): ToolCallView[] {
   return order.map((id) => byId.get(id)!)
 }
 
-function extractOutputText(content: Record<string, unknown> | null): string {
+export function extractOutputText(
+  content: Record<string, unknown> | null
+): string {
   if (!content) return ''
   const rawOutput = content.rawOutput
   const fromRaw = textFromBlocks(rawOutput)
@@ -414,9 +416,12 @@ function decisionText(resolved: Record<string, unknown>): string {
 }
 
 /** 消息列表的派生视图集合（hook 里单次 useMemo 消费，避免每个视图一条
- * memo 链）。 */
-export function deriveChatViews(messages: ChatMessage[]) {
-  const toolCalls = groupToolCalls(messages)
+ * memo 链）。toolCalls 可传入增量归并结果（#1120，useStudioChatViews 的
+ * createToolCallDeriver 保持未触动卡的引用稳定）；缺省全量 groupToolCalls。 */
+export function deriveChatViews(
+  messages: ChatMessage[],
+  toolCalls: ToolCallView[] = groupToolCalls(messages)
+) {
   return {
     toolCalls,
     workflowDraft: extractWorkflowDraft(toolCalls),
