@@ -433,6 +433,7 @@
     "frontend/src/features/workflowStudio/chat/studioChatSessionArchiveApi.ts": 46,
     "frontend/src/features/workflowStudio/chat/studioChatSessionLabel.ts": 16,
     "frontend/src/features/workflowStudio/chat/studioChatSessionManageApi.ts": 39,
+    "frontend/src/features/workflowStudio/chat/restoreDraftText.ts": 7,
     "frontend/src/features/workflowStudio/chat/studioChatTurnRecovery.ts": 67,
     "frontend/src/features/workflowStudio/chat/thoughtLevel.ts": 84,
     "frontend/src/features/workflowStudio/chat/useChatAutoScroll.ts": 28,

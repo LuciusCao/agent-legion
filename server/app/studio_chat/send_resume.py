@@ -19,14 +19,15 @@ follows within the same request, so the session_resumed row is the trace.
 Concurrency: a per-session lock (service._send_resume_locks) serializes
 auto-resume attempts — the loser of a concurrent attempt re-checks under the
 lock and rides the winner's fresh runtime instead of spawning twice. The
-idle->error stamp is a generational CAS (guarded UPDATE; zero rows = the row
-moved on, abort) and the resume claim runs with allow_closed=False, so the
-auto path never reopens a session a concurrent close just closed (#1121 codex
-P1); the closed/error -> starting claim stays the durable once-only guard
-against resumes that bypass the lock (the manual endpoint): a claim conflict
-with a live fresh runtime is ridden, not re-raised. The lock map is keyed by
-session id, never pruned — entries are tiny and bounded by the number of
-sessions ever auto-resumed in this process.
+claim moves idle/error -> starting in ONE capacity-checked statement (#1238
+codex round-4 P1: the row never transits an error state that drops out of the
+capacity count while its runtime still lives, and a close landing before the
+claim makes it match zero rows — the row stays closed; round-1 P1's generational
+CAS was subsumed by this); the starting claim stays the durable once-only
+guard against resumes that bypass the lock (the manual endpoint): a claim
+conflict with a live fresh runtime is ridden, not re-raised. The lock map is
+keyed by session id, never pruned — entries are tiny and bounded by the
+number of sessions ever auto-resumed in this process.
 """
 
 from __future__ import annotations
@@ -38,7 +39,6 @@ from server.app.auth.sessions import hash_token
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import resume as resume_module
 from server.app.studio_chat.resume_preflight import require_resumable_agent
-from server.app.studio_chat.session_escalation import _TOKEN_DEAD_ERROR_DETAIL
 from server.app.studio_chat.token_keepalive import TOKEN_INVALIDATED_DETAIL
 
 if TYPE_CHECKING:
@@ -92,29 +92,14 @@ def ensure_answerable_runtime(
             # resume still spawning): hand back to the normal admission path,
             # whose fail-closed token check owns the refusal.
             return session, runtime
-        # #1121 codex P2-1 (round 3): everything fallible prepares BEFORE the
-        # first write — a resume that cannot start (agent deleted/unavailable)
-        # raises here, leaving the truthful idle row (old runtime still alive)
-        # instead of a misleading error stamp.
-        require_resumable_agent(service, session)
-        # #1121 codex P1 — generational CAS claim before resuming: an idle row
-        # is stamped error only while it is STILL idle (the guarded UPDATE's
-        # status predicate is the claim; zero rows = a concurrent close/claim
-        # owns the row now, and we abort instead of reopening it). An error row
-        # is already in the resumable generation — the claim below refuses a
-        # close that lands later (allow_closed=False).
-        if session["status"] == "idle":
-            if not service.db.update_studio_chat_session_if(
-                session_id,
-                status_in=("idle",),
-                status="error",
-                error_detail=_TOKEN_DEAD_ERROR_DETAIL,
-            ):
-                current = service.db.get_studio_chat_session(session_id) or {}
-                if current.get("status") == "closed":
-                    raise ConflictError("Chat session is closed")
-                raise ConflictError("Chat session is no longer idle")
-            service.store.publish_session(session_id)
+        # #1238 codex round 4: everything fallible prepares BEFORE the first
+        # write — and its result rides the whole chain (the agent resolved
+        # here is NOT re-resolved inside resume). The claim then moves
+        # idle/error -> starting in ONE capacity-checked statement (P1: no
+        # intermediate error state that drops the row out of the capacity
+        # count while its runtime still lives; a close that lands before the
+        # claim simply makes it match zero rows — the row stays closed).
+        agent = require_resumable_agent(service, session)
         try:
             # The lifecycle admission of the decorated service.resume_session,
             # without its closed-accepting claim.
@@ -124,13 +109,15 @@ def ensure_answerable_runtime(
                     session_id,
                     workspace_id,
                     user_id or str(session["user_id"]),
-                    allow_closed=False,
+                    from_statuses=_AUTO_RESUMABLE_STATUSES,
+                    agent=agent,
                 )
         except ConflictError:
             # A lock-bypassing resume (manual 「继续对话」) won the claim: ride
-            # its fresh runtime; a row that raced to closed stays closed; any
-            # other conflict (cap, race loss with no live successor) stays a
-            # refusal.
+            # its fresh runtime; a row that raced to closed stays closed; a
+            # cap-full claim wrote nothing (the row keeps its truthful idle/
+            # error state and the old runtime keeps living — capacity
+            # accounting untouched); any other conflict stays a refusal.
             raced = service.runtime(session_id)
             if raced is not None and run_token_alive(service, raced):
                 return service.get_session(session_id, workspace_id), raced

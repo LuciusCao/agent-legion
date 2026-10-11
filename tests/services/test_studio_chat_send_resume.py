@@ -447,25 +447,26 @@ def test_running_turn_stays_fail_closed_then_next_send_auto_resumes(chat) -> Non
     assert len(_requests(_read_sink(script_path), "initialize")) == 2
 
 
-def test_auto_resume_aborts_when_close_wins_the_cas_race(chat, monkeypatch) -> None:
-    """#1121 codex P1: a close landing between the snapshot gate and the CAS
-    claim must abort the auto-resume — the guarded idle→error stamp matches
-    zero rows, nothing resumes, the just-closed session stays closed."""
+def test_auto_resume_never_reopens_a_row_that_raced_to_closed(chat, monkeypatch) -> None:
+    """#1121 codex P1 (round 1) / #1238 round 4: the auto path's claim accepts
+    only idle/error — a close landing before it makes the claim match zero
+    rows; nothing resumes, the just-closed session stays closed (manual resume
+    keeps accepting closed rows — not exercised here)."""
     service, _bus, register, workspace_id, user_id = chat
     script_path = register(TEXT_SCRIPT)
     sid = service.create_session(workspace_id, user_id, "fake-agent")["id"]
     runtime = service.runtime(sid)
     assert runtime is not None
     _expire_token(service.db, runtime.token)
-    real_update = service.db.update_studio_chat_session_if
+    real_claim = service.db.claim_studio_chat_resume
 
-    def close_then_cas(session_id, **kwargs):
-        # The CAS stamp is the only idle→error guarded write on this path.
-        if kwargs.get("status") == "error" and kwargs.get("status_in") == ("idle",):
-            service.close_session(sid, workspace_id)
-        return real_update(session_id, **kwargs)
+    def close_then_claim(session_id, **kwargs):
+        # The auto path's claim is the idle/error -> starting one.
+        assert kwargs.get("from_statuses") == ("idle", "error")
+        service.close_session(sid, workspace_id)
+        return real_claim(session_id, **kwargs)
 
-    monkeypatch.setattr(service.db, "update_studio_chat_session_if", close_then_cas)
+    monkeypatch.setattr(service.db, "claim_studio_chat_resume", close_then_claim)
     with pytest.raises(ConflictError, match="closed"):
         service.send_message(sid, workspace_id, "must not reopen me")
 
@@ -476,31 +477,64 @@ def test_auto_resume_aborts_when_close_wins_the_cas_race(chat, monkeypatch) -> N
     assert len(_requests(_read_sink(script_path), "initialize")) == 1  # no respawn
 
 
-def test_auto_resume_claim_refuses_a_close_landing_after_the_cas(chat, monkeypatch) -> None:
-    """#1121 codex P1, second window: the CAS succeeded (row error) but the
-    close lands before the resume claim — allow_closed=False makes the claim
-    fail and the session stays closed (manual resume keeps accepting closed)."""
+def test_auto_resume_claim_failure_preserves_capacity_accounting(chat, monkeypatch) -> None:
+    """#1238 codex round-4 P1: with the cap full the claim fails WITHOUT any
+    intermediate write — the row never transits an error state that drops out
+    of the capacity count while its runtime still lives, so a concurrent
+    creator cannot see a freed slot. The row keeps its truthful idle state,
+    the old runtime survives, and a later retry (cap restored) resumes fine."""
+    from server.app.studio_chat import service as service_module
+
     service, _bus, register, workspace_id, user_id = chat
     script_path = register(TEXT_SCRIPT)
     sid = service.create_session(workspace_id, user_id, "fake-agent")["id"]
     runtime = service.runtime(sid)
     assert runtime is not None
     _expire_token(service.db, runtime.token)
-    real_claim = service.db.claim_studio_chat_resume
 
-    def close_then_claim(session_id, **kwargs):
-        # The auto path must never claim a closed row (manual resume keeps
-        # the default allow_closed=True — not exercised here).
-        assert kwargs.get("allow_closed") is False
-        service.close_session(sid, workspace_id)
-        return real_claim(session_id, **kwargs)
-
-    monkeypatch.setattr(service.db, "claim_studio_chat_resume", close_then_claim)
-    with pytest.raises(ConflictError, match="closed"):
-        service.send_message(sid, workspace_id, "must not reopen me")
+    with monkeypatch.context() as patch:
+        patch.setattr(service_module, "MAX_ACTIVE_STUDIO_CHAT_SESSIONS", 0)
+        with pytest.raises(ConflictError, match="Too many active"):
+            service.send_message(sid, workspace_id, "no slot")
 
     session = service.get_session(sid)
-    assert session["status"] == "closed"
-    assert session["closed_at"] is not None
+    assert session["status"] == "idle"  # 无中间 error 态：容量计数从未被腾空
+    assert not session["error_detail"]
+    assert service.runtime(sid) is runtime  # 旧 runtime 未被 teardown
     assert _user_texts(service, sid, workspace_id) == []
     assert len(_requests(_read_sink(script_path), "initialize")) == 1  # no respawn
+
+    # 容量恢复后重试即正常自动 resume（没有卡死在 error 态）。
+    message = service.send_message(sid, workspace_id, "no slot")
+    assert message["content"]["text"] == "no slot"
+    _wait_for(lambda: _idle(service, sid))
+    assert _user_texts(service, sid, workspace_id) == ["no slot"]
+    assert len(_requests(_read_sink(script_path), "initialize")) == 2
+
+
+def test_auto_resume_reuses_the_preflighted_agent(chat, monkeypatch) -> None:
+    """#1238 codex round-4 P2-1: the agent resolved by the write-preceding
+    preflight rides the whole claim/teardown/spawn chain — resume must not
+    re-resolve it (an admin deleting/editing the agent in between would
+    otherwise fail the send after the chain started)."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TEXT_SCRIPT)
+    sid = service.create_session(workspace_id, user_id, "fake-agent")["id"]
+    runtime = service.runtime(sid)
+    assert runtime is not None
+    _expire_token(service.db, runtime.token)
+    real_find_agent = service._registry.find_agent
+    calls = 0
+
+    def find_agent(agent_id: str):
+        nonlocal calls
+        calls += 1
+        return real_find_agent(agent_id)
+
+    monkeypatch.setattr(service._registry, "find_agent", find_agent)
+    message = service.send_message(sid, workspace_id, "second question")
+
+    assert message["content"]["text"] == "second question"
+    _wait_for(lambda: _idle(service, sid))
+    assert calls == 1  # preflight 一次，链路复用，无二次解析
+    assert len(_requests(_read_sink(script_path), "initialize")) == 2

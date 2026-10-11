@@ -497,4 +497,29 @@ describe('useStudioChatQueue', () => {
     await waitFor(() => expect(send).toHaveBeenCalledTimes(2))
     expect(send).toHaveBeenLastCalledWith('第一条')
   })
+
+  it('cancels the old session slow-send timer on session switch (#1238 codex 四轮 P2-2)', () => {
+    // queue 把 sessionKey 作为 resetKey 传给 useInFlightSend：切会话后旧发送
+    // 的慢定时器不得再把 slowSend 置真（该提示优先于新会话的恢复入口）。
+    vi.useFakeTimers()
+    try {
+      const send = vi
+        .fn()
+        .mockImplementation(() => new Promise<boolean>(() => {}))
+      const { result, rerender } = renderQueue(send, {
+        busy: false,
+        sessionKey: 's1',
+      })
+      act(() => {
+        void result.current.submit('旧会话的消息')
+      })
+      rerender({ busy: false, sessionKey: 's2' })
+      act(() => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(result.current.slowSend).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

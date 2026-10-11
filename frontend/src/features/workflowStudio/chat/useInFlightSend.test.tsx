@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { restoreDraftText, useInFlightSend } from './useInFlightSend'
+import { useInFlightSend } from './useInFlightSend'
+import { restoreDraftText } from './restoreDraftText'
 
 describe('useInFlightSend', () => {
   beforeEach(() => vi.useFakeTimers())
@@ -14,7 +15,7 @@ describe('useInFlightSend', () => {
           settle = resolve
         })
     )
-    const { result } = renderHook(() => useInFlightSend(send, 1000))
+    const { result } = renderHook(() => useInFlightSend(send, undefined, 1000))
     act(() => {
       void result.current.sendInFlight('hi')
     })
@@ -32,7 +33,7 @@ describe('useInFlightSend', () => {
 
   it('never flags slowSend for a fast send', async () => {
     const send = vi.fn().mockResolvedValue(true)
-    const { result } = renderHook(() => useInFlightSend(send, 1000))
+    const { result } = renderHook(() => useInFlightSend(send, undefined, 1000))
     await act(async () => {
       await result.current.sendInFlight('hi')
     })
@@ -45,13 +46,53 @@ describe('useInFlightSend', () => {
   it('sendInFlight resolves with the send result and invokes onSent', async () => {
     const send = vi.fn().mockResolvedValue(false)
     const onSent = vi.fn()
-    const { result } = renderHook(() => useInFlightSend(send, 1000))
+    const { result } = renderHook(() => useInFlightSend(send, undefined, 1000))
     let settled: boolean | undefined
     await act(async () => {
       settled = await result.current.sendInFlight('hi', onSent)
     })
     expect(settled).toBe(false)
     expect(onSent).toHaveBeenCalledWith(false)
+  })
+
+  it('cancels the pending slowSend timer when the resetKey changes (#1238 codex 四轮 P2-2)', () => {
+    const send = vi
+      .fn()
+      .mockImplementation(() => new Promise<boolean>(() => {}))
+    const { result, rerender } = renderHook(
+      ({ sessionKey }: { sessionKey: string }) =>
+        useInFlightSend(send, sessionKey, 1000),
+      { initialProps: { sessionKey: 's1' } }
+    )
+    act(() => {
+      void result.current.sendInFlight('hi')
+    })
+    // 会话切换（commit 阶段取消旧定时器）；旧请求的定时器之后不得再触发。
+    rerender({ sessionKey: 's2' })
+    act(() => {
+      vi.advanceTimersByTime(5000)
+    })
+    expect(result.current.slowSend).toBe(false)
+  })
+
+  it('resets an already-fired slowSend when the resetKey changes (#1238 codex 四轮 P2-2)', () => {
+    const send = vi
+      .fn()
+      .mockImplementation(() => new Promise<boolean>(() => {}))
+    const { result, rerender } = renderHook(
+      ({ sessionKey }: { sessionKey: string }) =>
+        useInFlightSend(send, sessionKey, 1000),
+      { initialProps: { sessionKey: 's1' } }
+    )
+    act(() => {
+      void result.current.sendInFlight('hi')
+    })
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(result.current.slowSend).toBe(true)
+    rerender({ sessionKey: 's2' })
+    expect(result.current.slowSend).toBe(false)
   })
 })
 

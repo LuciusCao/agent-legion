@@ -5,7 +5,7 @@ import { StudioChatCancelButton } from './StudioChatCancelButton'
 import { StudioChatSendButton } from './StudioChatSendButton'
 import { StudioChatComposerConfig } from './StudioChatComposerConfig'
 import { StudioChatContextRing } from './StudioChatContextRing'
-import { restoreDraftText } from './useInFlightSend'
+import { restoreDraftText } from './restoreDraftText'
 import styles from './StudioChatComposer.module.css'
 
 type Props = {

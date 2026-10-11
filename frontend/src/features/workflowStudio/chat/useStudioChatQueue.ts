@@ -34,7 +34,10 @@ export function useStudioChatQueue(
     queueRef.current = queue
     sessionKeyRef.current = sessionKey
   })
-  const { inFlightRef, sendInFlight, slowSend } = useInFlightSend(send)
+  const { inFlightRef, sendInFlight, slowSend } = useInFlightSend(
+    send,
+    sessionKey
+  )
 
   // 跨会话切换清空队列：排队消息只属于当时那个会话。
   useEffect(() => {

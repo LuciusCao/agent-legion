@@ -23,19 +23,26 @@ _CLAIM_SQL = (
     " where status in ('starting', 'idle', 'running', 'awaiting_permission'))"
     " < %s returning id"
 )
-_CLAIM_FROM_RESUMABLE = _CLAIM_SQL.format(statuses="'closed', 'error'")
-# #1121 codex P1: the send-path auto-resume must never reopen a session the
-# user just closed — its claim accepts only the error row its CAS produced.
-_CLAIM_FROM_ERROR_ONLY = _CLAIM_SQL.format(statuses="'error'")
+_CLAIM_SQL_BY_FROM: dict[tuple[str, ...], str] = {
+    ("closed", "error"): _CLAIM_SQL.format(statuses="'closed', 'error'"),
+    # #1238 codex P1 (round 4): the send-path auto-resume claims idle/error ->
+    # starting in ONE statement — the row never transits an error state that
+    # drops out of the capacity count while its runtime still lives.
+    ("idle", "error"): _CLAIM_SQL.format(statuses="'idle', 'error'"),
+}
 
 
 class StudioChatResumeQueriesMixin(StudioChatTranscriptQueriesMixin):
-    """Atomic closed/error -> starting resume claim for studio_chat_sessions."""
+    """Atomic resume claim for studio_chat_sessions (from-statuses -> starting)."""
 
     def claim_studio_chat_resume(
-        self, session_id: str, *, max_active: int, allow_closed: bool = True
+        self,
+        session_id: str,
+        *,
+        max_active: int,
+        from_statuses: tuple[str, ...] = ("closed", "error"),
     ) -> bool:
-        """Move closed/error -> starting under the cap advisory lock.
+        """Move a from-statuses row -> starting under the cap advisory lock.
 
         The active-count predicate rides the same UPDATE (one statement, one
         transaction, the creation cap's advisory lock held), so concurrent
@@ -43,7 +50,7 @@ class StudioChatResumeQueriesMixin(StudioChatTranscriptQueriesMixin):
         spawn a subprocess. False means the session left a resumable state OR
         the cap is hit; the caller re-reads the row to tell them apart.
         """
-        sql = _CLAIM_FROM_RESUMABLE if allow_closed else _CLAIM_FROM_ERROR_ONLY
+        sql = _CLAIM_SQL_BY_FROM[from_statuses]  # KeyError = programming error
         with self.connect() as conn:
             conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (_CAP_LOCK_KEY,))
             row = conn.execute(sql, (session_id, max_active)).fetchone()
