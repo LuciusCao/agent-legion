@@ -1,5 +1,9 @@
 # 材料（Materials）与运行（Runs）：输入模型重设计
 
+> **历史设计记录**（#1103）：现行参考（概念模型、入口契约、数据模型、存储层、残余面）已抽出到
+> [materials-and-runs.md](materials-and-runs.md)；本文保留决策表、场景、迁移计划与分阶段实施记录，
+> 供溯源。
+
 状态：设计稿（实施进度以 §11 为准）。v1 已实施（schema v53 + materials/runs API +
 物化缓存 + 添加条目面板 + demo seed 迁移）；v1.2（bundle 文件夹条目，#156/#164）
 已落地（schema v55）；v1.3（text 条目「输入需求」，#761）与 v1.4（start 节点

@@ -4,8 +4,8 @@ Agent Legion 的材料（用户上传文件）与后续的 job 产物统一存�
 对象存储中。**默认自托管 [SeaweedFS](https://github.com/chrislusf/seaweedfs)**
 （Apache 2.0，volume/needle 布局，为海量小文件设计）；RustFS 保留为可切换
 的逃生舱后端（存量卷迁移期或大对象为主的部署使用）。代码只对 S3 API
-编程，可平行切换 Amazon S3 / MinIO / Garage。设计背景见
-[docs/architecture/materials-and-runs-design.md](architecture/materials-and-runs-design.md)。
+编程，可平行切换 Amazon S3 / MinIO / Garage。现行模型见
+[docs/architecture/materials-and-runs.md](architecture/materials-and-runs.md)（设计背景见其中链接的历史设计稿）。
 
 ## 双后端适用场景
 

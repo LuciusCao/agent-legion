@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- 架构文档现行 / 历史拆分（issue #1103，PR-A，docs）：四份以设计过程为主体的文档移入 `docs/architecture/README.md`「历史设计记录」并抽出现行参考——新增 `materials-and-runs.md`（条目 / 材料 / bundle / text / run 输入模型、start 入口契约、对象存储与物化缓存，并收编 #853 产物版本 key 与直连 URL 固定的现行机制）与 `node-sdk-and-worker-execution.md`（code 节点执行链、运行时契约、SDK API、Worker code 协议、`node_code_max_bytes`），实例设置旧概念治理的现行部分（容量三层、纯控制面模式与健康信号）并入 `backend.md`；`velites-harness.md` 收为现行规格（章节号不变，代码注释 `§N` 引用仍可解析），立项动机、灰度路径、里程碑与开放问题拆入 `velites-harness-design-history.md`；`studio-service-lifecycle.md` 与 `studio-kimi-background-wakeup.md` 合并为 `studio-chat-session-runtime.md`（服务层 + 会话层）。同步 `_CURRENT_DOCS`、索引表、AGENTS.md §6 链接、invariant registry 与各文档互链。
+
 ## [0.7.19] - 2026-10-11
 
 Worker 结果上报协议 v2（元数据移出 HTTP 头改走归档 `result.json`，**部署硬约束 Host 先升**）+ 执行面系统性收口：节点级并发限制覆盖远程 code Worker、`latest` 绑定 skill 的升级不再误重跑、events.jsonl 工具输出全链脱敏（P1 安全）、worker 上报心跳停摆/401/降级归档族收口；前端 workspace 主页加载失败误判引导页修复（#1183）、预览面板支持媒体产物播放（#1146）；分支模型收口为 trunk-based（#1150）。
