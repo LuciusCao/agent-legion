@@ -217,6 +217,29 @@ def test_bulk_create_rejects_cross_workspace_id_collision_before_locking(
     assert not any((tmp_path / "jobs").rglob(other_id))
 
 
+def test_bulk_create_rejects_late_chunk_collision_before_any_commit(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """#1243 codex R3：碰撞落在后面的 chunk 时，前面的 chunk 也不得已提交——
+    整批身份预检在首个 chunk 提交之前完成。"""
+    import server.app.jobs.queries.job_bulk as job_bulk_module
+
+    monkeypatch.setattr(job_bulk_module, "CREATE_CHUNK_ROWS", 1)
+    own_ws = "w1243b"
+    foreign_ws = f"{own_ws}_{_WORKFLOW}_x"
+    colliding_source = f"x_{_WORKFLOW}_y"
+    job_db.create_workspace(own_ws)
+    job_db.create_workspace(foreign_ws)
+    _create_single(job_db, foreign_ws, "y")
+    first_id = f"{own_ws}_{_WORKFLOW}_aa"
+
+    with pytest.raises(ValueError, match="collision"):
+        _create_bulk(job_db, own_ws, ["aa", colliding_source])
+
+    assert job_db.get_job(first_id) is None
+    assert not any((tmp_path / "jobs").rglob(first_id))
+
+
 def _lock_under_sort(node: dict[str, Any], sort_above: bool = False) -> bool:
     """True if some plan node evaluating pg_advisory_xact_lock has a Sort ancestor."""
     evaluates = any("pg_advisory_xact_lock" in out for out in node.get("Output", []))
