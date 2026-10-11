@@ -11,10 +11,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from server.app.services.job_errors import ConflictError, InvalidOperationError
+from server.app.services.job_errors import ConflictError
 from server.app.studio_chat.background_baseline import capture_resume_baseline
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.empty_turn_retry import retry_empty_turn
+from server.app.studio_chat.resume_preflight import require_resumable_agent
 from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.wire_baseline import capture_wire_baseline
 
@@ -70,16 +71,7 @@ def resume_session(
     # down (fatal error -> _on_exit window) or left over by a reap that
     # raced a live handle: the resume winner settles it below, right
     # after the atomic claim.
-    agent_id = str(session["agent_id"])
-    agent = service._registry.find_agent(agent_id)
-    if agent is None:
-        raise InvalidOperationError(f"Unknown studio agent: {agent_id}")
-    command = str(agent["command"])
-    if not service._probe.available(command):
-        raise InvalidOperationError(
-            f"Studio agent '{agent_id}' is not available on this host"
-            f" (command not found: {command})"
-        )
+    agent = require_resumable_agent(service, session)
     # Atomic closed/error -> starting claim under the creation cap's
     # advisory lock: a resume spawns a subprocess, so it counts against
     # the same active-session cap and cannot race creators past it. The

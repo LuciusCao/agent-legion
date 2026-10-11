@@ -34,17 +34,19 @@ def send_message(
     if session["status"] == "closed":
         raise ConflictError("Chat session is closed")
     runtime = service.runtime(session_id)
-    if runtime is None:
-        reject_orphaned_session(service, session_id, session)
     # #1121: a dead run token is rebuilt (auto-resume) before anything is
     # admitted — an accepted message always has a live tool channel.
     # Live-token sessions skip this entirely; ensure_answerable_runtime
-    # re-decides under its lock and falls through for non-idle/error rows
-    # (a running turn keeps the fail-closed refusal below).
-    if runtime is not None and not send_resume.run_token_alive(service, runtime):
+    # re-decides under its lock (waiting out an in-flight auto-resume,
+    # codex P2-2) and falls through for non-idle/error rows (a running turn
+    # keeps the fail-closed refusal below). A runtime still absent after the
+    # wait is a real orphan — the orphan projection owns it.
+    if runtime is None or not send_resume.run_token_alive(service, runtime):
         session, runtime = send_resume.ensure_answerable_runtime(
             service, session_id, workspace_id, user_id=user_id
         )
+        if runtime is None:
+            reject_orphaned_session(service, session_id, session)
     from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 
     # #1029: observe a just-started Kimi Code unprompted turn before deciding.

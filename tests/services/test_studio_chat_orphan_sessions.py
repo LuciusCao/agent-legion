@@ -132,9 +132,12 @@ def test_resume_claiming_between_recheck_and_append_gets_no_stale_error(
     calls = 0
 
     def runtime(session_id: str):
+        # #1121 P2-2: the send now re-reads through send_resume's lock first —
+        # call 1 = admission top, 2 = the ensure re-read, 3 = the projection's
+        # post-write recheck.
         nonlocal calls
         calls += 1
-        if calls == 2:  # post-write recheck: a resume claims right after it
+        if calls == 3:  # post-write recheck: a resume claims right after it
             assert job_db.claim_studio_chat_resume(session_id, max_active=32)
         return None
 
@@ -143,7 +146,7 @@ def test_resume_claiming_between_recheck_and_append_gets_no_stale_error(
     with pytest.raises(StudioChatSessionInterruptedError):
         service.send_message(sid, workspace_id, "hi")
 
-    assert calls == 2
+    assert calls == 3
     assert job_db.get_studio_chat_session(sid)["status"] == "starting"
     assert job_db.list_studio_chat_messages(sid) == []
     assert _session_publishes(bus, sid) == []
@@ -158,7 +161,9 @@ def test_runtime_registered_during_projection_rolls_the_stamp_back(
     service, bus, _register, workspace_id, user_id = chat
     sid = _orphan(job_db, workspace_id, user_id, "running")
     rt = _StubRuntime()
-    calls = iter([None, rt, rt])  # admission sees none; post-write recheck sees one
+    # #1121 P2-2: admission top + the ensure re-read both see no runtime; the
+    # projection's post-write recheck (call 3) is where the runtime appears.
+    calls = iter([None, None, rt, rt])
     monkeypatch.setattr(service, "runtime", lambda session_id: next(calls))
 
     with pytest.raises(ConflictError) as caught:
@@ -184,7 +189,8 @@ def test_rollback_never_undoes_a_new_runtime_real_failure(chat, job_db, monkeypa
     def runtime(session_id: str):
         nonlocal calls
         calls += 1
-        if calls == 2:  # recheck sees the new runtime, which then dies
+        # #1121 P2-2: 1 = admission top, 2 = ensure re-read, 3 = projection recheck.
+        if calls == 3:  # recheck sees the new runtime, which then dies
             job_db.update_studio_chat_session(
                 session_id, status="error", error_detail="agent process exited"
             )
@@ -216,7 +222,8 @@ def test_rollback_skips_a_new_runtime_that_exited_under_the_orphan_stamp(
     def runtime(session_id: str):
         nonlocal calls
         calls += 1
-        if calls == 2:  # recheck sees the new runtime, which then exits
+        # #1121 P2-2: 1 = admission top, 2 = ensure re-read, 3 = projection recheck.
+        if calls == 3:  # recheck sees the new runtime, which then exits
             rt.closed = True  # on_exit teardown: closed + unregistered
             return rt
         return None

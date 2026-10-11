@@ -1870,6 +1870,7 @@
     "server/app/studio_chat/registry.py": 59,
     "server/app/studio_chat/resume.py": 69,
     "server/app/studio_chat/resume_context.py": 60,
+    "server/app/studio_chat/resume_preflight.py": 17,
     "server/app/studio_chat/retention.py": 96,
     "server/app/studio_chat/runtime.py": 34,
     "server/app/studio_chat/send_resume.py": 48,

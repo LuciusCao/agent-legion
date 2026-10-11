@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.auth.sessions import hash_token
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import resume as resume_module
+from server.app.studio_chat.resume_preflight import require_resumable_agent
 from server.app.studio_chat.session_escalation import _TOKEN_DEAD_ERROR_DETAIL
 from server.app.studio_chat.token_keepalive import TOKEN_INVALIDATED_DETAIL
 
@@ -60,9 +61,12 @@ def run_token_alive(service: StudioChatService, runtime: SessionRuntime) -> bool
 
 def ensure_answerable_runtime(
     service: StudioChatService, session_id: str, workspace_id: str, user_id: str | None = None
-) -> tuple[dict[str, Any], SessionRuntime]:
-    """Return a (session, runtime) pair whose run token is live, resuming once
-    when the current one is dead. A session that raced into a non-resumable
+) -> tuple[dict[str, Any], SessionRuntime | None]:
+    """Re-read under the per-session resume lock (which waits out an in-flight
+    auto-resume, #1121 codex P2-2) and return a (session, runtime) pair whose
+    run token is live, resuming once when the current one is dead. A runtime
+    still absent after the wait is a real orphan — returned as None for the
+    caller's orphan projection. A session that raced into a non-resumable
     status falls through unchanged — the normal admission path owns its
     refusal. Raises (message never persisted) when the resume fails or cannot
     yield a live channel. The resume mints the fresh token for ``user_id``
@@ -77,14 +81,22 @@ def ensure_answerable_runtime(
             # restored the channel — ride it, never spawn a second one.
             return session, runtime
         if runtime is None:
-            # Torn down between the caller's snapshot and the lock: refuse;
-            # the retry's top-level orphan projection owns the error stamp.
-            raise ConflictError("Chat session is not running on this server")
+            # #1121 codex P2-2 (round 3): arriving here means an in-flight
+            # auto-resume held this lock (old runtime torn down, new one not
+            # yet registered) — the lock wait above already rode it out, so a
+            # still-absent runtime means a real orphan: hand back and let the
+            # caller's orphan projection own the stamp and the structured 409.
+            return session, None
         if session["status"] not in _AUTO_RESUMABLE_STATUSES:
             # Raced into a non-resumable shape (close, a turn claim, a manual
             # resume still spawning): hand back to the normal admission path,
             # whose fail-closed token check owns the refusal.
             return session, runtime
+        # #1121 codex P2-1 (round 3): everything fallible prepares BEFORE the
+        # first write — a resume that cannot start (agent deleted/unavailable)
+        # raises here, leaving the truthful idle row (old runtime still alive)
+        # instead of a misleading error stamp.
+        require_resumable_agent(service, session)
         # #1121 codex P1 — generational CAS claim before resuming: an idle row
         # is stamped error only while it is STILL idle (the guarded UPDATE's
         # status predicate is the claim; zero rows = a concurrent close/claim

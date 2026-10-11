@@ -261,9 +261,100 @@ def test_concurrent_sends_on_dead_token_resume_once(chat, monkeypatch) -> None:
     assert _user_texts(service, sid, workspace_id) == ["winner message", "loser message"]
 
 
-def test_auto_resume_failure_persists_nothing_and_stays_resumable(chat) -> None:
-    """Resume failure (agent unavailable): the message is NOT persisted, the
-    session lands on error — the manual 「继续对话」 entry stays reachable."""
+def test_concurrent_send_waits_out_the_registration_window(chat, monkeypatch) -> None:
+    """#1121 codex P2-2 (round 3): a send arriving while the winner's
+    auto-resume sits in the registration window (old runtime torn down, new
+    one not yet registered, row starting) must not hit the orphan 409 nor
+    spawn a second resume — it waits out the per-session lock and rides the
+    freshly registered runtime."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TEXT_SCRIPT)
+    sid = service.create_session(workspace_id, user_id, "fake-agent")["id"]
+    runtime = service.runtime(sid)
+    assert runtime is not None
+    _expire_token(service.db, runtime.token)
+
+    winner_in_spawn = threading.Event()
+    loser_at_lock = threading.Event()
+    winner_turn_done = threading.Event()
+    loser_holder: list[threading.Thread] = []
+
+    spawn_calls = {"n": 0}
+    real_spawn = resume_module.spawn_session_runtime
+
+    def parking_spawn(*args, **kwargs):
+        # The registration window: claim done (starting), teardown done
+        # (runtime registry empty) — the loser arrives exactly here.
+        spawn_calls["n"] += 1
+        winner_in_spawn.set()
+        assert loser_at_lock.wait(timeout=30)
+        return real_spawn(*args, **kwargs)
+
+    class _LoserSignalingLock:
+        def __init__(self, real: threading.Lock) -> None:
+            self._real = real
+
+        def __enter__(self):
+            loser_at_lock.set()
+            # Ride = the winner's turn has settled (a human turn in flight is
+            # a pre-existing 409-busy, unrelated to the window fix).
+            assert winner_turn_done.wait(timeout=30)
+            self._real.acquire()
+            return self
+
+        def __exit__(self, *args) -> None:
+            self._real.release()
+
+    real_lock = send_resume._resume_lock
+
+    def resume_lock(service_arg, session_id: str):
+        real = real_lock(service_arg, session_id)
+        if loser_holder and threading.current_thread() is loser_holder[0]:
+            return _LoserSignalingLock(real)
+        return real
+
+    monkeypatch.setattr(resume_module, "spawn_session_runtime", parking_spawn)
+    monkeypatch.setattr(send_resume, "_resume_lock", resume_lock)
+
+    results: dict[str, object] = {}
+    errors: dict[str, Exception] = {}
+
+    def send(name: str, text: str) -> None:
+        try:
+            results[name] = service.send_message(sid, workspace_id, text)
+        except Exception as exc:  # noqa: BLE001 - assertions live on the main thread
+            errors[name] = exc
+
+    winner = threading.Thread(target=send, args=("winner", "winner message"))
+    winner.start()
+    assert winner_in_spawn.wait(timeout=30)
+    # 注册窗口确认：runtime 已摘除、行是 starting——败者此刻进入。
+    assert service.runtime(sid) is None
+    assert service.get_session(sid)["status"] == "starting"
+    loser = threading.Thread(target=send, args=("loser", "loser message"))
+    loser_holder.append(loser)
+    loser.start()
+    # 等胜者的首轮落定（信号，非时长）再放行败者过锁。
+    _wait_for(lambda: len(_prompt_texts(_read_sink(script_path))) == 1 and _idle(service, sid))
+    winner_turn_done.set()
+    winner.join(timeout=30)
+    loser.join(timeout=30)
+    assert not winner.is_alive() and not loser.is_alive()
+
+    assert errors == {}
+    assert spawn_calls["n"] == 1  # 无二次 spawn
+    assert results["winner"]["content"]["text"] == "winner message"
+    assert results["loser"]["content"]["text"] == "loser message"
+    _wait_for(lambda: _idle(service, sid) and len(_prompt_texts(_read_sink(script_path))) == 2)
+    assert _user_texts(service, sid, workspace_id) == ["winner message", "loser message"]
+
+
+def test_auto_resume_preflight_failure_leaves_the_session_untouched(chat) -> None:
+    """#1121 codex P2-1 (round 3): an agent that cannot be spawned (command
+    gone) fails the resume PREFLIGHT — before any state write. The session
+    keeps its truthful idle row (the old runtime is still alive), the message
+    is not persisted, and fixing the registry + resending IS the manual
+    recovery entry (no misleading error stamp to resume out of)."""
     service, _bus, register, workspace_id, user_id = chat
     register(TEXT_SCRIPT)
     sid = service.create_session(workspace_id, user_id, "fake-agent")["id"]
@@ -291,8 +382,16 @@ def test_auto_resume_failure_persists_nothing_and_stays_resumable(chat) -> None:
 
     assert _user_texts(service, sid, workspace_id) == ["first question"]
     session = service.get_session(sid)
-    assert session["status"] == "error"
-    assert session["error_detail"]
+    assert session["status"] == "idle"  # 不被无谓写成 error：旧 runtime 还活着
+    assert not session["error_detail"]
+    assert service.runtime(sid) is runtime  # 旧 runtime 未被 teardown
+
+    # 手动入口 = 修好注册表后重发（自动路径重试即恢复）。
+    register(TEXT_SCRIPT)
+    message = service.send_message(sid, workspace_id, "never answered")
+    assert message["content"]["text"] == "never answered"
+    _wait_for(lambda: _idle(service, sid))
+    assert _user_texts(service, sid, workspace_id) == ["first question", "never answered"]
 
 
 def test_live_token_send_never_touches_the_resume_path(chat, monkeypatch) -> None:
