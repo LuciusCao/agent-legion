@@ -57,6 +57,11 @@ if [[ "$1" == "rev-parse" && "$2" == "--git-common-dir" ]]; then
   exit 0
 fi
 printf 'git %s\\n' "$*" >>"${STUB_LOG:-/dev/null}"
+# 真实 git worktree remove 会删掉目录；删除阶段的同名重建检查（#1084）
+# 以目录是否仍在判定注册条目是否有使用方。
+if [[ "$1" == "worktree" && "$2" == "remove" ]]; then
+  rm -rf "$3"
+fi
 exit 0
 """
 

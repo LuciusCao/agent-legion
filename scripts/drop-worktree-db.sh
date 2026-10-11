@@ -10,20 +10,24 @@
 #      不依赖调用者小心；
 #   3. 执行前打印每个目标库的 owner 与大小，交互确认（--yes 跳过）；
 #   4. 确认之后才取派生名锁（#1084，持锁等用户输入会卡住别的 init），
-#      持锁重新做撞名检查，只删确认时列出且仍存在的库。
+#      持锁重新做撞名检查，只删确认时列出且仍存在的库。删除前的检查把
+#      同名 worktree 本身也算冲突：本脚本只删「已移除」worktree 的库，同名
+#      worktree 仍（或被重建后又）注册着时库归它所有。
 #
-# 用法: scripts/drop-worktree-db.sh <worktree名> [--yes]
+# 用法: scripts/drop-worktree-db.sh <worktree名> [--yes | --list]
+#   --list：只列出存在的目标库后退出（0=没有、10=有待删），不确认、不取锁、
+#           不删除；clean-worktree.sh 在移除 worktree 之前用它展示删除计划。
 set -euo pipefail
 
 usage() {
-    echo "用法: $0 <worktree名> [--yes]" >&2
+    echo "用法: $0 <worktree名> [--yes | --list]" >&2
     exit 2
 }
 
 [[ $# -ge 1 && $# -le 2 ]] || usage
 WT="$1"
-ASSUME_YES="${2:-}"
-[[ -z "$ASSUME_YES" || "$ASSUME_YES" == "--yes" ]] || usage
+MODE="${2:-}"
+[[ -z "$MODE" || "$MODE" == "--yes" || "$MODE" == "--list" ]] || usage
 
 # 名字校验：只允许 worktree 目录名的合法字符集（含 '.'，#587：首字符必须
 # 是字母数字，'.'/'..' 进不来）；'.' 在派生时归并为 '_'，结果必然带
@@ -44,8 +48,13 @@ TEST_DB="$(worktree_derived_test_db "$WT")"
 # 库时拒绝删除——那是对方正在用的库。clean-worktree.sh 转调本脚本前已在
 # 移除 worktree 之前做过同一检测（同一共享函数），这里再查一次是独立调用
 # 时的兜底，结果一致、开销可忽略。这里是不持锁的预检（尽早拒绝、免得白
-# 问一次确认），真正的判定在下方取锁之后重做。
-worktree_require_unique_derived_names "$SCRIPT_DIR" "$WT" "删除派生库" || exit 1
+# 问一次确认），真正的判定在下方取锁之后重做。--list 是只读计划（clean
+# 在移除目标之前调用，目标自身此刻合法地注册着），不把同名条目算冲突。
+if [[ "$MODE" == "--list" ]]; then
+    worktree_require_unique_derived_names "$SCRIPT_DIR" "$WT" "列出派生库" || exit 1
+else
+    worktree_require_unique_derived_names "$SCRIPT_DIR" "$WT" "删除派生库" 1 || exit 1
+fi
 
 command -v psql >/dev/null 2>&1 || { echo "错误: 未找到 psql" >&2; exit 1; }
 
@@ -77,8 +86,11 @@ if [[ "$FOUND" -eq 0 ]]; then
     echo "没有需要删除的库。"
     exit 0
 fi
+if [[ "$MODE" == "--list" ]]; then
+    exit 10
+fi
 
-if [[ "$ASSUME_YES" != "--yes" ]]; then
+if [[ "$MODE" != "--yes" ]]; then
     reply=""
     read -r -p "确认删除以上 $FOUND 个库？输入 worktree 名 '$WT' 确认: " reply || true
     if [[ "$reply" != "$WT" ]]; then
@@ -88,11 +100,12 @@ if [[ "$ASSUME_YES" != "--yes" ]]; then
 fi
 
 # 护栏 0'（#1084）：确认后取派生名锁并重新检查撞名——确认期间可能有派生
-# 名相同的新 worktree 完成了 init（库名相同，删掉就是删它的库）。持锁后
+# 名相同（含同名重建）的新 worktree 完成了 init（库名相同，删掉就是删它
+# 的库）。持锁后
 # 并发的 init 只能在本次删除完成后再建库。锁在脚本退出（含报错/信号）时由
 # trap 释放；被 clean-worktree.sh 转调且父进程已持锁时直接复用。
 worktree_name_lock_acquire "$SCRIPT_DIR" "删除派生库 ${WT}" || exit 1
-worktree_require_unique_derived_names "$SCRIPT_DIR" "$WT" "删除派生库" || exit 1
+worktree_require_unique_derived_names "$SCRIPT_DIR" "$WT" "删除派生库" 1 || exit 1
 
 for db in $CONFIRMED; do
     if psql -d postgres -tAc "select 1 from pg_database where datname='$db'" 2>/dev/null | grep -q 1; then

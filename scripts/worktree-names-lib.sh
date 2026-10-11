@@ -36,10 +36,12 @@ worktree_derived_bucket() {
 # `<worktree名><TAB><撞名的资源名>`（一个 worktree 撞多个资源则多行）。
 # 只看目录仍存在的 worktree（目录已不在的 prunable 条目没有使用方）；跳过
 # 主仓库根（第一个条目，从不初始化派生资源）与同名条目（WT 自身）。
+# INCLUDE_SELF=1 时同名条目也算冲突（删除路径用：目标已移除后同名
+# worktree 又注册着 = 被重建的新实例，派生资源归它，#1084）。
 # `git worktree list` 失败返回 2（调用方必须当作「无法确认」拒绝继续）。
-#   用法: worktree_derived_name_conflicts REPO_DIR WT
+#   用法: worktree_derived_name_conflicts REPO_DIR WT [INCLUDE_SELF]
 worktree_derived_name_conflicts() {
-    local repo="$1" wt="$2" listing path other first=1
+    local repo="$1" wt="$2" include_self="${3:-0}" listing path other first=1
     local db test_db bucket
     listing="$(cd "$repo" && git worktree list --porcelain)" || return 2
     db="$(worktree_derived_db "$wt")"
@@ -52,7 +54,9 @@ worktree_derived_name_conflicts() {
         fi
         [[ -d "$path" ]] || continue
         other="$(basename "$path")"
-        [[ "$other" != "$wt" ]] || continue
+        if [[ "$other" == "$wt" && "$include_self" != "1" ]]; then
+            continue
+        fi
         if [[ "$(worktree_derived_db "$other")" == "$db" ]]; then
             printf '%s\t%s\n' "$other" "$db"
         fi
@@ -70,10 +74,12 @@ EOF
 
 # 存在派生名冲突（或无法列出 worktree）时向 stderr 打印原因并返回 1。
 # ACTION 是给人看的动作描述（如「建库/建 bucket」「删除派生库」）。
-#   用法: worktree_require_unique_derived_names REPO_DIR WT ACTION
+# INCLUDE_SELF=1（删除派生资源前的权威检查）：同名 worktree 仍/又注册着
+# 也拒绝，见 worktree_derived_name_conflicts。
+#   用法: worktree_require_unique_derived_names REPO_DIR WT ACTION [INCLUDE_SELF]
 worktree_require_unique_derived_names() {
-    local repo="$1" wt="$2" action="$3" conflicts rc=0
-    conflicts="$(worktree_derived_name_conflicts "$repo" "$wt")" || rc=$?
+    local repo="$1" wt="$2" action="$3" include_self="${4:-0}" conflicts rc=0
+    conflicts="$(worktree_derived_name_conflicts "$repo" "$wt" "$include_self")" || rc=$?
     if [[ "$rc" -ne 0 ]]; then
         echo "错误: 无法列出已注册 worktree（git worktree list 失败），无法确认派生名不冲突，拒绝${action}。" >&2
         return 1
@@ -87,6 +93,11 @@ worktree_require_unique_derived_names() {
     echo "      仅差在 '_' / '-' / '.' 或大小写的名字会共用同一个库/bucket。" >&2
     echo "      请先把其中一个 worktree 改为不冲突的名字（git worktree move 后在其中重跑" >&2
     echo "      scripts/init-worktree.sh 建它自己的库/bucket）再重试。" >&2
+    if [[ "$include_self" == "1" ]] \
+        && printf '%s\n' "$conflicts" | awk -F '\t' -v w="$wt" '$1 == w { found = 1 } END { exit !found }'; then
+        echo "      列出的 '${wt}' 是同名 worktree 本身：它仍（或已被重建后又）注册着，派生资源归它所有；" >&2
+        echo "      确认要删就先移除该 worktree（scripts/clean-worktree.sh ${wt}）。" >&2
+    fi
     return 1
 }
 
