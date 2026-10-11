@@ -94,6 +94,69 @@ describe('useInFlightSend', () => {
     rerender({ sessionKey: 's2' })
     expect(result.current.slowSend).toBe(false)
   })
+
+  it('frees the in-flight marker for the new session on resetKey change (#1238 codex 五轮)', () => {
+    // 旧会话直发永不落定：切会话后 inFlightRef 必须复位——否则新会话的
+    // 直发被 queue 误判为「旧请求仍占用」而仅入队，且旧请求落定只改 ref
+    // 不触发渲染，flush 又只认 busy 翻转沿，新消息滞留队列永不发出。
+    const send = vi
+      .fn()
+      .mockImplementation(() => new Promise<boolean>(() => {}))
+    const { result, rerender } = renderHook(
+      ({ sessionKey }: { sessionKey: string }) =>
+        useInFlightSend(send, sessionKey, 1000),
+      { initialProps: { sessionKey: 's1' } }
+    )
+    act(() => {
+      void result.current.sendInFlight('hi')
+    })
+    expect(result.current.inFlightRef.current).toBe(true)
+    rerender({ sessionKey: 's2' })
+    expect(result.current.inFlightRef.current).toBe(false)
+  })
+
+  it('a late settle from the old generation must not clobber the new one (#1238 codex 五轮)', async () => {
+    // 旧代次（s1）发送在途时切到 s2 并发出新发送：旧请求的迟到落定不得
+    // 清掉新代次的 in-flight 标记与慢发送定时器。
+    let settleOld: (ok: boolean) => void = () => {}
+    let settleNew: (ok: boolean) => void = () => {}
+    const send = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise<boolean>((resolve) => (settleOld = resolve))
+      )
+      .mockImplementationOnce(
+        () => new Promise<boolean>((resolve) => (settleNew = resolve))
+      )
+    const { result, rerender } = renderHook(
+      ({ sessionKey }: { sessionKey: string }) =>
+        useInFlightSend(send, sessionKey, 1000),
+      { initialProps: { sessionKey: 's1' } }
+    )
+    act(() => {
+      void result.current.sendInFlight('old')
+    })
+    rerender({ sessionKey: 's2' })
+    act(() => {
+      void result.current.sendInFlight('new')
+    })
+    expect(result.current.inFlightRef.current).toBe(true)
+    // 旧代次迟到落定：新代次状态不受影响。
+    await act(async () => {
+      settleOld(true)
+    })
+    expect(result.current.inFlightRef.current).toBe(true)
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(result.current.slowSend).toBe(true) // 新代次的慢定时器未被旧落定清掉
+    // 新代次落定：正常复位。
+    await act(async () => {
+      settleNew(true)
+    })
+    expect(result.current.inFlightRef.current).toBe(false)
+    expect(result.current.slowSend).toBe(false)
+  })
 })
 
 describe('restoreDraftText (#1121)', () => {

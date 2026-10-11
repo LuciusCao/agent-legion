@@ -522,4 +522,28 @@ describe('useStudioChatQueue', () => {
       vi.useRealTimers()
     }
   })
+
+  it('frees direct sends of the new session from the old session in-flight send (#1238 codex 五轮)', () => {
+    // 旧会话直发永不落定时切到空闲的新会话：新会话的提交必须直发而不是
+    // 入队——旧请求的落定只改 ref 不触发渲染，入队即滞留（flush 只认
+    // busy||blocked 翻转沿）。
+    const send = vi
+      .fn()
+      .mockImplementation(() => new Promise<boolean>(() => {}))
+    const { result, rerender } = renderQueue(send, {
+      busy: false,
+      sessionKey: 's1',
+    })
+    act(() => {
+      void result.current.submit('旧会话的消息')
+    })
+    expect(send).toHaveBeenCalledTimes(1)
+    rerender({ busy: false, sessionKey: 's2' })
+    act(() => {
+      void result.current.submit('新会话的消息')
+    })
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(send).toHaveBeenLastCalledWith('新会话的消息')
+    expect(result.current.queuedMessages).toEqual([])
+  })
 })
