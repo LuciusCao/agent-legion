@@ -175,9 +175,12 @@ def test_v82_database_gains_context_health_columns_via_init_db() -> None:
 @pytest.mark.fresh_schema
 def test_v94_database_gains_draft_message_kind_via_init_db() -> None:
     """v95 (#1123): the kind check widens with 'draft' (synthetic draft_saved
-    card events). The create-table check in the schema file keeps the pre-v95
-    list, so the migration's drop+add is the only widening path — restore the
-    old constraint, roll back the v95 record, and replay."""
+    card events). The v45 precedent applies to CHECK widenings that guard
+    existing rows: BOTH the schema file's replay DDL and the migration carry
+    the widened list (codex #1240 a87b0ea9e 轮 P1 — a replay with the narrow
+    list would validate existing draft rows and fail). Here the migration is
+    pinned as a widening path: restore the old constraint, roll back the v95
+    record, and replay."""
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("delete from schema_migrations where version >= 95")
         conn.execute(
@@ -215,3 +218,33 @@ def test_v94_database_gains_draft_message_kind_via_init_db() -> None:
         )
         row = conn.execute("select name from schema_migrations where version=%s", (95,)).fetchone()
     assert row is not None and row["name"] == "studio_chat_message_draft_kind"
+
+
+@pytest.mark.fresh_schema
+def test_v95_database_with_draft_rows_survives_upgrade_replay() -> None:
+    """codex #1240（a87b0ea9e 轮 P1）：基线重放与既有 draft 行共存。
+
+    init_db 的升级路径先整卷重放 postgres_schema.sql 再跑增量迁移
+    （schema.py）；若基线的 kind CHECK 仍停在 'thought'，重放段的
+    drop+add 会立刻拿旧约束校验既有行——v95 之后写过 draft 行的库在
+    升级到任何后续版本时直接死在重放阶段，根本走不到 v95 迁移。
+    模拟「已写 draft 行的 v95 → 下一版本」：抹掉 v95 记录（重放触发条件
+    与真实升级一致）后 init_db 必须成功且行保留。"""
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("insert into users(id, username) values ('u-legacy', 'legacy-user')")
+        conn.execute("insert into workspaces(id, name) values ('demo_workflow', 'legacy-ws')")
+        conn.execute(
+            "insert into studio_chat_sessions(id, workspace_id, user_id, agent_id)"
+            " values ('s-v95', 'demo_workflow', 'u-legacy', 'fake-agent')"
+        )
+        conn.execute(
+            "insert into studio_chat_messages(id, session_id, kind, role)"
+            " values ('m-draft', 's-v95', 'draft', 'agent')"
+        )
+        conn.execute("delete from schema_migrations where version >= 95")
+
+    init_db(TEST_DATABASE_URL)
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute("select kind from studio_chat_messages where id='m-draft'").fetchone()
+    assert row is not None and row["kind"] == "draft"
