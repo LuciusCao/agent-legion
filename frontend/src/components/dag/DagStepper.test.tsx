@@ -54,4 +54,16 @@ describe('DagStepper', () => {
     expect(bar?.className).toContain('pending')
     expect(bar?.className).not.toContain('stale')
   })
+
+  it('keeps the default 4px gap for small node counts', () => {
+    const { container } = render(<DagStepper nodes={makeNodes(8)} />)
+    expect((container.firstChild as HTMLElement).style.gap).toBe('4px')
+  })
+
+  it('shrinks the gap at 50+ nodes so every step stays visible (#1124)', () => {
+    const { container } = render(<DagStepper nodes={makeNodes(50)} />)
+    // 200px track：50 × 2px 段 + 49 × gap ≤ 200，gap 必须收缩到 2px
+    // （保持 4px 时 gap 总量 196px，段被压成 0 宽）。
+    expect((container.firstChild as HTMLElement).style.gap).toBe('2px')
+  })
 })
