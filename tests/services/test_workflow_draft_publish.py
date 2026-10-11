@@ -839,3 +839,31 @@ def test_runtime_only_publish_aborts_when_active_revision_moves(
     revisions = [r for r in queries.list_workflow_revisions(workspace["id"], "test_publish_flow")]
     v1 = next(r for r in revisions if r["version"] == 1)
     assert "glm-4.7" not in str(v1["definition_json"])
+
+
+def test_runtime_only_publish_needs_only_one_pool_connection(tmp_path, monkeypatch) -> None:
+    """#1226 三轮 codex P1: the lock-time active-revision revalidation must
+    ride the outer transaction's connection. A second pool checkout while the
+    outer one is held starves a size-1 pool (pool timeout / failure) — this
+    workspace's pool is forced to ``AGENT_LEGION_DB_POOL_MAX_SIZE=1`` via a
+    distinct DSN (pools key on (pid, dsn)), so any nested checkout inside the
+    runtime-only publish fails instead of silently passing on a big pool."""
+    monkeypatch.setenv("AGENT_LEGION_DB_POOL_MAX_SIZE", "1")
+    separator = "&" if "?" in TEST_DATABASE_URL else "?"
+    dsn = f"{TEST_DATABASE_URL}{separator}application_name=runtime_publish_pool1"
+    queries = JobQueries(dsn, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _seed_node_code(workspace["id"])
+    ok, _ = publish_workflow_draft(queries, workspace["id"], _DRAFT_YAML)
+    assert ok
+    runtime_edit = _DRAFT_YAML + "    execution:\n      model: glm-4.7\n"
+    queries.upsert_workspace_workflow_draft(workspace["id"], runtime_edit)
+
+    ok, errors = publish_workflow_draft(queries, workspace["id"], runtime_edit)
+
+    assert (ok, errors) == (True, [])
+    active = queries.get_active_workflow_revision(workspace["id"], "test_publish_flow")
+    assert active["version"] == 1
+    assert "glm-4.7" in str(active["definition_json"])
+    # The draft removal still happened (single-connection flow intact).
+    assert queries.get_workspace_workflow_draft(workspace["id"]) is None

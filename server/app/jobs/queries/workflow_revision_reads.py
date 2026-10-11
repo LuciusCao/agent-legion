@@ -19,7 +19,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from server.app.db.connection import DatabaseConnection
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
+
+_ACTIVE_REVISION_SQL = """
+select * from workflow_revisions
+where workspace_id=%s and status='active'
+order by version desc
+limit 1
+"""
 
 
 class WorkflowRevisionReadQueriesMixin(ConnectionQueriesMixin):
@@ -29,15 +37,21 @@ class WorkflowRevisionReadQueriesMixin(ConnectionQueriesMixin):
         self, workspace_id: str, workflow_key: str
     ) -> dict[str, Any] | None:
         with self._connect_read() as conn:
-            row = conn.execute(
-                """
-                select * from workflow_revisions
-                where workspace_id=%s and status='active'
-                order by version desc
-                limit 1
-                """,
-                (workspace_id,),
-            ).fetchone()
+            row = conn.execute(_ACTIVE_REVISION_SQL, (workspace_id,)).fetchone()
+        return dict(row) if row else None
+
+    def read_active_workflow_revision_on(
+        self, conn: DatabaseConnection, workspace_id: str, workflow_key: str
+    ) -> dict[str, Any] | None:
+        """Active-revision read on the caller's transaction connection.
+
+        The runtime-only in-place edit revalidates the active row under the
+        implementation-publication lock (#1226): the re-read must ride the
+        lock-holding connection — a fresh pool checkout there starves the
+        pool when it is exhausted (``AGENT_LEGION_DB_POOL_MAX_SIZE=1``).
+        Never commits on its own.
+        """
+        row = conn.execute(_ACTIVE_REVISION_SQL, (workspace_id,)).fetchone()
         return dict(row) if row else None
 
     def get_workflow_revision(

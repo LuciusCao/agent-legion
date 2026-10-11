@@ -99,16 +99,15 @@ def save_revision_runtime_or_publish(
         # #1226 二轮 codex P1：上面的 active 预读在锁外——并发结构发布在取锁
         # 前归档该行并创建新 active 时，往归档行上原地写会报成功而 live
         # revision 永远收不到这次 runtime 配置（编辑丢失）。锁内重读 active
-        # 重新校验判定状态：行已易主即中止（409 族，调用方对新 active 重试
-        # 即收敛），草稿删行 hook 也随事务回滚不执行。不做自动重分类：基于
-        # 新 active 重走结构路径会把本次 runtime 编辑静默升级为全量结构
-        # 发布，覆盖并发方的结构变更（LWW 全文档语义），比报冲突更危险。
-        current_active = job_db.get_active_workflow_revision(workspace_id, definition.key)
+        # 重新校验判定状态（三轮 P1：重读走持锁的同一事务连接，不再二次
+        # checkout——池打满/池容量 1 时嵌套 checkout 会饿死整个发布）：
+        # 行已易主即中止（409 族，调用方对新 active 重试即收敛），草稿删行
+        # hook 也随事务回滚不执行。不做自动重分类：基于新 active 重走结构
+        # 路径会把本次 runtime 编辑静默升级为全量结构发布，覆盖并发方的
+        # 结构变更（LWW 全文档语义），比报冲突更危险。
+        current_active = job_db.read_active_workflow_revision_on(conn, workspace_id, definition.key)
         if current_active is None or current_active["id"] != active["id"]:
-            raise ConflictError(
-                "The active workflow revision changed while publishing"
-                " (a concurrent publish landed) — retry the publish"
-            )
+            raise ConflictError("Active workflow revision moved during publish; retry")
         row = conn.execute(
             "update workflow_revisions set definition_json=%s, definition_hash=%s"
             " where id=%s returning *",
