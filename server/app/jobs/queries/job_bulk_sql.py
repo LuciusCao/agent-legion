@@ -9,11 +9,23 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-# Chunk = one committed transaction (lock probe + insert + node rows); a
-# mid-run failure leaves whole committed chunks behind (see create_jobs_bulk).
-# 1000 = the pre-chunking statement batch: each chunk's unnest INSERT still
-# fires the v77 trigger once (#448).
+# Statement batch for bulk IN reads / unnest INSERTs (#448/#712). 1000 = the
+# pre-chunking statement batch. create_jobs_bulk commits in smaller
+# CREATE_CHUNK_ROWS transactions (below); a mid-run failure leaves whole
+# committed chunks behind (see create_jobs_bulk).
 CHUNK_ROWS = 1000
+
+# Commit chunk of create_jobs_bulk (#1243 codex R2). Each creating chunk holds
+# one job-mutation advisory xact lock per job until COMMIT (#1083), and xact
+# locks cannot be released early, so the lock batch IS the commit chunk.
+# Advisory locks never take the per-backend fast path: they live in the shared
+# lock table, sized max_locks_per_transaction × (max_connections +
+# max_prepared_transactions) = 64 × 100 = 6400 entries at PostgreSQL defaults
+# and shared by every session. 250 keeps one full chunk under 4% of that
+# (≈25 concurrent full chunks before the table alone is exhausted, vs ≈6 at
+# 1000); the cost is one INSERT statement / trigger firing per 250 rows
+# instead of per 1000 — still set-based (#448).
+CREATE_CHUNK_ROWS = 250
 
 
 def id_chunks(ids: Iterable[Any]) -> Iterator[list[str]]:
@@ -104,6 +116,13 @@ def insert_job_nodes_batched(conn: Any, pairs: list[tuple[str, str]]) -> None:
         conn.execute(JOB_NODES_BULK_INSERT_SQL, columns)
 
 
+LOCK_JOB_MUTATIONS_SQL = """
+select pg_advisory_xact_lock(hashtext('job-mutation:' || t.id))
+from unnest(%s::text[]) with ordinality as t(id, ord)
+order by t.ord
+"""
+
+
 def lock_job_mutations_sorted(conn: Any, job_ids: Iterable[str]) -> None:
     """Take ``job-mutation:<id>`` for every id, sorted, held to COMMIT (#1083).
 
@@ -123,11 +142,18 @@ def lock_job_mutations_sorted(conn: Any, job_ids: Iterable[str]) -> None:
     Precondition: no id may name an existing job of ANOTHER workspace
     (underscore-concatenated ids can collide across workspaces); bulk callers
     reject such identities first (``verify_chunk_identities``, #1243).
-    One statement per id (not a set-returning SELECT): acquisition order must
-    not depend on the planner's projection order.
+
+    One round trip (#1243 codex R2): ``LOCK_JOB_MUTATIONS_SQL`` over the
+    Python-sorted array. Acquisition follows ``ord``: the ordinality scan
+    already emits ``ord`` order, so the planner elides the Sort and evaluates
+    the volatile lock per scanned row; if a Sort is ever planned, volatile
+    target-list expressions are computed ABOVE it (``make_sort_input_target``,
+    PostgreSQL ≥ 9.6). Pinned by an EXPLAIN test (no Sort above the node that
+    evaluates the lock) and by the pg_locks ordering test.
     """
-    for job_id in sorted(set(job_ids)):
-        conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"job-mutation:{job_id}",))
+    ordered = sorted(set(job_ids))
+    if ordered:
+        conn.execute(LOCK_JOB_MUTATIONS_SQL, (ordered,)).fetchall()
 
 
 def lock_rows_for_key_share(

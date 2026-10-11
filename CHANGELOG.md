@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
-- job 删除清理与同源重建的竞态窗口（issue #1083，#1065 follow-up）：`create_job` / `create_jobs_bulk` 此前不取 `job-mutation:<id>` 锁且先 mkdir 再 upsert，同源 job 若在清理「锁下复核行不存在」与「rename 入 `.trash`」之间重建，其采用的目录会被整体移走；现在创建路径在 mkdir / upsert 前取同一把锁并持到提交（bulk 每个 chunk 按 job_id 升序取锁，即全局批序在单 workspace 上的形态，先于 material/bundle 行锁；取锁前先拒绝撞上其他 workspace 现存 job 的 id 碰撞，保住全局锁序），bulk 的「已存在则不建目录」判定改在锁下按 chunk 重读，不再用无锁的整次预检。
+- job 删除清理与同源重建的竞态窗口（issue #1083，#1065 follow-up）：`create_job` / `create_jobs_bulk` 此前不取 `job-mutation:<id>` 锁且先 mkdir 再 upsert，同源 job 若在清理「锁下复核行不存在」与「rename 入 `.trash`」之间重建，其采用的目录会被整体移走；现在创建路径在 mkdir / upsert 前取同一把锁并持到提交（bulk 每个 chunk 用一条集合语句按 job_id 升序取完锁，chunk 提交粒度降为 250 行以约束共享锁表占用，即全局批序在单 workspace 上的形态，先于 material/bundle 行锁；取锁前先拒绝撞上其他 workspace 现存 job 的 id 碰撞，保住全局锁序），bulk 的「已存在则不建目录」判定改在锁下按 chunk 重读，不再用无锁的整次预检。
 
 ## [0.7.19] - 2026-10-11
 

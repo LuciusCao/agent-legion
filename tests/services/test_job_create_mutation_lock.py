@@ -217,6 +217,34 @@ def test_bulk_create_rejects_cross_workspace_id_collision_before_locking(
     assert not any((tmp_path / "jobs").rglob(other_id))
 
 
+def _lock_under_sort(node: dict[str, Any], sort_above: bool = False) -> bool:
+    """True if some plan node evaluating pg_advisory_xact_lock has a Sort ancestor."""
+    evaluates = any("pg_advisory_xact_lock" in out for out in node.get("Output", []))
+    if evaluates and sort_above:
+        return True
+    below = sort_above or node.get("Node Type") == "Sort"
+    return any(_lock_under_sort(child, below) for child in node.get("Plans", []))
+
+
+def test_set_based_lock_statement_never_sorts_after_acquiring(job_db: JobQueries) -> None:
+    """#1243 codex R2：一条集合语句取完全部锁，顺序必须是数组（已排序）顺序。
+
+    规划器要么因 ordinality 已有序而省掉 Sort、按扫描顺序逐行求值，要么把
+    volatile 目标列推到 Sort 之上求值；任何「先取锁再排序」的计划都会让取锁
+    顺序退化为扫描顺序以外的东西——在此钉住。真实取锁顺序另由下方 pg_locks
+    用例覆盖。"""
+    from server.app.jobs.queries.job_bulk_sql import LOCK_JOB_MUTATIONS_SQL
+
+    with job_db.connect() as conn:
+        plan = conn.execute(
+            "explain (verbose, format json) " + LOCK_JOB_MUTATIONS_SQL, (["c", "a", "b"],)
+        ).fetchone()
+    assert plan is not None
+    root = next(iter(plan.values()))[0]["Plan"]
+    assert "pg_advisory_xact_lock" in str(root)
+    assert not _lock_under_sort(root), root
+
+
 def test_bulk_create_takes_job_mutation_locks_in_job_id_order(
     job_db: JobQueries, tmp_path: Path
 ) -> None:
