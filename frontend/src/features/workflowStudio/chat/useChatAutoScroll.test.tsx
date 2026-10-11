@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatAutoScroll } from './useChatAutoScroll'
+import { useChatPrependAnchor } from './useChatPrependAnchor'
 import { StudioChatWindow } from './StudioChatWindow'
 import type { ChatMessage } from './studioChatMessages'
 
@@ -26,14 +27,11 @@ function batch(prefix: string, from: number, to: number): ChatMessage[] {
  * （scrollTop 在 jsdom 原生可读写在实例上）。 */
 function stubMetrics(
   el: HTMLElement,
-  metrics: { scrollHeight: number | (() => number); clientHeight: number }
+  metrics: { scrollHeight: number; clientHeight: number }
 ) {
   Object.defineProperty(el, 'scrollHeight', {
     configurable: true,
-    get:
-      typeof metrics.scrollHeight === 'function'
-        ? metrics.scrollHeight
-        : () => metrics.scrollHeight,
+    get: () => metrics.scrollHeight,
   })
   Object.defineProperty(el, 'clientHeight', {
     configurable: true,
@@ -41,15 +39,51 @@ function stubMetrics(
   })
 }
 
+function stubRect(el: Element, rect: { top: number; bottom: number }) {
+  Object.defineProperty(el, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({
+      width: 600,
+      height: rect.bottom - rect.top,
+      x: 0,
+      y: rect.top,
+      top: rect.top,
+      left: 0,
+      right: 600,
+      bottom: rect.bottom,
+      toJSON: () => ({}),
+    }),
+  })
+}
+
+/** ResizeObserver 桩：捕获实例供测试手动触发回调（jsdom 无 RO）。 */
+class ResizeObserverStub {
+  static instances: ResizeObserverStub[] = []
+  private readonly callback: ResizeObserverCallback
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback
+    ResizeObserverStub.instances.push(this)
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  fire() {
+    this.callback([], this as unknown as ResizeObserver)
+  }
+}
+
+// 与生产组合一致（StudioChatMessageList）：useChatPrependAnchor 产出到顶
+// 回调（锚点捕获 + 触发加载），交给 useChatAutoScroll 的滚动处理器。
 function Harness({
   messages,
   virtual = false,
-  onNearTop,
+  onLoadOlder,
 }: {
   messages: ChatMessage[]
   virtual?: boolean
-  onNearTop?: () => void
+  onLoadOlder?: () => void
 }) {
+  const onNearTop = useChatPrependAnchor(messages, onLoadOlder ?? (() => {}))
   const { bottomRef, listRef, handleScroll, pinnedToBottomRef } =
     useChatAutoScroll(messages, onNearTop)
   return (
@@ -69,8 +103,10 @@ function Harness({
   )
 }
 
-describe('useChatAutoScroll 历史翻页触发与锚定补偿（#1120 PR-4）', () => {
+describe('useChatAutoScroll + useChatPrependAnchor（#1120 PR-4 / #1237）', () => {
   beforeEach(() => {
+    ResizeObserverStub.instances = []
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub)
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       width: 600,
       height: 100,
@@ -85,118 +121,122 @@ describe('useChatAutoScroll 历史翻页触发与锚定补偿（#1120 PR-4）', 
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(100)
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(600)
   })
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
 
-  it('滚动到顶（<80px）触发 onNearTop；远离顶部不触发', () => {
-    const onNearTop = vi.fn()
-    render(<Harness messages={batch('m', 1, 10)} onNearTop={onNearTop} />)
+  it('滚动到顶（<80px）触发加载回调；远离顶部不触发', () => {
+    const onLoadOlder = vi.fn()
+    render(<Harness messages={batch('m', 1, 10)} onLoadOlder={onLoadOlder} />)
     const el = screen.getByTestId('list')
     stubMetrics(el, { scrollHeight: 1000, clientHeight: 400 })
 
     el.scrollTop = 200
     fireEvent.scroll(el)
-    expect(onNearTop).not.toHaveBeenCalled()
+    expect(onLoadOlder).not.toHaveBeenCalled()
 
     el.scrollTop = 50
     fireEvent.scroll(el)
-    expect(onNearTop).toHaveBeenCalledTimes(1)
+    expect(onLoadOlder).toHaveBeenCalledTimes(1)
   })
 
-  it('prepend 后按 scrollHeight 增量补偿 scrollTop（非虚拟态）', () => {
+  it('prepend 按旧首行元素的实测位移复原视口；触发→响应窗口内的测量修正不混入（#1237 codex P2-1）', () => {
     const initial = batch('m', 1, 10)
-    const view = render(<Harness messages={initial} />)
+    const view = render(<Harness messages={initial} onLoadOlder={() => {}} />)
     const el = screen.getByTestId('list')
     stubMetrics(el, { scrollHeight: 1000, clientHeight: 400 })
     el.scrollTop = 50
+    // 触发分页：捕获首行元素锚点（全局 mock 下各行 rect top=0）。
     fireEvent.scroll(el)
-    // 同内容新数组触发一次 layout effect：快照 prepend 前的 scrollHeight。
-    view.rerender(<Harness messages={[...initial]} />)
+    const anchorRow = el.children[0]
 
-    // prepend 一页旧消息：容器内容增高 600（模拟渲染增长）。
-    stubMetrics(el, { scrollHeight: 1600, clientHeight: 400 })
-    view.rerender(<Harness messages={[...batch('o', -19, 0), ...initial]} />)
+    // 触发→响应窗口内的内容高度变化（虚拟器测量修正/卡片展开）：
+    // scrollHeight 1000→1300——不改变 messages、不触发滚动事件。
+    stubMetrics(el, { scrollHeight: 1300, clientHeight: 400 })
 
-    // 视口不跳：scrollTop 补偿 = 50 + (1600 - 1000)。
+    // prepend 一页：锚定行被下推 600（keyed 重挂载保持同一 DOM 节点）。
+    stubRect(anchorRow, { top: 600, bottom: 700 })
+    stubMetrics(el, { scrollHeight: 1900, clientHeight: 400 })
+    view.rerender(
+      <Harness
+        messages={[...batch('o', -19, 0), ...initial]}
+        onLoadOlder={() => {}}
+      />
+    )
+
+    // 视口不跳：补偿 = 锚定行实测位移 600；若按 scrollHeight 差分会把
+    // 300 修正量混入（900，视口过冲）。
     expect(el.scrollTop).toBe(650)
   })
 
   it('尾部追加不补偿（scrollTop 保持原位）', () => {
     const initial = batch('m', 1, 10)
-    const view = render(<Harness messages={initial} />)
+    const view = render(<Harness messages={initial} onLoadOlder={() => {}} />)
     const el = screen.getByTestId('list')
     stubMetrics(el, { scrollHeight: 1000, clientHeight: 400 })
     el.scrollTop = 50
     fireEvent.scroll(el)
-    view.rerender(<Harness messages={[...initial]} />)
+    view.rerender(<Harness messages={[...initial]} onLoadOlder={() => {}} />)
 
     stubMetrics(el, { scrollHeight: 1200, clientHeight: 400 })
-    view.rerender(<Harness messages={[...initial, ...batch('n', 11, 12)]} />)
+    view.rerender(
+      <Harness
+        messages={[...initial, ...batch('n', 11, 12)]}
+        onLoadOlder={() => {}}
+      />
+    )
     expect(el.scrollTop).toBe(50)
   })
 
   it('整体替换（旧首条已不在列表，如切换会话）不补偿', () => {
     const initial = batch('m', 1, 10)
-    const view = render(<Harness messages={initial} />)
+    const view = render(<Harness messages={initial} onLoadOlder={() => {}} />)
     const el = screen.getByTestId('list')
     stubMetrics(el, { scrollHeight: 1000, clientHeight: 400 })
     el.scrollTop = 50
     fireEvent.scroll(el)
-    view.rerender(<Harness messages={[...initial]} />)
+    view.rerender(<Harness messages={[...initial]} onLoadOlder={() => {}} />)
 
     stubMetrics(el, { scrollHeight: 3000, clientHeight: 400 })
-    view.rerender(<Harness messages={batch('x', 100, 109)} />)
+    view.rerender(
+      <Harness messages={batch('x', 100, 109)} onLoadOlder={() => {}} />
+    )
     expect(el.scrollTop).toBe(50)
   })
 
-  it('虚拟滚动态（>80 条）prepend 同样锚定', () => {
-    // 100 条已在虚拟态 → prepend 100 条后 200 条。scrollHeight 固定注入
-    // （jsdom mock 下虚拟器的测量修正会在 commit 后漂移，不可作确定断言；
-    // 补偿机制按容器 scrollHeight 增量工作，两态同一代码路径——本用例的
-    // 增量断言与「确实处于虚拟态」的窗口化断言）。
+  it('虚拟态（>80 条）锚定行被裁出挂载窗口时回退高度差分，基线由 ResizeObserver 持续同步（#1237 codex P2-1/P2-2）', () => {
+    // 100 条已在虚拟态 → prepend 100 条后 200 条；scrollTop=50 的挂载窗口
+    // 只含新页行，旧首行（m101）被裁出 → 元素锚定不可用，回退差分。
     const initial = batch('m', 101, 200)
-    const view = render(<Harness messages={initial} virtual />)
+    const view = render(
+      <Harness messages={initial} virtual onLoadOlder={() => {}} />
+    )
     const el = screen.getByTestId('list')
     stubMetrics(el, { scrollHeight: 10990, clientHeight: 400 })
-    el.scrollTop = 200
-    fireEvent.scroll(el)
-    view.rerender(<Harness messages={[...initial]} virtual />)
-
-    stubMetrics(el, { scrollHeight: 21990, clientHeight: 400 })
-    view.rerender(
-      <Harness messages={[...batch('o', 1, 100), ...initial]} virtual />
-    )
-    expect(el.scrollTop).toBe(200 + 11000)
-    // 确实处于虚拟态：未挂载全部行。
-    expect(el.querySelectorAll('[data-index]').length).toBeLessThan(200)
-  })
-
-  it('补偿基线取触发分页时的当前高度（虚拟器测量修正不混入增量，#1237 codex P2-2）', () => {
-    // 虚拟列表的 measureElement/ResizeObserver 修正不改变 messages，只在
-    // 消息变化时快照的基线会滞留初始估算值，把累计修正混进 prepend 增量。
-    const initial = batch('m', 1, 10)
-    const onNearTop = () => {}
-    const view = render(<Harness messages={initial} onNearTop={onNearTop} />)
-    const el = screen.getByTestId('list')
-    stubMetrics(el, { scrollHeight: 1000, clientHeight: 400 })
     el.scrollTop = 50
+    // 触发分页：差分基线 10990 + 捕获首行锚点。
     fireEvent.scroll(el)
-    view.rerender(<Harness messages={[...initial]} onNearTop={onNearTop} />)
+    expect(ResizeObserverStub.instances.length).toBeGreaterThan(0)
 
-    // 测量修正把内容高度从 1000 改到 1300（messages 未变、无 effect 重跑），
-    // 用户继续滚动并再次到顶触发分页——基线必须取此刻的 1300。
-    stubMetrics(el, { scrollHeight: 1300, clientHeight: 400 })
-    el.scrollTop = 40
-    fireEvent.scroll(el)
+    // 触发→响应窗口内的测量修正：10990→11590；RO 回调把基线同步到
+    // 11590——修正量不混入随后的 prepend 补偿。
+    stubMetrics(el, { scrollHeight: 11590, clientHeight: 400 })
+    act(() => {
+      for (const observer of ResizeObserverStub.instances) observer.fire()
+    })
 
-    // prepend 一页：内容再增高 600。补偿 = 40 + 600；滞留基线会算出
-    // 40 + 900（混入 300 修正量，视口过冲）。
-    stubMetrics(el, { scrollHeight: 1900, clientHeight: 400 })
+    // prepend 100 行（虚拟器总高 +11000）。
+    stubMetrics(el, { scrollHeight: 22590, clientHeight: 400 })
     view.rerender(
       <Harness
-        messages={[...batch('o', -19, 0), ...initial]}
-        onNearTop={onNearTop}
+        messages={[...batch('o', 1, 100), ...initial]}
+        virtual
+        onLoadOlder={() => {}}
       />
     )
-    expect(el.scrollTop).toBe(640)
+    expect(el.scrollTop).toBe(50 + 11000)
+    // 确实处于虚拟态：未挂载全部行。
+    expect(el.querySelectorAll('[data-index]').length).toBeLessThan(200)
   })
 })

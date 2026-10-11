@@ -383,10 +383,12 @@ describe('useStudioChat 历史向上翻页（#1120 PR-4）', () => {
   })
 })
 
-// #1237 codex P2-1 族：异步加载回调的陈旧响应拒绝必须到「会话选择代次」级——
+// #1237 codex P2 族：① 异步加载回调的陈旧响应拒绝必须到「会话选择代次」级——
 // A→B→A 切换后 sessionId 守卫失效（重新选中的还是 A），早先代次挂起的响应
-// 不得合入消息、不得闩锁翻页、不得覆盖会话快照。
-describe('会话选择代次守卫（#1237 codex P2-1 族）', () => {
+// 不得合入消息、不得闩锁翻页、不得覆盖会话快照；② 共享加载锁/瞬态标志的
+// finally 释放必须绑定持有者（请求 token / 代次），旧请求的 finally 不得
+// 清掉新请求的锁。
+describe('会话选择代次与锁持有者守卫（#1237 codex P2 族）', () => {
   const originalEventSource = globalThis.EventSource
   let testClient = createTestQueryClient()
   const wrapper = ({ children }: { children: ReactNode }) =>
@@ -615,5 +617,119 @@ describe('会话选择代次守卫（#1237 codex P2-1 族）', () => {
       resolveFetch(sessionRecord({ id: 's1', status: 'running' }))
     })
     expect(result.current.session).toBeNull()
+  })
+
+  it('加载中锁绑定请求 token：A 的迟到 finally 不释放 B 的在途锁（#1237 codex P2-2）', async () => {
+    const resolvers: ((page: HistoryPage) => void)[] = []
+    mockApi.fetchStudioChatHistoryPage.mockImplementation(
+      () =>
+        new Promise<HistoryPage>((resolve) => {
+          resolvers.push(resolve)
+        })
+    )
+    const { result } = await renderS1()
+
+    // s1 的分页请求挂起（token1）。
+    act(() => {
+      void result.current.loadOlderHistory()
+    })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(1)
+    )
+
+    // 切到 s2（切换 effect 复位锁）→ s2 的分页请求挂起（token2）。
+    await act(async () => {
+      await result.current.selectSession('s2')
+    })
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['n500'])
+    )
+    act(() => {
+      void result.current.loadOlderHistory()
+    })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(2)
+    )
+    expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenLastCalledWith(
+      'ws1',
+      's2',
+      500
+    )
+
+    // s1 的迟到响应落地：代次守卫拒绝合入；其 finally 不得释放 s2 的
+    // 在途锁——否则下一次到顶会重复请求同一游标页。
+    await act(async () => {
+      resolvers[0]({ messages: [], hasMore: true })
+    })
+    let second: Promise<boolean> | undefined
+    act(() => {
+      second = result.current.loadOlderHistory()
+    })
+    // 先断言不重复发请求（旧实现这里会发起第三次的挂起请求），再收结果。
+    expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(2)
+    let secondResult: boolean | undefined
+    await act(async () => {
+      secondResult = await second
+    })
+    expect(secondResult).toBe(false)
+
+    // s2 的响应落地释放自己的锁：hasMore=false 闩锁到顶。
+    await act(async () => {
+      resolvers[1]({
+        messages: [textMessage('n400', 400, 's2 older')],
+        hasMore: false,
+      })
+    })
+    expect(result.current.messages[0]?.id).toBe('n400')
+    expect(result.current.hasMoreHistory).toBe(false)
+  })
+
+  it('startSession：workspace 往返后早先创建的 finally 不释放新一轮在途创建的 starting（#1237 codex P2-2 族）', async () => {
+    mockApi.fetchStudioChatSessions.mockImplementation((ws: string) =>
+      Promise.resolve(ws === 'ws1' ? [sessionRecord()] : [])
+    )
+    const resolvers: ((record: StudioChatSessionRecord) => void)[] = []
+    mockApi.createStudioChatSession.mockImplementation(
+      () =>
+        new Promise<StudioChatSessionRecord>((resolve) => {
+          resolvers.push(resolve)
+        })
+    )
+    const view = renderHook(({ ws }: { ws: string }) => useStudioChat(ws), {
+      wrapper,
+      initialProps: { ws: 'ws1' },
+    })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatSessions).toHaveBeenCalled()
+    )
+
+    // ws1 的创建 #1 挂起。
+    act(() => {
+      void view.result.current.startSession('kimi')
+    })
+    await waitFor(() => expect(view.result.current.starting).toBe(true))
+
+    // ws1→ws2→ws1（复位瞬态）后发起创建 #2（仍在途）。
+    view.rerender({ ws: 'ws2' })
+    await waitFor(() => expect(view.result.current.starting).toBe(false))
+    view.rerender({ ws: 'ws1' })
+    act(() => {
+      void view.result.current.startSession('kimi')
+    })
+    await waitFor(() => expect(view.result.current.starting).toBe(true))
+    expect(mockApi.createStudioChatSession).toHaveBeenCalledTimes(2)
+
+    // #1 的迟到响应：内容守卫丢弃，其 finally 不得清掉 #2 的 starting。
+    await act(async () => {
+      resolvers[0](sessionRecord({ id: 's-new-1' }))
+    })
+    expect(view.result.current.starting).toBe(true)
+
+    // #2 落地：自己的 finally 正常释放。
+    await act(async () => {
+      resolvers[1](sessionRecord({ id: 's-new-2' }))
+    })
+    expect(view.result.current.starting).toBe(false)
+    expect(view.result.current.activeSessionId).toBe('s-new-2')
   })
 })

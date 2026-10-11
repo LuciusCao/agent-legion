@@ -50,6 +50,8 @@ export function useStudioChat(workspaceId: string | undefined) {
   // （重新选中的还是 A），异步加载回调须同时校验代次——每次选择变化
   // （含 workspace 切换清空）在入口 effect 递增。
   const sessionGenerationRef = useRef(0)
+  // 创建请求 token（#1237 codex P2-2 族）：starting 的 finally 释放只认持有者。
+  const startTokenRef = useRef(0)
   // 当前 workspace 的 ref 快照（codex P2 复审轮 #796）：startSession 等异步
   // 回调落地前切换 workspace 时，旧 workspace 的迟到响应不得写入本 hook
   // 的 state（本 hook 实例被 react-router 复用，不被重挂）。ref 更新合入
@@ -204,6 +206,7 @@ export function useStudioChat(workspaceId: string | undefined) {
   // 拉取失败）不采。
   async function startSession(agentId: string): Promise<boolean | undefined> {
     if (!workspaceId || starting) return
+    const token = ++startTokenRef.current
     setStarting(true)
     try {
       const created = await createStudioChatSession(workspaceId, agentId)
@@ -227,7 +230,10 @@ export function useStudioChat(workspaceId: string | undefined) {
         setActionError(error instanceof Error ? error.message : '操作失败')
       return false
     } finally {
-      if (workspaceIdRef.current === workspaceId) setStarting(false)
+      // 只许持有 token 的创建释放 starting（#1237 codex P2-2 族）：
+      // workspace 往返后早先创建的 finally 不得清掉新一轮在途创建。
+      const owns = startTokenRef.current === token
+      if (owns && workspaceIdRef.current === workspaceId) setStarting(false)
     }
   }
 
