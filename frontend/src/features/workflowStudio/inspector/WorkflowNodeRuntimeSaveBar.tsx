@@ -32,7 +32,9 @@ function saveStatusText(save: DraftSaveState): string {
  * - 「应用到运行」只在全画布改动仅涉及 execution（compare.creates_revision
  *   === false）时可用：走顶栏同一发布确认框（原地更新 active revision 的
  *   运行配置，不产生新版本）。画布另有结构改动时禁用并说明——面板动作
- *   永远不会把用户没打算发布的结构改动一起发布。
+ *   永远不会把用户没打算发布的结构改动一起发布。本节点改了 runtime
+ *   （#1114，compare 字段 'runtime'）时不提供该按钮：runtime 属结构字段，
+ *   与发布路径同一判定，必出新版本。
  * 脱离 Studio Provider 渲染（Section 级测试）或只读查看时不渲染。
  */
 export function WorkflowNodeRuntimeSaveBar(props: {
@@ -45,14 +47,15 @@ export function WorkflowNodeRuntimeSaveBar(props: {
   const blocked = save.conflict === true || save.loadError === true
   const canSave =
     !blocked && (save.status === 'pending' || save.status === 'error')
-  const executionChanged = Boolean(
-    studio.compareSummary?.nodeChanges.some(
-      (change) =>
-        change.nodeKey === props.nodeKey &&
-        change.type === 'modified' &&
-        change.fields.includes('execution')
-    )
+  const nodeChange = studio.compareSummary?.nodeChanges.find(
+    (change) => change.nodeKey === props.nodeKey && change.type === 'modified'
   )
+  // #1114：本节点有效 runtime 变了（服务端 compare 单独标 'runtime'）属结构
+  // 改动——发布路径必出新 revision，没有可原地应用的部分，面板不提供
+  // 「应用到运行」，只说明需发布新版本。
+  const runtimeChanged = Boolean(nodeChange?.fields.includes('runtime'))
+  const executionChanged =
+    !runtimeChanged && Boolean(nodeChange?.fields.includes('execution'))
   const runtimeOnly = studio.compareSummary?.createsRevision === false
   const applyReason = !runtimeOnly
     ? '画布还有结构改动（节点/连线/声明），需在顶栏「发布」新版本后生效'
@@ -99,6 +102,11 @@ export function WorkflowNodeRuntimeSaveBar(props: {
           {runtimeOnly
             ? '运行配置已随草稿保存；「应用到运行」后对新执行生效，不产生新版本。'
             : '草稿另含结构改动：运行配置随草稿保存，需发布新版本后才生效。'}
+        </div>
+      ) : null}
+      {runtimeChanged ? (
+        <div className={styles.saveHint}>
+          切换 runtime 属结构改动：随草稿保存，需在顶栏「发布」新版本后生效。
         </div>
       ) : null}
     </div>

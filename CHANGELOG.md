@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Studio 草稿对比把仅改 `execution.runtime` 的草稿误判为 `creates_revision=false`（issue #1114，#1104 follow-up）：此前对比侧按自身字段名清单判定、把一切 `execution` 变更当作可原地应用，Inspector 保存条据此提供「应用到运行 / 不产生新版本」，而发布路径把节点有效 runtime 计入结构、实际发布新 revision。现两侧共用同一判定 `revision_structurally_changed`（`workflow_revision_change.py`，`structural_payload` 从 `workflow_revision_runtime.py` 迁入）：节点级或顶层默认 runtime 导致任一节点有效 runtime 变化 → `creates_revision=true`，对比结果在该节点变更字段里标 `runtime`，保存条对其不提供「应用到运行」并提示需发布新版本；仅改 provider / model / thinking / prompt / prompt_mode（含顶层同类默认）仍可原地应用。
+
 ## [0.7.19] - 2026-10-11
 
 Worker 结果上报协议 v2（元数据移出 HTTP 头改走归档 `result.json`，**部署硬约束 Host 先升**）+ 执行面系统性收口：节点级并发限制覆盖远程 code Worker、`latest` 绑定 skill 的升级不再误重跑、events.jsonl 工具输出全链脱敏（P1 安全）、worker 上报心跳停摆/401/降级归档族收口；前端 workspace 主页加载失败误判引导页修复（#1183）、预览面板支持媒体产物播放（#1146）；分支模型收口为 trunk-based（#1150）。
