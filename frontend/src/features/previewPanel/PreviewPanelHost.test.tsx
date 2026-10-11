@@ -1,76 +1,41 @@
 /**
- * PreviewPanelHost 契约测试（issue #328 的质量红线）：
+ * PreviewPanelHost 契约测试（issue #328 的质量红线；#1146 的字节桥用例在
+ * 姊妹文件 PreviewPanelHost.byteBridge.test.tsx——codex 复审 P1：原文件超
+ * 800 行主动拆分阈值后按被测主题拆分，共享夹具在 previewHostTestlib.tsx）：
  * - sandbox 属性恒为 "allow-scripts"，永不出现 allow-same-origin；
  * - 只认 event.source === iframe.contentWindow 且带面板 source 标记的消息
  *   （opaque origin 下 event.origin 恒为 "null"，不能用于鉴别）；
  * - 桥方法只读：listArtifacts / readArtifact / getJobDetail；
- * - ready → 下发 init（jobId + --pp-* 主题变量 + katex 资源 URL）；
+ * - ready → 下发 init（jobId + --pp-* 主题变量 + katex 资源 URL +
+ *   capabilities 能力声明；init 只带数据、永不携带端口——#1178 P1 收口）；
  * - resize 高度钳制在 [120, 6000]；
- * - #989：宿主文档有 CSP nonce 时 bundle 脚本盖章，拦截探针报告后显示提示。
+ * - #989：宿主文档有 CSP nonce 时 bundle 脚本盖章，拦截探针报告后显示提示；
+ * - #1146：面板 CSP 放行 media-src blob:（img-src 不放行 blob:）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, act, waitFor } from '@testing-library/react'
-import type { ReactElement } from 'react'
 import { PreviewPanelHost } from './PreviewPanelHost'
 import { PREVIEW_HOST_SOURCE, PREVIEW_PANEL_SOURCE } from './bridge'
-import { makeJobDetail } from '../../testing/jobDetailFixtures'
 import { TestQueryProvider } from '../../testing/testQueryClient'
-
-const mockFetchJobArtifact = vi.fn()
-const mockFetchJobDetail = vi.fn()
+import {
+  bridgeReady,
+  emitPanelMessage,
+  flush,
+  getIframe,
+  hostReplies,
+  mockFetchJobArtifact,
+  mockFetchJobDetail,
+  renderHost,
+  resetPreviewHostMocks,
+} from './previewHostTestlib'
 
 vi.mock('../../api', () => ({
   fetchJobArtifact: (...args: unknown[]) => mockFetchJobArtifact(...args),
   fetchJobDetail: (...args: unknown[]) => mockFetchJobDetail(...args),
 }))
 
-const BUNDLE = '<!doctype html><html><body>panel</body></html>'
-
-function renderHost(ui?: ReactElement) {
-  return render(ui ?? <PreviewPanelHost jobId="job-1" html={BUNDLE} />, {
-    wrapper: TestQueryProvider,
-  })
-}
-
-function getIframe(container: HTMLElement): HTMLIFrameElement {
-  const iframe = container.querySelector('iframe')
-  if (!iframe) throw new Error('iframe not rendered')
-  return iframe
-}
-
-/** 冲刷异步更新（react-query 解析 + jsdom 的 iframe load 事件）进 act。 */
-async function flush() {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  })
-}
-
-/** 以面板身份向宿主派发消息（jsdom 的 MessageEvent 支持 source 字段）。 */
-function emitPanelMessage(iframe: HTMLIFrameElement, data: unknown) {
-  const event = new MessageEvent('message', {
-    data,
-    source: iframe.contentWindow,
-  })
-  act(() => {
-    window.dispatchEvent(event)
-  })
-}
-
-function hostReplies(
-  iframe: HTMLIFrameElement
-): Array<Record<string, unknown>> {
-  const spy = vi.mocked(iframe.contentWindow!.postMessage)
-  return spy.mock.calls
-    .map((call) => call[0] as Record<string, unknown>)
-    .filter((data) => data.source === PREVIEW_HOST_SOURCE)
-}
-
 beforeEach(() => {
-  mockFetchJobArtifact.mockReset()
-  mockFetchJobDetail.mockReset()
-  mockFetchJobDetail.mockResolvedValue(
-    makeJobDetail([], { artifacts: ['questions.json', 'notes.md'] })
-  )
+  resetPreviewHostMocks()
 })
 
 describe('PreviewPanelHost 沙箱红线', () => {
@@ -110,6 +75,10 @@ describe('PreviewPanelHost 沙箱红线', () => {
     // 不放行。
     expect(policy).toContain(`img-src data: ${window.location.origin}`)
     expect(policy).not.toContain('https:')
+    // media（#1146）：只放行面板自建 blob（readArtifactBytes 字节 →
+    // URL.createObjectURL 喂 <video>/<audio>）；blob 归面板本帧命名空间，
+    // 不是出站面，故无需 origin 白名单。img-src 不得因此连带放行 blob:。
+    expect(policy).toContain('media-src blob:')
     expect(policy).toContain("form-action 'none'")
     // bundle 原文完整保留在注入结果里。
     expect(srcdoc).toContain('<body>panel</body>')
@@ -166,6 +135,7 @@ describe('PreviewPanelHost 桥协议', () => {
     const { container } = renderHost()
     const iframe = getIframe(container)
     const postSpy = vi.spyOn(iframe.contentWindow!, 'postMessage')
+    await bridgeReady()
 
     emitPanelMessage(iframe, { source: PREVIEW_PANEL_SOURCE, type: 'ready' })
 
@@ -180,6 +150,14 @@ describe('PreviewPanelHost 桥协议', () => {
     expect((init!.assets as Record<string, string>).katexJsUrl).toContain(
       'katex'
     )
+    // #1146：init 带能力声明，面板据此对 readArtifactBytes 同步分支。
+    expect(init!.capabilities).toEqual(['readArtifactBytes'])
+    // #1178 P1 收口：init 只带数据——postMessage 两参，无 transfer（端口
+    // 由初始文档的注入 bootstrap 上交，永不随 init 发放/重发）。
+    const initCall = postSpy.mock.calls.find(
+      ([data]) => (data as Record<string, unknown>)?.type === 'init'
+    )!
+    expect(initCall).toHaveLength(2)
   })
 
   it('listArtifacts 返回 job detail 的产物清单', async () => {
@@ -218,6 +196,7 @@ describe('PreviewPanelHost 桥协议', () => {
     const { container } = renderHost()
     const iframe = getIframe(container)
     vi.spyOn(iframe.contentWindow!, 'postMessage')
+    await bridgeReady()
 
     emitPanelMessage(iframe, {
       source: PREVIEW_PANEL_SOURCE,
@@ -243,6 +222,7 @@ describe('PreviewPanelHost 桥协议', () => {
     const { container } = renderHost()
     const iframe = getIframe(container)
     vi.spyOn(iframe.contentWindow!, 'postMessage')
+    await bridgeReady()
 
     emitPanelMessage(iframe, {
       source: PREVIEW_PANEL_SOURCE,

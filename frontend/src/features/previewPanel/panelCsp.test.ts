@@ -41,7 +41,7 @@ describe('readDocumentCspNonce', () => {
 describe('injectPanelCsp', () => {
   const csp = buildPanelCsp()
 
-  it('给每个真实 <script> 盖 nonce，并在 CSP meta 之后注入带 nonce 的探针', () => {
+  it('给每个真实 <script> 盖 nonce，并按 meta → bootstrap → 探针顺序注入 head 顶部（#1178 P1）', () => {
     const out = parse(
       injectPanelCsp(
         '<!doctype html><html><head><script>var s = "<script>"</script></head>' +
@@ -52,12 +52,18 @@ describe('injectPanelCsp', () => {
     )
     const head = Array.from(out.head.children)
     expect(head[0].getAttribute('http-equiv')).toBe('Content-Security-Policy')
+    // head[1] = 字节桥 bootstrap：必须先于 bundle 任何脚本执行，其 port
+    // 上交才先于攻击者可控代码发出的消息到达宿主（排序即鉴别）。
     expect(head[1].tagName).toBe('SCRIPT')
-    expect(head[1].textContent).toContain('securitypolicyviolation')
-    expect(head[1].textContent).toContain("type:'csp-violation'")
+    expect(head[1].textContent).toContain('__agentLegionPreviewBytes')
+    expect(head[1].textContent).toContain('byte-port-offer')
+    expect(head[2].tagName).toBe('SCRIPT')
+    expect(head[2].textContent).toContain('securitypolicyviolation')
+    expect(head[2].textContent).toContain("type:'csp-violation'")
     const scripts = Array.from(out.querySelectorAll('script'))
-    // 探针 + head 脚本 + body module 脚本 + svg 脚本；字符串里的伪 <script> 不算。
-    expect(scripts).toHaveLength(4)
+    // bootstrap + 探针 + head 脚本 + body module 脚本 + svg 脚本；字符串里
+    // 的伪 <script> 不算。
+    expect(scripts).toHaveLength(5)
     for (const script of scripts) {
       expect(script.getAttribute('nonce')).toBe('n0nce')
     }
@@ -77,8 +83,8 @@ describe('injectPanelCsp', () => {
     const nonces = Array.from(out.querySelectorAll('script')).map((s) =>
       s.getAttribute('nonce')
     )
-    // 探针、bundle 自有 nonce 脚本、无匹配策略的 nonce、无 nonce 脚本。
-    expect(nonces).toEqual(['n0nce', 'panel', 'n0nce', 'n0nce'])
+    // bootstrap、探针、bundle 自有 nonce 脚本、无匹配策略的 nonce、无 nonce 脚本。
+    expect(nonces).toEqual(['n0nce', 'n0nce', 'panel', 'n0nce', 'n0nce'])
   })
 
   it('只认对脚本实际生效的 bundle 策略：body 内、head noscript 内、脚本之后的 meta 不触发保留', () => {
@@ -98,7 +104,7 @@ describe('injectPanelCsp', () => {
     const nonces = Array.from(out.querySelectorAll('script')).map((s) =>
       s.getAttribute('nonce')
     )
-    expect(nonces).toEqual(['n0nce', 'n0nce', 'n0nce', 'n0nce'])
+    expect(nonces).toEqual(['n0nce', 'n0nce', 'n0nce', 'n0nce', 'n0nce'])
   })
 
   it('CSP 关键字大小写不敏感：NONCE-x 声明同样触发保留', () => {
@@ -114,21 +120,45 @@ describe('injectPanelCsp', () => {
     const nonces = Array.from(out.querySelectorAll('script')).map((s) =>
       s.getAttribute('nonce')
     )
-    expect(nonces).toEqual(['n0nce', 'Pa1'])
+    expect(nonces).toEqual(['n0nce', 'n0nce', 'Pa1'])
   })
 
-  it('无 nonce 时只注入 CSP meta，脚本原样', () => {
+  it('无 nonce 时注入 CSP meta 与 bootstrap（不盖章、不注入探针），bundle 脚本原样', () => {
     const out = injectPanelCsp(
       '<!doctype html><html><head><script>var a=1</script></head><body></body></html>',
       csp
     )
     expect(out).not.toContain('nonce=')
     expect(out).not.toContain('securitypolicyviolation')
+    // bootstrap 无条件注入：无 CSP 头的 dev 环境同样需要字节桥。
+    expect(out).toContain('__agentLegionPreviewBytes')
     expect(out).toContain('<script>var a=1</script>')
+  })
+
+  it('bootstrap 文本不含提前闭合脚本元素的序列（序列化进 HTML 的安全性）', () => {
+    const out = injectPanelCsp(
+      '<!doctype html><html><head></head><body></body></html>',
+      csp,
+      'n0nce'
+    )
+    const doc = parse(out)
+    const bootstrap = Array.from(doc.head.querySelectorAll('script'))[0]
+    // 若 bootstrap 源码含 `</script`，序列化会截断脚本并多出游离元素。
+    expect(bootstrap.textContent).toContain('MessageChannel')
+    expect(doc.head.querySelectorAll('script')).toHaveLength(2)
   })
 
   it('面板 meta 策略保持 unsafe-inline 不含 nonce（实例回退开关依赖它）', () => {
     expect(csp).toContain("script-src 'unsafe-inline'")
     expect(csp).not.toContain('nonce-')
+  })
+
+  it('media-src 只放行 blob:（#1146 面板自建 blob 的媒体播放）', () => {
+    // blob URL 归面板本帧的 opaque-origin 命名空间，只能由面板自身脚本
+    // 创建；不写 origin（媒体字节全部来自桥，无网络子资源引用面）。
+    expect(csp).toContain('media-src blob:')
+    // blob: 不得泄漏进其他指令——img-src 的引用面仍是 data: + 平台 origin。
+    expect(csp).not.toContain('img-src blob:')
+    expect(csp).not.toContain('connect-src blob:')
   })
 })
