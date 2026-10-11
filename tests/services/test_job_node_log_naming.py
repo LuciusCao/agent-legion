@@ -63,6 +63,7 @@ _TRICKY_KEYS = (
     ".hidden",
     "节点",
     "sp ace",
+    "tab\tnul\0",
 )
 _TRICKY_JOBS = (_A, f"{_A}-x", f"{_A}-x-y", f"{_A}.log", f"{_A}-x.shard-1")
 
@@ -94,6 +95,44 @@ def test_node_key_encoding_is_one_safe_reversible_component(
         stem = stem.removesuffix(f".shard-{shard_index}")
     assert "." not in stem and "/" not in stem
     assert unquote(stem) == node_key
+
+
+def test_non_ascii_key_is_not_inflated() -> None:
+    """#1215 codex P1：非 ASCII 字符原样保留，不按 UTF-8 字节膨胀 3 倍——
+    旧命名能写下的中文 key，新命名同样写得下。"""
+    key = "节" * 28  # 84 字节；百分号编码会膨胀到 252 字节
+    name = PurePosixPath(job_node_log_name(_A, key, 12))
+
+    assert name.name == f"{key}.shard-12.log"
+    assert len(name.name.encode()) <= 255
+
+
+_LONG_KEYS = {
+    "ASCII 超长": "k" * 300,
+    "中文超长": "节" * 120,
+    "点号超长（每个 . 编为 3 字节）": "." * 100,
+    "恰在边界": "k" * (255 - len(".log")),
+    "边界加一": "k" * (255 - len(".log") + 1),
+}
+
+
+@pytest.mark.parametrize("node_key", list(_LONG_KEYS.values()), ids=list(_LONG_KEYS))
+@pytest.mark.parametrize("shard_index", [None, 0, 123456])
+def test_file_name_is_bounded_by_name_max(node_key: str, shard_index: int | None) -> None:
+    name = PurePosixPath(job_node_log_name(_A, node_key, shard_index))
+
+    assert len(name.parts) == 3
+    assert len(name.name.encode()) <= 255
+    assert name.name.endswith(".log")
+
+
+def test_bounded_names_stay_injective() -> None:
+    """有界形态（前缀 + sha256）之间、与常规形态之间互不相等：同前缀的长 key
+    由摘要区分；分片后缀不同也不撞。"""
+    keys = ["k" * 300, "k" * 301, "k" * 300 + "x", "k" * 251, "k" * 250, "节" * 120, "节" * 121]
+    triples = [(_A, key, shard) for key in keys for shard in (None, 0, 1, 99999)]
+    names = [job_node_log_name(*triple) for triple in triples]
+    assert len(set(names)) == len(triples)
 
 
 def test_new_names_never_alias_legacy_flat_names() -> None:

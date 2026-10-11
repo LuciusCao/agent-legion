@@ -1,7 +1,7 @@
+import hashlib
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 from server.app.services.path_hygiene import warn_legacy_absolute
 
@@ -42,12 +42,51 @@ def job_log_dir(logs_dir: Path) -> Path:
 JOB_NODE_LOG_ROOT = "by-job"
 
 
+# 文件名字节上限（Linux / macOS 常见 NAME_MAX）。
+_NAME_MAX_BYTES = 255
+
+
+def _escape_node_log_char(char: str) -> str:
+    # 只转义会破坏「单一文件名分量 + 后缀可分」的字符：``%``（转义符自身）、
+    # ``/``（路径分隔）、``.``（与 ``.shard-<i>`` / ``.log`` 后缀及 ``..`` 分量
+    # 区分）与 ASCII 控制字符（含 NUL）。其余字符（含非 ASCII）原样保留——
+    # 百分号编码会把每个 UTF-8 字节膨胀成 3 字节，中文 key 很快超过 NAME_MAX
+    # （#1215 codex P1）。
+    # 被转义者都是单字节 ASCII（quote 不转义 ``.``，故手写）。
+    if char in "%/." or ord(char) < 0x20 or char == "\x7f":
+        return f"%{ord(char):02X}"
+    return char
+
+
 def _encode_node_log_key(node_key: str) -> str:
-    """node_key 的可逆文件名编码：百分号编码（``/`` 与 ``%`` 也编码），
-    再把 ``.`` 编码为 ``%2E``——编码结果不含 ``/`` 与 ``.``，故不会产生子目录、
-    ``.`` / ``..`` 分量，``.shard-<i>`` 后缀也不可能出现在 key 部分。
+    """node_key 的可逆文件名编码：仅把 ``%`` ``/`` ``.`` 与控制字符写成
+    ``%XX``——结果不含 ``/`` 与 ``.``，故不会产生子目录、``.`` / ``..`` 分量，
+    ``.shard-<i>`` 后缀也不可能出现在 key 部分；字面 ``%`` 恒被转义，
     ``urllib.parse.unquote`` 即可还原。"""
-    return quote(node_key, safe="-_~").replace(".", "%2E")
+    return "".join(_escape_node_log_char(char) for char in node_key)
+
+
+def _bounded_node_log_stem(node_key: str, suffix: str) -> str:
+    """编码 stem；整个文件名（stem + suffix + ``.log``）超出 NAME_MAX 时改用
+    有界形态 ``<编码前缀>.<sha256(node_key)>``。
+
+    单射性：常规 stem 不含 ``.``，有界 stem 恰含一个 ``.`` 且其后是 64 位十六
+    进制摘要——两种形态互不相等，有界形态之间由摘要区分。前缀按字符截断后
+    再编码，不会切断 ``%XX`` 或多字节字符。
+    """
+    stem = _encode_node_log_key(node_key)
+    fixed = len(suffix.encode()) + len(".log")
+    if len(stem.encode()) + fixed <= _NAME_MAX_BYTES:
+        return stem
+    digest = hashlib.sha256(node_key.encode("utf-8", "surrogatepass")).hexdigest()
+    budget = _NAME_MAX_BYTES - fixed - len(digest) - 1
+    prefix = ""
+    for char in node_key:
+        piece = _escape_node_log_char(char)
+        if len(prefix.encode()) + len(piece.encode()) > budget:
+            break
+        prefix += piece
+    return f"{prefix}.{digest}"
 
 
 def job_node_log_dir_name(job_id: str) -> str:
@@ -66,15 +105,16 @@ def job_node_log_name(job_id: str, node_key: str, shard_index: int | None = None
     普通节点 ``by-job/<job_id>/<enc(node_key)>.log``，分片
     ``by-job/<job_id>/<enc(node_key)>.shard-<i>.log``。
 
-    job_id 独占目录、node_key 经 ``_encode_node_log_key`` 编码（不含 ``.``），
-    故 (job_id, node_key, shard_index) → 路径是单射：旧扁平名
+    job_id 独占目录、node_key 经 ``_encode_node_log_key`` 编码（不含 ``.``；
+    文件名超 NAME_MAX 时改为有界的 ``<前缀>.<sha256>`` 形态，见
+    ``_bounded_node_log_stem``），故 (job_id, node_key, shard_index) → 路径是单射：旧扁平名
     ``<job_id>-<node_key>[-shard-<i>].log`` 在 job_id 与 node_key 都可含连字符时
     跨 job 碰撞的问题不再存在。写入方（claim_submit / shards）唯一入口；job
     删除按 ``job_node_log_dir_name`` 整目录清理，旧扁平名见
     ``legacy_job_node_log_name``。
     """
-    stem = _encode_node_log_key(node_key)
     suffix = "" if shard_index is None else f".shard-{shard_index}"
+    stem = _bounded_node_log_stem(node_key, suffix)
     return f"{job_node_log_dir_name(job_id)}/{stem}{suffix}.log"
 
 
