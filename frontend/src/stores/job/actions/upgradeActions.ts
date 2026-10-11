@@ -30,7 +30,6 @@ export function upgradeActions(set: JobStoreSet, get: () => JobState) {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Batch workflow upgrade failed'
-        set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         // The batch may have partially succeeded server-side while the
         // response was lost — refresh the list so it reflects the

@@ -3,7 +3,7 @@ import { render, screen, act, waitFor } from '@testing-library/react'
 import { Routes, Route } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import WorkspaceMainPage from './WorkspaceMainPage'
-import { useJobStore } from '../stores/jobStore'
+import { useJobStore, createJobSummary } from '../stores/jobStore'
 import { useAgentsStore } from '../stores/agentsStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingStore } from '../stores/settingStore'
@@ -187,7 +187,7 @@ describe('WorkspaceMainPage onboarding guide', () => {
       revision: 0,
       jobsWorkspaceId: 'ws1',
       isLoading: false,
-      error: null,
+      listLoadError: null,
       selectedIds: new Set(),
       selectionMode: 'explicit',
       selectionFilter: null,
@@ -381,6 +381,69 @@ describe('WorkspaceMainPage onboarding guide', () => {
       )
     ).toBe(false)
   })
+
+  it('hides the guide and shows an error row when the job list failed to load (#1183)', async () => {
+    // failJobFetch 清空 jobs 并置 isLoading=false——形态与「真空白」一致，
+    // 加载失败的 workspace 不渲染引导页，改显示错误行。
+    mockFetchJobsSnapshot.mockRejectedValueOnce(new Error('backend down'))
+
+    renderPage()
+    const source = EventSourceMock.instances[0]
+    await act(async () => {
+      source.onopen?.()
+    })
+
+    await waitFor(() => {
+      expect(useJobStore.getState().listLoadError).toBe('backend down')
+      expect(useJobStore.getState().isLoading).toBe(false)
+    })
+    expect(
+      screen.queryByRole('heading', { name: '开始使用 Workspace' })
+    ).not.toBeInTheDocument()
+    // 错误态渲染在 JobList 的位置（列表区中央，#1183 review P3-1）。
+    expect(await screen.findByText('任务列表加载失败')).toBeInTheDocument()
+    expect(await screen.findByText('backend down')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+    expect(screen.queryByText('暂无任务')).not.toBeInTheDocument()
+  })
+
+  it('keeps the error state when a patch event lands after a failed load (#1183)', async () => {
+    // 复发链：快照失败清空列表后，SSE 未断、job_patch_batch 无条件清
+    // error 并把增量套在空 store 上——「假空白 + error 已清」会重新满足
+    // 引导页判定。patch 必须在失败空态下被丢弃，直到整页快照成功。
+    mockFetchJobsSnapshot.mockRejectedValueOnce(new Error('backend down'))
+
+    renderPage()
+    const source = EventSourceMock.instances[0]
+    await act(async () => {
+      source.onopen?.()
+    })
+    await waitFor(() => {
+      expect(useJobStore.getState().listLoadError).toBe('backend down')
+    })
+
+    source.emitMessage({
+      type: 'job_patch_batch',
+      workspace_id: 'ws1',
+      revision: 5,
+      stats: { running: 1 },
+      jobs: [
+        createJobSummary({ id: 'j1', workspace_id: 'ws1', status: 'running' }),
+      ],
+      deleted_job_ids: [],
+    })
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 50)))
+
+    expect(useJobStore.getState().listLoadError).toBe('backend down')
+    expect(useJobStore.getState().jobIds).toEqual([])
+    expect(useJobStore.getState().revision).toBe(0)
+    expect(
+      screen.queryByRole('heading', { name: '开始使用 Workspace' })
+    ).not.toBeInTheDocument()
+    expect(await screen.findByText('任务列表加载失败')).toBeInTheDocument()
+    expect(screen.getByText('backend down')).toBeInTheDocument()
+  })
+
   describe('code-only workflow Worker dependency (#875)', () => {
     const codeOnlyWorkflow = {
       ...workflowDefinition,

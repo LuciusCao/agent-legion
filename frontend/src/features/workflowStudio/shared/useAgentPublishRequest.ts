@@ -32,8 +32,12 @@ export type AgentPublishRequestState = {
   /** cancel 在途（#429 三轮复审 P3）：在途期间重复 cancel 早退——二次
    * cancel 必 404，红 toast 与正确回执同现是假失败。 */
   canceling: boolean
-  /** 用户确认：走后端确认端点（与手动发布同门禁），成功后失效相关查询。 */
-  confirm: () => Promise<void>
+  /** 用户确认：走后端确认端点（与手动发布同门禁），成功后失效相关查询。
+   * #1122：onConfirmed 在端点成功后、invalidate 触发重取之前同步调用——
+   * 对话框借此把发布的草稿原文登记进 justPublishedRef（复用手动发布管道
+   * 的收尾），否则紧随的 canonical 新基线被 baseline sync 误判为外部
+   * 变更，preserveDirtyDraft 永真、dirty chip 卡在「有未发布变更」。 */
+  confirm: (onConfirmed?: () => void) => Promise<void>
   /** 用户取消：请求落 rejected，agent 可继续修改草稿再发起。404（输给
    * confirm 的 claim / 已被顶替 / 已过期）静默 refetch——不弹「取消失败」
    * （#429 收尾 P3：对「输给 confirm」是误导，行态自己说话）。 */
@@ -82,6 +86,10 @@ export function useAgentPublishRequest(
       queryClient.invalidateQueries({
         queryKey: extraQueryKeys.workflowStudioData(workspaceId),
       }),
+      // #1122：补服务端草稿查询——后端哪天发布清草稿时不至于显示旧草稿。
+      queryClient.invalidateQueries({
+        queryKey: extraQueryKeys.workflowStudioDraft(workspaceId),
+      }),
     ])
   }, [queryClient, workspaceId])
 
@@ -107,39 +115,53 @@ export function useAgentPublishRequest(
       useAgentPublishNoticeStore.getState().lastResolvedRequestId !== lastId
     ) {
       landNotice('Agent 的发布请求已消解（被新请求或手动发布取代，或已过期）')
+      // #1122：被手动发布顶替/过期时旁观路径也要刷新 revision 与状态
+      // chip——否则另一 tab 的发布要等别的触发才反映到本 tab。
+      if (workspaceId) {
+        void queryClient.invalidateQueries({
+          queryKey: extraQueryKeys.workflowStudioData(workspaceId),
+        })
+      }
     }
-  }, [pendingRequest, landNotice])
+  }, [pendingRequest, landNotice, queryClient, workspaceId])
 
-  const confirm = useCallback(async () => {
-    if (!workspaceId || !requestId || confirming) return
-    setConfirming(true)
-    try {
-      const resolved = await confirmPublishRequest(workspaceId, requestId)
-      markResolved(requestId)
-      const notice = agentPublishStatusNotice(resolved)
-      if (notice) landNotice(notice)
-      await invalidate()
-    } catch (error) {
-      showToast(
-        `确认发布失败：${(error instanceof Error && error.message) || '网络错误'}`,
-        'error'
-      )
-      // 失败（如草稿校验不过）后刷新 pending：请求可能仍在（可修复后重试）
-      // 也可能已过期（后端返回 404 → 弹窗由轮询自然关闭）。
-      await refetchPending()
-    } finally {
-      setConfirming(false)
-    }
-  }, [
-    workspaceId,
-    requestId,
-    confirming,
-    invalidate,
-    showToast,
-    refetchPending,
-    landNotice,
-    markResolved,
-  ])
+  const confirm = useCallback(
+    async (onConfirmed?: () => void) => {
+      if (!workspaceId || !requestId || confirming) return
+      setConfirming(true)
+      try {
+        const resolved = await confirmPublishRequest(workspaceId, requestId)
+        markResolved(requestId)
+        // #1122：登记发布原文必须在 invalidate 的重取落地之前——基线变化
+        // 紧随而来，baseline sync 靠 justPublishedRef 区分「自己刚发布」
+        // 与「外部变更」。
+        onConfirmed?.()
+        const notice = agentPublishStatusNotice(resolved)
+        if (notice) landNotice(notice)
+        await invalidate()
+      } catch (error) {
+        showToast(
+          `确认发布失败：${(error instanceof Error && error.message) || '网络错误'}`,
+          'error'
+        )
+        // 失败（如草稿校验不过）后刷新 pending：请求可能仍在（可修复后重试）
+        // 也可能已过期（后端返回 404 → 弹窗由轮询自然关闭）。
+        await refetchPending()
+      } finally {
+        setConfirming(false)
+      }
+    },
+    [
+      workspaceId,
+      requestId,
+      confirming,
+      invalidate,
+      showToast,
+      refetchPending,
+      landNotice,
+      markResolved,
+    ]
+  )
 
   const cancel = useCallback(async () => {
     if (!workspaceId || !requestId || canceling) return
