@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- 容器内 `workerctl` 无参数读不到控制令牌（issue #1106，#1099 follow-up）：`--state-dir` 默认值此前是相对路径 `data/agent-worker-service`，镜像 WORKDIR 为 `/app`、状态卷在 `/var/lib/agent-legion-worker-control`，`docker compose exec worker workerctl status` 报「读不到控制令牌」。现 `workerctl` 与 `worker.service` 的 `--state-dir` 默认值同源读 `AGENT_WORKER_STATE_DIR`（与 Makefile 变量同名，未设置/空值回落 `data/agent-worker-service`，解析时求值），Dockerfile worker 阶段设 `ENV AGENT_WORKER_STATE_DIR=/var/lib/agent-legion-worker-control` 并从 `CMD` 去掉重复的 `--state-dir`（ENV 为镜像内唯一来源）；docs/agent-worker-deployment.md 的 `wctl()` 去掉 `--state-dir` 绕行（旧镜像仍需显式传参，文档注明），docs/data-layout.md 同步。回归测试 `tests/workers/test_worker_state_dir_default.py` 钉住 CLI/service 默认值读环境变量、镜像布局下的 `workerctl status` 端到端（单文件副本 + 假控制 API）与 Dockerfile ENV 和 compose 状态卷挂载点一致。
+
 ## [0.7.19] - 2026-10-11
 
 Worker 结果上报协议 v2（元数据移出 HTTP 头改走归档 `result.json`，**部署硬约束 Host 先升**）+ 执行面系统性收口：节点级并发限制覆盖远程 code Worker、`latest` 绑定 skill 的升级不再误重跑、events.jsonl 工具输出全链脱敏（P1 安全）、worker 上报心跳停摆/401/降级归档族收口；前端 workspace 主页加载失败误判引导页修复（#1183）、预览面板支持媒体产物播放（#1146）；分支模型收口为 trunk-based（#1150）。

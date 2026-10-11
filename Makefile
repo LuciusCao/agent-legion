@@ -40,6 +40,7 @@ dev-backend: ## 启动后端开发服务器 (127.0.0.1:$(DEV_BACKEND_PORT))
 dev-frontend: ## 启动前端开发服务器（代理 /api 到 $(DEV_BACKEND_PORT)）
 	cd $(FRONTEND_DIR) && VITE_API_TARGET="http://127.0.0.1:$(DEV_BACKEND_PORT)" $(NPM) run dev -- --port $(DEV_FRONTEND_PORT)
 
+# 与 worker.service / workerctl 的 --state-dir 默认值同名同源（#1106，worker/cli_args.py）。
 AGENT_WORKER_STATE_DIR ?= data/agent-worker-service
 AGENT_WORKER_UI_HOST ?= 127.0.0.1
 AGENT_WORKER_UI_PORT ?= 8789
