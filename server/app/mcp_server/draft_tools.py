@@ -27,7 +27,9 @@ def register_draft_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         the human editor autosaves: {"definition_yaml", "updated_at",
         "definition_hash", "generation"}, yaml/hash null when never saved.
         Pass generation to save_workflow_draft as base_generation (0 when
-        never saved / after a publish emptied the store). definition_hash is
+        never saved; a publish that emptied the store advances it, so the
+        empty-state read then carries the post-publish generation — pass it
+        back as usual). definition_hash is
         the draft's semantic identity (parse → normalize → sha256): two YAMLs
         that differ only in serialization style (key order, explicit empty
         lists, block scalars) hash the same (#1143)."""

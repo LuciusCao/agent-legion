@@ -73,8 +73,9 @@ editing and re-read before submitting.
   draft (the SAME draft the canvas autosaves; NOT the active revision).
   `{"definition_yaml": ..., "updated_at": ..., "generation": ...}`; content
   fields null when no draft was ever saved. The `generation` is your CAS base
-  for `save_workflow_draft` (0 when never saved or right after a publish
-  emptied the store).
+  for `save_workflow_draft` (0 when never saved; a publish that emptied the
+  store advances it, so the empty-state read then carries the post-publish
+  generation — pass it back as usual).
 - `save_workflow_draft(workspace_id, definition_yaml, base_generation)` —
   write the full definition YAML into the Studio draft; the human's canvas and
   YAML editor pick it up. CAS: `base_generation` must be the `generation`
