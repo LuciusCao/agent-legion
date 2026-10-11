@@ -19,6 +19,7 @@ from server.app.studio_chat.session_config_state import apply_config_update, ses
 from server.app.studio_chat.session_exit import finish_session_exit
 from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.token_keepalive import keepalive_run_token
+from server.app.studio_chat.tool_call_coalesce import clear_tool_call_ownership
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -138,7 +139,12 @@ class AcpEventHandlers:
         # never reached the agent; the verdict is deferred past a grace so
         # trailing content (SDK response-before-updates ordering) clears it.
         empty_turn.schedule_check(self._backend, session_id, stop_reason, timed_out=timed_out)
-        compaction.note_turn_closed(self._backend.runtime(session_id))
+        runtime = self._backend.runtime(session_id)
+        compaction.note_turn_closed(runtime)
+        # #1228 codex P2: a toolCallId is unique within one turn only — drop
+        # the coalescing ownership map at the turn boundary so cancelled or
+        # timed-out calls never leak entries into later turns.
+        clear_tool_call_ownership(runtime)
         if timed_out:
             # #693: the turn was ended by the prompt-timeout ladder, not by
             # the agent finishing — record it as its own visible event so the
@@ -157,7 +163,10 @@ class AcpEventHandlers:
         self._backend.store.publish_session(session_id)
 
     def on_error(self, session_id: str, detail: str, *, fatal: bool) -> None:
-        compaction.note_turn_closed(self._backend.runtime(session_id))
+        runtime = self._backend.runtime(session_id)
+        compaction.note_turn_closed(runtime)
+        # #1228 codex P2: turn error is a turn boundary too (see on_turn_end).
+        clear_tool_call_ownership(runtime)
         self._backend.store.append_message(
             session_id, "status", "system", {"event": "error", "detail": detail}
         )

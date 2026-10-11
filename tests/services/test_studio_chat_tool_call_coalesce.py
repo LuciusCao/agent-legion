@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from server.app.studio_chat.turn_state import open_turn
 from server.app.studio_chat.unprompted_turns import UnpromptedTurnWatcher
 from tests.helpers import studio_chat_fixtures as fixtures
 from tests.helpers import wait_for_predicate
@@ -124,6 +125,46 @@ def test_terminal_first_frame_is_not_tracked(admission) -> None:
     service.store.append_tool_call(sid, runtime, _tool_call(status="completed"))
     assert runtime.tool_call_messages == {}
     assert len(_tool_rows(service, sid)) == 1
+
+
+def test_turn_end_evicts_tool_call_ownership(admission) -> None:
+    """#1228 codex P2：turn 结束清空归属 map——取消/超时没有终态帧的调用
+    不再把条目泄漏到后续 turn。"""
+    service, _db, sid, _workspace, runtime = admission
+    service.store.append_tool_call(sid, runtime, _tool_call())
+    assert runtime.tool_call_messages  # 在途登记
+    service._on_turn_end(sid, "end_turn")
+    assert runtime.tool_call_messages == {}
+
+
+def test_turn_error_evicts_tool_call_ownership(admission) -> None:
+    """#1228 codex P2：turn error 同样是 turn 边界。"""
+    service, _db, sid, _workspace, runtime = admission
+    service.store.append_tool_call(sid, runtime, _tool_call())
+    service._on_error(sid, "boom", fatal=False)
+    assert runtime.tool_call_messages == {}
+
+
+def test_open_turn_evicts_tool_call_ownership(admission) -> None:
+    """#1228 codex P2：turn 起点（open_turn）同样清空，覆盖未走
+    on_turn_end 的中断路径（对齐 TurnStreamState 的 turn 起点 reset）。"""
+    service, _db, sid, _workspace, runtime = admission
+    service.store.append_tool_call(sid, runtime, _tool_call())
+    with runtime.lock:
+        open_turn(runtime, "下一轮")
+    assert runtime.tool_call_messages == {}
+
+
+def test_tool_call_id_reuse_across_turns_lands_new_row(admission) -> None:
+    """toolCallId 生命周期不跨 turn（kimi 的 id 仅 turn 内唯一）：跨 turn
+    复用落新行，不被误合并进上一 turn 的旧行。"""
+    service, _db, sid, _workspace, runtime = admission
+    first = service.store.append_tool_call(sid, runtime, _tool_call())
+    service._on_turn_end(sid, "end_turn")
+    second = service.store.append_tool_call(sid, runtime, _tool_call())
+    rows = _tool_rows(service, sid)
+    assert [row["id"] for row in rows] == [first["id"], second["id"]]
+    assert runtime.tool_call_messages == {"tc-1": second["id"]}
 
 
 def test_missing_runtime_falls_back_to_per_frame_rows(admission) -> None:

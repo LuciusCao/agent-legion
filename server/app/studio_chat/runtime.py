@@ -59,7 +59,9 @@ class SessionRuntime:
         # In-memory only, guarded by ``lock``: a resume/restart starts empty
         # and an update for a pre-restart toolCallId degrades to a fresh row
         # (behavioural fallback, never data loss). Entries drop at terminal
-        # status (completed/failed), bounding the map to in-flight calls.
+        # status (completed/failed), and the whole map drops at every turn
+        # boundary (#1228 codex P2: a toolCallId is unique within one turn —
+        # see tool_call_coalesce.clear_tool_call_ownership).
         self.tool_call_messages: dict[str, str] = {}
         self.mcp_observed = False
         # Set by resume_session when the fresh agent could not reload the

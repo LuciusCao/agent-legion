@@ -13,7 +13,10 @@ created_at never move; schema untouched.
 Ownership is the in-memory ``runtime.tool_call_messages`` map, so a resume
 or restart starts empty and an update for a pre-restart toolCallId degrades
 to a fresh row — a behavioural fallback, never data loss. Entries drop at
-terminal status, bounding the map to in-flight calls.
+terminal status, and the whole map drops at every turn boundary
+(``on_turn_end`` / ``on_error`` / ``open_turn`` — a toolCallId is only unique
+within one turn, #1228 codex P2), so cancelled/timed-out calls never leak
+their entries and a reused id never merges into the previous turn's row.
 """
 
 from __future__ import annotations
@@ -61,3 +64,18 @@ def coalesce_tool_call(
     payload = tool_call_message_payload(session_id, open_id, merged)
     store.publish(session_id, {"type": "message", "message": payload}, replaceable=True)
     return None
+
+
+def clear_tool_call_ownership(runtime: SessionRuntime | None) -> None:
+    """Drop every toolCallId → row mapping (turn boundary, #1228 codex P2).
+
+    A toolCallId lives within one turn only: entries of calls that ended
+    without a terminal frame (cancel/timeout/turn error) must not leak into
+    later turns, and a reused id must never merge into the previous turn's
+    row. Mounted at on_turn_end / on_error / open_turn, mirroring
+    TurnStreamState's turn-scoped lifecycle.
+    """
+    if runtime is None:
+        return
+    with runtime.lock:
+        runtime.tool_call_messages.clear()

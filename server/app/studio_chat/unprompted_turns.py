@@ -192,10 +192,13 @@ class UnpromptedTurnWatcher:
             path = self.locate()
             if path is None:
                 return
-            self.tail = WireTail(path)
+            tail = WireTail(path)
             if self.baseline_on_locate:
-                self.tail.baseline()
-                return
+                # baseline 完成前不认领（#1228 codex P1）：baseline 抛错时
+                # self.tail 保持 None，下一轮重新 baseline；提前赋值会让
+                # offset=0 的实例直接 read，从文件头重读历史重复落行。
+                tail.baseline()
+            self.tail = tail
         if not self.pending:
             # A backlog left by a failed append pauses the journal: it is
             # persisted first, so retries never grow it (#1044).
