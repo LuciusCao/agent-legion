@@ -79,6 +79,16 @@ def _append(
     draft-currency gates in a single statement (None = gated out). The bus
     publish is non-blocking (store.py maintenance constraint), so the
     registry lock stays a leaf.
+
+    Accepted cost (#1240 复验 P3): ``_runtimes_lock`` is process-global, so
+    the guarded INSERT's DB round-trip queues every ``service.runtime()``
+    lookup (ACP callbacks / admission / teardown / close) process-wide — a
+    slow DB widens the throttle from one session to all studio chat
+    sessions. Accepted because the lock stays a leaf (no other lock is
+    taken inside), every blocking source self-heals (the round-trip
+    returns; the broad-except below bounds even a hung path at the request
+    level), and correctness is unaffected — same precedent as
+    session_close.py's in-lock DB write.
     """
     try:
         with service._runtimes_lock:
