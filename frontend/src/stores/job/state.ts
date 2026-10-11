@@ -53,11 +53,14 @@ export interface JobState
   }>
   /**
    * 任务列表加载失败的唯一信号（#1183）：只有整页快照/首屏加载的失败臂
-   * （failJobFetch、refreshFirstPage catch）可写入，成功快照/筛选重试/
-   * workspace 重置清除。批量与单项 mutation 的错误只走 toast 呈现、不落
-   * store——共享 error 通道被 mutation 复用时，一次批量操作失败即把健康
-   * 列表整页替换成错误页并冻结 SSE patch（PR #1189 评审 P1），新写入方
-   * 一律走 toast，不得复用本字段。
+   * （failJobFetch、refreshFirstPage catch）可写入；清除点为成功快照、
+   * workspace 重置、筛选重试（refreshFirstPage 入口 reset）、
+   * refreshFirstPage 重拉前的自愈臂（#1189 codex P1-d，
+   * 同 set 成对恢复 isLoading 并重新武装 patch 缓冲）。批量与单项
+   * mutation 的错误只走 toast 呈现、不落 store——共享 error 通道被
+   * mutation 复用时，一次批量操作失败即把健康列表整页替换成错误页并
+   * 冻结 SSE patch（PR #1189 评审 P1），新写入方一律走 toast，不得复用
+   * 本字段。
    */
   listLoadError: string | null
   selectedIds: Set<string>

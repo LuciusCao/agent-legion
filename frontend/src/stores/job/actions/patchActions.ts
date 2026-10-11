@@ -62,10 +62,13 @@ export function applyJobPatchBatchUpdate(
   // #1183：失败空态（failJobFetch / refreshFirstPage 失败终态）没有已加载
   // 基线——增量 patch 套在空列表上会拼出假的部分列表，且其无条件的
   // listLoadError: null 会让「加载失败→假空白」重新满足引导页判定，
-  // #1183 症状复发。丢弃 patch；listLoadError 只由整页快照成功、筛选重试
-  // 或 workspace 重置清除——恢复依赖整页快照成功落地（SSE 重连/open 重拉、
-  // 筛选变更触发重试、错误页「重试」按钮）；快照端点持续失败时不会有后续
-  // 快照，被丢弃 patch 期间的更新随下一次成功快照整体重建。
+  // #1183 症状复发。丢弃 patch；listLoadError 的清除点：整页快照成功、
+  // workspace 重置、筛选重试（refreshFirstPage 入口的 reset 覆盖）、
+  // refreshFirstPage 重拉前的自愈臂（#1189 codex P1-d——清除时并无快照
+  // 成功，但同 set 成对恢复 isLoading 并重新武装缓冲，语义是进入「重试
+  // 在途」形态而非「恢复健康」）。恢复依赖整页快照成功落地（SSE 重连/
+  // open 重拉、筛选变更触发重试、错误页「重试」按钮）；快照端点持续失败
+  // 时不会有后续快照，被丢弃 patch 期间的更新随下一次成功快照整体重建。
   if (
     state.jobsWorkspaceId !== workspaceId ||
     revision <= state.revision ||

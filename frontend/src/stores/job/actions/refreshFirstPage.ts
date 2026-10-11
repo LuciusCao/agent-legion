@@ -69,6 +69,24 @@ export function createRefreshFirstPage(
     // 与缓冲：所有权已被新一轮 refreshFirstPage 的 reset（重新置位）或
     // resetForWorkspace（清空）接管。
     for (let attempt = 0; attempt < MAX_REFRESH_ATTEMPTS; attempt += 1) {
+      // #1189 codex P1-d：新一轮采样前清掉在途期间落下的 listLoadError
+      // （缓冲溢出 / 并发 SSE loader 失败）——此后发回的响应是全新采样
+      // （revision ≥ 所有已记录 patch、内容完整），可安全应用；apply 步骤
+      // 的错误态否决只针对「采样早于 failJobFetch」的本轮响应。否决与清除
+      // 组合成自愈：被丢弃 patch 不可重放，靠下一次完整采样整体重建。
+      // 自愈是 failJobFetch 的逆操作，必须成对恢复：isLoading 归 true
+      // （否则空列表 + 非 loading + 无错误 = 假空白，重拉在途期间引导页/
+      // 「暂无任务」闪现，#1183 目标症状在自愈路径复活）并重新武装缓冲
+      // （溢出已清掉 snapshotInFlight；不重新武装时持续 patch 流会直连落地
+      // 推进 revision，重试快照必被守卫丢弃、结构性走到耗尽——窗口内直连
+      // 落地的 patch 由重放守卫幂等处理，语义安全）。
+      if (get().listLoadError !== null)
+        set({
+          listLoadError: null,
+          isLoading: true,
+          snapshotInFlight: true,
+          pendingPatchBuffer: [],
+        })
       let page: Awaited<ReturnType<typeof fetchJobsSnapshot>>
       try {
         page = await fetchJobsSnapshot(
@@ -96,6 +114,11 @@ export function createRefreshFirstPage(
       // 丢弃（并发整页快照先落地）则重拉。
       let applied = false
       set((state) => {
+        // 错误态否决（#1189 codex P1-d）：在途期间 failJobFetch 落地（缓冲
+        // 溢出或并发 SSE loader 失败）意味着已有 patch 被丢弃且不可重放，
+        // 本轮响应的采样可能早于那些被丢弃的 patch——否决本轮（applied
+        // 保持 false → continue 重拉），不让陈旧内容覆盖并清掉错误态。
+        if (state.listLoadError !== null) return {}
         const base = setJobsPageUpdate(
           state,
           workspaceId,
