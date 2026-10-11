@@ -112,14 +112,17 @@ def lock_job_mutations_sorted(conn: Any, job_ids: Iterable[str]) -> None:
     against a same-id recreate: the creator takes the lock BEFORE its mkdir
     and upsert, so it either committed its row before the cleanup's recheck
     (cleanup skips) or waits until the rename is done (mkdir lands on an
-    empty path). Callers run this as the FIRST statement of the creating
-    transaction — level 2 of the global lock order, before any row lock
-    (the chunk's material/bundle FOR KEY SHARE probes, the jobs upsert).
+    empty path). Callers take it before any row lock in the creating
+    transaction — level 2 of the global lock order, ahead of the chunk's
+    material/bundle FOR KEY SHARE probes and the jobs upsert.
 
     Ascending ``job_id`` is the global batch order
     ``(hashtext('agent-ws:' || workspace_id), job_id)`` restricted to one
     workspace — every creating call is single-workspace — so a create chunk
     never walks two jobs opposite to finish_many / claim batches / sweeps.
+    Precondition: no id may name an existing job of ANOTHER workspace
+    (underscore-concatenated ids can collide across workspaces); bulk callers
+    reject such identities first (``verify_chunk_identities``, #1243).
     One statement per id (not a set-returning SELECT): acquisition order must
     not depend on the planner's projection order.
     """
