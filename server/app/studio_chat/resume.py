@@ -25,7 +25,12 @@ _ARCHIVED_DETAIL = "Chat session is archived; unarchive it before continuing"
 
 
 def resume_session(
-    service: StudioChatService, session_id: str, workspace_id: str, user_id: str
+    service: StudioChatService,
+    session_id: str,
+    workspace_id: str,
+    user_id: str,
+    *,
+    allow_closed: bool = True,
 ) -> dict[str, Any]:
     """Rebuild the runtime of a closed/error session; history is kept.
 
@@ -37,6 +42,10 @@ def resume_session(
     Resuming a session that is still live on this server is an idempotent
     no-op — except an idle session whose last turn was confirmed empty,
     where it replays that message once (#882, empty_turn_retry).
+
+    allow_closed=False (#1121 send-path auto-resume) narrows the claim to
+    error rows only: the auto path holds no fresh human intent to reopen,
+    so a session that raced to closed must stay closed.
     """
     from server.app.studio_chat import service as service_module
 
@@ -78,7 +87,9 @@ def resume_session(
     # tests monkeypatching it keep working.
     max_active = service_module.MAX_ACTIVE_STUDIO_CHAT_SESSIONS
     baseline = capture_resume_baseline(str(service._settings.root_dir), session["acp_session_id"])
-    if not service.db.claim_studio_chat_resume(session_id, max_active=max_active):
+    if not service.db.claim_studio_chat_resume(
+        session_id, max_active=max_active, allow_closed=allow_closed
+    ):
         current = service.db.get_studio_chat_session(session_id) or {}
         if current.get("archived_at") is not None:
             raise ConflictError(_ARCHIVED_DETAIL)

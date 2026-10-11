@@ -32,10 +32,12 @@ def send_message(
     runtime = service.runtime(session_id)
     if runtime is None:
         reject_orphaned_session(service, session_id, session)
-    # #1121: a dead run token on an idle/error session is rebuilt (auto-resume)
-    # before anything is admitted — an accepted message always has a live
-    # tool channel. Live-token sessions skip this entirely.
-    if send_resume.needs_send_resume(service, session, runtime):
+    # #1121: a dead run token is rebuilt (auto-resume) before anything is
+    # admitted — an accepted message always has a live tool channel.
+    # Live-token sessions skip this entirely; ensure_answerable_runtime
+    # re-decides under its lock and falls through for non-idle/error rows
+    # (a running turn keeps the fail-closed refusal below).
+    if runtime is not None and not send_resume.run_token_alive(service, runtime):
         session, runtime = send_resume.ensure_answerable_runtime(service, session_id, workspace_id)
     from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 

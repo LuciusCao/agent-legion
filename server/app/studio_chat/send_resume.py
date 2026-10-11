@@ -19,11 +19,14 @@ follows within the same request, so the session_resumed row is the trace.
 Concurrency: a per-session lock (service._send_resume_locks) serializes
 auto-resume attempts — the loser of a concurrent attempt re-checks under the
 lock and rides the winner's fresh runtime instead of spawning twice. The
-closed/error -> starting claim (claim_studio_chat_resume) stays the durable
-once-only guard against resumes that bypass the lock (the manual endpoint):
-a claim conflict with a live fresh runtime is ridden, not re-raised. The lock
-map is keyed by session id, never pruned — entries are tiny and bounded by
-the number of sessions ever auto-resumed in this process.
+idle->error stamp is a generational CAS (guarded UPDATE; zero rows = the row
+moved on, abort) and the resume claim runs with allow_closed=False, so the
+auto path never reopens a session a concurrent close just closed (#1121 codex
+P1); the closed/error -> starting claim stays the durable once-only guard
+against resumes that bypass the lock (the manual endpoint): a claim conflict
+with a live fresh runtime is ridden, not re-raised. The lock map is keyed by
+session id, never pruned — entries are tiny and bounded by the number of
+sessions ever auto-resumed in this process.
 """
 
 from __future__ import annotations
@@ -33,7 +36,8 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.auth.sessions import hash_token
 from server.app.services.job_errors import ConflictError
-from server.app.studio_chat.session_escalation import escalate_dead_token_session
+from server.app.studio_chat import resume as resume_module
+from server.app.studio_chat.session_escalation import _TOKEN_DEAD_ERROR_DETAIL
 from server.app.studio_chat.token_keepalive import TOKEN_INVALIDATED_DETAIL
 
 if TYPE_CHECKING:
@@ -54,24 +58,14 @@ def run_token_alive(service: StudioChatService, runtime: SessionRuntime) -> bool
     return service.db.get_scoped_token_user(hash_token(runtime.token)) is not None
 
 
-def needs_send_resume(
-    service: StudioChatService, session: dict[str, Any], runtime: SessionRuntime | None
-) -> bool:
-    """Cheap pre-lock gate on the caller's snapshot; ensure_answerable_runtime
-    re-decides under the lock on a fresh read."""
-    return (
-        runtime is not None
-        and session["status"] in _AUTO_RESUMABLE_STATUSES
-        and not run_token_alive(service, runtime)
-    )
-
-
 def ensure_answerable_runtime(
     service: StudioChatService, session_id: str, workspace_id: str
 ) -> tuple[dict[str, Any], SessionRuntime]:
     """Return a (session, runtime) pair whose run token is live, resuming once
-    when the current one is dead. Raises (message never persisted) when the
-    resume fails or cannot yield a live channel."""
+    when the current one is dead. A session that raced into a non-resumable
+    status falls through unchanged — the normal admission path owns its
+    refusal. Raises (message never persisted) when the resume fails or cannot
+    yield a live channel."""
     with _resume_lock(service, session_id):
         session = service.get_session(session_id, workspace_id)
         runtime = service.runtime(session_id)
@@ -88,19 +82,45 @@ def ensure_answerable_runtime(
             # resume still spawning): hand back to the normal admission path,
             # whose fail-closed token check owns the refusal.
             return session, runtime
-        # The resume claim only accepts closed/error rows: escalate the
-        # dead-token row first (guarded write — a concurrent close/claim owns
-        # its final state and no-ops this). No timeline notice here.
-        escalate_dead_token_session(service, session_id)
+        # #1121 codex P1 — generational CAS claim before resuming: an idle row
+        # is stamped error only while it is STILL idle (the guarded UPDATE's
+        # status predicate is the claim; zero rows = a concurrent close/claim
+        # owns the row now, and we abort instead of reopening it). An error row
+        # is already in the resumable generation — the claim below refuses a
+        # close that lands later (allow_closed=False).
+        if session["status"] == "idle":
+            if not service.db.update_studio_chat_session_if(
+                session_id,
+                status_in=("idle",),
+                status="error",
+                error_detail=_TOKEN_DEAD_ERROR_DETAIL,
+            ):
+                current = service.db.get_studio_chat_session(session_id) or {}
+                if current.get("status") == "closed":
+                    raise ConflictError("Chat session is closed")
+                raise ConflictError("Chat session is no longer idle")
+            service.store.publish_session(session_id)
         try:
-            service.resume_session(session_id, workspace_id, str(session["user_id"]))
+            # The lifecycle admission of the decorated service.resume_session,
+            # without its closed-accepting claim.
+            with service._lifecycle.starting():
+                resume_module.resume_session(
+                    service,
+                    session_id,
+                    workspace_id,
+                    str(session["user_id"]),
+                    allow_closed=False,
+                )
         except ConflictError:
             # A lock-bypassing resume (manual 「继续对话」) won the claim: ride
-            # its fresh runtime; any other conflict (cap, race loss with no
-            # live successor) stays a refusal.
+            # its fresh runtime; a row that raced to closed stays closed; any
+            # other conflict (cap, race loss with no live successor) stays a
+            # refusal.
             raced = service.runtime(session_id)
             if raced is not None and run_token_alive(service, raced):
                 return service.get_session(session_id, workspace_id), raced
+            if (service.db.get_studio_chat_session(session_id) or {}).get("status") == "closed":
+                raise ConflictError("Chat session is closed") from None
             raise
         runtime = service.runtime(session_id)
         if runtime is None or not run_token_alive(service, runtime):

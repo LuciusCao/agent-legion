@@ -24,9 +24,13 @@ export function useStudioChatQueue(
 ) {
   const [queue, setQueue] = useState<StudioChatQueuedMessage[]>([])
   const queueRef = useRef(queue)
+  // #1121 codex P2：submit 闭包捕获发起时的 sessionKey，落定回调经 ref 读
+  // 最新值比对——跨会话切换后迟到的失败信号不得触发 composer 草稿恢复。
+  const sessionKeyRef = useRef(sessionKey)
   useEffect(() => {
     queueRef.current = queue
-  }, [queue])
+    sessionKeyRef.current = sessionKey
+  })
   const { inFlightRef, sendInFlight, slowSend } = useInFlightSend(send)
 
   // 跨会话切换清空队列：排队消息只属于当时那个会话。
@@ -75,7 +79,13 @@ export function useStudioChatQueue(
       setQueue((current) => [...current, { id, text }])
       return Promise.resolve(true)
     }
-    return sendInFlight(text)
+    // #1121 codex P2：落定只剩 false 一种「恢复草稿」信号——切会话后迟到
+    // 的 false（含 #962 守卫丢弃的已成功发送，消息其实已入库）一律改判
+    // true， composer 不恢复旧会话文本进新会话输入框。
+    const submittedIn = sessionKey
+    return sendInFlight(text).then(
+      (ok) => ok || sessionKeyRef.current !== submittedIn
+    )
   }
 
   function remove(id: string) {

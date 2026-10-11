@@ -45,6 +45,51 @@ describe('useStudioChatQueue', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
+  it('suppresses the failure signal when the session switched mid-flight (#1121 codex P2)', async () => {
+    // 发送在旧会话在途、落定前切到新会话：迟到的 false（无论是真失败还是
+    // #962 归属守卫丢弃的已成功发送）都改判 true——composer 不得把旧会话
+    // 文本恢复进新会话输入框（跨会话误发/重复发送风险）。
+    let resolveSend: (sent: boolean) => void = () => {}
+    const send = vi.fn().mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    const { result, rerender } = renderQueue(send, {
+      busy: false,
+      sessionKey: 's1',
+    })
+    let settled: boolean | undefined
+    act(() => {
+      void result.current.submit('旧会话的消息').then((ok) => (settled = ok))
+    })
+    rerender({ busy: false, sessionKey: 's2' })
+    await act(async () => {
+      resolveSend(false)
+    })
+    expect(settled).toBe(true)
+  })
+
+  it('resolves false for a same-session failure so the draft is restored (#1121)', async () => {
+    let resolveSend: (sent: boolean) => void = () => {}
+    const send = vi.fn().mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    const { result } = renderQueue(send, { busy: false, sessionKey: 's1' })
+    let settled: boolean | undefined
+    act(() => {
+      void result.current.submit('同会话失败').then((ok) => (settled = ok))
+    })
+    await act(async () => {
+      resolveSend(false)
+    })
+    expect(settled).toBe(false)
+  })
+
   it('enqueues while busy without sending', () => {
     const send = vi.fn().mockResolvedValue(true)
     const { result } = renderQueue(send, { busy: true, sessionKey: 's1' })

@@ -312,3 +312,62 @@ def test_running_turn_stays_fail_closed_then_next_send_auto_resumes(chat) -> Non
     _wait_for(lambda: _idle(service, sid))
     assert _user_texts(service, sid, workspace_id) == ["first question", "after recovery"]
     assert len(_requests(_read_sink(script_path), "initialize")) == 2
+
+
+def test_auto_resume_aborts_when_close_wins_the_cas_race(chat, monkeypatch) -> None:
+    """#1121 codex P1: a close landing between the snapshot gate and the CAS
+    claim must abort the auto-resume — the guarded idle→error stamp matches
+    zero rows, nothing resumes, the just-closed session stays closed."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TEXT_SCRIPT)
+    sid = service.create_session(workspace_id, user_id, "fake-agent")["id"]
+    runtime = service.runtime(sid)
+    assert runtime is not None
+    _expire_token(service.db, runtime.token)
+    real_update = service.db.update_studio_chat_session_if
+
+    def close_then_cas(session_id, **kwargs):
+        # The CAS stamp is the only idle→error guarded write on this path.
+        if kwargs.get("status") == "error" and kwargs.get("status_in") == ("idle",):
+            service.close_session(sid, workspace_id)
+        return real_update(session_id, **kwargs)
+
+    monkeypatch.setattr(service.db, "update_studio_chat_session_if", close_then_cas)
+    with pytest.raises(ConflictError, match="closed"):
+        service.send_message(sid, workspace_id, "must not reopen me")
+
+    session = service.get_session(sid)
+    assert session["status"] == "closed"
+    assert session["closed_at"] is not None  # 仍是 close 的关闭，未被 resume 清掉
+    assert _user_texts(service, sid, workspace_id) == []
+    assert len(_requests(_read_sink(script_path), "initialize")) == 1  # no respawn
+
+
+def test_auto_resume_claim_refuses_a_close_landing_after_the_cas(chat, monkeypatch) -> None:
+    """#1121 codex P1, second window: the CAS succeeded (row error) but the
+    close lands before the resume claim — allow_closed=False makes the claim
+    fail and the session stays closed (manual resume keeps accepting closed)."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TEXT_SCRIPT)
+    sid = service.create_session(workspace_id, user_id, "fake-agent")["id"]
+    runtime = service.runtime(sid)
+    assert runtime is not None
+    _expire_token(service.db, runtime.token)
+    real_claim = service.db.claim_studio_chat_resume
+
+    def close_then_claim(session_id, **kwargs):
+        # The auto path must never claim a closed row (manual resume keeps
+        # the default allow_closed=True — not exercised here).
+        assert kwargs.get("allow_closed") is False
+        service.close_session(sid, workspace_id)
+        return real_claim(session_id, **kwargs)
+
+    monkeypatch.setattr(service.db, "claim_studio_chat_resume", close_then_claim)
+    with pytest.raises(ConflictError, match="closed"):
+        service.send_message(sid, workspace_id, "must not reopen me")
+
+    session = service.get_session(sid)
+    assert session["status"] == "closed"
+    assert session["closed_at"] is not None
+    assert _user_texts(service, sid, workspace_id) == []
+    assert len(_requests(_read_sink(script_path), "initialize")) == 1  # no respawn
