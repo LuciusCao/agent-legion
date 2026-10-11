@@ -53,6 +53,65 @@ edges:
 `
 
 describe('workflowYamlToDefinitionRecord', () => {
+  it('tolerates malformed after values on v1 instead of crashing (#1258 复验 P2-1)', () => {
+    // after: 5 / true / {x: 1}：合法 YAML、编辑中途自动保存可达。形状守卫
+    // 只校验 nodes/edges，after 非数组时 for..of 抛 TypeError——渲染期崩溃
+    // 违反本函数自书契约（形状残缺一律回退/容忍）。非数组 after 按无依赖
+    // 容忍（发布侧 loader 另拒）。
+    for (const badAfter of ['5', 'true', '{x: 1}']) {
+      const yaml = [
+        'key: demo',
+        'nodes:',
+        '  _start:',
+        '    type: start',
+        '  fetch:',
+        '    capability: fetch',
+        `    after: ${badAfter}`,
+        '  review:',
+        '    capability: review',
+        '    after: [fetch]',
+        '',
+      ].join('\n')
+      const record = workflowYamlToDefinitionRecord(yaml)
+      expect(record).not.toBeNull()
+      expect(record?.edges).toEqual([
+        { source: 'fetch', target: 'review', condition: null },
+      ])
+    }
+  })
+
+  it('does not derive edges for prototype-chain or non-string after deps (#1258 复验 P3-1)', () => {
+    // `dep in nodes` 走原型链：after: [toString] / [constructor] 对空 nodes
+    // 也为真，会为不存在节点派生幽灵端点边；after: [1] 这类非字符串 dep
+    // 同理不得漏进 edges（后端 _load_nodes 对未知 dep 是 raise）。
+    const protoYaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  fetch:',
+      '    capability: fetch',
+      '    after: [toString]',
+      '  review:',
+      '    capability: review',
+      '    after: [constructor]',
+      '',
+    ].join('\n')
+    expect(workflowYamlToDefinitionRecord(protoYaml)?.edges).toEqual([])
+    // 非字符串 dep：节点键 '1' 存在时 after: [1]（number）也不得派生。
+    const numericYaml = [
+      'key: demo',
+      'nodes:',
+      '  1:',
+      '    capability: one',
+      '  fetch:',
+      '    capability: fetch',
+      '    after: [1]',
+      '',
+    ].join('\n')
+    expect(workflowYamlToDefinitionRecord(numericYaml)?.edges).toEqual([])
+  })
+
   it('materializes v1 after into edges like loader._load_edges (#1258 codex P2)', () => {
     // v1（schema_version 缺省或显式 1）：依赖只存于节点 after，loader
     // 物化为边（loader._load_edges）。草稿 record 不同构物化时，画布与
