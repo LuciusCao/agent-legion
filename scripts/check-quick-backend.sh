@@ -9,6 +9,36 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# 仓库级治理检查（issue #1201）：治理对象跨语言 lane（前端文件体积预算、
+# velites/frontend 版本清单、docs freshness），而被治理路径的改动可能把
+# backend lane 整个裁掉（纯 frontend/velites/docs 变更），因此本组检查同时
+# 经 BACKEND_GATE_PHASE=governance 独立暴露：check-quick.sh 在 backend lane 被
+# 裁剪时以该 phase 兜底，CI 以 governance-guard job 兜底——两条路互补，同一次
+# 门禁恰好跑一遍。组内失败聚合：全部跑完再统一退出，首个违规不再 fail-fast
+# 短路后续检查（PR #1177 里 check_invariants 红掉掩盖 check_architecture 违规）。
+run_governance_checks() {
+  local failed=0
+
+  echo "=== Architecture Invariant Registry ==="
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_invariants || failed=1
+
+  echo "=== Version Manifests ==="
+  # 清单 ↔ lock 一致 + 发版解耦纪律（velites/frontend 版本线独立于仓库版本，
+  # 禁止锁步 bump——无谓的版本前进会击穿 velites 二进制指纹与 Docker 缓存层）。
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_versions || failed=1
+
+  echo "=== Architecture Contracts ==="
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_architecture || failed=1
+
+  echo "=== Architecture Docs Freshness ==="
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.generate_architecture --check || failed=1
+
+  if [[ "$failed" -ne 0 ]]; then
+    echo "Repo-wide governance checks failed (see the sections above)." >&2
+    return 1
+  fi
+}
+
 run_static_checks() {
   echo "=== Ruff Lint ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen ruff check .
@@ -16,30 +46,17 @@ run_static_checks() {
   echo "=== Ruff Format ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen ruff format --check .
 
-  echo "=== Architecture Invariant Registry ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_invariants
-
-  echo "=== Version Manifests ==="
-  # 清单 ↔ lock 一致 + 发版解耦纪律（velites/frontend 版本线独立于仓库版本，
-  # 禁止锁步 bump——无谓的版本前进会击穿 velites 二进制指纹与 Docker 缓存层）。
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_versions
+  echo "=== MyPy Type Check ==="
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen mypy server/app worker shared workspace_libs scripts/architecture scripts/quality workflow_nodes
 
   # The business skill shared-assets check (scripts/check-skills-shared.py)
   # retired with the business skill sources; the script itself leaves with the
   # business runtime code in P4.
-
-  echo "=== MyPy Type Check ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen mypy server/app worker shared workspace_libs scripts/architecture scripts/quality workflow_nodes
-
-  echo "=== Architecture Contracts ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_architecture
-
-  echo "=== Architecture Docs Freshness ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.generate_architecture --check
-
   # The spec health check (scripts/verify_specs.py) retired with the
   # unpublished docs/superpowers specs (f4e7e46f): the directory is
   # gitignored and absent, so the step had been passing vacuously.
+
+  run_governance_checks
 }
 
 run_tests() {
@@ -308,6 +325,9 @@ run_tests() {
 
 case "${BACKEND_GATE_PHASE:-all}" in
   static) run_static_checks ;;
+  # governance：仓库级治理检查单独成 phase，供 backend lane 被裁剪的门禁兜底
+  # （check-quick.sh 的 governance guard、CI 的 governance-guard job，#1201）。
+  governance) run_governance_checks ;;
   test) run_tests ;;
   all)
     run_static_checks

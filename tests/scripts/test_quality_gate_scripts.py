@@ -45,6 +45,7 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         "FRONTEND_TEST_PROJECT",
         "GATE_LANES",
         "GATE_SHARD",
+        "GATE_SKIP_GOVERNANCE",
         "GATE_SKIP_STATIC",
         "GATE_TIER",
         "KEEP_COVERAGE",
@@ -446,11 +447,12 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     _write_executable(
         scripts / "check-quick.sh",
         "#!/usr/bin/env bash\n"
-        'printf "quick:lanes=%s,cov=%s,mode=%s,tier=%s,append=%s,skip_static=%s,skip_worker_ui=%s\\n" '
+        'printf "quick:lanes=%s,cov=%s,mode=%s,tier=%s,append=%s,skip_static=%s,skip_worker_ui=%s,skip_governance=%s\\n" '
         '"${GATE_LANES:-unset}" "${AGENT_LEGION_COV:-unset}" '
         '"${FRONTEND_TEST_MODE:-unset}" "${GATE_TIER:-unset}" '
         '"${AGENT_LEGION_COV_APPEND:-0}" '
-        '"${GATE_SKIP_STATIC:-unset}" "${BACKEND_SKIP_WORKER_UI_TESTS:-unset}" >>"$GATE_LOG"\n',
+        '"${GATE_SKIP_STATIC:-unset}" "${BACKEND_SKIP_WORKER_UI_TESTS:-unset}" '
+        '"${GATE_SKIP_GOVERNANCE:-unset}" >>"$GATE_LOG"\n',
     )
     _write_executable(scripts / "check-deps-audit.sh", "#!/usr/bin/env bash\nexit 0\n")
     for command in ("uv", "npm"):
@@ -481,11 +483,14 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     # The postgres segment re-enters the quick gate for its test round only
     # (GATE_SKIP_STATIC=1, BACKEND_SKIP_WORKER_UI_TESTS=1): segment 1a already
     # ran the static checks and the tier-independent worker UI tests, so every
-    # check still runs exactly once per full gate.
+    # check still runs exactly once per full gate. Segment 2 trims the backend
+    # lane, which would trigger the repo-wide governance guard (issue #1201) —
+    # GATE_SKIP_GOVERNANCE=1 keeps the set at exactly one run (segment 1a's
+    # backend static phase already included it).
     assert quick_calls == [
-        "quick:lanes=backend,cov=1,mode=unset,tier=unit,append=0,skip_static=unset,skip_worker_ui=unset",
-        "quick:lanes=backend,cov=1,mode=unset,tier=postgres,append=1,skip_static=1,skip_worker_ui=1",
-        "quick:lanes=frontend rust,cov=unset,mode=coverage,tier=unset,append=0,skip_static=unset,skip_worker_ui=unset",
+        "quick:lanes=backend,cov=1,mode=unset,tier=unit,append=0,skip_static=unset,skip_worker_ui=unset,skip_governance=unset",
+        "quick:lanes=backend,cov=1,mode=unset,tier=postgres,append=1,skip_static=1,skip_worker_ui=1,skip_governance=unset",
+        "quick:lanes=frontend rust,cov=unset,mode=coverage,tier=unset,append=0,skip_static=unset,skip_worker_ui=unset,skip_governance=1",
     ]
     assert calls.count("npm:run build:bundle") == 1
     assert not any("test:coverage" in call for call in calls)
