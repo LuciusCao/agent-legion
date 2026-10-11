@@ -352,6 +352,11 @@ PUT  upload_url（浏览器 → S3 直传；v1 为单 PUT presign，大文件 mu
 POST /api/workspaces/{id}/materials/{mid}/complete  服务端校验 size/hash → ready
 ```
 
+`filename` 不得以 `/` 结尾、不得含 `.` / `..` 段（presign 422，#1119）：材料 key 为
+`{workspace_id}/{hash}/{filename}`，以 `/` 结尾的 key 会被 SeaweedFS 存成目录（内容被
+丢弃），下载与备份落不了文件系统；纪律与产物名 `valid_artifact_name` 同源，放宽点是
+材料名允许中间的 `/`（多段相对路径）。
+
 SigV4 presigned PUT 无法约束 Content-Length，size/hash 一律由 complete 时
 服务端 HEAD + 流式校验强制（v1 实现为完整读自算 sha256，简单可靠；上传端
 带 checksum 头后可免读）。`(workspace_id, content_hash)` 的 dedup 唯一性

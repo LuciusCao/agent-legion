@@ -35,12 +35,37 @@ class MaterialStorageUnavailableError(JobServiceError):
     """Object storage is not configured on this instance (routes map to 503)."""
 
 
+class InvalidMaterialFilenameError(JobServiceError):
+    """Filename cannot be used in an object key (routes map to 422, #1119)."""
+
+
 class MaterialVerificationError(JobServiceError):
     """Stored object does not match the declared size/hash (routes map to 422)."""
 
 
 class MaterialInUseError(JobServiceError):
     """Material is still referenced by a job input (routes map to 409)."""
+
+
+def _validate_filename(filename: str) -> None:
+    """Reject filenames that cannot round-trip as an object key (#1119).
+
+    The material key is ``{workspace_id}/{hash}/{filename}``: a key ending in
+    ``/`` is stored by SeaweedFS as a directory (its bytes are dropped) and
+    ``aws s3 sync`` cannot place it on a filesystem; ``.``/``..`` segments
+    normalize away on download. Same discipline as ``valid_artifact_name``
+    (job_artifact_objects) loosened to allow interior ``/`` — material names
+    are multi-segment relative paths, not single segments.
+    """
+    if filename.endswith("/"):
+        raise InvalidMaterialFilenameError(
+            f"filename must not end with '/': {filename!r} — object keys ending "
+            "in '/' are stored as directories and cannot be downloaded"
+        )
+    if any(segment in {".", ".."} for segment in filename.split("/")):
+        raise InvalidMaterialFilenameError(
+            f"filename must not contain '.' or '..' path segments: {filename!r}"
+        )
 
 
 def _record(row: dict[str, Any]) -> dict[str, Any]:
@@ -107,6 +132,7 @@ class MaterialsService:
         (upload dedup, no URL); a stale uploading/failed row with the same
         hash is reset to uploading so the upload can be retried.
         """
+        _validate_filename(filename)
         storage = self._require_storage()
         content_hash = content_hash.strip()
         deduplicated = False

@@ -86,6 +86,21 @@ def test_presign_without_storage_returns_503(client, monkeypatch) -> None:
     assert "not configured" in response.json()["detail"]
 
 
+def test_presign_rejects_directory_like_filename_with_422(client, storage) -> None:
+    """#1119：以 / 结尾或含 ./.. 段的 filename 直接 422，不留行。"""
+    workspace_id = _create_workspace(client)
+
+    for filename in ("folder/", "a/../b.txt"):
+        response = client.post(
+            f"/api/workspaces/{workspace_id}/materials/presign",
+            json={"filename": filename, "size_bytes": 0},
+        )
+        assert response.status_code == 422, response.text
+        assert filename in response.json()["detail"]
+
+    assert client.get(f"/api/workspaces/{workspace_id}/materials").json()["total"] == 0
+
+
 def test_presign_complete_roundtrip(client, storage) -> None:
     workspace_id = _create_workspace(client)
     payload = b"roundtrip"

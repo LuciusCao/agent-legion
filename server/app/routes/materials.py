@@ -17,6 +17,7 @@ from server.app.routes.material_bundles import create_material_bundles_router
 from server.app.services.job_errors import JobServiceError
 from server.app.services.material_bundles import MaterialBundlesService
 from server.app.services.materials import (
+    InvalidMaterialFilenameError,
     MaterialInUseError,
     MaterialsService,
     MaterialStorageUnavailableError,
@@ -71,7 +72,7 @@ class MaterialDeleteResponse(BaseModel):
 def _raise_material_http_error(error: JobServiceError) -> Never:
     if isinstance(error, MaterialStorageUnavailableError):
         raise HTTPException(status_code=503, detail=str(error)) from error
-    if isinstance(error, MaterialVerificationError):
+    if isinstance(error, (MaterialVerificationError, InvalidMaterialFilenameError)):
         raise HTTPException(status_code=422, detail=str(error)) from error
     if isinstance(error, MaterialInUseError):
         raise HTTPException(status_code=409, detail=str(error)) from error

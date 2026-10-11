@@ -11,6 +11,7 @@ import pytest
 from server.app.db.connection import connect_database
 from server.app.services.job_errors import ConflictError, NotFoundError
 from server.app.services.materials import (
+    InvalidMaterialFilenameError,
     MaterialInUseError,
     MaterialsService,
     MaterialStorageUnavailableError,
@@ -109,6 +110,40 @@ def test_presign_resets_failed_row_for_retry(service, storage) -> None:
     assert retry["material"]["id"] == result["material"]["id"]
     assert retry["material"]["status"] == "uploading"
     assert retry["upload_url"] is not None
+
+
+@pytest.mark.parametrize("filename", ["folder/", "/"])
+def test_presign_rejects_filename_ending_with_slash(service, storage, filename) -> None:
+    """#1119：以 / 结尾的 key 被 SeaweedFS 存成目录，下载/备份落不了盘。"""
+    with pytest.raises(InvalidMaterialFilenameError, match="must not end with '/'"):
+        service.presign(WORKSPACE_ID, filename=filename, size_bytes=0)
+
+    # 拒绝先于一切写：不留行、不签发 URL。
+    assert storage.presigned == []
+    assert service.list(WORKSPACE_ID, limit=10, offset=0)["total"] == 0
+
+
+@pytest.mark.parametrize(
+    "filename", [".", "..", "./a.txt", "a/../b.txt", "dir/./f.txt", "a/..", "..hidden/ok.txt/../x"]
+)
+def test_presign_rejects_dot_segments(service, storage, filename) -> None:
+    """#1119：. / .. 段在下载时会被路径归一化吃掉（对齐 valid_artifact_name 纪律）。"""
+    with pytest.raises(InvalidMaterialFilenameError, match="path segments"):
+        service.presign(WORKSPACE_ID, filename=filename, size_bytes=1)
+
+    assert storage.presigned == []
+    assert service.list(WORKSPACE_ID, limit=10, offset=0)["total"] == 0
+
+
+def test_presign_accepts_nested_relative_path(service, storage) -> None:
+    """中间带 / 的相对路径合法：材料 key 本就是多段路径，只禁目录形态。"""
+    result = service.presign(
+        WORKSPACE_ID, filename="dir/sub/file.txt", size_bytes=1, content_hash="hash-nested"
+    )
+
+    (presigned_key, _) = storage.presigned[0]
+    assert presigned_key == f"{WORKSPACE_ID}/hash-nested/dir/sub/file.txt"
+    assert result["material"]["filename"] == "dir/sub/file.txt"
 
 
 def test_complete_marks_ready_when_object_matches(service, storage) -> None:
