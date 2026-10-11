@@ -11,7 +11,7 @@ import json
 from typing import Any
 from uuid import uuid4
 
-from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.studio_chat_message_reads import StudioChatMessageReadQueriesMixin
 
 
 def _message_record(
@@ -28,8 +28,8 @@ def _message_record(
     }
 
 
-class StudioChatMessageQueriesMixin(ConnectionQueriesMixin):
-    """CRUD for studio_chat_messages."""
+class StudioChatMessageQueriesMixin(StudioChatMessageReadQueriesMixin):
+    """Writes to studio_chat_messages (reads inherited from the read mixin)."""
 
     def append_studio_chat_message(
         self, session_id: str, kind: str, role: str, content: dict[str, Any]
@@ -51,6 +51,7 @@ class StudioChatMessageQueriesMixin(ConnectionQueriesMixin):
         role: str,
         content: dict[str, Any],
         live_statuses: tuple[str, ...],
+        error_detail_is: str | None = None,
     ) -> dict[str, Any] | None:
         """Insert only while the session is live and not soft-deleted (#915).
 
@@ -58,16 +59,20 @@ class StudioChatMessageQueriesMixin(ConnectionQueriesMixin):
         by a concurrent close / soft delete. ``FOR SHARE`` on the session row
         makes a racing status/deleted_at UPDATE wait for this insert (or, if
         it committed first, re-evaluates the predicate on the new row
-        version), so a dead session never gets the row. None = not inserted.
+        version), so a dead session never gets the row. ``error_detail_is``
+        additionally pins the row's current ``error_detail`` inside the same
+        predicate (#1095: an orphan stamp's event never lands once another
+        generation rewrote the row with its own failure). None = not inserted.
         """
         message_id = uuid4().hex
         with self.connect() as conn:
             row = conn.execute(
-                "with live as (select id from studio_chat_sessions"
-                " where id=%s and status = any(%s) and deleted_at is null for share)"
+                "with live as (select id from studio_chat_sessions where id=%s and status = any(%s)"
+                " and deleted_at is null and error_detail = coalesce(%s, error_detail) for share)"
                 " insert into studio_chat_messages(id, session_id, kind, role, content_json)"
                 " select %s, live.id, %s, %s, %s from live returning seq, created_at",
-                (session_id, list(live_statuses), message_id, kind, role, json.dumps(content)),
+                (session_id, list(live_statuses), error_detail_is, message_id, kind, role)
+                + (json.dumps(content),),
             ).fetchone()
         if row is None:
             return None
@@ -80,41 +85,3 @@ class StudioChatMessageQueriesMixin(ConnectionQueriesMixin):
                 "update studio_chat_messages set content_json=%s where id=%s",
                 (json.dumps(content), message_id),
             )
-
-    def list_studio_chat_messages(
-        self, session_id: str, *, after_seq: int = 0, limit: int = 500
-    ) -> list[dict[str, Any]]:
-        """List messages after ``after_seq``, newest first capped at ``limit``.
-
-        The cap takes the LATEST rows, not the earliest (#411): a session
-        that outgrew the limit used to hand back its first 500 messages
-        while silently dropping everything newer — the UI re-entering such a
-        long conversation showed ancient history and the ongoing turn looked
-        like it had vanished. desc + reverse keeps the ascending contract of
-        the return value; incremental after_seq refills stay exact. Trade-
-        off: a client >limit behind refills the newest window and keeps a
-        gap (no before_seq API); remounting replaces the list wholesale.
-        """
-        with self._connect_read() as conn:
-            rows = conn.execute(
-                "select id, session_id, kind, role, content_json, seq, created_at"
-                " from studio_chat_messages where session_id=%s and seq>%s"
-                " order by seq desc limit %s",
-                (session_id, after_seq, limit),
-            ).fetchall()
-        messages = []
-        for row in reversed(rows):
-            record = dict(row)
-            record["content"] = json.loads(record.pop("content_json") or "{}")
-            messages.append(record)
-        return messages
-
-    def count_studio_chat_user_messages(self, session_id: str) -> int:
-        with self._connect_read() as conn:
-            row = conn.execute(
-                "select count(*) as n from studio_chat_messages"
-                " where session_id=%s and kind='text' and role='user'",
-                (session_id,),
-            ).fetchone()
-        assert row is not None  # count(*) always yields a row
-        return int(row["n"])

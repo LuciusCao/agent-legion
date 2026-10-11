@@ -1307,6 +1307,7 @@
     "server/app/jobs/queries/status.py": 43,
     "server/app/jobs/queries/studio_chat.py": 146,
     "server/app/jobs/queries/studio_chat_admission.py": 54,
+    "server/app/jobs/queries/studio_chat_message_reads.py": 40,
     "server/app/jobs/queries/studio_chat_messages.py": 67,
     "server/app/jobs/queries/studio_chat_resume.py": 27,
     "server/app/jobs/queries/studio_chat_retention.py": 37,

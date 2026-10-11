@@ -276,6 +276,49 @@ def test_gone_generation_replaced_by_a_new_resume_gets_no_stale_error(
     assert _session_publishes(bus, sid) == []
 
 
+@pytest.mark.parametrize("recheck", ["none", "gone"])
+def test_orphan_event_is_pinned_to_its_own_stamp_at_append(
+    chat, job_db, monkeypatch, recheck
+) -> None:
+    """Between the generation verdict and the append, a further resume can
+    claim the row and its new runtime fail back to error with its own detail
+    (its on_error already projected that). The orphan event's append is
+    pinned atomically to this request's stamp, so it never lands on top
+    (#1207 codex P2)."""
+    service, bus, _register, workspace_id, user_id = chat
+    sid = _orphan(job_db, workspace_id, user_id, "running")
+    rt = _StubRuntime()
+    calls = 0
+
+    def runtime(session_id: str):
+        nonlocal calls
+        calls += 1
+        if calls == 2 and recheck == "gone":
+            rt.closed = True
+            return rt
+        return None
+
+    real_append = service.store.append_message_if_live
+
+    def append_after_resume_failed(session_id, *args, **kwargs):
+        assert job_db.claim_studio_chat_resume(session_id, max_active=32)
+        job_db.update_studio_chat_session(
+            session_id, status="error", error_detail="agent process exited"
+        )
+        return real_append(session_id, *args, **kwargs)
+
+    monkeypatch.setattr(service, "runtime", runtime)
+    monkeypatch.setattr(service.store, "append_message_if_live", append_after_resume_failed)
+
+    with pytest.raises(StudioChatSessionInterruptedError):
+        service.send_message(sid, workspace_id, "hi")
+
+    row = job_db.get_studio_chat_session(sid)
+    assert (row["status"], row["error_detail"]) == ("error", "agent process exited")
+    assert job_db.list_studio_chat_messages(sid) == []
+    assert _session_publishes(bus, sid) == []
+
+
 def test_orphan_projected_by_send_is_resumable(chat, job_db) -> None:
     """End to end: runtime lost while the row says idle -> the send lands
     error, resume rebuilds the runtime, and the next send goes through."""
