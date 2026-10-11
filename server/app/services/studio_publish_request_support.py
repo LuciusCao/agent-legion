@@ -51,6 +51,12 @@ def _confirming_claim_heartbeat(job_db: JobQueries, request_id: str):
     只是延长存活窗口的辅助通道，把它做成失败点反而把罕见的 DB 抖动放大
     成发布失败。行被并发 resolve/过期后心跳自然停跳（谓词在续租语句里
     重查 status='confirming'，rowcount=0 即退出循环）。
+
+    Known limitation（刻意取舍，记录不修）：租约语权的反面是——一个活着
+    但挂起的发布进程（如 publish 卡在永不通的锁/网络调用上）会持续续租，
+    stale 清扫永不触发，confirming 行一直占位（拒绝新请求、不可取消）。
+    解除路径只有进程重启（心跳随之消失，300s 后清扫）或 publish 内部的
+    超时机制；本层不引入看门狗式强杀。
     """
     stop = threading.Event()
     thread = threading.Thread(

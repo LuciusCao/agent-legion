@@ -155,7 +155,9 @@ def test_stale_confirming_row_without_heartbeat_is_still_swept(client, job_db, m
         # age the claim past the threshold, then "crash". The confirm's
         # broad-except rollback would normally move the row back to pending,
         # so the death is completed by also swallowing the rollback (the
-        # resolve never runs — same shape as the #429 sweep test above).
+        # resolve never runs — same shape as
+        # test_stale_confirming_row_recovers_via_sweep in
+        # tests/routes/test_studio_publish_request_races.py).
         with service_job_db.connect() as conn:
             conn.execute(
                 "update studio_publish_requests set claimed_at=current_timestamp"

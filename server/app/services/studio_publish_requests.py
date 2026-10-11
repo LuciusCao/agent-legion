@@ -251,7 +251,7 @@ class StudioPublishRequestService:
                     # Publish refused (draft drifted after the agent's request): the
                     # request returns to pending — the human can fix the draft and
                     # confirm again, or cancel. Never resolve on a failed publish.
-                    self._job_db.resolve_publish_request(request_id, status="pending")
+                    self._rollback_claim_to_pending(workspace_id, request_id)
                     raise ConflictError("Publish validation failed: " + "; ".join(errors[:5]))
                 active_after = active_revision_id(self._job_db, workspace_id)
                 produced_revision = active_after is not None and active_after != active_before
@@ -276,13 +276,16 @@ class StudioPublishRequestService:
                     resolved = self._resolve_lost_race(request_id)
                 return iso_payload(resolved)
         except Exception:
-            # #204 broad-except audit: this outer except only runs when the
-            # heartbeat context's __enter__/__exit__ raised — thread.start()
-            # hitting the process thread limit is the known case (RuntimeError),
-            # but the context manager is a third-party-style boundary whose
-            # failure surface is not enumerable; every one of them means the
-            # publish never ran, so the claim must roll back and the caller
-            # must still see the original exception (re-raised below).
+            # #204 broad-except audit: this outer except covers the heartbeat
+            # context's __enter__/__exit__ — thread.start() hitting the
+            # process thread limit is the known case (RuntimeError), but the
+            # context manager is a boundary whose failure surface is not
+            # enumerable. Whether the claim rolls back is decided by
+            # body_entered, not by where the exception came from: an enter
+            # failure means the publish never ran (roll back, below); a
+            # hypothetical exit failure could fire AFTER the publish landed,
+            # and body_entered=True correctly skips the rollback either way.
+            # The caller always sees the original exception (re-raised below).
             # #1256 codex P2: the claim (pending → confirming) is already
             # committed when __enter__ fails before yield, so the body's inner
             # rollback never executes — without this path the row would sit
