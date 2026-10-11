@@ -12,7 +12,7 @@ from psycopg_pool import ConnectionPool
 from server.app.db.cursor import Cursor
 from server.app.db.dialect import ConnectSource, postgres_sql, resolve_dsn
 from server.app.db.dialect import DatabaseDsn as DatabaseDsn  # noqa: F401 (re-export)
-from server.app.db.pool_reset import note_return, record_checkout_origin
+from server.app.db.pool_reset import record_checkout_origin, settle_return
 from server.app.db.pools import close_database_pools as close_database_pools
 from server.app.db.pools import pool_for
 
@@ -66,21 +66,24 @@ class DatabaseConnection:
         self._closed = True
         # #438: observe BEFORE the pool's async reset — this is the only
         # synchronous point where a dirty return can be attributed to its
-        # checkout site. The pool rolls the transaction back either way.
-        # #439: observability must never block the return — if note_return
-        # raises (broken connection, unexpected info error) the checkout
-        # would leak all over again. Observability failure loses the
-        # observation only, not the connection.
+        # checkout site. #1077: the dirty transaction is also rolled back
+        # here, so it never depends on the pool worker's ReturnConnection
+        # (discarded when a pool close wins the race).
+        # #439: the return must never be blocked — if settle_return raises
+        # (broken connection, unexpected info error) the checkout would
+        # leak all over again. Its failure loses the observation/rollback
+        # only, not the connection.
         try:
-            note_return(self._raw)
+            settle_return(self._raw)
         except Exception:
-            # #204 broad-except audit: observability must not gain a leak
-            # path (#439). note_return's failures are a broken connection
-            # or an unexpected info error — un-narrowable here, and any
-            # raise would skip putconn and strand the checkout all over
-            # again. Losing the observation is strictly cheaper than losing
-            # the return; the pool reset hook is the independent backstop.
-            logger.debug("note_return failed during close (#439)", exc_info=True)
+            # #204 broad-except audit: the return path must not gain a leak
+            # path (#439). settle_return's failures are a broken connection
+            # or an unexpected info error (psycopg rollback errors are
+            # already absorbed inside) — un-narrowable here, and any raise
+            # would skip putconn and strand the checkout all over again.
+            # Losing the observation is strictly cheaper than losing the
+            # return; the pool reset hook is the independent backstop.
+            logger.debug("settle_return failed during close (#439)", exc_info=True)
         self._pool.putconn(self._raw)
 
     def __enter__(self) -> DatabaseConnection:
