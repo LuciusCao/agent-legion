@@ -7143,6 +7143,8 @@ export interface components {
     }
     /** StudioChatMessagesResponse */
     StudioChatMessagesResponse: {
+      /** Has More */
+      has_more: boolean
       /** Messages */
       messages: components['schemas']['StudioChatMessageRecord'][]
     }
@@ -15330,6 +15332,7 @@ export interface operations {
     parameters: {
       query?: {
         after_seq?: number
+        before_seq?: number | null
       }
       header?: never
       path: {

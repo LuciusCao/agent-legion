@@ -464,3 +464,111 @@ def test_allow_all_route_registers_before_permission_answer() -> None:
     allow_all = next(i for i, p in enumerate(paths) if p.endswith("/permissions/allow-all"))
     answer = next(i for i, p in enumerate(paths) if p.endswith("/permissions/{request_id}"))
     assert allow_all < answer
+
+
+def _seed_chat_history(client, job_db, message_count: int) -> tuple[str, str]:
+    """Direct-DB session + message rows: paging tests assert on stored rows,
+    not on agent turns, so no fake ACP subprocess is spawned."""
+    workspace_id = _create_workspace(client)
+    user_id = str(job_db.create_user("chat-history-user", password_hash=None)["id"])
+    session_id = job_db.create_studio_chat_session(workspace_id, user_id, "test-agent")
+    for i in range(message_count):
+        job_db.append_studio_chat_message(session_id, "text", "user", {"text": f"m{i}"})
+    return workspace_id, session_id
+
+
+def _get_messages(client, workspace_id: str, session_id: str, **params) -> dict:
+    response = client.get(f"{_session_url(workspace_id, session_id)}/messages", params=params)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_messages_default_page_is_latest_window_with_has_more(client, job_db) -> None:
+    # #411 regression + #1120 PR-3: the default/after_seq path keeps the
+    # 500-row window (no behavior change until the frontend pages up), and
+    # has_more tells the panel an earlier page exists.
+    workspace_id, session_id = _seed_chat_history(client, job_db, 600)
+    all_seqs = [m["seq"] for m in job_db.list_studio_chat_messages(session_id)]
+
+    payload = _get_messages(client, workspace_id, session_id)
+    seqs = [m["seq"] for m in payload["messages"]]
+    assert seqs == all_seqs[-500:]
+    assert payload["has_more"] is True
+
+
+def test_messages_before_seq_pages_upward_without_gaps(client, job_db) -> None:
+    # Page-up pages are 100 rows (user-initiated wait, payload control).
+    workspace_id, session_id = _seed_chat_history(client, job_db, 250)
+    all_seqs = [m["seq"] for m in job_db.list_studio_chat_messages(session_id)]
+
+    page1 = _get_messages(client, workspace_id, session_id, before_seq=all_seqs[-1] + 1)
+    page2 = _get_messages(client, workspace_id, session_id, before_seq=page1["messages"][0]["seq"])
+    page3 = _get_messages(client, workspace_id, session_id, before_seq=page2["messages"][0]["seq"])
+
+    assert page1["has_more"] is True
+    assert page2["has_more"] is True
+    assert page3["has_more"] is False
+    seqs1 = [m["seq"] for m in page1["messages"]]
+    seqs2 = [m["seq"] for m in page2["messages"]]
+    seqs3 = [m["seq"] for m in page3["messages"]]
+    assert seqs1 == all_seqs[150:]
+    assert seqs2 == all_seqs[50:150]
+    assert seqs3 == all_seqs[:50]
+    # Seamless tiling: consecutive pages neither overlap nor leave a gap.
+    assert seqs3 + seqs2 + seqs1 == all_seqs
+
+
+def test_messages_before_seq_exact_page_boundary(client, job_db) -> None:
+    # The PR-4 flow: page up from the default 500-row window; the older side
+    # holding exactly one full page must not report has_more.
+    workspace_id, session_id = _seed_chat_history(client, job_db, 600)
+    all_seqs = [m["seq"] for m in job_db.list_studio_chat_messages(session_id, limit=1000)]
+
+    page0 = _get_messages(client, workspace_id, session_id)
+    assert [m["seq"] for m in page0["messages"]] == all_seqs[100:]
+    page1 = _get_messages(client, workspace_id, session_id, before_seq=page0["messages"][0]["seq"])
+    assert [m["seq"] for m in page1["messages"]] == all_seqs[:100]
+    assert page1["has_more"] is False
+
+
+def test_messages_before_seq_empty_page_has_more_false(client, job_db) -> None:
+    # 0 rows must stay distinguishable from "no earlier history": both are
+    # messages=[], and has_more=false is what stops the panel from refetching.
+    workspace_id, session_id = _seed_chat_history(client, job_db, 5)
+    first = _get_messages(client, workspace_id, session_id)["messages"][0]
+    payload = _get_messages(client, workspace_id, session_id, before_seq=first["seq"])
+    assert payload["messages"] == []
+    assert payload["has_more"] is False
+
+
+def test_messages_after_seq_and_before_seq_are_mutually_exclusive(client, job_db) -> None:
+    workspace_id, session_id = _seed_chat_history(client, job_db, 3)
+    response = client.get(
+        f"{_session_url(workspace_id, session_id)}/messages",
+        params={"after_seq": 1, "before_seq": 3},
+    )
+    assert response.status_code == 422
+
+
+def test_messages_cursor_validation(client, job_db) -> None:
+    workspace_id, session_id = _seed_chat_history(client, job_db, 3)
+    url = f"{_session_url(workspace_id, session_id)}/messages"
+    assert client.get(url, params={"before_seq": 0}).status_code == 422
+    assert client.get(url, params={"before_seq": -1}).status_code == 422
+    assert client.get(url, params={"before_seq": "abc"}).status_code == 422
+    assert client.get(url, params={"after_seq": -1}).status_code == 422
+
+
+def test_messages_default_response_unchanged_for_short_history(client, job_db) -> None:
+    # Regression: without before_seq the endpoint behaves exactly as before
+    # (ascending full history, after_seq refill), now with has_more=false.
+    workspace_id, session_id = _seed_chat_history(client, job_db, 3)
+    payload = _get_messages(client, workspace_id, session_id)
+    assert [m["content"]["text"] for m in payload["messages"]] == ["m0", "m1", "m2"]
+    assert payload["has_more"] is False
+
+    refill = _get_messages(
+        client, workspace_id, session_id, after_seq=payload["messages"][1]["seq"]
+    )
+    assert [m["content"]["text"] for m in refill["messages"]] == ["m2"]
+    assert refill["has_more"] is False
