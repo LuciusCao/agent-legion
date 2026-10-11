@@ -123,6 +123,7 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         "FRONTEND_TEST_PROJECT",
         "GATE_LANES",
         "GATE_SHARD",
+        "GATE_SKIP_GOVERNANCE",
         "GATE_SKIP_STATIC",
         "GATE_TIER",
         "KEEP_COVERAGE",
@@ -270,6 +271,88 @@ def test_backend_full_coverage_defers_floor_to_combined_report(
     # the AGENTS.md discipline assumes the unit-tier default.
     assert "-m not postgres" in calls
     assert "agent_legion_unit_offline" in calls
+
+
+def test_backend_governance_phase_runs_repo_wide_checks_only(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
+    """BACKEND_GATE_PHASE=governance (issue #1201) runs the repo-wide
+    governance set — the checks whose scope spans every lane — and nothing
+    lane-bound: ruff/mypy/pytest stay with the backend lane's own phases."""
+    calls = _run_shared_backend_gate(
+        backend_gate_layout, tmp_path, {"BACKEND_GATE_PHASE": "governance"}
+    )
+
+    assert "run --frozen python -m scripts.check_invariants" in calls
+    assert "run --frozen python -m scripts.check_versions" in calls
+    assert "run --frozen python -m scripts.check_architecture" in calls
+    assert "run --frozen python -m scripts.generate_architecture --check" in calls
+    assert "ruff" not in calls
+    assert "mypy" not in calls
+    assert "pytest" not in calls
+
+
+def test_backend_governance_phase_aggregates_failures(tmp_path: Path) -> None:
+    """A failing governance check must not mask the rest of the set: every
+    section runs and reports before the phase exits non-zero (fail-fast
+    ordering masked a second budget violation on PR #1177). Per-case layout:
+    replacing the uv stub mutates the layout, which the shared fixture's
+    read-only contract forbids."""
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    # The backend lane sources the shared job-count helper.
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
+        'case " $* " in\n'
+        '  *" scripts.check_invariants "*) exit 1 ;;\n'
+        "esac\n",
+    )
+
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "BACKEND_GATE_PHASE": "governance",
+            "GATE_LOG": str(gate_log),
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 1
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "run --frozen python -m scripts.check_invariants" in calls
+    # The later checks still ran despite the first one's failure.
+    assert "run --frozen python -m scripts.check_architecture" in calls
+    assert "run --frozen python -m scripts.generate_architecture --check" in calls
+    assert "Repo-wide governance checks failed" in result.stderr
+
+
+def test_backend_static_phase_still_includes_governance_checks(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
+    """The governance set stays inside the backend lane's static phase: the
+    governance phase and CI's governance-guard job are its complement for
+    trimmed lanes, not a move — dropping it here would leave backend-lane
+    gates with no budget enforcement at all."""
+    calls = _run_shared_backend_gate(
+        backend_gate_layout, tmp_path, {"BACKEND_GATE_PHASE": "static"}
+    )
+
+    assert "run --frozen ruff check ." in calls
+    assert "run --frozen mypy" in calls
+    assert "run --frozen python -m scripts.check_invariants" in calls
+    assert "run --frozen python -m scripts.check_versions" in calls
+    assert "run --frozen python -m scripts.check_architecture" in calls
+    assert "run --frozen python -m scripts.generate_architecture --check" in calls
 
 
 def test_backend_aff_tier_falls_back_to_unit_without_index(

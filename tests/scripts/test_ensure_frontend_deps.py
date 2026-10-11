@@ -415,6 +415,7 @@ def test_interrupted_backup_cleanup_keeps_committed_tree(tmp_path: Path) -> None
             },
         ),
     )
+    proc_timed_out = False
     try:
         # rm 桩挂起 = npm ci 已成功、stamp 已写、正在清备份（提交点已过）。
         for _ in range(200):
@@ -427,10 +428,16 @@ def test_interrupted_backup_cleanup_keeps_committed_tree(tmp_path: Path) -> None
         rm_pid = int(rm_pid_file.read_text().strip())
         os.kill(rm_pid, signal.SIGKILL)  # rm 失败 → set -e → EXIT trap
     finally:
-        proc.wait(timeout=60)
-        if proc.poll() is None:
+        # 回收不被 wait 超时跳过（#1205）：TimeoutExpired 路径兜底 kill 并
+        # reap；超时不以异常掩盖在飞的原失败，降级为 happy path 的响亮断言。
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
             proc.kill()
+            proc.wait(timeout=10)
+            proc_timed_out = True
     out, err = proc.communicate()
+    assert not proc_timed_out, "脚本未在 rm 被杀后 60s 内退出（已兜底 kill）"
 
     # trap 未降级成功状态：非零退出（rm 被杀）但已提交的新树完整存活，
     # 旧 marker 不在（恢复回去的会是它），备份残留（无害锚点）。

@@ -189,7 +189,7 @@ describe('WorkspaceMainPage', () => {
       revision: 0,
       jobsWorkspaceId: 'ws1',
       isLoading: false,
-      error: null,
+      listLoadError: null,
       selectedIds: new Set(),
       selectionMode: 'explicit',
       selectionFilter: null,

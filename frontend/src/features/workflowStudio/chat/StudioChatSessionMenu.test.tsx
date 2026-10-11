@@ -100,14 +100,19 @@ describe('StudioChatSessionMenu', () => {
     expect(props.onDelete).not.toHaveBeenCalled()
     // 运行中的会话：确认文案提示会先关闭。
     expect(screen.getByRole('alert')).toHaveTextContent('会先关闭运行中的会话')
+    // #1129：确认区行内展开，标题行保持不动、始终可见。
+    const list = screen.getByRole('list', { name: '会话列表' })
+    expect(within(list).getByText('梳理审核节点')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(props.onDelete).not.toHaveBeenCalled()
+    expect(within(list).getByText('梳理审核节点')).toBeInTheDocument()
 
     fireEvent.click(screen.getByLabelText('删除会话 旧对话'))
     expect(screen.getByRole('alert')).not.toHaveTextContent('会先关闭')
     // #924：删除是 danger 次要操作，文案明确不可恢复。
     expect(screen.getByRole('alert')).toHaveTextContent('删除后不可恢复')
     expect(screen.getByRole('alert')).toHaveAttribute('data-tone', 'danger')
+    expect(within(list).getByText('旧对话')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '永久删除' }))
     await waitFor(() => expect(props.onDelete).toHaveBeenCalledWith('s2'))
   })

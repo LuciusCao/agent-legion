@@ -157,6 +157,7 @@ server/app/
 | POST | `/workspaces/{workspace_id}/jobs/{job_id}/nodes/{node_key}/approval` | `decide_approval` | routes/job_approvals.py |
 | GET | `/workspaces/{workspace_id}/jobs/{job_id}/approvals` | `list_approval_decisions` | routes/job_approvals.py |
 | GET | `/jobs/{job_id}/artifacts/{artifact_name}/raw` | `get_artifact_raw` | routes/job_artifact_raw.py |
+| GET | `/jobs/{job_id}/raw-artifacts/{artifact_name:path}` | `get_artifact_raw_nested` | routes/job_artifact_raw_nested.py |
 | GET | `/jobs/{job_id}/artifacts/{artifact_name:path}` | `get_artifact` | routes/job_artifacts.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/log` | `get_job_run_log` | routes/job_artifacts.py |
 | POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/job_batches.py |
@@ -747,9 +748,13 @@ server/app/
   `AGENT_LEGION_BUDGET_MONOTONICITY_SHALLOW=1`。本地要跑和 CI merge ref
   完全一致的判定时设 `AGENT_LEGION_BUDGET_BASE`（如 `origin/main`）：
   锚点由 HEAD/HEAD^ 变为 HEAD + 该 base ref，release-train opt-out 优先于
-  该覆盖，base ref 无法解析硬失败（错误带 fetch 指引）。超出预算的文件必须拆分或回退。
-  ceiling 按有效行数计
-  （排除注释行、空行与 Python docstring 行（#610），实现见 `scripts/architecture/effective_lines.py`，`.sql` 的
+  该覆盖（CI 在 release/* → main 的 PR 与合并后 push 重跑时设
+  `AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN=1` 让锚点只看 HEAD，#249），
+  base ref 无法解析硬失败（错误带 fetch 指引）。注意这三个锚点环境变量会被
+  `tests/conftest.py` 在 pytest 会话启动时清除，需要它们的测试用 monkeypatch 自设。
+  超出预算的文件必须拆分或回退。ceiling 按有效行数计
+  （排除注释行、空行与 Python docstring 行（#610）——与代码混行的 docstring
+  尾行仍计费，同尾注释纪律，实现见 `scripts/architecture/effective_lines.py`，`.sql` 的
   `--` 注释行同样排除），压缩注释
   对预算没有帮助。此外 production 文件有
   800 行绝对上限（`production.max_lines`，按原始行数计），豁免也不能突破；#293 起
@@ -945,7 +950,7 @@ Token Usage 收集并展示 agent 节点（pi / velites runtime）运行时的 t
 
 ### Job Detail 产物预览（issue #11）
 
-- **raw 字节端点** `GET /api/jobs/{job_id}/artifacts/{artifact_name}/raw`（`routes/job_artifact_raw.py`）：本地 job_dir 副本走 `FileResponse`（原生 Range，媒体可拖动进度条），仅存对象存储的产物走 64 KiB 分块 `StreamingResponse`（`BackgroundTask` 兜底关流）。**content-type 白名单即安全边界**：仅 image/video/audio/pdf 扩展名映射真实 media type 并 `inline` 渲染，其余（含 .html/.svg——同源渲染即脚本执行面）一律 `application/octet-stream` + `attachment` 强制下载。
+- **raw 字节端点**（两条，`routes/job_artifact_raw.py` / `job_artifact_raw_nested.py`）：嵌套名走独立前缀 `GET /api/jobs/{job_id}/raw-artifacts/{artifact_name:path}`（与文本路由零撞形，#1178 codex 第 6 轮收口——贪婪后缀形态会把名为 `x/raw` 的产物文本 URL 按前缀名吞掉），根名兼容形态 `GET /api/jobs/{job_id}/artifacts/{artifact_name}/raw` 保留。两条均为 manifest-first（`open_raw_current`）：对象存储权威副本优先、本地 job_dir 只在无 manifest 行时使用（#1178 codex P2——远程 Worker 重跑后本地缓存可能滞后）；本地副本走 `FileResponse`（原生 Range，媒体可拖动进度条），对象存储走 64 KiB 分块 `StreamingResponse`（`BackgroundTask` 兜底关流）。**content-type 白名单即安全边界**：仅 image/video/audio/pdf 扩展名映射真实 media type 并 `inline` 渲染，其余（含 .html/.svg——同源渲染即脚本执行面）一律 `application/octet-stream` + `attachment` 强制下载。
 - **文本端点**（`{artifact_name:path}`）遇本地二进制产物的 `UnicodeDecodeError` 按 404 降级（字节由 raw 端点负责），不冒泡 500。
 - **workspace 级预览配置**：`preview_config_json` 存 `{"hidden": [<artifact name>, ...]}`；settings payload 键 `previewHidden`（默认 `[]` = 全部显示，工作流升级产生的新产物自动可见）。写路径两条：`PATCH /settings/preview` section（job 详情左栏勾选菜单，立即生效）与 `PUT /configuration` 全量保存（设置页 draft；缺省 `previewHidden` = 沿用已存值，旧客户端不抹勾选）。
 
@@ -970,7 +975,7 @@ Token Usage 收集并展示 agent 节点（pi / velites runtime）运行时的 t
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码、workspace API token 请求限流桶参数）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`、`AGENT_LEGION_API_TOKEN_RATE_LIMIT_PER_MINUTE` / `_BURST`，默认 60 / 20，#738）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
-外部服务集成走实例级外部服务连接（SECURITY-EXTERNAL-CONNECTION-001），不经全局 yaml 段配置（全局 `cms:` 段已退役，写进任何 split yaml 会撞退役文件校验报错）：连接由 admin 在全局设置「外部服务连接」或 admin API（`GET/POST /api/admin/connections`、`PUT/DELETE /api/admin/connections/{key}`、`POST /api/admin/connections/{key}/test`、`GET /api/admin/connection-types`）维护，存 DB `external_connections`（只存非敏感配置）；敏感字段转入实例 vault（`instance_secrets`，Fernet 加密，连接配置里只留 `conn:<key>:<field>` 引用），鉴权换来的 token 加密缓存在 `connection_tokens`，过期在父连接行锁下单飞刷新（`server/app/services/connection_tokens.py`）。平台内置 `static_bearer` 与通用 `hmac_token`（HMAC 签名换 token）adapter（`server/app/services/connection_adapters.py` / `connection_adapter_hmac.py`）；业务专属鉴权协议随业务节点迁出，不再由平台携带。节点 config 只写 `connection: "<key>"` 引用连接 + 业务参数（出厂默认值声明在 capability 的 `config_schema`，沿「schema defaults → 节点 config → workspace 覆盖」链解析，Settings UI 可改）。env `CMS_*` / `AGENT_LEGION_CMS_TOKEN` 运行时通道已退役：升级后首次启动由 schema v34 迁移（`server/app/db/migrations/external_connections.py`）把 env 凭据与 workspace 节点旧配置收编进连接，此后 env 不再被读取。explicit 单文件配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。
+外部服务集成走实例级外部服务连接（SECURITY-EXTERNAL-CONNECTION-001），不经全局 yaml 段配置（全局 `cms:` / `asr:` 段已退役，写进任何 split yaml 会撞退役文件校验报错）：连接由 admin 在全局设置「外部服务连接」或 admin API（`GET/POST /api/admin/connections`、`PUT/DELETE /api/admin/connections/{key}`、`POST /api/admin/connections/{key}/test`、`GET /api/admin/connection-types`）维护，存 DB `external_connections`（只存非敏感配置）；敏感字段转入实例 vault（`instance_secrets`，Fernet 加密，连接配置里只留 `conn:<key>:<field>` 引用），鉴权换来的 token 加密缓存在 `connection_tokens`，过期在父连接行锁下单飞刷新（`server/app/services/connection_tokens.py`）。平台内置 `static_bearer` 与通用 `hmac_token`（HMAC 签名换 token）adapter（`server/app/services/connection_adapters.py` / `connection_adapter_hmac.py`）；业务专属鉴权协议随业务节点迁出，不再由平台携带。节点 config 只写 `connection: "<key>"` 引用连接 + 业务参数（出厂默认值声明在 capability 的 `config_schema`，沿「schema defaults → 节点 config → workspace 覆盖」链解析，Settings UI 可改）。env `CMS_*` / `AGENT_LEGION_CMS_TOKEN` 运行时通道已退役：升级后首次启动由 schema v34 迁移（`server/app/db/migrations/external_connections.py`）把 env 凭据与 workspace 节点旧配置收编进连接，此后 env 不再被读取。explicit 单文件配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。
 
 `config/workflow.yaml` 的 `executors` 段已随 executor 概念整体退役（P-0.5，schema v47 drop 定义/allocation 两表，EXEC-CODE-POOL-001）：非 Agent 路由节点一律进隐含 code 池，池容量 = 实例设置 `code_capacity`（#389 改述：本地兜底执行并发上限——远程 code Worker 在线时任务优先远程执行，此值只约束宿主本地回落的并发；0 = 纯控制面模式，本地执行栈不组装），lease 行写常量 `'code'`；节点级并发经 `workspace_node_limits` 声明（远程 code claim 同样按节点计数）。code 节点的可调参数只剩一个声明层——节点 `config_schema:` 块（随 revision 快照版本化），平台保留执行键 `timeout_seconds` / `sandbox_network` 自动合并进每个 code 路由节点的有效 schema。
 

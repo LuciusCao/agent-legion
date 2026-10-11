@@ -358,7 +358,46 @@ run_round() {
 if [[ "${GATE_SKIP_STATIC:-0}" == "1" ]]; then
   echo "Static round skipped (GATE_SKIP_STATIC=1; test rounds only)."
 else
-  run_round "static-check" "static" "static" "static"
+  # 仓库级治理检查兜底（issue #1201）：check_invariants / check_versions /
+  # check_architecture / generate_architecture 的治理对象覆盖 frontend、
+  # velites 与 docs 文件，但它们挂在 backend lane 的静态轮里——纯前端等
+  # lane 裁剪会把它们一并裁掉（PR #1177 实测：两处体积超限本地两轮全绿）。
+  # backend lane 启用时其静态轮已包含本组检查；被裁剪时这里以 governance
+  # phase 补跑，与静态轮并行（秒级、语言无关），两种形态下恰好各跑一遍。
+  # GATE_SKIP_GOVERNANCE=1 只由 scripts/check.sh 的 frontend+rust 段设置
+  # （其 backend 段已跑过本组），与 BACKEND_SKIP_WORKER_UI_TESTS 同一去重惯例。
+  governance_pid=""
+  governance_log="$log_dir/governance.log"
+  if ! lane_enabled backend && [[ "${GATE_SKIP_GOVERNANCE:-0}" != "1" ]]; then
+    if [[ -x "$ROOT_DIR/scripts/check-quick-backend.sh" ]]; then
+      echo "Backend lane trimmed; running repo-wide governance checks alongside the static round (issue #1201)."
+      BACKEND_GATE_PHASE=governance \
+        "$ROOT_DIR/scripts/check-quick-backend.sh" >"$governance_log" 2>&1 &
+      governance_pid=$!
+    else
+      # Gate-script tests copy this script into fixture repos without it.
+      echo "check-quick-backend.sh not present; skipping repo-wide governance checks."
+    fi
+  fi
+  # 静态轮与 guard 任一失败都统一收口：run_round 的失败不能让 set -e 在
+  # wait 之前杀掉门禁——后台治理进程会越过 worktree 锁与机器级 slot 的释放
+  # 继续运行，诊断也随之丢失（codex #1223 R1 P2）；先收状态、等齐治理进程、
+  # 两边诊断都落地后再统一退出。
+  static_status=0
+  run_round "static-check" "static" "static" "static" || static_status=$?
+  if [[ -n "$governance_pid" ]]; then
+    governance_status=0
+    wait "$governance_pid" || governance_status=$?
+    print_lane_output "Repo-wide Governance" "$governance_log"
+    if [[ "$governance_status" -ne 0 ]]; then
+      keep_log_dir="$log_dir"
+      echo "Repo-wide governance checks failed (status=$governance_status)." >&2
+      [[ "$static_status" -eq 0 ]] && static_status=1
+    fi
+  fi
+  if [[ "$static_status" -ne 0 ]]; then
+    exit "$static_status"
+  fi
 fi
 # Integration step: the OpenAPI contract spans backend (schema export boots the
 # full app) and frontend (type generation), so it runs once here instead of

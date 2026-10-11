@@ -22,7 +22,6 @@ export function pauseActions(set: JobStoreSet, get: () => JobState) {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Batch pause failed'
-        set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
       } finally {
@@ -43,7 +42,6 @@ export function pauseActions(set: JobStoreSet, get: () => JobState) {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Batch resume failed'
-        set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
       } finally {

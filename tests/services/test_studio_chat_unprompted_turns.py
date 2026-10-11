@@ -519,3 +519,31 @@ def test_loaded_journal_without_usable_baseline_never_replays(held_watcher, tmp_
     with path.open("a") as handle:
         handle.writelines(json.dumps(record) + "\n" for record in CRON_TURN)
     assert "CRON-REPORT-938: 定时检查完成" in _texts(poll())
+
+
+def test_failed_baseline_never_replays_history(held_watcher, tmp_path, monkeypatch):
+    """#1228 codex P1：baseline 失败（文件替换/瞬时 I/O 错误）时 tail 不得
+    提前认领——否则下一轮跳过 baseline、从文件头重读，把历史 unprompted
+    turn 重复持久化。恢复后重新 baseline：历史不落行，新内容照常投影。"""
+    _service, _sid, runtime, _bus, poll = held_watcher
+    path = _wire(tmp_path, "session_flaky")
+    with path.open("a") as handle:  # 先于本次进程的历史
+        handle.writelines(json.dumps(record) + "\n" for record in TASK_TURN)
+    runtime.handle.loaded_existing = True
+    runtime.wire_baseline = None  # 无可用 baseline → baseline_on_locate
+    attempts = {"n": 0}
+    real_baseline = unprompted_turns.WireTail.baseline
+
+    def flaky_baseline(tail):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise OSError("transient replace")
+        real_baseline(tail)
+
+    monkeypatch.setattr(unprompted_turns.WireTail, "baseline", flaky_baseline)
+    unprompted_turns.start_unprompted_watcher(_service, _sid, runtime, "session_flaky")
+    poll()  # baseline 抛错：watcher 记日志、本轮无落行
+    assert _texts(poll()) == []  # 恢复后重新 baseline，历史不重放
+    with path.open("a") as handle:
+        handle.writelines(json.dumps(record) + "\n" for record in CRON_TURN)
+    assert "CRON-REPORT-938: 定时检查完成" in _texts(poll())

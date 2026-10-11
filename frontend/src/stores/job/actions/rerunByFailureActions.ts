@@ -48,7 +48,6 @@ export function rerunByFailureActions(set: JobStoreSet, get: () => JobState) {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Rerun by failure failed'
-        set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
       } finally {
