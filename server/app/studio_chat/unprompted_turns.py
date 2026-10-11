@@ -192,12 +192,10 @@ class UnpromptedTurnWatcher:
             path = self.locate()
             if path is None:
                 return
-            tail = WireTail(path)
+            self.tail = WireTail(path)
             if self.baseline_on_locate:
-                tail.baseline()
-                self.tail = tail
+                self.tail.baseline()
                 return
-            self.tail = tail
         if not self.pending:
             # A backlog left by a failed append pauses the journal: it is
             # persisted first, so retries never grow it (#1044).
@@ -215,7 +213,11 @@ class UnpromptedTurnWatcher:
             ended = False
             while self.pending:
                 kind, role, content = self.pending[0]
-                store.append_message(self.session_id, kind, role, content)
+                if kind == "tool_call":
+                    # #1120: tool.call/tool.result pairs coalesce into one row.
+                    store.append_tool_call(self.session_id, runtime, content)
+                else:
+                    store.append_message(self.session_id, kind, role, content)
                 self.pending.pop(0)
                 if kind == "tool_call" and is_agent_legion_tool_call(content):
                     runtime.mcp_observed = True
