@@ -7,6 +7,7 @@ import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges
 import { selectedNodeDetails } from '../shared/workflowStudioModel'
 import type { SelectedWorkflowNodeDetails } from '../shared/workflowStudioModel'
 import { ghostDraftNodeDetails } from '../canvas/workflowStudioGhostNode'
+import { workflowYamlToDefinitionRecord } from '../canvas/workflowYamlDraftRecord'
 
 type WorkflowEdgeResponse = components['schemas']['WorkflowEdgeResponse']
 
@@ -17,6 +18,10 @@ type WorkflowEdgeResponse = components['schemas']['WorkflowEdgeResponse']
  * 三级都落空返回 null，由 inspector 显示空态/「未加载 workflow」。
  * 草稿优先的理由：已发布 workflow 的节点被切型后，header/sections 必须
  * 反映草稿类型，否则受控选择器停在旧类型、用户无法再选它撤销切换。
+ * 草稿优先只在完整草稿可渲染时成立（#405 codex P1）：判定与画布同源
+ * （workflowYamlToDefinitionRecord）——语法合法但形状无效的草稿（如
+ * edges 是 mapping 而非数组）画布回退已发布 workflow，inspector 若仍
+ * 先跑 ghost 解析会对 edges 直接 .filter()，渲染期抛异常。
  */
 export function inspectorNodeDetails(
   source: {
@@ -26,8 +31,12 @@ export function inspectorNodeDetails(
   },
   selectedNodeKey: string | null
 ): SelectedWorkflowNodeDetails | null {
+  const draftRenderable =
+    workflowYamlToDefinitionRecord(source.definitionYaml) !== null
   return (
-    ghostDraftNodeDetails(source.definitionYaml, selectedNodeKey) ??
+    (draftRenderable
+      ? ghostDraftNodeDetails(source.definitionYaml, selectedNodeKey)
+      : null) ??
     selectedNodeDetails(source.workflow, selectedNodeKey) ??
     compareGhostNodeDetails(source.compareSummary ?? null, selectedNodeKey)
   )

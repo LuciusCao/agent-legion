@@ -400,6 +400,56 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     expect(selector).toHaveValue('code')
   })
 
+  it('falls back to the published baseline when the draft is shape-invalid (#405 codex P1)', async () => {
+    // 语法合法但形状无效（edges 是 mapping 而非数组）：画布按
+    // workflowYamlToDefinitionRecord 判定回退已发布 workflow；inspector
+    // 草稿优先必须同一判定——否则 ghost 解析对 edges 直接 .filter()，
+    // 渲染期抛异常。草稿里 gate 已切成 code，基线是 approval：回退成功
+    // 的可见证据就是选择器显示基线类型 approval（而非草稿的 code）。
+    const shapeBrokenDraft = approvalGateYaml
+      .replace('    type: approval', '    type: code\n    capability: gate_cap')
+      .replace(
+        'edges:\n  - from: _start\n    to: draft_gen\n',
+        'edges:\n  notalist: true\n'
+      )
+    render(
+      <WorkflowNodeInspector
+        workflow={
+          {
+            key: 'demo',
+            label: 'Demo',
+            nodes: [
+              {
+                key: '_start',
+                node_type: 'start',
+                label: 'Start',
+                inputs: [],
+                outputs: [],
+              },
+              {
+                key: 'gate',
+                node_type: 'approval',
+                label: '审批',
+                inputs: [],
+                outputs: [],
+              },
+            ],
+            edges: [],
+          } as never
+        }
+        selectedNodeKey="gate"
+        definitionYaml={shapeBrokenDraft}
+        setDefinitionYaml={() => {}}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    // 不炸（渲染完成）且与画布一致回退到基线详情。
+    const selector = await screen.findByLabelText('节点类型')
+    expect(selector).toHaveValue('approval')
+  })
+
   it('skips the prompt for an approval node that already has capability (#405 审核 P3)', async () => {
     // 手写 approval+capability 是合法瞬态——切出必须维持修复前的直通
     // 语义，不得被 prompt 拦下（cancel 会放弃合法切换）。
