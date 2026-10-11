@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- 证据矩阵改名与 Worker 部署文档拆分（issue #1103，PR-B，docs）：`workspace-executor-evidence-matrix.md` 改名为 `architecture-evidence-matrix.md`（沿用的「Workspace Executor」是 schema v47 已退役的命名），同步 AGENTS.md §6 两处链接、`tests/scripts/test_evidence_matrix.py` 的 `MATRIX_PATH`、`_CURRENT_DOCS`、索引与各文档引用，`docs-retired-terms.yaml` 追加旧文件名 pattern；`docs/agent-worker-deployment.md` 只保留操作步骤，runtime 声明与准入语义、code 任务 secret 边界、velites 安置与升级设计（#831）、控制面鉴权判定矩阵 / Host 头校验 / `worker-ctrl` 网络隔离、控制台入口与引导判定迁入新现行文档 `docs/architecture/agent-worker.md`；删除已失效的 `route_response_model` 豁免 `server/app/routes/studio_chat.py:session_events`（handler 已迁到 `studio_chat_events.py` 且以 `StreamingResponse` 声明，由协议响应判定自动豁免）。
+
 ## [0.7.19] - 2026-10-11
 
 Worker 结果上报协议 v2（元数据移出 HTTP 头改走归档 `result.json`，**部署硬约束 Host 先升**）+ 执行面系统性收口：节点级并发限制覆盖远程 code Worker、`latest` 绑定 skill 的升级不再误重跑、events.jsonl 工具输出全链脱敏（P1 安全）、worker 上报心跳停摆/401/降级归档族收口；前端 workspace 主页加载失败误判引导页修复（#1183）、预览面板支持媒体产物播放（#1146）；分支模型收口为 trunk-based（#1150）。

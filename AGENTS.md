@@ -72,7 +72,7 @@
 
 ## 6. Boundary Rules（禁止模式摘要）
 
-本节只收 agent 改代码时可能违反的红线；各子系统内部机制（调度、pin、解析链、物化细节）的权威记录是 [docs/architecture/workspace-executor-evidence-matrix.md](docs/architecture/workspace-executor-evidence-matrix.md) 与各模块 docstring。
+本节只收 agent 改代码时可能违反的红线；各子系统内部机制（调度、pin、解析链、物化细节）的权威记录是 [docs/architecture/architecture-evidence-matrix.md](docs/architecture/architecture-evidence-matrix.md) 与各模块 docstring。
 
 - Workspace API 扩展顺序：contract → service → focused route。
 - 新 service 的数据库访问必须走 `JobQueries` 门面（`server/app/jobs/queries`），不在 service 里手写 SQL、import `server.app.db.transaction`/`connection` 或读 DSN（BOUNDARY-DATA-001；基线只降不升，豁免边界见 `config/architecture/service-data-boundary-baseline.json`）。
@@ -109,7 +109,7 @@ review_keywords:
     runtime: velites
 ```
 
-更多完整规则与示例见 [docs/architecture/workspace-executor-evidence-matrix.md](docs/architecture/workspace-executor-evidence-matrix.md)。
+更多完整规则与示例见 [docs/architecture/architecture-evidence-matrix.md](docs/architecture/architecture-evidence-matrix.md)。
 
 ## 7. Pi / Skills
 

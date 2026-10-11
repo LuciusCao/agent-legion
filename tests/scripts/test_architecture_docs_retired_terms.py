@@ -74,7 +74,7 @@ def write_index(
                 "local-quality-gates.md",
                 "velites-harness.md",
                 "velites-model-registry.md",
-                "workspace-executor-evidence-matrix.md",
+                "architecture-evidence-matrix.md",
                 "node-sdk-and-worker-execution-design.md",
                 "materials-and-runs-design.md",
             )
