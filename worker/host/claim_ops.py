@@ -31,6 +31,7 @@ class ClaimOperations:
         limit: int,
         agent_limit: int,
         code_limit: int,
+        node_concurrency_limits: dict[str, int] | None = None,
     ) -> list[dict[str, Any]]:
         """#546 batch claim: one round-trip asks for up to ``limit`` claims.
 
@@ -50,6 +51,11 @@ class ClaimOperations:
             payload["max_concurrency"] = max_concurrency
         if max_code_concurrency is not None:
             payload["max_code_concurrency"] = max_code_concurrency
+        # #1158 节点级并发上限：与容量同渠道每次 claim 重声明（Host 热同步），
+        # 显式空 map 也携带——它是「清空库存值」的唯一通道；None 不携带（旧
+        # 行为，Host 保留库存值）。
+        if node_concurrency_limits is not None:
+            payload["node_concurrency_limits"] = node_concurrency_limits
         status, body = self.request(  # type: ignore[attr-defined]
             "POST",
             _CLAIM_PATH,

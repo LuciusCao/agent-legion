@@ -11,7 +11,7 @@ from server.app.db.schema_guard import guard_shared_db
 from server.app.db.schema_head_cache import note_verified_at_head, verified_at_head
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 93
+SCHEMA_VERSION = 94
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 
