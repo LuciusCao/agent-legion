@@ -80,7 +80,9 @@ agent 框架；依赖清单评审纳入 PR。
 
 worker 侧进程模型不变：`worker/executor.py` 每个 claim 起一个 velites 子进程
 （`subprocess.Popen(cwd=job_dir, start_new_session=True)`），stdout 即事件流。
-二进制经 Dockerfile 新增 rust build stage 打进 worker 镜像；命令构建经
+#381 起 worker 镜像不含 agent runtime：velites 二进制由宿主机按平台外挂（compose bind mount 到
+`/app/data/bin/velites`，自带副本优先解析，见 §9 与 `deploy/compose.worker.yaml`），镜像只内置
+code 池沙箱用的 `velites-sandbox`（#383）；命令构建经
 Host 侧 runtime catalog（`server/app/agent_runtime/`，按 agent 节点执行档案的
 `execution.runtime` 分发到各 adapter，EXEC-RUNTIME-DISPATCH-001）——pi → pi argv、
 velites → velites argv；pi 不退役、长期保留，
