@@ -172,13 +172,35 @@ exemptions:
     request/status/poll time via _draft_warnings and attaches them with with_draft_warnings
     — 153 vs the 139 baseline. The advisory enrichment must sit on the same service methods
     the routes already call; persisting instead would need the schema change #542 explicitly
-    avoids. Remove when the publish-request read model gets its planned split or a budget re-balance
-    re-registers it. Re-anchored by #926 from #456 (closed) to #1009: the overage above is the
-    shipped feature itself and the removal condition above stands; #1009 tracks at most five
-    entries (#917 A-2).'
+    avoids. Issue #464 wraps the confirm''s post-claim execution (gates, before/after probes,
+    publish, resolve) in the confirming heartbeat context, and the #1256 codex P2 round adds
+    the enter-failure rollback (the heartbeat thread failing to start after the claim
+    committed rolls the row back to pending) via a shared _rollback_claim_to_pending helper
+    — 166 effective lines (within the floor''s growth band). Remove when the publish-request
+    read model gets its planned split or a budget re-balance re-registers it. Re-anchored
+    by #926 from #456 (closed) to #1009: the overage above is the shipped feature itself
+    and the removal condition above stands; #1009 tracks at most five entries (#917 A-2).'
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1009
-  ceiling: 153
+  ceiling: 167
+- check: architecture.file_budget
+  path: server/app/services/studio_publish_request_support.py
+  reason: 'Issue #464 moves the confirm-time heartbeat into the shared-helpers module (the
+    _confirming_claim_heartbeat context manager + _heartbeat_loop): while the publish
+    executes, a daemon thread renews claimed_at every CONFIRMING_STALE_SECONDS/5 so the
+    poll''s 300s stale predicate only fires for genuinely dead owners — a legitimately
+    slow publish no longer gets flipped to expired mid-flight (the #464 misrecycle). The
+    helpers cannot live in studio_publish_requests.py (its exemption ceiling only ratchets
+    down) and mirror the executor lease heartbeat''s loop/stop discipline; they carry no
+    state-machine semantics of their own, which is this module''s charter — 97 effective
+    lines vs the 73 baseline (9 past the growth band). Time-boxed; harvest with the
+    publish handshake''s next rework or a support-module split. Anchored to #1009
+    (the publish-request read-model split tracker): the removal condition above is
+    the same harvest sweep, and #464 itself closes with this change.'
+  owner: workspace-executor
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1009
+  ceiling: 107
+  expires: 2026-12-31
 - check: architecture.file_budget
   path: server/app/routes/studio_agent_skill_contracts.py
   reason: 'Issue #542 adds the warnings channel to the validate/save-version tool responses

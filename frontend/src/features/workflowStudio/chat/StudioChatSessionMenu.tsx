@@ -43,7 +43,9 @@ type Mode = {
 /** 会话选择器（#872）：原生 select 换成按钮 + 弹出列表，列表项右侧挂
  * 改名（就地编辑：Enter 保存 / Esc 取消）、归档（#924 主操作：已关闭的
  * 直接归档，运行中的先行内确认「会先关闭」）与删除（次要 danger 操作，
- * 行内二次确认「不可恢复」）。底部「已归档（N）」折叠区可恢复归档会话。 */
+ * 行内二次确认「不可恢复」）。底部「已归档（N）」折叠区可恢复归档会话。
+ * #1129：删除 / 归档确认行内展开——标题行保持不动、始终可见，
+ * 确认区在标题行下方展开。 */
 export function StudioChatSessionMenu(props: Props) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
   const [mode, setMode] = useState<Mode>(null)
@@ -98,94 +100,92 @@ export function StudioChatSessionMenu(props: Props) {
         />
       )
     }
-    if (mode?.sessionId === session.id && mode.kind === 'delete') {
-      return (
-        <StudioChatSessionRowConfirm
-          tone="danger"
-          text={deleteConfirmText(label, !closed, retentionDays)}
-          confirmLabel="永久删除"
-          pending={pending}
-          onConfirm={() => void run(() => props.onDelete!(session.id))}
-          onCancel={() => setMode(null)}
-        />
-      )
-    }
-    if (mode?.sessionId === session.id && mode.kind === 'archive') {
-      return (
-        <StudioChatSessionRowConfirm
-          tone="primary"
-          text={`归档「${label}」？会先关闭运行中的会话，之后可在「已归档」中恢复${purge ? `（${purge}）` : ''}`}
-          confirmLabel="归档"
-          pending={pending}
-          onConfirm={() => archive(session.id)}
-          onCancel={() => setMode(null)}
-        />
-      )
-    }
     return (
-      <div className={styles.row} data-active={session.id === active?.id}>
-        <button
-          type="button"
-          className={styles.rowMain}
-          onClick={() => {
-            props.onSelectSession(session.id)
-            close()
-          }}
-        >
-          <span className={styles.rowLabel}>{label}</span>
-          {closed && <span className={styles.closedTag}>已关闭</span>}
-        </button>
-        {props.onRename && (
-          <Tooltip title="重命名">
-            <IconButton
-              size="small"
-              aria-label={`重命名会话 ${label}`}
-              onClick={() => {
-                setError(null)
-                setMode({ kind: 'rename', sessionId: session.id })
-              }}
-            >
-              <EditOutlined fontSize="inherit" />
-            </IconButton>
-          </Tooltip>
-        )}
-        {props.onArchive && (
-          <Tooltip
-            title={purge ? `归档（可恢复，${purge}）` : '归档（可恢复）'}
+      <>
+        <div className={styles.row} data-active={session.id === active?.id}>
+          <button
+            type="button"
+            className={styles.rowMain}
+            onClick={() => {
+              props.onSelectSession(session.id)
+              close()
+            }}
           >
-            <IconButton
-              size="small"
-              sx={ARCHIVE_ICON_SX}
-              aria-label={`归档会话 ${label}`}
-              disabled={pending}
-              onClick={() => {
-                setError(null)
-                // 已关闭的会话直接归档（可恢复，无需确认）；运行中的会先
-                // 被关闭，行内确认一次。
-                if (closed) archive(session.id)
-                else setMode({ kind: 'archive', sessionId: session.id })
-              }}
+            <span className={styles.rowLabel}>{label}</span>
+            {closed && <span className={styles.closedTag}>已关闭</span>}
+          </button>
+          {props.onRename && (
+            <Tooltip title="重命名">
+              <IconButton
+                size="small"
+                aria-label={`重命名会话 ${label}`}
+                onClick={() => {
+                  setError(null)
+                  setMode({ kind: 'rename', sessionId: session.id })
+                }}
+              >
+                <EditOutlined fontSize="inherit" />
+              </IconButton>
+            </Tooltip>
+          )}
+          {props.onArchive && (
+            <Tooltip
+              title={purge ? `归档（可恢复，${purge}）` : '归档（可恢复）'}
             >
-              <ArchiveOutlined fontSize="inherit" />
-            </IconButton>
-          </Tooltip>
+              <IconButton
+                size="small"
+                sx={ARCHIVE_ICON_SX}
+                aria-label={`归档会话 ${label}`}
+                disabled={pending}
+                onClick={() => {
+                  setError(null)
+                  // 已关闭的会话直接归档（可恢复，无需确认）；运行中的会先
+                  // 被关闭，行内确认一次。
+                  if (closed) archive(session.id)
+                  else setMode({ kind: 'archive', sessionId: session.id })
+                }}
+              >
+                <ArchiveOutlined fontSize="inherit" />
+              </IconButton>
+            </Tooltip>
+          )}
+          {props.onDelete && (
+            <Tooltip title="永久删除">
+              <IconButton
+                size="small"
+                sx={DANGER_ICON_SX}
+                aria-label={`删除会话 ${label}`}
+                onClick={() => {
+                  setError(null)
+                  setMode({ kind: 'delete', sessionId: session.id })
+                }}
+              >
+                <DeleteOutline fontSize="inherit" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </div>
+        {mode?.sessionId === session.id && mode.kind === 'delete' && (
+          <StudioChatSessionRowConfirm
+            tone="danger"
+            text={deleteConfirmText(label, !closed, retentionDays)}
+            confirmLabel="永久删除"
+            pending={pending}
+            onConfirm={() => void run(() => props.onDelete!(session.id))}
+            onCancel={() => setMode(null)}
+          />
         )}
-        {props.onDelete && (
-          <Tooltip title="永久删除">
-            <IconButton
-              size="small"
-              sx={DANGER_ICON_SX}
-              aria-label={`删除会话 ${label}`}
-              onClick={() => {
-                setError(null)
-                setMode({ kind: 'delete', sessionId: session.id })
-              }}
-            >
-              <DeleteOutline fontSize="inherit" />
-            </IconButton>
-          </Tooltip>
+        {mode?.sessionId === session.id && mode.kind === 'archive' && (
+          <StudioChatSessionRowConfirm
+            tone="primary"
+            text={`归档「${label}」？会先关闭运行中的会话，之后可在「已归档」中恢复${purge ? `（${purge}）` : ''}`}
+            confirmLabel="归档"
+            pending={pending}
+            onConfirm={() => archive(session.id)}
+            onCancel={() => setMode(null)}
+          />
         )}
-      </div>
+      </>
     )
   }
 

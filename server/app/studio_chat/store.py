@@ -3,8 +3,8 @@
 Every durable write and every bus publish goes through this store so the
 service facade stays a coordinator, and the permission/mcp_hint helpers
 (stop reaching into service privates) get a narrow, explicit interface:
-``append_message`` / ``publish_session`` / ``mark_mcp_verified`` /
-``runtime``.
+``append_message`` / ``append_tool_call`` / ``publish_session`` /
+``mark_mcp_verified`` / ``runtime``.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from server.app.studio_chat.payloads import (
 )
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.streaming import stream_message_payload
+from server.app.studio_chat.tool_call_coalesce import coalesce_tool_call
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,14 @@ class StudioChatStore:
             self.publish(session_id, {"type": "message", "message": serialize_message(message)})
         return message
 
+    def append_tool_call(
+        self, session_id: str, runtime: SessionRuntime | None, update: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Persist one tool_call/tool_call_update frame, coalesced by toolCallId (#1120)."""
+        if runtime is None:
+            return self.append_message(session_id, "tool_call", "agent", update)
+        return coalesce_tool_call(self._db, self, session_id, runtime, update)
+
     def publish_session(self, session_id: str) -> None:
         session = self._db.get_studio_chat_session(session_id)
         if session is not None:
@@ -71,8 +80,9 @@ class StudioChatStore:
             # ensure_ascii=False：流式 text 帧携带全量累积文本，CJK 走 \uXXXX
             # 转义会把每字符膨胀到 6 字节（UTF-8 直出 3 字节，2 倍帧体积）、
             # 加速填满订阅者的有界队列（#563）。
-            # replaceable：仅流式 text 快照帧声明（后续帧是全量累积，bus 溢出
-            # 时丢旧无损）；持久事件（tool_call/permission/status/session）不
+            # replaceable：原地更新的快照帧声明（流式 text 累积帧与 #1120
+            # tool_call 合并帧——后续帧是合并后的全量快照，bus 溢出时丢旧无
+            # 损）；持久新行事件（各行 append、permission/status/session）不
             # 声明——bus 对它们立即驱逐断流，SSE 重连 + REST 全量回取自愈。
             self._bus.publish(
                 studio_chat_channel(session_id),
@@ -118,11 +128,5 @@ class StudioChatStore:
                 runtime.stream.attach(kind, message["id"])
                 return
         self._db.update_studio_chat_message_content(open_id, {"text": full_text})
-        self.publish(
-            session_id,
-            {
-                "type": "message",
-                "message": stream_message_payload(session_id, open_id, kind, full_text),
-            },
-            replaceable=True,
-        )
+        payload = stream_message_payload(session_id, open_id, kind, full_text)
+        self.publish(session_id, {"type": "message", "message": payload}, replaceable=True)

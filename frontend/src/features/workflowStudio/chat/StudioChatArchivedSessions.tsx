@@ -35,7 +35,9 @@ type Props = {
  * 归档会话可「恢复」（取消归档，回到列表、仍为已关闭，按「继续对话」
  * 恢复运行）或永久删除（danger + 行内二次确认）。归档会话不可直接选中。
  * #1041：配置了对话保留策略时每行显示「N 天后清理」倒计时（归档时间 +
- * 保留天数现算）；恢复后会话回到列表、不再被清理。 */
+ * 保留天数现算）；恢复后会话回到列表、不再被清理。
+ * #1129：删除确认改为行内展开——标题行保持不动、始终可见，
+ * 确认区在标题行下方展开，不整行替换。 */
 export function StudioChatArchivedSessions(props: Props) {
   const [open, setOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -46,56 +48,57 @@ export function StudioChatArchivedSessions(props: Props) {
   function renderRow(session: StudioChatSessionRecord) {
     const label = sessionLabel(session)
     const daysLeft = retentionDaysLeft(session.archived_at, retentionDays ?? 0)
-    if (confirmDelete === session.id && props.onDelete) {
-      const onDelete = props.onDelete
-      return (
-        <StudioChatSessionRowConfirm
-          tone="danger"
-          text={deleteConfirmText(label, false, retentionDays)}
-          confirmLabel="永久删除"
-          pending={props.pending}
-          onConfirm={() =>
-            void props
-              .run(() => onDelete(session.id))
-              .then((ok) => ok && setConfirmDelete(null))
-          }
-          onCancel={() => setConfirmDelete(null)}
-        />
-      )
-    }
+    const confirming = confirmDelete === session.id && props.onDelete
     return (
-      <div className={styles.archivedRow}>
-        <span className={styles.archivedLabel} title={label}>
-          {label}
-        </span>
-        {daysLeft !== null && (
-          <span className={styles.countdown} data-imminent={daysLeft <= 1}>
-            {retentionCountdownLabel(daysLeft)}
+      <>
+        <div className={styles.archivedRow}>
+          <span className={styles.archivedLabel} title={label}>
+            {label}
           </span>
+          {daysLeft !== null && (
+            <span className={styles.countdown} data-imminent={daysLeft <= 1}>
+              {retentionCountdownLabel(daysLeft)}
+            </span>
+          )}
+          <button
+            type="button"
+            className={styles.restoreAction}
+            aria-label={`恢复会话 ${label}`}
+            disabled={props.pending}
+            onClick={() => void props.run(() => props.onUnarchive(session.id))}
+          >
+            <UnarchiveOutlined fontSize="inherit" />
+            恢复
+          </button>
+          {props.onDelete && (
+            <Tooltip title="永久删除">
+              <IconButton
+                size="small"
+                sx={DANGER_ICON_SX}
+                aria-label={`删除会话 ${label}`}
+                onClick={() => setConfirmDelete(session.id)}
+              >
+                <DeleteOutline fontSize="inherit" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </div>
+        {confirming && (
+          <StudioChatSessionRowConfirm
+            tone="danger"
+            text={deleteConfirmText(label, false, retentionDays)}
+            confirmLabel="永久删除"
+            pending={props.pending}
+            onConfirm={() => {
+              const onDelete = props.onDelete!
+              void props
+                .run(() => onDelete(session.id))
+                .then((ok) => ok && setConfirmDelete(null))
+            }}
+            onCancel={() => setConfirmDelete(null)}
+          />
         )}
-        <button
-          type="button"
-          className={styles.restoreAction}
-          aria-label={`恢复会话 ${label}`}
-          disabled={props.pending}
-          onClick={() => void props.run(() => props.onUnarchive(session.id))}
-        >
-          <UnarchiveOutlined fontSize="inherit" />
-          恢复
-        </button>
-        {props.onDelete && (
-          <Tooltip title="永久删除">
-            <IconButton
-              size="small"
-              sx={DANGER_ICON_SX}
-              aria-label={`删除会话 ${label}`}
-              onClick={() => setConfirmDelete(session.id)}
-            >
-              <DeleteOutline fontSize="inherit" />
-            </IconButton>
-          </Tooltip>
-        )}
-      </div>
+      </>
     )
   }
 

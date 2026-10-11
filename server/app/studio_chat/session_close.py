@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from server.app.studio_chat.close_notification import notify_closed
+from server.app.studio_chat.permissions import settle_pending_permissions
 
 if TYPE_CHECKING:
     from server.app.studio_chat.service import StudioChatService
@@ -59,7 +60,7 @@ def close_session(
                 runtime.closed = True
             pending = list(runtime.pending_permissions) if runtime is not None else []
             if runtime is not None:
-                service._settle_pending_permissions(runtime)
+                settle_pending_permissions(runtime)
             notify_closed(service, session_id, pending)
     finally:
         if committed and runtime is not None:

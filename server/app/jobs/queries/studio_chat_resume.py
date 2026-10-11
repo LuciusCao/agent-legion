@@ -8,7 +8,7 @@ concurrent creators past the active-session cap.
 
 from __future__ import annotations
 
-from server.app.jobs.queries.studio_chat_transcript import StudioChatTranscriptQueriesMixin
+from server.app.jobs.queries.studio_chat_pagination import StudioChatPaginationQueriesMixin
 
 # Advisory-lock key serializing session creation AND resume against the
 # active cap (studio_chat.py imports it for the creation path).
@@ -45,7 +45,7 @@ _CLAIM_FROM_IDLE_ERROR = (
 )
 
 
-class StudioChatResumeQueriesMixin(StudioChatTranscriptQueriesMixin):
+class StudioChatResumeQueriesMixin(StudioChatPaginationQueriesMixin):
     """Atomic resume claim for studio_chat_sessions (from-statuses -> starting)."""
 
     def claim_studio_chat_resume(

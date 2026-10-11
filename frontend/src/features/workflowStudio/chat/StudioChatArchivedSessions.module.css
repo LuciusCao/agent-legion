@@ -76,6 +76,10 @@
   margin: 0;
   padding: 0;
 }
+/* #1129：确认区在归档行下方展开时与行内容左对齐。 */
+.list .rowConfirm {
+  padding-left: 26px;
+}
 .archivedRow {
   display: flex;
   align-items: center;

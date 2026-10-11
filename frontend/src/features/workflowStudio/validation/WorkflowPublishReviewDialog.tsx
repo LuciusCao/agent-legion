@@ -14,7 +14,6 @@ import { WorkflowPublishReviewDialogMeta } from './WorkflowPublishReviewDialogMe
 
 type Props = {
   open: boolean
-  workflowKey: string | null
   activeRevision: WorkflowRevisionSummary | null
   nextVersion: number
   createsRevision?: boolean
@@ -41,7 +40,6 @@ type Props = {
 
 export function WorkflowPublishReviewDialog({
   open,
-  workflowKey,
   activeRevision,
   nextVersion,
   createsRevision = true,
@@ -74,7 +72,6 @@ export function WorkflowPublishReviewDialog({
       </DialogTitle>
       <DialogContent>
         <WorkflowPublishReviewDialogMeta
-          workflowKey={workflowKey}
           activeRevision={activeRevision}
           nextVersion={nextVersion}
           createsRevision={createsRevision}
