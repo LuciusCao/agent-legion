@@ -11,10 +11,12 @@ import { ghostDraftNodeDetails } from '../canvas/workflowStudioGhostNode'
 type WorkflowEdgeResponse = components['schemas']['WorkflowEdgeResponse']
 
 /**
- * inspector 的节点详情解析链：基线 workflow → 草稿 YAML（draft-only ghost
- * 节点）→ compareSummary（YAML 里没有 start 节点时，后端 loader 注入的合成
- * start 被 compare 画成 added ghost，但草稿文本里查不到）。三级都落空返回
- * null，由 inspector 显示空态/「未加载 workflow」。
+ * inspector 的节点详情解析链：草稿 YAML（draft-first，#405/#606 codex P2）
+ * → 基线 workflow → compareSummary（YAML 里没有 start 节点时，后端 loader
+ * 注入的合成 start 被 compare 画成 added ghost，但草稿文本里查不到）。
+ * 三级都落空返回 null，由 inspector 显示空态/「未加载 workflow」。
+ * 草稿优先的理由：已发布 workflow 的节点被切型后，header/sections 必须
+ * 反映草稿类型，否则受控选择器停在旧类型、用户无法再选它撤销切换。
  */
 export function inspectorNodeDetails(
   source: {
@@ -25,8 +27,8 @@ export function inspectorNodeDetails(
   selectedNodeKey: string | null
 ): SelectedWorkflowNodeDetails | null {
   return (
-    selectedNodeDetails(source.workflow, selectedNodeKey) ??
     ghostDraftNodeDetails(source.definitionYaml, selectedNodeKey) ??
+    selectedNodeDetails(source.workflow, selectedNodeKey) ??
     compareGhostNodeDetails(source.compareSummary ?? null, selectedNodeKey)
   )
 }
