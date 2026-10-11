@@ -62,6 +62,7 @@ class FakeClient:
         limit: int,
         agent_limit: int,
         code_limit: int,
+        node_concurrency_limits: dict[str, int] | None = None,
     ) -> list[dict]:
         """#546 适配器：只打桩了单条 ``claim()`` 的用例经此回落为逐条领取
         （混合舰队形态）——存量用例的语义全部保留；真批量由各自用例直接

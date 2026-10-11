@@ -137,6 +137,26 @@ def test_batch_claim_rejects_invalid_limit(tmp_path: Path) -> None:
     assert response.status_code == 422
 
 
+def test_batch_claim_rejects_invalid_node_concurrency_limits(tmp_path: Path) -> None:
+    """#1158：节点级并发上限的 Host 侧契约校验——值须为 1..2048 的整数、
+    key 非空；合法映射（含空 map = 清空）照常进入 claim 流程。bool/数字串
+    的宽松强转与既有 max_concurrency 等字段的契约行为一致（lax 模式）。"""
+    app = make_app(tmp_path)
+
+    with TestClient(app) as client:
+        authenticate_admin(client)
+        token = register(client)["worker_token"]
+        for bad in (0, -1, 2049, 1.5):
+            response = _batch_claim(client, token, {"node_concurrency_limits": {"heavy": bad}})
+            assert response.status_code == 422, (bad, response.text)
+        response = _batch_claim(client, token, {"node_concurrency_limits": {"": 1}})
+        assert response.status_code == 422, response.text
+        # 合法映射与显式空 map 都是 204（空队列），不是 422。
+        for good in ({"heavy": 1}, {}):
+            response = _batch_claim(client, token, {"node_concurrency_limits": good})
+            assert response.status_code == 204, (good, response.text)
+
+
 def test_pool_limits_alone_cap_per_pool(tmp_path: Path) -> None:
     """分池上限在 limit=1 的稳态补位形态（预算和=1）仍然生效——
     agent_limit=0 的池完全不受供给（#547 起全部请求共用本批路径）。"""

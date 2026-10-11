@@ -34,6 +34,7 @@ _EDITABLE_FIELDS = {
     "disabled_runtimes",
     "max_concurrency",
     "max_code_concurrency",
+    "node_concurrency_limits",
     "upload_max_concurrency",
     "models",
     "labels",
@@ -52,6 +53,8 @@ _DEFAULTS: dict[str, Any] = {
     "disabled_runtimes": [],
     "max_concurrency": 1,
     "max_code_concurrency": 0,
+    # 节点级并发上限（#1158）：{node_key: N} 机器资源保护层，空 = 不限制。
+    "node_concurrency_limits": {},
     "upload_max_concurrency": 4,
     "models": [],
     "labels": {},
@@ -124,6 +127,10 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     ):
         raise ValueError(f"上传并发数必须是 1 到 {MAX_DYNAMIC_CONCURRENCY} 的整数")
     normalized_labels = worker_declarations.normalize_labels(config.get("labels", {}))
+    # 节点级并发上限（#1158）：随每次 claim 声明热同步到 Host，无需重注册。
+    node_limits = worker_declarations.normalize_node_concurrency_limits(
+        config.get("node_concurrency_limits", {})
+    )
     # models allowlist 的 runtime 取值校验对齐支持全集而非生效集合：生效集合
     # 随机器安装状态浮动，持久化校验不该跟着漂（发现阶段仍按生效集合取交集）。
     models = worker_declarations.normalize_models(config.get("models", []), SUPPORTED_RUNTIMES)
@@ -160,6 +167,7 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
         "runtimes": runtimes,
         "max_concurrency": concurrency,
         "max_code_concurrency": code_concurrency,
+        "node_concurrency_limits": node_limits,
         "upload_max_concurrency": upload_concurrency,
         "claim_enabled": claim_enabled,
         "labels": normalized_labels,

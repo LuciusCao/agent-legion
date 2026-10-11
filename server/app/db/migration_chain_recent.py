@@ -10,6 +10,7 @@ from server.app.db.migrations.agent_request_profile_source import (
     migrate_agent_request_profile_source,
 )
 from server.app.db.migrations.agent_worker_claim_state import migrate_agent_worker_claim_state
+from server.app.db.migrations.agent_worker_node_limits import migrate_agent_worker_node_limits
 from server.app.db.migrations.job_node_status_count_deltas import (
     migrate_job_node_status_count_deltas as _migrate_v88_node_deltas,
 )
@@ -64,4 +65,8 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # table first, provenance sibling outside definition_hash. Data
     # migration, idempotent (self-contained nodes skipped), no down.
     SchemaMigration(93, "agent_profile_backfill", migrate_agent_profile_backfill),
+    # v94 (#1158): agent_workers.node_concurrency_limits_json — Worker 节点级
+    # 并发上限的库存面（claim 时热同步，机器资源保护层）。DDL-only, same
+    # guarded-ALTER home rule as v87.
+    SchemaMigration(94, "agent_worker_node_limits", migrate_agent_worker_node_limits),
 ]

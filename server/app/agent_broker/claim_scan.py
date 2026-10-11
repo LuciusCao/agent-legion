@@ -71,6 +71,13 @@ class WorkerView:
     # Worker never receives the cancel heartbeat body, so it must not hold
     # kind='code' executions even if a stale row grants it code capacity).
     protocol_version: int = 1
+    # #1158 per-node machine capacity: bare node_key → max concurrent claimed
+    # executions ON THIS worker (both kinds count; machine-protection layer on
+    # top of the workspace-global workspace_node_limits). Empty = unlimited.
+    # Consumed twice: the read phase's advisory pre-filter (claim_batch_select
+    # via claim_capacity.node_slot_open) and the write phase's authoritative
+    # gate (claim_capacity.worker_node_admits).
+    node_limits: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -80,6 +87,15 @@ class ScanState:
     attempts: int = 0
     skip_reasons: Counter[str] = field(default_factory=Counter)
     pause_cache: dict[str, bool] = field(default_factory=dict)
+    # #1158 R1 批选择段（claim_batch_select）的节点上限预过滤记账：在跑
+    # 快照 + 本批已选（per-pass accounting 家族成员）。空 = 未启用（Worker
+    # 未声明节点上限 / 单条路径——单条路径逐候选过写相权威门，无此问题）。
+    node_active: dict[str, int] = field(default_factory=dict)
+    node_chosen: dict[str, int] = field(default_factory=dict)
+    # 预过滤拒绝过的 execution_id：同一候选在 SCAN_ROUNDS 后续轮次会再次
+    # 出现，skip 直方图每个 pass 每条请求只计一次（对齐写相逐候选只评估
+    # 一次的计数口径）。
+    node_filtered: set[str] = field(default_factory=set)
 
 
 @dataclass(frozen=True)

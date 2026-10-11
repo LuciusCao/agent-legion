@@ -1,4 +1,4 @@
-// labelsFromText / numberField / NUMBER_DEFAULTS / formatElapsed / executionLabel /
+// labelsFromText / nodeLimitsFromText / numberField / NUMBER_DEFAULTS / formatElapsed / executionLabel /
 // formatTokens / latestMetric / tokensLastHour / bucketLabel / fillWindowBuckets /
 // chartSeriesData / hasChartData / foldLogLines 是纯函数，
 // 由 app.test.mjs（node:test）直接 import；
@@ -172,6 +172,8 @@ function fillForm(config) {
       form.elements.models.value = value.map((item) => `${item.runtime ? `${item.runtime}:` : ""}${item.provider}/${item.model}`).join("\n");
     } else if (key === "labels") {
       form.elements.labels.value = Object.entries(value).map(([label, item]) => `${label}=${item}`).join("\n");
+    } else if (key === "node_concurrency_limits") {
+      form.elements.node_concurrency_limits.value = Object.entries(value).map(([node, limit]) => `${node}=${limit}`).join("\n");
     } else if (key === "ramp_up") {
       const { enabled, values } = rampUpFormValues(value); // #471 爬坡表单
       if (form.elements.ramp_up_enabled) form.elements.ramp_up_enabled.checked = enabled;
@@ -402,6 +404,19 @@ export function labelsFromText(text) {
     const separator = line.indexOf("=");
     if (separator < 1) throw new Error(`标签必须使用 key=value 格式：${line}`);
     return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()];
+  }));
+}
+
+// #1158 节点并发上限：与 labels 同形态的多行 key=N，但值限正整数（Host 侧
+// 计数强制；空输入 = {} = 不限制）。
+export function nodeLimitsFromText(text) {
+  return Object.fromEntries(text.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+    const separator = line.indexOf("=");
+    const key = separator >= 1 ? line.slice(0, separator).trim() : "";
+    const value = separator >= 1 ? Number(line.slice(separator + 1).trim()) : Number.NaN;
+    if (!key || !Number.isInteger(value) || value < 1)
+      throw new Error(`节点并发上限必须使用 node_key=正整数 格式：${line}`);
+    return [key, value];
   }));
 }
 
@@ -797,6 +812,7 @@ if (hasDom) {
         max_concurrency: numberField(data, "max_concurrency"), max_code_concurrency: numberField(data, "max_code_concurrency"), upload_max_concurrency: numberField(data, "upload_max_concurrency"), claim_batch_limit: numberField(data, "claim_batch_limit"),
         disabled_runtimes: collectDisabledRuntimes(),
         models: modelsFromText(data.get("models")), labels: labelsFromText(data.get("labels")),
+        node_concurrency_limits: nodeLimitsFromText(data.get("node_concurrency_limits") || ""),
         poll_interval_seconds: numberField(data, "poll_interval_seconds"),
         heartbeat_interval_seconds: numberField(data, "heartbeat_interval_seconds"),
         shutdown_grace_seconds: numberField(data, "shutdown_grace_seconds"),

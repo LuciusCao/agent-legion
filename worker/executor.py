@@ -10,7 +10,6 @@ import signal
 import sys
 import threading
 import time
-import traceback
 from concurrent.futures import Future
 from pathlib import Path
 from typing import Any
@@ -30,6 +29,7 @@ from worker.claim_pacing import ClaimPacing
 from worker.cleanup import clean_work_root
 from worker.execution.execution_lane import ExecutionLanePool, LaneSpawnError
 from worker.execution.exit_watch import ExitWatchReactor
+from worker.executor_reap import reap_completed
 from worker.fd_limits import raise_fd_limit_startup
 from worker.host.client import HOST_UNAVAILABLE_ERRORS, Client, WorkerAuthError
 from worker.host.status_sync import sync_host_status
@@ -93,6 +93,8 @@ def main() -> int:
         # #662 review：传输面配置（含 upload_backlog_limit 的 relay 覆盖面
         # 上界）同属预检——非法值重试无意义，exit 2 走人工修复路径。
         transfer = load_transfer_controls(args.config)
+        # #1158：节点级并发上限同款启动预检 fail-fast；缺省 = {}（不限制）。
+        node_limits = runtime_controls.load_node_concurrency_limits(args.config)
     except ValueError as exc:
         print(f"Agent Worker 启动预检失败：{exc}", flush=True)
         return 2
@@ -177,6 +179,8 @@ def main() -> int:
     controls = DynamicControls(
         max_concurrency, claim_enabled, max_code_concurrency, transfer, claim_batch_limit, ramp
     )
+    # #1158 节点级并发上限：首 pass 的 reload_controls 之前即就位。
+    controls.node_limits = node_limits
     # #534（codex P1 二轮）：越池抑制——领到「本地预算已尽的池」的活时
     # 记下该池，抑制期间该池 claim 声明压到当前活跃数（Host 按「active
     # < 声明容量」分池发活，这是唯一能止住逐 pass 再发的通道）、预算视
@@ -197,6 +201,7 @@ def main() -> int:
         active_kinds=active_kinds,
         pool_deferred=pool_deferred,
         stop=stop,
+        node_limits=node_limits,
     )
     try:
         while not stop.is_set():
@@ -237,26 +242,7 @@ def main() -> int:
                     relay_state,
                     log=_print,
                 )
-            completed = {future for future in active if future.done()}
-            active -= completed
-            for future in completed:
-                active_kinds.pop(future, None)
-                # #534（codex P1 二轮）：越池抑制的解除在预算面（pass_budget
-                # 内 avail > 0 的 discard）——执行完成或档位推进都会让预
-                # 算转正，此处无需按 kind 解除。
-                try:
-                    future.result()
-                except Exception as exc:
-                    # #204 broad-except audit: 线程池 reap 安全网。执行主体
-                    # 已在 run_execution 内被遏制（execution/run.py 的
-                    # prebuilt 降级），能到达这里的只剩 deliver_result 收尾
-                    # 路径或真正的编程错误——但 claim 轮询循环必须存活：一次
-                    # future 失败不能让 worker 停摆，该次执行由租约过期后的
-                    # Host 重调度兜底。吞是对的：这里 future.result() 是异常
-                    # 的唯一提取点，不捕获则异常已在池内丢失。日志保全：
-                    # traceback.print_exc() + print 摘要。
-                    traceback.print_exc()
-                    print(f"Agent execution failed: {exc}", flush=True)
+            reap_completed(active, active_kinds)
             reloaded, load_error = reload_controls(args.config, controls, uploads, _print)
             if reloaded is None:
                 if load_error != control_error:
@@ -269,15 +255,13 @@ def main() -> int:
                 controls = reloaded
                 control_error = None
             max_concurrency, claim_enabled = controls.max_concurrency, controls.claim_enabled
-            max_code_concurrency, claim_batch_limit = (
-                controls.max_code_concurrency,
-                controls.claim_batch_limit,
-            )
-            ramp = controls.ramp
+            max_code_concurrency = controls.max_code_concurrency
+            claim_batch_limit = controls.claim_batch_limit
+            claim_ctx.node_limits = controls.node_limits
             # #471：本 pass 生效容量（禁用/未开窗 = 目标直通；暂停期 deduct
             # 折回、enabled 才推进虚拟时钟——策略收口在 ramp_pass）。
             ramp_view, ramp_paused_since = ramp_pass(
-                ramp, ramp_paused_since, max_concurrency, time.monotonic(), claim_enabled
+                controls.ramp, ramp_paused_since, max_concurrency, time.monotonic(), claim_enabled
             )
             effective = max_concurrency if ramp_view is None else ramp_view.effective
             status.set_ramp_up(ramp_view, max_concurrency)

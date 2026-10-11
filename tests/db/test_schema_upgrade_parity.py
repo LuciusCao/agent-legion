@@ -43,19 +43,22 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v93, agent_profile_backfill) must leave
+# Effects the newest migration (v94, agent_worker_node_limits) must leave
 # behind so the undo step rewinds a current-shape database to exactly the
-# previous recorded version. v93 is a data migration whose only DDL is the
-# agent_profile_backfill_backups table (#935); dropping it rewinds to v92.
-# (v92, #933, sits below: its agent_execution_requests columns stay applied.)
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("agent_profile_backfill_backups",)
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
+# previous recorded version. v94 is DDL-only: one guarded ALTER adding
+# agent_workers.node_concurrency_limits_json (#1158); dropping the column
+# rewinds to v93. (v93 sits below: its agent_profile_backfill_backups table
+# stays applied.)
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("agent_workers", "node_concurrency_limits_json", "text"),
+)
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "agent_profile_backfill"
+_NEWEST_MIGRATION_NAME = "agent_worker_node_limits"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the rewound database is a faithful
-# v92 (v93 only adds a table: nothing to recreate).
+# v93 (v94 only adds a column: nothing to recreate).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.
