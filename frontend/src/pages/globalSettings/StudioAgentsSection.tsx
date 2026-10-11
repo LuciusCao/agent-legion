@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { toErrorMessage } from '../../lib/queryError'
 import { useUiStore } from '../../stores/uiStore'
@@ -15,7 +15,9 @@ import {
   RedetectButton,
   serialize,
   toRows,
+  useApplyRegistryResult,
 } from './StudioAgentsSectionParts'
+import { useConflictRefresh } from './StudioAgentsConflictDialog'
 import type { AgentRow } from './StudioAgentsSectionParts'
 import styles from '../GlobalSettingsPage.module.css'
 
@@ -24,7 +26,8 @@ const ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/
 
 function buildPayload(
   apiBase: string,
-  rows: AgentRow[]
+  rows: AgentRow[],
+  revision: string
 ): StudioAgentRegistryUpdate {
   if (!apiBase.trim()) {
     throw new Error('api_base 不能为空')
@@ -59,7 +62,7 @@ function buildPayload(
       source: row.source ?? 'manual',
     }
   })
-  return { api_base: apiBase.trim(), agents }
+  return { api_base: apiBase.trim(), agents, revision }
 }
 
 function StudioAgentsEditor({
@@ -67,7 +70,6 @@ function StudioAgentsEditor({
 }: {
   initial: StudioAgentRegistryResponse
 }) {
-  const queryClient = useQueryClient()
   const [apiBase, setApiBase] = useState(initial.api_base)
   const [rows, setRows] = useState<AgentRow[]>(() => toRows(initial))
   const [availability, setAvailability] = useState<Record<string, boolean>>(
@@ -79,6 +81,8 @@ function StudioAgentsEditor({
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // #355：快照版本随 GET 持有、随每次保存/重检测/409 刷新前进。
+  const [revision, setRevision] = useState(initial.revision ?? '')
 
   const isDirty = serialize(apiBase, rows) !== baseline
 
@@ -88,20 +92,24 @@ function StudioAgentsEditor({
     )
   }
 
-  function applyResult(result: StudioAgentRegistryResponse) {
-    queryClient.setQueryData(extraQueryKeys.studioAgents(), result)
-    const nextRows = toRows(result)
-    setRows(nextRows)
-    setBaseline(serialize(result.api_base, nextRows))
-    setAvailability(result.availability ?? {})
-    setDetection(result.detection ?? {})
-  }
+  const applyResult = useApplyRegistryResult({
+    setApiBase,
+    setRows,
+    setBaseline,
+    setAvailability,
+    setDetection,
+    setRevision,
+  })
+  // #355：409 = 快照后有其他修改（典型为探测合并进新行）。弹确认对话框
+  // 提供刷新（丢弃本地编辑、采用 409 detail 携带的最新文档），不自动重试；
+  // 非冲突错误仍走普通错误提示。
+  const conflict = useConflictRefresh(applyResult)
 
   async function handleSave() {
     setError('')
     let payload: StudioAgentRegistryUpdate
     try {
-      payload = buildPayload(apiBase, rows)
+      payload = buildPayload(apiBase, rows, revision)
     } catch (err) {
       setError(errorMessage(err))
       return
@@ -112,7 +120,7 @@ function StudioAgentsEditor({
       applyResult(result)
       useUiStore.getState().showToast('Studio Agent 注册表已保存', 'success')
     } catch (err) {
-      setError(errorMessage(err))
+      if (!conflict.capture(err)) setError(errorMessage(err))
     } finally {
       setSaving(false)
     }
@@ -120,6 +128,7 @@ function StudioAgentsEditor({
 
   return (
     <>
+      {conflict.dialog}
       {error && (
         <p className={styles.error} role="alert">
           {error}

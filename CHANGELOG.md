@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Studio Agent 注册表 PUT 陈旧快照冲突检查（issue #355）：管理员基于旧快照编辑期间若启动探测或「重新检测」先提交，整份 PUT 会静默删除新探测到的 detected 行。GET 响应现携带注册表内容版本 `revision`（存储文档 canonical JSON 的 sha256 前缀；版本输入只含 agents 与显式存储的 api_base——未配置时按进程实际地址推导的 api_base（#915）不参与，重启/换端口不会产生假陈旧），PUT 带上该版本后服务端在 `SELECT ... FOR UPDATE` 同一事务内比对，不匹配返回 409 且 detail 携带当前注册表（#719 错误形态）；前端弹确认对话框，「刷新注册表」直接采用 409 detail 携带的最新文档一次性前进编辑器（invalidate 重取进不了已挂载编辑器，否则会 409 死循环），不自动重试；省略 `revision` 的调用保持原整份替换语义（smoke 脚本已改为携带 GET 到的 revision）。
+
 ## [0.7.19] - 2026-10-11
 
 Worker 结果上报协议 v2（元数据移出 HTTP 头改走归档 `result.json`，**部署硬约束 Host 先升**）+ 执行面系统性收口：节点级并发限制覆盖远程 code Worker、`latest` 绑定 skill 的升级不再误重跑、events.jsonl 工具输出全链脱敏（P1 安全）、worker 上报心跳停摆/401/降级归档族收口；前端 workspace 主页加载失败误判引导页修复（#1183）、预览面板支持媒体产物播放（#1146）；分支模型收口为 trunk-based（#1150）。
