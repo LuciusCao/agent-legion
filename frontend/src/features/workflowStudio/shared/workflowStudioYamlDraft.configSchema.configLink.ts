@@ -31,7 +31,13 @@ export function migrateNodeConfigKey(
   toKey?: string
 ): void {
   const config = node.config
-  if (config === undefined || !(fromKey in config)) return
+  // 自有键判定：`in` 走原型链，rename/delete 名为 toString 的 schema 属性
+  // 会把内建方法体迁进新键、dumpWorkflowYaml 随后抛错（#1258 复验 P3-B）。
+  if (
+    config === undefined ||
+    !Object.prototype.hasOwnProperty.call(config, fromKey)
+  )
+    return
   const rest: Record<string, unknown> = { ...config }
   delete rest[fromKey]
   if (toKey !== undefined) rest[toKey] = config[fromKey]

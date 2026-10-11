@@ -85,9 +85,13 @@ export function validateNodeTypeSwitch(
     )
   }
   if (targetType === 'approval') {
+    // `nodes:` 下空体键（`review:` 值为 null，编辑中途常见）：各处读取
+    // 都要容忍——start 判定用 n?.type，存在性判定自有键 ∧ 真值双查
+    // （#1258 复验 P3-A）。
+    const nodes = draft.nodes ?? {}
     const startKeys = new Set(
-      Object.entries(draft.nodes ?? [])
-        .filter(([, n]) => n.type === 'start')
+      Object.entries(nodes)
+        .filter(([, n]) => n?.type === 'start')
         .map(([key]) => key)
     )
     // loader 只对 schema_version === 1（含缺省）物化 after
@@ -103,16 +107,17 @@ export function validateNodeTypeSwitch(
       if (edge.to === nodeKey) upstream.add(edge.from ?? '')
     }
     // 上游键必须真实存在于 nodes——loader 对未知来源单独拒绝
-    // （「Unknown edge source/dependency」），此处同构收口。存在性判定
-    // 查自有键：下标/`in` 会走原型链，把 toString/constructor/__proto__
-    // 来源误判为存在节点而放行（#1258 codex 三轮 P3，与
-    // materializeDraftEdges 同族同修法）。
-    const nodes = draft.nodes ?? {}
+    // （「Unknown edge source/dependency」），此处同构收口。存在性 =
+    // 自有键 ∧ 真值双查：下标/`in` 走原型链会把 toString/constructor/
+    // __proto__ 误判为存在节点（#1258 codex 三轮 P3）；只查自有键又会把
+    // null 空体键当可执行上游放行、随即触发破坏性清洗而发布被拒（#1258
+    // 复验 P3-A）。与 materializeDraftEdges 同族同修法。
     const executableUpstream = [...upstream].filter(
       (key) =>
         key &&
         !startKeys.has(key) &&
-        Object.prototype.hasOwnProperty.call(nodes, key)
+        Object.prototype.hasOwnProperty.call(nodes, key) &&
+        nodes[key] != null
     )
     if (executableUpstream.length === 0) {
       throw new WorkflowNodeTypeSwitchError(

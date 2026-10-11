@@ -323,6 +323,28 @@ describe('patchWorkflowNodeType', () => {
     ).toThrow(WorkflowNodeTypeSwitchError)
   })
 
+  it('rejects →approval when the upstream node is a null-bodied stub (#1258 复验 P3-A)', () => {
+    // 编辑中途极常见形态：`nodes:` 下 `review:` 空体（值为 null）。存在性
+    // 判定必须自有键 ∧ 真值双查——只查 hasOwnProperty 会把 null 空体当可
+    // 执行上游放行，随即触发破坏性清洗写入自动保存草稿、发布才被 loader
+    // 拒（前端放行/发布被拒的漂移，恰是本文件要消除的）。
+    const stubUpstreamYaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  review:',
+      '  gate:',
+      '    type: code',
+      '    capability: gate_cap',
+      '    after: [review]',
+      '',
+    ].join('\n')
+    expect(() =>
+      patchWorkflowNodeType(stubUpstreamYaml, 'gate', 'approval')
+    ).toThrow(WorkflowNodeTypeSwitchError)
+  })
+
   it('rejects →approval when the upstream key only lives on Object.prototype (#1258 codex 三轮 P3)', () => {
     // 与 materializeDraftEdges 同族：下标判定节点存在性会走原型链，
     // toString/constructor/__proto__ 来源被误取到真值而放行——loader

@@ -72,4 +72,15 @@ describe('approvalReworkCandidates', () => {
     const protoYaml = dagYaml.replace('after: [draft]', 'after: [toString]')
     expect(approvalReworkCandidates(protoYaml, 'gate')).toEqual([])
   })
+
+  it('does not treat null-bodied stub nodes as rework candidates (#1258 复验 P3-A)', () => {
+    // `nodes:` 下 `draft:` 空体（值为 null）：自有键存在但无节点实体，
+    // 不得漏进重置候选，其后继依赖（fetch）也不经空体传递（同
+    // nodeTypeSwitch 的入边存在性判定）。
+    const stubYaml = dagYaml.replace(
+      '  draft:\n    type: agent\n    capability: draft\n    after: [fetch]\n',
+      '  draft:\n'
+    )
+    expect(approvalReworkCandidates(stubYaml, 'gate')).toEqual([])
+  })
 })

@@ -43,11 +43,13 @@ export function approvalReworkCandidates(
       .filter(
         (key) =>
           key !== approvalKey &&
-          // 存在性查自有键：下标判定走原型链会把 toString 等键误取到
-          // 真值函数（.type !== 'start' 随之通过）而漏进候选（#1258
-          // codex 三轮 P3，与 materializeDraftEdges 同族）。
+          // 存在性 = 自有键 ∧ 真值双查：下标判定走原型链会把 toString 等
+          // 键误取到真值函数（#1258 codex 三轮 P3）；只查自有键又会把
+          // `nodes:` 下空体键（`review:` 值为 null）当实体漏进候选
+          // （#1258 复验 P3-A）。与 materializeDraftEdges 同族同修法。
           Object.prototype.hasOwnProperty.call(nodes, key) &&
-          nodes[key]?.type !== 'start'
+          nodes[key] &&
+          nodes[key].type !== 'start'
       )
       .sort()
   } catch {
