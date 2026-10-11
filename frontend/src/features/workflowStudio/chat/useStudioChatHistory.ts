@@ -20,12 +20,14 @@ export function useStudioChatHistory({
   workspaceId,
   activeSessionId,
   activeSessionIdRef,
+  sessionGenerationRef,
   messagesRef,
   setMessages,
 }: {
   workspaceId: string | undefined
   activeSessionId: string | null
   activeSessionIdRef: MutableRefObject<string | null>
+  sessionGenerationRef: MutableRefObject<number>
   messagesRef: MutableRefObject<ChatMessage[]>
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>
 }) {
@@ -50,19 +52,25 @@ export function useStudioChatHistory({
     if (typeof oldest !== 'number') return false
     loadingRef.current = true
     const sessionId = activeSessionId
+    const generation = sessionGenerationRef.current
     try {
       const page = await fetchStudioChatHistoryPage(
         workspaceId,
         sessionId,
         oldest
       )
-      // 跨会话竞态（refillMessages 的 activeSessionIdRef 守卫同模式）：
-      // 拉取在途时切换了会话，旧会话的旧页不得合入新列表、游标也不推进。
-      if (activeSessionIdRef.current !== sessionId) return false
-      setMessages((current) =>
-        activeSessionIdRef.current !== sessionId
-          ? current
-          : mergeMessages(current, page.messages)
+      // 跨会话竞态（refillMessages 的守卫同模式，#1237 codex P2-1 升级为
+      // 会话 + 选择代次双检）：拉取在途时切换了会话——包括 A→B→A 重新选中
+      // 同一会话——早先代次的旧页不得合入新列表、不得闩锁 hasMore（否则
+      // 重新进入的首屏窗口覆盖旧页后永远无法继续分页）、游标也不推进。
+      const current = () =>
+        activeSessionIdRef.current === sessionId &&
+        sessionGenerationRef.current === generation
+      if (!current()) return false
+      setMessages((currentMessages) =>
+        current()
+          ? mergeMessages(currentMessages, page.messages)
+          : currentMessages
       )
       if (!page.hasMore) {
         hasMoreRef.current = false
@@ -79,6 +87,7 @@ export function useStudioChatHistory({
     workspaceId,
     activeSessionId,
     activeSessionIdRef,
+    sessionGenerationRef,
     messagesRef,
     setMessages,
   ])

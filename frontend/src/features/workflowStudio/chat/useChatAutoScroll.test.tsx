@@ -169,4 +169,34 @@ describe('useChatAutoScroll 历史翻页触发与锚定补偿（#1120 PR-4）', 
     // 确实处于虚拟态：未挂载全部行。
     expect(el.querySelectorAll('[data-index]').length).toBeLessThan(200)
   })
+
+  it('补偿基线取触发分页时的当前高度（虚拟器测量修正不混入增量，#1237 codex P2-2）', () => {
+    // 虚拟列表的 measureElement/ResizeObserver 修正不改变 messages，只在
+    // 消息变化时快照的基线会滞留初始估算值，把累计修正混进 prepend 增量。
+    const initial = batch('m', 1, 10)
+    const onNearTop = () => {}
+    const view = render(<Harness messages={initial} onNearTop={onNearTop} />)
+    const el = screen.getByTestId('list')
+    stubMetrics(el, { scrollHeight: 1000, clientHeight: 400 })
+    el.scrollTop = 50
+    fireEvent.scroll(el)
+    view.rerender(<Harness messages={[...initial]} onNearTop={onNearTop} />)
+
+    // 测量修正把内容高度从 1000 改到 1300（messages 未变、无 effect 重跑），
+    // 用户继续滚动并再次到顶触发分页——基线必须取此刻的 1300。
+    stubMetrics(el, { scrollHeight: 1300, clientHeight: 400 })
+    el.scrollTop = 40
+    fireEvent.scroll(el)
+
+    // prepend 一页：内容再增高 600。补偿 = 40 + 600；滞留基线会算出
+    // 40 + 900（混入 300 修正量，视口过冲）。
+    stubMetrics(el, { scrollHeight: 1900, clientHeight: 400 })
+    view.rerender(
+      <Harness
+        messages={[...batch('o', -19, 0), ...initial]}
+        onNearTop={onNearTop}
+      />
+    )
+    expect(el.scrollTop).toBe(640)
+  })
 })

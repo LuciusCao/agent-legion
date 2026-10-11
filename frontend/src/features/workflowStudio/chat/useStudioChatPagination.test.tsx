@@ -382,3 +382,238 @@ describe('useStudioChat 历史向上翻页（#1120 PR-4）', () => {
     ).toBe('q full')
   })
 })
+
+// #1237 codex P2-1 族：异步加载回调的陈旧响应拒绝必须到「会话选择代次」级——
+// A→B→A 切换后 sessionId 守卫失效（重新选中的还是 A），早先代次挂起的响应
+// 不得合入消息、不得闩锁翻页、不得覆盖会话快照。
+describe('会话选择代次守卫（#1237 codex P2-1 族）', () => {
+  const originalEventSource = globalThis.EventSource
+  let testClient = createTestQueryClient()
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: testClient }, children)
+
+  beforeEach(() => {
+    testClient = createTestQueryClient()
+    EventSourceMock.reset()
+    globalThis.EventSource = EventSourceMock as unknown as typeof EventSource
+    installLocalStorageStub()
+    vi.clearAllMocks()
+    mockApi.fetchStudioChatAgents.mockResolvedValue([
+      { id: 'kimi', label: 'Kimi Code' },
+    ])
+    mockApi.fetchStudioChatSessions.mockResolvedValue([sessionRecord()])
+    mockApi.fetchStudioChatMessages.mockImplementation(
+      (_workspaceId, sessionId) =>
+        Promise.resolve(
+          sessionId === 's1'
+            ? [
+                textMessage('m101', 101, 'a'),
+                textMessage('m102', 102, 'b'),
+                textMessage('m103', 103, 'c'),
+                textMessage('m104', 104, 'd'),
+                textMessage('m105', 105, 'e'),
+              ]
+            : [textMessage('n500', 500, 's2 newest')]
+        )
+    )
+    mockApi.updateStudioChatContext.mockResolvedValue(sessionRecord())
+  })
+
+  afterEach(() => {
+    globalThis.EventSource = originalEventSource
+  })
+
+  async function renderS1() {
+    const view = renderHook(() => useStudioChat('ws1'), { wrapper })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatSessions).toHaveBeenCalled()
+    )
+    await act(async () => {
+      await view.result.current.selectSession('s1')
+    })
+    await waitFor(() =>
+      expect(view.result.current.messages.map((m) => m.id)).toEqual([
+        'm101',
+        'm102',
+        'm103',
+        'm104',
+        'm105',
+      ])
+    )
+    return view
+  }
+
+  async function roundTripViaS2(
+    result: { current: ReturnType<typeof useStudioChat> },
+    s1Messages: ReturnType<typeof textMessage>[]
+  ) {
+    await act(async () => {
+      await result.current.selectSession('s2')
+    })
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['n500'])
+    )
+    mockApi.fetchStudioChatMessages.mockImplementation(
+      (_workspaceId, sessionId) =>
+        Promise.resolve(
+          sessionId === 's1' ? s1Messages : [textMessage('n500', 500, 's2')]
+        )
+    )
+    await act(async () => {
+      await result.current.selectSession('s1')
+    })
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(
+        s1Messages.map((m) => m.id)
+      )
+    )
+  }
+
+  it('分页：A→B→A 后拒绝早先代次的旧页（不合入、不闩锁 hasMore）', async () => {
+    let resolvePage: (page: HistoryPage) => void = () => {}
+    mockApi.fetchStudioChatHistoryPage.mockImplementation(
+      () =>
+        new Promise<HistoryPage>((resolve) => {
+          resolvePage = resolve
+        })
+    )
+    const { result } = await renderS1()
+
+    // gen1 的分页请求挂起，期间 A→B→A。
+    act(() => {
+      void result.current.loadOlderHistory()
+    })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        101
+      )
+    )
+    await roundTripViaS2(result, [
+      textMessage('m101', 101, 'a'),
+      textMessage('m102', 102, 'b'),
+      textMessage('m103', 103, 'c'),
+      textMessage('m104', 104, 'd'),
+      textMessage('m105', 105, 'e'),
+    ])
+
+    // gen1 的迟到响应落地：不得合入旧页、不得闩锁 hasMore（否则重新进入
+    // A 的首屏窗口覆盖旧页后永远无法继续分页）。
+    await act(async () => {
+      resolvePage({
+        messages: [textMessage('m96', 96, 'stale page')],
+        hasMore: false,
+      })
+    })
+    expect(result.current.messages.map((m) => m.id)).toEqual([
+      'm101',
+      'm102',
+      'm103',
+      'm104',
+      'm105',
+    ])
+    expect(result.current.hasMoreHistory).toBe(true)
+
+    // 当前代次分页不受影响。
+    mockApi.fetchStudioChatHistoryPage.mockResolvedValue({
+      messages: [textMessage('m90', 90, 'gen3 page')],
+      hasMore: false,
+    })
+    await act(async () => {
+      await result.current.loadOlderHistory()
+    })
+    expect(result.current.messages[0]?.id).toBe('m90')
+    expect(result.current.hasMoreHistory).toBe(false)
+  })
+
+  it('refill：A→B→A 后拒绝早先代次的补齐（不覆盖更新内容）', async () => {
+    const { result } = await renderS1()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+
+    // gen1：SSE 残片指向未知消息 → 增量补齐挂起。
+    let resolveRefill: (
+      messages: ReturnType<typeof textMessage>[]
+    ) => void = () => {}
+    mockApi.fetchStudioChatMessages.mockImplementation(
+      (_workspaceId, sessionId, afterSeq) => {
+        if (sessionId === 's1' && afterSeq !== undefined) {
+          return new Promise((resolve) => {
+            resolveRefill = resolve
+          })
+        }
+        return Promise.resolve(
+          sessionId === 's1' ? [] : [textMessage('n500', 500, 's2 newest')]
+        )
+      }
+    )
+    const source = EventSourceMock.instances[0]
+    act(() =>
+      source!.emitMessage({
+        type: 'message',
+        message: {
+          id: 'm106',
+          session_id: 's1',
+          kind: 'text',
+          role: 'agent',
+          content: { text: 'partial' },
+        },
+      })
+    )
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatMessages).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        105
+      )
+    )
+
+    // A→B→A：gen3 首屏窗口里 m105 已是服务端完整版。
+    await roundTripViaS2(result, [
+      textMessage('m101', 101, 'a'),
+      textMessage('m102', 102, 'b'),
+      textMessage('m103', 103, 'c'),
+      textMessage('m104', 104, 'd'),
+      textMessage('m105', 105, 'fresh e'),
+    ])
+
+    // gen1 的补齐携带 m105 的断连期旧快照：不得覆盖 gen3 的完整版。
+    await act(async () => {
+      resolveRefill([textMessage('m105', 105, 'stale e')])
+    })
+    expect(
+      result.current.messages.find((m) => m.id === 'm105')?.content.text
+    ).toBe('fresh e')
+  })
+
+  it('SSE 重连的会话快照：切换会话后丢弃迟到快照', async () => {
+    const { result } = await renderS1()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+
+    let resolveFetch: (record: StudioChatSessionRecord) => void = () => {}
+    mockApi.fetchStudioChatSession.mockImplementation(
+      () =>
+        new Promise<StudioChatSessionRecord>((resolve) => {
+          resolveFetch = resolve
+        })
+    )
+    const source = EventSourceMock.instances[0]
+    act(() => source!.onopen?.())
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatSession).toHaveBeenCalledWith('ws1', 's1')
+    )
+
+    await act(async () => {
+      await result.current.selectSession('s2')
+    })
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['n500'])
+    )
+
+    // 旧会话的迟到快照不得写进当前选中（s2 不在会话列表里，快照应为空）。
+    await act(async () => {
+      resolveFetch(sessionRecord({ id: 's1', status: 'running' }))
+    })
+    expect(result.current.session).toBeNull()
+  })
+})

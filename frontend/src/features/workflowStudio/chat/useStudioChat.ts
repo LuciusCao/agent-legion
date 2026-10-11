@@ -46,6 +46,10 @@ export function useStudioChat(workspaceId: string | undefined) {
   const [starting, setStarting] = useState(false)
   const messagesRef = useRef<ChatMessage[]>([])
   const activeSessionIdRef = useRef<string | null>(null)
+  // 会话选择代次（#1237 codex P2-1）：A→B→A 切换后 sessionId 守卫失效
+  // （重新选中的还是 A），异步加载回调须同时校验代次——每次选择变化
+  // （含 workspace 切换清空）在入口 effect 递增。
+  const sessionGenerationRef = useRef(0)
   // 当前 workspace 的 ref 快照（codex P2 复审轮 #796）：startSession 等异步
   // 回调落地前切换 workspace 时，旧 workspace 的迟到响应不得写入本 hook
   // 的 state（本 hook 实例被 react-router 复用，不被重挂）。ref 更新合入
@@ -76,24 +80,29 @@ export function useStudioChat(workspaceId: string | undefined) {
     async (fromSeq?: number) => {
       if (!workspaceId || !activeSessionId) return false
       const sessionId = activeSessionId
+      const generation = sessionGenerationRef.current
       const after = fromSeq ?? maxSeq(messagesRef.current)
       const fetched = await fetchStudioChatMessages(
         workspaceId,
         sessionId,
         after
       )
+      // #1237 codex P2-1：归属校验同时核对会话与选择代次——A→B→A 后
+      // sessionId 相同，早先代次的迟到响应不得合入/触发自愈。
+      const current =
+        activeSessionIdRef.current === sessionId &&
+        sessionGenerationRef.current === generation
       // #563：terminal 判定在 updater 外计算——updater 可能被 React 推迟到
       // render 才执行（同 state 有排队更新时），在 updater 内赋值再返回会
       // 拿到恒 false，REST 补齐的自愈被静默跳过；updater 必须是纯函数。
-      const hasTerminal =
-        activeSessionIdRef.current === sessionId &&
-        fetched.some(isTerminalStatus)
-      setMessages((current) => {
+      const hasTerminal = current && fetched.some(isTerminalStatus)
+      setMessages((currentMessages) => {
         // 跨会话竞态：拉取在途时切换了会话，旧会话的消息不得合入新列表；
         // 函数式更新以 current 为基线——并发的 refill(0) 与增量补齐各自
         // 合入，后落者不再回写旧基线覆盖前者（#563）。
-        if (activeSessionIdRef.current !== sessionId) return current
-        return mergeMessages(current, fetched)
+        if (activeSessionIdRef.current !== sessionId) return currentMessages
+        if (sessionGenerationRef.current !== generation) return currentMessages
+        return mergeMessages(currentMessages, fetched)
       })
       return hasTerminal
     },
@@ -102,6 +111,7 @@ export function useStudioChat(workspaceId: string | undefined) {
 
   // 进入/切换会话：全量拉一次消息与会话快照。
   useEffect(() => {
+    sessionGenerationRef.current += 1
     if (!workspaceId || !activeSessionId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- 会话切换时重置消息/快照（与 useWorkflowStudioDraft 同一模式）
       setMessages([])
@@ -151,6 +161,7 @@ export function useStudioChat(workspaceId: string | undefined) {
       refillMessages,
       fetchSession: fetchStudioChatSession,
       activeSessionId,
+      sessionGenerationRef,
     }
     const channel = createRealtimeChannel({
       url: `/api/workspaces/${encodeURIComponent(workspaceId)}/studio-chat/sessions/${encodeURIComponent(activeSessionId)}/events`,
@@ -310,6 +321,7 @@ export function useStudioChat(workspaceId: string | undefined) {
     workspaceId,
     activeSessionId,
     activeSessionIdRef,
+    sessionGenerationRef,
     messagesRef,
     setMessages,
   })
