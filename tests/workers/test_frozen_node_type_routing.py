@@ -115,6 +115,8 @@ def _assert_consistent(dispatched: tuple[str, str], detail: dict) -> None:
         assert (detail["executor_kind"], detail["agent_id"]) == (None, target)
     else:
         assert (detail["executor_kind"], detail["agent_id"]) == ("code", None)
+    # #1128: a dispatchable route never carries a route_error.
+    assert detail["route_error"] is None
 
 
 def test_code_turned_agent_keeps_the_old_job_on_the_code_pool(

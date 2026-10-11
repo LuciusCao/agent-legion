@@ -32,7 +32,8 @@ def legacy_agent_fallback_route(
     # #1128: the shared adjudication the job detail projection reuses.
     agent_id, error = legacy_agent_route(worker.job_db, workspace_id, node, None)
     if agent_id is None:
-        assert error is not None  # legacy_agent_route yields exactly one of the two
+        if error is None:  # legacy_agent_route yields exactly one of the two
+            raise AssertionError("legacy_agent_route returned neither agent_id nor error")
         return NodeRoute("error", error_message=error)
     if worker.agent_dispatch is None:
         raise RuntimeError("Agent dispatch service is not configured")
