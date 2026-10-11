@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.19] - 2026-10-11
+
+Worker 结果上报协议 v2（元数据移出 HTTP 头改走归档 `result.json`，**部署硬约束 Host 先升**）+ 执行面系统性收口：节点级并发限制覆盖远程 code Worker、`latest` 绑定 skill 的升级不再误重跑、events.jsonl 工具输出全链脱敏（P1 安全）、worker 上报心跳停摆/401/降级归档族收口；前端 workspace 主页加载失败误判引导页修复（#1183）、预览面板支持媒体产物播放（#1146）；分支模型收口为 trunk-based（#1150）。
+
 ### Added
 
 - 预览面板（自定义 preview panel）支持媒体产物播放（issue #1146，PR 面向面板作者的桥契约扩展）：宿主桥新增只读方法 `readArtifactBytes`——面板以 `{method:"readArtifactBytes", params:{name}}` 请求，宿主用自身会话经 raw 端点取回字节、以 postMessage transfer（零拷贝）回传 `ArrayBuffer` + `mediaType`，面板侧 `URL.createObjectURL(new Blob([buf], {type}))` 建 blob URL 喂 `<video>`/`<audio>`；读取上限 512 MiB（Content-Length 预检 + 实际字节数复核，超限走桥错误响应通道）。面板 CSP 增加 `media-src blob:`（只加 blob:，无网络出站面——blob URL 只能由面板本帧脚本创建；宿主文档头层的 media-src 本就放行，此条只解开面板 `default-src 'none'` 的压制）。init 消息新增 `capabilities: ["readArtifactBytes"]` 能力声明（旧面板零影响、新面板可同步分支）。面板作者指南（`server/app/mcp_server/preview_guide.md`）补方法签名、blob 播放与字幕叠加示例（`readArtifact` 读文本字幕轨 + `timeupdate` 叠加）。**注意：本条为 UI 改动，随 0.7.19 的 UI 验收批次交付，用户验收后合入。**
