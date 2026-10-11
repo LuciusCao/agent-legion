@@ -11,7 +11,7 @@ management (rename / delete / archive) lives in studio_chat_session_manage.py.
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from server.app.auth.dependencies import enforce_scoped_workspace_binding, reject_studio_agent_scope
 from server.app.auth.workspace_access import require_workspace_access
@@ -123,11 +123,26 @@ def create_studio_chat_router(
         response_model=StudioChatMessagesResponse,
     )
     def list_messages(
-        workspace_id: str, session_id: str, _user: scoped_read, after_seq: int = 0
+        workspace_id: str,
+        session_id: str,
+        _user: scoped_read,
+        after_seq: Annotated[int, Query(ge=0)] = 0,
+        before_seq: Annotated[int | None, Query(ge=1)] = None,
     ) -> StudioChatMessagesResponse:
-        messages = service.list_messages(session_id, workspace_id, after_seq=after_seq)
+        # after_seq (forward refill) and before_seq (paging up to older
+        # history, #1120 PR-3) frame the same scan from opposite directions;
+        # a request carrying both mixes frames, so it is rejected instead of
+        # silently picking one direction.
+        if before_seq is not None and after_seq:
+            raise HTTPException(
+                status_code=422, detail="after_seq and before_seq are mutually exclusive"
+            )
+        messages, has_more = service.list_messages_page(
+            session_id, workspace_id, after_seq=after_seq, before_seq=before_seq
+        )
         return StudioChatMessagesResponse(
-            messages=[StudioChatMessageRecord.model_validate(row) for row in messages]
+            messages=[StudioChatMessageRecord.model_validate(row) for row in messages],
+            has_more=has_more,
         )
 
     @guarded.post(
