@@ -2,7 +2,8 @@
 「继续对话」 resume and the send-path auto-resume (#1121).
 
 Both checks are fail-fast and side-effect-free. The send path runs them BEFORE
-stamping idle -> error (codex P2-1, round 3 — multi-step changes prepare
+the capacity-checked claim write (#1238 codex round 3 P2-1, kept after round 4
+eliminated the intermediate error stamp — multi-step changes prepare
 everything fallible first, then apply): a session whose agent was deleted or
 whose command no longer runs on this host keeps its truthful idle row (the old
 runtime is still alive), the send raises the preflight's explanatory error,

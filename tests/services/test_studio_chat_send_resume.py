@@ -447,6 +447,51 @@ def test_running_turn_stays_fail_closed_then_next_send_auto_resumes(chat) -> Non
     assert len(_requests(_read_sink(script_path), "initialize")) == 2
 
 
+def test_auto_resume_at_full_cap_excludes_itself_from_the_count(chat, monkeypatch) -> None:
+    """#1238 复验 P1-1: cap == 当前活跃数、且被 resume 的 idle 行本身就是活跃
+    成员——idle→starting 是已计数行的迁移、计数净变化为零，不得假阳性 409
+    「Too many active」。MAX=0 用例两种写法都拒绝，区分不出这个假阳性，
+    本用例钉住 cap=1 的区分形态。"""
+    from server.app.studio_chat import service as service_module
+
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TEXT_SCRIPT)
+    sid = service.create_session(workspace_id, user_id, "fake-agent")["id"]
+    runtime = service.runtime(sid)
+    assert runtime is not None
+    _expire_token(service.db, runtime.token)
+    # 容量恰好满：唯一活跃会话就是被 resume 的自己（cap=1, 活跃=1）。
+    monkeypatch.setattr(service_module, "MAX_ACTIVE_STUDIO_CHAT_SESSIONS", 1)
+
+    message = service.send_message(sid, workspace_id, "at full cap")
+
+    assert message["content"]["text"] == "at full cap"
+    _wait_for(lambda: _idle(service, sid))
+    assert _user_texts(service, sid, workspace_id) == ["at full cap"]
+    assert len(_requests(_read_sink(script_path), "initialize")) == 2
+
+
+def test_auto_resume_second_session_at_cap_fits_after_self_exclusion(chat, monkeypatch) -> None:
+    """同源次生（复验 P1-1）：cap=2、两个 idle+死 token 会话相继自动
+    resume——各自排除自身后计数为 1 < 2，第二个不得被误拒。"""
+    from server.app.studio_chat import service as service_module
+
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TEXT_SCRIPT)
+    first = service.create_session(workspace_id, user_id, "fake-agent")["id"]
+    second = service.create_session(workspace_id, user_id, "fake-agent")["id"]
+    for sid in (first, second):
+        runtime = service.runtime(sid)
+        assert runtime is not None
+        _expire_token(service.db, runtime.token)
+    monkeypatch.setattr(service_module, "MAX_ACTIVE_STUDIO_CHAT_SESSIONS", 2)
+
+    assert service.send_message(first, workspace_id, "one")["content"]["text"] == "one"
+    assert service.send_message(second, workspace_id, "two")["content"]["text"] == "two"
+    _wait_for(lambda: _idle(service, first) and _idle(service, second))
+    assert len(_requests(_read_sink(script_path), "initialize")) == 4
+
+
 def test_auto_resume_never_reopens_a_row_that_raced_to_closed(chat, monkeypatch) -> None:
     """#1121 codex P1 (round 1) / #1238 round 4: the auto path's claim accepts
     only idle/error — a close landing before it makes the claim match zero

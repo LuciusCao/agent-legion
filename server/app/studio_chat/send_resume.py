@@ -19,11 +19,13 @@ follows within the same request, so the session_resumed row is the trace.
 Concurrency: a per-session lock (service._send_resume_locks) serializes
 auto-resume attempts — the loser of a concurrent attempt re-checks under the
 lock and rides the winner's fresh runtime instead of spawning twice. The
-claim moves idle/error -> starting in ONE capacity-checked statement (#1238
-codex round-4 P1: the row never transits an error state that drops out of the
-capacity count while its runtime still lives, and a close landing before the
-claim makes it match zero rows — the row stays closed; round-1 P1's generational
-CAS was subsumed by this); the starting claim stays the durable once-only
+claim moves idle/error -> starting in ONE capacity-checked statement whose
+count excludes the claimed row itself (#1238 codex round-4 P1 + adversarial
+P1-1: the row never transits an error state that drops out of the capacity
+count while its runtime still lives, a full cap never false-positive-rejects
+an idle row's net-zero migration, and a close landing before the claim makes
+it match zero rows — the row stays closed; round-1 P1's generational CAS was
+subsumed by this); the starting claim stays the durable once-only
 guard against resumes that bypass the lock (the manual endpoint): a claim
 conflict with a live fresh runtime is ridden, not re-raised. The lock map is
 keyed by session id, never pruned — entries are tiny and bounded by the
@@ -97,8 +99,9 @@ def ensure_answerable_runtime(
         # here is NOT re-resolved inside resume). The claim then moves
         # idle/error -> starting in ONE capacity-checked statement (P1: no
         # intermediate error state that drops the row out of the capacity
-        # count while its runtime still lives; a close that lands before the
-        # claim simply makes it match zero rows — the row stays closed).
+        # count while its runtime still lives; the count excludes the claimed
+        # row itself, adversarial P1-1; a close that lands before the claim
+        # simply makes it match zero rows — the row stays closed).
         agent = require_resumable_agent(service, session)
         try:
             # The lifecycle admission of the decorated service.resume_session,
