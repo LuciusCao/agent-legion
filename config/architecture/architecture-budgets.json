@@ -1265,6 +1265,7 @@
     "server/app/http_range.py": 24,
     "server/app/http_request_id.py": 77,
     "server/app/job_intake_background.py": 28,
+    "server/app/job_node_log_names.py": 45,
     "server/app/jobs/__init__.py": 19,
     "server/app/jobs/artifact_row_retire.py": 32,
     "server/app/jobs/atomic_mutations.py": 176,
