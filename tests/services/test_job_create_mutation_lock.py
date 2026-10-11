@@ -188,6 +188,35 @@ def test_recreate_inside_cleanup_recheck_window_waits_and_keeps_its_dir(
     assert list(storage_dir.iterdir()) == []
 
 
+def test_bulk_create_rejects_cross_workspace_id_collision_before_locking(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    """#1243 codex P2：id 由带下划线的字段拼接，可能撞上别的 workspace 的现存 job。
+    批路径按该 job 自己的 workspace 键排序，按本 workspace 的 job_id 序去锁它
+    可能 AB-BA；所以碰撞必须在取任何 job-mutation 锁之前以结构化 identity 错误
+    拒绝——即便该 job 的锁正被别人持有，创建也不等待、不建目录、不写行。"""
+    own_ws = "w1243"
+    foreign_ws = f"{own_ws}_{_WORKFLOW}_x"
+    colliding_source = f"x_{_WORKFLOW}_y"
+    job_db.create_workspace(own_ws)
+    job_db.create_workspace(foreign_ws)
+    foreign_id = _create_single(job_db, foreign_ws, "y")
+    assert foreign_id == f"{own_ws}_{_WORKFLOW}_{colliding_source}"
+    other_id = f"{own_ws}_{_WORKFLOW}_zz"
+
+    with job_db.job_mutation_lock(foreign_id) as exists:
+        assert exists is True
+        thread, outcome = _start(lambda: _create_bulk(job_db, own_ws, [colliding_source, "zz"]))
+        thread.join(timeout=30)
+        assert not thread.is_alive(), "bulk create waited on a foreign job's lock"
+        assert _advisory_holders(job_db, foreign_id, granted=False) == []
+
+    assert isinstance(outcome.get("error"), ValueError), outcome
+    assert "collision" in str(outcome["error"]).lower()
+    assert job_db.get_job(other_id) is None
+    assert not any((tmp_path / "jobs").rglob(other_id))
+
+
 def test_bulk_create_takes_job_mutation_locks_in_job_id_order(
     job_db: JobQueries, tmp_path: Path
 ) -> None:

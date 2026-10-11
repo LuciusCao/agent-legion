@@ -140,6 +140,17 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
             for start in range(0, len(row_list), CHUNK_ROWS):
                 chunk = row_list[start : start + CHUNK_ROWS]
                 chunk_ids = [str(row[0]) for row in chunk]
+                # #1243 codex P2: ids are concatenated from underscore-bearing
+                # fields, so a chunk id can collide with another workspace's
+                # committed job (ws ``a`` + source ``a_a_z`` == ws ``a_a`` +
+                # source ``z``). Batches order such a job by ITS workspace key,
+                # not ours, so locking it in plain job_id order could AB-BA.
+                # Reject foreign identities BEFORE taking any lock (plain read,
+                # no row locks — same structured error the post-INSERT check
+                # raises); with every existing row in our workspace, job_id
+                # order IS the global batch order. The post-INSERT re-check
+                # below still closes the read-then-insert window (#501).
+                verify_chunk_identities(conn, chunk)
                 lock_job_mutations_sorted(conn, chunk_ids)
                 lock_rows_for_key_share(
                     conn,
