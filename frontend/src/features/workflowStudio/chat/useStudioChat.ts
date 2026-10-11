@@ -174,7 +174,9 @@ export function useStudioChat(workspaceId: string | undefined) {
     return () => channel.close()
   }, [workspaceId, activeSessionId, refillMessages, queryClient, setSession])
 
-  async function runAction(action: () => Promise<void>) {
+  // useCallback 稳定化（#1120 codex P1）：runAction 是 answerPermission /
+  // resume 的依赖，每 render 新建会把不稳定逐层传导到 MessageItem 的 props。
+  const runAction = useCallback(async (action: () => Promise<void>) => {
     setActionError(null)
     try {
       await action()
@@ -183,7 +185,7 @@ export function useStudioChat(workspaceId: string | undefined) {
       setActionError(error instanceof Error ? error.message : '操作失败')
       return false
     }
-  }
+  }, [])
 
   // 返回本次创建的成败（#801 codex 轮 7 根因方案）：useJobDiagnosis 的
   // 失败闩锁只采信本次尝试的失败——无关的历史加载错误（恢复会话的消息
@@ -228,23 +230,26 @@ export function useStudioChat(workspaceId: string | undefined) {
     setSession,
   })
 
-  async function answerPermission(
-    requestId: string,
-    answer: { option_id?: string; deny?: boolean }
-  ) {
-    if (!workspaceId || !activeSessionId) return
-    await runAction(async () => {
-      await answerStudioChatPermission(
-        workspaceId,
-        activeSessionId,
-        requestId,
-        {
-          deny: answer.deny ?? false,
-          option_id: answer.option_id ?? null,
-        }
-      )
-    })
-  }
+  const answerPermission = useCallback(
+    async (
+      requestId: string,
+      answer: { option_id?: string; deny?: boolean }
+    ) => {
+      if (!workspaceId || !activeSessionId) return
+      await runAction(async () => {
+        await answerStudioChatPermission(
+          workspaceId,
+          activeSessionId,
+          requestId,
+          {
+            deny: answer.deny ?? false,
+            option_id: answer.option_id ?? null,
+          }
+        )
+      })
+    },
+    [workspaceId, activeSessionId, runAction]
+  )
 
   // #1120：toolCalls 增量归并 + 草稿视图引用稳定化（见 useStudioChatViews）。
   const views = useStudioChatViews(messages)

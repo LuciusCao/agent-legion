@@ -147,6 +147,36 @@ describe('useStudioChat', () => {
     expect(result.current.messages[0]?.seq).toBe(1)
   })
 
+  // #1120（codex P1）：动作回调引用必须跨流式 chunk 稳定——它们逐行下传
+  // 给 MessageItem，每 render 新建会穿透 memo、重渲染整个可见列表。
+  it('keeps action callbacks referentially stable across streaming chunks', async () => {
+    const { result } = await renderChat()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    emit({ type: 'message', message: textMessage('m1', 1, 'hel') })
+    const before = {
+      send: result.current.send,
+      cancel: result.current.cancel,
+      setAllowAll: result.current.setAllowAll,
+      answerPermission: result.current.answerPermission,
+      resume: result.current.resume,
+    }
+    emit({
+      type: 'message',
+      message: {
+        id: 'm1',
+        session_id: 's1',
+        kind: 'text',
+        role: 'agent',
+        content: { text: 'hello' },
+      },
+    })
+    expect(result.current.send).toBe(before.send)
+    expect(result.current.cancel).toBe(before.cancel)
+    expect(result.current.setAllowAll).toBe(before.setAllowAll)
+    expect(result.current.answerPermission).toBe(before.answerPermission)
+    expect(result.current.resume).toBe(before.resume)
+  })
+
   // #938：后台子代理完成 / cron 触发的 agent 自发回合——本地没有发起任何
   // turn（未调用 send、会话 idle），SSE 推来的回执、汇报文本与收尾仍要实时
   // 合入消息列表。
