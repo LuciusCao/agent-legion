@@ -7,6 +7,7 @@ import time
 import pytest
 
 from server.app.jobs.queries.workflow_drafts import DraftConflictError
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def test_upsert_then_get_roundtrip(job_db) -> None:
@@ -68,6 +69,104 @@ def test_rejected_conditional_bump_leaves_no_generation_row(job_db) -> None:
             (workspace["id"],),
         ).fetchone()
     assert row is None
+
+
+def test_cas_and_legacy_writes_on_the_empty_state_never_deadlock(job_db, monkeypatch) -> None:
+    """#1226 codex 复审 P2：空草稿（行不存在）上 CAS 与 legacy LWW 并发——
+    旧形态下 CAS 的 FOR UPDATE 探针锁不到行，退化为「先代次行后插草稿」，
+    与 legacy「先插草稿后代次行」倒置成 AB-BA 死锁（40P01 冒成未处理的
+    500）。统一协议：两条写路径先取同一 workspace 级 advisory xact 锁——
+    本测试用屏障注入钉住最坏交错，断言无 40P01、双方合理收尾（CAS 成功
+    或 DraftConflictError）、终态等于某种合法串行序。
+
+    交错注入（比照 test_status_counts_deadlock 的手法）：补丁两条路径的
+    代次推进函数。A（legacy，主线程）插完草稿行后等 B 的信号；B（CAS 线程）
+    拿到代次行锁后举旗再等 A——旧序下环闭合，PG 死锁检测器必杀一边
+    （deadlock_timeout 默认 1s）；统一锁序后 B 卡在 advisory 锁上（经
+    pg_blocking_pids 观测，非裸 sleep），A 直接推进。"""
+    import threading
+    import time
+
+    import psycopg
+
+    from server.app.jobs.queries import workflow_draft_cas as cas_queries
+    from server.app.jobs.queries import workflow_drafts as draft_queries
+    from tests.helpers.pg_waits import backend_pid
+    from tests.postgres_support import TEST_SCHEMA
+
+    workspace = job_db.create_workspace(f"ws-draft-lock-order-{TEST_SCHEMA}")
+    workspace_id = str(workspace["id"])
+    a_holds_draft = threading.Event()
+    b_holds_generation = threading.Event()
+    real_bump = draft_queries.bump_workflow_draft_generation
+    real_bump_if_current = cas_queries.bump_workflow_draft_generation_if_current
+    errors: dict[str, BaseException] = {}
+
+    def _blocked_by(pid: int) -> bool:
+        with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as monitor:
+            row = monitor.execute(
+                "select exists(select 1 from pg_stat_activity"
+                " where %s = any(pg_blocking_pids(pid)))",
+                (pid,),
+            ).fetchone()
+        return bool(row[0])
+
+    def a_bump(conn, ws):
+        if ws != workspace_id:
+            return real_bump(conn, ws)
+        a_pid = backend_pid(conn)
+        a_holds_draft.set()
+        # 等信号非等时长：B 持代次锁（旧序交错）或 B 已被 A 的 advisory 锁
+        # 拦住（统一锁序——B 永远到不了代次锁，直接推进）；deadline 只是护栏。
+        deadline = time.monotonic() + 10
+        while not b_holds_generation.is_set():
+            if _blocked_by(a_pid):
+                break
+            assert time.monotonic() < deadline, "B 既未持代次锁也未被 A 阻塞"
+            time.sleep(0.02)
+        return real_bump(conn, ws)
+
+    def b_bump_if_current(conn, ws, base):
+        result = real_bump_if_current(conn, ws, base)
+        if ws != workspace_id:
+            return result
+        b_holds_generation.set()
+        # 旧序下 A 已持草稿行（事件早已竖起，零等待）；统一锁序下 B 只在 A
+        # 提交后才走到这里（事件同样早已竖起）——两侧都不引入睡眠。
+        a_holds_draft.wait(timeout=10)
+        return result
+
+    def run_cas() -> None:
+        try:
+            job_db.upsert_workspace_workflow_draft_if_unchanged(workspace_id, "key: cas\n", 0)
+        except BaseException as exc:  # 测试线程内收集，主线程统一断言
+            errors["cas"] = exc
+
+    monkeypatch.setattr(draft_queries, "bump_workflow_draft_generation", a_bump)
+    monkeypatch.setattr(cas_queries, "bump_workflow_draft_generation_if_current", b_bump_if_current)
+
+    thread_b = threading.Thread(target=run_cas)
+    thread_b.start()
+    try:
+        job_db.upsert_workspace_workflow_draft(workspace_id, "key: legacy\n")
+    except BaseException as exc:  # 主线程收集，统一断言
+        errors["legacy"] = exc
+    thread_b.join(timeout=30)
+    # B 挂死超过 join 上限必须响亮失败（否则其 errors 为空会读成假绿）。
+    assert not thread_b.is_alive(), "CAS thread never resolved"
+
+    deadlocked = [
+        name for name, exc in errors.items() if isinstance(exc, psycopg.errors.DeadlockDetected)
+    ]
+    assert not deadlocked, f"draft write paths deadlocked: {deadlocked} ({errors})"
+    assert "legacy" not in errors  # legacy LWW 在任一合法串行序下都成功
+    cas_error = errors.get("cas")
+    assert cas_error is None or isinstance(cas_error, DraftConflictError)
+    # 终态 = 某种合法串行序：草稿行存在（唯一写入者或后到者覆盖），代次 ≥
+    # 1 且与实际落库写入次数一致。
+    state = job_db.get_workspace_workflow_draft_state(workspace_id)
+    assert state["definition_yaml"] is not None
+    assert int(state["generation"]) >= 1
 
 
 def test_upsert_is_idempotent_and_advances_updated_at(job_db) -> None:

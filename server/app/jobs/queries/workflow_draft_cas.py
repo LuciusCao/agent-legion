@@ -14,6 +14,7 @@ from typing import Any
 
 from server.app.jobs.queries.workflow_draft_generation import (
     bump_workflow_draft_generation_if_current,
+    lock_workspace_draft_writes,
 )
 from server.app.jobs.queries.workflow_drafts import DraftConflictError
 
@@ -29,14 +30,16 @@ class WorkflowDraftCasQueriesMixin:
     ) -> dict[str, Any]:
         """Apply only when the workspace's draft generation still equals the base.
 
-        代次判定在同一事务内三步完成：先对草稿行 FOR UPDATE（等出任何在途
-        发布——它的删行 + 代次推进同事务提交），再条件推进代次（无代次行
-        时仅 base=0 可建、有行时仅当前代次 == base 可推进，并发交错在
-        READ COMMITTED 等待后重评估），推进成功才写草稿行。锁序全程
-        「草稿行 → 代次行」，与发布删行同序，无 AB-BA。代次已前进 →
-        ``DraftConflictError``（调用方重读新基线重试），不写不推进。
+        代次判定在同一事务内完成：先取 workspace 级草稿写锁（统一锁协议的
+        第一把锁——草稿行不存在时 FOR UPDATE 锁不到行，没有它 CAS 会退化
+        成「先代次行后插草稿」，与 legacy/发布的「先草稿行后代次行」倒置
+        成 AB-BA 死锁，#1226 codex 复审 P2），再对草稿行 FOR UPDATE，然后
+        条件推进代次（无代次行时仅 base=0 可建、有行时仅当前代次 == base
+        可推进，READ COMMITTED 等待后重评估），推进成功才写草稿行。代次已
+        前进 → ``DraftConflictError``（调用方重读新基线重试），不写不推进。
         """
         with self.connect() as conn:  # type: ignore[attr-defined]
+            lock_workspace_draft_writes(conn, workspace_id)
             conn.execute(
                 "select 1 from workspace_workflow_drafts where workspace_id=%s for update",
                 (workspace_id,),

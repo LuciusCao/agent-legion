@@ -12,12 +12,15 @@
 （不带 base_generation 的旧客户端）保持 LWW 放行——已知残余：它无法在
 发布代次边界上受保护，所有现行写入者都携带代次。
 
-锁序：草稿行（FOR UPDATE / upsert）→ 代次行（bump），写路径与发布删行
-同序，无 AB-BA。条件 bump 的 UPDATE 分支在 READ COMMITTED 下等待后重评估
-WHERE，并发写/发布交错两个方向都安全。
+锁序（#1226 codex 复审 P2）：所有触碰草稿行/代次行的写路径（CAS、
+legacy LWW、发布删行）第一把锁都是同一 workspace 级 advisory xact 锁
+（``lock_workspace_draft_writes``），行锁顺序因此被串行化——草稿行不
+存在时 SELECT ... FOR UPDATE 锁不到行，若 CAS 退化为「先代次行后插
+草稿」即与 legacy/发布的「先草稿行后代次行」倒置成 AB-BA 死锁。
+条件 bump 的 UPDATE 分支在 READ COMMITTED 下等待后重评估 WHERE。
 
-Mixin 持有池化读；conn-first 帮手（bump / 条件 bump / 发布生命周期的
-锁读与删除）由同模块与兄弟模块在调用方事务上执行——同
+Mixin 持有池化读；conn-first 帮手（写锁 / bump / 条件 bump / 发布生命
+周期的锁读与删除）由同模块与兄弟模块在调用方事务上执行——同
 ``workflow_revision_projection`` 惯例。
 """
 
@@ -28,6 +31,18 @@ from typing import Any
 from server.app.db.connection import DatabaseConnection
 
 _DRAFT_COLUMNS = "workspace_id, definition_yaml, created_at, updated_at"
+
+
+def lock_workspace_draft_writes(conn: DatabaseConnection, workspace_id: str) -> None:
+    """Workspace 级草稿写锁：每条触碰草稿行/代次行的写路径的第一把锁。
+
+    #1226 codex 复审 P2：统一锁协议让 CAS / legacy LWW / 发布删行在任何
+    行存在性下都同序（同会话重入取锁无害，事务结束释放）。
+    """
+    conn.execute(
+        "select pg_advisory_xact_lock(hashtext('workflow-draft-write-' || %s))",
+        (workspace_id,),
+    )
 
 
 def bump_workflow_draft_generation(conn: DatabaseConnection, workspace_id: str) -> int:
@@ -116,7 +131,10 @@ class WorkflowDraftGenerationQueriesMixin:
         serializes against a concurrent draft upsert (READ COMMITTED
         re-evaluates after the lock wait), so the comparison the caller makes
         on the returned content is race-safe. Never commits on its own.
+        #1226 复审 P2：先取 workspace 级草稿写锁（统一锁协议的第一把锁），
+        再锁草稿行。
         """
+        lock_workspace_draft_writes(conn, workspace_id)
         row = conn.execute(
             f"select {_DRAFT_COLUMNS}"
             " from workspace_workflow_drafts where workspace_id=%s for update",
@@ -136,7 +154,10 @@ class WorkflowDraftGenerationQueriesMixin:
         in-flight save conflicts instead of resurrecting the deleted content.
         Returns the new generation; an absent row deletes nothing and bumps
         nothing (no generation boundary without a delete) → None.
+        #1226 复审 P2：先取 workspace 级草稿写锁（同会话重入无害——发布
+        钩子的锁读已持锁），保护不经锁读的直接调用方。
         """
+        lock_workspace_draft_writes(conn, workspace_id)
         row = conn.execute(
             "delete from workspace_workflow_drafts where workspace_id=%s returning workspace_id",
             (workspace_id,),

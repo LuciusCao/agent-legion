@@ -20,6 +20,7 @@ from typing import Any
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.jobs.queries.workflow_draft_generation import (
     bump_workflow_draft_generation,
+    lock_workspace_draft_writes,
 )
 
 
@@ -57,9 +58,12 @@ class WorkflowDraftQueriesMixin(ConnectionQueriesMixin):
 
         残余（设计 v2 记明）：无代次的写入无法在发布代次边界上受保护——现行
          写入者（前端控制器 / agent 工具 / node prompt）都走 CAS 代次判定，
-         本路径只服务不带 base_generation 的旧客户端。
+         本路径只服务不带 base_generation 的旧客户端。锁序：与 CAS/发布同
+         一协议——先取 workspace 级草稿写锁（#1226 复审 P2），否则空草稿上
+         与 CAS 的「先代次行后插草稿」倒置成 AB-BA 死锁。
         """
         with self.connect() as conn:
+            lock_workspace_draft_writes(conn, workspace_id)
             row = conn.execute(
                 """
                 insert into workspace_workflow_drafts(workspace_id, definition_yaml)

@@ -90,6 +90,7 @@
     "tests/db/test_workspace_id_key_binding.py",
     "tests/db/test_workspace_preview_config.py",
     "tests/db/test_workspace_secrets_migration.py",
+    "tests/db/test_workspace_workflow_drafts.py",
     "tests/events/test_job_event_buffer_db.py",
     "tests/events/test_job_events.py",
     "tests/executors/leases/test_capacity_limits.py",
