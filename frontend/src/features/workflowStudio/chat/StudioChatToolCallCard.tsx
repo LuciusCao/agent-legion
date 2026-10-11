@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ToolCallView } from './studioChatMessages'
+import { StudioChatTruncatedPre } from './StudioChatTruncatedPre'
 import styles from './StudioChatPanel.module.css'
 
 const STATUS_ICON: Record<string, string> = {
@@ -20,6 +21,14 @@ export function StudioChatToolCallCard({ call }: { call: ToolCallView }) {
   const [open, setOpen] = useState(false)
   const icon = STATUS_ICON[call.status] ?? '…'
   const summary = outputSummary(call)
+  // rawInput 的 JSON 序列化只在展开态付出；两块长文本都经
+  // StudioChatTruncatedPre 渲染截断（#1120），点开出口才付全量 DOM
+  // 成本——call 本身持有的数据始终是完整的。
+  const inputJson = useMemo(
+    () =>
+      open && call.rawInput ? JSON.stringify(call.rawInput, null, 2) : null,
+    [open, call.rawInput]
+  )
   return (
     <div className={styles.toolCall} data-status={call.status || undefined}>
       <button
@@ -41,8 +50,18 @@ export function StudioChatToolCallCard({ call }: { call: ToolCallView }) {
       </button>
       {open && (
         <div className={styles.toolCallDetail}>
-          {call.rawInput && <pre>{JSON.stringify(call.rawInput, null, 2)}</pre>}
-          {call.outputText && <pre>{call.outputText}</pre>}
+          {inputJson && (
+            <StudioChatTruncatedPre
+              text={inputJson}
+              expandLabel="查看完整输入"
+            />
+          )}
+          {call.outputText && (
+            <StudioChatTruncatedPre
+              text={call.outputText}
+              expandLabel="查看完整输出"
+            />
+          )}
         </div>
       )}
     </div>
