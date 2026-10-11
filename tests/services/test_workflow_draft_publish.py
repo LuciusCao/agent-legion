@@ -784,3 +784,58 @@ def test_runtime_only_publish_with_concurrent_newer_draft_keeps_it(
     draft = queries.get_workspace_workflow_draft(workspace["id"])
     assert draft is not None
     assert draft["definition_yaml"] == newer
+
+
+def test_runtime_only_publish_aborts_when_active_revision_moves(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#1226 二轮 codex P1: the runtime-only path reads the active revision
+    OUTSIDE the implementation-publication lock. A structural publish landing
+    in between archives that row — the in-place edit must NOT be written onto
+    the archived row (the live v2 would never receive the runtime config and
+    the edit would be silently lost). The edit aborts with a 409-family
+    conflict instead: the draft row survives and neither revision is touched.
+    """
+    from server.app.services import workflow_revision_runtime as runtime_module
+    from server.app.services.job_errors import ConflictError
+
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    _seed_node_code(workspace["id"])
+    ok, _ = publish_workflow_draft(queries, workspace["id"], _DRAFT_YAML)
+    assert ok
+    runtime_edit = _DRAFT_YAML + "    execution:\n      model: glm-4.7\n"
+    queries.upsert_workspace_workflow_draft(workspace["id"], runtime_edit)
+
+    real_lock = runtime_module.acquire_implementation_publication_lock
+    service = WorkflowRevisionService(queries, True)
+
+    def publish_v2_then_lock(conn, ws_id) -> None:
+        # The interleave: after the runtime path's lock-free pre-read of v1,
+        # a concurrent structural publish archives v1 and creates v2.
+        structural = workflow_definition_from_yaml_string(
+            _DRAFT_YAML + "    outputs: [result.json]\n"
+        )
+        service.publish_workspace_revision(ws_id, structural)
+        real_lock(conn, ws_id)
+
+    monkeypatch.setattr(
+        runtime_module, "acquire_implementation_publication_lock", publish_v2_then_lock
+    )
+
+    with pytest.raises(ConflictError):
+        publish_workflow_draft(queries, workspace["id"], runtime_edit)
+
+    # Nothing was written: the draft row survives (the runtime edit is still
+    # an unpublished edit against the new active)...
+    draft = queries.get_workspace_workflow_draft(workspace["id"])
+    assert draft is not None
+    assert draft["definition_yaml"] == runtime_edit
+    # ...the live v2 never received the runtime config...
+    active = queries.get_active_workflow_revision(workspace["id"], "test_publish_flow")
+    assert active["version"] == 2
+    assert "glm-4.7" not in str(active["definition_json"])
+    # ...and the archived v1 row was not rewritten either.
+    revisions = [r for r in queries.list_workflow_revisions(workspace["id"], "test_publish_flow")]
+    v1 = next(r for r in revisions if r["version"] == 1)
+    assert "glm-4.7" not in str(v1["definition_json"])
