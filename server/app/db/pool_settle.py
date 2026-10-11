@@ -54,10 +54,15 @@ def settle_pool_returns(pool: ConnectionPool[Any]) -> None:
     FIFO and a parked worker cannot take a second checkpoint, so the barrier
     trips only after all workers finished everything queued before it. On
     timeout (a wedged worker) the barrier breaks and the caller proceeds.
-    Tasks queued *after* this call are not covered — callers settle once
-    nothing else returns connections any more (lifespan shutdown runs after
-    every DB-using background thread stopped; test boundaries run between
-    tests).
+    Tasks queued *after* this call are not covered, and lifespan shutdown
+    cannot fully quiesce DB users (bounded joins; an uninterruptible
+    ``asyncio.to_thread`` DB call may outlive them). That window is closed
+    one layer down (#1077 codex P1): ``DatabaseConnection.close`` rolls a
+    dirty transaction back on the caller's thread before ``putconn``
+    (``pool_reset.settle_return``), so a task discarded here can strand at
+    most an IDLE connection (no snapshot, no locks) until GC — never an
+    open transaction. The barrier's job is the prompt close of everything
+    returned before it.
     """
     if pool.closed:
         return
