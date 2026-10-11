@@ -17,6 +17,11 @@ import {
 } from './JobDiagnosisActionCard'
 import styles from './JobDiagnosisPanel.module.css'
 
+// 排查面板没有画布承接 workflow 草稿（#1120 codex 二轮 P1）：模块级 noop
+// 保持引用稳定——内联箭头随会话状态每 render 重建（流式 chunk 一路传到
+// MessageItem），会穿透 memo 重渲染全部可见消息行。
+const noopApplyWorkflowDraft = () => undefined
+
 type Props = {
   workspaceId: string
   target: JobDiagnosisTarget
@@ -133,7 +138,7 @@ export function JobDiagnosisPanel({ workspaceId, target, inDock }: Props) {
       }
       // 排查面板没有画布可承接 workflow 草稿；agent 若仍产草稿，
       // 草稿在 Studio 画布流程里照样可审。
-      onApplyWorkflowDraft={() => undefined}
+      onApplyWorkflowDraft={noopApplyWorkflowDraft}
     />
   )
 }
