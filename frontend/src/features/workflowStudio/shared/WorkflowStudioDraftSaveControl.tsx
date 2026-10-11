@@ -99,7 +99,12 @@ export function useDraftSaveConflictActions() {
     onAdoptServer: () => {
       const conflict = studio.draftSave?.conflictDraftYaml
       if (conflict == null) {
-        studio.resolveConflict(false)
+        // #1226 复审 P1：空内容冲突 = 发布删行后的在途写入被 409——服务端
+        // 没有草稿可采用。采用 = 画布回到已发布 canonical，CAS 基线推进到
+        // 冲突携带的发布后代次；不能仅解除警示（那会让 controller 收敛
+        // saved/idle 而画布仍是未落盘文本，关页静默丢失）。
+        const generation = studio.draftSave?.conflictDraftGeneration
+        studio.adoptServerDraft(studio.originalYaml, null, null, generation)
         return
       }
       // #1143：带上冲突草稿的语义身份——采用后 savedHash 恢复为服务端

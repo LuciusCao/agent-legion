@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import type { WorkflowDraftStoreResponse } from '../../../api/workflowDraft'
 import type { DraftSaveController } from './draftSaveController'
+import type { AdoptServerDraft } from './draftSaveConflict'
 import { isServerDraftNewer } from './serverDraftReapply'
 import type { ServerDraftConflict } from './useServerDraftApply'
 
@@ -38,11 +39,7 @@ export function useDraftServerSync(
 ): {
   hydrated: boolean
   isHydrated: () => boolean
-  adoptServerDraft: (
-    serverYaml: string,
-    serverAt: string | null,
-    onAdopt?: (serverYaml: string) => void
-  ) => void
+  adoptServerDraft: AdoptServerDraft
 } {
   const [hydrated, setHydrated] = useState(false)
   const hydratedRef = useRef(false)
@@ -50,7 +47,11 @@ export function useDraftServerSync(
   /* #1226 四轮 P1：「无草稿」重 hydrate 的幂等闸——记录已按哪份基线补过
      null-draft hydrate；同一基线的重复重取（effect 因非稳定回调引用等
      原因反复触发）跳过，否则每次 hydrate 的 setState 引发重渲染会构成
-     effect → setState → effect 循环。 */
+     effect → setState → effect 循环。
+     #1226 复审 P2：幂等键是 canonical 文本 + 代次——另一会话保存并发布
+     后草稿再次为空、代次已前进，若只按文本判等会跳过 re-hydrate，
+     controller 仍持旧代次，下一次保存以过期代次必然 409（服务端此时
+     根本没有草稿）。 */
   const nullBaselineHydratedRef = useRef<string | null>(null)
   const isHydrated = useCallback(() => hydratedRef.current, [])
   useEffect(() => {
@@ -73,9 +74,11 @@ export function useDraftServerSync(
     if (serverDraft.definition_yaml == null) {
       // #1226 四轮 P1：草稿行消失（发布删除）不是「更旧」而是「无存档」，
       // 时间戳守卫不适用——按当前基线重 hydrate（空态响应携带当前代次，
-      // hydrate 后下一次保存以该代次竞争），同一基线只补一次。
-      if (nullBaselineHydratedRef.current === originalYaml) return
-      nullBaselineHydratedRef.current = originalYaml
+      // hydrate 后下一次保存以该代次竞争），同一基线只补一次；复审 P2：
+      // 幂等键含代次，代次前进（文本未变）也重新对齐基线。
+      const key = `${originalYaml}@${serverDraft.generation}`
+      if (nullBaselineHydratedRef.current === key) return
+      nullBaselineHydratedRef.current = key
     } else {
       nullBaselineHydratedRef.current = null
       if (

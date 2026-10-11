@@ -154,6 +154,46 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     })
   })
 
+  it('re-hydrates the empty state when the generation advanced at the same canonical yaml (#1226 复审 P2)', async () => {
+    /* 另一会话保存并发布后草稿再次为空、代次从 0 推进到 2；幂等键只有
+       originalYaml 时旧实现跳过 re-hydrate，controller 仍持旧代次，下一次
+       保存以过期代次必然 409（即使服务端根本没有草稿）。修复后幂等键含
+       generation：代次前进即重新对齐基线。 */
+    const EMPTY_GEN2 = {
+      definition_yaml: null,
+      updated_at: null,
+      generation: 2,
+    }
+    const { rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: NO_DRAFT,
+    })
+    // 草稿再次为空但代次已前进（canonical 文本未变）。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: EMPTY_GEN2,
+    })
+    // 用户编辑 → 保存必须以新代次为基线。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: EMPTY_GEN2,
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
+      baseGeneration: 2,
+    })
+  })
+
   it('a superseded success still advances the CAS base for the follow-up save', async () => {
     /* codex review R2 P1：保存 A 在途时用户继续编辑调度 B——A 的成功
        响应虽被作废（不落 savedAt/不发通知），但它是服务端真值，基线必须
