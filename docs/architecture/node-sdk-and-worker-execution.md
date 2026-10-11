@@ -45,7 +45,13 @@ skill_versions   # 父进程预取（node_key -> skill_version）
 
 - 节点运行时**不含 DB 句柄或 DSN**（EXEC-CODE-004）：DB 派生输入由父进程预取；
   `settings_config` 按段白名单下发，vault/auth/database/agent_workers 段永不越界。
-- 预取失败语义：batch 预取失败即抛错；skill versions 预取失败降级为 `{}`。
+- 预取失败语义按入口区分：
+  - Host 本地 code 池（`_code_runtime.build_runtime`）：run（batch）行读取异常直接传播，节点执行失败；
+    skill versions 读取异常降级为 `{}`。
+  - 远程 Worker（`agent_broker/code_manifest.py` claim 响应路径）：job / workspace 行读取保持严格，
+    run 行读取遇暂时性 DB 异常降级为 `job_batch = None`（debug 日志），claim 照常继续；入队时的
+    审计哈希预取（`code_dispatch._prefetch_job_batch`）同样降级。节点侧 `ctx.batch` 因此可能为
+    `None`，依赖它的节点须自行处理。
 - **特权动作留在父进程**：节点只记录事实，父进程执行。`ctx.report_auth_failure()` 在
   `job_dir/.node_runtime/auth_failure` 写标记（内容为 node_config 里的 connection key，
   可为空串）；父进程在子进程退出后检查标记，经 `ConnectionTokenService` 失效该连接的

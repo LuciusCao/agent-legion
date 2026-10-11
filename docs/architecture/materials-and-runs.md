@@ -34,9 +34,11 @@ EXEC-GENERATION-002）为准。部署与运维步骤见
 - **一条目一 job，一 job 一实体**；创建 run 只做格式校验、拆行、内容 hash dedup、建 runs + jobs，
   **提交即同步返回、不调外部接口**（text 条目落材料是唯一例外的前置写，见 §2.2）。
 - **解析永远在执行时**：ref 的内容拉取、material 的物化都发生在 dispatch / 节点执行阶段。
-- 用户面只有「条目、材料、运行、任务」四个概念；job 创建只经 `RunService`。旧
-  `POST /workspaces/{id}/job-batches` 路由仍作为兼容 shim 保留（内部转 `RunService`），不要为它
-  加新功能。
+- 用户面只有「条目、材料、运行、任务」四个概念。job 创建当前有两条并行可用的路径：条目入口
+  `RunService`（runs API，新功能一律走这里），以及旧 `POST /workspaces/{id}/job-batches` 兼容路由
+  ——它仍注入 `JobIntakeService` 并调用 `create_batch`（`routes/job_batches.py`），**不**委托
+  `RunService`；两条路径共享 intake 骨架（节点配置冻结、code 版本 pin、dedup、确定性 run id），
+  直到 intake 退役切片落地（见 `services/run_service.py` 模块说明）。不要为旧路由加新功能。
 
 ## 2. 入口契约：start 节点（EXEC-WORKFLOW-START-001）
 
