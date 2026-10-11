@@ -10,7 +10,9 @@ journal file and the real admission path (unstarted ACP handle).
 
 from __future__ import annotations
 
+import contextlib
 import json
+import threading
 
 import pytest
 
@@ -285,3 +287,238 @@ def test_runtime_without_gate_is_unchanged(admission) -> None:
     message = service.send_message(sid, workspace, "plain")
     assert "queued" not in message["content"]
     assert inbound_queue.should_queue(runtime, "running") is False
+
+
+# --- #1109: every dequeue re-observes the journal -----------------------------
+#
+# Decision table for a queued message's ``before_start`` (GatedUnpromptedWatcher
+# .defer), and for the wake_session send boundary. Driven synchronously: the
+# real prompt loop calls these on a worker thread (prompt_turn.run_prompt_turn).
+
+
+def _turn(turn_id: int) -> tuple[dict, dict]:
+    prompt = {**PROMPT, "turnId": turn_id, "origin": {"kind": "cron_job"}}
+    return prompt, {**ENDED, "turnId": turn_id}
+
+
+def _held_ids(watcher) -> list[str]:
+    return [message_id for message_id, _text, _prompt in watcher.held]
+
+
+@contextlib.contextmanager
+def _step_in_progress(watcher, active: bool):
+    """While active, another thread holds the step lock (a concurrent step
+    that outlives the dequeue's wait). Signal-driven, no sleeps."""
+    if not active:
+        yield
+        return
+    taken, done = threading.Event(), threading.Event()
+
+    def concurrent_step() -> None:
+        with watcher.step_lock:
+            taken.set()
+            done.wait()
+
+    thread = threading.Thread(target=concurrent_step)
+    thread.start()
+    assert taken.wait(timeout=30)
+    try:
+        yield
+    finally:
+        done.set()
+        thread.join(timeout=30)
+        assert not thread.is_alive()
+
+
+def _flushed(service, sid, workspace, watcher, write, *texts) -> list[dict]:
+    """Hold ``texts`` behind an unprompted turn, end it, and step: all of them
+    now sit in the ACP queue (not yet started)."""
+    write(PROMPT)
+    watcher.step()
+    messages = [service.send_message(sid, workspace, text) for text in texts]
+    write(ENDED)
+    watcher.step()
+    return messages
+
+
+def test_unprompted_turn_between_two_flushed_messages_holds_the_second(gated) -> None:
+    """Issue #1109 acceptance: Kimi opens a turn (task / cron) right after the
+    first flushed message ends and before the second starts — no poll in
+    between. The second stays held and is delivered after that turn ends."""
+    service, db, sid, workspace, runtime, watcher, write, _path = gated
+    first, second = _flushed(service, sid, workspace, watcher, write, "first", "second")
+    (_p1, start_first), (_p2, start_second) = _queue_items(runtime)
+    assert start_first()
+    _finish_turn(service, sid)
+
+    opened, ended = _turn(4)
+    write(opened)  # on the journal, not yet polled
+    assert not start_second()
+    assert watcher.open == {"4"} and _held_ids(watcher) == [second["id"]]
+    assert runtime.inbound_pending == 1  # still pending, not dropped
+    assert _queue_items(runtime) == []
+    assert db.get_studio_chat_session(sid)["status"] == "idle"
+    assert _events(db, sid, "queued_dropped") == []
+
+    write(ended)
+    watcher.step()
+    [(_p, start_again)] = _queue_items(runtime)
+    assert start_again()
+    _finish_turn(service, sid)
+    assert runtime.inbound_pending == 0
+    delivered = _events(db, sid, "queued_delivered")
+    assert [event["message_id"] for event in delivered] == [first["id"], second["id"]]
+
+
+@pytest.mark.parametrize(
+    ("case", "sent", "put_back"),
+    [
+        ("journal_idle", True, False),  # observed, gate closed, nothing put back
+        ("turn_opened", False, True),  # observed, a new unprompted turn → back to held
+        ("step_busy", False, True),  # concurrent step outlived the wait → back, unconfirmed
+        ("step_failed", True, False),  # broken read: decide on the settled state
+        ("runtime_closed", False, False),  # torn down: #1028 drop semantics, not held
+    ],
+)
+def test_dequeue_decision_table(gated, monkeypatch, case, sent, put_back) -> None:
+    service, db, sid, workspace, runtime, watcher, write, _path = gated
+    [message] = _flushed(service, sid, workspace, watcher, write, "only")
+    [(_prompt, start)] = _queue_items(runtime)
+    if case == "turn_opened":
+        write(_turn(4)[0])
+    elif case == "step_busy":
+        monkeypatch.setattr(unprompted_queue, "DEQUEUE_STEP_TIMEOUT_SECONDS", 0)
+    elif case == "step_failed":
+
+        def broken_read():
+            raise OSError("journal unreadable")
+
+        monkeypatch.setattr(watcher.tail, "read", broken_read)
+    elif case == "runtime_closed":
+        with runtime.lock:
+            runtime.closed = True
+    with _step_in_progress(watcher, case == "step_busy"):
+        assert start() is sent
+    assert _held_ids(watcher) == ([message["id"]] if put_back else [])
+    # inbound_pending == held + still-queued: a put-back message stays counted.
+    assert runtime.inbound_pending == (1 if put_back else 0)
+    assert db.get_studio_chat_session(sid)["status"] == ("running" if sent else "idle")
+    # An unconfirmed put-back is not flushed straight back (no bounce); the
+    # next settled step releases it once the gate is closed.
+    assert _queue_items(runtime) == []
+    if case == "step_busy":
+        watcher.step()
+        [(_p, start_again)] = _queue_items(runtime)
+        assert start_again()
+
+
+def test_put_back_keeps_fifo_with_messages_arriving_meanwhile(gated) -> None:
+    """A, B flushed; C queued behind them (#1028); a turn opens before B. B
+    goes back to held, D arrives (held), C comes back between B and D."""
+    service, db, sid, workspace, runtime, watcher, write, _path = gated
+    a, b = _flushed(service, sid, workspace, watcher, write, "a", "b")
+    c = service.send_message(sid, workspace, "c")
+    (_pa, start_a), (_pb, start_b), (_pc, start_c) = _queue_items(runtime)
+    assert start_a()
+    _finish_turn(service, sid)
+    opened, ended = _turn(4)
+    write(opened)
+    assert not start_b()
+    d = service.send_message(sid, workspace, "d")
+    assert d["content"]["queued"] is True and _queue_items(runtime) == []
+    assert not start_c()
+    assert _held_ids(watcher) == [b["id"], c["id"], d["id"]]
+    assert runtime.inbound_pending == 3
+
+    write(ended)
+    watcher.step()
+    starts = [start for _prompt, start in _queue_items(runtime)]
+    for start in starts:
+        assert start()
+        _finish_turn(service, sid)
+    delivered = [event["message_id"] for event in _events(db, sid, "queued_delivered")]
+    assert delivered == [a["id"], b["id"], c["id"], d["id"]]
+    assert runtime.inbound_pending == 0 and watcher.held == [] and watcher.front == 0
+
+
+def test_release_waits_for_queued_messages_and_never_reorders(gated) -> None:
+    """A goes back to held while the turn is open; the turn ends before B's
+    dequeue. Releasing A at that settle would land it behind B: instead B
+    (younger) goes back behind A and both are released in order."""
+    service, db, sid, workspace, runtime, watcher, write, _path = gated
+    a, b = _flushed(service, sid, workspace, watcher, write, "a", "b")
+    (_pa, start_a), (_pb, start_b) = _queue_items(runtime)
+    opened, ended = _turn(4)
+    write(opened)
+    assert not start_a()
+    write(ended)
+    watcher.step()  # gate closed, but B is still in the ACP queue
+    assert _held_ids(watcher) == [a["id"]] and _queue_items(runtime) == []
+    assert not start_b()
+    starts = [start for _prompt, start in _queue_items(runtime)]
+    assert len(starts) == 2 and watcher.held == []
+    for start in starts:
+        assert start()
+        _finish_turn(service, sid)
+    delivered = [event["message_id"] for event in _events(db, sid, "queued_delivered")]
+    assert delivered == [a["id"], b["id"]]
+
+
+@pytest.mark.parametrize(
+    ("case", "sent"),
+    [("journal_idle", True), ("turn_opened", False), ("step_busy", False)],
+)
+def test_wakeup_send_boundary_observes_the_journal(gated, monkeypatch, case, sent) -> None:
+    """wake_session's claim reads the last poll (its caller holds runtime.lock);
+    the send boundary steps the watcher and stands back from an open turn,
+    re-arming the task ids instead of burning the run token."""
+    from types import SimpleNamespace
+
+    from server.app.studio_chat import background_delivery
+
+    service, db, sid, _workspace, runtime, watcher, write, _path = gated
+    watcher.step()
+    runtime.background_cursor = SimpleNamespace(pending=set())
+    invalidate = []
+    monkeypatch.setattr(
+        background_delivery, "invalidate_run_token", lambda *args: invalidate.append(args)
+    )
+    assert wake_session(service, sid, runtime, ["agent-1"])
+    [(_prompt, start)] = _queue_items(runtime)
+    if case == "turn_opened":
+        write(PROMPT)
+    elif case == "step_busy":
+        monkeypatch.setattr(background_delivery, "DEQUEUE_STEP_TIMEOUT_SECONDS", 0)
+    with _step_in_progress(watcher, case == "step_busy"):
+        assert start() is sent
+    assert invalidate == []
+    status = db.get_studio_chat_session(sid)["status"]
+    assert status == ("running" if sent else "idle")
+    assert runtime.turn_open is sent
+    assert runtime.background_cursor.pending == (set() if sent else {"agent-1"})
+
+
+def test_dequeue_guard_runs_off_the_acp_event_loop() -> None:
+    """The guard may step the watcher (journal read + DB writes) and take
+    runtime.lock: it must not run on the ACP event loop thread."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    from server.app.studio_chat.prompt_turn import run_prompt_turn
+
+    threads: dict[str, int] = {}
+
+    def guard() -> bool:
+        threads["guard"] = threading.get_ident()
+        return True
+
+    conn = SimpleNamespace(prompt=AsyncMock(return_value=SimpleNamespace(stop_reason="end_turn")))
+
+    async def dispatch():
+        threads["loop"] = threading.get_ident()
+        return await run_prompt_turn(conn, "acp-1", "hi", on_timeout=Mock(), before_start=guard)
+
+    result = asyncio.run(dispatch())
+    assert result.response is not None and conn.prompt.await_count == 1
+    assert threads["guard"] != threads["loop"]

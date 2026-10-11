@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Studio Kimi Code 自发回合门在出队边界重新观察 wire 日志（issue #1109，#1029 / PR #1076 follow-up）：一次释放多条暂存消息时，后一条在前一条回合结束后、自身开始前若遇引擎因 task / cron 新开自发回合，此前会被直接送进 ACP、零内容结算且回复不可见。现在每条排队消息的 `before_start` 先推进一次 watcher（并发 step 最多等 5 秒），门开着、已有更早消息被退回或等不到 step 时把消息退回暂存（排在已退回消息之后、新到消息之前，`inbound_pending` 照计、不写提示行）；暂存消息只在 ACP 队列里已无排队消息时整体释放，保持 FIFO。`wake_session` 在发送边界同样重新观察，门开着就释放认领、任务 id 放回游标重试，不吊销令牌。`before_start` 改在工作线程执行，不在 ACP 事件循环里读日志、写库；锁序保持 step_lock → runtime.lock。「引擎已开回合、日志未写」的残余窗口仍属固有。
+
 ## [0.7.19] - 2026-10-11
 
 Worker 结果上报协议 v2（元数据移出 HTTP 头改走归档 `result.json`，**部署硬约束 Host 先升**）+ 执行面系统性收口：节点级并发限制覆盖远程 code Worker、`latest` 绑定 skill 的升级不再误重跑、events.jsonl 工具输出全链脱敏（P1 安全）、worker 上报心跳停摆/401/降级归档族收口；前端 workspace 主页加载失败误判引导页修复（#1183）、预览面板支持媒体产物播放（#1146）；分支模型收口为 trunk-based（#1150）。
