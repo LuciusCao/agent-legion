@@ -2,6 +2,8 @@
  * #924 会话归档：归档是主整理操作（已关闭的直接归档；运行中的先行内确认
  * 「会先关闭」）；底部「已归档（N）」折叠区可恢复、可永久删除（danger +
  * 二次确认「不可恢复」）；归档会话不可直接选中。
+ * #1129：删除 / 归档确认改为行内展开——标题行保持不动、始终可见，
+ * 确认区在标题行下方展开，取消后行复原。
  */
 import {
   fireEvent,
@@ -78,7 +80,7 @@ describe('StudioChatSessionMenu archive (#924)', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
-  it('archiving a live session confirms that it will be closed first', async () => {
+  it('archiving a live session confirms inline: the title stays visible', async () => {
     const props = renderMenu()
     fireEvent.click(screen.getByLabelText('归档会话 梳理审核节点'))
     expect(props.onArchive).not.toHaveBeenCalled()
@@ -86,8 +88,29 @@ describe('StudioChatSessionMenu archive (#924)', () => {
     expect(alert).toHaveAttribute('data-tone', 'primary')
     expect(alert).toHaveTextContent('会先关闭运行中的会话')
     expect(alert).toHaveTextContent('可在「已归档」中恢复')
+    // #1129：确认区行内展开，标题行保持不动、始终可见。
+    const list = screen.getByRole('list', { name: '会话列表' })
+    expect(within(list).getByText('梳理审核节点')).toBeInTheDocument()
     fireEvent.click(within(alert).getByRole('button', { name: '归档' }))
     await waitFor(() => expect(props.onArchive).toHaveBeenCalledWith('s1'))
+    await waitFor(() =>
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    )
+    expect(within(list).getByText('梳理审核节点')).toBeInTheDocument()
+  })
+
+  it('cancelling the archive confirm restores the row', () => {
+    const props = renderMenu()
+    fireEvent.click(screen.getByLabelText('归档会话 梳理审核节点'))
+    const list = screen.getByRole('list', { name: '会话列表' })
+    expect(within(list).getByText('梳理审核节点')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(props.onArchive).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(within(list).getByText('梳理审核节点')).toBeInTheDocument()
+    expect(
+      within(list).getByLabelText('归档会话 梳理审核节点')
+    ).toBeInTheDocument()
   })
 
   it('archive is offered ahead of the secondary danger delete', () => {
@@ -126,16 +149,39 @@ describe('StudioChatSessionMenu archive (#924)', () => {
     await waitFor(() => expect(props.onUnarchive).toHaveBeenCalledWith('s9'))
   })
 
-  it('deleting from the archive is a danger action with a second confirm', async () => {
+  it('deleting from the archive confirms inline: the title stays visible', async () => {
     const props = renderMenu()
     fireEvent.click(screen.getByRole('button', { name: /已归档（1）/ }))
-    fireEvent.click(screen.getByLabelText('删除会话 上周的草稿'))
+    const archived = screen.getByRole('list', { name: '已归档会话' })
+    fireEvent.click(within(archived).getByLabelText('删除会话 上周的草稿'))
     expect(props.onDelete).not.toHaveBeenCalled()
     const alert = screen.getByRole('alert')
     expect(alert).toHaveAttribute('data-tone', 'danger')
     expect(alert).toHaveTextContent('删除后不可恢复')
+    // #1129：确认区行内展开，标题行保持不动、始终可见。
+    expect(within(archived).getByText('上周的草稿')).toBeInTheDocument()
     fireEvent.click(within(alert).getByRole('button', { name: '永久删除' }))
     await waitFor(() => expect(props.onDelete).toHaveBeenCalledWith('s9'))
+    // 确认完成后确认区收起；行的消失由父组件刷新列表驱动。
+    await waitFor(() =>
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    )
+    expect(within(archived).getByText('上周的草稿')).toBeInTheDocument()
+  })
+
+  it('cancelling the archived delete confirm restores the row', () => {
+    const props = renderMenu()
+    fireEvent.click(screen.getByRole('button', { name: /已归档（1）/ }))
+    const archived = screen.getByRole('list', { name: '已归档会话' })
+    fireEvent.click(within(archived).getByLabelText('删除会话 上周的草稿'))
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(props.onDelete).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(within(archived).getByText('上周的草稿')).toBeInTheDocument()
+    expect(
+      within(archived).getByLabelText('删除会话 上周的草稿')
+    ).toBeInTheDocument()
   })
 
   it('a failed restore is shown inline', async () => {
