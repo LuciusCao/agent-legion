@@ -323,6 +323,44 @@ describe('patchWorkflowNodeType', () => {
     ).toThrow(WorkflowNodeTypeSwitchError)
   })
 
+  it('rejects →approval when the upstream key only lives on Object.prototype (#1258 codex 三轮 P3)', () => {
+    // 与 materializeDraftEdges 同族：下标判定节点存在性会走原型链，
+    // toString/constructor/__proto__ 来源被误取到真值而放行——loader
+    // 对未知边来源是 raise，前端不得在切换时放行后触发破坏性清洗。
+    for (const source of ['toString', 'constructor', '__proto__']) {
+      const protoEdgeYaml = [
+        'key: demo',
+        'nodes:',
+        '  _start:',
+        '    type: start',
+        '  gate:',
+        '    type: code',
+        '    capability: gate_cap',
+        'edges:',
+        `  - {from: ${source}, to: gate}`,
+        '',
+      ].join('\n')
+      expect(() =>
+        patchWorkflowNodeType(protoEdgeYaml, 'gate', 'approval')
+      ).toThrow(WorkflowNodeTypeSwitchError)
+      // v1 after 形态同判（after 物化路径同样先做存在性过滤）。
+      const protoAfterYaml = [
+        'key: demo',
+        'nodes:',
+        '  _start:',
+        '    type: start',
+        '  gate:',
+        '    type: code',
+        '    capability: gate_cap',
+        `    after: [${source}]`,
+        '',
+      ].join('\n')
+      expect(() =>
+        patchWorkflowNodeType(protoAfterYaml, 'gate', 'approval')
+      ).toThrow(WorkflowNodeTypeSwitchError)
+    }
+  })
+
   it('drops skill when switching agent→code (EXEC-SKILL-NODE-001)', () => {
     // 源节点必须是 type: agent（同类型 code→code 不经选择器发生）。
     const agentYaml = baseYaml.replace('    type: code', '    type: agent')

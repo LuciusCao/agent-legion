@@ -64,4 +64,12 @@ describe('approvalReworkCandidates', () => {
     const rootYaml = dagYaml.replace('after: [draft]', 'after: [_start]')
     expect(approvalReworkCandidates(rootYaml, 'gate')).toEqual([])
   })
+
+  it('does not treat Object.prototype keys as existing upstream nodes (#1258 codex 三轮 P3)', () => {
+    // 与 materializeDraftEdges 同族：候选过滤的 nodes[key] 下标判定走
+    // 原型链——after: [toString] 会把函数对象当真节点（.type !== 'start'
+    // 通过），候选清单漏入 toString。
+    const protoYaml = dagYaml.replace('after: [draft]', 'after: [toString]')
+    expect(approvalReworkCandidates(protoYaml, 'gate')).toEqual([])
+  })
 })

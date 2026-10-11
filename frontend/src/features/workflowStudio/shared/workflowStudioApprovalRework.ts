@@ -42,7 +42,12 @@ export function approvalReworkCandidates(
     return [...closure]
       .filter(
         (key) =>
-          key !== approvalKey && nodes[key] && nodes[key].type !== 'start'
+          key !== approvalKey &&
+          // 存在性查自有键：下标判定走原型链会把 toString 等键误取到
+          // 真值函数（.type !== 'start' 随之通过）而漏进候选（#1258
+          // codex 三轮 P3，与 materializeDraftEdges 同族）。
+          Object.prototype.hasOwnProperty.call(nodes, key) &&
+          nodes[key]?.type !== 'start'
       )
       .sort()
   } catch {

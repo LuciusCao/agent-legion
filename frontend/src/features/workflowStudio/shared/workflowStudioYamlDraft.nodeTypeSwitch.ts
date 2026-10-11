@@ -103,9 +103,16 @@ export function validateNodeTypeSwitch(
       if (edge.to === nodeKey) upstream.add(edge.from ?? '')
     }
     // 上游键必须真实存在于 nodes——loader 对未知来源单独拒绝
-    // （「Unknown edge source/dependency」），此处同构收口。
+    // （「Unknown edge source/dependency」），此处同构收口。存在性判定
+    // 查自有键：下标/`in` 会走原型链，把 toString/constructor/__proto__
+    // 来源误判为存在节点而放行（#1258 codex 三轮 P3，与
+    // materializeDraftEdges 同族同修法）。
+    const nodes = draft.nodes ?? {}
     const executableUpstream = [...upstream].filter(
-      (key) => key && !startKeys.has(key) && (draft.nodes ?? {})[key] != null
+      (key) =>
+        key &&
+        !startKeys.has(key) &&
+        Object.prototype.hasOwnProperty.call(nodes, key)
     )
     if (executableUpstream.length === 0) {
       throw new WorkflowNodeTypeSwitchError(
