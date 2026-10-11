@@ -253,12 +253,12 @@ def test_save_node_prompt_conflicts_when_a_publish_deleted_the_draft_mid_edit(
     job_db, monkeypatch
 ) -> None:
     """#1226 五轮 P1：save_node_prompt 读到草稿后、落盘前，发布删了草稿行
-    （tombstone 记录被删行的 updated_at）——这次写入的 CAS base 是发布前
-    代次，必须 409（DraftConflictError）而不是把旧内容重建为草稿权威。"""
+    并推进草稿代次——这次写入的 CAS base 是发布前代次，必须 409
+    （DraftConflictError）而不是把旧内容重建为草稿权威。"""
     from server.app.services import node_prompt_preview as prompt_module
     from server.app.services.job_errors import DraftConflictError
 
-    workspace_id = _workspace(job_db, "ws-prompt-tombstone")
+    workspace_id = _workspace(job_db, "ws-prompt-generation")
     save_node_prompt(job_db, workspace_id, "write_script", "v1")
 
     real_cas_save = prompt_module.save_workflow_draft_if_unchanged
@@ -277,6 +277,43 @@ def test_save_node_prompt_conflicts_when_a_publish_deleted_the_draft_mid_edit(
 
     # The deleted row was not resurrected.
     assert job_db.get_workspace_workflow_draft(workspace_id) is None
+
+
+def test_save_node_prompt_empty_branch_bases_on_the_read_snapshot(job_db, monkeypatch) -> None:
+    """#1226 六轮 codex P1（同族）：空草稿分支「读行（空）→ 另读取代次」
+    之间落进并发保存时，CAS base 必须是内容读的同快照代次（0）——拿并发
+    后的代次做 base 会 CAS 成功、静默覆盖从未看到的草稿。"""
+    from server.app.jobs import JobQueries
+    from server.app.services.job_errors import DraftConflictError
+
+    workspace_id = _workspace(job_db, "ws-prompt-atomic-base")
+
+    real_get_draft = JobQueries.get_workspace_workflow_draft
+
+    def interleaved_get_draft(self, ws_id):
+        row = real_get_draft(self, ws_id)
+        # 并发交错点：内容读（空）与代次读之间，另一会话保存了草稿。
+        self.upsert_workspace_workflow_draft(ws_id, _DRAFT_YAML)
+        return row
+
+    monkeypatch.setattr(JobQueries, "get_workspace_workflow_draft", interleaved_get_draft)
+    # 修复后 save_node_prompt 改走原子读；两条读路径都挂上同一交错，
+    # 使本测试在修复前后都能复现/钉住竞态。
+    real_get_state = getattr(JobQueries, "get_workspace_workflow_draft_state", None)
+    if real_get_state is not None:
+
+        def interleaved_get_state(self, ws_id):
+            state = real_get_state(self, ws_id)
+            self.upsert_workspace_workflow_draft(ws_id, _DRAFT_YAML)
+            return state
+
+        monkeypatch.setattr(JobQueries, "get_workspace_workflow_draft_state", interleaved_get_state)
+
+    with pytest.raises(DraftConflictError):
+        save_node_prompt(job_db, workspace_id, "write_script", "x")
+
+    # 并发草稿未被这次写入覆盖。
+    assert job_db.get_workspace_workflow_draft(workspace_id)["definition_yaml"] == _DRAFT_YAML
 
 
 def test_save_node_prompt_unknown_targets_raise_not_found(job_db) -> None:

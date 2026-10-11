@@ -52,17 +52,19 @@ def bump_workflow_draft_generation_if_current(
 ) -> int | None:
     """+1 only when the current generation equals ``base_generation``.
 
-    两步：先确保代次行存在（无行 = 代次 0），再按「当前代次 == base」条件
-    推进——UPDATE 的 WHERE 在 READ COMMITTED 下等待行锁后重评估，并发写/
-    发布交错两个方向都只有一方推进。base 落后（或无行而 base>0）→ 无返回
-    行 → 调用方判 409。被拒的写入可能在第 一步留下 generation=0 的行——
-    与无行同义（代次 0），无害。
+    两步：base 为 0 时先确保代次行存在（无行 = 代次 0，首个写入者的并发
+    首存需要一个可锁的目标行），再按「当前代次 == base」条件推进——
+    UPDATE 的 WHERE 在 READ COMMITTED 下等待行锁后重评估，并发写/发布
+    交错两个方向都只有一方推进。base 落后（或无行而 base>0）→ 无返回行
+    → 调用方判 409；base>0 而无行本就是必败格，不兜底插行——被拒的写入
+    不再留下 generation=0 的残余行（#1226 对抗复验 P3）。
     """
-    conn.execute(
-        "insert into workspace_workflow_draft_generation(workspace_id, generation)"
-        " values (%s, 0) on conflict(workspace_id) do nothing",
-        (workspace_id,),
-    )
+    if base_generation == 0:
+        conn.execute(
+            "insert into workspace_workflow_draft_generation(workspace_id, generation)"
+            " values (%s, 0) on conflict(workspace_id) do nothing",
+            (workspace_id,),
+        )
     row = conn.execute(
         "update workspace_workflow_draft_generation set generation = generation + 1"
         " where workspace_id=%s and generation=%s returning generation",
@@ -82,6 +84,28 @@ class WorkflowDraftGenerationQueriesMixin:
                 (workspace_id,),
             ).fetchone()
         return int(row["generation"]) if row is not None else 0
+
+    def get_workspace_workflow_draft_state(self, workspace_id: str) -> dict[str, Any]:
+        """草稿内容 + 代次的原子读取：单查询同一快照（#1226 六轮 codex P1）。
+
+        「读草稿行、行缺失再另读取代次」的拆分读会让并发保存落进两次读
+        之间，产出「内容 null + 并发后的新代次」的错配——客户端拿错配
+        代次保存会 CAS 成功、静默覆盖它从未看到的草稿。本读法 LEFT JOIN
+        两侧都缺席时仍返回一行（内容字段全 null、代次 0），行在时与
+        ``get_workspace_workflow_draft`` 同形同源。
+        """
+        with self._connect_read() as conn:  # type: ignore[attr-defined]
+            row = conn.execute(
+                "select d.workspace_id, d.definition_yaml, d.created_at, d.updated_at,"
+                " coalesce(g.generation, 0) as generation"
+                " from (values (%s)) as w(workspace_id)"
+                " left join workspace_workflow_drafts d on d.workspace_id = w.workspace_id"
+                " left join workspace_workflow_draft_generation g"
+                " on g.workspace_id = w.workspace_id",
+                (workspace_id,),
+            ).fetchone()
+        assert row is not None  # the values row guarantees exactly one result row
+        return dict(row)
 
     def read_workspace_workflow_draft_for_update(
         self, conn: DatabaseConnection, workspace_id: str

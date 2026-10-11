@@ -57,10 +57,12 @@ class WorkflowDraftCasQueriesMixin:
                     (workspace_id, definition_yaml),
                 ).fetchone()
         if generation is None:
-            current_generation = self.get_workspace_workflow_draft_generation(workspace_id)  # type: ignore[attr-defined]
+            # 诊断文本的当前代次也走原子状态读（#1226 六轮 P1 家族统一形态：
+            # 本模块内不再有「内容/代次分开读」的读法）。
+            state = self.get_workspace_workflow_draft_state(workspace_id)  # type: ignore[attr-defined]
             raise DraftConflictError(
                 "Workflow draft was modified by another session"
                 f" (base generation {base_generation},"
-                f" current generation {current_generation})"
+                f" current generation {state['generation']})"
             )
         return dict(row) | {"generation": generation}

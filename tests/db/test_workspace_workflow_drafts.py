@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
+from server.app.jobs.queries.workflow_drafts import DraftConflictError
+
 
 def test_upsert_then_get_roundtrip(job_db) -> None:
     workspace = job_db.create_workspace("ws-draft")
@@ -22,6 +26,48 @@ def test_get_returns_none_without_a_draft(job_db) -> None:
     workspace = job_db.create_workspace("ws-draft-empty")
 
     assert job_db.get_workspace_workflow_draft(workspace["id"]) is None
+
+
+def test_draft_state_read_returns_content_and_generation_in_one_snapshot(job_db) -> None:
+    """#1226 六轮 codex P1：草稿内容 + 代次的原子读（单查询同一快照）——
+    空态也返回一行（内容字段全 null、代次为 workspace 当前值），行在时
+    与草稿行/代次行同源。"""
+    workspace = job_db.create_workspace("ws-draft-state")
+
+    empty = job_db.get_workspace_workflow_draft_state(workspace["id"])
+    assert empty["definition_yaml"] is None
+    assert empty["updated_at"] is None
+    assert empty["generation"] == 0
+
+    stored = job_db.upsert_workspace_workflow_draft(workspace["id"], "key: wf\n")
+    state = job_db.get_workspace_workflow_draft_state(workspace["id"])
+    assert state["definition_yaml"] == "key: wf\n"
+    assert state["updated_at"] == stored["updated_at"]
+    assert state["generation"] == stored["generation"] == 1
+
+    # 发布删行后：内容回 null，代次仍是推进后的当前值（同一快照）。
+    with job_db.connect() as conn:
+        job_db.delete_workspace_workflow_draft(conn, workspace["id"])
+    post_publish = job_db.get_workspace_workflow_draft_state(workspace["id"])
+    assert post_publish["definition_yaml"] is None
+    assert post_publish["generation"] == 2
+
+
+def test_rejected_conditional_bump_leaves_no_generation_row(job_db) -> None:
+    """#1226 对抗复验 P3：base>0 而代次行本就不存在的必败 CAS 写入不再兜底
+    插 generation=0 行——被拒写入不留残余（base=0 的首存仍需兜底行做并发
+    首存的锁目标，不受此限）。"""
+    workspace = job_db.create_workspace("ws-draft-no-residue")
+
+    with pytest.raises(DraftConflictError):
+        job_db.upsert_workspace_workflow_draft_if_unchanged(workspace["id"], "key: wf\n", 5)
+
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select 1 from workspace_workflow_draft_generation where workspace_id=%s",
+            (workspace["id"],),
+        ).fetchone()
+    assert row is None
 
 
 def test_upsert_is_idempotent_and_advances_updated_at(job_db) -> None:

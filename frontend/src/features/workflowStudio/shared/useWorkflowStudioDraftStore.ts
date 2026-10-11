@@ -83,8 +83,6 @@ export function useWorkflowStudioDraftStore(
     draftSave: draftSave.state,
     flushDraftSave: draftSave.flushNow,
     /* kimi review P1-2：冲突出口——采用服务端版本经 touched-aware setter
-       写画布；keep-mine 继续保存。#1143：hash 是被采用草稿的语义身份。 */
-    /* kimi review P1-2：冲突出口——采用服务端版本经 touched-aware setter
        写画布；keep-mine 继续保存。#1143：hash 是被采用草稿的语义身份；
        #1226：generation 是其代次（采用后恢复为 CAS 基线）。 */
     adoptServerDraft: (

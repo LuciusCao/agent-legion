@@ -25,7 +25,7 @@ from server.app.services.job_errors import (
 )
 from server.app.services.workflow_draft_store import (
     attach_draft_identity_hash,
-    get_workflow_draft,
+    get_workflow_draft_state,
 )
 
 
@@ -82,14 +82,12 @@ def save_workflow_draft_if_unchanged(
         # #1143: current_draft carries the semantic identity hash too — the
         # adopting side (frontend adopt path) restores savedHash from it.
         # #1177 codex P1: payload is contract-shaped (see _conflict_payload).
-        current = get_workflow_draft(job_db, workspace_id)
-        current_generation = (
-            int(current["generation"])
-            if current is not None
-            else job_db.get_workspace_workflow_draft_generation(workspace_id)
-        )
+        # #1226 六轮 codex P1：内容与代次同一快照（行缺失时代次不得另读——
+        # 两读之间落进并发保存会把新代次配给 null 内容）。
+        state = get_workflow_draft_state(job_db, workspace_id)
+        current = state if state["definition_yaml"] is not None else None
         raise DraftConflictError(
-            _conflict_payload(base_generation, current, current_generation)
+            _conflict_payload(base_generation, current, int(state["generation"]))
         ) from exc
     assert draft is not None  # the CAS upsert path returns a row or raises
     return draft

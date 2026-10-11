@@ -23,7 +23,7 @@ from server.app.routes.workflow_draft_store_contracts import (
     WorkflowDraftConflictResponse,
 )
 from server.app.services.workflow_draft_cas import save_workflow_draft_if_unchanged
-from server.app.services.workflow_draft_store import get_workflow_draft
+from server.app.services.workflow_draft_store import get_workflow_draft_state
 
 # 409 CAS 冲突的响应契约（#1177 codex P1/P2）：与人侧 draft-store PUT 同一
 # detail 形状（服务层同一 DraftConflictError.payload 渲染），contracts 立
@@ -64,9 +64,10 @@ class StudioAgentWorkflowDraftResponse(BaseModel):
 
 
 def _draft_response(draft: dict) -> StudioAgentWorkflowDraftResponse:
+    updated_at = draft["updated_at"]
     return StudioAgentWorkflowDraftResponse(
         definition_yaml=draft["definition_yaml"],
-        updated_at=str(draft["updated_at"]),
+        updated_at=str(updated_at) if updated_at is not None else None,
         definition_hash=draft.get("definition_hash"),
         generation=int(draft["generation"]),
     )
@@ -80,13 +81,9 @@ def create_studio_agent_draft_tools_router(job_db: JobQueries) -> APIRouter:
         response_model=StudioAgentWorkflowDraftResponse,
     )
     def get_workflow_draft_route(workspace_id: str) -> StudioAgentWorkflowDraftResponse:
-        draft = get_workflow_draft(job_db, workspace_id)
-        if draft is None:
-            # 空态也携带当前代次（发布删行后的首存以它为 base）。
-            return StudioAgentWorkflowDraftResponse(
-                generation=job_db.get_workspace_workflow_draft_generation(workspace_id)
-            )
-        return _draft_response(draft)
+        # 内容 + 代次单查询同一快照（#1226 六轮 codex P1）——空态也携带
+        # 该快照的代次，拆分读会把并发保存后的新代次配给 null 内容。
+        return _draft_response(get_workflow_draft_state(job_db, workspace_id))
 
     @router.put(
         "/studio-agent/tools/workspaces/{workspace_id}/workflow/draft",

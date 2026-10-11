@@ -25,7 +25,10 @@ from server.app.routes.workflow_draft_store_contracts import (
     WorkflowDraftStoreResponse,
 )
 from server.app.services.workflow_draft_cas import save_workflow_draft_if_unchanged
-from server.app.services.workflow_draft_store import get_workflow_draft, save_workflow_draft
+from server.app.services.workflow_draft_store import (
+    get_workflow_draft_state,
+    save_workflow_draft,
+)
 
 # 409 CAS 冲突的响应契约（#1177 codex P1/P2）：detail 由 app 级异常处理器
 # 从 DraftConflictError.payload 渲染，FastAPI 原生 handler 固定外包一层
@@ -44,13 +47,11 @@ def create_workflow_draft_store_router(job_db: JobQueries) -> APIRouter:
         response_model=WorkflowDraftStoreResponse,
     )
     def get_draft(workspace_id: str) -> WorkflowDraftStoreResponse:
-        draft = get_workflow_draft(job_db, workspace_id)
-        if draft is None:
-            # 空态也携带当前代次（发布删行后的首存以它为 base）。
-            return WorkflowDraftStoreResponse(
-                generation=job_db.get_workspace_workflow_draft_generation(workspace_id)
-            )
-        return WorkflowDraftStoreResponse.model_validate(draft)
+        # 内容 + 代次单查询同一快照（#1226 六轮 codex P1）——空态也携带
+        # 该快照的代次，拆分读会把并发保存后的新代次配给 null 内容。
+        return WorkflowDraftStoreResponse.model_validate(
+            get_workflow_draft_state(job_db, workspace_id)
+        )
 
     @router.put(
         "/workspaces/{workspace_id}/workflow-draft",

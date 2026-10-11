@@ -403,6 +403,68 @@ def test_put_with_invalid_base_generation_gets_422(client, job_db) -> None:
     assert client.get(_url(workspace["id"])).json()["definition_yaml"] is None
 
 
+# --- #1226 六轮 codex P1（缺陷族：草稿内容与代次拆两次读）：空态 GET 与
+# 409 载荷的「内容 + 代次」必须来自同一快照——拆分读会让并发保存落进两次
+# 读之间，产出「内容 null + 并发后的新代次」的错配，客户端据此保存会 CAS
+# 成功、静默覆盖从未看到的草稿。
+
+
+def test_get_empty_state_returns_a_single_consistent_snapshot(client, job_db, monkeypatch) -> None:
+    """行读（无草稿）与代次读之间插入一次并发保存：响应的代次必须与 null
+    内容同快照（0），而不是并发保存后的 1。"""
+    from server.app.jobs import JobQueries
+
+    workspace = job_db.create_workspace("ws-store-atomic-read")
+    real_get_generation = JobQueries.get_workspace_workflow_draft_generation
+
+    def interleaved_save(self, workspace_id: str) -> int:
+        # 并发交错点：第一次读（无草稿）之后、代次读之时，另一会话落盘。
+        self.upsert_workspace_workflow_draft(workspace_id, _DRAFT_YAML)
+        return real_get_generation(self, workspace_id)
+
+    monkeypatch.setattr(JobQueries, "get_workspace_workflow_draft_generation", interleaved_save)
+
+    response = client.get(_url(workspace["id"]))
+
+    assert response.status_code == 200
+    assert response.json()["definition_yaml"] is None
+    # 同快照语义：客户端的首次保存以 0 为 base，撞上并发草稿（代次 1）即
+    # 409 重 base，而不是拿 1 静默覆盖。
+    assert response.json()["generation"] == 0
+
+
+def test_conflict_payload_null_content_carries_the_same_snapshot_generation(
+    client, job_db, monkeypatch
+) -> None:
+    """409 的 current_draft 也是「内容 + 代次」对：发布删行后内容 null，
+    载荷代次必须是发布推进后的同一快照值（2）——若另读取且中间落进并发
+    保存（代次 3），客户端会以未见内容为基线覆盖它。"""
+    from server.app.jobs import JobQueries
+
+    workspace = job_db.create_workspace("ws-store-409-atomic")
+    client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})  # 代次 1
+    _publish_delete_draft(job_db, workspace["id"])  # 删行 + 代次 2
+
+    real_get_generation = JobQueries.get_workspace_workflow_draft_generation
+
+    def interleaved_save(self, workspace_id: str) -> int:
+        # 并发交错点：payload 内容读（None）与代次读之间，另一会话落盘。
+        self.upsert_workspace_workflow_draft(workspace_id, "key: wf\nlabel: Concurrent\n")
+        return real_get_generation(self, workspace_id)
+
+    monkeypatch.setattr(JobQueries, "get_workspace_workflow_draft_generation", interleaved_save)
+
+    conflict = client.put(
+        _url(workspace["id"]),
+        json={"definition_yaml": _DRAFT_YAML, "base_generation": 1},
+    )
+
+    assert conflict.status_code == 409, conflict.text
+    current = conflict.json()["detail"]["current_draft"]
+    assert current["definition_yaml"] is None
+    assert current["generation"] == 2
+
+
 def _admin_bearer(client, job_db) -> dict[str, str]:
     """Scoped-token Authorization header for the studio-agent tool surface."""
     from server.app.auth import scoped_tokens

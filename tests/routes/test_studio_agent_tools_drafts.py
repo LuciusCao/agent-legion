@@ -163,6 +163,30 @@ def test_save_workflow_draft_conflict_when_draft_created_after_empty_read(client
     )
 
 
+def test_get_workflow_draft_empty_state_is_a_single_snapshot(client, job_db, monkeypatch) -> None:
+    """#1226 六轮 codex P1：agent GET 的空态与人侧同一缺陷族——内容与代次
+    拆两次读时，并发保存落进其间会产出「内容 null + 并发后的新代次」的
+    错配响应；同快照语义要求代次与 null 内容同源（0）。"""
+    from server.app.jobs import JobQueries
+
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+    real_get_generation = JobQueries.get_workspace_workflow_draft_generation
+
+    def interleaved_save(self, ws_id: str) -> int:
+        # 并发交错点：行读（无草稿）之后、代次读之时，另一会话落盘。
+        self.upsert_workspace_workflow_draft(ws_id, "key: concurrent\nlabel: c\n")
+        return real_get_generation(self, ws_id)
+
+    monkeypatch.setattr(JobQueries, "get_workspace_workflow_draft_generation", interleaved_save)
+
+    response = scoped.get(_draft_url(workspace_id))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["definition_yaml"] is None
+    assert response.json()["generation"] == 0
+
+
 def test_workflow_draft_tools_404_for_unknown_workspace(client, job_db) -> None:
     scoped, _ = _scoped_client(client, job_db)
     assert scoped.get(_draft_url("ws-missing")).status_code == 404
