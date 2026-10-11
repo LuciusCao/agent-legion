@@ -33,8 +33,8 @@ The host also injects a Content-Security-Policy into your document before it
 parses (the meta lands in the real `<head>`, positioned by the HTML parser —
 you cannot preempt or remove it): `default-src 'none'`, inline
 `script-src`/`style-src` plus the platform origin (scripts, styles, fonts,
-and `connect-src`), `img-src data:` plus the platform origin,
-`form-action 'none'`. This tightens outbound network at the host, not by
+and `connect-src`), `img-src data:` plus the platform origin, `media-src
+blob:`, `form-action 'none'`. This tightens outbound network at the host, not by
 convention: `fetch()`, `sendBeacon()`, form submissions, subresource loads
 (including images) to any external origin will not fire. Known residual: CSP
 does not govern iframe self-navigation, so `location.href = …`-style
@@ -72,6 +72,10 @@ Consequences for your markup:
 - Images must be `data:` URIs inline in the HTML (or platform-origin assets);
   remote `https:` images do NOT load — the built-in question panel's
   sanitizer drops them rather than rendering remote sources.
+- `<video>` / `<audio>` sources: the ONLY permitted scheme is `blob:` URLs
+  your own script creates from bytes fetched through the bridge
+  (`readArtifactBytes` + `URL.createObjectURL`, see below). Remote media
+  URLs and `data:` media do not load.
 - Never `fetch()` the platform API directly: it fails (no credentials on an
   opaque origin, and `connect-src` only permits the platform origin) and is
   not the contract. Use the bridge.
@@ -80,30 +84,76 @@ Consequences for your markup:
 
 All messages are plain JSON objects with a `source` marker; the panel's
 origin is opaque, so the host identifies the frame by `event.source` and the
-marker — do not rely on `event.origin`.
+marker — do not rely on `event.origin`. The bridge has **two channels**
+(#1178 review hardening):
 
-Panel → host (`source: "agent-legion-preview-panel"`):
+- **Window channel** (`window.parent.postMessage`, source-marked) carries
+  `ready`, `resize`, `csp-violation`, and the base text-magnitude methods
+  (`listArtifacts` / `readArtifact` / `getJobDetail`).
+- **Byte bridge** carries `readArtifactBytes`. The host injects a tiny
+  bootstrap as the first `<head>` script of your bundle (same pipeline that
+  injects the CSP meta — it runs before any of your code). The bootstrap
+  creates a `MessageChannel`, keeps the panel-side port in a closure, exposes
+  `window.__agentLegionPreviewBytes.readArtifactBytes(name)`, and hands the
+  other port to the host. The host accepts only the FIRST offered port per
+  frame mount: a sandboxed frame can navigate itself away (`location.href =
+  …`, `<meta refresh>`) and the navigated-to page shares the same
+  WindowProxy, so the window channel alone cannot authenticate requests —
+  but the bootstrap's offer always precedes any message a navigated-to page
+  could send, later offers are refused and closed, and the port inside the
+  closure dies with your document. `init` re-sends never carry ports: the
+  byte bridge stays valid for the lifetime of your document. A well-behaved
+  panel never navigates anyway — the frame is your rendering surface, not a
+  router. `readArtifactBytes` requests sent over the window channel get an
+  explicit error response.
 
-- `{type: "ready"}` — send once at startup; the host answers with `init`.
-- `{type: "request", id, method, params}` — call a bridge method:
-  - `listArtifacts()` → `string[]` — artifact names of the current job.
-  - `readArtifact({name})` → `{name, content}` — UTF-8 text of one artifact
-    (same data as `GET /api/jobs/{id}/artifacts/{name}`).
-  - `getJobDetail()` → the job detail payload (`job`, `nodes` with
-    `node_key`/`status`, `runs`, `artifacts`) — use node statuses to gate
-    sections by execution progress.
-- `{type: "resize", height}` — ask the host to resize the frame (clamped to
-  [120, 6000] px); a ResizeObserver on the document is the usual driver.
+Panel → host:
+
+- Window channel (`source: "agent-legion-preview-panel"`):
+  - `{type: "ready"}` — send once at startup; the host answers with `init`.
+    Send it any time — scripts run before `load`, do NOT wait for the load
+    event.
+  - `{type: "request", id, method, params}` — base methods only:
+    - `listArtifacts()` → `string[]` — artifact names of the current job.
+    - `readArtifact({name})` → `{name, content}` — UTF-8 text of one
+      artifact (same data as `GET /api/jobs/{id}/artifacts/{name}`).
+    - `getJobDetail()` → the job detail payload (`job`, `nodes` with
+      `node_key`/`status`, `runs`, `artifacts`) — use node statuses to gate
+      sections by execution progress.
+  - `{type: "resize", height}` — ask the host to resize the frame (clamped
+    to [120, 6000] px); a ResizeObserver on the document is the usual
+    driver.
+- Byte bridge (host-injected global `window.__agentLegionPreviewBytes`;
+  available when `init.capabilities` lists `"readArtifactBytes"`):
+  - `readArtifactBytes(name)` → Promise of `{name, mediaType, bytes}` — the
+    artifact's raw bytes as an `ArrayBuffer` (structured clone; NOT base64),
+    plus the media type the raw endpoint maps from the file extension
+    (`video/mp4`, `audio/mpeg`, … non-media files are
+    `application/octet-stream`). Artifact names may contain `/` (nested
+    outputs like `reports/final.mp4`) — pass the manifest name verbatim.
+    Size guard: artifacts above 512 MiB are refused (the promise rejects) —
+    read media files, not entire archives. The bridge stays valid across
+    `init` re-sends; just call it again to re-fetch.
 
 Host → panel (`source: "agent-legion-preview-host"`):
 
-- `{type: "init", jobId, theme, assets}` — the panel's starting context.
-  `theme` maps CSS custom property names to values (`--pp-bg`,
+- `{type: "init", jobId, theme, assets, capabilities}` — the panel's starting
+  context. `theme` maps CSS custom property names to values (`--pp-bg`,
   `--pp-surface`, `--pp-text`, `--pp-text-secondary`, `--pp-accent`,
   `--pp-on-accent`, `--pp-error`, `--pp-border`, `--pp-radius`,
   `--pp-font-family`); apply them on `document.documentElement.style` so the
-  panel follows the platform look. The host RE-SENDS `init` when node
-  statuses change — treat every `init` as "re-fetch and re-render".
+  panel follows the platform look. `capabilities` is a string array of bridge
+  methods the host supports BEYOND the always-present base contract
+  (`listArtifacts` / `readArtifact` / `getJobDetail`) — currently
+  `["readArtifactBytes"]`. Feature-detect with
+  `data.capabilities && data.capabilities.indexOf("readArtifactBytes") !== -1`;
+  an older host sends no `capabilities` field at all (treat it as empty — you
+  cannot probe methods by sending unknown ones, the guard silently drops
+  them). When `"readArtifactBytes"` is listed, the host has also injected
+  the `window.__agentLegionPreviewBytes` global (see the byte bridge above)
+  — that global is the call surface, no port plumbing of your own. The host
+  RE-SENDS `init` when node statuses change — treat every `init` as
+  "re-fetch and re-render" (the byte bridge needs no re-setup).
 - `{type: "response", id, ok, payload | error}` — answer to a `request`.
 
 Minimal client skeleton (copy and adapt):
@@ -113,6 +163,7 @@ var PANEL_SOURCE = 'agent-legion-preview-panel'
 var HOST_SOURCE = 'agent-legion-preview-host'
 var seq = 0
 var pending = {}
+// Base methods (text magnitude) ride the window channel:
 function callBridge(method, params) {
   return new Promise(function (resolve, reject) {
     var id = ++seq
@@ -123,10 +174,20 @@ function callBridge(method, params) {
     )
   })
 }
+// Media bytes ride the host-injected byte bridge (promise-based, no port
+// plumbing of your own):
+function readBytes(name) {
+  if (!window.__agentLegionPreviewBytes) {
+    return Promise.reject(new Error('byte bridge unavailable on this host'))
+  }
+  return window.__agentLegionPreviewBytes.readArtifactBytes(name)
+}
 window.addEventListener('message', function (event) {
   var data = event.data
   if (!data || data.source !== HOST_SOURCE) return
-  if (data.type === 'init') { /* apply theme, (re)fetch, render */ }
+  if (data.type === 'init') {
+    /* apply theme, (re)fetch, render — the byte bridge needs no re-setup */
+  }
   if (data.type === 'response' && pending[data.id]) {
     var entry = pending[data.id]
     delete pending[data.id]
@@ -135,6 +196,54 @@ window.addEventListener('message', function (event) {
 })
 window.parent.postMessage({ source: PANEL_SOURCE, type: 'ready' }, '*')
 ```
+
+### Playing media artifacts (video/audio, issue #1146)
+
+Media bytes cannot ride `readArtifact` (it decodes UTF-8 text). When
+`init.capabilities` includes `"readArtifactBytes"`, fetch the bytes and build
+a blob URL for the `<video>`/`<audio>` element — `media-src blob:` is the
+only media scheme the panel CSP permits, and blob URLs can only be created by
+your own script in your own frame:
+
+```js
+var playerUrl = null
+function setPlayer(bytes, mediaType) {
+  // Replacing the media (the host re-sends init on node-status changes and
+  // your re-fetch re-creates URLs): revoke the previous URL first — an
+  // object URL holds its Blob alive until revoked.
+  if (playerUrl !== null) URL.revokeObjectURL(playerUrl)
+  playerUrl = URL.createObjectURL(new Blob([bytes], { type: mediaType }))
+  document.querySelector('video').src = playerUrl
+}
+// The frame goes away with the page: release the last URL on unload too.
+window.addEventListener('pagehide', function () {
+  if (playerUrl !== null) URL.revokeObjectURL(playerUrl)
+})
+window.__agentLegionPreviewBytes.readArtifactBytes('final.mp4').then(function (res) {
+  setPlayer(res.bytes, res.mediaType)
+})
+```
+
+Object URL lifetime is the panel's responsibility, not the host's: each
+`createObjectURL` entry pins its Blob (up to the 512 MiB response cap) until
+`revokeObjectURL` — track the current URL and revoke it when replacing the
+media and on `pagehide`, or repeated re-renders accumulate memory.
+
+Re-fetches after a rerun: when a media artifact is regenerated under the same
+name, the host's `init` resend triggers your re-fetch through
+`readArtifactBytes`, and that bridge channel is set up to bypass the browser's
+HTTP cache (`cache: 'no-store'` on the host side) — you always receive the
+current bytes. Requests the panel makes on its own (if any) do NOT get this
+guarantee: a panel reading text artifacts directly should not rely on cache
+freshness either.
+
+A common pattern for subtitled video: read the media via
+`readArtifactBytes`, read the subtitle track (SRT/VTT is text) via
+`readArtifact`, then drive an overlay `<div>` from the element's
+`timeupdate` event. Keep the panel's own seek/overlay logic in the `<script>`
+block (no inline event attributes). For over-512-MiB artifacts the byte
+bridge's promise rejects with `… exceed readArtifactBytes limit …` —
+render that error instead of a player.
 
 The platform ships a complete working example — the built-in question panel
 bundle (`frontend/src/features/previewPanel/builtin/questionPanel.html` in
@@ -164,6 +273,9 @@ rendering with graceful degradation.
   `source` marker field instead).
 - Blank panel after publish: you fetched the platform API directly instead of
   the bridge; the opaque origin carries no credentials.
+- `<video>`/`<audio>` stays blank with no error: you used a remote or `data:`
+  media URL (only panel-created `blob:` URLs are permitted) or the artifact
+  exceeds the 512 MiB `readArtifactBytes` limit (check the error response).
 - Buttons/inputs do nothing (and a "部分脚本被安全策略拦截" banner shows above
   the panel): the bundle uses inline event-handler attributes (`onclick=`)
   or `javascript:` URLs; rebind them with `addEventListener`.

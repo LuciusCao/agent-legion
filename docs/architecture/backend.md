@@ -157,6 +157,7 @@ server/app/
 | POST | `/workspaces/{workspace_id}/jobs/{job_id}/nodes/{node_key}/approval` | `decide_approval` | routes/job_approvals.py |
 | GET | `/workspaces/{workspace_id}/jobs/{job_id}/approvals` | `list_approval_decisions` | routes/job_approvals.py |
 | GET | `/jobs/{job_id}/artifacts/{artifact_name}/raw` | `get_artifact_raw` | routes/job_artifact_raw.py |
+| GET | `/jobs/{job_id}/raw-artifacts/{artifact_name:path}` | `get_artifact_raw_nested` | routes/job_artifact_raw_nested.py |
 | GET | `/jobs/{job_id}/artifacts/{artifact_name:path}` | `get_artifact` | routes/job_artifacts.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/log` | `get_job_run_log` | routes/job_artifacts.py |
 | POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/job_batches.py |
@@ -945,7 +946,7 @@ Token Usage 收集并展示 agent 节点（pi / velites runtime）运行时的 t
 
 ### Job Detail 产物预览（issue #11）
 
-- **raw 字节端点** `GET /api/jobs/{job_id}/artifacts/{artifact_name}/raw`（`routes/job_artifact_raw.py`）：本地 job_dir 副本走 `FileResponse`（原生 Range，媒体可拖动进度条），仅存对象存储的产物走 64 KiB 分块 `StreamingResponse`（`BackgroundTask` 兜底关流）。**content-type 白名单即安全边界**：仅 image/video/audio/pdf 扩展名映射真实 media type 并 `inline` 渲染，其余（含 .html/.svg——同源渲染即脚本执行面）一律 `application/octet-stream` + `attachment` 强制下载。
+- **raw 字节端点**（两条，`routes/job_artifact_raw.py` / `job_artifact_raw_nested.py`）：嵌套名走独立前缀 `GET /api/jobs/{job_id}/raw-artifacts/{artifact_name:path}`（与文本路由零撞形，#1178 codex 第 6 轮收口——贪婪后缀形态会把名为 `x/raw` 的产物文本 URL 按前缀名吞掉），根名兼容形态 `GET /api/jobs/{job_id}/artifacts/{artifact_name}/raw` 保留。两条均为 manifest-first（`open_raw_current`）：对象存储权威副本优先、本地 job_dir 只在无 manifest 行时使用（#1178 codex P2——远程 Worker 重跑后本地缓存可能滞后）；本地副本走 `FileResponse`（原生 Range，媒体可拖动进度条），对象存储走 64 KiB 分块 `StreamingResponse`（`BackgroundTask` 兜底关流）。**content-type 白名单即安全边界**：仅 image/video/audio/pdf 扩展名映射真实 media type 并 `inline` 渲染，其余（含 .html/.svg——同源渲染即脚本执行面）一律 `application/octet-stream` + `attachment` 强制下载。
 - **文本端点**（`{artifact_name:path}`）遇本地二进制产物的 `UnicodeDecodeError` 按 404 降级（字节由 raw 端点负责），不冒泡 500。
 - **workspace 级预览配置**：`preview_config_json` 存 `{"hidden": [<artifact name>, ...]}`；settings payload 键 `previewHidden`（默认 `[]` = 全部显示，工作流升级产生的新产物自动可见）。写路径两条：`PATCH /settings/preview` section（job 详情左栏勾选菜单，立即生效）与 `PUT /configuration` 全量保存（设置页 draft；缺省 `previewHidden` = 沿用已存值，旧客户端不抹勾选）。
 

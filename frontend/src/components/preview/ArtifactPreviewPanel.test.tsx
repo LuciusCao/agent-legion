@@ -187,7 +187,7 @@ describe('ArtifactPreviewPanel', () => {
     expect(screen.getByText('媒体加载失败')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '新窗口打开' })).toHaveAttribute(
       'href',
-      '/api/jobs/j1/artifacts/frame.png/raw'
+      '/api/jobs/j1/raw-artifacts/frame.png'
     )
 
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
@@ -204,7 +204,7 @@ describe('ArtifactPreviewPanel', () => {
     )
 
     const link = screen.getByRole('link', { name: '下载' })
-    expect(link).toHaveAttribute('href', '/api/jobs/j1/artifacts/frame.png/raw')
+    expect(link).toHaveAttribute('href', '/api/jobs/j1/raw-artifacts/frame.png')
   })
 
   it('文本超长时截断并显示提示', async () => {

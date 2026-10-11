@@ -478,17 +478,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1030
   ceiling: 134
 - check: architecture.file_budget
-  path: frontend/src/features/previewPanel/PreviewPanelHost.tsx
-  reason: 'The Codex P1 review on PR 345 added the host-injected CSP (the outbound-network red
-    line (sandbox allow-scripts does not block fetch/sendBeacon/img to external origins)). The
-    policy constant, the srcDoc head-injection helper and its documentation grow the security
-    surface in place -- splitting them out would separate the CSP from the iframe that enforces
-    it. Re-anchored by #926 from #456 (closed) to #1004: the overage above is the shipped feature
-    itself and the removal condition above stands; #1004 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1004
-  ceiling: 189
-- check: architecture.file_budget
   path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
   reason: 'The Codex P2 review on PR 345 added bundle content into the PreviewPanelHost remount
     key plus the hashBundle helper -- a cross-navigation bridge-request isolation fix that must

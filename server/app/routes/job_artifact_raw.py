@@ -26,7 +26,11 @@ def register_raw_artifact_route(
 ) -> None:
     # raw 必须先于 {artifact_name:path} 注册（在 job_artifacts.py 的
     # create_job_artifacts_router 里调用），否则 "foo.json/raw" 会被吞成
-    # 名为 "foo.json/raw" 的 artifact 查询。
+    # 名为 "foo.json/raw" 的 artifact 查询。单段参数是有意的（#1178 codex
+    # 复审 P2，第 6 轮收口）：本路由若用贪婪 :path，名为 x/raw 的产物其
+    # 文本 URL 会被按前缀名 x 吞掉——嵌套名的 raw 读取走独立前缀的
+    # job_artifact_raw_nested.py（与文本路由零撞形），本条只保留 main 上
+    # 既有的根名形态做兼容。
     # 206 声明（#703 codex round 4 P2-2，与外部 raw 路由同修）：Range 时
     # raw_response 答分段 206 + Content-Range，契约只写 200 会让生成客
     # 户端把分段下载当异常。
@@ -54,6 +58,7 @@ def register_raw_artifact_route(
         # Legacy bare route：scoped/成员/admin 语义由 job_group 的
         # require_job_workspace_access 统一裁决（#745 按 job 行反查授权域；
         # 见 jobs.py get_job 的注释——跨域与未知 job 同为 404，Range 行为
-        # 不变）。
-        # Range 解析在 service.open_raw 内（本地分支忽略，FileResponse 原生支持）。
-        return raw_response(service.open_raw(job_id, artifact_name, range_header))
+        # 不变）。Range 解析在 service 内（本地分支忽略，FileResponse 原生
+        # 支持）；open_raw_current 的 manifest-first 语义见嵌套路由注释
+        # （#1178 codex 复审 P2——两条路由同一服务变体）。
+        return raw_response(service.open_raw_current(job_id, artifact_name, range_header))

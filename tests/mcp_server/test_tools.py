@@ -509,7 +509,21 @@ def test_get_preview_guide_is_served_locally(recorded) -> None:
     text = _run_tool(server, "get_preview_guide", {})
     # The preview panel playbook ships with the MCP server: no HTTP call.
     assert calls == []
-    for section in ("Bridge API", "listArtifacts", "readArtifact", "getJobDetail"):
+    for section in (
+        "Bridge API",
+        "listArtifacts",
+        "readArtifact",
+        "readArtifactBytes",
+        "getJobDetail",
+        "media-src blob:",
+        # blob URL 生命周期归面板（#1178 codex P2）：示例必须带回收形态。
+        "revokeObjectURL",
+        "pagehide",
+        # 重跑后的重取语义（#1178 codex 复审）：桥通道穿透缓存。
+        "no-store",
+        # 字节桥调用面（#1178 codex 复审 P1 收口）：宿主注入全局，非端口下发。
+        "__agentLegionPreviewBytes",
+    ):
         assert section in text
 
 
