@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 
 from server.app.routes.job_artifact_raw import register_raw_artifact_route
+from server.app.routes.job_artifact_raw_nested import register_raw_nested_artifact_route
 from server.app.routes.job_contracts import ArtifactResponse
 from server.app.routes.job_view_contracts import JobLogResponse
 from server.app.services.job_artifacts import JobArtifactService
@@ -15,8 +16,11 @@ def create_job_artifacts_router(
     log_service: JobLogService,
 ) -> APIRouter:
     router = APIRouter()
-    # 注册顺序敏感：raw 端点必须先于 {artifact_name:path} 注册。
+    # 注册顺序敏感：raw 端点必须先于 {artifact_name:path} 注册。嵌套名
+    # raw 走独立静态前缀（#1178 codex 复审 P2 第 6 轮收口），与文本路由
+    # 零撞形、顺序无关。
     register_raw_artifact_route(router, service, settings)
+    register_raw_nested_artifact_route(router, service)
 
     @router.get("/jobs/{job_id}/artifacts/{artifact_name:path}", response_model=ArtifactResponse)
     def get_artifact(job_id: str, artifact_name: str) -> ArtifactResponse:

@@ -91,6 +91,10 @@ const studioState = {
   flushDraftSave: vi.fn().mockResolvedValue({ ok: true, state: null }),
   // 顶栏状态文本的展示位（守卫不再读它——React 快照在 await 期间不更新）。
   draftSave: { status: 'saved' as const, savedAt: null },
+  // #1122：确认成功后登记发布原文（justPublishedRef 收尾）的接线位；
+  // definitionYaml 是服务端草稿缺失时的回落登记值。
+  markDraftPublished: vi.fn(),
+  definitionYaml: 'key: w\n',
 }
 
 function pendingRecord(
@@ -412,6 +416,67 @@ describe('AgentPublishRequestDialog', () => {
     ).toBeInTheDocument()
     // confirming 状态下按钮禁用（发布进行中，不可重复触发）。
     await waitFor(() => expect(confirmButton).toBeDisabled())
+  })
+
+  it('confirm registers the re-read server draft as just-published (#1122)', async () => {
+    // #1122 根因钉：确认成功后必须把发布原文登记进 justPublishedRef
+    // （markDraftPublished），否则紧随的 canonical 基线被 baseline sync
+    // 判为外部变更，dirty chip 永真。登记值取重读的服务端草稿——它就是
+    // 确认端点将发布的内容（后端 confirm 读同一行，hash 校验兜底）。
+    studioState.flushDraftSave = vi.fn().mockResolvedValue({
+      ok: true,
+      state: { status: 'saved', savedAt: null },
+    })
+    mocks.fetchWorkflowDraft.mockResolvedValue({
+      definition_yaml: 'key: w\nlabel: V2\n',
+    })
+    mocks.confirmPublishRequest.mockResolvedValue({
+      ...pendingRecord(),
+      status: 'confirmed',
+      result_revision_id: 'ws1:demo_video_workflow:v2',
+      resolved_at: '2026-09-03T10:02:00Z',
+    })
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    renderDialog()
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '确认发布' })
+    )
+
+    await waitFor(() =>
+      expect(studioState.markDraftPublished).toHaveBeenCalledWith(
+        'key: w\nlabel: V2\n'
+      )
+    )
+    expect(mocks.confirmPublishRequest).toHaveBeenCalledWith('ws1', 'req-1')
+  })
+
+  it('confirm falls back to the canvas yaml when the server draft row is gone (#1122)', async () => {
+    // #1122 的回落形态：重读不到服务端草稿行时登记画布原文（此时 confirm
+    // 端点也会 404，登记无害——justPublishedRef 在草稿偏离时自动失效）。
+    studioState.flushDraftSave = vi.fn().mockResolvedValue({
+      ok: true,
+      state: { status: 'saved', savedAt: null },
+    })
+    mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: null })
+    mocks.confirmPublishRequest.mockResolvedValue({
+      ...pendingRecord(),
+      status: 'confirmed',
+      result_revision_id: 'ws1:demo_video_workflow:v2',
+      resolved_at: '2026-09-03T10:02:00Z',
+    })
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    renderDialog({ definitionYaml: 'key: canvas\n' })
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '确认发布' })
+    )
+
+    await waitFor(() =>
+      expect(studioState.markDraftPublished).toHaveBeenCalledWith(
+        'key: canvas\n'
+      )
+    )
   })
 
   it('cancel calls the cancel endpoint and closes the dialog', async () => {

@@ -83,7 +83,6 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Batch rerun failed'
-        set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
       } finally {
@@ -113,7 +112,6 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Batch delete failed'
-        set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
       } finally {
@@ -140,7 +138,6 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Batch package failed'
-        set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
       } finally {
@@ -170,7 +167,6 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Batch run-to failed'
-        set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
       } finally {
@@ -194,7 +190,6 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Continue full flow failed'
-        set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
       } finally {
