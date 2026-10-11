@@ -57,9 +57,10 @@ def _validate_filename(filename: str) -> None:
     file and clobber each other in a backup); backslashes are re-interpreted
     as separators by Windows-shaped consumers; control characters (newline)
     break the backup runbook's line-based marker listing. Same discipline as
-    ``valid_artifact_name`` (job_artifact_objects) loosened only to allow
-    non-empty interior ``/`` segments — material names are multi-segment
-    relative paths, not single segments.
+    ``valid_artifact_name`` (job_artifact_objects), loosened only to allow
+    non-empty interior ``/`` segments (material names are multi-segment
+    relative paths, not single segments), plus the control-character ban
+    adopted from ``validate_member_path`` (material_bundles).
     """
     if filename.endswith("/"):
         raise InvalidMaterialFilenameError(

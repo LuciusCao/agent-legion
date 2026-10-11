@@ -307,8 +307,9 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
 末尾为 `/` 的 key 被当作目录，只差大小写的 key 在不区分大小写的文件系统上互相覆盖。
 这类不一致让备份失败，而不是让恢复时的「清空 bucket」变成不可逆丢失。产物 key 不以
 `/` 结尾（产物名不含 `/`：`job_artifact_objects.py` 的 `valid_artifact_name`）；材料 key
-为 `{workspace_id}/{hash}/{filename}`，材料 API 拒绝以 `/` 结尾或含 `.` / `..` 段的
-`filename`（422，`MaterialsService.presign` 的 `_validate_filename`，#1119）。入口收紧
+为 `{workspace_id}/{hash}/{filename}`，材料 API 拒绝目录形态与下载时不可归一化的
+`filename`——以 `/` 结尾、含空 / `.` / `..` 段、含反斜杠或控制字符（422，
+`MaterialsService.presign` 的 `_validate_filename`，#1119）。入口收紧
 之前已入库的以 `/` 结尾的 key 用
 `select id, workspace_id, filename, status, storage_key from materials where storage_key like '%/'`
 排查，经材料 API 逐个删除（行与对象一起删）；不删也不阻塞备份。所以零字节的 `…/` key（现在
