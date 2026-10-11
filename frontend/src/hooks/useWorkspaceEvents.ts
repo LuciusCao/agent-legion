@@ -86,6 +86,12 @@ export function useWorkspaceEvents(
       onEvent: (_type, data) => {
         const event = new MessageEvent('message', { data })
         if (snapshotLoadingRef.current) {
+          // 与 store 级 patch 缓冲（jobStore.snapshotInFlight）互斥：快照
+          // 在途期间事件只进本队列、不进缓冲，重放时 patch revision 恒大于
+          // 快照采样 revision（服务端先采样、后提交产生 patch 的写）——
+          // 因此「缓冲被丢弃后陈旧快照落地丢 patch」（#1189 codex P1-d）
+          // 在 SSE 路径不可达：缓冲丢弃只发生在无快照在途时，之后的任何
+          // 快照采样都晚于被丢 patch。
           if (!enqueuePendingEvent(pendingEventsRef, event, maxPendingEvents)) {
             // Queue overflowed: resync from a fresh snapshot instead of losing patch revisions.
             pendingEventsRef.current = []

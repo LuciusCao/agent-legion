@@ -14,7 +14,10 @@ import { useWorkspaceRerunActions } from '../hooks/useWorkspaceRerunActions'
 import { useWorkspaceSelection } from '../hooks/useWorkspaceSelection'
 import { useWorkspaceOnboardingSteps } from '../hooks/useWorkspaceOnboardingSteps'
 import { useWorkflowNeedsWorker } from '../hooks/useWorkflowNeedsWorker'
-import { shouldShowEmptyGuide } from '../lib/onboardingReadiness'
+import {
+  anyFilterActive,
+  shouldShowEmptyGuide,
+} from '../lib/onboardingReadiness'
 import { JobFilterBar } from '../components/job/JobFilterBar'
 import { JobList } from '../components/job/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
@@ -33,6 +36,7 @@ import styles from './WorkspaceMainPage.module.css'
 export default function WorkspaceMainPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const { data: workspaceStats } = useWorkspaceStats(workspaceId)
+  // totalJobs 的 fallback 用 jobIds 长度（快照未返回 total 时）。
   const jobIds = useJobStore((state) => state.jobIds)
   const filterConfig = useJobStore((state) => state.filterConfig)
   const setFilterConfig = useJobStore((state) => state.setFilterConfig)
@@ -55,7 +59,10 @@ export default function WorkspaceMainPage() {
   const batchUpgradeWorkflowLoading = useJobStore(
     (state) => state.batchUpgradeWorkflowLoading
   )
+  // #1183：jobsError 是引导页判定的输入（失败空态不渲染引导），错误行
+  // 由 JobList 渲染。
   const jobsLoading = useJobStore((state) => state.isLoading)
+  const jobsError = useJobStore((state) => state.listLoadError)
 
   useWorkspaceEvents(workspaceId)
   useJobFilterRefetch(workspaceId)
@@ -74,12 +81,7 @@ export default function WorkspaceMainPage() {
     (workspaceStats?.job_stats?.queued ?? 0) +
     (workspaceStats?.job_stats?.pending ?? 0)
   const totalJobs = useJobStore((state) => state.totalJobs) ?? jobIds.length
-  const filtersActive =
-    filterConfig.status !== null ||
-    filterConfig.search.trim() !== '' ||
-    filterConfig.workflowVersion !== null ||
-    filterConfig.activeNodeKey !== null ||
-    filterConfig.paused !== null
+  const filtersActive = anyFilterActive(filterConfig)
   const { selectedJobs, selectedCount, allMatchingCount } =
     useWorkspaceSelection()
 
@@ -115,10 +117,12 @@ export default function WorkspaceMainPage() {
   // 全新 workspace（无 job 且无筛选）只显示分步引导，隐藏筛选栏与空列表；
   // workspaceStats 与 active revision 须先 settle，避免加载首帧闪现引导。
   // settle 探针用 workspace_id（stats 响应必含；workflow_key 字段已退役）。
+  // 加载失败不显示引导（#1183），错误态由 JobList 呈现。
   const showEmptyGuide = shouldShowEmptyGuide({
     filteredJobIds,
     totalJobs,
     jobsLoading,
+    jobsError,
     filtersActive,
     workflowKey: workspaceStats?.workspace_id,
     workflowDefinitionLoaded: workflowDefinitionData !== undefined,

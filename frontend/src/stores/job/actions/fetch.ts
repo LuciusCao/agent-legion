@@ -42,7 +42,12 @@ export function resetJobListForFilterChange(
     totalJobs: null,
     loadingMore: false,
     isLoading: true,
-    error: null,
+    listLoadError: null,
+    // 列表基线作废即在途缓冲作废：snapshotInFlight 由 refreshFirstPage 在
+    // 调用本函数后显式重新置位，其余调用方（resetForWorkspace）直接清空、
+    // 跨 workspace 不残留。
+    snapshotInFlight: false,
+    pendingPatchBuffer: [],
   }
 }
 
@@ -51,7 +56,7 @@ export const failJobFetch =
   (state: JobState): Partial<JobState> =>
     state.jobsWorkspaceId === ws
       ? {
-          error: msg,
+          listLoadError: msg,
           isLoading: false,
           jobs: [],
           jobsById: {},
@@ -70,6 +75,11 @@ export const resetForWorkspace =
     const filterConfig = filtersForWorkspace(state, ws)
     return {
       ...resetJobListForFilterChange({ ...state, filterConfig }),
+      // #1183：revision 归零——revision 是跨 workspace 单调计数器语义，
+      // 切换 workspace 后新库的快照从 0 重新比较；不重置时上一个
+      // workspace 残留的高 revision 会把新 workspace 的合法快照全部
+      // 丢弃（setJobsSnapshotUpdate 的 revision 守卫），页面卡 skeleton。
+      revision: 0,
       jobsWorkspaceId: ws,
       ...(keep ? { selectedIds: state.selectedIds } : clearedSelectionState()),
       filterConfig,

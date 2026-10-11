@@ -63,7 +63,7 @@ describe('useWorkspaceEvents', () => {
       jobIds: [],
       revision: 0,
       isLoading: false,
-      error: null,
+      listLoadError: null,
     })
     vi.clearAllMocks()
     mockFetchJobsSnapshot.mockResolvedValue({
@@ -146,11 +146,12 @@ describe('useWorkspaceEvents', () => {
     })
 
     // Job list changes arrive via job_patch_batch; legacy job_updated only
-    // triggers a stats refresh, never a full jobs refetch.
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      { queryKey: queryKeys.workspaceStats('ws1') },
-      { throwOnError: true }
-    )
+    // triggers a stats refresh, never a full jobs refetch. #1183: stats
+    // refresh failures no longer route into the job store, so the
+    // throwOnError plumbing is gone too.
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.workspaceStats('ws1'),
+    })
   })
 
   it('coalesces rapid job update messages into one stats invalidation', async () => {
@@ -234,8 +235,8 @@ describe('useWorkspaceEvents', () => {
     })
   })
 
-  it('clears a previous error after successful refresh', async () => {
-    useJobStore.setState({ error: 'previous error' })
+  it('clears a previous list load error after successful refresh', async () => {
+    useJobStore.setState({ listLoadError: 'previous error' })
 
     renderEvents('ws1')
     const source = EventSourceMock.instances[0]
@@ -245,7 +246,7 @@ describe('useWorkspaceEvents', () => {
     })
 
     await waitFor(() => {
-      expect(useJobStore.getState().error).toBeNull()
+      expect(useJobStore.getState().listLoadError).toBeNull()
     })
   })
 
