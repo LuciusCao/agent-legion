@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker import claim_timing as _claim_timing
 from server.app.agent_broker.claim_admission import admit_candidate
+from server.app.agent_broker.claim_capacity import load_node_claimed_counts, node_slot_open
 from server.app.agent_broker.claim_scan import (
     SCAN_ROUNDS,
     ScanState,
@@ -135,6 +136,8 @@ def _select_kind_batch(
     per-kind 尝试预算（MAX_CLAIM_ATTEMPTS）在此不适用：预算限的是准入后
     的锁竞争失败，而锁只在写入段出现——选择段每个准入候选即选中返回。
     ``chosen_ids`` 去重：选择段不写库，下一槽位的重扫会再次看到已选行。
+    #1158 R1：``node_slot_open`` 按本机节点上限预过滤（在跑快照 +
+    本批已选记账），已满节点不入选——避免写相拒收返回空批、饿死其后节点。
     """
     for per_workspace, window in SCAN_ROUNDS:
         candidates = fetch_candidates(conn, per_workspace, window, kind)
@@ -151,6 +154,8 @@ def _select_kind_batch(
                 # 顺序，floor 纪律由这里守住。Code 候选不取 agent-ws
                 # capacity 锁，因此不应被这个 floor 过滤。
                 state.skip_reasons["batch_lock_order"] += 1
+                continue
+            if not node_slot_open(view.node_limits, row, state):
                 continue
             if admit_candidate(broker, row, view, state) is not None:
                 return row
@@ -199,6 +204,10 @@ def select_batch_candidates(
         selected: list[Mapping[str, Any]] = []
         chosen_ids: set[str] = set()
         state = ScanState()
+        # #1158 R1 节点上限预过滤的快照：只在声明了上限时发一次 group by
+        # 查询（空 map 零回归面）；预过滤只是 hint，写相锁内重校验。
+        if view.node_limits:
+            state.node_active = load_node_claimed_counts(conn, worker_id)
         # Ascending-workspace lock floor (codex P1 / EXEC-CLAIM-LOCK-001):
         # the write phase accumulates one ``agent-ws:*`` advisory lock per
         # claimed workspace; without an ascending constraint two batches
@@ -233,6 +242,8 @@ def select_batch_candidates(
             selected.append(row)
             chosen_ids.add(str(row["execution_id"]))
             row_kind = str(row["kind"])
+            node_key = str(row["node_key"])
+            state.node_chosen[node_key] = state.node_chosen.get(node_key, 0) + 1
             row_key = int(row["ws_lock_key"])
             if row_kind != "code" and (ws_lock_floor is None or row_key > ws_lock_floor):
                 ws_lock_floor = row_key

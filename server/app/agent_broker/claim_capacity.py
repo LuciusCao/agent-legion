@@ -36,12 +36,55 @@ Worker per-node gate contract:
   without re-registration. An empty map (undeclared or explicitly cleared)
   skips the gate entirely: behavior is byte-identical to the pre-#1158
   claim path (zero regression surface).
+
+Read-phase twin (#1158 R1): ``load_node_claimed_counts`` + ``node_slot_open``
+give the batch selection (``claim_batch_select``) an advisory pre-filter on
+the same predicate, so a queue headed by an already-full node does not get
+selected, rejected by the write phase, and re-selected every poll while
+runnable nodes behind it starve. Advisory only — the write-phase gate stays
+the authoritative check.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+
+
+def load_node_claimed_counts(conn: Any, worker_id: str) -> dict[str, int]:
+    """读相预过滤的计数快照（#1158 R1）：本机各 node_key 的 claimed 行数。
+
+    一次 group by 查询服务整个批选择循环；与写相 ``worker_node_admits``
+    同一张表同一谓词（不分 kind、不带 workspace）。只在 Worker 声明了
+    节点上限时调用（空 map 不发这条查询，零回归面）。
+    """
+    rows = conn.execute(
+        "select node_key, count(*) as cnt from agent_execution_requests"
+        " where worker_id=%s and state='claimed' group by node_key",
+        (worker_id,),
+    ).fetchall()
+    return {str(row["node_key"]): int(row["cnt"]) for row in rows}
+
+
+def node_slot_open(limits: Mapping[str, int], row: Mapping[str, Any], state: Any) -> bool:
+    """读相 hint（#1158 R1）：声明上限覆盖该 key 且 在跑 + 本批已选 >= 上限 时拒选。
+
+    只是避免「选中一个写相必拒的节点导致空批、饿死其后节点」的预过滤——
+    写相 ``worker_node_admits`` 的锁内重校验仍是权威判定，一行不动。
+    在跑快照与本批已选记账在 ``state.node_active`` / ``state.node_chosen``
+    （批选择段填；ScanState 的 per-pass accounting 家族）。skip reason 与
+    写相同名 ``worker_node_limit_full``（语义同 capacity_full 的读相预检）。
+    """
+    node_key = str(row["node_key"])
+    limit = limits.get(node_key)
+    taken = state.node_active.get(node_key, 0) + state.node_chosen.get(node_key, 0)
+    if limit is None or taken < limit:
+        return True
+    execution_id = str(row["execution_id"])
+    if execution_id not in state.node_filtered:
+        state.node_filtered.add(execution_id)
+        state.skip_reasons["worker_node_limit_full"] += 1
+    return False
 
 
 def workspace_agent_admits(conn: Any, selected: Mapping[str, Any], kind: str, state: Any) -> bool:

@@ -16,8 +16,15 @@
    生效；None（不声明）保留库存值，显式 {} 清空（无限制）；
 3. 未声明 / 空 map 时行为与现状完全一致（同节点两请求都可领取，零回归面）；
 4. 计数不分 kind：agent 与 code 的 claimed 行都占本机该节点的额度；
-5. 批 claim 同节点多候选：批写阶段逐候选重跑 evaluate，批内前序 promote
-   的 claimed 翻转同事务可见，第二个候选 skip、第一个保留。
+5. 批 claim 同节点多候选：读相预过滤按「在跑 + 本批已选」记账，第一个
+   入选后第二个即被拒，批保留第一个；
+6. 读相预过滤（PR #1229 R1 P1）：已满节点排在队首时，读相
+   （claim_batch_select）按 在跑快照 + 本批已选 记账拒选，一批领走其后
+   的可执行节点而非返回空批——写相 ``worker_node_admits`` 保持权威重
+   校验一行不动；
+7. 写相权威门直调（R1 复验补钉）：读相未声明、写相才同步到声明的形态
+   （滚动升级窗口竞态），第二个候选被 ``worker_node_admits`` 拒并留队列
+   ——预过滤上线后写相拒绝路径的唯一覆盖。
 """
 
 from __future__ import annotations
@@ -28,7 +35,10 @@ from typing import Any
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.claim_batch import claim_batch_with_retry
+from server.app.agent_broker.claim_batch_select import select_batch_candidates
+from server.app.agent_broker.claim_batch_tx import claim_batch_in_transaction
 from server.app.agent_control.registry import AgentWorkerRegistry
+from server.app.db.transaction import write_transaction
 from shared.protocol import PROTOCOL_VERSION
 from tests.helpers.agent_worker_api import seed_request
 from tests.postgres_support import TEST_DATABASE_URL
@@ -180,7 +190,11 @@ def test_node_limit_declaration_hot_syncs_and_enforces_immediately(job_db) -> No
     workspace_id, node_key = "ws-1158-b", "heavy"
     for index in range(3):
         _seed_code_job(job_db, workspace_id, f"job-b{index}", node_key)
-        _enqueue_code(job_db, workspace_id, f"job-b{index}", node_key, order=index)
+    # job-b2 刻意延后在 round2 之后入队：读相预过滤会对队列里每个已满节点
+    # 候选计一次 skip（直方图语义），round2 的 ==1 断言要求当时队列里只有
+    # job-b1 一个 heavy 候选。
+    _enqueue_code(job_db, workspace_id, "job-b0", node_key, order=0)
+    _enqueue_code(job_db, workspace_id, "job-b1", node_key, order=1)
     _register_worker("worker-1158-b")
     pool = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
@@ -201,6 +215,8 @@ def test_node_limit_declaration_hot_syncs_and_enforces_immediately(job_db) -> No
     assert round2.claims == ()
     assert round2.skip_reasons.get("worker_node_limit_full") == 1
     assert _stored_node_limits(job_db, "worker-1158-b") == {node_key: 1}
+
+    _enqueue_code(job_db, workspace_id, "job-b2", node_key, order=2)
 
     # 显式 {} = 清空：同一 claim 即按新映射放行，库存列同步为 {}。
     round3 = claim_batch_with_retry(
@@ -286,9 +302,10 @@ def test_worker_node_limit_counts_both_kinds(job_db) -> None:
 
 
 def test_batch_second_candidate_same_node_skips(job_db) -> None:
-    """批 claim（#546/#555）同节点两候选：批写阶段逐候选重跑 evaluate，
-    前序 promote 的 claimed 翻转同事务可见——第二个候选 skip
-    （worker_node_limit_full），第一个 claim 保留（skip-and-continue）。"""
+    """批 claim（#546/#555）同节点两候选：读相预过滤按「在跑 + 本批已选」
+    记账（#1158 R1）——第一个入选后第二个即被拒（worker_node_limit_full，
+    读相产生），批保留第一个 claim（skip-and-continue）。批写相的锁内
+    权威重校验（worker_node_admits）由用例 7 直调覆盖。"""
     workspace_id, node_key = "ws-1158-e", "heavy"
     _seed_code_job(job_db, workspace_id, "job-e1", node_key)
     _seed_code_job(job_db, workspace_id, "job-e2", node_key)
@@ -311,3 +328,100 @@ def test_batch_second_candidate_same_node_skips(job_db) -> None:
     assert outcome.skip_reasons.get("worker_node_limit_full") == 1
     assert _request_state(job_db, first) == "claimed"
     assert _request_state(job_db, second) == "queued"
+
+
+def test_read_phase_prefilter_serves_nodes_behind_a_full_head(job_db) -> None:
+    """用例 6（PR #1229 R1 P1 饿死修复钉）：弱机 {heavy: 1} 已有一个 heavy
+    在跑；队列里两个 heavy 在前、light 在后——批 limit=2 时读相预过滤
+    逐一拒选两个已满的 heavy（skip 各计一次 worker_node_limit_full），
+    同一批领走后面的 light；修复前两个批槽全被 heavy 候选烧掉、写相
+    拒收返回空批，后续轮询重复，light 被饿死到 heavy 完成。写相
+    ``worker_node_admits`` 仍是权威重校验。"""
+    workspace_id = "ws-1158-f"
+    for job_id, node_key in (
+        ("job-f-running", "heavy"),
+        ("job-f-heavy-a", "heavy"),
+        ("job-f-heavy-b", "heavy"),
+        ("job-f-light", "light"),
+    ):
+        _seed_code_job(job_db, workspace_id, job_id, node_key)
+    _register_worker("worker-1158-f")
+    pool = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    # 占满额度：先领走一个 heavy（声明 {heavy: 1}）。
+    _enqueue_code(job_db, workspace_id, "job-f-running", "heavy", order=0)
+    round1 = claim_batch_with_retry(
+        pool,
+        "worker-1158-f",
+        None,
+        None,
+        limit=1,
+        code_limit=1,
+        declared_node_limits={"heavy": 1},
+    )
+    assert [claim.job_id for claim in round1.claims] == ["job-f-running"]
+
+    # 队列（按入队序）：两个 heavy 在前、light 在后——批预算 2 恰好会被
+    # 两个已满节点候选烧光（修复前的空批形态：单 heavy + limit≥2 时第二个
+    # 槽位仍会捞到 light，不构成饿死，故要两个 heavy 占满预算）。
+    blocked_a = _enqueue_code(job_db, workspace_id, "job-f-heavy-a", "heavy", order=1)
+    blocked_b = _enqueue_code(job_db, workspace_id, "job-f-heavy-b", "heavy", order=2)
+    served = _enqueue_code(job_db, workspace_id, "job-f-light", "light", order=3)
+
+    round2 = claim_batch_with_retry(
+        pool,
+        "worker-1158-f",
+        None,
+        None,
+        limit=2,
+        code_limit=2,
+        declared_node_limits={"heavy": 1},
+    )
+
+    # 修复前：读相两个槽位都选中 heavy、写相双双拒收、返回空批；修复后：
+    # 读相预过滤逐一跳过两个 heavy（各计一次），一批领走 light。
+    assert [claim.job_id for claim in round2.claims] == ["job-f-light"]
+    assert round2.skip_reasons.get("worker_node_limit_full") == 2
+    assert _request_state(job_db, blocked_a) == "queued"  # 留队列等额度
+    assert _request_state(job_db, blocked_b) == "queued"
+    assert _request_state(job_db, served) == "claimed"
+
+
+def test_write_phase_gate_rejects_second_candidate_after_declaration_sync(job_db) -> None:
+    """用例 7：写相权威门（worker_node_admits）直调覆盖。读相预过滤上线后
+    常规路径的 skip 都产自读相，写相拒绝路径的覆盖只剩「读相未声明、写相
+    才同步到声明」的形态（滚动升级窗口 / 声明与选择之间的真实竞态）：先不
+    声明上限调 select_batch_candidates（两个同节点候选都入选），再带
+    declared_node_limits={key: 1} 直调 claim_batch_in_transaction——写相
+    prepare_claim_view 在 agent_workers 行锁内同步声明后逐候选评估：第一个
+    promote、第二个被写相门拒（skip 计数 + 留队列）。直调模式比照
+    tests/db/test_claim_node_limit_remote.py 的 P2-2 用例。"""
+    workspace_id, node_key = "ws-1158-g", "heavy"
+    _seed_code_job(job_db, workspace_id, "job-g1", node_key)
+    _seed_code_job(job_db, workspace_id, "job-g2", node_key)
+    first = _enqueue_code(job_db, workspace_id, "job-g1", node_key, order=0)
+    second = _enqueue_code(job_db, workspace_id, "job-g2", node_key, order=1)
+    _register_worker("worker-1158-g")
+    pool = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+
+    # 读相未声明上限（库存 {}）：预过滤不启用，两个同节点候选都入选。
+    selection = select_batch_candidates(pool, "worker-1158-g", None, None, limit=2)
+    assert len(selection.candidates) == 2
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        outcome = claim_batch_in_transaction(
+            pool,
+            conn,
+            "worker-1158-g",
+            None,
+            None,
+            selection=selection,
+            declared_node_limits={node_key: 1},
+        )
+
+    assert [claim.job_id for claim in outcome.claims] == ["job-g1"]
+    assert outcome.skip_reasons.get("worker_node_limit_full") == 1
+    assert _request_state(job_db, first) == "claimed"
+    assert _request_state(job_db, second) == "queued"  # 写相门拒收，留队列
+    # 声明同步发生在写相：库存列随本批更新。
+    assert _stored_node_limits(job_db, "worker-1158-g") == {node_key: 1}
