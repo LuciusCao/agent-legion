@@ -61,6 +61,22 @@ describe('WorkflowStudioDraftSaveControl', () => {
     expect(onRetrySave).toHaveBeenCalledOnce()
   })
 
+  it('#1204：terminal 失败（4xx/退避耗尽）不承诺自动重试，仍保留显式「重试保存」出口', () => {
+    const onRetrySave = vi.fn()
+    render(
+      <WorkflowStudioDraftSaveControl
+        save={{ status: 'error', savedAt: null, saveError: 'terminal' }}
+        readOnly={false}
+        onRetrySave={onRetrySave}
+      />
+    )
+    expect(
+      screen.getByText('草稿保存失败，不会自动重试——请修改内容或点击重试')
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试保存' }))
+    expect(onRetrySave).toHaveBeenCalledOnce()
+  })
+
   it('codex 轮 5 P2：loadError（GET 失败）不给重试保存（重试的是读取侧）', () => {
     render(
       <WorkflowStudioDraftSaveControl

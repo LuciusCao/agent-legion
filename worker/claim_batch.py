@@ -112,6 +112,9 @@ class ClaimRunContext:
     pool_deferred: set[str]
     stop: Any
     lane_probe: bool = False
+    # #1158 节点级并发上限：executor 主循环每轮热更后原地刷新（与 active
+    # 等可变容器同 discipline），claim_batch_pass 随声明透传给 Host。
+    node_limits: dict[str, int] | None = None
 
 
 def make_claim_submitter(
@@ -187,6 +190,7 @@ def claim_batch_pass(
         limit=limit,
         agent_limit=agent_limit,
         code_limit=code_limit,
+        node_concurrency_limits=ctx.node_limits,
     )
     if not claims:
         return False, 0.0
