@@ -116,7 +116,7 @@ def test_dirty_return_is_attributed_and_rolled_back(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Pool defense (#438): a connection returned with an open transaction
-    is rolled back by the pool, and the return path attributes the leak to
+    is rolled back on return (#1077), and the return path attributes the leak to
     its checkout origin — the diagnostic #438 lacked in production."""
     caplog.set_level(logging.WARNING, logger="server.app.db.pool_reset")
     conn = connect_database(TEST_DATABASE_URL)
