@@ -17,26 +17,30 @@ directory → its ``(st_dev, st_ino)`` is snapshotted; anything else
 (symlink, file) → fail closed before any read. The residue carry walks a
 descriptor opened ``O_NOFOLLOW`` and ``fstat``-matched to the snapshot,
 and the retiring rename is re-checked right before and verified right
-after (``retire_dir_at``). Residual window: the rename acts on a name, so
-an entry swapped in between the last check and the rename is moved
-instead — detected by the post-move check, moved back, the write fails
-closed, and the cleanup never removes an unverified entry.
+after (``retire_dir_at``). The staging dir's identity is pinned when it
+is created; promote and restore go through ``promote_dir_at`` (source
+proven, target absent, result verified) and cleanup through
+``remove_tree_at`` (contents removed via a descriptor pinned to the
+expected identity, only the emptied entry removed by name). Residual
+window: renames act on names, so an entry swapped in between the last
+check and a rename moves instead — detected by the post-move check and
+failed closed; a target appearing in that window is replaced only when it
+is an empty directory; cleanup never empties an unverified directory.
 """
 
 from __future__ import annotations
 
 import os
-import shutil
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
 
 from server.app.fs_dir_identity import (
+    create_dir_identity,
     dir_identity_at,
     open_dir_identity_at,
-    rename_at,
-    retire_dir_at,
 )
+from server.app.fs_dir_moves import promote_dir_at, remove_tree_at, retire_dir_at
 from server.app.services.skill_build_residue_io import carry_build_residue
 from server.app.services.skill_shared_store import (
     SHARED_DIR_NAME,
@@ -69,35 +73,38 @@ def write_shared_materials(
     retired_name = f"{SHARED_DIR_NAME}.old-{uuid.uuid4().hex[:12]}"
     staging = shared_dir.parent / staging_name
     parent_fd: int | None = None
+    staged = live = None
     retired_owned = keep_retired = False
     try:
+        staged = create_dir_identity(staging)  # pinned at creation (codex R1)
+        # #1097: every step after the staging writes is relative to the parent
+        # pinned here and checked by lstat identity (see the module docstring).
+        parent_fd = os.open(shared_dir.parent, os.O_RDONLY | os.O_DIRECTORY)
         for relative, content in files:
             path = staging / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
         with shared_edit_lock(shared_dir, base_dir):
-            # #1097: every step below is relative to the parent pinned here
-            # and checked by lstat identity (see the module docstring). A
-            # staging dir not under the pinned parent fails the promote
-            # rename (ENOENT) — closed, like every other mismatch.
-            parent_fd = os.open(shared_dir.parent, os.O_RDONLY | os.O_DIRECTORY)
             live = dir_identity_at(parent_fd, SHARED_DIR_NAME)  # symlink → fail closed
             if live is not None:
                 # #1038: carried under the lock, BEFORE the live dir moves —
                 # a copy failure aborts the write with the live dir untouched.
-                with open_dir_identity_at(parent_fd, SHARED_DIR_NAME, live) as shared_fd:
-                    carry_build_residue(shared_fd, staging)
+                with (
+                    open_dir_identity_at(parent_fd, SHARED_DIR_NAME, live) as shared_fd,
+                    open_dir_identity_at(parent_fd, staging_name, staged) as staging_fd,
+                ):
+                    carry_build_residue(shared_fd, staging_fd)
                 retire_dir_at(parent_fd, SHARED_DIR_NAME, live, retired_name)
                 retired_owned = True
             try:
-                rename_at(parent_fd, staging_name, SHARED_DIR_NAME)
+                promote_dir_at(parent_fd, staging_name, staged, SHARED_DIR_NAME)
             except OSError:
-                if retired_owned:
+                if retired_owned and live is not None:
                     # Restore; on a second failure `retired` is the ONLY copy
                     # of the previous state — keep it (see docstring) instead
                     # of turning a recoverable write into data loss.
                     try:
-                        rename_at(parent_fd, retired_name, SHARED_DIR_NAME)
+                        promote_dir_at(parent_fd, retired_name, live, SHARED_DIR_NAME)
                     except OSError:
                         keep_retired = True
                         raise
@@ -109,12 +116,13 @@ def write_shared_materials(
             detail += f"; the previous state is preserved at {retired} for manual recovery"
         raise SharedMaterialWriteError(detail) from exc
     finally:
-        # Only a retired dir PROVEN to be the previous live dir is removed
-        # (``retire_dir_at``); a restored one is already gone (no-op).
-        if parent_fd is None:  # failed before the lock: nothing was retired
-            shutil.rmtree(staging, ignore_errors=True)
-        else:
-            removable = [staging_name] + [retired_name] * (retired_owned and not keep_retired)
-            for name in removable:
-                shutil.rmtree(name, ignore_errors=True, dir_fd=parent_fd)
+        # Removal is by IDENTITY, never by name (codex R1): staging only if it
+        # is still the dir created above, retired only if proven to be the
+        # previous live dir (``retire_dir_at``) and not kept for recovery.
+        retired_id = live if retired_owned and not keep_retired else None
+        removable = [(staging_name, staged), (retired_name, retired_id)]
+        if parent_fd is not None:  # None: failed creating staging, nothing to remove
+            for name, identity in removable:  # gone/restored/foreign: left as is
+                if identity is not None:
+                    remove_tree_at(parent_fd, name, identity)
             os.close(parent_fd)

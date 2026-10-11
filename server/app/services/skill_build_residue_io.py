@@ -17,7 +17,12 @@ from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path, PurePosixPath
 
-from server.app.fs_safety import NotRegularFileError, open_regular_at
+from server.app.fs_safety import (
+    NotRegularFileError,
+    create_new_at,
+    open_dir_beneath,
+    open_regular_at,
+)
 from server.app.services.skill_build_residue import is_build_residue
 
 GitRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -61,7 +66,7 @@ def blocking_entries(porcelain_z: str) -> list[str]:
     return blocking
 
 
-def carry_build_residue(shared_fd: int, staging: Path) -> None:
+def carry_build_residue(shared_fd: int, staging_fd: int) -> None:
     """Copy the live dir's build residue (``__pycache__/``, ``*.pyc``) into
     the staged tree so the ``_shared`` swap does not remove it.
 
@@ -85,6 +90,8 @@ def carry_build_residue(shared_fd: int, staging: Path) -> None:
     its directory descriptor: only single-link regular files are copied —
     symlinks, FIFOs, devices and hard links (which would alias a file from
     outside the tree) are skipped, also when swapped in after the lstat.
+    Writes go through ``staging_fd`` (the identity-checked staging dir,
+    codex R1 on PR #1242), never through the staging path.
     """
     walk = os.fwalk(".", dir_fd=shared_fd, follow_symlinks=False)
     for dirpath, _dirnames, filenames, dir_fd in walk:
@@ -96,23 +103,26 @@ def carry_build_residue(shared_fd: int, staging: Path) -> None:
             owner = relative.parent
             while owner.parts and is_build_residue(owner.as_posix()):
                 owner = owner.parent
-            target = staging / relative
-            if not (staging / owner).is_dir() or target.exists():
-                continue
-            with suppress(FileNotFoundError):  # removed by a validator outside the lock
-                copy_residue_file(dir_fd, filename, target)
+            # Skipped: dropped owner (ENOENT/ENOTDIR in staging) or a source
+            # a validator outside the lock removed (ENOENT).
+            with suppress(FileNotFoundError, NotADirectoryError):
+                with open_dir_beneath(staging_fd, owner.parts):
+                    pass  # the owning directory survives in the new state
+                copy_residue_file(dir_fd, filename, staging_fd, relative.parent.parts)
 
 
-def copy_residue_file(dir_fd: int, name: str, target: Path) -> None:
-    """Copy one residue file under ``dir_fd`` to a new ``target``, keeping
-    its mode and timestamps like ``copy2``. Anything but a single-link
-    regular file is skipped: ``lstat`` first so a FIFO/device is never
-    opened, then ``open_regular_at`` (``O_NOFOLLOW``; ELOOP = swapped for a
-    symlink after the lstat). A vanished source raises FileNotFoundError
-    before ``target`` exists."""
+def copy_residue_file(
+    dir_fd: int, name: str, staging_fd: int, target_parts: tuple[str, ...]
+) -> None:
+    """Copy one residue file under ``dir_fd`` to ``staging_fd/<target_parts>/
+    name``, keeping its mode and timestamps like ``copy2``. Anything but a
+    single-link regular file is skipped: ``lstat`` first so a FIFO/device
+    is never opened, then ``open_regular_at`` (``O_NOFOLLOW``; ELOOP =
+    swapped for a symlink after the lstat). The target side is walked
+    ``O_NOFOLLOW`` from the pinned staging descriptor and created
+    ``O_EXCL`` — an existing staged path wins, nothing is redirected."""
     if not stat.S_ISREG(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode):
         return
-    target.parent.mkdir(parents=True, exist_ok=True)
     try:
         source = open_regular_at(dir_fd, name)
     except NotRegularFileError:
@@ -121,8 +131,15 @@ def copy_residue_file(dir_fd: int, name: str, target: Path) -> None:
         if exc.errno == errno.ELOOP:
             return
         raise
-    with os.fdopen(source, "rb") as reader, target.open("xb") as writer:
-        shutil.copyfileobj(reader, writer)
+    with os.fdopen(source, "rb") as reader:
         info = os.fstat(reader.fileno())
-    os.chmod(target, stat.S_IMODE(info.st_mode))
-    os.utime(target, ns=(info.st_atime_ns, info.st_mtime_ns))
+        with open_dir_beneath(staging_fd, target_parts, create=True, mode=0o777) as target_fd:
+            try:
+                dest = create_new_at(target_fd, name, stat.S_IMODE(info.st_mode))
+            except FileExistsError:
+                return
+        with os.fdopen(dest, "wb") as writer:
+            shutil.copyfileobj(reader, writer)
+            writer.flush()
+            os.fchmod(writer.fileno(), stat.S_IMODE(info.st_mode))
+            os.utime(writer.fileno(), ns=(info.st_atime_ns, info.st_mtime_ns))

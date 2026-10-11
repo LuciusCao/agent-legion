@@ -17,7 +17,8 @@ from __future__ import annotations
 import os
 import stat
 from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
+from pathlib import Path
 
 from server.app.fs_safety import DIRECTORY_FLAGS, _component
 
@@ -44,37 +45,22 @@ def dir_identity_at(parent: int, name: str) -> DirIdentity | None:
     return (info.st_dev, info.st_ino)
 
 
+def create_dir_identity(path: Path) -> DirIdentity:
+    """Create a NEW directory ``path`` (missing ancestors too) and return its
+    identity, pinned at creation so later checks can tell it apart from a
+    directory swapped in under the same name."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.mkdir()
+    info = os.lstat(path)
+    if not stat.S_ISDIR(info.st_mode):
+        raise DirectoryIdentityError(f"{path.name!r} is not a real directory")
+    return (info.st_dev, info.st_ino)
+
+
 def require_dir_identity_at(parent: int, name: str, expected: DirIdentity) -> None:
     """Fail closed unless ``name`` under ``parent`` is still ``expected``."""
     if dir_identity_at(parent, name) != expected:
         raise DirectoryIdentityError(f"{name!r} changed identity since it was checked")
-
-
-def retire_dir_at(parent: int, name: str, expected: DirIdentity, retired: str) -> None:
-    """Rename ``name`` to ``retired`` under ``parent`` iff it is ``expected``.
-
-    Re-checks the identity right before the rename and verifies the moved
-    entry right after it. The rename itself acts on a name, so an entry
-    swapped in between the two ``lstat``-s would move instead; that case is
-    detected afterwards, moved back (best effort) and raised — on return
-    ``retired`` is proven to hold ``expected``, on raise the caller owns
-    nothing at ``retired`` and must not remove it.
-    """
-    require_dir_identity_at(parent, name, expected)
-    rename_at(parent, name, retired)
-    try:
-        moved = dir_identity_at(parent, retired)
-    except OSError:  # incl. DirectoryIdentityError: unverifiable = not ours
-        moved = None
-    if moved != expected:
-        with suppress(OSError):
-            rename_at(parent, retired, name)
-        raise DirectoryIdentityError(f"{name!r} was swapped during the move")
-
-
-def rename_at(parent: int, source: str, target: str) -> None:
-    """Rename one entry to another name inside the same pinned directory."""
-    os.rename(_component(source), _component(target), src_dir_fd=parent, dst_dir_fd=parent)
 
 
 @contextmanager

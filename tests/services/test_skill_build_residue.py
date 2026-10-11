@@ -250,17 +250,17 @@ def test_residue_vanishing_mid_copy_is_skipped_other_errors_abort(
     )
     real_copy = skill_build_residue_io.copy_residue_file
 
-    def vanishing_copy(dir_fd, name, target):
+    def vanishing_copy(dir_fd, name, *target):
         if name == "stray.pyc":
             os.unlink(name, dir_fd=dir_fd)  # a validator outside the lock cleaned it
-        return real_copy(dir_fd, name, target)
+        return real_copy(dir_fd, name, *target)
 
     monkeypatch.setattr(skill_build_residue_io, "copy_residue_file", vanishing_copy)
     write_shared_materials(root, list(targets.items()), tmp_path)
     assert not (root / "scripts" / "stray.pyc").exists()
     assert (root / "scripts" / "__pycache__" / "common.cpython-312.pyc").read_bytes() == _PYC
 
-    def denied_copy(dir_fd, name, target):
+    def denied_copy(dir_fd, name, *target):
         raise PermissionError("denied")
 
     monkeypatch.setattr(skill_build_residue_io, "copy_residue_file", denied_copy)

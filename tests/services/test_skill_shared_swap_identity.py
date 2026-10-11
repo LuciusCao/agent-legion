@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app import fs_dir_identity
+from server.app import fs_dir_moves
 from server.app.services import skill_shared_swap
 from server.app.services.skill_shared_store import SharedMaterialWriteError
 from server.app.services.skill_shared_swap import write_shared_materials
@@ -155,7 +155,7 @@ _CHECKPOINTS = {
     "during-carry": (skill_shared_swap, "carry_build_residue", _swap_before),
     # Residual window: after the pre-rename re-check, before the rename —
     # the post-move verification catches it and moves the entry back.
-    "after-recheck": (fs_dir_identity, "require_dir_identity_at", _swap_after),
+    "after-recheck": (fs_dir_moves, "require_dir_identity_at", _swap_after),
 }
 
 
@@ -224,14 +224,14 @@ def test_promote_failure_restores_or_preserves_the_verified_previous_dir(
     retired dir (proven to be the previous live dir) stays on disk."""
     _tree(layout["shared"], "live")
     original = _snapshot(layout["shared"])
-    real_rename = skill_shared_swap.rename_at
+    real_rename = fs_dir_moves.rename_at
 
     def flaky_rename(parent: int, source: str, target: str) -> None:
         if ".tmp-" in source or (restore_fails and ".old-" in source):
             raise OSError("rename refused")
         real_rename(parent, source, target)
 
-    monkeypatch.setattr(skill_shared_swap, "rename_at", flaky_rename)
+    monkeypatch.setattr(fs_dir_moves, "rename_at", flaky_rename)
     with pytest.raises(SharedMaterialWriteError) as caught:
         write_shared_materials(layout["shared"], _PAYLOAD, layout["ws"])
     leftovers = [p for p in layout["ws"].iterdir() if p.name.startswith("_shared.")]
@@ -244,3 +244,96 @@ def test_promote_failure_restores_or_preserves_the_verified_previous_dir(
     else:
         assert leftovers == []
         assert _snapshot(layout["shared"]) == original
+
+
+# --- codex R1 (PR #1242): staging and target identity, removal by identity ---
+
+
+def _entry(ws: Path, prefix: str) -> Path:
+    [entry] = [p for p in ws.iterdir() if p.name.startswith(prefix)]
+    return entry
+
+
+@pytest.mark.parametrize("kind", ["symlink", "other-directory"])
+def test_staging_replaced_before_the_lock_is_never_published(
+    layout: dict[str, Path], monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """The staging dir's identity is pinned at creation: a replacement
+    swapped in under its name is refused, not published — and not deleted."""
+    _tree(layout["shared"], "live")
+    original, other_before = _snapshot(layout["shared"]), _snapshot(layout["other"])
+
+    def swap_staging() -> None:
+        staging = _entry(layout["ws"], "_shared.tmp-")
+        os.rename(staging, layout["moved"])
+        if kind == "symlink":
+            staging.symlink_to(layout["other"], target_is_directory=True)
+        else:
+            os.rename(layout["other"], staging)
+
+    _swap_before(monkeypatch, skill_shared_swap, "shared_edit_lock", swap_staging)
+    with pytest.raises(SharedMaterialWriteError):
+        write_shared_materials(layout["shared"], _PAYLOAD, layout["ws"])
+    assert _snapshot(layout["shared"]) == original  # live dir restored
+    replacement = _entry(layout["ws"], "_shared.tmp-")
+    assert replacement.is_symlink() == (kind == "symlink")
+    assert _snapshot(replacement.resolve()) == other_before  # foreign data intact
+
+
+@pytest.mark.parametrize("kind", ["empty-directory", "other-directory", "symlink"])
+def test_target_appearing_before_promote_fails_closed_and_keeps_previous(
+    layout: dict[str, Path], monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """Promote requires an absent target: an entry created after the live
+    dir was retired is never overwritten; the restore is refused for the
+    same reason, so the verified previous dir is preserved and named."""
+    _tree(layout["shared"], "live")
+    original, other_before = _snapshot(layout["shared"]), _snapshot(layout["other"])
+
+    def create_target() -> None:
+        if kind == "empty-directory":
+            layout["shared"].mkdir()
+        elif kind == "other-directory":
+            os.rename(layout["other"], layout["shared"])
+        else:
+            layout["shared"].symlink_to(layout["other"], target_is_directory=True)
+
+    _swap_after(monkeypatch, skill_shared_swap, "retire_dir_at", create_target)
+    with pytest.raises(SharedMaterialWriteError, match="manual recovery") as caught:
+        write_shared_materials(layout["shared"], _PAYLOAD, layout["ws"])
+    retired = _entry(layout["ws"], "_shared.old-")
+    assert str(retired) in str(caught.value)
+    assert _snapshot(retired) == original
+    if kind == "empty-directory":
+        assert _snapshot(layout["shared"]) == {}
+    else:
+        assert _snapshot(layout["shared"].resolve()) == other_before
+    assert not [p for p in layout["ws"].iterdir() if p.name.startswith("_shared.tmp-")]
+
+
+@pytest.mark.parametrize("swapped", ["staging-name", "retired-name"])
+def test_cleanup_never_empties_a_directory_swapped_in_after_promote(
+    layout: dict[str, Path], monkeypatch: pytest.MonkeyPatch, swapped: str
+) -> None:
+    """Cleanup removes by identity: a foreign directory placed under the
+    vacated staging name, or swapped for the retired dir, keeps its content."""
+    _tree(layout["shared"], "live")
+    other_before = _snapshot(layout["other"])
+    names: dict[str, str] = {}
+    real_promote = skill_shared_swap.promote_dir_at
+
+    def promote(parent: int, source: str, expected, target: str) -> None:
+        real_promote(parent, source, expected, target)
+        names["staging"] = source
+        retired = _entry(layout["ws"], "_shared.old-")
+        if swapped == "staging-name":
+            os.rename(layout["other"], layout["ws"] / source)
+        else:
+            os.rename(retired, layout["moved"])
+            os.rename(layout["other"], retired)
+
+    monkeypatch.setattr(skill_shared_swap, "promote_dir_at", promote)
+    write_shared_materials(layout["shared"], _PAYLOAD, layout["ws"])
+    assert (layout["shared"] / "scripts" / "common.py").read_text(encoding="utf-8") == "X = 2\n"
+    prefix = "_shared.tmp-" if swapped == "staging-name" else "_shared.old-"
+    assert _snapshot(_entry(layout["ws"], prefix)) == other_before
