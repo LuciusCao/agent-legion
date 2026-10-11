@@ -85,6 +85,11 @@ ALTER DATABASE <agent_legion_worktree> OWNER TO agent_legion_dev;
   `agent_legion_dev` when the role exists (PostgreSQL then rejects any drop
   outside the derived set), and prints owner/size before asking for
   confirmation.
+- Derived names normalize `_` / `-` / `.` and case (`foo_bar` and `foo-bar`
+  share the same database/bucket); `scripts/init-worktree.sh` /
+  `clean-worktree.sh` / `drop-worktree-db.sh` refuse names that collide with
+  another worktree after normalization (#950) — avoid look-alike worktree
+  names.
 - Day-to-day superuser connections (such as the OS-user role) can still
   drop anything — the guarantee covers the scripted routine path, not
   deliberate superuser operations.

@@ -156,7 +156,7 @@ The affected tier (`GATE_TIER=aff`) is the edit-test iteration loop for
 agents and humans alike: the backend lane selects tests whose recorded
 coverage intersects the changed source files (index in
 `.pytest-aff-index.json`, distilled from a one-off `GATE_TIER=aff-index`
-run with `--cov-context=test`), and the frontend lane runs `vitest related`
+run with `--cov-context=test`, ~2.5 minutes per worktree), and the frontend lane runs `vitest related`
 over the changed frontend files. It falls back to the plain unit tier when
 no index exists, when a changed source file is missing from the index (an
 index blind spot — the affected tests are unknown), when the selection

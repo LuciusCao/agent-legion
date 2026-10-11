@@ -584,7 +584,10 @@ pi                      # 交互式完成认证
 6. **硬要求**：runtime 必须在 stdout 产出 pi 兼容 JSONL 事件子集
    （`velites/schema/events.schema.json`）——UI 预览、失败检测与 token
    计量都消费它；产不出流式事件的 runtime 不接（openclaw 即因此退役，
-   其一次性 envelope 无中间事件、无 token usage）。
+   其一次性 envelope 无中间事件、无 token usage）。事件 schema 改动必须
+   同步该 schema 文件并保持契约测试 `velites/tests/schema_current.rs` /
+   `golden_events.rs` 通过；禁止引入 delta 事件（`message_update` /
+   `tool_execution_update`）。
 
 历史参考：openclaw 曾按上述步骤完整接入（adapter、Worker 事件合成层、
 e2e），后按用户决策整体退役——实现与拆除过程见 git 历史（#75）。
