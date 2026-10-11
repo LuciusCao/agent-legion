@@ -31,7 +31,17 @@ export function AgentChatStatusStrip({ chat, queue }: Props) {
 
   const resumable = chat.closed && chat.session !== null
   let runSlot = null
-  if (resumable) {
+  if (queue.slowSend) {
+    // #1121：发送在途超过阈值（多为后端自动恢复会话、重建 runtime）——轻量
+    // 提示，不吓人；优先于 resumable：自动恢复途中会话快照会短暂落 error，
+    // 不得闪「会话已中断」。
+    runSlot = (
+      <>
+        <span className={`${styles.dot} ${styles.dotBusy}`} />
+        <span className={styles.label}>正在恢复对话…</span>
+      </>
+    )
+  } else if (resumable) {
     const interrupted = chat.session?.status === 'error'
     runSlot = (
       <>

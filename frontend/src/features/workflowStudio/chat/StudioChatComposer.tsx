@@ -5,13 +5,16 @@ import { StudioChatCancelButton } from './StudioChatCancelButton'
 import { StudioChatSendButton } from './StudioChatSendButton'
 import { StudioChatComposerConfig } from './StudioChatComposerConfig'
 import { StudioChatContextRing } from './StudioChatContextRing'
+import { restoreDraftText } from './useInFlightSend'
 import styles from './StudioChatComposer.module.css'
 
 type Props = {
   busy: boolean
   disabled: boolean
   disabledReason: string | null
-  onSend: (text: string) => void
+  /** #1121：返回是否已被保留（直发以服务端接纳为准，入队即 true）——
+   * 失败时 composer 恢复草稿，不再无条件清空输入框。 */
+  onSend: (text: string) => Promise<boolean>
   /** 仅 Studio / 定制预览 Dock 传：权限模式/模型/思考档位的紧凑芯片（数据层
    * 复用 useStudioChatAgentConfig）；diagnosis 不传，工具行只有发送按钮，
    * 不造空槽位。 */
@@ -49,8 +52,8 @@ export function StudioChatComposer(props: Props) {
   function submit() {
     const value = text.trim()
     if (!value || props.disabled) return
-    props.onSend(value)
     setText('')
+    void props.onSend(value).then((ok) => restoreDraftText(setText, value, ok))
   }
 
   // 圆环位于右组最左（模型芯片左边）：有配置芯片时经 contextRing 注入右组，

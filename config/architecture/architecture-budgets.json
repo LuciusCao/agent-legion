@@ -1872,6 +1872,7 @@
     "server/app/studio_chat/resume_context.py": 60,
     "server/app/studio_chat/retention.py": 96,
     "server/app/studio_chat/runtime.py": 34,
+    "server/app/studio_chat/send_resume.py": 48,
     "server/app/studio_chat/service.py": 240,
     "server/app/studio_chat/serving_address.py": 61,
     "server/app/studio_chat/session_archive.py": 30,

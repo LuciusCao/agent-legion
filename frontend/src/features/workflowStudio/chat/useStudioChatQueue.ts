@@ -27,7 +27,7 @@ export function useStudioChatQueue(
   useEffect(() => {
     queueRef.current = queue
   }, [queue])
-  const { inFlightRef, sendInFlight } = useInFlightSend(send)
+  const { inFlightRef, sendInFlight, slowSend } = useInFlightSend(send)
 
   // 跨会话切换清空队列：排队消息只属于当时那个会话。
   useEffect(() => {
@@ -61,7 +61,9 @@ export function useStudioChatQueue(
   }, [busy, blocked, sessionKey, inFlightRef, sendInFlight])
 
   const nextIdRef = useRef(1)
-  function submit(text: string) {
+  // #1121：返回是否已被保留（入队即 true——队列条可见可移除；直发以 send
+  // 结果为准）——composer 据此决定清稿还是留稿，发送失败不再丢草稿。
+  function submit(text: string): Promise<boolean> {
     // 首个直发在途（busy 尚未随 SSE 快照翻转）也视为忙：后续提交入队，
     // 避免两条都直发撞后端单 turn 原子认领的 409。压缩窗口（blocked）同理。
     // 队列非空时一律尾插（#797 复审批次 P2）：上一次 flush 失败会保留队首
@@ -71,9 +73,9 @@ export function useStudioChatQueue(
       const id = `q${nextIdRef.current}`
       nextIdRef.current += 1
       setQueue((current) => [...current, { id, text }])
-      return
+      return Promise.resolve(true)
     }
-    sendInFlight(text)
+    return sendInFlight(text)
   }
 
   function remove(id: string) {
@@ -91,5 +93,5 @@ export function useStudioChatQueue(
     })
   }
 
-  return { queuedMessages: queue, submit, remove }
+  return { queuedMessages: queue, submit, remove, slowSend }
 }

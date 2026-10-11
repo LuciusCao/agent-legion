@@ -9,7 +9,7 @@ from server.app.auth.scoped_tokens import renew_scoped_token
 from server.app.auth.sessions import hash_token
 from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.services.job_errors import ConflictError
-from server.app.studio_chat import compaction, inbound_queue, unprompted_queue
+from server.app.studio_chat import compaction, inbound_queue, send_resume, unprompted_queue
 from server.app.studio_chat.background_wakeup import prepare_rearm
 from server.app.studio_chat.payloads import serialize_message
 from server.app.studio_chat.resume_context import prepare_resume_prompt
@@ -32,6 +32,11 @@ def send_message(
     runtime = service.runtime(session_id)
     if runtime is None:
         reject_orphaned_session(service, session_id, session)
+    # #1121: a dead run token on an idle/error session is rebuilt (auto-resume)
+    # before anything is admitted — an accepted message always has a live
+    # tool channel. Live-token sessions skip this entirely.
+    if send_resume.needs_send_resume(service, session, runtime):
+        session, runtime = send_resume.ensure_answerable_runtime(service, session_id, workspace_id)
     from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 
     # #1029: observe a just-started Kimi Code unprompted turn before deciding.

@@ -73,6 +73,9 @@ class StudioChatService:
         self._probe = probe if probe is not None else AgentAvailabilityProbe()
         self._runtimes: dict[str, SessionRuntime] = {}
         self._runtimes_lock = threading.Lock()
+        # #1121 send-path auto-resume serializer (send_resume.py), keyed by
+        # session id; guarded by _runtimes_lock.
+        self._send_resume_locks: dict[str, threading.Lock] = {}
         self._lifecycle = ServiceLifecycle()
         self.store = StudioChatStore(job_db, bus)
 

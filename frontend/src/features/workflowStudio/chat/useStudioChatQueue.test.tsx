@@ -24,16 +24,36 @@ describe('useStudioChatQueue', () => {
   it('sends immediately when idle', () => {
     const send = vi.fn().mockResolvedValue(true)
     const { result } = renderQueue(send, { busy: false, sessionKey: 's1' })
-    act(() => result.current.submit('你好'))
+    act(() => {
+      void result.current.submit('你好')
+    })
     expect(send).toHaveBeenCalledWith('你好')
     expect(result.current.queuedMessages).toEqual([])
+  })
+
+  it('resolves true immediately for an enqueued message (#1121: 草稿已由队列保留)', async () => {
+    const send = vi.fn().mockResolvedValue(true)
+    const { result } = renderQueue(send, { busy: true, sessionKey: 's1' })
+    let accepted: boolean | undefined
+    act(() => {
+      void result.current.submit('排队').then((ok) => (accepted = ok))
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(accepted).toBe(true)
+    expect(send).not.toHaveBeenCalled()
   })
 
   it('enqueues while busy without sending', () => {
     const send = vi.fn().mockResolvedValue(true)
     const { result } = renderQueue(send, { busy: true, sessionKey: 's1' })
-    act(() => result.current.submit('第一条'))
-    act(() => result.current.submit('第二条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
+    act(() => {
+      void result.current.submit('第二条')
+    })
     expect(send).not.toHaveBeenCalled()
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
       '第一条',
@@ -47,8 +67,12 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
-    act(() => result.current.submit('第二条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
+    act(() => {
+      void result.current.submit('第二条')
+    })
 
     rerender({ busy: false, sessionKey: 's1' })
     await waitFor(() => expect(send).toHaveBeenCalledWith('第一条'))
@@ -72,7 +96,9 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
     rerender({ busy: false, sessionKey: 's1' })
     await waitFor(() => expect(send).toHaveBeenCalledWith('第一条'))
     // 等 then 回调落定后断言队列未被清空。
@@ -96,10 +122,14 @@ describe('useStudioChatQueue', () => {
       busy: false,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
     expect(send).toHaveBeenCalledWith('第一条')
 
-    act(() => result.current.submit('第二条'))
+    act(() => {
+      void result.current.submit('第二条')
+    })
     expect(send).toHaveBeenCalledTimes(1)
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual(['第二条'])
 
@@ -129,11 +159,15 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
     rerender({ busy: false, sessionKey: 's1' })
     await waitFor(() => expect(send).toHaveBeenCalledWith('第一条'))
 
-    act(() => result.current.submit('第二条'))
+    act(() => {
+      void result.current.submit('第二条')
+    })
     expect(send).toHaveBeenCalledTimes(1)
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
       '第一条',
@@ -153,8 +187,12 @@ describe('useStudioChatQueue', () => {
   it('removes a queued message manually', () => {
     const send = vi.fn().mockResolvedValue(true)
     const { result } = renderQueue(send, { busy: true, sessionKey: 's1' })
-    act(() => result.current.submit('第一条'))
-    act(() => result.current.submit('第二条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
+    act(() => {
+      void result.current.submit('第二条')
+    })
     const head = result.current.queuedMessages[0]
     act(() => result.current.remove(head.id))
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual(['第二条'])
@@ -166,7 +204,9 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
     rerender({ busy: true, sessionKey: 's2' })
     expect(result.current.queuedMessages).toEqual([])
   })
@@ -177,7 +217,9 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
     // 切到空闲的新会话：busy 翻转与会话切换同帧，旧队首不得发出。
     rerender({ busy: false, sessionKey: 's2' })
     await act(async () => {
@@ -195,7 +237,9 @@ describe('useStudioChatQueue', () => {
       blocked: false,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('排队消息'))
+    act(() => {
+      void result.current.submit('排队消息')
+    })
     rerender({ busy: false, blocked: true, sessionKey: 's1' })
     await act(async () => {
       await Promise.resolve()
@@ -217,7 +261,9 @@ describe('useStudioChatQueue', () => {
       blocked: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('压缩中提交'))
+    act(() => {
+      void result.current.submit('压缩中提交')
+    })
     expect(send).not.toHaveBeenCalled()
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
       '压缩中提交',
@@ -233,7 +279,9 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('m1'))
+    act(() => {
+      void result.current.submit('m1')
+    })
     rerender({ busy: false, sessionKey: 's1' })
     await waitFor(() => expect(send).toHaveBeenCalledWith('m1'))
     await act(async () => {
@@ -242,7 +290,9 @@ describe('useStudioChatQueue', () => {
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual(['m1'])
 
     // 失败 flush 后空闲窗口的新提交：尾插，不直发。
-    act(() => result.current.submit('m2'))
+    act(() => {
+      void result.current.submit('m2')
+    })
     expect(send).toHaveBeenCalledTimes(1)
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
       'm1',
@@ -269,13 +319,17 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('m1'))
+    act(() => {
+      void result.current.submit('m1')
+    })
     rerender({ busy: false, sessionKey: 's1' })
     await waitFor(() => expect(send).toHaveBeenCalledWith('m1'))
     await act(async () => {
       await Promise.resolve()
     })
-    act(() => result.current.submit('m2'))
+    act(() => {
+      void result.current.submit('m2')
+    })
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
       'm1',
       'm2',
@@ -296,8 +350,12 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('m1'))
-    act(() => result.current.submit('m2'))
+    act(() => {
+      void result.current.submit('m1')
+    })
+    act(() => {
+      void result.current.submit('m2')
+    })
 
     const head = result.current.queuedMessages[0]
     act(() => result.current.remove(head.id))
@@ -320,7 +378,9 @@ describe('useStudioChatQueue', () => {
       blocked: false,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
     rerender({ busy: false, blocked: false, sessionKey: 's1' })
     await waitFor(() => expect(send).toHaveBeenCalledWith('第一条'))
     await act(async () => {
