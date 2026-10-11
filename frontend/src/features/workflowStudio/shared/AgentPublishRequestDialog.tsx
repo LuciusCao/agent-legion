@@ -94,13 +94,11 @@ export function AgentPublishRequestDialog() {
  * 数据流）：抽出来供 WorkflowStudioLayoutDialogs 复用，两个对话框对同
  * 一份草稿展示同一份比对结果。 */
 export function reviewDialogProps(studio: {
-  workflow?: { key: string } | null
   revision?: WorkflowRevisionSummary | null
   createsRevision?: boolean
   compareSummary?: ChangeSummaryViewModel | null
 }) {
   return {
-    workflowKey: studio.workflow?.key ?? null,
     activeRevision: studio.revision ?? null,
     nextVersion: (studio.revision?.version ?? 0) + 1,
     createsRevision: studio.createsRevision,

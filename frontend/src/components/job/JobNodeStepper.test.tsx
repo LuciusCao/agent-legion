@@ -120,4 +120,25 @@ describe('JobNodeStepper', () => {
       expect(segment).toHaveAttribute('data-status', 'pending')
     })
   })
+
+  it('keeps the default 4px gap for small node counts', () => {
+    render(<JobNodeStepper nodeSummaries={summaries} />)
+
+    expect(screen.getByRole('list', { name: '节点进度' }).style.gap).toBe('4px')
+  })
+
+  it('shrinks the track gap at 50+ nodes so every segment stays visible (#1124)', () => {
+    const many: JobNodeSummary[] = Array.from({ length: 50 }, (_, i) => ({
+      node_key: `node-${i}`,
+      label: `节点 ${i}`,
+      status: 'pending',
+      error_message: '',
+    }))
+    render(<JobNodeStepper nodeSummaries={many} />)
+
+    expect(screen.getAllByRole('listitem')).toHaveLength(50)
+    // 176px track：50 × 2px 段 + 49 × gap ≤ 176，gap 必须收缩到 1px
+    // （保持 4px 时 gap 总量 196px 已超宽，段被压成 0 宽）。
+    expect(screen.getByRole('list', { name: '节点进度' }).style.gap).toBe('1px')
+  })
 })

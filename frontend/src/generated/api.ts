@@ -922,6 +922,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/jobs/{job_id}/raw-artifacts/{artifact_name}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Artifact Raw Nested */
+    get: operations['get_artifact_raw_nested_api_jobs__job_id__raw_artifacts__artifact_name__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/jobs/{job_id}/run-to': {
     parameters: {
       query?: never
@@ -4102,6 +4119,10 @@ export interface components {
       max_code_concurrency?: number | null
       /** Max Concurrency */
       max_concurrency?: number | null
+      /** Node Concurrency Limits */
+      node_concurrency_limits?: {
+        [key: string]: number
+      } | null
       /** Worker Id */
       worker_id: string
     }
@@ -7150,6 +7171,8 @@ export interface components {
     }
     /** StudioChatMessagesResponse */
     StudioChatMessagesResponse: {
+      /** Has More */
+      has_more: boolean
       /** Messages */
       messages: components['schemas']['StudioChatMessageRecord'][]
     }
@@ -10328,6 +10351,51 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['JobMutationResultResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_artifact_raw_nested_api_jobs__job_id__raw_artifacts__artifact_name__get: {
+    parameters: {
+      query?: never
+      header?: {
+        Range?: string | null
+      }
+      path: {
+        job_id: string
+        artifact_name: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
+      /** @description Partial Content (Range request) */
+      206: {
+        headers: {
+          'Content-Length'?: string
+          'Content-Range'?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
         }
       }
       /** @description Validation Error */
@@ -15350,6 +15418,7 @@ export interface operations {
     parameters: {
       query?: {
         after_seq?: number
+        before_seq?: number | null
       }
       header?: never
       path: {

@@ -28,12 +28,15 @@ def build_worker_view(
     agent_pool: int,
     code_pool: int,
     active_rows: Any,
+    node_limits: dict[str, int] | None = None,
 ) -> WorkerView:
     """Assemble the WorkerView from the worker row, enforced pools, counts.
 
     Shared by ``prepare_claim_view`` (write phase, row locked) and the #555
     batch read phase (``claim_batch_select``'s unlocked read) so both build
-    the identical view shape."""
+    the identical view shape. ``node_limits`` (#1158) is the ENFORCED map
+    (declared-then-synced on the write phase, declared-or-stored mirror on
+    the read phase), never re-parsed from the possibly-stale row here."""
     active_by_kind = {str(row["kind"]): int(row["cnt"]) for row in active_rows}
     return WorkerView(
         runtimes=set(json.loads(worker["runtimes_json"])),
@@ -45,6 +48,7 @@ def build_worker_view(
         code_capacity=code_pool,
         code_active=active_by_kind.get("code", 0),
         protocol_version=int(worker["protocol_version"]),
+        node_limits=dict(node_limits or {}),
     )
 
 
@@ -54,22 +58,26 @@ def prepare_claim_view(
     declared_max_concurrency: int | None = None,
     declared_max_code_concurrency: int | None = None,
     timer: _claim_timing.ClaimStageTimer | None = None,
+    declared_node_limits: dict[str, int] | None = None,
 ) -> WorkerView:
     """Lock the Worker row, sync declared capacities, snapshot the live pools.
 
     ``timer`` (#448) closes the two worker_setup stages exactly where the
     pre-#546 inline code had them; None keeps this importable from tests that
-    predate the instrumentation.
+    predate the instrumentation. ``declared_node_limits`` (#1158) is the
+    Worker 节点级并发上限的热声明——None 保留库存值，显式 map（含 {}）替换。
     """
     worker = conn.execute(WORKER_SELECT_SQL, (worker_id,)).fetchone()
     if timer is not None:
         timer.stage("worker_setup")
     if worker is None or worker["revoked_at"] is not None:
         raise ValueError("unknown or revoked Agent Worker")
-    max_concurrency, max_code_concurrency = sync_declared_capacity(
-        conn, worker, declared_max_concurrency, declared_max_code_concurrency
+    max_concurrency, max_code_concurrency, node_limits = sync_declared_capacity(
+        conn, worker, declared_max_concurrency, declared_max_code_concurrency, declared_node_limits
     )
     active_rows = conn.execute(ACTIVE_COUNT_SQL, (worker_id,)).fetchall()
     if timer is not None:
         timer.stage("worker_setup")
-    return build_worker_view(worker, max_concurrency, max_code_concurrency, active_rows)
+    return build_worker_view(
+        worker, max_concurrency, max_code_concurrency, active_rows, node_limits
+    )

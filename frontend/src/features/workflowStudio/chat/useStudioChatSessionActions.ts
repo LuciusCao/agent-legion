@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
 import {
   cancelStudioChatTurn,
@@ -72,47 +73,68 @@ export function useStudioChatSessionActions(deps: {
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>
   setSession: Dispatch<SetStateAction<StudioChatSessionRecord | null>>
 }) {
-  const { setMessages, setSession } = deps
-  const ctx = (expected?: string): StudioChatSessionActionContext => ({
-    workspaceId: deps.workspaceId,
-    activeSessionId: deps.activeSessionId,
-    activeSessionIdRef: deps.activeSessionIdRef,
-    setActionError: deps.setActionError,
-    expected,
-  })
+  const {
+    workspaceId,
+    activeSessionId,
+    activeSessionIdRef,
+    setActionError,
+    setMessages,
+    setSession,
+  } = deps
+  // #1120（codex P1）：send/cancel/setAllowAll 逐行下传到 MessageItem，
+  // 必须 useCallback 稳定引用——依赖只含 workspaceId/activeSessionId（切换
+  // 才变）与稳定的 setState/ref，流式 chunk 不再重建。
+  const ctx = useCallback(
+    (expected?: string): StudioChatSessionActionContext => ({
+      workspaceId,
+      activeSessionId,
+      activeSessionIdRef,
+      setActionError,
+      expected,
+    }),
+    [workspaceId, activeSessionId, activeSessionIdRef, setActionError]
+  )
 
   // 返回是否发送成功：busy 排队（useStudioChatQueue）flush 失败时要保留
   // 队首，失败原因已置 actionError。
-  async function send(text: string, expectedSessionId?: string) {
-    if (!text.trim()) return false
-    const result = await runStudioChatSessionAction(
-      ctx(expectedSessionId),
-      'send',
-      (wsId, sessionId) => sendStudioChatMessage(wsId, sessionId, text.trim())
-    )
-    if (!result) return false
-    const message = result.value
-    setMessages((current) => upsertMessage(current, message) ?? current)
-    return true
-  }
+  const send = useCallback(
+    async (text: string, expectedSessionId?: string) => {
+      if (!text.trim()) return false
+      const result = await runStudioChatSessionAction(
+        ctx(expectedSessionId),
+        'send',
+        (wsId, sessionId) => sendStudioChatMessage(wsId, sessionId, text.trim())
+      )
+      if (!result) return false
+      setMessages((current) => upsertMessage(current, result.value) ?? current)
+      return true
+    },
+    [ctx, setMessages]
+  )
 
-  async function cancel(expectedSessionId?: string) {
-    const result = await runStudioChatSessionAction(
-      ctx(expectedSessionId),
-      'cancel',
-      cancelStudioChatTurn
-    )
-    if (result) setSession(result.value)
-  }
+  const cancel = useCallback(
+    async (expectedSessionId?: string) => {
+      const result = await runStudioChatSessionAction(
+        ctx(expectedSessionId),
+        'cancel',
+        cancelStudioChatTurn
+      )
+      if (result) setSession(result.value)
+    },
+    [ctx, setSession]
+  )
 
-  async function setAllowAll(enabled: boolean, expectedSessionId?: string) {
-    const result = await runStudioChatSessionAction(
-      ctx(expectedSessionId),
-      'setAllowAll',
-      (wsId, sessionId) => setStudioChatAllowAll(wsId, sessionId, enabled)
-    )
-    if (result) setSession(result.value)
-  }
+  const setAllowAll = useCallback(
+    async (enabled: boolean, expectedSessionId?: string) => {
+      const result = await runStudioChatSessionAction(
+        ctx(expectedSessionId),
+        'setAllowAll',
+        (wsId, sessionId) => setStudioChatAllowAll(wsId, sessionId, enabled)
+      )
+      if (result) setSession(result.value)
+    },
+    [ctx, setSession]
+  )
 
   return { send, cancel, setAllowAll }
 }

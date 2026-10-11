@@ -73,6 +73,23 @@ function textMessage(id: string, seq: number, text: string) {
   }
 }
 
+function toolCallMessage(id: string, seq: number, status?: string) {
+  return {
+    id,
+    session_id: 's1',
+    kind: 'tool_call' as const,
+    role: 'agent' as const,
+    content: {
+      sessionUpdate: 'tool_call',
+      toolCallId: id,
+      title: 'Bash',
+      ...(status === undefined ? {} : { status }),
+    },
+    seq,
+    created_at: '2026-01-01T00:00:00Z',
+  }
+}
+
 describe('useStudioChat', () => {
   const originalEventSource = globalThis.EventSource
   let testClient = createTestQueryClient()
@@ -145,6 +162,36 @@ describe('useStudioChat', () => {
     expect(result.current.messages).toHaveLength(1)
     expect(result.current.messages[0]?.content.text).toBe('hello world')
     expect(result.current.messages[0]?.seq).toBe(1)
+  })
+
+  // #1120（codex P1）：动作回调引用必须跨流式 chunk 稳定——它们逐行下传
+  // 给 MessageItem，每 render 新建会穿透 memo、重渲染整个可见列表。
+  it('keeps action callbacks referentially stable across streaming chunks', async () => {
+    const { result } = await renderChat()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    emit({ type: 'message', message: textMessage('m1', 1, 'hel') })
+    const before = {
+      send: result.current.send,
+      cancel: result.current.cancel,
+      setAllowAll: result.current.setAllowAll,
+      answerPermission: result.current.answerPermission,
+      resume: result.current.resume,
+    }
+    emit({
+      type: 'message',
+      message: {
+        id: 'm1',
+        session_id: 's1',
+        kind: 'text',
+        role: 'agent',
+        content: { text: 'hello' },
+      },
+    })
+    expect(result.current.send).toBe(before.send)
+    expect(result.current.cancel).toBe(before.cancel)
+    expect(result.current.setAllowAll).toBe(before.setAllowAll)
+    expect(result.current.answerPermission).toBe(before.answerPermission)
+    expect(result.current.resume).toBe(before.resume)
   })
 
   // #938：后台子代理完成 / cron 触发的 agent 自发回合——本地没有发起任何
@@ -456,6 +503,79 @@ describe('useStudioChat', () => {
       expect(result.current.messages[0]?.content.text).toBe(
         'complete text after reconnect'
       )
+    )
+  })
+
+  it('heals in-flight tool_call rows on SSE reconnect (#1228)', async () => {
+    // #1120 起 tool_call 更新原地合并进单行、seq 不推进：断连期间的
+    // tool_call_update 靠 after_seq 增量补齐永远取不回，重连时必须像未终结
+    // 流式 text 行一样触发全量校准，否则纯工具 turn 的卡片定格在旧状态。
+    const { result } = await renderChat()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    emit({
+      type: 'message',
+      message: toolCallMessage('tc1', 1, 'in_progress'),
+    })
+    expect(result.current.messages[0]?.content.status).toBe('in_progress')
+
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      toolCallMessage('tc1', 1, 'completed'),
+    ])
+    const source = EventSourceMock.instances[0]
+    act(() => source.onopen?.())
+
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatMessages).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        0
+      )
+    )
+    await waitFor(() =>
+      expect(result.current.messages[0]?.content.status).toBe('completed')
+    )
+  })
+
+  it('treats a tool_call row with missing status as in-flight on reconnect (#1228)', async () => {
+    // status 缺失/畸形的保守形态：宁可多校准一次，不漏校准。
+    await renderChat()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    emit({ type: 'message', message: toolCallMessage('tc1', 1) })
+    const source = EventSourceMock.instances[0]
+    act(() => source.onopen?.())
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatMessages).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        0
+      )
+    )
+  })
+
+  it('does not trigger a full refill for terminal tool_call rows on reconnect (#1228)', async () => {
+    // 已终态的 tool_call 不会再有合并更新：重连只做 after_seq 增量补齐，
+    // 不做无谓的全量回取。
+    await renderChat()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    emit({
+      type: 'message',
+      message: toolCallMessage('tc1', 1, 'completed'),
+    })
+    const source = EventSourceMock.instances[0]
+    act(() => source.onopen?.())
+    // 等增量补齐（after_seq=maxSeq=1）落地作为重连已处理的信号，再断言
+    // 全量回取未发生（等信号非等时长）。
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatMessages).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        1
+      )
+    )
+    expect(mockApi.fetchStudioChatMessages).not.toHaveBeenCalledWith(
+      'ws1',
+      's1',
+      0
     )
   })
 

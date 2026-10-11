@@ -47,9 +47,8 @@ from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SC
 # behind so the undo step rewinds a current-shape database to exactly the
 # previous recorded version. v95 is DDL-only: one table
 # (workspace_workflow_draft_generation, #1226 五轮收口); dropping it rewinds
-# to v94. (v94 sits below on origin/main — agent_workers.
-# node_concurrency_limits_json; on this branch the applied chain tops at
-# v93, which simply stays applied either way.)
+# to v94 (agent_workers.node_concurrency_limits_json, #1158 — now in this
+# chain below v95, staying applied either way).
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("workspace_workflow_draft_generation",)
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()

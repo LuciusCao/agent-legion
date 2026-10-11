@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import type { StudioChat } from './useStudioChat'
 import { useChatAutoScroll } from './useChatAutoScroll'
 import {
@@ -9,6 +9,7 @@ import {
 } from './studioChatMessages'
 import { supersededCancelRequestIds } from './studioChatCancelVisibility'
 import { useQueuedMessageStates } from './studioChatTurnRecovery'
+import { draftAnchorToolCallId } from './useStudioChatViews'
 import { MessageItem } from './StudioChatMessageItem'
 import { permissionRequestId } from './StudioChatPermission'
 import { StudioChatWindow } from './StudioChatWindow'
@@ -64,20 +65,18 @@ export function StudioChatMessageList(props: Props) {
     () => new Map(chat.permissions.map((view) => [view.requestId, view])),
     [chat.permissions]
   )
+  // #1120（codex P1）：onToggleAllowAll 是 MessageItem 全行 prop，必须稳定
+  // 引用——内联箭头每个流式 chunk 都建新函数，memo 直接穿透。
+  // 渲染时绑定会话 id（#962）：切会话后旧卡片的迟到点击被丢弃。
+  const { setAllowAll, activeSessionId } = chat
+  const handleToggleAllowAll = useCallback(
+    (enabled: boolean) => setAllowAll(enabled, activeSessionId ?? undefined),
+    [setAllowAll, activeSessionId]
+  )
 
   // workflow 草稿卡片挂在最后一个携带该 yaml 的工具调用后面。
   const draftAnchorId = useMemo(
-    () =>
-      chat.workflowDraft
-        ? (chat.toolCalls
-            .filter(
-              (call) =>
-                call.rawInput?.definition_yaml === chat.workflowDraft!.yaml &&
-                (call.title.toLowerCase().includes('validate_workflow') ||
-                  call.title.toLowerCase().includes('compare_workflow'))
-            )
-            .slice(-1)[0]?.toolCallId ?? null)
-        : null,
+    () => draftAnchorToolCallId(chat.toolCalls, chat.workflowDraft),
     [chat.toolCalls, chat.workflowDraft]
   )
 
@@ -123,10 +122,7 @@ export function StudioChatMessageList(props: Props) {
               onApplyWorkflowDraft={props.onApplyWorkflowDraft}
               onSelectNode={props.onSelectNode}
               onAnswerPermission={chat.answerPermission}
-              // 渲染时绑定会话 id（#962）：切会话后旧卡片的迟到点击被丢弃。
-              onToggleAllowAll={(enabled) =>
-                chat.setAllowAll(enabled, chat.activeSessionId ?? undefined)
-              }
+              onToggleAllowAll={handleToggleAllowAll}
             />
           )
         }}

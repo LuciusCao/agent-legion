@@ -1,5 +1,9 @@
 import type { JobNodeSummary } from '../../types/jobTypes'
+import { stepperTrackGap } from '../../lib/stepperLayout'
 import styles from './JobNodeStepper.module.css'
+
+// 与 JobNodeStepper.module.css 的 .stepper width 保持一致。
+const TRACK_WIDTH_PX = 176
 
 export interface JobNodeStepperProps {
   nodeSummaries: JobNodeSummary[]
@@ -36,7 +40,12 @@ export function JobNodeStepper({
 
   return (
     <div className={styles.stepper}>
-      <div className={styles.track} role="list" aria-label="节点进度">
+      <div
+        className={styles.track}
+        style={{ gap: stepperTrackGap(segments.length, TRACK_WIDTH_PX) }}
+        role="list"
+        aria-label="节点进度"
+      >
         {segments.map((summary) => {
           const stateClass = STATUS_CLASSES[summary.status] || styles.pending
           const isActive = summary.node_key === activeNodeKey

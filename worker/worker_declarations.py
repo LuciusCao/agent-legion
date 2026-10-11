@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from shared.concurrency_limits import MAX_DYNAMIC_CONCURRENCY
+
 
 def normalize_labels(labels: Any) -> dict[str, str]:
     if not isinstance(labels, dict) or len(labels) > 32:
@@ -16,6 +18,29 @@ def normalize_labels(labels: Any) -> dict[str, str]:
         if not isinstance(value, (str, int, float, bool)) or len(str(value)) > 256:
             raise ValueError(f"标签 {key!r} 的值必须是短标量")
         normalized[key] = str(value)
+    return normalized
+
+
+def normalize_node_concurrency_limits(limits: Any) -> dict[str, int]:
+    """Worker 节点级并发上限（#1158 机器资源保护层）：{node_key: 正整数}。
+
+    key 是裸 node_key（不带 workspace）——机器不关心哪个 workspace 的同名
+    节点在烧自己的 CPU。空 map = 无限制（与未配置同义）。值上限与 Host
+    claim 契约引用同一常量（MAX_DYNAMIC_CONCURRENCY）。
+    """
+    if not isinstance(limits, dict) or len(limits) > 256:
+        raise ValueError("节点并发上限必须是对象且不能超过 256 项")
+    normalized: dict[str, int] = {}
+    for key, value in limits.items():
+        if not isinstance(key, str) or not key or len(key) > 128:
+            raise ValueError("节点并发上限的节点 key 必须是 1 到 128 个字符")
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not 1 <= value <= MAX_DYNAMIC_CONCURRENCY
+        ):
+            raise ValueError(f"节点 {key!r} 的并发上限必须是 1 到 {MAX_DYNAMIC_CONCURRENCY} 的整数")
+        normalized[key] = value
     return normalized
 
 
