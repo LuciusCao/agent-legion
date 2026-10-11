@@ -4,20 +4,25 @@ Subagent (Agent/AgentSwarm) saves never surface as ACP tool_call messages, so
 the chat draft cards had no data source for them; the save routes now append
 a synthetic ``kind='draft'`` message on the success path when the MCP
 loopback carries the session binding header. These tests pin: the event
-lands on success with the card payloads (hashes), and every non-success or
-non-attributable path (no header, unknown/foreign/closed session, 404/409)
-writes nothing.
+lands on success with the card payloads (hashes); the token↔session binding
+is enforced (a token may only card its OWN session — codex P2); and every
+non-success or non-attributable path (no header, unknown/foreign/closed
+session, runtime-less token, 404/409) writes nothing.
 """
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
 
+from server.app.auth import scoped_tokens
+from server.app.studio_chat.acp_session import AcpSessionHandle
+from server.app.studio_chat.runtime import SessionRuntime
 from tests.routes.studio_agent_tools_testlib import (
     _NODE_KEY,
     _active_yaml,
     _create_workspace,
-    _scoped_client,
     reset_create_count,
 )
 
@@ -28,6 +33,44 @@ _SESSION_HEADER = "x-agent-legion-mcp-session-id"
 def _reset_create_count():
     reset_create_count()
     yield
+
+
+@pytest.fixture
+def registered_runtimes(client):
+    """Track runtimes registered on the shared app's chat service so tests
+    leave no residue for the next test (the app is session-scoped)."""
+    service = client.app.state.studio_chat_service
+    registered: list[str] = []
+    yield service, registered
+    for session_id in registered:
+        service._runtimes.pop(session_id, None)
+
+
+def _mint_bound_session(client, job_db, workspace_id: str, admin_id: str, registered: list[str]):
+    """A scoped client whose token is the session's own run token: mint the
+    token, then register a runtime holding it (the spawn-time binding,
+    tests/helpers/studio_chat_fixtures.py 同款形状)."""
+    token = scoped_tokens.mint_scoped_token(job_db, admin_id, workspace_id=workspace_id)
+    session_id = job_db.create_studio_chat_session(workspace_id, admin_id, "kimi")
+    assert session_id is not None
+    handle = AcpSessionHandle(
+        command="unused", args=[], cwd="/tmp", mcp_server=None, env=None, callbacks=Mock()
+    )
+    client.app.state.studio_chat_service._runtimes[session_id] = SessionRuntime(handle, token)
+    registered.append(session_id)
+    scoped = client.__class__(client.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+    return scoped, session_id
+
+
+def _unbound_client(client, job_db):
+    """A scoped token with NO runtime binding (self-service shape): the
+    conservative no-card path."""
+    admin_id = str(job_db.get_user_credentials("admin")["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, admin_id)
+    scoped = client.__class__(client.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+    return scoped, admin_id
 
 
 def _create_chat_session(job_db, workspace_id: str, user_id: str) -> str:
@@ -44,10 +87,12 @@ def _draft_messages(job_db, session_id: str) -> list[dict]:
     ]
 
 
-def test_node_code_draft_save_appends_draft_event(client, job_db) -> None:
+def test_node_code_draft_save_appends_draft_event(client, job_db, registered_runtimes) -> None:
     workspace_id = _create_workspace(client)
-    scoped, admin_id = _scoped_client(client, job_db)
-    session_id = _create_chat_session(job_db, workspace_id, admin_id)
+    _, admin_id = _unbound_client(client, job_db)
+    scoped, session_id = _mint_bound_session(
+        client, job_db, workspace_id, admin_id, registered_runtimes[1]
+    )
 
     response = scoped.put(
         f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
@@ -67,10 +112,12 @@ def test_node_code_draft_save_appends_draft_event(client, job_db) -> None:
     }
 
 
-def test_workflow_draft_save_appends_draft_event(client, job_db) -> None:
+def test_workflow_draft_save_appends_draft_event(client, job_db, registered_runtimes) -> None:
     workspace_id = _create_workspace(client)
-    scoped, admin_id = _scoped_client(client, job_db)
-    session_id = _create_chat_session(job_db, workspace_id, admin_id)
+    _, admin_id = _unbound_client(client, job_db)
+    scoped, session_id = _mint_bound_session(
+        client, job_db, workspace_id, admin_id, registered_runtimes[1]
+    )
     draft_yaml = _active_yaml(scoped, workspace_id).replace("label: ", "label: v2 ", 1)
 
     response = scoped.put(
@@ -90,12 +137,38 @@ def test_workflow_draft_save_appends_draft_event(client, job_db) -> None:
     }
 
 
-def test_save_without_session_header_appends_nothing(client, job_db) -> None:
+def test_save_with_other_sessions_token_writes_no_card(client, job_db, registered_runtimes) -> None:
+    """codex P2: the header session must OWN the presented run token — a
+    token minted for session A cannot card session B's timeline in the same
+    workspace. The save itself still succeeds (the card is notification)."""
+    workspace_id = _create_workspace(client)
+    _, admin_id = _unbound_client(client, job_db)
+    scoped_a, session_a = _mint_bound_session(
+        client, job_db, workspace_id, admin_id, registered_runtimes[1]
+    )
+    _, session_b = _mint_bound_session(
+        client, job_db, workspace_id, admin_id, registered_runtimes[1]
+    )
+
+    response = scoped_a.put(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
+        json={"code": "def run(ctx):\n    return {}\n"},
+        headers={_SESSION_HEADER: session_b},
+    )
+
+    assert response.status_code == 200, response.text
+    assert _draft_messages(job_db, session_b) == []
+    assert _draft_messages(job_db, session_a) == []
+
+
+def test_save_without_session_header_appends_nothing(client, job_db, registered_runtimes) -> None:
     """Human/editor-shaped calls (and external self-service MCP setups without
     a session binding) must not grow timeline writes."""
     workspace_id = _create_workspace(client)
-    scoped, admin_id = _scoped_client(client, job_db)
-    session_id = _create_chat_session(job_db, workspace_id, admin_id)
+    _, admin_id = _unbound_client(client, job_db)
+    scoped, session_id = _mint_bound_session(
+        client, job_db, workspace_id, admin_id, registered_runtimes[1]
+    )
 
     response = scoped.put(
         f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
@@ -106,14 +179,42 @@ def test_save_without_session_header_appends_nothing(client, job_db) -> None:
     assert _draft_messages(job_db, session_id) == []
 
 
-def test_save_with_foreign_workspace_session_appends_nothing(client, job_db) -> None:
+def test_runtime_less_token_gets_no_card_even_with_own_session_header(client, job_db) -> None:
+    """保守行为：无 runtime 绑定的 token（self-service origin='user' 形态）
+    指到同 workspace 的 live session 也不写卡——绑定关系查不到即不写。"""
+    workspace_id = _create_workspace(client)
+    scoped, admin_id = _unbound_client(client, job_db)
+    session_id = _create_chat_session(job_db, workspace_id, admin_id)
+
+    response = scoped.put(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
+        json={"code": "def run(ctx):\n    return {}\n"},
+        headers={_SESSION_HEADER: session_id},
+    )
+
+    assert response.status_code == 200, response.text
+    assert _draft_messages(job_db, session_id) == []
+
+
+def test_save_with_foreign_workspace_session_appends_nothing(
+    client, job_db, registered_runtimes
+) -> None:
     """The header is an attribution hint, not an authority: a session of
     another workspace never gets the event (its timeline would leak the
     save)."""
     workspace_id = _create_workspace(client)
     other_workspace_id = _create_workspace(client)
-    scoped, admin_id = _scoped_client(client, job_db)
+    _, admin_id = _unbound_client(client, job_db)
+    scoped, _ = _mint_bound_session(client, job_db, workspace_id, admin_id, registered_runtimes[1])
     foreign_session = _create_chat_session(job_db, other_workspace_id, admin_id)
+    # Register a runtime holding the SAME token under the foreign session:
+    # even a forged binding shape fails the workspace cross-check.
+    handle = AcpSessionHandle(
+        command="unused", args=[], cwd="/tmp", mcp_server=None, env=None, callbacks=Mock()
+    )
+    token = scoped.headers["authorization"].removeprefix("Bearer ")
+    client.app.state.studio_chat_service._runtimes[foreign_session] = SessionRuntime(handle, token)
+    registered_runtimes[1].append(foreign_session)
 
     response = scoped.put(
         f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
@@ -127,7 +228,7 @@ def test_save_with_foreign_workspace_session_appends_nothing(client, job_db) -> 
 
 def test_save_with_unknown_session_appends_nothing(client, job_db) -> None:
     workspace_id = _create_workspace(client)
-    scoped, _ = _scoped_client(client, job_db)
+    scoped, _ = _unbound_client(client, job_db)
 
     response = scoped.put(
         f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
@@ -138,12 +239,14 @@ def test_save_with_unknown_session_appends_nothing(client, job_db) -> None:
     assert response.status_code == 200, response.text
 
 
-def test_save_with_closed_session_appends_nothing(client, job_db) -> None:
+def test_save_with_closed_session_appends_nothing(client, job_db, registered_runtimes) -> None:
     """Closed (or archived — archive stamps closed first) sessions get no
     card: the live-guarded insert skips them atomically."""
     workspace_id = _create_workspace(client)
-    scoped, admin_id = _scoped_client(client, job_db)
-    session_id = _create_chat_session(job_db, workspace_id, admin_id)
+    _, admin_id = _unbound_client(client, job_db)
+    scoped, session_id = _mint_bound_session(
+        client, job_db, workspace_id, admin_id, registered_runtimes[1]
+    )
     job_db.update_studio_chat_session(session_id, status="closed")
 
     response = scoped.put(
@@ -156,12 +259,14 @@ def test_save_with_closed_session_appends_nothing(client, job_db) -> None:
     assert _draft_messages(job_db, session_id) == []
 
 
-def test_failed_saves_append_nothing(client, job_db) -> None:
+def test_failed_saves_append_nothing(client, job_db, registered_runtimes) -> None:
     """Only the success path emits: a 409 CAS conflict and a 404 unknown node
     leave the timeline untouched."""
     workspace_id = _create_workspace(client)
-    scoped, admin_id = _scoped_client(client, job_db)
-    session_id = _create_chat_session(job_db, workspace_id, admin_id)
+    _, admin_id = _unbound_client(client, job_db)
+    scoped, session_id = _mint_bound_session(
+        client, job_db, workspace_id, admin_id, registered_runtimes[1]
+    )
 
     missing = scoped.put(
         f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/node_missing/code/draft",

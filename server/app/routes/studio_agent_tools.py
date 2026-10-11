@@ -9,9 +9,10 @@ human-facing routers behind ``reject_studio_agent_scope`` (STUDIO-AGENT-001).
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 
 from server.app.auth.dependencies import (
+    extract_session_token,
     require_studio_agent_scope,
     require_studio_agent_workspace,
 )
@@ -47,11 +48,11 @@ from server.app.services.studio_agent_tools import StudioAgentToolsService
 from server.app.services.workflow_drafts import workflow_draft_identity_hash
 from server.app.settings import Settings
 from server.app.studio_chat import draft_events
-from server.app.studio_chat.store import StudioChatStore
+from server.app.studio_chat.draft_events import DraftCardBackend
 
 
 def create_studio_agent_tools_router(
-    job_db: JobQueries, settings: Settings, chat_store: StudioChatStore | None = None
+    job_db: JobQueries, settings: Settings, chat_backend: DraftCardBackend | None = None
 ) -> APIRouter:
     router = APIRouter(dependencies=[Depends(require_studio_agent_scope)])
     # Workspace-path endpoints additionally enforce the run token's workspace
@@ -97,6 +98,7 @@ def create_studio_agent_tools_router(
         node_key: str,
         payload: StudioAgentNodeCodeDraftRequest,
         user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
+        request: Request,
         mcp_session_id: Annotated[str | None, Header(alias=SESSION_ID_HEADER)] = None,
     ) -> WorkflowNodeCodeVersionResponse:
         row = _service().save_node_code_draft(
@@ -108,9 +110,11 @@ def create_studio_agent_tools_router(
             str(user["id"]),
             expected_capability=payload.expected_capability,
         )
-        # #1123: success-path draft card for subagent saves (see draft_events).
+        # #1123: success-path draft card for subagent saves (see draft_events);
+        # the header session must own the presented run token (codex P2).
+        bearer, _ = extract_session_token(request)
         draft_events.emit_node_code_draft_saved(
-            chat_store, job_db, mcp_session_id, workspace_id, node_key, row
+            chat_backend, mcp_session_id, bearer, workspace_id, node_key, row
         )
         return WorkflowNodeCodeVersionResponse(**row)
 
@@ -132,7 +136,7 @@ def create_studio_agent_tools_router(
 
     router.include_router(create_studio_agent_skill_tools_router(job_db, settings))
     workspace_scoped.include_router(create_studio_agent_prompt_tools_router(job_db))
-    workspace_scoped.include_router(create_studio_agent_draft_tools_router(job_db, chat_store))
+    workspace_scoped.include_router(create_studio_agent_draft_tools_router(job_db, chat_backend))
     # Skill creation tool (#633), workspace-scoped (the created repo lives
     # under the calling workspace's skill dir); preview panel tools (#328),
     # workspace-bound draft reads/write.

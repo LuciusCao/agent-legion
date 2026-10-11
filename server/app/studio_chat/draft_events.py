@@ -13,23 +13,33 @@ seq, so the main-agent path (where the ACP tool_call messages DO arrive)
 still shows exactly one card — the synthetic event only fills the subagent
 gap.
 
-The header is an attribution hint, not an authority: the event is appended
-only when the session exists, belongs to the route's workspace (a scoped
-token could otherwise point a same-workspace save at another session's
-timeline), and is still live — the liveness predicate and the INSERT are one
-statement (``append_message_if_live``), so a close/delete racing the save
-simply gets no card. A forged, stale, or foreign header degrades to "no
-card", never to a failed save.
+The header alone is only a claim: any holder of a studio-agent token could
+otherwise point a same-workspace save at another session's timeline (codex
+P2). The event is therefore written only when ALL of these hold:
+
+- the presented Bearer token IS the named session's run token — the exact
+  token minted at spawn and held by the in-process ``SessionRuntime``
+  (a resume mints a fresh token + runtime, so a pre-resume token cannot
+  write into the resumed session; tokens without a runtime binding — e.g.
+  self-service origin='user' tokens — conservatively get no card);
+- the session exists and belongs to the route's workspace;
+- the session is still live — the liveness predicate and the INSERT are one
+  statement (``append_message_if_live``), so a close/delete racing the save
+  gets no card.
+
+A forged, stale, or foreign header degrades to "no card", never to a failed
+save: the card is a best-effort notification layered on the committed draft.
 """
 
 from __future__ import annotations
 
+import hmac
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any, Protocol
 
-if TYPE_CHECKING:
-    from server.app.jobs import JobQueries
-    from server.app.studio_chat.store import StudioChatStore
+from server.app.jobs import JobQueries
+from server.app.studio_chat.runtime import SessionRuntime
+from server.app.studio_chat.store import StudioChatStore
 
 logger = logging.getLogger(__name__)
 
@@ -40,18 +50,38 @@ DRAFT_SAVED_EVENT = "draft_saved"
 _LIVE_STATUSES = ("starting", "idle", "running", "awaiting_permission")
 
 
+class DraftCardBackend(Protocol):
+    """What the emit path needs from the chat service (structural subset of
+    StudioChatService; the routes take the service itself or None)."""
+
+    @property
+    def db(self) -> JobQueries: ...
+
+    @property
+    def store(self) -> StudioChatStore: ...
+
+    def runtime(self, session_id: str) -> SessionRuntime | None: ...
+
+
 def _append(
-    store: StudioChatStore,
-    db: JobQueries,
+    backend: DraftCardBackend,
     session_id: str,
     workspace_id: str,
+    presented_token: str | None,
     content: dict[str, Any],
 ) -> None:
     try:
-        session = db.get_studio_chat_session(session_id)
+        runtime = backend.runtime(session_id)
+        if (
+            runtime is None
+            or not presented_token
+            or not hmac.compare_digest(runtime.token, presented_token)
+        ):
+            return
+        session = backend.db.get_studio_chat_session(session_id)
         if session is None or str(session["workspace_id"]) != str(workspace_id):
             return
-        store.append_message_if_live(
+        backend.store.append_message_if_live(
             session_id, DRAFT_MESSAGE_KIND, "agent", content, _LIVE_STATUSES
         )
     except Exception:
@@ -68,21 +98,21 @@ def _append(
 
 
 def emit_node_code_draft_saved(
-    store: StudioChatStore | None,
-    db: JobQueries,
+    backend: DraftCardBackend | None,
     session_id: str | None,
+    presented_token: str | None,
     workspace_id: str,
     node_key: str,
     row: dict[str, Any],
 ) -> None:
     """Success-path hook of the node-code draft save route (row = save response)."""
-    if store is None or not session_id:
+    if backend is None or not session_id:
         return
     _append(
-        store,
-        db,
+        backend,
         session_id,
         workspace_id,
+        presented_token,
         {
             "event": DRAFT_SAVED_EVENT,
             "draft_type": "node_code",
@@ -95,20 +125,20 @@ def emit_node_code_draft_saved(
 
 
 def emit_workflow_draft_saved(
-    store: StudioChatStore | None,
-    db: JobQueries,
+    backend: DraftCardBackend | None,
     session_id: str | None,
+    presented_token: str | None,
     workspace_id: str,
     draft: dict[str, Any],
 ) -> None:
     """Success-path hook of the workflow draft CAS save route (draft = saved row)."""
-    if store is None or not session_id:
+    if backend is None or not session_id:
         return
     _append(
-        store,
-        db,
+        backend,
         session_id,
         workspace_id,
+        presented_token,
         {
             "event": DRAFT_SAVED_EVENT,
             "draft_type": "workflow",

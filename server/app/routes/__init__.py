@@ -142,9 +142,10 @@ def create_router(deps: RouterDeps) -> APIRouter:
     # detail iframe host); state/publish/archive carry their own Studio
     # authoring + reject_studio_agent_scope guards inside the router.
     secured(create_preview_panels_router(deps.job_db, deps.settings))
-    # chat_store feeds the #1123 draft_saved card emission on the save tools.
-    chat_store = deps.studio_chat_service.store if deps.studio_chat_service else None
-    secured(create_studio_agent_tools_router(deps.job_db, deps.settings, chat_store))
+    # chat backend feeds the #1123 draft_saved card emission on the save tools
+    # (token↔session binding check needs the runtime registry, not just the store).
+    chat_backend = deps.studio_chat_service
+    secured(create_studio_agent_tools_router(deps.job_db, deps.settings, chat_backend))
     # Job diagnosis tools (#329): read-only observation endpoints; the router
     # carries require_studio_agent_scope + workspace binding guards itself.
     secured(

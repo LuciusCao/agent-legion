@@ -13,9 +13,10 @@ for the file-size budget (same pattern as ``studio_agent_prompt_tools``).
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, Request
 from pydantic import BaseModel, Field, field_validator
 
+from server.app.auth.dependencies import extract_session_token
 from server.app.jobs import JobQueries
 from server.app.mcp_server.config import SESSION_ID_HEADER
 from server.app.routes.workflow_draft_store_contracts import (
@@ -28,7 +29,7 @@ from server.app.services.workflow_draft_cas_token import (
 )
 from server.app.services.workflow_draft_store import get_workflow_draft
 from server.app.studio_chat import draft_events
-from server.app.studio_chat.store import StudioChatStore
+from server.app.studio_chat.draft_events import DraftCardBackend
 
 # 409 CAS 冲突的响应契约（#1177 codex P1/P2）：与人侧 draft-store PUT 同一
 # detail 形状（服务层同一 DraftConflictError.payload 渲染），contracts 立
@@ -82,7 +83,7 @@ def _draft_response(draft: dict) -> StudioAgentWorkflowDraftResponse:
 
 
 def create_studio_agent_draft_tools_router(
-    job_db: JobQueries, chat_store: StudioChatStore | None = None
+    job_db: JobQueries, chat_backend: DraftCardBackend | None = None
 ) -> APIRouter:
     router = APIRouter()
 
@@ -104,14 +105,17 @@ def create_studio_agent_draft_tools_router(
     def save_workflow_draft_route(
         workspace_id: str,
         payload: StudioAgentWorkflowDraftSaveRequest,
+        request: Request,
         mcp_session_id: Annotated[str | None, Header(alias=SESSION_ID_HEADER)] = None,
     ) -> StudioAgentWorkflowDraftResponse:
         draft = save_workflow_draft_if_unchanged(
             job_db, workspace_id, payload.definition_yaml, payload.expected_updated_at
         )
-        # #1123: success-path draft card for subagent saves (see draft_events).
+        # #1123: success-path draft card for subagent saves (see draft_events);
+        # the header session must own the presented run token (codex P2).
+        bearer, _ = extract_session_token(request)
         draft_events.emit_workflow_draft_saved(
-            chat_store, job_db, mcp_session_id, workspace_id, draft
+            chat_backend, mcp_session_id, bearer, workspace_id, draft
         )
         return _draft_response(draft)
 
