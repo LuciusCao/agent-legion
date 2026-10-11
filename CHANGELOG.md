@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
-- Studio 发布请求 confirming 状态 300s 超时误回收（issue #464）：confirm 执行期（门禁 → before/after 探测 → publish → resolve 全程，含失败回滚分支）由守护线程按 CONFIRMING_STALE_SECONDS/5（60s）周期续租 claimed_at，谓词骑在 UPDATE 上（status='confirming'，失配 rowcount=0 即停跳），慢发布不再被轮询侧的 stale-confirming 谓词误改成 expired；无心跳的死进程行仍按原谓词被清扫为 expired（owner-liveness 语义，非豁免）。
+- Studio 发布请求 confirming 状态 300s 超时误回收（issue #464）：confirm 执行期（门禁 → before/after 探测 → publish → resolve 全程，含失败回滚分支）由守护线程按 CONFIRMING_STALE_SECONDS/5（60s）周期续租 claimed_at，谓词骑在 UPDATE 上（status='confirming'，失配 rowcount=0 即停跳），慢发布不再被轮询侧的 stale-confirming 谓词误改成 expired；无心跳的死进程行仍按原谓词被清扫为 expired（owner-liveness 语义，非豁免）。心跳线程启动失败（进程线程上限等）同样走回滚路径：claim 已提交的 confirming 行退回 pending，不再滞留 300s 等清扫（#1256 codex P2）。
 
 ## [0.7.19] - 2026-10-11
 

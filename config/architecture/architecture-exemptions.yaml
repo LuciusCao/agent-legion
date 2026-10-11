@@ -173,8 +173,10 @@ exemptions:
     — 153 vs the 139 baseline. The advisory enrichment must sit on the same service methods
     the routes already call; persisting instead would need the schema change #542 explicitly
     avoids. Issue #464 wraps the confirm''s post-claim execution (gates, before/after probes,
-    publish, resolve) in the confirming heartbeat context — the with line plus its import
-    take the file to 157 (within the floor''s growth band). Remove when the publish-request
+    publish, resolve) in the confirming heartbeat context, and the #1256 codex P2 round adds
+    the enter-failure rollback (the heartbeat thread failing to start after the claim
+    committed rolls the row back to pending) via a shared _rollback_claim_to_pending helper
+    — 166 effective lines (within the floor''s growth band). Remove when the publish-request
     read model gets its planned split or a budget re-balance re-registers it. Re-anchored
     by #926 from #456 (closed) to #1009: the overage above is the shipped feature itself
     and the removal condition above stands; #1009 tracks at most five entries (#917 A-2).'
