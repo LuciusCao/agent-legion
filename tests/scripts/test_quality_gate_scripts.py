@@ -45,6 +45,7 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         "FRONTEND_TEST_PROJECT",
         "GATE_LANES",
         "GATE_SHARD",
+        "GATE_SKIP_GOVERNANCE",
         "GATE_SKIP_STATIC",
         "GATE_TIER",
         "KEEP_COVERAGE",
@@ -365,13 +366,30 @@ def test_quick_gate_heartbeat_prints_running_lane_progress(tmp_path: Path) -> No
     # The quick gate sources the shared job-count helper.
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
+    # Minimal sufficient timing (was sleep 6 + heartbeat 2): the heartbeat loop
+    # polls every 1s and prints once SECONDS-last_heartbeat >= interval, so
+    # interval 1 gives the 3s lane two heartbeat chances (~1s and ~2s ticks).
+    # Margin note (honest accounting): the safety margin is ~1s, not the old
+    # ~3s — heartbeat is wall-clock behavior that cannot be fully signal-driven
+    # (the thing under test IS the 1s poll cadence), so the budget is kept
+    # bounded (sleep 3, one round) and the failure mode is loud and diagnosable
+    # (heartbeat_lines empty → assertion diff shows the whole gate stdout).
     _write_executable(
         scripts / "check-quick-backend.sh",
-        '#!/usr/bin/env bash\necho "backend lane working"\nsleep 6\n',
+        '#!/usr/bin/env bash\necho "backend lane working"\nsleep 3\n',
     )
     _write_executable(scripts / "check-quick-frontend.sh", "#!/usr/bin/env bash\nexit 0\n")
 
-    result = _run(quick_gate, cwd=tmp_path, env={"GATE_HEARTBEAT_SECONDS": "2"})
+    # GATE_SKIP_STATIC=1 confines the run to the test rounds: the heartbeat
+    # loop lives in run_round and is identical across rounds, so one slow-lane
+    # round (test-backend) exercises it fully — the static round's duplicate
+    # 3s bought no extra coverage. The full-rounds path stays pinned by
+    # test_quick_gate_fast_lanes_are_not_padded_by_heartbeat_sleep above.
+    result = _run(
+        quick_gate,
+        cwd=tmp_path,
+        env={"GATE_HEARTBEAT_SECONDS": "1", "GATE_SKIP_STATIC": "1", "GATE_LANES": "backend"},
+    )
 
     assert result.returncode == 0, result.stdout + result.stderr
     heartbeat_lines = [line for line in result.stdout.splitlines() if line.startswith("[gate:")]
@@ -429,11 +447,12 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     _write_executable(
         scripts / "check-quick.sh",
         "#!/usr/bin/env bash\n"
-        'printf "quick:lanes=%s,cov=%s,mode=%s,tier=%s,append=%s,skip_static=%s,skip_worker_ui=%s\\n" '
+        'printf "quick:lanes=%s,cov=%s,mode=%s,tier=%s,append=%s,skip_static=%s,skip_worker_ui=%s,skip_governance=%s\\n" '
         '"${GATE_LANES:-unset}" "${AGENT_LEGION_COV:-unset}" '
         '"${FRONTEND_TEST_MODE:-unset}" "${GATE_TIER:-unset}" '
         '"${AGENT_LEGION_COV_APPEND:-0}" '
-        '"${GATE_SKIP_STATIC:-unset}" "${BACKEND_SKIP_WORKER_UI_TESTS:-unset}" >>"$GATE_LOG"\n',
+        '"${GATE_SKIP_STATIC:-unset}" "${BACKEND_SKIP_WORKER_UI_TESTS:-unset}" '
+        '"${GATE_SKIP_GOVERNANCE:-unset}" >>"$GATE_LOG"\n',
     )
     _write_executable(scripts / "check-deps-audit.sh", "#!/usr/bin/env bash\nexit 0\n")
     for command in ("uv", "npm"):
@@ -464,11 +483,14 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     # The postgres segment re-enters the quick gate for its test round only
     # (GATE_SKIP_STATIC=1, BACKEND_SKIP_WORKER_UI_TESTS=1): segment 1a already
     # ran the static checks and the tier-independent worker UI tests, so every
-    # check still runs exactly once per full gate.
+    # check still runs exactly once per full gate. Segment 2 trims the backend
+    # lane, which would trigger the repo-wide governance guard (issue #1201) —
+    # GATE_SKIP_GOVERNANCE=1 keeps the set at exactly one run (segment 1a's
+    # backend static phase already included it).
     assert quick_calls == [
-        "quick:lanes=backend,cov=1,mode=unset,tier=unit,append=0,skip_static=unset,skip_worker_ui=unset",
-        "quick:lanes=backend,cov=1,mode=unset,tier=postgres,append=1,skip_static=1,skip_worker_ui=1",
-        "quick:lanes=frontend rust,cov=unset,mode=coverage,tier=unset,append=0,skip_static=unset,skip_worker_ui=unset",
+        "quick:lanes=backend,cov=1,mode=unset,tier=unit,append=0,skip_static=unset,skip_worker_ui=unset,skip_governance=unset",
+        "quick:lanes=backend,cov=1,mode=unset,tier=postgres,append=1,skip_static=1,skip_worker_ui=1,skip_governance=unset",
+        "quick:lanes=frontend rust,cov=unset,mode=coverage,tier=unset,append=0,skip_static=unset,skip_worker_ui=unset,skip_governance=1",
     ]
     assert calls.count("npm:run build:bundle") == 1
     assert not any("test:coverage" in call for call in calls)

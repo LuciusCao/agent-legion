@@ -1,5 +1,4 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { useJobStore } from '../stores/jobStore'
 import { queryKeys } from '../lib/queryKeys'
 import type { WorkspaceStats } from '../types/workspaceTypes'
 
@@ -18,21 +17,18 @@ export function mergeWorkspaceEventStats(
 }
 
 // 失效该 workspace 的 stats 查询，由活跃观察者触发 refetch（无观察者时不
-// 发请求）；throwOnError 让 refetch 失败继续走 failJobFetch 副作用。
+// 发请求）。refetch 失败落在 stats 查询自身的错误状态（TanStack v5 保留
+// 已有成功数据），不触碰任务列表（#1183：窗口聚焦/事件防抖都会走到这里，
+// stats 失败清列表会把瞬时故障放大成整页列表销毁）。调用方均为
+// fire-and-forget（void refresh()），吞掉 rejection 仅为避免 unhandled
+// rejection。
 export async function refreshWorkspaceEvents(
   queryClient: QueryClient,
   workspaceId: string,
   isInactive: () => boolean
 ) {
   if (isInactive()) return
-  try {
-    await queryClient.invalidateQueries(
-      { queryKey: queryKeys.workspaceStats(workspaceId) },
-      { throwOnError: true }
-    )
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : 'Failed to refresh jobs'
-    useJobStore.getState().failJobFetch(workspaceId, message)
-  }
+  await queryClient
+    .invalidateQueries({ queryKey: queryKeys.workspaceStats(workspaceId) })
+    .catch(() => {})
 }

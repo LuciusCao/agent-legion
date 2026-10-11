@@ -25,6 +25,11 @@ export type DraftSaveState = {
   /** #1143：冲突时服务端草稿的语义身份——「采用服务端版本」后作为
    * savedHash 恢复（画布内容即服务端草稿，卡核对不应对它误报）。 */
   conflictDraftHash?: string | null
+  /** #1204：error 的失败形态——'retrying'（退避重试在途，「将自动重试」
+   * 为真）或 'terminal'（4xx 客户端拒绝 / 退避耗尽，永不自行重试，文案
+   * 不得再承诺）。只在 status==='error' 时有意义，每次进入 error 由
+   * controller 重写。 */
+  saveError?: 'retrying' | 'terminal'
 }
 
 export const IDLE_DRAFT_SAVE: DraftSaveState = { status: 'idle', savedAt: null }

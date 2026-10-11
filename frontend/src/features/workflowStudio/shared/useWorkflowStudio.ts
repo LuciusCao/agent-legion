@@ -67,6 +67,9 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     canSubmit: draft.canSubmit,
     draftSave: draft.draftSave,
     flushDraftSave: draft.flushDraftSave,
+    // #1122：agent 发布确认管道复用「登记发布原文」收尾（见
+    // AgentPublishRequestDialog），与手动 publishDraft 同一机制。
+    markDraftPublished: draft.markDraftPublished,
     adoptServerDraft: draft.adoptServerDraft, // kimi review P1-2：冲突出口
     resolveConflict: draft.resolveConflict,
     canPublish: actions.canPublish,

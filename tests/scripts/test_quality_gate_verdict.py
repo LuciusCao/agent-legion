@@ -21,6 +21,7 @@ LANES = (
     "api-check",
     "backend-postgres",
     "docs-terms",
+    "governance-guard",
     "backend-coverage",
     "frontend-logic",
     "frontend-component",
@@ -53,6 +54,7 @@ def _passing_context(
     }
     if not backend:
         context["docs-terms"]["result"] = "success"
+        context["governance-guard"]["result"] = "success"
     if backend:
         for lane in ("backend-unit", "backend-postgres", "backend-coverage"):
             context[lane]["result"] = "success"
@@ -104,6 +106,7 @@ def test_selected_lanes_pass_only_when_their_jobs_succeed(
     ("base", "lane"),
     [
         (_passing_context(), "docs-terms"),
+        (_passing_context(), "governance-guard"),
         (_passing_context(backend=True), "backend-unit"),
         (_passing_context(backend=True), "backend-postgres"),
         (_passing_context(frontend=True), "api-check"),
