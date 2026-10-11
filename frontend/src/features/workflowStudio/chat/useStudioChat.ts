@@ -23,6 +23,10 @@ import {
   maxSeq,
   type ChatMessage,
 } from './studioChatMessages'
+import {
+  mergeNodeCodeDrafts,
+  mergeWorkflowDraft,
+} from './studioChatDraftEvents'
 import { lastRunCancelled } from './studioChatCancelVisibility'
 import { mergeMessages } from './studioChatRefill'
 import { useStudioChatResume } from './useStudioChatResume'
@@ -246,7 +250,20 @@ export function useStudioChat(workspaceId: string | undefined) {
     })
   }
 
-  const views = useMemo(() => deriveChatViews(messages), [messages])
+  // #1123：草稿视图在 tool_call 派生之上再合并合成 draft_saved 事件
+  // （子代理保存的唯一卡片数据源；同实体按证据时刻取最新，不重复出卡）。
+  const views = useMemo(() => {
+    const base = deriveChatViews(messages)
+    return {
+      ...base,
+      workflowDraft: mergeWorkflowDraft(
+        base.workflowDraft,
+        base.toolCalls,
+        messages
+      ),
+      nodeDrafts: mergeNodeCodeDrafts(base.nodeDrafts, messages),
+    }
+  }, [messages])
   const { toolCalls, workflowDraft, nodeDrafts, permissions } = views
   // #675：取消轮收尾视图在姊妹文件（studioChatCancelVisibility），与
   // deriveChatViews 的派生链分开 memo——它只被 RunBar 消费。

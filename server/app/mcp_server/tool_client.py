@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from server.app.mcp_server.config import McpServerConfig
+from server.app.mcp_server.config import SESSION_ID_HEADER, McpServerConfig
 
 REQUEST_TIMEOUT_SECONDS = 30
 # sync_shared_materials (#673, codex P1 on #674): a propagation batch is
@@ -40,6 +40,13 @@ class ToolClient:
             "Authorization": f"Bearer {config.token}",
             "Content-Type": "application/json",
         }
+        # #1123: forward the chat-session binding so the save routes can pin
+        # a synthetic draft_saved timeline event to this session (the card
+        # data source for subagent saves, which kimi never reports as ACP
+        # tool_call updates). Attribution hint only — the route re-verifies
+        # the session against the workspace before writing.
+        if config.session_id:
+            self._headers[SESSION_ID_HEADER] = config.session_id
 
     async def call(
         self,

@@ -170,3 +170,48 @@ def test_v82_database_gains_context_health_columns_via_init_db() -> None:
         columns = _columns(conn, "studio_chat_sessions")
         assert "usage_json" in columns
         assert "compacting" in columns
+
+
+@pytest.mark.fresh_schema
+def test_v94_database_gains_draft_message_kind_via_init_db() -> None:
+    """v95 (#1123): the kind check widens with 'draft' (synthetic draft_saved
+    card events). The create-table check in the schema file keeps the pre-v95
+    list, so the migration's drop+add is the only widening path — restore the
+    old constraint, roll back the v95 record, and replay."""
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("delete from schema_migrations where version >= 95")
+        conn.execute(
+            "alter table studio_chat_messages drop constraint if exists"
+            " studio_chat_messages_kind_check"
+        )
+        conn.execute(
+            "alter table studio_chat_messages add constraint studio_chat_messages_kind_check"
+            " check(kind in ('text', 'tool_call', 'plan', 'permission', 'status', 'thought'))"
+        )
+        conn.execute("insert into users(id, username) values ('u-legacy', 'legacy-user')")
+        conn.execute("insert into workspaces(id, name) values ('demo_workflow', 'legacy-ws')")
+        conn.execute(
+            "insert into studio_chat_sessions(id, workspace_id, user_id, agent_id)"
+            " values ('s-v95', 'demo_workflow', 'u-legacy', 'fake-agent')"
+        )
+
+    # Pre-migration the constraint still rejects 'draft' — the replay below is
+    # the only widening path (mutation pin: without it this insert keeps failing).
+    with (
+        pytest.raises(Exception, match="kind_check"),
+        write_transaction(TEST_DATABASE_URL) as conn,
+    ):
+        conn.execute(
+            "insert into studio_chat_messages(id, session_id, kind, role)"
+            " values ('m-v95-pre', 's-v95', 'draft', 'agent')"
+        )
+
+    init_db(TEST_DATABASE_URL)
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into studio_chat_messages(id, session_id, kind, role)"
+            " values ('m-v95', 's-v95', 'draft', 'agent')"
+        )
+        row = conn.execute("select name from schema_migrations where version=%s", (95,)).fetchone()
+    assert row is not None and row["name"] == "studio_chat_message_draft_kind"

@@ -9,13 +9,14 @@ human-facing routers behind ``reject_studio_agent_scope`` (STUDIO-AGENT-001).
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 
 from server.app.auth.dependencies import (
     require_studio_agent_scope,
     require_studio_agent_workspace,
 )
 from server.app.jobs import JobQueries
+from server.app.mcp_server.config import SESSION_ID_HEADER
 from server.app.routes.studio_agent_catalog_read_tools import (
     create_studio_agent_catalog_read_tools_router,
 )
@@ -45,9 +46,13 @@ from server.app.routes.workflow_revisions_contracts import (
 from server.app.services.studio_agent_tools import StudioAgentToolsService
 from server.app.services.workflow_drafts import workflow_draft_identity_hash
 from server.app.settings import Settings
+from server.app.studio_chat import draft_events
+from server.app.studio_chat.store import StudioChatStore
 
 
-def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> APIRouter:
+def create_studio_agent_tools_router(
+    job_db: JobQueries, settings: Settings, chat_store: StudioChatStore | None = None
+) -> APIRouter:
     router = APIRouter(dependencies=[Depends(require_studio_agent_scope)])
     # Workspace-path endpoints additionally enforce the run token's workspace
     # binding (schema v45, STUDIO-AGENT-001); global endpoints stay on `router`.
@@ -92,6 +97,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         node_key: str,
         payload: StudioAgentNodeCodeDraftRequest,
         user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
+        mcp_session_id: Annotated[str | None, Header(alias=SESSION_ID_HEADER)] = None,
     ) -> WorkflowNodeCodeVersionResponse:
         row = _service().save_node_code_draft(
             workspace_id,
@@ -101,6 +107,10 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
             payload.change_note,
             str(user["id"]),
             expected_capability=payload.expected_capability,
+        )
+        # #1123: success-path draft card for subagent saves (see draft_events).
+        draft_events.emit_node_code_draft_saved(
+            chat_store, job_db, mcp_session_id, workspace_id, node_key, row
         )
         return WorkflowNodeCodeVersionResponse(**row)
 
@@ -122,7 +132,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
 
     router.include_router(create_studio_agent_skill_tools_router(job_db, settings))
     workspace_scoped.include_router(create_studio_agent_prompt_tools_router(job_db))
-    workspace_scoped.include_router(create_studio_agent_draft_tools_router(job_db))
+    workspace_scoped.include_router(create_studio_agent_draft_tools_router(job_db, chat_store))
     # Skill creation tool (#633), workspace-scoped (the created repo lives
     # under the calling workspace's skill dir); preview panel tools (#328),
     # workspace-bound draft reads/write.
