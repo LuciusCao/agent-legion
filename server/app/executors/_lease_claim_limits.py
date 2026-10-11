@@ -7,7 +7,7 @@ validation plus the global/node lease counts that gate every claim.
 from __future__ import annotations
 
 from server.app.db.connection import DatabaseConnection
-from server.app.executors.models import LeaseClaimRequest
+from server.app.executors.models import CODE_LEASE_FORMS_PREDICATE, LeaseClaimRequest
 
 
 def check_claim_capacity(
@@ -18,15 +18,15 @@ def check_claim_capacity(
     Raises ValueError for limit configuration mismatches (dispatch-time
     contract violations, surfaced as claim rejection upstream).
 
-    Counting scope (#1167 fallout, tracked in #1171): the node-level count
-    below spans every active lease of the node — it does NOT filter lease
-    forms. The local claim path only ever writes ``executor_id='code'`` rows
-    itself, but a node_key that turned agent→code across revisions can hold
-    a live ``agent:<id>`` lease, and that lease also lands in this count —
-    conservative on mixed node keys (the claim skips and retries next pass,
-    never over-admitting). The remote claim gate filters to the code lease
-    forms (``claim_node_limit``, #1167); aligning this local count with the
-    same predicate is the #1171 follow-up.
+    Counting scope (#1167 口径表; local path aligned in #1171): the
+    node-level count below filters to the code lease forms via the shared
+    ``CODE_LEASE_FORMS_PREDICATE`` — the local pool's ``executor_id='code'``
+    plus remote code claims' ``agent:code:%``. A live ``agent:<id>`` lease on
+    a node_key that turned agent→code across revisions is agent-lane
+    execution, not code-pool concurrency, and no longer blocks this claim
+    (pre-#1171 it counted — conservative skip-and-retry on mixed node keys,
+    never over-admitting). The remote gate (``claim_node_limit``) uses the
+    same predicate.
     """
     if request.local_node_limit is not None:
         # #211 Phase 3 (read-layer binding): predicates key on
@@ -64,11 +64,9 @@ def check_claim_capacity(
 
     if request.local_node_limit is not None:
         node_count_row = conn.execute(
-            """
-            select count(*) as cnt
-            from executor_leases
-            where workspace_id=%s and node_key=%s and status='active' and expires_at>%s
-            """,
+            "select count(*) as cnt from executor_leases"
+            " where workspace_id=%s and node_key=%s and status='active' and expires_at>%s"
+            f" and {CODE_LEASE_FORMS_PREDICATE}",
             (request.workspace_id, request.node_key, now_str),
         ).fetchone()
         node_count = int(node_count_row["cnt"]) if node_count_row is not None else 0

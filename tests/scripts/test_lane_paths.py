@@ -6,6 +6,24 @@ the local quick gate's worktree derivation and the pre-push hook — so they
 cannot drift apart on what counts as docs. Runtime markdown (the Studio
 bootstrap prompt, MCP guides, example skills) must run its directory's lane,
 and ``velites/schema/**`` must also run the backend lane.
+
+Test shape: the full 12-case matrix runs end-to-end through ONE entry point
+(the CI ``changes`` job, whose ``run:`` script is the most intricate wiring).
+The two local entry points each carry cheap wiring pins instead of the full
+matrix — consistency cases (WIRING_CASES below), and one runtime-consultation
+case that patches the committed classifier copy and watches the verdict flip.
+The classification RULES drift-safe because all three entries source the
+single ``scripts/lane-paths.sh``: any rule drift breaks the CI matrix, and
+any local entry that stops consulting the shared file breaks its consultation
+pin. The MAPPING from verdicts to lanes, though, is each entry's own case
+block (check-quick.sh / pre-push keep their own ``frontend/*``, ``velites/*``
+and shared-file branches outside lane-paths.sh), so WIRING_CASES must
+exercise those branches per local entry — the docs/static derivations are
+already pinned e2e for the quick gate in
+tests/scripts/test_quality_gate_scripts.py (backend + static only) and for
+pre-push in tests/scripts/test_local_git_hooks.py. Running the same 12 cases
+through three wirings paid ~24 nested-gate runs for coverage of a fact — one
+shared classifier — that the wiring pins prove directly.
 """
 
 from __future__ import annotations
@@ -42,6 +60,42 @@ CASES: list[tuple[str, set[str], str]] = [
     ("velites/schema/events.schema.json", {"backend", "rust"}, "backend rust"),
 ]
 PATH_IDS = [case[0] for case in CASES]
+
+# Local-entry wiring pins (see module docstring): the consistency cases must
+# cover both the shared classifier's subtle rule AND each local entry's own
+# verdict→lane case block (check-quick.sh / pre-push keep frontend/* and
+# velites/* branches outside lane-paths.sh):
+# - nested runtime markdown is NOT docs — only the shared classifier's `*/*`
+#   branch gets this right; a naive `*.md`-is-docs parallel implementation
+#   would misclassify it;
+# - frontend/* maps to the frontend lane alone (the entry's own branch);
+# - velites/src/main.rs maps to rust WITHOUT backend — the rename pins below
+#   only exercise the feeds-backend=true form (velites/schema/**), so this
+#   pin is what keeps the plain velites/* branch honest;
+# plus one runtime-consultation case per entry below.
+WIRING_CASES: list[tuple[str, str]] = [
+    ("server/app/studio_chat/authoring_bootstrap.md", "backend"),
+    ("frontend/README.md", "frontend"),
+    ("velites/src/main.rs", "rust"),
+]
+
+# Consultation probe: a copy of the shared classifier with LICENSE flipped to
+# non-docs. Committed as the fixture base (so the changed-path set never
+# contains scripts/lane-paths.sh and the self-change guard stays out of the
+# way), it only affects the verdict if the entry really sources the shared
+# file at derivation time — an inlined parallel implementation would keep
+# answering "static" for a LICENSE change.
+FLIPPED_CLASSIFIER = (
+    "lane_path_is_docs() {\n"
+    '  case "$1" in\n'
+    "    docs/*) return 0 ;;\n"
+    "    */*) return 1 ;;\n"
+    "    *.md) return 0 ;;\n"
+    "  esac\n"
+    "  return 1\n"
+    "}\n"
+    "lane_path_feeds_backend() { return 1; }\n"
+)
 
 
 def _git(args: list[str], cwd: Path, **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -135,13 +189,21 @@ def _ci_lanes(tmp_path: Path, rel: str, rename_from: str | None = None) -> set[s
 
 
 def _quick_gate_lanes(
-    tmp_path: Path, rel: str, content: str | None = None, rename_from: str | None = None
+    tmp_path: Path,
+    rel: str,
+    content: str | None = None,
+    rename_from: str | None = None,
+    classifier: str | None = None,
 ) -> str:
     repo = tmp_path / "quick"
     scripts = repo / "scripts"
     scripts.mkdir(parents=True)
     for name in ("check-quick.sh", "gate-jobs.sh", "gate-queue.sh", "lane-paths.sh"):
         shutil.copy2(PROJECT_ROOT / "scripts" / name, scripts / name)
+    if classifier is not None:
+        # Consultation probe: the patched copy is committed in the base below,
+        # so the derivation sources it without tripping the self-change guard.
+        (scripts / "lane-paths.sh").write_text(classifier, encoding="utf-8")
     for name in ("check-quick-backend.sh", "check-quick-frontend.sh"):
         _write_executable(scripts / name, "#!/usr/bin/env bash\nexit 0\n")
     _seed_rename_source(repo, rename_from)
@@ -170,7 +232,11 @@ def _quick_gate_lanes(
 
 
 def _pre_push_lanes(
-    tmp_path: Path, rel: str, content: str | None = None, rename_from: str | None = None
+    tmp_path: Path,
+    rel: str,
+    content: str | None = None,
+    rename_from: str | None = None,
+    classifier: str | None = None,
 ) -> str:
     repo = tmp_path / "hook"
     (repo / ".githooks").mkdir(parents=True)
@@ -178,6 +244,9 @@ def _pre_push_lanes(
     shutil.copy2(PROJECT_ROOT / ".githooks" / "pre-push", repo / ".githooks" / "pre-push")
     for name in ("run-local-gate.sh", "lane-paths.sh"):
         shutil.copy2(PROJECT_ROOT / "scripts" / name, repo / "scripts" / name)
+    if classifier is not None:
+        # See _quick_gate_lanes: committed in the base, no self-change guard.
+        (repo / "scripts" / "lane-paths.sh").write_text(classifier, encoding="utf-8")
     gate_log = tmp_path / "gate.log"
     _write_executable(
         repo / "scripts" / "check-quick.sh",
@@ -212,18 +281,28 @@ def test_ci_changes_job_classifies_paths(
     assert _ci_lanes(tmp_path, rel) == ci_expected
 
 
-@pytest.mark.parametrize(("rel", "ci_expected", "local_expected"), CASES, ids=PATH_IDS)
-def test_quick_gate_classifies_paths(
-    tmp_path: Path, rel: str, ci_expected: set[str], local_expected: str
-) -> None:
+@pytest.mark.parametrize(("rel", "local_expected"), WIRING_CASES, ids=[c[0] for c in WIRING_CASES])
+def test_quick_gate_classifies_paths(tmp_path: Path, rel: str, local_expected: str) -> None:
+    # Consistency pin (see module docstring): the full matrix runs on the CI
+    # entry; here only the subtle nested-markdown verdict is re-checked e2e.
     assert _quick_gate_lanes(tmp_path, rel) == local_expected
 
 
-@pytest.mark.parametrize(("rel", "ci_expected", "local_expected"), CASES, ids=PATH_IDS)
-def test_pre_push_classifies_paths(
-    tmp_path: Path, rel: str, ci_expected: set[str], local_expected: str
-) -> None:
+@pytest.mark.parametrize(("rel", "local_expected"), WIRING_CASES, ids=[c[0] for c in WIRING_CASES])
+def test_pre_push_classifies_paths(tmp_path: Path, rel: str, local_expected: str) -> None:
     assert _pre_push_lanes(tmp_path, rel) == local_expected
+
+
+def test_quick_gate_consults_shared_classifier_at_runtime(tmp_path: Path) -> None:
+    # The flipped classifier turns LICENSE into a non-docs path; the quick
+    # gate must derive "backend" (its mapping for an ordinary non-frontend
+    # path) instead of "static" — proof the derivation sources the shared
+    # file rather than an inlined copy of the rules.
+    assert _quick_gate_lanes(tmp_path, "LICENSE", classifier=FLIPPED_CLASSIFIER) == "backend"
+
+
+def test_pre_push_consults_shared_classifier_at_runtime(tmp_path: Path) -> None:
+    assert _pre_push_lanes(tmp_path, "LICENSE", classifier=FLIPPED_CLASSIFIER) == "backend"
 
 
 def test_ci_changes_job_runs_every_lane_when_classifier_changes(tmp_path: Path) -> None:
@@ -258,6 +337,19 @@ def test_ci_changes_job_runs_every_lane_when_classifier_changes(tmp_path: Path) 
 def test_ci_classifier_guard_survives_large_diffs(tmp_path: Path) -> None:
     # Many paths after the classifier in diff order must not let an
     # early-exiting matcher SIGPIPE the producer and read as "unchanged".
+    #
+    # How many files that takes is a threshold question, not a volume one:
+    # the regression (a `git diff | grep -q` consumer closing the pipe after
+    # the first match — scripts/ sorts before zz/) only kills the producer
+    # once its pending output exceeds the pipe buffer, and the adversarial
+    # bound is TWO buffers, not one: grep's first read() can drain a full
+    # buffer (the matching line sits at line 1), and before grep's close
+    # lands, git may be woken once more and refill the pipe. So the diff must
+    # exceed 2x the biggest buffer in play: 2x64 KiB = 128 KiB on Linux CI
+    # (macOS dev machines are 2x16 KiB). 3,000 files with ~51-byte paths yield
+    # ~153 KB of --name-only output — over the bound deterministically — at
+    # well under a fifth of the inode cost of the original 20,000 short-named
+    # files (which at ~240 KB also cleared it, by accident of volume).
     repo = tmp_path / "ci"
     (repo / "scripts").mkdir(parents=True)
     shutil.copy2(PROJECT_ROOT / "scripts" / "lane-paths.sh", repo / "scripts" / "lane-paths.sh")
@@ -265,8 +357,8 @@ def test_ci_classifier_guard_survives_large_diffs(tmp_path: Path) -> None:
     (repo / "scripts" / "lane-paths.sh").write_text(BROKEN_CLASSIFIER, encoding="utf-8")
     bulk = repo / "zz"
     bulk.mkdir()
-    for i in range(20000):
-        (bulk / f"f{i:05d}.md").write_text("x\n", encoding="utf-8")
+    for i in range(3000):
+        (bulk / f"f{i:05d}{'x' * 38}.md").write_text("x\n", encoding="utf-8")
     _git(["add", "-A"], cwd=repo)
     _git(["commit", "-qm", "break classifier + bulk"], cwd=repo)
     output = tmp_path / "github_output"
