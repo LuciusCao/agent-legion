@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from server.app.services.agent_node_profile_catalog import legacy_fallback_agent_id
+from server.app.services.agent_route_validation import legacy_agent_route
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.routing import NodeRoute
@@ -29,17 +29,11 @@ def legacy_agent_fallback_route(
     """Agent route for a route-less legacy agent node, or a config error."""
     from server.app.workflow_worker.routing import NodeRoute
 
-    agent_id = legacy_fallback_agent_id(worker.job_db, workspace_id, node)
+    # #1128: the shared adjudication the job detail projection reuses.
+    agent_id, error = legacy_agent_route(worker.job_db, workspace_id, node, None)
     if agent_id is None:
-        return NodeRoute(
-            "error",
-            error_message=(
-                f"agent node {node.key!r} has no Agent route and capability"
-                f" {node.capability!r} does not resolve to exactly one published Agent;"
-                " if the active revision made the node self-contained (execution.runtime),"
-                " upgrade the job to the active revision"
-            ),
-        )
+        assert error is not None  # legacy_agent_route yields exactly one of the two
+        return NodeRoute("error", error_message=error)
     if worker.agent_dispatch is None:
         raise RuntimeError("Agent dispatch service is not configured")
     return NodeRoute("agent", target_id=agent_id)

@@ -6,6 +6,12 @@ row) must not pull the old job's code node onto an Agent, and a revision
 that turns it agent → code (pruning the row) must not drop the old job's
 legacy agent node into the code pool. Job detail / MCP's executor projection
 uses the same frozen-type decision, so both surfaces agree per (job, node).
+
+#1128 extends the consistency to the failure edge: when the frozen route row
+(or the capability fallback) no longer resolves — target Agent archived or
+republished under another capability — dispatch fails the node as a
+configuration error and the projection fills ``route_error`` with the same
+message instead of showing a stale Agent.
 """
 
 from __future__ import annotations
@@ -15,15 +21,20 @@ from types import SimpleNamespace
 
 import pytest
 
+from server.app.agent_catalog import AgentDefinition
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
 )
-from server.app.workflow_worker.routing import resolve_node_route
+from server.app.workflow_worker.routing import NodeRoute, resolve_node_route
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.revision_format import serialize_definition
-from tests.helpers import load_builtin_definition, seed_workspace_agent_definitions
+from tests.helpers import (
+    load_builtin_definition,
+    replace_agent_catalog,
+    seed_workspace_agent_definitions,
+)
 from tests.helpers.node_profile import legacy_profile_variant
 
 NODE = "write_script"
@@ -84,8 +95,12 @@ def _route_row(job_db, workspace_id: str) -> dict | None:
 
 
 def _dispatch(worker, workspace_id: str, definition: WorkflowDefinition) -> tuple[str, str]:
-    route = resolve_node_route(worker, workspace_id, definition.key, definition.nodes[NODE])
+    route = _dispatch_route(worker, workspace_id, definition)
     return route.kind, route.target_id
+
+
+def _dispatch_route(worker, workspace_id: str, definition: WorkflowDefinition) -> NodeRoute:
+    return resolve_node_route(worker, workspace_id, definition.key, definition.nodes[NODE])
 
 
 def _detail(query_service: JobQueryService, job: dict) -> dict:
@@ -168,3 +183,57 @@ def test_self_contained_snapshot_routes_to_its_own_profile(
     # The frozen route row targets the Agent; the self-contained snapshot wins.
     assert route == ("agent", NODE)
     _assert_consistent(route, _detail(query_service, job))
+
+
+def _assert_route_error_consistent(route: NodeRoute, detail: dict) -> None:
+    """#1128: dispatch fails the node as a configuration error; job detail
+    mirrors it through ``route_error`` instead of projecting a stale Agent."""
+    assert route.kind == "error"
+    assert detail["route_error"] == route.error_message
+    assert (detail["executor_kind"], detail["agent_id"]) == (None, None)
+
+
+def test_archived_agent_breaks_dispatch_and_detail_consistently(
+    job_db, workspace_id, query_service
+) -> None:
+    """Legacy 快照在途 job 执行中途目标 Agent 被归档（冻结 route 行仍在）。"""
+    snapshot = _legacy()
+    WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, snapshot)
+    job = _job(job_db, workspace_id, snapshot, "Q-archived")
+    replace_agent_catalog(workspace_id, {})
+
+    route = _dispatch_route(_worker(job_db), workspace_id, snapshot)
+    _assert_route_error_consistent(route, _detail(query_service, job))
+
+
+def test_capability_drift_invalidates_the_frozen_route(job_db, workspace_id, query_service) -> None:
+    """冻结 route 行指向的 Agent 被重发布为其他 capability。"""
+    snapshot = _legacy()
+    WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, snapshot)
+    job = _job(job_db, workspace_id, snapshot, "Q-drift")
+    replace_agent_catalog(
+        workspace_id, {AGENT: AgentDefinition(capability="other_capability", runtime="velites")}
+    )
+
+    route = _dispatch_route(_worker(job_db), workspace_id, snapshot)
+
+    assert "Invalid Agent route" in route.error_message
+    _assert_route_error_consistent(route, _detail(query_service, job))
+
+
+def test_pruned_route_with_no_matching_agent_surfaces_fallback_error(
+    job_db, workspace_id, query_service
+) -> None:
+    """route 行已剪除且 capability 解析不到唯一 published Agent（fallback 失败）。"""
+    snapshot = _legacy()
+    WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, snapshot)
+    job = _job(job_db, workspace_id, snapshot, "Q-fallback")
+    with job_db.connect() as conn:
+        conn.execute(
+            "delete from workspace_node_routes where workspace_id=%s and node_key=%s",
+            (workspace_id, NODE),
+        )
+    replace_agent_catalog(workspace_id, {})
+
+    route = _dispatch_route(_worker(job_db), workspace_id, snapshot)
+    _assert_route_error_consistent(route, _detail(query_service, job))

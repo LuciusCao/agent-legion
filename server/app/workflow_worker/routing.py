@@ -16,11 +16,11 @@ from typing import TYPE_CHECKING
 
 from server.app.executors.models import CODE_EXECUTOR_ID
 from server.app.jobs.queries.workspace_node_limits import get_local_node_limit
-from server.app.services.agent_node_profile_catalog import resolve_dispatch_agent_profile
 from server.app.services.agent_node_profile_types import (
     PROFILE_SOURCE_DEFINITION,
     PROFILE_SOURCE_NODE,
 )
+from server.app.services.agent_route_validation import routed_agent_error
 from server.app.workflow_worker.routing_fallback import legacy_agent_fallback_route
 from server.app.workflows import workflow_node_profile as frozen
 
@@ -129,19 +129,10 @@ def _resolve_uncached(
         # never pull it off the code pool.
         if is_agent and route is not None and route["target_kind"] == "agent":
             agent_id = str(route["target_id"])
-            profile = resolve_dispatch_agent_profile(worker.job_db, workspace_id, agent_id, None)
-            if profile is None or profile.legacy_ref is None:
-                return NodeRoute(
-                    "error",
-                    error_message=(
-                        f"Agent {agent_id!r} has no published definition in workspace"
-                        f" {workspace_id!r}; agent definitions are workspace-scoped"
-                        " (schema v46) — upgrade the job to the active revision, whose agent"
-                        " nodes carry their own execution profile"
-                    ),
-                )
-            if profile.legacy_ref.capability != node.capability:
-                return NodeRoute("error", error_message=f"Invalid Agent route {agent_id!r}")
+            # #1128: the shared adjudication the job detail projection reuses.
+            error = routed_agent_error(worker.job_db, workspace_id, agent_id, node.capability)
+            if error is not None:
+                return NodeRoute("error", error_message=error)
             if worker.agent_dispatch is None:
                 raise RuntimeError("Agent dispatch service is not configured")
             return NodeRoute("agent", target_id=agent_id)
