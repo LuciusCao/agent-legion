@@ -135,9 +135,16 @@ def create_studio_chat_router(
         response_model=StudioChatMessageResponse,
     )
     def send_message(
-        workspace_id: str, session_id: str, payload: StudioChatMessageCreateRequest
+        workspace_id: str,
+        session_id: str,
+        payload: StudioChatMessageCreateRequest,
+        user: Annotated[dict[str, Any], Depends(require_workspace_access)],
     ) -> StudioChatMessageResponse:
-        message = service.send_message(session_id, workspace_id, payload.text)
+        # user_id rides along so a send-path auto-resume (#1121) mints the fresh
+        # run token for the CURRENT sender — the session creator may be disabled.
+        message = service.send_message(
+            session_id, workspace_id, payload.text, user_id=str(user["id"])
+        )
         return StudioChatMessageResponse(message=StudioChatMessageRecord.model_validate(message))
 
     @guarded.post(

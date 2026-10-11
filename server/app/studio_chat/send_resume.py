@@ -59,13 +59,16 @@ def run_token_alive(service: StudioChatService, runtime: SessionRuntime) -> bool
 
 
 def ensure_answerable_runtime(
-    service: StudioChatService, session_id: str, workspace_id: str
+    service: StudioChatService, session_id: str, workspace_id: str, user_id: str | None = None
 ) -> tuple[dict[str, Any], SessionRuntime]:
     """Return a (session, runtime) pair whose run token is live, resuming once
     when the current one is dead. A session that raced into a non-resumable
     status falls through unchanged — the normal admission path owns its
     refusal. Raises (message never persisted) when the resume fails or cannot
-    yield a live channel."""
+    yield a live channel. The resume mints the fresh token for ``user_id``
+    (the current sender; #1121 codex P2-1 — the session creator may have been
+    disabled since, which is precisely why the old token reads dead); internal
+    callers without an authenticated sender fall back to the creator."""
     with _resume_lock(service, session_id):
         session = service.get_session(session_id, workspace_id)
         runtime = service.runtime(session_id)
@@ -108,7 +111,7 @@ def ensure_answerable_runtime(
                     service,
                     session_id,
                     workspace_id,
-                    str(session["user_id"]),
+                    user_id or str(session["user_id"]),
                     allow_closed=False,
                 )
         except ConflictError:

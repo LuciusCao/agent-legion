@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useInFlightSend } from './useInFlightSend'
 
 export type StudioChatQueuedMessage = { id: string; text: string }
@@ -26,8 +26,11 @@ export function useStudioChatQueue(
   const queueRef = useRef(queue)
   // #1121 codex P2：submit 闭包捕获发起时的 sessionKey，落定回调经 ref 读
   // 最新值比对——跨会话切换后迟到的失败信号不得触发 composer 草稿恢复。
+  // P2-2：ref 必须在布局效应（commit 阶段）同步——被动效应有 commit→effect
+  // 窗口，窗口内迟到的回调会按旧身份判定，把旧会话文本恢复进新会话输入框。
+  // queueRef 搭同一班车（它只被事件/回调读取，提前同步无害）。
   const sessionKeyRef = useRef(sessionKey)
-  useEffect(() => {
+  useLayoutEffect(() => {
     queueRef.current = queue
     sessionKeyRef.current = sessionKey
   })

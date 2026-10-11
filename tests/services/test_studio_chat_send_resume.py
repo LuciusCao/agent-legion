@@ -104,6 +104,10 @@ def test_dead_token_send_auto_resumes_and_delivers(chat) -> None:
     assert new_runtime.token != old_runtime.token
     assert authenticate_scoped_token(service.db, new_runtime.token) is not None
     assert authenticate_scoped_token(service.db, old_runtime.token) is None
+    # 无显式发送者（service 级调用）：新 token 回落到会话创建者身份。
+    record = service.db.get_scoped_token_user(hash_token(new_runtime.token))
+    assert record is not None and str(record["id"]) == user_id
+    assert record["scoped_workspace_id"] == workspace_id
     # The message was admitted once, onto the fresh turn, and answered.
     assert _user_texts(service, sid, workspace_id) == ["first question", "second question"]
     sink = _read_sink(script_path)
@@ -124,6 +128,36 @@ def test_dead_token_send_auto_resumes_and_delivers(chat) -> None:
     ]
     assert "run_token_invalidated" not in events
     assert "session_resumed" in events
+
+
+def test_auto_resume_mints_token_for_the_current_sender(chat) -> None:
+    """#1121 codex P2-1: the creator got disabled (which is WHY the old token
+    reads dead — the liveness join filters disabled users); the auto-resume
+    must mint the fresh token for the CURRENT sender, or the new token is born
+    dead and every send respawn-loops with no manual entry. Workspace binding
+    of the token is unchanged (the session's workspace, only the user swaps)."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TEXT_SCRIPT)
+    sid = service.create_session(workspace_id, user_id, "fake-agent")["id"]
+    service.send_message(sid, workspace_id, "first question")
+    _wait_for(lambda: _idle(service, sid))
+    service.db.update_user(user_id, disabled=True)
+    old_runtime = service.runtime(sid)
+    assert old_runtime is not None
+    assert not send_resume.run_token_alive(service, old_runtime)
+    editor_id = str(service.db.create_user("editor-user", password_hash=None)["id"])
+
+    message = service.send_message(sid, workspace_id, "from the editor", user_id=editor_id)
+
+    assert message["content"]["text"] == "from the editor"
+    _wait_for(lambda: _idle(service, sid))
+    new_runtime = service.runtime(sid)
+    assert new_runtime is not None and new_runtime is not old_runtime
+    record = service.db.get_scoped_token_user(hash_token(new_runtime.token))
+    assert record is not None and str(record["id"]) == editor_id
+    assert record["scoped_workspace_id"] == workspace_id
+    assert len(_requests(_read_sink(script_path), "initialize")) == 2
+    assert _user_texts(service, sid, workspace_id) == ["first question", "from the editor"]
 
 
 def test_concurrent_sends_on_dead_token_resume_once(chat, monkeypatch) -> None:

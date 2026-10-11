@@ -1,8 +1,30 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { useLayoutEffect } from 'react'
 import { useStudioChatQueue } from './useStudioChatQueue'
 
 type HookProps = { busy: boolean; sessionKey: string | null; blocked?: boolean }
+
+/** 同步兑现的迷你 thenable（#1121 P2-2 窗口用）：then 注册回调、resolve
+ * 在同一栈帧内同步派发并按 promise 语义链式传递映射值——用它把「迟到回调」
+ * 精确放进一次 commit 的布局效应里（被动效应尚未运行的窗口）。 */
+class SyncPromise {
+  private handlers: Array<(v: boolean) => void> = []
+  then(onFulfilled: (v: boolean) => unknown): SyncPromise {
+    const next = new SyncPromise()
+    this.handlers.push((v) => {
+      const mapped = onFulfilled(v)
+      next.resolve(typeof mapped === 'boolean' ? mapped : v)
+    })
+    return next
+  }
+  get pending(): boolean {
+    return this.handlers.length > 0
+  }
+  resolve(v: boolean) {
+    this.handlers.splice(0).forEach((h) => h(v))
+  }
+}
 
 function renderQueue(
   send: (text: string) => Promise<boolean>,
@@ -88,6 +110,37 @@ describe('useStudioChatQueue', () => {
       resolveSend(false)
     })
     expect(settled).toBe(false)
+  })
+
+  it('settles by the committed identity inside the commit→passive-effect window (#1121 codex P2-2)', () => {
+    // 同步 thenable 从 s2 commit 的布局效应里兑现：此刻被动效应尚未运行——
+    // ref 若靠被动效应同步（mutation），迟到回调读到旧身份 s1 而误恢复；
+    // 布局效应同步（修复）则读到已提交的 s2，恢复被抑制。
+    const box = new SyncPromise()
+    const send = vi.fn().mockReturnValue(box as unknown as Promise<boolean>)
+    let settled: boolean | undefined
+    const { result, rerender } = renderHook(
+      (props: HookProps) => {
+        const queue = useStudioChatQueue(
+          props.busy,
+          props.blocked ?? false,
+          props.sessionKey,
+          send
+        )
+        // 与 queue 同一 commit 的布局效应（按调用序排在 queue 内部布局效应
+        // 之后触发兑现）。
+        useLayoutEffect(() => {
+          if (props.sessionKey === 's2' && box.pending) box.resolve(false)
+        })
+        return queue
+      },
+      { initialProps: { busy: false, sessionKey: 's1' } }
+    )
+    act(() => {
+      void result.current.submit('旧会话的消息').then((ok) => (settled = ok))
+    })
+    rerender({ busy: false, sessionKey: 's2' })
+    expect(settled).toBe(true)
   })
 
   it('enqueues while busy without sending', () => {

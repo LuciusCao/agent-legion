@@ -219,8 +219,10 @@ class StudioChatService:
 
     # -- messaging ---------------------------------------------------------
 
-    def send_message(self, session_id: str, workspace_id: str, text: str) -> dict[str, Any]:
-        return send_message(self, session_id, workspace_id, text)
+    def send_message(
+        self, session_id: str, workspace_id: str, text: str, user_id: str | None = None
+    ) -> dict[str, Any]:
+        return send_message(self, session_id, workspace_id, text, user_id=user_id)
 
     def list_messages(
         self, session_id: str, workspace_id: str, *, after_seq: int = 0

@@ -24,7 +24,11 @@ logger = logging.getLogger(__name__)
 
 
 def send_message(
-    service: StudioChatService, session_id: str, workspace_id: str, text: str
+    service: StudioChatService,
+    session_id: str,
+    workspace_id: str,
+    text: str,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     session = service.get_session(session_id, workspace_id)
     if session["status"] == "closed":
@@ -38,7 +42,9 @@ def send_message(
     # re-decides under its lock and falls through for non-idle/error rows
     # (a running turn keeps the fail-closed refusal below).
     if runtime is not None and not send_resume.run_token_alive(service, runtime):
-        session, runtime = send_resume.ensure_answerable_runtime(service, session_id, workspace_id)
+        session, runtime = send_resume.ensure_answerable_runtime(
+            service, session_id, workspace_id, user_id=user_id
+        )
     from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 
     # #1029: observe a just-started Kimi Code unprompted turn before deciding.
