@@ -56,17 +56,25 @@ function stubRect(el: Element, rect: { top: number; bottom: number }) {
   })
 }
 
-/** ResizeObserver 桩：捕获实例供测试手动触发回调（jsdom 无 RO）。 */
+/** ResizeObserver 桩：捕获实例与观察目标集合，供测试手动触发回调
+ * （jsdom 无 RO）。 */
 class ResizeObserverStub {
   static instances: ResizeObserverStub[] = []
+  readonly observed = new Set<Element>()
   private readonly callback: ResizeObserverCallback
   constructor(callback: ResizeObserverCallback) {
     this.callback = callback
     ResizeObserverStub.instances.push(this)
   }
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+  observe(el: Element) {
+    this.observed.add(el)
+  }
+  unobserve(el: Element) {
+    this.observed.delete(el)
+  }
+  disconnect() {
+    this.observed.clear()
+  }
   fire() {
     this.callback([], this as unknown as ResizeObserver)
   }
@@ -238,5 +246,39 @@ describe('useChatAutoScroll + useChatPrependAnchor（#1120 PR-4 / #1237）', () 
     expect(el.scrollTop).toBe(50 + 11000)
     // 确实处于虚拟态：未挂载全部行。
     expect(el.querySelectorAll('[data-index]').length).toBeLessThan(200)
+  })
+
+  it('非虚拟→虚拟态交界后重挂观察：spacer 新节点纳入基线同步（#1237 复验 P3-b）', () => {
+    // 70 条非虚拟 → prepend 100 条后 170 条进入虚拟态：spacer 是新 DOM
+    // 节点。只观察首次触发时 children 的实现会让基线同步静默失效。
+    const initial = batch('m', 71, 140)
+    const view = render(<Harness messages={initial} onLoadOlder={() => {}} />)
+    const el = screen.getByTestId('list')
+    stubMetrics(el, { scrollHeight: 7690, clientHeight: 400 })
+    el.scrollTop = 50
+    fireEvent.scroll(el)
+    const observer = ResizeObserverStub.instances[0]
+    expect(observer.observed.size).toBeGreaterThan(0)
+
+    // prepend 100 行 → 越过 >80 阈值进入虚拟态（spacer 挂载）。
+    stubMetrics(el, { scrollHeight: 18690, clientHeight: 400 })
+    view.rerender(
+      <Harness
+        messages={[...batch('o', 1, 100), ...initial]}
+        virtual
+        onLoadOlder={() => {}}
+      />
+    )
+
+    // 再次到顶触发：观察目标必须重挂到当前 children（含新 spacer）。
+    el.scrollTop = 50
+    fireEvent.scroll(el)
+    const spacer = el.firstElementChild!
+    expect(spacer.querySelector(':scope > [data-index]')).not.toBeNull()
+    expect(observer.observed.has(spacer)).toBe(true)
+    // 观察集合与当前 children 一致（旧行节点不再滞留）。
+    expect(observer.observed.size).toBe(el.children.length)
+    for (const child of el.children)
+      expect(observer.observed.has(child)).toBe(true)
   })
 })
