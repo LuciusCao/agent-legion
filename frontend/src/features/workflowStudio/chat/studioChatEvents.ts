@@ -1,6 +1,8 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { invalidateStudioTurnEndQueries } from './studioChatInvalidation'
 import {
+  asRecord,
+  asText,
   statusEvent,
   streamingTextId,
   TERMINAL,
@@ -13,6 +15,21 @@ import type { StudioChatSessionRecord } from './studioChatApi'
  * 已终结——turn_end/turn_timeout/error/session_closed/session_resumed。 */
 export function isTerminalStatus(message: ChatMessage): boolean {
   return message.kind === 'status' && TERMINAL.has(statusEvent(message).event)
+}
+
+// ACP tool_call 终态集合，对齐后端 tool_call_commands._FINISHED。
+const TOOL_CALL_TERMINAL = new Set(['completed', 'failed'])
+
+/** 存在在途 tool_call 行（#1228 codex P1）：tool_call 合并帧与流式 text 同为
+ * 原地更新、seq 不推进，断连期间的更新 after_seq 增量取不回，重连需全量
+ * 校准。status 缺失或畸形一律按在途处理——宁可多校准，不漏校准。
+ * （唯一消费方是 handleSseReconnect；studioChatMessages.ts 预算已满，故居此。） */
+export function hasInFlightToolCall(messages: ChatMessage[]): boolean {
+  return messages.some(
+    (m) =>
+      m.kind === 'tool_call' &&
+      !TOOL_CALL_TERMINAL.has(asText(asRecord(m.content)?.status))
+  )
 }
 
 export type SsePayload = {
@@ -65,9 +82,11 @@ export function handleSseMessageEvent(
   }
 }
 
-/** SSE 重连自愈（#563）：本地仍挂着未终结的流式 agent text 行时全量回取
- * 校准，随后增量补齐 + 重拉会话快照；补齐携带 terminal 事件时与实时
- * 到达的同等触发查询失效（codex P2——断连期间保存的草稿也要失效）。 */
+/** SSE 重连自愈（#563）：本地仍挂着未终结的流式 agent text 行或在途
+ * tool_call 行（#1228——同为原地更新、seq 不推进的行，断连期间的更新
+ * after_seq 取不回）时全量回取校准，随后增量补齐 + 重拉会话快照；补齐
+ * 携带 terminal 事件时与实时到达的同等触发查询失效（codex P2——断连期间
+ * 保存的草稿也要失效）。 */
 export function handleSseReconnect(deps: SseDeps): void {
   const { messagesRef, refillMessages, setSession, fetchSession } = deps
   const invalidate = () =>
@@ -75,7 +94,10 @@ export function handleSseReconnect(deps: SseDeps): void {
   const checkTerminal = (hasTerminal?: boolean | undefined) => {
     if (hasTerminal) invalidate()
   }
-  if (streamingTextId(messagesRef.current) !== null) {
+  if (
+    streamingTextId(messagesRef.current) !== null ||
+    hasInFlightToolCall(messagesRef.current)
+  ) {
     void refillMessages(0)
       .then(checkTerminal)
       .catch(() => undefined)
