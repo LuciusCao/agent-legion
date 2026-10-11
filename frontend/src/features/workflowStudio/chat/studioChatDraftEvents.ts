@@ -64,7 +64,10 @@ export function extractDraftSavedEvents(
   return events
 }
 
-/** toolCallId → 最后一条贡献消息的 seq（合并排序的证据时刻）。 */
+/** toolCallId → 贡献消息的 seq。#1228 原地合并形态下这是**创建**时刻
+ * （completed 帧浅合并进首帧行，seq 不动）；旧转录的逐帧落行形态则是最后
+ * 一帧的 seq。只用于「身份不同的两次保存谁更新」的比较——同一次保存的
+ * 双证据判定走 hash 身份（见 mergeNodeCodeDrafts），不读它。 */
 function toolCallLastSeq(messages: ChatMessage[]): Map<string, number> {
   const lastSeq = new Map<string, number>()
   for (const message of messages) {
@@ -94,11 +97,15 @@ export function draftAnchorToolCallId(
   return anchor?.toolCallId ?? null
 }
 
-/** 节点代码草稿按实体合并两个来源：同实体取证据时刻最新的一份（主 agent
- * 路径下 tool call 的 completed 更新恒晚于合成事件，卡片锚点保持现状）。
- * #1240 codex P2-b：合成事件只在「它宣告的草稿仍是当前草稿」时落库
- * （后端 INSERT 内原子校验 code_hash/updated_at），迟到的停滞写者事件
- * 根本不会出现——seq 顺序因此等于权威草稿写入顺序。 */
+/** 节点代码草稿按实体合并两个来源。胜者判定（#1240 codex P2 修复后）：
+ * 1. 内容身份一致（同 nodeKey 且 hash 相同）→ 恒保留工具卡锚点——同一次
+ *    保存的双证据里，tool_call 行是更丰富的展示锚点；合成事件只补「没有
+ *    tool_call 行」的缺口（子代理路径）。这一步不读 seq：#1228 原地合并
+ *    让工具卡行的 seq 恒为创建时刻，按 seq 比会让同一次保存的合成事件
+ *    恒胜、卡片从工具卡组移位（本 finding 的原始缺陷）。
+ * 2. hash 不同（另一次保存）→ 按证据时刻（seq）取最新；后端草稿代次闸
+ *    保证落库事件顺序即权威草稿写入顺序（停滞写者的迟到事件不落库）。
+ * hash 缺失（旧转录/输出不可解析）时身份不可证 → 退回 seq 比较。 */
 export function mergeNodeCodeDrafts(
   base: NodeCodeDraftView[],
   messages: ChatMessage[]
@@ -115,7 +122,12 @@ export function mergeNodeCodeDrafts(
   for (const event of extractDraftSavedEvents(messages)) {
     if (event.draftType !== 'node_code' || !event.nodeKey) continue
     const current = byNode.get(event.nodeKey)
-    if (current && current.seq >= event.seq) continue
+    if (current) {
+      // 身份规则：同一次保存的工具卡证据优先于合成事件锚点。
+      if (current.draftHash !== null && current.draftHash === event.codeHash)
+        continue
+      if (current.seq >= event.seq) continue
+    }
     byNode.set(event.nodeKey, {
       toolCallId: '',
       nodeKey: event.nodeKey,

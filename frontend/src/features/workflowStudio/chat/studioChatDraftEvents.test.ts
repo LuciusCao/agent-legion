@@ -111,20 +111,19 @@ describe('mergeNodeCodeDrafts', () => {
     ])
   })
 
-  it('keeps the tool-call card when the ACP update is newer (main agent dedup)', () => {
+  it('keeps the tool-call anchor for the same save under in-place coalescing (#1240 codex P2)', () => {
+    // 生产形态（#1228）：tool_call / tool_call_update 原地合并成一行，
+    // seq 恒为创建时刻——合成事件（写在路由返回前）的 seq 反而更晚。
+    // 同实体同 hash（同一次保存的双证据）时必须保留工具卡锚点，
+    // 合成事件只补「没有 tool_call 行」的缺口。
     const messages = [
       toolCall('t1', {
         title: 'save_node_code_draft',
-        status: 'in_progress',
-        rawInput: { node_key: 'n1' },
-      }),
-      // 合成事件写在路由返回之前，completed 更新恒在其后。
-      draftEvent({ draft_type: 'node_code', node_key: 'n1', code_hash: 'h1' }),
-      toolCall('t1', {
-        sessionUpdate: 'tool_call_update',
         status: 'completed',
+        rawInput: { node_key: 'n1' },
         rawOutput: { content: [{ type: 'text', text: '{"code_hash": "h1"}' }] },
       }),
+      draftEvent({ draft_type: 'node_code', node_key: 'n1', code_hash: 'h1' }),
     ]
     const calls = groupToolCalls(messages)
     const merged = mergeNodeCodeDrafts(extractNodeCodeDrafts(calls), messages)
@@ -138,6 +137,8 @@ describe('mergeNodeCodeDrafts', () => {
   })
 
   it('lets a later synthetic save supersede an earlier tool-call save', () => {
+    // 身份不同（hash 不一致）即另一次保存：退回证据时刻比较，后到者胜
+    // （#1240 codex P2 的身份规则不适用，走 seq）。
     const messages = [
       toolCall('t1', {
         title: 'save_node_code_draft',
@@ -280,7 +281,9 @@ describe('mergeWorkflowDraft', () => {
     })
   })
 
-  it('a validate completed after the synthetic save wins again', () => {
+  it('a validate started after the synthetic save wins again', () => {
+    // #1228 原地合并形态下工具卡行的 seq 是创建（发起）时刻；本用例即该
+    // 形态（单行 completed），「发起晚于合成保存」即后到证据。
     const messages = [
       draftEvent(
         {
