@@ -34,6 +34,9 @@ WORKER = "docs/agent-worker-deployment.md"
 API_TOKENS = "docs/workspace-api-tokens.md"
 OPS_DOCS = (MATERIALS, WORKER, "docs/remote-execution-runbook.md", API_TOKENS)
 _MISSING_CORS = "NoSuchCORSConfiguration"
+# 「bucket 没有 CORS 配置」的错误码白名单。RustFS 1.0.0-beta.12 同样返回
+# NoSuchCORSConfiguration（源码核对，#1115）；新增后端等价码时加在这里。
+_MISSING_CORS_CODES = frozenset({_MISSING_CORS})
 
 
 def _text(doc: str) -> str:
@@ -115,7 +118,8 @@ def _compares_missing_cors(
     """(是否拿错误码与 NoSuchCORSConfiguration 比对, 是否为否定式 != / not in)。
 
     `in` / `not in` 接受常量元组 / 集合 / 列表，便于日后把其它后端的等价错误码
-    并入放行集合。"""
+    并入放行集合——但集合里**每一项**都必须是白名单内的「配置不存在」码：混进
+    AccessDenied 之类就等于对它也继续往下覆盖（#1213 codex）。"""
     if not isinstance(test, ast.Compare) or len(test.ops) != 1:
         return False, False
     op, left, right = test.ops[0], test.left, test.comparators[0]
@@ -124,14 +128,19 @@ def _compares_missing_cors(
             left, right = right, left
         hit = (
             isinstance(right, ast.Constant)
-            and right.value == _MISSING_CORS
+            and right.value in _MISSING_CORS_CODES
             and _is_error_code(left, exc_name, code_vars)
         )
         return hit, isinstance(op, ast.NotEq)
     if isinstance(op, (ast.In, ast.NotIn)) and isinstance(right, (ast.Tuple, ast.Set, ast.List)):
-        hit = any(
-            isinstance(item, ast.Constant) and item.value == _MISSING_CORS for item in right.elts
-        ) and _is_error_code(left, exc_name, code_vars)
+        hit = (
+            bool(right.elts)
+            and all(
+                isinstance(item, ast.Constant) and item.value in _MISSING_CORS_CODES
+                for item in right.elts
+            )
+            and _is_error_code(left, exc_name, code_vars)
+        )
         return hit, isinstance(op, ast.NotIn)
     return False, False
 
@@ -266,16 +275,55 @@ def _env_target(target: str) -> bool:
 
 
 def env_appends_guarded(block: str) -> bool:
-    """直写 deploy/.env（任意写法）前必须有一次 quiet grep 存在性检查，否则重跑
-    重复追加键。"""
+    """直写 deploy/.env（任意写法）必须落在针对该文件的 quiet grep 存在性检查的
+    「未匹配」分支里，否则重跑重复追加键。只比文本先后不够（#1213 codex）：
+    `grep -q K f; echo K=v >> f` 的追加是无条件的。"""
     writes = [pos for pos, target in write_targets(block) if _env_target(target)]
     if not writes:
         return True
-    guard = next(
-        (m.start() for m in _GREP_QUIET.finditer(block) if _greps_env(block, m.start())),
-        None,
-    )
-    return guard is not None and guard < min(writes)
+    unmatched = [
+        span
+        for m in _GREP_QUIET.finditer(block)
+        if _greps_env(block, m.start())
+        for span in _unmatched_branches(block, m.start())
+    ]
+    return all(any(start <= pos < end for start, end in unmatched) for pos in writes)
+
+
+_SHELL_KEYWORD = re.compile(r"(?<![\w$-])(if|then|elif|else|fi)(?![\w-])")
+
+
+def _unmatched_branches(block: str, grep_pos: int) -> list[tuple[int, int]]:
+    """grep 判「无匹配」时才执行的区间：`if grep …; then A else B fi` 的 B（含 elif
+    链），`if ! grep …; then A … fi` 的 A，或 `grep … || cmd` 的 cmd。"""
+    head = block[:grep_pos]
+    if_head = re.search(r"\bif\s+(!\s+)?$", head)
+    if if_head is None:
+        command_end = re.match(r"[^\n;]*?(?=;|&&|\|\||\n|$)", block[grep_pos:])
+        assert command_end is not None
+        tail_start = grep_pos + command_end.end()
+        or_branch = re.match(r"\|\|[^\n;]*", block[tail_start:])
+        return [(tail_start, tail_start + or_branch.end())] if or_branch else []
+    # 注释换成等长空白，保持位置不变，避免中文注释里的关键字干扰配对。
+    code = re.sub(r"(?m)(^|\s)#.*$", lambda m: m.group(1) + " " * (len(m.group()) - 1), block)
+    depth, then_at, else_at = 0, None, None
+    for match in _SHELL_KEYWORD.finditer(code, grep_pos):
+        word = match.group(1)
+        if word == "if":
+            depth += 1
+        elif word == "fi" and depth:
+            depth -= 1
+        elif depth == 0 and word == "then" and then_at is None:
+            then_at = match.end()
+        elif depth == 0 and word in ("elif", "else") and else_at is None:
+            else_at = match.start()
+        elif depth == 0 and word == "fi":
+            if then_at is None:
+                return []
+            if if_head.group(1):  # if ! grep：then 分支是未匹配
+                return [(then_at, else_at if else_at is not None else match.start())]
+            return [(else_at, match.start())] if else_at is not None else []
+    return []
 
 
 def _greps_env(block: str, pos: int) -> bool:
@@ -286,20 +334,40 @@ def _greps_env(block: str, pos: int) -> bool:
     )
 
 
+# 中止：`return` / `exit`，或同一行内含 return / exit 的 `{ …; }` 命令组。
+_ABORT = r"\s*(?:\{[^\n]*?\b(?:return|exit)\b|(?:return|exit)\b)"
+
+
 def _grep_rc_checked(block: str, after: int) -> bool:
-    """grep 之后区分「无匹配」(1) 与「读失败」(2)：`$?` 或由 `$?` 赋值的变量，
-    以 [ ] / [[ ]] / test / (( )) / case 判定 ≤1 继续或 ≥2 中止。"""
+    """grep 之后区分「无匹配」(1) 与「读失败」(2)，且读失败**必须中止**：比较对象
+    是 `$?` 或由 `$?` 赋值的变量，形态为 `≤1 || 中止`、`≥2 && 中止`、
+    `if ≥2; then … 中止 … fi`、`case … 0|1) ;; *) 中止`。只识别比较、不看命中
+    后控制流时，`[ "$rc" -gt 1 ] && echo warn` 也能过（#1213 codex）。"""
     rest = block[after:]
     names = ["\\?", *re.findall(r"\b(\w+)=\$\?", rest)]
     ref = r"[\"']?\$\{?(?:" + "|".join(names) + r")\}?[\"']?"
     arith_ref = r"\$?\{?(?:" + "|".join(names) + r")\}?"
+
+    def test(cmp: str) -> str:
+        return (
+            r"(?:(?:\[\[?|\btest)\s+" + ref + r"\s+" + cmp + r"\b(?:\s*\]\]?)?"
+            r"|\(\(\s*" + arith_ref + r"\s*" + _ARITH[cmp] + r"\s*\)\))"
+        )
+
     patterns = (
-        r"(?:\[\[?|\btest)\s+" + ref + r"\s+(?:-le\s+1|-lt\s+2|-gt\s+1|-ge\s+2)\b",
-        r"\|\|\s*(?:\[\[?|\btest)\s+" + ref + r"\s+-eq\s+1\b",
-        r"\(\(\s*" + arith_ref + r"\s*(?:<=\s*1|<\s*2|>\s*1|>=\s*2)\b",
-        r"\bcase\s+" + ref + r"\s+in\b[\s\S]*?\b(?:0\|1|1\|0|\[01\])\)",
+        test(_RC_OK) + r"\s*\|\|" + _ABORT,
+        test(_RC_FAIL) + r"\s*&&" + _ABORT,
+        r"\bif\s+" + test(_RC_FAIL) + r"\s*;?\s*then\b(?:(?!\bfi\b)[\s\S])*?\b(?:return|exit)\b",
+        r"\|\|\s*(?:\[\[?|\btest)\s+" + ref + r"\s+-eq\s+1\b(?:\s*\]\]?)?\s*\|\|" + _ABORT,
+        r"\bcase\s+" + ref + r"\s+in\b\s*(?:0\|1|1\|0|\[01\])\)\s*;;\s*\*\)"
+        r"(?:(?!;;)[\s\S])*?\b(?:return|exit)\b",
     )
     return any(re.search(pattern, rest) for pattern in patterns)
+
+
+_RC_OK = r"(?:-le\s+1|-lt\s+2)"
+_RC_FAIL = r"(?:-gt\s+1|-ge\s+2)"
+_ARITH = {_RC_OK: r"(?:<=\s*1|<\s*2)", _RC_FAIL: r"(?:>\s*1|>=\s*2)"}
 
 
 def env_edit_ok(block: str) -> bool:
@@ -396,6 +464,14 @@ _CORS_MUTANTS = {
     "compare_str_exc": _CORS_OK.replace('exc.response.get("Error", {}).get("Code")', "str(exc)"),
     "compare_message": _CORS_OK.replace('get("Code")', 'get("Message")'),
     "compare_other_root": _CORS_OK.replace("exc.response.get", "other.response.get"),
+    # 放行集合混进非「配置不存在」码：权限错误也继续往下覆盖（#1213 codex）
+    "allowlist_with_access_denied": _CORS_EQUIVALENTS[1].replace(
+        '{"NoSuchCORSConfiguration"}', '{"NoSuchCORSConfiguration", "AccessDenied"}'
+    ),
+    "positive_set_with_access_denied": _CORS_EQUIVALENTS[0].replace(
+        '"NoSuchCORSConfiguration" == code', 'code in ("NoSuchCORSConfiguration", "AccessDenied")'
+    ),
+    "empty_allowlist": _CORS_EQUIVALENTS[1].replace('{"NoSuchCORSConfiguration"}', "()"),
 }
 
 _SECRET_GOOD = (
@@ -490,6 +566,11 @@ _DOWNLOAD_GOOD = 'curl -o "$OUT.part" u\nmv "$OUT.part" "$OUT"'
                     "[ $? -le 1 ] || return 1", "case $? in 0|1) ;; *) return 1;; esac"
                 ),
                 _ENV_GOOD.replace("grep -v", "grep -Ev"),
+                _ENV_GOOD.replace(
+                    "[ $? -le 1 ] || return 1",
+                    'rc=$?\nif [ "$rc" -ge 2 ]; then\n  echo x >&2\n  return 1\nfi',
+                ),
+                _ENV_GOOD.replace("return 1", '{ rm -f "$1.tmp"; echo x >&2; return 1; }'),
             ],
             [
                 "echo 'K=v' >> deploy/.env",
@@ -501,6 +582,19 @@ _DOWNLOAD_GOOD = 'curl -o "$OUT.part" u\nmv "$OUT.part" "$OUT"'
                 'grep -v "^$2=" "$1" > "$1.tmp"\nmv "$1.tmp" "$1"',  # 读失败不中止
                 _ENV_GOOD.replace("[ $? -le 1 ]", "[ $? -le 2 ]"),  # 读失败也继续
                 _ENV_GOOD.replace('> "$1.tmp"\n', '> "$1"\n'),  # 直写改名目标
+                # 比较对了但命中后不中止，mv 照样把清空的临时文件盖回去（#1213 codex）
+                _ENV_GOOD.replace(
+                    "[ $? -le 1 ] || return 1", 'rc=$?\n[ "$rc" -gt 1 ] && echo warning >&2'
+                ),
+                _ENV_GOOD.replace("return 1", "echo warn >&2"),
+                _ENV_GOOD.replace("return 1", "{ echo warn >&2; }"),
+                _ENV_GOOD.replace(" || return 1", ""),
+                _ENV_GOOD.replace(
+                    "[ $? -le 1 ] || return 1", "case $? in 0|1) ;; *) echo warn;; esac"
+                ),
+                _ENV_GOOD.replace(
+                    "[ $? -le 1 ] || return 1", "if [ $? -gt 1 ]; then echo warn; fi"
+                ),
             ],
             id="env-edit",
         ),
@@ -510,12 +604,24 @@ _DOWNLOAD_GOOD = 'curl -o "$OUT.part" u\nmv "$OUT.part" "$OUT"'
             [
                 "set_env deploy/.env K v",
                 "if grep -E --quiet '^K=' ./deploy/.env; then :\nelse\n printf K=v >> ./deploy/.env\nfi",
+                "if ! grep -q '^K=' deploy/.env; then echo K=v >> deploy/.env; fi",
+                "grep -q '^K=' deploy/.env || echo K=v >> deploy/.env",
+                # elif 链与嵌套 if 都属于未匹配分支
+                "if grep -q '^K=' deploy/.env; then :\nelif V=$(x); then\n"
+                '  if [ -n "$V" ]; then :; fi\n  echo K=$V >> deploy/.env\nfi',
             ],
             [
                 "echo K=v >> deploy/.env",
                 "cat >> deploy/.env <<X\nK=v\nX",
                 "echo K=v >> deploy/.env\ngrep -q '^K=' deploy/.env",  # 守卫在写之后
                 "if grep -q '^K=' other.env; then :; else echo K=v >> deploy/.env; fi",
+                # 守卫在前但追加不受它控制（#1213 codex）
+                "grep -q '^K=' deploy/.env; echo K=v >> deploy/.env",
+                "grep -q '^K=' deploy/.env && echo K=v >> deploy/.env",
+                "if grep -q '^K=' deploy/.env; then echo K=v >> deploy/.env; fi",
+                "if grep -q '^K=' deploy/.env; then :; fi\necho K=v >> deploy/.env",
+                "if ! grep -q '^K=' deploy/.env; then :; else echo K=v >> deploy/.env; fi",
+                "if grep -q '^K=' deploy/.env; then :; else :; fi; echo K=v >> deploy/.env",
             ],
             id="env-append",
         ),
