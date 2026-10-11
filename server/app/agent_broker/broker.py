@@ -162,6 +162,7 @@ class AgentExecutionBroker:
         worker_id: str,
         declared_max_concurrency: int | None = None,
         declared_max_code_concurrency: int | None = None,
+        declared_node_limits: dict[str, int] | None = None,
     ) -> AgentClaim | None:
         from server.app.services.runtime_profile import profile
 
@@ -172,7 +173,11 @@ class AgentExecutionBroker:
             # write_transaction rolled the deadlocked connection back and
             # closed it, so the retry re-evaluates on a clean connection.
             outcome = claim_with_retry(
-                self, worker_id, declared_max_concurrency, declared_max_code_concurrency
+                self,
+                worker_id,
+                declared_max_concurrency,
+                declared_max_code_concurrency,
+                declared_node_limits,
             )
             claimed = outcome.claim
             if claimed is None:

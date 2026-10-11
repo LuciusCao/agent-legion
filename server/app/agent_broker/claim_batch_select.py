@@ -22,6 +22,7 @@ next poll refills.
 from __future__ import annotations
 
 import dataclasses
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -80,6 +81,7 @@ def _read_claim_view(
     declared_max_concurrency: int | None,
     declared_max_code_concurrency: int | None,
     timer: _claim_timing.ClaimStageTimer,
+    declared_node_limits: dict[str, int] | None = None,
 ) -> WorkerView:
     """Build the WorkerView from an UNLOCKED worker row read.
 
@@ -87,7 +89,8 @@ def _read_claim_view(
     ``sync_declared_capacity`` computes, but nothing is written here — the
     write phase's ``prepare_claim_view`` re-reads under the row lock, syncs
     the declared values, and its view is the authoritative one for every
-    per-candidate capacity gate.
+    per-candidate capacity gate. #1158 节点上限同规则镜像：declared 为 None
+    时用库存值（不声明 = 保留），显式 map（含 {}）覆盖。
     """
     worker = conn.execute(_WORKER_READ_SQL, (worker_id,)).fetchone()
     timer.stage("worker_setup")
@@ -103,9 +106,14 @@ def _read_claim_view(
         if declared_max_code_concurrency is not None
         else int(worker["max_code_concurrency"])
     )
+    node_limits = (
+        declared_node_limits
+        if declared_node_limits is not None
+        else json.loads(worker["node_concurrency_limits_json"] or "{}")
+    )
     active_rows = conn.execute(ACTIVE_COUNT_SQL, (worker_id,)).fetchall()
     timer.stage("worker_setup")
-    return build_worker_view(worker, agent_pool, code_pool, active_rows)
+    return build_worker_view(worker, agent_pool, code_pool, active_rows, node_limits)
 
 
 def _select_kind_batch(
@@ -161,6 +169,7 @@ def select_batch_candidates(
     limit: int,
     agent_limit: int | None = None,
     code_limit: int | None = None,
+    declared_node_limits: dict[str, int] | None = None,
 ) -> BatchClaimSelection:
     """Select up to ``min(limit, MAX_BATCH_CLAIMS)`` candidates, lock-free.
 
@@ -174,7 +183,12 @@ def select_batch_candidates(
     timer = _claim_timing.ClaimStageTimer()
     with read_connection(broker.database_dsn) as conn:
         view = _read_claim_view(
-            conn, worker_id, declared_max_concurrency, declared_max_code_concurrency, timer
+            conn,
+            worker_id,
+            declared_max_concurrency,
+            declared_max_code_concurrency,
+            timer,
+            declared_node_limits,
         )
         if not needed_claim_kinds(view):
             # Both pools exhausted (or code-only headroom on a pre-v2 Worker):

@@ -4102,6 +4102,10 @@ export interface components {
       max_code_concurrency?: number | null
       /** Max Concurrency */
       max_concurrency?: number | null
+      /** Node Concurrency Limits */
+      node_concurrency_limits?: {
+        [key: string]: number
+      } | null
       /** Worker Id */
       worker_id: string
     }

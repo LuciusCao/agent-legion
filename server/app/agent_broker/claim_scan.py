@@ -71,6 +71,10 @@ class WorkerView:
     # Worker never receives the cancel heartbeat body, so it must not hold
     # kind='code' executions even if a stale row grants it code capacity).
     protocol_version: int = 1
+    # #1158 per-node machine capacity: bare node_key → max concurrent claimed
+    # executions ON THIS worker (both kinds count; machine-protection layer on
+    # top of the workspace-global workspace_node_limits). Empty = unlimited.
+    node_limits: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass

@@ -5,11 +5,18 @@ request/response family lives next to its route (``agent_worker_claims.py``)
 and its response assembly (``agent_worker_claim_response.py``).
 """
 
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
 from shared.concurrency_limits import MAX_DYNAMIC_CONCURRENCY
+
+# #1158 Worker 节点级并发上限的声明通道类型：key = 裸 node_key（不带
+# workspace，机器保护语义），value = 正整数上限。
+NodeConcurrencyLimits = dict[
+    Annotated[str, Field(min_length=1, max_length=128)],
+    Annotated[int, Field(gt=0, le=MAX_DYNAMIC_CONCURRENCY)],
+]
 
 
 class ClaimAgentExecutionRequest(BaseModel):
@@ -21,6 +28,10 @@ class ClaimAgentExecutionRequest(BaseModel):
     # Live re-declaration of the code-execution pool (batch 2); None leaves
     # the recorded value untouched.
     max_code_concurrency: int | None = Field(default=None, ge=0, le=MAX_DYNAMIC_CONCURRENCY)
+    # #1158 Worker 节点级并发上限（机器资源保护层）：每次 claim 重声明，
+    # Host 热同步进 agent_workers 并在 claim 判定按 (worker_id, node_key)
+    # 计数强制。None（旧 Worker 不声明）= 保留库存值；{} = 显式清空（无限制）。
+    node_concurrency_limits: NodeConcurrencyLimits | None = Field(default=None, max_length=256)
     # Batch claim (issue #546; single path retired by #547): promotes up to
     # `limit` executions in ONE transaction and answers
     # BatchAgentClaimResponse (empty batch = the same 204). The default 1

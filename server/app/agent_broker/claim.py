@@ -45,6 +45,7 @@ def claim_in_transaction(
     worker_id: str,
     declared_max_concurrency: int | None = None,
     declared_max_code_concurrency: int | None = None,
+    declared_node_limits: dict[str, int] | None = None,
 ) -> ClaimOutcome:
     """Claim at most one request; the verdict rides out as ``ClaimOutcome``.
 
@@ -65,7 +66,12 @@ def claim_in_transaction(
     # unmeasured — it sits past this function's return).
     timer = _claim_timing.ClaimStageTimer()
     view = prepare_claim_view(
-        conn, worker_id, declared_max_concurrency, declared_max_code_concurrency, timer
+        conn,
+        worker_id,
+        declared_max_concurrency,
+        declared_max_code_concurrency,
+        timer,
+        declared_node_limits=declared_node_limits,
     )
     # Nothing this Worker could claim (both pools exhausted, or only code
     # headroom on a pre-v2 Worker): skip the scan entirely.

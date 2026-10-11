@@ -54,6 +54,7 @@ def create_agent_worker_claim_router(
                 limit=payload.limit,
                 agent_limit=payload.agent_limit,
                 code_limit=payload.code_limit,
+                declared_node_limits=payload.node_concurrency_limits,
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
