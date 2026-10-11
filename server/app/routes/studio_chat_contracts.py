@@ -113,6 +113,12 @@ class StudioChatMessageResponse(BaseModel):
 
 class StudioChatMessagesResponse(BaseModel):
     messages: list[StudioChatMessageRecord]
+    # Explicit older-side cursor (#1120 PR-3): true when the queried range
+    # holds rows older than the returned window — for before_seq page-ups
+    # and the initial load, exactly "an earlier page exists". "Returned
+    # count == page size" could not tell a full page from the last one, and
+    # an empty page must stay distinguishable from "no earlier history".
+    has_more: bool
 
 
 class StudioChatContextUpdateRequest(BaseModel):

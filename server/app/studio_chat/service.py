@@ -34,6 +34,7 @@ from server.app.studio_chat.availability import AgentAvailabilityProbe
 from server.app.studio_chat.background_wakeup import cancel_wakeup
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.lifecycle import ServiceLifecycle, starting_operation
+from server.app.studio_chat.message_pages import list_messages_page
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.resume import resume_session
 from server.app.studio_chat.retention import studio_chat_retention_days
@@ -224,6 +225,11 @@ class StudioChatService:
     ) -> list[dict[str, Any]]:
         self.get_session(session_id, workspace_id)
         return self._db.list_studio_chat_messages(session_id, after_seq=after_seq)
+
+    def list_messages_page(self, session_id: str, workspace_id: str, **cursors: Any):
+        """Paged read for the messages endpoint (#1120 PR-3); thin delegate —
+        the typed cursor contract lives in studio_chat.message_pages."""
+        return list_messages_page(self, session_id, workspace_id, **cursors)
 
     def cancel(self, session_id: str, workspace_id: str) -> dict[str, Any]:
         session = self.get_session(session_id, workspace_id)
