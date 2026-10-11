@@ -62,15 +62,16 @@ def main() -> int:
             "args": args.agent_args,
         }
     )
+    payload: dict = {"api_base": args.api_base, "agents": agents}
+    # #355：GET 拿到的 revision 一并带上——不携带则走空版本旁路（整份替换
+    # 语义），GET 与 PUT 之间探测合并进的新 detected 行会被静默删掉。仅当
+    # GET 响应含 revision 时才带该键：pre-#355 旧后端的 PUT 契约
+    # extra="forbid"，多带一个键会 422（保持脚本跨版本可用）。
+    if "revision" in registry:
+        payload["revision"] = registry["revision"]
     put = client.put(
         f"{args.base}/api/admin/studio-agents",
-        json={
-            "api_base": args.api_base,
-            "agents": agents,
-            # #355：GET 拿到的 revision 一并带上——不携带则走空版本旁路（整份
-            # 替换语义），GET 与 PUT 之间探测合并进的新 detected 行会被静默删掉。
-            "revision": registry.get("revision", ""),
-        },
+        json=payload,
         timeout=30,
     )
     if put.status_code != 200:

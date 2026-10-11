@@ -16,7 +16,8 @@ import type { StudioAgentRegistryResponse } from '../../api/studioAgents'
  * 从 PUT 失败 error 中取出 409 携带的当前注册表（#719 后 httpError 只保留
  * detail，冲突文档经 detail 传递）。非 409 或 detail 不是注册表文档（代理
  * 剥离响应体等异常路径）返回 null——调用方降级为普通错误提示，不能卡在
- * 无提示态。
+ * 无提示态。api_base 必须是字符串：缺该键的残缺 detail 若被采纳会把
+ * undefined 写进 apiBase state（复验 P3）。
  */
 export function registryConflictBody(
   error: unknown
@@ -27,6 +28,9 @@ export function registryConflictBody(
   }
   if (status !== 409 || !detail || typeof detail !== 'object') return null
   if (!('agents' in detail) || !('revision' in detail)) return null
+  if (typeof (detail as { api_base?: unknown }).api_base !== 'string') {
+    return null
+  }
   return detail as StudioAgentRegistryResponse
 }
 

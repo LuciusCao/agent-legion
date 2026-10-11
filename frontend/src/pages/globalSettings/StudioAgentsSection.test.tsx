@@ -376,6 +376,31 @@ describe('StudioAgentsSection', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  it('degrades to the error alert when the 409 detail lacks api_base', async () => {
+    // 复验 P3：缺 api_base 的残缺 detail 不能被采纳——否则 undefined 会写进
+    // apiBase state；降级为普通错误提示，编辑器保持原值。
+    vi.mocked(updateStudioAgents).mockRejectedValue(
+      Object.assign(new Error('HTTP 409: registry revision mismatch'), {
+        status: 409,
+        detail: { agents: [], revision: 'rev-9' },
+      })
+    )
+
+    renderSection()
+    await screen.findByLabelText('agent-label-0')
+
+    fireEvent.change(screen.getByLabelText('agent-label-0'), {
+      target: { value: 'Kimi CLI' },
+    })
+    fireEvent.click(screen.getByText('保存'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 409')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('平台回调地址（api_base）')).toHaveValue(
+      'http://127.0.0.1:8000'
+    )
+  })
+
   it('shows the load error when GET fails', async () => {
     vi.mocked(getStudioAgents).mockRejectedValue(new Error('HTTP 403'))
 
