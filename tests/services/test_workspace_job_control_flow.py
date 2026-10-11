@@ -20,7 +20,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.main import create_app
-from server.app.storage_paths import resolve_job_dir
+from server.app.storage_paths import job_node_log_dir_name, resolve_job_dir
 from server.app.workflow_worker.execution import reap_futures
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import load_workflow_definition
@@ -318,8 +318,9 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         # 8. delete removes database rows, storage, and logs.
         job = app.state.job_db.get_job(job_id)
         storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
-        log_dir = app.state.settings.logs_dir / "jobs"
-        log_files = list(log_dir.glob(f"{job_id}-*.log"))
+        # #1113：节点日志写进 job 独占目录 logs/jobs/by-job/<job_id>/。
+        log_dir = app.state.settings.logs_dir / "jobs" / job_node_log_dir_name(job_id)
+        log_files = list(log_dir.glob("*.log"))
         assert storage_dir.exists()
         assert log_files
 
@@ -328,7 +329,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         assert delete_response.json()["deleted"] == job_id
 
         assert not storage_dir.exists()
-        assert not list(log_dir.glob(f"{job_id}-*.log"))
+        assert not log_dir.exists()
         assert app.state.job_db.get_job(job_id) is None
         assert app.state.job_db.list_job_nodes(job_id) == []
         assert app.state.job_db.list_node_runs(job_id) == []

@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- 节点日志跨 job 同名碰撞（issue #1113，#1065 follow-up）：旧扁平名 `logs/jobs/<job_id>-<node_key>[-shard-<i>].log` 在 source_id 与 node_key 都可含连字符时互相覆盖（job `A` 节点 `x-y` 与 job `A-x` 节点 `y` 同写 `A-x-y.log`；`A` 的分片 `x#1` 与 `A-x` 的节点 `shard-1` 同写 `A-x-shard-1.log`），删除侧也无法区分。新命名 `logs/jobs/by-job/<job_id>/<enc(node_key)>[.shard-<i>].log`（`storage_paths.job_node_log_name` 唯一入口，node_key 仅把 `%` `/` `.` 与控制字符转义为 `%XX`、非 ASCII 原样保留，含 `/` 也只占一个文件名分量、不建子目录；文件名超 NAME_MAX 时改用有界的 `<前缀>.<sha256>` 形态），对 (job_id, node_key, shard) 单射；job 删除整目录移走本 job 独占的日志目录。存量扁平名无需迁移：读取侧本就按 `node_runs.log_path` 原样读；删除侧只删删除事务内 node_runs 快照登记过、且文件名等于本行节点 key 旧命名的文件（不再按 job_nodes 节点 key 生成旧名，避免误删兄弟 job 的同名日志）。
+
 ## [0.7.19] - 2026-10-11
 
 Worker 结果上报协议 v2（元数据移出 HTTP 头改走归档 `result.json`，**部署硬约束 Host 先升**）+ 执行面系统性收口：节点级并发限制覆盖远程 code Worker、`latest` 绑定 skill 的升级不再误重跑、events.jsonl 工具输出全链脱敏（P1 安全）、worker 上报心跳停摆/401/降级归档族收口；前端 workspace 主页加载失败误判引导页修复（#1183）、预览面板支持媒体产物播放（#1146）；分支模型收口为 trunk-based（#1150）。
