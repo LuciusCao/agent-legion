@@ -3,6 +3,8 @@ import type {
   WorkflowRevisionDetailResponse,
   WorkflowRevisionSummary,
 } from '../../../types'
+import { useQueryClient } from '@tanstack/react-query'
+import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import type { DraftSaveFlushResult, DraftSaveState } from './draftSaveTypes'
 import { useServerDraftApply } from './useServerDraftApply'
 import { useWorkflowDraftPersistence } from './useWorkflowDraftPersistence'
@@ -27,6 +29,7 @@ export function useWorkflowStudioDraftStore(
     revisionId: string
   ) => Promise<WorkflowRevisionDetailResponse>
 ) {
+  const queryClient = useQueryClient()
   const draftQuery = useWorkflowDraftQuery(workspaceId)
   const draft = useWorkflowStudioDraft(
     workspaceId,
@@ -81,5 +84,13 @@ export function useWorkflowStudioDraftStore(
     adoptServerDraft: (yaml: string, at: string | null, hash?: string | null) =>
       draftSave.adoptServerDraft(yaml, at, setDraftYaml, hash),
     resolveConflict: draftSave.resolveConflict,
+    /* #1226 四轮 P1：发布成功后失效服务端草稿查询（后端 #1221 已删行）——
+       重取到「无草稿」经 useDraftServerSync 把保存控制器重新 hydrate 成
+       「无草稿 + 新 canonical 基线」，画布 reset 的尾随 schedule 不再被判成
+       新编辑，debounce 到期也就不会 PUT 重建刚删的草稿行。 */
+    invalidateServerDraft: () =>
+      queryClient.invalidateQueries({
+        queryKey: extraQueryKeys.workflowStudioDraft(workspaceId ?? ''),
+      }),
   }
 }

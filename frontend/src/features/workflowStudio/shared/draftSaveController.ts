@@ -69,9 +69,16 @@ export class DraftSaveController {
     updatedAt: string | null | undefined,
     savedHash?: string | null
   ): void => {
+    /* #1226 四轮 P1：新基线可能正是挂起 debounce 的内容（发布后画布 reset
+       到 canonical 的尾随 schedule 已 arm）——该保存已成 no-op，作废它，
+       否则到期 PUT 按 CAS-over-absence 语义立刻重建刚删的草稿行。 */
+    if (this.pendingSave?.yaml === persistedYaml) this.abortPending()
     this.lastPersisted = persistedYaml
     this.lastPersistedAt = updatedAt ?? null
-    this.setState(conflictResolvedState(this.state, updatedAt, savedHash))
+    const next = conflictResolvedState(this.state, updatedAt, savedHash)
+    /* 内容不同的挂起保存（用户在窗口内的真实编辑）保留 pending——内容偏离
+       新基线，status 不得收敛 settled（#1177 不变量）。 */
+    this.setState(this.pendingSave ? { ...next, status: 'pending' } : next)
   }
 
   /* #633 codex review P1-2/P2-1：进入 conflict 态的统一入口——409 冲突

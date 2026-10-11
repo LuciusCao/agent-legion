@@ -17,6 +17,12 @@ import type { ServerDraftConflict } from './useServerDraftApply'
  * 3. 冲突呈现：用户有本地编辑时经 consumeConflict 拿到通知 →
  *    enterConflict 进入 conflict 态（编辑保留，conflictDraftYaml =
  *    服务端草稿），基线同样推进。
+ * 4. #1226 四轮 P1 草稿行消失：发布成功删除草稿行后重取到「无草稿」——
+ *    这不是「更旧的草稿」（updated_at 为 null 永远不比 hydratedAt 新，
+ *    时间戳守卫不适用），而是「无存档」：必须重新 hydrate 到当前基线
+ *    （null 时间戳 → 下一次保存以 never-saved 竞争），否则保存控制器仍持
+ *    已删草稿的旧基线，画布 reset 到 canonical 后的尾随 schedule 会被判成
+ *    新编辑，debounce 到期 PUT 立刻重建刚删的草稿行。
  *
  * 同一 updated_at 不会重复 hydrate（isServerDraftNewer 为 false）；hydratedAt
  * 由本 hook 持有，与 useServerDraftApply 的画布采用共用同一时间戳。
@@ -40,9 +46,15 @@ export function useDraftServerSync(
   const [hydrated, setHydrated] = useState(false)
   const hydratedRef = useRef(false)
   const hydratedAtRef = useRef<string | null>(null)
+  /* #1226 四轮 P1：「无草稿」重 hydrate 的幂等闸——记录已按哪份基线补过
+     null-draft hydrate；同一基线的重复重取（effect 因非稳定回调引用等
+     原因反复触发）跳过，否则每次 hydrate 的 setState 引发重渲染会构成
+     effect → setState → effect 循环。 */
+  const nullBaselineHydratedRef = useRef<string | null>(null)
   const isHydrated = useCallback(() => hydratedRef.current, [])
   useEffect(() => {
     hydratedRef.current = false
+    nullBaselineHydratedRef.current = null
     // eslint-disable-next-line react-hooks/set-state-in-effect -- workspace 切换时重置 hydrate 状态
     setHydrated(false)
   }, [workspaceId])
@@ -60,11 +72,20 @@ export function useDraftServerSync(
       hydratedAtRef.current = conflict.updatedAt || null
       return
     }
-    if (
-      hydrated &&
-      !isServerDraftNewer(serverDraft.updated_at, hydratedAtRef.current)
-    ) {
-      return
+    if (serverDraft.definition_yaml == null) {
+      // #1226 四轮 P1：草稿行消失（发布删除）不是「更旧」而是「无存档」，
+      // 时间戳守卫不适用——按当前基线重 hydrate（null 时间戳 → 下一次保存
+      // 以 never-saved 竞争），同一基线只补一次。
+      if (nullBaselineHydratedRef.current === originalYaml) return
+      nullBaselineHydratedRef.current = originalYaml
+    } else {
+      nullBaselineHydratedRef.current = null
+      if (
+        hydrated &&
+        !isServerDraftNewer(serverDraft.updated_at, hydratedAtRef.current)
+      ) {
+        return
+      }
     }
     controllerRef.current?.hydrate(
       serverDraft.definition_yaml ?? originalYaml,
