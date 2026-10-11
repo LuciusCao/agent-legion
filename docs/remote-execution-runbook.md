@@ -533,6 +533,8 @@ Batch claim (#546) note: a batch's skip reasons surface only on the zero-claim v
 | `model_mismatch` | model 未声明 — the required provider/model is not in this worker's model declarations |
 | `workspace_not_allowed` | scope 拒绝 — the request's workspace is outside this worker's admission scope |
 
+Skip（留队列、非拒绝）侧的码不进上表，只出现在 `claim.empty` 的 `reasons` 里：`node_limit_full` / `node_limit_appeared`（#1149 workspace 全局节点限额）与 `worker_node_limit_full`（#1158 本机节点级限额——某台机器突然不领某个节点的首要排查信号），请求一律留队列等下一轮。
+
 Direct mappings for the common complaints: 「并发下来了」→ check the
 `claim.rejected` reason distribution; 「本机拿不到任务」→ `claim.empty`
 vs `claim.rejected` distinguishes drained queue from admission mismatch;

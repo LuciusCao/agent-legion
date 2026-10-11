@@ -33,7 +33,7 @@ describe('jobStore rerunByFailureCategory', () => {
         makeJob({ id: 'j2', status: 'failed' }),
       ]),
       isLoading: false,
-      error: null,
+      listLoadError: null,
       selectedIds: new Set(['j1', 'j2']),
       selectionMode: 'explicit',
       selectionFilter: null,
@@ -125,7 +125,10 @@ describe('jobStore rerunByFailureCategory', () => {
     ).rejects.toThrow('server down')
 
     expect(mockShowToast).toHaveBeenCalledWith('server down', 'error')
-    expect(useJobStore.getState().error).toBe('server down')
+    // mutation 失败只走 toast，不写 listLoadError（任务列表加载失败的唯一
+    // 信号）——健康列表不得被整页替换成错误页（#1189 评审 P1）。
+    expect(useJobStore.getState().listLoadError).toBeNull()
+    expect(useJobStore.getState().jobIds).toEqual(['j1', 'j2'])
   })
 
   it('includes from_node_key in the request when a start node is given', async () => {

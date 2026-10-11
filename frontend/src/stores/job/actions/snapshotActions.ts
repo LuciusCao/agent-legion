@@ -30,7 +30,7 @@ export function setJobsSnapshotUpdate(
     jobsWorkspaceId: workspaceId,
     revision,
     isLoading: false,
-    error: null,
+    listLoadError: null,
   }
 }
 

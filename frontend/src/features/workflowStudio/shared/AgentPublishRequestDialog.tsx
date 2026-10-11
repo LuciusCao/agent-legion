@@ -47,20 +47,27 @@ export function AgentPublishRequestDialog() {
   const agentRequest = useAgentPublishRequest(workspaceId)
   const confirmAgentRequest = async () => {
     if (!workspaceId) return
+    let publishedYaml: string
     try {
       // 完成序：flush 的 PUT resolve 之后才重读服务端草稿、才调确认端点。
       // 收尾 P2-1：resolve 值是本次 flush 的终态（ok=false 即本次落盘失败）
       // ——不读 studio.draftSave 快照（闭包捕获的是点击前的值）。
       const flushed = await studio.flushDraftSave?.()
       if (flushed && !flushed.ok) throw new Error('draft save failed')
-      await fetchWorkflowDraft(workspaceId)
+      const reread = await fetchWorkflowDraft(workspaceId)
+      // #1122：重读的服务端草稿就是确认端点将发布的内容（后端 confirm 读
+      // 同一行 workspace_workflow_drafts，hash 校验兜底）——以它登记发布
+      // 原文；服务端草稿缺失时回落画布原文（confirm 会失败，登记无害）。
+      publishedYaml = reread.definition_yaml ?? studio.definitionYaml
     } catch {
       // flush/重读失败：中止 confirm（宁可让用户重试，不发布未确认落盘
       // 的草稿）；草稿保存的失败态由顶栏状态文本另行可见。
       showToast('草稿尚未保存成功，请稍后重试确认', 'error')
       return
     }
-    await agentRequest.confirm()
+    // #1122：登记发布原文在 invalidate 重取落地之前（confirm 内部顺序），
+    // baseline sync 据此对紧随的 canonical 基线强制 reset——dirty 不再永真。
+    await agentRequest.confirm(() => studio.markDraftPublished(publishedYaml))
     view.setChangesPanelOpen(true)
   }
   if (agentRequest.pendingRequest === null) return null

@@ -508,6 +508,20 @@ describe('draftSaveText', () => {
     expect(draftSaveText(undefined)).toBeNull()
   })
 
+  it('terminal 失败（4xx/退避耗尽）不承诺自动重试，retrying 保持承诺（#1204）', () => {
+    const savedAt = '2026-08-27T09:05:00+00:00'
+    expect(
+      draftSaveText({ status: 'error', savedAt, saveError: 'terminal' })
+    ).toBe('草稿保存失败，不会自动重试——请修改内容或点击重试')
+    expect(
+      draftSaveText({ status: 'error', savedAt, saveError: 'retrying' })
+    ).toBe('草稿保存失败，将自动重试')
+    // 旧状态形状（无 saveError 字段，如历史测试夹具）按 retrying 文案兜底。
+    expect(draftSaveText({ status: 'error', savedAt })).toBe(
+      '草稿保存失败，将自动重试'
+    )
+  })
+
   it('shows the service-unavailable warning when the draft query failed', () => {
     expect(
       draftSaveText({ status: 'idle', savedAt: null, loadError: true })
@@ -550,6 +564,8 @@ describe('useWorkflowDraftPersistence PUT retry', () => {
     })
     await waitFor(() => expect(result.current.state.status).toBe('error'))
     expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+    // #1204：退避在途期间 saveError=retrying（文案承诺「将自动重试」为真）。
+    expect(result.current.state.saveError).toBe('retrying')
 
     // 第一次重试（+2s）仍失败。
     await act(async () => {
@@ -567,6 +583,41 @@ describe('useWorkflowDraftPersistence PUT retry', () => {
     })
     expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(3)
     expect(result.current.state.status).toBe('error')
+    // 耗尽即终态：文案不再承诺自动重试（#1204 codex P2 的既有洞一并收口）。
+    expect(result.current.state.saveError).toBe('terminal')
+  })
+
+  it('does not retry a client-error (4xx) rejection — terminal error immediately（#1196）', async () => {
+    // 4xx 是确定性的请求侧拒绝（如前后端空白判定口径差导致的 422）——
+    // 走退避重试必然同样失败，只产生误导性的「将自动重试」与无效流量。
+    mocks.putWorkflowDraft.mockRejectedValue(
+      Object.assign(new Error('HTTP 422'), { status: 422 })
+    )
+    const { result } = renderEdited()
+
+    // 初次保存（debounce 850ms）失败后先让出执行权：rejection 的 catch 在
+    // 微任务里才运行（旧逻辑也在此刻才 arm 2s 重试计时器）——等 error 落定
+    // 这个信号再逐窗口推进退避，否则同一 act 内连推会跳过整条重试链
+    // （对旧行为也绿 = 空断言）。
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(result.current.state.status).toBe('error'))
+
+    // 逐窗口推进两个退避窗口（+2s / +4s）：4xx 必为终态，不发起任何重试。
+    await act(async () => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(4000)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+    expect(result.current.state.status).toBe('error')
+    // 终态文案不得承诺自动重试（#1204 codex P2）。
+    expect(result.current.state.saveError).toBe('terminal')
   })
 
   it('recovers to saved when a retry succeeds', async () => {

@@ -84,6 +84,24 @@ def test_client_claim_declares_code_capacity() -> None:
     ]
 
 
+def test_client_claim_declares_node_concurrency_limits() -> None:
+    # #1158：节点级并发上限与容量同渠道每次 claim 重声明；显式空 map 也携带
+    # （「清空库存值」的唯一通道），None 不携带（Host 保留库存值）。
+    client = agent_worker.Client("http://unused")
+    seen: list[dict] = []
+    client.request = lambda *a, **k: (seen.append(json.loads(k["data"])), (204, b""))[1]  # type: ignore[method-assign]
+
+    client.claim_batch(
+        "w1", limit=1, agent_limit=1, code_limit=1, node_concurrency_limits={"heavy": 1}
+    )
+    client.claim_batch("w1", limit=1, agent_limit=1, code_limit=1, node_concurrency_limits={})
+    client.claim_batch("w1", limit=1, agent_limit=1, code_limit=1)
+
+    assert seen[0]["node_concurrency_limits"] == {"heavy": 1}
+    assert seen[1]["node_concurrency_limits"] == {}
+    assert "node_concurrency_limits" not in seen[2]
+
+
 def test_client_registration_declares_latest_protocol_and_code_capacity() -> None:
     client = agent_worker.Client("http://unused")
     seen: list[dict] = []
