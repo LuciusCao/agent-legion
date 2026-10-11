@@ -148,7 +148,7 @@ skill root 已上移为 `~/.agents/skills`（单一来源
 
 ## 3. 启动部署机的 stack
 
-Docker 部署机的唯一入口是 `make prod-up docker`（停止用 `make prod-down docker`；它目前不会停掉 profile 下的本地对象存储容器，见 §8）：
+Docker 部署机的唯一入口是 `make prod-up docker`（停止用 `make prod-down docker`，见 §8）：
 
 1. **放好 velites 二进制（#381）**：worker 镜像不含 agent runtime 执行器，先把与部署机架构匹配的 velites 二进制放到 `<仓库根>/velites-bin/velites`（`chmod +x`）。compose 的默认值 `${VELITES_BIN:-../velites-bin/velites}` 按 compose 文件所在的 `deploy/` 目录解析，即仓库根下的 `velites-bin/`；用 `VELITES_BIN`（绝对路径）可改位置。产物获取与架构匹配见 §5「velites 二进制来源」。
 2. **准备对象存储凭据**：本地对象存储（默认 SeaweedFS）的凭据写进 `deploy/.env`，见 [materials-storage-deployment.md §3.1](materials-storage-deployment.md#31-准备凭据与配置)。
@@ -576,12 +576,7 @@ docker compose -f deploy/compose.worker.yaml exec worker \
 make prod-down docker
 ```
 
-注意：`make prod-down docker`（以及 `make stack-host-down` / `make stack-down`）执行的是不带 `--profile` 的 `docker compose ... down`，**不会停掉** profile 下的本地对象存储容器（`seaweedfs` 在 `materials-local`、`rustfs` 在 `materials-local-rustfs`），这些容器继续运行（compose v5 实测）。要连同对象存储一起停，显式带上对应 profile（存在 `deploy/compose.local.yaml` 时同样加 `-f`）：
-
-```bash
-docker compose -f deploy/compose.host.yaml --profile materials-local down
-# rustfs 逃生舱：--profile materials-local-rustfs
-```
+`make prod-down docker`（以及 `make stack-host-down` / `make stack-down`）无条件带上全部本地对象存储 profile（`materials-local` / `materials-local-rustfs`）执行 down，连同 profile 下的 `seaweedfs` / `rustfs` 容器与 stack 网络一并移除；未启动的 profile 服务不受影响（#1105）。
 
 Worker 机器：
 

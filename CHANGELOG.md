@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- `make prod-down docker` / `make stack-host-down` / `make stack-down` 不停 profile 下的本地对象存储容器（issue #1105，#1099 follow-up）：host stack 的 down 此前不带 `--profile`，seaweedfs / rustfs 容器留存、stack 网络移除报 "Resource is still in use"。现三个入口经 Makefile `COMPOSE_HOST_DOWN_PROFILES` 无条件带上 `materials-local` 与 `materials-local-rustfs`（未启动的 profile 服务 down 为 no-op）；刻意不复用 up 侧的 `local-s3-decide.sh --compose-flags`——down 时判定输入（`deploy/.env`、`AGENT_LEGION_LOCAL_S3*`）可能已不同于 up 时，决策失败的退出码也会被命令替换吞掉，都会漏停实际在跑的容器。`tests/scripts/test_stack_down_profiles.py` 以 `make -n` 渲染全部 compose down 入口，并从 compose 文件自身推导 profile 全集断言无遗漏；部署文档 §3/§8 的手动停止临时说明删除。
+
 ## [0.7.19] - 2026-10-11
 
 Worker 结果上报协议 v2（元数据移出 HTTP 头改走归档 `result.json`，**部署硬约束 Host 先升**）+ 执行面系统性收口：节点级并发限制覆盖远程 code Worker、`latest` 绑定 skill 的升级不再误重跑、events.jsonl 工具输出全链脱敏（P1 安全）、worker 上报心跳停摆/401/降级归档族收口；前端 workspace 主页加载失败误判引导页修复（#1183）、预览面板支持媒体产物播放（#1146）；分支模型收口为 trunk-based（#1150）。
