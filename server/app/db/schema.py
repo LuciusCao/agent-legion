@@ -11,7 +11,9 @@ from server.app.db.schema_guard import guard_shared_db
 from server.app.db.schema_head_cache import note_verified_at_head, verified_at_head
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 93
+# v94 (agent_worker_node_limits) exists on origin/main; this branch numbers
+# its tombstone migration v95 so the merge needs no renumber (#434 protocol).
+SCHEMA_VERSION = 95
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 

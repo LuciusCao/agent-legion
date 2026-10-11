@@ -249,6 +249,36 @@ def test_save_node_prompt_rejects_invalid_prompt_mode(job_db) -> None:
     assert result["prompt_mode"] == "overwrite"
 
 
+def test_save_node_prompt_conflicts_when_a_publish_deleted_the_draft_mid_edit(
+    job_db, monkeypatch
+) -> None:
+    """#1226 五轮 P1：save_node_prompt 读到草稿后、落盘前，发布删了草稿行
+    （tombstone 记录被删行的 updated_at）——这次写入的 CAS base 是发布前
+    代次，必须 409（DraftConflictError）而不是把旧内容重建为草稿权威。"""
+    from server.app.services import node_prompt_preview as prompt_module
+    from server.app.services.job_errors import DraftConflictError
+
+    workspace_id = _workspace(job_db, "ws-prompt-tombstone")
+    save_node_prompt(job_db, workspace_id, "write_script", "v1")
+
+    real_cas_save = prompt_module.save_workflow_draft_if_unchanged
+
+    def publish_then_save(db, ws_id, yaml, base):
+        # The interleave: the prompt edit was read/built from the draft, then
+        # a publish deletes the row before the save lands.
+        with db.connect() as conn:
+            db.delete_workspace_workflow_draft(conn, ws_id)
+        return real_cas_save(db, ws_id, yaml, base)
+
+    monkeypatch.setattr(prompt_module, "save_workflow_draft_if_unchanged", publish_then_save)
+
+    with pytest.raises(DraftConflictError):
+        save_node_prompt(job_db, workspace_id, "write_script", "v2 in-flight")
+
+    # The deleted row was not resurrected.
+    assert job_db.get_workspace_workflow_draft(workspace_id) is None
+
+
 def test_save_node_prompt_unknown_targets_raise_not_found(job_db) -> None:
     workspace_id = _workspace(job_db, "ws-prompt-save-404")
     job_db.create_workspace("ws-prompt-bare")

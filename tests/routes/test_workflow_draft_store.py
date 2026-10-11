@@ -298,32 +298,95 @@ def test_put_with_never_saved_conflicts_when_a_draft_already_exists(client, job_
     assert conflict.json()["detail"]["current_draft"]["definition_yaml"] == _DRAFT_YAML
 
 
-def test_put_with_stale_base_over_a_deleted_row_recreates_the_draft(client, job_db) -> None:
-    """#1221 §4 (方案 B): publish deletes the draft row; a CAS save holding a
-    pre-publish ``updated_at`` then silently RECREATES the draft instead of
-    409-ing — the CAS ``where`` gates only the conflict-update branch, so an
-    absent row is a plain insert. The recreation reads as a brand-new draft
-    (fresh timestamps), which is the intended post-publish semantics."""
-    workspace = job_db.create_workspace("ws-store-cas-deleted")
+# --- #1226 五轮 codex P1: publish-generation tombstone — a stale CAS base
+# over a publish-deleted row conflicts (409) instead of resurrecting the
+# pre-publish content; never-saved (client knows there is no draft) inserts
+# freely; a successful write clears the tombstone.
+
+
+def _publish_delete_draft(job_db, workspace_id: str) -> None:
+    """What the publish hook does: delete the row + record the tombstone."""
+    with job_db.connect() as conn:
+        job_db.delete_workspace_workflow_draft(conn, workspace_id)
+
+
+def test_put_with_stale_base_over_a_publish_deleted_row_conflicts(client, job_db) -> None:
+    """An in-flight save holding a pre-publish ``updated_at`` must NOT
+    re-INSERT the deleted content: the tombstone covers bases at or before
+    the deleted row's timestamp, the answer is a 409 whose current_draft is
+    null (the「仅解除警示」path), and the draft store stays empty."""
+    workspace = job_db.create_workspace("ws-store-tombstone")
     first = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
     assert first.status_code == 200
     stale_base = first.json()["updated_at"]
 
-    # Publish (or any deleter) removes the row underneath the held timestamp.
-    with job_db.connect() as conn:
-        conn.execute(
-            "delete from workspace_workflow_drafts where workspace_id=%s",
-            (workspace["id"],),
-        )
+    _publish_delete_draft(job_db, workspace["id"])
 
-    recreated = client.put(
+    refused = client.put(
         _url(workspace["id"]),
         json={"definition_yaml": _DRAFT_YAML, "expected_updated_at": stale_base},
     )
 
+    assert refused.status_code == 409, refused.text
+    detail = refused.json()["detail"]
+    assert detail["expected_updated_at"] == stale_base
+    assert detail["current_draft"]["definition_yaml"] is None
+    assert detail["current_draft"]["updated_at"] is None
+    # The deleted row was NOT resurrected.
+    assert client.get(_url(workspace["id"])).json()["definition_yaml"] is None
+
+
+def test_put_with_never_saved_over_a_publish_deleted_row_succeeds_and_clears_tombstone(
+    client,
+    job_db,
+) -> None:
+    """never-saved = the caller already knows there is no draft: its content
+    is a new edit and inserts freely. The successful write clears the
+    tombstone (it lives only while the row is absent) — so a LATER stale
+    base is judged against the live row again, not an ancient tombstone."""
+    workspace = job_db.create_workspace("ws-store-tombstone-clear")
+    first = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
+    assert first.status_code == 200
+    stale_base = first.json()["updated_at"]
+    _publish_delete_draft(job_db, workspace["id"])
+    # The stale base still conflicts right after the publish...
+    refused = client.put(
+        _url(workspace["id"]),
+        json={"definition_yaml": _DRAFT_YAML, "expected_updated_at": stale_base},
+    )
+    assert refused.status_code == 409
+
+    # ...the client re-reads (empty draft) and retries with never-saved.
+    assert client.get(_url(workspace["id"])).json()["definition_yaml"] is None
+    recreated = client.put(
+        _url(workspace["id"]),
+        json={"definition_yaml": _DRAFT_YAML, "expected_updated_at": "never-saved"},
+    )
     assert recreated.status_code == 200, recreated.text
     assert recreated.json()["definition_yaml"] == _DRAFT_YAML
-    assert recreated.json()["updated_at"] != stale_base
+
+    # Tombstone cleared: the table holds no row for the workspace anymore.
+    with job_db.connect() as conn:
+        tombstone = conn.execute(
+            "select 1 from workspace_workflow_draft_tombstones where workspace_id=%s",
+            (workspace["id"],),
+        ).fetchone()
+    assert tombstone is None
+
+
+def test_publish_without_a_draft_row_writes_no_tombstone(client, job_db) -> None:
+    """Deleting an absent row is a no-op — no tombstone either (nothing was
+    there to guard), so a never-saved first save stays unconditional."""
+    workspace = job_db.create_workspace("ws-store-tombstone-none")
+
+    _publish_delete_draft(job_db, workspace["id"])
+
+    with job_db.connect() as conn:
+        tombstone = conn.execute(
+            "select 1 from workspace_workflow_draft_tombstones where workspace_id=%s",
+            (workspace["id"],),
+        ).fetchone()
+    assert tombstone is None
 
 
 # --- #633 codex review P2-2: an unparseable CAS token is a 422 (input

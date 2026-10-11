@@ -12,7 +12,12 @@ newer draft. #1221 adds the delete: a successful draft publish removes the
 row inside the revision write's own transaction, so the published revision
 is the single post-publish authority — conditional on the locked row still
 matching the published content's identity hash (#1226 P1: a concurrently
-saved newer draft survives as the unpublished draft).
+saved newer draft survives as the unpublished draft). The delete also
+records a publish-generation tombstone (#1226 五轮 P1, see
+``workflow_draft_tombstones.py``): a stale in-flight save (base ≤ the
+deleted row's ``updated_at``) can no longer re-insert the pre-publish
+content after the commit — it conflicts; ``never-saved`` bases insert
+freely; the tombstone is cleared by the first successful write.
 """
 
 from __future__ import annotations
@@ -21,6 +26,10 @@ from typing import Any
 
 from server.app.db.connection import DatabaseConnection
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.workflow_draft_tombstones import (
+    clear_workflow_draft_tombstone,
+    record_workflow_draft_tombstone,
+)
 
 
 class DraftConflictError(Exception):
@@ -35,10 +44,10 @@ class DraftConflictError(Exception):
 # Marker for "no draft was persisted yet" on the CAS path: a caller holding
 # the marker may insert only while the row is still absent (an existing row
 # turns the conflict-update branch into a no-op → DraftConflictError). A
-# caller holding a real timestamp whose row was DELETED underneath (publish
-# deletes the draft row, #1221) silently recreates the draft on insert —
-# allowed on purpose (#1221 §4 方案 B): the recreation reads as a fresh
-# draft. Re-exported by the service layer (workflow_draft_store) so
+# caller holding a real TIMESTAMP whose row was deleted by a publish is
+# refused by the tombstone probe (#1226 五轮 P1: base ≤ the deleted row's
+# updated_at is a pre-publish generation write, 409 instead of silent
+# resurrection). Re-exported by the service layer (workflow_draft_store) so
 # routes/clients depend on services only.
 DRAFT_NEVER_SAVED = "never-saved"
 
@@ -72,6 +81,10 @@ class WorkflowDraftQueriesMixin(ConnectionQueriesMixin):
                 """,
                 (workspace_id, definition_yaml),
             ).fetchone()
+            # #1226 五轮 P1 lifecycle: a successful write ends the publish
+            # tombstone window — the row exists again, the tombstone fired
+            # (a no-op when the workspace has none).
+            clear_workflow_draft_tombstone(conn, workspace_id)
         if row is None:
             raise RuntimeError("workflow draft upsert did not return a row")
         return dict(row)
@@ -94,14 +107,19 @@ class WorkflowDraftQueriesMixin(ConnectionQueriesMixin):
         return dict(row) if row is not None else None
 
     def delete_workspace_workflow_draft(self, conn: DatabaseConnection, workspace_id: str) -> None:
-        """Delete the workspace's draft row inside the caller's transaction (#1221).
+        """Delete the draft row + record the publish tombstone, caller's transaction.
 
         Callers decide whether the delete is warranted (publish compares the
         locked row's identity hash against the published content first —
-        #1226 P1); this is the plain removal primitive. Never commits on its
-        own; deleting an absent row is a no-op.
+        #1226 P1); this is the plain removal primitive. The tombstone
+        (#1226 五轮 P1) records the deleted row's ``updated_at`` so a stale
+        in-flight save can no longer re-INSERT the pre-publish content after
+        the commit. Never commits on its own; deleting an absent row is a
+        no-op (no row, no tombstone — nothing was there to guard).
         """
-        conn.execute(
-            "delete from workspace_workflow_drafts where workspace_id=%s",
+        row = conn.execute(
+            "delete from workspace_workflow_drafts where workspace_id=%s returning updated_at",
             (workspace_id,),
-        )
+        ).fetchone()
+        if row is not None:
+            record_workflow_draft_tombstone(conn, workspace_id, row["updated_at"])
