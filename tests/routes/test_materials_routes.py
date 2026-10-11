@@ -98,6 +98,14 @@ def test_presign_rejects_directory_like_filename_with_422(client, storage) -> No
         assert response.status_code == 422, response.text
         assert filename in response.json()["detail"]
 
+    # #1119 复验收口：空段、反斜杠、控制字符同 422（repr 转义后不做子串断言）。
+    for filename in ("a//b.txt", "a\\b.txt", "a\nb.txt"):
+        response = client.post(
+            f"/api/workspaces/{workspace_id}/materials/presign",
+            json={"filename": filename, "size_bytes": 0},
+        )
+        assert response.status_code == 422, response.text
+
     assert client.get(f"/api/workspaces/{workspace_id}/materials").json()["total"] == 0
 
 

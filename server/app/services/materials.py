@@ -52,19 +52,34 @@ def _validate_filename(filename: str) -> None:
 
     The material key is ``{workspace_id}/{hash}/{filename}``: a key ending in
     ``/`` is stored by SeaweedFS as a directory (its bytes are dropped) and
-    ``aws s3 sync`` cannot place it on a filesystem; ``.``/``..`` segments
-    normalize away on download. Same discipline as ``valid_artifact_name``
-    (job_artifact_objects) loosened to allow interior ``/`` — material names
-    are multi-segment relative paths, not single segments.
+    ``aws s3 sync`` cannot place it on a filesystem; ``.``/``..`` and empty
+    segments normalize away on download (``a//b`` and ``a/b`` land on the same
+    file and clobber each other in a backup); backslashes are re-interpreted
+    as separators by Windows-shaped consumers; control characters (newline)
+    break the backup runbook's line-based marker listing. Same discipline as
+    ``valid_artifact_name`` (job_artifact_objects) loosened only to allow
+    non-empty interior ``/`` segments — material names are multi-segment
+    relative paths, not single segments.
     """
     if filename.endswith("/"):
         raise InvalidMaterialFilenameError(
             f"filename must not end with '/': {filename!r} — object keys ending "
             "in '/' are stored as directories and cannot be downloaded"
         )
-    if any(segment in {".", ".."} for segment in filename.split("/")):
+    if "\\" in filename:
+        raise InvalidMaterialFilenameError(f"filename must not contain backslashes: {filename!r}")
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in filename):
+        raise InvalidMaterialFilenameError(
+            f"filename must not contain control characters: {filename!r}"
+        )
+    segments = filename.split("/")
+    if any(segment in {".", ".."} for segment in segments):
         raise InvalidMaterialFilenameError(
             f"filename must not contain '.' or '..' path segments: {filename!r}"
+        )
+    if not all(segments):
+        raise InvalidMaterialFilenameError(
+            f"filename must not contain empty path segments: {filename!r}"
         )
 
 

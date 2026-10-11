@@ -135,6 +135,36 @@ def test_presign_rejects_dot_segments(service, storage, filename) -> None:
     assert service.list(WORKSPACE_ID, limit=10, offset=0)["total"] == 0
 
 
+@pytest.mark.parametrize("filename", ["a//b.txt", "/a.txt", "//a.txt", "a///b.txt"])
+def test_presign_rejects_empty_segments(service, storage, filename) -> None:
+    """#1119 复验 P2：空段下载时被归一化，a//b 与 a/b 落同一文件互相覆盖。"""
+    with pytest.raises(InvalidMaterialFilenameError, match="empty path segments"):
+        service.presign(WORKSPACE_ID, filename=filename, size_bytes=1)
+
+    assert storage.presigned == []
+    assert service.list(WORKSPACE_ID, limit=10, offset=0)["total"] == 0
+
+
+@pytest.mark.parametrize("filename", ["a\\b.txt", "C:\\data\\f.txt"])
+def test_presign_rejects_backslashes(service, storage, filename) -> None:
+    r"""#1119 复验 P3：对齐 valid_artifact_name / validate_member_path 的 \ 禁令。"""
+    with pytest.raises(InvalidMaterialFilenameError, match="backslash"):
+        service.presign(WORKSPACE_ID, filename=filename, size_bytes=1)
+
+    assert storage.presigned == []
+    assert service.list(WORKSPACE_ID, limit=10, offset=0)["total"] == 0
+
+
+@pytest.mark.parametrize("filename", ["a\nb.txt", "a\tb.txt", "a\x7fb.txt", "a\x01b.txt"])
+def test_presign_rejects_control_characters(service, storage, filename) -> None:
+    """#1119 复验 P3：含换行的 key 会让备份 MARKERS 的逐行表达判失败。"""
+    with pytest.raises(InvalidMaterialFilenameError, match="control characters"):
+        service.presign(WORKSPACE_ID, filename=filename, size_bytes=1)
+
+    assert storage.presigned == []
+    assert service.list(WORKSPACE_ID, limit=10, offset=0)["total"] == 0
+
+
 def test_presign_accepts_nested_relative_path(service, storage) -> None:
     """中间带 / 的相对路径合法：材料 key 本就是多段路径，只禁目录形态。"""
     result = service.presign(

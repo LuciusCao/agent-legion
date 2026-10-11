@@ -352,10 +352,12 @@ PUT  upload_url（浏览器 → S3 直传；v1 为单 PUT presign，大文件 mu
 POST /api/workspaces/{id}/materials/{mid}/complete  服务端校验 size/hash → ready
 ```
 
-`filename` 不得以 `/` 结尾、不得含 `.` / `..` 段（presign 422，#1119）：材料 key 为
-`{workspace_id}/{hash}/{filename}`，以 `/` 结尾的 key 会被 SeaweedFS 存成目录（内容被
-丢弃），下载与备份落不了文件系统；纪律与产物名 `valid_artifact_name` 同源，放宽点是
-材料名允许中间的 `/`（多段相对路径）。
+`filename` 不得以 `/` 结尾、不得含空 / `.` / `..` 段、不得含反斜杠或控制字符（presign
+422，#1119）：材料 key 为 `{workspace_id}/{hash}/{filename}`，以 `/` 结尾的 key 会被
+SeaweedFS 存成目录（内容被丢弃），下载与备份落不了文件系统；空段与 `.` / `..` 段在下载时
+被归一化吃掉（`a//b` 与 `a/b` 落同一文件互相覆盖）；含换行的 key 会让备份清单的逐行表达
+判失败。纪律与产物名 `valid_artifact_name` 同源，放宽点只剩材料名允许中间的非空 `/` 段
+（多段相对路径）。
 
 SigV4 presigned PUT 无法约束 Content-Length，size/hash 一律由 complete 时
 服务端 HEAD + 流式校验强制（v1 实现为完整读自算 sha256，简单可靠；上传端
