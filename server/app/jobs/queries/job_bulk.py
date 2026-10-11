@@ -16,6 +16,7 @@ from server.app.jobs.queries.job_bulk_rows import (
 from server.app.jobs.queries.job_bulk_sql import (
     BUNDLE_LOCK_IN_SQL,
     CHUNK_ROWS,
+    CREATE_CHUNK_ROWS,
     MATERIAL_LOCK_IN_SQL,
     insert_job_nodes_batched,
     insert_jobs_batched,
@@ -63,7 +64,7 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         Each job carries the run's frozen config + its own input doc
         (RUN-FREEZE-001); a same-run re-submitted job takes the new freeze.
 
-        #467 A3 — chunked-commit protocol: ≤CHUNK_ROWS-row chunks, one
+        #467 A3 — chunked-commit protocol: ≤CREATE_CHUNK_ROWS-row chunks, one
         transaction each. Every chunk FOR KEY SHARE-locks exactly its own
         material/bundle refs before inserting (per-chunk lock-before-insert,
         review P1-1; the delete-serialization argument lives on
@@ -126,8 +127,9 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         owned_ids: list[str] = []
 
         with self.connect() as conn:
-            # One commit per ≤CHUNK_ROWS jobs+nodes. #1083: each chunk's FIRST
-            # statement takes its ids' job-mutation locks (sorted, held to the
+            # One commit per ≤CREATE_CHUNK_ROWS jobs+nodes (sized for the
+            # shared lock table, see job_bulk_sql). #1083: each chunk takes its
+            # ids' job-mutation locks (sorted, one statement, held to the
             # chunk's COMMIT) — creation joins the EXEC-GENERATION-001 lock
             # domain, so a deleted same-id job's post-commit cleanup ("row
             # absent under the lock → rename into .trash") can never move a
@@ -136,8 +138,8 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
             # locks its own refs FOR KEY SHARE before its INSERT (P1-1) — a
             # between-chunks delete makes the next chunk's probe fail on the
             # missing row instead of letting a dangling reference in.
-            for start in range(0, len(row_list), CHUNK_ROWS):
-                chunk = row_list[start : start + CHUNK_ROWS]
+            for start in range(0, len(row_list), CREATE_CHUNK_ROWS):
+                chunk = row_list[start : start + CREATE_CHUNK_ROWS]
                 chunk_ids = [str(row[0]) for row in chunk]
                 # #1243 codex P2: ids are concatenated from underscore-bearing
                 # fields, so a chunk id can collide with another workspace's
