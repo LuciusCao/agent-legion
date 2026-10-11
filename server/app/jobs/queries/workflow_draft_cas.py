@@ -1,60 +1,50 @@
 """Compare-and-set persistence for the Studio workflow YAML draft (#633).
 
-Split from ``workflow_drafts.py`` (budget): the CAS upsert serves the agent
-draft-save tool — an ``expected_updated_at`` that no longer matches the
-stored row raises ``DraftConflictError`` instead of overwriting a newer
-draft. #1226 五轮 P1: a row deleted by a publish leaves a tombstone
-(``workflow_draft_tombstones``); a timestamp base at or before the deleted
-row's ``updated_at`` belongs to the pre-publish generation (an in-flight
-save that outlived the delete) and now conflicts instead of silently
-recreating the row — a ``never-saved`` base still inserts freely (the
-caller already knows there is no draft; its content is a new edit).
-Constants (``DRAFT_NEVER_SAVED``) and the exception stay importable from
-``workflow_drafts`` for the existing import surface.
+Split from ``workflow_drafts.py`` (budget). #1226 五轮收口（设计 v2）：CAS
+基线货币是 workspace 级草稿代次（``workspace_workflow_draft_generation``
+的 generation 计数器），不再是 updated_at 时间戳——写入声明它基于的
+代次 G，G 落后于当前代次即 ``DraftConflictError``（409），无论草稿行
+当前存在与否（行缺失 + G == 当前代次 = 发布后空态上的首存，放行
+INSERT；行缺失 + G 落后 = 发布前代次的在途写入，409 不重建）。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from server.app.jobs.queries.workflow_draft_tombstones import (
-    clear_workflow_draft_tombstone,
-    workflow_draft_base_is_stale,
+from server.app.jobs.queries.workflow_draft_generation import (
+    bump_workflow_draft_generation_if_current,
 )
-from server.app.jobs.queries.workflow_drafts import (
-    DRAFT_NEVER_SAVED,
-    DraftConflictError,
-)
+from server.app.jobs.queries.workflow_drafts import DraftConflictError
 
 
 class WorkflowDraftCasQueriesMixin:
-    """CAS upsert for workspace_workflow_drafts (#633)."""
+    """CAS upsert for workspace_workflow_drafts (#633; generation-based #1226)."""
 
     def upsert_workspace_workflow_draft_if_unchanged(
         self,
         workspace_id: str,
         definition_yaml: str,
-        expected_updated_at: str,
+        base_generation: int,
     ) -> dict[str, Any]:
-        """Apply only when the stored draft's ``updated_at`` matches.
+        """Apply only when the workspace's draft generation still equals the base.
 
-        The stored timestamp is compared AS a timestamptz against the parsed
-        expected value — text renderings differ across channels (Postgres
-        ``::text`` emits ``+00``, Python str() emits ``+00:00``), so a strict
-        text match would reject the very value the caller just read. The
-        ``where`` clause gates only the ON CONFLICT update branch: when no
-        row exists at all, the plain INSERT would always succeed — so the
-        timestamp branch first probes the publish tombstone (#1226 五轮 P1):
-        a base covered by the tombstone (≤ the deleted row's updated_at) is
-        a pre-publish generation write and conflicts (409) instead of
-        resurrecting the deleted content; a ``never-saved`` base skips the
-        probe and inserts freely. Every successful write clears the
-        tombstone in the same transaction (it lives only while the row is
-        absent). Unparseable timestamps never match — a malformed CAS token
-        must not degrade into a blind overwrite.
+        代次判定在同一事务内三步完成：先对草稿行 FOR UPDATE（等出任何在途
+        发布——它的删行 + 代次推进同事务提交），再条件推进代次（无代次行
+        时仅 base=0 可建、有行时仅当前代次 == base 可推进，并发交错在
+        READ COMMITTED 等待后重评估），推进成功才写草稿行。锁序全程
+        「草稿行 → 代次行」，与发布删行同序，无 AB-BA。代次已前进 →
+        ``DraftConflictError``（调用方重读新基线重试），不写不推进。
         """
         with self.connect() as conn:  # type: ignore[attr-defined]
-            if expected_updated_at == DRAFT_NEVER_SAVED:
+            conn.execute(
+                "select 1 from workspace_workflow_drafts where workspace_id=%s for update",
+                (workspace_id,),
+            )
+            generation = bump_workflow_draft_generation_if_current(
+                conn, workspace_id, base_generation
+            )
+            if generation is not None:
                 row = conn.execute(
                     """
                     insert into workspace_workflow_drafts(workspace_id, definition_yaml)
@@ -62,37 +52,15 @@ class WorkflowDraftCasQueriesMixin:
                     on conflict(workspace_id) do update set
                       definition_yaml=excluded.definition_yaml,
                       updated_at=current_timestamp
-                    where workspace_workflow_drafts.workspace_id is null
                     returning workspace_id, definition_yaml, created_at, updated_at
                     """,
                     (workspace_id, definition_yaml),
                 ).fetchone()
-            elif workflow_draft_base_is_stale(conn, workspace_id, expected_updated_at):  # type: ignore[attr-defined]
-                # Pre-publish generation write (the row was deleted by a
-                # publish while this save was in flight): conflict, do not
-                # resurrect the deleted content.
-                row = None
-            else:
-                row = conn.execute(
-                    """
-                    insert into workspace_workflow_drafts(workspace_id, definition_yaml)
-                    values (%s, %s)
-                    on conflict(workspace_id) do update set
-                      definition_yaml=excluded.definition_yaml,
-                      updated_at=current_timestamp
-                    where workspace_workflow_drafts.updated_at = %s::timestamptz
-                    returning workspace_id, definition_yaml, created_at, updated_at
-                    """,
-                    (workspace_id, definition_yaml, expected_updated_at),
-                ).fetchone()
-            if row is not None:
-                clear_workflow_draft_tombstone(conn, workspace_id)
-        if row is None:
-            current = self.get_workspace_workflow_draft(workspace_id)  # type: ignore[attr-defined]
+        if generation is None:
+            current_generation = self.get_workspace_workflow_draft_generation(workspace_id)  # type: ignore[attr-defined]
             raise DraftConflictError(
                 "Workflow draft was modified by another session"
-                f" (expected updated_at {expected_updated_at},"
-                f" current updated_at"
-                f" {current['updated_at'] if current else None})"
+                f" (base generation {base_generation},"
+                f" current generation {current_generation})"
             )
-        return dict(row)
+        return dict(row) | {"generation": generation}

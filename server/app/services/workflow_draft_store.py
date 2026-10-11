@@ -5,8 +5,9 @@ rule here is that the workspace must exist (404, mirroring the workflow
 revisions routes) — the draft row itself is created by the upsert.
 
 The #633 compare-and-set save lives in ``workflow_draft_cas.py`` (split
-for the budget); ``DRAFT_NEVER_SAVED`` is re-exported here so routes and
-clients depend on this module only.
+for the budget). #1226 五轮收口：CAS 基线是草稿代次（generation），
+``get_workflow_draft`` 返回的行带 ``generation``；行缺失时的当前代次经
+``get_workspace_workflow_draft_generation`` 另取（发布后空态）。
 """
 
 from __future__ import annotations
@@ -14,18 +15,14 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.jobs.queries.workflow_drafts import DRAFT_NEVER_SAVED as _NEVER_SAVED
 from server.app.services.job_errors import NotFoundError
 from server.app.services.workflow_drafts import workflow_draft_identity_hash
 
 __all__ = [
-    "DRAFT_NEVER_SAVED",
     "attach_draft_identity_hash",
     "get_workflow_draft",
     "save_workflow_draft",
 ]
-
-DRAFT_NEVER_SAVED = _NEVER_SAVED
 
 
 def attach_draft_identity_hash(draft: dict[str, Any] | None) -> dict[str, Any] | None:

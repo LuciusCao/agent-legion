@@ -131,10 +131,12 @@ describe('useWorkflowStudio', () => {
     mocks.fetchWorkflowDraft.mockResolvedValue({
       definition_yaml: null,
       updated_at: null,
+      generation: 0,
     })
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: 'key: demo\n',
       updated_at: '2026-08-27T00:00:00+00:00',
+      generation: 1,
     })
     mocks.fetchPendingPublishRequest.mockResolvedValue(null)
     useAgentPublishNoticeStore.setState({

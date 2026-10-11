@@ -166,6 +166,7 @@ function publishSwapsBaselineToCanonicalV2() {
   mocks.fetchWorkflowDraft.mockResolvedValue({
     definition_yaml: null,
     updated_at: null,
+    generation: 0,
   })
 }
 
@@ -192,6 +193,7 @@ describe('useWorkflowStudio publish draft-row cleanup (#1226 R4)', () => {
     mocks.fetchWorkflowDraft.mockResolvedValue({
       definition_yaml: null,
       updated_at: null,
+      generation: 0,
     })
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: EDITED_YAML,

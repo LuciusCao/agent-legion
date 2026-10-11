@@ -1,4 +1,4 @@
-"""Schema v95: ``workspace_workflow_draft_tombstones`` (#1226 五轮 codex P1).
+"""Schema v95: ``workspace_workflow_draft_generation`` (#1226 五轮收口, 设计 v2).
 
 Pins the migration side: fresh installs and upgrades from pre-v95 both land
 the table, and the chain tail carries the v95 name. Mirrors
@@ -15,21 +15,21 @@ from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
 
-def _tombstone_table_columns(conn) -> list[str]:
+def _generation_table_columns(conn) -> list[str]:
     rows = conn.execute(
         "select column_name from information_schema.columns"
         " where table_schema=current_schema()"
-        " and table_name='workspace_workflow_draft_tombstones'"
+        " and table_name='workspace_workflow_draft_generation'"
     ).fetchall()
     return [str(row["column_name"]) for row in rows]
 
 
-def test_fresh_schema_has_draft_tombstones_table() -> None:
+def test_fresh_schema_has_draft_generation_table() -> None:
     # The autouse fixture already ran init_db at SCHEMA_VERSION.
     assert SCHEMA_VERSION >= 95
     with read_connection(TEST_DATABASE_URL) as conn:
-        columns = _tombstone_table_columns(conn)
-    assert columns == ["workspace_id", "deleted_updated_at", "deleted_at"]
+        columns = _generation_table_columns(conn)
+    assert columns == ["workspace_id", "generation"]
 
 
 @pytest.mark.fresh_schema
@@ -38,10 +38,10 @@ def test_upgrade_from_pre_v95_adds_the_table() -> None:
     # (no-op) and runs the v95 migration: the migration module owns the DDL.
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("delete from schema_migrations where version >= 95")
-        conn.execute("drop table if exists workspace_workflow_draft_tombstones")
+        conn.execute("drop table if exists workspace_workflow_draft_generation")
     init_db(TEST_DATABASE_URL)
     with read_connection(TEST_DATABASE_URL) as conn:
-        columns = _tombstone_table_columns(conn)
+        columns = _generation_table_columns(conn)
         row = conn.execute("select name from schema_migrations where version=%s", (95,)).fetchone()
-    assert row is not None and row["name"] == "workflow_draft_tombstones"
-    assert columns == ["workspace_id", "deleted_updated_at", "deleted_at"]
+    assert row is not None and row["name"] == "workflow_draft_generation"
+    assert columns == ["workspace_id", "generation"]

@@ -119,6 +119,8 @@ def test_publish_success_deletes_the_stored_draft_row(tmp_path):
         "definition_yaml": None,
         "updated_at": None,
         "definition_hash": None,
+        # #1226 五轮收口：发布 = 删行 + 代次推进（PUT 落盘 1 → 发布删行 2）。
+        "generation": 2,
     }
 
 

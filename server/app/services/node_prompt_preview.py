@@ -21,7 +21,6 @@ from server.app.services.agent_node_profile import resolve_agent_node_profile
 from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.workflow_draft_cas import save_workflow_draft_if_unchanged
-from server.app.services.workflow_draft_store import DRAFT_NEVER_SAVED
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
 from server.app.workflows.definition import workflow_definition_from_dict
 from server.app.workflows.node_prompt import build_default_node_instructions
@@ -157,13 +156,21 @@ def save_node_prompt(
     the node falls back to the auto-assembled default instructions. #513:
     ``prompt_mode`` (append/overwrite) may be set alongside; ``None`` leaves
     the stored mode untouched. The new draft is fully built and validated
-    before the single upsert applies it. The save carries the read row's
-    ``updated_at`` as its CAS base (#1226 五轮 P1): a publish deleting the
-    row between the read and the write leaves a tombstone that refuses this
-    pre-publish-generation write with a conflict instead of resurrecting the
-    deleted content.
+    before the single upsert applies it. The save is compare-and-set on the
+    read-time draft generation (#1226 五轮收口): a publish (or another save)
+    advancing the generation between the read and the write refuses this
+    stale-base write with a conflict instead of resurrecting the deleted
+    content or overwriting a newer draft.
     """
     draft = job_db.get_workspace_workflow_draft(workspace_id)
+    # CAS base = 读取时刻的草稿代次（无行时取 workspace 当前代次——发布后
+    # 空态也有代次）。读-判-写之间发布删行推进会次 → 本次写入 409 而不是
+    # 重建旧内容（#1226 五轮收口）。
+    base_generation = (
+        int(draft["generation"])
+        if draft is not None
+        else job_db.get_workspace_workflow_draft_generation(workspace_id)
+    )
     base_yaml = str(draft["definition_yaml"]) if draft is not None else None
     if base_yaml is None:
         workspace = job_db.get_workspace(workspace_id)
@@ -195,11 +202,10 @@ def save_node_prompt(
     updated_definition = replace(
         base_definition, nodes={**base_definition.nodes, node_key: updated_node}
     )
-    # CAS base = the read row's updated_at (never-saved when the edit bases
-    # on the active revision without a draft row).
-    cas_base = str(draft["updated_at"]) if draft is not None else DRAFT_NEVER_SAVED
+    # CAS base = 读取时刻的草稿代次（无行时取 workspace 当前代次——发布后
+    # 空态也有代次）。
     saved = save_workflow_draft_if_unchanged(
-        job_db, workspace_id, definition_to_yaml(updated_definition), cas_base
+        job_db, workspace_id, definition_to_yaml(updated_definition), base_generation
     )
     return {
         "node_key": node_key,

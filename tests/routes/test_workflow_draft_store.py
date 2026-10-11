@@ -19,6 +19,7 @@ def test_get_returns_structured_empty_state(client, job_db) -> None:
         "definition_yaml": None,
         "updated_at": None,
         "definition_hash": None,
+        "generation": 0,
     }
 
 
@@ -109,6 +110,7 @@ def test_drafts_are_isolated_between_workspaces(client, job_db) -> None:
         "definition_yaml": None,
         "updated_at": None,
         "definition_hash": None,
+        "generation": 0,
     }
 
 
@@ -153,26 +155,71 @@ def test_scoped_token_cannot_write_but_can_read(client, job_db) -> None:
     assert got.json()["definition_yaml"] == _DRAFT_YAML
 
 
-# --- #633 codex review P1-1: the human PUT's expected_updated_at is a real
-# CAS base (stale → 409 with the current draft), and an absent field keeps
-# the legacy last-write-wins semantics for old clients.
+# --- #633 codex review P1-1 + #1226 五轮收口（设计 v2）：PUT 的 CAS 基线是
+# 草稿代次（base_generation）——唯一不变量「写入声明它基于的代次 G，G
+# 落后于当前代次即 409」；缺省 = legacy 无代次 LWW 放行。本节按迁移表逐格
+# 钉住（代次匹配 × 行在/行缺，代次落后 × 行在/行缺，legacy 两格）。
+#
+# 代次推进规则：每次成功写 +1、发布删行 +1；行缺失时 GET 空态也携带当前
+# 代次（发布后空态上的首存以它为 base）。
 
 
-def test_put_with_stale_expected_updated_at_gets_409_with_current_draft(client, job_db) -> None:
-    """The exact failure CAS was built to prevent: an agent-saved draft must
-    NOT be silently overwritten by a human autosave carrying a stale base —
-    the 409 detail carries the current draft (same payload shape as the tool
-    surface) so the editor can rebase in one round-trip."""
+def _generation(client, workspace_id: str) -> int:
+    return int(client.get(_url(workspace_id)).json()["generation"])
+
+
+def test_put_with_matching_base_generation_succeeds(client, job_db) -> None:
+    """迁移表「G=g × 行存在」：覆盖写入，代次 +1。"""
+    workspace = job_db.create_workspace("ws-store-cas-ok")
+    first = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
+    base = first.json()["generation"]
+    assert base == 1
+
+    matched = client.put(
+        _url(workspace["id"]),
+        json={"definition_yaml": "key: wf\nlabel: V2\n", "base_generation": base},
+    )
+
+    assert matched.status_code == 200, matched.text
+    assert matched.json()["generation"] == 2
+    assert client.get(_url(workspace["id"])).json()["definition_yaml"] == "key: wf\nlabel: V2\n"
+
+
+def test_put_on_post_publish_empty_state_with_current_generation_inserts(client, job_db) -> None:
+    """迁移表「G=g × 行不存在」：读到发布后空态（代次 g）的首存放行
+    INSERT——它声明的就是当前代次，不是发布前代次。"""
+    workspace = job_db.create_workspace("ws-store-gen-insert")
+    first = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
+    assert first.status_code == 200
+    _publish_delete_draft(job_db, workspace["id"])
+
+    empty = client.get(_url(workspace["id"]))
+    assert empty.json()["definition_yaml"] is None
+    current_generation = int(empty.json()["generation"])
+    assert current_generation == 2  # write(+1) + publish delete(+1)
+
+    inserted = client.put(
+        _url(workspace["id"]),
+        json={"definition_yaml": _DRAFT_YAML, "base_generation": current_generation},
+    )
+    assert inserted.status_code == 200, inserted.text
+    assert inserted.json()["generation"] == 3
+
+
+def test_put_with_stale_base_generation_gets_409_with_current_draft(client, job_db) -> None:
+    """迁移表「G<g × 行存在」：agent 保存的草稿不得被持落后代次的人类
+    自动保存静默覆盖——409 的 detail 携带当前草稿（与当前代次），编辑器
+    一轮重 base 即可恢复。"""
     workspace = job_db.create_workspace("ws-store-cas-stale")
     first = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
     assert first.status_code == 200
-    stale_base = first.json()["updated_at"]
+    stale_base = int(first.json()["generation"])
 
     # The agent tool surface (or another session) saves a newer draft.
     agent_yaml = "key: wf\nlabel: Agent v2\n"
     agent_saved = client.put(
         f"/api/studio-agent/tools/workspaces/{workspace['id']}/workflow/draft",
-        json={"definition_yaml": agent_yaml, "expected_updated_at": stale_base},
+        json={"definition_yaml": agent_yaml, "base_generation": stale_base},
         headers=_admin_bearer(client, job_db),
     )
     assert agent_saved.status_code == 200, agent_saved.text
@@ -180,17 +227,15 @@ def test_put_with_stale_expected_updated_at_gets_409_with_current_draft(client, 
     # The human editor's PUT with the now-stale base loses the race loudly.
     conflict = client.put(
         _url(workspace["id"]),
-        json={
-            "definition_yaml": "key: wf\nlabel: Human edit\n",
-            "expected_updated_at": stale_base,
-        },
+        json={"definition_yaml": "key: wf\nlabel: Human edit\n", "base_generation": stale_base},
     )
 
     assert conflict.status_code == 409, conflict.text
     detail = conflict.json()["detail"]
-    assert detail["expected_updated_at"] == stale_base
+    assert detail["base_generation"] == stale_base
     assert detail["current_draft"]["definition_yaml"] == agent_yaml
     assert detail["current_draft"]["updated_at"]
+    assert detail["current_draft"]["generation"] == stale_base + 1
     # #1143：current_draft 携带语义身份（采用服务端版本的一侧据此恢复
     # savedHash，草稿卡核对不误报）。
     from server.app.services.workflow_drafts import workflow_draft_identity_hash
@@ -218,12 +263,12 @@ def test_put_with_stale_expected_updated_at_gets_409_with_current_draft(client, 
     # The agent-saved draft was NOT overwritten.
     assert client.get(_url(workspace["id"])).json()["definition_yaml"] == agent_yaml
 
-    # Rebasing with the current timestamp succeeds.
+    # Rebasing onto the current generation succeeds.
     rebased = client.put(
         _url(workspace["id"]),
         json={
             "definition_yaml": "key: wf\nlabel: Human edit\n",
-            "expected_updated_at": detail["current_draft"]["updated_at"],
+            "base_generation": detail["current_draft"]["generation"],
         },
     )
     assert rebased.status_code == 200, rebased.text
@@ -232,20 +277,18 @@ def test_put_with_stale_expected_updated_at_gets_409_with_current_draft(client, 
     )
 
 
-def test_put_without_expected_updated_at_keeps_last_write_wins(client, job_db) -> None:
-    """Backward compatibility: an absent/null expected_updated_at keeps the
-    documented two-tab last-write-wins semantics (no 409 for legacy callers)."""
+def test_put_without_base_generation_keeps_last_write_wins(client, job_db) -> None:
+    """迁移表「legacy 无代次」两格：行存在覆盖写入、行不存在 INSERT——
+    兼容放行（设计 v2 记明的残余：无法在发布代次边界受保护），显式 null
+    同论。"""
     workspace = job_db.create_workspace("ws-store-cas-none")
     first = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
-    base = first.json()["updated_at"]
+    base = int(first.json()["generation"])
 
     # A newer draft lands (any writer), then a legacy PUT without the field.
     newer = client.put(
         _url(workspace["id"]),
-        json={
-            "definition_yaml": "key: wf\nlabel: Newer\n",
-            "expected_updated_at": base,
-        },
+        json={"definition_yaml": "key: wf\nlabel: Newer\n", "base_generation": base},
     )
     assert newer.status_code == 200
     legacy = client.put(_url(workspace["id"]), json={"definition_yaml": "key: wf\nlabel: Legacy\n"})
@@ -255,154 +298,107 @@ def test_put_without_expected_updated_at_keeps_last_write_wins(client, job_db) -
     # The same for an explicit null.
     explicit_null = client.put(
         _url(workspace["id"]),
-        json={
-            "definition_yaml": "key: wf\nlabel: Explicit null\n",
-            "expected_updated_at": None,
-        },
+        json={"definition_yaml": "key: wf\nlabel: Explicit null\n", "base_generation": None},
     )
     assert explicit_null.status_code == 200
     assert client.get(_url(workspace["id"])).json()["definition_yaml"] == (
         "key: wf\nlabel: Explicit null\n"
     )
+    # legacy 行不存在格：删除后无 base 的写入照样 INSERT（放行残余）。
+    _publish_delete_draft(job_db, workspace["id"])
+    legacy_insert = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
+    assert legacy_insert.status_code == 200
 
 
-def test_put_with_matching_expected_updated_at_succeeds(client, job_db) -> None:
-    workspace = job_db.create_workspace("ws-store-cas-ok")
-    first = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
-    base = first.json()["updated_at"]
-
-    matched = client.put(
-        _url(workspace["id"]),
-        json={
-            "definition_yaml": "key: wf\nlabel: V2\n",
-            "expected_updated_at": base,
-        },
-    )
-
-    assert matched.status_code == 200, matched.text
-    assert client.get(_url(workspace["id"])).json()["definition_yaml"] == "key: wf\nlabel: V2\n"
-
-
-def test_put_with_never_saved_conflicts_when_a_draft_already_exists(client, job_db) -> None:
-    """never-saved is only valid while the draft truly does not exist; a
-    caller that last saw a draft must not insert over its absence."""
-    workspace = job_db.create_workspace("ws-store-cas-ns")
-    client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
-
-    conflict = client.put(
-        _url(workspace["id"]),
-        json={"definition_yaml": "key: wf\nlabel: V2\n", "expected_updated_at": "never-saved"},
-    )
-
-    assert conflict.status_code == 409
-    assert conflict.json()["detail"]["current_draft"]["definition_yaml"] == _DRAFT_YAML
-
-
-# --- #1226 五轮 codex P1: publish-generation tombstone — a stale CAS base
-# over a publish-deleted row conflicts (409) instead of resurrecting the
-# pre-publish content; never-saved (client knows there is no draft) inserts
-# freely; a successful write clears the tombstone.
+# --- #1226 五轮收口：发布 = 删行 + 代次推进——发布前代次的在途写入 409
+# （不再重建旧内容），读到发布后空态的写入按当前代次放行。
 
 
 def _publish_delete_draft(job_db, workspace_id: str) -> None:
-    """What the publish hook does: delete the row + record the tombstone."""
+    """What the publish hook does: delete the row + bump the generation."""
     with job_db.connect() as conn:
         job_db.delete_workspace_workflow_draft(conn, workspace_id)
 
 
-def test_put_with_stale_base_over_a_publish_deleted_row_conflicts(client, job_db) -> None:
-    """An in-flight save holding a pre-publish ``updated_at`` must NOT
-    re-INSERT the deleted content: the tombstone covers bases at or before
-    the deleted row's timestamp, the answer is a 409 whose current_draft is
-    null (the「仅解除警示」path), and the draft store stays empty."""
-    workspace = job_db.create_workspace("ws-store-tombstone")
+def test_put_with_pre_publish_base_generation_conflicts_without_resurrecting(
+    client, job_db
+) -> None:
+    """迁移表「G<g × 行不存在」：已越过 debounce、发布删行后才到达的在途
+    写入——代次落后于发布后的当前代次，409（current_draft 内容全 null，
+    前端「仅解除警示」路径），被删内容不得重建。"""
+    workspace = job_db.create_workspace("ws-store-gen-stale")
     first = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
     assert first.status_code == 200
-    stale_base = first.json()["updated_at"]
+    pre_publish_base = int(first.json()["generation"])
 
     _publish_delete_draft(job_db, workspace["id"])
 
     refused = client.put(
         _url(workspace["id"]),
-        json={"definition_yaml": _DRAFT_YAML, "expected_updated_at": stale_base},
+        json={"definition_yaml": _DRAFT_YAML, "base_generation": pre_publish_base},
     )
 
     assert refused.status_code == 409, refused.text
     detail = refused.json()["detail"]
-    assert detail["expected_updated_at"] == stale_base
+    assert detail["base_generation"] == pre_publish_base
     assert detail["current_draft"]["definition_yaml"] is None
     assert detail["current_draft"]["updated_at"] is None
+    # 空态的当前代次仍可读（重 base 的落点）。
+    assert detail["current_draft"]["generation"] == pre_publish_base + 1
     # The deleted row was NOT resurrected.
     assert client.get(_url(workspace["id"])).json()["definition_yaml"] is None
 
 
-def test_put_with_never_saved_over_a_publish_deleted_row_succeeds_and_clears_tombstone(
-    client,
-    job_db,
-) -> None:
-    """never-saved = the caller already knows there is no draft: its content
-    is a new edit and inserts freely. The successful write clears the
-    tombstone (it lives only while the row is absent) — so a LATER stale
-    base is judged against the live row again, not an ancient tombstone."""
-    workspace = job_db.create_workspace("ws-store-tombstone-clear")
-    first = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
-    assert first.status_code == 200
-    stale_base = first.json()["updated_at"]
+def test_first_save_after_reading_empty_then_publish_conflicts(client, job_db) -> None:
+    """R6：tab B 读到空草稿（代次 0）后，另一写入者保存草稿、随后发布
+    （删行 + 代次推进）——B 的首次保存声明的是落后代次，409 而不是把
+    「发布前读到的空态内容」写成新草稿。代次判定对 never-saved 场景不再
+    豁免：空读的代次也是代次。"""
+    workspace = job_db.create_workspace("ws-store-gen-r6")
+    empty = client.get(_url(workspace["id"]))
+    assert empty.json()["definition_yaml"] is None
+    tab_b_base = int(empty.json()["generation"])  # 0
+
+    # 另一写入者建了草稿（gen 1），随后发布删除（gen 2）。
+    client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
     _publish_delete_draft(job_db, workspace["id"])
-    # The stale base still conflicts right after the publish...
+
     refused = client.put(
         _url(workspace["id"]),
-        json={"definition_yaml": _DRAFT_YAML, "expected_updated_at": stale_base},
+        json={"definition_yaml": "key: wf\nlabel: B 的编辑\n", "base_generation": tab_b_base},
     )
-    assert refused.status_code == 409
 
-    # ...the client re-reads (empty draft) and retries with never-saved.
+    assert refused.status_code == 409, refused.text
     assert client.get(_url(workspace["id"])).json()["definition_yaml"] is None
-    recreated = client.put(
-        _url(workspace["id"]),
-        json={"definition_yaml": _DRAFT_YAML, "expected_updated_at": "never-saved"},
-    )
-    assert recreated.status_code == 200, recreated.text
-    assert recreated.json()["definition_yaml"] == _DRAFT_YAML
-
-    # Tombstone cleared: the table holds no row for the workspace anymore.
-    with job_db.connect() as conn:
-        tombstone = conn.execute(
-            "select 1 from workspace_workflow_draft_tombstones where workspace_id=%s",
-            (workspace["id"],),
-        ).fetchone()
-    assert tombstone is None
 
 
-def test_publish_without_a_draft_row_writes_no_tombstone(client, job_db) -> None:
-    """Deleting an absent row is a no-op — no tombstone either (nothing was
-    there to guard), so a never-saved first save stays unconditional."""
-    workspace = job_db.create_workspace("ws-store-tombstone-none")
+def test_publish_without_a_draft_row_advances_nothing(client, job_db) -> None:
+    """行缺失时不删不进代次（删除是代次边界的载体）——空态首存不受影响。"""
+    workspace = job_db.create_workspace("ws-store-gen-noop")
 
     _publish_delete_draft(job_db, workspace["id"])
 
-    with job_db.connect() as conn:
-        tombstone = conn.execute(
-            "select 1 from workspace_workflow_draft_tombstones where workspace_id=%s",
-            (workspace["id"],),
-        ).fetchone()
-    assert tombstone is None
+    assert _generation(client, workspace["id"]) == 0
+    first = client.put(
+        _url(workspace["id"]),
+        json={"definition_yaml": _DRAFT_YAML, "base_generation": 0},
+    )
+    assert first.status_code == 200
+    assert first.json()["generation"] == 1
 
 
-# --- #633 codex review P2-2: an unparseable CAS token is a 422 (input
-# error), never a DB error (500) from the timestamptz cast.
+# --- base_generation 校验：负数/非整数是 422（输入错误），不进 SQL。
 
 
-def test_put_with_invalid_expected_updated_at_gets_422(client, job_db) -> None:
+def test_put_with_invalid_base_generation_gets_422(client, job_db) -> None:
     workspace = job_db.create_workspace("ws-store-cas-bad")
 
-    for bad in ("garbage", "2026-13-45T99:99:99+00:00", "yesterday"):
+    for bad in (-1, "garbage", "2026-13-45"):
         response = client.put(
             _url(workspace["id"]),
-            json={"definition_yaml": _DRAFT_YAML, "expected_updated_at": bad},
+            json={"definition_yaml": _DRAFT_YAML, "base_generation": bad},
         )
         assert response.status_code == 422, bad
-        assert "expected_updated_at must be an ISO timestamp" in response.text
     # Nothing was stored.
     assert client.get(_url(workspace["id"])).json()["definition_yaml"] is None
 

@@ -20,7 +20,8 @@ import type { ServerDraftConflict } from './useServerDraftApply'
  * 4. #1226 四轮 P1 草稿行消失：发布成功删除草稿行后重取到「无草稿」——
  *    这不是「更旧的草稿」（updated_at 为 null 永远不比 hydratedAt 新，
  *    时间戳守卫不适用），而是「无存档」：必须重新 hydrate 到当前基线
- *    （null 时间戳 → 下一次保存以 never-saved 竞争），否则保存控制器仍持
+ *    （空态响应携带当前代次 → 下一次保存以该代次竞争，#1226 五轮收口），
+ *    否则保存控制器仍持
  *    已删草稿的旧基线，画布 reset 到 canonical 后的尾随 schedule 会被判成
  *    新编辑，debounce 到期 PUT 立刻重建刚删的草稿行。
  *
@@ -64,18 +65,15 @@ export function useDraftServerSync(
     if (!hydrated) setHydrated(true)
     const conflict = hydrated ? consumeConflict() : null
     if (conflict) {
-      controllerRef.current?.enterConflict(
-        conflict.yaml,
-        conflict.updatedAt,
-        conflict.hash
-      )
-      hydratedAtRef.current = conflict.updatedAt || null
+      const { yaml, updatedAt, hash, generation } = conflict
+      controllerRef.current?.enterConflict(yaml, updatedAt, hash, generation)
+      hydratedAtRef.current = updatedAt || null
       return
     }
     if (serverDraft.definition_yaml == null) {
       // #1226 四轮 P1：草稿行消失（发布删除）不是「更旧」而是「无存档」，
-      // 时间戳守卫不适用——按当前基线重 hydrate（null 时间戳 → 下一次保存
-      // 以 never-saved 竞争），同一基线只补一次。
+      // 时间戳守卫不适用——按当前基线重 hydrate（空态响应携带当前代次，
+      // hydrate 后下一次保存以该代次竞争），同一基线只补一次。
       if (nullBaselineHydratedRef.current === originalYaml) return
       nullBaselineHydratedRef.current = originalYaml
     } else {
@@ -90,6 +88,7 @@ export function useDraftServerSync(
     controllerRef.current?.hydrate(
       serverDraft.definition_yaml ?? originalYaml,
       serverDraft.updated_at,
+      serverDraft.generation,
       serverDraft.definition_hash ?? null
     )
     hydratedAtRef.current = serverDraft.updated_at ?? null
@@ -103,9 +102,15 @@ export function useDraftServerSync(
       serverYaml: string,
       serverAt: string | null,
       onAdopt?: (yaml: string) => void,
-      serverHash?: string | null
+      serverHash?: string | null,
+      serverGeneration?: number | null
     ) => {
-      controllerRef.current?.adoptServerDraft(serverYaml, serverAt, serverHash)
+      controllerRef.current?.adoptServerDraft(
+        serverYaml,
+        serverAt,
+        serverHash,
+        serverGeneration
+      )
       onAdopt?.(serverYaml)
     },
     [controllerRef]

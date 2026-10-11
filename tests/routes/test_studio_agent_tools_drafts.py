@@ -1,5 +1,5 @@
 """Studio-agent tool surface: the workflow draft tools (read + CAS write,
-issue #633).
+issue #633; generation-based CAS since #1226 五轮收口).
 
 Split from test_studio_agent_tools.py when it crossed the 800-line
 test-file budget (#779 codex train review R3); cases migrated verbatim.
@@ -30,10 +30,14 @@ def _draft_url(workspace_id: str) -> str:
     return f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/draft"
 
 
+def _generation(scoped, workspace_id: str) -> int:
+    return int(scoped.get(_draft_url(workspace_id)).json()["generation"])
+
+
 def test_get_workflow_draft_empty_state(client, job_db) -> None:
-    """#633：读工具的结构化空态与人侧 GET 一致——无草稿 200 + 三 null，
-    不是 404（agent 可据此走 from-scratch 流）。#1143：definition_hash
-    一并入空态。"""
+    """#633：读工具的结构化空态与人侧 GET 一致——无草稿 200 + 内容字段全
+    null + 当前代次（0），不是 404（agent 可据此走 from-scratch 流）。
+    #1143：definition_hash 一并入空态；#1226 五轮收口：代次入空态。"""
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
 
@@ -44,52 +48,56 @@ def test_get_workflow_draft_empty_state(client, job_db) -> None:
         "definition_yaml": None,
         "updated_at": None,
         "definition_hash": None,
+        "generation": 0,
     }
 
 
 def test_save_workflow_draft_roundtrip_with_canvas(client, job_db) -> None:
     """#633 核心验收：agent 保存的草稿落到画布同一份草稿行——人侧
     workflow-draft GET 读到同一 YAML/updated_at。#1143：两侧读到的语义
-    身份 hash 一致（草稿卡核对用）。"""
+    身份 hash 一致（草稿卡核对用）。#1226：代次同读同写。"""
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
     draft_yaml = _active_yaml(scoped, workspace_id).replace("label: ", "label: v2 ", 1)
+    base = _generation(scoped, workspace_id)
 
     saved = scoped.put(
         _draft_url(workspace_id),
-        json={"definition_yaml": draft_yaml, "expected_updated_at": "never-saved"},
+        json={"definition_yaml": draft_yaml, "base_generation": base},
     )
 
     assert saved.status_code == 200, saved.text
     assert saved.json()["definition_yaml"] == draft_yaml
     assert saved.json()["updated_at"]
     assert saved.json()["definition_hash"]
+    assert saved.json()["generation"] == base + 1
     # The human editor's draft store reads the SAME row (identity included).
     human = client.get(f"/api/workspaces/{workspace_id}/workflow-draft")
     assert human.status_code == 200
     assert human.json()["definition_yaml"] == draft_yaml
     assert human.json()["updated_at"] == saved.json()["updated_at"]
     assert human.json()["definition_hash"] == saved.json()["definition_hash"]
+    assert human.json()["generation"] == saved.json()["generation"]
 
     got = scoped.get(_draft_url(workspace_id))
     assert got.json() == saved.json()
 
 
 def test_save_workflow_draft_cas_roundtrip_and_conflict(client, job_db) -> None:
-    """#633 并发保护：stale expected_updated_at → 409 + 结构化 payload 携带
-    当前草稿；用返回的新 updated_at rebase 后保存成功。"""
+    """#633 并发保护（#1226 代次基线）：stale base_generation → 409 + 结构化
+    payload 携带当前草稿与当前代次；用返回的新代次 rebase 后保存成功。"""
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
     draft_yaml = _active_yaml(scoped, workspace_id)
 
     first = scoped.put(
         _draft_url(workspace_id),
-        json={"definition_yaml": draft_yaml, "expected_updated_at": "never-saved"},
+        json={"definition_yaml": draft_yaml, "base_generation": 0},
     )
     assert first.status_code == 200
-    updated_at = first.json()["updated_at"]
+    base = int(first.json()["generation"])
 
-    # A stale token (the draft moved on via the human editor's surface).
+    # A stale base (the draft moved on via the human editor's surface).
     human_edit = "key: other\nlabel: human\n"
     client.put(
         f"/api/workspaces/{workspace_id}/workflow-draft",
@@ -98,12 +106,13 @@ def test_save_workflow_draft_cas_roundtrip_and_conflict(client, job_db) -> None:
 
     conflict = scoped.put(
         _draft_url(workspace_id),
-        json={"definition_yaml": draft_yaml, "expected_updated_at": updated_at},
+        json={"definition_yaml": draft_yaml, "base_generation": base},
     )
     assert conflict.status_code == 409, conflict.text
     detail = conflict.json()["detail"]
-    assert detail["expected_updated_at"] == updated_at
+    assert detail["base_generation"] == base
     assert detail["current_draft"]["definition_yaml"] == human_edit
+    assert detail["current_draft"]["generation"] == base + 1
     assert detail["current_draft"]["updated_at"]
     # #1143：current_draft 携带语义身份（采用服务端版本的一侧恢复 savedHash）。
     from server.app.services.workflow_drafts import workflow_draft_identity_hash
@@ -119,24 +128,25 @@ def test_save_workflow_draft_cas_roundtrip_and_conflict(client, job_db) -> None:
     # The stored draft was NOT overwritten.
     assert scoped.get(_draft_url(workspace_id)).json()["definition_yaml"] == human_edit
 
-    # Rebase with the current timestamp from the conflict payload succeeds.
+    # Rebase with the current generation from the conflict payload succeeds.
     rebased = scoped.put(
         _draft_url(workspace_id),
         json={
             "definition_yaml": draft_yaml,
-            "expected_updated_at": detail["current_draft"]["updated_at"],
+            "base_generation": detail["current_draft"]["generation"],
         },
     )
     assert rebased.status_code == 200, rebased.text
     assert scoped.get(_draft_url(workspace_id)).json()["definition_yaml"] == draft_yaml
 
 
-def test_save_workflow_draft_conflict_when_draft_created_after_never_saved(client, job_db) -> None:
-    """never-saved 基线只在草稿确实仍不存在时成立：草稿已被创建后再用
-    never-saved 保存是冲突，不得静默覆盖。"""
+def test_save_workflow_draft_conflict_when_draft_created_after_empty_read(client, job_db) -> None:
+    """空读（代次 0）后草稿已被创建（代次推进）→ 再用旧代次保存是冲突
+    （#633 的 never-saved 守卫的代次形态，#1226 R6 同源），不得静默覆盖。"""
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
     draft_yaml = _active_yaml(scoped, workspace_id)
+    empty_base = _generation(scoped, workspace_id)
 
     client.put(
         f"/api/workspaces/{workspace_id}/workflow-draft",
@@ -145,7 +155,7 @@ def test_save_workflow_draft_conflict_when_draft_created_after_never_saved(clien
 
     response = scoped.put(
         _draft_url(workspace_id),
-        json={"definition_yaml": draft_yaml, "expected_updated_at": "never-saved"},
+        json={"definition_yaml": draft_yaml, "base_generation": empty_base},
     )
     assert response.status_code == 409
     assert response.json()["detail"]["current_draft"]["definition_yaml"] == (
@@ -158,64 +168,58 @@ def test_workflow_draft_tools_404_for_unknown_workspace(client, job_db) -> None:
     assert scoped.get(_draft_url("ws-missing")).status_code == 404
     put = scoped.put(
         _draft_url("ws-missing"),
-        json={"definition_yaml": "key: x\n", "expected_updated_at": "never-saved"},
+        json={"definition_yaml": "key: x\n", "base_generation": 0},
     )
     assert put.status_code == 404
 
 
-def test_save_workflow_draft_rejects_blank_and_missing_cas_token(client, job_db) -> None:
-    """空白草稿/缺失 CAS 时间戳是 422（契约层拒绝），不落库。"""
+def test_save_workflow_draft_rejects_blank_and_missing_base_generation(client, job_db) -> None:
+    """空白草稿/缺失 base_generation 是 422（契约层拒绝），不落库。"""
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
 
     blank = scoped.put(
         _draft_url(workspace_id),
-        json={"definition_yaml": "   \n", "expected_updated_at": "never-saved"},
+        json={"definition_yaml": "   \n", "base_generation": 0},
     )
     assert blank.status_code == 422
 
-    no_token = scoped.put(_draft_url(workspace_id), json={"definition_yaml": "key: x\n"})
-    assert no_token.status_code == 422
+    no_base = scoped.put(_draft_url(workspace_id), json={"definition_yaml": "key: x\n"})
+    assert no_base.status_code == 422
 
     assert scoped.get(_draft_url(workspace_id)).json()["definition_yaml"] is None
 
 
-def test_save_workflow_draft_rejects_unparseable_cas_token_with_422(client, job_db) -> None:
-    """#633 codex review P2-2：非法 CAS 时间戳（既非 never-saved 也非 ISO）是
-    契约层 422——否则 timestamptz cast 会以 500 DB 错误暴露，而不是清晰的
-    "no match → conflict"。"""
+def test_save_workflow_draft_rejects_invalid_base_generation_with_422(client, job_db) -> None:
+    """非法代次（负数/非整数）是契约层 422——不是 DB 错误（500）。"""
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
 
-    for bad in ("garbage", "2026-13-45T99:99:99+00:00", "yesterday"):
+    for bad in (-1, "garbage", "never-saved"):
         response = scoped.put(
             _draft_url(workspace_id),
-            json={"definition_yaml": "key: x\n", "expected_updated_at": bad},
+            json={"definition_yaml": "key: x\n", "base_generation": bad},
         )
         assert response.status_code == 422, bad
-        assert "expected_updated_at must be an ISO timestamp" in response.text
 
     assert scoped.get(_draft_url(workspace_id)).json()["definition_yaml"] is None
 
 
-def test_save_workflow_draft_valid_but_stale_timestamp_gets_409_not_422(client, job_db) -> None:
-    """合法 ISO 但已过期的基线走正常 CAS 冲突（409 + current_draft），
-    never-saved 在草稿确实不存在时成功——422 只拦「非法格式」。"""
+def test_save_workflow_draft_stale_base_gets_409_not_422(client, job_db) -> None:
+    """合法但已过期的代次基线走正常 CAS 冲突（409 + current_draft）——
+    422 只拦「非法值」。"""
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
 
     ok = scoped.put(
         _draft_url(workspace_id),
-        json={"definition_yaml": "key: first\n", "expected_updated_at": "never-saved"},
+        json={"definition_yaml": "key: first\n", "base_generation": 0},
     )
     assert ok.status_code == 200, ok.text
 
     stale = scoped.put(
         _draft_url(workspace_id),
-        json={
-            "definition_yaml": "key: second\n",
-            "expected_updated_at": "2020-01-01T00:00:00+00:00",
-        },
+        json={"definition_yaml": "key: second\n", "base_generation": 0},
     )
     assert stale.status_code == 409, stale.text
     assert stale.json()["detail"]["current_draft"]["definition_yaml"] == "key: first\n"

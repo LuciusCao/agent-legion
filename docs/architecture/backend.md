@@ -540,7 +540,7 @@ server/app/
 | StudioContextEdge | BaseModel | source: str, target: str | app/routes/studio_agent_context_contracts.py |
 | StudioContextWorkflow | BaseModel | workflow_key: str, version: int, nodes: list[StudioContextNode], edges: list[... | app/routes/studio_agent_context_contracts.py |
 | StudioChatContextResponse | BaseModel | workspace_id: str, selected_node_key: str | None, draft_yaml: str | None, dra... | app/routes/studio_agent_context_contracts.py |
-| StudioAgentWorkflowDraftSaveRequest | BaseModel | definition_yaml: str, expected_updated_at: str | app/routes/studio_agent_draft_tools.py |
+| StudioAgentWorkflowDraftSaveRequest | BaseModel | definition_yaml: str, base_generation: int | app/routes/studio_agent_draft_tools.py |
 | StudioAgentWorkflowDraftResponse | BaseModel | definition_yaml: str | None, updated_at: str | None, definition_hash: str | N... | app/routes/studio_agent_draft_tools.py |
 | StudioAgentJobSummaryNode | BaseModel | node_key: str, label: str, status: str, error_message: str | app/routes/studio_agent_job_tool_contracts.py |
 | StudioAgentJobView | BaseModel | id: str, title: str, status: str, outcome: str, created_at: datetime | None, ... | app/routes/studio_agent_job_tool_contracts.py |
@@ -638,10 +638,10 @@ server/app/
 | WorkflowCompareSummary | BaseModel | risk_level: WorkflowRiskLevel, node_changes: list[WorkflowNodeChange], edge_c... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowDraftCompareResponse | BaseModel | valid: bool, creates_revision: bool, base_revision: WorkflowRevisionSummaryIt... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowMetadataChange | BaseModel | type: Literal['modified'], field: str, before_value: str | None, after_value:... | app/routes/workflow_draft_compare_metadata_contracts.py |
-| WorkflowDraftStoreRequest | BaseModel | definition_yaml: str, expected_updated_at: str | None | app/routes/workflow_draft_store_contracts.py |
+| WorkflowDraftStoreRequest | BaseModel | definition_yaml: str, base_generation: int | None | app/routes/workflow_draft_store_contracts.py |
 | WorkflowDraftStoreResponse | BaseModel | definition_yaml: str | None, updated_at: str | None, definition_hash: str | N... | app/routes/workflow_draft_store_contracts.py |
 | WorkflowDraftConflictCurrentDraft | BaseModel | definition_yaml: str | None, updated_at: str | None, definition_hash: str | N... | app/routes/workflow_draft_store_contracts.py |
-| WorkflowDraftConflictDetail | BaseModel | message: str, expected_updated_at: str, current_draft: WorkflowDraftConflictC... | app/routes/workflow_draft_store_contracts.py |
+| WorkflowDraftConflictDetail | BaseModel | message: str, base_generation: int, current_draft: WorkflowDraftConflictCurre... | app/routes/workflow_draft_store_contracts.py |
 | WorkflowDraftConflictResponse | BaseModel | detail: WorkflowDraftConflictDetail | app/routes/workflow_draft_store_contracts.py |
 | WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom', 'none'], code: str, version: int | None,... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeTemplateResponse | BaseModel | code: str | app/routes/workflow_node_code_contracts.py |

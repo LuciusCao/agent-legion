@@ -33,10 +33,11 @@ class StudioContextWorkflow(BaseModel):
 class StudioChatContextResponse(BaseModel):
     """What the get_studio_context MCP tool returns: the session's bound
     workspace, the human's live Studio node selection, the canvas' unpublished
-    workflow draft (None until the frontend pushes it), the draft row's
-    ``updated_at`` (kimi review P2-5: the CAS token for a subsequent
-    ``save_workflow_draft`` — the session-pushed draft_yaml alone carries
-    no baseline; None = never-saved), and the active workflow's structure.
+    workflow draft (None until the frontend pushes it), the workspace's
+    draft ``generation`` (kimi review P2-5 + #1226 五轮收口: the CAS base for
+    a subsequent ``save_workflow_draft`` — the session-pushed draft_yaml
+    alone carries no baseline; 0 = never written), and the active workflow's
+    structure.
     ``workflow`` is None when nothing is published yet."""
 
     model_config = ConfigDict(extra="forbid")
@@ -44,5 +45,5 @@ class StudioChatContextResponse(BaseModel):
     workspace_id: str
     selected_node_key: str | None
     draft_yaml: str | None
-    draft_updated_at: str | None
+    draft_generation: int
     workflow: StudioContextWorkflow | None

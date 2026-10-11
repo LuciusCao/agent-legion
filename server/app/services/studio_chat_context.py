@@ -37,16 +37,14 @@ def build_session_context(
         "selected_node_key": session.get("selected_node_key"),
         "draft_yaml": session.get("draft_yaml"),
         # kimi review P2-5：会话行推送的 draft_yaml 没有 CAS 基线；补上
-        # 草稿行的 updated_at（get_studio_context 即可作为 save_workflow_draft
-        # 的 token 来源，不必再调一次 get_workflow_draft）。None = never-saved。
-        "draft_updated_at": _draft_updated_at(job_db, str(session["workspace_id"])),
+        # 草稿代次（get_studio_context 即可作为 save_workflow_draft 的 base
+        # 来源，不必再调一次 get_workflow_draft）。#1226 五轮收口：代次取代
+        # updated_at；无草稿时也有当前代次（0 = 从未写过）。
+        "draft_generation": job_db.get_workspace_workflow_draft_generation(
+            str(session["workspace_id"])
+        ),
         "workflow": _active_workflow_summary(job_db, str(session["workspace_id"])),
     }
-
-
-def _draft_updated_at(job_db: JobQueries, workspace_id: str) -> str | None:
-    row = job_db.get_workspace_workflow_draft(workspace_id)
-    return str(row["updated_at"]) if row is not None else None
 
 
 def _may_read_session(job_db: JobQueries, session: dict[str, Any], user: dict[str, Any]) -> bool:

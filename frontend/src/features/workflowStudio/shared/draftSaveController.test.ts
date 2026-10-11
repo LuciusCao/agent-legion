@@ -14,6 +14,7 @@ function makeController() {
       definition_yaml: null,
       updated_at: '2026-08-27T00:00:00+00:00',
       definition_hash: null,
+      generation: 2,
     })
   )
   return { put, controller: new DraftSaveController(put) }
@@ -29,11 +30,11 @@ describe('DraftSaveController hydrate vs pending save', () => {
 
   it('cancels a pending debounce whose content equals the new baseline', () => {
     const { put, controller } = makeController()
-    controller.hydrate('baseline-v1', '2026-08-26T00:00:00+00:00')
+    controller.hydrate('baseline-v1', '2026-08-26T00:00:00+00:00', 1)
     controller.schedule('canonical')
     expect(controller.hasUnsaved()).toBe(true)
 
-    controller.hydrate('canonical', null)
+    controller.hydrate('canonical', null, 2)
 
     expect(controller.hasUnsaved()).toBe(false)
     vi.advanceTimersByTime(2000)
@@ -42,10 +43,10 @@ describe('DraftSaveController hydrate vs pending save', () => {
 
   it('keeps a pending save whose content differs from the new baseline', () => {
     const { put, controller } = makeController()
-    controller.hydrate('baseline-v1', '2026-08-26T00:00:00+00:00')
+    controller.hydrate('baseline-v1', '2026-08-26T00:00:00+00:00', 1)
     controller.schedule('user edit')
 
-    controller.hydrate('canonical', null)
+    controller.hydrate('canonical', null, 2)
 
     expect(controller.hasUnsaved()).toBe(true)
     vi.advanceTimersByTime(2000)

@@ -110,7 +110,8 @@ export function useDraftSaveConflictActions() {
       studio.adoptServerDraft(
         conflict,
         studio.draftSave?.savedAt ?? null,
-        studio.draftSave?.conflictDraftHash
+        studio.draftSave?.conflictDraftHash,
+        studio.draftSave?.conflictDraftGeneration
       )
     },
     onKeepMine: () => studio.resolveConflict(true),

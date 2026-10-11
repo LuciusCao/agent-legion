@@ -6,10 +6,19 @@
  * updated_at 为准（同一 updated_at 是 no-op，新的才是重应用候选），
  * 用户编辑检测复用 useServerDraftApply 的 touched 跟踪。 */
 
+/** 冲突通知/挂起记录的完整形状（#1226：generation 随冲突传播，保存层据
+ * 此把 CAS 基线推进到服务端代次）。 */
+export type ServerDraftConflictPayload = {
+  yaml: string
+  updatedAt: string
+  hash: string | null
+  generation: number | null
+}
+
 export type ServerDraftReapplyDecision =
   | { action: 'noop'; reason: 'not-ready' | 'same-or-older' | 'user-touched' }
   | { action: 'apply'; yaml: string; updatedAt: string }
-  | { action: 'conflict'; yaml: string; updatedAt: string; hash: string | null }
+  | ({ action: 'conflict' } & ServerDraftConflictPayload)
 
 /** 比较 CAS 时间戳：ISO 字符串按时间值比较（Postgres `+00` 与 Python
  * `+00:00`/`Z` 渲染差异不影响大小关系——`+NN` 裸偏移补成 `+NN:00`）。
@@ -44,6 +53,8 @@ export function decideServerDraftReapply(input: {
   serverDraftYaml: string | null | undefined
   serverDraftUpdatedAt: string | null | undefined
   serverDraftHash?: string | null
+  /** #1226 五轮收口：服务端草稿代次——冲突通知携带（保存层恢复为 CAS 基线）。 */
+  serverDraftGeneration?: number | null
   appliedUpdatedAt: string | null | undefined
   userTouched: boolean
   canvasYaml?: string
@@ -52,6 +63,7 @@ export function decideServerDraftReapply(input: {
     serverDraftYaml,
     serverDraftUpdatedAt,
     serverDraftHash,
+    serverDraftGeneration,
     appliedUpdatedAt,
     userTouched,
     canvasYaml,
@@ -68,7 +80,12 @@ export function decideServerDraftReapply(input: {
     return { action: 'apply', ...base }
   }
   if (userTouched) {
-    return { action: 'conflict', ...base, hash: serverDraftHash ?? null }
+    return {
+      action: 'conflict',
+      ...base,
+      hash: serverDraftHash ?? null,
+      generation: serverDraftGeneration ?? null,
+    }
   }
   return { action: 'apply', ...base }
 }
@@ -79,22 +96,14 @@ export function decideServerDraftReapply(input: {
 export class ServerDraftApplyTracker {
   private appliedAt: string | null = null
   private touched = false
-  private conflict: {
-    yaml: string
-    updatedAt: string
-    hash: string | null
-  } | null = null
+  private conflict: ServerDraftConflictPayload | null = null
 
   markTouched(): void {
     this.touched = true
     this.conflict = null
   }
 
-  consumeConflict(): {
-    yaml: string
-    updatedAt: string
-    hash: string | null
-  } | null {
+  consumeConflict(): ServerDraftConflictPayload | null {
     const conflict = this.conflict
     this.conflict = null
     return conflict
@@ -110,12 +119,14 @@ export class ServerDraftApplyTracker {
     serverDraftUpdatedAt: string | null | undefined,
     applyToCanvas: (yaml: string) => void,
     canvasYaml?: string,
-    serverDraftHash?: string | null
+    serverDraftHash?: string | null,
+    serverDraftGeneration?: number | null
   ): 'apply' | 'conflict' | 'noop' {
     const decision = decideServerDraftReapply({
       serverDraftYaml,
       serverDraftUpdatedAt,
       serverDraftHash,
+      serverDraftGeneration,
       appliedUpdatedAt: this.appliedAt,
       userTouched: this.touched,
       canvasYaml,
@@ -133,8 +144,8 @@ export class ServerDraftApplyTracker {
       return 'apply'
     }
     if (decision.action === 'conflict') {
-      const { yaml, updatedAt, hash } = decision
-      this.conflict = { yaml, updatedAt, hash }
+      const { yaml, updatedAt, hash, generation } = decision
+      this.conflict = { yaml, updatedAt, hash, generation }
       return 'conflict'
     }
     return 'noop'

@@ -1,6 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { DRAFT_NEVER_SAVED } from '../../../api/workflowDraft'
 import {
   draftSaveText,
   useWorkflowDraftPersistence,
@@ -17,6 +16,7 @@ type DraftStoreResponseMock = {
   definition_yaml: string
   updated_at: string
   definition_hash: string | null
+  generation: number
 }
 
 vi.mock('../../../api', () => ({
@@ -25,12 +25,12 @@ vi.mock('../../../api', () => ({
   putWorkflowDraft: (...args: unknown[]) => mocks.putWorkflowDraft(...args),
 }))
 vi.mock('../../../api/workflowDraft', () => ({
-  DRAFT_NEVER_SAVED: 'never-saved',
   WorkflowDraftConflictError: class extends Error {
     readonly currentDraft: {
       definition_yaml: string | null
       updated_at: string | null
       definition_hash: string | null
+      generation: number | null
     }
     constructor(detail: unknown) {
       super('workflow draft conflict')
@@ -42,11 +42,13 @@ vi.mock('../../../api/workflowDraft', () => ({
         definition_yaml?: string | null
         updated_at?: string | null
         definition_hash?: string | null
+        generation?: number | null
       }
       this.currentDraft = {
         definition_yaml: current.definition_yaml ?? null,
         updated_at: current.updated_at ?? null,
         definition_hash: current.definition_hash ?? null,
+        generation: current.generation ?? null,
       }
     }
   },
@@ -56,15 +58,18 @@ const SERVER_DRAFT: DraftStoreResponseMock = {
   definition_yaml: 'key: demo\nlabel: Server\n',
   updated_at: '2026-08-27T01:02:03+00:00',
   definition_hash: null,
+  generation: 7,
 }
 const NO_DRAFT: {
   definition_yaml: null
   updated_at: null
   definition_hash: null
+  generation: number
 } = {
   definition_yaml: null,
   updated_at: null,
   definition_hash: null,
+  generation: 0,
 }
 
 type HookProps = {
@@ -184,7 +189,7 @@ describe('useWorkflowDraftPersistence', () => {
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
       'key: demo\nlabel: Edited\n',
-      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
+      { baseGeneration: 0 }
     )
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
     expect(result.current.state.savedAt).toBe(SERVER_DRAFT.updated_at)
@@ -201,6 +206,7 @@ describe('useWorkflowDraftPersistence', () => {
         definition_yaml: 'key: demo\nlabel: Base\n',
         updated_at: '2026-08-27T00:00:00+00:00',
         definition_hash: null,
+        generation: 3,
       },
     })
     rerender({
@@ -211,6 +217,7 @@ describe('useWorkflowDraftPersistence', () => {
         definition_yaml: 'key: demo\nlabel: Base\n',
         updated_at: '2026-08-27T00:00:00+00:00',
         definition_hash: null,
+        generation: 3,
       },
     })
     // publish + reload：基线与草稿同为 Y（草稿未变，不再 rerender draftYaml）。
@@ -222,6 +229,7 @@ describe('useWorkflowDraftPersistence', () => {
         definition_yaml: 'key: demo\nlabel: Base\n',
         updated_at: '2026-08-27T00:00:00+00:00',
         definition_hash: null,
+        generation: 3,
       },
     })
 
@@ -232,7 +240,7 @@ describe('useWorkflowDraftPersistence', () => {
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
       'key: demo\nlabel: Y\n',
-      { expectedUpdatedAt: '2026-08-27T00:00:00+00:00' }
+      { baseGeneration: 3 }
     )
   })
 
@@ -285,7 +293,7 @@ describe('useWorkflowDraftPersistence', () => {
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
       'key: demo\nlabel: Edited\n',
-      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
+      { baseGeneration: 0 }
     )
   })
 
@@ -339,7 +347,7 @@ describe('useWorkflowDraftPersistence', () => {
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
       'key: demo\nlabel: B\n',
-      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
+      { baseGeneration: 0 }
     )
 
     // PUT(B) 响应前回退到 A。
@@ -355,11 +363,12 @@ describe('useWorkflowDraftPersistence', () => {
         definition_yaml: 'key: demo\nlabel: B\n',
         updated_at: '2026-08-27T02:00:00+00:00',
         definition_hash: null,
+        generation: 8,
       })
     })
     // 回退后补存 A（last-write-wins 把服务端的 B 改回来）。#633 codex
-    // review R2 P1：补存 A 的 CAS 基线是 B 落盘的时间戳（B 的迟到成功
-    // 响应仍是服务端真值——基线已推进；带 never-saved 会 409）。
+    // review R2 P1：补存 A 的 CAS 基线是 B 落盘的代次（B 的迟到成功
+    // 响应仍是服务端真值——基线已推进；带旧代次会 409）。
     await act(async () => {
       vi.advanceTimersByTime(850)
     })
@@ -367,7 +376,7 @@ describe('useWorkflowDraftPersistence', () => {
       'ws1',
       'key: demo\nlabel: A\n',
       {
-        expectedUpdatedAt: '2026-08-27T02:00:00+00:00',
+        baseGeneration: 8,
       }
     )
 
@@ -381,6 +390,7 @@ describe('useWorkflowDraftPersistence', () => {
         definition_yaml: 'key: demo\nlabel: A\n',
         updated_at: '2026-08-27T01:02:03+00:00',
         definition_hash: null,
+        generation: 9,
       })
       await vi.advanceTimersByTimeAsync(0)
     })
@@ -400,7 +410,7 @@ describe('useWorkflowDraftPersistence', () => {
       'ws1',
       'key: demo\nlabel: C\n',
       {
-        expectedUpdatedAt: '2026-08-27T01:02:03+00:00',
+        baseGeneration: 9,
       }
     )
   })
@@ -447,6 +457,7 @@ describe('useWorkflowDraftPersistence', () => {
       definition_yaml: 'key: demo\nlabel: A\n',
       updated_at: '2026-08-27T02:00:00+00:00',
       definition_hash: null,
+      generation: 8,
     })
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
@@ -455,7 +466,7 @@ describe('useWorkflowDraftPersistence', () => {
     expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
       'ws1',
       'key: demo\nlabel: B\n',
-      { expectedUpdatedAt: '2026-08-27T02:00:00+00:00' }
+      { baseGeneration: 8 }
     )
   })
 
@@ -490,7 +501,7 @@ describe('useWorkflowDraftPersistence', () => {
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
       'key: demo\nlabel: Two\n',
-      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
+      { baseGeneration: 0 }
     )
   })
 })
@@ -645,7 +656,7 @@ describe('useWorkflowDraftPersistence PUT retry', () => {
       vi.advanceTimersByTime(850)
     })
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
-      expectedUpdatedAt: DRAFT_NEVER_SAVED,
+      baseGeneration: 0,
     })
 
     // 重试计时器等待中来了新编辑：旧重试必须作废，只保存最新值。
@@ -666,7 +677,7 @@ describe('useWorkflowDraftPersistence PUT retry', () => {
     expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
       'ws1',
       'key: demo\nlabel: Two\n',
-      { expectedUpdatedAt: DRAFT_NEVER_SAVED }
+      { baseGeneration: 0 }
     )
   })
 })

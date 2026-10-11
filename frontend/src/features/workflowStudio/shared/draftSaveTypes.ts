@@ -25,6 +25,9 @@ export type DraftSaveState = {
   /** #1143：冲突时服务端草稿的语义身份——「采用服务端版本」后作为
    * savedHash 恢复（画布内容即服务端草稿，卡核对不应对它误报）。 */
   conflictDraftHash?: string | null
+  /** #1226 五轮收口：冲突时服务端的草稿代次——采用服务端版本后作为
+   * CAS 基线（generation）恢复。 */
+  conflictDraftGeneration?: number | null
   /** #1204：error 的失败形态——'retrying'（退避重试在途，「将自动重试」
    * 为真）或 'terminal'（4xx 客户端拒绝 / 退避耗尽，永不自行重试，文案
    * 不得再承诺）。只在 status==='error' 时有意义，每次进入 error 由
@@ -44,7 +47,7 @@ const KEEPALIVE_MAX_BODY_BYTES = 60_000
 export type PutWorkflowDraftFn = (
   yaml: string,
   keepalive: boolean,
-  expectedUpdatedAt: string | null
+  baseGeneration: number | null
 ) => Promise<WorkflowDraftStoreResponse>
 
 /** #429：flushNow 的结果——本次 flush 是否把最新内容落到了服务端。
@@ -64,4 +67,15 @@ export type DraftSaveFlushResult = {
 export function withinKeepaliveLimit(yaml: string): boolean {
   const body = JSON.stringify({ definition_yaml: yaml })
   return new TextEncoder().encode(body).byteLength <= KEEPALIVE_MAX_BODY_BYTES
+}
+
+/* beforeunload 护栏谓词：pending（未落盘）/在途写入/失败未恢复/冲突挂起
+   （本页编辑未保存且自动 flush 已停）都算未保存。 */
+export function hasPendingWork(
+  hasPending: boolean,
+  inFlight: boolean,
+  errored: boolean,
+  inConflict: boolean
+): boolean {
+  return hasPending || inFlight || errored || inConflict
 }

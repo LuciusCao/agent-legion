@@ -50,11 +50,14 @@ export function useWorkflowStudioDraftStore(
     /* #1143：服务端草稿的语义身份随草稿传入（冲突通知携带，采用时恢复）。 */
     serverDraft === undefined
       ? undefined
-      : (serverDraft.definition_hash ?? null)
+      : (serverDraft.definition_hash ?? null),
+    /* #1226 五轮收口：服务端代次随草稿传入（冲突通知携带，采用时恢复为
+       CAS 基线）。 */
+    serverDraft === undefined ? undefined : serverDraft.generation
   )
   // #633 codex review P1-2：服务端草稿前进且画布采用了它（用户无本地
-  // 编辑）时，保存层同步 hydrate——lastPersistedAt 推进到服务端真值，
-  // 后续 PUT 以新基线竞争而不是用过期时间戳 409。
+  // 编辑）时，保存层同步 hydrate——CAS 基线代次推进到服务端真值，
+  // 后续 PUT 以新基线竞争而不是用落后代次 409。
   const draftSave = useWorkflowDraftPersistence(
     workspaceId,
     draft.draftYaml,
@@ -81,8 +84,15 @@ export function useWorkflowStudioDraftStore(
     flushDraftSave: draftSave.flushNow,
     /* kimi review P1-2：冲突出口——采用服务端版本经 touched-aware setter
        写画布；keep-mine 继续保存。#1143：hash 是被采用草稿的语义身份。 */
-    adoptServerDraft: (yaml: string, at: string | null, hash?: string | null) =>
-      draftSave.adoptServerDraft(yaml, at, setDraftYaml, hash),
+    /* kimi review P1-2：冲突出口——采用服务端版本经 touched-aware setter
+       写画布；keep-mine 继续保存。#1143：hash 是被采用草稿的语义身份；
+       #1226：generation 是其代次（采用后恢复为 CAS 基线）。 */
+    adoptServerDraft: (
+      yaml: string,
+      at: string | null,
+      hash?: string | null,
+      generation?: number | null
+    ) => draftSave.adoptServerDraft(yaml, at, setDraftYaml, hash, generation),
     resolveConflict: draftSave.resolveConflict,
     /* #1226 四轮 P1：发布成功后失效服务端草稿查询（后端 #1221 已删行）——
        重取到「无草稿」经 useDraftServerSync 把保存控制器重新 hydrate 成

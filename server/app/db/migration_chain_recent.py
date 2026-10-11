@@ -22,8 +22,8 @@ from server.app.db.migrations.studio_chat_session_archive import (
 from server.app.db.migrations.studio_chat_session_soft_delete import (
     migrate_studio_chat_session_soft_delete,
 )
-from server.app.db.migrations.workflow_draft_tombstones import (
-    migrate_workflow_draft_tombstones,
+from server.app.db.migrations.workflow_draft_generation import (
+    migrate_workflow_draft_generation,
 )
 
 RECENT_MIGRATIONS: list[SchemaMigration] = [
@@ -67,11 +67,11 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # table first, provenance sibling outside definition_hash. Data
     # migration, idempotent (self-contained nodes skipped), no down.
     SchemaMigration(93, "agent_profile_backfill", migrate_agent_profile_backfill),
-    # v95 (#1226 五轮 codex P1): workspace_workflow_draft_tombstones — the
-    # publish-generation tombstone the CAS draft save probes before
-    # re-INSERTing a deleted row. Numbered past origin/main's v94
+    # v95 (#1226 五轮收口, 设计 v2): workspace_workflow_draft_generation —
+    # the workspace draft generation counter the CAS save bases on (stale
+    # base → 409, publish delete bumps). Numbered past origin/main's v94
     # (agent_worker_node_limits) so the merge needs no renumber (#434
     # collision protocol). DDL-only, table created by its migration module
     # (schema file at its raw-line ceiling; v76 precedent).
-    SchemaMigration(95, "workflow_draft_tombstones", migrate_workflow_draft_tombstones),
+    SchemaMigration(95, "workflow_draft_generation", migrate_workflow_draft_generation),
 ]
