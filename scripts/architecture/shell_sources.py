@@ -11,13 +11,15 @@ assignment value is pasted into recipes by ``$(VAR)``, so a ``$$NAME`` there
 still ends up as a shell ``$NAME``: those lines get the same masking (a
 single make ``$`` never reaches bash, so only ``$$`` can be reported). Their
 quotes are plain make text — the pasting recipe's quoting is unknown here — so
-every ``$$NAME`` on them is judged as expanding, quoted or not (#1096).
+every ``$$NAME`` on them is judged as expanding, quoted or not (#1096), after
+stripping their make comment — see ``make_values``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 
+from .make_values import DEFINE, ENDEF, pasted_value_offsets, strip_make_comment
 from .shell_lexer import UnterminatedShellContext, expanding_dollars
 
 __test__ = False
@@ -63,24 +65,6 @@ def _mask_make_references(line: bytes) -> bytes:
     return bytes(out)
 
 
-def _pasted_value_offsets(text: bytes, lineno: int) -> list[tuple[int, int]]:
-    """Every shell ``$`` of a masked non-recipe line except ``$$`` (PID).
-
-    Quotes in a make assignment are ordinary characters — the recipe that
-    pastes ``$(VAR)`` decides the shell quoting — so ``MSG = '$$X，'`` used
-    as ``echo "$(MSG)"`` expands ``$X``: judge conservatively (#1096)."""
-    found: list[tuple[int, int]] = []
-    i = 0
-    while i < len(text):
-        if text[i] == ord("$"):
-            if text.startswith(b"$$", i):
-                i += 2
-                continue
-            found.append((lineno, i))
-        i += 1
-    return found
-
-
 def makefile_shell_units(content: bytes) -> Iterator[tuple[bytes, list[tuple[int, int]]]]:
     """Yield (shell_text, expanding ``$`` offsets) per logical recipe line
     (shell-lexed), plus each non-comment non-recipe line (its ``$$`` may reach
@@ -88,19 +72,27 @@ def makefile_shell_units(content: bytes) -> Iterator[tuple[bytes, list[tuple[int
     for lineno, text, recipe in _makefile_shell_text(content):
         yield (
             text,
-            (dollar_offsets(text, lineno) if recipe else _pasted_value_offsets(text, lineno)),
+            (dollar_offsets(text, lineno) if recipe else pasted_value_offsets(text, lineno)),
         )
 
 
 def _makefile_shell_text(content: bytes) -> Iterator[tuple[int, bytes, bool]]:
     """Yield (first_lineno, shell_text, is_recipe) per logical recipe line and
-    per non-comment non-recipe line."""
+    per non-comment non-recipe line (make comment stripped, except in a
+    ``define`` body, where ``#`` is literal value text)."""
     lines = content.split(b"\n")
     index = 0
+    in_define = False
     while index < len(lines):
-        if not lines[index].startswith(b"\t"):
-            if not lines[index].lstrip().startswith(b"#"):
-                yield index + 1, _mask_make_references(lines[index]), False
+        line = lines[index]
+        if not line.startswith(b"\t"):
+            if in_define:
+                in_define = not ENDEF.match(line)
+            elif DEFINE.match(line):
+                in_define = True
+            if not line.lstrip().startswith(b"#"):
+                value = line if in_define else strip_make_comment(line)
+                yield index + 1, _mask_make_references(value), False
             index += 1
             continue
         first = index

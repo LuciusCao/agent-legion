@@ -201,6 +201,14 @@ def test_makefile_recipes_follow_make_semantics() -> None:
         ("'$${X}，'", False),
         ("'$$$$X，'", False),  # shell $$ (PID) followed by literal X
         ("'$(X)，'", False),  # make reference, expanded by make
+        # Make strips a trailing comment before the value is pasted (#1219 review).
+        ("hello # '$$X，'", False),
+        ("hello #$$X，", False),
+        # ...but not an escaped ``\#``, nor a ``#`` inside a reference (conservative).
+        ("hello \\# '$$X，'", True),
+        ("hello \\\\\\# '$$X，'", True),
+        ("$(subst #,-,'$$X，')", True),
+        ("hello \\\\# '$$X，'", False),  # ``\\`` then a real comment
     ],
 )
 def test_makefile_assignment_quotes_are_plain_text(value: str, flagged: bool) -> None:
@@ -209,6 +217,16 @@ def test_makefile_assignment_quotes_are_plain_text(value: str, flagged: bool) ->
     content = _bytes(f'MSG = {value}\nall:\n\t@echo "$(MSG)"\n')
     errors = find_violations("Makefile", content)
     assert [e.split(" ")[0] for e in errors] == (["Makefile:1:"] if flagged else [])
+
+
+def test_makefile_define_body_keeps_hash_as_value_text() -> None:
+    """#1219 review：define 体内的 # 是变量值文本，不是 make 注释，其后的 $$NAME 照判；
+    endef 之后恢复按注释剥离。"""
+    content = _bytes(
+        "define MSG\nhello # '$$X，'\nendef\nOTHER = ok # '$$Y，'\nall:\n\t@echo \"$(MSG)\"\n"
+    )
+    errors = find_violations("Makefile", content)
+    assert [e.split(" ")[0] for e in errors] == ["Makefile:2:"]
 
 
 def test_violation_reports_line_number_and_braced_fix() -> None:
