@@ -113,6 +113,21 @@ def test_raw_range_unsatisfiable_on_gz_object_is_416(two_workspaces):
     assert "content-encoding" not in response.headers
 
 
+def test_raw_endpoint_declares_416_in_openapi(two_workspaces):
+    """#1274（#1259 复验遗留）：raw 端点经共享 raw_response 可答 416
+    （.gz 解压口径越界），OpenAPI 契约必须声明——否则 generated client
+    把 416 当未知状态码。"""
+    c, _, _ = two_workspaces
+
+    raw_path = c.app.openapi()["paths"][
+        "/api/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw"
+    ]
+
+    unsatisfiable = raw_path["get"]["responses"]["416"]
+    assert "application/octet-stream" in unsatisfiable["content"]
+    assert set(unsatisfiable["headers"]) == {"Content-Range"}
+
+
 # --- P2-1: 子路径产物名列出 + 下载往返 ---------------------------------------
 
 

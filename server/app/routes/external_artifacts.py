@@ -74,6 +74,9 @@ def create_external_artifact_router(
     # 把分段下载当异常。206 与 200 共用同一 octet-stream 响应体描述
     # （含 Content-Range/Content-Length 头），本地 FileResponse 分支由
     # starlette 原生处理两种状态码。
+    # #1274（#1259 复验遗留）：.gz 产物的 Range 按解压口径判定，越界时
+    # raw_response 答 416 + Content-Range: bytes */<total>——契约同样必须
+    # 声明（同 job_artifact_raw.py 裸路由既有声明）。
     @router.get(
         "/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name:path}/raw",
         response_class=FileResponse,
@@ -86,6 +89,13 @@ def create_external_artifact_router(
                 "headers": {
                     "Content-Range": {"schema": {"type": "string"}},
                     "Content-Length": {"schema": {"type": "string"}},
+                },
+            },
+            416: {
+                "description": "Range Not Satisfiable (.gz 解压口径越界，#1259)",
+                "content": {"application/octet-stream": {}},
+                "headers": {
+                    "Content-Range": {"schema": {"type": "string"}},
                 },
             },
         },

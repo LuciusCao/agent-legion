@@ -288,6 +288,54 @@ def test_complete_after_retry_verifies_current_generation_key(service, storage, 
     assert service.complete(WORKSPACE_ID, material_id)["status"] == "ready"
 
 
+def test_complete_with_expected_generation(service, storage) -> None:
+    """#1269 格子②：携带匹配代次的 complete 照常核验落 ready。"""
+    payload = b"gen-pinned"
+    digest = _sha256(payload)
+    result = service.presign(
+        WORKSPACE_ID, filename="p.txt", size_bytes=len(payload), content_hash=digest
+    )
+    material_id = result["material"]["id"]
+    assert result["material"]["upload_generation"] == 0
+    storage.objects[f"{WORKSPACE_ID}/{digest}/g0/p.txt"] = payload
+
+    record = service.complete(WORKSPACE_ID, material_id, expected_upload_generation=0)
+
+    assert record["status"] == "ready"
+
+
+def test_complete_with_stale_generation_conflicts_without_touching_row(service, storage) -> None:
+    """#1269 格子②：携带旧代次的 complete 立即 409——既不做对象 I/O，也不把
+    新一轮上传的行误翻 failed（无代次语义下旧 URL 的 complete 会因新 key 对象
+    缺失而落 422 failed，踩掉在途的新一轮上传）。"""
+    payload = b"stale-gen"
+    digest = _sha256(payload)
+    result = service.presign(
+        WORKSPACE_ID, filename="s.txt", size_bytes=len(payload), content_hash=digest
+    )
+    material_id = result["material"]["id"]
+    # 第 0 代字节已 PUT；随后 presign 重试推进到代次 1（旧 URL 指向死 key）。
+    storage.objects[f"{WORKSPACE_ID}/{digest}/g0/s.txt"] = payload
+    retry = service.presign(
+        WORKSPACE_ID, filename="s.txt", size_bytes=len(payload), content_hash=digest
+    )
+    assert retry["material"]["upload_generation"] == 1
+
+    with pytest.raises(ConflictError, match="superseded"):
+        service.complete(WORKSPACE_ID, material_id, expected_upload_generation=0)
+
+    row = service.get(WORKSPACE_ID, material_id)
+    assert row["status"] == "uploading"
+    assert row["upload_generation"] == 1
+
+    # 匹配代次的 complete 正常走完核验；不带代次保持旧行为（锁内复查兜底）。
+    storage.objects[f"{WORKSPACE_ID}/{digest}/g1/s.txt"] = payload
+    assert (
+        service.complete(WORKSPACE_ID, material_id, expected_upload_generation=1)["status"]
+        == "ready"
+    )
+
+
 def test_complete_cas_rejects_key_rebuild_mid_verification(
     service, storage, job_db, monkeypatch
 ) -> None:
@@ -551,6 +599,47 @@ def test_concurrent_retries_derive_key_from_committed_generation(service, storag
     (key, _) = storage.presigned[-1]
     assert key == f"{WORKSPACE_ID}/{digest}/g6/r.txt"
     assert _storage_key_of(job_db, material_id) == key
+
+
+def test_presign_retry_racing_delete_returns_not_found(service, storage, job_db) -> None:
+    """#1269（#1267 复验遗留）：presign 的无锁 SELECT 与重试 UPDATE 之间行被
+    并发 delete/TTL 回收——对方持行锁删行并提交后，本事务的 UPDATE 命中 0 行、
+    RETURNING 为空。此时必须抛 NotFoundError（404 语义、可安全重试 presign），
+    不能 assert 崩成 500（优化模式下断言被剥，退化为 None 解引用）。"""
+    digest = _sha256(b"race-delete")
+    result = service.presign(WORKSPACE_ID, filename="d.txt", size_bytes=1, content_hash=digest)
+    material_id = result["material"]["id"]
+
+    outcome: list[str] = []
+    entered = threading.Event()
+
+    def _retry() -> None:
+        entered.set()
+        try:
+            service.presign(WORKSPACE_ID, filename="d.txt", size_bytes=1, content_hash=digest)
+            outcome.append("ok")
+        except NotFoundError:
+            outcome.append("not-found")
+        except Exception as exc:  # 线程内意外失败也要带回主线程定位
+            outcome.append(f"error:{exc!r}")
+
+    holder = connect_database(job_db.dsn_identity)
+    try:
+        with holder:
+            # holder 持行锁：重试线程的无锁 SELECT 读到旧快照后，UPDATE 阻塞在锁上。
+            holder.execute("select id from materials where id=%s for update", (material_id,))
+            thread = threading.Thread(target=_retry)
+            thread.start()
+            assert entered.wait(timeout=5)
+            wait_until_blocked_by(backend_pid(holder), thread=thread)
+            # 并发 delete 的终局：行被删除并提交，重试的 UPDATE 解锁后命中 0 行。
+            holder.execute("delete from materials where id=%s", (material_id,))
+        thread.join(timeout=15)
+    finally:
+        holder.close()
+
+    assert not thread.is_alive()
+    assert outcome == ["not-found"]
 
 
 def test_generation_namespace_unforgeable_by_filename(service, storage) -> None:

@@ -45,9 +45,22 @@ class MaterialRecord(BaseModel):
     content_type: str
     size_bytes: int
     status: str
+    upload_generation: int
     created_by: str
     created_at: str | None
     expires_at: str | None
+
+
+class MaterialCompleteRequest(BaseModel):
+    """Optional complete body (#1269 格子②): the caller pins the upload
+    generation its PUT URL was issued for (from the presign response); a
+    mismatch means a newer presign superseded this upload — 409 without
+    touching the row, instead of a misleading 422 that flips the newer
+    attempt's row to failed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_upload_generation: int | None = Field(default=None, ge=0)
 
 
 class MaterialPresignResponse(BaseModel):
@@ -116,10 +129,22 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
         response_model=MaterialResponse,
         dependencies=[Depends(reject_studio_agent_scope)],
     )
-    def complete_material(workspace_id: str, material_id: str) -> MaterialResponse:
+    def complete_material(
+        workspace_id: str,
+        material_id: str,
+        payload: MaterialCompleteRequest | None = None,
+    ) -> MaterialResponse:
         try:
             return MaterialResponse(
-                material=MaterialRecord(**service.complete(workspace_id, material_id))
+                material=MaterialRecord(
+                    **service.complete(
+                        workspace_id,
+                        material_id,
+                        expected_upload_generation=(
+                            payload.expected_upload_generation if payload else None
+                        ),
+                    )
+                )
             )
         except JobServiceError as exc:
             _raise_material_http_error(exc)

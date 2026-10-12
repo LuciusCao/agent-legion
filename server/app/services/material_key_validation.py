@@ -1,16 +1,22 @@
-"""Validation for the request-controlled ingredients of a material object key (#1119, #1267).
+"""Validation for the material upload declaration (#1119, #1267).
 
-The material storage key is ``{workspace_id}/{content_hash|material_id}/{filename}``;
+The material storage key is
+``{workspace_id}/{content_hash|material_id}/g{upload_generation}/{filename}``;
 the workspace segment is safe by contract (schema v62 id rules), while
 ``filename`` and ``content_hash`` come from the presign request and are pinned
-here before any row write or presign.
+here before any row write or presign. The same declaration is re-verified at
+complete time against the stored object (``verify_stored_object``): size
+always, sha256 when the client declared one.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
+from typing import Any
 
 from server.app.services.job_errors import JobServiceError
+from server.app.storage import ObjectStorage
 
 
 class InvalidMaterialFilenameError(JobServiceError):
@@ -76,3 +82,32 @@ def validate_material_content_hash(content_hash: str) -> None:
             "content_hash must be a lowercase sha256 hex digest (64 hex chars): "
             f"{content_hash[:80]!r}"
         )
+
+
+_HASH_CHUNK_BYTES = 1024 * 1024
+
+
+def verify_stored_object(storage: ObjectStorage, row: dict[str, Any]) -> str | None:
+    """Return a failure detail, or None when the stored object matches the row.
+
+    complete() 的声明核验（事务外对象 I/O）：size 恒验，声明了 content_hash
+    时重算 sha256 比对。调用方负责落库前的锁内身份复查
+    （jobs/queries/material_locked_rereads）。
+    """
+    head = storage.head_object(str(row["storage_key"]))
+    if head is None:
+        return f"Uploaded object is missing for material {row['id']}"
+    declared_size = int(row["size_bytes"])
+    if head.size_bytes != declared_size:
+        return f"Uploaded object size {head.size_bytes} != declared size {declared_size}"
+    content_hash = str(row["content_hash"])
+    if not content_hash:
+        return None
+    digest = hashlib.sha256()
+    stream = storage.open_stream(str(row["storage_key"]))
+    while chunk := stream.read(_HASH_CHUNK_BYTES):
+        digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual != content_hash:
+        return f"Uploaded object sha256 {actual} != declared hash {content_hash}"
+    return None

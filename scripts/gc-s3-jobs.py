@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
-"""S3 jobs/ 与 jobs-staging/ 前缀的孤儿对象 GC（#340）。dry-run 默认。
+"""S3 jobs/ 与 jobs-staging/ 前缀及材料根前缀的孤儿对象 GC（#340/#1269）。dry-run 默认。
 
 回收 job 删除路径永远看不到的对象：行已删但删除失败/未执行的 authority
-对象、promote 中途失败的拷贝、结果报告丢失的 Worker staging 残留。
-判定与删除逻辑见 server/app/services/s3_jobs_gc.py；DB 侧对照
-job_artifacts.storage_key（须能连上本 worktree 的 Postgres）。
+对象、promote 中途失败的拷贝、结果报告丢失的 Worker staging 残留；以及材料
+上传路径的孤儿（#1269 格子③）：「已上传后重试」留下的上一代 g{代次} key、
+行已删但对象删除失败的残留。jobs/ 与 jobs-staging/ 的判定与删除逻辑见
+server/app/services/s3_jobs_gc.py；材料根前缀（bucket 根排除两个 jobs 前缀）
+的扫描在本文件（材料 key 形如 {workspace_id}/{hash|id}/g{代次}/{filename}，
+存活对象必有 materials 行——presign 先建行后签发 URL——故与 jobs/ 同手法：
+对照 materials.storage_key 清单行 + 宽限窗）。材料 key 内容寻址可复用
+（删行后同文件同文件名再上传复用同 key），任何 check-then-delete 序列对
+可复用 key 都闭不死删除窗口——材料孤儿只扫描报告、不进入 --apply 删除批
+（#1282 三轮 codex P1 按族收口），删除待 #1279 所有权/key 不可复用协议
+落地后开放。
+DB 侧对照 job_artifacts ∪ materials（须能连上本 worktree 的 Postgres）。
 
 用法:
     uv run python scripts/gc-s3-jobs.py [--grace-hours N] [--staging-grace-hours N]
@@ -17,11 +26,56 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
+
+# 材料 key 内容寻址可复用（删行后同文件同文件名再上传复用同 key），
+# 任何 check-then-delete 序列对可复用 key 都闭不死删除窗口（#1282 三轮
+# codex P1 按族收口）——材料根前缀孤儿只扫描报告，删除待 #1279 的
+# 所有权/key 不可复用协议落地后开放。
+
+
+def _stale(modified, cutoff) -> bool:
+    if modified.tzinfo is None:
+        modified = modified.replace(tzinfo=UTC)
+    return modified < cutoff
+
+
+def _material_shaped(key: str) -> bool:
+    """碰撞命名空间里的材料 key 形态（#1282 r4 P1）：第 3 段是 g{代次}。
+
+    材料 key 为 ``{workspace_id}/{hash|material_id}/g{代次}/{filename}``；
+    workspace id 可字面为 jobs / jobs-staging（无保留名约束，s3_jobs_gc 已
+    记录这两个碰撞命名空间），那样的材料 key 落在 jobs 前缀扫描内。真 job
+    产物同位置是 job id（``{ws}_{workflow_key}_{source_id}``，恒含下划线），
+    永不匹配 g{数字}——分流零误伤。legacy 无代次段的材料 key 不可复用
+    （新上传恒带 g 段），留在删除批安全。
+    """
+    segments = key.split("/")
+    return len(segments) >= 4 and segments[2][:1] == "g" and segments[2][1:].isdigit()
+
+
+def scan_material_root_orphans(entry_lister, key_exists, grace_hours: float):
+    """材料根前缀的孤儿扫描（#1269 格子③，与 jobs/ 前缀同手法）。
+
+    材料 key 在 bucket 根，与 jobs/、jobs-staging/ 两个产物前缀平级：列举
+    根前缀并排除二者后，DB（job_artifacts ∪ materials）无行且超宽限窗即
+    孤儿。宽限窗与 authority 对象共用 ``--grace-hours``：presign 先建行后
+    签发 URL，在途上传的对象必有行，宽限窗只兜「行刚删、对象删除在途」的
+    短窗口。
+    """
+    from server.app.services.s3_jobs_gc import JOBS_PREFIX, STAGING_PREFIX
+
+    cutoff = datetime.now(UTC) - timedelta(hours=grace_hours)
+    candidates = [
+        e for e in entry_lister("") if not e.key.startswith((JOBS_PREFIX, STAGING_PREFIX))
+    ]
+    known = key_exists([e.key for e in candidates])
+    return [e for e in candidates if e.key not in known and _stale(e.last_modified, cutoff)]
 
 
 def main() -> int:
@@ -65,59 +119,74 @@ def main() -> int:
     parser.add_argument(
         "--database-url",
         default=None,
-        help="覆盖 AGENT_LEGION_DATABASE_URL（对照 job_artifacts 用）。",
+        help="覆盖 AGENT_LEGION_DATABASE_URL（对照 job_artifacts 与 materials 用）。",
     )
     args = parser.parse_args()
 
     settings = load_s3_settings()
     if settings is None:
-        print("提示: AGENT_LEGION_S3_BUCKET 未配置，跳过 S3 jobs GC")
+        print("提示: AGENT_LEGION_S3_BUCKET 未配置，跳过 S3 孤儿对象 GC")
         return 0
     kwargs: dict[str, str] = {"region_name": settings.region}
     if settings.endpoint_url:
         kwargs["endpoint_url"] = settings.endpoint_url
     if settings.access_key:
-        kwargs["aws_access_key_id"] = settings.access_key
-        kwargs["aws_secret_access_key"] = settings.secret_key
+        kwargs.update(
+            aws_access_key_id=settings.access_key, aws_secret_access_key=settings.secret_key
+        )
     client = boto3.client("s3", **kwargs)
 
     app_settings = load_settings()
-    dsn = args.database_url or app_settings.database_url
-    job_db = JobQueries(dsn, jobs_dir=app_settings.jobs_dir)
+    job_db = JobQueries(
+        args.database_url or app_settings.database_url, jobs_dir=app_settings.jobs_dir
+    )
 
     def entry_lister(prefix: str):
         paginator = client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=settings.bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
-                yield ObjectEntry(
-                    key=obj["Key"],
-                    last_modified=obj["LastModified"],
-                    size_bytes=int(obj.get("Size", 0)),
-                )
+                yield ObjectEntry(obj["Key"], obj["LastModified"], int(obj.get("Size", 0)))
 
+    # 材料根前缀（#1269 格子③）：与 jobs/ 同一 key_exists（内部缓存全量
+    # key 集合，两个扫描共享一遍 DB 载入）。
+    key_exists = make_db_key_existence(job_db)
+    staging_grace = args.staging_grace_hours
     report = scan_orphans(
-        entry_lister,
-        make_db_key_existence(job_db),
-        grace_hours=args.grace_hours,
-        staging_grace_hours=args.staging_grace_hours,
+        entry_lister, key_exists, grace_hours=args.grace_hours, staging_grace_hours=staging_grace
     )
+    material_orphans = scan_material_root_orphans(entry_lister, key_exists, args.grace_hours)
+    # 碰撞命名空间分流（#1282 r4 P1；族不变量：删除批只收不可复用 key）：
+    # jobs/ 与 jobs-staging/ 前缀里材料形态的 key 是撞名 workspace 的材料，
+    # 与材料根前缀同理只报告不删除，并入材料孤儿行。
+    collided = [
+        o for o in report.authority_orphans + report.staging_orphans if _material_shaped(o.key)
+    ]
+    report.authority_orphans = [o for o in report.authority_orphans if not _material_shaped(o.key)]
+    report.staging_orphans = [o for o in report.staging_orphans if not _material_shaped(o.key)]
+    material_orphans += collided
 
     label = "apply" if args.apply else "dry-run"
+    au, st = report.authority_orphans, report.staging_orphans
     print(
-        f"{label}: jobs/ 孤儿 {len(report.authority_orphans)} 个"
-        f"（{sum(o.size_bytes for o in report.authority_orphans)} 字节）, "
-        f"jobs-staging/ 孤儿 {len(report.staging_orphans)} 个"
-        f"（{sum(o.size_bytes for o in report.staging_orphans)} 字节）"
+        f"{label}: jobs/ 孤儿 {len(au)} 个（{sum(o.size_bytes for o in au)} 字节）, "
+        f"jobs-staging/ 孤儿 {len(st)} 个（{sum(o.size_bytes for o in st)} 字节）, "
+        f"材料根前缀孤儿 {len(material_orphans)} 个（{sum(o.size_bytes for o in material_orphans)} 字节）"
     )
+    if material_orphans:
+        # #1282 三轮 codex P1 按族收口：材料 key 内容寻址可复用（删行后同
+        # 文件再上传复用同 key），任何 check-then-delete 序列对可复用 key 都
+        # 闭不死 revalidate→delete 窗口——材料孤儿只扫描报告，删除待 #1279
+        # 的所有权/key 不可复用协议落地后开放。
+        print("材料根前缀孤儿只报告不删除：删除待 #1279 所有权协议落地后开放")
     if not args.apply:
-        if report.count:
+        if report.count or material_orphans:
             print("加 --apply 执行删除（幂等可重跑）。")
         return 0
 
     # 删除前逐批新鲜反查（TOCTOU，#344 评审 P1）：不用扫描阶段的缓存
     # key 集合——扫描与删除之间并发 promote 重建同名 key 并建行时，
     # 缓存判定会误删新权威对象；反查同时对照 materials（撞名 workspace
-    # 的材料 key 在删除前最后一道被救下）。
+    # 的材料 key 在删除前最后一道被救下）。材料孤儿不进入删除批（见上）。
     def fresh_revalidate(keys: list[str]) -> set[str]:
         return job_db.existing_object_storage_keys(keys)
 

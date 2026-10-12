@@ -5155,6 +5155,18 @@ export interface components {
     MaterialBundleResponse: {
       bundle: components['schemas']['MaterialBundleRecord']
     }
+    /**
+     * MaterialCompleteRequest
+     * @description Optional complete body (#1269 格子②): the caller pins the upload
+     *     generation its PUT URL was issued for (from the presign response); a
+     *     mismatch means a newer presign superseded this upload — 409 without
+     *     touching the row, instead of a misleading 422 that flips the newer
+     *     attempt's row to failed.
+     */
+    MaterialCompleteRequest: {
+      /** Expected Upload Generation */
+      expected_upload_generation?: number | null
+    }
     /** MaterialDeleteResponse */
     MaterialDeleteResponse: {
       /** Deleted */
@@ -5215,6 +5227,8 @@ export interface components {
       size_bytes: number
       /** Status */
       status: string
+      /** Upload Generation */
+      upload_generation: number
       /** Workspace Id */
       workspace_id: string
     }
@@ -13346,6 +13360,16 @@ export interface operations {
           'application/octet-stream': unknown
         }
       }
+      /** @description Range Not Satisfiable (.gz 解压口径越界，#1259) */
+      416: {
+        headers: {
+          'Content-Range'?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -13670,7 +13694,13 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody?: {
+      content: {
+        'application/json':
+          | components['schemas']['MaterialCompleteRequest']
+          | null
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {

@@ -116,7 +116,7 @@ describe('uploadMaterialFile', () => {
 
   it('runs presign → PUT → complete and returns the material id', async () => {
     mockPresign.mockResolvedValue({
-      material: { id: 'm1' },
+      material: { id: 'm1', upload_generation: 2 },
       upload_url: 'https://s3.example/put',
       upload_expires_in_seconds: 900,
       deduplicated: false,
@@ -144,7 +144,8 @@ describe('uploadMaterialFile', () => {
       method: 'PUT',
       body: file,
     })
-    expect(mockComplete).toHaveBeenCalledWith('ws1', 'm1')
+    // #1282 复审 P1：complete 携带 presign 响应里的上传代次。
+    expect(mockComplete).toHaveBeenCalledWith('ws1', 'm1', 2)
   })
 
   it('skips the PUT when the material is deduplicated', async () => {

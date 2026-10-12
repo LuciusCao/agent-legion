@@ -265,26 +265,37 @@ EOF
   在 run 创建与 dispatch 物化处都被拒（解析链只接受 `ready`），已在
   引用中的 job 不强行失效；`expired` 超过短暂 grace（10 分钟）且
   引用计数为 0 时物理删除（先删 S3 对象再删行，对象删除失败留到下轮
-  重试）。孤儿对象兜底分前缀治理（`#340`）：材料 key 在 bucket 根
-  （`{workspace_id}/{content_hash}/{filename}`），产物在 `jobs/` 前缀
+  重试）。孤儿对象兜底分前缀治理（`#340`）：产物在 `jobs/` 前缀
   下，Worker 直传的暂存对象在 `jobs-staging/` 前缀下（Host 核验后服务端
   copy 提升到 `jobs/` 权威 key；暂存源只在 finish 提交后由完成方删除，
   失败/冲突残留由 GC/lifecycle 兜底），三条前缀
   分开配规则——材料侧按你们对上传内容的数据分级策略设保留期（务必
   显著长于 `materials_ttl_days`，让 DB 侧先完成引用检查），`jobs/`
   前缀按产物保留策略另设，`jobs-staging/` 配短保留（如 1 天，孤儿
-  暂存对象只是失败残留）。注意 promote 回滚备份（key 含 `/.rollback/`
+  暂存对象只是失败残留）。材料 key 在 bucket 根
+  （`{workspace_id}/{hash|material_id}/g{上传代次}/{filename}`，
+  代次段自 #1267 起、存量行无代次段），与两个 jobs 前缀平级。注意 promote 回滚备份（key 含 `/.rollback/`
   段）也在该前缀下：promote 恢复最终失败时被刻意保留的备份是幸存清单
   行所指向旧字节的最后恢复源（`s3_jobs_gc` 对它们豁免回收，codex #774
   P1 族）——bucket lifecycle 规则只能按前缀过滤、无法按子串豁免，配
   `jobs-staging/` 短保留即接受「恢复处置死线 = 保留天数」。手工清理可用
   console（rustfs `:9001`；seaweedfs 为 master UI `:9333`）。
   - `jobs/` 与 `jobs-staging/` 的孤儿对象（行已删但删除失败/未执行、
-    promote 中途失败的结果报告丢失残留）由
-    `scripts/gc-s3-jobs.py` 回收：按前缀列举对照 `job_artifacts`
-    清单行，宽限窗（默认 24h，`--grace-hours`/`--staging-grace-hours`
+    promote 中途失败的结果报告丢失残留）与材料根前缀的孤儿对象（已上传
+    后重试留下的上一代 `g{代次}` key、行已删但对象删除失败的残留，
+    #1269）由 `scripts/gc-s3-jobs.py` 治理：按前缀列举（材料为根前缀
+    排除两个 jobs 前缀）对照 `job_artifacts` ∪ `materials` 清单行，
+    宽限窗（默认 24h，`--grace-hours`/`--staging-grace-hours`
     可调）外的无行对象与过期暂存对象判定为孤儿；默认 dry-run，加
-    `--apply` 执行删除，幂等可重跑。
+    `--apply` 执行删除，幂等可重跑。材料 key 内容寻址可复用（删行后
+    同文件再上传复用同 key），任何 check-then-delete 序列对可复用 key
+    都闭不死删除窗口——**材料根前缀孤儿只扫描报告、不进入删除批**
+    （#1282 三轮 codex P1 按族收口），删除待 #1279 所有权/key 不可复用
+    协议落地后开放；此前材料孤儿的回收仍靠 bucket lifecycle 规则兜底。
+    同理，workspace id 字面为 `jobs` / `jobs-staging` 时其材料 key 落在
+    jobs 前缀扫描内，脚本在组装删除批前按材料形态文法（第 3 段为
+    `g{代次}`；真 job 产物同位置是恒含下划线的 job id，零误伤）把这类
+    key 分流进材料报告行，同样只报告不删除（#1282 r4 P1）。
   - 孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已
     不存在的测试 bucket）由 `scripts/report-orphan-s3-buckets.py`
     报告（只报不删，逐个给出 `clean-worktree.sh` 收尾命令）。

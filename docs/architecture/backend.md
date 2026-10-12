@@ -479,6 +479,7 @@ server/app/
 | MaterialBundleDeleteResponse | BaseModel | deleted: str | app/routes/material_bundles.py |
 | MaterialPresignRequest | BaseModel | filename: str, size_bytes: int, content_hash: str | None, content_type: str | app/routes/materials.py |
 | MaterialRecord | BaseModel | id: str, workspace_id: str, content_hash: str, filename: str, content_type: s... | app/routes/materials.py |
+| MaterialCompleteRequest | BaseModel | expected_upload_generation: int | None | app/routes/materials.py |
 | MaterialPresignResponse | BaseModel | material: MaterialRecord, upload_url: str | None, upload_expires_in_seconds: ... | app/routes/materials.py |
 | MaterialResponse | BaseModel | material: MaterialRecord | app/routes/materials.py |
 | MaterialListResponse | BaseModel | materials: list[MaterialRecord], total: int, limit: int, offset: int | app/routes/materials.py |
