@@ -49,6 +49,9 @@ export function useStudioChat(workspaceId: string | undefined) {
   // （重新选中的还是 A），异步加载回调须同时校验代次——每次选择变化
   // （含 workspace 切换清空）在入口 effect 递增。
   const sessionGenerationRef = useRef(0)
+  // missed 帧点读重试链的去重表（#1289）：跨 SSE 事件共享，键为消息 id、
+  // 值为挂链时的会话代次（代次推进即失效，语义见 studioChatCalibration）。
+  const missedRetryRef = useRef(new Map<string, number>())
   // workspace 往返代次（#1265）：只在 workspace 重置效应递增——startSession
   // 的落地守卫用它识别 A→B→A，不被同 workspace 内的会话选择变化误伤。
   const workspaceEpochRef = useRef(0)
@@ -164,6 +167,7 @@ export function useStudioChat(workspaceId: string | undefined) {
       fetchSession: fetchStudioChatSession,
       activeSessionId,
       sessionGenerationRef,
+      missedRetryRef,
     }
     const channel = createRealtimeChannel({
       url: `/api/workspaces/${encodeURIComponent(workspaceId)}/studio-chat/sessions/${encodeURIComponent(activeSessionId)}/events`,

@@ -2,11 +2,11 @@ import type { QueryClient } from '@tanstack/react-query'
 import { invalidateStudioTurnEndQueries } from './studioChatInvalidation'
 import {
   calibrateWithRowRefetch,
-  handleMissedMessageFrame,
   hasInFlightToolCall,
   isTerminalStatus,
   type RowRefetchDeps,
 } from './studioChatCalibration'
+import { handleMissedMessageFrame } from './studioChatMissedRefetch'
 import {
   streamingTextId,
   upsertMessage,
@@ -35,6 +35,8 @@ type SseDeps = {
   /** 会话选择代次（#1237 codex P2-1）：异步回调落地前复核——A→B→A 后
    * sessionId 相同，只有代次能识别早先选择的迟到响应。 */
   sessionGenerationRef: { current: number }
+  /** missed 帧点读重试链的去重表（#1289，语义见 RowRefetchDeps）。 */
+  missedRetryRef: { current: Map<string, number> }
 }
 
 /** SseDeps → RowRefetchDeps（#1236）：按 id 点读校准的消费面。 */
@@ -45,6 +47,7 @@ function rowRefetchDeps(deps: SseDeps): RowRefetchDeps & {
     workspaceId: deps.workspaceId,
     sessionId: deps.activeSessionId,
     sessionGenerationRef: deps.sessionGenerationRef,
+    missedRetryRef: deps.missedRetryRef,
     messagesRef: deps.messagesRef,
     setMessages: deps.setMessages,
     refillMessages: deps.refillMessages,
