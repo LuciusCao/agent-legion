@@ -45,6 +45,20 @@ def _stale(modified, cutoff) -> bool:
     return modified < cutoff
 
 
+def _material_shaped(key: str) -> bool:
+    """碰撞命名空间里的材料 key 形态（#1282 r4 P1）：第 3 段是 g{代次}。
+
+    材料 key 为 ``{workspace_id}/{hash|material_id}/g{代次}/{filename}``；
+    workspace id 可字面为 jobs / jobs-staging（无保留名约束，s3_jobs_gc 已
+    记录这两个碰撞命名空间），那样的材料 key 落在 jobs 前缀扫描内。真 job
+    产物同位置是 job id（``{ws}_{workflow_key}_{source_id}``，恒含下划线），
+    永不匹配 g{数字}——分流零误伤。legacy 无代次段的材料 key 不可复用
+    （新上传恒带 g 段），留在删除批安全。
+    """
+    segments = key.split("/")
+    return len(segments) >= 4 and segments[2][:1] == "g" and segments[2][1:].isdigit()
+
+
 def scan_material_root_orphans(entry_lister, key_exists, grace_hours: float):
     """材料根前缀的孤儿扫描（#1269 格子③，与 jobs/ 前缀同手法）。
 
@@ -141,6 +155,15 @@ def main() -> int:
         entry_lister, key_exists, grace_hours=args.grace_hours, staging_grace_hours=staging_grace
     )
     material_orphans = scan_material_root_orphans(entry_lister, key_exists, args.grace_hours)
+    # 碰撞命名空间分流（#1282 r4 P1；族不变量：删除批只收不可复用 key）：
+    # jobs/ 与 jobs-staging/ 前缀里材料形态的 key 是撞名 workspace 的材料，
+    # 与材料根前缀同理只报告不删除，并入材料孤儿行。
+    collided = [
+        o for o in report.authority_orphans + report.staging_orphans if _material_shaped(o.key)
+    ]
+    report.authority_orphans = [o for o in report.authority_orphans if not _material_shaped(o.key)]
+    report.staging_orphans = [o for o in report.staging_orphans if not _material_shaped(o.key)]
+    material_orphans += collided
 
     label = "apply" if args.apply else "dry-run"
     au, st = report.authority_orphans, report.staging_orphans

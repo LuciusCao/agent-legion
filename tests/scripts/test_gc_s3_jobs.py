@@ -115,10 +115,16 @@ def scan_orphans(lister, key_exists, *, grace_hours=24.0, staging_grace_hours=24
         fh.write(
             f"scan_orphans grace={grace_hours} staging_grace={staging_grace_hours}\\n"
         )
-    # 真判定逻辑不在此重放：固定返回 1+1，供 CLI 输出断言。
+    # 真判定逻辑不在此重放：固定返回 1+1，供 CLI 输出断言；
+    # STUB_SCAN_EXTRA_JSON（key 列表）追加进 authority_orphans，供碰撞
+    # 命名空间材料形态分流断言。
     t = datetime.now(UTC)
+    extra = [
+        ObjectEntry(key, t, 10)
+        for key in json.loads(os.environ.get("STUB_SCAN_EXTRA_JSON", "[]"))
+    ]
     return OrphanReport(
-        authority_orphans=[ObjectEntry("jobs/x/a.json", t, 50)],
+        authority_orphans=[ObjectEntry("jobs/x/a.json", t, 50), *extra],
         staging_orphans=[ObjectEntry("jobs-staging/x/b.json", t, 30)],
     )
 
@@ -335,3 +341,34 @@ def test_material_root_prefix_orphans_reported_but_never_deleted(tmp_path: Path)
     assert "已删除 2 个" in result.stdout
     # 根前缀只列举一次（扫描）；删除路径不存在后不再有删除前重列。
     assert log.count("prefix=\n") == 1
+
+
+def test_collision_namespace_material_keys_are_report_only(tmp_path: Path):
+    """#1282 r4 P1：workspace id 字面为 jobs / jobs-staging 时材料 key
+    （{ws}/{hash}/g{代次}/{filename}）落在 jobs 前缀扫描内——删除批组装前
+    按材料形态文法（第 3 段 g{数字}）分流到只报告集合。真 job 产物第 3 段
+    是 job id（恒含下划线、永不匹配 g{数字}），不误伤、留在删除批。"""
+    extra = [
+        f"jobs/{'a' * 64}/g0/doc.txt",  # ws=jobs 的材料 key → 分流
+        f"jobs-staging/{'b' * 64}/g2/d.txt",  # 撞名前缀下的材料 key → 分流
+        "jobs/ws-x/ws-x_q1/dead.json",  # 真 job 产物（job id 含下划线）→ 留在删除批
+        f"jobs/{'c' * 64}/old-name.txt",  # legacy 无代次段材料 key：不可复用，可删
+    ]
+    pystub = _make_pystub(tmp_path, _STORAGE_PROBE_CONFIGURED)
+
+    result, log = _run(
+        tmp_path,
+        pystub,
+        "--apply",
+        env_extra={"STUB_SCAN_EXTRA_JSON": json.dumps(extra)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    # 两个撞名材料 key 分流进材料报告行（本次根前缀扫描为 0）。
+    assert "材料根前缀孤儿 2 个" in result.stdout
+    assert "只报告不删除" in result.stdout
+    # jobs/ 删除批：桩固定的 1 个 + 真产物 + legacy 无代次段 key = 3；
+    # jobs-staging/ 1 个（撞名材料 key 已被分流）→ 共删 4。
+    assert "jobs/ 孤儿 3 个" in result.stdout
+    assert "jobs-staging/ 孤儿 1 个" in result.stdout
+    assert "已删除 4 个" in result.stdout

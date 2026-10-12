@@ -292,6 +292,10 @@ EOF
     都闭不死删除窗口——**材料根前缀孤儿只扫描报告、不进入删除批**
     （#1282 三轮 codex P1 按族收口），删除待 #1279 所有权/key 不可复用
     协议落地后开放；此前材料孤儿的回收仍靠 bucket lifecycle 规则兜底。
+    同理，workspace id 字面为 `jobs` / `jobs-staging` 时其材料 key 落在
+    jobs 前缀扫描内，脚本在组装删除批前按材料形态文法（第 3 段为
+    `g{代次}`；真 job 产物同位置是恒含下划线的 job id，零误伤）把这类
+    key 分流进材料报告行，同样只报告不删除（#1282 r4 P1）。
   - 孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已
     不存在的测试 bucket）由 `scripts/report-orphan-s3-buckets.py`
     报告（只报不删，逐个给出 `clean-worktree.sh` 收尾命令）。
