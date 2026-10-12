@@ -2,6 +2,7 @@ import {
   useStudioStateOptional,
   type StudioState,
 } from '../shared/studioStateContext'
+import { savedIdentityConfirms } from '../shared/draftSaveTypes'
 import styles from './StudioChatPanel.module.css'
 
 /* #667 B1：聊天草稿卡内的发布入口。发布对象永远是编辑器当前 YAML——
@@ -91,7 +92,12 @@ export function WorkflowDraftPublishButton() {
  * #1177 codex R3 P2：上述「偏离必然推进状态」有一个例外——空白内容。
  * decideSchedule 对空白 skip（服务端拒存空白草稿），状态停在上次成功
  * 保存的 settled、savedHash 仍是旧 H；用户清空编辑器后短路前置并不成立。
- * 空白永不落盘 ⇒ 对空白内容禁用短路，回落提示（恢复字节比较时代的行为）。 */
+ * 空白永不落盘 ⇒ 对空白内容禁用短路，回落提示（恢复字节比较时代的行为）。
+ * #1196：短路判据收口到 savedIdentityConfirms（另要求编辑器内容逐字节
+ * 等于 savedHash 的内容本体 savedYaml，消除 hydrate/adopt 的单帧假
+ * settled）；比较对象是保存状态机跟踪的草稿 studio.draftYaml——revision
+ * 查看模式下 definitionYaml 是被查看版本，而发布对象与 savedHash 都属于
+ * 草稿，提示以草稿为准（语义待产品确认）。 */
 export function WorkflowDraftStaleHint({
   draftYaml,
   draftHash,
@@ -100,13 +106,9 @@ export function WorkflowDraftStaleHint({
   draftHash: string | null
 }) {
   const studio = useStudioStateOptional()
-  if (!studio || studio.definitionYaml === draftYaml) return null
-  const save = studio.draftSave
-  const savedHash = save?.savedHash ?? null
-  const settled =
-    studio.definitionYaml.trim() !== '' &&
-    (save?.status === 'saved' || save?.status === 'idle')
-  if (draftHash && savedHash && settled && draftHash === savedHash) return null
+  if (!studio || studio.draftYaml === draftYaml) return null
+  if (savedIdentityConfirms(studio.draftSave, studio.draftYaml, draftHash))
+    return null
   return (
     <div className={styles.draftHint} role="note">
       该草稿与编辑器当前内容不一致，发布将以编辑器中的 YAML 为准
