@@ -213,8 +213,8 @@ def _storage_key_of(job_db, material_id: str) -> str:
 
 
 def test_presign_retry_rebuilds_invalid_legacy_key(service, storage, job_db) -> None:
-    """#1267 codex P2：收紧前入库的行可能带着非法 key（以 / 结尾等）；用合法
-    新文件名重试时必须按当前字段重建 key，不能把旧 key 再次签发。"""
+    """#1267 codex P2：收紧前入库的行可能带着非法 key（以 / 结尾等）；重试
+    迁到代次段 key 后按当前（已校验）文件名重建，非法旧 key 不再签发。"""
     digest = _sha256(b"legacy")
     _insert_material_row(
         job_db,
@@ -229,12 +229,13 @@ def test_presign_retry_rebuilds_invalid_legacy_key(service, storage, job_db) -> 
     assert retry["material"]["id"] == "mat-legacy"
     assert retry["material"]["status"] == "uploading"
     (presigned_key, _) = storage.presigned[0]
-    assert presigned_key == f"{WORKSPACE_ID}/{digest}/ok.txt"
+    assert presigned_key == f"{WORKSPACE_ID}/{digest}/g1/ok.txt"
     assert _storage_key_of(job_db, "mat-legacy") == presigned_key
 
 
-def test_presign_retry_keeps_valid_legacy_key(service, storage, job_db) -> None:
-    """重试改名但旧 key 合法时保持既有行为：复用原 key，只更新展示名。"""
+def test_presign_retry_moves_to_current_generation_key(service, storage, job_db) -> None:
+    """#1267 codex R4 P1：重试不复用旧 key——即使旧 key 合法，也迁到
+    g{代次} 段的新 key，此前签发的 PUT URL 全部指向死 key。"""
     digest = _sha256(b"legacy-ok")
     legacy_key = f"{WORKSPACE_ID}/{digest}/old.txt"
     _insert_material_row(
@@ -245,13 +246,46 @@ def test_presign_retry_keeps_valid_legacy_key(service, storage, job_db) -> None:
         storage_key=legacy_key,
     )
 
-    retry = service.presign(WORKSPACE_ID, filename="new.txt", size_bytes=1, content_hash=digest)
+    retry = service.presign(WORKSPACE_ID, filename="old.txt", size_bytes=1, content_hash=digest)
 
     assert retry["material"]["id"] == "mat-legacy-ok"
     (presigned_key, _) = storage.presigned[0]
-    assert presigned_key == legacy_key
-    assert _storage_key_of(job_db, "mat-legacy-ok") == legacy_key
-    assert retry["material"]["filename"] == "new.txt"
+    assert presigned_key == f"{WORKSPACE_ID}/{digest}/g1/old.txt"
+    assert _storage_key_of(job_db, "mat-legacy-ok") == presigned_key
+    assert retry["material"]["filename"] == "old.txt"
+
+
+def test_complete_after_retry_verifies_current_generation_key(service, storage, job_db) -> None:
+    """#1267 codex R4 P1 目标形态：旧代次已 PUT 的字节永远不能被标
+    ready——重试提交后 complete 只认当前代次的 key（其对象缺失即失败），
+    此前签发的 URL 再写也只能落到死 key。"""
+    payload = b"gen-zero-bytes"
+    digest = _sha256(payload)
+    result = service.presign(
+        WORKSPACE_ID, filename="v.txt", size_bytes=len(payload), content_hash=digest
+    )
+    material_id = result["material"]["id"]
+    # 第 0 代 URL 的 PUT 已落地（重试之前）。
+    storage.objects[f"{WORKSPACE_ID}/{digest}/v.txt"] = payload
+
+    retry = service.presign(
+        WORKSPACE_ID, filename="v.txt", size_bytes=len(payload), content_hash=digest
+    )
+    (retry_key, _) = storage.presigned[1]
+    assert retry_key == f"{WORKSPACE_ID}/{digest}/g1/v.txt"
+    assert retry["deduplicated"] is False
+
+    # complete 核验当前代次（g1）的 key：对象缺失 → 422 failed，不吃旧代次字节。
+    with pytest.raises(MaterialVerificationError, match="missing"):
+        service.complete(WORKSPACE_ID, material_id)
+    assert service.get(WORKSPACE_ID, material_id)["status"] == "failed"
+
+    # 新代次字节落地后重试 complete（presign 复位 → g2），正常 ready。
+    service.presign(WORKSPACE_ID, filename="v.txt", size_bytes=len(payload), content_hash=digest)
+    (final_key, _) = storage.presigned[2]
+    assert final_key == f"{WORKSPACE_ID}/{digest}/g2/v.txt"
+    storage.objects[final_key] = payload
+    assert service.complete(WORKSPACE_ID, material_id)["status"] == "ready"
 
 
 def test_complete_cas_rejects_key_rebuild_mid_verification(
@@ -293,7 +327,7 @@ def test_complete_cas_rejects_key_rebuild_mid_verification(
     # 没落 ready；行已被重试重置为 uploading 并指向新 key。
     assert service.get(WORKSPACE_ID, "mat-cas")["status"] == "uploading"
     # 明确的失败语义：客户端重调 complete，按新 key 重新核验后正常 ready。
-    storage.objects[f"{WORKSPACE_ID}/{digest}/ok.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{digest}/g1/ok.txt"] = payload
     assert service.complete(WORKSPACE_ID, "mat-cas")["status"] == "ready"
 
 
@@ -380,6 +414,11 @@ def test_presign_retry_bumps_upload_generation(service, storage, job_db) -> None
     assert _generation_of(job_db, material_id) == 1
     service.presign(WORKSPACE_ID, filename="g.txt", size_bytes=1, content_hash=digest)
     assert _generation_of(job_db, material_id) == 2
+    # R4：每代 key 独立——两次重试签发的 URL 指向各自的 g{代次} 段
+    # （presigned[0] 是首发的第 0 代，无代次段）。
+    assert storage.presigned[0][0] == f"{WORKSPACE_ID}/{digest}/g.txt"
+    assert storage.presigned[1][0] == f"{WORKSPACE_ID}/{digest}/g1/g.txt"
+    assert storage.presigned[2][0] == f"{WORKSPACE_ID}/{digest}/g2/g.txt"
 
 
 def test_complete_cas_rejects_same_identity_retry_mid_verification(

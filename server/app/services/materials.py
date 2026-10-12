@@ -26,7 +26,6 @@ from server.app.services.job_errors import (
     NotFoundError,
 )
 from server.app.services.material_key_validation import (
-    invalid_material_filename_reason,
     validate_material_content_hash,
     validate_material_filename,
 )
@@ -114,9 +113,11 @@ class MaterialsService:
         A ready row with the same declared content_hash is returned as-is
         (upload dedup, no URL); a stale uploading/failed row with the same
         hash is reset to uploading so the upload can be retried. Every such
-        reset bumps ``upload_generation`` (schema v96) so a same-key same-size
-        retry stays visible to complete()'s locked identity recheck (#1267
-        codex R3 P1).
+        reset bumps ``upload_generation`` (schema v96) and moves the row to a
+        per-generation key (``.../g{generation}/{filename}``), so a same-size
+        retry stays visible to complete()'s locked identity recheck and every
+        previously issued PUT URL points at a dead key — bytes can never be
+        overwritten across generations (#1267 codex R3/R4 P1).
         """
         validate_material_filename(filename)
         content_hash = content_hash.strip()
@@ -171,21 +172,18 @@ class MaterialsService:
                 if str(row["status"]) == "ready":
                     deduplicated = True
                 else:
-                    # #1267 codex P2: rows written before the key validation
-                    # (#1119) may carry a storage_key the current rules reject;
-                    # re-issuing it would sign the bad key again. The row's
-                    # middle segments are safe by construction (workspace_id is
-                    # schema-v62 contract, the hash segment equals the validated
-                    # request hash), so only the filename tail needs the recheck;
-                    # an invalid tail rebuilds the key from the validated request
-                    # fields and the leftover old object is orphaned to the
-                    # bucket lifecycle rule. A complete() racing this update is
-                    # serialized by its locked identity recheck — the
-                    # generation bump below makes even a same-key same-size
-                    # reset visible to it (R2/R3 P1).
-                    parts = storage_key.split("/", 2)
-                    if len(parts) != 3 or invalid_material_filename_reason(parts[2]) is not None:
-                        storage_key = f"{workspace_id}/{content_hash or material_id}/{filename}"
+                    # #1267 codex R4 P1: a retry moves the row to a
+                    # per-generation key, binding the PUT capability to the
+                    # upload generation — every URL issued for earlier
+                    # generations (and every legacy key written before the
+                    # #1119 validation, P2) points at a dead key; leftover
+                    # objects are orphaned to the bucket lifecycle rule. A
+                    # complete() racing this update is serialized by its
+                    # locked identity recheck (generation included, R3 P1).
+                    new_generation = int(row["upload_generation"]) + 1
+                    storage_key = (
+                        f"{workspace_id}/{content_hash or material_id}/g{new_generation}/{filename}"
+                    )
                     conn.execute(
                         """
                         update materials
