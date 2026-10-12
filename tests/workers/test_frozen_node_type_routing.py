@@ -239,3 +239,34 @@ def test_pruned_route_with_no_matching_agent_surfaces_fallback_error(
 
     route = _dispatch_route(_worker(job_db), workspace_id, snapshot)
     _assert_route_error_consistent(route, _detail(query_service, job))
+
+
+def test_cached_route_revalidates_capability_drift(job_db, workspace_id, query_service) -> None:
+    """#1266：30s TTL 内的缓存命中也必须重新裁决——capability 漂移即失效重解析。"""
+    snapshot = _legacy()
+    WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, snapshot)
+    job = _job(job_db, workspace_id, snapshot, "Q-cache-drift")
+    worker = _worker(job_db)
+    assert _dispatch(worker, workspace_id, snapshot) == ("agent", AGENT)
+
+    replace_agent_catalog(
+        workspace_id, {AGENT: AgentDefinition(capability="other_capability", runtime="velites")}
+    )
+
+    route = _dispatch_route(worker, workspace_id, snapshot)  # cache hit, same worker
+    assert "Invalid Agent route" in route.error_message
+    _assert_route_error_consistent(route, _detail(query_service, job))
+
+
+def test_cached_route_revalidates_archival(job_db, workspace_id, query_service) -> None:
+    """#1266：缓存命中路径同样拦截 TTL 内发生的 Agent 归档。"""
+    snapshot = _legacy()
+    WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, snapshot)
+    job = _job(job_db, workspace_id, snapshot, "Q-cache-archive")
+    worker = _worker(job_db)
+    assert _dispatch(worker, workspace_id, snapshot) == ("agent", AGENT)
+
+    replace_agent_catalog(workspace_id, {})
+
+    route = _dispatch_route(worker, workspace_id, snapshot)  # cache hit, same worker
+    _assert_route_error_consistent(route, _detail(query_service, job))

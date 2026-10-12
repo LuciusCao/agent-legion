@@ -5,7 +5,11 @@ tens of thousands of ready candidates and saturated local capacity, the
 per-candidate route/binding SQL queries dominated the whole pass. Routing
 configuration changes rarely (operator edits in Workspace settings), so the
 resolution is cached for a short TTL: a stale entry at worst claims against
-a seconds-old binding or fails a claim that the next pass retries.
+a seconds-old binding or fails a claim that the next pass retries. Cache hits
+on Agent routes still re-adjudicate the target Agent against the (~5s cached)
+published catalog (#1266): an Agent archived or republished under another
+capability inside the TTL forces re-resolution instead of serving the stale
+route, so dispatch never diverges from the job detail projection.
 """
 
 from __future__ import annotations
@@ -85,10 +89,21 @@ def resolve_node_route(
     is_agent = kind == frozen.FROZEN_NODE_LEGACY_AGENT
     key = route_cache_key(workspace_id, workflow_key, node)
     now = time.monotonic()
+    route: NodeRoute | None = None
     cached = worker.state.route_cache.get(key)
     if cached is not None and now - cached[0] < ROUTE_CACHE_TTL_SECONDS:
         route = cached[1]
-    else:
+        if route.kind == "agent":
+            # #1266: the cached route predates any Agent definition drift inside
+            # the TTL — re-adjudicate against the (~5s cached) published catalog
+            # on every hit, a dict lookup, and force re-resolution on drift
+            # instead of dispatching through a stale route.
+            drift = routed_agent_error(
+                worker.job_db, workspace_id, route.target_id, node.capability
+            )
+            if drift is not None:
+                route = None
+    if route is None:
         route = _resolve_uncached(worker, workspace_id, workflow_key, node, is_agent=is_agent)
         worker.state.route_cache[key] = (now, route)
     if route.kind == "executor" and is_agent:
