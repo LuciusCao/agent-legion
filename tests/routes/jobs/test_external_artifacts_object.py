@@ -62,7 +62,8 @@ def test_raw_missing_object_is_404(two_workspaces, monkeypatch):
 
 def test_raw_range_request_on_object_artifact(two_workspaces):
     """External video consumers need byte ranges: 206 + Content-Range on the
-    object-store branch (gzip objects ignore Range, so use a bare-key row)."""
+    object-store branch, bare-key row form (the .gz form's decoded-range
+    behavior is covered by the #1259 tests below)."""
     c, job_a, _ = two_workspaces
     payload = b"0123456789"
     _register_object_artifact(c, job_a, "clip.mp4", payload, gzipped=False)
@@ -75,6 +76,41 @@ def test_raw_range_request_on_object_artifact(two_workspaces):
     assert response.status_code == 206
     assert response.headers["content-range"] == "bytes 2-5/10"
     assert response.content == b"2345"
+
+
+def test_raw_range_request_on_gz_object_served_decoded(two_workspaces):
+    """#1259：.gz 对象的 Range 按解压口径答 206 + Content-Range、无
+    Content-Encoding——修复前回 200 + gzip 透传，浏览器网络栈判为协议
+    失败（内置产物预览全挂）。"""
+    c, job_a, _ = two_workspaces
+    payload = b"0123456789"
+    _register_object_artifact(c, job_a, "clip.mp4", payload, gzipped=True)
+
+    response = c.get(
+        f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/clip.mp4/raw",
+        headers={"Range": "bytes=2-5"},
+    )
+
+    assert response.status_code == 206
+    assert response.headers["content-range"] == "bytes 2-5/10"
+    assert "content-encoding" not in response.headers
+    assert response.content == b"2345"
+
+
+def test_raw_range_unsatisfiable_on_gz_object_is_416(two_workspaces):
+    """#1259：起点越过解压长度 → 416 + Content-Range: */<解压长度>，
+    无 Content-Encoding。"""
+    c, job_a, _ = two_workspaces
+    _register_object_artifact(c, job_a, "clip.mp4", b"0123456789", gzipped=True)
+
+    response = c.get(
+        f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/clip.mp4/raw",
+        headers={"Range": "bytes=100-"},
+    )
+
+    assert response.status_code == 416
+    assert response.headers["content-range"] == "bytes */10"
+    assert "content-encoding" not in response.headers
 
 
 # --- P2-1: 子路径产物名列出 + 下载往返 ---------------------------------------
