@@ -128,4 +128,4 @@ def test_stale_agent_route_row_never_routes_a_code_node_to_an_agent() -> None:
         route = resolve_node_route(worker, "ws", "ws", code_node)
 
     assert route.kind == "executor"
-    assert list(worker.state.route_cache) == [("ws", "ws", "draft", False)]
+    assert list(worker.state.route_cache) == [("ws", "ws", "draft", False, "draft")]
