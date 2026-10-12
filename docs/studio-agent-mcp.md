@@ -13,7 +13,7 @@ workflow、预览面板与节点代码 / prompt 相关工具都是**读取 / 校
 
 - `get_active_workflow`：读激活 revision；无已发布 revision 时返回结构化空态 `{"state": "empty"}`，不报错。
 - `validate_workflow` / `compare_workflow`：校验、对比草稿；无基线时 compare 退化为草稿全貌预览。
-- `get_workflow_draft` / `save_workflow_draft`（#633）：读写画布同一份未发布草稿。读取无草稿时返回结构化空态（双 null）；保存以 CAS 语义写回完整 `definition_yaml`——携带上次读取的 `updated_at` 作 `expected_updated_at`（无草稿时用字面量 `never-saved`），过期即 409 且 detail 携带当前草稿（`current_draft.definition_yaml` / `current_draft.updated_at`），据此 rebase 重试而非静默覆盖。保存后画布与 YAML 编辑器经 turn-end 查询失效同步显示；编辑只落草稿。
+- `get_workflow_draft` / `save_workflow_draft`（#633；#1226 五轮收口改代次基线）：读写画布同一份未发布草稿。读取无草稿时返回结构化空态（内容字段 null + 当前 `generation`）；保存以 CAS 语义写回完整 `definition_yaml`——携带上次读取的 `generation` 作 `base_generation`（从未写过/发布清空后为当前空态代次），落后即 409 且 detail 携带当前草稿状态（`current_draft.definition_yaml` / `current_draft.generation`），据此 rebase 重试而非静默覆盖。保存后画布与 YAML 编辑器经 turn-end 查询失效同步显示；编辑只落草稿。
 - `request_workflow_publish`（#416）：只是「请求」——校验 workspace 未发布草稿通过后挂一条 pending 记录，由人在 Studio 的发布确认对话框里确认/取消，工具本身永不产生 revision；确认走与手动发布完全一致的门禁。
 - `get_publish_request_status`：查询发布请求结果（pending / confirmed / rejected / expired / superseded）。
 

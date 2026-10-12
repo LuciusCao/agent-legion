@@ -29,6 +29,9 @@ from server.app.db.migrations.studio_chat_session_archive import (
 from server.app.db.migrations.studio_chat_session_soft_delete import (
     migrate_studio_chat_session_soft_delete,
 )
+from server.app.db.migrations.workflow_draft_generation import (
+    migrate_workflow_draft_generation,
+)
 
 RECENT_MIGRATIONS: list[SchemaMigration] = [
     # v87: Worker-reported claim switch column (agent_workers.claim_enabled,
@@ -80,10 +83,19 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # tools so subagent saves also produce draft cards. DDL-only, same
     # guarded-ALTER home rule as v87.
     SchemaMigration(95, "studio_chat_message_draft_kind", migrate_studio_chat_message_draft_kind),
-    # v96 (#1267 codex R3 P1): materials.upload_generation — 每次 presign 重试
+    # v96 (#1226 五轮收口, 设计 v2): workspace_workflow_draft_generation —
+    # the workspace draft generation counter the CAS save bases on (stale
+    # base → 409, publish delete bumps). Renumbered v95→v96 after main took
+    # v95 for studio_chat_message_draft_kind (#434 collision protocol).
+    # DDL-only, table created by its migration module (schema file at its
+    # raw-line ceiling; v76 precedent).
+    SchemaMigration(96, "workflow_draft_generation", migrate_workflow_draft_generation),
+    # v97 (#1267 codex R3 P1): materials.upload_generation — 每次 presign 重试
     # +1 的上传代次，让同 key/同大小的 uploading→uploading 重试对 complete
-    # 的锁内复查可见。Born as this branch's v95, renumbered after main took
-    # v95 for studio_chat_message_draft_kind (#434 collision protocol: the
-    # later merge renumbers). DDL-only, same guarded-ALTER home rule as v87.
-    SchemaMigration(96, "material_upload_generation", migrate_material_upload_generation),
+    # 的锁内复查可见。Born as this branch's v95, renumbered twice (#434
+    # collision protocol: the later merge renumbers): v95→v96 when main took
+    # v95 for studio_chat_message_draft_kind, then v96→v97 when #1226 took
+    # v96 for workflow_draft_generation. DDL-only, same guarded-ALTER home
+    # rule as v87.
+    SchemaMigration(97, "material_upload_generation", migrate_material_upload_generation),
 ]

@@ -360,7 +360,7 @@ SeaweedFS 存成目录（内容被丢弃），下载与备份落不了文件系�
 （多段相对路径），另按 bundle 成员路径 `validate_member_path` 补齐控制字符禁令。
 `content_hash` 非空时必须是 64 位小写 sha256 hex（422，#1267）——它同样拼进 key 且是
 dedup 身份，不限制格式会把 `../other` 之类值原样签进 key。每次重试（复位 uploading）都把
-行迁到 `…/g{代次}/{filename}` 的新 key 并把 `upload_generation` +1（schema v96）：此前签发
+行迁到 `…/g{代次}/{filename}` 的新 key 并把 `upload_generation` +1（schema v97）：此前签发
 的 PUT URL 全部指向死 key（上传能力随代次失效，收紧前入库的非法 key 也随之不再签发），
 旧对象交 bucket lifecycle 回收；complete 落 ready/failed 前在行锁内复查 verify 身份
 （storage_key + size_bytes + 代次）与当前状态，不一致返回 409 由客户端重调 complete，

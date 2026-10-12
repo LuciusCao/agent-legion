@@ -50,6 +50,9 @@ type SseDeps = {
     sessionId: string
   ) => Promise<StudioChatSessionRecord>
   activeSessionId: string
+  /** 会话选择代次（#1237 codex P2-1）：异步回调落地前复核——A→B→A 后
+   * sessionId 相同，只有代次能识别早先选择的迟到响应。 */
+  sessionGenerationRef: { current: number }
 }
 
 /** SSE message 事件的合入：流式残片 upsert（缺 seq 指向未知消息则增量补齐，
@@ -105,8 +108,12 @@ export function handleSseReconnect(deps: SseDeps): void {
   void refillMessages()
     .then(checkTerminal)
     .catch(() => undefined)
+  const generation = deps.sessionGenerationRef.current
   void fetchSession(deps.workspaceId, deps.activeSessionId).then(
-    setSession,
+    // 落地前复核代次：重连快照在途时切换了会话（含 A→B→A），旧快照丢弃。
+    (snapshot) => {
+      if (deps.sessionGenerationRef.current === generation) setSession(snapshot)
+    },
     () => undefined
   )
 }

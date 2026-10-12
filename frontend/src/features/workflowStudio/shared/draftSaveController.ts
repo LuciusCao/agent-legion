@@ -2,6 +2,7 @@ import {
   MAX_PUT_RETRIES,
   DEBOUNCE_MS,
   IDLE_DRAFT_SAVE,
+  hasPendingWork,
   withinKeepaliveLimit,
   type DraftSaveFlushResult,
   type DraftSaveState,
@@ -13,7 +14,6 @@ import {
   conflictEnteredState,
   conflictResolvedState,
   decideSchedule,
-  hasPendingWork,
   pendingAfterResolve,
   revertedState,
   stopTimer,
@@ -26,10 +26,11 @@ import {
    作废的成功响应仍推进 CAS 基线（#633 codex review R2 P1）——它是服务端
    真值，后续请求必须以它竞争，否则连续编辑会被误报成会话冲突。
    #633：PUT 携带 CAS 基线，409 冲突进入专属 conflict 态（不自动重试
-   ——同一过期时间戳重试只会再 409），同时把 CAS 基线推进到冲突响应的
-   current_draft.updated_at（服务端真值），用户继续编辑后的下一次保存以新
+   ——同一落后基线重试只会再 409），同时把 CAS 基线推进到冲突响应的
+   current_draft 代次（服务端真值），用户继续编辑后的下一次保存以新
    基线竞争；conflict 在用户采用服务端草稿（hydrate）或继续编辑（新调度）
-   后解除。状态/常量在 draftSaveTypes.ts，提示文本在 draftSaveText.ts
+   后解除。#1226 五轮收口：基线货币是草稿代次（generation），不再是
+   updated_at 时间戳。状态/常量在 draftSaveTypes.ts，提示文本在 draftSaveText.ts
    （#633 拆出）。
    #1177 评审缺陷族：核心不变量「内容偏离已持久化 ⇒ status 必离开 settled
    （saved/idle）」由全部路径共同维护——调度（含空白 skip 的
@@ -40,8 +41,9 @@ export class DraftSaveController {
   private state: DraftSaveState = IDLE_DRAFT_SAVE
   private readonly listeners = new Set<(state: DraftSaveState) => void>()
   private lastPersisted: string | null = null
-  // #633：已持久化基线的 CAS 时间戳（null = 尚无基线，首存用 never-saved）。
-  private lastPersistedAt: string | null = null
+  // #633 + #1226：已持久化基线的草稿代次（null = 尚无基线——保存被
+  // hydrated 门控，不会以 null 代次发 PUT）。
+  private lastPersistedGeneration: number | null = null
   private requestCounter = 0
   // 最新一次已发起 PUT 的 requestId（0 = 无在途写入）。
   private inFlight = 0
@@ -59,25 +61,33 @@ export class DraftSaveController {
   }
 
   /* 记录服务端已持久化基线（GET 草稿到达时调用一次；#633 codex review
-     P1-2：服务端草稿前进且画布采用了它时再次调用）。#633：同时记下
-     updated_at 作为后续 PUT 的 CAS 基线——冲突恢复采用服务端草稿与首次
-     hydrate 走同一入口。kimi review P1-2：hydrate 即冲突的解除路径之一
+     P1-2：服务端草稿前进且画布采用了它时再次调用）。#633 + #1226：
+     同时记下代次作为后续 PUT 的 CAS 基线——冲突恢复采用服务端草稿与
+     首次 hydrate 走同一入口。kimi review P1-2：hydrate 即冲突的解除路径之一
      （采用服务端版本），conflict 字段一并清零。#1143：savedHash 是服务端
      草稿的语义身份（GET/adopt 传入），随基线一并推进。 */
   hydrate = (
     persistedYaml: string,
     updatedAt: string | null | undefined,
+    generation: number | null,
     savedHash?: string | null
   ): void => {
+    /* #1226 四轮 P1：新基线可能正是挂起 debounce 的内容（发布后画布 reset
+       到 canonical 的尾随 schedule 已 arm）——该保存已成 no-op，作废它，
+       否则到期 PUT 按 CAS-over-absence 语义立刻重建刚删的草稿行。 */
+    if (this.pendingSave?.yaml === persistedYaml) this.abortPending()
     this.lastPersisted = persistedYaml
-    this.lastPersistedAt = updatedAt ?? null
-    this.setState(conflictResolvedState(this.state, updatedAt, savedHash))
+    this.lastPersistedGeneration = generation
+    const next = conflictResolvedState(this.state, updatedAt, savedHash)
+    /* 内容不同的挂起保存（用户在窗口内的真实编辑）保留 pending——内容偏离
+       新基线，status 不得收敛 settled（#1177 不变量）。 */
+    this.setState(this.pendingSave ? { ...next, status: 'pending' } : next)
   }
 
   /* #633 codex review P1-2/P2-1：进入 conflict 态的统一入口——409 冲突
      响应（current_draft）与 turn-end 失效后服务端草稿前进（useDraftServerSync
      在用户有本地编辑时调用）共用。冲突双方携带服务端真值：把 CAS 基线推进
-     到服务端 updated_at（下一次保存以新基线竞争，否则同一过期时间戳永远
+     到服务端代次（下一次保存以新基线竞争，否则同一落后代次永远
      409）；用户未落盘的编辑保留在画布（conflictDraftYaml 供 UI 提供采用
      服务端草稿的入口），不自动重试。R4 P1：同时取消挂起的 debounce/retry
      计时器——计时器若存活，到期 save() 会以刚推进的基线成功覆盖 Agent
@@ -85,12 +95,13 @@ export class DraftSaveController {
   enterConflict = (
     yaml: string | null,
     at: string | null,
-    hash?: string | null
+    hash?: string | null,
+    generation?: number | null
   ): void => {
     this.clearTimers()
     this.pendingSave = null
-    if (at) this.lastPersistedAt = at
-    this.setState(conflictEnteredState(this.state, yaml, at, hash))
+    if (generation != null) this.lastPersistedGeneration = generation
+    this.setState(conflictEnteredState(this.state, yaml, at, hash, generation))
   }
 
   /* draftYaml 变化时调度一次 debounce 保存；空内容与「回退到已持久化值且
@@ -179,9 +190,14 @@ export class DraftSaveController {
      写入画布并推进基线，本页未保存编辑被放弃（调用方负责 UI 确认）。
      #1143：hash 即被采用草稿的语义身份，随 hydrate 恢复成 savedHash
      （画布内容=服务端草稿，草稿卡核对不应对它误报）。 */
-  adoptServerDraft(yaml: string, at: string | null, hash?: string | null) {
+  adoptServerDraft(
+    yaml: string,
+    at: string | null,
+    hash?: string | null,
+    generation?: number | null
+  ) {
     this.abortPending()
-    this.hydrate(yaml, at, hash)
+    this.hydrate(yaml, at, generation ?? null, hash)
   }
 
   /* 回退到已持久化值：撤销等待中的保存与失败重试（retryTimer 本身也有
@@ -256,6 +272,13 @@ export class DraftSaveController {
     )
   }
 
+  /* #1226 七轮复审 P1：空态重取落地前的冲突探针（useDraftServerSync 空态
+     分支用）——409 冲突在旗时 hydrate 会清掉冲突（enterConflict 已清
+     pendingSave），画布未落盘文本被状态机遗忘、离页静默丢失。 */
+  inConflict(): boolean {
+    return this.state.conflict === true
+  }
+
   /* 卸载/workspace 切换：清理计时器（pending 的尾部编辑随 debounce 窗口
      丢弃，与旧行为一致；页面级离开由 useDraftUnloadGuard 的 flush 覆盖）。 */
   dispose = (): void => this.abortPending()
@@ -266,7 +289,7 @@ export class DraftSaveController {
      #633：PUT 携带发起时刻的 CAS 基线（同一 requestId 的重试链固定用首次
      快照）；409 冲突直接进 conflict 态且不重试，flush 终态 ok=false（等待方
      如发布确认必须中止——本页草稿并未落盘）。冲突响应同时把基线推进到
-     current_draft.updated_at（服务端真值）：用户的编辑保留在画布，下一次
+     current_draft 的代次（服务端真值）：用户的编辑保留在画布，下一次
      保存以新基线重新竞争而不是永远 409。 */
   private save(
     yaml: string,
@@ -294,10 +317,10 @@ export class DraftSaveController {
         if (this.inFlight === id) this.inFlight = 0
         this.drainQueued()
       },
-      baseline: () => this.lastPersistedAt,
-      onBaseline: (saved, at, current, hash) => {
+      baseline: () => this.lastPersistedGeneration,
+      onBaseline: (saved, at, current, hash, generation) => {
         this.lastPersisted = saved
-        this.lastPersistedAt = at
+        if (generation != null) this.lastPersistedGeneration = generation
         // #1177 评审 V6：作废响应同样推进 savedHash——它是服务端真值的
         // 身份；pending 期间没有消费方按 settled 读它，而画布 revert 到
         // 该内容后它恰好正确（否则一张记录旧 hash 的卡可短路隐藏提示）。

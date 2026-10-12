@@ -71,15 +71,18 @@ editing and re-read before submitting.
   error.
 - `get_workflow_draft(workspace_id)` — the workspace's unpublished Studio
   draft (the SAME draft the canvas autosaves; NOT the active revision).
-  `{"definition_yaml": ..., "updated_at": ...}`; both null when no draft was
-  ever saved. The `updated_at` is your CAS token for `save_workflow_draft`.
-- `save_workflow_draft(workspace_id, definition_yaml, expected_updated_at)` —
+  `{"definition_yaml": ..., "updated_at": ..., "generation": ...}`; content
+  fields null when no draft was ever saved. The `generation` is your CAS base
+  for `save_workflow_draft` (0 when never saved; a publish that emptied the
+  store advances it, so the empty-state read then carries the post-publish
+  generation — pass it back as usual).
+- `save_workflow_draft(workspace_id, definition_yaml, base_generation)` —
   write the full definition YAML into the Studio draft; the human's canvas and
-  YAML editor pick it up. CAS: `expected_updated_at` must be the `updated_at`
-  from your last read (or the literal `never-saved` when none existed). A
-  stale token returns HTTP 409 with the current draft embedded
-  (`current_draft.definition_yaml` / `current_draft.updated_at`) — rebase your
-  changes onto that draft and retry with its timestamp; never retry the old
+  YAML editor pick it up. CAS: `base_generation` must be the `generation`
+  from your last read. A stale base returns HTTP 409 with the current draft
+  embedded (`current_draft.definition_yaml` / `current_draft.generation`) —
+  rebase your changes onto that draft and retry with its generation; never
+  retry the old
   one. Draft only: publishing stays with `request_workflow_publish`.
 - `validate_workflow(workspace_id, definition_yaml)` — the full publish
   validation set (structure + bindings). Persists nothing.
@@ -196,11 +199,12 @@ publish, and skill release actions stay human-only).
 4. `validate_workflow` → fix every reported error. Then `compare_workflow`
    → preview the full shape. Repeat until clean.
 5. `save_workflow_draft` → persist the validated YAML as the Studio draft.
-   The CAS token (`expected_updated_at`) comes from `get_workflow_draft`'s
-   `updated_at`, from `get_studio_context`'s `draft_updated_at` (same value —
-   the draft row's updated_at), or the literal `never-saved`. Never invent a
-   timestamp. On a 409, rebase onto the response's `current_draft` and retry
-   with its `updated_at` — the human may have edited concurrently.
+   The CAS base (`base_generation`) comes from `get_workflow_draft`'s
+   `generation` (content and generation are one atomic snapshot there —
+   `get_studio_context`'s mirrored draft_yaml deliberately carries no
+   generation, #1226). Never invent one. On a 409,
+   rebase onto the response's `current_draft` and retry with its
+   `generation` — the human may have edited concurrently.
 6. For each code node, `save_node_code_draft` with `expected_capability` set
    (section 4). Every agent node carries its own execution profile in the
    YAML you saved in step 5 (`execution.runtime`, `skill`, optional `tools` /
@@ -380,7 +384,7 @@ worker declared `*` accepts whatever the node types.
 Edit execution blocks through the workflow draft round-trip:
 `get_workflow_draft` / `get_active_workflow` → edit the YAML (top-level
 `execution:` and/or per-node overrides) → `validate_workflow` →
-`save_workflow_draft` with the CAS flow (`expected_updated_at` from your
+`save_workflow_draft` with the CAS flow (`base_generation` from your
 last read; a 409 carries `current_draft` for rebasing) →
 `compare_workflow` to preview.
 
@@ -595,10 +599,11 @@ workspace's shared materials instead of copying it into every skill:
 - `Draft workflow key '...' does not match workspace default workflow key
   '...'` — the workspace already has a key; re-emit the YAML with that key.
 - HTTP 409 `Workflow draft conflict` from `save_workflow_draft` — the human
-  (or another session) saved a newer draft after your read. Rebase your
-  changes onto `current_draft.definition_yaml` from the error and retry with
-  `current_draft.updated_at` as the new `expected_updated_at`; never retry
-  the stale timestamp.
+  (or another session) saved a newer draft after your read, or a publish
+  advanced the generation. Rebase your changes onto
+  `current_draft.definition_yaml` from the error and retry with
+  `current_draft.generation` as the new `base_generation`; never retry the
+  stale base.
 - `no published node code for ...` — publish the node code first
   (`save_node_code_draft` with `expected_capability`, then publish).
 - `Agent node X must declare its own execution profile` — set

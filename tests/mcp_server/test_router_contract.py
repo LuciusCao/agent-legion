@@ -74,6 +74,10 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
             args["code"] = "def run(ctx): pass"
         elif tool.name in ("save_skill_version", "save_shared_materials"):
             args["files"] = []
+        elif tool.name == "save_workflow_draft":
+            # base_generation is int-typed (#1226): the [] placeholder is for
+            # array params; an int param needs an int.
+            args["base_generation"] = 0
         asyncio.run(server.call_tool(tool.name, args))
 
     settings = Settings(

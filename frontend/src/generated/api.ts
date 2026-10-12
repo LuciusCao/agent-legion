@@ -7074,22 +7074,28 @@ export interface components {
     }
     /**
      * StudioAgentWorkflowDraftResponse
-     * @description Human draft-store mirror; both null when no draft (structured empty).
+     * @description Human draft-store mirror; null content fields when no draft
+     *     (structured empty), generation always the workspace's current one.
      */
     StudioAgentWorkflowDraftResponse: {
       /** Definition Hash */
       definition_hash?: string | null
       /** Definition Yaml */
       definition_yaml?: string | null
+      /**
+       * Generation
+       * @default 0
+       */
+      generation: number
       /** Updated At */
       updated_at?: string | null
     }
     /** StudioAgentWorkflowDraftSaveRequest */
     StudioAgentWorkflowDraftSaveRequest: {
+      /** Base Generation */
+      base_generation: number
       /** Definition Yaml */
       definition_yaml: string
-      /** Expected Updated At */
-      expected_updated_at: string
     }
     /**
      * StudioChatAgentOption
@@ -7115,15 +7121,14 @@ export interface components {
      * StudioChatContextResponse
      * @description What the get_studio_context MCP tool returns: the session's bound
      *     workspace, the human's live Studio node selection, the canvas' unpublished
-     *     workflow draft (None until the frontend pushes it), the draft row's
-     *     ``updated_at`` (kimi review P2-5: the CAS token for a subsequent
-     *     ``save_workflow_draft`` — the session-pushed draft_yaml alone carries
-     *     no baseline; None = never-saved), and the active workflow's structure.
-     *     ``workflow`` is None when nothing is published yet.
+     *     workflow draft (None until the frontend pushes it), and the active
+     *     workflow's structure. ``workflow`` is None when nothing is published yet.
+     *
+     *     #1226 八轮复审 P1：会话镜像的 draft_yaml 与代次分属两条通道，任何此处
+     *     另读的代次都可能与 YAML 错配——因此响应不携带代次；save_workflow_draft
+     *     的 CAS base 一律从 get_workflow_draft 的原子状态读取。
      */
     StudioChatContextResponse: {
-      /** Draft Updated At */
-      draft_updated_at: string | null
       /** Draft Yaml */
       draft_yaml: string | null
       /** Selected Node Key */
@@ -7801,25 +7806,33 @@ export interface components {
      *     契约模型化——此前是裸 dict，前端只能手写 transport type）。
      *
      *     与 ``WorkflowDraftStoreResponse`` 同一字段集（服务端 current draft 的
-     *     单一形状）：草稿不存在（never-saved 竞态删除后撞 CAS）时全 null。
+     *     单一形状）：草稿行不存在（发布删除后的代次冲突）时 yaml/时间戳/hash
+     *     全 null，但 ``generation`` 始终是 workspace 当前代次（重 base 以它为
+     *     准）。
      */
     WorkflowDraftConflictCurrentDraft: {
       /** Definition Hash */
       definition_hash?: string | null
       /** Definition Yaml */
       definition_yaml?: string | null
+      /**
+       * Generation
+       * @default 0
+       */
+      generation: number
       /** Updated At */
       updated_at?: string | null
     }
     /**
      * WorkflowDraftConflictDetail
      * @description 409 detail 顶层（服务层 DraftConflictError.payload 的契约形态）：
-     *     message（人读指引）+ expected_updated_at（stale 基线）+ current_draft。
+     *     message（人读指引）+ base_generation（写入方声明的落后基线）+
+     *     current_draft（含当前代次）。
      */
     WorkflowDraftConflictDetail: {
+      /** Base Generation */
+      base_generation: number
       current_draft: components['schemas']['WorkflowDraftConflictCurrentDraft']
-      /** Expected Updated At */
-      expected_updated_at: string
       /** Message */
       message: string
     }
@@ -7840,10 +7853,10 @@ export interface components {
     }
     /** WorkflowDraftStoreRequest */
     WorkflowDraftStoreRequest: {
+      /** Base Generation */
+      base_generation?: number | null
       /** Definition Yaml */
       definition_yaml: string
-      /** Expected Updated At */
-      expected_updated_at?: string | null
     }
     /** WorkflowDraftStoreResponse */
     WorkflowDraftStoreResponse: {
@@ -7851,6 +7864,11 @@ export interface components {
       definition_hash?: string | null
       /** Definition Yaml */
       definition_yaml?: string | null
+      /**
+       * Generation
+       * @default 0
+       */
+      generation: number
       /** Updated At */
       updated_at?: string | null
     }
@@ -11893,7 +11911,7 @@ export interface operations {
           'application/json': components['schemas']['StudioAgentWorkflowDraftResponse']
         }
       }
-      /** @description Stale CAS base */
+      /** @description Stale base generation */
       409: {
         headers: {
           [name: string]: unknown
@@ -15762,7 +15780,7 @@ export interface operations {
           'application/json': components['schemas']['WorkflowDraftStoreResponse']
         }
       }
-      /** @description Stale CAS base */
+      /** @description Stale base generation */
       409: {
         headers: {
           [name: string]: unknown

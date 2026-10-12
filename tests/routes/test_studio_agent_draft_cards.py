@@ -122,7 +122,7 @@ def test_workflow_draft_save_appends_draft_event(client, job_db, registered_runt
 
     response = scoped.put(
         f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/draft",
-        json={"definition_yaml": draft_yaml, "expected_updated_at": "never-saved"},
+        json={"definition_yaml": draft_yaml, "base_generation": 0},
         headers={_SESSION_HEADER: session_id},
     )
 
@@ -425,7 +425,7 @@ def test_stalled_workflow_save_event_is_dropped_after_overwrite(
 
     save_a = scoped.put(
         url,
-        json={"definition_yaml": yaml_a, "expected_updated_at": "never-saved"},
+        json={"definition_yaml": yaml_a, "base_generation": 0},
         headers={_SESSION_HEADER: session_id},
     )
     assert save_a.status_code == 200
@@ -434,7 +434,7 @@ def test_stalled_workflow_save_event_is_dropped_after_overwrite(
         url,
         json={
             "definition_yaml": yaml_b,
-            "expected_updated_at": save_a.json()["updated_at"],
+            "base_generation": save_a.json()["generation"],
         },
         headers={_SESSION_HEADER: session_id},
     )
@@ -479,13 +479,13 @@ def test_failed_saves_append_nothing(client, job_db, registered_runtimes) -> Non
     draft_yaml = _active_yaml(scoped, workspace_id)
     first = scoped.put(
         f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/draft",
-        json={"definition_yaml": draft_yaml, "expected_updated_at": "never-saved"},
+        json={"definition_yaml": draft_yaml, "base_generation": 0},
         headers={_SESSION_HEADER: session_id},
     )
     assert first.status_code == 200
     conflict = scoped.put(
         f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/draft",
-        json={"definition_yaml": draft_yaml, "expected_updated_at": "never-saved"},
+        json={"definition_yaml": draft_yaml, "base_generation": 0},
         headers={_SESSION_HEADER: session_id},
     )
     assert conflict.status_code == 409

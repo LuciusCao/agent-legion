@@ -3,7 +3,7 @@
    计时器/CAS 基线/请求生命期留在 controller（它们与竞争时序强耦合），
    这里是可以独立测试的决策逻辑。 */
 
-import type { DraftSaveState } from './draftSaveTypes'
+import type { DraftSaveState, PutWorkflowDraftFn } from './draftSaveTypes'
 
 /* 采用服务端版本（adoptServerDraft/hydrate 共用）：回到 idle、清除冲突，
    savedAt 跟随服务端时间戳（无时间戳时保留原值）。#1177 codex P2：
@@ -38,7 +38,8 @@ export function conflictEnteredState(
   current: DraftSaveState,
   serverYaml: string | null,
   serverAt: string | null,
-  serverHash?: string | null
+  serverHash?: string | null,
+  serverGeneration?: number | null
 ): DraftSaveState {
   return {
     ...current,
@@ -47,6 +48,9 @@ export function conflictEnteredState(
     conflict: true,
     conflictDraftYaml: serverYaml,
     conflictDraftHash: serverHash === undefined ? undefined : serverHash,
+    // #1226 五轮收口：冲突携带服务端代次——采用服务端版本后恢复为 CAS 基线。
+    conflictDraftGeneration:
+      serverGeneration === undefined ? undefined : serverGeneration,
   }
 }
 
@@ -64,6 +68,7 @@ export function conflictClearedState(current: DraftSaveState): DraftSaveState {
     conflict: false,
     conflictDraftYaml: undefined,
     conflictDraftHash: undefined,
+    conflictDraftGeneration: undefined,
   }
 }
 
@@ -117,12 +122,14 @@ export function stopTimer(
 
 /* 成功响应回调：作废与否都推进基线（R2 P1）；current 时才更新可见状态。
    #1143：savedHash 是本次落盘内容的服务端语义身份（响应带回，旧服务端
-   或不可解析草稿为 null——调用方按「无法核对」降级）。 */
+   或不可解析草稿为 null——调用方按「无法核对」降级）。#1226 五轮收口：
+   generation 是落盘后的新代次（下一次保存的 CAS 基线）。 */
 export type OnSaveSuccess = (
   yaml: string,
   updatedAt: string | null,
   current: boolean,
-  savedHash: string | null
+  savedHash: string | null,
+  generation: number | null
 ) => void
 
 /* 失败回调：409 冲突（WorkflowDraftConflictError，携带 current_draft）
@@ -133,16 +140,12 @@ export type OnSaveFailure = (
 ) => void
 
 /* 保存编排：发起 PUT 并按响应分派回调。requestId 过期的迟到响应只推进
-   基线、不构成失败信号（R2 P1）。 */
+   基线、不构成失败信号（R2 P1）。#1226 五轮收口：CAS 基线是代次。 */
 export function runSave(options: {
-  put: (
-    yaml: string,
-    keepalive: boolean,
-    expectedAt: string
-  ) => Promise<{ updated_at?: string | null; definition_hash?: string | null }>
+  put: PutWorkflowDraftFn
   yaml: string
   keepalive: boolean
-  expectedAt: string
+  baseGeneration: number | null
   requestId: number
   isCurrentRequest: (requestId: number) => boolean
   clearInFlight: (requestId: number) => void
@@ -150,18 +153,19 @@ export function runSave(options: {
   onFailure: OnSaveFailure
   resolve: (ok: boolean) => void
 }): void {
-  const { put, yaml, keepalive, expectedAt, requestId } = options
-  put(yaml, keepalive, expectedAt)
+  const { put, yaml, keepalive, baseGeneration, requestId } = options
+  put(yaml, keepalive, baseGeneration)
     .then((response) => {
       // onSuccess BEFORE clearInFlight: the success handler advances the
-      // persisted baseline (lastPersistedAt), and a queued save drains on
-      // clearInFlight — the drain must re-read the ADVANCED baseline, not
+      // persisted baseline (lastPersistedGeneration), and a queued save drains
+      // on clearInFlight — the drain must re-read the ADVANCED baseline, not
       // the pre-A snapshot (codex R3 P1 serialization).
       options.onSuccess(
         yaml,
         response.updated_at ?? null,
         options.isCurrentRequest(requestId),
-        response.definition_hash ?? null
+        response.definition_hash ?? null,
+        response.generation ?? null
       )
       options.clearInFlight(requestId)
       options.resolve(true)
@@ -173,23 +177,14 @@ export function runSave(options: {
     })
 }
 
-/* beforeunload 护栏谓词：pending（未落盘）/在途写入/失败未恢复/冲突挂起
-   （本页编辑未保存且自动 flush 已停）都算未保存。 */
-export function hasPendingWork(
-  hasPending: boolean,
-  inFlight: boolean,
-  errored: boolean,
-  inConflict: boolean
-): boolean {
-  return hasPending || inFlight || errored || inConflict
-}
-
 /* kimi review P1-2 冲突出口的签名（persistence 与 serverSync 共享）。
-   #1143：serverHash（可选）是被采用服务端草稿的语义身份。 */
+   #1143：serverHash（可选）是被采用服务端草稿的语义身份；#1226：
+   serverGeneration 是其代次（采用后恢复为 CAS 基线）。 */
 export type AdoptServerDraft = (
   serverYaml: string,
   serverAt: string | null,
   onAdopt?: (serverYaml: string) => void,
-  serverHash?: string | null
+  serverHash?: string | null,
+  serverGeneration?: number | null
 ) => void
 export type ResolveConflict = (keepMine: boolean) => void
