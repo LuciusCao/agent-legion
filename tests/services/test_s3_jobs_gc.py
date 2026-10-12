@@ -197,6 +197,36 @@ def test_apply_gc_never_deletes_rollback_backup_keys() -> None:
     assert result.deleted == 2
 
 
+def test_rollback_exemption_scoped_to_jobs_prefixes() -> None:
+    """#1285：``/.rollback/`` 豁免仅对 jobs/、jobs-staging/ 前缀的 key 生效
+    ——promote 回滚备份只出现在这两个产物前缀下；材料根前缀 key 不适用
+    （材料文件名允许合法多段相对路径、无 .rollback 保留段，
+    dir/.rollback/file.bin 形态的旧代次/删行残留在删除开放（#1279）后
+    不得被豁免永久跳过）。钉豁免判定函数本身。"""
+    assert s3_jobs_gc._rollback_backup_exempt("jobs/ws-1/job-1/.rollback/x.json")
+    assert s3_jobs_gc._rollback_backup_exempt("jobs-staging/ws-1/job-1/e1/.rollback/a/o.json")
+    assert not s3_jobs_gc._rollback_backup_exempt(f"ws1/{'a' * 64}/g1/dir/.rollback/file.bin")
+    assert not s3_jobs_gc._rollback_backup_exempt(f"ws1/{'b' * 64}/g0/.rollback/file.bin")
+    assert not s3_jobs_gc._rollback_backup_exempt("jobs/ws-1/job-1/plain.json")
+
+
+def test_apply_gc_rollback_exemption_does_not_cover_material_root_keys() -> None:
+    """#1285：apply_gc 的纵深防御豁免同样按前缀收窄——手工构造的
+    OrphanReport 混入材料根前缀 key（#1279 删除开放后的形态）时，
+    材料 key 中的 /.rollback/ 段不构成豁免理由，jobs 前缀下的真回滚
+    备份仍不可删。"""
+    deleter = _RecordingDeleter()
+    material_key = f"ws1/{'a' * 64}/g1/dir/.rollback/file.bin"
+    report = _report_with(
+        authority=["jobs/ws-1/job-1/.rollback/x.json", material_key],
+    )
+
+    result = s3_jobs_gc.apply_gc(deleter, "bkt", report)  # 无 revalidate 的最坏路径
+
+    assert deleter.deleted == [material_key]
+    assert result.deleted == 1
+
+
 def test_apply_revalidate_skips_keys_that_gained_rows() -> None:
     """TOCTOU（#344 评审 P1）：扫描判孤儿后、删除前同名 key 被并发 promote
     重建行——删除批经新鲜反查过滤，不删新权威对象；被救下的计入
