@@ -19,7 +19,8 @@ import type { StudioChatMessageRecord } from './studioChatApi'
  * 校准后对仍在途的行逐个重取（最近 terminal 截断，#1290；terminal 当轮
  * 到达时截断按合入后的快照计算，#1300）；点读落地前校验本地行未被更新
  * 的 SSE 快照超越（点火整行快照 #1299 + 终态/长度比较 #1288；整行冲突
- * 丢弃后补一次收口点读防 SSE 丢失导致的永停中间态，#1305）；missed 帧
+ * 丢弃后按 updater 观察补一次收口点读防 SSE 丢失导致的永停中间态，
+ * #1305）；missed 帧
  *（未知 id）的点读与失败有界重试（#1289）在 studioChatMissedRefetch
  *（复用本模块的 fetchAndUpsert）。行分类谓词（isTerminalStatus /
  * hasInFlightToolCall）从 studioChatEvents 迁居于此——events 与本模块
@@ -46,6 +47,9 @@ export function isTerminalStatus(message: ChatMessage): boolean {
 
 // ACP tool_call 终态集合，对齐后端 tool_call_commands._FINISHED。
 const TOOL_CALL_TERMINAL = new Set(['completed', 'failed'])
+
+// 收口点读（#1305）的 reject 静默：失败无额外回退，等下次校准/事件自然触发。
+const noop = () => undefined
 
 function isInFlightToolCall(message: ChatMessage): boolean {
   return (
@@ -153,22 +157,26 @@ export function fetchAndUpsert(
   ).then((message) => {
     if (deps.sessionGenerationRef.current !== generation) return
     // #1305：整行偏离按「本地已被更新 SSE 改写」丢弃（#1299），但偏离也可能
-    // 是服务端在途持久化、SSE 丢失的更新快照被误丢——落地丢弃后补一次收口
-    // 点读（仅一次）让最新库快照落地，消除「服务端已更新但界面永停中间态」；
-    // 收口点读随返回链被调用方既有 catch 接管，不再单独吞错。
-    const diverged = (local: ChatMessage | undefined) =>
-      local !== undefined && JSON.stringify(local) !== firedWith
-    const localNow = deps.messagesRef.current.find((m) => m.id === message.id)
+    // 是服务端在途持久化、SSE 丢失的更新快照被误丢——丢弃后补一次收口点读
+    //（仅一次）让最新库快照落地，消除「服务端已更新但界面永停中间态」。
+    // 收口决定由 updater 实际观察到的冲突驱动（conflicted 标记），不能事后
+    // 读 messagesRef——ref 由被动效应同步，SSE 已排入 state 而未同步 ref 时
+    // 读 ref 仍是点火快照，会漏挂收口（复验 r1 P1）。决定延迟到宏任务读取：
+    // updater 在存量更新排队时延迟执行（React 仅无待办时同步求值），宏任务
+    // 时渲染冲刷已定局、标记才是终值，且被动效应已同步 ref，收口点读的
+    // 点火快照不再滞后。
+    let conflicted = false
     deps.setMessages((current) => {
-      // 守卫均为纯读，updater 在 StrictMode 双调用下安全。
+      // conflicted 幂等置位（true 不翻回），updater 在 StrictMode 双调用下安全。
       const local = current.find((m) => m.id === message.id)
-      if (diverged(local)) return current
+      conflicted ||= local !== undefined && JSON.stringify(local) !== firedWith
+      if (conflicted) return current
       if (local && isLocalRowFresher(local, message)) return current
       return upsertMessage(current, message) ?? current
     })
-    if (allowConflictRefire && diverged(localNow))
-      return fetchAndUpsert(deps, messageId, generation, false)
-    return undefined
+    const refire = () =>
+      void fetchAndUpsert(deps, messageId, generation, false).catch(noop)
+    if (conflicted && allowConflictRefire) setTimeout(refire, 0)
   })
 }
 
@@ -192,8 +200,7 @@ export function calibrateWithRowRefetch(
   const generation = deps.sessionGenerationRef.current
   return deps.refillMessages(0).then((hasTerminal) => {
     if (deps.sessionGenerationRef.current !== generation) return hasTerminal
-    for (const id of ids)
-      void fetchAndUpsert(deps, id, generation).catch(() => undefined)
+    for (const id of ids) void fetchAndUpsert(deps, id, generation).catch(noop)
     return hasTerminal
   })
 }

@@ -84,6 +84,48 @@ function makeDeps(current: ChatMessage[]) {
   return { deps, state }
 }
 
+// 复现真实 React 时序的 deps 变体（#1305 复验 r1 P1）：setMessages 只推进
+// state，messagesRef 保持陈旧直到显式 syncRef()（模拟 useStudioChat 里
+// messagesRef 由被动效应同步的滞后窗口）。同步假 setMessages + 同步 ref
+// 会遮蔽「SSE 已排入 state 而 ref 未同步」的窗口，不得用它测收口点读。
+// setMessagesCalls 是 updater 实际执行的计数——响应链落定（丢弃发生）的
+// 信号：数微任务不可靠（.then 链长度是实现细节），以 updater 执行为准。
+function makeLaggingDeps(current: ChatMessage[]) {
+  const state = { messages: current }
+  const laggingRef = { current }
+  const setMessagesCalls = { n: 0 }
+  const deps: RowRefetchDeps = {
+    workspaceId: 'ws1',
+    sessionId: 's1',
+    sessionGenerationRef: { current: 1 },
+    missedRetryRef: { current: new Map<string, number>() },
+    messagesRef: laggingRef,
+    setMessages: (updater) => {
+      setMessagesCalls.n += 1
+      state.messages = updater(state.messages)
+    },
+    refillMessages: vi.fn(async () => false),
+    onTerminal: vi.fn(),
+  }
+  return {
+    deps,
+    state,
+    setMessagesCalls,
+    syncRef: () => {
+      laggingRef.current = state.messages
+    },
+  }
+}
+
+// 微任务排空直到条件满足（不点火任何宏任务——收口点读的 setTimeout 仍
+// 停驻）。替代 vi.waitFor：后者以宏任务轮询，会让收口点读抢在 syncRef
+// 之前点火，复现不出「响应落定而 ref 滞后」的窗口。
+async function flushMicrotasksUntil(cond: () => boolean) {
+  while (!cond()) {
+    await Promise.resolve()
+  }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
@@ -169,9 +211,16 @@ describe('calibrateWithRowRefetch（#1236 窗口外在途行补取）', () => {
   it('全量校准后对在途原地更新行按 id 逐个重取', async () => {
     const inFlight = toolCallMessage('tc2', 2, 'in_progress')
     const { deps } = makeDeps([textMessage('m1', 1, 'a'), inFlight])
-    mockApi.mockResolvedValue({
-      message: recordOf(toolCallMessage('tc2', 2, 'completed')),
-    })
+    // 两个在途行各点读一次：按 URL 尾部分发响应（同一记录喂所有 id 会让
+    // m1 的点读拿到 tc2 的行——整行守卫按响应 id 比对必然偏离，#1305 的
+    // 收口点读会被这种假响应误触发）。
+    mockApi.mockImplementation((url) =>
+      Promise.resolve({
+        message: String(url).endsWith('/tc2')
+          ? recordOf(toolCallMessage('tc2', 2, 'completed'))
+          : recordOf(textMessage('m1', 1, 'a')),
+      })
+    )
     const hasTerminal = await calibrateWithRowRefetch(deps)
     expect(hasTerminal).toBe(false)
     expect(deps.refillMessages).toHaveBeenCalledWith(0)
@@ -283,7 +332,13 @@ describe('点读落地的新鲜度守卫（#1288）', () => {
         upsertMessage(current, { id: 'm1', content: { text: 'abcdef' } }) ??
         current
     )
+    // 收口点读（#1305）会随后发起：第二次 GET 返回服务端的最新态（即本地
+    // 已合入的 abcdef），落地为 no-op。
+    mockApi.mockResolvedValueOnce({
+      message: recordOf(textMessage('m1', 1, 'abcdef')),
+    })
     resolveFetch({ message: recordOf(textMessage('m1', 1, 'abc')) })
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(2))
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(state.messages[0]).toMatchObject({ content: { text: 'abcdef' } })
   })
@@ -305,9 +360,14 @@ describe('点读落地的新鲜度守卫（#1288）', () => {
           content: { status: 'completed' },
         }) ?? current
     )
+    // 收口点读（#1305）：第二次 GET 返回服务端最新态（completed），no-op。
+    mockApi.mockResolvedValueOnce({
+      message: recordOf(toolCallMessage('tc1', 1, 'completed')),
+    })
     resolveFetch({
       message: recordOf(toolCallMessage('tc1', 1, 'in_progress')),
     })
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(2))
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(state.messages[0]).toMatchObject({
       content: { status: 'completed' },
@@ -360,11 +420,18 @@ describe('点读落地的点火快照守卫（#1299）', () => {
         current
     )
     // 点读响应是 SSE 帧之前读库的旧快照（rawOutput 仍为 out1）。
+    // 收口点读（#1305）：第二次 GET 返回服务端最新态（out2），no-op。
+    mockApi.mockResolvedValueOnce({
+      message: recordOf(
+        toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out2' })
+      ),
+    })
     resolveFetch({
       message: recordOf(
         toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out1' })
       ),
     })
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(2))
     await new Promise((resolve) => setTimeout(resolve, 0))
     // 本地行已偏离点火快照 = 在途期间被更新的 SSE 帧改写，旧点读结果丢弃；
     // 无修复时 upsert 把 rawOutput 盖回 out1（若那是最后一帧界面永久回退）。
@@ -436,7 +503,7 @@ describe('terminal 实时到达当轮的校准截断（#1300）', () => {
 
 describe('整行冲突丢弃后的收口点读（#1305）', () => {
   it('GET 在途期间收到中间 SSE、服务端随后持久化的更新快照（SSE 丢失）被整行守卫误丢：补一次收口点读落地最新库快照', async () => {
-    const { deps, state } = makeDeps([
+    const { deps, state, setMessagesCalls, syncRef } = makeLaggingDeps([
       toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out1' }),
     ])
     let resolveFetch!: (value: unknown) => void
@@ -448,15 +515,18 @@ describe('整行冲突丢弃后的收口点读（#1305）', () => {
     )
     await calibrateWithRowRefetch(deps)
     await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(1))
-    // GET 在途期间：中间 SSE 快照合入本地行（rawOutput 刷新、status 不变——
-    // 终态/长度比较判不出新旧，#1288 守卫放行的形态）。
+    // GET 在途期间：中间 SSE 快照合入本地 state（rawOutput 刷新、status
+    // 不变——终态/长度比较判不出新旧），而 messagesRef 保持滞后（复验 r1
+    // P1：真实 React 下 ref 由被动效应同步；此刻读 ref 仍得点火快照
+    // out1，ref 驱动的收口决定会漏挂——同步假 setMessages 遮蔽该窗口）。
     deps.setMessages(
       (current) =>
         upsertMessage(current, { id: 'tc1', content: { rawOutput: 'out2' } }) ??
         current
     )
     // 服务端随后持久化 out3 而对应 SSE 丢失：GET 的库读取发生在持久化之后，
-    // 响应携带的其实是较新的 out3——整行守卫仍按偏离无条件丢弃（#1299）。
+    // 响应携带的其实是较新的 out3——整行守卫按 updater 观察到的偏离丢弃，
+    // 并据同一观察（conflicted 标记）挂收口点读。
     mockApi.mockResolvedValueOnce({
       message: recordOf(
         toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out3' })
@@ -467,22 +537,31 @@ describe('整行冲突丢弃后的收口点读（#1305）', () => {
         toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out3' })
       ),
     })
-    // 丢弃后补一次收口点读：第二次 GET 读得 out3，本地未再偏离即落地。
-    // 无修复时只有这一次 GET、界面永停中间态 out2——本断言即红
-    //（mutation：摘掉收口点读即红，已自检）。
+    // 等响应链的 updater 实际执行（第 2 次 setMessages = 丢弃发生）——此刻
+    // messagesRef 仍滞后于 state。mutation 自检：收口决定退回事后读 ref
+    //（ref 还是点火快照 out1）会漏挂收口点读，下方调用数断言即红。
+    await flushMicrotasksUntil(() => setMessagesCalls.n === 2)
+    // 被动效应同步（渲染冲刷后）先于收口点读的宏任务点火：点火快照不滞后。
+    syncRef()
+    // 第二次 GET 读得 out3，本地未再偏离即落地。无收口点读时界面永停
+    // out2——本断言即红。
     await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(2))
     await vi.waitFor(() =>
       expect(state.messages[0]).toMatchObject({
         content: { status: 'in_progress', rawOutput: 'out3' },
       })
     )
-    // 收口点读正常落地后不再续挂第三次（有界）。
+    // 收口点读正常落地后不再续挂第三次（有界）。两个宏任务：第一个冲掉
+    // 可能的 refire 定时器点火，第二个让其响应链落定。
+    await new Promise((resolve) => setTimeout(resolve, 0))
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mockApi).toHaveBeenCalledTimes(2)
   })
 
   it('收口点读在途期间本地再被 SSE 改写：再次冲突丢弃但不续挂（有界），本地保留最新 SSE 内容', async () => {
-    const { deps, state } = makeDeps([textMessage('m1', 1, 'a')])
+    const { deps, state, setMessagesCalls, syncRef } = makeLaggingDeps([
+      textMessage('m1', 1, 'a'),
+    ])
     const resolvers: ((value: unknown) => void)[] = []
     mockApi.mockImplementation(
       () =>
@@ -492,22 +571,28 @@ describe('整行冲突丢弃后的收口点读（#1305）', () => {
     )
     await calibrateWithRowRefetch(deps)
     await vi.waitFor(() => expect(resolvers).toHaveLength(1))
-    // 持续流式：第一次点读在途期间本地推进到 ab。
+    // 持续流式：第一次点读在途期间本地 state 推进到 ab（ref 保持滞后）。
     deps.setMessages(
       (current) =>
         upsertMessage(current, { id: 'm1', content: { text: 'ab' } }) ?? current
     )
-    // 旧快照 a 被整行守卫丢弃，挂出唯一一次收口点读。
+    // 旧快照 a 被整行守卫（updater 观察）丢弃，挂出唯一一次收口点读。
     resolvers[0]({ message: recordOf(textMessage('m1', 1, 'a')) })
+    // 等响应链的 updater 实际执行（第 2 次 setMessages = 丢弃发生），
+    // 随后被动效应同步 ref——先于收口点读的宏任务点火。
+    await flushMicrotasksUntil(() => setMessagesCalls.n === 2)
+    syncRef()
     await vi.waitFor(() => expect(resolvers).toHaveLength(2))
-    // 收口点读在途期间又推进到 abc：再次偏离 → 丢弃；不再续挂第三次
-    //（mutation：递归标记失效会点火第三次点读——本断言即红）。
+    // 收口点读在途期间又推进到 abc（ref 再次滞后）：再次偏离 → 丢弃；
+    // 不再续挂第三次（mutation：递归标记失效会点火第三次点读——本断言即红）。
     deps.setMessages(
       (current) =>
         upsertMessage(current, { id: 'm1', content: { text: 'abc' } }) ??
         current
     )
     resolvers[1]({ message: recordOf(textMessage('m1', 1, 'ab')) })
+    // 两个宏任务：冲掉可能的（违规）第三次点读定时器并让其响应链落定。
+    await new Promise((resolve) => setTimeout(resolve, 0))
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(resolvers).toHaveLength(2)
     expect(state.messages[0]).toMatchObject({ content: { text: 'abc' } })
