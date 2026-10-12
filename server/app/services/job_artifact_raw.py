@@ -15,6 +15,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from server.app.http_range import parse_range_header
 from server.app.services.job_artifact_gzip import is_gzip_key
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from server.app.services.job_artifact_raw_gzip import open_gzip_ranged
 from server.app.services.job_artifact_raw_types import RawArtifact
 from server.app.services.job_artifact_row_prefix import refuse_row_outside_job_prefix
 from server.app.services.job_errors import NotFoundError
@@ -36,8 +37,10 @@ def open_raw_row(
 
     The object branch of ``open_raw_artifact`` split out for callers that
     resolve the row themselves (manifest-first reads): same semantics —
-    ``.gz`` objects pass stored bytes through, others honour the parsed
-    single range, storage failures degrade to NotFoundError.
+    ``.gz`` objects pass stored bytes through when the request carries no
+    Range header (#338), and answer ranged requests in decompressed units
+    (#1259, ``open_gzip_ranged``); others honour the parsed single range;
+    storage failures degrade to NotFoundError.
 
     ``job``（#631 攻击复审 H1）：行所属 job 的记录行（``get_job`` 的
     返回形状），传入时先做读侧 storage_key 前缀兜底
@@ -47,12 +50,14 @@ def open_raw_row(
     """
     if job is not None and refuse_row_outside_job_prefix(row, job):
         raise NotFoundError("Artifact not found")
-    size = row.get("size_bytes")
-    size_bytes = int(size) if isinstance(size, int) else None
+    size_bytes = int(size) if isinstance(size := row.get("size_bytes"), int) else None
     gzipped = is_gzip_key(str(row["storage_key"]))
-    # .gz 对象：Range 失效（open_raw_artifact docstring），永远全量透传存储字节。
     byte_range = None if gzipped else parse_range_header(range_header, size_bytes)
     try:
+        if gzipped and range_header:
+            # #1259：Range × gzip 透传被浏览器网络栈判为协议失败——带
+            # Range 的 .gz 请求切解压口径应答（206/416/全量解压 200）。
+            return open_gzip_ranged(store, row, artifact_name, range_header, size_bytes)
         if gzipped:
             stream = store.open_object_stream(row)
         elif byte_range is not None:
@@ -110,8 +115,10 @@ def open_raw_artifact(
 
     #338 双形态：``.gz`` 对象按存储字节透传（``content_encoding="gzip"``，
     路由层加 Content-Encoding 响应头），manifest ``size_bytes`` 是压缩后
-    字节数（与透传 body 的 Content-Length 一致）。gzip 流不支持分段解
-    码——``.gz`` 对象的 Range 请求被忽略（始终全量返回）。
+    字节数（与透传 body 的 Content-Length 一致）。#1259：透传仅限无
+    Range 的请求——带 Range 的 .gz 请求按解压口径应答（206/416/全量解
+    压 200，见 job_artifact_raw_gzip），200+gzip 透传组合被浏览器网络
+    栈判为协议失败。
     """
     store = object_store
     row = None

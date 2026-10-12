@@ -404,19 +404,120 @@ def test_read_object_gunzips_gz_object(job_db, job):
     assert result == {"name": "result.json", "content": _GZ_RAW.decode("utf-8")}
 
 
-def test_open_raw_gz_object_passthrough_with_encoding(job_db, job):
-    """raw 端点：.gz 对象按存储字节透传 + content_encoding 标记；Range 请求
-    被忽略（gzip 流不支持分段解码），size_bytes 是压缩后字节数。"""
+def test_open_raw_gz_object_no_range_passthrough_with_encoding(job_db, job):
+    """无 Range 的 .gz 读维持 #338 透传（下载/字节桥链路）：存储字节 +
+    content_encoding 标记，size_bytes 是压缩后字节数。"""
     store = _seed_gz_row(job_db, job)
     service = JobArtifactService(job_db, store)
 
-    raw = service.open_raw(job["id"], "result.json", range_header="bytes=0-3")
+    raw = service.open_raw(job["id"], "result.json")
 
     assert raw.stream is not None
     assert raw.stream.read() == _GZ_COMPRESSED  # 透传压缩字节（全量）
     assert raw.content_encoding == "gzip"
     assert raw.size_bytes == len(_GZ_COMPRESSED)
     assert raw.range_start is None and raw.range_end is None
+
+
+def test_open_raw_gz_object_range_served_decoded(job_db, job):
+    """#1259：.gz + Range → 解压口径分段（206 语义）：流含区间解压字节，
+    无 content_encoding（200+gzip 透传组合被浏览器网络栈判为协议失败），
+    size_bytes 切换为解压后口径。"""
+    store = _seed_gz_row(job_db, job)
+    service = JobArtifactService(job_db, store)
+
+    raw = service.open_raw(job["id"], "result.json", range_header="bytes=2-5")
+
+    # 流是解压口径的全量流（gzip 顺序解码，无法按存储字节分段），
+    # unsliced_stream 标记由响应层切片到 [range_start, range_end]。
+    assert raw.stream is not None
+    assert raw.stream.read() == _GZ_RAW
+    assert raw.unsliced_stream is True
+    assert raw.range_start == 2 and raw.range_end == 5
+    assert raw.content_encoding is None
+    assert raw.size_bytes == len(_GZ_RAW)
+    assert raw.unsatisfiable_range is False
+
+
+def test_open_raw_gz_object_open_ended_range_covers_full(job_db, job):
+    """#1259：Range: bytes=0-（媒体 preload 形态）→ 覆盖解压全文的区间。"""
+    store = _seed_gz_row(job_db, job)
+    service = JobArtifactService(job_db, store)
+
+    raw = service.open_raw(job["id"], "result.json", range_header="bytes=0-")
+
+    assert raw.range_start == 0
+    assert raw.range_end == len(_GZ_RAW) - 1
+    assert raw.unsliced_stream is True
+    assert raw.content_encoding is None
+
+
+def test_open_raw_gz_object_unsatisfiable_range(job_db, job):
+    """#1259：起点越过解压长度 → 416 语义标记（无流），size_bytes 给
+    Content-Range 分母。"""
+    store = _seed_gz_row(job_db, job)
+    service = JobArtifactService(job_db, store)
+
+    raw = service.open_raw(job["id"], "result.json", range_header="bytes=9999-")
+
+    assert raw.unsatisfiable_range is True
+    assert raw.stream is None
+    assert raw.size_bytes == len(_GZ_RAW)
+
+
+def test_open_raw_gz_object_suffix_range_full_decoded_fallback(job_db, job):
+    """#1259：后缀区间（bytes=-N）是不支持的形态——忽略 Range 但绝不 gzip
+    透传：全量解压字节、无 content_encoding（浏览器接受对 Range 的 200
+    全量应答，只拒绝 200+gzip 组合）。"""
+    store = _seed_gz_row(job_db, job)
+    service = JobArtifactService(job_db, store)
+
+    raw = service.open_raw(job["id"], "result.json", range_header="bytes=-5")
+
+    assert raw.stream is not None
+    assert raw.stream.read() == _GZ_RAW  # 解压后的全量内容字节
+    assert raw.content_encoding is None
+    assert raw.range_start is None and raw.range_end is None
+    assert raw.unsatisfiable_range is False
+
+
+def test_open_raw_gz_object_range_unknown_size_full_decoded_fallback(job_db, job):
+    """#1259：行缺 size_bytes（无法定位 trailer、解压长度未知）→ 忽略
+    Range，全量解压应答（不 gzip 透传）。"""
+    from server.app.services.job_artifact_raw import open_raw_row
+
+    store = _seed_gz_row(job_db, job)
+    row = store.lookup(job["id"], "result.json")
+    assert row is not None
+    row["size_bytes"] = None
+
+    raw = open_raw_row(store, row, "result.json", range_header="bytes=0-3", job=job)
+
+    assert raw.stream is not None
+    assert raw.stream.read() == _GZ_RAW
+    assert raw.content_encoding is None
+    assert raw.range_start is None
+    assert raw.unsatisfiable_range is False
+
+
+def test_open_raw_gz_object_range_missing_object_is_notfound(job_db, job):
+    """#1259：trailer 读的存储故障（对象已被 bucket lifecycle 删除）与既有
+    读路径一致降级 NotFoundError（404 语义），不冒泡 500。"""
+    from server.app.services.job_artifact_raw import open_raw_row
+
+    store = _seed_gz_row(job_db, job)
+    row = store.lookup(job["id"], "result.json")
+    assert row is not None
+
+    def _lifecycle_deleted(key: str, start: int, end: int) -> io.BytesIO:
+        from botocore.exceptions import ClientError
+
+        raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+
+    store.storage.open_range = _lifecycle_deleted  # type: ignore[method-assign]
+
+    with pytest.raises(NotFoundError, match="Artifact not found"):
+        open_raw_row(store, row, "result.json", range_header="bytes=0-3", job=job)
 
 
 def test_object_store_open_stream_dual_form(job_db, job):

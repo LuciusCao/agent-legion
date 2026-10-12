@@ -49,6 +49,13 @@ def register_raw_nested_artifact_route(
                     "Content-Length": {"schema": {"type": "string"}},
                 },
             },
+            416: {
+                "description": "Range Not Satisfiable (.gz 解压口径越界，#1259)",
+                "content": {"application/octet-stream": {}},
+                "headers": {
+                    "Content-Range": {"schema": {"type": "string"}},
+                },
+            },
         },
     )
     def get_artifact_raw_nested(

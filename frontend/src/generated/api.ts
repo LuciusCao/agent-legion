@@ -10266,6 +10266,16 @@ export interface operations {
           'application/octet-stream': unknown
         }
       }
+      /** @description Range Not Satisfiable (.gz 解压口径越界，#1259) */
+      416: {
+        headers: {
+          'Content-Range'?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -10371,6 +10381,16 @@ export interface operations {
       206: {
         headers: {
           'Content-Length'?: string
+          'Content-Range'?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
+      /** @description Range Not Satisfiable (.gz 解压口径越界，#1259) */
+      416: {
+        headers: {
           'Content-Range'?: string
           [name: string]: unknown
         }
