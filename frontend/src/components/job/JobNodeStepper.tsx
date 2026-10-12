@@ -17,6 +17,10 @@ const STATUS_CLASSES: Record<JobNodeSummary['status'], string> = {
   failed: styles.failed,
   stale: styles.stale,
   pending: styles.pending,
+  // #1277：与 StepperCompactView（#1275）同色——ready 沿用 running 蓝
+  // （同 DagNode），awaiting_approval 用审批紫。
+  awaiting_approval: styles.awaitingApproval,
+  ready: styles.ready,
 }
 
 export function JobNodeStepper({

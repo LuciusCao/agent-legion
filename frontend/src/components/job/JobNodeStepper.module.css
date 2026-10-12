@@ -41,6 +41,15 @@
   background: var(--status-failed-border);
 }
 
+/* #1277：与 StepperCompactView（#1275）同色——ready 沿用 running 蓝。 */
+.ready .bar {
+  background: var(--status-running-border);
+}
+
+.awaitingApproval .bar {
+  background: var(--status-approval-border);
+}
+
 .pending .bar,
 .stale .bar {
   background: #e0e0e0;

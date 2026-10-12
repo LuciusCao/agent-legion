@@ -302,6 +302,159 @@ describe('JobListItem', () => {
     expect(screen.getByText('FAQ 生成')).toBeInTheDocument()
   })
 
+  it('shows the approval gate label when the job parks at an approval gate', () => {
+    // #1277：停在审批门时当前节点是门本身，不是下游首个 pending。
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{
+            ...mockJob,
+            status: 'awaiting_approval',
+            active_node_key: '',
+            node_summaries: [
+              {
+                node_key: 'question_understanding',
+                label: '题目理解',
+                status: 'completed',
+                error_message: '',
+              },
+              {
+                node_key: 'manual_approval',
+                label: '人工审批',
+                status: 'awaiting_approval',
+                error_message: '',
+              },
+              {
+                node_key: 'faq_generation',
+                label: 'FAQ 生成',
+                status: 'pending',
+                error_message: '',
+              },
+            ],
+          }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('人工审批')).toBeInTheDocument()
+    expect(screen.queryByText('FAQ 生成')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('listitem', { name: '人工审批: awaiting_approval' })
+    ).toHaveAttribute('data-active', 'true')
+  })
+
+  it('shows the ready node label when a node is ready to run', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{
+            ...mockJob,
+            status: 'pending',
+            active_node_key: '',
+            node_summaries: [
+              {
+                node_key: 'question_understanding',
+                label: '题目理解',
+                status: 'completed',
+                error_message: '',
+              },
+              {
+                node_key: 'assemble_package',
+                label: '打包组装',
+                status: 'ready',
+                error_message: '',
+              },
+              {
+                node_key: 'faq_generation',
+                label: 'FAQ 生成',
+                status: 'pending',
+                error_message: '',
+              },
+            ],
+          }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('打包组装')).toBeInTheDocument()
+    expect(screen.queryByText('FAQ 生成')).not.toBeInTheDocument()
+  })
+
+  it('trusts the server-provided active_node_key over the fallback chain', () => {
+    // server 给了权威值用权威值：即使回退链会命中 failed 节点。
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{
+            ...mockJob,
+            status: 'awaiting_approval',
+            active_node_key: 'manual_approval',
+            node_summaries: [
+              {
+                node_key: 'assemble_package',
+                label: '打包组装',
+                status: 'failed',
+                error_message: 'assemble failed',
+              },
+              {
+                node_key: 'manual_approval',
+                label: '人工审批',
+                status: 'awaiting_approval',
+                error_message: '',
+              },
+            ],
+          }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('人工审批')).toBeInTheDocument()
+    expect(screen.queryByText('打包组装')).not.toBeInTheDocument()
+  })
+
+  it('prefers the failed node over a parked approval gate in the fallback chain', () => {
+    // 并行分支「一门一败」：failed 保持优先（scheduler 语义，#1277）。
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{
+            ...mockJob,
+            status: 'failed',
+            active_node_key: '',
+            node_summaries: [
+              {
+                node_key: 'manual_approval',
+                label: '人工审批',
+                status: 'awaiting_approval',
+                error_message: '',
+              },
+              {
+                node_key: 'assemble_package',
+                label: '打包组装',
+                status: 'failed',
+                error_message: 'assemble failed',
+              },
+            ],
+          }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('打包组装')).toBeInTheDocument()
+  })
+
   it('shows failed node label for failed jobs', () => {
     render(
       <MemoryRouter>

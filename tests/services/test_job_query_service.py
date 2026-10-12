@@ -83,6 +83,42 @@ def test_list_jobs_returns_typed_node_summaries(query_service, job_db):
     }
 
 
+def test_list_jobs_active_node_key_parks_on_approval_gate(query_service, job_db):
+    # #1277：停在大流程审批门时 active_node_key 是门本身，不再是 None
+    # （此前列表行回退到下游首个 pending）。
+    job = create_question_job(job_db, source_id="Q-approval")
+    job_db.update_job_node(job["id"], "question_understanding", status="completed")
+    job_db.update_job_node(job["id"], "assemble_package", status="awaiting_approval")
+
+    listed = query_service.list_jobs(job["workspace_id"])
+
+    assert listed[0]["active_node_key"] == "assemble_package"
+    assert listed[0]["error_summary"] == ""
+
+
+def test_list_jobs_active_node_key_picks_ready_node(query_service, job_db):
+    job = create_question_job(job_db, source_id="Q-ready")
+    job_db.update_job_node(job["id"], "question_understanding", status="completed")
+    job_db.update_job_node(job["id"], "assemble_package", status="ready")
+
+    listed = query_service.list_jobs(job["workspace_id"])
+
+    assert listed[0]["active_node_key"] == "assemble_package"
+
+
+def test_list_jobs_active_node_key_failed_outranks_approval_gate(query_service, job_db):
+    # 并行分支「一边 awaiting_approval、一边 failed」：failed 保持既有优先，
+    # 与 scheduler summarize_job_status 的 job 级状态推导一致（#1277）。
+    job = create_question_job(job_db, source_id="Q-parallel")
+    job_db.update_job_node(job["id"], "question_understanding", status="awaiting_approval")
+    job_db.update_job_node(job["id"], "assemble_package", status="failed", error_message="boom")
+
+    listed = query_service.list_jobs(job["workspace_id"])
+
+    assert listed[0]["active_node_key"] == "assemble_package"
+    assert listed[0]["error_summary"] == "boom"
+
+
 def test_list_jobs_exposes_job_workflow_version_and_outdated_status(query_service, job_db):
     workspace = job_db.create_workspace("versioned")
     definition = load_builtin_definition("education_video_problems_generation")

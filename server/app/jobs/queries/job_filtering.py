@@ -14,6 +14,10 @@ _STATUS_BUCKET_SQL = (
     " then status else 'pending' end"
 )
 
+# Active-node semantics mirror JobQueryService._job_summary (#1277): a running
+# node is active; otherwise the first node by id in scheduler-priority order
+# failed → awaiting_approval → ready (failed outranks a parked approval gate,
+# matching summarize_job_status).
 _ACTIVE_NODE_CLAUSE = """
 (exists (
   select 1 from job_nodes jn
@@ -25,8 +29,10 @@ _ACTIVE_NODE_CLAUSE = """
   )
   and %s = (
     select jn3.node_key from job_nodes jn3
-    where jn3.job_id = jobs.id and jn3.status = 'failed'
-    order by jn3.id limit 1
+    where jn3.job_id = jobs.id and jn3.status in ('failed', 'awaiting_approval', 'ready')
+    order by case jn3.status when 'failed' then 0 when 'awaiting_approval' then 1 else 2 end,
+      jn3.id
+    limit 1
   )
 ))
 """
@@ -111,8 +117,9 @@ def job_facets(job_db: JobQueries, workspace_id: str, f: JobListFilter) -> dict[
     Each dimension's counts apply every filter except that dimension's own,
     matching the frontend's facet ``exclude`` behavior. ``version_counts``
     keeps the null version under the ``None`` key and ``node_counts`` keeps
-    jobs without a running/failed node under the ``None`` key; serialization
-    to response keys happens in the service layer.
+    jobs without an active node (no running/failed/awaiting_approval/ready
+    node) under the ``None`` key; serialization to response keys happens in
+    the service layer.
     """
     # #957: one read connection for every facet statement, and the filtered
     # total shares one scan with the node dimension's base count (every filter
@@ -154,17 +161,19 @@ def job_facets(job_db: JobQueries, workspace_id: str, f: JobListFilter) -> dict[
         )
         version_counts = {row["workflow_version"]: int(row["cnt"]) for row in rows}
 
-        # Resolve the active node from the job_nodes side: running/failed rows
+        # Resolve the active node from the job_nodes side: active-status rows
         # are a tiny subset, so a per-job lateral over every filtered job is
         # needlessly expensive at 10万+ job scale (30s on a 259k-job workspace).
-        # distinct-on ordering keeps the original "first running node by id,
-        # else first failed node by id" semantics.
+        # distinct-on ordering keeps the _ACTIVE_NODE_CLAUSE / _job_summary
+        # semantics (#1277): first running node by id, else failed →
+        # awaiting_approval → ready (scheduler priority, first by id each).
         rows = conn.execute(
             "with picked as ("
             "select distinct on (job_id) job_id, node_key"
             " from job_nodes"
-            " where status in ('running', 'failed')"
-            " order by job_id, case when status = 'running' then 0 else 1 end, id"
+            " where status in ('running', 'failed', 'awaiting_approval', 'ready')"
+            " order by job_id, case status when 'running' then 0 when 'failed' then 1"
+            " when 'awaiting_approval' then 2 else 3 end, id"
             ")"
             " select p.node_key as active_node_key, count(*) as cnt"
             " from picked p join jobs on jobs.id = p.job_id"
@@ -173,7 +182,7 @@ def job_facets(job_db: JobQueries, workspace_id: str, f: JobListFilter) -> dict[
             node_params,
         )
         node_counts = {row["active_node_key"]: int(row["cnt"]) for row in rows}
-    # Jobs without any running/failed node fall into the None bucket; derive it
+    # Jobs without any active-status node fall into the None bucket; derive it
     # from the node dimension's base count instead of scanning every job.
     no_node = node_base - sum(node_counts.values())
     if no_node:
