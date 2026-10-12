@@ -143,6 +143,112 @@ def test_failed_authorization_prevents_filesystem_access(authoring, monkeypatch)
     assert not any(method != "GET" for method, _, _ in calls)
 
 
+def test_preview_panel_html_path_save_preserves_every_byte(authoring):
+    run, _state, calls = authoring
+    root = local_files.staging_root("ws")
+    root.mkdir(parents=True)
+    html = '<!doctype html>\r\n<html>\r\n<body>中文\\n\\\\"' + "a" * 39000 + "</body></html>\r\n"
+    (root / "panel.html").write_bytes(html.encode())
+    for path in ("panel.html", str(root / "panel.html")):
+        saved = run("save_preview_panel_draft", html_path=path, change_note="v1")
+        assert "html" not in saved
+        assert saved["html_bytes"] == len(html.encode())
+        assert saved["html_sha256"] == hashlib.sha256(html.encode()).hexdigest()
+        put = next(c for c in reversed(calls) if c[0] == "PUT")
+        assert put[1].endswith("/workspaces/ws/preview/panel/draft")
+        assert put[2]["html"].encode() == html.encode()
+        assert put[2]["change_note"] == "v1"
+
+
+def test_preview_panel_inline_html_response_is_not_compacted(authoring):
+    run, _state, calls = authoring
+    html = "<!doctype html><html><body>p</body></html>"
+    saved = run("save_preview_panel_draft", html=html)
+    assert saved["html"] == html
+    assert "html_sha256" not in saved
+    put = next(c for c in calls if c[0] == "PUT")
+    assert put[2] == {"html": html, "change_note": None}
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"html": "<html></html>", "html_path": "panel.html"},
+        {},
+    ],
+)
+def test_preview_panel_requires_exactly_one_html_source(authoring, args):
+    run, _state, calls = authoring
+    root = local_files.staging_root("ws")
+    root.mkdir(parents=True)
+    (root / "panel.html").write_text("<html></html>")
+    with pytest.raises(ToolError, match="exactly one of html or html_path"):
+        run("save_preview_panel_draft", **args)
+    assert not any(method != "GET" for method, _, _ in calls)
+
+
+@pytest.mark.parametrize("path", ["../outside.html", "missing.html", "dir"])
+def test_preview_panel_html_path_rejects_escape_missing_and_directory(authoring, path):
+    run, _state, calls = authoring
+    root = local_files.staging_root("ws")
+    root.mkdir(parents=True)
+    (root / "dir").mkdir()
+    with pytest.raises(ToolError):
+        run("save_preview_panel_draft", html_path=path)
+    assert not any(method != "GET" for method, _, _ in calls)
+
+
+def test_preview_panel_html_path_rejects_foreign_absolute_path(authoring):
+    run, _state, calls = authoring
+    root = local_files.staging_root("ws")
+    root.mkdir(parents=True)
+    outside = root.parent / "foreign.html"
+    outside.write_text("<html>secret</html>")
+    with pytest.raises(ToolError):
+        run("save_preview_panel_draft", html_path=str(outside))
+    assert not any(method != "GET" for method, _, _ in calls)
+
+
+def test_preview_panel_html_path_enforces_the_256kib_bundle_budget(authoring):
+    from server.app.services.preview_panels import MAX_BUNDLE_BYTES
+
+    run, _state, calls = authoring
+    root = local_files.staging_root("ws")
+    root.mkdir(parents=True)
+    (root / "big.html").write_bytes(b"a" * (MAX_BUNDLE_BYTES + 1))
+    with pytest.raises(ToolError, match="exceeds"):
+        run("save_preview_panel_draft", html_path="big.html")
+    assert not any(method != "GET" for method, _, _ in calls)
+    (root / "max.html").write_bytes(b"a" * MAX_BUNDLE_BYTES)
+    saved = run("save_preview_panel_draft", html_path="max.html")
+    assert saved["html_bytes"] == MAX_BUNDLE_BYTES
+
+
+def test_preview_panel_html_path_authorizes_before_reading(authoring, monkeypatch):
+    run, state, calls = authoring
+    state["authorized"] = False
+
+    def forbidden(*args):
+        pytest.fail("read before workspace authorization")
+
+    monkeypatch.setattr(local_files, "read_text", forbidden)
+    with pytest.raises(Exception, match="403"):
+        run("save_preview_panel_draft", html_path="secret.html")
+    assert not any(method != "GET" for method, _, _ in calls)
+
+
+def test_get_preview_panel_output_path_exports_the_state_json(authoring):
+    run, state, _calls = authoring
+    state["read"] = {"published": {"html": "<html>live</html>"}, "draft": None}
+    exported = run("get_preview_panel", output_path="panel.json")
+    payload = Path(exported["output_path"]).read_bytes()
+    assert exported["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert exported["size"] == len(payload)
+    assert json.loads(payload) == state["read"]
+    with pytest.raises(Exception, match="exists"):
+        run("get_preview_panel", output_path="panel.json")
+
+
 @pytest.mark.parametrize(
     "bad",
     [

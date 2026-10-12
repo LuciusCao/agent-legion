@@ -72,6 +72,8 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
         # the tool still requires one branch. Exercise inline without disk I/O.
         if tool.name == "save_node_code_draft":
             args["code"] = "def run(ctx): pass"
+        elif tool.name == "save_preview_panel_draft":
+            args["html"] = "<html></html>"
         elif tool.name in ("save_skill_version", "save_shared_materials"):
             args["files"] = []
         asyncio.run(server.call_tool(tool.name, args))
