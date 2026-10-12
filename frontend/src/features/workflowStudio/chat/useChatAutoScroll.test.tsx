@@ -281,4 +281,89 @@ describe('useChatAutoScroll + useChatPrependAnchor（#1120 PR-4 / #1237）', () 
     for (const child of el.children)
       expect(observer.observed.has(child)).toBe(true)
   })
+
+  it('加载在途期间用户滚离锚点预期位：放弃恢复，不拽回旧锚点（#1237 codex 七轮 P2）', () => {
+    const initial = batch('m', 1, 10)
+    const view = render(<Harness messages={initial} onLoadOlder={() => {}} />)
+    const el = screen.getByTestId('list')
+    stubMetrics(el, { scrollHeight: 1000, clientHeight: 400 })
+    el.scrollTop = 50
+    fireEvent.scroll(el) // 触发分页：捕获锚点（预期位 scrollTop=50）
+    const anchorRow = el.children[0]
+
+    // 加载在途期间用户滚到中部阅读（远离预期位 80px 以上）。
+    el.scrollTop = 500
+    fireEvent.scroll(el)
+
+    // 旧页落地（prepend）：锚定行被下推 600。
+    stubRect(anchorRow, { top: 600, bottom: 700 })
+    stubMetrics(el, { scrollHeight: 1600, clientHeight: 400 })
+    view.rerender(
+      <Harness
+        messages={[...batch('o', -19, 0), ...initial]}
+        onLoadOlder={() => {}}
+      />
+    )
+
+    // 放弃恢复：scrollTop 保持用户选择的位置，不被拽回旧锚点。
+    expect(el.scrollTop).toBe(500)
+  })
+
+  it('加载在途期间用户在贴顶区内微调：锚点随最近一次触发重捕获，补偿跟随当前位置', () => {
+    const initial = batch('m', 1, 10)
+    const view = render(<Harness messages={initial} onLoadOlder={() => {}} />)
+    const el = screen.getByTestId('list')
+    stubMetrics(el, { scrollHeight: 1000, clientHeight: 400 })
+    el.scrollTop = 50
+    fireEvent.scroll(el)
+    const anchorRow = el.children[0]
+
+    // 用户在贴顶区内微调到 30：滚动事件重捕获锚点（行相对容器顶部 20）。
+    stubRect(anchorRow, { top: 20, bottom: 120 })
+    el.scrollTop = 30
+    fireEvent.scroll(el)
+
+    // 旧页落地：锚定行相对触发位置被下推 600（rect top 20→620）。
+    stubRect(anchorRow, { top: 620, bottom: 720 })
+    stubMetrics(el, { scrollHeight: 1600, clientHeight: 400 })
+    view.rerender(
+      <Harness
+        messages={[...batch('o', -19, 0), ...initial]}
+        onLoadOlder={() => {}}
+      />
+    )
+
+    // 仍在触发区内：补偿跟随用户微调后的当前位置（30 + 600）。
+    expect(el.scrollTop).toBe(630)
+  })
+
+  it('内容不足一屏（未溢出）时主动补拉更早消息，直到溢出为止（#1237 codex 七轮 P2）', () => {
+    const onLoadOlder = vi.fn()
+    const initial = batch('m', 1, 3)
+    const view = render(
+      <Harness messages={initial} onLoadOlder={onLoadOlder} />
+    )
+    const el = screen.getByTestId('list')
+    // 挂载时 jsdom clientHeight=0（未布局）不触发；stub 后模拟首屏消息
+    // 到达（messages 变化）——未溢出：无滚动事件可发，必须主动补拉。
+    stubMetrics(el, { scrollHeight: 300, clientHeight: 400 })
+    view.rerender(<Harness messages={[...initial]} onLoadOlder={onLoadOlder} />)
+    expect(onLoadOlder).toHaveBeenCalledTimes(1)
+
+    // 第一页落地（prepend）后仍未溢出 → 继续补拉。
+    const withPage2 = [...batch('o', -9, 0), ...initial]
+    stubMetrics(el, { scrollHeight: 380, clientHeight: 400 })
+    view.rerender(<Harness messages={withPage2} onLoadOlder={onLoadOlder} />)
+    expect(onLoadOlder).toHaveBeenCalledTimes(2)
+
+    // 第二页落地后溢出 → 停止主动补拉。
+    stubMetrics(el, { scrollHeight: 1200, clientHeight: 400 })
+    view.rerender(
+      <Harness
+        messages={[...batch('p', -29, -10), ...withPage2]}
+        onLoadOlder={onLoadOlder}
+      />
+    )
+    expect(onLoadOlder).toHaveBeenCalledTimes(2)
+  })
 })

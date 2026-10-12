@@ -42,7 +42,8 @@ export function useChatPrependAnchor(
     list: HTMLElement | null
     row: RowAnchor
     scrollHeight: number
-  }>({ firstId: null, list: null, row: null, scrollHeight: 0 })
+    scrollTop: number
+  }>({ firstId: null, list: null, row: null, scrollHeight: 0, scrollTop: 0 })
   const observerRef = useRef<ResizeObserver | null>(null)
 
   useEffect(() => () => observerRef.current?.disconnect(), [])
@@ -56,7 +57,10 @@ export function useChatPrependAnchor(
       el &&
       anchor.firstId !== null &&
       firstId !== anchor.firstId &&
-      messages.some((message) => message.id === anchor.firstId)
+      messages.some((message) => message.id === anchor.firstId) &&
+      // 加载在途期间用户已向下滚离锚点预期位：放弃恢复，不拽回旧锚点
+      // （#1237 codex 七轮 P2）；贴顶区内微调与虚拟器修正漂移（≤80px）仍补偿。
+      el.scrollTop - anchor.scrollTop <= 80
     ) {
       const row = anchor.row
       if (row && row.element.isConnected) {
@@ -78,6 +82,7 @@ export function useChatPrependAnchor(
       const anchor = anchorRef.current
       anchor.list = list
       anchor.scrollHeight = list.scrollHeight
+      anchor.scrollTop = list.scrollTop
       anchor.row = firstVisibleRow(list)
       // 差分基线的持续同步（回退路径是生产主路径）：观察当前内容行/spacer
       // 的高度变化。每次触发都按当前 children 重挂——非虚拟态长成/切入虚拟

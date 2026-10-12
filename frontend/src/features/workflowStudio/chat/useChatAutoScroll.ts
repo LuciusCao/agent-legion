@@ -18,6 +18,16 @@ export function useChatAutoScroll(
       bottomRef.current?.scrollIntoView?.({ block: 'end' })
   }, [messages])
 
+  // 内容未溢出容器时滚动事件不会发生（贴顶触发路径不可达）：主动触发
+  // 加载更早一页（#1237 codex 七轮 P2），直到溢出或无更多——防重入锁与
+  // hasMore 闩锁在 loadOlderHistory 内，重复触发幂等。clientHeight 为 0
+  // （jsdom/未布局）时跳过。
+  useEffect(() => {
+    const el = listRef.current
+    if (el && el.clientHeight > 0 && el.scrollHeight <= el.clientHeight)
+      onNearTop?.(el)
+  }, [messages, onNearTop])
+
   function handleScroll() {
     const el = listRef.current
     if (!el) return
