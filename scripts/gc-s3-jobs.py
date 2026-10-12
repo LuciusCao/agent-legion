@@ -37,20 +37,9 @@ if str(ROOT) not in sys.path:
 # 任何 check-then-delete 序列对可复用 key 都闭不死删除窗口（#1282 三轮
 # codex P1 按族收口）——材料根前缀孤儿只扫描报告，删除待 #1279 的
 # 所有权/key 不可复用协议落地后开放。
-
-
-def _material_shaped(key: str) -> bool:
-    """碰撞命名空间里的材料 key 形态（#1282 r4 P1）：第 3 段是 g{代次}。
-
-    材料 key 为 ``{workspace_id}/{hash|material_id}/g{代次}/{filename}``；
-    workspace id 可字面为 jobs / jobs-staging（无保留名约束，s3_jobs_gc 已
-    记录这两个碰撞命名空间），那样的材料 key 落在 jobs 前缀扫描内。真 job
-    产物同位置是 job id（``{ws}_{workflow_key}_{source_id}``，恒含下划线），
-    永不匹配 g{数字}——分流零误伤。legacy 无代次段的材料 key 不可复用
-    （新上传恒带 g 段），留在删除批安全。
-    """
-    segments = key.split("/")
-    return len(segments) >= 4 and segments[2][:1] == "g" and segments[2][1:].isdigit()
+# 材料形态文法（第 3 段 g{代次}）的权威实现是
+# server/app/services/s3_jobs_gc.py 的 material_shaped_key（#1295 下沉：
+# 扫描期的 /.rollback/ 豁免判定也要用它排除材料形态 key）。
 
 
 def scan_material_root_orphans(entry_lister, key_exists, grace_hours: float):
@@ -96,6 +85,7 @@ def main() -> int:
         ObjectEntry,
         apply_gc,
         make_db_key_existence,
+        material_shaped_key,
         scan_orphans,
     )
     from server.app.settings import load_settings
@@ -160,12 +150,16 @@ def main() -> int:
     material_orphans = scan_material_root_orphans(entry_lister, key_exists, args.grace_hours)
     # 碰撞命名空间分流（#1282 r4 P1；族不变量：删除批只收不可复用 key）：
     # jobs/ 与 jobs-staging/ 前缀里材料形态的 key 是撞名 workspace 的材料，
-    # 与材料根前缀同理只报告不删除，并入材料孤儿行。
+    # 与材料根前缀同理只报告不删除，并入材料孤儿行。含 .rollback 段的材料
+    # 形态 key 自 #1295 起不被扫描期豁免吞掉（s3_jobs_gc 的
+    # _rollback_backup_exempt 叠加材料形态排除），能到达这里。
     collided = [
-        o for o in report.authority_orphans + report.staging_orphans if _material_shaped(o.key)
+        o for o in report.authority_orphans + report.staging_orphans if material_shaped_key(o.key)
     ]
-    report.authority_orphans = [o for o in report.authority_orphans if not _material_shaped(o.key)]
-    report.staging_orphans = [o for o in report.staging_orphans if not _material_shaped(o.key)]
+    report.authority_orphans = [
+        o for o in report.authority_orphans if not material_shaped_key(o.key)
+    ]
+    report.staging_orphans = [o for o in report.staging_orphans if not material_shaped_key(o.key)]
     material_orphans += collided
 
     label = "apply" if args.apply else "dry-run"

@@ -227,6 +227,75 @@ def test_apply_gc_rollback_exemption_does_not_cover_material_root_keys() -> None
     assert result.deleted == 1
 
 
+def test_material_shaped_key_grammar() -> None:
+    """材料形态文法（#1282 r4 P1；自 scripts/gc-s3-jobs.py 下沉为
+    s3_jobs_gc.material_shaped_key，#1295）：第 3 段是 g{代次}。真 job
+    产物第 3 段是 job id（恒含下划线）永不匹配；legacy 无代次段材料
+    key 与段数不足的 key 不匹配。"""
+    assert s3_jobs_gc.material_shaped_key(f"ws1/{'a' * 64}/g0/doc.txt")
+    assert s3_jobs_gc.material_shaped_key(f"jobs-staging/{'b' * 64}/g2/dir/.rollback/f.bin")
+    assert not s3_jobs_gc.material_shaped_key("jobs/ws-x/ws-x_q1/dead.json")
+    assert not s3_jobs_gc.material_shaped_key(f"jobs/{'c' * 64}/old-name.txt")
+    assert not s3_jobs_gc.material_shaped_key("ws1/hash/g2")
+    assert not s3_jobs_gc.material_shaped_key("ws1/hash/g2x/f.txt")
+
+
+def test_rollback_exemption_excludes_material_shaped_keys() -> None:
+    """#1295（#1285 同族残留）：豁免判定叠加材料形态排除——撞名前缀下
+    第 3 段为 g{代次} 的材料形态 key 不豁免（其 .rollback 段是材料文件
+    的合法相对路径段，非 promote 回滚备份）；同前缀下的真回滚备份（第
+    3 段是 job id）仍豁免。"""
+    assert not s3_jobs_gc._rollback_backup_exempt(
+        f"jobs-staging/{'a' * 64}/g2/dir/.rollback/file.bin"
+    )
+    assert not s3_jobs_gc._rollback_backup_exempt(f"jobs/{'b' * 64}/g0/.rollback/file.bin")
+    assert s3_jobs_gc._rollback_backup_exempt("jobs-staging/ws-1/job-1/e1/.rollback/att-1/out.json")
+    assert s3_jobs_gc._rollback_backup_exempt("jobs/ws-1/job-1/.rollback/x.json")
+
+
+def test_staging_scan_does_not_swallow_material_key_with_rollback_segment() -> None:
+    """#1295：workspace id 字面为 jobs-staging 时，材料 key
+    （{ws}/{hash}/g{代次}/dir/.rollback/file.bin）落在 staging 前缀扫描
+    内。扫描期 /.rollback/ 豁免若先于材料形态分流命中，该 key 既不删除
+    也不进报告（永久不可见）。豁免叠加材料形态排除后：无行且超窗的该
+    形态 key 进 staging_orphans（由 CLI 分流进材料只报告集合）；真回滚
+    备份仍被豁免。"""
+    material_key = f"jobs-staging/{'a' * 64}/g2/dir/.rollback/file.bin"
+    report = scan_orphans(
+        _lister(
+            {
+                "jobs-staging/": [
+                    _entry(material_key),
+                    _entry("jobs-staging/ws-1/job-1/e1/.rollback/att-1/out.json"),
+                ]
+            }
+        ),
+        lambda keys: set(),
+        now=NOW,
+    )
+    assert [o.key for o in report.staging_orphans] == [material_key]
+
+
+def test_apply_gc_rollback_exemption_does_not_cover_material_shaped_keys() -> None:
+    """#1295：apply_gc 的纵深防御豁免同样叠加材料形态排除——手工构造的
+    OrphanReport 混入撞名前缀下含 .rollback 段的材料形态 key 时，不继承
+    豁免被永久跳过；同前缀的真回滚备份仍不可删。"""
+    deleter = _RecordingDeleter()
+    material_key = f"jobs-staging/{'a' * 64}/g2/dir/.rollback/file.bin"
+    report = _report_with(
+        authority=[],
+        staging=[
+            "jobs-staging/ws-1/job-1/e1/.rollback/att-1/out.json",
+            material_key,
+        ],
+    )
+
+    result = s3_jobs_gc.apply_gc(deleter, "bkt", report)  # 无 revalidate 的最坏路径
+
+    assert deleter.deleted == [material_key]
+    assert result.deleted == 1
+
+
 def test_apply_revalidate_skips_keys_that_gained_rows() -> None:
     """TOCTOU（#344 评审 P1）：扫描判孤儿后、删除前同名 key 被并发 promote
     重建行——删除批经新鲜反查过滤，不删新权威对象；被救下的计入
