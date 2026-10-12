@@ -65,6 +65,22 @@ describe('materialsApi', () => {
     )
   })
 
+  it('completes with the expected upload generation in the body (#1282 P1)', async () => {
+    const payload = { material: { id: 'm1', status: 'ready' } }
+    const fetchMock = mockFetchJson(payload)
+    global.fetch = fetchMock
+
+    await completeMaterial('ws1', 'm1', 2)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/ws1/materials/m1/complete',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ expected_upload_generation: 2 }),
+      })
+    )
+  })
+
   it('creates a run with material and ref items', async () => {
     const payload = { run: { id: 'r1' }, created_count: 2 }
     const fetchMock = mockFetchJson(payload)

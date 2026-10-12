@@ -64,7 +64,9 @@ export type UploadMaterialResult = {
   deduplicated: boolean
 }
 
-/** 单文件上传协议：presign → PUT 直传对象存储 → complete。 */
+/** 单文件上传协议：presign → PUT 直传对象存储 → complete（携带 presign
+ *  时的上传代次，#1269 格子②——其间行被重试推进代次时 complete 得 409，
+ *  调用方按失败重试整个上传即可）。 */
 export async function uploadMaterialFile(
   workspaceId: string,
   file: File,
@@ -91,7 +93,11 @@ export async function uploadMaterialFile(
   if (!response.ok) {
     throw new Error(`直传失败 (HTTP ${response.status})`)
   }
-  await completeMaterial(workspaceId, materialId)
+  await completeMaterial(
+    workspaceId,
+    materialId,
+    presigned.material.upload_generation
+  )
   return { materialId, deduplicated: false }
 }
 
