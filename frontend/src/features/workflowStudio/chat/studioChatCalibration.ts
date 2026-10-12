@@ -161,10 +161,10 @@ export function fetchAndUpsert(
     //（仅一次）让最新库快照落地，消除「服务端已更新但界面永停中间态」。
     // 收口决定由 updater 实际观察到的冲突驱动（conflicted 标记），不能事后
     // 读 messagesRef——ref 由被动效应同步，SSE 已排入 state 而未同步 ref 时
-    // 读 ref 仍是点火快照，会漏挂收口（复验 r1 P1）。决定延迟到宏任务读取：
-    // updater 在存量更新排队时延迟执行（React 仅无待办时同步求值），宏任务
-    // 时渲染冲刷已定局、标记才是终值，且被动效应已同步 ref，收口点读的
-    // 点火快照不再滞后。
+    // 读 ref 仍是点火快照，会漏挂收口（复验 r1 P1）。标记的读取与收口点读
+    // 同处宏任务：存量更新排队时 React 跳过急切求值、updater 延迟执行，
+    // 同步读标记只会拿到未定的 false（复验 r2 finding）；宏任务时渲染冲刷
+    // 已定局、标记才是终值，且被动效应已同步 ref，点火快照不再滞后。
     let conflicted = false
     deps.setMessages((current) => {
       // conflicted 幂等置位（true 不翻回），updater 在 StrictMode 双调用下安全。
@@ -176,7 +176,7 @@ export function fetchAndUpsert(
     })
     const refire = () =>
       void fetchAndUpsert(deps, messageId, generation, false).catch(noop)
-    if (conflicted && allowConflictRefire) setTimeout(refire, 0)
+    if (allowConflictRefire) setTimeout(() => conflicted && refire(), 0)
   })
 }
 

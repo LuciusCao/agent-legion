@@ -126,6 +126,38 @@ async function flushMicrotasksUntil(cond: () => boolean) {
   }
 }
 
+// 复现「updater 排队」的 deps 变体（#1305 复验 r2 finding）：React 在存量
+// 更新待办时跳过 updater 的急切求值——setMessages 只入队，flushRender
+//（模拟渲染冲刷 + 被动效应）才依次执行并同步 ref。GET 响应先于冲刷落地
+// 时，同步读 updater 的观察标记只会拿到未定的 false。
+function makeQueuedDeps(current: ChatMessage[]) {
+  const state = { messages: current }
+  const laggingRef = { current }
+  const queued: ((prev: ChatMessage[]) => ChatMessage[])[] = []
+  const deps: RowRefetchDeps = {
+    workspaceId: 'ws1',
+    sessionId: 's1',
+    sessionGenerationRef: { current: 1 },
+    missedRetryRef: { current: new Map<string, number>() },
+    messagesRef: laggingRef,
+    setMessages: (updater) => {
+      queued.push(updater)
+    },
+    refillMessages: vi.fn(async () => false),
+    onTerminal: vi.fn(),
+  }
+  return {
+    deps,
+    state,
+    queuedCount: () => queued.length,
+    flushRender: () => {
+      for (const updater of queued.splice(0))
+        state.messages = updater(state.messages)
+      laggingRef.current = state.messages
+    },
+  }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
@@ -553,6 +585,56 @@ describe('整行冲突丢弃后的收口点读（#1305）', () => {
     )
     // 收口点读正常落地后不再续挂第三次（有界）。两个宏任务：第一个冲掉
     // 可能的 refire 定时器点火，第二个让其响应链落定。
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mockApi).toHaveBeenCalledTimes(2)
+  })
+
+  it('GET 先于渲染冲刷落地（updater 仍排队）：收口决定推迟到宏任务，标记终值驱动收口点读（复验 r2 finding）', async () => {
+    const { deps, state, queuedCount, flushRender } = makeQueuedDeps([
+      toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out1' }),
+    ])
+    let resolveFetch!: (value: unknown) => void
+    mockApi.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve
+        }) as ReturnType<typeof api>
+    )
+    await calibrateWithRowRefetch(deps)
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(1))
+    // SSE 中间帧到达：updater 只入队（React 有待办时跳过急切求值），
+    // state 与 ref 均未动。
+    deps.setMessages(
+      (current) =>
+        upsertMessage(current, { id: 'tc1', content: { rawOutput: 'out2' } }) ??
+        current
+    )
+    // GET 先于渲染冲刷落地（服务端在途持久化 out3、SSE 丢失）。
+    mockApi.mockResolvedValueOnce({
+      message: recordOf(
+        toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out3' })
+      ),
+    })
+    resolveFetch({
+      message: recordOf(
+        toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out3' })
+      ),
+    })
+    // 响应链落定：丢弃 updater 同样入队（第 2 条）——此刻同步读冲突标记
+    // 只会拿到未定的 false（r2 形态在此漏挂收口点读，本用例对 r2 即红）。
+    await flushMicrotasksUntil(() => queuedCount() === 2)
+    // 渲染冲刷：依次执行排队 updater（SSE 落地 out2；点读按偏离丢弃并置位
+    // 冲突标记），被动效应同步 ref——均先于收口决定所在的宏任务。
+    flushRender()
+    // 宏任务点火：标记已是终值 → 收口点读发起，读得 out3。
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(2))
+    // 收口点读的落地 updater 同样入队，冲刷后生效。
+    flushRender()
+    expect(state.messages[0]).toMatchObject({
+      content: { status: 'in_progress', rawOutput: 'out3' },
+    })
+    // 有界：不再续挂第三次。两个宏任务冲掉可能的违规续挂及其响应链。
     await new Promise((resolve) => setTimeout(resolve, 0))
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mockApi).toHaveBeenCalledTimes(2)
