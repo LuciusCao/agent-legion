@@ -10,7 +10,6 @@ declared content_hash.
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from typing import Any
 
@@ -28,12 +27,12 @@ from server.app.services.job_errors import (
 from server.app.services.material_key_validation import (
     validate_material_content_hash,
     validate_material_filename,
+    verify_stored_object,
 )
 from server.app.services.material_ttl import mark_ready
 from server.app.storage import ObjectStorage
 
 _PRESIGN_EXPIRY_SECONDS = 3600
-_HASH_CHUNK_BYTES = 1024 * 1024
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 200
 
@@ -60,6 +59,7 @@ def _record(row: dict[str, Any]) -> dict[str, Any]:
         "content_type": str(row["content_type"]),
         "size_bytes": int(row["size_bytes"]),
         "status": str(row["status"]),
+        "upload_generation": int(row["upload_generation"]),
         "created_by": str(row["created_by"]),
         "created_at": iso_optional(row["created_at"]),
         "expires_at": iso_optional(row["expires_at"]),
@@ -206,7 +206,10 @@ class MaterialsService:
                             material_id,
                         ),
                     ).fetchone()
-                    assert new_row is not None  # where id 命中本分支刚读到的行
+                    if new_row is None:
+                        # 无锁 SELECT 与 UPDATE 之间行被并发 delete/TTL 回收：
+                        # 对方持行锁删行提交后本 UPDATE 命中 0 行（#1269）。
+                        raise NotFoundError(f"Material not found: {material_id}")
                     storage_key = str(new_row["storage_key"])
         upload_url: str | None = None
         if not deduplicated:
@@ -221,7 +224,9 @@ class MaterialsService:
             "deduplicated": deduplicated,
         }
 
-    def complete(self, workspace_id: str, material_id: str) -> dict[str, Any]:
+    def complete(
+        self, workspace_id: str, material_id: str, *, expected_upload_generation: int | None = None
+    ) -> dict[str, Any]:
         """Verify the stored object against the declaration and mark ready.
 
         Verification failures flip the row to failed so the client can retry
@@ -235,6 +240,13 @@ class MaterialsService:
         back by this call's own failure verdict (#1267 codex R2/R3 P1). An
         identity mismatch raises 409 and the client simply calls complete
         again (re-read, re-verify).
+
+        ``expected_upload_generation`` (#1269 格子②): the generation the
+        caller's PUT URL was issued for (from the presign response). A
+        mismatch means a newer presign retry has superseded this upload —
+        raise 409 immediately WITHOUT verifying or touching the row, so a
+        stale client neither pays the object-I/O cost nor flips the newer
+        attempt's row to failed when its own (dead-key) object is missing.
         """
         storage = self._require_storage()
         row = self._fetch_row(workspace_id, material_id)
@@ -242,6 +254,12 @@ class MaterialsService:
             return _record(row)
         if row["status"] == "expired":
             raise ConflictError(f"Material is expired: {material_id}")
+        generation = int(row["upload_generation"])
+        if expected_upload_generation is not None and generation != expected_upload_generation:
+            raise ConflictError(
+                f"Material {material_id} upload superseded by generation {generation}"
+                f" (expected {expected_upload_generation}); presign again to restart"
+            )
         failure = self._verify_object(storage, row)
         with write_transaction(self._connect_source) as conn:
             locked_status = assert_material_upload_identity_tx(conn, material_id, row)
@@ -264,33 +282,9 @@ class MaterialsService:
         return _record(self._fetch_row(workspace_id, material_id))
 
     def _verify_object(self, storage: ObjectStorage, row: dict[str, Any]) -> str | None:
-        """Return a failure detail, or None when the object matches the row."""
-        storage_key = str(row["storage_key"])
-        head = storage.head_object(storage_key)
-        if head is None:
-            return f"Uploaded object is missing for material {row['id']}"
-        declared_size = int(row["size_bytes"])
-        if head.size_bytes != declared_size:
-            return (
-                f"Uploaded object size {head.size_bytes} does not match "
-                f"the declared size {declared_size}"
-            )
-        content_hash = str(row["content_hash"])
-        if content_hash:
-            digest = hashlib.sha256()
-            stream = storage.open_stream(storage_key)
-            while True:
-                chunk = stream.read(_HASH_CHUNK_BYTES)
-                if not chunk:
-                    break
-                digest.update(chunk)
-            actual = digest.hexdigest()
-            if actual != content_hash:
-                return (
-                    f"Uploaded object sha256 {actual} does not match "
-                    f"the declared hash {content_hash}"
-                )
-        return None
+        """Failure detail or None; logic lives in material_key_validation
+        (file-budget split) — this method stays as the tests' injection seam."""
+        return verify_stored_object(storage, row)
 
     def list(self, workspace_id: str, *, limit: int, offset: int) -> dict[str, Any]:
         limit = max(1, min(limit or _DEFAULT_LIST_LIMIT, _MAX_LIST_LIMIT))

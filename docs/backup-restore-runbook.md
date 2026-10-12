@@ -308,7 +308,8 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
 这类不一致让备份失败，而不是让恢复时的「清空 bucket」变成不可逆丢失。产物 key 不以
 `/` 结尾（产物名不含 `/`：`job_artifact_objects.py` 的 `valid_artifact_name`）；材料 key
 为 `{workspace_id}/{hash}/g{代次}/{filename}`（首发即 g0，代次段让上传能力随重试失效；更早的
-存量行无代次段、key 不可变，旧代次对象成为孤儿由 lifecycle 回收，#1267），材料 API 拒绝目录形态与下载时不可归一化的
+存量行无代次段、key 不可变，旧代次对象成为孤儿，由 `scripts/gc-s3-jobs.py` 的材料根前缀
+扫描（#1269）或 bucket lifecycle 回收，#1267），材料 API 拒绝目录形态与下载时不可归一化的
 `filename`——以 `/` 结尾、含空 / `.` / `..` 段、含反斜杠或控制字符；`content_hash`
 同样拼进 key，非空时必须是 64 位小写 sha256 hex（422，
 `MaterialsService.presign` 入口经 `material_key_validation.py` 校验，#1119/#1267）。入口收紧

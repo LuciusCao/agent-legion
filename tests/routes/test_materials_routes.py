@@ -155,6 +155,39 @@ def test_complete_verification_failure_returns_422(client, storage) -> None:
     assert detail.json()["material"]["status"] == "failed"
 
 
+def test_complete_with_expected_upload_generation(client, storage) -> None:
+    """#1269 格子②：调用方携带 presign 时的代次——错代次 409（不触碰行，
+    不把新一轮上传误翻 failed），匹配代次照常核验落 ready。"""
+    workspace_id = _create_workspace(client)
+    payload = b"genpin"
+    content_hash = hashlib.sha256(payload).hexdigest()
+    result = _presign(client, workspace_id, size_bytes=len(payload), content_hash=content_hash)
+    material = result["material"]
+    assert material["upload_generation"] == 0
+
+    # 旧代次字节已 PUT；随后一次 presign 重试把行推进到 g1。
+    storage.objects[f"{workspace_id}/{content_hash}/g0/doc.txt"] = payload
+    retry = _presign(client, workspace_id, size_bytes=len(payload), content_hash=content_hash)
+    assert retry["material"]["upload_generation"] == 1
+
+    stale = client.post(
+        f"/api/workspaces/{workspace_id}/materials/{material['id']}/complete",
+        json={"expected_upload_generation": 0},
+    )
+    assert stale.status_code == 409, stale.text
+    detail = client.get(f"/api/workspaces/{workspace_id}/materials/{material['id']}")
+    assert detail.json()["material"]["status"] == "uploading"
+
+    # 新代次字节落地后携带匹配代次 complete → ready；不带 body 保持旧行为。
+    storage.objects[f"{workspace_id}/{content_hash}/g1/doc.txt"] = payload
+    matched = client.post(
+        f"/api/workspaces/{workspace_id}/materials/{material['id']}/complete",
+        json={"expected_upload_generation": 1},
+    )
+    assert matched.status_code == 200, matched.text
+    assert matched.json()["material"]["status"] == "ready"
+
+
 def test_list_and_get(client, storage) -> None:
     workspace_id = _create_workspace(client)
     for index in range(3):

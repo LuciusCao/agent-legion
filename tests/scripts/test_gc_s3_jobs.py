@@ -8,9 +8,11 @@ server.app.settings.load_settings（不触真 Postgres）。
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -30,17 +32,31 @@ def load_dotenv(dotenv_path=None, override=False):
     return True
 """
 
-# boto3 桩：ListObjectsV2 分页器对任何 Prefix 都返回空集（对象列举交给
-# s3_jobs_gc 桩的固定返回），delete_objects 记入 STUB_LOG 并返回全成功。
+# boto3 桩：ListObjectsV2 分页器默认对任何 Prefix 都返回空集（对象列举交给
+# s3_jobs_gc 桩的固定返回）；STUB_OBJECTS_JSON（[[key, epoch秒, size], ...]）
+# 提供时按该清单产出（供材料根前缀扫描断言），delete_objects 记入 STUB_LOG
+# 并返回全成功。
 _BOTO3_PROBE = """
+import json
 import os
+from datetime import UTC, datetime
+
+
+def _stub_objects():
+    raw = os.environ.get("STUB_OBJECTS_JSON")
+    if not raw:
+        return []
+    return [
+        {"Key": key, "LastModified": datetime.fromtimestamp(epoch, UTC), "Size": size}
+        for key, epoch, size in json.loads(raw)
+    ]
 
 
 class _Paginator:
     def paginate(self, Bucket, Prefix=None):
         with open(os.environ["STUB_LOG"], "a") as fh:
             fh.write(f"list_objects {Bucket} prefix={Prefix}\\n")
-        yield {"Contents": []}
+        yield {"Contents": _stub_objects()}
 
 
 class _Client:
@@ -61,13 +77,20 @@ def client(*args, **kwargs):
 # s3_jobs_gc 桩：scan_orphans/apply_gc 的行为由 env 驱动并记入 STUB_LOG，
 # CLI 编排契约（参数、输出、dry-run/--apply 分档）不依赖真判定逻辑——后者
 # 已在 tests/services/test_s3_jobs_gc.py 直测。桩经 STUB_*_MODULE 机制注入。
+# 材料根前缀扫描（脚本内 scan_material_root_orphans）消费本桩的常量与
+# ObjectEntry；make_db_key_existence 默认「全部 key 已有行」，env
+# STUB_KNOWN_KEYS_JSON 提供时只认清单内的 key（供孤儿判定断言）。
 _S3_JOBS_GC_PROBE = """
+import json
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 DEFAULT_GRACE_HOURS = 24.0
 DEFAULT_STAGING_GRACE_HOURS = 24.0
+JOBS_PREFIX = "jobs/"
+STAGING_PREFIX = "jobs-staging/"
+KEY_PAGE_SIZE = 1000
 
 
 @dataclass(frozen=True)
@@ -101,7 +124,12 @@ def scan_orphans(lister, key_exists, *, grace_hours=24.0, staging_grace_hours=24
 
 
 def make_db_key_existence(database_dsn):
+    raw = os.environ.get("STUB_KNOWN_KEYS_JSON")
+    known_keys = set(json.loads(raw)) if raw else None
+
     def exists(keys):
+        if known_keys is not None:
+            return {key for key in keys if key in known_keys}
         return set(keys)
 
     return exists
@@ -268,3 +296,37 @@ def test_grace_args_reach_scan(tmp_path: Path):
 
     assert result.returncode == 0, result.stderr
     assert "scan_orphans grace=48.0 staging_grace=6.0" in log
+
+
+def test_material_root_prefix_orphans_scanned_and_applied(tmp_path: Path):
+    """#1269 格子③：材料根前缀纳入 GC——根前缀列举排除 jobs/ 与
+    jobs-staging/ 后，DB（job_artifacts ∪ materials）无行且超宽限窗的材料
+    key 判定为孤儿并随 --apply 删除；有行的存活材料与宽限窗内的对象保留。
+    判定逻辑是脚本内 scan_material_root_orphans 的真实代码，桩只提供对象
+    清单（STUB_OBJECTS_JSON）与已知 key 集合（STUB_KNOWN_KEYS_JSON）。"""
+    now = time.time()
+    objects = [
+        ["ws1/hash-old/g0/superseded.txt", now - 48 * 3600, 10],  # 孤儿：无行 + 超窗
+        ["ws1/hash-live/g0/live.txt", now - 48 * 3600, 10],  # 有行：保留
+        ["ws1/hash-new/g0/inflight.txt", now - 3600, 10],  # 宽限窗内：保留
+        ["jobs/ws1/j1/a.json", now - 48 * 3600, 10],  # jobs/ 前缀：归 scan_orphans
+        ["jobs-staging/ws1/j1/e1/b.json", now - 48 * 3600, 10],  # 同上
+    ]
+    pystub = _make_pystub(tmp_path, _STORAGE_PROBE_CONFIGURED)
+
+    result, log = _run(
+        tmp_path,
+        pystub,
+        "--apply",
+        env_extra={
+            "STUB_OBJECTS_JSON": json.dumps(objects),
+            "STUB_KNOWN_KEYS_JSON": json.dumps(["ws1/hash-live/g0/live.txt"]),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    # 根前缀确实被列举（Prefix="" 即 bucket 根），且只有 1 个材料孤儿。
+    assert "list_objects agent-legion-dev prefix=\n" in log
+    assert "材料根前缀孤儿 1 个" in result.stdout
+    # --apply：jobs 报告桩的 1+1 加上 1 个材料孤儿。
+    assert "已删除 3 个" in result.stdout
