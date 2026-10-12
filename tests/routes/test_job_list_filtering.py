@@ -150,6 +150,42 @@ def test_active_node_key_prefers_running_then_first_failed(client_factory):
         assert [job["id"] for job in by_n2["jobs"]] == [running_job["id"]]
 
 
+def test_active_node_key_covers_approval_gate_and_ready(client_factory):
+    """#1277：审批门/就绪节点也是 active node——此前 job 停在审批门时
+    active_node_key 为 None，列表行回退到下游首个 pending。failed 在
+    并行分支里保持对 awaiting_approval 的优先（scheduler 语义）。"""
+    with client_factory() as client:
+        job_db = client.app.state.job_db
+        workspace = _make_workspace(job_db, "filter-node-approval-ws")
+        approval_job = _make_job(job_db, workspace["id"], "q-approval")
+        ready_job = _make_job(job_db, workspace["id"], "q-ready")
+        parallel_job = _make_job(job_db, workspace["id"], "q-parallel")
+        running_job = _make_job(job_db, workspace["id"], "q-running")
+        _set_node_status(job_db, approval_job["id"], "n1", "awaiting_approval")
+        _set_node_status(job_db, ready_job["id"], "n2", "ready")
+        # 并行分支「一门一败」：failed 胜出。
+        _set_node_status(job_db, parallel_job["id"], "n1", "awaiting_approval")
+        _set_node_status(job_db, parallel_job["id"], "n2", "failed")
+        # running 仍然最高优先。
+        _set_node_status(job_db, running_job["id"], "n1", "awaiting_approval")
+        _set_node_status(job_db, running_job["id"], "n2", "running")
+
+        # 审批门场景的 job 列表行：active_node_key 直指门节点。
+        by_n1 = _snapshot(client, workspace["id"], "?active_node_key=n1")
+        assert [job["id"] for job in by_n1["jobs"]] == [approval_job["id"]]
+        assert by_n1["jobs"][0]["active_node_key"] == "n1"
+
+        by_n2 = _snapshot(client, workspace["id"], "?active_node_key=n2")
+        assert {job["id"] for job in by_n2["jobs"]} == {
+            ready_job["id"],
+            parallel_job["id"],
+            running_job["id"],
+        }
+
+        facets = _facets(client, workspace["id"])
+        assert facets["node_counts"] == {"n1": 1, "n2": 3}
+
+
 def test_packed_filter(client_factory):
     with client_factory() as client:
         job_db = client.app.state.job_db
@@ -231,7 +267,8 @@ def test_facets_null_keys_and_unfiltered_counts(client_factory):
         assert data["status_counts"] == {"pending": 2}
         # Jobs without a workflow version are keyed "none".
         assert data["version_counts"] == {"none": 2}
-        # Jobs without a running/failed node are keyed "".
+        # Jobs without an active-status node (running/failed/
+        # awaiting_approval/ready) are keyed "".
         assert data["node_counts"] == {"n1": 1, "": 1}
 
         by_node = _facets(client, workspace["id"], "?active_node_key=n1")

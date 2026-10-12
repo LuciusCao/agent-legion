@@ -59,9 +59,22 @@ function currentNodeSummary(job: JobSummary): JobNodeSummary | undefined {
   const running = summaries.find((n) => n.status === 'running')
   if (running) return running
 
+  // 缺省回退链与 server _job_summary 的 active_node_key 解析同序（#1277）：
+  // failed 在 awaiting_approval 之前（与 scheduler 的 job 级状态推导一致，
+  // 并行分支「一门一败」时指向失败节点）；awaiting_approval/ready 同属
+  // 「执行面当前所在」——停在审批门或就绪待跑时当前节点是门/就绪节点
+  // 本身，不能落到下游首个 pending。
+  const failed = summaries.find((n) => n.status === 'failed')
+  if (failed) return failed
+  const awaitingApproval = summaries.find(
+    (n) => n.status === 'awaiting_approval'
+  )
+  if (awaitingApproval) return awaitingApproval
+  const ready = summaries.find((n) => n.status === 'ready')
+  if (ready) return ready
+
   if (job.status === 'failed') {
     return (
-      summaries.find((n) => n.status === 'failed') ??
       summaries.find((n) => n.status === 'stale') ??
       summaries[summaries.length - 1]
     )

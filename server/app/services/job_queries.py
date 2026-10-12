@@ -83,16 +83,20 @@ class JobQueryService:
         completed_nodes = sum(1 for summary in summaries if summary["status"] == "completed")
         total_nodes = len(summaries)
 
+        # 「当前节点」解析优先级与 scheduler summarize_job_status 对齐
+        # （#1277）：running → failed → awaiting_approval → ready。
+        # failed 保持既有优先——并行分支「一边 awaiting_approval、一边
+        # failed」时 job 级状态是 failed，active 节点也指向失败节点；
+        # awaiting_approval/ready 同属「执行面当前所在」——停在审批门或
+        # 就绪待跑时当前节点是门/就绪节点本身，不能落到下游首个 pending。
         active_node_key: str | None = None
-        for summary in summaries:
-            if summary["status"] == "running":
-                active_node_key = summary["node_key"]
-                break
-        if active_node_key is None:
+        for active_status in ("running", "failed", "awaiting_approval", "ready"):
             for summary in summaries:
-                if summary["status"] == "failed":
+                if summary["status"] == active_status:
                     active_node_key = summary["node_key"]
                     break
+            if active_node_key is not None:
+                break
 
         error_summary = ""
         if active_node_key is not None:
