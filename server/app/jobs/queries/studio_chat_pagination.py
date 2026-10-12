@@ -3,7 +3,10 @@
 Split from studio_chat_messages.py (file budget): the plain list read there
 serves internal consumers, while the HTTP surface needs an explicit
 older-side cursor (``has_more``) so the panel can page upwards on scroll.
-Composes into the JobQueries chain via studio_chat_resume.py.
+Also hosts the single-message point read (#1236): the panel recalibrates
+in-place rows (streaming text / in-flight tool_call) sitting outside the
+500-row refill window by id. Composes into the JobQueries chain via
+studio_chat_resume.py.
 """
 
 from __future__ import annotations
@@ -78,3 +81,22 @@ class StudioChatPaginationQueriesMixin(StudioChatTranscriptQueriesMixin):
             record["content"] = json.loads(record.pop("content_json") or "{}")
             messages.append(record)
         return messages, has_more
+
+    def get_studio_chat_message(self, session_id: str, message_id: str) -> dict[str, Any] | None:
+        """Single message by id, session-scoped (#1236 point read).
+
+        The session predicate doubles as an ownership check: an id from
+        another session returns None, and callers turn both that and an
+        unknown id into the same 404 (no cross-session probing).
+        """
+        with self._connect_read() as conn:
+            row = conn.execute(
+                "select id, session_id, kind, role, content_json, seq, created_at"
+                " from studio_chat_messages where session_id=%s and id=%s",
+                (session_id, message_id),
+            ).fetchone()
+        if row is None:
+            return None
+        record = dict(row)
+        record["content"] = json.loads(record.pop("content_json") or "{}")
+        return record

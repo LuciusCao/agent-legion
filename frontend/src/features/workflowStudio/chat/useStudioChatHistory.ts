@@ -16,7 +16,8 @@ import type { ChatMessage } from './studioChatMessages'
  * refillMessages(0) 全量回取重叠时幂等，中间的 seq gap 是设计接受态。
  * 状态机：loadingRef 请求 token 防重入（加载中不重复拉，finally 只许
  * 持有者释放）；hasMore=false 闩锁到顶终止；
- * 失败不推进游标也不闩锁 hasMore，下次滚到顶部自然重试。 */
+ * 失败不推进游标也不闩锁 hasMore——除滚动重触发外另带一次性延迟重试
+ * （#1270：未溢出态没有滚动事件可再触发；重试自身失败不续期）。 */
 export function useStudioChatHistory({
   workspaceId,
   activeSessionId,
@@ -39,14 +40,11 @@ export function useStudioChatHistory({
   // 请求的锁（否则下一次到顶会以同游标重复发请求）。
   const loadingRef = useRef<number | null>(null)
   const requestTokenRef = useRef(0)
-
-  // 切换会话/workspace：游标与到顶闩锁复位（消息列表由入口 effect 清空）。
-  useEffect(() => {
-    hasMoreRef.current = true
-    loadingRef.current = null
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 会话切换时重置翻页瞬态（与 useStudioChat 入口 effect 同一模式）
-    setHasMoreHistory(true)
-  }, [workspaceId, activeSessionId])
+  // 失败的一次性延迟重试（#1270）：未溢出态补拉失败后没有任何滚动事件可
+  // 再触发，会话会静默停在部分历史——失败后短延迟自动重试一次。重试计时器
+  // 经 loadRef 调最新 loadOlderHistory（声明时序上捕获不到后定义的回调）。
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const loadRef = useRef<() => void>(() => undefined)
 
   // 返回是否真正发起了一次拉取（提前返回 = 锁/闩锁/空列表拦截）。
   // oldestSeqHint：触发方当前渲染快照的最老游标（#1237 codex 八轮 P2）——
@@ -54,7 +52,9 @@ export function useStudioChatHistory({
   // effect 同步，子 effect 先跑时会读到上一轮的滞后值。直接调用（事件
   // 回调等 commit 后时机）缺省回退 messagesRef。
   const loadOlderHistory = useCallback(
-    async (oldestSeqHint?: number): Promise<boolean> => {
+    // isRetry：自动重试触发的内部调用——重试自身失败不再续期（#1270，防
+    // 持续故障下 2s 空转），等滚动/RO/新消息的自然触发再获得重试机会。
+    async (oldestSeqHint?: number, isRetry = false): Promise<boolean> => {
       if (!workspaceId || !activeSessionId) return false
       if (loadingRef.current !== null || !hasMoreRef.current) return false
       // 列表按 seq 升序维护，首行即当前最老游标。
@@ -90,6 +90,14 @@ export function useStudioChatHistory({
         return true
       } catch {
         // 拉取失败不闩锁：游标未推进、hasMore 保持 true，下次滚到顶部重试。
+        // #1270：未溢出态没有「下次滚动」——短延迟自动重试一次；??= 保证只挂
+        // 一个待定重试，isRetry 使重试自身失败不再续期（不空转），之后等滚动
+        // /RO/新消息的自然触发。2s 为即时故障（抖动）与风暴防回退的折中。
+        if (!isRetry && hasMoreRef.current)
+          retryTimerRef.current ??= setTimeout(() => {
+            retryTimerRef.current = null
+            loadRef.current()
+          }, 2_000)
         return false
       } finally {
         if (loadingRef.current === token) loadingRef.current = null
@@ -104,6 +112,22 @@ export function useStudioChatHistory({
       setMessages,
     ]
   )
+
+  // 切换会话/workspace：游标与到顶闩锁复位（消息列表由入口 effect 清空）。
+  // loadRef 的同步搭同一班车：loadOlderHistory 的依赖与本效应完全相同，
+  // 会话切换时两者必一起重跑。
+  useEffect(() => {
+    hasMoreRef.current = true
+    loadingRef.current = null
+    loadRef.current = () => void loadOlderHistory(undefined, true)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 会话切换时重置翻页瞬态（与 useStudioChat 入口 effect 同一模式）
+    setHasMoreHistory(true)
+    // 清理同时覆盖卸载与切换（效应重跑前先跑清理）：待定重试不得跨会话触发。
+    return () => {
+      clearTimeout(retryTimerRef.current ?? undefined)
+      retryTimerRef.current = null
+    }
+  }, [workspaceId, activeSessionId, loadOlderHistory])
 
   return { hasMoreHistory, loadOlderHistory }
 }

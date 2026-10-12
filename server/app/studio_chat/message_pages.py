@@ -2,7 +2,9 @@
 
 Split from service.py (file budget): the page-size policy and the
 ``has_more`` cursor contract live here; internal consumers keep using
-``StudioChatService.list_messages`` (plain list, no cursor).
+``StudioChatService.list_messages`` (plain list, no cursor). Also hosts the
+single-message point read (#1236): the panel recalibrates in-place rows
+(streaming text / in-flight tool_call) outside the refill window by id.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from server.app.jobs.queries.studio_chat_pagination import (
     STUDIO_CHAT_PAGE_SIZE,
     STUDIO_CHAT_PAGE_UP_SIZE,
 )
+from server.app.services.job_errors import NotFoundError
 
 if TYPE_CHECKING:
     from server.app.studio_chat.service import StudioChatService
@@ -35,3 +38,19 @@ def list_messages_page(
     return service.db.list_studio_chat_messages_page(
         session_id, after_seq=after_seq, before_seq=before_seq, limit=limit
     )
+
+
+def get_message(
+    service: StudioChatService, session_id: str, workspace_id: str, message_id: str
+) -> dict[str, Any]:
+    """Single message by id for the point-read endpoint (#1236).
+
+    ``get_session`` enforces the workspace binding (and the soft-delete 404);
+    the query's session scope turns a foreign session's id into the same 404
+    as an unknown id, so ids cannot be probed across sessions.
+    """
+    service.get_session(session_id, workspace_id)
+    message = service.db.get_studio_chat_message(session_id, message_id)
+    if message is None:
+        raise NotFoundError("Chat message not found")
+    return message

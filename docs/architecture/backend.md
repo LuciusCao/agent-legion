@@ -271,6 +271,7 @@ server/app/
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/config-options` | `set_config_option` | routes/studio_chat_config.py |
 | PUT | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context` | `update_context` | routes/studio_chat_context.py |
 | GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events` | `session_events` | routes/studio_chat_events.py |
+| GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages/{message_id}` | `get_message` | routes/studio_chat_message_read.py |
 | PATCH | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `rename_session` | routes/studio_chat_session_manage.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/delete` | `delete_session` | routes/studio_chat_session_manage.py |
 | POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/archive` | `archive_session` | routes/studio_chat_session_manage.py |
