@@ -13,6 +13,7 @@ from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
 )
 from server.app.storage_paths import make_data_relative, resolve_job_dir
+from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake, WorkflowNode
 from tests.helpers import (
     load_builtin_definition,
     publish_builtin_revision,
@@ -117,6 +118,39 @@ def test_list_jobs_active_node_key_failed_outranks_approval_gate(query_service, 
 
     assert listed[0]["active_node_key"] == "assemble_package"
     assert listed[0]["error_summary"] == "boom"
+
+
+def test_list_jobs_active_node_key_tiebreak_uses_node_insertion_order(query_service, job_db):
+    # #1294：同优先级节点的 tie-break 是 job_nodes.id（插入序），与
+    # job_filtering._ACTIVE_NODE_CLAUSE / facet node_counts 共享同一语义。
+    # 声明序（拓扑序）a 在 b 前，但 b 先插入（id 更小）——active 节点取 b。
+    workspace = job_db.create_workspace("tiebreak")
+    definition = WorkflowDefinition(
+        key="tiebreak",
+        label="Tie Break",
+        intake=WorkflowIntake(),
+        nodes={
+            "a": WorkflowNode(key="a", label="A", capability="cap_a"),
+            "b": WorkflowNode(key="b", label="B", capability="cap_b"),
+        },
+    )
+    WorkflowRevisionService(job_db).publish_workspace_revision(workspace["id"], definition)
+    job = job_db.create_job(
+        workflow_key="tiebreak",
+        source_type="question",
+        source_id="Q-tiebreak",
+        run_id="",
+        title="Tiebreak",
+        node_keys=["b", "a"],
+        workspace_id=workspace["id"],
+    )
+    job_db.update_job_node(job["id"], "a", status="failed")
+    job_db.update_job_node(job["id"], "b", status="failed")
+
+    listed = query_service.list_jobs(workspace["id"])
+
+    assert [node["node_key"] for node in listed[0]["node_summaries"]] == ["a", "b"]
+    assert listed[0]["active_node_key"] == "b"
 
 
 def test_list_jobs_exposes_job_workflow_version_and_outdated_status(query_service, job_db):

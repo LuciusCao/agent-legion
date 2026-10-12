@@ -186,6 +186,54 @@ def test_active_node_key_covers_approval_gate_and_ready(client_factory):
         assert facets["node_counts"] == {"n1": 1, "n2": 3}
 
 
+def _tiebreak_definition():
+    from server.app.workflows.schema import (
+        WorkflowDefinition,
+        WorkflowIntake,
+        WorkflowNode,
+    )
+
+    # 声明序（拓扑序）a 在 b 前；配合插入序相反的 job_nodes 行制造
+    # 「同优先级双节点、两序不一致」的场景（#1294）。
+    return WorkflowDefinition(
+        key="tiebreak",
+        label="Tie Break",
+        intake=WorkflowIntake(),
+        nodes={
+            "a": WorkflowNode(key="a", label="A", capability="cap_a"),
+            "b": WorkflowNode(key="b", label="B", capability="cap_b"),
+        },
+    )
+
+
+def test_active_node_key_tiebreak_shared_by_filter_facets_and_rows(client_factory):
+    """#1294：同优先级双节点、job_nodes 插入序与 DAG 拓扑序相反时，
+    ?active_node_key= 过滤、facet node_counts 与列表行 active_node_key
+    共享同一 tie-break（job_nodes.id 序，即插入序）。"""
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+
+    with client_factory() as client:
+        job_db = client.app.state.job_db
+        workspace = job_db.create_workspace("filter-tiebreak-ws")
+        WorkflowRevisionService(job_db).publish_workspace_revision(
+            workspace["id"], _tiebreak_definition()
+        )
+        # b 先插入（id 更小），但声明序 a 在 b 前；两节点同为 failed。
+        job = _make_job(job_db, workspace["id"], "q-tiebreak", node_keys=("b", "a"))
+        _set_node_status(job_db, job["id"], "a", "failed")
+        _set_node_status(job_db, job["id"], "b", "failed")
+
+        by_b = _snapshot(client, workspace["id"], "?active_node_key=b")
+        assert [row["id"] for row in by_b["jobs"]] == [job["id"]]
+        assert by_b["jobs"][0]["active_node_key"] == "b"
+
+        by_a = _snapshot(client, workspace["id"], "?active_node_key=a")
+        assert by_a["jobs"] == []
+
+        facets = _facets(client, workspace["id"])
+        assert facets["node_counts"] == {"b": 1}
+
+
 def test_packed_filter(client_factory):
     with client_factory() as client:
         job_db = client.app.state.job_db

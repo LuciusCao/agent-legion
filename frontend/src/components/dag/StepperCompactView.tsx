@@ -24,12 +24,13 @@ export interface StepperCompactInfo {
   currentStatus: string
 }
 
-// 「当前节点」解析顺序：调用方高亮（activeNodeKey）→ running →
-// awaiting_approval（审批门，#1275）→ ready → failed → stale →
+// 「当前节点」解析顺序：调用方高亮（activeNodeKey）→ running → failed →
+// awaiting_approval（审批门，#1275）→ ready → stale →
 // 首个 pending（下一个待跑）→ 全部完成/兜底取末节点。
-// awaiting_approval/ready 与 running 同属「执行面当前所在」状态，排在
-// failed/stale 之前：停在审批门或就绪待跑时当前节点是门/就绪节点本身，
-// 不能落到下游首个 pending。
+// failed 在 awaiting_approval/ready 之前（#1292），与 scheduler
+// summarize_job_status 及 server _job_summary/JobListItem 的口径一致：
+// 并行分支「一门一败」时当前节点指向失败节点；审批门/就绪待跑仅在没有
+// 失败节点时才是「执行面当前所在」，不能落到下游首个 pending。
 export function stepperCompactInfo(
   segments: readonly StepperCompactSegment[],
   activeNodeKey?: string | null
@@ -42,10 +43,10 @@ export function stepperCompactInfo(
     ? segments.findIndex((s) => s.node_key === activeNodeKey)
     : -1
   if (index < 0) index = segments.findIndex((s) => s.status === 'running')
+  if (index < 0) index = segments.findIndex((s) => s.status === 'failed')
   if (index < 0)
     index = segments.findIndex((s) => s.status === 'awaiting_approval')
   if (index < 0) index = segments.findIndex((s) => s.status === 'ready')
-  if (index < 0) index = segments.findIndex((s) => s.status === 'failed')
   if (index < 0) index = segments.findIndex((s) => s.status === 'stale')
   if (index < 0) index = segments.findIndex((s) => s.status === 'pending')
   if (index < 0) index = total - 1
