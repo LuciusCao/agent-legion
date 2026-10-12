@@ -17,10 +17,17 @@ from typing import Any
 from server.app.db.dialect import ConnectSource
 from server.app.db.rowmap import iso_optional
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.jobs.queries.material_locked_rereads import (
+    assert_material_upload_identity_tx,
+)
 from server.app.services.job_errors import (
     ConflictError,
     JobServiceError,
     NotFoundError,
+)
+from server.app.services.material_key_validation import (
+    validate_material_content_hash,
+    validate_material_filename,
 )
 from server.app.services.material_ttl import mark_ready
 from server.app.storage import ObjectStorage
@@ -105,10 +112,21 @@ class MaterialsService:
 
         A ready row with the same declared content_hash is returned as-is
         (upload dedup, no URL); a stale uploading/failed row with the same
-        hash is reset to uploading so the upload can be retried.
+        hash is reset to uploading so the upload can be retried. Object keys
+        live in a per-generation namespace the client's filename cannot forge
+        (``{ws}/{hash|id}/g{generation}/{filename}``, first issue included);
+        every retry bumps ``upload_generation`` (schema v97) and moves the row
+        to that generation's key, so a same-size retry stays visible to
+        complete()'s locked identity recheck and every previously issued PUT
+        URL points at a dead key — bytes can never be overwritten across
+        generations (#1267 codex R3/R4/R5 P1). Pre-namespace rows (no ``g``
+        segment) keep their keys untouched until their first retry.
         """
-        storage = self._require_storage()
+        validate_material_filename(filename)
         content_hash = content_hash.strip()
+        if content_hash:
+            validate_material_content_hash(content_hash)
+        storage = self._require_storage()
         deduplicated = False
         with write_transaction(self._connect_source) as conn:
             row = None
@@ -119,7 +137,7 @@ class MaterialsService:
                 ).fetchone()
             if row is None:
                 material_id = uuid.uuid4().hex
-                storage_key = f"{workspace_id}/{content_hash or material_id}/{filename}"
+                storage_key = f"{workspace_id}/{content_hash or material_id}/g0/{filename}"
                 insert_sql = """
                     insert into materials(
                       id, workspace_id, content_hash, filename, content_type,
@@ -153,18 +171,43 @@ class MaterialsService:
                     conn.execute(insert_sql, insert_params)
             if row is not None:
                 material_id = str(row["id"])
-                storage_key = str(row["storage_key"])
-                if str(row["status"]) == "ready":
-                    deduplicated = True
-                else:
-                    conn.execute(
+                deduplicated = str(row["status"]) == "ready"
+                if not deduplicated:
+                    # #1267 codex R4/R5 P1: a retry moves the row to a
+                    # per-generation key, binding the PUT capability to the
+                    # upload generation — every URL issued for earlier
+                    # generations (and every legacy key written before the
+                    # #1119 validation, P2) points at a dead key; leftover
+                    # objects are orphaned to the bucket lifecycle rule. The
+                    # new key is derived INSIDE the locked UPDATE from the
+                    # row's own increment (R5 P1-a): a concurrent retry blocked
+                    # on the row lock re-evaluates against the newest committed
+                    # generation, so two racing retries can never precompute
+                    # the same g{n} key from a stale snapshot. A complete()
+                    # racing this is serialized by its locked identity recheck
+                    # (generation included, R3 P1).
+                    # row 非空 ⇒ 经 content_hash 命中（select 或 on-conflict 回落），
+                    # key 前缀必为 hash 段。
+                    new_row = conn.execute(
                         """
                         update materials
-                        set filename=%s, content_type=%s, size_bytes=%s, status='uploading'
+                        set filename=%s, content_type=%s, size_bytes=%s,
+                          status='uploading', upload_generation = upload_generation + 1,
+                          storage_key = %s || '/g' || (upload_generation + 1) || '/' || %s
                         where id=%s
+                        returning storage_key
                         """,
-                        (filename, content_type, size_bytes, material_id),
-                    )
+                        (
+                            filename,
+                            content_type,
+                            size_bytes,
+                            f"{workspace_id}/{content_hash}",
+                            filename,
+                            material_id,
+                        ),
+                    ).fetchone()
+                    assert new_row is not None  # where id 命中本分支刚读到的行
+                    storage_key = str(new_row["storage_key"])
         upload_url: str | None = None
         if not deduplicated:
             upload_url = storage.presign_put(
@@ -182,7 +225,16 @@ class MaterialsService:
         """Verify the stored object against the declaration and mark ready.
 
         Verification failures flip the row to failed so the client can retry
-        the upload (presign resets the row to uploading).
+        the upload (presign resets the row to uploading and bumps the upload
+        generation). Verification runs outside any transaction (object I/O);
+        the status write then rechecks the verified identity (storage_key +
+        size_bytes + upload_generation) and the live status under a row lock
+        (jobs/queries/material_locked_rereads) so a concurrent presign retry
+        — even a same-key same-size one — can never let a stale snapshot mark
+        unverified bytes ready, and a concurrent ready can never be flipped
+        back by this call's own failure verdict (#1267 codex R2/R3 P1). An
+        identity mismatch raises 409 and the client simply calls complete
+        again (re-read, re-verify).
         """
         storage = self._require_storage()
         row = self._fetch_row(workspace_id, material_id)
@@ -192,7 +244,13 @@ class MaterialsService:
             raise ConflictError(f"Material is expired: {material_id}")
         failure = self._verify_object(storage, row)
         with write_transaction(self._connect_source) as conn:
-            if failure is not None:
+            locked_status = assert_material_upload_identity_tx(conn, material_id, row)
+            if locked_status == "ready":
+                # 并发 complete 已按同一身份落 ready：幂等，本方结论不覆盖。
+                pass
+            elif locked_status == "expired":
+                raise ConflictError(f"Material is expired: {material_id}")
+            elif failure is not None:
                 conn.execute(
                     "update materials set status='failed' where id=%s",
                     (material_id,),
@@ -201,7 +259,7 @@ class MaterialsService:
                 # TTL (design §10): expires_at from the instance setting,
                 # read fresh at every completion.
                 mark_ready(conn, self._connect_source, material_id)
-        if failure is not None:
+        if failure is not None and locked_status != "ready":
             raise MaterialVerificationError(failure)
         return _record(self._fetch_row(workspace_id, material_id))
 

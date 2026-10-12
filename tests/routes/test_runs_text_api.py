@@ -675,7 +675,18 @@ def test_ready_reuse_is_revalidated_at_publication(client, storage, job_db, monk
     )
     assert response.status_code == 409, response.text
     assert all(row["content_hash"] == digest for row in _materials(client, workspace_id))
-    assert set(storage.objects) == _storage_keys(job_db, workspace_id)
+    # #1267 R5 起重试把行迁到代次段 key，被取代的旧代次对象按设计成为孤儿
+    # （回收交 bucket lifecycle）——「对象集合 == 行 key 集合」不再成立。
+    # 收窄后的不变量：ready 行的当前 key 必有正确字节（uploading 行的当前
+    # key 尚未 PUT，本就无对象）。
+    with job_db.read() as conn:
+        rows = conn.execute(
+            "select storage_key, status from materials where workspace_id=%s",
+            (workspace_id,),
+        ).fetchall()
+    for row in rows:
+        if row["status"] == "ready":
+            assert storage.objects[row["storage_key"]] == b"B"
     assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []
 
 

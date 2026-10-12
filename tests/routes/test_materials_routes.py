@@ -86,6 +86,37 @@ def test_presign_without_storage_returns_503(client, monkeypatch) -> None:
     assert "not configured" in response.json()["detail"]
 
 
+def test_presign_rejects_directory_like_filename_with_422(client, storage) -> None:
+    """#1119：以 / 结尾或含 ./.. 段的 filename 直接 422，不留行。"""
+    workspace_id = _create_workspace(client)
+
+    for filename in ("folder/", "a/../b.txt"):
+        response = client.post(
+            f"/api/workspaces/{workspace_id}/materials/presign",
+            json={"filename": filename, "size_bytes": 0},
+        )
+        assert response.status_code == 422, response.text
+        assert filename in response.json()["detail"]
+
+    # #1119 复验收口：空段、反斜杠、控制字符同 422（repr 转义后不做子串断言）。
+    for filename in ("a//b.txt", "a\\b.txt", "a\nb.txt"):
+        response = client.post(
+            f"/api/workspaces/{workspace_id}/materials/presign",
+            json={"filename": filename, "size_bytes": 0},
+        )
+        assert response.status_code == 422, response.text
+
+    # #1267 codex P1：content_hash 同样进 storage_key，非 sha256 hex 直接 422。
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/materials/presign",
+        json={"filename": "ok.txt", "size_bytes": 1, "content_hash": "../other"},
+    )
+    assert response.status_code == 422, response.text
+    assert "sha256" in response.json()["detail"]
+
+    assert client.get(f"/api/workspaces/{workspace_id}/materials").json()["total"] == 0
+
+
 def test_presign_complete_roundtrip(client, storage) -> None:
     workspace_id = _create_workspace(client)
     payload = b"roundtrip"
@@ -94,11 +125,11 @@ def test_presign_complete_roundtrip(client, storage) -> None:
 
     material = result["material"]
     assert material["status"] == "uploading"
-    assert result["upload_url"].endswith(f"{workspace_id}/{content_hash}/doc.txt")
+    assert result["upload_url"].endswith(f"{workspace_id}/{content_hash}/g0/doc.txt")
     assert result["deduplicated"] is False
 
     # Simulate the browser PUT going straight to the object store.
-    storage.objects[f"{workspace_id}/{content_hash}/doc.txt"] = payload
+    storage.objects[f"{workspace_id}/{content_hash}/g0/doc.txt"] = payload
     response = client.post(f"/api/workspaces/{workspace_id}/materials/{material['id']}/complete")
     assert response.status_code == 200, response.text
     assert response.json()["material"]["status"] == "ready"
@@ -113,7 +144,7 @@ def test_presign_complete_roundtrip(client, storage) -> None:
 def test_complete_verification_failure_returns_422(client, storage) -> None:
     workspace_id = _create_workspace(client)
     result = _presign(client, workspace_id, size_bytes=10)
-    storage.objects[f"{workspace_id}/{result['material']['id']}/doc.txt"] = b"short"
+    storage.objects[f"{workspace_id}/{result['material']['id']}/g0/doc.txt"] = b"short"
 
     response = client.post(
         f"/api/workspaces/{workspace_id}/materials/{result['material']['id']}/complete"
@@ -149,7 +180,7 @@ def test_delete_removes_material_and_object(client, storage) -> None:
     workspace_id = _create_workspace(client)
     result = _presign(client, workspace_id)
     material_id = result["material"]["id"]
-    storage_key = f"{workspace_id}/{material_id}/doc.txt"
+    storage_key = f"{workspace_id}/{material_id}/g0/doc.txt"
     storage.objects[storage_key] = b"12345"
 
     response = client.delete(f"/api/workspaces/{workspace_id}/materials/{material_id}")
@@ -165,7 +196,7 @@ def test_delete_referenced_material_returns_409(client, storage, job_db) -> None
     workspace_id = _create_workspace(client)
     result = _presign(client, workspace_id)
     material_id = result["material"]["id"]
-    storage_key = f"{workspace_id}/{material_id}/doc.txt"
+    storage_key = f"{workspace_id}/{material_id}/g0/doc.txt"
     storage.objects[storage_key] = b"12345"
     with job_db.connect() as conn:
         conn.execute(

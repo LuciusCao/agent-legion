@@ -307,10 +307,15 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
 末尾为 `/` 的 key 被当作目录，只差大小写的 key 在不区分大小写的文件系统上互相覆盖。
 这类不一致让备份失败，而不是让恢复时的「清空 bucket」变成不可逆丢失。产物 key 不以
 `/` 结尾（产物名不含 `/`：`job_artifact_objects.py` 的 `valid_artifact_name`）；材料 key
-为 `{workspace_id}/{hash}/{filename}`，而材料 API 目前**不拒绝**以 `/` 结尾的
-`filename`（`MaterialPresignRequest` 只限长度），客户端提交 `size_bytes=0` 的这类名字
-会留下一条 ready 材料行和一个零字节、以 `/` 结尾的 key。所以零字节的 `…/` key（无论
-是控制台建目录留下的标记，还是这种材料）不走文件系统：`CHK` 把它们从文件比对中剔除并
+为 `{workspace_id}/{hash}/g{代次}/{filename}`（首发即 g0，代次段让上传能力随重试失效；更早的
+存量行无代次段、key 不可变，旧代次对象成为孤儿由 lifecycle 回收，#1267），材料 API 拒绝目录形态与下载时不可归一化的
+`filename`——以 `/` 结尾、含空 / `.` / `..` 段、含反斜杠或控制字符；`content_hash`
+同样拼进 key，非空时必须是 64 位小写 sha256 hex（422，
+`MaterialsService.presign` 入口经 `material_key_validation.py` 校验，#1119/#1267）。入口收紧
+之前已入库的以 `/` 结尾的 key 用
+`select id, workspace_id, filename, status, storage_key from materials where storage_key like '%/'`
+排查，经材料 API 逐个删除（行与对象一起删）；不删也不阻塞备份。所以零字节的 `…/` key（现在
+只服务控制台建目录留下的标记，以及收紧前上传、尚未清理的这类空材料）不走文件系统：`CHK` 把它们从文件比对中剔除并
 报出个数；它们的名字就在源清单 `objects.json` 里（与文件比对共用同一份清单，没有另外
 的旁文件可被单独截断或改写），恢复时 `PUT_MARKERS` 据此按名重建为零字节对象，并在
 清空 bucket 之后比对新清单与源清单的这一集合（§2.3 第 5 步），行 → 对象的核对因此仍能
@@ -340,7 +345,8 @@ export AWS_ACCESS_KEY_ID=<AGENT_LEGION_S3_ACCESS_KEY> \
 S3() { aws --endpoint-url "$EP" s3 "$@"; }
 LIST() { aws --endpoint-url "$EP" s3api list-objects-v2 --bucket "$B" --output json; }
 # MARKERS <清单 JSON>：从清单（objects.json，与文件比对共用同一份、无旁文件）列出零字节、
-# 以 / 结尾的 key（目录标记或以 / 结尾命名的空材料），排序后每行一个；它们落不了文件系统，
+# 以 / 结尾的 key（控制台目录标记；另有 #1119 入口收紧前上传、尚未清理的以 / 结尾命名的空
+# 材料），排序后每行一个；它们落不了文件系统，
 # 恢复时由 PUT_MARKERS 按名重建。key 含换行时逐行格式无法无损表达，直接判失败让人处理
 MARKERS() { python3 -c '
 import json,sys

@@ -264,7 +264,7 @@ def _ready_bundle(client, storage, workspace_id: str) -> str:
     )
     assert response.status_code == 200, response.text
     material_id = response.json()["material"]["id"]
-    storage.objects[f"{workspace_id}/{content_hash}/a.txt"] = payload
+    storage.objects[f"{workspace_id}/{content_hash}/g0/a.txt"] = payload
     complete = client.post(f"/api/workspaces/{workspace_id}/materials/{material_id}/complete")
     assert complete.status_code == 200, complete.text
     response = client.post(

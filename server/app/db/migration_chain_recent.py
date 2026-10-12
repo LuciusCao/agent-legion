@@ -14,6 +14,9 @@ from server.app.db.migrations.agent_worker_node_limits import migrate_agent_work
 from server.app.db.migrations.job_node_status_count_deltas import (
     migrate_job_node_status_count_deltas as _migrate_v88_node_deltas,
 )
+from server.app.db.migrations.material_upload_generation import (
+    migrate_material_upload_generation,
+)
 from server.app.db.migrations.retire_default_workflow_key import (
     migrate_retire_default_workflow_key,
 )
@@ -87,4 +90,12 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # DDL-only, table created by its migration module (schema file at its
     # raw-line ceiling; v76 precedent).
     SchemaMigration(96, "workflow_draft_generation", migrate_workflow_draft_generation),
+    # v97 (#1267 codex R3 P1): materials.upload_generation — 每次 presign 重试
+    # +1 的上传代次，让同 key/同大小的 uploading→uploading 重试对 complete
+    # 的锁内复查可见。Born as this branch's v95, renumbered twice (#434
+    # collision protocol: the later merge renumbers): v95→v96 when main took
+    # v95 for studio_chat_message_draft_kind, then v96→v97 when #1226 took
+    # v96 for workflow_draft_generation. DDL-only, same guarded-ALTER home
+    # rule as v87.
+    SchemaMigration(97, "material_upload_generation", migrate_material_upload_generation),
 ]
