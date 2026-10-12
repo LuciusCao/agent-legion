@@ -15,6 +15,13 @@ Reads go to the DB per use (like the skill-source store), so registry edits
 take effect without a restart. SQL lives in the queries layer
 (``global_settings`` KV mixin, issue #281); this module keeps the
 defaults-synthesis domain logic.
+
+Stale-snapshot protection (#355): GET responses carry a content ``revision``
+(see ``registry_revision``) that the admin editor round-trips on PUT; the
+store compares it inside the FOR UPDATE RMW transaction and rejects a
+mismatch with ``RegistryVersionMismatch`` instead of letting a whole-document
+replace silently drop rows the client never saw (e.g. freshly detected
+entries merged by a concurrent detection pass).
 """
 
 from __future__ import annotations
@@ -29,10 +36,17 @@ from server.app.jobs.queries.global_settings import (
     GlobalSettingsKVQueriesMixin,
     global_settings_kv_from_dsn,
 )
+from server.app.studio_chat.registry_revision import (
+    RegistryVersionMismatch,
+    registry_revision,
+)
 from server.app.studio_chat.serving_address import derived_api_base
 
 GLOBAL_SETTINGS_KEY = "studio_agents"
 DEFAULT_API_BASE = "http://127.0.0.1:8000"
+
+#: conditional_put 的合并器签名：updater(incoming=document, stored) → 落库文档。
+RegistryMerger = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
 
 
 def default_registry_document() -> dict[str, Any]:
@@ -69,8 +83,20 @@ class StudioAgentRegistryStore:
 
     def get(self) -> dict[str, Any]:
         """Return the effective document: stored values over code defaults."""
-        document = default_registry_document()
+        return self.get_with_revision()[0]
+
+    def get_with_revision(self) -> tuple[dict[str, Any], str]:
+        """Effective document plus its content revision (#355): both derive
+        from the same raw stored read, so the version a GET hands out always
+        matches what a PUT compare will recompute inside the write
+        transaction."""
         stored = self._kv().get_global_settings_document(GLOBAL_SETTINGS_KEY)
+        return self._effective(stored), registry_revision(stored)
+
+    @staticmethod
+    def _effective(stored: dict[str, Any] | None) -> dict[str, Any]:
+        """Defaults synthesis over the raw stored document."""
+        document = default_registry_document()
         if stored is None:
             return document
         if stored.get("api_base"):
@@ -87,6 +113,34 @@ class StudioAgentRegistryStore:
         detected/manual source merges must not lose a concurrent admin edit
         or detection pass (single-transaction RMW, issue #281 KV mixin)."""
         self._kv().update_global_settings_document(GLOBAL_SETTINGS_KEY, updater)
+
+    def conditional_put(
+        self, expected_revision: str, updater: RegistryMerger, document: dict[str, Any]
+    ) -> dict[str, Any]:
+        """带版本冲突检查的 RMW 写入（#355）。
+
+        不变量：版本比对发生在 FOR UPDATE 行锁开启的同一事务内——判断与
+        写入之间没有窗口，快照后落地的任何写入（探测合并、并发 PUT）必然
+        先改变存储版本，使陈旧 PUT 以 RegistryVersionMismatch 被拒绝（事务
+        回滚、存储不动），而非被整份覆盖静默删行。匹配则执行
+        ``updater(incoming=document, stored)``（source 重导等合并）写入并
+        返回**合并后的最终文档**——调用方据此构建响应，revision 即刚落库
+        的这次写入（事务外再 get 可能把并发写入者的结果冒充本次保存返
+        回）。空 ``expected_revision`` 跳过检查（一次性客户端的整份替换语
+        义不变）。
+        """
+        merged: list[dict[str, Any]] = []
+
+        def _rmw(stored: dict[str, Any]) -> dict[str, Any]:
+            if expected_revision and registry_revision(stored) != expected_revision:
+                raise RegistryVersionMismatch(
+                    f"registry at {registry_revision(stored)}, not {expected_revision}"
+                )
+            merged.append(updater(document, stored))
+            return merged[-1]
+
+        self.update(_rmw)
+        return merged[0]
 
     def find_agent(self, agent_id: str) -> dict[str, Any] | None:
         for agent in self.get()["agents"]:

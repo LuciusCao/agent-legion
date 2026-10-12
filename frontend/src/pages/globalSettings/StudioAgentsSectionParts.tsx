@@ -39,6 +39,35 @@ export function serialize(apiBase: string, rows: AgentRow[]): string {
   return JSON.stringify({ apiBase: apiBase.trim(), rows })
 }
 
+/**
+ * #355：编辑器「前进」原语（保存/重检测/409 刷新三路共用）——rows/baseline/
+ * apiBase/availability/detection/revision 一次性对齐服务端文档；编辑器状态
+ * 只在挂载与这些动作时前进（invalidate 重取的数据不会被已挂载的 useState
+ * 编辑器消费，409 刷新若只 invalidate 会陷入二次 409 死循环，旧审核 P1）。
+ */
+export function useApplyRegistryResult(setters: {
+  setApiBase: (v: string) => void
+  setRows: (rows: AgentRow[]) => void
+  setBaseline: (v: string) => void
+  setAvailability: (v: Record<string, boolean>) => void
+  setDetection: (v: Record<string, StudioAgentDetection>) => void
+  setRevision: (v: string) => void
+}) {
+  const queryClient = useQueryClient()
+  return (result: StudioAgentRegistryResponse) => {
+    queryClient.setQueryData(extraQueryKeys.studioAgents(), result)
+    const nextRows = toRows(result)
+    // apiBase 必须随快照一并前进：漏更会让刷新后立即 dirty，下次保存把旧
+    // 地址写回、覆盖并发修改。
+    setters.setApiBase(result.api_base)
+    setters.setRows(nextRows)
+    setters.setBaseline(serialize(result.api_base, nextRows))
+    setters.setAvailability(result.availability ?? {})
+    setters.setDetection(result.detection ?? {})
+    setters.setRevision(result.revision ?? '')
+  }
+}
+
 export function availabilityBadge(
   availability: Record<string, boolean>,
   id: string

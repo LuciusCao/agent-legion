@@ -6967,7 +6967,9 @@ export interface components {
      *     ``availability`` and ``detection`` are response-only (admins see which
      *     entries can launch and which catalog agents this host has); both are
      *     never persisted and never accepted on PUT, so they live here rather than
-     *     on the shared document model.
+     *     on the shared document model. ``revision`` is the stored content version
+     *     (#355): derived from the stored document alone (probe results never
+     *     change it), round-tripped by the editor and checked on PUT.
      */
     StudioAgentRegistryResponse: {
       /** Agents */
@@ -6982,13 +6984,30 @@ export interface components {
       detection?: {
         [key: string]: components['schemas']['StudioAgentDetection']
       }
+      /**
+       * Revision
+       * @default
+       */
+      revision: string
     }
-    /** StudioAgentRegistryUpdate */
+    /**
+     * StudioAgentRegistryUpdate
+     * @description PUT 载荷：``revision`` 为客户端 GET 快照时的内容版本（#355）。
+     *
+     *     服务端在写入事务内比对该版本：不一致返回 409，detail 携带当前注册表
+     *     （含新版本）供前端刷新。缺省为空——省略即跳过检查（一次性客户端与
+     *     smoke 脚本的整份替换语义不变）。
+     */
     StudioAgentRegistryUpdate: {
       /** Agents */
       agents?: components['schemas']['StudioAgentRegistryEntry'][]
       /** Api Base */
       api_base: string
+      /**
+       * Revision
+       * @default
+       */
+      revision: string
     }
     /**
      * StudioAgentSuggestedAction
