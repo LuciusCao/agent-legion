@@ -17,6 +17,9 @@ from server.app.db.migrations.job_node_status_count_deltas import (
 from server.app.db.migrations.retire_default_workflow_key import (
     migrate_retire_default_workflow_key,
 )
+from server.app.db.migrations.studio_chat_message_draft_kind import (
+    migrate_studio_chat_message_draft_kind,
+)
 from server.app.db.migrations.studio_chat_session_archive import (
     migrate_studio_chat_session_archive,
 )
@@ -72,11 +75,16 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # 并发上限的库存面（claim 时热同步，机器资源保护层）。DDL-only, same
     # guarded-ALTER home rule as v87.
     SchemaMigration(94, "agent_worker_node_limits", migrate_agent_worker_node_limits),
-    # v95 (#1226 五轮收口, 设计 v2): workspace_workflow_draft_generation —
+    # v95 (#1123): studio_chat_messages kind check gains 'draft' — the
+    # synthetic draft_saved timeline message emitted by the studio-agent save
+    # tools so subagent saves also produce draft cards. DDL-only, same
+    # guarded-ALTER home rule as v87.
+    SchemaMigration(95, "studio_chat_message_draft_kind", migrate_studio_chat_message_draft_kind),
+    # v96 (#1226 五轮收口, 设计 v2): workspace_workflow_draft_generation —
     # the workspace draft generation counter the CAS save bases on (stale
-    # base → 409, publish delete bumps). Numbered past origin/main's v94
-    # (agent_worker_node_limits) so the merge needs no renumber (#434
-    # collision protocol). DDL-only, table created by its migration module
-    # (schema file at its raw-line ceiling; v76 precedent).
-    SchemaMigration(95, "workflow_draft_generation", migrate_workflow_draft_generation),
+    # base → 409, publish delete bumps). Renumbered v95→v96 after main took
+    # v95 for studio_chat_message_draft_kind (#434 collision protocol).
+    # DDL-only, table created by its migration module (schema file at its
+    # raw-line ceiling; v76 precedent).
+    SchemaMigration(96, "workflow_draft_generation", migrate_workflow_draft_generation),
 ]

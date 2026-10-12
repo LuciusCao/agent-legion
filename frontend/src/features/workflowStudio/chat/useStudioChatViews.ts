@@ -5,40 +5,26 @@
 // 输入只有少量视图、成本低，保持全量派生，但输出经结构等价稳定化
 // （studioChatViewStability）：内容没变就复用旧引用，否则这些全行 prop
 // 每次派生都换新对象，MessageItem 的 memo 照样穿透。
+// #1123：草稿视图在 tool_call 派生之上再合并合成 draft_saved 事件
+// （studioChatDraftEvents）——子代理保存的唯一卡片数据源；同实体按证据
+// 时刻取最新，不重复出卡。
 import { useMemo, useState } from 'react'
 import {
   buildPermissionViews,
   extractNodeCodeDrafts,
   extractWorkflowDraft,
   type ChatMessage,
-  type ToolCallView,
-  type WorkflowDraftView,
 } from './studioChatMessages'
+import {
+  mergeNodeCodeDrafts,
+  mergeWorkflowDraft,
+} from './studioChatDraftEvents'
 import { createToolCallDeriver } from './studioChatToolCallDeriver'
 import {
   createRefStabilizer,
   sameDraftViews,
   samePermissionViews,
 } from './studioChatViewStability'
-
-/** workflow 草稿卡的锚定工具调用：最后一个携带该 yaml 的 validate/compare
- * 调用——草稿卡挂在它后面（原 StudioChatMessageList 内联逻辑，#1120 codex
- * P1 轮为保列表体积预算移入本模块）。 */
-export function draftAnchorToolCallId(
-  toolCalls: ToolCallView[],
-  draft: WorkflowDraftView | null
-): string | null {
-  if (!draft) return null
-  const anchor = toolCalls
-    .filter(
-      (call) =>
-        call.rawInput?.definition_yaml === draft.yaml &&
-        (call.title.toLowerCase().includes('validate_workflow') ||
-          call.title.toLowerCase().includes('compare_workflow'))
-    )
-    .slice(-1)[0]
-  return anchor?.toolCallId ?? null
-}
 
 export function useStudioChatViews(messages: ChatMessage[]) {
   // useState 惰性初始化只用于持有跨渲染的稳定实例；deriver/stabilizer 的
@@ -52,10 +38,17 @@ export function useStudioChatViews(messages: ChatMessage[]) {
   const drafts = useMemo(
     () =>
       stabilizeDrafts({
-        workflowDraft: extractWorkflowDraft(toolCalls),
-        nodeDrafts: extractNodeCodeDrafts(toolCalls),
+        workflowDraft: mergeWorkflowDraft(
+          extractWorkflowDraft(toolCalls),
+          toolCalls,
+          messages
+        ),
+        nodeDrafts: mergeNodeCodeDrafts(
+          extractNodeCodeDrafts(toolCalls),
+          messages
+        ),
       }),
-    [toolCalls, stabilizeDrafts]
+    [toolCalls, messages, stabilizeDrafts]
   )
   const permissions = useMemo(
     () => stabilizePermissions(buildPermissionViews(messages)),

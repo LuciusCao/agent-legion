@@ -1,4 +1,4 @@
-"""Schema v95 (#1226 五轮收口, 设计 v2): the Studio draft generation counter.
+"""Schema v96 (#1226 五轮收口, 设计 v2): the Studio draft generation counter.
 
 ``workspace_workflow_draft_generation`` is the workspace-level draft
 generation: every draft write and every publish's row delete advances it by
@@ -10,11 +10,11 @@ generation — R6).
 
 Born on this branch as the tombstone table (记被删行 updated_at 的近似),
 rewritten in place to the generation model before merge (unmerged branches
-may rewrite their migration; #434 collision protocol numbers it past
-origin/main's v94).
+may rewrite their migration); numbered v95 first, renumbered v96 when main
+took v95 for studio_chat_message_draft_kind (#434 collision protocol).
 
 This module owns the table's DDL — postgres_schema.sql does not create it
-(the schema file sits at its absolute line ceiling; fresh and pre-v95
+(the schema file sits at its absolute line ceiling; fresh and pre-v96
 databases both run this apply fn — the parity test pins the shapes equal).
 """
 
@@ -31,5 +31,5 @@ create table if not exists workspace_workflow_draft_generation (
 
 
 def migrate_workflow_draft_generation(conn: Any) -> None:
-    """Create the draft generation table (v95); idempotent on replay."""
+    """Create the draft generation table (v96); idempotent on replay."""
     conn.execute(_WORKFLOW_DRAFT_GENERATION_DDL)

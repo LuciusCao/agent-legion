@@ -11,10 +11,10 @@ from server.app.db.schema_guard import guard_shared_db
 from server.app.db.schema_head_cache import note_verified_at_head, verified_at_head
 from server.app.db.transaction import write_transaction
 
-# v94 (agent_worker_node_limits) landed on origin/main; this branch numbers
-# its draft-generation migration v95 so the merge needs no renumber (#434
-# protocol).
-SCHEMA_VERSION = 95
+# v95 (studio_chat_message_draft_kind) landed on origin/main; this branch
+# renumbered its draft-generation migration v95→v96 per the #434 collision
+# protocol.
+SCHEMA_VERSION = 96
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 
