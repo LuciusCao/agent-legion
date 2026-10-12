@@ -170,6 +170,8 @@
     "frontend/src/components/dag/DagSelectionViewport.tsx": 63,
     "frontend/src/components/dag/DagStepper.module.css": 48,
     "frontend/src/components/dag/DagStepper.tsx": 37,
+    "frontend/src/components/dag/StepperCompactView.module.css": 62,
+    "frontend/src/components/dag/StepperCompactView.tsx": 103,
     "frontend/src/components/dag/dagLayout.ts": 132,
     "frontend/src/components/dag/dagNodeMemo.ts": 50,
     "frontend/src/components/dag/dagNodeTypes.ts": 21,

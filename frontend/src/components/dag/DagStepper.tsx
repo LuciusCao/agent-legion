@@ -1,5 +1,6 @@
 import type { JobNode } from '../../types/jobTypes'
-import { stepperTrackGap } from '../../lib/stepperLayout'
+import { isStepperCompact, stepperTrackGap } from '../../lib/stepperLayout'
+import { StepperCompactView } from './StepperCompactView'
 import styles from './DagStepper.module.css'
 
 // 与 DagStepper.module.css 的 .dagStepper width 保持一致。
@@ -16,8 +17,23 @@ function getStepState(status: string): StepState {
   return 'pending'
 }
 
-export function DagStepper({ nodes }: { nodes: JobNode[] }) {
+export interface DagStepperProps {
+  nodes: JobNode[]
+  /** 超过该节点数切换紧凑形态（#1257）；默认 STEPPER_COMPACT_THRESHOLD。 */
+  compactThreshold?: number
+}
+
+export function DagStepper({ nodes, compactThreshold }: DagStepperProps) {
   if (nodes.length === 0) return null
+
+  // 紧凑形态（#1257）：面板头部没有别处展示当前节点名，故内联。
+  if (isStepperCompact(nodes.length, compactThreshold)) {
+    return (
+      <div className={styles.dagStepper} data-compact="true">
+        <StepperCompactView segments={nodes} showLabel />
+      </div>
+    )
+  }
 
   return (
     <div
