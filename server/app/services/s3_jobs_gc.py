@@ -13,7 +13,9 @@ job 删除路径（``job_deletion`` → ``job_artifacts.delete_objects``）只�
   突/闸拒/进程崩溃的残留走本工具或 bucket lifecycle；docs/materials-
   storage-deployment.md 规划的 1 天短保留）。``/.rollback/`` 段的
   promote 回滚备份例外豁免（仅 jobs/ 与 jobs-staging/ 前缀的 key，
-  #1285——材料文件名可含合法 .rollback 段，材料根前缀 key 不适用）：
+  #1285——材料文件名可含合法 .rollback 段，材料根前缀 key 不适用；
+  #1295——撞名前缀下的材料形态 key 同样不适用，豁免判定叠加材料形态
+  排除，见 ``_rollback_backup_exempt``）：
   恢复最终失败时它是旧字节的最后恢复源
   （codex #774 P1 族），正常结局的备份由 promote 自身清理、不经过本
   工具。
@@ -144,17 +146,42 @@ def orphans_in_page(
     return [e for e in entries if e.key not in known and _past_grace(e, cutoff)]
 
 
+def material_shaped_key(key: str) -> bool:
+    """碰撞命名空间里的材料 key 形态（#1282 r4 P1）：第 3 段是 g{代次}。
+
+    材料 key 为 ``{workspace_id}/{hash|material_id}/g{代次}/{filename}``；
+    workspace id 可字面为 jobs / jobs-staging（无保留名约束），那样的材料
+    key 落在 jobs 前缀扫描内。真 job 产物同位置是 job id
+    （``{ws}_{workflow_key}_{source_id}``，恒含下划线），永不匹配
+    g{数字}——分流零误伤。legacy 无代次段的材料 key 不可复用（新上传恒
+    带 g 段），留在删除批安全。
+    """
+    segments = key.split("/")
+    return len(segments) >= 4 and segments[2][:1] == "g" and segments[2][1:].isdigit()
+
+
 def _rollback_backup_exempt(key: str) -> bool:
-    """``/.rollback/`` 回滚备份豁免的判定（codex #774 P1 族，#1285 收窄）。
+    """``/.rollback/`` 回滚备份豁免的判定（codex #774 P1 族，#1285/#1295 收窄）。
 
     豁免仅对 jobs/ 与 jobs-staging/ 前缀的 key 生效——promote 回滚备份只
     出现在这两个产物前缀下（恢复最终失败时它是幸存清单行所指向旧字节的
-    最后恢复源）。材料根前缀的 key 不适用：材料文件名允许合法多段相对
-    路径、无 .rollback 保留段，``{ws}/{hash}/g{代次}/dir/.rollback/f.bin``
-    形态的旧代次/删行残留若继承本豁免，会在材料孤儿删除开放（#1279）后
-    被永久跳过。
+    最后恢复源）。两类 key 不适用：
+
+    - 材料根前缀的 key（#1285）：材料文件名允许合法多段相对路径、无
+      .rollback 保留段，``{ws}/{hash}/g{代次}/dir/.rollback/f.bin`` 形态
+      的旧代次/删行残留若继承本豁免，会在材料孤儿删除开放（#1279）后被
+      永久跳过；
+    - 撞名前缀下的材料形态 key（#1295）：workspace id 字面为
+      jobs / jobs-staging 时材料 key 落在产物前缀内，同样允许合法
+      .rollback 段；若豁免先于材料形态分流命中，该 key 既不删除也不进
+      报告——永久不可见。豁免前先识别材料形态（第 3 段 g{代次}）排除之，
+      由 CLI 分流进材料只报告集合（#1282 收口纪律）。
     """
-    return key.startswith((JOBS_PREFIX, STAGING_PREFIX)) and "/.rollback/" in key
+    return (
+        key.startswith((JOBS_PREFIX, STAGING_PREFIX))
+        and "/.rollback/" in key
+        and not material_shaped_key(key)
+    )
 
 
 def _staging_orphans_in(
@@ -166,7 +193,10 @@ def _staging_orphans_in(
     （codex #774 P1 族）：promote 恢复最终失败时被刻意保留的备份是幸存
     清单行所指向旧字节的最后恢复源，其生命周期归运维处置（ERROR 日志带
     key）；代价是崩溃残留的 `.rollback` 孤儿不再被本 GC 回收（备份只在
-    authority 已存在时创建、崩溃窗口毫秒级，量可忽略）。bucket lifecycle
+    authority 已存在时创建、崩溃窗口毫秒级，量可忽略）。豁免判定叠加材
+    料形态排除（#1295）：撞名 workspace（id 字面 jobs-staging）的材料
+    key 文件名可含合法 .rollback 段，不豁免——进孤儿报告由 CLI 分流到
+    材料只报告集合，避免被豁免吞掉后永久不可见。bucket lifecycle
     的子串不可豁免性见 docs/materials-storage-deployment.md。"""
     known = key_exists([e.key for e in entries])
     return [
@@ -263,9 +293,9 @@ def apply_gc(
     # 纵深防御（#774 对抗复审）：回滚备份在任何路径都不可删——正常报告来
     # 自 scan 层的豁免，但手工构造的 OrphanReport 会绕过它；把「GC 永不删
     # 恢复备份」钉在删除动作本身上。豁免按 _rollback_backup_exempt 收窄到
-    # jobs/ 与 jobs-staging/ 前缀（#1285）：材料根前缀 key 的文件名可含
-    # 合法 .rollback 段（dir/.rollback/file.bin），删除开放（#1279）后并入
-    # 删除批时不得继承本豁免被永久跳过。
+    # jobs/ 与 jobs-staging/ 前缀（#1285）且排除材料形态 key（#1295）：材
+    # 料 key 的文件名可含合法 .rollback 段（dir/.rollback/file.bin），删
+    # 除开放（#1279）后并入删除批时不得继承本豁免被永久跳过。
     authority_orphans = [e for e in report.authority_orphans if not _rollback_backup_exempt(e.key)]
     staging_orphans = [e for e in report.staging_orphans if not _rollback_backup_exempt(e.key)]
     if revalidate is not None:

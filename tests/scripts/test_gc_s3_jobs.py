@@ -86,7 +86,9 @@ def client(*args, **kwargs):
 # 材料根前缀扫描（脚本内 scan_material_root_orphans）消费本桩的常量、
 # ObjectEntry 与 orphans_in_page（#1287 起页内判定下沉为 s3_jobs_gc 的共享
 # 实现，桩按同语义镜像：DB 无行且超宽限窗；分页/前缀排除/孤儿归并仍是脚本
-# 真实代码）；make_db_key_existence 默认「全部 key 已有行」，env
+# 真实代码）；碰撞命名空间分流消费 material_shaped_key（#1295 起自脚本下沉
+# 为 s3_jobs_gc 的共享实现，桩按同语义镜像）；make_db_key_existence 默认
+# 「全部 key 已有行」，env
 # STUB_KNOWN_KEYS_JSON 提供时只认清单内的 key（供孤儿判定断言）。
 _S3_JOBS_GC_PROBE = """
 import json
@@ -142,6 +144,13 @@ def orphans_in_page(entries, key_exists, cutoff):
     # 真实实现的判定正确性由 tests/services/test_s3_jobs_gc.py 钉住。
     known = key_exists([e.key for e in entries])
     return [e for e in entries if e.key not in known and e.last_modified < cutoff]
+
+
+def material_shaped_key(key):
+    # 镜像 s3_jobs_gc.material_shaped_key 的形态文法（第 3 段 g{数字}）；
+    # 真实实现由 tests/services/test_s3_jobs_gc.py 钉住。
+    segments = key.split("/")
+    return len(segments) >= 4 and segments[2][:1] == "g" and segments[2][1:].isdigit()
 
 
 def make_db_key_existence(database_dsn):
@@ -425,3 +434,31 @@ def test_collision_namespace_material_keys_are_report_only(tmp_path: Path):
     assert "jobs/ 孤儿 3 个" in result.stdout
     assert "jobs-staging/ 孤儿 1 个" in result.stdout
     assert "已删除 4 个" in result.stdout
+
+
+def test_collision_namespace_rollback_segment_material_key_is_report_only(tmp_path: Path):
+    """#1295（#1285 同族残留）：撞名前缀下文件名含 /.rollback/ 段的材料形态
+    key（jobs-staging/<hash>/g{代次}/dir/.rollback/file.bin）不被扫描期豁
+    免吞掉——到达分流后进材料只报告集合，--apply 下也不进删除批。豁免叠
+    加材料形态排除的判定正确性由 tests/services/test_s3_jobs_gc.py 钉住，
+    这里钉 CLI 分流/报告侧对该形态的归并。"""
+    extra = [
+        f"jobs-staging/{'d' * 64}/g2/dir/.rollback/file.bin",  # 撞名材料 key（含 .rollback 段）→ 分流
+    ]
+    pystub = _make_pystub(tmp_path, _STORAGE_PROBE_CONFIGURED)
+
+    result, log = _run(
+        tmp_path,
+        pystub,
+        "--apply",
+        env_extra={"STUB_SCAN_EXTRA_JSON": json.dumps(extra)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    # 含 .rollback 段的撞名材料 key 出现在材料报告行（本次根前缀扫描为 0）。
+    assert "材料根前缀孤儿 1 个" in result.stdout
+    assert "只报告不删除" in result.stdout
+    # 删除批：桩固定的 authority 1 个 + staging 1 个（材料 key 已分流）→ 共删 2。
+    assert "jobs/ 孤儿 1 个" in result.stdout
+    assert "jobs-staging/ 孤儿 1 个" in result.stdout
+    assert "已删除 2 个" in result.stdout
