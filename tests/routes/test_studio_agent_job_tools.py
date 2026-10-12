@@ -263,6 +263,91 @@ def test_list_jobs_filters_status_and_caps_limit(tools_client) -> None:
     payload = response.json()
     assert payload["returned"] == 1
     assert [job["id"] for job in payload["jobs"]] == ["job-bad"]
+    # Everything fits in one page: no further page is offered.
+    assert payload["next_cursor"] is None
+
+
+def test_list_jobs_paginates_with_next_cursor(tools_client) -> None:
+    """#1261: pages beyond the first stay reachable — following next_cursor
+    walks the whole list, and the union of pages covers every job."""
+    job_db = tools_client.app.state.job_db
+    _seed_workspace(job_db, "ws-paged")
+    for index in range(1, 6):
+        _seed_job(
+            job_db,
+            workspace_id="ws-paged",
+            job_id=f"job-{index}",
+            job_status="completed",
+            nodes=[],
+        )
+    with job_db.connect() as conn:
+        for index in range(1, 6):
+            conn.execute(
+                "update jobs set created_at=%s where id=%s",
+                (f"2026-01-01 00:00:0{index}+00", f"job-{index}"),
+            )
+    scoped, _ = _scoped_client(tools_client, job_db)
+    url = "/api/studio-agent/tools/workspaces/ws-paged/jobs"
+
+    page1 = scoped.get(url, params={"limit": 2}).json()
+    assert [job["id"] for job in page1["jobs"]] == ["job-5", "job-4"]
+    assert page1["returned"] == 2
+    assert page1["next_cursor"] is not None
+
+    page2 = scoped.get(url, params={"limit": 2, "cursor": page1["next_cursor"]}).json()
+    assert [job["id"] for job in page2["jobs"]] == ["job-3", "job-2"]
+    assert page2["next_cursor"] is not None
+
+    page3 = scoped.get(url, params={"limit": 2, "cursor": page2["next_cursor"]}).json()
+    assert [job["id"] for job in page3["jobs"]] == ["job-1"]
+    assert page3["next_cursor"] is None
+
+    paged_ids = [job["id"] for page in (page1, page2, page3) for job in page["jobs"]]
+    assert sorted(paged_ids) == [f"job-{index}" for index in range(1, 6)]
+
+
+def test_list_jobs_cursor_keeps_status_filter(tools_client) -> None:
+    job_db = tools_client.app.state.job_db
+    _seed_workspace(job_db, "ws-paged-filter")
+    for index in range(1, 5):
+        _seed_job(
+            job_db,
+            workspace_id="ws-paged-filter",
+            job_id=f"job-{index}",
+            job_status="failed" if index % 2 else "completed",
+            nodes=[],
+        )
+    with job_db.connect() as conn:
+        for index in range(1, 5):
+            conn.execute(
+                "update jobs set created_at=%s where id=%s",
+                (f"2026-01-01 00:00:0{index}+00", f"job-{index}"),
+            )
+    scoped, _ = _scoped_client(tools_client, job_db)
+    url = "/api/studio-agent/tools/workspaces/ws-paged-filter/jobs"
+
+    page1 = scoped.get(url, params={"status": "failed", "limit": 1}).json()
+    assert [job["id"] for job in page1["jobs"]] == ["job-3"]
+    assert page1["next_cursor"] is not None
+
+    page2 = scoped.get(
+        url, params={"status": "failed", "limit": 1, "cursor": page1["next_cursor"]}
+    ).json()
+    assert [job["id"] for job in page2["jobs"]] == ["job-1"]
+    assert page2["next_cursor"] is None
+
+
+def test_list_jobs_rejects_malformed_cursor(tools_client) -> None:
+    job_db = tools_client.app.state.job_db
+    _seed_workspace(job_db, "ws-bad-cursor")
+    scoped, _ = _scoped_client(tools_client, job_db)
+
+    response = scoped.get(
+        "/api/studio-agent/tools/workspaces/ws-bad-cursor/jobs",
+        params={"cursor": "not-a-cursor"},
+    )
+
+    assert response.status_code == 422
 
 
 def test_get_node_logs_defaults_to_latest_failed_run(tools_client) -> None:
