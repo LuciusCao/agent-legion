@@ -359,12 +359,14 @@ SeaweedFS 存成目录（内容被丢弃），下载与备份落不了文件系�
 判失败。纪律与产物名 `valid_artifact_name` 同源，放宽点只剩材料名允许中间的非空 `/` 段
 （多段相对路径），另按 bundle 成员路径 `validate_member_path` 补齐控制字符禁令。
 `content_hash` 非空时必须是 64 位小写 sha256 hex（422，#1267）——它同样拼进 key 且是
-dedup 身份，不限制格式会把 `../other` 之类值原样签进 key。每次重试（复位 uploading）都把
-行迁到 `…/g{代次}/{filename}` 的新 key 并把 `upload_generation` +1（schema v97）：此前签发
-的 PUT URL 全部指向死 key（上传能力随代次失效，收紧前入库的非法 key 也随之不再签发），
-旧对象交 bucket lifecycle 回收；complete 落 ready/failed 前在行锁内复查 verify 身份
-（storage_key + size_bytes + 代次）与当前状态，不一致返回 409 由客户端重调 complete，
-并发 complete 已落 ready 时幂等不覆盖（#1267 codex R2/R3/R4 P1）。
+dedup 身份，不限制格式会把 `../other` 之类值原样签进 key。材料 key 统一带代次段
+`{workspace_id}/{hash}/g{代次}/{filename}`（首发即 g0，用户 filename 落在代次段之后、不可
+伪造新代次命名空间；更早的存量行无代次段、key 不可变），每次重试（复位 uploading）把行
+迁到新代次 key 并把 `upload_generation` +1（schema v97，代次在行锁内原子推进、key 由锁内
+实际新值派生）：此前签发的 PUT URL 全部指向死 key（上传能力随代次失效，收紧前入库的非法
+key 也随之不再签发），旧对象交 bucket lifecycle 回收；complete 落 ready/failed 前在行锁内
+复查 verify 身份（storage_key + size_bytes + 代次）与当前状态，不一致返回 409 由客户端
+重调 complete，并发 complete 已落 ready 时幂等不覆盖（#1267 codex R2–R5 P1）。
 
 SigV4 presigned PUT 无法约束 Content-Length，size/hash 一律由 complete 时
 服务端 HEAD + 流式校验强制（v1 实现为完整读自算 sha256，简单可靠；上传端

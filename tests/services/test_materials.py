@@ -59,7 +59,7 @@ def _presign_ready(service: MaterialsService, storage: FakeStorage, payload: byt
         content_hash=content_hash,
         created_by="user-1",
     )
-    storage.objects[f"{WORKSPACE_ID}/{content_hash}/notes.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{content_hash}/g0/notes.txt"] = payload
     return service.complete(WORKSPACE_ID, result["material"]["id"])
 
 
@@ -72,9 +72,9 @@ def test_presign_creates_uploading_row_and_url(service, storage) -> None:
     assert material["size_bytes"] == 10
     assert result["upload_url"].startswith("https://s3.test/upload/")
     assert result["deduplicated"] is False
-    # Storage key layout: {workspace_id}/{content_hash}/{filename}.
+    # Storage key layout: {workspace_id}/{content_hash}/g{upload_generation}/{filename}.
     (presigned_key, expiry) = storage.presigned[0]
-    assert presigned_key == f"{WORKSPACE_ID}/{digest}/a.txt"
+    assert presigned_key == f"{WORKSPACE_ID}/{digest}/g0/a.txt"
     assert expiry == 3600
 
 
@@ -82,7 +82,7 @@ def test_presign_without_hash_uses_material_id_in_key(service, storage) -> None:
     result = service.presign(WORKSPACE_ID, filename="b.bin", size_bytes=3)
 
     (presigned_key, _) = storage.presigned[0]
-    assert presigned_key == f"{WORKSPACE_ID}/{result['material']['id']}/b.bin"
+    assert presigned_key == f"{WORKSPACE_ID}/{result['material']['id']}/g0/b.bin"
     assert result["material"]["content_hash"] == ""
 
 
@@ -266,7 +266,7 @@ def test_complete_after_retry_verifies_current_generation_key(service, storage, 
     )
     material_id = result["material"]["id"]
     # 第 0 代 URL 的 PUT 已落地（重试之前）。
-    storage.objects[f"{WORKSPACE_ID}/{digest}/v.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{digest}/g0/v.txt"] = payload
 
     retry = service.presign(
         WORKSPACE_ID, filename="v.txt", size_bytes=len(payload), content_hash=digest
@@ -416,7 +416,7 @@ def test_presign_retry_bumps_upload_generation(service, storage, job_db) -> None
     assert _generation_of(job_db, material_id) == 2
     # R4：每代 key 独立——两次重试签发的 URL 指向各自的 g{代次} 段
     # （presigned[0] 是首发的第 0 代，无代次段）。
-    assert storage.presigned[0][0] == f"{WORKSPACE_ID}/{digest}/g.txt"
+    assert storage.presigned[0][0] == f"{WORKSPACE_ID}/{digest}/g0/g.txt"
     assert storage.presigned[1][0] == f"{WORKSPACE_ID}/{digest}/g1/g.txt"
     assert storage.presigned[2][0] == f"{WORKSPACE_ID}/{digest}/g2/g.txt"
 
@@ -432,7 +432,7 @@ def test_complete_cas_rejects_same_identity_retry_mid_verification(
         WORKSPACE_ID, filename="s.txt", size_bytes=len(payload), content_hash=digest
     )
     material_id = result["material"]["id"]
-    storage.objects[f"{WORKSPACE_ID}/{digest}/s.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{digest}/g0/s.txt"] = payload
     real_verify = service._verify_object
 
     def verify_then_retry(storage_arg, row):  # noqa: ANN001, ANN202
@@ -462,7 +462,7 @@ def test_complete_does_not_overwrite_concurrent_ready(
         WORKSPACE_ID, filename="late.txt", size_bytes=len(payload), content_hash=digest
     )
     material_id = result["material"]["id"]
-    key = f"{WORKSPACE_ID}/{digest}/late.txt"
+    key = f"{WORKSPACE_ID}/{digest}/g0/late.txt"
     real_verify = service._verify_object
     injected: list[bool] = []
 
@@ -493,7 +493,7 @@ def test_complete_rejects_expired_mid_verification(service, storage, job_db, mon
         WORKSPACE_ID, filename="x.txt", size_bytes=len(payload), content_hash=digest
     )
     material_id = result["material"]["id"]
-    storage.objects[f"{WORKSPACE_ID}/{digest}/x.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{digest}/g0/x.txt"] = payload
     real_verify = service._verify_object
 
     def verify_then_expire(storage_arg, row):  # noqa: ANN001, ANN202
@@ -510,6 +510,66 @@ def test_complete_rejects_expired_mid_verification(service, storage, job_db, mon
     assert service.get(WORKSPACE_ID, material_id)["status"] == "expired"
 
 
+def test_concurrent_retries_derive_key_from_committed_generation(service, storage, job_db) -> None:
+    """#1267 codex R5 P1-a：并发双重试——B 的 UPDATE 在行锁后推进代次，
+    key 必须由锁内实际新值派生（禁止从事务外快照值造 key）。确定性注入：
+    holder 持行 FOR UPDATE 锁，B 阻塞期间 holder 把代次推到 5 再提交。"""
+    digest = _sha256(b"race")
+    result = service.presign(WORKSPACE_ID, filename="r.txt", size_bytes=1, content_hash=digest)
+    material_id = result["material"]["id"]
+
+    outcome: list[str] = []
+    entered = threading.Event()
+
+    def _retry() -> None:
+        entered.set()
+        try:
+            service.presign(WORKSPACE_ID, filename="r.txt", size_bytes=1, content_hash=digest)
+            outcome.append("ok")
+        except Exception as exc:  # 线程内意外失败也要带回主线程定位
+            outcome.append(f"error:{exc!r}")
+
+    holder = connect_database(job_db.dsn_identity)
+    try:
+        with holder:
+            # holder 持行锁：B 的 SELECT 拿到 gen 0 快照，UPDATE 阻塞在锁上。
+            holder.execute("select id from materials where id=%s for update", (material_id,))
+            thread = threading.Thread(target=_retry)
+            thread.start()
+            assert entered.wait(timeout=5)
+            wait_until_blocked_by(backend_pid(holder), thread=thread)
+            assert thread.is_alive()
+            holder.execute("update materials set upload_generation=5 where id=%s", (material_id,))
+        # holder 提交，B 的 UPDATE 以最新行版本（gen 5）求值 → 6
+        thread.join(timeout=15)
+    finally:
+        holder.close()
+
+    assert not thread.is_alive()
+    assert outcome == ["ok"]
+    assert _generation_of(job_db, material_id) == 6
+    (key, _) = storage.presigned[-1]
+    assert key == f"{WORKSPACE_ID}/{digest}/g6/r.txt"
+    assert _storage_key_of(job_db, material_id) == key
+
+
+def test_generation_namespace_unforgeable_by_filename(service, storage) -> None:
+    """#1267 codex R5 P1-b：代次段统一存在（首发也是 g0），用户 filename 里
+    的 g1/ 无法伪造新代次 key——`g1/foo` 的首发与同 hash `foo` 的重试 key
+    必须不同。"""
+    digest = _sha256(b"forge")
+    # 攻击者先以 g1/foo 首发建行（第 0 代）。
+    service.presign(WORKSPACE_ID, filename="g1/foo", size_bytes=1, content_hash=digest)
+    # 受害者随后以 foo 重试同一 hash 的行 → 代次 1。
+    service.presign(WORKSPACE_ID, filename="foo", size_bytes=1, content_hash=digest)
+
+    (first_key, _) = storage.presigned[0]
+    (retry_key, _) = storage.presigned[1]
+    assert first_key == f"{WORKSPACE_ID}/{digest}/g0/g1/foo"
+    assert retry_key == f"{WORKSPACE_ID}/{digest}/g1/foo"
+    assert first_key != retry_key
+
+
 def test_presign_accepts_nested_relative_path(service, storage) -> None:
     """中间带 / 的相对路径合法：材料 key 本就是多段路径，只禁目录形态。"""
     digest = _sha256(b"nested")
@@ -518,7 +578,7 @@ def test_presign_accepts_nested_relative_path(service, storage) -> None:
     )
 
     (presigned_key, _) = storage.presigned[0]
-    assert presigned_key == f"{WORKSPACE_ID}/{digest}/dir/sub/file.txt"
+    assert presigned_key == f"{WORKSPACE_ID}/{digest}/g0/dir/sub/file.txt"
     assert result["material"]["filename"] == "dir/sub/file.txt"
 
 
@@ -530,7 +590,7 @@ def test_complete_marks_ready_when_object_matches(service, storage) -> None:
         size_bytes=len(payload),
         content_hash=_sha256(payload),
     )
-    storage.objects[f"{WORKSPACE_ID}/{_sha256(payload)}/d.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{_sha256(payload)}/g0/d.txt"] = payload
 
     material = service.complete(WORKSPACE_ID, result["material"]["id"])
 
@@ -549,7 +609,7 @@ def test_complete_fails_when_object_missing(service, storage) -> None:
 
 def test_complete_fails_on_size_mismatch(service, storage) -> None:
     result = service.presign(WORKSPACE_ID, filename="f.txt", size_bytes=10)
-    storage.objects[f"{WORKSPACE_ID}/{result['material']['id']}/f.txt"] = b"short"
+    storage.objects[f"{WORKSPACE_ID}/{result['material']['id']}/g0/f.txt"] = b"short"
 
     with pytest.raises(MaterialVerificationError, match="size"):
         service.complete(WORKSPACE_ID, result["material"]["id"])
@@ -560,7 +620,7 @@ def test_complete_fails_on_hash_mismatch(service, storage) -> None:
     declared = _sha256(b"expected")
     result = service.presign(WORKSPACE_ID, filename="g.txt", size_bytes=7, content_hash=declared)
     # Same length as the declaration, different bytes: size passes, hash fails.
-    storage.objects[f"{WORKSPACE_ID}/{declared}/g.txt"] = b"tamperd"
+    storage.objects[f"{WORKSPACE_ID}/{declared}/g0/g.txt"] = b"tamperd"
 
     with pytest.raises(MaterialVerificationError, match="sha256"):
         service.complete(WORKSPACE_ID, result["material"]["id"])
@@ -614,7 +674,7 @@ def test_list_paginates_newest_first(service, storage) -> None:
 
 def test_delete_removes_object_and_row(service, storage) -> None:
     result = service.presign(WORKSPACE_ID, filename="j.txt", size_bytes=2)
-    storage_key = f"{WORKSPACE_ID}/{result['material']['id']}/j.txt"
+    storage_key = f"{WORKSPACE_ID}/{result['material']['id']}/g0/j.txt"
     storage.objects[storage_key] = b"ok"
 
     service.delete(WORKSPACE_ID, result["material"]["id"])
@@ -647,7 +707,7 @@ def _insert_job_referencing(job_db, material_id: str, *, status: str = "queued")
 def test_delete_rejects_material_referenced_by_job(service, storage, job_db) -> None:
     result = service.presign(WORKSPACE_ID, filename="k.txt", size_bytes=2)
     material_id = result["material"]["id"]
-    storage_key = f"{WORKSPACE_ID}/{material_id}/k.txt"
+    storage_key = f"{WORKSPACE_ID}/{material_id}/g0/k.txt"
     storage.objects[storage_key] = b"ok"
     job_id = _insert_job_referencing(job_db, material_id)
 
@@ -674,7 +734,7 @@ def test_delete_ignores_unrelated_job_inputs(service, storage, job_db) -> None:
     """其他材料的 job 与非 material 输入不阻断删除。"""
     result = service.presign(WORKSPACE_ID, filename="m.txt", size_bytes=2)
     material_id = result["material"]["id"]
-    storage_key = f"{WORKSPACE_ID}/{material_id}/m.txt"
+    storage_key = f"{WORKSPACE_ID}/{material_id}/g0/m.txt"
     storage.objects[storage_key] = b"ok"
     _insert_job_referencing(job_db, "other-material")
     with job_db.connect() as conn:
@@ -698,7 +758,7 @@ def test_delete_blocked_by_key_share_sees_committed_reference(service, storage, 
     看到对方已提交的 job → MaterialInUseError，对象与行都保留。"""
     result = service.presign(WORKSPACE_ID, filename="n.txt", size_bytes=2)
     material_id = result["material"]["id"]
-    storage.objects[f"{WORKSPACE_ID}/{material_id}/n.txt"] = b"ok"
+    storage.objects[f"{WORKSPACE_ID}/{material_id}/g0/n.txt"] = b"ok"
 
     outcome: list[str] = []
     entered = threading.Event()

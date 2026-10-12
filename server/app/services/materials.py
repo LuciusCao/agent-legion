@@ -112,12 +112,15 @@ class MaterialsService:
 
         A ready row with the same declared content_hash is returned as-is
         (upload dedup, no URL); a stale uploading/failed row with the same
-        hash is reset to uploading so the upload can be retried. Every such
-        reset bumps ``upload_generation`` (schema v97) and moves the row to a
-        per-generation key (``.../g{generation}/{filename}``), so a same-size
-        retry stays visible to complete()'s locked identity recheck and every
-        previously issued PUT URL points at a dead key — bytes can never be
-        overwritten across generations (#1267 codex R3/R4 P1).
+        hash is reset to uploading so the upload can be retried. Object keys
+        live in a per-generation namespace the client's filename cannot forge
+        (``{ws}/{hash|id}/g{generation}/{filename}``, first issue included);
+        every retry bumps ``upload_generation`` (schema v97) and moves the row
+        to that generation's key, so a same-size retry stays visible to
+        complete()'s locked identity recheck and every previously issued PUT
+        URL points at a dead key — bytes can never be overwritten across
+        generations (#1267 codex R3/R4/R5 P1). Pre-namespace rows (no ``g``
+        segment) keep their keys untouched until their first retry.
         """
         validate_material_filename(filename)
         content_hash = content_hash.strip()
@@ -134,7 +137,7 @@ class MaterialsService:
                 ).fetchone()
             if row is None:
                 material_id = uuid.uuid4().hex
-                storage_key = f"{workspace_id}/{content_hash or material_id}/{filename}"
+                storage_key = f"{workspace_id}/{content_hash or material_id}/g0/{filename}"
                 insert_sql = """
                     insert into materials(
                       id, workspace_id, content_hash, filename, content_type,
@@ -168,31 +171,43 @@ class MaterialsService:
                     conn.execute(insert_sql, insert_params)
             if row is not None:
                 material_id = str(row["id"])
-                storage_key = str(row["storage_key"])
-                if str(row["status"]) == "ready":
-                    deduplicated = True
-                else:
-                    # #1267 codex R4 P1: a retry moves the row to a
+                deduplicated = str(row["status"]) == "ready"
+                if not deduplicated:
+                    # #1267 codex R4/R5 P1: a retry moves the row to a
                     # per-generation key, binding the PUT capability to the
                     # upload generation — every URL issued for earlier
                     # generations (and every legacy key written before the
                     # #1119 validation, P2) points at a dead key; leftover
-                    # objects are orphaned to the bucket lifecycle rule. A
-                    # complete() racing this update is serialized by its
-                    # locked identity recheck (generation included, R3 P1).
-                    new_generation = int(row["upload_generation"]) + 1
-                    storage_key = (
-                        f"{workspace_id}/{content_hash or material_id}/g{new_generation}/{filename}"
-                    )
-                    conn.execute(
+                    # objects are orphaned to the bucket lifecycle rule. The
+                    # new key is derived INSIDE the locked UPDATE from the
+                    # row's own increment (R5 P1-a): a concurrent retry blocked
+                    # on the row lock re-evaluates against the newest committed
+                    # generation, so two racing retries can never precompute
+                    # the same g{n} key from a stale snapshot. A complete()
+                    # racing this is serialized by its locked identity recheck
+                    # (generation included, R3 P1).
+                    # row 非空 ⇒ 经 content_hash 命中（select 或 on-conflict 回落），
+                    # key 前缀必为 hash 段。
+                    new_row = conn.execute(
                         """
                         update materials
-                        set filename=%s, content_type=%s, size_bytes=%s, storage_key=%s,
-                          status='uploading', upload_generation = upload_generation + 1
+                        set filename=%s, content_type=%s, size_bytes=%s,
+                          status='uploading', upload_generation = upload_generation + 1,
+                          storage_key = %s || '/g' || (upload_generation + 1) || '/' || %s
                         where id=%s
+                        returning storage_key
                         """,
-                        (filename, content_type, size_bytes, storage_key, material_id),
-                    )
+                        (
+                            filename,
+                            content_type,
+                            size_bytes,
+                            f"{workspace_id}/{content_hash}",
+                            filename,
+                            material_id,
+                        ),
+                    ).fetchone()
+                    assert new_row is not None  # where id 命中本分支刚读到的行
+                    storage_key = str(new_row["storage_key"])
         upload_url: str | None = None
         if not deduplicated:
             upload_url = storage.presign_put(

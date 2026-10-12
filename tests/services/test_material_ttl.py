@@ -67,7 +67,7 @@ def _ready_material(service: MaterialsService, storage: FakeStorage, filename: s
         created_by="user-1",
     )
     material_id = result["material"]["id"]
-    storage.objects[f"{WORKSPACE_ID}/{content_hash}/{filename}"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{content_hash}/g0/{filename}"] = payload
     service.complete(WORKSPACE_ID, material_id)
     return material_id
 
@@ -215,6 +215,11 @@ def test_expired_material_revived_by_same_hash_presign(
     assert result["upload_url"] is not None
     assert _material_row(material_id)["status"] == "uploading"
 
+    # R5 起复活重试迁到代次段 key：旧代次对象成为孤儿（lifecycle 回收），
+    # 新代次必须重新上传（PUT 到刚签发的 key）。
+    (revived_key, _) = storage.presigned[-1]
+    assert revived_key == f"{WORKSPACE_ID}/{content_hash}/g1/revive.txt"
+    storage.objects[revived_key] = payload
     service.complete(WORKSPACE_ID, material_id)
 
     row = _material_row(material_id)
