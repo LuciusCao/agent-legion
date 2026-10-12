@@ -38,6 +38,8 @@ const browserTestFiles = [
   'src/features/workflowStudio/shared/useWorkflowStudioPageView.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudio.draft.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudio.draftBaselineSync.test.ts',
+  // #1226 四轮 P1：发布删草稿行的前端收尾回归（renderHook 需要 jsdom）。
+  'src/features/workflowStudio/shared/useWorkflowStudio.publishReset.test.ts',
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.test.ts',
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.cas.test.ts',
   // #809：cas 测试文件超 800 行纪律线拆出的姊妹文件，同走 jsdom 项目。

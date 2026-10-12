@@ -22,6 +22,7 @@ vi.mock('../../../api', () => ({
 
 type DraftWithSave = UseWorkflowStudioDraftResult & {
   draftSave: { status: DraftSaveStatus; savedAt: string | null }
+  invalidateServerDraft: () => Promise<unknown>
 }
 
 const draft: DraftWithSave = {
@@ -40,6 +41,7 @@ const draft: DraftWithSave = {
   revisionLoadError: null,
   draftSave: { status: 'idle', savedAt: null },
   markDraftPublished: vi.fn(),
+  invalidateServerDraft: vi.fn(() => Promise.resolve()),
   selectRevision: vi.fn(),
   backToDraft: vi.fn(),
   useViewedRevisionAsDraft: vi.fn(),

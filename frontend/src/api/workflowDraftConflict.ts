@@ -14,8 +14,16 @@ export type WorkflowDraftConflictDetail =
 export type WorkflowDraftConflictCurrentDraft =
   ApiSchemas['WorkflowDraftConflictCurrentDraft']
 
+/** 生成的契约里 generation 必填（服务端现在总携带）；错误包装在字段缺失
+ * 的响应（混合部署窗口）上降级为 null——下游按「未知代次」处理（不推进
+ * CAS 基线），而不是假装 0。 */
+export type ConflictCurrentDraft = Omit<
+  WorkflowDraftConflictCurrentDraft,
+  'generation'
+> & { generation: number | null }
+
 export class WorkflowDraftConflictError extends Error {
-  readonly currentDraft: WorkflowDraftConflictCurrentDraft
+  readonly currentDraft: ConflictCurrentDraft
 
   constructor(detail: unknown) {
     super('workflow draft conflict')
@@ -29,6 +37,7 @@ export class WorkflowDraftConflictError extends Error {
       definition_yaml: current.definition_yaml ?? null,
       updated_at: current.updated_at ?? null,
       definition_hash: current.definition_hash ?? null,
+      generation: current.generation ?? null,
     }
     this.name = 'WorkflowDraftConflictError'
   }

@@ -235,6 +235,9 @@ def test_new_request_during_confirm_window_is_refused(client, job_db, monkeypatc
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["request"]["status"] == "confirmed"
     # The confirm window closed: re-requests work again (no confirming row).
+    # #1221: the publish deleted the draft row, so the follow-up request needs
+    # a fresh draft first (the agent re-saves from the new canonical baseline).
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 再次调整\n")
     followup = _request_publish(scoped, workspace_id)
     assert followup.status_code == 200, followup.text
 
@@ -388,9 +391,10 @@ def test_stale_confirming_row_recovers_via_sweep(client, job_db, monkeypatch) ->
 
     def claim_then_die(job_db_, workspace_id_, yaml, enabled):
         # Simulate the process dying between claim and resolve: age the claim
-        # past the threshold, publish (the effect is real and on disk — keeps
-        # the draft's post-publish state coherent with the follow-up request
-        # below), then die — the resolve never runs.
+        # past the threshold, publish (the effect is real and on disk — #1221
+        # deletes the draft row with it, which the follow-up request below
+        # accounts for by parking a fresh draft), then die — the resolve
+        # never runs.
         with job_db_.connect() as conn:
             conn.execute(
                 "update studio_publish_requests set claimed_at = current_timestamp"
@@ -422,6 +426,8 @@ def test_stale_confirming_row_recovers_via_sweep(client, job_db, monkeypatch) ->
     status = scoped.get(f"/api/studio-agent/tools/publish-requests/{request_id}")
     assert status.json()["request"]["status"] == "expired"
     # And the workspace is unwedged: a fresh request can be parked.
+    # #1221: the in-flight publish deleted the draft row — park a fresh one.
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 再次调整\n")
     followup = _request_publish(scoped, workspace_id)
     assert followup.status_code == 200, followup.text
 
@@ -497,6 +503,8 @@ def test_concurrent_create_during_claim_never_parks_a_second_request(
             (workspace_id,),
         ).fetchone()
     assert pendings["count"] == 0
+    # #1221: the publish deleted the draft row — park a fresh one first.
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 再次调整\n")
     followup = _request_publish(scoped, workspace_id)
     assert followup.status_code == 200, followup.text
 
@@ -537,3 +545,44 @@ def test_pending_poll_surfaces_the_confirming_row_while_publish_is_in_flight(
     assert confirmed.status_code == 200, confirmed.text
     # Once resolved, the poll is empty again.
     assert _pending(client, workspace_id).json()["request"] is None
+
+
+def test_confirm_with_concurrent_draft_edit_publishes_but_keeps_the_new_draft(
+    client, job_db, monkeypatch
+) -> None:
+    """#1226 codex P1: the canvas autosaves a DIFFERENT draft after the
+    confirm's claim (bound to the old draft's hash) but before the publish's
+    delete hook fires. The publish of the OLD content succeeds, and the
+    newer draft row must SURVIVE as the unpublished draft — the delete is
+    conditional on the stored row still matching the published content's
+    identity hash."""
+    workspace_id = _seed_workspace(client, job_db)
+    _put_draft(client, workspace_id, _DRAFT_YAML + "    label: 调整后的节点\n")
+    scoped = _scoped_client(client, job_db, workspace_id)
+    request = _request_publish(scoped, workspace_id).json()["request"]
+
+    from server.app.services import studio_publish_requests as service_module
+
+    real_publish = service_module.publish_workflow_draft
+
+    def rewrite_then_publish(job_db_, workspace_id_, yaml, enabled):
+        # The interleave: claim already bound the old draft's hash; now the
+        # canvas saves newer content before the revision write lands.
+        _put_draft(client, workspace_id_, yaml + "    label: 更晚的并发编辑\n")
+        return real_publish(job_db_, workspace_id_, yaml, enabled)
+
+    monkeypatch.setattr(service_module, "publish_workflow_draft", rewrite_then_publish)
+
+    confirmed = client.post(
+        f"/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request['id']}/confirm"
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["request"]["status"] == "confirmed"
+    # The old content went live (v2)...
+    active = client.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
+    assert active.json()["revision"]["version"] == 2
+    assert "更晚的并发编辑" not in active.json()["definition_yaml"]
+    # ...and the newer draft survives as the unpublished edit.
+    draft = client.get(f"/api/workspaces/{workspace_id}/workflow-draft")
+    assert "更晚的并发编辑" in draft.json()["definition_yaml"]

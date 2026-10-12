@@ -4,20 +4,21 @@ Empty-state convention: GET always returns 200 for an existing workspace,
 with ``definition_yaml: null`` / ``updated_at: null`` when no draft was ever
 saved — same structured-empty style as the revisions list (``revisions: []``)
 rather than a 404, so the editor's first load needs no error-branch handling.
+``generation`` is always the workspace's current draft generation (#1226
+五轮收口, 设计 v2) — including the post-publish empty state, so a first save
+on it can declare its base.
 """
 
-from pydantic import BaseModel, field_validator
-
-from server.app.services.workflow_draft_cas_token import CAS_TIMESTAMP_HINT, parse_cas_timestamp
+from pydantic import BaseModel, Field, field_validator
 
 
 class WorkflowDraftStoreRequest(BaseModel):
     definition_yaml: str
-    # #633 codex review P1-1: the human PUT carries the CAS base (the updated_at
-    # the last GET returned, or "never-saved") so an agent-saved draft lost to a
-    # human autosave surfaces as a visible 409, not a silent overwrite. Optional:
-    # absent/null keeps the legacy last-write-wins semantics (two-tab autosave).
-    expected_updated_at: str | None = None
+    # #633 codex review P1-1 + #1226 五轮收口：PUT 携带 CAS 基线代次（最后
+    # 一次读到的 generation），落后即 409（detail 携带当前草稿状态）；
+    # 缺省/null = legacy 无代次写入，保留 last-write-wins 放行（设计 v2
+    # 记明的兼容残余，现行客户端都携带代次）。
+    base_generation: int | None = Field(default=None, ge=0)
 
     @field_validator("definition_yaml")
     @classmethod
@@ -29,15 +30,6 @@ class WorkflowDraftStoreRequest(BaseModel):
             raise ValueError("definition_yaml must not be blank")
         return value
 
-    # #633 codex review P2-2: malformed CAS token → 422 here, never the
-    # timestamptz cast's 500. None means "no CAS" (last-write-wins).
-    @field_validator("expected_updated_at")
-    @classmethod
-    def _cas_timestamp_or_never_saved(cls, value: str | None) -> str | None:
-        if value is None or parse_cas_timestamp(value):
-            return value
-        raise ValueError(CAS_TIMESTAMP_HINT)
-
 
 class WorkflowDraftStoreResponse(BaseModel):
     definition_yaml: str | None = None
@@ -47,6 +39,8 @@ class WorkflowDraftStoreResponse(BaseModel):
     # 用它与草稿卡记录的 hash 核对「是否与编辑器一致」，替代逐字节全等。
     # 不可解析的草稿为 null（前端按「无法核对」降级到字符串比较）。
     definition_hash: str | None = None
+    # #1226 五轮收口：workspace 当前草稿代次（CAS 基线货币）。
+    generation: int = 0
 
 
 class WorkflowDraftConflictCurrentDraft(BaseModel):
@@ -54,20 +48,24 @@ class WorkflowDraftConflictCurrentDraft(BaseModel):
     契约模型化——此前是裸 dict，前端只能手写 transport type）。
 
     与 ``WorkflowDraftStoreResponse`` 同一字段集（服务端 current draft 的
-    单一形状）：草稿不存在（never-saved 竞态删除后撞 CAS）时全 null。
+    单一形状）：草稿行不存在（发布删除后的代次冲突）时 yaml/时间戳/hash
+    全 null，但 ``generation`` 始终是 workspace 当前代次（重 base 以它为
+    准）。
     """
 
     definition_yaml: str | None = None
     updated_at: str | None = None
     definition_hash: str | None = None
+    generation: int = 0
 
 
 class WorkflowDraftConflictDetail(BaseModel):
     """409 detail 顶层（服务层 DraftConflictError.payload 的契约形态）：
-    message（人读指引）+ expected_updated_at（stale 基线）+ current_draft。"""
+    message（人读指引）+ base_generation（写入方声明的落后基线）+
+    current_draft（含当前代次）。"""
 
     message: str
-    expected_updated_at: str
+    base_generation: int
     current_draft: WorkflowDraftConflictCurrentDraft
 
 

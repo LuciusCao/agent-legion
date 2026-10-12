@@ -3,7 +3,6 @@
    用例零改动迁移；mock/setup 与原文件同构）。 */
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { DRAFT_NEVER_SAVED } from '../../../api/workflowDraft'
 import { useWorkflowDraftPersistence } from './useWorkflowDraftPersistence'
 
 const mocks = {
@@ -17,6 +16,7 @@ type DraftStoreResponseMock = {
   definition_yaml: string
   updated_at: string
   definition_hash: string | null
+  generation: number
 }
 
 vi.mock('../../../api', () => ({
@@ -25,12 +25,12 @@ vi.mock('../../../api', () => ({
   putWorkflowDraft: (...args: unknown[]) => mocks.putWorkflowDraft(...args),
 }))
 vi.mock('../../../api/workflowDraft', () => ({
-  DRAFT_NEVER_SAVED: 'never-saved',
   WorkflowDraftConflictError: class extends Error {
     readonly currentDraft: {
       definition_yaml: string | null
       updated_at: string | null
       definition_hash: string | null
+      generation: number | null
     }
     constructor(detail: unknown) {
       super('workflow draft conflict')
@@ -42,11 +42,13 @@ vi.mock('../../../api/workflowDraft', () => ({
         definition_yaml?: string | null
         updated_at?: string | null
         definition_hash?: string | null
+        generation?: number | null
       }
       this.currentDraft = {
         definition_yaml: current.definition_yaml ?? null,
         updated_at: current.updated_at ?? null,
         definition_hash: current.definition_hash ?? null,
+        generation: current.generation ?? null,
       }
     }
   },
@@ -56,15 +58,18 @@ const SERVER_DRAFT: DraftStoreResponseMock = {
   definition_yaml: 'key: demo\nlabel: Server\n',
   updated_at: '2026-08-27T01:02:03+00:00',
   definition_hash: null,
+  generation: 7,
 }
 const NO_DRAFT: {
   definition_yaml: null
   updated_at: null
   definition_hash: null
+  generation: number
 } = {
   definition_yaml: null,
   updated_at: null,
   definition_hash: null,
+  generation: 0,
 }
 
 type HookProps = {
@@ -242,7 +247,7 @@ describe('useWorkflowDraftPersistence 草稿语义身份（#1143/#1177 savedHash
       'ws1',
       'key: demo\nlabel: Retyped\n',
       {
-        expectedUpdatedAt: DRAFT_NEVER_SAVED,
+        baseGeneration: 0,
       }
     )
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
@@ -276,7 +281,7 @@ describe('useWorkflowDraftPersistence 草稿语义身份（#1143/#1177 savedHash
       'ws1',
       'key: demo\nlabel: E1\n',
       {
-        expectedUpdatedAt: DRAFT_NEVER_SAVED,
+        baseGeneration: 0,
       }
     )
     rerender({
@@ -292,6 +297,7 @@ describe('useWorkflowDraftPersistence 草稿语义身份（#1143/#1177 savedHash
         definition_yaml: 'key: demo\nlabel: E1\n',
         updated_at: '2026-08-27T02:00:00+00:00',
         definition_hash: 'hash-e1',
+        generation: 8,
       })
     })
     expect(result.current.state.savedHash).toBe('hash-e1')

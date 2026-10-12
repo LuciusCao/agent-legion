@@ -4,10 +4,7 @@
    mock/setup 与各姊妹文件同构）。 */
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  DRAFT_NEVER_SAVED,
-  WorkflowDraftConflictError,
-} from '../../../api/workflowDraft'
+import { WorkflowDraftConflictError } from '../../../api/workflowDraft'
 import { useWorkflowDraftPersistence } from './useWorkflowDraftPersistence'
 
 const mocks = {
@@ -21,12 +18,12 @@ vi.mock('../../../api', () => ({
   putWorkflowDraft: (...args: unknown[]) => mocks.putWorkflowDraft(...args),
 }))
 vi.mock('../../../api/workflowDraft', () => ({
-  DRAFT_NEVER_SAVED: 'never-saved',
   WorkflowDraftConflictError: class extends Error {
     readonly currentDraft: {
       definition_yaml: string | null
       updated_at: string | null
       definition_hash: string | null
+      generation: number | null
     }
     constructor(detail: unknown) {
       super('workflow draft conflict')
@@ -38,11 +35,13 @@ vi.mock('../../../api/workflowDraft', () => ({
         definition_yaml?: string | null
         updated_at?: string | null
         definition_hash?: string | null
+        generation?: number | null
       }
       this.currentDraft = {
         definition_yaml: current.definition_yaml ?? null,
         updated_at: current.updated_at ?? null,
         definition_hash: current.definition_hash ?? null,
+        generation: current.generation ?? null,
       }
     }
   },
@@ -51,8 +50,9 @@ vi.mock('../../../api/workflowDraft', () => ({
 const SERVER_DRAFT = {
   definition_yaml: 'key: demo\nlabel: Server\n',
   updated_at: '2026-08-27T01:02:03+00:00',
+  generation: 7,
 }
-const NO_DRAFT = { definition_yaml: null, updated_at: null }
+const NO_DRAFT = { definition_yaml: null, updated_at: null, generation: 0 }
 
 type HookProps = {
   workspaceId: string | undefined
@@ -80,6 +80,8 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
   const BASE = 'key: demo\nlabel: Base\n'
   const EDITED = 'key: demo\nlabel: Edited\n'
   const SERVER_AT = '2026-08-27T01:02:03+00:00'
+  // #1226 五轮收口：CAS 基线是代次。SERVER 草稿处于代次 7。
+  const SERVER_GEN = 7
 
   function conflictError() {
     return new WorkflowDraftConflictError({
@@ -87,6 +89,7 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
       current_draft: {
         definition_yaml: 'key: demo\nlabel: Agent v2\n',
         updated_at: '2026-09-12T10:00:00+00:00',
+        generation: 9,
       },
     })
   }
@@ -97,18 +100,26 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     mocks.putWorkflowDraft.mockResolvedValue(SERVER_DRAFT)
   })
 
-  it('PUTs with the hydrated updated_at as the CAS base', async () => {
+  it('PUTs with the hydrated generation as the CAS base', async () => {
     const { rerender } = renderPersistence({
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: SERVER_GEN,
+      },
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: SERVER_GEN,
+      },
     })
 
     await act(async () => {
@@ -116,11 +127,11 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     })
 
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
-      expectedUpdatedAt: SERVER_AT,
+      baseGeneration: SERVER_GEN,
     })
   })
 
-  it('PUTs with never-saved before any baseline exists', async () => {
+  it('PUTs with generation 0 before any draft exists', async () => {
     const { rerender } = renderPersistence({
       workspaceId: 'ws1',
       draftYaml: BASE,
@@ -139,7 +150,90 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     })
 
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
-      expectedUpdatedAt: DRAFT_NEVER_SAVED,
+      baseGeneration: 0,
+    })
+  })
+
+  it('re-hydrates the empty state when the generation advanced at the same canonical yaml (#1226 复审 P2)', async () => {
+    /* 另一会话保存并发布后草稿再次为空、代次从 0 推进到 2；幂等键只有
+       originalYaml 时旧实现跳过 re-hydrate，controller 仍持旧代次，下一次
+       保存以过期代次必然 409（即使服务端根本没有草稿）。修复后幂等键含
+       generation：代次前进即重新对齐基线。 */
+    const EMPTY_GEN2 = {
+      definition_yaml: null,
+      updated_at: null,
+      generation: 2,
+    }
+    const { rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: NO_DRAFT,
+    })
+    // 草稿再次为空但代次已前进（canonical 文本未变）。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: EMPTY_GEN2,
+    })
+    // 用户编辑 → 保存必须以新代次为基线。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: EMPTY_GEN2,
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
+      baseGeneration: 2,
+    })
+  })
+
+  it('re-hydrates when the generation advances at the same updated_at (#1226 复审 P2)', async () => {
+    /* Postgres 的 current_timestamp 固定在事务开始：更高代次的草稿可能带
+       相同 updated_at——按时间戳的 hydrate 守卫会跳过，controller 保留旧
+       代次，下一次保存白吃 409。前进判定以代次为准。 */
+    const AGENT_V2 = {
+      definition_yaml: 'key: demo\nlabel: Agent v2\n',
+      updated_at: SERVER_AT,
+      generation: 8,
+    }
+    const { rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: SERVER_GEN,
+      },
+    })
+    // 服务端草稿前进（代次 7→8）但时间戳未变。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: AGENT_V2,
+    })
+    // 用户编辑 → 保存必须以新代次为基线。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: AGENT_V2,
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
+      baseGeneration: 8,
     })
   })
 
@@ -149,6 +243,7 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
        前进；否则 B 携带 A 之前的旧基线必然 409，连续编辑被误报成
        「其它会话更新」并停止自动保存。 */
     const A_AT = '2026-09-12T11:00:00+00:00'
+    const A_GEN = 8
     let resolveA: (value: typeof SERVER_DRAFT) => void = () => {}
     mocks.putWorkflowDraft.mockImplementationOnce(
       () => new Promise((resolve) => (resolveA = resolve))
@@ -157,14 +252,22 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: SERVER_GEN,
+      },
     })
     // A：edited 草稿的保存（PUT 挂起在途）。
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: SERVER_GEN,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -176,41 +279,53 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
       workspaceId: 'ws1',
       draftYaml: 'key: demo\nlabel: Third\n',
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: SERVER_GEN,
+      },
     })
     // A 成功返回（被 B 的调度作废）。
     await act(async () => {
-      resolveA({ definition_yaml: EDITED, updated_at: A_AT })
+      resolveA({ definition_yaml: EDITED, updated_at: A_AT, generation: A_GEN })
     })
-    // B 的 debounce 到期发起 PUT——基线必须是 A 落盘的时间戳。
+    // B 的 debounce 到期发起 PUT——基线必须是 A 落盘的代次。
     await act(async () => {
       vi.advanceTimersByTime(850)
     })
     expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
       'ws1',
       'key: demo\nlabel: Third\n',
-      { expectedUpdatedAt: A_AT }
+      { baseGeneration: A_GEN }
     )
   })
 
   // --- #633 codex review P2-1：conflict 响应推进 CAS 基线。 ---
 
-  it('a conflict advances lastPersistedAt so the next save competes on the fresh base', async () => {
-    // 冲突响应的 current_draft.updated_at 是服务端真值：进入 conflict 态的
+  it('a conflict advances the base generation so the next save competes on the fresh base', async () => {
+    // 冲突响应的 current_draft.generation 是服务端真值：进入 conflict 态的
     // 同时把基线推进到它——用户显式保留本页（resolveConflict）后的下一次
-    // 保存以新基线发起，而不是永远用过期时间戳 409。
+    // 保存以新基线发起，而不是永远用过期代次 409。
     mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
     const { result, rerender } = renderPersistence({
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: SERVER_GEN,
+      },
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: SERVER_GEN,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -223,12 +338,17 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: EDITED,
       updated_at: '2026-09-12T11:30:00+00:00',
+      generation: 10,
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: 'key: demo\nlabel: After conflict\n',
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: SERVER_GEN,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -241,7 +361,7 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
       'ws1',
       'key: demo\nlabel: After conflict\n',
-      { expectedUpdatedAt: '2026-09-12T10:00:00+00:00' }
+      { baseGeneration: 9 }
     )
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
     expect(result.current.state.conflict).toBeUndefined()
@@ -250,15 +370,20 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
   // --- #633 codex review P1-2：turn-end 失效后服务端草稿前进的重应用。 ---
 
   it('re-hydrates the CAS base when the server draft advanced and was adopted', async () => {
-    // 画布采用了新服务端草稿（无本地编辑）：hydrate 把 lastPersistedAt
-    // 推进到新 updated_at，随后的保存以新基线竞争（不过期时间戳）。
+    // 画布采用了新服务端草稿（无本地编辑）：hydrate 把基线代次推进到新
+    // generation，随后的保存以新基线竞争（不过期代次）。
     const { rerender } = renderPersistence({
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: SERVER_GEN,
+      },
     })
     const ADVANCED = '2026-08-27T03:00:00+00:00'
+    const ADVANCED_GEN = 9
     rerender({
       workspaceId: 'ws1',
       draftYaml: 'key: demo\nlabel: Agent v2\n',
@@ -266,6 +391,7 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
       serverDraft: {
         definition_yaml: 'key: demo\nlabel: Agent v2\n',
         updated_at: ADVANCED,
+        generation: ADVANCED_GEN,
       },
     })
     // 采用的草稿与 lastPersisted 一致：不触发回写 PUT。
@@ -281,6 +407,7 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
       serverDraft: {
         definition_yaml: 'key: demo\nlabel: Agent v2\n',
         updated_at: ADVANCED,
+        generation: ADVANCED_GEN,
       },
     })
     await act(async () => {
@@ -289,7 +416,7 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
       'key: demo\nlabel: My edit\n',
-      { expectedUpdatedAt: ADVANCED }
+      { baseGeneration: ADVANCED_GEN }
     )
   })
 
@@ -302,13 +429,21 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: SERVER_GEN,
+      },
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: SERVER_GEN,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -316,11 +451,16 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
     // turn-end 重取：updated_at 推进到本页保存的时间戳，内容 === 画布。
     const OWN_AT = '2026-08-27T05:00:00+00:00'
+    const OWN_GEN = 8
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: EDITED, updated_at: OWN_AT },
+      serverDraft: {
+        definition_yaml: EDITED,
+        updated_at: OWN_AT,
+        generation: OWN_GEN,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)

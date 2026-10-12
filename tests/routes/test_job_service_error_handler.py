@@ -22,7 +22,6 @@ from server.app.services.job_errors import (
     CustomNodesDisabledError,
     DraftConflictError,
     DraftWorkflowKeyMismatchError,
-    InvalidDraftCasTokenError,
     InvalidOperationError,
     JobServiceError,
     NotFoundError,
@@ -46,9 +45,8 @@ pytestmark = pytest.mark.no_db
 
 _DRAFT_CONFLICT_PAYLOAD = {
     "message": "draft changed",
-    "expected_updated_at": "2026-01-01T00:00:00+00:00",
-    "current_updated_at": "2026-01-02T00:00:00+00:00",
-    "draft": {"nodes": []},
+    "base_generation": 1,
+    "current_draft": {"definition_yaml": None, "generation": 2},
 }
 
 # (case id, error factory, expected status, expected detail)
@@ -76,7 +74,6 @@ _MAPPED_CASES = [
         422,
         "key mismatch",
     ),
-    ("invalid_cas_token", lambda: InvalidDraftCasTokenError("bad token"), 422, "bad token"),
     (
         "partial_run_creation",
         lambda: PartialRunCreationError("chunk 2 failed", run_id="run-1", created_so_far=3),

@@ -5,15 +5,13 @@
    在途）；排队请求被作废（requestId 过期）或冲突挂起时按既有语义处置。
    计时器与 CAS 基线留在 controller（与竞争时序强耦合），这里可独立测试。 */
 
-import {
-  DRAFT_NEVER_SAVED,
-  WorkflowDraftConflictError,
-} from '../../../api/workflowDraft'
+import { WorkflowDraftConflictError } from '../../../api/workflowDraft'
 import { runSave } from './draftSaveConflict'
 import {
   MAX_PUT_RETRIES,
   RETRY_BASE_MS,
   type DraftSaveFlushResult,
+  type PutWorkflowDraftFn,
 } from './draftSaveTypes'
 
 export type QueuedSave = { yaml: string; requestId: number }
@@ -86,31 +84,30 @@ export class DraftSaveQueue {
 
 /* controller.save 的可外移半边（codex R3 P1 拆分）：CAS 基线现取、PUT 发起
    与响应分派。controller 只提供状态钩子（基线读写、状态机转换、计时器
-   归属、排队补发入口），requestId 过期/冲突/重试语义与拆分前一致。 */
+   归属、排队补发入口），requestId 过期/冲突/重试语义与拆分前一致。
+   #1226 五轮收口：CAS 基线是草稿代次（number），不再是 updated_at。 */
 export function runTrackedSave(context: {
-  put: (
-    yaml: string,
-    keepalive: boolean,
-    expectedAt: string
-  ) => Promise<{ updated_at?: string | null; definition_hash?: string | null }>
+  put: PutWorkflowDraftFn
   yaml: string
   requestId: number
   retriesLeft: number
   keepalive: boolean
   currentRequest: (id: number) => boolean
   onCleared: (requestId: number) => void
-  baseline: () => string | null
+  baseline: () => number | null
   onBaseline: (
     saved: string,
     updatedAt: string | null,
     current: boolean,
-    savedHash: string | null
+    savedHash: string | null,
+    generation: number | null
   ) => void
   onSaving: () => void
   onConflict: (
     serverYaml: string | null,
     serverAt: string | null,
-    serverHash: string | null
+    serverHash: string | null,
+    serverGeneration: number | null
   ) => void
   onTransientError: (terminal: boolean) => void
   armRetry: (timer: ReturnType<typeof setTimeout>) => void
@@ -124,13 +121,12 @@ export function runTrackedSave(context: {
 }): Promise<DraftSaveFlushResult> {
   const { yaml, requestId, retriesLeft, keepalive } = context
   context.onSaving()
-  const expectedAt = context.baseline() ?? DRAFT_NEVER_SAVED
   return new Promise<DraftSaveFlushResult>((resolve) =>
     runSave({
       put: context.put,
       yaml,
       keepalive,
-      expectedAt,
+      baseGeneration: context.baseline(),
       requestId,
       isCurrentRequest: context.currentRequest,
       clearInFlight: () => context.onCleared(requestId),
@@ -140,11 +136,12 @@ export function runTrackedSave(context: {
           const current = error.currentDraft
           // #1177 codex P2：undefined（旧响应缺字段）→ null（明确无身份），
           // 不经 onConflict 的「未传」臂（conflict 事件总是已发生——身份
-          // 缺失就是无身份，不是「不更新」）。
+          // 缺失就是无身份，不是「不更新」）。代次同论（#1226）。
           context.onConflict(
             current.definition_yaml ?? null,
             current.updated_at ?? null,
-            current.definition_hash ?? null
+            current.definition_hash ?? null,
+            current.generation
           )
           return resolveRetry(false)
         }

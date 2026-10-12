@@ -22,7 +22,7 @@ from server.app.services.versioned_entities import VersionedEntityStore
 _NOT_VERSIONED_ENTITY_PUBLISH = {
     # Workflow revision publish (workflow_revisions, not versioned_entities):
     # it validates and publishes the workspace's workflow draft; its
-    # concurrency contract is the draft store's expected_updated_at (#633).
+    # concurrency contract is the draft store's base_generation (#633; #1226 五轮收口改代次基线).
     "/api/workspaces/{workspace_id}/workflow-drafts/publish",
 }
 

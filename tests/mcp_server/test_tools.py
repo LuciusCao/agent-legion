@@ -204,9 +204,9 @@ def test_get_workflow_draft_gets_canvas_draft(recorded) -> None:
     assert calls[0]["url"].endswith("/workspaces/ws-1/workflow/draft")
 
 
-def test_save_workflow_draft_puts_with_cas_token(recorded) -> None:
-    # #633: the write carries the CAS base (expected_updated_at) — a stale
-    # token comes back as HTTP 409 text carrying the current draft.
+def test_save_workflow_draft_puts_with_base_generation(recorded) -> None:
+    # #633 + #1226 五轮收口: the write carries the CAS base generation — a
+    # stale base comes back as HTTP 409 text carrying the current draft state.
     server, calls = recorded
     _run_tool(
         server,
@@ -214,14 +214,14 @@ def test_save_workflow_draft_puts_with_cas_token(recorded) -> None:
         {
             "workspace_id": "ws-1",
             "definition_yaml": "key: wf\n",
-            "expected_updated_at": "2026-09-12 00:00:00+00",
+            "base_generation": 3,
         },
     )
     assert calls[0]["method"] == "PUT"
     assert calls[0]["url"].endswith("/workspaces/ws-1/workflow/draft")
     assert calls[0]["json"] == {
         "definition_yaml": "key: wf\n",
-        "expected_updated_at": "2026-09-12 00:00:00+00",
+        "base_generation": 3,
     }
 
 

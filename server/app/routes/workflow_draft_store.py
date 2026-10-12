@@ -8,9 +8,9 @@ surface has no draft-store tool, so a scoped run token has no business
 rewriting the human editor's draft. The GET stays on the plain secured
 surface (same convention as the workflow-revisions reads: the scoped token
 authenticates as the initiating user and may read what they can read).
-#633 codex review P1-1: the PUT carries the CAS base when the client sends
-expected_updated_at (stale base → 409 with the current draft, mirroring the
-tool surface); an absent field keeps the legacy last-write-wins upsert.
+#633 codex review P1-1 + #1226 五轮收口：PUT 携带 base_generation 时是代次
+CAS（落后即 409，detail 携带当前草稿状态与代次）；缺省保留 legacy
+last-write-wins 放行（设计 v2 记明的兼容残余）。
 """
 
 from typing import Any
@@ -25,14 +25,17 @@ from server.app.routes.workflow_draft_store_contracts import (
     WorkflowDraftStoreResponse,
 )
 from server.app.services.workflow_draft_cas import save_workflow_draft_if_unchanged
-from server.app.services.workflow_draft_store import get_workflow_draft, save_workflow_draft
+from server.app.services.workflow_draft_store import (
+    get_workflow_draft_state,
+    save_workflow_draft,
+)
 
 # 409 CAS 冲突的响应契约（#1177 codex P1/P2）：detail 由 app 级异常处理器
 # 从 DraftConflictError.payload 渲染，FastAPI 原生 handler 固定外包一层
 # detail——responses= 挂带封套的响应模型进 OpenAPI，前端 transport type
 # 从生成的 api.ts 派生（不再手写）。
 _DRAFT_CONFLICT_RESPONSES: dict[int | str, dict[str, Any]] = {
-    409: {"model": WorkflowDraftConflictResponse, "description": "Stale CAS base"}
+    409: {"model": WorkflowDraftConflictResponse, "description": "Stale base generation"}
 }
 
 
@@ -44,10 +47,11 @@ def create_workflow_draft_store_router(job_db: JobQueries) -> APIRouter:
         response_model=WorkflowDraftStoreResponse,
     )
     def get_draft(workspace_id: str) -> WorkflowDraftStoreResponse:
-        draft = get_workflow_draft(job_db, workspace_id)
-        if draft is None:
-            return WorkflowDraftStoreResponse()
-        return WorkflowDraftStoreResponse.model_validate(draft)
+        # 内容 + 代次单查询同一快照（#1226 六轮 codex P1）——空态也携带
+        # 该快照的代次，拆分读会把并发保存后的新代次配给 null 内容。
+        return WorkflowDraftStoreResponse.model_validate(
+            get_workflow_draft_state(job_db, workspace_id)
+        )
 
     @router.put(
         "/workspaces/{workspace_id}/workflow-draft",
@@ -58,19 +62,16 @@ def create_workflow_draft_store_router(job_db: JobQueries) -> APIRouter:
     def put_draft(
         workspace_id: str, request: WorkflowDraftStoreRequest
     ) -> WorkflowDraftStoreResponse:
-        # #633 codex review P1-1: with expected_updated_at the PUT is a real
-        # CAS save (a stale base is a 409 carrying the current draft — same
-        # payload shape as the tool surface); without it, the legacy
-        # last-write-wins upsert keeps the documented two-tab autosave
-        # semantics for old clients.
-        if request.expected_updated_at is None:
+        # 代次 CAS（#633 P1-1 + #1226 五轮收口）：带 base_generation 的 PUT
+        # 落后即 409；缺省为 legacy 无代次 LWW（兼容残余，现行客户端都带）。
+        if request.base_generation is None:
             draft = save_workflow_draft(job_db, workspace_id, request.definition_yaml)
         else:
             draft = save_workflow_draft_if_unchanged(
                 job_db,
                 workspace_id,
                 request.definition_yaml,
-                request.expected_updated_at,
+                request.base_generation,
             )
         return WorkflowDraftStoreResponse.model_validate(draft)
 

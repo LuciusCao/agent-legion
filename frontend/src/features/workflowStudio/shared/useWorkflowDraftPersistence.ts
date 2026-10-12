@@ -68,12 +68,13 @@ export function useWorkflowDraftPersistence(
     setState(IDLE_DRAFT_SAVE)
     if (!workspaceId) return
     const controller = new DraftSaveController(
-      /* #633：expectedUpdatedAt 由 controller 维护（hydrate 记录基线、保存
-         成功后推进），这里只透传——keepalive 分支同样携带 CAS 基线。 */
-      (yaml, keepalive, expectedUpdatedAt) =>
+      /* #633 + #1226 五轮收口：baseGeneration 由 controller 维护（hydrate
+         记录基线代次、保存成功后推进），这里只透传——keepalive 分支同样
+         携带 CAS 基线。 */
+      (yaml, keepalive, baseGeneration) =>
         putWorkflowDraft(workspaceId, yaml, {
           ...(keepalive && { keepalive: true }),
-          expectedUpdatedAt,
+          baseGeneration,
         })
     )
     controllerRef.current = controller

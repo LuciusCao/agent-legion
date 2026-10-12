@@ -5,6 +5,8 @@ export type ServerDraftConflict = {
   yaml: string
   updatedAt: string
   hash: string | null
+  /** #1226 五轮收口：服务端代次（保存层恢复为 CAS 基线）。 */
+  generation: number | null
 }
 
 export type ServerDraftApplyControls = {
@@ -29,7 +31,8 @@ export function useServerDraftApply(
   serverDraftUpdatedAt: string | null | undefined,
   setDraftYamlState: (value: string) => void,
   canvasYaml?: string,
-  serverDraftHash?: string | null
+  serverDraftHash?: string | null,
+  serverDraftGeneration?: number | null
 ): ServerDraftApplyControls {
   // workspace 切换重建跟踪器（清空 appliedAt/touched/冲突挂起）；两个 effect
   // 的注册顺序保证 reset 先于 evaluate 跑。
@@ -45,7 +48,8 @@ export function useServerDraftApply(
       serverDraftUpdatedAt,
       setDraftYamlState,
       canvasYaml,
-      serverDraftHash
+      serverDraftHash,
+      serverDraftGeneration
     )
     // 冲突挂起需要一次重渲染让保存层 effect 跑起来；apply/no-op 不需要。
     if (outcome === 'conflict') forceRender((count) => count + 1)
@@ -53,6 +57,7 @@ export function useServerDraftApply(
     serverDraftYaml,
     serverDraftUpdatedAt,
     serverDraftHash,
+    serverDraftGeneration,
     originalYaml,
     setDraftYamlState,
     canvasYaml,
