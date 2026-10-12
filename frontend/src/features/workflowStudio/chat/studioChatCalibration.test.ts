@@ -434,6 +434,86 @@ describe('terminal 实时到达当轮的校准截断（#1300）', () => {
   })
 })
 
+describe('整行冲突丢弃后的收口点读（#1305）', () => {
+  it('GET 在途期间收到中间 SSE、服务端随后持久化的更新快照（SSE 丢失）被整行守卫误丢：补一次收口点读落地最新库快照', async () => {
+    const { deps, state } = makeDeps([
+      toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out1' }),
+    ])
+    let resolveFetch!: (value: unknown) => void
+    mockApi.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve
+        }) as ReturnType<typeof api>
+    )
+    await calibrateWithRowRefetch(deps)
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(1))
+    // GET 在途期间：中间 SSE 快照合入本地行（rawOutput 刷新、status 不变——
+    // 终态/长度比较判不出新旧，#1288 守卫放行的形态）。
+    deps.setMessages(
+      (current) =>
+        upsertMessage(current, { id: 'tc1', content: { rawOutput: 'out2' } }) ??
+        current
+    )
+    // 服务端随后持久化 out3 而对应 SSE 丢失：GET 的库读取发生在持久化之后，
+    // 响应携带的其实是较新的 out3——整行守卫仍按偏离无条件丢弃（#1299）。
+    mockApi.mockResolvedValueOnce({
+      message: recordOf(
+        toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out3' })
+      ),
+    })
+    resolveFetch({
+      message: recordOf(
+        toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out3' })
+      ),
+    })
+    // 丢弃后补一次收口点读：第二次 GET 读得 out3，本地未再偏离即落地。
+    // 无修复时只有这一次 GET、界面永停中间态 out2——本断言即红
+    //（mutation：摘掉收口点读即红，已自检）。
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() =>
+      expect(state.messages[0]).toMatchObject({
+        content: { status: 'in_progress', rawOutput: 'out3' },
+      })
+    )
+    // 收口点读正常落地后不再续挂第三次（有界）。
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mockApi).toHaveBeenCalledTimes(2)
+  })
+
+  it('收口点读在途期间本地再被 SSE 改写：再次冲突丢弃但不续挂（有界），本地保留最新 SSE 内容', async () => {
+    const { deps, state } = makeDeps([textMessage('m1', 1, 'a')])
+    const resolvers: ((value: unknown) => void)[] = []
+    mockApi.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvers.push(resolve)
+        }) as ReturnType<typeof api>
+    )
+    await calibrateWithRowRefetch(deps)
+    await vi.waitFor(() => expect(resolvers).toHaveLength(1))
+    // 持续流式：第一次点读在途期间本地推进到 ab。
+    deps.setMessages(
+      (current) =>
+        upsertMessage(current, { id: 'm1', content: { text: 'ab' } }) ?? current
+    )
+    // 旧快照 a 被整行守卫丢弃，挂出唯一一次收口点读。
+    resolvers[0]({ message: recordOf(textMessage('m1', 1, 'a')) })
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2))
+    // 收口点读在途期间又推进到 abc：再次偏离 → 丢弃；不再续挂第三次
+    //（mutation：递归标记失效会点火第三次点读——本断言即红）。
+    deps.setMessages(
+      (current) =>
+        upsertMessage(current, { id: 'm1', content: { text: 'abc' } }) ??
+        current
+    )
+    resolvers[1]({ message: recordOf(textMessage('m1', 1, 'ab')) })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(resolvers).toHaveLength(2)
+    expect(state.messages[0]).toMatchObject({ content: { text: 'abc' } })
+  })
+})
+
 describe('missed 帧点读瞬时失败的有界重试（#1289）', () => {
   beforeEach(() => {
     vi.useFakeTimers()

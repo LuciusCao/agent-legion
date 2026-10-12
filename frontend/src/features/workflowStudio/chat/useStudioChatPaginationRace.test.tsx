@@ -382,6 +382,80 @@ describe('会话选择代次与锁持有者守卫（#1237 codex P2 族）', () =
     expect(result.current.hasMoreHistory).toBe(false)
   })
 
+  it('A 的分页在途时切到 B：A 迟到的失败不挤掉 B 已挂好的待定重试（#1304）', async () => {
+    const rejecters: ((reason: unknown) => void)[] = []
+    mockApi.fetchStudioChatHistoryPage.mockImplementation(
+      () =>
+        new Promise<HistoryPage>((_resolve, reject) => {
+          rejecters.push(reject)
+        })
+    )
+    const { result } = await renderS1()
+
+    // s1 的分页请求挂起（在途），期间切到 s2：切换复位锁，允许 s2 发起请求。
+    act(() => {
+      void result.current.loadOlderHistory()
+    })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        101
+      )
+    )
+    await act(async () => {
+      await result.current.selectSession('s2')
+    })
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['n500'])
+    )
+
+    // fake timers 必须先于失败的 load 开启（同 #1291 用例的复验 finding 2）。
+    vi.useFakeTimers()
+    try {
+      // s2 的补拉先失败：挂好 2s 重试（闭包游标 500）。
+      act(() => {
+        void result.current.loadOlderHistory()
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(2)
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenLastCalledWith(
+        'ws1',
+        's2',
+        500
+      )
+      await act(async () => {
+        rejecters[1](new Error('s2 down'))
+      })
+
+      // s1 的旧请求随后才失败：无修复时其无条件 clearTimeout 取消 s2 的
+      // 计时器，重挂的定时器捕获 s1 游标 101——点火守卫被 s2 当前游标 500
+      // 挡掉，s2 在未溢出视口永久停在部分历史。
+      await act(async () => {
+        rejecters[0](new Error('s1 late down'))
+      })
+      expect(result.current.messages.map((m) => m.id)).toEqual(['n500'])
+
+      // 到点：s2 的待定重试必须照常点火（信号：第三次调用以游标 500 发起；
+      // 无修复时计时器已被取消/替换，本断言即红——mutation 自检过）。
+      mockApi.fetchStudioChatHistoryPage.mockResolvedValue({
+        messages: [textMessage('n400', 400, 's2 older')],
+        hasMore: false,
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000)
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(3)
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenLastCalledWith(
+        'ws1',
+        's2',
+        500
+      )
+      expect(result.current.messages[0]?.id).toBe('n400')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('startSession：workspace 往返后早先创建的 finally 不释放新一轮在途创建的 starting（#1237 codex P2-2 族）', async () => {
     mockApi.fetchStudioChatSessions.mockImplementation((ws: string) =>
       Promise.resolve(ws === 'ws1' ? [sessionRecord()] : [])

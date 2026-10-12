@@ -18,7 +18,7 @@ import type { ChatMessage } from './studioChatMessages'
  * 持有者释放）；hasMore=false 闩锁到顶终止；
  * 失败不推进游标也不闩锁 hasMore——除滚动重触发外另带一次性延迟重试
  * （#1270：未溢出态没有滚动事件可再触发；重试自身失败不续期；窗口内
- * 再次失败重新武装，#1296）。 */
+ * 再次失败重新武装，#1296；迟到失败的清除/重挂受会话代次守卫，#1304）。 */
 export function useStudioChatHistory({
   workspaceId,
   activeSessionId,
@@ -66,19 +66,19 @@ export function useStudioChatHistory({
       loadingRef.current = token
       const sessionId = activeSessionId
       const generation = sessionGenerationRef.current
+      // 跨会话竞态（refillMessages 的守卫同模式，#1237 codex P2-1 升级为
+      // 会话 + 选择代次双检）：拉取在途时切换了会话——包括 A→B→A 重新选中
+      // 同一会话——早先代次的旧页不得合入新列表、不得闩锁 hasMore（否则
+      // 重新进入的首屏窗口覆盖旧页后永远无法继续分页）、游标也不推进。
+      const current = () =>
+        activeSessionIdRef.current === sessionId &&
+        sessionGenerationRef.current === generation
       try {
         const page = await fetchStudioChatHistoryPage(
           workspaceId,
           sessionId,
           oldest
         )
-        // 跨会话竞态（refillMessages 的守卫同模式，#1237 codex P2-1 升级为
-        // 会话 + 选择代次双检）：拉取在途时切换了会话——包括 A→B→A 重新选中
-        // 同一会话——早先代次的旧页不得合入新列表、不得闩锁 hasMore（否则
-        // 重新进入的首屏窗口覆盖旧页后永远无法继续分页）、游标也不推进。
-        const current = () =>
-          activeSessionIdRef.current === sessionId &&
-          sessionGenerationRef.current === generation
         if (!current()) return false
         setMessages((currentMessages) =>
           current()
@@ -100,8 +100,11 @@ export function useStudioChatHistory({
         // 推进，点火守卫会把第二次失败的一次性重试吞掉（会话静默停在部分
         // 历史）；重挂让守卫比对最新一次失败的游标。失败之间至少隔一次
         // 请求往返，重挂不构成空转。
-        clearTimeout(retryTimerRef.current ?? undefined)
-        if (!isRetry && hasMoreRef.current)
+        // #1304：清除/重挂先过会话代次守卫——A 的请求在途时切到 B，A 迟到
+        // 的失败若无条件 clearTimeout 会取消 B 已挂好的重试并换成捕获 A
+        // 游标的定时器（点火时被 B 的当前游标挡掉），B 永久停在部分历史。
+        if (current()) clearTimeout(retryTimerRef.current ?? undefined)
+        if (current() && !isRetry && hasMoreRef.current)
           retryTimerRef.current = setTimeout(() => {
             retryTimerRef.current = null
             // #1291：游标已推进 = 前台自然加载已成功并承担了重试职责——不再
