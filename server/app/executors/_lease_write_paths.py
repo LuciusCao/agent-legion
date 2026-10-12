@@ -109,14 +109,12 @@ def finish(
     _mark_result_stage(stage_timer, "lease_write")
 
     # Parse events.jsonl outside the main write transaction; the
-    # capture helper opens its own short write tx only for the persist.
-    # The helper still expects a caller-provided connection (its own
-    # migration is Task 3), so hand it a fresh one now that the commit
-    # has landed. A stale-generation finish (#759 review P2) settles the
-    # lease/history rows but the shared run_dir path may already belong
-    # to the NEW generation's run — token capture would misattribute and
-    # PI compression could truncate the new run's events.jsonl, so the
-    # events family is skipped on a stale verdict.
+    # capture helper orchestrates facade read → parse → persist with
+    # sequential checkouts (#1239). A stale-generation finish (#759 review
+    # P2) settles the lease/history rows but the shared run_dir path may
+    # already belong to the NEW generation's run — token capture would
+    # misattribute and PI compression could truncate the new run's
+    # events.jsonl, so the events family is skipped on a stale verdict.
     events_ran = result_flag and not generation_stale and result.status in ("completed", "failed")
     if events_ran:
         finish_events_post_processing(repo, lease_id, result)
@@ -135,17 +133,21 @@ def finish_events_post_processing(
 
     Completed/failed only (both finish paths' family gate — the direct
     path and the batched arm's post-commit callback); the data_dir guard
-    keeps the exact defensive shape. Parse events outside the main write
-    transaction; the capture helper opens its own short tx for the persist.
+    keeps the exact defensive shape. The capture orchestrates facade
+    read → parse → persist with sequential checkouts (#1239) — this
+    caller must not hold a connection across it.
     """
-    from server.app.db.transaction import read_connection
+    from server.app.jobs import JobQueries
     from server.app.services.token_usage_lease import capture_token_usage_after_lease_finish
     from server.app.storage_paths import resolve_data_path
     from shared.pi_events import compress_pi_events
 
     if repo.data_dir is not None:
-        with read_connection(repo.path) as read_conn:
-            capture_token_usage_after_lease_finish(read_conn, lease_id, repo.data_dir)
+        # Production always wires the facade; the legacy bare-DSN repo
+        # construction (tests) gets an ephemeral one — jobs_dir is unused
+        # by the capture methods.
+        job_db = repo.job_db or JobQueries(repo.path, repo.data_dir / "jobs")
+        capture_token_usage_after_lease_finish(job_db, lease_id, repo.data_dir)
         if result.run_dir:
             run_dir = resolve_data_path(result.run_dir, repo.data_dir, allow_missing=True)
             compress_pi_events(run_dir / "events.jsonl")

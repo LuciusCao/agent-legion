@@ -672,12 +672,15 @@ def test_queue_alert_none_when_executions_running_or_no_workers() -> None:
 def test_blocked_signal_written_by_empty_claim_diagnostics() -> None:
     import json as _json
 
-    from server.app.agent_broker.empty_diagnostics import log_blocked_queue
+    from server.app.agent_broker.empty_diagnostics import log_blocked_queue, read_queue_head
 
     _seed_workspace_job()
     _insert_execution("ex-head", "queued")
+    # 顺序两次 checkout（#1239）：队列头采样骑读连接，信号落库在
+    # 读连接释放后走自己的写事务，不再嵌套。
     with read_connection(TEST_DATABASE_URL) as conn:
-        log_blocked_queue(TEST_DATABASE_URL, conn, {"model_mismatch": 3})
+        head = read_queue_head(conn)
+    log_blocked_queue(TEST_DATABASE_URL, {"model_mismatch": 3}, head)
 
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
