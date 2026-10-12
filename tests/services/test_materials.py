@@ -11,6 +11,7 @@ import pytest
 from server.app.db.connection import connect_database
 from server.app.services.job_errors import ConflictError, NotFoundError
 from server.app.services.materials import (
+    InvalidMaterialContentHashError,
     InvalidMaterialFilenameError,
     MaterialInUseError,
     MaterialsService,
@@ -61,7 +62,8 @@ def _presign_ready(service: MaterialsService, storage: FakeStorage, payload: byt
 
 
 def test_presign_creates_uploading_row_and_url(service, storage) -> None:
-    result = service.presign(WORKSPACE_ID, filename="a.txt", size_bytes=10, content_hash="hash-a")
+    digest = _sha256(b"a")
+    result = service.presign(WORKSPACE_ID, filename="a.txt", size_bytes=10, content_hash=digest)
 
     material = result["material"]
     assert material["status"] == "uploading"
@@ -70,7 +72,7 @@ def test_presign_creates_uploading_row_and_url(service, storage) -> None:
     assert result["deduplicated"] is False
     # Storage key layout: {workspace_id}/{content_hash}/{filename}.
     (presigned_key, expiry) = storage.presigned[0]
-    assert presigned_key == f"{WORKSPACE_ID}/hash-a/a.txt"
+    assert presigned_key == f"{WORKSPACE_ID}/{digest}/a.txt"
     assert expiry == 3600
 
 
@@ -100,12 +102,13 @@ def test_presign_dedups_ready_material_with_same_hash(service, storage) -> None:
 
 
 def test_presign_resets_failed_row_for_retry(service, storage) -> None:
-    result = service.presign(WORKSPACE_ID, filename="c.txt", size_bytes=5, content_hash="hash-c")
+    digest = _sha256(b"c")
+    result = service.presign(WORKSPACE_ID, filename="c.txt", size_bytes=5, content_hash=digest)
     with pytest.raises(MaterialVerificationError):
         service.complete(WORKSPACE_ID, result["material"]["id"])
     assert service.get(WORKSPACE_ID, result["material"]["id"])["status"] == "failed"
 
-    retry = service.presign(WORKSPACE_ID, filename="c.txt", size_bytes=5, content_hash="hash-c")
+    retry = service.presign(WORKSPACE_ID, filename="c.txt", size_bytes=5, content_hash=digest)
 
     assert retry["material"]["id"] == result["material"]["id"]
     assert retry["material"]["status"] == "uploading"
@@ -165,14 +168,93 @@ def test_presign_rejects_control_characters(service, storage, filename) -> None:
     assert service.list(WORKSPACE_ID, limit=10, offset=0)["total"] == 0
 
 
+@pytest.mark.parametrize(
+    "content_hash",
+    ["../other", "a/b", "nothex", "g" * 64, "A" * 64, "a" * 63, "a" * 65, ".."],
+)
+def test_presign_rejects_invalid_content_hash(service, storage, content_hash) -> None:
+    """#1267 codex P1：content_hash 同样拼进 storage_key，非空时必须是 64 位
+    小写 sha256 hex——否则 '../other' 会签出 {ws}/../other/file.txt 的 key。"""
+    with pytest.raises(InvalidMaterialContentHashError, match="sha256"):
+        service.presign(WORKSPACE_ID, filename="ok.txt", size_bytes=1, content_hash=content_hash)
+
+    assert storage.presigned == []
+    assert service.list(WORKSPACE_ID, limit=10, offset=0)["total"] == 0
+
+
+def _insert_material_row(
+    job_db, *, material_id: str, content_hash: str, filename: str, storage_key: str
+) -> None:
+    """直接落一条材料行，模拟校验收紧（#1119/#1267）前入库的 legacy 行。"""
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into materials(id, workspace_id, content_hash, filename, content_type,"
+            " size_bytes, storage_key, status, created_by)"
+            " values (%s, %s, %s, %s, 'text/plain', 1, %s, 'failed', 'user-1')",
+            (material_id, WORKSPACE_ID, content_hash, filename, storage_key),
+        )
+
+
+def _storage_key_of(job_db, material_id: str) -> str:
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select storage_key from materials where id=%s", (material_id,)
+        ).fetchone()
+    assert row is not None
+    return str(row["storage_key"])
+
+
+def test_presign_retry_rebuilds_invalid_legacy_key(service, storage, job_db) -> None:
+    """#1267 codex P2：收紧前入库的行可能带着非法 key（以 / 结尾等）；用合法
+    新文件名重试时必须按当前字段重建 key，不能把旧 key 再次签发。"""
+    digest = _sha256(b"legacy")
+    _insert_material_row(
+        job_db,
+        material_id="mat-legacy",
+        content_hash=digest,
+        filename="folder/",
+        storage_key=f"{WORKSPACE_ID}/{digest}/folder/",
+    )
+
+    retry = service.presign(WORKSPACE_ID, filename="ok.txt", size_bytes=1, content_hash=digest)
+
+    assert retry["material"]["id"] == "mat-legacy"
+    assert retry["material"]["status"] == "uploading"
+    (presigned_key, _) = storage.presigned[0]
+    assert presigned_key == f"{WORKSPACE_ID}/{digest}/ok.txt"
+    assert _storage_key_of(job_db, "mat-legacy") == presigned_key
+
+
+def test_presign_retry_keeps_valid_legacy_key(service, storage, job_db) -> None:
+    """重试改名但旧 key 合法时保持既有行为：复用原 key，只更新展示名。"""
+    digest = _sha256(b"legacy-ok")
+    legacy_key = f"{WORKSPACE_ID}/{digest}/old.txt"
+    _insert_material_row(
+        job_db,
+        material_id="mat-legacy-ok",
+        content_hash=digest,
+        filename="old.txt",
+        storage_key=legacy_key,
+    )
+
+    retry = service.presign(WORKSPACE_ID, filename="new.txt", size_bytes=1, content_hash=digest)
+
+    assert retry["material"]["id"] == "mat-legacy-ok"
+    (presigned_key, _) = storage.presigned[0]
+    assert presigned_key == legacy_key
+    assert _storage_key_of(job_db, "mat-legacy-ok") == legacy_key
+    assert retry["material"]["filename"] == "new.txt"
+
+
 def test_presign_accepts_nested_relative_path(service, storage) -> None:
     """中间带 / 的相对路径合法：材料 key 本就是多段路径，只禁目录形态。"""
+    digest = _sha256(b"nested")
     result = service.presign(
-        WORKSPACE_ID, filename="dir/sub/file.txt", size_bytes=1, content_hash="hash-nested"
+        WORKSPACE_ID, filename="dir/sub/file.txt", size_bytes=1, content_hash=digest
     )
 
     (presigned_key, _) = storage.presigned[0]
-    assert presigned_key == f"{WORKSPACE_ID}/hash-nested/dir/sub/file.txt"
+    assert presigned_key == f"{WORKSPACE_ID}/{digest}/dir/sub/file.txt"
     assert result["material"]["filename"] == "dir/sub/file.txt"
 
 

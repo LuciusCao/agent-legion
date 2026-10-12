@@ -106,6 +106,14 @@ def test_presign_rejects_directory_like_filename_with_422(client, storage) -> No
         )
         assert response.status_code == 422, response.text
 
+    # #1267 codex P1：content_hash 同样进 storage_key，非 sha256 hex 直接 422。
+    response = client.post(
+        f"/api/workspaces/{workspace_id}/materials/presign",
+        json={"filename": "ok.txt", "size_bytes": 1, "content_hash": "../other"},
+    )
+    assert response.status_code == 422, response.text
+    assert "sha256" in response.json()["detail"]
+
     assert client.get(f"/api/workspaces/{workspace_id}/materials").json()["total"] == 0
 
 

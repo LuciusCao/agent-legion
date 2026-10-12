@@ -22,8 +22,24 @@ from server.app.services.job_errors import (
     JobServiceError,
     NotFoundError,
 )
+from server.app.services.material_key_validation import (
+    InvalidMaterialContentHashError,
+    InvalidMaterialFilenameError,
+    invalid_material_filename_reason,
+    validate_material_content_hash,
+    validate_material_filename,
+)
 from server.app.services.material_ttl import mark_ready
 from server.app.storage import ObjectStorage
+
+__all__ = [
+    "InvalidMaterialContentHashError",
+    "InvalidMaterialFilenameError",
+    "MaterialInUseError",
+    "MaterialStorageUnavailableError",
+    "MaterialVerificationError",
+    "MaterialsService",
+]
 
 _PRESIGN_EXPIRY_SECONDS = 3600
 _HASH_CHUNK_BYTES = 1024 * 1024
@@ -35,53 +51,12 @@ class MaterialStorageUnavailableError(JobServiceError):
     """Object storage is not configured on this instance (routes map to 503)."""
 
 
-class InvalidMaterialFilenameError(JobServiceError):
-    """Filename cannot be used in an object key (routes map to 422, #1119)."""
-
-
 class MaterialVerificationError(JobServiceError):
     """Stored object does not match the declared size/hash (routes map to 422)."""
 
 
 class MaterialInUseError(JobServiceError):
     """Material is still referenced by a job input (routes map to 409)."""
-
-
-def _validate_filename(filename: str) -> None:
-    """Reject filenames that cannot round-trip as an object key (#1119).
-
-    The material key is ``{workspace_id}/{hash}/{filename}``: a key ending in
-    ``/`` is stored by SeaweedFS as a directory (its bytes are dropped) and
-    ``aws s3 sync`` cannot place it on a filesystem; ``.``/``..`` and empty
-    segments normalize away on download (``a//b`` and ``a/b`` land on the same
-    file and clobber each other in a backup); backslashes are re-interpreted
-    as separators by Windows-shaped consumers; control characters (newline)
-    break the backup runbook's line-based marker listing. Same discipline as
-    ``valid_artifact_name`` (job_artifact_objects), loosened only to allow
-    non-empty interior ``/`` segments (material names are multi-segment
-    relative paths, not single segments), plus the control-character ban
-    adopted from ``validate_member_path`` (material_bundles).
-    """
-    if filename.endswith("/"):
-        raise InvalidMaterialFilenameError(
-            f"filename must not end with '/': {filename!r} — object keys ending "
-            "in '/' are stored as directories and cannot be downloaded"
-        )
-    if "\\" in filename:
-        raise InvalidMaterialFilenameError(f"filename must not contain backslashes: {filename!r}")
-    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in filename):
-        raise InvalidMaterialFilenameError(
-            f"filename must not contain control characters: {filename!r}"
-        )
-    segments = filename.split("/")
-    if any(segment in {".", ".."} for segment in segments):
-        raise InvalidMaterialFilenameError(
-            f"filename must not contain '.' or '..' path segments: {filename!r}"
-        )
-    if not all(segments):
-        raise InvalidMaterialFilenameError(
-            f"filename must not contain empty path segments: {filename!r}"
-        )
 
 
 def _record(row: dict[str, Any]) -> dict[str, Any]:
@@ -148,9 +123,11 @@ class MaterialsService:
         (upload dedup, no URL); a stale uploading/failed row with the same
         hash is reset to uploading so the upload can be retried.
         """
-        _validate_filename(filename)
-        storage = self._require_storage()
+        validate_material_filename(filename)
         content_hash = content_hash.strip()
+        if content_hash:
+            validate_material_content_hash(content_hash)
+        storage = self._require_storage()
         deduplicated = False
         with write_transaction(self._connect_source) as conn:
             row = None
@@ -199,13 +176,26 @@ class MaterialsService:
                 if str(row["status"]) == "ready":
                     deduplicated = True
                 else:
+                    # #1267 codex P2: rows written before the key validation
+                    # (#1119) may carry a storage_key the current rules reject;
+                    # re-issuing it would sign the bad key again. The row's
+                    # middle segments are safe by construction (workspace_id is
+                    # schema-v62 contract, the hash segment equals the validated
+                    # request hash), so only the filename tail needs the recheck;
+                    # an invalid tail rebuilds the key from the validated request
+                    # fields and the leftover old object is orphaned to the
+                    # bucket lifecycle rule.
+                    parts = storage_key.split("/", 2)
+                    if len(parts) != 3 or invalid_material_filename_reason(parts[2]) is not None:
+                        storage_key = f"{workspace_id}/{content_hash or material_id}/{filename}"
                     conn.execute(
                         """
                         update materials
-                        set filename=%s, content_type=%s, size_bytes=%s, status='uploading'
+                        set filename=%s, content_type=%s, size_bytes=%s, storage_key=%s,
+                          status='uploading'
                         where id=%s
                         """,
-                        (filename, content_type, size_bytes, material_id),
+                        (filename, content_type, size_bytes, storage_key, material_id),
                     )
         upload_url: str | None = None
         if not deduplicated:

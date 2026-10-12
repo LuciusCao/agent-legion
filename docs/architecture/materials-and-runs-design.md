@@ -358,6 +358,9 @@ SeaweedFS 存成目录（内容被丢弃），下载与备份落不了文件系�
 被归一化吃掉（`a//b` 与 `a/b` 落同一文件互相覆盖）；含换行的 key 会让备份清单的逐行表达
 判失败。纪律与产物名 `valid_artifact_name` 同源，放宽点只剩材料名允许中间的非空 `/` 段
 （多段相对路径），另按 bundle 成员路径 `validate_member_path` 补齐控制字符禁令。
+`content_hash` 非空时必须是 64 位小写 sha256 hex（422，#1267）——它同样拼进 key 且是
+dedup 身份，不限制格式会把 `../other` 之类值原样签进 key。重试复用收紧前入库的旧行时
+校验其 storage_key，非法则按当前请求字段重建（旧对象交 bucket lifecycle 回收）。
 
 SigV4 presigned PUT 无法约束 Content-Length，size/hash 一律由 complete 时
 服务端 HEAD + 流式校验强制（v1 实现为完整读自算 sha256，简单可靠；上传端
