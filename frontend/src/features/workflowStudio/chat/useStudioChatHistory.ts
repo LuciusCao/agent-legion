@@ -17,7 +17,8 @@ import type { ChatMessage } from './studioChatMessages'
  * 状态机：loadingRef 请求 token 防重入（加载中不重复拉，finally 只许
  * 持有者释放）；hasMore=false 闩锁到顶终止；
  * 失败不推进游标也不闩锁 hasMore——除滚动重触发外另带一次性延迟重试
- * （#1270：未溢出态没有滚动事件可再触发；重试自身失败不续期）。 */
+ * （#1270：未溢出态没有滚动事件可再触发；重试自身失败不续期；窗口内
+ * 再次失败重新武装，#1296）。 */
 export function useStudioChatHistory({
   workspaceId,
   activeSessionId,
@@ -41,8 +42,9 @@ export function useStudioChatHistory({
   const loadingRef = useRef<number | null>(null)
   const requestTokenRef = useRef(0)
   // 失败的一次性延迟重试（#1270）：未溢出态补拉失败后没有任何滚动事件可
-  // 再触发，会话会静默停在部分历史——失败后短延迟自动重试一次。重试计时器
-  // 经 loadRef 调最新 loadOlderHistory（声明时序上捕获不到后定义的回调）。
+  // 再触发，会话会静默停在部分历史——失败后短延迟自动重试一次，窗口内再次
+  // 失败重新武装（#1296）。重试计时器经 loadRef 调最新 loadOlderHistory
+  //（声明时序上捕获不到后定义的回调）。
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadRef = useRef<() => void>(() => undefined)
 
@@ -90,11 +92,17 @@ export function useStudioChatHistory({
         return true
       } catch {
         // 拉取失败不闩锁：游标未推进、hasMore 保持 true，下次滚到顶部重试。
-        // #1270：未溢出态没有「下次滚动」——短延迟自动重试一次；??= 保证只挂
-        // 一个待定重试，isRetry 使重试自身失败不再续期（不空转），之后等滚动
-        // /RO/新消息的自然触发。2s 为即时故障（抖动）与风暴防回退的折中。
+        // #1270：未溢出态没有「下次滚动」——短延迟自动重试一次；isRetry 使
+        // 重试自身失败不再续期（不空转），之后等滚动/RO/新消息的自然触发。
+        // 2s 为即时故障（抖动）与风暴防回退的折中。
+        // #1296：窗口内再次失败重新武装（clearTimeout + 重挂）——fail→
+        // success→fail 时若保留首次失败的定时器，其闭包游标已被前台成功
+        // 推进，点火守卫会把第二次失败的一次性重试吞掉（会话静默停在部分
+        // 历史）；重挂让守卫比对最新一次失败的游标。失败之间至少隔一次
+        // 请求往返，重挂不构成空转。
+        clearTimeout(retryTimerRef.current ?? undefined)
         if (!isRetry && hasMoreRef.current)
-          retryTimerRef.current ??= setTimeout(() => {
+          retryTimerRef.current = setTimeout(() => {
             retryTimerRef.current = null
             // #1291：游标已推进 = 前台自然加载已成功并承担了重试职责——不再
             // 重复拉取（等效于取消待定定时器；也覆盖 refill 等路径推进游标）。

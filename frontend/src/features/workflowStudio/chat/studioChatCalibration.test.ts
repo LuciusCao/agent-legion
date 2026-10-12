@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import type { QueryClient } from '@tanstack/react-query'
 import {
   calibrateWithRowRefetch,
   hasInFlightToolCall,
@@ -6,6 +7,7 @@ import {
   type RowRefetchDeps,
 } from './studioChatCalibration'
 import { handleMissedMessageFrame } from './studioChatMissedRefetch'
+import { handleSseMessageEvent } from './studioChatEvents'
 import { api } from '../../../api/core'
 import { upsertMessage, type ChatMessage } from './studioChatMessages'
 import type { StudioChatMessageRecord } from './studioChatApi'
@@ -26,13 +28,18 @@ function textMessage(id: string, seq: number, text: string): ChatMessage {
   }
 }
 
-function toolCallMessage(id: string, seq: number, status: string): ChatMessage {
+function toolCallMessage(
+  id: string,
+  seq: number,
+  status: string,
+  extraContent?: Record<string, unknown>
+): ChatMessage {
   return {
     id,
     session_id: 's1',
     kind: 'tool_call',
     role: 'agent',
-    content: { tool_call_id: id, status },
+    content: { tool_call_id: id, status, ...extraContent },
     seq,
     created_at: '2026-01-01T00:00:00Z',
   }
@@ -56,7 +63,7 @@ function statusMessage(id: string, seq: number, event: string): ChatMessage {
 
 function makeDeps(current: ChatMessage[]) {
   const state = { messages: current }
-  const deps: RowRefetchDeps & { messagesRef: { current: ChatMessage[] } } = {
+  const deps: RowRefetchDeps = {
     workspaceId: 'ws1',
     sessionId: 's1',
     sessionGenerationRef: { current: 1 },
@@ -329,6 +336,101 @@ describe('点读落地的新鲜度守卫（#1288）', () => {
     await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(2))
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(state2.messages[0]).toMatchObject({ content: { text: 'abcdef' } })
+  })
+})
+
+describe('点读落地的点火快照守卫（#1299）', () => {
+  it('GET 在途期间同 tool_call 收到非终态更新（status 均 in_progress）：旧点读快照不得覆盖较新本地字段', async () => {
+    const { deps, state } = makeDeps([
+      toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out1' }),
+    ])
+    let resolveFetch!: (value: unknown) => void
+    mockApi.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve
+      }) as ReturnType<typeof api>
+    )
+    await calibrateWithRowRefetch(deps)
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalled())
+    // GET 读库后、响应返回前：rawOutput 刷新的非终态 SSE 帧合入本地行——
+    // 终态比较判不出新旧（两侧 status 都是 in_progress），#1288 守卫放行。
+    deps.setMessages(
+      (current) =>
+        upsertMessage(current, { id: 'tc1', content: { rawOutput: 'out2' } }) ??
+        current
+    )
+    // 点读响应是 SSE 帧之前读库的旧快照（rawOutput 仍为 out1）。
+    resolveFetch({
+      message: recordOf(
+        toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out1' })
+      ),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // 本地行已偏离点火快照 = 在途期间被更新的 SSE 帧改写，旧点读结果丢弃；
+    // 无修复时 upsert 把 rawOutput 盖回 out1（若那是最后一帧界面永久回退）。
+    expect(state.messages[0]).toMatchObject({
+      content: { status: 'in_progress', rawOutput: 'out2' },
+    })
+  })
+
+  it('本地行在途期间未变：点读快照照常合入（守卫不误伤）', async () => {
+    const { deps, state } = makeDeps([
+      toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out1' }),
+    ])
+    mockApi.mockResolvedValueOnce({
+      message: recordOf(
+        toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out2' })
+      ),
+    })
+    await calibrateWithRowRefetch(deps)
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(state.messages[0]).toMatchObject({
+      content: { status: 'in_progress', rawOutput: 'out2' },
+    })
+  })
+})
+
+describe('terminal 实时到达当轮的校准截断（#1300）', () => {
+  it('calibrateWithRowRefetch scanBasis：截断按传入的合入快照计算', async () => {
+    const { deps } = makeDeps([toolCallMessage('tc1', 1, 'in_progress')])
+    const merged = upsertMessage(
+      deps.messagesRef.current,
+      statusMessage('st1', 2, 'turn_end')
+    )
+    await calibrateWithRowRefetch(deps, merged ?? undefined)
+    // 快照里 terminal 已在 tc1 之后：tc1 是刚终结 turn 的死行，不点读。
+    expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  it('handleSseMessageEvent：messagesRef 尚未合入刚到的 terminal 时，校准截断仍按合入后快照', async () => {
+    const before = [toolCallMessage('tc1', 1, 'in_progress')]
+    // React 被动效应才同步 messagesRef：事件当轮它仍是合入前的列表。
+    const laggingRef = { current: before }
+    let applied = before
+    const deps = {
+      workspaceId: 'ws1',
+      messagesRef: laggingRef,
+      queryClient: {
+        invalidateQueries: vi.fn(),
+      } as unknown as QueryClient,
+      setMessages: (updater: (current: ChatMessage[]) => ChatMessage[]) => {
+        applied = updater(applied)
+      },
+      setSession: vi.fn(),
+      refillMessages: vi.fn(async () => false),
+      fetchSession: vi.fn(),
+      activeSessionId: 's1',
+      sessionGenerationRef: { current: 1 },
+      missedRetryRef: { current: new Map<string, number>() },
+    }
+    handleSseMessageEvent(statusMessage('st1', 2, 'turn_end'), deps)
+    await vi.waitFor(() => expect(deps.refillMessages).toHaveBeenCalledWith(0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // terminal 的合入照常排队；刚终结 turn 的 tc1 是死行，不得点读——
+    // 无修复时 ids 快照来自滞后 ref（无 terminal），tc1 被误判在途点读（红）。
+    expect(applied.map((m) => m.id)).toEqual(['tc1', 'st1'])
+    expect(mockApi).not.toHaveBeenCalled()
   })
 })
 
