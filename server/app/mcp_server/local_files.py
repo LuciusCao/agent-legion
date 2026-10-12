@@ -13,6 +13,7 @@ import json
 import os
 import re
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -42,7 +43,7 @@ def compact_response(response: str) -> str:
     for record in records:
         if not isinstance(record, dict):
             continue
-        for key in ("code", "content"):
+        for key in ("code", "content", "html"):
             content = record.get(key)
             if isinstance(content, str):
                 data = record.pop(key).encode("utf-8")
@@ -181,11 +182,18 @@ async def prepare_files(
 
 
 async def load_code(
-    client: ToolClient, workspace_id: str, code: str | None, code_path: str | None
+    client: ToolClient,
+    workspace_id: str,
+    code: str | None,
+    code_path: str | None,
+    *,
+    param_names: tuple[str, str] = ("code", "code_path"),
+    max_bytes: int | None = None,
 ) -> str:
     if (code is None) == (code_path is None):
-        raise ValueError("Supply exactly one of code or code_path")
+        raise ValueError(f"Supply exactly one of {param_names[0]} or {param_names[1]}")
     if code is not None:
         return code
     await authorize(client, workspace_id)
-    return await anyio.to_thread.run_sync(read_text, workspace_id, str(code_path))
+    read = partial(read_text, workspace_id, str(code_path), max_bytes=max_bytes)
+    return await anyio.to_thread.run_sync(read)
