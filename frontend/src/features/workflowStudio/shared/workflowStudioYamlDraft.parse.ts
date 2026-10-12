@@ -115,3 +115,12 @@ export function parseWorkflowEdgeConditions(
     return []
   }
 }
+
+/** 渲染侧数组字段归一化（#1258 codex 四轮 P1）：inputs: foo（字符串）/
+ * outputs: {a: 1}（mapping）/ after: 5（数字）这类合法 YAML 异形在编辑
+ * 中途自动保存后可达；record/ghost 映射与编辑器直连 parse 的读路径都
+ * 假定数组（ItemList .map、formatLines .join），非数组按空数组归一、
+ * 元素字符串化——保「形状残缺不得渲染期抛异常」契约，不回退整份草稿。 */
+export function normalizeStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : []
+}

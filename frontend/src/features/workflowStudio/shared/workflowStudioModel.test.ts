@@ -215,6 +215,27 @@ describe('workflowStudioModel', () => {
     expect(ghostDraftNodeDetails(v2Yaml, 'intake')?.incoming).toEqual([])
   })
 
+  it('normalizes malformed node list fields instead of crashing (#1258 codex 四轮 P1)', () => {
+    // 与 record 映射同一归一化（normalizeStringList）：inputs: foo 等异形
+    // 不抛、按空数组呈现。
+    const yaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  intake:',
+      '    capability: intake',
+      '    inputs: foo',
+      '    outputs: {a: 1}',
+      '    after: 5',
+      '',
+    ].join('\n')
+    const details = ghostDraftNodeDetails(yaml, 'intake')
+    expect(details?.node.inputs).toEqual([])
+    expect(details?.node.outputs).toEqual([])
+    expect(details?.node.after).toEqual([])
+  })
+
   it('returns null ghost details for unknown or unparsable nodes', () => {
     const yaml = 'key: demo\nnodes:\n  intake:\n    capability: intake\n'
     expect(ghostDraftNodeDetails(yaml, 'missing')).toBeNull()

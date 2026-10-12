@@ -475,6 +475,36 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     expect(await screen.findByText('1 入 / 1 出')).toBeInTheDocument()
   })
 
+  it('renders without crashing when a draft node has malformed list fields (#1258 codex 四轮 P1)', async () => {
+    // codex 复现：语法合法的 inputs: foo（字符串）——草稿仍判为可渲染、
+    // ghost 详情被采用，WorkflowNodeDataEditor 的 formatLines 对字符串调
+    // .join() 崩溃。归一化后按空数组呈现，inspector 不炸、不回退。
+    const malformedYaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  intake:',
+      '    label: 读取知识点',
+      '    capability: intake',
+      '    after: [_start]',
+      '    inputs: foo',
+      '    outputs: {a: 1}',
+      'edges:',
+      '  - from: _start',
+      '    to: intake',
+      '',
+    ].join('\n')
+    renderInspector('intake', { definitionYaml: malformedYaml })
+
+    // 汇总计数即归一证据（异形 inputs/outputs 按空数组计，不是 3/undefined）。
+    expect(await screen.findByText('0 个产物')).toBeInTheDocument()
+    // 展开数据契约段：编辑区直连 parse 的读路径也不炸、按空数组呈现。
+    fireEvent.click(screen.getByText('数据契约'))
+    expect(await screen.findByLabelText('输入产物，每行一个')).toHaveValue('')
+    expect(screen.getByLabelText('输出产物，每行一个')).toHaveValue('')
+  })
+
   it('skips the prompt for an approval node that already has capability (#405 审核 P3)', async () => {
     // 手写 approval+capability 是合法瞬态——切出必须维持修复前的直通
     // 语义，不得被 prompt 拦下（cancel 会放弃合法切换）。

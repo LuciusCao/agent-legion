@@ -198,6 +198,32 @@ describe('workflowYamlToDefinitionRecord', () => {
     expect(workflowYamlToDefinitionRecord(v2Yaml)?.edges).toEqual([])
   })
 
+  it('normalizes malformed node list fields instead of crashing (#1258 codex 四轮 P1)', () => {
+    // inputs: foo（字符串）/ outputs: {a: 1}（mapping）/ after: 5（数字）：
+    // 合法 YAML、编辑中途自动保存可达。渲染侧契约是「形状残缺不得渲染期
+    // 抛异常」——画布 record 消费方（ItemList .map、itemTypeLabels 等）与
+    // 编辑器直连 parse 的读路径都假定数组，字段级异形在映射时归一为空
+    // 数组（不回退整份草稿，保住其余字段的草稿视图）。
+    const yaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  fetch:',
+      '    capability: fetch',
+      '    inputs: foo',
+      '    outputs: {a: 1}',
+      '    after: 5',
+      '',
+    ].join('\n')
+    const record = workflowYamlToDefinitionRecord(yaml)
+    expect(record).not.toBeNull()
+    const fetchNode = record?.nodes.find((node) => node.key === 'fetch')
+    expect(fetchNode?.inputs).toEqual([])
+    expect(fetchNode?.outputs).toEqual([])
+    expect(fetchNode?.after).toEqual([])
+  })
+
   it('maps all node, edge and metadata fields', () => {
     const record = workflowYamlToDefinitionRecord(FULL_YAML)
     expect(record).not.toBeNull()

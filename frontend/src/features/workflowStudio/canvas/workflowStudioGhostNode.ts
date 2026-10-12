@@ -4,6 +4,7 @@ import type { SelectedWorkflowNodeDetails } from '../shared/workflowStudioModel'
 import {
   parseWorkflowNode,
   parseWorkflowYaml,
+  normalizeStringList,
 } from '../shared/workflowStudioYamlDraft.parse'
 import { normalizeTextInput } from '../shared/workflowStudioYamlDraft.textInput'
 import { readDraftStartTypes } from '../shared/workflowStudioTextInputEditable'
@@ -46,16 +47,17 @@ export function ghostDraftNodeDetails(
     key: selectedNodeKey,
     label: parsed.label ?? selectedNodeKey,
     capability: parsed.capability ?? '',
-    after: parsed.after ?? [],
-    inputs: parsed.inputs ?? [],
-    outputs: parsed.outputs ?? [],
+    // 数组字段渲染期归一（#1258 codex 四轮 P1，与 record 映射同一 helper）。
+    after: normalizeStringList(parsed.after),
+    inputs: normalizeStringList(parsed.inputs),
+    outputs: normalizeStringList(parsed.outputs),
     // 显式类型还原（#284 + EXEC-APPROVAL-001）：start/approval 各自还原；
     // 其余节点还原 code|agent，遗留 `type: node` 与缺失一律按 code（与
     // 后端 loader 归一化一致）。
     ...(parsed.type === 'start'
       ? {
           node_type: 'start',
-          accepted_item_types: parsed.accepted_item_types ?? [],
+          accepted_item_types: normalizeStringList(parsed.accepted_item_types),
           text_input: textInput ?? null,
         }
       : {

@@ -4,6 +4,7 @@ import type {
 } from '../../../types'
 import {
   parseWorkflowYaml,
+  normalizeStringList,
   type WorkflowYamlNode,
   type WorkflowYamlObject,
 } from '../shared/workflowStudioYamlDraft.parse'
@@ -77,9 +78,11 @@ function mapNode(
     key,
     label: node.label ?? key,
     capability: node.capability ?? '',
-    after: node.after ?? [],
-    inputs: node.inputs ?? [],
-    outputs: node.outputs ?? [],
+    // 数组字段渲染期归一（#1258 codex 四轮 P1）：编辑中途的 inputs: foo
+    // 等异形按空数组呈现，消费方（ItemList/formatLines/拓扑徽标）不炸。
+    after: normalizeStringList(node.after),
+    inputs: normalizeStringList(node.inputs),
+    outputs: normalizeStringList(node.outputs),
     ...(node.terminal?.outcome
       ? { terminal: { outcome: node.terminal.outcome } }
       : {}),
@@ -88,7 +91,7 @@ function mapNode(
     ...(node.type === 'start'
       ? {
           node_type: 'start',
-          accepted_item_types: node.accepted_item_types ?? [],
+          accepted_item_types: normalizeStringList(node.accepted_item_types),
           text_input: normalizeTextInput(node.text_input) ?? null,
         }
       : {
