@@ -374,6 +374,7 @@
     "frontend/src/features/workflowStudio/canvas/useStudioDag.ts": 26,
     "frontend/src/features/workflowStudio/canvas/workflowStudioDag.ts": 43,
     "frontend/src/features/workflowStudio/canvas/workflowStudioDagChanges.ts": 62,
+    "frontend/src/features/workflowStudio/canvas/workflowStudioDraftEdges.ts": 59,
     "frontend/src/features/workflowStudio/canvas/workflowStudioEmptyState.ts": 34,
     "frontend/src/features/workflowStudio/canvas/workflowStudioExecutionWarnings.ts": 63,
     "frontend/src/features/workflowStudio/canvas/workflowStudioGhostNode.ts": 60,

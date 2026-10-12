@@ -45,6 +45,29 @@ const draftYaml = [
   '',
 ].join('\n')
 
+// 中游审批门（#405）：sanitize 切入 approval 已剥 capability，结构化 UI
+// 对 approval 又隐藏能力 Key 输入——切回 code/agent 只能经弹窗补。
+const approvalGateYaml = [
+  'key: demo',
+  'nodes:',
+  '  _start:',
+  '    type: start',
+  '  draft_gen:',
+  '    type: code',
+  '    label: 起草',
+  '    capability: draft_gen',
+  '    after: [_start]',
+  '  gate:',
+  '    type: approval',
+  '    label: 审批',
+  '    config: {rework_target: draft_gen, feedback_artifact: review.json}',
+  '    after: [draft_gen]',
+  'edges:',
+  '  - from: _start',
+  '    to: draft_gen',
+  '',
+].join('\n')
+
 function renderInspector(
   selectedNodeKey: string | null,
   options?: {
@@ -214,6 +237,300 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     await vi.waitFor(() =>
       expect(useUiStore.getState().toast?.message).toContain('可执行节点的入边')
     )
+  })
+
+  it('switches approval→code atomically via the capability prompt (#405)', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const promptSpy = vi
+      .spyOn(window, 'prompt')
+      .mockReturnValue('gate_cap' as unknown as string)
+    const setDefinitionYaml = vi.fn()
+    // 结构化 UI 对 approval 隐藏能力 Key 输入（loader 禁 capability）；
+    // 切回 code 必须经弹窗补 capability，一次提交原子落草稿。
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        selectedNodeKey="gate"
+        definitionYaml={approvalGateYaml}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'code' },
+    })
+
+    expect(promptSpy).toHaveBeenCalledWith(
+      expect.stringContaining('capability')
+    )
+    expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
+    const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
+    const node = (
+      yaml.load(nextYaml) as {
+        nodes?: Record<string, Record<string, unknown>>
+      }
+    ).nodes?.gate
+    // type 与 capability 同一次提交写入（无中间非法态）。
+    expect(node?.type).toBe('code')
+    expect(node?.capability).toBe('gate_cap')
+    // 审批专属 config 键随切换剥除。
+    expect(node).not.toHaveProperty('config')
+  })
+
+  it('keeps the draft untouched when the capability prompt is dismissed (#405)', async () => {
+    const promptSpy = vi
+      .spyOn(window, 'prompt')
+      .mockReturnValue(null as unknown as string)
+    const setDefinitionYaml = vi.fn()
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        selectedNodeKey="gate"
+        definitionYaml={approvalGateYaml}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'code' },
+    })
+
+    // 取消（或留空）即放弃本次切换：草稿不动、不触发破坏性确认。
+    expect(promptSpy).toHaveBeenCalled()
+    expect(setDefinitionYaml).not.toHaveBeenCalled()
+    expect(vi.spyOn(window, 'confirm')).not.toHaveBeenCalled()
+  })
+
+  it('skips the capability prompt when switching between executable types', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('x')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const setDefinitionYaml = vi.fn()
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        selectedNodeKey="intake"
+        definitionYaml={draftYaml}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    // code/agent 互切本就有 capability，弹窗不该出现（直通路径不变）。
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'agent' },
+    })
+
+    expect(promptSpy).not.toHaveBeenCalled()
+    expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
+  })
+
+  it('inspector shows the DRAFT type after approval→code switch (#606 codex P2)', async () => {
+    // 草稿优先：切型后 selector/sections 反映草稿类型（ghost 链形态，
+    // workflow=null）。
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const setDefinitionYaml = vi.fn()
+    const draftSwitched = approvalGateYaml.replace(
+      '    type: approval',
+      '    type: code\n    capability: gate_cap'
+    )
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        selectedNodeKey="gate"
+        definitionYaml={draftSwitched}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    const selector = await screen.findByLabelText('节点类型')
+    expect(selector).toHaveValue('code')
+  })
+
+  it('inspector shows the DRAFT type after a switch on a published workflow (#606 codex P2)', async () => {
+    // 直击形态：已发布 workflow 的 approval 节点，草稿里已切成
+    // code——header/选择器必须显示 code（草稿优先），否则受控选择器
+    // 停在 approval、用户无法再选择 approval 来撤销切换。
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const setDefinitionYaml = vi.fn()
+    const draftSwitched = approvalGateYaml.replace(
+      '    type: approval',
+      '    type: code\n    capability: gate_cap'
+    )
+    render(
+      <WorkflowNodeInspector
+        workflow={
+          {
+            key: 'demo',
+            label: 'Demo',
+            nodes: [
+              {
+                key: '_start',
+                node_type: 'start',
+                label: 'Start',
+                inputs: [],
+                outputs: [],
+              },
+              {
+                key: 'gate',
+                node_type: 'approval',
+                label: '审批',
+                inputs: [],
+                outputs: [],
+              },
+            ],
+            edges: [],
+          } as never
+        }
+        selectedNodeKey="gate"
+        definitionYaml={draftSwitched}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    const selector = await screen.findByLabelText('节点类型')
+    expect(selector).toHaveValue('code')
+  })
+
+  it('falls back to the published baseline when the draft is shape-invalid (#405 codex P1)', async () => {
+    // 语法合法但形状无效（edges 是 mapping 而非数组）：画布按
+    // workflowYamlToDefinitionRecord 判定回退已发布 workflow；inspector
+    // 草稿优先必须同一判定——否则 ghost 解析对 edges 直接 .filter()，
+    // 渲染期抛异常。草稿里 gate 已切成 code，基线是 approval：回退成功
+    // 的可见证据就是选择器显示基线类型 approval（而非草稿的 code）。
+    const shapeBrokenDraft = approvalGateYaml
+      .replace('    type: approval', '    type: code\n    capability: gate_cap')
+      .replace(
+        'edges:\n  - from: _start\n    to: draft_gen\n',
+        'edges:\n  notalist: true\n'
+      )
+    render(
+      <WorkflowNodeInspector
+        workflow={
+          {
+            key: 'demo',
+            label: 'Demo',
+            nodes: [
+              {
+                key: '_start',
+                node_type: 'start',
+                label: 'Start',
+                inputs: [],
+                outputs: [],
+              },
+              {
+                key: 'gate',
+                node_type: 'approval',
+                label: '审批',
+                inputs: [],
+                outputs: [],
+              },
+            ],
+            edges: [],
+          } as never
+        }
+        selectedNodeKey="gate"
+        definitionYaml={shapeBrokenDraft}
+        setDefinitionYaml={() => {}}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    // 不炸（渲染完成）且与画布一致回退到基线详情。
+    const selector = await screen.findByLabelText('节点类型')
+    expect(selector).toHaveValue('approval')
+  })
+
+  it('shows v1 draft dependencies materialized from after (#1258 codex P2)', async () => {
+    // v1 草稿（无 schema_version、无顶层 edges）：依赖只存于节点
+    // after——inspector 草稿详情必须与 loader._load_edges 物化同构，
+    // 否则依赖关系段从正确关系退化为 0 入/0 出。
+    const v1Yaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  fetch:',
+      '    label: 抓取',
+      '    capability: fetch',
+      '    after: [_start]',
+      '  review:',
+      '    label: 评审',
+      '    capability: review',
+      '    after: [fetch]',
+      '',
+    ].join('\n')
+    renderInspector('fetch', { definitionYaml: v1Yaml })
+
+    // fetch：入 _start、出 review（均为 after 物化边）。
+    expect(await screen.findByText('1 入 / 1 出')).toBeInTheDocument()
+  })
+
+  it('renders without crashing when a draft node has malformed list fields (#1258 codex 四轮 P1)', async () => {
+    // codex 复现：语法合法的 inputs: foo（字符串）——草稿仍判为可渲染、
+    // ghost 详情被采用，WorkflowNodeDataEditor 的 formatLines 对字符串调
+    // .join() 崩溃。归一化后按空数组呈现，inspector 不炸、不回退。
+    const malformedYaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  intake:',
+      '    label: 读取知识点',
+      '    capability: intake',
+      '    after: [_start]',
+      '    inputs: foo',
+      '    outputs: {a: 1}',
+      'edges:',
+      '  - from: _start',
+      '    to: intake',
+      '',
+    ].join('\n')
+    renderInspector('intake', { definitionYaml: malformedYaml })
+
+    // 汇总计数即归一证据（异形 inputs/outputs 按空数组计，不是 3/undefined）。
+    expect(await screen.findByText('0 个产物')).toBeInTheDocument()
+    // 展开数据契约段：编辑区直连 parse 的读路径也不炸、按空数组呈现。
+    fireEvent.click(screen.getByText('数据契约'))
+    expect(await screen.findByLabelText('输入产物，每行一个')).toHaveValue('')
+    expect(screen.getByLabelText('输出产物，每行一个')).toHaveValue('')
+  })
+
+  it('skips the prompt for an approval node that already has capability (#405 审核 P3)', async () => {
+    // 手写 approval+capability 是合法瞬态——切出必须维持修复前的直通
+    // 语义，不得被 prompt 拦下（cancel 会放弃合法切换）。
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('x')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const setDefinitionYaml = vi.fn()
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        selectedNodeKey="gate"
+        definitionYaml={approvalGateYaml.replace(
+          '    config: {rework_target: draft_gen, feedback_artifact: review.json}',
+          '    config: {rework_target: draft_gen, feedback_artifact: review.json}\n    capability: gate_cap'
+        )}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'code' },
+    })
+
+    expect(promptSpy).not.toHaveBeenCalled()
+    expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
   })
 
   it('renders no agent editor on a code node (#392 regression)', async () => {

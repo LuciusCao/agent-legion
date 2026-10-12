@@ -112,15 +112,15 @@ describe('patchWorkflowNodeType', () => {
     // approval 节点按契约无 capability；loader 对 code/agent 要求非空。
     // 前置校验必须拦下，否则草稿落入「type 已改、capability 缺失」的
     // 不可发布半应用态（AGENTS.md L88）。被拦截时草稿原样保留——审批
-    // config 键的剥除因此只发生在「先补 capability 再切」的路径上。
+    // config 键的剥除因此只发生在「补 capability 再切」的路径上。
     expect(() => patchWorkflowNodeType(midDagYaml, 'gate', 'code')).toThrow(
       WorkflowNodeTypeSwitchError
     )
     expect(() => patchWorkflowNodeType(midDagYaml, 'gate', 'agent')).toThrow(
       WorkflowNodeTypeSwitchError
     )
-    // 用户在「基本设置」补齐 capability 后切换成功，审批专属 config 键
-    // 随切换剥除（空 config 整体删除）。
+    // 手写「approval + capability」的中间态 YAML 仍是合法直通路径
+    // （已有 capability 优先于补能力通道）。
     const withCapability = midDagYaml.replace(
       '    type: approval',
       '    type: approval\n    capability: gate_cap'
@@ -132,6 +132,34 @@ describe('patchWorkflowNodeType', () => {
     expect(node).not.toHaveProperty('config')
   })
 
+  it('switches approval→code/agent atomically via the capability channel (#405)', () => {
+    // 结构化 UI 对 approval 隐藏能力 Key 输入，「先在基本设置补再切」
+    // 不可达；切换弹窗收集的 capability 随本次 patch 原子写入——type
+    // 与 capability 一次提交，无中间非法态。
+    const out = patchWorkflowNodeType(midDagYaml, 'gate', 'code', 'gate_cap')
+    const node = parseNodes(out).nodes?.gate
+    expect(node?.type).toBe('code')
+    expect(node?.capability).toBe('gate_cap')
+    // 审批专属 config 键仍随切换剥除（空 config 整体删除）。
+    expect(node).not.toHaveProperty('config')
+    const toAgent = patchWorkflowNodeType(
+      midDagYaml,
+      'gate',
+      'agent',
+      'gate_cap'
+    )
+    const agentNode = parseNodes(toAgent).nodes?.gate
+    expect(agentNode?.type).toBe('agent')
+    expect(agentNode?.capability).toBe('gate_cap')
+    // #935 兜底：approval→agent 经通道后节点仍须自含 execution.runtime
+    // （无 workflow 顶层默认时写 velites），保持原位在 sanitize 之后。
+    expect(agentNode?.execution).toEqual({ runtime: 'velites' })
+    // 空白通道等同未提供（弹窗留空不应绕过前置校验）。
+    expect(() =>
+      patchWorkflowNodeType(midDagYaml, 'gate', 'code', '   ')
+    ).toThrow(WorkflowNodeTypeSwitchError)
+  })
+
   it('refuses →approval without an executable upstream (validate_approval_edges mirror)', () => {
     // 仅 start 驱动的根节点切 approval：start 的合成边不算可执行上游。
     expect(() => patchWorkflowNodeType(baseYaml, 'intake', 'approval')).toThrow(
@@ -141,7 +169,8 @@ describe('patchWorkflowNodeType', () => {
 
   it('accepts →approval when the upstream is declared via edges only (v2 yaml)', () => {
     // 手写 v2 YAML 用 edges 声明依赖、after 只是 echo（甚至缺省）——判定源
-    // 必须是 after ∪ edges，与 validate_approval_edges 的物化 edges 同构。
+    // 必须是进入本节点的 edges（取 from 侧），与 validate_approval_edges
+    // 的物化 edges 同构。
     const edgesOnlyYaml = [
       'key: demo',
       'schema_version: 2',
@@ -178,6 +207,180 @@ describe('patchWorkflowNodeType', () => {
     expect(() =>
       patchWorkflowNodeType(startOnlyEdgesYaml, 'gate', 'approval')
     ).toThrow(WorkflowNodeTypeSwitchError)
+  })
+
+  it('rejects →approval when the draft edge does not enter this node (#405)', () => {
+    // #405：收集全图 edge.to 会把「别处存在一条非 start 边」误判为入边
+    // （判定退化为任意非 start 边即可通过）。入边判定必须约束
+    // edge.to === 当前节点、收集 edge.from；本用例里唯一的非 start 边
+    // （draft_gen → intake）不进入 gate，gate 没有可执行入边仍拦截。
+    const unrelatedEdgeYaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  draft_gen:',
+      '    type: code',
+      '    capability: draft_gen',
+      '    after: [_start]',
+      '  intake:',
+      '    type: code',
+      '    capability: intake',
+      '    after: [draft_gen]',
+      '  gate:',
+      '    type: code',
+      '    capability: gate_cap',
+      '    after: [_start]',
+      'edges:',
+      '  - {from: _start, to: draft_gen}',
+      '  - {from: draft_gen, to: intake}',
+      '',
+    ].join('\n')
+    expect(() =>
+      patchWorkflowNodeType(unrelatedEdgeYaml, 'gate', 'approval')
+    ).toThrow(WorkflowNodeTypeSwitchError)
+    // 对照：进入本节点的非 start 边才放行。
+    const incomingEdgeYaml = unrelatedEdgeYaml.replace(
+      '  - {from: draft_gen, to: intake}',
+      '  - {from: draft_gen, to: intake}\n  - {from: intake, to: gate}'
+    )
+    const out = patchWorkflowNodeType(incomingEdgeYaml, 'gate', 'approval')
+    expect(parseNodes(out).nodes?.gate?.type).toBe('approval')
+  })
+
+  it('v3+ counts only entering edges like v2 (#606 codex P2)', () => {
+    // loader 对 v2+ 一律 edges-only（物化只在 v1）；判定不得把 v3 的
+    // after 当入边。
+    const v3Yaml = [
+      'key: demo',
+      'schema_version: 3',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  draft_gen:',
+      '    type: code',
+      '    capability: draft_gen',
+      '  gate:',
+      '    type: code',
+      '    capability: gate_cap',
+      '    after: [draft_gen]',
+      'edges:',
+      '  - {from: _start, to: draft_gen}',
+      '',
+    ].join('\n')
+    expect(() => patchWorkflowNodeType(v3Yaml, 'gate', 'approval')).toThrow(
+      WorkflowNodeTypeSwitchError
+    )
+  })
+
+  it('v2 counts only entering edges — after is an echo field (#405 审核 P2)', () => {
+    // v2 草稿 loader 只以 edges 列表为准（_load_edges 不物化 after）；
+    // gate 有 after: [draft_gen] 但无入边——无条件计入 after 会让前端
+    // 放行、发布才被 validate_approval_edges 拒（正是要消除的漂移）。
+    const v2AfterNoEdgeYaml = [
+      'key: demo',
+      'schema_version: 2',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  draft_gen:',
+      '    type: code',
+      '    capability: draft_gen',
+      '  gate:',
+      '    type: code',
+      '    capability: gate_cap',
+      '    after: [draft_gen]',
+      'edges:',
+      '  - {from: _start, to: draft_gen}',
+      '',
+    ].join('\n')
+    expect(() =>
+      patchWorkflowNodeType(v2AfterNoEdgeYaml, 'gate', 'approval')
+    ).toThrow(WorkflowNodeTypeSwitchError)
+    // 对照：v1（无 schema_version 声明）after 物化为边，同形状放行。
+    const v1SameShape = v2AfterNoEdgeYaml
+      .replace('schema_version: 2\n', '')
+      .replace('  - {from: _start, to: draft_gen}\n', '')
+    const outV1 = patchWorkflowNodeType(v1SameShape, 'gate', 'approval')
+    expect(parseNodes(outV1).nodes?.gate?.type).toBe('approval')
+  })
+
+  it('upstream keys must exist in nodes — unknown sources stay refused (#405 审核 P2)', () => {
+    // loader 对未知边来源/依赖单独拒绝；ghost 上游不得作为入边放行。
+    const ghostUpstreamYaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  gate:',
+      '    type: code',
+      '    capability: gate_cap',
+      '    after: [ghost_node]',
+      '',
+    ].join('\n')
+    expect(() =>
+      patchWorkflowNodeType(ghostUpstreamYaml, 'gate', 'approval')
+    ).toThrow(WorkflowNodeTypeSwitchError)
+  })
+
+  it('rejects →approval when the upstream node is a null-bodied stub (#1258 复验 P3-A)', () => {
+    // 编辑中途极常见形态：`nodes:` 下 `review:` 空体（值为 null）。存在性
+    // 判定必须自有键 ∧ 真值双查——只查 hasOwnProperty 会把 null 空体当可
+    // 执行上游放行，随即触发破坏性清洗写入自动保存草稿、发布才被 loader
+    // 拒（前端放行/发布被拒的漂移，恰是本文件要消除的）。
+    const stubUpstreamYaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  review:',
+      '  gate:',
+      '    type: code',
+      '    capability: gate_cap',
+      '    after: [review]',
+      '',
+    ].join('\n')
+    expect(() =>
+      patchWorkflowNodeType(stubUpstreamYaml, 'gate', 'approval')
+    ).toThrow(WorkflowNodeTypeSwitchError)
+  })
+
+  it('rejects →approval when the upstream key only lives on Object.prototype (#1258 codex 三轮 P3)', () => {
+    // 与 materializeDraftEdges 同族：下标判定节点存在性会走原型链，
+    // toString/constructor/__proto__ 来源被误取到真值而放行——loader
+    // 对未知边来源是 raise，前端不得在切换时放行后触发破坏性清洗。
+    for (const source of ['toString', 'constructor', '__proto__']) {
+      const protoEdgeYaml = [
+        'key: demo',
+        'nodes:',
+        '  _start:',
+        '    type: start',
+        '  gate:',
+        '    type: code',
+        '    capability: gate_cap',
+        'edges:',
+        `  - {from: ${source}, to: gate}`,
+        '',
+      ].join('\n')
+      expect(() =>
+        patchWorkflowNodeType(protoEdgeYaml, 'gate', 'approval')
+      ).toThrow(WorkflowNodeTypeSwitchError)
+      // v1 after 形态同判（after 物化路径同样先做存在性过滤）。
+      const protoAfterYaml = [
+        'key: demo',
+        'nodes:',
+        '  _start:',
+        '    type: start',
+        '  gate:',
+        '    type: code',
+        '    capability: gate_cap',
+        `    after: [${source}]`,
+        '',
+      ].join('\n')
+      expect(() =>
+        patchWorkflowNodeType(protoAfterYaml, 'gate', 'approval')
+      ).toThrow(WorkflowNodeTypeSwitchError)
+    }
   })
 
   it('drops skill when switching agent→code (EXEC-SKILL-NODE-001)', () => {
