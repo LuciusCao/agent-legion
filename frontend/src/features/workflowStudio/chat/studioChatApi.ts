@@ -71,6 +71,21 @@ export function fetchStudioChatMessages(
   ).then((response) => response.messages)
 }
 
+/** 向上翻页（#1120 PR-4）：beforeSeq（不含）之前的更早一页；hasMore=false
+ * 表示扫描范围内已无更早的行（游标终止信号）。 */
+export function fetchStudioChatHistoryPage(
+  workspaceId: string,
+  sessionId: string,
+  beforeSeq: number
+): Promise<{ messages: StudioChatMessageRecord[]; hasMore: boolean }> {
+  return api<MessagesResponse>(
+    `${base(workspaceId, sessionId)}/messages?before_seq=${beforeSeq}`
+  ).then((response) => ({
+    messages: response.messages,
+    hasMore: response.has_more,
+  }))
+}
+
 export function sendStudioChatMessage(
   workspaceId: string,
   sessionId: string,
