@@ -114,7 +114,7 @@ class MaterialsService:
         A ready row with the same declared content_hash is returned as-is
         (upload dedup, no URL); a stale uploading/failed row with the same
         hash is reset to uploading so the upload can be retried. Every such
-        reset bumps ``upload_generation`` (schema v95) so a same-key same-size
+        reset bumps ``upload_generation`` (schema v96) so a same-key same-size
         retry stays visible to complete()'s locked identity recheck (#1267
         codex R3 P1).
         """

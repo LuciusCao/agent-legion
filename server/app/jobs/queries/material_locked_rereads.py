@@ -3,7 +3,7 @@
 complete() 的核验在事务外做对象 I/O；落 ready/failed 前必须在行锁内重读
 核验身份，防并发 presign 重试把行改嫁到未核验的字节——锁外快照到落库之间
 的窗口由本模块的锁内当前状态判定关闭。身份 = storage_key + size_bytes +
-upload_generation：代次（schema v95，每次 presign 重试 +1）让同 key 同
+upload_generation：代次（schema v96，每次 presign 重试 +1）让同 key 同
 大小的 uploading→uploading 重试也可见（R3 P1）。
 """
 

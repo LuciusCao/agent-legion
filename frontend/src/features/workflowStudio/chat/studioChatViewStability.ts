@@ -3,20 +3,23 @@
 // MessageItem 的全行 prop，内容没变却换新引用会穿透 memo、让每个流式
 // chunk 重渲染整个可见列表。这里的比较器按值判等，stabilizer 在内容一致
 // 时复用上一轮引用。
+// #1123：草稿视图是合并视图（tool_call 证据 + 合成 draft_saved 事件），
+// 判等必须覆盖锚点与证据时刻字段——只比内容字段会让「同草稿换锚点」
+// （如子代理再次保存后卡片移到新事件行）复用旧引用，卡片位置不更新。
+import type { PermissionView } from './studioChatMessages'
 import type {
-  NodeCodeDraftView,
-  PermissionView,
-  WorkflowDraftView,
-} from './studioChatMessages'
+  MergedNodeCodeDraft,
+  MergedWorkflowDraft,
+} from './studioChatDraftEvents'
 
 export type DraftViews = {
-  workflowDraft: WorkflowDraftView | null
-  nodeDrafts: NodeCodeDraftView[]
+  workflowDraft: MergedWorkflowDraft | null
+  nodeDrafts: MergedNodeCodeDraft[]
 }
 
 export function sameWorkflowDraft(
-  a: WorkflowDraftView | null,
-  b: WorkflowDraftView | null
+  a: MergedWorkflowDraft | null,
+  b: MergedWorkflowDraft | null
 ): boolean {
   return (
     a === b ||
@@ -25,13 +28,15 @@ export function sameWorkflowDraft(
       a.yaml === b.yaml &&
       a.validated === b.validated &&
       a.compareMeta === b.compareMeta &&
-      a.draftHash === b.draftHash)
+      a.draftHash === b.draftHash &&
+      a.anchorToolCallId === b.anchorToolCallId &&
+      a.anchorMessageId === b.anchorMessageId)
   )
 }
 
 export function sameNodeDrafts(
-  a: readonly NodeCodeDraftView[],
-  b: readonly NodeCodeDraftView[]
+  a: readonly MergedNodeCodeDraft[],
+  b: readonly MergedNodeCodeDraft[]
 ): boolean {
   return (
     a.length === b.length &&
@@ -41,7 +46,9 @@ export function sameNodeDrafts(
         draft.nodeKey === b[i].nodeKey &&
         draft.status === b[i].status &&
         draft.draftHash === b[i].draftHash &&
-        draft.saveFailed === b[i].saveFailed
+        draft.saveFailed === b[i].saveFailed &&
+        draft.seq === b[i].seq &&
+        draft.anchorMessageId === b[i].anchorMessageId
     )
   )
 }

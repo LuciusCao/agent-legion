@@ -20,6 +20,9 @@ from server.app.db.migrations.material_upload_generation import (
 from server.app.db.migrations.retire_default_workflow_key import (
     migrate_retire_default_workflow_key,
 )
+from server.app.db.migrations.studio_chat_message_draft_kind import (
+    migrate_studio_chat_message_draft_kind,
+)
 from server.app.db.migrations.studio_chat_session_archive import (
     migrate_studio_chat_session_archive,
 )
@@ -72,8 +75,15 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # 并发上限的库存面（claim 时热同步，机器资源保护层）。DDL-only, same
     # guarded-ALTER home rule as v87.
     SchemaMigration(94, "agent_worker_node_limits", migrate_agent_worker_node_limits),
-    # v95 (#1267 codex R3 P1): materials.upload_generation — 每次 presign 重试
+    # v95 (#1123): studio_chat_messages kind check gains 'draft' — the
+    # synthetic draft_saved timeline message emitted by the studio-agent save
+    # tools so subagent saves also produce draft cards. DDL-only, same
+    # guarded-ALTER home rule as v87.
+    SchemaMigration(95, "studio_chat_message_draft_kind", migrate_studio_chat_message_draft_kind),
+    # v96 (#1267 codex R3 P1): materials.upload_generation — 每次 presign 重试
     # +1 的上传代次，让同 key/同大小的 uploading→uploading 重试对 complete
-    # 的锁内复查可见。DDL-only, same guarded-ALTER home rule as v87.
-    SchemaMigration(95, "material_upload_generation", migrate_material_upload_generation),
+    # 的锁内复查可见。Born as this branch's v95, renumbered after main took
+    # v95 for studio_chat_message_draft_kind (#434 collision protocol: the
+    # later merge renumbers). DDL-only, same guarded-ALTER home rule as v87.
+    SchemaMigration(96, "material_upload_generation", migrate_material_upload_generation),
 ]

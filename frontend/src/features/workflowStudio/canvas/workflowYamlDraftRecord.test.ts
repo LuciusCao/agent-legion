@@ -53,6 +53,195 @@ edges:
 `
 
 describe('workflowYamlToDefinitionRecord', () => {
+  it('tolerates malformed after values on v1 instead of crashing (#1258 复验 P2-1)', () => {
+    // after: 5 / true / {x: 1}：合法 YAML、编辑中途自动保存可达。形状守卫
+    // 只校验 nodes/edges，after 非数组时 for..of 抛 TypeError——渲染期崩溃
+    // 违反本函数自书契约（形状残缺一律回退/容忍）。非数组 after 按无依赖
+    // 容忍（发布侧 loader 另拒）。
+    for (const badAfter of ['5', 'true', '{x: 1}']) {
+      const yaml = [
+        'key: demo',
+        'nodes:',
+        '  _start:',
+        '    type: start',
+        '  fetch:',
+        '    capability: fetch',
+        `    after: ${badAfter}`,
+        '  review:',
+        '    capability: review',
+        '    after: [fetch]',
+        '',
+      ].join('\n')
+      const record = workflowYamlToDefinitionRecord(yaml)
+      expect(record).not.toBeNull()
+      expect(record?.edges).toEqual([
+        { source: 'fetch', target: 'review', condition: null },
+      ])
+    }
+  })
+
+  it('does not derive edges for prototype-chain or non-string after deps (#1258 复验 P3-1)', () => {
+    // `dep in nodes` 走原型链：after: [toString] / [constructor] 对空 nodes
+    // 也为真，会为不存在节点派生幽灵端点边；after: [1] 这类非字符串 dep
+    // 同理不得漏进 edges（后端 _load_nodes 对未知 dep 是 raise）。
+    const protoYaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  fetch:',
+      '    capability: fetch',
+      '    after: [toString]',
+      '  review:',
+      '    capability: review',
+      '    after: [constructor]',
+      '',
+    ].join('\n')
+    expect(workflowYamlToDefinitionRecord(protoYaml)?.edges).toEqual([])
+    // 非字符串 dep：节点键 '1' 存在时 after: [1]（number）也不得派生。
+    const numericYaml = [
+      'key: demo',
+      'nodes:',
+      '  1:',
+      '    capability: one',
+      '  fetch:',
+      '    capability: fetch',
+      '    after: [1]',
+      '',
+    ].join('\n')
+    expect(workflowYamlToDefinitionRecord(numericYaml)?.edges).toEqual([])
+  })
+
+  it('materializes v1 after into edges like loader._load_edges (#1258 codex P2)', () => {
+    // v1（schema_version 缺省或显式 1）：依赖只存于节点 after，loader
+    // 物化为边（loader._load_edges）。草稿 record 不同构物化时，画布与
+    // inspector 依赖关系退化为 0 入/0 出。
+    const v1Yaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  fetch:',
+      '    capability: fetch',
+      '    after: [_start]',
+      '  review:',
+      '    capability: review',
+      '    after: [fetch]',
+      '  dangling:',
+      '    capability: dangling',
+      '    after: [missing_node]',
+      '',
+    ].join('\n')
+    const expected = [
+      { source: '_start', target: 'fetch', condition: null },
+      { source: 'fetch', target: 'review', condition: null },
+    ]
+    expect(workflowYamlToDefinitionRecord(v1Yaml)?.edges).toEqual(expected)
+    // 显式 schema_version: 1 同语义（loader 缺省即 1）。
+    expect(
+      workflowYamlToDefinitionRecord(
+        v1Yaml.replace('key: demo', 'key: demo\nschema_version: 1')
+      )?.edges
+    ).toEqual(expected)
+    // 指向不存在节点的 after 不派生边（loader 发布侧另拒未知依赖；
+    // 展示模型不画幽灵端点）。
+    expect(
+      workflowYamlToDefinitionRecord(v1Yaml)?.edges.some(
+        (edge) => edge.source === 'missing_node'
+      )
+    ).toBe(false)
+  })
+
+  it('unions explicit edges with derived after edges on v1, dedup by (source, target)', () => {
+    // loader v1：after 派生边在先；raw edges 追加，(from,to) 已在派生集合
+    // 的跳过（其 when 条件随之不生效——严格同构 _load_edges）。
+    const v1Mixed = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  fetch:',
+      '    capability: fetch',
+      '    after: [_start]',
+      '  review:',
+      '    capability: review',
+      '    after: [fetch]',
+      'edges:',
+      '  - from: fetch',
+      '    to: review',
+      '    when: {artifact: r.json, path: $.ok, equals: true}',
+      '  - from: review',
+      '    to: fetch',
+      '',
+    ].join('\n')
+    expect(workflowYamlToDefinitionRecord(v1Mixed)?.edges).toEqual([
+      { source: '_start', target: 'fetch', condition: null },
+      { source: 'fetch', target: 'review', condition: null },
+      { source: 'review', target: 'fetch', condition: null },
+    ])
+  })
+
+  it('does not materialize after on v2 (after is an echo field)', () => {
+    // v2+ 完全以 edges 列表为准；after 只是 echo，不得物化。
+    const v2Yaml = [
+      'key: demo',
+      'schema_version: 2',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  fetch:',
+      '    capability: fetch',
+      '    after: [_start]',
+      'edges: []',
+      '',
+    ].join('\n')
+    expect(workflowYamlToDefinitionRecord(v2Yaml)?.edges).toEqual([])
+  })
+
+  it('normalizes malformed node list fields instead of crashing (#1258 codex 四轮 P1)', () => {
+    // inputs: foo（字符串）/ outputs: {a: 1}（mapping）/ after: 5（数字）：
+    // 合法 YAML、编辑中途自动保存可达。渲染侧契约是「形状残缺不得渲染期
+    // 抛异常」——画布 record 消费方（ItemList .map、itemTypeLabels 等）与
+    // 编辑器直连 parse 的读路径都假定数组，字段级异形在映射时归一为空
+    // 数组（不回退整份草稿，保住其余字段的草稿视图）。
+    const yaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  fetch:',
+      '    capability: fetch',
+      '    inputs: foo',
+      '    outputs: {a: 1}',
+      '    after: 5',
+      '',
+    ].join('\n')
+    const record = workflowYamlToDefinitionRecord(yaml)
+    expect(record).not.toBeNull()
+    const fetchNode = record?.nodes.find((node) => node.key === 'fetch')
+    expect(fetchNode?.inputs).toEqual([])
+    expect(fetchNode?.outputs).toEqual([])
+    expect(fetchNode?.after).toEqual([])
+    // 元素级同策略：非字符串元素过滤（不字符串化——[null] 不该变
+    // ["null"]、[{a:1}] 不该变 ["[object Object]"]，#1258 复验 P3 nit）。
+    const mixed = workflowYamlToDefinitionRecord(
+      yaml.replace('    inputs: foo', "    inputs: [null, 'a', 5]")
+    )
+    expect(mixed?.nodes.find((node) => node.key === 'fetch')?.inputs).toEqual([
+      'a',
+    ])
+  })
+
+  it('normalizes malformed skill bindings instead of crashing (#1258 codex 四轮 P1 同族)', () => {
+    // skill: {key: 5}：normalizeNodeSkill 的 .trim() 崩溃经 mapNode 直达
+    // 画布 record（形状守卫之后无 try/catch）。
+    const record = workflowYamlToDefinitionRecord(
+      'key: demo\nnodes:\n  review:\n    capability: review\n    skill: {key: 5}\n'
+    )
+    expect(record).not.toBeNull()
+    expect(record?.nodes[0]?.skill).toBeUndefined()
+  })
+
   it('maps all node, edge and metadata fields', () => {
     const record = workflowYamlToDefinitionRecord(FULL_YAML)
     expect(record).not.toBeNull()

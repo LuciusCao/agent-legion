@@ -361,7 +361,7 @@ SeaweedFS 存成目录（内容被丢弃），下载与备份落不了文件系�
 `content_hash` 非空时必须是 64 位小写 sha256 hex（422，#1267）——它同样拼进 key 且是
 dedup 身份，不限制格式会把 `../other` 之类值原样签进 key。重试复用收紧前入库的旧行时
 校验其 storage_key，非法则按当前请求字段重建（旧对象交 bucket lifecycle 回收）；每次重试
-（含同 key 同大小）都把行的 `upload_generation` +1（schema v95），complete 落 ready/failed
+（含同 key 同大小）都把行的 `upload_generation` +1（schema v96），complete 落 ready/failed
 前在行锁内复查 verify 身份（storage_key + size_bytes + 代次）与当前状态，不一致返回 409
 由客户端重调 complete，并发 complete 已落 ready 时幂等不覆盖（#1267 codex R2/R3 P1）。
 

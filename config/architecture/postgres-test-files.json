@@ -245,6 +245,7 @@
     "tests/services/test_studio_chat_orphan_sessions.py",
     "tests/services/test_studio_chat_resume_service.py",
     "tests/services/test_studio_chat_retention.py",
+    "tests/services/test_studio_chat_send_resume.py",
     "tests/services/test_studio_chat_service_lifecycle.py",
     "tests/services/test_studio_chat_service_permissions.py",
     "tests/services/test_studio_chat_service_sessions.py",

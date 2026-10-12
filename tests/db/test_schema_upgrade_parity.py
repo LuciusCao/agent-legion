@@ -43,11 +43,12 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v95, material_upload_generation) must leave
+# Effects the newest migration (v96, material_upload_generation) must leave
 # behind so the undo step rewinds a current-shape database to exactly the
-# previous recorded version. v95 is DDL-only: one guarded ALTER adding
+# previous recorded version. v96 is DDL-only: one guarded ALTER adding
 # materials.upload_generation (#1267 codex R3 P1, upload generation for the
-# complete-time locked recheck); dropping the column rewinds to v94.
+# complete-time locked recheck); dropping the column rewinds to v95. (v95
+# sits below: its widened studio_chat_messages kind check stays applied.)
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("materials", "upload_generation", "integer"),
@@ -57,7 +58,7 @@ _NEWEST_MIGRATION_NAME = "material_upload_generation"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the rewound database is a faithful
-# v94 (v95 only adds a column: nothing to recreate).
+# v95 (v96 only adds a column: nothing to recreate).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.
