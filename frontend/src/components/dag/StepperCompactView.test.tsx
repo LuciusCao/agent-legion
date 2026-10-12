@@ -45,6 +45,45 @@ describe('stepperCompactInfo (#1257)', () => {
     ).toBe(2)
   })
 
+  it('resolves an awaiting_approval gate as current before downstream pending (#1275)', () => {
+    const segments = [
+      seg('a', 'completed'),
+      seg('gate', 'awaiting_approval'),
+      seg('c', 'pending'),
+      seg('d', 'pending'),
+    ]
+    const info = stepperCompactInfo(segments)
+    expect(info).toMatchObject({
+      current: 2,
+      total: 4,
+      completed: 1,
+      currentKey: 'gate',
+      currentStatus: 'awaiting_approval',
+    })
+  })
+
+  it('resolves a ready node as current before downstream pending (#1275)', () => {
+    const segments = [
+      seg('a', 'completed'),
+      seg('b', 'ready'),
+      seg('c', 'pending'),
+    ]
+    expect(stepperCompactInfo(segments)).toMatchObject({
+      current: 2,
+      currentKey: 'b',
+      currentStatus: 'ready',
+    })
+  })
+
+  it('keeps running ahead of awaiting_approval/ready when both exist', () => {
+    const segments = [
+      seg('a', 'awaiting_approval'),
+      seg('b', 'ready'),
+      seg('c', 'running'),
+    ]
+    expect(stepperCompactInfo(segments)?.currentKey).toBe('c')
+  })
+
   it('uses the last node when everything is completed', () => {
     const info = stepperCompactInfo([
       seg('a', 'completed'),
@@ -121,6 +160,27 @@ describe('StepperCompactView (#1257)', () => {
     expect(
       done.querySelector('[class*="compactFill"]')?.className
     ).not.toContain('pulse-blue')
+  })
+
+  it('renders the approval gate as current in an over-threshold workflow (#1275)', () => {
+    // 57 段（超 STEPPER_COMPACT_THRESHOLD），审批门在第 30 段，下游全部
+    // pending——紧凑形态必须停在门上，而不是落到首个下游 pending。
+    const gateSegments = Array.from({ length: 57 }, (_, i) =>
+      seg(
+        `n${i + 1}`,
+        i < 29 ? 'completed' : i === 29 ? 'awaiting_approval' : 'pending',
+        i === 29 ? '审批门' : `节点 ${i + 1}`
+      )
+    )
+    render(<StepperCompactView segments={gateSegments} showLabel />)
+
+    const count = screen.getByText('30/57')
+    expect(count).toHaveAttribute('data-status', 'awaiting_approval')
+    expect(count).toHaveAttribute('title', '审批门')
+    expect(screen.getByText('审批门')).toBeInTheDocument()
+    expect(
+      screen.getByRole('progressbar', { name: '节点进度' })
+    ).toHaveAttribute('aria-valuetext', '30/57 审批门')
   })
 
   it('renders nothing for empty segments', () => {

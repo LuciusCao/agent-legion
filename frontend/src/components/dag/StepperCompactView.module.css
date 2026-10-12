@@ -27,8 +27,13 @@
   color: var(--status-completed-text);
 }
 
-.compactCount[data-status='running'] {
+.compactCount[data-status='running'],
+.compactCount[data-status='ready'] {
   color: var(--status-running-text);
+}
+
+.compactCount[data-status='awaiting_approval'] {
+  color: var(--status-approval-text);
 }
 
 .compactCount[data-status='failed'] {
