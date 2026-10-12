@@ -283,14 +283,15 @@ EOF
   - `jobs/` 与 `jobs-staging/` 的孤儿对象（行已删但删除失败/未执行、
     promote 中途失败的结果报告丢失残留）与材料根前缀的孤儿对象（已上传
     后重试留下的上一代 `g{代次}` key、行已删但对象删除失败的残留，
-    #1269）由 `scripts/gc-s3-jobs.py` 回收：按前缀列举（材料为根前缀
+    #1269）由 `scripts/gc-s3-jobs.py` 治理：按前缀列举（材料为根前缀
     排除两个 jobs 前缀）对照 `job_artifacts` ∪ `materials` 清单行，
     宽限窗（默认 24h，`--grace-hours`/`--staging-grace-hours`
     可调）外的无行对象与过期暂存对象判定为孤儿；默认 dry-run，加
     `--apply` 执行删除，幂等可重跑。材料 key 内容寻址可复用（删行后
-    同文件再上传复用同 key），删除材料孤儿前会重列根前缀做时点新鲜度
-    守卫：LastModified 晚于（扫描开始 − 1h presign 有效期）的 key 必属
-    新一轮上传，跳过本轮（#1282 复审 P1）。
+    同文件再上传复用同 key），任何 check-then-delete 序列对可复用 key
+    都闭不死删除窗口——**材料根前缀孤儿只扫描报告、不进入删除批**
+    （#1282 三轮 codex P1 按族收口），删除待 #1279 所有权/key 不可复用
+    协议落地后开放；此前材料孤儿的回收仍靠 bucket lifecycle 规则兜底。
   - 孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已
     不存在的测试 bucket）由 `scripts/report-orphan-s3-buckets.py`
     报告（只报不删，逐个给出 `clean-worktree.sh` 收尾命令）。

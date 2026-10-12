@@ -9,8 +9,10 @@ server/app/services/s3_jobs_gc.py；材料根前缀（bucket 根排除两个 job
 的扫描在本文件（材料 key 形如 {workspace_id}/{hash|id}/g{代次}/{filename}，
 存活对象必有 materials 行——presign 先建行后签发 URL——故与 jobs/ 同手法：
 对照 materials.storage_key 清单行 + 宽限窗）。材料 key 内容寻址可复用
-（删行后同文件同文件名再上传复用同 key），--apply 删除材料孤儿前重列根
-前缀做时点新鲜度守卫（#1282 二轮 P1，见 _MATERIAL_RESCAN_GUARD_SECONDS）。
+（删行后同文件同文件名再上传复用同 key），任何 check-then-delete 序列对
+可复用 key 都闭不死删除窗口——材料孤儿只扫描报告、不进入 --apply 删除批
+（#1282 三轮 codex P1 按族收口），删除待 #1279 所有权/key 不可复用协议
+落地后开放。
 DB 侧对照 job_artifacts ∪ materials（须能连上本 worktree 的 Postgres）。
 
 用法:
@@ -31,19 +33,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
-# 材料孤儿删除时点新鲜度守卫的余量（#1282 二轮 P1）：取 presigned PUT URL
-# 有效期（server 侧 _PRESIGN_EXPIRY_SECONDS=3600）。材料 key 内容寻址可复用：
-# 行存在性反查与 delete_objects 之间，新 presign 提交 + PUT 落地会复用同
-# key——删除前重列根前缀，LastModified 晚于（扫描开始 − 本余量）的孤儿必属
-# 新一轮上传，跳过本轮（下轮正常回收），零误伤。残余窗口 = PUT 恰好完成于
-# 重列与删除之间的毫秒级间隙，可忽略。
-_MATERIAL_RESCAN_GUARD_SECONDS = 3600
+# 材料 key 内容寻址可复用（删行后同文件同文件名再上传复用同 key），
+# 任何 check-then-delete 序列对可复用 key 都闭不死删除窗口（#1282 三轮
+# codex P1 按族收口）——材料根前缀孤儿只扫描报告，删除待 #1279 的
+# 所有权/key 不可复用协议落地后开放。
 
 
 def _stale(modified, cutoff) -> bool:
-    """LastModified 是否早于 cutoff（None = 对象已消失，删除幂等，按可删）。"""
-    if modified is None:
-        return True
     if modified.tzinfo is None:
         modified = modified.replace(tzinfo=UTC)
     return modified < cutoff
@@ -139,7 +135,6 @@ def main() -> int:
 
     # 材料根前缀（#1269 格子③）：与 jobs/ 同一 key_exists（内部缓存全量
     # key 集合，两个扫描共享一遍 DB 载入）。
-    scan_started = datetime.now(UTC)
     key_exists = make_db_key_existence(job_db)
     staging_grace = args.staging_grace_hours
     report = scan_orphans(
@@ -154,6 +149,12 @@ def main() -> int:
         f"jobs-staging/ 孤儿 {len(st)} 个（{sum(o.size_bytes for o in st)} 字节）, "
         f"材料根前缀孤儿 {len(material_orphans)} 个（{sum(o.size_bytes for o in material_orphans)} 字节）"
     )
+    if material_orphans:
+        # #1282 三轮 codex P1 按族收口：材料 key 内容寻址可复用（删行后同
+        # 文件再上传复用同 key），任何 check-then-delete 序列对可复用 key 都
+        # 闭不死 revalidate→delete 窗口——材料孤儿只扫描报告，删除待 #1279
+        # 的所有权/key 不可复用协议落地后开放。
+        print("材料根前缀孤儿只报告不删除：删除待 #1279 所有权协议落地后开放")
     if not args.apply:
         if report.count or material_orphans:
             print("加 --apply 执行删除（幂等可重跑）。")
@@ -162,23 +163,14 @@ def main() -> int:
     # 删除前逐批新鲜反查（TOCTOU，#344 评审 P1）：不用扫描阶段的缓存
     # key 集合——扫描与删除之间并发 promote 重建同名 key 并建行时，
     # 缓存判定会误删新权威对象；反查同时对照 materials（撞名 workspace
-    # 的材料 key 在删除前最后一道被救下）。
+    # 的材料 key 在删除前最后一道被救下）。材料孤儿不进入删除批（见上）。
     def fresh_revalidate(keys: list[str]) -> set[str]:
         return job_db.existing_object_storage_keys(keys)
 
-    guarded = material_orphans
-    if material_orphans:
-        # 时点新鲜度守卫（#1282 二轮 P1，见 _MATERIAL_RESCAN_GUARD_SECONDS）：
-        # 重列根前缀，候选里 LastModified 变新的 key 必属新一轮上传，跳过本轮。
-        cutoff = scan_started - timedelta(seconds=_MATERIAL_RESCAN_GUARD_SECONDS)
-        current = {e.key: e.last_modified for e in entry_lister("")}
-        guarded = [o for o in material_orphans if _stale(current.get(o.key), cutoff)]
-        report.authority_orphans.extend(guarded)
     result = apply_gc(client, settings.bucket, report, revalidate=fresh_revalidate)
     print(f"已删除 {result.deleted} 个孤儿对象")
-    skipped = result.skipped_revalidated + len(material_orphans) - len(guarded)
-    if skipped:
-        print(f"反查/重列救下 {skipped} 个对象（扫描后被重新引用或重写，未删除）")
+    if result.skipped_revalidated:
+        print(f"反查救下 {result.skipped_revalidated} 个对象（扫描后被重新引用，未删除）")
     print("（删除失败的对象下一轮扫描会重试）")
     return 0
 

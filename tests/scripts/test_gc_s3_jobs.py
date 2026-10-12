@@ -34,24 +34,16 @@ def load_dotenv(dotenv_path=None, override=False):
 
 # boto3 桩：ListObjectsV2 分页器默认对任何 Prefix 都返回空集（对象列举交给
 # s3_jobs_gc 桩的固定返回）；STUB_OBJECTS_JSON（[[key, epoch秒, size], ...]）
-# 提供时按该清单产出（供材料根前缀扫描断言）；根前缀的第二次列举（--apply
-# 删除前的新鲜度重列）在 STUB_OBJECTS_JSON2 提供时改用它——模拟扫描后对象
-# 被新一轮上传重写。delete_objects 记入 STUB_LOG 并返回全成功。
+# 提供时按该清单产出（供材料根前缀扫描断言），delete_objects 记入 STUB_LOG
+# 并返回全成功。
 _BOTO3_PROBE = """
 import json
 import os
 from datetime import UTC, datetime
 
 
-def _stub_objects(prefix):
+def _stub_objects():
     raw = os.environ.get("STUB_OBJECTS_JSON")
-    if prefix == "":
-        count_file = os.environ["STUB_LOG"] + ".root-list-calls"
-        calls = int(open(count_file).read()) if os.path.exists(count_file) else 0
-        with open(count_file, "w") as fh:
-            fh.write(str(calls + 1))
-        if calls >= 1 and os.environ.get("STUB_OBJECTS_JSON2"):
-            raw = os.environ["STUB_OBJECTS_JSON2"]
     if not raw:
         return []
     return [
@@ -64,7 +56,7 @@ class _Paginator:
     def paginate(self, Bucket, Prefix=None):
         with open(os.environ["STUB_LOG"], "a") as fh:
             fh.write(f"list_objects {Bucket} prefix={Prefix}\\n")
-        yield {"Contents": _stub_objects(Prefix)}
+        yield {"Contents": _stub_objects()}
 
 
 class _Client:
@@ -306,12 +298,14 @@ def test_grace_args_reach_scan(tmp_path: Path):
     assert "scan_orphans grace=48.0 staging_grace=6.0" in log
 
 
-def test_material_root_prefix_orphans_scanned_and_applied(tmp_path: Path):
-    """#1269 格子③：材料根前缀纳入 GC——根前缀列举排除 jobs/ 与
-    jobs-staging/ 后，DB（job_artifacts ∪ materials）无行且超宽限窗的材料
-    key 判定为孤儿并随 --apply 删除；有行的存活材料与宽限窗内的对象保留。
-    判定逻辑是脚本内 scan_material_root_orphans 的真实代码，桩只提供对象
-    清单（STUB_OBJECTS_JSON）与已知 key 集合（STUB_KNOWN_KEYS_JSON）。"""
+def test_material_root_prefix_orphans_reported_but_never_deleted(tmp_path: Path):
+    """#1269 格子③ + #1282 三轮 P1 收口：材料根前缀纳入扫描报告——根前缀
+    列举排除 jobs/ 与 jobs-staging/ 后，DB（job_artifacts ∪ materials）无行
+    且超宽限窗的材料 key 判定为孤儿并打印数量与「只报告不删除」说明；
+    --apply 下材料孤儿也不进删除批（key 内容寻址可复用，check-then-delete
+    闭不死窗口，删除待 #1279 所有权协议）。判定逻辑是脚本内
+    scan_material_root_orphans 的真实代码，桩只提供对象清单
+    （STUB_OBJECTS_JSON）与已知 key 集合（STUB_KNOWN_KEYS_JSON）。"""
     now = time.time()
     objects = [
         ["ws1/hash-old/g0/superseded.txt", now - 48 * 3600, 10],  # 孤儿：无行 + 超窗
@@ -336,36 +330,8 @@ def test_material_root_prefix_orphans_scanned_and_applied(tmp_path: Path):
     # 根前缀确实被列举（Prefix="" 即 bucket 根），且只有 1 个材料孤儿。
     assert "list_objects agent-legion-dev prefix=\n" in log
     assert "材料根前缀孤儿 1 个" in result.stdout
-    # --apply：jobs 报告桩的 1+1 加上 1 个材料孤儿。
-    assert "已删除 3 个" in result.stdout
-
-
-def test_material_orphan_rewritten_after_scan_is_skipped(tmp_path: Path):
-    """#1282 二轮 P1：材料 key 内容寻址可复用——扫描判孤儿后、删除前新
-    presign 提交行 + PUT 落地会复用同 key（重列时 LastModified 变新）。
-    时点新鲜度守卫（扫描开始 − presign TTL 余量）必须跳过这种 key 的本轮
-    删除，只留下次回收——删掉它会让新 ready 行指向缺失字节。"""
-    now = time.time()
-    key = "ws1/hash-old/g0/reused.txt"
-    at_scan = [[key, now - 48 * 3600, 10]]  # 扫描时：老对象、无行 → 孤儿
-    at_apply = [[key, now - 60, 10]]  # 删除前重列：刚被新一轮上传重写
-    pystub = _make_pystub(tmp_path, _STORAGE_PROBE_CONFIGURED)
-
-    result, log = _run(
-        tmp_path,
-        pystub,
-        "--apply",
-        env_extra={
-            "STUB_OBJECTS_JSON": json.dumps(at_scan),
-            "STUB_OBJECTS_JSON2": json.dumps(at_apply),
-            "STUB_KNOWN_KEYS_JSON": json.dumps([]),  # DB 无行：扫描判孤儿
-        },
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "材料根前缀孤儿 1 个" in result.stdout
-    # 重列守卫拦下材料孤儿：删除的只有 jobs 报告桩的 1+1。
+    assert "只报告不删除" in result.stdout
+    # --apply：材料孤儿不进删除批——删除的只有 jobs 报告桩的 1+1。
     assert "已删除 2 个" in result.stdout
-    assert "救下 1 个" in result.stdout
-    # 根前缀列举了两次：扫描一次 + 删除前重列一次。
-    assert log.count("prefix=\n") == 2
+    # 根前缀只列举一次（扫描）；删除路径不存在后不再有删除前重列。
+    assert log.count("prefix=\n") == 1
