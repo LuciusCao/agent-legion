@@ -247,19 +247,23 @@ class MaterialsService:
         raise 409 immediately WITHOUT verifying or touching the row, so a
         stale client neither pays the object-I/O cost nor flips the newer
         attempt's row to failed when its own (dead-key) object is missing.
+        The generation check runs BEFORE the ready idempotent fast path
+        (#1284): a late complete from a superseded generation gets 409 even
+        when the newer generation has already marked the row ready — only a
+        same-generation replay of a ready row returns 200 idempotently.
         """
         storage = self._require_storage()
         row = self._fetch_row(workspace_id, material_id)
-        if row["status"] == "ready":
-            return _record(row)
-        if row["status"] == "expired":
-            raise ConflictError(f"Material is expired: {material_id}")
         generation = int(row["upload_generation"])
         if expected_upload_generation is not None and generation != expected_upload_generation:
             raise ConflictError(
                 f"Material {material_id} upload superseded by generation {generation}"
                 f" (expected {expected_upload_generation}); presign again to restart"
             )
+        if row["status"] == "ready":
+            return _record(row)
+        if row["status"] == "expired":
+            raise ConflictError(f"Material is expired: {material_id}")
         failure = self._verify_object(storage, row)
         with write_transaction(self._connect_source) as conn:
             locked_status = assert_material_upload_identity_tx(conn, material_id, row)

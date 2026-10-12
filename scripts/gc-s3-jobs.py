@@ -39,12 +39,6 @@ if str(ROOT) not in sys.path:
 # 所有权/key 不可复用协议落地后开放。
 
 
-def _stale(modified, cutoff) -> bool:
-    if modified.tzinfo is None:
-        modified = modified.replace(tzinfo=UTC)
-    return modified < cutoff
-
-
 def _material_shaped(key: str) -> bool:
     """碰撞命名空间里的材料 key 形态（#1282 r4 P1）：第 3 段是 g{代次}。
 
@@ -66,16 +60,25 @@ def scan_material_root_orphans(entry_lister, key_exists, grace_hours: float):
     根前缀并排除二者后，DB（job_artifacts ∪ materials）无行且超宽限窗即
     孤儿。宽限窗与 authority 对象共用 ``--grace-hours``：presign 先建行后
     签发 URL，在途上传的对象必有行，宽限窗只兜「行刚删、对象删除在途」的
-    短窗口。
+    短窗口。判定按 KEY_PAGE_SIZE 分页推进、只累计孤儿（#1287）：全量对象
+    清单不驻留内存，大 bucket 上不会比 scan_orphans 多一份完整清单。页内
+    判定复用 s3_jobs_gc.orphans_in_page（与 jobs/ 前缀同一判定）。
     """
-    from server.app.services.s3_jobs_gc import JOBS_PREFIX, STAGING_PREFIX
+    from server.app.services import s3_jobs_gc
 
     cutoff = datetime.now(UTC) - timedelta(hours=grace_hours)
-    candidates = [
-        e for e in entry_lister("") if not e.key.startswith((JOBS_PREFIX, STAGING_PREFIX))
-    ]
-    known = key_exists([e.key for e in candidates])
-    return [e for e in candidates if e.key not in known and _stale(e.last_modified, cutoff)]
+    orphans = []
+    pending = []
+    for entry in entry_lister(""):
+        if entry.key.startswith((s3_jobs_gc.JOBS_PREFIX, s3_jobs_gc.STAGING_PREFIX)):
+            continue
+        pending.append(entry)
+        if len(pending) >= s3_jobs_gc.KEY_PAGE_SIZE:
+            orphans.extend(s3_jobs_gc.orphans_in_page(pending, key_exists, cutoff))
+            pending = []
+    if pending:
+        orphans.extend(s3_jobs_gc.orphans_in_page(pending, key_exists, cutoff))
+    return orphans
 
 
 def main() -> int:

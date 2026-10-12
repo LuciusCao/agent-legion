@@ -277,7 +277,8 @@ EOF
   代次段自 #1267 起、存量行无代次段），与两个 jobs 前缀平级。注意 promote 回滚备份（key 含 `/.rollback/`
   段）也在该前缀下：promote 恢复最终失败时被刻意保留的备份是幸存清单
   行所指向旧字节的最后恢复源（`s3_jobs_gc` 对它们豁免回收，codex #774
-  P1 族）——bucket lifecycle 规则只能按前缀过滤、无法按子串豁免，配
+  P1 族；豁免仅适用于 `jobs/` 与 `jobs-staging/` 前缀的 key——材料文件
+  名允许含合法 `.rollback` 段，材料根前缀 key 不继承该豁免，#1285）——bucket lifecycle 规则只能按前缀过滤、无法按子串豁免，配
   `jobs-staging/` 短保留即接受「恢复处置死线 = 保留天数」。手工清理可用
   console（rustfs `:9001`；seaweedfs 为 master UI `:9333`）。
   - `jobs/` 与 `jobs-staging/` 的孤儿对象（行已删但删除失败/未执行、

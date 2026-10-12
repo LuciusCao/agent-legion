@@ -12,7 +12,9 @@ job 删除路径（``job_deletion`` → ``job_artifacts.delete_objects``）只�
   （Worker 直传的 staging 源只在 finish 提交后由完成方删除——失败/冲
   突/闸拒/进程崩溃的残留走本工具或 bucket lifecycle；docs/materials-
   storage-deployment.md 规划的 1 天短保留）。``/.rollback/`` 段的
-  promote 回滚备份例外豁免：恢复最终失败时它是旧字节的最后恢复源
+  promote 回滚备份例外豁免（仅 jobs/ 与 jobs-staging/ 前缀的 key，
+  #1285——材料文件名可含合法 .rollback 段，材料根前缀 key 不适用）：
+  恢复最终失败时它是旧字节的最后恢复源
   （codex #774 P1 族），正常结局的备份由 promote 自身清理、不经过本
   工具。
 
@@ -121,23 +123,38 @@ def scan_orphans(
     for entry in lister(JOBS_PREFIX):
         pending.append(entry)
         if len(pending) >= KEY_PAGE_SIZE:
-            report.authority_orphans.extend(
-                _authority_orphans_in(pending, key_exists, authority_cutoff)
-            )
+            report.authority_orphans.extend(orphans_in_page(pending, key_exists, authority_cutoff))
             pending = []
     if pending:
-        report.authority_orphans.extend(
-            _authority_orphans_in(pending, key_exists, authority_cutoff)
-        )
+        report.authority_orphans.extend(orphans_in_page(pending, key_exists, authority_cutoff))
     return report
 
 
-def _authority_orphans_in(
+def orphans_in_page(
     entries: list[ObjectEntry], key_exists: KeyExistence, cutoff: datetime
 ) -> list[ObjectEntry]:
-    """DB 无行且超宽限窗：窗内的未知 key 保留（上传在途/行未写场景）。"""
+    """DB 无行且超宽限窗：窗内的未知 key 保留（上传在途/行未写场景）。
+
+    页内判定的共享实现：jobs/ 前缀的 authority 页与材料根前缀页
+    （scripts/gc-s3-jobs.py 的 scan_material_root_orphans，#1287）同一
+    判定；staging 页另有带 ``/.rollback/`` 豁免的变体
+    （``_staging_orphans_in``）。
+    """
     known = key_exists([e.key for e in entries])
     return [e for e in entries if e.key not in known and _past_grace(e, cutoff)]
+
+
+def _rollback_backup_exempt(key: str) -> bool:
+    """``/.rollback/`` 回滚备份豁免的判定（codex #774 P1 族，#1285 收窄）。
+
+    豁免仅对 jobs/ 与 jobs-staging/ 前缀的 key 生效——promote 回滚备份只
+    出现在这两个产物前缀下（恢复最终失败时它是幸存清单行所指向旧字节的
+    最后恢复源）。材料根前缀的 key 不适用：材料文件名允许合法多段相对
+    路径、无 .rollback 保留段，``{ws}/{hash}/g{代次}/dir/.rollback/f.bin``
+    形态的旧代次/删行残留若继承本豁免，会在材料孤儿删除开放（#1279）后
+    被永久跳过。
+    """
+    return key.startswith((JOBS_PREFIX, STAGING_PREFIX)) and "/.rollback/" in key
 
 
 def _staging_orphans_in(
@@ -145,17 +162,19 @@ def _staging_orphans_in(
 ) -> list[ObjectEntry]:
     """超宽限窗且 DB 无行：staging 的 DB 对照救的是撞名 workspace 的
     materials（正常 staging 对象本就无行，宽限窗是它们的唯一防线）。
-    ``/.rollback/`` 段的回滚备份一律豁免（codex #774 P1 族）：promote 恢
-    复最终失败时被刻意保留的备份是幸存清单行所指向旧字节的最后恢复源，
-    其生命周期归运维处置（ERROR 日志带 key）；代价是崩溃残留的
-    `.rollback` 孤儿不再被本 GC 回收（备份只在 authority 已存在时创建、
-    崩溃窗口毫秒级，量可忽略）。bucket lifecycle 的子串不可豁免性见
-    docs/materials-storage-deployment.md。"""
+    ``/.rollback/`` 段的回滚备份按 ``_rollback_backup_exempt`` 豁免
+    （codex #774 P1 族）：promote 恢复最终失败时被刻意保留的备份是幸存
+    清单行所指向旧字节的最后恢复源，其生命周期归运维处置（ERROR 日志带
+    key）；代价是崩溃残留的 `.rollback` 孤儿不再被本 GC 回收（备份只在
+    authority 已存在时创建、崩溃窗口毫秒级，量可忽略）。bucket lifecycle
+    的子串不可豁免性见 docs/materials-storage-deployment.md。"""
     known = key_exists([e.key for e in entries])
     return [
         entry
         for entry in entries
-        if entry.key not in known and "/.rollback/" not in entry.key and _past_grace(entry, cutoff)
+        if entry.key not in known
+        and not _rollback_backup_exempt(entry.key)
+        and _past_grace(entry, cutoff)
     ]
 
 
@@ -243,9 +262,12 @@ def apply_gc(
     skipped = 0
     # 纵深防御（#774 对抗复审）：回滚备份在任何路径都不可删——正常报告来
     # 自 scan 层的豁免，但手工构造的 OrphanReport 会绕过它；把「GC 永不删
-    # 恢复备份」钉在删除动作本身上。
-    authority_orphans = [e for e in report.authority_orphans if "/.rollback/" not in e.key]
-    staging_orphans = [e for e in report.staging_orphans if "/.rollback/" not in e.key]
+    # 恢复备份」钉在删除动作本身上。豁免按 _rollback_backup_exempt 收窄到
+    # jobs/ 与 jobs-staging/ 前缀（#1285）：材料根前缀 key 的文件名可含
+    # 合法 .rollback 段（dir/.rollback/file.bin），删除开放（#1279）后并入
+    # 删除批时不得继承本豁免被永久跳过。
+    authority_orphans = [e for e in report.authority_orphans if not _rollback_backup_exempt(e.key)]
+    staging_orphans = [e for e in report.staging_orphans if not _rollback_backup_exempt(e.key)]
     if revalidate is not None:
         for batch in _batches(authority_orphans):
             known = revalidate([e.key for e in batch])
