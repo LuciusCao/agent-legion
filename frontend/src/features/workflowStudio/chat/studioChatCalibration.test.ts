@@ -394,4 +394,23 @@ describe('missed 帧点读瞬时失败的有界重试（#1289）', () => {
     await vi.advanceTimersByTimeAsync(10_000)
     expect(mockApi).toHaveBeenCalledTimes(1)
   })
+
+  it('首次点读在途期间切换会话后才失败：重试链沿用点火代次快照，不按新代次点火（#1297 r2 P1）', async () => {
+    const { deps, state } = makeDeps([textMessage('m1', 1, 'a')])
+    let rejectFetch!: (reason: unknown) => void
+    mockApi.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectFetch = reject
+      }) as ReturnType<typeof api>
+    )
+    handleMissedMessageFrame(deps, 'tc9')
+    // 首次点读在途期间切换会话：共享 ref 已是新会话代次，deps.sessionId
+    // 仍属旧会话——挂链时现读代次会穿守卫（mutation：改回现读即红）。
+    deps.sessionGenerationRef.current += 1
+    rejectFetch(new Error('down'))
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(mockApi).toHaveBeenCalledTimes(1)
+    expect(state.messages.map((m) => m.id)).toEqual(['m1'])
+  })
 })

@@ -13,14 +13,17 @@ const MISSED_REFETCH_MAX_RETRIES = 2
 
 /** 点读失败后的有界重试（#1289）：同 id 同代次只挂一条链
  *（missedRetryRef 去重——重复 missed 帧不倍增重试）；代次推进后旧链点火
- * 即被代次守卫拦下，旧条目不再占用（A→B→A 回来可重新挂链）。 */
+ * 即被代次守卫拦下，旧条目不再占用（A→B→A 回来可重新挂链）。
+ * generation 是链生效的代次快照（#1297 r2 P1）：由 handleMissedMessageFrame
+ * 在首次点读点火时捕获，首次 + 递归全链沿用——挂链/递归时现读共享 ref
+ * 会拿到切换后的新会话代次，而 deps.sessionId 仍属旧会话，代次检查被穿。 */
 function scheduleMissedRowRetry(
   deps: RowRefetchDeps,
   messageId: string,
+  generation: number,
   attempt: number
 ): void {
   if (attempt > MISSED_REFETCH_MAX_RETRIES) return
-  const generation = deps.sessionGenerationRef.current
   const pending = deps.missedRetryRef.current
   if (pending.get(messageId) === generation) return
   pending.set(messageId, generation)
@@ -29,7 +32,7 @@ function scheduleMissedRowRetry(
     if (pending.get(messageId) === generation) pending.delete(messageId)
     if (deps.sessionGenerationRef.current !== generation) return
     void fetchAndUpsert(deps, messageId, generation).then(undefined, () =>
-      scheduleMissedRowRetry(deps, messageId, attempt + 1)
+      scheduleMissedRowRetry(deps, messageId, generation, attempt + 1)
     )
   }, MISSED_REFETCH_RETRY_MS)
 }
@@ -43,8 +46,12 @@ export function handleMissedMessageFrame(
   deps: RowRefetchDeps,
   messageId: string
 ): void {
-  void fetchAndUpsert(deps, messageId).then(undefined, () => {
-    scheduleMissedRowRetry(deps, messageId, 1)
+  // 代次快照钉在首次点读点火时刻（#1297 r2 P1）：点读在途期间切换会话后，
+  // 失败回调里现读 ref 会拿到新会话代次——去重条目与重试链都必须沿用
+  // 点火快照，否则旧会话的点读/重试以新代次通过守卫，写入当前会话列表。
+  const generation = deps.sessionGenerationRef.current
+  void fetchAndUpsert(deps, messageId, generation).then(undefined, () => {
+    scheduleMissedRowRetry(deps, messageId, generation, 1)
     void deps
       .refillMessages()
       .then((hasTerminal) => {

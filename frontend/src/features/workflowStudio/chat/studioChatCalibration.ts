@@ -88,9 +88,11 @@ export type RowRefetchDeps = {
   /** 会话选择代次（#1237 codex P2-1）：异步落地前复核——A→B→A 后
    * sessionId 相同，只有代次能识别早先选择的迟到响应。 */
   sessionGenerationRef: { current: number }
-  /** missed 帧点读重试链的去重表（#1289）：id → 挂链时的会话代次。同代次
-   * 已有待定链时不叠加（重复 missed 帧不倍增重试）；代次推进后旧条目不再
-   * 占用（A→B→A 回来可重新挂链），旧链点火时被代次守卫拦下。 */
+  /** missed 帧点读重试链的去重表（#1289）：id → 链生效的代次快照（首次
+   * 点读点火时捕获，全链沿用，#1297 r2 P1——挂链时现读会拿到切换后的
+   * 新代次）。同代次已有待定链时不叠加（重复 missed 帧不倍增重试）；
+   * 代次推进后旧条目不再占用（A→B→A 回来可重新挂链），旧链点火时被
+   * 代次守卫拦下。 */
   missedRetryRef: { current: Map<string, number> }
   setMessages: (updater: (current: ChatMessage[]) => ChatMessage[]) => void
   refillMessages: (fromSeq?: number) => Promise<boolean | undefined>
