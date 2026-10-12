@@ -10,6 +10,7 @@ from server.app.db.connection import connect_database
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, LeaseClaimRequest
 from server.app.jobs import JobQueries
+from server.app.jobs.queries import token_usage_capture
 from server.app.services import token_usage_lease
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -257,15 +258,21 @@ def test_finish_lease_parses_events_outside_write_transaction(lease_repo, monkey
         ],
     )
 
-    real_parse = token_usage_lease.parse_token_usage_for_lease
-    real_persist = token_usage_lease.persist_node_run_usage
-    in_transaction_at = {"parse": None, "persist": None, "persist_after": None}
+    real_parse = token_usage_lease.parse_lease_run_usage
+    real_persist = token_usage_capture.persist_node_run_usage
+    calls: list[str] = []
+    in_transaction_at = {"persist": None, "persist_after": None}
 
-    def spy_parse(conn, lease_id, data_dir_arg):
-        in_transaction_at["parse"] = conn.in_transaction
-        return real_parse(conn, lease_id, data_dir_arg)
+    def spy_parse(source, data_dir_arg):
+        # #1239: the parse step is pure filesystem (the facade already
+        # released its read checkout), so "parse outside any write
+        # transaction" is structural; the ordering pin below replaces the
+        # old conn.in_transaction sample.
+        calls.append("parse")
+        return real_parse(source, data_dir_arg)
 
     def spy_persist(conn, summary):
+        calls.append("persist")
         in_transaction_at["persist"] = conn.in_transaction
         try:
             return real_persist(conn, summary)
@@ -279,8 +286,8 @@ def test_finish_lease_parses_events_outside_write_transaction(lease_repo, monkey
             # be INTRANS.
             in_transaction_at["persist_after"] = conn.in_transaction
 
-    monkeypatch.setattr(token_usage_lease, "parse_token_usage_for_lease", spy_parse)
-    monkeypatch.setattr(token_usage_lease, "persist_node_run_usage", spy_persist)
+    monkeypatch.setattr(token_usage_lease, "parse_lease_run_usage", spy_parse)
+    monkeypatch.setattr(token_usage_capture, "persist_node_run_usage", spy_persist)
 
     result = ExecutionResult(
         status="completed",
@@ -292,9 +299,10 @@ def test_finish_lease_parses_events_outside_write_transaction(lease_repo, monkey
 
     assert repo.finish(claimed.lease_id, result) is True
 
-    # The events.jsonl parse must run outside any write transaction; only the
-    # short persist step may hold the write lock.
-    assert in_transaction_at["parse"] is False
+    # Sequential-checkouts contract (#1239): the events.jsonl parse runs
+    # between the facade's read and write checkouts; only the short persist
+    # step may hold the write transaction.
+    assert calls == ["parse", "persist"]
     assert in_transaction_at["persist_after"] is True
 
     with closing(connect_database(repo.path)) as conn, conn:

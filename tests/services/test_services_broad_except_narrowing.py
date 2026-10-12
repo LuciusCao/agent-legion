@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import logging
-from contextlib import contextmanager
 from pathlib import Path
 
 import psycopg
@@ -232,46 +231,15 @@ def test_stage_outputs_programming_error_propagates_uncaught(tmp_path: Path) -> 
 # ---------------------------------------------------------------------------
 
 
-class _UsageConn:
-    def execute(self, sql: str, params: tuple | None = None):
-        class _Row:
-            def __init__(self, data: dict) -> None:
-                self._data = data
+class _FakeJobDb:
+    """Facade stand-in: a real read source, and a persist that must not run
+    when the parse step failed."""
 
-            def __getitem__(self, key: str):
-                return self._data[key]
+    def read_lease_token_usage_source(self, lease_id: str) -> dict:
+        return {"workspace_id": "ws", "node_run": {"run_dir": "jobs/j1/runs/node_a/tok"}}
 
-        if "executor_leases" in sql:
-            return _Result([_Row({"node_run_id": "nr-1", "workspace_id": "ws"})])
-        if "node_runs" in sql:
-            return _Result([_Row({"run_dir": "jobs/j1/runs/node_a/tok"})])
-        return _Result([])
-
-
-class _Result:
-    def __init__(self, rows: list) -> None:
-        self._rows = rows
-
-    def fetchone(self):
-        return self._rows[0] if self._rows else None
-
-    def fetchall(self):
-        return self._rows
-
-
-def _stub_lease_transaction(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Route the lease module's pooled read checkout at a fake connection."""
-
-    @contextmanager
-    def _fake_read_connection(_dsn):
-        yield _UsageConn()
-
-    class _FakeTransaction:
-        read_connection = staticmethod(_fake_read_connection)
-
-    import server.app.services.token_usage_lease as lease_module
-
-    monkeypatch.setattr(lease_module, "transaction", _FakeTransaction)
+    def persist_lease_token_usage(self, summary) -> None:
+        raise AssertionError("persist must not run when the parse step failed")
 
 
 def test_capture_token_usage_swallows_oserror(caplog, monkeypatch) -> None:
@@ -279,16 +247,13 @@ def test_capture_token_usage_swallows_oserror(caplog, monkeypatch) -> None:
     （debug 日志），完成路径不受影响。"""
     import server.app.services.token_usage_lease as lease_module
 
-    def _failing_parse(conn, lease_id: str, data_dir: Path):
+    def _failing_parse(source: dict, data_dir: Path):
         raise OSError("connection reset")
 
-    _stub_lease_transaction(monkeypatch)
-    monkeypatch.setattr(lease_module, "parse_token_usage_for_lease", _failing_parse)
+    monkeypatch.setattr(lease_module, "parse_lease_run_usage", _failing_parse)
 
     with caplog.at_level(logging.DEBUG, logger="server.app.services.token_usage_lease"):
-        capture_token_usage_after_lease_finish(
-            "postgresql://invalid/test", "lease-1", Path("/data")
-        )
+        capture_token_usage_after_lease_finish(_FakeJobDb(), "lease-1", Path("/data"))
 
     assert "Failed to capture token usage" in caplog.text
 
@@ -297,16 +262,13 @@ def test_capture_token_usage_propagates_programming_error(monkeypatch) -> None:
     """#204 窄化：注入的编程错误（TypeError）上抛，不再静默 debug 掉。"""
     import server.app.services.token_usage_lease as lease_module
 
-    def _broken_parse(conn, lease_id: str, data_dir: Path):
+    def _broken_parse(source: dict, data_dir: Path):
         raise TypeError("parse contract violation")
 
-    _stub_lease_transaction(monkeypatch)
-    monkeypatch.setattr(lease_module, "parse_token_usage_for_lease", _broken_parse)
+    monkeypatch.setattr(lease_module, "parse_lease_run_usage", _broken_parse)
 
     with pytest.raises(TypeError, match="parse contract violation"):
-        capture_token_usage_after_lease_finish(
-            "postgresql://invalid/test", "lease-1", Path("/data")
-        )
+        capture_token_usage_after_lease_finish(_FakeJobDb(), "lease-1", Path("/data"))
 
 
 # ---------------------------------------------------------------------------
