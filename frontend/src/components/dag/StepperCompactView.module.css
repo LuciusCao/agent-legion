@@ -1,0 +1,62 @@
+/* 紧凑形态（#1257）：数字进度 + 可选当前节点名 + 细进度条；宽度跟随父
+   track，DOM 与节点数无关。 */
+.compact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.compactRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.compactCount {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  color: #43474e;
+}
+
+.compactCount[data-status='completed'] {
+  color: var(--status-completed-text);
+}
+
+.compactCount[data-status='running'] {
+  color: var(--status-running-text);
+}
+
+.compactCount[data-status='failed'] {
+  color: var(--status-failed-text);
+}
+
+.compactLabel {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: #43474e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compactTrack {
+  width: 100%;
+  height: 4px;
+  border-radius: 4px;
+  background: #e0e0e0;
+  overflow: hidden;
+}
+
+.compactFill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--status-completed-border);
+  transition: width 200ms ease;
+}

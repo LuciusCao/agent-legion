@@ -142,3 +142,92 @@ describe('JobNodeStepper', () => {
     expect(screen.getByRole('list', { name: '节点进度' }).style.gap).toBe('1px')
   })
 })
+
+describe('JobNodeStepper 紧凑形态 (#1257)', () => {
+  const makeMany = (count: number): JobNodeSummary[] =>
+    Array.from({ length: count }, (_, i) => ({
+      node_key: `node-${i}`,
+      label: `节点 ${i}`,
+      status:
+        i < 10 ? 'completed' : i === 10 ? 'running' : ('pending' as const),
+      error_message: '',
+    }))
+
+  it('switches to compact form at 51 nodes and stops rendering per-node segments', () => {
+    const { container } = render(
+      <JobNodeStepper nodeSummaries={makeMany(51)} activeNodeKey="node-10" />
+    )
+
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0)
+    expect(screen.queryByRole('list')).not.toBeInTheDocument()
+    const progress = screen.getByRole('progressbar', { name: '节点进度' })
+    expect(progress).toHaveAttribute('aria-valuemax', '51')
+    expect(progress).toHaveAttribute('aria-valuenow', '10')
+    expect(progress).toHaveAttribute('aria-valuetext', '11/51 节点 10')
+    // DOM 规模与节点数无关：51 与 200 节点的渲染量一致，不会溢出/挤压。
+    expect(container.querySelectorAll('div').length).toBeLessThan(10)
+  })
+
+  it('shows the current/total count with the current node status at 200 nodes', () => {
+    render(
+      <JobNodeStepper nodeSummaries={makeMany(200)} activeNodeKey="node-10" />
+    )
+
+    const count = screen.getByText('11/200')
+    expect(count).toHaveAttribute('data-status', 'running')
+    expect(count).toHaveAttribute('data-active', 'true')
+    expect(count).toHaveAttribute('title', '节点 10')
+  })
+
+  it('resolves the current node without an activeNodeKey (running > failed > pending)', () => {
+    const many = makeMany(60)
+    many[10].status = 'completed'
+    many[20].status = 'failed'
+    render(<JobNodeStepper nodeSummaries={many} />)
+
+    expect(screen.getByText('21/60')).toHaveAttribute('data-status', 'failed')
+  })
+
+  it('reports the last node and a full bar when all nodes completed', () => {
+    const many = makeMany(57).map((s) => ({
+      ...s,
+      status: 'completed' as const,
+    }))
+    render(<JobNodeStepper nodeSummaries={many} />)
+
+    expect(screen.getByText('57/57')).toHaveAttribute(
+      'data-status',
+      'completed'
+    )
+    const progress = screen.getByRole('progressbar', { name: '节点进度' })
+    expect(progress).toHaveAttribute('aria-valuenow', '57')
+    expect(progress.firstChild).toHaveStyle({ width: '100%' })
+  })
+
+  it('keeps the segmented form at exactly 50 nodes', () => {
+    render(<JobNodeStepper nodeSummaries={makeMany(50)} />)
+
+    expect(screen.getAllByRole('listitem')).toHaveLength(50)
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
+  it('supports a custom compactThreshold', () => {
+    render(
+      <JobNodeStepper nodeSummaries={makeMany(11)} compactThreshold={10} />
+    )
+
+    expect(screen.getByText('11/11')).toBeInTheDocument()
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0)
+  })
+
+  it('uses the compact form for placeholder segments from totalNodes', () => {
+    render(<JobNodeStepper nodeSummaries={[]} totalNodes={120} />)
+
+    const count = screen.getByText('1/120')
+    expect(count).toHaveAttribute('data-status', 'pending')
+    expect(screen.getByRole('progressbar')).toHaveAttribute(
+      'aria-valuenow',
+      '0'
+    )
+  })
+})
