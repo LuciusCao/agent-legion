@@ -19,8 +19,8 @@ import type { StudioChatMessageRecord } from './studioChatApi'
  * 校准后对仍在途的行逐个重取（最近 terminal 截断，#1290；terminal 当轮
  * 到达时截断按合入后的快照计算，#1300）；点读落地前校验本地行未被更新
  * 的 SSE 快照超越（点火整行快照 #1299 + 终态/长度比较 #1288；整行冲突
- * 丢弃后按 updater 观察补一次收口点读防 SSE 丢失导致的永停中间态，
- * #1305）；missed 帧
+ * 丢弃后按权威 messagesRef 复核补一次收口点读，防 SSE 丢失导致的永停
+ * 中间态，#1305）；missed 帧
  *（未知 id）的点读与失败有界重试（#1289）在 studioChatMissedRefetch
  *（复用本模块的 fetchAndUpsert）。行分类谓词（isTerminalStatus /
  * hasInFlightToolCall）从 studioChatEvents 迁居于此——events 与本模块
@@ -95,8 +95,10 @@ export type RowRefetchDeps = {
   /** 会话选择代次（#1237 codex P2-1）：异步落地前复核——A→B→A 后
    * sessionId 相同，只有代次能识别早先选择的迟到响应。 */
   sessionGenerationRef: { current: number }
-  /** 消息列表 ref：calibrate 入口取在途行快照；点读点火时快照本地行
-   *（#1299，落地整行比对守卫）。 */
+  /** 消息列表 ref（权威，#1305 复验 codex r2 P1）：useStudioChat 的包装
+   * setter 让全部写入入队即同步落地——恒等于「已提交 state + 已排队
+   * updater」，读取不滞后于已处理事件、不依赖渲染冲刷。calibrate 入口取
+   * 在途行快照；点读点火/落地快照本地行（#1299 整行比对 + #1305 收口决定）。 */
   messagesRef: { current: ChatMessage[] }
   /** missed 帧点读重试链的去重表（#1289）：id → 链生效的代次快照（首次
    * 点读点火时捕获，全链沿用，#1297 r2 P1——挂链时现读会拿到切换后的
@@ -159,24 +161,24 @@ export function fetchAndUpsert(
     // #1305：整行偏离按「本地已被更新 SSE 改写」丢弃（#1299），但偏离也可能
     // 是服务端在途持久化、SSE 丢失的更新快照被误丢——丢弃后补一次收口点读
     //（仅一次）让最新库快照落地，消除「服务端已更新但界面永停中间态」。
-    // 收口决定由 updater 实际观察到的冲突驱动（conflicted 标记），不能事后
-    // 读 messagesRef——ref 由被动效应同步，SSE 已排入 state 而未同步 ref 时
-    // 读 ref 仍是点火快照，会漏挂收口（复验 r1 P1）。标记的读取与收口点读
-    // 同处宏任务：存量更新排队时 React 跳过急切求值、updater 延迟执行，
-    // 同步读标记只会拿到未定的 false（复验 r2 finding）；宏任务时渲染冲刷
-    // 已定局、标记才是终值，且被动效应已同步 ref，点火快照不再滞后。
-    let conflicted = false
+    // 收口决定与 updater 的丢弃决定读同一事实：messagesRef 是权威 ref——
+    // useStudioChat 的包装 setter 让全部写入入队即同步落地 ref（复验 codex
+    // r2 P1：不猜 React 调度，不用定时器等 updater）；updater 丢弃 ⟺ 此前
+    // 有入队行变更 ⟺ 此处读 ref 必偏离，冲突必收口。
+    const localNow = deps.messagesRef.current.find((m) => m.id === message.id)
     deps.setMessages((current) => {
-      // conflicted 幂等置位（true 不翻回），updater 在 StrictMode 双调用下安全。
+      // 守卫均为纯读，updater 在 StrictMode 双调用下安全。
       const local = current.find((m) => m.id === message.id)
-      conflicted ||= local !== undefined && JSON.stringify(local) !== firedWith
-      if (conflicted) return current
+      if (local && JSON.stringify(local) !== firedWith) return current
       if (local && isLocalRowFresher(local, message)) return current
       return upsertMessage(current, message) ?? current
     })
-    const refire = () =>
+    if (
+      allowConflictRefire &&
+      localNow &&
+      JSON.stringify(localNow) !== firedWith
+    )
       void fetchAndUpsert(deps, messageId, generation, false).catch(noop)
-    if (allowConflictRefire) setTimeout(() => conflicted && refire(), 0)
   })
 }
 

@@ -50,9 +50,8 @@ export function useStudioChatHistory({
 
   // 返回是否真正发起了一次拉取（提前返回 = 锁/闩锁/空列表拦截）。
   // oldestSeqHint：触发方当前渲染快照的最老游标（#1237 codex 八轮 P2）——
-  // 子组件 effect 触发的补拉不能依赖 messagesRef：它由父组件 passive
-  // effect 同步，子 effect 先跑时会读到上一轮的滞后值。直接调用（事件
-  // 回调等 commit 后时机）缺省回退 messagesRef。
+  // 缺省回退 messagesRef（权威 ref：全部写入入队即同步落地，#1305 复验
+  // codex r2 P1；子组件 effect 读滞后 ref 的窗口已不存在，hint 留作显式契约）。
   const loadOlderHistory = useCallback(
     // isRetry：自动重试触发的内部调用——重试自身失败不再续期（#1270，防
     // 持续故障下 2s 空转），等滚动/RO/新消息的自然触发再获得重试机会。
