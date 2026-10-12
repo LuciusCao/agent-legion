@@ -72,6 +72,12 @@ export function useDraftServerSync(
       return
     }
     if (serverDraft.definition_yaml == null) {
+      // #1226 七轮复审 P1：409 冲突在旗时，空态重取不得 hydrate——hydrate
+      // 会清掉刚建立的冲突（enterConflict 已清 pendingSave），controller
+      // 收敛 idle、画布未落盘文本离页静默丢失。基线代次已由冲突载荷推进，
+      // 无需补；幂等键也不落——冲突解除后的下一次空态重取仍应正常补
+      // hydrate（届时不在冲突态）。
+      if (controllerRef.current?.inConflict()) return
       // #1226 四轮 P1：草稿行消失（发布删除）不是「更旧」而是「无存档」，
       // 时间戳守卫不适用——按当前基线重 hydrate（空态响应携带当前代次，
       // hydrate 后下一次保存以该代次竞争），同一基线只补一次；复审 P2：

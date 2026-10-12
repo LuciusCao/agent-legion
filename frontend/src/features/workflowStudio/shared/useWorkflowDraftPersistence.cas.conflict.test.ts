@@ -214,6 +214,62 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突呈现与挂起', () =>
     expect(flushed?.ok).toBe(false)
   })
 
+  it('空态重取不得清掉 409 冲突（#1226 七轮复审 P1）', async () => {
+    /* 发布前已发出的 autosave 因发布推进代次收到 409（current_draft 全
+       null），enterConflict 建立冲突并清空 pendingSave；随后发布触发的
+       草稿查询才重取到 definition_yaml: null——旧实现对该空态无条件
+       hydrate，冲突被清、controller 收敛 idle、hasUnsaved()=false，画布
+       未落盘文本离页静默丢失。空态落地前必须看冲突态：在旗即保留
+       （基线代次已由冲突载荷推进），由用户显式二选一。 */
+    mocks.putWorkflowDraft.mockRejectedValue(
+      new WorkflowDraftConflictError({
+        message: 'Workflow draft conflict',
+        current_draft: {
+          definition_yaml: null,
+          updated_at: null,
+          generation: 9,
+        },
+      })
+    )
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+    expect(result.current.state.conflictDraftYaml).toBeNull()
+
+    // 发布后的空态重取到达（草稿行已删，代次 9）。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: null, updated_at: null, generation: 9 },
+    })
+
+    // 冲突必须保留——画布上的未落盘文本仍在守卫视野内（离页提示有原料）。
+    expect(result.current.state.conflict).toBe(true)
+    expect(result.current.hasUnsavedChanges()).toBe(true)
+  })
+
   it('a conflict keeps the user edits on the canvas (never silently reverted)', async () => {
     // 冲突只呈现（conflict 态 + conflictDraftYaml 供采用入口），画布上的
     // 用户编辑原样保留——由用户决定采用服务端草稿还是继续编辑。

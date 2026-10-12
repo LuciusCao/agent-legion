@@ -272,6 +272,13 @@ export class DraftSaveController {
     )
   }
 
+  /* #1226 七轮复审 P1：空态重取落地前的冲突探针（useDraftServerSync 空态
+     分支用）——409 冲突在旗时 hydrate 会清掉冲突（enterConflict 已清
+     pendingSave），画布未落盘文本被状态机遗忘、离页静默丢失。 */
+  inConflict(): boolean {
+    return this.state.conflict === true
+  }
+
   /* 卸载/workspace 切换：清理计时器（pending 的尾部编辑随 debounce 窗口
      丢弃，与旧行为一致；页面级离开由 useDraftUnloadGuard 的 flush 覆盖）。 */
   dispose = (): void => this.abortPending()
