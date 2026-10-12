@@ -82,18 +82,24 @@ def ensure_answerable_runtime(
             # A concurrent resume (or a renewal landing first) already
             # restored the channel — ride it, never spawn a second one.
             return session, runtime
-        if runtime is None:
+        if runtime is None and session["status"] != "error":
             # #1121 codex P2-2 (round 3): arriving here means an in-flight
             # auto-resume held this lock (old runtime torn down, new one not
             # yet registered) — the lock wait above already rode it out, so a
-            # still-absent runtime means a real orphan: hand back and let the
-            # caller's orphan projection own the stamp and the structured 409.
+            # still-absent runtime on a LIVE-claimed row (idle/running/...) is
+            # a real orphan: hand back and let the caller's orphan projection
+            # own the stamp and the structured 409.
             return session, None
         if session["status"] not in _AUTO_RESUMABLE_STATUSES:
             # Raced into a non-resumable shape (close, a turn claim, a manual
             # resume still spawning): hand back to the normal admission path,
             # whose fail-closed token check owns the refusal.
             return session, runtime
+        # #1238 codex 六轮：error + 无 runtime 同样是可恢复态（死 token 的
+        # turn 被停止后进程退出、启动失败、reap 后的僵尸行——row 都已落在
+        # resume 可认领的 error 上），走同一条 preflight/claim/spawn 链；
+        # runtime 缺席时 resume 的 teardown 是 no-op。真孤儿（行声称活态但
+        # 无 runtime）在上面已交还。
         # #1238 codex round 4: everything fallible prepares BEFORE the first
         # write — and its result rides the whole chain (the agent resolved
         # here is NOT re-resolved inside resume). The claim then moves

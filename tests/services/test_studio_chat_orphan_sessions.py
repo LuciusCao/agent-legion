@@ -14,7 +14,7 @@ import pytest
 from fastapi import HTTPException
 
 from server.app.routes.job_http import raise_job_http_error
-from server.app.services.job_errors import ConflictError
+from server.app.services.job_errors import ConflictError, InvalidOperationError
 from server.app.studio_chat.session_orphan import (
     ORPHAN_ERROR_DETAIL,
     SESSION_INTERRUPTED_CODE,
@@ -78,11 +78,14 @@ def test_interrupted_error_maps_to_409_with_payload_detail() -> None:
 
 
 def test_send_to_already_errored_session_does_not_restamp(chat, job_db) -> None:
+    """error 行无 runtime：#1238 六轮起发送会尝试自动 resume（可恢复态），
+    本用例的 agent 未注册 → preflight 拒绝且零写入——原有 error_detail
+    不被覆盖、时间线不变、无二次 spawn。"""
     service, _bus, _register, workspace_id, user_id = chat
     sid = _orphan(job_db, workspace_id, user_id, "error")
     job_db.update_studio_chat_session(sid, error_detail="agent process exited")
 
-    with pytest.raises(StudioChatSessionInterruptedError):
+    with pytest.raises(InvalidOperationError, match="Unknown studio agent"):
         service.send_message(sid, workspace_id, "hi")
 
     assert job_db.get_studio_chat_session(sid)["error_detail"] == "agent process exited"

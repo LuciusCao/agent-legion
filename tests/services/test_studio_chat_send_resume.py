@@ -160,6 +160,37 @@ def test_auto_resume_mints_token_for_the_current_sender(chat) -> None:
     assert _user_texts(service, sid, workspace_id) == ["first question", "from the editor"]
 
 
+def test_error_session_without_runtime_auto_resumes(chat) -> None:
+    """#1238 codex 六轮：token 在运行中的 turn 内失效 → 升级 error + 请求停止
+    → 进程退出后 runtime 被正常移除。此时会话是「error 且无 runtime」的可
+    恢复态——下一次发送必须走 preflight/claim/spawn 链自动恢复，而不是按
+    孤儿 409 把用户推回手动「继续对话」。真孤儿（无 runtime 且行仍声称
+    idle/running 等活态）才拒绝。"""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(WAIT_FOR_CANCEL_SCRIPT)
+    sid = service.create_session(workspace_id, user_id, "fake-agent")["id"]
+    service.send_message(sid, workspace_id, "first question")
+    _wait_for(lambda: service.get_session(sid)["status"] == "running")
+    runtime = service.runtime(sid)
+    assert runtime is not None
+    _expire_token(service.db, runtime.token)
+    with pytest.raises(ConflictError, match="继续对话"):
+        service.send_message(sid, workspace_id, "during the doomed turn")
+    _wait_for(lambda: service.get_session(sid)["status"] == "error")
+    # 进程退出收尾移除 runtime（finish_session_exit 的常态路径）。
+    service.teardown_runtime(sid, service.runtime(sid))
+    assert service.runtime(sid) is None
+    assert service.get_session(sid)["status"] == "error"
+
+    script_path.write_text(json.dumps(TEXT_SCRIPT), encoding="utf-8")
+    message = service.send_message(sid, workspace_id, "after the exit")
+
+    assert message["content"]["text"] == "after the exit"
+    _wait_for(lambda: _idle(service, sid))
+    assert _user_texts(service, sid, workspace_id) == ["first question", "after the exit"]
+    assert len(_requests(_read_sink(script_path), "initialize")) == 2
+
+
 def test_concurrent_sends_on_dead_token_resume_once(chat, monkeypatch) -> None:
     """Two sends racing a dead token: the loser blocks on the per-session
     resume lock and rides the winner's fresh runtime — exactly one respawn,
