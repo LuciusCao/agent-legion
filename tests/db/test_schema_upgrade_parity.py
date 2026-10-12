@@ -43,23 +43,25 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v94, agent_worker_node_limits) must leave
-# behind so the undo step rewinds a current-shape database to exactly the
-# previous recorded version. v94 is DDL-only: one guarded ALTER adding
-# agent_workers.node_concurrency_limits_json (#1158); dropping the column
-# rewinds to v93. (v93 sits below: its agent_profile_backfill_backups table
-# stays applied.)
+# Effects the newest migration (v95, studio_chat_message_draft_kind) must
+# leave behind so the undo step rewinds a current-shape database to exactly
+# the previous recorded version. v95 is DDL-only: a guarded drop+add widening
+# the studio_chat_messages kind check with 'draft' (#1123); re-adding the
+# pre-v95 constraint rewinds to v94. (v94 sits below: its
+# agent_workers.node_concurrency_limits_json column stays applied.)
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("agent_workers", "node_concurrency_limits_json", "text"),
-)
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "agent_worker_node_limits"
+_NEWEST_MIGRATION_NAME = "studio_chat_message_draft_kind"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the rewound database is a faithful
-# v93 (v94 only adds a column: nothing to recreate).
-_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
+# v94 (v95 only widens a CHECK: restore the pre-v95 kind list).
+_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = (
+    "alter table studio_chat_messages drop constraint if exists studio_chat_messages_kind_check",
+    "alter table studio_chat_messages add constraint studio_chat_messages_kind_check"
+    " check(kind in ('text', 'tool_call', 'plan', 'permission', 'status', 'thought'))",
+)
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]

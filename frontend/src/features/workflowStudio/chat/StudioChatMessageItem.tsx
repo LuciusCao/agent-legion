@@ -5,16 +5,19 @@ import {
   textContent,
   type ChatMessage,
   type ToolCallView,
-  type WorkflowDraftView,
-  type NodeCodeDraftView,
   type PermissionView,
 } from './studioChatMessages'
+import type {
+  MergedNodeCodeDraft,
+  MergedWorkflowDraft,
+} from './studioChatDraftEvents'
 import type { QueuedMessageState } from './studioChatTurnRecovery'
 import { StatusLine } from './StudioChatStatusLine'
 import { StudioChatTextBubble } from './StudioChatTextBubble'
 import { StudioChatToolCallCard } from './StudioChatToolCallCard'
 import { StudioChatPermission } from './StudioChatPermission'
 import { StudioChatThought } from './StudioChatThought'
+import { DraftMessageCards } from './DraftMessageCards'
 import { NodeCodeDraftCard } from './StudioChatDraftCards'
 import { WorkflowDraftCard } from './WorkflowDraftCard'
 import styles from './StudioChatPanel.module.css'
@@ -27,8 +30,8 @@ export type MessageItemProps = {
   toolCall: ToolCallView | null
   permission: PermissionView | null
   draftAnchorId: string | null
-  workflowDraft: WorkflowDraftView | null
-  nodeDrafts: NodeCodeDraftView[]
+  workflowDraft: MergedWorkflowDraft | null
+  nodeDrafts: MergedNodeCodeDraft[]
   allowAllPermissions: boolean
   permissionDisabled: boolean
   workspaceId: string
@@ -102,6 +105,19 @@ export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
             />
           ))}
       </div>
+    )
+  }
+  // #1123：合成 draft_saved 事件的消息行——卡片只在其胜出锚点上渲染。
+  if (message.kind === 'draft') {
+    return (
+      <DraftMessageCards
+        messageId={message.id}
+        workflowDraft={workflowDraft}
+        nodeDrafts={nodeDrafts}
+        workspaceId={workspaceId}
+        onApplyWorkflowDraft={onApplyWorkflowDraft}
+        onSelectNode={onSelectNode}
+      />
     )
   }
   if (message.kind === 'plan') {

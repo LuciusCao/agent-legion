@@ -48,7 +48,14 @@ function sessionRecord(
 function chatMessage(
   id: string,
   seq: number,
-  kind: 'text' | 'tool_call' | 'plan' | 'permission' | 'status' | 'thought',
+  kind:
+    | 'text'
+    | 'tool_call'
+    | 'plan'
+    | 'permission'
+    | 'status'
+    | 'thought'
+    | 'draft',
   role: 'user' | 'agent' | 'system',
   content: Record<string, unknown>
 ) {
@@ -316,6 +323,80 @@ describe('StudioChatPanel', () => {
       })
     )
     expect(await screen.findByText('变更摘要')).toBeInTheDocument()
+  })
+
+  it('renders a node draft card from a synthetic draft_saved event (subagent save, #1123)', async () => {
+    // 子代理保存不出 ACP tool_call 消息：时间线里只有后端补写的合成
+    // kind='draft' 事件，卡片与发布入口照常出现。
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'draft', 'agent', {
+        event: 'draft_saved',
+        draft_type: 'node_code',
+        node_key: 'intake_knowledge_points',
+        code_hash: 'hash-1',
+      }),
+    ])
+    renderPanel()
+
+    expect(
+      await screen.findByText('节点代码草稿：intake_knowledge_points')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('已存为服务端草稿，发布后新执行才使用')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '发布节点代码' })
+    ).toBeInTheDocument()
+  })
+
+  it('shows exactly one card when both the tool call and the synthetic event exist (#1123 dedup)', async () => {
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'tool_call', 'agent', {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'call-1',
+        title: 'save_node_code_draft',
+        status: 'completed',
+        rawInput: { workspace_id: 'ws1', node_key: 'intake_knowledge_points' },
+        rawOutput: {
+          content: [{ type: 'text', text: '{"code_hash": "hash-1"}' }],
+        },
+      }),
+      chatMessage('m2', 2, 'draft', 'agent', {
+        event: 'draft_saved',
+        draft_type: 'node_code',
+        node_key: 'intake_knowledge_points',
+        code_hash: 'hash-1',
+      }),
+    ])
+    renderPanel()
+
+    await screen.findByText('节点代码草稿：intake_knowledge_points')
+    expect(
+      screen.getAllByText('节点代码草稿：intake_knowledge_points')
+    ).toHaveLength(1)
+    expect(
+      screen.getAllByRole('button', { name: '发布节点代码' })
+    ).toHaveLength(1)
+  })
+
+  it('applies a workflow draft carried only by a synthetic event (#1123)', async () => {
+    const yaml = 'key: demo_video_workflow\nnodes: []\n'
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'draft', 'agent', {
+        event: 'draft_saved',
+        draft_type: 'workflow',
+        definition_yaml: yaml,
+        definition_hash: 'dh-1',
+      }),
+    ])
+    const onApplyWorkflowDraft = vi.fn()
+    renderPanel({ onApplyWorkflowDraft })
+
+    const apply = await screen.findByRole('button', { name: '应用到编辑器' })
+    // 未经 validate 的合成事件如实标注「未通过校验」。
+    expect(screen.getByText(/未通过校验/)).toBeInTheDocument()
+    fireEvent.click(apply)
+    expect(onApplyWorkflowDraft).toHaveBeenCalledWith(yaml)
   })
 
   it('pushes the Studio node selection to the active session context', async () => {

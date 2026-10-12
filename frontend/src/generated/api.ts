@@ -7147,7 +7147,14 @@ export interface components {
        * Kind
        * @enum {string}
        */
-      kind: 'text' | 'tool_call' | 'plan' | 'permission' | 'status' | 'thought'
+      kind:
+        | 'text'
+        | 'tool_call'
+        | 'plan'
+        | 'permission'
+        | 'status'
+        | 'thought'
+        | 'draft'
       /**
        * Role
        * @enum {string}
@@ -11338,7 +11345,9 @@ export interface operations {
   save_node_code_draft_api_studio_agent_tools_workspaces__workspace_id__nodes__node_key__code_draft_put: {
     parameters: {
       query?: never
-      header?: never
+      header?: {
+        'x-agent-legion-mcp-session-id'?: string | null
+      }
       path: {
         workspace_id: string
         node_key: string
@@ -11842,7 +11851,9 @@ export interface operations {
   save_workflow_draft_route_api_studio_agent_tools_workspaces__workspace_id__workflow_draft_put: {
     parameters: {
       query?: never
-      header?: never
+      header?: {
+        'x-agent-legion-mcp-session-id'?: string | null
+      }
       path: {
         workspace_id: string
       }
