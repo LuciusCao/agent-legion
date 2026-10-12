@@ -2,8 +2,8 @@
 
 Pins the migration side: fresh installs and upgrades from pre-v96 both land
 the table, and the chain tail carries the v96 name. Mirrors
-test_agent_worker_claim_state_migration.py (v87). Numbered past
-origin/main's v94 (#434 collision protocol).
+test_agent_worker_claim_state_migration.py (v87). Renumbered past main's
+v95 (studio_chat_message_draft_kind, #434 collision protocol).
 """
 
 from __future__ import annotations
