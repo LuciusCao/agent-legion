@@ -441,6 +441,7 @@
     "frontend/src/features/workflowStudio/chat/thoughtLevel.ts": 84,
     "frontend/src/features/workflowStudio/chat/useChatAutoScroll.ts": 28,
     "frontend/src/features/workflowStudio/chat/useChatPrependAnchor.ts": 82,
+    "frontend/src/features/workflowStudio/chat/useChatScroll.ts": 16,
     "frontend/src/features/workflowStudio/chat/useInFlightSend.ts": 29,
     "frontend/src/features/workflowStudio/chat/useStudioChat.ts": 273,
     "frontend/src/features/workflowStudio/chat/useStudioChatAgentConfig.ts": 76,

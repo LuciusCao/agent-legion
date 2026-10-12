@@ -1,7 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useChatAutoScroll } from './useChatAutoScroll'
-import { useChatPrependAnchor } from './useChatPrependAnchor'
+import { useChatScroll } from './useChatScroll'
 import { StudioChatWindow } from './StudioChatWindow'
 import type { ChatMessage } from './studioChatMessages'
 
@@ -80,8 +79,8 @@ class ResizeObserverStub {
   }
 }
 
-// 与生产组合一致（StudioChatMessageList）：useChatPrependAnchor 产出到顶
-// 回调（锚点捕获 + 触发加载），交给 useChatAutoScroll 的滚动处理器。
+// 与生产组合一致（StudioChatMessageList → useChatScroll）：自动跟底 +
+// 到顶/未溢出加载 + prepend 锚定补偿。
 function Harness({
   messages,
   virtual = false,
@@ -91,9 +90,10 @@ function Harness({
   virtual?: boolean
   onLoadOlder?: () => void
 }) {
-  const onNearTop = useChatPrependAnchor(messages, onLoadOlder ?? (() => {}))
-  const { bottomRef, listRef, handleScroll, pinnedToBottomRef } =
-    useChatAutoScroll(messages, onNearTop)
+  const { bottomRef, listRef, handleScroll, pinnedToBottomRef } = useChatScroll(
+    messages,
+    onLoadOlder ?? (() => {})
+  )
   return (
     <div ref={listRef} data-testid="list" onScroll={handleScroll}>
       {virtual ? (

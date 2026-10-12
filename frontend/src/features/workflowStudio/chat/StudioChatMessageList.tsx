@@ -1,7 +1,6 @@
 import { useCallback, useMemo } from 'react'
 import type { StudioChat } from './useStudioChat'
-import { useChatAutoScroll } from './useChatAutoScroll'
-import { useChatPrependAnchor } from './useChatPrependAnchor'
+import { useChatScroll } from './useChatScroll'
 import {
   asText,
   statusEvent,
@@ -25,11 +24,10 @@ type Props = {
 
 export function StudioChatMessageList(props: Props) {
   const { chat } = props
-  const { bottomRef, listRef, handleScroll, pinnedToBottomRef } =
-    useChatAutoScroll(
-      chat.messages,
-      useChatPrependAnchor(chat.messages, chat.loadOlderHistory)
-    )
+  const { bottomRef, listRef, handleScroll, pinnedToBottomRef } = useChatScroll(
+    chat.messages,
+    chat.loadOlderHistory
+  )
   // Memoized: during streaming every SSE message event re-renders this list;
   // the toolCall lookup is O(messages × toolCalls) if rebuilt naively, and a
   // Map keyed by toolCallId makes it O(messages + toolCalls).
