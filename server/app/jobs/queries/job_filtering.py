@@ -15,9 +15,12 @@ _STATUS_BUCKET_SQL = (
 )
 
 # Active-node semantics mirror JobQueryService._job_summary (#1277): a running
-# node is active; otherwise the first node by id in scheduler-priority order
+# node is active; otherwise the first node in scheduler-priority order
 # failed → awaiting_approval → ready (failed outranks a parked approval gate,
-# matching summarize_job_status).
+# matching summarize_job_status). The within-priority tie-break is job_nodes.id
+# on both sides (#1294): the SQL cannot reproduce the DAG topological rank
+# (edges are not relational), so the summary adopts id order, keeping the
+# ?active_node_key= filter, facet node_counts and list rows consistent.
 _ACTIVE_NODE_CLAUSE = """
 (exists (
   select 1 from job_nodes jn

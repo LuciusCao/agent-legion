@@ -84,6 +84,21 @@ describe('stepperCompactInfo (#1257)', () => {
     expect(stepperCompactInfo(segments)?.currentKey).toBe('c')
   })
 
+  it('prefers the failed node over a parked approval gate in parallel branches (#1292)', () => {
+    // 并行分支「一门一败」：failed 优先于 awaiting_approval/ready，与
+    // scheduler summarize_job_status 及 server _job_summary/JobListItem
+    // 口径一致（#1277/#1293）。
+    const segments = [
+      seg('gate', 'awaiting_approval'),
+      seg('next', 'ready'),
+      seg('boom', 'failed'),
+    ]
+    expect(stepperCompactInfo(segments)).toMatchObject({
+      currentKey: 'boom',
+      currentStatus: 'failed',
+    })
+  })
+
   it('uses the last node when everything is completed', () => {
     const info = stepperCompactInfo([
       seg('a', 'completed'),

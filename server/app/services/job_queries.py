@@ -89,13 +89,16 @@ class JobQueryService:
         # failed」时 job 级状态是 failed，active 节点也指向失败节点；
         # awaiting_approval/ready 同属「执行面当前所在」——停在审批门或
         # 就绪待跑时当前节点是门/就绪节点本身，不能落到下游首个 pending。
+        # 同优先级内的 tie-break 是 job_nodes.id（插入序，#1294），与
+        # job_filtering._ACTIVE_NODE_CLAUSE / facet node_counts 共享同一
+        # 语义：声明/插入序不保证等于拓扑序，而 SQL 侧无法复现拓扑位次
+        # （边不在关系表里），故摘要侧向 id 序对齐，保证 ?active_node_key=
+        # 过滤、facet 计数与列表行三者一致。
         active_node_key: str | None = None
         for active_status in ("running", "failed", "awaiting_approval", "ready"):
-            for summary in summaries:
-                if summary["status"] == active_status:
-                    active_node_key = summary["node_key"]
-                    break
-            if active_node_key is not None:
+            candidates = [node for node in nodes if str(node["status"]) == active_status]
+            if candidates:
+                active_node_key = str(min(candidates, key=lambda node: node["id"])["node_key"])
                 break
 
         error_summary = ""
