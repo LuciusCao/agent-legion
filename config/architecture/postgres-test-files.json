@@ -56,6 +56,7 @@
     "tests/db/test_jobs_run_id_index.py",
     "tests/db/test_jobs_workflow_key_alignment.py",
     "tests/db/test_material_bundles_schema.py",
+    "tests/db/test_material_upload_generation_migration.py",
     "tests/db/test_materials_schema.py",
     "tests/db/test_monitoring_hotpath_indexes.py",
     "tests/db/test_node_cms_config_migration.py",

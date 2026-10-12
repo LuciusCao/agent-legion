@@ -273,13 +273,16 @@ def test_complete_cas_rejects_key_rebuild_mid_verification(
     # 旧 key 的字节齐全（verify 按旧 key 会通过），模拟在途 complete。
     storage.objects[old_key] = payload
     real_verify = service._verify_object
+    injected: list[bool] = []
 
     def verify_then_rebuild(storage_arg, row):  # noqa: ANN001, ANN202
         outcome = real_verify(storage_arg, row)
-        # 并发 presign 重试：合法新文件名触发 key 重建（#1267 P2 路径）。
-        service.presign(
-            WORKSPACE_ID, filename="ok.txt", size_bytes=len(payload), content_hash=digest
-        )
+        if not injected:
+            injected.append(True)
+            # 并发 presign 重试：合法新文件名触发 key 重建（#1267 P2 路径）。
+            service.presign(
+                WORKSPACE_ID, filename="ok.txt", size_bytes=len(payload), content_hash=digest
+            )
         return outcome
 
     monkeypatch.setattr(service, "_verify_object", verify_then_rebuild)
@@ -354,6 +357,118 @@ def test_complete_cas_rejects_size_change_mid_verification(
 
     assert service.get(WORKSPACE_ID, "mat-cas-size")["status"] == "uploading"
     assert service.get(WORKSPACE_ID, "mat-cas-size")["size_bytes"] == 9
+
+
+def _generation_of(job_db, material_id: str) -> int:
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select upload_generation from materials where id=%s", (material_id,)
+        ).fetchone()
+    assert row is not None
+    return int(row["upload_generation"])
+
+
+def test_presign_retry_bumps_upload_generation(service, storage, job_db) -> None:
+    """#1267 codex R3 P1：每次重试（即使同 key 同大小）都推进上传代次，
+    让 uploading→uploading 的重试对 complete 的锁内复查可见。"""
+    digest = _sha256(b"gen")
+    result = service.presign(WORKSPACE_ID, filename="g.txt", size_bytes=1, content_hash=digest)
+    material_id = result["material"]["id"]
+    assert _generation_of(job_db, material_id) == 0
+
+    service.presign(WORKSPACE_ID, filename="g.txt", size_bytes=1, content_hash=digest)
+    assert _generation_of(job_db, material_id) == 1
+    service.presign(WORKSPACE_ID, filename="g.txt", size_bytes=1, content_hash=digest)
+    assert _generation_of(job_db, material_id) == 2
+
+
+def test_complete_cas_rejects_same_identity_retry_mid_verification(
+    service, storage, job_db, monkeypatch
+) -> None:
+    """#1267 codex R3 P1：同 key 同大小的重试不改 key/size，只靠代次可见——
+    verify 期间的这种重试同样必须让 complete 409。"""
+    payload = b"same-identity"
+    digest = _sha256(payload)
+    result = service.presign(
+        WORKSPACE_ID, filename="s.txt", size_bytes=len(payload), content_hash=digest
+    )
+    material_id = result["material"]["id"]
+    storage.objects[f"{WORKSPACE_ID}/{digest}/s.txt"] = payload
+    real_verify = service._verify_object
+
+    def verify_then_retry(storage_arg, row):  # noqa: ANN001, ANN202
+        outcome = real_verify(storage_arg, row)
+        # 并发重试：同 filename/同 size——key 与 size 都不变，只有代次 +1。
+        service.presign(
+            WORKSPACE_ID, filename="s.txt", size_bytes=len(payload), content_hash=digest
+        )
+        return outcome
+
+    monkeypatch.setattr(service, "_verify_object", verify_then_retry)
+
+    with pytest.raises(ConflictError, match="complete again"):
+        service.complete(WORKSPACE_ID, material_id)
+
+    assert service.get(WORKSPACE_ID, material_id)["status"] == "uploading"
+
+
+def test_complete_does_not_overwrite_concurrent_ready(
+    service, storage, job_db, monkeypatch
+) -> None:
+    """codex R3 P1 第二形态：并发两个 complete 同身份——本方 verify 失败但
+    行已被另一方落 ready 时，不得用 failed 覆盖 ready，幂等返回 ready。"""
+    payload = b"late-bytes"
+    digest = _sha256(payload)
+    result = service.presign(
+        WORKSPACE_ID, filename="late.txt", size_bytes=len(payload), content_hash=digest
+    )
+    material_id = result["material"]["id"]
+    key = f"{WORKSPACE_ID}/{digest}/late.txt"
+    real_verify = service._verify_object
+    injected: list[bool] = []
+
+    def verify_fail_then_other_complete_succeeds(storage_arg, row):  # noqa: ANN001, ANN202
+        outcome = real_verify(storage_arg, row)
+        if not injected:
+            injected.append(True)
+            # 本方核验时对象尚未上传（失败结论）……
+            assert outcome is not None
+            # ……其间另一个 complete 看到字节已落地并成功落 ready。
+            storage.objects[key] = payload
+            service.complete(WORKSPACE_ID, material_id)
+        return outcome
+
+    monkeypatch.setattr(service, "_verify_object", verify_fail_then_other_complete_succeeds)
+
+    record = service.complete(WORKSPACE_ID, material_id)
+
+    assert record["status"] == "ready"
+    assert service.get(WORKSPACE_ID, material_id)["status"] == "ready"
+
+
+def test_complete_rejects_expired_mid_verification(service, storage, job_db, monkeypatch) -> None:
+    """锁内复查同时钉住 status：verify 期间被 TTL 翻成 expired 的行不落 ready。"""
+    payload = b"expiring"
+    digest = _sha256(payload)
+    result = service.presign(
+        WORKSPACE_ID, filename="x.txt", size_bytes=len(payload), content_hash=digest
+    )
+    material_id = result["material"]["id"]
+    storage.objects[f"{WORKSPACE_ID}/{digest}/x.txt"] = payload
+    real_verify = service._verify_object
+
+    def verify_then_expire(storage_arg, row):  # noqa: ANN001, ANN202
+        outcome = real_verify(storage_arg, row)
+        with job_db.connect() as conn:
+            conn.execute("update materials set status='expired' where id=%s", (material_id,))
+        return outcome
+
+    monkeypatch.setattr(service, "_verify_object", verify_then_expire)
+
+    with pytest.raises(ConflictError, match="expired"):
+        service.complete(WORKSPACE_ID, material_id)
+
+    assert service.get(WORKSPACE_ID, material_id)["status"] == "expired"
 
 
 def test_presign_accepts_nested_relative_path(service, storage) -> None:

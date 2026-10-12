@@ -14,6 +14,9 @@ from server.app.db.migrations.agent_worker_node_limits import migrate_agent_work
 from server.app.db.migrations.job_node_status_count_deltas import (
     migrate_job_node_status_count_deltas as _migrate_v88_node_deltas,
 )
+from server.app.db.migrations.material_upload_generation import (
+    migrate_material_upload_generation,
+)
 from server.app.db.migrations.retire_default_workflow_key import (
     migrate_retire_default_workflow_key,
 )
@@ -69,4 +72,8 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # 并发上限的库存面（claim 时热同步，机器资源保护层）。DDL-only, same
     # guarded-ALTER home rule as v87.
     SchemaMigration(94, "agent_worker_node_limits", migrate_agent_worker_node_limits),
+    # v95 (#1267 codex R3 P1): materials.upload_generation — 每次 presign 重试
+    # +1 的上传代次，让同 key/同大小的 uploading→uploading 重试对 complete
+    # 的锁内复查可见。DDL-only, same guarded-ALTER home rule as v87.
+    SchemaMigration(95, "material_upload_generation", migrate_material_upload_generation),
 ]

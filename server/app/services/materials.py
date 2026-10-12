@@ -113,7 +113,10 @@ class MaterialsService:
 
         A ready row with the same declared content_hash is returned as-is
         (upload dedup, no URL); a stale uploading/failed row with the same
-        hash is reset to uploading so the upload can be retried.
+        hash is reset to uploading so the upload can be retried. Every such
+        reset bumps ``upload_generation`` (schema v95) so a same-key same-size
+        retry stays visible to complete()'s locked identity recheck (#1267
+        codex R3 P1).
         """
         validate_material_filename(filename)
         content_hash = content_hash.strip()
@@ -177,7 +180,9 @@ class MaterialsService:
                     # an invalid tail rebuilds the key from the validated request
                     # fields and the leftover old object is orphaned to the
                     # bucket lifecycle rule. A complete() racing this update is
-                    # serialized by its verified-identity CAS (R2 P1).
+                    # serialized by its locked identity recheck — the
+                    # generation bump below makes even a same-key same-size
+                    # reset visible to it (R2/R3 P1).
                     parts = storage_key.split("/", 2)
                     if len(parts) != 3 or invalid_material_filename_reason(parts[2]) is not None:
                         storage_key = f"{workspace_id}/{content_hash or material_id}/{filename}"
@@ -185,7 +190,7 @@ class MaterialsService:
                         """
                         update materials
                         set filename=%s, content_type=%s, size_bytes=%s, storage_key=%s,
-                          status='uploading'
+                          status='uploading', upload_generation = upload_generation + 1
                         where id=%s
                         """,
                         (filename, content_type, size_bytes, storage_key, material_id),
@@ -207,14 +212,16 @@ class MaterialsService:
         """Verify the stored object against the declaration and mark ready.
 
         Verification failures flip the row to failed so the client can retry
-        the upload (presign resets the row to uploading). Verification runs
-        outside any transaction (object I/O); the status write then rechecks
-        the verified identity (storage_key + size_bytes) under a row lock
+        the upload (presign resets the row to uploading and bumps the upload
+        generation). Verification runs outside any transaction (object I/O);
+        the status write then rechecks the verified identity (storage_key +
+        size_bytes + upload_generation) and the live status under a row lock
         (jobs/queries/material_locked_rereads) so a concurrent presign retry
-        — which may rebuild a legacy invalid key or change the declared size —
-        can never let a stale snapshot mark unverified bytes ready
-        (#1267 codex R2 P1). A mismatch raises 409 and the client simply calls
-        complete again (re-read, re-verify).
+        — even a same-key same-size one — can never let a stale snapshot mark
+        unverified bytes ready, and a concurrent ready can never be flipped
+        back by this call's own failure verdict (#1267 codex R2/R3 P1). An
+        identity mismatch raises 409 and the client simply calls complete
+        again (re-read, re-verify).
         """
         storage = self._require_storage()
         row = self._fetch_row(workspace_id, material_id)
@@ -224,8 +231,13 @@ class MaterialsService:
             raise ConflictError(f"Material is expired: {material_id}")
         failure = self._verify_object(storage, row)
         with write_transaction(self._connect_source) as conn:
-            assert_material_upload_identity_tx(conn, material_id, row)
-            if failure is not None:
+            locked_status = assert_material_upload_identity_tx(conn, material_id, row)
+            if locked_status == "ready":
+                # 并发 complete 已按同一身份落 ready：幂等，本方结论不覆盖。
+                pass
+            elif locked_status == "expired":
+                raise ConflictError(f"Material is expired: {material_id}")
+            elif failure is not None:
                 conn.execute(
                     "update materials set status='failed' where id=%s",
                     (material_id,),
@@ -234,7 +246,7 @@ class MaterialsService:
                 # TTL (design §10): expires_at from the instance setting,
                 # read fresh at every completion.
                 mark_ready(conn, self._connect_source, material_id)
-        if failure is not None:
+        if failure is not None and locked_status != "ready":
             raise MaterialVerificationError(failure)
         return _record(self._fetch_row(workspace_id, material_id))
 

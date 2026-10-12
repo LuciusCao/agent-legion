@@ -1177,6 +1177,7 @@
     "server/app/db/migrations/jobs_run_id_index.py": 14,
     "server/app/db/migrations/jobs_workflow_key_alignment.py": 42,
     "server/app/db/migrations/local_executor_removal.py": 23,
+    "server/app/db/migrations/material_upload_generation.py": 18,
     "server/app/db/migrations/node_cms_config.py": 112,
     "server/app/db/migrations/ops_runtime_profile_samples.py": 19,
     "server/app/db/migrations/preview_panels.py": 21,

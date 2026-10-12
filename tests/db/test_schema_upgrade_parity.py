@@ -43,22 +43,21 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v94, agent_worker_node_limits) must leave
+# Effects the newest migration (v95, material_upload_generation) must leave
 # behind so the undo step rewinds a current-shape database to exactly the
-# previous recorded version. v94 is DDL-only: one guarded ALTER adding
-# agent_workers.node_concurrency_limits_json (#1158); dropping the column
-# rewinds to v93. (v93 sits below: its agent_profile_backfill_backups table
-# stays applied.)
+# previous recorded version. v95 is DDL-only: one guarded ALTER adding
+# materials.upload_generation (#1267 codex R3 P1, upload generation for the
+# complete-time locked recheck); dropping the column rewinds to v94.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("agent_workers", "node_concurrency_limits_json", "text"),
+    ("materials", "upload_generation", "integer"),
 )
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "agent_worker_node_limits"
+_NEWEST_MIGRATION_NAME = "material_upload_generation"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the rewound database is a faithful
-# v93 (v94 only adds a column: nothing to recreate).
+# v94 (v95 only adds a column: nothing to recreate).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.
