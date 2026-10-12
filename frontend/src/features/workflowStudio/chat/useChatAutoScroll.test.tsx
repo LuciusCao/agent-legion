@@ -257,7 +257,11 @@ describe('useChatAutoScroll + useChatPrependAnchor（#1120 PR-4 / #1237）', () 
     stubMetrics(el, { scrollHeight: 7690, clientHeight: 400 })
     el.scrollTop = 50
     fireEvent.scroll(el)
-    const observer = ResizeObserverStub.instances[0]
+    // 内容观察器（useChatPrependAnchor，观察行/spacer）区别于
+    // useChatAutoScroll 的容器观察器（观察列表元素本身）。
+    const observer = ResizeObserverStub.instances.find(
+      (o) => o.observed.size > 0 && !o.observed.has(el)
+    )!
     expect(observer.observed.size).toBeGreaterThan(0)
 
     // prepend 100 行 → 越过 >80 阈值进入虚拟态（spacer 挂载）。
@@ -365,5 +369,26 @@ describe('useChatAutoScroll + useChatPrependAnchor（#1120 PR-4 / #1237）', () 
       />
     )
     expect(onLoadOlder).toHaveBeenCalledTimes(2)
+  })
+
+  it('Dock 隐藏（display:none 保活）时跳过补拉；重新显示恢复布局后重查（#1237 codex 九轮 P2）', () => {
+    const onLoadOlder = vi.fn()
+    const initial = batch('m', 1, 3)
+    const view = render(
+      <Harness messages={initial} onLoadOlder={onLoadOlder} />
+    )
+    const el = screen.getByTestId('list')
+    // Dock 隐藏：子树保持挂载但 clientHeight=0——首屏消息到达也不补拉。
+    stubMetrics(el, { scrollHeight: 300, clientHeight: 0 })
+    view.rerender(<Harness messages={[...initial]} onLoadOlder={onLoadOlder} />)
+    expect(onLoadOlder).not.toHaveBeenCalled()
+
+    // Dock 重新显示：只翻转祖先 hidden，messages 不变、短列表无滚动
+    // 事件——容器尺寸恢复必须由 ResizeObserver 捕获并重查补拉。
+    stubMetrics(el, { scrollHeight: 300, clientHeight: 400 })
+    act(() => {
+      for (const observer of ResizeObserverStub.instances) observer.fire()
+    })
+    expect(onLoadOlder).toHaveBeenCalledTimes(1)
   })
 })

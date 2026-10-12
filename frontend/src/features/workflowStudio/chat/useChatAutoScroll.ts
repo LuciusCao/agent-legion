@@ -12,6 +12,10 @@ export function useChatAutoScroll(
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
   const pinnedToBottomRef = useRef(true)
+  const onNearTopRef = useRef(onNearTop)
+  useEffect(() => {
+    onNearTopRef.current = onNearTop
+  })
 
   useEffect(() => {
     if (pinnedToBottomRef.current)
@@ -21,12 +25,23 @@ export function useChatAutoScroll(
   // 内容未溢出容器时滚动事件不会发生（贴顶触发路径不可达）：主动触发
   // 加载更早一页（#1237 codex 七轮 P2），直到溢出或无更多——防重入锁与
   // hasMore 闩锁在 loadOlderHistory 内，重复触发幂等。clientHeight 为 0
-  // （jsdom/未布局）时跳过。
-  useEffect(() => {
+  // 时跳过：jsdom/未布局，或 Dock 以 display:none 保活隐藏子树。
+  function checkAutoFill() {
     const el = listRef.current
     if (el && el.clientHeight > 0 && el.scrollHeight <= el.clientHeight)
-      onNearTop?.(el)
-  }, [messages, onNearTop])
+      onNearTopRef.current?.(el)
+  }
+  useEffect(checkAutoFill, [messages])
+
+  // Dock 隐藏→重新显示只翻转祖先 hidden：messages 不变、短列表无滚动
+  // 事件——监听容器尺寸，恢复布局时重查未溢出补拉（#1237 codex 九轮 P2）。
+  useEffect(() => {
+    const el = listRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(checkAutoFill)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   function handleScroll() {
     const el = listRef.current
