@@ -1,12 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import {
   calibrateWithRowRefetch,
-  handleMissedMessageFrame,
+  hasInFlightToolCall,
   inFlightInPlaceRowIds,
   type RowRefetchDeps,
 } from './studioChatCalibration'
+import { handleMissedMessageFrame } from './studioChatMissedRefetch'
 import { api } from '../../../api/core'
-import type { ChatMessage } from './studioChatMessages'
+import { upsertMessage, type ChatMessage } from './studioChatMessages'
 import type { StudioChatMessageRecord } from './studioChatApi'
 
 vi.mock('../../../api/core', () => ({ api: vi.fn() }))
@@ -41,12 +42,25 @@ function recordOf(message: ChatMessage): StudioChatMessageRecord {
   return { ...message }
 }
 
+function statusMessage(id: string, seq: number, event: string): ChatMessage {
+  return {
+    id,
+    session_id: 's1',
+    kind: 'status',
+    role: 'system',
+    content: { event },
+    seq,
+    created_at: '2026-01-01T00:00:00Z',
+  }
+}
+
 function makeDeps(current: ChatMessage[]) {
   const state = { messages: current }
   const deps: RowRefetchDeps & { messagesRef: { current: ChatMessage[] } } = {
     workspaceId: 'ws1',
     sessionId: 's1',
     sessionGenerationRef: { current: 1 },
+    missedRetryRef: { current: new Map<string, number>() },
     messagesRef: {
       get current() {
         return state.messages
@@ -192,5 +206,192 @@ describe('calibrateWithRowRefetch（#1236 窗口外在途行补取）', () => {
     await pending
     // 无修复时这里会用切换后的新代次点火点读——本断言即红（mutation 自检过）。
     expect(mockApi).not.toHaveBeenCalled()
+  })
+})
+
+describe('inFlightInPlaceRowIds 最近 terminal 截断（#1290）', () => {
+  it('最近 terminal 之前的死行（取消/超时遗留的 pending/in_progress）不重取', () => {
+    const ids = inFlightInPlaceRowIds([
+      toolCallMessage('tc1', 1, 'in_progress'),
+      statusMessage('st1', 2, 'turn_end'),
+      toolCallMessage('tc2', 3, 'in_progress'),
+      textMessage('m4', 4, 'streaming…'),
+    ])
+    expect(ids).toEqual(['tc2', 'm4'])
+  })
+
+  it('整个已加载窗口没有 terminal：保持全窗口扫描（无法判定 turn 边界，宁多勿漏）', () => {
+    expect(
+      inFlightInPlaceRowIds([toolCallMessage('tc1', 1, 'in_progress')])
+    ).toEqual(['tc1'])
+  })
+
+  it('hasInFlightToolCall 同样截断：历史死行不再触发全量校准', () => {
+    expect(
+      hasInFlightToolCall([
+        toolCallMessage('tc1', 1, 'in_progress'),
+        statusMessage('st1', 2, 'turn_end'),
+      ])
+    ).toBe(false)
+    expect(
+      hasInFlightToolCall([
+        toolCallMessage('tc1', 1, 'in_progress'),
+        statusMessage('st1', 2, 'turn_end'),
+        toolCallMessage('tc2', 3, 'pending'),
+      ])
+    ).toBe(true)
+  })
+
+  it('校准时历史死行不按 id 点读（每次 turn 结束/重连不再重复点读）', async () => {
+    const { deps } = makeDeps([
+      toolCallMessage('tc1', 1, 'in_progress'),
+      statusMessage('st1', 2, 'turn_end'),
+      toolCallMessage('tc2', 3, 'in_progress'),
+    ])
+    mockApi.mockResolvedValue({
+      message: recordOf(toolCallMessage('tc2', 3, 'completed')),
+    })
+    await calibrateWithRowRefetch(deps)
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(1))
+    expect(mockApi).toHaveBeenCalledWith(
+      '/api/workspaces/ws1/studio-chat/sessions/s1/messages/tc2'
+    )
+  })
+})
+
+describe('点读落地的新鲜度守卫（#1288）', () => {
+  it('GET 在途期间本地行被更新的 SSE 快照超越：较旧点读响应丢弃（流式文本）', async () => {
+    const { deps, state } = makeDeps([textMessage('m1', 1, 'abc')])
+    let resolveFetch!: (value: unknown) => void
+    mockApi.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve
+      }) as ReturnType<typeof api>
+    )
+    await calibrateWithRowRefetch(deps)
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalled())
+    // GET 读库后、响应返回前：更新的流式快照已合入本地行。
+    deps.setMessages(
+      (current) =>
+        upsertMessage(current, { id: 'm1', content: { text: 'abcdef' } }) ??
+        current
+    )
+    resolveFetch({ message: recordOf(textMessage('m1', 1, 'abc')) })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(state.messages[0]).toMatchObject({ content: { text: 'abcdef' } })
+  })
+
+  it('GET 在途期间 tool call 已终结：较旧点读响应不得把它恢复 in_progress', async () => {
+    const { deps, state } = makeDeps([toolCallMessage('tc1', 1, 'in_progress')])
+    let resolveFetch!: (value: unknown) => void
+    mockApi.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve
+      }) as ReturnType<typeof api>
+    )
+    await calibrateWithRowRefetch(deps)
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalled())
+    deps.setMessages(
+      (current) =>
+        upsertMessage(current, {
+          id: 'tc1',
+          content: { status: 'completed' },
+        }) ?? current
+    )
+    resolveFetch({
+      message: recordOf(toolCallMessage('tc1', 1, 'in_progress')),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(state.messages[0]).toMatchObject({
+      content: { status: 'completed' },
+    })
+  })
+
+  it('点读快照更新（本地未被超越）：照常合入', async () => {
+    const { deps, state } = makeDeps([toolCallMessage('tc1', 1, 'in_progress')])
+    mockApi.mockResolvedValueOnce({
+      message: recordOf(toolCallMessage('tc1', 1, 'completed')),
+    })
+    await calibrateWithRowRefetch(deps)
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(state.messages[0]).toMatchObject({
+      content: { status: 'completed' },
+    })
+
+    const { deps: deps2, state: state2 } = makeDeps([
+      textMessage('m1', 1, 'abc'),
+    ])
+    mockApi.mockResolvedValueOnce({
+      message: recordOf(textMessage('m1', 1, 'abcdef')),
+    })
+    await calibrateWithRowRefetch(deps2)
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(2))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(state2.messages[0]).toMatchObject({ content: { text: 'abcdef' } })
+  })
+})
+
+describe('missed 帧点读瞬时失败的有界重试（#1289）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('瞬时失败：对目标行短延迟重试，成功即合入；增量回退保持不变', async () => {
+    const { deps, state } = makeDeps([textMessage('m1', 1, 'a')])
+    mockApi
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce({
+        message: recordOf(toolCallMessage('tc9', 9, 'completed')),
+      })
+    handleMissedMessageFrame(deps, 'tc9')
+    await vi.advanceTimersByTimeAsync(0)
+    // 既有增量回退（terminal 连锁）保留；点读失败后安排有界重试。
+    expect(deps.refillMessages).toHaveBeenCalledTimes(1)
+    expect(mockApi).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(mockApi).toHaveBeenCalledTimes(2)
+    expect(state.messages.map((m) => m.id)).toEqual(['m1', 'tc9'])
+  })
+
+  it('持续失败：重试有界后停止，不无限空转', async () => {
+    const { deps } = makeDeps([textMessage('m1', 1, 'a')])
+    mockApi.mockRejectedValue(new Error('down'))
+    handleMissedMessageFrame(deps, 'tc9')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mockApi).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(mockApi).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(mockApi).toHaveBeenCalledTimes(3)
+    // 界已用尽：再推进窗口不再点火，等下次校准/事件的自然触发。
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(mockApi).toHaveBeenCalledTimes(3)
+  })
+
+  it('同一 id 的重复 missed 帧不叠加重试链（按代次去重）', async () => {
+    const { deps } = makeDeps([textMessage('m1', 1, 'a')])
+    mockApi.mockRejectedValue(new Error('down'))
+    handleMissedMessageFrame(deps, 'tc9')
+    handleMissedMessageFrame(deps, 'tc9')
+    await vi.advanceTimersByTimeAsync(0)
+    // 两帧各点读一次（既有行为），失败只挂一条重试链。
+    expect(mockApi).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(10_000)
+    // 一条链 = 2 次重试；无去重时两条链共 4 次重试（总数 6）——本断言即红。
+    expect(mockApi).toHaveBeenCalledTimes(4)
+  })
+
+  it('重试点火前会话代次已推进：旧会话的迟到重试不点火', async () => {
+    const { deps } = makeDeps([textMessage('m1', 1, 'a')])
+    mockApi.mockRejectedValue(new Error('down'))
+    handleMissedMessageFrame(deps, 'tc9')
+    await vi.advanceTimersByTimeAsync(0)
+    deps.sessionGenerationRef.current += 1
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(mockApi).toHaveBeenCalledTimes(1)
   })
 })

@@ -96,7 +96,9 @@ export function useStudioChatHistory({
         if (!isRetry && hasMoreRef.current)
           retryTimerRef.current ??= setTimeout(() => {
             retryTimerRef.current = null
-            loadRef.current()
+            // #1291：游标已推进 = 前台自然加载已成功并承担了重试职责——不再
+            // 重复拉取（等效于取消待定定时器；也覆盖 refill 等路径推进游标）。
+            if (messagesRef.current[0]?.seq === oldest) loadRef.current()
           }, 2_000)
         return false
       } finally {

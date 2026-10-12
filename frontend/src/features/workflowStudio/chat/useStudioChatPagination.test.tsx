@@ -417,6 +417,69 @@ describe('useStudioChat 历史向上翻页（#1120 PR-4）', () => {
     }
   })
 
+  it('前台自然加载成功后待定重试不再重复拉取（#1291 游标守卫）', async () => {
+    const { result } = await renderChat()
+    // fake timers 必须先于失败的 load 开启（同上一用例的复验 finding 2）。
+    vi.useFakeTimers()
+    try {
+      mockApi.fetchStudioChatHistoryPage.mockRejectedValueOnce(
+        new Error('network down')
+      )
+      let failed: boolean | undefined
+      await act(async () => {
+        failed = await result.current.loadOlderHistory()
+      })
+      expect(failed).toBe(false)
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(1)
+
+      // 2s 重试窗口内滚动/RO/新消息自然触发并成功一页：游标推进，前台加载
+      // 承担了重试职责——定时器到点时不得再拉（无游标守卫则重复拉取，红）。
+      let ok: boolean | undefined
+      await act(async () => {
+        ok = await result.current.loadOlderHistory()
+      })
+      expect(ok).toBe(true)
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(2)
+      expect(result.current.messages[0]?.id).toBe('m96')
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000)
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('前台加载同样失败（游标未推进）：待定重试照常点火（#1291 守卫不误伤）', async () => {
+    mockApi.fetchStudioChatHistoryPage.mockRejectedValue(
+      new Error('network down')
+    )
+    const { result } = await renderChat()
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        await result.current.loadOlderHistory()
+      })
+      // 第二次失败：??= 不叠加待定重试（#1270）。
+      await act(async () => {
+        await result.current.loadOlderHistory()
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(2)
+      // 游标未推进，重试照常点火；重试自身失败不续期。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000)
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(3)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000)
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('切换会话清理待定重试：旧会话的失败重试不跨会话触发（#1270）', async () => {
     mockApi.fetchStudioChatMessages.mockImplementation(
       (_workspaceId, sessionId) =>
