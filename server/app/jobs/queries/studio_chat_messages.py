@@ -59,12 +59,18 @@ class StudioChatMessageQueriesMixin(ConnectionQueriesMixin):
         makes a racing status/deleted_at UPDATE wait for this insert (or, if
         it committed first, re-evaluates the predicate on the new row
         version), so a dead session never gets the row. None = not inserted.
+
+        ``archived_at is null`` (#1123 codex P2-c): archive stamps the row
+        BEFORE the close lands (session_archive.py) — the stamp alone must
+        already fence timeline writes, otherwise the stamp→close window still
+        accepts them.
         """
         message_id = uuid4().hex
         with self.connect() as conn:
             row = conn.execute(
                 "with live as (select id from studio_chat_sessions"
-                " where id=%s and status = any(%s) and deleted_at is null for share)"
+                " where id=%s and status = any(%s) and deleted_at is null"
+                " and archived_at is null for share)"
                 " insert into studio_chat_messages(id, session_id, kind, role, content_json)"
                 " select %s, live.id, %s, %s, %s from live returning seq, created_at",
                 (session_id, list(live_statuses), message_id, kind, role, json.dumps(content)),

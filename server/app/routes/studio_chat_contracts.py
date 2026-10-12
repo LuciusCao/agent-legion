@@ -8,7 +8,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 SessionStatus = Literal["starting", "idle", "running", "awaiting_permission", "closed", "error"]
-MessageKind = Literal["text", "tool_call", "plan", "permission", "status", "thought"]
+# #1123: 'draft' = synthetic draft_saved card event (studio_chat/draft_events.py).
+MessageKind = Literal["text", "tool_call", "plan", "permission", "status", "thought", "draft"]
 MessageRole = Literal["user", "agent", "system"]
 McpStatus = Literal["unknown", "verified", "unverified"]
 

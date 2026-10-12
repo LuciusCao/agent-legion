@@ -9,7 +9,6 @@ import {
 } from './studioChatMessages'
 import { supersededCancelRequestIds } from './studioChatCancelVisibility'
 import { useQueuedMessageStates } from './studioChatTurnRecovery'
-import { draftAnchorToolCallId } from './useStudioChatViews'
 import { MessageItem } from './StudioChatMessageItem'
 import { permissionRequestId } from './StudioChatPermission'
 import { StudioChatWindow } from './StudioChatWindow'
@@ -76,17 +75,27 @@ export function StudioChatMessageList(props: Props) {
     [setAllowAll, activeSessionId]
   )
 
-  // workflow 草稿卡片挂在最后一个携带该 yaml 的工具调用后面。
-  const draftAnchorId = useMemo(
-    () => draftAnchorToolCallId(chat.toolCalls, chat.workflowDraft),
-    [chat.toolCalls, chat.workflowDraft]
-  )
+  // workflow 草稿卡的工具卡锚点由派生视图自带（mergeWorkflowDraft 记录；
+  // 合成事件锚点走 anchorMessageId，见下）。
+  const draftAnchorId = chat.workflowDraft?.anchorToolCallId ?? null
+  // 输给去重的合成 draft 消息不渲染（卡片已挂在胜出的锚点上）；
+  // 只保留当前锚点消息（#1123）。
+  const draftMessageAnchors = useMemo(() => {
+    const ids = new Set<string>()
+    if (chat.workflowDraft?.anchorMessageId)
+      ids.add(chat.workflowDraft.anchorMessageId)
+    for (const draft of chat.nodeDrafts) {
+      if (draft.anchorMessageId) ids.add(draft.anchorMessageId)
+    }
+    return ids
+  }, [chat.workflowDraft, chat.nodeDrafts])
 
   // Updates of an existing tool card have no separate visual row.
   const visibleMessages = chat.messages.filter(
     (message) =>
       (message.kind !== 'tool_call' ||
         toolCallByFirstMessage.has(message.id)) &&
+      (message.kind !== 'draft' || draftMessageAnchors.has(message.id)) &&
       !(message.kind === 'status' && statusEvent(message).event === 'turn_end')
   )
   return (

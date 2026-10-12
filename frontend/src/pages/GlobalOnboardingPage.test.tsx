@@ -65,6 +65,8 @@ const registry: StudioAgentRegistryResponse = {
     },
   ],
   availability: { kimi: true, claude: false },
+  // #355：响应契约新增内容版本 revision，fixture 需满足类型。
+  revision: 'r1',
 }
 
 function LocationProbe() {
@@ -161,6 +163,7 @@ describe('GlobalOnboardingPage', () => {
       api_base: 'http://127.0.0.1:8000',
       agents: [],
       availability: {},
+      revision: 'r-empty',
     })
 
     renderPage()

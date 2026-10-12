@@ -18,6 +18,7 @@ from server.app.mcp_server.config import (
     API_BASE_ENV,
     DEFAULT_API_BASE,
     SESSION_ID_ENV,
+    SESSION_ID_HEADER,
     TOKEN_ENV,
     McpConfigError,
     McpServerConfig,
@@ -661,6 +662,25 @@ def test_loopback_client_ignores_env_proxies(monkeypatch) -> None:
     monkeypatch.setattr("server.app.mcp_server.tool_client.httpx.AsyncClient", FakeAsyncClient)
     asyncio.run(ToolClient(_CONFIG).call("GET", "/workspaces/ws-1/workflow"))
     assert captured.get("trust_env") is False
+
+
+def test_loopback_client_forwards_session_binding_header(monkeypatch) -> None:
+    """#1123: the loopback carries the chat-session binding so save routes can
+    pin the synthetic draft_saved timeline event to the session."""
+    sent: list[dict] = []
+
+    def capture(method, url, json=None, headers=None, timeout=None):  # noqa: A002
+        sent.append(headers or {})
+        return _FakeResponse(200)
+
+    _patch_http_client(monkeypatch, capture)
+
+    bound = McpServerConfig(api_base="http://backend.test:9000", token="t", session_id="sess-7")
+    asyncio.run(ToolClient(bound).call("PUT", "/workspaces/ws-1/workflow/draft", {}))
+    assert sent[-1].get(SESSION_ID_HEADER) == "sess-7"
+
+    asyncio.run(ToolClient(_CONFIG).call("PUT", "/workspaces/ws-1/workflow/draft", {}))
+    assert SESSION_ID_HEADER not in sent[-1]
 
 
 def test_config_requires_token() -> None:

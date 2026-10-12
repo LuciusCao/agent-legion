@@ -126,4 +126,37 @@ describe('useStudioChatViews（#1120 引用稳定化）', () => {
     expect(result.current.workflowDraft).toBe(first.workflowDraft)
     expect(result.current.nodeDrafts).toBe(first.nodeDrafts)
   })
+
+  it('refreshes drafts when a synthetic draft_saved event lands (#1123)', () => {
+    // 引用稳定化不得吞掉锚点变化：同一节点草稿的合成事件晚于 tool_call
+    // 证据到达时（子代理覆盖主 agent 旧保存），nodeDrafts 必须换引用——
+    // 否则卡片锚点不迁移，MessageItem memo 穿透修复会把卡钉死在旧位置。
+    const initial = draftMessages()
+    const { result, rerender } = renderHook(
+      ({ msgs }) => useStudioChatViews(msgs),
+      { initialProps: { msgs: initial } }
+    )
+    const first = result.current
+    const next = [
+      ...initial,
+      message(
+        'draft',
+        'agent',
+        {
+          event: 'draft_saved',
+          draft_type: 'node_code',
+          node_key: 'writer',
+          code_hash: 'ch-2',
+        },
+        'm-synthetic'
+      ),
+    ]
+    rerender({ msgs: next })
+    expect(result.current.nodeDrafts).not.toBe(first.nodeDrafts)
+    expect(result.current.nodeDrafts[0]).toMatchObject({
+      nodeKey: 'writer',
+      draftHash: 'ch-2',
+      anchorMessageId: 'm-synthetic',
+    })
+  })
 })

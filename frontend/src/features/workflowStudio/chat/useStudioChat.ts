@@ -269,7 +269,8 @@ export function useStudioChat(workspaceId: string | undefined) {
     [workspaceId, activeSessionId, runAction]
   )
 
-  // #1120：toolCalls 增量归并 + 草稿视图引用稳定化（见 useStudioChatViews）。
+  // #1120：toolCalls 增量归并 + 草稿视图引用稳定化（见 useStudioChatViews；
+  // 合成 draft_saved 事件的合并也在那里完成，#1123）。
   const views = useStudioChatViews(messages)
   const { toolCalls, workflowDraft, nodeDrafts, permissions } = views
   // #675：取消轮收尾视图在姊妹文件（studioChatCancelVisibility），与
