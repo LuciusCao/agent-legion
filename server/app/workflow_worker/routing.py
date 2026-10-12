@@ -51,15 +51,19 @@ class NodeRoute:
 
 def route_cache_key(
     workspace_id: str, workflow_key: str, node: WorkflowNode
-) -> tuple[str, str, str, bool]:
-    """Route cache key of a frozen snapshot node (#935 R1, #1091).
+) -> tuple[str, str, str, bool, str]:
+    """Route cache key of a frozen snapshot node (#935 R1, #1091, #1266).
 
-    The snapshot's agent-ness is part of the key: a route row may outlive a
-    node one job froze as ``code`` while another job froze it as an agent
-    node, and the two must never share a cached route.
+    The snapshot's agent-ness and capability are both part of the key: a
+    route row may outlive a node one job froze as ``code`` while another job
+    froze it as an agent node, and two jobs may freeze the same node key with
+    different capabilities (the node was renamed across revisions) — a legacy
+    route's validity is adjudicated against the caller's capability
+    (#1128/#1266), so entries, errors included, must never be shared across
+    either frozen input.
     """
     is_agent = frozen.frozen_node_execution_kind(node) != frozen.FROZEN_NODE_CODE
-    return (workspace_id, workflow_key, node.key, is_agent)
+    return (workspace_id, workflow_key, node.key, is_agent, node.capability)
 
 
 def resolve_node_route(

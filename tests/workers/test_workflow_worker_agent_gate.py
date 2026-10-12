@@ -68,7 +68,9 @@ def test_prepare_batch_loads_and_filters_by_route_cache() -> None:
         key="test", label="Test", intake=WorkflowIntake(), nodes={node.key: node}
     )
     # Cached non-agent route: excluded from the batch query without any DB.
-    worker.state.route_cache[("ws1", "test", node.key, node.node_type == "agent")] = (
+    worker.state.route_cache[
+        ("ws1", "test", node.key, node.node_type == "agent", node.capability)
+    ] = (
         time.monotonic(),
         NodeRoute("executor", target_id="local-default"),
     )

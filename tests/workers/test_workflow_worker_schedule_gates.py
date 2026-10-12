@@ -63,7 +63,10 @@ def _worker(tmp_path: Path, route: NodeRoute, node: WorkflowNode) -> MagicMock:
     worker.state.pass_claim_counts = {}
     worker.state.agent_pass = AgentPassState()
     worker.state.route_cache = {
-        ("ws1", "test", node.key, node.node_type == "agent"): (time.monotonic(), route)
+        ("ws1", "test", node.key, node.node_type == "agent", node.capability): (
+            time.monotonic(),
+            route,
+        )
     }
     return worker
 

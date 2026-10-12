@@ -270,3 +270,26 @@ def test_cached_route_revalidates_archival(job_db, workspace_id, query_service) 
 
     route = _dispatch_route(worker, workspace_id, snapshot)  # cache hit, same worker
     _assert_route_error_consistent(route, _detail(query_service, job))
+
+
+def test_route_cache_does_not_share_entries_across_capabilities(
+    job_db, workspace_id, query_service
+) -> None:
+    """#1266：同一 node key 的冻结快照可能携带不同 capability（节点改名前
+    后）；capability A 的漂移错误绝不能经共享缓存键投毒 capability B 的合法
+    路由——B 的 job 会被 fail_node_config 永久标败。"""
+    snapshot_b = _legacy()
+    WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, snapshot_b)
+    job_b = _job(job_db, workspace_id, snapshot_b, "Q-cap-b")
+    node_a = replace(snapshot_b.nodes[NODE], capability="renamed_capability")
+    snapshot_a = replace(snapshot_b, nodes={**snapshot_b.nodes, NODE: node_a})
+    job_a = _job(job_db, workspace_id, snapshot_a, "Q-cap-a")
+    worker = _worker(job_db)
+
+    # B fills the cache with the valid route; A's drift error must not poison it.
+    assert _dispatch(worker, workspace_id, snapshot_b) == ("agent", AGENT)
+    route_a = _dispatch_route(worker, workspace_id, snapshot_a)
+    assert "Invalid Agent route" in route_a.error_message
+    _assert_route_error_consistent(route_a, _detail(query_service, job_a))
+    assert _dispatch(worker, workspace_id, snapshot_b) == ("agent", AGENT)
+    _assert_consistent(("agent", AGENT), _detail(query_service, job_b))
