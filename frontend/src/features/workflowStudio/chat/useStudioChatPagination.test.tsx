@@ -1,8 +1,15 @@
 import { createElement, type ReactNode } from 'react'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import {
+  act,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
-import { useStudioChat } from './useStudioChat'
+import { useStudioChat, type StudioChat } from './useStudioChat'
+import { useChatScroll } from './useChatScroll'
 import * as chatApi from './studioChatApi'
 import * as resumeApi from './studioChatResumeApi'
 import type { StudioChatSessionRecord } from './studioChatApi'
@@ -731,5 +738,107 @@ describe('会话选择代次与锁持有者守卫（#1237 codex P2 族）', () =
     })
     expect(view.result.current.starting).toBe(false)
     expect(view.result.current.activeSessionId).toBe('s-new-2')
+  })
+})
+
+// #1237 codex 八轮 P2：自动补拉由子组件（useChatScroll，StudioChatMessageList）
+// 的 passive effect 触发，而 messagesRef 由父组件（useStudioChat 所在组件）
+// 的 passive effect 同步——React 子 effect 先跑，补拉若从 messagesRef 取游标
+// 会读到上一轮的空数组直接返回，父 effect 更新 ref 又不再引发重渲染，
+// 短会话死锁。本 describe 用父子组件集成还愿该时序（其余用例是 renderHook
+// 单组件，结构上无法暴露）。
+describe('补拉链游标取位（#1237 codex 八轮 P2）', () => {
+  const originalEventSource = globalThis.EventSource
+  let testClient = createTestQueryClient()
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: testClient }, children)
+
+  function ChatList({ chat }: { chat: StudioChat }) {
+    const { bottomRef, listRef, handleScroll } = useChatScroll(
+      chat.messages,
+      chat.loadOlderHistory
+    )
+    return (
+      <div ref={listRef} data-testid="list" onScroll={handleScroll}>
+        {chat.messages.map((m) => (
+          <div key={m.id}>{m.id}</div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+    )
+  }
+  function Panel() {
+    return <ChatList chat={useStudioChat('ws1')} />
+  }
+
+  beforeEach(() => {
+    testClient = createTestQueryClient()
+    EventSourceMock.reset()
+    globalThis.EventSource = EventSourceMock as unknown as typeof EventSource
+    installLocalStorageStub()
+    vi.clearAllMocks()
+    mockApi.fetchStudioChatAgents.mockResolvedValue([
+      { id: 'kimi', label: 'Kimi Code' },
+    ])
+    mockApi.fetchStudioChatSessions.mockResolvedValue([sessionRecord()])
+    mockApi.updateStudioChatContext.mockResolvedValue(sessionRecord())
+  })
+
+  afterEach(() => {
+    globalThis.EventSource = originalEventSource
+  })
+
+  it('首屏未溢出触发补拉：游标取当前渲染快照（子 effect 先于父 ref 同步）', async () => {
+    // 首屏只有 3 条（seq 101..103），不足以撑满容器。
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      textMessage('m101', 101, 'a'),
+      textMessage('m102', 102, 'b'),
+      textMessage('m103', 103, 'c'),
+    ])
+    mockApi.fetchStudioChatHistoryPage
+      .mockResolvedValueOnce({
+        messages: [textMessage('m96', 96, 'p1')],
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [textMessage('m90', 90, 'p2')],
+        hasMore: false,
+      })
+    render(<Panel />, { wrapper })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatSessions).toHaveBeenCalled()
+    )
+    // 列表容器 stub 为「未溢出」（300 < 400）；首屏消息落地后子组件的
+    // 自动补拉 effect 即触发——此刻父组件同步 messagesRef 的 passive
+    // 效应尚未运行。
+    const list = screen.getByTestId('list')
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => 300,
+    })
+    Object.defineProperty(list, 'clientHeight', {
+      configurable: true,
+      get: () => 400,
+    })
+
+    // 记忆效应自动选中 s1 → 首屏消息落地 → 补拉必须以当前渲染的最老
+    // seq=101 发起（滞后 messagesRef 此时仍为空数组，旧实现直接返回）。
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        101
+      )
+    )
+    // 第一页落地后仍未溢出：以新最老 seq=96 续拉；hasMore=false 闩锁终止。
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        96
+      )
+    )
+    await waitFor(() => expect(screen.getByText('m90')).toBeInTheDocument())
+    expect(mockApi.fetchStudioChatHistoryPage.mock.calls.length).toBe(2)
   })
 })

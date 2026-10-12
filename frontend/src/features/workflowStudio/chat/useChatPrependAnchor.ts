@@ -35,7 +35,7 @@ function firstVisibleRow(list: HTMLElement): RowAnchor {
  * 与 useChatAutoScroll 组合使用：返回的回调作为其 onNearTop。 */
 export function useChatPrependAnchor(
   messages: ChatMessage[],
-  onLoadOlder: () => void
+  onLoadOlder: (oldestSeq?: number) => void
 ): (list: HTMLElement) => void {
   const anchorRef = useRef<{
     firstId: string | null
@@ -98,8 +98,8 @@ export function useChatPrependAnchor(
         observer.disconnect()
         for (const child of list.children) observer.observe(child)
       }
-      onLoadOlder()
+      onLoadOlder(messages[0]?.seq)
     },
-    [onLoadOlder]
+    [onLoadOlder, messages]
   )
 }

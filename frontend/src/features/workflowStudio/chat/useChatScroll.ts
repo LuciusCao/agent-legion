@@ -6,7 +6,7 @@ import type { ChatMessage } from './studioChatMessages'
  * prepend 锚定补偿。拆自 StudioChatMessageList（文件预算）。 */
 export function useChatScroll(
   messages: ChatMessage[],
-  onLoadOlder: () => void
+  onLoadOlder: (oldestSeq?: number) => void
 ) {
   return useChatAutoScroll(
     messages,

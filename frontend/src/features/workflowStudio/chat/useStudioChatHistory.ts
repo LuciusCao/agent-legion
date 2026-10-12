@@ -49,54 +49,61 @@ export function useStudioChatHistory({
   }, [workspaceId, activeSessionId])
 
   // 返回是否真正发起了一次拉取（提前返回 = 锁/闩锁/空列表拦截）。
-  const loadOlderHistory = useCallback(async (): Promise<boolean> => {
-    if (!workspaceId || !activeSessionId) return false
-    if (loadingRef.current !== null || !hasMoreRef.current) return false
-    // 列表按 seq 升序维护，首行即当前最老游标。
-    const oldest = messagesRef.current[0]?.seq
-    if (typeof oldest !== 'number') return false
-    const token = ++requestTokenRef.current
-    loadingRef.current = token
-    const sessionId = activeSessionId
-    const generation = sessionGenerationRef.current
-    try {
-      const page = await fetchStudioChatHistoryPage(
-        workspaceId,
-        sessionId,
-        oldest
-      )
-      // 跨会话竞态（refillMessages 的守卫同模式，#1237 codex P2-1 升级为
-      // 会话 + 选择代次双检）：拉取在途时切换了会话——包括 A→B→A 重新选中
-      // 同一会话——早先代次的旧页不得合入新列表、不得闩锁 hasMore（否则
-      // 重新进入的首屏窗口覆盖旧页后永远无法继续分页）、游标也不推进。
-      const current = () =>
-        activeSessionIdRef.current === sessionId &&
-        sessionGenerationRef.current === generation
-      if (!current()) return false
-      setMessages((currentMessages) =>
-        current()
-          ? mergeMessages(currentMessages, page.messages)
-          : currentMessages
-      )
-      if (!page.hasMore) {
-        hasMoreRef.current = false
-        setHasMoreHistory(false)
+  // oldestSeqHint：触发方当前渲染快照的最老游标（#1237 codex 八轮 P2）——
+  // 子组件 effect 触发的补拉不能依赖 messagesRef：它由父组件 passive
+  // effect 同步，子 effect 先跑时会读到上一轮的滞后值。直接调用（事件
+  // 回调等 commit 后时机）缺省回退 messagesRef。
+  const loadOlderHistory = useCallback(
+    async (oldestSeqHint?: number): Promise<boolean> => {
+      if (!workspaceId || !activeSessionId) return false
+      if (loadingRef.current !== null || !hasMoreRef.current) return false
+      // 列表按 seq 升序维护，首行即当前最老游标。
+      const oldest = oldestSeqHint ?? messagesRef.current[0]?.seq
+      if (typeof oldest !== 'number') return false
+      const token = ++requestTokenRef.current
+      loadingRef.current = token
+      const sessionId = activeSessionId
+      const generation = sessionGenerationRef.current
+      try {
+        const page = await fetchStudioChatHistoryPage(
+          workspaceId,
+          sessionId,
+          oldest
+        )
+        // 跨会话竞态（refillMessages 的守卫同模式，#1237 codex P2-1 升级为
+        // 会话 + 选择代次双检）：拉取在途时切换了会话——包括 A→B→A 重新选中
+        // 同一会话——早先代次的旧页不得合入新列表、不得闩锁 hasMore（否则
+        // 重新进入的首屏窗口覆盖旧页后永远无法继续分页）、游标也不推进。
+        const current = () =>
+          activeSessionIdRef.current === sessionId &&
+          sessionGenerationRef.current === generation
+        if (!current()) return false
+        setMessages((currentMessages) =>
+          current()
+            ? mergeMessages(currentMessages, page.messages)
+            : currentMessages
+        )
+        if (!page.hasMore) {
+          hasMoreRef.current = false
+          setHasMoreHistory(false)
+        }
+        return true
+      } catch {
+        // 拉取失败不闩锁：游标未推进、hasMore 保持 true，下次滚到顶部重试。
+        return false
+      } finally {
+        if (loadingRef.current === token) loadingRef.current = null
       }
-      return true
-    } catch {
-      // 拉取失败不闩锁：游标未推进、hasMore 保持 true，下次滚到顶部重试。
-      return false
-    } finally {
-      if (loadingRef.current === token) loadingRef.current = null
-    }
-  }, [
-    workspaceId,
-    activeSessionId,
-    activeSessionIdRef,
-    sessionGenerationRef,
-    messagesRef,
-    setMessages,
-  ])
+    },
+    [
+      workspaceId,
+      activeSessionId,
+      activeSessionIdRef,
+      sessionGenerationRef,
+      messagesRef,
+      setMessages,
+    ]
+  )
 
   return { hasMoreHistory, loadOlderHistory }
 }
