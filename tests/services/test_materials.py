@@ -10,9 +10,11 @@ import pytest
 
 from server.app.db.connection import connect_database
 from server.app.services.job_errors import ConflictError, NotFoundError
-from server.app.services.materials import (
+from server.app.services.material_key_validation import (
     InvalidMaterialContentHashError,
     InvalidMaterialFilenameError,
+)
+from server.app.services.materials import (
     MaterialInUseError,
     MaterialsService,
     MaterialStorageUnavailableError,
@@ -183,15 +185,21 @@ def test_presign_rejects_invalid_content_hash(service, storage, content_hash) ->
 
 
 def _insert_material_row(
-    job_db, *, material_id: str, content_hash: str, filename: str, storage_key: str
+    job_db,
+    *,
+    material_id: str,
+    content_hash: str,
+    filename: str,
+    storage_key: str,
+    size_bytes: int = 1,
 ) -> None:
     """直接落一条材料行，模拟校验收紧（#1119/#1267）前入库的 legacy 行。"""
     with job_db.connect() as conn:
         conn.execute(
             "insert into materials(id, workspace_id, content_hash, filename, content_type,"
             " size_bytes, storage_key, status, created_by)"
-            " values (%s, %s, %s, %s, 'text/plain', 1, %s, 'failed', 'user-1')",
-            (material_id, WORKSPACE_ID, content_hash, filename, storage_key),
+            " values (%s, %s, %s, %s, 'text/plain', %s, %s, 'failed', 'user-1')",
+            (material_id, WORKSPACE_ID, content_hash, filename, size_bytes, storage_key),
         )
 
 
@@ -244,6 +252,108 @@ def test_presign_retry_keeps_valid_legacy_key(service, storage, job_db) -> None:
     assert presigned_key == legacy_key
     assert _storage_key_of(job_db, "mat-legacy-ok") == legacy_key
     assert retry["material"]["filename"] == "new.txt"
+
+
+def test_complete_cas_rejects_key_rebuild_mid_verification(
+    service, storage, job_db, monkeypatch
+) -> None:
+    """#1267 codex R2 P1：verify（事务外）期间并发重试重建了 storage_key，
+    complete 必须 409 而不是按旧快照把（尚未上传的）新 key 标 ready。"""
+    payload = b"legacy"
+    digest = _sha256(payload)
+    old_key = f"{WORKSPACE_ID}/{digest}/folder/"
+    _insert_material_row(
+        job_db,
+        material_id="mat-cas",
+        content_hash=digest,
+        filename="folder/",
+        storage_key=old_key,
+        size_bytes=len(payload),
+    )
+    # 旧 key 的字节齐全（verify 按旧 key 会通过），模拟在途 complete。
+    storage.objects[old_key] = payload
+    real_verify = service._verify_object
+
+    def verify_then_rebuild(storage_arg, row):  # noqa: ANN001, ANN202
+        outcome = real_verify(storage_arg, row)
+        # 并发 presign 重试：合法新文件名触发 key 重建（#1267 P2 路径）。
+        service.presign(
+            WORKSPACE_ID, filename="ok.txt", size_bytes=len(payload), content_hash=digest
+        )
+        return outcome
+
+    monkeypatch.setattr(service, "_verify_object", verify_then_rebuild)
+
+    with pytest.raises(ConflictError, match="complete again"):
+        service.complete(WORKSPACE_ID, "mat-cas")
+
+    # 没落 ready；行已被重试重置为 uploading 并指向新 key。
+    assert service.get(WORKSPACE_ID, "mat-cas")["status"] == "uploading"
+    # 明确的失败语义：客户端重调 complete，按新 key 重新核验后正常 ready。
+    storage.objects[f"{WORKSPACE_ID}/{digest}/ok.txt"] = payload
+    assert service.complete(WORKSPACE_ID, "mat-cas")["status"] == "ready"
+
+
+def test_complete_cas_rejects_key_rebuild_when_verification_failed(
+    service, storage, job_db, monkeypatch
+) -> None:
+    """CAS 对称面：verify 失败且 key 同时被重建时，不落 failed（行已属于新一轮上传）。"""
+    digest = _sha256(b"legacy-fail")
+    old_key = f"{WORKSPACE_ID}/{digest}/folder/"
+    _insert_material_row(
+        job_db,
+        material_id="mat-cas-fail",
+        content_hash=digest,
+        filename="folder/",
+        storage_key=old_key,
+    )
+    real_verify = service._verify_object
+
+    def verify_then_rebuild(storage_arg, row):  # noqa: ANN001, ANN202
+        outcome = real_verify(storage_arg, row)  # 旧 key 无对象 → failure
+        assert outcome is not None
+        service.presign(WORKSPACE_ID, filename="ok.txt", size_bytes=1, content_hash=digest)
+        return outcome
+
+    monkeypatch.setattr(service, "_verify_object", verify_then_rebuild)
+
+    with pytest.raises(ConflictError, match="complete again"):
+        service.complete(WORKSPACE_ID, "mat-cas-fail")
+
+    assert service.get(WORKSPACE_ID, "mat-cas-fail")["status"] == "uploading"
+
+
+def test_complete_cas_rejects_size_change_mid_verification(
+    service, storage, job_db, monkeypatch
+) -> None:
+    """同族存量竞态：key 合法不重建、但重试更新了 size_bytes——verify 按旧
+    size 通过也不能落 ready（CAS 覆盖 verify 的全部输入：key + size）。"""
+    payload = b"1234"
+    digest = _sha256(payload)
+    key = f"{WORKSPACE_ID}/{digest}/r.txt"
+    _insert_material_row(
+        job_db,
+        material_id="mat-cas-size",
+        content_hash=digest,
+        filename="r.txt",
+        storage_key=key,
+        size_bytes=len(payload),
+    )
+    storage.objects[key] = payload
+    real_verify = service._verify_object
+
+    def verify_then_resize(storage_arg, row):  # noqa: ANN001, ANN202
+        outcome = real_verify(storage_arg, row)
+        service.presign(WORKSPACE_ID, filename="r.txt", size_bytes=9, content_hash=digest)
+        return outcome
+
+    monkeypatch.setattr(service, "_verify_object", verify_then_resize)
+
+    with pytest.raises(ConflictError, match="complete again"):
+        service.complete(WORKSPACE_ID, "mat-cas-size")
+
+    assert service.get(WORKSPACE_ID, "mat-cas-size")["status"] == "uploading"
+    assert service.get(WORKSPACE_ID, "mat-cas-size")["size_bytes"] == 9
 
 
 def test_presign_accepts_nested_relative_path(service, storage) -> None:

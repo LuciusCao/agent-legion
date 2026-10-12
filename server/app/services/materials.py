@@ -17,29 +17,21 @@ from typing import Any
 from server.app.db.dialect import ConnectSource
 from server.app.db.rowmap import iso_optional
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.jobs.queries.material_locked_rereads import (
+    assert_material_upload_identity_tx,
+)
 from server.app.services.job_errors import (
     ConflictError,
     JobServiceError,
     NotFoundError,
 )
 from server.app.services.material_key_validation import (
-    InvalidMaterialContentHashError,
-    InvalidMaterialFilenameError,
     invalid_material_filename_reason,
     validate_material_content_hash,
     validate_material_filename,
 )
 from server.app.services.material_ttl import mark_ready
 from server.app.storage import ObjectStorage
-
-__all__ = [
-    "InvalidMaterialContentHashError",
-    "InvalidMaterialFilenameError",
-    "MaterialInUseError",
-    "MaterialStorageUnavailableError",
-    "MaterialVerificationError",
-    "MaterialsService",
-]
 
 _PRESIGN_EXPIRY_SECONDS = 3600
 _HASH_CHUNK_BYTES = 1024 * 1024
@@ -184,7 +176,8 @@ class MaterialsService:
                     # request hash), so only the filename tail needs the recheck;
                     # an invalid tail rebuilds the key from the validated request
                     # fields and the leftover old object is orphaned to the
-                    # bucket lifecycle rule.
+                    # bucket lifecycle rule. A complete() racing this update is
+                    # serialized by its verified-identity CAS (R2 P1).
                     parts = storage_key.split("/", 2)
                     if len(parts) != 3 or invalid_material_filename_reason(parts[2]) is not None:
                         storage_key = f"{workspace_id}/{content_hash or material_id}/{filename}"
@@ -214,7 +207,14 @@ class MaterialsService:
         """Verify the stored object against the declaration and mark ready.
 
         Verification failures flip the row to failed so the client can retry
-        the upload (presign resets the row to uploading).
+        the upload (presign resets the row to uploading). Verification runs
+        outside any transaction (object I/O); the status write then rechecks
+        the verified identity (storage_key + size_bytes) under a row lock
+        (jobs/queries/material_locked_rereads) so a concurrent presign retry
+        — which may rebuild a legacy invalid key or change the declared size —
+        can never let a stale snapshot mark unverified bytes ready
+        (#1267 codex R2 P1). A mismatch raises 409 and the client simply calls
+        complete again (re-read, re-verify).
         """
         storage = self._require_storage()
         row = self._fetch_row(workspace_id, material_id)
@@ -224,6 +224,7 @@ class MaterialsService:
             raise ConflictError(f"Material is expired: {material_id}")
         failure = self._verify_object(storage, row)
         with write_transaction(self._connect_source) as conn:
+            assert_material_upload_identity_tx(conn, material_id, row)
             if failure is not None:
                 conn.execute(
                     "update materials set status='failed' where id=%s",

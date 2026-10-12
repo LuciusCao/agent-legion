@@ -1315,6 +1315,7 @@
     "server/app/jobs/queries/job_scan_marks.py": 36,
     "server/app/jobs/queries/job_shard_reads.py": 21,
     "server/app/jobs/queries/material_inline.py": 60,
+    "server/app/jobs/queries/material_locked_rereads.py": 25,
     "server/app/jobs/queries/path_hygiene.py": 41,
     "server/app/jobs/queries/quality_replays.py": 19,
     "server/app/jobs/queries/run_healing.py": 45,

@@ -16,9 +16,11 @@ from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.material_bundles import create_material_bundles_router
 from server.app.services.job_errors import JobServiceError
 from server.app.services.material_bundles import MaterialBundlesService
-from server.app.services.materials import (
+from server.app.services.material_key_validation import (
     InvalidMaterialContentHashError,
     InvalidMaterialFilenameError,
+)
+from server.app.services.materials import (
     MaterialInUseError,
     MaterialsService,
     MaterialStorageUnavailableError,
