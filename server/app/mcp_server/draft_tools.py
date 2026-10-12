@@ -44,8 +44,8 @@ def register_draft_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
     ) -> str:
         """Save the full workflow definition YAML as the workspace's Studio
         draft (canvas picks it up live). CAS: base_generation must be the
-        generation from your last get_workflow_draft / get_studio_context's
-        draft_generation — never invent one (stale → 409, negative → 422).
+        generation from your last get_workflow_draft — never invent one
+        (stale → 409, negative → 422).
         A stale value → 409 carrying the current draft state
         (current_draft.definition_yaml + current_draft.generation +
         current_draft.definition_hash): rebase onto it and retry with its

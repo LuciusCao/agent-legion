@@ -200,8 +200,9 @@ publish, and skill release actions stay human-only).
    → preview the full shape. Repeat until clean.
 5. `save_workflow_draft` → persist the validated YAML as the Studio draft.
    The CAS base (`base_generation`) comes from `get_workflow_draft`'s
-   `generation`, or from `get_studio_context`'s `draft_generation` (same
-   value — the workspace's draft generation). Never invent one. On a 409,
+   `generation` (content and generation are one atomic snapshot there —
+   `get_studio_context`'s mirrored draft_yaml deliberately carries no
+   generation, #1226). Never invent one. On a 409,
    rebase onto the response's `current_draft` and retry with its
    `generation` — the human may have edited concurrently.
 6. For each code node, `save_node_code_draft` with `expected_capability` set

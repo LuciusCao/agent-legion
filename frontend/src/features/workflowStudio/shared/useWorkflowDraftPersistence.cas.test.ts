@@ -194,6 +194,49 @@ describe('useWorkflowDraftPersistence CAS (#633)', () => {
     })
   })
 
+  it('re-hydrates when the generation advances at the same updated_at (#1226 复审 P2)', async () => {
+    /* Postgres 的 current_timestamp 固定在事务开始：更高代次的草稿可能带
+       相同 updated_at——按时间戳的 hydrate 守卫会跳过，controller 保留旧
+       代次，下一次保存白吃 409。前进判定以代次为准。 */
+    const AGENT_V2 = {
+      definition_yaml: 'key: demo\nlabel: Agent v2\n',
+      updated_at: SERVER_AT,
+      generation: 8,
+    }
+    const { rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: SERVER_GEN,
+      },
+    })
+    // 服务端草稿前进（代次 7→8）但时间戳未变。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: AGENT_V2,
+    })
+    // 用户编辑 → 保存必须以新代次为基线。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: AGENT_V2,
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledWith('ws1', EDITED, {
+      baseGeneration: 8,
+    })
+  })
+
   it('a superseded success still advances the CAS base for the follow-up save', async () => {
     /* codex review R2 P1：保存 A 在途时用户继续编辑调度 B——A 的成功
        响应虽被作废（不落 savedAt/不发通知），但它是服务端真值，基线必须

@@ -36,13 +36,11 @@ def build_session_context(
         "workspace_id": session["workspace_id"],
         "selected_node_key": session.get("selected_node_key"),
         "draft_yaml": session.get("draft_yaml"),
-        # kimi review P2-5：会话行推送的 draft_yaml 没有 CAS 基线；补上
-        # 草稿代次（get_studio_context 即可作为 save_workflow_draft 的 base
-        # 来源，不必再调一次 get_workflow_draft）。#1226 五轮收口：代次取代
-        # updated_at；无草稿时也有当前代次（0 = 从未写过）。
-        "draft_generation": job_db.get_workspace_workflow_draft_generation(
-            str(session["workspace_id"])
-        ),
+        # #1226 八轮复审 P1：会话行推送的 draft_yaml 与代次分属两条写入/读取
+        # 通道（推送写会话行、代次另读代次表）——另读的当前代次配给推送时刻
+        # 的旧 YAML 会让 agent 拿错配 base 静默覆盖未见草稿。上下文不再携带
+        # 代次：save_workflow_draft 的 CAS base 一律从 get_workflow_draft 的
+        # 原子状态读（内容 + 代次同一快照，六轮 P1）取。
         "workflow": _active_workflow_summary(job_db, str(session["workspace_id"])),
     }
 

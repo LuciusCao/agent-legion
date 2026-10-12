@@ -134,12 +134,11 @@ def test_bound_token_reads_own_session_context(client, job_db, tmp_path) -> None
 
 def test_context_carries_canvas_draft_mirror(client, job_db, tmp_path) -> None:
     """The payload's draft_yaml is null until the human's Studio pushes the
-    canvas' unpublished draft through the PUT context route. kimi review
-    P2-5: draft_generation mirrors the workspace's draft generation (the CAS
-    base for a subsequent save_workflow_draft) — 0 while never-saved, then
-    the store's generation once the canvas draft is saved (#1226 五轮收口:
-    代次取代 updated_at 成为 CAS 基线——发布后空态也有代次,比行时间戳
-    更可靠的 token 来源)."""
+    canvas' unpublished draft through the PUT context route. #1226 八轮复审
+    P1：会话行推送的 draft_yaml 与代次分属两条写入/读取通道——另读当前
+    代次配给旧 YAML 会让 agent 拿错配 base 静默覆盖未见草稿；因此上下文
+    不再携带 draft_generation，CAS base 一律从 get_workflow_draft 的原子
+    状态读取。"""
     script_path = _register_fake_agent(client, tmp_path)
     workspace_id = _create_workspace(client)
     session_id = _create_session(client, workspace_id)
@@ -150,27 +149,26 @@ def test_context_carries_canvas_draft_mirror(client, job_db, tmp_path) -> None:
         )
         assert response.status_code == 200, response.text
         assert response.json()["draft_yaml"] is None
-        assert response.json()["draft_generation"] == 0
+        assert "draft_generation" not in response.json()
 
         pushed = client.put(
             f"/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context",
             json={"draft_yaml": "key: wf\nnodes: {}\n"},
         )
         assert pushed.status_code == 200, pushed.text
-        # The canvas draft store row advances the CAS token (session-row
-        # draft_yaml alone carries no baseline).
+        # The canvas draft store row advancing must NOT leak a mismatched
+        # generation into the session mirror.
         saved = client.put(
             f"/api/workspaces/{workspace_id}/workflow-draft",
             json={"definition_yaml": "key: wf\nschema_version: 2\nnodes: {}\nedges: []\n"},
         )
         assert saved.status_code == 200, saved.text
-        saved_generation = saved.json()["generation"]
         response = client.get(
             _context_url(session_id), headers={"Authorization": f"Bearer {token}"}
         )
         assert response.status_code == 200, response.text
         assert response.json()["draft_yaml"] == "key: wf\nnodes: {}\n"
-        assert response.json()["draft_generation"] == saved_generation
+        assert "draft_generation" not in response.json()
     finally:
         client.delete(f"/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}")
 
