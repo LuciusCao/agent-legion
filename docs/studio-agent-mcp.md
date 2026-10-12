@@ -57,7 +57,7 @@ workflow、预览面板与节点代码 / prompt 相关工具都是**读取 / 校
 - `get_job_detail`：节点状态/错误、run 清单、产物名清单、声明的 inputs/outputs。
 - `get_node_logs`：默认取最近失败 run，路径与密钥已消毒，尾截限幅。
 - `read_artifact`：读产物内容，头截限幅。
-- `list_jobs`：列最近 job，状态过滤 + limit ≤100。
+- `list_jobs`：列最近 job（最新在前），状态过滤 + limit ≤100（MCP 侧收紧，REST 列表上限更高）；响应带 `next_cursor`，传回 `cursor` 入参翻页取更早的 job，不传即最新一页（#1261）。
 - `compare_jobs`：对比两个 job，per-node 状态/错误并排 + newly_failed / recovered 摘要。
 
 job 观测组没有任何生效工具：重跑类动作由 agent 引用 `suggested_actions` payload 输出建议，UI 渲染确认卡片，人确认后由宿主会话走常规 job 路由执行（scoped token 直接调动作端点被拒）。

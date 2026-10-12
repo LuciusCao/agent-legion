@@ -6800,6 +6800,8 @@ export interface components {
       jobs: components['schemas']['StudioAgentJobView'][]
       /** Limit */
       limit: number
+      /** Next Cursor */
+      next_cursor?: string | null
       /** Returned */
       returned: number
     }
@@ -11114,6 +11116,7 @@ export interface operations {
       query?: {
         status?: string | null
         limit?: number
+        cursor?: string | null
       }
       header?: never
       path: {

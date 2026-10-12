@@ -17,10 +17,13 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.jobs import JobQueries
+from server.app.jobs.queries.job_filtering import JobListFilter
+from server.app.jobs.queries.job_pagination import list_jobs_paginated
 from server.app.services.failed_node_runs import FailedNodeRunQueryService
 from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_errors import NotFoundError
 from server.app.services.job_logs import JobLogService
+from server.app.services.job_patch_query_summaries import summarize_paginated_jobs
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
@@ -156,14 +159,28 @@ class StudioAgentJobToolsService:
         }
 
     def list_jobs(
-        self, workspace_id: str, status: str | None = None, limit: int = _LIST_LIMIT_DEFAULT
+        self,
+        workspace_id: str,
+        status: str | None = None,
+        limit: int = _LIST_LIMIT_DEFAULT,
+        cursor: str | None = None,
     ) -> dict[str, Any]:
         limit = max(1, min(int(limit), _LIST_LIMIT_MAX))
-        jobs = self._queries.list_jobs(workspace_id, status=status)
+        # #1261: keyset-paged on (created_at, id) via the shared pagination
+        # query — without the cursor the list was capped at the newest page
+        # and older jobs were invisible to MCP-side diagnosis. The status
+        # filter rides JobListFilter, the same semantics as the workspace
+        # jobs snapshot API ("pending" is the not-yet-started bucket).
+        job_filter = JobListFilter(status=status) if status else None
+        rows, next_cursor = list_jobs_paginated(
+            self._job_db, workspace_id, limit, cursor, job_filter
+        )
+        jobs = summarize_paginated_jobs(self._queries, self._job_db, rows)
         return {
-            "jobs": [_trim_summary(job) for job in jobs[:limit]],
-            "returned": min(len(jobs), limit),
+            "jobs": [_trim_summary(job) for job in jobs],
+            "returned": len(jobs),
             "limit": limit,
+            "next_cursor": next_cursor,
         }
 
     def get_job_detail(self, workspace_id: str, job_id: str) -> dict[str, Any]:

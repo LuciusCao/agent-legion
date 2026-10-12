@@ -545,7 +545,7 @@ server/app/
 | StudioAgentWorkflowDraftResponse | BaseModel | definition_yaml: str | None, updated_at: str | None, definition_hash: str | N... | app/routes/studio_agent_draft_tools.py |
 | StudioAgentJobSummaryNode | BaseModel | node_key: str, label: str, status: str, error_message: str | app/routes/studio_agent_job_tool_contracts.py |
 | StudioAgentJobView | BaseModel | id: str, title: str, status: str, outcome: str, created_at: datetime | None, ... | app/routes/studio_agent_job_tool_contracts.py |
-| StudioAgentJobListResponse | BaseModel | jobs: list[StudioAgentJobView], returned: int, limit: int | app/routes/studio_agent_job_tool_contracts.py |
+| StudioAgentJobListResponse | BaseModel | jobs: list[StudioAgentJobView], returned: int, limit: int, next_cursor: str |... | app/routes/studio_agent_job_tool_contracts.py |
 | StudioAgentJobNode | BaseModel | node_key: str, label: str, capability: str, status: str, error_message: str, ... | app/routes/studio_agent_job_tool_contracts.py |
 | StudioAgentJobRun | BaseModel | id: int, node_key: str, status: str, error_message: str, started_at: datetime... | app/routes/studio_agent_job_tool_contracts.py |
 | StudioAgentSuggestedAction | BaseModel | action: str, job_id: str, node_key: str, label: str, requires_confirmation: b... | app/routes/studio_agent_job_tool_contracts.py |

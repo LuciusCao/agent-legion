@@ -167,6 +167,23 @@ def test_list_jobs_forwards_filters(monkeypatch) -> None:
     assert calls[1]["url"].endswith("/workspaces/ws-1/jobs?status=failed&limit=5")
 
 
+def test_list_jobs_forwards_cursor(monkeypatch) -> None:
+    # #1261: the previous page's next_cursor pages further back; without it
+    # jobs beyond the first page are invisible to MCP-side diagnosis.
+    calls: list[dict] = []
+    server = _build_server(monkeypatch, calls)
+
+    _run_tool(
+        server,
+        "list_jobs",
+        {"workspace_id": "ws-1", "cursor": "2026-01-01 00:00:00|job-9"},
+    )
+
+    assert calls[0]["url"].endswith(
+        "/workspaces/ws-1/jobs?limit=20&cursor=2026-01-01+00%3A00%3A00%7Cjob-9"
+    )
+
+
 def test_compare_jobs_forwards_pair(monkeypatch) -> None:
     calls: list[dict] = []
     server = _build_server(monkeypatch, calls)

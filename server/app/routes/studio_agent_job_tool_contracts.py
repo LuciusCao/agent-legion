@@ -46,6 +46,8 @@ class StudioAgentJobListResponse(BaseModel):
     jobs: list[StudioAgentJobView]
     returned: int
     limit: int
+    # #1261: keyset cursor for the next (older) page; None on the last page.
+    next_cursor: str | None = None
 
 
 class StudioAgentJobNode(BaseModel):
