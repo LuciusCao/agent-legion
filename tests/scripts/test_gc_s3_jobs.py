@@ -34,16 +34,22 @@ def load_dotenv(dotenv_path=None, override=False):
 
 # boto3 桩：ListObjectsV2 分页器默认对任何 Prefix 都返回空集（对象列举交给
 # s3_jobs_gc 桩的固定返回）；STUB_OBJECTS_JSON（[[key, epoch秒, size], ...]）
-# 提供时按该清单产出（供材料根前缀扫描断言），delete_objects 记入 STUB_LOG
+# 提供时按该清单产出（供材料根前缀扫描断言），大清单走 STUB_OBJECTS_JSON_PATH
+# 指向的临时文件（同 JSON 内容）——env/argv 合计限额在 Linux CI 上会被多页
+# 用例打爆（#1298 CI 红，macOS 限额宽本地绿），delete_objects 记入 STUB_LOG
 # 并返回全成功。
 _BOTO3_PROBE = """
 import json
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 
 
 def _stub_objects():
     raw = os.environ.get("STUB_OBJECTS_JSON")
+    path = os.environ.get("STUB_OBJECTS_JSON_PATH")
+    if path:
+        raw = Path(path).read_text()
     if not raw:
         return []
     return [
@@ -361,19 +367,23 @@ def test_material_root_scan_pages_key_existence(tmp_path: Path):
     """#1287：材料根前缀扫描按 KEY_PAGE_SIZE（桩=1000）分页判定——多页输入
     的孤儿归并正确，且 key_exists 按页分批调用（全量对象清单不驻留内存，
     大 bucket 不比 scan_orphans 多一份完整清单）。2503 个根前缀对象 =
-    1000 + 1000 + 503 三页；其中 1 个有行、1 个在宽限窗内，均非孤儿。"""
+    1000 + 1000 + 503 三页；其中 1 个有行、1 个在宽限窗内，均非孤儿。
+    大清单走临时文件（STUB_OBJECTS_JSON_PATH）注入：env+argv 合计限额在
+    Linux CI 上会被内联 JSON 打爆（#1298）。"""
     now = time.time()
     stale = now - 48 * 3600
     objects = [[f"ws1/hash-old/g0/f{i:04}.txt", stale, 10] for i in range(2501)]
     objects.append(["ws1/hash-live/g0/known.txt", stale, 10])  # 有行：保留
     objects.append(["ws1/hash-new/g0/fresh.txt", now - 60, 10])  # 窗内：保留
+    objects_file = tmp_path / "stub-objects.json"
+    objects_file.write_text(json.dumps(objects))
     pystub = _make_pystub(tmp_path, _STORAGE_PROBE_CONFIGURED)
 
     result, log = _run(
         tmp_path,
         pystub,
         env_extra={
-            "STUB_OBJECTS_JSON": json.dumps(objects),
+            "STUB_OBJECTS_JSON_PATH": str(objects_file),
             "STUB_KNOWN_KEYS_JSON": json.dumps(["ws1/hash-live/g0/known.txt"]),
         },
     )
