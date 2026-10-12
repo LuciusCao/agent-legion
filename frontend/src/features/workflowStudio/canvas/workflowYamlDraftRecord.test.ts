@@ -222,6 +222,24 @@ describe('workflowYamlToDefinitionRecord', () => {
     expect(fetchNode?.inputs).toEqual([])
     expect(fetchNode?.outputs).toEqual([])
     expect(fetchNode?.after).toEqual([])
+    // 元素级同策略：非字符串元素过滤（不字符串化——[null] 不该变
+    // ["null"]、[{a:1}] 不该变 ["[object Object]"]，#1258 复验 P3 nit）。
+    const mixed = workflowYamlToDefinitionRecord(
+      yaml.replace('    inputs: foo', "    inputs: [null, 'a', 5]")
+    )
+    expect(mixed?.nodes.find((node) => node.key === 'fetch')?.inputs).toEqual([
+      'a',
+    ])
+  })
+
+  it('normalizes malformed skill bindings instead of crashing (#1258 codex 四轮 P1 同族)', () => {
+    // skill: {key: 5}：normalizeNodeSkill 的 .trim() 崩溃经 mapNode 直达
+    // 画布 record（形状守卫之后无 try/catch）。
+    const record = workflowYamlToDefinitionRecord(
+      'key: demo\nnodes:\n  review:\n    capability: review\n    skill: {key: 5}\n'
+    )
+    expect(record).not.toBeNull()
+    expect(record?.nodes[0]?.skill).toBeUndefined()
   })
 
   it('maps all node, edge and metadata fields', () => {

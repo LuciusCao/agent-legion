@@ -5,7 +5,9 @@ import {
 } from './workflowStudioYamlDraft.parse'
 
 /** 归一化节点 skill 绑定（#322：空 ref 与 latest 同义 = 跟随仓库 HEAD）。
- * 与后端 loader（workflow_node_skill.load_node_skill）同一归一：ref 恒非空。 */
+ * 与后端 loader（workflow_node_skill.load_node_skill）同一归一：ref 恒非空。
+ * 非字符串 key/ref（skill: {key: 5}，编辑中途的合法 YAML 异形）按未声明
+ * 归一——渲染期不得抛 TypeError（#1258 codex 四轮 P1 同族）。 */
 export function normalizeNodeSkill(
   skill: WorkflowYamlNode['skill'] | null | undefined
 ): { key: string; ref: string } | null {
@@ -13,9 +15,10 @@ export function normalizeNodeSkill(
   if (typeof skill === 'string') {
     return skill.trim() ? { key: skill.trim(), ref: 'latest' } : null
   }
-  const key = (skill.key ?? '').trim()
+  const key = typeof skill.key === 'string' ? skill.key.trim() : ''
   if (!key) return null
-  return { key, ref: (skill.ref ?? '').trim() || 'latest' }
+  const ref = typeof skill.ref === 'string' ? skill.ref.trim() : ''
+  return { key, ref: ref || 'latest' }
 }
 
 // #76：节点级 skill 绑定（仅对 Agent 路由节点有意义）。#322：ref 空归一为
