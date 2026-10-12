@@ -8,8 +8,10 @@
 server/app/services/s3_jobs_gc.py；材料根前缀（bucket 根排除两个 jobs 前缀）
 的扫描在本文件（材料 key 形如 {workspace_id}/{hash|id}/g{代次}/{filename}，
 存活对象必有 materials 行——presign 先建行后签发 URL——故与 jobs/ 同手法：
-对照 materials.storage_key 清单行 + 宽限窗）。DB 侧对照
-job_artifacts ∪ materials（须能连上本 worktree 的 Postgres）。
+对照 materials.storage_key 清单行 + 宽限窗）。材料 key 内容寻址可复用
+（删行后同文件同文件名再上传复用同 key），--apply 删除材料孤儿前重列根
+前缀做时点新鲜度守卫（#1282 二轮 P1，见 _MATERIAL_RESCAN_GUARD_SECONDS）。
+DB 侧对照 job_artifacts ∪ materials（须能连上本 worktree 的 Postgres）。
 
 用法:
     uv run python scripts/gc-s3-jobs.py [--grace-hours N] [--staging-grace-hours N]
@@ -29,15 +31,25 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
+# 材料孤儿删除时点新鲜度守卫的余量（#1282 二轮 P1）：取 presigned PUT URL
+# 有效期（server 侧 _PRESIGN_EXPIRY_SECONDS=3600）。材料 key 内容寻址可复用：
+# 行存在性反查与 delete_objects 之间，新 presign 提交 + PUT 落地会复用同
+# key——删除前重列根前缀，LastModified 晚于（扫描开始 − 本余量）的孤儿必属
+# 新一轮上传，跳过本轮（下轮正常回收），零误伤。残余窗口 = PUT 恰好完成于
+# 重列与删除之间的毫秒级间隙，可忽略。
+_MATERIAL_RESCAN_GUARD_SECONDS = 3600
 
-def _past_grace(entry, cutoff) -> bool:
-    modified = entry.last_modified
+
+def _stale(modified, cutoff) -> bool:
+    """LastModified 是否早于 cutoff（None = 对象已消失，删除幂等，按可删）。"""
+    if modified is None:
+        return True
     if modified.tzinfo is None:
         modified = modified.replace(tzinfo=UTC)
     return modified < cutoff
 
 
-def scan_material_root_orphans(entry_lister, key_exists, *, grace_hours: float):
+def scan_material_root_orphans(entry_lister, key_exists, grace_hours: float):
     """材料根前缀的孤儿扫描（#1269 格子③，与 jobs/ 前缀同手法）。
 
     材料 key 在 bucket 根，与 jobs/、jobs-staging/ 两个产物前缀平级：列举
@@ -50,12 +62,10 @@ def scan_material_root_orphans(entry_lister, key_exists, *, grace_hours: float):
 
     cutoff = datetime.now(UTC) - timedelta(hours=grace_hours)
     candidates = [
-        entry
-        for entry in entry_lister("")
-        if not entry.key.startswith((JOBS_PREFIX, STAGING_PREFIX))
+        e for e in entry_lister("") if not e.key.startswith((JOBS_PREFIX, STAGING_PREFIX))
     ]
-    known = key_exists([entry.key for entry in candidates])
-    return [e for e in candidates if e.key not in known and _past_grace(e, cutoff)]
+    known = key_exists([e.key for e in candidates])
+    return [e for e in candidates if e.key not in known and _stale(e.last_modified, cutoff)]
 
 
 def main() -> int:
@@ -111,47 +121,38 @@ def main() -> int:
     if settings.endpoint_url:
         kwargs["endpoint_url"] = settings.endpoint_url
     if settings.access_key:
-        kwargs["aws_access_key_id"] = settings.access_key
-        kwargs["aws_secret_access_key"] = settings.secret_key
+        kwargs.update(
+            aws_access_key_id=settings.access_key, aws_secret_access_key=settings.secret_key
+        )
     client = boto3.client("s3", **kwargs)
 
     app_settings = load_settings()
-    dsn = args.database_url or app_settings.database_url
-    job_db = JobQueries(dsn, jobs_dir=app_settings.jobs_dir)
+    job_db = JobQueries(
+        args.database_url or app_settings.database_url, jobs_dir=app_settings.jobs_dir
+    )
 
     def entry_lister(prefix: str):
         paginator = client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=settings.bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
-                yield ObjectEntry(
-                    key=obj["Key"],
-                    last_modified=obj["LastModified"],
-                    size_bytes=int(obj.get("Size", 0)),
-                )
+                yield ObjectEntry(obj["Key"], obj["LastModified"], int(obj.get("Size", 0)))
 
     # 材料根前缀（#1269 格子③）：与 jobs/ 同一 key_exists（内部缓存全量
     # key 集合，两个扫描共享一遍 DB 载入）。
+    scan_started = datetime.now(UTC)
     key_exists = make_db_key_existence(job_db)
+    staging_grace = args.staging_grace_hours
     report = scan_orphans(
-        entry_lister,
-        key_exists,
-        grace_hours=args.grace_hours,
-        staging_grace_hours=args.staging_grace_hours,
+        entry_lister, key_exists, grace_hours=args.grace_hours, staging_grace_hours=staging_grace
     )
-    material_orphans = scan_material_root_orphans(
-        entry_lister,
-        key_exists,
-        grace_hours=args.grace_hours,
-    )
+    material_orphans = scan_material_root_orphans(entry_lister, key_exists, args.grace_hours)
 
     label = "apply" if args.apply else "dry-run"
+    au, st = report.authority_orphans, report.staging_orphans
     print(
-        f"{label}: jobs/ 孤儿 {len(report.authority_orphans)} 个"
-        f"（{sum(o.size_bytes for o in report.authority_orphans)} 字节）, "
-        f"jobs-staging/ 孤儿 {len(report.staging_orphans)} 个"
-        f"（{sum(o.size_bytes for o in report.staging_orphans)} 字节）, "
-        f"材料根前缀孤儿 {len(material_orphans)} 个"
-        f"（{sum(o.size_bytes for o in material_orphans)} 字节）"
+        f"{label}: jobs/ 孤儿 {len(au)} 个（{sum(o.size_bytes for o in au)} 字节）, "
+        f"jobs-staging/ 孤儿 {len(st)} 个（{sum(o.size_bytes for o in st)} 字节）, "
+        f"材料根前缀孤儿 {len(material_orphans)} 个（{sum(o.size_bytes for o in material_orphans)} 字节）"
     )
     if not args.apply:
         if report.count or material_orphans:
@@ -161,16 +162,23 @@ def main() -> int:
     # 删除前逐批新鲜反查（TOCTOU，#344 评审 P1）：不用扫描阶段的缓存
     # key 集合——扫描与删除之间并发 promote 重建同名 key 并建行时，
     # 缓存判定会误删新权威对象；反查同时对照 materials（撞名 workspace
-    # 的材料 key 在删除前最后一道被救下）。材料根前缀孤儿并入 authority
-    # 批（同一 DB 对照 + 批内反查语义）。
+    # 的材料 key 在删除前最后一道被救下）。
     def fresh_revalidate(keys: list[str]) -> set[str]:
         return job_db.existing_object_storage_keys(keys)
 
-    report.authority_orphans.extend(material_orphans)
+    guarded = material_orphans
+    if material_orphans:
+        # 时点新鲜度守卫（#1282 二轮 P1，见 _MATERIAL_RESCAN_GUARD_SECONDS）：
+        # 重列根前缀，候选里 LastModified 变新的 key 必属新一轮上传，跳过本轮。
+        cutoff = scan_started - timedelta(seconds=_MATERIAL_RESCAN_GUARD_SECONDS)
+        current = {e.key: e.last_modified for e in entry_lister("")}
+        guarded = [o for o in material_orphans if _stale(current.get(o.key), cutoff)]
+        report.authority_orphans.extend(guarded)
     result = apply_gc(client, settings.bucket, report, revalidate=fresh_revalidate)
     print(f"已删除 {result.deleted} 个孤儿对象")
-    if result.skipped_revalidated:
-        print(f"反查救下 {result.skipped_revalidated} 个对象（扫描后被重新引用，未删除）")
+    skipped = result.skipped_revalidated + len(material_orphans) - len(guarded)
+    if skipped:
+        print(f"反查/重列救下 {skipped} 个对象（扫描后被重新引用或重写，未删除）")
     print("（删除失败的对象下一轮扫描会重试）")
     return 0
 

@@ -265,8 +265,7 @@ EOF
   在 run 创建与 dispatch 物化处都被拒（解析链只接受 `ready`），已在
   引用中的 job 不强行失效；`expired` 超过短暂 grace（10 分钟）且
   引用计数为 0 时物理删除（先删 S3 对象再删行，对象删除失败留到下轮
-  重试）。孤儿对象兜底分前缀治理（`#340`）：材料 key 在 bucket 根
-  （`{workspace_id}/{content_hash}/{filename}`），产物在 `jobs/` 前缀
+  重试）。孤儿对象兜底分前缀治理（`#340`）：产物在 `jobs/` 前缀
   下，Worker 直传的暂存对象在 `jobs-staging/` 前缀下（Host 核验后服务端
   copy 提升到 `jobs/` 权威 key；暂存源只在 finish 提交后由完成方删除，
   失败/冲突残留由 GC/lifecycle 兜底），三条前缀
@@ -282,11 +281,16 @@ EOF
   `jobs-staging/` 短保留即接受「恢复处置死线 = 保留天数」。手工清理可用
   console（rustfs `:9001`；seaweedfs 为 master UI `:9333`）。
   - `jobs/` 与 `jobs-staging/` 的孤儿对象（行已删但删除失败/未执行、
-    promote 中途失败的结果报告丢失残留）由
-    `scripts/gc-s3-jobs.py` 回收：按前缀列举对照 `job_artifacts`
-    清单行，宽限窗（默认 24h，`--grace-hours`/`--staging-grace-hours`
+    promote 中途失败的结果报告丢失残留）与材料根前缀的孤儿对象（已上传
+    后重试留下的上一代 `g{代次}` key、行已删但对象删除失败的残留，
+    #1269）由 `scripts/gc-s3-jobs.py` 回收：按前缀列举（材料为根前缀
+    排除两个 jobs 前缀）对照 `job_artifacts` ∪ `materials` 清单行，
+    宽限窗（默认 24h，`--grace-hours`/`--staging-grace-hours`
     可调）外的无行对象与过期暂存对象判定为孤儿；默认 dry-run，加
-    `--apply` 执行删除，幂等可重跑。
+    `--apply` 执行删除，幂等可重跑。材料 key 内容寻址可复用（删行后
+    同文件再上传复用同 key），删除材料孤儿前会重列根前缀做时点新鲜度
+    守卫：LastModified 晚于（扫描开始 − 1h presign 有效期）的 key 必属
+    新一轮上传，跳过本轮（#1282 复审 P1）。
   - 孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已
     不存在的测试 bucket）由 `scripts/report-orphan-s3-buckets.py`
     报告（只报不删，逐个给出 `clean-worktree.sh` 收尾命令）。
