@@ -572,3 +572,46 @@ def test_messages_default_response_unchanged_for_short_history(client, job_db) -
     )
     assert [m["content"]["text"] for m in refill["messages"]] == ["m2"]
     assert refill["has_more"] is False
+
+
+# -- single-message point read (#1236) --------------------------------------
+
+
+def test_get_message_by_id(client, job_db) -> None:
+    workspace_id, session_id = _seed_chat_history(client, job_db, 3)
+    target = job_db.list_studio_chat_messages(session_id)[1]
+
+    response = client.get(f"{_session_url(workspace_id, session_id)}/messages/{target['id']}")
+
+    assert response.status_code == 200, response.text
+    message = response.json()["message"]
+    assert message["id"] == target["id"]
+    assert message["seq"] == target["seq"]
+    assert message["content"] == {"text": "m1"}
+
+
+def test_get_message_by_id_unknown_and_cross_session_are_404(client, job_db) -> None:
+    workspace_id, session_id = _seed_chat_history(client, job_db, 2)
+    other_user = str(job_db.create_user("chat-history-user-2", password_hash=None)["id"])
+    other_session = job_db.create_studio_chat_session(workspace_id, other_user, "test-agent")
+    job_db.append_studio_chat_message(other_session, "text", "user", {"text": "other"})
+    foreign = job_db.list_studio_chat_messages(other_session)[0]
+    url = f"{_session_url(workspace_id, session_id)}/messages"
+    assert client.get(f"{url}/no-such-id").status_code == 404
+    # 跨会话 id 同样 404：不可探测其他会话的消息 id。
+    assert client.get(f"{url}/{foreign['id']}").status_code == 404
+
+
+def test_get_message_by_id_wrong_workspace_is_404(client, job_db) -> None:
+    workspace_id, session_id = _seed_chat_history(client, job_db, 1)
+    row = job_db.list_studio_chat_messages(session_id)[0]
+    other_workspace = _create_workspace(client)
+    response = client.get(
+        f"/api/workspaces/{other_workspace}/studio-chat/sessions/{session_id}/messages/{row['id']}"
+    )
+    assert response.status_code == 404
+
+
+def test_get_message_by_id_requires_auth(anon_client) -> None:
+    response = anon_client.get("/api/workspaces/ws/studio-chat/sessions/s-1/messages/m-1")
+    assert response.status_code == 401

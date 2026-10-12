@@ -32,6 +32,7 @@ from server.app.routes.studio_chat_contracts import (
     StudioChatSessionsResponse,
 )
 from server.app.routes.studio_chat_events import create_studio_chat_events_router
+from server.app.routes.studio_chat_message_read import create_studio_chat_message_read_router
 from server.app.routes.studio_chat_session_manage import create_studio_chat_session_manage_router
 from server.app.studio_chat.service import StudioChatService
 
@@ -199,5 +200,6 @@ def create_studio_chat_router(
     router.include_router(create_studio_chat_context_router(service))
     router.include_router(create_studio_chat_session_manage_router(service))
     router.include_router(create_studio_chat_events_router(service, job_event_manager))
+    router.include_router(create_studio_chat_message_read_router(service))
     router.include_router(guarded)
     return router

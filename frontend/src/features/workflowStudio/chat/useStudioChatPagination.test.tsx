@@ -377,8 +377,92 @@ describe('useStudioChat 历史向上翻页（#1120 PR-4）', () => {
         'm105',
       ])
     )
-    expect(
-      result.current.messages.find((m) => m.id === 'm100')?.content.text
-    ).toBe('q full')
+    // 内容断言等合入完成的信号（非中间态）：m96/m100 由翻页先行到位，
+    // id 列表相等不代表 once-mock 的 q full 已合入。
+    await waitFor(() =>
+      expect(
+        result.current.messages.find((m) => m.id === 'm100')?.content.text
+      ).toBe('q full')
+    )
+  })
+
+  it('补拉失败短延迟自动重试一次（#1270）；重试自身失败不续期', async () => {
+    mockApi.fetchStudioChatHistoryPage.mockRejectedValue(
+      new Error('network down')
+    )
+    const { result } = await renderChat()
+    vi.useFakeTimers()
+    try {
+      let failed: boolean | undefined
+      await act(async () => {
+        failed = await result.current.loadOlderHistory()
+      })
+      expect(failed).toBe(false)
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(1)
+
+      // 未溢出态没有滚动事件可再触发——2s 后自动重试一次（信号驱动，非等待
+      // 真实时长）。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000)
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(2)
+
+      // 重试自身失败不续期：再推进窗口不出现第三次。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000)
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('切换会话清理待定重试：旧会话的失败重试不跨会话触发（#1270）', async () => {
+    mockApi.fetchStudioChatMessages.mockImplementation(
+      (_workspaceId, sessionId) =>
+        Promise.resolve(
+          sessionId === 's1'
+            ? [textMessage('m101', 101, 'a')]
+            : [textMessage('n500', 500, 's2 newest')]
+        )
+    )
+    mockApi.fetchStudioChatHistoryPage.mockRejectedValue(
+      new Error('network down')
+    )
+    const view = renderHook(() => useStudioChat('ws1'), { wrapper })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatSessions).toHaveBeenCalled()
+    )
+    await act(async () => {
+      await view.result.current.selectSession('s1')
+    })
+    await waitFor(() =>
+      expect(view.result.current.messages.map((m) => m.id)).toEqual(['m101'])
+    )
+
+    let failed: boolean | undefined
+    // fake timers 必须先于失败的 load 开启（复验 finding 2）：否则重试是
+    // 真定时器，cleanup 的 clearTimeout 打在 fake 注册表上是空操作——
+    // 有无 cleanup 断言都过（空心）且泄漏真定时器。
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        failed = await view.result.current.loadOlderHistory()
+      })
+      expect(failed).toBe(false)
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(1)
+
+      // 切走再推进重试窗口：待定重试已被会话切换的清理取消（无 cleanup 时
+      // fake 定时器会在推进时点火、多拉一次——本断言即红）。
+      await act(async () => {
+        await view.result.current.selectSession('s2')
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000)
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

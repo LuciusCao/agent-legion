@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { ChatMessage } from './studioChatMessages'
 
 /** 消息列表自动滚动：仅在用户本已贴底时跟随滚动到底——向上翻历史时不被
@@ -13,7 +13,10 @@ export function useChatAutoScroll(
   const listRef = useRef<HTMLDivElement | null>(null)
   const pinnedToBottomRef = useRef(true)
   const onNearTopRef = useRef(onNearTop)
-  useEffect(() => {
+  // 布局效应同步（#1270，useInFlightSend/useStudioChatQueue 同款模式）：RO
+  // 回调在 commit 后、被动效应前的窗口就可能 fire——被动同步会让它拿到上一
+  // 代闭包（陈旧游标多浪费一次拉取）。
+  useLayoutEffect(() => {
     onNearTopRef.current = onNearTop
   })
 
