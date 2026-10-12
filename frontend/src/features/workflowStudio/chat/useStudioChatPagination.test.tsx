@@ -480,6 +480,55 @@ describe('useStudioChat 历史向上翻页（#1120 PR-4）', () => {
     }
   })
 
+  it('窗口内 fail→success→fail：第二次失败重新武装一次性重试（#1296）', async () => {
+    const { result } = await renderChat()
+    // fake timers 必须先于失败的 load 开启（同 #1291 用例的复验 finding 2）。
+    vi.useFakeTimers()
+    try {
+      // 第一次失败（游标 101）：挂出 2s 重试。
+      mockApi.fetchStudioChatHistoryPage.mockRejectedValueOnce(
+        new Error('network down')
+      )
+      await act(async () => {
+        await result.current.loadOlderHistory()
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(1)
+
+      // 窗口内前台自然加载成功：游标推进 101 → 96（#1291：前台承担了第一次
+      // 失败的重试职责，首次失败的待定定时器到点应空转）。
+      await act(async () => {
+        await result.current.loadOlderHistory()
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(2)
+      expect(result.current.messages[0]?.id).toBe('m96')
+
+      // 同一窗口内第二次失败（游标 96）：??= 占位仍在，但重试必须按最新失败
+      // 重新武装——否则点火时比对的是首次失败的游标 101，第二次失败的一次性
+      // 重试被游标守卫吞掉，会话静默停在部分历史。
+      mockApi.fetchStudioChatHistoryPage.mockRejectedValueOnce(
+        new Error('network down again')
+      )
+      await act(async () => {
+        await result.current.loadOlderHistory()
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(3)
+
+      // 到点：比对最新失败游标（96 仍相等）重试点火；无修复时守卫比对首次
+      // 失败的 101（游标已是 96）拦下点火——本断言即红。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000)
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(4)
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenLastCalledWith(
+        'ws1',
+        's1',
+        96
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('切换会话清理待定重试：旧会话的失败重试不跨会话触发（#1270）', async () => {
     mockApi.fetchStudioChatMessages.mockImplementation(
       (_workspaceId, sessionId) =>

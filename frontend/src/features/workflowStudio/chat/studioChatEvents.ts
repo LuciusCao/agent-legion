@@ -40,9 +40,7 @@ type SseDeps = {
 }
 
 /** SseDeps → RowRefetchDeps（#1236）：按 id 点读校准的消费面。 */
-function rowRefetchDeps(deps: SseDeps): RowRefetchDeps & {
-  messagesRef: { current: ChatMessage[] }
-} {
+function rowRefetchDeps(deps: SseDeps): RowRefetchDeps {
   return {
     workspaceId: deps.workspaceId,
     sessionId: deps.activeSessionId,
@@ -66,11 +64,18 @@ export function handleSseMessageEvent(
   const { messagesRef, setMessages, queryClient, workspaceId } = deps
   // updater 外判定 missed：updater 在 StrictMode 下会被双调用，副作用放
   // 里面会重复 fetch；补齐失败留待下次事件再试，不产生 unhandled rejection。
-  const missed = upsertMessage(messagesRef.current, incoming) === null
+  const merged = upsertMessage(messagesRef.current, incoming)
+  const missed = merged === null
   setMessages((current) => upsertMessage(current, incoming) ?? current)
   if (missed) handleMissedMessageFrame(rowRefetchDeps(deps), incoming.id)
   if (isTerminalStatus(incoming as ChatMessage)) {
-    void calibrateWithRowRefetch(rowRefetchDeps(deps)).catch(() => undefined)
+    // #1300：terminal 当轮到达——messagesRef 由被动效应同步、此刻尚未合入
+    // 它；校准的 turn 截断按合入 incoming 后的快照计算，否则刚到的新边界
+    // 不可见，刚终结 turn 的死行被误判在途逐个点读。
+    void calibrateWithRowRefetch(
+      rowRefetchDeps(deps),
+      merged ?? undefined
+    ).catch(() => undefined)
     invalidateStudioTurnEndQueries(queryClient, workspaceId)
   }
 }
