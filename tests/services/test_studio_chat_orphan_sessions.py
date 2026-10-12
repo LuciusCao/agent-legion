@@ -14,7 +14,7 @@ import pytest
 from fastapi import HTTPException
 
 from server.app.routes.job_http import raise_job_http_error
-from server.app.services.job_errors import ConflictError
+from server.app.services.job_errors import ConflictError, InvalidOperationError
 from server.app.studio_chat.session_orphan import (
     ORPHAN_ERROR_DETAIL,
     SESSION_INTERRUPTED_CODE,
@@ -78,11 +78,14 @@ def test_interrupted_error_maps_to_409_with_payload_detail() -> None:
 
 
 def test_send_to_already_errored_session_does_not_restamp(chat, job_db) -> None:
+    """error 行无 runtime：#1238 六轮起发送会尝试自动 resume（可恢复态），
+    本用例的 agent 未注册 → preflight 拒绝且零写入——原有 error_detail
+    不被覆盖、时间线不变、无二次 spawn。"""
     service, _bus, _register, workspace_id, user_id = chat
     sid = _orphan(job_db, workspace_id, user_id, "error")
     job_db.update_studio_chat_session(sid, error_detail="agent process exited")
 
-    with pytest.raises(StudioChatSessionInterruptedError):
+    with pytest.raises(InvalidOperationError, match="Unknown studio agent"):
         service.send_message(sid, workspace_id, "hi")
 
     assert job_db.get_studio_chat_session(sid)["error_detail"] == "agent process exited"
@@ -132,9 +135,12 @@ def test_resume_claiming_between_recheck_and_append_gets_no_stale_error(
     calls = 0
 
     def runtime(session_id: str):
+        # #1121 P2-2: the send now re-reads through send_resume's lock first —
+        # call 1 = admission top, 2 = the ensure re-read, 3 = the projection's
+        # post-write recheck.
         nonlocal calls
         calls += 1
-        if calls == 2:  # post-write recheck: a resume claims right after it
+        if calls == 3:  # post-write recheck: a resume claims right after it
             assert job_db.claim_studio_chat_resume(session_id, max_active=32)
         return None
 
@@ -143,7 +149,7 @@ def test_resume_claiming_between_recheck_and_append_gets_no_stale_error(
     with pytest.raises(StudioChatSessionInterruptedError):
         service.send_message(sid, workspace_id, "hi")
 
-    assert calls == 2
+    assert calls == 3
     assert job_db.get_studio_chat_session(sid)["status"] == "starting"
     assert job_db.list_studio_chat_messages(sid) == []
     assert _session_publishes(bus, sid) == []
@@ -158,7 +164,9 @@ def test_runtime_registered_during_projection_rolls_the_stamp_back(
     service, bus, _register, workspace_id, user_id = chat
     sid = _orphan(job_db, workspace_id, user_id, "running")
     rt = _StubRuntime()
-    calls = iter([None, rt, rt])  # admission sees none; post-write recheck sees one
+    # #1121 P2-2: admission top + the ensure re-read both see no runtime; the
+    # projection's post-write recheck (call 3) is where the runtime appears.
+    calls = iter([None, None, rt, rt])
     monkeypatch.setattr(service, "runtime", lambda session_id: next(calls))
 
     with pytest.raises(ConflictError) as caught:
@@ -184,7 +192,8 @@ def test_rollback_never_undoes_a_new_runtime_real_failure(chat, job_db, monkeypa
     def runtime(session_id: str):
         nonlocal calls
         calls += 1
-        if calls == 2:  # recheck sees the new runtime, which then dies
+        # #1121 P2-2: 1 = admission top, 2 = ensure re-read, 3 = projection recheck.
+        if calls == 3:  # recheck sees the new runtime, which then dies
             job_db.update_studio_chat_session(
                 session_id, status="error", error_detail="agent process exited"
             )
@@ -216,7 +225,8 @@ def test_rollback_skips_a_new_runtime_that_exited_under_the_orphan_stamp(
     def runtime(session_id: str):
         nonlocal calls
         calls += 1
-        if calls == 2:  # recheck sees the new runtime, which then exits
+        # #1121 P2-2: 1 = admission top, 2 = ensure re-read, 3 = projection recheck.
+        if calls == 3:  # recheck sees the new runtime, which then exits
             rt.closed = True  # on_exit teardown: closed + unregistered
             return rt
         return None

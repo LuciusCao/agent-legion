@@ -1,8 +1,9 @@
 """Short-lived scope-bound bearer tokens for server-side built-in agents.
 
 A studio chat run mints one scoped token per run — bound to the initiating
-user and ``actor_scope='studio_agent'`` with a TTL of roughly run duration
-plus grace — instead of handing the agent a full user session
+user and ``actor_scope='studio_agent'`` with a TTL sized to a full day of
+activity (slid forward at each turn) — instead of handing the agent a full
+user session
 (STUDIO-AGENT-001). Scoped tokens authenticate only through the Bearer
 channel; effecting endpoints (publish/rollback/archive, job lifecycle and
 execution triggers, workspace/secret/package/member/settings writes, worker
@@ -20,16 +21,19 @@ from server.app.auth.sessions import hash_token, issue_token
 from server.app.jobs.queries import JobQueries
 
 STUDIO_AGENT_SCOPE = "studio_agent"
-# Run duration plus grace. The TTL is fixed at mint time, but a live studio
+# Run duration plus grace — sized at a full day (#1121): the session layer is
+# "no expiry" (a dead token auto-resumes on the next send), the credential
+# layer keeps a leak fuse, so the window in which a leaked token is usable is
+# this TTL. The TTL is fixed at mint time, but a live studio
 # chat session slides it forward at each turn start (renew_scoped_token below,
 # #158): the token the agent holds in its MCP headers cannot be swapped
 # mid-session, so the same token's expiry is extended while a human keeps the
 # session active. A leaked token still dies on its own once the session goes
-# idle or closes (close revokes it outright).
-SCOPED_TOKEN_TTL = timedelta(hours=2)
+# idle past the TTL or closes (close revokes it outright).
+SCOPED_TOKEN_TTL = timedelta(hours=24)
 # Renew at turn start only when less than this much life remains, so active
-# sessions do not pay an UPDATE per turn.
-SCOPED_TOKEN_RENEW_THRESHOLD = timedelta(minutes=30)
+# sessions do not pay an UPDATE per turn (proportional to the 24h TTL, #1121).
+SCOPED_TOKEN_RENEW_THRESHOLD = timedelta(hours=4)
 
 
 def mint_scoped_token(

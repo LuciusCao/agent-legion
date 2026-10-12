@@ -9,7 +9,7 @@ from server.app.auth.scoped_tokens import renew_scoped_token
 from server.app.auth.sessions import hash_token
 from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.services.job_errors import ConflictError
-from server.app.studio_chat import compaction, inbound_queue, unprompted_queue
+from server.app.studio_chat import compaction, inbound_queue, send_resume, unprompted_queue
 from server.app.studio_chat.background_wakeup import prepare_rearm
 from server.app.studio_chat.payloads import serialize_message
 from server.app.studio_chat.resume_context import prepare_resume_prompt
@@ -24,14 +24,29 @@ logger = logging.getLogger(__name__)
 
 
 def send_message(
-    service: StudioChatService, session_id: str, workspace_id: str, text: str
+    service: StudioChatService,
+    session_id: str,
+    workspace_id: str,
+    text: str,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     session = service.get_session(session_id, workspace_id)
     if session["status"] == "closed":
         raise ConflictError("Chat session is closed")
     runtime = service.runtime(session_id)
-    if runtime is None:
-        reject_orphaned_session(service, session_id, session)
+    # #1121: a dead run token is rebuilt (auto-resume) before anything is
+    # admitted — an accepted message always has a live tool channel.
+    # Live-token sessions skip this entirely; ensure_answerable_runtime
+    # re-decides under its lock (waiting out an in-flight auto-resume,
+    # codex P2-2) and falls through for non-idle/error rows (a running turn
+    # keeps the fail-closed refusal below). A runtime still absent after the
+    # wait is a real orphan — the orphan projection owns it.
+    if runtime is None or not send_resume.run_token_alive(service, runtime):
+        session, runtime = send_resume.ensure_answerable_runtime(
+            service, session_id, workspace_id, user_id=user_id
+        )
+        if runtime is None:
+            reject_orphaned_session(service, session_id, session)
     from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 
     # #1029: observe a just-started Kimi Code unprompted turn before deciding.
