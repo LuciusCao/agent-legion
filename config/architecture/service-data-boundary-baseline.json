@@ -241,11 +241,6 @@
       1,
       0
     ],
-    "server/app/services/token_usage_lease.py": [
-      2,
-      2,
-      0
-    ],
     "server/app/services/token_usage_workspace.py": [
       8,
       0,
