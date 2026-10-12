@@ -88,6 +88,15 @@ class FakeJobDB:
         # #958：删除事务内（删行之前）快照 node_runs.(node_key, log_path)；假库无节点运行。
         return []
 
+    def read_lease_token_usage_source(self, lease_id):
+        # #1239：finish 的 token capture 走 facade 方法。假库的 lease 行
+        # （_insert_lease 落进真实测试库）node_run 无 run_dir，真实 facade
+        # 同样返回 None——capture 提前返回、不落库。
+        return None
+
+    def persist_lease_token_usage(self, summary):
+        raise AssertionError("fake has no usage source; persist must be unreachable")
+
     @contextmanager
     def job_mutation_lock(self, job_id):
         # #958：删除提交后的本地清理在此锁下复核行；假库里行已删 → False。
