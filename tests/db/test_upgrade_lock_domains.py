@@ -212,7 +212,10 @@ def test_guard_reread_waits_for_inflight_publish_and_sees_new_revision(job_db) -
     def _guard_reread() -> str:
         with queries_timed.connect() as conn_a:
             queries_timed.acquire_implementation_publication_lock(conn_a, workspace_id)
-            current = queries_timed.get_active_workflow_revision(workspace_id, "wf")
+            # conn-first 变体（#1226/#1239）：重读骑在持锁连接上，不开二次
+            # 池 checkout——自 checkout 的 get_active_workflow_revision 在池
+            # 耗尽形态下会把持锁线程卡在 10s checkout timeout 上。
+            current = queries_timed.read_active_workflow_revision_on(conn_a, workspace_id, "wf")
             assert current is not None
             return str(current["id"])
 

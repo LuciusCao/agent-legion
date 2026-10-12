@@ -5,8 +5,9 @@ from pathlib import Path
 
 import psycopg
 
+from server.app.db import transaction
 from server.app.db.connection import DatabaseConnection
-from server.app.db.transaction import write_transaction
+from server.app.db.dialect import ConnectSource
 from server.app.services.token_usage import persist_node_run_usage
 from server.app.services.token_usage_parse import TokenUsageSummary, parse_run_usage
 from server.app.storage_paths import ManagedPathError, resolve_data_path
@@ -42,19 +43,26 @@ def parse_token_usage_for_lease(
 
 
 def capture_token_usage_after_lease_finish(
-    conn: DatabaseConnection,
+    dsn: ConnectSource,
     lease_id: str,
     data_dir: Path,
 ) -> None:
-    """Capture token usage for a finished lease; parse outside, persist inside a write tx."""
+    """Capture token usage for a finished lease: parse on a short read checkout, then persist on a separate write tx.
+
+    The two pool checkouts are strictly sequential (#1239): the caller holds
+    no connection across this call, so even a size-1 pool
+    (``AGENT_LEGION_DB_POOL_MAX_SIZE=1``) can serve both. The previous shape
+    took the caller's still-held read connection for the parse and opened
+    the write transaction on top of it — a nested checkout that waited out
+    the 10s pool timeout and let the best-effort guard below swallow
+    PoolTimeout, silently dropping the usage row on every lease finish.
+    """
     try:
-        summary = parse_token_usage_for_lease(conn, lease_id, data_dir)
+        with transaction.read_connection(dsn) as read_conn:
+            summary = parse_token_usage_for_lease(read_conn, lease_id, data_dir)
         if summary is None:
             return
-        # The caller hands us a read-only connection for the parse step; the
-        # short persist transaction runs on its own connection to the same
-        # PostgreSQL DSN via the unified write_transaction helper.
-        with write_transaction(conn.database_dsn) as write_conn:
+        with transaction.write_transaction(dsn) as write_conn:
             persist_node_run_usage(write_conn, summary)
     except (OSError, psycopg.Error):
         # #204: usage capture is best-effort telemetry on the completion

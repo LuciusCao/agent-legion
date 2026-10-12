@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import contextmanager
 from pathlib import Path
 
 import psycopg
@@ -232,8 +233,6 @@ def test_stage_outputs_programming_error_propagates_uncaught(tmp_path: Path) -> 
 
 
 class _UsageConn:
-    database_dsn = "postgresql://invalid/test"
-
     def execute(self, sql: str, params: tuple | None = None):
         class _Row:
             def __init__(self, data: dict) -> None:
@@ -260,45 +259,54 @@ class _Result:
         return self._rows
 
 
-def test_capture_token_usage_swallows_oserror(caplog) -> None:
-    """#204 窄化：解析/持久化的 OSError（连接层）按 best-effort 吞掉
-    （debug 日志），完成路径不受影响。"""
-    conn = _UsageConn()
+def _stub_lease_transaction(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Route the lease module's pooled read checkout at a fake connection."""
+
+    @contextmanager
+    def _fake_read_connection(_dsn):
+        yield _UsageConn()
+
+    class _FakeTransaction:
+        read_connection = staticmethod(_fake_read_connection)
 
     import server.app.services.token_usage_lease as lease_module
 
-    original = lease_module.parse_token_usage_for_lease
+    monkeypatch.setattr(lease_module, "transaction", _FakeTransaction)
+
+
+def test_capture_token_usage_swallows_oserror(caplog, monkeypatch) -> None:
+    """#204 窄化：解析/持久化的 OSError（连接层）按 best-effort 吞掉
+    （debug 日志），完成路径不受影响。"""
+    import server.app.services.token_usage_lease as lease_module
 
     def _failing_parse(conn, lease_id: str, data_dir: Path):
         raise OSError("connection reset")
 
-    lease_module.parse_token_usage_for_lease = _failing_parse
-    try:
-        with caplog.at_level(logging.DEBUG, logger="server.app.services.token_usage_lease"):
-            capture_token_usage_after_lease_finish(conn, "lease-1", Path("/data"))
-    finally:
-        lease_module.parse_token_usage_for_lease = original
+    _stub_lease_transaction(monkeypatch)
+    monkeypatch.setattr(lease_module, "parse_token_usage_for_lease", _failing_parse)
+
+    with caplog.at_level(logging.DEBUG, logger="server.app.services.token_usage_lease"):
+        capture_token_usage_after_lease_finish(
+            "postgresql://invalid/test", "lease-1", Path("/data")
+        )
 
     assert "Failed to capture token usage" in caplog.text
 
 
-def test_capture_token_usage_propagates_programming_error() -> None:
+def test_capture_token_usage_propagates_programming_error(monkeypatch) -> None:
     """#204 窄化：注入的编程错误（TypeError）上抛，不再静默 debug 掉。"""
-    conn = _UsageConn()
-
     import server.app.services.token_usage_lease as lease_module
-
-    original = lease_module.parse_token_usage_for_lease
 
     def _broken_parse(conn, lease_id: str, data_dir: Path):
         raise TypeError("parse contract violation")
 
-    lease_module.parse_token_usage_for_lease = _broken_parse
-    try:
-        with pytest.raises(TypeError, match="parse contract violation"):
-            capture_token_usage_after_lease_finish(conn, "lease-1", Path("/data"))
-    finally:
-        lease_module.parse_token_usage_for_lease = original
+    _stub_lease_transaction(monkeypatch)
+    monkeypatch.setattr(lease_module, "parse_token_usage_for_lease", _broken_parse)
+
+    with pytest.raises(TypeError, match="parse contract violation"):
+        capture_token_usage_after_lease_finish(
+            "postgresql://invalid/test", "lease-1", Path("/data")
+        )
 
 
 # ---------------------------------------------------------------------------
