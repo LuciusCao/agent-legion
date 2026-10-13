@@ -72,7 +72,7 @@ class MaterialTtlSweeperThread:
             self._dsn, self._storage, pending=self._backfill_pending
         )
         self._backfill_done = bool(stats["done"])
-        if stats["bound"] or stats["missing"] or stats["failed"] or stats["cas_lost"]:
+        if stats["bound"] or stats["marked_failed"] or stats["failed"] or stats["cas_lost"]:
             logger.info("material etag backfill pass: %s", stats)
 
     def run_once(self) -> None:

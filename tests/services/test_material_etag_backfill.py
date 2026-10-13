@@ -249,6 +249,39 @@ def test_sweeper_thread_backfills_at_startup_and_retries(
         thread.stop()
 
 
+def test_sweeper_backfill_stats_path_tolerates_marked_failed(service, storage, job_db) -> None:
+    """评审 P2-①：binder 结果含 marked_failed（缺对象翻 failed）时 sweeper
+    统计路径不抛 KeyError（改名 missing→marked_failed 的 callsite 回归）。"""
+    material_id, key = _legacy_ready_row(job_db, service, storage)
+    del storage.objects[key]
+    thread = MaterialTtlSweeperThread(job_db.dsn_identity, storage, interval_seconds=3600)
+
+    thread._run_backfill()  # 不抛即过（旧代码 KeyError: 'missing'）
+
+    assert service.get(WORKSPACE_ID, material_id)["status"] == "failed"
+
+
+def test_done_not_wedged_by_stale_pending_mark(service, storage, job_db) -> None:
+    """评审 P2-②：行带着 pending 标记离开候选集（被 repair 走）后，done
+    按本轮候选 pending 计数判定，不被陈旧标记永久楔形。"""
+    material_id, _key = _legacy_ready_row(job_db, service, storage)
+    clock = _Clock()
+    pending: dict = {}
+    first = backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, pause_seconds=0, pending=pending, now=clock
+    )
+    assert first["done"] is False and pending  # 标记在、未绑
+
+    # 行被 repair 走（uploading，离开候选集），标记残留在 map 里。
+    service.request_material_reupload(WORKSPACE_ID, material_id)
+    assert pending, "repair 不清 binder 的 map（由身份比对兜住安全）"
+
+    second = backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, pause_seconds=0, pending=pending, now=clock
+    )
+    assert second["done"] is True, "候选集已空：陈旧标记不得楔形 done"
+
+
 def test_sweeper_thread_backfill_skips_without_storage(job_db) -> None:
     """无对象存储 = 无材料特性：回填直接标记完成，不炸线程。"""
     thread = MaterialTtlSweeperThread(job_db.dsn_identity, None, interval_seconds=3600)

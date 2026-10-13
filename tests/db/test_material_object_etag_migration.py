@@ -30,8 +30,8 @@ def test_fresh_schema_has_object_etag_column() -> None:
         column = _object_etag_column(conn)
     assert column is not None
     assert column["data_type"] == "text"
-    # 非空 + '' 默认：存量行是过渡态（启动回填收口；消费侧 etag='' 在
-    # 回填完成前维持 size-only 现状）。
+    # 非空 + '' 默认：存量行是过渡态（启动回填收口；回填完成前由
+    # fail-closed/门禁挂起挡住，不再 size-only 放行）。
     assert column["is_nullable"] == "NO"
     assert column["column_default"] == "''::text"
 

@@ -176,8 +176,8 @@ def test_runtime_block_detects_post_complete_overwrite_via_etag(
     """#1279 验收项（Host 链故障注入，目标洞的原生形态）：无 content_hash
     的 ready 材料行（object_etag 是唯一内容身份）在 complete 后被同尺寸
     静默覆盖——cache miss 的 GET 带 If-Match，S3 412 检出为
-    MaterializeError，毒化字节不落缓存。etag=''（存量行）维持 size-only
-    旧语义（本文件其余用例覆盖）。"""
+    MaterializeError，毒化字节不落缓存。etag=''（存量行回填在途）由
+    assert_material_identity_ready fail-closed（r9，不再 size-only 放行）。"""
     from tests.fakes.storage import etag_of
 
     key = f"{WORKSPACE_ID}/mat-nh/g0/mat-nh/file.bin"

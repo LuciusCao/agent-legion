@@ -139,10 +139,9 @@ def backfill_legacy_material_etags(
                 stats["cas_lost"] = int(stats["cas_lost"]) + 1
                 marks.pop(material_id, None)
             time.sleep(pause_seconds)
-    # 注：被 repair 走的行的旧标记无清理必要——身份比对含 key+代次，旧标记
-    # 永不误配（行再成候选时身份已变、标记重置）；bound/翻 failed/CAS 让位
-    # 的行在各自分支即时摘除。
-    # done = 全量扫描完成且无 pending、无失败——有失败（存储故障/无 etag
-    # 异常）则下轮重扫；pending 行等静止期满。
-    stats["done"] = not marks and stats["failed"] == 0
+    # done = 本轮扫描到的候选全部有着落（绑定/翻 failed/静止期外无
+    # pending）且无失败——按本轮 pending 计数判，不按 marks 全局：行离开
+    # 候选集（被 repair 走等）留下的陈旧标记不楔形 done（评审 P2-②；
+    # 陈旧标记由身份比对兜住——key/代次变了只会重置计时，永不误绑）。
+    stats["done"] = not stats["pending"] and stats["failed"] == 0
     return stats

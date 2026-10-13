@@ -6,8 +6,8 @@ inline 文本与 demo seed 两条直插 ready 产线在 put 后 HEAD 取 ETag �
 同尺寸静默覆盖」。存量行 default '' 是过渡态（codex r8：升级前完成、旧 PUT URL
 仍在 1h 有效期内的无 hash 行仍处窗口内）——启动后台回填
 （services/material_etag_backfill.py，挂在 MaterialTtlSweeperThread 上）逐行
-HEAD 取当前 ETag、CAS 落库收口；回填完成前这些行维持 size-only 现状放行
-（瞬态窗口）。
+HEAD 取当前 ETag、CAS 落库收口；回填完成前这些行由 fail-closed（Host 物化）
+与门禁挂起（Worker claim 拦全部）挡住（codex r9），不再放行。
 
 Same guarded-ALTER home rule as v87+: the column lives ONLY here
 (postgres_schema.sql sits at its budget ceiling), idempotent on replay, and
