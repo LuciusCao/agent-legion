@@ -83,7 +83,16 @@ class MaterialTtlSweeperThread:
             logger.info("materials TTL sweep collected %d material(s)", deleted)
 
     def _loop(self) -> None:
-        self._run_backfill()  # etag 回填启动即跑（升级窗口尽早关闭）
+        try:
+            # #1279：etag 回填启动即跑（升级窗口尽早关闭）；纳入生命维持——
+            # DB 瞬断不得带走整个 sweeper 线程（连带 TTL sweep，评审 P2）。
+            # #204 broad-except audit: 与下方 sweep 循环同一生命维持纪律
+            # （JobArtifactMaintenanceThread 先例）：启动期回填失败的全部
+            # 形态（DB 不可达/存储故障/编程错误）都记日志并等下个间隔重试，
+            # 线程不死。
+            self._run_backfill()
+        except Exception:
+            logger.exception("material etag backfill at startup failed; retrying each interval")
         while not self._stop_event.wait(self._interval_seconds):
             try:
                 if not self._backfill_done:

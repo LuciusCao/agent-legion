@@ -76,6 +76,27 @@ def test_backfill_yields_on_cas_race(service, storage, job_db, monkeypatch) -> N
     assert _object_etag_of(job_db, material_id) == "raced"
 
 
+def test_backfill_yields_when_repair_rotated_key(service, storage, job_db, monkeypatch) -> None:
+    """评审 P2-②：CAS 的 storage_key 钉——HEAD 之后并发 repair 清了 etag
+    且轮换了 key（etag 仍是 ''，单 etag 钉会被骗过），带旧 key 的 CAS
+    必须不落库：不得把旧 key 的 HEAD etag 绑到指向新 key 的行上。"""
+    material_id, key = _legacy_ready_row(job_db, service, storage)
+    real_head = storage.head_object
+
+    def head_then_repair(storage_key: str):
+        head = real_head(storage_key)
+        # 并发 repair：清 etag + 轮换 key（object_etag 仍是 ''）。
+        service.request_material_reupload(WORKSPACE_ID, material_id)
+        return head
+
+    monkeypatch.setattr(storage, "head_object", head_then_repair)
+    stats = backfill_legacy_material_etags(job_db.dsn_identity, storage, pause_seconds=0)
+
+    assert stats["cas_lost"] == 1 and stats["bound"] == 0
+    assert _object_etag_of(job_db, material_id) == ""
+    assert materials_testlib.storage_key_of(job_db, material_id) != key
+
+
 def test_backfill_zero_progress_is_not_done(service, storage, job_db, monkeypatch) -> None:
     """存储面故障：每行 HEAD 失败 → 零进展闸收尾，done=False（等下一轮）。"""
     _legacy_ready_row(job_db, service, storage)
