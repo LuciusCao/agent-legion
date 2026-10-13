@@ -206,6 +206,14 @@ def test_hashless_address_follows_generation_with_legacy_fallback(
     assert Path(third["path"]).name == "mat-w1"
 
 
+def test_unbound_hashless_descriptor_is_refused(tmp_path: Path) -> None:
+    """#1279 codex r9 纵深：描述符 etag 字段在但为空 + 无 hash（新 Server
+    的未绑定行）→ 拒绝消费；字段缺席（旧 Server）→ 旧语义放行。"""
+    unbound = _material_block(content_hash="", object_etag="")
+    with pytest.raises(MaterializeError, match="identity is not yet established"):
+        materialize_claim_material(_manifest_with_material(unbound), tmp_path / "exec-1")
+
+
 def test_sandbox_argv_grants_static_cache_root(tmp_path: Path) -> None:
     cache_root = tmp_path / MATERIALS_CACHE_DIRNAME
     argv = build_sandbox_argv(

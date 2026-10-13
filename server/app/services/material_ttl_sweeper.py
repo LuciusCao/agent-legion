@@ -50,6 +50,9 @@ class MaterialTtlSweeperThread:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._backfill_done = False
+        # binder 的静止期计时表（#1279 r9）：跨轮存活；重启丢失 = 重新计时
+        # （安全方向）。语义见 material_etag_backfill 模块 docstring。
+        self._backfill_pending: dict[str, tuple[float, str, int, str]] = {}
 
     def start(self) -> None:
         if self._thread is not None:
@@ -65,7 +68,9 @@ class MaterialTtlSweeperThread:
         if self._storage is None:
             self._backfill_done = True
             return
-        stats = backfill_legacy_material_etags(self._dsn, self._storage)
+        stats = backfill_legacy_material_etags(
+            self._dsn, self._storage, pending=self._backfill_pending
+        )
         self._backfill_done = bool(stats["done"])
         if stats["bound"] or stats["missing"] or stats["failed"] or stats["cas_lost"]:
             logger.info("material etag backfill pass: %s", stats)

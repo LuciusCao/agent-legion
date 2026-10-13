@@ -23,6 +23,7 @@ from botocore.exceptions import ClientError
 from server.app.db.dialect import ConnectSource
 from server.app.db.rowmap import parse_object
 from server.app.db.transaction import read_connection
+from server.app.services.material_identity import assert_material_identity_ready
 from server.app.storage import ObjectStorage, build_s3_storage, is_precondition_failed
 from shared.material_cache import (
     MaterializeError,
@@ -133,6 +134,7 @@ def material_runtime_block(
         return None
     row = _ready_row(connect_source, workspace_id, input_doc)
     material_id = str(row["id"])
+    assert_material_identity_ready(row)
     storage = _require_storage(storage, material_id)
     content_hash = str(row.get("content_hash") or "")
     filename = str(row.get("filename") or "")
@@ -241,6 +243,7 @@ def material_claim_block(
         return None
     row = _ready_row(connect_source, workspace_id, input_doc)
     material_id = str(row["id"])
+    assert_material_identity_ready(row)
     storage = _require_storage(storage, material_id)
     return {
         "material_id": material_id,

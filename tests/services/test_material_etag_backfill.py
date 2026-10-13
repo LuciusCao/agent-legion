@@ -1,9 +1,9 @@
-"""#1279 codex r8：存量 ready 行 object_etag 启动回填（material_etag_backfill
-+ MaterialTtlSweeperThread 接线）。
+"""#1279 codex r8/r9：存量 ready 行 object_etag 启动回填（binder）。
 
-覆盖：正常回填（''→HEAD etag 落库）、对象缺失跳过并计数、CAS 竞争让位
-（期间被改动则不覆盖）、幂等重跑、零进展闸（存储故障 → done=False 等下
-一轮）、sweeper 线程启动即跑与无存储短路。
+格子：静止期守卫（首见标记 + 满 presign TTL 才绑定）、缺对象翻 failed
+（候选集自净）、CAS 竞争让位、幂等、存储故障零绑定 done=False、游标
+活性（永久失败行压头不挡后续）、sweeper 线程接线（启动即跑 + 间隔重试
++ 无存储短路）。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import time
 
 from botocore.exceptions import ClientError
 
+import server.app.services.material_etag_backfill as backfill_module
 from server.app.services.material_etag_backfill import backfill_legacy_material_etags
 from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from tests.fakes.storage import etag_of
@@ -25,41 +26,148 @@ _object_etag_of = materials_testlib.object_etag_of
 PAYLOAD = b"legacy-row-bytes"
 
 
-def _legacy_ready_row(job_db, service, storage) -> tuple[str, str]:
+class _Clock:
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def _legacy_ready_row(job_db, service, storage, payload: bytes = PAYLOAD) -> tuple[str, str]:
     """一条 ready 但 object_etag='' 的存量行（模拟 v98 前完成上传的行）。"""
-    ready = materials_testlib.presign_ready(service, storage, PAYLOAD)
+    ready = materials_testlib.presign_ready(service, storage, payload)
     material_id = ready["id"]
     with job_db.connect() as conn:
         conn.execute("update materials set object_etag='' where id=%s", (material_id,))
     return material_id, materials_testlib.storage_key_of(job_db, material_id)
 
 
-def test_backfill_binds_head_etag(service, storage, job_db) -> None:
+def test_backfill_binds_only_after_quiescent_window(service, storage, job_db) -> None:
+    """静止期守卫：首见只标记不绑定；身份标记（key+代次+etag）持续满一个
+    presign TTL 才落库。"""
     material_id, _key = _legacy_ready_row(job_db, service, storage)
+    clock = _Clock()
+    pending: dict = {}
 
-    stats = backfill_legacy_material_etags(job_db.dsn_identity, storage, pause_seconds=0)
+    first = backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, pause_seconds=0, pending=pending, now=clock
+    )
+    assert first["bound"] == 0 and first["pending"] == 1 and first["done"] is False
+    assert _object_etag_of(job_db, material_id) == "", "静止期未满不得绑定"
 
-    assert stats == {"bound": 1, "missing": 0, "cas_lost": 0, "failed": 0, "done": True}
+    # 同一身份第二次见到但未满 TTL：仍不得绑定（静止期守卫的实质格）。
+    clock.t += 10
+    early = backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, pause_seconds=0, pending=pending, now=clock
+    )
+    assert early["bound"] == 0 and early["pending"] == 1
+    assert _object_etag_of(job_db, material_id) == ""
+
+    clock.t += backfill_module._PRESIGN_EXPIRY_SECONDS + 1
+    second = backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, pause_seconds=0, pending=pending, now=clock
+    )
+    assert second == {
+        "bound": 1,
+        "marked_failed": 0,
+        "cas_lost": 0,
+        "failed": 0,
+        "pending": 0,
+        "done": True,
+    }
     assert _object_etag_of(job_db, material_id) == etag_of(PAYLOAD)
-    # 幂等：重跑无可回填（done，零绑定）。
-    again = backfill_legacy_material_etags(job_db.dsn_identity, storage, pause_seconds=0)
-    assert again["done"] and again["bound"] == 0
+    # 幂等：重跑无可回填。
+    third = backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, pause_seconds=0, pending=pending, now=clock
+    )
+    assert third["done"] and third["bound"] == 0
 
 
-def test_backfill_skips_missing_object(service, storage, job_db) -> None:
+def test_quiescence_timer_resets_when_identity_changes(service, storage, job_db) -> None:
+    """标记期内对象被活 URL 改写（etag 变了）→ 重新计时，不绑旧身份。"""
+    material_id, key = _legacy_ready_row(job_db, service, storage)
+    clock = _Clock()
+    pending: dict = {}
+    backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, pause_seconds=0, pending=pending, now=clock
+    )
+    # 窗口内对象被同尺寸覆盖（活 URL 的幽灵写）。
+    storage.objects[key] = b"legacy-row-XXXXX"
+    clock.t += backfill_module._PRESIGN_EXPIRY_SECONDS + 1
+    stats = backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, pause_seconds=0, pending=pending, now=clock
+    )
+    assert stats["bound"] == 0 and stats["pending"] == 1
+    assert _object_etag_of(job_db, material_id) == ""
+    # 再满一个 TTL（身份未再变）→ 绑定新 etag。
+    clock.t += backfill_module._PRESIGN_EXPIRY_SECONDS + 1
+    stats = backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, pause_seconds=0, pending=pending, now=clock
+    )
+    assert stats["bound"] == 1
+    assert _object_etag_of(job_db, material_id) == etag_of(b"legacy-row-XXXXX")
+
+
+def test_backfill_marks_missing_object_failed(service, storage, job_db) -> None:
+    """缺对象行直接翻 failed（complete 同语义，repair 可救），候选集自净。"""
     material_id, key = _legacy_ready_row(job_db, service, storage)
     del storage.objects[key]
 
     stats = backfill_legacy_material_etags(job_db.dsn_identity, storage, pause_seconds=0)
 
-    assert stats["missing"] == 1 and stats["bound"] == 0
+    assert stats["marked_failed"] == 1 and stats["bound"] == 0 and stats["done"] is True
+    assert service.get(WORKSPACE_ID, material_id)["status"] == "failed"
     assert _object_etag_of(job_db, material_id) == ""
+
+
+def test_permanently_missing_rows_do_not_starve_later_candidates(service, storage, job_db) -> None:
+    """扫描活性（r9 P1-3）：205 个缺对象行压头 + 3 个正常行——游标越过
+    失败项，正常行照样标记/可绑，缺对象行翻 failed 后退出候选集。"""
+    with job_db.connect() as conn:
+        for index in range(205):
+            conn.execute(
+                "insert into materials(id, workspace_id, content_hash, filename, content_type,"
+                " size_bytes, storage_key, status, created_by, object_etag, created_at)"
+                " values (%s, %s, '', 'm.txt', 'text/plain', 1, %s, 'ready', 'user-1', '',"
+                " now() - make_interval(days => 1))",
+                (f"mat-missing-{index}", WORKSPACE_ID, f"{WORKSPACE_ID}/missing-{index}/f"),
+            )
+    good_ids = [
+        _legacy_ready_row(job_db, service, storage, f"good-{i}".encode())[0] for i in range(3)
+    ]
+    clock = _Clock()
+    pending: dict = {}
+
+    first = backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, batch_size=50, pause_seconds=0, pending=pending, now=clock
+    )
+    assert first["marked_failed"] == 205, "缺对象行全部翻 failed（不挡扫描）"
+    assert first["pending"] == 3, "正常行照样进入静止期标记"
+    clock.t += backfill_module._PRESIGN_EXPIRY_SECONDS + 1
+    second = backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, batch_size=50, pause_seconds=0, pending=pending, now=clock
+    )
+    assert second["bound"] == 3 and second["done"] is True
+    for material_id in good_ids:
+        assert _object_etag_of(job_db, material_id) != ""
+    # 翻 failed 的行已退出候选集：第三轮 done 且零动作。
+    third = backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, batch_size=50, pause_seconds=0, pending=pending, now=clock
+    )
+    assert third["done"] is True and third["marked_failed"] == 0
 
 
 def test_backfill_yields_on_cas_race(service, storage, job_db, monkeypatch) -> None:
     """HEAD 之后、CAS 之前行被并发改动（complete/repair 先动）→ 让位，
     不用 HEAD 到的旧值覆盖。"""
     material_id, _key = _legacy_ready_row(job_db, service, storage)
+    clock = _Clock()
+    pending: dict = {}
+    backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, pause_seconds=0, pending=pending, now=clock
+    )
+    clock.t += backfill_module._PRESIGN_EXPIRY_SECONDS + 1
     real_head = storage.head_object
 
     def head_then_race(storage_key: str):
@@ -70,36 +178,45 @@ def test_backfill_yields_on_cas_race(service, storage, job_db, monkeypatch) -> N
         return head
 
     monkeypatch.setattr(storage, "head_object", head_then_race)
-    stats = backfill_legacy_material_etags(job_db.dsn_identity, storage, pause_seconds=0)
+    stats = backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, pause_seconds=0, pending=pending, now=clock
+    )
 
     assert stats["cas_lost"] == 1 and stats["bound"] == 0
     assert _object_etag_of(job_db, material_id) == "raced"
 
 
 def test_backfill_yields_when_repair_rotated_key(service, storage, job_db, monkeypatch) -> None:
-    """评审 P2-②：CAS 的 storage_key 钉——HEAD 之后并发 repair 清了 etag
-    且轮换了 key（etag 仍是 ''，单 etag 钉会被骗过），带旧 key 的 CAS
-    必须不落库：不得把旧 key 的 HEAD etag 绑到指向新 key 的行上。"""
+    """CAS 的 storage_key 钉：HEAD 之后并发 repair 清了 etag 且轮换了 key
+    （etag 仍是 ''，单 etag 钉会被骗过），带旧 key 的 CAS 必须不落库。"""
     material_id, key = _legacy_ready_row(job_db, service, storage)
+    clock = _Clock()
+    pending: dict = {}
+    backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, pause_seconds=0, pending=pending, now=clock
+    )
+    clock.t += backfill_module._PRESIGN_EXPIRY_SECONDS + 1
     real_head = storage.head_object
 
     def head_then_repair(storage_key: str):
         head = real_head(storage_key)
-        # 并发 repair：清 etag + 轮换 key（object_etag 仍是 ''）。
+        # 并发 repair：清 etag + 轮换 key + 翻 uploading（object_etag 仍是 ''）。
         service.request_material_reupload(WORKSPACE_ID, material_id)
         return head
 
     monkeypatch.setattr(storage, "head_object", head_then_repair)
-    stats = backfill_legacy_material_etags(job_db.dsn_identity, storage, pause_seconds=0)
+    stats = backfill_legacy_material_etags(
+        job_db.dsn_identity, storage, pause_seconds=0, pending=pending, now=clock
+    )
 
     assert stats["cas_lost"] == 1 and stats["bound"] == 0
     assert _object_etag_of(job_db, material_id) == ""
     assert materials_testlib.storage_key_of(job_db, material_id) != key
 
 
-def test_backfill_zero_progress_is_not_done(service, storage, job_db, monkeypatch) -> None:
-    """存储面故障：每行 HEAD 失败 → 零进展闸收尾，done=False（等下一轮）。"""
-    _legacy_ready_row(job_db, service, storage)
+def test_backfill_storage_outage_is_not_done(service, storage, job_db, monkeypatch) -> None:
+    """存储面故障：HEAD 失败 → 零绑定、done=False（等下一轮），不动行。"""
+    material_id, _key = _legacy_ready_row(job_db, service, storage)
 
     def failing_head(_key: str):
         raise ClientError({"Error": {"Code": "InternalError"}}, "HeadObject")
@@ -107,21 +224,27 @@ def test_backfill_zero_progress_is_not_done(service, storage, job_db, monkeypatc
     monkeypatch.setattr(storage, "head_object", failing_head)
     stats = backfill_legacy_material_etags(job_db.dsn_identity, storage, pause_seconds=0)
 
-    assert stats["failed"] == 1 and stats["done"] is False
+    assert stats["failed"] == 1 and stats["done"] is False and stats["bound"] == 0
+    assert _object_etag_of(job_db, material_id) == ""
 
 
-def test_sweeper_thread_backfills_at_startup(service, storage, job_db) -> None:
-    """接线格：sweeper 线程启动即跑回填（不等首个 sweep 间隔）。"""
+def test_sweeper_thread_backfills_at_startup_and_retries(
+    service, storage, job_db, monkeypatch
+) -> None:
+    """接线格：sweeper 线程启动即跑回填（不等首个 sweep 间隔）；静止期
+    计时满后（此处 TTL 打 0）间隔重试轮完成绑定。"""
+    monkeypatch.setattr(backfill_module, "_PRESIGN_EXPIRY_SECONDS", 0)
     material_id, _key = _legacy_ready_row(job_db, service, storage)
-    thread = MaterialTtlSweeperThread(job_db.dsn_identity, storage, interval_seconds=3600)
+    thread = MaterialTtlSweeperThread(job_db.dsn_identity, storage, interval_seconds=0.05)
     thread.start()
     try:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
-            if _object_etag_of(job_db, material_id) == etag_of(PAYLOAD):
+            if _object_etag_of(job_db, material_id) == etag_of(PAYLOAD) and thread._backfill_done:
                 break
-            time.sleep(0.05)
+            time.sleep(0.02)
         assert _object_etag_of(job_db, material_id) == etag_of(PAYLOAD)
+        assert thread._backfill_done
     finally:
         thread.stop()
 

@@ -52,14 +52,36 @@ def materials_with_object_etag(connect_source: ConnectSource) -> list[dict[str, 
 
 
 def legacy_etag_backfill_candidates(
-    connect_source: ConnectSource, limit: int
+    connect_source: ConnectSource, limit: int, *, after: tuple[Any, Any] | None = None
 ) -> list[dict[str, Any]]:
-    """启动回填候选（codex r8）：object_etag='' 的 ready 行。"""
+    """启动回填候选（codex r8/r9）：object_etag='' 的 ready 行，keyset 分页
+    （created_at, id）——永久失败行不许挡住后续候选的扫描活性（r9 P1-3）。
+
+    只扫 ready——uploading 行在 complete 时重新核验落 etag，expired 行
+    复活走同一路径，都不需要回填。
+    """
+    cursor = "and (created_at, id) > (%s, %s)" if after is not None else ""
+    params = (*after, limit) if after is not None else (limit,)
     with read_connection(connect_source) as conn:
         rows = conn.execute(
-            "select id, storage_key from materials"
-            " where status='ready' and object_etag = ''"
+            "select id, storage_key, upload_generation, created_at from materials"
+            f" where status='ready' and object_etag = '' {cursor}"
             " order by created_at, id limit %s",
-            (limit,),
+            params,
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def mark_material_failed_if_unbound(
+    connect_source: ConnectSource, material_id: str, *, storage_key: str
+) -> bool:
+    """回填发现对象缺失时把行翻 failed（与 complete 缺对象 → failed 同语义；
+    failed 行 repair 可救）。CAS 钉 (object_etag='', storage_key, status=
+    'ready')——期间被 complete/repair 改动则让位（返回 False）。"""
+    with write_transaction(connect_source) as conn:
+        result = conn.execute(
+            "update materials set status='failed'"
+            " where id=%s and object_etag='' and storage_key=%s and status='ready'",
+            (material_id, storage_key),
+        )
+    return result.rowcount > 0

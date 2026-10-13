@@ -81,6 +81,13 @@ def materialize_claim_material(
     content_hash = str(material.get("content_hash") or "")
     filename = str(material.get("filename") or "")
     object_etag = str(material.get("object_etag") or "")
+    if not content_hash and "object_etag" in material and not object_etag:
+        # #1279 codex r9 纵深：新 Server 的未绑定无 hash 行（etag 字段在
+        # 但为空 = 身份未建立、回填在途）——拒绝消费。正常路径这类任务
+        # 被 claim 门禁挡住到不了这里；字段缺席（旧 Server）走旧语义。
+        raise MaterializeError(
+            "material identity is not yet established (etag backfill in flight); retry later"
+        )
     # 无 hash 行的缓存地址带代次（#1279 codex r6：代次即身份——repair 代次
     # +1 后旧地址自然孤儿化，修复前（可能被旧 Worker 无核验缓存的）毒化
     # 字节不再命中）。旧 Server 的描述符无 upload_generation → None 回落
