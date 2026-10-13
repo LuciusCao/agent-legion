@@ -17,6 +17,7 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -166,6 +167,10 @@ if [[ "$1" == "worktree" && "$2" == "list" ]]; then
   echo "bare"
   exit 0
 fi
+if [[ "$1" == "rev-parse" && "$2" == "--git-common-dir" ]]; then
+  echo "__MAIN__"
+  exit 0
+fi
 exit 0
 """
 
@@ -238,7 +243,9 @@ def _exe(path: Path, content: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def _run_clean(tmp_path: Path, extra_env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def _prepare_clean(
+    tmp_path: Path, extra_env: dict[str, str], args: tuple[str, ...]
+) -> tuple[list[str], dict[str, str], Path]:
     main = tmp_path / "main"
     scripts_dir = main / ".worktrees" / "other" / "scripts"
     scripts_dir.mkdir(parents=True)
@@ -272,14 +279,80 @@ def _run_clean(tmp_path: Path, extra_env: dict[str, str]) -> subprocess.Complete
         "REAL_PYTHON": sys.executable,
     }
     env.update(extra_env)
+    return ["bash", str(scripts_dir / "clean-worktree.sh"), *args], env, main
+
+
+def _run_clean(
+    tmp_path: Path,
+    extra_env: dict[str, str],
+    args: tuple[str, ...] = ("wt-a", "--yes"),
+    stdin_text: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    cmd, env, main = _prepare_clean(tmp_path, extra_env, args)
     return subprocess.run(
-        ["bash", str(scripts_dir / "clean-worktree.sh"), "wt-a", "--yes"],
+        cmd,
         capture_output=True,
         text=True,
         env=env,
         cwd=main,
+        input=stdin_text,
         timeout=60,
     )
+
+
+# --- bucket 两阶段删除：确认不持锁、持锁重新检查（#1084） -----------------
+
+_UNREACHABLE_MASTER = {"AGENT_LEGION_SEAWEEDFS_MASTER_URL": "http://127.0.0.1:1"}
+
+
+@pytest.mark.parametrize(("answer", "deleted"), [("wt-a", True), ("nope", False)])
+def test_clean_worktree_bucket_confirmation_reads_stdin(
+    tmp_path: Path, answer: str, deleted: bool
+) -> None:
+    # 旧实现在 python heredoc 里 input()，stdin 已被脚本本身读到 EOF，交互
+    # 确认必抛 EOFError、bucket 步骤只会降级跳过；确认挪到 bash 侧后才真正生效。
+    result = _run_clean(
+        tmp_path,
+        {**_UNREACHABLE_MASTER, "STUB_BUCKET_EXISTS": "1"},
+        args=("wt-a",),
+        stdin_text=f"{answer}\n",
+    )
+
+    assert "待删除 bucket: agent-legion-wt-a" in result.stdout
+    if deleted:
+        assert result.returncode == 0, result.stderr
+        assert "stub delete_bucket agent-legion-wt-a" in result.stdout
+    else:
+        assert result.returncode == 1
+        assert "已取消" in result.stderr
+        assert "stub delete" not in result.stdout
+
+
+def test_clean_worktree_bucket_delete_waits_for_name_lock(tmp_path: Path) -> None:
+    cmd, env, main = _prepare_clean(
+        tmp_path, {**_UNREACHABLE_MASTER, "STUB_BUCKET_EXISTS": "1"}, ("wt-a", "--yes")
+    )
+    # 伪造一个存活持有者（本测试进程的 pid）；git stub 把 common dir 报为 main。
+    lock_dir = main / "worktree-derived-names.lock"
+    lock_dir.mkdir()
+    holder = lock_dir / f"holder-{os.getpid()}-test"
+    holder.write_text(f"pid={os.getpid()} test holder\n")
+    out, err = tmp_path / "clean.out", tmp_path / "clean.err"
+    with out.open("w") as out_f, err.open("w") as err_f:
+        proc = subprocess.Popen(cmd, env=env, cwd=main, stdout=out_f, stderr=err_f, text=True)
+        deadline = time.monotonic() + 60
+        while "派生名锁被占用" not in err.read_text():
+            assert proc.poll() is None, err.read_text()
+            assert time.monotonic() < deadline, "clean never waited for the lock"
+            time.sleep(0.02)
+        # probe（只读）在锁外已完成；删除被挡在锁后。
+        assert "待删除 bucket: agent-legion-wt-a" in out.read_text()
+        assert "stub delete" not in out.read_text()
+        holder.unlink()
+        assert proc.wait(timeout=60) == 0, err.read_text()
+
+    assert "stub delete_bucket agent-legion-wt-a" in out.read_text()
+    assert list(lock_dir.iterdir()) == []
 
 
 @pytest.mark.parametrize("bucket_exists", ["1", "0"])

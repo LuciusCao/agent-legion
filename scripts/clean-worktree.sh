@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # worktree 收尾清理：一站式移除某个已完成任务的 worktree 残留——
+#   0. 删除计划（只读）：列出派生库、核对 bucket，需要时一次性交互确认；
+#      之后取派生名锁（#1084）一直持有到第 4 步结束
 #   1. git worktree remove（dirty 时 git 自己拒绝，不加 --force）
 #   2. 删除该 worktree 占用的本地分支（git branch -d，未合并删不掉时提示但
 #      不中断后续步骤）；远端分支默认不删，仅打印提示命令，加
@@ -16,7 +18,9 @@
 #   - 拒绝清理脚本当前所在的 worktree 自身与 prod（生产 worktree 禁止动）；
 #   - --delete-remote-branch 拒绝删除长期分支 main/master/prod 与
 #     发布线 release/*（与 pre-push 的 protected 分支口径对齐，#930）；
-#   - bucket 删除前列出对象数量与总大小，无 --yes 时逐个打印摘要并交互确认；
+#   - 删除前列出派生库 owner/大小与 bucket 对象数量/总大小，无 --yes 时
+#     交互确认（在取锁之前，持锁不等用户输入）；
+#   - 删库/删 bucket 前持锁重查：同名 worktree 被重建后又注册着也拒绝；
 #   - endpoint 不可达/未配置 S3 时 warning 跳过（对齐 init-worktree.sh 的
 #     降级语义），不影响其余步骤。
 #
@@ -87,65 +91,20 @@ fi
 
 # 护栏（#950）：派生名映射不是单射，另一个仍存在的 worktree 派生出同名
 # 库/bucket 时整体拒绝——在第 1 步移除 worktree 之前判定，不留半清理状态。
-# drop-worktree-db.sh 用同一共享函数再兜底一次。
+# 这里是不持锁的预检（尽早拒绝），权威判定在下方取锁之后重做。
 # shellcheck source=worktree-names-lib.sh
 source "$ROOT/scripts/worktree-names-lib.sh"
 worktree_require_unique_derived_names "$ROOT" "$WT" "清理（删除派生库/bucket）" || exit 1
 
-# 1. git worktree remove（remove 前先解析该 worktree checkout 的分支，
-#    供第 2 步删本地分支用）。
-BRANCH=""
-if [[ -d "$TARGET" ]]; then
-    BRANCH="$(git worktree list --porcelain | awk -v target="$TARGET" '
-        /^worktree / { wt = substr($0, 10) }
-        /^branch / && wt == target { print substr($0, 8) }
-    ')"
-    BRANCH="${BRANCH#refs/heads/}"
-    git worktree remove "$TARGET"
-    echo "已移除 worktree: $TARGET"
-else
-    echo "worktree 不存在（跳过）: $TARGET"
-fi
-
-# 2. 本地分支：git branch -d 只允许删已合并分支，未合并报错时提示但不中断
-#    后续 DB/bucket 清理。远端分支默认只打印提示命令。
-# 远端删除护栏（#930）：长期分支与发布线一律拒删，即便显式传了
-# --delete-remote-branch。
-is_protected_remote_branch() {
-    case "$1" in
-        main | master | prod | release/*) return 0 ;;
-    esac
-    return 1
-}
-if [[ -n "$BRANCH" ]]; then
-    if ! git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-        echo "本地分支不存在（跳过）: $BRANCH"
-    elif [[ "$BRANCH" == "$(git branch --show-current)" ]]; then
-        echo "提示: $BRANCH 是当前 worktree 的检出分支，跳过删除" >&2
-    elif git branch -d "$BRANCH"; then
-        echo "已删除本地分支: $BRANCH"
-    else
-        echo "提示: 本地分支 $BRANCH 未合并，git branch -d 拒绝删除，已跳过" >&2
-    fi
-    if is_protected_remote_branch "$BRANCH"; then
-        echo "提示: $BRANCH 是受保护分支（main/master/prod/release/*），不删除远端分支" >&2
-    elif [[ -n "$DELETE_REMOTE" ]]; then
-        git push origin --delete "$BRANCH" && echo "已删除远端分支: origin/$BRANCH"
-    else
-        echo "提示: 如需删除远端分支，执行 git push origin --delete $BRANCH"
-        echo "      （或重跑本脚本加 --delete-remote-branch）"
-    fi
-else
-    echo "未解析到分支（跳过本地/远端分支删除）"
-fi
-
-# 3. 派生 Postgres 库：护栏与确认交互全部继承 drop-worktree-db.sh。
-"$(dirname "${BASH_SOURCE[0]}")/drop-worktree-db.sh" "$WT" $ASSUME_YES
-
-# 4. 派生 S3 bucket：与 init-worktree.sh 同一派生规则与 env 加载。
+# 派生 S3 bucket 的两阶段 python（与 init-worktree.sh 同一派生规则与 env
+# 加载，#1084）：probe 只读核对并打印摘要，delete 持锁后重新 head/list 再
+# 删除。确认在 bash 侧做——旧实现在 heredoc python 里 input()，stdin 已是
+# EOF 必抛 EOFError，无 --yes 时 bucket 步骤只会降级为 warning 跳过。
+# 退出码约定（两阶段通用）：0=无需/已完成、10=probe 发现 bucket 待删、
+# 4=护栏拒绝；其余（python 异常也退出 1）降级为 warning 跳过。
 export CLEAN_WORKTREE_WT="$WT"
-export CLEAN_WORKTREE_YES="$ASSUME_YES"
-if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run --frozen python - <<'PY'
+run_bucket_phase() {
+    CLEAN_WORKTREE_PHASE="$1" PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run --frozen python - <<'PY'
 import os
 import re
 import sys
@@ -169,14 +128,13 @@ from scripts.seaweedfs_collection import (
 from server.app.storage import load_s3_settings
 
 wt = os.environ["CLEAN_WORKTREE_WT"]
-assume_yes = bool(os.environ.get("CLEAN_WORKTREE_YES"))
+phase = os.environ["CLEAN_WORKTREE_PHASE"]
 # bucket 派生规则与 scripts/init-worktree.sh 完全一致：
 # agent-legion-$(小写 | 非 [a-z0-9-] 归并为 '-')
 bucket = "agent-legion-" + re.sub(r"[^a-z0-9-]", "-", wt.lower())
 
 # 护栏：只操作派生命名的 bucket，结构上碰不到共享/prod bucket。
-# 退出码约定：3=用户取消、4=护栏拒绝——这两类在调用侧原样失败，其余
-# 非零（python 异常也退出 1，无法靠 1 区分）降级为 warning 跳过。
+# 退出码约定见调用侧（4=护栏拒绝，原样失败）。
 if not bucket.startswith("agent-legion-") or bucket == "agent-legion-":
     print(f"错误: 拒绝删除非派生命名的 bucket: {bucket}", file=sys.stderr)
     raise SystemExit(4)
@@ -236,19 +194,19 @@ except ClientError as exc:
         raise SystemExit(0)
     raise
 
-# 列出对象数量与总大小（分页），供确认与删除。
+# 列出对象数量与总大小（分页）：probe 阶段供确认，delete 阶段持锁后重新
+# 列出再删（两阶段之间对象可能变化）。
 objects = []
 paginator = client.get_paginator("list_objects_v2")
 for page in paginator.paginate(Bucket=bucket):
     objects.extend(page.get("Contents", []))
 total_size = sum(obj["Size"] for obj in objects)
-print(f"待删除 bucket: {bucket} (对象数={len(objects)}, 总大小={total_size} 字节)")
-
-if not assume_yes:
-    reply = input(f"确认删除 bucket {bucket}（含全部 {len(objects)} 个对象）？输入 worktree 名 '{wt}' 确认: ")
-    if reply != wt:
-        print("已取消。", file=sys.stderr)
-        raise SystemExit(3)
+if phase == "probe":
+    print(f"待删除 bucket: {bucket} (对象数={len(objects)}, 总大小={total_size} 字节)")
+    raise SystemExit(10)
+if phase != "delete":
+    print(f"错误: 未知阶段 {phase!r}", file=sys.stderr)
+    raise SystemExit(4)
 
 # 非空 bucket 需先清空对象再 delete_bucket（不可逆操作）。
 for start in range(0, len(objects), 1000):
@@ -261,17 +219,112 @@ client.delete_bucket(Bucket=bucket)
 print(f"已删除 S3 bucket: {bucket}（含 {len(objects)} 个对象）")
 report_seaweedfs_leftovers()
 PY
-then
-    :
-else
-    rc=$?
-    # 3=用户取消、4=护栏拒绝：原样失败；其余（endpoint 不可达、boto3 缺失、
-    # 凭据错误等 python 异常）降级为 warning 跳过，对齐 init 的降级语义。
-    if [[ "$rc" -eq 3 || "$rc" -eq 4 ]]; then
+}
+
+# 4=护栏拒绝：原样失败；其余非零（endpoint 不可达、boto3 缺失、凭据错误等
+# python 异常）降级为 warning 跳过，对齐 init 的降级语义。
+bucket_phase_degraded() {
+    echo "提示: S3 endpoint 不可达或清理失败（exit=$1），跳过 bucket 清理。" >&2
+    echo "      待共享对象存储（SeaweedFS/RustFS）可达后可重跑本脚本补齐。" >&2
+}
+
+# 0. 删除计划（只读、不持锁）：列出派生库、核对 bucket，需要删除时一次性
+#    交互确认（--yes 跳过）。确认必须在取锁之前——持锁等用户输入会卡住同机
+#    所有 init（#1084）。
+DROP_DB="$(dirname "${BASH_SOURCE[0]}")/drop-worktree-db.sh"
+db_rc=0
+"$DROP_DB" "$WT" --list || db_rc=$?
+if [[ "$db_rc" -ne 0 && "$db_rc" -ne 10 ]]; then
+    exit 1
+fi
+bucket_rc=0
+run_bucket_phase probe || bucket_rc=$?
+if [[ "$bucket_rc" -eq 4 ]]; then
+    exit 1
+fi
+if [[ -z "$ASSUME_YES" && ( "$db_rc" -eq 10 || "$bucket_rc" -eq 10 ) ]]; then
+    reply=""
+    read -r -p "确认清理 worktree '$WT' 并删除以上派生库/bucket（含全部对象）？输入 worktree 名 '$WT' 确认: " reply || true
+    if [[ "$reply" != "$WT" ]]; then
+        echo "已取消。" >&2
         exit 1
     fi
-    echo "提示: S3 endpoint 不可达或清理失败（exit=${rc}），跳过 bucket 清理。" >&2
-    echo "      待共享对象存储（SeaweedFS/RustFS）可达后可重跑本脚本补齐。" >&2
+fi
+
+# 取派生名锁并持有到派生库与 bucket 都处理完（#1084）：从移除 worktree 起
+# 到最后一个删除之间，派生名相同（含同名重建）的 worktree 即使已经
+# `git worktree add`，其 init 也只能等本次删完再建库/建 bucket，不会复用
+# 半清理的资源。锁在脚本退出（含报错/信号）时由 trap 释放；第 3 步转调的
+# drop-worktree-db.sh 复用本锁。取锁后重做撞名检查（目标此刻仍合法注册）。
+worktree_name_lock_acquire "$ROOT" "清理 worktree ${WT}" || exit 1
+worktree_require_unique_derived_names "$ROOT" "$WT" "清理（删除派生库/bucket）" || exit 1
+
+# 1. git worktree remove（remove 前先解析该 worktree checkout 的分支，
+#    供第 2 步删本地分支用）。
+BRANCH=""
+if [[ -d "$TARGET" ]]; then
+    BRANCH="$(git worktree list --porcelain | awk -v target="$TARGET" '
+        /^worktree / { wt = substr($0, 10) }
+        /^branch / && wt == target { print substr($0, 8) }
+    ')"
+    BRANCH="${BRANCH#refs/heads/}"
+    git worktree remove "$TARGET"
+    echo "已移除 worktree: $TARGET"
+else
+    echo "worktree 不存在（跳过）: $TARGET"
+fi
+
+# 2. 本地分支：git branch -d 只允许删已合并分支，未合并报错时提示但不中断
+#    后续 DB/bucket 清理。远端分支默认只打印提示命令。
+# 远端删除护栏（#930）：长期分支与发布线一律拒删，即便显式传了
+# --delete-remote-branch。
+is_protected_remote_branch() {
+    case "$1" in
+        main | master | prod | release/*) return 0 ;;
+    esac
+    return 1
+}
+if [[ -n "$BRANCH" ]]; then
+    if ! git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+        echo "本地分支不存在（跳过）: $BRANCH"
+    elif [[ "$BRANCH" == "$(git branch --show-current)" ]]; then
+        echo "提示: $BRANCH 是当前 worktree 的检出分支，跳过删除" >&2
+    elif git branch -d "$BRANCH"; then
+        echo "已删除本地分支: $BRANCH"
+    else
+        echo "提示: 本地分支 $BRANCH 未合并，git branch -d 拒绝删除，已跳过" >&2
+    fi
+    if is_protected_remote_branch "$BRANCH"; then
+        echo "提示: $BRANCH 是受保护分支（main/master/prod/release/*），不删除远端分支" >&2
+    elif [[ -n "$DELETE_REMOTE" ]]; then
+        git push origin --delete "$BRANCH" && echo "已删除远端分支: origin/$BRANCH"
+    else
+        echo "提示: 如需删除远端分支，执行 git push origin --delete $BRANCH"
+        echo "      （或重跑本脚本加 --delete-remote-branch）"
+    fi
+else
+    echo "未解析到分支（跳过本地/远端分支删除）"
+fi
+
+# 3. 派生 Postgres 库：转调 drop-worktree-db.sh（继承其名字/role 护栏；复用
+#    本进程的锁；删除前把同名 worktree 也算冲突——目标已移除后同名又注册
+#    着 = 被重建的新实例）。确认已在第 0 步做过，计划里没有库就不再调用。
+if [[ "$db_rc" -eq 10 ]]; then
+    "$DROP_DB" "$WT" --yes
+fi
+
+# 4. 派生 S3 bucket：删除前同样把同名重建算冲突，再跑 delete 阶段。
+rc="$bucket_rc"
+if [[ "$bucket_rc" -eq 10 ]]; then
+    worktree_require_unique_derived_names "$ROOT" "$WT" "删除派生 bucket" 1 || exit 1
+    rc=0
+    run_bucket_phase delete || rc=$?
+fi
+worktree_name_lock_release
+if [[ "$rc" -eq 4 ]]; then
+    exit 1
+elif [[ "$rc" -ne 0 ]]; then
+    bucket_phase_degraded "$rc"
 fi
 
 echo "完成: worktree '$WT' 收尾清理结束。"
