@@ -116,18 +116,19 @@ class MaterialsService:
         (upload dedup, no URL); a stale uploading/failed row with the same
         hash is reset to uploading so the upload can be retried. Object keys
         live in a per-generation, per-row namespace the client's filename
-        cannot forge (``{ws}/{hash|id}/g{generation}/m_{material_id}/{filename}``,
+        cannot forge (``{ws}/{hash|id}/v2g{generation}/m_{material_id}/{filename}``,
         first issue included); every retry bumps ``upload_generation``
         (schema v97) and moves the row to that generation's key, so a
         same-size retry stays visible to complete()'s locked identity
         recheck and every previously issued PUT URL points at a dead key —
         bytes can never be overwritten across generations (#1267 codex
-        R3/R4/R5 P1). The ``m_{material_id}`` marker segment (#1279, schema
-        v98; marker prefix disambiguates from old-grammar keys whose first
-        filename segment is 32-hex, codex P1) makes every key single-use
-        across row lifecycles: deleting the row and re-uploading the same
-        file under the same name can never reproduce the key, which is what
-        lets the S3 orphan GC delete marker-grammar material keys
+        R3/R4/R5 P1). The ``v2g`` version marker sits in the server-derived
+        third segment and ``m_{material_id}`` marks the row-unique fourth
+        (#1279, schema v98; the marker belongs to a segment no writer can
+        inject from a filename — codex r1/r2 P1 族), making every key
+        single-use across row lifecycles: deleting the row and re-uploading
+        the same file under the same name can never reproduce the key, which
+        is what lets the S3 orphan GC delete v2g-grammar material keys
         (``material_key_single_use`` in s3_jobs_gc).
         Pre-namespace rows (no ``g`` segment) keep their keys untouched
         until their first retry.
@@ -148,7 +149,7 @@ class MaterialsService:
             if row is None:
                 material_id = uuid.uuid4().hex
                 storage_key = (
-                    f"{workspace_id}/{content_hash or material_id}/g0/m_{material_id}/{filename}"
+                    f"{workspace_id}/{content_hash or material_id}/v2g0/m_{material_id}/{filename}"
                 )
                 insert_sql = """
                     insert into materials(
@@ -205,7 +206,7 @@ class MaterialsService:
                         update materials
                         set filename=%s, content_type=%s, size_bytes=%s,
                           status='uploading', upload_generation = upload_generation + 1,
-                          storage_key = %s || '/g' || (upload_generation + 1)
+                          storage_key = %s || '/v2g' || (upload_generation + 1)
                             || '/m_' || %s || '/' || %s
                         where id=%s
                         returning storage_key

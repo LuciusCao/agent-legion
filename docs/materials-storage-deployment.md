@@ -273,8 +273,9 @@ EOF
   显著长于 `materials_ttl_days`，让 DB 侧先完成引用检查），`jobs/`
   前缀按产物保留策略另设，`jobs-staging/` 配短保留（如 1 天，孤儿
   暂存对象只是失败残留）。材料 key 在 bucket 根
-  （`{workspace_id}/{hash|material_id}/g{上传代次}/m_{material_id}/{filename}`，
-  代次段自 #1267 起、m_ 标记唯一段自 #1279 起、存量行两者皆可缺），与两个 jobs 前缀平级。注意 promote 回滚备份（key 含 `/.rollback/`
+  （`{workspace_id}/{hash|material_id}/v2g{上传代次}/m_{material_id}/{filename}`，
+  代次段自 #1267 起（旧形态 `g{代次}`）、v2g 版本标记 + m_ 标记唯一段
+  自 #1279 起、存量行可缺），与两个 jobs 前缀平级。注意 promote 回滚备份（key 含 `/.rollback/`
   段）也在该前缀下：promote 恢复最终失败时被刻意保留的备份是幸存清单
   行所指向旧字节的最后恢复源（`s3_jobs_gc` 对它们豁免回收，codex #774
   P1 族；豁免仅适用于 `jobs/` 与 `jobs-staging/` 前缀的 key——材料文件
@@ -288,15 +289,16 @@ EOF
     排除两个 jobs 前缀）对照 `job_artifacts` ∪ `materials` 清单行，
     宽限窗（默认 24h，`--grace-hours`/`--staging-grace-hours`
     可调）外的无行对象与过期暂存对象判定为孤儿；默认 dry-run，加
-    `--apply` 执行删除，幂等可重跑。#1279 起材料 key 新文法在 `g{代次}`
-    段后带 `m_` 标记的 material_id 唯一段（删行后同文件同名再上传必得
-    新 key，跨行不可复用，check-then-delete 窗口构造性关闭；`m_` 前缀
-    使「旧文法 + 32-hex 首段文件名」的歧义形态保持只报告，codex P1）
-    ——**新文法材料孤儿重新并入删除批**（与 jobs/ 同走删除前新鲜反查）；
-    旧文法材料孤儿（无标记段，混合版本窗口内仍可能被旧写端复用）保持
-    只报告不删除，排空靠 bucket lifecycle 规则兜底
-    （`s3_jobs_gc.material_key_single_use` 是门禁的权威判定，apply 内部
-    还有一道同样的纵深闸门）。
+    `--apply` 执行删除，幂等可重跑。#1279 起材料 key 新文法第 3 段为
+    `v2g{代次}`（写端不可注入的服务端派生段：#1267 起在役写端该段恒为
+    `g<int>`，发不出 `v2g0`——codex r1/r2 P1 族的构造性关闭，完整论证
+    见 `s3_jobs_gc.material_key_single_use` docstring）+ `m_` 标记的
+    material_id 唯一段（删行后同文件同名再上传必得新 key，跨行不可复用，
+    check-then-delete 窗口构造性关闭）——**新文法材料孤儿重新并入删除批**
+    （与 jobs/ 同走删除前新鲜反查）；旧文法材料孤儿（`g{代次}` 段形态，
+    含 32-hex / `m_` 前缀首段文件名的歧义形态）保持只报告不删除，排空
+    靠 bucket lifecycle 规则兜底（`s3_jobs_gc.material_key_single_use`
+    是门禁的权威判定，apply 内部还有一道同样的纵深闸门）。
     同理，workspace id 字面为 `jobs` / `jobs-staging` 时其材料 key 落在
     jobs 前缀扫描内，脚本在组装删除批前按材料形态文法（第 3 段为
     `g{代次}`；真 job 产物同位置是恒含下划线的 job id，零误伤）把这类

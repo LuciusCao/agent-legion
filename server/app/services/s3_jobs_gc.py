@@ -103,8 +103,9 @@ def scan_orphans(
     """全前缀扫描并返回孤儿对象（纯判定，不删除）。
 
     两个前缀都经 ``key_exists`` 对照（系统性评审 P1，#344）：materials
-    的 key 以 workspace id 起手（``{workspace_id}/{hash|id}/g{代次}/
-    [m_{material_id}/]{filename}``），workspace id 允许叫
+    的 key 以 workspace id 起手（``{workspace_id}/{hash|id}/v2g{代次}/
+    m_{material_id}/{filename}``，#1279 前的在役形态第 3 段为 g{代次}），
+    workspace id 允许叫
     ``jobs`` / ``jobs-staging``（无保留名约束），那样的材料 key 会落进
     这两个前缀——staging 不能只看宽限窗无条件回收，否则撞名 workspace
     的材料会被整批误删。authority 侧按页攒批只是有界化每次传给
@@ -113,25 +114,20 @@ def scan_orphans(
     """
     now = now or datetime.now(UTC)
     report = OrphanReport([], [])
-    authority_cutoff = now - timedelta(hours=grace_hours)
-    staging_cutoff = now - timedelta(hours=staging_grace_hours)
-
-    pending: list[ObjectEntry] = []
-    for entry in lister(STAGING_PREFIX):
-        pending.append(entry)
-        if len(pending) >= KEY_PAGE_SIZE:
-            report.staging_orphans.extend(_staging_orphans_in(pending, key_exists, staging_cutoff))
-            pending = []
-    if pending:
-        report.staging_orphans.extend(_staging_orphans_in(pending, key_exists, staging_cutoff))
-    pending = []
-    for entry in lister(JOBS_PREFIX):
-        pending.append(entry)
-        if len(pending) >= KEY_PAGE_SIZE:
-            report.authority_orphans.extend(orphans_in_page(pending, key_exists, authority_cutoff))
-            pending = []
-    if pending:
-        report.authority_orphans.extend(orphans_in_page(pending, key_exists, authority_cutoff))
+    lanes = (
+        (STAGING_PREFIX, staging_grace_hours, _staging_orphans_in, report.staging_orphans),
+        (JOBS_PREFIX, grace_hours, orphans_in_page, report.authority_orphans),
+    )
+    for prefix, grace, page_orphans, sink in lanes:
+        cutoff = now - timedelta(hours=grace)
+        pending: list[ObjectEntry] = []
+        for entry in lister(prefix):
+            pending.append(entry)
+            if len(pending) >= KEY_PAGE_SIZE:
+                sink.extend(page_orphans(pending, key_exists, cutoff))
+                pending = []
+        if pending:
+            sink.extend(page_orphans(pending, key_exists, cutoff))
     return report
 
 
@@ -149,43 +145,64 @@ def orphans_in_page(
     return [e for e in entries if e.key not in known and _past_grace(e, cutoff)]
 
 
-def material_shaped_key(key: str) -> bool:
-    """碰撞命名空间里的材料 key 形态（#1282 r4 P1）：第 3 段是 g{代次}。
+def _material_generation(segments: list[str]) -> str:
+    """材料 key 第 3 段的代次数字：``g{n}``（#1267 旧文法）或 ``v2g{n}``
+    （#1279 现文法）；非材料形态（段数不足/段形不符）返回 ''。"""
+    seg = segments[2] if len(segments) >= 4 else ""
+    return seg[3:] if seg.startswith("v2g") else seg[1:] if seg.startswith("g") else ""
 
-    材料 key 为 ``{workspace_id}/{hash|material_id}/g{代次}/[m_{material_id}/]{filename}``
-    （#1279 起新文法在 g 段后带 m_ 标记的行 id 唯一段，两种形态本判定都匹配）；
-    workspace id 可字面为 jobs / jobs-staging（无保留名约束），那样的材料
-    key 落在 jobs 前缀扫描内。真 job 产物同位置是 job id
-    （``{ws}_{workflow_key}_{source_id}``，恒含下划线），永不匹配
-    g{数字}——分流零误伤。legacy 无代次段的材料 key 不可复用（新上传恒
-    带 g 段），留在删除批安全。
+
+def material_shaped_key(key: str) -> bool:
+    """碰撞命名空间里的材料 key 形态（#1282 r4 P1）：第 3 段是 g{代次} 或
+    v2g{代次}（#1279）。
+
+    材料 key 为 ``{workspace_id}/{hash|material_id}/(v2)g{代次}/[m_{material_id}/]{filename}``
+    （两种文法本判定都匹配——碰撞分流要收全形态，删除门禁在
+    ``material_key_single_use``）；workspace id 可字面为 jobs / jobs-staging
+    （无保留名约束），那样的材料 key 落在 jobs 前缀扫描内。真 job 产物同
+    位置是 job id（``{ws}_{workflow_key}_{source_id}``，恒含下划线），永不
+    匹配 (v2)g{纯数字}——分流零误伤。legacy 无代次段的材料 key 不可复用
+    （新上传恒带代次段），留在删除批安全。
     """
-    segments = key.split("/")
-    return len(segments) >= 4 and segments[2][:1] == "g" and segments[2][1:].isdigit()
+    return _material_generation(key.split("/")).isdigit()
 
 
 def material_key_single_use(key: str) -> bool:
     """#1279 新文法的材料 key 跨行不可复用 → 可进 GC 删除批。
 
-    形态：``{ws}/{hash|id}/g{代次}/m_{material_id}/{filename}``——g 段后的
-    第 4 段是 ``m_`` 前缀 + 行 id（uuid4 hex，32 位小写十六进制），删行后
+    形态：``{ws}/{hash|id}/v2g{代次}/m_{material_id}/{filename}``。删行后
     同文件同名再上传也必得新 key，revalidate→删 窗口随之构造性关闭。
-    旧文法（无标记段的 g key、legacy 无 g 段 key、inline-{uuid4} key）一律
-    排除——保持只报告，由 bucket lifecycle/TTL 排空。本判定与
+    旧文法（g 段非 v2g 形态、legacy 无代次段 key、inline-{uuid4} key）
+    一律排除——保持只报告，由 bucket lifecycle/TTL 排空。本判定与
     materials.py / run_text_batch.py / demo_material_seed.py 三条产线
     （以及 ``material_shaped_key`` 碰撞分流面）的 key 文法必须同步演进。
 
-    歧义排除（#1279 codex P1）：``m_`` 标记段使「旧文法 key + 首文件名段
-    恰为 32 位 hex」的形态（``ws/hash/g0/<32hex>/file``）不再误判为单次
-    使用——那种 key 无 ``m_`` 前缀，保持只报告。旧写端要产出标记形态须
-    用户文件名首段恰为 ``m_<32hex>``（35 字节、非自然命名），且材料 key
-    写端全在 Host 单副本后端（presign/inline/demo seed 都在 server 侧，
-    Worker 不写材料 key），混合版本窗口 = 单副本部署重启的分钟级；叠加
-    apply_gc 的删除前新鲜反查，残余风险落到 #344 已接受的亚秒窗之内。
+    构造性关闭论证（#1279 codex r1/r2 P1 族——「第 4 段标记」连续两轮被
+    「旧文法合法文件名巧合」反例击穿后，标记移入写端不可注入的第 3 段）：
+
+    1. 逐条核验在役旧写端产线的第 3 段能力：presign 首发与重试
+       （materials.py）第 3 段是服务端派生的字面量 ``'g' || generation``
+       ——#1267 起恒为 ``g<int>``；inline（run_text_batch）旧形态第 3 段
+       是 ``inline-{uuid4}``；demo seed 旧形态无代次段（第 3 段是文件名
+       首段）。没有任何在役写端能在第 3 段写出 ``v2g0``。
+    2. 混合版本窗口内的活写端只有紧邻旧版 Host server（材料 key 写端全
+       在 Host 单副本后端：presign/inline/demo seed 都在 server 侧，
+       worker/ 零写端）——它受 #1267 文法约束，第 3 段发不出 ``v2g``；
+       新版 GC CLI 与旧 Host 并行时，旧 Host 产出的全部 key 都被本门禁
+       拦在只报告侧。
+    3. #1267 之前的 legacy 写端已死（不存在于任何与现行代码的混合部署）；
+       其桶内遗留即使有形态巧合（如文件名首段字面 ``v2g0``），有行则非
+       孤儿（key_exists/新鲜反查救下），无行则是无人能重建引用的真孤儿
+       ——删除安全。
+    4. 因此「fresh_revalidate 后旧写端重建同名 key + PUT」对带 v2g 标记
+       的 key 构造性不成立：重建者只能是现版写端，而现版写端对新行恒
+       生成新 material_id、必得新 key。
     """
     segments = key.split("/")
-    mid = segments[3] if material_shaped_key(key) and len(segments) >= 5 else ""
-    return len(mid) == 34 and mid[:2] == "m_" and all(c in "0123456789abcdef" for c in mid[2:])
+    mid = segments[3] if len(segments) >= 5 else ""
+    new_gen = len(segments) >= 5 and segments[2].startswith("v2g")
+    hex_ok = mid[:2] == "m_" and len(mid) == 34 and all(c in "0123456789abcdef" for c in mid[2:])
+    return new_gen and _material_generation(segments).isdigit() and hex_ok
 
 
 def split_material_orphans(

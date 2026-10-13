@@ -1,9 +1,11 @@
 """Validation for the material upload declaration (#1119, #1267).
 
 The material storage key is
-``{workspace_id}/{content_hash|material_id}/g{upload_generation}/m_{material_id}/{filename}``
-(the ``m_``-marked material_id segment, #1279, makes every key single-use
-across row lifecycles and unambiguous to the GC grammar gate);
+``{workspace_id}/{content_hash|material_id}/v2g{upload_generation}/m_{material_id}/{filename}``
+(the ``v2g`` version marker lives in the server-derived third segment no
+filename can reach, and ``m_`` marks the row-unique fourth — #1279; every
+key is single-use across row lifecycles and unambiguous to the GC grammar
+gate);
 the workspace segment is safe by contract (schema v62 id rules), while
 ``filename`` and ``content_hash`` come from the presign request and are pinned
 here before any row write or presign. The same declaration is re-verified at

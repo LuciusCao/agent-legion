@@ -229,11 +229,13 @@ def test_apply_gc_rollback_exemption_does_not_cover_material_root_keys() -> None
 
 def test_material_shaped_key_grammar() -> None:
     """材料形态文法（#1282 r4 P1；自 scripts/gc-s3-jobs.py 下沉为
-    s3_jobs_gc.material_shaped_key，#1295）：第 3 段是 g{代次}。真 job
+    s3_jobs_gc.material_shaped_key，#1295）：第 3 段是 g{代次}（#1267
+    旧文法）或 v2g{代次}（#1279 现文法），两种都匹配——碰撞分流要收全
+    形态，删除门禁在 material_key_single_use。真 job
     产物第 3 段是 job id（恒含下划线）永不匹配；legacy 无代次段材料
-    key 与段数不足的 key 不匹配。#1279 新文法（g 段后 m_ 标记的
-    material_id 唯一段）同样匹配本判定。"""
+    key 与段数不足的 key 不匹配。"""
     assert s3_jobs_gc.material_shaped_key(f"ws1/{'a' * 64}/g0/doc.txt")
+    assert s3_jobs_gc.material_shaped_key(f"ws1/{'a' * 64}/v2g0/m_{'e' * 32}/doc.txt")
     assert s3_jobs_gc.material_shaped_key(f"ws1/{'a' * 64}/g0/m_{'e' * 32}/doc.txt")
     assert s3_jobs_gc.material_shaped_key(f"jobs-staging/{'b' * 64}/g2/dir/.rollback/f.bin")
     assert not s3_jobs_gc.material_shaped_key("jobs/ws-x/ws-x_q1/dead.json")
@@ -243,26 +245,30 @@ def test_material_shaped_key_grammar() -> None:
 
 
 def test_material_key_single_use_grammar() -> None:
-    """#1279 单次使用文法门禁（删除批入口）：g 段后第 4 段是 ``m_`` 标记 +
-    32 位小写 hex material_id → 跨行不可复用，可删；旧文法 g key（无标记
-    段，含「首文件名段恰为 32 位 hex」的歧义形态，codex P1）、legacy 无 g
-    key、inline 旧 key、真 job 产物一律排除（保持只报告）。"""
+    """#1279 单次使用文法门禁（删除批入口）：第 3 段是 ``v2g{代次}``（写端
+    不可注入的服务端派生段）且第 4 段是 ``m_`` 标记 + 32 位小写 hex
+    material_id → 跨行构造性不可复用，可删；其余形态一律只报告：
+    旧文法 g 段 key（含 r1 反例「首文件名段恰为 32 位 hex」与 r2 反例
+    「首文件名段恰为 m_<32hex>」）、legacy 无 g 段 key、inline 旧 key、
+    真 job 产物。"""
     mid = "m_" + "a" * 32
-    assert s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/{mid}/doc.txt")
-    assert s3_jobs_gc.material_key_single_use(f"ws1/{mid[2:]}/g2/{mid}/dir/f.bin")
+    assert s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/v2g0/{mid}/doc.txt")
+    assert s3_jobs_gc.material_key_single_use(f"ws1/{mid[2:]}/v2g2/{mid}/dir/f.bin")
     # 撞名前缀下的新文法材料 key 同门禁。
-    assert s3_jobs_gc.material_key_single_use(f"jobs-staging/{'c' * 64}/g1/{mid}/f.bin")
-    # 旧文法（无 material_id 段）：可复用，排除。
+    assert s3_jobs_gc.material_key_single_use(f"jobs-staging/{'c' * 64}/v2g1/{mid}/f.bin")
+    # 旧文法（g 段无 v2 标记）：可复用，排除。
     assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/doc.txt")
-    # 歧义旧文法（codex P1）：g 段后首文件名段恰为 32 位 hex、无 m_ 标记
-    # ——旧写端可复用此形态，必须保持只报告。
+    # r1 反例：旧文法 + 首文件名段恰为 32 位 hex。
     assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/{'a' * 32}/doc.txt")
+    # r2 反例：旧文法 + 首文件名段恰为 m_<32hex>。
+    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/{mid}/doc.txt")
     # legacy 无 g 段 / inline 尾段（旧文法）。
     assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/doc.txt")
     assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/inline-{'d' * 32}")
-    # 第 4 段不是 m_ + 32 位 hex 的 g key。
-    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/notanid/doc.txt")
-    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/m_{'a' * 31}/doc.txt")
+    # 第 4 段不是 m_ + 32 位 hex / 代次段缺数字的形态。
+    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/v2g0/notanid/doc.txt")
+    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/v2g0/m_{'a' * 31}/doc.txt")
+    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/v2gx/{mid}/doc.txt")
     # 真 job 产物（第 3 段 job id 恒含下划线）。
     assert not s3_jobs_gc.material_key_single_use("jobs/ws-x/ws-x_q1/dead.json")
 
@@ -273,10 +279,10 @@ def test_apply_gc_deletes_single_use_material_orphans() -> None:
     歧义形态 key 也不删）。"""
     deleter = _RecordingDeleter()
     mid = "m_" + "a" * 32
-    keep = f"ws1/{'b' * 64}/g0/{mid}/keep.txt"
-    gone = f"ws1/{'b' * 64}/g0/{mid}/gone.txt"
+    keep = f"ws1/{'b' * 64}/v2g0/{mid}/keep.txt"
+    gone = f"ws1/{'b' * 64}/v2g0/{mid}/gone.txt"
     legacy = f"ws1/{'b' * 64}/g0/legacy.txt"  # 旧文法：门禁拦截，不删不计 skipped
-    ambiguous = f"ws1/{'b' * 64}/g0/{'a' * 32}/amb.txt"  # 歧义旧文法（无 m_ 标记）：拦截
+    ambiguous = f"ws1/{'b' * 64}/g0/{mid}/amb.txt"  # r2 反例（g 段 + m_ 首段）：拦截
     report = s3_jobs_gc.OrphanReport(
         authority_orphans=[],
         staging_orphans=[],

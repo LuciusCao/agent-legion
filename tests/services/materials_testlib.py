@@ -50,7 +50,7 @@ def presign_ready(service: MaterialsService, storage: FakeObjectStorage, payload
         created_by="user-1",
     )
     material_id = result["material"]["id"]
-    storage.objects[f"{WORKSPACE_ID}/{content_hash}/g0/m_{material_id}/notes.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{content_hash}/v2g0/m_{material_id}/notes.txt"] = payload
     return service.complete(WORKSPACE_ID, material_id)
 
 
