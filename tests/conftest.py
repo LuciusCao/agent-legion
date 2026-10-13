@@ -16,9 +16,7 @@ from tests.postgres_support import (
     BASE_DATABASE_URL,
     TEST_DATABASE_URL,
     TEST_SCHEMA,
-    close_database_pools_settled,
     ensure_test_database,
-    settle_database_pools,
 )
 
 os.environ["AGENT_LEGION_DATABASE_URL"] = TEST_DATABASE_URL
@@ -26,6 +24,7 @@ os.environ["AGENT_LEGION_DATABASE_URL"] = TEST_DATABASE_URL
 import psycopg
 from psycopg import sql
 
+from server.app.db.pools import close_database_pools, settle_database_pools
 from server.app.db.schema import init_db
 from server.app.db.schema_head_cache import init_db_full_check, note_schema_rebuilt
 from server.app.events.agents import AgentStatusManager
@@ -157,7 +156,7 @@ def pytest_collection_modifyitems(config, items):
 
 def _rebuild_schema() -> None:
     """Drop and recreate the per-xdist-worker schema, then apply full DDL."""
-    close_database_pools_settled()
+    close_database_pools()
     close_reset_connection()
     # Invalidate BEFORE the drop: a create-schema failure below must not
     # leave the memo claiming "at head" over an empty schema.
@@ -195,7 +194,7 @@ def _session_test_schema():
     ensure_test_database()
     _rebuild_schema()
     yield
-    close_database_pools_settled()
+    close_database_pools()
     close_reset_connection()
 
 
