@@ -21,6 +21,7 @@ from server.app.db.transaction import read_connection, write_transaction
 from server.app.jobs.queries.material_locked_rereads import (
     assert_material_upload_identity_tx,
 )
+from server.app.jobs.queries.material_repair import repair_material_for_reupload_tx
 from server.app.services.job_errors import (
     ConflictError,
     JobServiceError,
@@ -292,10 +293,7 @@ class MaterialsService:
             elif locked_status == "expired":
                 raise ConflictError(f"Material is expired: {material_id}")
             elif failure is not None:
-                conn.execute(
-                    "update materials set status='failed' where id=%s",
-                    (material_id,),
-                )
+                conn.execute("update materials set status='failed' where id=%s", (material_id,))
             else:
                 # TTL (design §10): expires_at from the instance setting,
                 # read fresh at every completion. The verified HEAD's ETag
@@ -321,6 +319,28 @@ class MaterialsService:
             if not is_precondition_failed(exc):
                 raise
             return f"Uploaded object changed during verification of material {row['id']}", ""
+
+    def request_material_reupload(self, workspace_id: str, material_id: str) -> dict[str, Any]:
+        """ETag 失配（消费侧 412）ready 行的受控修复 + 重传 URL（#1279
+        codex r4/r5，运维入口 scripts/request_material_reupload.py）。
+
+        编排：queries 层行锁内翻转（ready → uploading、清 etag、代次 +1、
+        轮换 v2g key）→ 为**原行**的新 key 签发受代次保护的 presigned PUT
+        URL——hash 与无 hash 行统一由原 material_id 愈合（无 hash 行没有
+        presign 按 hash 找旧行的回路，历史 job/bundle 引用都指着原 ID）。
+        客户端用该 URL PUT 后 complete(expected_upload_generation=轮换后
+        代次) 即恢复 ready。uploading/failed 行幂等重签（修复重试）；
+        expired → 409；未知 → 404。修复签发的 URL 与后续 presign 重试
+        互斥：presign 会再次推进代次使该 URL 指向死 key（complete 代次
+        守卫兜住，409 后可重新 presign 或重跑修复）。
+        """
+        storage = self._require_storage()
+        with write_transaction(self._connect_source) as conn:
+            outcome = repair_material_for_reupload_tx(conn, workspace_id, material_id)
+        outcome["upload_url"] = storage.presign_put(
+            str(outcome["storage_key"]), int(outcome["size_bytes"]), _PRESIGN_EXPIRY_SECONDS
+        )
+        return outcome
 
     def list(self, workspace_id: str, *, limit: int, offset: int) -> dict[str, Any]:
         limit = max(1, min(limit or _DEFAULT_LIST_LIMIT, _MAX_LIST_LIMIT))

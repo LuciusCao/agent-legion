@@ -308,10 +308,12 @@ EOF
     legacy 固定 key 的 revalidate→delete 亚秒窗残留由 #1309 独立跟踪。
   - ETag 失配的恢复面（#1279）：消费侧 If-Match 检出 412 后，行级修复走
     `uv run python scripts/request_material_reupload.py <workspace_id>
-    <material_id>`——把 ready 行翻回 uploading 并清 object_etag（此后同
-    hash presign 走重试路径：代次 +1、v2g 新 key、签发新 URL），客户端
-    重传即愈合；历史 job 按 material_id 引用行，重传后消费新对象，旧
-    对象由 GC 新文法删除批回收。S3 快照恢复（aws s3 cp 重传会改变大行
+    <material_id>`——把 ready 行翻回 uploading（代次 +1、轮换 v2g key、
+    清 object_etag）并为**原行**新 key 签发受代次保护的一次性 PUT URL
+    （hash 与无 hash 行统一由原 material_id 愈合：无 hash 行没有 presign
+    按 hash 找旧行的回路）；用该 URL 重传后 complete 携带输出里的代次
+    即恢复 ready，历史 job 引用随之消费新对象；旧对象由 GC 新文法删除批
+    回收。S3 快照恢复（aws s3 cp 重传会改变大行
     ETag）后、启动调度前必须跑 `scripts/rebind_material_etags.py`
     （先 dry-run 再 --apply；字节核验不过的行 fail-closed 只报告，退出
     码 1），步骤与纪律见 backup-restore-runbook.md 的对象存储恢复段。
