@@ -53,7 +53,7 @@ from worker.state_evidence import configure_evidence_root
 from worker.status import ExecutionStatusReporter
 from worker.transfer_controls import load_transfer_controls
 from worker.upload.queue import UploadQueue
-from worker.upload.stderr_evidence import register_secrets as _register_secrets
+from worker.upload.secret_registry import register_secrets as _register_secrets
 
 
 def _print(message: str) -> None:

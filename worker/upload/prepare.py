@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from shared.output_truncation import OutputTruncation
 from shared.pi_events import scan_and_compress_pi_events
+from shared.stderr_tail import AGENT_STDERR_FILENAME
 from worker.state_evidence import dump_prep_evidence, prep_failure_message
 from worker.upload.degraded_archive import (
     failed_metadata,
@@ -30,11 +31,8 @@ from worker.upload.degraded_archive import (
 )
 from worker.upload.report_policy import declared_ceiling_rejection
 from worker.upload.result_metadata import MAX_ERROR_MESSAGE_CHARS, exit_verdict
-from worker.upload.stderr_evidence import (
-    AGENT_STDERR_FILENAME,
-    secret_snapshot,
-    stderr_tail_for_run,
-)
+from worker.upload.secret_registry import secret_snapshot
+from worker.upload.stderr_evidence import stderr_tail_for_run
 
 if TYPE_CHECKING:
     from worker.upload.queue import UploadTask

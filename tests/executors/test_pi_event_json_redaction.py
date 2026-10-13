@@ -444,7 +444,7 @@ def _inject_scan_failure(
 ) -> None:
     """在扫描链的指定环节注入整趟失败：fsync（落盘校验）/ replace（原子
     替换）/ read（源读取）——三处都在统一 except 的覆盖面内。"""
-    from shared import pi_events
+    from shared import pi_events_scan as pi_events
 
     if fail_step == "fsync":
         monkeypatch.setattr(
@@ -529,7 +529,7 @@ def test_staging_unlink_failure_does_not_skip_truncation(redactor_mode, tmp_path
     redactor=None 时原样保留（E 态不受 unlink 失败影响）。staging 清理
     失败的残留如实滞留（suppress 不消灭失败，只阻断连坐），残留内容只含
     已脱敏的行（半截压缩产物）。"""
-    from shared import pi_events
+    from shared import pi_events_scan as pi_events
 
     secret = "sk-live-supersecretgatewaytoken123"
     if redactor_mode == "no_hit":

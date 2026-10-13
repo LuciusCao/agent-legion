@@ -5,7 +5,7 @@ character spans) instead of returning rewritten text. Callers that cut text
 need the positions: ``shared/pi_events.py`` must keep a lookback region out
 of its output and widen its cut to the start of any secret straddling it,
 neither of which is possible behind a text-in/text-out black box. The
-Worker-side registry (worker/upload/stderr_evidence.py) produces the spans;
+Worker-side registry (worker/upload/secret_registry.py) produces the spans;
 this module only merges and applies them. Stdlib-only (see
 ``shared/__init__.py``).
 
