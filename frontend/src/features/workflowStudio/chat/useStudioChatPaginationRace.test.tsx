@@ -12,14 +12,18 @@ import { useStudioChat, type StudioChat } from './useStudioChat'
 import { useChatScroll } from './useChatScroll'
 import * as chatApi from './studioChatApi'
 import * as resumeApi from './studioChatResumeApi'
+import { api } from '../../../api/core'
 import type { StudioChatSessionRecord } from './studioChatApi'
 import { EventSourceMock } from '../../../testing/eventSourceMock'
 import { createTestQueryClient } from '../../../testing/testQueryClient'
 
 vi.mock('./studioChatApi')
 vi.mock('./studioChatResumeApi')
+// 按 id 点读（studioChatCalibration.fetchStudioChatMessage）直连 api/core。
+vi.mock('../../../api/core', () => ({ api: vi.fn() }))
 
 const mockApi = vi.mocked(chatApi)
+const mockCoreApi = vi.mocked(api)
 void vi.mocked(resumeApi)
 
 // 与 useStudioChat.test.tsx 同款的 jsdom localStorage 内存 stub。
@@ -117,6 +121,9 @@ describe('会话选择代次与锁持有者守卫（#1237 codex P2 族）', () =
         )
     )
     mockApi.updateStudioChatContext.mockResolvedValue(sessionRecord())
+    // 默认拒绝：missed 帧点读等直连 api/core 的路径走既有失败回退（#1289），
+    // 不在本文件主题的调用不得静默成功。
+    mockCoreApi.mockRejectedValue(new Error('not mocked'))
   })
 
   afterEach(() => {
@@ -380,6 +387,144 @@ describe('会话选择代次与锁持有者守卫（#1237 codex P2 族）', () =
     })
     expect(result.current.messages[0]?.id).toBe('n400')
     expect(result.current.hasMoreHistory).toBe(false)
+  })
+
+  it('A 的分页在途时切到 B：A 迟到的失败不挤掉 B 已挂好的待定重试（#1304）', async () => {
+    const rejecters: ((reason: unknown) => void)[] = []
+    mockApi.fetchStudioChatHistoryPage.mockImplementation(
+      () =>
+        new Promise<HistoryPage>((_resolve, reject) => {
+          rejecters.push(reject)
+        })
+    )
+    const { result } = await renderS1()
+
+    // s1 的分页请求挂起（在途），期间切到 s2：切换复位锁，允许 s2 发起请求。
+    act(() => {
+      void result.current.loadOlderHistory()
+    })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        101
+      )
+    )
+    await act(async () => {
+      await result.current.selectSession('s2')
+    })
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['n500'])
+    )
+
+    // fake timers 必须先于失败的 load 开启（同 #1291 用例的复验 finding 2）。
+    vi.useFakeTimers()
+    try {
+      // s2 的补拉先失败：挂好 2s 重试（闭包游标 500）。
+      act(() => {
+        void result.current.loadOlderHistory()
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(2)
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenLastCalledWith(
+        'ws1',
+        's2',
+        500
+      )
+      await act(async () => {
+        rejecters[1](new Error('s2 down'))
+      })
+
+      // s1 的旧请求随后才失败：无修复时其无条件 clearTimeout 取消 s2 的
+      // 计时器，重挂的定时器捕获 s1 游标 101——点火守卫被 s2 当前游标 500
+      // 挡掉，s2 在未溢出视口永久停在部分历史。
+      await act(async () => {
+        rejecters[0](new Error('s1 late down'))
+      })
+      expect(result.current.messages.map((m) => m.id)).toEqual(['n500'])
+
+      // 到点：s2 的待定重试必须照常点火（信号：第三次调用以游标 500 发起；
+      // 无修复时计时器已被取消/替换，本断言即红——mutation 自检过）。
+      mockApi.fetchStudioChatHistoryPage.mockResolvedValue({
+        messages: [textMessage('n400', 400, 's2 older')],
+        hasMore: false,
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000)
+      })
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenCalledTimes(3)
+      expect(mockApi.fetchStudioChatHistoryPage).toHaveBeenLastCalledWith(
+        'ws1',
+        's2',
+        500
+      )
+      expect(result.current.messages[0]?.id).toBe('n400')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('收口点读不猜渲染时序（#1305 复验 codex r2 P1）：SSE 中间帧与较新 GET 响应在同一 act 内落地（其间无渲染冲刷），收口点读仍点火并落地最新库快照', async () => {
+    // 首屏只有一条在途流式行（无 terminal，streamingTextId 命中）。
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      textMessage('m101', 101, 'a'),
+    ])
+    mockApi.fetchStudioChatSession.mockResolvedValue(sessionRecord())
+    const view = renderHook(() => useStudioChat('ws1'), { wrapper })
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatSessions).toHaveBeenCalled()
+    )
+    await act(async () => {
+      await view.result.current.selectSession('s1')
+    })
+    await waitFor(() =>
+      expect(view.result.current.messages.map((m) => m.id)).toEqual(['m101'])
+    )
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    const source = EventSourceMock.instances[0]!
+
+    // SSE 重连自愈校准：m101 在途 → refill(0)（原样返回）后按 id 点读，挂起。
+    let resolvePointRead: (value: unknown) => void = () => {}
+    mockCoreApi.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePointRead = resolve
+        }) as ReturnType<typeof api>
+    )
+    act(() => source.onopen?.())
+    await waitFor(() => expect(mockCoreApi).toHaveBeenCalledTimes(1))
+    expect(mockCoreApi).toHaveBeenLastCalledWith(
+      '/api/workspaces/ws1/studio-chat/sessions/s1/messages/m101'
+    )
+
+    // 关键时序：同一 act 内先 emit 中间 SSE 帧（ab）、再落地较新的 GET 响应
+    //（abc——服务端在 GET 在途期间持久化、对应 SSE 丢失），其间没有任何
+    // 渲染冲刷。收口决定读权威 messagesRef（emit 的 handler 已同步写入 ab），
+    // 与 updater 的丢弃决定同一事实 → 立即补一次收口点读；若 ref 回到被动
+    // 效应同步（mutation），此刻 ref 仍是 a，与点火快照相等 → 漏挂收口
+    // 点读，界面永停 ab——本用例即红。
+    mockCoreApi.mockResolvedValueOnce({
+      message: { ...textMessage('m101', 101, 'abc') },
+    })
+    await act(async () => {
+      source.emitMessage({
+        type: 'message',
+        message: {
+          id: 'm101',
+          session_id: 's1',
+          kind: 'text',
+          role: 'agent',
+          content: { text: 'ab' },
+        },
+      })
+      resolvePointRead({ message: { ...textMessage('m101', 101, 'abc') } })
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(mockCoreApi).toHaveBeenCalledTimes(2))
+    await waitFor(() =>
+      expect(view.result.current.messages[0]?.content.text).toBe('abc')
+    )
   })
 
   it('startSession：workspace 往返后早先创建的 finally 不释放新一轮在途创建的 starting（#1237 codex P2-2 族）', async () => {

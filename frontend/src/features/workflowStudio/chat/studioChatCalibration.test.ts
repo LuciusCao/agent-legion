@@ -169,9 +169,16 @@ describe('calibrateWithRowRefetch（#1236 窗口外在途行补取）', () => {
   it('全量校准后对在途原地更新行按 id 逐个重取', async () => {
     const inFlight = toolCallMessage('tc2', 2, 'in_progress')
     const { deps } = makeDeps([textMessage('m1', 1, 'a'), inFlight])
-    mockApi.mockResolvedValue({
-      message: recordOf(toolCallMessage('tc2', 2, 'completed')),
-    })
+    // 两个在途行各点读一次：按 URL 尾部分发响应（同一记录喂所有 id 会让
+    // m1 的点读拿到 tc2 的行——整行守卫按响应 id 比对必然偏离，#1305 的
+    // 收口点读会被这种假响应误触发）。
+    mockApi.mockImplementation((url) =>
+      Promise.resolve({
+        message: String(url).endsWith('/tc2')
+          ? recordOf(toolCallMessage('tc2', 2, 'completed'))
+          : recordOf(textMessage('m1', 1, 'a')),
+      })
+    )
     const hasTerminal = await calibrateWithRowRefetch(deps)
     expect(hasTerminal).toBe(false)
     expect(deps.refillMessages).toHaveBeenCalledWith(0)
@@ -283,7 +290,13 @@ describe('点读落地的新鲜度守卫（#1288）', () => {
         upsertMessage(current, { id: 'm1', content: { text: 'abcdef' } }) ??
         current
     )
+    // 收口点读（#1305）会随后发起：第二次 GET 返回服务端的最新态（即本地
+    // 已合入的 abcdef），落地为 no-op。
+    mockApi.mockResolvedValueOnce({
+      message: recordOf(textMessage('m1', 1, 'abcdef')),
+    })
     resolveFetch({ message: recordOf(textMessage('m1', 1, 'abc')) })
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(2))
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(state.messages[0]).toMatchObject({ content: { text: 'abcdef' } })
   })
@@ -305,9 +318,14 @@ describe('点读落地的新鲜度守卫（#1288）', () => {
           content: { status: 'completed' },
         }) ?? current
     )
+    // 收口点读（#1305）：第二次 GET 返回服务端最新态（completed），no-op。
+    mockApi.mockResolvedValueOnce({
+      message: recordOf(toolCallMessage('tc1', 1, 'completed')),
+    })
     resolveFetch({
       message: recordOf(toolCallMessage('tc1', 1, 'in_progress')),
     })
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(2))
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(state.messages[0]).toMatchObject({
       content: { status: 'completed' },
@@ -360,11 +378,18 @@ describe('点读落地的点火快照守卫（#1299）', () => {
         current
     )
     // 点读响应是 SSE 帧之前读库的旧快照（rawOutput 仍为 out1）。
+    // 收口点读（#1305）：第二次 GET 返回服务端最新态（out2），no-op。
+    mockApi.mockResolvedValueOnce({
+      message: recordOf(
+        toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out2' })
+      ),
+    })
     resolveFetch({
       message: recordOf(
         toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out1' })
       ),
     })
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(2))
     await new Promise((resolve) => setTimeout(resolve, 0))
     // 本地行已偏离点火快照 = 在途期间被更新的 SSE 帧改写，旧点读结果丢弃；
     // 无修复时 upsert 把 rawOutput 盖回 out1（若那是最后一帧界面永久回退）。
@@ -431,6 +456,90 @@ describe('terminal 实时到达当轮的校准截断（#1300）', () => {
     // 无修复时 ids 快照来自滞后 ref（无 terminal），tc1 被误判在途点读（红）。
     expect(applied.map((m) => m.id)).toEqual(['tc1', 'st1'])
     expect(mockApi).not.toHaveBeenCalled()
+  })
+})
+
+// 收口点读（#1305）：get 在途期间本地被中间 SSE 改写时，整行守卫丢弃响应
+// 后必须再补一次点读（服务端在途持久化的更新快照可能因 SSE 丢失被误丢）。
+// 注意 deps 形态即生产语义：权威 messagesRef 由包装 setter 同步维护
+//（useStudioChat，复验 codex r2 P1），makeDeps 的同步 setMessages + 实时
+// getter ref 与之同构——不存在「ref 滞后于 state」的窗口可复现。
+describe('整行冲突丢弃后的收口点读（#1305）', () => {
+  it('GET 在途期间收到中间 SSE、服务端随后持久化的更新快照（SSE 丢失）被整行守卫误丢：补一次收口点读落地最新库快照', async () => {
+    const { deps, state } = makeDeps([
+      toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out1' }),
+    ])
+    let resolveFetch!: (value: unknown) => void
+    mockApi.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve
+        }) as ReturnType<typeof api>
+    )
+    await calibrateWithRowRefetch(deps)
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(1))
+    // GET 在途期间：中间 SSE 快照合入本地行（rawOutput 刷新、status 不变——
+    // 终态/长度比较判不出新旧，#1288 守卫放行的形态）。
+    deps.setMessages(
+      (current) =>
+        upsertMessage(current, { id: 'tc1', content: { rawOutput: 'out2' } }) ??
+        current
+    )
+    // 服务端随后持久化 out3 而对应 SSE 丢失：GET 的库读取发生在持久化之后，
+    // 响应携带的其实是较新的 out3——整行守卫按偏离丢弃（#1299），收口决定
+    // 读权威 ref 同样偏离 → 立即补一次收口点读。无收口点读时界面永停
+    // out2——本断言即红（mutation：摘掉收口点读即红，已自检）。
+    mockApi.mockResolvedValueOnce({
+      message: recordOf(
+        toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out3' })
+      ),
+    })
+    resolveFetch({
+      message: recordOf(
+        toolCallMessage('tc1', 1, 'in_progress', { rawOutput: 'out3' })
+      ),
+    })
+    await vi.waitFor(() => expect(mockApi).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() =>
+      expect(state.messages[0]).toMatchObject({
+        content: { status: 'in_progress', rawOutput: 'out3' },
+      })
+    )
+    // 收口点读正常落地后不再续挂第三次（有界）。
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mockApi).toHaveBeenCalledTimes(2)
+  })
+
+  it('收口点读在途期间本地再被 SSE 改写：再次冲突丢弃但不续挂（有界），本地保留最新 SSE 内容', async () => {
+    const { deps, state } = makeDeps([textMessage('m1', 1, 'a')])
+    const resolvers: ((value: unknown) => void)[] = []
+    mockApi.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvers.push(resolve)
+        }) as ReturnType<typeof api>
+    )
+    await calibrateWithRowRefetch(deps)
+    await vi.waitFor(() => expect(resolvers).toHaveLength(1))
+    // 持续流式：第一次点读在途期间本地推进到 ab。
+    deps.setMessages(
+      (current) =>
+        upsertMessage(current, { id: 'm1', content: { text: 'ab' } }) ?? current
+    )
+    // 旧快照 a 被整行守卫丢弃，立即补唯一一次收口点读。
+    resolvers[0]({ message: recordOf(textMessage('m1', 1, 'a')) })
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2))
+    // 收口点读在途期间又推进到 abc：再次偏离 → 丢弃；不再续挂第三次
+    //（mutation：递归标记失效会点火第三次点读——本断言即红）。
+    deps.setMessages(
+      (current) =>
+        upsertMessage(current, { id: 'm1', content: { text: 'abc' } }) ??
+        current
+    )
+    resolvers[1]({ message: recordOf(textMessage('m1', 1, 'ab')) })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(resolvers).toHaveLength(2)
+    expect(state.messages[0]).toMatchObject({ content: { text: 'abc' } })
   })
 })
 

@@ -69,9 +69,8 @@ export function handleSseMessageEvent(
   setMessages((current) => upsertMessage(current, incoming) ?? current)
   if (missed) handleMissedMessageFrame(rowRefetchDeps(deps), incoming.id)
   if (isTerminalStatus(incoming as ChatMessage)) {
-    // #1300：terminal 当轮到达——messagesRef 由被动效应同步、此刻尚未合入
-    // 它；校准的 turn 截断按合入 incoming 后的快照计算，否则刚到的新边界
-    // 不可见，刚终结 turn 的死行被误判在途逐个点读。
+    // #1300：terminal 当轮到达——校准的 turn 截断按合入 incoming 后的快照
+    // 计算，否则刚到的新边界不可见，刚终结 turn 的死行被误判在途逐个点读。
     void calibrateWithRowRefetch(
       rowRefetchDeps(deps),
       merged ?? undefined

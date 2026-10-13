@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { SetStateAction } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRealtimeChannel } from '../../../lib/realtime'
 import { queryKeys } from '../../../lib/queryKeys'
@@ -40,10 +41,20 @@ import { useStudioChatViews } from './useStudioChatViews'
 export function useStudioChat(workspaceId: string | undefined) {
   const queryClient = useQueryClient()
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessagesState] = useState<ChatMessage[]>([])
   const [session, setSession] = useState<StudioChatSessionRecord | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  // 权威 messagesRef（#1305 复验 codex r2 P1）：所有消息写入必须经此包装——
+  // 入队即同步落地 ref，ref 恒等于「已提交 state + 已排队 updater」，事件
+  // 处理与点读落地读到同一事实，不依赖渲染冲刷/被动效应的事后同步（并发
+  // 渲染让步/挂起时事后同步窗口不可控）。updater 必须保持纯函数（包装急切
+  // 求值一次 + React 冲刷时再求值）。
   const messagesRef = useRef<ChatMessage[]>([])
+  const setMessages = useCallback((action: SetStateAction<ChatMessage[]>) => {
+    messagesRef.current =
+      typeof action === 'function' ? action(messagesRef.current) : action
+    setMessagesState(action)
+  }, [])
   const activeSessionIdRef = useRef<string | null>(null)
   // 会话选择代次（#1237 codex P2-1）：A→B→A 切换后 sessionId 守卫失效
   // （重新选中的还是 A），异步加载回调须同时校验代次——每次选择变化
@@ -59,11 +70,11 @@ export function useStudioChat(workspaceId: string | undefined) {
   // 回调落地前切换 workspace 时，旧 workspace 的迟到响应不得写入本 hook
   // 的 state（本 hook 实例被 react-router 复用，不被重挂）。ref 更新合入
   // 下方 workspaceId 重置 effect（react-hooks/refs 禁止 render 期写 ref）。
+  // messagesRef 不在此同步：它由上方包装 setter 在入队时同步维护（权威 ref）。
   const workspaceIdRef = useRef(workspaceId)
   useEffect(() => {
-    messagesRef.current = messages
     activeSessionIdRef.current = activeSessionId
-  }, [messages, activeSessionId])
+  }, [activeSessionId])
 
   const agentsQuery = useQuery({
     queryKey: queryKeys.studioChatAgents(workspaceId ?? ''),
@@ -111,7 +122,7 @@ export function useStudioChat(workspaceId: string | undefined) {
       })
       return hasTerminal
     },
-    [workspaceId, activeSessionId]
+    [workspaceId, activeSessionId, setMessages]
   )
 
   // 进入/切换会话：全量拉一次消息与会话快照。
@@ -139,12 +150,12 @@ export function useStudioChat(workspaceId: string | undefined) {
     return () => {
       stale = true
     }
-  }, [workspaceId, activeSessionId])
+  }, [workspaceId, activeSessionId, setMessages])
 
   // 会话快照兜底：列表/事件不可达时以 sessions 查询里的行为准。
   useEffect(() => {
     if (!activeSessionId || session) return
-    const fromList = (sessionsQuery.data ?? []).find(
+    const fromList = sessionsQuery.data?.find(
       (row) => row.id === activeSessionId
     )
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 用已加载的会话列表回填快照
@@ -190,7 +201,14 @@ export function useStudioChat(workspaceId: string | undefined) {
       },
     })
     return () => channel.close()
-  }, [workspaceId, activeSessionId, refillMessages, queryClient, setSession])
+  }, [
+    workspaceId,
+    activeSessionId,
+    refillMessages,
+    queryClient,
+    setSession,
+    setMessages,
+  ])
 
   // useCallback 稳定化（#1120 codex P1）：runAction 是 answerPermission /
   // resume 的依赖，每 render 新建会把不稳定逐层传导到 MessageItem 的 props。
