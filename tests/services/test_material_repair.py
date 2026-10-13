@@ -11,6 +11,7 @@ import pytest
 
 from server.app.services.job_errors import ConflictError, NotFoundError
 from server.app.services.material_cache import material_runtime_block
+from server.app.services.materials import MaterialVerificationError
 from shared.material_cache import MaterializeError
 from tests.services import materials_testlib
 
@@ -48,20 +49,24 @@ def test_request_reupload_repairs_poisoned_row_and_heals_consumers(
     with pytest.raises(MaterializeError, match="ETag mismatch"):
         material_runtime_block(job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage)
 
-    # 受控修复：ready → uploading + 清 etag。
+    # 受控修复：ready → uploading + 清 etag + 代次 +1 + 轮换 v2g key（r5 P2）。
     job_db.request_material_reupload(WORKSPACE_ID, material_id)
     assert service.get(WORKSPACE_ID, material_id)["status"] == "uploading"
     assert _object_etag_of(job_db, material_id) == ""
+    assert _generation_of(job_db, material_id) == 1
+    repaired_key = _storage_key_of(job_db, material_id)
+    assert repaired_key == f"{WORKSPACE_ID}/{_sha256(payload)}/v2g1/m_{material_id}/notes.txt"
+    assert repaired_key != old_key
 
-    # 修复后同 hash presign 不再 dedup：代次 +1、v2g 新 key、签发新 URL。
+    # 修复后同 hash presign 不再 dedup：代次再 +1（链式单调）、v2g2 新 key、
+    # 签发新 URL；中间代次 v2g1 从未签发 URL、无对象、不产生孤儿。
     retry = service.presign(
         WORKSPACE_ID, filename="notes.txt", size_bytes=len(payload), content_hash=_sha256(payload)
     )
     assert retry["deduplicated"] is False and retry["upload_url"] is not None
-    assert retry["material"]["upload_generation"] == 1
+    assert retry["material"]["upload_generation"] == 2
     new_key = _storage_key_of(job_db, material_id)
-    assert new_key != old_key
-    assert new_key == f"{WORKSPACE_ID}/{_sha256(payload)}/v2g1/m_{material_id}/notes.txt"
+    assert new_key == f"{WORKSPACE_ID}/{_sha256(payload)}/v2g2/m_{material_id}/notes.txt"
 
     # 重传正确字节 → complete 落 ready + 新 etag；历史引用（material_id）
     # 消费新字节——愈合语义。
@@ -72,6 +77,36 @@ def test_request_reupload_repairs_poisoned_row_and_heals_consumers(
         job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage
     )
     assert block is not None and block["material_id"] == material_id
+
+
+def test_bare_complete_cannot_undo_repair_with_poisoned_bytes(service, storage, job_db) -> None:
+    """r5 P2 正测试（评审 scratch 场景转正）：无 hash 行被同尺寸覆盖毒化 →
+    repair（代次 +1、key 轮换）→ 窗口期内的 bare complete 不得把毒化字节
+    重新落 ready：带旧代次 → 409 代次守卫；无代次 → 新 key 缺对象落
+    failed（size-only 核验够不着旧 key 的毒化对象）。"""
+    payload = b"hashless-original"
+    result = service.presign(WORKSPACE_ID, filename="h.txt", size_bytes=len(payload))
+    material_id = result["material"]["id"]
+    old_key = _storage_key_of(job_db, material_id)
+    storage.objects[old_key] = payload
+    assert service.complete(WORKSPACE_ID, material_id)["status"] == "ready"
+
+    # 同尺寸覆盖毒化，然后修复（轮换 key）。
+    storage.objects[old_key] = b"hashless-poisoned"  # 同长（17 字节）
+    job_db.request_material_reupload(WORKSPACE_ID, material_id)
+    assert _generation_of(job_db, material_id) == 1
+
+    # 带旧代次的 bare complete → 409，行仍是 uploading。
+    with pytest.raises(ConflictError, match="superseded"):
+        service.complete(WORKSPACE_ID, material_id, expected_upload_generation=0)
+    assert service.get(WORKSPACE_ID, material_id)["status"] == "uploading"
+
+    # 无代次 bare complete → 新 key 无对象 → 核验失败落 failed，不落 ready。
+    with pytest.raises(MaterialVerificationError, match="missing"):
+        service.complete(WORKSPACE_ID, material_id)
+    row = service.get(WORKSPACE_ID, material_id)
+    assert row["status"] == "failed"
+    assert _object_etag_of(job_db, material_id) == ""
 
 
 def test_request_reupload_rejects_non_ready_and_unknown(service, storage, job_db) -> None:

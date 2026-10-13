@@ -54,9 +54,9 @@ def main() -> int:
         print(f"修复失败: {exc}")
         return 1
     print(
-        f"材料 {args.material_id} 已翻回 uploading（object_etag 已清）。"
-        "请重新上传：同 hash 再次 presign 会签发新代次 key 的 PUT URL，"
-        "PUT 后 complete 即恢复 ready。"
+        f"材料 {args.material_id} 已翻回 uploading（代次 +1、key 已轮换、object_etag 已清）。"
+        "请重新上传：hash 行同 hash 再次 presign 会重试本行并签发新代次 key 的 PUT URL"
+        "（无 hash 行直接重新 presign 建新行即可），PUT 后 complete 即恢复 ready。"
     )
     return 0
 
