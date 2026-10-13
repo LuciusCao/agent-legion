@@ -96,6 +96,19 @@ def test_seed_aborts_gracefully_when_store_unreachable(job_db, settings) -> None
     assert _seeded_rows(job_db, workspace_id) == []
 
 
+def test_seed_aborts_when_store_returns_no_etag(job_db, settings) -> None:
+    """#1279 R3b：demo seed 产线 HEAD 空 ETag → 降级中断（不落 ready 且
+    无身份的行）。"""
+    workspace_id = str(job_db.create_workspace("demo")["id"])
+
+    seeded = seed_demo_workspace_materials(
+        settings, workspace_id, storage=FakeStorage(no_etag=True)
+    )
+
+    assert seeded == []
+    assert _seeded_rows(job_db, workspace_id) == []
+
+
 def test_seed_aborts_on_boto_outage_but_propagates_programming_errors(job_db, settings) -> None:
     """#204 窄化：botocore 数据面故障（ClientError/BotoCoreError）按既有的
     warning + break 降级；编程错误（此处以 TypeError 代表）上抛给

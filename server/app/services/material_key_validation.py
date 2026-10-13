@@ -99,8 +99,15 @@ def verify_stored_object(storage: ObjectStorage, row: dict[str, Any]) -> tuple[s
     ETag 是它唯一的内容身份）：complete 成功时与 ready 同事务落库
     （materials.object_etag，schema v98，#1279），消费侧据以检出 complete
     后的同尺寸静默覆盖。对象缺失/核验失败时 ETag 为空串（不落库）。
+    存储返回空 ETag 时折算核验失败（R3b：不落 ready+etag='' 的永久无
+    身份行；支持矩阵内后端恒有 ETag）。
     调用方负责落库前的锁内身份复查
     （jobs/queries/material_locked_rereads）。
+
+    威胁模型边界（M30 R1）：presigned PUT URL 即作者通道——作者 PUT 之后、
+    complete 的 HEAD 之前，活 URL 持有者同尺寸重写会被绑成身份（无 hash
+    行结构性「最后写入者即作者」）；URL 外泄不在威胁模型内，hash 行免疫
+    （sha256 声明在先）。要关此格只能强制 content_hash（未做）。
 
     sha256 流读携带刚 HEAD 到的 ETag 作 If-Match（#1279 codex P1）：同一
     未过期 presigned PUT URL 在 complete 期间被二次使用、对象在 HEAD 与
@@ -111,6 +118,11 @@ def verify_stored_object(storage: ObjectStorage, row: dict[str, Any]) -> tuple[s
     head = storage.head_object(str(row["storage_key"]))
     if head is None:
         return f"Uploaded object is missing for material {row['id']}", ""
+    if not head.etag:
+        # #1279 R3b：存储不返回 ETag 则无法建立无 hash 行的内容身份——
+        # fail-closed 折算核验失败（行落 failed，不落 ready+etag='' 的
+        # 永久无身份行）。支持矩阵内后端（S3/MinIO/SeaweedFS）恒有 ETag。
+        return f"Object store returned no ETag for material {row['id']}", ""
     declared_size = int(row["size_bytes"])
     if head.size_bytes != declared_size:
         return f"Uploaded object size {head.size_bytes} != declared size {declared_size}", ""

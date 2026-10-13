@@ -85,10 +85,12 @@ def store_text_batch(
             keys.append(key)
             storage.put_object(key, payload, content_type=content_type)
             # put 后 HEAD 取 ETag 一并落列（#1279：直插 ready 产线同样携带
-            # 内容身份）；put 成功而 HEAD 读不到对象是存储面故障，按不可用处理。
+            # 内容身份）；put 成功而 HEAD 读不到对象或**空 ETag**（R3b：
+            # 无法建立身份）都是存储面故障，按不可用处理——不得落 ready
+            # 且无身份的行。
             head = storage.head_object(key)
-            if head is None:
-                raise OSError(f"head after put returned no object: {key}")
+            if head is None or not head.etag:
+                raise OSError(f"head after put returned no object/etag: {key}")
             entries[digest] = dict(
                 content_hash=digest,
                 filename=filename,

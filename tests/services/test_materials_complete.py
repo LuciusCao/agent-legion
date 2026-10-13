@@ -412,6 +412,22 @@ def test_complete_rejects_object_swap_between_head_and_read(
     assert materials_testlib.object_etag_of(job_db, material_id) == ""
 
 
+def test_complete_fails_closed_when_store_returns_no_etag(service, storage, job_db) -> None:
+    """#1279 R3b：HEAD 返回空 ETag → 折算核验失败落 failed——不落
+    ready+etag='' 的永久无身份行（支持矩阵内后端恒有 ETag，不触发）。"""
+    storage.no_etag = True
+    result = service.presign(WORKSPACE_ID, filename="noetag.txt", size_bytes=4)
+    material_id = result["material"]["id"]
+    (key, _) = storage.presigned[0]
+    storage.objects[key] = b"1234"
+
+    with pytest.raises(MaterialVerificationError, match="no ETag"):
+        service.complete(WORKSPACE_ID, material_id)
+    row = service.get(WORKSPACE_ID, material_id)
+    assert row["status"] == "failed"
+    assert materials_testlib.object_etag_of(job_db, material_id) == ""
+
+
 def test_complete_rejects_expired_material(service, job_db) -> None:
     result = service.presign(WORKSPACE_ID, filename="h.txt", size_bytes=1)
     with job_db.connect() as conn:

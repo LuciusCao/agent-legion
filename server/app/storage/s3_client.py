@@ -63,6 +63,11 @@ class ObjectStorage(Protocol):
         GET is conditioned on it (S3 If-Match → 412 on mismatch), so a
         same-size overwrite after complete() is detected at read time
         instead of silently serving poisoned bytes. Empty = unconditional.
+
+        存储契约（M30 R2）：If-Match 只校验 GET open 时刻——返回的流必须
+        是 open 时刻对象的原子快照（AWS S3 语义；SeaweedFS/MinIO 见
+        docs/materials-storage-deployment.md 的后端契约要求）。流中同尺寸
+        覆盖对无 hash 行依赖此契约；hash 行由下载后的 sha256 复算免疫。
         """
         ...
 

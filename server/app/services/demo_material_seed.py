@@ -104,8 +104,8 @@ def seed_demo_workspace_materials(
             # consumption chains can detect a later overwrite.
             storage.put_object(storage_key, payload, content_type=_CONTENT_TYPE)
             head = storage.head_object(storage_key)
-            if head is None:
-                raise OSError(f"head after put returned no object: {storage_key}")
+            if head is None or not head.etag:
+                raise OSError(f"head after put returned no object/etag: {storage_key}")
             with write_transaction(source) as conn:
                 conn.execute(
                     """

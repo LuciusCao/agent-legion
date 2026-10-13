@@ -36,6 +36,18 @@ gzip 对象的上传下载对后端完全透明。`Content-Encoding: gzip` 响�
 路由层根据 key 的 `.gz` 后缀自行添加（`job_artifact_raw.py` 判定 +
 `job_artifact_raw_response.py` 加头），同样不经后端。
 
+## 后端契约要求（#1279 材料 ETag 协议，M30 R2）
+
+材料身份协议对后端的两条硬要求（支持矩阵内的 AWS S3 / MinIO / SeaweedFS
+均满足；换后端时必须核对）：
+
+- **HEAD 恒返回非空 ETag**：complete/inline/demo seed 对空 ETag fail-closed
+  （不落 ready 的无身份行）；
+- **单 GET 原子快照**：`open_stream` 的 If-Match 只校验 GET open 时刻，
+  返回的流必须是 open 时刻对象的原子快照（AWS S3 语义）——流读期间的
+  同尺寸覆盖对无 hash 材料依赖此契约才不可撕裂；hash 行由下载后的
+  sha256 复算免疫，不依赖此条。
+
 ## 1. 组件与配置面
 
 | 项 | 值 | 说明 |

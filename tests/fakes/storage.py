@@ -44,11 +44,15 @@ class FakeObjectStorage:
         record_deletions: bool = True,
         fail_put: bool = False,
         fail_put_with: Exception | None = None,
+        no_etag: bool = False,
     ) -> None:
         self.objects: dict[str, bytes] = dict(objects) if objects else {}
         self.record_deletions = record_deletions
         self.fail_put = fail_put
         self.fail_put_with = fail_put_with
+        # True 时 head_object 返回空 ETag（模拟不支持/不返回 ETag 的存储，
+        # 钉 #1279 R3b 的 fail-closed）。
+        self.no_etag = no_etag
         # 可变行为开关：True 时 delete_object 抛 botocore ClientError。
         self.fail_deletes = False
         self.deleted: list[str] = []
@@ -87,9 +91,9 @@ class FakeObjectStorage:
 
     def head_object(self, storage_key: str) -> ObjectHead | None:
         payload = self.objects.get(storage_key)
-        return (
-            None if payload is None else ObjectHead(size_bytes=len(payload), etag=etag_of(payload))
-        )
+        if payload is None:
+            return None
+        return ObjectHead(size_bytes=len(payload), etag="" if self.no_etag else etag_of(payload))
 
     def open_stream(self, storage_key: str, *, if_match: str = "") -> io.BytesIO:
         self.opened += 1

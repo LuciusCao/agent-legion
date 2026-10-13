@@ -431,6 +431,22 @@ generation/key 变化，标记不变 ⟺ 当前 key 的最后一个 URL 已过�
 行 / claim 描述符同行）；binder 绑定后对象再被改写只有「已签发 URL 复用」一条路，而
 If-Match 把该路变成 412 检出而非静默。
 
+已声明接受格（M30 对账）：
+- **pre-complete 幽灵写绑身份**（能力模型边界）：作者 PUT 之后、complete 的 HEAD 之前，
+  活 URL 持有者可同尺寸重写并被绑成身份——presigned URL 即作者通道，URL 外泄不在威胁
+  模型内；hash 行免疫（sha256 声明在先）；无 hash 行结构性「最后写入者即作者」，关不掉
+  （除非强制 content_hash）。
+- **流中同尺寸撕裂**（存储契约）：If-Match 只校验 GET open 时刻；流读期间的同尺寸覆盖
+  依赖存储的「单 GET 原子快照」语义（AWS S3 保证；已写入
+  docs/materials-storage-deployment.md 的后端契约要求）。hash 行由最终 sha256 复算免疫，
+  仅无 hash 行依赖此契约。
+- **升级瞬态缓存**（R4 对账）：升级前被无核验填充的缓存字节，升级后构造性不可达——
+  无 hash 地址带代次（`{id}-v2g{gen}`，r6），旧裸 id 缓存永不被新地址命中；绑定前填充
+  被门禁/fail-closed 挡住（填充只在绑定后发生，绑定不推进代次、绑定前后地址一致但此前
+  该地址从未被填充）。
+- 回填信任前提：升级前已毒化行绑毒化 etag，无机制可分辨（repair 重传）；rebind 对无
+  hash 行只 size 核验（信任运维备份字节）；worker 版本自报（trusted infra）。
+
 语义边界（写死）：升级前已被毒化的行无机制可分辨——binder 静止期绑定到的是毒化 etag
 （既成事实，只能靠 repair 重传换内容身份）；静止期守卫关掉的是升级前后「活 URL 窗口」
 内的新替换。
