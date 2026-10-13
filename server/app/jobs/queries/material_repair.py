@@ -31,6 +31,10 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.material_etag_identity import (
+    bind_material_etag_if_current,
+    materials_with_object_etag,
+)
 from server.app.services.job_errors import ConflictError, NotFoundError
 
 
@@ -85,24 +89,19 @@ def repair_material_for_reupload_tx(
 
 class MaterialRepairQueriesMixin(ConnectionQueriesMixin):
     def materials_with_object_etag(self) -> list[dict[str, Any]]:
-        """恢复重绑扫描面：记录了 object_etag 的全部材料行（跨 workspace）。
+        """门面薄壳：见 material_etag_identity 模块级同名函数（恢复重绑
+        扫描面，运维低频全量扫描）。"""
+        return materials_with_object_etag(self.dsn_identity)
 
-        运维低频全量扫描（恢复流程专用），无索引可接受。
-        """
-        with self._connect_read() as conn:
-            rows = conn.execute(
-                "select id, workspace_id, content_hash, size_bytes, storage_key,"
-                " object_etag from materials where object_etag <> ''"
-            ).fetchall()
-        return [dict(row) for row in rows]
-
-    def rebind_material_etag(self, material_id: str, *, expected_etag: str, new_etag: str) -> bool:
-        """CAS 重绑：仅当行的 object_etag 仍是 ``expected_etag`` 时落
-        ``new_etag``；返回是否重绑（False = 期间被并发改动，调用方报告并
-        交下一轮处理）。"""
-        with self.write() as conn:
-            result = conn.execute(
-                "update materials set object_etag=%s where id=%s and object_etag=%s",
-                (new_etag, material_id, expected_etag),
-            )
-        return result.rowcount > 0
+    def rebind_material_etag(
+        self, material_id: str, *, expected_etag: str, new_etag: str, storage_key: str
+    ) -> bool:
+        """门面薄壳：见 ``material_etag_identity.bind_material_etag_if_current``
+        （CAS：(object_etag, storage_key) 双钉，key 钉防 repair 轮换串键）。"""
+        return bind_material_etag_if_current(
+            self.dsn_identity,
+            material_id,
+            expected_etag=expected_etag,
+            new_etag=new_etag,
+            storage_key=storage_key,
+        )

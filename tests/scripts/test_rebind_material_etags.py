@@ -34,7 +34,9 @@ class _FakeQueries:
     def materials_with_object_etag(self) -> list[dict]:
         return [dict(row) for row in self.rows]
 
-    def rebind_material_etag(self, material_id: str, *, expected_etag: str, new_etag: str) -> bool:
+    def rebind_material_etag(
+        self, material_id: str, *, expected_etag: str, new_etag: str, storage_key: str
+    ) -> bool:
         if self.cas_fail:
             return False
         self.rebound.append((material_id, expected_etag, new_etag))

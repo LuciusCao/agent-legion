@@ -41,8 +41,9 @@ def open_verified_stream(
     The S3 If-Match binds the verification to the exact bytes this GET
     returns (412 before any byte is served), so a same-size overwrite that
     landed after complete() surfaces as a ``MaterializeError`` instead of
-    silently caching poisoned bytes. An empty ``object_etag`` (pre-v98 rows,
-    永久豁免) skips the condition and keeps the size-only semantics.
+    silently caching poisoned bytes. An empty ``object_etag`` (pre-v98 rows
+    awaiting the startup backfill, codex r8) skips the condition and keeps
+    the size-only semantics.
     """
     try:
         return storage.open_stream(storage_key, if_match=object_etag)

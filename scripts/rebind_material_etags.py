@@ -36,7 +36,7 @@ class RebindQueries(Protocol):
     def materials_with_object_etag(self) -> list[dict[str, Any]]: ...
 
     def rebind_material_etag(
-        self, material_id: str, *, expected_etag: str, new_etag: str
+        self, material_id: str, *, expected_etag: str, new_etag: str, storage_key: str
     ) -> bool: ...
 
 
@@ -69,7 +69,12 @@ def rebind_material_etags(storage: Any, queries: RebindQueries, *, apply: bool) 
         if not apply:
             report.rebound.append(material_id)
             continue
-        if queries.rebind_material_etag(material_id, expected_etag=recorded, new_etag=fresh_etag):
+        if queries.rebind_material_etag(
+            material_id,
+            expected_etag=recorded,
+            new_etag=fresh_etag,
+            storage_key=str(row["storage_key"]),
+        ):
             report.rebound.append(material_id)
         else:
             report.unresolved.append(f"{material_id}: row changed concurrently (CAS lost)")

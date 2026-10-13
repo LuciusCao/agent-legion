@@ -204,11 +204,19 @@ def test_rebind_material_etag_cas(job_db) -> None:
 
     # CAS 失败：expected 不符 → 不动行。
     assert not job_db.rebind_material_etag(
-        "mat-rebind", expected_etag="etag-x", new_etag="etag-new"
+        "mat-rebind",
+        expected_etag="etag-x",
+        new_etag="etag-new",
+        storage_key=f"{WORKSPACE_ID}/mat-rebind/v2g0/m_mat-rebind/a.txt",
     )
     assert _object_etag_of(job_db, "mat-rebind") == "etag-old"
     # CAS 成功。
-    assert job_db.rebind_material_etag("mat-rebind", expected_etag="etag-old", new_etag="etag-new")
+    assert job_db.rebind_material_etag(
+        "mat-rebind",
+        expected_etag="etag-old",
+        new_etag="etag-new",
+        storage_key=f"{WORKSPACE_ID}/mat-rebind/v2g0/m_mat-rebind/a.txt",
+    )
     assert _object_etag_of(job_db, "mat-rebind") == "etag-new"
     # 重绑后落出扫描面语义不变（仍是带 etag 行）。
     assert [str(r["id"]) for r in job_db.materials_with_object_etag()] == ["mat-rebind"]

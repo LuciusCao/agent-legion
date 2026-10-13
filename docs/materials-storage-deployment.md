@@ -320,7 +320,11 @@ EOF
     升级窗口内（Host 先升），命中谓词（无 hash 且有 etag 的材料输入）
     的任务对旧 Worker 不可领（留队列等升级，不落失败）；hash 行与
     etag='' 存量行不受门禁。升级顺序与矩阵见 remote-execution-runbook.md
-    §5。
+    §5。存量行身份（codex r8）：`object_etag=''` 的 ready 行由
+    materials TTL sweeper 线程的启动回填逐行 HEAD + CAS 建立 ETag 身份
+    （幂等可重入，未清空按 sweep 间隔重试）；升级前已被毒化的行回填到
+    的是毒化 etag（既成事实无机制可分辨，只能靠 repair 重传）——回填
+    关闭的是升级后的新窗口。
   - 孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已
     不存在的测试 bucket）由 `scripts/report-orphan-s3-buckets.py`
     报告（只报不删，逐个给出 `clean-worktree.sh` 收尾命令）。

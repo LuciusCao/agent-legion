@@ -3,6 +3,12 @@
 Split from :mod:`material_ttl` (budget): the sweep functions are the
 unit-testable core; this thread mirrors JobArtifactMaintenanceThread's loop
 discipline around them.
+
+Also carries the #1279 codex r8 startup backfill of ``materials.object_etag``
+（存量 ready 行的 ETag 身份建立，语义见 material_etag_backfill.py）：
+线程启动即跑一次（不等首个 interval——升级窗口要尽早关闭），未清空
+（存储故障等零进展）则每个 sweep 间隔重试；sweeper 副本单实例运行，
+无多副本并发问题。
 """
 
 from __future__ import annotations
@@ -11,6 +17,7 @@ import logging
 import threading
 
 from server.app.db.dialect import ConnectSource
+from server.app.services.material_etag_backfill import backfill_legacy_material_etags
 from server.app.services.material_ttl import (
     DEFAULT_SWEEP_INTERVAL_SECONDS,
     collect_expired_materials,
@@ -25,7 +32,8 @@ class MaterialTtlSweeperThread:
     """Slow-cadence driver; mirrors JobArtifactMaintenanceThread's discipline.
 
     The first run happens after one full interval: the sweep is low-urgency
-    and a boot-time scan only competes with startup work.
+    and a boot-time scan only competes with startup work.（例外：etag 回填
+    在启动时立即跑，见模块 docstring。）
     """
 
     def __init__(
@@ -41,12 +49,26 @@ class MaterialTtlSweeperThread:
         self._interval_seconds = interval_seconds
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._backfill_done = False
 
     def start(self) -> None:
         if self._thread is not None:
             return
         self._thread = threading.Thread(target=self._loop, name="material-ttl-sweeper", daemon=True)
         self._thread.start()
+
+    def _run_backfill(self) -> None:
+        """#1279 codex r8：存量 ready 行 object_etag 回填（一次性收口）。
+
+        无存储 = 无材料特性（run_once 同前提），标记完成不再重试。
+        """
+        if self._storage is None:
+            self._backfill_done = True
+            return
+        stats = backfill_legacy_material_etags(self._dsn, self._storage)
+        self._backfill_done = bool(stats["done"])
+        if stats["bound"] or stats["missing"] or stats["failed"] or stats["cas_lost"]:
+            logger.info("material etag backfill pass: %s", stats)
 
     def run_once(self) -> None:
         # No object storage means no materials feature: rows can only reach
@@ -61,8 +83,11 @@ class MaterialTtlSweeperThread:
             logger.info("materials TTL sweep collected %d material(s)", deleted)
 
     def _loop(self) -> None:
+        self._run_backfill()  # etag 回填启动即跑（升级窗口尽早关闭）
         while not self._stop_event.wait(self._interval_seconds):
             try:
+                if not self._backfill_done:
+                    self._run_backfill()
                 self.run_once()
             except Exception:
                 # #204 broad-except audit: the sweeper thread's life support

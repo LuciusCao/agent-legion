@@ -383,7 +383,11 @@ content_hash 的行它是唯一的内容身份，关闭「已签发 URL 的 1h �
 携带 `object_etag`，memory-only 不落 manifest），不一致即 MaterializeError 不落缓存；
 cache hit 不重验（填充时已验）。complete 的 sha256 流读同样携带刚 HEAD 到的 ETag 作
 If-Match（codex P1：HEAD 与读取之间对象被复用 URL 换掉时按核验失败处理，绝不把旧快照的
-ETag 与新字节一起落 ready）。存量行 `object_etag=''` 永久豁免（维持 size-only 语义），
+ETag 与新字节一起落 ready）。存量行 `object_etag=''` 是过渡态——启动后台回填
+（`material_etag_backfill`，挂在 materials TTL sweeper 线程上，启动即跑、幂等可重入、
+CAS 落库）逐行建立身份；回填完成前维持 size-only 现状放行（瞬态窗口，codex r8）。
+语义边界：升级前已被毒化的行，回填到的是毒化 etag——既成事实无机制可分辨（只能靠
+repair 重传）；回填关闭的是升级之后的新窗口。
 新旧 Server 方向兼容（纯增量可选字段，Worker 按缺失回落）；**旧 Worker（协议 < v6）
 方向是门禁语义**：命中 ETag 谓词（无 hash 且有 etag）的材料任务对旧 Worker 不可领——
 claim admission 跳过、留队列不落失败，Worker 升级后恢复（见 shared/protocol.py v6 条目
