@@ -173,6 +173,39 @@ def test_open_download_sends_if_match_header_and_maps_412(monkeypatch: pytest.Mo
     assert sent[-1]["headers"] == {}
 
 
+def test_hashless_address_follows_generation_with_legacy_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1279 codex r6：无 hash 材料的缓存地址带代次（代次即身份）——
+    代次推进（repair）后不再命中旧地址、重新下载；旧 Server 描述符无
+    upload_generation 字段 → 回落裸 material_id（既有形态）。"""
+    urls = _fake_download(monkeypatch)
+    block_no_hash = _material_block(content_hash="", upload_generation=0)
+
+    first = materialize_claim_material(
+        _manifest_with_material(block_no_hash), tmp_path / "work" / "exec-1"
+    )
+    assert first is not None
+    assert Path(first["path"]).name == "mat-w1-v2g0"
+    assert len(urls) == 1
+
+    # 代次推进（修复后）：新地址、重新下载。
+    second = materialize_claim_material(
+        _manifest_with_material(_material_block(content_hash="", upload_generation=1)),
+        tmp_path / "work" / "exec-2",
+    )
+    assert second is not None
+    assert Path(second["path"]).name == "mat-w1-v2g1"
+    assert len(urls) == 2
+
+    # 旧 Server（描述符无 upload_generation）→ 裸 material_id 地址。
+    legacy = _material_block(content_hash="")
+    legacy.pop("upload_generation", None)
+    third = materialize_claim_material(_manifest_with_material(legacy), tmp_path / "w2" / "exec-3")
+    assert third is not None
+    assert Path(third["path"]).name == "mat-w1"
+
+
 def test_sandbox_argv_grants_static_cache_root(tmp_path: Path) -> None:
     cache_root = tmp_path / MATERIALS_CACHE_DIRNAME
     argv = build_sandbox_argv(

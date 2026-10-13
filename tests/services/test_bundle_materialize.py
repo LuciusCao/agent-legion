@@ -180,6 +180,47 @@ def test_claim_block_presigns_each_member_without_storage_key(job_db, bundle, st
     assert "storage_key" not in json.dumps(block)
 
 
+def test_bundle_member_address_follows_generation(job_db, storage, tmp_path: Path) -> None:
+    """#1279 codex r6（Host bundle 成员同格）：无 hash 成员的缓存地址带
+    代次——成员代次推进后地址变化、重新下载，树地址随成员地址联动变化。"""
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name)"
+            " values (%s, 'BundleCache') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+        conn.execute(
+            "insert into materials(id, workspace_id, content_hash, filename,"
+            " content_type, size_bytes, storage_key, status)"
+            " values ('mat-h', %s, '', 'h.txt', 'text/plain', 4, %s, 'ready')",
+            (WORKSPACE_ID, f"{WORKSPACE_ID}/mat-h/g0/mat-h/h.txt"),
+        )
+    storage.objects[f"{WORKSPACE_ID}/mat-h/g0/mat-h/h.txt"] = b"hash"
+    service = MaterialBundlesService(job_db.dsn_identity)
+    bundle = service.create(
+        WORKSPACE_ID, name="folder", members=[{"material_id": "mat-h", "path": "h.txt"}]
+    )
+
+    block = bundle_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+    )
+    assert block is not None
+    first_tree = block["path"]
+    assert (tmp_path / "ma" / "mat-h-v2g0").is_file()
+    assert storage.opened == 1
+
+    # 成员代次推进（修复语义）：地址变化 → 重新下载，树地址联动变化。
+    with job_db.connect() as conn:
+        conn.execute("update materials set upload_generation=1 where id='mat-h'")
+    again = bundle_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+    )
+    assert again is not None
+    assert again["path"] != first_tree
+    assert (tmp_path / "ma" / "mat-h-v2g1").is_file()
+    assert storage.opened == 2, "代次推进后不得命中旧 gen 地址"
+
+
 def test_runtime_block_detects_member_overwrite_via_etag(
     job_db, bundle, storage, tmp_path: Path
 ) -> None:

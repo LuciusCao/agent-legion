@@ -384,7 +384,11 @@ content_hash 的行它是唯一的内容身份，关闭「已签发 URL 的 1h �
 cache hit 不重验（填充时已验）。complete 的 sha256 流读同样携带刚 HEAD 到的 ETag 作
 If-Match（codex P1：HEAD 与读取之间对象被复用 URL 换掉时按核验失败处理，绝不把旧快照的
 ETag 与新字节一起落 ready）。存量行 `object_etag=''` 永久豁免（维持 size-only 语义），
-新旧 Server/Worker 互兼容（纯增量可选字段）。恢复面（codex r4/r5 族）：ETag 失配的
+新旧 Server/Worker 互兼容（纯增量可选字段）。缓存寻址（codex r6）：hash 行内容寻址不变；
+无 hash 行地址带上传代次（`{material_id}-v2g{代次}`，代次即身份）——repair 代次 +1 后
+旧 gen 地址自然孤儿化，修复前（可能被旧 Worker 无核验缓存的）毒化字节不再命中；
+代次来源与消费读取的行快照同一份（Host dispatch 现读行 / Worker claim 描述符与 presigned
+URL 同行），旧 Server 描述符无代次字段时回落裸 id。恢复面（codex r4/r5 族）：ETag 失配的
 ready 行经 `scripts/request_material_reupload.py` 修复——翻回 uploading、代次 +1、轮换
 v2g key 并为**原行**签发受代次保护的重传 URL（hash/无 hash 统一由原 material_id 愈合，
 历史 job 按 material_id 消费重传后的新对象）；S3 快照恢复（aws s3 cp 改变大行 ETag）后

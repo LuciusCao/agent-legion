@@ -22,6 +22,7 @@ from shared.material_cache import (
     MATERIALS_CACHE_DIRNAME,
     MaterializeError,
     cache_file_path,
+    material_cache_address,
     materialize_stream,
 )
 from worker.material_fetch import _open_download
@@ -46,9 +47,12 @@ def materialize_claim_bundle(material: Mapping[str, Any], execution_dir: Path) -
             raise MaterializeError("claim bundle entry is incomplete")
         content_hash = str(entry.get("content_hash") or "")
         object_etag = str(entry.get("object_etag") or "")
+        generation = entry.get("upload_generation")
+        generation = int(generation) if isinstance(generation, (int, float)) else None
         size = entry.get("size_bytes")
         expected_size = int(size) if isinstance(size, (int, float)) else None
-        address = content_hash or member_id
+        # 无 hash 成员：地址带代次（#1279 codex r6，与单材料同规则）。
+        address = material_cache_address(member_id, content_hash, generation)
         parsed.append((address, url, relpath, content_hash, object_etag, expected_size))
         manifest.append((address, relpath))
     tree_address = bundle_address(manifest)

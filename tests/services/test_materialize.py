@@ -201,7 +201,7 @@ def test_runtime_block_detects_post_complete_overwrite_via_etag(
 
     with pytest.raises(MaterializeError, match="ETag mismatch"):
         material_runtime_block(job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage)
-    assert not (tmp_path / "ma" / "mat-nh").exists(), "毒化字节不得落缓存"
+    assert not (tmp_path / "ma" / "mat-nh-v2g0").exists(), "毒化字节不得落缓存"
 
     # 恢复正确字节（ETag 重新匹配）后正常物化。
     storage.objects[key] = payload
@@ -211,8 +211,59 @@ def test_runtime_block_detects_post_complete_overwrite_via_etag(
     assert block is not None and Path(block["path"]).read_bytes() == payload
 
 
+def test_hashless_cache_address_follows_repair_generation(job_db, storage, tmp_path: Path) -> None:
+    """codex r6 场景转正：无 hash 行的缓存地址 = material_id + 代次——修复
+    （代次 +1）后旧 gen 地址的（毒化）缓存不再命中，消费走 verified opener
+    重新下载。mutation 互证：摘代次段（裸 id 取址）→ 本测试红（毒化字节
+    被旧地址命中返回）。"""
+    from server.app.services.materials import MaterialsService
+
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'MatCache') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+    service = MaterialsService(job_db.dsn_identity, storage)
+    payload = b"goodbyte"
+    result = service.presign(WORKSPACE_ID, filename="f.bin", size_bytes=len(payload))
+    material_id = result["material"]["id"]
+    (key0, _) = storage.presigned[0]
+    storage.objects[key0] = payload
+    service.complete(WORKSPACE_ID, material_id)
+    job = _job({"type": "material", "material_id": material_id})
+
+    block = material_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage
+    )
+    assert block is not None
+    first_path = Path(block["path"])
+    assert first_path.name == f"{material_id}-v2g0"
+    assert storage.opened == 1
+
+    # 模拟 codex 场景：旧 gen 地址的缓存里是被毒化的字节（旧 Worker 无核验
+    # 缓存的残留），对象也被同尺寸覆盖。
+    first_path.write_bytes(b"poisoned")  # 同长（8 字节）
+    storage.objects[key0] = b"poisoned"
+
+    # 修复 + 用签发 URL 重传 + complete(代次)。
+    outcome = service.request_material_reupload(WORKSPACE_ID, material_id)
+    storage.objects[str(outcome["storage_key"])] = payload
+    service.complete(WORKSPACE_ID, material_id, expected_upload_generation=1)
+
+    again = material_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage
+    )
+    assert again is not None
+    second_path = Path(again["path"])
+    assert second_path.name == f"{material_id}-v2g1"
+    assert second_path != first_path
+    assert second_path.read_bytes() == payload
+    assert storage.opened == 2, "代次推进后不得命中旧 gen 地址"
+
+
 def test_claim_block_carries_object_etag(job_db, material, storage) -> None:
-    """#1279：claim 描述符携带行记录的 object_etag（Worker 侧 If-Match 核验）。"""
+    """#1279：claim 描述符携带行记录的 object_etag（Worker 侧 If-Match 核验）
+    与 upload_generation（无 hash 行缓存寻址的代次段，与 URL 同行快照）。"""
     with job_db.connect() as conn:
         conn.execute("update materials set object_etag='etag-1' where id=%s", (material,))
 
@@ -225,6 +276,7 @@ def test_claim_block_carries_object_etag(job_db, material, storage) -> None:
 
     assert block is not None
     assert block["object_etag"] == "etag-1"
+    assert block["upload_generation"] == 0
 
 
 def test_runtime_block_facade_passthrough_no_getattr_escape(

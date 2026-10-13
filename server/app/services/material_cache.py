@@ -24,7 +24,11 @@ from server.app.db.dialect import ConnectSource
 from server.app.db.rowmap import parse_object
 from server.app.db.transaction import read_connection
 from server.app.storage import ObjectStorage, build_s3_storage, is_precondition_failed
-from shared.material_cache import MaterializeError, materialize_stream
+from shared.material_cache import (
+    MaterializeError,
+    material_cache_address,
+    materialize_stream,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +138,9 @@ def material_runtime_block(
     size_bytes = int(row.get("size_bytes") or 0)
     object_etag = str(row.get("object_etag") or "")
     # Content addressing dedups downloads across jobs of the same material;
-    # hashless rows fall back to their (unique) id.
-    address = content_hash or material_id
+    # hashless rows address by id + upload generation (#1279 codex r6：修复
+    # 代次 +1 后旧地址自然孤儿化，毒化缓存不再命中）。
+    address = material_cache_address(material_id, content_hash, int(row["upload_generation"]))
     try:
         path = materialize_stream(
             cache_root,
@@ -243,9 +248,13 @@ def material_claim_block(
         "size_bytes": int(row.get("size_bytes") or 0),
         "content_hash": str(row.get("content_hash") or ""),
         # #1279：行记录的 ETag 随描述符下发（memory-only，不落 manifest）；
-        # Worker 对 presigned GET 带 If-Match 核验。旧 Worker 忽略此字段，
-        # 旧 Server 不下发（Worker 按空值跳过）——双向兼容。
+        # Worker 对 presigned GET 带 If-Match 核验。upload_generation 参与
+        # 无 hash 行的缓存寻址（代次即身份，见 material_cache_address）——
+        # 与 download_url 取自同一行快照，地址代次与 URL key 代次恒一致。
+        # 旧 Worker 忽略此字段，旧 Server 不下发（Worker 按缺失回落裸 id）
+        # ——双向兼容。
         "object_etag": str(row.get("object_etag") or ""),
+        "upload_generation": int(row["upload_generation"]),
         "download_url": storage.presign_get(
             str(row["storage_key"]), expires_seconds=download_expires_seconds
         ),
