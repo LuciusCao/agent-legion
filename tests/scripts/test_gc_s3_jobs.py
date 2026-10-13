@@ -161,15 +161,11 @@ def material_shaped_key(key):
 
 def material_key_single_use(key):
     # 镜像 s3_jobs_gc.material_key_single_use 的单次使用文法门禁（#1279：
-    # g 段后第 4 段为 32 位小写 hex material_id）；真实实现由
+    # g 段后第 4 段为 m_ 标记 + 32 位小写 hex material_id）；真实实现由
     # tests/services/test_s3_jobs_gc.py 钉住。
     segments = key.split("/")
-    return (
-        material_shaped_key(key)
-        and len(segments) >= 5
-        and len(segments[3]) == 32
-        and all(c in "0123456789abcdef" for c in segments[3])
-    )
+    mid = segments[3] if material_shaped_key(key) and len(segments) >= 5 else ""
+    return len(mid) == 34 and mid[:2] == "m_" and all(c in "0123456789abcdef" for c in mid[2:])
 
 
 def split_material_orphans(orphans):
@@ -369,11 +365,13 @@ def test_material_root_prefix_orphans_split_by_key_grammar(tmp_path: Path):
     tests/services/test_s3_jobs_gc.py 钉住），桩提供对象清单
     （STUB_OBJECTS_JSON）与已知 key 集合（STUB_KNOWN_KEYS_JSON）。"""
     now = time.time()
-    mid = "a" * 32
+    mid = "m_" + "a" * 32
     live_key = f"ws1/hash-live/g0/{mid}/live.txt"
     objects = [
         [f"ws1/hash-old/g0/{mid}/superseded.txt", now - 48 * 3600, 10],  # 新文法孤儿 → 删除批
         ["ws1/hash-old/g0/legacy.txt", now - 48 * 3600, 10],  # 旧文法孤儿 → 只报告
+        # 歧义旧文法（codex P1）：首文件名段恰为 32 位 hex、无 m_ 标记 → 只报告
+        [f"ws1/hash-old/g0/{'a' * 32}/ambiguous.txt", now - 48 * 3600, 10],
         [live_key, now - 48 * 3600, 10],  # 有行：保留
         [f"ws1/hash-new/g0/{mid}/inflight.txt", now - 3600, 10],  # 宽限窗内：保留
         ["jobs/ws1/j1/a.json", now - 48 * 3600, 10],  # jobs/ 前缀：归 scan_orphans
@@ -395,7 +393,7 @@ def test_material_root_prefix_orphans_split_by_key_grammar(tmp_path: Path):
     # 根前缀确实被列举（Prefix="" 即 bucket 根）。
     assert "list_objects agent-legion-dev prefix=\n" in log
     assert "材料孤儿 1 个" in result.stdout  # 新文法 → 进删除批
-    assert "旧文法材料孤儿 1 个" in result.stdout  # 旧文法 → 只报告
+    assert "旧文法材料孤儿 2 个" in result.stdout  # 旧文法 + 歧义形态 → 只报告
     assert "只报告不删除" in result.stdout
     # --apply：删除批 = jobs 报告桩的 1+1 + 新文法材料孤儿 1。
     assert "已删除 3 个" in result.stdout
@@ -438,11 +436,11 @@ def test_material_root_scan_pages_key_existence(tmp_path: Path):
 
 def test_collision_namespace_material_keys_split_by_grammar(tmp_path: Path):
     """#1282 r4 P1 + #1279：workspace id 字面为 jobs / jobs-staging 时材料
-    key（{ws}/{hash}/g{代次}/[{material_id}/]{filename}）落在 jobs 前缀扫描
+    key（{ws}/{hash}/g{代次}/[m_{material_id}/]{filename}）落在 jobs 前缀扫描
     内——删除批组装前按材料形态文法（第 3 段 g{数字}）分流进材料孤儿集合，
     再按单次使用文法分流：新文法进删除批，旧文法只报告。真 job 产物第 3 段
     是 job id（恒含下划线、永不匹配 g{数字}），不误伤、留在删除批。"""
-    mid = "a" * 32
+    mid = "m_" + "a" * 32
     extra = [
         f"jobs/{'a' * 64}/g0/doc.txt",  # 旧文法撞名材料 key → 只报告
         f"jobs-staging/{'b' * 64}/g2/d.txt",  # 旧文法撞名材料 key → 只报告
@@ -480,7 +478,7 @@ def test_collision_namespace_rollback_segment_material_key_is_report_only(tmp_pa
     对该形态的归并。"""
     extra = [
         f"jobs-staging/{'d' * 64}/g2/dir/.rollback/file.bin",  # 旧文法撞名材料 key（含 .rollback 段）→ 只报告
-        f"jobs-staging/{'d' * 64}/g2/{'e' * 32}/dir/.rollback/file.bin",  # 新文法 → 删除批
+        f"jobs-staging/{'d' * 64}/g2/m_{'e' * 32}/dir/.rollback/file.bin",  # 新文法 → 删除批
     ]
     pystub = _make_pystub(tmp_path, _STORAGE_PROBE_CONFIGURED)
 

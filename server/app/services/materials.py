@@ -13,6 +13,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from botocore.exceptions import ClientError
+
 from server.app.db.dialect import ConnectSource
 from server.app.db.rowmap import iso_optional
 from server.app.db.transaction import read_connection, write_transaction
@@ -30,7 +32,7 @@ from server.app.services.material_key_validation import (
     verify_stored_object,
 )
 from server.app.services.material_ttl import mark_ready
-from server.app.storage import ObjectStorage
+from server.app.storage import ObjectStorage, is_precondition_failed
 
 _PRESIGN_EXPIRY_SECONDS = 3600
 _DEFAULT_LIST_LIMIT = 50
@@ -114,17 +116,19 @@ class MaterialsService:
         (upload dedup, no URL); a stale uploading/failed row with the same
         hash is reset to uploading so the upload can be retried. Object keys
         live in a per-generation, per-row namespace the client's filename
-        cannot forge (``{ws}/{hash|id}/g{generation}/{material_id}/{filename}``,
+        cannot forge (``{ws}/{hash|id}/g{generation}/m_{material_id}/{filename}``,
         first issue included); every retry bumps ``upload_generation``
         (schema v97) and moves the row to that generation's key, so a
         same-size retry stays visible to complete()'s locked identity
         recheck and every previously issued PUT URL points at a dead key —
         bytes can never be overwritten across generations (#1267 codex
-        R3/R4/R5 P1). The ``material_id`` segment (#1279, schema v98) makes
-        every key single-use across row lifecycles: deleting the row and
-        re-uploading the same file under the same name can never reproduce
-        the key, which is what lets the S3 orphan GC delete new-grammar
-        material keys (``material_key_single_use`` in s3_jobs_gc).
+        R3/R4/R5 P1). The ``m_{material_id}`` marker segment (#1279, schema
+        v98; marker prefix disambiguates from old-grammar keys whose first
+        filename segment is 32-hex, codex P1) makes every key single-use
+        across row lifecycles: deleting the row and re-uploading the same
+        file under the same name can never reproduce the key, which is what
+        lets the S3 orphan GC delete marker-grammar material keys
+        (``material_key_single_use`` in s3_jobs_gc).
         Pre-namespace rows (no ``g`` segment) keep their keys untouched
         until their first retry.
         """
@@ -144,7 +148,7 @@ class MaterialsService:
             if row is None:
                 material_id = uuid.uuid4().hex
                 storage_key = (
-                    f"{workspace_id}/{content_hash or material_id}/g0/{material_id}/{filename}"
+                    f"{workspace_id}/{content_hash or material_id}/g0/m_{material_id}/{filename}"
                 )
                 insert_sql = """
                     insert into materials(
@@ -202,7 +206,7 @@ class MaterialsService:
                         set filename=%s, content_type=%s, size_bytes=%s,
                           status='uploading', upload_generation = upload_generation + 1,
                           storage_key = %s || '/g' || (upload_generation + 1)
-                            || '/' || %s || '/' || %s
+                            || '/m_' || %s || '/' || %s
                         where id=%s
                         returning storage_key
                         """,
@@ -306,8 +310,16 @@ class MaterialsService:
     def _verify_object(self, storage: ObjectStorage, row: dict[str, Any]) -> tuple[str | None, str]:
         """(Failure detail or None, object ETag); logic lives in
         material_key_validation (file-budget split) — this method stays as
-        the tests' injection seam."""
-        return verify_stored_object(storage, row)
+        the tests' injection seam. An If-Match 412 (#1279 codex P1: object
+        swapped between the HEAD and the hash read by a reused PUT URL) is a
+        verification failure — the row flips to failed for a client retry,
+        never ready with a stale ETag."""
+        try:
+            return verify_stored_object(storage, row)
+        except ClientError as exc:
+            if not is_precondition_failed(exc):
+                raise
+            return f"Uploaded object changed during verification of material {row['id']}", ""
 
     def list(self, workspace_id: str, *, limit: int, offset: int) -> dict[str, Any]:
         limit = max(1, min(limit or _DEFAULT_LIST_LIMIT, _MAX_LIST_LIMIT))

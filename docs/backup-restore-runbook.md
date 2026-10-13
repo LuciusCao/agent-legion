@@ -307,8 +307,8 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
 末尾为 `/` 的 key 被当作目录，只差大小写的 key 在不区分大小写的文件系统上互相覆盖。
 这类不一致让备份失败，而不是让恢复时的「清空 bucket」变成不可逆丢失。产物 key 不以
 `/` 结尾（产物名不含 `/`：`job_artifact_objects.py` 的 `valid_artifact_name`）；材料 key
-为 `{workspace_id}/{hash}/g{代次}/{material_id}/{filename}`（首发即 g0，代次段让上传能力随
-重试失效，material_id 唯一段（#1279）让 key 跨行不可复用；更早的
+为 `{workspace_id}/{hash}/g{代次}/m_{material_id}/{filename}`（首发即 g0，代次段让上传能力随
+重试失效，m_ 标记的 material_id 唯一段（#1279）让 key 跨行不可复用且对 GC 门禁无歧义；更早的
 存量行无代次段、key 不可变，旧代次对象成为孤儿，由 GC/bucket lifecycle 回收；
 `scripts/gc-s3-jobs.py` 的材料根前缀扫描（#1269）对新文法 key 已并入删除批、旧文法
 key 只报告（#1279），#1267），材料 API 拒绝目录形态与下载时不可归一化的

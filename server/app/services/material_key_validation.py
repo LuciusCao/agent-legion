@@ -1,9 +1,9 @@
 """Validation for the material upload declaration (#1119, #1267).
 
 The material storage key is
-``{workspace_id}/{content_hash|material_id}/g{upload_generation}/{material_id}/{filename}``
-(the trailing ``material_id`` segment, #1279, makes every key single-use
-across row lifecycles);
+``{workspace_id}/{content_hash|material_id}/g{upload_generation}/m_{material_id}/{filename}``
+(the ``m_``-marked material_id segment, #1279, makes every key single-use
+across row lifecycles and unambiguous to the GC grammar gate);
 the workspace segment is safe by contract (schema v62 id rules), while
 ``filename`` and ``content_hash`` come from the presign request and are pinned
 here before any row write or presign. The same declaration is re-verified at
@@ -99,6 +99,12 @@ def verify_stored_object(storage: ObjectStorage, row: dict[str, Any]) -> tuple[s
     后的同尺寸静默覆盖。对象缺失/核验失败时 ETag 为空串（不落库）。
     调用方负责落库前的锁内身份复查
     （jobs/queries/material_locked_rereads）。
+
+    sha256 流读携带刚 HEAD 到的 ETag 作 If-Match（#1279 codex P1）：同一
+    未过期 presigned PUT URL 在 complete 期间被二次使用、对象在 HEAD 与
+    读取之间被换掉时，412 由调用方（materials._verify_object）折算为
+    核验失败——绝不把旧快照的 ETag 与新字节一起落 ready（否则记录了
+    失效 ETag 的 ready 行会让所有消费侧 cache miss 永久 412）。
     """
     head = storage.head_object(str(row["storage_key"]))
     if head is None:
@@ -110,7 +116,7 @@ def verify_stored_object(storage: ObjectStorage, row: dict[str, Any]) -> tuple[s
     if not content_hash:
         return None, head.etag
     digest = hashlib.sha256()
-    stream = storage.open_stream(str(row["storage_key"]))
+    stream = storage.open_stream(str(row["storage_key"]), if_match=head.etag)
     while chunk := stream.read(_HASH_CHUNK_BYTES):
         digest.update(chunk)
     actual = digest.hexdigest()

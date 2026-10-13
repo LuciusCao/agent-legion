@@ -23,7 +23,7 @@ from botocore.exceptions import ClientError
 from server.app.db.dialect import ConnectSource
 from server.app.db.rowmap import parse_object
 from server.app.db.transaction import read_connection
-from server.app.storage import ObjectStorage, build_s3_storage
+from server.app.storage import ObjectStorage, build_s3_storage, is_precondition_failed
 from shared.material_cache import MaterializeError, materialize_stream
 
 logger = logging.getLogger(__name__)
@@ -43,8 +43,7 @@ def open_verified_stream(
     try:
         return storage.open_stream(storage_key, if_match=object_etag)
     except ClientError as exc:
-        code = str(exc.response.get("Error", {}).get("Code", ""))
-        if code in ("412", "PreconditionFailed"):
+        if is_precondition_failed(exc):
             raise MaterializeError(
                 f"{label} bytes changed after completion (ETag mismatch); re-upload the material"
             ) from exc

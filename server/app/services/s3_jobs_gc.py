@@ -104,7 +104,7 @@ def scan_orphans(
 
     两个前缀都经 ``key_exists`` 对照（系统性评审 P1，#344）：materials
     的 key 以 workspace id 起手（``{workspace_id}/{hash|id}/g{代次}/
-    [{material_id}/]{filename}``），workspace id 允许叫
+    [m_{material_id}/]{filename}``），workspace id 允许叫
     ``jobs`` / ``jobs-staging``（无保留名约束），那样的材料 key 会落进
     这两个前缀——staging 不能只看宽限窗无条件回收，否则撞名 workspace
     的材料会被整批误删。authority 侧按页攒批只是有界化每次传给
@@ -152,8 +152,8 @@ def orphans_in_page(
 def material_shaped_key(key: str) -> bool:
     """碰撞命名空间里的材料 key 形态（#1282 r4 P1）：第 3 段是 g{代次}。
 
-    材料 key 为 ``{workspace_id}/{hash|material_id}/g{代次}/[{material_id}/]{filename}``
-    （#1279 起新文法在 g 段后带 material_id 唯一段，两种形态本判定都匹配）；
+    材料 key 为 ``{workspace_id}/{hash|material_id}/g{代次}/[m_{material_id}/]{filename}``
+    （#1279 起新文法在 g 段后带 m_ 标记的行 id 唯一段，两种形态本判定都匹配）；
     workspace id 可字面为 jobs / jobs-staging（无保留名约束），那样的材料
     key 落在 jobs 前缀扫描内。真 job 产物同位置是 job id
     （``{ws}_{workflow_key}_{source_id}``，恒含下划线），永不匹配
@@ -167,24 +167,25 @@ def material_shaped_key(key: str) -> bool:
 def material_key_single_use(key: str) -> bool:
     """#1279 新文法的材料 key 跨行不可复用 → 可进 GC 删除批。
 
-    形态：``{ws}/{hash|id}/g{代次}/{material_id}/{filename}``——g 段后的
-    第 4 段是行 id（uuid4 hex，32 位小写十六进制），删行后同文件同名再
-    上传也必得新 key，revalidate→删 窗口随之构造性关闭。旧文法
-    （无 material_id 段的 g key、legacy 无 g 段 key、inline-{uuid4} key）
-    与混合版本窗口内仍可能被旧写端复用的形态一律排除——保持只报告，
-    由 bucket lifecycle/TTL 排空。本判定与 materials.py / run_text_batch.py
-    / demo_material_seed.py 三条产线（以及 ``material_shaped_key`` 碰撞
-    分流面）的 key 文法必须同步演进。
+    形态：``{ws}/{hash|id}/g{代次}/m_{material_id}/{filename}``——g 段后的
+    第 4 段是 ``m_`` 前缀 + 行 id（uuid4 hex，32 位小写十六进制），删行后
+    同文件同名再上传也必得新 key，revalidate→删 窗口随之构造性关闭。
+    旧文法（无标记段的 g key、legacy 无 g 段 key、inline-{uuid4} key）一律
+    排除——保持只报告，由 bucket lifecycle/TTL 排空。本判定与
+    materials.py / run_text_batch.py / demo_material_seed.py 三条产线
+    （以及 ``material_shaped_key`` 碰撞分流面）的 key 文法必须同步演进。
 
-    已知残余（明示接受）：旧文法且首文件名段恰为 32 位小写 hex 的 key
-    在形态上不可区分（位置同 material_id 段）——该形态会被当作新文法
-    进删除批；其安全网是 apply_gc 的删除前新鲜反查（行已重建即救下），
-    残余窗口与 #344 已接受的 revalidate→删 亚秒窗同类，且要求混合版本
-    旧写端 + 32-hex 目录段文件名同时成立。
+    歧义排除（#1279 codex P1）：``m_`` 标记段使「旧文法 key + 首文件名段
+    恰为 32 位 hex」的形态（``ws/hash/g0/<32hex>/file``）不再误判为单次
+    使用——那种 key 无 ``m_`` 前缀，保持只报告。旧写端要产出标记形态须
+    用户文件名首段恰为 ``m_<32hex>``（35 字节、非自然命名），且材料 key
+    写端全在 Host 单副本后端（presign/inline/demo seed 都在 server 侧，
+    Worker 不写材料 key），混合版本窗口 = 单副本部署重启的分钟级；叠加
+    apply_gc 的删除前新鲜反查，残余风险落到 #344 已接受的亚秒窗之内。
     """
     segments = key.split("/")
     mid = segments[3] if material_shaped_key(key) and len(segments) >= 5 else ""
-    return len(mid) == 32 and all(char in "0123456789abcdef" for char in mid)
+    return len(mid) == 34 and mid[:2] == "m_" and all(c in "0123456789abcdef" for c in mid[2:])
 
 
 def split_material_orphans(
@@ -332,9 +333,9 @@ def apply_gc(
     # jobs/ 与 jobs-staging/ 前缀（#1285）且排除材料形态 key（#1295）：材
     # 料 key 的文件名可含合法 .rollback 段（dir/.rollback/file.bin），并
     # 入删除批时不得继承本豁免被永久跳过。
-    # #1279 同型纵深：材料删除批只收单次使用文法 key（material_id 唯一段，
-    # 跨行不可复用），门禁同样钉在删除动作本身——手工构造的报告把旧文法
-    # （可复用）材料 key 塞进 material_orphans 也不会被删。
+    # #1279 同型纵深：材料删除批只收单次使用文法 key（m_ 标记的行 id 唯一
+    # 段，跨行不可复用），门禁同样钉在删除动作本身——手工构造的报告把旧
+    # 文法（可复用）材料 key 塞进 material_orphans 也不会被删。
     authority_orphans = [e for e in report.authority_orphans if not _rollback_backup_exempt(e.key)]
     staging_orphans = [e for e in report.staging_orphans if not _rollback_backup_exempt(e.key)]
     material_orphans = [e for e in report.material_orphans if material_key_single_use(e.key)]

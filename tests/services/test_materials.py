@@ -48,7 +48,7 @@ def test_presign_creates_uploading_row_and_url(service, storage) -> None:
     assert result["deduplicated"] is False
     # Storage key layout: {workspace_id}/{content_hash}/g{upload_generation}/{material_id}/{filename}.
     (presigned_key, expiry) = storage.presigned[0]
-    assert presigned_key == f"{WORKSPACE_ID}/{digest}/g0/{material['id']}/a.txt"
+    assert presigned_key == f"{WORKSPACE_ID}/{digest}/g0/m_{material['id']}/a.txt"
     assert expiry == 3600
 
 
@@ -57,7 +57,7 @@ def test_presign_without_hash_uses_material_id_in_key(service, storage) -> None:
 
     (presigned_key, _) = storage.presigned[0]
     material_id = result["material"]["id"]
-    assert presigned_key == f"{WORKSPACE_ID}/{material_id}/g0/{material_id}/b.bin"
+    assert presigned_key == f"{WORKSPACE_ID}/{material_id}/g0/m_{material_id}/b.bin"
     assert result["material"]["content_hash"] == ""
 
 
@@ -99,7 +99,7 @@ def test_deleted_row_key_is_never_reused(service, storage) -> None:
     assert second["deduplicated"] is False
     (second_key, _) = storage.presigned[1]
     assert second_key != first_key
-    assert second_key == (f"{WORKSPACE_ID}/{digest}/g0/{second['material']['id']}/same.txt")
+    assert second_key == (f"{WORKSPACE_ID}/{digest}/g0/m_{second['material']['id']}/same.txt")
 
 
 def test_presign_resets_failed_row_for_retry(service, storage) -> None:
@@ -200,7 +200,7 @@ def test_presign_retry_rebuilds_invalid_legacy_key(service, storage, job_db) -> 
     assert retry["material"]["id"] == "mat-legacy"
     assert retry["material"]["status"] == "uploading"
     (presigned_key, _) = storage.presigned[0]
-    assert presigned_key == f"{WORKSPACE_ID}/{digest}/g1/mat-legacy/ok.txt"
+    assert presigned_key == f"{WORKSPACE_ID}/{digest}/g1/m_mat-legacy/ok.txt"
     assert _storage_key_of(job_db, "mat-legacy") == presigned_key
 
 
@@ -221,7 +221,7 @@ def test_presign_retry_moves_to_current_generation_key(service, storage, job_db)
 
     assert retry["material"]["id"] == "mat-legacy-ok"
     (presigned_key, _) = storage.presigned[0]
-    assert presigned_key == f"{WORKSPACE_ID}/{digest}/g1/mat-legacy-ok/old.txt"
+    assert presigned_key == f"{WORKSPACE_ID}/{digest}/g1/m_mat-legacy-ok/old.txt"
     assert _storage_key_of(job_db, "mat-legacy-ok") == presigned_key
     assert retry["material"]["filename"] == "old.txt"
 
@@ -240,9 +240,9 @@ def test_presign_retry_bumps_upload_generation(service, storage, job_db) -> None
     assert _generation_of(job_db, material_id) == 2
     # R4：每代 key 独立——两次重试签发的 URL 指向各自的 g{代次} 段
     # （presigned[0] 是首发的第 0 代；#1279 起 g 段后带 material_id 唯一段）。
-    assert storage.presigned[0][0] == f"{WORKSPACE_ID}/{digest}/g0/{material_id}/g.txt"
-    assert storage.presigned[1][0] == f"{WORKSPACE_ID}/{digest}/g1/{material_id}/g.txt"
-    assert storage.presigned[2][0] == f"{WORKSPACE_ID}/{digest}/g2/{material_id}/g.txt"
+    assert storage.presigned[0][0] == f"{WORKSPACE_ID}/{digest}/g0/m_{material_id}/g.txt"
+    assert storage.presigned[1][0] == f"{WORKSPACE_ID}/{digest}/g1/m_{material_id}/g.txt"
+    assert storage.presigned[2][0] == f"{WORKSPACE_ID}/{digest}/g2/m_{material_id}/g.txt"
 
 
 def test_concurrent_retries_derive_key_from_committed_generation(service, storage, job_db) -> None:
@@ -284,7 +284,7 @@ def test_concurrent_retries_derive_key_from_committed_generation(service, storag
     assert outcome == ["ok"]
     assert _generation_of(job_db, material_id) == 6
     (key, _) = storage.presigned[-1]
-    assert key == f"{WORKSPACE_ID}/{digest}/g6/{material_id}/r.txt"
+    assert key == f"{WORKSPACE_ID}/{digest}/g6/m_{material_id}/r.txt"
     assert _storage_key_of(job_db, material_id) == key
 
 
@@ -342,8 +342,8 @@ def test_generation_namespace_unforgeable_by_filename(service, storage) -> None:
     material_id = first["material"]["id"]
     (first_key, _) = storage.presigned[0]
     (retry_key, _) = storage.presigned[1]
-    assert first_key == f"{WORKSPACE_ID}/{digest}/g0/{material_id}/g1/foo"
-    assert retry_key == f"{WORKSPACE_ID}/{digest}/g1/{material_id}/foo"
+    assert first_key == f"{WORKSPACE_ID}/{digest}/g0/m_{material_id}/g1/foo"
+    assert retry_key == f"{WORKSPACE_ID}/{digest}/g1/m_{material_id}/foo"
     assert first_key != retry_key
 
 
@@ -356,7 +356,7 @@ def test_presign_accepts_nested_relative_path(service, storage) -> None:
 
     (presigned_key, _) = storage.presigned[0]
     assert presigned_key == (
-        f"{WORKSPACE_ID}/{digest}/g0/{result['material']['id']}/dir/sub/file.txt"
+        f"{WORKSPACE_ID}/{digest}/g0/m_{result['material']['id']}/dir/sub/file.txt"
     )
     assert result["material"]["filename"] == "dir/sub/file.txt"
 
@@ -397,7 +397,7 @@ def test_list_paginates_newest_first(service, storage) -> None:
 def test_delete_removes_object_and_row(service, storage) -> None:
     result = service.presign(WORKSPACE_ID, filename="j.txt", size_bytes=2)
     material_id = result["material"]["id"]
-    storage_key = f"{WORKSPACE_ID}/{material_id}/g0/{material_id}/j.txt"
+    storage_key = f"{WORKSPACE_ID}/{material_id}/g0/m_{material_id}/j.txt"
     storage.objects[storage_key] = b"ok"
 
     service.delete(WORKSPACE_ID, result["material"]["id"])
@@ -430,7 +430,7 @@ def _insert_job_referencing(job_db, material_id: str, *, status: str = "queued")
 def test_delete_rejects_material_referenced_by_job(service, storage, job_db) -> None:
     result = service.presign(WORKSPACE_ID, filename="k.txt", size_bytes=2)
     material_id = result["material"]["id"]
-    storage_key = f"{WORKSPACE_ID}/{material_id}/g0/{material_id}/k.txt"
+    storage_key = f"{WORKSPACE_ID}/{material_id}/g0/m_{material_id}/k.txt"
     storage.objects[storage_key] = b"ok"
     job_id = _insert_job_referencing(job_db, material_id)
 
@@ -457,7 +457,7 @@ def test_delete_ignores_unrelated_job_inputs(service, storage, job_db) -> None:
     """其他材料的 job 与非 material 输入不阻断删除。"""
     result = service.presign(WORKSPACE_ID, filename="m.txt", size_bytes=2)
     material_id = result["material"]["id"]
-    storage_key = f"{WORKSPACE_ID}/{material_id}/g0/{material_id}/m.txt"
+    storage_key = f"{WORKSPACE_ID}/{material_id}/g0/m_{material_id}/m.txt"
     storage.objects[storage_key] = b"ok"
     _insert_job_referencing(job_db, "other-material")
     with job_db.connect() as conn:
@@ -481,7 +481,7 @@ def test_delete_blocked_by_key_share_sees_committed_reference(service, storage, 
     看到对方已提交的 job → MaterialInUseError，对象与行都保留。"""
     result = service.presign(WORKSPACE_ID, filename="n.txt", size_bytes=2)
     material_id = result["material"]["id"]
-    storage.objects[f"{WORKSPACE_ID}/{material_id}/g0/{material_id}/n.txt"] = b"ok"
+    storage.objects[f"{WORKSPACE_ID}/{material_id}/g0/m_{material_id}/n.txt"] = b"ok"
 
     outcome: list[str] = []
     entered = threading.Event()

@@ -74,11 +74,12 @@ def store_text_batch(
                     )
                 entries[digest] = dict(content_hash=digest, material_id=existing["id"])
                 continue
-            # #1279 key 文法：g 段 + material_id 唯一段（与上传产线同文法），
-            # 跨行不可复用 → GC 删除批对 inline 孤儿开放；inline-{uuid4} 尾段
-            # 保留产线标记。material_id 在此预生成、随 entry 传给 publish。
+            # #1279 key 文法：g 段 + m_{material_id} 标记唯一段（与上传产线
+            # 同文法），跨行不可复用 → GC 删除批对 inline 孤儿开放；
+            # inline-{uuid4} 尾段保留产线标记。material_id 在此预生成、随
+            # entry 传给 publish。
             material_id = uuid.uuid4().hex
-            key = f"{workspace_id}/{digest}/g0/{material_id}/inline-{uuid.uuid4().hex}"
+            key = f"{workspace_id}/{digest}/g0/m_{material_id}/inline-{uuid.uuid4().hex}"
             content_type = text_content_type(filename)
             # Register before PUT: a timeout can occur after the server stored it.
             keys.append(key)

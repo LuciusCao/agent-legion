@@ -6,15 +6,15 @@
 上传路径的孤儿（#1269 格子③）：「已上传后重试」留下的上一代 g{代次} key、
 行已删但对象删除失败的残留。jobs/ 与 jobs-staging/ 的判定与删除逻辑见
 server/app/services/s3_jobs_gc.py；材料根前缀（bucket 根排除两个 jobs 前缀）
-的扫描在本文件（材料 key 形如 {workspace_id}/{hash|id}/g{代次}/[{material_id}/]{filename}，
+的扫描在本文件（材料 key 形如 {workspace_id}/{hash|id}/g{代次}/[m_{material_id}/]{filename}，
 存活对象必有 materials 行——presign 先建行后签发 URL——故与 jobs/ 同手法：
 对照 materials.storage_key 清单行 + 宽限窗）。
-#1279 起材料 key 新文法在 g 段后带 material_id 唯一段：删行后同文件同名再
-上传必得新 key，跨行不可复用，check-then-delete 窗口构造性关闭——新文法
-孤儿重新并入 --apply 删除批（与 jobs/ 同走删除前新鲜反查）；旧文法孤儿
-（混合版本窗口内仍可能被旧写端复用）保持只报告，待 bucket lifecycle/TTL
-排空。文法门禁判定是 s3_jobs_gc.material_key_single_use（删除动作内部还有
-一道同样的纵深闸门）。
+#1279 起材料 key 新文法在 g 段后带 m_ 标记的 material_id 唯一段：删行后
+同文件同名再上传必得新 key，跨行不可复用，check-then-delete 窗口构造性
+关闭——新文法孤儿重新并入 --apply 删除批（与 jobs/ 同走删除前新鲜反查）；
+旧文法孤儿（含无标记段的歧义形态，混合版本窗口内仍可能被旧写端复用）
+保持只报告，待 bucket lifecycle/TTL 排空。文法门禁判定是
+s3_jobs_gc.material_key_single_use（删除动作内部还有一道同样的纵深闸门）。
 DB 侧对照 job_artifacts ∪ materials（须能连上本 worktree 的 Postgres）。
 
 用法:
@@ -38,8 +38,8 @@ if str(ROOT) not in sys.path:
 # 材料形态文法（第 3 段 g{代次}）的权威实现是
 # server/app/services/s3_jobs_gc.py 的 material_shaped_key（#1295 下沉：
 # 扫描期的 /.rollback/ 豁免判定也要用它排除材料形态 key）；单次使用
-# 文法门禁（g 段后 material_id 唯一段，#1279）的权威实现是同模块的
-# material_key_single_use——本文件的删除批分流与三条 key 产线
+# 文法门禁（g 段后 m_ 标记的 material_id 唯一段，#1279）的权威实现是
+# 同模块的 material_key_single_use——本文件的删除批分流与三条 key 产线
 # （materials.py / run_text_batch.py / demo_material_seed.py）的文法
 # 必须同步演进。
 
@@ -164,10 +164,11 @@ def main() -> int:
     report.staging_orphans = [o for o in report.staging_orphans if not material_shaped_key(o.key)]
     material_orphans += collided
 
-    # #1279：单次使用文法（g 段后 material_id 唯一段）的材料孤儿重新并入
-    # 删除批（跨行不可复用，check-then-delete 窗口构造性关闭；删除前仍走
-    # 新鲜反查兜底混合版本窗口内的行重建）；旧文法孤儿保持只报告——混合
-    # 版本窗口内旧写端仍可复用其 key，排空交给 bucket lifecycle/TTL。
+    # #1279：单次使用文法（g 段后 m_ 标记的 material_id 唯一段）的材料
+    # 孤儿重新并入删除批（跨行不可复用，check-then-delete 窗口构造性关闭；
+    # 删除前仍走新鲜反查兜底混合版本窗口内的行重建）；旧文法孤儿保持只
+    # 报告——混合版本窗口内旧写端仍可复用其 key，排空交给 bucket
+    # lifecycle/TTL。
     report.material_orphans, legacy = split_material_orphans(material_orphans)
 
     def _stat(entries: list) -> str:

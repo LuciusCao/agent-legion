@@ -93,6 +93,17 @@ class ObjectStorage(Protocol):
         ...
 
 
+def is_precondition_failed(exc: Any) -> bool:
+    """True when a botocore ClientError is an S3 If-Match 412 (PreconditionFailed).
+
+    Shared by the material verification/consumption paths (#1279): an If-Match
+    conditioned GET fails with this shape when the object no longer carries the
+    recorded ETag (overwritten after the HEAD/complete snapshot).
+    """
+    code = str(exc.response.get("Error", {}).get("Code", ""))
+    return code in ("412", "PreconditionFailed")
+
+
 class S3StorageClient:
     """boto3-backed ObjectStorage."""
 

@@ -61,7 +61,7 @@ def _ready_material(
         content_hash=content_hash,
     )
     material_id = result["material"]["id"]
-    storage.objects[f"{WORKSPACE_ID}/{content_hash}/g0/{material_id}/{filename}"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{content_hash}/g0/m_{material_id}/{filename}"] = payload
     return materials.complete(WORKSPACE_ID, material_id)["id"]
 
 

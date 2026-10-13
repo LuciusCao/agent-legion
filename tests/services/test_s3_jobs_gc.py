@@ -231,10 +231,10 @@ def test_material_shaped_key_grammar() -> None:
     """材料形态文法（#1282 r4 P1；自 scripts/gc-s3-jobs.py 下沉为
     s3_jobs_gc.material_shaped_key，#1295）：第 3 段是 g{代次}。真 job
     产物第 3 段是 job id（恒含下划线）永不匹配；legacy 无代次段材料
-    key 与段数不足的 key 不匹配。#1279 新文法（g 段后 material_id
-    唯一段）同样匹配本判定。"""
+    key 与段数不足的 key 不匹配。#1279 新文法（g 段后 m_ 标记的
+    material_id 唯一段）同样匹配本判定。"""
     assert s3_jobs_gc.material_shaped_key(f"ws1/{'a' * 64}/g0/doc.txt")
-    assert s3_jobs_gc.material_shaped_key(f"ws1/{'a' * 64}/g0/{'e' * 32}/doc.txt")
+    assert s3_jobs_gc.material_shaped_key(f"ws1/{'a' * 64}/g0/m_{'e' * 32}/doc.txt")
     assert s3_jobs_gc.material_shaped_key(f"jobs-staging/{'b' * 64}/g2/dir/.rollback/f.bin")
     assert not s3_jobs_gc.material_shaped_key("jobs/ws-x/ws-x_q1/dead.json")
     assert not s3_jobs_gc.material_shaped_key(f"jobs/{'c' * 64}/old-name.txt")
@@ -243,39 +243,44 @@ def test_material_shaped_key_grammar() -> None:
 
 
 def test_material_key_single_use_grammar() -> None:
-    """#1279 单次使用文法门禁（删除批入口）：g 段后第 4 段是 32 位小写 hex
-    material_id → 跨行不可复用，可删；旧文法 g key（无 material_id 段，
-    混合版本窗口内可复用）、legacy 无 g key、inline key、真 job 产物一律
-    排除（保持只报告）。"""
-    mid = "a" * 32
+    """#1279 单次使用文法门禁（删除批入口）：g 段后第 4 段是 ``m_`` 标记 +
+    32 位小写 hex material_id → 跨行不可复用，可删；旧文法 g key（无标记
+    段，含「首文件名段恰为 32 位 hex」的歧义形态，codex P1）、legacy 无 g
+    key、inline 旧 key、真 job 产物一律排除（保持只报告）。"""
+    mid = "m_" + "a" * 32
     assert s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/{mid}/doc.txt")
-    assert s3_jobs_gc.material_key_single_use(f"ws1/{mid}/g2/{mid}/dir/f.bin")
+    assert s3_jobs_gc.material_key_single_use(f"ws1/{mid[2:]}/g2/{mid}/dir/f.bin")
     # 撞名前缀下的新文法材料 key 同门禁。
     assert s3_jobs_gc.material_key_single_use(f"jobs-staging/{'c' * 64}/g1/{mid}/f.bin")
     # 旧文法（无 material_id 段）：可复用，排除。
     assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/doc.txt")
+    # 歧义旧文法（codex P1）：g 段后首文件名段恰为 32 位 hex、无 m_ 标记
+    # ——旧写端可复用此形态，必须保持只报告。
+    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/{'a' * 32}/doc.txt")
     # legacy 无 g 段 / inline 尾段（旧文法）。
     assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/doc.txt")
     assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/inline-{'d' * 32}")
-    # 第 4 段不是 32 位 hex 的 g key。
+    # 第 4 段不是 m_ + 32 位 hex 的 g key。
     assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/notanid/doc.txt")
+    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/m_{'a' * 31}/doc.txt")
     # 真 job 产物（第 3 段 job id 恒含下划线）。
     assert not s3_jobs_gc.material_key_single_use("jobs/ws-x/ws-x_q1/dead.json")
 
 
 def test_apply_gc_deletes_single_use_material_orphans() -> None:
     """#1279：material_orphans 并入删除批——新鲜反查救下扫描后被重新引用
-    的 key；单次使用文法门禁钉在删除动作本身（手工塞进报告的旧文法 key
-    也不删）。"""
+    的 key；单次使用文法门禁钉在删除动作本身（手工塞进报告的旧文法/
+    歧义形态 key 也不删）。"""
     deleter = _RecordingDeleter()
-    mid = "a" * 32
+    mid = "m_" + "a" * 32
     keep = f"ws1/{'b' * 64}/g0/{mid}/keep.txt"
     gone = f"ws1/{'b' * 64}/g0/{mid}/gone.txt"
     legacy = f"ws1/{'b' * 64}/g0/legacy.txt"  # 旧文法：门禁拦截，不删不计 skipped
+    ambiguous = f"ws1/{'b' * 64}/g0/{'a' * 32}/amb.txt"  # 歧义旧文法（无 m_ 标记）：拦截
     report = s3_jobs_gc.OrphanReport(
         authority_orphans=[],
         staging_orphans=[],
-        material_orphans=[_entry(keep), _entry(gone), _entry(legacy)],
+        material_orphans=[_entry(keep), _entry(gone), _entry(legacy), _entry(ambiguous)],
     )
 
     result = s3_jobs_gc.apply_gc(deleter, "bkt", report, revalidate=lambda keys: {keep} & set(keys))

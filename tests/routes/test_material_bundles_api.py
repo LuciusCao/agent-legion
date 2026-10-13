@@ -44,7 +44,7 @@ def _ready_material(
     )
     assert response.status_code == 200, response.text
     material_id = response.json()["material"]["id"]
-    storage.objects[f"{workspace_id}/{content_hash}/g0/{material_id}/{name}"] = payload
+    storage.objects[f"{workspace_id}/{content_hash}/g0/m_{material_id}/{name}"] = payload
     response = client.post(f"/api/workspaces/{workspace_id}/materials/{material_id}/complete")
     assert response.status_code == 200, response.text
     return material_id
