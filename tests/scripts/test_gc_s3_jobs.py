@@ -87,13 +87,14 @@ def client(*args, **kwargs):
 # ObjectEntry 与 orphans_in_page（#1287 起页内判定下沉为 s3_jobs_gc 的共享
 # 实现，桩按同语义镜像：DB 无行且超宽限窗；分页/前缀排除/孤儿归并仍是脚本
 # 真实代码）；碰撞命名空间分流消费 material_shaped_key（#1295 起自脚本下沉
-# 为 s3_jobs_gc 的共享实现，桩按同语义镜像）；make_db_key_existence 默认
+# 为 s3_jobs_gc 的共享实现，桩按同语义镜像）；单次使用文法门禁消费
+# material_key_single_use（#1279 同型下沉镜像）；make_db_key_existence 默认
 # 「全部 key 已有行」，env
 # STUB_KNOWN_KEYS_JSON 提供时只认清单内的 key（供孤儿判定断言）。
 _S3_JOBS_GC_PROBE = """
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 DEFAULT_GRACE_HOURS = 24.0
@@ -114,10 +115,15 @@ class ObjectEntry:
 class OrphanReport:
     authority_orphans: list
     staging_orphans: list
+    material_orphans: list = field(default_factory=list)
 
     @property
     def count(self):
-        return len(self.authority_orphans) + len(self.staging_orphans)
+        return (
+            len(self.authority_orphans)
+            + len(self.staging_orphans)
+            + len(self.material_orphans)
+        )
 
 
 def scan_orphans(lister, key_exists, *, grace_hours=24.0, staging_grace_hours=24.0, now=None):
@@ -153,6 +159,25 @@ def material_shaped_key(key):
     return len(segments) >= 4 and segments[2][:1] == "g" and segments[2][1:].isdigit()
 
 
+def material_key_single_use(key):
+    # 镜像 s3_jobs_gc.material_key_single_use 的单次使用文法门禁（#1279：
+    # g 段后第 4 段为 32 位小写 hex material_id）；真实实现由
+    # tests/services/test_s3_jobs_gc.py 钉住。
+    segments = key.split("/")
+    return (
+        material_shaped_key(key)
+        and len(segments) >= 5
+        and len(segments[3]) == 32
+        and all(c in "0123456789abcdef" for c in segments[3])
+    )
+
+
+def split_material_orphans(orphans):
+    # 镜像 s3_jobs_gc.split_material_orphans（#1279 单次使用文法分流）。
+    deletable = [o for o in orphans if material_key_single_use(o.key)]
+    return deletable, [o for o in orphans if not material_key_single_use(o.key)]
+
+
 def make_db_key_existence(database_dsn):
     raw = os.environ.get("STUB_KNOWN_KEYS_JSON")
     known_keys = set(json.loads(raw)) if raw else None
@@ -177,7 +202,11 @@ class ApplyResult:
 def apply_gc(client, bucket, report, revalidate=None):
     with open(os.environ["STUB_LOG"], "a") as fh:
         fh.write(f"apply_gc revalidate={revalidate is not None}\\n")
-    return ApplyResult(len(report.authority_orphans) + len(report.staging_orphans))
+    return ApplyResult(
+        len(report.authority_orphans)
+        + len(report.staging_orphans)
+        + len(report.material_orphans)
+    )
 """
 
 
@@ -331,21 +360,22 @@ def test_grace_args_reach_scan(tmp_path: Path):
     assert "scan_orphans grace=48.0 staging_grace=6.0" in log
 
 
-def test_material_root_prefix_orphans_reported_but_never_deleted(tmp_path: Path):
-    """#1269 格子③ + #1282 三轮 P1 收口：材料根前缀纳入扫描报告——根前缀
-    列举排除 jobs/ 与 jobs-staging/ 后，DB（job_artifacts ∪ materials）无行
-    且超宽限窗的材料 key 判定为孤儿并打印数量与「只报告不删除」说明；
-    --apply 下材料孤儿也不进删除批（key 内容寻址可复用，check-then-delete
-    闭不死窗口，删除待 #1279 所有权协议）。分页/前缀排除/孤儿归并是脚本内
-    scan_material_root_orphans 的真实代码；页内判定自 #1287 起复用
-    s3_jobs_gc.orphans_in_page（此处为同语义桩，真实判定由
+def test_material_root_prefix_orphans_split_by_key_grammar(tmp_path: Path):
+    """#1269 格子③ + #1279：材料根前缀纳入扫描，孤儿按 key 文法分流——
+    新文法（g 段后 material_id 唯一段，跨行不可复用）并入 --apply 删除批；
+    旧文法（混合版本窗口内仍可复用）保持只报告不删除。分页/前缀排除/孤儿
+    归并是脚本内 scan_material_root_orphans 的真实代码；页内判定自 #1287
+    起复用 s3_jobs_gc.orphans_in_page（此处为同语义桩，真实判定由
     tests/services/test_s3_jobs_gc.py 钉住），桩提供对象清单
     （STUB_OBJECTS_JSON）与已知 key 集合（STUB_KNOWN_KEYS_JSON）。"""
     now = time.time()
+    mid = "a" * 32
+    live_key = f"ws1/hash-live/g0/{mid}/live.txt"
     objects = [
-        ["ws1/hash-old/g0/superseded.txt", now - 48 * 3600, 10],  # 孤儿：无行 + 超窗
-        ["ws1/hash-live/g0/live.txt", now - 48 * 3600, 10],  # 有行：保留
-        ["ws1/hash-new/g0/inflight.txt", now - 3600, 10],  # 宽限窗内：保留
+        [f"ws1/hash-old/g0/{mid}/superseded.txt", now - 48 * 3600, 10],  # 新文法孤儿 → 删除批
+        ["ws1/hash-old/g0/legacy.txt", now - 48 * 3600, 10],  # 旧文法孤儿 → 只报告
+        [live_key, now - 48 * 3600, 10],  # 有行：保留
+        [f"ws1/hash-new/g0/{mid}/inflight.txt", now - 3600, 10],  # 宽限窗内：保留
         ["jobs/ws1/j1/a.json", now - 48 * 3600, 10],  # jobs/ 前缀：归 scan_orphans
         ["jobs-staging/ws1/j1/e1/b.json", now - 48 * 3600, 10],  # 同上
     ]
@@ -357,17 +387,18 @@ def test_material_root_prefix_orphans_reported_but_never_deleted(tmp_path: Path)
         "--apply",
         env_extra={
             "STUB_OBJECTS_JSON": json.dumps(objects),
-            "STUB_KNOWN_KEYS_JSON": json.dumps(["ws1/hash-live/g0/live.txt"]),
+            "STUB_KNOWN_KEYS_JSON": json.dumps([live_key]),
         },
     )
 
     assert result.returncode == 0, result.stderr
-    # 根前缀确实被列举（Prefix="" 即 bucket 根），且只有 1 个材料孤儿。
+    # 根前缀确实被列举（Prefix="" 即 bucket 根）。
     assert "list_objects agent-legion-dev prefix=\n" in log
-    assert "材料根前缀孤儿 1 个" in result.stdout
+    assert "材料孤儿 1 个" in result.stdout  # 新文法 → 进删除批
+    assert "旧文法材料孤儿 1 个" in result.stdout  # 旧文法 → 只报告
     assert "只报告不删除" in result.stdout
-    # --apply：材料孤儿不进删除批——删除的只有 jobs 报告桩的 1+1。
-    assert "已删除 2 个" in result.stdout
+    # --apply：删除批 = jobs 报告桩的 1+1 + 新文法材料孤儿 1。
+    assert "已删除 3 个" in result.stdout
     # 根前缀只列举一次（扫描）；删除路径不存在后不再有删除前重列。
     assert log.count("prefix=\n") == 1
 
@@ -398,21 +429,24 @@ def test_material_root_scan_pages_key_existence(tmp_path: Path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert "材料根前缀孤儿 2501 个" in result.stdout
+    assert "旧文法材料孤儿 2501 个" in result.stdout
     # 分页证据：key_exists 恰被调用 3 次，批量 1000/1000/503（含每页的
     # 非孤儿——判定按页整批送检，孤儿在每页内归并后累计）。
     batches = [line for line in log.splitlines() if line.startswith("key_exists n=")]
     assert batches == ["key_exists n=1000", "key_exists n=1000", "key_exists n=503"]
 
 
-def test_collision_namespace_material_keys_are_report_only(tmp_path: Path):
-    """#1282 r4 P1：workspace id 字面为 jobs / jobs-staging 时材料 key
-    （{ws}/{hash}/g{代次}/{filename}）落在 jobs 前缀扫描内——删除批组装前
-    按材料形态文法（第 3 段 g{数字}）分流到只报告集合。真 job 产物第 3 段
+def test_collision_namespace_material_keys_split_by_grammar(tmp_path: Path):
+    """#1282 r4 P1 + #1279：workspace id 字面为 jobs / jobs-staging 时材料
+    key（{ws}/{hash}/g{代次}/[{material_id}/]{filename}）落在 jobs 前缀扫描
+    内——删除批组装前按材料形态文法（第 3 段 g{数字}）分流进材料孤儿集合，
+    再按单次使用文法分流：新文法进删除批，旧文法只报告。真 job 产物第 3 段
     是 job id（恒含下划线、永不匹配 g{数字}），不误伤、留在删除批。"""
+    mid = "a" * 32
     extra = [
-        f"jobs/{'a' * 64}/g0/doc.txt",  # ws=jobs 的材料 key → 分流
-        f"jobs-staging/{'b' * 64}/g2/d.txt",  # 撞名前缀下的材料 key → 分流
+        f"jobs/{'a' * 64}/g0/doc.txt",  # 旧文法撞名材料 key → 只报告
+        f"jobs-staging/{'b' * 64}/g2/d.txt",  # 旧文法撞名材料 key → 只报告
+        f"jobs/{'e' * 64}/g0/{mid}/new.txt",  # 新文法撞名材料 key → 删除批
         "jobs/ws-x/ws-x_q1/dead.json",  # 真 job 产物（job id 含下划线）→ 留在删除批
         f"jobs/{'c' * 64}/old-name.txt",  # legacy 无代次段材料 key：不可复用，可删
     ]
@@ -426,24 +460,27 @@ def test_collision_namespace_material_keys_are_report_only(tmp_path: Path):
     )
 
     assert result.returncode == 0, result.stderr
-    # 两个撞名材料 key 分流进材料报告行（本次根前缀扫描为 0）。
-    assert "材料根前缀孤儿 2 个" in result.stdout
+    # 三个撞名材料 key 分流进材料行（本次根前缀扫描为 0），按文法再分流。
+    assert "材料孤儿 1 个" in result.stdout  # 新文法 → 进删除批
+    assert "旧文法材料孤儿 2 个" in result.stdout
     assert "只报告不删除" in result.stdout
     # jobs/ 删除批：桩固定的 1 个 + 真产物 + legacy 无代次段 key = 3；
-    # jobs-staging/ 1 个（撞名材料 key 已被分流）→ 共删 4。
+    # jobs-staging/ 1 个（撞名材料 key 已被分流）；材料删除批 1 → 共删 5。
     assert "jobs/ 孤儿 3 个" in result.stdout
     assert "jobs-staging/ 孤儿 1 个" in result.stdout
-    assert "已删除 4 个" in result.stdout
+    assert "已删除 5 个" in result.stdout
 
 
 def test_collision_namespace_rollback_segment_material_key_is_report_only(tmp_path: Path):
-    """#1295（#1285 同族残留）：撞名前缀下文件名含 /.rollback/ 段的材料形态
-    key（jobs-staging/<hash>/g{代次}/dir/.rollback/file.bin）不被扫描期豁
-    免吞掉——到达分流后进材料只报告集合，--apply 下也不进删除批。豁免叠
-    加材料形态排除的判定正确性由 tests/services/test_s3_jobs_gc.py 钉住，
-    这里钉 CLI 分流/报告侧对该形态的归并。"""
+    """#1295（#1285 同族残留）+ #1279：撞名前缀下文件名含 /.rollback/ 段的
+    材料形态 key（jobs-staging/<hash>/g{代次}/dir/.rollback/file.bin）不被
+    扫描期豁免吞掉——到达分流后进材料孤儿集合；旧文法（无 material_id 唯一
+    段）保持只报告，--apply 下也不进删除批。豁免叠加材料形态排除的判定正
+    确性由 tests/services/test_s3_jobs_gc.py 钉住，这里钉 CLI 分流/报告侧
+    对该形态的归并。"""
     extra = [
-        f"jobs-staging/{'d' * 64}/g2/dir/.rollback/file.bin",  # 撞名材料 key（含 .rollback 段）→ 分流
+        f"jobs-staging/{'d' * 64}/g2/dir/.rollback/file.bin",  # 旧文法撞名材料 key（含 .rollback 段）→ 只报告
+        f"jobs-staging/{'d' * 64}/g2/{'e' * 32}/dir/.rollback/file.bin",  # 新文法 → 删除批
     ]
     pystub = _make_pystub(tmp_path, _STORAGE_PROBE_CONFIGURED)
 
@@ -455,10 +492,12 @@ def test_collision_namespace_rollback_segment_material_key_is_report_only(tmp_pa
     )
 
     assert result.returncode == 0, result.stderr
-    # 含 .rollback 段的撞名材料 key 出现在材料报告行（本次根前缀扫描为 0）。
-    assert "材料根前缀孤儿 1 个" in result.stdout
+    # 含 .rollback 段的撞名材料 key 出现在材料行（本次根前缀扫描为 0）。
+    assert "材料孤儿 1 个" in result.stdout  # 新文法 → 进删除批
+    assert "旧文法材料孤儿 1 个" in result.stdout
     assert "只报告不删除" in result.stdout
-    # 删除批：桩固定的 authority 1 个 + staging 1 个（材料 key 已分流）→ 共删 2。
+    # 删除批：桩固定的 authority 1 个 + staging 1 个（材料 key 已分流）+
+    # 新文法材料 1 → 共删 3。
     assert "jobs/ 孤儿 1 个" in result.stdout
     assert "jobs-staging/ 孤儿 1 个" in result.stdout
-    assert "已删除 2 个" in result.stdout
+    assert "已删除 3 个" in result.stdout

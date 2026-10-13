@@ -23,7 +23,7 @@ PAYLOADS = {"https://s3.test/get/a": PAYLOAD_A, "https://s3.test/get/b": PAYLOAD
 
 @pytest.fixture
 def downloads(monkeypatch):
-    def _open(url: str):
+    def _open(url: str, *, if_match: str = ""):
         return io.BytesIO(PAYLOADS[url])
 
     # bundle_fetch 从 material_fetch 导入了 _open_download（独立绑定），两边都 patch。
@@ -111,3 +111,23 @@ def test_materialize_claim_material_dispatches_by_kind(downloads, tmp_path: Path
     assert block is not None
     assert "kind" not in block
     assert Path(block["path"]).is_file()
+
+
+def test_materialize_claim_bundle_sends_per_member_if_match(monkeypatch, tmp_path: Path) -> None:
+    """#1279：bundle 每成员的 object_etag 独立随 If-Match 下发；无该字段的
+    成员（旧 Server / 存量行）不带条件头。"""
+    seen: dict[str, str] = {}
+
+    def _open(url: str, *, if_match: str = ""):
+        seen[url] = if_match
+        return io.BytesIO(PAYLOADS[url])
+
+    monkeypatch.setattr("worker.bundle_fetch._open_download", _open)
+    monkeypatch.setattr("worker.material_fetch._open_download", _open)
+    manifest = _manifest()
+    manifest["runtime_context"]["material"]["entries"][0]["object_etag"] = "etag-a"
+
+    block = materialize_claim_material(manifest, tmp_path / "exec")
+
+    assert block is not None
+    assert seen == {"https://s3.test/get/a": "etag-a", "https://s3.test/get/b": ""}

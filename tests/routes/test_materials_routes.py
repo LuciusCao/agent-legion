@@ -125,11 +125,13 @@ def test_presign_complete_roundtrip(client, storage) -> None:
 
     material = result["material"]
     assert material["status"] == "uploading"
-    assert result["upload_url"].endswith(f"{workspace_id}/{content_hash}/g0/doc.txt")
+    assert result["upload_url"].endswith(
+        f"{workspace_id}/{content_hash}/g0/{material['id']}/doc.txt"
+    )
     assert result["deduplicated"] is False
 
     # Simulate the browser PUT going straight to the object store.
-    storage.objects[f"{workspace_id}/{content_hash}/g0/doc.txt"] = payload
+    storage.objects[f"{workspace_id}/{content_hash}/g0/{material['id']}/doc.txt"] = payload
     response = client.post(f"/api/workspaces/{workspace_id}/materials/{material['id']}/complete")
     assert response.status_code == 200, response.text
     assert response.json()["material"]["status"] == "ready"
@@ -144,7 +146,8 @@ def test_presign_complete_roundtrip(client, storage) -> None:
 def test_complete_verification_failure_returns_422(client, storage) -> None:
     workspace_id = _create_workspace(client)
     result = _presign(client, workspace_id, size_bytes=10)
-    storage.objects[f"{workspace_id}/{result['material']['id']}/g0/doc.txt"] = b"short"
+    material_id = result["material"]["id"]
+    storage.objects[f"{workspace_id}/{material_id}/g0/{material_id}/doc.txt"] = b"short"
 
     response = client.post(
         f"/api/workspaces/{workspace_id}/materials/{result['material']['id']}/complete"
@@ -166,7 +169,7 @@ def test_complete_with_expected_upload_generation(client, storage) -> None:
     assert material["upload_generation"] == 0
 
     # 旧代次字节已 PUT；随后一次 presign 重试把行推进到 g1。
-    storage.objects[f"{workspace_id}/{content_hash}/g0/doc.txt"] = payload
+    storage.objects[f"{workspace_id}/{content_hash}/g0/{material['id']}/doc.txt"] = payload
     retry = _presign(client, workspace_id, size_bytes=len(payload), content_hash=content_hash)
     assert retry["material"]["upload_generation"] == 1
 
@@ -179,7 +182,7 @@ def test_complete_with_expected_upload_generation(client, storage) -> None:
     assert detail.json()["material"]["status"] == "uploading"
 
     # 新代次字节落地后携带匹配代次 complete → ready；不带 body 保持旧行为。
-    storage.objects[f"{workspace_id}/{content_hash}/g1/doc.txt"] = payload
+    storage.objects[f"{workspace_id}/{content_hash}/g1/{material['id']}/doc.txt"] = payload
     matched = client.post(
         f"/api/workspaces/{workspace_id}/materials/{material['id']}/complete",
         json={"expected_upload_generation": 1},
@@ -213,7 +216,7 @@ def test_delete_removes_material_and_object(client, storage) -> None:
     workspace_id = _create_workspace(client)
     result = _presign(client, workspace_id)
     material_id = result["material"]["id"]
-    storage_key = f"{workspace_id}/{material_id}/g0/doc.txt"
+    storage_key = f"{workspace_id}/{material_id}/g0/{material_id}/doc.txt"
     storage.objects[storage_key] = b"12345"
 
     response = client.delete(f"/api/workspaces/{workspace_id}/materials/{material_id}")
@@ -229,7 +232,7 @@ def test_delete_referenced_material_returns_409(client, storage, job_db) -> None
     workspace_id = _create_workspace(client)
     result = _presign(client, workspace_id)
     material_id = result["material"]["id"]
-    storage_key = f"{workspace_id}/{material_id}/g0/doc.txt"
+    storage_key = f"{workspace_id}/{material_id}/g0/{material_id}/doc.txt"
     storage.objects[storage_key] = b"12345"
     with job_db.connect() as conn:
         conn.execute(

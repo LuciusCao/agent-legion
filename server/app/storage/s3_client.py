@@ -56,8 +56,14 @@ class ObjectStorage(Protocol):
         """
         ...
 
-    def open_stream(self, storage_key: str) -> BinaryIO:
-        """Return a streaming reader for the object bytes."""
+    def open_stream(self, storage_key: str, *, if_match: str = "") -> BinaryIO:
+        """Return a streaming reader for the object bytes.
+
+        ``if_match`` (#1279) carries the material row's recorded ETag: the
+        GET is conditioned on it (S3 If-Match → 412 on mismatch), so a
+        same-size overwrite after complete() is detected at read time
+        instead of silently serving poisoned bytes. Empty = unconditional.
+        """
         ...
 
     def open_range(self, storage_key: str, start: int, end: int) -> BinaryIO:
@@ -158,8 +164,11 @@ class S3StorageClient:
         size = int(response.get("ContentLength", 0))
         return ObjectHead(size_bytes=size, etag=str(response.get("ETag", "")).strip('"'))
 
-    def open_stream(self, storage_key: str) -> BinaryIO:
-        response = self._client.get_object(Bucket=self._settings.bucket, Key=storage_key)
+    def open_stream(self, storage_key: str, *, if_match: str = "") -> BinaryIO:
+        # 行内落库的 etag 是去引号形态（head_object strip）；If-Match 按 S3
+        # 线协议回引号发送。
+        extra = {"IfMatch": f'"{if_match}"'} if if_match else {}
+        response = self._client.get_object(Bucket=self._settings.bucket, Key=storage_key, **extra)
         return cast(BinaryIO, response["Body"])
 
     def open_range(self, storage_key: str, start: int, end: int) -> BinaryIO:

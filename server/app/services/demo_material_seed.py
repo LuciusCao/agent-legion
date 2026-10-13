@@ -90,30 +90,39 @@ def seed_demo_workspace_materials(
         digest = hashlib.sha256(payload).hexdigest()
         if digest in known_hashes:
             continue
-        storage_key = f"{workspace_id}/{digest}/{path.name}"
+        # #1279 key 文法：g 段 + material_id 唯一段（与上传/inline 产线同
+        # 文法），删行后重播种子也必得新 key——GC 删除批对 demo 孤儿开放。
+        material_id = uuid.uuid4().hex
+        storage_key = f"{workspace_id}/{digest}/g0/{material_id}/{path.name}"
         try:
             # Object first, row second: a ready row always has its object
             # (a crashed seed between the two simply re-puts on the next run —
-            # the content-addressed key makes the put idempotent).
+            # the per-row unique key makes the put idempotent). The ETag of
+            # the stored object is recorded on the row (v98) so both
+            # consumption chains can detect a later overwrite.
             storage.put_object(storage_key, payload, content_type=_CONTENT_TYPE)
+            head = storage.head_object(storage_key)
+            if head is None:
+                raise OSError(f"head after put returned no object: {storage_key}")
             with write_transaction(source) as conn:
                 conn.execute(
                     """
                     insert into materials(
                       id, workspace_id, content_hash, filename, content_type,
-                      size_bytes, storage_key, status, created_by
-                    ) values (%s, %s, %s, %s, %s, %s, %s, 'ready', 'system')
+                      size_bytes, storage_key, status, created_by, object_etag
+                    ) values (%s, %s, %s, %s, %s, %s, %s, 'ready', 'system', %s)
                     on conflict (workspace_id, content_hash)
                     where content_hash <> '' do nothing
                     """,
                     (
-                        uuid.uuid4().hex,
+                        material_id,
                         workspace_id,
                         digest,
                         path.name,
                         _CONTENT_TYPE,
                         len(payload),
                         storage_key,
+                        head.etag,
                     ),
                 )
         except (ClientError, BotoCoreError, OSError, psycopg.Error):

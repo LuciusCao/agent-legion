@@ -12,7 +12,7 @@ from server.app.services.demo_material_seed import (
     DEMO_MATERIALS_DIR,
     seed_demo_workspace_materials,
 )
-from tests.fakes.storage import FakeObjectStorage
+from tests.fakes.storage import FakeObjectStorage, etag_of
 
 FakeStorage = FakeObjectStorage
 
@@ -43,7 +43,9 @@ def test_seed_uploads_examples_as_ready_materials(job_db, settings) -> None:
         digest = hashlib.sha256(payload).hexdigest()
         assert row["content_hash"] == digest
         assert row["size_bytes"] == len(payload)
-        assert row["storage_key"] == f"{workspace_id}/{digest}/{row['filename']}"
+        # #1279 key 文法：g 段 + material_id 唯一段（= 行 id）。
+        assert row["storage_key"] == f"{workspace_id}/{digest}/g0/{row['id']}/{row['filename']}"
+        assert row["object_etag"] == etag_of(payload)
         assert storage.objects[row["storage_key"]] == payload
 
 

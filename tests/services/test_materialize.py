@@ -170,6 +170,63 @@ def test_claim_block_carries_presigned_url_without_storage_key(job_db, material,
     )
 
 
+def test_runtime_block_detects_post_complete_overwrite_via_etag(
+    job_db, storage, tmp_path: Path
+) -> None:
+    """#1279 验收项（Host 链故障注入，目标洞的原生形态）：无 content_hash
+    的 ready 材料行（object_etag 是唯一内容身份）在 complete 后被同尺寸
+    静默覆盖——cache miss 的 GET 带 If-Match，S3 412 检出为
+    MaterializeError，毒化字节不落缓存。etag=''（存量行）维持 size-only
+    旧语义（本文件其余用例覆盖）。"""
+    from tests.fakes.storage import etag_of
+
+    key = f"{WORKSPACE_ID}/mat-nh/g0/mat-nh/file.bin"
+    payload = b"hashless-material"
+    storage.objects[key] = payload
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'MatCache') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+        conn.execute(
+            "insert into materials(id, workspace_id, content_hash, filename,"
+            " content_type, size_bytes, storage_key, status, created_by, object_etag)"
+            " values ('mat-nh', %s, '', 'file.bin', 'application/octet-stream',"
+            " %s, %s, 'ready', 'user-1', %s)",
+            (WORKSPACE_ID, len(payload), key, etag_of(payload)),
+        )
+    job = _job({"type": "material", "material_id": "mat-nh"})
+    # complete 后同尺寸覆盖（已签发 URL 的 1h 窗口残留场景）。
+    storage.objects[key] = b"y" * len(payload)
+
+    with pytest.raises(MaterializeError, match="ETag mismatch"):
+        material_runtime_block(job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage)
+    assert not (tmp_path / "ma" / "mat-nh").exists(), "毒化字节不得落缓存"
+
+    # 恢复正确字节（ETag 重新匹配）后正常物化。
+    storage.objects[key] = payload
+    block = material_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage
+    )
+    assert block is not None and Path(block["path"]).read_bytes() == payload
+
+
+def test_claim_block_carries_object_etag(job_db, material, storage) -> None:
+    """#1279：claim 描述符携带行记录的 object_etag（Worker 侧 If-Match 核验）。"""
+    with job_db.connect() as conn:
+        conn.execute("update materials set object_etag='etag-1' where id=%s", (material,))
+
+    block = material_claim_block(
+        job_db.dsn_identity,
+        WORKSPACE_ID,
+        _job({"type": "material", "material_id": material}),
+        storage=storage,
+    )
+
+    assert block is not None
+    assert block["object_etag"] == "etag-1"
+
+
 def test_runtime_block_facade_passthrough_no_getattr_escape(
     job_db, material, storage, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -16,7 +16,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
+
+from botocore.exceptions import ClientError
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.rowmap import parse_object
@@ -25,6 +27,28 @@ from server.app.storage import ObjectStorage, build_s3_storage
 from shared.material_cache import MaterializeError, materialize_stream
 
 logger = logging.getLogger(__name__)
+
+
+def open_verified_stream(
+    storage: ObjectStorage, storage_key: str, object_etag: str, label: str
+) -> BinaryIO:
+    """``open_stream`` conditioned on the material row's recorded ETag (#1279).
+
+    The S3 If-Match binds the verification to the exact bytes this GET
+    returns (412 before any byte is served), so a same-size overwrite that
+    landed after complete() surfaces as a ``MaterializeError`` instead of
+    silently caching poisoned bytes. An empty ``object_etag`` (pre-v98 rows,
+    永久豁免) skips the condition and keeps the size-only semantics.
+    """
+    try:
+        return storage.open_stream(storage_key, if_match=object_etag)
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if code in ("412", "PreconditionFailed"):
+            raise MaterializeError(
+                f"{label} bytes changed after completion (ETag mismatch); re-upload the material"
+            ) from exc
+        raise
 
 
 def input_document(job: Mapping[str, Any]) -> dict[str, Any]:
@@ -108,6 +132,7 @@ def material_runtime_block(
     content_hash = str(row.get("content_hash") or "")
     filename = str(row.get("filename") or "")
     size_bytes = int(row.get("size_bytes") or 0)
+    object_etag = str(row.get("object_etag") or "")
     # Content addressing dedups downloads across jobs of the same material;
     # hashless rows fall back to their (unique) id.
     address = content_hash or material_id
@@ -115,7 +140,9 @@ def material_runtime_block(
         path = materialize_stream(
             cache_root,
             address,
-            lambda: storage.open_stream(str(row["storage_key"])),
+            lambda: open_verified_stream(
+                storage, str(row["storage_key"]), object_etag, f"material {material_id}"
+            ),
             expected_sha256=content_hash,
             expected_size=size_bytes,
             log=lambda message: logger.warning("%s", message),
@@ -215,6 +242,10 @@ def material_claim_block(
         "content_type": str(row.get("content_type") or ""),
         "size_bytes": int(row.get("size_bytes") or 0),
         "content_hash": str(row.get("content_hash") or ""),
+        # #1279：行记录的 ETag 随描述符下发（memory-only，不落 manifest）；
+        # Worker 对 presigned GET 带 If-Match 核验。旧 Worker 忽略此字段，
+        # 旧 Server 不下发（Worker 按空值跳过）——双向兼容。
+        "object_etag": str(row.get("object_etag") or ""),
         "download_url": storage.presign_get(
             str(row["storage_key"]), expires_seconds=download_expires_seconds
         ),

@@ -19,7 +19,11 @@ from typing import Any
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
-from server.app.services.material_cache import _require_storage, input_document
+from server.app.services.material_cache import (
+    _require_storage,
+    input_document,
+    open_verified_stream,
+)
 from server.app.storage import ObjectStorage
 from shared.material_bundle import assemble_bundle_tree, bundle_address
 from shared.material_cache import MaterializeError, cache_file_path, materialize_stream
@@ -50,7 +54,7 @@ def _ready_bundle(
             dict(row)
             for row in conn.execute(
                 "select m.path, mat.id, mat.status, mat.filename, mat.size_bytes,"
-                " mat.content_hash, mat.storage_key"
+                " mat.content_hash, mat.storage_key, mat.object_etag"
                 " from material_bundle_members m"
                 " join materials mat on mat.id = m.material_id"
                 " where m.bundle_id=%s order by m.ordinal",
@@ -107,7 +111,13 @@ def bundle_runtime_block(
             path = materialize_stream(
                 cache_root,
                 member_address,
-                partial(storage.open_stream, str(member["storage_key"])),
+                partial(
+                    open_verified_stream,
+                    storage,
+                    str(member["storage_key"]),
+                    str(member.get("object_etag") or ""),
+                    f"bundle member {member['id']}",
+                ),
                 expected_sha256=str(member.get("content_hash") or ""),
                 expected_size=int(member.get("size_bytes") or 0),
                 pin=pin,
@@ -192,6 +202,9 @@ def bundle_claim_block(
                 "path": str(member["path"]),
                 "size_bytes": int(member.get("size_bytes") or 0),
                 "content_hash": str(member.get("content_hash") or ""),
+                # #1279：每成员的行记录 ETag（memory-only）；Worker 逐成员
+                # 对 presigned GET 带 If-Match 核验，空值（存量行）跳过。
+                "object_etag": str(member.get("object_etag") or ""),
                 "download_url": storage.presign_get(
                     str(member["storage_key"]), expires_seconds=download_expires_seconds
                 ),

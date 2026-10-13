@@ -74,17 +74,28 @@ def store_text_batch(
                     )
                 entries[digest] = dict(content_hash=digest, material_id=existing["id"])
                 continue
-            key = f"{workspace_id}/{digest}/inline-{uuid.uuid4().hex}"
+            # #1279 key 文法：g 段 + material_id 唯一段（与上传产线同文法），
+            # 跨行不可复用 → GC 删除批对 inline 孤儿开放；inline-{uuid4} 尾段
+            # 保留产线标记。material_id 在此预生成、随 entry 传给 publish。
+            material_id = uuid.uuid4().hex
+            key = f"{workspace_id}/{digest}/g0/{material_id}/inline-{uuid.uuid4().hex}"
             content_type = text_content_type(filename)
             # Register before PUT: a timeout can occur after the server stored it.
             keys.append(key)
             storage.put_object(key, payload, content_type=content_type)
+            # put 后 HEAD 取 ETag 一并落列（#1279：直插 ready 产线同样携带
+            # 内容身份）；put 成功而 HEAD 读不到对象是存储面故障，按不可用处理。
+            head = storage.head_object(key)
+            if head is None:
+                raise OSError(f"head after put returned no object: {key}")
             entries[digest] = dict(
                 content_hash=digest,
                 filename=filename,
                 content_type=content_type,
                 size_bytes=len(payload),
                 storage_key=key,
+                new_material_id=material_id,
+                object_etag=head.etag,
             )
         identities = job_db.publish_inline_materials(
             workspace_id,

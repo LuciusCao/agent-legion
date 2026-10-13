@@ -23,9 +23,9 @@ from server.app.services.job_errors import ConflictError
 
 _INSERT_SQL = (
     "insert into materials(id, workspace_id, content_hash, filename, content_type,"
-    " size_bytes, storage_key, status, created_by, expires_at)"
+    " size_bytes, storage_key, status, created_by, expires_at, object_etag)"
     " values (%s, %s, %s, %s, %s, %s, %s, 'ready', %s,"
-    " case when %s > 0 then now() + make_interval(days => %s) end)"
+    " case when %s > 0 then now() + make_interval(days => %s) end, %s)"
     " on conflict (workspace_id, content_hash) where content_hash <> '' do nothing"
     " returning id, status"
 )
@@ -60,7 +60,10 @@ class InlineMaterialQueriesMixin(ConnectionQueriesMixin):
                     row = conn.execute(
                         _INSERT_SQL,
                         (
-                            uuid.uuid4().hex,
+                            # #1279：store_text_batch 预生成的 id（key 的
+                            # material_id 唯一段必须与行 id 一致）；缺省回落
+                            # 现场生成（直调本接口的旧调用方）。
+                            entry.get("new_material_id") or uuid.uuid4().hex,
                             workspace_id,
                             digest,
                             entry["filename"],
@@ -70,6 +73,7 @@ class InlineMaterialQueriesMixin(ConnectionQueriesMixin):
                             created_by,
                             ttl_days,
                             ttl_days,
+                            entry.get("object_etag") or "",
                         ),
                     ).fetchone()
                 if row is None:

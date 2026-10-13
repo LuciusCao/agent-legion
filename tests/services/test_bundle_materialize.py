@@ -180,6 +180,40 @@ def test_claim_block_presigns_each_member_without_storage_key(job_db, bundle, st
     assert "storage_key" not in json.dumps(block)
 
 
+def test_runtime_block_detects_member_overwrite_via_etag(
+    job_db, bundle, storage, tmp_path: Path
+) -> None:
+    """#1279 验收项（Host bundle 链故障注入）：成员材料 complete 后被同尺寸
+    静默覆盖——行记录的 object_etag 使该成员的 GET 带 If-Match，412 检出为
+    MaterializeError，毒化字节不落缓存。"""
+    from tests.fakes.storage import etag_of
+
+    with job_db.connect() as conn:
+        conn.execute("update materials set object_etag=%s where id='mat-a'", (etag_of(PAYLOAD_A),))
+    storage.objects[KEY_A] = b"x" * len(PAYLOAD_A)
+
+    with pytest.raises(MaterializeError, match="ETag mismatch"):
+        bundle_runtime_block(
+            job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+        )
+    assert not (tmp_path / HASH_A[:2] / HASH_A).exists(), "毒化字节不得落缓存"
+
+
+def test_claim_block_carries_member_object_etag(job_db, bundle, storage) -> None:
+    """#1279：bundle claim 描述符逐成员携带行记录的 object_etag。"""
+    with job_db.connect() as conn:
+        conn.execute("update materials set object_etag='etag-a' where id='mat-a'")
+
+    block = bundle_claim_block(
+        job_db.dsn_identity, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+    )
+
+    assert block is not None
+    by_id = {entry["material_id"]: entry for entry in block["entries"]}
+    assert by_id["mat-a"]["object_etag"] == "etag-a"
+    assert by_id["mat-b"]["object_etag"] == ""
+
+
 class _FakeExecutor:
     """prefetch_bundle_block 需要的最小 executor 面（dispatch 接线）。"""
 

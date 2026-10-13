@@ -49,8 +49,9 @@ def presign_ready(service: MaterialsService, storage: FakeObjectStorage, payload
         content_hash=content_hash,
         created_by="user-1",
     )
-    storage.objects[f"{WORKSPACE_ID}/{content_hash}/g0/notes.txt"] = payload
-    return service.complete(WORKSPACE_ID, result["material"]["id"])
+    material_id = result["material"]["id"]
+    storage.objects[f"{WORKSPACE_ID}/{content_hash}/g0/{material_id}/notes.txt"] = payload
+    return service.complete(WORKSPACE_ID, material_id)
 
 
 def insert_material_row(
@@ -88,3 +89,12 @@ def generation_of(job_db, material_id: str) -> int:
         ).fetchone()
     assert row is not None
     return int(row["upload_generation"])
+
+
+def object_etag_of(job_db, material_id: str) -> str:
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select object_etag from materials where id=%s", (material_id,)
+        ).fetchone()
+    assert row is not None
+    return str(row["object_etag"])

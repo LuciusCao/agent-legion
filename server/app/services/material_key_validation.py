@@ -1,7 +1,9 @@
 """Validation for the material upload declaration (#1119, #1267).
 
 The material storage key is
-``{workspace_id}/{content_hash|material_id}/g{upload_generation}/{filename}``;
+``{workspace_id}/{content_hash|material_id}/g{upload_generation}/{material_id}/{filename}``
+(the trailing ``material_id`` segment, #1279, makes every key single-use
+across row lifecycles);
 the workspace segment is safe by contract (schema v62 id rules), while
 ``filename`` and ``content_hash`` come from the presign request and are pinned
 here before any row write or presign. The same declaration is re-verified at
@@ -87,27 +89,31 @@ def validate_material_content_hash(content_hash: str) -> None:
 _HASH_CHUNK_BYTES = 1024 * 1024
 
 
-def verify_stored_object(storage: ObjectStorage, row: dict[str, Any]) -> str | None:
-    """Return a failure detail, or None when the stored object matches the row.
+def verify_stored_object(storage: ObjectStorage, row: dict[str, Any]) -> tuple[str | None, str]:
+    """Return ``(failure detail or None, object ETag)``.
 
     complete() 的声明核验（事务外对象 I/O）：size 恒验，声明了 content_hash
-    时重算 sha256 比对。调用方负责落库前的锁内身份复查
+    时重算 sha256 比对。同一 HEAD 的 ETag 随结果返回（无 hash 行在此止步，
+    ETag 是它唯一的内容身份）：complete 成功时与 ready 同事务落库
+    （materials.object_etag，schema v98，#1279），消费侧据以检出 complete
+    后的同尺寸静默覆盖。对象缺失/核验失败时 ETag 为空串（不落库）。
+    调用方负责落库前的锁内身份复查
     （jobs/queries/material_locked_rereads）。
     """
     head = storage.head_object(str(row["storage_key"]))
     if head is None:
-        return f"Uploaded object is missing for material {row['id']}"
+        return f"Uploaded object is missing for material {row['id']}", ""
     declared_size = int(row["size_bytes"])
     if head.size_bytes != declared_size:
-        return f"Uploaded object size {head.size_bytes} != declared size {declared_size}"
+        return f"Uploaded object size {head.size_bytes} != declared size {declared_size}", ""
     content_hash = str(row["content_hash"])
     if not content_hash:
-        return None
+        return None, head.etag
     digest = hashlib.sha256()
     stream = storage.open_stream(str(row["storage_key"]))
     while chunk := stream.read(_HASH_CHUNK_BYTES):
         digest.update(chunk)
     actual = digest.hexdigest()
     if actual != content_hash:
-        return f"Uploaded object sha256 {actual} != declared hash {content_hash}"
-    return None
+        return f"Uploaded object sha256 {actual} != declared hash {content_hash}", ""
+    return None, head.etag

@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
@@ -65,16 +65,18 @@ class OrphanReport:
 
     authority_orphans: list[ObjectEntry]
     staging_orphans: list[ObjectEntry]
+    # #1279：材料根前缀（及撞名前缀分流来的）孤儿中通过单次使用文法门禁
+    # 的部分——只有它们进删除批；旧文法孤儿由 CLI 只报告不放进本字段。
+    material_orphans: list[ObjectEntry] = field(default_factory=list)
 
     @property
     def count(self) -> int:
-        return len(self.authority_orphans) + len(self.staging_orphans)
+        return len(self.authority_orphans) + len(self.staging_orphans) + len(self.material_orphans)
 
     @property
     def total_bytes(self) -> int:
-        return sum(o.size_bytes for o in self.authority_orphans) + sum(
-            o.size_bytes for o in self.staging_orphans
-        )
+        entries = (*self.authority_orphans, *self.staging_orphans, *self.material_orphans)
+        return sum(o.size_bytes for o in entries)
 
 
 # 注入面：列举器产出按 key 升序的对象流（S3 ListObjectsV2 本身有序）。
@@ -101,7 +103,8 @@ def scan_orphans(
     """全前缀扫描并返回孤儿对象（纯判定，不删除）。
 
     两个前缀都经 ``key_exists`` 对照（系统性评审 P1，#344）：materials
-    的 key 是 ``{workspace_id}/{hash}/{filename}``，workspace id 允许叫
+    的 key 以 workspace id 起手（``{workspace_id}/{hash|id}/g{代次}/
+    [{material_id}/]{filename}``），workspace id 允许叫
     ``jobs`` / ``jobs-staging``（无保留名约束），那样的材料 key 会落进
     这两个前缀——staging 不能只看宽限窗无条件回收，否则撞名 workspace
     的材料会被整批误删。authority 侧按页攒批只是有界化每次传给
@@ -149,7 +152,8 @@ def orphans_in_page(
 def material_shaped_key(key: str) -> bool:
     """碰撞命名空间里的材料 key 形态（#1282 r4 P1）：第 3 段是 g{代次}。
 
-    材料 key 为 ``{workspace_id}/{hash|material_id}/g{代次}/{filename}``；
+    材料 key 为 ``{workspace_id}/{hash|material_id}/g{代次}/[{material_id}/]{filename}``
+    （#1279 起新文法在 g 段后带 material_id 唯一段，两种形态本判定都匹配）；
     workspace id 可字面为 jobs / jobs-staging（无保留名约束），那样的材料
     key 落在 jobs 前缀扫描内。真 job 产物同位置是 job id
     （``{ws}_{workflow_key}_{source_id}``，恒含下划线），永不匹配
@@ -158,6 +162,37 @@ def material_shaped_key(key: str) -> bool:
     """
     segments = key.split("/")
     return len(segments) >= 4 and segments[2][:1] == "g" and segments[2][1:].isdigit()
+
+
+def material_key_single_use(key: str) -> bool:
+    """#1279 新文法的材料 key 跨行不可复用 → 可进 GC 删除批。
+
+    形态：``{ws}/{hash|id}/g{代次}/{material_id}/{filename}``——g 段后的
+    第 4 段是行 id（uuid4 hex，32 位小写十六进制），删行后同文件同名再
+    上传也必得新 key，revalidate→删 窗口随之构造性关闭。旧文法
+    （无 material_id 段的 g key、legacy 无 g 段 key、inline-{uuid4} key）
+    与混合版本窗口内仍可能被旧写端复用的形态一律排除——保持只报告，
+    由 bucket lifecycle/TTL 排空。本判定与 materials.py / run_text_batch.py
+    / demo_material_seed.py 三条产线（以及 ``material_shaped_key`` 碰撞
+    分流面）的 key 文法必须同步演进。
+
+    已知残余（明示接受）：旧文法且首文件名段恰为 32 位小写 hex 的 key
+    在形态上不可区分（位置同 material_id 段）——该形态会被当作新文法
+    进删除批；其安全网是 apply_gc 的删除前新鲜反查（行已重建即救下），
+    残余窗口与 #344 已接受的 revalidate→删 亚秒窗同类，且要求混合版本
+    旧写端 + 32-hex 目录段文件名同时成立。
+    """
+    segments = key.split("/")
+    mid = segments[3] if material_shaped_key(key) and len(segments) >= 5 else ""
+    return len(mid) == 32 and all(char in "0123456789abcdef" for char in mid)
+
+
+def split_material_orphans(
+    orphans: list[ObjectEntry],
+) -> tuple[list[ObjectEntry], list[ObjectEntry]]:
+    """单次使用文法分流（#1279）：``(进删除批的新文法孤儿, 只报告的旧文法孤儿)``。"""
+    deletable = [o for o in orphans if material_key_single_use(o.key)]
+    return deletable, [o for o in orphans if not material_key_single_use(o.key)]
 
 
 def _rollback_backup_exempt(key: str) -> bool:
@@ -286,7 +321,8 @@ def apply_gc(
     删除之间并发 promote 可能重建同名 key 并建行，按扫描阶段缓存的孤儿
     判定删会把新权威对象删掉，DB 清单从此指向缺失内容。被过滤掉的 key
     计入 ``skipped_revalidated``，CLI 会如实报告，运维才能区分「删完了」
-    与「跳过了仍被引用的对象」。
+    与「跳过了仍被引用的对象」。材料删除批（#1279）同走新鲜反查：
+    反查对照 job_artifacts ∪ materials，行刚重建即被救下。
     """
     deleted = 0
     skipped = 0
@@ -294,26 +330,25 @@ def apply_gc(
     # 自 scan 层的豁免，但手工构造的 OrphanReport 会绕过它；把「GC 永不删
     # 恢复备份」钉在删除动作本身上。豁免按 _rollback_backup_exempt 收窄到
     # jobs/ 与 jobs-staging/ 前缀（#1285）且排除材料形态 key（#1295）：材
-    # 料 key 的文件名可含合法 .rollback 段（dir/.rollback/file.bin），删
-    # 除开放（#1279）后并入删除批时不得继承本豁免被永久跳过。
+    # 料 key 的文件名可含合法 .rollback 段（dir/.rollback/file.bin），并
+    # 入删除批时不得继承本豁免被永久跳过。
+    # #1279 同型纵深：材料删除批只收单次使用文法 key（material_id 唯一段，
+    # 跨行不可复用），门禁同样钉在删除动作本身——手工构造的报告把旧文法
+    # （可复用）材料 key 塞进 material_orphans 也不会被删。
     authority_orphans = [e for e in report.authority_orphans if not _rollback_backup_exempt(e.key)]
     staging_orphans = [e for e in report.staging_orphans if not _rollback_backup_exempt(e.key)]
+    material_orphans = [e for e in report.material_orphans if material_key_single_use(e.key)]
     if revalidate is not None:
-        for batch in _batches(authority_orphans):
-            known = revalidate([e.key for e in batch])
-            still_orphans = [e for e in batch if e.key not in known]
-            skipped += len(batch) - len(still_orphans)
-            if still_orphans:
-                deleted += _delete_batch(client, bucket, still_orphans)
-        for batch in _batches(staging_orphans):
-            known = revalidate([e.key for e in batch])
-            still_orphans = [e for e in batch if e.key not in known]
-            skipped += len(batch) - len(still_orphans)
-            if still_orphans:
-                deleted += _delete_batch(client, bucket, still_orphans)
+        for entries in (authority_orphans, staging_orphans, material_orphans):
+            for batch in _batches(entries):
+                known = revalidate([e.key for e in batch])
+                still_orphans = [e for e in batch if e.key not in known]
+                skipped += len(batch) - len(still_orphans)
+                if still_orphans:
+                    deleted += _delete_batch(client, bucket, still_orphans)
     else:
-        deleted += delete_entries(client, bucket, authority_orphans)
-        deleted += delete_entries(client, bucket, staging_orphans)
+        for entries in (authority_orphans, staging_orphans, material_orphans):
+            deleted += delete_entries(client, bucket, entries)
     return ApplyResult(deleted=deleted, skipped_revalidated=skipped)
 
 
