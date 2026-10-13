@@ -405,10 +405,10 @@ def test_error_message_redacts_config_environment_secret(
     secret 通道）里的值，经 register_secrets 注册后三面（error_message、
     metadata.agent_stderr_tail、归档锚点）均替换为 ***——修复前只扫
     os.environ，该通道完全不设防。"""
-    from worker.upload import stderr_evidence
+    from worker.upload import secret_registry
 
     secret = "cfg-gateway-token-ZZZ-not-in-os-environ"
-    monkeypatch.setattr(stderr_evidence, "_extra_secret_values", frozenset({secret}))
+    monkeypatch.setattr(secret_registry, "_extra_secret_values", frozenset({secret}))
     work_root = tmp_path / "work"
     _execution_dir(work_root)
     _events_with_stderr(work_root, [f"failed to authenticate with {secret}"])
@@ -440,7 +440,7 @@ def test_redact_secrets_replaces_longest_value_first(
 ) -> None:
     """R2 P3-4：短密钥是长密钥前缀时，先替换长的——否则短值先替换掉前缀，
     长密钥只剩不可恢复的残段。"""
-    from worker.upload.stderr_evidence import secret_snapshot
+    from worker.upload.secret_registry import secret_snapshot
 
     short, long = "tok-live-abc123", "tok-live-abc123def456ghi789"
     monkeypatch.setenv("SHORT_TOKEN", short)
@@ -456,7 +456,7 @@ def test_redact_secrets_byte_threshold_covers_cjk_short_keys(
 ) -> None:
     """R2 P3-4：8 个 CJK 字 = 24 字节的真实密钥不再因「字符>8」阈值漏掉
     （阈值改为字节>8）。"""
-    from worker.upload.stderr_evidence import secret_snapshot
+    from worker.upload.secret_registry import secret_snapshot
 
     cjk_secret = "九曜之门钥匙甲乙"  # 8 个 CJK 字符（24 字节）
     monkeypatch.setenv("GATEWAY_KEY", cjk_secret)
@@ -471,7 +471,7 @@ def test_redact_secrets_matches_decoded_domain_variants(
     + 通用换行解码，注册值必须在同一域匹配。CRLF 形态的注册值在翻译后的
     流上以 \n 变体整值命中；带尾换行的值在「流恰好以值 − 尾换行收尾」时
     以 rstrip 变体命中。最长优先保证完整值先于变体替换。"""
-    from worker.upload.stderr_evidence import secret_snapshot
+    from worker.upload.secret_registry import secret_snapshot
 
     crlf_pem = (
         "-----BEGIN PRIVATE KEY-----\r\n"
@@ -494,7 +494,7 @@ def test_redact_secrets_matches_decoded_domain_variants(
 def test_redact_secrets_covers_github_and_slack_shapes() -> None:
     """R2 P3-4：形态规则补 GitHub PAT/OAuth（ghp_/gho_）与 Slack
     bot/user/app token（xox[bap]-）三族。"""
-    from worker.upload.stderr_evidence import secret_snapshot
+    from worker.upload.secret_registry import secret_snapshot
 
     for secret in (
         "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2",
@@ -506,6 +506,18 @@ def test_redact_secrets_covers_github_and_slack_shapes() -> None:
         assert secret not in secret_snapshot().redact(f"echo {secret} failed")
 
 
+def test_redact_secrets_covers_bearer_shape() -> None:
+    """Bearer 形态的凭证只脱敏 credential 本体、保留 scheme 词——崩溃摘要
+    保持可读（"Bearer ***"），对抗复验变异自检（禁用 _BEARER_SHAPE 时本测试
+    必须红）补齐的覆盖缺口。"""
+    from worker.upload.secret_registry import secret_snapshot
+
+    credential = "Ab3dEf7hIj9kLm1nOp2Qr4.s6tUv8Wx0Yz2"
+    redacted = secret_snapshot().redact(f"auth failed: Bearer {credential}")
+    assert credential not in redacted
+    assert "Bearer ***" in redacted
+
+
 def test_sink_persist_failure_cleans_staging_and_never_fails_scan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -515,7 +527,7 @@ def test_sink_persist_failure_cleans_staging_and_never_fails_scan(
     返回值照常携带（脱敏后的）tail。"""
     import os as _os
 
-    from shared import pi_events
+    from shared import pi_events_scan as pi_events
     from worker.upload.stderr_evidence import AGENT_STDERR_FILENAME
 
     secret = "sk-live-supersecretgatewaytoken123"
@@ -548,7 +560,7 @@ def test_sink_persist_failure_cleans_staging_and_never_fails_scan(
 
 def test_sink_replace_success_leaves_no_staging(tmp_path: Path) -> None:
     """成功路径对照：replace 成功后 run 目录里只有锚点文件，无 staging 残留。"""
-    from shared import pi_events
+    from shared import pi_events_scan as pi_events
 
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -566,10 +578,10 @@ def test_secret_snapshot_reports_longest_registered_value(
     """#755 codex P1：快照的 max_chars——已注册最长密钥的字符数，shared/ 侧
     lookback 的对齐口径（max(512, 本值)，与匹配域同为解码后字符）。无注册
     密钥时 0；短于阈值（≤8 字节，阈值仍按字节）的值不参与脱敏、也不扩窗。"""
-    from worker.upload import stderr_evidence
-    from worker.upload.stderr_evidence import secret_snapshot
+    from worker.upload import secret_registry
+    from worker.upload.secret_registry import secret_snapshot
 
-    monkeypatch.setattr(stderr_evidence, "_extra_secret_values", frozenset())
+    monkeypatch.setattr(secret_registry, "_extra_secret_values", frozenset())
     # 只留受控 env：清掉可能含 TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL 命名的项。
     for name in list(os.environ):
         if any(
@@ -584,7 +596,7 @@ def test_secret_snapshot_reports_longest_registered_value(
     assert secret_snapshot().max_chars == 100
 
     monkeypatch.setattr(
-        stderr_evidence, "_extra_secret_values", frozenset({"密" * 150})
+        secret_registry, "_extra_secret_values", frozenset({"密" * 150})
     )  # 150 字符 / 450 字节
     assert secret_snapshot().max_chars == 150
 
@@ -596,19 +608,19 @@ def test_secret_snapshot_is_one_immutable_read(
     同一份值表（两次分别读取的竞态窗口消除：读取间隙 register_secrets
     注册更长值，旧形态会扩宽区间函数却不扩 lookback，切割可能劈开快照本可
     整值覆盖的密钥）；快照不可变，读取后再注册不影响已持有的快照。"""
-    from worker.upload import stderr_evidence
-    from worker.upload.stderr_evidence import secret_snapshot
+    from worker.upload import secret_registry
+    from worker.upload.secret_registry import secret_snapshot
 
     secret = "k" * 100
     monkeypatch.setenv("CI_KEY", secret)
-    real_values = stderr_evidence._secret_values
+    real_values = secret_registry._secret_values
     calls: list[int] = []
 
     def counting_values() -> list[str]:
         calls.append(1)
         return real_values()
 
-    monkeypatch.setattr(stderr_evidence, "_secret_values", counting_values)
+    monkeypatch.setattr(secret_registry, "_secret_values", counting_values)
     snapshot = secret_snapshot()
     assert calls == [1]  # 单次读取，两个面同源
     assert snapshot.max_chars == 100
@@ -616,7 +628,7 @@ def test_secret_snapshot_is_one_immutable_read(
 
     # 读取后注册更长值：已持有的快照不变（不可变快照）。
     monkeypatch.setenv("CI_KEY2", "z" * 300)
-    monkeypatch.setattr(stderr_evidence, "_secret_values", real_values)
+    monkeypatch.setattr(secret_registry, "_secret_values", real_values)
     assert snapshot.max_chars == 100
     assert snapshot.redact("z" * 300) == "z" * 300  # 新值不在旧快照里
     # 新快照读到新值。
@@ -639,7 +651,7 @@ def test_surrogateescape_env_secret_neither_crashes_nor_leaks(
     走 surrogateescape 对称编码（忠实往返、不炸），且密钥在匹配域
     （errors="replace" 解码渲染）仍被脱敏覆盖——不静默丢弃（丢弃 = 泄漏
     通道）。"""
-    from worker.upload.stderr_evidence import secret_snapshot
+    from worker.upload.secret_registry import secret_snapshot
 
     secret_bytes = b"gw-\xff-secret-material-" + bytes(range(0x80, 0x90))
     monkeypatch.setenv("LLM_GATEWAY_TOKEN", secret_bytes.decode("utf-8", "surrogateescape"))
