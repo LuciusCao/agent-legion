@@ -316,6 +316,11 @@ EOF
     ETag）后、启动调度前必须跑 `scripts/rebind_material_etags.py`
     （先 dry-run 再 --apply；字节核验不过的行 fail-closed 只报告，退出
     码 1），步骤与纪律见 backup-restore-runbook.md 的对象存储恢复段。
+    协议门禁（codex r7）：消费侧 ETag 核验要求 Worker 协议 v6——滚动
+    升级窗口内（Host 先升），命中谓词（无 hash 且有 etag 的材料输入）
+    的任务对旧 Worker 不可领（留队列等升级，不落失败）；hash 行与
+    etag='' 存量行不受门禁。升级顺序与矩阵见 remote-execution-runbook.md
+    §5。
   - 孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已
     不存在的测试 bucket）由 `scripts/report-orphan-s3-buckets.py`
     报告（只报不删，逐个给出 `clean-worktree.sh` 收尾命令）。

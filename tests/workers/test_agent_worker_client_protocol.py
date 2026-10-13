@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 import requests
 
+from shared.protocol import PROTOCOL_VERSION
 from worker import executor as agent_worker
 from worker.host.errors import HostResponseError
 from worker.registration.retry import register_with_retry
@@ -112,7 +113,8 @@ def test_client_registration_declares_latest_protocol_and_code_capacity() -> Non
         headers.update(kwargs["headers"])
         return (
             201,
-            b'{"worker_token": "tok", "host_protocol_version": 5, "allowed_workspaces": []}',
+            f'{{"worker_token": "tok", "host_protocol_version": {PROTOCOL_VERSION},'
+            ' "allowed_workspaces": []}'.encode(),
         )
 
     client.request = stub  # type: ignore[method-assign]
@@ -131,7 +133,7 @@ def test_client_registration_declares_latest_protocol_and_code_capacity() -> Non
         ["token-a", "token-b"],
     )
 
-    assert seen[0]["protocol_version"] == 5
+    assert seen[0]["protocol_version"] == PROTOCOL_VERSION
     assert seen[0]["max_code_concurrency"] == 3
     assert seen[0]["runtime_versions"] == {"velites": "velites 0.4.0-alpha"}
     # issue #35：全部 scoped token 逗号拼进同一个注册请求。
@@ -221,7 +223,10 @@ def test_registration_retries_transient_http_status_errors(
         del args, kwargs
         status = statuses.pop(0)
         if status == 201:
-            return (status, b'{"worker_token": "tok", "host_protocol_version": 5}')
+            return (
+                status,
+                f'{{"worker_token": "tok", "host_protocol_version": {PROTOCOL_VERSION}}}'.encode(),
+            )
         return (status, b"temporarily unavailable")
 
     client.request = flaky_request  # type: ignore[method-assign]

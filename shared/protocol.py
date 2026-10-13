@@ -23,6 +23,16 @@ Version history:
   that Worker in one write transaction. The single execution endpoint is
   unchanged (a mixed fleet is served by the same Host); a v5 Worker that
   meets a pre-v5 Host gets 404 and falls back to per-execution beats.
+- 6 (MATERIAL_ETAG_PROTOCOL_VERSION, #1279): material ETag consumption-side
+  verification. v6 Workers attach If-Match (the claim descriptor's
+  ``object_etag``) to material downloads; older Workers ignore the field and
+  would silently consume a same-size overwrite of a hash-less material, so
+  the Host's claim admission skips material-gated candidates for them
+  (queued, not failed — they become claimable again after the Worker
+  upgrades). Gated = the job's material inputs include a row with
+  ``object_etag <> ''`` and ``content_hash = ''`` (hash rows stay claimable:
+  the old Worker's sha256 recompute is already fail-closed; rows without an
+  etag have nothing to verify against).
 
 Field-level deprecations ride without a version bump while the wire shape is
 unchanged; a deprecated field's removal rides without one too once no
@@ -62,7 +72,8 @@ CODE_PROTOCOL_VERSION = 2
 MODEL_RUNTIME_PROTOCOL_VERSION = 3
 ARTIFACT_GZIP_PROTOCOL_VERSION = 4
 HEARTBEAT_BATCH_PROTOCOL_VERSION = 5
+MATERIAL_ETAG_PROTOCOL_VERSION = 6
 
 # The protocol version this software declares at registration. Equals the
 # latest feature version above.
-PROTOCOL_VERSION = HEARTBEAT_BATCH_PROTOCOL_VERSION
+PROTOCOL_VERSION = MATERIAL_ETAG_PROTOCOL_VERSION

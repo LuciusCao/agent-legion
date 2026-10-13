@@ -384,7 +384,10 @@ content_hash 的行它是唯一的内容身份，关闭「已签发 URL 的 1h �
 cache hit 不重验（填充时已验）。complete 的 sha256 流读同样携带刚 HEAD 到的 ETag 作
 If-Match（codex P1：HEAD 与读取之间对象被复用 URL 换掉时按核验失败处理，绝不把旧快照的
 ETag 与新字节一起落 ready）。存量行 `object_etag=''` 永久豁免（维持 size-only 语义），
-新旧 Server/Worker 互兼容（纯增量可选字段）。缓存寻址（codex r6）：hash 行内容寻址不变；
+新旧 Server 方向兼容（纯增量可选字段，Worker 按缺失回落）；**旧 Worker（协议 < v6）
+方向是门禁语义**：命中 ETag 谓词（无 hash 且有 etag）的材料任务对旧 Worker 不可领——
+claim admission 跳过、留队列不落失败，Worker 升级后恢复（见 shared/protocol.py v6 条目
+与 jobs/queries/material_claim_gate.py 的谓词论证）。缓存寻址（codex r6）：hash 行内容寻址不变；
 无 hash 行地址带上传代次（`{material_id}-v2g{代次}`，代次即身份）——repair 代次 +1 后
 旧 gen 地址自然孤儿化，修复前（可能被旧 Worker 无核验缓存的）毒化字节不再命中；
 代次来源与消费读取的行快照同一份（Host dispatch 现读行 / Worker claim 描述符与 presigned

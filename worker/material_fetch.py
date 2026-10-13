@@ -42,7 +42,9 @@ def _open_download(url: str, *, if_match: str = "") -> BinaryIO:
     If-Match is not a signed header, so attaching it to the presigned GET
     is allowed, and a same-size overwrite after complete() answers 412
     instead of silently serving poisoned bytes. Empty (older servers,
-    pre-v98 rows) = unconditional.
+    pre-v98 rows) = unconditional.（协议 < v6 的旧 Worker 领不到命中门禁
+    的材料任务——claim admission 跳过，不存在「忽略该字段仍执行」的
+    窗口；见 shared/protocol.py v6 条目。）
     """
     headers = {"If-Match": f'"{if_match}"'} if if_match else {}
     response = requests.get(url, stream=True, timeout=_DOWNLOAD_TIMEOUT_SECONDS, headers=headers)

@@ -1335,6 +1335,7 @@
     "server/app/jobs/queries/job_scan_delta.py": 28,
     "server/app/jobs/queries/job_scan_marks.py": 36,
     "server/app/jobs/queries/job_shard_reads.py": 21,
+    "server/app/jobs/queries/material_claim_gate.py": 44,
     "server/app/jobs/queries/material_inline.py": 60,
     "server/app/jobs/queries/material_repair.py": 47,
     "server/app/jobs/queries/material_locked_rereads.py": 25,

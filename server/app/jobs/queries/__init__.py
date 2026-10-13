@@ -8,6 +8,7 @@ from server.app.jobs.queries.groups import (
     WorkflowRevisionDomainQueriesMixin,
     WorkspaceDomainQueriesMixin,
 )
+from server.app.jobs.queries.material_claim_gate import MaterialClaimGateQueriesMixin  # #1279
 from server.app.jobs.queries.material_repair import MaterialRepairQueriesMixin  # #1279
 from server.app.jobs.queries.run_healing import RunHealingQueriesMixin  # #501
 from server.app.jobs.queries.token_usage_capture import TokenUsageCaptureQueriesMixin  # #1239
@@ -28,6 +29,8 @@ class JobQueries(
     # #1279: material ETag repair/rebind (the RunDomain group sits at its
     # budget band).
     MaterialRepairQueriesMixin,
+    # #1279 codex r7: material ETag protocol claim gate (same band).
+    MaterialClaimGateQueriesMixin,
     JobQueriesBase,
 ):
     """Backward-compatible facade for all workspace/job query operations.

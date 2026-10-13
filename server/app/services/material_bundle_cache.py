@@ -212,10 +212,11 @@ def bundle_claim_block(
                 "path": str(member["path"]),
                 "size_bytes": int(member.get("size_bytes") or 0),
                 "content_hash": str(member.get("content_hash") or ""),
-                # #1279：每成员的行记录 ETag（memory-only）；Worker 逐成员
-                # 对 presigned GET 带 If-Match 核验，空值（存量行）跳过。
-                # upload_generation 参与无 hash 成员的缓存寻址（与
-                # download_url 同行快照，代次恒一致；旧 Worker 忽略）。
+                # #1279：每成员的行记录 ETag + 代次（memory-only）；Worker
+                # 逐成员对 presigned GET 带 If-Match 核验、代次参与无 hash
+                # 成员缓存寻址，均与 download_url 同行快照；旧 Server 不下发
+                # （Worker 按缺失回落），旧 Worker（协议 < v6）领不到命中
+                # 门禁的材料任务（claim admission 跳过）。
                 "object_etag": str(member.get("object_etag") or ""),
                 "upload_generation": int(member["upload_generation"]),
                 "download_url": storage.presign_get(

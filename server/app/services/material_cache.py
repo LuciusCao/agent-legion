@@ -247,12 +247,15 @@ def material_claim_block(
         "content_type": str(row.get("content_type") or ""),
         "size_bytes": int(row.get("size_bytes") or 0),
         "content_hash": str(row.get("content_hash") or ""),
-        # #1279：行记录的 ETag 随描述符下发（memory-only，不落 manifest）；
-        # Worker 对 presigned GET 带 If-Match 核验。upload_generation 参与
-        # 无 hash 行的缓存寻址（代次即身份，见 material_cache_address）——
-        # 与 download_url 取自同一行快照，地址代次与 URL key 代次恒一致。
-        # 旧 Worker 忽略此字段，旧 Server 不下发（Worker 按缺失回落裸 id）
-        # ——双向兼容。
+        # #1279：行记录的 ETag 与代次随描述符下发（memory-only，不落
+        # manifest）；Worker 对 presigned GET 带 If-Match 核验，
+        # upload_generation 参与无 hash 行的缓存寻址（代次即身份，见
+        # material_cache_address）——与 download_url 取自同一行快照，地址
+        # 代次与 URL key 代次恒一致。旧 Server 不下发这两字段（Worker 按
+        # 缺失回落）；**旧 Worker（协议 < v6）领不到命中门禁的材料任务**
+        # （claim admission 跳过，见 shared/protocol.py v6 条目与
+        # jobs/queries/material_claim_gate.py），不存在「忽略字段仍执行」
+        # 的窗口。
         "object_etag": str(row.get("object_etag") or ""),
         "upload_generation": int(row["upload_generation"]),
         "download_url": storage.presign_get(

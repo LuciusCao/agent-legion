@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from shared.code_sandbox import CODE_RESULT_METADATA_KEYS
 from shared.protocol import (
     CODE_PROTOCOL_VERSION,
-    HEARTBEAT_BATCH_PROTOCOL_VERSION,
+    MATERIAL_ETAG_PROTOCOL_VERSION,
     MODEL_RUNTIME_PROTOCOL_VERSION,
     PROTOCOL_VERSION,
 )
@@ -40,7 +40,7 @@ def test_worker_declared_version_is_latest_shared() -> None:
     from worker.host.client import PROTOCOL_VERSION as worker_declared
 
     assert worker_declared is PROTOCOL_VERSION
-    assert PROTOCOL_VERSION == HEARTBEAT_BATCH_PROTOCOL_VERSION
+    assert PROTOCOL_VERSION == MATERIAL_ETAG_PROTOCOL_VERSION
 
 
 def test_batch_heartbeat_limit_mirrors_host_contract() -> None:
