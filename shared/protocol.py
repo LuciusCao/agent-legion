@@ -21,8 +21,15 @@ Version history:
   v5 Workers run one heartbeat loop per machine: a single
   ``POST /api/agent-executions/heartbeats`` renews every claimed lease of
   that Worker in one write transaction. The single execution endpoint is
-  unchanged (a mixed fleet is served by the same Host); a v5 Worker that
-  meets a pre-v5 Host gets 404 and falls back to per-execution beats.
+  unchanged and keeps serving older (pre-v5) Workers from the same Host.
+  The other direction is not a mixed-fleet mode: the registration handshake
+  (worker/host/client.py) requires ``host_protocol_version >=
+  PROTOCOL_VERSION``, so a v5 Worker meeting a pre-v5 Host is refused at
+  registration and exits 2 before it ever beats. The Worker's 404/405
+  fallback to per-execution beats (worker/execution/heartbeat_batch.py) only
+  covers a Host rolled back underneath an already-registered v5 Worker; that
+  Worker exits 2 the same way at its next registration (restart). See the
+  compatibility matrix in docs/remote-execution-runbook.md §5.
 
 Field-level deprecations ride without a version bump while the wire shape is
 unchanged; a deprecated field's removal rides without one too once no
