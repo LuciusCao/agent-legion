@@ -367,7 +367,7 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
     storage_key = f"{workspace_id}/{digest}/{filename}"
 
     class _FakeStorage:
-        def open_stream(self, key: str) -> io.BytesIO:
+        def open_stream(self, key: str, *, if_match: str = "") -> io.BytesIO:
             assert key == storage_key
             return io.BytesIO(payload)
 

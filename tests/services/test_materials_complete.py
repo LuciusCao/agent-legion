@@ -196,7 +196,7 @@ def test_complete_cas_rejects_key_rebuild_when_verification_failed(
 
     def verify_then_rebuild(storage_arg, row):  # noqa: ANN001, ANN202
         outcome = real_verify(storage_arg, row)  # 旧 key 无对象 → failure
-        assert outcome is not None
+        assert outcome[0] is not None
         service.presign(WORKSPACE_ID, filename="ok.txt", size_bytes=1, content_hash=digest)
         return outcome
 
@@ -291,7 +291,7 @@ def test_complete_does_not_overwrite_concurrent_ready(
         if not injected:
             injected.append(True)
             # 本方核验时对象尚未上传（失败结论）……
-            assert outcome is not None
+            assert outcome[0] is not None
             # ……其间另一个 complete 看到字节已落地并成功落 ready。
             storage.objects[key] = payload
             service.complete(WORKSPACE_ID, material_id)

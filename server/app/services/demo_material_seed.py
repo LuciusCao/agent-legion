@@ -96,8 +96,9 @@ def seed_demo_workspace_materials(
         storage_key = f"{workspace_id}/{digest}/g0/{material_id}/{path.name}"
         try:
             # Object first, row second: a ready row always has its object
-            # (a crashed seed between the two simply re-puts on the next run —
-            # the per-row unique key makes the put idempotent). The ETag of
+            # (a crashed seed between the two leaves an orphan object at a
+            # per-row unique key — reaped by the GC delete batch, #1279 —
+            # while the next seed run writes a fresh key). The ETag of
             # the stored object is recorded on the row (v98) so both
             # consumption chains can detect a later overwrite.
             storage.put_object(storage_key, payload, content_type=_CONTENT_TYPE)
