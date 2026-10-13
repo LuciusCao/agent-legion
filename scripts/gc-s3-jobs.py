@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""S3 jobs/ 与 jobs-staging/ 前缀及材料根前缀的孤儿对象 GC（#340/#1269/#1279）。dry-run 默认。
+"""S3 jobs/ 与 jobs-staging/ 前缀及材料根前缀的孤儿对象 GC（#340/#1269）。dry-run 默认。
 
 回收 job 删除路径永远看不到的对象：行已删但删除失败/未执行的 authority
 对象、promote 中途失败的拷贝、结果报告丢失的 Worker staging 残留；以及材料
@@ -9,13 +9,10 @@ server/app/services/s3_jobs_gc.py；材料根前缀（bucket 根排除两个 job
 的扫描在本文件（材料 key 形如 {workspace_id}/{hash|id}/v2g{代次}/m_{material_id}/{filename}，
 存活对象必有 materials 行——presign 先建行后签发 URL——故与 jobs/ 同手法：
 对照 materials.storage_key 清单行 + 宽限窗）。
-#1279 起材料 key 新文法第 3 段为 v2g{代次}（写端不可注入的服务端派生段）
-+ m_ 标记的 material_id 唯一段：删行后同文件同名再上传必得新 key，跨行
-不可复用，check-then-delete 窗口构造性关闭——新文法孤儿重新并入 --apply
-删除批（与 jobs/ 同走删除前新鲜反查）；旧文法孤儿（g{代次} 段形态，含
-32-hex / m_ 前缀首段文件名的歧义形态）保持只报告，待 bucket
-lifecycle/TTL 排空。文法门禁判定是
-s3_jobs_gc.material_key_single_use（删除动作内部还有一道同样的纵深闸门）。
+材料孤儿只扫描报告、不进入 --apply 删除批：#1279 已落地 v2g 单次使用 key
+文法与 material_key_single_use 门禁（跨行不可复用），但 PUT→行发布窗口
+（inline/demo seed 先 PUT 后建行，codex r5 P1）让删除批在窗口内会删掉
+未发布对象——删除批重开由 #1314 跟踪（发布窗口协议）。
 DB 侧对照 job_artifacts ∪ materials（须能连上本 worktree 的 Postgres）。
 
 用法:
@@ -39,10 +36,8 @@ if str(ROOT) not in sys.path:
 # 材料形态文法（第 3 段 (v2)g{代次}）的权威实现是
 # server/app/services/s3_jobs_gc.py 的 material_shaped_key（#1295 下沉：
 # 扫描期的 /.rollback/ 豁免判定也要用它排除材料形态 key）；单次使用
-# 文法门禁（v2g 代次段 + m_ 标记的 material_id 唯一段，#1279）的权威
-# 实现是同模块的 material_key_single_use——本文件的删除批分流与三条
-# key 产线（materials.py / run_text_batch.py / demo_material_seed.py）
-# 的文法必须同步演进。
+# 文法门禁 material_key_single_use（v2g 代次段 + m_ 标记的行 id 唯一段，
+# #1279）为 #1314 的材料删除批重开预备——当前材料孤儿只报告不删除。
 
 
 def scan_material_root_orphans(entry_lister, key_exists, grace_hours: float):
@@ -89,7 +84,6 @@ def main() -> int:
         make_db_key_existence,
         material_shaped_key,
         scan_orphans,
-        split_material_orphans,
     )
     from server.app.settings import load_settings
     from server.app.storage import load_s3_settings
@@ -151,11 +145,11 @@ def main() -> int:
         entry_lister, key_exists, grace_hours=args.grace_hours, staging_grace_hours=staging_grace
     )
     material_orphans = scan_material_root_orphans(entry_lister, key_exists, args.grace_hours)
-    # 碰撞命名空间分流（#1282 r4 P1；族不变量：删除批只收不可复用 key）：
-    # jobs/ 与 jobs-staging/ 前缀里材料形态的 key 是撞名 workspace 的材料，
-    # 与材料根前缀同理按单次使用文法分流，并入材料孤儿集合。含 .rollback
-    # 段的材料形态 key 自 #1295 起不被扫描期豁免吞掉（s3_jobs_gc 的
-    # _rollback_backup_exempt 叠加材料形态排除），能到达这里。
+    # 碰撞命名空间分流（#1282 r4 P1）：jobs/ 与 jobs-staging/ 前缀里材料
+    # 形态的 key 是撞名 workspace 的材料，与材料根前缀同理只报告不删除，
+    # 并入材料孤儿集合。含 .rollback 段的材料形态 key 自 #1295 起不被扫描
+    # 期豁免吞掉（s3_jobs_gc 的 _rollback_backup_exempt 叠加材料形态排
+    # 除），能到达这里。
     collided = [
         o for o in report.authority_orphans + report.staging_orphans if material_shaped_key(o.key)
     ]
@@ -165,24 +159,20 @@ def main() -> int:
     report.staging_orphans = [o for o in report.staging_orphans if not material_shaped_key(o.key)]
     material_orphans += collided
 
-    # #1279：单次使用文法（v2g 代次段 + m_ 标记的 material_id 唯一段）的
-    # 材料孤儿重新并入删除批（跨行不可复用，check-then-delete 窗口构造性
-    # 关闭；删除前仍走新鲜反查兜底）；旧文法（g 段形态）孤儿保持只报告
-    # ——旧写端仍可复用其 key，排空交给 bucket lifecycle/TTL。
-    report.material_orphans, legacy = split_material_orphans(material_orphans)
-
+    # 材料孤儿只报告不删除（#1282 收口纪律保持；#1279 准备好了 v2g 单次
+    # 使用 key 文法与 material_key_single_use 门禁，但 PUT→行发布窗口
+    # （inline/demo seed 先 PUT 后建行）让删除批在窗口内会删掉未发布对象
+    # ——codex r5 P1，删除批重开由 #1314 跟踪（发布窗口协议））。
     def _stat(entries: list) -> str:
         return f"{len(entries)} 个（{sum(o.size_bytes for o in entries)} 字节）"
 
     label = "apply" if args.apply else "dry-run"
     au, st = report.authority_orphans, report.staging_orphans
     print(f"{label}: jobs/ 孤儿 {_stat(au)}, jobs-staging/ 孤儿 {_stat(st)}")
-    print(
-        f"{label}: 材料孤儿 {_stat(report.material_orphans)}（进删除批）, 旧文法材料孤儿 {_stat(legacy)}（只报告不删除）"
-    )
+    print(f"{label}: 材料根前缀孤儿 {_stat(material_orphans)}（只报告不删除，#1314 重开删除批）")
     if not args.apply:
-        if report.count or legacy:
-            print("加 --apply 执行删除（幂等可重跑；旧文法材料孤儿不删）。")
+        if report.count or material_orphans:
+            print("加 --apply 执行删除（幂等可重跑；材料孤儿不删）。")
         return 0
 
     # 删除前逐批新鲜反查（TOCTOU，#344 评审 P1）：不用扫描阶段的缓存

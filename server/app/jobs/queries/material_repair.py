@@ -12,8 +12,9 @@
   hash 找旧行」的回路，presign 只会建新行、历史引用永不合愈）——hash /
   无 hash 两格统一由原 material_id 的 URL 重传，complete（携带轮换后
   代次）落 ready 后历史 job/bundle 引用即愈合（它们按 material_id 消费
-  新对象——旧对象已毒化/丢失，412 是它的终局；旧对象留在旧 key 由 GC
-  新文法删除批回收）。代次链：complete@…g0 → repair 落 v2g1 并签发
+  新对象——旧对象已毒化/丢失，412 是它的终局；旧对象留在旧 key 成为
+  孤儿，由 bucket lifecycle 回收，GC 材料删除批重开见 #1314）。代次链：
+  complete@…g0 → repair 落 v2g1 并签发
   URL——与 presign 重试同构、代次单调、每代 key 独立。
   uploading/failed 行 = 修复重试（上次 repair 与重传之间的崩溃恢复）：
   不轮换，返回现状 key/代次供重签 URL；expired → 409。

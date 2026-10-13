@@ -370,8 +370,9 @@ ready/failed 前在行锁内复查 verify 身份（storage_key + size_bytes + �
 R2–R5 P1）。`v2g` 版本标记位于写端无法注入的第 3 段（#1267 起在役写端该段恒为服务端
 派生的 `g<int>`，发不出 `v2g0`；codex r1/r2 P1 族——「第 4 段标记」两轮被「合法文件名
 巧合」反例击穿后的构造性关闭），`m_{material_id}` 标记第 4 段行唯一段：key 跨行不可复用
-——删行后同文件同名再上传必得新 key，S3 孤儿 GC 因此能按新文法把材料孤儿重新并入删除批
-（旧文法 g 段 key 保持只报告，构造性论证见 `s3_jobs_gc.material_key_single_use` docstring）；
+——删行后同文件同名再上传必得新 key。这为 S3 孤儿 GC 的材料删除批重开备好了文法与门禁
+（`s3_jobs_gc.material_key_single_use`），但重开本身由 #1314 跟踪（PUT→行发布窗口协议，
+codex r5 P1）；当前材料孤儿继续只报告不删除；
 inline 文本与 demo seed 两条直插 ready 产线同文法。
 
 ETag 内容身份（#1279）：complete 的 HEAD 核验同时取对象 ETag，与 ready 同事务落

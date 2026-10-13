@@ -289,20 +289,19 @@ EOF
     排除两个 jobs 前缀）对照 `job_artifacts` ∪ `materials` 清单行，
     宽限窗（默认 24h，`--grace-hours`/`--staging-grace-hours`
     可调）外的无行对象与过期暂存对象判定为孤儿；默认 dry-run，加
-    `--apply` 执行删除，幂等可重跑。#1279 起材料 key 新文法第 3 段为
-    `v2g{代次}`（写端不可注入的服务端派生段：#1267 起在役写端该段恒为
-    `g<int>`，发不出 `v2g0`——codex r1/r2 P1 族的构造性关闭，完整论证
-    见 `s3_jobs_gc.material_key_single_use` docstring）+ `m_` 标记的
-    material_id 唯一段（删行后同文件同名再上传必得新 key，跨行不可复用，
-    check-then-delete 窗口构造性关闭）——**新文法材料孤儿重新并入删除批**
-    （与 jobs/ 同走删除前新鲜反查）；旧文法材料孤儿（`g{代次}` 段形态，
-    含 32-hex / `m_` 前缀首段文件名的歧义形态）保持只报告不删除，排空
-    靠 bucket lifecycle 规则兜底（`s3_jobs_gc.material_key_single_use`
-    是门禁的权威判定，apply 内部还有一道同样的纵深闸门）。
+    `--apply` 执行删除，幂等可重跑。材料 key 内容寻址可复用（删行后
+    同文件再上传复用同 key），任何 check-then-delete 序列对可复用 key
+    都闭不死删除窗口——**材料根前缀孤儿只扫描报告、不进入删除批**
+    （#1282 三轮 codex P1 按族收口）。#1279 已落地 v2g 单次使用 key
+    文法与 `s3_jobs_gc.material_key_single_use` 门禁（跨行不可复用，
+    构造性论证见其 docstring），但 PUT→行发布窗口（inline/demo seed
+    先 PUT 后建行，codex r5 P1）让删除批在窗口内会删掉未发布对象——
+    **删除批重开由 #1314 跟踪（发布窗口协议）**，此前材料孤儿的回收
+    仍靠 bucket lifecycle 规则兜底。
     同理，workspace id 字面为 `jobs` / `jobs-staging` 时其材料 key 落在
     jobs 前缀扫描内，脚本在组装删除批前按材料形态文法（第 3 段为
     `(v2)g{代次}`；真 job 产物同位置是恒含下划线的 job id，零误伤）把这类
-    key 分流进材料孤儿集合，按同一文法门禁决定去留（#1282 r4 P1）。
+    key 分流进材料孤儿集合，同样只报告不删除（#1282 r4 P1）。
     job authority key 侧（#1309 判定，排除出 #1279 协议面）：#853 起产物
     每次写落 per-attempt uuid4 版本 key，不可复用已构造性成立；#853 前
     legacy 固定 key 的 revalidate→delete 亚秒窗残留由 #1309 独立跟踪。
@@ -312,8 +311,8 @@ EOF
     清 object_etag）并为**原行**新 key 签发受代次保护的一次性 PUT URL
     （hash 与无 hash 行统一由原 material_id 愈合：无 hash 行没有 presign
     按 hash 找旧行的回路）；用该 URL 重传后 complete 携带输出里的代次
-    即恢复 ready，历史 job 引用随之消费新对象；旧对象由 GC 新文法删除批
-    回收。S3 快照恢复（aws s3 cp 重传会改变大行
+    即恢复 ready，历史 job 引用随之消费新对象；旧对象成孤儿，由 bucket
+    lifecycle 回收（GC 材料删除批重开见 #1314）。S3 快照恢复（aws s3 cp 重传会改变大行
     ETag）后、启动调度前必须跑 `scripts/rebind_material_etags.py`
     （先 dry-run 再 --apply；字节核验不过的行 fail-closed 只报告，退出
     码 1），步骤与纪律见 backup-restore-runbook.md 的对象存储恢复段。

@@ -91,8 +91,8 @@ def seed_demo_workspace_materials(
         if digest in known_hashes:
             continue
         # #1279 key 文法：v2g 代次段 + m_{material_id} 标记唯一段（与上传
-        # /inline 产线同文法），删行后重播种子也必得新 key——GC 删除批对
-        # demo 孤儿开放。
+        # /inline 产线同文法），删行后重播种子也必得新 key——GC 材料删除批
+        # 重开（#1314）后 demo 孤儿即可回收。
         material_id = uuid.uuid4().hex
         storage_key = f"{workspace_id}/{digest}/v2g0/m_{material_id}/{path.name}"
         try:

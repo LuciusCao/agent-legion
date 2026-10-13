@@ -9,7 +9,8 @@ object_etag 已与对象脱节，同 hash 的 presign 又会 dedup 复用该行�
 object_etag）并为新 key 签发受代次保护的 presigned PUT URL：用它 PUT
 重传后 complete（携带输出里的代次）即恢复 ready，历史 job/bundle 对原
 material_id 的引用随之愈合（重传后消费新对象；旧对象已毒化/丢失，412
-是它的终局）。旧对象由 GC 新文法删除批回收。
+是它的终局）。旧对象成孤儿，由 bucket lifecycle 回收（GC 材料删除批
+重开见 #1314）。
 
 用法:
     uv run python scripts/request_material_reupload.py <workspace_id> <material_id> \

@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
@@ -65,17 +65,14 @@ class OrphanReport:
 
     authority_orphans: list[ObjectEntry]
     staging_orphans: list[ObjectEntry]
-    # #1279：材料根前缀（及撞名前缀分流来的）孤儿中通过单次使用文法门禁
-    # 的部分——只有它们进删除批；旧文法孤儿由 CLI 只报告不放进本字段。
-    material_orphans: list[ObjectEntry] = field(default_factory=list)
 
     @property
     def count(self) -> int:
-        return len(self.authority_orphans) + len(self.staging_orphans) + len(self.material_orphans)
+        return len(self.authority_orphans) + len(self.staging_orphans)
 
     @property
     def total_bytes(self) -> int:
-        entries = (*self.authority_orphans, *self.staging_orphans, *self.material_orphans)
+        entries = (*self.authority_orphans, *self.staging_orphans)
         return sum(o.size_bytes for o in entries)
 
 
@@ -168,17 +165,20 @@ def material_shaped_key(key: str) -> bool:
 
 
 def material_key_single_use(key: str) -> bool:
-    """#1279 新文法的材料 key 跨行不可复用 → 可进 GC 删除批。
+    """#1279 新文法的材料 key 跨行不可复用——#1314 重开材料删除批时的
+    准入门禁（当前材料孤儿只报告不删除，见 gc-s3-jobs.py；本谓词由
+    碰撞分流面的测试钉住，供 #1314 直接复用）。
 
     形态：``{ws}/{hash|id}/v2g{代次}/m_{material_id}/{filename}``。删行后
     同文件同名再上传也必得新 key，revalidate→删 窗口随之构造性关闭。
     旧文法（g 段非 v2g 形态、legacy 无代次段 key、inline-{uuid4} key）
-    一律排除——保持只报告，由 bucket lifecycle/TTL 排空。本判定与
-    materials.py / run_text_batch.py / demo_material_seed.py 三条产线
-    （以及 ``material_shaped_key`` 碰撞分流面）的 key 文法必须同步演进。
+    一律排除。本判定与 materials.py / run_text_batch.py /
+    demo_material_seed.py 三条产线（以及 ``material_shaped_key`` 碰撞
+    分流面）的 key 文法必须同步演进。
 
     构造性关闭论证（#1279 codex r1/r2 P1 族——「第 4 段标记」连续两轮被
-    「旧文法合法文件名巧合」反例击穿后，标记移入写端不可注入的第 3 段）：
+    「旧文法合法文件名巧合」反例击穿后，标记移入写端不可注入的第 3 段；
+    #1314 重开删除批时此论证是承重墙）：
 
     1. 逐条核验在役旧写端产线的第 3 段能力：presign 首发与重试
        （materials.py）第 3 段是服务端派生的字面量 ``'g' || generation``
@@ -205,14 +205,6 @@ def material_key_single_use(key: str) -> bool:
     return new_gen and _material_generation(segments).isdigit() and hex_ok
 
 
-def split_material_orphans(
-    orphans: list[ObjectEntry],
-) -> tuple[list[ObjectEntry], list[ObjectEntry]]:
-    """单次使用文法分流（#1279）：``(进删除批的新文法孤儿, 只报告的旧文法孤儿)``。"""
-    deletable = [o for o in orphans if material_key_single_use(o.key)]
-    return deletable, [o for o in orphans if not material_key_single_use(o.key)]
-
-
 def _rollback_backup_exempt(key: str) -> bool:
     """``/.rollback/`` 回滚备份豁免的判定（codex #774 P1 族，#1285/#1295 收窄）。
 
@@ -222,13 +214,13 @@ def _rollback_backup_exempt(key: str) -> bool:
 
     - 材料根前缀的 key（#1285）：材料文件名允许合法多段相对路径、无
       .rollback 保留段，``{ws}/{hash}/g{代次}/dir/.rollback/f.bin`` 形态
-      的旧代次/删行残留若继承本豁免，会在材料孤儿删除开放（#1279）后被
-      永久跳过；
+      的旧代次/删行残留若继承本豁免，会在材料孤儿删除批重开（#1314）
+      后被永久跳过；
     - 撞名前缀下的材料形态 key（#1295）：workspace id 字面为
       jobs / jobs-staging 时材料 key 落在产物前缀内，同样允许合法
       .rollback 段；若豁免先于材料形态分流命中，该 key 既不删除也不进
-      报告——永久不可见。豁免前先识别材料形态（第 3 段 g{代次}）排除之，
-      由 CLI 分流进材料只报告集合（#1282 收口纪律）。
+      报告——永久不可见。豁免前先识别材料形态（第 3 段 (v2)g{代次}）排除
+      之，由 CLI 分流进材料只报告集合（#1282 收口纪律）。
     """
     return (
         key.startswith((JOBS_PREFIX, STAGING_PREFIX))
@@ -339,8 +331,7 @@ def apply_gc(
     删除之间并发 promote 可能重建同名 key 并建行，按扫描阶段缓存的孤儿
     判定删会把新权威对象删掉，DB 清单从此指向缺失内容。被过滤掉的 key
     计入 ``skipped_revalidated``，CLI 会如实报告，运维才能区分「删完了」
-    与「跳过了仍被引用的对象」。材料删除批（#1279）同走新鲜反查：
-    反查对照 job_artifacts ∪ materials，行刚重建即被救下。
+    与「跳过了仍被引用的对象」。
     """
     deleted = 0
     skipped = 0
@@ -348,16 +339,12 @@ def apply_gc(
     # 自 scan 层的豁免，但手工构造的 OrphanReport 会绕过它；把「GC 永不删
     # 恢复备份」钉在删除动作本身上。豁免按 _rollback_backup_exempt 收窄到
     # jobs/ 与 jobs-staging/ 前缀（#1285）且排除材料形态 key（#1295）：材
-    # 料 key 的文件名可含合法 .rollback 段（dir/.rollback/file.bin），并
-    # 入删除批时不得继承本豁免被永久跳过。
-    # #1279 同型纵深：材料删除批只收单次使用文法 key（m_ 标记的行 id 唯一
-    # 段，跨行不可复用），门禁同样钉在删除动作本身——手工构造的报告把旧
-    # 文法（可复用）材料 key 塞进 material_orphans 也不会被删。
+    # 料 key 的文件名可含合法 .rollback 段（dir/.rollback/file.bin），材料
+    # 删除批重开（#1314）后并入时不得继承本豁免被永久跳过。
     authority_orphans = [e for e in report.authority_orphans if not _rollback_backup_exempt(e.key)]
     staging_orphans = [e for e in report.staging_orphans if not _rollback_backup_exempt(e.key)]
-    material_orphans = [e for e in report.material_orphans if material_key_single_use(e.key)]
     if revalidate is not None:
-        for entries in (authority_orphans, staging_orphans, material_orphans):
+        for entries in (authority_orphans, staging_orphans):
             for batch in _batches(entries):
                 known = revalidate([e.key for e in batch])
                 still_orphans = [e for e in batch if e.key not in known]
@@ -365,7 +352,7 @@ def apply_gc(
                 if still_orphans:
                     deleted += _delete_batch(client, bucket, still_orphans)
     else:
-        for entries in (authority_orphans, staging_orphans, material_orphans):
+        for entries in (authority_orphans, staging_orphans):
             deleted += delete_entries(client, bucket, entries)
     return ApplyResult(deleted=deleted, skipped_revalidated=skipped)
 

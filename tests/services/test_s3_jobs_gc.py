@@ -201,7 +201,7 @@ def test_rollback_exemption_scoped_to_jobs_prefixes() -> None:
     """#1285：``/.rollback/`` 豁免仅对 jobs/、jobs-staging/ 前缀的 key 生效
     ——promote 回滚备份只出现在这两个产物前缀下；材料根前缀 key 不适用
     （材料文件名允许合法多段相对路径、无 .rollback 保留段，
-    dir/.rollback/file.bin 形态的旧代次/删行残留在删除开放（#1279）后
+    dir/.rollback/file.bin 形态的旧代次/删行残留在删除批重开（#1314）后
     不得被豁免永久跳过）。钉豁免判定函数本身。"""
     assert s3_jobs_gc._rollback_backup_exempt("jobs/ws-1/job-1/.rollback/x.json")
     assert s3_jobs_gc._rollback_backup_exempt("jobs-staging/ws-1/job-1/e1/.rollback/a/o.json")
@@ -212,7 +212,7 @@ def test_rollback_exemption_scoped_to_jobs_prefixes() -> None:
 
 def test_apply_gc_rollback_exemption_does_not_cover_material_root_keys() -> None:
     """#1285：apply_gc 的纵深防御豁免同样按前缀收窄——手工构造的
-    OrphanReport 混入材料根前缀 key（#1279 删除开放后的形态）时，
+    OrphanReport 混入材料根前缀 key（#1314 删除批重开后的形态）时，
     材料 key 中的 /.rollback/ 段不构成豁免理由，jobs 前缀下的真回滚
     备份仍不可删。"""
     deleter = _RecordingDeleter()
@@ -245,12 +245,12 @@ def test_material_shaped_key_grammar() -> None:
 
 
 def test_material_key_single_use_grammar() -> None:
-    """#1279 单次使用文法门禁（删除批入口）：第 3 段是 ``v2g{代次}``（写端
-    不可注入的服务端派生段）且第 4 段是 ``m_`` 标记 + 32 位小写 hex
-    material_id → 跨行构造性不可复用，可删；其余形态一律只报告：
-    旧文法 g 段 key（含 r1 反例「首文件名段恰为 32 位 hex」与 r2 反例
-    「首文件名段恰为 m_<32hex>」）、legacy 无 g 段 key、inline 旧 key、
-    真 job 产物。"""
+    """#1279 单次使用文法门禁（为 #1314 材料删除批重开预备；当前材料孤儿
+    只报告不删除）：第 3 段是 ``v2g{代次}``（写端不可注入的服务端派生段）
+    且第 4 段是 ``m_`` 标记 + 32 位小写 hex material_id → 跨行构造性不可
+    复用；其余形态一律否：旧文法 g 段 key（含 r1 反例「首文件名段恰为
+    32 位 hex」与 r2 反例「首文件名段恰为 m_<32hex>」）、legacy 无 g 段
+    key、inline 旧 key、真 job 产物。"""
     mid = "m_" + "a" * 32
     assert s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/v2g0/{mid}/doc.txt")
     assert s3_jobs_gc.material_key_single_use(f"ws1/{mid[2:]}/v2g2/{mid}/dir/f.bin")
@@ -271,29 +271,6 @@ def test_material_key_single_use_grammar() -> None:
     assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/v2gx/{mid}/doc.txt")
     # 真 job 产物（第 3 段 job id 恒含下划线）。
     assert not s3_jobs_gc.material_key_single_use("jobs/ws-x/ws-x_q1/dead.json")
-
-
-def test_apply_gc_deletes_single_use_material_orphans() -> None:
-    """#1279：material_orphans 并入删除批——新鲜反查救下扫描后被重新引用
-    的 key；单次使用文法门禁钉在删除动作本身（手工塞进报告的旧文法/
-    歧义形态 key 也不删）。"""
-    deleter = _RecordingDeleter()
-    mid = "m_" + "a" * 32
-    keep = f"ws1/{'b' * 64}/v2g0/{mid}/keep.txt"
-    gone = f"ws1/{'b' * 64}/v2g0/{mid}/gone.txt"
-    legacy = f"ws1/{'b' * 64}/g0/legacy.txt"  # 旧文法：门禁拦截，不删不计 skipped
-    ambiguous = f"ws1/{'b' * 64}/g0/{mid}/amb.txt"  # r2 反例（g 段 + m_ 首段）：拦截
-    report = s3_jobs_gc.OrphanReport(
-        authority_orphans=[],
-        staging_orphans=[],
-        material_orphans=[_entry(keep), _entry(gone), _entry(legacy), _entry(ambiguous)],
-    )
-
-    result = s3_jobs_gc.apply_gc(deleter, "bkt", report, revalidate=lambda keys: {keep} & set(keys))
-
-    assert result.deleted == 1
-    assert result.skipped_revalidated == 1
-    assert deleter.deleted == [gone]
 
 
 def test_rollback_exemption_excludes_material_shaped_keys() -> None:

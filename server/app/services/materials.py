@@ -129,8 +129,10 @@ class MaterialsService:
         inject from a filename — codex r1/r2 P1 族), making every key
         single-use across row lifecycles: deleting the row and re-uploading
         the same file under the same name can never reproduce the key, which
-        is what lets the S3 orphan GC delete v2g-grammar material keys
-        (``material_key_single_use`` in s3_jobs_gc).
+        is what the S3 orphan GC's material delete batch will gate on
+        (``material_key_single_use`` in s3_jobs_gc; reopening the batch
+        itself is tracked by #1314 — until then material orphans are
+        report-only).
         Pre-namespace rows (no ``g`` segment) keep their keys untouched
         until their first retry.
         """

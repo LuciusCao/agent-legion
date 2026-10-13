@@ -80,7 +80,7 @@ def test_presign_dedups_ready_material_with_same_hash(service, storage) -> None:
 
 def test_deleted_row_key_is_never_reused(service, storage) -> None:
     """#1279 验收项：删行后同文件同名（同 hash）再上传必得新 key——g 段后的
-    material_id 唯一段使 key 跨行不可复用，GC 删除批因此构造性安全。"""
+    material_id 唯一段使 key 跨行不可复用——GC 删除批重开（#1314）后构造性安全。"""
     payload = b"reupload-me"
     digest = _sha256(payload)
     first = service.presign(

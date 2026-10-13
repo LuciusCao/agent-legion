@@ -311,8 +311,8 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
 重试失效，v2g 版本标记（写端不可注入）+ m_ 标记的 material_id 唯一段（#1279）让 key
 跨行不可复用且对 GC 门禁无歧义；更早的
 存量行无代次段、key 不可变，旧代次对象成为孤儿，由 GC/bucket lifecycle 回收；
-`scripts/gc-s3-jobs.py` 的材料根前缀扫描（#1269）对新文法 key 已并入删除批、旧文法
-key 只报告（#1279），#1267），材料 API 拒绝目录形态与下载时不可归一化的
+`scripts/gc-s3-jobs.py` 的材料根前缀扫描（#1269）只报告不删除——#1279 已备好 v2g 单次使用
+文法与门禁，删除批重开由 #1314 跟踪（PUT→行发布窗口协议，codex r5 P1），#1267），材料 API 拒绝目录形态与下载时不可归一化的
 `filename`——以 `/` 结尾、含空 / `.` / `..` 段、含反斜杠或控制字符；`content_hash`
 同样拼进 key，非空时必须是 64 位小写 sha256 hex（422，
 `MaterialsService.presign` 入口经 `material_key_validation.py` 校验，#1119/#1267）。入口收紧
