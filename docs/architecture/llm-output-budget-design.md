@@ -31,7 +31,9 @@
    `config` → workspace 覆盖，intake 冻结，经 `manifest["config"]` 下发），
    `server/app/workflows/velites_command.py` 映射为 `--max-output-tokens N`；
    velites 侧该值覆盖 models.json 的 `maxOutputTokens`（Anthropic），并在
-   OpenAI 兼容路径作为请求体 `max_tokens` 下发（未配置时保持原样不发）。
+   OpenAI 兼容路径作为请求体 `max_tokens` 下发（未配置时保持原样不发；推理模型
+   可在 models.json 模型条目声明 `outputTokensParam: max_completion_tokens` 改用该字段，
+   #1093，见 [velites-model-registry.md](velites-model-registry.md)）。
    与累计预算 `max_tokens`（整个 run 的 usage 累计）是两回事。节点声明示例：
 
    ```yaml

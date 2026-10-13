@@ -45,6 +45,7 @@ use super::{CompletionRequest, Provider, ProviderError};
 mod aggregate;
 
 use crate::events::{Message, RequestTiming, Role, StopReason};
+use crate::models::OutputTokensParam;
 use aggregate::{parse_non_streaming, read_sse_stream, wire_message, wire_tool};
 
 /// Bounds connection setup; streaming itself has no total deadline.
@@ -61,9 +62,12 @@ pub struct OpenAiCompatProvider {
     api_key: String,
     client: reqwest::Client,
     read_idle_timeout: Duration,
-    /// Per-call output cap sent as `max_tokens` (#952); `None` keeps the
-    /// historical wire shape (no `max_tokens`, server default applies).
+    /// Per-call output cap (#952); `None` keeps the historical wire shape
+    /// (no cap field, server default applies).
     max_output_tokens: Option<u64>,
+    /// Which body field carries the cap (#1093): `max_tokens` unless the
+    /// registry declares `max_completion_tokens` (OpenAI reasoning models).
+    output_tokens_param: OutputTokensParam,
 }
 
 impl OpenAiCompatProvider {
@@ -84,12 +88,20 @@ impl OpenAiCompatProvider {
             client,
             read_idle_timeout: DEFAULT_READ_IDLE_TIMEOUT,
             max_output_tokens: None,
+            output_tokens_param: OutputTokensParam::default(),
         })
     }
 
     /// Set the per-call output cap (`--max-output-tokens`, #952).
     pub fn with_max_output_tokens(mut self, max_output_tokens: Option<u64>) -> Self {
         self.max_output_tokens = max_output_tokens;
+        self
+    }
+
+    /// Set the body field the cap rides in (registry `outputTokensParam`,
+    /// #1093). Only consulted when a cap is set.
+    pub fn with_output_tokens_param(mut self, param: OutputTokensParam) -> Self {
+        self.output_tokens_param = param;
         self
     }
 
@@ -114,7 +126,8 @@ impl OpenAiCompatProvider {
         body.insert("stream".into(), json!(true));
         body.insert("stream_options".into(), json!({"include_usage": true}));
         if let Some(max_output_tokens) = self.max_output_tokens {
-            body.insert("max_tokens".into(), json!(max_output_tokens));
+            let field = self.output_tokens_param.field_name();
+            body.insert(field.into(), json!(max_output_tokens));
         }
         if !req.tools.is_empty() {
             body.insert(
