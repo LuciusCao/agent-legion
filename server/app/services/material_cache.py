@@ -45,7 +45,8 @@ def open_verified_stream(
     except ClientError as exc:
         if is_precondition_failed(exc):
             raise MaterializeError(
-                f"{label} bytes changed after completion (ETag mismatch); re-upload the material"
+                f"{label} bytes changed after completion (ETag mismatch); repair the row "
+                "with scripts/request_material_reupload.py, then re-upload the material"
             ) from exc
         raise
 

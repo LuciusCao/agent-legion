@@ -383,7 +383,11 @@ content_hash 的行它是唯一的内容身份，关闭「已签发 URL 的 1h �
 cache hit 不重验（填充时已验）。complete 的 sha256 流读同样携带刚 HEAD 到的 ETag 作
 If-Match（codex P1：HEAD 与读取之间对象被复用 URL 换掉时按核验失败处理，绝不把旧快照的
 ETag 与新字节一起落 ready）。存量行 `object_etag=''` 永久豁免（维持 size-only 语义），
-新旧 Server/Worker 互兼容（纯增量可选字段）。
+新旧 Server/Worker 互兼容（纯增量可选字段）。恢复面（codex r4 P1 族）：ETag 失配的
+ready 行经 `scripts/request_material_reupload.py` 翻回 uploading 修复（重试路径换新 key，
+历史 job 按 material_id 消费重传后的新对象）；S3 快照恢复（aws s3 cp 改变大行 ETag）后
+启动调度前必须跑 `scripts/rebind_material_etags.py` 重绑（字节核验不过 fail-closed），
+见 backup-restore-runbook.md。
 
 SigV4 presigned PUT 无法约束 Content-Length，size/hash 一律由 complete 时
 服务端 HEAD + 流式校验强制（v1 实现为完整读自算 sha256，简单可靠；上传端

@@ -8,6 +8,7 @@ from server.app.jobs.queries.groups import (
     WorkflowRevisionDomainQueriesMixin,
     WorkspaceDomainQueriesMixin,
 )
+from server.app.jobs.queries.material_repair import MaterialRepairQueriesMixin  # #1279
 from server.app.jobs.queries.run_healing import RunHealingQueriesMixin  # #501
 from server.app.jobs.queries.token_usage_capture import TokenUsageCaptureQueriesMixin  # #1239
 from server.app.jobs.queries.workflow_draft_generation import WorkflowDraftGenerationQueriesMixin
@@ -24,6 +25,9 @@ class JobQueries(
     WorkflowDraftGenerationQueriesMixin,
     # #1239: lease-finish token capture (the RunDomain group sits at its budget band).
     TokenUsageCaptureQueriesMixin,
+    # #1279: material ETag repair/rebind (the RunDomain group sits at its
+    # budget band).
+    MaterialRepairQueriesMixin,
     JobQueriesBase,
 ):
     """Backward-compatible facade for all workspace/job query operations.

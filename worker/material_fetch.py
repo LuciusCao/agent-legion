@@ -49,7 +49,8 @@ def _open_download(url: str, *, if_match: str = "") -> BinaryIO:
         response.close()
         raise MaterializeError(
             "material bytes changed after the server's completion check "
-            "(ETag mismatch); re-run the job to re-resolve the material"
+            "(ETag mismatch); an operator must repair the row with "
+            "scripts/request_material_reupload.py, then re-upload the material"
         )
     if response.status_code != 200:
         response.close()

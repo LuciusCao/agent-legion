@@ -628,6 +628,22 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
       发现，零字节目录标记除外），内容再逐对象对 `SHA256SUMS`。外部 S3 开了版本控制时，
       `rm` 只留下删除标记，旧版本仍占空间。
 
+      **材料 ETag 重绑（#1279，启动调度前必做）**：`aws s3 cp --recursive` 对较大的
+      文件走分段上传，即使字节与 sha256 完全相同，恢复后对象的 ETag 也与备份前不同——
+      而 `materials.object_etag` 仍是备份前的值，消费侧（Host/Worker 物化）的 If-Match
+      核验会全线 412。逐对象校验通过后、恢复调度（`scripts/resume-workspaces.sh` /
+      打开 worker claim）之前，先跑：
+
+      ```bash
+      uv run python scripts/rebind_material_etags.py          # dry-run：报告将重绑的行
+      uv run python scripts/rebind_material_etags.py --apply  # 逐行核验字节后重绑
+      ```
+
+      脚本对 ETag 失配的行先核验恢复字节（size 恒验 + content_hash 非空时流式
+      sha256），通过才原子重绑（CAS）；字节不符或对象缺失的行 fail-closed 只报告
+      （退出码 1），必须人工处置后才能启动调度。
+      卷级冷备份（下文）逐字节还原则 ETag 不变，无需重绑（跑了也是全匹配的空转）。
+
    **对象存储·卷级冷备份**（§2.2.2 的备份）：停对象存储服务，`RESTORE_INTO` 校验后清空
    整个卷再解包，`THEN_UP` 重新拉起（无论成败）。`RESTORE_INTO` **先完整校验归档再删**：
    `tar tzf` 读完整个 gzip 流，截断或损坏的包会在这里失败，现有卷原样不动。现有卷还有

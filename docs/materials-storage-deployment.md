@@ -301,11 +301,20 @@ EOF
     是门禁的权威判定，apply 内部还有一道同样的纵深闸门）。
     同理，workspace id 字面为 `jobs` / `jobs-staging` 时其材料 key 落在
     jobs 前缀扫描内，脚本在组装删除批前按材料形态文法（第 3 段为
-    `g{代次}`；真 job 产物同位置是恒含下划线的 job id，零误伤）把这类
+    `(v2)g{代次}`；真 job 产物同位置是恒含下划线的 job id，零误伤）把这类
     key 分流进材料孤儿集合，按同一文法门禁决定去留（#1282 r4 P1）。
     job authority key 侧（#1309 判定，排除出 #1279 协议面）：#853 起产物
     每次写落 per-attempt uuid4 版本 key，不可复用已构造性成立；#853 前
     legacy 固定 key 的 revalidate→delete 亚秒窗残留由 #1309 独立跟踪。
+  - ETag 失配的恢复面（#1279）：消费侧 If-Match 检出 412 后，行级修复走
+    `uv run python scripts/request_material_reupload.py <workspace_id>
+    <material_id>`——把 ready 行翻回 uploading 并清 object_etag（此后同
+    hash presign 走重试路径：代次 +1、v2g 新 key、签发新 URL），客户端
+    重传即愈合；历史 job 按 material_id 引用行，重传后消费新对象，旧
+    对象由 GC 新文法删除批回收。S3 快照恢复（aws s3 cp 重传会改变大行
+    ETag）后、启动调度前必须跑 `scripts/rebind_material_etags.py`
+    （先 dry-run 再 --apply；字节核验不过的行 fail-closed 只报告，退出
+    码 1），步骤与纪律见 backup-restore-runbook.md 的对象存储恢复段。
   - 孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已
     不存在的测试 bucket）由 `scripts/report-orphan-s3-buckets.py`
     报告（只报不删，逐个给出 `clean-worktree.sh` 收尾命令）。
