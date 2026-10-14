@@ -129,7 +129,9 @@ nodes:
   出边）能与派生边集正确合并。
 - **`text` 条目（直接输入需求）**：`{type:"text", content, filename?}` 把需求
   文字直接写进 run 请求；`RunService` 在契约/节点配置/pin 全部校验通过后、
-  run 行写入前，把它落成一份 ready 材料（sha256 内容寻址，对象先写、行后插，
+  run 行写入前，把它落成一份 ready 材料（sha256 内容寻址，经服务端材料写入 chokepoint
+`material_object_publish`：先落无 hash 的 uploading intent 行、再写对象、再原子换成 ready
+行——行先于对象，#1314，见 §6.4.2；
   `.md`/`.txt`/`.json` 文件名白名单（`.json` 落盘 `application/json`，#813），UTF-8 ≤ 64 KiB，`run_text_items.py` +
   `jobs/queries/material_inline.py`），再改写成普通 `material` 条目进入解析——
   `input_json`、manifest、Worker 物化、skill 看到的与手动上传同名文件完全
@@ -138,13 +140,15 @@ nodes:
   时整条请求 503。同一文本重复提交命中同一材料、同一 job dedup 键。契约
   缺省不含 `text`（存量 fail-closed），Studio 入口节点显式勾选「直接输入
   需求」后「添加条目」出现「输入需求」Tab。
-  多条文本先全部校验并暂存对象，再以单个事务提交材料行；中途失败回滚整批
-  新行，并补偿删除本次暂存对象。文本入口从不复活、重定向或修改既有材料行。
+  多条文本先全部校验、预检 hash，再整批落 intent 行并暂存对象，最后以单个事务把
+  intent 行换成 ready 行；中途失败回滚整批新行，并补偿删除本次的 intent 行与暂存对象
+  （先删行、后删对象）。文本入口从不复活、重定向或修改既有材料行。
   对象 key 包含请求独占随机段，hash 仍是材料去重身份；并发冲突只复用 ready
   胜者材料、删除落败对象，不能按共享
   hash 路径补偿删除。提交和清理核验使用同一 workspace 事务锁，避免提交
   确认丢失时误删已提交对象。清理时数据库或存储不可达会记录待清理 key，
-  保留对象以保护数据；进程崩溃与持续清理失败仍需运维回收孤儿对象。
+  保留对象以保护数据（intent 行随之保留，对象不会被 GC 删除）；进程崩溃留下的 uploading
+  intent 行可在材料列表删除，对象删除失败留下的单次使用 key 孤儿由 GC 材料删除批回收。
   文件名拒绝控制字符，内容和文件名拒绝无效 UTF-8，避免写入后才发生编码错误。
   混合提交含超长需求时禁用创建按钮（包括切换到其他 Tab 后），避免悄悄
   丢掉需求、只提交其他材料。
@@ -370,10 +374,9 @@ ready/failed 前在行锁内复查 verify 身份（storage_key + size_bytes + �
 R2–R5 P1）。`v2g` 版本标记位于写端无法注入的第 3 段（#1267 起在役写端该段恒为服务端
 派生的 `g<int>`，发不出 `v2g0`；codex r1/r2 P1 族——「第 4 段标记」两轮被「合法文件名
 巧合」反例击穿后的构造性关闭），`m_{material_id}` 标记第 4 段行唯一段：key 跨行不可复用
-——删行后同文件同名再上传必得新 key。这为 S3 孤儿 GC 的材料删除批重开备好了文法与门禁
-（`s3_jobs_gc.material_key_single_use`），但重开本身由 #1314 跟踪（PUT→行发布窗口协议，
-codex r5 P1）；当前材料孤儿继续只报告不删除；
-inline 文本与 demo seed 两条直插 ready 产线同文法。
+——删行后同文件同名再上传必得新 key。S3 孤儿 GC 的材料删除批以它为准入门禁
+（`s3_jobs_gc.material_key_single_use`），配合写端「行先于对象」协议与年龄下限重开删除
+（#1314，§6.4.2）；inline 文本与 demo seed 两条服务端产线同文法。
 
 ETag 内容身份（#1279）：complete 的 HEAD 核验同时取对象 ETag，与 ready 同事务落
 `materials.object_etag`（inline/demo 产线在 put 后 HEAD 取 ETag 一并落列）——对无
@@ -453,6 +456,70 @@ sha256 fail-closed 兜底（既有）。新 complete / inline / demo seed 的行
   等价），repair 重传可换内容身份。
 - 信任前提：rebind 对无 hash 行只 size 核验（信任运维备份字节）；worker 版本自报
   （trusted infra）。
+
+#### 6.4.2 材料对象写入协议 × S3 孤儿 GC 材料删除批（#1314）
+
+**不变式**：任何被 GC 删除的材料前缀对象，在删除时刻及之后都不可能被任何 materials 行
+（含 uploading intent）引用。
+
+**写端协议（行先于对象）**：每个材料对象 key 在第一个字节写入之前，已被一条**已提交**的
+materials 行引用；key 由新 uuid（material_id）或行锁内单调递增的代次派生，行删除或迁走
+后再无写者能让行重新引用它。写入入口全集（`tests/services/test_material_write_surfaces.py`
+按 AST 钉住 `put_object` / `presign_put` 调用点）：
+
+| 入口 | 写字节的方式 | 行先于对象的落点 |
+| --- | --- | --- |
+| presign 首发（`MaterialsService.presign`） | 浏览器经 presigned PUT（1h） | insert uploading 行提交后才签 URL |
+| presign 重试（同 hash 非 ready 行） | 同上，新代次 key | 行锁内代次 +1、派生 `v2g{n+1}` key，提交后才签 URL；旧 URL 指向死 key |
+| repair（`request_material_reupload`） | 同上 | 行锁内 ready→uploading、代次 +1、轮换 key，提交后才签 URL |
+| inline 文本（`run_text_batch`） | 服务端 `put_object` | chokepoint `material_object_publish`：无 hash uploading intent 行 → PUT/HEAD → 同事务删 intent + 插 ready（CAS：intent 必须仍在） |
+| demo seed（`demo_material_seed`） | 同上 | 同上（`on_non_ready='skip'`、不设 TTL） |
+| complete / rebind / bundle 创建 | 不写字节 | — |
+| Worker | 不写材料前缀（只写 `jobs-staging/`） | — |
+| 备份恢复（aws s3 cp/sync） | 运维 | 模型外：恢复纪律见 backup-restore-runbook |
+
+**GC 判定入口**：`scripts/gc-s3-jobs.py` → `s3_material_gc.collect_gc_report`（`scan_orphans`
+两个 jobs 前缀 + `scan_material_root_orphans` 根前缀，扫描期用一次性载入的 key 集合；撞名
+前缀里的材料形态 key 分流进材料候选；`partition_material_orphans` 三分为进删除批 / 暂缓 /
+旧文法只报告）→ `--apply` 才执行 `s3_jobs_gc.apply_gc`（jobs 两条道，**不删任何材料形态
+key**）与 `s3_material_gc.apply_material_gc`（材料道）；dry-run 只报告。材料道三道门：
+①单次使用文法；②对象年龄过 `max(--grace-hours, MATERIAL_MIN_GRACE_HOURS=1h)`，删除动作处
+按当时时钟复核；③每批删除前新鲜反查（无反查整道不删）。门禁钉在删除函数本身，手工构造的
+列表同样受约束。
+其余删除入口：`MaterialsService.delete`（行锁内先删对象后删行）、TTL 回收（先删行后删
+对象）、chokepoint 补偿（先删 intent 行后删对象）、bucket lifecycle（运维，按年龄）。
+
+**交错决策表**（写者处于某状态时 GC 走到扫描 Sc / 反查 Rv / 删除 Dl；`--grace-hours 0`）：
+
+| 写者状态 | 对象 | 引用 K 的行 | GC 结论 | 判定 |
+| --- | --- | --- | --- | --- |
+| chokepoint：intent 已提交、未 PUT | 无 | intent | 无可删 | 安全 |
+| chokepoint：PUT 后、发布前（含卡住远超 1h） | 有 | intent | Sc 若缓存早于 intent 可判候选；Rv 见 intent 救下 | 安全（故障注入用例） |
+| chokepoint：发布事务提交中 | 有 | intent 或 ready（同事务换手） | Rv 只读已提交状态，二者必居其一 | 安全 |
+| chokepoint：复用 ready 胜者 / skip / 失败补偿删行后 | 有 | 无 | 可删 | 安全：K 的 id 不复用，永不再被引用 |
+| chokepoint：intent 被用户删除（删除 API 连对象一起删） | 可能被迟到 PUT 重建 | 无 | 可删 | 安全：发布 CAS 拒绝，不会有 ready 行指向 K |
+| chokepoint：intent 被用户 complete 成 failed/ready | 有 | 该行 | 保留 | 安全：发布 CAS 409，补偿只删 intent 形态行 |
+| chokepoint：release 事务失败 / 进程崩溃 | 有/无 | intent 残留 | 保留 | 安全；残余：uploading 行待用户删除 |
+| presign：URL 签出后过期未用、行永不 complete | 有/无 | uploading | 保留（intent，不是孤儿） | 安全；残余同上 |
+| presign：complete 核验失败翻 failed | 有 | failed | 保留 | 安全 |
+| presign 重试 / repair 轮换后的旧代 K（旧 URL ≤1h 仍可迟到 PUT） | 有 | 无 | 删 | 安全：代次单调，行回不到旧 key |
+| Sc 后才发生的重试 / repair 轮换 | 有 | Sc 时有、Rv 时无 | 本轮不进候选，下轮删 | 安全（扫描缓存只会少删） |
+| 行被删除 API / TTL 回收后的残留或幽灵 PUT（URL ≤1h） | 有 | 无 | 删；GC 后再 PUT 只是新孤儿 | 安全：id 不复用 |
+| #1312 期旧 Host（先 PUT 后建行，v2g key）窗口 < 1h | 有 | 无（暂未建） | 年龄下限暂缓 | 安全（纵深） |
+| 同上，PUT 后卡住 > 1h 才建行 | 有 | 删后才出现 ready 行 | 删 | **不安全：声明残余** |
+| 旧文法 key（`g{n}` / legacy 无代次段 / `inline-{uuid}`） | 有 | 无 | 只报告 | 安全（不删，#1282 纪律） |
+| 撞名前缀（workspace 名 `jobs`/`jobs-staging`）里的材料形态 key | 同上各行 | — | 同材料道门禁 | 同上各行 |
+
+Rv→Dl 之间不会冒出引用 K 的新行：协议内写者只为「尚不存在对象」的 key 建行（新 uuid 或
+新代次），而 K 在 Sc 时已有对象；唯一的例外是协议外的旧 Host，由年龄下限覆盖（Dl 时对象
+年龄 > 1h ⇒ 其 PUT→建行窗口 > 1h）。在途 claim 持有已轮换旧 key 的 presigned GET 会读到
+404 而非 412——repair 只轮换已判毒化的对象，两者都是失败结局，不扩大语义。
+
+**声明的残余窗口**：①#1312 期 Host 与本版 GC CLI 混跑且其 inline/demo seed 在 PUT 与建行
+之间卡住超过 1h（默认部署里 GC CLI 随 Host 镜像同版本运行，不出现此组合）；②写端崩溃
+或 release 失败留下的 uploading intent 行及其对象不被 GC 回收（与浏览器放弃上传的
+uploading 行同类，用户删除行即回收）；③模型外：DB 从旧备份恢复会复活引用已删对象的行
+（恢复纪律：S3 与 DB 同步恢复、核对后再跑 GC）；bucket lifecycle 的按年龄删除。
 
 SigV4 presigned PUT 无法约束 Content-Length，size/hash 一律由 complete 时
 服务端 HEAD + 流式校验强制（v1 实现为完整读自算 sha256，简单可靠；上传端

@@ -129,10 +129,11 @@ class MaterialsService:
         inject from a filename — codex r1/r2 P1 族), making every key
         single-use across row lifecycles: deleting the row and re-uploading
         the same file under the same name can never reproduce the key, which
-        is what the S3 orphan GC's material delete batch will gate on
-        (``material_key_single_use`` in s3_jobs_gc; reopening the batch
-        itself is tracked by #1314 — until then material orphans are
-        report-only).
+        is what the S3 orphan GC's material delete batch gates on
+        (``material_key_single_use`` in s3_jobs_gc, #1314). The row (and
+        its key) commits BEFORE the PUT URL is signed, so every object this
+        protocol writes is referenced by a row from its first byte — the
+        other half of the delete batch's safety argument.
         Pre-namespace rows (no ``g`` segment) keep their keys untouched
         until their first retry.
         """

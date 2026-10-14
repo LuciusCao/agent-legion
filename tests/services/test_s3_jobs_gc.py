@@ -212,18 +212,19 @@ def test_rollback_exemption_scoped_to_jobs_prefixes() -> None:
 
 def test_apply_gc_rollback_exemption_does_not_cover_material_root_keys() -> None:
     """#1285：apply_gc 的纵深防御豁免同样按前缀收窄——手工构造的
-    OrphanReport 混入材料根前缀 key（#1314 删除批重开后的形态）时，
-    材料 key 中的 /.rollback/ 段不构成豁免理由，jobs 前缀下的真回滚
-    备份仍不可删。"""
+    OrphanReport 混入非材料形态的根前缀 key 时，其 /.rollback/ 段不构成
+    豁免理由，jobs 前缀下的真回滚备份仍不可删。材料形态 key（#1314）
+    一律不在 apply_gc 删除——只经 s3_material_gc 的门禁。"""
     deleter = _RecordingDeleter()
-    material_key = f"ws1/{'a' * 64}/g1/dir/.rollback/file.bin"
+    root_key = f"ws1/{'a' * 64}/dir/.rollback/file.bin"
+    material_key = f"ws1/{'a' * 64}/v2g1/m_{'e' * 32}/dir/.rollback/file.bin"
     report = _report_with(
-        authority=["jobs/ws-1/job-1/.rollback/x.json", material_key],
+        authority=["jobs/ws-1/job-1/.rollback/x.json", root_key, material_key],
     )
 
     result = s3_jobs_gc.apply_gc(deleter, "bkt", report)  # 无 revalidate 的最坏路径
 
-    assert deleter.deleted == [material_key]
+    assert deleter.deleted == [root_key]
     assert result.deleted == 1
 
 
@@ -245,8 +246,8 @@ def test_material_shaped_key_grammar() -> None:
 
 
 def test_material_key_single_use_grammar() -> None:
-    """#1279 单次使用文法门禁（为 #1314 材料删除批重开预备；当前材料孤儿
-    只报告不删除）：第 3 段是 ``v2g{代次}``（写端不可注入的服务端派生段）
+    """#1279 单次使用文法门禁（#1314 材料删除批的准入条件；不满足的材料
+    孤儿只报告不删除）：第 3 段是 ``v2g{代次}``（写端不可注入的服务端派生段）
     且第 4 段是 ``m_`` 标记 + 32 位小写 hex material_id → 跨行构造性不可
     复用；其余形态一律否：旧文法 g 段 key（含 r1 反例「首文件名段恰为
     32 位 hex」与 r2 反例「首文件名段恰为 m_<32hex>」）、legacy 无 g 段
@@ -310,22 +311,25 @@ def test_staging_scan_does_not_swallow_material_key_with_rollback_segment() -> N
 
 
 def test_apply_gc_rollback_exemption_does_not_cover_material_shaped_keys() -> None:
-    """#1295：apply_gc 的纵深防御豁免同样叠加材料形态排除——手工构造的
-    OrphanReport 混入撞名前缀下含 .rollback 段的材料形态 key 时，不继承
-    豁免被永久跳过；同前缀的真回滚备份仍不可删。"""
+    """#1295 + #1314：撞名前缀下含 .rollback 段的材料形态 key 不继承回滚
+    豁免（豁免判定叠加材料形态排除，见上方豁免判定用例），也不在
+    apply_gc 删除——材料形态 key 只经 s3_material_gc 的门禁删除（见
+    tests/services/test_s3_material_gc.py）；同前缀的真回滚备份仍不可删，
+    同前缀的普通 staging 孤儿照删。"""
     deleter = _RecordingDeleter()
     material_key = f"jobs-staging/{'a' * 64}/g2/dir/.rollback/file.bin"
     report = _report_with(
         authority=[],
         staging=[
             "jobs-staging/ws-1/job-1/e1/.rollback/att-1/out.json",
+            "jobs-staging/ws-1/job-1/e1/plain.json",
             material_key,
         ],
     )
 
     result = s3_jobs_gc.apply_gc(deleter, "bkt", report)  # 无 revalidate 的最坏路径
 
-    assert deleter.deleted == [material_key]
+    assert deleter.deleted == ["jobs-staging/ws-1/job-1/e1/plain.json"]
     assert result.deleted == 1
 
 
