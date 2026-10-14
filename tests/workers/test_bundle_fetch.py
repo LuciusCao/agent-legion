@@ -23,7 +23,7 @@ PAYLOADS = {"https://s3.test/get/a": PAYLOAD_A, "https://s3.test/get/b": PAYLOAD
 
 @pytest.fixture
 def downloads(monkeypatch):
-    def _open(url: str):
+    def _open(url: str, *, if_match: str = ""):
         return io.BytesIO(PAYLOADS[url])
 
     # bundle_fetch 从 material_fetch 导入了 _open_download（独立绑定），两边都 patch。
@@ -93,6 +93,31 @@ def test_materialize_claim_bundle_rejects_incomplete_descriptor(tmp_path: Path) 
         materialize_claim_material(manifest, tmp_path / "exec")
 
 
+def test_bundle_member_address_follows_generation(downloads, tmp_path: Path) -> None:
+    """#1279 codex r6（bundle 成员同格）：无 hash 成员的缓存地址带代次——
+    代次推进后成员与目录树都换新地址、重新下载，旧 gen 地址残留不再命中。"""
+    manifest = _manifest()
+    entry = manifest["runtime_context"]["material"]["entries"][0]
+    entry["content_hash"] = ""
+    entry["upload_generation"] = 0
+    manifest["runtime_context"]["material"]["entries"][1]["upload_generation"] = 0
+
+    block = materialize_claim_material(manifest, tmp_path / "exec-1")
+
+    assert block is not None
+    first_tree = Path(block["path"])
+    cache_root = tmp_path / "materials_cache"
+    assert (cache_root / "ma" / "mat-a-v2g0").is_file()
+
+    # 代次推进（成员修复后）：成员新地址 + 树新地址，重新下载该成员。
+    manifest["runtime_context"]["material"]["entries"][0]["upload_generation"] = 1
+    block2 = materialize_claim_material(manifest, tmp_path / "exec-2")
+
+    assert block2 is not None
+    assert Path(block2["path"]) != first_tree
+    assert (cache_root / "ma" / "mat-a-v2g1").is_file()
+
+
 def test_materialize_claim_material_dispatches_by_kind(downloads, tmp_path: Path) -> None:
     # kind 缺席时走单文件路径（既有行为不变）。
     block = materialize_claim_material(
@@ -111,3 +136,45 @@ def test_materialize_claim_material_dispatches_by_kind(downloads, tmp_path: Path
     assert block is not None
     assert "kind" not in block
     assert Path(block["path"]).is_file()
+
+
+def test_materialize_claim_bundle_sends_per_member_if_match(monkeypatch, tmp_path: Path) -> None:
+    """#1279：bundle 每成员的 object_etag 独立随 If-Match 下发；无该字段的
+    成员（旧 Server / 存量行）不带条件头。"""
+    seen: dict[str, str] = {}
+
+    def _open(url: str, *, if_match: str = ""):
+        seen[url] = if_match
+        return io.BytesIO(PAYLOADS[url])
+
+    monkeypatch.setattr("worker.bundle_fetch._open_download", _open)
+    monkeypatch.setattr("worker.material_fetch._open_download", _open)
+    manifest = _manifest()
+    manifest["runtime_context"]["material"]["entries"][0]["object_etag"] = "etag-a"
+
+    block = materialize_claim_material(manifest, tmp_path / "exec")
+
+    assert block is not None
+    assert seen == {"https://s3.test/get/a": "etag-a", "https://s3.test/get/b": ""}
+
+
+def test_legacy_unbound_hashless_member_is_size_only(monkeypatch, tmp_path: Path) -> None:
+    """#1312 方案 B：存量无 hash 成员（描述符 object_etag 字段在但为空）
+    维持 size-only——无条件 GET 照常物化，不拒绝。"""
+    seen: dict[str, str] = {}
+
+    def _open(url: str, *, if_match: str = ""):
+        seen[url] = if_match
+        return io.BytesIO(PAYLOADS[url])
+
+    monkeypatch.setattr("worker.bundle_fetch._open_download", _open)
+    monkeypatch.setattr("worker.material_fetch._open_download", _open)
+    manifest = _manifest()
+    entry = manifest["runtime_context"]["material"]["entries"][0]
+    entry.update(content_hash="", object_etag="", upload_generation=0)
+
+    block = materialize_claim_material(manifest, tmp_path / "exec")
+
+    assert block is not None
+    assert (Path(block["path"]) / "a.txt").read_bytes() == PAYLOAD_A
+    assert seen["https://s3.test/get/a"] == ""

@@ -170,6 +170,146 @@ def test_claim_block_carries_presigned_url_without_storage_key(job_db, material,
     )
 
 
+def test_runtime_block_detects_post_complete_overwrite_via_etag(
+    job_db, storage, tmp_path: Path
+) -> None:
+    """#1279 验收项（Host 链故障注入，目标洞的原生形态）：无 content_hash
+    的 ready 材料行（object_etag 是唯一内容身份）在 complete 后被同尺寸
+    静默覆盖——cache miss 的 GET 带 If-Match，S3 412 检出为
+    MaterializeError，毒化字节不落缓存。etag=''（存量行）维持 size-only
+    旧语义（本文件其余用例覆盖；存量行身份建立拆至 #1316）。"""
+    from tests.fakes.storage import etag_of
+
+    key = f"{WORKSPACE_ID}/mat-nh/g0/mat-nh/file.bin"
+    payload = b"hashless-material"
+    storage.objects[key] = payload
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'MatCache') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+        conn.execute(
+            "insert into materials(id, workspace_id, content_hash, filename,"
+            " content_type, size_bytes, storage_key, status, created_by, object_etag)"
+            " values ('mat-nh', %s, '', 'file.bin', 'application/octet-stream',"
+            " %s, %s, 'ready', 'user-1', %s)",
+            (WORKSPACE_ID, len(payload), key, etag_of(payload)),
+        )
+    job = _job({"type": "material", "material_id": "mat-nh"})
+    # complete 后同尺寸覆盖（已签发 URL 的 1h 窗口残留场景）。
+    storage.objects[key] = b"y" * len(payload)
+
+    with pytest.raises(MaterializeError, match="ETag mismatch"):
+        material_runtime_block(job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage)
+    assert not (tmp_path / "ma" / "mat-nh-v2g0").exists(), "毒化字节不得落缓存"
+
+    # 恢复正确字节（ETag 重新匹配）后正常物化。
+    storage.objects[key] = payload
+    block = material_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage
+    )
+    assert block is not None and Path(block["path"]).read_bytes() == payload
+
+
+def test_legacy_unbound_hashless_row_is_size_only(job_db, storage, tmp_path: Path) -> None:
+    """#1312 方案 B：存量无 hash 行（object_etag=''，身份未建立）在 Host
+    物化与 claim 描述符两个入口都维持 base 的 size-only 语义——不 fail-closed，
+    GET 不带条件头；描述符照常下发（object_etag=''）。"""
+    key = f"{WORKSPACE_ID}/mat-legacy/g0/mat-legacy/file.bin"
+    payload = b"legacy-hashless"
+    storage.objects[key] = payload
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'MatCache') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+        conn.execute(
+            "insert into materials(id, workspace_id, content_hash, filename,"
+            " content_type, size_bytes, storage_key, status, created_by)"
+            " values ('mat-legacy', %s, '', 'file.bin', 'application/octet-stream',"
+            " %s, %s, 'ready', 'user-1')",
+            (WORKSPACE_ID, len(payload), key),
+        )
+    job = _job({"type": "material", "material_id": "mat-legacy"})
+
+    block = material_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage
+    )
+    assert block is not None and Path(block["path"]).read_bytes() == payload
+
+    descriptor = material_claim_block(job_db.dsn_identity, WORKSPACE_ID, job, storage=storage)
+    assert descriptor is not None
+    assert descriptor["object_etag"] == ""
+
+
+def test_hashless_cache_address_follows_repair_generation(job_db, storage, tmp_path: Path) -> None:
+    """codex r6 场景转正：无 hash 行的缓存地址 = material_id + 代次——修复
+    （代次 +1）后旧 gen 地址的（毒化）缓存不再命中，消费走 verified opener
+    重新下载。mutation 互证：摘代次段（裸 id 取址）→ 本测试红（毒化字节
+    被旧地址命中返回）。"""
+    from server.app.services.materials import MaterialsService
+
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'MatCache') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+    service = MaterialsService(job_db.dsn_identity, storage)
+    payload = b"goodbyte"
+    result = service.presign(WORKSPACE_ID, filename="f.bin", size_bytes=len(payload))
+    material_id = result["material"]["id"]
+    (key0, _) = storage.presigned[0]
+    storage.objects[key0] = payload
+    service.complete(WORKSPACE_ID, material_id)
+    job = _job({"type": "material", "material_id": material_id})
+
+    block = material_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage
+    )
+    assert block is not None
+    first_path = Path(block["path"])
+    assert first_path.name == f"{material_id}-v2g0"
+    assert storage.opened == 1
+
+    # 模拟 codex 场景：旧 gen 地址的缓存里是被毒化的字节（旧 Worker 无核验
+    # 缓存的残留），对象也被同尺寸覆盖。
+    first_path.write_bytes(b"poisoned")  # 同长（8 字节）
+    storage.objects[key0] = b"poisoned"
+
+    # 修复 + 用签发 URL 重传 + complete(代次)。
+    outcome = service.request_material_reupload(WORKSPACE_ID, material_id)
+    storage.objects[str(outcome["storage_key"])] = payload
+    service.complete(WORKSPACE_ID, material_id, expected_upload_generation=1)
+
+    again = material_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage
+    )
+    assert again is not None
+    second_path = Path(again["path"])
+    assert second_path.name == f"{material_id}-v2g1"
+    assert second_path != first_path
+    assert second_path.read_bytes() == payload
+    assert storage.opened == 2, "代次推进后不得命中旧 gen 地址"
+
+
+def test_claim_block_carries_object_etag(job_db, material, storage) -> None:
+    """#1279：claim 描述符携带行记录的 object_etag（Worker 侧 If-Match 核验）
+    与 upload_generation（无 hash 行缓存寻址的代次段，与 URL 同行快照）。"""
+    with job_db.connect() as conn:
+        conn.execute("update materials set object_etag='etag-1' where id=%s", (material,))
+
+    block = material_claim_block(
+        job_db.dsn_identity,
+        WORKSPACE_ID,
+        _job({"type": "material", "material_id": material}),
+        storage=storage,
+    )
+
+    assert block is not None
+    assert block["object_etag"] == "etag-1"
+    assert block["upload_generation"] == 0
+
+
 def test_runtime_block_facade_passthrough_no_getattr_escape(
     job_db, material, storage, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

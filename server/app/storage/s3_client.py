@@ -56,8 +56,19 @@ class ObjectStorage(Protocol):
         """
         ...
 
-    def open_stream(self, storage_key: str) -> BinaryIO:
-        """Return a streaming reader for the object bytes."""
+    def open_stream(self, storage_key: str, *, if_match: str = "") -> BinaryIO:
+        """Return a streaming reader for the object bytes.
+
+        ``if_match`` (#1279) carries the material row's recorded ETag: the
+        GET is conditioned on it (S3 If-Match → 412 on mismatch), so a
+        same-size overwrite after complete() is detected at read time
+        instead of silently serving poisoned bytes. Empty = unconditional.
+
+        存储契约（M30 R2）：If-Match 只校验 GET open 时刻——返回的流必须
+        是 open 时刻对象的原子快照（AWS S3 语义；SeaweedFS/MinIO 见
+        docs/materials-storage-deployment.md 的后端契约要求）。流中同尺寸
+        覆盖对无 hash 行依赖此契约；hash 行由下载后的 sha256 复算免疫。
+        """
         ...
 
     def open_range(self, storage_key: str, start: int, end: int) -> BinaryIO:
@@ -85,6 +96,17 @@ class ObjectStorage(Protocol):
     def copy_object(self, source_key: str, destination_key: str) -> None:
         """Server-side copy within the bucket (Worker staging → authority key)."""
         ...
+
+
+def is_precondition_failed(exc: Any) -> bool:
+    """True when a botocore ClientError is an S3 If-Match 412 (PreconditionFailed).
+
+    Shared by the material verification/consumption paths (#1279): an If-Match
+    conditioned GET fails with this shape when the object no longer carries the
+    recorded ETag (overwritten after the HEAD/complete snapshot).
+    """
+    code = str(exc.response.get("Error", {}).get("Code", ""))
+    return code in ("412", "PreconditionFailed")
 
 
 class S3StorageClient:
@@ -158,8 +180,11 @@ class S3StorageClient:
         size = int(response.get("ContentLength", 0))
         return ObjectHead(size_bytes=size, etag=str(response.get("ETag", "")).strip('"'))
 
-    def open_stream(self, storage_key: str) -> BinaryIO:
-        response = self._client.get_object(Bucket=self._settings.bucket, Key=storage_key)
+    def open_stream(self, storage_key: str, *, if_match: str = "") -> BinaryIO:
+        # 行内落库的 etag 是去引号形态（head_object strip）；If-Match 按 S3
+        # 线协议回引号发送。
+        extra = {"IfMatch": f'"{if_match}"'} if if_match else {}
+        response = self._client.get_object(Bucket=self._settings.bucket, Key=storage_key, **extra)
         return cast(BinaryIO, response["Body"])
 
     def open_range(self, storage_key: str, start: int, end: int) -> BinaryIO:

@@ -43,22 +43,22 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v97, material_upload_generation) must leave
+# Effects the newest migration (v98, material_object_etag) must leave
 # behind so the undo step rewinds a current-shape database to exactly the
-# previous recorded version. v97 is DDL-only: one guarded ALTER adding
-# materials.upload_generation (#1267 codex R3 P1, upload generation for the
-# complete-time locked recheck); dropping the column rewinds to v96. (v96
-# sits below: its workspace_workflow_draft_generation table stays applied.)
+# previous recorded version. v98 is DDL-only: one guarded ALTER adding
+# materials.object_etag (#1279 所有权协议, consumption-side ETag identity);
+# dropping the column rewinds to v97. (v97 sits below: its
+# materials.upload_generation column stays applied.)
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("materials", "upload_generation", "integer"),
+    ("materials", "object_etag", "text"),
 )
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "material_upload_generation"
+_NEWEST_MIGRATION_NAME = "material_object_etag"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the rewound database is a faithful
-# v96 (v97 only adds a column: nothing to recreate).
+# v97 (v98 only adds a column: nothing to recreate).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.

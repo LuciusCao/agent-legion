@@ -60,8 +60,9 @@ def _ready_material(
         content_type="text/plain",
         content_hash=content_hash,
     )
-    storage.objects[f"{WORKSPACE_ID}/{content_hash}/g0/{filename}"] = payload
-    return materials.complete(WORKSPACE_ID, result["material"]["id"])["id"]
+    material_id = result["material"]["id"]
+    storage.objects[f"{WORKSPACE_ID}/{content_hash}/v2g0/m_{material_id}/{filename}"] = payload
+    return materials.complete(WORKSPACE_ID, material_id)["id"]
 
 
 def _two_member_bundle(bundles, materials, storage, name: str = "folder") -> dict:

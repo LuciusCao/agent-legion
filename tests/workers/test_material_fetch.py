@@ -68,7 +68,7 @@ def _fake_download(monkeypatch: pytest.MonkeyPatch, payload: bytes = PAYLOAD) ->
     """替换 worker.material_fetch._open_download 为内存流；返回请求的 URL 列表。"""
     urls: list[str] = []
 
-    def _open(url: str) -> io.BytesIO:
+    def _open(url: str, *, if_match: str = "") -> io.BytesIO:
         urls.append(url)
         return io.BytesIO(payload)
 
@@ -115,6 +115,115 @@ def test_materialize_verifies_hash(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     _fake_download(monkeypatch, payload=b"x" * len(PAYLOAD))
     with pytest.raises(MaterializeError, match="sha256"):
         materialize_claim_material(_manifest_with_material(_material_block()), tmp_path / "exec-1")
+
+
+def test_materialize_sends_if_match_with_object_etag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1279：claim 描述符带 object_etag 时，presigned GET 带 If-Match 头核验；
+    描述符无该字段（旧 Server）→ 不带条件头（新旧兼容矩阵的新 Worker 半格）。"""
+    seen: list[dict[str, str]] = []
+
+    def _open(url: str, *, if_match: str = "") -> io.BytesIO:
+        seen.append({"url": url, "if_match": if_match})
+        return io.BytesIO(PAYLOAD)
+
+    monkeypatch.setattr(material_fetch, "_open_download", _open)
+    materialize_claim_material(
+        _manifest_with_material(_material_block(object_etag="etag-1")), tmp_path / "exec-1"
+    )
+    assert seen[0]["if_match"] == "etag-1"
+
+    # 旧 Server 的描述符无 object_etag：空值 → 无条件 GET。
+    # （独立 work 根：不与上面的 exec-1 共享缓存。）
+    materialize_claim_material(
+        _manifest_with_material(_material_block()), tmp_path / "w2" / "exec-2"
+    )
+    assert seen[1]["if_match"] == ""
+
+
+def test_open_download_sends_if_match_header_and_maps_412(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#1279（Worker 链故障注入）：_open_download 真实头装配——If-Match 带
+    引号发出；412（complete 后同尺寸覆盖）映射为 MaterializeError。"""
+    sent: list[dict] = []
+
+    class _Response:
+        def __init__(self, status_code: int) -> None:
+            self.status_code = status_code
+            self.raw = io.BytesIO(PAYLOAD)
+
+        def close(self) -> None:
+            pass
+
+    def _get(url: str, **kwargs: Any) -> _Response:
+        sent.append(kwargs)
+        if_match = (kwargs.get("headers") or {}).get("If-Match", "")
+        return _Response(412 if if_match and if_match != '"etag-1"' else 200)
+
+    monkeypatch.setattr(material_fetch.requests, "get", _get)
+
+    stream = material_fetch._open_download("https://s3.test/x", if_match="etag-1")
+    assert sent[0]["headers"] == {"If-Match": '"etag-1"'}
+    assert stream.read() == PAYLOAD
+
+    with pytest.raises(MaterializeError, match="ETag mismatch"):
+        material_fetch._open_download("https://s3.test/x", if_match="stale")
+    # 无 etag（旧 Server / 存量行）：不带条件头。
+    material_fetch._open_download("https://s3.test/x")
+    assert sent[-1]["headers"] == {}
+
+
+def test_hashless_address_follows_generation_with_legacy_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1279 codex r6：无 hash 材料的缓存地址带代次（代次即身份）——
+    代次推进（repair）后不再命中旧地址、重新下载；旧 Server 描述符无
+    upload_generation 字段 → 回落裸 material_id（既有形态）。"""
+    urls = _fake_download(monkeypatch)
+    block_no_hash = _material_block(content_hash="", upload_generation=0)
+
+    first = materialize_claim_material(
+        _manifest_with_material(block_no_hash), tmp_path / "work" / "exec-1"
+    )
+    assert first is not None
+    assert Path(first["path"]).name == "mat-w1-v2g0"
+    assert len(urls) == 1
+
+    # 代次推进（修复后）：新地址、重新下载。
+    second = materialize_claim_material(
+        _manifest_with_material(_material_block(content_hash="", upload_generation=1)),
+        tmp_path / "work" / "exec-2",
+    )
+    assert second is not None
+    assert Path(second["path"]).name == "mat-w1-v2g1"
+    assert len(urls) == 2
+
+    # 旧 Server（描述符无 upload_generation）→ 裸 material_id 地址。
+    legacy = _material_block(content_hash="")
+    legacy.pop("upload_generation", None)
+    third = materialize_claim_material(_manifest_with_material(legacy), tmp_path / "w2" / "exec-3")
+    assert third is not None
+    assert Path(third["path"]).name == "mat-w1"
+
+
+def test_legacy_unbound_hashless_descriptor_is_size_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1312 方案 B：新 Server 对存量无 hash 行下发 object_etag=''（身份
+    未建立）——Worker 维持 base 的 size-only 语义：无条件 GET 照常物化，
+    不拒绝（存量行身份建立拆至 #1316）。"""
+    seen: list[str] = []
+
+    def _open(url: str, *, if_match: str = "") -> io.BytesIO:
+        seen.append(if_match)
+        return io.BytesIO(PAYLOAD)
+
+    monkeypatch.setattr(material_fetch, "_open_download", _open)
+    legacy = _material_block(content_hash="", object_etag="", upload_generation=0)
+    block = materialize_claim_material(_manifest_with_material(legacy), tmp_path / "exec-1")
+
+    assert block is not None and Path(block["path"]).read_bytes() == PAYLOAD
+    assert seen == [""]
 
 
 def test_sandbox_argv_grants_static_cache_root(tmp_path: Path) -> None:

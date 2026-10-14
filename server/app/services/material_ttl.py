@@ -61,20 +61,26 @@ def materials_ttl_days(connect_source: ConnectSource) -> int:
     return value
 
 
-def mark_ready(conn: Any, database_dsn: ConnectSource, material_id: str) -> None:
+def mark_ready(
+    conn: Any, database_dsn: ConnectSource, material_id: str, *, object_etag: str = ""
+) -> None:
     """Mark a verified material ready, stamping expires_at from the TTL.
 
     ``database_dsn`` accepts the JobQueries facade or a bare DSN string
     (BOUNDARY-DATA-001, #187). The TTL is read fresh from the instance
     document at every completion — 0/absent disables expiry
-    (``expires_at`` stays NULL).
+    (``expires_at`` stays NULL). ``object_etag`` (#1279) is the ETag the
+    verifying HEAD observed, recorded atomically with the ready flip in the
+    same transaction: the consumption side (Host If-Match / Worker claim
+    descriptor) compares against it to detect a same-size overwrite that
+    landed after complete().
     """
     ttl_days = materials_ttl_days(database_dsn)
     conn.execute(
-        "update materials set status='ready',"
+        "update materials set status='ready', object_etag=%s,"
         " expires_at = case when %s > 0 then now() + make_interval(days => %s) end"
         " where id=%s",
-        (ttl_days, ttl_days, material_id),
+        (object_etag, ttl_days, ttl_days, material_id),
     )
 
 

@@ -12,7 +12,7 @@ from server.app.services.demo_material_seed import (
     DEMO_MATERIALS_DIR,
     seed_demo_workspace_materials,
 )
-from tests.fakes.storage import FakeObjectStorage
+from tests.fakes.storage import FakeObjectStorage, etag_of
 
 FakeStorage = FakeObjectStorage
 
@@ -43,7 +43,9 @@ def test_seed_uploads_examples_as_ready_materials(job_db, settings) -> None:
         digest = hashlib.sha256(payload).hexdigest()
         assert row["content_hash"] == digest
         assert row["size_bytes"] == len(payload)
-        assert row["storage_key"] == f"{workspace_id}/{digest}/{row['filename']}"
+        # #1279 key 文法：g 段 + material_id 唯一段（= 行 id）。
+        assert row["storage_key"] == f"{workspace_id}/{digest}/v2g0/m_{row['id']}/{row['filename']}"
+        assert row["object_etag"] == etag_of(payload)
         assert storage.objects[row["storage_key"]] == payload
 
 
@@ -88,6 +90,19 @@ def test_seed_aborts_gracefully_when_store_unreachable(job_db, settings) -> None
 
     seeded = seed_demo_workspace_materials(
         settings, workspace_id, storage=FakeStorage(fail_put=True)
+    )
+
+    assert seeded == []
+    assert _seeded_rows(job_db, workspace_id) == []
+
+
+def test_seed_aborts_when_store_returns_no_etag(job_db, settings) -> None:
+    """#1279 R3b：demo seed 产线 HEAD 空 ETag → 降级中断（不落 ready 且
+    无身份的行）。"""
+    workspace_id = str(job_db.create_workspace("demo")["id"])
+
+    seeded = seed_demo_workspace_materials(
+        settings, workspace_id, storage=FakeStorage(no_etag=True)
     )
 
     assert seeded == []

@@ -36,6 +36,18 @@ gzip 对象的上传下载对后端完全透明。`Content-Encoding: gzip` 响�
 路由层根据 key 的 `.gz` 后缀自行添加（`job_artifact_raw.py` 判定 +
 `job_artifact_raw_response.py` 加头），同样不经后端。
 
+## 后端契约要求（#1279 材料 ETag 协议，M30 R2）
+
+材料身份协议对后端的两条硬要求（支持矩阵内的 AWS S3 / MinIO / SeaweedFS
+均满足；换后端时必须核对）：
+
+- **HEAD 恒返回非空 ETag**：complete/inline/demo seed 对空 ETag fail-closed
+  （不落 ready 的无身份行）；
+- **单 GET 原子快照**：`open_stream` 的 If-Match 只校验 GET open 时刻，
+  返回的流必须是 open 时刻对象的原子快照（AWS S3 语义）——流读期间的
+  同尺寸覆盖对无 hash 材料依赖此契约才不可撕裂；hash 行由下载后的
+  sha256 复算免疫，不依赖此条。
+
 ## 1. 组件与配置面
 
 | 项 | 值 | 说明 |
@@ -238,7 +250,7 @@ EOF
 ### 3.3 启动后检查
 
 - 后端启动时在 PostgreSQL advisory 迁移锁下自动执行 schema 迁移；当前版本
-  以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准（目前 v97）——该数字由
+  以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准（目前 v98）——该数字由
   `scripts/architecture/docs_consistency.py` 与代码对账，迁移链在
   `server/app/db/migration_chain.py`（及其 `migration_chain_recent.py`）。
   升级前先备份数据库，见 [postgresql-runbook.md](postgresql-runbook.md)。v93 会把
@@ -273,8 +285,9 @@ EOF
   显著长于 `materials_ttl_days`，让 DB 侧先完成引用检查），`jobs/`
   前缀按产物保留策略另设，`jobs-staging/` 配短保留（如 1 天，孤儿
   暂存对象只是失败残留）。材料 key 在 bucket 根
-  （`{workspace_id}/{hash|material_id}/g{上传代次}/{filename}`，
-  代次段自 #1267 起、存量行无代次段），与两个 jobs 前缀平级。注意 promote 回滚备份（key 含 `/.rollback/`
+  （`{workspace_id}/{hash|material_id}/v2g{上传代次}/m_{material_id}/{filename}`，
+  代次段自 #1267 起（旧形态 `g{代次}`）、v2g 版本标记 + m_ 标记唯一段
+  自 #1279 起、存量行可缺），与两个 jobs 前缀平级。注意 promote 回滚备份（key 含 `/.rollback/`
   段）也在该前缀下：promote 恢复最终失败时被刻意保留的备份是幸存清单
   行所指向旧字节的最后恢复源（`s3_jobs_gc` 对它们豁免回收，codex #774
   P1 族；豁免仅适用于 `jobs/` 与 `jobs-staging/` 前缀的 key——材料文件
@@ -291,12 +304,43 @@ EOF
     `--apply` 执行删除，幂等可重跑。材料 key 内容寻址可复用（删行后
     同文件再上传复用同 key），任何 check-then-delete 序列对可复用 key
     都闭不死删除窗口——**材料根前缀孤儿只扫描报告、不进入删除批**
-    （#1282 三轮 codex P1 按族收口），删除待 #1279 所有权/key 不可复用
-    协议落地后开放；此前材料孤儿的回收仍靠 bucket lifecycle 规则兜底。
+    （#1282 三轮 codex P1 按族收口）。#1279 已落地 v2g 单次使用 key
+    文法与 `s3_jobs_gc.material_key_single_use` 门禁（跨行不可复用，
+    构造性论证见其 docstring），但 PUT→行发布窗口（inline/demo seed
+    先 PUT 后建行，codex r5 P1）让删除批在窗口内会删掉未发布对象——
+    **删除批重开由 #1314 跟踪（发布窗口协议）**，此前材料孤儿的回收
+    仍靠 bucket lifecycle 规则兜底。
     同理，workspace id 字面为 `jobs` / `jobs-staging` 时其材料 key 落在
     jobs 前缀扫描内，脚本在组装删除批前按材料形态文法（第 3 段为
-    `g{代次}`；真 job 产物同位置是恒含下划线的 job id，零误伤）把这类
-    key 分流进材料报告行，同样只报告不删除（#1282 r4 P1）。
+    `(v2)g{代次}`；真 job 产物同位置是恒含下划线的 job id，零误伤）把这类
+    key 分流进材料孤儿集合，同样只报告不删除（#1282 r4 P1）。
+    job authority key 侧（#1309 判定，排除出 #1279 协议面）：#853 起产物
+    每次写落 per-attempt uuid4 版本 key，不可复用已构造性成立；#853 前
+    legacy 固定 key 的 revalidate→delete 亚秒窗残留由 #1309 独立跟踪。
+  - ETag 失配的恢复面（#1279）：消费侧 If-Match 检出 412 后，行级修复走
+    `uv run python scripts/request_material_reupload.py <workspace_id>
+    <material_id>`——把 ready 行翻回 uploading（代次 +1、轮换 v2g key、
+    清 object_etag）并为**原行**新 key 签发受代次保护的一次性 PUT URL
+    （hash 与无 hash 行统一由原 material_id 愈合：无 hash 行没有 presign
+    按 hash 找旧行的回路）；用该 URL 重传后 complete 携带输出里的代次
+    即恢复 ready，历史 job 引用随之消费新对象；旧对象成孤儿，由 bucket
+    lifecycle 回收（GC 材料删除批重开见 #1314）。S3 快照恢复（aws s3 cp 重传会改变大行
+    ETag）后、启动调度前必须跑 `scripts/rebind_material_etags.py`
+    （先 dry-run 再 --apply；字节核验不过的行 fail-closed 只报告，退出
+    码 1），步骤与纪律见 backup-restore-runbook.md 的对象存储恢复段。
+    协议门禁（codex r7）：消费侧 ETag 核验要求 Worker 协议 v6——滚动
+    升级窗口内（Host 先升），无 hash 且 etag 已绑的材料任务对旧 Worker
+    不可领（留队列等升级，不落失败）；hash 行与 etag='' 行恒免门禁。
+    升级顺序与矩阵见 remote-execution-runbook.md §5。
+  - **存量行一次性残留窗口**（#1312 方案 B）：v98 之前完成的行
+    `object_etag=''`（无内容身份），各消费入口（Host 物化、bundle、远程
+    Worker claim、旧 Worker 门禁）维持升级前的 size-only 语义、不做 ETag
+    核验，也不挂起或拒绝。残留风险仅限**升级前签出、升级时仍未过期的
+    PUT URL**（presign 有效期 1h，故窗口最长 ≤1h、一次性、与升级前等价）：
+    其持有者在窗口内同尺寸覆盖无 hash 存量对象不会被检出。升级后签出的
+    URL 都对应 complete 时原子落 ETag 的行，走 If-Match 核验链。对此敏感
+    的部署可在升级前停止签发上传 1h（或升级后 1h 内暂不消费存量无 hash
+    材料）。存量行的身份建立（回填 + 门禁）由 #1316 跟踪。
   - 孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已
     不存在的测试 bucket）由 `scripts/report-orphan-s3-buckets.py`
     报告（只报不删，逐个给出 `clean-worktree.sh` 收尾命令）。

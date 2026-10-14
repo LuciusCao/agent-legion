@@ -6,13 +6,13 @@
 上传路径的孤儿（#1269 格子③）：「已上传后重试」留下的上一代 g{代次} key、
 行已删但对象删除失败的残留。jobs/ 与 jobs-staging/ 的判定与删除逻辑见
 server/app/services/s3_jobs_gc.py；材料根前缀（bucket 根排除两个 jobs 前缀）
-的扫描在本文件（材料 key 形如 {workspace_id}/{hash|id}/g{代次}/{filename}，
+的扫描在本文件（材料 key 形如 {workspace_id}/{hash|id}/v2g{代次}/m_{material_id}/{filename}，
 存活对象必有 materials 行——presign 先建行后签发 URL——故与 jobs/ 同手法：
-对照 materials.storage_key 清单行 + 宽限窗）。材料 key 内容寻址可复用
-（删行后同文件同文件名再上传复用同 key），任何 check-then-delete 序列对
-可复用 key 都闭不死删除窗口——材料孤儿只扫描报告、不进入 --apply 删除批
-（#1282 三轮 codex P1 按族收口），删除待 #1279 所有权/key 不可复用协议
-落地后开放。
+对照 materials.storage_key 清单行 + 宽限窗）。
+材料孤儿只扫描报告、不进入 --apply 删除批：#1279 已落地 v2g 单次使用 key
+文法与 material_key_single_use 门禁（跨行不可复用），但 PUT→行发布窗口
+（inline/demo seed 先 PUT 后建行，codex r5 P1）让删除批在窗口内会删掉
+未发布对象——删除批重开由 #1314 跟踪（发布窗口协议）。
 DB 侧对照 job_artifacts ∪ materials（须能连上本 worktree 的 Postgres）。
 
 用法:
@@ -33,13 +33,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
-# 材料 key 内容寻址可复用（删行后同文件同文件名再上传复用同 key），
-# 任何 check-then-delete 序列对可复用 key 都闭不死删除窗口（#1282 三轮
-# codex P1 按族收口）——材料根前缀孤儿只扫描报告，删除待 #1279 的
-# 所有权/key 不可复用协议落地后开放。
-# 材料形态文法（第 3 段 g{代次}）的权威实现是
+# 材料形态文法（第 3 段 (v2)g{代次}）的权威实现是
 # server/app/services/s3_jobs_gc.py 的 material_shaped_key（#1295 下沉：
-# 扫描期的 /.rollback/ 豁免判定也要用它排除材料形态 key）。
+# 扫描期的 /.rollback/ 豁免判定也要用它排除材料形态 key）；单次使用
+# 文法门禁 material_key_single_use（v2g 代次段 + m_ 标记的行 id 唯一段，
+# #1279）为 #1314 的材料删除批重开预备——当前材料孤儿只报告不删除。
 
 
 def scan_material_root_orphans(entry_lister, key_exists, grace_hours: float):
@@ -56,8 +54,7 @@ def scan_material_root_orphans(entry_lister, key_exists, grace_hours: float):
     from server.app.services import s3_jobs_gc
 
     cutoff = datetime.now(UTC) - timedelta(hours=grace_hours)
-    orphans = []
-    pending = []
+    orphans, pending = [], []
     for entry in entry_lister(""):
         if entry.key.startswith((s3_jobs_gc.JOBS_PREFIX, s3_jobs_gc.STAGING_PREFIX)):
             continue
@@ -148,11 +145,11 @@ def main() -> int:
         entry_lister, key_exists, grace_hours=args.grace_hours, staging_grace_hours=staging_grace
     )
     material_orphans = scan_material_root_orphans(entry_lister, key_exists, args.grace_hours)
-    # 碰撞命名空间分流（#1282 r4 P1；族不变量：删除批只收不可复用 key）：
-    # jobs/ 与 jobs-staging/ 前缀里材料形态的 key 是撞名 workspace 的材料，
-    # 与材料根前缀同理只报告不删除，并入材料孤儿行。含 .rollback 段的材料
-    # 形态 key 自 #1295 起不被扫描期豁免吞掉（s3_jobs_gc 的
-    # _rollback_backup_exempt 叠加材料形态排除），能到达这里。
+    # 碰撞命名空间分流（#1282 r4 P1）：jobs/ 与 jobs-staging/ 前缀里材料
+    # 形态的 key 是撞名 workspace 的材料，与材料根前缀同理只报告不删除，
+    # 并入材料孤儿集合。含 .rollback 段的材料形态 key 自 #1295 起不被扫描
+    # 期豁免吞掉（s3_jobs_gc 的 _rollback_backup_exempt 叠加材料形态排
+    # 除），能到达这里。
     collided = [
         o for o in report.authority_orphans + report.staging_orphans if material_shaped_key(o.key)
     ]
@@ -162,28 +159,26 @@ def main() -> int:
     report.staging_orphans = [o for o in report.staging_orphans if not material_shaped_key(o.key)]
     material_orphans += collided
 
+    # 材料孤儿只报告不删除（#1282 收口纪律保持；#1279 准备好了 v2g 单次
+    # 使用 key 文法与 material_key_single_use 门禁，但 PUT→行发布窗口
+    # （inline/demo seed 先 PUT 后建行）让删除批在窗口内会删掉未发布对象
+    # ——codex r5 P1，删除批重开由 #1314 跟踪（发布窗口协议））。
+    def _stat(entries: list) -> str:
+        return f"{len(entries)} 个（{sum(o.size_bytes for o in entries)} 字节）"
+
     label = "apply" if args.apply else "dry-run"
     au, st = report.authority_orphans, report.staging_orphans
-    print(
-        f"{label}: jobs/ 孤儿 {len(au)} 个（{sum(o.size_bytes for o in au)} 字节）, "
-        f"jobs-staging/ 孤儿 {len(st)} 个（{sum(o.size_bytes for o in st)} 字节）, "
-        f"材料根前缀孤儿 {len(material_orphans)} 个（{sum(o.size_bytes for o in material_orphans)} 字节）"
-    )
-    if material_orphans:
-        # #1282 三轮 codex P1 按族收口：材料 key 内容寻址可复用（删行后同
-        # 文件再上传复用同 key），任何 check-then-delete 序列对可复用 key 都
-        # 闭不死 revalidate→delete 窗口——材料孤儿只扫描报告，删除待 #1279
-        # 的所有权/key 不可复用协议落地后开放。
-        print("材料根前缀孤儿只报告不删除：删除待 #1279 所有权协议落地后开放")
+    print(f"{label}: jobs/ 孤儿 {_stat(au)}, jobs-staging/ 孤儿 {_stat(st)}")
+    print(f"{label}: 材料根前缀孤儿 {_stat(material_orphans)}（只报告不删除，#1314 重开删除批）")
     if not args.apply:
         if report.count or material_orphans:
-            print("加 --apply 执行删除（幂等可重跑）。")
+            print("加 --apply 执行删除（幂等可重跑；材料孤儿不删）。")
         return 0
 
     # 删除前逐批新鲜反查（TOCTOU，#344 评审 P1）：不用扫描阶段的缓存
     # key 集合——扫描与删除之间并发 promote 重建同名 key 并建行时，
     # 缓存判定会误删新权威对象；反查同时对照 materials（撞名 workspace
-    # 的材料 key 在删除前最后一道被救下）。材料孤儿不进入删除批（见上）。
+    # 的材料 key 与行刚重建的材料 key 在删除前最后一道被救下）。
     def fresh_revalidate(keys: list[str]) -> set[str]:
         return job_db.existing_object_storage_keys(keys)
 

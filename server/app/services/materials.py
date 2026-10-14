@@ -13,12 +13,15 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from botocore.exceptions import ClientError
+
 from server.app.db.dialect import ConnectSource
 from server.app.db.rowmap import iso_optional
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.jobs.queries.material_locked_rereads import (
     assert_material_upload_identity_tx,
 )
+from server.app.jobs.queries.material_repair import repair_material_for_reupload_tx
 from server.app.services.job_errors import (
     ConflictError,
     JobServiceError,
@@ -30,7 +33,7 @@ from server.app.services.material_key_validation import (
     verify_stored_object,
 )
 from server.app.services.material_ttl import mark_ready
-from server.app.storage import ObjectStorage
+from server.app.storage import ObjectStorage, is_precondition_failed
 
 _PRESIGN_EXPIRY_SECONDS = 3600
 _DEFAULT_LIST_LIMIT = 50
@@ -113,14 +116,25 @@ class MaterialsService:
         A ready row with the same declared content_hash is returned as-is
         (upload dedup, no URL); a stale uploading/failed row with the same
         hash is reset to uploading so the upload can be retried. Object keys
-        live in a per-generation namespace the client's filename cannot forge
-        (``{ws}/{hash|id}/g{generation}/{filename}``, first issue included);
-        every retry bumps ``upload_generation`` (schema v97) and moves the row
-        to that generation's key, so a same-size retry stays visible to
-        complete()'s locked identity recheck and every previously issued PUT
-        URL points at a dead key — bytes can never be overwritten across
-        generations (#1267 codex R3/R4/R5 P1). Pre-namespace rows (no ``g``
-        segment) keep their keys untouched until their first retry.
+        live in a per-generation, per-row namespace the client's filename
+        cannot forge (``{ws}/{hash|id}/v2g{generation}/m_{material_id}/{filename}``,
+        first issue included); every retry bumps ``upload_generation``
+        (schema v97) and moves the row to that generation's key, so a
+        same-size retry stays visible to complete()'s locked identity
+        recheck and every previously issued PUT URL points at a dead key —
+        bytes can never be overwritten across generations (#1267 codex
+        R3/R4/R5 P1). The ``v2g`` version marker sits in the server-derived
+        third segment and ``m_{material_id}`` marks the row-unique fourth
+        (#1279, schema v98; the marker belongs to a segment no writer can
+        inject from a filename — codex r1/r2 P1 族), making every key
+        single-use across row lifecycles: deleting the row and re-uploading
+        the same file under the same name can never reproduce the key, which
+        is what the S3 orphan GC's material delete batch will gate on
+        (``material_key_single_use`` in s3_jobs_gc; reopening the batch
+        itself is tracked by #1314 — until then material orphans are
+        report-only).
+        Pre-namespace rows (no ``g`` segment) keep their keys untouched
+        until their first retry.
         """
         validate_material_filename(filename)
         content_hash = content_hash.strip()
@@ -137,7 +151,9 @@ class MaterialsService:
                 ).fetchone()
             if row is None:
                 material_id = uuid.uuid4().hex
-                storage_key = f"{workspace_id}/{content_hash or material_id}/g0/{filename}"
+                storage_key = (
+                    f"{workspace_id}/{content_hash or material_id}/v2g0/m_{material_id}/{filename}"
+                )
                 insert_sql = """
                     insert into materials(
                       id, workspace_id, content_hash, filename, content_type,
@@ -193,7 +209,8 @@ class MaterialsService:
                         update materials
                         set filename=%s, content_type=%s, size_bytes=%s,
                           status='uploading', upload_generation = upload_generation + 1,
-                          storage_key = %s || '/g' || (upload_generation + 1) || '/' || %s
+                          storage_key = %s || '/v2g' || (upload_generation + 1)
+                            || '/m_' || %s || '/' || %s
                         where id=%s
                         returning storage_key
                         """,
@@ -202,6 +219,7 @@ class MaterialsService:
                             content_type,
                             size_bytes,
                             f"{workspace_id}/{content_hash}",
+                            material_id,
                             filename,
                             material_id,
                         ),
@@ -239,7 +257,11 @@ class MaterialsService:
         unverified bytes ready, and a concurrent ready can never be flipped
         back by this call's own failure verdict (#1267 codex R2/R3 P1). An
         identity mismatch raises 409 and the client simply calls complete
-        again (re-read, re-verify).
+        again (re-read, re-verify). On success the verifying HEAD's ETag is
+        recorded atomically with the ready flip (materials.object_etag, v98,
+        #1279): for hash-less rows it is the only content identity, and both
+        consumption sides compare against it to detect a same-size overwrite
+        that lands inside the issued URL's lifetime.
 
         ``expected_upload_generation`` (#1269 格子②): the generation the
         caller's PUT URL was issued for (from the presign response). A
@@ -264,7 +286,7 @@ class MaterialsService:
             return _record(row)
         if row["status"] == "expired":
             raise ConflictError(f"Material is expired: {material_id}")
-        failure = self._verify_object(storage, row)
+        failure, object_etag = self._verify_object(storage, row)
         with write_transaction(self._connect_source) as conn:
             locked_status = assert_material_upload_identity_tx(conn, material_id, row)
             if locked_status == "ready":
@@ -273,22 +295,54 @@ class MaterialsService:
             elif locked_status == "expired":
                 raise ConflictError(f"Material is expired: {material_id}")
             elif failure is not None:
-                conn.execute(
-                    "update materials set status='failed' where id=%s",
-                    (material_id,),
-                )
+                conn.execute("update materials set status='failed' where id=%s", (material_id,))
             else:
                 # TTL (design §10): expires_at from the instance setting,
-                # read fresh at every completion.
-                mark_ready(conn, self._connect_source, material_id)
+                # read fresh at every completion. The verified HEAD's ETag
+                # lands in the same transaction (#1279): the row's content
+                # identity and its ready status are atomic, so a same-size
+                # overwrite after this commit is detectable by every
+                # consumption side comparing against object_etag.
+                mark_ready(conn, self._connect_source, material_id, object_etag=object_etag)
         if failure is not None and locked_status != "ready":
             raise MaterialVerificationError(failure)
         return _record(self._fetch_row(workspace_id, material_id))
 
-    def _verify_object(self, storage: ObjectStorage, row: dict[str, Any]) -> str | None:
-        """Failure detail or None; logic lives in material_key_validation
-        (file-budget split) — this method stays as the tests' injection seam."""
-        return verify_stored_object(storage, row)
+    def _verify_object(self, storage: ObjectStorage, row: dict[str, Any]) -> tuple[str | None, str]:
+        """(Failure detail or None, object ETag); logic lives in
+        material_key_validation (file-budget split) — this method stays as
+        the tests' injection seam. An If-Match 412 (#1279 codex P1: object
+        swapped between the HEAD and the hash read by a reused PUT URL) is a
+        verification failure — the row flips to failed for a client retry,
+        never ready with a stale ETag."""
+        try:
+            return verify_stored_object(storage, row)
+        except ClientError as exc:
+            if not is_precondition_failed(exc):
+                raise
+            return f"Uploaded object changed during verification of material {row['id']}", ""
+
+    def request_material_reupload(self, workspace_id: str, material_id: str) -> dict[str, Any]:
+        """ETag 失配（消费侧 412）ready 行的受控修复 + 重传 URL（#1279
+        codex r4/r5，运维入口 scripts/request_material_reupload.py）。
+
+        编排：queries 层行锁内翻转（ready → uploading、清 etag、代次 +1、
+        轮换 v2g key）→ 为**原行**的新 key 签发受代次保护的 presigned PUT
+        URL——hash 与无 hash 行统一由原 material_id 愈合（无 hash 行没有
+        presign 按 hash 找旧行的回路，历史 job/bundle 引用都指着原 ID）。
+        客户端用该 URL PUT 后 complete(expected_upload_generation=轮换后
+        代次) 即恢复 ready。uploading/failed 行幂等重签（修复重试）；
+        expired → 409；未知 → 404。修复签发的 URL 与后续 presign 重试
+        互斥：presign 会再次推进代次使该 URL 指向死 key（complete 代次
+        守卫兜住，409 后可重新 presign 或重跑修复）。
+        """
+        storage = self._require_storage()
+        with write_transaction(self._connect_source) as conn:
+            outcome = repair_material_for_reupload_tx(conn, workspace_id, material_id)
+        outcome["upload_url"] = storage.presign_put(
+            str(outcome["storage_key"]), int(outcome["size_bytes"]), _PRESIGN_EXPIRY_SECONDS
+        )
+        return outcome
 
     def list(self, workspace_id: str, *, limit: int, offset: int) -> dict[str, Any]:
         limit = max(1, min(limit or _DEFAULT_LIST_LIMIT, _MAX_LIST_LIMIT))
