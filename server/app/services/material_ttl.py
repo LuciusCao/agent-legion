@@ -73,11 +73,13 @@ def mark_ready(
     verifying HEAD observed, recorded atomically with the ready flip in the
     same transaction: the consumption side (Host If-Match / Worker claim
     descriptor) compares against it to detect a same-size overwrite that
-    landed after complete().
+    landed after complete(). ``legacy_etag_bound_at`` is cleared (#1316): an
+    identity recorded at completion is not a pre-upgrade binding — its PUT
+    URL may still be live, so the old-Worker gate must keep applying.
     """
     ttl_days = materials_ttl_days(database_dsn)
     conn.execute(
-        "update materials set status='ready', object_etag=%s,"
+        "update materials set status='ready', object_etag=%s, legacy_etag_bound_at=null,"
         " expires_at = case when %s > 0 then now() + make_interval(days => %s) end"
         " where id=%s",
         (object_etag, ttl_days, ttl_days, material_id),

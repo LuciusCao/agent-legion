@@ -250,7 +250,7 @@ EOF
 ### 3.3 启动后检查
 
 - 后端启动时在 PostgreSQL advisory 迁移锁下自动执行 schema 迁移；当前版本
-  以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准（目前 v98）——该数字由
+  以 `server/app/db/schema.py` 的 `SCHEMA_VERSION` 为准（目前 v99）——该数字由
   `scripts/architecture/docs_consistency.py` 与代码对账，迁移链在
   `server/app/db/migration_chain.py`（及其 `migration_chain_recent.py`）。
   升级前先备份数据库，见 [postgresql-runbook.md](postgresql-runbook.md)。v93 会把
@@ -328,19 +328,36 @@ EOF
     ETag）后、启动调度前必须跑 `scripts/rebind_material_etags.py`
     （先 dry-run 再 --apply；字节核验不过的行 fail-closed 只报告，退出
     码 1），步骤与纪律见 backup-restore-runbook.md 的对象存储恢复段。
-    协议门禁（codex r7）：消费侧 ETag 核验要求 Worker 协议 v6——滚动
-    升级窗口内（Host 先升），无 hash 且 etag 已绑的材料任务对旧 Worker
-    不可领（留队列等升级，不落失败）；hash 行与 etag='' 行恒免门禁。
-    升级顺序与矩阵见 remote-execution-runbook.md §5。
-  - **存量行一次性残留窗口**（#1312 方案 B）：v98 之前完成的行
-    `object_etag=''`（无内容身份），各消费入口（Host 物化、bundle、远程
-    Worker claim、旧 Worker 门禁）维持升级前的 size-only 语义、不做 ETag
-    核验，也不挂起或拒绝。残留风险仅限**升级前签出、升级时仍未过期的
-    PUT URL**（presign 有效期 1h，故窗口最长 ≤1h、一次性、与升级前等价）：
-    其持有者在窗口内同尺寸覆盖无 hash 存量对象不会被检出。升级后签出的
-    URL 都对应 complete 时原子落 ETag 的行，走 If-Match 核验链。对此敏感
-    的部署可在升级前停止签发上传 1h（或升级后 1h 内暂不消费存量无 hash
-    材料）。存量行的身份建立（回填 + 门禁）由 #1316 跟踪。
+    协议门禁（codex r7 / #1316）：消费侧 ETag 核验要求 Worker 协议 v6——
+    滚动升级窗口内（Host 先升），无 hash 且 etag 已绑的材料任务、以及
+    repair 进行中（uploading）的无 hash 材料任务对旧 Worker 不可领（留
+    队列等升级，不耗 attempt）；hash 行、etag='' 行、failed/expired 行
+    不门禁（后两者维持既有失败语义）。准入后、描述符组装前行被 repair
+    重传或绑定的竞态，由 claim 响应按同一行快照复判（拒绝 → 500 → lease
+    过期回收重排，消耗一次 attempt）。升级顺序与矩阵见
+    remote-execution-runbook.md §5。
+  - **存量行 ETag 绑定**（#1316，schema v99）：v98 之前完成的无 hash 行
+    `object_etag=''`（无内容身份）。新 Host **每次启动**都会起一个后台
+    线程，按当前 HEAD 为它们一次性绑定 ETag（同时记录绑定时刻
+    `legacy_etag_bound_at`），只要配置了对象存储就会运行，**不受**
+    `sweeper_enabled`、`code_capacity`、claim 开关或 workspace 暂停影响；
+    候选来自 DB，重启不丢进度。绑定之后与新上传的行同一语义：Host 与
+    v6 Worker 带 If-Match，升级前签出、仍未过期的 PUT URL 再被用来同尺寸
+    覆盖时会 412 响亮失败（用上面的 repair 流程愈合）。旧 Worker（< v6）
+    对刚绑定的存量行门禁 75 分钟（presign TTL 1h + 15min 时钟裕度），
+    此后升级前签出的 URL 必已过期，自动放行。
+    - 绑定失败（对象缺失、size 与行不符、存储不回 ETag、HEAD 报错）只
+      报告不改行：该行保持升级前的 size-only 语义，不挂起、不翻 failed。
+      HEAD 报错时线程每 10 分钟重扫、至多 3 轮；之后（或 DB 恢复后不想
+      重启 Host 时）手工补跑：
+      `uv run python scripts/bind_legacy_material_etags.py`（dry-run）→
+      `... --apply`（幂等；库未被新 Host 迁移到当前版本时拒绝运行，
+      本工具不触发迁移；退出码 1 = 仍有无法绑定的行）。
+    - 残留（已声明，与 base 等价）：升级前、以及从 Host 启动到线程扫到
+      该行之间（秒级，启动时 workspace 全部处于暂停）发生的同尺寸覆盖
+      会被绑成身份，无锚可分辨。前提：停机升级、单副本 Host（新旧 Host
+      不得同时在役签发 URL）；回滚到 v98 前代码不受支持（见
+      backup-restore-runbook.md §2.3）。
   - 孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已
     不存在的测试 bucket）由 `scripts/report-orphan-s3-buckets.py`
     报告（只报不删，逐个给出 `clean-worktree.sh` 收尾命令）。

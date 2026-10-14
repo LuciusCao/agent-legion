@@ -41,6 +41,10 @@ from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
+from server.app.services.material_legacy_etag_binding import (
+    LegacyMaterialEtagBinderThread,
+    start_legacy_material_etag_binder,
+)
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
@@ -143,6 +147,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
     slow_sweeps: SweeperOwnedThreads | None = None
+    legacy_etag_binder: LegacyMaterialEtagBinderThread | None = None
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
@@ -159,7 +164,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal workflow_worker_thread, sweeper_thread, slow_sweeps
+        nonlocal workflow_worker_thread, sweeper_thread, slow_sweeps, legacy_etag_binder
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
         replica_probe.probe()
         # #831/#835 velites 副本指纹对账（软告警）：Host 消费的两个面
@@ -217,6 +222,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                     object_storage,
                     studio_chat_service,
                 )
+            # #1316：存量无 hash 材料的 ETag 一次性绑定。每次启动都起（候选
+            # 来自 DB，重启不丢进度），只看对象存储是否配置——不受
+            # sweeper_enabled / code_capacity / claim 开关门控（#1312 R10 教训）。
+            legacy_etag_binder = start_legacy_material_etag_binder(job_db, object_storage)
         background_tasks.start(app)
         studio_chat_service.reap_zombie_sessions()
         studio_registry = StudioAgentRegistryStore(job_db)
@@ -244,6 +253,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             for thread in (
                 sweeper_thread,
                 *(slow_sweeps or ()),
+                legacy_etag_binder,
             ):
                 if thread is not None:
                     thread.stop()

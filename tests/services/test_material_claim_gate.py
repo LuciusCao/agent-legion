@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
+from server.app.jobs.queries.material_claim_gate import LEGACY_URL_DRAIN_SECONDS
 from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
 from tests.services import materials_testlib
 
@@ -180,3 +183,54 @@ def test_gate_bypass_for_exempt_materials(job_db) -> None:
     _gated_code_job(job_db, object_etag="etag-1", content_hash="a" * 64)
     _register_worker(protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION - 1)
     assert any(c.job_id == "job-gated" for c in _claims(job_db))
+
+
+# --- #1316：存量行绑定后的旧 Worker 准入（经 claim_batch 全链）-----------------
+
+
+def _set_gated_row(job_db, **fields) -> None:
+    assignments = ", ".join(f"{name}={value}" for name, value in fields.items())
+    with job_db.connect() as conn:
+        conn.execute(f"update materials set {assignments} where id='mat-gated'")
+
+
+@pytest.mark.parametrize(
+    ("fields", "old_worker_claims"),
+    [
+        # binder 刚绑定：升级前签出的 URL 可能仍活 → 旧 Worker 跳过。
+        ({"legacy_etag_bound_at": "now()"}, False),
+        # 绑定时刻 + TTL + 裕度已过：存量 URL 全部过期 → 旧 Worker 照领。
+        (
+            {
+                "legacy_etag_bound_at": "now() - make_interval(secs => "
+                f"{LEGACY_URL_DRAIN_SECONDS + 1})"
+            },
+            True,
+        ),
+        # R12：repair 窗口（uploading）→ 跳过（不领到再 500）。
+        ({"status": "'uploading'", "object_etag": "''"}, False),
+        # failed 维持既有失败语义（领到 → 描述符 not ready → 有界 requeue 后 failed），
+        # 不被旧 Worker 永久跳过。
+        ({"status": "'failed'"}, True),
+    ],
+    ids=["bound_fresh", "bound_drained", "uploading", "failed"],
+)
+def test_old_worker_admission_for_legacy_bound_rows(job_db, fields, old_worker_claims) -> None:
+    _gated_code_job(job_db, object_etag="etag-1")
+    _set_gated_row(job_db, **fields)
+    _register_worker(protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION - 1)
+
+    claimed = any(c.job_id == "job-gated" for c in _claims(job_db))
+
+    assert claimed is old_worker_claims
+    assert _queued(job_db, "job-gated") is (not old_worker_claims)
+
+
+def test_drain_window_covers_the_material_presign_ttl() -> None:
+    """放行时刻的 TTL 项必须与材料 presign PUT 的实际有效期一致（改了一边
+    忘了另一边，旧 Worker 会在活 URL 仍有效时被放行）。"""
+    from server.app.jobs.queries import material_claim_gate
+    from server.app.services import materials
+
+    assert material_claim_gate.PRESIGN_PUT_TTL_SECONDS == materials._PRESIGN_EXPIRY_SECONDS
+    assert material_claim_gate.LEGACY_URL_DRAIN_SECONDS > materials._PRESIGN_EXPIRY_SECONDS

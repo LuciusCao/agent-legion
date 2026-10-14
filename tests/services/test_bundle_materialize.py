@@ -9,13 +9,13 @@ from pathlib import Path
 import pytest
 
 from server.app.services.material_bundle_cache import (
-    bundle_claim_block,
     bundle_runtime_block,
     is_bundle_input,
     prefetch_bundle_block,
 )
 from server.app.services.material_bundles import MaterialBundlesService
 from server.app.services.material_cache import material_runtime_block
+from server.app.services.material_claim_descriptors import bundle_claim_block
 from shared.material_bundle import bundle_address
 from shared.material_cache import MaterializeError
 from tests.fakes.storage import FakeObjectStorage
