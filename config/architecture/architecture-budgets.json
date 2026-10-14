@@ -1703,6 +1703,7 @@
     "server/app/services/material_bundles.py": 194,
     "server/app/services/material_cache.py": 151,
     "server/app/services/material_etag_backfill.py": 72,
+    "server/app/services/material_etag_binder.py": 70,
     "server/app/services/material_identity.py": 20,
     "server/app/services/material_key_validation.py": 42,
     "server/app/services/material_ttl.py": 101,

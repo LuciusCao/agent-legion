@@ -27,8 +27,10 @@ content_hash（sha256 fail-closed，既有）与**静止期绑定的 etag**（�
 可能是毒化 etag（既成事实无机制可分辨，只能靠 repair 重传）；静止期
 守卫关掉的是升级前后「活 URL 窗口」内的新替换。
 
-调用面：``MaterialTtlSweeperThread``（sweeper 副本单实例，启动即跑一次、
-未清空则按 sweep 间隔重试，pending 计时表随线程持有，重启安全重置）。
+调用面：``MaterialEtagBackfillThread``（services/material_etag_binder.py，
+独立一次性后台线程——codex r10 起不再挂 sweeper 线程，不受
+sweeper_enabled 门控；启动即跑一次、未清完按间隔重试、done 即退），
+pending 计时表随线程持有，重启安全重置。
 DB 访问走 material_etag_identity.py 的 queries 层函数（BOUNDARY-DATA-001）。
 """
 
@@ -70,7 +72,7 @@ def backfill_legacy_material_etags(
     """全量游标扫一轮候选；返回计数 + ``done`` 标记。
 
     ``done`` = 扫描到达候选集末尾且没有等待静止期满的 pending 行——调用方
-    （sweeper 线程）据此停止回填；异常/中断则 done=False 下轮重扫。
+    （binder 线程）据此停止回填；异常/中断则 done=False 下轮重扫。
     ``pending`` 计时表由调用方持有（跨轮存活；重启丢失 = 重新计时，安全
     方向）。缺对象翻 failed 的行即时退出候选集（自净）；静止期未满的行
     是暂时态，不计失败。

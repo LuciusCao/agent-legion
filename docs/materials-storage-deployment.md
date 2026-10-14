@@ -332,9 +332,11 @@ EOF
     升级窗口内（Host 先升），无 hash 且 etag 已绑的材料任务对旧 Worker
     不可领（留队列等升级，不落失败）；无 hash 且 etag=''（身份未建立、
     回填在途）的行对**所有** Worker 挂起到 binder 绑定。hash 行恒免门禁。
-    升级顺序与矩阵见 remote-execution-runbook.md §5。存量行身份（codex r8）：`object_etag=''` 的 ready 行由
-    materials TTL sweeper 线程的启动回填逐行 HEAD + CAS 建立 ETag 身份
-    （幂等可重入，未清空按 sweep 间隔重试）；升级前已被毒化的行回填到
+    升级顺序与矩阵见 remote-execution-runbook.md §5。存量行身份（codex r8/r10）：
+    `object_etag=''` 的 ready 行由独立的一次性后台线程
+    （material_etag_binder，不受 sweeper_enabled 门控——逃生舱形态下回填
+    照常运行）启动即跑、逐行 HEAD + CAS 建立 ETag 身份（幂等可重入，
+    未清完按间隔重试，done 即退）；升级前已被毒化的行回填到
     的是毒化 etag（既成事实无机制可分辨，只能靠 repair 重传）——回填
     关闭的是升级后的新窗口。
   - 孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已

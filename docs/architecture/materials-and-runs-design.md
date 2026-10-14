@@ -384,8 +384,8 @@ content_hash 的行它是唯一的内容身份，关闭「已签发 URL 的 1h �
 cache hit 不重验（填充时已验）。complete 的 sha256 流读同样携带刚 HEAD 到的 ETag 作
 If-Match（codex P1：HEAD 与读取之间对象被复用 URL 换掉时按核验失败处理，绝不把旧快照的
 ETag 与新字节一起落 ready）。存量行 `object_etag=''` 是过渡态——启动后台回填
-（`material_etag_backfill`，挂在 materials TTL sweeper 线程上，启动即跑、幂等可重入、
-CAS 落库）逐行建立身份；回填完成前这些行被 fail-closed / 门禁挂起（codex r9，不再
+（`material_etag_backfill`，由独立的一次性后台线程 material_etag_binder 承载——
+启动即跑、幂等可重入、CAS 落库、done 即退，不受 sweeper_enabled 门控）逐行建立身份；回填完成前这些行被 fail-closed / 门禁挂起（codex r9，不再
 放行——见 §6.4.1）。语义边界与逐格机制见 §6.4.1 状态机表。
 新旧 Server 方向兼容（纯增量可选字段，Worker 按缺失回落）；**旧 Worker（协议 < v6）
 方向是门禁语义**，且分两档：无 hash 且 etag 已绑 → 拦旧 Worker（留队列等升级）；无

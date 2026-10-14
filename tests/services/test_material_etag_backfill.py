@@ -14,7 +14,10 @@ from botocore.exceptions import ClientError
 
 import server.app.services.material_etag_backfill as backfill_module
 from server.app.services.material_etag_backfill import backfill_legacy_material_etags
-from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
+from server.app.services.material_etag_binder import (
+    MaterialEtagBackfillThread,
+    start_material_etag_backfill,
+)
 from tests.fakes.storage import etag_of
 from tests.services import materials_testlib
 
@@ -228,35 +231,36 @@ def test_backfill_storage_outage_is_not_done(service, storage, job_db, monkeypat
     assert _object_etag_of(job_db, material_id) == ""
 
 
-def test_sweeper_thread_backfills_at_startup_and_retries(
+def test_binder_thread_backfills_at_startup_and_retries(
     service, storage, job_db, monkeypatch
 ) -> None:
-    """接线格：sweeper 线程启动即跑回填（不等首个 sweep 间隔）；静止期
-    计时满后（此处 TTL 打 0）间隔重试轮完成绑定。"""
+    """接线格：binder 线程启动即跑回填（不等间隔）；静止期计时满后
+    （此处 TTL 打 0）间隔重试轮完成绑定，done 后线程退出。"""
     monkeypatch.setattr(backfill_module, "_PRESIGN_EXPIRY_SECONDS", 0)
     material_id, _key = _legacy_ready_row(job_db, service, storage)
-    thread = MaterialTtlSweeperThread(job_db.dsn_identity, storage, interval_seconds=0.05)
+    thread = MaterialEtagBackfillThread(job_db.dsn_identity, storage, interval_seconds=0.05)
     thread.start()
     try:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
-            if _object_etag_of(job_db, material_id) == etag_of(PAYLOAD) and thread._backfill_done:
+            if _object_etag_of(job_db, material_id) == etag_of(PAYLOAD) and thread.done:
                 break
             time.sleep(0.02)
         assert _object_etag_of(job_db, material_id) == etag_of(PAYLOAD)
-        assert thread._backfill_done
+        assert thread.done
     finally:
         thread.stop()
 
 
-def test_sweeper_backfill_stats_path_tolerates_marked_failed(service, storage, job_db) -> None:
-    """评审 P2-①：binder 结果含 marked_failed（缺对象翻 failed）时 sweeper
-    统计路径不抛 KeyError（改名 missing→marked_failed 的 callsite 回归）。"""
+def test_binder_run_once_stats_path_tolerates_marked_failed(service, storage, job_db) -> None:
+    """评审 P2-①（r10 随解耦迁入 binder 线程）：binder 结果含
+    marked_failed（缺对象翻 failed）时统计路径不抛 KeyError（改名
+    missing→marked_failed 的 callsite 回归）。"""
     material_id, key = _legacy_ready_row(job_db, service, storage)
     del storage.objects[key]
-    thread = MaterialTtlSweeperThread(job_db.dsn_identity, storage, interval_seconds=3600)
+    thread = MaterialEtagBackfillThread(job_db.dsn_identity, storage)
 
-    thread._run_backfill()  # 不抛即过（旧代码 KeyError: 'missing'）
+    thread.run_once()  # 不抛即过（旧代码 KeyError: 'missing'）
 
     assert service.get(WORKSPACE_ID, material_id)["status"] == "failed"
 
@@ -282,8 +286,6 @@ def test_done_not_wedged_by_stale_pending_mark(service, storage, job_db) -> None
     assert second["done"] is True, "候选集已空：陈旧标记不得楔形 done"
 
 
-def test_sweeper_thread_backfill_skips_without_storage(job_db) -> None:
-    """无对象存储 = 无材料特性：回填直接标记完成，不炸线程。"""
-    thread = MaterialTtlSweeperThread(job_db.dsn_identity, None, interval_seconds=3600)
-    thread._run_backfill()
-    assert thread._backfill_done
+def test_start_helper_skips_without_storage(job_db) -> None:
+    """无对象存储 = 无材料特性：不建线程（None）。"""
+    assert start_material_etag_backfill(job_db.dsn_identity, None) is None

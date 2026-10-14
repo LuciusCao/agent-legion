@@ -5,7 +5,8 @@ inline 文本与 demo seed 两条直插 ready 产线在 put 后 HEAD 取 ETag �
 消费侧（Host 物化 If-Match / Worker claim 描述符）以本列判等检出「complete 后
 同尺寸静默覆盖」。存量行 default '' 是过渡态（codex r8：升级前完成、旧 PUT URL
 仍在 1h 有效期内的无 hash 行仍处窗口内）——启动后台回填
-（services/material_etag_backfill.py，挂在 MaterialTtlSweeperThread 上）逐行
+（services/material_etag_backfill.py，由独立一次性后台线程
+material_etag_binder 承载，启动即跑，不受 sweeper_enabled 门控）逐行
 HEAD 取当前 ETag、CAS 落库收口；回填完成前这些行由 fail-closed（Host 物化）
 与门禁挂起（Worker claim 拦全部）挡住（codex r9），不再放行。
 
