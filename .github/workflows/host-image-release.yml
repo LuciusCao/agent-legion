@@ -65,7 +65,7 @@ jobs:
       # label 必须用它才映射得回 git log。
       commit_sha: ${{ steps.commit.outputs.sha }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Tag version must be a valid Docker tag
         run: |
@@ -130,7 +130,7 @@ jobs:
             runs-on: ubuntu-24.04-arm
             cache-scope: host-arm64
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
@@ -190,7 +190,7 @@ jobs:
       # ls-remote 查最高版本 tag 需要 origin（velites-release 同先例，
       # codex P1 on #533：runner 是全新环境，没有 checkout 就没有 origin）；
       # depth 1 即可——只查 tag 引用列表，不看历史。
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
 
