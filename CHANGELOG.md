@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Studio 发布请求 confirming 状态 300s 超时误回收（issue #464）：confirm 执行期（门禁 → before/after 探测 → publish → resolve 全程，含失败回滚分支）由守护线程按 CONFIRMING_STALE_SECONDS/5（60s）周期续租 claimed_at，谓词骑在 UPDATE 上（status='confirming'，失配 rowcount=0 即停跳），慢发布不再被轮询侧的 stale-confirming 谓词误改成 expired；无心跳的死进程行仍按原谓词被清扫为 expired（owner-liveness 语义，非豁免）。心跳线程启动失败（进程线程上限等）同样走回滚路径：claim 已提交的 confirming 行退回 pending，不再滞留 300s 等清扫（#1256 codex P2）。
 - Studio Agent 注册表 PUT 陈旧快照冲突检查（issue #355）：管理员基于旧快照编辑期间若启动探测或「重新检测」先提交，整份 PUT 会静默删除新探测到的 detected 行。GET 响应现携带注册表内容版本 `revision`（存储文档 canonical JSON 的 sha256 前缀；版本输入只含 agents 与显式存储的 api_base——未配置时按进程实际地址推导的 api_base（#915）不参与，重启/换端口不会产生假陈旧），PUT 带上该版本后服务端在 `SELECT ... FOR UPDATE` 同一事务内比对，不匹配返回 409 且 detail 携带当前注册表（#719 错误形态）；前端弹确认对话框，「刷新注册表」直接采用 409 detail 携带的最新文档一次性前进编辑器（invalidate 重取进不了已挂载编辑器，否则会 409 死循环），不自动重试；省略 `revision` 的调用保持原整份替换语义（smoke 脚本已改为携带 GET 到的 revision）。
+- 材料 ETag 恢复重绑（`scripts/rebind_material_etags.py`）的 CAS 从 (object_etag, storage_key) 扩为四钉：再钉扫描时的 `upload_generation` 与 `status`（TTL 过期、complete 失败只翻 status，旧 CAS 拦不住）；CAS 落空单列为「竞态失败」报告、退出码 1（issue #1313）。
 
 ## [0.7.19] - 2026-10-11
 

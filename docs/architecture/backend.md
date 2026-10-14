@@ -346,6 +346,7 @@ server/app/
 | AgentWorkersRuntimeConfig | BaseModel | max_archive_bytes: int, min_protocol_version: int, max_concurrent_result_comm... | app/configuration/executor_runtime.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/configuration/executor_runtime.py |
 | CodeCapabilityConfig | BaseModel | timeout_seconds: int, sandbox_network: bool, config_schema: dict[str, Any] | app/executors/contracts.py |
+| EtagRebindCas | TypedDict | expected_etag: str, new_etag: str, storage_key: str, upload_generation: int, ... | app/jobs/queries/material_etag_identity.py |
 | AgentDefinitionResponse | BaseModel | id: str, runtime: Literal['pi', 'velites'], capability: str, skill: str, tool... | app/routes/agent_catalog_contracts.py |
 | AgentCatalogResponse | BaseModel | agents: list[AgentDefinitionResponse] | app/routes/agent_catalog_contracts.py |
 | AgentDefinitionPayload | BaseModel | capability: str, runtime: Literal['pi', 'velites'], skill: str, tools: list[s... | app/routes/agent_definition_contracts.py |

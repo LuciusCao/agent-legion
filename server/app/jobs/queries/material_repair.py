@@ -20,7 +20,7 @@
   不轮换，返回现状 key/代次供重签 URL；expired → 409。
 - 恢复重绑两方法（S3 快照恢复后 AWS CLI 分段上传改变 ETag 的场景，见
   docs/backup-restore-runbook.md）：``materials_with_object_etag`` 给出
-  扫描面，``rebind_material_etag`` 以 (id, expected_etag) CAS 落新值——
+  扫描面，``rebind_material_etag`` 以四钉 CAS 落新值（#1313）——
   调用方（scripts/rebind_material_etags.py）必须先核验恢复字节
   （size 恒验 + content_hash 非空时流式 sha256）再重绑，字节不符
   fail-closed。
@@ -28,10 +28,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Unpack
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.jobs.queries.material_etag_identity import (
+    EtagRebindCas,
     bind_material_etag_if_current,
     materials_with_object_etag,
 )
@@ -93,15 +94,6 @@ class MaterialRepairQueriesMixin(ConnectionQueriesMixin):
         扫描面，运维低频全量扫描）。"""
         return materials_with_object_etag(self.dsn_identity)
 
-    def rebind_material_etag(
-        self, material_id: str, *, expected_etag: str, new_etag: str, storage_key: str
-    ) -> bool:
-        """门面薄壳：见 ``material_etag_identity.bind_material_etag_if_current``
-        （CAS：(object_etag, storage_key) 双钉，key 钉防 repair 轮换串键）。"""
-        return bind_material_etag_if_current(
-            self.dsn_identity,
-            material_id,
-            expected_etag=expected_etag,
-            new_etag=new_etag,
-            storage_key=storage_key,
-        )
+    def rebind_material_etag(self, material_id: str, **cas: Unpack[EtagRebindCas]) -> bool:
+        """门面薄壳：见 ``material_etag_identity.bind_material_etag_if_current``（四钉 CAS）。"""
+        return bind_material_etag_if_current(self.dsn_identity, material_id, **cas)
