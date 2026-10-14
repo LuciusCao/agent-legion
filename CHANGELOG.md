@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- S3 孤儿 GC 材料删除批重开（issue #1314）：inline 文本与 demo seed 改走服务端材料写入 chokepoint（先落无 hash 的 uploading intent 行、再 PUT、再同事务换成 ready 行），所有材料对象从第一个字节起都被行引用；`scripts/gc-s3-jobs.py --apply` 据此删除 v2g 单次使用文法、对象年龄过 max(--grace-hours, 1h 下限)、删除前新鲜反查无行的材料孤儿，旧文法材料孤儿仍只报告；交错决策表见 materials-and-runs-design §6.4.2。
+
 ### Fixed
 
 - 材料 ETag 恢复重绑（`scripts/rebind_material_etags.py`）的 CAS 从 (object_etag, storage_key) 扩为四钉：再钉扫描时的 `upload_generation` 与 `status`（TTL 过期、complete 失败只翻 status，旧 CAS 拦不住）；CAS 落空单列为「竞态失败」报告、退出码 1（issue #1313）。

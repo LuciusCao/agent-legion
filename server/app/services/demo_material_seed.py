@@ -22,14 +22,18 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import uuid
 from typing import TYPE_CHECKING
 
 import psycopg
 from botocore.exceptions import BotoCoreError, ClientError
 
 from server.app.db.dialect import ConnectSource
-from server.app.db.transaction import read_connection, write_transaction
+from server.app.db.transaction import read_connection
+from server.app.services.job_errors import ConflictError
+from server.app.services.material_object_publish import (
+    MaterialObjectWrite,
+    publish_material_objects,
+)
 from server.app.storage import ObjectStorage, build_s3_storage
 
 if TYPE_CHECKING:
@@ -90,47 +94,35 @@ def seed_demo_workspace_materials(
         digest = hashlib.sha256(payload).hexdigest()
         if digest in known_hashes:
             continue
-        # #1279 key 文法：v2g 代次段 + m_{material_id} 标记唯一段（与上传
-        # /inline 产线同文法），删行后重播种子也必得新 key——GC 材料删除批
-        # 重开（#1314）后 demo 孤儿即可回收。
-        material_id = uuid.uuid4().hex
-        storage_key = f"{workspace_id}/{digest}/v2g0/m_{material_id}/{path.name}"
+        # 服务端材料写入 chokepoint（#1314）：先落 uploading intent 行、
+        # 再 PUT、再原子换成 ready 行——GC 反查在任何时刻都见行引用；
+        # #1279 key 文法（v2g0 + m_{material_id} 唯一段，key 尾段为文件
+        # 名）由 chokepoint 派生，删行后重播种子也必得新 key。同 hash
+        # 已有行（任意状态/来源）时不覆盖（on_non_ready='skip'）。Demo
+        # 材料不设 TTL（ttl_days=0，expires_at 为 NULL）。
+        write = MaterialObjectWrite(
+            content_hash=digest,
+            filename=path.name,
+            content_type=_CONTENT_TYPE,
+            payload=payload,
+            key_tail=path.name,
+        )
         try:
-            # Object first, row second: a ready row always has its object
-            # (a crashed seed between the two leaves an orphan object at a
-            # per-row unique key — reaped by the GC delete batch, #1279 —
-            # while the next seed run writes a fresh key). The ETag of
-            # the stored object is recorded on the row (v98) so both
-            # consumption chains can detect a later overwrite.
-            storage.put_object(storage_key, payload, content_type=_CONTENT_TYPE)
-            head = storage.head_object(storage_key)
-            if head is None or not head.etag:
-                raise OSError(f"head after put returned no object/etag: {storage_key}")
-            with write_transaction(source) as conn:
-                conn.execute(
-                    """
-                    insert into materials(
-                      id, workspace_id, content_hash, filename, content_type,
-                      size_bytes, storage_key, status, created_by, object_etag
-                    ) values (%s, %s, %s, %s, %s, %s, %s, 'ready', 'system', %s)
-                    on conflict (workspace_id, content_hash)
-                    where content_hash <> '' do nothing
-                    """,
-                    (
-                        material_id,
-                        workspace_id,
-                        digest,
-                        path.name,
-                        _CONTENT_TYPE,
-                        len(payload),
-                        storage_key,
-                        head.etag,
-                    ),
-                )
-        except (ClientError, BotoCoreError, OSError, psycopg.Error):
+            published = publish_material_objects(
+                source,
+                storage,
+                workspace_id,
+                [write],
+                created_by="system",
+                ttl_days=0,
+                on_non_ready="skip",
+            )
+        except (ClientError, BotoCoreError, OSError, psycopg.Error, ConflictError):
             # #204: the seeding loop's failure space is the boto3 data plane
             # (object put), the DB write (psycopg.Error — DB writes raise it, not OSError, codex on #264), and the
-            # read of the source markdown (OSError). All are transient
+            # read of the source markdown (OSError); ConflictError is the
+            # chokepoint's "intent row changed under us" (#1314 — e.g. the
+            # uploading row was deleted mid-seed). All are transient
             # infrastructure failures the module docstring already frames as
             # "degrade with a warning, the next seed call completes the
             # rest"; an abort (not skip) is correct because the loop's
@@ -146,6 +138,8 @@ def seed_demo_workspace_materials(
             )
             break
         known_hashes.add(digest)
+        if published.get(digest) is None:
+            continue
         seeded.append(path.name)
         logger.info(
             "seeded demo material: %s -> workspace %s (%d bytes)",
