@@ -5,15 +5,14 @@ versions here; migration_chain asserts the combined registry stays sorted."""
 from __future__ import annotations
 
 from server.app.db.migration_entry import SchemaMigration
+from server.app.db.migrations import job_node_status_count_deltas as _v88
+from server.app.db.migrations import material_legacy_etag_binding as _v99
 from server.app.db.migrations.agent_profile_backfill import migrate_agent_profile_backfill
 from server.app.db.migrations.agent_request_profile_source import (
     migrate_agent_request_profile_source,
 )
 from server.app.db.migrations.agent_worker_claim_state import migrate_agent_worker_claim_state
 from server.app.db.migrations.agent_worker_node_limits import migrate_agent_worker_node_limits
-from server.app.db.migrations.job_node_status_count_deltas import (
-    migrate_job_node_status_count_deltas as _migrate_v88_node_deltas,
-)
 from server.app.db.migrations.material_object_etag import migrate_material_object_etag
 from server.app.db.migrations.material_upload_generation import migrate_material_upload_generation
 from server.app.db.migrations.retire_default_workflow_key import (
@@ -46,7 +45,7 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # delta, so no write in the family ever waits. bump_job_node_status_counts
     # moved out of postgres_schema.sql into this migration's SQL so a later
     # schema-file replay cannot restore the blocking body.
-    SchemaMigration(88, "job_node_status_count_deltas", _migrate_v88_node_deltas),
+    SchemaMigration(88, "job_node_status_count_deltas", _v88.migrate_job_node_status_count_deltas),
     # v89 (#872): studio_chat_sessions.deleted_at — Studio chat session soft
     # delete (list filters it, public reads 404, resume claim refuses it).
     # A column, not a status value: status is the live runtime state
@@ -102,4 +101,9 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # 存量行 default '' 维持 size-only（身份建立拆至 #1316）。DDL-only,
     # same guarded-ALTER home rule as v87.
     SchemaMigration(98, "material_object_etag", migrate_material_object_etag),
+    # v99 (#1316): materials.legacy_etag_bound_at — 存量无 hash 行由启动
+    # binder 按当前 HEAD 绑定 ETag 的时刻；旧 Worker（< v6）门禁据此在
+    # 「绑定时刻 + presign TTL + 时钟裕度」后放行该行（升级前签出的 URL
+    # 已全部过期）。DDL-only, same guarded-ALTER home rule as v87.
+    SchemaMigration(99, "material_legacy_etag_binding", _v99.migrate_material_legacy_etag_binding),
 ]

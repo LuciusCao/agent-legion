@@ -8,11 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from server.app.services.material_cache import (
-    is_material_input,
-    material_claim_block,
-    material_runtime_block,
-)
+from server.app.services.material_cache import is_material_input, material_runtime_block
+from server.app.services.material_claim_descriptors import material_claim_block
 from shared.material_cache import MaterializeError
 from tests.fakes.storage import FakeObjectStorage
 

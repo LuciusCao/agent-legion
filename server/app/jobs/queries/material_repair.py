@@ -76,6 +76,9 @@ def repair_material_for_reupload_tx(
         )
         conn.execute(
             "update materials set status='uploading', object_etag='',"
+            # #1316：轮换后的新 key 有新签发的活 URL——清掉存量绑定时刻，
+            # 旧 Worker 门禁不再按「存量 URL 已过期」放行这一行。
+            " legacy_etag_bound_at=null,"
             " upload_generation=%s, storage_key=%s where id=%s",
             (generation, storage_key, material_id),
         )

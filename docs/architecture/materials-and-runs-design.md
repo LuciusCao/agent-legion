@@ -383,13 +383,14 @@ content_hash 的行它是唯一的内容身份，关闭「已签发 URL 的 1h �
 携带 `object_etag`，memory-only 不落 manifest），不一致即 MaterializeError 不落缓存；
 cache hit 不重验（填充时已验）。complete 的 sha256 流读同样携带刚 HEAD 到的 ETag 作
 If-Match（codex P1：HEAD 与读取之间对象被复用 URL 换掉时按核验失败处理，绝不把旧快照的
-ETag 与新字节一起落 ready）。存量行 `object_etag=''`（v98 前完成，无内容身份）维持升级前
-的 size-only 语义：各消费入口不核验、不挂起、不拒绝（#1312 方案 B）；一次性残留窗口与
-逐入口语义见 §6.4.1，存量行身份建立（回填 + 门禁）拆至 #1316。
+ETag 与新字节一起落 ready）。存量行 `object_etag=''`（v98 前完成，无内容身份）由新 Host
+启动时按当前 HEAD 一次性绑定（#1316，schema v99 记录绑定时刻）；绑定前与绑定失败的行维持
+升级前的 size-only 语义，不挂起、不拒绝。取舍与逐入口语义见 §6.4.1。
 新旧 Server 方向兼容（纯增量可选字段，Worker 按缺失回落）；**旧 Worker（协议 < v6）
 方向是门禁语义**：无 hash 且 etag 已绑的材料任务对旧 Worker 不可领——claim
-admission 跳过、留队列不落失败；hash 行与 etag='' 行恒免（见 shared/protocol.py v6 条目与
-jobs/queries/material_claim_gate.py 的谓词论证）。缓存寻址（codex r6）：hash 行内容寻址不变；
+admission 跳过、留队列不落失败，claim 描述符按同一行快照复判；repair 进行中的无 hash 行
+同样门禁；hash 行、etag='' 行、failed/expired 行与绑定满 75min 的存量行不门禁（见
+shared/protocol.py v6 条目与 jobs/queries/material_claim_gate.py 的谓词论证）。缓存寻址（codex r6）：hash 行内容寻址不变；
 无 hash 行地址带上传代次（`{material_id}-v2g{代次}`，代次即身份）——repair 代次 +1 后
 旧 gen 地址自然孤儿化，修复前（可能被旧 Worker 无核验缓存的）毒化字节不再命中；
 代次来源与消费读取的行快照同一份（Host dispatch 现读行 / Worker claim 描述符与 presigned
@@ -400,59 +401,139 @@ v2g key 并为**原行**签发受代次保护的重传 URL（hash/无 hash 统�
 启动调度前必须跑 `scripts/rebind_material_etags.py` 重绑（字节核验不过 fail-closed），
 见 backup-restore-runbook.md。
 
-#### 6.4.1 无 hash 材料的身份状态机（#1279；#1312 第 11 轮按方案 B 收缩）
+#### 6.4.1 无 hash 材料的身份状态机（#1279；#1316 存量行绑定）
 
-**不变量（本 PR 范围）**：**已绑定 etag** 的无 `content_hash` 材料，其字节在每个消费入口都
-必须与绑定的 etag 一致才可消费（If-Match，412 → MaterializeError，不落缓存）；hash 行由
-sha256 fail-closed 兜底（既有）。新 complete / inline / demo seed 的行都原子落 ETag，所以
-升级后签出的 PUT URL 所对应的行一律进入核验链。
+**不变量**：已绑定 etag 的无 `content_hash` 材料，其字节在每个消费入口都必须与绑定的
+etag 一致才可消费（If-Match，412 → MaterializeError，不落缓存）；hash 行由 sha256
+fail-closed 兜底。新 complete 的行原子落 ETag；inline / demo seed 产线恒带 hash。
+存量行（v98 前完成，`object_etag=''`）由 #1316 的启动绑定建立身份（下文）。
 
-**存量行（etag=''）不在本 PR 建立身份**：它们在每个消费入口维持升级前的 size-only 语义——
-不 fail-closed、不挂起、不对任何 Worker 门禁。**一次性残留窗口** = 升级前签出、升级时仍
-未过期的 PUT URL（presign 有效期 1h，故最长 ≤1h）：其持有者在窗口内同尺寸覆盖存量无 hash
-对象不会被检出，与升级前等价、不随时间扩大。存量行的身份建立（静止期回填、未绑定档门禁、
-驱动方与失败处置语义）拆至 #1316。
+**存量行的取舍（#1316）**：「全局升级时刻 T\*（= 升级时刻 + presign TTL）」之前的三种
+做法逐格比较——
 
-**消费入口维度**：材料字节只在下列入口被消费（没有预览/下载字节端点；complete 的 sha256
-流读是生产侧核验，不是消费）——
-- E1 Host 本地单材料 / E2 Host 本地 bundle / E3 Host 本地分片：普通节点与本地 shard 都经
-  `build_runtime` → `material_cache.material_runtime_block` / `material_bundle_cache` 的
-  `open_verified_stream`（同一条路，下表合为一列）；
-- E4 远程 claim 准入：`claim_admission` 的 v6 协议门禁（只对 < v6 Worker 生效）；
-- E5 claim 响应：`material_claim_block` / `bundle_claim_block` 下发描述符（etag、代次、
-  presigned GET，memory-only）；
-- E6 Worker 拉取：`worker/material_fetch` / `bundle_fetch` 对 presigned GET 带 If-Match；
-- E7 两侧缓存命中：不重验（填充时已验），无 hash 地址带代次。
+| 窗口内（升级 → 升级前签出的 URL 全部过期）活 URL 同尺寸覆盖 | (a) T\* 后才绑，之前 size-only | (b) T\* 前挂起，T\* 后绑 | **(c) 启动即绑（选定）** |
+| --- | --- | --- | --- |
+| 覆盖发生在 Host 启动、绑定之前 | 消费 + T\* 时被绑成身份 | 不消费，T\* 时被绑成身份 | 被绑成身份（秒级窗口，启动时 workspace 全暂停） |
+| 覆盖发生在绑定之后、T\* 之前 | **静默消费**，T\* 时被绑成身份 | 不消费，T\* 时被绑成身份（挂起无法改变 T\* 时 HEAD 到的字节） | **412 响亮失败**（Host / v6），repair 愈合 |
+| 窗口内写入的缓存（地址 `{id}-v2g{gen}`，命中不重验） | 可能与 T\* 绑定的身份分叉 | 无 | 无（绑定先于消费） |
+| Host / v6 Worker 可用性 | 不变 | 存量无 hash 任务挂起 ≤75min，须在 Host 单材料 / bundle / 分片 / 远程入队 / 远程准入五处准入层收口，挂起请求还会占全局 code stock（P2） | 不变 |
+| 旧 Worker（< v6）可用性 | 绑定后永久门禁 → 需要「存量放行」 | 同左 | 门禁 75min 后按 `legacy_etag_bound_at` 自动放行 |
+| 驱动方 | 要睡到 T\*（计时须持久化） | 同左 + 挂起谓词 | 启动一次性扫描，无计时 |
 
-| 行状态（status × hash × etag） | E1–E3 Host 本地物化 | E4 准入（< v6 Worker） | E5 claim 描述符 | E6 Worker v6+ 拉取 | 机制 |
-| --- | --- | --- | --- | --- | --- |
-| hash 行（任意 etag） | sha256 fail-closed | 放行（sha256 兜底） | 下发 | sha256 fail-closed | 内容寻址 + 下载重算 |
-| 无 hash，etag 已绑（complete/rebind），URL 全死 | If-Match 核验 | **门禁拦**（留队列，不落失败） | 下发 etag | If-Match 核验 | v6 门禁 + If-Match |
-| 无 hash，etag 已绑，仍有活 URL（签发 1h 内）被覆盖 | 412 → MaterializeError（节点 failed，可 repair） | 门禁拦 | 下发 etag | 412 → 失败（可 repair） | If-Match 检出 + repair |
-| 无 hash，etag=''（存量行） | **size-only 物化**（base 语义） | 放行 | 下发 etag='' | **size-only**（无条件 GET） | 方案 B：残留窗口 ≤1h，一次性 |
-| uploading/failed（任意身份） | 拒绝（not ready，节点 failed，既有） | 门禁按 etag 判 | 拒绝（claim 500 → 回收重排，既有） | — | 解析链只收 ready |
-| expired | 拒绝（既有） | 同上 | 拒绝（既有） | — | 既有 TTL 语义 |
-| repair 窗口（清 etag + 轮换 key + 签发新 URL） | 行为 uploading → 同上；重传 complete 后落新 etag | 同上 | 同上 | 新 key If-Match | 代次守卫 + 轮换（bare complete 409/缺对象 failed） |
-| rebind 窗口（恢复后 etag 漂移，字节已核验） | CAS 前 412；CAS 后正常 | 门禁拦 | 下发新 etag | 同 E1 | verify-then-CAS（字节不过 fail-closed） |
-| 滚动升级（Host 先升，旧 Worker 在役） | 不受影响 | 已绑行任务挂起、其余照领 | — | — | 见 remote-execution-runbook §5 |
+(c) 在完整性上严格优于 (a)、(b)，可用性与 (a) 相同，机制最少；它对「升级前签出的 URL」
+的信任与新行 complete 时一样（已声明接受的「pre-complete 幽灵写绑身份」格）。T\* 只剩
+一个用途：旧 Worker 何时可以安全领取 binder 绑定的存量行；它按**行的绑定时刻**
+（`legacy_etag_bound_at`，DB 钟，持久化）计算，比 `schema_migrations(98).applied_at`
+更晚、更保守（脚本先触发迁移、旧 Host 尚在役的路径下 applied_at 不是上界）。
 
-构造性不可达格：「读 A 代址取 B 代对象」不可达——缓存地址代次与 presigned URL 取自同一
-行快照（Host 现读行 / claim 描述符同行）；etag 绑定后对象再被改写只有「已签发 URL 复用」
-一条路，而 If-Match 把该路变成 412 检出而非静默。
+**旧 Worker 门禁谓词 G**（唯一定义：`jobs/queries/material_claim_gate.requires_etag_protocol_sql`）：
+`content_hash='' ∧ (status='uploading' ∨ (status='ready' ∧ object_etag≠'' ∧ ¬(legacy_etag_bound_at 非空 ∧ legacy_etag_bound_at + 4500s ≤ now())))`。
+4500s = 材料 presign PUT TTL 3600s（自 #141 起不变，测试钉与 `materials._PRESIGN_EXPIRY_SECONDS`
+一致）+ 900s 时钟裕度。准入层（job 的全部材料 / bundle 成员行）与描述符层（与描述符
+同一行快照）复用同一表达式。complete（`mark_ready`）与 repair 的 ready 分支清空
+`legacy_etag_bound_at`。
 
-已声明接受格（M30 对账）：
-- **pre-complete 幽灵写绑身份**（能力模型边界）：作者 PUT 之后、complete 的 HEAD 之前，
-  活 URL 持有者可同尺寸重写并被绑成身份——presigned URL 即作者通道，URL 外泄不在威胁
-  模型内；hash 行免疫（sha256 声明在先）；无 hash 行结构性「最后写入者即作者」，关不掉
-  （除非强制 content_hash）。
-- **流中同尺寸撕裂**（存储契约）：If-Match 只校验 GET open 时刻；流读期间的同尺寸覆盖
-  依赖存储的「单 GET 原子快照」语义（AWS S3 保证；已写入
-  docs/materials-storage-deployment.md 的后端契约要求）。hash 行由最终 sha256 复算免疫，
-  仅无 hash 行依赖此契约。
-- **存量行残留窗口**（方案 B）：见上；升级前已被毒化的存量行同样无机制可分辨（与 base
-  等价），repair 重传可换内容身份。
-- 信任前提：rebind 对无 hash 行只 size 核验（信任运维备份字节）；worker 版本自报
-  （trusted infra）。
+**行状态类**：
+
+| 类 | status | hash | etag | legacy_etag_bound_at |
+| --- | --- | --- | --- | --- |
+| S1 | ready | 有 | 任意 | 任意 |
+| S2 | ready | 无 | ''（未绑：启动扫描前 / 绑定失败） | NULL |
+| S3 | ready | 无 | binder 已绑，未满 4500s | 有 |
+| S3' | ready | 无 | binder 已绑，已满 4500s | 有 |
+| S4 | ready | 无 | complete / repair 重传绑定 | NULL |
+| S5 | uploading | 无 | ''（新 presign 或 repair 进行中） | NULL |
+| S6 | failed / expired | 无 | 任意 | 任意 |
+| S7 | ready | 无 | 已绑，对象被活 URL 覆盖 | 任意 |
+
+**消费入口**：准入层——A1 Host 本地单材料 / A2 Host 本地 bundle（`claim_submit` →
+`local_dispatch.decide_local_code_dispatch` → 取租约）、A3 Host 本地分片
+（`shards.claim_shard_locally`）、A4 远程入队（`code_claim.try_claim_code_worker_node`，计入
+全局 code stock）、A5 远程准入（`claim_admission.admit_candidate`，读相 / 写相共用）。
+物化层——M1 claim 描述符（`material_claim_block` / `bundle_claim_block`）、M2 Worker 拉取
+（`worker/material_fetch` / `bundle_fetch`）、M3 Host 物化（A1–A3 全部汇入 `_code_sandbox`
+→ `build_runtime` → `prefetch_material_block`）、M4 / M5 Host / Worker 缓存命中（不重验；
+地址 hash ｜ `{id}-v2g{gen}`（v6）｜ `{id}`（< v6））。另：run 创建只收 ready（不碰字节）。
+
+| 类 | A1–A3 Host 准入 | A4 远程入队 | A5 准入 < v6 | A5 准入 ≥ v6 | M1 描述符 | M2 Worker 拉取 | M3 Host 物化 | M4/M5 缓存 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| S1 | 放行 | 入队 | 放行 | 放行 | 下发 | sha256 | sha256 | 内容寻址 |
+| S2 | 放行 | 入队 | 放行 | 放行 | 下发 etag='' | size-only | size-only | 地址不变 |
+| S3 | 放行 | 入队 | **跳过**（留队列，不耗 attempt） | 放行 | 下发 etag；< v6 快照判真 → 拒 | If-Match | If-Match | 地址不变 |
+| S3' | 放行 | 入队 | 放行 | 放行 | 下发 etag（< v6 忽略，无活 URL，安全） | If-Match | If-Match | 地址不变 |
+| S4 | 放行 | 入队 | 跳过 | 放行 | 下发 etag；< v6 快照判真 → 拒 | If-Match | If-Match | 地址不变 |
+| S5 | 放行 | 入队 | **跳过**（R12） | 放行 | not ready → 拒（既有） | — | not ready → MaterializeError（既有） | — |
+| S6 | 放行 | 入队 | 放行（维持失败路径） | 放行 | not ready → 拒（既有） | — | not ready → MaterializeError（既有） | — |
+| S7 | 放行 | 入队 | 跳过 | 放行 | 下发 etag | 412 → MaterializeError | 412 → MaterializeError | 不落缓存 |
+
+**失败处置语义**（逐格核对过调用链）：
+
+| 处置 | 出现在 | 语义 |
+| --- | --- | --- |
+| 准入跳过 | A5 < v6 × S3 / S4 / S5 / S7 | 留队列、不耗 attempt；由 v6 Worker 领取，或 S3 满 4500s 自动放行；Host 本地兜底只在未入队时发生（入队后不回落） |
+| M1 拒绝 | 描述符组装 | `MaterializeError` → claim 响应 500（批量 claim 丢弃该条）→ lease 过期 → sweeper 回收重排，每次消耗 1 次 attempt，超过 requeue_limit（3）落 failed 终态 |
+| M3 物化抛错 | Host 本地 | `_code_sandbox` 映射为节点 failed 终态（不是暂时态） |
+| M2 拉取失败 | Worker | Worker 侧节点 failed |
+| 无 | S2 全部入口 | base 的 size-only 语义，不挂起、不失败 |
+
+本设计**没有挂起**：唯一的「留队列」是旧 Worker 准入跳过，属 #1279 v6 门禁的既有语义，
+对存量行有界（≤4500s 后放行）。
+
+**跨事务竞态（准入 → 描述符）**：
+
+| 准入时（< v6，G 假） | 描述符组装前发生 | M1 结果 |
+| --- | --- | --- |
+| S2 / S3' | 无 | 下发；S2 = size-only（base），S3' = 无活 URL |
+| S2 | binder 绑定 → S3 | 快照 G 真 → 拒（消耗 1 次 attempt），下一轮准入跳过 |
+| S2 / S3' | repair → S5 | not ready → 拒（既有） |
+| S2 / S3' | repair + 重传 complete → S4（新 key + 新 etag）【R12】 | 快照 G 真 → 拒；旧 Worker 拿不到新 key 的 URL |
+| ≥ v6 任意 | 任意 | 描述符 etag 与 URL 同快照，If-Match 核验 |
+
+**绑定（写端）**：候选 `status='ready' ∧ content_hash='' ∧ object_etag=''`（hash 行不绑，P4），
+keyset (created_at, id) 分批。HEAD 返回 None / size 与行不符 / ETag 空 / HEAD 抛错 → 只报告、
+不改行（行保持 S2）；否则 CAS `update … set object_etag, legacy_etag_bound_at=now() where id ∧
+status='ready' ∧ content_hash='' ∧ object_etag='' ∧ storage_key ∧ upload_generation`，CAS 让位
+（期间 repair / complete / 删行）只报告。恢复重绑（`rebind_material_etags.py`）的 CAS 不在此（#1313）。
+
+**驱动方**：
+
+| 驱动方 | 何时起 | 门控 | 跨重启 | 结束 |
+| --- | --- | --- | --- | --- |
+| Host 启动线程（`material_legacy_etag_binding`） | 每次 lifespan，`start_worker`（生产 app） | 只看对象存储是否配置；**不**受 sweeper_enabled / code_capacity / claim 开关 / workspace 暂停影响 | 候选来自 DB，无内存计时 | 无候选或一轮干净即退；HEAD 抛错 / CAS 让位 / DB 异常时每 10min 重扫，至多 3 轮后告警退出（剩余行 = S2，base 语义） |
+| CLI `scripts/bind_legacy_material_etags.py` | 运维手动（dry-run 默认，`--apply`） | 库未被新 Host 迁移到当前版本时拒绝；**不**触发迁移 | — | 幂等可重跑；有未绑定行退出码 1 |
+| 并发（线程 + CLI / 多副本） | — | — | — | CAS 幂等 |
+
+**运维事件**：
+
+| 事件 | 结果 |
+| --- | --- |
+| 正常停机升级（单副本） | 启动即绑；旧 Worker 对存量行门禁 75min 后放行 |
+| 升级后重启 | 重扫剩余候选（通常为空） |
+| DB 恢复（升级前 dump） | 恢复流程会重启 Host → 重新迁移 + 启动绑定；不重启时跑 CLI；在此之前存量行为 S2（base 语义，无挂起） |
+| DB 恢复（升级后 dump） | `legacy_etag_bound_at` 随行恢复，放行时刻是绝对时间，仍正确 |
+| S3 快照恢复 | 已绑行走 rebind；未绑行在 Host 重启 / CLI 时按恢复后对象绑定 |
+| 迁移由脚本先于停旧 Host 触发 / 新旧 Host 并行 | 不受支持（停机升级 + 单副本）；放行时刻按绑定时刻算，已比按 applied_at 算保守 |
+| 回滚到 v98 前代码（不恢复 DB） | 不受支持（backup-restore-runbook §2.3 无降级路径） |
+| 无对象存储 | 不起线程；材料 API 503，存量行本就无法消费 |
+| 先新装库、再导入存量行（非标准恢复） | 下一次 Host 启动 / CLI 时绑定，放行时刻按绑定时刻算 |
+
+**已声明接受格**：
+- **pre-complete 幽灵写绑身份**（能力模型边界）：作者 PUT 之后、complete 的 HEAD 之前，活 URL
+  持有者可同尺寸重写并被绑成身份——presigned URL 即作者通道，URL 外泄不在威胁模型内；hash
+  行免疫；无 hash 行结构性「最后写入者即作者」，关不掉（除非强制 content_hash）。存量行的
+  同类格：升级前、以及 Host 启动到绑定之间（秒级）的覆盖被绑成身份，与 base 等价。
+- **流中同尺寸撕裂**（存储契约）：If-Match 只校验 GET open 时刻；依赖存储的「单 GET 原子快照」
+  （见 materials-storage-deployment.md 的后端契约）。
+- **升级前已被毒化的存量行**：无锚可分辨。LastModified 晚于升级时刻可以检出「升级后、绑定前」
+  的覆盖，但 S3 快照恢复会整体重置 LastModified（大面积误报），且检出即产生处置义务（挂起或
+  终态），重新引入 (b) 的入口面；(c) 下该窗口只剩秒级，不做。
+- **历史上多行共享同一对象**（#1119 / #1267 收紧前的 key 规范化碰撞）：repair 对 failed /
+  uploading 行重签现有 key 时可能写到另一行的对象；Host / v6 会 412，旧 Worker 对已放行的另一行
+  不可检出。需要旧非法 key + 碰撞 + 运维 repair + 旧 Worker 同时成立。
+- 信任前提：rebind 对无 hash 行只 size 核验（信任运维备份字节）；Worker 版本自报（trusted infra）；
+  对象存储强制 presign 过期（SeaweedFS 4.45 实测：过期 PUT → 403 AccessDenied）。
+- 旧 Worker 门禁的请求仍计入全局 code stock、且入队后不回落 Host 本地：#1279 v6 门禁的既有
+  语义；存量行只在绑定后 75min 内加入该集合。
 
 SigV4 presigned PUT 无法约束 Content-Length，size/hash 一律由 complete 时
 服务端 HEAD + 流式校验强制（v1 实现为完整读自算 sha256，简单可靠；上传端

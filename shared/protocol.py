@@ -29,10 +29,15 @@ Version history:
   would silently consume a same-size overwrite of a hash-less material, so
   the Host's claim admission skips material-gated candidates for them
   (queued, not failed — they become claimable again after the Worker
-  upgrades). Gated = the job's material inputs include a row with
-  ``object_etag <> ''`` and ``content_hash = ''`` (hash rows stay claimable:
-  the old Worker's sha256 recompute is already fail-closed; rows without an
-  etag have nothing to verify against).
+  upgrades). Gated = the job's material inputs include a hash-less row that
+  is uploading (repair in flight, #1316 R12) or ready with a bound
+  ``object_etag`` — except pre-upgrade rows bound by the #1316 legacy binder
+  once ``legacy_etag_bound_at`` + presign TTL + skew margin has passed (no
+  live PUT URL can remain). Hash rows stay claimable (the old Worker's
+  sha256 recompute is already fail-closed); rows without an etag have
+  nothing to verify against; failed/expired rows keep their failure path.
+  The predicate lives in server/app/jobs/queries/material_claim_gate.py and
+  is re-checked on the claim descriptor's own row snapshot.
 
 Field-level deprecations ride without a version bump while the wire shape is
 unchanged; a deprecated field's removal rides without one too once no

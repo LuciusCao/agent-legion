@@ -19,6 +19,7 @@ from typing import Any
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
+from server.app.jobs.queries.material_claim_gate import requires_etag_protocol_sql
 from server.app.services.material_cache import (
     _require_storage,
     input_document,
@@ -59,7 +60,9 @@ def _ready_bundle(
             dict(row)
             for row in conn.execute(
                 "select m.path, mat.id, mat.status, mat.filename, mat.size_bytes,"
-                " mat.content_hash, mat.storage_key, mat.object_etag, mat.upload_generation"
+                " mat.content_hash, mat.storage_key, mat.object_etag, mat.upload_generation, "
+                + requires_etag_protocol_sql("mat")
+                + " as requires_etag_protocol"
                 " from material_bundle_members m"
                 " join materials mat on mat.id = m.material_id"
                 " where m.bundle_id=%s order by m.ordinal",
@@ -184,45 +187,3 @@ def prefetch_bundle_block(
         job,
         storage=executor._object_store(),
     )
-
-
-def bundle_claim_block(
-    connect_source: ConnectSource,
-    workspace_id: str,
-    job: Mapping[str, Any],
-    *,
-    storage: ObjectStorage | None = None,
-    download_expires_seconds: int = 3600,
-) -> dict[str, Any] | None:
-    """The Worker-facing bundle descriptor: one presigned GET per member."""
-    input_doc = input_document(job)
-    if input_doc.get("type") != "bundle":
-        return None
-    bundle, members = _ready_bundle(connect_source, workspace_id, input_doc)
-    bundle_id = str(bundle["id"])
-    storage = _require_storage(storage, bundle_id)
-    return {
-        "material_id": bundle_id,
-        "kind": "bundle",
-        "filename": str(bundle.get("name") or ""),
-        "size_bytes": int(bundle.get("total_size_bytes") or 0),
-        "entries": [
-            {
-                "material_id": str(member["id"]),
-                "path": str(member["path"]),
-                "size_bytes": int(member.get("size_bytes") or 0),
-                "content_hash": str(member.get("content_hash") or ""),
-                # #1279：每成员的行记录 ETag + 代次（memory-only）；Worker
-                # 逐成员对 presigned GET 带 If-Match 核验、代次参与无 hash
-                # 成员缓存寻址，均与 download_url 同行快照；旧 Server 不下发
-                # （Worker 按缺失回落），旧 Worker（协议 < v6）领不到命中
-                # 门禁的材料任务（claim admission 跳过）。
-                "object_etag": str(member.get("object_etag") or ""),
-                "upload_generation": int(member["upload_generation"]),
-                "download_url": storage.presign_get(
-                    str(member["storage_key"]), expires_seconds=download_expires_seconds
-                ),
-            }
-            for member in members
-        ],
-    }
