@@ -441,7 +441,7 @@ sha256 fail-closed 兜底（既有）。新 complete / inline / demo seed 的行
 | uploading/failed（任意身份） | 拒绝（not ready，节点 failed，既有） | 门禁按 etag 判 | 拒绝（claim 500 → 回收重排，既有） | — | 解析链只收 ready |
 | expired | 拒绝（既有） | 同上 | 拒绝（既有） | — | 既有 TTL 语义 |
 | repair 窗口（清 etag + 轮换 key + 签发新 URL） | 行为 uploading → 同上；重传 complete 后落新 etag | 同上 | 同上 | 新 key If-Match | 代次守卫 + 轮换（bare complete 409/缺对象 failed） |
-| rebind 窗口（恢复后 etag 漂移，字节已核验） | CAS 前 412；CAS 后正常 | 门禁拦 | 下发新 etag | 同 E1 | verify-then-CAS（字节不过 fail-closed） |
+| rebind 窗口（恢复后 etag 漂移，字节已核验） | CAS 前 412；CAS 后正常 | 门禁拦 | 下发新 etag | 同 E1 | verify-then-CAS（字节不过 fail-closed；CAS 四钉 etag/key/代次/status，扫描后被并发改写按竞态失败报告，#1313） |
 | 滚动升级（Host 先升，旧 Worker 在役） | 不受影响 | 已绑行任务挂起、其余照领 | — | — | 见 remote-execution-runbook §5 |
 
 构造性不可达格：「读 A 代址取 B 代对象」不可达——缓存地址代次与 presigned URL 取自同一
