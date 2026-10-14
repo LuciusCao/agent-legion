@@ -301,19 +301,30 @@ EOF
     排除两个 jobs 前缀）对照 `job_artifacts` ∪ `materials` 清单行，
     宽限窗（默认 24h，`--grace-hours`/`--staging-grace-hours`
     可调）外的无行对象与过期暂存对象判定为孤儿；默认 dry-run，加
-    `--apply` 执行删除，幂等可重跑。材料 key 内容寻址可复用（删行后
-    同文件再上传复用同 key），任何 check-then-delete 序列对可复用 key
-    都闭不死删除窗口——**材料根前缀孤儿只扫描报告、不进入删除批**
-    （#1282 三轮 codex P1 按族收口）。#1279 已落地 v2g 单次使用 key
-    文法与 `s3_jobs_gc.material_key_single_use` 门禁（跨行不可复用，
-    构造性论证见其 docstring），但 PUT→行发布窗口（inline/demo seed
-    先 PUT 后建行，codex r5 P1）让删除批在窗口内会删掉未发布对象——
-    **删除批重开由 #1314 跟踪（发布窗口协议）**，此前材料孤儿的回收
-    仍靠 bucket lifecycle 规则兜底。
+    `--apply` 执行删除，幂等可重跑。**材料删除批（#1314）**：材料根前缀
+    孤儿只有同时过三道门才删除——①单次使用 key 文法（`v2g{代次}` +
+    `m_{material_id}`，#1279，`s3_jobs_gc.material_key_single_use`）；
+    ②对象年龄过 `max(--grace-hours, 1h)`（1h 为材料年龄下限
+    `MATERIAL_MIN_GRACE_HOURS`，`--grace-hours 0` 也压不穿，删除前按当时
+    时钟再复核）；③删除前逐批新鲜反查 materials ∪ job_artifacts 无行。
+    承重墙是写端「行先于对象」协议：presign/重试/repair 在行锁内派生 key
+    并提交后才签 URL；inline 文本与 demo seed 经
+    `material_object_publish` 先落无 hash 的 uploading intent 行、再 PUT、
+    再原子换成 ready 行——任何对象从第一个字节起都被一条行引用，反查
+    「无行」即此后永不再被引用（id 不复用、代次单调）。年龄下限是纵深：
+    兜住仍「先 PUT 后建行」的 #1312 期旧 Host（秒级窗口）与时钟偏差。
+    旧文法材料孤儿（`g{代次}`、legacy 无代次段、`inline-{uuid}` 旧形态——
+    key 可复用，check-then-delete 关不死窗口）仍**只报告不删除**（#1282
+    收口纪律），回收靠 bucket lifecycle 规则兜底。输出分三栏：进删除批 /
+    未满年龄下限暂缓 / 旧文法只报告；`--apply` 另报「材料删除门禁扣下」
+    与「反查救下」的对象数。写端进程在 PUT 与发布之间崩溃会留下 uploading
+    intent 行（对象受保护、不会被 GC），与浏览器放弃上传的 uploading 行
+    同类，可在材料列表删除。逐格交错决策表见
+    architecture/materials-and-runs-design.md §6.4.2。
     同理，workspace id 字面为 `jobs` / `jobs-staging` 时其材料 key 落在
     jobs 前缀扫描内，脚本在组装删除批前按材料形态文法（第 3 段为
     `(v2)g{代次}`；真 job 产物同位置是恒含下划线的 job id，零误伤）把这类
-    key 分流进材料孤儿集合，同样只报告不删除（#1282 r4 P1）。
+    key 分流进材料孤儿集合，同走上述材料删除门禁（#1282 r4 P1）。
     job authority key 侧（#1309 判定，排除出 #1279 协议面）：#853 起产物
     每次写落 per-attempt uuid4 版本 key，不可复用已构造性成立；#853 前
     legacy 固定 key 的 revalidate→delete 亚秒窗残留由 #1309 独立跟踪。
@@ -323,8 +334,8 @@ EOF
     清 object_etag）并为**原行**新 key 签发受代次保护的一次性 PUT URL
     （hash 与无 hash 行统一由原 material_id 愈合：无 hash 行没有 presign
     按 hash 找旧行的回路）；用该 URL 重传后 complete 携带输出里的代次
-    即恢复 ready，历史 job 引用随之消费新对象；旧对象成孤儿，由 bucket
-    lifecycle 回收（GC 材料删除批重开见 #1314）。S3 快照恢复（aws s3 cp 重传会改变大行
+    即恢复 ready，历史 job 引用随之消费新对象；旧对象成孤儿（单次使用
+    key），由 `scripts/gc-s3-jobs.py` 的材料删除批回收（#1314）。S3 快照恢复（aws s3 cp 重传会改变大行
     ETag）后、启动调度前必须跑 `scripts/rebind_material_etags.py`
     （先 dry-run 再 --apply；字节核验不过的行 fail-closed 只报告，退出
     码 1），步骤与纪律见 backup-restore-runbook.md 的对象存储恢复段。
