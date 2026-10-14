@@ -156,3 +156,25 @@ def test_materialize_claim_bundle_sends_per_member_if_match(monkeypatch, tmp_pat
 
     assert block is not None
     assert seen == {"https://s3.test/get/a": "etag-a", "https://s3.test/get/b": ""}
+
+
+def test_legacy_unbound_hashless_member_is_size_only(monkeypatch, tmp_path: Path) -> None:
+    """#1312 方案 B：存量无 hash 成员（描述符 object_etag 字段在但为空）
+    维持 size-only——无条件 GET 照常物化，不拒绝。"""
+    seen: dict[str, str] = {}
+
+    def _open(url: str, *, if_match: str = ""):
+        seen[url] = if_match
+        return io.BytesIO(PAYLOADS[url])
+
+    monkeypatch.setattr("worker.bundle_fetch._open_download", _open)
+    monkeypatch.setattr("worker.material_fetch._open_download", _open)
+    manifest = _manifest()
+    entry = manifest["runtime_context"]["material"]["entries"][0]
+    entry.update(content_hash="", object_etag="", upload_generation=0)
+
+    block = materialize_claim_material(manifest, tmp_path / "exec")
+
+    assert block is not None
+    assert (Path(block["path"]) / "a.txt").read_bytes() == PAYLOAD_A
+    assert seen["https://s3.test/get/a"] == ""

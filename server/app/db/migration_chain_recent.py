@@ -99,7 +99,7 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     SchemaMigration(97, "material_upload_generation", migrate_material_upload_generation),
     # v98 (#1279): materials.object_etag — 落 ready 时记录的对象 ETag（complete
     # 锁内原子 / inline / demo seed），消费侧据以检出 complete 后同尺寸覆盖；
-    # 存量行 default '' 是过渡态（启动回填收口，codex r8）。DDL-only,
+    # 存量行 default '' 维持 size-only（身份建立拆至 #1316）。DDL-only,
     # same guarded-ALTER home rule as v87.
     SchemaMigration(98, "material_object_etag", migrate_material_object_etag),
 ]

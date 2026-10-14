@@ -47,11 +47,6 @@ def materialize_claim_bundle(material: Mapping[str, Any], execution_dir: Path) -
             raise MaterializeError("claim bundle entry is incomplete")
         content_hash = str(entry.get("content_hash") or "")
         object_etag = str(entry.get("object_etag") or "")
-        if not content_hash and "object_etag" in entry and not object_etag:
-            # #1279 codex r9 纵深（与单材料同）：未绑定无 hash 成员拒绝消费。
-            raise MaterializeError(
-                "bundle member identity is not yet established (etag backfill in flight)"
-            )
         generation = entry.get("upload_generation")
         generation = int(generation) if isinstance(generation, (int, float)) else None
         size = entry.get("size_bytes")

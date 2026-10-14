@@ -24,7 +24,6 @@ from server.app.services.material_cache import (
     input_document,
     open_verified_stream,
 )
-from server.app.services.material_identity import assert_material_identity_ready
 from server.app.storage import ObjectStorage
 from shared.material_bundle import assemble_bundle_tree, bundle_address
 from shared.material_cache import (
@@ -71,9 +70,6 @@ def _ready_bundle(
         status = str(member.get("status") or "")
         if status != "ready":
             raise MaterializeError(f"bundle member {member['id']} is not ready (status: {status})")
-        # #1279 codex r9：无 hash 成员的 etag 身份未建立（回填在途）→
-        # fail-closed（Host 物化不过 claim 门禁）。
-        assert_material_identity_ready(member)
     return dict(bundle), members
 
 

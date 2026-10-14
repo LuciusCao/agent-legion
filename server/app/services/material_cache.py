@@ -23,7 +23,6 @@ from botocore.exceptions import ClientError
 from server.app.db.dialect import ConnectSource
 from server.app.db.rowmap import parse_object
 from server.app.db.transaction import read_connection
-from server.app.services.material_identity import assert_material_identity_ready
 from server.app.storage import ObjectStorage, build_s3_storage, is_precondition_failed
 from shared.material_cache import (
     MaterializeError,
@@ -43,8 +42,8 @@ def open_verified_stream(
     returns (412 before any byte is served), so a same-size overwrite that
     landed after complete() surfaces as a ``MaterializeError`` instead of
     silently caching poisoned bytes. An empty ``object_etag`` (pre-v98 rows
-    awaiting the startup backfill, codex r8) skips the condition and keeps
-    the size-only semantics.
+    with no recorded identity: base size-only semantics; establishing their
+    identity is split into #1316) skips the condition.
     """
     try:
         return storage.open_stream(storage_key, if_match=object_etag)
@@ -134,7 +133,6 @@ def material_runtime_block(
         return None
     row = _ready_row(connect_source, workspace_id, input_doc)
     material_id = str(row["id"])
-    assert_material_identity_ready(row)
     storage = _require_storage(storage, material_id)
     content_hash = str(row.get("content_hash") or "")
     filename = str(row.get("filename") or "")
@@ -243,7 +241,6 @@ def material_claim_block(
         return None
     row = _ready_row(connect_source, workspace_id, input_doc)
     material_id = str(row["id"])
-    assert_material_identity_ready(row)
     storage = _require_storage(storage, material_id)
     return {
         "material_id": material_id,

@@ -206,12 +206,24 @@ def test_hashless_address_follows_generation_with_legacy_fallback(
     assert Path(third["path"]).name == "mat-w1"
 
 
-def test_unbound_hashless_descriptor_is_refused(tmp_path: Path) -> None:
-    """#1279 codex r9 纵深：描述符 etag 字段在但为空 + 无 hash（新 Server
-    的未绑定行）→ 拒绝消费；字段缺席（旧 Server）→ 旧语义放行。"""
-    unbound = _material_block(content_hash="", object_etag="")
-    with pytest.raises(MaterializeError, match="identity is not yet established"):
-        materialize_claim_material(_manifest_with_material(unbound), tmp_path / "exec-1")
+def test_legacy_unbound_hashless_descriptor_is_size_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1312 方案 B：新 Server 对存量无 hash 行下发 object_etag=''（身份
+    未建立）——Worker 维持 base 的 size-only 语义：无条件 GET 照常物化，
+    不拒绝（存量行身份建立拆至 #1316）。"""
+    seen: list[str] = []
+
+    def _open(url: str, *, if_match: str = "") -> io.BytesIO:
+        seen.append(if_match)
+        return io.BytesIO(PAYLOAD)
+
+    monkeypatch.setattr(material_fetch, "_open_download", _open)
+    legacy = _material_block(content_hash="", object_etag="", upload_generation=0)
+    block = materialize_claim_material(_manifest_with_material(legacy), tmp_path / "exec-1")
+
+    assert block is not None and Path(block["path"]).read_bytes() == PAYLOAD
+    assert seen == [""]
 
 
 def test_sandbox_argv_grants_static_cache_root(tmp_path: Path) -> None:

@@ -328,17 +328,19 @@ EOF
     ETag）后、启动调度前必须跑 `scripts/rebind_material_etags.py`
     （先 dry-run 再 --apply；字节核验不过的行 fail-closed 只报告，退出
     码 1），步骤与纪律见 backup-restore-runbook.md 的对象存储恢复段。
-    协议门禁（codex r7/r9）：消费侧 ETag 核验要求 Worker 协议 v6——滚动
+    协议门禁（codex r7）：消费侧 ETag 核验要求 Worker 协议 v6——滚动
     升级窗口内（Host 先升），无 hash 且 etag 已绑的材料任务对旧 Worker
-    不可领（留队列等升级，不落失败）；无 hash 且 etag=''（身份未建立、
-    回填在途）的行对**所有** Worker 挂起到 binder 绑定。hash 行恒免门禁。
-    升级顺序与矩阵见 remote-execution-runbook.md §5。存量行身份（codex r8/r10）：
-    `object_etag=''` 的 ready 行由独立的一次性后台线程
-    （material_etag_binder，不受 sweeper_enabled 门控——逃生舱形态下回填
-    照常运行）启动即跑、逐行 HEAD + CAS 建立 ETag 身份（幂等可重入，
-    未清完按间隔重试，done 即退）；升级前已被毒化的行回填到
-    的是毒化 etag（既成事实无机制可分辨，只能靠 repair 重传）——回填
-    关闭的是升级后的新窗口。
+    不可领（留队列等升级，不落失败）；hash 行与 etag='' 行恒免门禁。
+    升级顺序与矩阵见 remote-execution-runbook.md §5。
+  - **存量行一次性残留窗口**（#1312 方案 B）：v98 之前完成的行
+    `object_etag=''`（无内容身份），各消费入口（Host 物化、bundle、远程
+    Worker claim、旧 Worker 门禁）维持升级前的 size-only 语义、不做 ETag
+    核验，也不挂起或拒绝。残留风险仅限**升级前签出、升级时仍未过期的
+    PUT URL**（presign 有效期 1h，故窗口最长 ≤1h、一次性、与升级前等价）：
+    其持有者在窗口内同尺寸覆盖无 hash 存量对象不会被检出。升级后签出的
+    URL 都对应 complete 时原子落 ETag 的行，走 If-Match 核验链。对此敏感
+    的部署可在升级前停止签发上传 1h（或升级后 1h 内暂不消费存量无 hash
+    材料）。存量行的身份建立（回填 + 门禁）由 #1316 跟踪。
   - 孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已
     不存在的测试 bucket）由 `scripts/report-orphan-s3-buckets.py`
     报告（只报不删，逐个给出 `clean-worktree.sh` 收尾命令）。

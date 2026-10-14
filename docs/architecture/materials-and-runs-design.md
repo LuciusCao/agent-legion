@@ -383,15 +383,13 @@ content_hash 的行它是唯一的内容身份，关闭「已签发 URL 的 1h �
 携带 `object_etag`，memory-only 不落 manifest），不一致即 MaterializeError 不落缓存；
 cache hit 不重验（填充时已验）。complete 的 sha256 流读同样携带刚 HEAD 到的 ETag 作
 If-Match（codex P1：HEAD 与读取之间对象被复用 URL 换掉时按核验失败处理，绝不把旧快照的
-ETag 与新字节一起落 ready）。存量行 `object_etag=''` 是过渡态——启动后台回填
-（`material_etag_backfill`，由独立的一次性后台线程 material_etag_binder 承载——
-启动即跑、幂等可重入、CAS 落库、done 即退，不受 sweeper_enabled 门控）逐行建立身份；回填完成前这些行被 fail-closed / 门禁挂起（codex r9，不再
-放行——见 §6.4.1）。语义边界与逐格机制见 §6.4.1 状态机表。
+ETag 与新字节一起落 ready）。存量行 `object_etag=''`（v98 前完成，无内容身份）维持升级前
+的 size-only 语义：各消费入口不核验、不挂起、不拒绝（#1312 方案 B）；一次性残留窗口与
+逐入口语义见 §6.4.1，存量行身份建立（回填 + 门禁）拆至 #1316。
 新旧 Server 方向兼容（纯增量可选字段，Worker 按缺失回落）；**旧 Worker（协议 < v6）
-方向是门禁语义**，且分两档：无 hash 且 etag 已绑 → 拦旧 Worker（留队列等升级）；无
-hash 且 etag=''（身份未建立、回填在途）→ 拦全部 Worker（等 binder 绑定）——claim
-admission 跳过、留队列不落失败（见 shared/protocol.py v6 条目与
-jobs/queries/material_claim_gate.py 的分档论证）。缓存寻址（codex r6）：hash 行内容寻址不变；
+方向是门禁语义**：无 hash 且 etag 已绑的材料任务对旧 Worker 不可领——claim
+admission 跳过、留队列不落失败；hash 行与 etag='' 行恒免（见 shared/protocol.py v6 条目与
+jobs/queries/material_claim_gate.py 的谓词论证）。缓存寻址（codex r6）：hash 行内容寻址不变；
 无 hash 行地址带上传代次（`{material_id}-v2g{代次}`，代次即身份）——repair 代次 +1 后
 旧 gen 地址自然孤儿化，修复前（可能被旧 Worker 无核验缓存的）毒化字节不再命中；
 代次来源与消费读取的行快照同一份（Host dispatch 现读行 / Worker claim 描述符与 presigned
@@ -402,34 +400,45 @@ v2g key 并为**原行**签发受代次保护的重传 URL（hash/无 hash 统�
 启动调度前必须跑 `scripts/rebind_material_etags.py` 重绑（字节核验不过 fail-closed），
 见 backup-restore-runbook.md。
 
-#### 6.4.1 无 hash 材料的身份状态机（#1279 codex r9 收口，完备性论证）
+#### 6.4.1 无 hash 材料的身份状态机（#1279；#1312 第 11 轮按方案 B 收缩）
 
-**统一不变量**：无 `content_hash` 材料的字节，任何时候都不能在没有已验证身份锚的情况下
-被消费。锚只有两种：① `content_hash`（sha256 fail-closed，既有）；② **静止期绑定的
-etag**——绑定时刻必须不存在任何仍可改写当前 key 对象的活 PUT URL。其余状态（etag=''
-的 ready 无 hash 行）一律 fail-closed 或门禁挂起。URL 活性维度：已签出的 PUT URL 在
-1h TTL 内是幽灵写端——静止期守卫把它建进模型（binder 只对「同一身份标记（storage_key
-+ upload_generation + HEAD etag）持续满一个 presign TTL」的行落绑；每次签发必伴随
-generation/key 变化，标记不变 ⟺ 当前 key 的最后一个 URL 已过期）。
+**不变量（本 PR 范围）**：**已绑定 etag** 的无 `content_hash` 材料，其字节在每个消费入口都
+必须与绑定的 etag 一致才可消费（If-Match，412 → MaterializeError，不落缓存）；hash 行由
+sha256 fail-closed 兜底（既有）。新 complete / inline / demo seed 的行都原子落 ETag，所以
+升级后签出的 PUT URL 所对应的行一律进入核验链。
 
-| 行状态（status × hash × etag × key/URL 活性） | Host 物化 | Worker v6+ | Worker < v6 | 机制 |
-| --- | --- | --- | --- | --- |
-| hash 行（任意 etag/key 形态） | sha256 fail-closed | 同左 | 同左（sha256 兜底） | 内容寻址 + 下载重算，恒安全 |
-| 无 hash，etag 已绑（complete/静止期回填/rebind），URL 全死 | If-Match 412 检出 | 同左 | **门禁拦**（留队列等升级） | v6 门禁（claim admission） |
-| 无 hash，etag 已绑，仍有活 URL（签发 1h 内） | If-Match 412 检出（覆盖即失败，可 repair） | 同左 | **门禁拦** | 同上 |
-| 无 hash，etag=''（身份未建立：存量行回填在途） | **fail-closed**（身份未建立，可重试） | **门禁拦全部**（等 binder） | **门禁拦全部** | 回填在途档（GATE_ALL） |
-| 无 hash，etag='' 且对象已丢 | fail-closed（同上） | 门禁拦全部 | 门禁拦全部 | binder 翻 failed（自净）→ repair 可救 |
-| uploading/failed（任意身份） | 拒绝（not ready，既有） | 同左 | 同左 | 解析链只收 ready |
-| expired | 拒绝（既有） | 同左 | 同左 | 既有 TTL 语义 |
-| repair 窗口（清 etag + 轮换 key + 签发新 URL） | 旧 key If-Match 412 / 新 key 未传缺对象 | 同左 | 门禁拦（repair 后 etag='' → GATE_ALL，绑定后恢复） | 代次守卫 + 轮换（bare complete 409/缺对象 failed） |
-| rebind 窗口（恢复后 etag 漂移，字节已核验） | CAS 前 If-Match 412；CAS 后正常 | 同左 | 门禁拦 | verify-then-CAS（字节不过 fail-closed） |
-| 滚动升级（Host 先升，旧 Worker 在役） | 不受影响 | — | 门禁任务挂起、其余照领 | 见 remote-execution-runbook §5 |
+**存量行（etag=''）不在本 PR 建立身份**：它们在每个消费入口维持升级前的 size-only 语义——
+不 fail-closed、不挂起、不对任何 Worker 门禁。**一次性残留窗口** = 升级前签出、升级时仍
+未过期的 PUT URL（presign 有效期 1h，故最长 ≤1h）：其持有者在窗口内同尺寸覆盖存量无 hash
+对象不会被检出，与升级前等价、不随时间扩大。存量行的身份建立（静止期回填、未绑定档门禁、
+驱动方与失败处置语义）拆至 #1316。
 
-构造性不可达格：Worker 侧「描述符带 etag 字段但为空 + 无 hash」在门禁后不可达——仍留有
-纵深拒绝（material_fetch / bundle_fetch 对空 etag 无 hash 描述符直接 MaterializeError）；
-「读 A 代址取 B 代对象」不可达——缓存地址代次与 presigned URL 取自同一行快照（Host 现读
-行 / claim 描述符同行）；binder 绑定后对象再被改写只有「已签发 URL 复用」一条路，而
-If-Match 把该路变成 412 检出而非静默。
+**消费入口维度**：材料字节只在下列入口被消费（没有预览/下载字节端点；complete 的 sha256
+流读是生产侧核验，不是消费）——
+- E1 Host 本地单材料 / E2 Host 本地 bundle / E3 Host 本地分片：普通节点与本地 shard 都经
+  `build_runtime` → `material_cache.material_runtime_block` / `material_bundle_cache` 的
+  `open_verified_stream`（同一条路，下表合为一列）；
+- E4 远程 claim 准入：`claim_admission` 的 v6 协议门禁（只对 < v6 Worker 生效）；
+- E5 claim 响应：`material_claim_block` / `bundle_claim_block` 下发描述符（etag、代次、
+  presigned GET，memory-only）；
+- E6 Worker 拉取：`worker/material_fetch` / `bundle_fetch` 对 presigned GET 带 If-Match；
+- E7 两侧缓存命中：不重验（填充时已验），无 hash 地址带代次。
+
+| 行状态（status × hash × etag） | E1–E3 Host 本地物化 | E4 准入（< v6 Worker） | E5 claim 描述符 | E6 Worker v6+ 拉取 | 机制 |
+| --- | --- | --- | --- | --- | --- |
+| hash 行（任意 etag） | sha256 fail-closed | 放行（sha256 兜底） | 下发 | sha256 fail-closed | 内容寻址 + 下载重算 |
+| 无 hash，etag 已绑（complete/rebind），URL 全死 | If-Match 核验 | **门禁拦**（留队列，不落失败） | 下发 etag | If-Match 核验 | v6 门禁 + If-Match |
+| 无 hash，etag 已绑，仍有活 URL（签发 1h 内）被覆盖 | 412 → MaterializeError（节点 failed，可 repair） | 门禁拦 | 下发 etag | 412 → 失败（可 repair） | If-Match 检出 + repair |
+| 无 hash，etag=''（存量行） | **size-only 物化**（base 语义） | 放行 | 下发 etag='' | **size-only**（无条件 GET） | 方案 B：残留窗口 ≤1h，一次性 |
+| uploading/failed（任意身份） | 拒绝（not ready，节点 failed，既有） | 门禁按 etag 判 | 拒绝（claim 500 → 回收重排，既有） | — | 解析链只收 ready |
+| expired | 拒绝（既有） | 同上 | 拒绝（既有） | — | 既有 TTL 语义 |
+| repair 窗口（清 etag + 轮换 key + 签发新 URL） | 行为 uploading → 同上；重传 complete 后落新 etag | 同上 | 同上 | 新 key If-Match | 代次守卫 + 轮换（bare complete 409/缺对象 failed） |
+| rebind 窗口（恢复后 etag 漂移，字节已核验） | CAS 前 412；CAS 后正常 | 门禁拦 | 下发新 etag | 同 E1 | verify-then-CAS（字节不过 fail-closed） |
+| 滚动升级（Host 先升，旧 Worker 在役） | 不受影响 | 已绑行任务挂起、其余照领 | — | — | 见 remote-execution-runbook §5 |
+
+构造性不可达格：「读 A 代址取 B 代对象」不可达——缓存地址代次与 presigned URL 取自同一
+行快照（Host 现读行 / claim 描述符同行）；etag 绑定后对象再被改写只有「已签发 URL 复用」
+一条路，而 If-Match 把该路变成 412 检出而非静默。
 
 已声明接受格（M30 对账）：
 - **pre-complete 幽灵写绑身份**（能力模型边界）：作者 PUT 之后、complete 的 HEAD 之前，
@@ -440,16 +449,10 @@ If-Match 把该路变成 412 检出而非静默。
   依赖存储的「单 GET 原子快照」语义（AWS S3 保证；已写入
   docs/materials-storage-deployment.md 的后端契约要求）。hash 行由最终 sha256 复算免疫，
   仅无 hash 行依赖此契约。
-- **升级瞬态缓存**（R4 对账）：升级前被无核验填充的缓存字节，升级后构造性不可达——
-  无 hash 地址带代次（`{id}-v2g{gen}`，r6），旧裸 id 缓存永不被新地址命中；绑定前填充
-  被门禁/fail-closed 挡住（填充只在绑定后发生，绑定不推进代次、绑定前后地址一致但此前
-  该地址从未被填充）。
-- 回填信任前提：升级前已毒化行绑毒化 etag，无机制可分辨（repair 重传）；rebind 对无
-  hash 行只 size 核验（信任运维备份字节）；worker 版本自报（trusted infra）。
-
-语义边界（写死）：升级前已被毒化的行无机制可分辨——binder 静止期绑定到的是毒化 etag
-（既成事实，只能靠 repair 重传换内容身份）；静止期守卫关掉的是升级前后「活 URL 窗口」
-内的新替换。
+- **存量行残留窗口**（方案 B）：见上；升级前已被毒化的存量行同样无机制可分辨（与 base
+  等价），repair 重传可换内容身份。
+- 信任前提：rebind 对无 hash 行只 size 核验（信任运维备份字节）；worker 版本自报
+  （trusted infra）。
 
 SigV4 presigned PUT 无法约束 Content-Length，size/hash 一律由 complete 时
 服务端 HEAD + 流式校验强制（v1 实现为完整读自算 sha256，简单可靠；上传端

@@ -41,10 +41,6 @@ from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
-from server.app.services.material_etag_binder import (
-    MaterialEtagBackfillThread,
-    start_material_etag_backfill,
-)
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
@@ -147,7 +143,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
     slow_sweeps: SweeperOwnedThreads | None = None
-    etag_backfill_thread: MaterialEtagBackfillThread | None = None
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
@@ -164,7 +159,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal workflow_worker_thread, sweeper_thread, slow_sweeps, etag_backfill_thread
+        nonlocal workflow_worker_thread, sweeper_thread, slow_sweeps
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
         replica_probe.probe()
         # #831/#835 velites 副本指纹对账（软告警）：Host 消费的两个面
@@ -222,10 +217,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                     object_storage,
                     studio_chat_service,
                 )
-            # #1279 codex r10：object_etag 启动回填是一次性任务（done 即
-            # 退），不随 sweeper_enabled 门控——逃生舱形态下缺席会让存量
-            # 无 hash 材料被 fail-closed/门禁永久拦住。
-            etag_backfill_thread = start_material_etag_backfill(job_db, object_storage)
         background_tasks.start(app)
         studio_chat_service.reap_zombie_sessions()
         studio_registry = StudioAgentRegistryStore(job_db)
@@ -253,7 +244,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             for thread in (
                 sweeper_thread,
                 *(slow_sweeps or ()),
-                etag_backfill_thread,
             ):
                 if thread is not None:
                     thread.stop()

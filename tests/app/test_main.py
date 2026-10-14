@@ -65,46 +65,6 @@ def test_lifespan_with_start_worker_initializes_only_workflow_worker(tmp_path, m
     assert isinstance(app.state.code_executor, CodeExecutor)
 
 
-def test_lifespan_sweeper_disabled_still_starts_etag_backfill(tmp_path, monkeypatch):
-    """#1279 codex r10 P1：sweeper_enabled=False 逃生舱形态下 etag 回填照常
-    启动——binder 是一次性任务，与慢扫职责解耦（曾挂在 sweeper 线程上：
-    该形态下存量无 hash 材料被 fail-closed/门禁永久拦住）。TTL sweep 与
-    lease sweeper 仍不启动。"""
-    from server.app import main
-    from server.app.services.material_etag_binder import MaterialEtagBackfillThread
-
-    calls = []
-    monkeypatch.setattr(WorkflowWorkerThread, "start", lambda self: calls.append("workflow"))
-    monkeypatch.setattr(SweeperThread, "start", lambda self: calls.append("sweeper"))
-    monkeypatch.setattr(
-        MaterialEtagBackfillThread, "start", lambda self: calls.append("etag-backfill")
-    )
-    monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
-    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
-    # 让回填接线见到一个假存储（存储为 None → 不建线程的语义由
-    # test_start_helper_skips_without_storage 单元格覆盖）。
-    monkeypatch.setattr(main, "build_s3_storage_checked", lambda: object())
-
-    for path_name in ["videos", "logs", "packages", "jobs"]:
-        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
-
-    real_load_settings = main.load_settings
-
-    def load_with_sweeper_disabled(**kwargs):
-        settings = real_load_settings(**kwargs)
-        settings.executor_runtime.sweeper_enabled = False
-        return settings
-
-    monkeypatch.setattr(main, "load_settings", load_with_sweeper_disabled)
-
-    app = main.create_app(data_dir=tmp_path, start_worker=True)
-    with TestClient(app) as _:
-        pass
-
-    assert "etag-backfill" in calls
-    assert "sweeper" not in calls
-
-
 def test_lifespan_sweeper_disabled_by_settings(tmp_path, monkeypatch):
     from server.app import main
 

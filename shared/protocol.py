@@ -29,11 +29,10 @@ Version history:
   would silently consume a same-size overwrite of a hash-less material, so
   the Host's claim admission skips material-gated candidates for them
   (queued, not failed — they become claimable again after the Worker
-  upgrades). Two gate tiers (codex r9): hash-less rows with a bound etag
-  (``object_etag <> ''``) skip pre-v6 Workers; hash-less rows without one
-  (identity not yet established — startup backfill in flight) skip ALL
-  workers until the binder binds them. Hash rows stay claimable on any
-  version: the sha256 recompute is already fail-closed on both sides.
+  upgrades). Gated = the job's material inputs include a row with
+  ``object_etag <> ''`` and ``content_hash = ''`` (hash rows stay claimable:
+  the old Worker's sha256 recompute is already fail-closed; rows without an
+  etag have nothing to verify against).
 
 Field-level deprecations ride without a version bump while the wire shape is
 unchanged; a deprecated field's removal rides without one too once no

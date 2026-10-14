@@ -2,10 +2,7 @@
 
 Split from :mod:`material_ttl` (budget): the sweep functions are the
 unit-testable core; this thread mirrors JobArtifactMaintenanceThread's loop
-discipline around them.（#1279 的 object_etag 启动回填曾挂在本线程上——
-codex r10 P1：sweeper_enabled=False 形态下本线程不启动会让回填永久缺席；
-已解耦到独立一次性线程 services/material_etag_binder.py，不受
-sweeper_enabled 门控。）
+discipline around them.
 """
 
 from __future__ import annotations

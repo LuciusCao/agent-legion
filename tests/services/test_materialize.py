@@ -176,8 +176,8 @@ def test_runtime_block_detects_post_complete_overwrite_via_etag(
     """#1279 验收项（Host 链故障注入，目标洞的原生形态）：无 content_hash
     的 ready 材料行（object_etag 是唯一内容身份）在 complete 后被同尺寸
     静默覆盖——cache miss 的 GET 带 If-Match，S3 412 检出为
-    MaterializeError，毒化字节不落缓存。etag=''（存量行回填在途）由
-    assert_material_identity_ready fail-closed（r9，不再 size-only 放行）。"""
+    MaterializeError，毒化字节不落缓存。etag=''（存量行）维持 size-only
+    旧语义（本文件其余用例覆盖；存量行身份建立拆至 #1316）。"""
     from tests.fakes.storage import etag_of
 
     key = f"{WORKSPACE_ID}/mat-nh/g0/mat-nh/file.bin"
@@ -209,6 +209,37 @@ def test_runtime_block_detects_post_complete_overwrite_via_etag(
         job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage
     )
     assert block is not None and Path(block["path"]).read_bytes() == payload
+
+
+def test_legacy_unbound_hashless_row_is_size_only(job_db, storage, tmp_path: Path) -> None:
+    """#1312 方案 B：存量无 hash 行（object_etag=''，身份未建立）在 Host
+    物化与 claim 描述符两个入口都维持 base 的 size-only 语义——不 fail-closed，
+    GET 不带条件头；描述符照常下发（object_etag=''）。"""
+    key = f"{WORKSPACE_ID}/mat-legacy/g0/mat-legacy/file.bin"
+    payload = b"legacy-hashless"
+    storage.objects[key] = payload
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'MatCache') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+        conn.execute(
+            "insert into materials(id, workspace_id, content_hash, filename,"
+            " content_type, size_bytes, storage_key, status, created_by)"
+            " values ('mat-legacy', %s, '', 'file.bin', 'application/octet-stream',"
+            " %s, %s, 'ready', 'user-1')",
+            (WORKSPACE_ID, len(payload), key),
+        )
+    job = _job({"type": "material", "material_id": "mat-legacy"})
+
+    block = material_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, job, storage=storage
+    )
+    assert block is not None and Path(block["path"]).read_bytes() == payload
+
+    descriptor = material_claim_block(job_db.dsn_identity, WORKSPACE_ID, job, storage=storage)
+    assert descriptor is not None
+    assert descriptor["object_etag"] == ""
 
 
 def test_hashless_cache_address_follows_repair_generation(job_db, storage, tmp_path: Path) -> None:

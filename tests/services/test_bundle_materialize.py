@@ -18,7 +18,7 @@ from server.app.services.material_bundles import MaterialBundlesService
 from server.app.services.material_cache import material_runtime_block
 from shared.material_bundle import bundle_address
 from shared.material_cache import MaterializeError
-from tests.fakes.storage import FakeObjectStorage, etag_of
+from tests.fakes.storage import FakeObjectStorage
 
 WORKSPACE_ID = "ws-bundle-cache"
 PAYLOAD_A = b"bundle-member-a" * 20
@@ -191,9 +191,9 @@ def test_bundle_member_address_follows_generation(job_db, storage, tmp_path: Pat
         )
         conn.execute(
             "insert into materials(id, workspace_id, content_hash, filename,"
-            " content_type, size_bytes, storage_key, status, object_etag)"
-            " values ('mat-h', %s, '', 'h.txt', 'text/plain', 4, %s, 'ready', %s)",
-            (WORKSPACE_ID, f"{WORKSPACE_ID}/mat-h/g0/mat-h/h.txt", etag_of(b"hash")),
+            " content_type, size_bytes, storage_key, status)"
+            " values ('mat-h', %s, '', 'h.txt', 'text/plain', 4, %s, 'ready')",
+            (WORKSPACE_ID, f"{WORKSPACE_ID}/mat-h/g0/mat-h/h.txt"),
         )
     storage.objects[f"{WORKSPACE_ID}/mat-h/g0/mat-h/h.txt"] = b"hash"
     service = MaterialBundlesService(job_db.dsn_identity)
