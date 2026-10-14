@@ -415,7 +415,7 @@ fail-closed 兜底。新 complete 的行原子落 ETag；inline / demo seed 产�
 | --- | --- | --- | --- |
 | 覆盖发生在 Host 启动、绑定之前 | 消费 + T\* 时被绑成身份 | 不消费，T\* 时被绑成身份 | 被绑成身份（秒级窗口，启动时 workspace 全暂停） |
 | 覆盖发生在绑定之后、T\* 之前 | **静默消费**，T\* 时被绑成身份 | 不消费，T\* 时被绑成身份（挂起无法改变 T\* 时 HEAD 到的字节） | **412 响亮失败**（Host / v6），repair 愈合 |
-| 窗口内写入的缓存（地址 `{id}-v2g{gen}`，命中不重验） | 可能与 T\* 绑定的身份分叉 | 无 | 无（绑定先于消费） |
+| 未绑窗口内写入的缓存（地址 `{id}-v2g{gen}`，命中不重验） | 可能与 T\* 绑定的身份分叉 | 无 | 绑定 CAS 同时代次 +1，旧地址孤儿化（#1319 codex R1） |
 | Host / v6 Worker 可用性 | 不变 | 存量无 hash 任务挂起 ≤75min，须在 Host 单材料 / bundle / 分片 / 远程入队 / 远程准入五处准入层收口，挂起请求还会占全局 code stock（P2） | 不变 |
 | 旧 Worker（< v6）可用性 | 绑定后永久门禁 → 需要「存量放行」 | 同左 | 门禁 75min 后按 `legacy_etag_bound_at` 自动放行 |
 | 驱动方 | 要睡到 T\*（计时须持久化） | 同左 + 挂起谓词 | 启动一次性扫描，无计时 |
@@ -458,9 +458,9 @@ fail-closed 兜底。新 complete 的行原子落 ETag；inline / demo seed 产�
 | 类 | A1–A3 Host 准入 | A4 远程入队 | A5 准入 < v6 | A5 准入 ≥ v6 | M1 描述符 | M2 Worker 拉取 | M3 Host 物化 | M4/M5 缓存 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | S1 | 放行 | 入队 | 放行 | 放行 | 下发 | sha256 | sha256 | 内容寻址 |
-| S2 | 放行 | 入队 | 放行 | 放行 | 下发 etag='' | size-only | size-only | 地址不变 |
-| S3 | 放行 | 入队 | **跳过**（留队列，不耗 attempt） | 放行 | 下发 etag；< v6 快照判真 → 拒 | If-Match | If-Match | 地址不变 |
-| S3' | 放行 | 入队 | 放行 | 放行 | 下发 etag（< v6 忽略，无活 URL，安全） | If-Match | If-Match | 地址不变 |
+| S2 | 放行 | 入队 | 放行 | 放行 | 下发 etag='' | size-only | size-only | 命中不重验（base 语义；绑定时孤儿化） |
+| S3 | 放行 | 入队 | **跳过**（留队列，不耗 attempt） | 放行 | 下发 etag；< v6 快照判真 → 拒 | If-Match | If-Match | 绑定时代次 +1：绑定前写入的缓存孤儿化 |
+| S3' | 放行 | 入队 | 放行 | 放行 | 下发 etag（< v6 忽略，无活 URL，安全） | If-Match | If-Match | 同 S3 |
 | S4 | 放行 | 入队 | 跳过 | 放行 | 下发 etag；< v6 快照判真 → 拒 | If-Match | If-Match | 地址不变 |
 | S5 | 放行 | 入队 | **跳过**（R12） | 放行 | not ready → 拒（既有） | — | not ready → MaterializeError（既有） | — |
 | S6 | 放行 | 入队 | 放行（维持失败路径） | 放行 | not ready → 拒（既有） | — | not ready → MaterializeError（既有） | — |
@@ -493,7 +493,8 @@ fail-closed 兜底。新 complete 的行原子落 ETag；inline / demo seed 产�
 keyset (created_at, id) 分批。HEAD 返回 None / size 与行不符 / ETag 空 / HEAD 抛错 → 只报告、
 不改行（行保持 S2）；否则 CAS `update … set object_etag, legacy_etag_bound_at=now() where id ∧
 status='ready' ∧ content_hash='' ∧ object_etag='' ∧ storage_key ∧ upload_generation`，CAS 让位
-（期间 repair / complete / 删行）只报告。恢复重绑（`rebind_material_etags.py`）的 CAS 不在此（#1313）。
+（期间 repair / complete / 删行）只报告。同一 UPDATE 把 `upload_generation` +1（代次即身份，与 repair 同一机制）：
+无 hash 行缓存地址 `{id}-v2g{gen}` 随之变化，未绑窗口内写入的 Host / Worker 缓存不再命中；storage_key 不变。恢复重绑（`rebind_material_etags.py`）的 CAS 不在此（#1313）。
 
 **驱动方**：
 

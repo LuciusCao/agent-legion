@@ -9,8 +9,12 @@ etag（#1316 P4）。
 绑定 CAS 钉住扫描到的全部身份字段（id、status='ready'、content_hash=''、
 object_etag=''、storage_key、upload_generation）：期间被 repair（轮换 key /
 代次 +1 / 翻 uploading）、complete、删行改动过的行一律让位，不会把旧 key 的
-HEAD 绑到新身份上。同一 UPDATE 落 ``legacy_etag_bound_at = now()``（DB 钟），
-旧 Worker 门禁据此计算存量 URL 的放行时刻（jobs/queries/material_claim_gate）。
+HEAD 绑到新身份上。同一 UPDATE 落 ``legacy_etag_bound_at = now()``（DB 钟，
+旧 Worker 门禁据此计算存量 URL 的放行时刻，见 jobs/queries/material_claim_gate），
+并把 ``upload_generation`` +1：无 hash 行的缓存地址是 ``{id}-v2g{gen}``，命中
+不重验，绑定前（未绑窗口内）写入的缓存若不孤儿化，会继续返回与绑定身份不符
+的字节。storage_key 不变（存量 key 不含代次段；代次只参与缓存寻址与 complete
+的代次守卫——ready 行没有在途 complete）。
 
 恢复重绑（scripts/rebind_material_etags.py）的 CAS 在 material_etag_identity，
 不在这里（#1313 线）。
@@ -64,7 +68,11 @@ def bind_legacy_material_etag(
         raise ValueError("refusing to bind an empty ETag")
     with write_transaction(connect_source) as conn:
         result = conn.execute(
-            "update materials set object_etag=%s, legacy_etag_bound_at=now()"
+            "update materials set object_etag=%s, legacy_etag_bound_at=now(),"
+            # 代次即身份（#1279 r6 同一机制）：绑定 = 身份从「无」变为 etag，
+            # 代次 +1 让绑定前按 {id}-v2g{gen} 写入的 Host / Worker 缓存地址
+            # 孤儿化——缓存命中不重验，否则会继续返回与绑定身份不符的字节。
+            " upload_generation = upload_generation + 1"
             f" where id=%s and {_CANDIDATE_PREDICATE}"
             " and storage_key=%s and upload_generation=%s",
             (object_etag, material_id, storage_key, upload_generation),

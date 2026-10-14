@@ -343,3 +343,23 @@ def test_claim_response_forwards_the_worker_protocol_version(job_db, service, st
             SimpleNamespace(storage=storage),
             worker_protocol_version=OLD_WORKER,
         )
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_binding_orphans_caches_filled_before_binding(
+    job_db, service, storage, tmp_path, monkeypatch, entry
+) -> None:
+    """#1319 codex R1：未绑窗口内（首轮 HEAD 失败 / binder 尚未扫到）缓存了
+    A，随后活 URL 把对象覆盖成 B，binder 绑定 B。缓存命中不重验——绑定必须
+    使旧缓存地址孤儿化（代次 +1），否则节点继续静默消费与绑定身份不符的 A。"""
+    _fake_presigned_get(monkeypatch, storage)
+    material_id = legacy_hashless(job_db, service, storage, ORIGINAL, filename="a.txt")
+    bundle_id = _bundle(service, material_id)
+    input_doc = _input_doc(entry, material_id, bundle_id)
+    assert _consume(entry, job_db, storage, tmp_path, input_doc) == ORIGINAL  # 缓存 A
+
+    storage.objects[_key(job_db, material_id)] = POISON
+    assert bind_legacy_material_etags(job_db, storage).bound == [material_id]
+
+    # 同一缓存根：消费的必须是绑定身份对应的字节，而不是绑定前缓存的 A。
+    assert _consume(entry, job_db, storage, tmp_path, input_doc) == POISON
