@@ -292,6 +292,7 @@ def test_put_staging_failure_leaves_previous_state_intact(
     write leaves the live dir exactly as it was. The operational IO error
     surfaces as SharedMaterialWriteError (unmapped JobServiceError → 500,
     the SkillGitError convention)."""
+    from server.app.services import skill_shared_swap
     from server.app.services.skill_shared_store import SharedMaterialWriteError
     from server.app.services.skill_shared_swap import write_shared_materials
 
@@ -310,22 +311,19 @@ def test_put_staging_failure_leaves_previous_state_intact(
         assert first.status_code == 200, first.text
 
         shared = shared_home / "_shared"
-        real_write = Path.write_text
 
-        def failing_write(self, data, encoding=None, errors=None):
-            # Fail only inside the staging dir (live-dir reads still work).
-            if ".tmp-" in str(self):
-                raise OSError("disk full")
-            return real_write(self, data, encoding=encoding, errors=errors)
+        def failing_tree_write(root_fd: int, files) -> None:
+            # Fail the staged write (#1254: staging goes through the pinned
+            # descriptor via write_tree_at, never Path.write_text).
+            raise OSError("disk full")
 
-        monkeypatch.setattr(Path, "write_text", failing_write)
+        monkeypatch.setattr(skill_shared_swap, "write_tree_at", failing_tree_write)
         with pytest.raises(SharedMaterialWriteError):
             write_shared_materials(
                 shared,
                 [("map.json", json.dumps(_MAP)), ("references/prompt-style.md", "v2-never")],
                 shared_home,
             )
-        monkeypatch.setattr(Path, "write_text", real_write)
         # The live dir is untouched: old content, no staging leftovers.
         assert (shared / "references" / "prompt-style.md").read_text(encoding="utf-8") == "v1"
         assert sorted(p.name for p in shared_home.iterdir()) == ["_shared"]

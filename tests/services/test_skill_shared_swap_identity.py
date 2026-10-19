@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app import fs_dir_moves
+from server.app import fs_dir_moves, fs_safety
 from server.app.services import skill_shared_swap
 from server.app.services.skill_shared_store import SharedMaterialWriteError
 from server.app.services.skill_shared_swap import write_shared_materials
@@ -337,3 +337,81 @@ def test_cleanup_never_empties_a_directory_swapped_in_after_promote(
     assert (layout["shared"] / "scripts" / "common.py").read_text(encoding="utf-8") == "X = 2\n"
     prefix = "_shared.tmp-" if swapped == "staging-name" else "_shared.old-"
     assert _snapshot(_entry(layout["ws"], prefix)) == other_before
+
+
+# --- #1254: staging writes never follow a swapped-in symlink ---
+
+
+def _staging(layout: dict[str, Path]) -> Path:
+    return _entry(layout["ws"], "_shared.tmp-")
+
+
+def _link_scripts_to_outside(layout: dict[str, Path]) -> None:
+    """Out-of-band swap of the staging ``scripts`` subdir for a symlink."""
+    staging = _staging(layout)
+    scripts = staging / "scripts"
+    if scripts.is_dir() and not scripts.is_symlink():
+        os.rename(scripts, layout["moved"])
+    scripts.symlink_to(layout["outside"] / "scripts", target_is_directory=True)
+
+
+@pytest.mark.parametrize("attack", ["link-before-walk", "link-before-create"])
+@pytest.mark.parametrize("first_write", [False, True])
+def test_staging_subdir_swapped_for_symlink_fails_closed(
+    layout: dict[str, Path], monkeypatch: pytest.MonkeyPatch, attack: str, first_write: bool
+) -> None:
+    """The mkdir→write window in staging (codex R3 P1 on #1242 → #1254).
+
+    link-before-walk: the subdir is a symlink when the component walk
+    reaches it — ``open_dir_beneath``'s O_NOFOLLOW open fails closed.
+    link-before-create: the swap lands between the walk and the file
+    create — the write goes to the PINNED real directory (never through
+    the link), and the pre-promote fwalk refuses to publish a tree
+    containing a symlink. Either way: fail closed, nothing outside the
+    tree changes, the live dir is untouched (or stays absent), nothing is
+    promoted.
+    """
+    if not first_write:
+        _tree(layout["shared"], "live")
+        original = _snapshot(layout["shared"])
+    outside_before = _snapshot(layout["outside"])
+    attacked = False
+
+    if attack == "link-before-walk":
+        real_beneath = fs_safety.open_dir_beneath
+
+        def beneath(root, parts, **kwargs):
+            nonlocal attacked
+            if parts:  # the walk into scripts/ — plant the link first
+                attacked = True
+                _link_scripts_to_outside(layout)
+            return real_beneath(root, parts, **kwargs)
+
+        monkeypatch.setattr(fs_safety, "open_dir_beneath", beneath)
+    else:
+        real_create = fs_safety.create_new_at
+
+        def create(parent: int, name: str, mode: int = 0o600) -> int:
+            nonlocal attacked
+            if name == "common.py":  # walked into scripts/ — swap it now
+                attacked = True
+                _link_scripts_to_outside(layout)
+            return real_create(parent, name, mode)
+
+        monkeypatch.setattr(fs_safety, "create_new_at", create)
+
+    with pytest.raises(SharedMaterialWriteError, match="shared materials write failed"):
+        write_shared_materials(layout["shared"], _PAYLOAD, layout["ws"])
+
+    assert attacked  # the injection fired — a vacuous pass is a broken test
+    # The outside tree the link points at is byte-identical: the write
+    # never went through the link.
+    assert _snapshot(layout["outside"]) == outside_before
+    if attack == "link-before-create":
+        # ...it landed in the pinned real directory instead.
+        assert (layout["moved"] / "common.py").read_text(encoding="utf-8") == "X = 2\n"
+    if first_write:
+        assert not os.path.lexists(layout["shared"])  # nothing promoted
+    else:
+        assert _snapshot(layout["shared"]) == original  # live dir untouched
+    _no_leftovers(layout["ws"])

@@ -3,8 +3,10 @@
 Two tiers, pick by what the caller does with the path:
 
 - **Descriptor tier** (``open_dir_beneath`` / ``open_dir_nofollow`` /
-  ``open_regular_at``): openat-style walks modelled on the MCP staging reader
-  (``server/app/mcp_server/local_files.py``). The trusted root is opened once;
+  ``open_regular_at`` / ``create_new_at`` / ``write_text_at`` /
+  ``write_tree_at``): openat-style walks modelled on the MCP staging
+  reader (``server/app/mcp_server/local_files.py``). The trusted root is
+  opened once;
   every component below it is opened relative to the previous directory
   descriptor with ``O_NOFOLLOW``, so a symlink anywhere in the untrusted part
   fails the open and a directory swapped after the walk cannot redirect I/O
@@ -25,7 +27,7 @@ from __future__ import annotations
 
 import os
 import stat
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePath, PurePosixPath
 
@@ -127,6 +129,34 @@ def create_new_at(parent: int, name: str, mode: int = 0o600) -> int:
     """
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
     return os.open(_component(name), flags, mode, dir_fd=parent)
+
+
+def write_text_at(parent: int, name: str, content: str, mode: int = 0o600) -> None:
+    """Create ``name`` under ``parent`` via ``create_new_at`` and write text.
+
+    The write half of the descriptor tier (#1254): the file descriptor is
+    wrapped and closed here so callers staging a tree cannot leak it.
+    """
+    with os.fdopen(create_new_at(parent, name, mode), "w", encoding="utf-8") as handle:
+        handle.write(content)
+
+
+def write_tree_at(root: int, files: Iterable[tuple[str, str]]) -> None:
+    """Stage ``files`` (relative path + text content) under pinned dir ``root``.
+
+    The descriptor-tier tree writer (#1254): each path passes the
+    ``relative_parts`` lexical gate, intermediate directories are created
+    component-wise from ``root`` with ``O_NOFOLLOW`` (``open_dir_beneath``,
+    ``create=True``) and the leaf with ``O_EXCL | O_NOFOLLOW``
+    (``write_text_at``). A component swapped for a symlink between the
+    mkdir and the write fails the walk instead of redirecting content
+    outside the tree, and a directory swapped after its walk still cannot
+    redirect I/O done through the pinned descriptor.
+    """
+    for relative, content in files:
+        parts = relative_parts(relative)
+        with open_dir_beneath(root, parts[:-1], create=True) as dir_fd:
+            write_text_at(dir_fd, parts[-1], content)
 
 
 def open_regular_at(parent: int, name: str) -> int:
