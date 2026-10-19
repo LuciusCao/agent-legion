@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # worktree 收尾清理：一站式移除某个已完成任务的 worktree 残留——
-#   0. 删除计划（只读）：列出派生库、核对 bucket，需要时一次性交互确认；
-#      之后取派生名锁（#1084）一直持有到第 4 步结束
+#   0. 删除计划（只读）：记录目标 worktree 身份快照、列出派生库、核对
+#      bucket，需要时一次性交互确认；之后取派生名锁（#1084）一直持有到
+#      第 4 步结束
 #   1. git worktree remove（dirty 时 git 自己拒绝，不加 --force）
 #   2. 删除该 worktree 占用的本地分支（git branch -d，未合并删不掉时提示但
 #      不中断后续步骤）；远端分支默认不删，仅打印提示命令，加
@@ -20,6 +21,12 @@
 #     发布线 release/*（与 pre-push 的 protected 分支口径对齐，#930）；
 #   - 删除前列出派生库 owner/大小与 bucket 对象数量/总大小，无 --yes 时
 #     交互确认（在取锁之前，持锁不等用户输入）；
+#   - 取锁后、git worktree remove 前重验目标身份快照（HEAD/分支/.git 文件
+#     指纹）：确认/等锁期间目标被移除并以同名同路径重建（哪怕已跑完
+#     init-worktree.sh）时拒绝——否则删除会落到新实例的 worktree/分支/库/
+#     bucket 上（#1084）；
+#   - 派生库/bucket 的存在性以取锁后的重探测为准：锁前 probe 只用于确认
+#     展示，等锁期间 init 补建的资源不会被陈旧的「不存在」结果漏删（#1084）；
 #   - 删库/删 bucket 前持锁重查：同名 worktree 被重建后又注册着也拒绝；
 #   - endpoint 不可达/未配置 S3 时 warning 跳过（对齐 init-worktree.sh 的
 #     降级语义），不影响其余步骤。
@@ -95,6 +102,33 @@ fi
 # shellcheck source=worktree-names-lib.sh
 source "$ROOT/scripts/worktree-names-lib.sh"
 worktree_require_unique_derived_names "$ROOT" "$WT" "清理（删除派生库/bucket）" || exit 1
+
+# 目标身份快照（#1084）：计划阶段记录，取锁后、git worktree remove 前重验。
+# 确认/等锁期间另一流程可能移除原 worktree 并以同名同路径重建（甚至跑完
+# init-worktree.sh）——撞名检查不把同名条目算冲突，识别不了这种替换，没有
+# 身份重验的话删除会落到新实例上。
+_identity_stat() {
+    # $1: 路径, $2: BSD(macOS) stat 格式, $3: GNU stat 格式。
+    stat -f "$2" "$1" 2>/dev/null || stat -c "$3" "$1" 2>/dev/null || echo "no-stat"
+}
+target_identity() {
+    if [[ ! -d "$TARGET" ]]; then
+        echo "absent"
+        return 0
+    fi
+    local head branch gitinfo dir_fp file_fp
+    head="$(git -C "$TARGET" rev-parse HEAD 2>/dev/null)" || head="unresolved"
+    branch="$(git -C "$TARGET" symbolic-ref --short -q HEAD 2>/dev/null)" || branch="detached"
+    gitinfo="$(head -c 300 "$TARGET/.git" 2>/dev/null)" || gitinfo="no-gitfile"
+    # 目录只用 device:inode:birthtime——init 在目录内创建文件会改变目录的
+    # ctime/mtime，等锁期间并发 init 是合法场景，不能据此误判替换；.git
+    # 文件 init 从不触碰，可以用完整指纹（含 ctime）。remove+add 重建后
+    # 目录与 .git 文件必然重写，inode/birthtime/ctime 至少其一变化。
+    dir_fp="$(_identity_stat "$TARGET" '%d:%i:%B' '%d:%i:%W')"
+    file_fp="$(_identity_stat "$TARGET/.git" '%d:%i:%c:%B' '%d:%i:%Z:%W')"
+    printf 'present\n%s\n%s\n%s\n%s\n%s\n' "$head" "$branch" "$gitinfo" "$dir_fp" "$file_fp"
+}
+PLANNED_IDENTITY="$(target_identity)"
 
 # 派生 S3 bucket 的两阶段 python（与 init-worktree.sh 同一派生规则与 env
 # 加载，#1084）：probe 只读核对并打印摘要，delete 持锁后重新 head/list 再
@@ -230,7 +264,9 @@ bucket_phase_degraded() {
 
 # 0. 删除计划（只读、不持锁）：列出派生库、核对 bucket，需要删除时一次性
 #    交互确认（--yes 跳过）。确认必须在取锁之前——持锁等用户输入会卡住同机
-#    所有 init（#1084）。
+#    所有 init（#1084）。注意：这里的 probe 结果（db_rc/bucket_rc）只用于
+#    确认展示，删除决策在取锁后以锁内重探测为准（等锁期间 init 可能补建
+#    资源）。
 DROP_DB="$(dirname "${BASH_SOURCE[0]}")/drop-worktree-db.sh"
 db_rc=0
 "$DROP_DB" "$WT" --list || db_rc=$?
@@ -258,6 +294,14 @@ fi
 # drop-worktree-db.sh 复用本锁。取锁后重做撞名检查（目标此刻仍合法注册）。
 worktree_name_lock_acquire "$ROOT" "清理 worktree ${WT}" || exit 1
 worktree_require_unique_derived_names "$ROOT" "$WT" "清理（删除派生库/bucket）" || exit 1
+
+# 移除前重验目标身份（#1084）：快照见上方 target_identity。身份不一致说明
+# 确认/等锁期间目标被移除或重建，当前 $TARGET 已不是用户确认过的实例。
+if [[ "$(target_identity)" != "$PLANNED_IDENTITY" ]]; then
+    echo "错误: worktree '${WT}' 在确认/等锁期间被移除或重建（目标身份已变化），拒绝清理（#1084）。" >&2
+    echo "      若确认要清理当前实例，请重新执行本脚本。" >&2
+    exit 1
+fi
 
 # 1. git worktree remove（remove 前先解析该 worktree checkout 的分支，
 #    供第 2 步删本地分支用）。
@@ -306,19 +350,25 @@ else
     echo "未解析到分支（跳过本地/远端分支删除）"
 fi
 
-# 3. 派生 Postgres 库：转调 drop-worktree-db.sh（继承其名字/role 护栏；复用
-#    本进程的锁；删除前把同名 worktree 也算冲突——目标已移除后同名又注册
-#    着 = 被重建的新实例）。确认已在第 0 步做过，计划里没有库就不再调用。
-if [[ "$db_rc" -eq 10 ]]; then
-    "$DROP_DB" "$WT" --yes
-fi
+# 3. 派生 Postgres 库：无条件转调 drop-worktree-db.sh（继承其名字/role 护栏；
+#    复用本进程的锁）。它在锁内重新探测实际存在的库再删（#1084：锁前
+#    probe 的「不存在」可能是 init 补建前的陈旧结果，不能作为删除决策），
+#    并把同名 worktree 仍/又注册着算冲突（目标已移除后同名再注册 = 被重建
+#    的新实例）。确认已在第 0 步做过。
+"$DROP_DB" "$WT" --yes
 
-# 4. 派生 S3 bucket：删除前同样把同名重建算冲突，再跑 delete 阶段。
-rc="$bucket_rc"
-if [[ "$bucket_rc" -eq 10 ]]; then
+# 4. 派生 S3 bucket：同样在锁内重新 probe（锁前结果仅用于确认展示），存在
+#    才删；删除前把同名重建算冲突（#1084）。
+rc=0
+bucket_rc=0
+run_bucket_phase probe || bucket_rc=$?
+if [[ "$bucket_rc" -eq 4 ]]; then
+    exit 1
+elif [[ "$bucket_rc" -eq 10 ]]; then
     worktree_require_unique_derived_names "$ROOT" "$WT" "删除派生 bucket" 1 || exit 1
-    rc=0
     run_bucket_phase delete || rc=$?
+elif [[ "$bucket_rc" -ne 0 ]]; then
+    rc="$bucket_rc"
 fi
 worktree_name_lock_release
 if [[ "$rc" -eq 4 ]]; then

@@ -14,9 +14,13 @@ restricted PATH: no real database or bucket is touched.
 
 from __future__ import annotations
 
+import os
 import shutil
 import stat
 import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -45,6 +49,13 @@ exit 0
 _UV_STUB = """#!/usr/bin/env bash
 printf 'uv %s\\n' "$*" >>"$STUB_LOG"
 echo "stub-vault-master-key"
+"""
+
+
+# dropdb 桩：记录每次调用（正常路径不该碰到真实数据库）。
+_DROPDB_STUB = """#!/usr/bin/env bash
+printf 'dropdb %s\\n' "$*" >>"$STUB_LOG"
+exit 0
 """
 
 
@@ -78,6 +89,7 @@ class _Repo:
         # 那里可能同时有真 createdb/psql。
         _exe(self.bin / "git", f'#!/usr/bin/env bash\nexec "{_GIT}" "$@"\n')
         _exe(self.bin / "psql", _PSQL_STUB)
+        _exe(self.bin / "dropdb", _DROPDB_STUB)
         _exe(self.bin / "uv", _UV_STUB)
         self._git("init", "-q", str(self.main))
         self._git("-C", str(self.main), "commit", "-q", "--allow-empty", "-m", "init")
@@ -263,3 +275,276 @@ def test_drop_db_without_collision_proceeds(repo: _Repo) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "没有需要删除的库" in result.stdout
+
+
+# --- 跨锁边界重验（#1084 codex R2 P1）---------------------------------------
+#
+# 「检查 → 行动」跨越派生名锁边界时，锁前的 probe/确认结果只是计划素材，
+# 行动前必须在锁内重验：目标 worktree 的身份（防确认窗口内被移除后以同名
+# 同路径重建）与派生库/bucket 的存在性（防等锁期间 init 补建后沿用陈旧的
+# 「不存在」跳过删除，留下会被同名 worktree 复用的资源）。
+
+
+def _script_env(repo: _Repo, extra: dict[str, str] | None = None) -> dict[str, str]:
+    env = {
+        **_git_env(repo.tmp),
+        "PATH": f"{repo.bin}:/usr/bin:/bin",
+        "STUB_LOG": str(repo.log),
+    }
+    env.update(extra or {})
+    return env
+
+
+class _ScriptRun:
+    """Popen 包装：后台线程收集 stdout/stderr，主线程等 stderr 出现特定提示
+    （等信号非等时长）后注入 stdin / 翻转桩状态，最后收割退出状态。"""
+
+    def __init__(
+        self,
+        repo: _Repo,
+        script: Path,
+        args: tuple[str, ...],
+        extra_env: dict[str, str] | None = None,
+    ) -> None:
+        self._proc = subprocess.Popen(
+            ["bash", str(script), *args],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=repo.main,
+            env=_script_env(repo, extra_env),
+        )
+        self._buf = {"out": b"", "err": b""}
+        self._cond = threading.Condition()
+        self._threads = []
+        for stream, key in ((self._proc.stdout, "out"), (self._proc.stderr, "err")):
+            thread = threading.Thread(target=self._drain, args=(stream, key), daemon=True)
+            thread.start()
+            self._threads.append(thread)
+
+    def _drain(self, stream, key: str) -> None:
+        # os.read 而不是 stream.read(4096)：后者会攒满 4096 字节才返回，
+        # 短提示（如锁等待横幅）要等到 EOF 才现身。
+        fd = stream.fileno()
+        while chunk := os.read(fd, 4096):
+            with self._cond:
+                self._buf[key] += chunk
+                self._cond.notify_all()
+
+    def _wait_for(self, key: str, needle: str, timeout: float) -> None:
+        deadline = time.monotonic() + timeout
+        with self._cond:
+            while needle.encode() not in self._buf[key]:
+                remaining = deadline - time.monotonic()
+                assert remaining > 0, (
+                    f"未等到 {key} 提示 {needle!r}；已有输出: "
+                    f"out={self._buf['out'].decode(errors='replace')!r} "
+                    f"err={self._buf['err'].decode(errors='replace')!r}"
+                )
+                self._cond.wait(remaining)
+
+    def wait_stderr(self, needle: str, timeout: float = 30.0) -> None:
+        self._wait_for("err", needle, timeout)
+
+    def wait_stdout(self, needle: str, timeout: float = 30.0) -> None:
+        self._wait_for("out", needle, timeout)
+
+    def write_stdin(self, data: str) -> None:
+        assert self._proc.stdin is not None
+        self._proc.stdin.write(data.encode())
+        self._proc.stdin.flush()
+        self._proc.stdin.close()
+
+    def finish(self, timeout: float = 60.0) -> subprocess.CompletedProcess[str]:
+        rc = self._proc.wait(timeout=timeout)
+        for thread in self._threads:
+            thread.join(timeout=5)
+        return subprocess.CompletedProcess(
+            (), rc, self._buf["out"].decode(), self._buf["err"].decode()
+        )
+
+
+def _hold_derived_name_lock(repo: _Repo) -> subprocess.Popen:
+    """以存活 pid 占位派生名锁，扮演正在持锁补建资源的 init-worktree.sh。"""
+    lock_dir = repo.main / ".git" / "worktree-derived-names.lock"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    sleeper = subprocess.Popen(["sleep", "60"])
+    (lock_dir / f"holder-{sleeper.pid}-test").write_text(
+        f"pid={sleeper.pid} 测试占位（模拟 init 持锁）\n", encoding="utf-8"
+    )
+    return sleeper
+
+
+# psql 桩：目标库已存在（触发 clean 的交互确认窗口）。注意库详情查询里
+# join 了 pg_roles，role 探测必须匹配完整的 "select 1 from pg_roles"。
+_PSQL_DB_PRESENT_STUB = """#!/usr/bin/env bash
+printf 'psql %s\\n' "$*" >>"$STUB_LOG"
+if [[ "$*" == *"select 1 from pg_roles"* ]]; then exit 0; fi
+if [[ "$*" == *pg_database_size* ]]; then echo "agent_legion_dev|1 MB"; exit 0; fi
+if [[ "$*" == *"select 1 from pg_database where"* ]]; then echo "1"; exit 0; fi
+exit 0
+"""
+
+# psql 桩：状态文件出现前报告目标库不存在，出现后报告存在（模拟 init 在
+# clean 等锁期间补建了派生库）。
+_PSQL_DB_APPEARS_STUB = """#!/usr/bin/env bash
+printf 'psql %s\\n' "$*" >>"$STUB_LOG"
+if [[ "$*" == *"select 1 from pg_roles"* ]]; then exit 0; fi
+if [[ ! -f "$STUB_DB_READY" ]]; then exit 0; fi
+if [[ "$*" == *pg_database_size* ]]; then echo "agent_legion_dev|1 MB"; exit 0; fi
+if [[ "$*" == *"select 1 from pg_database where"* ]]; then echo "1"; exit 0; fi
+exit 0
+"""
+
+# clean 的 S3 heredoc 由 uv 桩转交真实 python 执行（PYTHONPATH 指向 runner
+# worktree），以下替身模块屏蔽 dotenv/boto3/botocore 与 repo 模块。
+_FAKE_S3_MODULES = {
+    "dotenv.py": "def load_dotenv(*a, **k):\n    return False\n",
+    "botocore/__init__.py": "",
+    "botocore/exceptions.py": (
+        "class ClientError(Exception):\n"
+        "    def __init__(self, response):\n"
+        "        super().__init__('stub')\n"
+        "        self.response = response\n"
+        "class EndpointConnectionError(Exception):\n"
+        "    pass\n"
+    ),
+    # head_bucket 以状态文件模拟「等锁期间 init 补建了 bucket」。
+    "boto3.py": (
+        "import os\n"
+        "from botocore.exceptions import ClientError\n"
+        "class _Paginator:\n"
+        "    def paginate(self, Bucket):\n"
+        "        return iter([{}])\n"
+        "class _Client:\n"
+        "    def head_bucket(self, Bucket):\n"
+        "        if not os.path.exists(os.environ['STUB_BUCKET_READY']):\n"
+        "            raise ClientError({'Error': {'Code': '404'}})\n"
+        "    def get_paginator(self, name):\n"
+        "        return _Paginator()\n"
+        "    def delete_objects(self, Bucket, Delete):\n"
+        "        pass\n"
+        "    def delete_bucket(self, Bucket):\n"
+        "        with open(os.environ['STUB_LOG'], 'a', encoding='utf-8') as fh:\n"
+        "            fh.write(f'delete_bucket {Bucket}\\n')\n"
+        "def client(*a, **k):\n"
+        "    return _Client()\n"
+    ),
+    "scripts/__init__.py": "",
+    "scripts/seaweedfs_collection.py": (
+        "class CollectionGuardError(Exception):\n    pass\n"
+        "def leftover_volume_ids(*a):\n    return ()\n"
+        "def manual_reclaim_command(*a):\n    return ''\n"
+        "def resolve_master_url(*a):\n    return None\n"
+    ),
+    "server/__init__.py": "",
+    "server/app/__init__.py": "",
+    "server/app/storage.py": (
+        "class _S:\n"
+        "    region = 'us-east-1'\n"
+        "    endpoint_url = None\n"
+        "    access_key = None\n"
+        "    secret_key = None\n"
+        "def load_s3_settings():\n"
+        "    return _S()\n"
+    ),
+}
+
+
+def _install_bucket_fakes(repo: _Repo, worktree: Path) -> None:
+    for rel, content in _FAKE_S3_MODULES.items():
+        target = worktree / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    _exe(repo.bin / "uv", f'#!/usr/bin/env bash\nexec "{sys.executable}" -\n')
+
+
+def test_clean_refuses_when_target_rebuilt_during_confirmation(repo: _Repo) -> None:
+    runner = repo.add("runner")
+    repo.install_scripts(runner)
+    victim_path = repo.add("victim")
+    _exe(repo.bin / "psql", _PSQL_DB_PRESENT_STUB)
+
+    run = _ScriptRun(repo, runner / "scripts" / "clean-worktree.sh", ("victim",))
+    # bash 的 read -p 只在 stdin 是 tty 时打印提示；改用计划输出的「待删除」
+    # 行作为到达确认窗口的信号（确认读取紧随其后，仍在取锁之前）。
+    run.wait_stdout("待删除: agent_legion_victim")
+    # 确认窗口内（取锁之前）：另一流程移除原 worktree 并以同名同路径重建，
+    # 新实例 HEAD 已前进（重建通常基于更新后的 main）。
+    repo._git("-C", str(repo.main), "commit", "-q", "--allow-empty", "-m", "advance")
+    repo._git("-C", str(repo.main), "worktree", "remove", str(victim_path))
+    repo._git("-C", str(repo.main), "worktree", "add", "-q", "-b", "rebuild", str(victim_path))
+    run.write_stdin("victim\n")
+    result = run.finish()
+
+    assert result.returncode == 1
+    assert "身份已变化" in result.stderr
+    # 新实例未被误伤：worktree 目录与重建分支仍在，派生库未被删除。
+    assert victim_path.is_dir()
+    assert "dropdb" not in repo.log.read_text(encoding="utf-8")
+    ref = subprocess.run(
+        [_GIT, "-C", str(repo.main), "show-ref", "--verify", "--quiet", "refs/heads/rebuild"],
+        env={**_git_env(repo.tmp), "PATH": "/usr/bin:/bin"},
+        check=False,
+    )
+    assert ref.returncode == 0
+
+
+def test_clean_reprobes_db_created_during_lock_wait(repo: _Repo) -> None:
+    runner = repo.add("runner")
+    repo.install_scripts(runner)
+    repo.add("victim")
+    _exe(repo.bin / "psql", _PSQL_DB_APPEARS_STUB)
+    db_ready = repo.tmp / "db-ready"
+    sleeper = _hold_derived_name_lock(repo)
+
+    run = _ScriptRun(
+        repo,
+        runner / "scripts" / "clean-worktree.sh",
+        ("victim", "--yes"),
+        extra_env={"STUB_DB_READY": str(db_ready)},
+    )
+    try:
+        run.wait_stderr("派生名锁被占用")
+        # init 在 clean 等锁期间补建了派生库：锁前 probe 的「不存在」已陈旧。
+        db_ready.write_text("ready\n", encoding="utf-8")
+    finally:
+        # kill 后必须 wait 回收：zombie 子进程 kill -0 仍判活（#1251 的
+        # 已知残余），锁的占用者判死回收会因此永不触发。
+        sleeper.kill()
+        sleeper.wait()
+    result = run.finish()
+
+    assert result.returncode == 0, result.stderr
+    assert "dropdb agent_legion_victim\n" in repo.log.read_text(encoding="utf-8")
+    assert "已删除: agent_legion_victim" in result.stdout
+
+
+def test_clean_reprobes_bucket_created_during_lock_wait(repo: _Repo) -> None:
+    runner = repo.add("runner")
+    repo.install_scripts(runner)
+    repo.add("victim")
+    _install_bucket_fakes(repo, runner)
+    bucket_ready = repo.tmp / "bucket-ready"
+    sleeper = _hold_derived_name_lock(repo)
+
+    run = _ScriptRun(
+        repo,
+        runner / "scripts" / "clean-worktree.sh",
+        ("victim", "--yes"),
+        extra_env={"STUB_BUCKET_READY": str(bucket_ready)},
+    )
+    try:
+        run.wait_stderr("派生名锁被占用")
+        # 同上：init 在 clean 等锁期间补建了派生 bucket。
+        bucket_ready.write_text("ready\n", encoding="utf-8")
+    finally:
+        # kill 后必须 wait 回收：zombie 子进程 kill -0 仍判活（#1251 的
+        # 已知残余），锁的占用者判死回收会因此永不触发。
+        sleeper.kill()
+        sleeper.wait()
+    result = run.finish()
+
+    assert result.returncode == 0, result.stderr
+    assert "delete_bucket agent-legion-victim\n" in repo.log.read_text(encoding="utf-8")
+    assert "已删除 S3 bucket: agent-legion-victim" in result.stdout

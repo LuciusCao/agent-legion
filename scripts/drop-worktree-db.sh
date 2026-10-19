@@ -10,9 +10,10 @@
 #      不依赖调用者小心；
 #   3. 执行前打印每个目标库的 owner 与大小，交互确认（--yes 跳过）；
 #   4. 确认之后才取派生名锁（#1084，持锁等用户输入会卡住别的 init），
-#      持锁重新做撞名检查，只删确认时列出且仍存在的库。删除前的检查把
-#      同名 worktree 本身也算冲突：本脚本只删「已移除」worktree 的库，同名
-#      worktree 仍（或被重建后又）注册着时库归它所有。
+#      持锁重新做撞名检查与存在性探测，只删锁内实际存在的库——锁前列出的
+#      集合仅用于确认展示，确认/等锁期间 init 可能补建库（#1084）。删除前
+#      的检查把同名 worktree 本身也算冲突：本脚本只删「已移除」worktree 的
+#      库，同名 worktree 仍（或被重建后又）注册着时库归它所有。
 #
 # 用法: scripts/drop-worktree-db.sh <worktree名> [--yes | --list]
 #   --list：只列出存在的目标库后退出（0=没有、10=有待删），不确认、不取锁、
@@ -66,31 +67,40 @@ else
     echo "提示: 集群无 $DEV_ROLE role，以当前用户（$(whoami)）连接——仅靠名字护栏保护。" >&2
 fi
 
-# 收集存在的目标库（owner + 大小）。CONFIRMED 是确认时展示的集合，下方
-# 只删其中的库（空格分隔；库名由派生规则保证不含空白）。
-FOUND=0
-CONFIRMED=""
-for db in "$DB" "$TEST_DB"; do
-    row="$(psql -d postgres -tAc \
-        "select r.rolname || '|' || pg_size_pretty(pg_database_size(d.datname)) from pg_database d join pg_roles r on r.oid=d.datdba where d.datname='$db'" \
-        2>/dev/null)" || true
-    if [[ -n "$row" ]]; then
-        echo "待删除: $db (owner=${row%%|*}, size=${row##*|})"
-        FOUND=$((FOUND + 1))
-        CONFIRMED="${CONFIRMED} ${db}"
-    else
-        echo "不存在（跳过）: $db"
-    fi
-done
-if [[ "$FOUND" -eq 0 ]]; then
-    echo "没有需要删除的库。"
-    exit 0
-fi
+# 收集当前存在的目标库（owner + 大小）。$1 为 "print" 时打印每个库的
+# 待删除/不存在行；CONFIRMED 是本次探测到的集合（空格分隔；库名由派生
+# 规则保证不含空白）。
+collect_existing_dbs() {
+    local verbose="${1:-}" db row
+    FOUND=0
+    CONFIRMED=""
+    for db in "$DB" "$TEST_DB"; do
+        row="$(psql -d postgres -tAc \
+            "select r.rolname || '|' || pg_size_pretty(pg_database_size(d.datname)) from pg_database d join pg_roles r on r.oid=d.datdba where d.datname='$db'" \
+            2>/dev/null)" || true
+        if [[ -n "$row" ]]; then
+            FOUND=$((FOUND + 1))
+            CONFIRMED="${CONFIRMED} ${db}"
+            [[ "$verbose" == "print" ]] && echo "待删除: $db (owner=${row%%|*}, size=${row##*|})"
+        else
+            [[ "$verbose" == "print" ]] && echo "不存在（跳过）: $db"
+        fi
+    done
+    return 0
+}
+
+# 计划阶段（不持锁）：列出当前存在的目标库供确认。该集合仅用于确认展示，
+# 删除决策以取锁后的重新探测为准（#1084）。
+collect_existing_dbs print
 if [[ "$MODE" == "--list" ]]; then
+    if [[ "$FOUND" -eq 0 ]]; then
+        echo "没有需要删除的库。"
+        exit 0
+    fi
     exit 10
 fi
 
-if [[ "$MODE" != "--yes" ]]; then
+if [[ "$FOUND" -gt 0 && "$MODE" != "--yes" ]]; then
     reply=""
     read -r -p "确认删除以上 $FOUND 个库？输入 worktree 名 '$WT' 确认: " reply || true
     if [[ "$reply" != "$WT" ]]; then
@@ -101,11 +111,26 @@ fi
 
 # 护栏 0'（#1084）：确认后取派生名锁并重新检查撞名——确认期间可能有派生
 # 名相同（含同名重建）的新 worktree 完成了 init（库名相同，删掉就是删它
-# 的库）。持锁后
-# 并发的 init 只能在本次删除完成后再建库。锁在脚本退出（含报错/信号）时由
-# trap 释放；被 clean-worktree.sh 转调且父进程已持锁时直接复用。
+# 的库）。持锁后并发的 init 只能在本次删除完成后再建库。锁在脚本退出（含
+# 报错/信号）时由 trap 释放；被 clean-worktree.sh 转调且父进程已持锁时直接
+# 复用。
 worktree_name_lock_acquire "$SCRIPT_DIR" "删除派生库 ${WT}" || exit 1
 worktree_require_unique_derived_names "$SCRIPT_DIR" "$WT" "删除派生库" 1 || exit 1
+
+# 锁内重新探测（#1084）：确认/等锁期间 init 可能补建了库（或他人已删），
+# 只删锁内实际存在的库。
+PLANNED_CONFIRMED="$CONFIRMED"
+collect_existing_dbs
+if [[ "$CONFIRMED" != "$PLANNED_CONFIRMED" ]]; then
+    echo "提示: 锁内重检发现目标库集合与确认时不一致（期间有建/删），以当前实际存在的为准：" >&2
+    for db in $CONFIRMED; do
+        echo "  锁内待删除: $db" >&2
+    done
+fi
+if [[ "$FOUND" -eq 0 ]]; then
+    echo "没有需要删除的库。"
+    exit 0
+fi
 
 for db in $CONFIRMED; do
     if psql -d postgres -tAc "select 1 from pg_database where datname='$db'" 2>/dev/null | grep -q 1; then
