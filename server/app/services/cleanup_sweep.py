@@ -99,6 +99,8 @@ def _remove_row_artifacts(
     data_dir: Path,
     action: str,
     cutoff: datetime,
+    db: JobQueries,
+    pending_claim_strips: list[tuple[int, str]],
 ) -> int:
     """Remove one expired artifact (``log`` or ``run_dir``) for a row past retention."""
     try:
@@ -141,6 +143,14 @@ def _remove_row_artifacts(
         # owned by a NEWER row (whose own run_dir claim and retention timeline
         # apply), deleting fresh evidence for a stale row. Leftover dirs of
         # such rows are bounded and reclaimed by cleanup_extra_runs_per_node.
+        return 0
+    if db.has_other_run_dir_claimant(run_dir_str, row["id"]):
+        # #1315 共享认领守卫：另一行也认领该目录（部署前 finish 不转移所有权
+        # 留下的存量：worker 固定 token 目录被历次 run 共享）。本行不是所有者，
+        # 删除会灭失认领者的证据——只把本行的陈旧认领排进批缴清（游标升序
+        # 处理，最终仅剩最新 finish 行持有认领），绝不删除；目录等唯一认领行
+        # 自己过期时才删。
+        pending_claim_strips.append((row["id"], run_dir_str))
         return 0
     try:
         remove_path(resolve_data_path(run_dir_str, data_dir, allow_missing=True))
@@ -204,8 +214,14 @@ def sweep_expired_node_runs(
                     ).fetchall()
                 if not rows:
                     break
+                pending_claim_strips: list[tuple[int, str]] = []
                 for row in rows:
-                    totals[action] += _remove_row_artifacts(row, data_dir, action, cutoff)
+                    totals[action] += _remove_row_artifacts(
+                        row, data_dir, action, cutoff, db, pending_claim_strips
+                    )
+                # Shared-claim strips flush in one short write transaction per
+                # chunk — after the chunk's filesystem work, never around it.
+                db.release_stale_run_dir_claims(pending_claim_strips)
                 raw_last_finished_at = rows[-1]["finished_at"]
                 last_finished_at = (
                     raw_last_finished_at

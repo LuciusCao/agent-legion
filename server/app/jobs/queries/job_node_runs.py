@@ -117,6 +117,25 @@ class JobNodeRunQueriesMixin(JobNodeLifecycleQueriesMixin):
             definition = definition_from_job_snapshot(dict(job)) if job is not None else None
             self._sync_job_status_after_node_run(conn, run, status, definition)
 
+    def has_other_run_dir_claimant(self, run_dir: str, node_run_id: int) -> bool:
+        """#1315：是否有其他行认领同一 run_dir（共享固定 token 目录的存量形态）。"""
+        with self._connect_read() as conn:
+            row = conn.execute(
+                "select 1 from node_runs where run_dir = %s and id <> %s limit 1",
+                (run_dir, node_run_id),
+            ).fetchone()
+        return row is not None
+
+    def release_stale_run_dir_claims(self, claims: list[tuple[int, str]]) -> None:
+        """缴清指定行对 run_dir 的陈旧认领（CAS 校验认领值，幂等可重入）。"""
+        if not claims:
+            return
+        with self.connect() as conn:
+            conn.executemany(
+                "update node_runs set run_dir = '', session_dir = '' where id = %s and run_dir = %s",
+                claims,
+            )
+
     def list_node_runs(self, job_id: str) -> list[dict[str, Any]]:
         with self._connect_read() as conn:
             rows = conn.execute("select * from node_runs where job_id=%s order by id", (job_id,))

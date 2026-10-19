@@ -172,6 +172,45 @@ def test_cleanup_empty_run_dir_row_never_deletes_current_run_dir(tmp_path):
     assert (worker_dir / "events.jsonl").read_text() == "current run events"
 
 
+def test_cleanup_shared_run_dir_claim_strips_stale_claim_without_deleting(tmp_path):
+    """#1315 r1：存量共享认领（部署前 finish 不转移所有权，过期行与新鲜行
+    共享同一非空 run_dir——worker 固定 token 目录形态）。sweep 不得删除共享
+    目录，只缴清过期行的陈旧认领；目录等唯一认领行自己过期时才删除。"""
+    data_dir, db = _make_db(tmp_path)
+    worker_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a" / "worker"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "events.jsonl").write_text("current run events")
+    worker_rel = make_data_relative(worker_dir, data_dir)
+
+    old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
+    recent_finished = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    with db.connect() as conn:
+        _seed_workspace(conn)
+        _insert_job(conn, "job-1")
+        _insert_node_run(conn, "job-1", "node-a", run_dir=worker_rel, finished_at=old_finished)
+        _insert_node_run(conn, "job-1", "node-a", run_dir=worker_rel, finished_at=recent_finished)
+
+    cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
+    _logs, dirs = cleanup_old_logs(db, data_dir, cfg)
+
+    assert dirs == 0
+    assert (worker_dir / "events.jsonl").read_text() == "current run events"
+    with db._connect_read() as conn:
+        rows = conn.execute("select run_dir from node_runs order by finished_at").fetchall()
+    # 过期行的认领被缴清；新鲜行成为唯一认领者。
+    assert [row["run_dir"] for row in rows] == ["", worker_rel]
+
+    # 唯一认领行自己过期后，目录才被删除（finished_at 晚于游标，下轮必被啃到）。
+    with db.connect() as conn:
+        conn.execute(
+            "update node_runs set finished_at = %s where run_dir = %s",
+            ((datetime.now(UTC) - timedelta(days=39)).isoformat(), worker_rel),
+        )
+    _logs, dirs = cleanup_old_logs(db, data_dir, cfg)
+    assert dirs == 1
+    assert not worker_dir.exists()
+
+
 def test_cleanup_config_from_settings():
     cfg = CleanupConfig.from_settings(
         {"cleanup": {"log_retention_days": "7", "run_dir_retention_days": 14}}
@@ -284,7 +323,7 @@ def test_cleanup_processes_expired_rows_in_chunks(tmp_path, monkeypatch):
     assert not any(log_dir.glob("completed-*.log"))
     assert not any(log_dir.glob("failed-*.log"))
     assert recent_log.exists()
-    # 1 job-id read + at least 2 chunk reads per status proves chunked paging.
+    # At least 2 chunk reads per status proves chunked paging.
     assert reads >= 3
 
 
