@@ -80,17 +80,19 @@ def _component(part: str) -> str:
 
 @contextmanager
 def open_dir_beneath(
-    root: Path | str, parts: Sequence[str], *, create: bool = False, mode: int = 0o700
+    root: Path | str | int, parts: Sequence[str], *, create: bool = False, mode: int = 0o700
 ) -> Iterator[int]:
     """Yield a descriptor for ``root/<parts...>`` walked without following links.
 
     ``root`` is the trusted anchor and is opened normally (a symlinked root is
-    followed, matching how deployments mount data directories); each of
-    ``parts`` is opened relative to its parent descriptor with ``O_NOFOLLOW``.
-    With ``create`` missing components are created with ``mode`` first.
+    followed, matching how deployments mount data directories) — or, given as
+    an already pinned directory descriptor, duplicated (the caller keeps
+    ownership of its own descriptor); each of ``parts`` is opened relative to
+    its parent descriptor with ``O_NOFOLLOW``. With ``create`` missing
+    components are created with ``mode`` first.
     """
     components = [_component(part) for part in parts]
-    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    fd = os.dup(root) if isinstance(root, int) else os.open(root, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for part in components:
             if create:
