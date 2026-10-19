@@ -70,6 +70,7 @@ def test_cleanup_removes_old_logs_and_run_dirs(tmp_path):
             "job-1",
             "node-a",
             log_path=make_data_relative(log_path, data_dir),
+            run_dir=make_data_relative(run_dir, data_dir),
             finished_at=old_finished,
         )
 
@@ -109,7 +110,10 @@ def test_cleanup_keeps_recent_logs_and_run_dirs(tmp_path):
     assert run_dir.exists()
 
 
-def test_cleanup_derives_run_dir_when_empty(tmp_path):
+def test_cleanup_keeps_run_dir_when_row_run_dir_empty(tmp_path):
+    """#1315: 过期行的 run_dir 为空 = 该行不拥有任何目录（从未记录，或已被
+    keep-only-latest 删除并清空列）。sweep 不得为这类行推导/删除任何目录；
+    残留目录由 keep-only-latest 按目录自身时间戳兜底。"""
     data_dir, db = _make_db(tmp_path)
     run_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a" / "tok-1"
     run_dir.mkdir(parents=True)
@@ -132,8 +136,40 @@ def test_cleanup_derives_run_dir_when_empty(tmp_path):
     cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
     logs, dirs = cleanup_old_logs(db, data_dir, cfg)
     assert logs == 1
-    assert dirs == 1
-    assert not run_dir.exists()
+    assert dirs == 0
+    assert run_dir.exists()
+
+
+def test_cleanup_empty_run_dir_row_never_deletes_current_run_dir(tmp_path):
+    """#1315 回归：过期空 run_dir 行与「当前活跃 worker 目录」共存时，sweep
+    不得误删活跃目录——fallback 推导出的 max-mtime token 目录属于更新的 run
+    （由更新行的 run_dir 与 retention 时间线管辖），不属于这条过期行。"""
+    data_dir, db = _make_db(tmp_path)
+    worker_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a" / "worker"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "events.jsonl").write_text("current run events")
+
+    old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
+    recent_finished = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    with db.connect() as conn:
+        _seed_workspace(conn)
+        _insert_job(conn, "job-1")
+        # 历史过期行：run_dir 已丢失（空）——#1315 的触发形态
+        _insert_node_run(conn, "job-1", "node-a", finished_at=old_finished)
+        # 当前 run 的归属行：run_dir 指向 worker 目录，远在 retention 线内
+        _insert_node_run(
+            conn,
+            "job-1",
+            "node-a",
+            run_dir=make_data_relative(worker_dir, data_dir),
+            finished_at=recent_finished,
+        )
+
+    cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
+    _logs, dirs = cleanup_old_logs(db, data_dir, cfg)
+
+    assert dirs == 0
+    assert (worker_dir / "events.jsonl").read_text() == "current run events"
 
 
 def test_cleanup_config_from_settings():
@@ -306,10 +342,13 @@ def test_cleanup_deletes_files_outside_db_transaction(tmp_path, monkeypatch):
 
     assert removed_paths, "expected filesystem deletions to be exercised"
     assert logs == 1
-    assert dirs == 2  # keep-latest sweep removes tok-old; retention deletes derived tok-new
+    # keep-latest removes tok-old and clears the row's run_dir; with the #1315
+    # fail-closed rule the retention pass must not derive a replacement target
+    # for the now-empty claim, so tok-new (owned by no expired row) survives.
+    assert dirs == 1
     assert not log_path.exists()
     assert not old_dir.exists()
-    assert not new_dir.exists()
+    assert new_dir.exists()
     with db._connect_read() as conn:
         row = conn.execute("select run_dir, session_dir from node_runs").fetchone()
     assert row["run_dir"] == ""
