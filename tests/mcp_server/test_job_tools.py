@@ -70,7 +70,7 @@ def _run_tool(server: FastMCP, name: str, args: dict) -> str:
 
 def test_registers_six_read_only_async_tools(monkeypatch) -> None:
     server = _build_server(monkeypatch, [])
-    tools = server._tool_manager._tools  # pinned mcp==1.29 internals
+    tools = server._tool_manager._tools  # pinned mcp==1.30 internals
     expected = {
         "get_job_context",
         "get_job_detail",
