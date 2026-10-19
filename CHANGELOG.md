@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- `make prod-down docker` / `make stack-host-down` / `make stack-down` 不停 profile 下的本地对象存储容器（issue #1105，#1099 follow-up）：host stack 的 down 此前不带 `--profile`，seaweedfs / rustfs 容器留存、stack 网络移除报 "Resource is still in use"。现三个入口经 Makefile `COMPOSE_HOST_DOWN_PROFILES` 无条件带上 `materials-local` 与 `materials-local-rustfs`（未启动的 profile 服务 down 为 no-op）；刻意不复用 up 侧的 `local-s3-decide.sh --compose-flags`——down 时判定输入（`deploy/.env`、`AGENT_LEGION_LOCAL_S3*`）可能已不同于 up 时，决策失败的退出码也会被命令替换吞掉，都会漏停实际在跑的容器。`tests/scripts/test_stack_down_profiles.py` 以 `make -n` 渲染全部 compose down 入口，并从 compose 文件自身推导 profile 全集断言无遗漏；部署文档 §3/§8 的手动停止临时说明删除。
+
 ## [0.8.0] - 2026-10-19
 
 主打 Studio 长会话与草稿协作、材料内容身份与 Worker 容量治理：长对话单行合并与历史分页、会话自动恢复、草稿代次 CAS 与发布单一权威；材料上传代次和 ETag 全链核验（Worker 协议 v6）；Worker 节点级并发上限与一批执行面/UI 稳定性修复。
