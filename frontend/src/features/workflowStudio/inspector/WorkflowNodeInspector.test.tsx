@@ -24,7 +24,7 @@ function wrapper({ children }: { children: ReactNode }) {
     createElement(
       ReactRouterMemoryRouter,
       // #593：start 契约编辑器渲染外部服务连接的管理员入口 Link。
-      { future: { v7_startTransition: true, v7_relativeSplatPath: true } },
+      {},
       children
     )
   )
