@@ -185,7 +185,8 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
                             resolved.base_url,
                             resolved.api_key,
                         )?
-                        .with_max_output_tokens(cli.max_output_tokens);
+                        .with_max_output_tokens(cli.max_output_tokens)
+                        .with_output_tokens_param(resolved.model.output_tokens_param);
                         run_real_provider(config, provider, cli.max_retries, &mut sink).await
                     }
                     models::ApiKind::AnthropicMessages => {

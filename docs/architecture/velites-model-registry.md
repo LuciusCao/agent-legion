@@ -20,6 +20,12 @@ velites 的单一事实源是 `~/.velites/models.json`（`VELITES_MODELS_PATH` �
       "apiKey": "$SQAI_API_KEY",
       "models": ["kimi-k2.6"]
     },
+    "openai": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "$OPENAI_API_KEY",
+      "models": [{"id": "o3-mini", "outputTokensParam": "max_completion_tokens"}]
+    },
     "anthropic": {
       "api": "anthropic-messages",
       "baseUrl": "https://api.anthropic.com",
@@ -34,6 +40,16 @@ velites 的单一事实源是 `~/.velites/models.json`（`VELITES_MODELS_PATH` �
   }
 }
 ```
+
+模型条目可写成裸 id 字符串，或带方言参数的对象（未知键一律拒绝）：
+
+- `maxOutputTokens` / `thinkingBudgets`：`anthropic-messages` 的单次输出上限默认值与
+  thinking 档位预算；
+- `outputTokensParam`（#1093，仅 `openai-completions`）：节点下发 `--max-output-tokens`
+  时上限写进请求体的哪个字段——`max_tokens`（缺省，Kimi / DeepSeek 等多数兼容服务）或
+  `max_completion_tokens`（OpenAI o-series 等推理模型，收到 `max_tokens` 会直接拒绝请求）。
+  未配置上限时两个字段都不发，与此前一致；在 `anthropic-messages` provider 上声明非缺省值
+  会让 registry 加载失败（该方言恒用 `max_tokens`，声明不会生效）。
 
 `apiKey` 可为 0600 文件中的字面值；推荐使用精确的 `$ENV` / `${ENV}` 引用。模型发现
 会解析凭据引用：引用缺失即探测失败，该 runtime 不广播任何模型，不会领取 Agent 任务。
@@ -109,7 +125,7 @@ Host，因此滚动发布必须先升级 Host、再升级 Worker；这避免旧 
 velites 保留 crate 内的 `Provider` trait，并实现：
 
 - `openai-completions`：OpenAI-compatible Chat Completions、SSE、tool calls、
-  `reasoning_effort`；
+  `reasoning_effort`，输出上限字段按模型 `outputTokensParam` 选择（#1093）；
 - `anthropic-messages`：Anthropic Messages API、`x-api-key` / `anthropic-version`、
   content blocks、streamed `input_json_delta`、tool use/result、cache usage、stop reason，
   以及 thinking level 到模型 `thinkingBudgets` 的映射。

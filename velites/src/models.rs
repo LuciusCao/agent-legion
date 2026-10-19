@@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context};
 use serde::{Deserialize, Serialize};
 
+mod output_tokens;
+pub use output_tokens::OutputTokensParam;
+
 pub const ENV_MODELS_PATH: &str = "VELITES_MODELS_PATH";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -50,6 +53,10 @@ pub struct ModelConfig {
     pub max_output_tokens: Option<u64>,
     #[serde(default)]
     pub thinking_budgets: BTreeMap<String, u64>,
+    /// Request-body field carrying the per-call output cap on the
+    /// `openai-completions` dialect (#1093). Absent → `max_tokens`.
+    #[serde(default)]
+    pub output_tokens_param: OutputTokensParam,
 }
 
 impl ModelEntry {
@@ -191,6 +198,18 @@ fn validate(file: &ModelsFile) -> anyhow::Result<()> {
                     model.id
                 ));
             }
+            // #1093: the field choice exists only on the OpenAI dialect;
+            // Anthropic Messages always sends `max_tokens`, so a non-default
+            // declaration there would be silently ignored — reject it.
+            if provider.api == ApiKind::AnthropicMessages
+                && model.output_tokens_param != OutputTokensParam::MaxTokens
+            {
+                return Err(anyhow!(
+                    "provider {name:?} model {:?}: outputTokensParam is only supported \
+                     for api \"openai-completions\"",
+                    model.id
+                ));
+            }
         }
     }
     Ok(())
@@ -215,6 +234,11 @@ fn resolve_api_key(value: &str) -> anyhow::Result<String> {
 fn default_anthropic_version() -> String {
     "2023-06-01".to_string()
 }
+
+// `outputTokensParam` registry tests live in the child module (split for the
+// file size budget, #1093); everything else stays inline.
+#[cfg(test)]
+mod output_tokens_param_tests;
 
 #[cfg(test)]
 mod tests {
