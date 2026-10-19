@@ -1,4 +1,4 @@
-"""Consistency tests for the Phase 1-5 reverse evidence matrix."""
+"""Consistency tests for the architecture reverse evidence matrix."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from scripts.quality.invariants import load_registry
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-MATRIX_PATH = PROJECT_ROOT / "docs" / "architecture" / "workspace-executor-evidence-matrix.md"
+MATRIX_PATH = PROJECT_ROOT / "docs" / "architecture" / "architecture-evidence-matrix.md"
 REGISTRY_PATH = PROJECT_ROOT / "config" / "architecture" / "architecture-invariants.yaml"
 
 REQUIRED_COLUMNS = [
