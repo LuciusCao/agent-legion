@@ -945,6 +945,7 @@
     "scripts/architecture/import_dependencies.py": 267,
     "scripts/architecture/import_guards.py": 112,
     "scripts/architecture/main.py": 20,
+    "scripts/architecture/make_values.py": 46,
     "scripts/architecture/repository.py": 173,
     "scripts/architecture/route_contracts.py": 185,
     "scripts/architecture/route_mutations.py": 127,

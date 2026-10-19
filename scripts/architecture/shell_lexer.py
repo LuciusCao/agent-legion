@@ -14,8 +14,10 @@ This module tracks just enough lexical state to tell those apart — unquoted
 word-start ``#`` comments and heredocs (quoted delimiter → literal body,
 unquoted → expanding body with ``\\$`` escapes). It is deliberately not a
 parser: ``$(…)`` opens its own unquoted frame and ``$((…))`` / ``((…))``
-an arithmetic one (no comments or single quotes, ``<<`` is a shift; a
-``)`` not doubled means bash reparses it as subshells — fail closed), while backticks and
+an arithmetic one (no comments or single quotes, ``<<`` is a shift, ``((``
+is just grouping; a ``)`` not doubled means bash reparses it as subshells —
+fail closed); anywhere else ``<<WORD`` is a heredoc, even with an all-digit
+WORD (#1096). Backticks and
 ``${…}`` contents are lexed in the enclosing context, which errs towards
 reporting (every one of those contexts expands). ``$$`` is the PID parameter, never a ``$NAME`` prefix.
 
@@ -203,7 +205,12 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
             stack.append(("single", 0, lineno))
         elif byte == ord('"'):
             stack.append(("double", 0, lineno))
-        elif byte == ord("(") and previous_word_start and content.startswith(b"((", i):
+        elif (
+            byte == ord("(")
+            and previous_word_start
+            and state != "arith"  # ``$(( ((1+2)*3) ))``: grouping parens, #1096
+            and content.startswith(b"((", i)
+        ):
             stack.append(("arith", 0, lineno))  # ``(( … ))`` arithmetic command
             i += 2
             continue
@@ -227,9 +234,11 @@ def expanding_dollars(content: bytes, first_lineno: int = 1) -> Iterator[tuple[i
             word_start = True
             continue
         elif content.startswith(b"<<", i) and state != "arith":  # arithmetic shift
+            # Outside an arithmetic frame bash always reads ``<<WORD`` as a
+            # heredoc, digits included (``cat <<123``; even ``let x<<2`` —
+            # an unterminated body then fails closed, #1096).
             delimiter, quoted, strip_tabs, i = _read_heredoc_delimiter(content, i + 2)
-            # ``let x<<2``-style digit operands outside a tracked ``((…))``.
-            if delimiter and not delimiter.isdigit():
+            if delimiter:
                 pending.append((delimiter, quoted, strip_tabs))
             continue
         i += 1
