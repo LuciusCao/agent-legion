@@ -48,11 +48,12 @@ class WorkflowNodeExecution:
     # platform envelope itself is never coverable in either mode; empty
     # string = append (the YAML default, kept unpersisted like ``prompt``).
     prompt_mode: str = ""
-    # Self-contained agent execution profile (#933, #440 P2, D5): an
-    # ``agent`` node declaring a runtime (one of ``AGENT_RUNTIMES``; the
+    # Self-contained agent execution profile (#933, EXEC-AGENT-PROFILE-001):
+    # an ``agent`` node declaring a runtime (one of ``AGENT_RUNTIMES``; the
     # workflow top-level ``execution.runtime`` is the default) dispatches
-    # from its own profile instead of a published Agent definition. Empty =
-    # legacy path (capability → the one published Agent). Manifest builders
+    # from its own profile; publish requires it since #935 (#440 P3). Empty
+    # = legacy path (capability → the one published Agent), reachable only
+    # from pre-v93 snapshots / un-inlined active nodes. Manifest builders
     # drop the empty key (``node_execution_payload``) so legacy manifests
     # stay byte-identical.
     runtime: str = ""
