@@ -228,16 +228,18 @@ mixed-fleet compatibility and upgrade order.
   absent in both directions and are not breaking.
 
   Compatibility matrix by release (rows: Host release and its protocol;
-  columns: Worker release; every `worker-v*` tag declares protocol v4 or v5):
+  columns: Worker release; `worker-v*` tags declare protocol v4, v5 or v6 —
+  worker-v0.8.0 is the first v6):
 
-  | Host \ Worker | worker-v0.6.0 – v0.6.1 (v4) | worker-v0.7.0 (v5) | worker-v0.7.4 – v0.7.13 (v5) | worker-v0.7.14 – v0.7.18 (v5) | worker-v0.7.19 and later (v5) |
-  | --- | --- | --- | --- | --- | --- |
-  | **v0.4.0-alpha and earlier** (≤ v3) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
-  | **v0.5.0 – v0.6.0** (v4) | works (gzip artifacts, per-execution heartbeats) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
-  | **v0.7.0 – v0.7.11** (v5, single-object claims still served) | works (per-execution heartbeats) | works | works (batch claims from Host v0.7.4; per-claim fallback before); worker-v0.7.12+ configured above 1024 concurrency is rejected at registration (#657) | degraded (#748 / #755 row above); above 1024 concurrency rejected (#657) | **broken** (#843 row above: no v1 `X-Agent-Result` JSON → 400 → drop → lease-expiry re-run); upgrade the Host first |
-  | **v0.7.12 – v0.7.13** (v5) | **broken** (#547) | **broken** (#547) | works | degraded (#748 / #755 row above) | **broken** (#843 row above: 400 → drop → re-run) |
-  | **v0.7.14 – v0.7.18** (v5) | **broken** (#547) | **broken** (#547) | works | works | **broken** (#843 row above: 400 → drop → re-run) |
-  | **v0.7.19 and later** (v5, current) | **broken** (#547) | **broken** (#547) | works | works (v1 header shape; the #843 dual-shape read) | works (result metadata v2) |
+  | Host \ Worker | worker-v0.6.0 – v0.6.1 (v4) | worker-v0.7.0 (v5) | worker-v0.7.4 – v0.7.13 (v5) | worker-v0.7.14 – v0.7.18 (v5) | worker-v0.7.19 (v5) | worker-v0.8.0 (v6) |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | **v0.4.0-alpha and earlier** (≤ v3) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
+  | **v0.5.0 – v0.6.0** (v4) | works (gzip artifacts, per-execution heartbeats) | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 | registration refused, exit 2 |
+  | **v0.7.0 – v0.7.11** (v5, single-object claims still served) | works (per-execution heartbeats) | works | works (batch claims from Host v0.7.4; per-claim fallback before); worker-v0.7.12+ configured above 1024 concurrency is rejected at registration (#657) | degraded (#748 / #755 row above); above 1024 concurrency rejected (#657) | **broken** (#843 row above: no v1 `X-Agent-Result` JSON → 400 → drop → lease-expiry re-run); upgrade the Host first | registration refused, exit 2 (host_protocol_version v5 < v6) |
+  | **v0.7.12 – v0.7.13** (v5) | **broken** (#547) | **broken** (#547) | works | degraded (#748 / #755 row above) | **broken** (#843 row above: 400 → drop → re-run) | registration refused, exit 2 (host_protocol_version v5 < v6) |
+  | **v0.7.14 – v0.7.18** (v5) | **broken** (#547) | **broken** (#547) | works | works | **broken** (#843 row above: 400 → drop → re-run) | registration refused, exit 2 (host_protocol_version v5 < v6) |
+  | **v0.7.19** (v5) | **broken** (#547) | **broken** (#547) | works | works (v1 header shape; the #843 dual-shape read) | works (result metadata v2) | registration refused, exit 2 (host_protocol_version v5 < v6) |
+  | **v0.8.0 and later** (v6, current) | **broken** (#547) | **broken** (#547) | works; material-etag-gated jobs stay queued for pre-v6 Workers | works (v1 header shape; the #843 dual-shape read); material-etag-gated jobs stay queued for pre-v6 Workers | works (result metadata v2); material-etag-gated jobs stay queued for pre-v6 Workers | works (material ETag consumption-side verification) |
 
   **Minimum supported Worker for a current Host (v0.7.12 and later):
   worker-v0.7.4.** The recommended pairing is the Worker release of the
@@ -248,7 +250,15 @@ mixed-fleet compatibility and upgrade order.
   #547 claim break; source older than v0.5.0 (protocol ≤ v3) is likewise
   unsupported. `min_protocol_version` cannot express this floor —
   worker-v0.7.0 already declares v5 — so enforce it by upgrading Workers,
-  not by raising the setting. The v5 Worker's per-execution heartbeat
+  not by raising the setting. **The worker-v0.7.4 floor is the general
+  floor; the v6 material gate sits above it.** On a v0.8.0+ Host a pre-v6
+  Worker still claims everything EXCEPT material jobs whose inputs include
+  a row with `object_etag <> ''` and no `content_hash`: claim admission
+  skips those candidates for pre-v6 Workers and such a job stays queued
+  (never failed) until a worker-v0.8.0 exists that can claim it; hash-locked
+  rows and `etag=''` rows are not gated. Upgrading any capable Worker to
+  worker-v0.8.0 drains the queue automatically — no manual drain, and
+  `min_protocol_version` does not need raising for this. The v5 Worker's per-execution heartbeat
   fallback (it degrades for good when the batch route answers 404/405,
   with a 5s per-beat timeout; transient errors do not trigger it) is not a
   mixed-fleet mode: it only covers a Host rolled back underneath an
