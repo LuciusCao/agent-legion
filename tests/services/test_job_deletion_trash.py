@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import server.app.services.job_deletion_log_paths as log_paths_module
+import server.app.services.job_deletion_staging as staging_module
 import server.app.services.job_deletion_trash as trash_module
 from server.app.services.job_deletion_trash import (
     COMMITTED_MARKER,
@@ -220,7 +221,7 @@ def test_purge_derives_log_paths_outside_lock_and_never_lists_log_dir(tmp_path: 
     derived_in_lock: list[bool] = []
     listed: list[Path] = []
     real_derive = trash_module.deleted_job_log_paths
-    real_scandir = trash_module.os.scandir
+    real_scandir = staging_module.os.scandir
 
     def _spy_derive(*args: Any) -> list[Path]:
         derived_in_lock.append(job_db.in_lock)
@@ -234,7 +235,7 @@ def test_purge_derives_log_paths_outside_lock_and_never_lists_log_dir(tmp_path: 
 
     with (
         patch.object(trash_module, "deleted_job_log_paths", _spy_derive),
-        patch.object(trash_module.os, "scandir", _spy_scandir),
+        patch.object(staging_module.os, "scandir", _spy_scandir),
     ):
         recreated = purge_deleted_job_files(
             job_db,
@@ -393,6 +394,91 @@ def test_run_log_row_outside_log_dir_is_not_mapped_to_log_dir(tmp_path: Path) ->
 
 def _purge_with(settings: Settings, run_logs: list[tuple[str, str]]) -> bool:
     return purge_deleted_job_files(_UnlockedJobDB(), {"id": _JOB}, settings, "op-1", run_logs)
+
+
+def test_purge_removes_legacy_nested_logs_of_slash_node_key(tmp_path: Path) -> None:
+    """#1113 codex P1：升级前 node_key 允许 ``/``（loader 只要求非空），旧写入器
+    按扁平名规则写出嵌套路径 ``logs/jobs/<job_id>-a/b.log``（node_key ``a/b``）。
+    删除候选若只收 ``logs/jobs`` 直属层，此文件在 node_runs 级联删除后永久残留
+    （retention 也无从发现）。归属判定：解析后的完整路径仍在日志根内、且逐字等于
+    该行 key 的完整旧命名——满足即沿其相对层级清理，并回收腾空的嵌套父目录。"""
+    settings = _settings(tmp_path)
+    log_dir = settings.logs_dir / "jobs"
+    nested = log_dir / legacy_job_node_log_name(_JOB, "a/b")
+    nested.parent.mkdir(parents=True)
+    nested.write_text("nested", encoding="utf-8")
+    shard = log_dir / legacy_job_node_log_name(_JOB, "a/b", 2)
+    shard.write_text("shard", encoding="utf-8")
+
+    recreated = _purge_with(
+        settings,
+        [
+            ("a/b", f"logs/jobs/{legacy_job_node_log_name(_JOB, 'a/b')}"),
+            ("a/b", f"logs/jobs/{legacy_job_node_log_name(_JOB, 'a/b', 2)}"),
+        ],
+    )
+
+    assert recreated is False
+    assert not nested.exists()
+    assert not shard.exists()
+    # 嵌套父目录腾空后一并回收，不留 ``<job_id>-a/`` 空壳。
+    assert not (log_dir / f"{_JOB}-a").exists()
+
+
+def test_purge_stages_nested_logs_sharing_a_basename(tmp_path: Path) -> None:
+    """两个含斜杠 key（``a/b`` 与 ``c/b``）的旧嵌套日志 basename 相同：trash 里
+    按相对层级分放，不互相覆盖，两个都清掉。"""
+    settings = _settings(tmp_path)
+    log_dir = settings.logs_dir / "jobs"
+    first = log_dir / legacy_job_node_log_name(_JOB, "a/b")
+    second = log_dir / legacy_job_node_log_name(_JOB, "c/b")
+    assert first.name == second.name  # 测试前提：basename 碰撞
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+
+    assert (
+        _purge_with(
+            settings,
+            [
+                ("a/b", f"logs/jobs/{legacy_job_node_log_name(_JOB, 'a/b')}"),
+                ("c/b", f"logs/jobs/{legacy_job_node_log_name(_JOB, 'c/b')}"),
+            ],
+        )
+        is False
+    )
+
+    assert not first.exists()
+    assert not second.exists()
+
+
+def test_purge_rejects_run_log_that_resolves_outside_log_root(tmp_path: Path) -> None:
+    """``..`` 逃逸守卫：历史 log_path 归一化后越出 ``logs/jobs``（即便仍在 data
+    根内）一律不删。"""
+    settings = _settings(tmp_path)
+    (settings.logs_dir / "jobs").mkdir(parents=True)
+    resident = settings.logs_dir / "sibling.log"
+    resident.write_text("sibling", encoding="utf-8")
+
+    assert _purge_with(settings, [("n", "logs/jobs/../sibling.log")]) is False
+
+    assert resident.read_text(encoding="utf-8") == "sibling"
+
+
+def test_purge_rejects_dotdot_node_key_whose_legacy_name_normalizes_away(tmp_path: Path) -> None:
+    """完整旧命名守卫：node_key 带 ``..`` 分量时旧命名 ``<job>-a/../x.log`` 归一化
+    后落在日志根内的 ``x.log``，与该行 key 的旧命名不再逐字相等——拒绝清理
+    （归一化落点可能是兄弟 job 或无关文件）。"""
+    settings = _settings(tmp_path)
+    log_dir = settings.logs_dir / "jobs"
+    log_dir.mkdir(parents=True)
+    resident = log_dir / "x.log"
+    resident.write_text("not ours", encoding="utf-8")
+
+    assert _purge_with(settings, [("a/../x", f"logs/jobs/{_JOB}-a/../x.log")]) is False
+
+    assert resident.read_text(encoding="utf-8") == "not ours"
 
 
 _LONG_KEY = "k" * 260  # 文件名超 NAME_MAX（255）：stat 抛 ENAMETOOLONG

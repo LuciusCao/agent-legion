@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 import server.app.services.job_deletion as job_deletion_module
+import server.app.services.job_deletion_staging as staging_module
 import server.app.services.job_deletion_trash as trash_module
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
@@ -394,14 +395,14 @@ def test_delete_moves_files_only_after_commit(
     job = _create_job(job_db, "ws-order", "Q010", status="completed")
     storage_dir, log_path = _seed_job_files(settings, job)
 
-    real_rename = trash_module.os.rename
+    real_rename = staging_module.os.rename
     row_visible_at_move: list[bool] = []
 
     def _observing_move(src: Any, dst: Any) -> Any:
         row_visible_at_move.append(job_db.get_job(job["id"]) is not None)
         return real_rename(src, dst)
 
-    monkeypatch.setattr(trash_module.os, "rename", _observing_move)
+    monkeypatch.setattr(staging_module.os, "rename", _observing_move)
 
     result = service.delete(job["workspace_id"], job["id"])
 
@@ -428,7 +429,7 @@ def test_delete_succeeds_when_staging_into_trash_fails(
         # 跨文件系统：锁下不退化为拷贝，直接放弃留残留。
         raise OSError(errno.EXDEV, "Invalid cross-device link")
 
-    monkeypatch.setattr(trash_module.os, "rename", _move_fails)
+    monkeypatch.setattr(staging_module.os, "rename", _move_fails)
 
     result = service.delete(job["workspace_id"], job["id"])
 
@@ -454,7 +455,7 @@ def test_delete_succeeds_when_purging_staged_files_fails(
     def _rmtree_fails(path: Any, *args: Any, **kwargs: Any) -> None:
         raise OSError("busy")
 
-    monkeypatch.setattr(trash_module.shutil, "rmtree", _rmtree_fails)
+    monkeypatch.setattr(staging_module.shutil, "rmtree", _rmtree_fails)
 
     result = service.delete(job["workspace_id"], job["id"])
 
