@@ -14,8 +14,9 @@ shape used to give for free:
   progress, and a resubmission resuming the remainder — while a between-
   chunks material delete fails the next chunk's FOR KEY SHARE probe instead
   of letting a dangling reference in (review P1-1/P2-1);
-- normalize collision across chunks: ``a/b`` vs ``a_w`` (same job id) is
-  rejected over the WHOLE candidate set before the first chunk commits;
+- escaped-source pairs across chunks (#1255): ``a/b`` vs ``a_w`` used to
+  normalize to the same job id; the injective encoding makes them two
+  distinct legal jobs that land whole even across the chunk boundary;
 - dedup point lookups: filter_existing_dedup_keys returns exactly the
   workspace-scoped subset, regardless of how many other keys exist.
 
@@ -32,6 +33,7 @@ import time
 import pytest
 
 from server.app.db.connection import connect_database
+from server.app.jobs.job_id_encoding import encode_job_id
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.run_partial_failure import PartialRunCreationError
 from server.app.services.run_service import RunService
@@ -311,10 +313,10 @@ def test_between_chunks_material_delete_fails_next_chunk_probe(service, job_db) 
     assert int(dangling["n"]) == 0
 
 
-def test_intra_run_normalize_collision_detected_across_chunks(service, job_db) -> None:
-    """normalize 冲突跨块检测：两个归一到同一 job id 的 source_id（``a/b``
-    vs ``a_w``）无论落在候选集的哪个位置，都必须在首个 chunk 提交前被
-    拒绝——冲突检测覆盖整个候选集（Python dict 期），不是逐块独立。"""
+def test_intra_run_escaped_pair_creates_distinct_jobs_across_chunks(service, job_db) -> None:
+    """#1255 新契约：``col/a`` 与 ``col_a`` 不再归一到同一 job id——转义
+    编码下它们是两个不同的合法 job，即使同批提交且落在不同 chunk（候选
+    1202 个，跨过 1000 的 chunk 边界）也全部落库。"""
     _insert_materials(job_db, 1200)
     _insert_materials(job_db, 2, prefix="col")
     with job_db.connect() as conn:
@@ -331,20 +333,18 @@ def test_intra_run_normalize_collision_detected_across_chunks(service, job_db) -
         _material_item("col/a"),
         _material_item("col_a"),
     ]
+    result = service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=items)
 
-    with pytest.raises(InvalidOperationError, match="Job identity collision"):
-        service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=items)
-
-    # 整个请求零写入：run 行与 jobs 都不存在。
+    assert result["created_count"] == 1202
+    id_slash = encode_job_id(WORKSPACE_ID, WORKFLOW_KEY, "col/a")
+    id_underscore = encode_job_id(WORKSPACE_ID, WORKFLOW_KEY, "col_a")
+    assert id_slash != id_underscore
+    assert {id_slash, id_underscore} <= set(result["job_ids"])
     with job_db.connect() as conn:
-        runs = conn.execute(
-            "select count(*) as n from runs where workspace_id=%s", (WORKSPACE_ID,)
-        ).fetchone()
         jobs = conn.execute(
             "select count(*) as n from jobs where workspace_id=%s", (WORKSPACE_ID,)
         ).fetchone()
-    assert int(runs["n"]) == 0
-    assert int(jobs["n"]) == 0
+    assert int(jobs["n"]) == 1202
 
 
 def test_filter_existing_dedup_keys_point_lookup_semantics(service, job_db) -> None:
@@ -403,25 +403,27 @@ def test_identity_collision_error_carries_structured_fields(service, job_db) -> 
     """#501（PR #497 review）：撞 id 的身份校验错误携带结构化字段。
 
     预置一个同 job_id 但不同 source_type 的遗留行（跨路径撞 id 的经典
-    形态），提交 material 项 → 400 InvalidOperationError，其 __cause__
+    形态——#1255 起 id 是对 (workspace, workflow, source_id) 的单射转义
+    编码，不含 entity_type，所以同 source_id 不同类型的碰撞依然存在），
+    提交 material 项 → 400 InvalidOperationError，其 __cause__
     ValueError 带 job_id / existing_source_type / existing_source_id /
     submitted_source_type / submitted_source_id——裸消息只说 collision，
     排障看不到是哪对身份撞了。"""
     _insert_materials(job_db, 1)
-    # job id 由 _job_id(workspace, workflow, source_id) 派生：material 项
-    # 的 source_id 与预置行的 source_id 相同、source_type 不同。
+    # job id 由 encode_job_id(workspace, workflow, source_id) 派生：material
+    # 项的 source_id 与预置行的 source_id 相同、source_type 不同。
     with job_db.connect() as conn:
         conn.execute(
             "insert into jobs(id, workspace_id, source_type, source_id, run_id)"
             " values (%s, %s, 'question', 'mat-0', 'legacy-run')",
-            (f"{WORKSPACE_ID}_{WORKFLOW_KEY}_mat-0", WORKSPACE_ID),
+            (encode_job_id(WORKSPACE_ID, WORKFLOW_KEY, "mat-0"), WORKSPACE_ID),
         )
 
     with pytest.raises(InvalidOperationError, match="Job identity collision") as caught:
         service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_material_item("mat-0")])
     cause = caught.value.__cause__
     assert isinstance(cause, ValueError)
-    assert cause.job_id == f"{WORKSPACE_ID}_{WORKFLOW_KEY}_mat-0"  # type: ignore[attr-defined]
+    assert cause.job_id == encode_job_id(WORKSPACE_ID, WORKFLOW_KEY, "mat-0")  # type: ignore[attr-defined]
     assert cause.existing_source_type == "question"  # type: ignore[attr-defined]
     assert cause.existing_source_id == "mat-0"  # type: ignore[attr-defined]
     assert cause.submitted_source_type == "material"  # type: ignore[attr-defined]

@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from server.app.jobs.job_id_encoding import encode_job_id
 from server.app.jobs.queries.job_bulk_sql import id_chunks
 from server.app.jobs.queries.job_list_columns import JOB_LIST_COLUMNS
 from server.app.jobs.queries.job_locked_rereads import JobLockedRereadQueriesMixin
@@ -11,11 +12,6 @@ from server.app.jobs.queries.job_node_runs import JobNodeRunQueriesMixin
 from server.app.jobs.queries.job_shard_reads import JobShardReadQueriesMixin
 from server.app.jobs.storage_layout import job_storage_dir
 from server.app.storage_paths import make_data_relative
-
-
-def _job_id(workspace_id: str, workflow_key: str, source_id: str) -> str:
-    safe_source_id = source_id.strip().replace("/", "_")
-    return f"{workspace_id}_{workflow_key}_{safe_source_id}"
 
 
 class JobNodeQueriesMixin(
@@ -38,7 +34,7 @@ class JobNodeQueriesMixin(
         workflow_definition_hash: str = "",
         workflow_definition_snapshot_json: str = "",
     ) -> dict[str, Any]:
-        job_id = _job_id(workspace_id, workflow_key, source_id)
+        job_id = encode_job_id(workspace_id, workflow_key, source_id)
         storage_dir = job_storage_dir(self.jobs_dir, workspace_id, job_id)
         storage_dir.mkdir(parents=True, exist_ok=True)
 
