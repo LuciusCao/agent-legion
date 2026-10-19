@@ -29,6 +29,7 @@ from server.app.services.material_ttl import (
 from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
 from shared.material_cache import MaterializeError
+from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -187,7 +188,13 @@ def test_expired_material_rejected_at_claim_resolution(
     job = {"input_json": {"type": "material", "material_id": material_id}}
 
     with pytest.raises(MaterializeError, match="not ready"):
-        material_claim_block(TEST_DATABASE_URL, WORKSPACE_ID, job, storage=storage)
+        material_claim_block(
+            TEST_DATABASE_URL,
+            WORKSPACE_ID,
+            job,
+            storage=storage,
+            worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
+        )
 
 
 def test_expired_material_revived_by_same_hash_presign(

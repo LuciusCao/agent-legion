@@ -218,7 +218,7 @@ def material_claim_block(
     *,
     storage: ObjectStorage | None = None,
     download_expires_seconds: int = 3600,
-    worker_protocol_version: int | None = None,
+    worker_protocol_version: int,
 ) -> dict[str, Any] | None:
     """The Worker-facing material descriptor for the claim response.
 
@@ -238,6 +238,7 @@ def material_claim_block(
             job,
             storage=storage,
             download_expires_seconds=download_expires_seconds,
+            worker_protocol_version=worker_protocol_version,
         )
     if input_doc.get("type") != "material":
         return None
@@ -266,7 +267,5 @@ def material_claim_block(
         # TOCTOU；见 material_identity.assert_worker_etag_protocol）。
         "object_etag": str(row.get("object_etag") or ""),
         "upload_generation": int(row["upload_generation"]),
-        "download_url": storage.presign_get(
-            str(row["storage_key"]), expires_seconds=download_expires_seconds
-        ),
+        "download_url": storage.presign_get(str(row["storage_key"]), download_expires_seconds),
     }

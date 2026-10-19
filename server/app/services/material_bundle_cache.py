@@ -194,7 +194,7 @@ def bundle_claim_block(
     *,
     storage: ObjectStorage | None = None,
     download_expires_seconds: int = 3600,
-    worker_protocol_version: int | None = None,
+    worker_protocol_version: int,
 ) -> dict[str, Any] | None:
     """The Worker-facing bundle descriptor: one presigned GET per member."""
     input_doc = input_document(job)

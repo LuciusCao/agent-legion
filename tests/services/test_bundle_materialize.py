@@ -18,6 +18,7 @@ from server.app.services.material_bundles import MaterialBundlesService
 from server.app.services.material_cache import material_runtime_block
 from shared.material_bundle import bundle_address
 from shared.material_cache import MaterializeError
+from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
 from tests.fakes.storage import FakeObjectStorage
 
 WORKSPACE_ID = "ws-bundle-cache"
@@ -260,9 +261,61 @@ def test_bundle_response_snapshot_gate_catches_failed_retry_toctou(job_db, stora
     assert block is not None and block["entries"][0]["object_etag"]
 
 
+def test_production_wrapper_bundle_toctou_gate(job_db, storage) -> None:
+    """#1279 codex final r2：bundle 生产转发层 `material_claim_block` 把
+    worker_protocol_version 继续传给 bundle_claim_block——版本漏传即被
+    None 旁路，本测试钉住该接线（mutation：摘 wrapper 透传 → 本测试红）。"""
+    from server.app.services.material_cache import material_claim_block
+    from server.app.services.materials import MaterialsService
+    from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
+
+    payload = b"wrapper-toctou"
+    service = MaterialsService(job_db.dsn_identity, storage)
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'ToctouW') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+    result = service.presign(WORKSPACE_ID, filename="w.txt", size_bytes=len(payload))
+    material_id = result["material"]["id"]
+    (key0, _) = storage.presigned[0]
+    storage.objects[key0] = payload
+    service.complete(WORKSPACE_ID, material_id)
+    bundle = MaterialBundlesService(job_db.dsn_identity).create(
+        WORKSPACE_ID, name="folder", members=[{"material_id": material_id, "path": "w.txt"}]
+    )
+    job = _job(bundle["id"])
+
+    outcome = service.request_material_reupload(WORKSPACE_ID, material_id)
+    storage.objects[str(outcome["storage_key"])] = payload
+    service.complete(WORKSPACE_ID, material_id, expected_upload_generation=1)
+
+    with pytest.raises(MaterializeError, match="protocol v6"):
+        material_claim_block(
+            job_db.dsn_identity,
+            WORKSPACE_ID,
+            job,
+            storage=storage,
+            worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION - 1,
+        )
+    block = material_claim_block(
+        job_db.dsn_identity,
+        WORKSPACE_ID,
+        job,
+        storage=storage,
+        worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
+    )
+    assert block is not None and block["kind"] == "bundle"
+    assert block["entries"][0]["object_etag"]
+
+
 def test_claim_block_presigns_each_member_without_storage_key(job_db, bundle, storage) -> None:
     block = bundle_claim_block(
-        job_db.dsn_identity, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+        job_db.dsn_identity,
+        WORKSPACE_ID,
+        _job(bundle["id"]),
+        storage=storage,
+        worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
     )
 
     assert block is not None
@@ -341,7 +394,11 @@ def test_claim_block_carries_member_object_etag(job_db, bundle, storage) -> None
         conn.execute("update materials set object_etag='etag-a' where id='mat-a'")
 
     block = bundle_claim_block(
-        job_db.dsn_identity, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+        job_db.dsn_identity,
+        WORKSPACE_ID,
+        _job(bundle["id"]),
+        storage=storage,
+        worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
     )
 
     assert block is not None

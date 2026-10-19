@@ -14,6 +14,7 @@ from server.app.services.material_cache import (
     material_runtime_block,
 )
 from shared.material_cache import MaterializeError
+from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
 from tests.fakes.storage import FakeObjectStorage
 
 WORKSPACE_ID = "ws-mat-cache"
@@ -149,6 +150,7 @@ def test_claim_block_carries_presigned_url_without_storage_key(job_db, material,
         WORKSPACE_ID,
         _job({"type": "material", "material_id": material}),
         storage=storage,
+        worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
     )
 
     assert block is not None
@@ -165,6 +167,7 @@ def test_claim_block_carries_presigned_url_without_storage_key(job_db, material,
             WORKSPACE_ID,
             _job({"type": "ref", "external_id": "q-1"}),
             storage=storage,
+            worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
         )
         is None
     )
@@ -237,7 +240,13 @@ def test_legacy_unbound_hashless_row_is_size_only(job_db, storage, tmp_path: Pat
     )
     assert block is not None and Path(block["path"]).read_bytes() == payload
 
-    descriptor = material_claim_block(job_db.dsn_identity, WORKSPACE_ID, job, storage=storage)
+    descriptor = material_claim_block(
+        job_db.dsn_identity,
+        WORKSPACE_ID,
+        job,
+        storage=storage,
+        worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
+    )
     assert descriptor is not None
     assert descriptor["object_etag"] == ""
 
@@ -397,6 +406,7 @@ def test_claim_block_carries_object_etag(job_db, material, storage) -> None:
         WORKSPACE_ID,
         _job({"type": "material", "material_id": material}),
         storage=storage,
+        worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
     )
 
     assert block is not None
