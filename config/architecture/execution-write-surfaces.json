@@ -206,7 +206,7 @@
     },
     "server/app/services/cleanup_sweep.py": {
       "via": [],
-      "note": "历史 run_dir 簿记清理（只清 run_dir/session_dir 列，非状态翻转）；#1315 共享认领守卫：过期行的 run_dir 仍被其他行认领时只 CAS 缴清本行陈旧认领、绝不删目录（经 JobQueries.release_stale_run_dir_claims 批flush）"
+      "note": "历史 run_dir 簿记清理（只清 run_dir/session_dir 列，非状态翻转）；#1315 共享认领守卫：过期行的 run_dir 被 (finished_at,id) 序更新的行认领时只 CAS 缴清本行陈旧认领、绝不删目录，最新认领者过期即正常删除（经 JobQueries.release_stale_run_dir_claims 批 flush）"
     },
     "server/app/services/quality_replay_setup.py": {
       "via": [],

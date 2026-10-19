@@ -144,12 +144,13 @@ def _remove_row_artifacts(
         # apply), deleting fresh evidence for a stale row. Leftover dirs of
         # such rows are bounded and reclaimed by cleanup_extra_runs_per_node.
         return 0
-    if db.has_other_run_dir_claimant(run_dir_str, row["id"]):
-        # #1315 共享认领守卫：另一行也认领该目录（部署前 finish 不转移所有权
-        # 留下的存量：worker 固定 token 目录被历次 run 共享）。本行不是所有者，
-        # 删除会灭失认领者的证据——只把本行的陈旧认领排进批缴清（游标升序
-        # 处理，最终仅剩最新 finish 行持有认领），绝不删除；目录等唯一认领行
-        # 自己过期时才删。
+    if db.has_newer_run_dir_claimant(run_dir_str, finished, row["id"]):
+        # #1315 共享认领守卫：按 sweep 同一 (finished_at, id) 升序存在更新的
+        # 认领者（部署前 finish 不转移所有权留下的存量：worker 固定 token
+        # 目录被历次 run 共享）。本行不是所有者，删除会灭失认领者的证据——
+        # 只把本行的陈旧认领排进批缴清（较新者恒未被缴清，判据对同 chunk
+        # flush 滞后免疫），绝不删除；最新认领者无更新认领者，过期即正常
+        # 删除。
         pending_claim_strips.append((row["id"], run_dir_str))
         return 0
     try:

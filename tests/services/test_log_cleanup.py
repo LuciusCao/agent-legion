@@ -211,6 +211,46 @@ def test_cleanup_shared_run_dir_claim_strips_stale_claim_without_deleting(tmp_pa
     assert not worker_dir.exists()
 
 
+def test_cleanup_same_chunk_expired_shared_claims_still_delete_dir(tmp_path):
+    """#1315 r2 P2-1：同 chunk 两条过期共享认领行（40d / 39d，批缴清尚未
+    flush）——守卫判据必须是「存在更新认领者」：c1 缴清（c2 更新），c2 是
+    最新认领者=指定所有者、无更新认领者 → 正常删除目录。「任一其他认领者」
+    判据会把 c2 一并缴清：游标越过、行永不重访，目录永久泄漏。"""
+    data_dir, db = _make_db(tmp_path)
+    worker_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a" / "worker"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "events.jsonl").write_text("expired run events")
+    worker_rel = make_data_relative(worker_dir, data_dir)
+
+    with db.connect() as conn:
+        _seed_workspace(conn)
+        _insert_job(conn, "job-1")
+        _insert_node_run(
+            conn,
+            "job-1",
+            "node-a",
+            run_dir=worker_rel,
+            finished_at=(datetime.now(UTC) - timedelta(days=40)).isoformat(),
+        )
+        _insert_node_run(
+            conn,
+            "job-1",
+            "node-a",
+            run_dir=worker_rel,
+            finished_at=(datetime.now(UTC) - timedelta(days=39)).isoformat(),
+        )
+
+    cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
+    _logs, dirs = cleanup_old_logs(db, data_dir, cfg)
+
+    assert dirs == 1
+    assert not worker_dir.exists()
+    with db._connect_read() as conn:
+        rows = conn.execute("select run_dir from node_runs order by finished_at").fetchall()
+    # c1 的认领被缴清；c2（最新认领者）执行了删除，保留其已失效的认领值。
+    assert [row["run_dir"] for row in rows] == ["", worker_rel]
+
+
 def test_cleanup_config_from_settings():
     cfg = CleanupConfig.from_settings(
         {"cleanup": {"log_retention_days": "7", "run_dir_retention_days": 14}}

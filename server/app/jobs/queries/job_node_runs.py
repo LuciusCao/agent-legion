@@ -9,6 +9,7 @@ the workspace listing past that module's budget — the run-record family
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
 from server.app.jobs.queries.job_node_lifecycle import JobNodeLifecycleQueriesMixin
@@ -117,12 +118,21 @@ class JobNodeRunQueriesMixin(JobNodeLifecycleQueriesMixin):
             definition = definition_from_job_snapshot(dict(job)) if job is not None else None
             self._sync_job_status_after_node_run(conn, run, status, definition)
 
-    def has_other_run_dir_claimant(self, run_dir: str, node_run_id: int) -> bool:
-        """#1315：是否有其他行认领同一 run_dir（共享固定 token 目录的存量形态）。"""
+    def has_newer_run_dir_claimant(
+        self, run_dir: str, finished_at: datetime, node_run_id: int
+    ) -> bool:
+        """#1315：按 sweep 的 (finished_at, id) 升序，是否有更新的行认领同一
+        run_dir。较新者恒未被缴清，判据对同 chunk 批缴清的 flush 滞后免疫：
+        最新认领者 = 指定所有者（无更新认领者 → 过期即删），其余逐行缴清。"""
         with self._connect_read() as conn:
             row = conn.execute(
-                "select 1 from node_runs where run_dir = %s and id <> %s limit 1",
-                (run_dir, node_run_id),
+                """
+                select 1 from node_runs
+                where run_dir = %s
+                  and (finished_at > %s or (finished_at = %s and id > %s))
+                limit 1
+                """,
+                (run_dir, finished_at, finished_at, node_run_id),
             ).fetchone()
         return row is not None
 
