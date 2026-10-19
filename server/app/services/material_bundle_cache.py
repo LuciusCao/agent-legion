@@ -19,10 +19,20 @@ from typing import Any
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
-from server.app.services.material_cache import _require_storage, input_document
+from server.app.services.material_cache import (
+    _require_storage,
+    input_document,
+    open_verified_stream,
+)
+from server.app.services.material_identity import assert_worker_etag_protocol
 from server.app.storage import ObjectStorage
 from shared.material_bundle import assemble_bundle_tree, bundle_address
-from shared.material_cache import MaterializeError, cache_file_path, materialize_stream
+from shared.material_cache import (
+    MaterializeError,
+    cache_file_path,
+    material_cache_address,
+    materialize_stream,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +60,7 @@ def _ready_bundle(
             dict(row)
             for row in conn.execute(
                 "select m.path, mat.id, mat.status, mat.filename, mat.size_bytes,"
-                " mat.content_hash, mat.storage_key"
+                " mat.content_hash, mat.storage_key, mat.object_etag, mat.upload_generation"
                 " from material_bundle_members m"
                 " join materials mat on mat.id = m.material_id"
                 " where m.bundle_id=%s order by m.ordinal",
@@ -65,8 +75,13 @@ def _ready_bundle(
 
 
 def _member_address(member: Mapping[str, Any]) -> str:
-    """Same addressing rule as single materials: content hash, else id."""
-    return str(member.get("content_hash") or "") or str(member["id"])
+    """Same addressing rule as single materials: content hash, else id +
+    upload generation（#1279 codex r6：修复代次 +1 后旧地址自然孤儿化）。"""
+    return material_cache_address(
+        str(member["id"]),
+        str(member.get("content_hash") or ""),
+        int(member["upload_generation"]),
+    )
 
 
 def _entries_block(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -107,7 +122,13 @@ def bundle_runtime_block(
             path = materialize_stream(
                 cache_root,
                 member_address,
-                partial(storage.open_stream, str(member["storage_key"])),
+                partial(
+                    open_verified_stream,
+                    storage,
+                    str(member["storage_key"]),
+                    str(member.get("object_etag") or ""),
+                    f"bundle member {member['id']}",
+                ),
                 expected_sha256=str(member.get("content_hash") or ""),
                 expected_size=int(member.get("size_bytes") or 0),
                 pin=pin,
@@ -173,6 +194,7 @@ def bundle_claim_block(
     *,
     storage: ObjectStorage | None = None,
     download_expires_seconds: int = 3600,
+    worker_protocol_version: int,
 ) -> dict[str, Any] | None:
     """The Worker-facing bundle descriptor: one presigned GET per member."""
     input_doc = input_document(job)
@@ -181,6 +203,10 @@ def bundle_claim_block(
     bundle, members = _ready_bundle(connect_source, workspace_id, input_doc)
     bundle_id = str(bundle["id"])
     storage = _require_storage(storage, bundle_id)
+    # #1279 codex final P1：与单材料同一响应快照复核（repair/failed-retry
+    # TOCTOU 的 bundle 格）。
+    for member in members:
+        assert_worker_etag_protocol(member, worker_protocol_version)
     return {
         "material_id": bundle_id,
         "kind": "bundle",
@@ -192,6 +218,14 @@ def bundle_claim_block(
                 "path": str(member["path"]),
                 "size_bytes": int(member.get("size_bytes") or 0),
                 "content_hash": str(member.get("content_hash") or ""),
+                # #1279：每成员的行记录 ETag + 代次（memory-only）；Worker
+                # 逐成员对 presigned GET 带 If-Match 核验、代次参与无 hash
+                # 成员缓存寻址，均与 download_url 同行快照；旧 Server 不下发
+                # （Worker 按缺失回落），旧 Worker（协议 < v6）领不到命中
+                # 门禁的材料任务（claim admission 跳过 + 描述符快照复核
+                # 双闸，堵 repair/failed-retry TOCTOU）。
+                "object_etag": str(member.get("object_etag") or ""),
+                "upload_generation": int(member["upload_generation"]),
                 "download_url": storage.presign_get(
                     str(member["storage_key"]), expires_seconds=download_expires_seconds
                 ),

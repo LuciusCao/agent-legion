@@ -6,6 +6,7 @@ from server.app.storage.s3_client import (
     ObjectStorage,
     S3StorageClient,
     build_s3_storage,
+    is_precondition_failed,
 )
 from server.app.storage.s3_settings import S3Settings, load_s3_settings
 
@@ -16,5 +17,6 @@ __all__ = [
     "S3StorageClient",
     "build_s3_storage",
     "build_s3_storage_checked",
+    "is_precondition_failed",
     "load_s3_settings",
 ]

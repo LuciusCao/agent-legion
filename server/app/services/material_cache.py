@@ -16,15 +16,45 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
+
+from botocore.exceptions import ClientError
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.rowmap import parse_object
 from server.app.db.transaction import read_connection
-from server.app.storage import ObjectStorage, build_s3_storage
-from shared.material_cache import MaterializeError, materialize_stream
+from server.app.services.material_identity import assert_worker_etag_protocol
+from server.app.storage import ObjectStorage, build_s3_storage, is_precondition_failed
+from shared.material_cache import (
+    MaterializeError,
+    material_cache_address,
+    materialize_stream,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def open_verified_stream(
+    storage: ObjectStorage, storage_key: str, object_etag: str, label: str
+) -> BinaryIO:
+    """``open_stream`` conditioned on the material row's recorded ETag (#1279).
+
+    The S3 If-Match binds the verification to the exact bytes this GET
+    returns (412 before any byte is served), so a same-size overwrite that
+    landed after complete() surfaces as a ``MaterializeError`` instead of
+    silently caching poisoned bytes. An empty ``object_etag`` (pre-v98 rows
+    with no recorded identity: base size-only semantics; establishing their
+    identity is split into #1316) skips the condition.
+    """
+    try:
+        return storage.open_stream(storage_key, if_match=object_etag)
+    except ClientError as exc:
+        if is_precondition_failed(exc):
+            raise MaterializeError(
+                f"{label} bytes changed after completion (ETag mismatch); repair the row "
+                "with scripts/request_material_reupload.py, then re-upload the material"
+            ) from exc
+        raise
 
 
 def input_document(job: Mapping[str, Any]) -> dict[str, Any]:
@@ -108,14 +138,18 @@ def material_runtime_block(
     content_hash = str(row.get("content_hash") or "")
     filename = str(row.get("filename") or "")
     size_bytes = int(row.get("size_bytes") or 0)
+    object_etag = str(row.get("object_etag") or "")
     # Content addressing dedups downloads across jobs of the same material;
-    # hashless rows fall back to their (unique) id.
-    address = content_hash or material_id
+    # hashless rows address by id + upload generation (#1279 codex r6：修复
+    # 代次 +1 后旧地址自然孤儿化，毒化缓存不再命中）。
+    address = material_cache_address(material_id, content_hash, int(row["upload_generation"]))
     try:
         path = materialize_stream(
             cache_root,
             address,
-            lambda: storage.open_stream(str(row["storage_key"])),
+            lambda: open_verified_stream(
+                storage, str(row["storage_key"]), object_etag, f"material {material_id}"
+            ),
             expected_sha256=content_hash,
             expected_size=size_bytes,
             log=lambda message: logger.warning("%s", message),
@@ -184,6 +218,7 @@ def material_claim_block(
     *,
     storage: ObjectStorage | None = None,
     download_expires_seconds: int = 3600,
+    worker_protocol_version: int,
 ) -> dict[str, Any] | None:
     """The Worker-facing material descriptor for the claim response.
 
@@ -203,11 +238,17 @@ def material_claim_block(
             job,
             storage=storage,
             download_expires_seconds=download_expires_seconds,
+            worker_protocol_version=worker_protocol_version,
         )
     if input_doc.get("type") != "material":
         return None
     row = _ready_row(connect_source, workspace_id, input_doc)
     material_id = str(row["id"])
+    # #1279 codex final P1：响应描述符快照复核——admission 后 complete 可
+    # 把 uploading/failed 行落回 ready 并写新 etag（repair/failed-retry
+    # TOCTOU），此处对 < v6 Worker 拒绝（batch per-item drop 走既有
+    # lease-expiry 重排队恢复，非硬失败）。
+    assert_worker_etag_protocol(row, worker_protocol_version)
     storage = _require_storage(storage, material_id)
     return {
         "material_id": material_id,
@@ -215,7 +256,16 @@ def material_claim_block(
         "content_type": str(row.get("content_type") or ""),
         "size_bytes": int(row.get("size_bytes") or 0),
         "content_hash": str(row.get("content_hash") or ""),
-        "download_url": storage.presign_get(
-            str(row["storage_key"]), expires_seconds=download_expires_seconds
-        ),
+        # #1279：行记录的 ETag 与代次随描述符下发（memory-only，不落
+        # manifest）；Worker 对 presigned GET 带 If-Match 核验，
+        # upload_generation 参与无 hash 行的缓存寻址（代次即身份，见
+        # material_cache_address）——与 download_url 取自同一行快照，地址
+        # 代次与 URL key 代次恒一致。旧 Server 不下发这两字段（Worker 按
+        # 缺失回落）；**旧 Worker（协议 < v6）领不到命中门禁的材料任务**
+        # （claim admission 跳过 + 本描述符快照复核双闸，防止
+        # repair/failed-retry 在 admission 与响应组装之间落新 etag 的
+        # TOCTOU；见 material_identity.assert_worker_etag_protocol）。
+        "object_etag": str(row.get("object_etag") or ""),
+        "upload_generation": int(row["upload_generation"]),
+        "download_url": storage.presign_get(str(row["storage_key"]), download_expires_seconds),
     }

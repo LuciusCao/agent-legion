@@ -74,17 +74,31 @@ def store_text_batch(
                     )
                 entries[digest] = dict(content_hash=digest, material_id=existing["id"])
                 continue
-            key = f"{workspace_id}/{digest}/inline-{uuid.uuid4().hex}"
+            # #1279 key 文法：v2g 代次段 + m_{material_id} 标记唯一段（与上传
+            # 产线同文法），跨行不可复用——GC 材料删除批重开（#1314）后
+            # inline 孤儿即可回收；inline-{uuid4} 尾段保留产线标记。
+            # material_id 在此预生成、随 entry 传给 publish。
+            material_id = uuid.uuid4().hex
+            key = f"{workspace_id}/{digest}/v2g0/m_{material_id}/inline-{uuid.uuid4().hex}"
             content_type = text_content_type(filename)
             # Register before PUT: a timeout can occur after the server stored it.
             keys.append(key)
             storage.put_object(key, payload, content_type=content_type)
+            # put 后 HEAD 取 ETag 一并落列（#1279：直插 ready 产线同样携带
+            # 内容身份）；put 成功而 HEAD 读不到对象或**空 ETag**（R3b：
+            # 无法建立身份）都是存储面故障，按不可用处理——不得落 ready
+            # 且无身份的行。
+            head = storage.head_object(key)
+            if head is None or not head.etag:
+                raise OSError(f"head after put returned no object/etag: {key}")
             entries[digest] = dict(
                 content_hash=digest,
                 filename=filename,
                 content_type=content_type,
                 size_bytes=len(payload),
                 storage_key=key,
+                new_material_id=material_id,
+                object_etag=head.etag,
             )
         identities = job_db.publish_inline_materials(
             workspace_id,

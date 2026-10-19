@@ -143,6 +143,7 @@ def resolve_code_runtime_context(
                 workspace_id,
                 job or {},
                 storage=object_store.storage if object_store is not None else None,
+                worker_protocol_version=worker_protocol_version,
             ),
         },
     }

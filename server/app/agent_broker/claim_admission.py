@@ -11,9 +11,11 @@ runtime/model/label compatibility. Two callers:
   read-only connection while selecting the batch, so the write phase never
   scans. Both must agree on the rules, hence the single home.
 
-Everything here is pure with respect to the database: safe on a read-only
-connection, and re-running it in the write phase is the revalidation the
-two-phase claim relies on.
+Everything here is read-only with respect to the database: safe on a
+read-only connection, and re-running it in the write phase is the
+revalidation the two-phase claim relies on. (#1279 起有一个例外：材料
+ETag 协议门禁现读 materials 行——etag 落列于 complete，可能在 enqueue
+之后，冻结 manifest 不含它；只读语义不变。)
 """
 
 from __future__ import annotations
@@ -26,6 +28,10 @@ from server.app.agent_broker import agent_claim_compatibility
 from server.app.agent_broker.claim_scan import ScanState, WorkerView, labels_satisfy
 from server.app.agent_broker.claim_timeout import decide_claim_timeout
 from server.app.agent_control.registry import CODE_PROTOCOL_VERSION
+from server.app.jobs.queries.material_claim_gate import (
+    material_inputs_require_etag_protocol,
+)
+from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
@@ -82,6 +88,21 @@ def admit_candidate(
         # no cancel body, and old binaries cannot unpack code bundles).
         if view.protocol_version < CODE_PROTOCOL_VERSION:
             state.skip_reasons["protocol_version_too_old"] += 1
+            return None
+        # #1279 材料 ETag 门禁（协议 v6）：旧 Worker 忽略 claim 描述符的
+        # object_etag、对 presigned GET 无条件下载——complete 后同尺寸覆盖
+        # 的无 hash 材料会被静默喂给节点执行。命中门禁谓词（材料输入含
+        # object_etag 非空且无 hash 的行；hash 行旧 Worker 有 sha256
+        # fail-closed 兜底故豁免，etag='' 无内容身份可验故豁免——谓词论证
+        # 见 jobs/queries/material_claim_gate.py docstring）的候选对旧
+        # Worker 不可领：留队列等升级，不落失败。现行核验（etag 落列于
+        # complete，可能在 enqueue 之后）必须现读 DB，不能读冻结 manifest。
+        if view.protocol_version < MATERIAL_ETAG_PROTOCOL_VERSION and (
+            material_inputs_require_etag_protocol(
+                broker.database_dsn, selected_workspace, str(selected["job_id"])
+            )
+        ):
+            state.skip_reasons["material_etag_protocol_too_old"] += 1
             return None
         if view.code_active >= view.code_capacity:
             state.skip_reasons["code_capacity_full"] += 1

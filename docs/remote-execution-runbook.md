@@ -176,7 +176,7 @@ mixed-fleet compatibility and upgrade order.
   `/api/agent-executions/{id}/heartbeat` and `/api/agent-executions/{id}/result`.
   Registration carries `protocol_version` and `image_version`; the Host rejects
   workers below `agent_workers.min_protocol_version` (DB instance settings,
-  `/api/admin/instance-settings`). Current protocol is **v5**: v2 added
+  `/api/admin/instance-settings`). Current protocol is **v6**: v2 added
   `kind: "code"` claims and heartbeat cancellation bodies; v3 adds
   runtime-scoped model declarations plus a `host_protocol_version`
   registration handshake (the Host reads an old Worker's bare provider/model
@@ -185,9 +185,18 @@ mixed-fleet compatibility and upgrade order.
   input refs; older Workers keep bare keys); v5 adds the per-Worker batch
   heartbeat — `POST /api/agent-executions/heartbeats` renews every claimed
   lease of the machine in one write transaction, so heartbeat write traffic
-  scales with machine count, not slot count. The single execution endpoint is
+  scales with machine count, not slot count; v6 adds material ETag
+  consumption-side verification (#1279): v6 Workers attach If-Match (the
+  claim descriptor's `object_etag`) to material downloads, and the Host's
+  claim admission **skips** material-gated candidates for older Workers —
+  a gated job (its material inputs include a row with `object_etag <> ''`
+  and no `content_hash`) stays queued until every Worker that could claim
+  it runs v6; hash rows stay claimable (the old Worker's sha256 recompute
+  is already fail-closed). The single execution endpoint is
   unchanged and still serves older Workers. Code capacity only requires
-  protocol ≥ v2.
+  protocol ≥ v2. Rolling-upgrade note: after the Host upgrade, pre-v6
+  Workers keep claiming everything EXCEPT etag-gated material jobs — those
+  queue until the fleet upgrades; no manual drain needed.
 
   Two things decide whether a mixed fleet works, and the protocol number is
   only one of them. The first is the Worker-side handshake

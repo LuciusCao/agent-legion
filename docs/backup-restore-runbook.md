@@ -307,10 +307,12 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
 末尾为 `/` 的 key 被当作目录，只差大小写的 key 在不区分大小写的文件系统上互相覆盖。
 这类不一致让备份失败，而不是让恢复时的「清空 bucket」变成不可逆丢失。产物 key 不以
 `/` 结尾（产物名不含 `/`：`job_artifact_objects.py` 的 `valid_artifact_name`）；材料 key
-为 `{workspace_id}/{hash}/g{代次}/{filename}`（首发即 g0，代次段让上传能力随重试失效；更早的
-存量行无代次段、key 不可变，旧代次对象成为孤儿，由 bucket lifecycle 回收；`scripts/gc-s3-jobs.py`
-的材料根前缀扫描（#1269）只报告不删除——材料 key 内容寻址可复用，删除待 #1279 所有权协议
-（#1282 三轮 codex P1），#1267），材料 API 拒绝目录形态与下载时不可归一化的
+为 `{workspace_id}/{hash}/v2g{代次}/m_{material_id}/{filename}`（首发即 v2g0，代次段让上传能力随
+重试失效，v2g 版本标记（写端不可注入）+ m_ 标记的 material_id 唯一段（#1279）让 key
+跨行不可复用且对 GC 门禁无歧义；更早的
+存量行无代次段、key 不可变，旧代次对象成为孤儿，由 GC/bucket lifecycle 回收；
+`scripts/gc-s3-jobs.py` 的材料根前缀扫描（#1269）只报告不删除——#1279 已备好 v2g 单次使用
+文法与门禁，删除批重开由 #1314 跟踪（PUT→行发布窗口协议，codex r5 P1），#1267），材料 API 拒绝目录形态与下载时不可归一化的
 `filename`——以 `/` 结尾、含空 / `.` / `..` 段、含反斜杠或控制字符；`content_hash`
 同样拼进 key，非空时必须是 64 位小写 sha256 hex（422，
 `MaterialsService.presign` 入口经 `material_key_validation.py` 校验，#1119/#1267）。入口收紧
@@ -625,6 +627,22 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
       新的空目录：下载结果与新清单一致、与备份时的源清单一致（多出或缺少的 key 都会被
       发现，零字节目录标记除外），内容再逐对象对 `SHA256SUMS`。外部 S3 开了版本控制时，
       `rm` 只留下删除标记，旧版本仍占空间。
+
+      **材料 ETag 重绑（#1279，启动调度前必做）**：`aws s3 cp --recursive` 对较大的
+      文件走分段上传，即使字节与 sha256 完全相同，恢复后对象的 ETag 也与备份前不同——
+      而 `materials.object_etag` 仍是备份前的值，消费侧（Host/Worker 物化）的 If-Match
+      核验会全线 412。逐对象校验通过后、恢复调度（`scripts/resume-workspaces.sh` /
+      打开 worker claim）之前，先跑：
+
+      ```bash
+      uv run python scripts/rebind_material_etags.py          # dry-run：报告将重绑的行
+      uv run python scripts/rebind_material_etags.py --apply  # 逐行核验字节后重绑
+      ```
+
+      脚本对 ETag 失配的行先核验恢复字节（size 恒验 + content_hash 非空时流式
+      sha256），通过才原子重绑（CAS）；字节不符或对象缺失的行 fail-closed 只报告
+      （退出码 1），必须人工处置后才能启动调度。
+      卷级冷备份（下文）逐字节还原则 ETag 不变，无需重绑（跑了也是全匹配的空转）。
 
    **对象存储·卷级冷备份**（§2.2.2 的备份）：停对象存储服务，`RESTORE_INTO` 校验后清空
    整个卷再解包，`THEN_UP` 重新拉起（无论成败）。`RESTORE_INTO` **先完整校验归档再删**：

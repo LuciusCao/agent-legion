@@ -31,13 +31,13 @@ def test_complete_after_retry_verifies_current_generation_key(service, storage, 
     )
     material_id = result["material"]["id"]
     # 第 0 代 URL 的 PUT 已落地（重试之前）。
-    storage.objects[f"{WORKSPACE_ID}/{digest}/g0/v.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{digest}/v2g0/m_{material_id}/v.txt"] = payload
 
     retry = service.presign(
         WORKSPACE_ID, filename="v.txt", size_bytes=len(payload), content_hash=digest
     )
     (retry_key, _) = storage.presigned[1]
-    assert retry_key == f"{WORKSPACE_ID}/{digest}/g1/v.txt"
+    assert retry_key == f"{WORKSPACE_ID}/{digest}/v2g1/m_{material_id}/v.txt"
     assert retry["deduplicated"] is False
 
     # complete 核验当前代次（g1）的 key：对象缺失 → 422 failed，不吃旧代次字节。
@@ -48,7 +48,7 @@ def test_complete_after_retry_verifies_current_generation_key(service, storage, 
     # 新代次字节落地后重试 complete（presign 复位 → g2），正常 ready。
     service.presign(WORKSPACE_ID, filename="v.txt", size_bytes=len(payload), content_hash=digest)
     (final_key, _) = storage.presigned[2]
-    assert final_key == f"{WORKSPACE_ID}/{digest}/g2/v.txt"
+    assert final_key == f"{WORKSPACE_ID}/{digest}/v2g2/m_{material_id}/v.txt"
     storage.objects[final_key] = payload
     assert service.complete(WORKSPACE_ID, material_id)["status"] == "ready"
 
@@ -62,7 +62,7 @@ def test_complete_with_expected_generation(service, storage) -> None:
     )
     material_id = result["material"]["id"]
     assert result["material"]["upload_generation"] == 0
-    storage.objects[f"{WORKSPACE_ID}/{digest}/g0/p.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{digest}/v2g0/m_{material_id}/p.txt"] = payload
 
     record = service.complete(WORKSPACE_ID, material_id, expected_upload_generation=0)
 
@@ -80,7 +80,7 @@ def test_complete_with_stale_generation_conflicts_without_touching_row(service, 
     )
     material_id = result["material"]["id"]
     # 第 0 代字节已 PUT；随后 presign 重试推进到代次 1（旧 URL 指向死 key）。
-    storage.objects[f"{WORKSPACE_ID}/{digest}/g0/s.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{digest}/v2g0/m_{material_id}/s.txt"] = payload
     retry = service.presign(
         WORKSPACE_ID, filename="s.txt", size_bytes=len(payload), content_hash=digest
     )
@@ -94,7 +94,7 @@ def test_complete_with_stale_generation_conflicts_without_touching_row(service, 
     assert row["upload_generation"] == 1
 
     # 匹配代次的 complete 正常走完核验；不带代次保持旧行为（锁内复查兜底）。
-    storage.objects[f"{WORKSPACE_ID}/{digest}/g1/s.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{digest}/v2g1/m_{material_id}/s.txt"] = payload
     assert (
         service.complete(WORKSPACE_ID, material_id, expected_upload_generation=1)["status"]
         == "ready"
@@ -111,14 +111,14 @@ def test_complete_with_stale_generation_conflicts_on_ready_row(service, storage)
         WORKSPACE_ID, filename="r.txt", size_bytes=len(payload), content_hash=digest
     )
     material_id = result["material"]["id"]
-    storage.objects[f"{WORKSPACE_ID}/{digest}/g0/r.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{digest}/v2g0/m_{material_id}/r.txt"] = payload
     # g0 的 complete 在途期间客户端 presign 重试（行仍 uploading → 推进 g1），
     # 新代次字节落地并完成 → ready @ g1。
     retry = service.presign(
         WORKSPACE_ID, filename="r.txt", size_bytes=len(payload), content_hash=digest
     )
     assert retry["material"]["upload_generation"] == 1
-    storage.objects[f"{WORKSPACE_ID}/{digest}/g1/r.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{digest}/v2g1/m_{material_id}/r.txt"] = payload
     assert (
         service.complete(WORKSPACE_ID, material_id, expected_upload_generation=1)["status"]
         == "ready"
@@ -175,7 +175,7 @@ def test_complete_cas_rejects_key_rebuild_mid_verification(
     # 没落 ready；行已被重试重置为 uploading 并指向新 key。
     assert service.get(WORKSPACE_ID, "mat-cas")["status"] == "uploading"
     # 明确的失败语义：客户端重调 complete，按新 key 重新核验后正常 ready。
-    storage.objects[f"{WORKSPACE_ID}/{digest}/g1/ok.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{digest}/v2g1/m_mat-cas/ok.txt"] = payload
     assert service.complete(WORKSPACE_ID, "mat-cas")["status"] == "ready"
 
 
@@ -196,7 +196,7 @@ def test_complete_cas_rejects_key_rebuild_when_verification_failed(
 
     def verify_then_rebuild(storage_arg, row):  # noqa: ANN001, ANN202
         outcome = real_verify(storage_arg, row)  # 旧 key 无对象 → failure
-        assert outcome is not None
+        assert outcome[0] is not None
         service.presign(WORKSPACE_ID, filename="ok.txt", size_bytes=1, content_hash=digest)
         return outcome
 
@@ -252,7 +252,7 @@ def test_complete_cas_rejects_same_identity_retry_mid_verification(
         WORKSPACE_ID, filename="s.txt", size_bytes=len(payload), content_hash=digest
     )
     material_id = result["material"]["id"]
-    storage.objects[f"{WORKSPACE_ID}/{digest}/g0/s.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{digest}/v2g0/m_{material_id}/s.txt"] = payload
     real_verify = service._verify_object
 
     def verify_then_retry(storage_arg, row):  # noqa: ANN001, ANN202
@@ -282,7 +282,7 @@ def test_complete_does_not_overwrite_concurrent_ready(
         WORKSPACE_ID, filename="late.txt", size_bytes=len(payload), content_hash=digest
     )
     material_id = result["material"]["id"]
-    key = f"{WORKSPACE_ID}/{digest}/g0/late.txt"
+    key = f"{WORKSPACE_ID}/{digest}/v2g0/m_{material_id}/late.txt"
     real_verify = service._verify_object
     injected: list[bool] = []
 
@@ -291,7 +291,7 @@ def test_complete_does_not_overwrite_concurrent_ready(
         if not injected:
             injected.append(True)
             # 本方核验时对象尚未上传（失败结论）……
-            assert outcome is not None
+            assert outcome[0] is not None
             # ……其间另一个 complete 看到字节已落地并成功落 ready。
             storage.objects[key] = payload
             service.complete(WORKSPACE_ID, material_id)
@@ -313,7 +313,7 @@ def test_complete_rejects_expired_mid_verification(service, storage, job_db, mon
         WORKSPACE_ID, filename="x.txt", size_bytes=len(payload), content_hash=digest
     )
     material_id = result["material"]["id"]
-    storage.objects[f"{WORKSPACE_ID}/{digest}/g0/x.txt"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{digest}/v2g0/m_{material_id}/x.txt"] = payload
     real_verify = service._verify_object
 
     def verify_then_expire(storage_arg, row):  # noqa: ANN001, ANN202
@@ -338,7 +338,8 @@ def test_complete_marks_ready_when_object_matches(service, storage) -> None:
         size_bytes=len(payload),
         content_hash=_sha256(payload),
     )
-    storage.objects[f"{WORKSPACE_ID}/{_sha256(payload)}/g0/d.txt"] = payload
+    material_id = result["material"]["id"]
+    storage.objects[f"{WORKSPACE_ID}/{_sha256(payload)}/v2g0/m_{material_id}/d.txt"] = payload
 
     material = service.complete(WORKSPACE_ID, result["material"]["id"])
 
@@ -357,7 +358,8 @@ def test_complete_fails_when_object_missing(service, storage) -> None:
 
 def test_complete_fails_on_size_mismatch(service, storage) -> None:
     result = service.presign(WORKSPACE_ID, filename="f.txt", size_bytes=10)
-    storage.objects[f"{WORKSPACE_ID}/{result['material']['id']}/g0/f.txt"] = b"short"
+    material_id = result["material"]["id"]
+    storage.objects[f"{WORKSPACE_ID}/{material_id}/v2g0/m_{material_id}/f.txt"] = b"short"
 
     with pytest.raises(MaterialVerificationError, match="size"):
         service.complete(WORKSPACE_ID, result["material"]["id"])
@@ -368,11 +370,62 @@ def test_complete_fails_on_hash_mismatch(service, storage) -> None:
     declared = _sha256(b"expected")
     result = service.presign(WORKSPACE_ID, filename="g.txt", size_bytes=7, content_hash=declared)
     # Same length as the declaration, different bytes: size passes, hash fails.
-    storage.objects[f"{WORKSPACE_ID}/{declared}/g0/g.txt"] = b"tamperd"
+    storage.objects[f"{WORKSPACE_ID}/{declared}/v2g0/m_{result['material']['id']}/g.txt"] = (
+        b"tamperd"
+    )
 
     with pytest.raises(MaterialVerificationError, match="sha256"):
         service.complete(WORKSPACE_ID, result["material"]["id"])
     assert service.get(WORKSPACE_ID, result["material"]["id"])["status"] == "failed"
+
+
+def test_complete_rejects_object_swap_between_head_and_read(
+    service, storage, job_db, monkeypatch
+) -> None:
+    """#1279 codex P1（complete 链故障注入）：同一未过期 PUT URL 在 complete
+    期间被二次使用——HEAD 观察对象 A 之后、sha256 流读之前对象被换成 B。
+    流读携带 HEAD 的 ETag 作 If-Match，412 → 核验失败落 failed（客户端
+    presign 重试），绝不把 A 的 ETag 与 B 的字节一起标 ready（否则该 ready
+    行让所有消费侧 cache miss 永久 412）。消息须走 changed 路径而非 sha256
+    路径（证明是 If-Match 绑定检出，不是 hash 兜底）。"""
+    payload = b"original-bytes"
+    digest = _sha256(payload)
+    result = service.presign(
+        WORKSPACE_ID, filename="swap.txt", size_bytes=len(payload), content_hash=digest
+    )
+    material_id = result["material"]["id"]
+    key = f"{WORKSPACE_ID}/{digest}/v2g0/m_{material_id}/swap.txt"
+    storage.objects[key] = payload
+    real_open = storage.open_stream
+
+    def swap_then_open(storage_key: str, *, if_match: str = ""):
+        # HEAD（complete 内）之后、读取之前：对象被同 URL 二次 PUT 换掉。
+        storage.objects[storage_key] = b"swapped-bytes!"
+        return real_open(storage_key, if_match=if_match)
+
+    monkeypatch.setattr(storage, "open_stream", swap_then_open)
+
+    with pytest.raises(MaterialVerificationError, match="changed during verification"):
+        service.complete(WORKSPACE_ID, material_id)
+
+    assert service.get(WORKSPACE_ID, material_id)["status"] == "failed"
+    assert materials_testlib.object_etag_of(job_db, material_id) == ""
+
+
+def test_complete_fails_closed_when_store_returns_no_etag(service, storage, job_db) -> None:
+    """#1279 R3b：HEAD 返回空 ETag → 折算核验失败落 failed——不落
+    ready+etag='' 的永久无身份行（支持矩阵内后端恒有 ETag，不触发）。"""
+    storage.no_etag = True
+    result = service.presign(WORKSPACE_ID, filename="noetag.txt", size_bytes=4)
+    material_id = result["material"]["id"]
+    (key, _) = storage.presigned[0]
+    storage.objects[key] = b"1234"
+
+    with pytest.raises(MaterialVerificationError, match="no ETag"):
+        service.complete(WORKSPACE_ID, material_id)
+    row = service.get(WORKSPACE_ID, material_id)
+    assert row["status"] == "failed"
+    assert materials_testlib.object_etag_of(job_db, material_id) == ""
 
 
 def test_complete_rejects_expired_material(service, job_db) -> None:
@@ -385,3 +438,28 @@ def test_complete_rejects_expired_material(service, job_db) -> None:
 
     with pytest.raises(ConflictError):
         service.complete(WORKSPACE_ID, result["material"]["id"])
+
+
+def test_complete_records_head_etag_atomically(service, storage, job_db) -> None:
+    """#1279 验收项：complete 成功时把核验 HEAD 的 ETag 与 ready 同事务落库
+    （无 hash 行的唯一内容身份）；核验失败/未 complete 的行 etag 保持 ''。"""
+    from tests.fakes.storage import etag_of
+
+    payload = b"etag-recorded"
+    result = service.presign(WORKSPACE_ID, filename="e.txt", size_bytes=len(payload))
+    material_id = result["material"]["id"]
+    assert materials_testlib.object_etag_of(job_db, material_id) == ""
+    storage.objects[f"{WORKSPACE_ID}/{material_id}/v2g0/m_{material_id}/e.txt"] = payload
+
+    record = service.complete(WORKSPACE_ID, material_id)
+
+    assert record["status"] == "ready"
+    assert materials_testlib.object_etag_of(job_db, material_id) == etag_of(payload)
+
+    # 核验失败的行不落 etag。
+    bad = service.presign(WORKSPACE_ID, filename="bad.txt", size_bytes=9)
+    bad_id = bad["material"]["id"]
+    storage.objects[f"{WORKSPACE_ID}/{bad_id}/v2g0/m_{bad_id}/bad.txt"] = b"short"
+    with pytest.raises(MaterialVerificationError, match="size"):
+        service.complete(WORKSPACE_ID, bad_id)
+    assert materials_testlib.object_etag_of(job_db, bad_id) == ""

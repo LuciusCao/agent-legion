@@ -18,6 +18,7 @@ from server.app.services.material_bundles import MaterialBundlesService
 from server.app.services.material_cache import material_runtime_block
 from shared.material_bundle import bundle_address
 from shared.material_cache import MaterializeError
+from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
 from tests.fakes.storage import FakeObjectStorage
 
 WORKSPACE_ID = "ws-bundle-cache"
@@ -165,9 +166,156 @@ def test_runtime_block_unknown_bundle_is_readable_error(job_db, storage, tmp_pat
         )
 
 
+def test_bundle_response_snapshot_gate_catches_repair_complete_toctou(job_db, storage) -> None:
+    """#1279 codex final P1（bundle/uploading）：bundle 成员 repair→complete
+    落新 etag 的 TOCTOU——bundle_claim_block 的响应快照复核拦下（v5 拒、
+    v6 放行）。"""
+    from server.app.services.materials import MaterialsService
+    from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
+
+    payload = b"bundle-toctou"
+    service = MaterialsService(job_db.dsn_identity, storage)
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'ToctouB') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+    result = service.presign(WORKSPACE_ID, filename="b.txt", size_bytes=len(payload))
+    material_id = result["material"]["id"]
+    (key0, _) = storage.presigned[0]
+    storage.objects[key0] = payload
+    service.complete(WORKSPACE_ID, material_id)
+    bundle = MaterialBundlesService(job_db.dsn_identity).create(
+        WORKSPACE_ID, name="folder", members=[{"material_id": material_id, "path": "b.txt"}]
+    )
+    job = _job(bundle["id"])
+
+    outcome = service.request_material_reupload(WORKSPACE_ID, material_id)
+    storage.objects[str(outcome["storage_key"])] = payload
+    service.complete(WORKSPACE_ID, material_id, expected_upload_generation=1)
+
+    with pytest.raises(MaterializeError, match="protocol v6"):
+        bundle_claim_block(
+            job_db.dsn_identity,
+            WORKSPACE_ID,
+            job,
+            storage=storage,
+            worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION - 1,
+        )
+    block = bundle_claim_block(
+        job_db.dsn_identity,
+        WORKSPACE_ID,
+        job,
+        storage=storage,
+        worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
+    )
+    assert block is not None and block["entries"][0]["object_etag"]
+
+
+def test_bundle_response_snapshot_gate_catches_failed_retry_toctou(job_db, storage) -> None:
+    """#1279 codex final P1（bundle/failed-retry）：repair 后 bare complete
+    失败 → failed+etag=''，再 complete 成功落新 etag——v5 拒、v6 放行。"""
+    from server.app.services.materials import MaterialsService, MaterialVerificationError
+    from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
+
+    payload = b"bundle-failed"
+    service = MaterialsService(job_db.dsn_identity, storage)
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'ToctouB') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+    result = service.presign(WORKSPACE_ID, filename="f.txt", size_bytes=len(payload))
+    material_id = result["material"]["id"]
+    (key0, _) = storage.presigned[0]
+    storage.objects[key0] = payload
+    service.complete(WORKSPACE_ID, material_id)
+    bundle = MaterialBundlesService(job_db.dsn_identity).create(
+        WORKSPACE_ID, name="folder", members=[{"material_id": material_id, "path": "f.txt"}]
+    )
+    job = _job(bundle["id"])
+
+    outcome = service.request_material_reupload(WORKSPACE_ID, material_id)
+    new_key = str(outcome["storage_key"])
+    with pytest.raises(MaterialVerificationError, match="missing"):
+        service.complete(WORKSPACE_ID, material_id)
+    assert service.get(WORKSPACE_ID, material_id)["status"] == "failed"
+    storage.objects[new_key] = payload
+    service.complete(WORKSPACE_ID, material_id)
+
+    with pytest.raises(MaterializeError, match="protocol v6"):
+        bundle_claim_block(
+            job_db.dsn_identity,
+            WORKSPACE_ID,
+            job,
+            storage=storage,
+            worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION - 1,
+        )
+    block = bundle_claim_block(
+        job_db.dsn_identity,
+        WORKSPACE_ID,
+        job,
+        storage=storage,
+        worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
+    )
+    assert block is not None and block["entries"][0]["object_etag"]
+
+
+def test_production_wrapper_bundle_toctou_gate(job_db, storage) -> None:
+    """#1279 codex final r2：bundle 生产转发层 `material_claim_block` 把
+    worker_protocol_version 继续传给 bundle_claim_block——版本漏传即被
+    None 旁路，本测试钉住该接线（mutation：摘 wrapper 透传 → 本测试红）。"""
+    from server.app.services.material_cache import material_claim_block
+    from server.app.services.materials import MaterialsService
+    from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
+
+    payload = b"wrapper-toctou"
+    service = MaterialsService(job_db.dsn_identity, storage)
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'ToctouW') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+    result = service.presign(WORKSPACE_ID, filename="w.txt", size_bytes=len(payload))
+    material_id = result["material"]["id"]
+    (key0, _) = storage.presigned[0]
+    storage.objects[key0] = payload
+    service.complete(WORKSPACE_ID, material_id)
+    bundle = MaterialBundlesService(job_db.dsn_identity).create(
+        WORKSPACE_ID, name="folder", members=[{"material_id": material_id, "path": "w.txt"}]
+    )
+    job = _job(bundle["id"])
+
+    outcome = service.request_material_reupload(WORKSPACE_ID, material_id)
+    storage.objects[str(outcome["storage_key"])] = payload
+    service.complete(WORKSPACE_ID, material_id, expected_upload_generation=1)
+
+    with pytest.raises(MaterializeError, match="protocol v6"):
+        material_claim_block(
+            job_db.dsn_identity,
+            WORKSPACE_ID,
+            job,
+            storage=storage,
+            worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION - 1,
+        )
+    block = material_claim_block(
+        job_db.dsn_identity,
+        WORKSPACE_ID,
+        job,
+        storage=storage,
+        worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
+    )
+    assert block is not None and block["kind"] == "bundle"
+    assert block["entries"][0]["object_etag"]
+
+
 def test_claim_block_presigns_each_member_without_storage_key(job_db, bundle, storage) -> None:
     block = bundle_claim_block(
-        job_db.dsn_identity, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+        job_db.dsn_identity,
+        WORKSPACE_ID,
+        _job(bundle["id"]),
+        storage=storage,
+        worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
     )
 
     assert block is not None
@@ -178,6 +326,85 @@ def test_claim_block_presigns_each_member_without_storage_key(job_db, bundle, st
         assert entry["download_url"].startswith("https://s3.test/download/")
         assert entry["material_id"] in ("mat-a", "mat-b")
     assert "storage_key" not in json.dumps(block)
+
+
+def test_bundle_member_address_follows_generation(job_db, storage, tmp_path: Path) -> None:
+    """#1279 codex r6（Host bundle 成员同格）：无 hash 成员的缓存地址带
+    代次——成员代次推进后地址变化、重新下载，树地址随成员地址联动变化。"""
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name)"
+            " values (%s, 'BundleCache') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+        conn.execute(
+            "insert into materials(id, workspace_id, content_hash, filename,"
+            " content_type, size_bytes, storage_key, status)"
+            " values ('mat-h', %s, '', 'h.txt', 'text/plain', 4, %s, 'ready')",
+            (WORKSPACE_ID, f"{WORKSPACE_ID}/mat-h/g0/mat-h/h.txt"),
+        )
+    storage.objects[f"{WORKSPACE_ID}/mat-h/g0/mat-h/h.txt"] = b"hash"
+    service = MaterialBundlesService(job_db.dsn_identity)
+    bundle = service.create(
+        WORKSPACE_ID, name="folder", members=[{"material_id": "mat-h", "path": "h.txt"}]
+    )
+
+    block = bundle_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+    )
+    assert block is not None
+    first_tree = block["path"]
+    assert (tmp_path / "ma" / "mat-h-v2g0").is_file()
+    assert storage.opened == 1
+
+    # 成员代次推进（修复语义）：地址变化 → 重新下载，树地址联动变化。
+    with job_db.connect() as conn:
+        conn.execute("update materials set upload_generation=1 where id='mat-h'")
+    again = bundle_runtime_block(
+        job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+    )
+    assert again is not None
+    assert again["path"] != first_tree
+    assert (tmp_path / "ma" / "mat-h-v2g1").is_file()
+    assert storage.opened == 2, "代次推进后不得命中旧 gen 地址"
+
+
+def test_runtime_block_detects_member_overwrite_via_etag(
+    job_db, bundle, storage, tmp_path: Path
+) -> None:
+    """#1279 验收项（Host bundle 链故障注入）：成员材料 complete 后被同尺寸
+    静默覆盖——行记录的 object_etag 使该成员的 GET 带 If-Match，412 检出为
+    MaterializeError，毒化字节不落缓存。"""
+    from tests.fakes.storage import etag_of
+
+    with job_db.connect() as conn:
+        conn.execute("update materials set object_etag=%s where id='mat-a'", (etag_of(PAYLOAD_A),))
+    storage.objects[KEY_A] = b"x" * len(PAYLOAD_A)
+
+    with pytest.raises(MaterializeError, match="ETag mismatch"):
+        bundle_runtime_block(
+            job_db.dsn_identity, tmp_path, WORKSPACE_ID, _job(bundle["id"]), storage=storage
+        )
+    assert not (tmp_path / HASH_A[:2] / HASH_A).exists(), "毒化字节不得落缓存"
+
+
+def test_claim_block_carries_member_object_etag(job_db, bundle, storage) -> None:
+    """#1279：bundle claim 描述符逐成员携带行记录的 object_etag。"""
+    with job_db.connect() as conn:
+        conn.execute("update materials set object_etag='etag-a' where id='mat-a'")
+
+    block = bundle_claim_block(
+        job_db.dsn_identity,
+        WORKSPACE_ID,
+        _job(bundle["id"]),
+        storage=storage,
+        worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
+    )
+
+    assert block is not None
+    by_id = {entry["material_id"]: entry for entry in block["entries"]}
+    assert by_id["mat-a"]["object_etag"] == "etag-a"
+    assert by_id["mat-b"]["object_etag"] == ""
 
 
 class _FakeExecutor:

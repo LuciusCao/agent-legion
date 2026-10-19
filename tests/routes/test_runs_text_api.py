@@ -500,6 +500,26 @@ def test_text_item_storage_failure_returns_503_without_a_run(client, storage, jo
     assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []
 
 
+def test_text_item_fails_closed_when_store_returns_no_etag(client, job_db) -> None:
+    """#1279 R3b：inline 产线 HEAD 空 ETag → fail-closed（503，不落
+    ready+etag='' 的永久无身份行）。"""
+    from server.app.services.materials import MaterialStorageUnavailableError
+    from server.app.services.run_text_items import materialize_text_items
+
+    workspace_id = _create_workspace(client)
+    no_etag_storage = FakeStorage(no_etag=True)
+    client.app.state.materials_service.storage = no_etag_storage
+    with pytest.raises(MaterialStorageUnavailableError):
+        materialize_text_items(
+            job_db,
+            client.app.state.materials_service,
+            workspace_id,
+            [{"type": "text", "content": "A"}],
+        )
+    assert _materials(client, workspace_id) == []
+    assert no_etag_storage.put_calls == 1  # PUT 已发生、HEAD 空 ETag 拒绝落行
+
+
 def test_missing_material_is_reported_before_text_is_stored(client, storage, job_db) -> None:
     """Stored items are validated first: an unknown material id 404s before any
     text material is written (error precedence of the pre-text path)."""
