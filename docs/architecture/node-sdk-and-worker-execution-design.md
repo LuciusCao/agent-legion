@@ -1,5 +1,9 @@
 # 节点 SDK 与 code 节点执行迁移 Worker（合并设计）
 
+> **历史设计记录**（#1103）：现行参考（执行链、运行时契约、SDK API、Worker code 协议、
+> 体积上限配置、残余面）已抽出到 [node-sdk-and-worker-execution.md](node-sdk-and-worker-execution.md)；
+> 本文保留批次设计与盘点，章节号不变以兼容代码注释中的 `§N` 引用。
+
 状态：批次 0/1 已实现；批次 2 已实施（§7，协议 v2 + schema v39，2026-08 落地）；
 批次 3 已取消（§9）。**2026-08-17 更新（#82/#96）**：§4.2 API 表面已扩展
 （entrypoint / batch_payload / root_dir + http_client / media 姊妹模块）；

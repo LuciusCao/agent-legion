@@ -674,8 +674,8 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
 
 - [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)：
   架构承诺的反向审计证据矩阵（EXEC-GENERATION-001 行）。
-- [node-sdk-and-worker-execution-design.md](node-sdk-and-worker-execution-design.md)：
-  节点 SDK 与 Worker 执行模型（lease、job_dir、产物通道的底层设计）。
+- [node-sdk-and-worker-execution.md](node-sdk-and-worker-execution.md)：
+  节点 SDK 与 Worker 执行模型（lease、job_dir、产物通道；底层设计过程见其链接的历史设计稿）。
 - [backend.md](backend.md)：后端服务总览（lease 申请、对象存储、配置治理）。
 - AGENTS.md §6 Boundary Rules：EXEC-ARTIFACT-STORE-001（产物权威副本在对象
   存储）、EXEC-APPROVAL-001（审批门语义）等关联红线的摘要。

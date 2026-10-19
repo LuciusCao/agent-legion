@@ -358,7 +358,9 @@ membership（viewer 只读），全会话 admin 直接放行。外部系统的�
   也不再被任何写入覆盖）；key 一律由服务端生成，请求输入除 job_id 与产物
   名外无法影响签名目标；URL 只含 SigV4 签名参数，不含任何凭据。同名产物
   重新登记后被取代的旧版本对象随即删除，旧 URL 答 404（`NoSuchKey`）——
-  与 403 一样按「重取清单」处理。设计与对象存储实测见
+  与 403 一样按「重取清单」处理。现行机制见
+  [materials-and-runs.md §4.5](architecture/materials-and-runs.md#45-产物-key-布局与直连-url-版本固定853)，
+  方案对比与对象存储实测见历史设计稿
   [artifact-direct-url-pinning.md](architecture/artifact-direct-url-pinning.md)。
 - **吊销 SOP**：吊销 token 不会让已签发 URL 失效。需要立即切断访问时，
   先把实例 TTL 调到最小（60 秒，重启生效，只约束之后签发的 URL），再删除
