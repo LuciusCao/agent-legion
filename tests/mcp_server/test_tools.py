@@ -133,7 +133,7 @@ def test_loopback_tools_are_async() -> None:
     server = create_mcp_server(
         McpServerConfig(api_base="http://backend.test:9000", token="t", session_id="sess-1")
     )
-    tools = server._tool_manager._tools  # pinned mcp==1.29 internals
+    tools = server._tool_manager._tools  # pinned mcp==1.30 internals
     for name in (
         "get_studio_context",
         "get_active_workflow",
@@ -592,7 +592,7 @@ def test_static_config_without_session_skips_session_tools() -> None:
     # registers the two session-bound tools (they could only answer
     # "unavailable"); the callable-resolver HTTP transport keeps them.
     server = create_mcp_server(_CONFIG)
-    tools = server._tool_manager._tools  # pinned mcp==1.29 internals
+    tools = server._tool_manager._tools  # pinned mcp==1.30 internals
     assert len(tools) == 33
     assert "get_studio_context" not in tools
     assert "get_job_context" not in tools
