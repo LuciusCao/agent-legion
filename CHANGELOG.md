@@ -39,13 +39,13 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Security
 
 - 无 hash 材料建立 ETag 内容身份与消费核验链（issue #1279，schema v98）：complete 的 HEAD ETag 与 ready 原子落 `materials.object_etag`，inline 文本和 demo seed 同样记录，空 ETag 直接 fail-closed；complete 的 sha256 流读绑定 HEAD ETag，Host 单材料/bundle/分片物化与 Worker 下载在 cache miss 时用 `If-Match` 把所取字节绑定到该身份，complete 后同尺寸覆盖会以 412 / MaterializeError 暴露而非静默消费。无 hash 缓存地址包含上传代次，repair 后旧缓存不会复活。v98 前完成的 `object_etag=''` 存量行仍维持 size-only，身份建立由 #1316 跟进，残留边界见升级注意。
-- mcp 定向升级 1.29.0 → 1.30.0（CVE-2026-59951 / GHSA-84m7-p3x7-pcfv）：修复默认 stateful Streamable HTTP 会话无限积累导致的内存耗尽——本应用以默认 FastMCP + `streamable_http_app()` 提供 Studio MCP HTTP 面，scoped Bearer 守卫只减少匿名暴露，持有效 token 者仍可无限开会话，故不豁免。约束保持 `>=1.12,<2`；上游 1.30 另含 30 分钟空闲会话过期与 10k 会话上限、同源 redirect 与 OAuth issuer 校验（server 未使用 OAuth client/AuthSettings），两处 pinned internals 注释同步到 1.30。
+- mcp 定向升级 1.29.0 → 1.30.0（CVE-2026-59951 / GHSA-84m7-p3x7-pcfv）：修复默认 stateful Streamable HTTP 会话无限积累导致的内存耗尽——本应用以默认 FastMCP + `streamable_http_app()` 提供 Studio MCP HTTP 面，scoped Bearer 守卫只减少匿名暴露，持有效 token 者仍可无限开会话，故不豁免。约束保持 `>=1.12,<2`；上游 1.30 另含 30 分钟空闲会话过期与 10k 会话上限、同源 redirect 与 OAuth issuer 校验（server 未使用 OAuth client/AuthSettings），pinned internals 注释（server 与测试共 5 处）同步到 1.30。
 - DOMPurify 升级 3.4.13 → 3.4.17（两项 XSS 公告，均要求 `IN_PLACE` 模式）：纯 lockfile 升级，manifest 约束 `^3.4.13` 不变；本应用传入字符串、未设 `IN_PLACE`，`afterSanitizeAttributes` hook 只改/删属性不移除节点，当前形态不满足已公告触发链，升级为不保留已知漏洞版本。
 
 ### Maintenance
 
 - 测试与内部结构治理（issue #1118、PR #1310 等）：Studio empty-turn 宽限测试改为事件驱动，消除真实 50ms 竞速；token usage 数据访问收进 JobQueries 门面；`shared/pi_events.py` 扫描逻辑与 Worker stderr 证据模块拆分并回收已关闭锚点的预算豁免。运行时契约不变。
-- 退役已修复/已稳定的 flaky registry 条目（#1150 nightly 门禁治理）：FLAKY-016 已由 `6c05d19f2` 的 `lost_armed` 定向修复消除「never reached running」竞态（测试已迁至 `tests/workers/test_execution_run_handoff.py`）；FLAKY-017 根因（关池丢弃排队 rollback 导致后续 TRUNCATE 30s lock timeout）已由 #1078 修复；FLAKY-018 在 #1151 将 CI postgres 钉 `-n1` 后两轮完整 backend CI 的 rerun 汇总为 0。三条旧 nodeid 均已失效，删除后若复发会成为 unregistered rerun 硬失败，比继续吸收更能强制根因治理。
+- 退役已修复/已稳定的 flaky registry 条目（#1150 nightly 门禁治理）：FLAKY-016 已由 `6c05d19f2` 的 `lost_armed` 定向修复消除「never reached running」竞态（测试已迁至 `tests/workers/test_execution_run_handoff.py`）；FLAKY-017 根因（关池丢弃排队 rollback 导致后续 TRUNCATE 30s lock timeout）已由 #1078 修复；FLAKY-018 在 #1151 将 CI postgres 钉 `-n1` 后两轮完整 backend CI 的 rerun 汇总为 0。FLAKY-016/017 的旧 nodeid 已随测试文件迁移失效；FLAKY-018 的 nodeid 仍在现行代码（`tests/routes/test_agent_workers.py`）中、条目删除后复发即成为 unregistered rerun 硬失败，比继续吸收更能强制根因治理。
 - 部署与恢复文档同步材料 v6 协议、单次使用 key、ETag 后端契约、行级重传与 S3 恢复重绑步骤；对象存储后端必须提供非空 HEAD ETag 与单 GET 原子快照，支持矩阵内 AWS S3 / MinIO / SeaweedFS 已核对。
 
 ### 升级注意
