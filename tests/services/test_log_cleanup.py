@@ -70,6 +70,7 @@ def test_cleanup_removes_old_logs_and_run_dirs(tmp_path):
             "job-1",
             "node-a",
             log_path=make_data_relative(log_path, data_dir),
+            run_dir=make_data_relative(run_dir, data_dir),
             finished_at=old_finished,
         )
 
@@ -109,7 +110,10 @@ def test_cleanup_keeps_recent_logs_and_run_dirs(tmp_path):
     assert run_dir.exists()
 
 
-def test_cleanup_derives_run_dir_when_empty(tmp_path):
+def test_cleanup_keeps_run_dir_when_row_run_dir_empty(tmp_path):
+    """#1315: 过期行的 run_dir 为空 = 该行不拥有任何目录（从未记录，或已被
+    keep-only-latest 删除并清空列）。sweep 不得为这类行推导/删除任何目录；
+    残留目录由 keep-only-latest 按目录自身时间戳兜底。"""
     data_dir, db = _make_db(tmp_path)
     run_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a" / "tok-1"
     run_dir.mkdir(parents=True)
@@ -132,8 +136,119 @@ def test_cleanup_derives_run_dir_when_empty(tmp_path):
     cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
     logs, dirs = cleanup_old_logs(db, data_dir, cfg)
     assert logs == 1
+    assert dirs == 0
+    assert run_dir.exists()
+
+
+def test_cleanup_empty_run_dir_row_never_deletes_current_run_dir(tmp_path):
+    """#1315 回归：过期空 run_dir 行与「当前活跃 worker 目录」共存时，sweep
+    不得误删活跃目录——fallback 推导出的 max-mtime token 目录属于更新的 run
+    （由更新行的 run_dir 与 retention 时间线管辖），不属于这条过期行。"""
+    data_dir, db = _make_db(tmp_path)
+    worker_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a" / "worker"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "events.jsonl").write_text("current run events")
+
+    old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
+    recent_finished = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    with db.connect() as conn:
+        _seed_workspace(conn)
+        _insert_job(conn, "job-1")
+        # 历史过期行：run_dir 已丢失（空）——#1315 的触发形态
+        _insert_node_run(conn, "job-1", "node-a", finished_at=old_finished)
+        # 当前 run 的归属行：run_dir 指向 worker 目录，远在 retention 线内
+        _insert_node_run(
+            conn,
+            "job-1",
+            "node-a",
+            run_dir=make_data_relative(worker_dir, data_dir),
+            finished_at=recent_finished,
+        )
+
+    cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
+    _logs, dirs = cleanup_old_logs(db, data_dir, cfg)
+
+    assert dirs == 0
+    assert (worker_dir / "events.jsonl").read_text() == "current run events"
+
+
+def test_cleanup_shared_run_dir_claim_strips_stale_claim_without_deleting(tmp_path):
+    """#1315 r1：存量共享认领（部署前 finish 不转移所有权，过期行与新鲜行
+    共享同一非空 run_dir——worker 固定 token 目录形态）。sweep 不得删除共享
+    目录，只缴清过期行的陈旧认领；目录等唯一认领行自己过期时才删除。"""
+    data_dir, db = _make_db(tmp_path)
+    worker_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a" / "worker"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "events.jsonl").write_text("current run events")
+    worker_rel = make_data_relative(worker_dir, data_dir)
+
+    old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
+    recent_finished = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    with db.connect() as conn:
+        _seed_workspace(conn)
+        _insert_job(conn, "job-1")
+        _insert_node_run(conn, "job-1", "node-a", run_dir=worker_rel, finished_at=old_finished)
+        _insert_node_run(conn, "job-1", "node-a", run_dir=worker_rel, finished_at=recent_finished)
+
+    cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
+    _logs, dirs = cleanup_old_logs(db, data_dir, cfg)
+
+    assert dirs == 0
+    assert (worker_dir / "events.jsonl").read_text() == "current run events"
+    with db._connect_read() as conn:
+        rows = conn.execute("select run_dir from node_runs order by finished_at").fetchall()
+    # 过期行的认领被缴清；新鲜行成为唯一认领者。
+    assert [row["run_dir"] for row in rows] == ["", worker_rel]
+
+    # 唯一认领行自己过期后，目录才被删除（finished_at 晚于游标，下轮必被啃到）。
+    with db.connect() as conn:
+        conn.execute(
+            "update node_runs set finished_at = %s where run_dir = %s",
+            ((datetime.now(UTC) - timedelta(days=39)).isoformat(), worker_rel),
+        )
+    _logs, dirs = cleanup_old_logs(db, data_dir, cfg)
     assert dirs == 1
-    assert not run_dir.exists()
+    assert not worker_dir.exists()
+
+
+def test_cleanup_same_chunk_expired_shared_claims_still_delete_dir(tmp_path):
+    """#1315 r2 P2-1：同 chunk 两条过期共享认领行（40d / 39d，批缴清尚未
+    flush）——守卫判据必须是「存在更新认领者」：c1 缴清（c2 更新），c2 是
+    最新认领者=指定所有者、无更新认领者 → 正常删除目录。「任一其他认领者」
+    判据会把 c2 一并缴清：游标越过、行永不重访，目录永久泄漏。"""
+    data_dir, db = _make_db(tmp_path)
+    worker_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a" / "worker"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "events.jsonl").write_text("expired run events")
+    worker_rel = make_data_relative(worker_dir, data_dir)
+
+    with db.connect() as conn:
+        _seed_workspace(conn)
+        _insert_job(conn, "job-1")
+        _insert_node_run(
+            conn,
+            "job-1",
+            "node-a",
+            run_dir=worker_rel,
+            finished_at=(datetime.now(UTC) - timedelta(days=40)).isoformat(),
+        )
+        _insert_node_run(
+            conn,
+            "job-1",
+            "node-a",
+            run_dir=worker_rel,
+            finished_at=(datetime.now(UTC) - timedelta(days=39)).isoformat(),
+        )
+
+    cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
+    _logs, dirs = cleanup_old_logs(db, data_dir, cfg)
+
+    assert dirs == 1
+    assert not worker_dir.exists()
+    with db._connect_read() as conn:
+        rows = conn.execute("select run_dir from node_runs order by finished_at").fetchall()
+    # c1 的认领被缴清；c2（最新认领者）执行了删除，保留其已失效的认领值。
+    assert [row["run_dir"] for row in rows] == ["", worker_rel]
 
 
 def test_cleanup_config_from_settings():
@@ -248,7 +363,7 @@ def test_cleanup_processes_expired_rows_in_chunks(tmp_path, monkeypatch):
     assert not any(log_dir.glob("completed-*.log"))
     assert not any(log_dir.glob("failed-*.log"))
     assert recent_log.exists()
-    # 1 job-id read + at least 2 chunk reads per status proves chunked paging.
+    # At least 2 chunk reads per status proves chunked paging.
     assert reads >= 3
 
 
@@ -306,10 +421,13 @@ def test_cleanup_deletes_files_outside_db_transaction(tmp_path, monkeypatch):
 
     assert removed_paths, "expected filesystem deletions to be exercised"
     assert logs == 1
-    assert dirs == 2  # keep-latest sweep removes tok-old; retention deletes derived tok-new
+    # keep-latest removes tok-old and clears the row's run_dir; with the #1315
+    # fail-closed rule the retention pass must not derive a replacement target
+    # for the now-empty claim, so tok-new (owned by no expired row) survives.
+    assert dirs == 1
     assert not log_path.exists()
     assert not old_dir.exists()
-    assert not new_dir.exists()
+    assert new_dir.exists()
     with db._connect_read() as conn:
         row = conn.execute("select run_dir, session_dir from node_runs").fetchone()
     assert row["run_dir"] == ""

@@ -70,7 +70,7 @@ def test_sweep_forces_index_and_serves_pages(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "_connect_read", _recording_read)
 
     cutoff = datetime.now(UTC) - timedelta(days=30)
-    logs, _dirs = cleanup_sweep.sweep_expired_node_runs(db, data_dir, cutoff, cutoff, {})
+    logs, _dirs = cleanup_sweep.sweep_expired_node_runs(db, data_dir, cutoff, cutoff)
 
     # The expired log was still removed under the forced-index page read.
     assert logs == 1
@@ -113,7 +113,7 @@ def test_sweep_skips_unresolvable_log_path_and_continues(tmp_path, monkeypatch):
         )
 
     cutoff = datetime.now(UTC) - timedelta(days=30)
-    logs, _dirs = cleanup_sweep.sweep_expired_node_runs(db, data_dir, cutoff, cutoff, {})
+    logs, _dirs = cleanup_sweep.sweep_expired_node_runs(db, data_dir, cutoff, cutoff)
 
     # 不可解析路径的行被跳过；可解析的行照常删除
     assert logs == 1
@@ -139,7 +139,7 @@ def test_sweep_unresolvable_run_dir_warns_without_raising(tmp_path):
 
     cutoff = datetime.now(UTC) - timedelta(days=30)
     # ManagedPathError 被窄捕获 → 不上抛；返回 0（该行跳过）
-    logs, dirs = cleanup_sweep.sweep_expired_node_runs(db, data_dir, cutoff, cutoff, {})
+    logs, dirs = cleanup_sweep.sweep_expired_node_runs(db, data_dir, cutoff, cutoff)
     assert (logs, dirs) == (0, 0)
 
 
@@ -168,5 +168,5 @@ def test_sweep_survives_os_level_resolve_failures(tmp_path, monkeypatch):
 
     cutoff = datetime.now(UTC) - timedelta(days=30)
     # PermissionError 被 per-row 吞掉（warning），不上抛、游标推进
-    logs, _dirs = cleanup_sweep.sweep_expired_node_runs(db, data_dir, cutoff, cutoff, {})
+    logs, _dirs = cleanup_sweep.sweep_expired_node_runs(db, data_dir, cutoff, cutoff)
     assert logs == 0

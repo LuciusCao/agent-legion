@@ -114,7 +114,7 @@
       "via": [
         "finish_lease"
       ],
-      "note": "finish（含分片臂）：锁内重读 lease 仍 active 才收尾（codex #774 P1），过期代次只收尾不翻转"
+      "note": "finish（含分片臂）：锁内重读 lease 仍 active 才收尾（codex #774 P1），过期代次只收尾不翻转；finish 写 run_dir=D 时同事务缴清其他行对 D 的认领（#1315 所有权转移：一个磁盘目录同一时刻至多被一个 node_runs 行拥有，否则共享固定 token 目录的历史行过期会误删当前 run 目录）"
     },
     "server/app/executors/_lease_expiry.py": {
       "via": [
@@ -206,7 +206,7 @@
     },
     "server/app/services/cleanup_sweep.py": {
       "via": [],
-      "note": "历史 run_dir 簿记清理（只清 run_dir/session_dir 列，非状态翻转）"
+      "note": "历史 run_dir 簿记清理（只清 run_dir/session_dir 列，非状态翻转）；#1315 共享认领守卫：过期行的 run_dir 被 (finished_at,id) 序更新的行认领时只 CAS 缴清本行陈旧认领、绝不删目录，最新认领者过期即正常删除（经 JobQueries.release_stale_run_dir_claims 批 flush）"
     },
     "server/app/services/quality_replay_setup.py": {
       "via": [],
