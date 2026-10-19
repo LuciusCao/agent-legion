@@ -48,8 +48,8 @@ workflow、预览面板与节点代码 / prompt 相关工具都是**读取 / 校
 
 - `get_preview_guide`：预览面板 playbook（本地静态资源，不发 HTTP）。
 - `get_preview_context`：workspace 最近 job 的产物清单 + 单 job 的限幅内容采样，用来对齐真实数据形状。
-- `get_preview_panel`：已发布 bundle + 待发布草稿，皆空即内置回落。
-- `save_preview_panel_draft`：单文件 HTML bundle，校验非空 / 完整文档 / ≤256KiB，覆盖式草稿。没有发布工具——发布永远是人在 job detail 页「定制预览」对话框里的点击。
+- `get_preview_panel`：已发布 bundle + 待发布草稿，皆空即内置回落。可选 `output_path` 把完整 JSON 导出到 workspace 暂存目录的新文件（不覆盖已有文件），只返回路径/字节数/SHA-256，供本地提取 html 编辑后再用 `html_path` 存回（#1272）。
+- `save_preview_panel_draft`：单文件 HTML bundle，校验非空 / 完整文档 / ≤256KiB，覆盖式草稿。`html` 与 `html_path` 二选一：`html_path` 从 workspace 暂存目录读 UTF-8 HTML（相对该目录，或目录内绝对路径），与 inline `html` 同一 256 KiB 上限，带 `html_path` 时响应中的 `html` 折叠为 `html_bytes`/`html_sha256` 回执（#1272）。响应携带刚写入草稿的 `html_hash`。没有发布工具——发布永远是人在 job detail 页「定制预览」对话框里的点击。
 
 **Job 观测**（#329，全部只读）
 
@@ -66,12 +66,13 @@ job 观测组没有任何生效工具：重跑类动作由 agent 引用 `suggest
 
 ## 大文件的字节精确编辑（#767/#768）
 
-`get_node_code`、`get_skill`、`get_shared_materials` 可以传
+`get_node_code`、`get_skill`、`get_shared_materials`、`get_preview_panel` 可以传
 `output_path="snapshot.json"`，将完整响应直接导出到 MCP 主机的
 `<进程 cwd>/data/studio-mcp-files/<workspace_id>/`，只返回路径、
 字节数与 SHA-256。同机 agent 可本地解析、修改，再传 `code_path`
-（节点源码）或 `files_path`（skill/shared 的 JSON 文件列表，亦接受
-完整导出响应）提交；单个文件条目也支持 `file_path` 替代 `content`。
+（节点源码）、`files_path`（skill/shared 的 JSON 文件列表，亦接受
+完整导出响应）或 `html_path`（预览面板 HTML）提交；单个文件条目也支持
+`file_path` 替代 `content`。
 原来的 inline 参数保持兼容。不要同时提交路径参数和对应正文参数。
 
 完整 skill 编辑导出仅限当前 workspace 自有的 skill；group skill 只能通过

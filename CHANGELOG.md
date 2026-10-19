@@ -4,10 +4,68 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-19
+
+主打 Studio 长会话与草稿协作、材料内容身份与 Worker 容量治理：长对话单行合并与历史分页、会话自动恢复、草稿代次 CAS 与发布单一权威；材料上传代次和 ETag 全链核验（Worker 协议 v6）；Worker 节点级并发上限与一批执行面/UI 稳定性修复。
+
+### Added
+
+- Worker 节点级并发上限（issue #1158，schema v94）：Worker 控制台新增 `node_concurrency_limits {node_key: N}`，按「本机 × 裸 node_key」限制 agent 与 code 执行数，随下一次 claim 热同步，无需重启或重注册；空配置保持不限，跨 workspace 同名节点按机器资源语义保守合并计数。Host 批读预过滤、批内预留与写相权威复核共同避免队头饿死；code 节点同时受 workspace 全局节点上限与本机上限约束。
+- Studio Chat 长历史分页与持续校准（issues #1120、#1236、#1265、#1270 及后续时序族）：messages 接口新增 `before_seq` / `has_more`，并提供按消息 id 点读；前端支持滚动到顶部加载更早消息、滚动锚定补偿、未溢出短会话主动补拉与失败重试。跨会话迟到分页、SSE 全量校准与窗口外原地更新行统一受代次和快照守卫，点读冲突后会再收口一次，历史不再被最新 500 行窗口截断，也不长期停留在工具调用中间态。
+- 子代理保存草稿也出草稿卡（issue #1123，schema v95）：Agent/AgentSwarm 保存 workflow 或节点代码草稿的成功路径由后端补写合成 `draft` 时间线消息，前端与主 agent 的工具事件按实体去重，用户可直接在对话内查看、应用或进入发布流程；写面绑定会话 token、runtime 代次、草稿代次与归档状态，迟到或越权事件不会落到别的会话。
+- Studio MCP 翻页与大面板文件入口（issues #1261、#1272）：`list_jobs` 透传 `cursor` 并返回 `next_cursor`，超过单页 limit 的 job 可用于诊断；`save_preview_panel_draft` 新增 `html_path`，`get_preview_panel` 新增 `output_path` 导出，沿用暂存目录授权、链接拒绝和 256 KiB 上限，大 HTML 不必再逐字内联进工具参数。
+- 材料恢复工具（issue #1279）：`scripts/request_material_reupload.py` 把 ETag 失配的原 material_id 翻回 uploading、推进代次并轮换 key，签发受代次保护的一小时重传 URL，重传后历史 job/bundle 引用随原 id 愈合；`scripts/rebind_material_etags.py` 用于 S3 快照恢复后的 ETag 重绑，默认 dry-run，逐行核验 size/hash 后才 CAS 更新，无法核验的行只报告并以非零码退出。
+- 超多节点 stepper 紧凑形态（issues #1124、#1257）：节点数超过 50 时改为 `current/total` 数字进度与细进度条，避免分段条被 flex gap 压塌；50 节点以内保留原视觉，DAG 与 job 列表共用紧凑组件。
+
+### Changed
+
+- **Breaking (API/behavior):** Studio workflow 草稿 CAS 从时间戳改为代次（issue #1221，schema v96）：草稿读取、保存与 409 冲突响应携带 `generation`，PUT 的 `expected_updated_at` 改为 `base_generation`；Studio-agent `save_workflow_draft` 必填代次，人侧 PUT 省略时仍保留无 CAS 的 legacy last-write-wins 兼容路径，因此旧 `expected_updated_at` 不再构成冲突保护。每次保存与发布都推进代次；发布成功在同一事务删除草稿行并推进代次，发布前在途写不能复活已删草稿，所有 tab 最终以新 revision 为唯一权威，语义等价的旁观画布不再误报 dirty。发布成功后若要按草稿做 quality replay，需要先重新编辑生成草稿。
+- 材料 presign / complete 引入上传代次与单次使用 key（issues #1119、#1267、#1269，schema v97）：新对象 key 采用 `{workspace}/{hash|id}/v2g{generation}/m_{material_id}/{filename}`，每次 presign 重试在行锁内推进代次并换 key，旧 PUT URL 随之失效；`MaterialRecord` 新增 `upload_generation`，complete 可携带 `expected_upload_generation`，错代次在任何对象 I/O 前返回 409 且不改行，旧的无 body complete 调用仍兼容。filename 拒绝以 `/` 结尾、空段、`.`/`..` 段、反斜杠与控制字符，非空 content_hash 必须是 64 位小写 sha256；并发删除/TTL 回收下的 presign 重试由断言改为 404。
+- Worker 协议升级到 v6（issue #1279）：claim 材料描述符增量携带 `object_etag` 与 `upload_generation`，v6 Worker 下载时附加 `If-Match`，无 hash 缓存地址纳入代次；Host 对 pre-v6 Worker 跳过「无 hash 且 ETag 已绑」的材料候选，任务留队列而非失败，hash 行与 `etag=''` 行不受门禁。`min_protocol_version` 仍为 1，正常升级不需要调整。
+- Studio Chat 会话层无感续期（issue #1121）：scoped token TTL 从 2 小时调整为 24 小时、续期阈值从 30 分钟调整为 4 小时；发送前先检查活性，死 token 在 per-session 临界区内自动 resume、铸新 token 并重建 runtime，成功后才把消息入库发送，并发发送只恢复一次。自动恢复期间显示轻量状态，失败时保留输入草稿与手动「继续对话」入口；过期 token 本身不复活，会话关闭吊销和效应端点权限约束不变。
+
 ### Fixed
 
 - Studio 发布请求 confirming 状态 300s 超时误回收（issue #464）：confirm 执行期（门禁 → before/after 探测 → publish → resolve 全程，含失败回滚分支）由守护线程按 CONFIRMING_STALE_SECONDS/5（60s）周期续租 claimed_at，谓词骑在 UPDATE 上（status='confirming'，失配 rowcount=0 即停跳），慢发布不再被轮询侧的 stale-confirming 谓词误改成 expired；无心跳的死进程行仍按原谓词被清扫为 expired（owner-liveness 语义，非豁免）。心跳线程启动失败（进程线程上限等）同样走回滚路径：claim 已提交的 confirming 行退回 pending，不再滞留 300s 等清扫（#1256 codex P2）。
 - Studio Agent 注册表 PUT 陈旧快照冲突检查（issue #355）：管理员基于旧快照编辑期间若启动探测或「重新检测」先提交，整份 PUT 会静默删除新探测到的 detected 行。GET 响应现携带注册表内容版本 `revision`（存储文档 canonical JSON 的 sha256 前缀；版本输入只含 agents 与显式存储的 api_base——未配置时按进程实际地址推导的 api_base（#915）不参与，重启/换端口不会产生假陈旧），PUT 带上该版本后服务端在 `SELECT ... FOR UPDATE` 同一事务内比对，不匹配返回 409 且 detail 携带当前注册表（#719 错误形态）；前端弹确认对话框，「刷新注册表」直接采用 409 detail 携带的最新文档一次性前进编辑器（invalidate 重取进不了已挂载编辑器，否则会 409 死循环），不自动重试；省略 `revision` 的调用保持原整份替换语义（smoke 脚本已改为携带 GET 到的 revision）。
+- Studio Chat 长对话内存与历史可用性（issue #1120）：同一 `toolCallId` 的流式更新由逐快照新增行改为原地合并单行，避免数据库行数、前端消息拷贝与最新窗口被工具更新乘法放大；runtime 重建后的归属缺失退化为新增行而不丢数据。工具卡默认只渲染前 4000 字符并可二次展开完整输出，视图派生按消息缓存增量归并，未变消息与动作回调保持引用稳定，流式 chunk 不再穿透整表 memo。
+- `.gz` 产物 raw Range 请求恢复浏览器预览（issues #1259、#1274）：带 Range 的 gzip 对象改按解压字节口径返回 206 流式区间或 416，Content-Range 使用解压长度；不支持的多区间/后缀区间或长度未知时回退全量解压 200，无 Range 的既有 gzip 透传不变。raw 与 external artifacts 的 OpenAPI 均补齐 416 声明。
+- legacy agent 节点执行投影与路由漂移一致化（issue #1128）：job 详情与 Studio MCP 复用 dispatch 的路由裁决，Agent 归档或 capability 变更后返回 `route_error`，不再一面判配置失败、一面显示正常；Worker 路由缓存命中也会重新裁决漂移，缓存键纳入冻结 capability，避免 TTL 内旧路由或跨 capability 污染。`route_error` 已进入 API/MCP，前端专门展示尚未做。
+- Studio 节点编辑与发布稳定性（issues #405、#1122、#1221）：approval 切出时 capability 在同一提交补齐，upstream 只统计真实入边；异常草稿的数组/边集/skill 字段统一归一化，类型切换、检查器与画布不再因原型链键或畸形形状误判。发布代次、空态重取、会话上下文与草稿卡统一按同一代次判定，修复 Agent 发布后 dirty 永真及尾随保存复活草稿等收敛问题。
+- 任务进度与会话 UI（issues #1127、#1129、#1275、#1277、#1292、#1294）：归档/删除确认改为标题下方的行内展开，不再用警告卡替换整行；退役的「Workflow Key」文案从创建与发布对话框移除。active node 统一按 running → failed → awaiting_approval → ready 等执行口径解析，同优先级按 id 决胜，列表行、节点筛选、facet 与紧凑 stepper 不再各自显示不同的当前节点。
+- 数据库小池形态的嵌套 checkout（issue #1239）：token usage capture 改为顺序读写连接，blocked-queue 诊断改为先骑调用方连接采样、释放后再落库；`AGENT_LEGION_DB_POOL_MAX_SIZE=1` 时不再因二次取连接等待 10 秒，usage 行不再静默丢失，诊断也不会把 PoolTimeout 传播进 claim 响应。
+- 材料孤儿扫描与命名边界（issues #1269、#1285、#1287、#1295）：`gc-s3-jobs.py` 覆盖 bucket 根材料前缀并分页扫描，`.rollback` 豁免收窄到 jobs 前缀，撞名 `jobs` / `jobs-staging` workspace 的材料形态 key 会被分流而非误并入 job 产物；complete 的 ready 幂等快路也移到代次检查之后。鉴于 key 复用和 PUT→行发布窗口，材料孤儿当前只扫描报告、不进入删除批，job 产物 GC 保持既有路径。
+
+### Security
+
+- 无 hash 材料建立 ETag 内容身份与消费核验链（issue #1279，schema v98）：complete 的 HEAD ETag 与 ready 原子落 `materials.object_etag`，inline 文本和 demo seed 同样记录，空 ETag 直接 fail-closed；complete 的 sha256 流读绑定 HEAD ETag，Host 单材料/bundle/分片物化与 Worker 下载在 cache miss 时用 `If-Match` 把所取字节绑定到该身份，complete 后同尺寸覆盖会以 412 / MaterializeError 暴露而非静默消费。无 hash 缓存地址包含上传代次，repair 后旧缓存不会复活。v98 前完成的 `object_etag=''` 存量行仍维持 size-only，身份建立由 #1316 跟进，残留边界见升级注意。
+- mcp 定向升级 1.29.0 → 1.30.0（CVE-2026-59951 / GHSA-84m7-p3x7-pcfv）：修复默认 stateful Streamable HTTP 会话无限积累导致的内存耗尽——本应用以默认 FastMCP + `streamable_http_app()` 提供 Studio MCP HTTP 面，scoped Bearer 守卫只减少匿名暴露，持有效 token 者仍可无限开会话，故不豁免。约束保持 `>=1.12,<2`；上游 1.30 另含 30 分钟空闲会话过期与 10k 会话上限、同源 redirect 与 OAuth issuer 校验（server 未使用 OAuth client/AuthSettings），两处 pinned internals 注释同步到 1.30。
+- DOMPurify 升级 3.4.13 → 3.4.17（两项 XSS 公告，均要求 `IN_PLACE` 模式）：纯 lockfile 升级，manifest 约束 `^3.4.13` 不变；本应用传入字符串、未设 `IN_PLACE`，`afterSanitizeAttributes` hook 只改/删属性不移除节点，当前形态不满足已公告触发链，升级为不保留已知漏洞版本。
+
+### Maintenance
+
+- 测试与内部结构治理（issue #1118、PR #1310 等）：Studio empty-turn 宽限测试改为事件驱动，消除真实 50ms 竞速；token usage 数据访问收进 JobQueries 门面；`shared/pi_events.py` 扫描逻辑与 Worker stderr 证据模块拆分并回收已关闭锚点的预算豁免。运行时契约不变。
+- 退役已修复/已稳定的 flaky registry 条目（#1150 nightly 门禁治理）：FLAKY-016 已由 `6c05d19f2` 的 `lost_armed` 定向修复消除「never reached running」竞态（测试已迁至 `tests/workers/test_execution_run_handoff.py`）；FLAKY-017 根因（关池丢弃排队 rollback 导致后续 TRUNCATE 30s lock timeout）已由 #1078 修复；FLAKY-018 在 #1151 将 CI postgres 钉 `-n1` 后两轮完整 backend CI 的 rerun 汇总为 0。三条旧 nodeid 均已失效，删除后若复发会成为 unregistered rerun 硬失败，比继续吸收更能强制根因治理。
+- 部署与恢复文档同步材料 v6 协议、单次使用 key、ETag 后端契约、行级重传与 S3 恢复重绑步骤；对象存储后端必须提供非空 HEAD ETag 与单 GET 原子快照，支持矩阵内 AWS S3 / MinIO / SeaweedFS 已核对。
+
+### 升级注意
+
+- **数据库：** 升级前备份 PostgreSQL；Host 启动会自动按序执行 v94–v98，包括 Worker 节点上限列、聊天 draft kind、草稿代次表、材料上传代次列与材料 ETag 列。迁移只向前，不要把 v98 dump 恢复给旧代码；需要回滚时使用升级前备份，并按 runbook 配套处理 Host 与 Worker。
+- **Host / Worker 顺序：** 必须先升 Host 到 v0.8.0 并确认健康，再逐台升级 Worker 到 worker-v0.8.0。新 Worker 对旧 Host 会因 `host_protocol_version` 低于自身 v6 而 exit 2；Host 先升期间旧 Worker 仍可处理普通任务，但已绑 ETag 的无 hash 材料任务只能由 v6 Worker 领取，在仅有旧 Worker 时会保持 queued，升级后自动可领，不需要手工 drain 或调高 `min_protocol_version`。
+- **草稿 API 迁移：** 自写调用方把 `PUT /api/workspaces/{workspace_id}/workflow-draft` 与 `/api/studio-agent/tools/workspaces/{workspace_id}/workflow/draft` 的 CAS 字段从 `expected_updated_at` 改为最近一次 GET/409 返回的 `generation`，作为 `base_generation` 回传；Studio-agent 缺字段返回 422，人侧只发旧字段会落到无 CAS 的兼容路径。发布成功后草稿行不再保留，依赖发布后草稿回放的流程需先重新编辑。
+- **材料上传客户端：** presign 后保存 `material.upload_generation`，complete 时以 `expected_upload_generation` 回传；409 表示上传已被新一轮 presign 取代，应重新 presign，旧 PUT URL 不再可复用。此前接受目录形态、不可归一化 filename 或非 64 位小写 sha256 的调用现在返回 422。
+- **对象存储要求与一次性残留窗：** 后端必须保证 HEAD 返回非空 ETag，且带 `If-Match` 的 GET 返回 open 时刻的原子快照。v98 前完成的存量行 `object_etag=''`，本版不为其新建身份；升级前签出且仍有效的 PUT URL 最长一小时内仍可同尺寸覆盖这些无 hash 对象而不被本版识别。敏感部署可在升级前停止签发上传一小时，或升级后一小时内暂不消费存量无 hash 材料；升级前已经污染的行也无法靠本版反向识别（#1316）。
+- **S3 快照恢复：** 若用 `aws s3 cp --recursive` 重传恢复对象，大文件 ETag 会改变；逐对象校验后、恢复调度前必须依次运行 `uv run python scripts/rebind_material_etags.py`（dry-run）与 `... --apply`，存在无法重绑的行时先人工处置。卷级逐字节冷恢复不改变 ETag，无需重绑。执行期间保持 Host、Worker 与材料写操作停止，避免 #1313 所跟踪的 rebind/repair 并发窗口。
+- **velites：** 本版继续配套 velites-v0.5.8，`velites/` 自该 tag 后无源码差异，不发布新的 velites tag；`scripts/install-worker.sh` 的 Worker 默认值已钉到 0.8.0，`VELITES_VERSION` 保持 0.5.8。
+
+### 已知后续
+
+- #1316：为 `object_etag=''` 的存量无 hash 材料建立可信身份与统一门禁，彻底关闭上述一次性窗口及升级前已污染行不可识别的问题。
+- #1314：先关闭 inline/demo 等写路径的 PUT→材料行发布窗口，再把材料根前缀孤儿重新纳入 GC 删除批；此前材料孤儿仍只报告，实际回收依赖 bucket lifecycle。
+- #1313：加强 `rebind_material_etags.py` CAS 对 storage_key / generation / status 的复核；当前按恢复 runbook 停止相关写入执行。
+- #1309：评估并收口 #853 前 legacy 固定 job authority key 的 GC revalidate→delete 残余窗口；#853 后的 per-attempt uuid key 不在此列。
+- #1329：KaTeX 升级 ≥0.18.2 修复 GHSA-238p-pmpm-9mq7（当前 0.17.0，`^0.17.0` 不允许 0.18.x，0.18/0.19 均含 breaking change，需定向升级并回归 LaTeXSpan/RichText/questionPanel 与默认 CSS）；公告为低严重度且以应用或依赖已存在原型污染为前提，本应用 `renderToString` 后直接 `innerHTML`、没有输出后再 sanitize 的替代防线，残余风险在修复前持续存在。
+- #1330：React Router 迁移 ≥7.18 修复 GHSA-337j-9hxr-rhxg 与 GHSA-wrjc-x8rr-h8h6（当前 6.30.6，两项公告 first patched 均为 7.18.0，需独立 major migration 与全路由/e2e 回归）；SSR hydration constructor injection 项不适用于当前 Declarative Mode（`createRoot` + `BrowserRouter`），但 `<Link>`/`useNavigate` backslash 开放重定向项不能随之排除，仍待升级修复。
 
 ## [0.7.19] - 2026-10-11
 
@@ -738,7 +796,8 @@ Initial open-source release.
 - Demo workflow `education_video_problems_generation` under `examples/`, runnable out of the box against a real LLM.
 - Docker deployment stacks (`deploy/`) and remote worker deployment runbook.
 
-[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.7.6...HEAD
+[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/LuciusCao/agent-legion/compare/v0.7.19...v0.8.0
 [0.7.6]: https://github.com/LuciusCao/agent-legion/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/LuciusCao/agent-legion/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/LuciusCao/agent-legion/compare/v0.7.3...v0.7.4
