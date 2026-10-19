@@ -9,6 +9,8 @@
 #      派生库）——此时对任何非派生库的 DROP 会被 Postgres 直接拒绝，
 #      不依赖调用者小心；
 #   3. 执行前打印每个目标库的 owner 与大小，交互确认（--yes 跳过）；
+#      psql 探测失败（连接级错误）fail-closed 中止——「查询失败」不等于
+#      「库不存在」，状态未知时不确认、不删除（#1084）；
 #   4. 确认之后才取派生名锁（#1084，持锁等用户输入会卡住别的 init），
 #      持锁重新做撞名检查与存在性探测，只删锁内实际存在的库——锁前列出的
 #      集合仅用于确认展示，确认/等锁期间 init 可能补建库（#1084）。删除前
@@ -75,9 +77,15 @@ collect_existing_dbs() {
     FOUND=0
     CONFIRMED=""
     for db in "$DB" "$TEST_DB"; do
-        row="$(psql -d postgres -tAc \
+        # 区分「查询失败」与「库不存在」（#1084）：psql 连接级失败若被吞成
+        # 空结果，未展示的库会跳过确认进入删除集合——探测失败一律 fail-closed。
+        if ! row="$(psql -d postgres -tAc \
             "select r.rolname || '|' || pg_size_pretty(pg_database_size(d.datname)) from pg_database d join pg_roles r on r.oid=d.datdba where d.datname='$db'" \
-            2>/dev/null)" || true
+            2>/dev/null)"; then
+            echo "错误: 探测库 ${db} 失败（Postgres 不可达？），无法确认目标库状态，中止（#1084）。" >&2
+            echo "      请在数据库恢复后重跑本脚本。" >&2
+            return 1
+        fi
         if [[ -n "$row" ]]; then
             FOUND=$((FOUND + 1))
             CONFIRMED="${CONFIRMED} ${db}"
@@ -133,7 +141,12 @@ if [[ "$FOUND" -eq 0 ]]; then
 fi
 
 for db in $CONFIRMED; do
-    if psql -d postgres -tAc "select 1 from pg_database where datname='$db'" 2>/dev/null | grep -q 1; then
+    # 删除前最后复核同样 fail-closed：复核失败时报错中止，不静默跳过（#1084）。
+    if ! exists="$(psql -d postgres -tAc "select 1 from pg_database where datname='$db'" 2>/dev/null)"; then
+        echo "错误: 删除前复核库 ${db} 失败（Postgres 不可达？），中止（#1084）。" >&2
+        exit 1
+    fi
+    if [[ "$exists" == "1" ]]; then
         # 不用 --if-exists：存在性已显式检查，dropdb 的任何报错（含
         # 「must be owner」权限护栏）都应原样失败暴露。
         dropdb "$db"

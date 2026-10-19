@@ -28,8 +28,10 @@
 #   - 派生库/bucket 的存在性以取锁后的重探测为准：锁前 probe 只用于确认
 #     展示，等锁期间 init 补建的资源不会被陈旧的「不存在」结果漏删（#1084）；
 #   - 删库/删 bucket 前持锁重查：同名 worktree 被重建后又注册着也拒绝；
-#   - endpoint 不可达/未配置 S3 时 warning 跳过（对齐 init-worktree.sh 的
-#     降级语义），不影响其余步骤。
+#   - bucket 探测失败（endpoint/鉴权/python 故障，exit 非 0/4/10）fail-closed
+#     中止：探测失败 ≠ 不存在，状态未知时不确认、不推进、不盲删（#1084）；
+#     未配置 S3（确定性状态）仍提示跳过；delete 执行本身失败则 warning 并
+#     提示重跑补齐（删除决策基于锁内成功探测）。
 #
 # 用法: scripts/clean-worktree.sh <worktree名> [--yes] [--delete-remote-branch]
 set -euo pipefail
@@ -107,9 +109,30 @@ worktree_require_unique_derived_names "$ROOT" "$WT" "清理（删除派生库/bu
 # 确认/等锁期间另一流程可能移除原 worktree 并以同名同路径重建（甚至跑完
 # init-worktree.sh）——撞名检查不把同名条目算冲突，识别不了这种替换，没有
 # 身份重验的话删除会落到新实例上。
+# stat 方言（#1084）：BSD（macOS）的 -f 指定输出格式，GNU（Linux）的 -f 是
+# 「查文件系统」标志——同一调用在 GNU 上会往 stdout 打印动态文件系统计数
+# （可用块/inode 数随锁 holder 文件创建而变化）再报错，靠错误回退拼接会
+# 把动态计数混进指纹，把未变化的实例误判为被重建。按 stat --version 探测
+# 一次方言后分流，不做错误回退。
+_STAT_DIALECT=""
+_stat_dialect() {
+    if [[ -z "$_STAT_DIALECT" ]]; then
+        if stat --version >/dev/null 2>&1; then
+            _STAT_DIALECT=gnu
+        else
+            _STAT_DIALECT=bsd
+        fi
+    fi
+    printf '%s' "$_STAT_DIALECT"
+}
 _identity_stat() {
-    # $1: 路径, $2: BSD(macOS) stat 格式, $3: GNU stat 格式。
-    stat -f "$2" "$1" 2>/dev/null || stat -c "$3" "$1" 2>/dev/null || echo "no-stat"
+    # $1: 路径, $2: BSD stat 格式, $3: GNU stat 格式。GNU 的 %W（birthtime）
+    # 在不支持的文件系统上为 0/-，inode+ctime 已足够区分重建。
+    if [[ "$(_stat_dialect)" == "gnu" ]]; then
+        stat -c "$3" "$1" 2>/dev/null || echo "no-stat"
+    else
+        stat -f "$2" "$1" 2>/dev/null || echo "no-stat"
+    fi
 }
 target_identity() {
     if [[ ! -d "$TARGET" ]]; then
@@ -135,7 +158,8 @@ PLANNED_IDENTITY="$(target_identity)"
 # 删除。确认在 bash 侧做——旧实现在 heredoc python 里 input()，stdin 已是
 # EOF 必抛 EOFError，无 --yes 时 bucket 步骤只会降级为 warning 跳过。
 # 退出码约定（两阶段通用）：0=无需/已完成、10=probe 发现 bucket 待删、
-# 4=护栏拒绝；其余（python 异常也退出 1）降级为 warning 跳过。
+# 4=护栏拒绝；其余（python 异常也退出 1）= 失败——probe 阶段 fail-closed
+# 中止，delete 阶段降级为 warning 提示重跑（见调用侧）。
 export CLEAN_WORKTREE_WT="$WT"
 run_bucket_phase() {
     CLEAN_WORKTREE_PHASE="$1" PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run --frozen python - <<'PY'
@@ -255,8 +279,9 @@ report_seaweedfs_leftovers()
 PY
 }
 
-# 4=护栏拒绝：原样失败；其余非零（endpoint 不可达、boto3 缺失、凭据错误等
-# python 异常）降级为 warning 跳过，对齐 init 的降级语义。
+# 4=护栏拒绝：原样失败。探测（probe）失败 fail-closed 由调用侧处理；此处
+# 的降级只覆盖 delete 阶段执行失败（endpoint 抖动、boto3 异常等）——删除
+# 决策基于锁内成功探测，残留可重跑补齐。
 bucket_phase_degraded() {
     echo "提示: S3 endpoint 不可达或清理失败（exit=$1），跳过 bucket 清理。" >&2
     echo "      待共享对象存储（SeaweedFS/RustFS）可达后可重跑本脚本补齐。" >&2
@@ -276,6 +301,13 @@ fi
 bucket_rc=0
 run_bucket_phase probe || bucket_rc=$?
 if [[ "$bucket_rc" -eq 4 ]]; then
+    exit 1
+elif [[ "$bucket_rc" -ne 0 && "$bucket_rc" -ne 10 ]]; then
+    # 探测失败（endpoint/鉴权/python 故障）≠ bucket 不存在（#1084）：状态
+    # 未知时不确认、不推进——否则服务在锁内重探测前恢复，会以免确认模式
+    # 删除从未展示过的 bucket。
+    echo "错误: 派生 bucket 探测失败（exit=${bucket_rc}），无法确认其状态，中止清理（#1084）。" >&2
+    echo "      请在 S3 endpoint 恢复后重跑本脚本。" >&2
     exit 1
 fi
 if [[ -z "$ASSUME_YES" && ( "$db_rc" -eq 10 || "$bucket_rc" -eq 10 ) ]]; then
@@ -358,7 +390,8 @@ fi
 "$DROP_DB" "$WT" --yes
 
 # 4. 派生 S3 bucket：同样在锁内重新 probe（锁前结果仅用于确认展示），存在
-#    才删；删除前把同名重建算冲突（#1084）。
+#    才删；删除前把同名重建算冲突（#1084）。锁内重探测失败同样 fail-closed——
+#    不凭锁前「不存在」跳过，也不在状态未知时盲删。
 rc=0
 bucket_rc=0
 run_bucket_phase probe || bucket_rc=$?
@@ -368,7 +401,9 @@ elif [[ "$bucket_rc" -eq 10 ]]; then
     worktree_require_unique_derived_names "$ROOT" "$WT" "删除派生 bucket" 1 || exit 1
     run_bucket_phase delete || rc=$?
 elif [[ "$bucket_rc" -ne 0 ]]; then
-    rc="$bucket_rc"
+    echo "错误: 锁内派生 bucket 重探测失败（exit=${bucket_rc}），bucket 状态未知，中止（#1084）。" >&2
+    echo "      worktree/派生库可能已删除；S3 endpoint 恢复后重跑本脚本补齐 bucket 清理。" >&2
+    exit 1
 fi
 worktree_name_lock_release
 if [[ "$rc" -eq 4 ]]; then

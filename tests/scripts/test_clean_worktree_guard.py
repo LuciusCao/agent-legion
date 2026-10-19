@@ -72,9 +72,11 @@ _PSQL_STUB = """#!/usr/bin/env bash
 exit 0
 """
 
+# uv 桩：bucket probe 成功且无需删除（probe 失败在 clean-worktree.sh 里是
+# fail-closed 中止，不能再用「uv 失败」模拟跳过路径，#1084）。
 _UV_STUB = """#!/usr/bin/env bash
-echo "uv stub (S3 cleanup skipped)"
-exit 1
+echo "uv stub (bucket probe: nothing to delete)"
+exit 0
 """
 
 

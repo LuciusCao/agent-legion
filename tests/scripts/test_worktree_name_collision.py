@@ -112,18 +112,17 @@ class _Repo:
             shutil.copy(ROOT / "scripts" / name, scripts / name)
 
     def run(
-        self, script: Path, *args: str, cwd: Path | None = None
+        self,
+        script: Path,
+        *args: str,
+        cwd: Path | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        env = {
-            **_git_env(self.tmp),
-            "PATH": f"{self.bin}:/usr/bin:/bin",
-            "STUB_LOG": str(self.log),
-        }
         return subprocess.run(
             ["bash", str(script), *args],
             capture_output=True,
             text=True,
-            env=env,
+            env=_script_env(self, extra_env),
             cwd=cwd or self.main,
             timeout=60,
         )
@@ -409,15 +408,20 @@ _FAKE_S3_MODULES = {
         "class EndpointConnectionError(Exception):\n"
         "    pass\n"
     ),
-    # head_bucket 以状态文件模拟「等锁期间 init 补建了 bucket」。
+    # head_bucket 以状态文件模拟「等锁期间 init 补建了 bucket」；
+    # STUB_BUCKET_FAIL 指向的文件存在时模拟 endpoint 故障（探测 fail-closed
+    # 用例）。
     "boto3.py": (
         "import os\n"
-        "from botocore.exceptions import ClientError\n"
+        "from botocore.exceptions import ClientError, EndpointConnectionError\n"
         "class _Paginator:\n"
         "    def paginate(self, Bucket):\n"
         "        return iter([{}])\n"
         "class _Client:\n"
         "    def head_bucket(self, Bucket):\n"
+        "        fail = os.environ.get('STUB_BUCKET_FAIL')\n"
+        "        if fail and os.path.exists(fail):\n"
+        "            raise EndpointConnectionError('stub endpoint down')\n"
         "        if not os.path.exists(os.environ['STUB_BUCKET_READY']):\n"
         "            raise ClientError({'Error': {'Code': '404'}})\n"
         "    def get_paginator(self, name):\n"
@@ -548,3 +552,221 @@ def test_clean_reprobes_bucket_created_during_lock_wait(repo: _Repo) -> None:
     assert result.returncode == 0, result.stderr
     assert "delete_bucket agent-legion-victim\n" in repo.log.read_text(encoding="utf-8")
     assert "已删除 S3 bucket: agent-legion-victim" in result.stdout
+
+
+# --- 探测/指纹采集失败语义（#1084 codex R3 P1）-------------------------------
+#
+# 同族新形态：「探测/指纹采集的失败被吞成空状态继续推进」。三处修复：
+# stat 方言分流（GNU 的 -f 语义不同，错误回退会把动态文件系统计数混进
+# 指纹）、bucket/db 探测失败 fail-closed（只有成功探测后的空结果才算
+# 「不存在」）。
+
+# stat 方言仿真桩（STUB_STAT_DIALECT=gnu|bsd）：只暴露所选方言的接口，输出
+# 一律由本机真 stat 翻译产生——保证两种方言下同一实例指纹一致、重建可区分。
+_STAT_STUB = r"""#!/usr/bin/env bash
+REAL=/usr/bin/stat
+[[ -x "$REAL" ]] || REAL=/bin/stat
+if "$REAL" --version >/dev/null 2>&1; then HOST=gnu; else HOST=bsd; fi
+# emit <file|dir> <路径>：按指纹语义用本机真 stat 产出等价输出
+emit() {
+    if [[ "$HOST" == gnu ]]; then
+        if [[ "$1" == file ]]; then "$REAL" -c '%d:%i:%Z:%W' "$2"; else "$REAL" -c '%d:%i:%W' "$2"; fi
+    else
+        if [[ "$1" == file ]]; then "$REAL" -f '%d:%i:%c:%B' "$2"; else "$REAL" -f '%d:%i:%B' "$2"; fi
+    fi
+}
+case "${STUB_STAT_DIALECT:?}" in
+  gnu)
+    case "${1:-}" in
+      --version) echo "stat (GNU coreutils) 9.1-stub"; exit 0 ;;
+      -c) case "$2" in
+            '%d:%i:%Z:%W') emit file "$3" ;;
+            '%d:%i:%W')    emit dir "$3" ;;
+            *) echo "stat stub: 未仿真 GNU 格式 $2" >&2; exit 1 ;;
+          esac ;;
+      # GNU 语义：-f 是「查文件系统」标志——格式串被当作不存在的路径报错，
+      # 但仍对真实路径往 stdout 打印动态文件系统计数（随每次调用变化，忠实
+      # 复现「错误回退把动态计数混进指纹」的缺陷形态）
+      -f) count_file="${STUB_LOG}.statcount"
+          n=$(( $(cat "$count_file" 2>/dev/null || echo 0) + 1 ))
+          echo "$n" > "$count_file"
+          echo "  File: $3  ID: 0  Namelen: 255  Available blocks: $n"
+          echo "stat: cannot read file system information for '$2': No such file or directory" >&2
+          exit 1 ;;
+      *) echo "stat stub: 未仿真参数 $*" >&2; exit 1 ;;
+    esac ;;
+  bsd)
+    case "${1:-}" in
+      --version) echo "stat: illegal option" >&2; exit 1 ;;
+      -f) case "$2" in
+            '%d:%i:%c:%B') emit file "$3" ;;
+            '%d:%i:%B')    emit dir "$3" ;;
+            *) echo "stat stub: 未仿真 BSD 格式 $2" >&2; exit 1 ;;
+          esac ;;
+      *) echo "stat stub: 未仿真参数 $*" >&2; exit 1 ;;
+    esac ;;
+esac
+"""
+
+
+def _install_stat_stub(repo: _Repo) -> None:
+    _exe(repo.bin / "stat", _STAT_STUB)
+
+
+@pytest.mark.parametrize("dialect", ["bsd", "gnu"])
+def test_identity_fingerprint_stable_under_stat_dialect(repo: _Repo, dialect: str) -> None:
+    """指纹在两种 stat 方言下格式稳定：未变化的实例两次快照一致，清理正常完成。"""
+    runner = repo.add("runner")
+    repo.install_scripts(runner)
+    victim = repo.add("victim")
+    _install_stat_stub(repo)
+
+    result = repo.run(
+        runner / "scripts" / "clean-worktree.sh",
+        "victim",
+        "--yes",
+        extra_env={"STUB_STAT_DIALECT": dialect},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not victim.exists()
+    assert "身份已变化" not in result.stderr
+    assert "收尾清理结束" in result.stdout
+
+
+@pytest.mark.parametrize("dialect", ["bsd", "gnu"])
+def test_rebuild_detected_under_stat_dialect(repo: _Repo, dialect: str) -> None:
+    """P1-1 的替换识别在两种 stat 方言下都生效（确认窗口内同名重建→拒绝）。"""
+    runner = repo.add("runner")
+    repo.install_scripts(runner)
+    victim_path = repo.add("victim")
+    _exe(repo.bin / "psql", _PSQL_DB_PRESENT_STUB)
+    _install_stat_stub(repo)
+
+    run = _ScriptRun(
+        repo,
+        runner / "scripts" / "clean-worktree.sh",
+        ("victim",),
+        extra_env={"STUB_STAT_DIALECT": dialect},
+    )
+    run.wait_stdout("待删除: agent_legion_victim")
+    repo._git("-C", str(repo.main), "commit", "-q", "--allow-empty", "-m", "advance")
+    repo._git("-C", str(repo.main), "worktree", "remove", str(victim_path))
+    repo._git("-C", str(repo.main), "worktree", "add", "-q", "-b", "rebuild", str(victim_path))
+    run.write_stdin("victim\n")
+    result = run.finish()
+
+    assert result.returncode == 1
+    assert "身份已变化" in result.stderr
+    assert victim_path.is_dir()
+    assert "dropdb" not in repo.log.read_text(encoding="utf-8")
+
+
+def test_clean_aborts_when_plan_bucket_probe_fails(repo: _Repo) -> None:
+    """首次 bucket probe 失败（endpoint/鉴权/python 故障）→ fail-closed：
+    不把「探测失败」当「不存在」推进，不确认、不动 worktree/库。"""
+    runner = repo.add("runner")
+    repo.install_scripts(runner)
+    victim = repo.add("victim")
+    _exe(repo.bin / "uv", "#!/usr/bin/env bash\nexit 1\n")
+
+    result = repo.run(runner / "scripts" / "clean-worktree.sh", "victim", "--yes")
+
+    assert result.returncode == 1
+    assert "bucket 探测失败" in result.stderr
+    assert victim.is_dir()
+    assert "dropdb" not in repo.log.read_text(encoding="utf-8")
+
+
+def test_clean_aborts_when_locked_bucket_reprobe_fails(repo: _Repo) -> None:
+    """锁内重探测失败 → fail-closed：不凭锁前「不存在」跳过，也不盲删。"""
+    runner = repo.add("runner")
+    repo.install_scripts(runner)
+    repo.add("victim")
+    _install_bucket_fakes(repo, runner)
+    bucket_ready = repo.tmp / "bucket-ready"
+    bucket_ready.write_text("ready\n", encoding="utf-8")  # plan 与锁内 probe 都能见到 bucket
+    bucket_fail = repo.tmp / "bucket-fail"
+    sleeper = _hold_derived_name_lock(repo)
+
+    run = _ScriptRun(
+        repo,
+        runner / "scripts" / "clean-worktree.sh",
+        ("victim", "--yes"),
+        extra_env={
+            "STUB_BUCKET_READY": str(bucket_ready),
+            "STUB_BUCKET_FAIL": str(bucket_fail),
+        },
+    )
+    try:
+        run.wait_stderr("派生名锁被占用")
+        # 等锁期间 endpoint 故障：锁内重探测返回失败而非空
+        bucket_fail.write_text("down\n", encoding="utf-8")
+    finally:
+        # kill 后必须 wait 回收：zombie 子进程 kill -0 仍判活（#1251）。
+        sleeper.kill()
+        sleeper.wait()
+    result = run.finish()
+
+    assert result.returncode == 1
+    assert "锁内派生 bucket 重探测失败" in result.stderr
+    assert "delete_bucket" not in repo.log.read_text(encoding="utf-8")
+
+
+# psql 桩：库详情查询连接级失败（exit 1）——「查询失败」不得记为「不存在」。
+_PSQL_PROBE_FAIL_STUB = """#!/usr/bin/env bash
+printf 'psql %s\\n' "$*" >>"$STUB_LOG"
+if [[ "$*" == *"select 1 from pg_roles"* ]]; then exit 0; fi
+if [[ "$*" == *pg_database_size* ]]; then exit 1; fi
+exit 0
+"""
+
+# psql 桩：状态文件出现后库详情查询才失败（模拟等锁期间数据库失联）。
+_PSQL_FAILS_LATE_STUB = """#!/usr/bin/env bash
+printf 'psql %s\\n' "$*" >>"$STUB_LOG"
+if [[ "$*" == *"select 1 from pg_roles"* ]]; then exit 0; fi
+if [[ -f "$STUB_PSQL_FAIL" && "$*" == *pg_database_size* ]]; then exit 1; fi
+exit 0
+"""
+
+
+def test_drop_db_aborts_when_probe_fails(repo: _Repo) -> None:
+    """psql 探测失败 ≠ 库不存在：fail-closed，不打印「没有需要删除的库」。"""
+    runner = repo.add("runner")
+    repo.install_scripts(runner)
+    _exe(repo.bin / "psql", _PSQL_PROBE_FAIL_STUB)
+
+    result = repo.run(runner / "scripts" / "drop-worktree-db.sh", "victim", "--yes")
+
+    assert result.returncode == 1
+    assert "探测库" in result.stderr
+    assert "没有需要删除的库" not in result.stdout
+    assert "dropdb" not in repo.log.read_text(encoding="utf-8")
+
+
+def test_drop_db_aborts_when_locked_reprobe_fails(repo: _Repo) -> None:
+    """计划探测成功（无库）、锁内重探测失败 → fail-closed，不静默放行。"""
+    runner = repo.add("runner")
+    repo.install_scripts(runner)
+    _exe(repo.bin / "psql", _PSQL_FAILS_LATE_STUB)
+    psql_fail = repo.tmp / "psql-fail"
+    sleeper = _hold_derived_name_lock(repo)
+
+    run = _ScriptRun(
+        repo,
+        runner / "scripts" / "drop-worktree-db.sh",
+        ("victim", "--yes"),
+        extra_env={"STUB_PSQL_FAIL": str(psql_fail)},
+    )
+    try:
+        run.wait_stderr("派生名锁被占用")
+        psql_fail.write_text("down\n", encoding="utf-8")
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+    result = run.finish()
+
+    assert result.returncode == 1
+    assert "探测库" in result.stderr
+    assert "没有需要删除的库" not in result.stdout
+    assert "dropdb" not in repo.log.read_text(encoding="utf-8")
