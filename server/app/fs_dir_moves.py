@@ -5,11 +5,16 @@ relative to a pinned parent descriptor and refuses — or leaves alone — an
 entry whose ``(st_dev, st_ino)`` is not the expected one. Renames act on
 names, so each move re-checks right before and verifies right after; the
 residual window between the two is documented per primitive.
+
+``require_no_symlink_entries`` (#1254) is the pre-move content check for
+staged trees: the O_NOFOLLOW write path cannot be redirected through a
+link, this rejects links an out-of-band writer placed INSIDE the tree.
 """
 
 from __future__ import annotations
 
 import os
+import stat
 from contextlib import suppress
 
 from server.app.fs_dir_identity import (
@@ -66,6 +71,26 @@ def promote_dir_at(parent: int, source: str, expected: DirIdentity, target: str)
         raise DirectoryIdentityError(f"{target!r} appeared before the move")
     rename_at(parent, source, target)
     require_dir_identity_at(parent, target, expected)
+
+
+def require_no_symlink_entries(root_fd: int) -> None:
+    """Fail closed if the tree rooted at the pinned ``root_fd`` holds a symlink.
+
+    Defense in depth for staged trees (#1254): the ``O_NOFOLLOW`` write path
+    cannot be redirected through a link, but an out-of-band writer can still
+    place a symlink INSIDE the staging tree; promoted, it would keep pointing
+    outside after the swap. A symlink to a directory is listed in ``dirnames``
+    (never entered with ``follow_symlinks=False``), one to anything else in
+    ``filenames`` — both are lstat-ed here. Residual window: a link swapped
+    in after this check and before the promote rename is caught only by the
+    root identity check in ``promote_dir_at``.
+    """
+    walk = os.fwalk(".", dir_fd=root_fd, follow_symlinks=False)
+    for dirpath, dirnames, filenames, dir_fd in walk:
+        for entry in (*dirnames, *filenames):
+            info = os.stat(entry, dir_fd=dir_fd, follow_symlinks=False)
+            if stat.S_ISLNK(info.st_mode):
+                raise DirectoryIdentityError(f"tree contains a symlink entry: {dirpath}/{entry}")
 
 
 def remove_tree_at(parent: int, name: str, expected: DirIdentity) -> bool:

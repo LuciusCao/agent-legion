@@ -26,6 +26,16 @@ window: renames act on names, so an entry swapped in between the last
 check and a rename moves instead — detected by the post-move check and
 failed closed; a target appearing in that window is replaced only when it
 is an empty directory; cleanup never empties an unverified directory.
+
+#1254 — the staging WRITES go through the pinned descriptor too: payload
+paths are staged from the identity-checked staging descriptor
+(``fs_safety.write_tree_at``: component-wise directory creation through
+``open_dir_beneath``, leaf files through ``write_text_at`` with
+``O_EXCL``, ``O_NOFOLLOW`` on every component), so a staging subdir
+swapped for a symlink between mkdir and write fails the walk instead of
+redirecting content outside the tree; before promote, the pinned staging
+tree is walked once (``require_no_symlink_entries``) to refuse any symlink
+entry an out-of-band writer placed inside it.
 """
 
 from __future__ import annotations
@@ -40,7 +50,13 @@ from server.app.fs_dir_identity import (
     dir_identity_at,
     open_dir_identity_at,
 )
-from server.app.fs_dir_moves import promote_dir_at, remove_tree_at, retire_dir_at
+from server.app.fs_dir_moves import (
+    promote_dir_at,
+    remove_tree_at,
+    require_no_symlink_entries,
+    retire_dir_at,
+)
+from server.app.fs_safety import write_tree_at
 from server.app.services.skill_build_residue_io import carry_build_residue
 from server.app.services.skill_shared_store import (
     SHARED_DIR_NAME,
@@ -71,44 +87,46 @@ def write_shared_materials(
     """
     staging_name = f"{SHARED_DIR_NAME}.tmp-{uuid.uuid4().hex[:12]}"
     retired_name = f"{SHARED_DIR_NAME}.old-{uuid.uuid4().hex[:12]}"
-    staging = shared_dir.parent / staging_name
     parent_fd: int | None = None
     staged = live = None
     retired_owned = keep_retired = False
     try:
-        staged = create_dir_identity(staging)  # pinned at creation (codex R1)
+        # Pinned at creation (codex R1); the fd opened below then proves it.
+        staged = create_dir_identity(shared_dir.parent / staging_name)
         # #1097: every step after the staging writes is relative to the parent
         # pinned here and checked by lstat identity (see the module docstring).
         parent_fd = os.open(shared_dir.parent, os.O_RDONLY | os.O_DIRECTORY)
-        for relative, content in files:
-            path = staging / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-        with shared_edit_lock(shared_dir, base_dir):
-            live = dir_identity_at(parent_fd, SHARED_DIR_NAME)  # symlink → fail closed
-            if live is not None:
-                # #1038: carried under the lock, BEFORE the live dir moves —
-                # a copy failure aborts the write with the live dir untouched.
-                with (
-                    open_dir_identity_at(parent_fd, SHARED_DIR_NAME, live) as shared_fd,
-                    open_dir_identity_at(parent_fd, staging_name, staged) as staging_fd,
-                ):
-                    carry_build_residue(shared_fd, staging_fd)
-                retire_dir_at(parent_fd, SHARED_DIR_NAME, live, retired_name)
-                retired_owned = True
-            try:
-                promote_dir_at(parent_fd, staging_name, staged, SHARED_DIR_NAME)
-            except OSError:
-                if retired_owned and live is not None:
-                    # Restore; on a second failure `retired` is the ONLY copy
-                    # of the previous state — keep it (see docstring) instead
-                    # of turning a recoverable write into data loss.
-                    try:
-                        promote_dir_at(parent_fd, retired_name, live, SHARED_DIR_NAME)
-                    except OSError:
-                        keep_retired = True
-                        raise
-                raise
+        # #1254: the staging fd pins the inode for writes AND the swap —
+        # payload writes walk O_NOFOLLOW from it (write_tree_at), so a
+        # subdir swapped for a link cannot redirect content outside.
+        with open_dir_identity_at(parent_fd, staging_name, staged) as staging_fd:
+            write_tree_at(staging_fd, files)
+            with shared_edit_lock(shared_dir, base_dir):
+                live = dir_identity_at(parent_fd, SHARED_DIR_NAME)  # symlink → fail closed
+                if live is not None:
+                    # #1038: carried under the lock, BEFORE the live dir moves —
+                    # a copy failure aborts the write with the live dir untouched.
+                    with open_dir_identity_at(parent_fd, SHARED_DIR_NAME, live) as shared_fd:
+                        carry_build_residue(shared_fd, staging_fd)
+                # #1254: refuse to promote a tree an out-of-band writer
+                # placed a symlink inside of.
+                require_no_symlink_entries(staging_fd)
+                if live is not None:
+                    retire_dir_at(parent_fd, SHARED_DIR_NAME, live, retired_name)
+                    retired_owned = True
+                try:
+                    promote_dir_at(parent_fd, staging_name, staged, SHARED_DIR_NAME)
+                except OSError:
+                    if retired_owned and live is not None:
+                        # Restore; on a second failure `retired` is the ONLY copy
+                        # of the previous state — keep it (see docstring) instead
+                        # of turning a recoverable write into data loss.
+                        try:
+                            promote_dir_at(parent_fd, retired_name, live, SHARED_DIR_NAME)
+                        except OSError:
+                            keep_retired = True
+                            raise
+                    raise
     except OSError as exc:
         detail = f"shared materials write failed: {exc}"
         if keep_retired:
