@@ -640,16 +640,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1011
   ceiling: 75
 - check: architecture.file_budget
-  path: server/app/db/pools.py
-  reason: '#438 installs the pool reset callback (reset=reset_connection) so every returned
-    connection is verified IDLE and dirty returns are attributed — one effective line plus wiring
-    comment. Re-anchored by #926 from #456 (closed) to #1011: the overage above is the shipped
-    feature itself and the removal condition above stands; #1011 tracks at most five entries
-    (#917 A-2).'
-  owner: database
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1011
-  ceiling: 50
-- check: architecture.file_budget
   path: server/app/workflows/loader.py
   reason: 'Issue #458 round-trip fix: the asdict snapshot reloader must translate the serialized
     reduce.from_node spelling back to the yaml from the loader reads (mirroring the existing

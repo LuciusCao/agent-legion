@@ -1,20 +1,29 @@
-"""Test-boundary pool close must not strand dirty returns (#1045).
+"""Pool close must not strand returned connections (#1045, #1077).
 
-Schema rebuilds and session teardown close every pool (per-test isolation
-itself only settles, keeping pools alive across tests — see
-tests/postgres_support.settle_database_pools). With the #438 ``reset``
-callback, psycopg_pool rolls back a dirty (INTRANS) return on a
-maintenance worker; ``ConnectionPool.close()`` discards any such task that
-has not run yet, so the returned connection keeps its transaction (and
-locks) open server-side until GC finalizes it. The next test's TRUNCATE then
-waited out the 30s lock_timeout — the load-dependent "setup error" of
-test_rejected_claim_event_emits_after_commit and friends.
+``server.app.db.pools.close_database_pools`` is the single close chokepoint:
+the production lifespan shutdown and the test boundaries (schema rebuilds,
+session teardown) both call it, so these tests cover both (per-test
+isolation itself only settles, keeping pools alive across tests — see
+``pools.settle_database_pools``). With the #438 ``reset`` callback every
+return is a ``ReturnConnection`` task on a pool maintenance worker;
+``ConnectionPool.close()`` discards any such task that has not run yet, so
+the returned connection is neither returned nor closed until GC finalizes it.
 
-The scenario is made deterministic by parking every pool worker on a gate
-before the dirty return, so the ReturnConnection task is guaranteed to
-still be queued when the boundary close starts. The test keeps a reference
-to the connection, so a discarded rollback would also stay leaked
-deterministically (no GC timing involved).
+Two layers, one test each:
+
+- the settle barrier: a return queued before the close runs before
+  ``pool.close()``, so the connection is closed with the pool;
+- the synchronous rollback in ``DatabaseConnection.close`` (#1077 codex P1):
+  a dirty return that lands after the barrier (a DB call still running past
+  the lifespan's bounded joins) is already rolled back on the caller's
+  thread, so a discarded task can never keep a transaction (snapshot,
+  locks) alive. Before that, the next test's TRUNCATE waited out the 30s
+  lock_timeout — the load-dependent "setup error" of #1045.
+
+Deterministic by parking every pool worker on a gate before the return, so
+the ReturnConnection task is guaranteed to still be queued. The tests keep
+a reference to the connection, so a discarded task stays visible (no GC
+timing involved).
 """
 
 from __future__ import annotations
@@ -22,16 +31,13 @@ from __future__ import annotations
 import threading
 
 import psycopg
+import pytest
 from psycopg.pq import TransactionStatus
 
+from server.app.db import pools
 from server.app.db.connection import connect_database
-from server.app.db.pools import pool_for
-from tests.postgres_support import (
-    BASE_DATABASE_URL,
-    TEST_DATABASE_URL,
-    TEST_SCHEMA,
-    close_database_pools_settled,
-)
+from server.app.db.pools import close_database_pools, pool_for
+from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
 
 class _GatedTask:
@@ -59,28 +65,56 @@ def _foreign_locks_on(table: str) -> list[tuple]:
         ).fetchall()
 
 
-def test_settled_close_rolls_back_dirty_return_queued_behind_busy_workers() -> None:
-    pool = pool_for(TEST_DATABASE_URL)
+def _park_workers(pool) -> threading.Event:
     gate = threading.Event()
     for _ in range(pool.num_workers):
         pool.run_task(_GatedTask(gate))
+    return gate
 
+
+def test_settled_close_runs_return_queued_behind_busy_workers() -> None:
+    gate = _park_workers(pool_for(TEST_DATABASE_URL))
+    conn = connect_database(TEST_DATABASE_URL)
+    raw = conn._raw
+    try:
+        conn.execute("select count(*) from workspaces").fetchone()
+        conn.commit()
+        conn.close()  # ReturnConnection queued behind the parked workers
+        assert raw.closed is False
+
+        # Release the workers only after the close has started: an unsettled
+        # close would already have flagged the pool closed, and the queued
+        # return would be discarded (connection left open until GC).
+        threading.Timer(0.3, gate.set).start()
+        close_database_pools()
+
+        assert raw.closed is True  # returned, then closed with the pool
+    finally:
+        gate.set()
+        raw.close()
+
+
+def test_dirty_return_after_the_barrier_never_keeps_its_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Model a return landing after the barrier: the close does not wait for
+    # it at all, so the queued ReturnConnection is discarded.
+    monkeypatch.setattr(pools, "settle_pool_returns", lambda pool: None)
+    gate = _park_workers(pool_for(TEST_DATABASE_URL))
     conn = connect_database(TEST_DATABASE_URL)
     raw = conn._raw
     try:
         conn.execute("select count(*) from workspaces").fetchone()
         assert raw.info.transaction_status == TransactionStatus.INTRANS
-        conn.close()  # dirty return: rollback queued behind the parked workers
-        assert raw.info.transaction_status == TransactionStatus.INTRANS
         assert _foreign_locks_on("workspaces") != []
+        conn.close()  # dirty return, workers parked: no pool rollback possible
 
-        # Release the workers only after the boundary close has started: an
-        # unsettled close would already have flagged the pool closed, and the
-        # queued rollback would be discarded.
+        # Rolled back on the caller's thread, before any pool task.
+        assert raw.info.transaction_status == TransactionStatus.IDLE
+        assert _foreign_locks_on("workspaces") == []
+
         threading.Timer(0.3, gate.set).start()
-        close_database_pools_settled()
-
-        # Rolled back (then closed with the pool) — never left INTRANS.
+        close_database_pools()
         assert raw.info.transaction_status != TransactionStatus.INTRANS
         assert _foreign_locks_on("workspaces") == []
     finally:
