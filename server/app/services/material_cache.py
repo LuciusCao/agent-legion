@@ -23,6 +23,7 @@ from botocore.exceptions import ClientError
 from server.app.db.dialect import ConnectSource
 from server.app.db.rowmap import parse_object
 from server.app.db.transaction import read_connection
+from server.app.services.material_identity import assert_worker_etag_protocol
 from server.app.storage import ObjectStorage, build_s3_storage, is_precondition_failed
 from shared.material_cache import (
     MaterializeError,
@@ -217,6 +218,7 @@ def material_claim_block(
     *,
     storage: ObjectStorage | None = None,
     download_expires_seconds: int = 3600,
+    worker_protocol_version: int | None = None,
 ) -> dict[str, Any] | None:
     """The Worker-facing material descriptor for the claim response.
 
@@ -241,6 +243,11 @@ def material_claim_block(
         return None
     row = _ready_row(connect_source, workspace_id, input_doc)
     material_id = str(row["id"])
+    # #1279 codex final P1：响应描述符快照复核——admission 后 complete 可
+    # 把 uploading/failed 行落回 ready 并写新 etag（repair/failed-retry
+    # TOCTOU），此处对 < v6 Worker 拒绝（batch per-item drop 走既有
+    # lease-expiry 重排队恢复，非硬失败）。
+    assert_worker_etag_protocol(row, worker_protocol_version)
     storage = _require_storage(storage, material_id)
     return {
         "material_id": material_id,
@@ -254,9 +261,9 @@ def material_claim_block(
         # material_cache_address）——与 download_url 取自同一行快照，地址
         # 代次与 URL key 代次恒一致。旧 Server 不下发这两字段（Worker 按
         # 缺失回落）；**旧 Worker（协议 < v6）领不到命中门禁的材料任务**
-        # （claim admission 跳过，见 shared/protocol.py v6 条目与
-        # jobs/queries/material_claim_gate.py），不存在「忽略字段仍执行」
-        # 的窗口。
+        # （claim admission 跳过 + 本描述符快照复核双闸，防止
+        # repair/failed-retry 在 admission 与响应组装之间落新 etag 的
+        # TOCTOU；见 material_identity.assert_worker_etag_protocol）。
         "object_etag": str(row.get("object_etag") or ""),
         "upload_generation": int(row["upload_generation"]),
         "download_url": storage.presign_get(

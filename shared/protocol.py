@@ -32,7 +32,12 @@ Version history:
   upgrades). Gated = the job's material inputs include a row with
   ``object_etag <> ''`` and ``content_hash = ''`` (hash rows stay claimable:
   the old Worker's sha256 recompute is already fail-closed; rows without an
-  etag have nothing to verify against).
+  etag have nothing to verify against). codex final P1 adds a second,
+  response-descriptor-snapshot re-check at
+  ``material_identity.assert_worker_etag_protocol`` so the repair /
+  failed-retry TOCTOU (admission → complete → new etag) cannot leak either:
+  a pre-v6 claim containing such a row is dropped and requeued after lease
+  expiry instead of being answered with a new ETag.
 
 Field-level deprecations ride without a version bump while the wire shape is
 unchanged; a deprecated field's removal rides without one too once no

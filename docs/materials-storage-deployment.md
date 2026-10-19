@@ -328,10 +328,14 @@ EOF
     ETag）后、启动调度前必须跑 `scripts/rebind_material_etags.py`
     （先 dry-run 再 --apply；字节核验不过的行 fail-closed 只报告，退出
     码 1），步骤与纪律见 backup-restore-runbook.md 的对象存储恢复段。
-    协议门禁（codex r7）：消费侧 ETag 核验要求 Worker 协议 v6——滚动
+    协议门禁（codex r7/final P1）：消费侧 ETag 核验要求 Worker 协议 v6——滚动
     升级窗口内（Host 先升），无 hash 且 etag 已绑的材料任务对旧 Worker
-    不可领（留队列等升级，不落失败）；hash 行与 etag='' 行恒免门禁。
-    升级顺序与矩阵见 remote-execution-runbook.md §5。
+    不可领（留队列等升级，不落失败）；且 admission 与响应组装之间若发生
+    repair/failed-retry complete，响应描述符快照再复核一次
+    （material_identity.assert_worker_etag_protocol，batch per-item drop →
+    lease 过期重排），防止 complete 在两次判定之间落新 etag 的 TOCTOU。
+    hash 行与 etag='' 行恒免。升级顺序与矩阵见 remote-execution-runbook.md
+    §5。
   - **存量行一次性残留窗口**（#1312 方案 B）：v98 之前完成的行
     `object_etag=''`（无内容身份），各消费入口（Host 物化、bundle、远程
     Worker claim、旧 Worker 门禁）维持升级前的 size-only 语义、不做 ETag

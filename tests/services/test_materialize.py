@@ -292,6 +292,100 @@ def test_hashless_cache_address_follows_repair_generation(job_db, storage, tmp_p
     assert storage.opened == 2, "代次推进后不得命中旧 gen 地址"
 
 
+def test_response_snapshot_gate_catches_repair_complete_toctou(job_db, storage) -> None:
+    """#1279 codex final P1（single/uploading）：admission 后 repair→complete
+    落新 etag 的 TOCTOU——响应描述符快照复核拦下（v5 拒、v6 放行）。
+    mutation 互证：摘掉响应复核 → 本测试红。"""
+    from server.app.services.materials import MaterialsService
+    from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
+
+    payload = b"toctou-bytes"
+    service = MaterialsService(job_db.dsn_identity, storage)
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'Toctou') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+    result = service.presign(WORKSPACE_ID, filename="t.txt", size_bytes=len(payload))
+    material_id = result["material"]["id"]
+    (key0, _) = storage.presigned[0]
+    storage.objects[key0] = payload
+    service.complete(WORKSPACE_ID, material_id)
+    job = _job({"type": "material", "material_id": material_id})
+
+    outcome = service.request_material_reupload(WORKSPACE_ID, material_id)
+    storage.objects[str(outcome["storage_key"])] = payload
+    service.complete(WORKSPACE_ID, material_id, expected_upload_generation=1)
+
+    with pytest.raises(MaterializeError, match="protocol v6"):
+        material_claim_block(
+            job_db.dsn_identity,
+            WORKSPACE_ID,
+            job,
+            storage=storage,
+            worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION - 1,
+        )
+    block = material_claim_block(
+        job_db.dsn_identity,
+        WORKSPACE_ID,
+        job,
+        storage=storage,
+        worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
+    )
+    assert block is not None and block["object_etag"]
+
+
+def test_response_snapshot_gate_catches_failed_retry_toctou(job_db, storage) -> None:
+    """#1279 codex final P1（single/failed-retry）：repair 后 bare complete
+    失败（缺对象）→ failed+etag=''，再 complete 成功落新 etag——同一响应
+    快照竞态，v5 拒、v6 放行。"""
+    from server.app.services.materials import MaterialsService
+    from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
+
+    payload = b"failed-retry"
+    service = MaterialsService(job_db.dsn_identity, storage)
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'Toctou') on conflict(id) do nothing",
+            (WORKSPACE_ID,),
+        )
+    result = service.presign(WORKSPACE_ID, filename="f.txt", size_bytes=len(payload))
+    material_id = result["material"]["id"]
+    (key0, _) = storage.presigned[0]
+    storage.objects[key0] = payload
+    service.complete(WORKSPACE_ID, material_id)
+    job = _job({"type": "material", "material_id": material_id})
+
+    outcome = service.request_material_reupload(WORKSPACE_ID, material_id)
+    new_key = str(outcome["storage_key"])
+    # bare complete：新 key 缺对象 → failed + etag=''。
+    from server.app.services.materials import MaterialVerificationError
+
+    with pytest.raises(MaterialVerificationError, match="missing"):
+        service.complete(WORKSPACE_ID, material_id)
+    assert service.get(WORKSPACE_ID, material_id)["status"] == "failed"
+    # 补齐对象后 complete 成功 → ready + 新 etag（修复链 TOCTOU 格）。
+    storage.objects[new_key] = payload
+    service.complete(WORKSPACE_ID, material_id)
+
+    with pytest.raises(MaterializeError, match="protocol v6"):
+        material_claim_block(
+            job_db.dsn_identity,
+            WORKSPACE_ID,
+            job,
+            storage=storage,
+            worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION - 1,
+        )
+    block = material_claim_block(
+        job_db.dsn_identity,
+        WORKSPACE_ID,
+        job,
+        storage=storage,
+        worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
+    )
+    assert block is not None and block["object_etag"]
+
+
 def test_claim_block_carries_object_etag(job_db, material, storage) -> None:
     """#1279：claim 描述符携带行记录的 object_etag（Worker 侧 If-Match 核验）
     与 upload_generation（无 hash 行缓存寻址的代次段，与 URL 同行快照）。"""

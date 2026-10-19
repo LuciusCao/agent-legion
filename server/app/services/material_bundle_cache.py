@@ -24,6 +24,7 @@ from server.app.services.material_cache import (
     input_document,
     open_verified_stream,
 )
+from server.app.services.material_identity import assert_worker_etag_protocol
 from server.app.storage import ObjectStorage
 from shared.material_bundle import assemble_bundle_tree, bundle_address
 from shared.material_cache import (
@@ -193,6 +194,7 @@ def bundle_claim_block(
     *,
     storage: ObjectStorage | None = None,
     download_expires_seconds: int = 3600,
+    worker_protocol_version: int | None = None,
 ) -> dict[str, Any] | None:
     """The Worker-facing bundle descriptor: one presigned GET per member."""
     input_doc = input_document(job)
@@ -201,6 +203,10 @@ def bundle_claim_block(
     bundle, members = _ready_bundle(connect_source, workspace_id, input_doc)
     bundle_id = str(bundle["id"])
     storage = _require_storage(storage, bundle_id)
+    # #1279 codex final P1：与单材料同一响应快照复核（repair/failed-retry
+    # TOCTOU 的 bundle 格）。
+    for member in members:
+        assert_worker_etag_protocol(member, worker_protocol_version)
     return {
         "material_id": bundle_id,
         "kind": "bundle",
@@ -216,7 +222,8 @@ def bundle_claim_block(
                 # 逐成员对 presigned GET 带 If-Match 核验、代次参与无 hash
                 # 成员缓存寻址，均与 download_url 同行快照；旧 Server 不下发
                 # （Worker 按缺失回落），旧 Worker（协议 < v6）领不到命中
-                # 门禁的材料任务（claim admission 跳过）。
+                # 门禁的材料任务（claim admission 跳过 + 描述符快照复核
+                # 双闸，堵 repair/failed-retry TOCTOU）。
                 "object_etag": str(member.get("object_etag") or ""),
                 "upload_generation": int(member["upload_generation"]),
                 "download_url": storage.presign_get(

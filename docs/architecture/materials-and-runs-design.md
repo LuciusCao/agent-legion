@@ -388,7 +388,10 @@ ETag 与新字节一起落 ready）。存量行 `object_etag=''`（v98 前完成
 逐入口语义见 §6.4.1，存量行身份建立（回填 + 门禁）拆至 #1316。
 新旧 Server 方向兼容（纯增量可选字段，Worker 按缺失回落）；**旧 Worker（协议 < v6）
 方向是门禁语义**：无 hash 且 etag 已绑的材料任务对旧 Worker 不可领——claim
-admission 跳过、留队列不落失败；hash 行与 etag='' 行恒免（见 shared/protocol.py v6 条目与
+admission 跳过、留队列不落失败；且 admission 与响应组装之间若发生 repair/failed-retry
+complete，响应描述符快照再复核一次（material_identity.assert_worker_etag_protocol，
+batch per-item drop → lease 过期重排），防止 complete 在两次判定之间落新 etag 造成
+TOCTOU（codex final P1）。hash 行与 etag='' 行恒免（见 shared/protocol.py v6 条目与
 jobs/queries/material_claim_gate.py 的谓词论证）。缓存寻址（codex r6）：hash 行内容寻址不变；
 无 hash 行地址带上传代次（`{material_id}-v2g{代次}`，代次即身份）——repair 代次 +1 后
 旧 gen 地址自然孤儿化，修复前（可能被旧 Worker 无核验缓存的）毒化字节不再命中；
@@ -429,6 +432,7 @@ sha256 fail-closed 兜底（既有）。新 complete / inline / demo seed 的行
 | hash 行（任意 etag） | sha256 fail-closed | 放行（sha256 兜底） | 下发 | sha256 fail-closed | 内容寻址 + 下载重算 |
 | 无 hash，etag 已绑（complete/rebind），URL 全死 | If-Match 核验 | **门禁拦**（留队列，不落失败） | 下发 etag | If-Match 核验 | v6 门禁 + If-Match |
 | 无 hash，etag 已绑，仍有活 URL（签发 1h 内）被覆盖 | 412 → MaterializeError（节点 failed，可 repair） | 门禁拦 | 下发 etag | 412 → 失败（可 repair） | If-Match 检出 + repair |
+| **repair/failed-retry 后刚落的新 etag**（TOCTOU：准入 → complete → 响应） | 若 repair 中：拒绝（not ready）；若已 complete：If-Match | **响应描述符快照复核拦**（batch per-item drop → lease 过期重排，非硬失败） | 同左 | 若准入后已 complete：412 检出 | 快照与下发一致（material_identity.assert_worker_etag_protocol） |
 | 无 hash，etag=''（存量行） | **size-only 物化**（base 语义） | 放行 | 下发 etag='' | **size-only**（无条件 GET） | 方案 B：残留窗口 ≤1h，一次性 |
 | uploading/failed（任意身份） | 拒绝（not ready，节点 failed，既有） | 门禁按 etag 判 | 拒绝（claim 500 → 回收重排，既有） | — | 解析链只收 ready |
 | expired | 拒绝（既有） | 同上 | 拒绝（既有） | — | 既有 TTL 语义 |
