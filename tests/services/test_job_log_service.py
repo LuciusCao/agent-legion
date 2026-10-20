@@ -167,8 +167,9 @@ def test_job_log_service_rejects_run_from_other_job(log_service):
         make_data_relative(log_file, settings.data_dir),
     )
 
+    viewer_job, _viewer_run = _create_job_with_run(job_db, settings)
     with pytest.raises(NotFoundError, match="Run not found"):
-        service.read("default_demo_workflow_Q001", run["id"])
+        service.read(viewer_job["id"], run["id"])
 
 
 def test_job_log_service_rejects_dotdot_escape(log_service):
