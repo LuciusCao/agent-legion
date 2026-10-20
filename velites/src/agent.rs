@@ -32,6 +32,14 @@
 //!   Artifacts still missing when a non-cancelled run ends fail the output
 //!   contract: the process exits 1, so an exit-0 run with missing declared
 //!   outputs never reaches the caller.
+//! - Truncation continuation (#865, design §4 方案A, see `truncation.rs`): a
+//!   length-truncated reply (`stopReason=length`, per-call output cap hit) is
+//!   NOT a normal stop. Its un-executed tool calls (and unsigned Anthropic
+//!   thinking blocks) are stripped from the model-facing history — the
+//!   session mirror and event stream keep the original — a continuation user
+//!   message is injected, and the loop continues within the SAME budgets.
+//!   After `MAX_CONSECUTIVE_LENGTH_STOPS` consecutive truncations the run
+//!   falls back to the pre-#865 ending (remediation turn / normal stop).
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -51,6 +59,7 @@ use crate::events::{
 use crate::provider::{CompletionRequest, Provider, ToolSpec};
 use crate::session::SessionLog;
 use crate::tools::{resolve_in_cwd, ToolContext, ToolKind, ToolOutput};
+use crate::truncation::{continuation_message, track_stop, MAX_CONSECUTIVE_LENGTH_STOPS};
 
 /// Exit code for a run that ended without its declared `--require-output`
 /// artifacts (output contract violation). Harness faults exit 2 (see
@@ -160,6 +169,8 @@ pub async fn run<P: Provider>(
     // Set once the wrap-up turn has actually run; the top-of-loop end check
     // must not fire between injecting the wrap-up message and its turn.
     let mut wrap_up_turn_ran = false;
+    // #865: consecutive length-truncated replies; reset by any other stop.
+    let mut consecutive_lengths: u32 = 0;
 
     loop {
         // Cancellation checkpoint: turn boundary (before the model call).
@@ -301,6 +312,14 @@ pub async fn run<P: Provider>(
             wrap_up_turn_ran = true;
         }
 
+        // #865: a length-truncated reply is not a normal stop — track_stop
+        // traces it on stderr, sanitizes the model-facing copy, and counts
+        // the consecutive streak; the match below decides between a
+        // continuation turn and the pre-#865 ending. Session mirror and
+        // event stream keep the ORIGINAL message.
+        let stopped = messages.last_mut().expect("turn message just pushed");
+        consecutive_lengths = track_stop(stop_reason, consecutive_lengths, turn_index, stopped);
+
         match stop_reason {
             Some(StopReason::ToolUse) => {
                 // Next iteration's top-of-loop checks (cancel / wrap-up end /
@@ -310,9 +329,24 @@ pub async fn run<P: Provider>(
                 final_error = messages.last().and_then(|msg| msg.error_message.clone());
                 break;
             }
+            // #865 continuation turn: below the consecutive cap and outside a
+            // wrap-up turn, a truncation injects a continuation notice (it
+            // does NOT consume the WrapUp::Outputs remediation turn) and the
+            // loop continues. At the cap — or when the wrap-up turn itself
+            // truncated — the length stop falls into the normal-stop arm.
+            Some(StopReason::Length)
+                if wrap_up.is_none() && consecutive_lengths < MAX_CONSECUTIVE_LENGTH_STOPS =>
+            {
+                let notice = Message::user(continuation_message());
+                messages.push(notice.clone());
+                append_session(&mut config.session, &notice)?;
+                continue;
+            }
             _ => {
-                // Normal stop. A finished wrap-up turn ends the run; the
-                // budget wrap-up is what sets the reason.
+                // Normal stop — also the pre-#865 ending a length stop falls
+                // back to at the continuation cap or on a wrap-up turn. A
+                // finished wrap-up turn ends the run; the budget wrap-up is
+                // what sets the reason.
                 if wrap_up.is_some() {
                     if matches!(wrap_up, Some(WrapUp::Budget)) {
                         end_reason = Some(EndReason::BudgetExceeded);
@@ -439,7 +473,8 @@ mod tests {
     // tests in tests/agent_loop.rs (ScriptedProvider + MemorySink); what
     // stays here are the private pure helpers only the same crate/file can
     // reach: enabled_tool_names, resolve_required_outputs / missing_outputs.
-    // The remediation message lives in contract.rs (with its tests).
+    // The remediation message lives in contract.rs, the #865 truncation
+    // helpers in truncation.rs (both with their own tests).
 
     #[test]
     fn enabled_tool_names_joins_in_order() {

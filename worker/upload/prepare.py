@@ -167,6 +167,16 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         "output_artifacts": {},
         "run_dir": PurePosixPath(run_dir.relative_to(job_dir)).as_posix(),
     }
+    # #865: the scan's truncation facts ride the result metadata into the
+    # Host outcome_json — the DB attribution face for runs whose failure was
+    # NOT rewritten (e.g. the continuation turn recovered and the run
+    # completed, or the remediation turn ended untruncated). Optional and
+    # tolerated-absent on the Host side (older Workers never send it).
+    if truncation.count:
+        metadata["output_truncation"] = {
+            "count": truncation.count,
+            "last_stop": truncation.last_stop,
+        }
     # #748: agent_stderr_tail rides the report metadata (not just the
     # archive) so the DB row + external error_summary surface the crash
     # reason without unpacking the archive. Keep the END of the tail
