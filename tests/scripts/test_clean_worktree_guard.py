@@ -51,7 +51,24 @@ if [[ "$1" == "worktree" && "$2" == "list" ]]; then
     "branch refs/heads/feat/other"
   exit 0
 fi
+# 派生名锁（#1084）落在 git common dir 下；只读查询，不记入 stub 日志。
+if [[ "$1" == "rev-parse" && "$2" == "--git-common-dir" ]]; then
+  echo "__MAIN__/.git"
+  exit 0
+fi
+# 远端分支删除必须在放锁之后（#1084 P2：远端网络操作不入锁域）——push 时
+# 仍有 holder 即违规。
+if [[ "$1" == "push" ]]; then
+  if ls "__MAIN__/.git/worktree-derived-names.lock"/holder-* >/dev/null 2>&1; then
+    printf 'push-under-lock\n' >>"${STUB_LOG:-/dev/null}"
+  fi
+fi
 printf 'git %s\\n' "$*" >>"${STUB_LOG:-/dev/null}"
+# 真实 git worktree remove 会删掉目录；删除阶段的同名重建检查（#1084）
+# 以目录是否仍在判定注册条目是否有使用方。
+if [[ "$1" == "worktree" && "$2" == "remove" ]]; then
+  rm -rf "$3"
+fi
 exit 0
 """
 
@@ -62,9 +79,11 @@ _PSQL_STUB = """#!/usr/bin/env bash
 exit 0
 """
 
+# uv 桩：bucket probe 成功且无需删除（probe 失败在 clean-worktree.sh 里是
+# fail-closed 中止，不能再用「uv 失败」模拟跳过路径，#1084）。
 _UV_STUB = """#!/usr/bin/env bash
-echo "uv stub (S3 cleanup skipped)"
-exit 1
+echo "uv stub (bucket probe: nothing to delete)"
+exit 0
 """
 
 
@@ -78,6 +97,7 @@ def _setup(tmp_path: Path) -> tuple[Path, Path, Path]:
     main = tmp_path / "main"
     scripts_dir = main / ".worktrees" / "other" / "scripts"
     scripts_dir.mkdir(parents=True)
+    (main / ".git").mkdir()
     shutil.copy(SCRIPT, scripts_dir / "clean-worktree.sh")
     shutil.copy(DB_SCRIPT, scripts_dir / "drop-worktree-db.sh")
     shutil.copy(NAMES_LIB, scripts_dir / NAMES_LIB.name)
@@ -206,6 +226,8 @@ def test_delete_remote_branch_deletes_unprotected_branch(tmp_path: Path, branch:
 
     assert result.returncode == 0, result.stderr
     assert f"git push origin --delete {branch}\n" in stub_log.read_text(encoding="utf-8")
+    # 远端网络操作不入锁域（#1084 P2）：push 时派生名锁必须已释放。
+    assert "push-under-lock" not in stub_log.read_text(encoding="utf-8")
     assert "受保护分支" not in result.stderr
 
 

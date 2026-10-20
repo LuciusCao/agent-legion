@@ -45,6 +45,10 @@ fi
 # 0.5 派生名撞名防护（#950）：worktree 名到库/bucket 名的映射不是单射，
 #     与其他已注册 worktree 派生出同名资源时 fail-fast（在任何副作用之前），
 #     否则两个 worktree 会静默共用同一个库与 bucket。
+#     检查到建库/建 bucket（2.5 末尾）持派生名锁（#1084）：并发的 clean/drop
+#     要么在本次检查前删完，要么在建完后才重新检查（届时本 worktree 已注册，
+#     对方撞名拒绝）。本脚本无交互，持锁期间不等用户输入。
+worktree_name_lock_acquire "$ROOT" "初始化 $(basename "$ROOT")（建库/建 bucket）" || exit 1
 worktree_require_unique_derived_names "$ROOT" "$(basename "$ROOT")" "初始化（建库/建 bucket）" || exit 1
 
 BASE="${1:-}"
@@ -164,6 +168,13 @@ else
     echo "提示: S3 endpoint 不可达或未配置，跳过建 bucket（材料 API 将降级为 503；" >&2
     echo "      启动共享 RustFS 后重跑本脚本即可补齐）。" >&2
 fi
+# 初始化完成标记（#1084 R5）：在锁内、派生资源建完后写入——clean/drop 的
+# INCLUDE_SELF 删除护栏只认带标记（或存量实例的 .env 已指向派生库）的同名
+# 登记为资源主；无标记的同名登记是阻塞在锁上的待初始化实例，不构成资源主。
+# 标记已加入 .gitignore，不阻塞 git worktree remove，随 worktree 目录消失。
+printf 'initialized_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$ROOT/$WORKTREE_INITIALIZED_MARKER"
+# 派生资源已建完，其余步骤（vault key、worker 状态副本）与派生名无关。
+worktree_name_lock_release
 
 # 3. deploy/secrets
 mkdir -p deploy/secrets
