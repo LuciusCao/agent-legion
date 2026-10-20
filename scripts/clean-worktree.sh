@@ -28,6 +28,9 @@
 #   - 派生库/bucket 的存在性以取锁后的重探测为准：锁前 probe 只用于确认
 #     展示，等锁期间 init 补建的资源不会被陈旧的「不存在」结果漏删（#1084）；
 #   - 删库/删 bucket 前持锁重查：同名 worktree 被重建后又注册着也拒绝；
+#   - 锁持有期间的多步删除由后代进程执行（转调的 drop、后台的 bucket
+#     delete 子 shell）：它们登记为锁的共同执行者，本进程被 SIGKILL 时
+#     回收方仍按存活的执行者判活，锁不会提前释放（#1084 R4）；
 #   - bucket 探测失败（endpoint/鉴权/python 故障，exit 非 0/4/10）fail-closed
 #     中止：探测失败 ≠ 不存在，状态未知时不确认、不推进、不盲删（#1084）；
 #     未配置 S3（确定性状态）仍提示跳过；delete 执行本身失败则 warning 并
@@ -399,7 +402,21 @@ if [[ "$bucket_rc" -eq 4 ]]; then
     exit 1
 elif [[ "$bucket_rc" -eq 10 ]]; then
     worktree_require_unique_derived_names "$ROOT" "$WT" "删除派生 bucket" 1 || exit 1
-    run_bucket_phase delete || rc=$?
+    # delete 是多步删除（list → 分批 delete_objects → delete_bucket），实际
+    # 执行者是 uv/python 子进程：本进程被 SIGKILL 时它仍在删——后台执行并把
+    # 子 shell 登记为锁的共同执行者，回收方按其存活判锁（#1084 R4）。登记
+    # 失败时 fail-closed：停掉子进程并中止，不在无登记状态下继续删除。
+    # 只读 probe 不登记。
+    run_bucket_phase delete &
+    phase_pid=$!
+    if ! worktree_name_lock_register_child "$phase_pid"; then
+        kill "$phase_pid" 2>/dev/null || true
+        wait "$phase_pid" 2>/dev/null || true
+        echo "错误: 派生名锁共同执行者登记失败，中止 bucket 删除（#1084）。" >&2
+        exit 1
+    fi
+    wait "$phase_pid" || rc=$?
+    worktree_name_lock_unregister_child "$phase_pid"
 elif [[ "$bucket_rc" -ne 0 ]]; then
     echo "错误: 锁内派生 bucket 重探测失败（exit=${bucket_rc}），bucket 状态未知，中止（#1084）。" >&2
     echo "      worktree/派生库可能已删除；S3 endpoint 恢复后重跑本脚本补齐 bucket 清理。" >&2

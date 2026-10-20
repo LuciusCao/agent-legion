@@ -111,19 +111,38 @@ worktree_require_unique_derived_names() {
 # 争）；pid 编在文件名里，持有者被 SIGKILL 后由下一个竞争者按 pid 判死
 # 回收。与 gate-queue 不同，这里上限固定为 1 且不容忍超额。
 #
+# 共同执行者登记（R4，锁生命周期 vs 进程树）：holder 文件名只编码取锁进程
+# 的 pid，但实际执行资源操作的可能是它的后代——clean 转调的 drop（借用父
+# 锁）、clean 的 bucket delete（多步删除，执行者是 uv/python 子进程）。
+# 父进程被 SIGKILL 时这些后代继续运行，仅按父 pid 判死回收会让新竞争者与
+# 孤儿执行者并发。因此：借用锁的子进程取锁时登记 <holder>.child-<pid>
+# 文件并在退出时由 trap 移除；clean 的 bucket delete 在后台子 shell 执行
+# 并登记其 pid（只读 probe 不登记）。holder 判活 = 取锁进程存活或任一登记
+# 的共同执行者存活。单条原子命令级的孙进程（psql/dropdb/git）不登记——
+# 父脚本死亡后它们只完成当前已发出的那条命令，不再推进后续步骤。
+#
 # 调用方约定：
 #   - 只在「撞名检查 → 建/删派生资源」区间持锁；交互确认一律放在取锁之
 #     前，取锁后重新做撞名检查再执行（持锁等用户输入会卡住别的 init）。
 #   - 取锁时安装 EXIT/INT/TERM/HUP trap 释放锁（会覆盖调用方的同名
 #     trap，三个调用脚本均无自己的 trap）；正常路径可提前调用
-#     worktree_name_lock_release。
+#     worktree_name_lock_release。信号中断时若登记的共同执行者仍存活，
+#     holder 不删除、留给回收方按子进程判活。
 #   - 嵌套：持锁进程导出 AGENT_LEGION_WT_NAME_LOCK_FILE，子进程（如
-#     clean 转调 drop）看到它指向的 holder 仍存活即视为已持锁直接返回，
-#     且不负责释放——不会自锁死锁，也不会提前放掉父进程的锁。
+#     clean 转调 drop）看到它指向的 holder 仍存活即借用——登记自身为共同
+#     执行者后直接返回，不负责释放父 holder（只移除自己的登记）；父进程
+#     在登记前已死则借用失败，退回独立取锁排队——不会自锁死锁，也不会
+#     提前放掉父进程的锁。
 
 _WT_NAME_LOCK_OWNED=0
 _WT_NAME_LOCK_SLOT=""
 _WT_NAME_LOCK_TMP=""
+# 本进程登记的共同执行者文件（持有者的后台 delete 子 shell）；借用方见
+# 下方 _WT_NAME_LOCK_BORROW_CHILD。
+_WT_NAME_LOCK_CHILD=""
+# 借用父锁时登记的自身文件（Exit 时无条件移除——借用方退出即不再有多步
+# 删除在推进，第三代单条命令的收尾见 R4 注释）。
+_WT_NAME_LOCK_BORROW_CHILD=""
 
 # 锁目录路径（不创建）。git common dir 无法解析时返回 1。
 #   用法: worktree_name_lock_dir REPO_DIR
@@ -148,15 +167,37 @@ _wt_name_lock_file_pid() {
     printf '%s' "${base%%-*}"
 }
 
-# 回收 pid 已死的 holder 与发布中途崩溃留下的 .tmp。只按文件名判定，不读
-# 内容——文件随时可能被其主人删掉（让位），读失败不能当错误。
+# holder 判活（#1084 R4）：取锁进程存活，或任一登记的共同执行者（
+# <holder>.child-<pid>）存活——父进程被 SIGKILL 后嵌套/后台的删除进程
+# 可能仍在推进，此时锁必须视为仍被持有。
+_wt_name_lock_holder_alive() {
+    local f="$1" child
+    _wt_name_lock_pid_alive "$(_wt_name_lock_file_pid "$f")" && return 0
+    for child in "$f".child-*; do
+        [[ -e "$child" ]] || continue
+        _wt_name_lock_pid_alive "${child##*.child-}" && return 0
+    done
+    return 1
+}
+
+# 回收：pid 已死的共同执行者登记、发布中途崩溃留下的 .tmp，以及完全判死
+# （父与全部登记子进程都死了）的 holder。只按文件名判定，不读内容——文件
+# 随时可能被其主人删掉（让位），读失败不能当错误。
 _wt_name_lock_reclaim() {
     local dir="$1" f
-    for f in "$dir"/holder-* "$dir"/.tmp-*; do
+    for f in "$dir"/holder-*.child-* "$dir"/.tmp-*; do
         [[ -e "$f" ]] || continue
-        if ! _wt_name_lock_pid_alive "$(_wt_name_lock_file_pid "$f")"; then
-            rm -f "$f"
-        fi
+        case "$f" in
+            *.child-*) _wt_name_lock_pid_alive "${f##*.child-}" || rm -f "$f" ;;
+            *) _wt_name_lock_pid_alive "$(_wt_name_lock_file_pid "$f")" || rm -f "$f" ;;
+        esac
+    done
+    for f in "$dir"/holder-*; do
+        [[ -e "$f" ]] || continue
+        case "$f" in
+            *.child-*) continue ;;
+        esac
+        _wt_name_lock_holder_alive "$f" || rm -f "$f"
     done
     return 0
 }
@@ -165,7 +206,10 @@ _wt_name_lock_live_count() {
     local dir="$1" f count=0
     for f in "$dir"/holder-*; do
         [[ -e "$f" ]] || continue
-        if _wt_name_lock_pid_alive "$(_wt_name_lock_file_pid "$f")"; then
+        case "$f" in
+            *.child-*) continue ;;
+        esac
+        if _wt_name_lock_holder_alive "$f"; then
             count=$((count + 1))
         fi
     done
@@ -176,6 +220,9 @@ _wt_name_lock_describe() {
     local dir="$1" f line out=""
     for f in "$dir"/holder-*; do
         [[ -e "$f" ]] || continue
+        case "$f" in
+            *.child-*) continue ;;
+        esac
         [[ "$f" != "$_WT_NAME_LOCK_SLOT" ]] || continue
         line="$(head -n1 "$f" 2>/dev/null)" || continue
         out="${out}${out:+; }${line}"
@@ -188,6 +235,17 @@ _wt_name_lock_release() {
         rm -f "$_WT_NAME_LOCK_TMP"
         _WT_NAME_LOCK_TMP=""
     fi
+    if [[ -n "$_WT_NAME_LOCK_CHILD" ]]; then
+        # 信号中断路径上共同执行者（后台 delete 子 shell）可能仍在运行：
+        # holder 留给回收方按子进程判活，不在此删除（#1084 R4）。正常路径
+        # 在 wait + unregister 之后走到这里，child 已死、直接清理。
+        if _wt_name_lock_pid_alive "${_WT_NAME_LOCK_CHILD##*.child-}"; then
+            _WT_NAME_LOCK_CHILD=""
+            return 0
+        fi
+        rm -f "$_WT_NAME_LOCK_CHILD"
+        _WT_NAME_LOCK_CHILD=""
+    fi
     if [[ -n "$_WT_NAME_LOCK_SLOT" ]]; then
         rm -f "$_WT_NAME_LOCK_SLOT"
         _WT_NAME_LOCK_SLOT=""
@@ -196,6 +254,49 @@ _wt_name_lock_release() {
         unset AGENT_LEGION_WT_NAME_LOCK_FILE
         _WT_NAME_LOCK_OWNED=0
     fi
+    return 0
+}
+
+# 借用方退出时只移除自己的共同执行者登记（不动父 holder）。借用方退出即
+# 不再有以它推进的多步删除，登记可无条件移除。
+_wt_name_lock_borrow_release() {
+    if [[ -n "$_WT_NAME_LOCK_BORROW_CHILD" ]]; then
+        rm -f "$_WT_NAME_LOCK_BORROW_CHILD"
+        _WT_NAME_LOCK_BORROW_CHILD=""
+    fi
+    return 0
+}
+
+# 写共同执行者登记文件（<holder>.child-<pid>），noclobber 防并发覆盖；
+# 同名残留只在 pid 已死（pid 复用）时清除。成功返回 0。
+_wt_name_lock_write_child_file() {
+    local file="$1" pid="$2" child="${1}.child-${2}"
+    if [[ -e "$child" ]] && ! _wt_name_lock_pid_alive "$pid"; then
+        rm -f "$child"
+    fi
+    (set -o noclobber; printf 'pid=%s 共同执行者\n' "$pid" >"$child") 2>/dev/null || return 1
+    return 0
+}
+
+# 持有者登记/注销共同执行者（#1084 R4）：多步资源操作放到后台子进程执行时，
+# 登记其 pid——本进程被信号杀死而子进程仍在删资源时，回收方按子进程判活，
+# 锁不会被提前回收。登记失败（锁文件已不在等）返回 1，调用方应 fail-closed。
+worktree_name_lock_register_child() {
+    local pid="$1" file="${AGENT_LEGION_WT_NAME_LOCK_FILE:-}"
+    [[ -n "$file" && -e "$file" ]] || return 1
+    _wt_name_lock_write_child_file "$file" "$pid" || return 1
+    _WT_NAME_LOCK_CHILD="${file}.child-${pid}"
+    return 0
+}
+
+worktree_name_lock_unregister_child() {
+    local pid="$1" file="${AGENT_LEGION_WT_NAME_LOCK_FILE:-}" child
+    [[ -n "$file" ]] || return 0
+    child="${file}.child-${pid}"
+    if [[ "$child" == "$_WT_NAME_LOCK_CHILD" ]]; then
+        _WT_NAME_LOCK_CHILD=""
+    fi
+    rm -f "$child"
     return 0
 }
 
@@ -211,12 +312,30 @@ worktree_name_lock_release() {
 #   用法: worktree_name_lock_acquire REPO_DIR WHAT
 worktree_name_lock_acquire() {
     local repo="$1" what="$2" dir poll nonce waited=0 announced=0
+    local parent_file parent_pid
     if [[ "$_WT_NAME_LOCK_OWNED" -eq 1 ]]; then
         return 0
     fi
-    if [[ -n "${AGENT_LEGION_WT_NAME_LOCK_FILE:-}" && -e "$AGENT_LEGION_WT_NAME_LOCK_FILE" ]] \
-        && _wt_name_lock_pid_alive "$(_wt_name_lock_file_pid "$AGENT_LEGION_WT_NAME_LOCK_FILE")"; then
-        return 0
+    # 嵌套借用（clean 转调 drop）：父 holder 存活时登记自身为共同执行者再
+    # 返回——父进程随后被 SIGKILL 而本进程仍在删库时，回收方按登记判活
+    # （#1084 R4）。登记后复核父锁仍有效：父在登记前已死（或 holder 已被
+    # 回收）则撤销登记、退回下方独立取锁，与当前持有者正常排队。
+    if [[ -n "${AGENT_LEGION_WT_NAME_LOCK_FILE:-}" && -e "$AGENT_LEGION_WT_NAME_LOCK_FILE" ]]; then
+        parent_file="$AGENT_LEGION_WT_NAME_LOCK_FILE"
+        parent_pid="$(_wt_name_lock_file_pid "$parent_file")"
+        if _wt_name_lock_pid_alive "$parent_pid"; then
+            if _wt_name_lock_write_child_file "$parent_file" "$$"; then
+                if [[ -e "$parent_file" ]] && _wt_name_lock_pid_alive "$parent_pid"; then
+                    _WT_NAME_LOCK_BORROW_CHILD="${parent_file}.child-$$"
+                    trap '_wt_name_lock_borrow_release' EXIT
+                    trap '_wt_name_lock_borrow_release; exit 130' INT
+                    trap '_wt_name_lock_borrow_release; exit 143' TERM
+                    trap '_wt_name_lock_borrow_release; exit 129' HUP
+                    return 0
+                fi
+                rm -f "${parent_file}.child-$$"
+            fi
+        fi
     fi
     if ! dir="$(worktree_name_lock_dir "$repo")" || ! mkdir -p "$dir" 2>/dev/null; then
         echo "错误: 无法定位或创建派生名锁目录（git common dir 不可用），拒绝${what}（#1084）。" >&2

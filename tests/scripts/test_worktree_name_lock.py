@@ -66,8 +66,13 @@ exit 0
 
 # dropdb 桩：记录调用与「此刻锁是否被持有」；RECREATE_WT 非空时模拟并发方
 # 在删库之后、删 bucket 之前用同名重建 worktree（只做 git worktree add——
-# 其 init 会被锁挡住）。
+# 其 init 会被锁挡住）。BLOCK_RELEASE 非空时，victim 开发库的删除阻塞到该
+# 文件出现（模拟父进程被 SIGKILL 时嵌套子进程仍在删库，#1084 R4）。
 _DROPDB_STUB = """#!/usr/bin/env bash
+if [[ -n "${BLOCK_RELEASE:-}" && "$*" == *agent_legion_victim && "$*" != *_test_* ]]; then
+    echo "dropdb-blocked agent_legion_victim" >>"$STUB_LOG"
+    while [[ ! -e "$BLOCK_RELEASE" ]]; do sleep 0.05; done
+fi
 printf 'dropdb %s\\n' "$*" >>"$STUB_LOG"
 if ls "$LOCK_DIR"/holder-* >/dev/null 2>&1; then echo "dropdb-under-lock" >>"$STUB_LOG"; fi
 if [[ -n "${RECREATE_WT:-}" && ! -d "$REPO/.worktrees/$RECREATE_WT" ]]; then
@@ -76,11 +81,17 @@ fi
 """
 
 # uv 桩：clean 的 bucket 两阶段（probe 报待删、delete 记录是否持锁）；其余
-# 调用（init 的 vault key）输出一行。
+# 调用（init 的 vault key）输出一行。BLOCK_RELEASE 非空时 delete 阻塞到该
+# 文件出现（模拟父进程被 SIGKILL 时 delete 子进程仍在删，#1084 R4）。
 _UV_STUB = """#!/usr/bin/env bash
 case "${CLEAN_WORKTREE_PHASE:-}" in
     probe) echo "待删除 bucket: stub"; exit 10 ;;
     delete)
+        echo "bucket-delete-start" >>"$STUB_LOG"
+        if [[ -n "${BLOCK_RELEASE:-}" ]]; then
+            while [[ ! -e "$BLOCK_RELEASE" ]]; do sleep 0.05; done
+        fi
+        echo "bucket-delete-done" >>"$STUB_LOG"
         if ls "$LOCK_DIR"/holder-* >/dev/null 2>&1; then echo "bucket-delete-under-lock" >>"$STUB_LOG"; fi
         echo "stub delete_bucket"; exit 0 ;;
 esac
@@ -500,3 +511,98 @@ def test_drop_refuses_while_same_name_worktree_is_registered(env: _Env) -> None:
     assert "foo_bar -> agent_legion_foo_bar" in result.stderr
     assert "同名 worktree 本身" in result.stderr
     assert "dropdb" not in env.log.read_text()
+
+
+# --- 锁生命周期 vs 进程树（#1084 codex R4 P1）--------------------------------
+#
+# holder 只编码取锁进程 pid：父进程（clean）被 SIGKILL 后，借用锁的嵌套
+# 子进程（drop）与后台执行的 bucket delete 仍在删资源，pid 判死回收会让
+# 新竞争者与孤儿执行者并发。锁必须按「任一登记的共同执行者存活」判活。
+
+
+def _start_clean_with_blocked_delete(
+    env: _Env, block_release: Path, stub_dbs: str
+) -> tuple[subprocess.Popen[str], Path]:
+    scripts = env.runner()
+    env.add("victim")
+    clean_err = env.tmp / "clean-killed.err"
+    clean = subprocess.Popen(
+        ["bash", str(scripts / "clean-worktree.sh"), "victim", "--yes"],
+        env=env.env(STUB_DBS=stub_dbs, BLOCK_RELEASE=str(block_release)),
+        stdout=subprocess.PIPE,
+        stderr=clean_err.open("w"),
+        text=True,
+        cwd=env.main,
+    )
+    return clean, clean_err
+
+
+def _registered_children(env: _Env) -> list[str]:
+    """锁目录里共同执行者登记文件（holder-*.child-*）。"""
+    if not env.lock_dir.exists():
+        return []
+    return sorted(p.name for p in env.lock_dir.glob("holder-*.child-*"))
+
+
+def test_lock_outlives_parent_killed_during_nested_drop(env: _Env) -> None:
+    """clean 在嵌套 drop 删库期间被 SIGKILL：drop 完成前竞争者不得进临界区。"""
+    block = env.tmp / "block-release"
+    clean, _ = _start_clean_with_blocked_delete(env, block, _VICTIM_DBS)
+    # 等嵌套 drop 进入第一个库的删除（桩阻塞点）
+    _wait_for(
+        lambda: "dropdb-blocked agent_legion_victim" in env.log.read_text(), "drop blocks in dropdb"
+    )
+
+    # 竞争者此时启动：必须等锁（看见持有者公告），不得直接拿到
+    contender, release_t = env.start_holder("t")
+    err_t = env.tmp / "holder-t.err"
+    _wait_for(lambda: _BUSY in err_t.read_text(), "contender announces waiting")
+
+    clean.kill()  # 只杀父 shell；drop 孤儿继续阻塞在删库中
+    clean.wait(timeout=_DEADLINE)  # 回收 zombie：pid 判死才会失效
+
+    # 父进程已死且已回收：锁必须因登记的共同执行者（drop）存活而保持——
+    # 登记文件仍在、竞争者未拿到锁（确定性状态断言，不靠延时）。
+    assert _registered_children(env) != []
+    assert "acquired t" not in env.events_lines()
+
+    block.touch()  # 放行 dropdb：drop 完成剩余删除后退出
+    release_t.touch()
+    _wait_for(lambda: "acquired t" in env.events_lines(), "contender eventually acquires")
+    assert contender.wait(timeout=_DEADLINE) == 0
+
+    # 竞争者拿到锁时，drop 的两个库都必须已经删完（锁按登记子进程判活）。
+    log = env.log.read_text()
+    assert "dropdb agent_legion_victim\n" in log
+    assert "dropdb agent_legion_test_victim\n" in log
+    _wait_for(lambda: env.holders() == [], "lock dir fully reclaimed")
+    assert env.holders() == []
+
+
+def test_lock_outlives_parent_killed_during_bucket_delete(env: _Env) -> None:
+    """clean 在 bucket delete（多步删除，实际执行者是 uv/python 子进程）期间
+    被 SIGKILL：delete 完成前竞争者不得进临界区。"""
+    block = env.tmp / "block-release"
+    # 无库可删（STUB_DBS 为空）：drop 快速跳过，阻塞点只在 bucket delete。
+    clean, _ = _start_clean_with_blocked_delete(env, block, "")
+    _wait_for(lambda: "bucket-delete-start" in env.log.read_text(), "bucket delete blocks")
+
+    contender, release_t = env.start_holder("t")
+    err_t = env.tmp / "holder-t.err"
+    _wait_for(lambda: _BUSY in err_t.read_text(), "contender announces waiting")
+
+    clean.kill()
+    clean.wait(timeout=_DEADLINE)
+
+    assert _registered_children(env) != []
+    assert "acquired t" not in env.events_lines()
+
+    block.touch()
+    release_t.touch()
+    _wait_for(lambda: "acquired t" in env.events_lines(), "contender eventually acquires")
+    assert contender.wait(timeout=_DEADLINE) == 0
+
+    # 竞争者拿到锁时 delete 必须已完成（顺序：delete 结束 → 锁才释放）。
+    assert "bucket-delete-done" in env.log.read_text()
+    _wait_for(lambda: env.holders() == [], "lock dir fully reclaimed")
+    assert env.holders() == []
