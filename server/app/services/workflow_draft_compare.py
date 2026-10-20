@@ -51,6 +51,14 @@ def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
         fields.append("runtime")
     if base.skill != draft.skill:
         fields.append("skill")
+    # Agent 档案的其余结构字段（tools 白名单 / requires_labels 调度要求）同样
+    # 随 revision 版本化（structural_payload 的 asdict == 覆盖它们）——compare
+    # 不报的话，仅改这两个字段的草稿 creates_revision=true 而摘要为空，
+    # Studio 从摘要推 hasCompareChanges 会静默禁用发布。
+    if base.tools != draft.tools:
+        fields.append("tools")
+    if base.requires_labels != draft.requires_labels:
+        fields.append("requires_labels")
     if _normalized_config(base) != _normalized_config(draft):
         fields.append("config")
     if _normalized_config_schema(base) != _normalized_config_schema(draft):
@@ -127,6 +135,12 @@ def _node_field_risks(base: WorkflowNode, draft: WorkflowNode) -> dict[str, str]
     # execution overrides.
     if base.skill != draft.skill:
         risks["skill"] = "warning"
+    # tools 白名单 / requires_labels 同理：改变 agent 实际可运行的工具集与
+    # 可调度 Worker 范围，随 revision 版本化，与 execution 覆盖同档。
+    if base.tools != draft.tools:
+        risks["tools"] = "warning"
+    if base.requires_labels != draft.requires_labels:
+        risks["requires_labels"] = "warning"
     # Tunable node settings (#418): structural (they version with the
     # revision) and they change what the node actually runs — same tier as
     # execution overrides, not a routing break.

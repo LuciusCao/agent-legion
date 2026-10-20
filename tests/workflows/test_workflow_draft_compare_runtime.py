@@ -73,6 +73,9 @@ def _agent_node(**execution: str) -> WorkflowNode:
         ({"after": ["x"]}, True),
         ({"shard": WorkflowShardSpec(count=4)}, True),
         ({"reduce": WorkflowReduceSpec(from_node="x")}, True),
+        # codex P2：档案的其余结构字段同样由谓词覆盖（compare 摘要对齐补报）。
+        ({"tools": ("bash",)}, True),
+        ({"requires_labels": {"gpu": "true"}}, True),
         ({"execution": WorkflowNodeExecution(runtime="velites", provider="p")}, False),
         ({"execution": WorkflowNodeExecution(runtime="velites", model="m")}, False),
         ({"execution": WorkflowNodeExecution(runtime="velites", thinking="high")}, False),

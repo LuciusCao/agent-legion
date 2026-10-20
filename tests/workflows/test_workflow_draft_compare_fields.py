@@ -84,6 +84,26 @@ def _bare_node(key: str = "demo") -> WorkflowNode:
 # ---------------------------------------------------------------------------
 
 
+def test_node_change_fields_tools_change_is_change():
+    """#1114 codex P2：tools 白名单随 revision 版本化（structural_payload
+    的 asdict == 覆盖），compare 摘要必须报出——否则 tools-only 草稿
+    creates_revision=true 而摘要为空，Studio 从摘要推 hasCompareChanges
+    会静默禁用发布。"""
+    base = _bare_node()
+    draft = replace(base, tools=("bash",))
+    assert _node_change_fields(base, draft) == ["tools"]
+    # Same value: no change.
+    assert _node_change_fields(draft, replace(draft, tools=("bash",))) == []
+
+
+def test_node_change_fields_requires_labels_change_is_change():
+    """同上：requires_labels（Worker 调度要求）的摘要覆盖。"""
+    base = _bare_node()
+    draft = replace(base, requires_labels={"gpu": "true"})
+    assert _node_change_fields(base, draft) == ["requires_labels"]
+    assert _node_change_fields(draft, replace(draft, requires_labels={"gpu": "true"})) == []
+
+
 def test_node_change_fields_node_type_change_is_change():
     base = _bare_node()
     draft = replace(base, node_type="agent")
@@ -164,6 +184,42 @@ def test_compare_after_reorder_creates_revision(tmp_path):
     assert result["creates_revision"] is True
     change = _modified_change(result, "publish_content")
     assert change["fields"] == ["after"]
+    assert change["risk"] == "warning"
+
+
+def test_compare_tools_only_change_creates_revision(tmp_path):
+    """#1114 codex P2 场景：仅改 agent 节点 tools 白名单——谓词判结构变更
+    （creates_revision=true），摘要也必须非空；此前 _node_change_fields 不报
+    tools，Studio 从空摘要推 hasCompareChanges=false 静默禁用发布。"""
+    app, workspace_id, definition = _app_with_baseline(tmp_path)
+    raw = yaml.safe_load(definition_to_yaml(definition))
+    raw["nodes"]["write_script"]["tools"] = ["bash"]
+    raw_yaml = yaml.safe_dump(raw, allow_unicode=True)
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, raw_yaml)
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is True
+    change = _modified_change(result, "write_script")
+    assert change["fields"] == ["tools"]
+    assert change["risk"] == "warning"
+
+
+def test_compare_requires_labels_only_change_creates_revision(tmp_path):
+    """同上：仅改 agent 节点 requires_labels（Worker 调度要求）。"""
+    app, workspace_id, definition = _app_with_baseline(tmp_path)
+    raw = yaml.safe_load(definition_to_yaml(definition))
+    raw["nodes"]["write_script"]["requires_labels"] = {"gpu": "true"}
+    raw_yaml = yaml.safe_dump(raw, allow_unicode=True)
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, raw_yaml)
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is True
+    change = _modified_change(result, "write_script")
+    assert change["fields"] == ["requires_labels"]
     assert change["risk"] == "warning"
 
 
