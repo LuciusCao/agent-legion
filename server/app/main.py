@@ -40,11 +40,10 @@ from server.app.services.artifact_store import ArtifactStore
 from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
 from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
-from server.app.services.job_intake_queue import JobIntakeQueue
+from server.app.services.job_batch_operations.wiring import build_background_tasks
 from server.app.services.job_packages import JobPackageService
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
-from server.app.services.run_batch_feeder import RunBatchFeeder
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
@@ -53,7 +52,6 @@ from server.app.settings import load_settings, validate_settings
 from server.app.single_replica_probe import SingleReplicaProbe
 from server.app.skills.skill_sources_retirement import retire_skill_sources_document
 from server.app.spa import mount_spa
-from server.app.startup_tasks import BackgroundTasks
 from server.app.storage import build_s3_storage_checked
 from server.app.studio_chat.agent_catalog import spawn_startup_detection
 from server.app.studio_chat.registry import StudioAgentRegistryStore
@@ -149,15 +147,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # one MaterialsService instance (#1117 text-item materialization); the
     # app.state assignment below reuses the same object.
     materials_service = MaterialsService(job_db, object_storage)
-    background_tasks = BackgroundTasks(
-        workspace_event_aggregator=workspace_event_aggregator,
-        agent_broadcast_controller=agent_manager.broadcast_controller,
-        job_intake_queue=JobIntakeQueue(job_db, settings, job_event_buffer),
-        ops_metrics=ops_metrics,
-        run_batch_feeder=RunBatchFeeder(
-            job_db, settings, job_event_buffer, materials_service=materials_service
-        ),
-    )
     # Single-replica guardrail (#277): the runtime state above (in-process
     # event bus, login rate limiter, studio chat sessions, pause reset) is
     # process-local, so a second replica against the same database degrades
@@ -301,6 +290,22 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     workspace_execution_configuration = WorkspaceExecutionConfigurationService(job_db, settings)
     workspace_configuration = WorkspaceConfigurationService(job_db, settings)
     job_packages = JobPackageService(job_db, settings, object_store=job_artifact_objects)
+    # BackgroundTasks assembly lives in job_batch_operations.wiring (#946,
+    # main.py file budget): intake consumer + runs-async feeder (#1117) +
+    # ops metrics + batch-ops feeder.
+    background_tasks = build_background_tasks(
+        job_db,
+        settings,
+        workspace_event_aggregator,
+        agent_manager,
+        ops_metrics,
+        job_event_manager,
+        job_event_buffer,
+        materials_service,
+        artifact_store,
+        job_artifact_objects,
+        job_packages,
+    )
     app.include_router(create_auth_router(app.state.auth_service), prefix="/api")
     quality = build_quality_loop(job_db, artifact_store, object_store=job_artifact_objects)
     app.include_router(

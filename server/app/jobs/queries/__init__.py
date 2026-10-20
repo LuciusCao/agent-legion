@@ -8,6 +8,9 @@ from server.app.jobs.queries.groups import (
     WorkflowRevisionDomainQueriesMixin,
     WorkspaceDomainQueriesMixin,
 )
+from server.app.jobs.queries.job_batch_operations import (  # #946
+    JobBatchOperationQueriesMixin,
+)
 from server.app.jobs.queries.material_claim_gate import MaterialClaimGateQueriesMixin  # #1279
 from server.app.jobs.queries.material_repair import MaterialRepairQueriesMixin  # #1279
 from server.app.jobs.queries.run_batches import RunBatchQueriesMixin  # #1117
@@ -38,6 +41,8 @@ class JobQueries(
     RunBatchQueriesMixin,
     # #1157 phase3: task-center listing/archive views (standalone mixin).
     RunBatchListingQueriesMixin,
+    # #946: batch-ops async task rows (same standalone-mixin argument).
+    JobBatchOperationQueriesMixin,
     JobQueriesBase,
 ):
     """Backward-compatible facade for all workspace/job query operations.

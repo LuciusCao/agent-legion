@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 from server.app.job_intake_background import consume_intake_batches
 from server.app.ops_metrics_background import run_ops_metrics_loop
+from server.app.services.job_batch_ops_background import consume_job_batch_operations
 from server.app.services.run_batch_background import consume_run_batches
 
 
@@ -23,12 +24,14 @@ class BackgroundTasks:
         job_intake_queue: Any,
         ops_metrics: OpsMetricsService | None = None,
         run_batch_feeder: Any | None = None,
+        job_batch_ops_feeder: Any | None = None,
     ) -> None:
         self._workspace_event_aggregator = workspace_event_aggregator
         self._agent_broadcast_controller = agent_broadcast_controller
         self._job_intake_queue = job_intake_queue
         self._ops_metrics = ops_metrics
         self._run_batch_feeder = run_batch_feeder
+        self._job_batch_ops_feeder = job_batch_ops_feeder
 
     def start(self, app: FastAPI) -> None:
         app.state.workspace_event_aggregator_task = asyncio.create_task(
@@ -52,6 +55,12 @@ class BackgroundTasks:
                 consume_run_batches(self._run_batch_feeder)
             )
 
+        # #946: batch-ops feeder (same hosting contract).
+        if self._job_batch_ops_feeder is not None:
+            app.state.job_batch_ops_feeder_task = asyncio.create_task(
+                consume_job_batch_operations(self._job_batch_ops_feeder)
+            )
+
         if self._ops_metrics is not None:
             app.state.ops_metrics_task = asyncio.create_task(
                 run_ops_metrics_loop(self._ops_metrics)
@@ -64,6 +73,7 @@ class BackgroundTasks:
             "agent_status_flush_task",
             "job_intake_queue_task",
             "run_batch_feeder_task",
+            "job_batch_ops_feeder_task",
             "ops_metrics_task",
         ):
             task = getattr(app.state, attr, None)

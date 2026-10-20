@@ -1991,6 +1991,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Job Batch Operation */
+    get: operations['get_job_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/results': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Job Batch Operation Results */
+    get: operations['list_job_batch_operation_results_api_workspaces__workspace_id__job_batch_operations__op_id__results_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/job-batches': {
     parameters: {
       query?: never
@@ -4749,6 +4783,102 @@ export interface components {
       max_items_per_run: number
       /** Node Code Max Bytes */
       node_code_max_bytes: number
+    }
+    /**
+     * JobBatchOperationAcceptedResponse
+     * @description 202 body of every async-dispatched batch endpoint.
+     */
+    JobBatchOperationAcceptedResponse: {
+      operation: components['schemas']['JobBatchOperationResponse']
+    }
+    /**
+     * JobBatchOperationResponse
+     * @description The public operation handle (accept response + status poll).
+     */
+    JobBatchOperationResponse: {
+      /** Chunk Errors */
+      chunk_errors?: {
+        [key: string]: unknown
+      }[]
+      /** Created At */
+      created_at?: string | null
+      /**
+       * Created By
+       * @default
+       */
+      created_by: string
+      /**
+       * Error Message
+       * @default
+       */
+      error_message: string
+      /** Failed Count */
+      failed_count: number
+      /** Finished At */
+      finished_at?: string | null
+      /** Id */
+      id: string
+      /** Items Total */
+      items_total: number
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind:
+        | 'rerun'
+        | 'rerun_by_failure'
+        | 'delete'
+        | 'run_to'
+        | 'pause'
+        | 'resume'
+        | 'upgrade_workflow'
+        | 'package'
+        | 'clear_packed'
+      /** Output */
+      output?: {
+        [key: string]: unknown
+      }
+      /** Processed Count */
+      processed_count: number
+      /** Reason Counts */
+      reason_counts?: {
+        [key: string]: number
+      }
+      /** Skipped Count */
+      skipped_count: number
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        | 'pending'
+        | 'running'
+        | 'paused'
+        | 'completed'
+        | 'failed'
+        | 'cancelled'
+      /** Succeeded Count */
+      succeeded_count: number
+      /** Updated At */
+      updated_at?: string | null
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** JobBatchOperationResultItem */
+    JobBatchOperationResultItem: {
+      /** Result */
+      result: {
+        [key: string]: unknown
+      }
+      /** Seq */
+      seq: number
+    }
+    /** JobBatchOperationResultsResponse */
+    JobBatchOperationResultsResponse: {
+      /** Next Cursor */
+      next_cursor?: string | null
+      /** Results */
+      results: components['schemas']['JobBatchOperationResultItem'][]
     }
     /** JobBatchRequest */
     JobBatchRequest: {
@@ -12964,6 +13094,73 @@ export interface operations {
       }
     }
   }
+  get_job_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        op_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_job_batch_operation_results_api_workspaces__workspace_id__job_batch_operations__op_id__results_get: {
+    parameters: {
+      query?: {
+        limit?: number
+        cursor?: number | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+        op_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationResultsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   create_workspace_job_batch_api_workspaces__workspace_id__job_batches_post: {
     parameters: {
       query?: never
@@ -13058,6 +13255,15 @@ export interface operations {
           'application/json': components['schemas']['BatchJobMutationResponse']
         }
       }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -13093,6 +13299,15 @@ export interface operations {
           'application/json': components['schemas']['BatchJobMutationResponse']
         }
       }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -13126,6 +13341,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['BatchJobMutationResponse']
+        }
+      }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
         }
       }
       /** @description Validation Error */
@@ -13198,6 +13422,15 @@ export interface operations {
           'application/json': components['schemas']['BatchJobMutationResponse']
         }
       }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -13231,6 +13464,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['BatchJobMutationResponse']
+        }
+      }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
         }
       }
       /** @description Validation Error */
@@ -13268,6 +13510,15 @@ export interface operations {
           'application/json': components['schemas']['BatchJobMutationResponse']
         }
       }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -13301,6 +13552,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspacePackageStatusResetResponse']
+        }
+      }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
         }
       }
       /** @description Validation Error */
@@ -13378,6 +13638,15 @@ export interface operations {
           'application/json': components['schemas']['WorkspacePackageResponse']
         }
       }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -13411,6 +13680,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['JobRerunByFailureResponse']
+        }
+      }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
         }
       }
       /** @description Validation Error */

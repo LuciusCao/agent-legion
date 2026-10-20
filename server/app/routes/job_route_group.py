@@ -10,6 +10,7 @@ from server.app.routes.external_artifacts import create_external_artifact_router
 from server.app.routes.failed_node_runs import create_failed_node_runs_router
 from server.app.routes.job_approvals import create_job_approvals_router
 from server.app.routes.job_artifacts import create_job_artifacts_router
+from server.app.routes.job_batch_operations import create_job_batch_operations_router
 from server.app.routes.job_batches import create_job_batches_router
 from server.app.routes.job_invalid_paths import create_job_invalid_paths_router
 from server.app.routes.job_mutations import create_job_mutations_router
@@ -58,6 +59,9 @@ def include_job_routes(
 
     router.include_router(create_job_batches_router(services.intake))
     router.include_router(create_jobs_router(services.queries))
+    # #946: the batch-ops async read surface (status poll + per-job results);
+    # the write side stays on the effecting routers below.
+    router.include_router(create_job_batch_operations_router(job_db))
     router.include_router(
         create_job_mutations_router(
             services.queries, services.rerun, services.deletion, services.execution

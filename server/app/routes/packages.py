@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from typing import Annotated, Any
 
-from ..auth.dependencies import reject_studio_agent_scope
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
+
+from ..auth.dependencies import reject_studio_agent_scope, require_user
 from ..jobs import JobQueries
 from ..security import validate_package_filename
 from ..services.job_packages import (
@@ -12,6 +14,7 @@ from ..services.job_packages import (
 from ..services.job_selection_resolver import EmptyJobSelectionError
 from ..settings import Settings
 from ..storage_paths import ManagedPathError, resolve_data_path, resolve_package_file
+from .job_batch_operations import ACCEPTED_202, async_dispatch_or_none
 from .package_clear_packed import register_clear_packed_route
 from .package_contracts import (
     WorkspacePackageRequest,
@@ -102,18 +105,22 @@ def create_packages_router(
     @router.post(
         "/workspaces/{workspace_id}/jobs/package",
         response_model=WorkspacePackageResponse,
+        responses=ACCEPTED_202,
         dependencies=[Depends(reject_studio_agent_scope)],
     )
     def package_workspace_jobs(
-        workspace_id: str, request: WorkspacePackageRequest
-    ) -> WorkspacePackageResponse:
+        workspace_id: str,
+        request: WorkspacePackageRequest,
+        user: Annotated[dict[str, Any], Depends(require_user)],
+    ) -> WorkspacePackageResponse | JSONResponse:
+        # #946: selections above the sync threshold enqueue (202 + handle);
+        # the feeder marks eligibility per chunk and packages once at
+        # completion (the zip lands in the operation's output).
+        ids, accepted = async_dispatch_or_none(job_db, workspace_id, "package", request, {}, user)
+        if accepted is not None:
+            return accepted
         try:
-            package_result = job_packages.package(
-                workspace_id,
-                request.job_ids,
-                job_filter=request.resolved_filter(),
-                exclude_ids=request.exclude_ids,
-            )
+            package_result = job_packages.package(workspace_id, ids)
         except EmptyJobSelectionError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         return WorkspacePackageResponse(
@@ -127,7 +134,7 @@ def create_packages_router(
             download_url=package_result["download_url"],
         )
 
-    register_clear_packed_route(router, job_packages)
+    register_clear_packed_route(router, job_db, job_packages)
 
     @router.get(
         "/workspaces/{workspace_id}/packages/{filename:path}",
