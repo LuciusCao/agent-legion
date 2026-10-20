@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- 批量 job 端点的单请求选择上限从 5000 上调至 20000，并新增 env `AGENT_LEGION_MAX_BATCH_JOBS` 覆盖（重启生效，issue #1348）：原上限是 0.7.16 评审波次的人为护栏（#712/#917）而非性能实测推导，写侧逐 job 一个事务（锁即放）、读侧已按 `CHUNK_ROWS=1000` 分块，均按规模线性扩展；`jobs/package` / `jobs/clear-packed` 共用的 `set_jobs_packed` UPDATE 同步改为按块执行，补齐读侧之外的最后一个未分块写面。线程池占用语义不变（1 请求 1 槽位），大批量操作仍同步等待、无进度反馈，进度展示与后台化归 #946（0.8.1 内后续迭代）。前端 `rerunJobsByFailure` 补上与其他批量端点一致的 `BULK_REQUEST_TIMEOUT` 超时豁免，消除「前端 2 分钟超时误报失败、服务端继续跑」的缺口。
+
 ### Fixed
 
 - job 删除清理与同源重建的竞态窗口（issue #1083，#1065 follow-up）：`create_job` / `create_jobs_bulk` 此前不取 `job-mutation:<id>` 锁且先 mkdir 再 upsert，同源 job 若在清理「锁下复核行不存在」与「rename 入 `.trash`」之间重建，其采用的目录会被整体移走；现在创建路径在 mkdir / upsert 前取同一把锁并持到提交（bulk 每个 chunk 用一条集合语句按 job_id 升序取完锁，chunk 提交粒度降为 250 行以约束共享锁表占用，即全局批序在单 workspace 上的形态，先于 material/bundle 行锁；取锁前先拒绝撞上其他 workspace 现存 job 的 id 碰撞，保住全局锁序），bulk 的「已存在则不建目录」判定改在锁下按 chunk 重读，不再用无锁的整次预检。

@@ -67,7 +67,7 @@ def _assert_too_large(response) -> None:
 @pytest.mark.no_db
 def test_max_batch_jobs_aligns_with_bulk_chunking():
     assert MAX_BATCH_JOBS % CHUNK_ROWS == 0
-    assert CHUNK_ROWS <= MAX_BATCH_JOBS <= 10 * CHUNK_ROWS
+    assert CHUNK_ROWS <= MAX_BATCH_JOBS <= 50 * CHUNK_ROWS
 
 
 @pytest.mark.no_db
