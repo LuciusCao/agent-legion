@@ -758,3 +758,96 @@ async fn continuation_turn_counts_into_the_turn_budget() {
     assert!(user_text(&history[2]).contains("NOT executed"));
     assert!(user_text(&history[3]).contains("--max-turns"));
 }
+
+/// #865 review P2: the consecutive-truncation streak RESETS on any non-length
+/// stop — `length → toolUse (reset) → length` must earn a fresh continuation
+/// turn (mutation target: `track_stop` never resetting would push the second
+/// truncation straight to the cap and skip the continuation).
+#[tokio::test]
+async fn non_length_stop_resets_the_consecutive_truncation_streak() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = base_config(dir.path().canonicalize().unwrap());
+    config.tools = vec![ToolKind::Write];
+    config.session = Some(SessionLog::open(&dir.path().join("session")).unwrap());
+
+    let provider = ScriptedProvider::new(vec![
+        truncated_assistant("call-0-1"),
+        assistant_tool_call(
+            "call-1-0",
+            "write",
+            serde_json::json!({"path": "out.txt", "content": "payload"}),
+        ),
+        truncated_assistant("call-2-1"),
+        assistant_text("done", StopReason::Stop),
+    ]);
+    let mut sink = MemorySink::default();
+
+    let code = run(config, &provider, &mut sink).await.unwrap();
+    assert_eq!(code, 0);
+    // length → continuation turn (toolUse, streak reset) → length →
+    // continuation turn (stop): FOUR turns, TWO continuation notices.
+    assert_eq!(turn_starts(&sink), 4);
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 4);
+    assert!(user_text(requests[1].last().unwrap()).contains("NOT executed"));
+    assert!(
+        user_text(requests[3].last().unwrap()).contains("NOT executed"),
+        "the truncation after the reset must earn a fresh continuation turn"
+    );
+    let continuations = session_messages(dir.path())
+        .iter()
+        .filter(|message| {
+            message.role == Role::User
+                && matches!(&message.content[0], ContentBlock::Text { text } if text.contains("NOT executed"))
+        })
+        .count();
+    assert_eq!(continuations, 2);
+}
+
+/// #865 review P2: the continuation arm's `wrap_up.is_none()` guard — a
+/// REMEDIATION turn that truncates must NOT stack a continuation on top of
+/// the wrap-up; the run ends with the outputs validation as before (mutation
+/// target: dropping the guard would inject a continuation and run a third
+/// turn).
+#[tokio::test]
+async fn truncated_remediation_turn_ends_without_stacking_a_continuation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = base_config(dir.path().canonicalize().unwrap());
+    config.tools = vec![ToolKind::Write];
+    config.require_output = vec![PathBuf::from("result.txt")];
+    config.session = Some(SessionLog::open(&dir.path().join("session")).unwrap());
+
+    let provider = ScriptedProvider::new(vec![
+        // Turn 1 stops normally with the artifact missing → remediation turn.
+        assistant_text("done without writing", StopReason::Stop),
+        // Turn 2 (the remediation turn) truncates.
+        truncated_assistant("call-1-1"),
+    ]);
+    let mut sink = MemorySink::default();
+
+    let code = run(config, &provider, &mut sink).await.unwrap();
+    assert_eq!(code, EXIT_MISSING_OUTPUTS);
+    assert_eq!(turn_starts(&sink), 2, "no continuation on a wrap-up turn");
+    let validations: Vec<&OutputsValidationEvent> = sink
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            Event::OutputsValidation(event) => Some(event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(validations.len(), 1);
+    assert_eq!(validations[0].missing, vec!["result.txt"]);
+
+    // The session holds the remediation notice but NO continuation notice.
+    let messages = session_messages(dir.path());
+    assert!(
+        messages.iter().all(|message| {
+            !matches!(&message.content[0], ContentBlock::Text { text } if text.contains("NOT executed"))
+        }),
+        "a wrap-up-turn truncation must not inject a continuation message"
+    );
+    assert!(messages.iter().any(|message| {
+        matches!(&message.content[0], ContentBlock::Text { text } if text.contains("result.txt"))
+    }));
+}

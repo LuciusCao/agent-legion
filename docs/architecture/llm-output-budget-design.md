@@ -87,9 +87,11 @@
    - 收尾轮不叠加：预算收尾只在 `wrap_up.is_none()` 时注入（`agent.rs:194-199`），
      收尾轮结束即发校验并 break（`agent.rs:183-190`、`:352-360`），补救轮只在
      非收尾轮的正常停止里注入（`agent.rs:373-379`），续写轮同样不叠加在收尾轮上
-     （guard `wrap_up.is_none()`，`agent.rs:336-348`），一次 run 至多一个收尾轮；
-     续写轮至多每段连续触顶一次（上限 2，`truncation.rs`
-     `MAX_CONSECUTIVE_LENGTH_STOPS`）；
+     （guard `wrap_up.is_none()`，`agent.rs:337-339`，测试
+     `truncated_remediation_turn_ends_without_stacking_a_continuation` 钉住），
+     一次 run 至多一个收尾轮；续写轮至多每段连续触顶一次（上限 2，`truncation.rs`
+     `MAX_CONSECUTIVE_LENGTH_STOPS`；非 length 停止重置连续计数，测试
+     `non_length_stop_resets_the_consecutive_truncation_streak` 钉住）；
    - #865 起，触顶与后续收尾（补救轮 / 校验）之间必有续写轮的 assistant
      `message_end`（已达连续上限或处于收尾轮时除外）；表中触顶后直接跟收尾产物的
      velites 行（12/15/16/18/34）因此转为防御行，只钉住归因语义；
