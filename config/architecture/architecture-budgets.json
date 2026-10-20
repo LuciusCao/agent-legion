@@ -899,7 +899,7 @@
     "frontend/src/test-setup-matchmedia.ts": 22,
     "frontend/src/test-setup-node.ts": 11,
     "frontend/src/test-setup.ts": 103,
-    "frontend/src/testing/TestMemoryRouter.tsx": 23,
+    "frontend/src/testing/TestMemoryRouter.tsx": 22,
     "frontend/src/testing/eventSourceMock.ts": 28,
     "frontend/src/testing/fixtures.ts": 73,
     "frontend/src/testing/jobDetailFixtures.ts": 39,

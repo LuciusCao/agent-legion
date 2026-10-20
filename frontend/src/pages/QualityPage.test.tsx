@@ -175,10 +175,7 @@ vi.mock('../api', () => ({
 function renderPage() {
   return render(
     <TestQueryProvider>
-      <MemoryRouter
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-        initialEntries={['/workspaces/ws1/quality']}
-      >
+      <MemoryRouter initialEntries={['/workspaces/ws1/quality']}>
         <Routes>
           <Route
             path="/workspaces/:workspaceId/quality"

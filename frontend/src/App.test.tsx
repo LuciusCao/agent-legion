@@ -37,9 +37,7 @@ describe('App startup lifecycle', () => {
   it('connects realtime UI state and closes it on unmount', () => {
     const routes: RouteObject[] = [{ path: '*', element: <App /> }]
     const router = createMemoryRouter(routes, { initialEntries: ['/'] })
-    const view = render(
-      <RouterProvider router={router} future={{ v7_startTransition: true }} />
-    )
+    const view = render(<RouterProvider router={router} />)
 
     expect(connectAgentsWs).toHaveBeenCalledOnce()
     expect(screen.getByText('application routes')).toBeInTheDocument()

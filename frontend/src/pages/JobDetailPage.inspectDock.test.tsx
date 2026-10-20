@@ -145,10 +145,7 @@ function renderPageWithCache() {
   })
   return render(
     <QueryClientProvider client={client}>
-      <ReactRouterMemoryRouter
-        initialEntries={['/workspaces/ws1/jobs/j1']}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
+      <ReactRouterMemoryRouter initialEntries={['/workspaces/ws1/jobs/j1']}>
         <ActionRenderer />
         <NavigateButton to="/workspaces/ws1/jobs/j1" label="去 j1" />
         <NavigateButton to="/workspaces/ws1/jobs/j2" label="去 j2" />
