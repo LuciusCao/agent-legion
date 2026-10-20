@@ -458,6 +458,8 @@ def test_all_duplicate_resubmission_heals_failed_run(service, job_db) -> None:
     assert result["run"]["id"] == run_id
     assert result["created_count"] == 0
     assert result["job_ids"] == []
+    # #1157 phase0：治愈路径上全部条目都是重复，skipped_count = 提交数。
+    assert result["skipped_count"] == 2
     with job_db.connect() as conn:
         healed = conn.execute(
             "select status, error_message, created_count from runs where id=%s", (run_id,)

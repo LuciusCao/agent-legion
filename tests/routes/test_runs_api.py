@@ -138,6 +138,8 @@ def test_create_list_and_detail(client, job_db) -> None:
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["created_count"] == 2
+    # #1157 phase0：无跳过条目时 skipped_count 为 0。
+    assert body["skipped_count"] == 0
     run = body["run"]
     assert run["source_kind"] == "items"
     assert run["status"] == "created"
@@ -428,17 +430,21 @@ def test_healed_resubmission_returns_empty_job_ids(client, job_db) -> None:
     assert healed["run"]["id"] == run_id
     assert healed["created_count"] == 0
     assert healed["job_ids"] == []
+    # #1157 phase0：治愈路径 skipped_count = 提交条目数（全部已存在）。
+    assert healed["skipped_count"] == 1
 
 
 def test_run_create_response_contract_pins_job_ids_without_rows() -> None:
     """#467 A4 原始动机回归钉（#735 收口）：响应 schema 有 job_ids（字符串
-    数组）且没有 jobs 字段——万级 items 响应体积不能随 #735 回退。"""
+    数组）且没有 jobs 字段——万级 items 响应体积不能随 #735 回退。
+    #1157 phase0 加入 skipped_count 标量（跳过=已存在/并发认领），体积
+    不随规模增长。"""
     from server.app.routes.run_contracts import RunCreateResponse
 
     schema = RunCreateResponse.model_json_schema()
 
-    assert set(schema["required"]) == {"run", "created_count", "job_ids"}
-    assert set(schema["properties"]) == {"run", "created_count", "job_ids"}
+    assert set(schema["required"]) == {"run", "created_count", "job_ids", "skipped_count"}
+    assert set(schema["properties"]) == {"run", "created_count", "job_ids", "skipped_count"}
     # review P3-1：契约级描述进 OpenAPI（外部调用方在生成的类型里就能
     # 看到「新建、非 run 全量、全重复为空」的语义，不用翻 issue）。
     job_ids_schema = schema["properties"]["job_ids"]
@@ -446,6 +452,9 @@ def test_run_create_response_contract_pins_job_ids_without_rows() -> None:
     assert job_ids_schema["type"] == "array"
     assert "新建" in job_ids_schema["description"]
     assert "#501" in job_ids_schema["description"]
+    skipped_schema = schema["properties"]["skipped_count"]
+    assert skipped_schema["type"] == "integer"
+    assert "已存在" in skipped_schema["description"]
 
 
 def test_raced_runs_share_item_responses_follow_write_truth(client, job_db, monkeypatch) -> None:
@@ -512,6 +521,10 @@ def test_raced_runs_share_item_responses_follow_write_truth(client, job_db, monk
     assert second_body["job_ids"] == [job_of["mat-b"]]
     assert second_body["created_count"] == 1
     assert second_body["run"]["created_count"] == 1
+    # #1157 phase0：写入竞态中被并发 run 先行认领的共享 item 计入后写者
+    # 的 skipped_count（submitted − created 恒等）。
+    assert first_body["skipped_count"] == 0
+    assert second_body["skipped_count"] == 1
 
     # GET /jobs?run_id= 对两边都恰好查得到各自真正拥有的 job。
     for run_id, expected_ids in (

@@ -22,6 +22,9 @@ submissions racing the same item past the dedup probe are arbitrated by the
 ON CONFLICT ownership clause (first writer wins, ownership is never
 re-bound), so a response can never claim a job another run owns, and the
 GET /jobs run_id filter stays consistent with every returned id.
+#1157 phase0 adds the scalar ``skipped_count`` (submitted − created): items
+filtered by the dedup probe plus items a concurrent run claimed first, so the
+client can show 「新建 N 跳过 M」 without a second round trip.
 """
 
 from __future__ import annotations
@@ -39,7 +42,7 @@ from server.app.services.job_intake_workspace import get_workspace
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.run_item_client_token import drop_null_client_tokens
-from server.app.services.run_item_resolution import resolve_run_items
+from server.app.services.run_item_resolution import create_run_response, resolve_run_items
 from server.app.services.run_item_types import validate_run_item_types
 from server.app.services.run_partial_failure import compensate_partial_creation
 from server.app.services.run_text_items import is_text_item, materialize_text_items
@@ -208,7 +211,11 @@ class RunService:
                 workspace_id, workflow_key, ITEMS_SOURCE_KIND, digest_payload
             )
             if healed is not None:
-                return {"run": _run_record(healed), "created_count": 0, "job_ids": []}
+                # 治愈路径上全部条目都是重复（fresh 为空才走到这里）。
+                return create_run_response(_run_record(healed), [], len(items))
+            # 文案是对外机器契约（docs/workspace-api-tokens.md 教调用方精确
+            # 相等判断「已存在」），不得改动或追加计数后缀；人读侧的可读化
+            # 由前端 toast 承担（#1157 phase0，tower 裁决 A）。
             raise InvalidOperationError("No tasks were resolved from input")
 
         run = self.job_db.create_run(
@@ -315,7 +322,9 @@ class RunService:
         # truthful shape of "a concurrent run won all of these items" (the
         # serialized equivalent, the dedup probe's 400/heal branch, never
         # applies to an in-flight race).
-        return {"run": _run_record(run), "created_count": len(job_ids), "job_ids": job_ids}
+        # #1157 phase0: skipped_count 由 create_run_response 组装
+        # （submitted − created，语义见其 docstring）。
+        return create_run_response(_run_record(run), job_ids, len(items))
 
     def list_runs(self, workspace_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
         rows = self.job_db.list_runs(workspace_id, limit)

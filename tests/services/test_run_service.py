@@ -263,6 +263,7 @@ def test_duplicate_items_are_filtered(service, job_db) -> None:
         WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_material_item("mat-1")]
     )
     assert first["created_count"] == 1
+    assert first["skipped_count"] == 0
 
     # A resubmission mixing an existing item with a fresh one keeps only the fresh.
     second = service.create_run(
@@ -271,6 +272,8 @@ def test_duplicate_items_are_filtered(service, job_db) -> None:
         items=[_material_item("mat-1"), _material_item("mat-2")],
     )
     assert second["created_count"] == 1
+    # #1157 phase0：被 dedup 过滤的已存在条目计入 skipped_count。
+    assert second["skipped_count"] == 1
     assert _fetch_job(job_db, second["job_ids"][0])["source_id"] == "mat-2"
 
     # Nothing fresh left: the whole request is rejected like legacy intake.
@@ -288,6 +291,8 @@ def test_intra_request_duplicates_create_one_job(service, job_db) -> None:
     )
 
     assert result["created_count"] == 1
+    # 请求内重复条目同样计入 skipped_count（submitted − created 恒等）。
+    assert result["skipped_count"] == 1
 
 
 def test_validation_failures_leave_no_run_behind(service_all_types, job_db) -> None:

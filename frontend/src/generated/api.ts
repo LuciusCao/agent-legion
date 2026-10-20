@@ -6142,7 +6142,8 @@ export interface components {
      * @description #467 A4 响应瘦身保持：run + created_count only，永不物化 job 行
      *     （万级 items 的响应体积回归由测试钉住）；#735 加回 job_ids——服务层
      *     本就返回的字符串 id 列表（体积与 job rows 差一个数量级），外部系统
-     *     提交后即可拿到 job_id 去 #703 的单 job 端点轮询。
+     *     提交后即可拿到 job_id 去 #703 的单 job 端点轮询。#1157 phase0 加
+     *     skipped_count 标量计数（不随规模涨体积）。
      */
     RunCreateResponse: {
       /** Created Count */
@@ -6153,6 +6154,11 @@ export interface components {
        */
       job_ids: string[]
       run: components['schemas']['RunRecord']
+      /**
+       * Skipped Count
+       * @description 本次提交被跳过（未新建）的条目数：条目已存在对应任务的 dedup 过滤，加上写入竞态中被并发提交先行认领的条目；created_count + skipped_count == 本次提交条目数。
+       */
+      skipped_count: number
     }
     /** RunDetailResponse */
     RunDetailResponse: {

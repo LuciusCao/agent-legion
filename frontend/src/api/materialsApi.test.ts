@@ -1,8 +1,29 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { completeMaterial, createRun, presignMaterial } from './materialsApi'
+import {
+  DEFAULT_WRITE_TIMEOUT_MS,
+  REQUEST_TIMEOUT_CODE,
+} from './requestTimeout'
 
 const originalFetch = global.fetch
+
+/** 模拟僵死后端（同 coreTimeout.test.ts 的形态）：永不响应，只在 signal
+ * abort 时以 AbortError 拒绝。 */
+function hangingFetch() {
+  return vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+    return new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal
+      if (signal?.aborted) {
+        reject(new DOMException('The operation was aborted.', 'AbortError'))
+        return
+      }
+      signal?.addEventListener('abort', () => {
+        reject(new DOMException('The operation was aborted.', 'AbortError'))
+      })
+    })
+  })
+}
 
 afterEach(() => {
   global.fetch = originalFetch
@@ -106,5 +127,45 @@ describe('materialsApi', () => {
         }),
       })
     )
+  })
+
+  describe('bulk submit timeout exemption (#1157 phase0)', () => {
+    const manyItems = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        type: 'material' as const,
+        material_id: `m${i}`,
+      }))
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('exempts submissions over 1000 items from the write timeout', async () => {
+      global.fetch = hangingFetch()
+      let settled = false
+      void createRun('ws1', { items: manyItems(1001) }).catch(() => {
+        settled = true
+      })
+      // 豁免后 10 倍写超时也不 abort（服务端分钟级建行不再被误报失败）。
+      await vi.advanceTimersByTimeAsync(DEFAULT_WRITE_TIMEOUT_MS * 10)
+      expect(settled).toBe(false)
+    })
+
+    it('keeps the 120s write timeout at exactly 1000 items', async () => {
+      global.fetch = hangingFetch()
+      const pending = createRun('ws1', { items: manyItems(1000) }).catch(
+        (err: unknown) => err
+      )
+      await vi.advanceTimersByTimeAsync(DEFAULT_WRITE_TIMEOUT_MS - 1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(await pending).toMatchObject({
+        code: REQUEST_TIMEOUT_CODE,
+        timeoutMs: DEFAULT_WRITE_TIMEOUT_MS,
+      })
+    })
   })
 })
