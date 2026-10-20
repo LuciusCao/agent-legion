@@ -111,7 +111,7 @@ brick。现行语义：决策写在 `job-mutation` 锁下只做状态守卫—�
 | --- | --- | --- |
 | 1（最外） | 池级锁：`code-pool` / `agent-ws:<workspace_id>` / `agent-worker:<worker_id>` | claim 与批路径（批的 code-pool 在写事务首句集中决策，#1149）；`workspace_node_limits` 配置写（#1149，共享 code-pool，先于任何 limit 行写）；mutation 侧**永不取** |
 | 1.5 | `artifact-authority:<key>` | promote 事务首句（多 key 升序），串行化产物字节面的备份/copy/登记/恢复；mutation 侧不取，与池锁无共持 |
-| 2 | `job-mutation:<job_id>` | mutation 侧首句；所有执行态写面在池锁之后（或无池锁直接）取 |
+| 2 | `job-mutation:<job_id>` | mutation 侧首句；所有执行态写面在池锁之后（或无池锁直接）取；job 创建（`create_job` / `create_jobs_bulk` 每个 chunk）事务首句、先于 mkdir 与任何行锁（#1083） |
 | 3 | `implementation-publication:<workspace_id>` | upgrade guard 事务（无条件，先于 active revision 重读）；发布侧共享（见 2.9） |
 | 4 | `skill-lock`（全局单文档域） | skill 锁文档写与 upgrade 重验（见 2.9） |
 | 5（最内） | 行锁（`FOR UPDATE` 等） | 各写面自身 |
@@ -132,7 +132,14 @@ agent sweep、两个 queued-request sweep、批 claim 的每个候选——code 
 借 ws 锁键纯当排序位，code 本不取 agent-ws 锁）一律按全库唯一序
 `(hashtext('agent-ws:' || workspace_id)::int, job_id)` 遍历；jobs 行已消失的
 孤儿项用哨兵 `-(2**31)` 定位（`_ORPHAN_WS_LOCK_KEY`），job_id 收尾决胜。单一
-全序保证任意两批不会以相反顺序走同一对 job。
+全序保证任意两批不会以相反顺序走同一对 job。job 创建批（`create_jobs_bulk`
+的每个 chunk，#1083）只含单一 workspace，全序在其上退化为 job_id 升序
+（`lock_job_mutations_sorted`），与上述各批一致。
+
+**创建入锁域**（#1083）：job 删除的提交后清理在 `job-mutation` 锁下复核行
+不存在才把 job_dir rename 入 `.trash`；创建路径在 mkdir / upsert 之前取同一把
+锁并持到提交，二者互斥，同源重建要么在复核前已提交（清理整体跳过），要么等
+rename 完成后才 mkdir 空目录。
 
 ### 2.6 artifact 消费关系索引：唯一枚举处
 

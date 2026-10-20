@@ -28,6 +28,7 @@ from pathlib import Path
 
 from server.app.db.transaction import read_connection
 from server.app.jobs.queries import JobQueries
+from server.app.jobs.queries.job_bulk_sql import CREATE_CHUNK_ROWS
 from tests.postgres_support import TEST_DATABASE_URL
 
 _REVISION = {
@@ -315,7 +316,7 @@ def test_bulk_insert_fires_statement_trigger_once_per_batch(tmp_path: Path) -> N
     # The #441 review's point: with executemany each jobs row was its own
     # statement and its own trigger firing. The unnest shape must fire the
     # v77 INSERT trigger once per batch. Measured via pg_stat_user_tables
-    # delta around a 2500-row create (3 batches: 1000+1000+500) on a fresh
+    # delta around a 2500-row create (CREATE_CHUNK_ROWS-row chunks) on a fresh
     # run so the first batch INSERTS the counter row (n_tup_ins) and the
     # later batches take the ON CONFLICT UPDATE arm (n_tup_upd) — the
     # firing count is the ins+upd delta, not upd alone. Two measurement
@@ -353,6 +354,7 @@ def test_bulk_insert_fires_statement_trigger_once_per_batch(tmp_path: Path) -> N
     # (measured locally) — poll for the firings instead of trusting one
     # fixed read. The counter-equality test above remains the hard
     # correctness check; this is the trigger-economics pin.
+    expected = -(-2500 // CREATE_CHUNK_ROWS)
     firings = 0
     for _ in range(30):
         time.sleep(0.1)
@@ -364,12 +366,13 @@ def test_bulk_insert_fires_statement_trigger_once_per_batch(tmp_path: Path) -> N
             ).fetchone()
         assert after is not None
         firings = (int(after["n_tup_ins"]) - base_ins) + (int(after["n_tup_upd"]) - base_upd)
-        if firings >= 3:
+        if firings >= expected:
             break
-    # 2500 rows in 1000-row batches = 3 statement firings (1000+1000+500),
-    # each upserting one counter row for this run — nowhere near the
-    # per-row count the executemany shape produced. The lower bound pins
-    # that every batch actually fired (at least one counter write per
-    # batch); the upper bound keeps the assertion robust against concurrent
-    # stats noise from other tests' writes to the same shared stats table.
-    assert 3 <= firings <= 3 + 10, firings
+    # One statement firing per committed chunk (#1243: create_jobs_bulk
+    # commits per CREATE_CHUNK_ROWS, so 2500 rows = 10 firings at 250), each
+    # upserting one counter row for this run — nowhere near the per-row
+    # count the executemany shape produced. The lower bound pins that every
+    # batch actually fired (at least one counter write per batch); the upper
+    # bound keeps the assertion robust against concurrent stats noise from
+    # other tests' writes to the same shared stats table.
+    assert expected <= firings <= expected + 10, firings

@@ -10,15 +10,16 @@ from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.jobs.queries.job_bulk_identity import verify_chunk_identities
 from server.app.jobs.queries.job_bulk_rows import (
     chunk_ref_ids,
-    fetch_identity_map,
     job_row_tuple,
 )
 from server.app.jobs.queries.job_bulk_sql import (
     BUNDLE_LOCK_IN_SQL,
     CHUNK_ROWS,
+    CREATE_CHUNK_ROWS,
     MATERIAL_LOCK_IN_SQL,
     insert_job_nodes_batched,
     insert_jobs_batched,
+    lock_job_mutations_sorted,
     lock_rows_for_key_share,
 )
 from server.app.jobs.run_freeze import candidate_input
@@ -62,7 +63,7 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         Each job carries the run's frozen config + its own input doc
         (RUN-FREEZE-001); a same-run re-submitted job takes the new freeze.
 
-        #467 A3 — chunked-commit protocol: ≤CHUNK_ROWS-row chunks, one
+        #467 A3 — chunked-commit protocol: ≤CREATE_CHUNK_ROWS-row chunks, one
         transaction each. Every chunk FOR KEY SHARE-locks exactly its own
         material/bundle refs before inserting (per-chunk lock-before-insert,
         review P1-1; the delete-serialization argument lives on
@@ -93,7 +94,6 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
             else None
         )
         rows: dict[str, tuple[Any, ...]] = {}
-        job_ids: list[str] = []
         identities: dict[str, tuple[str, str]] = {}
         job_refs: dict[str, tuple[str, str]] = {}
         for candidate in candidates:
@@ -109,9 +109,8 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                 job_refs[job_id] = (input_type, str(input_doc.get(f"{input_type}_id") or ""))
             # dict-keyed insert = dedup by job id, last row wins (the
             # executemany shape's later-DO-UPDATE-wins semantics — see
-            # job_bulk_sql's JOBS_BULK_INSERT_SQL comment).
-            if job_id not in rows:
-                job_ids.append(job_id)
+            # job_bulk_sql's JOBS_BULK_INSERT_SQL comment; dict order keeps
+            # first-seen order).
             rows[job_id] = job_row_tuple(
                 self.jobs_dir,
                 workspace_id,
@@ -127,23 +126,49 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         owned_ids: list[str] = []
 
         with self.connect() as conn:
-            # Existence precheck over the WHOLE call, in chunked statements:
-            # ``by_id`` feeds the storage-dir skip (resubmits keep the stored
-            # dir). #501 removed the precheck's identity-comparison loop — a
-            # locked read cannot see concurrent in-flight same-id inserts
-            # (see fetch_identity_map), so the identity contract moved to the
-            # write side: verify_chunk_identities re-checks AFTER each chunk's
-            # INSERT settles, under every interleaving, and raises the
-            # structured identity error on any mismatch (committed or raced).
-            by_id = fetch_identity_map(conn, job_ids)
-            # One commit per ≤CHUNK_ROWS jobs+nodes; each chunk locks its own
-            # refs FOR KEY SHARE before its INSERT (P1-1) — a between-chunks
-            # delete makes the next chunk's probe fail on the missing row
-            # instead of letting a dangling reference in. Storage dirs are
-            # created AFTER the precheck (stray shard dirs would block the
-            # flat→sharded migration; resubmits keep the stored dir).
-            for start in range(0, len(row_list), CHUNK_ROWS):
-                chunk = row_list[start : start + CHUNK_ROWS]
+            # One commit per ≤CREATE_CHUNK_ROWS jobs+nodes (sized for the
+            # shared lock table, see job_bulk_sql). #1083: each chunk takes its
+            # ids' job-mutation locks (sorted, one statement, held to the
+            # chunk's COMMIT) — creation joins the EXEC-GENERATION-001 lock
+            # domain, so a deleted same-id job's post-commit cleanup ("row
+            # absent under the lock → rename into .trash") can never move a
+            # directory this chunk is creating or adopting. Lock order: the
+            # job-mutation level precedes every row lock below. Then the chunk
+            # locks its own refs FOR KEY SHARE before its INSERT (P1-1) — a
+            # between-chunks delete makes the next chunk's probe fail on the
+            # missing row instead of letting a dangling reference in.
+            #
+            # Identity contract, three checkpoints (#501 / #1243):
+            # (1) WHOLE-batch precheck here, before any lock or commit (plain
+            #     read, chunked statements). Since #1255 job ids are injective
+            #     in (workspace, workflow, source_id), no NEW insert can
+            #     collide across workspaces, so the precheck's original
+            #     deadlock-guard role (a foreign-owned row in the lock set
+            #     would break "job_id order IS the global batch order" →
+            #     AB-BA) is structurally gone: any row the lock set can name
+            #     is either ours or a committed cross-era legacy row — a
+            #     legacy id equal to a new encoding requires the legacy row's
+            #     workspace/workflow id to carry ``~``, which the v62
+            #     workspace-id contract forbids. Kept as an integrity guard:
+            #     it still rejects same-source_id-different-entity_type and
+            #     any cross-era coincidence all-or-nothing BEFORE the first
+            #     chunk commits, so a collision in chunk N never leaves
+            #     chunks < N committed.
+            # (2) per chunk, under its job-mutation locks, before the INSERT:
+            #     every creator holds that lock to COMMIT, and injectivity
+            #     leaves only same-(workspace, workflow, source_id) in-flight
+            #     inserters between (1) and the lock acquisition, so the read
+            #     already sees an in-flight same-id insert's arbitrated
+            #     outcome — rejected before any write. Kept also as the
+            #     existence map for mkdir below and as the same-workspace
+            #     entity_type-conflict guard.
+            # (3) post-INSERT re-check (#501), kept as the write-side backstop
+            #     (cross-era legacy coincidence + the entity_type dimension).
+            verify_chunk_identities(conn, row_list)
+            for start in range(0, len(row_list), CREATE_CHUNK_ROWS):
+                chunk = row_list[start : start + CREATE_CHUNK_ROWS]
+                chunk_ids = [str(row[0]) for row in chunk]
+                lock_job_mutations_sorted(conn, chunk_ids)
                 lock_rows_for_key_share(
                     conn,
                     MATERIAL_LOCK_IN_SQL,
@@ -158,9 +183,15 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                     workspace_id,
                     kind="Material bundle",
                 )
-                for row in chunk:
-                    if str(row[0]) not in by_id:
-                        job_storage_dir(self.jobs_dir, workspace_id, str(row[0])).mkdir(
+                # Checkpoint (2), whose map doubles as the existence map:
+                # storage dirs only for ids with no row yet (stray shard dirs
+                # would block the flat→sharded migration; resubmits keep the
+                # stored dir). Read under the job-mutation locks, existence
+                # is settled against deletion and concurrent creation.
+                existing = verify_chunk_identities(conn, chunk)
+                for job_id in chunk_ids:
+                    if job_id not in existing:
+                        job_storage_dir(self.jobs_dir, workspace_id, job_id).mkdir(
                             parents=True, exist_ok=True
                         )
                 owned_chunk = insert_jobs_batched(conn, chunk)
@@ -177,13 +208,12 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                         for node_key in node_keys
                     ],
                 )
-                # #501: post-INSERT identity verification inside this chunk's
-                # transaction — the ON CONFLICT arm rebinds run/title/input
-                # (same-run rows only, #735) but never touches source
-                # identity, so a foreign-identity row that slipped past the
-                # precheck (concurrent in-flight insert) shows up here and
-                # rolls the whole chunk back instead of being silently
-                # re-bound to this run.
+                # Checkpoint (3), #501: post-INSERT identity verification
+                # inside this chunk's transaction — the ON CONFLICT arm
+                # rebinds run/title/input (same-run rows only, #735) but never
+                # touches source identity, so a foreign-identity row that
+                # slipped past (1)/(2) would show up here and roll the whole
+                # chunk back instead of being silently re-bound to this run.
                 verify_chunk_identities(conn, chunk)
                 conn.commit()
                 owned_ids.extend(str(row[0]) for row in chunk if str(row[0]) in owned_chunk)

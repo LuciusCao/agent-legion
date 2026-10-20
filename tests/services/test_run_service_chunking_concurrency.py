@@ -256,21 +256,24 @@ def test_material_delete_holding_for_update_blocks_chunk_probe(service, job_db) 
 
 
 def test_identity_precheck_blocks_on_in_flight_id_insert(service, job_db) -> None:
-    """#501（PR #497 review P2-4）：post-INSERT 身份验证封住读后插竞态窗口。
+    """#501（PR #497 review P2-4）：在途的同 id 插入不能让后到者静默 rebind。
 
     并发提交撞同一 job id：#1255 单射编码退役了 ``col/a`` vs ``col_a``
     的归一冲突后，同 id 异身份的形态只剩同 source_id 不同 source_type——
     material ``col``（A 提交）vs bundle ``col``（B 提交）。两份不同
     items → 不同 digest → 各自独立的 run 行，run upsert 不参与串行化。
     先到者 A 的 INSERT 在触发器里泊车 1.5s（行已插、事务未提交），后到者
-    B 的预查看不到 A 的在途行（快照读；FOR KEY SHARE 对未提交插入本就不
-    阻塞——这是实测过的 Postgres 行为），继续进 INSERT 并阻塞在 A 的唯
-    一索引仲裁上；A 提交后 B 的冲突行被 #735 ownership 条款原子跳过
-    （不同 run 不可抢占），随即 chunk 内的 verify_chunk_identities 重读
-    身份，发现行上的 (material, col) 与 B 提交的 (bundle, col) 不一致 →
-    ValueError → B 整 chunk 回滚，A 的行保持原 run 绑定。无验证版本里
-    B 静默跳过（identity 不校验）——撞 id 竞态的事实面是「别人的 job
-    被绑到你的 run」。"""
+    B 的整批预查看不到 A 的在途行（快照读）。#1083 起创建持 job-mutation
+    锁到提交，B 阻塞在 A 持有的该 advisory 锁上；A 提交后 B 在锁下、
+    INSERT 之前重读身份，发现行上的 (material, col) 与 B 提交的
+    (bundle, col) 不一致 → ValueError → B 整 chunk 回滚（未写任何行），
+    A 的行保持原 run 绑定。撞 id 竞态的事实面是「别人的 job 被绑到你的
+    run」——必须报错。
+
+    同步（#1243 R3）：A 的在途窗口由 pg_stat_activity 观测（A 的 backend 正
+    处于触发器的 PgSleep），B 的阻塞由 pg_blocking_pids 观测（被 A 阻塞）。
+    旧版用 NOTIFY 判定 A 在途——NOTIFY 只在事务提交时投递，监听方醒来时
+    A 其实已提交，B 的「在途」全靠它自己 INSERT 触发同一泊车触发器。"""
     # material `col`（A 提交）与 bundle `col`（B 提交）映射到同一 job id。
     _insert_materials(job_db, 1, prefix="colx")
     with job_db.connect() as conn:
@@ -287,14 +290,13 @@ def test_identity_precheck_blocks_on_in_flight_id_insert(service, job_db) -> Non
             "insert into material_bundle_members(bundle_id, material_id, path, ordinal)"
             " values ('col', 'col', 'col.txt', 0)"
         )
-        # A 的 jobs INSERT 落行后泊车（行已插、事务未提交）并 NOTIFY 主
-        # 线程——主线程据此确认 A 处于在途窗口后再放 B 进场。
+        # A 的 jobs INSERT 落行后泊车（行已插、事务未提交）；主线程经
+        # pg_stat_activity 观测到 A 的 backend 处于 PgSleep 后再放 B 进场。
         conn.execute("drop trigger if exists jobs_park_insert on jobs")
         conn.execute("drop function if exists jobs_park_after_insert()")
         conn.execute("""
             create function jobs_park_after_insert() returns trigger as $$
             begin
-              perform pg_notify('jobs_parked', '');
               perform pg_sleep(1.5);
               return null;
             end $$ language plpgsql
@@ -303,9 +305,20 @@ def test_identity_precheck_blocks_on_in_flight_id_insert(service, job_db) -> Non
             "create trigger jobs_park_insert after insert on jobs"
             " for each statement execute function jobs_park_after_insert()"
         )
-    listener = psycopg.connect(job_db.dsn_identity, autocommit=True)
-    listener.execute("listen jobs_parked")
-    import select as _select
+
+    def _parked_insert_pid(timeout: float = 10.0) -> int:
+        deadline = time.monotonic() + timeout
+        with psycopg.connect(job_db.dsn_identity, autocommit=True) as monitor:
+            while time.monotonic() < deadline:
+                row = monitor.execute(
+                    "select pid from pg_stat_activity where datname = current_database()"
+                    " and wait_event = 'PgSleep' and query ilike %s and pid <> pg_backend_pid()",
+                    ("%insert into jobs%",),
+                ).fetchone()
+                if row is not None:
+                    return int(row[0])
+                time.sleep(0.01)
+        raise AssertionError("A never parked inside its jobs INSERT")
 
     # widen the entry contract so the bundle item resolves (the seeded demo
     # revision accepts materials only, #156).
@@ -327,22 +340,19 @@ def test_identity_precheck_blocks_on_in_flight_id_insert(service, job_db) -> Non
     thread_a = threading.Thread(target=_submit, args=("a", _material_item("col")))
     thread_a.start()
     try:
-        _select.select([listener], [], [], 10)  # 等 A 的泊车通知（行锁在途）
+        a_pid = _parked_insert_pid()  # A 在途：行已插、事务未提交
         assert thread_a.is_alive(), "A should be parked inside its INSERT"
         thread_b = threading.Thread(
             target=_submit, args=("b", {"type": "bundle", "bundle_id": "col"})
         )
         thread_b.start()
-        # 保留：负向观察窗——B 的在途形态不唯一（预查空过 / 阻塞在 A 的唯一索引仲裁 / 未到验证点），只断言窗内无决定性结果。
-        time.sleep(0.6)
-        # A 仍在泊车：B 未见决定性结果（预查空过、INSERT 阻塞在 A 的唯一
-        # 索引仲裁上，或尚未到达验证点）——B 的最终命运由验证点裁决。
-        assert thread_b.is_alive(), "B should still be in flight against A's insert"
+        # B 必须等 A 的在途插入有结论：被 A 阻塞（job-mutation advisory 锁）。
+        # B 提前结束（预查空过后直接写入 / 报错）即失败。
+        wait_until_blocked_by(a_pid, thread=thread_b, dsn=job_db.dsn_identity)
         assert "b" not in outcome
         thread_a.join(timeout=15)
         thread_b.join(timeout=15)
     finally:
-        listener.close()
         with job_db.connect() as conn:
             conn.execute("drop trigger if exists jobs_park_insert on jobs")
             conn.execute("drop function if exists jobs_park_after_insert()")
