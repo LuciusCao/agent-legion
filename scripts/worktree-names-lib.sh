@@ -48,6 +48,9 @@ WORKTREE_INITIALIZED_MARKER=".worktree-initialized.ok"
 #     引入前创建的存量实例，或 init 在标记写入前崩溃的实例——视作资源主，
 #     拒绝删（fail-closed 保护存量；确认其未完成初始化要删时，先移除该
 #     登记或手动删资源）；
+#   - 严格匹配不认的手改形态（引号包裹/行内注释等）由宽松兜底兜住：.env
+#     里任何包含派生库名的行都判资源主（fail-closed）；
+#   - 两种匹配都不中（.env 完全没提该库）→ 待初始化实例 → 不拒绝；
 #   - .env 存在但不可读 → 无法判定，fail-closed 当资源主。
 worktree_registration_owns_resources() {
     local wt_path="$1" wt_name="$2" db
@@ -55,10 +58,14 @@ worktree_registration_owns_resources() {
     [[ -e "$wt_path/.env" ]] || return 1
     [[ -r "$wt_path/.env" ]] || return 0
     db="$(worktree_derived_db "$wt_name")"
-    # 行首锚定 + 可选 export 前缀（init 的 replace_in_place 保留基准 .env 的
-    # export 形式）+ 行尾锚定（派生库名只含 [a-zA-Z0-9_]，正则安全）；引号
-    # 包裹/行内注释等手改形态不认——维持 fail-closed 当作资源主。
+    # 严格形态（行首锚定 + 可选 export 前缀 + 行尾锚定；派生库名只含
+    # [a-zA-Z0-9_]，正则安全）：区分「指向派生库 vs 未指向」。
     if grep -qE "^(export )?AGENT_LEGION_DATABASE_URL=postgresql://127\.0\.0\.1:5432/${db}\$" "$wt_path/.env" 2>/dev/null; then
+        return 0
+    fi
+    # 宽松兜底（fail-closed）：严格形态不认的手改（引号包裹/行内注释等），
+    # 只要 .env 有任何一行包含派生库名就判资源主。
+    if grep -qF "$db" "$wt_path/.env" 2>/dev/null; then
         return 0
     fi
     return 1

@@ -285,6 +285,10 @@ def test_acquire_refuses_without_git_common_dir(env: _Env) -> None:
         # 形态）同样认定为资源主（codex P2：此前不认 export 行会误判为
         # 待初始化而绕过护栏）。
         ("foo_bar", "export-env", True),
+        # 手改形态（引号包裹/行内注释）严格指纹不认，由宽松兜底 fail-closed
+        # 判资源主（复验 P2-1：此前注释承诺 fail-closed 但代码 fail-open）。
+        ("foo_bar", "quoted-env", True),
+        ("foo_bar", "comment-env", True),
         ("foo_bar", None, False),
         (None, None, False),
     ],
@@ -326,6 +330,16 @@ def test_drop_confirms_unlocked_then_rechecks_under_lock(
         elif initialized == "export-env":
             (added / ".env").write_text(
                 "export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_foo_bar\n",
+                encoding="utf-8",
+            )
+        elif initialized == "quoted-env":
+            (added / ".env").write_text(
+                'AGENT_LEGION_DATABASE_URL="postgresql://127.0.0.1:5432/agent_legion_foo_bar"\n',
+                encoding="utf-8",
+            )
+        elif initialized == "comment-env":
+            (added / ".env").write_text(
+                "# 试跑记录 AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_foo_bar\n",
                 encoding="utf-8",
             )
     release_a.touch()

@@ -792,7 +792,9 @@ def test_drop_db_aborts_when_locked_reprobe_fails(repo: _Repo) -> None:
 # 协议）。STUB_GIT_SAME_BRANCH=1 时同分支同 HEAD 重建（porcelain 条目逐字节
 # 不变，只有指纹成分能区分）。状态经文件传递（每次调用都是新进程）。
 # 本测试布景下最终校验的条目读是第 6 次 porcelain（MAIN 解析、计划预检、
-# 计划条目、锁内重查、分支解析之后）。
+# 计划条目、锁内重查、分支解析之后）。注意（复验 P2，不修）：计数是硬编码
+# 的——clean 在最终校验之前新增任何 porcelain 调用都会让注入点静默提前，
+# 届时需同步调整 STUB_GIT_FIRE_AT。
 _GIT_SWAP_WRAPPER = """#!/usr/bin/env bash
 REAL="__REAL_GIT__"
 if [[ "${1:-}" == "worktree" && "${2:-}" == "list" && -e "$STUB_GIT_TARGET" ]]; then
