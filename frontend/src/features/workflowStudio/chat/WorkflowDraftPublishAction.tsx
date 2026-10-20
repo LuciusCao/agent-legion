@@ -2,7 +2,7 @@ import {
   useStudioStateOptional,
   type StudioState,
 } from '../shared/studioStateContext'
-import { savedIdentityConfirms } from '../shared/draftSaveTypes'
+import { savedIdentityConfirms } from '../shared/draftIdentity'
 import styles from './StudioChatPanel.module.css'
 
 /* #667 B1：聊天草稿卡内的发布入口。发布对象永远是编辑器当前 YAML——
