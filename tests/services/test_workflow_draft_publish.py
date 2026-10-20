@@ -713,9 +713,9 @@ def _rewrite_draft_before_revision_write(
     ``yaml`` into the draft store."""
     real_save = WorkflowRevisionService.save_workspace_revision
 
-    def rewrite_then_save(self, ws_id, definition, on_commit=None):
+    def rewrite_then_save(self, ws_id, definition, on_commit=None, created_by=""):
         queries.upsert_workspace_workflow_draft(ws_id, yaml)
-        return real_save(self, ws_id, definition, on_commit)
+        return real_save(self, ws_id, definition, on_commit, created_by=created_by)
 
     monkeypatch.setattr(WorkflowRevisionService, "save_workspace_revision", rewrite_then_save)
 
@@ -796,7 +796,7 @@ def test_runtime_only_publish_aborts_when_active_revision_moves(
     the edit would be silently lost). The edit aborts with a 409-family
     conflict instead: the draft row survives and neither revision is touched.
     """
-    from server.app.services import workflow_revision_runtime as runtime_module
+    from server.app.services import runtime_config as runtime_module
     from server.app.services.job_errors import ConflictError
 
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")

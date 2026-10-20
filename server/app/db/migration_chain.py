@@ -6,6 +6,7 @@ that still reads job_batches; the sorted registry guarantees it."""
 
 from __future__ import annotations
 
+from server.app.db.migration_chain_latest import LATEST_MIGRATIONS
 from server.app.db.migration_chain_recent import RECENT_MIGRATIONS
 from server.app.db.migration_entry import SchemaMigration
 from server.app.db.migrations import (
@@ -230,6 +231,8 @@ MIGRATIONS: list[SchemaMigration] = [
     SchemaMigration(86, "node_runs_impl_identity"),
     # v87+ live in migration_chain_recent.py (file-budget split).
     *RECENT_MIGRATIONS,
+    # v102+ live in migration_chain_latest.py (M47: recent's band is full).
+    *LATEST_MIGRATIONS,
 ]
 
 _versions = [m.version for m in MIGRATIONS]

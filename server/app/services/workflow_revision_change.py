@@ -32,6 +32,11 @@ def structural_payload(definition: WorkflowDefinition) -> dict[str, Any]:
     for node in payload["nodes"].values():
         execution = node.pop("execution", None) or {}
         node["profile_runtime"] = execution.get("runtime", "")
+        # M47（Studio 分离改造）：tools 白名单与 requires_labels 调度要求归入
+        # runtime 通道（DAG 未变，原地生效并追加配置版本行），不再计入结构
+        # 判定——改它们不再发布新 revision。
+        node.pop("tools", None)
+        node.pop("requires_labels", None)
     # Top-level execution defaults are runtime settings like the node-level
     # block: editing them updates the active revision in place instead of
     # publishing a structural revision (its runtime default is already baked

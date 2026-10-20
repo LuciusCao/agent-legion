@@ -46,15 +46,23 @@ class WorkflowRevisionService:
         workspace_id: str,
         definition: WorkflowDefinition,
         on_commit: Callable[[Any], None] | None = None,
+        created_by: str = "",
     ) -> dict:
         """Update runtime settings in-place, or publish a structural revision.
 
         ``on_commit`` rides whichever write wins (#1221: draft publish passes
         the draft-row removal). The seed path (``ensure_active_revision``)
         never passes one, so seeding never touches a stored draft.
+        ``created_by`` stamps the runtime config version row (M47) when the
+        in-place path wins.
         """
         return save_revision_runtime_or_publish(
-            self.job_db, workspace_id, definition, self.publish_workspace_revision, on_commit
+            self.job_db,
+            workspace_id,
+            definition,
+            self.publish_workspace_revision,
+            on_commit,
+            created_by=created_by,
         )
 
     def get_active(self, workspace_id: str, workflow_key: str) -> dict:

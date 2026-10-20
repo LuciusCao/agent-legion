@@ -12,6 +12,7 @@ effective runtime 计入结构、实际发布了新 revision。修复后两侧�
 | 顶层 execution.runtime（节点继承）    | true             | 新 revision    |
 | 节点 provider/model/thinking/prompt/prompt_mode | false  | 原地更新       |
 | 顶层 provider/model/thinking          | false            | 原地更新       |
+| 节点 tools / requires_labels（M47）   | false            | 原地更新       |
 """
 
 from dataclasses import replace
@@ -73,9 +74,10 @@ def _agent_node(**execution: str) -> WorkflowNode:
         ({"after": ["x"]}, True),
         ({"shard": WorkflowShardSpec(count=4)}, True),
         ({"reduce": WorkflowReduceSpec(from_node="x")}, True),
-        # codex P2：档案的其余结构字段同样由谓词覆盖（compare 摘要对齐补报）。
-        ({"tools": ("bash",)}, True),
-        ({"requires_labels": {"gpu": "true"}}, True),
+        # M47：tools / requires_labels 归入 runtime 通道（原地生效 + 配置版本
+        # 历史），不再是结构字段。
+        ({"tools": ("bash",)}, False),
+        ({"requires_labels": {"gpu": "true"}}, False),
         ({"execution": WorkflowNodeExecution(runtime="velites", provider="p")}, False),
         ({"execution": WorkflowNodeExecution(runtime="velites", model="m")}, False),
         ({"execution": WorkflowNodeExecution(runtime="velites", thinking="high")}, False),

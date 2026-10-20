@@ -42,6 +42,7 @@ def publish_workflow_draft(
     workspace_id: str,
     definition_yaml: str,
     custom_nodes_enabled: bool = True,
+    created_by: str = "",
 ) -> tuple[bool, list[str]]:
     """Validate, then publish — deleting the stored draft row on success (#1221).
 
@@ -84,6 +85,7 @@ def publish_workflow_draft(
         workspace_id,
         workflow_definition_from_yaml_string(definition_yaml),
         on_commit=_delete_draft,
+        created_by=created_by,
     )
     # Schema v62: the workflow key is bound to the workspace id at creation
     # and immutable — no first-publish adoption path anymore.

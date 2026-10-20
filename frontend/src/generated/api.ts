@@ -3606,6 +3606,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/workflow-runtime': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    /** Save Runtime */
+    patch: operations['save_runtime_api_workspaces__workspace_id__workflow_runtime_patch']
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/workflow-runtime/rollback': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Rollback Runtime */
+    post: operations['rollback_runtime_api_workspaces__workspace_id__workflow_runtime_rollback_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/workflow-runtime/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Runtime Versions */
+    get: operations['list_runtime_versions_api_workspaces__workspace_id__workflow_runtime_versions_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/workflow/node-prompt-preview': {
     parameters: {
       query?: never
@@ -6685,6 +6736,19 @@ export interface components {
       /** Total */
       total: number | null
     }
+    /** RuntimeConfigVersionSummary */
+    RuntimeConfigVersionSummary: {
+      /** Changed Keys */
+      changed_keys: string[]
+      /** Created At */
+      created_at: string
+      /** Created By */
+      created_by: string
+      /** Revision Id */
+      revision_id: string
+      /** Version */
+      version: number
+    }
     /** RuntimeProfileResponse */
     RuntimeProfileResponse: {
       /** Buckets */
@@ -8621,6 +8685,31 @@ export interface components {
        * @enum {string}
        */
       severity: 'none' | 'info' | 'warning' | 'breaking'
+    }
+    /** WorkflowRuntimeRollbackRequest */
+    WorkflowRuntimeRollbackRequest: {
+      /** Version */
+      version: number
+    }
+    /**
+     * WorkflowRuntimeSaveRequest
+     * @description Full definition YAML; only the runtime slice may differ from active.
+     */
+    WorkflowRuntimeSaveRequest: {
+      /** Definition Yaml */
+      definition_yaml: string
+    }
+    /** WorkflowRuntimeSaveResponse */
+    WorkflowRuntimeSaveResponse: {
+      revision: components['schemas']['WorkflowRevisionSummary']
+      runtime_version?:
+        | components['schemas']['RuntimeConfigVersionSummary']
+        | null
+    }
+    /** WorkflowRuntimeVersionsResponse */
+    WorkflowRuntimeVersionsResponse: {
+      /** Versions */
+      versions: components['schemas']['RuntimeConfigVersionSummary'][]
     }
     /** WorkflowTerminalResponse */
     WorkflowTerminalResponse: {
@@ -16871,6 +16960,107 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowRevisionDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_runtime_api_workspaces__workspace_id__workflow_runtime_patch: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowRuntimeSaveRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowRuntimeSaveResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  rollback_runtime_api_workspaces__workspace_id__workflow_runtime_rollback_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowRuntimeRollbackRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowRuntimeSaveResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_runtime_versions_api_workspaces__workspace_id__workflow_runtime_versions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowRuntimeVersionsResponse']
         }
       }
       /** @description Validation Error */

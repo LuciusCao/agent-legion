@@ -308,6 +308,9 @@ server/app/
 | GET | `/workspaces/{workspace_id}/workflow-revisions` | `list_workflow_revisions` | routes/workflow_revisions.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions/active` | `get_active_workflow_revision` | routes/workflow_revisions.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions/{revision_id}` | `get_workflow_revision_detail` | routes/workflow_revisions.py |
+| PATCH | `/workspaces/{workspace_id}/workflow-runtime` | `save_runtime` | routes/workflow_runtime.py |
+| GET | `/workspaces/{workspace_id}/workflow-runtime/versions` | `list_runtime_versions` | routes/workflow_runtime.py |
+| POST | `/workspaces/{workspace_id}/workflow-runtime/rollback` | `rollback_runtime` | routes/workflow_runtime.py |
 | GET | `/agent-catalog` | `get_agent_catalog` | routes/workspace_agent_catalog.py |
 | GET | `/workspaces/{workspace_id}/execution-configuration` | `get_workspace_execution_configuration` | routes/workspace_agent_catalog.py |
 | GET | `/workspaces/{workspace_id}/agent-routes` | `get_workspace_agent_routes` | routes/workspace_agent_routes.py |
@@ -682,6 +685,11 @@ server/app/
 | WorkflowDraftValidationResponse | BaseModel | valid: bool, errors: list[str], definition_hash: str | None | app/routes/workflow_revisions_contracts.py |
 | ActiveWorkflowRevisionResponse | BaseModel | revision: WorkflowRevisionSummary, workflow: workflow_contracts.WorkflowDefin... | app/routes/workflow_revisions_contracts.py |
 | WorkflowRevisionDetailResponse | BaseModel | revision: WorkflowRevisionSummary, workflow: workflow_contracts.WorkflowDefin... | app/routes/workflow_revisions_contracts.py |
+| WorkflowRuntimeSaveRequest | BaseModel | definition_yaml: str | app/routes/workflow_runtime_contracts.py |
+| RuntimeConfigVersionSummary | BaseModel | version: int, revision_id: str, changed_keys: list[str], created_by: str, cre... | app/routes/workflow_runtime_contracts.py |
+| WorkflowRuntimeSaveResponse | BaseModel | revision: WorkflowRevisionSummary, runtime_version: RuntimeConfigVersionSumma... | app/routes/workflow_runtime_contracts.py |
+| WorkflowRuntimeVersionsResponse | BaseModel | versions: list[RuntimeConfigVersionSummary] | app/routes/workflow_runtime_contracts.py |
+| WorkflowRuntimeRollbackRequest | BaseModel | version: int | app/routes/workflow_runtime_contracts.py |
 | CreateWorkspaceApiTokenRequest | BaseModel | label: str, ttl_hours: int | None | app/routes/workspace_api_token_contracts.py |
 | WorkspaceApiTokenCreatedResponse | BaseModel | token_id: str, api_token: str, workspace_id: str, label: str | app/routes/workspace_api_token_contracts.py |
 | WorkspaceApiTokenSummary | BaseModel | token_id: str, workspace_id: str, label: str, created_at: str, expires_at: st... | app/routes/workspace_api_token_contracts.py |
@@ -904,6 +912,15 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
 - 执行路径全集（#869）：本地 code 池（普通节点与本地分片）统一经 `local_dispatch.decide_local_code_dispatch` 判定（超时 + 审计、业务 config、published 代码），远程 agent/code（含远程分片）入队带 `timeout_base`、claim 判定。构造 `ExecutionContext` / `AgentExecutionRequest` 的位置由 `tests/services/test_runtime_timeout_paths_guard.py` AST 扫描钉住：新路径须接判定函数并登记到矩阵路径表，否则测试失败。
 - 生效时点（快照语义）：运行时可调键是**配置输入**，不是判定状态。每次求值在一个声明好的时点读取一次——Host dispatch 时，或 Worker 批量 claim 的候选选取阶段（只读连接）——写事务沿用该快照，不在锁下重读，也不对 `workspaces` 行加锁；在此之后提交的修改从下一次 dispatch / claim 起生效。与「先选候选、后在写事务内修改并提交」之间提交的修改效果上等同于晚于本次 claim 提交，不产生错误执行；在 claim 热路径上加锁消除这个窗口的代价（#690 锁序族）远大于收益。跨事务携带的身份、状态、执行代次、租约、容量等**判定状态**仍须在写事务内重新校验（AGENTS.md「多步变更」条）。
 
+### Runtime 通道：runtime 配置直存与版本化（M47）
+
+Studio 分离改造把 workflow 编辑分成两条通道。**结构通道**（草稿 + 发布）：DAG、节点类型、`config`/`config_schema`、skill 绑定、有效 `execution.runtime`（换引擎）等结构性改动发布新 revision，在途 job 不受影响。**Runtime 通道**：agent 节点的 provider/model/thinking/prompt/prompt_mode/tools/requires_labels 与 workflow 顶层 `execution` 默认块的同类键（prompt/prompt_mode 为节点级专属，顶层不接受；`runtime` 键保持结构字段）直存生效——原地更新 active revision 的 definition_json（revision id/version 不变），不产生新 revision。
+
+- 端点：`PATCH /workspaces/{id}/workflow-runtime`（body 为完整 definition YAML；结构判定与发布路径共用 `revision_structurally_changed`，结构有差异即 409 拒绝，须走草稿通道）、`GET .../workflow-runtime/versions`（版本历史：时间戳/操作者/变更键清单）、`POST .../workflow-runtime/rollback`（回滚 = 追加一个内容等于目标版本的新版本，历史行永不篡改；目标版本不认识的新增节点保留现值）。
+- 版本化（schema v102 `workflow_runtime_config_versions`）：每次有实际变更的保存（runtime 端点或草稿发布的 runtime-only 原地臂）在同一事务、同一 implementation-publication 锁下追加一条不可变版本行——每版本即审计行；无变更保存是 no-op。changed_keys 的 diff 基线取锁内重读的 active 现内容，并发 runtime 保存在锁下串行。
+- 解析链不变（EXEC-RUNTIME-DISPATCH-001）：dispatch/claim 永远读 active revision 的 definition_json（节点 `execution.*` → workflow 顶层 `execution` → 报错），版本表不是解析输入；在途 job 持 intake 冻结快照，快照语义不受 runtime 保存影响。
+- 与「升级 workflow」的关系：already_current 判定按 revision id + definition_json 实际内容比对——runtime 保存不改 revision id 但改 definition_json，因此钉在同一 revision 上的既有 job 在 runtime 保存后**不**判 already_current，走既有升级路径把快照 re-pin 到新内容；正在执行的节点不受回追影响（其 manifest/快照在 dispatch/claim 时已冻结）。回滚同理等价于一次 runtime 保存。
+
 ## Database
 
 - PostgreSQL 服务 Agent Legion workflow 与平台状态（当前版本见 `server/app/db/schema.py` 的 `SCHEMA_VERSION`）：
@@ -915,6 +932,7 @@ Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的
   - `materials` — 材料（单文件条目）元数据；`material_bundles` / `material_bundle_members` — bundle 文件夹条目的冻结引用式清单（schema v55）
   - `job_artifacts` — Job 产物清单（权威副本在实例对象存储，schema v54）
   - `workflow_revisions` — workflow 版本修订历史
+  - `workflow_runtime_config_versions` — runtime 通道配置版本（schema v102，M47）：每次 runtime 保存追加一条不可变行（runtime 切片 + 变更键清单 + 操作者），审计与回滚来源；不参与 dispatch 解析链
   - `studio_publish_requests` — agent 发起的 workflow 发布握手（schema v76，#416：pending → superseded/confirmed/rejected/expired 状态机，agent 经 MCP 挂起、用户在 Studio 确认）
   - `ops_runtime_profile_samples` — 运行画像 L1 指标（schema v72，#359：ops-metrics 采样循环每分钟一行六段管线指标 + 瓶颈分类，retention 共用 `monitoring.retention_days`）
   - `run_job_status_counts` — run 级 job 状态计数快照（schema v73，#358：触发器维护，run 详情读取从 group-by 变 PK 点查）
