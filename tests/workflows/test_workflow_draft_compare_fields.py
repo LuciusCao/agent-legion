@@ -1,7 +1,7 @@
 """Issue #431: compare 对 node_type/after 序/shard/reduce/edges 序的比对。
 
 姊妹文件（主文件 test_workflow_draft_compare.py 已接近 test_max_lines 上限，
-#422 拆分纪律延续）：这里聚焦 _structural_payload 判结构性变更、而 compare
+#422 拆分纪律延续）：这里聚焦 structural_payload 判结构性变更、而 compare
 曾经盲区的五类字段。publish 出新版本 + compare 报零变更 = canPublish 的
 hasCompareChanges 闸门禁用发布按钮（#418 原始症状同型）。
 """
@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 from server.app.main import create_app
 from server.app.services.workflow_draft_compare import _node_change_fields
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
-from server.app.services.workflow_revision_change import structural_revision_changed
 from server.app.services.workflow_revision_format import definition_to_yaml
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.schema import (
@@ -85,6 +84,26 @@ def _bare_node(key: str = "demo") -> WorkflowNode:
 # ---------------------------------------------------------------------------
 
 
+def test_node_change_fields_tools_change_is_change():
+    """#1114 codex P2：tools 白名单随 revision 版本化（structural_payload
+    的 asdict == 覆盖），compare 摘要必须报出——否则 tools-only 草稿
+    creates_revision=true 而摘要为空，Studio 从摘要推 hasCompareChanges
+    会静默禁用发布。"""
+    base = _bare_node()
+    draft = replace(base, tools=("bash",))
+    assert _node_change_fields(base, draft) == ["tools"]
+    # Same value: no change.
+    assert _node_change_fields(draft, replace(draft, tools=("bash",))) == []
+
+
+def test_node_change_fields_requires_labels_change_is_change():
+    """同上：requires_labels（Worker 调度要求）的摘要覆盖。"""
+    base = _bare_node()
+    draft = replace(base, requires_labels={"gpu": "true"})
+    assert _node_change_fields(base, draft) == ["requires_labels"]
+    assert _node_change_fields(draft, replace(draft, requires_labels={"gpu": "true"})) == []
+
+
 def test_node_change_fields_node_type_change_is_change():
     base = _bare_node()
     draft = replace(base, node_type="agent")
@@ -92,7 +111,7 @@ def test_node_change_fields_node_type_change_is_change():
 
 
 def test_node_change_fields_after_order_is_change():
-    """after 是有序 list：同集不同序即变更（对齐 _structural_payload 的 ==）。"""
+    """after 是有序 list：同集不同序即变更（对齐 structural_payload 的 ==）。"""
     base = _bare_node()
     draft = replace(base, after=["a", "b"])
     assert _node_change_fields(replace(base, after=["b", "a"]), draft) == ["after"]
@@ -124,20 +143,6 @@ def test_node_change_fields_reduce_change_is_change():
     )
 
 
-def test_structural_revision_changed_for_remaining_fields():
-    """传导链：五类新字段必须让 creates_revision 为真（对齐 publish 行为）。"""
-    for field in ("node_type", "after", "shard", "reduce"):
-        node_change = {"type": "modified", "fields": [field]}
-        assert structural_revision_changed([node_change], [], [], []) is True
-    # edges reorder lands in the edges dimension: any edge change is structural.
-    assert structural_revision_changed([], [{"type": "reordered"}], [], []) is True
-    # execution-only stays the runtime exception (regression guard, #431 spec).
-    assert (
-        structural_revision_changed([{"type": "modified", "fields": ["execution"]}], [], [], [])
-        is False
-    )
-
-
 # ---------------------------------------------------------------------------
 # HTTP level: the exact issue #431 scenarios through the studio compare route.
 # ---------------------------------------------------------------------------
@@ -159,8 +164,9 @@ def test_compare_node_type_only_change_creates_revision(tmp_path):
     change = _modified_change(result, "publish_content")
     # #935: the demo declares a workflow top-level execution.runtime, which
     # the loader merges into the node once it is an agent node — the
-    # inherited runtime surfaces as an execution change alongside the type.
-    assert change["fields"] == ["execution", "node_type"]
+    # inherited runtime surfaces as an execution change alongside the type
+    # (#1114: the effective-runtime move is also flagged as ``runtime``).
+    assert change["fields"] == ["execution", "runtime", "node_type"]
     assert change["risk"] == "breaking"
 
 
@@ -178,6 +184,42 @@ def test_compare_after_reorder_creates_revision(tmp_path):
     assert result["creates_revision"] is True
     change = _modified_change(result, "publish_content")
     assert change["fields"] == ["after"]
+    assert change["risk"] == "warning"
+
+
+def test_compare_tools_only_change_creates_revision(tmp_path):
+    """#1114 codex P2 场景：仅改 agent 节点 tools 白名单——谓词判结构变更
+    （creates_revision=true），摘要也必须非空；此前 _node_change_fields 不报
+    tools，Studio 从空摘要推 hasCompareChanges=false 静默禁用发布。"""
+    app, workspace_id, definition = _app_with_baseline(tmp_path)
+    raw = yaml.safe_load(definition_to_yaml(definition))
+    raw["nodes"]["write_script"]["tools"] = ["bash"]
+    raw_yaml = yaml.safe_dump(raw, allow_unicode=True)
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, raw_yaml)
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is True
+    change = _modified_change(result, "write_script")
+    assert change["fields"] == ["tools"]
+    assert change["risk"] == "warning"
+
+
+def test_compare_requires_labels_only_change_creates_revision(tmp_path):
+    """同上：仅改 agent 节点 requires_labels（Worker 调度要求）。"""
+    app, workspace_id, definition = _app_with_baseline(tmp_path)
+    raw = yaml.safe_load(definition_to_yaml(definition))
+    raw["nodes"]["write_script"]["requires_labels"] = {"gpu": "true"}
+    raw_yaml = yaml.safe_dump(raw, allow_unicode=True)
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, raw_yaml)
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is True
+    change = _modified_change(result, "write_script")
+    assert change["fields"] == ["requires_labels"]
     assert change["risk"] == "warning"
 
 

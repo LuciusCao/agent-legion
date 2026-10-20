@@ -125,6 +125,28 @@ describe('WorkflowNodeRuntimeSaveBar（#769 execution 面板内保存）', () =>
     expect(studio.requestPublish).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['节点级 runtime', [executionChange('draft', ['execution', 'runtime'])]],
+    [
+      '顶层默认 runtime（继承节点全部标 runtime）',
+      [
+        executionChange('draft', ['execution', 'runtime']),
+        executionChange('other', ['execution', 'runtime']),
+      ],
+    ],
+  ])(
+    '#1114 仅改 %s：compare 判新版本，「应用到运行」不提供，提示需发布',
+    (_label, nodeChanges) => {
+      const studio = renderBar({
+        compareSummary: { createsRevision: true, nodeChanges },
+      })
+      expect(screen.queryByRole('button', { name: '应用到运行' })).toBeNull()
+      expect(screen.queryByText(/不产生新版本/)).toBeNull()
+      expect(screen.getByText(/切换 runtime 属结构改动/)).toBeInTheDocument()
+      expect(studio.requestPublish).not.toHaveBeenCalled()
+    }
+  )
+
   it('本节点 execution 未改动时不出「应用到运行」', () => {
     renderBar({
       compareSummary: {

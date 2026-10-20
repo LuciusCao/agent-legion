@@ -20,7 +20,7 @@ from server.app.services.workflow_drafts import (
     workflow_definition_from_yaml_string,
     workflow_draft_identity_hash,
 )
-from server.app.services.workflow_revision_change import structural_revision_changed
+from server.app.services.workflow_revision_change import revision_structurally_changed
 from server.app.workflows.definition import WorkflowDefinitionError, workflow_definition_from_dict
 from server.app.workflows.schema import (
     WorkflowDefinition,
@@ -45,8 +45,20 @@ def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
         fields.append("outputs")
     if base.execution != draft.execution:
         fields.append("execution")
+    # #1114：effective runtime（loader 已把顶层默认并入节点）属结构字段，
+    # 单独标出，供界面区分「原地应用」与「需发布新版本」。
+    if base.execution.runtime != draft.execution.runtime:
+        fields.append("runtime")
     if base.skill != draft.skill:
         fields.append("skill")
+    # Agent 档案的其余结构字段（tools 白名单 / requires_labels 调度要求）同样
+    # 随 revision 版本化（structural_payload 的 asdict == 覆盖它们）——compare
+    # 不报的话，仅改这两个字段的草稿 creates_revision=true 而摘要为空，
+    # Studio 从摘要推 hasCompareChanges 会静默禁用发布。
+    if base.tools != draft.tools:
+        fields.append("tools")
+    if base.requires_labels != draft.requires_labels:
+        fields.append("requires_labels")
     if _normalized_config(base) != _normalized_config(draft):
         fields.append("config")
     if _normalized_config_schema(base) != _normalized_config_schema(draft):
@@ -60,7 +72,7 @@ def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
     if base.text_input != draft.text_input:
         fields.append("text_input")
     # Issue #431: the remaining structural fields. Each of these version with
-    # the revision via ``_structural_payload`` (asdict + ``==``), so the
+    # the revision via ``structural_payload`` (asdict + ``==``), so the
     # compare must see them too or a same-set-different-order draft shows
     # "no changes" while publishing still bumps the version. ``after`` is a
     # plain ordered list — list equality is order-sensitive on purpose, the
@@ -77,7 +89,7 @@ def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
 
 
 # Issue #418: ``config`` / ``config_schema`` are structural — they version with
-# the revision (the publish path diffs them via ``_structural_payload``), so
+# the revision (the publish path diffs them via ``structural_payload``), so
 # the compare must see them too or a config-only draft shows "no changes"
 # while publishing still bumps the version. The loader already normalizes a
 # missing/``None`` block to ``{}``; the compare cannot assume the model objects
@@ -116,11 +128,19 @@ def _node_field_risks(base: WorkflowNode, draft: WorkflowNode) -> dict[str, str]
             risks["outputs"] = "info"
     if base.execution != draft.execution:
         risks["execution"] = "warning"
+    if base.execution.runtime != draft.execution.runtime:
+        risks["runtime"] = "warning"
     # Rebinding the skill content changes what the Agent runs (issue #76):
     # structural like the DAG, but not a routing break — same tier as
     # execution overrides.
     if base.skill != draft.skill:
         risks["skill"] = "warning"
+    # tools 白名单 / requires_labels 同理：改变 agent 实际可运行的工具集与
+    # 可调度 Worker 范围，随 revision 版本化，与 execution 覆盖同档。
+    if base.tools != draft.tools:
+        risks["tools"] = "warning"
+    if base.requires_labels != draft.requires_labels:
+        risks["requires_labels"] = "warning"
     # Tunable node settings (#418): structural (they version with the
     # revision) and they change what the node actually runs — same tier as
     # execution overrides, not a routing break.
@@ -497,9 +517,9 @@ def compare_workflow_draft(
     risk_level = compute_risk_level(
         node_changes, edge_changes, intake_changes, risk_flags, metadata_changes
     )
-    creates_revision = structural_revision_changed(
-        node_changes, edge_changes, intake_changes, metadata_changes
-    )
+    # #1114：与发布路径（save_revision_runtime_or_publish）同一判定函数——
+    # 界面「不产生新版本」的承诺必须与实际发布行为一致。
+    creates_revision = revision_structurally_changed(base, draft)
 
     return {
         "valid": True,

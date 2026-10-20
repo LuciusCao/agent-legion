@@ -28,6 +28,11 @@ const FIELD_LABELS: Record<string, string> = {
   config_schema: '配置 Schema',
   execution: '执行配置',
   skill: 'Skill 绑定',
+  // #1114 codex P2：谓词覆盖的字段全量给中文标签（runtime 是 #1114 引入的
+  // 摘要字段，tools/requires_labels 是本次补报的档案结构字段）。
+  runtime: '执行 Runtime',
+  tools: '工具白名单',
+  requires_labels: 'Worker 标签要求',
   accepted_item_types: '入口条目类型',
   text_input: '直接输入需求的呈现配置',
   node_type: '节点类型',
