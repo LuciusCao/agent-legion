@@ -28,7 +28,8 @@ const SERVER: WorkflowDraftStoreResponse = {
   definition_yaml: SERVER_D,
   updated_at: '2026-10-10T01:00:00+00:00',
   definition_hash: H_D,
-} as WorkflowDraftStoreResponse
+  generation: 7,
+}
 
 type Frame = { canvas: string; save: DraftSaveState }
 type Props = { serverDraft: WorkflowDraftStoreResponse | undefined }
@@ -51,7 +52,8 @@ function renderComposition(frames: Frame[]) {
         serverDraft?.updated_at,
         setDraftYamlState,
         draftYaml,
-        serverDraft === undefined ? undefined : serverDraft.definition_hash
+        serverDraft === undefined ? undefined : serverDraft.definition_hash,
+        serverDraft === undefined ? undefined : serverDraft.generation
       )
       const persistence = useWorkflowDraftPersistence(
         'ws1',
@@ -128,7 +130,8 @@ describe('草稿卡 hash 短路不变量（#1196 单帧假 settled）', () => {
         SERVER_D,
         SERVER.updated_at ?? null,
         result.current.setDraftYaml,
-        H_D
+        H_D,
+        SERVER.generation
       )
     )
     await waitFor(() => expect(result.current.draftYaml).toBe(SERVER_D))
@@ -143,7 +146,7 @@ describe('savedYaml 与 savedHash 成对（#1196）', () => {
     controller.subscribe((state) => {
       last = state
     })
-    controller.hydrate(SERVER_D, SERVER.updated_at, null, H_D)
+    controller.hydrate(SERVER_D, SERVER.updated_at, SERVER.generation, H_D)
     expect(last).toMatchObject({ savedYaml: SERVER_D, savedHash: H_D })
     controller.schedule('key: demo\nlabel: Mine\n')
     expect(last).toMatchObject({ status: 'pending', savedYaml: SERVER_D })
