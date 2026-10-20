@@ -19,6 +19,7 @@ from server.app.db.migrations.material_upload_generation import migrate_material
 from server.app.db.migrations.retire_default_workflow_key import (
     migrate_retire_default_workflow_key,
 )
+from server.app.db.migrations.run_batches import migrate_run_batches
 from server.app.db.migrations.studio_chat_message_draft_kind import (
     migrate_studio_chat_message_draft_kind,
 )
@@ -28,9 +29,7 @@ from server.app.db.migrations.studio_chat_session_archive import (
 from server.app.db.migrations.studio_chat_session_soft_delete import (
     migrate_studio_chat_session_soft_delete,
 )
-from server.app.db.migrations.workflow_draft_generation import (
-    migrate_workflow_draft_generation,
-)
+from server.app.db.migrations.workflow_draft_generation import migrate_workflow_draft_generation
 
 RECENT_MIGRATIONS: list[SchemaMigration] = [
     # v87: Worker-reported claim switch column (agent_workers.claim_enabled,
@@ -102,4 +101,9 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # 存量行 default '' 维持 size-only（身份建立拆至 #1316）。DDL-only,
     # same guarded-ALTER home rule as v87.
     SchemaMigration(98, "material_object_etag", migrate_material_object_etag),
+    # v99 (#1117): run_batches — runs 异步模式的 batch 状态行（target_spec +
+    # 游标 + 计数器 + 状态机；基础设施，非 Campaign 产品实体）。Table DDL
+    # rides the apply fn (schema file at its raw-line ceiling; v76/v96
+    # precedent).
+    SchemaMigration(99, "run_batches", migrate_run_batches),
 ]

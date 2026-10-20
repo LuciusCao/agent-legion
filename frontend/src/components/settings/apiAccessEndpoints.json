@@ -4,7 +4,22 @@
     {
       "method": "POST",
       "path": "/runs",
-      "purpose": "提交条目，一项一个 job（唯一的写操作）"
+      "purpose": "提交条目，一项一个 job（同步默认；mode=\"async\" 异步受理返 202 + batch 句柄）"
+    },
+    {
+      "method": "POST",
+      "path": "/runs/{run_id}/pause",
+      "purpose": "暂停异步 run 的投喂（已建 job 不动）"
+    },
+    {
+      "method": "POST",
+      "path": "/runs/{run_id}/resume",
+      "purpose": "恢复异步 run 的投喂"
+    },
+    {
+      "method": "POST",
+      "path": "/runs/{run_id}/cancel",
+      "purpose": "终止异步 run 的投喂（已建 job 保留）"
     },
     {
       "method": "GET",

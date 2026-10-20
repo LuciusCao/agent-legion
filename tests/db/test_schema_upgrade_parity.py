@@ -43,18 +43,16 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v98, material_object_etag) must leave
-# behind so the undo step rewinds a current-shape database to exactly the
-# previous recorded version. v98 is DDL-only: one guarded ALTER adding
-# materials.object_etag (#1279 所有权协议, consumption-side ETag identity);
-# dropping the column rewinds to v97. (v97 sits below: its
-# materials.upload_generation column stays applied.)
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("materials", "object_etag", "text"),
-)
+# Effects the newest migration (v99, run_batches) must leave behind so the
+# undo step rewinds a current-shape database to exactly the previous recorded
+# version. v99 is DDL-only: the run_batches table plus its two indexes (#1117
+# runs 异步模式 batch 状态行); dropping the table (indexes cascade with it)
+# rewinds to v98. (v98 sits below: its materials.object_etag column stays
+# applied.)
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("run_batches",)
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "material_object_etag"
+_NEWEST_MIGRATION_NAME = "run_batches"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the rewound database is a faithful

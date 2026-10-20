@@ -2860,6 +2860,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/runs/{run_id}/cancel': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Cancel Run Batch */
+    post: operations['cancel_run_batch_api_workspaces__workspace_id__runs__run_id__cancel_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/runs/{run_id}/pause': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Pause Run Batch */
+    post: operations['pause_run_batch_api_workspaces__workspace_id__runs__run_id__pause_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/runs/{run_id}/resume': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Resume Run Batch */
+    post: operations['resume_run_batch_api_workspaces__workspace_id__runs__run_id__resume_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/runtime-models': {
     parameters: {
       query?: never
@@ -6127,6 +6178,63 @@ export interface components {
       /** Workspaces */
       workspaces?: components['schemas']['AgentWorkerWorkspace'][]
     }
+    /**
+     * RunAcceptedResponse
+     * @description 202 异步受理（#1117）：run 记录 + batch 句柄；job 由 feeder 后台创建，
+     *     轮询 GET /workspaces/{id}/runs/{run_id}（batch + job_stats）取进度。
+     */
+    RunAcceptedResponse: {
+      batch: components['schemas']['RunBatchRecord']
+      run: components['schemas']['RunRecord']
+    }
+    /**
+     * RunBatchRecord
+     * @description 异步 run 的 feeder 句柄（#1117）：状态机 + 游标 + 计数器。
+     *
+     *     jobs_skipped 由调用方按 processed_count − jobs_created 推导（dedup 过滤
+     *     与 chunk 跳过同源，不单独物化）；chunk_errors 至多 20 条（intake 先例）。
+     */
+    RunBatchRecord: {
+      /** Chunk Errors */
+      chunk_errors: {
+        [key: string]: unknown
+      }[]
+      /** Created At */
+      created_at: string | null
+      /** Error Message */
+      error_message: string
+      /** Finished At */
+      finished_at: string | null
+      /** Items Total */
+      items_total: number
+      /**
+       * Jobs Created
+       * @description 该 run 当前实有 job 数（每 tick 按 count_jobs_in_run 重算）
+       */
+      jobs_created: number
+      /**
+       * Processed Count
+       * @description 游标：已处理的条目数（含 dedup 跳过与失败 chunk）
+       */
+      processed_count: number
+      /** Run Id */
+      run_id: string
+      /**
+       * Status
+       * @description pending/running/paused/completed/failed/cancelled（语义见 runs-async-mode.md §2）
+       */
+      status: string
+      /** Updated At */
+      updated_at: string | null
+    }
+    /**
+     * RunBatchResponse
+     * @description pause/resume/cancel 控制面回包（#1117）：与 202 受理同形。
+     */
+    RunBatchResponse: {
+      batch: components['schemas']['RunBatchRecord']
+      run: components['schemas']['RunRecord']
+    }
     /** RunCreateRequest */
     RunCreateRequest: {
       /** Items */
@@ -6136,6 +6244,8 @@ export interface components {
         | components['schemas']['RunItemBundle']
         | components['schemas']['RunItemText']
       )[]
+      /** Mode */
+      mode?: ('sync' | 'async') | null
     }
     /**
      * RunCreateResponse
@@ -6162,6 +6272,7 @@ export interface components {
     }
     /** RunDetailResponse */
     RunDetailResponse: {
+      batch?: components['schemas']['RunBatchRecord'] | null
       job_stats: components['schemas']['RunJobStats']
       run: components['schemas']['RunRecord']
     }
@@ -14749,6 +14860,15 @@ export interface operations {
           'application/json': components['schemas']['RunCreateResponse']
         }
       }
+      /** @description 异步受理句柄 */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunAcceptedResponse']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -14779,6 +14899,102 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['RunDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  cancel_run_batch_api_workspaces__workspace_id__runs__run_id__cancel_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunBatchResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  pause_run_batch_api_workspaces__workspace_id__runs__run_id__pause_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunBatchResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  resume_run_batch_api_workspaces__workspace_id__runs__run_id__resume_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunBatchResponse']
         }
       }
       /** @description Validation Error */

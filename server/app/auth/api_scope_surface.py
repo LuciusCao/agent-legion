@@ -39,8 +39,8 @@ from fastapi.routing import APIRoute
 API_SCOPE_INTAKE_TAG = "api-scope-intake"
 
 # 唯一权威常量（#678 tool_names.py 形态）：按注册站点分组登记路由名。
-# runs.py：提交（POST 是 #626 唯一 effecting 面，require_workspace_api_
-# intake 把关）+ run 状态两读。jobs.py：jobs 列表。job_list.py：分页
+# runs.py：提交 + run 状态两读 + #1117 异步模式的 pause/resume/cancel
+# （effecting 面都经 require_workspace_api_intake 把关）。jobs.py：jobs 列表。job_list.py：分页
 # snapshot（codex3 P1——机器调用方必须越过 legacy 列表上限读全量 job
 # 状态面；同模块的 facets 是前端聚合端点，刻意不收）。external_artifacts.py
 # （#631）：job 状态、产物清单、raw 下载——#734 修的就是这三个当初被
@@ -51,6 +51,11 @@ API_SCOPE_INTAKE_ROUTE_NAMES: frozenset[str] = frozenset(
         "create_run",
         "list_runs",
         "get_run",
+        # #1117：runs 异步模式控制面（暂停/恢复/取消 feeder），机器闭环的
+        # 取消臂——与 create_run 同一个 require_workspace_api_intake 守卫。
+        "pause_run_batch",
+        "resume_run_batch",
+        "cancel_run_batch",
         # routes/jobs.py
         "list_workspace_jobs",
         # routes/job_list.py

@@ -153,8 +153,9 @@ Bearer 通道不需要 CSRF header（非 ambient 凭据）。token 泄露时在�
 
   | 端点 | 作用 |
   | --- | --- |
-  | `POST /runs` | 提交（唯一 effecting 面） |
-  | `GET /runs` · `GET /runs/{run_id}` | run 列表 / 单 run + job_stats |
+  | `POST /runs` | 提交（同步默认；`mode="async"` 为异步受理，见下文「异步受理模式」） |
+  | `POST /runs/{run_id}/pause` · `POST /runs/{run_id}/resume` · `POST /runs/{run_id}/cancel` | 异步 run 的投喂控制面（#1117；只停/续/止「继续建 job」，已建 job 不动） |
+  | `GET /runs` · `GET /runs/{run_id}` | run 列表 / 单 run + job_stats（异步 run 另带 `batch` 进度句柄） |
   | `GET /jobs` | job 列表（`run_id` / `status` 过滤，`limit` ≤ 2000 + `truncated`） |
   | `GET /jobs/snapshot` | 分页 job 列表（`run_id` 等过滤，`limit` 1–500 + `next_cursor`） |
   | `GET /jobs/{job_id}` | 单 job 轻量状态 |
@@ -271,6 +272,36 @@ failed run 治愈路径（以及下文的并发重提）。识别「已存在」
   `created`）。
 - 轮询间隔建议 10 秒以上、长任务逐步放宽；单 job 状态优先轮询
   `GET /jobs/{job_id}`，批量看进度用 `GET /runs/{run_id}` 的 `job_stats`。
+
+## 异步受理模式（`mode="async"`，#1117）
+
+大批量提交（千级以上）可在 `POST /runs` 请求体里加 `mode: "async"`：服务端
+只做廉价校验（workspace / revision / 条目形状与入口契约 / 节点配置冻结），
+秒级返回 **202** 与句柄 `{run, batch}`，逐项解析、去重与建 job 由后台
+feeder 分块滴灌完成——不再有大请求写超时问题（同步臂的兜底文案/超时豁免
+随之失去意义，小批量继续用同步臂拿 `job_ids`）。
+
+- **句柄与轮询**：`run.id` 与同步路径同一确定性 digest（同一组 items 两
+  模式同一 run id，盲重试跨模式幂等）。进度轮询复用
+  `GET /runs/{run_id}`：`batch.status`（pending/running/paused/completed/
+  failed/cancelled）、`batch.processed_count` / `items_total`（投喂游标）、
+  `batch.jobs_created`（run 实有 job 数）、`batch.chunk_errors`（坏条目所在
+  分块记录，至多 20 条）；job 执行状态照常读 `job_stats`。
+- **去重语义不变**：feeder 每个分块走同一套 dedup 探测 + 写入仲裁，重复
+  条目照样不重建。差别只在「全量重复」的呈现：异步受理不返回 400，而是
+  202 + batch 走到 `completed` 且零新增（`jobs_created` 为 run 全量实有数）。
+  失败 run 的同 digest 重提自愈（failed→重新排队）、已完成 run 的 job 被删
+  后同 digest 重提自动补齐缺口——与同步臂的 #501/枯竭重排队语义对齐。
+- **水位**：workspace 非终态 job 积压达到水位（30000，且不超过实例
+  `workflows.max_items_per_run`）时 feeder 自动停喂，积压消化后继续——异步
+  run 之间按先进度公平轮转，不会一次灌满调度队列。
+- **控制面**：`POST /runs/{run_id}/pause`（暂停投喂）/ `resume`（恢复）/
+  `cancel`（终止投喂；**已建 job 不取消**，要撤销任务走控制台/job 批量
+  操作）。三者是 CAS 迁移：状态不匹配返回 409（响应 `detail` 带当前
+  status），同步 run 或无此 run 返回 404。
+- **错误面**：text 条目在对象存储未配置时异步受理照样 503（与同步一致）；
+  坏条目（材料不存在、连接禁用等）不再 400 拒整批，而是记入
+  `batch.chunk_errors` 并跳过所在分块，其余分块照常。
 
 ## 读取产物：清单、直连下载与全链路示例
 

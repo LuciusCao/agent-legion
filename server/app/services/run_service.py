@@ -31,29 +31,29 @@ record) is shared with both intake paths via ``JobCreationPipeline``
 (job_creation_pipeline); this module keeps only the /runs-specific value
 provenance (items validation, text-item materialization, digest + #501 heal
 branch, progress persistence, response assembly).
+#1117: ``create_run_async`` adds the async accept mode (202 + run_batches
+handle); the shared preamble lives in ``prepare_submission``, the accept and
+the pause/resume/cancel control plane in ``run_batch``, the drip-feed
+consumption in ``run_batch_feeder`` (docs/architecture/runs-async-mode.md).
 """
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
 from server.app.db.rowmap import iso_optional, parse_object
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
+from server.app.services import run_batch
 from server.app.services.job_creation_pipeline import JobCreationPipeline
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
-from server.app.services.job_intake_workspace import get_workspace
-from server.app.services.run_item_client_token import drop_null_client_tokens
 from server.app.services.run_item_resolution import create_run_response, resolve_run_items
-from server.app.services.run_item_types import validate_run_item_types
 from server.app.services.run_text_items import is_text_item, materialize_text_items
 from server.app.settings import Settings
 
 if TYPE_CHECKING:
     from server.app.services.materials import MaterialsService
-from server.app.workflows.definition import workflow_definition_from_dict
 
 # Runs created from items carry this marker in source_kind; legacy rows keep
 # their intake source_kind for display (design §5.2).
@@ -103,6 +103,25 @@ class RunService:
             job_event_buffer=job_event_buffer,
         )
 
+    def create_run_async(
+        self,
+        workspace_id: str,
+        *,
+        workflow_key: str,
+        items: list[dict[str, Any]],
+        created_by: str = "",
+    ) -> dict[str, Any]:
+        """Async accept (#1117): 202 handle = run record + batch record.
+
+        The heavy stages (per-item resolution, dedup, job insertion) run in
+        the feeder; accept persists the deterministic run row (same digest as
+        sync) plus the run_batches state row, and blind retries heal terminal
+        batches via guarded resets (run_batch.accept_async_run).
+        """
+        return run_batch.accept_async_response(
+            self, workspace_id, workflow_key=workflow_key, items=items, created_by=created_by
+        )
+
     def create_run(
         self,
         workspace_id: str,
@@ -111,34 +130,12 @@ class RunService:
         items: list[dict[str, Any]],
         created_by: str = "",
     ) -> dict[str, Any]:
-        workspace = get_workspace(self.job_db, workspace_id)
-        active_revision = self.job_db.get_active_workflow_revision(workspace_id, workflow_key)
-        if active_revision is None:
-            raise InvalidOperationError(
-                "Workspace has no active workflow revision; publish a workflow revision first"
-            )
-        definition = workflow_definition_from_dict(json.loads(active_revision["definition_json"]))
-        if not items:
-            raise InvalidOperationError("At least one item is required")
-        # #813: a null client_token means "no token" — normalize before the
-        # digest so null and omitted resolve to the same run id.
-        items = drop_null_client_tokens(items)
-        max_items = self.settings.executor_runtime.workflows.max_items_per_run
-        if max_items and len(items) > max_items:
-            raise InvalidOperationError(
-                f"Run items exceed the per-run limit: {len(items)} > {max_items}."
-                " Split the submission into smaller runs (the limit is"
-                " workflows.max_items_per_run in instance settings)."
-            )
-        validate_run_item_types(definition, items)
-        # Runtime profile (#359): intake-stage rate gauges. Counted after the
-        # cheap contract checks but before the heavy resolution/insert path,
-        # so the gauge measures submitted load (what a campaign operator
-        # pacing batches cares about), not just accepted load.
-        from server.app.services.runtime_profile import profile
-
-        profile.note_run_intake(len(items))
-
+        # #1117: the submission preamble (workspace/revision/definition +
+        # cheap fail-fast item checks) is shared with the async accept path
+        # and lives in run_batch.prepare_submission (file budget).
+        workspace, active_revision, definition, items = run_batch.prepare_submission(
+            self, workspace_id, workflow_key, items
+        )
         # Validate everything (items, node config, pins) before the first
         # write so a rejected request leaves no half-created run behind.
         # Text items are the one exception: they become materials after the
@@ -249,7 +246,26 @@ class RunService:
         if row is None or str(row["workspace_id"]) != workspace_id:
             raise NotFoundError("Run not found")
         by_status = self.job_db.count_jobs_by_status_in_run(run_id)
+        # #1117: async runs carry their feeder handle on the detail payload —
+        # the polling loop reads batch progress + job_stats from one response.
+        batch = run_batch.get_run_batch_for_run(self.job_db, workspace_id, run_id)
         return {
             "run": _run_record(row),
             "job_stats": {"total": sum(by_status.values()), "by_status": by_status},
+            "batch": run_batch.batch_record(batch) if batch is not None else None,
         }
+
+    def pause_run_batch(self, workspace_id: str, run_id: str) -> dict[str, Any]:
+        return run_batch.batch_response(
+            *run_batch.pause_run_batch(self.job_db, workspace_id, run_id)
+        )
+
+    def resume_run_batch(self, workspace_id: str, run_id: str) -> dict[str, Any]:
+        return run_batch.batch_response(
+            *run_batch.resume_run_batch(self.job_db, workspace_id, run_id)
+        )
+
+    def cancel_run_batch(self, workspace_id: str, run_id: str) -> dict[str, Any]:
+        return run_batch.batch_response(
+            *run_batch.cancel_run_batch(self.job_db, workspace_id, run_id)
+        )

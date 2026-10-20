@@ -520,12 +520,14 @@ server/app/
 | QualityConfusionMatrix | BaseModel | tp: int, fp: int, fn: int, tn: int, precision: float | None, recall: float | ... | app/routes/quality_contracts.py |
 | QualityStatsGroup | BaseModel | node_key: str, skill_version: str, provider: str, model: str, runs: int, succ... | app/routes/quality_contracts.py |
 | QualityBatchStatsResponse | BaseModel | batch_id: str, groups: list[QualityStatsGroup] | app/routes/quality_contracts.py |
-| RunCreateRequest | BaseModel | items: list[RunItem] | app/routes/run_contracts.py |
+| RunCreateRequest | BaseModel | items: list[RunItem], mode: Literal['sync', 'async'] | None | app/routes/run_contracts.py |
 | RunRecord | BaseModel | id: str, workspace_id: str, source_kind: str, status: str, created_count: int... | app/routes/run_contracts.py |
 | RunCreateResponse | BaseModel | run: RunRecord, created_count: int, job_ids: list[str], skipped_count: int | app/routes/run_contracts.py |
 | RunListResponse | BaseModel | runs: list[RunRecord] | app/routes/run_contracts.py |
+| RunBatchRecord | BaseModel | run_id: str, status: str, items_total: int, processed_count: int, jobs_create... | app/routes/run_contracts.py |
+| RunAcceptedResponse | BaseModel | run: RunRecord, batch: RunBatchRecord | app/routes/run_contracts.py |
 | RunJobStats | BaseModel | total: int, by_status: dict[str, int] | app/routes/run_contracts.py |
-| RunDetailResponse | BaseModel | run: RunRecord, job_stats: RunJobStats | app/routes/run_contracts.py |
+| RunDetailResponse | BaseModel | run: RunRecord, job_stats: RunJobStats, batch: RunBatchRecord | None | app/routes/run_contracts.py |
 | RunItemMaterial | BaseModel | type: Literal['material'], material_id: str, client_token: _ClientToken | app/routes/run_item_contracts.py |
 | RunItemRef | BaseModel | type: Literal['ref'], connection_key: str, external_id: str, params: dict[str... | app/routes/run_item_contracts.py |
 | RunItemBundle | BaseModel | type: Literal['bundle'], bundle_id: str, client_token: _ClientToken | app/routes/run_item_contracts.py |
