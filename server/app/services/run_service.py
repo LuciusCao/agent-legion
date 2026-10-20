@@ -239,10 +239,11 @@ class RunService:
             # masked: the non-ValueError branch is a bare re-raise preserving
             # type and traceback, and the compensation helper is itself
             # #204-audited to never mask this error.
-            # A fresh item can still collide at insert time: two items can
-            # normalize to the same job id (``a/b`` vs ``a_w``), or an item
-            # can hit a legacy-path job with a different source_type but the
-            # same source_id. Chunked commits (#467 A3) change the outcome
+            # A fresh item can still collide at insert time: under the #1255
+            # injective encoding two items can only share a job id via the
+            # same source_id under different source_types, or an item can
+            # hit a legacy-path job whose pre-#1255 id coincides with the
+            # new encoding. Chunked commits (#467 A3) change the outcome
             # only when a chunk already committed: the partial run STAYS
             # (delete_run_without_jobs's not-exists guard is a no-op) and is
             # marked failed with its progress so the operator sees what was

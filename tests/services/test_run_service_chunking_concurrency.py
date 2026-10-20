@@ -23,8 +23,10 @@ import pytest
 from server.app.db.connection import connect_database
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.run_service import RunService
+from server.app.services.workflow_revisions import WorkflowRevisionService
 from tests.helpers.pg_waits import backend_pid, wait_until_blocked_by
 from tests.helpers.run_chunking import WORKFLOW_KEY, WORKSPACE_ID
+from tests.helpers.run_chunking import definition_accepting as _definition_accepting
 from tests.helpers.run_chunking import insert_materials as _insert_materials
 from tests.helpers.run_chunking import material_item as _material_item
 from tests.helpers.run_chunking import workspace as _workspace
@@ -256,29 +258,34 @@ def test_material_delete_holding_for_update_blocks_chunk_probe(service, job_db) 
 def test_identity_precheck_blocks_on_in_flight_id_insert(service, job_db) -> None:
     """#501（PR #497 review P2-4）：post-INSERT 身份验证封住读后插竞态窗口。
 
-    并发提交撞同一 job id（``col/a`` vs ``col_a`` 归一冲突——两份不同
-    items → 不同 digest → 各自独立的 run 行，run upsert 不参与串行化）。
+    并发提交撞同一 job id：#1255 单射编码退役了 ``col/a`` vs ``col_a``
+    的归一冲突后，同 id 异身份的形态只剩同 source_id 不同 source_type——
+    material ``col``（A 提交）vs bundle ``col``（B 提交）。两份不同
+    items → 不同 digest → 各自独立的 run 行，run upsert 不参与串行化。
     先到者 A 的 INSERT 在触发器里泊车 1.5s（行已插、事务未提交），后到者
     B 的预查看不到 A 的在途行（快照读；FOR KEY SHARE 对未提交插入本就不
     阻塞——这是实测过的 Postgres 行为），继续进 INSERT 并阻塞在 A 的唯
-    一索引仲裁上；A 提交后 B 的 ON CONFLICT rebind 生效，随即 chunk 内的
-    verify_chunk_identities 重读身份，发现行上的 (question→material) 身
-    份与 B 提交的不一致 → ValueError → B 整 chunk 回滚，A 的行保持原
-    run 绑定。无验证版本里 B 的 rebind 静默成功（identity 不校验）——
-    撞 id 竞态的事实面是「别人的 job 被绑到你的 run」。"""
-    # col/a（A 提交）与 col_a（B 提交）归一到同一 job id。
+    一索引仲裁上；A 提交后 B 的冲突行被 #735 ownership 条款原子跳过
+    （不同 run 不可抢占），随即 chunk 内的 verify_chunk_identities 重读
+    身份，发现行上的 (material, col) 与 B 提交的 (bundle, col) 不一致 →
+    ValueError → B 整 chunk 回滚，A 的行保持原 run 绑定。无验证版本里
+    B 静默跳过（identity 不校验）——撞 id 竞态的事实面是「别人的 job
+    被绑到你的 run」。"""
+    # material `col`（A 提交）与 bundle `col`（B 提交）映射到同一 job id。
     _insert_materials(job_db, 1, prefix="colx")
     with job_db.connect() as conn:
         conn.execute(
-            "update materials set id='col/a' where id='colx-0' and workspace_id=%s",
+            "update materials set id='col' where id='colx-0' and workspace_id=%s",
             (WORKSPACE_ID,),
         )
         conn.execute(
-            "insert into materials(id, workspace_id, content_hash, filename, content_type,"
-            " size_bytes, storage_key, status, created_by)"
-            " values ('col_a', %s, 'hash-col_a', 'col_a.txt', 'text/plain', 10,"
-            " 'k', 'ready', 'tester')",
+            "insert into material_bundles(id, workspace_id, name, total_size_bytes,"
+            " file_count, created_by) values ('col', %s, 'col bundle', 10, 1, 'tester')",
             (WORKSPACE_ID,),
+        )
+        conn.execute(
+            "insert into material_bundle_members(bundle_id, material_id, path, ordinal)"
+            " values ('col', 'col', 'col.txt', 0)"
         )
         # A 的 jobs INSERT 落行后泊车（行已插、事务未提交）并 NOTIFY 主
         # 线程——主线程据此确认 A 处于在途窗口后再放 B 进场。
@@ -300,6 +307,12 @@ def test_identity_precheck_blocks_on_in_flight_id_insert(service, job_db) -> Non
     listener.execute("listen jobs_parked")
     import select as _select
 
+    # widen the entry contract so the bundle item resolves (the seeded demo
+    # revision accepts materials only, #156).
+    WorkflowRevisionService(job_db).publish_workspace_revision(
+        WORKSPACE_ID, _definition_accepting(["material", "bundle"])
+    )
+
     outcome: dict[str, str] = {}
 
     def _submit(tag: str, item: dict) -> None:
@@ -311,12 +324,14 @@ def test_identity_precheck_blocks_on_in_flight_id_insert(service, job_db) -> Non
         except BaseException as exc:  # 线程内失败带回主线程
             outcome[tag] = f"error:{exc!r}"
 
-    thread_a = threading.Thread(target=_submit, args=("a", _material_item("col/a")))
+    thread_a = threading.Thread(target=_submit, args=("a", _material_item("col")))
     thread_a.start()
     try:
         _select.select([listener], [], [], 10)  # 等 A 的泊车通知（行锁在途）
         assert thread_a.is_alive(), "A should be parked inside its INSERT"
-        thread_b = threading.Thread(target=_submit, args=("b", _material_item("col_a")))
+        thread_b = threading.Thread(
+            target=_submit, args=("b", {"type": "bundle", "bundle_id": "col"})
+        )
         thread_b.start()
         # 保留：负向观察窗——B 的在途形态不唯一（预查空过 / 阻塞在 A 的唯一索引仲裁 / 未到验证点），只断言窗内无决定性结果。
         time.sleep(0.6)
@@ -334,9 +349,9 @@ def test_identity_precheck_blocks_on_in_flight_id_insert(service, job_db) -> Non
 
     assert not thread_a.is_alive() and not thread_b.is_alive(), outcome
     assert outcome["a"] == "created", outcome
-    # A 提交后 B 的验证点重读身份：行上是 A 的 (material, col/a)，B 提交
-    # 的是 (material, col_a) → 身份冲突（ValueError cause），B 整 chunk
-    # 回滚（rebind 未提交），A 的行保持原 run 绑定。
+    # A 提交后 B 的验证点重读身份：行上是 A 的 (material, col)，B 提交
+    # 的是 (bundle, col) → 身份冲突（ValueError cause），B 整 chunk
+    # 回滚（跳过未提交），A 的行保持原 run 绑定。
     assert outcome["b"] == "invalid:ValueError", outcome
     with job_db.connect() as conn:
         rows = conn.execute(

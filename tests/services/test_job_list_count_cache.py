@@ -13,6 +13,7 @@ import time
 
 import pytest
 
+from server.app.jobs.job_id_encoding import encode_job_id
 from server.app.jobs.queries.job_filtering import JobListFilter
 from server.app.services.job_list_count_cache import TtlCache
 
@@ -96,7 +97,7 @@ def _insert_job(job_db, workspace_id: str, source_id: str, status: str = "queued
     with job_db.connect() as conn:
         conn.execute(
             "update jobs set status = %s where id = %s",
-            (status, f"{workspace_id}_{workspace_id}_{source_id}"),
+            (status, encode_job_id(workspace_id, workspace_id, source_id)),
         )
 
 

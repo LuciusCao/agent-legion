@@ -1,5 +1,6 @@
 import pytest
 
+from server.app.jobs.job_id_encoding import encode_job_id
 from server.app.jobs.storage_layout import job_storage_dir
 from server.app.services import job_intake_chunks
 from server.app.services.demo_node_seed import seed_demo_workspace_node_codes
@@ -46,12 +47,16 @@ def test_job_intake_creates_direct_id_jobs(job_db, settings):
     assert [job["storage_dir"] for job in result["jobs"]] == [
         str(
             job_storage_dir(
-                settings.jobs_dir, "default", "default_education_video_problems_generation_Q1"
+                settings.jobs_dir,
+                "default",
+                encode_job_id("default", "education_video_problems_generation", "Q1"),
             )
         ),
         str(
             job_storage_dir(
-                settings.jobs_dir, "default", "default_education_video_problems_generation_Q2"
+                settings.jobs_dir,
+                "default",
+                encode_job_id("default", "education_video_problems_generation", "Q2"),
             )
         ),
     ]
