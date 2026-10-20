@@ -1359,6 +1359,7 @@
     "server/app/jobs/queries/studio_chat_admission.py": 54,
     "server/app/jobs/queries/studio_chat_draft_events.py": 81,
     "server/app/jobs/queries/studio_chat_message_merge.py": 31,
+    "server/app/jobs/queries/studio_chat_message_reads.py": 40,
     "server/app/jobs/queries/studio_chat_messages.py": 67,
     "server/app/jobs/queries/studio_chat_pagination.py": 46,
     "server/app/jobs/queries/studio_chat_resume.py": 27,

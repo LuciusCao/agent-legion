@@ -48,10 +48,12 @@ class StudioChatStore:
         role: str,
         content: dict[str, Any],
         live_statuses: tuple[str, ...],
+        *,
+        error_detail_is: str | None = None,
     ) -> dict[str, Any] | None:
         """Atomic live-guarded append (#915); publishes only what was inserted."""
         message = self._db.append_studio_chat_message_if_live(
-            session_id, kind, role, content, live_statuses
+            session_id, kind, role, content, live_statuses, error_detail_is=error_detail_is
         )
         if message is not None:
             self.publish(session_id, {"type": "message", "message": serialize_message(message)})
