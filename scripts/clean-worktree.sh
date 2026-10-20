@@ -458,6 +458,10 @@ fi
 #    porcelain 条目逐字段比对）与 remove 之间不再有任何步骤（#1084 P1-a：
 #    裸 git worktree add 不入锁协议，校验到 remove 的系统调用间微秒窗是
 #    声明的固有竞态）。校验失败 = 状态已变化，中止不动任何资源。
+#    读序（复验 P2）：先 porcelain 后指纹——指纹是唯一能区分「同分支同
+#    HEAD 的 remove+add 重建」（porcelain 条目逐字节相同）的判据，必须做
+#    remove 前的最后一次读；反序会让「指纹已读、porcelain 未读」窗口漏过
+#    这种重建。
 BRANCH=""
 if [[ -d "$TARGET" ]]; then
     BRANCH="$(git worktree list --porcelain | awk -v target="$TARGET" '
@@ -466,8 +470,8 @@ if [[ -d "$TARGET" ]]; then
     ')"
     BRANCH="${BRANCH#refs/heads/}"
 fi
-if [[ "$(target_identity)" != "$PLANNED_IDENTITY" ]] \
-    || [[ "$(worktree_porcelain_entry)" != "$PLANNED_ENTRY" ]]; then
+if [[ "$(worktree_porcelain_entry)" != "$PLANNED_ENTRY" ]] \
+    || [[ "$(target_identity)" != "$PLANNED_IDENTITY" ]]; then
     echo "错误: worktree '${WT}' 状态在确认/等锁期间已变化（被移除或重建），拒绝清理（#1084）。" >&2
     echo "      若确认要清理当前实例，请重跑本脚本。" >&2
     exit 1

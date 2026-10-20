@@ -783,51 +783,63 @@ def test_drop_db_aborts_when_locked_reprobe_fails(repo: _Repo) -> None:
 
 # --- 熔断重估第 2 轮：校验-remove 同互斥 / 计划外资源重确认（#1084 codex）----
 
-# git 包装：目标身份快照的成分读取（symbolic-ref）计数到第 2 次（=锁内最终
-# 校验）后「上膛」；此后的第一次 worktree list 应答前先同名重建目标——模拟
-# 「最终校验与 git worktree remove 之间插入裸 git worktree add」（裸 git
-# 不入派生名锁协议）。状态经文件传递（每次调用都是新进程）。
+# git 包装：目标路径经 STUB_GIT_TARGET 文件给出；`worktree list`（porcelain）
+# 计数到第 STUB_GIT_FIRE_AT 次时，应答前先重建目标——模拟「最终校验读与
+# git worktree remove 之间插入裸 git worktree add」（裸 git 不入派生名锁
+# 协议）。STUB_GIT_SAME_BRANCH=1 时同分支同 HEAD 重建（porcelain 条目逐字节
+# 不变，只有指纹成分能区分）。状态经文件传递（每次调用都是新进程）。
+# 本测试布景下最终校验的条目读是第 6 次 porcelain（MAIN 解析、计划预检、
+# 计划条目、锁内重查、分支解析之后）。
 _GIT_SWAP_WRAPPER = """#!/usr/bin/env bash
 REAL="__REAL_GIT__"
-if [[ "${3:-}" == "symbolic-ref" ]]; then
+if [[ "${1:-}" == "worktree" && "${2:-}" == "list" && -e "$STUB_GIT_TARGET" ]]; then
     n=$(( $(cat "$STUB_GIT_COUNT" 2>/dev/null || echo 0) + 1 ))
     echo "$n" > "$STUB_GIT_COUNT"
-    if [[ "$n" -eq 2 ]]; then
-        echo "$2" > "$STUB_GIT_TARGET"
+    if [[ "$n" -eq "$STUB_GIT_FIRE_AT" ]]; then
+        target="$(cat "$STUB_GIT_TARGET")"
+        rm -f "$STUB_GIT_TARGET"
+        if [[ "$STUB_GIT_SAME_BRANCH" == "1" ]]; then
+            branch="$("$REAL" -C "$target" symbolic-ref --short -q HEAD)"
+            "$REAL" -C "$STUB_GIT_MAIN" worktree remove "$target" >/dev/null
+            "$REAL" -C "$STUB_GIT_MAIN" worktree add -q "$target" "$branch" >/dev/null
+        else
+            "$REAL" -C "$STUB_GIT_MAIN" worktree remove "$target" >/dev/null
+            "$REAL" -C "$STUB_GIT_MAIN" worktree add -q -b rebuilt-in-window "$target" >/dev/null
+        fi
     fi
-fi
-if [[ "${1:-}" == "worktree" && "${2:-}" == "list" && -e "$STUB_GIT_TARGET" ]]; then
-    target="$(cat "$STUB_GIT_TARGET")"
-    rm -f "$STUB_GIT_TARGET"
-    "$REAL" -C "$STUB_GIT_MAIN" worktree remove "$target" >/dev/null
-    "$REAL" -C "$STUB_GIT_MAIN" worktree add -q -b rebuilt-in-window "$target" >/dev/null
 fi
 exec "$REAL" "$@"
 """
 
 
-def test_clean_aborts_when_target_swapped_between_final_check_and_remove(repo: _Repo) -> None:
-    """P1-a：锁内最终校验与 remove 之间插入同名 `git worktree add`（裸 git
-    不拿锁）→ clean 必须中止，新实例与全部资源不动。"""
+def _run_clean_with_swap_hook(
+    repo: _Repo, victim_path: Path, same_branch: bool
+) -> subprocess.CompletedProcess[str]:
     runner = repo.add("runner")
     repo.install_scripts(runner)
-    victim_path = repo.add("victim")
     _exe(repo.bin / "psql", _PSQL_DB_PRESENT_STUB)
-    _exe(
-        repo.bin / "git",
-        _GIT_SWAP_WRAPPER.replace("__REAL_GIT__", _GIT),
-    )
-
-    result = repo.run(
+    _exe(repo.bin / "git", _GIT_SWAP_WRAPPER.replace("__REAL_GIT__", _GIT))
+    (repo.tmp / "swap-target").write_text(str(victim_path), encoding="utf-8")
+    return repo.run(
         runner / "scripts" / "clean-worktree.sh",
         "victim",
         "--yes",
         extra_env={
-            "STUB_GIT_COUNT": str(repo.tmp / "symref-count"),
+            "STUB_GIT_COUNT": str(repo.tmp / "porcelain-count"),
             "STUB_GIT_TARGET": str(repo.tmp / "swap-target"),
             "STUB_GIT_MAIN": str(repo.main),
+            "STUB_GIT_FIRE_AT": "6",
+            "STUB_GIT_SAME_BRANCH": "1" if same_branch else "0",
         },
     )
+
+
+def test_clean_aborts_when_target_swapped_between_final_check_and_remove(repo: _Repo) -> None:
+    """P1-a：锁内最终校验与 remove 之间插入同名 `git worktree add`（裸 git
+    不拿锁，重建为不同分支）→ clean 必须中止，新实例与全部资源不动。"""
+    victim_path = repo.add("victim")
+
+    result = _run_clean_with_swap_hook(repo, victim_path, same_branch=False)
 
     assert result.returncode == 1
     assert "已变化" in result.stderr
@@ -848,6 +860,37 @@ def test_clean_aborts_when_target_swapped_between_final_check_and_remove(repo: _
         check=False,
     )
     assert ref.returncode == 0
+
+
+def test_clean_aborts_when_identical_branch_rebuild_slips_past_porcelain(repo: _Repo) -> None:
+    """复验 P2：同分支同 HEAD 的 remove+add 重建（porcelain 条目逐字节不变）
+    落在最终校验窗口——条目比对必然放过，必须由最后读的指纹比对抓住。"""
+    victim_path = repo.add("victim")
+    victim_branch = subprocess.run(
+        [_GIT, "-C", str(victim_path), "symbolic-ref", "--short", "-q", "HEAD"],
+        capture_output=True,
+        text=True,
+        env={**_git_env(repo.tmp), "PATH": "/usr/bin:/bin"},
+        check=True,
+    ).stdout.strip()
+
+    result = _run_clean_with_swap_hook(repo, victim_path, same_branch=True)
+
+    assert result.returncode == 1
+    assert "已变化" in result.stderr
+    # 新实例未被误删：目录仍在，且仍检出原分支（同名同 HEAD 重建）。
+    assert victim_path.is_dir()
+    assert "dropdb" not in repo.log.read_text(encoding="utf-8")
+    assert (
+        subprocess.run(
+            [_GIT, "-C", str(victim_path), "symbolic-ref", "--short", "-q", "HEAD"],
+            capture_output=True,
+            text=True,
+            env={**_git_env(repo.tmp), "PATH": "/usr/bin:/bin"},
+            check=True,
+        ).stdout.strip()
+        == victim_branch
+    )
 
 
 def test_clean_aborts_interactively_when_locked_probe_finds_unplanned_dbs(repo: _Repo) -> None:
