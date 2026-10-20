@@ -195,7 +195,8 @@ export class DraftSaveController {
   /* kimi review P1-2：采用服务端草稿（Agent 的版本）——经 hydrate 入口
      写入画布并推进基线，本页未保存编辑被放弃（调用方负责 UI 确认）。
      #1143：hash 即被采用草稿的语义身份，随 hydrate 恢复成 savedHash
-     （画布内容=服务端草稿，草稿卡核对不应对它误报）。 */
+     （画布内容=服务端草稿，草稿卡核对不应对它误报）。#1196：hash 缺省
+     （undefined）而内容与旧基线不同时，hydrate 按「无身份」清除旧 hash。 */
   adoptServerDraft(
     yaml: string,
     at: string | null,
