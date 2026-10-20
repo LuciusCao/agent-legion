@@ -1303,6 +1303,7 @@
     "server/app/jobs/atomic_mutations.py": 176,
     "server/app/jobs/execution_control.py": 118,
     "server/app/jobs/execution_pause.py": 49,
+    "server/app/jobs/job_id_encoding.py": 48,
     "server/app/jobs/job_state_mutations.py": 99,
     "server/app/jobs/node_limits.py": 32,
     "server/app/jobs/queries/__init__.py": 29,

@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from server.app.jobs.job_id_encoding import encode_job_id
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.jobs.queries.job_bulk_identity import verify_chunk_identities
 from server.app.jobs.queries.job_bulk_rows import (
@@ -22,11 +23,6 @@ from server.app.jobs.queries.job_bulk_sql import (
 )
 from server.app.jobs.run_freeze import candidate_input
 from server.app.jobs.storage_layout import job_storage_dir
-
-
-def _job_id(workspace_id: str, workflow_key: str, source_id: str) -> str:
-    safe_source_id = source_id.strip().replace("/", "_")
-    return f"{workspace_id}_{workflow_key}_{safe_source_id}"
 
 
 class JobBulkQueriesMixin(ConnectionQueriesMixin):
@@ -74,11 +70,14 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         earlier chunks committed: the run service marks the partial run
         failed (operator legibility) and a resubmission of the same items
         resumes through the dedup filter — the async intake queue's
-        chunk-error contract. Normalize collisions (``a/b`` vs ``a_w``) and
-        identity mismatches are detected over the WHOLE candidate set before
-        the first chunk commits (chunked identity precheck, review P2-2), so
-        a collision inserts nothing. Returns the job ids this call actually
-        OWNS after the writes (first-seen order), derived from the INSERT's
+        chunk-error contract. Job ids are injective in (workspace, workflow,
+        source_id) since #1255 (``job_id_encoding.encode_job_id``), so the
+        remaining intra-call collision is one source_id submitted under two
+        different entity types; identity mismatches are detected over the
+        WHOLE candidate set before the first chunk commits (chunked identity
+        precheck, review P2-2), so a collision inserts nothing. Returns the
+        job ids this call actually OWNS after the writes (first-seen order),
+        derived from the INSERT's
         RETURNING (#735 review P1): a candidate whose job a concurrent run
         claimed between the caller's dedup probe and this insert is skipped
         by the ON CONFLICT ownership clause (first writer wins — see
@@ -99,7 +98,7 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         job_refs: dict[str, tuple[str, str]] = {}
         for candidate in candidates:
             source_id = str(candidate["entity_id"])
-            job_id = _job_id(workspace_id, workflow_key, source_id)
+            job_id = encode_job_id(workspace_id, workflow_key, source_id)
             identity = (str(candidate["entity_type"]), source_id)
             if job_id in identities and identities[job_id] != identity:
                 raise ValueError(f"Job identity collision for {job_id}")

@@ -1,7 +1,7 @@
 """Runs API × item 级 client_token（#813）与 text 条目 ``.json``。
 
 - 同内容不同 token → 各自独立 job；同 token 重复提交 → 幂等命中同一 job；
-- 不传 token → 纯内容寻址，job id / run digest 与 #813 之前逐字节一致（钉子）；
+- 不传 token → 纯内容寻址，job id 派生不引入 token 维度、run digest 与 #813 之前逐字节一致（钉子；job id 形态本身在 #1255 改为单射转义编码）；
 - material / bundle / text 统一支持，ref 拒收（已有 connection_key:external_id 命名空间）；
 - 非法 token 在契约层 422、服务层 400；API token 通道与会话通道行为一致；
 - text 条目 ``.json`` 文件名落盘 ``application/json``，未 opt-in text 的契约仍 fail-closed。
@@ -14,6 +14,7 @@ import hashlib
 
 import pytest
 
+from server.app.jobs.job_id_encoding import encode_job_id
 from tests.fakes.storage import FakeObjectStorage
 
 WORKFLOW_KEY = "education_video_problems_generation"
@@ -65,7 +66,10 @@ def _create_run(client, workspace_id: str, items: list[dict]):
 
 
 def _job_id(source_id: str) -> str:
-    return f"{WORKFLOW_KEY}_{WORKFLOW_KEY}_{source_id}"
+    # #1255: job ids are the injective escape encoding of
+    # (workspace, workflow_key, source_id) — mirror the production formula
+    # instead of the retired raw concatenation.
+    return encode_job_id(WORKFLOW_KEY, WORKFLOW_KEY, source_id)
 
 
 def _jobs(job_db, workspace_id: str) -> dict[str, dict]:
