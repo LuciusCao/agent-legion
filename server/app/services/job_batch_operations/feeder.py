@@ -21,9 +21,10 @@ completion phase re-runs only when the crash lands between the packaging
 side effects and the final advance.
 
 Watermark gate: kinds whose per-job effect enqueues execution work (rerun /
-rerun_by_failure / run_to / resume) drip against the same workspace backlog
-watermark as the runs feeder; the other kinds don't grow the backlog and run
-ungated.
+rerun_by_failure / run_to / resume / upgrade_workflow — a clean upgrade
+requeues the job and resets its nodes to pending, the same execution load
+as a rerun) drip against the same workspace backlog watermark as the runs
+feeder; the other kinds don't grow the backlog and run ungated.
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ logger = logging.getLogger(__name__)
 # crash-replay re-scan window.
 JOB_BATCH_OPS_CHUNK_SIZE = 200
 MAX_CHUNK_ERRORS = 20
-_WATERMARK_KINDS = frozenset({"rerun", "rerun_by_failure", "run_to", "resume"})
+_WATERMARK_KINDS = frozenset({"rerun", "rerun_by_failure", "run_to", "resume", "upgrade_workflow"})
 # run_to/pause/resume loop the raw id list (duplicates included), so their
 # chunk results map back to seqs positionally; every other kind's frozen ids
 # are unique and map by job_id.

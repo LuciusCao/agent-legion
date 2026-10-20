@@ -96,7 +96,15 @@ def test_explicit_job_ids_empty_list_is_a_noop(client):
     assert preview.json() == {"total_count": 0, "eligible_count": 0}
 
 
-def test_explicit_job_ids_exactly_at_limit_are_accepted(client):
+def test_explicit_job_ids_exactly_at_limit_are_accepted(client, monkeypatch):
+    # #946 分流前提：默认阈值 1000 下超过即走异步（202 受理），同步大规模路径
+    # 在 API 面不可达、仅 env 调高 BATCH_OPS_ASYNC_THRESHOLD 可恢复——本测试
+    # 钉住的正是这条同步路径（分块预取在 MAX_BATCH_JOBS 规模下仍找得到末尾
+    # 的真实 job），因此把阈值垫到上限之上。
+    monkeypatch.setattr(
+        "server.app.services.job_batch_operations.service.BATCH_OPS_ASYNC_THRESHOLD",
+        MAX_BATCH_JOBS,
+    )
     ws_id = _create_workspace(client, "bounds-at-limit-ws")
     (real_job,) = _create_jobs(client, ws_id, ["L1"])
     # The real job sits in the last prefetch chunk: chunked reads must still

@@ -76,8 +76,9 @@ RunBatchFeeder 模式：SKIP LOCKED 认领（停滞 600s 回收）、每 tick �
   写面）由构造保证不变。chunk 级意外异常归一化为该 chunk 逐 job 的
   `failed/internal_error` 结果（#759 P1 先例），不丢任何一个选中 job 的判定；簿记级
   失败（target_spec 损坏等）→ `failed`。
-- **水位闸只对产生执行负载的 kind**（rerun / rerun_by_failure / run_to / resume）：
-  与 runs feeder 相同的 workspace backlog 水位（`min(30000, max_items_per_run)`）；
+- **水位闸只对产生执行负载的 kind**（rerun / rerun_by_failure / run_to / resume /
+  upgrade_workflow——clean 升级把 job 翻 queued、节点全重置 pending，与 rerun 同款
+  负载）：与 runs feeder 相同的 workspace backlog 水位（`min(30000, max_items_per_run)`）；
   delete/pause/package/clear-packed 不制造 backlog，不闸。
 - **package 是批级操作**：chunk 内只做逐 job 资格判定（结果即同步路径的
   eligibility verdicts），游标耗尽时由完成钩跑一次打包（重取 succeeded ids 的 live

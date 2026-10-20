@@ -418,6 +418,23 @@ def test_watermark_gate_releases_work_creating_kinds(
     assert job_db.get_job_batch_operation(pause_op)["status"] == "completed"
 
 
+def test_watermark_gate_covers_upgrade_workflow(workspace, job_db, settings, monkeypatch) -> None:
+    """clean 升级把 job 翻 queued、节点全重置 pending——与 rerun 同款的执行
+    负载，必须在闸清单内（评审 P2）。"""
+    job = _create_job(job_db, WORKSPACE, "W-upg", status="completed")
+    op_id = _submit(job_db, "upgrade_workflow", [str(job["id"])], {"mode": "clean"})
+    feeder = _feeder(job_db, settings)
+    monkeypatch.setattr(feeder, "_watermark", lambda: 0)
+
+    assert feeder.consume_once() is False  # 停喂，不执行
+    op = job_db.get_job_batch_operation(op_id)
+    assert op["status"] == "pending" and op["next_index"] == 0
+
+    monkeypatch.setattr(feeder, "_watermark", lambda: 30_000)
+    _drain(feeder)
+    assert job_db.get_job_batch_operation(op_id)["status"] == "completed"
+
+
 def test_batch_level_failure_marks_failed(workspace, job_db, settings) -> None:
     job = _create_job(job_db, WORKSPACE, "B-1")
     op_id = _submit(job_db, "pause", [str(job["id"])])
