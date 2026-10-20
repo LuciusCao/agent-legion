@@ -303,7 +303,7 @@ def test_orphan_event_is_pinned_to_its_own_stamp_at_append(
     def runtime(session_id: str):
         nonlocal calls
         calls += 1
-        if calls == 2 and recheck == "gone":
+        if calls == 3 and recheck == "gone":
             rt.closed = True
             return rt
         return None
