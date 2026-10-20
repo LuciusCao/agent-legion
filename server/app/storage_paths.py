@@ -2,6 +2,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+# #1113：节点日志命名拆在 job_node_log_names（文件预算），此处再导出——写入方
+# 与删除侧仍经 storage_paths 取名。
+from server.app.job_node_log_names import JOB_NODE_LOG_ROOT as JOB_NODE_LOG_ROOT
+from server.app.job_node_log_names import job_node_log_dir_name as job_node_log_dir_name
+from server.app.job_node_log_names import job_node_log_name as job_node_log_name
+from server.app.job_node_log_names import (
+    legacy_job_node_log_name as legacy_job_node_log_name,
+)
 from server.app.services.path_hygiene import warn_legacy_absolute
 
 _MANAGED_CATEGORIES = frozenset({"videos", "jobs", "logs", "packages"})
@@ -33,18 +41,6 @@ def ensure_dir_once(path: Path) -> Path:
 @lru_cache(maxsize=16)
 def job_log_dir(logs_dir: Path) -> Path:
     return ensure_dir_once(logs_dir.resolve() / "jobs")
-
-
-def job_node_log_name(job_id: str, node_key: str, shard_index: int | None = None) -> str:
-    """``<logs_dir>/jobs`` 下节点日志的唯一命名规则：普通节点
-    ``<job_id>-<node_key>.log``，分片 ``<job_id>-<node_key>-shard-<i>.log``。
-
-    写入方（claim_submit / shards）与 job 删除（job_deletion_trash 按它反推
-    已删 job 拥有的日志）共用此函数——删除只认它能生成的文件名。
-    """
-    if shard_index is None:
-        return f"{job_id}-{node_key}.log"
-    return f"{job_id}-{node_key}-shard-{shard_index}.log"
 
 
 class ManagedPathError(ValueError):

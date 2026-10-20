@@ -72,7 +72,7 @@
 
 ## 6. Boundary Rules（禁止模式摘要）
 
-本节只收 agent 改代码时可能违反的红线；各子系统内部机制（调度、pin、解析链、物化细节）的权威记录是 [docs/architecture/workspace-executor-evidence-matrix.md](docs/architecture/workspace-executor-evidence-matrix.md) 与各模块 docstring。
+本节只收 agent 改代码时可能违反的红线；各子系统内部机制（调度、pin、解析链、物化细节）的权威记录是 [docs/architecture/architecture-evidence-matrix.md](docs/architecture/architecture-evidence-matrix.md) 与各模块 docstring。
 
 - Workspace API 扩展顺序：contract → service → focused route。
 - 新 service 的数据库访问必须走 `JobQueries` 门面（`server/app/jobs/queries`），不在 service 里手写 SQL、import `server.app.db.transaction`/`connection` 或读 DSN（BOUNDARY-DATA-001；基线只降不升，豁免边界见 `config/architecture/service-data-boundary-baseline.json`）。
@@ -84,7 +84,7 @@
 - Workflow Node 声明 `capability`、显式 `type: code | agent`（#284）与可选 `skill` 内容绑定（仅 agent 节点；`ref` 为空 = `latest` = 跟随仓库 HEAD）。`agent` 节点必须自含执行档案（EXEC-AGENT-PROFILE-001）：`execution.runtime`（workflow 顶层可作默认）+ 节点自身 requires_labels / tools / config_schema / skill，缺 runtime 发布即报错；不要为新节点回读 Agent 定义或物化路由。`code` 节点必须有 published node_code；节点不声明 `runner` / `agent` / command template（见文末反例）。skill 锁定/物化语义与 legacy 解析边界见 matrix（EXEC-SKILL-NODE-001 / EXEC-SKILL-HERMETIC-001）。例外类型：`type: start` 入口（EXEC-WORKFLOW-START-001）与 `type: approval` 人工审批门（EXEC-APPROVAL-001）。
 - Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.runtime` / `.contracts`。
 - 节点代码以 DB 发布文本（`versioned_entities`）为准、版本不可变；code 节点的普通 job 不 pin 版本，dispatch 只解析本 workspace 当前 published——不要加全局兜底（EXEC-CODE-002/003）。agent 节点执行档案随 revision 发布、随 job 快照冻结，在途 job 用「升级 workflow」取新配置（D4）。禁止任何运行时 API 增删改 repo 文件。
-- 写节点统一走节点 SDK：`def run(ctx)` + `@entrypoint`，脚手架用 `workspace_libs/node_sdk.py` 的 `NodeContext` 与姊妹模块（`http_client.py` / `download.py` / `media.py`），不要手写 JSON 读写/配置合并/取消检查；节点运行时不含 DB 句柄——DB 派生输入由父进程预取，特权动作由节点写 marker、父进程执行（EXEC-CODE-004，设计见 [docs/architecture/node-sdk-and-worker-execution-design.md](docs/architecture/node-sdk-and-worker-execution-design.md)）。
+- 写节点统一走节点 SDK：`def run(ctx)` + `@entrypoint`，脚手架用 `workspace_libs/node_sdk.py` 的 `NodeContext` 与姊妹模块（`http_client.py` / `download.py` / `media.py`），不要手写 JSON 读写/配置合并/取消检查；节点运行时不含 DB 句柄——DB 派生输入由父进程预取，特权动作由节点写 marker、父进程执行（EXEC-CODE-004，见 [docs/architecture/node-sdk-and-worker-execution.md](docs/architecture/node-sdk-and-worker-execution.md)）。
 - 所有节点代码执行必须经 `velites sandbox wrap` OS 沙箱，沙箱不可用即拒绝执行（fail-closed，EXEC-CODE-003）；开关 `workflows.custom_nodes_enabled`。Worker 上的 code 执行同样过沙箱，worker-eligible 由静态 import 闭包扫描判定（EXEC-CODE-WORKER-001）。
 - 节点可调参数经节点 `config_schema:` 块声明（`server/app/config_schema.py` 子集）；平台保留执行键 `timeout_seconds` / `sandbox_network` 不得重声明；解析链 defaults → 节点 `config` → workspace 覆盖，intake 冻结。敏感参数标记 `secret`，manifest 只携带白名单非敏感键（CONFIG-MANIFEST-001）；`runtime_mutable` 与保留键的可变性语义见 backend.md「节点配置可变性分类」（CONFIG-RUNTIME-MUTABLE-001 / CONFIG-RUNTIME-TIMEOUT-001）。
 - Agent 定义存 DB、不走 yaml——`agents:` 段与 `workflows.pi` 块出现在任何 split yaml 启动即报错。runtime（pi / velites）只由 agent 节点 `execution.runtime` 声明；runtime 全集的单一事实来源是 `server/app/agent_runtime` catalog 的 `AGENT_RUNTIMES`，新 runtime 按 adapter 机制接入（步骤见 [docs/architecture/velites-harness.md](docs/architecture/velites-harness.md)）；Worker 按本机二进制探测自动启用 runtime，`disabled_runtimes` 反选（#254）。velites 事件 schema 改动必须同步 `velites/schema/events.schema.json` 并保持契约测试通过；禁止引入 delta 事件（`message_update` / `tool_execution_update`）。
@@ -109,7 +109,13 @@ review_keywords:
     runtime: velites
 ```
 
-更多完整规则与示例见 [docs/architecture/workspace-executor-evidence-matrix.md](docs/architecture/workspace-executor-evidence-matrix.md)。
+```python
+# Wrong: Job service invokes an Executor directly.
+from server.app.executors.code import CodeExecutor
+CodeExecutor(...).execute(context)
+```
+
+更多完整规则与示例见 [docs/architecture/architecture-evidence-matrix.md](docs/architecture/architecture-evidence-matrix.md)。
 
 ## 7. Pi / Skills
 

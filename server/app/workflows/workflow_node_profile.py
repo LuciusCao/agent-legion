@@ -1,7 +1,9 @@
 """Self-contained agent node profile fields: loading and per-node rules (#933).
 
-#440 P2 (D5): an ``agent`` node may carry its own execution profile instead
-of resolving a published Agent definition by capability —
+EXEC-AGENT-PROFILE-001 (#440 P3, #935; introduced as optional in P2 / D5):
+every published ``agent`` node carries its own execution profile — publish
+rejects one without a runtime; resolving a published Agent definition by
+capability survives only for legacy snapshots / nodes v93 could not inline —
 
 - ``execution.runtime`` (one of ``AGENT_RUNTIMES``; the workflow top-level
   ``execution.runtime`` is the default, merged in by

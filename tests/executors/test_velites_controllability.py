@@ -375,6 +375,26 @@ def test_no_auto_discovery(tmp_path: Path, velites_binary: Path) -> None:
     thread.start()
     try:
         base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        # The registry is the only credential source (#1102 removed the
+        # config.json / env bridge); a private file also keeps a developer's
+        # real ~/.velites/models.json out of the run.
+        models_path = tmp_path / "models.json"
+        models_path.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "openai_compat": {
+                            "api": "openai-completions",
+                            "baseUrl": base_url,
+                            "apiKey": "test-key",
+                            "models": ["stub-model"],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        models_path.chmod(0o600)
         proc = _run(
             velites_binary,
             tmp_path,
@@ -390,13 +410,7 @@ def test_no_auto_discovery(tmp_path: Path, velites_binary: Path) -> None:
                 "--no-sandbox",
                 "@prompt.md",
             ],
-            env_extra={
-                "VELITES_BASE_URL": base_url,
-                "VELITES_API_KEY": "test-key",
-                # This test exercises the explicit legacy env bridge and must
-                # not inherit a developer's real ~/.velites/models.json.
-                "VELITES_MODELS_PATH": str(tmp_path / "missing-models.json"),
-            },
+            env_extra={"VELITES_MODELS_PATH": str(models_path)},
         )
     finally:
         server.shutdown()

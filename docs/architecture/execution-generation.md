@@ -5,7 +5,7 @@ workflow 升级/重跑与并发执行之间的串行化机制、执行态平面�
 以及审查同类并发改动时复用的对抗审查 checklist。invariant 注册表的正式表述
 见 `config/architecture/architecture-invariants.yaml` 的 EXEC-GENERATION-001
 条目；反向审计证据见
-[workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)
+[architecture-evidence-matrix.md](architecture-evidence-matrix.md)
 的同名行。本文不写行号——以模块级文件引用为准。
 
 ## 1. 问题背景（issue #759）
@@ -672,10 +672,10 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
 
 ## 6. 相关文档
 
-- [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)：
+- [architecture-evidence-matrix.md](architecture-evidence-matrix.md)：
   架构承诺的反向审计证据矩阵（EXEC-GENERATION-001 行）。
-- [node-sdk-and-worker-execution-design.md](node-sdk-and-worker-execution-design.md)：
-  节点 SDK 与 Worker 执行模型（lease、job_dir、产物通道的底层设计）。
+- [node-sdk-and-worker-execution.md](node-sdk-and-worker-execution.md)：
+  节点 SDK 与 Worker 执行模型（lease、job_dir、产物通道；底层设计过程见其链接的历史设计稿）。
 - [backend.md](backend.md)：后端服务总览（lease 申请、对象存储、配置治理）。
 - AGENTS.md §6 Boundary Rules：EXEC-ARTIFACT-STORE-001（产物权威副本在对象
   存储）、EXEC-APPROVAL-001（审批门语义）等关联红线的摘要。

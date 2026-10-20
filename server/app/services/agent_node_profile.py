@@ -2,16 +2,23 @@
 
 Every reader that needs an agent node's execution configuration (runtime,
 tools, labels, config schema, legacy skill fallback) resolves it here
-instead of walking the published Agent catalog itself. Two sources (#440
-P2, dual read):
+instead of walking the published Agent catalog itself. The node profile is
+authoritative (EXEC-AGENT-PROFILE-001, #440 P3); the two sources are:
 
-- ``node`` — the node is self-contained (``execution.runtime`` declared,
-  ``workflow_node_profile``): the profile is the node's own runtime /
-  tools / requires_labels / config_schema; no Agent definition, no route.
-- ``agent_definition`` — the legacy path: the node's capability resolves to
-  exactly one published Agent of the workspace (the catalog's partial
-  unique index guarantees at most one per capability), so the profile is a
-  field-for-field projection of that definition.
+- ``node`` — the normal path: the node is self-contained
+  (``execution.runtime`` declared, ``workflow_node_profile``): the profile
+  is the node's own runtime / tools / requires_labels / config_schema; no
+  Agent definition, no route. Provider/model/thinking resolve separately
+  (node ``execution.*`` → workflow top-level ``execution``) and are checked
+  against the runtime's ``ExecutionContract`` (EXEC-RUNTIME-DISPATCH-001).
+- ``agent_definition`` — the legacy path, served only for legacy agent
+  nodes: those in job snapshots frozen before the schema v93 inlining, and
+  those of an active revision v93 could not inline that still lack a
+  runtime. The node's capability resolves to exactly one published Agent of
+  the workspace (the catalog's partial unique index guarantees at most one
+  per capability), so the profile is a field-for-field projection of that
+  definition. The Agent catalog is read-only history; never route a new
+  node through it.
 
 This module is pure (no DB): the legacy catalog is passed in. The loaders —
 the only place allowed to read ``published_agent_definitions`` (ratchet,
