@@ -140,20 +140,30 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
             #
             # Identity contract, three checkpoints (#501 / #1243):
             # (1) WHOLE-batch precheck here, before any lock or commit (plain
-            #     read, chunked statements). ids are concatenated from
-            #     underscore-bearing fields, so one can collide with another
-            #     workspace's job (ws ``a`` + source ``a_a_z`` == ws ``a_a`` +
-            #     source ``z``). Rejecting every committed collision up front
-            #     means a collision in chunk N never leaves chunks < N
-            #     committed, and every existing row a chunk later locks is
-            #     ours — so job_id order IS the global batch order (batches
-            #     order a foreign job by ITS workspace key; locking it in our
-            #     order could AB-BA).
+            #     read, chunked statements). Since #1255 job ids are injective
+            #     in (workspace, workflow, source_id), no NEW insert can
+            #     collide across workspaces, so the precheck's original
+            #     deadlock-guard role (a foreign-owned row in the lock set
+            #     would break "job_id order IS the global batch order" →
+            #     AB-BA) is structurally gone: any row the lock set can name
+            #     is either ours or a committed cross-era legacy row — a
+            #     legacy id equal to a new encoding requires the legacy row's
+            #     workspace/workflow id to carry ``~``, which the v62
+            #     workspace-id contract forbids. Kept as an integrity guard:
+            #     it still rejects same-source_id-different-entity_type and
+            #     any cross-era coincidence all-or-nothing BEFORE the first
+            #     chunk commits, so a collision in chunk N never leaves
+            #     chunks < N committed.
             # (2) per chunk, under its job-mutation locks, before the INSERT:
-            #     every creator holds that lock to COMMIT, so a same-id insert
-            #     that was in flight at (1) has been arbitrated (we waited on
-            #     its lock) and is visible here — rejected before any write.
-            # (3) post-INSERT re-check (#501), kept as the write-side backstop.
+            #     every creator holds that lock to COMMIT, and injectivity
+            #     leaves only same-(workspace, workflow, source_id) in-flight
+            #     inserters between (1) and the lock acquisition, so the read
+            #     already sees an in-flight same-id insert's arbitrated
+            #     outcome — rejected before any write. Kept also as the
+            #     existence map for mkdir below and as the same-workspace
+            #     entity_type-conflict guard.
+            # (3) post-INSERT re-check (#501), kept as the write-side backstop
+            #     (cross-era legacy coincidence + the entity_type dimension).
             verify_chunk_identities(conn, row_list)
             for start in range(0, len(row_list), CREATE_CHUNK_ROWS):
                 chunk = row_list[start : start + CREATE_CHUNK_ROWS]

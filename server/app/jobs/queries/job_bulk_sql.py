@@ -139,9 +139,13 @@ def lock_job_mutations_sorted(conn: Any, job_ids: Iterable[str]) -> None:
     ``(hashtext('agent-ws:' || workspace_id), job_id)`` restricted to one
     workspace — every creating call is single-workspace — so a create chunk
     never walks two jobs opposite to finish_many / claim batches / sweeps.
-    Precondition: no id may name an existing job of ANOTHER workspace
-    (underscore-concatenated ids can collide across workspaces); bulk callers
-    reject such identities first (``verify_chunk_identities``, #1243).
+    Precondition: no id may name an existing job of ANOTHER workspace.
+    Structurally true for new ids since #1255 (injective encoding — a
+    cross-workspace coincidence would need a pre-v62 legacy row whose
+    workspace/workflow id carries ``~``, which the v62 workspace-id contract
+    forbids); bulk callers still reject every committed collision first
+    (``verify_chunk_identities``, #1243) as the integrity guard for that
+    legacy residue.
 
     One round trip (#1243 codex R2): ``LOCK_JOB_MUTATIONS_SQL`` over the
     Python-sorted array. Acquisition follows ``ord``: the ordinality scan

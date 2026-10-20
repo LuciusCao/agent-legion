@@ -6,7 +6,7 @@ rename 入 ``.trash``。创建路径（``create_job`` / ``create_jobs_bulk``）�
 整体移走。现在创建在 mkdir / upsert 前取同一把锁并持到提交。
 
 同步纪律（等信号不等时长）：竞态点用 monkeypatch 嵌进真实路径（清理锁内的
-``_stage``），创建方在另一线程发起，经 pg_locks 观测「它正等待该 advisory
+``stage_path``），创建方在另一线程发起，经 pg_locks 观测「它正等待该 advisory
 锁」后才放行；join 带超时并断言线程已结束，防假绿。
 """
 
@@ -22,6 +22,7 @@ import pytest
 import server.app.services.job_deletion_trash as trash_module
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
+from server.app.jobs.job_id_encoding import encode_job_id
 from server.app.services.job_deletion import JobDeletionService
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
@@ -161,7 +162,7 @@ def test_recreate_inside_cleanup_recheck_window_waits_and_keeps_its_dir(
             return _create_single(job_db, workspace_id, "Q1083")
         return _create_bulk(job_db, workspace_id, ["Q1083"])
 
-    original_stage = trash_module._stage
+    original_stage = trash_module.stage_path
     observed: dict[str, Any] = {}
 
     def stage_after_racing_recreate(target: Path, *args: Any, **kwargs: Any) -> list[Path]:
@@ -172,7 +173,7 @@ def test_recreate_inside_cleanup_recheck_window_waits_and_keeps_its_dir(
             observed["row_while_blocked"] = job_db.get_job(job_id)
         return original_stage(target, *args, **kwargs)
 
-    monkeypatch.setattr(trash_module, "_stage", stage_after_racing_recreate)
+    monkeypatch.setattr(trash_module, "stage_path", stage_after_racing_recreate)
 
     result = service.delete(workspace_id, job_id)
 
@@ -188,28 +189,63 @@ def test_recreate_inside_cleanup_recheck_window_waits_and_keeps_its_dir(
     assert list(storage_dir.iterdir()) == []
 
 
+def _insert_legacy_job(
+    job_db: JobQueries, workspace_id: str, legacy_id: str, source_id: str
+) -> None:
+    """pre-v62 / pre-#1255 形态的存量行，直插 SQL 播种。
+
+    legacy 行的 workspace id 或 source_id 可能带 ``~``（v62 起 workspace id
+    契约禁 ``~``，create_workspace 会拒绝），job id 是裸拼接而非转义编码，
+    两个面都只能绕开现行创建路径模拟（同
+    tests/db/test_job_bulk_injective_ids.py 的 _insert_legacy_job）。
+    """
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, %s) on conflict (id) do nothing",
+            (workspace_id, workspace_id),
+        )
+        conn.execute(
+            "insert into runs(id, workspace_id, source_kind)"
+            " values (%s, %s, 'items') on conflict (id) do nothing",
+            (f"run-{workspace_id}", workspace_id),
+        )
+        conn.execute(
+            """
+            insert into jobs(
+              id, workspace_id, source_type, source_id, run_id, title, storage_dir, stem,
+              workflow_revision_id, workflow_version, workflow_definition_hash,
+              workflow_definition_snapshot_json
+            )
+            values (%s, %s, 'question', %s, %s, 'legacy', 'legacy/dir', '', '', 1, '', '')
+            """,
+            (legacy_id, workspace_id, source_id, f"run-{workspace_id}"),
+        )
+
+
 def test_bulk_create_rejects_cross_workspace_id_collision_before_locking(
     job_db: JobQueries, tmp_path: Path
 ) -> None:
-    """#1243 codex P2：id 由带下划线的字段拼接，可能撞上别的 workspace 的现存 job。
-    批路径按该 job 自己的 workspace 键排序，按本 workspace 的 job_id 序去锁它
-    可能 AB-BA；所以碰撞必须在取任何 job-mutation 锁之前以结构化 identity 错误
-    拒绝——即便该 job 的锁正被别人持有，创建也不等待、不建目录、不写行。"""
-    own_ws = "w1243"
-    foreign_ws = f"{own_ws}_{_WORKFLOW}_x"
-    colliding_source = f"x_{_WORKFLOW}_y"
+    """#1243 codex P2（#1255 单射编码后的残余形态）：跨 workspace 撞 id 只剩
+    跨时代巧合——存量 pre-v62 legacy 行的 workspace id 含 ``~``，其裸拼接 id
+    恰等于本 workspace 某候选的新编码。预检必须在取任何 job-mutation 锁之前
+    以结构化 identity 错误拒绝——即便该行的锁正被别人持有，创建也不等待、
+    不建目录、不写行。"""
+    own_ws = "w1243_x"
     job_db.create_workspace(own_ws)
-    job_db.create_workspace(foreign_ws)
-    foreign_id = _create_single(job_db, foreign_ws, "y")
-    assert foreign_id == f"{own_ws}_{_WORKFLOW}_{colliding_source}"
-    other_id = f"{own_ws}_{_WORKFLOW}_zz"
+    # legacy_ws = 编码首段（own_ws 的 ``_`` 转义为 ``~u``）；legacy 行按裸
+    # 拼接恰好得到同一个 id，但 workspace_id 是别人。
+    legacy_id = encode_job_id(own_ws, _WORKFLOW, "y")
+    legacy_ws = legacy_id.split("_")[0]
+    assert legacy_ws != own_ws and "~" in legacy_ws
+    _insert_legacy_job(job_db, legacy_ws, legacy_id, "y")
+    other_id = encode_job_id(own_ws, _WORKFLOW, "zz")
 
-    with job_db.job_mutation_lock(foreign_id) as exists:
+    with job_db.job_mutation_lock(legacy_id) as exists:
         assert exists is True
-        thread, outcome = _start(lambda: _create_bulk(job_db, own_ws, [colliding_source, "zz"]))
+        thread, outcome = _start(lambda: _create_bulk(job_db, own_ws, ["y", "zz"]))
         thread.join(timeout=30)
         assert not thread.is_alive(), "bulk create waited on a foreign job's lock"
-        assert _advisory_holders(job_db, foreign_id, granted=False) == []
+        assert _advisory_holders(job_db, legacy_id, granted=False) == []
 
     assert isinstance(outcome.get("error"), ValueError), outcome
     assert "collision" in str(outcome["error"]).lower()
@@ -221,20 +257,21 @@ def test_bulk_create_rejects_late_chunk_collision_before_any_commit(
     job_db: JobQueries, tmp_path: Path, monkeypatch
 ) -> None:
     """#1243 codex R3：碰撞落在后面的 chunk 时，前面的 chunk 也不得已提交——
-    整批身份预检在首个 chunk 提交之前完成。"""
+    整批身份预检在首个 chunk 提交之前完成。#1255 后跨行碰撞的残余形态是跨
+    时代巧合：存量 legacy 行（source_id 含 ``~``）的裸拼接 id 恰等于某候选
+    的新编码。"""
     import server.app.jobs.queries.job_bulk as job_bulk_module
 
     monkeypatch.setattr(job_bulk_module, "CREATE_CHUNK_ROWS", 1)
     own_ws = "w1243b"
-    foreign_ws = f"{own_ws}_{_WORKFLOW}_x"
-    colliding_source = f"x_{_WORKFLOW}_y"
     job_db.create_workspace(own_ws)
-    job_db.create_workspace(foreign_ws)
-    _create_single(job_db, foreign_ws, "y")
-    first_id = f"{own_ws}_{_WORKFLOW}_aa"
+    # legacy 行 source_id "c~ud" 的裸拼接 id == encode(own_ws, _WORKFLOW, "c_d")。
+    legacy_id = encode_job_id(own_ws, _WORKFLOW, "c_d")
+    _insert_legacy_job(job_db, own_ws, legacy_id, "c~ud")
+    first_id = encode_job_id(own_ws, _WORKFLOW, "aa")
 
     with pytest.raises(ValueError, match="collision"):
-        _create_bulk(job_db, own_ws, ["aa", colliding_source])
+        _create_bulk(job_db, own_ws, ["aa", "c_d"])
 
     assert job_db.get_job(first_id) is None
     assert not any((tmp_path / "jobs").rglob(first_id))
@@ -276,7 +313,7 @@ def test_bulk_create_takes_job_mutation_locks_in_job_id_order(
     尚未碰更大的 id，且尚未建任何目录或写任何行。"""
     workspace_id = "ws-1083-order"
     job_db.create_workspace(workspace_id)
-    ids = {sid: f"{workspace_id}_{_WORKFLOW}_{sid}" for sid in ("a", "b", "c")}
+    ids = {sid: encode_job_id(workspace_id, _WORKFLOW, sid) for sid in ("a", "b", "c")}
 
     with job_db.job_mutation_lock(ids["b"]) as exists:
         assert exists is False
@@ -286,7 +323,7 @@ def test_bulk_create_takes_job_mutation_locks_in_job_id_order(
         assert _advisory_holders(job_db, ids["a"], granted=True) == waiters
         assert _advisory_holders(job_db, ids["c"], granted=True) == []
         assert [sid for sid, jid in ids.items() if job_db.get_job(jid) is not None] == []
-        assert not any((tmp_path / "jobs").rglob(f"*{_WORKFLOW}_*"))
+        assert not any((tmp_path / "jobs").rglob(f"{workspace_id}_*"))
 
     _join(thread)
     assert "error" not in outcome, outcome.get("error")
