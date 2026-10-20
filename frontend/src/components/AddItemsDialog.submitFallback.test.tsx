@@ -81,7 +81,7 @@ describe('AddItemsDialog 提交兜底（#1157 phase0）', () => {
 
     await waitFor(() =>
       expect(useUiStore.getState().toast).toEqual({
-        message: '运行已创建：新建 1 个任务，跳过 1 个已存在条目',
+        message: '已开始运行：新建 1 个任务；1 个条目已有任务，自动跳过。',
         type: 'success',
       })
     )
@@ -102,7 +102,7 @@ describe('AddItemsDialog 提交兜底（#1157 phase0）', () => {
     // 计数取本地提交数——400 语义即本次 0 新建，机器契约字符串不变。
     await waitFor(() =>
       expect(useUiStore.getState().toast).toEqual({
-        message: '全部 1 个条目均已存在对应任务，0 个新建',
+        message: '这 1 个条目都已经有任务了，无需重复创建。',
         type: 'error',
       })
     )
@@ -120,7 +120,7 @@ describe('AddItemsDialog 提交兜底（#1157 phase0）', () => {
     await waitFor(() =>
       expect(useUiStore.getState().toast).toEqual({
         message:
-          '提交结果未返回：服务端可能仍在处理，请稍后刷新任务列表确认；确定性运行 ID 与条目去重会防止重复建任务，无需立即重新提交',
+          '网络较慢，暂时没收到结果。请稍后刷新任务列表查看；没出现的话再重新提交，已经提交的条目不会重复创建。',
         type: 'error',
       })
     )
@@ -140,7 +140,7 @@ describe('AddItemsDialog 提交兜底（#1157 phase0）', () => {
 
     await waitFor(() =>
       expect(useUiStore.getState().toast?.message).toContain(
-        '服务端可能仍在处理'
+        '网络较慢，暂时没收到结果'
       )
     )
   })
@@ -194,8 +194,8 @@ describe('AddItemsDialog 提交兜底（#1157 phase0）', () => {
       '共 1001 个条目'
     )
     const hint = screen.getByTestId('bulk-submit-hint')
-    expect(hint).toHaveTextContent('整体受理')
-    expect(hint).toHaveTextContent('分批')
+    expect(hint).toHaveTextContent('条目较多')
+    expect(hint).toHaveTextContent('每批不超过 1000 条')
 
     // 边界：恰好 1000 条不提示（>1000 才算大批量）。
     pasteIds(1000)
