@@ -1,4 +1,5 @@
 import { api } from './core'
+import { BULK_REQUEST_TIMEOUT } from './requestTimeout'
 import type {
   FailedNodeRunsResponse,
   JobRerunByFailureRequest,
@@ -22,6 +23,12 @@ export async function rerunJobsByFailure(
 ): Promise<JobRerunByFailureResponse> {
   return api<JobRerunByFailureResponse>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/rerun-by-failure`,
-    { method: 'POST', body: JSON.stringify(body) }
+    // 与其他批量端点一致豁免超时：服务端同步跑完整批，客户端 2 分钟超时
+    // 并不撤销服务端动作，只会误报失败（#719 / #1348）。
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+      timeoutMs: BULK_REQUEST_TIMEOUT,
+    }
   )
 }

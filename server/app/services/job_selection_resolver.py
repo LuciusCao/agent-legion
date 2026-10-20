@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Collection, Sequence
 from typing import Any
 
@@ -13,12 +14,24 @@ from server.app.jobs.queries.job_filtering import JobListFilter, filter_clauses
 # limitation); keyset pages keep memory bounded while scanning workspaces.
 _PAGE_SIZE = 1000
 
+MAX_BATCH_JOBS_ENV = "AGENT_LEGION_MAX_BATCH_JOBS"
 # #712 / #917 B-2: upper bound on one batch selection (explicit ids are capped
 # by the request contract's max_length, filter matches here). Batch mutations
 # run per-job transactions in the sync request thread, so the cap bounds how
-# long one request can hold a threadpool slot; the order of magnitude matches
-# the bulk-read chunking (``CHUNK_ROWS``), and prefetch reads chunk by it.
-MAX_BATCH_JOBS = 5 * CHUNK_ROWS
+# long one request can hold a threadpool slot; prefetch reads chunk by
+# ``CHUNK_ROWS`` regardless of the cap, so raising it scales linearly (#1348).
+DEFAULT_MAX_BATCH_JOBS = 20 * CHUNK_ROWS
+
+
+def _max_batch_jobs() -> int:
+    """Env override for the batch cap (import-time read; restart to change)."""
+    try:
+        return max(1, int(os.environ.get(MAX_BATCH_JOBS_ENV, "")))
+    except ValueError:
+        return DEFAULT_MAX_BATCH_JOBS
+
+
+MAX_BATCH_JOBS = _max_batch_jobs()
 
 
 class EmptyJobSelectionError(ValueError):
