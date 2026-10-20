@@ -317,6 +317,9 @@ def lease_check() -> None:
         )
         raise SystemExit(4)
     if not os.path.exists(lease_file):
+        # 纵深防御分支：holder 文件消失仅由 owner release 或回收方删死 pid
+        # 触发，都蕴含 owner 已死/在退出——上方 pid 分支必先命中，本分支在
+        # 现实流程中几乎不可达，测试不单独覆盖。
         print(
             f"错误: 派生名锁 holder 已不在（{lease_file}），锁已易主——放弃剩余删除"
             f"（已删 {deleted_count} 个对象，其余对象与 bucket 保留，#1084）",

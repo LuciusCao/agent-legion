@@ -43,9 +43,10 @@ WORKTREE_INITIALIZED_MARKER=".worktree-initialized.ok"
 #   - 无标记、.env 不存在或不含自身派生库 URL → 待初始化实例：init 在取锁
 #     后才碰资源（复制 .env、改写派生 URL、createdb、建 bucket 全在锁内），
 #     此刻它不拥有任何资源，不拒绝；
-#   - 无标记但 .env 已指向自身派生库 → 本机制引入前创建的存量实例，或 init
-#     在标记写入前崩溃的实例——视作资源主，拒绝删（fail-closed 保护存量；
-#     确认其未完成初始化要删时，先移除该登记或手动删资源）；
+#   - 无标记但 .env 已指向自身派生库（`export ` 前缀形式同样认）→ 本机制
+#     引入前创建的存量实例，或 init 在标记写入前崩溃的实例——视作资源主，
+#     拒绝删（fail-closed 保护存量；确认其未完成初始化要删时，先移除该
+#     登记或手动删资源）；
 #   - .env 存在但不可读 → 无法判定，fail-closed 当资源主。
 worktree_registration_owns_resources() {
     local wt_path="$1" wt_name="$2" db
@@ -53,7 +54,10 @@ worktree_registration_owns_resources() {
     [[ -e "$wt_path/.env" ]] || return 1
     [[ -r "$wt_path/.env" ]] || return 0
     db="$(worktree_derived_db "$wt_name")"
-    if grep -qE "AGENT_LEGION_DATABASE_URL=postgresql://127\.0\.0\.1:5432/${db}\$" "$wt_path/.env" 2>/dev/null; then
+    # 行首锚定 + 可选 export 前缀（init 的 replace_in_place 保留基准 .env 的
+    # export 形式）+ 行尾锚定（派生库名只含 [a-zA-Z0-9_]，正则安全）；引号
+    # 包裹/行内注释等手改形态不认——维持 fail-closed 当作资源主。
+    if grep -qE "^(export )?AGENT_LEGION_DATABASE_URL=postgresql://127\.0\.0\.1:5432/${db}\$" "$wt_path/.env" 2>/dev/null; then
         return 0
     fi
     return 1
@@ -148,6 +152,9 @@ worktree_require_unique_derived_names() {
 # 锁内没有嵌套或后台执行者，holder 的 pid 就是执行者本身，pid 判活即锁存
 # 活。残余窗口只有「持有者被 SIGKILL 时在途的那一条命令会执行完」（任何
 # 锁设计都无法撤回在途命令）；被杀后没有任何进程会继续推进后续步骤。
+# 活性残余（#1251 上下文，既有属性勿当新 bug）：holder pid 被长寿无关进程
+# 复用（或持有者成未回收 zombie）时 kill -0 恒真、holder 永不回收，竞争者
+# 永久等待——安全方向无损，仅活性受损；等待方每 30s 打印持有者可人工解除。
 # 例外收窄到唯一的多步前台子进程：clean 的 bucket delete（uv run python
 # 内部是多批 S3 调用）——它拿到 holder 文件路径 + 持有者 pid 作为租约，
 # 每个破坏性步骤前校验二者仍有效，失效即自绝（见 clean-worktree.sh）。

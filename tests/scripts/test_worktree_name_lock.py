@@ -276,6 +276,10 @@ def test_acquire_refuses_without_git_common_dir(env: _Env) -> None:
         ("foo-bar", None, True),
         ("foo_bar", "marker", True),
         ("foo_bar", "legacy-env", True),
+        # export 前缀形式（init 的 replace_in_place 保留基准 .env 的 export
+        # 形态）同样认定为资源主（codex P2：此前不认 export 行会误判为
+        # 待初始化而绕过护栏）。
+        ("foo_bar", "export-env", True),
         ("foo_bar", None, False),
         (None, None, False),
     ],
@@ -312,6 +316,11 @@ def test_drop_confirms_unlocked_then_rechecks_under_lock(
         elif initialized == "legacy-env":
             (added / ".env").write_text(
                 "AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_foo_bar\n",
+                encoding="utf-8",
+            )
+        elif initialized == "export-env":
+            (added / ".env").write_text(
+                "export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_foo_bar\n",
                 encoding="utf-8",
             )
     release_a.touch()
