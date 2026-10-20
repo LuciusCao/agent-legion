@@ -25,6 +25,12 @@ GET /jobs run_id filter stays consistent with every returned id.
 #1157 phase0 adds the scalar ``skipped_count`` (submitted − created): items
 filtered by the dedup probe plus items a concurrent run claimed first, so the
 client can show 「新建 N 跳过 M」 without a second round trip.
+#724: the creation sequence itself (dedup probe → node setup → version
+freeze → create_run → create_jobs_bulk → #501 compensation → notify → event
+record) is shared with both intake paths via ``JobCreationPipeline``
+(job_creation_pipeline); this module keeps only the /runs-specific value
+provenance (items validation, text-item materialization, digest + #501 heal
+branch, progress persistence, response assembly).
 """
 
 from __future__ import annotations
@@ -36,15 +42,12 @@ from server.app.db.rowmap import iso_optional, parse_object
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
-from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
+from server.app.services.job_creation_pipeline import JobCreationPipeline
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake_workspace import get_workspace
-from server.app.services.node_code_resolution import freeze_node_code_versions
-from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.run_item_client_token import drop_null_client_tokens
 from server.app.services.run_item_resolution import create_run_response, resolve_run_items
 from server.app.services.run_item_types import validate_run_item_types
-from server.app.services.run_partial_failure import compensate_partial_creation
 from server.app.services.run_text_items import is_text_item, materialize_text_items
 from server.app.settings import Settings
 
@@ -55,10 +58,6 @@ from server.app.workflows.definition import workflow_definition_from_dict
 # Runs created from items carry this marker in source_kind; legacy rows keep
 # their intake source_kind for display (design §5.2).
 ITEMS_SOURCE_KIND = "items"
-
-# Event-record chunk (#467 A5): the buffer itself batches revisions; this
-# only bounds the transient id list per record call.
-_EVENT_RECORD_CHUNK = 500
 
 
 def _run_record(row: dict[str, Any]) -> dict[str, Any]:
@@ -94,6 +93,15 @@ class RunService:
         # Object store seam for ``text`` items (run_text_items); None keeps
         # text submissions failing closed with 503 like the materials API.
         self.materials_service = materials_service
+        # #724: the creation sequence itself (dedup probe → node setup →
+        # version freeze → create_run → create_jobs_bulk → #501 compensation
+        # → notify → event record) is shared with both intake paths.
+        self.pipeline = JobCreationPipeline(
+            job_db,
+            settings,
+            job_event_manager=job_event_manager,
+            job_event_buffer=job_event_buffer,
+        )
 
     def create_run(
         self,
@@ -138,20 +146,8 @@ class RunService:
         # probed first and the full list re-resolved once texts exist.
         stored_items = [item for item in items if not is_text_item(item)]
         candidates = resolve_run_items(self.job_db, workspace_id, stored_items)
-        try:
-            node_config = resolve_workflow_node_configs(
-                definition,
-                legacy_agent_catalog(self.job_db, workspace_id),
-                workspace,
-            )
-        except ValueError as exc:
-            raise InvalidOperationError(f"Invalid node configuration: {exc}") from exc
-        node_code_versions = freeze_node_code_versions(
-            self.job_db,
-            self.settings.executor_runtime.workflows.custom_nodes_enabled,
-            workspace_id,
-            workflow_key,
-            list(definition.executable_nodes),
+        node_config, node_code_versions = self.pipeline.resolve_node_setup(
+            definition, workspace, workspace_id, workflow_key
         )
         if len(stored_items) != len(items):
             start_node = definition.start_node
@@ -171,28 +167,9 @@ class RunService:
 
         # Same dedup contract as intake: items whose (source_type, source_id)
         # already has a job in this workflow drop out; accepted keys grow the
-        # set so intra-request duplicates filter exactly like pre-existing jobs.
-        # #467 A2: point lookups over this request's keys (indexed IN probes)
-        # instead of loading the whole workspace's keys — same workspace-
-        # scoped semantics, cost tracks the submission size. #735 review P1:
-        # this probe is a check-then-act read — a concurrent submission can
-        # claim the same item after it; that race is closed on the write side
-        # (create_jobs_bulk's ownership clause + RETURNING), not by locking
-        # here, so the loser simply drops the raced item from its response.
-        existing_keys = self.job_db.filter_existing_dedup_keys(
-            workspace_id,
-            (
-                (str(candidate["entity_type"]), str(candidate["entity_id"]))
-                for candidate in candidates
-            ),
-        )
-        fresh: list[dict[str, Any]] = []
-        for candidate in candidates:
-            key = (str(candidate["entity_type"]), str(candidate["entity_id"]))
-            if key in existing_keys:
-                continue
-            existing_keys.add(key)
-            fresh.append(candidate)
+        # set so intra-request duplicates filter exactly like pre-existing
+        # jobs (the probe's check-then-act race note lives on the pipeline).
+        fresh = self.pipeline.collect_fresh_candidates(workspace_id, candidates)
         digest_payload = {
             "workflow_key": workflow_key,
             "source_kind": ITEMS_SOURCE_KIND,
@@ -218,63 +195,18 @@ class RunService:
             # 由前端 toast 承担（#1157 phase0，tower 裁决 A）。
             raise InvalidOperationError("No tasks were resolved from input")
 
-        run = self.job_db.create_run(
-            workflow_key,
-            ITEMS_SOURCE_KIND,
-            digest_payload,
+        run, job_ids = self.pipeline.create_run_and_jobs(
             workspace_id=workspace_id,
-            frozen_pins={"node_code_versions": node_code_versions},
+            workflow_key=workflow_key,
+            source_kind=ITEMS_SOURCE_KIND,
+            source_payload=digest_payload,
+            node_code_versions=node_code_versions,
+            candidates=fresh,
+            revision=active_revision,
+            definition=definition,
+            node_config=node_config,
+            notify=notify_schedulable_work,
         )
-        try:
-            job_ids = self.job_db.create_jobs_bulk(
-                candidates=fresh,
-                workflow_key=workflow_key,
-                run_id=run["id"],
-                node_keys=list(definition.executable_nodes),
-                workspace_id=workspace_id,
-                revision=active_revision,
-                frozen_config=node_config,
-            )
-        except Exception as exc:
-            # #204 broad-except audit: compensate-then-re-raise after the
-            # run row committed (create_jobs_bulk commits in chunks, so the
-            # failure space is the bulk-insert's mixed psycopg/dedup
-            # surface). The width is required because the compensation must
-            # run on EVERY failure mode — ValueError (normalize-collision,
-            # converted to the user-facing InvalidOperationError) and
-            # unexpected errors alike — or a run row would linger; nothing is
-            # masked: the non-ValueError branch is a bare re-raise preserving
-            # type and traceback, and the compensation helper is itself
-            # #204-audited to never mask this error.
-            # A fresh item can still collide at insert time: under the #1255
-            # injective encoding two items can only share a job id via the
-            # same source_id under different source_types, or an item can
-            # hit a legacy-path job whose pre-#1255 id coincides with the
-            # new encoding. Chunked commits (#467 A3) change the outcome
-            # only when a chunk already committed: the partial run STAYS
-            # (delete_run_without_jobs's not-exists guard is a no-op) and is
-            # marked failed with its progress so the operator sees what was
-            # created; a resubmission resumes through the dedup filter.
-            # With no committed chunk the compensation removes the run row
-            # exactly like the pre-chunking shape. #501: the two-branch
-            # compensation body lives ONCE in
-            # run_partial_failure.compensate_partial_creation (this path and
-            # the legacy intake shared drifted duplicates before); the only
-            # per-caller part left here is the error presentation —
-            # #467 review P1-2/P2-1: after a committed chunk EVERY failure
-            # family maps to the structured partial-failure error (the
-            # operator legibility requirement — created_so_far in the 400
-            # detail; original rides as __cause__), with no committed chunk
-            # the branches below keep the pre-chunking semantics verbatim
-            # (ValueError → 400, anything else → bare re-raise → 500).
-            partial_error = compensate_partial_creation(self.job_db, str(run["id"]), exc)
-            if partial_error is not None:
-                raise partial_error from exc
-            if isinstance(exc, ValueError):
-                raise InvalidOperationError(str(exc)) from exc
-            raise
-        if job_ids:
-            notify_schedulable_work()
         # Persist the final creation progress so the run row alone answers
         # the detail endpoint (legacy sync intake kept this only in memory).
         # #467 review P1-2: created_count is the run's WHOLE job slice
@@ -288,25 +220,7 @@ class RunService:
             status=str(run["status"]),
         )
 
-        if self.job_event_buffer is not None:
-            # #467 A5: chunked record — the buffer is the batching layer (one
-            # lock acquisition + one revision per call, SSE payloads
-            # aggregated by the drain loop), so recording per insert chunk
-            # keeps memory bounded for very large runs while the wire stays
-            # on the compacted batch path.
-            for start in range(0, len(job_ids), _EVENT_RECORD_CHUNK):
-                self.job_event_buffer.record_jobs_created(
-                    workspace_id, job_ids[start : start + _EVENT_RECORD_CHUNK]
-                )
-        elif self.job_event_manager is not None:
-            # Bufferless fallback (tests/legacy wiring): broadcast ids only —
-            # the create response no longer carries job rows (#467 A4), and
-            # the manager's job_patch_batch consumers key off ids. Stats stay
-            # empty: the aggregator's periodic flush owns the numbers on the
-            # buffered path, and this fallback's SSE consumers re-read them.
-            self.job_event_manager.broadcast_jobs_created(
-                workspace_id, [{"id": job_id} for job_id in job_ids], {}
-            )
+        self.pipeline.record_jobs_created(workspace_id, job_ids)
         # #467 A4: the response carries run + created_count plus job_ids only
         # (#735 re-added the id list so external callers can poll #703's
         # per-job endpoints right after submit — ids, never job rows); a
