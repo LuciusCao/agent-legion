@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from server.app.jobs.job_id_encoding import encode_job_id
 from server.app.jobs.queries import JobQueries
 from tests.helpers import load_builtin_definition
 from tests.helpers.job_dirs import job_storage_ref
@@ -31,11 +32,11 @@ def test_create_batch_and_question_jobs(tmp_path):
     assert batch["workspace_id"] == "default"
     # #211 M3: the identity backfill is gone with the deprecated wire field.
     assert "workflow_key" not in batch
-    assert job["id"] == "default_education_video_problems_generation_Q001"
+    # #1255: ids use the injective escape encoding (`_` → `~u` inside segments).
+    expected_id = encode_job_id("default", "education_video_problems_generation", "Q001")
+    assert job["id"] == expected_id
     assert job["workspace_id"] == "default"
-    assert job["storage_dir"].endswith(
-        job_storage_ref("default", "default_education_video_problems_generation_Q001")
-    )
+    assert job["storage_dir"].endswith(job_storage_ref("default", expected_id))
     nodes = queries.list_job_nodes(job["id"])
     assert [node["node_key"] for node in nodes] == [
         "fetch_question_context",
@@ -69,8 +70,12 @@ def test_workspaces_isolate_jobs_with_same_source_id(tmp_path):
     )
 
     assert workspace["id"] == "math_sprint"
-    assert default_job["id"] == "default_education_video_problems_generation_Q100"
-    assert workspace_job["id"] == "math_sprint_education_video_problems_generation_Q100"
+    assert default_job["id"] == encode_job_id(
+        "default", "education_video_problems_generation", "Q100"
+    )
+    assert workspace_job["id"] == encode_job_id(
+        "math_sprint", "education_video_problems_generation", "Q100"
+    )
     assert [job["id"] for job in queries.list_jobs(workspace_id="default")] == [default_job["id"]]
     assert [job["id"] for job in queries.list_jobs(workspace_id=workspace["id"])] == [
         workspace_job["id"]
