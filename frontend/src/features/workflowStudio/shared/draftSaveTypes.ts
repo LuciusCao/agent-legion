@@ -14,6 +14,11 @@ export type DraftSaveState = {
    * 字节差异干扰。冲突挂起期间刻意不推进（编辑器有未保存编辑，发布以
    * 编辑器为准——此时提示应保留）。 */
   savedHash?: string | null
+  /** #1196：savedHash 所描述的内容本体（= controller 的已持久化基线
+   * lastPersisted，由 setState 单点注入，与 savedHash 同一快照原子推进）。
+   * 「当前内容已落盘」的真值是逐字节 content === savedYaml，而不是从
+   * status 推断——status 与画布写入分属不同 effect 链，可错开一帧。 */
+  savedYaml?: string | null
   /** GET 草稿查询失败（仅内存模式）时由组合层合并进来，供 UI 警示。 */
   loadError?: boolean
   /** #633：CAS 冲突——服务端草稿已被 agent/其它会话推进，本页未保存的
