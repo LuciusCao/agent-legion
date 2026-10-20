@@ -19,6 +19,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -576,4 +577,124 @@ def test_killed_holder_leaves_no_orphan_progress(env: _Env) -> None:
     release_t.touch()
     _wait_for(lambda: "acquired t" in env.events_lines(), "contender acquires after reclaim")
     assert contender.wait(timeout=_DEADLINE) == 0
+    assert env.holders() == []
+    # P3-2 兜底：竞争者跑完后再次断言无孤儿推进（覆盖迟到的孤儿写入）。
+    assert "dropdb agent_legion_test_victim" not in env.log.read_text()
+    assert "bucket-delete-under-lock" not in env.log.read_text()
+
+
+# --- bucket 删除租约（#1084 熔断重估 R2 P1）----------------------------------
+#
+# R5 收窄后唯一的多步前台子进程是 bucket delete 的 uv/python：clean 被
+# SIGKILL 时它成孤儿仍能继续多批删除，而锁 holder 只记 clean 的 pid。修法
+# 是不换锁原语的逐批租约校验：clean 把 holder 文件路径（租约）与自身 pid
+# 经 env 传给 python，python 在每个破坏性步骤前校验二者仍有效，失效自绝。
+
+# clean 的 S3 heredoc 由 uv 桩转交真实 python（PYTHONPATH=runner worktree），
+# 以下替身模块屏蔽 dotenv/boto3/botocore 与 repo 模块。
+_LEASE_S3_MODULES = {
+    "dotenv.py": "def load_dotenv(*a, **k):\n    return False\n",
+    "botocore/__init__.py": "",
+    "botocore/exceptions.py": (
+        "class ClientError(Exception):\n"
+        "    def __init__(self, response):\n"
+        "        super().__init__('stub')\n"
+        "        self.response = response\n"
+        "class EndpointConnectionError(Exception):\n"
+        "    pass\n"
+    ),
+    # head_bucket 成功（bucket 存在）；list 出一个对象；delete_objects 记录
+    # 后阻塞到 BLOCK_RELEASE 出现（停在在途批次里）；delete_bucket 记录。
+    "boto3.py": (
+        "import os, time\n"
+        "def _log(line):\n"
+        "    with open(os.environ['STUB_LOG'], 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(line + '\\n')\n"
+        "class _Paginator:\n"
+        "    def paginate(self, Bucket):\n"
+        "        return iter([{'Contents': [{'Key': 'k1', 'Size': 1}]}])\n"
+        "class _Client:\n"
+        "    def head_bucket(self, Bucket):\n"
+        "        return None\n"
+        "    def get_paginator(self, name):\n"
+        "        return _Paginator()\n"
+        "    def delete_objects(self, Bucket, Delete):\n"
+        "        _log('delete_objects ' + ','.join(o['Key'] for o in Delete['Objects']))\n"
+        "        block = os.environ.get('BLOCK_RELEASE')\n"
+        "        if block:\n"
+        "            while not os.path.exists(block):\n"
+        "                time.sleep(0.05)\n"
+        "    def delete_bucket(self, Bucket):\n"
+        "        _log('delete_bucket ' + Bucket)\n"
+        "def client(*a, **k):\n"
+        "    return _Client()\n"
+    ),
+    "scripts/__init__.py": "",
+    "scripts/seaweedfs_collection.py": (
+        "class CollectionGuardError(Exception):\n    pass\n"
+        "def leftover_volume_ids(*a):\n    return ()\n"
+        "def manual_reclaim_command(*a):\n    return ''\n"
+        "def resolve_master_url(*a):\n    return None\n"
+    ),
+    "server/__init__.py": "",
+    "server/app/__init__.py": "",
+    "server/app/storage.py": (
+        "class _S:\n"
+        "    region = 'us-east-1'\n"
+        "    endpoint_url = None\n"
+        "    access_key = None\n"
+        "    secret_key = None\n"
+        "def load_s3_settings():\n"
+        "    return _S()\n"
+    ),
+}
+
+
+def _install_lease_bucket_fakes(env: _Env, worktree: Path) -> None:
+    for rel, content in _LEASE_S3_MODULES.items():
+        target = worktree / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    _exe(env.bin / "uv", f'#!/usr/bin/env bash\nexec "{sys.executable}" -\n')
+
+
+def test_bucket_delete_orphan_self_terminates_when_lease_lost(env: _Env) -> None:
+    """clean 在 bucket delete 中途被 SIGKILL、竞争者回收锁（=同名 init 进入
+    临界区重建 bucket）后，孤儿删除进程在下一个破坏性步骤前的租约校验失败
+    并自绝——新实例的 bucket 不会被删。"""
+    scripts = env.runner()
+    env.add("victim")
+    _install_lease_bucket_fakes(env, scripts.parent)
+    block = env.tmp / "block-release"
+    clean_err = env.tmp / "clean-lease.err"
+    clean = subprocess.Popen(
+        ["bash", str(scripts / "clean-worktree.sh"), "victim", "--yes"],
+        env=env.env(STUB_DBS="", BLOCK_RELEASE=str(block)),
+        stdout=subprocess.PIPE,
+        stderr=clean_err.open("w"),
+        text=True,
+        cwd=env.main,
+    )
+    # 删除进程停在 delete_objects 批次里（在途命令）
+    _wait_for(lambda: "delete_objects" in env.log.read_text(), "delete_objects in flight")
+
+    # 杀 clean 并回收 zombie（pid 判死生效）；竞争者在孤儿删除仍在途时回收
+    # 锁——覆盖「锁易主时在途删除未结束」的窗口（旧用例在在途命令完成后才
+    # 启动竞争者，没覆盖到；此处先拿锁、后放行在途批次）。
+    clean.kill()
+    clean.wait(timeout=_DEADLINE)
+    contender, release_t = env.start_holder("t")
+    release_t.touch()
+    _wait_for(
+        lambda: "acquired t" in env.events_lines(),
+        "contender reclaims lock while delete in flight",
+    )
+    assert contender.wait(timeout=_DEADLINE) == 0
+
+    # 放走在途批次：下一破坏性步骤（delete_bucket）前的租约校验必须失败。
+    block.touch()
+    _wait_for(lambda: "租约失效" in clean_err.read_text(), "orphan aborts on lease check")
+
+    assert "delete_bucket" not in env.log.read_text()
+    assert clean.returncode == -9
     assert env.holders() == []

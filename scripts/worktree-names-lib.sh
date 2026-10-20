@@ -148,6 +148,9 @@ worktree_require_unique_derived_names() {
 # 锁内没有嵌套或后台执行者，holder 的 pid 就是执行者本身，pid 判活即锁存
 # 活。残余窗口只有「持有者被 SIGKILL 时在途的那一条命令会执行完」（任何
 # 锁设计都无法撤回在途命令）；被杀后没有任何进程会继续推进后续步骤。
+# 例外收窄到唯一的多步前台子进程：clean 的 bucket delete（uv run python
+# 内部是多批 S3 调用）——它拿到 holder 文件路径 + 持有者 pid 作为租约，
+# 每个破坏性步骤前校验二者仍有效，失效即自绝（见 clean-worktree.sh）。
 #
 # 调用方约定：
 #   - 只在「撞名检查 → 建/删派生资源」区间持锁；交互确认一律放在取锁之
@@ -231,6 +234,17 @@ _wt_name_lock_release() {
     fi
     _WT_NAME_LOCK_OWNED=0
     return 0
+}
+
+# 当前进程持有的锁的 holder 文件路径（未持锁返回 1）。供持有者把租约身份
+# 传给前台子进程做逐批校验（#1084 熔断重估 R2）：holder 文件名编码
+# pid+nonce，删除即租约失效。
+worktree_name_lock_lease_file() {
+    if [[ "$_WT_NAME_LOCK_OWNED" -eq 1 && -n "$_WT_NAME_LOCK_SLOT" ]]; then
+        printf '%s\n' "$_WT_NAME_LOCK_SLOT"
+        return 0
+    fi
+    return 1
 }
 
 # 释放本进程持有的锁并撤掉 trap。

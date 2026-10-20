@@ -31,7 +31,9 @@
 #   - 删库/删 bucket 前持锁重查：同名 worktree 被重建后又注册着也拒绝；
 #   - 全部建/删步骤在持锁进程内同步执行（R5 熔断收窄）：锁内没有嵌套或
 #     后台执行者，holder 的 pid 即执行者本身；本进程被 SIGKILL 的残余
-#     窗口只有「在途的那一条命令执行完」，不会有孤儿进程继续推进删除
+#     窗口只有「在途的那一条命令执行完」，不会有孤儿进程继续推进删除。
+#     唯一的多步前台子进程是 bucket delete 的 uv/python——它持有删除
+#     租约（holder 文件 + owner pid），每个破坏性步骤前校验，失效即自绝
 #     （#1084）；
 #   - bucket 探测失败（endpoint/鉴权/python 故障，exit 非 0/4/10）fail-closed
 #     中止：探测失败 ≠ 不存在，状态未知时不确认、不推进、不盲删（#1084）；
@@ -167,7 +169,24 @@ PLANNED_IDENTITY="$(target_identity)"
 # 中止，delete 阶段降级为 warning 提示重跑（见调用侧）。
 export CLEAN_WORKTREE_WT="$WT"
 run_bucket_phase() {
-    CLEAN_WORKTREE_PHASE="$1" PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run --frozen python - <<'PY'
+    # 删除租约（#1084 熔断重估 R2）：delete 阶段的实际执行者是 uv/python
+    # 前台子进程——本 shell 被 SIGKILL 时它会成孤儿继续跑多批删除，而锁
+    # holder 只记本进程 pid，竞争者回收锁后同名 init 会建/用同名 bucket。
+    # 因此 delete 阶段把 holder 文件路径（租约）与 holder pid 经 env 传给
+    # python，python 在每个破坏性步骤前校验两者仍有效，失效即放弃剩余
+    # 删除。回收方保持 pid 判活不变——孤儿自绝后无需等它。probe 只读，
+    # 不传租约。
+    local phase="$1" lease_file="" owner_pid=""
+    if [[ "$phase" == "delete" ]]; then
+        if ! lease_file="$(worktree_name_lock_lease_file)"; then
+            echo "错误: 未持有派生名锁（无删除租约），拒绝 bucket 删除（#1084）。" >&2
+            return 4
+        fi
+        owner_pid="$$"
+    fi
+    CLEAN_WORKTREE_PHASE="$phase" PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache \
+    AGENT_LEGION_WT_CLEAN_LEASE="$lease_file" AGENT_LEGION_WT_CLEAN_OWNER_PID="$owner_pid" \
+    uv run --frozen python - <<'PY'
 import os
 import re
 import sys
@@ -271,13 +290,51 @@ if phase != "delete":
     print(f"错误: 未知阶段 {phase!r}", file=sys.stderr)
     raise SystemExit(4)
 
+# 逐批租约校验（#1084 熔断重估 R2）：本进程是 clean 的前台子进程
+#（uv → python）。clean 被 SIGKILL 后本进程成孤儿仍能继续删，但锁 holder
+# 只记 clean 的 pid，会被竞争者回收、同名 init 随即建/用同名 bucket。
+# 每个破坏性步骤前校验：①持锁 shell（owner pid）仍存活；②holder 文件
+#（租约）仍在。任一失败 = 锁已易主或父死，继续删就是删别人的资源——放弃
+# 剩余删除并报错退出。owner 为 zombie 时 kill(pid, 0) 仍成功，与回收方的
+# pid 判活口径一致（该活性残余见 #1251）。
+lease_file = os.environ.get("AGENT_LEGION_WT_CLEAN_LEASE", "")
+_owner_pid_raw = os.environ.get("AGENT_LEGION_WT_CLEAN_OWNER_PID", "")
+owner_pid = int(_owner_pid_raw) if _owner_pid_raw.isdigit() else 0
+deleted_count = 0
+
+
+def lease_check() -> None:
+    if not lease_file or owner_pid <= 0:
+        print("错误: 缺少删除租约（holder 文件/owner pid 未传入），拒绝删除（#1084）", file=sys.stderr)
+        raise SystemExit(4)
+    try:
+        os.kill(owner_pid, 0)
+    except OSError:
+        print(
+            f"错误: 持锁进程（pid={owner_pid}）已退出，租约失效——放弃剩余删除"
+            f"（已删 {deleted_count} 个对象，其余对象与 bucket 保留，#1084）",
+            file=sys.stderr,
+        )
+        raise SystemExit(4)
+    if not os.path.exists(lease_file):
+        print(
+            f"错误: 派生名锁 holder 已不在（{lease_file}），锁已易主——放弃剩余删除"
+            f"（已删 {deleted_count} 个对象，其余对象与 bucket 保留，#1084）",
+            file=sys.stderr,
+        )
+        raise SystemExit(4)
+
+
 # 非空 bucket 需先清空对象再 delete_bucket（不可逆操作）。
 for start in range(0, len(objects), 1000):
     batch = objects[start : start + 1000]
+    lease_check()
     client.delete_objects(
         Bucket=bucket,
         Delete={"Objects": [{"Key": obj["Key"]} for obj in batch]},
     )
+    deleted_count += len(batch)
+lease_check()
 client.delete_bucket(Bucket=bucket)
 print(f"已删除 S3 bucket: {bucket}（含 {len(objects)} 个对象）")
 report_seaweedfs_leftovers()
@@ -390,9 +447,13 @@ fi
 
 # 3. 派生 Postgres 库：在本持锁进程内同步探测并删除（R5 熔断收窄后不再
 #    转调 drop 子进程——锁持有者即唯一执行者，父进程被 SIGKILL 时不会有
-#    孤儿脚本继续推进删除；单条在途命令的完成是任何锁设计都无法撤回的
-#    残余）。探测/复核失败 fail-closed；撞名检查把已完成初始化的同名
-#    登记算冲突（待初始化登记不构成资源主，见 worktree-names-lib.sh）。
+#    孤儿脚本继续推进删除）。取舍说明（R5 重估第 2 轮）：两条 dropdb 是
+#    单条快命令，不加租约校验——孤儿 dropdb 只完成「删除决策时已存在」
+#    的那一条删除，与竞争者重建同名库的交错窗口为毫秒级，归入「在途单
+#    命令完成」的声明残余；bucket delete 是多批 S3 调用（窗口长且分批），
+#    才需要逐批租约校验（见 run_bucket_phase）。探测/复核失败 fail-closed；
+#    撞名检查把已完成初始化的同名登记算冲突（待初始化登记不构成资源主，
+#    见 worktree-names-lib.sh）。
 worktree_db_prepare
 worktree_require_unique_derived_names "$ROOT" "$WT" "删除派生库" 1 || exit 1
 worktree_db_collect "$WT"
@@ -404,8 +465,9 @@ fi
 
 # 4. 派生 S3 bucket：同样在锁内重新 probe（锁前结果仅用于确认展示），存在
 #    才删；删除前把同名重建算冲突（#1084）。锁内重探测失败同样 fail-closed——
-#    不凭锁前「不存在」跳过，也不在状态未知时盲删。delete 在本进程同步
-#    执行（R5 收窄，不再放后台子 shell）。
+#    不凭锁前「不存在」跳过，也不在状态未知时盲删。delete 在本进程前台
+#    执行（R5 收窄），uv/python 子进程持删除租约逐批校验（见
+#    run_bucket_phase 注释，#1084 R2）。
 rc=0
 bucket_rc=0
 run_bucket_phase probe || bucket_rc=$?
