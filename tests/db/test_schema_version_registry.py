@@ -52,6 +52,9 @@ def test_upgrade_from_older_version_runs_only_the_increment() -> None:
     # artifacts they created, then init_db must run only v50+ migrations.
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("delete from schema_migrations where version > 47")
+        # run_batches（v99, #1117）FK 依赖 runs，必须先于 runs drop；两者在
+        # v47 形态下都不存在，升级路径由 v99 迁移与 schema 回放分别重建。
+        conn.execute("drop table if exists run_batches")
         # Drop the runs table so the v53 cutover migration has visible work;
         # its idempotent DDL create comes from the schema file replay. Tables
         # owned by post-v47 migrations that FK into runs must drop first
