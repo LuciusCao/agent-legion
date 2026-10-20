@@ -89,7 +89,26 @@ worktree_require_unique_derived_names "$SCRIPT_DIR" "$WT" "删除派生库" 1 ||
 # 只删锁内实际存在的库。
 PLANNED_LIST="$_WT_DB_LIST"
 worktree_db_collect "$WT"
-if [[ "$_WT_DB_LIST" != "$PLANNED_LIST" ]]; then
+
+# 计划外资源比对（#1084 P1-b）：锁内集合比锁前确认计划扩大（出现确认时
+# 不存在的新库）时——交互模式中止（这些库用户从未见过、未确认），--yes
+# 模式打印警告继续（自动化语义）。集合缩小（期间他人已删）只提示。
+EXTRA=""
+for db in $_WT_DB_LIST; do
+    case "${PLANNED_LIST} " in
+        *" ${db} "*) ;;
+        *) EXTRA="${EXTRA} ${db}" ;;
+    esac
+done
+if [[ -n "$EXTRA" ]]; then
+    if [[ "$MODE" == "--yes" ]]; then
+        echo "提示: 锁内重探测发现确认计划外的库:[${EXTRA# }]（等锁期间同名实例可能刚初始化），按 --yes 语义一并删除。" >&2
+    else
+        echo "错误: 锁内重探测发现确认计划外的库:[${EXTRA# }]——可能同名实例刚初始化（#1084）。" >&2
+        echo "      这些库从未展示、未经确认，已中止。请重跑本脚本查看并确认最新计划。" >&2
+        exit 1
+    fi
+elif [[ "$_WT_DB_LIST" != "$PLANNED_LIST" ]]; then
     echo "提示: 锁内重检发现目标库集合与确认时不一致（期间有建/删），以当前实际存在的为准：" >&2
     for db in $_WT_DB_LIST; do
         echo "  锁内待删除: $db" >&2

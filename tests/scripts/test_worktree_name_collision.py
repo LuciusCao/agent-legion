@@ -487,7 +487,7 @@ def test_clean_refuses_when_target_rebuilt_during_confirmation(repo: _Repo) -> N
     result = run.finish()
 
     assert result.returncode == 1
-    assert "身份已变化" in result.stderr
+    assert "状态在确认/等锁期间已变化" in result.stderr
     # 新实例未被误伤：worktree 目录与重建分支仍在，派生库未被删除。
     assert victim_path.is_dir()
     assert "dropdb" not in repo.log.read_text(encoding="utf-8")
@@ -527,6 +527,8 @@ def test_clean_reprobes_db_created_during_lock_wait(repo: _Repo) -> None:
     assert result.returncode == 0, result.stderr
     assert "dropdb agent_legion_victim\n" in repo.log.read_text(encoding="utf-8")
     assert "已删除: agent_legion_victim" in result.stdout
+    # --yes 自动化语义：计划外资源打印警告后继续（#1084 P1-b）
+    assert "计划外" in result.stderr
 
 
 def test_clean_reprobes_bucket_created_during_lock_wait(repo: _Repo) -> None:
@@ -557,6 +559,8 @@ def test_clean_reprobes_bucket_created_during_lock_wait(repo: _Repo) -> None:
     assert result.returncode == 0, result.stderr
     assert "delete_bucket agent-legion-victim\n" in repo.log.read_text(encoding="utf-8")
     assert "已删除 S3 bucket: agent-legion-victim" in result.stdout
+    # --yes 自动化语义：计划外资源打印警告后继续（#1084 P1-b）
+    assert "计划外" in result.stderr
 
 
 # --- 探测/指纹采集失败语义（#1084 codex R3 P1）-------------------------------
@@ -635,7 +639,7 @@ def test_identity_fingerprint_stable_under_stat_dialect(repo: _Repo, dialect: st
 
     assert result.returncode == 0, result.stderr
     assert not victim.exists()
-    assert "身份已变化" not in result.stderr
+    assert "状态在确认/等锁期间已变化" not in result.stderr
     assert "收尾清理结束" in result.stdout
 
 
@@ -662,7 +666,7 @@ def test_rebuild_detected_under_stat_dialect(repo: _Repo, dialect: str) -> None:
     result = run.finish()
 
     assert result.returncode == 1
-    assert "身份已变化" in result.stderr
+    assert "状态在确认/等锁期间已变化" in result.stderr
     assert victim_path.is_dir()
     assert "dropdb" not in repo.log.read_text(encoding="utf-8")
 
@@ -775,3 +779,139 @@ def test_drop_db_aborts_when_locked_reprobe_fails(repo: _Repo) -> None:
     assert "探测库" in result.stderr
     assert "没有需要删除的库" not in result.stdout
     assert "dropdb" not in repo.log.read_text(encoding="utf-8")
+
+
+# --- 熔断重估第 2 轮：校验-remove 同互斥 / 计划外资源重确认（#1084 codex）----
+
+# git 包装：目标身份快照的成分读取（symbolic-ref）计数到第 2 次（=锁内最终
+# 校验）后「上膛」；此后的第一次 worktree list 应答前先同名重建目标——模拟
+# 「最终校验与 git worktree remove 之间插入裸 git worktree add」（裸 git
+# 不入派生名锁协议）。状态经文件传递（每次调用都是新进程）。
+_GIT_SWAP_WRAPPER = """#!/usr/bin/env bash
+REAL="__REAL_GIT__"
+if [[ "${3:-}" == "symbolic-ref" ]]; then
+    n=$(( $(cat "$STUB_GIT_COUNT" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" > "$STUB_GIT_COUNT"
+    if [[ "$n" -eq 2 ]]; then
+        echo "$2" > "$STUB_GIT_TARGET"
+    fi
+fi
+if [[ "${1:-}" == "worktree" && "${2:-}" == "list" && -e "$STUB_GIT_TARGET" ]]; then
+    target="$(cat "$STUB_GIT_TARGET")"
+    rm -f "$STUB_GIT_TARGET"
+    "$REAL" -C "$STUB_GIT_MAIN" worktree remove "$target" >/dev/null
+    "$REAL" -C "$STUB_GIT_MAIN" worktree add -q -b rebuilt-in-window "$target" >/dev/null
+fi
+exec "$REAL" "$@"
+"""
+
+
+def test_clean_aborts_when_target_swapped_between_final_check_and_remove(repo: _Repo) -> None:
+    """P1-a：锁内最终校验与 remove 之间插入同名 `git worktree add`（裸 git
+    不拿锁）→ clean 必须中止，新实例与全部资源不动。"""
+    runner = repo.add("runner")
+    repo.install_scripts(runner)
+    victim_path = repo.add("victim")
+    _exe(repo.bin / "psql", _PSQL_DB_PRESENT_STUB)
+    _exe(
+        repo.bin / "git",
+        _GIT_SWAP_WRAPPER.replace("__REAL_GIT__", _GIT),
+    )
+
+    result = repo.run(
+        runner / "scripts" / "clean-worktree.sh",
+        "victim",
+        "--yes",
+        extra_env={
+            "STUB_GIT_COUNT": str(repo.tmp / "symref-count"),
+            "STUB_GIT_TARGET": str(repo.tmp / "swap-target"),
+            "STUB_GIT_MAIN": str(repo.main),
+        },
+    )
+
+    assert result.returncode == 1
+    assert "已变化" in result.stderr
+    # 新实例（重建的 checkout 与其分支）未被误删，派生库未被碰。
+    assert victim_path.is_dir()
+    assert "dropdb" not in repo.log.read_text(encoding="utf-8")
+    ref = subprocess.run(
+        [
+            _GIT,
+            "-C",
+            str(repo.main),
+            "show-ref",
+            "--verify",
+            "--quiet",
+            "refs/heads/rebuilt-in-window",
+        ],
+        env={**_git_env(repo.tmp), "PATH": "/usr/bin:/bin"},
+        check=False,
+    )
+    assert ref.returncode == 0
+
+
+def test_clean_aborts_interactively_when_locked_probe_finds_unplanned_dbs(repo: _Repo) -> None:
+    """P1-b：计划为空（无库无 bucket），等锁期间同名 init 建了库——锁内重
+    探测发现计划外资源，交互模式必须中止（资源从未展示、未确认）。"""
+    runner = repo.add("runner")
+    repo.install_scripts(runner)
+    victim_path = repo.add("victim")
+    _exe(repo.bin / "psql", _PSQL_DB_APPEARS_STUB)
+    db_ready = repo.tmp / "db-ready"
+    sleeper = _hold_derived_name_lock(repo)
+
+    run = _ScriptRun(
+        repo,
+        runner / "scripts" / "clean-worktree.sh",
+        ("victim",),
+        extra_env={"STUB_DB_READY": str(db_ready)},
+    )
+    try:
+        run.wait_stderr("派生名锁被占用")
+        # init 在 clean 等锁期间建好了库（计划外）
+        db_ready.write_text("ready\n", encoding="utf-8")
+    finally:
+        # kill 后必须 wait 回收：zombie 子进程 kill -0 仍判活（#1251）。
+        sleeper.kill()
+        sleeper.wait()
+    result = run.finish()
+
+    assert result.returncode == 1
+    assert "计划外" in result.stderr
+    assert victim_path.is_dir()  # 中止于任何删除之前
+    assert "dropdb" not in repo.log.read_text(encoding="utf-8")
+
+
+def test_drop_aborts_interactively_when_locked_probe_finds_unplanned_dbs(repo: _Repo) -> None:
+    """P1-b 同族（drop 独立入口）：计划为空、锁内出现计划外库 → 交互中止；
+    --yes 模式警告后继续删。"""
+    runner = repo.add("runner")
+    repo.install_scripts(runner)
+    _exe(repo.bin / "psql", _PSQL_DB_APPEARS_STUB)
+
+    for args, refused in [(("victim",), True), (("victim", "--yes"), False)]:
+        repo.log.write_text("", encoding="utf-8")
+        db_ready = repo.tmp / f"db-ready-{'yes' if not refused else 'ask'}"
+        sleeper = _hold_derived_name_lock(repo)
+        run = _ScriptRun(
+            repo,
+            runner / "scripts" / "drop-worktree-db.sh",
+            args,
+            extra_env={"STUB_DB_READY": str(db_ready)},
+        )
+        try:
+            run.wait_stderr("派生名锁被占用")
+            db_ready.write_text("ready\n", encoding="utf-8")
+        finally:
+            sleeper.kill()
+            sleeper.wait()
+        result = run.finish()
+
+        if refused:
+            assert result.returncode == 1
+            assert "计划外" in result.stderr
+            assert "dropdb" not in repo.log.read_text(encoding="utf-8")
+        else:
+            assert result.returncode == 0, result.stderr
+            assert "计划外" in result.stderr  # --yes 打印警告继续
+            assert "dropdb agent_legion_victim\n" in repo.log.read_text(encoding="utf-8")

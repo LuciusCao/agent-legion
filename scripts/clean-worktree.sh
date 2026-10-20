@@ -22,12 +22,15 @@
 #     发布线 release/*（与 pre-push 的 protected 分支口径对齐，#930）；
 #   - 删除前列出派生库 owner/大小与 bucket 对象数量/总大小，无 --yes 时
 #     交互确认（在取锁之前，持锁不等用户输入）；
-#   - 取锁后、git worktree remove 前重验目标身份快照（HEAD/分支/.git 文件
-#     指纹）：确认/等锁期间目标被移除并以同名同路径重建（哪怕已跑完
-#     init-worktree.sh）时拒绝——否则删除会落到新实例的 worktree/分支/库/
-#     bucket 上（#1084）；
+#   - 取锁后、git worktree remove 前做最终校验且校验与 remove 之间不再
+#     有任何步骤（#1084）：身份快照（HEAD/分支/.git 文件指纹）+ porcelain
+#     条目（path/HEAD/branch）逐字段比对——确认/等锁期间目标被移除并以
+#     同名同路径重建（哪怕已跑完 init-worktree.sh，裸 git add 不入锁协议）
+#     时拒绝——否则删除会落到新实例的 worktree/分支/库/bucket 上；
 #   - 派生库/bucket 的存在性以取锁后的重探测为准：锁前 probe 只用于确认
-#     展示，等锁期间 init 补建的资源不会被陈旧的「不存在」结果漏删（#1084）；
+#     展示与计划集合，等锁期间 init 补建的资源不会被陈旧的「不存在」结果
+#     漏删（#1084）；锁内集合比确认计划扩大（计划外资源）时交互模式中止、
+#     --yes 模式警告后继续——不删除用户从未见过、未确认的资源（#1084）；
 #   - 删库/删 bucket 前持锁重查：同名 worktree 被重建后又注册着也拒绝；
 #   - 全部建/删步骤在持锁进程内同步执行（R5 熔断收窄）：锁内没有嵌套或
 #     后台执行者，holder 的 pid 即执行者本身；本进程被 SIGKILL 的残余
@@ -159,6 +162,16 @@ target_identity() {
     printf 'present\n%s\n%s\n%s\n%s\n%s\n' "$head" "$branch" "$gitinfo" "$dir_fp" "$file_fp"
 }
 PLANNED_IDENTITY="$(target_identity)"
+# 目标在 porcelain 里的条目（HEAD/branch/detached 行）：与身份快照一起，
+# 在 remove 前的最终校验里逐字段比对（#1084：裸 git worktree add 不入锁
+# 协议，条目变化即状态已变）。
+worktree_porcelain_entry() {
+    git worktree list --porcelain | awk -v target="$TARGET" '
+        /^worktree / { wt = substr($0, 10); next }
+        wt == target && /^(HEAD |branch |detached$)/ { print }
+    '
+}
+PLANNED_ENTRY="$(worktree_porcelain_entry)"
 
 # 派生 S3 bucket 的两阶段 python（与 init-worktree.sh 同一派生规则与 env
 # 加载，#1084）：probe 只读核对并打印摘要，delete 持锁后重新 head/list 再
@@ -354,15 +367,19 @@ bucket_phase_degraded() {
 
 # 0. 删除计划（只读、不持锁）：列出派生库、核对 bucket，需要删除时一次性
 #    交互确认（--yes 跳过）。确认必须在取锁之前——持锁等用户输入会卡住同机
-#    所有 init（#1084）。注意：这里的 probe 结果（db_rc/bucket_rc）只用于
-#    确认展示，删除决策在取锁后以锁内重探测为准（等锁期间 init 可能补建
-#    资源）。
-DROP_DB="$(dirname "${BASH_SOURCE[0]}")/drop-worktree-db.sh"
+#    所有 init（#1084）。注意：这里的 probe 结果只用于确认展示与计划集合
+#    （PLANNED_DBS/PLANNED_BUCKET），删除决策在取锁后以锁内重探测为准（等锁
+#    期间 init 可能补建资源）；锁内集合比计划扩大时交互模式中止（见下方
+#    取锁后的比对，#1084）。
+worktree_db_prepare
 db_rc=0
-"$DROP_DB" "$WT" --list || db_rc=$?
-if [[ "$db_rc" -ne 0 && "$db_rc" -ne 10 ]]; then
-    exit 1
+worktree_db_collect "$WT" print
+if [[ "$_WT_DB_FOUND" -eq 0 ]]; then
+    echo "没有需要删除的库。"
+else
+    db_rc=10
 fi
+PLANNED_DBS="$_WT_DB_LIST"
 bucket_rc=0
 run_bucket_phase probe || bucket_rc=$?
 if [[ "$bucket_rc" -eq 4 ]]; then
@@ -374,6 +391,10 @@ elif [[ "$bucket_rc" -ne 0 && "$bucket_rc" -ne 10 ]]; then
     echo "错误: 派生 bucket 探测失败（exit=${bucket_rc}），无法确认其状态，中止清理（#1084）。" >&2
     echo "      请在 S3 endpoint 恢复后重跑本脚本。" >&2
     exit 1
+fi
+PLANNED_BUCKET=""
+if [[ "$bucket_rc" -eq 10 ]]; then
+    PLANNED_BUCKET=1
 fi
 if [[ -z "$ASSUME_YES" && ( "$db_rc" -eq 10 || "$bucket_rc" -eq 10 ) ]]; then
     reply=""
@@ -393,16 +414,50 @@ fi
 worktree_name_lock_acquire "$ROOT" "清理 worktree ${WT}" || exit 1
 worktree_require_unique_derived_names "$ROOT" "$WT" "清理（删除派生库/bucket）" || exit 1
 
-# 移除前重验目标身份（#1084）：快照见上方 target_identity。身份不一致说明
-# 确认/等锁期间目标被移除或重建，当前 $TARGET 已不是用户确认过的实例。
-if [[ "$(target_identity)" != "$PLANNED_IDENTITY" ]]; then
-    echo "错误: worktree '${WT}' 在确认/等锁期间被移除或重建（目标身份已变化），拒绝清理（#1084）。" >&2
-    echo "      若确认要清理当前实例，请重新执行本脚本。" >&2
+# 锁内重探测（#1084）：锁前 probe 只用于确认展示与计划集合；等锁期间 init
+# 可能补建资源，删除集合以锁内实际存在的为准。
+worktree_db_collect "$WT"
+bucket_rc=0
+run_bucket_phase probe || bucket_rc=$?
+if [[ "$bucket_rc" -eq 4 ]]; then
+    exit 1
+elif [[ "$bucket_rc" -ne 0 && "$bucket_rc" -ne 10 ]]; then
+    echo "错误: 锁内派生 bucket 重探测失败（exit=${bucket_rc}），bucket 状态未知，中止（#1084）。" >&2
+    echo "      worktree/派生库可能已删除；S3 endpoint 恢复后重跑本脚本补齐 bucket 清理。" >&2
     exit 1
 fi
 
-# 1. git worktree remove（remove 前先解析该 worktree checkout 的分支，
-#    供第 2 步删本地分支用）。
+# 计划外资源比对（#1084 P1-b）：锁内集合比锁前确认计划扩大（出现计划外
+# 库/bucket）时——交互模式中止（这些资源用户从未见过、未确认），--yes
+# 模式打印警告继续（自动化语义）。
+EXTRA_DBS=""
+for db in $_WT_DB_LIST; do
+    case "${PLANNED_DBS} " in
+        *" ${db} "*) ;;
+        *) EXTRA_DBS="${EXTRA_DBS} ${db}" ;;
+    esac
+done
+EXTRA_BUCKET=""
+if [[ "$bucket_rc" -eq 10 && -z "$PLANNED_BUCKET" ]]; then
+    EXTRA_BUCKET=1
+fi
+if [[ -n "$EXTRA_DBS" || -n "$EXTRA_BUCKET" ]]; then
+    extra_msg="锁内重探测发现确认计划外的资源（等锁期间同名实例可能刚初始化）："
+    [[ -n "$EXTRA_DBS" ]] && extra_msg="${extra_msg} 库[${EXTRA_DBS# }]"
+    [[ -n "$EXTRA_BUCKET" ]] && extra_msg="${extra_msg} bucket"
+    if [[ -n "$ASSUME_YES" ]]; then
+        echo "提示: ${extra_msg}按 --yes 语义一并清理。" >&2
+    else
+        echo "错误: ${extra_msg}" >&2
+        echo "      这些资源从未展示、未经确认，已中止。请重跑本脚本查看并确认最新删除计划。" >&2
+        exit 1
+    fi
+fi
+
+# 1. git worktree remove。分支解析移到最终校验之前；最终校验（身份指纹 +
+#    porcelain 条目逐字段比对）与 remove 之间不再有任何步骤（#1084 P1-a：
+#    裸 git worktree add 不入锁协议，校验到 remove 的系统调用间微秒窗是
+#    声明的固有竞态）。校验失败 = 状态已变化，中止不动任何资源。
 BRANCH=""
 if [[ -d "$TARGET" ]]; then
     BRANCH="$(git worktree list --porcelain | awk -v target="$TARGET" '
@@ -410,6 +465,14 @@ if [[ -d "$TARGET" ]]; then
         /^branch / && wt == target { print substr($0, 8) }
     ')"
     BRANCH="${BRANCH#refs/heads/}"
+fi
+if [[ "$(target_identity)" != "$PLANNED_IDENTITY" ]] \
+    || [[ "$(worktree_porcelain_entry)" != "$PLANNED_ENTRY" ]]; then
+    echo "错误: worktree '${WT}' 状态在确认/等锁期间已变化（被移除或重建），拒绝清理（#1084）。" >&2
+    echo "      若确认要清理当前实例，请重跑本脚本。" >&2
+    exit 1
+fi
+if [[ -d "$TARGET" ]]; then
     git worktree remove "$TARGET"
     echo "已移除 worktree: $TARGET"
 else
@@ -448,41 +511,29 @@ else
     echo "未解析到分支（跳过本地/远端分支删除）"
 fi
 
-# 3. 派生 Postgres 库：在本持锁进程内同步探测并删除（R5 熔断收窄后不再
-#    转调 drop 子进程——锁持有者即唯一执行者，父进程被 SIGKILL 时不会有
-#    孤儿脚本继续推进删除）。取舍说明（R5 重估第 2 轮）：两条 dropdb 是
-#    单条快命令，不加租约校验——孤儿 dropdb 只完成「删除决策时已存在」
-#    的那一条删除，与竞争者重建同名库的交错窗口为毫秒级，归入「在途单
-#    命令完成」的声明残余；bucket delete 是多批 S3 调用（窗口长且分批），
-#    才需要逐批租约校验（见 run_bucket_phase）。探测/复核失败 fail-closed；
-#    撞名检查把已完成初始化的同名登记算冲突（待初始化登记不构成资源主，
-#    见 worktree-names-lib.sh）。
-worktree_db_prepare
+# 3. 派生 Postgres 库：在本持锁进程内同步删除（R5 熔断收窄后不再转调 drop
+#    子进程——锁持有者即唯一执行者，父进程被 SIGKILL 时不会有孤儿脚本继续
+#    推进删除）。删除集合 = 上方锁内重探测且已通过计划比对的结果。取舍说明
+#    （熔断重估第 2 轮）：两条 dropdb 是单条快命令，不加租约校验——孤儿
+#    dropdb 只完成「删除决策时已存在」的那一条删除，与竞争者重建同名库的
+#    交错窗口为毫秒级，归入「在途单命令完成」的声明残余；bucket delete 是
+#    多批 S3 调用（窗口长且分批），才需要逐批租约校验（见 run_bucket_phase）。
+#    复核失败 fail-closed；撞名检查把已完成初始化的同名登记算冲突（待初始化
+#    登记不构成资源主，见 worktree-names-lib.sh）。
 worktree_require_unique_derived_names "$ROOT" "$WT" "删除派生库" 1 || exit 1
-worktree_db_collect "$WT"
 if [[ "$_WT_DB_FOUND" -gt 0 ]]; then
     worktree_db_drop
 else
     echo "没有需要删除的库。"
 fi
 
-# 4. 派生 S3 bucket：同样在锁内重新 probe（锁前结果仅用于确认展示），存在
-#    才删；删除前把同名重建算冲突（#1084）。锁内重探测失败同样 fail-closed——
-#    不凭锁前「不存在」跳过，也不在状态未知时盲删。delete 在本进程前台
-#    执行（R5 收窄），uv/python 子进程持删除租约逐批校验（见
-#    run_bucket_phase 注释，#1084 R2）。
+# 4. 派生 S3 bucket：删除集合同样取自锁内重探测（上方已 probe）。删除前把
+#    已完成初始化的同名重建算冲突（#1084）。delete 在本进程前台执行（R5
+#    收窄），uv/python 子进程持删除租约逐批校验（见 run_bucket_phase 注释）。
 rc=0
-bucket_rc=0
-run_bucket_phase probe || bucket_rc=$?
-if [[ "$bucket_rc" -eq 4 ]]; then
-    exit 1
-elif [[ "$bucket_rc" -eq 10 ]]; then
+if [[ "$bucket_rc" -eq 10 ]]; then
     worktree_require_unique_derived_names "$ROOT" "$WT" "删除派生 bucket" 1 || exit 1
     run_bucket_phase delete || rc=$?
-elif [[ "$bucket_rc" -ne 0 ]]; then
-    echo "错误: 锁内派生 bucket 重探测失败（exit=${bucket_rc}），bucket 状态未知，中止（#1084）。" >&2
-    echo "      worktree/派生库可能已删除；S3 endpoint 恢复后重跑本脚本补齐 bucket 清理。" >&2
-    exit 1
 fi
 worktree_name_lock_release
 if [[ "$rc" -eq 4 ]]; then
