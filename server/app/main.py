@@ -43,6 +43,7 @@ from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
+from server.app.services.run_batch_feeder import RunBatchFeeder
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
@@ -143,11 +144,18 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
     slow_sweeps: SweeperOwnedThreads | None = None
+    # Constructed ahead of BackgroundTasks so the runs-async feeder shares the
+    # one MaterialsService instance (#1117 text-item materialization); the
+    # app.state assignment below reuses the same object.
+    materials_service = MaterialsService(job_db, object_storage)
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
         job_intake_queue=JobIntakeQueue(job_db, settings, job_event_buffer),
         ops_metrics=ops_metrics,
+        run_batch_feeder=RunBatchFeeder(
+            job_db, settings, job_event_buffer, materials_service=materials_service
+        ),
     )
     # Single-replica guardrail (#277): the runtime state above (in-process
     # event bus, login rate limiter, studio chat sessions, pause reset) is
@@ -285,7 +293,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.studio_chat_service = studio_chat_service
     app.state.event_bus = job_event_manager.bus
     app.state.job_event_buffer = job_event_buffer
-    app.state.materials_service = MaterialsService(job_db, object_storage)
+    app.state.materials_service = materials_service
     app.state.job_artifact_objects = job_artifact_objects
     app.state.workspace_event_aggregator = workspace_event_aggregator
     agent_catalog = AgentCatalogService(settings, job_db)

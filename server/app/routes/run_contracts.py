@@ -1,6 +1,13 @@
-"""Runs API contracts (materials-and-runs design §4/§5.2, slice 3)."""
+"""Runs API contracts (materials-and-runs design §4/§5.2, slice 3).
 
-from typing import Any
+#1117 adds the async accept mode: ``mode="async"`` on the create request
+returns 202 with the run + batch handle (``RunAcceptedResponse``); the detail
+endpoint carries the same handle on its nullable ``batch`` field, and the
+pause/resume/cancel control endpoints answer ``RunBatchResponse``. Design:
+docs/architecture/runs-async-mode.md.
+"""
+
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,6 +18,10 @@ class RunCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[RunItem] = Field(min_length=1)
+    # sync（缺省/None）= 既有请求内创建；async = 受理即返（202），feeder 后台
+    # 解析/去重/建 job。None 而非 "sync" 默认值：openapi-typescript 把带
+    # default 的字段生成为必填，会破坏既有前端调用点（M43 不动 Studio UI）。
+    mode: Literal["sync", "async"] | None = None
 
 
 class RunRecord(BaseModel):
@@ -51,6 +62,41 @@ class RunListResponse(BaseModel):
     runs: list[RunRecord]
 
 
+class RunBatchRecord(BaseModel):
+    """异步 run 的 feeder 句柄（#1117）：状态机 + 游标 + 计数器。
+
+    jobs_skipped 由调用方按 processed_count − jobs_created 推导（dedup 过滤
+    与 chunk 跳过同源，不单独物化）；chunk_errors 至多 20 条（intake 先例）。
+    """
+
+    run_id: str
+    status: str = Field(
+        description="pending/running/paused/completed/failed/cancelled（语义见 runs-async-mode.md §2）"
+    )
+    items_total: int
+    processed_count: int = Field(description="游标：已处理的条目数（含 dedup 跳过与失败 chunk）")
+    jobs_created: int = Field(
+        description="该 run 当前实有 job 数（每 tick 按 count_jobs_in_run 重算）"
+    )
+    chunk_errors: list[dict[str, Any]]
+    error_message: str
+    created_at: str | None
+    updated_at: str | None
+    finished_at: str | None
+
+
+class RunAcceptedResponse(BaseModel):
+    """202 异步受理（#1117）：run 记录 + batch 句柄；job 由 feeder 后台创建，
+    轮询 GET /workspaces/{id}/runs/{run_id}（batch + job_stats）取进度。"""
+
+    run: RunRecord
+    batch: RunBatchRecord
+
+
+class RunBatchResponse(RunAcceptedResponse):
+    """pause/resume/cancel 控制面回包（#1117）：与 202 受理同形。"""
+
+
 class RunJobStats(BaseModel):
     total: int
     by_status: dict[str, int]
@@ -59,3 +105,5 @@ class RunJobStats(BaseModel):
 class RunDetailResponse(BaseModel):
     run: RunRecord
     job_stats: RunJobStats
+    # #1117: 仅异步 run 携带 batch 句柄；同步 run 恒为 null。
+    batch: RunBatchRecord | None = None

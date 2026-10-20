@@ -63,6 +63,7 @@ agent nodes → velites / Pi CLI → skills (local in-place git, pins in DB skil
 | Studio chat 会话运行时 | [studio-chat-session-runtime.md](studio-chat-session-runtime.md) | 服务层 create/resume 准入、在途启动排空与 shutdown 清理（STUDIO-RUNTIME-001）；会话层 Kimi 后台任务回执、空闲接续、自发回合与入站排队（#772/#806/#938/#972/#1029） |
 | 节点 SDK / code 执行 | [node-sdk-and-worker-execution.md](node-sdk-and-worker-execution.md) | code 节点执行链（Host / Worker 两入口）、运行时契约、节点 SDK API、Worker code 协议、节点代码体积上限配置 |
 | 材料与 runs | [materials-and-runs.md](materials-and-runs.md) | 条目 / 材料 / bundle / text / run 输入模型、start 入口契约、对象存储与物化缓存、产物版本 key 与直连 URL 固定（#853） |
+| Runs 异步模式 | [runs-async-mode.md](runs-async-mode.md) | runs 异步受理（202 + 句柄 + 轮询）：run_batches 状态行、items feeder、水位滴灌与盲重试语义（#1117） |
 | velites 模型注册 | [velites-model-registry.md](velites-model-registry.md) | runtime-owned 模型发现与 velites provider registry（Worker 侧发现、Host 侧三元组路由） |
 | 文档治理 | [docs-governance.md](docs-governance.md) | 文档漂移检查（退役术语基线 `docs_retired_terms` + 事实一致性 `docs_consistency`）的机制说明与维护指引 |
 

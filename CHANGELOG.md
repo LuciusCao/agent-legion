@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Runs 异步受理模式（issue #1117，runs-async 里程碑 Phase 2 核心）：`POST /workspaces/{id}/runs` 新增 `mode: "async"`，秒级受理返回 202 与 run + batch 句柄（run id 与同步路径同一确定性 digest，盲重试跨模式幂等），items 的解析/去重/建 job 由新进程内 feeder（`run_batches` 状态行 + `startup_tasks` 托管消费循环，intake queue 同款认领/退避/崩溃回收）按 chunk 滴灌完成，workspace 非终态 job 积压达水位（30000，受 `workflows.max_items_per_run` 钳制）时自动停喂；新增 `POST .../runs/{run_id}/pause|resume|cancel` 控制面（只停喂，已建 job 沿用既有批量操作管理），`GET .../runs/{id}` 详情新增可空 `batch` 进度字段，四个端点均纳入 #626 workspace API token 通道（`API_SCOPE_INTAKE_ROUTE_NAMES` 登记）。schema v99 新增 `run_batches` 表（基础设施状态行，非 #505/#532 Campaign 产品实体）。Studio UI 不变（异步接线归 #1157 Phase 3）。
+
 ### Changed
 
 - 批量 job 端点的单请求选择上限从 5000 上调至 20000，并新增 env `AGENT_LEGION_MAX_BATCH_JOBS` 覆盖（重启生效，issue #1348）：原上限是 0.7.16 评审波次的人为护栏（#712/#917）而非性能实测推导，写侧逐 job 一个事务（锁即放）、读侧已按 `CHUNK_ROWS=1000` 分块，均按规模线性扩展；`jobs/package` / `jobs/clear-packed` 共用的 `set_jobs_packed` UPDATE 同步改为按块执行，补齐读侧之外的最后一个未分块写面。线程池占用语义不变（1 请求 1 槽位），大批量操作仍同步等待、无进度反馈，进度展示与后台化归 #946（0.8.1 内后续迭代）。前端 `rerunJobsByFailure` 补上与其他批量端点一致的 `BULK_REQUEST_TIMEOUT` 超时豁免，消除「前端 2 分钟超时误报失败、服务端继续跑」的缺口。
