@@ -24,6 +24,8 @@ import { AddItemsExistingMaterials } from './AddItemsExistingMaterials'
 import { AddItemsRefPanel } from './AddItemsRefPanel'
 import { AddItemsTextPanel } from './AddItemsTextPanel'
 import { AddItemsUploadPanel } from './AddItemsUploadPanel'
+import { AddItemsDialogBulkHint } from './AddItemsDialogSubmitText'
+import { submitFailText, submitOkText } from './AddItemsDialogSubmitText'
 import { useBundleUploads } from './useBundleUploads'
 import { useMaterialUploads } from './useMaterialUploads'
 import styles from './AddItemsDialog.module.css'
@@ -175,12 +177,12 @@ export function AddItemsDialog({
     setIsSubmitting(true)
     try {
       const response = await createRun(workspaceId, { items })
-      showToast(`运行已创建，共 ${response.created_count} 个任务`, 'success')
+      const text = submitOkText(response.created_count, response.skipped_count)
+      showToast(text, 'success')
       resetState()
       onClose()
     } catch (err) {
-      const message = err instanceof Error ? err.message : '创建运行失败'
-      showToast(`创建运行失败: ${message}`, 'error')
+      showToast(submitFailText(err, items.length), 'error')
     } finally {
       setIsSubmitting(false)
     }
@@ -290,6 +292,7 @@ export function AddItemsDialog({
               「输入需求」页签的文件名无效，修正或清空后才能创建运行。
             </div>
           )}
+          <AddItemsDialogBulkHint totalItems={totalItems} />
         </div>
       </DialogContent>
       <DialogActions>
