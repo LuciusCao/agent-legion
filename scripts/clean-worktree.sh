@@ -7,7 +7,8 @@
 #   2. 删除该 worktree 占用的本地分支（git branch -d，未合并删不掉时提示但
 #      不中断后续步骤）；远端分支默认不删，仅打印提示命令，加
 #      --delete-remote-branch 才执行 push --delete
-#   3. 派生 Postgres 库（转调 scripts/drop-worktree-db.sh，继承其护栏）
+#   3. 派生 Postgres 库（与 scripts/drop-worktree-db.sh 共用
+#      worktree-names-lib.sh 的探测/删除函数，在本进程内同步执行）
 #   4. 派生 S3 bucket（agent-legion-<worktree名>，与 init-worktree.sh 同一
 #      派生规则与 env 加载）；bucket 删除后（或已不存在时）经 SeaweedFS
 #      master 只读核对同名 collection，残留卷只告警并给出手动回收命令
@@ -28,9 +29,10 @@
 #   - 派生库/bucket 的存在性以取锁后的重探测为准：锁前 probe 只用于确认
 #     展示，等锁期间 init 补建的资源不会被陈旧的「不存在」结果漏删（#1084）；
 #   - 删库/删 bucket 前持锁重查：同名 worktree 被重建后又注册着也拒绝；
-#   - 锁持有期间的多步删除由后代进程执行（转调的 drop、后台的 bucket
-#     delete 子 shell）：它们登记为锁的共同执行者，本进程被 SIGKILL 时
-#     回收方仍按存活的执行者判活，锁不会提前释放（#1084 R4）；
+#   - 全部建/删步骤在持锁进程内同步执行（R5 熔断收窄）：锁内没有嵌套或
+#     后台执行者，holder 的 pid 即执行者本身；本进程被 SIGKILL 的残余
+#     窗口只有「在途的那一条命令执行完」，不会有孤儿进程继续推进删除
+#     （#1084）；
 #   - bucket 探测失败（endpoint/鉴权/python 故障，exit 非 0/4/10）fail-closed
 #     中止：探测失败 ≠ 不存在，状态未知时不确认、不推进、不盲删（#1084）；
 #     未配置 S3（确定性状态）仍提示跳过；delete 执行本身失败则 warning 并
@@ -325,8 +327,9 @@ fi
 # 取派生名锁并持有到派生库与 bucket 都处理完（#1084）：从移除 worktree 起
 # 到最后一个删除之间，派生名相同（含同名重建）的 worktree 即使已经
 # `git worktree add`，其 init 也只能等本次删完再建库/建 bucket，不会复用
-# 半清理的资源。锁在脚本退出（含报错/信号）时由 trap 释放；第 3 步转调的
-# drop-worktree-db.sh 复用本锁。取锁后重做撞名检查（目标此刻仍合法注册）。
+# 半清理的资源。锁在脚本退出（含报错/信号）时由 trap 释放；全部删除步骤
+# 在本进程内同步执行（R5：不再转调 drop、不再后台执行 bucket delete）。
+# 取锁后重做撞名检查（目标此刻仍合法注册）。
 worktree_name_lock_acquire "$ROOT" "清理 worktree ${WT}" || exit 1
 worktree_require_unique_derived_names "$ROOT" "$WT" "清理（删除派生库/bucket）" || exit 1
 
@@ -385,16 +388,24 @@ else
     echo "未解析到分支（跳过本地/远端分支删除）"
 fi
 
-# 3. 派生 Postgres 库：无条件转调 drop-worktree-db.sh（继承其名字/role 护栏；
-#    复用本进程的锁）。它在锁内重新探测实际存在的库再删（#1084：锁前
-#    probe 的「不存在」可能是 init 补建前的陈旧结果，不能作为删除决策），
-#    并把同名 worktree 仍/又注册着算冲突（目标已移除后同名再注册 = 被重建
-#    的新实例）。确认已在第 0 步做过。
-"$DROP_DB" "$WT" --yes
+# 3. 派生 Postgres 库：在本持锁进程内同步探测并删除（R5 熔断收窄后不再
+#    转调 drop 子进程——锁持有者即唯一执行者，父进程被 SIGKILL 时不会有
+#    孤儿脚本继续推进删除；单条在途命令的完成是任何锁设计都无法撤回的
+#    残余）。探测/复核失败 fail-closed；撞名检查把已完成初始化的同名
+#    登记算冲突（待初始化登记不构成资源主，见 worktree-names-lib.sh）。
+worktree_db_prepare
+worktree_require_unique_derived_names "$ROOT" "$WT" "删除派生库" 1 || exit 1
+worktree_db_collect "$WT"
+if [[ "$_WT_DB_FOUND" -gt 0 ]]; then
+    worktree_db_drop
+else
+    echo "没有需要删除的库。"
+fi
 
 # 4. 派生 S3 bucket：同样在锁内重新 probe（锁前结果仅用于确认展示），存在
 #    才删；删除前把同名重建算冲突（#1084）。锁内重探测失败同样 fail-closed——
-#    不凭锁前「不存在」跳过，也不在状态未知时盲删。
+#    不凭锁前「不存在」跳过，也不在状态未知时盲删。delete 在本进程同步
+#    执行（R5 收窄，不再放后台子 shell）。
 rc=0
 bucket_rc=0
 run_bucket_phase probe || bucket_rc=$?
@@ -402,21 +413,7 @@ if [[ "$bucket_rc" -eq 4 ]]; then
     exit 1
 elif [[ "$bucket_rc" -eq 10 ]]; then
     worktree_require_unique_derived_names "$ROOT" "$WT" "删除派生 bucket" 1 || exit 1
-    # delete 是多步删除（list → 分批 delete_objects → delete_bucket），实际
-    # 执行者是 uv/python 子进程：本进程被 SIGKILL 时它仍在删——后台执行并把
-    # 子 shell 登记为锁的共同执行者，回收方按其存活判锁（#1084 R4）。登记
-    # 失败时 fail-closed：停掉子进程并中止，不在无登记状态下继续删除。
-    # 只读 probe 不登记。
-    run_bucket_phase delete &
-    phase_pid=$!
-    if ! worktree_name_lock_register_child "$phase_pid"; then
-        kill "$phase_pid" 2>/dev/null || true
-        wait "$phase_pid" 2>/dev/null || true
-        echo "错误: 派生名锁共同执行者登记失败，中止 bucket 删除（#1084）。" >&2
-        exit 1
-    fi
-    wait "$phase_pid" || rc=$?
-    worktree_name_lock_unregister_child "$phase_pid"
+    run_bucket_phase delete || rc=$?
 elif [[ "$bucket_rc" -ne 0 ]]; then
     echo "错误: 锁内派生 bucket 重探测失败（exit=${bucket_rc}），bucket 状态未知，中止（#1084）。" >&2
     echo "      worktree/派生库可能已删除；S3 endpoint 恢复后重跑本脚本补齐 bucket 清理。" >&2

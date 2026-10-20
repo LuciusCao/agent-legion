@@ -168,6 +168,11 @@ else
     echo "提示: S3 endpoint 不可达或未配置，跳过建 bucket（材料 API 将降级为 503；" >&2
     echo "      启动共享 RustFS 后重跑本脚本即可补齐）。" >&2
 fi
+# 初始化完成标记（#1084 R5）：在锁内、派生资源建完后写入——clean/drop 的
+# INCLUDE_SELF 删除护栏只认带标记（或存量实例的 .env 已指向派生库）的同名
+# 登记为资源主；无标记的同名登记是阻塞在锁上的待初始化实例，不构成资源主。
+# 标记已加入 .gitignore，不阻塞 git worktree remove，随 worktree 目录消失。
+printf 'initialized_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$ROOT/$WORKTREE_INITIALIZED_MARKER"
 # 派生资源已建完，其余步骤（vault key、worker 状态副本）与派生名无关。
 worktree_name_lock_release
 

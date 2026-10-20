@@ -194,6 +194,11 @@ def test_init_without_collision_initializes(repo: _Repo) -> None:
     env = (target / ".env").read_text()
     assert "AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_foo_baz" in env
     assert "AGENT_LEGION_S3_BUCKET=agent-legion-foo-baz" in env
+    # 初始化完成标记在锁内写入（#1084 R5：删除护栏据此判定同名登记是否为
+    # 资源主）；文件名与 worktree-names-lib.sh 的 WORKTREE_INITIALIZED_MARKER
+    # 常量一致。
+    marker = target / ".worktree-initialized.ok"
+    assert marker.read_text(encoding="utf-8").startswith("initialized_at=")
 
 
 def test_init_ignores_prunable_worktree_whose_directory_is_gone(repo: _Repo) -> None:

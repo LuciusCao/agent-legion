@@ -32,12 +32,41 @@ worktree_derived_bucket() {
     printf 'agent-legion-%s' "$(printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-')"
 }
 
+# 初始化完成标记（#1084 R5）：init-worktree.sh 在锁内、派生资源建完后写
+# <worktree>/.worktree-initialized.ok（已加入 .gitignore，不阻塞
+# git worktree remove，随 worktree 目录一起消失）。删除护栏据此区分同名
+# 登记的身份。
+WORKTREE_INITIALIZED_MARKER=".worktree-initialized.ok"
+
+# 同名登记是否为派生资源主（仅 INCLUDE_SELF=1 的删除护栏使用）：
+#   - 有完成标记 → 是（健康实例），拒绝删；
+#   - 无标记、.env 不存在或不含自身派生库 URL → 待初始化实例：init 在取锁
+#     后才碰资源（复制 .env、改写派生 URL、createdb、建 bucket 全在锁内），
+#     此刻它不拥有任何资源，不拒绝；
+#   - 无标记但 .env 已指向自身派生库 → 本机制引入前创建的存量实例，或 init
+#     在标记写入前崩溃的实例——视作资源主，拒绝删（fail-closed 保护存量；
+#     确认其未完成初始化要删时，先移除该登记或手动删资源）；
+#   - .env 存在但不可读 → 无法判定，fail-closed 当资源主。
+worktree_registration_owns_resources() {
+    local wt_path="$1" wt_name="$2" db
+    [[ -f "$wt_path/$WORKTREE_INITIALIZED_MARKER" ]] && return 0
+    [[ -e "$wt_path/.env" ]] || return 1
+    [[ -r "$wt_path/.env" ]] || return 0
+    db="$(worktree_derived_db "$wt_name")"
+    if grep -qE "AGENT_LEGION_DATABASE_URL=postgresql://127\.0\.0\.1:5432/${db}\$" "$wt_path/.env" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
 # 列出与 WT 派生出同名资源的其他已注册 worktree，每行
 # `<worktree名><TAB><撞名的资源名>`（一个 worktree 撞多个资源则多行）。
 # 只看目录仍存在的 worktree（目录已不在的 prunable 条目没有使用方）；跳过
 # 主仓库根（第一个条目，从不初始化派生资源）与同名条目（WT 自身）。
-# INCLUDE_SELF=1 时同名条目也算冲突（删除路径用：目标已移除后同名
-# worktree 又注册着 = 被重建的新实例，派生资源归它，#1084）。
+# INCLUDE_SELF=1 时同名条目也算冲突——但只认「已完成初始化的登记」为资源
+# 主（#1084 R5）：无完成标记且 .env 未指向自身派生库的同名登记，是阻塞在
+# 锁上的待初始化实例（init 在取锁后才碰资源），不拥有任何资源，不构成
+# 冲突——删除旧资源后它的 init 在干净石板上自建，不会复用旧实例的数据。
 # `git worktree list` 失败返回 2（调用方必须当作「无法确认」拒绝继续）。
 #   用法: worktree_derived_name_conflicts REPO_DIR WT [INCLUDE_SELF]
 worktree_derived_name_conflicts() {
@@ -54,8 +83,11 @@ worktree_derived_name_conflicts() {
         fi
         [[ -d "$path" ]] || continue
         other="$(basename "$path")"
-        if [[ "$other" == "$wt" && "$include_self" != "1" ]]; then
-            continue
+        if [[ "$other" == "$wt" ]]; then
+            if [[ "$include_self" != "1" ]]; then
+                continue
+            fi
+            worktree_registration_owns_resources "$path" "$wt" || continue
         fi
         if [[ "$(worktree_derived_db "$other")" == "$db" ]]; then
             printf '%s\t%s\n' "$other" "$db"
@@ -95,8 +127,9 @@ worktree_require_unique_derived_names() {
     echo "      scripts/init-worktree.sh 建它自己的库/bucket）再重试。" >&2
     if [[ "$include_self" == "1" ]] \
         && printf '%s\n' "$conflicts" | awk -F '\t' -v w="$wt" '$1 == w { found = 1 } END { exit !found }'; then
-        echo "      列出的 '${wt}' 是同名 worktree 本身：它仍（或已被重建后又）注册着，派生资源归它所有；" >&2
-        echo "      确认要删就先移除该 worktree（scripts/clean-worktree.sh ${wt}）。" >&2
+        echo "      列出的 '${wt}' 是同名 worktree 本身：它仍（或已被重建后又）注册着且已完成初始化，" >&2
+        echo "      派生资源归它所有；确认要删就先移除该 worktree（scripts/clean-worktree.sh ${wt}）。" >&2
+        echo "      （无初始化完成标记且 .env 未指向派生库的同名登记视为待初始化实例，不构成冲突，#1084）" >&2
     fi
     return 1
 }
@@ -111,38 +144,23 @@ worktree_require_unique_derived_names() {
 # 争）；pid 编在文件名里，持有者被 SIGKILL 后由下一个竞争者按 pid 判死
 # 回收。与 gate-queue 不同，这里上限固定为 1 且不容忍超额。
 #
-# 共同执行者登记（R4，锁生命周期 vs 进程树）：holder 文件名只编码取锁进程
-# 的 pid，但实际执行资源操作的可能是它的后代——clean 转调的 drop（借用父
-# 锁）、clean 的 bucket delete（多步删除，执行者是 uv/python 子进程）。
-# 父进程被 SIGKILL 时这些后代继续运行，仅按父 pid 判死回收会让新竞争者与
-# 孤儿执行者并发。因此：借用锁的子进程取锁时登记 <holder>.child-<pid>
-# 文件并在退出时由 trap 移除；clean 的 bucket delete 在后台子 shell 执行
-# 并登记其 pid（只读 probe 不登记）。holder 判活 = 取锁进程存活或任一登记
-# 的共同执行者存活。单条原子命令级的孙进程（psql/dropdb/git）不登记——
-# 父脚本死亡后它们只完成当前已发出的那条命令，不再推进后续步骤。
+# 锁生命周期 vs 进程树（R5 熔断收窄）：持锁进程同步执行全部建/删步骤——
+# 锁内没有嵌套或后台执行者，holder 的 pid 就是执行者本身，pid 判活即锁存
+# 活。残余窗口只有「持有者被 SIGKILL 时在途的那一条命令会执行完」（任何
+# 锁设计都无法撤回在途命令）；被杀后没有任何进程会继续推进后续步骤。
 #
 # 调用方约定：
 #   - 只在「撞名检查 → 建/删派生资源」区间持锁；交互确认一律放在取锁之
 #     前，取锁后重新做撞名检查再执行（持锁等用户输入会卡住别的 init）。
 #   - 取锁时安装 EXIT/INT/TERM/HUP trap 释放锁（会覆盖调用方的同名
 #     trap，三个调用脚本均无自己的 trap）；正常路径可提前调用
-#     worktree_name_lock_release。信号中断时若登记的共同执行者仍存活，
-#     holder 不删除、留给回收方按子进程判活。
-#   - 嵌套：持锁进程导出 AGENT_LEGION_WT_NAME_LOCK_FILE，子进程（如
-#     clean 转调 drop）看到它指向的 holder 仍存活即借用——登记自身为共同
-#     执行者后直接返回，不负责释放父 holder（只移除自己的登记）；父进程
-#     在登记前已死则借用失败，退回独立取锁排队——不会自锁死锁，也不会
-#     提前放掉父进程的锁。
+#     worktree_name_lock_release。
+#   - 锁不跨进程借用：需要持锁执行的操作必须在取锁进程内同步完成
+#     （clean 不再转调 drop，两者共用本文件的 worktree_db_* 函数）。
 
 _WT_NAME_LOCK_OWNED=0
 _WT_NAME_LOCK_SLOT=""
 _WT_NAME_LOCK_TMP=""
-# 本进程登记的共同执行者文件（持有者的后台 delete 子 shell）；借用方见
-# 下方 _WT_NAME_LOCK_BORROW_CHILD。
-_WT_NAME_LOCK_CHILD=""
-# 借用父锁时登记的自身文件（Exit 时无条件移除——借用方退出即不再有多步
-# 删除在推进，第三代单条命令的收尾见 R4 注释）。
-_WT_NAME_LOCK_BORROW_CHILD=""
 
 # 锁目录路径（不创建）。git common dir 无法解析时返回 1。
 #   用法: worktree_name_lock_dir REPO_DIR
@@ -167,37 +185,15 @@ _wt_name_lock_file_pid() {
     printf '%s' "${base%%-*}"
 }
 
-# holder 判活（#1084 R4）：取锁进程存活，或任一登记的共同执行者（
-# <holder>.child-<pid>）存活——父进程被 SIGKILL 后嵌套/后台的删除进程
-# 可能仍在推进，此时锁必须视为仍被持有。
-_wt_name_lock_holder_alive() {
-    local f="$1" child
-    _wt_name_lock_pid_alive "$(_wt_name_lock_file_pid "$f")" && return 0
-    for child in "$f".child-*; do
-        [[ -e "$child" ]] || continue
-        _wt_name_lock_pid_alive "${child##*.child-}" && return 0
-    done
-    return 1
-}
-
-# 回收：pid 已死的共同执行者登记、发布中途崩溃留下的 .tmp，以及完全判死
-# （父与全部登记子进程都死了）的 holder。只按文件名判定，不读内容——文件
-# 随时可能被其主人删掉（让位），读失败不能当错误。
+# 回收 pid 已死的 holder 与发布中途崩溃留下的 .tmp。只按文件名判定，不读
+# 内容——文件随时可能被其主人删掉（让位），读失败不能当错误。
 _wt_name_lock_reclaim() {
     local dir="$1" f
-    for f in "$dir"/holder-*.child-* "$dir"/.tmp-*; do
+    for f in "$dir"/holder-* "$dir"/.tmp-*; do
         [[ -e "$f" ]] || continue
-        case "$f" in
-            *.child-*) _wt_name_lock_pid_alive "${f##*.child-}" || rm -f "$f" ;;
-            *) _wt_name_lock_pid_alive "$(_wt_name_lock_file_pid "$f")" || rm -f "$f" ;;
-        esac
-    done
-    for f in "$dir"/holder-*; do
-        [[ -e "$f" ]] || continue
-        case "$f" in
-            *.child-*) continue ;;
-        esac
-        _wt_name_lock_holder_alive "$f" || rm -f "$f"
+        if ! _wt_name_lock_pid_alive "$(_wt_name_lock_file_pid "$f")"; then
+            rm -f "$f"
+        fi
     done
     return 0
 }
@@ -206,10 +202,7 @@ _wt_name_lock_live_count() {
     local dir="$1" f count=0
     for f in "$dir"/holder-*; do
         [[ -e "$f" ]] || continue
-        case "$f" in
-            *.child-*) continue ;;
-        esac
-        if _wt_name_lock_holder_alive "$f"; then
+        if _wt_name_lock_pid_alive "$(_wt_name_lock_file_pid "$f")"; then
             count=$((count + 1))
         fi
     done
@@ -220,9 +213,6 @@ _wt_name_lock_describe() {
     local dir="$1" f line out=""
     for f in "$dir"/holder-*; do
         [[ -e "$f" ]] || continue
-        case "$f" in
-            *.child-*) continue ;;
-        esac
         [[ "$f" != "$_WT_NAME_LOCK_SLOT" ]] || continue
         line="$(head -n1 "$f" 2>/dev/null)" || continue
         out="${out}${out:+; }${line}"
@@ -235,72 +225,15 @@ _wt_name_lock_release() {
         rm -f "$_WT_NAME_LOCK_TMP"
         _WT_NAME_LOCK_TMP=""
     fi
-    if [[ -n "$_WT_NAME_LOCK_CHILD" ]]; then
-        # 信号中断路径上共同执行者（后台 delete 子 shell）可能仍在运行：
-        # holder 留给回收方按子进程判活，不在此删除（#1084 R4）。正常路径
-        # 在 wait + unregister 之后走到这里，child 已死、直接清理。
-        if _wt_name_lock_pid_alive "${_WT_NAME_LOCK_CHILD##*.child-}"; then
-            _WT_NAME_LOCK_CHILD=""
-            return 0
-        fi
-        rm -f "$_WT_NAME_LOCK_CHILD"
-        _WT_NAME_LOCK_CHILD=""
-    fi
     if [[ -n "$_WT_NAME_LOCK_SLOT" ]]; then
         rm -f "$_WT_NAME_LOCK_SLOT"
         _WT_NAME_LOCK_SLOT=""
     fi
-    if [[ "$_WT_NAME_LOCK_OWNED" -eq 1 ]]; then
-        unset AGENT_LEGION_WT_NAME_LOCK_FILE
-        _WT_NAME_LOCK_OWNED=0
-    fi
+    _WT_NAME_LOCK_OWNED=0
     return 0
 }
 
-# 借用方退出时只移除自己的共同执行者登记（不动父 holder）。借用方退出即
-# 不再有以它推进的多步删除，登记可无条件移除。
-_wt_name_lock_borrow_release() {
-    if [[ -n "$_WT_NAME_LOCK_BORROW_CHILD" ]]; then
-        rm -f "$_WT_NAME_LOCK_BORROW_CHILD"
-        _WT_NAME_LOCK_BORROW_CHILD=""
-    fi
-    return 0
-}
-
-# 写共同执行者登记文件（<holder>.child-<pid>），noclobber 防并发覆盖；
-# 同名残留只在 pid 已死（pid 复用）时清除。成功返回 0。
-_wt_name_lock_write_child_file() {
-    local file="$1" pid="$2" child="${1}.child-${2}"
-    if [[ -e "$child" ]] && ! _wt_name_lock_pid_alive "$pid"; then
-        rm -f "$child"
-    fi
-    (set -o noclobber; printf 'pid=%s 共同执行者\n' "$pid" >"$child") 2>/dev/null || return 1
-    return 0
-}
-
-# 持有者登记/注销共同执行者（#1084 R4）：多步资源操作放到后台子进程执行时，
-# 登记其 pid——本进程被信号杀死而子进程仍在删资源时，回收方按子进程判活，
-# 锁不会被提前回收。登记失败（锁文件已不在等）返回 1，调用方应 fail-closed。
-worktree_name_lock_register_child() {
-    local pid="$1" file="${AGENT_LEGION_WT_NAME_LOCK_FILE:-}"
-    [[ -n "$file" && -e "$file" ]] || return 1
-    _wt_name_lock_write_child_file "$file" "$pid" || return 1
-    _WT_NAME_LOCK_CHILD="${file}.child-${pid}"
-    return 0
-}
-
-worktree_name_lock_unregister_child() {
-    local pid="$1" file="${AGENT_LEGION_WT_NAME_LOCK_FILE:-}" child
-    [[ -n "$file" ]] || return 0
-    child="${file}.child-${pid}"
-    if [[ "$child" == "$_WT_NAME_LOCK_CHILD" ]]; then
-        _WT_NAME_LOCK_CHILD=""
-    fi
-    rm -f "$child"
-    return 0
-}
-
-# 释放本进程持有的锁并撤掉 trap；嵌套（未实际持锁）时是 no-op。
+# 释放本进程持有的锁并撤掉 trap。
 worktree_name_lock_release() {
     _wt_name_lock_release
     trap - EXIT INT TERM HUP
@@ -312,30 +245,8 @@ worktree_name_lock_release() {
 #   用法: worktree_name_lock_acquire REPO_DIR WHAT
 worktree_name_lock_acquire() {
     local repo="$1" what="$2" dir poll nonce waited=0 announced=0
-    local parent_file parent_pid
     if [[ "$_WT_NAME_LOCK_OWNED" -eq 1 ]]; then
         return 0
-    fi
-    # 嵌套借用（clean 转调 drop）：父 holder 存活时登记自身为共同执行者再
-    # 返回——父进程随后被 SIGKILL 而本进程仍在删库时，回收方按登记判活
-    # （#1084 R4）。登记后复核父锁仍有效：父在登记前已死（或 holder 已被
-    # 回收）则撤销登记、退回下方独立取锁，与当前持有者正常排队。
-    if [[ -n "${AGENT_LEGION_WT_NAME_LOCK_FILE:-}" && -e "$AGENT_LEGION_WT_NAME_LOCK_FILE" ]]; then
-        parent_file="$AGENT_LEGION_WT_NAME_LOCK_FILE"
-        parent_pid="$(_wt_name_lock_file_pid "$parent_file")"
-        if _wt_name_lock_pid_alive "$parent_pid"; then
-            if _wt_name_lock_write_child_file "$parent_file" "$$"; then
-                if [[ -e "$parent_file" ]] && _wt_name_lock_pid_alive "$parent_pid"; then
-                    _WT_NAME_LOCK_BORROW_CHILD="${parent_file}.child-$$"
-                    trap '_wt_name_lock_borrow_release' EXIT
-                    trap '_wt_name_lock_borrow_release; exit 130' INT
-                    trap '_wt_name_lock_borrow_release; exit 143' TERM
-                    trap '_wt_name_lock_borrow_release; exit 129' HUP
-                    return 0
-                fi
-                rm -f "${parent_file}.child-$$"
-            fi
-        fi
     fi
     if ! dir="$(worktree_name_lock_dir "$repo")" || ! mkdir -p "$dir" 2>/dev/null; then
         echo "错误: 无法定位或创建派生名锁目录（git common dir 不可用），拒绝${what}（#1084）。" >&2
@@ -363,7 +274,6 @@ worktree_name_lock_acquire() {
         _WT_NAME_LOCK_TMP=""
         if [[ "$(_wt_name_lock_live_count "$dir")" -eq 1 ]]; then
             _WT_NAME_LOCK_OWNED=1
-            export AGENT_LEGION_WT_NAME_LOCK_FILE="$_WT_NAME_LOCK_SLOT"
             return 0
         fi
         # 让位：删掉自己的 holder，抖动退避后重试。
@@ -378,4 +288,70 @@ worktree_name_lock_acquire() {
         sleep "${poll}.$(printf '%03d' $((RANDOM % 500)))"
         waited=$((waited + poll))
     done
+}
+
+
+# --- 派生库探测与删除（clean-worktree.sh 与 drop-worktree-db.sh 共用）-------
+# R5 熔断收窄后 clean 不再转调 drop 子进程：两个入口各自在自己的持锁进程内
+# 同步执行删除，锁内没有嵌套/后台执行者。调用方须先自行取派生名锁
+# （drop 的 --list 计划阶段除外，只读）。
+# psql 探测失败（连接级错误）一律 fail-closed：「查询失败」不等于「库不
+# 存在」（#1084）。
+
+# psql 存在性检查 + dev role 连接护栏（存在 agent_legion_dev 就以它连接——
+# 非 superuser、只拥有派生库，对共享/prod 库的 DROP 会被 Postgres 拒绝）。
+worktree_db_prepare() {
+    command -v psql >/dev/null 2>&1 || { echo "错误: 未找到 psql" >&2; return 1; }
+    local dev_role="agent_legion_dev"
+    if psql -d postgres -tAc "select 1 from pg_roles where rolname='$dev_role'" 2>/dev/null | grep -q 1; then
+        export PGUSER="$dev_role"
+    else
+        echo "提示: 集群无 $dev_role role，以当前用户（$(whoami)）连接——仅靠名字护栏保护。" >&2
+    fi
+    return 0
+}
+
+# 收集当前存在的目标库（owner + 大小）。$2 为 "print" 时打印每个库的
+# 待删除/不存在行。结果在 _WT_DB_FOUND / _WT_DB_LIST（空格分隔；库名由
+# 派生规则保证不含空白）。
+worktree_db_collect() {
+    local wt="$1" verbose="${2:-}" db row
+    _WT_DB_FOUND=0
+    _WT_DB_LIST=""
+    for db in "$(worktree_derived_db "$wt")" "$(worktree_derived_test_db "$wt")"; do
+        if ! row="$(psql -d postgres -tAc \
+            "select r.rolname || '|' || pg_size_pretty(pg_database_size(d.datname)) from pg_database d join pg_roles r on r.oid=d.datdba where d.datname='$db'" \
+            2>/dev/null)"; then
+            echo "错误: 探测库 ${db} 失败（Postgres 不可达？），无法确认目标库状态，中止（#1084）。" >&2
+            echo "      请在数据库恢复后重跑本脚本。" >&2
+            return 1
+        fi
+        if [[ -n "$row" ]]; then
+            _WT_DB_FOUND=$((_WT_DB_FOUND + 1))
+            _WT_DB_LIST="${_WT_DB_LIST} ${db}"
+            [[ "$verbose" == "print" ]] && echo "待删除: $db (owner=${row%%|*}, size=${row##*|})"
+        else
+            [[ "$verbose" == "print" ]] && echo "不存在（跳过）: $db"
+        fi
+    done
+    return 0
+}
+
+# 逐库复核存在性后 dropdb（复核失败 fail-closed；只删 worktree_db_collect
+# 锁内重探测到的集合）。
+worktree_db_drop() {
+    local db exists
+    for db in $_WT_DB_LIST; do
+        if ! exists="$(psql -d postgres -tAc "select 1 from pg_database where datname='$db'" 2>/dev/null)"; then
+            echo "错误: 删除前复核库 ${db} 失败（Postgres 不可达？），中止（#1084）。" >&2
+            return 1
+        fi
+        if [[ "$exists" == "1" ]]; then
+            # 不用 --if-exists：存在性已显式检查，dropdb 的任何报错（含
+            # 「must be owner」权限护栏）都应原样失败暴露。
+            dropdb "$db" || return 1
+            echo "已删除: $db"
+        fi
+    done
+    return 0
 }
