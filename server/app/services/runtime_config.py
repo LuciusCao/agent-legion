@@ -7,7 +7,9 @@ skill、execution.runtime 换引擎等）仍走草稿 + 发布产生新 revision
 runtime 键属结构）走本通道：原地更新 active revision（revision id/version 不变，
 ``save_revision_runtime_or_publish`` 的既有机制）并追加一条不可变版本行
 （``workflow_runtime_config_versions``，schema v102）——每版本即审计行，
-回滚 = 追加一个内容等于目标版本的新版本，历史永不篡改。
+回滚 = 把目标版本的切片应用到当前结构后追加为新版本（目标版本不认识
+的新增节点保留现值，故跨结构变更后回滚的结果不等于目标版本原文），
+历史永不篡改。
 
 解析链不变（EXEC-RUNTIME-DISPATCH-001）：dispatch/claim 永远读 active revision
 的 definition_json，本模块的版本表不参与解析；在途 job 持 intake 冻结快照，
@@ -271,8 +273,10 @@ def rollback_workflow_runtime_config(
     """Re-apply a historical runtime config as a NEW appended version.
 
     The rollback target's slice is applied onto the current active revision
-    (nodes the target does not know keep their current values); history rows
-    are never rewritten — the new version's config_json equals the target's.
+    (nodes the target does not know keep their current values — so after an
+    intervening structural change the new row's config_json is the target
+    slice applied to the current structure, not the target verbatim);
+    history rows are never rewritten.
     """
     target = job_db.get_runtime_config_version(workspace_id, version)
     if target is None:
