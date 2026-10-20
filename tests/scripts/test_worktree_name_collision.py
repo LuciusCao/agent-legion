@@ -243,7 +243,10 @@ def test_drop_db_refuses_when_another_worktree_shares_derived_names(
 ) -> None:
     runner = repo.add("runner")
     repo.install_scripts(runner)
-    repo.add(survivor)
+    survivor_path = repo.add(survivor)
+    # 「对方正在用」的模型 = 已完成初始化的实例（#1084：无标记无 .env 的登记
+    # 是阻塞在锁上的待初始化实例，不拥有资源、不阻断删除）。
+    (survivor_path / ".worktree-initialized.ok").write_text("initialized_at=t\n", encoding="utf-8")
 
     # victim 已被移除（独立调用 drop 的典型时机），survivor 仍在用同名库。
     result = repo.run(runner / "scripts" / "drop-worktree-db.sh", victim, "--yes")

@@ -38,7 +38,8 @@ worktree_derived_bucket() {
 # 登记的身份。
 WORKTREE_INITIALIZED_MARKER=".worktree-initialized.ok"
 
-# 同名登记是否为派生资源主（仅 INCLUDE_SELF=1 的删除护栏使用）：
+# 同名登记是否为派生资源主（仅 INCLUDE_SELF=1 的删除护栏使用；别名碰撞
+# 登记同样经它判定——foo_bar 与 foo-bar 归一派生同一库名，见 #950）：
 #   - 有完成标记 → 是（健康实例），拒绝删；
 #   - 无标记、.env 不存在或不含自身派生库 URL → 待初始化实例：init 在取锁
 #     后才碰资源（复制 .env、改写派生 URL、createdb、建 bucket 全在锁内），
@@ -68,9 +69,12 @@ worktree_registration_owns_resources() {
 # 只看目录仍存在的 worktree（目录已不在的 prunable 条目没有使用方）；跳过
 # 主仓库根（第一个条目，从不初始化派生资源）与同名条目（WT 自身）。
 # INCLUDE_SELF=1 时同名条目也算冲突——但只认「已完成初始化的登记」为资源
-# 主（#1084 R5）：无完成标记且 .env 未指向自身派生库的同名登记，是阻塞在
+# 主，且该判定覆盖**所有**派生名碰撞的登记（含别名：foo_bar 与 foo-bar
+# 归一派生同一库名）：无完成标记且 .env 未指向自身派生库的登记，是阻塞在
 # 锁上的待初始化实例（init 在取锁后才碰资源），不拥有任何资源，不构成
-# 冲突——删除旧资源后它的 init 在干净石板上自建，不会复用旧实例的数据。
+# 冲突——删除旧资源后它的 init 在干净石板上自建，不会复用旧实例的数据
+# （#1084）。别名场景若把待初始化登记当冲突中止删除，遗留资源会被它的
+# init 当作已有资源复用（跨实例数据复用）。
 # `git worktree list` 失败返回 2（调用方必须当作「无法确认」拒绝继续）。
 #   用法: worktree_derived_name_conflicts REPO_DIR WT [INCLUDE_SELF]
 worktree_derived_name_conflicts() {
@@ -87,11 +91,11 @@ worktree_derived_name_conflicts() {
         fi
         [[ -d "$path" ]] || continue
         other="$(basename "$path")"
-        if [[ "$other" == "$wt" ]]; then
-            if [[ "$include_self" != "1" ]]; then
-                continue
-            fi
-            worktree_registration_owns_resources "$path" "$wt" || continue
+        if [[ "$other" == "$wt" && "$include_self" != "1" ]]; then
+            continue
+        fi
+        if [[ "$include_self" == "1" ]]; then
+            worktree_registration_owns_resources "$path" "$other" || continue
         fi
         if [[ "$(worktree_derived_db "$other")" == "$db" ]]; then
             printf '%s\t%s\n' "$other" "$db"

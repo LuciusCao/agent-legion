@@ -6,7 +6,8 @@
 #   1. git worktree remove（dirty 时 git 自己拒绝，不加 --force）
 #   2. 删除该 worktree 占用的本地分支（git branch -d，未合并删不掉时提示但
 #      不中断后续步骤）；远端分支默认不删，仅打印提示命令，加
-#      --delete-remote-branch 才执行 push --delete
+#      --delete-remote-branch 才在放锁后执行 push --delete（远端网络操作
+#      刻意不入锁域，避免 SSH/凭据交互/网络超时停住全机 init/clean，#1084）
 #   3. 派生 Postgres 库（与 scripts/drop-worktree-db.sh 共用
 #      worktree-names-lib.sh 的探测/删除函数，在本进程内同步执行）
 #   4. 派生 S3 bucket（agent-legion-<worktree名>，与 init-worktree.sh 同一
@@ -503,11 +504,11 @@ if [[ -n "$BRANCH" ]]; then
     else
         echo "提示: 本地分支 $BRANCH 未合并，git branch -d 拒绝删除，已跳过" >&2
     fi
+    # 远端删除移到放锁之后（远端网络操作不入锁域，见下方）；这里只打印
+    # 保护名单/提示。
     if is_protected_remote_branch "$BRANCH"; then
         echo "提示: $BRANCH 是受保护分支（main/master/prod/release/*），不删除远端分支" >&2
-    elif [[ -n "$DELETE_REMOTE" ]]; then
-        git push origin --delete "$BRANCH" && echo "已删除远端分支: origin/$BRANCH"
-    else
+    elif [[ -z "$DELETE_REMOTE" ]]; then
         echo "提示: 如需删除远端分支，执行 git push origin --delete $BRANCH"
         echo "      （或重跑本脚本加 --delete-remote-branch）"
     fi
@@ -544,6 +545,18 @@ if [[ "$rc" -eq 4 ]]; then
     exit 1
 elif [[ "$rc" -ne 0 ]]; then
     bucket_phase_degraded "$rc"
+fi
+
+# 5. 远端分支删除（--delete-remote-branch）：远端网络操作，刻意放在放锁
+#    之后（#1084 P2）——SSH/凭据交互/网络超时不应停住全机 init/clean/drop
+#    的派生名锁，它本来就不与派生资源互斥。失败只提示，不影响已完成的
+#    本地清理结果。
+if [[ -n "$BRANCH" && -n "$DELETE_REMOTE" ]] && ! is_protected_remote_branch "$BRANCH"; then
+    if git push origin --delete "$BRANCH"; then
+        echo "已删除远端分支: origin/$BRANCH"
+    else
+        echo "提示: 远端分支 origin/$BRANCH 删除失败（不影响本地清理），可稍后手动执行 git push origin --delete $BRANCH" >&2
+    fi
 fi
 
 echo "完成: worktree '$WT' 收尾清理结束。"

@@ -75,7 +75,10 @@ if [[ -n "${RECREATE_WT:-}" && ! -d "$REPO/.worktrees/$RECREATE_WT" ]]; then
     git -C "$REPO" worktree add -q -b "recreated-$RECREATE_WT" "$REPO/.worktrees/$RECREATE_WT"
     case "${RECREATE_INITIALIZED:-}" in
         marker) echo "initialized_at=stub" > "$REPO/.worktrees/$RECREATE_WT/.worktree-initialized.ok" ;;
-        legacy-env) echo "AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_victim" > "$REPO/.worktrees/$RECREATE_WT/.env" ;;
+        legacy-env)
+            db="agent_legion_$(printf '%s' "$RECREATE_WT" | tr -c 'a-zA-Z0-9_' '_')"
+            echo "AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/$db" > "$REPO/.worktrees/$RECREATE_WT/.env"
+            ;;
     esac
 fi
 """
@@ -266,14 +269,16 @@ def test_acquire_refuses_without_git_common_dir(env: _Env) -> None:
 # --- drop-worktree-db.sh -------------------------------------------------------
 
 
-# None = 无人插队。"foo-bar"（派生名相同的不同名 worktree）始终拒绝；
-# "foo_bar"（同名重建）按初始化状态分流（#1084 R5）：有完成标记或存量 .env
-# 指向派生库 = 资源主 → 拒绝；无标记无 .env = 阻塞在锁上的待初始化实例，
-# 不构成资源主 → 照删，其 init 放锁后在干净石板上自建。
+# None = 无人插队。别名碰撞（foo-bar 与 foo_bar 归一派生同一库，#950）与
+# 同名适用同一资源主判定（复验 P1）：有完成标记或存量 .env 指向派生库 =
+# 资源主 → 拒绝；无标记无 .env = 阻塞在锁上的待初始化实例，不构成资源主 →
+# 照删，其 init 放锁后在干净石板上自建。
 @pytest.mark.parametrize(
     ("appears", "initialized", "refused"),
     [
-        ("foo-bar", None, True),
+        ("foo-bar", "marker", True),
+        ("foo-bar", "legacy-env", True),
+        ("foo-bar", None, False),
         ("foo_bar", "marker", True),
         ("foo_bar", "legacy-env", True),
         # export 前缀形式（init 的 replace_in_place 保留基准 .env 的 export
@@ -490,6 +495,51 @@ def test_clean_bucket_delete_and_same_name_recreate(
         assert "bucket-delete-under-lock" in log
     # 两种形态下库都已删除（删库发生在重建之前）。
     assert "dropdb agent_legion_victim\n" in log
+    assert env.holders() == []
+
+
+@pytest.mark.parametrize(
+    ("initialized", "refused"),
+    [("marker", True), ("legacy-env", True), (None, False)],
+)
+def test_clean_bucket_delete_and_alias_recreate(
+    env: _Env, initialized: str | None, refused: bool
+) -> None:
+    """别名重建（复验 P1）：clean 删 foo_bar 期间另一进程注册别名 foo-bar
+    （归一派生同一库，#950）——owns-resources 判定覆盖别名登记：待初始化
+    （无标记无 .env，init 阻塞在锁上）不构成资源主，照删不误拦（否则遗留
+    资源会被它的 init 当作已有复用）；已初始化（标记/存量 .env）= 资源主，
+    拒删。"""
+    scripts = env.runner()
+    env.add("foo_bar")
+
+    result = subprocess.run(
+        ["bash", str(scripts / "clean-worktree.sh"), "foo_bar", "--yes"],
+        env=env.env(
+            STUB_DBS="agent_legion_foo_bar agent_legion_test_foo_bar",
+            RECREATE_WT="foo-bar",
+            RECREATE_INITIALIZED=initialized or "",
+        ),
+        capture_output=True,
+        text=True,
+        cwd=env.main,
+        timeout=_DEADLINE,
+    )
+
+    log = env.log.read_text()
+    if refused:
+        assert result.returncode == 1, result.stdout
+        assert "拒绝删除派生 bucket" in result.stderr
+        assert "foo-bar -> agent-legion-foo-bar" in result.stderr
+        assert "stub delete_bucket" not in result.stdout
+        assert "bucket-delete-under-lock" not in log
+    else:
+        assert result.returncode == 0, result.stderr
+        assert "stub delete_bucket" in result.stdout
+        assert "bucket-delete-under-lock" in log
+    assert "dropdb agent_legion_foo_bar\n" in log
+    # 别名 worktree 本身始终不动。
+    assert (env.main / ".worktrees" / "foo-bar").is_dir()
     assert env.holders() == []
 
 
