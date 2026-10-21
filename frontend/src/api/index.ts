@@ -44,6 +44,10 @@ export { fetchWorkflowDraft, putWorkflowDraft } from './workflowDraft'
 export { fetchOpsMetrics } from './metrics'
 export { presignMaterial, completeMaterial, createRun } from './materialsApi'
 // prettier-ignore
+export { listRunBatches, archiveRunBatch, pauseRunBatch, resumeRunBatch, cancelRunBatch, createRunAsync } from './runBatchesApi'
+// prettier-ignore
+export type { RunBatchListItem, RunBatchListResponse, RunBatchView, RunAcceptedResponse } from './runBatchesApi'
+// prettier-ignore
 export type { MetricBucket, OpsGranularity, OpsMetricsParams, OpsMetricsResponse } from './metrics'
 // prettier-ignore
 export { createRegisterToken, deleteRegisterToken, listRegisterTokens } from './workerTokens'

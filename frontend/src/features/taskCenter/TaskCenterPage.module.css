@@ -1,0 +1,343 @@
+/* 任务中心（#1157 phase3）：卡片网格 + 分区 + 归档视图。
+   视觉基准：0.8.1-ui-acceptance/m44-async-submit 原型（用户两轮确认）。 */
+
+.page {
+  padding: 20px 24px 120px;
+}
+
+.summary {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.summary h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.chips {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-secondary, #666);
+}
+
+.chips b {
+  color: var(--text-primary, #1a1a1a);
+}
+
+.summaryNote {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary, #666);
+  margin: 20px 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sectionTitle .countNote {
+  font-weight: 400;
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr));
+  gap: 16px;
+}
+
+.loadMoreWrap {
+  text-align: center;
+  margin: 18px 0 4px;
+}
+
+.loadMoreWrap .noMore {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+}
+
+/* ===== 卡片 ===== */
+.tcard {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 9px;
+  align-content: start;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.tcard.terminal {
+  opacity: 0.82;
+}
+
+.tcard.archivedView {
+  opacity: 0.68;
+  box-shadow: none;
+}
+
+.tcHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tcIcon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+.tcIcon.run-batch {
+  background: #e3f2fd;
+}
+
+.tcIcon.job-batch-op {
+  background: #f3e5f5;
+}
+
+.tcName {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tcType {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.st {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.st .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.st.running {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.st.running .dot {
+  animation: tc-blink 1.1s ease infinite;
+}
+
+.st.queued,
+.st.paused {
+  background: #f5f5f5;
+  color: #666;
+}
+
+.st.done {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.st.partial {
+  background: #fff3e0;
+  color: #ed6c02;
+}
+
+.st.failed {
+  background: #ffebee;
+  color: #d32f2f;
+}
+
+.st.cancelled {
+  background: #eceff1;
+  color: #607d8b;
+}
+
+@keyframes tc-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.tcMeta {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+}
+
+.mono {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.pbar {
+  height: 8px;
+  background: #eceff1;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.pbar .fill {
+  height: 100%;
+  background: #1976d2;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
+.pbar-done .fill {
+  background: #2e7d32;
+}
+
+.pbar-partial .fill {
+  background: #ed6c02;
+}
+
+.pbar-failed .fill {
+  background: #d32f2f;
+}
+
+.pbar-cancelled .fill {
+  background: #90a4ae;
+}
+
+.tcCount {
+  font-size: 13px;
+}
+
+.tcDetail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12.5px;
+  color: var(--text-secondary, #666);
+}
+
+.tcDetail b {
+  color: var(--text-primary, #1a1a1a);
+  font-weight: 600;
+}
+
+.tcDetail .ok b {
+  color: #2e7d32;
+}
+
+.tcDetail .skip b {
+  color: #ed6c02;
+}
+
+.tcDetail .fail b {
+  color: #d32f2f;
+}
+
+.tcError {
+  font-size: 12px;
+  color: #d32f2f;
+  background: #ffebee;
+  border-radius: 4px;
+  padding: 7px 10px;
+  line-height: 1.5;
+}
+
+.tcFoot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.tcFoot .elapsed {
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+  margin-right: auto;
+}
+
+.tbtn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 4px;
+  color: #1976d2;
+  font-size: 12.5px;
+  padding: 4px 8px;
+}
+
+.tbtn:hover {
+  background: #e3f2fd;
+}
+
+.tbtn.danger {
+  color: #d32f2f;
+}
+
+.tbtn.danger:hover {
+  background: #ffebee;
+}
+
+.tbtn:disabled {
+  color: #9e9e9e;
+  cursor: default;
+  background: none;
+}
+
+/* ===== 已归档视图 ===== */
+.archivedBanner {
+  background: #eceff1;
+  border: 1px solid #cfd8dc;
+  color: #546e7a;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 12px 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* ===== 空态 ===== */
+.emptyState {
+  background: #fff;
+  border: 1px dashed #e0e0e0;
+  border-radius: 10px;
+  padding: 56px 24px;
+  text-align: center;
+  color: var(--text-secondary, #666);
+  font-size: 14px;
+  line-height: 2;
+}
+
+.linkBtn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #1976d2;
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.linkBtn:hover {
+  background: #e3f2fd;
+}

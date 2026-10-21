@@ -33,6 +33,16 @@
     },
     {
       "method": "GET",
+      "path": "/run-batches",
+      "purpose": "批量任务三视图列表（view=active|ended|archived，含徽标计数 active_count）"
+    },
+    {
+      "method": "POST",
+      "path": "/run-batches/{run_id}/archive",
+      "purpose": "手动归档终态批量任务"
+    },
+    {
+      "method": "GET",
       "path": "/jobs",
       "purpose": "job 列表（按 run_id / status 过滤）"
     },

@@ -124,6 +124,7 @@ frontend/src/
 | `/monitoring` | MonitoringPage |
 | `/workspaces/:workspaceId` | WorkspaceLayout |
 | `/workspaces/:workspaceId` | WorkspaceMainPage |
+| `/workspaces/:workspaceId/tasks` | TaskCenterPage |
 | `/workspaces/:workspaceId/jobs/:jobId` | JobDetailPage |
 | `/workspaces/:workspaceId` | SettingsPage |
 | `/workspaces/:workspaceId/token-usage` | TokenUsagePage |

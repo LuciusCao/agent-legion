@@ -52,8 +52,10 @@ class RunBatchQueriesMixin(ConnectionQueriesMixin):
         run's live job count fell below the recorded total (jobs deleted after
         completion — the ``requeue_completed_run_if_depleted`` precedent). The
         re-walk is idempotent: the dedup probe filters already-created jobs.
-        Returns the reset row, or None when the batch is intact (the caller
-        then leaves the run row untouched as well).
+        ``archived_at`` is cleared too (#1157): the healed batch is live again
+        and must leave the task center's archived view. Returns the reset row,
+        or None when the batch is intact (the caller then leaves the run row
+        untouched as well).
         """
         spec_json = json.dumps(target_spec, ensure_ascii=False, sort_keys=True)
         with self.connect() as conn:
@@ -61,7 +63,8 @@ class RunBatchQueriesMixin(ConnectionQueriesMixin):
                 """
                 update run_batches
                 set status='pending', next_index=0, jobs_created=0, chunk_errors_json='[]',
-                    error_message='', finished_at=null, updated_at=current_timestamp,
+                    error_message='', finished_at=null, archived_at=null,
+                    updated_at=current_timestamp,
                     target_spec_json=%s, items_total=%s
                 where run_id=%s and (
                   status in ('failed', 'cancelled')

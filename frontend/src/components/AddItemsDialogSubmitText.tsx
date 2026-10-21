@@ -3,10 +3,9 @@ import { isRequestTimeoutError } from '../api/requestTimeout'
 import styles from './AddItemsDialog.module.css'
 
 /**
- * 添加条目对话框的提交反馈文案与大批量提示（#1157 phase0 过渡兜底；
- * 从 AddItemsDialog 拆出，体积预算同各 AddItems 面板姊妹模块的先例）。
- * 文案为用户视角定稿（评审验收后逐字确认）。完整解（Studio 接异步提交）
- * 随 #1117 进 0.8.2。
+ * 添加条目对话框的提交反馈文案与大批量提示（#1157 phase0 过渡兜底 + phase3
+ * 异步接线；从 AddItemsDialog 拆出，体积预算同各 AddItems 面板姊妹模块的
+ * 先例）。文案为用户视角定稿（评审验收 + 任务中心原型两轮确认后逐字确认）。
  */
 
 /** 全量重复 400 的对外机器契约字符串（docs/workspace-api-tokens.md 教
@@ -42,14 +41,16 @@ export function submitFailText(error: unknown, submittedCount: number) {
   return `创建运行失败: ${message}`
 }
 
-/** 大批量（>1000 条）提交的提示；阈值与 createRun 的写超时豁免共用
- * （materialsApi.BULK_RUN_SUBMIT_THRESHOLD）。 */
+/** 大批量（>1000 条）提交的提示；阈值与异步受理切换共用
+ * （materialsApi.BULK_RUN_SUBMIT_THRESHOLD）。phase3：超过阈值自动转
+ * mode=async 后台创建（任务中心原型定稿文案）。 */
 export function AddItemsDialogBulkHint({ totalItems }: { totalItems: number }) {
   if (totalItems <= BULK_RUN_SUBMIT_THRESHOLD) return null
   return (
     <div className={styles.bulkHint} data-testid="bulk-submit-hint">
-      条目较多，提交后需要等一会儿才会全部出现在任务列表里，可以稍后刷新查看；想更快看到结果的话，建议分成几批提交（每批不超过{' '}
-      {BULK_RUN_SUBMIT_THRESHOLD} 条）。
+      共 {totalItems.toLocaleString()} 个条目，数量较多，提交后将
+      <b>转为后台创建</b>
+      ：立即返回，不阻塞操作；进度集中在右上角「任务」里查看，期间可以提交其他批量操作。
     </div>
   )
 }

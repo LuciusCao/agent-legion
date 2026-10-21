@@ -32,7 +32,9 @@ vi.mock('./stores/authStore', () => ({
 
 // Replace lazy page chunks with instant stubs: guard behavior must not
 // depend on dynamic-import timing under load.
-vi.mock('./routes/pages', () => {
+vi.mock('./routes/pages', async () => {
+  const { Outlet } =
+    await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
   const stub = (label: string) => () => <div>{label}</div>
   return {
     LoginPage: stub('登录 Agent Legion'),
@@ -40,12 +42,19 @@ vi.mock('./routes/pages', () => {
     UsersAdminPage: stub('用户管理'),
     JobDetailPage: stub('job-detail'),
     DashboardPage: stub('dashboard'),
-    WorkspaceLayout: stub('workspace-layout'),
+    // 渲染子路由出口（任务中心等嵌套页断言需要）。
+    WorkspaceLayout: () => (
+      <div>
+        workspace-layout
+        <Outlet />
+      </div>
+    ),
     SettingsPage: stub('settings'),
     WorkflowStudioPage: stub('workflow-studio'),
     WorkspaceMainPage: stub('workspace-main'),
     TokenUsagePage: stub('token-usage'),
     MonitoringPage: stub('monitoring'),
+    TaskCenterPage: stub('task-center'),
     QualityPage: stub('quality'),
     GlobalSettingsPage: stub('global-settings'),
     GlobalOnboardingPage: stub('agent-onboarding'),
@@ -113,5 +122,24 @@ describe('AppRoutes auth guard', () => {
     expect(
       await screen.findByText('agent-onboarding', undefined, { timeout: 5000 })
     ).toBeInTheDocument()
+  })
+
+  it('serves the task center inside the workspace layout (#1157 phase3)', async () => {
+    authState.status = 'authenticated'
+    authState.user = {
+      id: 'u1',
+      username: 'admin',
+      display_name: 'Admin',
+      role: 'admin',
+      disabled_at: null,
+      created_at: '2026-01-01T00:00:00Z',
+    }
+
+    renderRoutes('/workspaces/ws1/tasks')
+
+    expect(
+      await screen.findByText('workspace-layout', undefined, { timeout: 5000 })
+    ).toBeInTheDocument()
+    expect(screen.getByText('task-center')).toBeInTheDocument()
   })
 })

@@ -9,15 +9,14 @@ import {
   Tabs,
 } from '@mui/material'
 import { useQuery } from '@tanstack/react-query'
-import { api, createRun } from '../api'
-import { useUiStore } from '../stores/uiStore'
+import { api } from '../api'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
 import { acceptedItemTypes } from '../lib/acceptedItemTypes'
 import { isInvalidTouchedTextItem } from '../lib/textItemFilename'
-import { resolveTextItem, startTextInput, textRunItem } from '../lib/textItem'
+import { resolveTextItem, startTextInput } from '../lib/textItem'
 import { parseRefIds } from '../lib/addItems'
-import type { RunItem, WorkspaceResponse } from '../types'
+import type { WorkspaceResponse } from '../types'
 import { AddItemsBundlePanel } from './AddItemsBundlePanel'
 import { AddItemsContractHint } from './AddItemsContractHint'
 import { AddItemsExistingMaterials } from './AddItemsExistingMaterials'
@@ -25,7 +24,7 @@ import { AddItemsRefPanel } from './AddItemsRefPanel'
 import { AddItemsTextPanel } from './AddItemsTextPanel'
 import { AddItemsUploadPanel } from './AddItemsUploadPanel'
 import { AddItemsDialogBulkHint } from './AddItemsDialogSubmitText'
-import { submitFailText, submitOkText } from './AddItemsDialogSubmitText'
+import { useAddItemsSubmit } from './useAddItemsSubmit'
 import { useBundleUploads } from './useBundleUploads'
 import { useMaterialUploads } from './useMaterialUploads'
 import styles from './AddItemsDialog.module.css'
@@ -48,7 +47,6 @@ export function AddItemsDialog({
   onClose,
   workspaceId,
 }: AddItemsDialogProps) {
-  const { showToast } = useUiStore()
   const [tab, setTab] = useState<TabKey>('upload')
   const [refText, setRefText] = useState('')
   const [connectionKey, setConnectionKey] = useState('')
@@ -56,7 +54,6 @@ export function AddItemsDialog({
   // null = 用户未输入，回落到入口节点 text_input 的模板 / 文件名。
   const [text, setText] = useState<string | null>(null)
   const [textFilename, setTextFilename] = useState<string | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const {
     doneEntries,
@@ -152,44 +149,13 @@ export function AddItemsDialog({
     onClose()
   }, [resetState, onClose])
 
-  const handleSubmit = useCallback(async () => {
-    if (!workspaceId || !workflowKey || totalItems === 0 || invalidText) return
-    const items: RunItem[] = [
-      ...(materialAccepted ? doneEntries : []).map((entry) => ({
-        type: 'material' as const,
-        material_id: entry.materialId!,
-      })),
-      ...(materialAccepted ? selectedMaterialIds : []).map((materialId) => ({
-        type: 'material' as const,
-        material_id: materialId,
-      })),
-      ...(bundleAccepted ? readyBundles : []).map((bundle) => ({
-        type: 'bundle' as const,
-        bundle_id: bundle.bundleId!,
-      })),
-      ...(refAccepted ? refIds : []).map((id) => ({
-        type: 'ref' as const,
-        connection_key: connectionKey.trim(),
-        external_id: id,
-      })),
-      ...(textItems ? [textRunItem(textItem)] : []),
-    ]
-    setIsSubmitting(true)
-    try {
-      const response = await createRun(workspaceId, { items })
-      const text = submitOkText(response.created_count, response.skipped_count)
-      showToast(text, 'success')
-      resetState()
-      onClose()
-    } catch (err) {
-      showToast(submitFailText(err, items.length), 'error')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }, [
+  // 提交序列（同步快路径 + 大批量异步受理臂）在 useAddItemsSubmit
+  // （#1157 phase3 拆分，体积预算）。
+  const { isSubmitting, handleSubmit } = useAddItemsSubmit({
     workspaceId,
     workflowKey,
     totalItems,
+    invalidText,
     materialAccepted,
     refAccepted,
     bundleAccepted,
@@ -199,12 +165,10 @@ export function AddItemsDialog({
     refIds,
     connectionKey,
     textItems,
-    invalidText,
     textItem,
-    showToast,
     resetState,
     onClose,
-  ])
+  })
 
   if (!open) return null
 

@@ -54,8 +54,13 @@
 }
 
 .bulk-hint {
-  color: #92400e;
+  background: #e3f2fd;
+  border: 1px solid #90caf9;
+  color: #0d47a1;
+  border-radius: 4px;
+  padding: 10px 12px;
   font-size: 13px;
+  line-height: 1.6;
 }
 
 .total-count {

@@ -2825,6 +2825,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/run-batches': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Run Batches */
+    get: operations['list_run_batches_api_workspaces__workspace_id__run_batches_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/run-batches/{run_id}/archive': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Archive Run Batch */
+    post: operations['archive_run_batch_api_workspaces__workspace_id__run_batches__run_id__archive_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/runs': {
     parameters: {
       query?: never
@@ -6186,6 +6220,92 @@ export interface components {
     RunAcceptedResponse: {
       batch: components['schemas']['RunBatchRecord']
       run: components['schemas']['RunRecord']
+    }
+    /**
+     * RunBatchArchiveResponse
+     * @description 手动归档回包：更新后的卡片载荷（幂等语义见 archive_run_batch 的 409）。
+     */
+    RunBatchArchiveResponse: {
+      batch: components['schemas']['RunBatchListItem']
+    }
+    /**
+     * RunBatchListItem
+     * @description 任务中心卡片载荷：#1117 句柄 + 归档位与操作归属。
+     *
+     *     archive_source：manual = 用户在任务中心手动归档；auto = 终态结束超过
+     *     7 天按查询口径自动归档（不落列）；非归档视图为 null。
+     *     failed_item_count（reviewer r1 P2-1）：由 chunk_errors 推导的 chunk
+     *     级失败条目数（chunk_start + RUN_BATCH_CHUNK_SIZE，以 items_total 钳
+     *     制），调用方据此把「跳过（已有任务）」与「失败」拆开——跳过数 =
+     *     processed_count − jobs_created − failed_item_count；chunk_errors 打
+     *     满 20 条时 failed_item_count 为下限（lower_bound=true）。
+     */
+    RunBatchListItem: {
+      /** Archive Source */
+      archive_source: ('manual' | 'auto') | null
+      /** Archived At */
+      archived_at: string | null
+      /** Chunk Errors */
+      chunk_errors: {
+        [key: string]: unknown
+      }[]
+      /** Created At */
+      created_at: string | null
+      /** Created By */
+      created_by: string
+      /** Error Message */
+      error_message: string
+      /**
+       * Failed Item Count
+       * @description chunk 级失败的条目数（由 chunk_errors 推导；dedup 跳过不含在内）
+       */
+      failed_item_count: number
+      /**
+       * Failed Item Count Lower Bound
+       * @description chunk_errors 已达 20 条上限时为 true：真实失败数 ≥ failed_item_count
+       */
+      failed_item_count_lower_bound: boolean
+      /** Finished At */
+      finished_at: string | null
+      /** Items Total */
+      items_total: number
+      /**
+       * Jobs Created
+       * @description 该 run 当前实有 job 数（每 tick 按 count_jobs_in_run 重算）
+       */
+      jobs_created: number
+      /**
+       * Processed Count
+       * @description 游标：已处理的条目数（含 dedup 跳过与失败 chunk）
+       */
+      processed_count: number
+      /** Run Id */
+      run_id: string
+      /**
+       * Status
+       * @description pending/running/paused/completed/failed/cancelled（语义见 runs-async-mode.md §2）
+       */
+      status: string
+      /** Updated At */
+      updated_at: string | null
+    }
+    /**
+     * RunBatchListResponse
+     * @description 单视图一页；active_count 与视图无关（AppBar 徽标与分区标题同快照）。
+     */
+    RunBatchListResponse: {
+      /**
+       * Active Count
+       * @description 进行中 + 排队数（徽标口径）
+       */
+      active_count: number
+      /** Batches */
+      batches: components['schemas']['RunBatchListItem'][]
+      /**
+       * Next Cursor
+       * @description keyset 游标（ended/archived 瀑布流）；active 视图不分页恒为 null
+       */
+      next_cursor: string | null
     }
     /**
      * RunBatchRecord
@@ -14790,6 +14910,73 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['QualityReplayResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_run_batches_api_workspaces__workspace_id__run_batches_get: {
+    parameters: {
+      query?: {
+        view?: 'active' | 'ended' | 'archived'
+        limit?: number
+        cursor?: string | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunBatchListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  archive_run_batch_api_workspaces__workspace_id__run_batches__run_id__archive_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunBatchArchiveResponse']
         }
       }
       /** @description Validation Error */

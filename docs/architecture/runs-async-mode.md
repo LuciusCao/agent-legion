@@ -1,7 +1,7 @@
 # Runs 异步模式（#1117）
 
 日期：2026-10-20
-状态：现行（Phase 2 核心切片；Studio UI 接线属后续切片）
+状态：现行（Phase 2 核心切片 + Phase 3 任务中心读取/归档面，§6）
 
 `POST /workspaces/{id}/runs` 的异步受理模式：大批量 items 提交不再在请求线程内
 完成「解析 → 去重 → 建 job」全序列（万级条目会撞上写超时，#1157 phase0 只能兜底
@@ -135,3 +135,32 @@ items run 当 intake batch 认领。feeding 进度由 `batch` 字段与 `created
   注册表钉住的三族，故注册表无需新增条目（新增反而被 stale-entry 检查拒绝）。
 - Studio UI 不变（异步提交接线属后续切片）；对外 API 行为新增（`mode` 字段 +
   202 + batch 句端点），api.ts 经 `export_openapi` 机械重生成。
+
+## 6. 任务中心读取/归档面（#1157 phase3，schema v100）
+
+Studio 任务中心（`/workspaces/:id/tasks`）以 `run_batches` 为唯一数据源，对外
+同时开放给 #626 机器通道（「提交 → 轮询 → 取消 → 归档」闭环收尾臂）：
+
+- `GET /workspaces/{id}/run-batches?view=active|ended|archived&limit&cursor`：
+  三视图。`active` = pending/running/paused（进行中按发起时间倒序、排队按
+  提交顺序；全量不分页，响应恒带 `active_count` 徽标计数）；`ended` = 终态
+  且未归档且仍在自动归档窗口内（finished_at ≥ now−7d），keyset
+  (finished_at desc, run_id desc)；`archived` = 终态且（`archived_at` 置位
+  或 finished_at < now−7d），keyset (coalesce(archived_at, finished_at)
+  desc, run_id desc)。列表项在 #1117 句柄上扩 `created_by` / `archived_at` /
+  `archive_source`（manual | auto | null）。
+- `POST /workspaces/{id}/run-batches/{run_id}/archive`：手动归档，一条
+  guarded UPDATE 仲裁全部竞态（跨 workspace id、非终态、重复归档 →
+  404/409，不静默成功）。
+- **自动归档是查询口径**：终态且结束超过 7 天自动从 ended 视图落入
+  archived 视图（`archive_source=auto`），无任何写入；手动归档置
+  `run_batches.archived_at`（v100 新增列，部分索引服务归档视图与
+  retention 探针）。盲重提治愈（`reset_run_batch_for_resubmit`）会清空
+  `archived_at`——治愈的 batch 是活的，不留在归档视图。
+- **归档 retention**：execution retention sweep 增加无条件臂（不经
+  `execution_retention_days` 闸）：手动归档行 `archived_at` 满 90 天、
+  自动归档行 `finished_at` 满 97 天（7d 窗口 + 90d 留存）分批物理删除
+  （每批一个短事务，删除即进度，无游标）。
+- 卡片数据模型 source-agnostic（`kind: run-batch | job-batch-op`）；本切片
+  只接 run_batches，job_batch_operations 的任务中心接入复用同一页面与卡片
+  组件（前端 `features/taskCenter`）。

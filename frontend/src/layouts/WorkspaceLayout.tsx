@@ -9,6 +9,9 @@ import { WorkspaceRunControl } from '../components/WorkspaceRunControl'
 import { LabeledIconButton } from '../components/LabeledIconButton'
 import { WorkspaceMoreMenu } from '../components/WorkspaceMoreMenu'
 import { WorkspacePageOutlet } from './WorkspacePageOutlet'
+import { TaskAcceptToast } from '../features/taskCenter/TaskAcceptToast'
+import { TasksEntry } from '../features/taskCenter/TasksEntry'
+
 export default function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
@@ -70,6 +73,7 @@ export default function WorkspaceLayout() {
                     navigate(`/workspaces/${workspaceId}/monitoring`)
                   }
                 />
+                {workspaceId && <TasksEntry workspaceId={workspaceId} />}
                 <WorkspaceMoreMenu />
               </>
             ) : (
@@ -94,6 +98,7 @@ export default function WorkspaceLayout() {
         onClose={() => setAddItemsDialogOpen(false)}
         workspaceId={workspaceId}
       />
+      <TaskAcceptToast workspaceId={workspaceId} />
     </AppShell>
   )
 }

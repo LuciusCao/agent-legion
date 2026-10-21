@@ -5,6 +5,7 @@ versions here; migration_chain asserts the combined registry stays sorted."""
 from __future__ import annotations
 
 from server.app.db.migration_entry import SchemaMigration
+from server.app.db.migrations import run_batches_archive
 from server.app.db.migrations.agent_profile_backfill import migrate_agent_profile_backfill
 from server.app.db.migrations.agent_request_profile_source import (
     migrate_agent_request_profile_source,
@@ -19,7 +20,6 @@ from server.app.db.migrations.material_upload_generation import migrate_material
 from server.app.db.migrations.retire_default_workflow_key import (
     migrate_retire_default_workflow_key,
 )
-from server.app.db.migrations.run_batches import migrate_run_batches
 from server.app.db.migrations.studio_chat_message_draft_kind import (
     migrate_studio_chat_message_draft_kind,
 )
@@ -105,5 +105,11 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # 游标 + 计数器 + 状态机；基础设施，非 Campaign 产品实体）。Table DDL
     # rides the apply fn (schema file at its raw-line ceiling; v76/v96
     # precedent).
-    SchemaMigration(99, "run_batches", migrate_run_batches),
+    # v99/v100 共用一个模块级导入（本文件贴着 growth-allowance 带上沿，
+    # 第二条 import 行会超带）：v99 fn 经 v100 模块 re-export。
+    SchemaMigration(99, "run_batches", run_batches_archive.migrate_run_batches),
+    # v100 (#1157 phase3): run_batches.archived_at — 任务中心归档位（手动归档
+    # 置位；自动归档为查询口径，不落列）。DDL-only, same guarded-ALTER home
+    # rule as v87.
+    SchemaMigration(100, "run_batches_archive", run_batches_archive.migrate_run_batches_archive),
 ]
