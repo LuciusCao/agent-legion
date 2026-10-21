@@ -40,18 +40,23 @@ roots、结果/错误解析；bundle / 标记路径等常量单一定义在 `sha
 # 共同键（Host / Worker 一致）
 job_dir, log_path, inputs, expected_outputs, capability, node_key,
 workflow_key, execution_id, workspace_id, workspace, job,
-settings_config, node_config
+settings_config, node_config,
+skill_versions   # 父进程预取（node_key -> skill_version；无 skill 绑定时为空 dict）
 
 # 仅 Host
 cancellation     # 取消 token；Worker 的取消走轮询/回报里的显式取消字段 +
                  # kill 进程组（§4），不进 runtime dict
 root_dir         # Host 根目录（节点解析机器相对资源路径用）
 
+# 仅 Worker
+shard_index, shard_input   # 分片执行（#389）时由 build_child_payload 随 manifest
+                           # 注入 runtime dict；Host 本地路径不下发——分片身份经
+                           # expected_outputs 文件名区分（Host 侧 shard_input
+                           # 不下发是 #389 既存缺口，见 #1356）
+
 # 条件键（两侧同一判定，有才下发）
 job_batch        # 父进程预取（有 batch_id 且父进程有 DB 时）
-skill_versions   # 父进程预取（node_key -> skill_version）
 materials        # material 类 job 的本地物化块（design §6.2）
-shard_index, shard_input   # 分片执行（#389）时随 context / manifest 注入
 ```
 
 - 节点运行时**不含 DB 句柄或 DSN**（EXEC-CODE-004）：DB 派生输入由父进程预取；
