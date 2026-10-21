@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   estimateRemaining,
   formatDayTime,
@@ -89,6 +89,16 @@ describe('runBatchToCard（#1157 phase3）', () => {
 })
 
 describe('card formatting helpers', () => {
+  // formatDayTime 按浏览器本地时区渲染「今天/昨天」；本组断言钉死
+  // Asia/Shanghai，否则 CI（TZ=UTC）会把 10:21 渲染成 02:21
+  // （main 红 run 39561162339）。
+  beforeAll(() => {
+    vi.stubEnv('TZ', 'Asia/Shanghai')
+  })
+  afterAll(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('shortens run ids into the mono ref shape（尾段 digest，reviewer r1 P2-5）', () => {
     // run id 前段是 workspace/workflow 前缀（无区分度），取尾 8 位。
     expect(shortRunRef('abcdef1234567890')).toBe('run-34567890')

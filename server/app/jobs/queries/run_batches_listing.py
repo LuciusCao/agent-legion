@@ -17,6 +17,15 @@ Auto-archive is a reading, never a write: no sweeper stamps rows on the
 UPDATE whose WHERE decides every race (cross-workspace id, non-terminal
 state, double-archive), per the 多步变更纪律 (revalidate the DECIDING state
 inside the mutation, not in the caller).
+
+Clock semantics: row timestamps (``finished_at`` / ``archived_at``) are
+stamped by the DB clock (``current_timestamp``), while the auto-archive
+cutoff is read by the caller's Python clock (``datetime.now(UTC)`` in
+``services/run_batch_listing.py``). Both are UTC instants and prod runs
+app+DB on one host, so the two clocks are the same wall clock; the 7-day
+reading tolerates any residual sub-second skew by construction. Tests must
+read their boundary clock at execution time, never at module import (CI
+xdist collects long before it executes — main 红 run 39561162339).
 """
 
 from __future__ import annotations
