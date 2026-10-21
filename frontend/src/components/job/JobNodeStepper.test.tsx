@@ -191,6 +191,22 @@ describe('JobNodeStepper 紧凑形态（#1335 宽度驱动）', () => {
       error_message: '',
     }))
 
+  it('attaches the observer when summaries arrive after an empty first render (#1335 r1)', () => {
+    // 空态首挂载渲染占位符、容器 ref 不存在——observer 必须在数据到达、
+    // 容器节点出现时补建，否则动态判定终身静默失效（r1 实证缺陷）。
+    const { rerender } = render(<JobNodeStepper nodeSummaries={[]} />)
+    expect(ResizeObserverStub.instances).toHaveLength(0)
+
+    rerender(<JobNodeStepper nodeSummaries={makeMany(60)} />)
+    expect(ResizeObserverStub.instances).toHaveLength(1)
+
+    // 补建后即刻按实测宽度判定：100px 切紧凑，拉回 400px 恢复逐段。
+    fireTrackWidth(100)
+    expect(screen.getByText('11/60')).toBeInTheDocument()
+    fireTrackWidth(400)
+    expect(screen.getAllByRole('listitem')).toHaveLength(60)
+  })
+
   it('keeps the segmented form while per-segment width stays at the 2px floor', () => {
     // 176px 轨道：88 段 × 2px 刚好铺满，仍在可辨识下限上。
     render(<JobNodeStepper nodeSummaries={makeMany(88)} />)
