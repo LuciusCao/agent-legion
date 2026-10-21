@@ -6,7 +6,10 @@ so a single large campaign left the tables (and their claim-path indexes)
 permanently fat and every subsequent scan paid for the corpses. This module
 owns the time-dimensional row removal, driven by the ``execution_retention_days``
 instance setting (0 = disabled — the default; no row is removed unless an
-operator explicitly turns it on).
+operator explicitly turns it on). One arm is exempt from the setting:
+#1157's archived ``run_batches`` retention (90 days; implemented in
+``run_batch_listing.sweep_archived_run_batches``) is unconditional product
+behavior.
 
 Table order and per-table predicates follow the foreign keys (the detailed
 rationale lives with the SQL in ``jobs/queries/execution_retention.py``):
@@ -48,6 +51,7 @@ from server.app.jobs.queries.execution_retention import (
     ExecutionRetentionQueriesMixin,
     execution_retention_queries_from_dsn,
 )
+from server.app.services import run_batch_listing
 from server.app.services.instance_settings_store import InstanceSettingsStore
 
 logger = logging.getLogger(__name__)
@@ -187,12 +191,21 @@ def sweep_expired_executions(
 ) -> dict[str, int]:
     """Remove terminal execution-plane rows past the retention window.
 
-    Returns per-table deleted counts (all zero when retention is disabled).
+    Returns per-table deleted counts (the three execution-plane tables are
+    all zero when retention is disabled; the ``run_batches`` arm —
+    #1157 archived-batch retention — is unconditional and always sweeps).
     """
+    moment = now or datetime.now(UTC)
+    run_batches = run_batch_listing.sweep_archived_run_batches(connect_source, moment)
     days = execution_retention_days(connect_source)
     if days <= 0:
-        return {"agent_execution_requests": 0, "executor_leases": 0, "node_run_token_usage": 0}
-    cutoff = (now or datetime.now(UTC)) - timedelta(days=days)
+        return {
+            "agent_execution_requests": 0,
+            "executor_leases": 0,
+            "node_run_token_usage": 0,
+            "run_batches": run_batches,
+        }
+    cutoff = moment - timedelta(days=days)
     queries = _queries(connect_source)
     requests = sum(
         _sweep_pages(
@@ -233,4 +246,5 @@ def sweep_expired_executions(
         "agent_execution_requests": requests,
         "executor_leases": leases,
         "node_run_token_usage": usage,
+        "run_batches": run_batches,
     }

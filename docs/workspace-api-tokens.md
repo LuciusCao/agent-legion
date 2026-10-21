@@ -156,6 +156,8 @@ Bearer 通道不需要 CSRF header（非 ambient 凭据）。token 泄露时在�
   | `POST /runs` | 提交（同步默认；`mode="async"` 为异步受理，见下文「异步受理模式」） |
   | `POST /runs/{run_id}/pause` · `POST /runs/{run_id}/resume` · `POST /runs/{run_id}/cancel` | 异步 run 的投喂控制面（#1117；只停/续/止「继续建 job」，已建 job 不动） |
   | `GET /runs` · `GET /runs/{run_id}` | run 列表 / 单 run + job_stats（异步 run 另带 `batch` 进度句柄） |
+  | `GET /run-batches` | 批量任务三视图列表（#1157 phase3：`view=active|ended|archived` + keyset `cursor` 翻页 + `active_count` 徽标计数） |
+  | `POST /run-batches/{run_id}/archive` | 手动归档终态批量任务（重复归档 / 非终态 409） |
   | `GET /jobs` | job 列表（`run_id` / `status` 过滤，`limit` ≤ 2000 + `truncated`） |
   | `GET /jobs/snapshot` | 分页 job 列表（`run_id` 等过滤，`limit` 1–500 + `next_cursor`） |
   | `GET /jobs/{job_id}` | 单 job 轻量状态 |

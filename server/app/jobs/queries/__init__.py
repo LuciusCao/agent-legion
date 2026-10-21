@@ -11,6 +11,7 @@ from server.app.jobs.queries.groups import (
 from server.app.jobs.queries.material_claim_gate import MaterialClaimGateQueriesMixin  # #1279
 from server.app.jobs.queries.material_repair import MaterialRepairQueriesMixin  # #1279
 from server.app.jobs.queries.run_batches import RunBatchQueriesMixin  # #1117
+from server.app.jobs.queries.run_batches_listing import RunBatchListingQueriesMixin  # #1157
 from server.app.jobs.queries.run_healing import RunHealingQueriesMixin  # #501
 from server.app.jobs.queries.token_usage_capture import TokenUsageCaptureQueriesMixin  # #1239
 from server.app.jobs.queries.workflow_draft_generation import WorkflowDraftGenerationQueriesMixin
@@ -35,6 +36,8 @@ class JobQueries(
     # #1117: runs-async batch state row (standalone mixin; the domain groups
     # sit at their budget bands).
     RunBatchQueriesMixin,
+    # #1157 phase3: task-center listing/archive views (standalone mixin).
+    RunBatchListingQueriesMixin,
     JobQueriesBase,
 ):
     """Backward-compatible facade for all workspace/job query operations.

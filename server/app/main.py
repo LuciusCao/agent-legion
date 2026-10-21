@@ -33,6 +33,7 @@ from server.app.routes import RouterDeps, create_router
 from server.app.routes.auth import create_auth_router
 from server.app.routes.job_http_handlers import register_job_http_exception_handlers
 from server.app.routes.quality_deps import build_quality_loop
+from server.app.routes.run_batches import create_run_batches_router
 from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.agent_catalog_projection import AgentCatalogService
 from server.app.services.artifact_store import ArtifactStore
@@ -331,6 +332,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             )
         )
     )
+    # #1157 phase3: the task-center run-batches surface mounts here (not in
+    # job_route_group): its router carries require_workspace_access itself,
+    # with identical membership/api-scope semantics for workspace-prefixed
+    # routes (routes/run_batches.py module docstring).
+    app.include_router(create_run_batches_router(job_db), prefix="/api")
     # After the API routers so /api/studio-agent/tools/* routes match first;
     # the mount only receives /api/studio-agent/mcp.
     app.mount(MCP_MOUNT_PATH, studio_mcp_relay)

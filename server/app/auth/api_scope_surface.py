@@ -40,7 +40,9 @@ API_SCOPE_INTAKE_TAG = "api-scope-intake"
 
 # 唯一权威常量（#678 tool_names.py 形态）：按注册站点分组登记路由名。
 # runs.py：提交 + run 状态两读 + #1117 异步模式的 pause/resume/cancel
-# （effecting 面都经 require_workspace_api_intake 把关）。jobs.py：jobs 列表。job_list.py：分页
+# （effecting 面都经 require_workspace_api_intake 把关）。run_batches.py
+# （#1157 phase3）：任务中心三视图列表 + 手动归档，机器闭环的收尾臂。
+# jobs.py：jobs 列表。job_list.py：分页
 # snapshot（codex3 P1——机器调用方必须越过 legacy 列表上限读全量 job
 # 状态面；同模块的 facets 是前端聚合端点，刻意不收）。external_artifacts.py
 # （#631）：job 状态、产物清单、raw 下载——#734 修的就是这三个当初被
@@ -56,6 +58,10 @@ API_SCOPE_INTAKE_ROUTE_NAMES: frozenset[str] = frozenset(
         "pause_run_batch",
         "resume_run_batch",
         "cancel_run_batch",
+        # #1157 phase3：任务中心列表（三视图 + 徽标计数）与手动归档——机器
+        # 闭环「提交 → 轮询 → 取消 → 归档」的收尾臂（routes/run_batches.py）。
+        "list_run_batches",
+        "archive_run_batch",
         # routes/jobs.py
         "list_workspace_jobs",
         # routes/job_list.py
