@@ -62,7 +62,15 @@ _SERVER_REPO_ROOT = Path(__file__).resolve().parents[3]
 # sandbox read access to `config/` exposes no credentials.
 _REPO_READ_SUBDIRS = ("server", "workflow_nodes", "config", "workspace_libs")
 
-_RESULT_BASENAME = ".custom_node_result.json"
+
+def _result_path(job_dir: Path, execution_id: str) -> Path:
+    """Per-execution result file (#1311): every node of a job shares the
+    job's ``job_dir`` (parallel siblings, and every shard of a node, run
+    concurrently in it), so a fixed name let one execution's child overwrite
+    — or its parent unlink — a neighbour's result, attributing the
+    neighbour's error to this node. ``execution_id`` is a per-claim uuid,
+    unique across nodes, shards and retries."""
+    return job_dir / f".custom_node_result.{execution_id}.json"
 
 
 def _velites_binary(executor: CodeExecutor) -> str | None:
@@ -145,7 +153,7 @@ def execute_custom_sandboxed(
     # deterministic id) needs again — so no #618 process-lifetime memo here;
     # one mkdir per execution (not per claim attempt).
     context.log_path.parent.mkdir(parents=True, exist_ok=True)
-    result_path = context.job_dir / _RESULT_BASENAME
+    result_path = _result_path(context.job_dir, context.execution_id)
     # A leftover result from a previous attempt must never fake a success.
     result_path.unlink(missing_ok=True)
     # Same for a stale auth-failure marker (the parent consumes it post-run).
