@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Chip } from '@mui/material'
+import { Button, Chip, ToggleButton, ToggleButtonGroup } from '@mui/material'
 import type { WorkflowNodeRecord } from '../../../types'
+import { MaterialIcon } from '../../../components/MaterialIcon'
 import { useStudioStateOptional } from '../shared/studioStateContext'
 import {
   parseWorkflowNode,
@@ -254,10 +255,16 @@ export function WorkflowNodeRuntimeChannelSection(props: {
 
   return (
     <section className={inspectorStyles.section} aria-label="运行配置">
-      <div className={styles.card}>
+      {/* r2 视觉返工：不再用整片色块，与既有 Inspector section 同构——通道
+          身份由标题旁小徽标表达，分隔靠细线。 */}
+      <div>
         {props.readOnly && (
           <div className={styles.readonlyBanner} role="note">
-            <span className={styles.readonlyBannerIcon}>🔒</span>
+            <MaterialIcon
+              name="lock"
+              fontSize="small"
+              className={styles.readonlyBannerIcon}
+            />
             <span>
               <b>查看历史版本时不可修改运行配置。</b>
               <br />
@@ -334,28 +341,19 @@ export function WorkflowNodeRuntimeChannelSection(props: {
 
           <div>
             <div className={styles.fieldLabelRow}>Prompt 模式</div>
-            <div
-              className={`${styles.segmented} ${props.readOnly ? styles.segmentedDisabled : ''}`}
-              role="group"
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={promptMode}
               aria-label="Prompt 模式"
+              onChange={(_event, value: 'default' | 'custom' | null) => {
+                if (value) setPromptMode(value)
+              }}
+              disabled={props.readOnly}
             >
-              <button
-                type="button"
-                className={promptMode === 'default' ? styles.active : ''}
-                disabled={props.readOnly}
-                onClick={() => setPromptMode('default')}
-              >
-                默认（随 skill）
-              </button>
-              <button
-                type="button"
-                className={promptMode === 'custom' ? styles.active : ''}
-                disabled={props.readOnly}
-                onClick={() => setPromptMode('custom')}
-              >
-                自定义
-              </button>
-            </div>
+              <ToggleButton value="default">默认（随 skill）</ToggleButton>
+              <ToggleButton value="custom">自定义</ToggleButton>
+            </ToggleButtonGroup>
           </div>
           <div>
             <div className={styles.fieldLabelRow}>
@@ -481,18 +479,24 @@ export function WorkflowNodeRuntimeChannelSection(props: {
         {studio && (
           <div className={styles.saveBar}>
             <div className={styles.saveHint}>
-              <span className={styles.saveHintIcon}>⚡</span>
+              <MaterialIcon
+                name="rocket_launch"
+                fontSize="small"
+                className={styles.saveHintIcon}
+              />
               <span>{saveHint}</span>
             </div>
-            <button
-              type="button"
-              className={styles.saveButton}
+            <Button
+              variant="contained"
+              size="small"
+              fullWidth
               disabled={saveDisabled}
               onClick={() => void studio.saveRuntimeConfig()}
             >
-              {studio.runtimeSaving ? '保存中…' : '保存运行配置'}
-              <small>立即生效，不产生版本</small>
-            </button>
+              {studio.runtimeSaving
+                ? '保存中…'
+                : '保存运行配置（立即生效，不产生版本）'}
+            </Button>
           </div>
         )}
         <div className={styles.topNote}>

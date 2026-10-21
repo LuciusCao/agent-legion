@@ -5,9 +5,11 @@
   background: #fff;
   border: 1px solid #e0e0e0;
 }
+/* r2 视觉返工：运行通道组与结构组同构（中性底 + 细边框），通道身份由
+ * 组内小徽标表达，不再用整片色块。 */
 .groupRuntime {
-  background: #eef7f3;
-  border-color: #bfe3d4;
+  background: #fff;
+  border-color: #e0e0e0;
 }
 .groupHead {
   display: flex;
@@ -31,7 +33,7 @@
   white-space: nowrap;
 }
 .badgeRuntime {
-  background: #fff;
+  background: #eef7f3;
   color: #0b6b53;
   border: 1px solid #bfe3d4;
 }
@@ -54,7 +56,7 @@
 }
 .diffValue {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  color: #0b6b53;
+  color: #1a1c1e;
   font-weight: 600;
   word-break: break-all;
 }
@@ -67,18 +69,4 @@
 .groupActions {
   display: flex;
   gap: 8px;
-}
-.applyRuntimeButton {
-  font-size: 12px;
-  border-radius: 6px;
-  padding: 5px 12px;
-  cursor: pointer;
-  border: 1px solid #0b6b53;
-  background: #0b6b53;
-  color: #fff;
-  font-weight: 600;
-}
-.applyRuntimeButton:disabled {
-  opacity: 0.5;
-  cursor: default;
 }

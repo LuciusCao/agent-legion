@@ -174,7 +174,7 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
     expect(screen.queryByText('已修改 · 待保存')).not.toBeInTheDocument()
   })
 
-  it('选中态走 CSS module 类（r1 P2-3 回归：自定义分段高亮）', () => {
+  it('选中态走 MUI ToggleButton（r2 视觉返工：分段控件与设计系统一致）', () => {
     const withPrompt = baselineYaml.replace(
       'execution:\n      runtime: pi\n',
       'execution:\n      runtime: pi\n      prompt: 自定义提示\n'
@@ -185,8 +185,8 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
     const defaultButton = screen.getByRole('button', {
       name: '默认（随 skill）',
     })
-    expect(customButton.className).toMatch(/active/)
-    expect(defaultButton.className).not.toMatch(/active/)
+    expect(customButton.className).toContain('Mui-selected')
+    expect(defaultButton.className).not.toContain('Mui-selected')
   })
 
   it('r1 P1-1：只读视图下失效工具告警不渲染删除钮（点击面被门禁）', () => {

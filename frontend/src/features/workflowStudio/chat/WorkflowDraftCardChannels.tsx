@@ -115,7 +115,7 @@ export function WorkflowDraftCardChannelGroups(props: {
           <div className={channelStyles.groupActions}>
             <button
               type="button"
-              className={channelStyles.applyRuntimeButton}
+              className={`${styles.draftButton} ${styles.draftPrimary}`}
               disabled={studio?.runtimeSaving}
               onClick={() => void studio?.saveRuntimeConfig(props.draftYaml)}
             >

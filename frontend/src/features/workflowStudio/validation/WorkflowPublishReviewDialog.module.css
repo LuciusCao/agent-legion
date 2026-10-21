@@ -85,14 +85,10 @@
   font-size: 12px;
   line-height: 1.55;
   margin: 4px 0 16px;
+  background: #f5f5f5;
+  color: #43474e;
 }
-.runtimeExcluded {
-  background: #eef7f3;
-  border: 1px solid #bfe3d4;
-  color: #2c5a48;
-}
-.runtimePending {
-  background: #fef3e2;
-  border: 1px solid #f5d9a8;
-  color: #8d5a00;
+.runtimeExcluded b,
+.runtimePending b {
+  color: #1a1c1e;
 }
