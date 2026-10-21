@@ -18,6 +18,7 @@ from server.app.jobs.queries.run_batches_listing import RunBatchListingQueriesMi
 from server.app.jobs.queries.run_healing import RunHealingQueriesMixin  # #501
 from server.app.jobs.queries.token_usage_capture import TokenUsageCaptureQueriesMixin  # #1239
 from server.app.jobs.queries.workflow_draft_generation import WorkflowDraftGenerationQueriesMixin
+from server.app.jobs.queries.workflow_runtime_config import WorkflowRuntimeConfigQueriesMixin
 
 
 class JobQueries(
@@ -29,6 +30,9 @@ class JobQueries(
     WorkflowRevisionDomainQueriesMixin,
     # #1226: draft generation (the WorkspaceDomain group sits at its budget band).
     WorkflowDraftGenerationQueriesMixin,
+    # M47: runtime config version history (the WorkflowRevisionDomain group sits
+    # at its budget band).
+    WorkflowRuntimeConfigQueriesMixin,
     # #1239: lease-finish token capture (the RunDomain group sits at its budget band).
     TokenUsageCaptureQueriesMixin,
     # #1279: material ETag repair/rebind (the RunDomain group sits at its

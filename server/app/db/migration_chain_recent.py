@@ -1,6 +1,7 @@
 """Most recent versioned schema migrations (v87+), spliced onto the end of
-``migration_chain.MIGRATIONS`` (file-budget split, #924). Append new
-versions here; migration_chain asserts the combined registry stays sorted."""
+``migration_chain.MIGRATIONS`` (file-budget split, #924). New versions append
+to ``migration_chain_latest.py`` (M47: this file's budget band is full);
+migration_chain asserts the combined registry stays sorted."""
 
 from __future__ import annotations
 

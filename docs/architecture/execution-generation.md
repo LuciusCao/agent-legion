@@ -340,7 +340,10 @@ already_current。有继承候选时再取全局
   发布、回滚、归档（`server/app/jobs/queries/upgrade_impl_identity.py`）、
   active workflow revision 发布
   （`server/app/jobs/queries/workflow_revision_projection.py`）、runtime-only
-  原地编辑（`server/app/services/workflow_revision_runtime.py`）。
+  原地编辑与 runtime 通道的配置版本追加
+  （`server/app/services/runtime_config.py`，M47——runtime 通道端点与
+  草稿发布的原地臂共用同一写函数；该写面不动执行态五表，故不在
+  EXEC-GENERATION-002 注册表域内）。
 - `skill-lock`（全局）：`SkillLockStore.put_lock` 的全部写（dispatch 首次 pin、
   `make skills-lock` 重锁）与 upgrade plan 阶段的锁内读
   （`server/app/services/skill_lock_store.py`）。dispatch 热路径的解析读不进

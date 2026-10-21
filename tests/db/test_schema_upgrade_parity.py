@@ -43,17 +43,16 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v101, job_batch_operations) must leave behind
-# so the undo step rewinds a current-shape database to exactly the previous
-# recorded version. v101 is DDL-only: the job_batch_operations table plus the
-# job_batch_operation_results child table and the two indexes (#946 批量操作
-# 异步化任务行); dropping both tables (indexes cascade with them; child first
-# for the FK) rewinds to v100. (v100 sits below: its run_batches.archived_at
-# column and partial index stay applied.)
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("job_batch_operation_results", "job_batch_operations")
+# Effects the newest migration (v102, workflow_runtime_config_versions) must
+# leave behind so the undo step rewinds a current-shape database to exactly
+# the previous recorded version. v102 is DDL-only: one migration-owned table
+# (M47 runtime config version history; schema file at its line ceiling, v96
+# precedent). Dropping the table rewinds to v101. (v101 sits below: its
+# job_batch_operations tables stay applied.)
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("workflow_runtime_config_versions",)
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "job_batch_operations"
+_NEWEST_MIGRATION_NAME = "workflow_runtime_config_versions"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the rewound database is a faithful
