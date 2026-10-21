@@ -1,6 +1,6 @@
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
 import { isRuntimeOnlyNodeChange } from './workflowStudioChanges'
-import { formatRuntimeChangedKeys } from '../shared/workflowRuntimeSlice'
+import { WorkflowPublishReviewDialogRuntimeNote } from './WorkflowPublishReviewDialogRuntimeNote'
 import {
   formatEdgeChange,
   formatIntakeChange,
@@ -120,19 +120,10 @@ export function WorkflowPublishReviewDialogChanges({
         </>
       )}
 
-      {runtimeChangedKeys.length > 0 && (
-        <p className={styles.runtimePending} role="note">
-          运行配置修改（{formatRuntimeChangedKeys(runtimeChangedKeys)}
-          ）尚未通过运行通道保存——将随本次发布一并写入新版本；如需立即生效，可在「运行配置」区单独保存。
-        </p>
-      )}
-      {runtimeChangedKeys.length === 0 && runtimeSavedKeys.length > 0 && (
-        <p className={styles.runtimeExcluded} role="note">
-          运行配置变更（{formatRuntimeChangedKeys(runtimeSavedKeys)}
-          ）已通过运行通道单独保存并生效，不包含在本次发布中，也不会出现在上方
-          diff。
-        </p>
-      )}
+      <WorkflowPublishReviewDialogRuntimeNote
+        runtimeChangedKeys={runtimeChangedKeys}
+        runtimeSavedKeys={runtimeSavedKeys}
+      />
     </>
   )
 }
