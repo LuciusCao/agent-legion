@@ -7,8 +7,8 @@ const AUTO_DISMISS_MS = 8000
 
 /**
  * 大批量异步受理通知（#1157 phase3）：关对话框后的秒级回执——持久
- * snackbar（8s），带「查看进度 →」跳任务中心；与 AppBar 徽标 pulse
- * 同时发生（徽标计数由 active 查询轮询驱动）。
+ * snackbar（8s），带「查看进度 →」跳任务中心；AppBar 徽标数字由
+ * active 查询轮询即时刷新（纯数字，无动效）。
  */
 export function TaskAcceptToast({ workspaceId }: { workspaceId?: string }) {
   const notice = useTaskCenterStore((s) => s.acceptedNotice)

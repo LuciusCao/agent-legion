@@ -10,7 +10,8 @@ v100）+ 真实前端 build，Playwright 操作 + 截图。截图为本目录 `s
    →「添加」→ 粘贴 ID 页签粘贴 1,200 个外部 ID（> 1,000 阈值）→ 对话框
    蓝色提示「转为后台创建」（`m1-dialog-bulk-hint.png`）→「创建运行」→
    `POST /runs mode=async` 秒级 202 → 对话框即关、左下受理通知带
-   「查看进度 →」、AppBar 徽标计数+1 并 pulse（`m1-accepted-toast-badge.png`）
+   「查看进度 →」、AppBar 徽标数字即时+1（纯数字无动效，用户验收裁决；
+   `m1-accepted-toast-badge.png`）
    → 点「查看进度 →」跳任务中心，新 run 以「排队中」卡片出现
    （`m1-task-center-after-accept.png`）。本次受理的 1,200 个 job 随后由
    feeder 真实建成并出现在任务列表（`m1-joblist-badge.png`，重拍于

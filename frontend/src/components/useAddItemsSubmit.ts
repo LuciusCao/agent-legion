@@ -34,7 +34,7 @@ type SubmitInputs = {
  * 添加条目对话框的提交序列（#1157 phase3 从 AddItemsDialog 拆出，体积预算
  * 同 AddItemsDialogSubmitText 先例）：组装 RunItem 列表后——大批量
  * （>1000，BULK_RUN_SUBMIT_THRESHOLD）走异步受理臂（202 句柄 + 受理通知 +
- * 徽标 pulse），小批量保留同步快路径（M40 兜底文案不动）。
+ * 徽标数字即时刷新），小批量保留同步快路径（M40 兜底文案不动）。
  */
 export function useAddItemsSubmit({
   workspaceId,

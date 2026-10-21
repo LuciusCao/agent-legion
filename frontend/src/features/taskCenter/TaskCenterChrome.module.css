@@ -23,22 +23,6 @@
   pointer-events: none;
 }
 
-.badge.pulse {
-  animation: tc-badge-pulse 1s ease 3;
-}
-
-@keyframes tc-badge-pulse {
-  0% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.5);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
 /* ===== 受理通知 snackbar（左下，8s 自动消失，带「查看进度 →」）===== */
 .acceptToast {
   position: fixed;
