@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   estimateRemaining,
   formatDayTime,
@@ -89,15 +89,15 @@ describe('runBatchToCard（#1157 phase3）', () => {
 })
 
 describe('card formatting helpers', () => {
-  // formatDayTime 按浏览器本地时区渲染「今天/昨天」；本组断言钉死
-  // Asia/Shanghai，否则 CI（TZ=UTC）会把 10:21 渲染成 02:21
-  // （main 红 run 39561162339）。
-  beforeAll(() => {
-    vi.stubEnv('TZ', 'Asia/Shanghai')
-  })
-  afterAll(() => {
-    vi.unstubAllEnvs()
-  })
+  // formatDayTime 按浏览器本地时区渲染「今天/昨天」；样本一律用本地时区
+  // 原语 new Date(y, m, d, …) 构造，断言在任何进程 TZ 下成立。不能用
+  // vi.stubEnv('TZ') 钉时区：vitest 以 worker_threads 跑测试
+  // （--pool=threads），worker 内 process.env 是快照副本、不触达进程级
+  // C environ 的 tzset，Linux 上 Date 时区永远取进程启动时的 TZ
+  // （vitest.config test.env 同理无效）——macOS 本地碰巧生效，Linux CI
+  // 红（main run 39571319114）。
+  const localIso = (y: number, m: number, d: number, hh: number, mm: number) =>
+    new Date(y, m - 1, d, hh, mm).toISOString()
 
   it('shortens run ids into the mono ref shape（尾段 digest，reviewer r1 P2-5）', () => {
     // run id 前段是 workspace/workflow 前缀（无区分度），取尾 8 位。
@@ -119,9 +119,13 @@ describe('card formatting helpers', () => {
   })
 
   it('renders 今天/昨天/日期 by calendar day', () => {
-    const now = new Date('2026-10-21T12:00:00+08:00')
-    expect(formatDayTime('2026-10-21T02:21:00+00:00', now)).toBe('今天 10:21')
-    expect(formatDayTime('2026-10-20T09:40:00+00:00', now)).toBe('昨天 17:40')
-    expect(formatDayTime('2026-10-14T06:00:00+00:00', now)).toBe('10月14日')
+    const now = new Date(2026, 9, 21, 12, 0)
+    expect(formatDayTime(localIso(2026, 10, 21, 10, 21), now)).toBe(
+      '今天 10:21'
+    )
+    expect(formatDayTime(localIso(2026, 10, 20, 17, 40), now)).toBe(
+      '昨天 17:40'
+    )
+    expect(formatDayTime(localIso(2026, 10, 14, 14, 0), now)).toBe('10月14日')
   })
 })

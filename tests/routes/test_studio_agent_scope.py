@@ -171,6 +171,19 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     # Context push (Studio node selection): the agent reads it back via
     # get_studio_context, so a scoped token must not rewrite its own context.
     ("PUT", f"{_CHAT}/sessions/{{session_id}}/context", {"selected_node_key": "n"}),
+    # Workflow runtime channel (M47): save and rollback mount
+    # reject_studio_agent_scope like the draft PUT — runtime config mutates
+    # the active revision in place, so it stays human-only.
+    (
+        "PATCH",
+        "/api/workspaces/{workspace_id}/workflow-runtime",
+        {"definition_yaml": _DRAFT_YAML},
+    ),
+    (
+        "POST",
+        "/api/workspaces/{workspace_id}/workflow-runtime/rollback",
+        {"version": 1},
+    ),
     # Shared-material propagation (#673): commits + tags local skill repos —
     # an effecting write for full sessions (the UI); scoped tokens use their
     # own scoped tool endpoint (exempt below), never this one.
