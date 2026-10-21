@@ -58,7 +58,8 @@ function FieldDot(props: { dirty: boolean; saved: boolean; hide?: boolean }) {
 /**
  * M48 运行配置专区（用户确认原型）：agent 节点的 runtime 字段
  * （provider/model/thinking/prompt/prompt_mode + tools/requires_labels）
- * 独立成区——绿色描边卡片 +「运行通道 · 即改即存」徽标 + 独立保存按钮
+ * 独立成区——与既有 Inspector 分区同构的中性专区 +「运行通道 · 即改即存」
+ * 小徽标 + 独立保存按钮
  * （运行通道：立即生效，不产生新版本）。编辑仍写草稿 YAML（单一事实源），
  * 但 execution-only 变更不点亮「未发布变更」（见 workflowStudioChanges）。
  * 只读 revision：横幅 + 全部控件禁用。自含执行档案缺失的 legacy 节点不渲染
