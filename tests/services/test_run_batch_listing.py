@@ -18,7 +18,13 @@ from server.app.services import run_batch_listing
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 
 _WORKSPACE = "listing-ws"
-_NOW = datetime.now(UTC)
+
+
+def _now() -> datetime:
+    """执行时点现读时钟，绝不在模块 import 时冻结：CI xdist 先全量
+    collection（导入本模块）再执行，两者相隔分钟级，import 时戳会让
+    7 天边界两侧的整体漂移出窗口（main 红 run 39561162339）。"""
+    return datetime.now(UTC)
 
 
 def _seed_workspace(job_db, ws_id: str = _WORKSPACE) -> None:
@@ -69,8 +75,12 @@ def _insert_batch(
 
 def test_auto_archive_boundary_is_seven_days(job_db) -> None:
     """finished_at 恰好落在窗口内的一侧进 ended，另一侧进 archived(auto)。"""
-    inside = _NOW - timedelta(days=7) + timedelta(minutes=1)
-    outside = _NOW - timedelta(days=7) - timedelta(minutes=1)
+    # 余量取 1 小时而非分钟级：测试读时钟与 service 读时钟之间隔着整段
+    # seed/查询，边界语义不受余量影响，但 collection→execution 漂移永远
+    # 不该能把两侧推出各自窗口。
+    now = _now()
+    inside = now - timedelta(days=7) + timedelta(hours=1)
+    outside = now - timedelta(days=7) - timedelta(hours=1)
     _insert_batch(job_db, "run-inside", status="completed", finished_at=inside)
     _insert_batch(job_db, "run-outside", status="completed", finished_at=outside)
 
@@ -100,7 +110,7 @@ def test_bad_cursor_raises_400_family(job_db) -> None:
     # active 视图不分页：带 cursor 即错。
     with pytest.raises(InvalidOperationError):
         run_batch_listing.list_run_batches(
-            job_db, _WORKSPACE, view="active", limit=20, cursor=f"{_NOW.isoformat()}|run-x"
+            job_db, _WORKSPACE, view="active", limit=20, cursor=f"{_now().isoformat()}|run-x"
         )
 
 
@@ -121,7 +131,7 @@ def test_archive_service_404_and_409(job_db) -> None:
         "run-foreign",
         workspace_id="listing-other",
         status="completed",
-        finished_at=_NOW,
+        finished_at=_now(),
     )
 
     with pytest.raises(NotFoundError):
@@ -131,7 +141,7 @@ def test_archive_service_404_and_409(job_db) -> None:
     with pytest.raises(ConflictError):
         run_batch_listing.archive_run_batch(job_db, _WORKSPACE, "run-open")
 
-    _insert_batch(job_db, "run-done", status="failed", finished_at=_NOW)
+    _insert_batch(job_db, "run-done", status="failed", finished_at=_now())
     archived = run_batch_listing.archive_run_batch(job_db, _WORKSPACE, "run-done")
     assert archived["batch"]["archive_source"] == "manual"
     assert archived["batch"]["archived_at"] is not None
@@ -150,7 +160,7 @@ def test_failed_item_count_from_chunk_errors(job_db) -> None:
         processed=3000,
         jobs_created=2788,
         chunk_errors=[{"chunk_start": 2800, "error": "外部连接超时"}],
-        finished_at=_NOW,
+        finished_at=_now(),
     )
     _insert_batch(
         job_db,
@@ -160,7 +170,7 @@ def test_failed_item_count_from_chunk_errors(job_db) -> None:
         processed=12000,
         jobs_created=2000,
         chunk_errors=[{"chunk_start": i * 500, "error": "x"} for i in range(20)],
-        finished_at=_NOW,
+        finished_at=_now(),
     )
     _insert_batch(
         job_db,
@@ -170,7 +180,7 @@ def test_failed_item_count_from_chunk_errors(job_db) -> None:
         processed=100,
         jobs_created=90,
         chunk_errors=[{"index": 3, "error": "无 chunk_start 的旧形状"}],
-        finished_at=_NOW,
+        finished_at=_now(),
     )
 
     ended = run_batch_listing.list_run_batches(
@@ -190,7 +200,7 @@ def test_failed_item_count_from_chunk_errors(job_db) -> None:
 def test_resubmit_heal_clears_archived_at(job_db) -> None:
     """failed+archived 的 batch 被同 digest 重提治愈后重回 active，归档位清空。"""
     run_id = "run-heal"
-    _insert_batch(job_db, run_id, status="failed", finished_at=_NOW, archived_at=_NOW)
+    _insert_batch(job_db, run_id, status="failed", finished_at=_now(), archived_at=_now())
     spec = {"items": [{"type": "ref", "connection_key": "c", "external_id": "e"}]}
 
     reset = job_db.reset_run_batch_for_resubmit(run_id, spec, 1)
