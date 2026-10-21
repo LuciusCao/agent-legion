@@ -62,6 +62,32 @@ describe('countNodeChanges', () => {
     )
     expect(counts).toEqual({ added: 1, modified: 1, removed: 1, total: 3 })
   })
+
+  it('M48：execution-only 变更（运行通道字段）不计入未发布变更', () => {
+    const executionOnly = {
+      ...nodeChange('modified', 'a'),
+      fields: ['execution'],
+    }
+    expect(
+      countNodeChanges(makeSummary({ nodeChanges: [executionOnly] }))
+    ).toBeNull()
+    // execution + runtime（切引擎）属结构改动，照常计数。
+    const runtimeSwitch = {
+      ...nodeChange('modified', 'a'),
+      fields: ['execution', 'runtime'],
+    }
+    expect(
+      countNodeChanges(makeSummary({ nodeChanges: [runtimeSwitch] }))
+    ).toEqual({ added: 0, modified: 1, removed: 0, total: 1 })
+    // execution + 其他结构字段同样照常计数。
+    const mixed = {
+      ...nodeChange('modified', 'a'),
+      fields: ['execution', 'label'],
+    }
+    expect(countNodeChanges(makeSummary({ nodeChanges: [mixed] }))?.total).toBe(
+      1
+    )
+  })
 })
 
 describe('applyCompareChanges', () => {
@@ -82,6 +108,19 @@ describe('applyCompareChanges', () => {
       ghost: false,
     })
     expect(nodes.find((n) => n.key === 'b')?.changeType).toBeUndefined()
+  })
+
+  it('M48：execution-only 变更不打画布角标', () => {
+    const { nodes } = applyCompareChanges(
+      baseNodes,
+      baseEdges,
+      makeSummary({
+        nodeChanges: [
+          { ...nodeChange('modified', 'a'), fields: ['execution'] },
+        ],
+      })
+    )
+    expect(nodes.find((n) => n.key === 'a')?.changeType).toBeUndefined()
   })
 
   it('tags a removed baseline node with ghost styling', () => {

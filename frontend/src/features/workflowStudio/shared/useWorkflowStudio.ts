@@ -5,6 +5,7 @@ import {
   useStudioNodeSelection,
 } from '../inspector/useStudioNodeSelection'
 import { useWorkflowDraftCompare } from './useWorkflowDraftCompare'
+import { useStudioRuntimeChannel } from './useStudioRuntimeChannel'
 import { useWorkflowStudioActions } from './useWorkflowStudioActions'
 import { useWorkflowStudioData } from './useWorkflowStudioData'
 import { useWorkflowStudioDraftStore } from './useWorkflowStudioDraftStore'
@@ -37,6 +38,14 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     loadState === 'empty'
   )
   const actions = useWorkflowStudioActions(workspaceId, draft, reload, compare)
+  // M48 运行通道：runtime 字段即改即存（不产生 revision），与结构发布通道并列。
+  const runtimeChannel = useStudioRuntimeChannel({
+    workspaceId,
+    originalYaml,
+    draftYaml: draft.draftYaml,
+    setDraftYaml: draft.setDraftYaml,
+    markRuntimeChannelSaved: draft.markRuntimeChannelSaved,
+  })
   const { nodes, edges } = useStudioDag(
     draft.visibleWorkflow,
     catalog.agents,
@@ -89,6 +98,8 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     retryCompare: compare.retry,
     compareErrors: compare.compareErrors,
     compareSummary: compare.compareSummary,
+    // M48 运行通道字段（runtimeChangedKeys / saveRuntimeConfig / 等六项）
+    ...runtimeChannel,
     reviewDialogOpen: actions.reviewDialogOpen,
     reviewStale: actions.reviewStale,
     closeReviewDialog: actions.closeReviewDialog,

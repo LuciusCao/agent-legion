@@ -1,4 +1,5 @@
 import type { WorkflowNodeRecord } from '../../../types'
+import { WorkflowChannelBadge } from './WorkflowChannelBadge'
 import { WorkflowInspectorDisclosure } from './WorkflowInspectorDisclosure'
 import { ItemList } from './WorkflowNodeInspectorLists'
 import { WorkflowNodeDataEditor } from './WorkflowNodeDataEditor'
@@ -11,7 +12,11 @@ export function WorkflowNodeDataContractSection(props: {
 }) {
   const count = props.node.inputs.length + props.node.outputs.length
   return (
-    <WorkflowInspectorDisclosure title="数据契约" summary={`${count} 个产物`}>
+    <WorkflowInspectorDisclosure
+      title="数据契约"
+      summary={`${count} 个产物`}
+      titleSuffix={<WorkflowChannelBadge kind="structure" />}
+    >
       {props.readOnly ? (
         <>
           <ItemList items={props.node.inputs} />

@@ -1,0 +1,233 @@
+.card {
+  border: 1.5px solid #bfe3d4;
+  border-radius: 12px;
+  background: #eef7f3;
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1c1e;
+}
+.titleSpacer {
+  flex: 1;
+}
+.savedDot {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #1e8e3e;
+  background: #e6f4ea;
+  border-radius: 8px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+.dirtyDot {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #e8710a;
+  background: #fef3e2;
+  border-radius: 8px;
+  padding: 1px 7px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.lead {
+  font-size: 11.5px;
+  color: #3c6e5d;
+  line-height: 1.6;
+  margin: 0;
+}
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fieldLabelRow {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: #43474e;
+  margin-bottom: 4px;
+  gap: 2px;
+}
+.fieldHint {
+  font-size: 11px;
+  color: #687078;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.segmented {
+  display: inline-flex;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  width: fit-content;
+}
+.segmented button {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #5f6368;
+  font-family: inherit;
+}
+.segmented button.active {
+  background: #1a1a1a;
+  color: #fff;
+  font-weight: 600;
+}
+.segmented button:disabled {
+  cursor: not-allowed;
+}
+.segmentedDisabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.promptArea {
+  width: 100%;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #1a1c1e;
+  background: #fff;
+  outline: none;
+  resize: vertical;
+  min-height: 64px;
+  line-height: 1.6;
+  box-sizing: border-box;
+}
+.promptArea:disabled {
+  background: #f1f3f4;
+  color: #9aa0a6;
+  cursor: not-allowed;
+}
+.modeSelect {
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: #1a1c1e;
+  background: #fff;
+  font-family: inherit;
+  margin-top: 6px;
+}
+.saveBar {
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px dashed #bfe3d4;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.saveHint {
+  display: flex;
+  gap: 6px;
+  font-size: 11.5px;
+  color: #3c6e5d;
+  line-height: 1.55;
+  align-items: flex-start;
+}
+.saveHintIcon {
+  font-size: 13px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.saveButton {
+  align-self: stretch;
+  text-align: center;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  background: #0b6b53;
+  color: #fff;
+  line-height: 1.35;
+}
+.saveButton:hover:not(:disabled) {
+  background: #095c47;
+}
+.saveButton:disabled {
+  background: #c2dcd0;
+  color: #33604e;
+  cursor: not-allowed;
+}
+.saveButton small {
+  display: block;
+  font-weight: 400;
+  font-size: 11px;
+  opacity: 0.85;
+}
+.topNote {
+  font-size: 11px;
+  color: #6b7d75;
+  border-top: 1px dashed #bfe3d4;
+  padding-top: 8px;
+  line-height: 1.6;
+}
+.topNote code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.readonlyBanner {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  background: #e8f0fe;
+  color: #174ea6;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.readonlyBannerIcon {
+  font-size: 14px;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+.historyButton {
+  border: 1px solid #bfe3d4;
+  background: #fff;
+  color: #0b6b53;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.historyButton:hover:not(:disabled) {
+  background: #f4faf7;
+}
+.historyButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.invalidTools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #b3261e;
+  margin-top: 4px;
+  line-height: 1.5;
+}

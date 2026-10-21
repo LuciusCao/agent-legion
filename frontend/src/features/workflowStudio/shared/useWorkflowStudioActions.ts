@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { publishWorkflowDraft } from '../../../api'
+import { hasStructuralChanges } from '../validation/workflowStudioChanges'
 import { useValidationFeedback } from '../validation/useValidationFeedback'
 import { useDraftAutoValidation } from './useDraftAutoValidation'
 import type { DraftSaveState } from './draftSaveTypes'
@@ -62,11 +63,12 @@ export function useWorkflowStudioActions(
     setValidating,
   })
   const { compareState, compareErrors, compareSummary } = compare
+  // M48 双通道：execution-only 变更（runtime 字段）不点亮发布——运行配置
+  // 走运行通道的「保存运行配置」即改即存；发布复核只承载结构变更。
   const hasCompareChanges = Boolean(
-    compareSummary?.nodeChanges.length ||
-    compareSummary?.edgeChanges.length ||
-    compareSummary?.intakeChanges.length ||
-    compareSummary?.riskFlags.length
+    compareSummary &&
+    (hasStructuralChanges(compareSummary) ||
+      compareSummary.riskFlags.length > 0)
   )
   const hasBlockingCompareError = Boolean(
     compareErrors?.some(

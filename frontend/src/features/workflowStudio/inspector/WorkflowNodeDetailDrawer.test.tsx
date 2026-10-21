@@ -416,7 +416,9 @@ describe('WorkflowNodeDetailBody（inspector 级，抽屉壳不介入）', () =>
     expect(screen.queryByText('agent-key-info')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Agent ID')).not.toBeInTheDocument()
     expect(
-      screen.queryByRole('button', { name: /发布|新建 Agent/ })
+      // M48：「结构通道 · 发布生效」徽标挂在 disclosure 按钮的可访问名里，
+      // 锚定开头避免误匹配（本断言针对 Agent 编辑器的发布/新建按钮，#1079）。
+      screen.queryByRole('button', { name: /^发布|新建 Agent/ })
     ).not.toBeInTheDocument()
   })
 

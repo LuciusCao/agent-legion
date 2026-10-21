@@ -97,6 +97,8 @@ export function reviewDialogProps(studio: {
   revision?: WorkflowRevisionSummary | null
   createsRevision?: boolean
   compareSummary?: ChangeSummaryViewModel | null
+  runtimeChangedKeys?: string[]
+  lastRuntimeSavedKeys?: string[]
 }) {
   return {
     activeRevision: studio.revision ?? null,
@@ -104,5 +106,7 @@ export function reviewDialogProps(studio: {
     createsRevision: studio.createsRevision,
     definitionHash: studio.revision?.definition_hash ?? null,
     summary: studio.compareSummary ?? null,
+    runtimeChangedKeys: studio.runtimeChangedKeys ?? [],
+    runtimeSavedKeys: studio.lastRuntimeSavedKeys ?? [],
   }
 }

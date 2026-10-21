@@ -1,0 +1,84 @@
+.group {
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 8px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+}
+.groupRuntime {
+  background: #eef7f3;
+  border-color: #bfe3d4;
+}
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1c1e;
+  margin-bottom: 4px;
+}
+.groupCount {
+  color: #687078;
+  font-weight: 400;
+}
+.badge {
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 10px;
+  padding: 1px 8px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.badgeRuntime {
+  background: #fff;
+  color: #0b6b53;
+  border: 1px solid #bfe3d4;
+}
+.badgeStructure {
+  background: #eceff1;
+  color: #546e7a;
+}
+.diffRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  padding: 2px 0;
+  color: #455a64;
+}
+.diffField {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #1a1c1e;
+  word-break: break-all;
+}
+.diffValue {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #0b6b53;
+  font-weight: 600;
+  word-break: break-all;
+}
+.groupHint {
+  font-size: 11px;
+  color: #455a64;
+  margin: 6px 0;
+  line-height: 1.5;
+}
+.groupActions {
+  display: flex;
+  gap: 8px;
+}
+.applyRuntimeButton {
+  font-size: 12px;
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  border: 1px solid #0b6b53;
+  background: #0b6b53;
+  color: #fff;
+  font-weight: 600;
+}
+.applyRuntimeButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

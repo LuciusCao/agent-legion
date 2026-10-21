@@ -13,6 +13,7 @@ import type { CompareResponse } from '../shared/useWorkflowDraftCompare.types'
 import { WorkflowChangeSummaryPanel } from '../validation/WorkflowChangeSummaryPanel'
 import { useStudioStateOptional } from '../shared/studioStateContext'
 import { StudioDraftCardHeader } from './StudioDraftCardHeader'
+import { WorkflowDraftCardChannelGroups } from './WorkflowDraftCardChannels'
 import {
   WorkflowDraftPublishButton,
   WorkflowDraftStaleHint,
@@ -69,6 +70,12 @@ export function WorkflowDraftCard(props: WorkflowProps) {
         {props.draft.compareMeta ?? 'agent 产出的定义草稿'}
         {props.draft.validated ? ' · 校验通过' : ' · 未通过校验'}
       </div>
+      {/* M48：双通道分组（运行配置「应用并生效」/ 结构变更「存为草稿」）——
+          无 studio 上下文或无差异时组件自身返回 null，退化为下方单键应用。 */}
+      <WorkflowDraftCardChannelGroups
+        draftYaml={props.draft.yaml}
+        onApply={props.onApply}
+      />
       <div className={styles.draftActions}>
         <button type="button" className={styles.draftButton} onClick={openDiff}>
           查看 diff

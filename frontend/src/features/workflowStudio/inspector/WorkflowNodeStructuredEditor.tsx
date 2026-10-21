@@ -1,4 +1,5 @@
 import type { WorkflowNodeRecord } from '../../../types'
+import { WorkflowChannelBadge } from './WorkflowChannelBadge'
 import {
   parseWorkflowNode,
   patchWorkflowNodeCapability,
@@ -37,7 +38,10 @@ export function WorkflowNodeStructuredEditor({
       aria-label="Workflow node structured editor"
       className={styles.structuredSection}
     >
-      <h3 className={styles.structuredTitle}>基本设置</h3>
+      <h3 className={styles.structuredTitle}>
+        基本设置
+        <WorkflowChannelBadge kind="structure" />
+      </h3>
       <label className={styles.field}>
         <span className={styles.fieldLabel}>节点名称</span>
         <input

@@ -41,6 +41,7 @@ const draft: DraftWithSave = {
   revisionLoadError: null,
   draftSave: { status: 'idle', savedAt: null },
   markDraftPublished: vi.fn(),
+  markRuntimeChannelSaved: vi.fn(),
   invalidateServerDraft: vi.fn(() => Promise.resolve()),
   selectRevision: vi.fn(),
   backToDraft: vi.fn(),

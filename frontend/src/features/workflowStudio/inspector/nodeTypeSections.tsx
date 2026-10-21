@@ -7,6 +7,8 @@ import { WorkflowNodeDataContractSection } from './WorkflowNodeDataContractSecti
 import { WorkflowNodeDependencySection } from './WorkflowNodeDependencySection'
 import { WorkflowNodeEditorSection } from './WorkflowNodeEditorSection'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
+import { WorkflowNodeRuntimeChannelSection } from './WorkflowNodeRuntimeChannelSection'
+import { WorkflowNodeStructureSaveBar } from './WorkflowNodeStructureSaveBar'
 import { WorkflowNodeApprovalConfigSection } from './WorkflowNodeApprovalConfigSection'
 import type { InspectorSectionProps } from './WorkflowNodeInspectorSections'
 
@@ -34,15 +36,19 @@ export const NODE_TYPE_SECTIONS: Record<SwitchableNodeType, SectionSpec> = {
       DependencySection,
     ],
   },
-  // agent：基本设置 → 执行能力（节点执行档案：runtime / skill / 执行
-  // 参数 / tools，#935）→ 节点配置（运行时覆盖通道）→ 数据契约 → 依赖。
+  // agent：基本设置 → 执行能力（节点执行档案：runtime / skill，#935——
+  // 结构通道）→ 运行配置（M48 运行通道专区：provider/model/thinking/
+  // prompt/tools/requires_labels 即改即存）→ 节点配置 → 数据契约 →
+  // 依赖 → 结构保存条（props 切片类型兼容，直接注册免适配器）。
   agent: {
     sections: [
       EditorSection,
       ExecutionSection,
+      RuntimeChannelSection,
       NodeConfigSection,
       DataContractSection,
       DependencySection,
+      WorkflowNodeStructureSaveBar,
     ],
   },
   // approval：基本设置 → 审批门配置 → 数据契约 → 依赖。无执行能力/
@@ -88,6 +94,17 @@ function ConfigSchemaSection(props: InspectorSectionProps) {
 function ExecutionSection(props: InspectorSectionProps) {
   return (
     <WorkflowNodeExecutionSection
+      node={props.details.node}
+      definitionYaml={props.definitionYaml}
+      setDefinitionYaml={props.setDefinitionYaml}
+      readOnly={props.readOnly}
+    />
+  )
+}
+// M48：agent 节点的运行配置专区（运行通道，即改即存不产生版本）。
+function RuntimeChannelSection(props: InspectorSectionProps) {
+  return (
+    <WorkflowNodeRuntimeChannelSection
       node={props.details.node}
       definitionYaml={props.definitionYaml}
       setDefinitionYaml={props.setDefinitionYaml}

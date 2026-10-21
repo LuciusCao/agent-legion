@@ -83,6 +83,22 @@ export function patchWorkflowNodeTools(
   })
 }
 
+// M48：节点级 requires_labels（仅 agent 节点，运行通道字段）。空 mapping =
+// 未声明（任意可用 worker），与 tools 的「空即删键」语义一致。
+export function patchWorkflowNodeRequiresLabels(
+  rawYaml: string,
+  nodeKey: string,
+  labels: Record<string, string>
+): string {
+  return patchNode(rawYaml, nodeKey, (node) => {
+    if (Object.keys(labels).length === 0) {
+      delete node.requires_labels
+      return
+    }
+    node.requires_labels = labels
+  })
+}
+
 export function patchWorkflowNodeTerminalOutcome(
   rawYaml: string,
   nodeKey: string,
