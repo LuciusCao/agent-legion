@@ -41,7 +41,10 @@ function listEqual(a: string[], b: string[]) {
 }
 
 /** 「已修改 · 待保存」/「已生效」字段状态点。 */
-function FieldDot(props: { dirty: boolean; saved: boolean }) {
+function FieldDot(props: { dirty: boolean; saved: boolean; hide?: boolean }) {
+  // 只读 revision 视图不挂状态点——字段展示的是被查看版本，与 active 基线
+  // 的差异不是「待保存修改」。
+  if (props.hide) return null
   if (props.dirty) {
     return <span className={styles.dirtyDot}>已修改 · 待保存</span>
   }
@@ -284,6 +287,7 @@ export function WorkflowNodeRuntimeChannelSection(props: {
             readOnly={props.readOnly}
             labelSuffix={
               <FieldDot
+                hide={props.readOnly}
                 dirty={fieldDirty('provider')}
                 saved={fieldSaved('provider')}
               />
@@ -299,6 +303,7 @@ export function WorkflowNodeRuntimeChannelSection(props: {
             readOnly={props.readOnly}
             labelSuffix={
               <FieldDot
+                hide={props.readOnly}
                 dirty={fieldDirty('model')}
                 saved={fieldSaved('model')}
               />
@@ -311,6 +316,7 @@ export function WorkflowNodeRuntimeChannelSection(props: {
             readOnly={props.readOnly}
             labelSuffix={
               <FieldDot
+                hide={props.readOnly}
                 dirty={fieldDirty('thinking')}
                 saved={fieldSaved('thinking')}
               />
@@ -347,6 +353,7 @@ export function WorkflowNodeRuntimeChannelSection(props: {
             <div className={styles.fieldLabelRow}>
               Prompt
               <FieldDot
+                hide={props.readOnly}
                 dirty={fieldDirty('prompt') || fieldDirty('prompt_mode')}
                 saved={
                   !fieldDirty('prompt') &&
@@ -388,7 +395,11 @@ export function WorkflowNodeRuntimeChannelSection(props: {
           <div>
             <div className={styles.fieldLabelRow}>
               Tools 覆盖
-              <FieldDot dirty={toolsDirty} saved={toolsSaved} />
+              <FieldDot
+                hide={props.readOnly}
+                dirty={toolsDirty}
+                saved={toolsSaved}
+              />
             </div>
             <WorkflowChipEditor
               ariaLabel="Tools 覆盖"
@@ -449,7 +460,11 @@ export function WorkflowNodeRuntimeChannelSection(props: {
           <div>
             <div className={styles.fieldLabelRow}>
               Requires labels
-              <FieldDot dirty={labelsDirty} saved={labelsSaved} />
+              <FieldDot
+                hide={props.readOnly}
+                dirty={labelsDirty}
+                saved={labelsSaved}
+              />
             </div>
             <WorkflowChipEditor
               ariaLabel="Requires labels"

@@ -1,5 +1,6 @@
 import type { WorkflowNodeRecord } from '../../../types'
 import { WorkflowChannelBadge } from './WorkflowChannelBadge'
+import { useStudioStateOptional } from '../shared/studioStateContext'
 import {
   parseWorkflowNode,
   patchWorkflowNodeCapability,
@@ -13,6 +14,17 @@ type Props = {
   onDefinitionYamlChange: (nextYaml: string) => void
 }
 
+/** M48：结构字段的「已修改 · 待发布」标记（用户确认原型屏 3/4）——
+ * compare 报告的该节点变更字段即数据源；execution-only 变更已被
+ * compare 单独归类，不会在此误挂。 */
+function useStructuralDirtyFields(nodeKey: string): Set<string> {
+  const studio = useStudioStateOptional()
+  const change = studio?.compareSummary?.nodeChanges.find(
+    (item) => item.nodeKey === nodeKey
+  )
+  return new Set(change?.fields ?? [])
+}
+
 export function WorkflowNodeStructuredEditor({
   node,
   definitionYaml,
@@ -21,6 +33,7 @@ export function WorkflowNodeStructuredEditor({
   const draftNode = parseWorkflowNode(definitionYaml, node.key) ?? node
   const label = draftNode.label
   const capability = draftNode.capability ?? node.capability
+  const dirtyFields = useStructuralDirtyFields(node.key)
   const handleLabelChange = (event: React.ChangeEvent<HTMLInputElement>) =>
     onDefinitionYamlChange(
       patchWorkflowNodeLabel(definitionYaml, node.key, event.target.value)
@@ -43,7 +56,12 @@ export function WorkflowNodeStructuredEditor({
         <WorkflowChannelBadge kind="structure" />
       </h3>
       <label className={styles.field}>
-        <span className={styles.fieldLabel}>节点名称</span>
+        <span className={styles.fieldLabel}>
+          节点名称
+          {dirtyFields.has('label') && (
+            <span className={styles.dirtyDot}>已修改 · 待发布</span>
+          )}
+        </span>
         <input
           aria-label="节点名称"
           className={styles.fieldInput}
@@ -53,7 +71,12 @@ export function WorkflowNodeStructuredEditor({
       </label>
       {showsCapability && (
         <label className={styles.field}>
-          <span className={styles.fieldLabel}>能力 Key</span>
+          <span className={styles.fieldLabel}>
+            能力 Key
+            {dirtyFields.has('capability') && (
+              <span className={styles.dirtyDot}>已修改 · 待发布</span>
+            )}
+          </span>
           <input
             aria-label="能力"
             className={styles.fieldInput}

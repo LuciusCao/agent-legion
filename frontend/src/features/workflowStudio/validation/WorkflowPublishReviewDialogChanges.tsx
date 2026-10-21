@@ -21,16 +21,20 @@ type Props = {
 }
 
 /* M48 双通道：复核框只列结构 diff——execution-only 的节点变更（runtime
- * 字段）不出现在列表里，改用信息条明示其去向（已经运行通道单独生效 /
- * 未保存的将随发布写入新版本）。 */
+ * 字段）整行剔除；结构/execution 混合的节点保留行但字段清单剥掉
+ * execution（其去向由下方信息条明示：已经运行通道单独生效 / 未保存的将
+ * 随发布写入新版本）。 */
 export function WorkflowPublishReviewDialogChanges({
   summary,
   runtimeChangedKeys = [],
   runtimeSavedKeys = [],
 }: Props) {
-  const structuralNodeChanges = (summary?.nodeChanges ?? []).filter(
-    (change) => !isRuntimeOnlyNodeChange(change)
-  )
+  const structuralNodeChanges = (summary?.nodeChanges ?? [])
+    .filter((change) => !isRuntimeOnlyNodeChange(change))
+    .map((change) => ({
+      ...change,
+      fields: change.fields.filter((field) => field !== 'execution'),
+    }))
   const hasChanges =
     summary &&
     (structuralNodeChanges.length > 0 ||

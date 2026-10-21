@@ -164,6 +164,16 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
     expect(screen.getByRole('button', { name: /保存运行配置/ })).toBeDisabled()
   })
 
+  it('只读视图不挂「已修改 · 待保存」状态点（展示的是被查看版本）', () => {
+    const draft = baselineYaml.replace(
+      'execution:\n      runtime: pi\n',
+      'execution:\n      runtime: pi\n      model: gpt-5\n'
+    )
+    renderSection({ definitionYaml: draft, readOnly: true })
+
+    expect(screen.queryByText('已修改 · 待保存')).not.toBeInTheDocument()
+  })
+
   it('writes a node model override to workflow YAML', () => {
     let nextYaml = ''
     renderSection({
