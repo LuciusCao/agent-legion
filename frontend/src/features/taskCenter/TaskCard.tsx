@@ -77,9 +77,10 @@ function footerLine(card: TaskCardModel, nowMs: number): string {
 }
 
 function archiveLine(card: TaskCardModel): string {
+  // 不署名：created_by 是提交者而非归档者，多操作者场景会署错名
+  // （reviewer r1 P2-2）；archived_by 列属 follow-up，落地后再补归属。
   if (card.archiveSource === 'manual' && card.archivedAt) {
-    const actor = card.createdBy || '你'
-    return `${formatDayTime(card.archivedAt)} 由 ${actor} 手动归档`
+    return `${formatDayTime(card.archivedAt)} 手动归档`
   }
   // auto：归档时间 = 结束时间 + 7 天窗口（查询口径，不落列）。
   if (card.finishedAt) {
@@ -152,6 +153,15 @@ export function TaskCard({
           <span className={styles.skip}>
             跳过 <b>{card.skippedCount.toLocaleString()}</b>
             {card.skipNote ? `（${card.skipNote}）` : ''}
+          </span>
+        )}
+        {card.failedCount > 0 && (
+          <span className={styles.fail}>
+            失败{' '}
+            <b>
+              {card.failedLowerBound ? '≥' : ''}
+              {card.failedCount.toLocaleString()}
+            </b>
           </span>
         )}
       </div>

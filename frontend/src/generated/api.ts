@@ -6234,6 +6234,11 @@ export interface components {
      *
      *     archive_source：manual = 用户在任务中心手动归档；auto = 终态结束超过
      *     7 天按查询口径自动归档（不落列）；非归档视图为 null。
+     *     failed_item_count（reviewer r1 P2-1）：由 chunk_errors 推导的 chunk
+     *     级失败条目数（chunk_start + RUN_BATCH_CHUNK_SIZE，以 items_total 钳
+     *     制），调用方据此把「跳过（已有任务）」与「失败」拆开——跳过数 =
+     *     processed_count − jobs_created − failed_item_count；chunk_errors 打
+     *     满 20 条时 failed_item_count 为下限（lower_bound=true）。
      */
     RunBatchListItem: {
       /** Archive Source */
@@ -6250,6 +6255,16 @@ export interface components {
       created_by: string
       /** Error Message */
       error_message: string
+      /**
+       * Failed Item Count
+       * @description chunk 级失败的条目数（由 chunk_errors 推导；dedup 跳过不含在内）
+       */
+      failed_item_count: number
+      /**
+       * Failed Item Count Lower Bound
+       * @description chunk_errors 已达 20 条上限时为 true：真实失败数 ≥ failed_item_count
+       */
+      failed_item_count_lower_bound: boolean
       /** Finished At */
       finished_at: string | null
       /** Items Total */

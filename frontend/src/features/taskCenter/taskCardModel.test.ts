@@ -23,6 +23,8 @@ function batch(overrides: Partial<RunBatchListItem>): RunBatchListItem {
     created_by: 'tester',
     archived_at: null,
     archive_source: null,
+    failed_item_count: 0,
+    failed_item_count_lower_bound: false,
     ...overrides,
   } as RunBatchListItem
 }
@@ -39,19 +41,38 @@ describe('runBatchToCard（#1157 phase3）', () => {
     expect(runBatchToCard(batch({ status: 'completed' })).status).toBe('done')
   })
 
-  it('derives skipped = processed − created and marks chunk-error completions partial', () => {
+  it('derives skipped = processed − created − chunk-failed（reviewer r1 P2-1）', () => {
     const done = runBatchToCard(batch({ status: 'completed' }))
     expect(done.skippedCount).toBe(200)
     expect(done.okCount).toBe(1000)
+    expect(done.failedCount).toBe(0)
 
+    // processed 2400 / created 2000 / chunk 失败 400 → 跳过 0、失败 400；
+    // chunk 失败条目不再被贴「已有任务」标签。
     const partial = runBatchToCard(
       batch({
         status: 'completed',
-        chunk_errors: [{ index: 3, error: '连接超时' }],
+        processed_count: 2400,
+        jobs_created: 2000,
+        chunk_errors: [{ chunk_start: 2000, error: '连接超时' }],
+        failed_item_count: 400,
       })
     )
     expect(partial.status).toBe('partial')
+    expect(partial.failedCount).toBe(400)
+    expect(partial.failedLowerBound).toBe(false)
+    expect(partial.skippedCount).toBe(0)
     expect(partial.errorMessage).toBe('连接超时')
+
+    const lowerBound = runBatchToCard(
+      batch({
+        status: 'completed',
+        chunk_errors: [{ chunk_start: 0, error: 'x' }],
+        failed_item_count: 10000,
+        failed_item_count_lower_bound: true,
+      })
+    )
+    expect(lowerBound.failedLowerBound).toBe(true)
   })
 
   it('keeps the archive provenance fields', () => {
@@ -68,8 +89,9 @@ describe('runBatchToCard（#1157 phase3）', () => {
 })
 
 describe('card formatting helpers', () => {
-  it('shortens run ids into the mono ref shape', () => {
-    expect(shortRunRef('abcdef1234567890')).toBe('run-abcdef12')
+  it('shortens run ids into the mono ref shape（尾段 digest，reviewer r1 P2-5）', () => {
+    // run id 前段是 workspace/workflow 前缀（无区分度），取尾 8 位。
+    expect(shortRunRef('abcdef1234567890')).toBe('run-34567890')
     expect(shortRunRef('run-already')).toBe('run-already')
   })
 

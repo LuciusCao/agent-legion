@@ -22,6 +22,7 @@ from server.app.jobs.queries.run_batches_listing import (  # fmt: skip
 from server.app.services import run_batch
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.services.job_intake_workspace import get_workspace
+from server.app.services.run_batch_feeder import MAX_CHUNK_ERRORS, RUN_BATCH_CHUNK_SIZE
 
 RunBatchView = Literal["active", "ended", "archived"]
 _VIEWS: tuple[str, ...] = ("active", "ended", "archived")
@@ -67,7 +68,12 @@ def _as_utc(value: Any) -> datetime:
 
 def batch_list_item(row: dict[str, Any], *, now: datetime) -> dict[str, Any]:
     """The task-center card payload: the #1117 batch handle plus the archive
-    fields (归档时间 + 来源标注 manual/auto) and the operator attribution."""
+    fields (归档时间 + 来源标注 manual/auto) and the operator attribution.
+
+    ``failed_item_count`` 由 chunk_errors 推导（reviewer r1 P2-1）：feeder
+    的 chunk 容错跳过整个 chunk（RUN_BATCH_CHUNK_SIZE，按 items_total 钳
+    制），这批条目不能算「已有任务」跳过；chunk_errors 最多
+    MAX_CHUNK_ERRORS 条，打满时真实失败数 ≥ 推导值（lower_bound）。"""
     item = run_batch.batch_record(row)
     archived_at = iso_optional(row.get("archived_at"))
     finished_at = row.get("finished_at")
@@ -80,11 +86,19 @@ def batch_list_item(row: dict[str, Any], *, now: datetime) -> dict[str, Any]:
         and _as_utc(finished_at) < now - timedelta(days=AUTO_ARCHIVE_DAYS)
     ):
         archive_source = "auto"
+    items_total = int(row.get("items_total") or 0)
+    failed_item_count = 0
+    for error in item["chunk_errors"]:
+        chunk_start = error.get("chunk_start")
+        if isinstance(chunk_start, int) and not isinstance(chunk_start, bool):
+            failed_item_count += min(RUN_BATCH_CHUNK_SIZE, max(0, items_total - chunk_start))
     return {
         **item,
         "created_by": str(row.get("created_by") or ""),
         "archived_at": archived_at,
         "archive_source": archive_source,
+        "failed_item_count": failed_item_count,
+        "failed_item_count_lower_bound": len(item["chunk_errors"]) >= MAX_CHUNK_ERRORS,
     }
 
 

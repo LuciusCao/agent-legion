@@ -9,6 +9,7 @@ archived view).
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -36,6 +37,10 @@ def _insert_batch(
     workspace_id: str = _WORKSPACE,
     finished_at: datetime | None = None,
     archived_at: datetime | None = None,
+    items_total: int = 3,
+    processed: int = 0,
+    jobs_created: int = 0,
+    chunk_errors: list[dict] | None = None,
 ) -> None:
     _seed_workspace(job_db, workspace_id)
     with job_db.connect() as conn:
@@ -44,9 +49,21 @@ def _insert_batch(
             (run_id, workspace_id),
         )
         conn.execute(
-            "insert into run_batches(run_id, workspace_id, status, finished_at, archived_at)"
-            " values (%s, %s, %s, %s, %s)",
-            (run_id, workspace_id, status, finished_at, archived_at),
+            "insert into run_batches("
+            " run_id, workspace_id, status, items_total, next_index, jobs_created,"
+            " chunk_errors_json, finished_at, archived_at)"
+            " values (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                run_id,
+                workspace_id,
+                status,
+                items_total,
+                processed,
+                jobs_created,
+                json.dumps(chunk_errors or []),
+                finished_at,
+                archived_at,
+            ),
         )
 
 
@@ -120,6 +137,54 @@ def test_archive_service_404_and_409(job_db) -> None:
     assert archived["batch"]["archived_at"] is not None
     with pytest.raises(ConflictError):
         run_batch_listing.archive_run_batch(job_db, _WORKSPACE, "run-done")
+
+
+def test_failed_item_count_from_chunk_errors(job_db) -> None:
+    """reviewer r1 P2-1：chunk 失败条目数按 chunk_start + 500 推导、以
+    items_total 钳制、打满 20 条标下限；缺 chunk_start 的异形条目不炸。"""
+    _insert_batch(
+        job_db,
+        "run-partial",
+        status="completed",
+        items_total=3000,
+        processed=3000,
+        jobs_created=2788,
+        chunk_errors=[{"chunk_start": 2800, "error": "外部连接超时"}],
+        finished_at=_NOW,
+    )
+    _insert_batch(
+        job_db,
+        "run-saturated",
+        status="completed",
+        items_total=12000,
+        processed=12000,
+        jobs_created=2000,
+        chunk_errors=[{"chunk_start": i * 500, "error": "x"} for i in range(20)],
+        finished_at=_NOW,
+    )
+    _insert_batch(
+        job_db,
+        "run-legacy-shape",
+        status="completed",
+        items_total=100,
+        processed=100,
+        jobs_created=90,
+        chunk_errors=[{"index": 3, "error": "无 chunk_start 的旧形状"}],
+        finished_at=_NOW,
+    )
+
+    ended = run_batch_listing.list_run_batches(
+        job_db, _WORKSPACE, view="ended", limit=20, cursor=None
+    )
+    by_id = {b["run_id"]: b for b in ended["batches"]}
+    # min(500, 3000-2800) = 200；跳过（已有任务）= 3000-2788-200 = 12。
+    assert by_id["run-partial"]["failed_item_count"] == 200
+    assert by_id["run-partial"]["failed_item_count_lower_bound"] is False
+    # 末条 chunk_start=9500：min(500, 12000-9500)=500；20 条打满 → 下限。
+    assert by_id["run-saturated"]["failed_item_count"] == 10000
+    assert by_id["run-saturated"]["failed_item_count_lower_bound"] is True
+    # 无 chunk_start 的条目计 0（钳制/异形防御），不影响列出。
+    assert by_id["run-legacy-shape"]["failed_item_count"] == 0
 
 
 def test_resubmit_heal_clears_archived_at(job_db) -> None:

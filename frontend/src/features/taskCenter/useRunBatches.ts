@@ -37,10 +37,13 @@ export function useActiveRunBatches(workspaceId: string | undefined) {
 
 const ENDED_PAGE_SIZE = 12
 
-/** ended / archived 瀑布流（keyset cursor，「加载更早的记录」）。 */
+/** ended / archived 瀑布流（keyset cursor，「加载更早的记录」）。
+ * enabled 由调用方按当前视图给（reviewer r1 P2-4：主视图不空发
+ * archived 首页请求，归档视图也不空发 ended）。 */
 export function useRunBatchWaterfall(
   workspaceId: string | undefined,
-  view: 'ended' | 'archived'
+  view: 'ended' | 'archived',
+  enabled = true
 ) {
   return useInfiniteQuery({
     queryKey: runBatchKeys.view(workspaceId ?? '', view),
@@ -52,7 +55,7 @@ export function useRunBatchWaterfall(
       }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.next_cursor,
-    enabled: Boolean(workspaceId),
+    enabled: Boolean(workspaceId) && enabled,
   })
 }
 

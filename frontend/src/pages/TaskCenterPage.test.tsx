@@ -43,6 +43,8 @@ function batch(overrides: Record<string, unknown>) {
     created_by: 'tester',
     archived_at: null,
     archive_source: null,
+    failed_item_count: 0,
+    failed_item_count_lower_bound: false,
     ...overrides,
   }
 }
@@ -109,6 +111,18 @@ describe('TaskCenterPage（#1157 phase3）', () => {
                 jobs_created: 2130,
                 finished_at: '2026-10-21T01:53:00+00:00',
               }),
+              batch({
+                run_id: 'run-partial-1',
+                status: 'completed',
+                items_total: 3000,
+                processed_count: 3000,
+                jobs_created: 2588,
+                chunk_errors: [
+                  { chunk_start: 2800, error: '外部连接 cms-main 响应超时' },
+                ],
+                failed_item_count: 200,
+                finished_at: '2026-10-21T01:36:00+00:00',
+              }),
             ],
             2
           ) as never
@@ -135,6 +149,14 @@ describe('TaskCenterPage（#1157 phase3）', () => {
     expect(doneCard).toHaveTextContent('已完成')
     expect(doneCard).toHaveTextContent('2,400 / 2,400 全部完成')
     expect(doneCard).toHaveTextContent('跳过 270')
+
+    // 部分完成卡片（reviewer r1 P2-1）：跳过与失败拆开，失败不贴「已有任务」。
+    const partialCard = screen.getByTestId('task-card-run-partial-1')
+    expect(partialCard).toHaveTextContent('部分完成')
+    expect(partialCard).toHaveTextContent('新建 2,588')
+    expect(partialCard).toHaveTextContent('跳过 212（已有任务）')
+    expect(partialCard).toHaveTextContent('失败 200')
+    expect(partialCard).toHaveTextContent('外部连接 cms-main 响应超时')
   })
 
   it('runs the control plane from running cards（暂停/继续/取消）', async () => {

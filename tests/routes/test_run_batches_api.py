@@ -197,6 +197,9 @@ def test_manual_archive_cycle_and_conflict_matrix(client: TestClient) -> None:
     batch = archived.json()["batch"]
     assert batch["archived_at"] is not None
     assert batch["archive_source"] == "manual"
+    # reviewer r1 P2-1 契约增量：chunk 失败计数与下限标志随列表项下发。
+    assert batch["failed_item_count"] == 0
+    assert batch["failed_item_count_lower_bound"] is False
 
     # 归档后从 ended 消失、进 archived；幂等重归档 = 409（不静默成功）。
     ended = client.get(f"/api/workspaces/{ws}/run-batches", params={"view": "ended"}).json()

@@ -40,8 +40,12 @@ export default function TaskCenterPage() {
   const archivedView = searchParams.get('view') === 'archived'
 
   const activeQuery = useActiveRunBatches(workspaceId)
-  const endedQuery = useRunBatchWaterfall(workspaceId, 'ended')
-  const archivedQuery = useRunBatchWaterfall(workspaceId, 'archived')
+  const endedQuery = useRunBatchWaterfall(workspaceId, 'ended', !archivedView)
+  const archivedQuery = useRunBatchWaterfall(
+    workspaceId,
+    'archived',
+    archivedView
+  )
   const actions = useRunBatchActions(workspaceId)
 
   const activeCards = useMemo(

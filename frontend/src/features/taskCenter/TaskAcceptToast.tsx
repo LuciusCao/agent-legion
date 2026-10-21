@@ -16,11 +16,13 @@ export function TaskAcceptToast({ workspaceId }: { workspaceId?: string }) {
   const navigate = useNavigate()
   const visible = Boolean(notice && notice.workspaceId === workspaceId)
 
+  // 定时器挂 notice 存在性（reviewer r1 P2-3）：8s 内切到别的 workspace
+  // 不再取消计时——回到本 workspace 时过期通知已被清掉，不会 stale 复现。
   useEffect(() => {
-    if (!visible) return
+    if (!notice) return
     const timer = window.setTimeout(clear, AUTO_DISMISS_MS)
     return () => window.clearTimeout(timer)
-  }, [visible, clear, notice])
+  }, [notice, clear])
 
   if (!visible || !notice) return null
   return (

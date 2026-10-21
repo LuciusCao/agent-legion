@@ -35,19 +35,24 @@ export type TaskCardModel = {
   skippedCount: number
   /** 跳过的补充说明（如「已有任务」），无则不渲染括号。 */
   skipNote: string
+  /** chunk 级失败条目数（后端由 chunk_errors 推导；lower_bound 时渲染 ≥）。 */
+  failedCount: number
+  failedLowerBound: boolean
   errorMessage: string
   createdBy: string
   archivedAt: string | null
   archiveSource: 'manual' | 'auto' | null
 }
 
+/** mono 引用取 run id 尾段 digest——run id 前段是 workspace/workflow 前缀，
+ * 同 workspace 内无区分度（reviewer r1 P2-5）。 */
 export function shortRunRef(runId: string): string {
-  return runId.startsWith('run-') ? runId : `run-${runId.slice(0, 8)}`
+  return runId.startsWith('run-') ? runId : `run-${runId.slice(-8)}`
 }
 
-/** run_batches 列表项 → 卡片模型。跳过数 = 已处理 − 新建（后端契约：dedup
- * 过滤与 chunk 跳过同源，不单独物化）；completed 且有 chunk 错误记为
- * 部分完成。 */
+/** run_batches 列表项 → 卡片模型。跳过数 = 已处理 − 新建 − chunk 失败
+ * （reviewer r1 P2-1：chunk 容错跳过的条目不是「已有任务」，拆为独立
+ * 失败计数）；completed 且有 chunk 错误记为部分完成。 */
 export function runBatchToCard(item: RunBatchListItem): TaskCardModel {
   const chunkErrors = item.chunk_errors?.length ?? 0
   const statusMap: Record<string, TaskCardStatus> = {
@@ -67,6 +72,7 @@ export function runBatchToCard(item: RunBatchListItem): TaskCardModel {
   const errorMessage =
     item.error_message ||
     (firstChunkError ? String(firstChunkError.error ?? firstChunkError) : '')
+  const failedCount = item.failed_item_count ?? 0
   return {
     kind: 'run-batch',
     id: item.run_id,
@@ -81,8 +87,13 @@ export function runBatchToCard(item: RunBatchListItem): TaskCardModel {
     total: item.items_total,
     okCount: item.jobs_created,
     okLabel: '新建',
-    skippedCount: Math.max(0, item.processed_count - item.jobs_created),
+    skippedCount: Math.max(
+      0,
+      item.processed_count - item.jobs_created - failedCount
+    ),
     skipNote: '已有任务',
+    failedCount,
+    failedLowerBound: item.failed_item_count_lower_bound ?? false,
     errorMessage,
     createdBy: item.created_by,
     archivedAt: item.archived_at,
