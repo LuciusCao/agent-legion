@@ -1,4 +1,10 @@
-# M44 原型：大批量添加条目 → 异步受理与进度（#1157 Phase 3）
+# M44 原型（旧）：大批量添加条目 → 异步受理与进度（#1157 Phase 3）
+
+> **已否决（2026-10-21 用户最终裁决）**：本目录的「右下角浮动卡片 /
+> 页内横幅」两案均被否决，权威设计改为「任务中心」形态——以
+> `~/Desktop/0.8.1-ui-acceptance/m44-async-submit/prototype.html`（四场景：
+> 提交入口链路 / 任务中心 / 已归档 / 空态）与最终实现为准。本目录仅提交
+> 链路（AddItemsDialog 提示 + 受理 toast）部分可作历史参考，其余留存备查。
 
 **用途**：用户 UI 验收用原型（mission 硬规则：涉 UI 交互先原型确认再实现）。
 纯静态 mock，不接后端。确认后本目录将被真实实现取代（届时整目录删除）。
@@ -32,7 +38,7 @@
    - 部分失败（chunk 级容错）：失败数 + 原因摘要 +「重试失败条目」
      （重提同一运行，确定性 run id + 去重保证不重复建任务）。
    - 失败：错误信息 +「重试」。
-   卡片在手动关闭或下次提交前一直可见（非瞬时 toast）。
+     卡片在手动关闭或下次提交前一直可见（非瞬时 toast）。
 
 ## 待用户拍板的决策点
 
@@ -44,12 +50,12 @@
 
 ## 截图（shots/）
 
-| 文件 | 状态 |
-| --- | --- |
-| 01-dialog-bulk-hint.png | ① 对话框 + 异步受理提示 |
-| 02-accepted-toast-card.png | ② 秒级受理回执（toast + 卡片） |
-| 03-progress-mid.png | ③ 进行中（浮动卡片） |
-| 04a-done-ok.png | ④a 完成（含跳过数） |
-| 04b-done-partial.png | ④b 部分失败（chunk 容错 + 重试） |
-| 04c-done-failed.png | ④c 失败 + 重试 |
-| 05-progress-inline-banner.png | 方案 B：页内横幅 |
+| 文件                          | 状态                             |
+| ----------------------------- | -------------------------------- |
+| 01-dialog-bulk-hint.png       | ① 对话框 + 异步受理提示          |
+| 02-accepted-toast-card.png    | ② 秒级受理回执（toast + 卡片）   |
+| 03-progress-mid.png           | ③ 进行中（浮动卡片）             |
+| 04a-done-ok.png               | ④a 完成（含跳过数）              |
+| 04b-done-partial.png          | ④b 部分失败（chunk 容错 + 重试） |
+| 04c-done-failed.png           | ④c 失败 + 重试                   |
+| 05-progress-inline-banner.png | 方案 B：页内横幅                 |

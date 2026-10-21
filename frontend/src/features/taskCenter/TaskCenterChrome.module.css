@@ -1,0 +1,73 @@
+/* 任务中心 AppBar 徽标 + 受理通知 snackbar（#1157 phase3）。
+   视觉基准：0.8.1-ui-acceptance/m44-async-submit 原型。 */
+
+.badgeWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.badge {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: #d32f2f;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  padding: 0 4px;
+  pointer-events: none;
+}
+
+.badge.pulse {
+  animation: tc-badge-pulse 1s ease 3;
+}
+
+@keyframes tc-badge-pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.5);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* ===== 受理通知 snackbar（左下，8s 自动消失，带「查看进度 →」）===== */
+.acceptToast {
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  z-index: 1400;
+  background: #323232;
+  color: #fff;
+  border-radius: 4px;
+  padding: 12px 18px;
+  font-size: 14px;
+  max-width: 480px;
+  line-height: 1.6;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.acceptToast .goto {
+  background: none;
+  border: none;
+  color: #90caf9;
+  cursor: pointer;
+  font-size: 14px;
+  white-space: nowrap;
+  padding: 0;
+}
+
+.acceptToast .goto:hover {
+  text-decoration: underline;
+}

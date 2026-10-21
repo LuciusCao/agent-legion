@@ -12,6 +12,7 @@ import { TestQueryProvider } from '../testing/testQueryClient'
 vi.mock('../api', () => ({
   api: vi.fn(),
   createRun: vi.fn(),
+  createRunAsync: vi.fn(),
   fetchActiveWorkflowRevision: vi.fn(),
 }))
 
@@ -194,8 +195,10 @@ describe('AddItemsDialog 提交兜底（#1157 phase0）', () => {
       '共 1001 个条目'
     )
     const hint = screen.getByTestId('bulk-submit-hint')
-    expect(hint).toHaveTextContent('条目较多')
-    expect(hint).toHaveTextContent('每批不超过 1000 条')
+    // #1157 phase3：超过阈值自动转后台创建（任务中心原型定稿文案）。
+    expect(hint).toHaveTextContent('共 1,001 个条目')
+    expect(hint).toHaveTextContent('转为后台创建')
+    expect(hint).toHaveTextContent('右上角「任务」')
 
     // 边界：恰好 1000 条不提示（>1000 才算大批量）。
     pasteIds(1000)

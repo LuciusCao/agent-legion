@@ -1,509 +1,807 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>原型：大批量添加条目 → 异步受理与进度（M44 / #1157 Phase 3）</title>
-<style>
-  :root {
-    --primary: #1976d2;
-    --primary-dark: #1565c0;
-    --success: #2e7d32;
-    --warning: #ed6c02;
-    --error: #d32f2f;
-    --text: #1a1a1a;
-    --text-secondary: #666;
-    --border: #e0e0e0;
-    --bg: #f5f5f7;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
-    background: var(--bg);
-    color: var(--text);
-  }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>原型：大批量添加条目 → 异步受理与进度（M44 / #1157 Phase 3）</title>
+    <style>
+      :root {
+        --primary: #1976d2;
+        --primary-dark: #1565c0;
+        --success: #2e7d32;
+        --warning: #ed6c02;
+        --error: #d32f2f;
+        --text: #1a1a1a;
+        --text-secondary: #666;
+        --border: #e0e0e0;
+        --bg: #f5f5f7;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family:
+          -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI',
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
 
-  /* ===== 顶部原型控制台（仅原型用，非产品 UI）===== */
-  .proto-bar {
-    position: sticky; top: 0; z-index: 100;
-    background: #263238; color: #eceff1;
-    padding: 10px 16px;
-    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-    font-size: 13px;
-  }
-  .proto-bar .title { font-weight: 600; margin-right: 8px; }
-  .proto-bar button {
-    background: #37474f; color: #eceff1; border: 1px solid #546e7a;
-    border-radius: 4px; padding: 5px 12px; cursor: pointer; font-size: 13px;
-  }
-  .proto-bar button:hover { background: #455a64; }
-  .proto-bar button.active { background: var(--primary); border-color: var(--primary); }
-  .proto-bar .sep { width: 1px; height: 20px; background: #546e7a; margin: 0 4px; }
-  .proto-bar .hint { color: #b0bec5; font-size: 12px; }
+      /* ===== 顶部原型控制台（仅原型用，非产品 UI）===== */
+      .proto-bar {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        background: #263238;
+        color: #eceff1;
+        padding: 10px 16px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        font-size: 13px;
+      }
+      .proto-bar .title {
+        font-weight: 600;
+        margin-right: 8px;
+      }
+      .proto-bar button {
+        background: #37474f;
+        color: #eceff1;
+        border: 1px solid #546e7a;
+        border-radius: 4px;
+        padding: 5px 12px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .proto-bar button:hover {
+        background: #455a64;
+      }
+      .proto-bar button.active {
+        background: var(--primary);
+        border-color: var(--primary);
+      }
+      .proto-bar .sep {
+        width: 1px;
+        height: 20px;
+        background: #546e7a;
+        margin: 0 4px;
+      }
+      .proto-bar .hint {
+        color: #b0bec5;
+        font-size: 12px;
+      }
 
-  /* ===== 背景：模拟 Studio 任务列表页 ===== */
-  .page { padding: 24px 32px 200px; max-width: 1100px; margin: 0 auto; }
-  .page-header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
-  .page-header h1 { font-size: 20px; margin: 0; }
-  .page-header .ws { color: var(--text-secondary); font-size: 13px; }
-  .fake-table {
-    background: #fff; border: 1px solid var(--border); border-radius: 8px;
-    overflow: hidden;
-  }
-  .fake-table .row {
-    display: grid; grid-template-columns: 90px 1fr 120px 140px;
-    padding: 10px 16px; border-bottom: 1px solid var(--border);
-    font-size: 13px; align-items: center;
-  }
-  .fake-table .row.head { background: #fafafa; color: var(--text-secondary); font-weight: 600; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
-  .badge.running { background: #e3f2fd; color: var(--primary-dark); }
-  .badge.completed { background: #e8f5e9; color: var(--success); }
-  .badge.failed { background: #ffebee; color: var(--error); }
-  .badge.pending { background: #f5f5f5; color: var(--text-secondary); }
+      /* ===== 背景：模拟 Studio 任务列表页 ===== */
+      .page {
+        padding: 24px 32px 200px;
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+      .page-header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      .page-header h1 {
+        font-size: 20px;
+        margin: 0;
+      }
+      .page-header .ws {
+        color: var(--text-secondary);
+        font-size: 13px;
+      }
+      .fake-table {
+        background: #fff;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .fake-table .row {
+        display: grid;
+        grid-template-columns: 90px 1fr 120px 140px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+        align-items: center;
+      }
+      .fake-table .row.head {
+        background: #fafafa;
+        color: var(--text-secondary);
+        font-weight: 600;
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 12px;
+      }
+      .badge.running {
+        background: #e3f2fd;
+        color: var(--primary-dark);
+      }
+      .badge.completed {
+        background: #e8f5e9;
+        color: var(--success);
+      }
+      .badge.failed {
+        background: #ffebee;
+        color: var(--error);
+      }
+      .badge.pending {
+        background: #f5f5f5;
+        color: var(--text-secondary);
+      }
 
-  /* ===== 添加条目对话框（模拟现有 MUI Dialog）===== */
-  .dialog-mask {
-    position: fixed; inset: 0; background: rgba(0,0,0,.5);
-    display: flex; align-items: center; justify-content: center; z-index: 50;
-  }
-  .dialog {
-    background: #fff; border-radius: 8px; min-width: 560px; max-width: 640px;
-    box-shadow: 0 11px 15px -7px rgba(0,0,0,.2), 0 24px 38px 3px rgba(0,0,0,.14);
-  }
-  .dialog h2 { font-size: 18px; margin: 0; padding: 16px 24px 8px; }
-  .dialog .content { padding: 8px 24px 16px; display: grid; gap: 12px; }
-  .tabs { display: flex; border-bottom: 1px solid var(--border); }
-  .tabs .tab {
-    padding: 10px 16px; font-size: 14px; cursor: pointer;
-    color: var(--text-secondary); border-bottom: 2px solid transparent;
-  }
-  .tabs .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
-  .paste-area {
-    width: 100%; height: 110px; border: 1px solid var(--border); border-radius: 4px;
-    padding: 8px; font-size: 13px; resize: none; color: var(--text-secondary);
-  }
-  .bulk-hint {
-    background: #fff8e1; border: 1px solid #ffe082; color: #795548;
-    border-radius: 4px; padding: 10px 12px; font-size: 13px; line-height: 1.6;
-  }
-  .bulk-hint.async { background: #e3f2fd; border-color: #90caf9; color: #0d47a1; }
-  .dialog .actions {
-    display: flex; align-items: center; gap: 12px; padding: 8px 24px 16px;
-  }
-  .dialog .total { margin-right: auto; font-size: 13px; color: var(--text-secondary); }
-  .btn {
-    border: none; border-radius: 4px; padding: 7px 18px; font-size: 14px; cursor: pointer;
-  }
-  .btn.text { background: none; color: var(--primary); }
-  .btn.contained { background: var(--primary); color: #fff; }
-  .btn.contained:hover { background: var(--primary-dark); }
-  .btn.small { padding: 4px 12px; font-size: 12px; }
+      /* ===== 添加条目对话框（模拟现有 MUI Dialog）===== */
+      .dialog-mask {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 50;
+      }
+      .dialog {
+        background: #fff;
+        border-radius: 8px;
+        min-width: 560px;
+        max-width: 640px;
+        box-shadow:
+          0 11px 15px -7px rgba(0, 0, 0, 0.2),
+          0 24px 38px 3px rgba(0, 0, 0, 0.14);
+      }
+      .dialog h2 {
+        font-size: 18px;
+        margin: 0;
+        padding: 16px 24px 8px;
+      }
+      .dialog .content {
+        padding: 8px 24px 16px;
+        display: grid;
+        gap: 12px;
+      }
+      .tabs {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+      }
+      .tabs .tab {
+        padding: 10px 16px;
+        font-size: 14px;
+        cursor: pointer;
+        color: var(--text-secondary);
+        border-bottom: 2px solid transparent;
+      }
+      .tabs .tab.active {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+      }
+      .paste-area {
+        width: 100%;
+        height: 110px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 8px;
+        font-size: 13px;
+        resize: none;
+        color: var(--text-secondary);
+      }
+      .bulk-hint {
+        background: #fff8e1;
+        border: 1px solid #ffe082;
+        color: #795548;
+        border-radius: 4px;
+        padding: 10px 12px;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+      .bulk-hint.async {
+        background: #e3f2fd;
+        border-color: #90caf9;
+        color: #0d47a1;
+      }
+      .dialog .actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 24px 16px;
+      }
+      .dialog .total {
+        margin-right: auto;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+      .btn {
+        border: none;
+        border-radius: 4px;
+        padding: 7px 18px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      .btn.text {
+        background: none;
+        color: var(--primary);
+      }
+      .btn.contained {
+        background: var(--primary);
+        color: #fff;
+      }
+      .btn.contained:hover {
+        background: var(--primary-dark);
+      }
+      .btn.small {
+        padding: 4px 12px;
+        font-size: 12px;
+      }
 
-  /* ===== Toast ===== */
-  .toast {
-    position: fixed; left: 24px; bottom: 24px; z-index: 60;
-    background: #323232; color: #fff; border-radius: 4px;
-    padding: 12px 18px; font-size: 14px; max-width: 460px; line-height: 1.5;
-    box-shadow: 0 3px 8px rgba(0,0,0,.3);
-  }
-  .toast .mono { font-family: ui-monospace, monospace; font-size: 12px; color: #90caf9; }
+      /* ===== Toast ===== */
+      .toast {
+        position: fixed;
+        left: 24px;
+        bottom: 24px;
+        z-index: 60;
+        background: #323232;
+        color: #fff;
+        border-radius: 4px;
+        padding: 12px 18px;
+        font-size: 14px;
+        max-width: 460px;
+        line-height: 1.5;
+        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+      }
+      .toast .mono {
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        color: #90caf9;
+      }
 
-  /* ===== 持久进度卡片（方案 A：右下角浮动卡片）===== */
-  .progress-card {
-    position: fixed; right: 24px; bottom: 24px; z-index: 55;
-    width: 380px; background: #fff; border-radius: 8px;
-    border: 1px solid var(--border);
-    box-shadow: 0 6px 20px rgba(0,0,0,.18);
-    overflow: hidden;
-  }
-  .progress-card .pc-head {
-    display: flex; align-items: center; gap: 8px;
-    padding: 10px 14px; border-bottom: 1px solid var(--border);
-    font-size: 14px; font-weight: 600;
-  }
-  .progress-card .pc-head .spinner {
-    width: 14px; height: 14px; border: 2px solid #bbdefb; border-top-color: var(--primary);
-    border-radius: 50%; animation: spin 0.9s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .progress-card .pc-head .done-icon { color: var(--success); font-size: 16px; }
-  .progress-card .pc-head .fail-icon { color: var(--error); font-size: 16px; }
-  .progress-card .pc-head .close {
-    margin-left: auto; border: none; background: none; cursor: pointer;
-    color: var(--text-secondary); font-size: 16px; padding: 2px 6px;
-  }
-  .progress-card .pc-body { padding: 12px 14px; display: grid; gap: 10px; }
-  .progress-bar {
-    height: 8px; background: #e3f2fd; border-radius: 4px; overflow: hidden;
-  }
-  .progress-bar .fill {
-    height: 100%; background: var(--primary); border-radius: 4px;
-    transition: width .4s ease;
-  }
-  .progress-bar.done .fill { background: var(--success); }
-  .progress-bar.failed .fill { background: var(--error); }
-  .pc-stats { display: flex; gap: 14px; font-size: 13px; color: var(--text-secondary); }
-  .pc-stats b { color: var(--text); font-weight: 600; }
-  .pc-stats .skipped b { color: var(--warning); }
-  .pc-stats .failed b { color: var(--error); }
-  .pc-status-line { font-size: 12px; color: var(--text-secondary); }
-  .pc-status-line .mono { font-family: ui-monospace, monospace; }
-  .pc-actions { display: flex; gap: 8px; justify-content: flex-end; }
-  .pc-error-detail {
-    font-size: 12px; color: var(--error); background: #ffebee;
-    border-radius: 4px; padding: 8px 10px; line-height: 1.5;
-  }
+      /* ===== 持久进度卡片（方案 A：右下角浮动卡片）===== */
+      .progress-card {
+        position: fixed;
+        right: 24px;
+        bottom: 24px;
+        z-index: 55;
+        width: 380px;
+        background: #fff;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+        overflow: hidden;
+      }
+      .progress-card .pc-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border);
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .progress-card .pc-head .spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid #bbdefb;
+        border-top-color: var(--primary);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .progress-card .pc-head .done-icon {
+        color: var(--success);
+        font-size: 16px;
+      }
+      .progress-card .pc-head .fail-icon {
+        color: var(--error);
+        font-size: 16px;
+      }
+      .progress-card .pc-head .close {
+        margin-left: auto;
+        border: none;
+        background: none;
+        cursor: pointer;
+        color: var(--text-secondary);
+        font-size: 16px;
+        padding: 2px 6px;
+      }
+      .progress-card .pc-body {
+        padding: 12px 14px;
+        display: grid;
+        gap: 10px;
+      }
+      .progress-bar {
+        height: 8px;
+        background: #e3f2fd;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .progress-bar .fill {
+        height: 100%;
+        background: var(--primary);
+        border-radius: 4px;
+        transition: width 0.4s ease;
+      }
+      .progress-bar.done .fill {
+        background: var(--success);
+      }
+      .progress-bar.failed .fill {
+        background: var(--error);
+      }
+      .pc-stats {
+        display: flex;
+        gap: 14px;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+      .pc-stats b {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .pc-stats .skipped b {
+        color: var(--warning);
+      }
+      .pc-stats .failed b {
+        color: var(--error);
+      }
+      .pc-status-line {
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      .pc-status-line .mono {
+        font-family: ui-monospace, monospace;
+      }
+      .pc-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      .pc-error-detail {
+        font-size: 12px;
+        color: var(--error);
+        background: #ffebee;
+        border-radius: 4px;
+        padding: 8px 10px;
+        line-height: 1.5;
+      }
 
-  /* ===== 方案 B：任务列表页内横幅 ===== */
-  .inline-banner {
-    background: #fff; border: 1px solid #90caf9; border-left: 4px solid var(--primary);
-    border-radius: 6px; padding: 12px 16px; margin-bottom: 16px;
-    display: grid; gap: 8px;
-  }
-  .inline-banner .ib-head { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
-  .inline-banner .ib-actions { margin-left: auto; display: flex; gap: 8px; }
+      /* ===== 方案 B：任务列表页内横幅 ===== */
+      .inline-banner {
+        background: #fff;
+        border: 1px solid #90caf9;
+        border-left: 4px solid var(--primary);
+        border-radius: 6px;
+        padding: 12px 16px;
+        margin-bottom: 16px;
+        display: grid;
+        gap: 8px;
+      }
+      .inline-banner .ib-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .inline-banner .ib-actions {
+        margin-left: auto;
+        display: flex;
+        gap: 8px;
+      }
 
-  .hidden { display: none !important; }
-  .state-note {
-    background: #fff3e0; border: 1px dashed #ffb74d; color: #e65100;
-    border-radius: 6px; padding: 10px 14px; font-size: 13px; line-height: 1.7;
-    margin-bottom: 16px;
-  }
-</style>
-</head>
-<body>
+      .hidden {
+        display: none !important;
+      }
+      .state-note {
+        background: #fff3e0;
+        border: 1px dashed #ffb74d;
+        color: #e65100;
+        border-radius: 6px;
+        padding: 10px 14px;
+        font-size: 13px;
+        line-height: 1.7;
+        margin-bottom: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ======= 原型控制台（非产品 UI）======= -->
+    <div class="proto-bar">
+      <span class="title">M44 原型 · 大批量异步提交</span>
+      <button data-goto="dialog" class="active">① 提交（对话框）</button>
+      <button data-goto="accepted">② 秒级受理回执</button>
+      <button data-goto="progress">③ 进行中（自动播放）</button>
+      <button data-goto="done-ok">④a 完成（含跳过）</button>
+      <button data-goto="done-partial">④b 部分失败</button>
+      <button data-goto="done-failed">④c 失败 + 重试</button>
+      <span class="sep"></span>
+      <span>进度指示位置：</span>
+      <button id="pos-float" class="active">浮动卡片（右下）</button>
+      <button id="pos-inline">页内横幅</button>
+      <span class="sep"></span>
+      <span class="hint"
+        >场景数据：粘贴 2,400 个外部 ID（&gt;1000 → 自动异步受理）</span
+      >
+    </div>
 
-<!-- ======= 原型控制台（非产品 UI）======= -->
-<div class="proto-bar">
-  <span class="title">M44 原型 · 大批量异步提交</span>
-  <button data-goto="dialog" class="active">① 提交（对话框）</button>
-  <button data-goto="accepted">② 秒级受理回执</button>
-  <button data-goto="progress">③ 进行中（自动播放）</button>
-  <button data-goto="done-ok">④a 完成（含跳过）</button>
-  <button data-goto="done-partial">④b 部分失败</button>
-  <button data-goto="done-failed">④c 失败 + 重试</button>
-  <span class="sep"></span>
-  <span>进度指示位置：</span>
-  <button id="pos-float" class="active">浮动卡片（右下）</button>
-  <button id="pos-inline">页内横幅</button>
-  <span class="sep"></span>
-  <span class="hint">场景数据：粘贴 2,400 个外部 ID（&gt;1000 → 自动异步受理）</span>
-</div>
-
-<!-- ======= 模拟 Studio 任务列表页 ======= -->
-<div class="page">
-  <div class="page-header">
-    <h1>任务列表</h1>
-    <span class="ws">工作空间：demo-video-qa</span>
-  </div>
-
-  <div class="state-note" id="state-note">
-    当前状态说明文字（随场景切换）。
-  </div>
-
-  <!-- 方案 B：页内横幅（默认隐藏，由位置开关控制） -->
-  <div id="inline-banner-slot" class="hidden"></div>
-
-  <div class="fake-table">
-    <div class="row head"><span>编号</span><span>标题</span><span>状态</span><span>创建时间</span></div>
-    <div class="row"><span>job-0091</span><span>视频条目 ext-100234 的解析任务</span><span><span class="badge running">运行中</span></span><span>10:21:03</span></div>
-    <div class="row"><span>job-0090</span><span>视频条目 ext-100233 的解析任务</span><span><span class="badge running">运行中</span></span><span>10:20:58</span></div>
-    <div class="row"><span>job-0089</span><span>视频条目 ext-100198 的解析任务</span><span><span class="badge completed">已完成</span></span><span>10:19:41</span></div>
-    <div class="row"><span>job-0088</span><span>视频条目 ext-100197 的解析任务</span><span><span class="badge failed">失败</span></span><span>10:19:12</span></div>
-    <div class="row"><span>job-0087</span><span>视频条目 ext-100180 的解析任务</span><span><span class="badge pending">排队中</span></span><span>10:18:55</span></div>
-  </div>
-</div>
-
-<!-- ======= 状态①：添加条目对话框 ======= -->
-<div class="dialog-mask" id="dialog-mask">
-  <div class="dialog">
-    <h2>添加条目</h2>
-    <div class="content">
-      <div class="tabs">
-        <span class="tab">上传材料</span>
-        <span class="tab active">粘贴 ID</span>
-        <span class="tab">已有材料</span>
-        <span class="tab">文件夹打包</span>
-        <span class="tab">输入需求</span>
+    <!-- ======= 模拟 Studio 任务列表页 ======= -->
+    <div class="page">
+      <div class="page-header">
+        <h1>任务列表</h1>
+        <span class="ws">工作空间：demo-video-qa</span>
       </div>
-      <textarea class="paste-area" readonly>ext-100001
+
+      <div class="state-note" id="state-note">
+        当前状态说明文字（随场景切换）。
+      </div>
+
+      <!-- 方案 B：页内横幅（默认隐藏，由位置开关控制） -->
+      <div id="inline-banner-slot" class="hidden"></div>
+
+      <div class="fake-table">
+        <div class="row head">
+          <span>编号</span><span>标题</span><span>状态</span
+          ><span>创建时间</span>
+        </div>
+        <div class="row">
+          <span>job-0091</span><span>视频条目 ext-100234 的解析任务</span
+          ><span><span class="badge running">运行中</span></span
+          ><span>10:21:03</span>
+        </div>
+        <div class="row">
+          <span>job-0090</span><span>视频条目 ext-100233 的解析任务</span
+          ><span><span class="badge running">运行中</span></span
+          ><span>10:20:58</span>
+        </div>
+        <div class="row">
+          <span>job-0089</span><span>视频条目 ext-100198 的解析任务</span
+          ><span><span class="badge completed">已完成</span></span
+          ><span>10:19:41</span>
+        </div>
+        <div class="row">
+          <span>job-0088</span><span>视频条目 ext-100197 的解析任务</span
+          ><span><span class="badge failed">失败</span></span
+          ><span>10:19:12</span>
+        </div>
+        <div class="row">
+          <span>job-0087</span><span>视频条目 ext-100180 的解析任务</span
+          ><span><span class="badge pending">排队中</span></span
+          ><span>10:18:55</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======= 状态①：添加条目对话框 ======= -->
+    <div class="dialog-mask" id="dialog-mask">
+      <div class="dialog">
+        <h2>添加条目</h2>
+        <div class="content">
+          <div class="tabs">
+            <span class="tab">上传材料</span>
+            <span class="tab active">粘贴 ID</span>
+            <span class="tab">已有材料</span>
+            <span class="tab">文件夹打包</span>
+            <span class="tab">输入需求</span>
+          </div>
+          <textarea class="paste-area" readonly>
+ext-100001
 ext-100002
 ext-100003
-…（已粘贴 2,400 个外部 ID）</textarea>
+…（已粘贴 2,400 个外部 ID）</textarea
+          >
 
-      <!-- M40 旧提示（对照，默认隐藏） -->
-      <div class="bulk-hint hidden" id="hint-old">
-        条目较多，提交后需要等一会儿才会全部出现在任务列表里，可以稍后刷新查看；想更快看到结果的话，建议分成几批提交（每批不超过 1000 条）。
+          <!-- M40 旧提示（对照，默认隐藏） -->
+          <div class="bulk-hint hidden" id="hint-old">
+            条目较多，提交后需要等一会儿才会全部出现在任务列表里，可以稍后刷新查看；想更快看到结果的话，建议分成几批提交（每批不超过
+            1000 条）。
+          </div>
+          <!-- M44 新提示：自动异步受理 -->
+          <div class="bulk-hint async" id="hint-new">
+            共 2,400 个条目，超过 1,000
+            条，提交后将<b>转为后台受理</b>：立即返回受理回执，任务在后台分批创建，进度显示在页面右下角，期间可以继续其他操作。
+          </div>
+        </div>
+        <div class="actions">
+          <span class="total">共 2,400 个条目</span>
+          <button class="btn text">取消</button>
+          <button class="btn contained" id="submit-btn">创建运行</button>
+        </div>
       </div>
-      <!-- M44 新提示：自动异步受理 -->
-      <div class="bulk-hint async" id="hint-new">
-        共 2,400 个条目，超过 1,000 条，提交后将<b>转为后台受理</b>：立即返回受理回执，任务在后台分批创建，进度显示在页面右下角，期间可以继续其他操作。
+    </div>
+
+    <!-- ======= Toast（瞬时受理回执）======= -->
+    <div class="toast hidden" id="toast">
+      已受理 2,400 个条目，任务正在后台创建。<br />
+      运行编号
+      <span class="mono">run-7f3a9c2e</span>，进度见页面上的创建进度卡片。
+    </div>
+
+    <!-- ======= 持久进度卡片（方案 A）======= -->
+    <div class="progress-card hidden" id="progress-card">
+      <div class="pc-head">
+        <span id="pc-icon"><span class="spinner"></span></span>
+        <span id="pc-title">正在后台创建任务</span>
+        <button class="close" title="收起">✕</button>
+      </div>
+      <div class="pc-body">
+        <div class="progress-bar" id="pc-bar">
+          <div class="fill" id="pc-fill" style="width: 0%"></div>
+        </div>
+        <div class="pc-stats">
+          <span>已处理 <b id="pc-processed">0</b> / 2,400</span>
+          <span>新建 <b id="pc-created">0</b></span>
+          <span class="skipped">跳过 <b id="pc-skipped">0</b></span>
+          <span class="failed hidden" id="pc-failed-wrap"
+            >失败 <b id="pc-failed">0</b></span
+          >
+        </div>
+        <div class="pc-status-line" id="pc-status-line">
+          运行 <span class="mono">run-7f3a9c2e</span> ·
+          后台分批创建中，可随时关闭本卡片，不影响创建。
+        </div>
+        <div class="pc-error-detail hidden" id="pc-error"></div>
+        <div class="pc-actions" id="pc-actions">
+          <button class="btn text small" id="pc-pause-btn">暂停</button>
+          <button class="btn text small" id="pc-cancel-btn">取消创建</button>
+        </div>
       </div>
     </div>
-    <div class="actions">
-      <span class="total">共 2,400 个条目</span>
-      <button class="btn text">取消</button>
-      <button class="btn contained" id="submit-btn">创建运行</button>
-    </div>
-  </div>
-</div>
 
-<!-- ======= Toast（瞬时受理回执）======= -->
-<div class="toast hidden" id="toast">
-  已受理 2,400 个条目，任务正在后台创建。<br />
-  运行编号 <span class="mono">run-7f3a9c2e</span>，进度见页面上的创建进度卡片。
-</div>
+    <script>
+      ;(function () {
+        const TOTAL = 2400
 
-<!-- ======= 持久进度卡片（方案 A）======= -->
-<div class="progress-card hidden" id="progress-card">
-  <div class="pc-head">
-    <span id="pc-icon"><span class="spinner"></span></span>
-    <span id="pc-title">正在后台创建任务</span>
-    <button class="close" title="收起">✕</button>
-  </div>
-  <div class="pc-body">
-    <div class="progress-bar" id="pc-bar"><div class="fill" id="pc-fill" style="width: 0%"></div></div>
-    <div class="pc-stats">
-      <span>已处理 <b id="pc-processed">0</b> / 2,400</span>
-      <span>新建 <b id="pc-created">0</b></span>
-      <span class="skipped">跳过 <b id="pc-skipped">0</b></span>
-      <span class="failed hidden" id="pc-failed-wrap">失败 <b id="pc-failed">0</b></span>
-    </div>
-    <div class="pc-status-line" id="pc-status-line">
-      运行 <span class="mono">run-7f3a9c2e</span> · 后台分批创建中，可随时关闭本卡片，不影响创建。
-    </div>
-    <div class="pc-error-detail hidden" id="pc-error"></div>
-    <div class="pc-actions" id="pc-actions">
-      <button class="btn text small" id="pc-pause-btn">暂停</button>
-      <button class="btn text small" id="pc-cancel-btn">取消创建</button>
-    </div>
-  </div>
-</div>
-
-<script>
-(function () {
-  const TOTAL = 2400;
-
-  const els = {
-    note: document.getElementById('state-note'),
-    dialogMask: document.getElementById('dialog-mask'),
-    toast: document.getElementById('toast'),
-    card: document.getElementById('progress-card'),
-    inlineSlot: document.getElementById('inline-banner-slot'),
-    pcTitle: document.getElementById('pc-title'),
-    pcIcon: document.getElementById('pc-icon'),
-    pcBar: document.getElementById('pc-bar'),
-    pcFill: document.getElementById('pc-fill'),
-    pcProcessed: document.getElementById('pc-processed'),
-    pcCreated: document.getElementById('pc-created'),
-    pcSkipped: document.getElementById('pc-skipped'),
-    pcFailedWrap: document.getElementById('pc-failed-wrap'),
-    pcFailed: document.getElementById('pc-failed'),
-    pcStatusLine: document.getElementById('pc-status-line'),
-    pcError: document.getElementById('pc-error'),
-    pcActions: document.getElementById('pc-actions'),
-    submitBtn: document.getElementById('submit-btn'),
-  };
-
-  let placement = 'float'; // 'float' | 'inline'
-  let timer = null;
-
-  function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
-
-  // 把进度卡片渲染到当前位置（浮动 or 页内横幅，共用一份 DOM 语义）
-  function mountCard() {
-    if (placement === 'inline') {
-      els.inlineSlot.classList.remove('hidden');
-      els.inlineSlot.innerHTML = '';
-      const clone = els.card.cloneNode(true);
-      clone.classList.remove('hidden', 'progress-card');
-      clone.classList.add('inline-banner');
-      clone.style.position = 'static';
-      clone.style.width = 'auto';
-      // clone 的 id 重映射：简化处理——直接移动原节点再包样式
-      els.inlineSlot.innerHTML = '';
-      els.card.classList.remove('progress-card');
-      els.card.classList.add('inline-banner');
-      els.card.style.position = 'static';
-      els.card.style.width = 'auto';
-      els.inlineSlot.appendChild(els.card);
-    } else {
-      els.inlineSlot.classList.add('hidden');
-      els.card.classList.add('progress-card');
-      els.card.classList.remove('inline-banner');
-      els.card.style.position = '';
-      els.card.style.width = '';
-      document.body.appendChild(els.card);
-    }
-  }
-
-  function setStats(processed, created, skipped, failed) {
-    els.pcProcessed.textContent = processed.toLocaleString();
-    els.pcCreated.textContent = created.toLocaleString();
-    els.pcSkipped.textContent = skipped.toLocaleString();
-    if (failed > 0) {
-      els.pcFailedWrap.classList.remove('hidden');
-      els.pcFailed.textContent = failed;
-    } else {
-      els.pcFailedWrap.classList.add('hidden');
-    }
-    els.pcFill.style.width = Math.round((processed / TOTAL) * 100) + '%';
-  }
-
-  function showCard() { els.card.classList.remove('hidden'); mountCard(); }
-  function hideDialog() { els.dialogMask.classList.add('hidden'); }
-  function showDialog() { els.dialogMask.classList.remove('hidden'); }
-
-  const NOTES = {
-    dialog: '状态① — 提交：粘贴了 2,400 个外部 ID（超过 1,000 阈值）。对话框内提示从 M40 的「建议分批」升级为「将自动转后台受理」。点「创建运行」进入状态②。小批量（≤1,000 条）仍走同步快路径，交互与现状完全一致（本原型不演示）。',
-    accepted: '状态② — 秒级受理回执：POST /runs (mode=async) 秒级返回 202，对话框立即关闭，toast 给出运行编号（句柄），右下角出现持久进度卡片。用户可以关掉对话框继续做别的事。',
-    progress: '状态③ — 进行中：卡片轮询 GET /runs/{id}（batch.processed_count / jobs_created，跳过数 = 已处理 − 新建），进度条持续推进。提供「暂停 / 取消创建」（对应 pause/cancel 端点；只停后台创建，不动已建任务）。自动播放中…',
-    'done-ok': '状态④a — 完成：全部条目处理完。卡片转成功态，汇总「新建 2,130 个任务；270 个条目已有任务，自动跳过」，按钮变为「查看任务」（滚动/跳转到任务列表并刷新）与「关闭」。卡片在下次提交或手动关闭前一直可见（非瞬时 toast）。',
-    'done-partial': '状态④b — 部分失败：2 个批次（chunk）的条目创建失败被跳过（chunk 级容错），其余成功。卡片给出失败数与原因摘要，可「重试失败条目」（重提同一运行——确定性 run id + 去重保证不重复建任务）。',
-    'done-failed': '状态④c — 失败：后台创建整体失败（如 workflow 被下线）。卡片转失败态，给出错误信息与「重试」按钮（重提即自愈重置，无需重新粘贴条目）。',
-  };
-
-  function setNote(key) { els.note.textContent = NOTES[key]; }
-
-  function resetCardToRunning() {
-    els.pcTitle.textContent = '正在后台创建任务';
-    els.pcIcon.innerHTML = '<span class="spinner"></span>';
-    els.pcBar.classList.remove('done', 'failed');
-    els.pcError.classList.add('hidden');
-    els.pcActions.innerHTML =
-      '<button class="btn text small">暂停</button>' +
-      '<button class="btn text small">取消创建</button>';
-    els.pcStatusLine.innerHTML =
-      '运行 <span class="mono">run-7f3a9c2e</span> · 后台分批创建中，可随时关闭本卡片，不影响创建。';
-  }
-
-  const states = {
-    dialog() {
-      stopTimer();
-      showDialog();
-      els.toast.classList.add('hidden');
-      els.card.classList.add('hidden');
-      setNote('dialog');
-    },
-    accepted() {
-      stopTimer();
-      hideDialog();
-      els.toast.classList.remove('hidden');
-      resetCardToRunning();
-      setStats(0, 0, 0, 0);
-      showCard();
-      setNote('accepted');
-      // toast 数秒后淡出（瞬时），卡片保留（持久）
-      setTimeout(() => els.toast.classList.add('hidden'), 6000);
-    },
-    progress() {
-      states.accepted();
-      setNote('progress');
-      let processed = 0, created = 0, skipped = 0;
-      timer = setInterval(() => {
-        const step = 200;
-        processed = Math.min(TOTAL, processed + step);
-        const newCreated = Math.round(step * 0.89);
-        created = Math.min(2130, created + newCreated);
-        skipped = processed - created;
-        setStats(processed, created, skipped, 0);
-        if (processed >= TOTAL) {
-          stopTimer();
-          states['done-ok']();
+        const els = {
+          note: document.getElementById('state-note'),
+          dialogMask: document.getElementById('dialog-mask'),
+          toast: document.getElementById('toast'),
+          card: document.getElementById('progress-card'),
+          inlineSlot: document.getElementById('inline-banner-slot'),
+          pcTitle: document.getElementById('pc-title'),
+          pcIcon: document.getElementById('pc-icon'),
+          pcBar: document.getElementById('pc-bar'),
+          pcFill: document.getElementById('pc-fill'),
+          pcProcessed: document.getElementById('pc-processed'),
+          pcCreated: document.getElementById('pc-created'),
+          pcSkipped: document.getElementById('pc-skipped'),
+          pcFailedWrap: document.getElementById('pc-failed-wrap'),
+          pcFailed: document.getElementById('pc-failed'),
+          pcStatusLine: document.getElementById('pc-status-line'),
+          pcError: document.getElementById('pc-error'),
+          pcActions: document.getElementById('pc-actions'),
+          submitBtn: document.getElementById('submit-btn'),
         }
-      }, 800);
-    },
-    'done-ok'() {
-      stopTimer();
-      hideDialog();
-      els.toast.classList.add('hidden');
-      showCard();
-      els.pcTitle.textContent = '任务创建完成';
-      els.pcIcon.innerHTML = '<span class="done-icon">✔</span>';
-      els.pcBar.classList.add('done');
-      setStats(2400, 2130, 270, 0);
-      els.pcStatusLine.innerHTML =
-        '运行 <span class="mono">run-7f3a9c2e</span> · 全部 2,400 个条目已处理。';
-      els.pcError.classList.add('hidden');
-      els.pcActions.innerHTML =
-        '<button class="btn contained small">查看任务</button>' +
-        '<button class="btn text small">关闭</button>';
-      setNote('done-ok');
-    },
-    'done-partial'() {
-      stopTimer();
-      hideDialog();
-      els.toast.classList.add('hidden');
-      showCard();
-      els.pcTitle.textContent = '任务创建完成（部分失败）';
-      els.pcIcon.innerHTML = '<span class="fail-icon">⚠</span>';
-      els.pcBar.classList.add('done');
-      setStats(2400, 1958, 242, 200);
-      els.pcStatusLine.innerHTML =
-        '运行 <span class="mono">run-7f3a9c2e</span> · 2,400 个条目已处理，其中 2 批失败。';
-      els.pcError.textContent = '失败原因：外部连接 cms-main 响应超时（第 9、14 批，共 200 个条目）。已建任务不受影响。';
-      els.pcError.classList.remove('hidden');
-      els.pcActions.innerHTML =
-        '<button class="btn contained small">重试失败条目</button>' +
-        '<button class="btn text small">查看任务</button>' +
-        '<button class="btn text small">关闭</button>';
-      setNote('done-partial');
-    },
-    'done-failed'() {
-      stopTimer();
-      hideDialog();
-      els.toast.classList.add('hidden');
-      showCard();
-      els.pcTitle.textContent = '后台创建失败';
-      els.pcIcon.innerHTML = '<span class="fail-icon">✖</span>';
-      els.pcBar.classList.add('failed');
-      setStats(800, 690, 110, 0);
-      els.pcStatusLine.innerHTML =
-        '运行 <span class="mono">run-7f3a9c2e</span> · 处理到 800 / 2,400 时中断。';
-      els.pcError.textContent = '失败原因：工作空间的 workflow 版本已被删除，无法继续创建任务。已创建的 690 个任务不受影响。';
-      els.pcError.classList.remove('hidden');
-      els.pcActions.innerHTML =
-        '<button class="btn contained small">重试</button>' +
-        '<button class="btn text small">关闭</button>';
-      setNote('done-failed');
-    },
-  };
 
-  // 控制台按钮
-  const buttons = document.querySelectorAll('.proto-bar [data-goto]');
-  buttons.forEach((b) => {
-    b.addEventListener('click', () => {
-      buttons.forEach((x) => x.classList.remove('active'));
-      b.classList.add('active');
-      states[b.dataset.goto]();
-    });
-  });
+        let placement = 'float' // 'float' | 'inline'
+        let timer = null
 
-  // 位置开关
-  const posFloat = document.getElementById('pos-float');
-  const posInline = document.getElementById('pos-inline');
-  posFloat.addEventListener('click', () => {
-    placement = 'float';
-    posFloat.classList.add('active'); posInline.classList.remove('active');
-    if (!els.card.classList.contains('hidden')) mountCard();
-  });
-  posInline.addEventListener('click', () => {
-    placement = 'inline';
-    posInline.classList.add('active'); posFloat.classList.remove('active');
-    if (!els.card.classList.contains('hidden')) mountCard();
-  });
+        function stopTimer() {
+          if (timer) {
+            clearInterval(timer)
+            timer = null
+          }
+        }
 
-  // 对话框提交按钮 → 受理回执
-  els.submitBtn.addEventListener('click', () => {
-    buttons.forEach((x) => x.classList.remove('active'));
-    document.querySelector('[data-goto="accepted"]').classList.add('active');
-    states.accepted();
-  });
+        // 把进度卡片渲染到当前位置（浮动 or 页内横幅，共用一份 DOM 语义）
+        function mountCard() {
+          if (placement === 'inline') {
+            els.inlineSlot.classList.remove('hidden')
+            els.inlineSlot.innerHTML = ''
+            const clone = els.card.cloneNode(true)
+            clone.classList.remove('hidden', 'progress-card')
+            clone.classList.add('inline-banner')
+            clone.style.position = 'static'
+            clone.style.width = 'auto'
+            // clone 的 id 重映射：简化处理——直接移动原节点再包样式
+            els.inlineSlot.innerHTML = ''
+            els.card.classList.remove('progress-card')
+            els.card.classList.add('inline-banner')
+            els.card.style.position = 'static'
+            els.card.style.width = 'auto'
+            els.inlineSlot.appendChild(els.card)
+          } else {
+            els.inlineSlot.classList.add('hidden')
+            els.card.classList.add('progress-card')
+            els.card.classList.remove('inline-banner')
+            els.card.style.position = ''
+            els.card.style.width = ''
+            document.body.appendChild(els.card)
+          }
+        }
 
-  states.dialog();
-})();
-</script>
-</body>
+        function setStats(processed, created, skipped, failed) {
+          els.pcProcessed.textContent = processed.toLocaleString()
+          els.pcCreated.textContent = created.toLocaleString()
+          els.pcSkipped.textContent = skipped.toLocaleString()
+          if (failed > 0) {
+            els.pcFailedWrap.classList.remove('hidden')
+            els.pcFailed.textContent = failed
+          } else {
+            els.pcFailedWrap.classList.add('hidden')
+          }
+          els.pcFill.style.width = Math.round((processed / TOTAL) * 100) + '%'
+        }
+
+        function showCard() {
+          els.card.classList.remove('hidden')
+          mountCard()
+        }
+        function hideDialog() {
+          els.dialogMask.classList.add('hidden')
+        }
+        function showDialog() {
+          els.dialogMask.classList.remove('hidden')
+        }
+
+        const NOTES = {
+          dialog:
+            '状态① — 提交：粘贴了 2,400 个外部 ID（超过 1,000 阈值）。对话框内提示从 M40 的「建议分批」升级为「将自动转后台受理」。点「创建运行」进入状态②。小批量（≤1,000 条）仍走同步快路径，交互与现状完全一致（本原型不演示）。',
+          accepted:
+            '状态② — 秒级受理回执：POST /runs (mode=async) 秒级返回 202，对话框立即关闭，toast 给出运行编号（句柄），右下角出现持久进度卡片。用户可以关掉对话框继续做别的事。',
+          progress:
+            '状态③ — 进行中：卡片轮询 GET /runs/{id}（batch.processed_count / jobs_created，跳过数 = 已处理 − 新建），进度条持续推进。提供「暂停 / 取消创建」（对应 pause/cancel 端点；只停后台创建，不动已建任务）。自动播放中…',
+          'done-ok':
+            '状态④a — 完成：全部条目处理完。卡片转成功态，汇总「新建 2,130 个任务；270 个条目已有任务，自动跳过」，按钮变为「查看任务」（滚动/跳转到任务列表并刷新）与「关闭」。卡片在下次提交或手动关闭前一直可见（非瞬时 toast）。',
+          'done-partial':
+            '状态④b — 部分失败：2 个批次（chunk）的条目创建失败被跳过（chunk 级容错），其余成功。卡片给出失败数与原因摘要，可「重试失败条目」（重提同一运行——确定性 run id + 去重保证不重复建任务）。',
+          'done-failed':
+            '状态④c — 失败：后台创建整体失败（如 workflow 被下线）。卡片转失败态，给出错误信息与「重试」按钮（重提即自愈重置，无需重新粘贴条目）。',
+        }
+
+        function setNote(key) {
+          els.note.textContent = NOTES[key]
+        }
+
+        function resetCardToRunning() {
+          els.pcTitle.textContent = '正在后台创建任务'
+          els.pcIcon.innerHTML = '<span class="spinner"></span>'
+          els.pcBar.classList.remove('done', 'failed')
+          els.pcError.classList.add('hidden')
+          els.pcActions.innerHTML =
+            '<button class="btn text small">暂停</button>' +
+            '<button class="btn text small">取消创建</button>'
+          els.pcStatusLine.innerHTML =
+            '运行 <span class="mono">run-7f3a9c2e</span> · 后台分批创建中，可随时关闭本卡片，不影响创建。'
+        }
+
+        const states = {
+          dialog() {
+            stopTimer()
+            showDialog()
+            els.toast.classList.add('hidden')
+            els.card.classList.add('hidden')
+            setNote('dialog')
+          },
+          accepted() {
+            stopTimer()
+            hideDialog()
+            els.toast.classList.remove('hidden')
+            resetCardToRunning()
+            setStats(0, 0, 0, 0)
+            showCard()
+            setNote('accepted')
+            // toast 数秒后淡出（瞬时），卡片保留（持久）
+            setTimeout(() => els.toast.classList.add('hidden'), 6000)
+          },
+          progress() {
+            states.accepted()
+            setNote('progress')
+            let processed = 0,
+              created = 0,
+              skipped = 0
+            timer = setInterval(() => {
+              const step = 200
+              processed = Math.min(TOTAL, processed + step)
+              const newCreated = Math.round(step * 0.89)
+              created = Math.min(2130, created + newCreated)
+              skipped = processed - created
+              setStats(processed, created, skipped, 0)
+              if (processed >= TOTAL) {
+                stopTimer()
+                states['done-ok']()
+              }
+            }, 800)
+          },
+          'done-ok'() {
+            stopTimer()
+            hideDialog()
+            els.toast.classList.add('hidden')
+            showCard()
+            els.pcTitle.textContent = '任务创建完成'
+            els.pcIcon.innerHTML = '<span class="done-icon">✔</span>'
+            els.pcBar.classList.add('done')
+            setStats(2400, 2130, 270, 0)
+            els.pcStatusLine.innerHTML =
+              '运行 <span class="mono">run-7f3a9c2e</span> · 全部 2,400 个条目已处理。'
+            els.pcError.classList.add('hidden')
+            els.pcActions.innerHTML =
+              '<button class="btn contained small">查看任务</button>' +
+              '<button class="btn text small">关闭</button>'
+            setNote('done-ok')
+          },
+          'done-partial'() {
+            stopTimer()
+            hideDialog()
+            els.toast.classList.add('hidden')
+            showCard()
+            els.pcTitle.textContent = '任务创建完成（部分失败）'
+            els.pcIcon.innerHTML = '<span class="fail-icon">⚠</span>'
+            els.pcBar.classList.add('done')
+            setStats(2400, 1958, 242, 200)
+            els.pcStatusLine.innerHTML =
+              '运行 <span class="mono">run-7f3a9c2e</span> · 2,400 个条目已处理，其中 2 批失败。'
+            els.pcError.textContent =
+              '失败原因：外部连接 cms-main 响应超时（第 9、14 批，共 200 个条目）。已建任务不受影响。'
+            els.pcError.classList.remove('hidden')
+            els.pcActions.innerHTML =
+              '<button class="btn contained small">重试失败条目</button>' +
+              '<button class="btn text small">查看任务</button>' +
+              '<button class="btn text small">关闭</button>'
+            setNote('done-partial')
+          },
+          'done-failed'() {
+            stopTimer()
+            hideDialog()
+            els.toast.classList.add('hidden')
+            showCard()
+            els.pcTitle.textContent = '后台创建失败'
+            els.pcIcon.innerHTML = '<span class="fail-icon">✖</span>'
+            els.pcBar.classList.add('failed')
+            setStats(800, 690, 110, 0)
+            els.pcStatusLine.innerHTML =
+              '运行 <span class="mono">run-7f3a9c2e</span> · 处理到 800 / 2,400 时中断。'
+            els.pcError.textContent =
+              '失败原因：工作空间的 workflow 版本已被删除，无法继续创建任务。已创建的 690 个任务不受影响。'
+            els.pcError.classList.remove('hidden')
+            els.pcActions.innerHTML =
+              '<button class="btn contained small">重试</button>' +
+              '<button class="btn text small">关闭</button>'
+            setNote('done-failed')
+          },
+        }
+
+        // 控制台按钮
+        const buttons = document.querySelectorAll('.proto-bar [data-goto]')
+        buttons.forEach((b) => {
+          b.addEventListener('click', () => {
+            buttons.forEach((x) => x.classList.remove('active'))
+            b.classList.add('active')
+            states[b.dataset.goto]()
+          })
+        })
+
+        // 位置开关
+        const posFloat = document.getElementById('pos-float')
+        const posInline = document.getElementById('pos-inline')
+        posFloat.addEventListener('click', () => {
+          placement = 'float'
+          posFloat.classList.add('active')
+          posInline.classList.remove('active')
+          if (!els.card.classList.contains('hidden')) mountCard()
+        })
+        posInline.addEventListener('click', () => {
+          placement = 'inline'
+          posInline.classList.add('active')
+          posFloat.classList.remove('active')
+          if (!els.card.classList.contains('hidden')) mountCard()
+        })
+
+        // 对话框提交按钮 → 受理回执
+        els.submitBtn.addEventListener('click', () => {
+          buttons.forEach((x) => x.classList.remove('active'))
+          document
+            .querySelector('[data-goto="accepted"]')
+            .classList.add('active')
+          states.accepted()
+        })
+
+        states.dialog()
+      })()
+    </script>
+  </body>
 </html>
