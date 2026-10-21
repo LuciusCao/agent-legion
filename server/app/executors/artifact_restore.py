@@ -123,7 +123,12 @@ def _restore_row(
     if row is None:
         return None
     target = job_dir / name
-    tmp = target.with_name(target.name + ".part")
+    # The temp name must be unique per restore (#1311 family): parallel nodes
+    # share the job_dir and can restore the same evicted input concurrently —
+    # a fixed ``<name>.part`` let a sibling's open truncate this restore's
+    # bytes or its os.replace move a partial file. pid + id(target) is unique
+    # across processes and concurrent calls (target is alive for the call).
+    tmp = target.with_name(f"{target.name}.{os.getpid()}-{id(target)}.part")
     digest = hashlib.sha256()
     try:
         with store.open_stream(row) as stream, tmp.open("wb") as out:
