@@ -159,6 +159,17 @@ describe('combineYamlStructureRuntime', () => {
     expect(merged).not.toContain('requires_labels')
   })
 
+  it('prompt 尾随换行原样保留（r1 观察①：与后端 apply_runtime_config 对齐）', () => {
+    const draft = BASELINE.replace(
+      '      thinking: low\n',
+      '      thinking: low\n      prompt: |\n        第一行\n        第二行\n'
+    )
+    const merged = combineYamlStructureRuntime(BASELINE, draft)
+    expect(extractRuntimeSlice(merged).nodes.write_script.prompt).toBe(
+      '第一行\n第二行\n'
+    )
+  })
+
   it('顶层 execution 默认块只搬 provider/model/thinking，保留顶层 runtime', () => {
     const structure = BASELINE.replace(
       'execution:\n  provider: openai\n  model: gpt-5.1',

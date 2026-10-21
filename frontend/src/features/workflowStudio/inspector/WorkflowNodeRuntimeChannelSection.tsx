@@ -243,6 +243,14 @@ export function WorkflowNodeRuntimeChannelSection(props: {
   }
 
   const datalistPrefix = `runtime-channel-${node.key}`
+  const removeTool = (tool: string) =>
+    props.setDefinitionYaml(
+      patchWorkflowNodeTools(
+        props.definitionYaml,
+        node.key,
+        tools.filter((item) => item !== tool)
+      )
+    )
 
   return (
     <section className={inspectorStyles.section} aria-label="运行配置">
@@ -341,7 +349,7 @@ export function WorkflowNodeRuntimeChannelSection(props: {
               </button>
               <button
                 type="button"
-                className={promptMode === 'custom' ? 'active' : ''}
+                className={promptMode === 'custom' ? styles.active : ''}
                 disabled={props.readOnly}
                 onClick={() => setPromptMode('custom')}
               >
@@ -404,15 +412,7 @@ export function WorkflowNodeRuntimeChannelSection(props: {
             <WorkflowChipEditor
               ariaLabel="Tools 覆盖"
               chips={tools}
-              onRemove={(tool) =>
-                props.setDefinitionYaml(
-                  patchWorkflowNodeTools(
-                    props.definitionYaml,
-                    node.key,
-                    tools.filter((item) => item !== tool)
-                  )
-                )
-              }
+              onRemove={removeTool}
               onAdd={(tool) =>
                 props.setDefinitionYaml(
                   patchWorkflowNodeTools(props.definitionYaml, node.key, [
@@ -442,14 +442,10 @@ export function WorkflowNodeRuntimeChannelSection(props: {
                     size="small"
                     color="error"
                     label={tool}
-                    onDelete={() =>
-                      props.setDefinitionYaml(
-                        patchWorkflowNodeTools(
-                          props.definitionYaml,
-                          node.key,
-                          tools.filter((item) => item !== tool)
-                        )
-                      )
+                    // r1 P1-1：只读 revision 下不给删除钮——× 会把被查看版本
+                    // 的 YAML 改动静默写进用户草稿（覆写未发布编辑）。
+                    onDelete={
+                      props.readOnly ? undefined : () => removeTool(tool)
                     }
                   />
                 ))}

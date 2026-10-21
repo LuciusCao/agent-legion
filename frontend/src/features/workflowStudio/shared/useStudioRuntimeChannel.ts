@@ -113,6 +113,18 @@ export function useStudioRuntimeChannel(args: {
     return fresh.definition_yaml
   }
 
+  /* r1 P2-1：保存/回滚已生效后的本地刷新（拉新 active + 并草稿）失败不能
+   * 报「保存失败」——PATCH 已落库，报失败会误导重试（重试是 no-change
+   * 保存，用户以为没生效）。包错分离：刷新失败给「已生效 + 手动刷新」。 */
+  async function tryApplyFreshActive(): Promise<boolean> {
+    try {
+      await applyFreshActive()
+      return true
+    } catch {
+      return false
+    }
+  }
+
   async function saveRuntimeConfig(
     runtimeSourceYaml?: string
   ): Promise<boolean> {
@@ -133,10 +145,15 @@ export function useStudioRuntimeChannel(args: {
     try {
       const result = await saveWorkflowRuntimeConfig(workspaceId, saveYaml)
       setLastRuntimeSavedKeys(result.runtime_version?.changed_keys ?? [])
-      await applyFreshActive()
+      const refreshed = await tryApplyFreshActive()
       useUiStore
         .getState()
-        .showToast('运行配置已保存并生效（不产生新版本）', 'success')
+        .showToast(
+          refreshed
+            ? '运行配置已保存并生效（不产生新版本）'
+            : '运行配置已保存并生效；本地刷新失败，请手动刷新页面查看最新配置',
+          refreshed ? 'success' : 'error'
+        )
       return true
     } catch (error) {
       const message =
@@ -156,10 +173,15 @@ export function useStudioRuntimeChannel(args: {
     try {
       const result = await rollbackWorkflowRuntimeConfig(workspaceId, version)
       setLastRuntimeSavedKeys(result.runtime_version?.changed_keys ?? [])
-      await applyFreshActive()
+      const refreshed = await tryApplyFreshActive()
       useUiStore
         .getState()
-        .showToast(`已回滚到运行配置 v${version}（作为新版本追加）`, 'success')
+        .showToast(
+          refreshed
+            ? `已回滚到运行配置 v${version}（作为新版本追加）`
+            : `已回滚到运行配置 v${version} 并生效；本地刷新失败，请手动刷新页面`,
+          refreshed ? 'success' : 'error'
+        )
       return true
     } catch (error) {
       useUiStore

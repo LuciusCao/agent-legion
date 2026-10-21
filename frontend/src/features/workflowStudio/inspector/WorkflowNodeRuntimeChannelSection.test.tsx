@@ -174,6 +174,44 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
     expect(screen.queryByText('已修改 · 待保存')).not.toBeInTheDocument()
   })
 
+  it('选中态走 CSS module 类（r1 P2-3 回归：自定义分段高亮）', () => {
+    const withPrompt = baselineYaml.replace(
+      'execution:\n      runtime: pi\n',
+      'execution:\n      runtime: pi\n      prompt: 自定义提示\n'
+    )
+    renderSection({ definitionYaml: withPrompt })
+
+    const customButton = screen.getByRole('button', { name: '自定义' })
+    const defaultButton = screen.getByRole('button', {
+      name: '默认（随 skill）',
+    })
+    expect(customButton.className).toMatch(/active/)
+    expect(defaultButton.className).not.toMatch(/active/)
+  })
+
+  it('r1 P1-1：只读视图下失效工具告警不渲染删除钮（点击面被门禁）', () => {
+    const withInvalidTool = baselineYaml.replace(
+      'execution:\n      runtime: pi\n',
+      'execution:\n      runtime: pi\n    tools: [not_in_catalog]\n'
+    )
+    let nextYaml = ''
+    renderSection({
+      definitionYaml: withInvalidTool,
+      readOnly: true,
+      setDefinitionYaml: (value: string) => {
+        nextYaml = value
+      },
+    })
+
+    expect(screen.getByText(/不在 runtime/)).toBeInTheDocument()
+    // MUI Chip onDelete=undefined 时无删除图标按钮（chip 编辑器自身的 ×
+    // 在只读态另行 disabled，二者是不同删除面）。
+    expect(
+      document.querySelector('.MuiChip-deleteIcon')
+    ).not.toBeInTheDocument()
+    expect(nextYaml).toBe('')
+  })
+
   it('writes a node model override to workflow YAML', () => {
     let nextYaml = ''
     renderSection({

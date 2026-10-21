@@ -143,7 +143,9 @@ export function diffRuntimeSliceKeys(
 function applyRuntimeToNode(node: WorkflowYamlNode, source: RuntimeSliceNode) {
   const execution = { ...(node.execution ?? {}) }
   for (const key of NODE_EXECUTION_KEYS) {
-    const value = source[key].trim()
+    // 与后端 apply_runtime_config 对齐：原样写 str 值，不 trim——trim 会
+    // 静默裁掉 prompt 的尾随换行，保存后草稿与生效值产生伪差异（r1 观察①）。
+    const value = source[key]
     if (value) execution[key] = value
     else delete execution[key]
   }
@@ -174,7 +176,8 @@ export function combineYamlStructureRuntime(
   const runtime = extractRuntimeSlice(runtimeYaml)
   const topExecution = { ...(structure.execution ?? {}) }
   for (const key of TOP_EXECUTION_KEYS) {
-    const value = runtime.execution[key].trim()
+    // 同节点级：不 trim（与后端 apply_runtime_config 对齐）。
+    const value = runtime.execution[key]
     if (value) topExecution[key] = value
     else delete topExecution[key]
   }

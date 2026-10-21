@@ -234,4 +234,37 @@ describe('useStudioRuntimeChannel（M48 运行通道）', () => {
     const [, body] = mocks.save.mock.calls[0]
     expect(body).toContain('model: gpt-5.3')
   })
+
+  it('r1 P2-1：保存已生效但本地刷新失败——报「已生效 + 手动刷新」而非保存失败', async () => {
+    mocks.fetchActive.mockRejectedValue(new Error('network down'))
+    const draft = BASELINE.replace('model: gpt-5.1', 'model: gpt-5.2')
+    const { result } = setup({ draftYaml: draft })
+
+    let ok = false
+    await act(async () => {
+      ok = await result.current.saveRuntimeConfig()
+    })
+
+    expect(ok).toBe(true)
+    const toast = useUiStore.getState().toast
+    expect(toast?.message).toContain('已保存并生效')
+    expect(toast?.message).toContain('手动刷新')
+    expect(toast?.message).not.toContain('保存失败')
+  })
+
+  it('r1 P2-1：回滚已生效但本地刷新失败同样不误报回滚失败', async () => {
+    mocks.fetchActive.mockRejectedValue(new Error('network down'))
+    const { result } = setup({ draftYaml: BASELINE })
+
+    let ok = false
+    await act(async () => {
+      ok = await result.current.rollbackRuntimeConfig(3)
+    })
+
+    expect(ok).toBe(true)
+    expect(useUiStore.getState().toast?.message).toContain(
+      '已回滚到运行配置 v3'
+    )
+    expect(useUiStore.getState().toast?.message).toContain('手动刷新')
+  })
 })
