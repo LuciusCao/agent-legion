@@ -550,7 +550,6 @@
     "frontend/src/features/workflowStudio/inspector/WorkflowNodeStructuredEditor.helpers.ts": 19,
     "frontend/src/features/workflowStudio/inspector/WorkflowNodeStructuredEditor.tsx": 65,
     "frontend/src/features/workflowStudio/inspector/WorkflowNodeThinkingField.tsx": 39,
-    "frontend/src/features/workflowStudio/inspector/WorkflowNodeToolsEditor.tsx": 84,
     "frontend/src/features/workflowStudio/inspector/WorkflowPromptPreviewPanel.module.css": 15,
     "frontend/src/features/workflowStudio/inspector/WorkflowPromptPreviewPanel.tsx": 26,
     "frontend/src/features/workflowStudio/inspector/WorkflowRuntimeInheritedField.tsx": 35,
