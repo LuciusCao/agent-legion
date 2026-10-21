@@ -1,16 +1,19 @@
 import type { JobNodeSummary } from '../../types/jobTypes'
-import { isStepperCompact, stepperTrackGap } from '../../lib/stepperLayout'
+import { stepperTrackGap } from '../../lib/stepperLayout'
 import { StepperCompactView } from '../dag/StepperCompactView'
+import { useStepperCompactMode } from '../dag/useStepperCompactMode'
 import styles from './JobNodeStepper.module.css'
 
+// 实测宽度不可得（无 ResizeObserver 环境）时间距计算的回落宽度，
 // 与 JobNodeStepper.module.css 的 .stepper width 保持一致。
-const TRACK_WIDTH_PX = 176
+const FALLBACK_TRACK_WIDTH_PX = 176
 
 export interface JobNodeStepperProps {
   nodeSummaries: JobNodeSummary[]
   activeNodeKey?: string | null
   totalNodes?: number
-  /** 超过该节点数切换紧凑形态（#1257）；默认 STEPPER_COMPACT_THRESHOLD。 */
+  /** 显式覆盖紧凑判定（节点数阈值，#1257）；缺省按轨道实测宽度动态
+   * 计算（#1335）。 */
   compactThreshold?: number
 }
 
@@ -32,6 +35,11 @@ export function JobNodeStepper({
   totalNodes = 0,
   compactThreshold,
 }: JobNodeStepperProps) {
+  const { containerRef, compact, trackWidthPx } = useStepperCompactMode(
+    nodeSummaries.length > 0 ? nodeSummaries.length : Math.max(0, totalNodes),
+    compactThreshold
+  )
+
   if (nodeSummaries.length === 0 && totalNodes <= 0) {
     return <div className={styles.stepper}>—</div>
   }
@@ -49,9 +57,9 @@ export function JobNodeStepper({
   // 紧凑形态（#1257）：超阈值后逐段失去辨识度，改数字进度 + 细进度条。
   // 当前节点名不内联——唯一消费方 JobListItem 已在相邻 activeLabel 渲染
   // 当前节点 label，176px 行槽内联会重复（名字经 title / aria 暴露）。
-  if (isStepperCompact(segments.length, compactThreshold)) {
+  if (compact) {
     return (
-      <div className={styles.stepper} data-compact="true">
+      <div ref={containerRef} className={styles.stepper} data-compact="true">
         <StepperCompactView
           segments={segments}
           activeNodeKey={activeNodeKey}
@@ -62,10 +70,15 @@ export function JobNodeStepper({
   }
 
   return (
-    <div className={styles.stepper}>
+    <div ref={containerRef} className={styles.stepper}>
       <div
         className={styles.track}
-        style={{ gap: stepperTrackGap(segments.length, TRACK_WIDTH_PX) }}
+        style={{
+          gap: stepperTrackGap(
+            segments.length,
+            trackWidthPx ?? FALLBACK_TRACK_WIDTH_PX
+          ),
+        }}
         role="list"
         aria-label="节点进度"
       >

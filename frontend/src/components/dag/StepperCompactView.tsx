@@ -1,11 +1,12 @@
 import styles from './StepperCompactView.module.css'
 
-// JobNodeStepper / DagStepper 共用的紧凑形态（#1257）：节点数超过
-// STEPPER_COMPACT_THRESHOLD 时逐段渲染失去辨识度，切换为「数字进度
-// current/total（当前节点状态色）+ 细进度条（填充 = completed/total）」，
-// DOM 规模与节点数无关。当前节点高亮的等价物是 count 本身（它即当前节点
-// 位置与状态）；running 脉冲从分段 bar 移到填充条。原形态没有点击/跳转
-// 交互（仅 title tooltip），紧凑形态无需降级等价物。
+// JobNodeStepper / DagStepper 共用的紧凑形态（#1257）：逐段渲染失去辨识度
+// 时切换为「数字进度 current/total（当前节点状态色）+ 细进度条（填充 =
+// completed/total）」，DOM 规模与节点数无关。切换判定的单一来源是
+// useStepperCompactMode——默认按轨道实测宽度动态计算（#1335），
+// compactThreshold prop 为节点数显式覆盖。当前节点高亮的等价物是 count
+// 本身（它即当前节点位置与状态）；running 脉冲从分段 bar 移到填充条。
+// 原形态没有点击/跳转交互（仅 title tooltip），紧凑形态无需降级等价物。
 
 export interface StepperCompactSegment {
   node_key: string

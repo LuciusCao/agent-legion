@@ -178,8 +178,8 @@ describe('StepperCompactView (#1257)', () => {
   })
 
   it('renders the approval gate as current in an over-threshold workflow (#1275)', () => {
-    // 57 段（超 STEPPER_COMPACT_THRESHOLD），审批门在第 30 段，下游全部
-    // pending——紧凑形态必须停在门上，而不是落到首个下游 pending。
+    // 57 段的大型 workflow（紧凑形态的典型触发规模），审批门在第 30 段，
+    // 下游全部 pending——紧凑形态必须停在门上，而不是落到首个下游 pending。
     const gateSegments = Array.from({ length: 57 }, (_, i) =>
       seg(
         `n${i + 1}`,

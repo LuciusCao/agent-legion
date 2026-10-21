@@ -3,7 +3,10 @@
   flex-direction: column;
   gap: 4px;
   width: 176px;
-  flex-shrink: 0;
+  /* #1335：窄行槽下允许收缩（紧凑判定随实测宽度动态切换），
+     空间充足时保持 176px 不变。 */
+  flex-shrink: 1;
+  min-width: 96px;
 }
 
 .track {
