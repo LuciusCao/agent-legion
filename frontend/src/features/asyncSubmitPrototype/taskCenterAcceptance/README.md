@@ -30,8 +30,8 @@ v100）+ 真实前端 build，Playwright 操作 + 截图。截图为本目录 `s
 
 - 后端：`uv run uvicorn server.app.main:create_prod_app --factory --port 8944`
   （`AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_wt_44`
-  + `AGENT_LEGION_VAULT_MASTER_KEY`），`frontend/npm run build` 后由后端
-  SPA 挂载直接服务。
+  - `AGENT_LEGION_VAULT_MASTER_KEY`），`frontend/npm run build` 后由后端
+    SPA 挂载直接服务。
 - 数据：demo workspace 各状态 run_batches 种子（进行中/已暂停/完成/部分
   完成/失败/取消/手动归档/自动归档）+ 真实 `mode=async` 提交 1,200 个
   ref 条目（连接 `cms-demo`，feeder 真实建成 1,200 个 job）。
