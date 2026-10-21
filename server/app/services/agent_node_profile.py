@@ -17,8 +17,10 @@ authoritative (EXEC-AGENT-PROFILE-001, #440 P3); the two sources are:
   runtime. The node's capability resolves to exactly one published Agent of
   the workspace (the catalog's partial unique index guarantees at most one
   per capability), so the profile is a field-for-field projection of that
-  definition. The Agent catalog is read-only history; never route a new
-  node through it.
+  definition. The Agent catalog is legacy history: its write routes are
+  deprecated but still live (``routes/agent_definitions.py``), so the
+  definition behind such a node can still change or be archived; never
+  route a *new* node through it.
 
 This module is pure (no DB): the legacy catalog is passed in. The loaders —
 the only place allowed to read ``published_agent_definitions`` (ratchet,

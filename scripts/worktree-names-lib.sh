@@ -163,9 +163,10 @@ worktree_require_unique_derived_names() {
 # 锁内没有嵌套或后台执行者，holder 的 pid 就是执行者本身，pid 判活即锁存
 # 活。残余窗口只有「持有者被 SIGKILL 时在途的那一条命令会执行完」（任何
 # 锁设计都无法撤回在途命令）；被杀后没有任何进程会继续推进后续步骤。
-# 活性残余（#1251 上下文，既有属性勿当新 bug）：holder pid 被长寿无关进程
-# 复用（或持有者成未回收 zombie）时 kill -0 恒真、holder 永不回收，竞争者
-# 永久等待——安全方向无损，仅活性受损；等待方每 30s 打印持有者可人工解除。
+# 判活在 kill -0 之外核验进程身份（#1251）：stat 为 Z 的 zombie（父进程未
+# 回收）与 lstart 启动时间不符的 pid 复用都判死，holder 发布时写入自身
+# lstart 供比对。无 start= 行的 holder 是旧版本脚本留下的 legacy 登记，
+# 回落到 kill-0 判活（宁可活性受损，不在混合版本窗口破坏互斥）。
 # 例外收窄到唯一的多步前台子进程：clean 的 bucket delete（uv run python
 # 内部是多批 S3 调用）——它拿到 holder 文件路径 + 持有者 pid 作为租约，
 # 每个破坏性步骤前校验二者仍有效，失效即自绝（见 clean-worktree.sh）。
@@ -198,6 +199,31 @@ _wt_name_lock_pid_alive() {
     [[ "$1" =~ ^[0-9]+$ ]] && kill -0 "$1" 2>/dev/null
 }
 
+# 判活（#1251）：kill -0 之外识别 zombie 与 pid 复用——
+#   - ps 查不到该 pid，或 stat 以 Z 开头（zombie，父进程未回收）→ 死；
+#   - holder-* 文件带持有者发布时写入的 start=（ps -o lstart=，空格归一）：
+#     读不到 start= 但文件可读 → 旧版本脚本的 legacy 登记，回落 kill-0 判活
+#     （不破坏混合版本窗口的互斥）；读到但与该 pid 当前 lstart 不符 → pid
+#     已被复用 → 死；读取失败（文件正被让位方删除）→ 不计数。
+#   - .tmp-* 内容可能写了一半，不做启动时间比对。
+_wt_name_lock_file_alive() {
+    local file="$1" pid stat recorded current
+    pid="$(_wt_name_lock_file_pid "$file")"
+    _wt_name_lock_pid_alive "$pid" || return 1
+    stat="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')"
+    [[ -n "$stat" && "$stat" != Z* ]] || return 1
+    if [[ "${file##*/}" == holder-* ]]; then
+        if ! recorded="$(sed -n 's/^start=//p' "$file" 2>/dev/null)"; then
+            return 1
+        fi
+        if [[ -n "$recorded" ]]; then
+            current="$(ps -o lstart= -p "$pid" 2>/dev/null | tr -s ' ')"
+            [[ -n "$current" && "$recorded" == "$current" ]] || return 1
+        fi
+    fi
+    return 0
+}
+
 # 文件名形如 holder-<pid>-<nonce> / .tmp-<pid>-<nonce>，取出 pid。
 _wt_name_lock_file_pid() {
     local base="${1##*/}"
@@ -206,13 +232,13 @@ _wt_name_lock_file_pid() {
     printf '%s' "${base%%-*}"
 }
 
-# 回收 pid 已死的 holder 与发布中途崩溃留下的 .tmp。只按文件名判定，不读
-# 内容——文件随时可能被其主人删掉（让位），读失败不能当错误。
+# 回收已死的 holder 与发布中途崩溃留下的 .tmp（判活见 _wt_name_lock_file_alive）。
+# holder 内容随时可能被其主人删掉（让位）：读失败不计数、不能当错误。
 _wt_name_lock_reclaim() {
     local dir="$1" f
     for f in "$dir"/holder-* "$dir"/.tmp-*; do
         [[ -e "$f" ]] || continue
-        if ! _wt_name_lock_pid_alive "$(_wt_name_lock_file_pid "$f")"; then
+        if ! _wt_name_lock_file_alive "$f"; then
             rm -f "$f"
         fi
     done
@@ -223,7 +249,7 @@ _wt_name_lock_live_count() {
     local dir="$1" f count=0
     for f in "$dir"/holder-*; do
         [[ -e "$f" ]] || continue
-        if _wt_name_lock_pid_alive "$(_wt_name_lock_file_pid "$f")"; then
+        if _wt_name_lock_file_alive "$f"; then
             count=$((count + 1))
         fi
     done
@@ -286,6 +312,14 @@ worktree_name_lock_acquire() {
     fi
     poll="${AGENT_LEGION_WT_NAME_LOCK_POLL_SECONDS:-1}"
     [[ "$poll" =~ ^[0-9]+$ && "$poll" -gt 0 ]] || poll=1
+    # holder 携带本进程启动时间（#1251 判活核验 pid 复用）；ps 读不到就拒绝
+    # ——发布无法核验身份的 holder 会让竞争者把它当死锁回收，破坏互斥。
+    local start
+    start="$(ps -o lstart= -p $$ 2>/dev/null | tr -s ' ')"
+    if [[ -z "$start" ]]; then
+        echo "错误: 无法读取本进程启动时间（ps 不可用），拒绝${what}（#1251）。" >&2
+        return 1
+    fi
     trap '_wt_name_lock_release' EXIT
     trap '_wt_name_lock_release; exit 130' INT
     trap '_wt_name_lock_release; exit 143' TERM
@@ -296,8 +330,8 @@ worktree_name_lock_acquire() {
         # 先登记路径再写文件：中途被信号打断时 trap 能清掉半成品。
         _WT_NAME_LOCK_TMP="$dir/.tmp-$$-$nonce"
         _WT_NAME_LOCK_SLOT="$dir/holder-$$-$nonce"
-        if ! printf 'pid=%s %s（%s，%s 起）\n' "$$" "$what" "$(pwd)" \
-            "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >"$_WT_NAME_LOCK_TMP" \
+        if ! printf 'pid=%s %s（%s，%s 起）\nstart=%s\n' "$$" "$what" "$(pwd)" \
+            "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$start" >"$_WT_NAME_LOCK_TMP" \
             || ! mv "$_WT_NAME_LOCK_TMP" "$_WT_NAME_LOCK_SLOT"; then
             _wt_name_lock_release
             echo "错误: 写入派生名锁失败（${dir}），拒绝${what}（#1084）。" >&2

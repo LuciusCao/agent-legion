@@ -32,15 +32,26 @@ roots、结果/错误解析；bundle / 标记路径等常量单一定义在 `sha
 
 ## 2. 节点运行时契约
 
-节点只依赖「预取输入 + job_dir + config」，runtime 键集合（Host / Worker 一致）：
+节点只依赖「预取输入 + job_dir + config」。runtime 键按入口分三类
+（Host：`executors/_code_runtime.py` `build_runtime`；Worker：
+`worker/code_runner.py` `build_child_payload`——两处的真实行为以此为准）：
 
 ```
+# 共同键（Host / Worker 一致）
 job_dir, log_path, inputs, expected_outputs, capability, node_key,
 workflow_key, execution_id, workspace_id, workspace, job,
-settings_config, node_config, cancellation,
-root_dir          # Host 根目录（节点解析机器相对资源路径用；Worker 不下发）
+settings_config, node_config
+
+# 仅 Host
+cancellation     # 取消 token；Worker 的取消走轮询/回报里的显式取消字段 +
+                 # kill 进程组（§4），不进 runtime dict
+root_dir         # Host 根目录（节点解析机器相对资源路径用）
+
+# 条件键（两侧同一判定，有才下发）
 job_batch        # 父进程预取（有 batch_id 且父进程有 DB 时）
 skill_versions   # 父进程预取（node_key -> skill_version）
+materials        # material 类 job 的本地物化块（design §6.2）
+shard_index, shard_input   # 分片执行（#389）时随 context / manifest 注入
 ```
 
 - 节点运行时**不含 DB 句柄或 DSN**（EXEC-CODE-004）：DB 派生输入由父进程预取；
@@ -54,10 +65,15 @@ skill_versions   # 父进程预取（node_key -> skill_version）
     `None`，依赖它的节点须自行处理。
 - **特权动作留在父进程**：节点只记录事实，父进程执行。`ctx.report_auth_failure()` 在
   `job_dir/.node_runtime/auth_failure` 写标记（内容为 node_config 里的 connection key，
-  可为空串）；父进程在子进程退出后检查标记，经 `ConnectionTokenService` 失效该连接的
-  缓存 token 并删除标记，运行前先做 stale 清理。`.node_runtime/` 是目录，不会被产物
-  顶层文件清单捞走。失效动作发生在「节点退出后、下次 dispatch 前」，与连接 token
-  缓存的读取时机等价。
+  可为空串）。`.node_runtime/` 是目录，不会被产物顶层文件清单捞走。失效按入口分路径：
+  - Host 本地 code 池：父进程（`_code_runtime.consume_auth_failure_marker`）在子进程
+    退出后检查标记，经 `ConnectionTokenService` 失效该连接的缓存 token 并删除标记，
+    运行前先做 stale 清理。失效发生在「节点退出后、下次 dispatch 前」，与连接 token
+    缓存的读取时机等价。
+  - 远程 Worker：`code_runner.read_auth_failure_key` 只读取标记，把 key 放进结果元数据
+    `auth_failure_connection` 随结果回报；真正的失效由 Host 在结果提交
+    （`agent_broker/agent_result_commit.py`，`mark_done` 之后）执行。结果提交失败或延迟时
+    不在「下次 dispatch 前已失效」的保证内——该时序承诺只对 Host 本地路径成立。
 
 ## 3. 节点 SDK（`workspace_libs/node_sdk.py`）
 

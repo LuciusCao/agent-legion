@@ -15,6 +15,7 @@ the deadlines are generous budgets for loaded CI machines.
 
 from __future__ import annotations
 
+import os
 import shutil
 import signal
 import stat
@@ -430,6 +431,112 @@ def test_pid_alive_helper_rejects_garbage(env: _Env) -> None:
     lines = result.stdout.splitlines()
     assert lines[:3] == ["dead:", "dead:abc", "dead:1 2"]
     assert lines[3].startswith("alive:") and lines[3] != "alive:"
+
+
+# --- 判活核验：zombie 与 pid 复用（#1251）--------------------------------------
+
+# 不回收子进程的父进程：子进程持锁后被 SIGKILL 即成 zombie（kill -0 仍成功，
+# 旧判活下竞争者永久等待）。父进程不能是 bash（它对后台子进程装 SIGCHLD
+# 回收，zombie 留不住），用只睡不 poll 的 python 包装；也不能是 pytest 自己
+# （subprocess 的内部清理会顺带回收）。
+
+
+def _ps_stat(pid: int) -> str:
+    out = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, timeout=10
+    )
+    return out.stdout.strip()
+
+
+def test_zombie_holder_is_reclaimed(env: _Env) -> None:
+    """持有者成未回收 zombie：竞争者按 ps stat=Z 判死回收，正常拿锁。"""
+    child_pid_file = env.tmp / "child.pid"
+    done = env.tmp / "done-z"
+    inner = (
+        'source "$LIB"; worktree_name_lock_acquire "$REPO" "holder z";'
+        ' echo "acquired z" >>"$EVENTS";'
+        ' while [[ ! -e "$DONE" ]]; do sleep 0.05; done'
+    )
+    wrapper_code = (
+        "import os, subprocess, time\n"
+        f"child = subprocess.Popen(['bash', '-c', {inner!r}], env=os.environ)\n"
+        f"open({str(child_pid_file)!r}, 'w').write(str(child.pid))\n"
+        f"while not os.path.exists({str(done)!r}): time.sleep(0.05)\n"
+    )
+    wrapper = subprocess.Popen(
+        [sys.executable, "-c", wrapper_code],
+        env=env.env(DONE=str(done)),
+        stdout=subprocess.DEVNULL,
+        stderr=(env.tmp / "holder-z.err").open("w"),
+        text=True,
+    )
+    try:
+        _wait_for(lambda: "acquired z" in env.events_lines(), "z acquires")
+        child_pid = int(child_pid_file.read_text().strip())
+
+        os.kill(child_pid, signal.SIGKILL)
+        _wait_for(lambda: _ps_stat(child_pid).startswith("Z"), "holder becomes zombie")
+
+        second, release_b = env.start_holder("b")
+        release_b.touch()
+        assert second.wait(timeout=_DEADLINE) == 0
+        assert env.events_lines()[-2:] == ["acquired b", "released b"]
+        assert env.holders() == []
+    finally:
+        done.touch()
+        assert wrapper.wait(timeout=_DEADLINE) == 0
+
+
+def test_holder_with_mismatched_start_time_is_reclaimed(env: _Env) -> None:
+    """pid 复用形态：holder 的 pid 活着但 start= 与该 pid 实际启动时间不符
+    → 判死回收，竞争者拿锁。"""
+    sleeper = subprocess.Popen(["sleep", "300"])
+    try:
+        env.lock_dir.mkdir(parents=True, exist_ok=True)
+        (env.lock_dir / f"holder-{sleeper.pid}-fake").write_text(
+            f"pid={sleeper.pid} stale（/tmp，2026-01-01T00:00:00Z 起）\n"
+            "start=Wed Jan 1 00:00:00 2026\n",
+            encoding="utf-8",
+        )
+
+        second, release_b = env.start_holder("b")
+        release_b.touch()
+        assert second.wait(timeout=_DEADLINE) == 0
+        assert env.events_lines() == ["acquired b", "released b"]
+        assert env.holders() == []
+    finally:
+        sleeper.kill()
+        sleeper.wait(timeout=_DEADLINE)
+
+
+def test_legacy_holder_without_start_line_is_honored(env: _Env) -> None:
+    """旧版本脚本发布的 holder 没有 start= 行：活着就回落 kill-0 判活、不被
+    回收（混合版本窗口不破坏互斥）；进程死后照常回收。"""
+    sleeper = subprocess.Popen(["sleep", "300"])
+    try:
+        env.lock_dir.mkdir(parents=True, exist_ok=True)
+        fake = env.lock_dir / f"holder-{sleeper.pid}-legacy"
+        fake.write_text(
+            f"pid={sleeper.pid} legacy（/tmp，2026-01-01T00:00:00Z 起）\n", encoding="utf-8"
+        )
+
+        second, release_b = env.start_holder("b")
+        err_b = env.tmp / "holder-b.err"
+        # 「被占用」公告意味着竞争者已数到 2 个存活 holder：legacy 登计算活。
+        _wait_for(lambda: _BUSY in err_b.read_text(), "b waits behind legacy holder")
+        assert "acquired b" not in env.events_lines()
+        assert fake.exists()
+
+        sleeper.kill()
+        sleeper.wait(timeout=_DEADLINE)
+        release_b.touch()
+        assert second.wait(timeout=_DEADLINE) == 0
+        assert env.events_lines()[-2:] == ["acquired b", "released b"]
+        assert env.holders() == []
+    finally:
+        if sleeper.poll() is None:
+            sleeper.kill()
+            sleeper.wait(timeout=_DEADLINE)
 
 
 # --- clean-worktree.sh ---------------------------------------------------------

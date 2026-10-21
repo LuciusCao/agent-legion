@@ -4,7 +4,8 @@
 迁出）。部署操作步骤、命令与排障仍以部署文档为准；协议版本、混合舰队兼容矩阵、结果上报格式与
 **Host first, Worker second** 升级纪律的权威出处是
 [remote-execution-runbook.md §5](../remote-execution-runbook.md#5-workers)；code 节点执行协议见
-[node-sdk-and-worker-execution-design.md §7](node-sdk-and-worker-execution-design.md)，部署形态硬约束
+[node-sdk-and-worker-execution.md §4](node-sdk-and-worker-execution.md#4-worker-code-执行协议)（现行参考；
+设计背景见历史稿 node-sdk-and-worker-execution-design.md），部署形态硬约束
 （Worker 容器特权边界等）见 [deployment.md](deployment.md)。
 
 ## 1. runtime 声明与 agent 任务准入

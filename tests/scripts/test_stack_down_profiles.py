@@ -34,8 +34,25 @@ _DOWN_GOALS = (
 )
 
 
+def _compose_local_tag(loader: yaml.Loader, suffix: str, node: yaml.Node) -> object:
+    """Compose 的本地标签（``!reset null`` / ``!override``，compose v2.24+）
+    不是 PyYAML 标准标签；收集 profile 只关心结构，当普通值载入（#1339）。"""
+    if isinstance(node, yaml.ScalarNode):
+        return loader.construct_scalar(node)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    return loader.construct_mapping(node)
+
+
+class _ComposeLoader(yaml.SafeLoader):
+    pass
+
+
+_ComposeLoader.add_multi_constructor("!", _compose_local_tag)
+
+
 def _declared_profiles(compose_file: Path) -> set[str]:
-    data = yaml.safe_load(compose_file.read_text(encoding="utf-8"))
+    data = yaml.load(compose_file.read_text(encoding="utf-8"), Loader=_ComposeLoader)
     profiles: set[str] = set()
     for service in (data.get("services") or {}).values():
         profiles.update((service or {}).get("profiles") or ())
@@ -99,6 +116,24 @@ def test_down_passes_every_declared_profile(goals: tuple[str, ...]) -> None:
             required |= _declared_profiles(ROOT / name)
         missing = required - profiles
         assert not missing, f"{' '.join(argv)} misses --profile {sorted(missing)}"
+
+
+def test_declared_profiles_tolerate_compose_local_tags(tmp_path: Path) -> None:
+    """#1339 回归：文档化的 pull 部署本地覆盖（compose.local.yaml，照抄
+    compose.*.pull.example.yaml）含 ``!reset null`` / ``!override`` 标签，
+    收集 profile 不得抛 ConstructorError——否则受支持配置下测试门直接红。"""
+    compose = tmp_path / "compose.local.yaml"
+    compose.write_text(
+        "services:\n"
+        "  backend:\n"
+        "    build: !reset null\n"
+        "  sidecar:\n"
+        "    volumes: !override\n"
+        "      - /data:/data\n"
+        "    profiles: [materials-local]\n",
+        encoding="utf-8",
+    )
+    assert _declared_profiles(compose) == {"materials-local"}
 
 
 def test_host_down_covers_both_local_storage_profiles() -> None:

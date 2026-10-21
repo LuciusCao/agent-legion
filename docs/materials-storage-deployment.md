@@ -119,18 +119,24 @@ cd <prod worktree>
 umask 077
 # 只在首次配置时生成：deploy/.env 里 bucket / endpoint / 凭据任一已配置就不
 # 追加——重复键会让后出现的随机值生效（本地后端随之换凭据，外部 S3 直接失效）。
-# 随机值先落变量并判非空，生成失败显式报错、不写 .env
+# 随机值先落变量并判非空，生成失败显式报错、不写 .env。grep 的退出码紧随其
+# 后判定：1 = 文件可读但无键，文件不存在（grep 报 2）也算首次配置——两者都追
+# 加；文件存在但读失败（权限等，rc=2）则中止，不盲目追加。
 if grep -qE '^AGENT_LEGION_S3_(BUCKET|ENDPOINT|ACCESS_KEY|SECRET_KEY)=' deploy/.env 2>/dev/null; then
   echo 'deploy/.env 已配置 AGENT_LEGION_S3_*，未改动（换凭据请手工编辑）' >&2
-elif ACCESS_KEY=$(openssl rand -hex 20) && SECRET_KEY=$(openssl rand -hex 40) &&
-    [ -n "$ACCESS_KEY" ] && [ -n "$SECRET_KEY" ]; then
-  cat >> deploy/.env <<EOF
+elif [ $? -eq 1 ] || [ ! -e deploy/.env ]; then
+  if ACCESS_KEY=$(openssl rand -hex 20) && SECRET_KEY=$(openssl rand -hex 40) &&
+      [ -n "$ACCESS_KEY" ] && [ -n "$SECRET_KEY" ]; then
+    cat >> deploy/.env <<EOF
 AGENT_LEGION_S3_BUCKET=agent-legion
 AGENT_LEGION_S3_ACCESS_KEY=$ACCESS_KEY
 AGENT_LEGION_S3_SECRET_KEY=$SECRET_KEY
 EOF
+  else
+    echo '生成 S3 凭据失败，deploy/.env 未改动' >&2
+  fi
 else
-  echo '生成 S3 凭据失败，deploy/.env 未改动' >&2
+  echo 'deploy/.env 存在但读取失败（权限？），未改动' >&2
 fi
 chmod 600 deploy/.env
 ```
