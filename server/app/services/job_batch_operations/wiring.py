@@ -17,6 +17,7 @@ from server.app.events.agents import AgentStatusManager
 from server.app.events.aggregator import WorkspaceJobEventAggregator
 from server.app.jobs import JobQueries
 from server.app.services.artifact_store import ArtifactStore
+from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_batch_operations.feeder import JobBatchOpsFeeder
 from server.app.services.job_batch_operations.handlers import BatchOpsExecutors
 from server.app.services.job_intake_queue import JobIntakeQueue
@@ -74,10 +75,14 @@ def build_background_tasks(
     job_event_manager: JobEventManager,
     job_event_buffer: Any,
     materials_service: MaterialsService,
-    artifact_store: ArtifactStore,
     object_store: Any,
-    job_packages: JobPackageService,
 ) -> BackgroundTasks:
+    # The facades below are stateless (paths + job_db + the shared object
+    # storage client): building them here keeps main.py's call-site short
+    # (file budget) while behaving identically to the route-side instances.
+    artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db)
+    job_artifact_objects = JobArtifactObjectStore(job_db, object_store)
+    job_packages = JobPackageService(job_db, settings, object_store=job_artifact_objects)
     return BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
@@ -95,7 +100,7 @@ def build_background_tasks(
             job_event_manager,
             job_event_buffer,
             artifact_store=artifact_store,
-            object_store=object_store,
+            object_store=job_artifact_objects,
             job_packages=job_packages,
         ),
     )

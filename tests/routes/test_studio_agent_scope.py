@@ -244,6 +244,13 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/workspaces/{workspace_id}/runs/{run_id}/pause"): "api intake channel guard",
     ("POST", "/api/workspaces/{workspace_id}/runs/{run_id}/resume"): "api intake channel guard",
     ("POST", "/api/workspaces/{workspace_id}/runs/{run_id}/cancel"): "api intake channel guard",
+    # #1157 phase3 task center: manual archive mounts the same
+    # require_workspace_api_intake guard as the #1117 control plane (part of
+    # the #626 machine loop: submit → poll → cancel → archive).
+    (
+        "POST",
+        "/api/workspaces/{workspace_id}/run-batches/{run_id}/archive",
+    ): "api intake channel guard",
     # Node prompt preview: read-only render, persists nothing.
     ("POST", "/api/workspaces/{workspace_id}/workflow/node-prompt-preview"): "preview only",
     # Scoped-only tool surface (require_studio_agent_scope): these endpoints

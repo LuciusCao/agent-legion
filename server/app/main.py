@@ -302,9 +302,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
         job_event_manager,
         job_event_buffer,
         materials_service,
-        artifact_store,
-        job_artifact_objects,
-        job_packages,
+        object_storage,
     )
     app.include_router(create_auth_router(app.state.auth_service), prefix="/api")
     quality = build_quality_loop(job_db, artifact_store, object_store=job_artifact_objects)
