@@ -7,8 +7,10 @@ of the same key family) that the save wrote into the active revision, the
 changed keys, and the operator. Dispatch still resolves the active revision's
 definition_json — the table is the history/rollback source, not a resolution
 input; in-flight jobs keep their intake-frozen snapshots untouched. Rollback
-appends a NEW version whose content equals the target version (history is
-never rewritten).
+appends a NEW version whose content is the target version's slice applied to
+the current structure — nodes the target does not know keep their current
+values, so after an intervening structural change the result is not the
+target verbatim (history is never rewritten).
 
 This module owns the table's DDL — postgres_schema.sql does not create it
 (the schema file sits at its absolute line ceiling; fresh and pre-v102
