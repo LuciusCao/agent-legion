@@ -53,7 +53,11 @@ def test_upgrade_from_older_version_runs_only_the_increment() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("delete from schema_migrations where version > 47")
         # Drop the runs table so the v53 cutover migration has visible work;
-        # its idempotent DDL create comes from the schema file replay.
+        # its idempotent DDL create comes from the schema file replay. Tables
+        # owned by post-v47 migrations that FK into runs must drop first
+        # (v99 run_batches, #1117; v100 stays parented to workspaces, which
+        # this rewind keeps).
+        conn.execute("drop table if exists run_batches")
         conn.execute("drop table if exists runs")
 
     init_db(TEST_DATABASE_URL)

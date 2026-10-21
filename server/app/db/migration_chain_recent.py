@@ -12,6 +12,7 @@ from server.app.db.migrations.agent_request_profile_source import (
 )
 from server.app.db.migrations.agent_worker_claim_state import migrate_agent_worker_claim_state
 from server.app.db.migrations.agent_worker_node_limits import migrate_agent_worker_node_limits
+from server.app.db.migrations.job_batch_operations import migrate_job_batch_operations
 from server.app.db.migrations.job_node_status_count_deltas import (
     migrate_job_node_status_count_deltas as _migrate_v88_node_deltas,
 )
@@ -23,9 +24,7 @@ from server.app.db.migrations.retire_default_workflow_key import (
 from server.app.db.migrations.studio_chat_message_draft_kind import (
     migrate_studio_chat_message_draft_kind,
 )
-from server.app.db.migrations.studio_chat_session_archive import (
-    migrate_studio_chat_session_archive,
-)
+from server.app.db.migrations.studio_chat_session_archive import migrate_studio_chat_session_archive
 from server.app.db.migrations.studio_chat_session_soft_delete import (
     migrate_studio_chat_session_soft_delete,
 )
@@ -112,4 +111,10 @@ RECENT_MIGRATIONS: list[SchemaMigration] = [
     # 置位；自动归档为查询口径，不落列）。DDL-only, same guarded-ALTER home
     # rule as v87.
     SchemaMigration(100, "run_batches_archive", run_batches_archive.migrate_run_batches_archive),
+    # v101 (#946): job_batch_operations + job_batch_operation_results —
+    # 批量 job 操作异步化的任务行与逐 job 结果子表（runs-async 基建复用到
+    # 变更类批量端点）。Born as this branch's v100, renumbered after main
+    # took v100 for run_batches_archive (#434 collision protocol). Table DDL
+    # rides the apply fn (same precedent).
+    SchemaMigration(101, "job_batch_operations", migrate_job_batch_operations),
 ]

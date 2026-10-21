@@ -83,6 +83,9 @@ def _rebuild_v52_shape(conn) -> None:
     conn.execute("alter table jobs drop column if exists input_json")
     conn.execute("alter table jobs drop column if exists frozen_config_json")
     conn.execute("alter table jobs rename column run_id to batch_id")
+    # run_batches (v99, #1117) FK-references runs — drop it first like any
+    # other post-v52 artifact (its DDL replays on the init_db upgrade path).
+    conn.execute("drop table if exists run_batches")
     conn.execute("drop table if exists runs")
     conn.execute(
         """

@@ -238,6 +238,19 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     # scoped identity except the workspace API token on its OWN workspace;
     # studio-agent scopes get the same 403 reject_studio_agent_scope gave.
     ("POST", "/api/workspaces/{workspace_id}/runs"): "api intake channel guard",
+    # #1117 runs-async control plane: same require_workspace_api_intake guard as
+    # POST /runs — the verbs only steer the feeder (stop/resume feeding); the
+    # already-created jobs stay managed via the guarded job batch ops.
+    ("POST", "/api/workspaces/{workspace_id}/runs/{run_id}/pause"): "api intake channel guard",
+    ("POST", "/api/workspaces/{workspace_id}/runs/{run_id}/resume"): "api intake channel guard",
+    ("POST", "/api/workspaces/{workspace_id}/runs/{run_id}/cancel"): "api intake channel guard",
+    # #1157 phase3 task center: manual archive mounts the same
+    # require_workspace_api_intake guard as the #1117 control plane (part of
+    # the #626 machine loop: submit → poll → cancel → archive).
+    (
+        "POST",
+        "/api/workspaces/{workspace_id}/run-batches/{run_id}/archive",
+    ): "api intake channel guard",
     # Node prompt preview: read-only render, persists nothing.
     ("POST", "/api/workspaces/{workspace_id}/workflow/node-prompt-preview"): "preview only",
     # Scoped-only tool surface (require_studio_agent_scope): these endpoints

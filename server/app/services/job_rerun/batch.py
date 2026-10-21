@@ -151,6 +151,36 @@ def batch_rerun(
     return [results[job_id] for job_id in ids]
 
 
+def resolve_failure_rerun_scope(
+    job_db: Any,
+    workspace_id: str,
+    category: str,
+    job_ids: list[str] | tuple[str, ...] = (),
+    job_filter: JobListFilter | None = None,
+    exclude_ids: Collection[str] = (),
+) -> tuple[list[str], list[str]]:
+    """Resolve (requested, scope): the stripped explicit/filter selection, and
+    the target id list (``requested``, or every job with a matching failure —
+    capped — when the selection is empty).
+
+    Shared by ``rerun_by_failure_category`` (sync path) and the #946 async
+    dispatch (the route freezes ``scope`` into the operation's target spec),
+    so both modes resolve identically.
+    """
+    ids = resolve_batch_selection(job_db, workspace_id, job_ids, job_filter, exclude_ids)
+    requested = [value.strip() for value in ids if value.strip()]
+    if requested:
+        return requested, requested
+    # An empty selection means "every job with a matching failure": cap it
+    # the same way as filter selections (#712 / #917 B-2) with a LIMITed
+    # distinct-job query, before any failed-run rows are materialized.
+    scope = job_db.list_failed_job_ids(
+        workspace_id, category=category, limit=job_selection_resolver.MAX_BATCH_JOBS + 1
+    )
+    ensure_batch_size(len(scope))
+    return requested, scope
+
+
 def rerun_by_failure_category(
     service: JobRerunService,
     workspace_id: str,
@@ -171,19 +201,11 @@ def rerun_by_failure_category(
     per-job path exactly.
     """
     resolved = AUTO_STRATEGIES.get(category, "rerun_self") if strategy == "auto" else strategy
-    ids = resolve_batch_selection(service.job_db, workspace_id, job_ids, job_filter, exclude_ids)
-    requested = [value.strip() for value in ids if value.strip()]
-    scope = requested
+    requested, scope = resolve_failure_rerun_scope(
+        service.job_db, workspace_id, category, job_ids, job_filter, exclude_ids
+    )
     if not scope:
-        # An empty selection means "every job with a matching failure": cap it
-        # the same way as filter selections (#712 / #917 B-2) with a LIMITed
-        # distinct-job query, before any failed-run rows are materialized.
-        scope = service.job_db.list_failed_job_ids(
-            workspace_id, category=category, limit=job_selection_resolver.MAX_BATCH_JOBS + 1
-        )
-        ensure_batch_size(len(scope))
-        if not scope:
-            return []
+        return []
     grouped = failed_nodes_by_job(service, workspace_id, category, scope, workflow_key)
 
     pre = prefetch_rerun_state(service, list(grouped))

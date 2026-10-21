@@ -43,21 +43,21 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v100, run_batches_archive) must leave behind
+# Effects the newest migration (v101, job_batch_operations) must leave behind
 # so the undo step rewinds a current-shape database to exactly the previous
-# recorded version. v100 is DDL-only: the run_batches.archived_at column plus
-# its partial index (#1157 phase3 任务中心归档位); dropping both rewinds to
-# v99 (the run_batches table itself, v99, stays applied).
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("run_batches", "archived_at", "timestamp with time zone"),
-)
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_run_batches_archived",)
-_NEWEST_MIGRATION_NAME = "run_batches_archive"
+# recorded version. v101 is DDL-only: the job_batch_operations table plus the
+# job_batch_operation_results child table and the two indexes (#946 批量操作
+# 异步化任务行); dropping both tables (indexes cascade with them; child first
+# for the FK) rewinds to v100. (v100 sits below: its run_batches.archived_at
+# column and partial index stay applied.)
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("job_batch_operation_results", "job_batch_operations")
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_NAME = "job_batch_operations"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Old-shape DDL the rewind recreates so the rewound database is a faithful
-# v99 (v100 only adds a column + index: nothing to recreate).
+# v100 (v101 only adds two tables: nothing to recreate).
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.

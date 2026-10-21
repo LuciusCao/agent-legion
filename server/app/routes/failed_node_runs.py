@@ -1,22 +1,25 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse
 
-from server.app.auth.dependencies import reject_studio_agent_scope
+from server.app.auth.dependencies import reject_studio_agent_scope, require_user
 from server.app.jobs import JobQueries
 from server.app.routes.failed_node_run_contracts import (
     FailedNodeRunItem,
     FailedNodeRunsResponse,
     FailedRunCursorParam,
 )
+from server.app.routes.job_batch_operations import ACCEPTED_202, accepted_202_response
 from server.app.routes.job_rerun_by_failure_contracts import (
     JobRerunByFailureRequest,
     JobRerunByFailureResponse,
     JobRerunByFailureResultResponse,
 )
+from server.app.services import job_batch_operations as batch_ops_async
 from server.app.services.failed_node_runs import FailedNodeRunQueryService
 from server.app.services.job_rerun import JobRerunService
 
@@ -60,19 +63,35 @@ def create_failed_node_runs_router(
     @router.post(
         "/workspaces/{workspace_id}/jobs/rerun-by-failure",
         response_model=JobRerunByFailureResponse,
+        responses=ACCEPTED_202,
         dependencies=[Depends(reject_studio_agent_scope)],
     )
     def rerun_jobs_by_failure_category(
         workspace_id: str,
         payload: JobRerunByFailureRequest,
-    ) -> JobRerunByFailureResponse:
+        user: Annotated[dict[str, Any], Depends(require_user)],
+    ) -> JobRerunByFailureResponse | JSONResponse:
+        # The scope resolution (explicit ids / filter / every matching failure)
+        # stays in the request thread in both modes (#946): the async branch
+        # freezes it into the operation's target spec.
+        scope, operation = batch_ops_async.dispatch_rerun_by_failure(
+            job_db,
+            workspace_id,
+            category=payload.category,
+            strategy=payload.strategy,
+            from_node_key=payload.from_node_key,
+            job_ids=payload.job_ids,
+            job_filter=payload.filter.to_filter() if payload.filter is not None else None,
+            exclude_ids=payload.exclude_ids,
+            created_by=f"user:{user['id']}",
+        )
+        if operation is not None:
+            return accepted_202_response(job_db, operation)
         results = job_rerun.rerun_by_failure_category(
             workspace_id,
             payload.category,
             strategy=payload.strategy,
-            job_ids=payload.job_ids,
-            job_filter=payload.filter.to_filter() if payload.filter is not None else None,
-            exclude_ids=payload.exclude_ids,
+            job_ids=scope,
             from_node_key=payload.from_node_key,
         )
         return JobRerunByFailureResponse(

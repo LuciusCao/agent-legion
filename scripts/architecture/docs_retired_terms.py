@@ -61,6 +61,7 @@ _CURRENT_DOCS = (
     "docs/architecture/node-sdk-and-worker-execution.md",
     "docs/architecture/materials-and-runs.md",
     "docs/architecture/runs-async-mode.md",
+    "docs/architecture/batch-ops-async.md",
     "docs/architecture/studio-draft-publish-contract.md",
     "docs/architecture/studio-chat-session-runtime.md",
     "docs/agent-worker-deployment.md",
