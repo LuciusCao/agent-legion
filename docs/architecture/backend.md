@@ -209,6 +209,8 @@ server/app/
 | GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replay-profiles` | `list_replay_profiles` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `list_replays` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/replays/{replay_id}` | `get_replay` | routes/quality_replays.py |
+| GET | `/workspaces/{workspace_id}/run-batches` | `list_run_batches` | routes/run_batches.py |
+| POST | `/workspaces/{workspace_id}/run-batches/{run_id}/archive` | `archive_run_batch` | routes/run_batches.py |
 | POST | `/workspaces/{workspace_id}/runs` | `create_run` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs` | `list_runs` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs/{run_id}` | `get_run` | routes/runs.py |
@@ -520,6 +522,8 @@ server/app/
 | QualityConfusionMatrix | BaseModel | tp: int, fp: int, fn: int, tn: int, precision: float | None, recall: float | ... | app/routes/quality_contracts.py |
 | QualityStatsGroup | BaseModel | node_key: str, skill_version: str, provider: str, model: str, runs: int, succ... | app/routes/quality_contracts.py |
 | QualityBatchStatsResponse | BaseModel | batch_id: str, groups: list[QualityStatsGroup] | app/routes/quality_contracts.py |
+| RunBatchListResponse | BaseModel | batches: list[RunBatchListItem], next_cursor: str | None, active_count: int | app/routes/run_batches_contracts.py |
+| RunBatchArchiveResponse | BaseModel | batch: RunBatchListItem | app/routes/run_batches_contracts.py |
 | RunCreateRequest | BaseModel | items: list[RunItem], mode: Literal['sync', 'async'] | None | app/routes/run_contracts.py |
 | RunRecord | BaseModel | id: str, workspace_id: str, source_kind: str, status: str, created_count: int... | app/routes/run_contracts.py |
 | RunCreateResponse | BaseModel | run: RunRecord, created_count: int, job_ids: list[str], skipped_count: int | app/routes/run_contracts.py |
