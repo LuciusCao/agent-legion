@@ -249,7 +249,8 @@ def test_rollback_appends_new_version_with_target_content(job_db) -> None:
     versions = job_db.list_runtime_config_versions(workspace["id"])
     assert [row["version"] for row in versions] == [3, 2, 1]
     newest = versions[0]
-    # 回滚 = 追加内容等于目标版本的新版本；历史行不被篡改。
+    # 回滚 = 目标版本切片应用到当前结构后追加为新版本（本用例结构未变，
+    # 故逐字节等于目标版本；跨结构场景不等于原文）；历史行不被篡改。
     assert json.loads(str(newest["config_json"])) == json.loads(str(versions[2]["config_json"]))
     assert json.loads(str(newest["changed_keys_json"])) == ["nodes.do_thing.model"]
     assert newest["created_by"] == "user:u3"
