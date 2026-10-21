@@ -1,8 +1,46 @@
-import { describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { JobNodeStepper } from './JobNodeStepper'
 import styles from './JobNodeStepper.module.css'
 import type { JobNodeSummary } from '../../types/jobTypes'
+
+// 可控 ResizeObserver 桩（#1335）：observe 不自动回调，测试用 fire(width)
+// 显式报告轨道实测宽度；不 fire 即「宽度未测得」，走节点数阈值回落。
+class ResizeObserverStub {
+  static instances: ResizeObserverStub[] = []
+  private callback: ResizeObserverCallback
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback
+    ResizeObserverStub.instances.push(this)
+  }
+  observe = () => {}
+  unobserve = () => {}
+  disconnect = () => {}
+  fire(width: number) {
+    this.callback(
+      [{ contentRect: { width } } as unknown as ResizeObserverEntry],
+      this as unknown as ResizeObserver
+    )
+  }
+}
+
+function fireTrackWidth(width: number) {
+  const instance =
+    ResizeObserverStub.instances[ResizeObserverStub.instances.length - 1]
+  act(() => instance?.fire(width))
+}
+
+const originalResizeObserver = globalThis.ResizeObserver
+
+beforeEach(() => {
+  ResizeObserverStub.instances = []
+  globalThis.ResizeObserver =
+    ResizeObserverStub as unknown as typeof ResizeObserver
+})
+
+afterEach(() => {
+  globalThis.ResizeObserver = originalResizeObserver
+})
 
 const summaries: JobNodeSummary[] = [
   {
@@ -143,7 +181,7 @@ describe('JobNodeStepper', () => {
   })
 })
 
-describe('JobNodeStepper 紧凑形态 (#1257)', () => {
+describe('JobNodeStepper 紧凑形态（#1335 宽度驱动）', () => {
   const makeMany = (count: number): JobNodeSummary[] =>
     Array.from({ length: count }, (_, i) => ({
       node_key: `node-${i}`,
@@ -153,25 +191,77 @@ describe('JobNodeStepper 紧凑形态 (#1257)', () => {
       error_message: '',
     }))
 
-  it('switches to compact form at 51 nodes and stops rendering per-node segments', () => {
+  it('attaches the observer when summaries arrive after an empty first render (#1335 r1)', () => {
+    // 空态首挂载渲染占位符、容器 ref 不存在——observer 必须在数据到达、
+    // 容器节点出现时补建，否则动态判定终身静默失效（r1 实证缺陷）。
+    const { rerender } = render(<JobNodeStepper nodeSummaries={[]} />)
+    expect(ResizeObserverStub.instances).toHaveLength(0)
+
+    rerender(<JobNodeStepper nodeSummaries={makeMany(60)} />)
+    expect(ResizeObserverStub.instances).toHaveLength(1)
+
+    // 补建后即刻按实测宽度判定：100px 切紧凑，拉回 400px 恢复逐段。
+    fireTrackWidth(100)
+    expect(screen.getByText('11/60')).toBeInTheDocument()
+    fireTrackWidth(400)
+    expect(screen.getAllByRole('listitem')).toHaveLength(60)
+  })
+
+  it('keeps the segmented form while per-segment width stays at the 2px floor', () => {
+    // 176px 轨道：88 段 × 2px 刚好铺满，仍在可辨识下限上。
+    render(<JobNodeStepper nodeSummaries={makeMany(88)} />)
+    fireTrackWidth(176)
+
+    expect(screen.getAllByRole('listitem')).toHaveLength(88)
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
+  it('switches to compact one node past the width-derived threshold', () => {
+    // 同一 176px 轨道：89 段每段不足 2px → 紧凑形态。
     const { container } = render(
-      <JobNodeStepper nodeSummaries={makeMany(51)} activeNodeKey="node-10" />
+      <JobNodeStepper nodeSummaries={makeMany(89)} activeNodeKey="node-10" />
     )
+    fireTrackWidth(176)
 
     expect(screen.queryAllByRole('listitem')).toHaveLength(0)
     expect(screen.queryByRole('list')).not.toBeInTheDocument()
     const progress = screen.getByRole('progressbar', { name: '节点进度' })
-    expect(progress).toHaveAttribute('aria-valuemax', '51')
+    expect(progress).toHaveAttribute('aria-valuemax', '89')
     expect(progress).toHaveAttribute('aria-valuenow', '10')
-    expect(progress).toHaveAttribute('aria-valuetext', '11/51 节点 10')
-    // DOM 规模与节点数无关：51 与 200 节点的渲染量一致，不会溢出/挤压。
+    expect(progress).toHaveAttribute('aria-valuetext', '11/89 节点 10')
+    // DOM 规模与节点数无关：89 与 200 节点的渲染量一致，不会溢出/挤压。
     expect(container.querySelectorAll('div').length).toBeLessThan(10)
+  })
+
+  it('keeps mid-size workflows segmented on a wide track (#1335)', () => {
+    // 宽轨道（800px）：60 段每段 13px，不再被固定阈值 50 过早切成数字形态。
+    render(<JobNodeStepper nodeSummaries={makeMany(60)} />)
+    fireTrackWidth(800)
+
+    expect(screen.getAllByRole('listitem')).toHaveLength(60)
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
+  it('switches form live when the track width changes, both directions', () => {
+    // 60 段：400px 轨道逐段（每段 6.7px）→ 缩到 100px（每段 1.7px）切紧凑
+    // → 拉宽还原，无抖动卡死。
+    render(<JobNodeStepper nodeSummaries={makeMany(60)} />)
+    fireTrackWidth(400)
+    expect(screen.getAllByRole('listitem')).toHaveLength(60)
+
+    fireTrackWidth(100)
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0)
+    expect(screen.getByText('11/60')).toBeInTheDocument()
+
+    fireTrackWidth(400)
+    expect(screen.getAllByRole('listitem')).toHaveLength(60)
   })
 
   it('shows the current/total count with the current node status at 200 nodes', () => {
     render(
       <JobNodeStepper nodeSummaries={makeMany(200)} activeNodeKey="node-10" />
     )
+    fireTrackWidth(176)
 
     const count = screen.getByText('11/200')
     expect(count).toHaveAttribute('data-status', 'running')
@@ -184,6 +274,7 @@ describe('JobNodeStepper 紧凑形态 (#1257)', () => {
     many[10].status = 'completed'
     many[20].status = 'failed'
     render(<JobNodeStepper nodeSummaries={many} />)
+    fireTrackWidth(100)
 
     expect(screen.getByText('21/60')).toHaveAttribute('data-status', 'failed')
   })
@@ -194,6 +285,7 @@ describe('JobNodeStepper 紧凑形态 (#1257)', () => {
       status: 'completed' as const,
     }))
     render(<JobNodeStepper nodeSummaries={many} />)
+    fireTrackWidth(100)
 
     expect(screen.getByText('57/57')).toHaveAttribute(
       'data-status',
@@ -204,17 +296,24 @@ describe('JobNodeStepper 紧凑形态 (#1257)', () => {
     expect(progress.firstChild).toHaveStyle({ width: '100%' })
   })
 
-  it('keeps the segmented form at exactly 50 nodes', () => {
+  it('falls back to the count threshold when no width is reported (#1257)', () => {
+    // 无 ResizeObserver / 首帧回调前：保持节点数阈值 50 的旧行为。
+    render(<JobNodeStepper nodeSummaries={makeMany(51)} />)
+    expect(
+      screen.getByRole('progressbar', { name: '节点进度' })
+    ).toHaveAttribute('aria-valuemax', '51')
+    cleanup()
     render(<JobNodeStepper nodeSummaries={makeMany(50)} />)
-
     expect(screen.getAllByRole('listitem')).toHaveLength(50)
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
   })
 
-  it('supports a custom compactThreshold', () => {
+  it('supports a custom compactThreshold as an explicit override', () => {
+    // 显式 prop 覆盖宽度判定：宽轨道上 11 段也切紧凑。
     render(
       <JobNodeStepper nodeSummaries={makeMany(11)} compactThreshold={10} />
     )
+    fireTrackWidth(800)
 
     expect(screen.getByText('11/11')).toBeInTheDocument()
     expect(screen.queryAllByRole('listitem')).toHaveLength(0)
@@ -222,6 +321,7 @@ describe('JobNodeStepper 紧凑形态 (#1257)', () => {
 
   it('uses the compact form for placeholder segments from totalNodes', () => {
     render(<JobNodeStepper nodeSummaries={[]} totalNodes={120} />)
+    fireTrackWidth(176)
 
     const count = screen.getByText('1/120')
     expect(count).toHaveAttribute('data-status', 'pending')
