@@ -1,9 +1,11 @@
+import { useEffect } from 'react'
 import { WorkflowPublishReviewDialog } from '../validation/WorkflowPublishReviewDialog'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
 import type { WorkflowRevisionSummary } from '../../../types'
 import { fetchWorkflowDraft } from '../../../api/workflowDraft'
 import { useStudioState, useStudioView } from './studioStateContext'
 import { useAgentPublishRequest } from './useAgentPublishRequest'
+import { useAgentPublishNoticeStore } from './agentPublishNoticeStore'
 import { useSettingStore } from '../../../stores/settingStore'
 import { useUiStore } from '../../../stores/uiStore'
 
@@ -45,6 +47,14 @@ export function AgentPublishRequestDialog() {
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
   // 相同 queryKey 的 useQuery 与 StudioChatAside 的轮询自动合并。
   const agentRequest = useAgentPublishRequest(workspaceId)
+  // M65：把挂起态镜像进 agentPublishNoticeStore——Workflow 草稿卡的
+  // 「发布请求挂起」引导条读 store（卡片可在无 QueryClient 的测试环境
+  // 直渲染，不能直接挂 useAgentPublishRequest 的轮询 hook）。
+  useEffect(() => {
+    useAgentPublishNoticeStore
+      .getState()
+      .setPendingRequestId(agentRequest.pendingRequest?.id ?? null)
+  }, [agentRequest.pendingRequest])
   const confirmAgentRequest = async () => {
     if (!workspaceId) return
     let publishedYaml: string

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentPublishRequestDialog } from './AgentPublishRequestDialog'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
+import { useAgentPublishNoticeStore } from './agentPublishNoticeStore'
 import { useSettingStore } from '../../../stores/settingStore'
 import { useUiStore } from '../../../stores/uiStore'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
@@ -133,6 +134,11 @@ describe('AgentPublishRequestDialog', () => {
     vi.clearAllMocks()
     useSettingStore.setState({ workspaceId: 'ws1' })
     useUiStore.setState({ toast: null })
+    useAgentPublishNoticeStore.setState({
+      resolvedNotice: null,
+      pendingRequestId: null,
+      lastResolvedRequestId: null,
+    })
     mocks.fetchPendingPublishRequest.mockResolvedValue(null)
   })
 
@@ -155,6 +161,32 @@ describe('AgentPublishRequestDialog', () => {
       expect(
         screen.getByRole('dialog', { name: '发布 workflow revision' })
       ).toBeInTheDocument()
+    )
+  })
+
+  // M65 评审 P2-3 钉：镜像 effect 是 pendingRequestId 的唯一写入方——
+  // 删掉它，结构卡的「发布请求挂起」引导条会静默消失（引导条测试直接
+  // 置 store，不覆盖镜像链路）。
+  it('M65：pending 请求经镜像 effect 写入 agentPublishNoticeStore（引导条数据源）', async () => {
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    renderDialog()
+
+    await waitFor(() =>
+      expect(useAgentPublishNoticeStore.getState().pendingRequestId).toBe(
+        'req-1'
+      )
+    )
+  })
+
+  it('M65：无 pending 时镜像归 null（陈旧值被清除，引导条撤离）', async () => {
+    useAgentPublishNoticeStore.setState({ pendingRequestId: 'stale-req' })
+    renderDialog()
+
+    await waitFor(() =>
+      expect(mocks.fetchPendingPublishRequest).toHaveBeenCalled()
+    )
+    await waitFor(() =>
+      expect(useAgentPublishNoticeStore.getState().pendingRequestId).toBeNull()
     )
   })
 

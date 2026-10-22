@@ -36,6 +36,9 @@ export function WorkflowRuntimeVersionsDialog(props: {
     queryKey: ['workflowRuntimeVersions', props.workspaceId],
     queryFn: () => fetchWorkflowRuntimeVersions(props.workspaceId),
     enabled: props.open,
+    // 版本历史是审计视图：重开必须拉新——全局 staleTime 30s 下，用户刚
+    // 保存/回滚完立刻打开会看到缺行的旧列表（r5 验收实测复现）。
+    staleTime: 0,
   })
   const versions = [...(versionsQuery.data?.versions ?? [])].sort(
     (a, b) => b.version - a.version
@@ -83,8 +86,10 @@ export function WorkflowRuntimeVersionsDialog(props: {
               <span className={styles.meta}>{version.created_by}</span>
             </div>
             <Button
-              size="small"
-              variant="outlined"
+              // r5（用户复验）：与同对话框「关闭」按钮同式（text 变体、
+              // medium 尺寸）；nowrap + 不收缩——此前 small+outlined 被长键
+              // 列表挤压成两行折字的大圆饼。
+              sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
               disabled={props.readOnly || studio?.runtimeSaving || !studio}
               title={
                 props.readOnly ? '查看历史版本时不可回滚，请回到草稿后操作' : ''

@@ -35,7 +35,10 @@
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   color: #0b6b53;
-  word-break: break-all;
+  /* r5（用户复验）：变更键按 token 边界折行——word-break: break-all 会把
+   * write_script.prompt_mode 从中间截断（prompt_mod e）；keys 以「、」
+   * 分隔（CJK 顿号是天然断点），仅当单个 token 比整行还长时才断词。 */
+  overflow-wrap: break-word;
 }
 .meta {
   font-size: 12px;

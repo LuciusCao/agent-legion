@@ -1,5 +1,5 @@
 import { NodeCodeDraftCard } from './StudioChatDraftCards'
-import { WorkflowDraftCard } from './WorkflowDraftCard'
+import { WorkflowProposalCards } from './RuntimeConfigCard'
 import type {
   MergedNodeCodeDraft,
   MergedWorkflowDraft,
@@ -32,7 +32,9 @@ export function DraftMessageCards({
   return (
     <div className={styles.toolCallGroup}>
       {showWorkflow && workflowDraft && (
-        <WorkflowDraftCard
+        // M65 拆卡：运行配置卡固定在前、结构草稿卡在后（两卡操作对象
+        // 不相交，各自内部判空——无差异/无上下文时自行返回 null）。
+        <WorkflowProposalCards
           draft={workflowDraft}
           workspaceId={workspaceId}
           onApply={onApplyWorkflowDraft}
