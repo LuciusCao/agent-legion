@@ -8,16 +8,19 @@ current state, not run_batches' 409).
 
 Mounted from ``routes/job_batch_operations.py`` (the job route group applies
 ``require_workspace_access``, same as the #946 polling endpoints); the
-single-op status/results routes stay in that module. Contracts live here
+single-op status/results routes stay in that module. The archive write
+additionally mounts ``reject_studio_agent_scope`` (STUDIO-AGENT-001) like
+every other effecting workspace write. Contracts live here
 next to the router (the run_batches.py + run_batches_contracts.py split —
 routes/job_batch_operations.py sits inside its growth-allowance band).
 """
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.jobs import JobQueries
 from server.app.routes.job_batch_operations import JobBatchOperationResponse
 from server.app.services.job_batch_operations import listing as batch_ops_listing
@@ -72,6 +75,7 @@ def create_job_batch_operations_listing_router(job_db: JobQueries) -> APIRouter:
     @router.post(
         "/workspaces/{workspace_id}/job-batch-operations/{op_id}/archive",
         response_model=JobBatchOperationArchiveResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def archive_job_batch_operation(
         workspace_id: str, op_id: str
