@@ -19,8 +19,7 @@ import { StudioChatPermission } from './StudioChatPermission'
 import { StudioChatThought } from './StudioChatThought'
 import { DraftMessageCards } from './DraftMessageCards'
 import { NodeCodeDraftCard } from './StudioChatDraftCards'
-import { RuntimeConfigCard } from './RuntimeConfigCard'
-import { WorkflowDraftCard } from './WorkflowDraftCard'
+import { WorkflowProposalCards } from './RuntimeConfigCard'
 import styles from './StudioChatPanel.module.css'
 
 export type MessageItemProps = {
@@ -89,19 +88,13 @@ export const MessageItem = memo(function MessageItem(props: MessageItemProps) {
       <div className={styles.toolCallGroup}>
         <StudioChatToolCallCard call={toolCall} />
         {workflowDraft && draftAnchorId === toolCall.toolCallId && (
-          <>
-            {/* M65 拆卡：运行配置卡固定在前、结构草稿卡在后（与
-                DraftMessageCards 的合成消息路径同序）。 */}
-            <RuntimeConfigCard
-              draft={workflowDraft}
-              workspaceId={workspaceId}
-            />
-            <WorkflowDraftCard
-              draft={workflowDraft}
-              workspaceId={workspaceId}
-              onApply={onApplyWorkflowDraft}
-            />
-          </>
+          // M65 拆卡：与 DraftMessageCards 合成消息路径同序（运行配置卡
+          // 在前、结构草稿卡在后）。
+          <WorkflowProposalCards
+            draft={workflowDraft}
+            workspaceId={workspaceId}
+            onApply={onApplyWorkflowDraft}
+          />
         )}
         {nodeDrafts
           .filter((draft) => draft.toolCallId === toolCall.toolCallId)

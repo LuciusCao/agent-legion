@@ -1,7 +1,16 @@
 /* M65 拆卡：「运行配置变更」卡与「Workflow 草稿」卡共用的通道样式
  * （由 M48 卡内双分组的 WorkflowDraftCardChannels.module.css 演进）。
  * 两卡壳体沿用草稿卡蓝底家族（.draftCard），通道身份由标题图标色 + 小
- * 徽标表达，不用整片色块（M48 r2 视觉纪律）。 */
+ * 徽标表达，不用整片色块（M48 r2 视觉纪律）。
+ *
+ * 间距体系（视觉返工 r2，全部对齐既有组件 token，不自创数值）：
+ * - 卡间距：.cardStack gap 10px = 消息流节奏（StudioChatPanel.module.css
+ *   .messages gap: 10px）；卡与上方 tool call 行之间仍是 .toolCallGroup
+ *   的 6px（既有模式不动）。
+ * - 卡内节奏：meta → 白块 8px（.draftMeta margin-bottom）；白块 → 说明
+ *   6px（.draftHint margin-top: 6px 口径）；说明 → 按钮行 8px（.permission
+ *   卡 .permissionCommand margin-bottom: 8px / M48 .group margin-top: 8px
+ *   口径）。说明文字移出 diff 白块（评审打回 a）：白块内只放 diff 行。 */
 
 /* 运行配置卡标题色调（#0b6b53 在 #e3f2fd 卡底上实测对比度约 5.9:1，过
  * WCAG AA 4.5:1；与运行通道专区同一色系）。 */
@@ -12,9 +21,19 @@
   color: #0b6b53;
 }
 
+/* 同一草稿消息上的两张卡（运行配置卡在前、结构卡在后）。 */
+.cardStack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .badge {
+  display: inline-flex;
+  align-items: center;
   font-size: 10px;
   font-weight: 600;
+  line-height: 1.5;
   border-radius: 10px;
   padding: 1px 8px;
   letter-spacing: 0.02em;
@@ -30,7 +49,7 @@
   color: #546e7a;
 }
 
-/* 卡内白色内容区（沿用 M48 组的白底容器语言）。 */
+/* 卡内白色内容区（沿用 M48 组的白底容器语言）：只承载 diff 行。 */
 .body {
   border-radius: 8px;
   padding: 8px 10px;
@@ -65,10 +84,12 @@
   color: #687078;
   font-weight: 400;
 }
+
+/* 说明文字：卡级行（diff 白块之外、按钮行之上），.draftHint 的 6px 前间距。 */
 .hint {
   font-size: 11px;
   color: #455a64;
-  margin: 6px 0 2px;
+  margin: 6px 0 0;
   line-height: 1.5;
 }
 .hintSettled {
@@ -80,6 +101,11 @@
 .hintSettled svg {
   font-size: 14px;
   flex-shrink: 0;
+}
+
+/* 按钮行前间距 8px（.permission 卡内块 → 按钮行的既有口径）。 */
+.actions {
+  margin-top: 8px;
 }
 
 /* 发布请求挂起引导条（结构卡内）：复核框只含结构、runtime 卡无需先处理。 */

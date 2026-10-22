@@ -16,8 +16,29 @@ import {
   useRuntimeCardSettlementStore,
 } from './runtimeCardSettlement'
 import type { WorkflowDraftView } from './studioChatMessages'
+import { WorkflowDraftCard } from './WorkflowDraftCard'
 import styles from './StudioChatPanel.module.css'
 import splitStyles from './draftChannelSplit.module.css'
+
+/** 同一 agent 建议的双卡栈（M65 拆卡，两个渲染点共用）：运行配置卡固定
+ * 在前、Workflow 草稿卡在后；卡间距对齐消息流节奏（.messages gap 10px）。
+ * 两卡各自内部判空（无差异/无上下文时返回 null），栈随之自然塌缩。 */
+export function WorkflowProposalCards(props: {
+  draft: WorkflowDraftView
+  workspaceId: string
+  onApply: (yaml: string) => void
+}) {
+  return (
+    <div className={splitStyles.cardStack}>
+      <RuntimeConfigCard draft={props.draft} workspaceId={props.workspaceId} />
+      <WorkflowDraftCard
+        draft={props.draft}
+        workspaceId={props.workspaceId}
+        onApply={props.onApply}
+      />
+    </div>
+  )
+}
 
 function formatSavedAt(ms: number): string {
   return new Date(ms).toLocaleTimeString('zh-CN', { hour12: false })
@@ -135,21 +156,21 @@ export function RuntimeConfigCard(props: {
             </span>
           </div>
         ))}
-        {settlement ? (
-          <div className={`${splitStyles.hint} ${splitStyles.hintSettled}`}>
-            <CheckCircleOutlinedIcon />
-            {settlement.version !== null
-              ? `已对新执行生效（配置版本 v${settlement.version}）；生效前的建议原文保留在此备查。`
-              : '已对新执行生效；生效前的建议原文保留在此备查。'}
-          </div>
-        ) : (
-          <div className={splitStyles.hint}>
-            应用后立即对新执行生效并追加一条配置版本，不创建新
-            revision；进行中的任务不受影响。
-          </div>
-        )}
       </div>
-      <div className={styles.draftActions}>
+      {settlement ? (
+        <div className={`${splitStyles.hint} ${splitStyles.hintSettled}`}>
+          <CheckCircleOutlinedIcon />
+          {settlement.version !== null
+            ? `已对新执行生效（配置版本 v${settlement.version}）；生效前的建议原文保留在此备查。`
+            : '已对新执行生效；生效前的建议原文保留在此备查。'}
+        </div>
+      ) : (
+        <div className={splitStyles.hint}>
+          应用后立即对新执行生效并追加一条配置版本，不创建新
+          revision；进行中的任务不受影响。
+        </div>
+      )}
+      <div className={`${styles.draftActions} ${splitStyles.actions}`}>
         {!settlement && (
           <button
             type="button"

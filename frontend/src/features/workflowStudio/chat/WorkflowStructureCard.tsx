@@ -75,11 +75,11 @@ export function WorkflowStructureCard(props: {
             </span>
           </div>
         )}
-        <div className={splitStyles.hint}>
-          应用到编辑器后随顶栏「发布」生成新版本生效；不影响当前生效的运行配置。
-        </div>
       </div>
-      <div className={styles.draftActions}>
+      <div className={splitStyles.hint}>
+        应用到编辑器后随顶栏「发布」生成新版本生效；不影响当前生效的运行配置。
+      </div>
+      <div className={`${styles.draftActions} ${splitStyles.actions}`}>
         <button
           type="button"
           className={styles.draftButton}
