@@ -11,6 +11,9 @@ from server.app.jobs.queries.groups import (
 from server.app.jobs.queries.job_batch_operations import (  # #946
     JobBatchOperationQueriesMixin,
 )
+from server.app.jobs.queries.job_batch_operations_listing import (  # M61
+    JobBatchOperationListingQueriesMixin,
+)
 from server.app.jobs.queries.material_claim_gate import MaterialClaimGateQueriesMixin  # #1279
 from server.app.jobs.queries.material_repair import MaterialRepairQueriesMixin  # #1279
 from server.app.jobs.queries.run_batches import RunBatchQueriesMixin  # #1117
@@ -47,6 +50,8 @@ class JobQueries(
     RunBatchListingQueriesMixin,
     # #946: batch-ops async task rows (same standalone-mixin argument).
     JobBatchOperationQueriesMixin,
+    # M61: batch-ops task-center listing/archive views (standalone mixin).
+    JobBatchOperationListingQueriesMixin,
     JobQueriesBase,
 ):
     """Backward-compatible facade for all workspace/job query operations.

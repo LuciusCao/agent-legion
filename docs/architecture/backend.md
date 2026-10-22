@@ -162,6 +162,8 @@ server/app/
 | GET | `/jobs/{job_id}/runs/{run_id}/log` | `get_job_run_log` | routes/job_artifacts.py |
 | GET | `/workspaces/{workspace_id}/job-batch-operations/{op_id}` | `get_job_batch_operation` | routes/job_batch_operations.py |
 | GET | `/workspaces/{workspace_id}/job-batch-operations/{op_id}/results` | `list_job_batch_operation_results` | routes/job_batch_operations.py |
+| GET | `/workspaces/{workspace_id}/job-batch-operations` | `list_job_batch_operations` | routes/job_batch_operations_listing.py |
+| POST | `/workspaces/{workspace_id}/job-batch-operations/{op_id}/archive` | `archive_job_batch_operation` | routes/job_batch_operations_listing.py |
 | POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/job_batches.py |
 | GET | `/jobs/{job_id}/{invalid_path:path}` | `reject_invalid_job_subpath` | routes/job_invalid_paths.py |
 | GET | `/workspaces/{workspace_id}/jobs/snapshot` | `snapshot_workspace_jobs` | routes/job_list.py |
@@ -442,6 +444,8 @@ server/app/
 | JobBatchOperationAcceptedResponse | BaseModel | operation: JobBatchOperationResponse | app/routes/job_batch_operations.py |
 | JobBatchOperationResultItem | BaseModel | seq: int, result: dict[str, Any] | app/routes/job_batch_operations.py |
 | JobBatchOperationResultsResponse | BaseModel | results: list[JobBatchOperationResultItem], next_cursor: str | None | app/routes/job_batch_operations.py |
+| JobBatchOperationListResponse | BaseModel | operations: list[JobBatchOperationListItem], next_cursor: str | None, active_... | app/routes/job_batch_operations_listing.py |
+| JobBatchOperationArchiveResponse | BaseModel | operation: JobBatchOperationListItem | app/routes/job_batch_operations_listing.py |
 | JobClientTokenFields | BaseModel | client_token: str | None, source_base_id: str | None | app/routes/job_client_token_contracts.py |
 | JobBatchRequest | BaseModel | entity: str | None, source_kind: str, question_ids: list[str], knowledge_code... | app/routes/job_contracts.py |
 | JobBatchResponse | BaseModel | batch: dict[str, Any], created_count: int, jobs: list[dict[str, Any]] | app/routes/job_contracts.py |

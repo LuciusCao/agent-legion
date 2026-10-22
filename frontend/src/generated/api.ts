@@ -1991,6 +1991,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/job-batch-operations': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Job Batch Operations */
+    get: operations['list_job_batch_operations_api_workspaces__workspace_id__job_batch_operations_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}': {
     parameters: {
       query?: never
@@ -2002,6 +2019,23 @@ export interface paths {
     get: operations['get_job_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__get']
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/archive': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Archive Job Batch Operation */
+    post: operations['archive_job_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__archive_post']
     delete?: never
     options?: never
     head?: never
@@ -4841,6 +4875,111 @@ export interface components {
      */
     JobBatchOperationAcceptedResponse: {
       operation: components['schemas']['JobBatchOperationResponse']
+    }
+    /**
+     * JobBatchOperationArchiveResponse
+     * @description 手动归档回包：更新后的卡片载荷（幂等：重复归档返回现态，不报错）。
+     */
+    JobBatchOperationArchiveResponse: {
+      operation: components['schemas']['JobBatchOperationListItem']
+    }
+    /**
+     * JobBatchOperationListItem
+     * @description 任务中心批量操作卡片载荷：#946 操作句柄 + 归档位。
+     *
+     *     archive_source：manual = 用户在任务中心手动归档；auto = 终态结束超过
+     *     7 天按查询口径自动归档（不落列）；非归档视图为 null。
+     */
+    JobBatchOperationListItem: {
+      /** Archive Source */
+      archive_source: ('manual' | 'auto') | null
+      /** Archived At */
+      archived_at: string | null
+      /** Chunk Errors */
+      chunk_errors?: {
+        [key: string]: unknown
+      }[]
+      /** Created At */
+      created_at?: string | null
+      /**
+       * Created By
+       * @default
+       */
+      created_by: string
+      /**
+       * Error Message
+       * @default
+       */
+      error_message: string
+      /** Failed Count */
+      failed_count: number
+      /** Finished At */
+      finished_at?: string | null
+      /** Id */
+      id: string
+      /** Items Total */
+      items_total: number
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind:
+        | 'rerun'
+        | 'rerun_by_failure'
+        | 'delete'
+        | 'run_to'
+        | 'pause'
+        | 'resume'
+        | 'upgrade_workflow'
+        | 'package'
+        | 'clear_packed'
+      /** Output */
+      output?: {
+        [key: string]: unknown
+      }
+      /** Processed Count */
+      processed_count: number
+      /** Reason Counts */
+      reason_counts?: {
+        [key: string]: number
+      }
+      /** Skipped Count */
+      skipped_count: number
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        | 'pending'
+        | 'running'
+        | 'paused'
+        | 'completed'
+        | 'failed'
+        | 'cancelled'
+      /** Succeeded Count */
+      succeeded_count: number
+      /** Updated At */
+      updated_at?: string | null
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /**
+     * JobBatchOperationListResponse
+     * @description 单视图一页；active_count 与视图无关（徽标与分区标题同快照）。
+     */
+    JobBatchOperationListResponse: {
+      /**
+       * Active Count
+       * @description 进行中 + 排队数（徽标口径）
+       */
+      active_count: number
+      /**
+       * Next Cursor
+       * @description keyset 游标（ended/archived 瀑布流）；active 视图不分页恒为 null
+       */
+      next_cursor: string | null
+      /** Operations */
+      operations: components['schemas']['JobBatchOperationListItem'][]
     }
     /**
      * JobBatchOperationResponse
@@ -13183,6 +13322,41 @@ export interface operations {
       }
     }
   }
+  list_job_batch_operations_api_workspaces__workspace_id__job_batch_operations_get: {
+    parameters: {
+      query?: {
+        view?: 'active' | 'ended' | 'archived'
+        limit?: number
+        cursor?: string | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_job_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__get: {
     parameters: {
       query?: never
@@ -13202,6 +13376,38 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['JobBatchOperationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  archive_job_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__archive_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        op_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationArchiveResponse']
         }
       }
       /** @description Validation Error */
