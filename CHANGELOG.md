@@ -874,7 +874,8 @@ Initial open-source release.
 - Demo workflow `education_video_problems_generation` under `examples/`, runnable out of the box against a real LLM.
 - Docker deployment stacks (`deploy/`) and remote worker deployment runbook.
 
-[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/LuciusCao/agent-legion/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/LuciusCao/agent-legion/compare/v0.7.19...v0.8.0
 [0.7.6]: https://github.com/LuciusCao/agent-legion/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/LuciusCao/agent-legion/compare/v0.7.4...v0.7.5

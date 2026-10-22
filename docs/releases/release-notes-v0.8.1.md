@@ -2,7 +2,7 @@
 
 ### Added
 - 任务中心与大批量异步受理（#1117、#1157、#946）：workspace 新增「任务」页与 AppBar 徽标入口；添加条目超过 1000 条、或多选批量操作超过 1000 个 job 时秒级受理返回任务句柄，进度以卡片呈现（状态、进度条、逐 job 计数），进行中可暂停/继续/取消，终态可归档。
-- Studio 运行配置通道（#1114 族，0.8.1 studio-split 里程碑）：agent 节点的 provider/model/thinking/prompt/tools/requires_labels 在 Inspector「运行配置」区即改即存，不再产生新 revision；配置版本历史可查看、可逐版本回滚；Studio Agent 建议卡拆为「运行配置变更」与「Workflow 草稿」两张卡分别提交。
+- Studio 运行配置通道（0.8.1 studio-split 里程碑，M47 后端通道 + M48/M49 前端双通道）：agent 节点的 provider/model/thinking/prompt/tools/requires_labels 在 Inspector「运行配置」区即改即存，不再产生新 revision；配置版本历史可查看、可逐版本回滚；Studio Agent 建议卡拆为「运行配置变更」与「Workflow 草稿」两张卡分别提交。
 - 批量操作列表面（#946）：任务中心混排展示批量操作与批量建 run 两类卡片，支持三视图（进行中/已结束/已归档）、逐 job 结果明细与打包产物下载；归档记录 90 天后自动清理。
 - velites 0.5.9：单次输出触顶自动续写（#865）——回复因长度触顶时在同一 run 内续写，已落盘部分保留；OpenAI 兼容路径可按模型方言选择上限字段（#1093）。
 

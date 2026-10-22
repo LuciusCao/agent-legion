@@ -52,9 +52,9 @@ usage() {
   --name NAME           显示名（默认 "Worker on <hostname>"）
   --models-json FILE    安装该文件为 velites-config/models.json（已存在则
                         覆盖——显式传入即声明为本次的期望内容）
-  --version TAG         worker 镜像 tag（默认 0.8.0；须存在 worker-v<TAG>
+  --version TAG         worker 镜像 tag（默认 0.8.1；须存在 worker-v<TAG>
                         发布 tag）
-  --velites-version VER velites 二进制版本（默认 0.5.8）
+  --velites-version VER velites 二进制版本（默认 0.5.9）
   --no-up               只组装文件，不执行 docker compose up
 
 示例（无仓库的远程机器）:
