@@ -115,26 +115,28 @@ export function RuntimeConfigCard(props: {
       版本历史
     </button>
   )
-  const settledKeys = settlement?.savedKeys ?? []
-  const shownKeys = settlement ? settledKeys : channels.runtimeKeys
+  const shownKeys = settlement?.savedKeys ?? channels.runtimeKeys
+  // 徽标文案（落定态带版本号）；徽标本身在标题行作独立 flex 子项渲染。
+  const badgeText = !settlement
+    ? '运行通道 · 立即生效'
+    : settlement.version !== null
+      ? `已生效 · v${settlement.version}`
+      : '已生效'
 
   return (
     <div className={styles.draftCard}>
       {/* 标题行与 Workflow 草稿卡同式（深色标题 + 蓝色图标），通道身份只由
           右侧小徽标表达（review 实锤：标题不用绿色）。 */}
-      <StudioDraftCardHeader icon={TuneOutlinedIcon} tone="workflow">
+      <StudioDraftCardHeader
+        icon={TuneOutlinedIcon}
+        tone="workflow"
+        badge={
+          <span className={`${splitStyles.badge} ${splitStyles.badgeRuntime}`}>
+            {badgeText}
+          </span>
+        }
+      >
         运行配置变更
-        {settlement ? (
-          <span className={`${splitStyles.badge} ${splitStyles.badgeRuntime}`}>
-            {settlement.version !== null
-              ? `已生效 · v${settlement.version}`
-              : '已生效'}
-          </span>
-        ) : (
-          <span className={`${splitStyles.badge} ${splitStyles.badgeRuntime}`}>
-            运行通道 · 立即生效
-          </span>
-        )}
       </StudioDraftCardHeader>
       <div className={styles.draftMeta}>
         {settlement

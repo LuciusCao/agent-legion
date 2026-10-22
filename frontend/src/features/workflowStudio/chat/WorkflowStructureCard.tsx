@@ -37,11 +37,18 @@ export function WorkflowStructureCard(props: {
 
   return (
     <div className={styles.draftCard}>
-      <StudioDraftCardHeader icon={AccountTreeOutlinedIcon} tone="workflow">
+      <StudioDraftCardHeader
+        icon={AccountTreeOutlinedIcon}
+        tone="workflow"
+        badge={
+          <span
+            className={`${splitStyles.badge} ${splitStyles.badgeStructure}`}
+          >
+            结构通道 · 发布生效
+          </span>
+        }
+      >
         Workflow 草稿
-        <span className={`${splitStyles.badge} ${splitStyles.badgeStructure}`}>
-          结构通道 · 发布生效
-        </span>
       </StudioDraftCardHeader>
       <div className={styles.draftMeta}>
         {props.draft.compareMeta ?? 'agent 产出的定义草稿'}

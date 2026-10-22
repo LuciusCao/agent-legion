@@ -33,6 +33,10 @@
   padding: 1px 8px;
   letter-spacing: 0.02em;
   white-space: nowrap;
+  /* 标题文字与徽标的间距：标题行 flex gap 6px + 2px = 8px（.draftActions /
+   * .permissionActions 的 8px 间距 token；视觉返工 r4——徽标作为标题行
+   * 独立 flex 子项，align-items: center 保证中心线像素级对齐）。 */
+  margin-left: 2px;
 }
 .badgeRuntime {
   background: #eef7f3;
