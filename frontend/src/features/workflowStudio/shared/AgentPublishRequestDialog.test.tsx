@@ -479,6 +479,58 @@ describe('AgentPublishRequestDialog', () => {
     )
   })
 
+  it('M49 runtime-only 请求（compare 无条目 + 有 runtime 键）：确认保存可用并调确认端点', async () => {
+    // 通道死端回归钉：agent 对 tools/requires_labels-only 草稿发起发布
+    // 请求时 compare 摘要为空（M47 起这些字段不进 compare）——旧门禁把
+    // 确认永久禁用（用户只剩取消）。现在 runtime 键存在即可确认：标题
+    // 「保存节点运行配置」、runtime-only 文案、确认端点照常调用（后端按
+    // runtime-only 原地生效 + 追加配置版本，result_revision_id 为 null）。
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    studioState.flushDraftSave = vi.fn().mockResolvedValue({
+      ok: true,
+      state: { status: 'saved', savedAt: null },
+    })
+    mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
+    mocks.confirmPublishRequest.mockResolvedValue({
+      ...pendingRecord(),
+      status: 'confirmed',
+      result_revision_id: null,
+      resolved_at: '2026-09-03T10:02:00Z',
+    })
+    renderDialog({
+      createsRevision: false,
+      compareSummary: {
+        createsRevision: false,
+        riskLevel: 'none' as const,
+        severityLabel: '无风险',
+        nodeChanges: [],
+        edgeChanges: [],
+        intakeChanges: [],
+        metadataChanges: [],
+        riskFlags: [],
+        changedNodeKeys: new Set(),
+      },
+      runtimeChangedKeys: ['nodes.fetch_items.tools'],
+    })
+
+    const confirmButton = await screen.findByRole('button', {
+      name: '确认保存',
+    })
+    expect(
+      screen.getByRole('dialog', { name: '保存节点运行配置' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/确认后立即对新执行生效并追加一条配置版本/)
+    ).toBeInTheDocument()
+    expect(confirmButton).toBeEnabled()
+
+    await userEvent.click(confirmButton)
+
+    await waitFor(() =>
+      expect(mocks.confirmPublishRequest).toHaveBeenCalledWith('ws1', 'req-1')
+    )
+  })
+
   it('cancel calls the cancel endpoint and closes the dialog', async () => {
     mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
     mocks.cancelPublishRequest.mockResolvedValue({
