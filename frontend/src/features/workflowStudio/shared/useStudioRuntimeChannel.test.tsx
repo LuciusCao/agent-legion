@@ -308,6 +308,41 @@ describe('useStudioRuntimeChannel（M48 运行通道）', () => {
     expect(mocks.save).toHaveBeenCalledTimes(2)
   })
 
+  it('M49 r1 P1-1 回归钉：回滚落定后守卫复位——saveRuntimeConfig 照常发 PATCH', async () => {
+    // r1 P1-1：state→ref 转换时 rollback 的 finally 漏了 savingRef 复位，
+    // 一次回滚后 save/再回滚整会话静默无效（return false、无请求无 toast）。
+    const { result } = setup({ draftYaml: BASELINE })
+
+    await act(async () => {
+      await result.current.rollbackRuntimeConfig(1)
+    })
+    expect(mocks.rollback).toHaveBeenCalledTimes(1)
+
+    const draft = BASELINE.replace('model: gpt-5.1', 'model: gpt-5.2')
+    let ok = false
+    await act(async () => {
+      ok = await result.current.saveRuntimeConfig(draft)
+    })
+    expect(ok).toBe(true)
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+    expect(mocks.save.mock.calls[0][1]).toContain('model: gpt-5.2')
+  })
+
+  it('M49 r1 P1-1 回归钉：连续两次回滚各发一次 POST', async () => {
+    const { result } = setup({ draftYaml: BASELINE })
+
+    await act(async () => {
+      await result.current.rollbackRuntimeConfig(1)
+    })
+    await act(async () => {
+      await result.current.rollbackRuntimeConfig(2)
+    })
+
+    expect(mocks.rollback).toHaveBeenCalledTimes(2)
+    expect(mocks.rollback.mock.calls[0]).toEqual(['ws1', 1])
+    expect(mocks.rollback.mock.calls[1]).toEqual(['ws1', 2])
+  })
+
   it('r1 P2-1：保存已生效但本地刷新失败——报「已生效 + 手动刷新」而非保存失败', async () => {
     mocks.fetchActive.mockRejectedValue(new Error('network down'))
     const draft = BASELINE.replace('model: gpt-5.1', 'model: gpt-5.2')

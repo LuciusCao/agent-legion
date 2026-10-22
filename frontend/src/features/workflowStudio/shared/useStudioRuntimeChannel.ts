@@ -134,6 +134,7 @@ export function useStudioRuntimeChannel(args: {
   async function saveRuntimeConfig(
     runtimeSourceYaml?: string
   ): Promise<boolean> {
+    // 置位/复位与 rollbackRuntimeConfig 对称（见彼处 r1 P1-1 注释）。
     if (!workspaceId || savingRef.current) return false
     let saveYaml: string
     try {
@@ -176,6 +177,8 @@ export function useStudioRuntimeChannel(args: {
   }
 
   async function rollbackRuntimeConfig(version: number): Promise<boolean> {
+    // 置位/复位与 saveRuntimeConfig 对称（见彼处的 M49 注释）——finally 里
+    // 的 savingRef 复位漏一行就是整会话运行通道静默锁死（r1 P1-1）。
     if (!workspaceId || savingRef.current) return false
     savingRef.current = true
     setRuntimeSaving(true)
@@ -198,6 +201,7 @@ export function useStudioRuntimeChannel(args: {
         .showToast(`运行配置回滚失败：${errorMessage(error)}`, 'error')
       return false
     } finally {
+      savingRef.current = false
       setRuntimeSaving(false)
     }
   }
