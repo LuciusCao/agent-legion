@@ -72,6 +72,38 @@ exit 1
 """
 
 
+# 基准选择 SIGPIPE 回归（#1247）：候选 worktree 出现在前，后续 filler 条目
+# 远超管道缓冲——awk 提前 exit 时上游 stub 继续写会收到 SIGPIPE，pipefail
+# 下整个命令替换 141、set -e 静默终止。filler 目录不落在盘上，撞名检查的
+# `[[ -d ]]` 过滤会把它们快速跳过。
+_GIT_STUB_LARGE_LIST = """#!/usr/bin/env bash
+if [[ "$1" == "worktree" && "$2" == "list" ]]; then
+  echo "worktree {main}"
+  echo "bare"
+  echo
+  echo "worktree {main}/.worktrees/develop"
+  echo "HEAD 0000000000000000000000000000000000000000"
+  echo "branch refs/heads/develop"
+  echo
+  i=0
+  while [[ $i -lt 1000 ]]; do
+    echo "worktree {main}/.worktrees/filler-$i"
+    echo "HEAD 0000000000000000000000000000000000000000"
+    echo "branch refs/heads/filler-$i"
+    echo
+    i=$((i + 1))
+  done
+  exit 0
+fi
+if [[ "$1" == "rev-parse" && "$2" == "--git-common-dir" ]]; then
+  echo "{main}/.git"
+  exit 0
+fi
+echo "unexpected git call: $*" >&2
+exit 1
+"""
+
+
 def _write_stub(path: Path, content: str) -> None:
     path.write_text(content)
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -320,6 +352,25 @@ def test_s3_bucket_existing_value_is_rewritten(tmp_path: Path) -> None:
     env_text = (main / ".worktrees/flat/.env").read_text()
     assert "AGENT_LEGION_S3_BUCKET=agent-legion-flat" in env_text
     assert "custom-bucket" not in env_text
+
+
+def test_default_base_selection_survives_large_worktree_list(tmp_path: Path) -> None:
+    """#1247 回归：worktree 数量多到 porcelain 输出超过管道缓冲时，默认基准
+    选择不得触发 SIGPIPE 141（awk 读完全部输入、只打印首个匹配）。"""
+    main, bin_dir = _setup(
+        tmp_path, ".worktrees/flat/scripts/init-worktree.sh", _GIT_STUB_LARGE_LIST
+    )
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+
+    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    env_text = (main / ".worktrees/flat/.env").read_text()
+    # 基准选中的是 develop（候选列表首位），不是 filler。
+    assert "# stub env" in env_text
+    assert "AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_flat" in env_text
 
 
 def test_missing_env_fails_fast_without_side_effects(tmp_path: Path) -> None:

@@ -171,15 +171,16 @@ TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计�
 
 ## 5. 可控性特性（第一特性）
 
-核心五项（评审已确认）：
+核心五项（评审已确认；下表即现行行为——预算、优雅取消、输出自检与无 delta 均已交付，
+设计期「现状对照」列的 Pi 对照已随落地移除）：
 
-| 特性 | 设计 | 现状对照 |
-|---|---|---|
-| 预算内建 | `--max-turns`、`--max-tokens`（按 usage 累计）、wall-clock deadline（复用 `--timeout-seconds`，M3 起该 flag 界定整个 run 的墙钟上限；**不再**兼任单次 provider HTTP 总超时——总超时会掐断长生成流，HTTP 层改为 connect 超时 + chunk 间 idle 超时，见 §7）；每次模型调用**前**检查，耗尽时注入一条收尾消息给模型**一个**收尾轮写出已声明产物，然后结束，`agent_end{reason: "budget_exceeded"}`（M3 实现为可选 `reason` 字段，取 `budget_exceeded` / `cancelled` 两值，替代布尔 flag 方案）；预算值走 `AgentDefinition.config_schema` 解析链成为节点标准可调参数 | 现在只有外层 wall-clock 强杀 |
-| 优雅取消 | SIGTERM 被 loop 捕获：检查点在 turn 边界与每次工具执行完成后（模型调用也可被中断）；bash 工具正在跑时走既有 TERM→grace→KILL 进程组清理；收尾发出 `agent_end{reason:"cancelled"}` 再退出，**exit 0**（取消是 Host 主动行为，非 harness 故障；M3 已决）；SIGKILL 兜底语义不变 | 现在 cancel = 进程组强杀，无事件收尾 |
-| 输出自检 | `--require-output <file>`（可多次）；loop 正常结束前自检缺失项（路径走工具同款 cwd 沙箱校验，逃逸路径启动即报错），有缺失则注入系统消息给**一次**补救轮；最终**总是**发 `outputs_validation{missing:[...]}` 事件（`missing` 可为空，M3 已决：显式事件便于 Host 判定）；补救后仍缺失的非取消运行 **exit 1**（EXEC-HARNESS-OUTPUTS-001）。#443 起升级为**契约模式**：任一 `--skill` 目录声明了机器可读契约（#542 起根目录 `contract.yaml` 为权威位置，legacy 嵌入块继续生效，见 §8）时，引擎同时校验文件**内容**（text 长度/必备标题、JSON Schema draft 2020-12），违约与缺失一样触发补救轮与 exit 1，事件带 `mode: contract` + `violations`；契约解析失败按一条违约处理（fail-closed，不静默降级；未闭合 fence 同此），且因契约位于只读 skill 目录、模型无法修复而**跳过补救轮直接失败**（不烧徒劳的 token）；无可解析契约时保持 legacy 存在性语义，事件带 `mode: existence`（给 skill 作者补契约的信号） | 现在 Host 事后扫 job_dir 才发现缺失 |
-| 零自动发现 | 不读 AGENTS.md/CLAUDE.md、不扫描 skill/扩展/模板目录、不读用户级配置；上下文 = `--system-prompt` + `--skill` + `@prompt.md`，无第三个来源（代码层不存在发现逻辑，而非"有逻辑加开关"） | Pi 靠 4 个 `--no-*` flag 维持；pi_agent_rust 无开关（PoC 的 P0 阻断项） |
-| 无 delta | 见 §4 | 现在 99% 的 stdout 体积是被丢弃的 delta |
+| 特性 | 现行行为 |
+|---|---|
+| 预算内建 | `--max-turns`、`--max-tokens`（按 usage 累计）、wall-clock deadline（复用 `--timeout-seconds`，M3 起该 flag 界定整个 run 的墙钟上限；**不再**兼任单次 provider HTTP 总超时——总超时会掐断长生成流，HTTP 层改为 connect 超时 + chunk 间 idle 超时，见 §7）；每次模型调用**前**检查，耗尽时注入一条收尾消息给模型**一个**收尾轮写出已声明产物，然后结束，`agent_end{reason: "budget_exceeded"}`（M3 实现为可选 `reason` 字段，取 `budget_exceeded` / `cancelled` 两值，替代布尔 flag 方案）；预算值走 `AgentDefinition.config_schema` 解析链成为节点标准可调参数 |
+| 优雅取消 | SIGTERM 被 loop 捕获：检查点在 turn 边界与每次工具执行完成后（模型调用也可被中断）；bash 工具正在跑时走既有 TERM→grace→KILL 进程组清理；收尾发出 `agent_end{reason:"cancelled"}` 再退出，**exit 0**（取消是 Host 主动行为，非 harness 故障；M3 已决）；SIGKILL 兜底语义不变 |
+| 输出自检 | `--require-output <file>`（可多次）；loop 正常结束前自检缺失项（路径走工具同款 cwd 沙箱校验，逃逸路径启动即报错），有缺失则注入系统消息给**一次**补救轮；最终**总是**发 `outputs_validation{missing:[...]}` 事件（`missing` 可为空，M3 已决：显式事件便于 Host 判定）；补救后仍缺失的非取消运行 **exit 1**（EXEC-HARNESS-OUTPUTS-001）。#443 起升级为**契约模式**：任一 `--skill` 目录声明了机器可读契约（#542 起根目录 `contract.yaml` 为权威位置，legacy 嵌入块继续生效，见 §8）时，引擎同时校验文件**内容**（text 长度/必备标题、JSON Schema draft 2020-12），违约与缺失一样触发补救轮与 exit 1，事件带 `mode: contract` + `violations`；契约解析失败按一条违约处理（fail-closed，不静默降级；未闭合 fence 同此），且因契约位于只读 skill 目录、模型无法修复而**跳过补救轮直接失败**（不烧徒劳的 token）；无可解析契约时保持 legacy 存在性语义，事件带 `mode: existence`（给 skill 作者补契约的信号） |
+| 零自动发现 | 不读 AGENTS.md/CLAUDE.md、不扫描 skill/扩展/模板目录、不读用户级配置；上下文 = `--system-prompt` + `--skill` + `@prompt.md`，无第三个来源（代码层不存在发现逻辑，而非"有逻辑加开关"） |
+| 无 delta | 见 §4 |
 
 评审后调整的两项：
 
@@ -349,8 +350,9 @@ fail-closed 报错，内置节点不受影响。
   cache 420k = velites 修复前 input 447k），`saturating_sub` 兜底异常网关；
 - `thinking` 按 driver 映射：OpenAI 使用 `reasoning_effort`；Anthropic 使用模型配置的
   `thinkingBudgets` 生成 `thinking.budget_tokens`；
-- 已知边界：严格要求 SSE——gateway 上只回 `application/json` 的模型不可用
-  （PoC P2 发现）；模型接入约束由实例级外部服务连接与 gateway 运维策略控制，
+- 响应按 Content-Type 分流：SSE 流式与 `application/json` 非流式响应都支持
+  （`openai_compat` 按响应头选择 `parse_non_streaming`，gateway 上只回 JSON 的
+  模型可用）；模型接入约束由实例级外部服务连接与 gateway 运维策略控制，
   不再通过 `config/workflow.yaml` 维护（split yaml 已退役）。
 - HTTP 层**不设整请求总超时**（总超时会掐断几分钟的长生成流；2026-08-01
   回放事故证实 gateway 会在上游失败时直接掐流）：内建 connect 超时 10s +

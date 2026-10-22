@@ -1,4 +1,4 @@
-"""运维文档示例与 ensure-s3-bucket.py 的「读成功再写」守卫（#1099 G2 review、#1111、#1115）。
+"""运维文档示例与 ensure-s3-bucket.py 的「读成功再写」守卫（#1099 G2 review、#1111、#1115、#1250、#1252）。
 
 codex 在 materials-storage-deployment.md 的 prod CORS 合并脚本上发现：
 `get_bucket_cors` 的任意 ClientError 都被当成「还没有 CORS」，随后
@@ -274,20 +274,87 @@ def _env_target(target: str) -> bool:
     return target == "deploy/.env"
 
 
+# 追加写入的键：echo/printf 参数与 heredoc 体里的 K= 记号（.env 键为
+# UPPER_SNAKE）。提取不到键的直写无法核对守卫覆盖，按违规处理（#1252）。
+_WRITTEN_KEY = re.compile(r"\b([A-Z_][A-Z0-9_]*)=")
+_HEREDOC = re.compile(r"<<-?\s*['\"]?([A-Za-z_]\w*)['\"]?")
+# 读失败区分（#1250）：分支里 `$?` 判 1（无匹配才继续），或对 deploy/.env
+# 的否定存在性检查（文件不存在才继续）——「文件存在但读失败」都不再追加。
+_RC_IS_ONE = re.compile(r"\$\?[\"']?\s+(?:-eq\s+1|-le\s+1|-lt\s+2)\b")
+_NOT_EXISTS_ENV = re.compile(
+    r"(?:\[\[?\s+!\s+-[ef]|!\s+\[\[?\s+-[ef])\s+[\"']?(?:\./)?deploy/\.env\b"
+)
+
+
+def _written_env_keys(block: str, pos: int) -> set[str]:
+    """pos 处直写 deploy/.env 的键：写入命令的 K= 记号与 heredoc 体的 K= 行。
+    命令范围只取最近的分隔符（`;` / 换行 / `&&` / `||`）之后——同一行前面的
+    grep 条件里的 `K=` 不算写入。"""
+    line_start = block.rfind("\n", 0, pos) + 1
+    before = block[line_start:pos]
+    command_start = max(before.rfind(";"), before.rfind("&&"), before.rfind("||")) + 1
+    line_end = block.find("\n", pos)
+    command = before[command_start:] + block[pos : line_end if line_end != -1 else len(block)]
+    keys = set(_WRITTEN_KEY.findall(command))
+    heredoc = _HEREDOC.search(command)
+    if heredoc is not None and line_end != -1:
+        for line in block[line_end + 1 :].splitlines():
+            if line.strip() == heredoc.group(1):
+                break
+            key = re.match(r"([A-Z_][A-Z0-9_]*)=", line)
+            if key:
+                keys.add(key.group(1))
+    return keys
+
+
+def _grep_checked_pattern(block: str, pos: int) -> re.Pattern[str] | None:
+    """pos 处 grep 命令检查的键模式（首个引号包裹的参数，ERE 按 Python re 解释）。"""
+    command = re.match(_COMMAND, block[pos:])
+    if command is None:
+        return None
+    match = re.search(r"\bgrep\b(?:\s+--?\w[-\w]*)*\s+(['\"])(?P<pattern>.*?)\1", command.group())
+    if match is None:
+        return None
+    try:
+        return re.compile(match.group("pattern"))
+    except re.error:
+        return None
+
+
 def env_appends_guarded(block: str) -> bool:
     """直写 deploy/.env（任意写法）必须落在针对该文件的 quiet grep 存在性检查的
     「未匹配」分支里，否则重跑重复追加键。只比文本先后不够（#1213 codex）：
-    `grep -q K f; echo K=v >> f` 的追加是无条件的。"""
+    `grep -q K f; echo K=v >> f` 的追加是无条件的。另两项（#1250/#1252）：
+    grep 检查的键必须覆盖写入的全部键（查 OTHER 却追加 K 不算数）；分支必须
+    区分「无匹配」(rc=1) 与「读失败」(rc=2)——`$?` 判 1 或 `! -e` 存在性检查，
+    「文件存在但不可读」时不得盲目追加（文件不存在是首次配置，照常追加）。"""
     writes = [pos for pos, target in write_targets(block) if _env_target(target)]
     if not writes:
         return True
-    unmatched = [
-        span
-        for m in _GREP_QUIET.finditer(block)
-        if _greps_env(block, m.start())
-        for span in _unmatched_branches(block, m.start())
+    guards = [
+        (match, span)
+        for match in _GREP_QUIET.finditer(block)
+        if _greps_env(block, match.start())
+        for span in _unmatched_branches(block, match.start())
     ]
-    return all(any(start <= pos < end for start, end in unmatched) for pos in writes)
+    for pos in writes:
+        keys = _written_env_keys(block, pos)
+        if not keys:
+            return False
+        covered = False
+        for match, (start, end) in guards:
+            if not (start <= pos < end):
+                continue
+            pattern = _grep_checked_pattern(block, match.start())
+            if pattern is None or not all(pattern.search(f"{key}=") for key in keys):
+                continue
+            span = block[start:pos]
+            if _RC_IS_ONE.search(span) or _NOT_EXISTS_ENV.search(span):
+                covered = True
+                break
+        if not covered:
+            return False
+    return True
 
 
 _SHELL_KEYWORD = re.compile(r"(?<![\w$-])(if|then|elif|else|fi)(?![\w-])")
@@ -338,13 +405,38 @@ def _greps_env(block: str, pos: int) -> bool:
 _ABORT = r"\s*(?:\{[^\n]*?\b(?:return|exit)\b|(?:return|exit)\b)"
 
 
+_SEPARATORS = re.compile(r"^(?:[ \t]*(?:\n|;|&&|\|\|)[ \t]*)+")
+_COMMAND = r"[^\n;]*?(?=;|&&|\|\||\n|$)"
+_RC_CAPTURE = re.compile(r"^(\w+)=\$\?(?=\s|$)")
+_RC_IMMEDIATE_TEST = re.compile(r"^(?:\[\[?\s|test\s|\(\(|case\s)")
+
+
+def _first_command_after(block: str, pos: int) -> str:
+    """pos 处的命令结束后紧随的第一条命令文本（跳过分隔符与 &&/|| 链接）。"""
+    head = re.match(_COMMAND, block[pos:])
+    assert head is not None
+    tail = _SEPARATORS.sub("", block[pos + head.end() :])
+    end = re.match(_COMMAND, tail)
+    assert end is not None
+    return tail[: end.end()]
+
+
 def _grep_rc_checked(block: str, after: int) -> bool:
     """grep 之后区分「无匹配」(1) 与「读失败」(2)，且读失败**必须中止**：比较对象
     是 `$?` 或由 `$?` 赋值的变量，形态为 `≤1 || 中止`、`≥2 && 中止`、
     `if ≥2; then … 中止 … fi`、`case … 0|1) ;; *) 中止`。只识别比较、不看命中
-    后控制流时，`[ "$rc" -gt 1 ] && echo warn` 也能过（#1213 codex）。"""
+    后控制流时，`[ "$rc" -gt 1 ] && echo warn` 也能过（#1213 codex）。
+    `$?` 的捕获或比较必须是紧随 grep 的第一条命令（#1252）：隔一条命令后
+    `$?` 已被覆盖，`rc=$?` 存的是别人的退出码。"""
+    first = _first_command_after(block, after)
+    capture = _RC_CAPTURE.match(first)
+    if capture:
+        names = [capture.group(1)]
+    elif _RC_IMMEDIATE_TEST.match(first) and "$?" in first:
+        names = ["\\?"]
+    else:
+        return False
     rest = block[after:]
-    names = ["\\?", *re.findall(r"\b(\w+)=\$\?", rest)]
     ref = r"[\"']?\$\{?(?:" + "|".join(names) + r")\}?[\"']?"
     arith_ref = r"\$?\{?(?:" + "|".join(names) + r")\}?"
 
@@ -580,6 +672,8 @@ _DOWNLOAD_GOOD = 'curl -o "$OUT.part" u\nmv "$OUT.part" "$OUT"'
                 "cat >> deploy/.env <<X\nK=v\nX",
                 "echo K=v | tee -a deploy/.env",
                 'grep -v "^$2=" "$1" > "$1.tmp"\nmv "$1.tmp" "$1"',  # 读失败不中止
+                # rc 捕获没有紧随 grep：rc 里存的是 echo 的退出码（#1252）
+                'grep -v "^$2=" "$1" > "$1.tmp"\necho logged\nrc=$?\n[ "$rc" -gt 1 ] && return 1\nmv "$1.tmp" "$1"',
                 _ENV_GOOD.replace("[ $? -le 1 ]", "[ $? -le 2 ]"),  # 读失败也继续
                 _ENV_GOOD.replace('> "$1.tmp"\n', '> "$1"\n'),  # 直写改名目标
                 # 比较对了但命中后不中止，mv 照样把清空的临时文件盖回去（#1213 codex）
@@ -600,15 +694,20 @@ _DOWNLOAD_GOOD = 'curl -o "$OUT.part" u\nmv "$OUT.part" "$OUT"'
         ),
         pytest.param(
             env_appends_guarded,
-            "if grep -q '^K=' deploy/.env; then :; else echo K=v >> deploy/.env; fi",
+            "if grep -q '^K=' deploy/.env; then :; elif [ $? -eq 1 ]; then echo K=v >> deploy/.env; fi",
             [
                 "set_env deploy/.env K v",
-                "if grep -E --quiet '^K=' ./deploy/.env; then :\nelse\n printf K=v >> ./deploy/.env\nfi",
-                "if ! grep -q '^K=' deploy/.env; then echo K=v >> deploy/.env; fi",
-                "grep -q '^K=' deploy/.env || echo K=v >> deploy/.env",
+                "if grep -E --quiet '^K=' ./deploy/.env; then :\nelif [ $? -eq 1 ]; then\n printf K=v >> ./deploy/.env\nfi",
+                # 文件不存在（首次配置）也走追加：rc=1 或 ! -e 任一（#1250）
+                "if grep -q '^K=' deploy/.env; then :\nelif [ $? -eq 1 ] || [ ! -e deploy/.env ]; then\n echo K=v >> deploy/.env\nelse\n echo bad >&2\nfi",
+                "if grep -q '^K=' deploy/.env; then :; elif [ ! -e deploy/.env ]; then echo K=v >> deploy/.env; fi",
                 # elif 链与嵌套 if 都属于未匹配分支
-                "if grep -q '^K=' deploy/.env; then :\nelif V=$(x); then\n"
+                "if grep -q '^K=' deploy/.env; then :\nelif [ $? -eq 1 ] && V=$(x); then\n"
                 '  if [ -n "$V" ]; then :; fi\n  echo K=$V >> deploy/.env\nfi',
+                # heredoc 多键写入，grep 模式覆盖全部键（materials 文档的 S3 形态）
+                "if grep -qE '^AGENT_LEGION_S3_(BUCKET|SECRET_KEY)=' deploy/.env; then :\n"
+                "elif [ $? -eq 1 ] || [ ! -e deploy/.env ]; then\n"
+                "cat >> deploy/.env <<EOF\nAGENT_LEGION_S3_BUCKET=b\nAGENT_LEGION_S3_SECRET_KEY=$SK\nEOF\nfi",
             ],
             [
                 "echo K=v >> deploy/.env",
@@ -622,6 +721,18 @@ _DOWNLOAD_GOOD = 'curl -o "$OUT.part" u\nmv "$OUT.part" "$OUT"'
                 "if grep -q '^K=' deploy/.env; then :; fi\necho K=v >> deploy/.env",
                 "if ! grep -q '^K=' deploy/.env; then :; else echo K=v >> deploy/.env; fi",
                 "if grep -q '^K=' deploy/.env; then :; else :; fi; echo K=v >> deploy/.env",
+                # 不区分无匹配与读失败（#1250）：文件存在但不可读会盲目追加
+                "if grep -q '^K=' deploy/.env; then :; else echo K=v >> deploy/.env; fi",
+                "if ! grep -q '^K=' deploy/.env; then echo K=v >> deploy/.env; fi",
+                "grep -q '^K=' deploy/.env || echo K=v >> deploy/.env",
+                # 守卫的键与写入的键不一致（#1252）：OTHER 不存在时每次重跑都重复追加 K
+                "if grep -q '^OTHER=' deploy/.env; then :; elif [ $? -eq 1 ]; then echo K=v >> deploy/.env; fi",
+                # heredoc 写入了守卫模式未覆盖的键（#1252）
+                "if grep -qE '^AGENT_LEGION_S3_(BUCKET|SECRET_KEY)=' deploy/.env; then :\n"
+                "elif [ $? -eq 1 ]; then\n"
+                "cat >> deploy/.env <<EOF\nAGENT_LEGION_S3_BUCKET=b\nOTHER_KEY=x\nEOF\nfi",
+                # 提取不到写入键（动态值）：无法核对守卫覆盖，按违规处理
+                "if grep -q '^K=' deploy/.env; then :; elif [ $? -eq 1 ]; then echo \"$V\" >> deploy/.env; fi",
             ],
             id="env-append",
         ),

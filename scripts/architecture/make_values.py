@@ -21,23 +21,29 @@ DEFINE = re.compile(rb"^\s*(?:(?:override|export|private)\s+)*define\b")
 ENDEF = re.compile(rb"^\s*endef\b")
 
 
+_CLOSER = {ord("("): ord(")"), ord("{"): ord("}")}
+
+
 def strip_make_comment(line: bytes) -> bytes:
     """``line`` without its make comment. A ``#`` inside a reference is kept
-    (errs towards reporting); ``\\#`` (odd backslash run) is a literal ``#``."""
-    depth = 0
+    (errs towards reporting); ``\\#`` (odd backslash run) is a literal ``#``.
+    Reference tracking is a stack of opening-bracket types (#1253): only the
+    closer matching the stack top pops it, so a literal mismatched closer in a
+    function argument (``$(subst },x,# $$X，)``) does not end the reference."""
+    stack: list[int] = []
     i = 0
     while i < len(line):
         byte = line[i]
         if byte == ord("$") and i + 1 < len(line):
             if line[i + 1] in b"({":
-                depth += 1
+                stack.append(line[i + 1])
             i += 2  # ``$$`` / ``$X`` / ``$(``: never a comment start
             continue
-        if depth and byte in b"({":
-            depth += 1
-        elif depth and byte in b")}":
-            depth -= 1
-        elif byte == ord("#") and not depth:
+        if stack and byte in b"({":
+            stack.append(byte)
+        elif stack and byte in b")}" and byte == _CLOSER[stack[-1]]:
+            stack.pop()
+        elif byte == ord("#") and not stack:
             backslashes = len(line[:i]) - len(line[:i].rstrip(b"\\"))
             if backslashes % 2 == 0:
                 return line[:i]

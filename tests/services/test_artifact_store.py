@@ -86,15 +86,41 @@ def test_refs_lifecycle(store, tmp_path):
     store.add_ref("job-1", "node-a", "output.json", h)  # 幂等
     store.add_ref("job-2", "node-b", "output.json", h)
     assert len(store.refs_for_job("job-1")) == 1
-    orphaned = store.delete_refs_for_job("job-1")
-    assert orphaned == []  # job-2 仍引用
-    orphaned = store.delete_refs_for_job("job-2")
-    assert orphaned == [h]
-    # Just-created blobs are inside the GC grace window; age past it.
+    # #1248：job 行仍在（删除提交后同源重建占用了同一 id）时，按 id 的 refs
+    # 清扫绝不生效——这些行归新 job 所有。
+    assert store.delete_refs_for_job("job-1") == []
+    assert len(store.refs_for_job("job-1")) == 1
+    assert len(store.refs_for_job("job-2")) == 1
+    # 删除路径的收尾：jobs 行已删（FK 级联收走 refs）后清扫是幂等空操作。
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("delete from jobs where id in ('job-1', 'job-2')")
+    assert store.delete_refs_for_job("job-1") == []
+    assert store.refs_for_job("job-1") == []
+    assert store.refs_for_job("job-2") == []
+    # h 不再被任何 job 引用：过了 GC 宽限窗后物理删除。
     past_grace = datetime.now(UTC) + timedelta(seconds=GC_GRACE_SECONDS + 60)
     assert store.delete_unreferenced([h], now=past_grace) == 1
     with pytest.raises(ArtifactNotFoundError):
         store.open(h)
+
+
+def test_delete_refs_sweeps_refs_whose_job_row_is_gone(store):
+    """正向路径：jobs 行不在而 refs 残留（级联缺失的存量/损坏形态）时才真正
+    删除，并返回不再被任何 job 引用的 hash。FK 拦着正常写入，用
+    session_replication_role=replica 模拟（非 superuser 角色跳过）。"""
+    h = store.put(b"orphaned")
+    try:
+        with write_transaction(TEST_DATABASE_URL) as conn:
+            conn.execute("set session_replication_role = replica")
+            conn.execute(
+                "insert into artifact_refs(job_id, node_key, name, hash) values (%s, %s, %s, %s)",
+                ("gone-job", "node-a", "out.json", h),
+            )
+    except Exception as exc:  # 测试角色非 superuser，无法绕过 FK
+        pytest.skip(f"cannot simulate pre-cascade orphan refs: {exc}")
+    orphaned = store.delete_refs_for_job("gone-job")
+    assert orphaned == [h]
+    assert store.refs_for_job("gone-job") == []
 
 
 def test_put_reasserts_catalog_row_for_existing_blob(store):

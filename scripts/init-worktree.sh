@@ -57,9 +57,12 @@ if [[ -z "$BASE" ]]; then
     # bare/无工作区配置，永不适合作基准）。注意选中的基准自身也可能缺 .env，
     # 由下方 fail-fast 兜底（2026-08-18 事故：基准 worktree 缺 .env → 新
     # worktree 无 .env → 后端回落共享默认库即 prod 库）。
+    # awk 不提前 exit（#1247，同 #1145 族）：读完全部输入、只打印首个匹配，
+    # 否则 worktree 多到 porcelain 输出超过管道缓冲时，上游 git 在 awk 退出后
+    # 继续写会收到 SIGPIPE，pipefail 下命令替换整体 141、set -e 静默终止。
     BASE="$(git worktree list --porcelain | awk -v root="$ROOT" -v main="$MAIN" '
         /^worktree / {
-            if (wt != "" && !isbare && wt != root && wt != main) { print wt; found=1; exit }
+            if (!found && wt != "" && !isbare && wt != root && wt != main) { print wt; found=1 }
             wt = substr($0, 10); isbare = 0
         }
         /^bare$/ { isbare = 1 }

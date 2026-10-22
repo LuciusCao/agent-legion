@@ -208,6 +208,15 @@ def test_makefile_recipes_follow_make_semantics() -> None:
         ("hello \\# '$$X，'", True),
         ("hello \\\\\\# '$$X，'", True),
         ("$(subst #,-,'$$X，')", True),
+        # A literal mismatched closer inside a function argument does not end
+        # the reference (#1253): the ``#`` stays make-internal, ``$$X`` still
+        # reaches the recipe.
+        ("$(subst },x,# $$X，)", True),
+        ("${subst ),x,# $$X，}", True),
+        # ...and the same shapes stay green once the payload is safe.
+        ("$(subst },x,# $${X}，)", False),
+        ("$(subst },x,v) # '$$X，'", False),
+        ("$(if $(X),$(subst },a,b)) # '$$Z，'", False),
         ("hello \\\\# '$$X，'", False),  # ``\\`` then a real comment
     ],
 )
