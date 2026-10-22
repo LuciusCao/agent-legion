@@ -235,6 +235,114 @@ describe('useStudioRuntimeChannel（M48 运行通道）', () => {
     expect(body).toContain('model: gpt-5.3')
   })
 
+  it('M49 连续编辑：两次「应用并生效」各发一次 PATCH（每次生效一条配置版本）', async () => {
+    // agent 会话内连续调整 runtime：第一次保存落定后守卫必须复位，第二
+    // 次建议照常发出——后端逐次追加配置版本（锁内串行，M47），客户端不吞。
+    const proposalA = BASELINE.replace('model: gpt-5.1', 'model: gpt-5.2')
+    const proposalB = BASELINE.replace('model: gpt-5.1', 'model: gpt-5.3')
+    const { result } = setup({ draftYaml: BASELINE })
+
+    await act(async () => {
+      await result.current.saveRuntimeConfig(proposalA)
+    })
+    await act(async () => {
+      await result.current.saveRuntimeConfig(proposalB)
+    })
+
+    expect(mocks.save).toHaveBeenCalledTimes(2)
+    expect(mocks.save.mock.calls[0][1]).toContain('model: gpt-5.2')
+    expect(mocks.save.mock.calls[1][1]).toContain('model: gpt-5.3')
+  })
+
+  it('M49 在途守卫（ref 级）：第一次 PATCH 未落定时第二次调用立即拒发', async () => {
+    // state 守卫读闭包快照，同一渲染周期内的第二次调用会穿透（建议卡双击
+    // / 卡片与 Inspector 保存按钮同帧）；ref 守卫同步置位，保证「一次生效
+    // = 一次 PATCH = 一条配置版本」，用户无感知的多版本连发被挡在客户端。
+    let releaseSave: (() => void) | null = null
+    mocks.save.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseSave = () =>
+            resolve({
+              revision: FRESH_ACTIVE.revision,
+              runtime_version: {
+                version: 1,
+                revision_id: 'rev1',
+                changed_keys: ['nodes.write_script.model'],
+                created_by: 'user:1',
+                created_at: '2026-10-21T10:00:00',
+              },
+            })
+        })
+    )
+    const draft = BASELINE.replace('model: gpt-5.1', 'model: gpt-5.2')
+    const { result } = setup({ draftYaml: draft })
+
+    let firstPromise!: Promise<boolean>
+    act(() => {
+      firstPromise = result.current.saveRuntimeConfig()
+    })
+    // 第一次 PATCH 在途：第二次不进入 try（setState 不会触发），直接 false。
+    const second = await result.current.saveRuntimeConfig()
+    expect(second).toBe(false)
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      releaseSave?.()
+      expect(await firstPromise).toBe(true)
+    })
+    // 落定后守卫复位，后续保存恢复可用（mock 恢复正常 resolve 形态）。
+    mocks.save.mockResolvedValue({
+      revision: FRESH_ACTIVE.revision,
+      runtime_version: {
+        version: 2,
+        revision_id: 'rev1',
+        changed_keys: ['nodes.write_script.model'],
+        created_by: 'user:1',
+        created_at: '2026-10-21T10:05:00',
+      },
+    })
+    await act(async () => {
+      await result.current.saveRuntimeConfig()
+    })
+    expect(mocks.save).toHaveBeenCalledTimes(2)
+  })
+
+  it('M49 r1 P1-1 回归钉：回滚落定后守卫复位——saveRuntimeConfig 照常发 PATCH', async () => {
+    // r1 P1-1：state→ref 转换时 rollback 的 finally 漏了 savingRef 复位，
+    // 一次回滚后 save/再回滚整会话静默无效（return false、无请求无 toast）。
+    const { result } = setup({ draftYaml: BASELINE })
+
+    await act(async () => {
+      await result.current.rollbackRuntimeConfig(1)
+    })
+    expect(mocks.rollback).toHaveBeenCalledTimes(1)
+
+    const draft = BASELINE.replace('model: gpt-5.1', 'model: gpt-5.2')
+    let ok = false
+    await act(async () => {
+      ok = await result.current.saveRuntimeConfig(draft)
+    })
+    expect(ok).toBe(true)
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+    expect(mocks.save.mock.calls[0][1]).toContain('model: gpt-5.2')
+  })
+
+  it('M49 r1 P1-1 回归钉：连续两次回滚各发一次 POST', async () => {
+    const { result } = setup({ draftYaml: BASELINE })
+
+    await act(async () => {
+      await result.current.rollbackRuntimeConfig(1)
+    })
+    await act(async () => {
+      await result.current.rollbackRuntimeConfig(2)
+    })
+
+    expect(mocks.rollback).toHaveBeenCalledTimes(2)
+    expect(mocks.rollback.mock.calls[0]).toEqual(['ws1', 1])
+    expect(mocks.rollback.mock.calls[1]).toEqual(['ws1', 2])
+  })
+
   it('r1 P2-1：保存已生效但本地刷新失败——报「已生效 + 手动刷新」而非保存失败', async () => {
     mocks.fetchActive.mockRejectedValue(new Error('network down'))
     const draft = BASELINE.replace('model: gpt-5.1', 'model: gpt-5.2')

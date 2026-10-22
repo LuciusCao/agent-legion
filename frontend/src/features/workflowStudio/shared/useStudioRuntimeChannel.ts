@@ -63,6 +63,12 @@ export function useStudioRuntimeChannel(args: {
   const { workspaceId, originalYaml, draftYaml } = args
   const queryClient = useQueryClient()
   const [runtimeSaving, setRuntimeSaving] = useState(false)
+  // M49 会话内连续编辑：在途守卫用 ref 而不是 state——state 读的是闭包
+  // 快照，同一渲染周期内的第二次调用（建议卡双击 / 卡片与 Inspector 保存
+  // 按钮近乎同帧触发）会穿透 state 守卫发出第二个 PATCH。后端虽靠
+  // publication 锁串行追加版本（数据不腐坏），但客户端串行化保证「一次
+  // 生效 = 一条配置版本」，避免用户无感知的多版本连发。
+  const savingRef = useRef(false)
   const [lastRuntimeSavedKeys, setLastRuntimeSavedKeys] = useState<string[]>([])
   // 保存在途期间草稿可能继续被编辑——收尾合并读最新值而不是闭包快照。
   const liveRef = useRef({ originalYaml, draftYaml })
@@ -128,7 +134,8 @@ export function useStudioRuntimeChannel(args: {
   async function saveRuntimeConfig(
     runtimeSourceYaml?: string
   ): Promise<boolean> {
-    if (!workspaceId || runtimeSaving) return false
+    // 置位/复位与 rollbackRuntimeConfig 对称（见彼处 r1 P1-1 注释）。
+    if (!workspaceId || savingRef.current) return false
     let saveYaml: string
     try {
       saveYaml = combineYamlStructureRuntime(
@@ -141,6 +148,7 @@ export function useStudioRuntimeChannel(args: {
         .showToast('草稿 YAML 有语法错误，修复后才能保存运行配置', 'error')
       return false
     }
+    savingRef.current = true
     setRuntimeSaving(true)
     try {
       const result = await saveWorkflowRuntimeConfig(workspaceId, saveYaml)
@@ -163,12 +171,16 @@ export function useStudioRuntimeChannel(args: {
       useUiStore.getState().showToast(message, 'error')
       return false
     } finally {
+      savingRef.current = false
       setRuntimeSaving(false)
     }
   }
 
   async function rollbackRuntimeConfig(version: number): Promise<boolean> {
-    if (!workspaceId || runtimeSaving) return false
+    // 置位/复位与 saveRuntimeConfig 对称（见彼处的 M49 注释）——finally 里
+    // 的 savingRef 复位漏一行就是整会话运行通道静默锁死（r1 P1-1）。
+    if (!workspaceId || savingRef.current) return false
+    savingRef.current = true
     setRuntimeSaving(true)
     try {
       const result = await rollbackWorkflowRuntimeConfig(workspaceId, version)
@@ -189,6 +201,7 @@ export function useStudioRuntimeChannel(args: {
         .showToast(`运行配置回滚失败：${errorMessage(error)}`, 'error')
       return false
     } finally {
+      savingRef.current = false
       setRuntimeSaving(false)
     }
   }
