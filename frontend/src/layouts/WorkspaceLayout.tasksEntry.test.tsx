@@ -29,6 +29,7 @@ vi.mock('../views/WorkspaceJobDetail', () => ({
 }))
 
 const activeCountState = { count: 0 }
+const activeOpCountState = { count: 0 }
 vi.mock('../features/taskCenter/useRunBatches', () => ({
   useActiveRunBatches: () => ({
     data:
@@ -44,6 +45,19 @@ vi.mock('../features/taskCenter/useRunBatches', () => ({
     all: (id: string) => ['run-batches', id],
     view: (id: string, view: string) => ['run-batches', id, view],
   },
+}))
+
+vi.mock('../features/taskCenter/useJobBatchOpListing', () => ({
+  useActiveJobBatchOps: () => ({
+    data:
+      activeOpCountState.count > 0
+        ? {
+            operations: [],
+            next_cursor: null,
+            active_count: activeOpCountState.count,
+          }
+        : undefined,
+  }),
 }))
 
 function renderLayout(initialEntry = '/workspaces/ws1') {
@@ -63,6 +77,7 @@ describe('WorkspaceLayout 任务中心入口（#1157 phase3）', () => {
   beforeEach(() => {
     mockNavigate.mockClear()
     activeCountState.count = 0
+    activeOpCountState.count = 0
     useTaskCenterStore.setState({ acceptedNotice: null })
   })
 
@@ -88,6 +103,20 @@ describe('WorkspaceLayout 任务中心入口（#1157 phase3）', () => {
       </MemoryRouter>
     )
     expect(screen.getByTestId('tasks-badge')).toHaveTextContent('3')
+
+    // #946 M52：批量操作 active 计数并入徽标。
+    activeOpCountState.count = 2
+    rerender(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    expect(screen.getByTestId('tasks-badge')).toHaveTextContent('5')
   })
 
   it('renders the accept toast with 查看进度 after an async accept', () => {
@@ -118,5 +147,19 @@ describe('WorkspaceLayout 任务中心入口（#1157 phase3）', () => {
       })
     })
     expect(screen.queryByTestId('task-accept-toast')).not.toBeInTheDocument()
+  })
+
+  it('renders the batch-op accept toast with the kind wording（#946 M52）', () => {
+    renderLayout()
+    act(() => {
+      useTaskCenterStore.getState().showAcceptedNotice({
+        workspaceId: 'ws1',
+        itemsTotal: 20000,
+        opId: 'op-x',
+        opKind: 'rerun',
+      })
+    })
+    const toast = screen.getByTestId('task-accept-toast')
+    expect(toast).toHaveTextContent('已受理 20,000 个任务，正在后台重跑。')
   })
 })

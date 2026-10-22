@@ -5,7 +5,9 @@ import {
   batchRunToJobs,
   continueJob as apiContinueJob,
 } from '../../../api/jobApi'
+import { isJobBatchAccepted } from '../../../api/jobBatchOperationsApi'
 import { useUiStore } from '../../uiStore'
+import { notifyJobBatchAccepted } from '../../taskCenterStore'
 import { applyPatchToAccumulator } from '../filterLogic/optionAccumulator'
 import {
   applyDeleteToFilteredIds,
@@ -76,6 +78,11 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
         const data = await batchRerunJobs(workspaceId, nodeKey, target, {
           fromFailedNode,
         })
+        // 大选择 202 受理（#946）：进度由任务中心卡片承载，跳过一次性 toast。
+        if (isJobBatchAccepted(data)) {
+          notifyJobBatchAccepted(workspaceId, data.operation)
+          return data
+        }
         const results = data.results ?? []
         applyMutationResults(set, results, '重跑')
         await refreshAfterBatchOperation(get, workspaceId)
@@ -95,6 +102,10 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
       set({ batchDeleteLoading: true })
       try {
         const data = await batchDeleteJobs(workspaceId, target)
+        if (isJobBatchAccepted(data)) {
+          notifyJobBatchAccepted(workspaceId, data.operation)
+          return data
+        }
         const results = data.results ?? []
         const succeededIds = new Set(
           results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)
@@ -125,6 +136,12 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
       set({ batchPackageLoading: true })
       try {
         const data = await packageJobs(workspaceId, target)
+        // 202 受理（#946）：zip 由 feeder 完成后落 output，下载入口在
+        // 任务中心卡片上；这里不再出一次性 toast。
+        if (isJobBatchAccepted(data)) {
+          notifyJobBatchAccepted(workspaceId, data.operation)
+          return data
+        }
         const results = data.results ?? []
         clearSucceededSelection(set, results)
         useUiStore
@@ -160,6 +177,10 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
           target,
           startNodeKey
         )
+        if (isJobBatchAccepted(data)) {
+          notifyJobBatchAccepted(workspaceId, data.operation)
+          return data
+        }
         const results = data.results ?? []
         applyMutationResults(set, results, '运行到')
         await refreshAfterBatchOperation(get, workspaceId)

@@ -1,4 +1,6 @@
 import { useUiStore } from '../../uiStore'
+import { notifyJobBatchAccepted } from '../../taskCenterStore'
+import { isJobBatchAccepted } from '../../../api/jobBatchOperationsApi'
 import type { UpgradeMode } from '../../../types/jobTypes'
 import { applyMutationResults } from './mutationResults'
 import { refreshAfterBatchOperation } from './selectionModeState'
@@ -18,15 +20,20 @@ export function upgradeActions(set: JobStoreSet, get: () => JobState) {
       }
       set({ batchUpgradeWorkflowLoading: true })
       try {
-        const results = await fetchUpgradeResults(
+        const outcome = await fetchUpgradeResults(
           state,
           workspaceId,
           jobIds,
           mode
         )
-        applyMutationResults(set, results, '升级 workflow')
+        // 大选择 202 受理（#946）：进度由任务中心卡片承载，跳过一次性 toast。
+        if (isJobBatchAccepted(outcome)) {
+          notifyJobBatchAccepted(workspaceId, outcome.operation)
+          return outcome
+        }
+        applyMutationResults(set, outcome, '升级 workflow')
         await refreshAfterBatchOperation(get, workspaceId)
-        return { results }
+        return { results: outcome }
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Batch workflow upgrade failed'

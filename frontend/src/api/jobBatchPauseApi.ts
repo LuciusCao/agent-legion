@@ -1,6 +1,7 @@
 import { api } from './core'
 import { BULK_REQUEST_TIMEOUT } from './requestTimeout'
 import { targetBody, type BatchJobTarget } from './batchTarget'
+import type { BatchOpMaybeAccepted } from './jobBatchOperationsApi'
 import type { components } from '../generated/api'
 import type { BatchJobMutationResult } from '../types/jobTypes'
 
@@ -11,10 +12,10 @@ export async function batchPauseJobs(
   workspaceId: string,
   target: BatchJobTarget,
   reason?: string
-): Promise<BatchJobMutationResult> {
+): Promise<BatchOpMaybeAccepted<BatchJobMutationResult>> {
   const body: BatchPauseJobsRequest = { ...targetBody(target) }
   if (reason != null && reason.trim() !== '') body.reason = reason.trim()
-  return api<BatchJobMutationResult>(
+  return api<BatchOpMaybeAccepted<BatchJobMutationResult>>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch-pause`,
     {
       method: 'POST',
@@ -27,9 +28,9 @@ export async function batchPauseJobs(
 export async function batchResumeJobs(
   workspaceId: string,
   target: BatchJobTarget
-): Promise<BatchJobMutationResult> {
+): Promise<BatchOpMaybeAccepted<BatchJobMutationResult>> {
   const body: BatchResumeJobsRequest = { ...targetBody(target) }
-  return api<BatchJobMutationResult>(
+  return api<BatchOpMaybeAccepted<BatchJobMutationResult>>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch-resume`,
     {
       method: 'POST',

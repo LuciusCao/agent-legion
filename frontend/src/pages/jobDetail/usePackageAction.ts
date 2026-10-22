@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { clearJobsPackedStatus, packageJobs } from '../../api/jobApi'
+import { isJobBatchAccepted } from '../../api/jobBatchOperationsApi'
 import type { JobDetail } from '../../types/jobTypes'
 
 type RefreshDetail = () => Promise<JobDetail | null>
@@ -19,7 +20,8 @@ export function usePackageAction(
     setActionLoading(true)
     try {
       const result = await packageJobs(workspaceId, { jobIds: [jobId] })
-      if (result.download_url) {
+      // 单 job 永不超异步阈值，这里只为联合类型收窄（#946）。
+      if (!isJobBatchAccepted(result) && result.download_url) {
         window.open(result.download_url, '_blank')
       }
       await refreshDetail()

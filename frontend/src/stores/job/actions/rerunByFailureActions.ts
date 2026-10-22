@@ -1,10 +1,12 @@
 import { rerunJobsByFailure } from '../../../api/failureApi'
+import { isJobBatchAccepted } from '../../../api/jobBatchOperationsApi'
 import { targetBody } from '../../../api/batchTarget'
 import type {
   JobRerunByFailureRequest,
   RerunByFailureInput,
 } from '../../../types/failureTypes'
 import { useUiStore } from '../../uiStore'
+import { notifyJobBatchAccepted } from '../../taskCenterStore'
 import { applyMutationResults } from './mutationResults'
 import {
   refreshAfterBatchOperation,
@@ -29,6 +31,11 @@ export function rerunByFailureActions(set: JobStoreSet, get: () => JobState) {
         }
         if (input.fromNodeKey) body.from_node_key = input.fromNodeKey
         const data = await rerunJobsByFailure(workspaceId, body)
+        // 大选择 202 受理（#946）：进度由任务中心卡片承载，跳过一次性 toast。
+        if (isJobBatchAccepted(data)) {
+          notifyJobBatchAccepted(workspaceId, data.operation)
+          return data
+        }
         const results = data.results ?? []
         // rerun_nodes 在本端点是「实际重跑的节点 key 列表」（string[]）；
         // upgrade-workflow 的数量统计走 kept_node_count / rerun_node_count。

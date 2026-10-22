@@ -1,6 +1,9 @@
 import { clearJobsPackedStatus } from '../../../api/jobApi'
+import { isJobBatchAccepted } from '../../../api/jobBatchOperationsApi'
+import type { BatchOpMaybeAccepted } from '../../../api/jobBatchOperationsApi'
 import type { WorkspacePackageStatusResetResult } from '../../../types/jobTypes'
 import { useUiStore } from '../../uiStore'
+import { notifyJobBatchAccepted } from '../../taskCenterStore'
 import {
   refreshAfterBatchOperation,
   resolveBatchTarget,
@@ -10,7 +13,7 @@ import type { JobState, JobStoreSet } from '../state'
 export type ClearPackedActions = {
   batchClearPacked: (
     workspaceId: string
-  ) => Promise<WorkspacePackageStatusResetResult>
+  ) => Promise<BatchOpMaybeAccepted<WorkspacePackageStatusResetResult>>
 }
 
 export function clearPackedActions(set: JobStoreSet, get: () => JobState) {
@@ -21,6 +24,10 @@ export function clearPackedActions(set: JobStoreSet, get: () => JobState) {
       set({ batchClearPackedLoading: true })
       try {
         const data = await clearJobsPackedStatus(workspaceId, target)
+        if (isJobBatchAccepted(data)) {
+          notifyJobBatchAccepted(workspaceId, data.operation)
+          return data
+        }
         useUiStore
           .getState()
           .showToast(

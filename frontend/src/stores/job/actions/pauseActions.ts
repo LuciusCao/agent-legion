@@ -1,5 +1,7 @@
 import { batchPauseJobs, batchResumeJobs } from '../../../api/jobBatchPauseApi'
+import { isJobBatchAccepted } from '../../../api/jobBatchOperationsApi'
 import { useUiStore } from '../../uiStore'
+import { notifyJobBatchAccepted } from '../../taskCenterStore'
 import { applyMutationResults } from './mutationResults'
 import {
   refreshAfterBatchOperation,
@@ -15,6 +17,10 @@ export function pauseActions(set: JobStoreSet, get: () => JobState) {
       set({ batchPauseLoading: true })
       try {
         const data = await batchPauseJobs(workspaceId, target, reason)
+        if (isJobBatchAccepted(data)) {
+          notifyJobBatchAccepted(workspaceId, data.operation)
+          return data
+        }
         const results = data.results ?? []
         applyMutationResults(set, results, '暂停')
         await refreshAfterBatchOperation(get, workspaceId)
@@ -35,6 +41,10 @@ export function pauseActions(set: JobStoreSet, get: () => JobState) {
       set({ batchResumeLoading: true })
       try {
         const data = await batchResumeJobs(workspaceId, target)
+        if (isJobBatchAccepted(data)) {
+          notifyJobBatchAccepted(workspaceId, data.operation)
+          return data
+        }
         const results = data.results ?? []
         applyMutationResults(set, results, '恢复')
         await refreshAfterBatchOperation(get, workspaceId)

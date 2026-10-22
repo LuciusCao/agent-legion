@@ -3,6 +3,7 @@ import { useJobStore } from './index'
 import { createJobSummary } from './actions/testHelpers'
 import { createOptionAccumulator } from './filterLogic/optionAccumulator'
 import { upgradeJobWorkflow } from '../../api/jobWorkflowUpgradeApi'
+import { isJobBatchAccepted } from '../../api/jobBatchOperationsApi'
 
 vi.mock('../../api/jobWorkflowUpgradeApi', () => ({
   upgradeJobWorkflow: vi.fn(),
@@ -182,6 +183,7 @@ describe('useJobStore batchUpgradeWorkflow', () => {
     expect(upgradeJobWorkflow).toHaveBeenCalledTimes(2)
     expect(upgradeJobWorkflow).toHaveBeenNthCalledWith(1, 'j1', 'clean')
     expect(upgradeJobWorkflow).toHaveBeenNthCalledWith(2, 'j2', 'clean')
+    if (isJobBatchAccepted(result)) throw new Error('expected sync result')
     expect(result.results).toHaveLength(2)
     expect(useJobStore.getState().selectedIds).toEqual(new Set())
     expect(useJobStore.getState().selectMode).toBe(false)
@@ -205,6 +207,7 @@ describe('useJobStore batchUpgradeWorkflow', () => {
       .getState()
       .batchUpgradeWorkflow('ws1', ['j1', 'j2'])
 
+    if (isJobBatchAccepted(result)) throw new Error('expected sync result')
     expect(result.results[1].status).toBe('failed')
     expect(useJobStore.getState().selectedIds).toEqual(new Set())
   })
