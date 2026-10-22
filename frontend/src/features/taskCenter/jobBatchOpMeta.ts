@@ -101,6 +101,8 @@ export const JOB_BATCH_OP_REASON_LABEL: Record<string, string> = {
   invalid_node_config: '节点配置无效',
   cancelled: '已取消',
   awaiting_approval: '等待审批',
+  not_failed: '任务未失败',
+  no_failed_node: '无失败节点',
   cleanup_failed: '清理失败',
   internal_error: '内部错误',
 }

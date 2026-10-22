@@ -5,9 +5,8 @@ import {
 } from '../../api/jobBatchOperationsApi'
 
 /**
- * 批量操作（#946）轮询 hooks。查询 key 集中在本地（feature 内聚）。
- * 列表/归档视图的发现面由 M61 的列表端点落地后接入；本模块先提供
- * 单 op 轮询与逐 job 结果瀑布流。
+ * 批量操作（#946）轮询 hooks。查询 key 集中在本地（feature 内聚），
+ * 列表/归档 hooks 姊妹分列在 useJobBatchOpListing.ts（体积预算）。
  */
 export const jobBatchOpKeys = {
   all: (workspaceId: string) => ['job-batch-ops', workspaceId] as const,

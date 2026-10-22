@@ -117,7 +117,13 @@ describe('jobBatchOpToCard（#946 / M52）', () => {
   }
 
   it('maps states onto card statuses; completed+失败 = partial', () => {
-    expect(jobBatchOpToCard(op({ status: 'pending' })).status).toBe('queued')
+    expect(
+      jobBatchOpToCard(op({ status: 'pending', processed_count: 0 })).status
+    ).toBe('queued')
+    // pending 且有处理量 = tick 间隙，实为进行中
+    expect(
+      jobBatchOpToCard(op({ status: 'pending', processed_count: 400 })).status
+    ).toBe('running')
     expect(jobBatchOpToCard(op({ status: 'running' })).status).toBe('running')
     expect(jobBatchOpToCard(op({ status: 'paused' })).status).toBe('paused')
     expect(jobBatchOpToCard(op({ status: 'cancelled' })).status).toBe(

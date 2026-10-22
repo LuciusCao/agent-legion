@@ -1,16 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useUiStore } from '../stores/uiStore'
-import {
-  runBatchToCard,
-  type TaskCardModel,
-} from '../features/taskCenter/taskCardModel'
+import type { TaskCardModel } from '../features/taskCenter/taskCardModel'
 import { TaskCard, type TaskCardActions } from '../features/taskCenter/TaskCard'
-import {
-  useActiveRunBatches,
-  useRunBatchActions,
-  useRunBatchWaterfall,
-} from '../features/taskCenter/useRunBatches'
+import { useRunBatchActions } from '../features/taskCenter/useRunBatches'
+import { useJobBatchOpArchive } from '../features/taskCenter/useJobBatchOpListing'
+import { useTaskCenterCards } from '../features/taskCenter/useTaskCenterCards'
+import { TaskOpResultsDialog } from '../features/taskCenter/TaskOpResultsDialog'
 import styles from '../features/taskCenter/TaskCenterPage.module.css'
 
 /** 卡片底部「已进行 / 等待」行的重绘节拍（数据本身由查询轮询刷新）。 */
@@ -26,10 +22,10 @@ function useNowMs(): number {
 }
 
 /**
- * 任务中心（#1157 phase3）：workspace 级批量操作进度页。数据源为
- * run_batches 三视图（active 全量 / ended、archived keyset 瀑布流）；
- * 卡片模型 source-agnostic，M52 的 job_batch_operations 复用本页与
- * TaskCard（taskCardModel.ts 的 kind 扩展点）。
+ * 任务中心（#1157 phase3 + #946 M52）：workspace 级批量操作进度页。run_batches
+ * （批量创建）与 job_batch_operations（重跑/升级/删除/打包等）的卡片在同一
+ * 列表按时间混排（active/ended/archived 三视图统一）；job-batch-op 卡片的
+ * 暂停/取消控制面本期不外露（M52 裁决），终态给逐条结果/查看任务/归档。
  */
 export default function TaskCenterPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
@@ -39,48 +35,51 @@ export default function TaskCenterPage() {
   const nowMs = useNowMs()
   const archivedView = searchParams.get('view') === 'archived'
 
-  const activeQuery = useActiveRunBatches(workspaceId)
-  const endedQuery = useRunBatchWaterfall(workspaceId, 'ended', !archivedView)
-  const archivedQuery = useRunBatchWaterfall(
-    workspaceId,
-    'archived',
-    archivedView
-  )
-  const actions = useRunBatchActions(workspaceId)
+  const cards = useTaskCenterCards(workspaceId, archivedView)
+  const runBatchActions = useRunBatchActions(workspaceId)
+  const opArchive = useJobBatchOpArchive(workspaceId)
+  const [resultsOp, setResultsOp] = useState<{
+    id: string
+    title: string
+  } | null>(null)
 
-  const activeCards = useMemo(
-    () => (activeQuery.data?.batches ?? []).map(runBatchToCard),
-    [activeQuery.data]
-  )
-  const endedCards = useMemo(
-    () =>
-      (endedQuery.data?.pages ?? []).flatMap((page) =>
-        page.batches.map(runBatchToCard)
-      ),
-    [endedQuery.data]
-  )
-  const archivedCards = useMemo(
-    () =>
-      (archivedQuery.data?.pages ?? []).flatMap((page) =>
-        page.batches.map(runBatchToCard)
-      ),
-    [archivedQuery.data]
-  )
+  const onArchived = () =>
+    showToast(
+      '已归档。记录移到任务中心右上角「已归档」，随时可以查看。',
+      'success'
+    )
 
-  const cardActions: TaskCardActions = {
-    onPause: (id) => actions.pause.mutate(id),
-    onResume: (id) => actions.resume.mutate(id),
-    onCancel: (id) => actions.cancel.mutate(id),
-    onArchive: (id) =>
-      actions.archive.mutate(id, {
-        onSuccess: () =>
-          showToast(
-            '已归档。记录移到任务中心右上角「已归档」，随时可以查看。',
-            'success'
-          ),
-      }),
-    onViewJobs: () => navigate(`/workspaces/${workspaceId}`),
-  }
+  /** 按卡片来源分发操作：run-batch 有暂停/继续/取消控制面；job-batch-op
+   * 只读进度 + 终态归档（M61）与逐条结果。 */
+  const actionsFor = (card: TaskCardModel): TaskCardActions =>
+    card.kind === 'run-batch'
+      ? {
+          onPause: (id) => runBatchActions.pause.mutate(id),
+          onResume: (id) => runBatchActions.resume.mutate(id),
+          onCancel: (id) => runBatchActions.cancel.mutate(id),
+          onArchive: (id) =>
+            runBatchActions.archive.mutate(id, { onSuccess: onArchived }),
+          onViewJobs: () => navigate(`/workspaces/${workspaceId}`),
+        }
+      : {
+          onArchive: (id) => opArchive.mutate(id, { onSuccess: onArchived }),
+          onViewJobs: () => navigate(`/workspaces/${workspaceId}`),
+          onViewResults: (id) => setResultsOp({ id, title: card.title }),
+        }
+
+  const renderCards = (list: TaskCardModel[], readonly = false) => (
+    <div className={styles.cardGrid}>
+      {list.map((card) => (
+        <TaskCard
+          key={card.id}
+          card={card}
+          nowMs={nowMs}
+          readonly={readonly}
+          actions={readonly ? {} : actionsFor(card)}
+        />
+      ))}
+    </div>
+  )
 
   if (archivedView) {
     return (
@@ -101,27 +100,23 @@ export default function TaskCenterPage() {
           这里是「收起来」的记录：结束超过 7
           天自动归档，或在任务中心手动点「归档」。仅查看，不能操作；数据本身不受影响。
         </div>
-        <div className={styles.cardGrid}>
-          {archivedCards.map((card) => (
-            <TaskCard key={card.id} card={card} nowMs={nowMs} readonly />
-          ))}
-        </div>
+        {renderCards(cards.archivedCards, true)}
         <div className={styles.loadMoreWrap}>
-          {archivedQuery.hasNextPage ? (
+          {cards.archived.hasNextPage ? (
             <button
               className={styles.linkBtn}
-              disabled={archivedQuery.isFetchingNextPage}
-              onClick={() => archivedQuery.fetchNextPage()}
+              disabled={cards.archived.isFetchingNextPage}
+              onClick={() => cards.archived.fetchNextPage()}
             >
-              {archivedQuery.isFetchingNextPage ? '加载中…' : '加载更早的记录'}
+              {cards.archived.isFetchingNextPage ? '加载中…' : '加载更早的记录'}
             </button>
           ) : (
-            archivedCards.length > 0 && (
+            cards.archivedCards.length > 0 && (
               <span className={styles.noMore}>已加载全部记录</span>
             )
           )}
         </div>
-        {!archivedQuery.isLoading && archivedCards.length === 0 && (
+        {!cards.isArchivedLoading && cards.archivedCards.length === 0 && (
           <div className={styles.emptyState}>
             还没有归档记录。
             <br />
@@ -132,15 +127,14 @@ export default function TaskCenterPage() {
     )
   }
 
-  const runningCount = activeCards.filter(
+  const runningCount = cards.activeCards.filter(
     (card) => card.status === 'running' || card.status === 'paused'
   ).length
-  const queuedCount = activeCards.length - runningCount
+  const queuedCount = cards.activeCards.length - runningCount
   const showEmpty =
-    !activeQuery.isLoading &&
-    !endedQuery.isLoading &&
-    activeCards.length === 0 &&
-    endedCards.length === 0
+    !cards.isLoading &&
+    cards.activeCards.length === 0 &&
+    cards.endedCards.length === 0
 
   return (
     <div className={styles.page}>
@@ -174,7 +168,7 @@ export default function TaskCenterPage() {
         </div>
       ) : (
         <>
-          {activeCards.length > 0 && (
+          {cards.activeCards.length > 0 && (
             <>
               <div className={styles.sectionTitle}>
                 进行中与排队
@@ -182,19 +176,10 @@ export default function TaskCenterPage() {
                   · 进行中按发起时间倒序，排队按提交顺序
                 </span>
               </div>
-              <div className={styles.cardGrid}>
-                {activeCards.map((card: TaskCardModel) => (
-                  <TaskCard
-                    key={card.id}
-                    card={card}
-                    nowMs={nowMs}
-                    actions={cardActions}
-                  />
-                ))}
-              </div>
+              {renderCards(cards.activeCards)}
             </>
           )}
-          {endedCards.length > 0 && (
+          {cards.endedCards.length > 0 && (
             <>
               <div className={styles.sectionTitle}>
                 已结束
@@ -202,24 +187,15 @@ export default function TaskCenterPage() {
                   · 按结束时间倒序 · 首屏只加载最近几条，点击加载更早
                 </span>
               </div>
-              <div className={styles.cardGrid}>
-                {endedCards.map((card) => (
-                  <TaskCard
-                    key={card.id}
-                    card={card}
-                    nowMs={nowMs}
-                    actions={cardActions}
-                  />
-                ))}
-              </div>
+              {renderCards(cards.endedCards)}
               <div className={styles.loadMoreWrap}>
-                {endedQuery.hasNextPage ? (
+                {cards.ended.hasNextPage ? (
                   <button
                     className={styles.linkBtn}
-                    disabled={endedQuery.isFetchingNextPage}
-                    onClick={() => endedQuery.fetchNextPage()}
+                    disabled={cards.ended.isFetchingNextPage}
+                    onClick={() => cards.ended.fetchNextPage()}
                   >
-                    {endedQuery.isFetchingNextPage
+                    {cards.ended.isFetchingNextPage
                       ? '加载中…'
                       : '加载更早的记录'}
                   </button>
@@ -233,6 +209,13 @@ export default function TaskCenterPage() {
           )}
         </>
       )}
+      <TaskOpResultsDialog
+        workspaceId={workspaceId ?? ''}
+        opId={resultsOp?.id ?? null}
+        title={resultsOp?.title ?? ''}
+        open={resultsOp !== null}
+        onClose={() => setResultsOp(null)}
+      />
     </div>
   )
 }

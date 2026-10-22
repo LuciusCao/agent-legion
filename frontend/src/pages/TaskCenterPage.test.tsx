@@ -10,6 +10,11 @@ import {
   pauseRunBatch,
   resumeRunBatch,
 } from '../api/runBatchesApi'
+import { listJobBatchOperationResults } from '../api/jobBatchOperationsApi'
+import {
+  archiveJobBatchOperation,
+  listJobBatchOperations,
+} from '../api/jobBatchOperationsListApi'
 import { useUiStore } from '../stores/uiStore'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { TestQueryProvider } from '../testing/testQueryClient'
@@ -22,11 +27,25 @@ vi.mock('../api/runBatchesApi', () => ({
   cancelRunBatch: vi.fn(),
 }))
 
+vi.mock('../api/jobBatchOperationsApi', () => ({
+  getJobBatchOperation: vi.fn(),
+  listJobBatchOperationResults: vi.fn(),
+}))
+
+vi.mock('../api/jobBatchOperationsListApi', () => ({
+  listJobBatchOperations: vi.fn(),
+  archiveJobBatchOperation: vi.fn(),
+}))
+
 const mockList = vi.mocked(listRunBatches)
 const mockArchive = vi.mocked(archiveRunBatch)
 const mockPause = vi.mocked(pauseRunBatch)
 const mockResume = vi.mocked(resumeRunBatch)
 const mockCancel = vi.mocked(cancelRunBatch)
+
+const mockOpList = vi.mocked(listJobBatchOperations)
+const mockOpArchive = vi.mocked(archiveJobBatchOperation)
+const mockOpResults = vi.mocked(listJobBatchOperationResults)
 
 function batch(overrides: Record<string, unknown>) {
   return {
@@ -72,6 +91,39 @@ function renderPage(entry = '/workspaces/ws1/tasks') {
   )
 }
 
+function opPage(operations: unknown[], activeCount = 0) {
+  return {
+    operations,
+    next_cursor: null,
+    active_count: activeCount,
+  }
+}
+
+function op(overrides: Record<string, unknown>) {
+  return {
+    id: 'op-a1b2c3d4e5f6',
+    workspace_id: 'ws1',
+    kind: 'rerun',
+    status: 'running',
+    items_total: 20000,
+    processed_count: 8400,
+    succeeded_count: 8000,
+    skipped_count: 300,
+    failed_count: 100,
+    reason_counts: { busy: 250 },
+    output: {},
+    chunk_errors: [],
+    error_message: '',
+    created_by: 'tester',
+    created_at: '2026-10-21T02:21:00+00:00',
+    updated_at: '2026-10-21T02:24:00+00:00',
+    finished_at: null,
+    archived_at: null,
+    archive_source: null,
+    ...overrides,
+  }
+}
+
 describe('TaskCenterPage（#1157 phase3）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -81,6 +133,8 @@ describe('TaskCenterPage（#1157 phase3）', () => {
         return Promise.resolve(page([], 0) as never)
       return Promise.resolve(page([], 0) as never)
     })
+    mockOpList.mockImplementation(() => Promise.resolve(opPage([], 0) as never))
+    mockOpResults.mockResolvedValue({ results: [], next_cursor: null } as never)
   })
 
   it('renders active and ended sections with self-contained cards', async () => {
@@ -296,5 +350,151 @@ describe('TaskCenterPage（#1157 phase3）', () => {
     // 只读：归档视图不渲染任何操作按钮。
     expect(manualCard.querySelectorAll('button')).toHaveLength(0)
     expect(autoCard.querySelectorAll('button')).toHaveLength(0)
+  })
+
+  it('mixes job-batch-op cards into all three views（#946 M52）', async () => {
+    mockList.mockImplementation((_ws, options: { view: string }) => {
+      if (options.view === 'active')
+        return Promise.resolve(
+          page(
+            [batch({ run_id: 'run-running-1', status: 'running' })],
+            1
+          ) as never
+        )
+      return Promise.resolve(page([], 1) as never)
+    })
+    mockOpList.mockImplementation((_ws, options: { view: string }) => {
+      if (options.view === 'active')
+        return Promise.resolve(
+          opPage([op({ id: 'op-active-1', kind: 'rerun' })], 1) as never
+        )
+      if (options.view === 'ended')
+        return Promise.resolve(
+          opPage([
+            op({
+              id: 'op-done-1',
+              kind: 'package',
+              status: 'completed',
+              processed_count: 20000,
+              succeeded_count: 19900,
+              skipped_count: 100,
+              failed_count: 0,
+              reason_counts: { not_completed: 100 },
+              output: { download_url: '/api/workspaces/ws1/packages/pkg.zip' },
+              finished_at: '2026-10-21T01:53:00+00:00',
+            }),
+          ]) as never
+        )
+      return Promise.resolve(opPage([], 1) as never)
+    })
+    renderPage()
+
+    // 进行中：op 卡片与 run-batch 卡片同区混排；op 卡片不暴露暂停/取消。
+    const opCard = await screen.findByTestId('task-card-op-active-1')
+    expect(opCard).toHaveTextContent('批量重跑')
+    expect(opCard).toHaveTextContent('已处理 8,400 / 20,000')
+    expect(opCard).toHaveTextContent('重跑 8,000')
+    expect(opCard).toHaveTextContent('正在执行中 250')
+    expect(screen.getByTestId('task-card-run-running-1')).toBeInTheDocument()
+    expect(
+      Array.from(opCard.querySelectorAll('button')).map((b) => b.textContent)
+    ).toEqual([])
+
+    // 终态 op 卡片：下载打包 + 逐条结果 + 归档。
+    const doneOp = await screen.findByTestId('task-card-op-done-1')
+    expect(doneOp).toHaveTextContent('批量打包')
+    expect(doneOp).toHaveTextContent('已完成')
+    const download = Array.from(doneOp.querySelectorAll('a')).find(
+      (a) => a.textContent === '下载打包'
+    )
+    expect(download?.getAttribute('href')).toBe(
+      '/api/workspaces/ws1/packages/pkg.zip'
+    )
+  })
+
+  it('archives a terminal op card via the op archive endpoint', async () => {
+    mockOpList.mockImplementation((_ws, options: { view: string }) => {
+      if (options.view === 'ended')
+        return Promise.resolve(
+          opPage([
+            op({
+              id: 'op-done-1',
+              kind: 'delete',
+              status: 'completed',
+              processed_count: 20000,
+              succeeded_count: 20000,
+              finished_at: '2026-10-21T01:53:00+00:00',
+            }),
+          ]) as never
+        )
+      return Promise.resolve(opPage([], 0) as never)
+    })
+    mockOpArchive.mockResolvedValue({} as never)
+    renderPage()
+
+    const doneOp = await screen.findByTestId('task-card-op-done-1')
+    fireEvent.click(
+      Array.from(doneOp.querySelectorAll('button')).find(
+        (b) => b.textContent === '归档'
+      )!
+    )
+    await waitFor(() =>
+      expect(mockOpArchive).toHaveBeenCalledWith('ws1', 'op-done-1')
+    )
+    await waitFor(() =>
+      expect(useUiStore.getState().toast).toEqual({
+        message: '已归档。记录移到任务中心右上角「已归档」，随时可以查看。',
+        type: 'success',
+      })
+    )
+    // run-batch 归档端点不被误触。
+    expect(mockArchive).not.toHaveBeenCalled()
+  })
+
+  it('opens the per-job results dialog from a terminal op card', async () => {
+    mockOpList.mockImplementation((_ws, options: { view: string }) => {
+      if (options.view === 'ended')
+        return Promise.resolve(
+          opPage([
+            op({
+              id: 'op-done-1',
+              status: 'completed',
+              processed_count: 20000,
+              failed_count: 3,
+              finished_at: '2026-10-21T01:53:00+00:00',
+            }),
+          ]) as never
+        )
+      return Promise.resolve(opPage([], 0) as never)
+    })
+    mockOpResults.mockResolvedValue({
+      results: [
+        {
+          seq: 5,
+          result: {
+            job_id: 'job-xyz',
+            status: 'failed',
+            reason_code: 'not_found',
+            message: 'Job not found',
+          },
+        },
+      ],
+      next_cursor: null,
+    } as never)
+    renderPage()
+
+    const doneOp = await screen.findByTestId('task-card-op-done-1')
+    fireEvent.click(
+      Array.from(doneOp.querySelectorAll('button')).find(
+        (b) => b.textContent === '逐条结果'
+      )!
+    )
+    expect(await screen.findByText('批量重跑 · 逐条结果')).toBeInTheDocument()
+    expect(await screen.findByText('任务不存在')).toBeInTheDocument()
+    expect(screen.getByText('Job not found')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('关闭'))
+    await waitFor(() =>
+      expect(screen.queryByText('批量重跑 · 逐条结果')).not.toBeInTheDocument()
+    )
   })
 })

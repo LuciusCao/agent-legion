@@ -11,6 +11,19 @@ export type JobBatchOperationAccepted =
 export type JobBatchOperationKind = JobBatchOperation['kind']
 export type JobBatchOperationResultsPage =
   ApiSchemas['JobBatchOperationResultsResponse']
+export type JobBatchOpView = 'active' | 'ended' | 'archived'
+
+// 列表/归档（M61）姊妹分列在 jobBatchOperationsListApi.ts（体积预算），
+// re-export 保持单入口 import 便利。
+export type {
+  JobBatchOperationListItem,
+  JobBatchOperationListResponse,
+  JobBatchOperationArchiveResponse,
+} from './jobBatchOperationsListApi'
+export {
+  listJobBatchOperations,
+  archiveJobBatchOperation,
+} from './jobBatchOperationsListApi'
 
 /** 8 个批量端点的返回：≤ 阈值走同步结果，超阈值返回 202 受理句柄。 */
 export type BatchOpMaybeAccepted<T> = T | JobBatchOperationAccepted
