@@ -4,7 +4,8 @@ A scoped token minted for a studio chat run authenticates as the initiating
 user through the Bearer channel, but every effecting endpoint — workflow
 publish; node code publish/rollback/archive; agent and executor definition
 publish/rollback/archive; job lifecycle and execution triggers (delete,
-rerun, run-to, continue, batch intake, workflow upgrade, replay); workspace,
+rerun, run-to, continue, batch intake, workflow upgrade, replay, batch-op
+archive); workspace,
 secret, package, member and settings writes; worker pause/resume — mounts
 reject_studio_agent_scope and must refuse it with 403, and require_admin
 refuses scoped identities outright. Studio chat effecting endpoints (session
@@ -96,6 +97,9 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-resume", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/rerun-by-failure", None),
     ("POST", "/api/workspaces/{workspace_id}/job-batches", None),
+    # M61 task-center manual archive: idempotent user write on the batch-op
+    # card, guarded like every other effecting workspace write.
+    ("POST", "/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/archive", None),
     # Run creation from items (materials-and-runs design §4) moved to
     # require_workspace_api_intake (#626) — it still refuses studio-agent
     # scopes (same 403), but admits the workspace API intake token; pinned
@@ -376,6 +380,7 @@ _PATH_PARAM_VALUES = {
     "request_id": "request-x",
     "material_id": "mat-x",
     "bundle_id": "bundle-x",
+    "op_id": "op-x",
 }
 
 
