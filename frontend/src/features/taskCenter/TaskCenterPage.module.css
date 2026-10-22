@@ -105,10 +105,12 @@
 
 .tcIcon.run-batch {
   background: #e3f2fd;
+  color: #1565c0;
 }
 
 .tcIcon.job-batch-op {
   background: #f3e5f5;
+  color: #6a1b9a;
 }
 
 .tcName {
@@ -249,6 +251,15 @@
 
 .tcDetail .fail b {
   color: #d32f2f;
+}
+
+.tcDetail .reason {
+  color: var(--text-secondary, #666);
+}
+
+.tcDetail .reason b {
+  color: var(--text-secondary, #666);
+  font-weight: 500;
 }
 
 .tcError {

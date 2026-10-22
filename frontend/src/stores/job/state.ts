@@ -4,6 +4,7 @@ import type {
   UpgradeMode,
   WorkspacePackageResult,
 } from '../../types/jobTypes'
+import type { BatchOpMaybeAccepted } from '../../api/jobBatchOperationsApi'
 export type { UpgradeMode } from '../../types/jobTypes'
 import type { ClearPackedActions } from './actions/clearPackedActions'
 import type { ContinueJobResult, RerunByFailureActions } from './stateTypes'
@@ -106,25 +107,31 @@ export interface JobState
     nodeKey: string | null,
     fromFailedNode?: boolean,
     jobIds?: string[]
-  ) => Promise<BatchJobMutationResult>
-  batchDelete: (workspaceId: string) => Promise<BatchJobMutationResult>
-  batchPackage: (workspaceId: string) => Promise<WorkspacePackageResult>
+  ) => Promise<BatchOpMaybeAccepted<BatchJobMutationResult>>
+  batchDelete: (
+    workspaceId: string
+  ) => Promise<BatchOpMaybeAccepted<BatchJobMutationResult>>
+  batchPackage: (
+    workspaceId: string
+  ) => Promise<BatchOpMaybeAccepted<WorkspacePackageResult>>
   batchRunTo: (
     workspaceId: string,
     targetNodeKey: string,
     startNodeKey?: string
-  ) => Promise<BatchJobMutationResult>
+  ) => Promise<BatchOpMaybeAccepted<BatchJobMutationResult>>
   batchPause: (
     workspaceId: string,
     reason?: string
-  ) => Promise<BatchJobMutationResult>
-  batchResume: (workspaceId: string) => Promise<BatchJobMutationResult>
+  ) => Promise<BatchOpMaybeAccepted<BatchJobMutationResult>>
+  batchResume: (
+    workspaceId: string
+  ) => Promise<BatchOpMaybeAccepted<BatchJobMutationResult>>
   continueJob: (jobId: string) => ContinueJobResult
   batchUpgradeWorkflow: (
     workspaceId: string,
     jobIds?: string[],
     mode?: UpgradeMode
-  ) => Promise<BatchJobMutationResult>
+  ) => Promise<BatchOpMaybeAccepted<BatchJobMutationResult>>
 }
 export type JobStoreSet = (
   partial:

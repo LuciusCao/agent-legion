@@ -38,7 +38,9 @@ import {
   batchRunToJobs,
 } from '../api/jobApi'
 import { batchPauseJobs } from '../api/jobBatchPauseApi'
+import { isJobBatchAccepted } from '../api/jobBatchOperationsApi'
 import { useUiStore } from './uiStore'
+import { useTaskCenterStore } from './taskCenterStore'
 
 const mockBatchRerunJobs = vi.mocked(batchRerunJobs)
 const mockBatchDeleteJobs = vi.mocked(batchDeleteJobs)
@@ -188,6 +190,38 @@ describe('jobStore', () => {
     )
   })
 
+  it('accepted 202 batch rerun notifies the task center instead of a toast（#946）', async () => {
+    useJobStore.setState({ selectedIds: new Set(['j1']) })
+    useTaskCenterStore.getState().clearAcceptedNotice()
+    mockBatchRerunJobs.mockResolvedValueOnce({
+      operation: {
+        id: 'op1',
+        workspace_id: 'ws1',
+        kind: 'rerun',
+        status: 'pending',
+        items_total: 2000,
+        processed_count: 0,
+        succeeded_count: 0,
+        skipped_count: 0,
+        failed_count: 0,
+        created_by: 'tester',
+        error_message: '',
+      },
+    })
+
+    const result = await useJobStore.getState().batchRerun('ws1', 'extract')
+
+    expect(isJobBatchAccepted(result)).toBe(true)
+    expect(mockShowToast).not.toHaveBeenCalled()
+    expect(mockRefreshFirstPage).not.toHaveBeenCalled()
+    expect(useTaskCenterStore.getState().acceptedNotice).toMatchObject({
+      workspaceId: 'ws1',
+      itemsTotal: 2000,
+      opId: 'op1',
+      opKind: 'rerun',
+    })
+  })
+
   it('surfaces 404 on batch rerun', async () => {
     useJobStore.setState({ selectedIds: new Set(['j1']) })
     const err = Object.assign(new Error('Not Found'), { status: 404 })
@@ -255,6 +289,36 @@ describe('jobStore', () => {
     )
   })
 
+  it('accepted 202 batch package notifies without a toast（#946）', async () => {
+    useJobStore.setState({ selectedIds: new Set(['j1']) })
+    useTaskCenterStore.getState().clearAcceptedNotice()
+    mockPackageJobs.mockResolvedValueOnce({
+      operation: {
+        id: 'op9',
+        workspace_id: 'ws1',
+        kind: 'package',
+        status: 'pending',
+        items_total: 3000,
+        processed_count: 0,
+        succeeded_count: 0,
+        skipped_count: 0,
+        failed_count: 0,
+        created_by: 'tester',
+        error_message: '',
+      },
+    })
+
+    const result = await useJobStore.getState().batchPackage('ws1')
+
+    expect(isJobBatchAccepted(result)).toBe(true)
+    expect(mockShowToast).not.toHaveBeenCalled()
+    expect(mockRefreshFirstPage).not.toHaveBeenCalled()
+    expect(useTaskCenterStore.getState().acceptedNotice).toMatchObject({
+      opId: 'op9',
+      opKind: 'package',
+    })
+  })
+
   it('surfaces 404 on batch delete', async () => {
     useJobStore.setState({ selectedIds: new Set(['j1']) })
     const err = Object.assign(new Error('Not Found'), { status: 404 })
@@ -294,6 +358,7 @@ describe('jobStore', () => {
     expect(mockPackageJobs).toHaveBeenCalledWith('ws1', {
       jobIds: ['j1', 'j2'],
     })
+    if (isJobBatchAccepted(result)) throw new Error('expected sync result')
     expect(result.download_url).toBe('/api/workspaces/ws1/packages/pkg.zip')
     expect(useJobStore.getState().selectedIds.size).toBe(0)
     expect(useJobStore.getState().selectMode).toBe(true)

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTaskCenterStore } from '../../stores/taskCenterStore'
+import { JOB_BATCH_OP_META } from './jobBatchOpMeta'
 import styles from './TaskCenterChrome.module.css'
 
 const AUTO_DISMISS_MS = 8000
@@ -9,6 +10,7 @@ const AUTO_DISMISS_MS = 8000
  * 大批量异步受理通知（#1157 phase3）：关对话框后的秒级回执——持久
  * snackbar（8s），带「查看进度 →」跳任务中心；AppBar 徽标数字由
  * active 查询轮询即时刷新（纯数字，无动效）。
+ * #946：批量 job 操作的 202 受理复用本通知，措辞按 opKind 区分。
  */
 export function TaskAcceptToast({ workspaceId }: { workspaceId?: string }) {
   const notice = useTaskCenterStore((s) => s.acceptedNotice)
@@ -25,6 +27,7 @@ export function TaskAcceptToast({ workspaceId }: { workspaceId?: string }) {
   }, [notice, clear])
 
   if (!visible || !notice) return null
+  const opMeta = notice.opKind ? JOB_BATCH_OP_META[notice.opKind] : null
   return (
     <div
       className={styles.acceptToast}
@@ -32,7 +35,9 @@ export function TaskAcceptToast({ workspaceId }: { workspaceId?: string }) {
       data-testid="task-accept-toast"
     >
       <span>
-        已受理 {notice.itemsTotal.toLocaleString()} 个条目，正在后台创建。
+        {opMeta
+          ? `已受理 ${notice.itemsTotal.toLocaleString()} 个任务，正在后台${opMeta.action}。`
+          : `已受理 ${notice.itemsTotal.toLocaleString()} 个条目，正在后台创建。`}
         <br />
         进度见右上角「任务」，期间可以继续其他操作。
       </span>

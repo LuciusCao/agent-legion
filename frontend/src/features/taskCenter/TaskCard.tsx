@@ -1,11 +1,13 @@
 import styles from './TaskCenterPage.module.css'
+import { MaterialIcon } from '../../components/MaterialIcon'
 import {
-  estimateRemaining,
   formatDayTime,
-  formatDuration,
   type TaskCardModel,
   type TaskCardStatus,
 } from './taskCardModel'
+import { TaskCardFooter, type TaskCardActions } from './TaskCardFooter'
+
+export type { TaskCardActions } from './TaskCardFooter'
 
 const STATUS_LABEL: Record<TaskCardStatus, string> = {
   running: '进行中',
@@ -15,19 +17,6 @@ const STATUS_LABEL: Record<TaskCardStatus, string> = {
   partial: '部分完成',
   failed: '失败',
   cancelled: '已取消',
-}
-
-const KIND_ICON: Record<TaskCardModel['kind'], string> = {
-  'run-batch': '＋',
-  'job-batch-op': '↻',
-}
-
-export type TaskCardActions = {
-  onPause?: (id: string) => void
-  onResume?: (id: string) => void
-  onCancel?: (id: string) => void
-  onArchive?: (id: string) => void
-  onViewJobs?: (id: string) => void
 }
 
 function countLine(card: TaskCardModel): string {
@@ -45,54 +34,10 @@ function countLine(card: TaskCardModel): string {
   }
 }
 
-function footerLine(card: TaskCardModel, nowMs: number): string {
-  const startedMs = card.startedAt ? Date.parse(card.startedAt) : null
-  const finishedMs = card.finishedAt ? Date.parse(card.finishedAt) : null
-  switch (card.status) {
-    case 'running': {
-      const elapsed = startedMs ? (nowMs - startedMs) / 1000 : 0
-      const eta = estimateRemaining(card.processed, card.total, elapsed)
-      return `已进行 ${formatDuration(elapsed)}${eta ? ` · ${eta}` : ''}`
-    }
-    case 'paused':
-      return '已暂停 · 后台处理已挂起，已处理部分保留'
-    case 'queued':
-      return startedMs
-        ? `等待 ${formatDuration((nowMs - startedMs) / 1000)}`
-        : '排队等待中'
-    case 'done':
-    case 'partial': {
-      const cost =
-        startedMs && finishedMs
-          ? `耗时 ${formatDuration((finishedMs - startedMs) / 1000)} · `
-          : ''
-      const when = card.finishedAt ? formatDayTime(card.finishedAt) : ''
-      return `${cost}${when} ${card.status === 'done' ? '完成' : '结束'}`
-    }
-    case 'failed':
-      return `${card.finishedAt ? formatDayTime(card.finishedAt) : ''} 中断`
-    case 'cancelled':
-      return `${card.finishedAt ? formatDayTime(card.finishedAt) : ''} 取消 · 已处理部分保留，不受影响`
-  }
-}
-
-function archiveLine(card: TaskCardModel): string {
-  // 不署名：created_by 是提交者而非归档者，多操作者场景会署错名
-  // （reviewer r1 P2-2）；archived_by 列属 follow-up，落地后再补归属。
-  if (card.archiveSource === 'manual' && card.archivedAt) {
-    return `${formatDayTime(card.archivedAt)} 手动归档`
-  }
-  // auto：归档时间 = 结束时间 + 7 天窗口（查询口径，不落列）。
-  if (card.finishedAt) {
-    const autoAt = new Date(Date.parse(card.finishedAt) + 7 * 86400000)
-    return `${formatDayTime(autoAt.toISOString())} 自动归档（结束超过 7 天）`
-  }
-  return '自动归档（结束超过 7 天）'
-}
-
 /**
  * 任务中心卡片（#1157 phase3）：每卡自洽——类型图标+名称、状态 badge、
- * 进度条、已处理/总数、成功/跳过明细、耗时、操作按钮。source-agnostic
+ * 进度条、已处理/总数、成功/跳过/失败明细（#946 附原因分布与打包下载）、
+ * 耗时、操作按钮（底行拆至 TaskCardFooter）。source-agnostic
  * （TaskCardModel）；readonly（已归档视图）时不渲染操作按钮。
  */
 export function TaskCard({
@@ -120,7 +65,7 @@ export function TaskCard({
     >
       <div className={styles.tcHead}>
         <span className={`${styles.tcIcon} ${styles[card.kind]}`}>
-          {KIND_ICON[card.kind]}
+          <MaterialIcon name={card.icon} style={{ fontSize: 18 }} />
         </span>
         <span className={styles.tcName}>
           {card.title}
@@ -164,90 +109,21 @@ export function TaskCard({
             </b>
           </span>
         )}
+        {card.reasons.map((reason) => (
+          <span key={reason.label} className={styles.reason}>
+            {reason.label} <b>{reason.count.toLocaleString()}</b>
+          </span>
+        ))}
       </div>
       {card.errorMessage && (
         <div className={styles.tcError}>{card.errorMessage}</div>
       )}
-      <div className={styles.tcFoot}>
-        <span className={styles.elapsed}>
-          {readonly ? archiveLine(card) : footerLine(card, nowMs)}
-        </span>
-        {!readonly && card.status === 'running' && (
-          <>
-            <button
-              className={styles.tbtn}
-              onClick={() => actions.onPause?.(card.id)}
-            >
-              暂停
-            </button>
-            <button
-              className={`${styles.tbtn} ${styles.danger}`}
-              onClick={() => actions.onCancel?.(card.id)}
-            >
-              取消
-            </button>
-          </>
-        )}
-        {!readonly && card.status === 'paused' && (
-          <>
-            <button
-              className={styles.tbtn}
-              onClick={() => actions.onResume?.(card.id)}
-            >
-              继续
-            </button>
-            <button
-              className={`${styles.tbtn} ${styles.danger}`}
-              onClick={() => actions.onCancel?.(card.id)}
-            >
-              取消
-            </button>
-          </>
-        )}
-        {!readonly && card.status === 'queued' && (
-          <button
-            className={`${styles.tbtn} ${styles.danger}`}
-            onClick={() => actions.onCancel?.(card.id)}
-          >
-            取消
-          </button>
-        )}
-        {!readonly && (card.status === 'done' || card.status === 'partial') && (
-          <>
-            <button
-              className={styles.tbtn}
-              onClick={() => actions.onViewJobs?.(card.id)}
-            >
-              查看任务
-            </button>
-            <button
-              className={styles.tbtn}
-              onClick={() => actions.onArchive?.(card.id)}
-            >
-              归档
-            </button>
-          </>
-        )}
-        {!readonly &&
-          (card.status === 'failed' || card.status === 'cancelled') && (
-            <>
-              {card.okCount > 0 && (
-                <button
-                  className={styles.tbtn}
-                  onClick={() => actions.onViewJobs?.(card.id)}
-                >
-                  查看任务
-                </button>
-              )}
-              <button
-                className={styles.tbtn}
-                onClick={() => actions.onArchive?.(card.id)}
-              >
-                归档
-              </button>
-            </>
-          )}
-      </div>
+      <TaskCardFooter
+        card={card}
+        nowMs={nowMs}
+        readonly={readonly}
+        actions={actions}
+      />
     </div>
   )
 }

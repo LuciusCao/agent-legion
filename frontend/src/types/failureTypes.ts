@@ -18,4 +18,7 @@ export type RerunByFailureInput = {
 export type RerunByFailureCategoryAction = (
   workspaceId: string,
   input: RerunByFailureInput
-) => Promise<JobRerunByFailureResponse>
+) => Promise<
+  | JobRerunByFailureResponse
+  | components['schemas']['JobBatchOperationAcceptedResponse']
+>

@@ -1,5 +1,6 @@
 import { api } from './core'
 import { BULK_REQUEST_TIMEOUT } from './requestTimeout'
+import type { BatchOpMaybeAccepted } from './jobBatchOperationsApi'
 import type {
   FailedNodeRunsResponse,
   JobRerunByFailureRequest,
@@ -20,8 +21,8 @@ export async function fetchFailedNodeRuns(
 export async function rerunJobsByFailure(
   workspaceId: string,
   body: JobRerunByFailureRequest
-): Promise<JobRerunByFailureResponse> {
-  return api<JobRerunByFailureResponse>(
+): Promise<BatchOpMaybeAccepted<JobRerunByFailureResponse>> {
+  return api<BatchOpMaybeAccepted<JobRerunByFailureResponse>>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/rerun-by-failure`,
     // 与其他批量端点一致豁免超时：服务端同步跑完整批，客户端 2 分钟超时
     // 并不撤销服务端动作，只会误报失败（#719 / #1348）。

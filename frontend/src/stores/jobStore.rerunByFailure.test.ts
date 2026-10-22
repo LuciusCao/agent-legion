@@ -18,6 +18,7 @@ vi.mock('./uiStore', () => ({
 }))
 
 import { rerunJobsByFailure } from '../api/failureApi'
+import { isJobBatchAccepted } from '../api/jobBatchOperationsApi'
 import { useUiStore } from './uiStore'
 
 const mockRerunJobsByFailure = vi.mocked(rerunJobsByFailure)
@@ -81,6 +82,7 @@ describe('jobStore rerunByFailureCategory', () => {
       strategy: 'auto',
       job_ids: ['j1', 'j2'],
     })
+    if (isJobBatchAccepted(data)) throw new Error('expected sync result')
     expect(data.results).toHaveLength(2)
     expect(mockShowToast).toHaveBeenCalledWith(
       '重跑完成：成功 1 项，跳过 1 项',

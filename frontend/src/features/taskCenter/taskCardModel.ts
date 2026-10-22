@@ -1,9 +1,13 @@
 import type { RunBatchListItem } from '../../api/runBatchesApi'
 
+// job-batch-op（#946）适配器姊妹分列在 jobBatchOpCardModel.ts（体积预算），
+// 此处 re-export 保持既有 import 路径稳定。
+export { jobBatchOpToCard, shortOpRef, topReasons } from './jobBatchOpCardModel'
+
 /**
  * 任务中心卡片数据模型（#1157 phase3）——source-agnostic：run_batches
- * （异步添加条目）与后续 job_batch_operations（M52 多选批量操作）共用同一
- * 模型与 TaskCard 组件，各自提供 adapter。本切片只接 run-batch。
+ * （异步添加条目）与 job_batch_operations（#946 多选批量操作，M52）共用
+ * 同一模型与 TaskCard 组件，各自提供 adapter。
  */
 export type TaskCardKind = 'run-batch' | 'job-batch-op'
 
@@ -16,10 +20,18 @@ export type TaskCardStatus =
   | 'failed'
   | 'cancelled'
 
+/** 失败/跳过原因的汇总行（reason_counts 的 Top N，label 已中文化）。 */
+export type TaskCardReason = {
+  label: string
+  count: number
+}
+
 export type TaskCardModel = {
   kind: TaskCardKind
   /** run_batches 视角下即 run_id（控制面与归档的操作键）。 */
   id: string
+  /** Material Symbols 图标名（MaterialIcon；视觉纪律禁 emoji）。 */
+  icon: string
   title: string
   subtitle: string
   status: TaskCardStatus
@@ -38,6 +50,13 @@ export type TaskCardModel = {
   /** chunk 级失败条目数（后端由 chunk_errors 推导；lower_bound 时渲染 ≥）。 */
   failedCount: number
   failedLowerBound: boolean
+  /** 失败/跳过原因 Top 分布（job-batch-op 的 reason_counts），空不渲染。 */
+  reasons: TaskCardReason[]
+  /** package 终态的 zip 下载地址（output.download_url），有则渲染下载按钮。 */
+  downloadUrl: string | null
+  /** 进行中是否暴露暂停/取消（run_batches 控制面已就绪；job-batch-op 的
+   * pause/cancel 控制面本期不外露，卡片只读展示进度——M52 裁决）。 */
+  controllable: boolean
   errorMessage: string
   createdBy: string
   archivedAt: string | null
@@ -76,6 +95,7 @@ export function runBatchToCard(item: RunBatchListItem): TaskCardModel {
   return {
     kind: 'run-batch',
     id: item.run_id,
+    icon: 'add_task',
     title: '批量创建',
     subtitle: '添加条目',
     status,
@@ -94,6 +114,9 @@ export function runBatchToCard(item: RunBatchListItem): TaskCardModel {
     skipNote: '已有任务',
     failedCount,
     failedLowerBound: item.failed_item_count_lower_bound ?? false,
+    reasons: [],
+    downloadUrl: null,
+    controllable: true,
     errorMessage,
     createdBy: item.created_by,
     archivedAt: item.archived_at,

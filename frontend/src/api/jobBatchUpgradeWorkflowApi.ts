@@ -1,14 +1,15 @@
 import { api } from './core'
 import { BULK_REQUEST_TIMEOUT } from './requestTimeout'
 import { targetBody, type BatchJobTarget } from './batchTarget'
+import type { BatchOpMaybeAccepted } from './jobBatchOperationsApi'
 import type { BatchJobMutationResult, UpgradeMode } from '../types/jobTypes'
 
 export async function batchUpgradeJobsWorkflow(
   workspaceId: string,
   target: BatchJobTarget,
   mode: UpgradeMode = 'clean'
-): Promise<BatchJobMutationResult> {
-  return api<BatchJobMutationResult>(
+): Promise<BatchOpMaybeAccepted<BatchJobMutationResult>> {
+  return api<BatchOpMaybeAccepted<BatchJobMutationResult>>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch-upgrade-workflow`,
     {
       method: 'POST',
