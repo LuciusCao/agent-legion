@@ -88,10 +88,25 @@ def test_put_overwrites_the_previous_draft(client, job_db) -> None:
 def test_put_rejects_blank_draft(client, job_db) -> None:
     workspace = job_db.create_workspace("ws-store-blank")
 
-    for blank in ("", "   \n  "):
+    # #1196：空白判据家族钉口径——Python str.strip() 的空白全集都拒（含
+    # JS trim() 不剥的 \x85/\x1c-\x1f；前端 isBlankDraftYaml 按同一口径
+    # skip，保证编辑器永不发出此处必拒的内容）。
+    for blank in ("", "   \n  ", "\x85", "\x1c\x1d\x1e\x1f", "\xa0", "\u3000"):
         response = client.put(_url(workspace["id"]), json={"definition_yaml": blank})
-        assert response.status_code == 422
+        assert response.status_code == 422, repr(blank)
     assert client.get(_url(workspace["id"])).json()["definition_yaml"] is None
+
+
+def test_put_accepts_bom_only_draft(client, job_db) -> None:
+    """#1196 对照表的反向差：\ufeff 被 JS trim() 剥、不被 Python strip()
+    剥——服务端按契约收（非空白），前端谓词把它判空白永不发出，两个方向
+    都不产生 422。"""
+    workspace = job_db.create_workspace("ws-store-bom")
+
+    response = client.put(_url(workspace["id"]), json={"definition_yaml": "\ufeff"})
+
+    assert response.status_code == 200
+    assert client.get(_url(workspace["id"])).json()["definition_yaml"] == "\ufeff"
 
 
 def test_unknown_workspace_gets_404(client) -> None:

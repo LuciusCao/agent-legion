@@ -92,6 +92,20 @@ export function revertedState(current: DraftSaveState): DraftSaveState {
   return current
 }
 
+/* #1196：草稿空白判据（PUT 门的唯一口径，decideSchedule 与 controller
+   forceSave 护栏共用）——与后端 workflow_draft_store_contracts._not_blank
+   的 Python str.strip() 对齐：其空白集比 JS trim() 多 \u0085(NEL) 与
+   \u001C-\u001F（FS/GS/RS/US），少了这层剥除，只含这些字符的画布会被
+   前端判成非空白发出 PUT、服务端确定性 422。反向差 \uFEFF（JS 剥、
+   Python 不剥）保持 skip——只含 BOM 的内容同样无意义，且 skip 方向永不
+   触发服务端拒绝（前端判空集 ⊇ 后端判空集是本谓词的安全方向）。 */
+export function isBlankDraftYaml(yaml: string): boolean {
+  return [...yaml].every(
+    (ch) =>
+      ch.trim() === '' || ch === '\u0085' || (ch >= '\u001C' && ch <= '\u001F')
+  )
+}
+
 /* schedule 的调度决策（kimi P1-2/P2-4）：空白内容 → skip（controller
    侧的收口见 markBlankSkipped：清等待中的保存/重试 + 离开 settled）；
    回退到已持久化值且无在途 → revert；否则进入 pending（conflict 态挂起，
@@ -107,7 +121,7 @@ export function decideSchedule(
   inFlight: boolean,
   inConflict: boolean
 ): ScheduleDecision {
-  if (!yaml.trim()) return { action: 'skip' }
+  if (isBlankDraftYaml(yaml)) return { action: 'skip' }
   if (persisted && !inFlight) return { action: 'revert' }
   return { action: 'pending', armTimer: !inConflict }
 }

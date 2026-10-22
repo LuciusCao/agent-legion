@@ -145,10 +145,11 @@ export function runTrackedSave(context: {
           )
           return resolveRetry(false)
         }
-        // #1196：4xx 是确定性的请求侧拒绝（如 422 校验失败——前后端空白
-        // 判定的 \x85/\x1c-\x1f 口径差可达），与退避耗尽同属终态：永不自行
-        // 重试——saveError=terminal 让文案不承诺「将自动重试」。409 已在
-        // 上面的冲突分支终结；5xx/网络错误保持退避重试。
+        // #1196：4xx 是确定性的请求侧拒绝（如 422 校验失败、401/403/404），
+        // 与退避耗尽同属终态：永不自行重试——saveError=terminal 让文案不承诺
+        // 「将自动重试」。409 已在上面的冲突分支终结；5xx/网络错误保持退避
+        // 重试。（前后端空白判定的 \x85/\x1c-\x1f 口径差已随 isBlankDraftYaml
+        // 对齐闭合，此处 4xx 终态仍是其它确定性拒绝的兜底。）
         const status = (error as { status?: unknown } | null)?.status
         const terminal =
           (typeof status === 'number' && status >= 400 && status < 500) ||
