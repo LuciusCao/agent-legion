@@ -26,6 +26,9 @@ class WorkflowDraftStoreRequest(BaseModel):
         # A blank draft is never meaningful (the editor's draft always
         # carries at least a workflow key); refuse it instead of storing
         # content that would resurrect as a broken draft on the next load.
+        # #1196：空白判据 = Python str.strip() 全集（含 \x85/\x1c-\x1f，
+        # JS trim() 不剥）；前端 isBlankDraftYaml（draftSaveConflict.ts）
+        # 按本口径 skip，保证编辑器永不发出此处必拒的内容。
         if not value.strip():
             raise ValueError("definition_yaml must not be blank")
         return value

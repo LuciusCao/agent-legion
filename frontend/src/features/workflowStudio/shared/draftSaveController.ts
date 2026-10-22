@@ -14,6 +14,7 @@ import {
   conflictEnteredState,
   conflictResolvedState,
   decideSchedule,
+  isBlankDraftYaml,
   pendingAfterResolve,
   revertedState,
   stopTimer,
@@ -180,9 +181,11 @@ export class DraftSaveController {
      基线把画布内容写回服务端（Agent 已把服务端推进成别的内容），必须
      绕过去重强制发，否则警示消失而内容从未写回，离页即丢。
      #1177 评审 V5：空白无可落盘——conflictCleared 已把 status 收敛到
-     saved/idle，不把假 settled 留给空白画布（保持 pending）。 */
+     saved/idle，不把假 settled 留给空白画布（保持 pending）。
+     #1196：判空走 isBlankDraftYaml（与 decideSchedule 同口径、与后端
+     strip 对齐），避免只含 \u0085/\u001C-\u001F 的画布被发出后确定性 422。 */
   private forceSave(yaml: string) {
-    if (!yaml.trim()) {
+    if (isBlankDraftYaml(yaml)) {
       this.setState({ ...this.state, status: 'pending' })
       return
     }
