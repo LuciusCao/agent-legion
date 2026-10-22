@@ -16,6 +16,7 @@ import {
   useRuntimeCardSettlementStore,
 } from './runtimeCardSettlement'
 import type { WorkflowDraftView } from './studioChatMessages'
+import { StudioDraftCardHeader } from './StudioDraftCardHeader'
 import { WorkflowDraftCard } from './WorkflowDraftCard'
 import styles from './StudioChatPanel.module.css'
 import splitStyles from './draftChannelSplit.module.css'
@@ -105,10 +106,12 @@ export function RuntimeConfigCard(props: {
   const historyButton = (
     <button
       type="button"
-      className={styles.draftButton}
+      className={`${styles.draftButton} ${splitStyles.btnWithIcon}`}
       onClick={() => setHistoryOpen(true)}
     >
-      <HistoryOutlinedIcon className={splitStyles.historyIcon} />
+      {/* fontSize="inherit"（= 按钮 12px 文本同号）：MUI 默认 24px 会撑高
+          按钮行（review 实锤）；inline-flex 行内居中不对 line box 充气。 */}
+      <HistoryOutlinedIcon fontSize="inherit" />
       版本历史
     </button>
   )
@@ -117,9 +120,10 @@ export function RuntimeConfigCard(props: {
 
   return (
     <div className={styles.draftCard}>
-      <div className={`${styles.draftTitle} ${splitStyles.titleRuntime}`}>
-        <TuneOutlinedIcon className={splitStyles.iconRuntime} />
-        <span>运行配置变更</span>
+      {/* 标题行与 Workflow 草稿卡同式（深色标题 + 蓝色图标），通道身份只由
+          右侧小徽标表达（review 实锤：标题不用绿色）。 */}
+      <StudioDraftCardHeader icon={TuneOutlinedIcon} tone="workflow">
+        运行配置变更
         {settlement ? (
           <span className={`${splitStyles.badge} ${splitStyles.badgeRuntime}`}>
             {settlement.version !== null
@@ -131,7 +135,7 @@ export function RuntimeConfigCard(props: {
             运行通道 · 立即生效
           </span>
         )}
-      </div>
+      </StudioDraftCardHeader>
       <div className={styles.draftMeta}>
         {settlement
           ? `agent 建议的运行配置修改 · 已于 ${formatSavedAt(settlement.savedAt)} 生效`

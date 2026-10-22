@@ -12,14 +12,9 @@
  *   卡 .permissionCommand margin-bottom: 8px / M48 .group margin-top: 8px
  *   口径）。说明文字移出 diff 白块（评审打回 a）：白块内只放 diff 行。 */
 
-/* 运行配置卡标题色调（#0b6b53 在 #e3f2fd 卡底上实测对比度约 5.9:1，过
- * WCAG AA 4.5:1；与运行通道专区同一色系）。 */
-.titleRuntime {
-  color: #0b6b53;
-}
-.iconRuntime {
-  color: #0b6b53;
-}
+/* 标题行与 Workflow 草稿卡同式（.draftTitle 深色 + 蓝色图标，由
+ * StudioDraftCardHeader tone="workflow" 承载），通道身份只由右侧小徽标
+ * 表达（视觉返工 r3，review 实锤：标题不用通道绿色）。 */
 
 /* 同一草稿消息上的两张卡（运行配置卡在前、结构卡在后）。 */
 .cardStack {
@@ -132,9 +127,11 @@
   font-weight: 600;
 }
 
-/* 「版本历史」按钮内的小图标（与按钮文本基线对齐）。 */
-.historyIcon {
-  font-size: 14px;
-  vertical-align: -2px;
-  margin-right: 3px;
+/* 带图标的按钮（「版本历史」）：inline-flex 居中——图标不参与基线 line box
+ * 计算，按钮高度与纯文本按钮像素级一致（图标 fontSize="inherit" 继承按钮
+ * 12px 字号，与文字 x-height 成比例）。 */
+.btnWithIcon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
