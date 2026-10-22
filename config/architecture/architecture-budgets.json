@@ -179,6 +179,7 @@
     "frontend/src/components/dag/dagLayout.ts": 132,
     "frontend/src/components/dag/dagNodeMemo.ts": 50,
     "frontend/src/components/dag/dagNodeTypes.ts": 21,
+    "frontend/src/components/dag/useStepperCompactMode.ts": 61,
     "frontend/src/components/dagGraphRelations.ts": 44,
     "frontend/src/components/dagHighlight.ts": 78,
     "frontend/src/components/dagNodeHeight.ts": 27,

@@ -1,5 +1,4 @@
 import type { JobNodeSummary } from '../../types/jobTypes'
-import { stepperTrackGap } from '../../lib/stepperLayout'
 import { StepperCompactView } from '../dag/StepperCompactView'
 import { useStepperCompactMode } from '../dag/useStepperCompactMode'
 import styles from './JobNodeStepper.module.css'
@@ -35,8 +34,9 @@ export function JobNodeStepper({
   totalNodes = 0,
   compactThreshold,
 }: JobNodeStepperProps) {
-  const { containerRef, compact, trackWidthPx } = useStepperCompactMode(
+  const { containerRef, compact, trackGapPx } = useStepperCompactMode(
     nodeSummaries.length > 0 ? nodeSummaries.length : Math.max(0, totalNodes),
+    FALLBACK_TRACK_WIDTH_PX,
     compactThreshold
   )
 
@@ -69,37 +69,30 @@ export function JobNodeStepper({
     )
   }
 
+  // running 段条上的 pulse-blue 是 styles.css 定义的全局工具类（非 module class）。
   return (
     <div ref={containerRef} className={styles.stepper}>
       <div
         className={styles.track}
-        style={{
-          gap: stepperTrackGap(
-            segments.length,
-            trackWidthPx ?? FALLBACK_TRACK_WIDTH_PX
-          ),
-        }}
+        style={{ gap: trackGapPx }}
         role="list"
         aria-label="节点进度"
       >
         {segments.map((summary) => {
           const stateClass = STATUS_CLASSES[summary.status] || styles.pending
-          const isActive = summary.node_key === activeNodeKey
+          const ariaLabel = summary.label
+            ? `${summary.label}: ${summary.status}`
+            : undefined
           return (
             <div
               key={summary.node_key}
               className={`${styles.segment} ${stateClass}`}
               title={summary.label || undefined}
               data-status={summary.status}
-              data-active={isActive || undefined}
+              data-active={summary.node_key === activeNodeKey || undefined}
               role="listitem"
-              aria-label={
-                summary.label
-                  ? `${summary.label}: ${summary.status}`
-                  : undefined
-              }
+              aria-label={ariaLabel}
             >
-              {/* .pulse-blue is a global utility class defined in styles.css */}
               <div
                 className={`${styles.bar} ${
                   summary.status === 'running' ? 'pulse-blue' : ''

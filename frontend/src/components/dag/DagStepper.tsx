@@ -1,5 +1,4 @@
 import type { JobNode } from '../../types/jobTypes'
-import { stepperTrackGap } from '../../lib/stepperLayout'
 import { StepperCompactView } from './StepperCompactView'
 import { useStepperCompactMode } from './useStepperCompactMode'
 import styles from './DagStepper.module.css'
@@ -8,14 +7,13 @@ import styles from './DagStepper.module.css'
 // 与 DagStepper.module.css 的 .dagStepper width 保持一致。
 const FALLBACK_TRACK_WIDTH_PX = 200
 
-type StepState = 'completed' | 'running' | 'failed' | 'stale' | 'pending'
+type StepState = 'completed' | 'running' | 'failed' | 'pending'
 
+// stale 视觉上视同 pending；仅 failed 标红。
 function getStepState(status: string): StepState {
-  if (status === 'completed') return 'completed'
-  if (status === 'running') return 'running'
-  if (status === 'failed') return 'failed'
-  // stale is visually treated as pending; only failed is red
-  if (status === 'stale') return 'pending'
+  if (status === 'completed' || status === 'running' || status === 'failed') {
+    return status
+  }
   return 'pending'
 }
 
@@ -27,8 +25,9 @@ export interface DagStepperProps {
 }
 
 export function DagStepper({ nodes, compactThreshold }: DagStepperProps) {
-  const { containerRef, compact, trackWidthPx } = useStepperCompactMode(
+  const { containerRef, compact, trackGapPx } = useStepperCompactMode(
     nodes.length,
+    FALLBACK_TRACK_WIDTH_PX,
     compactThreshold
   )
   if (nodes.length === 0) return null
@@ -46,12 +45,7 @@ export function DagStepper({ nodes, compactThreshold }: DagStepperProps) {
     <div
       ref={containerRef}
       className={styles.dagStepper}
-      style={{
-        gap: stepperTrackGap(
-          nodes.length,
-          trackWidthPx ?? FALLBACK_TRACK_WIDTH_PX
-        ),
-      }}
+      style={{ gap: trackGapPx }}
     >
       {nodes.map((node) => {
         const state = getStepState(node.status)
