@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { RuntimeConfigCard } from './RuntimeConfigCard'
 import { WorkflowDraftCard } from './WorkflowDraftCard'
 import { DraftMessageCards } from './DraftMessageCards'
-import { runtimeCardKey } from './draftChannelSplit'
+import { MessageItem } from './StudioChatMessageItem'
+import { runtimeCardSettlementKey } from './draftChannelSplit'
 import { useRuntimeCardSettlementStore } from './runtimeCardSettlement'
 import { useAgentPublishNoticeStore } from '../shared/agentPublishNoticeStore'
 import {
@@ -12,7 +13,11 @@ import {
 } from '../shared/testStudioProviders'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
 import { fetchWorkflowRuntimeVersions } from '../../../api'
-import type { WorkflowDraftView } from './studioChatMessages'
+import type {
+  ChatMessage,
+  ToolCallView,
+  WorkflowDraftView,
+} from './studioChatMessages'
 
 vi.mock('../../../api/workflowDraftCompare', () => ({
   compareWorkflowDraft: vi.fn(),
@@ -207,7 +212,7 @@ describe('M65 拆卡：运行配置变更卡 / Workflow 草稿卡', () => {
     const draft = makeDraft(PROPOSAL_RUNTIME_ONLY)
     useRuntimeCardSettlementStore
       .getState()
-      .settleRuntimeCard(runtimeCardKey(draft), {
+      .settleRuntimeCard(runtimeCardSettlementKey('ws1', draft), {
         version: 2,
         savedKeys: ['nodes.write_script.model'],
         savedAt: 0,
@@ -236,6 +241,48 @@ describe('M65 拆卡：运行配置变更卡 / Workflow 草稿卡', () => {
     )
 
     expect(screen.queryByText('运行配置变更')).not.toBeInTheDocument()
+  })
+
+  it('落定记录按 workspace 隔离（评审 P2-2 回归钉）', () => {
+    // 落定记录写在 ws1 名下；同一份建议 YAML 在 ws2 渲染时不应读到它。
+    const draft = makeDraft(PROPOSAL_RUNTIME_ONLY)
+    useRuntimeCardSettlementStore
+      .getState()
+      .settleRuntimeCard(runtimeCardSettlementKey('ws1', draft), {
+        version: 2,
+        savedKeys: ['nodes.write_script.model'],
+        savedAt: 0,
+      })
+    const studio = makeStudio({
+      originalYaml: PROPOSAL_RUNTIME_ONLY,
+      draftYaml: PROPOSAL_RUNTIME_ONLY,
+    })
+    render(
+      <TestQueryProvider>
+        {withStudioProviders(
+          studio,
+          makeStudioView(),
+          <RuntimeConfigCard draft={draft} workspaceId="ws2" />
+        )}
+      </TestQueryProvider>
+    )
+
+    // ws2 无落定记录 + diff 为空 → 卡不渲染（而不是借 ws1 的「已生效 · v2」）。
+    expect(screen.queryByText('运行配置变更')).not.toBeInTheDocument()
+  })
+
+  it('版本号读取失败时落定徽标降级为「已生效」（不带 vN，评审 P2-3）', async () => {
+    mockVersions.mockRejectedValue(new Error('versions read failed'))
+    renderBothCards(makeDraft(PROPOSAL_RUNTIME_ONLY), makeStudio())
+
+    fireEvent.click(screen.getByRole('button', { name: '应用并生效' }))
+
+    await waitFor(() => expect(screen.getByText('已生效')).toBeInTheDocument())
+    expect(screen.queryByText(/已生效 · v/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '应用并生效' })
+    ).not.toBeInTheDocument()
+    expect(screen.getByText('write_script.model')).toBeInTheDocument()
   })
 
   it('发布请求挂起时结构卡展示引导条，runtime 卡不展示', () => {
@@ -279,6 +326,68 @@ describe('DraftMessageCards 拆卡渲染顺序（M65）', () => {
             nodeDrafts={[]}
             workspaceId="ws1"
             onApplyWorkflowDraft={vi.fn()}
+          />
+        )}
+      </TestQueryProvider>
+    )
+
+    const runtimeTitle = screen.getByText('运行配置变更')
+    const draftTitle = screen.getByText('Workflow 草稿')
+    expect(
+      runtimeTitle.compareDocumentPosition(draftTitle) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+})
+
+describe('StudioChatMessageItem 锚点路径拆卡顺序（M65 评审 P2-3 钉）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useRuntimeCardSettlementStore.setState({ settled: {} })
+    useAgentPublishNoticeStore.setState({ pendingRequestId: null })
+  })
+
+  it('tool_call 锚点路径同样运行配置卡在前、Workflow 草稿卡在后', () => {
+    const toolCall: ToolCallView = {
+      toolCallId: 'tc-1',
+      title: 'validate_workflow',
+      status: 'completed',
+      rawInput: { definition_yaml: PROPOSAL_MIXED },
+      outputText: '{"valid": true, "errors": []}',
+    }
+    const message: ChatMessage = {
+      id: 'm-tool',
+      session_id: 's1',
+      kind: 'tool_call',
+      role: 'agent',
+      content: {},
+      seq: 1,
+      created_at: '2026-10-22T00:00:00Z',
+    }
+    render(
+      <TestQueryProvider>
+        {withStudioProviders(
+          makeStudio(),
+          makeStudioView(),
+          <MessageItem
+            message={message}
+            streaming={false}
+            cancelSuperseded={false}
+            toolCall={toolCall}
+            permission={null}
+            draftAnchorId="tc-1"
+            workflowDraft={{
+              ...makeDraft(PROPOSAL_MIXED),
+              anchorToolCallId: 'tc-1',
+              anchorMessageId: null,
+            }}
+            nodeDrafts={[]}
+            allowAllPermissions={false}
+            permissionDisabled={false}
+            workspaceId="ws1"
+            onApplyWorkflowDraft={vi.fn()}
+            onAnswerPermission={vi.fn()}
+            onToggleAllowAll={vi.fn()}
           />
         )}
       </TestQueryProvider>

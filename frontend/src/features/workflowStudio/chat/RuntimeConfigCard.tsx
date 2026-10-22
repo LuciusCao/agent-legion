@@ -8,7 +8,7 @@ import { useStudioStateOptional } from '../shared/studioStateContext'
 import {
   computeDraftChannels,
   formatRuntimeKey,
-  runtimeCardKey,
+  runtimeCardSettlementKey,
   runtimeValueAt,
 } from './draftChannelSplit'
 import {
@@ -59,7 +59,7 @@ export function RuntimeConfigCard(props: {
 }) {
   const studio = useStudioStateOptional()
   const [historyOpen, setHistoryOpen] = useState(false)
-  const cardKey = runtimeCardKey(props.draft)
+  const cardKey = runtimeCardSettlementKey(props.workspaceId, props.draft)
   const settlement = useRuntimeCardSettlement(cardKey)
   const channels = computeDraftChannels({
     proposalYaml: props.draft.yaml,

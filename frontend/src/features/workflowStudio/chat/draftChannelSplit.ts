@@ -93,6 +93,16 @@ export function runtimeCardKey(draft: {
   return draft.draftHash ?? `yaml-${hashString(draft.yaml)}`
 }
 
+/** 落定记录的 store 键（评审 P2-2）：内容派生键加 workspaceId 前缀——
+ * 同一 tab 内两个 workspace 产出字节级相同建议时，落定记录不跨 workspace
+ * 串扰（版本号分属各 workspace 的配置版本序列）。 */
+export function runtimeCardSettlementKey(
+  workspaceId: string,
+  draft: { yaml: string; draftHash: string | null }
+): string {
+  return `${workspaceId}:${runtimeCardKey(draft)}`
+}
+
 function hashString(text: string): string {
   let hash = 5381
   for (let i = 0; i < text.length; i += 1) {

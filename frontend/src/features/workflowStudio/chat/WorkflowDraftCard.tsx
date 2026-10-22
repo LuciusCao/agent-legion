@@ -1,7 +1,10 @@
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined'
 import { useStudioStateOptional } from '../shared/studioStateContext'
 import { StudioDraftCardHeader } from './StudioDraftCardHeader'
-import { computeDraftChannels, runtimeCardKey } from './draftChannelSplit'
+import {
+  computeDraftChannels,
+  runtimeCardSettlementKey,
+} from './draftChannelSplit'
 import { useRuntimeCardSettlement } from './runtimeCardSettlement'
 import { useWorkflowDraftDiffDialog } from './WorkflowDraftDiffDialog'
 import { WorkflowStructureCard } from './WorkflowStructureCard'
@@ -25,7 +28,9 @@ type WorkflowProps = {
  * 无差异时回落经典单卡（与 M48 之前形态一致）。 */
 export function WorkflowDraftCard(props: WorkflowProps) {
   const studio = useStudioStateOptional()
-  const settlement = useRuntimeCardSettlement(runtimeCardKey(props.draft))
+  const settlement = useRuntimeCardSettlement(
+    runtimeCardSettlementKey(props.workspaceId, props.draft)
+  )
   const diffDialog = useWorkflowDraftDiffDialog({
     workspaceId: props.workspaceId,
     draftYaml: props.draft.yaml,
