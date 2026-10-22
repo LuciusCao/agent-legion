@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import type { RefCallback } from 'react'
 import {
   isStepperCompact,
+  stepperTrackGap,
   STEPPER_MIN_SEGMENT_PX,
 } from '../../lib/stepperLayout'
 
@@ -21,12 +22,14 @@ export interface StepperCompactMode {
   /** 挂到 stepper 容器节点上量轨道宽度（紧凑/逐段两形态共用同一容器）。 */
   containerRef: RefCallback<HTMLDivElement>
   compact: boolean
-  /** 实测轨道宽度；未测得（无 ResizeObserver 或首帧回调前）为 null。 */
-  trackWidthPx: number | null
+  /** 非紧凑形态的轨道段间距：宽度已测得按实测计算，未测得时按消费方
+   * 传入的回落宽度（fallbackTrackWidthPx）计算。 */
+  trackGapPx: number
 }
 
 export function useStepperCompactMode(
   segmentCount: number,
+  fallbackTrackWidthPx: number,
   compactThreshold?: number
 ): StepperCompactMode {
   const [trackWidthPx, setTrackWidthPx] = useState<number | null>(null)
@@ -62,5 +65,9 @@ export function useStepperCompactMode(
         ? isStepperCompactForWidth(segmentCount, trackWidthPx)
         : isStepperCompact(segmentCount)
 
-  return { containerRef, compact, trackWidthPx }
+  const trackGapPx = stepperTrackGap(
+    segmentCount,
+    trackWidthPx ?? fallbackTrackWidthPx
+  )
+  return { containerRef, compact, trackGapPx }
 }
