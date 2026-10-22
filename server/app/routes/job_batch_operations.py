@@ -5,7 +5,10 @@ selection exceeds the sync threshold; this module carries that response model
 plus the polling endpoints (status + keyset-paged per-job results) the UI
 progress view consumes. Mounted inside the job route group from
 ``jobs.py`` (member-level workspace guard); the write-side submission stays
-on the effecting routers with their studio-agent refusals.
+on the effecting routers with their studio-agent refusals. The M61
+task-center list/archive endpoints live in the sibling
+``job_batch_operations_listing`` module (budget split) and are included into
+this router below.
 """
 
 from __future__ import annotations
@@ -171,5 +174,15 @@ def create_job_batch_operations_router(job_db: JobQueries) -> APIRouter:
             ],
             next_cursor=next_cursor,
         )
+
+    # M61: the task-center list/archive surface (this module sits inside its
+    # growth-allowance band; the endpoints live in the sibling module). The
+    # import is deferred: the sibling module subclasses this module's
+    # JobBatchOperationResponse, so a module-level import would cycle.
+    from server.app.routes.job_batch_operations_listing import (
+        create_job_batch_operations_listing_router,
+    )
+
+    router.include_router(create_job_batch_operations_listing_router(job_db))
 
     return router

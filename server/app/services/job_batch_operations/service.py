@@ -180,8 +180,15 @@ def dispatch_rerun_by_failure(
     return scope, operation
 
 
-def operation_record(job_db: JobQueries, row: dict[str, Any]) -> dict[str, Any]:
-    """Public operation handle; target_spec (frozen ids) stays internal."""
+def operation_record(
+    job_db: JobQueries, row: dict[str, Any], *, reason_counts: dict[str, int] | None = None
+) -> dict[str, Any]:
+    """Public operation handle; target_spec (frozen ids) stays internal.
+
+    ``reason_counts`` lets the listing surface pass a page-wide precomputed
+    breakdown (one grouped query per page); None falls back to the per-row
+    single-op query (the status poll path).
+    """
     return {
         "id": str(row["id"]),
         "workspace_id": str(row["workspace_id"]),
@@ -194,7 +201,11 @@ def operation_record(job_db: JobQueries, row: dict[str, Any]) -> dict[str, Any]:
         "failed_count": int(row["failed_count"]),
         # reason_code breakdown over non-succeeded results, computed on read
         # (the counters stay crash-consistent via the per-advance recompute).
-        "reason_counts": job_db.summarize_job_batch_operation_reasons(str(row["id"])),
+        "reason_counts": (
+            reason_counts
+            if reason_counts is not None
+            else job_db.summarize_job_batch_operation_reasons(str(row["id"]))
+        ),
         "output": json.loads(str(row["output_json"] or "{}")),
         "chunk_errors": json.loads(str(row["chunk_errors_json"] or "[]")),
         "error_message": str(row["error_message"] or ""),

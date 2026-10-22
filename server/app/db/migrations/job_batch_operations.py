@@ -26,6 +26,15 @@ State machine mirrors run_batches: ``pending`` (accepted / between ticks) →
 ``pending``) ⇄ ``paused`` (reserved for a future control plane; the feeder
 skips) ; terminal: ``completed`` (cursor exhausted) | ``failed``
 (deterministic bookkeeping failure) | ``cancelled`` (reserved).
+
+v103 (M61) rides the same module (the v99/v100 shared-module precedent):
+``job_batch_operations.archived_at`` — the task-center archive bit for batch
+ops, exactly the run_batches v100 semantics (manual archive stamps the
+column; auto-archive is a query-time reading, never a sweeper write; the
+retention sweep deletes manual archives past 90 days and auto-archived rows
+past finished_at + 7d + 90d). The partial index serves the archived view's
+keyset scan and the retention sweep's cutoff probe. Same guarded-ALTER home
+rule, idempotent on replay.
 """
 
 from __future__ import annotations
@@ -88,3 +97,16 @@ create index if not exists idx_job_batch_operations_workspace
 def migrate_job_batch_operations(conn: Any) -> None:
     """Create the job_batch_operations tables (v101); idempotent on replay."""
     conn.execute(_JOB_BATCH_OPERATIONS_DDL)
+
+
+_JOB_BATCH_OPERATIONS_ARCHIVE_DDL = """
+alter table job_batch_operations
+  add column if not exists archived_at timestamptz;
+create index if not exists idx_job_batch_operations_archived
+  on job_batch_operations(archived_at) where archived_at is not null;
+"""
+
+
+def migrate_job_batch_operations_archive(conn: Any) -> None:
+    """Add the archive column + partial index (v103, M61); idempotent."""
+    conn.execute(_JOB_BATCH_OPERATIONS_ARCHIVE_DDL)

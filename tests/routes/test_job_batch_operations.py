@@ -6,9 +6,16 @@ route tests pin that) and return 202 + an operation handle above it. The
 shared test app runs with background tasks dormant (tests/conftest.py), so
 these tests drive ``JobBatchOpsFeeder.consume_once`` directly — deterministic
 progression, no wall-clock waits.
+
+The tail of this file owns the M61 task-center HTTP contract: the three-view
+list endpoint (keyset paging, item shape) and the idempotent manual archive.
+Service/query semantics live in
+tests/services/test_job_batch_operations_listing.py.
 """
 
 from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -225,4 +232,173 @@ def test_async_dispatch_requires_auth(anon_client: TestClient) -> None:
     )
     assert (
         anon_client.get(f"/api/workspaces/{WORKSPACE}/job-batch-operations/op-1").status_code == 401
+    )
+
+
+# --- M61: task-center list/archive HTTP contract -------------------------
+
+
+def _insert_operation(
+    client: TestClient,
+    workspace_id: str,
+    op_id: str,
+    *,
+    status: str,
+    kind: str = "pause",
+    finished_at: datetime | None = None,
+    archived_at: datetime | None = None,
+    created_at: datetime | None = None,
+    items_total: int = 2,
+) -> None:
+    job_db = client.app.state.job_db
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into job_batch_operations("
+            " id, workspace_id, kind, status, items_total, next_index,"
+            " created_at, finished_at, archived_at, created_by)"
+            " values (%s, %s, %s, %s, %s, %s,"
+            " coalesce(%s, current_timestamp), %s, %s, 'tester')",
+            (
+                op_id,
+                workspace_id,
+                kind,
+                status,
+                items_total,
+                items_total if status == "completed" else 0,
+                created_at,
+                finished_at,
+                archived_at,
+            ),
+        )
+
+
+def test_list_views_keyset_paging_and_item_shape(client: TestClient) -> None:
+    ws = _create_workspace(client)
+    now = datetime.now(UTC)
+    _insert_operation(client, ws, "op-running", status="running", kind="rerun")
+    for index in range(3):
+        _insert_operation(
+            client,
+            ws,
+            f"op-ended-{index}",
+            status="completed",
+            finished_at=now - timedelta(hours=index + 1),
+        )
+    # 终态超过 7 天 = 查询口径自动归档，不进 ended 视图。
+    _insert_operation(
+        client, ws, "op-auto-archived", status="completed", finished_at=now - timedelta(days=8)
+    )
+    _insert_operation(
+        client,
+        ws,
+        "op-manual-archived",
+        status="failed",
+        finished_at=now - timedelta(hours=1),
+        archived_at=now - timedelta(minutes=30),
+    )
+
+    active = client.get(f"/api/workspaces/{ws}/job-batch-operations", params={"view": "active"})
+    assert active.status_code == 200, active.text
+    body = active.json()
+    assert [op["id"] for op in body["operations"]] == ["op-running"]
+    assert body["active_count"] == 1
+    assert body["next_cursor"] is None
+    item = body["operations"][0]
+    assert item["kind"] == "rerun" and item["status"] == "running"
+    assert item["archived_at"] is None and item["archive_source"] is None
+    assert item["created_by"] == "tester"
+
+    page1 = client.get(
+        f"/api/workspaces/{ws}/job-batch-operations", params={"view": "ended", "limit": 2}
+    ).json()
+    assert [op["id"] for op in page1["operations"]] == ["op-ended-0", "op-ended-1"]
+    page2 = client.get(
+        f"/api/workspaces/{ws}/job-batch-operations",
+        params={"view": "ended", "limit": 2, "cursor": page1["next_cursor"]},
+    ).json()
+    assert [op["id"] for op in page2["operations"]] == ["op-ended-2"]
+    assert page2["next_cursor"] is None
+
+    archived = client.get(
+        f"/api/workspaces/{ws}/job-batch-operations", params={"view": "archived"}
+    ).json()
+    assert [op["id"] for op in archived["operations"]] == [
+        "op-manual-archived",
+        "op-auto-archived",
+    ]
+    by_id = {op["id"]: op for op in archived["operations"]}
+    assert by_id["op-manual-archived"]["archive_source"] == "manual"
+    assert by_id["op-auto-archived"]["archive_source"] == "auto"
+
+    # 参数校验：未知视图 / 越界 limit / 坏游标。
+    assert (
+        client.get(
+            f"/api/workspaces/{ws}/job-batch-operations", params={"view": "later"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            f"/api/workspaces/{ws}/job-batch-operations", params={"view": "ended", "limit": 0}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            f"/api/workspaces/{ws}/job-batch-operations",
+            params={"view": "ended", "cursor": "no-pipe"},
+        ).status_code
+        == 400
+    )
+    # 未知 workspace 404。
+    assert (
+        client.get(
+            "/api/workspaces/nope/job-batch-operations", params={"view": "active"}
+        ).status_code
+        == 404
+    )
+
+
+def test_archive_endpoint_idempotent_and_guards(client: TestClient) -> None:
+    ws = _create_workspace(client)
+    _insert_operation(client, ws, "op-open", status="running")
+    _insert_operation(client, ws, "op-done", status="completed", finished_at=datetime.now(UTC))
+
+    url = f"/api/workspaces/{ws}/job-batch-operations"
+    # 未知 id 与非终态：404 / 409。
+    assert client.post(f"{url}/op-missing/archive").status_code == 404
+    assert client.post(f"{url}/op-open/archive").status_code == 409
+    # 跨 workspace 引用同形 404（不泄漏存在性）。
+    other = "batch-ops-archive-other"
+    assert client.post("/api/workspaces", json={"id": other, "name": other}).status_code == 200
+    assert (
+        client.post(f"/api/workspaces/{other}/job-batch-operations/op-done/archive").status_code
+        == 404
+    )
+
+    archived = client.post(f"{url}/op-done/archive")
+    assert archived.status_code == 200, archived.text
+    operation = archived.json()["operation"]
+    assert operation["archive_source"] == "manual"
+    assert operation["archived_at"] is not None
+
+    # 幂等（M61 brief）：重复归档 200 返回现态，archived_at 不重置。
+    replay = client.post(f"{url}/op-done/archive")
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["operation"]["archived_at"] == operation["archived_at"]
+
+    # 归档后落在 archived 视图、离开 ended 视图。
+    ended = client.get(f"{url}", params={"view": "ended"}).json()
+    assert ended["operations"] == []
+    archived_view = client.get(f"{url}", params={"view": "archived"}).json()
+    assert [op["id"] for op in archived_view["operations"]] == ["op-done"]
+
+
+def test_list_and_archive_require_auth(anon_client: TestClient) -> None:
+    assert anon_client.get(f"/api/workspaces/{WORKSPACE}/job-batch-operations").status_code == 401
+    assert (
+        anon_client.post(
+            f"/api/workspaces/{WORKSPACE}/job-batch-operations/op-1/archive"
+        ).status_code
+        == 401
     )

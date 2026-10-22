@@ -6,10 +6,12 @@ so a single large campaign left the tables (and their claim-path indexes)
 permanently fat and every subsequent scan paid for the corpses. This module
 owns the time-dimensional row removal, driven by the ``execution_retention_days``
 instance setting (0 = disabled — the default; no row is removed unless an
-operator explicitly turns it on). One arm is exempt from the setting:
+operator explicitly turns it on). Two arms are exempt from the setting:
 #1157's archived ``run_batches`` retention (90 days; implemented in
-``run_batch_listing.sweep_archived_run_batches``) is unconditional product
-behavior.
+``run_batch_listing.sweep_archived_run_batches``) and M61's archived
+``job_batch_operations`` retention (same 90 days, same query-time
+auto-archive reading; ``job_batch_operations.listing``) are unconditional
+product behavior.
 
 Table order and per-table predicates follow the foreign keys (the detailed
 rationale lives with the SQL in ``jobs/queries/execution_retention.py``):
@@ -53,6 +55,7 @@ from server.app.jobs.queries.execution_retention import (
 )
 from server.app.services import run_batch_listing
 from server.app.services.instance_settings_store import InstanceSettingsStore
+from server.app.services.job_batch_operations import listing as job_batch_ops_listing
 
 logger = logging.getLogger(__name__)
 
@@ -192,11 +195,18 @@ def sweep_expired_executions(
     """Remove terminal execution-plane rows past the retention window.
 
     Returns per-table deleted counts (the three execution-plane tables are
-    all zero when retention is disabled; the ``run_batches`` arm —
-    #1157 archived-batch retention — is unconditional and always sweeps).
+    all zero when retention is disabled; the ``run_batches`` and
+    ``job_batch_operations`` arms — #1157/M61 archived-batch retention — are
+    unconditional and always sweep).
     """
     moment = now or datetime.now(UTC)
     run_batches = run_batch_listing.sweep_archived_run_batches(connect_source, moment)
+    # M61: batch ops carry the same task-center archive semantics (v103
+    # archived_at; auto-archive stays a query-time reading, so there is no
+    # 7-day write arm anywhere — only this 90-day physical-delete arm).
+    job_batch_operations = job_batch_ops_listing.sweep_archived_job_batch_operations(
+        connect_source, moment
+    )
     days = execution_retention_days(connect_source)
     if days <= 0:
         return {
@@ -204,6 +214,7 @@ def sweep_expired_executions(
             "executor_leases": 0,
             "node_run_token_usage": 0,
             "run_batches": run_batches,
+            "job_batch_operations": job_batch_operations,
         }
     cutoff = moment - timedelta(days=days)
     queries = _queries(connect_source)
@@ -247,4 +258,5 @@ def sweep_expired_executions(
         "executor_leases": leases,
         "node_run_token_usage": usage,
         "run_batches": run_batches,
+        "job_batch_operations": job_batch_operations,
     }
