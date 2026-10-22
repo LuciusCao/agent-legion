@@ -8,6 +8,8 @@ export function WorkflowInspectorDisclosure(props: {
   summary?: string
   children: React.ReactNode
   defaultExpanded?: boolean
+  /** M48：标题尾部的通道徽标（结构通道 · 发布生效）。 */
+  titleSuffix?: React.ReactNode
 }) {
   const [expanded, setExpanded] = useState(props.defaultExpanded ?? false)
   return (
@@ -18,7 +20,10 @@ export function WorkflowInspectorDisclosure(props: {
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
       >
-        <span className={styles.title}>{props.title}</span>
+        <span className={styles.title}>
+          {props.title}
+          {props.titleSuffix}
+        </span>
         {props.summary && (
           <span className={styles.summary}>{props.summary}</span>
         )}

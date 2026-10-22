@@ -41,6 +41,8 @@ export { cancelPublishRequest, confirmPublishRequest, fetchPendingPublishRequest
 export type { StudioPublishRequestRecord } from './studioPublishRequestApi'
 export { publishWorkflowDraft, validateWorkflowDraft } from './workflows'
 export { fetchWorkflowDraft, putWorkflowDraft } from './workflowDraft'
+// prettier-ignore
+export { fetchWorkflowRuntimeVersions, rollbackWorkflowRuntimeConfig, saveWorkflowRuntimeConfig } from './workflowRuntimeApi'
 export { fetchOpsMetrics } from './metrics'
 export { presignMaterial, completeMaterial, createRun } from './materialsApi'
 // prettier-ignore

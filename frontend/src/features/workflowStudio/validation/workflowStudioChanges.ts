@@ -226,6 +226,34 @@ export type ErrorGroup = {
   errors: CompareError[]
 }
 
+/* M48 双通道：runtime 字段（节点 execution 除 runtime 键 + tools /
+ * requires_labels + 顶层 execution 默认）走运行通道即改即存，不属
+ * 「未发布变更」。compare 把 execution-only 的节点变更单独标出
+ * （fields 全为 'execution'；execution.runtime 变化另带 'runtime' 字段、
+ * 属结构），tools/requires_labels 自 M47 起根本不进 compare——这些变更
+ * 不点亮未发布变更 chip、不参与发布门控、不进发布复核框 diff。 */
+export function isRuntimeOnlyNodeChange(change: NodeChangeGroup): boolean {
+  return (
+    change.type === 'modified' &&
+    change.fields.length > 0 &&
+    change.fields.every((field) => field === 'execution')
+  )
+}
+
+/** 结构变更判定：发布门控与发布复核框的过滤口径（risk flag 均由结构事件
+ * 派生，不单独计入）。 */
+export function hasStructuralChanges(
+  summary: ChangeSummaryViewModel | null
+): boolean {
+  if (!summary) return false
+  return (
+    summary.nodeChanges.some((change) => !isRuntimeOnlyNodeChange(change)) ||
+    summary.edgeChanges.length > 0 ||
+    summary.intakeChanges.length > 0 ||
+    summary.metadataChanges.length > 0
+  )
+}
+
 export function groupCompareErrors(errors: CompareError[]): ErrorGroup[] {
   const groups = new Map<string, CompareError[]>()
   for (const error of errors) {

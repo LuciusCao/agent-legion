@@ -36,6 +36,10 @@ type Props = {
   /** #804 轮 4 P2-C 审 A 发 B：确认框打开期间草稿 YAML 被后台换掉 →
    * 禁确认 + 提示重审（审阅的 diff 与将发布的内容已不一致）。 */
   contentStale?: boolean
+  /** M48：草稿里尚未经运行通道保存的 runtime 键（信息条）。 */
+  runtimeChangedKeys?: string[]
+  /** M48：本会话已经运行通道保存生效的 runtime 键（信息条）。 */
+  runtimeSavedKeys?: string[]
 }
 
 export function WorkflowPublishReviewDialog({
@@ -51,6 +55,8 @@ export function WorkflowPublishReviewDialog({
   canceling = false,
   advisories = [],
   contentStale = false,
+  runtimeChangedKeys = [],
+  runtimeSavedKeys = [],
 }: Props) {
   const hasChanges = hasCompareSummaryChanges(summary)
   // 任一操作在途即禁止二次触发关闭与确认（#429 四轮 codex P2：cancel 在途
@@ -77,7 +83,11 @@ export function WorkflowPublishReviewDialog({
           createsRevision={createsRevision}
           definitionHash={definitionHash}
         />
-        <WorkflowPublishReviewDialogChanges summary={summary} />
+        <WorkflowPublishReviewDialogChanges
+          summary={summary}
+          runtimeChangedKeys={runtimeChangedKeys}
+          runtimeSavedKeys={runtimeSavedKeys}
+        />
         {contentStale && (
           <Typography variant="body2" color="error" sx={{ mt: 2 }}>
             草稿内容在你审阅期间已被更新（可能来自 Agent

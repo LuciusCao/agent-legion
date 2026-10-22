@@ -1,0 +1,43 @@
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f1f3f4;
+}
+.row:last-of-type {
+  border-bottom: none;
+}
+.rowMain {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.versionTag {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0b6b53;
+  background: #eef7f3;
+  border: 1px solid #bfe3d4;
+  border-radius: 8px;
+  padding: 1px 8px;
+  flex-shrink: 0;
+}
+.time {
+  font-size: 12px;
+  color: #43474e;
+  white-space: nowrap;
+}
+.keys {
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #0b6b53;
+  word-break: break-all;
+}
+.meta {
+  font-size: 12px;
+  color: #687078;
+}

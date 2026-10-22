@@ -3,6 +3,7 @@ import {
   type StudioState,
 } from '../shared/studioStateContext'
 import { savedIdentityConfirms } from '../shared/draftIdentity'
+import { hasStructuralChanges } from '../validation/workflowStudioChanges'
 import styles from './StudioChatPanel.module.css'
 
 /* #667 B1：聊天草稿卡内的发布入口。发布对象永远是编辑器当前 YAML——
@@ -30,17 +31,21 @@ function publishDisabledReason(studio: StudioState): string | null {
     (error) => error.category === 'yaml' || error.category === 'schema'
   )
   if (hasBlockingError) return 'YAML / 结构存在错误，请先修正再发布'
-  // 与 useWorkflowStudioActions 的 hasCompareChanges 口径保持一致（不计
-  // metadataChanges）。
+  // r1 P2-2：与 useWorkflowStudioActions 的 hasCompareChanges 同口径
+  // （hasStructuralChanges || riskFlags——execution-only 的 runtime 变更不算
+  // 可发布变更，metadataChanges 自 M48 起计入）。
   const summary = studio.compareSummary
   const hasChanges = Boolean(
-    summary &&
-    (summary.nodeChanges.length ||
-      summary.edgeChanges.length ||
-      summary.intakeChanges.length ||
-      summary.riskFlags.length)
+    summary && (hasStructuralChanges(summary) || summary.riskFlags.length > 0)
   )
-  if (!hasChanges) return '与 active revision 没有可发布的变更'
+  if (!hasChanges) {
+    // M48：runtime-only 草稿走运行通道即改即存，发布按钮永远禁用——给
+    // 指引而不是笼统的「没有变更」（compare 可能确有 execution-only diff）。
+    if ((studio.runtimeChangedKeys?.length ?? 0) > 0) {
+      return '仅运行配置修改：在「运行配置」区保存即生效，无需发布'
+    }
+    return '与 active revision 没有可发布的变更'
+  }
   // 轮 6 H2：冲突未解决禁发布（canPublish 已含此门控）。
   if (studio.draftSave?.conflict) return '草稿存在冲突，请先解决冲突再发布'
   // codex 轮 3 P2：canPublish 已绑定「当前 YAML 校验通过」（自动校验驱动），

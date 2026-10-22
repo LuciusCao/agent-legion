@@ -20,6 +20,7 @@ import { MaterialIcon } from '../../../components/MaterialIcon'
 import { StudioAgentPanelToggle } from '../inspector/StudioAgentPanelToggle'
 import { useStudioState, useStudioView } from './studioStateContext'
 import { countNodeChanges } from '../canvas/workflowStudioDagChanges'
+import { hasStructuralChanges } from '../validation/workflowStudioChanges'
 import { useStudioNarrowViewport } from './useStudioNarrowViewport'
 import { useWorkspaceDisplayName } from './useWorkspaceDisplayName'
 import { WorkflowRevisionSelect } from './WorkflowRevisionSelect'
@@ -60,6 +61,8 @@ export function StudioCanvasIslands() {
     inConflict: studio.draftSave?.conflict === true,
     compareError: studio.compareState === 'error',
     validationMessage,
+    runtimeChangedCount: studio.runtimeChangedKeys?.length ?? 0,
+    hasStructuralChanges: hasStructuralChanges(studio.compareSummary),
   })
   // #812 对抗轮 D4 + P2-1：抽屉打开期间被 paper 物理遮住的岛触发器加
   // inert，堵住「Tab 聚焦被遮按钮并激活」的路径（inert 一次阻断指针/键盘/

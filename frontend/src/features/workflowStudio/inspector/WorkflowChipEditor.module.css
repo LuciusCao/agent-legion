@@ -1,0 +1,90 @@
+.addIcon {
+  font-size: 13px;
+  line-height: 1;
+}
+.editor {
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-height: 40px;
+}
+.editorDisabled {
+  background: #f1f3f4;
+}
+.editorDisabled .chip {
+  opacity: 0.55;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #eef1f3;
+  border-radius: 14px;
+  padding: 3px 6px 3px 11px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #1a1c1e;
+  word-break: break-all;
+}
+.chipRemove {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #80868b;
+  font-size: 13px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.chipRemove:hover:not(:disabled) {
+  background: #dde1e4;
+  color: #1a1c1e;
+}
+.chipRemove:disabled {
+  cursor: not-allowed;
+}
+.addButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px dashed #bdc1c6;
+  background: transparent;
+  border-radius: 14px;
+  padding: 4px 11px;
+  font-size: 12px;
+  color: #5f6368;
+  cursor: pointer;
+  font-family: inherit;
+}
+.addButton:hover:not(:disabled) {
+  background: #f8f9fa;
+}
+.addButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.addInput {
+  border: 1px solid #dadce0;
+  border-radius: 14px;
+  padding: 4px 11px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  outline: none;
+  min-width: 140px;
+}
+.addInput:focus {
+  border-color: #1a73e8;
+}
+.addEmpty {
+  font-size: 12px;
+  color: #9aa0a6;
+}

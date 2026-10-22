@@ -1,5 +1,6 @@
 import type { WorkflowNodeRecord } from '../../../types'
 import { WorkflowNodeLegacyAgentBody } from './WorkflowNodeLegacyAgentBody'
+import { WorkflowChannelBadge } from './WorkflowChannelBadge'
 import {
   WorkflowNodeProfileBody,
   useNodeRuntimeInfo,
@@ -33,6 +34,7 @@ export function WorkflowNodeExecutionSection(props: Props) {
     <section className={inspectorStyles.section} aria-label="节点执行能力">
       <div className={inspectorStyles.sectionTitle}>
         {isAgentNode ? 'Agent 配置' : '代码节点'}
+        <WorkflowChannelBadge kind="structure" />
       </div>
       {isAgentNode && runtimeInfo.effectiveRuntime ? (
         <WorkflowNodeProfileBody

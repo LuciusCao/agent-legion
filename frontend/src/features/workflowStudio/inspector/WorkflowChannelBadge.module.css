@@ -1,0 +1,22 @@
+.badgeStructure,
+.badgeRuntime {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 10px;
+  padding: 1px 8px;
+  margin-left: 6px;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+.badgeStructure {
+  background: #eceff1;
+  color: #546e7a;
+}
+.badgeRuntime {
+  background: #eef7f3;
+  color: #0b6b53;
+  border: 1px solid #bfe3d4;
+}

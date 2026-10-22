@@ -13,11 +13,16 @@ export function WorkflowRuntimeInheritedField(props: {
   options?: string[]
   listId?: string
   readOnly?: boolean
+  /** M48：label 尾部的通道状态点（已修改 · 待保存 / 已生效）。 */
+  labelSuffix?: React.ReactNode
   onChange: (value: string) => void
 }) {
   return (
     <label className={editorStyles.field}>
-      <span className={editorStyles.fieldLabel}>{props.label}</span>
+      <span className={editorStyles.fieldLabel}>
+        {props.label}
+        {props.labelSuffix}
+      </span>
       <input
         aria-label={props.label}
         className={editorStyles.fieldInput}

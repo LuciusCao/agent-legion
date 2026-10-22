@@ -754,16 +754,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1012
   ceiling: 83
 - check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/inspector/WorkflowAgentExecutionDetails.tsx
-  reason: '#443/#476 mount WorkflowNodeToolsEditor below the runtime settings — one import plus
-    one JSX block (9 lines) in the agent execution body. The editor itself is a sibling component;
-    this file is only the composition point. Remove if the composition is restructured. Re-anchored
-    by #926 from #456 (closed) to #1014: the overage above is the shipped feature itself and
-    the removal condition above stands; #1014 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1014
-  ceiling: 65
-- check: architecture.file_budget
   path: velites/src/tools/specs.rs
   reason: '#518 adds the json tool''s provider spec (description + JSON Schema parameters) —
     the file is the per-tool spec table by design, one arm per ToolKind; the spec IS the content,
