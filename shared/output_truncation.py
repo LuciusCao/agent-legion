@@ -2,7 +2,8 @@
 
 单次输出触顶（provider 侧 ``max_tokens`` / ``finish_reason=length``）在 pi 与
 velites 的事件流里统一表现为 assistant ``message_end`` 的 ``stopReason=length``。
-触顶本身不是失败——velites 把它当普通停止继续收尾，触顶后产物仍可能齐全——
+触顶本身不是失败——#865 起 velites 触顶后注入续写轮继续同一 run（连续触顶
+达上限才回落收尾），触顶后产物仍可能齐全——
 所以它不进 model_error（``shared/pi_model_error.py``，exit 0 时直接判 run 失败），
 只在声明产物缺失时作为失败归因，把笼统的「Missing outputs」换成可行动的触顶
 原因。Stdlib-only（见 ``shared/__init__.py``）：Worker 归因、Host 失败分类与
@@ -31,9 +32,11 @@ class OutputTruncation:
     """单遍扫描中累计的触顶事实；``observe`` 作为扫描的事件观察者。
 
     归因只看**最后一次** assistant 模型调用（``last_stop``，即导致最终产物
-    校验 / 退出的那一轮）：velites 的补救轮或 pi 的后续轮以 ``stop`` /
-    ``toolUse`` 正常结束、或以模型错误结束时，更早的触顶不再解释最终缺产物；
-    ``count`` 只是文案里的累计次数。另记排除归因的旁证：未恢复的模型调用错误
+    校验 / 退出的那一轮）：#865 起 velites 触顶后先注入续写轮（同一 run 内
+    剔除未执行 toolCall 后续写，连续触顶达上限才回落产物补救轮），续写轮 /
+    补救轮 / pi 的后续轮以 ``stop`` / ``toolUse`` 正常结束、或以模型错误结束
+    时，更早的触顶不再解释最终缺产物；``count`` 只是文案里的累计次数。另记
+    排除归因的旁证：未恢复的模型调用错误
     （与扫描的 model_error 同一 fold，不受 exit 0 门控）、velites 的非正常结束
     （``agent_end.reason``：``budget_exceeded`` / ``cancelled``，正常结束不带
     reason）、``outputs_validation`` 是否出现（证明 velites 的 exit 1 来自产物

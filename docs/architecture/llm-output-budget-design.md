@@ -1,7 +1,7 @@
-# LLM 节点单次输出预算与触顶续写（#952）
+# LLM 节点单次输出预算与触顶续写（#952 / #865）
 
 > 状态：P0（显式输出预算参数 + 触顶失败归因 + 日志告警）已在 0.7.17 落地；
-> §4 的「触顶自动续写」是**设计草案，未实施**，§5 列出需要 owner 决策的点。
+> §4 方案 A「触顶自动续写」已随 #865 实施（0.8.1），§5 决策点 1-3 已定。
 
 ## 1. 问题
 
@@ -61,16 +61,18 @@
    原归因。失败分类新增 `technical / output_truncated`。Anthropic 的
    `model_context_window_exceeded` 同样映射为 `length`，事件流无法区分，故文案
    同时提示上下文窗口溢出的可能。
-   归因只关联导致最终产物校验 / 退出的**最后一轮**模型调用：velites 首轮触顶后
-   进入补救轮（`velites/src/agent.rs` 正常停止分支），补救轮以 `stop` / `toolUse`
-   正常结束仍缺产物时，失败是补救轮没写齐产物，调高输出预算也无济于事，不归因
-   为触顶。
+   归因只关联导致最终产物校验 / 退出的**最后一轮**模型调用：#865 起 velites
+   首轮触顶后先进入续写轮（§4 方案 A），连续触顶达上限才回落补救轮；续写轮 /
+   补救轮以 `stop` / `toolUse` 正常结束仍缺产物时，失败是后续轮没写齐产物，
+   调高输出预算也无济于事，不归因为触顶。
 
    **触顶归因决策表**（`tests/workers/test_worker_upload_truncation.py`
    `_DECISION_TABLE` 逐行参数化）。velites 事件形态：每次模型调用一个 assistant
    `message_end`；瞬态失败的重试先发 `message_end{stopReason=error, errorMessage}` +
    `auto_retry_start`，成功的重试再发一个 `message_end`；未恢复的模型错误发
    `message_end{error}` 后直接结束，**不发** `outputs_validation`（缺产物时 exit 1）；
+   触顶（length）先触发一次续写轮（#865，不占用补救轮；续写轮的 user 注入不进事件流，
+   序列上只见又一个 assistant `message_end`），连续触顶达上限 2 后按正常停止回落；
    正常停止时缺产物 / 契约违例触发一次补救轮（契约解析失败跳过补救），补救轮或
    预算收尾轮之后发 `outputs_validation`（`agent.rs` 三处发出点：收尾轮以 toolUse
    结束后的循环顶、收尾轮正常停止、无需补救的正常停止），仍缺产物则 exit 1；取消
@@ -82,17 +84,25 @@
    即结束），表中 pi 「length → …」的行都以该次 length 携带 toolCall 为前提。
 
    velites **保证不会出现**的组合（表中标 ✗ 的行只用来钉住防御行为）：
-   - 收尾轮不叠加：预算收尾只在 `wrap_up.is_none()` 时注入（`agent.rs:183-190`），
-     收尾轮结束即发校验并 break（`agent.rs:172-177`、`:316-327`），补救轮只在
-     非收尾轮的正常停止里注入（`agent.rs:336-345`），一次 run 至多一个收尾轮；
+   - 收尾轮不叠加：预算收尾只在 `wrap_up.is_none()` 时注入（`agent.rs:194-199`），
+     收尾轮结束即发校验并 break（`agent.rs:183-190`、`:352-360`），补救轮只在
+     非收尾轮的正常停止里注入（`agent.rs:373-379`），续写轮同样不叠加在收尾轮上
+     （guard `wrap_up.is_none()`，`agent.rs:337-339`，测试
+     `truncated_remediation_turn_ends_without_stacking_a_continuation` 钉住），
+     一次 run 至多一个收尾轮；续写轮至多每段连续触顶一次（上限 2，`truncation.rs`
+     `MAX_CONSECUTIVE_LENGTH_STOPS`；非 length 停止重置连续计数，测试
+     `non_length_stop_resets_the_consecutive_truncation_streak` 钉住）；
+   - #865 起，触顶与后续收尾（补救轮 / 校验）之间必有续写轮的 assistant
+     `message_end`（已达连续上限或处于收尾轮时除外）；表中触顶后直接跟收尾产物的
+     velites 行（12/15/16/18/34）因此转为防御行，只钉住归因语义；
    - `outputs_validation` 每 run 至多一次，且其后不再有模型调用：三处发出点
-     （`agent.rs:176`、`:320`、`:347`）之后都紧跟 `break`，随后只发 `agent_end`
-     （`agent.rs:353`）；
+     （`agent.rs:187`、`:354`、`:381`）之后都紧跟 `break`，随后只发 `agent_end`
+     （`agent.rs:387`）；
    - assistant `message_end` 必带 `stopReason`：成功路径由 provider 映射后必设
      （`provider/anthropic.rs:160-181`、`provider/openai_compat/mod.rs:179-202`，
-     缺 stop/finish reason 时转为错误），失败路径为 `error`（`agent.rs:219`、
+     缺 stop/finish reason 时转为错误），失败路径为 `error`（`agent.rs:230`、
      `events.rs:378`）；
-   - `errorMessage` 不与 `length` 并存：`errorMessage` 只在 `agent.rs:220` 与
+   - `errorMessage` 不与 `length` 并存：`errorMessage` 只在 `agent.rs:231` 与
      `events.rs:379` 设置，两处都是 `stopReason=error`（`provider/stub.rs` 为测试桩）。
 
    | # | 运行时 / exit | 模型调用序列（`stopReason`） | 模型错误 | 其他旁证 | 产物 | 期望 |
@@ -109,8 +119,8 @@
    | 10 | pi / 0 | error（未恢复） | 有 | — | 齐全 | model_error |
    | 11 | pi / 0 | length（带 errorMessage） | 有 | — | 缺失 | model_error |
    | 12 | velites / 1 | length → 补救 length | — | `outputs_validation` | 缺失 | output_truncated（2x） |
-   | 13 | velites / 1 | length → 补救 stop | — | `outputs_validation` | 缺失 | 原 exit 错误 |
-   | 14 | velites / 1 | length → 补救 toolUse（工具执行后校验） | — | `outputs_validation` | 缺失 | 原 exit 错误 |
+   | 13 | velites / 1 | length → 续写 stop → 补救 stop | — | `outputs_validation` | 缺失 | 原 exit 错误 |
+   | 14 | velites / 1 | length → 续写 stop → 补救 toolUse（工具执行后校验） | — | `outputs_validation` | 缺失 | 原 exit 错误 |
    | 15 | velites / 1 | length → 补救 error → retry → length | 已恢复 | `outputs_validation` | 缺失 | output_truncated |
    | 16 | velites / 1 | length → 补救 length | — | 契约违例仅 `missing required file` | 缺失 | output_truncated |
    | 17 | velites / 1 | length（契约解析失败，无补救轮） | — | `contract parse error` 违例 | 缺失 | 原 exit 错误 |
@@ -137,6 +147,9 @@
    | 38 (G12 ✗) | velites / 1 | length → 补救 length | — | `cancelled`，无 `outputs_validation` | 缺失 | 原 exit 错误 |
    | 39 (G13) | pi / 0 | length → toolUse → length | — | — | 缺失 | output_truncated（本次运行累计 2x） |
    | 40 (G14) | pi / 0 | length → error → retry → length | 已恢复 | — | 缺失 | output_truncated（2x） |
+   | 41 (C1) | velites / 0 | length → 续写 stop | — | `outputs_validation`（missing 空） | 齐全 | completed（续写恢复，不归因） |
+   | 42 (C2) | velites / 1 | length → 续写 length（达上限回落）→ 补救 length | — | `outputs_validation` | 缺失 | output_truncated（3x） |
+   | 43 (C3) | velites / 1 | length → 续写 length（达上限回落）→ 补救 stop | — | `outputs_validation` | 缺失 | 原 exit 错误（补救轮没写齐，不归因） |
 
    文案中的 `Nx` 是本次运行累计触顶次数，归因前提是最后一次调用触顶：
    `(stopReason=length on the last model call; Nx in this run)`。
@@ -156,28 +169,33 @@ provider/model/thinking 这类「连接与模型选择」键；预算类参数�
 未知 flag 会直接报错退出（velites 刻意不吞未知 flag）。只有声明了
 `max_output_tokens` 的节点受影响，部署时经 `ensure-velites.sh` 重建即可。
 
-## 4. 触顶自动续写（草案，未实施）
+## 4. 触顶自动续写（方案 A 已实施，#865）
 
-### 方案 A（推荐）：velites agent loop 内的「触顶续写轮」
-
-触顶后不结束，而是在同一 run 内追加续写轮：
+velites agent loop 内的「触顶续写轮」（`velites/src/agent.rs`）：触顶后不结束，
+而是在同一 run 内追加续写轮：
 
 1. **清理模型上下文**（必需，否则下一请求被 provider 拒绝）：截断回复中未完成
-   的 toolCall 必须从发往模型的历史里剔除——Anthropic 与 OpenAI 都要求每个
-   tool_use 都有对应的 tool_result；Anthropic 截断的 thinking 块可能缺少
-   signature，同样需剔除（`provider_data.anthropicThinkingBlocks`）。session
-   镜像与事件流保留原样，不改写已发生的事实。
-2. **注入续写提示**（user 消息）：说明上一条回复因单次输出上限被截断、未完成
-   的工具调用未执行；要求缩短思考、把产物拆成多次小块写盘、已落盘部分不要重写。
-3. **有界**：连续触顶达到上限 N（建议 2）后按现状收尾（进入产物补救/退出）；
-   续写轮计入 `max_turns` / `max_tokens` / 墙钟预算，不另开额度。
-4. **事件面**：不新增事件类型，复用 `message_end.stopReason=length` 作为可观测
-   证据；若需要在 `agent_end` 上标注，必须同步 `velites/schema/events.schema.json`
-   与契约测试；禁止引入 delta 事件。
-
-已落盘的部分天然保留（工具调用写盘是增量的），因此这就是 issue 方向 1 的
-「已生成部分保留、继续生成剩余部分」在 agent 粒度的实现。需要 cargo 环境
-补齐 stub provider 的触顶 fixture 测试（`velites/tests/`）。
+   的 toolCall 从发往模型的历史里剔除——Anthropic 与 OpenAI 都要求每个
+   tool_use 都有对应的 tool_result；Anthropic 截断的 thinking 块缺 signature
+   同样剔除（`provider_data.anthropicThinkingBlocks`）；剔除后无任何可见内容时
+   留一个标记文本块（空 assistant content 会被 Anthropic 拒收）。实现为
+   `sanitize_truncated_history`（`velites/src/truncation.rs`），在**每一次**触顶后
+   对模型侧历史副本执行（续写、补救、预算收尾请求都受益）；session 镜像与事件流
+   保留原样，不改写已发生的事实。
+2. **注入续写提示**（user 消息，`continuation_message`，同模块）：说明
+   上一条回复因单次输出上限被截断、未完成的工具调用未执行；要求缩短思考、把
+   产物拆成多次小块写盘、已落盘部分不要重写。续写轮不占用 `WrapUp::Outputs`
+   补救轮（续写后正常停止仍缺产物时，补救轮照常触发）。
+3. **有界**：连续触顶达到上限 N=2（`MAX_CONSECUTIVE_LENGTH_STOPS`，同模块）
+   后按现状收尾（进入产物补救/退出）；非 length 停止即重置
+   连续计数。续写轮不另开额度：预算检查在每次模型调用前，续写轮计入
+   `max_turns` / `max_tokens` / 墙钟预算（预算耗尽时续写收敛为预算收尾轮）。
+4. **事件面**：不新增事件类型、不加 `agent_end.reason` 变体，复用
+   `message_end.stopReason=length` 作为可观测证据；每次触顶在 stderr 留一行
+   痕迹（turn 号 + 输出 token 数 + 连续计数）；Worker 结果准备把
+   `OutputTruncation` 的 `count` / `last_stop` 写入 result metadata
+   `output_truncation`（Host 落 `agent_execution_requests.outcome_json`，
+   补齐「续写恢复后判 completed」run 的 DB 归因面）。禁止引入 delta 事件。
 
 ### 方案 B（不推荐）：文本层 continuation
 
@@ -198,21 +216,31 @@ Anthropic 路径已有按档位的 `thinkingBudgets`；OpenAI 兼容路径只有
 
 ## 5. 需要 owner 决策的点
 
-1. 续写（方案 A）是否默认开启，还是按节点开关（例如 config 键）启用？
-2. 连续触顶上限 N 取值；续写轮是否计入 `max_turns`？
-3. `output_truncated` 是否加入自动重试集合（`TRANSIENT_RETRY_DETAILS`）？
-   概率性失败重跑可能成功，但每次重跑都是一次完整的大输出成本。
+1. **已定（#865，2026-10-20）**：续写（方案 A）默认开启，无节点开关——相对
+   静默降级是严格改进。
+2. **已定（#865）**：连续触顶上限 N=2（达到即回落现状收尾）；续写轮计入
+   `max_turns` / `max_tokens` / 墙钟预算，不另开额度。
+3. **已定（#865）**：`output_truncated` 暂不加入自动重试集合
+   （`TRANSIENT_RETRY_DETAILS`）——概率性失败重跑可能成功，但每次重跑都是
+   一次完整的大输出成本；续写落地后重跑收益进一步下降。
 4. `max_output_tokens` 是否迁到 `execution.*` 由 ExecutionContract 管辖，并在
-   Studio 执行面板显式展示（目前经 config_schema 声明）？
+   Studio 执行面板显式展示（目前经 config_schema 声明）？**待定**。
 5. pi runtime 无对应 flag：是继续静默忽略，还是在 dispatch 时对 pi 节点配置
-   该键给出告警？
+   该键给出告警？**待定**。
 
 ## Quality Impact
 
 - 正确性：归因只在「触顶 + 声明产物缺失」时改写失败原因，不改变任何 run 的
-  成败判定；新参数未配置时 velites 请求体与 argv 均与改动前逐字节一致。
-- 可观测性：失败原因、失败分类、job 日志三处都能直接看出是触顶。
+  成败判定；新参数未配置时 velites 请求体与 argv 均与改动前逐字节一致。#865
+  续写只改写发往模型的历史副本（session 镜像与事件流保留原始截断消息），
+  不改归因规则；续写轮占用既有预算，连续触顶达上限即回落原收尾路径。
+- 可观测性：失败原因、失败分类、job 日志三处都能直接看出是触顶；#865 另加
+  stderr 逐次留痕（turn + 输出 token 数）与 result metadata
+  `output_truncation {count, last_stop}`（Host 落 outcome_json）。
 - 测试：Python 侧覆盖 argv 映射、事件扫描计数、按上方决策表逐行参数化的归因
-  分支、失败分类与日志渲染；Rust 侧 CLI 解析与 OpenAI 请求体
-  单测依赖 CI（开发机无 cargo）。
-- 风险：旧 velites 二进制不认识新 flag，仅影响显式声明该键的节点。
+  分支、失败分类与日志渲染、metadata 上报与 Host 白名单解析；Rust 侧覆盖 CLI
+  解析、OpenAI 请求体、续写轮的上下文清理/注入/上限/预算记账
+  （tests/agent_loop.rs）与真实二进制 + stub fixture 的端到端触顶形态
+  （tests/truncation_continuation.rs）。
+- 风险：旧 velites 二进制不认识 `--max-output-tokens` flag，仅影响显式声明该键
+  的节点；续写行为变化随下一次 velites 落版发布（release 时 bump 版本号）。

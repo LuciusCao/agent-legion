@@ -138,6 +138,69 @@ def test_agent_stderr_tail_absent_defaults_empty() -> None:
 
 
 @_parse_only
+def test_output_truncation_facts_land_in_record() -> None:
+    """#865：Worker 事件扫描的触顶事实 {count, last_stop} 进 record
+    （outcome_json 落 DB 的归因面）；AgentOutcome 不加字段（record-only，
+    与 output_artifacts_in_archive 标记同纪律）。"""
+    payload = json.dumps(
+        {
+            "status": "completed",
+            "exit_code": 0,
+            "command": [],
+            "output_artifacts": {},
+            "output_truncation": {"count": 2, "last_stop": "stop"},
+        }
+    )
+    _, record = parse_result_metadata(payload)
+    assert record["output_truncation"] == {"count": 2, "last_stop": "stop"}
+
+
+@_parse_only
+def test_output_truncation_absent_and_defensive_shapes() -> None:
+    """旧 Worker 不带该键（None）；异形态不 400：非 dict 丢弃、count 非
+    非负 int 归零、last_stop 非 str 归 None、超长截断。"""
+    _, record = parse_result_metadata(_payload({}))
+    assert record["output_truncation"] is None
+
+    for raw in ("length", 3, ["length"], None):
+        payload = json.dumps(
+            {
+                "status": "completed",
+                "exit_code": 0,
+                "command": [],
+                "output_artifacts": {},
+                "output_truncation": raw,
+            }
+        )
+        _, record = parse_result_metadata(payload)
+        assert record["output_truncation"] is None
+
+    payload = json.dumps(
+        {
+            "status": "completed",
+            "exit_code": 0,
+            "command": [],
+            "output_artifacts": {},
+            "output_truncation": {"count": -1, "last_stop": "x" * 64},
+        }
+    )
+    _, record = parse_result_metadata(payload)
+    assert record["output_truncation"] == {"count": 0, "last_stop": "x" * 32}
+
+    payload = json.dumps(
+        {
+            "status": "completed",
+            "exit_code": 0,
+            "command": [],
+            "output_artifacts": {},
+            "output_truncation": {"count": True, "last_stop": 5},
+        }
+    )
+    _, record = parse_result_metadata(payload)
+    assert record["output_truncation"] == {"count": 0, "last_stop": None}
+
+
+@_parse_only
 def test_artifact_truncation_markers_accepted_absent_defaults() -> None:
     """#748 R2 P2-1：无截断标记的载荷（旧 Worker / 未触发预算）默认
     truncated=False、total=0——与 agent_stderr_tail 的接法一致。"""

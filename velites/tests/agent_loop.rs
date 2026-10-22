@@ -537,3 +537,317 @@ async fn json_lenient_parse_note_reaches_the_next_model_request() {
         other => panic!("expected text content, got {other:?}"),
     }
 }
+
+/// #865 fixture: an assistant reply cut off by the per-call output token
+/// limit (`stopReason=length`) — partial text plus a tool call that the
+/// truncation prevented from ever executing.
+fn truncated_assistant(id: &str) -> Message {
+    let mut message = Message::bare(
+        Role::Assistant,
+        vec![
+            ContentBlock::Text {
+                text: "partial".into(),
+            },
+            ContentBlock::ToolCall {
+                id: id.into(),
+                name: "write".into(),
+                arguments: serde_json::json!({"path": "result.txt", "content": "never ran"}),
+            },
+        ],
+    );
+    message.stop_reason = Some(StopReason::Length);
+    message.usage = Some(Usage {
+        input: 100,
+        output: 9000,
+        cache_read: 0,
+    });
+    message
+}
+
+fn user_text(message: &Message) -> &str {
+    assert_eq!(message.role, Role::User);
+    match &message.content[0] {
+        ContentBlock::Text { text } => text,
+        other => panic!("expected text block, got {other:?}"),
+    }
+}
+
+/// #865: a length-truncated reply is not a normal stop — the loop strips the
+/// un-executed tool call from the model-facing history, injects a
+/// continuation notice, and lets the model finish within the same run.
+#[tokio::test]
+async fn length_truncation_continues_and_completes_with_outputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = base_config(dir.path().canonicalize().unwrap());
+    config.tools = vec![ToolKind::Write];
+    config.require_output = vec![PathBuf::from("result.txt")];
+    config.session = Some(SessionLog::open(&dir.path().join("session")).unwrap());
+
+    let provider = ScriptedProvider::new(vec![
+        truncated_assistant("call-0-1"),
+        assistant_tool_call(
+            "call-1-0",
+            "write",
+            serde_json::json!({"path": "result.txt", "content": "payload"}),
+        ),
+        assistant_text("done", StopReason::Stop),
+    ]);
+    let mut sink = MemorySink::default();
+
+    let code = run(config, &provider, &mut sink).await.unwrap();
+    assert_eq!(code, 0);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("result.txt")).unwrap(),
+        "payload"
+    );
+    // Initial turn + continuation turn (which runs the write) + final stop.
+    assert_eq!(turn_starts(&sink), 3);
+
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 3);
+    // The continuation request must NOT carry the un-executed tool call…
+    let history = &requests[1];
+    assert_eq!(history.len(), 3);
+    let stripped = &history[1];
+    assert_eq!(stripped.role, Role::Assistant);
+    assert!(
+        !stripped
+            .content
+            .iter()
+            .any(|block| matches!(block, ContentBlock::ToolCall { .. })),
+        "un-executed tool calls must be stripped from the model-facing history"
+    );
+    assert!(stripped
+        .content
+        .iter()
+        .any(|block| matches!(block, ContentBlock::Text { text } if text == "partial")));
+    // …and must end with the continuation notice.
+    let notice = user_text(&history[2]);
+    assert!(notice.contains("NOT executed"), "got: {notice}");
+    assert!(notice.contains("smaller chunks"), "got: {notice}");
+
+    // The event stream keeps the ORIGINAL truncated message (tool call
+    // included) — the rewrite only touches the model-facing history copy.
+    let length_ends: Vec<&MessageEndEvent> = sink
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            Event::MessageEnd(event) if event.message.stop_reason == Some(StopReason::Length) => {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(length_ends.len(), 1);
+    assert!(length_ends[0]
+        .message
+        .content
+        .iter()
+        .any(|block| matches!(block, ContentBlock::ToolCall { .. })));
+
+    // The session mirror also keeps the original message; the injected
+    // continuation notice is appended as a new user message.
+    let messages = session_messages(dir.path());
+    assert_eq!(messages.len(), 6);
+    assert!(messages[1]
+        .content
+        .iter()
+        .any(|block| matches!(block, ContentBlock::ToolCall { .. })));
+    assert_eq!(messages[2].role, Role::User);
+
+    // A completed-after-continuation run ends with no agent_end reason and an
+    // empty validation missing list.
+    match sink.events.last().unwrap() {
+        Event::AgentEnd(event) => {
+            assert_eq!(event.error, None);
+            assert_eq!(event.reason, None);
+        }
+        other => panic!("expected agent_end event, got {other:?}"),
+    }
+}
+
+/// #865: the second CONSECUTIVE truncation reaches the cap — no further
+/// continuation; the run falls back to the pre-#865 ending (one outputs
+/// remediation turn, then the failed exit when artifacts stay missing).
+#[tokio::test]
+async fn consecutive_truncations_fall_back_to_remediation_at_the_cap() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = base_config(dir.path().canonicalize().unwrap());
+    config.tools = vec![ToolKind::Write];
+    config.require_output = vec![PathBuf::from("result.txt")];
+    config.session = Some(SessionLog::open(&dir.path().join("session")).unwrap());
+
+    let provider = ScriptedProvider::new(vec![
+        truncated_assistant("call-0-1"),
+        truncated_assistant("call-1-1"),
+        // The remediation turn finishes normally but writes nothing.
+        assistant_text("still nothing", StopReason::Stop),
+    ]);
+    let mut sink = MemorySink::default();
+
+    let code = run(config, &provider, &mut sink).await.unwrap();
+    assert_eq!(code, EXIT_MISSING_OUTPUTS);
+    // Initial turn + ONE continuation turn + ONE remediation turn.
+    assert_eq!(turn_starts(&sink), 3);
+
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 3);
+    // Turn 2 was the continuation turn.
+    assert!(user_text(requests[1].last().unwrap()).contains("NOT executed"));
+    // Turn 3 was the remediation turn (the pre-#865 ending).
+    let remediation = user_text(requests[2].last().unwrap());
+    assert!(remediation.contains("SYSTEM NOTICE"), "got: {remediation}");
+    assert!(remediation.contains("result.txt"), "got: {remediation}");
+    // Sanitizing is not continuation-only: the cap-path truncation is also
+    // stripped from the remediation request's history (both truncated
+    // replies carry an un-executed tool call).
+    assert!(
+        requests[2]
+            .iter()
+            .filter(|message| message.role == Role::Assistant)
+            .all(|message| !message
+                .content
+                .iter()
+                .any(|block| matches!(block, ContentBlock::ToolCall { .. }))),
+        "truncated replies must be sanitized on the fallback path too"
+    );
+
+    let validations: Vec<&OutputsValidationEvent> = sink
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            Event::OutputsValidation(event) => Some(event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(validations.len(), 1);
+    assert_eq!(validations[0].missing, vec!["result.txt"]);
+}
+
+/// #865: continuation turns get no extra budget — once the turn budget is
+/// exhausted the continuation converges into the single budget wrap-up turn.
+#[tokio::test]
+async fn continuation_turn_counts_into_the_turn_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = base_config(dir.path().canonicalize().unwrap());
+    config.tools = vec![ToolKind::Write];
+    config.budget = Budget::new(Some(1), None, Duration::from_secs(3600));
+
+    let provider = ScriptedProvider::new(vec![
+        truncated_assistant("call-0-1"),
+        assistant_text("wrapping up", StopReason::Stop),
+    ]);
+    let mut sink = MemorySink::default();
+
+    let code = run(config, &provider, &mut sink).await.unwrap();
+    assert_eq!(code, 0);
+    // Turn 1 truncated; the continuation converged into the wrap-up turn
+    // (turn 2) instead of buying a free extra turn.
+    assert_eq!(turn_starts(&sink), 2);
+    match sink.events.last().unwrap() {
+        Event::AgentEnd(event) => assert_eq!(event.reason, Some(EndReason::BudgetExceeded)),
+        other => panic!("expected agent_end event, got {other:?}"),
+    }
+
+    // The wrap-up request carries BOTH notices: continuation first, then the
+    // budget wrap-up injected at the top of the same iteration.
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 2);
+    let history = &requests[1];
+    assert_eq!(history.len(), 4);
+    assert!(user_text(&history[2]).contains("NOT executed"));
+    assert!(user_text(&history[3]).contains("--max-turns"));
+}
+
+/// #865 review P2: the consecutive-truncation streak RESETS on any non-length
+/// stop — `length → toolUse (reset) → length` must earn a fresh continuation
+/// turn (mutation target: `track_stop` never resetting would push the second
+/// truncation straight to the cap and skip the continuation).
+#[tokio::test]
+async fn non_length_stop_resets_the_consecutive_truncation_streak() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = base_config(dir.path().canonicalize().unwrap());
+    config.tools = vec![ToolKind::Write];
+    config.session = Some(SessionLog::open(&dir.path().join("session")).unwrap());
+
+    let provider = ScriptedProvider::new(vec![
+        truncated_assistant("call-0-1"),
+        assistant_tool_call(
+            "call-1-0",
+            "write",
+            serde_json::json!({"path": "out.txt", "content": "payload"}),
+        ),
+        truncated_assistant("call-2-1"),
+        assistant_text("done", StopReason::Stop),
+    ]);
+    let mut sink = MemorySink::default();
+
+    let code = run(config, &provider, &mut sink).await.unwrap();
+    assert_eq!(code, 0);
+    // length → continuation turn (toolUse, streak reset) → length →
+    // continuation turn (stop): FOUR turns, TWO continuation notices.
+    assert_eq!(turn_starts(&sink), 4);
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 4);
+    assert!(user_text(requests[1].last().unwrap()).contains("NOT executed"));
+    assert!(
+        user_text(requests[3].last().unwrap()).contains("NOT executed"),
+        "the truncation after the reset must earn a fresh continuation turn"
+    );
+    let continuations = session_messages(dir.path())
+        .iter()
+        .filter(|message| {
+            message.role == Role::User
+                && matches!(&message.content[0], ContentBlock::Text { text } if text.contains("NOT executed"))
+        })
+        .count();
+    assert_eq!(continuations, 2);
+}
+
+/// #865 review P2: the continuation arm's `wrap_up.is_none()` guard — a
+/// REMEDIATION turn that truncates must NOT stack a continuation on top of
+/// the wrap-up; the run ends with the outputs validation as before (mutation
+/// target: dropping the guard would inject a continuation and run a third
+/// turn).
+#[tokio::test]
+async fn truncated_remediation_turn_ends_without_stacking_a_continuation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = base_config(dir.path().canonicalize().unwrap());
+    config.tools = vec![ToolKind::Write];
+    config.require_output = vec![PathBuf::from("result.txt")];
+    config.session = Some(SessionLog::open(&dir.path().join("session")).unwrap());
+
+    let provider = ScriptedProvider::new(vec![
+        // Turn 1 stops normally with the artifact missing → remediation turn.
+        assistant_text("done without writing", StopReason::Stop),
+        // Turn 2 (the remediation turn) truncates.
+        truncated_assistant("call-1-1"),
+    ]);
+    let mut sink = MemorySink::default();
+
+    let code = run(config, &provider, &mut sink).await.unwrap();
+    assert_eq!(code, EXIT_MISSING_OUTPUTS);
+    assert_eq!(turn_starts(&sink), 2, "no continuation on a wrap-up turn");
+    let validations: Vec<&OutputsValidationEvent> = sink
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            Event::OutputsValidation(event) => Some(event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(validations.len(), 1);
+    assert_eq!(validations[0].missing, vec!["result.txt"]);
+
+    // The session holds the remediation notice but NO continuation notice.
+    let messages = session_messages(dir.path());
+    assert!(
+        messages.iter().all(|message| {
+            !matches!(&message.content[0], ContentBlock::Text { text } if text.contains("NOT executed"))
+        }),
+        "a wrap-up-turn truncation must not inject a continuation message"
+    );
+    assert!(messages.iter().any(|message| {
+        matches!(&message.content[0], ContentBlock::Text { text } if text.contains("result.txt"))
+    }));
+}
