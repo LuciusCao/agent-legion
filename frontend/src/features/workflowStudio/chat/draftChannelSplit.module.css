@@ -1,0 +1,114 @@
+/* M65 拆卡：「运行配置变更」卡与「Workflow 草稿」卡共用的通道样式
+ * （由 M48 卡内双分组的 WorkflowDraftCardChannels.module.css 演进）。
+ * 两卡壳体沿用草稿卡蓝底家族（.draftCard），通道身份由标题图标色 + 小
+ * 徽标表达，不用整片色块（M48 r2 视觉纪律）。 */
+
+/* 运行配置卡标题色调（#0b6b53 在 #e3f2fd 卡底上实测对比度约 5.9:1，过
+ * WCAG AA 4.5:1；与运行通道专区同一色系）。 */
+.titleRuntime {
+  color: #0b6b53;
+}
+.iconRuntime {
+  color: #0b6b53;
+}
+
+.badge {
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 10px;
+  padding: 1px 8px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.badgeRuntime {
+  background: #eef7f3;
+  color: #0b6b53;
+  border: 1px solid #bfe3d4;
+}
+.badgeStructure {
+  background: #eceff1;
+  color: #546e7a;
+}
+
+/* 卡内白色内容区（沿用 M48 组的白底容器语言）。 */
+.body {
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+}
+.diffRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  padding: 2px 0;
+  color: #455a64;
+}
+.diffField {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #1a1c1e;
+  word-break: break-all;
+}
+.diffValue {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #1a1c1e;
+  font-weight: 600;
+  word-break: break-all;
+}
+/* 落定态：建议原文灰色备查（已并入生效配置，不再是待办 diff）。 */
+.diffRowSettled {
+  color: #687078;
+}
+.diffRowSettled .diffField,
+.diffRowSettled .diffValue {
+  color: #687078;
+  font-weight: 400;
+}
+.hint {
+  font-size: 11px;
+  color: #455a64;
+  margin: 6px 0 2px;
+  line-height: 1.5;
+}
+.hintSettled {
+  color: #0b6b53;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.hintSettled svg {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+/* 发布请求挂起引导条（结构卡内）：复核框只含结构、runtime 卡无需先处理。 */
+.pendingBanner {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  background: #fff;
+  border: 1px solid #bbdefb;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #1a1c1e;
+}
+.pendingBanner svg {
+  font-size: 16px;
+  color: #1976d2;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+.pendingBanner b {
+  font-weight: 600;
+}
+
+/* 「版本历史」按钮内的小图标（与按钮文本基线对齐）。 */
+.historyIcon {
+  font-size: 14px;
+  vertical-align: -2px;
+  margin-right: 3px;
+}

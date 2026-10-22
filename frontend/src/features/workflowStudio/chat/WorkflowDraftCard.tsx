@@ -1,19 +1,10 @@
-import { useState } from 'react'
-import {
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-} from '@mui/material'
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined'
-import { compareWorkflowDraft } from '../../../api/workflowDraftCompare'
-import { buildChangeSummary } from '../validation/workflowStudioChanges'
-import type { CompareResponse } from '../shared/useWorkflowDraftCompare.types'
-import { WorkflowChangeSummaryPanel } from '../validation/WorkflowChangeSummaryPanel'
 import { useStudioStateOptional } from '../shared/studioStateContext'
 import { StudioDraftCardHeader } from './StudioDraftCardHeader'
-import { WorkflowDraftCardChannelGroups } from './WorkflowDraftCardChannels'
+import { computeDraftChannels, runtimeCardKey } from './draftChannelSplit'
+import { useRuntimeCardSettlement } from './runtimeCardSettlement'
+import { useWorkflowDraftDiffDialog } from './WorkflowDraftDiffDialog'
+import { WorkflowStructureCard } from './WorkflowStructureCard'
 import {
   WorkflowDraftPublishButton,
   WorkflowDraftStaleHint,
@@ -27,40 +18,40 @@ type WorkflowProps = {
   onApply: (yaml: string) => void
 }
 
+/* M65 拆卡（用户确认原型）：「Workflow 草稿」卡——分发器 + 经典回落形态。
+ * 有 studio 上下文且建议含结构变更时交给 WorkflowStructureCard（只承载结构
+ * 语义）；纯 runtime 建议或运行配置已落定时返回 null（由 RuntimeConfigCard
+ * 承载）；无 studio 上下文（测试直渲染）、建议 YAML 解析失败、或与现状完全
+ * 无差异时回落经典单卡（与 M48 之前形态一致）。 */
 export function WorkflowDraftCard(props: WorkflowProps) {
-  const [diffOpen, setDiffOpen] = useState(false)
-  const [compare, setCompare] = useState<CompareResponse | null>(null)
-  const [compareError, setCompareError] = useState<string | null>(null)
   const studio = useStudioStateOptional()
+  const settlement = useRuntimeCardSettlement(runtimeCardKey(props.draft))
+  const diffDialog = useWorkflowDraftDiffDialog({
+    workspaceId: props.workspaceId,
+    draftYaml: props.draft.yaml,
+  })
+  const channels = computeDraftChannels({
+    proposalYaml: props.draft.yaml,
+    originalYaml: studio?.originalYaml,
+    currentDraftYaml: studio?.draftYaml ?? '',
+  })
 
-  async function openDiff() {
-    setDiffOpen(true)
-    setCompare(null)
-    setCompareError(null)
-    try {
-      setCompare(
-        await compareWorkflowDraft(props.workspaceId, {
-          definition_yaml: props.draft.yaml,
-          // agent 起草场景允许空基线预览（从未发布的 workflow 展示全貌）。
-          allow_missing_baseline: true,
-        })
-      )
-    } catch (error) {
-      setCompareError(error instanceof Error ? error.message : '对比失败')
-    }
+  if (channels && channels.structuralCount > 0) {
+    return (
+      <WorkflowStructureCard
+        draft={props.draft}
+        workspaceId={props.workspaceId}
+        channels={channels}
+        onApply={props.onApply}
+      />
+    )
+  }
+  // 纯 runtime 建议 / 运行配置已落定：本卡让位给 RuntimeConfigCard。
+  if (channels && (channels.runtimeKeys.length > 0 || settlement)) {
+    return null
   }
 
-  const summary = compare ? buildChangeSummary(compare) : null
-  // diff 里的变更节点只有已应用进当前编辑器画布时才可选中定位：草稿未
-  // 「应用到编辑器」时（尤其新增节点）不在 studio.nodes 中，选中会被
-  // useStudioNodeSelection 立即清掉，变成无提示空操作——这些节点不可点，
-  // 并在 dialog 里给一句提示。
-  const canvasNodeKeys = new Set((studio?.nodes ?? []).map((node) => node.key))
-  const hasUnlocatableNodes = Boolean(
-    studio &&
-    summary?.nodeChanges.some((change) => !canvasNodeKeys.has(change.nodeKey))
-  )
-
+  // 经典形态：无 studio 上下文 / 解析失败 / 与现状无差异。
   return (
     <div className={styles.draftCard}>
       <StudioDraftCardHeader icon={AccountTreeOutlinedIcon} tone="workflow">
@@ -70,14 +61,12 @@ export function WorkflowDraftCard(props: WorkflowProps) {
         {props.draft.compareMeta ?? 'agent 产出的定义草稿'}
         {props.draft.validated ? ' · 校验通过' : ' · 未通过校验'}
       </div>
-      {/* M48：双通道分组（运行配置「应用并生效」/ 结构变更「存为草稿」）——
-          无 studio 上下文或无差异时组件自身返回 null，退化为下方单键应用。 */}
-      <WorkflowDraftCardChannelGroups
-        draftYaml={props.draft.yaml}
-        onApply={props.onApply}
-      />
       <div className={styles.draftActions}>
-        <button type="button" className={styles.draftButton} onClick={openDiff}>
+        <button
+          type="button"
+          className={styles.draftButton}
+          onClick={diffDialog.openDialog}
+        >
           查看 diff
         </button>
         <button
@@ -93,47 +82,7 @@ export function WorkflowDraftCard(props: WorkflowProps) {
         draftYaml={props.draft.yaml}
         draftHash={props.draft.draftHash}
       />
-      <Dialog
-        open={diffOpen}
-        onClose={() => setDiffOpen(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>草稿与 active revision 的差异</DialogTitle>
-        <DialogContent dividers>
-          {compareError && <p>{compareError}</p>}
-          {!compareError && (
-            <>
-              <WorkflowChangeSummaryPanel
-                summary={summary}
-                loading={compare === null}
-                errors={compare?.errors ?? null}
-                onSelectNode={
-                  studio
-                    ? (nodeKey) => {
-                        if (!canvasNodeKeys.has(nodeKey)) return
-                        // requestNodeFocus = bump 定位 nonce + 选中：目标已
-                        // 是 selectedNodeKey 时（移动端在 Agent 面板点同一
-                        // 节点）也能触发面板切换与镜头定位。
-                        studio.requestNodeFocus(nodeKey)
-                        setDiffOpen(false)
-                      }
-                    : undefined
-                }
-                isNodeSelectable={(nodeKey) => canvasNodeKeys.has(nodeKey)}
-              />
-              {hasUnlocatableNodes && (
-                <p className={styles.draftHint} role="note">
-                  部分变更节点不在当前编辑器画布中，应用草稿后可定位
-                </p>
-              )}
-            </>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDiffOpen(false)}>关闭</Button>
-        </DialogActions>
-      </Dialog>
+      {diffDialog.dialog}
     </div>
   )
 }
