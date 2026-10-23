@@ -90,6 +90,33 @@ ALTER DATABASE <agent_legion_worktree> OWNER TO agent_legion_dev;
   `clean-worktree.sh` / `drop-worktree-db.sh` refuse names that collide with
   another worktree after normalization (#950) — avoid look-alike worktree
   names.
+- If `clean-worktree.sh` is SIGKILLed between removing the worktree and
+  dropping its databases (or a worktree was removed by hand without cleanup),
+  the stale derived databases survive. `init-worktree.sh` closes the
+  silent-adoption window (#1349): while holding the derived-name lock, a
+  fresh instance (no `.worktree-initialized.ok` marker, `.env` not yet
+  pointing at its own derived database) that finds the derived databases
+  already present refuses to start instead of silently reusing the previous
+  instance's data. "Pointing at its own derived database" is judged by the
+  exact anchored `AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/<db>`
+  line init itself writes — deliberately not a substring match: a base
+  worktree whose derived name is a superstring of this one (e.g. `victim2`
+  vs `victim`) would otherwise make the just-copied `.env` read as
+  "already mine" and reopen the window. The refusal also removes the `.env`
+  copy it just made from the base worktree (it points at the base instance's
+  database/bucket), so the refused instance is left with no marker and no
+  `.env`, still counts as pending-initialization, and the delete guard does
+  not block the remediation: drop the remnant with
+  `scripts/drop-worktree-db.sh <name> --yes` and rerun init; or — after
+  verifying the data really should be inherited — rerun init with
+  `AGENT_LEGION_INIT_ADOPT_EXISTING_DB=1`. (A pre-existing `.env` is never
+  removed.) Legacy instances created before the marker mechanism (no marker,
+  but `.env` already carries their own derived database in that exact
+  form) rerun fine, as do plain idempotent reruns (marker present). When
+  `psql` is unavailable or PostgreSQL is unreachable, the existence probe
+  cannot run; init then keeps its offline-tolerant behavior and only prints
+  a notice that the check was skipped (no database action is possible in
+  that state anyway).
 - Day-to-day superuser connections (such as the OS-user role) can still
   drop anything — the guarantee covers the scripted routine path, not
   deliberate superuser operations.
