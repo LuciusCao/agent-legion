@@ -274,3 +274,21 @@ entries:
     absorbed; the lane's only failure was the rerun-governance step.
   registered_on: 2026-10-09
   deadline: 2026-11-09
+- id: FLAKY-022
+  nodeid: tests/scripts/test_worktree_name_collision.py::test_clean_aborts_when_identical_branch_rebuild_slips_past_porcelain
+  owner: test-infra
+  reason: >-
+    CI load-timing flake (#1387): the test failed its first attempt and
+    passed on the --reruns 1 retry in three consecutive backend-coverage
+    lanes of PR #1319, whose diff (materials family) does not touch the
+    worktree clean/lock path this test exercises, so rerun governance
+    (scripts/check_reruns.py) hard-failed on the unregistered nodeid.
+    Registered for rerun absorption to unblock in-flight PRs; hardening
+    (making the branch-rebuild race window deterministic instead of
+    load-dependent) is tracked by #1387.
+  observed: >-
+    PR #1319 backend-coverage lane, three consecutive runs, 2026-10; first
+    attempt failed, retry passed, lane failed only on the rerun-governance
+    step.
+  registered_on: 2026-10-24
+  deadline: 2026-11-23
