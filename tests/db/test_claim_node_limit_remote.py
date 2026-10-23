@@ -437,16 +437,23 @@ def test_node_limit_config_write_takes_code_pool_lock_first(job_db) -> None:
     assert int(row["concurrency_limit"]) == 1
 
 
-def test_batch_prefetches_agent_ws_locks_ascending_before_job_locks(job_db) -> None:
-    """#1378 codex P2：纯 (job 锁键, job_id) 批序下，agent-ws 池锁必须在首个
-    job-mutation 锁之前、按实际 ws 锁键升序统一预取——逐候选交错获取会让
-    候选集不同的两个并发批按相反顺序取 ws 锁（ws 域 AB-BA 复辟）。
+def test_batch_takes_code_pool_lock_before_any_job_mutation(job_db) -> None:
+    """P2-2 + #1378 codex P2：批写事务在首个候选取 job-mutation 锁之前统一取
+    池级锁——code-pool 集中 probe（#1149）+ 全部 agent 候选 workspace 的
+    agent-ws 锁按实际键升序预取。
 
-    夹具：两个 workspace 的 ws 锁键序与其 job 的 job 锁键序相反（ws_hi 的
-    锁键更大、其 job 的锁键更小——纯键序下它先被 promote）；spy 记录全部
-    advisory 锁键到达次序。去掉预取（逐候选获取）时第二个 ws 锁落在首个
-    job-mutation 之后、且次序随 job 键序而非 ws 键序——两条断言同时红。"""
-    ws_lo, ws_hi = "ws-1378-lo", "ws-1378-hi"
+    批序里 agent 候选（不取 code-pool）在前、带 limit 行的 code 候选在后
+    时，逐候选获取会把 code-pool 排到 job-mutation 之后（倒置全局锁序、
+    与「持 code-pool 等 job-mutation」的本地 claim 成环）；同理逐候选取
+    agent-ws 会把 ws 锁交错进纯 (job 锁键, job_id) 的 job 序里——候选集
+    不同的两个并发批可按相反顺序取 ws 锁（ws 域 AB-BA）。集中预取在事务
+    首句恢复层级序。spy 记录全部 advisory 锁键的到达次序作断言；agent 侧
+    用两个 workspace 且 ws 锁键序与 job 锁键序相反（去掉预取则第二把 ws
+    锁落到首个 job-mutation 之后、次序随 job 键序——断言必红）。"""
+    workspace_id, node_key = "ws-1149-p22", "package"
+    # 两个 agent workspace：ws 锁键序与各自 job 的 job 锁键序相反（ws_hi 的
+    # ws 锁键更大、其 job 的锁键更小——纯键序下它先被 promote）。
+    ws_lo, ws_hi = "ws-1149-p22-lo", "ws-1149-p22-hi"
     with psycopg.connect(TEST_DATABASE_URL) as conn:
         key_lo = int(
             conn.execute("select hashtext(%s)::int as k", (f"agent-ws:{ws_lo}",)).fetchone()[0]
@@ -456,10 +463,9 @@ def test_batch_prefetches_agent_ws_locks_ascending_before_job_locks(job_db) -> N
         )
         if key_lo > key_hi:
             ws_lo, ws_hi = ws_hi, ws_lo
-        # 找一对 job id：ws_hi 的 job 锁键 < ws_lo 的 job 锁键（与 ws 键序相反）。
         job_lo = job_hi = ""
         for i in range(200):
-            cand_lo, cand_hi = f"job-1378-lo-{i:03d}", f"job-1378-hi-{i:03d}"
+            cand_lo, cand_hi = f"job-1149-lo-{i:03d}", f"job-1149-hi-{i:03d}"
             job_key_lo = int(
                 conn.execute(
                     "select hashtext('job-mutation:' || %s)::int as k", (cand_lo,)
@@ -476,59 +482,26 @@ def test_batch_prefetches_agent_ws_locks_ascending_before_job_locks(job_db) -> N
     assert job_lo and job_hi, "expected an inverted (ws key, job key) pair within 200 candidates"
     seed_request(job_db, job_id=job_lo, workspace_id=ws_lo)
     seed_request(job_db, job_id=job_hi, workspace_id=ws_hi)
-    _register_code_worker("worker-1378")
-    pool = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
-    selection = select_batch_candidates(pool, "worker-1378", None, None, limit=2)
-    assert len(selection.candidates) == 2
-
-    advisory_keys: list[str] = []
-    with write_transaction(TEST_DATABASE_URL) as conn:
-        real_execute = conn.execute
-
-        def spy(sql: Any, params: Any = None) -> Any:
-            cursor = real_execute(sql, params)
-            if "pg_advisory_xact_lock" in str(sql) and params:
-                advisory_keys.append(str(params[0]))
-            return cursor
-
-        conn.execute = spy  # type: ignore[method-assign]
-        outcome = claim_batch_in_transaction(
-            pool, conn, "worker-1378", None, None, selection=selection
+    # floor 纪律：ws_lo 的 agent 请求先排队（其 ws 锁键较小，先入floor），
+    # ws_hi 的随后被同批 admitted。
+    base = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set queued_at=%s where job_id=%s",
+            (base, job_lo),
         )
-
-    # 领取序按纯 job 锁键（ws_hi 的 job 在前），与 ws 键序相反。
-    assert [claim.job_id for claim in outcome.claims] == [job_hi, job_lo]
-    first_job_mutation = next(
-        (i for i, key in enumerate(advisory_keys) if key.startswith("job-mutation:")), None
-    )
-    assert first_job_mutation is not None
-    # 两把 agent-ws 锁都先于首个 job-mutation，且按实际 ws 锁键升序。
-    ws_domain_lo, ws_domain_hi = f"agent-ws:{ws_lo}", f"agent-ws:{ws_hi}"
-    assert advisory_keys.index(ws_domain_lo) < advisory_keys.index(ws_domain_hi)
-    assert advisory_keys.index(ws_domain_hi) < first_job_mutation
-
-
-def test_batch_takes_code_pool_lock_before_any_job_mutation(job_db) -> None:
-    """P2-2 + #1378 codex P2：批写事务在首个候选取 job-mutation 锁之前统一取
-    池级锁——code-pool 集中 probe（#1149）+ 全部 agent 候选 workspace 的
-    agent-ws 锁按实际键升序预取。
-
-    批序里 agent 候选（不取 code-pool）在前、带 limit 行的 code 候选在后
-    时，逐候选获取会把 code-pool 排到 job-mutation 之后（倒置全局锁序、
-    与「持 code-pool 等 job-mutation」的本地 claim 成环）；同理逐候选取
-    agent-ws 会把 ws 锁交错进纯 (job 锁键, job_id) 的 job 序里——两个跨
-    ws 批在碰撞别名对上仍成环。集中预取在事务首句恢复层级序。spy 记录
-    全部 advisory 锁键的到达次序作断言。"""
-    workspace_id, node_key = "ws-1149-p22", "package"
-    seed_request(job_db, job_id="job-a-agent", workspace_id=workspace_id)
+        conn.execute(
+            "update agent_execution_requests set queued_at=%s where job_id=%s",
+            (base + timedelta(seconds=1), job_hi),
+        )
     _seed_code_job(job_db, workspace_id, "job-z-code", node_key)
     _set_node_limit(job_db, workspace_id, node_key, 1)
     _enqueue_code(job_db, workspace_id, "job-z-code", node_key)
     _register_code_worker("worker-1149-p22")
     pool = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
-    selection = select_batch_candidates(pool, "worker-1149-p22", None, None, limit=2)
-    assert {str(row["kind"]) for row in selection.candidates} == {"agent", "code"}
+    selection = select_batch_candidates(pool, "worker-1149-p22", None, None, limit=3)
+    assert len(selection.candidates) == 3
 
     advisory_keys: list[str] = []
     with write_transaction(TEST_DATABASE_URL) as conn:
@@ -550,7 +523,8 @@ def test_batch_takes_code_pool_lock_before_any_job_mutation(job_db) -> None:
     with psycopg.connect(TEST_DATABASE_URL) as conn:
         rows = conn.execute(
             "select id, hashtext('job-mutation:' || id)::int as jk"
-            " from (values ('job-a-agent'), ('job-z-code')) as t(id)"
+            " from (values (%s), (%s), (%s)) as t(id)",
+            (job_lo, job_hi, "job-z-code"),
         ).fetchall()
     key_by_job = {str(row[0]): (int(row[1]), str(row[0])) for row in rows}
     expected_claim_order = sorted(key_by_job, key=lambda j: key_by_job[j])
@@ -561,10 +535,13 @@ def test_batch_takes_code_pool_lock_before_any_job_mutation(job_db) -> None:
     )
     assert first_job_mutation is not None
     assert advisory_keys.index("code-pool") < first_job_mutation
-    # agent-ws 池锁同样必须在首个 job-mutation 之前（批首预取，#1378）。
-    ws_domain = f"agent-ws:{workspace_id}"
-    assert ws_domain in advisory_keys
-    assert advisory_keys.index(ws_domain) < first_job_mutation
+    # agent-ws 池锁同样在首个 job-mutation 之前（批首预取，#1378），且两把
+    # 锁按实际 ws 锁键升序——与 code-pool 的集中 probe 同族（池锁层级序：
+    # code-pool probe → agent-ws 预取 → job-mutation）。
+    ws_domain_lo, ws_domain_hi = f"agent-ws:{ws_lo}", f"agent-ws:{ws_hi}"
+    assert advisory_keys.index("code-pool") < advisory_keys.index(ws_domain_lo)
+    assert advisory_keys.index(ws_domain_lo) < advisory_keys.index(ws_domain_hi)
+    assert advisory_keys.index(ws_domain_hi) < first_job_mutation
 
 
 # ---------------------------------------------------------------------------
