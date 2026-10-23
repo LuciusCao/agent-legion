@@ -98,3 +98,19 @@ def object_etag_of(job_db, material_id: str) -> str:
         ).fetchone()
     assert row is not None
     return str(row["object_etag"])
+
+
+def legacy_hashless(job_db, service, storage, payload: bytes, *, filename: str = "l.txt") -> str:
+    """一条「v98 前完成」的无 hash ready 行（#1316）：走真实 presign/complete
+    后清空 object_etag，模拟升级前没有内容身份的存量行。"""
+    result = service.presign(WORKSPACE_ID, filename=filename, size_bytes=len(payload))
+    material_id = result["material"]["id"]
+    (key, _) = storage.presigned[-1]
+    storage.objects[key] = payload
+    service.complete(WORKSPACE_ID, material_id)
+    with job_db.connect() as conn:
+        conn.execute(
+            "update materials set object_etag='' where id=%s",
+            (material_id,),
+        )
+    return material_id

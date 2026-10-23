@@ -24,6 +24,7 @@ from server.app.events.bus import InProcessEventBus
 from server.app.executors.sweeper import SweeperThread
 from server.app.http_middleware import add_http_middleware
 from server.app.jobs import JobQueries
+from server.app.lifespan_threads import stop_lifespan_threads
 from server.app.mcp_server.http_app import (
     MCP_MOUNT_PATH,
     StudioMcpRelay,
@@ -34,7 +35,6 @@ from server.app.routes.auth import create_auth_router
 from server.app.routes.job_http_handlers import register_job_http_exception_handlers
 from server.app.routes.quality_deps import build_quality_loop
 from server.app.routes.run_batches import create_run_batches_router
-from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.agent_catalog_projection import AgentCatalogService
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
@@ -42,6 +42,10 @@ from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_batch_operations.wiring import build_background_tasks
 from server.app.services.job_packages import JobPackageService
+from server.app.services.material_legacy_etag_binding import (
+    LegacyMaterialEtagBinderThread,
+    start_legacy_material_etag_binder,
+)
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
@@ -143,6 +147,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
     slow_sweeps: SweeperOwnedThreads | None = None
+    legacy_etag_binder: LegacyMaterialEtagBinderThread | None = None
     # Constructed ahead of BackgroundTasks so the runs-async feeder shares the
     # one MaterialsService instance (#1117 text-item materialization); the
     # app.state assignment below reuses the same object.
@@ -157,7 +162,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal workflow_worker_thread, sweeper_thread, slow_sweeps
+        nonlocal workflow_worker_thread, sweeper_thread, slow_sweeps, legacy_etag_binder
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
         replica_probe.probe()
         # #831/#835 velites 副本指纹对账（软告警）：Host 消费的两个面
@@ -215,6 +220,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                     object_storage,
                     studio_chat_service,
                 )
+            # #1316：存量无 hash 材料的 ETag 一次性绑定。每次启动都起（候选
+            # 来自 DB，重启不丢进度），只看对象存储是否配置——不受
+            # sweeper_enabled / code_capacity / claim 开关门控（#1312 R10 教训）。
+            legacy_etag_binder = start_legacy_material_etag_binder(job_db, object_storage)
         background_tasks.start(app)
         studio_chat_service.reap_zombie_sessions()
         studio_registry = StudioAgentRegistryStore(job_db)
@@ -239,15 +248,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             # Reap chat sessions before closing DB pools: teardown revokes
             # scoped tokens and settles permission waiters via the DB.
             studio_chat_service.shutdown()
-            for thread in (
-                sweeper_thread,
-                *(slow_sweeps or ()),
-            ):
-                if thread is not None:
-                    thread.stop()
-            if workflow_worker_thread is not None:
-                unregister_wakeup(workflow_worker_thread.wake)
-                workflow_worker_thread.stop()
+            stop_lifespan_threads(
+                sweeper_thread, slow_sweeps, legacy_etag_binder, workflow_worker_thread
+            )
             # #591: stop the group-commit writer BEFORE the pools close —
             # stop() drains parked writes to completion, and those writes
             # need a live pool (the same ordering discipline the studio

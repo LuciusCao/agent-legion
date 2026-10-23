@@ -91,10 +91,9 @@ def admit_candidate(
             return None
         # #1279 材料 ETag 门禁（协议 v6）：旧 Worker 忽略 claim 描述符的
         # object_etag、对 presigned GET 无条件下载——complete 后同尺寸覆盖
-        # 的无 hash 材料会被静默喂给节点执行。命中门禁谓词（材料输入含
-        # object_etag 非空且无 hash 的行；hash 行旧 Worker 有 sha256
-        # fail-closed 兜底故豁免，etag='' 无内容身份可验故豁免——谓词论证
-        # 见 jobs/queries/material_claim_gate.py docstring）的候选对旧
+        # 的无 hash 材料会被静默喂给节点执行。命中门禁谓词（无 hash 且
+        # uploading 或 ready∧etag 已绑的行——谓词与逐格论证见
+        # jobs/queries/material_claim_gate.py docstring）的候选对旧
         # Worker 不可领：留队列等升级，不落失败。现行核验（etag 落列于
         # complete，可能在 enqueue 之后）必须现读 DB，不能读冻结 manifest。
         if view.protocol_version < MATERIAL_ETAG_PROTOCOL_VERSION and (

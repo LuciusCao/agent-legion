@@ -645,6 +645,10 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
       处置后才能启动调度。扫描后行被并发改写（材料 API 的修复/重传/删除、TTL 过期、
       另一次重绑）的行按「竞态失败」单列、不改动（同样退出码 1）：确认材料写入已停后重跑即可。
       卷级冷备份（下文）逐字节还原则 ETag 不变，无需重绑（跑了也是全匹配的空转）。
+      `rebind` 只处理已记录 ETag 的行；`object_etag=''` 的存量无 hash 行（v98 前完成，
+      #1316）由第 6 步重新拉起的 Host 在启动时自动按当前 HEAD 绑定（恢复后的对象即
+      权威字节）。不重启 Host 时用 `scripts/bind_legacy_material_etags.py`（dry-run →
+      `--apply`）补跑；未绑定的行保持 size-only 语义，不挂起也不会失败。
 
    **对象存储·卷级冷备份**（§2.2.2 的备份）：停对象存储服务，`RESTORE_INTO` 校验后清空
    整个卷再解包，`THEN_UP` 重新拉起（无论成败）。`RESTORE_INTO` **先完整校验归档再删**：

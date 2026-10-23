@@ -28,7 +28,7 @@ from server.app.agent_broker.artifact_object_block import inject_artifact_object
 from server.app.config_schema import node_safe_settings_config
 from server.app.db.transaction import read_connection
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
-from server.app.services.material_cache import material_claim_block
+from server.app.services.material_claim_descriptors import material_claim_block
 from server.app.services.run_payload import sdk_batch_row
 
 logger = logging.getLogger(__name__)
@@ -143,6 +143,7 @@ def resolve_code_runtime_context(
                 workspace_id,
                 job or {},
                 storage=object_store.storage if object_store is not None else None,
+                # #1316 R12：描述符层按同一行快照复判旧 Worker 门禁。
                 worker_protocol_version=worker_protocol_version,
             ),
         },

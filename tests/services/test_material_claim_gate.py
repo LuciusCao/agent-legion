@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
 from tests.services import materials_testlib
 
@@ -180,3 +182,75 @@ def test_gate_bypass_for_exempt_materials(job_db) -> None:
     _gated_code_job(job_db, object_etag="etag-1", content_hash="a" * 64)
     _register_worker(protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION - 1)
     assert any(c.job_id == "job-gated" for c in _claims(job_db))
+
+
+# --- #1316：存量行绑定后的旧 Worker 准入（经 claim_batch 全链）-----------------
+
+
+def _set_gated_row(job_db, **fields) -> None:
+    assignments = ", ".join(f"{name}={value}" for name, value in fields.items())
+    with job_db.connect() as conn:
+        conn.execute(f"update materials set {assignments} where id='mat-gated'")
+
+
+@pytest.mark.parametrize(
+    ("fields", "old_worker_claims"),
+    [
+        # R12：repair 窗口（uploading）→ 跳过（不领到再 500）。
+        ({"status": "'uploading'", "object_etag": "''"}, False),
+        # failed 维持既有失败语义（领到 → 描述符 not ready → 有界 requeue 后 failed），
+        # 不被旧 Worker 永久跳过。
+        ({"status": "'failed'"}, True),
+    ],
+    ids=["uploading", "failed"],
+)
+def test_old_worker_admission_for_legacy_bound_rows(job_db, fields, old_worker_claims) -> None:
+    _gated_code_job(job_db, object_etag="etag-1")
+    _set_gated_row(job_db, **fields)
+    _register_worker(protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION - 1)
+
+    claimed = any(c.job_id == "job-gated" for c in _claims(job_db))
+
+    assert claimed is old_worker_claims
+    assert _queued(job_db, "job-gated") is (not old_worker_claims)
+
+
+def test_binder_bound_legacy_row_is_gated_permanently(job_db, storage) -> None:
+    """codex r2 P1 全链回归：升级前缓存 A → 活 PUT URL 同尺寸覆盖成 B →
+    binder 绑定 B → 此后**任意时刻**旧 Worker 都领不到（永久门禁，无排空期）。
+
+    旧 Worker（< v6）命中升级前裸 material_id 地址的缓存时不发 GET、不读
+    object_etag/upload_generation，因此「升级前签出的 URL 已全部过期」推不出
+    「旧 Worker 缓存的字节匹配已绑 ETag」——谓词结构性不含时间字段，本测试把
+    行时间推到任意久远之后断言结论不变（配合 mutation 自检：任何把时间豁免
+    加回谓词的改动都会让本测试转红）。
+    """
+    from server.app.services.material_legacy_etag_binding import bind_legacy_material_etags
+
+    _gated_code_job(job_db, object_etag="")  # 存量行形态：无 hash、etag=''
+    key = "test-workspace/x/v2g0/m_mat-gated/g.txt"
+    storage.objects[key] = b"A"  # 升级前的字节 A（旧 Worker 裸 id 缓存的内容）
+
+    # 绑定前（S2）：准入放行——base size-only 语义，旧 Worker 此刻可领并缓存 A。
+    assert not job_db.job_material_inputs_require_etag_protocol("test-workspace", "job-gated")
+
+    # 活 PUT URL 同尺寸覆盖 A→B（PUT 过期拦不住已缓存方），binder 按当前 HEAD 绑 B。
+    storage.objects[key] = b"B"
+    assert bind_legacy_material_etags(job_db, storage).bound == ["mat-gated"]
+
+    _register_worker(protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION - 1)
+    assert not any(c.job_id == "job-gated" for c in _claims(job_db))
+    assert _queued(job_db, "job-gated")
+
+    # 「75min 后」形态：谓词不读任何时间字段，行时间推到 30 天前结论不变。
+    with job_db.connect() as conn:
+        conn.execute(
+            "update materials set created_at = now() - interval '30 days' where id='mat-gated'"
+        )
+    assert not any(c.job_id == "job-gated" for c in _claims(job_db))
+    assert _queued(job_db, "job-gated")
+
+    # 升级到 v6（重新注册同 worker_id）后恢复可领——门禁只拦旧协议。
+    _register_worker()
+    assert any(c.job_id == "job-gated" for c in _claims(job_db))
+    assert not _queued(job_db, "job-gated")

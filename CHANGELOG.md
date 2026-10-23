@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Fixed
 
 - 材料 ETag 恢复重绑（`scripts/rebind_material_etags.py`）的 CAS 从 (object_etag, storage_key) 扩为四钉：再钉扫描时的 `upload_generation` 与 `status`（TTL 过期、complete 失败只翻 status，旧 CAS 拦不住）；CAS 落空单列为「竞态失败」报告、退出码 1（issue #1313）。
+- 存量无 hash 材料的 ETag 身份绑定（issue #1316）：v98 前完成、`object_etag=''` 的无 hash 材料由新 Host 每次启动时的后台线程按当前 HEAD 一次性绑定（不受 sweeper_enabled / code_capacity 等开关影响；失败只报告、行保持 size-only，不挂起不翻 failed；`scripts/bind_legacy_material_etags.py` 可补跑），绑定 CAS 同条 UPDATE 把 `upload_generation` +1，未绑窗口内写入的 `{id}-v2g{gen}` 缓存地址孤儿化；绑定后升级前签出的 PUT URL 的同尺寸覆盖在 Host 与 v6 Worker 上 412 响亮失败；旧 Worker（< v6）对已绑 ETag 的无 hash 材料**永久门禁**（任务保持 queued、不随时间放行——pre-v6 Worker 命中升级前裸 material_id 缓存时不发 GET 也不核验字节，任何排空期都不能证明其缓存与已绑 ETag 相符，codex r2 P1），repair 进行中（uploading）的无 hash 行也对旧 Worker 门禁，claim 描述符按同一行快照复判，关闭准入与描述符组装之间的跨事务窗口。
 
 ## [0.8.1] - 2026-10-22
 

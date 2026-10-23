@@ -36,15 +36,23 @@ Version history:
   would silently consume a same-size overwrite of a hash-less material, so
   the Host's claim admission skips material-gated candidates for them
   (queued, not failed — they become claimable again after the Worker
-  upgrades). Gated = the job's material inputs include a row with
-  ``object_etag <> ''`` and ``content_hash = ''`` (hash rows stay claimable:
-  the old Worker's sha256 recompute is already fail-closed; rows without an
-  etag have nothing to verify against). codex final P1 adds a second,
-  response-descriptor-snapshot re-check at
-  ``material_identity.assert_worker_etag_protocol`` so the repair /
-  failed-retry TOCTOU (admission → complete → new etag) cannot leak either:
-  a pre-v6 claim containing such a row is dropped and requeued after lease
-  expiry instead of being answered with a new ETag.
+  upgrades). Gated = the job's material inputs include a hash-less row that
+  is uploading (repair in flight, #1316 R12) or ready with a bound
+  ``object_etag``. Hash rows stay claimable (the old Worker's sha256
+  recompute is already fail-closed); rows without an etag have nothing to
+  verify against; failed/expired rows keep their failure path. Rows bound
+  by the #1316 legacy binder are gated for pre-v6 Workers **permanently**
+  like any other bound row — a pre-v6 Worker can hold a pre-upgrade cache
+  at the bare material_id address and never re-GETs, so no elapsed time
+  can prove its cached bytes match the bound ETag (codex r2 P1: the
+  original 75-minute drain window was removed). The predicate lives in
+  server/app/jobs/queries/material_claim_gate.py and is re-checked on the
+  claim descriptor's own row snapshot
+  (``material_claim_descriptors.assert_worker_may_consume``, #1316 R12 —
+  the same snapshot re-check codex final P1 (#1279) required) so the
+  repair / failed-retry TOCTOU (admission → complete → new etag) cannot
+  leak either: a pre-v6 claim containing such a row is dropped and
+  requeued after lease expiry instead of being answered with a new ETag.
 
 Field-level deprecations ride without a version bump while the wire shape is
 unchanged; a deprecated field's removal rides without one too once no

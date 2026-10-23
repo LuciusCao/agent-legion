@@ -189,9 +189,14 @@ mixed-fleet compatibility and upgrade order.
   consumption-side verification (#1279): v6 Workers attach If-Match (the
   claim descriptor's `object_etag`) to material downloads, and the Host's
   claim admission **skips** material-gated candidates for older Workers —
-  a gated job (its material inputs include a row with `object_etag <> ''`
-  and no `content_hash`) stays queued until every Worker that could claim
-  it runs v6; hash rows stay claimable (the old Worker's sha256 recompute
+  a gated job (its material inputs include a hash-less row that is ready
+  with a bound `object_etag`, or uploading during a repair) stays queued
+  until a v6 Worker (or the Host) takes it; pre-upgrade rows bound by the
+  #1316 legacy binder are gated for old Workers **permanently** (a pre-v6
+  Worker can hold a pre-upgrade cache at the bare material_id address and
+  never re-GETs, so no elapsed time can prove its cached bytes match the
+  bound ETag — codex r2 P1; same semantics as complete-bound rows since
+  0.8.0); hash rows stay claimable (the old Worker's sha256 recompute
   is already fail-closed). The single execution endpoint is
   unchanged and still serves older Workers. Code capacity only requires
   protocol ≥ v2. Rolling-upgrade note: after the Host upgrade, pre-v6
