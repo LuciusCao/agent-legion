@@ -173,29 +173,48 @@ run_tests() {
       # back to the plain unit tier. Never a gate pass: full suite stays the
       # pre-push/CI boundary.
       aff_args=()
+      aff_skip=0
       if command -v git >/dev/null 2>&1 && [[ -f "$ROOT_DIR/.pytest-aff-index.json" ]]; then
         base_ref="$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD origin/main 2>/dev/null || true)"
         selected=""
         selection_status=0
+        # stderr stays attached to the lane log: the selector's diagnostics
+        # (no-index, unmapped files, the postgres blind-spot hint, #1307)
+        # are exactly what a misleading aff result needs next to it.
         selected="$(UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.pytest_aff_selection select \
-          ${base_ref:+--base "$base_ref"} 2>/dev/null)" || selection_status=$?
+          ${base_ref:+--base "$base_ref"})" || selection_status=$?
         # Exit 4 = a changed source file is missing from the index (stale
         # index or a --cov blind spot): the affected tests are unknown, so
         # run the full unit tier rather than a silently incomplete subset.
         if [[ "$selection_status" -eq 4 ]]; then
           echo "=== Python Unit Tests (aff fallback: changed source files missing from the index) ==="
-        elif [[ -n "$selected" ]] && [[ "$(printf '%s\n' "$selected" | wc -l)" -lt 400 ]]; then
-          echo "=== Python Affected Tests (selected $(printf '%s' "$selected" | wc -l | tr -d ' ') of unit tier) ==="
+        elif [[ "$selection_status" -eq 0 && -z "$selected" ]]; then
+          # Empty selection (#1307/#304): the change set has no unit-tier
+          # tests to run (postgres-tier-only edits, tests/full or tests/ci
+          # files, docs/registries). Skip explicitly instead of letting an
+          # empty pytest invocation fail with exit 5 or paying a full
+          # unit-tier fallback for nothing. Selection is a superset of the
+          # affected unit tests, so empty means "nothing affected", never
+          # "unknown" (unknown source files took the exit-4 fallback).
+          aff_skip=1
+        elif [[ -n "$selected" ]] && [[ "$(printf '%s\n' "$selected" | wc -l | tr -d ' ')" -lt 400 ]]; then
+          echo "=== Python Affected Tests (selected $(printf '%s\n' "$selected" | wc -l | tr -d ' ') of unit tier) ==="
           while IFS= read -r nodeid; do
             aff_args+=("$nodeid")
           done <<<"$selected"
+        elif [[ -n "$selected" ]]; then
+          echo "=== Python Unit Tests (aff fallback: selection too broad) ==="
         else
-          echo "=== Python Unit Tests (aff fallback: no index or selection too broad) ==="
+          echo "=== Python Unit Tests (aff fallback: selection unavailable, status $selection_status) ==="
         fi
       else
         echo "=== Python Unit Tests (aff fallback: no .pytest-aff-index.json; prime it with GATE_TIER=aff-index) ==="
       fi
-      if [[ ${#aff_args[@]} -gt 0 ]]; then
+      if [[ "$aff_skip" -eq 1 ]]; then
+        echo "=== aff: no affected unit-tier tests for this change set; skipping the backend test run ==="
+        echo "    (postgres-tier changes are covered by GATE_TIER=postgres ./scripts/check-quick-backend.sh and CI backend-postgres-*)"
+      elif [[ ${#aff_args[@]} -gt 0 ]]; then
+        aff_status=0
         AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
           UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
           --ignore=tests/full \
@@ -204,7 +223,18 @@ run_tests() {
           -n "$workers" --dist worksteal \
           --reruns 1 \
           --reruns-delay 2 \
-          "${aff_args[@]}"
+          "${aff_args[@]}" || aff_status=$?
+        if [[ "$aff_status" -eq 5 ]]; then
+          # pytest exit 5 = no tests collected: every selected nodeid was
+          # deselected by `-m "not postgres"` — a postgres-marked file the
+          # manifest does not list (fixture-based classification). A
+          # legitimate empty run, not a failure (#1307/#304; M55 hit this
+          # on tests/routes/test_studio_agent_scope.py).
+          echo "=== aff: all selected tests belong to the postgres tier; nothing ran in the unit tier ==="
+          echo "    (cover them with GATE_TIER=postgres ./scripts/check-quick-backend.sh or CI backend-postgres-*)"
+        elif [[ "$aff_status" -ne 0 ]]; then
+          return "$aff_status"
+        fi
       else
         AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
           UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \

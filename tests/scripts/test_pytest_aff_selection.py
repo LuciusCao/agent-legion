@@ -16,6 +16,7 @@ import pytest
 
 from scripts.pytest_aff_selection import (
     build_index_from_coverage,
+    postgres_manifest_files,
     select_affected_tests,
     unmapped_source_files,
 )
@@ -274,3 +275,55 @@ def test_unmapped_source_files_flags_deleted_test_helpers(tmp_path):
     )
 
     assert unmapped == ["tests/helpers/seed.py"]
+
+
+def _write_postgres_manifest(root: pathlib.Path, files: list[str]) -> None:
+    manifest = root / "config" / "architecture" / "postgres-test-files.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    import json
+
+    manifest.write_text(json.dumps({"version": 1, "files": files}), encoding="utf-8")
+
+
+def test_postgres_manifest_files_reads_the_manifest(tmp_path):
+    _write_postgres_manifest(tmp_path, ["tests/db/test_jobs.py"])
+
+    assert postgres_manifest_files(tmp_path) == frozenset({"tests/db/test_jobs.py"})
+    # Missing or malformed manifest degrades to "no knowledge" — the gate's
+    # exit-5 tolerance then carries the postgres-only case alone.
+    assert postgres_manifest_files(tmp_path / "absent") == frozenset()
+    _write_postgres_manifest(tmp_path / "broken", [])
+    (tmp_path / "broken" / "config" / "architecture" / "postgres-test-files.json").write_text(
+        "not json", encoding="utf-8"
+    )
+    assert postgres_manifest_files(tmp_path / "broken") == frozenset()
+
+
+def test_select_affected_tests_never_passes_through_postgres_manifest_files(tmp_path):
+    """#1307/#304: a changed fully postgres-marked file must not become a
+    nodeid — under `-m "not postgres"` it collects zero tests and pytest
+    exits 5, which the gate used to count as a failure (M18/M55)."""
+    _write_postgres_manifest(tmp_path, ["tests/db/test_jobs.py"])
+    pg_file = tmp_path / "tests" / "db" / "test_jobs.py"
+    pg_file.parent.mkdir(parents=True)
+    pg_file.write_text("def test_a():\n    pass\n", encoding="utf-8")
+    unit_file = tmp_path / "tests" / "test_unit.py"
+    unit_file.write_text("def test_b():\n    pass\n", encoding="utf-8")
+
+    selected = select_affected_tests(
+        ["tests/db/test_jobs.py", "tests/test_unit.py"], {}, repo_root=tmp_path
+    )
+
+    assert selected == ["tests/test_unit.py"]
+
+
+def test_select_affected_tests_postgres_only_change_selects_nothing(tmp_path):
+    """The #304 shape: a change touching only postgres-tier test files yields
+    an empty selection, which the gate skips explicitly instead of failing
+    on pytest exit 5."""
+    _write_postgres_manifest(tmp_path, ["tests/db/test_jobs.py"])
+    pg_file = tmp_path / "tests" / "db" / "test_jobs.py"
+    pg_file.parent.mkdir(parents=True)
+    pg_file.write_text("def test_a():\n    pass\n", encoding="utf-8")
+
+    assert select_affected_tests(["tests/db/test_jobs.py"], {}, repo_root=tmp_path) == []

@@ -8,6 +8,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -653,3 +655,30 @@ def test_rust_lane_workers_env_override_wins(tmp_path: Path) -> None:
 
     assert re.search(r"cargo:clippy .* -j 3 ", calls)
     assert "cargo:test --locked -j 3" in calls
+
+
+# #1307 pipe 族：gate 输出被调用方裸 pipe（`| tail`/`| head`）时管道只回传
+# 末段命令的退出码，真实结论会丢。脚本侧的纪律是内部统一 pipefail（管道不吞
+# 任一环节的失败）+ lane 输出落盘（本文件的 SIGPIPE 测试族已 pin），失败结论
+# 同时写 stderr（test_quick_gate_reports_each_lane_status 已 pin）。gate-jobs.sh
+# 与 gate-queue.sh 是被 source 的库、不自带 set 选项，由调用方的 pipefail 覆盖。
+_GATE_PIPEFAIL_SCRIPTS = (
+    "check-quick.sh",
+    "check-quick-backend.sh",
+    "check-quick-frontend.sh",
+    "check.sh",
+    "check-ci.sh",
+    "check-fast.sh",
+    "run-local-gate.sh",
+)
+
+
+@pytest.mark.parametrize("script_name", _GATE_PIPEFAIL_SCRIPTS)
+def test_gate_scripts_set_euo_pipefail(script_name: str) -> None:
+    # check-quick-backend.sh leads with a comment block (the --frozen
+    # rationale, #526) before its `set` line — scan a generous header window.
+    head = (PROJECT_ROOT / "scripts" / script_name).read_text(encoding="utf-8").splitlines()[:12]
+    assert any(line.strip() == "set -euo pipefail" for line in head), (
+        f"{script_name} lost its pipefail header: an internal pipeline would "
+        "again be able to swallow a failing stage's exit code (#1307)"
+    )
