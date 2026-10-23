@@ -241,7 +241,7 @@
     "frontend/src/components/job/UpgradeModeSelector.tsx": 40,
     "frontend/src/components/job/useBatchRerunPreview.ts": 53,
     "frontend/src/components/jobActionEligibility.ts": 49,
-    "frontend/src/components/jobProgressHelpers.ts": 48,
+    "frontend/src/components/jobProgressHelpers.ts": 44,
     "frontend/src/components/materialIconRegistry.ts": 168,
     "frontend/src/components/preview/ArtifactPreviewCard.module.css": 57,
     "frontend/src/components/preview/ArtifactPreviewCard.tsx": 44,

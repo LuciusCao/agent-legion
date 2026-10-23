@@ -81,10 +81,7 @@ function isolatedGridPositions(
 
 export function computeLayout(
   nodes: DagGraphNode[],
-  edges: DagGraphEdge[],
-  normalizeExecutorKind: (
-    kind?: DagGraphNode['executorKind']
-  ) => DagNodeData['executorKind']
+  edges: DagGraphEdge[]
 ): { rfNodes: Node<DagNodeData>[] } {
   const g = new dagre.graphlib.Graph()
   g.setGraph({ rankdir: 'LR', nodesep: 60, ranksep: 100 })
@@ -153,8 +150,8 @@ export function computeLayout(
         label: node.label,
         status: node.status,
         duration: node.duration,
-        executorKind: normalizeExecutorKind(node.executorKind),
-        executorId: node.executorId ?? null,
+        executionType: node.executionType ?? null,
+        executionRuntime: node.executionRuntime ?? null,
         agentId: node.agentId ?? null,
         workerId: node.workerId ?? null,
         nodeKey: node.capability ? node.key : undefined,

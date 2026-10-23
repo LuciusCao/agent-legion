@@ -1,6 +1,6 @@
 /* #423 review P2：动态徽标独立治理。terminalTag/workerTag 的内容来自用户
    工作流/运行时（terminal.outcome 后端只校验非空字符串、排队中尚未分配
-   Worker 时显示的 agentId 任意长），与固定短徽标（executorKind 枚举、「缺
+   Worker 时显示的 agentId 任意长），与固定短徽标（executionType 枚举、「缺
    执行配置」「未绑定」文案，在 DagNode.module.css 里 flex-shrink: 0）不同：
    不可收缩会把 .header 里的 .label 压到接近零宽或直接伸出 280px 卡片（卡片
    宽度与 dagre NODE_WIDTH 同步），在合法工作流上仍造成文字裁剪甚至节点重

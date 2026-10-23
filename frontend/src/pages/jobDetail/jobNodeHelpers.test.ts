@@ -120,26 +120,40 @@ describe('toNodeCatalog', () => {
 })
 
 describe('toDagNodes', () => {
-  it('maps logical Agent and physical Worker separately onto dag nodes', () => {
+  it('maps agent nodes to the agent execution type and keeps Worker identity separately', () => {
+    // #1180：agent 节点的契约投影是 executor_kind=None + agent_id 非空
+    // （job_node_agent_projection），类型徽标显示 agent。
     const nodes = toDagNodes([
       makeNode('generate', 'running', {
-        executor_kind: 'pi',
         agent_id: 'key-info-generator',
         worker_id: 'worker-abc123',
       }),
     ])
 
-    expect(nodes[0].executorKind).toBe('pi')
+    expect(nodes[0].executionType).toBe('agent')
     expect(nodes[0].agentId).toBe('key-info-generator')
-    expect(nodes[0].executorId).toBeNull()
     expect(nodes[0].workerId).toBe('worker-abc123')
   })
 
-  it('defaults executor ids to null when absent', () => {
+  it('maps code-pool nodes to the code execution type (#1180)', () => {
+    // executor_id 的 'code' 池键占位不再进入展示层（双「code」徽标的来源）。
+    const nodes = toDagNodes([
+      makeNode('generate', 'pending', {
+        executor_kind: 'code',
+        executor_id: 'code',
+      }),
+    ])
+
+    expect(nodes[0].executionType).toBe('code')
+    expect(nodes[0].agentId).toBeNull()
+    expect(nodes[0].workerId).toBeNull()
+  })
+
+  it('renders no execution type when the projection carries neither kind nor agent', () => {
+    // route_error 节点（#1128）：executor_kind 与 agent_id 皆 None。
     const nodes = toDagNodes([makeNode('generate', 'pending')])
 
-    expect(nodes[0].executorKind).toBeNull()
-    expect(nodes[0].executorId).toBeNull()
+    expect(nodes[0].executionType).toBeNull()
     expect(nodes[0].agentId).toBeNull()
     expect(nodes[0].workerId).toBeNull()
   })

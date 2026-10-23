@@ -49,8 +49,9 @@ const mockNodes: JobNode[] = [
     capability: 'generate',
     inputs: [],
     outputs: [],
-    executor_kind: 'pi',
-    executor_id: 'pi-1',
+    executor_kind: null,
+    executor_id: null,
+    agent_id: 'generate',
   },
 ]
 
@@ -240,7 +241,7 @@ describe('JobProgressPanel', () => {
     expect(screen.getByText('1秒')).toBeInTheDocument()
   })
 
-  it('renders executor kind labels for code and agent nodes', () => {
+  it('renders the executor badge only for code-pool nodes (#731/#1180)', () => {
     renderWithClient(
       <JobProgressPanel
         jobId="j1"
@@ -250,7 +251,10 @@ describe('JobProgressPanel', () => {
       />
     )
     expect(screen.getByText('代码')).toBeInTheDocument()
-    expect(screen.getByText('Pi Agent')).toBeInTheDocument()
+    // agent 节点的契约投影是 executor_kind=None + agent_id
+    // （job_node_agent_projection），时间线不渲染执行器徽标；退役的
+    // 「Pi Agent」词条已摘除。
+    expect(screen.queryByText('Pi Agent')).not.toBeInTheDocument()
   })
 
   it('renders the run skill version when present (#410)', () => {

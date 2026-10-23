@@ -5254,7 +5254,7 @@ export interface components {
       /** Executor Id */
       executor_id?: string | null
       /** Executor Kind */
-      executor_kind?: ('code' | 'pi' | 'openclaw') | null
+      executor_kind?: 'code' | null
       /** Finished At */
       finished_at?: string | null
       hydration_defer?: components['schemas']['HydrationDeferResponse'] | null
@@ -7432,7 +7432,7 @@ export interface components {
       /** Error Message */
       error_message: string
       /** Executor Kind */
-      executor_kind: string | null
+      executor_kind: 'code' | null
       /** Inputs */
       inputs: string[]
       /** Label */

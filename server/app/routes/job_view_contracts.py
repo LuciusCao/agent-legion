@@ -77,7 +77,10 @@ class JobNodeResponse(BaseModel):
     inputs: list[str]
     outputs: list[str]
     executor_id: str | None = None
-    executor_kind: Literal["code", "pi", "openclaw"] | None = None
+    # #731: retired executor vocabulary removed — the runtime projection only
+    # ever produces "code" (implicit code pool) or None (agent nodes,
+    # job_node_agent_projection); pi/openclaw retired with their runtimes (#75).
+    executor_kind: Literal["code"] | None = None
     agent_id: str | None = None
     worker_id: str | None = None
     # PR #1085: the shared route decision (same as dispatch) says this node

@@ -101,7 +101,7 @@
   -webkit-line-clamp: 2;
 }
 
-/* #423 review P2：固定短徽标（executorKind 枚举/警告文案）内容可控，
+/* #423 review P2：固定短徽标（executionType 枚举/警告文案）内容可控，
    flex-shrink: 0 不收缩；terminalTag/workerTag 是动态内容徽标
    （terminal.outcome 只校验非空、排队中 agentId 任意长），整体搬去
    DagNodeBadges.module.css 做可收缩 + max-width + 单行省略——本文件已到
