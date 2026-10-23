@@ -134,3 +134,109 @@ def run(job, job_dir, runtime):
     )
     assert results["f01"].error_message == ""
     assert (job_dir / "f01.json").is_file()
+
+
+def test_parallel_nodes_auth_failure_markers_attributed_to_own_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1355 recipe (#1311 family): two parallel code nodes share one job_dir
+    and BOTH report an auth failure. ``slowa`` reports first and stays alive
+    until ``fastb`` has fully finished — so pre-fix, fastb's pre-run clear
+    deterministically deletes slowa's fixed-name marker (its invalidation is
+    lost) and the post-run consume of the shared name mis-attributes the
+    surviving key. Post-fix each invalidation fires exactly once, keyed to
+    its own connection."""
+    from types import SimpleNamespace
+
+    _sandboxed(monkeypatch)
+    executor = CodeExecutor(repo_root=REPO_ROOT)
+    executor.job_db = SimpleNamespace(dsn_identity="postgresql://fake")
+    calls: list[tuple[str, str]] = []
+    calls_lock = threading.Lock()
+
+    def record(dsn: str) -> SimpleNamespace:
+        def report(key: str) -> None:
+            with calls_lock:
+                calls.append((dsn, key))
+
+        return SimpleNamespace(report_auth_failure=report)
+
+    monkeypatch.setattr(
+        "server.app.executors._code_runtime.ConnectionTokenService",
+        record,
+    )
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+
+    slowa_code = """
+import time
+from pathlib import Path
+
+from workspace_libs.node_sdk import NodeContext
+
+
+def run(job, job_dir, runtime):
+    NodeContext(job, Path(job_dir), runtime).report_auth_failure()
+    deadline = time.monotonic() + 60
+    while not (job_dir / "proceed.flag").exists():
+        if time.monotonic() > deadline:
+            raise RuntimeError("proceed flag never appeared")
+        time.sleep(0.01)
+    Path(job_dir, "slowa.json").write_text("{}", encoding="utf-8")
+"""
+    fastb_code = """
+from pathlib import Path
+
+from workspace_libs.node_sdk import NodeContext
+
+
+def run(job, job_dir, runtime):
+    NodeContext(job, Path(job_dir), runtime).report_auth_failure()
+    Path(job_dir, "fastb.json").write_text("{}", encoding="utf-8")
+"""
+
+    results: dict[str, ExecutionResult] = {}
+    errors: dict[str, BaseException] = {}
+
+    def run_node(node_key: str, code: str, outputs: tuple[str, ...]) -> None:
+        try:
+            results[node_key] = executor.execute(
+                replace(
+                    _context(job_dir, node_key, outputs),
+                    node_code=code,
+                    node_config={"connection": f"conn-{node_key}"},
+                )
+            )
+        except BaseException as exc:  # surfaced below with the node key
+            errors[node_key] = exc
+
+    slowa = threading.Thread(target=run_node, args=("slowa", slowa_code, ("slowa.json",)))
+    slowa.start()
+    # Wait until slowa's marker is on disk (glob matches both the pre-fix
+    # fixed name and the post-fix per-execution name, so this gate stays
+    # valid when mutation-testing the fix away).
+    deadline = time.monotonic() + 60
+    while not list(job_dir.glob(".node_runtime/auth_failure*")):
+        assert time.monotonic() < deadline, "slowa marker never appeared"
+        time.sleep(0.01)
+
+    fastb = threading.Thread(target=run_node, args=("fastb", fastb_code, ("fastb.json",)))
+    fastb.start()
+    fastb.join(timeout=120)
+    assert not fastb.is_alive(), "fastb execution hung"
+    # fastb's full lifecycle (pre-run clear + post-run consume) is now
+    # guaranteed to have happened inside slowa's marker lifetime.
+    (job_dir / "proceed.flag").write_text("", encoding="utf-8")
+    slowa.join(timeout=120)
+    assert not slowa.is_alive(), "slowa execution hung"
+    assert not errors, errors
+
+    assert results["slowa"].status == "completed"
+    assert results["fastb"].status == "completed"
+    # Each node's invalidation keyed to its OWN connection, exactly once —
+    # pre-fix slowa's report is lost (deleted by fastb's clear) and the
+    # shared marker is consumed at most once, so this set never materializes.
+    assert sorted(calls) == [
+        ("postgresql://fake", "conn-fastb"),
+        ("postgresql://fake", "conn-slowa"),
+    ]

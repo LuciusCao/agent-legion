@@ -53,7 +53,25 @@ from workspace_libs.node_artifacts import ArtifactStore
 # ``iterdir()`` listing) never pick it up.
 NODE_RUNTIME_DIR = ".node_runtime"
 AUTH_FAILURE_MARKER = "auth_failure"
+# Legacy fixed name — kept as the fallback for hand-built contexts whose
+# runtime carries no ``execution_id``; production dispatch always sets one.
 AUTH_FAILURE_MARKER_PATH = Path(NODE_RUNTIME_DIR) / AUTH_FAILURE_MARKER
+
+
+def auth_failure_marker_path(execution_id: str) -> Path:
+    """Per-execution marker path (#1355, #1311 family).
+
+    Every code execution of a job shares the job's ``job_dir`` (parallel
+    sibling nodes, and every shard of a node, run concurrently in it), so the
+    fixed name let a neighbour's pre-run clear delete this execution's marker
+    or mis-attribute it at consume time. ``execution_id`` is a per-claim uuid,
+    unique across nodes, shards and retries. Mirrored by
+    ``shared/code_contract.py`` (SDK stays import-self-contained); equality is
+    pinned by tests/workers/test_protocol_sync.py.
+    """
+    if execution_id:
+        return Path(NODE_RUNTIME_DIR) / f"{AUTH_FAILURE_MARKER}-{execution_id}"
+    return AUTH_FAILURE_MARKER_PATH
 
 
 def parse_json_object(value: Any) -> dict[str, Any]:
@@ -204,9 +222,13 @@ class NodeContext:
 
         The node only records the fact (a marker under ``job_dir``); the
         parent executor performs the privileged cache invalidation after the
-        child exits — nodes hold no database handle (design §5.3).
+        child exits — nodes hold no database handle (design §5.3). The marker
+        is namespaced per execution (#1355): parallel code nodes share one
+        ``job_dir``, and a fixed name let a neighbour's clear/consume lose or
+        mis-attribute the report.
         """
-        marker = self._job_dir / AUTH_FAILURE_MARKER_PATH
+        execution_id = str(self._runtime.get("execution_id") or "")
+        marker = self._job_dir / auth_failure_marker_path(execution_id)
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(str(self.config.get("connection") or "").strip(), encoding="utf-8")
 

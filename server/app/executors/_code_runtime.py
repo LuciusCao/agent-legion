@@ -25,7 +25,7 @@ from server.app.executors.models import ExecutionContext
 from server.app.services.connection_tokens import ConnectionTokenService
 from server.app.services.material_cache import prefetch_material_block
 from server.app.services.run_payload import sdk_batch_row
-from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH
+from workspace_libs.node_sdk import auth_failure_marker_path
 
 if TYPE_CHECKING:
     from server.app.executors.code import CodeExecutor
@@ -71,6 +71,20 @@ def build_runtime(
     materials = prefetch_material_block(executor, context.job, str(context.workspace_id))
     if materials is not None:
         runtime["materials"] = materials
+    # Shard executions (#389, #1356): local shard dispatch carries
+    # ``shard_index`` / ``shard_input`` on ``context.runtime``
+    # (workflow_worker/shard_dispatch.py); mirror them into the child runtime
+    # dict so a locally executed shard sees the same payload the remote Worker
+    # path injects from the manifest (worker/code_runner.build_child_payload).
+    # ``node_execution`` stays parent-side — it is dispatch metadata, not part
+    # of the node-facing runtime contract.
+    runtime.update(
+        {
+            key: context.runtime[key]
+            for key in ("shard_index", "shard_input")
+            if key in context.runtime
+        }
+    )
     return runtime
 
 
@@ -105,9 +119,14 @@ def _prefetch_skill_versions(executor: CodeExecutor, context: ExecutionContext) 
 
 
 def clear_auth_failure_marker(context: ExecutionContext) -> None:
-    """Drop any stale marker: a previous attempt must not fake a fresh report."""
+    """Drop any stale marker: a previous attempt must not fake a fresh report.
+
+    Scoped to THIS execution's marker (#1355): parallel code nodes share one
+    ``job_dir``, and clearing the old fixed name could delete a neighbour's
+    live marker (its token-invalidation request would be lost).
+    """
     with contextlib.suppress(OSError):
-        (context.job_dir / AUTH_FAILURE_MARKER_PATH).unlink(missing_ok=True)
+        (context.job_dir / auth_failure_marker_path(context.execution_id)).unlink(missing_ok=True)
 
 
 def consume_auth_failure_marker(executor: CodeExecutor, context: ExecutionContext) -> None:
@@ -117,9 +136,11 @@ def consume_auth_failure_marker(executor: CodeExecutor, context: ExecutionContex
     the parent re-reads the connection key, invalidates the cached connection
     token, and removes the marker. Runs after the child exits — the cached
     token is only consulted at the next dispatch, so the semantics match the
-    retired in-child report.
+    retired in-child report. The marker is per-execution (#1355), so a
+    parallel neighbour finishing first can neither consume nor remove this
+    execution's report.
     """
-    marker = context.job_dir / AUTH_FAILURE_MARKER_PATH
+    marker = context.job_dir / auth_failure_marker_path(context.execution_id)
     try:
         if not marker.is_file():
             return
