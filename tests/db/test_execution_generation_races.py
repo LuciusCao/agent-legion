@@ -25,11 +25,16 @@ lock_timeout=5s（有环必现、意外等待有界），thread.join(timeout=30)
 7. late finish：旧代次 lease 的 finish 在 upgrade 后到达 → lease released +
    node_run 终态落库，job_nodes/jobs 不被翻转。
 8. 批 AB-BA 回归（阶段 7 任务 A）：finish_many 与 agent claim 批跨两个
-   workspace 反向 job 序并发——统一 (ws 锁键, job 锁键, job_id) 批序（#1346）下无 40P01、双方
-   提交；旧纯 job_id 序下本案必死锁（突变自检覆盖）。
+   workspace 并发——统一纯 (job 锁键, job_id) 批序（#1346：实际锁键；
+   #1378 codex P2：无 ws 分桶）下无 40P01、双方提交；旧纯 job_id 序或
+   分桶序下本案可死锁（突变自检覆盖）。
 9. claim 盖戳（审查 P2-b）：兄弟节点 rerun bump 代次后，旁支 pending 行
    （旧戳）上的 agent claim 翻 running 必须盖 jobs 现值戳——否则该行成
    孤儿时 recover 的代次闸门拒绝复位，节点永久 running。
+10. 跨 ws 碰撞别名 AB-BA 回归（#1378 codex P2）：两个 finish_many 批在
+    「W1 的 K1 与 W2 的 K1 是同一把锁」的别名四元组上并发——纯键序下
+    都先取 K1（后到者原地等待、不持 K2），无 40P01；ws 分桶序下反向取锁
+    即成环（突变自检覆盖）。
 
 xdist 兼容：所有同步都走 pg_locks 观测 + join 超时，不用跨用例状态；每个
 用例的 job/workspace id 独立，TRUNCATE 隔离照常。
@@ -205,6 +210,24 @@ def _join(thread: threading.Thread) -> None:
     thread.join(timeout=30)
     # B 挂死超过 join 上限必须炸响——否则它的 outcome 为空会被读成假绿。
     assert not thread.is_alive(), "B-side transaction never resolved"
+
+
+def _advisory_holders_for_job(job_id: str, *, granted: bool) -> list[int]:
+    """持有（granted）/等待该 job 的 job-mutation 锁的 backend pid——键级观测。"""
+    with psycopg.connect(TIMED_DATABASE_URL, autocommit=True) as probe:
+        row = probe.execute("select hashtext(%s)", (f"job-mutation:{job_id}",)).fetchone()
+        assert row is not None
+        expected = int(row[0]) & 0xFFFFFFFFFFFFFFFF
+        rows = probe.execute(
+            "select classid, objid, pid from pg_locks"
+            " where locktype='advisory' and objsubid=1 and granted=%s",
+            (granted,),
+        ).fetchall()
+    return [
+        int(pid)
+        for classid, objid, pid in rows
+        if ((int(classid) << 32) | int(objid)) & 0xFFFFFFFFFFFFFFFF == expected
+    ]
 
 
 def _await_job_mutation_waiter(job_id: str, timeout: float = 10.0) -> None:
@@ -636,45 +659,33 @@ def test_late_finish_after_upgrade_settles_lease_only(job_db) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _inverted_ws_pair(job_db) -> tuple[str, str]:
-    """一对文本序与 hashtext('agent-ws:' || …)::int 序相反的 workspace id。
-
-    返回 (ws_first, ws_second)：ws_first 锁键更小（文本更大），ws_second 锁键
-    更大（文本更小）——配反向 job id 后，纯 job_id 序与锁键序相反。
-    """
-    pool: list[tuple[str, int]] = []
-    with job_db.connect() as conn:
-        for i in range(200):
-            wid = f"race8-ws-{i:03d}"
-            row = conn.execute("select hashtext(%s)::int as k", (f"agent-ws:{wid}",)).fetchone()
-            assert row is not None
-            pool.append((wid, int(row["k"])))
-    for wid, key in sorted(pool):
-        smaller = [w for w, other_key in pool if w > wid and other_key < key]
-        if smaller:
-            return min(smaller), wid
-    raise AssertionError("no inverted (text, lock-key) pair among 200 candidates")
-
-
 def test_finish_many_vs_agent_claim_batch_no_ab_ba(job_db) -> None:
-    """钉住「全库 job-mutation 批序唯一」（阶段 7 任务 A）：finish_many 与
-    agent claim 批按同一 (ws 锁键, job 锁键, job_id) 序取 job-mutation 锁（#1346：
-    job 分量是实际 advisory 锁键，不是 id 文本）。
+    """钉住「全库 job-mutation 批序唯一」（阶段 7 任务 A；#1346/#1378 纯
+    (job 锁键, job_id) 序）：finish_many 与 agent claim 批按同一序取
+    job-mutation 锁。
 
-    两个 workspace（锁键序与 job_id 序相反）各两节点：n1 已被 code 池认领
-    （running、lease active），n2 排队 agent 请求。A = 手工驱动的 agent 批
-    （_lock_order_sorted 后先领锁键较小侧的 job-z），B = finish_many（两条
-    n1 lease）。统一序下 B 的第一项就等 A 提交，双方干净提交、无 40P01；
-    旧纯 job_id 序下 B 先取 job-a 的锁 → 与 A 成环必 40P01（deadlock_timeout
-    =50ms，突变自检覆盖）。
+    两个 workspace 各两节点：n1 已被 code 池认领（running、lease active），
+    n2 排队 agent 请求。A = 手工驱动的 agent 批（_lock_order_sorted 后先领
+    锁键较小侧），B = finish_many（两条 n1 lease）。统一序下 B 的第一项就
+    等 A 提交，双方干净提交、无 40P01；旧纯 job_id 序或 ws 分桶序下 B 可能
+    先取另一把锁 → 与 A 成环必 40P01（deadlock_timeout=50ms，突变自检
+    覆盖）。编舞不依赖 ws/id 文本序：job_first/job_second 按真实锁键现算。
     """
-    ws_first, ws_second = _inverted_ws_pair(job_db)
-    # job_id 序与锁键序相反：job-a 在锁键较大的 ws_second，job-z 在 ws_first。
-    job_first, job_second = "race8-job-z", "race8-job-a"
+    ws_a, ws_b = "race8-ws-a", "race8-ws-b"
+    with job_db.connect() as conn:
+        keys = {
+            job: int(
+                conn.execute("select hashtext('job-mutation:' || %s)::int as k", (job,)).fetchone()[
+                    "k"
+                ]
+            )
+            for job in ("race8-job-a", "race8-job-b")
+        }
+    job_first, job_second = sorted(keys, key=lambda j: (keys[j], j))
     broker = AgentExecutionBroker(TIMED_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     repo = _repo(job_db)
     lease_by_job: dict[str, str] = {}
-    for workspace_id, job_id in ((ws_first, job_first), (ws_second, job_second)):
+    for workspace_id, job_id in ((ws_a, job_first), (ws_b, job_second)):
         _seed_agent_lane(job_db, workspace_id=workspace_id, job_id=job_id, node_key="n2")
         _add_node(job_db, job_id, "n1")
         _enqueue(job_db, workspace_id=workspace_id, job_id=job_id, node_key="n2", generation=0)
@@ -692,18 +703,17 @@ def test_finish_many_vs_agent_claim_batch_no_ab_ba(job_db) -> None:
         claim1 = evaluate_candidate(
             broker, conn_a, "worker-race8", ordered[0], _agent_view(), ScanState()
         )
-        assert claim1 is not None  # A 持 job-mutation:job-z，未提交
+        assert claim1 is not None  # A 持 job-mutation:job_first，未提交
 
         result = ExecutionResult(status="completed", exit_code=0)
         thread, outcome = _start(
             lambda: finish_many(
                 repo,
-                # 入队序按 job_id 序——排序键必须纠正它（两版代码下 B 的第一项
-                # 分别是 job-z（新）与 job-a（旧））。
+                # 入队序与锁键序相反——排序键必须纠正它。
                 [(lease_by_job[job_second], result, None), (lease_by_job[job_first], result, None)],
             )
         )
-        _await_job_mutation_waiter(job_first)  # B 卡在 job-z 的锁上
+        _await_job_mutation_waiter(job_first)  # B 卡在 job_first 的锁上
         claim2 = evaluate_candidate(
             broker, conn_a, "worker-race8", ordered[1], _agent_view(), ScanState()
         )
@@ -755,3 +765,124 @@ def test_claim_stamps_running_node_with_current_generation(job_db) -> None:
     node = _node_row(job_id, "generate")
     assert node["status"] == "running"
     assert int(node["execution_generation"]) == 1  # == jobs 现值
+
+
+# ---------------------------------------------------------------------------
+# 10. 跨 ws 碰撞别名 AB-BA 回归（#1378 codex P2）
+# ---------------------------------------------------------------------------
+
+
+def _cross_ws_alias_quadruple(job_db) -> tuple[str, str, str, str]:
+    """跨 workspace 碰撞别名四元组：返回 (job_a, job_b, job_c, job_d) 满足
+    key(job_a) == key(job_d)（K1）、key(job_c) == key(job_b)（K2）、K1 < K2，
+    且 job_a/job_c 在 ws-1、job_d/job_b 在 ws-2——批一 [a,b] 与批二 [c,d] 在
+    ws 分桶序下按 K1→K2 / K2→K1 相反顺序取同两把锁（40P01 窗口），纯
+    (锁键, id) 序下两批都先取 K1。
+
+    job id 是 (workspace, workflow, source_id) 的确定性编码——两个 ws 各生成
+    候选池，一条 unnest 聚合算键后取键集交集（20 万/侧 ⇒ 交集期望 ~9 个键）。
+    """
+    from server.app.jobs.job_id_encoding import encode_job_id
+
+    ws1, ws2 = "alias10-ws-1", "alias10-ws-2"
+    count = 200_000
+    ids1 = [encode_job_id(ws1, "questions", f"cand-{i}") for i in range(count)]
+    ids2 = [encode_job_id(ws2, "questions", f"cand-{i}") for i in range(count)]
+    with job_db.connect() as conn:
+        rows = conn.execute(
+            "select t.id as id, hashtext('job-mutation:' || t.id)::int as k"
+            " from unnest(%s::text[]) as t(id)",
+            (ids1 + ids2,),
+        ).fetchall()
+    key_by_id = {str(row["id"]): int(row["k"]) for row in rows}
+    keys1 = {key_by_id[job_id]: job_id for job_id in ids1}
+    keys2 = {key_by_id[job_id]: job_id for job_id in ids2}
+    shared = sorted(set(keys1) & set(keys2))
+    assert len(shared) >= 2, "200k ids per workspace must share >=2 lock keys"
+    k1, k2 = shared[0], shared[1]
+    return keys1[k1], keys2[k2], keys1[k2], keys2[k1]
+
+
+def test_finish_many_cross_ws_alias_quadruple_no_ab_ba(job_db, monkeypatch) -> None:
+    """#1378 codex P2 的活回归：跨 ws 碰撞别名四元组上两个 finish_many 批不再
+    按相反顺序等同两把锁。
+
+    编舞（等信号非等时长）：A = finish_many([a, b])——monkeypatch 的
+    finish_lease 在完成第一项（a，持 K1）后泊住，K2 尚未取；B =
+    finish_many([c, d])。纯键序下 B 的第一项是 d（K1）→ 原地等待且不持
+    K2；ws 分桶序（旧代码）下 B 的第一项是 c（W1 桶在前）→ 先拿 K2 再等
+    K1——「等待期间不得持有 K2」的键级断言即突变自检的抓点。双方随后干净
+    提交、无 40P01。"""
+    import server.app.executors._lease_finish_batch as batch_module
+
+    job_a, job_b, job_c, job_d = _cross_ws_alias_quadruple(job_db)
+    ws_by_job = {
+        job_a: "alias10-ws-1",
+        job_c: "alias10-ws-1",
+        job_d: "alias10-ws-2",
+        job_b: "alias10-ws-2",
+    }
+    repo = _repo(job_db)
+    lease_by_job: dict[str, str] = {}
+    for job_id, workspace_id in ws_by_job.items():
+        insert_job_rows(
+            job_db,
+            job_id=job_id,
+            node_key="n1",
+            limit=20,
+            workspace_id=workspace_id,
+            agent_id="generator-v1",
+        )
+        claim = repo.try_claim(_code_claim_request(workspace_id, job_id, "n1", generation=0))
+        assert claim is not None
+        lease_by_job[job_id] = claim.lease_id
+
+    first_item_done = threading.Event()
+    release_a = threading.Event()
+    real_finish_lease = batch_module.finish_lease
+    calls = {"n": 0}
+
+    def _blocking_finish_lease(conn, lease_id, result, data_dir=None):  # noqa: ANN001
+        calls["n"] += 1
+        verdict = real_finish_lease(conn, lease_id, result, data_dir)
+        if calls["n"] == 1:
+            # A 已完成第一项（持 K1），泊住——第二项（K2）尚未取锁。
+            first_item_done.set()
+            assert release_a.wait(timeout=15)
+        return verdict
+
+    monkeypatch.setattr(batch_module, "finish_lease", _blocking_finish_lease)
+    result = ExecutionResult(status="completed", exit_code=0)
+    thread_a, outcome_a = _start(
+        lambda: finish_many(
+            repo, [(lease_by_job[job_a], result, None), (lease_by_job[job_b], result, None)]
+        )
+    )
+    thread_b: threading.Thread | None = None
+    outcome_b: dict[str, Any] = {}
+    try:
+        assert first_item_done.wait(timeout=10), "A never finished its first item"
+        thread_b, outcome_b = _start(
+            lambda: finish_many(
+                repo, [(lease_by_job[job_c], result, None), (lease_by_job[job_d], result, None)]
+            )
+        )
+        _await_job_mutation_waiter(job_d)  # B 卡在 K1（d 的锁）上
+        # 关键断言：等待中的 B 不得持有 K2——ws 分桶序（旧代码）下 B 先拿了
+        # c 的锁（K2），此处必红。
+        assert _advisory_holders_for_job(job_b, granted=True) == []
+        release_a.set()
+        _join(thread_b)
+        assert outcome_b.get("error") is None, outcome_b.get("error")
+    finally:
+        release_a.set()
+        _join(thread_a)
+        if thread_b is not None and thread_b.is_alive():
+            thread_b.join(timeout=30)
+    assert outcome_a.get("error") is None, outcome_a.get("error")
+    verdicts_a, _ = outcome_a["result"]
+    verdicts_b, _ = outcome_b["result"]
+    assert verdicts_a == [True, True] and verdicts_b == [True, True]
+    for job_id in ws_by_job:
+        lease = _fetchone("select status from executor_leases where id=%s", (lease_by_job[job_id],))
+        assert lease["status"] == "released"

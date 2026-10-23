@@ -14,7 +14,7 @@ from server.app.db.connection import DatabaseConnection
 from server.app.db.transaction import write_transaction
 from server.app.executors._lease_claims import claim_lease
 from server.app.executors._lease_control import (
-    batch_lock_keys_by_job,
+    job_mutation_lock_keys,
     lock_job_mutation_and_read_generation,
     sync_job_status,
 )
@@ -49,26 +49,25 @@ def try_claim_many(
 
     Claims run in the single global job-mutation batch order shared with
     ``finish_many`` / expire / recover / the agent sweep and the claim
-    batch's all-kinds order (EXEC-GENERATION-001, #759 phases 1c+7; #1346):
-    ``(hashtext('agent-ws:' || workspace_id)::int, hashtext('job-mutation:' || job_id)::int,
-    job_id)`` — the job component is the ACTUAL advisory lock key, not the id
-    text (a 32-bit hashtext collision could otherwise fold two batches into
-    opposite wait orders). Every claim takes the ``job-mutation:<job_id>``
-    advisory xact lock, never released before COMMIT, so one cross-batch
-    order prevents AB-BA on that domain. Since #645 review P2 the claim
-    batch's code candidates join the same order (they take no ``agent-ws:*``
-    lock and borrow the ws key purely as a sort position), so no cross-batch
-    pair walks the same two jobs in different orders. Verdicts are
-    reassembled in caller order.
+    batch's all-kinds order (EXEC-GENERATION-001, #759 phases 1c+7; #1346;
+    #1378 codex P2): ``(hashtext('job-mutation:' || job_id)::int, job_id)`` —
+    the ACTUAL advisory lock key, then the id as same-key tiebreak. No ws
+    component: bucketed orders still walk a cross-workspace collision-alias
+    pair in opposite orders; pool-level locks are covered by the lock-level
+    order (pool locks before job-mutation — claim_lease takes code-pool
+    first), not by the job sort. Every claim takes the
+    ``job-mutation:<job_id>`` advisory xact lock, never released before
+    COMMIT, so one cross-batch order prevents AB-BA on that domain.
+    Verdicts are reassembled in caller order.
     """
     with write_transaction(repo.path) as conn:
-        # Both lock-key components are server-side (hashtext), so resolve them
-        # for the batch's jobs in one query before sorting.
-        lock_keys = batch_lock_keys_by_job(conn, [request.job_id for request in requests])
+        # The lock key is server-side (hashtext), so resolve it for the
+        # batch's jobs in one query before sorting.
+        lock_keys = job_mutation_lock_keys(conn, [request.job_id for request in requests])
         results: list[ClaimedExecution | None] = [None] * len(requests)
         for index, request in sorted(
             enumerate(requests),
-            key=lambda e: (*lock_keys[e[1].job_id], e[1].job_id, e[0]),
+            key=lambda e: (lock_keys[e[1].job_id], e[1].job_id, e[0]),
         ):
             results[index] = claim_lease(conn, request, repo.data_dir)
     _broadcast_committed(repo, [str(r.job_id) for r in results if r is not None])
@@ -178,28 +177,19 @@ def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) 
     now_str = database_timestamp(now)
     with write_transaction(repo.path) as conn:
         rows = conn.execute(
-            "select j.id, hashtext('agent-ws:' || j.workspace_id)::int as ws_lock_key,"
-            " hashtext('job-mutation:' || j.id)::int as job_lock_key from jobs j"
+            "select j.id, hashtext('job-mutation:' || j.id)::int as job_lock_key from jobs j"
             " where j.status='running' and not exists"
             " (select 1 from executor_leases l where l.job_id=j.id and l.status='active')"
         ).fetchall()
         # EXEC-GENERATION-001：每个恢复都会取 job-mutation advisory xact 锁
-        # （不随语句提前释放），全库批路径共用唯一序 (ws 锁键, job 锁键, job_id)
-        # ——job 分量是实际 advisory 锁键而非 id 文本（#1346 碰撞折叠）；与
-        # agent claim 批的（claim_batch_tx._lock_order_sorted）及
-        # finish_many/expire/sweep 相同，防批间 AB-BA。
+        # （不随语句提前释放），全库批路径共用唯一纯序 (job 锁键, job_id)——
+        # 不带 ws 分桶（#1378 codex P2：分桶在跨 ws 碰撞别名对上仍成环）；与
+        # finish_many/try_claim_many/expire/sweep/claim 批相同，防批间 AB-BA。
         recovered = [
             job_id
             for job_id in (
                 str(row["id"])
-                for row in sorted(
-                    rows,
-                    key=lambda r: (
-                        int(r["ws_lock_key"]),
-                        int(r["job_lock_key"]),
-                        str(r["id"]),
-                    ),
-                )
+                for row in sorted(rows, key=lambda r: (int(r["job_lock_key"]), str(r["id"])))
             )
             if _recover_orphaned_job(conn, job_id, now_str)
         ]

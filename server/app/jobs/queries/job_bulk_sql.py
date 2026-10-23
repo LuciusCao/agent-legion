@@ -135,17 +135,16 @@ def lock_job_mutations_sorted(conn: Any, job_ids: Iterable[str]) -> None:
     transaction — level 2 of the global lock order, ahead of the chunk's
     material/bundle FOR KEY SHARE probes and the jobs upsert.
 
-    The global batch order is ``(hashtext('agent-ws:' || workspace_id),
-    hashtext('job-mutation:' || id), id)`` — #1346: the lock resource is the
-    32-bit ``hashtext`` of the key, not the id text, so ordering by id text
-    alone lets a collision quadruple (a<b<c<d with hash(a)=hash(d) and
-    hash(b)=hash(c)) fold two concurrent batches into opposite wait orders on
-    the same two real locks → 40P01. Ordering by the ACTUAL advisory key
-    (id only as the same-key tiebreak) keeps every path in one total order;
-    every creating call is single-workspace, so the leading ws component is
-    constant here and the SQL's ``(hashtext, id)`` order IS the global order
-    restricted to one workspace — a create chunk never walks two jobs
-    opposite to finish_many / claim batches / sweeps. Precondition: no id may
+    The global batch order is the PURE ``(hashtext('job-mutation:' || id),
+    id)`` order — #1346 + #1378 codex P2: the lock resource is the 32-bit
+    ``hashtext`` of the key, not the id text, and there is no ws bucket —
+    any prefix (workspace or otherwise) still lets a collision-alias pair
+    (W1's K1 and W2's K1 are the SAME lock) be walked in opposite orders by
+    two cross-workspace batches. Ordering by the ACTUAL advisory key (id
+    only as the same-key tiebreak) is the one total order every path shares;
+    every creating call is single-workspace anyway, so the SQL's
+    ``(hashtext, id)`` order IS the global order — a create chunk never
+    walks two jobs opposite to finish_many / claim batches / sweeps. Precondition: no id may
     name an existing job of ANOTHER workspace. Structurally true for new ids
     since #1255 (injective encoding — a cross-workspace coincidence would
     need a pre-v62 legacy row whose workspace/workflow id carries ``~``,

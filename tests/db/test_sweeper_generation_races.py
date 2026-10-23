@@ -6,9 +6,9 @@
 queued 请求）构成 AB-BA；且对旧代次请求按 fail 处理，mutation 提交后
 ``record_failed_node_without_execution`` 的 ``status in ('pending','ready','stale')``
 守卫恰好匹配新重置的 pending 行 → 新代次节点被翻 failed。改造后两者与
-``sweep_expired_claims`` 同款协议成员：全库批序 (hashtext('agent-ws:' || ws),
-hashtext('job-mutation:' || job_id), job_id)（#1346：job 分量为实际锁键）逐 job 取
-job-mutation 锁 → 请求行代次 CAS——旧代次走取消语义（不动
+``sweep_expired_claims`` 同款协议成员：全库批序为纯
+(hashtext('job-mutation:' || job_id), job_id)（#1346：实际锁键；#1378 codex
+P2：无 ws 分桶）逐 job 取 job-mutation 锁 → 请求行代次 CAS——旧代次走取消语义（不动
 job_nodes），代次相符维持 fail。
 
 手法比照 test_execution_generation_races.py：TIMED_DATABASE_URL 带

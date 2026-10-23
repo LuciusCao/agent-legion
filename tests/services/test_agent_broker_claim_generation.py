@@ -10,10 +10,10 @@
    ``_cancel_queued_sql`` 的同语义取消该请求（state='cancelled' + manifest
    trim）并跳过，不 promote、不写 node_runs/executor_leases；
 3. 代次匹配的正常 promote 给 node_runs / executor_leases 落同一戳；
-4. 批写入段按统一全序 (ws_lock_key, job_lock_key, job_id) 进入
-   evaluate/promote（code 候选不取 agent-ws 锁，仅借同一排序键参与全序；
-   #1346：job 分量是实际 advisory 锁键而非 id 文本）——SAVEPOINT 不释放
-   advisory xact 锁，无排序的两个并发批会在 job-mutation 域成环。
+4. 批写入段按统一纯序 (job_lock_key, job_id) 进入 evaluate/promote（code
+   候选不取 agent-ws 锁；#1346：job 锁键是实际 advisory 锁键；#1378 codex
+   P2：无 ws 分桶，agent-ws 池锁在事务首句按实际键升序预取）——SAVEPOINT
+   不释放 advisory xact 锁，无排序的两个并发批会在 job-mutation 域成环。
 """
 
 from __future__ import annotations
@@ -214,22 +214,23 @@ def test_batch_claim_cancels_only_stale_candidates(job_db) -> None:
     assert _request_row(fresh_id)["state"] == "claimed"
 
 
-def test_lock_order_sorted_uses_single_ws_job_order_for_all_kinds() -> None:
-    """批写入段排序（#645 评审 P2；#1346）：全部候选——code 候选不取 agent-ws
-    锁，仅借同一排序键——统一按 (ws_lock_key, job_lock_key, job_id) 升序，与
+def test_lock_order_sorted_uses_single_job_key_order_for_all_kinds() -> None:
+    """批写入段排序（#645 评审 P2；#1346；#1378 codex P2）：全部候选——code
+    候选不取 agent-ws 锁——统一按纯 (job_lock_key, job_id) 升序，与
     finish_many / try_claim_many / sweeper 的全库批序同一；job_lock_key 是
-    job-mutation 锁的实际 hashtext 键（不是 id 文本），id 只作同键决胜。
-    SAVEPOINT 不释放 advisory xact 锁，两个并发批若按不同顺序取
-    job-mutation 锁即成环。"""
+    job-mutation 锁的实际 hashtext 键，id 只作同键决胜。无 ws 分桶：分桶序
+    在跨 workspace 碰撞别名对上仍会反向取锁（下方别名用例钉住）。SAVEPOINT
+    不释放 advisory xact 锁，两个并发批若按不同顺序取 job-mutation 锁即成环。"""
     candidates = (
         {"kind": "agent", "ws_lock_key": 20, "job_lock_key": 1, "job_id": "job-b"},
         {"kind": "code", "ws_lock_key": 99, "job_lock_key": 1, "job_id": "job-z"},
         {"kind": "agent", "ws_lock_key": 10, "job_lock_key": 7, "job_id": "job-y"},
-        # 同 ws 内：job-x 的 id 文本更小但锁键更大——锁键序必须赢过文本序。
-        {"kind": "agent", "ws_lock_key": 10, "job_lock_key": 9, "job_id": "job-x"},
-        # 同键决胜：job-c 与 job-d 同 ws 同锁键（碰撞），按 id 文本决胜。
+        # ws 键与 job 锁键序相反：job-x 的 ws 键最小——纯键序下它仍按 job
+        # 锁键排在最后（ws 分桶已退役，ws_lock_key 不参与排序）。
+        {"kind": "agent", "ws_lock_key": 1, "job_lock_key": 9, "job_id": "job-x"},
+        # 同键决胜：job-c 与 job-d 同锁键（碰撞），按 id 文本决胜。
         {"kind": "agent", "ws_lock_key": 10, "job_lock_key": 7, "job_id": "job-d"},
-        {"kind": "code", "ws_lock_key": 10, "job_lock_key": 7, "job_id": "job-c"},
+        {"kind": "code", "ws_lock_key": 5, "job_lock_key": 7, "job_id": "job-c"},
         {"kind": "code", "ws_lock_key": 5, "job_lock_key": 1, "job_id": "job-a"},
     )
 
@@ -237,13 +238,34 @@ def test_lock_order_sorted_uses_single_ws_job_order_for_all_kinds() -> None:
 
     assert [(row["kind"], row["job_id"]) for row in ordered] == [
         ("code", "job-a"),
+        ("agent", "job-b"),
+        ("code", "job-z"),
         ("code", "job-c"),
         ("agent", "job-d"),
         ("agent", "job-y"),
         ("agent", "job-x"),
-        ("agent", "job-b"),
-        ("code", "job-z"),
     ]
+
+
+def test_lock_order_sorted_alias_pairs_walk_one_order_across_workspaces() -> None:
+    """#1378 codex P2 的碰撞别名场景：批一含 (W1,K1)、(W2,K2)，批二含
+    (W1,K2)、(W2,K1)（K1/K2 是两把实际 job 锁，跨 ws 别名）。纯
+    (job_lock_key, job_id) 序下两批都先取 K1（锁键较小侧）——任何 ws 分桶
+    序都会让两批按相反顺序取这两把锁（40P01 窗口），本用例钉死「分桶不
+    复辟」。"""
+    batch_one = (
+        {"kind": "agent", "ws_lock_key": 10, "job_lock_key": 100, "job_id": "job-w1-a"},
+        {"kind": "agent", "ws_lock_key": 20, "job_lock_key": 200, "job_id": "job-w2-b"},
+    )
+    batch_two = (
+        {"kind": "agent", "ws_lock_key": 10, "job_lock_key": 200, "job_id": "job-w1-c"},
+        {"kind": "agent", "ws_lock_key": 20, "job_lock_key": 100, "job_id": "job-w2-d"},
+    )
+
+    order_one = [int(row["job_lock_key"]) for row in _lock_order_sorted(batch_one)]
+    order_two = [int(row["job_lock_key"]) for row in _lock_order_sorted(batch_two)]
+
+    assert order_one == order_two == [100, 200]
 
 
 def _agent_view() -> WorkerView:

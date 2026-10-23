@@ -73,33 +73,20 @@ def lock_job_mutation_and_read_generation(conn: DatabaseConnection, job_id: str)
     return int(row["execution_generation"]) if row is not None else None
 
 
-# Sort sentinel for batch items whose workspace lock key cannot be resolved
-# (the jobs row vanished before the batch's lookup — the item then fails the
-# generation CAS without writing). hashtext's int domain is signed 32-bit, so
-# -(2**31) is a real possible key value; the sentinel only needs a
-# deterministic position, and the job_id tiebreak keeps even that collision
-# consistent across batches.
-_ORPHAN_WS_LOCK_KEY = -(2**31)
+def job_mutation_lock_keys(conn: DatabaseConnection, job_ids: list[str]) -> dict[str, int]:
+    """EXEC-GENERATION-001 全库唯一批序的排序键：每 job 的实际 32 位锁键
+    hashtext('job-mutation:' || id)::int（#1346 / #1378 codex P2）。
 
-
-def batch_lock_keys_by_job(
-    conn: DatabaseConnection, job_ids: list[str]
-) -> dict[str, tuple[int, int]]:
-    """EXEC-GENERATION-001 全库唯一批序的排序键：每 job 的
-    (hashtext('agent-ws:' || workspace_id)::int, hashtext('job-mutation:' || id)::int)。
-
-    ws 分量与 agent claim 批的 ``_lock_order_sorted``（claim_scan 的
-    ws_lock_key / job_lock_key 列）同源同事。job 分量是 job-mutation 锁的
-    **实际** 32 位锁键（#1346）：锁资源是 hashtext(key) 而非 id 文本，按 id
-    文本序取锁会让碰撞四元组（a<b<c<d 且 hash(a)=hash(d)、hash(b)=hash(c)）
-    把两个并发批的取锁序折叠成 AB-BA——批序必须建在真实锁键上，id 只作同键
-    决胜。jobs 行已消失的 id 的 ws 分量取 ``_ORPHAN_WS_LOCK_KEY``（advisory
-    锁键不依赖行存在，job 分量仍按真实键算）。"""
+    批序是纯 (锁键, job_id) 全序——不带 ws 分桶：分桶会让跨 workspace 批在
+    碰撞别名对（W1 的 K1 与 W2 的 K1 是同一把锁）上仍按相反顺序取锁；池级锁
+    由锁层级序（池锁先于 job-mutation）与 claim 批的 ws 预取纪律覆盖，不参与
+    job 锁排序。advisory 锁键不依赖 jobs 行存在，直接按 id 计算。"""
     rows = conn.execute(
-        "select t.id as id, coalesce(hashtext('agent-ws:' || j.workspace_id)::int, %s) as ws_lock_key, hashtext('job-mutation:' || t.id)::int as job_lock_key from unnest(%s::text[]) as t(id) left join jobs j on j.id = t.id",
-        (_ORPHAN_WS_LOCK_KEY, sorted({str(job_id) for job_id in job_ids})),
+        "select t.id as id, hashtext('job-mutation:' || t.id)::int as job_lock_key"
+        " from unnest(%s::text[]) as t(id)",
+        (sorted({str(job_id) for job_id in job_ids}),),
     ).fetchall()
-    return {str(r["id"]): (int(r["ws_lock_key"]), int(r["job_lock_key"])) for r in rows}
+    return {str(r["id"]): int(r["job_lock_key"]) for r in rows}
 
 
 def sync_job_status(conn: DatabaseConnection, job_id: str) -> None:

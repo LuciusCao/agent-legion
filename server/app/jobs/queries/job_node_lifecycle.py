@@ -30,19 +30,17 @@ class JobNodeLifecycleQueriesMixin(ConnectionQueriesMixin):
         if not entries:
             return
         from server.app.executors._lease_control import (
-            batch_lock_keys_by_job,
+            job_mutation_lock_keys,
             lock_job_mutation_and_read_generation,
         )
 
         with self.connect() as conn:
-            # The batch is single-workspace by construction (the scan fetches
-            # fat rows for one workspace per pass), so the ws component of the
-            # global batch order is constant and the per-job component decides:
-            # (actual job-mutation lock key, job_id) — #1346, the lock resource
-            # is the 32-bit hashtext, not the id text; plain job_id order would
-            # let a hash collision fold two batches into opposite wait orders.
-            lock_keys = batch_lock_keys_by_job(conn, [str(entry[0]) for entry in entries])
-            ordered = sorted(entries, key=lambda e: (lock_keys[str(e[0])][1], str(e[0])))
+            # The batch walks the global PURE (job lock key, job_id) order of
+            # EXEC-GENERATION-001 (#1346/#1378: actual advisory key, no ws
+            # bucket — a bucketed order still AB-BAs on cross-workspace
+            # collision-alias pairs).
+            lock_keys = job_mutation_lock_keys(conn, [str(entry[0]) for entry in entries])
+            ordered = sorted(entries, key=lambda e: (lock_keys[str(e[0])], str(e[0])))
             for job_id, node_keys, reason, expected_generation in ordered:
                 if not node_keys:
                     continue

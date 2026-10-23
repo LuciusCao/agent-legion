@@ -268,8 +268,9 @@ def test_batch_claim_floor_follows_actual_lock_key(job_db) -> None:
     文本序与 int 锁键序相反的 ws 对（约一半 id 对如此，无需碰撞）上，
     文本域的 floor 会让「文本较小、锁键较大」之后的候选下探，破坏批内
     升序纪律。钉子：播种一对反序 id，队首（文本较小、锁键较大）先领后，
-    文本较大但锁键更小的候选必须被让位到下一批——同
-    test_try_claim_many_orders_by_actual_ws_lock_key 的 agent 批形态。"""
+    文本较大但锁键更小的候选必须被让位到下一批。（floor 是选择段的
+    公平/限界纪律；写入段的 ws 锁自 #1378 起在事务首句按实际键升序
+    预取。）"""
     # 播种一对「文本序与 hashtext int 序相反」的 workspace id。
     pool_ids: list[tuple[str, int]] = []
     with job_db.connect() as conn:
@@ -350,9 +351,9 @@ def test_code_candidates_ignore_agent_workspace_lock_floor(job_db) -> None:
     )
 
     # 写入段的稳定锁序（EXEC-GENERATION-001 #645 P2：SAVEPOINT 不释放
-    # advisory xact 锁）把 code 候选与 agent 候选统一按 (ws_lock_key,
-    # job_id) 排序；本测试只钉「code 候选不被 agent-ws floor 过滤」——
-    # 两类在同一批都领到。
+    # advisory xact 锁）把 code 候选与 agent 候选统一按纯 (job_lock_key,
+    # job_id) 排序（#1378：无 ws 分桶）；本测试只钉「code 候选不被
+    # agent-ws floor 过滤」——两类在同一批都领到。
     assert sorted(claim.kind for claim in claims) == ["agent", "code"]
 
 

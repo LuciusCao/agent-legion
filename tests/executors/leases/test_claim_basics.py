@@ -398,14 +398,14 @@ def test_active_counts_reflects_released_leases(
     assert counts_after.get(workspace_id, 0) == 0
 
 
-def test_try_claim_many_sorts_writes_by_ws_lock_key_then_job_id(
+def test_try_claim_many_sorts_writes_by_job_lock_key(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
     """try_claim_many writes in the single global job-mutation batch order —
-    (hashtext('agent-ws:' || workspace_id)::int, hashtext('job-mutation:' || id)::int,
-    job_id), shared with finish_many / expire / recover / the agent sweep and the
-    agent claim batch's all-kinds order (EXEC-GENERATION-001, #759 phase 7;
-    #1346: the job component is the ACTUAL advisory key, not the id text): every
+    the PURE (hashtext('job-mutation:' || id)::int, job_id) order, shared with
+    finish_many / expire / recover / the agent sweep and the agent claim
+    batch's all-kinds order (EXEC-GENERATION-001, #759 phase 7; #1346: the
+    ACTUAL advisory key, not the id text; #1378 codex P2: no ws bucket): every
     claim takes the job-mutation:<job_id> advisory xact lock, never released
     before COMMIT, so one cross-batch order prevents AB-BA — while returning
     verdicts in caller order."""
@@ -416,8 +416,8 @@ def test_try_claim_many_sorts_writes_by_ws_lock_key_then_job_id(
     # test pins the ALGORITHM rather than a hardcoded hash outcome.
     ws_a = str(queries.create_workspace(name="claim-ws-a", workspace_id="a-ws")["id"])
     ws_b = str(queries.create_workspace(name="claim-ws-b", workspace_id="b-ws")["id"])
-    # 同 ws 两 job 的 job-mutation 锁键序必须与 id 文本序相反（否则「丢掉
-    # job 锁键分量」的 mutation 在本夹具上不可观测）——按真实键现挑一对
+    # 同 ws 两 job 的 job-mutation 锁键序必须与 id 文本序相反（否则「退回
+    # id 文本序」的 mutation 在本夹具上不可观测）——按真实键现挑一对
     # source id（job id 是确定性编码，锁键打在 job id 上）。
     from server.app.jobs.job_id_encoding import encode_job_id
 
@@ -460,12 +460,10 @@ def test_try_claim_many_sorts_writes_by_ws_lock_key_then_job_id(
     job_b1 = _create_job_in_workspace(queries, ws_b)
     with queries.connect() as conn:
         rows = conn.execute(
-            "select id, hashtext('agent-ws:' || workspace_id)::int as k,"
-            " hashtext('job-mutation:' || id)::int as jk"
-            " from jobs where id = any(%s)",
+            "select id, hashtext('job-mutation:' || id)::int as jk from jobs where id = any(%s)",
             ([job_a1, job_a2, job_b1],),
         ).fetchall()
-    key_by_job = {str(row["id"]): (int(row["k"]), int(row["jk"]), str(row["id"])) for row in rows}
+    key_by_job = {str(row["id"]): (int(row["jk"]), str(row["id"])) for row in rows}
     expected_order = sorted((job_a1, job_a2, job_b1), key=lambda j: key_by_job[j])
     caller_order = [expected_order[1], expected_order[2], expected_order[0]]
     ws_by_job = {job_a1: ws_a, job_a2: ws_a, job_b1: ws_b}
@@ -490,38 +488,65 @@ def test_try_claim_many_sorts_writes_by_ws_lock_key_then_job_id(
     assert all(r is not None for r in results), "capacity 99 must admit all three"
     # Verdicts are positional: caller order preserved regardless of write order.
     assert [r.job_id for r in results if r is not None] == caller_order
-    assert order == expected_order, "claims must run in (ws lock key, job lock key, job_id) order"
+    assert order == expected_order, "claims must run in (job lock key, job_id) order"
 
 
-def test_try_claim_many_orders_by_actual_ws_lock_key(
+def test_try_claim_many_ignores_workspace_lock_key(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
-    """The deterministic leading key is the workspace lock hash, not text:
-    a workspace pair whose text order disagrees with its
-    hashtext('agent-ws:' || …)::int order must write in hash order."""
+    """#1378 codex P2：ws 分桶已退役——写序不被 agent-ws 锁键（或 ws 文本）
+    影响，只跟实际 job-mutation 锁键走。夹具挑一对「job 锁键序与 ws 锁键序
+    相反」的 (ws, job)：分桶序会把 ws 键较小侧的 job 排前（必红），纯键序
+    把 job 锁键较小者排前。"""
     import server.app.executors._lease_write_paths as _write_paths
 
-    # 播种一对「文本序与 hashtext int 序相反」的 workspace id：候选池里
-    # 文本较小的 id 锁键更大、文本较大的 id 锁键更小。
-    pool: list[tuple[str, int]] = []
+    ws_first = str(queries.create_workspace(name="claim-ws-first", workspace_id="ws-nb-a")["id"])
+    ws_second = str(queries.create_workspace(name="claim-ws-second", workspace_id="ws-nb-b")["id"])
+    # 挑 job id 使两个 job 的锁键序与两 ws 的锁键序相反。
+    pair_keys: dict[str, int] = {}
     with queries.connect() as conn:
+        ws_keys = {
+            ws: int(
+                conn.execute("select hashtext(%s)::int as k", (f"agent-ws:{ws}",)).fetchone()["k"]
+            )
+            for ws in (ws_first, ws_second)
+        }
+        pair: tuple[str, str] | None = None
         for i in range(200):
-            wid = f"ws-k{i:03d}"
-            row = conn.execute("select hashtext(%s)::int as k", (f"agent-ws:{wid}",)).fetchone()
-            assert row is not None
-            pool.append((wid, int(row["k"])))
-    ws_first, ws_second = "", ""
-    for wid, key in sorted(pool):
-        smaller = [w for w, other_key in pool if w > wid and other_key < key]
-        if smaller:
-            # wid 文本更小但锁键更大；min(smaller) 文本更大但锁键更小。
-            ws_first, ws_second = min(smaller), wid
-            break
-    assert ws_first and ws_second, "expected an inverted (text, lock-key) pair"
-    ws_first = str(queries.create_workspace(name="claim-ws-first", workspace_id=ws_first)["id"])
-    ws_second = str(queries.create_workspace(name="claim-ws-second", workspace_id=ws_second)["id"])
-    job_first = _create_job_in_workspace(queries, ws_first)
-    job_second = _create_job_in_workspace(queries, ws_second)
+            job_first, job_second = f"job-nb-f{i:03d}", f"job-nb-s{i:03d}"
+            key_first = int(
+                conn.execute(
+                    "select hashtext('job-mutation:' || %s)::int as k", (job_first,)
+                ).fetchone()["k"]
+            )
+            key_second = int(
+                conn.execute(
+                    "select hashtext('job-mutation:' || %s)::int as k", (job_second,)
+                ).fetchone()["k"]
+            )
+            if (key_first < key_second) != (ws_keys[ws_first] < ws_keys[ws_second]):
+                pair = (job_first, job_second)
+                pair_keys = {job_first: key_first, job_second: key_second}
+                break
+    assert pair is not None, "expected a job pair whose key order inverts the ws key order"
+    job_first, job_second = pair
+    with queries.connect() as conn:
+        for workspace_id, job_id in ((ws_first, job_first), (ws_second, job_second)):
+            conn.execute(
+                """
+                insert into jobs(
+                  id, workspace_id, source_type, source_id, run_id, title, storage_dir, stem,
+                  workflow_revision_id, workflow_version, workflow_definition_hash,
+                  workflow_definition_snapshot_json
+                ) values (%s, %s, 'question', 'src-nb', '', 't', 'dir', '', '', 1, '', '')
+                """,
+                (job_id, workspace_id),
+            )
+            conn.execute(
+                "insert into job_nodes(job_id, node_key, status, created_at)"
+                " values (%s, 'review_keywords', 'pending', current_timestamp)",
+                (job_id,),
+            )
 
     requests = [
         _claim_request(ws_second, job_second, global_capacity=99, local_node_limit=None),
@@ -541,5 +566,5 @@ def test_try_claim_many_orders_by_actual_ws_lock_key(
         _write_paths.claim_lease = real_claim_lease
 
     assert all(r is not None for r in results), "capacity 99 must admit both"
-    # 文本序（ws_second < ws_first）若生效会写 job_second 在前；锁键序必须赢。
-    assert order == [job_first, job_second], "claims must follow the ws lock key order"
+    expected = sorted(pair, key=lambda j: pair_keys[j])
+    assert order == expected, "claims must follow the job lock key order, not the ws bucket"

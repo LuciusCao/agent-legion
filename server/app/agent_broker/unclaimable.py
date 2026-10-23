@@ -66,7 +66,6 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             """
             select r.execution_id, r.job_id, r.node_key, r.manifest_json,
                    r.workspace_id,
-                   hashtext('agent-ws:' || r.workspace_id)::int as ws_lock_key,
                    hashtext('job-mutation:' || r.job_id)::int as job_lock_key,
                    case when r.profile_source='node' then r.runtime
                         else d.definition_json::jsonb->>'runtime' end as runtime,
@@ -92,15 +91,12 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             """,
             (_SWEEP_LIMIT,),
         ).fetchall()
-        # EXEC-GENERATION-001 single global batch order (ws lock key, job
-        # lock key, job_id — #1346: the job component is the ACTUAL advisory
-        # key hashtext('job-mutation:' || job_id), not the id text): advisory
-        # xact locks accumulate until COMMIT, so the walk order must match
+        # EXEC-GENERATION-001 single global batch order (PURE job lock key,
+        # job_id — #1346 + #1378 codex P2: the ACTUAL advisory key
+        # hashtext('job-mutation:' || job_id), no ws bucket): advisory xact
+        # locks accumulate until COMMIT, so the walk order must match
         # finish_many / the claim batch / the other sweeps.
-        for row in sorted(
-            rows,
-            key=lambda r: (int(r["ws_lock_key"]), int(r["job_lock_key"]), str(r["job_id"])),
-        ):
+        for row in sorted(rows, key=lambda r: (int(r["job_lock_key"]), str(r["job_id"]))):
             try:
                 manifest = agent_claim_compatibility.live_claim_manifest(row)
             except ValueError as exc:
