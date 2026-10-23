@@ -57,3 +57,14 @@ def test_failure_tracker_dedups_one_ops_issue_by_title() -> None:
     assert 'gh issue list --state open --search "in:title' in body
     assert "gh issue comment" in body
     assert "--label ops" in body
+
+
+def test_failure_tracker_triggers_on_cancelled_lanes() -> None:
+    """r1 P2-1：超时 lane 的结论是 cancelled 而非 failure（四条 lane 都带
+    timeout-minutes，本仓库有 stall 病史——FLAKY-004 浏览器下载挂死 41 分钟）。
+    触发条件必须同时覆盖 cancelled，否则「weekly 红无人知」从超时入口复发。"""
+    _, tracker = _failure_tracker()
+
+    condition = str(tracker["if"])
+    assert "contains(needs.*.result, 'failure')" in condition
+    assert "contains(needs.*.result, 'cancelled')" in condition

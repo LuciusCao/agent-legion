@@ -47,6 +47,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = REPO_ROOT / ".pytest-aff-index.json"
+# Tracked change-set roots. The two dependency manifests live at the repo
+# root outside every prefix: they must stay visible to the selector so a
+# dependency upgrade lands in ``unmapped_source_files`` (exit 4 → full unit
+# fallback) instead of producing an empty selection that the aff tier would
+# skip without running a single backend test (#1307 r1 P2-2).
 _GIT_PATH_PREFIXES = (
     "server/",
     "worker/",
@@ -55,6 +60,8 @@ _GIT_PATH_PREFIXES = (
     "scripts/",
     "workspace_libs/",
     "tests/",
+    "pyproject.toml",
+    "uv.lock",
 )
 
 
@@ -75,7 +82,12 @@ def _repo_relative(path: str, repo_root: Path | None = None) -> str | None:
 
 
 def changed_source_files(base: str | None) -> list[str]:
-    """Repo-relative changed files (uncommitted + committed vs base)."""
+    """Repo-relative changed files (uncommitted + committed vs base).
+
+    The dependency manifests (``pyproject.toml`` / ``uv.lock``) ride beside
+    the source-root prefixes so a dependency upgrade stays visible and takes
+    the unmapped-source full fallback (#1307 r1 P2-2).
+    """
     files: set[str] = set()
     commands = [["git", "status", "--porcelain=v1", "--untracked-files=all"]]
     if base:
@@ -301,8 +313,7 @@ def _cmd_select(args: argparse.Namespace) -> int:
     # locally uncovered without an explicit GATE_TIER=postgres run. Only
     # manifest-classified files are exact here; fixture-based marking needs
     # collection (the gate's exit-5 tolerance covers those).
-    blind_spot = sorted(path for path in changed if path in postgres_manifest_files())
-    if blind_spot:
+    if blind_spot := sorted(p for p in changed if p in postgres_manifest_files()):
         print(
             f"# postgres blind spot: {len(blind_spot)} postgres-tier file(s) not run "
             f"by aff; cover via GATE_TIER=postgres: {', '.join(blind_spot)}",

@@ -344,13 +344,16 @@ jobs:
   # #1331: without `needs`, the job had no ancestor results, so failure()
   # never saw a failed lane and the tracker stayed skipped on red schedules
   # (run 39195751594). Depend on every lane and gate on their results
-  # explicitly; always() keeps the job alive when a need fails.
+  # explicitly; always() keeps the job alive when a need fails. 'cancelled'
+  # is covered too: a timed-out lane (all four carry timeout-minutes, and
+  # this repo has stall history — FLAKY-004) concludes as cancelled, not
+  # failure (r1 P2-1).
   failure-tracker:
     name: failure-tracker
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [nightly-e2e, ci-extended, exemption-expiry, deps-audit]
-    if: always() && github.event_name == 'schedule' && contains(needs.*.result, 'failure')
+    if: always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
     permissions:
       issues: write
     steps:

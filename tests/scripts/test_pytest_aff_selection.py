@@ -327,3 +327,19 @@ def test_select_affected_tests_postgres_only_change_selects_nothing(tmp_path):
     pg_file.write_text("def test_a():\n    pass\n", encoding="utf-8")
 
     assert select_affected_tests(["tests/db/test_jobs.py"], {}, repo_root=tmp_path) == []
+
+
+def test_dependency_manifests_stay_visible_to_the_selector(tmp_path):
+    """#1307 r1 P2-2：pyproject.toml/uv.lock 在 tracked-roots 之外，但依赖
+    升级必须走 exit 4 全额回落（aff 空选择跳过不得吞掉后端测试）。它们在
+    前缀清单内，且不在覆盖索引里 → unmapped。"""
+    from scripts.pytest_aff_selection import _GIT_PATH_PREFIXES
+
+    assert "pyproject.toml" in _GIT_PATH_PREFIXES
+    assert "uv.lock" in _GIT_PATH_PREFIXES
+    for manifest in ("pyproject.toml", "uv.lock"):
+        (tmp_path / manifest).write_text("", encoding="utf-8")
+    assert unmapped_source_files(["pyproject.toml", "uv.lock"], {}, repo_root=tmp_path) == [
+        "pyproject.toml",
+        "uv.lock",
+    ]
