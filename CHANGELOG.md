@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- 材料 ETag 恢复重绑（`scripts/rebind_material_etags.py`）的 CAS 从 (object_etag, storage_key) 扩为四钉：再钉扫描时的 `upload_generation` 与 `status`（TTL 过期、complete 失败只翻 status，旧 CAS 拦不住）；CAS 落空单列为「竞态失败」报告、退出码 1（issue #1313）。
+
 ## [0.8.1] - 2026-10-22
 
 主打 runs-async 里程碑收官与 Studio 运行配置双通道：大批量添加条目与 9 个批量 job 操作改为秒级异步受理，新增任务中心页承载进度卡片、暂停/继续/取消与归档；agent 节点运行配置（provider/model/thinking/prompt/tools/requires_labels）经独立运行通道即改即存、版本化可回滚，不再卷入草稿发布链路；配套 velites 0.5.9 带来单次输出触顶自动续写，并退役 `config.json` 迁移桥（Breaking）；另含 job_id 单射编码、并行 code 节点结果归因、stepper 动态阈值等一批执行面/前端修复与 KaTeX/React Router 安全升级。
