@@ -3,8 +3,9 @@
 Shared by ``sweeper_definitions.fail_stale_definition_requests`` and
 ``unclaimable.fail_unclaimable_model_requests`` — the two queued-request
 sweeps that write job_nodes/jobs. Both scan lock-free, walk candidates in
-the single global batch order (hashtext('agent-ws:' || workspace_id)::int,
-job_id), and run this prelude per row before any write:
+the single global batch order (hashtext('job-mutation:' || job_id)::int,
+job_id — the PURE actual-key order, no ws bucket, #1346/#1378), and run
+this prelude per row before any write:
 
 - the per-job mutation advisory lock comes FIRST (mirroring
   claim_evaluate's reorder): the mutation side (``lease_guarded_mutation``)

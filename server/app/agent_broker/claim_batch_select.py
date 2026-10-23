@@ -65,9 +65,13 @@ class BatchClaimSelection:
     Agent ``candidates`` are monotone by the actual ``agent-ws:`` capacity
     lock key, fairness-rotated within that constraint. Code candidates do
     not enter that lock domain and stay floor-unconstrained AT SELECTION —
-    the write phase still re-sorts every candidate (code included) into the
-    global ``(ws_lock_key, job_id)`` order (EXEC-GENERATION-001, #645 P2).
-    ``timer`` carries the scan/evaluate timings across both phases (#448).
+    the write phase pre-acquires every selected agent workspace's
+    ``agent-ws:*`` lock in ascending key order at transaction start, then
+    re-sorts every candidate (code included) into the global PURE
+    ``(job_lock_key, job_id)`` order (EXEC-GENERATION-001, #645 P2; #1346;
+    #1378 codex P2: no ws bucket — bucketed orders still AB-BA on
+    cross-workspace collision-alias pairs). ``timer`` carries the
+    scan/evaluate timings across both phases (#448).
     """
 
     candidates: tuple[Mapping[str, Any], ...]
@@ -210,11 +214,13 @@ def select_batch_candidates(
             state.node_active = load_node_claimed_counts(conn, worker_id)
         # Ascending-workspace lock floor (codex P1 / EXEC-CLAIM-LOCK-001):
         # the write phase accumulates one ``agent-ws:*`` advisory lock per
-        # claimed workspace; without an ascending constraint two batches
-        # walking the same workspaces in different queue orders could AB-BA
-        # deadlock. Agent candidates below the floor are deferred (skip +
-        # next batch = fresh floor). Code claims take no agent-ws lock and
-        # must not lose throughput to an unrelated ordering domain.
+        # claimed workspace. Since #1378 the write phase pre-acquires them in
+        # ascending actual-key order at transaction start, so the floor is no
+        # longer the lock-order mechanism — it stays as the selection-side
+        # bounding/fairness discipline: agent candidates below the floor are
+        # deferred (skip + next batch = fresh floor). Code claims take no
+        # agent-ws lock and must not lose throughput to an unrelated
+        # ordering domain.
         ws_lock_floor: int | None = None
         while len(selected) < budget:
             open_kinds = []

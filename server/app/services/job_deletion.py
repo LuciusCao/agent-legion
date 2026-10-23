@@ -140,12 +140,46 @@ class JobDeletionService:
         gc_deleted_job_artifacts(self.artifact_store, job_id, artifact_candidates)
         if object_rows and self.object_store is not None:
             self.object_store.delete_objects(object_rows)
-        if self.job_event_buffer is not None:
-            self.job_event_buffer.record_job_deleted(workspace_id, job_id)
-        elif self.job_event_manager is not None:
-            stats = self.job_db.count_jobs_by_status(workspace_id)
-            self.job_event_manager.broadcast_job_deleted(workspace_id, job_id, stats)
+        self._broadcast_deleted(workspace_id, job_id)
         return self._result(job_id, "succeeded")
+
+    def _broadcast_deleted(self, workspace_id: str, job_id: str) -> None:
+        """删除广播前的身份复核（#1357，#1248 删除广播面）。
+
+        purge 的锁在 rename 提交后即释放，广播若按裸 id 直发，落在「锁释放 →
+        广播」之间提交的同源重建（确定性 id）会让客户端把**新** job 当作已删除
+        移除。与 refs gc 面（``delete_refs_for_job`` 的 not exists 条件）同族：
+        广播在 ``job-mutation:<id>`` 锁下复核 jobs 行仍不存在才发出——创建路径
+        持同一把锁到提交（#1083），所以重建要么已落行（复核命中 → 跳过广播），
+        要么等本锁释放后才提交，其 created 事件序在 deleted 之后，客户端不会
+        误删活 job。锁事务因 DB 错误未能给出复核结果时无法排除重建，保守跳过
+        广播（代价只是客户端下次全量刷新前多显示一个已删 job）；复核与广播失败
+        绝不把已成功的删除变成 API 错误。广播本身是内存事件（buffer / SSE），
+        不进锁事务的 DB 写面，锁事务保持只读短事务。
+        """
+        if self.job_event_buffer is None and self.job_event_manager is None:
+            return
+        try:
+            with self.job_db.job_mutation_lock(job_id) as recreated:
+                if recreated:
+                    logger.info(
+                        "Skip deletion broadcast of job %s: recreated under the same id", job_id
+                    )
+                    return
+                if self.job_event_buffer is not None:
+                    self.job_event_buffer.record_job_deleted(workspace_id, job_id)
+                elif self.job_event_manager is not None:
+                    stats = self.job_db.count_jobs_by_status(workspace_id)
+                    self.job_event_manager.broadcast_job_deleted(workspace_id, job_id, stats)
+        except Exception:
+            # #204 broad-except audit: the jobs row is already committed as
+            # deleted, so this locked recheck is best-effort — its only
+            # failure kinds are DB errors (connection loss, lock/commit
+            # failure) or an event-sink error. Failing here must not turn the
+            # succeeded deletion into an API error; skipping the broadcast
+            # only leaks a stale list entry until the client's next full
+            # refresh. logger.exception keeps the traceback.
+            logger.exception("Deletion broadcast recheck failed for job %s", job_id)
 
     def batch_delete(
         self, workspace_id: str, job_ids: list[str] | None = None, **kwargs: Any

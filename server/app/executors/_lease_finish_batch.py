@@ -10,7 +10,9 @@ for a non-active row — a 409 is data, not an error).
 Two disciplines the codex review on #609 added:
 
 - **Deterministic item order**: finish and claim batches share one global
-  ``(workspace lock key, job_id)`` order (EXEC-GENERATION-001, #759 phase 7:
+  ``(job lock key, job_id)`` order (EXEC-GENERATION-001, #759 phase 7;
+  #1346 + #1378 codex P2 — the ACTUAL ``hashtext('job-mutation:' || job_id)``
+  advisory key, no ws bucket, id only as same-key tiebreak):
   the job-mutation advisory xact locks every finish/claim takes survive the
   batcher's per-item boundaries, so one global order — the claim batch's
   single all-kinds order, ``claim_batch_tx._lock_order_sorted`` —
@@ -32,7 +34,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from server.app.db.retry import retry_on_database_conflict
 from server.app.db.transaction import write_transaction
-from server.app.executors._lease_control import _ORPHAN_WS_LOCK_KEY
 from server.app.executors._lease_lifecycle import finish_lease
 from server.app.executors._lease_write_paths import (
     _mark_result_stage,
@@ -65,9 +66,11 @@ def finish_many(
         # EXEC-GENERATION-001 batch order: every finish_lease takes the
         # job-mutation:<job_id> advisory xact lock (never released by the
         # batcher's per-item boundaries), so ALL multi-job batches on this
-        # domain walk jobs in one global order — (ws lock key, job_id) with
-        # the ws key being hashtext('agent-ws:' || workspace_id)::int, the
-        # exact key of the claim batch's single all-kinds order
+        # domain walk jobs in one global order — the PURE
+        # (hashtext('job-mutation:' || job_id)::int, job_id) order (#1346;
+        # #1378 codex P2: no ws component — a ws-bucketed order still walks a
+        # cross-workspace collision-alias pair in opposite orders). The exact
+        # key of the claim batch's single all-kinds order
         # (claim_batch_tx._lock_order_sorted), shared with try_claim_many /
         # expire / recover / the agent sweep. Two concurrent batches walking
         # the same jobs in different orders would AB-BA on the job-mutation
@@ -76,17 +79,16 @@ def finish_many(
         resolved: list[tuple[int, str, int, str, ExecutionResult, Any]] = []
         for index, (lease_id, result, stage_timer) in enumerate(writes):
             lease = conn.execute(
-                "select l.job_id, hashtext('agent-ws:' || j.workspace_id)::int as ws_lock_key"
-                " from executor_leases l"
-                " left join jobs j on j.id = l.job_id where l.id = %s",
+                "select l.job_id, hashtext('job-mutation:' || l.job_id)::int as job_lock_key"
+                " from executor_leases l where l.id = %s",
                 (lease_id,),
             ).fetchone()
             resolved.append(
                 (
                     (
-                        int(lease["ws_lock_key"])
-                        if lease is not None and lease["ws_lock_key"] is not None
-                        else _ORPHAN_WS_LOCK_KEY
+                        int(lease["job_lock_key"])
+                        if lease is not None and lease["job_lock_key"] is not None
+                        else 0
                     ),
                     str(lease["job_id"]) if lease is not None else "",
                     index,
@@ -98,7 +100,7 @@ def finish_many(
         resolved.sort(key=lambda entry: entry[:3])
         by_index: dict[int, bool] = {}
         stale_by_index: dict[int, bool] = {}
-        for _ws_key, _job_id, index, lease_id, result, _timer in resolved:
+        for _job_key, _job_id, index, lease_id, result, _timer in resolved:
             verdict = finish_lease(conn, lease_id, result, repo.data_dir)
             by_index[index] = verdict.applied
             stale_by_index[index] = verdict.generation_stale
@@ -139,7 +141,9 @@ def finish_many(
 
         return run
 
-    for _ws, job_id, index, lease_id, result, stage_timer in sorted(resolved, key=lambda i: i[2]):
+    for _job_key, job_id, index, lease_id, result, stage_timer in sorted(
+        resolved, key=lambda i: i[2]
+    ):
         result_flag = by_index[index]
         # #759 review P2: a stale-generation finish settles the lease/history
         # rows but the shared run_dir may already hold the NEW generation's

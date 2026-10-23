@@ -21,6 +21,7 @@ import psycopg
 import pytest
 
 from server.app.db.connection import connect_database
+from server.app.jobs.job_id_encoding import encode_job_id
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.run_service import RunService
 from server.app.services.workflow_revisions import WorkflowRevisionService
@@ -30,6 +31,53 @@ from tests.helpers.run_chunking import definition_accepting as _definition_accep
 from tests.helpers.run_chunking import insert_materials as _insert_materials
 from tests.helpers.run_chunking import material_item as _material_item
 from tests.helpers.run_chunking import workspace as _workspace
+
+
+def _advisory_key(job_db, job_id: str) -> int:
+    with job_db.read() as conn:
+        row = conn.execute("select hashtext(%s) as k", (f"job-mutation:{job_id}",)).fetchone()
+    assert row is not None
+    return int(row["k"]) & 0xFFFFFFFFFFFFFFFF
+
+
+def _advisory_waiters(job_db, job_id: str) -> list[int]:
+    """正等待该 job-mutation 锁（granted=False）的 backend pid——键级 pg_locks 观测。
+
+    单键 advisory 锁（objsubid=1）在 pg_locks 里拆成 (classid, objid) 两段
+    32 位，按无符号 64 位还原后与 hashtext 比对（同 test_job_create_mutation_lock）。
+    """
+    expected = _advisory_key(job_db, job_id)
+    with job_db.read() as conn:
+        rows = conn.execute(
+            "select classid, objid, pid from pg_locks"
+            " where locktype='advisory' and objsubid=1 and granted=false",
+        ).fetchall()
+    return [
+        int(row["pid"])
+        for row in rows
+        if ((int(row["classid"]) << 32) | int(row["objid"])) & 0xFFFFFFFFFFFFFFFF == expected
+    ]
+
+
+def _await_advisory_waiter(
+    job_db, job_id: str, *, thread: threading.Thread, timeout: float = 10.0
+) -> list[int]:
+    """等到有 backend 正等待该 job 的 job-mutation advisory 锁（#1342 键级观测）。
+
+    替代 ``wait_until_blocked_by`` 单端探针：pg_blocking_pids 分不出 B 等的是
+    advisory 锁还是 A 未提交插入的唯一索引仲裁——删掉创建侧的 advisory 锁，
+    B 仍被 A 阻塞、单端探针照样返回（测试假绿）。键级观测直接钉「有等待者
+    挂在这把 advisory 键上」。B 提前结束（没走到锁点就写入 / 报错）即失败。
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        waiters = _advisory_waiters(job_db, job_id)
+        if waiters:
+            return waiters
+        if not thread.is_alive():
+            raise AssertionError("waiter thread finished without waiting on the advisory lock")
+        time.sleep(0.02)
+    raise TimeoutError(f"no backend waiting on job-mutation:{job_id} within {timeout}s")
 
 
 @pytest.fixture
@@ -339,16 +387,21 @@ def test_identity_precheck_blocks_on_in_flight_id_insert(service, job_db) -> Non
 
     thread_a = threading.Thread(target=_submit, args=("a", _material_item("col")))
     thread_a.start()
+    # 撞 id 的 job（material `col` 与 bundle `col` 同图）——B 必须等在这把
+    # job-mutation advisory 锁上。
+    raced_job_id = encode_job_id(WORKSPACE_ID, WORKFLOW_KEY, "col")
     try:
-        a_pid = _parked_insert_pid()  # A 在途：行已插、事务未提交
+        _parked_insert_pid()  # A 在途：行已插、事务未提交
         assert thread_a.is_alive(), "A should be parked inside its INSERT"
         thread_b = threading.Thread(
             target=_submit, args=("b", {"type": "bundle", "bundle_id": "col"})
         )
         thread_b.start()
-        # B 必须等 A 的在途插入有结论：被 A 阻塞（job-mutation advisory 锁）。
-        # B 提前结束（预查空过后直接写入 / 报错）即失败。
-        wait_until_blocked_by(a_pid, thread=thread_b, dsn=job_db.dsn_identity)
+        # B 必须等 A 的在途插入有结论，且等的必须是 job-mutation advisory 锁
+        # 本身（键级 pg_locks 观测，#1342）：pg_blocking_pids 单端探针分不出
+        # advisory 锁与 A 未提交插入的唯一索引仲裁（删掉创建侧 advisory 锁它
+        # 照样返回、测试假绿）。B 提前结束（预查空过后直接写入 / 报错）即失败。
+        _await_advisory_waiter(job_db, raced_job_id, thread=thread_b)
         assert "b" not in outcome
         thread_a.join(timeout=15)
         thread_b.join(timeout=15)

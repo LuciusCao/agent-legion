@@ -420,6 +420,8 @@ def test_batch_claim_promotes_awaiting_approval_job(job_db) -> None:
 
     claims = claim_batch(broker(job_db.jobs_dir.parent), "worker-1", None, None, limit=2)
 
-    assert [claim.job_id for claim in claims] == ["job-0", "job-1"]
+    # 两个都领到即通过；返回序是批写入段的全局锁序（#1346 起按实际
+    # job-mutation 锁键，不是 job_id 文本序）——不是本用例的主题。
+    assert sorted(claim.job_id for claim in claims) == ["job-0", "job-1"]
     job = job_db.get_job("job-0")
     assert job["status"] == "running"

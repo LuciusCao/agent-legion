@@ -173,8 +173,9 @@ def test_batch_claim_keeps_prefix_when_a_candidate_races(job_db, monkeypatch) ->
     上直接注入 ClaimRacedError（测试主题是 savepoint 容错本身）。
     """
     _seed_agent_jobs(job_db, 3)
-    # 队列序：job-0（正常）→ job-1（竞态）→ job-2（不应被领到——批在竞态
-    # 处终止）。
+    # 批写入段按全局锁序 promote（#1346：同 ws 下按实际 job-mutation 锁键，
+    # 不是 job_id 文本序）——竞态 victim 必须取锁序居中者：期望前缀 = 锁序
+    # 最小者领到，锁序最大者本批不再评估。
     base = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
     with job_db.connect() as conn:
         for offset in range(3):
@@ -182,6 +183,13 @@ def test_batch_claim_keeps_prefix_when_a_candidate_races(job_db, monkeypatch) ->
                 "update agent_execution_requests set queued_at=%s where job_id=%s",
                 (base + timedelta(seconds=offset), f"job-{offset}"),
             )
+        rows = conn.execute(
+            "select id, hashtext('job-mutation:' || id)::int as jk"
+            " from jobs where id in ('job-0', 'job-1', 'job-2')"
+        ).fetchall()
+    first_job, raced_job, last_job = [
+        str(item["id"]) for item in sorted(rows, key=lambda r: (int(r["jk"]), str(r["id"])))
+    ]
     _register_worker()
 
     import server.app.agent_broker.claim_evaluate as evaluate_module
@@ -190,7 +198,7 @@ def test_batch_claim_keeps_prefix_when_a_candidate_races(job_db, monkeypatch) ->
     original_promote = evaluate_module.promote_claim
 
     def raced_promote(broker, conn, worker_id, selected, manifest, kind, **kwargs):
-        if selected["job_id"] == "job-1":
+        if selected["job_id"] == raced_job:
             raise ClaimRacedError()
         return original_promote(broker, conn, worker_id, selected, manifest, kind, **kwargs)
 
@@ -198,7 +206,7 @@ def test_batch_claim_keeps_prefix_when_a_candidate_races(job_db, monkeypatch) ->
 
     claims = claim_batch(broker(job_db.jobs_dir.parent), "worker-1", None, None, limit=3)
 
-    assert [claim.job_id for claim in claims] == ["job-0"]
+    assert [claim.job_id for claim in claims] == [first_job]
     with job_db._connect_read() as conn:
         rows = conn.execute(
             "select job_id, state from agent_execution_requests order by job_id"
@@ -206,7 +214,7 @@ def test_batch_claim_keeps_prefix_when_a_candidate_races(job_db, monkeypatch) ->
     states = {row["job_id"]: row["state"] for row in rows}
     # 竞态候选回滚到 savepoint：请求保持 queued（未被 cancel、未被 claim），
     # 后继候选本批不再评估。
-    assert states == {"job-0": "claimed", "job-1": "queued", "job-2": "queued"}
+    assert states == {first_job: "claimed", raced_job: "queued", last_job: "queued"}
 
 
 def test_batch_claim_empty_queue_returns_empty(job_db) -> None:
@@ -260,8 +268,9 @@ def test_batch_claim_floor_follows_actual_lock_key(job_db) -> None:
     文本序与 int 锁键序相反的 ws 对（约一半 id 对如此，无需碰撞）上，
     文本域的 floor 会让「文本较小、锁键较大」之后的候选下探，破坏批内
     升序纪律。钉子：播种一对反序 id，队首（文本较小、锁键较大）先领后，
-    文本较大但锁键更小的候选必须被让位到下一批——同
-    test_try_claim_many_orders_by_actual_ws_lock_key 的 agent 批形态。"""
+    文本较大但锁键更小的候选必须被让位到下一批。（floor 是选择段的
+    公平/限界纪律；写入段的 ws 锁自 #1378 起在事务首句按实际键升序
+    预取。）"""
     # 播种一对「文本序与 hashtext int 序相反」的 workspace id。
     pool_ids: list[tuple[str, int]] = []
     with job_db.connect() as conn:
@@ -342,9 +351,9 @@ def test_code_candidates_ignore_agent_workspace_lock_floor(job_db) -> None:
     )
 
     # 写入段的稳定锁序（EXEC-GENERATION-001 #645 P2：SAVEPOINT 不释放
-    # advisory xact 锁）把 code 候选与 agent 候选统一按 (ws_lock_key,
-    # job_id) 排序；本测试只钉「code 候选不被 agent-ws floor 过滤」——
-    # 两类在同一批都领到。
+    # advisory xact 锁）把 code 候选与 agent 候选统一按纯 (job_lock_key,
+    # job_id) 排序（#1378：无 ws 分桶）；本测试只钉「code 候选不被
+    # agent-ws floor 过滤」——两类在同一批都领到。
     assert sorted(claim.kind for claim in claims) == ["agent", "code"]
 
 

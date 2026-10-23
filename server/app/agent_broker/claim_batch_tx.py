@@ -17,14 +17,20 @@ execute against write-time state. A candidate that left the runnable set
 since selection skips (stale) or, when the exit lands mid-promote, rolls
 its own savepoint back (``ClaimRacedError``); nothing is half-applied.
 
-Lock order (EXEC-CLAIM-LOCK-001 + EXEC-GENERATION-001): the selection's
-ascending ``agent-ws:`` capacity-lock floor fixes agent promote order; on top
-of it this module re-sorts the batch into one globally consistent lock
-order — EVERY candidate (code included) ascending by ``(ws_lock_key,
-job_id)``, the same key ``finish_many`` / ``try_claim_many`` / the sweeps
-walk. Code candidates take no ``agent-ws:*`` lock and borrow the key purely
-as a sort position (#645 review P2: the old code-first job_id block could
-AB-BA against a finish batch walking the same two jobs in ws-key order). A
+Lock order (EXEC-CLAIM-LOCK-001 + EXEC-GENERATION-001): pool locks first,
+then job-mutation locks. At transaction start the batch pre-acquires the
+code-pool lock when any selected code candidate has a node-limit row (#1149
+P2-2) and every selected agent workspace's ``agent-ws:*`` lock in ascending
+actual-key order (#1378 codex P2); then this module re-sorts the batch into
+one globally consistent lock order — EVERY candidate (code included)
+ascending by ``(job_lock_key, job_id)``, the same PURE key ``finish_many``
+/ ``try_claim_many`` / the sweeps walk. ``job_lock_key`` is the ACTUAL
+``job-mutation:`` advisory key and there is no ws bucket: a bucketed order
+still walks a cross-workspace collision-alias pair in opposite orders
+(#1346's collision fold survives any prefix). Code candidates take no
+``agent-ws:*`` lock and never did need a sort position (#645 review P2's
+code-first block could AB-BA against a finish batch walking the same two
+jobs in ws-key order — the shared pure key order is the fix that stuck). A
 ``pg_advisory_xact_lock`` is NOT released by ROLLBACK TO SAVEPOINT, so every
 ``job-mutation:<job_id>`` lock a candidate takes is held to COMMIT: without
 the stable sort two concurrent batches walking the same jobs in different
@@ -119,20 +125,27 @@ def _promote_selected(
 
 
 def _lock_order_sorted(candidates: tuple[Any, ...]) -> list[Any]:
-    """Stable batch lock order (EXEC-GENERATION-001, #759 phase 1c; #645 P2).
+    """Stable batch lock order (EXEC-GENERATION-001, #759 phase 1c; #645 P2;
+    #1346; #1378 codex P2).
 
     Advisory xact locks survive SAVEPOINT rollback, so the batch accumulates
     every candidate's ``job-mutation:<job_id>`` lock to COMMIT; two batches
     taking them in different orders could AB-BA. ALL candidates — code
-    included — sort by the single global batch key ``(ws_lock_key, job_id)``
-    shared with ``finish_many`` / ``try_claim_many`` / the sweeps: code
-    candidates take no ``agent-ws:*`` lock and borrow the key purely as a
-    sort position, so a mixed batch can no longer walk the same two jobs
-    opposite to a finish/claim batch.
+    included — sort by the single global batch key ``(job_lock_key, job_id)``
+    shared with ``finish_many`` / ``try_claim_many`` / the sweeps:
+    ``job_lock_key`` is the ACTUAL advisory key
+    (``hashtext('job-mutation:' || job_id)``), and there is NO ws bucket — a
+    ws-prefixed order still walks a cross-workspace collision-alias pair
+    ((W1,K1),(W2,K2) vs (W1,K2),(W2,K1)) in opposite orders. ``job_id`` is
+    only the same-key tiebreak. The pool-level locks this batch also takes
+    are covered by the lock-LEVEL order (pool before job-mutation): code-pool
+    and every selected agent workspace's ``agent-ws:*`` lock are pre-acquired
+    in ascending key order at transaction start (``claim_batch_in_transaction``)
+    before the first job-mutation lock.
     """
     return sorted(
         candidates,
-        key=lambda row: (int(row["ws_lock_key"]), str(row["job_id"])),
+        key=lambda row: (int(row["job_lock_key"]), str(row["job_id"])),
     )
 
 
@@ -187,6 +200,20 @@ def claim_batch_in_transaction(
     # 行无法中途补锁（frozen 决策抑制逐候选获取）——该候选按
     # node_limit_appeared skip，下一批在新事务里以正常锁序领取。
     code_pool_lock = claim_node_limit.lock_code_pool_for_batch(conn, selection.candidates)
+    # #1378 codex P2：批内 job-mutation 走纯 (锁键, job_id) 全序（不再按 ws
+    # 分桶），所以 agent 候选的 agent-ws 池锁必须在首个 job-mutation 锁之前
+    # 统一预取（锁层级序：池锁 → job-mutation）——按实际 ws 锁键升序，与
+    # code-pool 的事务首句获取（#1149 P2-2）同族。同键跨 ws 碰撞无害（同一
+    # 锁资源，一次获取即覆盖）；预取到最终 skip 的候选的 ws 锁只是多持到
+    # COMMIT 的容量锁，不换序正确性。evaluate_candidate 内逐候选的 ws 获取
+    # 此处已成可重入 no-op。
+    ws_domains = {
+        int(row["ws_lock_key"]): f"agent-ws:{row['workspace_id']}"
+        for row in selection.candidates
+        if str(row["kind"]) != "code"
+    }
+    for ws_key in sorted(ws_domains):
+        conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (ws_domains[ws_key],))
     for candidate in _lock_order_sorted(selection.candidates):
         claimed, raced = _promote_selected(
             broker, conn, worker_id, candidate, view, state, timer, code_pool_lock

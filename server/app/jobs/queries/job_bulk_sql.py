@@ -118,13 +118,13 @@ def insert_job_nodes_batched(conn: Any, pairs: list[tuple[str, str]]) -> None:
 
 LOCK_JOB_MUTATIONS_SQL = """
 select pg_advisory_xact_lock(hashtext('job-mutation:' || t.id))
-from unnest(%s::text[]) with ordinality as t(id, ord)
-order by t.ord
+from unnest(%s::text[]) as t(id)
+order by hashtext('job-mutation:' || t.id), t.id
 """
 
 
 def lock_job_mutations_sorted(conn: Any, job_ids: Iterable[str]) -> None:
-    """Take ``job-mutation:<id>`` for every id, sorted, held to COMMIT (#1083).
+    """Take ``job-mutation:<id>`` for every id, in lock-key order, held to COMMIT (#1083).
 
     Job creation joins the EXEC-GENERATION-001 lock domain so the deletion
     cleanup's "row absent under the lock → rename into .trash" step is atomic
@@ -135,29 +135,35 @@ def lock_job_mutations_sorted(conn: Any, job_ids: Iterable[str]) -> None:
     transaction — level 2 of the global lock order, ahead of the chunk's
     material/bundle FOR KEY SHARE probes and the jobs upsert.
 
-    Ascending ``job_id`` is the global batch order
-    ``(hashtext('agent-ws:' || workspace_id), job_id)`` restricted to one
-    workspace — every creating call is single-workspace — so a create chunk
-    never walks two jobs opposite to finish_many / claim batches / sweeps.
-    Precondition: no id may name an existing job of ANOTHER workspace.
-    Structurally true for new ids since #1255 (injective encoding — a
-    cross-workspace coincidence would need a pre-v62 legacy row whose
-    workspace/workflow id carries ``~``, which the v62 workspace-id contract
-    forbids); bulk callers still reject every committed collision first
-    (``verify_chunk_identities``, #1243) as the integrity guard for that
-    legacy residue.
+    The global batch order is the PURE ``(hashtext('job-mutation:' || id),
+    id)`` order — #1346 + #1378 codex P2: the lock resource is the 32-bit
+    ``hashtext`` of the key, not the id text, and there is no ws bucket —
+    any prefix (workspace or otherwise) still lets a collision-alias pair
+    (W1's K1 and W2's K1 are the SAME lock) be walked in opposite orders by
+    two cross-workspace batches. Ordering by the ACTUAL advisory key (id
+    only as the same-key tiebreak) is the one total order every path shares;
+    every creating call is single-workspace anyway, so the SQL's
+    ``(hashtext, id)`` order IS the global order — a create chunk never
+    walks two jobs opposite to finish_many / claim batches / sweeps. Precondition: no id may
+    name an existing job of ANOTHER workspace. Structurally true for new ids
+    since #1255 (injective encoding — a cross-workspace coincidence would
+    need a pre-v62 legacy row whose workspace/workflow id carries ``~``,
+    which the v62 workspace-id contract forbids); bulk callers still reject
+    every committed collision first (``verify_chunk_identities``, #1243) as
+    the integrity guard for that legacy residue.
 
-    One round trip (#1243 codex R2): ``LOCK_JOB_MUTATIONS_SQL`` over the
-    Python-sorted array. Acquisition follows ``ord``: the ordinality scan
-    already emits ``ord`` order, so the planner elides the Sort and evaluates
-    the volatile lock per scanned row; if a Sort is ever planned, volatile
-    target-list expressions are computed ABOVE it (``make_sort_input_target``,
-    PostgreSQL ≥ 9.6). Pinned by an EXPLAIN test (no Sort above the node that
-    evaluates the lock) and by the pg_locks ordering test.
+    One round trip (#1243 codex R2): the ORDER BY is on the actual lock key,
+    so the plan carries a Sort — correctness needs the volatile
+    ``pg_advisory_xact_lock`` evaluated ABOVE it (acquisition follows the
+    sorted order). PostgreSQL ≥ 9.6 keeps volatile target-list expressions
+    out of the sort input (``make_sort_input_target``): the lock is computed
+    per output row of the Sort, in ``(hashtext, id)`` order. Pinned by an
+    EXPLAIN test (a Sort on the lock key MUST sit below the lock-evaluating
+    node) and by the pg_locks ordering / colliding-quadruple deadlock tests.
     """
-    ordered = sorted(set(job_ids))
-    if ordered:
-        conn.execute(LOCK_JOB_MUTATIONS_SQL, (ordered,)).fetchall()
+    deduped = sorted(set(job_ids))
+    if deduped:
+        conn.execute(LOCK_JOB_MUTATIONS_SQL, (deduped,)).fetchall()
 
 
 def lock_rows_for_key_share(

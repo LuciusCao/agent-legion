@@ -330,39 +330,42 @@ def test_kill_switch_none_batcher_takes_direct_path(job_db) -> None:
     assert job_db.get_job_node("job-1", "generate")["status"] == "completed"
 
 
-def test_finish_many_sorts_writes_by_ws_lock_key_then_job(job_db) -> None:
-    """The batch writes in the single global job-mutation batch order —
-    (hashtext('agent-ws:' || workspace_id)::int, job_id), shared with
+def test_finish_many_sorts_writes_by_job_lock_key(job_db) -> None:
+    """The batch writes in the single global job-mutation batch order — the
+    PURE (hashtext('job-mutation:' || id)::int, job_id) order, shared with
     try_claim_many / expire / recover / the agent sweep and the agent claim
-    batch's agent block (EXEC-GENERATION-001, #759 phase 7: every finish
-    takes the job-mutation:<job_id> advisory xact lock, never released before
-    COMMIT, so one cross-batch order prevents AB-BA) — and restores verdicts
-    to queue order."""
+    batch's all-kinds order (EXEC-GENERATION-001, #759 phase 7; #1346: the
+    ACTUAL advisory key, not the id text; #1378 codex P2: no ws bucket — a
+    bucketed order still walks cross-workspace collision-alias pairs in
+    opposite orders): every finish takes the job-mutation:<job_id> advisory
+    xact lock, never released before COMMIT, so one cross-batch order
+    prevents AB-BA — and restores verdicts to queue order."""
     seed_request(job_db, job_id="job-01", limit=10, workspace_id="ws-a")
     seed_request(job_db, job_id="job-02", limit=10, workspace_id="ws-a")
     seed_request(job_db, job_id="job-03", limit=10, workspace_id="ws-b")
     seed_request(job_db, job_id="job-04", limit=10, workspace_id="ws-b")
     # Distinct run_ids with their own inversion inside ws-a: neither the
-    # run_id nor the workspace TEXT may reorder the writes — only the
-    # server-side lock key does. The expected order is computed from the
-    # real hashtext keys, so the test pins the algorithm itself.
+    # run_id nor the workspace (text OR lock key) may reorder the writes —
+    # only the actual job-mutation lock key does. The expected order is
+    # computed from the real hashtext keys, so the test pins the algorithm
+    # itself.
     with job_db.connect() as conn:
         conn.execute("update jobs set run_id='run-B' where id='job-01'")
         conn.execute("update jobs set run_id='run-A' where id='job-02'")
         conn.execute("update jobs set run_id='run-A' where id='job-03'")
         conn.execute("update jobs set run_id='run-B' where id='job-04'")
         rows = conn.execute(
-            "select id, hashtext('agent-ws:' || workspace_id)::int as k"
+            "select id, hashtext('job-mutation:' || id)::int as jk"
             " from jobs where id in ('job-01', 'job-02', 'job-03', 'job-04')"
         ).fetchall()
-    key_by_job = {str(row["id"]): (int(row["k"]), str(row["id"])) for row in rows}
+    key_by_job = {str(row["id"]): (int(row["jk"]), str(row["id"])) for row in rows}
     expected_order = sorted(key_by_job, key=lambda j: key_by_job[j])
     _setup_worker(job_db)
     leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     claimed = [broker.claim("worker-1") for _ in range(4)]
     assert all(c is not None for c in claimed)
-    # Reverse queue order; the batch must still write in (ws lock key, job_id).
+    # Reverse queue order; the batch must still write in (job lock key, job_id).
     order: list[str] = []
     real_finish_lease = _lease_finish_batch.finish_lease
 
@@ -389,31 +392,44 @@ def test_finish_many_sorts_writes_by_ws_lock_key_then_job(job_db) -> None:
     assert order == expected_order
 
 
-def test_finish_many_orders_by_actual_ws_lock_key(job_db) -> None:
-    """The deterministic leading key is the workspace lock hash, not text
-    and not job_id: a workspace pair whose text order disagrees with its
-    hashtext('agent-ws:' || …)::int order must write in hash order."""
-    # 找一对 hashtext int 序与文本序相反的 workspace id：候选池里文本较小
-    # 的 id 锁键更大、文本较大的 id 锁键更小（500 个候选必命中）。
-    candidates: list[tuple[str, int]] = []
+def test_finish_many_ignores_workspace_lock_key(job_db) -> None:
+    """#1378 codex P2：ws 分桶已退役——写序不再被 agent-ws 锁键（或 ws 文本）
+    影响，只跟实际 job-mutation 锁键走。
+
+    夹具：一对 workspace 的 agent-ws 锁键序与其 job 的 job-mutation 锁键序
+    相反（ws_first 的 ws 键更小、其 job 的 job 锁键更大）——ws 分桶序会把
+    ws_first 的 job 排前，纯键序必须把 ws_second 的 job 排前。"""
+    ws_first, ws_second = "ws-nb-first", "ws-nb-second"
+    # 挑 job id 使 job 锁键序与 ws 锁键序相反（候选少量即命中）。
+    pair_keys: dict[str, int] = {}
     with job_db.connect() as conn:
-        for i in range(500):
-            row = conn.execute(
-                "select hashtext(%s)::int as k", (f"agent-ws:ws-c{i:03d}",)
-            ).fetchone()
-            assert row is not None
-            candidates.append((f"ws-c{i:03d}", int(row["k"])))
-    ws_first, ws_second = "", ""
-    for wid, key in sorted(candidates):
-        smaller = [w for w, other_key in candidates if w > wid and other_key < key]
-        if smaller:
-            # wid 文本更小但锁键更大；min(smaller) 文本更大但锁键更小。
-            ws_first, ws_second = min(smaller), wid
-            break
-    assert ws_first and ws_second, "expected an inverted (text, lock-key) pair"
-    # job id 再反一层：纯文本 job_id 序会把 ws_second 的 job 排在前面。
-    seed_request(job_db, job_id="job-a", limit=10, workspace_id=ws_second)
-    seed_request(job_db, job_id="job-z", limit=10, workspace_id=ws_first)
+        ws_keys = {
+            ws: int(
+                conn.execute("select hashtext(%s)::int as k", (f"agent-ws:{ws}",)).fetchone()["k"]
+            )
+            for ws in (ws_first, ws_second)
+        }
+        pair: tuple[str, str] | None = None
+        for i in range(200):
+            job_first, job_second = f"job-f{i:03d}", f"job-s{i:03d}"
+            key_first = int(
+                conn.execute(
+                    "select hashtext('job-mutation:' || %s)::int as k", (job_first,)
+                ).fetchone()["k"]
+            )
+            key_second = int(
+                conn.execute(
+                    "select hashtext('job-mutation:' || %s)::int as k", (job_second,)
+                ).fetchone()["k"]
+            )
+            if (key_first < key_second) != (ws_keys[ws_first] < ws_keys[ws_second]):
+                pair = (job_first, job_second)
+                pair_keys = {job_first: key_first, job_second: key_second}
+                break
+    assert pair is not None, "expected a job pair whose key order inverts the ws key order"
+    job_first, job_second = pair
+    seed_request(job_db, job_id=job_first, limit=10, workspace_id=ws_first)
+    seed_request(job_db, job_id=job_second, limit=10, workspace_id=ws_second)
     _setup_worker(job_db)
     leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
@@ -435,16 +451,17 @@ def test_finish_many_orders_by_actual_ws_lock_key(job_db) -> None:
 
     batch_module.finish_lease = _recording_finish_lease
     try:
-        # 队列序与锁键序相反（ws_second 的 job-a 先）——写序必须按锁键序。
         writes = [
-            (by_job["job-a"], ExecutionResult(status="completed", exit_code=0), None),
-            (by_job["job-z"], ExecutionResult(status="completed", exit_code=0), None),
+            (by_job[job_first], ExecutionResult(status="completed", exit_code=0), None),
+            (by_job[job_second], ExecutionResult(status="completed", exit_code=0), None),
         ]
         verdicts, _callbacks = _lease_finish_batch.finish_many_with_retry(leases, writes)
     finally:
         batch_module.finish_lease = real_finish_lease
     assert verdicts == [True, True]
-    assert order == ["job-z", "job-a"], "write order must follow the ws lock key"
+    # 纯键序：job 锁键较小者在前——与 ws 锁键序相反（分桶序的断言必红）。
+    expected = sorted((job_first, job_second), key=lambda j: pair_keys[j])
+    assert order == expected, "write order must follow the job lock key, not the ws bucket"
 
 
 def test_post_stop_submit_takes_direct_path(job_db) -> None:

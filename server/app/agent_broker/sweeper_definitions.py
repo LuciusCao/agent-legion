@@ -51,7 +51,7 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
             """
             select r.execution_id, r.job_id, r.node_key, r.agent_id,
                    r.workspace_id,
-                   hashtext('agent-ws:' || r.workspace_id)::int as ws_lock_key
+                   hashtext('job-mutation:' || r.job_id)::int as job_lock_key
             from agent_execution_requests r
             where r.state='queued'
               -- kind='code' payloads are self-contained: no versioned Agent
@@ -73,10 +73,12 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
               )
             """
         ).fetchall()
-        # EXEC-GENERATION-001 single global batch order (ws lock key,
-        # job_id): advisory xact locks accumulate until COMMIT, so the walk
-        # order must match finish_many / the claim batch / the other sweeps.
-        for row in sorted(rows, key=lambda r: (int(r["ws_lock_key"]), str(r["job_id"]))):
+        # EXEC-GENERATION-001 single global batch order (PURE job lock key,
+        # job_id — #1346 + #1378 codex P2: the ACTUAL advisory key
+        # hashtext('job-mutation:' || job_id), no ws bucket): advisory xact
+        # locks accumulate until COMMIT, so the walk order must match
+        # finish_many / the claim batch / the other sweeps.
+        for row in sorted(rows, key=lambda r: (int(r["job_lock_key"]), str(r["job_id"]))):
             if not lock_sweep_candidate(conn, row):
                 continue
             error = (
