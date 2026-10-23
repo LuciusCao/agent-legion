@@ -30,7 +30,8 @@ export function resolveStudioNodeRouting(
     return {
       agentId: agent?.id ?? null,
       executionType: 'agent',
-      executionRuntime: node.execution?.runtime ?? null,
+      // 空串归一为 null（草稿记录的 execution 可能携带归一后的空值键）。
+      executionRuntime: node.execution?.runtime || null,
       executorUnbound: false,
     }
   }

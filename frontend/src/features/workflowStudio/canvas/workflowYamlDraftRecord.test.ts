@@ -391,6 +391,42 @@ nodes:
     expect(nodes._start?.execution).toBeUndefined()
   })
 
+  it('carries execution runtime into the draft record (#1180 草稿画布徽标口径)', () => {
+    // r3 评审回归：runtime 丢失会让草稿画布的 agent·runtime 类型徽标恒无
+    // runtime；顶层 runtime 默认只达 agent 节点（#933，对齐后端 loader）。
+    const record = workflowYamlToDefinitionRecord(`key: demo
+execution:
+  provider: openai
+  model: gpt-5
+  runtime: pi
+nodes:
+  _start:
+    type: start
+  review:
+    type: agent
+    capability: review
+  classify:
+    type: agent
+    capability: classify
+    execution:
+      runtime: velites
+  fetch:
+    capability: fetch
+`)
+    const nodes = Object.fromEntries(
+      (record?.nodes ?? []).map((node) => [node.key, node])
+    )
+    // 顶层默认落到未声明的 agent 节点。
+    expect(nodes.review?.execution?.runtime).toBe('pi')
+    // 节点声明值优先。
+    expect(nodes.classify?.execution?.runtime).toBe('velites')
+    // code 节点不携带 runtime。
+    expect(nodes.fetch?.execution && 'runtime' in nodes.fetch.execution).toBe(
+      false
+    )
+    expect(nodes._start?.execution).toBeUndefined()
+  })
+
   it('normalizes non-string execution values instead of crashing the canvas (codex P1)', () => {
     // `provider: 1`、`model: true`：合法 YAML、非法契约值。草稿持久化后
     // 重开会反复走到这里——不得抛异常，非字符串按未配置归一（后续由

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildDagNodes } from './workflowStudioDag'
+import { workflowYamlToDefinitionRecord } from './workflowYamlDraftRecord'
 
 const workflow = {
   key: 'wf',
@@ -227,5 +228,37 @@ describe('buildDagNodes', () => {
     expect(nodes[1].topologyBadges).toEqual(['approval', 'branch'])
     // 审批门不 dispatch：不产生 execution 缺口误报。
     expect(nodes[1].executionWarning).toBeUndefined()
+  })
+
+  it('reaches the agent·runtime badge from draft YAML through the draft record (#1180)', () => {
+    // r3 评审回归：草稿画布（主编辑视图）走 workflowYamlToDefinitionRecord
+    // → buildDagNodes 链——mergeNodeExecution 漏丢 runtime 时草稿画布
+    // agent 节点恒只显示「agent」，与只读 revision 视图的「agent·velites」
+    // 口径不一致。这里钉住全链路数据到达。
+    const draftRecord = workflowYamlToDefinitionRecord(`key: demo
+nodes:
+  _start:
+    type: start
+    inputs: []
+    outputs: []
+  review:
+    type: agent
+    capability: review
+    label: Review
+    inputs: []
+    outputs: []
+    execution:
+      provider: openai
+      model: gpt-5
+      runtime: velites
+edges: []
+`)
+    const nodes = buildDagNodes(draftRecord)
+    const review = nodes.find((node) => node.key === 'review')
+
+    expect(review).toMatchObject({
+      executionType: 'agent',
+      executionRuntime: 'velites',
+    })
   })
 })
