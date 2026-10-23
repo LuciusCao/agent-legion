@@ -62,7 +62,9 @@ def main() -> int:
     print(
         f"材料 {args.material_id} 已翻回 uploading（代次 "
         f"{outcome['upload_generation']}、key 已轮换、object_etag 已清）。"
-        "请用下面的一次性 PUT URL 重传（1 小时有效），随后 complete 携带代次：\n"
+        "请用下面的一次性 PUT URL 重传（1 小时有效；#1321 起 URL 签入条件写，"
+        "PUT 必须携带 -H 'If-None-Match: *'，412 = 对象已存在按已上传处理），"
+        "随后 complete 携带代次：\n"
         f"  PUT {outcome['upload_url']}\n"
         f"  complete: expected_upload_generation={outcome['upload_generation']}"
     )

@@ -2,6 +2,7 @@
 
 from server.app.storage.probe import build_s3_storage_checked
 from server.app.storage.s3_client import (
+    IF_NONE_MATCH_STAR,
     ObjectHead,
     ObjectStorage,
     S3StorageClient,
@@ -11,6 +12,7 @@ from server.app.storage.s3_client import (
 from server.app.storage.s3_settings import S3Settings, load_s3_settings
 
 __all__ = [
+    "IF_NONE_MATCH_STAR",
     "ObjectHead",
     "ObjectStorage",
     "S3Settings",

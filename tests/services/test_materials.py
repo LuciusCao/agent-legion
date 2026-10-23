@@ -50,6 +50,18 @@ def test_presign_creates_uploading_row_and_url(service, storage) -> None:
     (presigned_key, expiry) = storage.presigned[0]
     assert presigned_key == f"{WORKSPACE_ID}/{digest}/v2g0/m_{material['id']}/a.txt"
     assert expiry == 3600
+    # #1321：PUT URL 签入 If-None-Match: *（create-only 条件写）。
+    assert storage.put_if_none_match == ["*"]
+
+
+def test_presign_retry_url_is_create_only_too(service, storage) -> None:
+    """#1321：重试轮换代次 key 后重签的 URL 同样签入 If-None-Match: *。"""
+    digest = _sha256(b"cond")
+    service.presign(WORKSPACE_ID, filename="c.txt", size_bytes=1, content_hash=digest)
+
+    service.presign(WORKSPACE_ID, filename="c.txt", size_bytes=1, content_hash=digest)
+
+    assert storage.put_if_none_match == ["*", "*"]
 
 
 def test_presign_without_hash_uses_material_id_in_key(service, storage) -> None:

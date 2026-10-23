@@ -355,7 +355,8 @@ all-in-one，#340；RustFS 为存量逃生舱），开发环境成本可控：
 ```
 POST /api/workspaces/{id}/materials/presign   {filename, size_bytes, content_hash?}
    → {material_id, upload_url}                  已存在同 hash 直接返回 ready
-PUT  upload_url（浏览器 → S3 直传；v1 为单 PUT presign，大文件 multipart
+PUT  upload_url（浏览器 → S3 直传，携带 If-None-Match: * 条件写头（#1321）；
+     v1 为单 PUT presign，大文件 multipart
      与签名级 size 约束（presigned POST policy）列为后续优化）
 POST /api/workspaces/{id}/materials/{mid}/complete  服务端校验 size/hash → ready
 ```
@@ -414,6 +415,18 @@ v2g key 并为**原行**签发受代次保护的重传 URL（hash/无 hash 统�
 启动调度前必须跑 `scripts/rebind_material_etags.py` 重绑（字节核验不过 fail-closed），
 见 backup-restore-runbook.md。
 
+存储层条件写（#1321，与 #1316/#1319 ETag 门禁同族）：presign 首发/重试与 repair 重签的
+PUT URL 一律把 `If-None-Match: *` 签进 SignedHeaders——材料 key 在存储层 create-only，
+「complete 之后用同一 URL 覆盖」不再依赖消费侧检出，首个 PUT 落盘后同 URL 重放直接被
+412 关闭，§6.4.1 的 If-Match 核验链随之降为纵深防御。上传方必须原样携带该头（它进了
+SignedHeaders，缺头 403 SignatureDoesNotMatch）；网络重试（首 PUT 已落盘但响应丢失）
+遇到 412 按「已上传」处理、继续 complete，内容裁决不变（complete 的 size/hash 核验仍是
+权威）。presign 重试与 repair 本就轮换 v2g key（新 key 不存在对象），条件写不改变它们的
+可用性。后端契约：SeaweedFS 4.45 实测（#1319 + 本地复核）：缺头 403 / 首发 200 / 重放 412 /
+未签名的 If-None-Match 头同样被强制执行 412（对未签该头的存量 URL，新前端带头 PUT 仍获
+条件写语义）；RustFS 实测待办。存量 URL（升级前签出、未签该头，≤1h）的覆盖窗口由 #1316
+的绑定与消费侧 If-Match 覆盖。
+
 #### 6.4.1 无 hash 材料的身份状态机（#1279；#1316 存量行绑定）
 
 **不变量**：已绑定 etag 的无 `content_hash` 材料，其字节在每个消费入口都必须与绑定的
@@ -437,7 +450,7 @@ fail-closed 兜底。新 complete 的行原子落 ETag；inline / demo seed 产�
 | --- | --- | --- | --- | --- | --- |
 | hash 行（任意 etag） | sha256 fail-closed | 放行（sha256 兜底） | 下发 | sha256 fail-closed | 内容寻址 + 下载重算 |
 | 无 hash，etag 已绑（complete/rebind），URL 全死 | If-Match 核验 | **门禁拦**（留队列，不落失败） | 下发 etag | If-Match 核验 | v6 门禁 + If-Match |
-| 无 hash，etag 已绑，仍有活 URL（签发 1h 内）被覆盖 | 412 → MaterializeError（节点 failed，可 repair） | 门禁拦 | 下发 etag | 412 → 失败（可 repair） | If-Match 检出 + repair |
+| 无 hash，etag 已绑，仍有活 URL（签发 1h 内）被覆盖 | 412 → MaterializeError（节点 failed，可 repair） | 门禁拦 | 下发 etag | 412 → 失败（可 repair） | If-Match 检出 + repair；#1321 起新签 URL 的覆盖 PUT 在存储层即 412，本格只剩存量未签头 URL（≤1h） |
 | **repair/failed-retry 后刚落的新 etag**（TOCTOU：准入 → complete → 响应） | 若 repair 中：拒绝（not ready）；若已 complete：If-Match | **响应描述符快照复核拦**（batch per-item drop → lease 过期重排，非硬失败） | 同左 | 若准入后已 complete：412 检出 | 快照与下发一致（material_claim_descriptors.assert_worker_may_consume） |
 | 无 hash，etag=''（存量行） | **size-only 物化**（base 语义） | 放行 | 下发 etag='' | **size-only**（无条件 GET） | 方案 B：残留窗口 ≤1h，一次性 |
 | uploading/failed（任意身份） | 拒绝（not ready，节点 failed，既有） | uploading 拦（无 hash 无论 etag 与否，R12）；failed 不拦（维持失败语义） | 拒绝（claim 500 → 回收重排，既有） | — | 解析链只收 ready |
@@ -545,9 +558,11 @@ status='ready' ∧ content_hash='' ∧ object_etag='' ∧ storage_key ∧ upload
 | 先新装库、再导入存量行（非标准恢复） | 下一次 Host 启动 / CLI 时绑定 |
 
 **已声明接受格**：
-- **pre-complete 幽灵写绑身份**（能力模型边界）：作者 PUT 之后、complete 的 HEAD 之前，活 URL
-  持有者可同尺寸重写并被绑成身份——presigned URL 即作者通道，URL 外泄不在威胁模型内；hash
-  行免疫；无 hash 行结构性「最后写入者即作者」，关不掉（除非强制 content_hash）。存量行的
+- **pre-complete 幽灵写绑身份**（能力模型边界）：presigned URL 即作者通道，URL 外泄不在威胁
+  模型内。#1321 起该格收窄为「抢在作者首个 PUT 落盘之前写入」：此后任何同 URL 重写被
+  存储层 412 拒绝；抢跑者对 hash 行过不了 complete 的 sha256（422），仅无 hash 行结构性
+  「先写入者即作者」残留（除非强制 content_hash 否则关不掉）；存量未签头 URL（≤1h）
+  保留旧的「最后写入者即作者」形态。存量行的
   同类格：升级前、以及 Host 启动到绑定之间（秒级）的覆盖被绑成身份，与 base 等价。
 - **流中同尺寸撕裂**（存储契约）：If-Match 只校验 GET open 时刻；依赖存储的「单 GET 原子快照」
   （见 materials-storage-deployment.md 的后端契约）。
@@ -574,7 +589,7 @@ materials 行引用；key 由新 uuid（material_id）或行锁内单调递增�
 
 | 入口 | 写字节的方式 | 行先于对象的落点 |
 | --- | --- | --- |
-| presign 首发（`MaterialsService.presign`） | 浏览器经 presigned PUT（1h） | insert uploading 行提交后才签 URL |
+| presign 首发（`MaterialsService.presign`） | 浏览器经 presigned PUT（1h，签入 `If-None-Match: *`，#1321） | insert uploading 行提交后才签 URL |
 | presign 重试（同 hash 非 ready 行） | 同上，新代次 key | 行锁内代次 +1、派生 `v2g{n+1}` key，提交后才签 URL；旧 URL 指向死 key |
 | repair（`request_material_reupload`） | 同上 | 行锁内 ready→uploading、代次 +1、轮换 key，提交后才签 URL |
 | inline 文本（`run_text_batch`） | 服务端 `put_object` | chokepoint `material_object_publish`：无 hash uploading intent 行 → PUT/HEAD → 同事务删 intent + 插 ready（CAS：intent 必须仍在） |

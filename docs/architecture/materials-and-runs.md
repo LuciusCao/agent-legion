@@ -122,12 +122,18 @@ vault，两者不混。
 ```
 POST /api/workspaces/{id}/materials/presign   {filename, size_bytes, content_hash?}
    → {material_id, upload_url}                  已存在同 hash 直接返回 ready
-PUT  upload_url                                  浏览器 → S3 直传（单 PUT presign）
+PUT  upload_url                                  浏览器 → S3 直传（单 PUT presign，
+                                                 携带 If-None-Match: * 条件写头，#1321）
 POST /api/workspaces/{id}/materials/{mid}/complete  服务端校验 size/hash → ready
 ```
 
 SigV4 presigned PUT 无法约束 Content-Length，size/hash 一律由 complete 时服务端 HEAD + 流式
-校验强制。后端用内部 endpoint（`AGENT_LEGION_S3_ENDPOINT`）做 HEAD/GET/DELETE；签发给浏览器 /
+校验强制。PUT URL 把 `If-None-Match: *` 签进 SignedHeaders（#1321）：对象在存储层
+create-only——首个 PUT 落盘后，同一 URL 的任何重放/覆盖（含 complete 之后的复用）被存储层
+以 412 PreconditionFailed 关闭，消费侧的 If-Match ETag 核验（#1279）降为纵深防御；上传方
+必须原样携带该头（缺头 403 SignatureDoesNotMatch），网络重试（首 PUT 已落盘但响应丢失）
+遇到 412 按「已上传」处理、继续 complete（内容裁决仍在 complete 的 size/hash 核验）。
+后端用内部 endpoint（`AGENT_LEGION_S3_ENDPOINT`）做 HEAD/GET/DELETE；签发给浏览器 /
 remote worker 的 presigned URL 用 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`（未配置回落内部
 endpoint）——URL 必须以客户端实际可达的地址签发，不能签后改写 host。文件夹上传逐文件走同一
 协议。

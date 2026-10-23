@@ -31,14 +31,15 @@ fleet 不会错配存储形态）——压缩发生在对象层**之外**
 （`worker/artifact/gzip.py`，对象本体就是 gzip 字节流），不依赖任何后端的
 透明压缩 / `Content-Encoding` 元数据语义。对 SeaweedFS 无负面影响，且方向
 上互相强化：压缩把 KB 级 JSON 产物进一步缩小，正是 SeaweedFS volume/needle
-布局最擅长的小对象形态；presigned PUT/GET 只签 Bucket+Key（`s3_client.py`），
+布局最擅长的小对象形态；presigned GET 只签 Bucket+Key、PUT 另把 `If-None-Match: *`
+签进 SignedHeaders（材料 create-only 条件写，#1321，`s3_client.py`），
 gzip 对象的上传下载对后端完全透明。`Content-Encoding: gzip` 响应头由 Host
 路由层根据 key 的 `.gz` 后缀自行添加（`job_artifact_raw.py` 判定 +
 `job_artifact_raw_response.py` 加头），同样不经后端。
 
-## 后端契约要求（#1279 材料 ETag 协议，M30 R2）
+## 后端契约要求（#1279 材料 ETag 协议，M30 R2；#1321 条件写）
 
-材料身份协议对后端的两条硬要求（支持矩阵内的 AWS S3 / MinIO / SeaweedFS
+材料身份协议对后端的三条硬要求（支持矩阵内的 AWS S3 / MinIO / SeaweedFS
 均满足；换后端时必须核对）：
 
 - **HEAD 恒返回非空 ETag**：complete/inline/demo seed 对空 ETag fail-closed
@@ -47,6 +48,15 @@ gzip 对象的上传下载对后端完全透明。`Content-Encoding: gzip` 响�
   返回的流必须是 open 时刻对象的原子快照（AWS S3 语义）——流读期间的
   同尺寸覆盖对无 hash 材料依赖此契约才不可撕裂；hash 行由下载后的
   sha256 复算免疫，不依赖此条。
+- **PUT 条件写（If-None-Match）**：材料 presigned PUT 把 `If-None-Match: *`
+  签进 SignedHeaders（#1321），后端必须对既有 key 的条件 PUT 返回
+  412 PreconditionFailed、对缺该头的请求返回 403 SignatureDoesNotMatch——
+  「complete 之后复用同一 URL 覆盖」在存储层一次性关闭。SeaweedFS 4.45
+  实测（#1319，本机 materials-local 栈复核）：签入后缺头 PUT → 403、
+  首发 → 200、同 URL 重放 → 412；未签名的 `If-None-Match` 头同样被强制
+  执行（对升级前签出的存量 URL，新前端带头 PUT 也获得 412 语义）；
+  `CopyObject` 支持 `x-amz-copy-source-if-match`。RustFS 实测待办
+  （逃生舱形态接入前必须补做）。
 
 ## 1. 组件与配置面
 
@@ -341,7 +351,10 @@ EOF
     清 object_etag）并为**原行**新 key 签发受代次保护的一次性 PUT URL
     （hash 与无 hash 行统一由原 material_id 愈合：无 hash 行没有 presign
     按 hash 找旧行的回路）；用该 URL 重传后 complete 携带输出里的代次
-    即恢复 ready，历史 job 引用随之消费新对象；旧对象成孤儿（单次使用
+    即恢复 ready，历史 job 引用随之消费新对象。重传 URL 同样签入
+    `If-None-Match: *`（#1321）：手工 curl 重传必须带 `-H 'If-None-Match: *'`
+    （缺头 403 SignatureDoesNotMatch），412 = 对象已存在按已上传处理。
+    旧对象成孤儿（单次使用
     key），由 `scripts/gc-s3-jobs.py` 的材料删除批回收（#1314）。S3 快照恢复（aws s3 cp 重传会改变大行
     ETag）后、启动调度前必须跑 `scripts/rebind_material_etags.py`
     （先 dry-run 再 --apply；字节核验不过的行 fail-closed 只报告，退出
@@ -411,7 +424,7 @@ EOF
 | 症状 | 排查 |
 |---|---|
 | 材料 API 503 | `AGENT_LEGION_S3_BUCKET` 未配置或服务启动时 env 未生效 |
-| 上传 PUT 失败（浏览器） | presigned URL 的 host 是否浏览器可达（`AGENT_LEGION_S3_PUBLIC_ENDPOINT` 未配或配错时 URL 会指向 compose 内部地址）；bucket CORS 是否放行前端 origin；presigned URL 过期（1h） |
+| 上传 PUT 失败（浏览器） | presigned URL 的 host 是否浏览器可达（`AGENT_LEGION_S3_PUBLIC_ENDPOINT` 未配或配错时 URL 会指向 compose 内部地址）；bucket CORS 是否放行前端 origin；presigned URL 过期（1h）。412 = 条件写生效（对象已存在），网络重试场景按已上传处理即可；403 且 URL 的 SignedHeaders 含 `if-none-match` = 客户端 PUT 缺 `If-None-Match: *` 头（#1321） |
 | complete 422 | 实际上传字节与声明 size/hash 不符，重新上传 |
 | 节点报 "material storage is not configured" | Host/Worker 侧 env 缺失；Worker 路径靠 Host 签发的 presigned GET（1h 有效），失败会由 sweeper 重排队换新 URL |
 | 缓存目录膨胀 | 调低 `AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES` 或手动清空 |
