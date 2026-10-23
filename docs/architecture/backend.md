@@ -89,7 +89,7 @@ server/app/
 
 ## Key Decisions
 
-- PostgreSQL 是唯一运行时数据库，通过连接池支撑多进程、多设备并发协调。
+- PostgreSQL 是唯一运行时数据库，通过连接池支撑多进程、多设备并发协调。连接获取全部共享 `pool_for(dsn)` 池（`read_connection` / `write_transaction` / `connect_database` 与 JobQueries 门面的 `read`/`write`/`connect`），池容可配到 1、checkout 超时 10s，因此**禁止嵌套池 checkout**（持连接块内再自开连接；#1239 族）：拆分先后两次 checkout 或 conn-first 骑调用方连接（#1226 契约）。机器防回归：`scripts/architecture/nested_pool_checkout.py`（DB-POOL-CHECKOUT-001，#1308），已知实例钉在 `config/architecture/nested-pool-checkout-allowlist.json`。
 - Agent Legion DAG 是唯一的执行模型；workflow 是 workspace 内部的一份 DAG（schema v50 退役全局 catalog）。schema v62 起 workspace id 即 workflow key（创建时显式提供、终身不可变），创建路径不再种子示例模板——示例 workflow（`education_video_problems_generation`）仅经 `make import-demo` 提供 demo workspace，业务 workflow 经 workspace revision 发布 + 自定义节点发布承载。
 - 所有文件 I/O 限制在 `data/` 目录内，由 `security.py` 做路径校验。
 - 路由、服务、执行器之间有明确的边界：Route 只做 HTTP 适配，Service 处理业务逻辑，Executor 通过租赁（lease）申请容量。详见 [AGENTS.md](../../AGENTS.md)。
@@ -744,6 +744,7 @@ server/app/
 - `scripts/export_openapi.py` 在不启动 Worker 的情况下导出 OpenAPI 模式。
 - `frontend/src/generated/api.ts` 由 OpenAPI 模式生成，并通过 `npm run api:check` 做漂移检查；禁止手写重复的传输类型。
 - `scripts/check_architecture.py` 在质量门禁中执行，负责约束模块边界与体积预算。
+- 零引用导出检查（#732，knip/vulture 式）：`scripts/architecture/zero_reference_exports.py` 挡「删调用方漏删实现方」型死代码——backend 覆盖 `server/app` / `worker` / `shared` / `workspace_libs` / `workflow_nodes` 的公开模块级定义（装饰器注册面、`__init__.py` 再导出面豁免），frontend 覆盖 `frontend/src` 的具名导出（`export default` 与 `generated/` 豁免）；引用计数为全仓文本词元（yaml/docstring 提及即视为引用，保守方向），已知死符号带理由钉在 `config/architecture/zero-reference-exports-allowlist.json`（只降不升，删除后 stale 报错强制摘钉）。
 - 源文件体积预算由 `config/architecture/architecture-budget-policy.yaml`（人工维护的策略）和
   `config/architecture/architecture-budgets.json`（机器维护的基线）共同治理。基线通过 ratchet 脚本更新：
 
