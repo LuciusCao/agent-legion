@@ -18,7 +18,12 @@ Semantics and guardrails:
 
 * Unit-tier tests never seen by the indexer (new tests, or new files)
   always run — the selection is a *superset* of affected unit tests.
-  ``tests/full/`` and ``tests/ci/`` remain owned by their dedicated tiers.
+  ``tests/full/`` and ``tests/ci/`` remain owned by their dedicated tiers,
+  and manifest-classified postgres test files
+  (``config/architecture/postgres-test-files.json``) never pass through:
+  under the tier's ``-m "not postgres"`` they would collect zero tests and
+  exit 5. Changed postgres files are instead reported as a blind-spot hint
+  on stderr (#1307).
 * Only files under the repo's tracked source roots (``server/``,
   ``worker/``, ``shared/``, ``workflow_nodes/``, ``scripts/``,
   ``workspace_libs/``, ``tests/``) are mapped; anything else (venv,
@@ -42,6 +47,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = REPO_ROOT / ".pytest-aff-index.json"
+# Tracked change-set roots. The two dependency manifests live at the repo
+# root outside every prefix: they must stay visible to the selector so a
+# dependency upgrade lands in ``unmapped_source_files`` (exit 4 → full unit
+# fallback) instead of producing an empty selection that the aff tier would
+# skip without running a single backend test (#1307 r1 P2-2).
 _GIT_PATH_PREFIXES = (
     "server/",
     "worker/",
@@ -50,6 +60,8 @@ _GIT_PATH_PREFIXES = (
     "scripts/",
     "workspace_libs/",
     "tests/",
+    "pyproject.toml",
+    "uv.lock",
 )
 
 
@@ -70,7 +82,12 @@ def _repo_relative(path: str, repo_root: Path | None = None) -> str | None:
 
 
 def changed_source_files(base: str | None) -> list[str]:
-    """Repo-relative changed files (uncommitted + committed vs base)."""
+    """Repo-relative changed files (uncommitted + committed vs base).
+
+    The dependency manifests (``pyproject.toml`` / ``uv.lock``) ride beside
+    the source-root prefixes so a dependency upgrade stays visible and takes
+    the unmapped-source full fallback (#1307 r1 P2-2).
+    """
     files: set[str] = set()
     commands = [["git", "status", "--porcelain=v1", "--untracked-files=all"]]
     if base:
@@ -160,6 +177,23 @@ def _is_test_module(path: str) -> bool:
     return name.startswith("test_") and name.endswith(".py")
 
 
+def postgres_manifest_files(repo_root: Path | None = None) -> frozenset[str]:
+    """Fully postgres-marked test files (config/architecture/postgres-test-files.json, #192).
+
+    tests/conftest.py marks every item in a listed file ``postgres``, so the
+    aff tier's ``-m "not postgres"`` run collects nothing from them: passing
+    one as a nodeid exits 5 with zero tests (#1307/#304). A missing or
+    unreadable manifest degrades to an empty set — the gate's exit-5
+    tolerance then carries the postgres-only case alone.
+    """
+    path = (repo_root or REPO_ROOT) / "config/architecture/postgres-test-files.json"
+    try:
+        files = json.loads(path.read_text(encoding="utf-8")).get("files")
+    except (OSError, json.JSONDecodeError):
+        files = None
+    return frozenset(map(str, files)) if isinstance(files, list) else frozenset()
+
+
 def select_affected_tests(
     changed: list[str], mapping: dict[str, list[str]], repo_root: Path | None = None
 ) -> list[str]:
@@ -174,6 +208,7 @@ def select_affected_tests(
     deleted file).
     """
     root = repo_root if repo_root is not None else REPO_ROOT
+    postgres_files = postgres_manifest_files(root)
     selected: set[str] = set()
     for path in changed:
         nodeids = mapping.get(path)
@@ -188,6 +223,10 @@ def select_affected_tests(
             # YAML/JSON 等不影响测试执行的文件由本臂静默忽略；Python 辅助
             # 文件（helpers/conftest 等）由 unmapped_source_files 计入盲区
             # 回退（exit 4 → 全量 unit 档）——见该函数的注释。
+            # 清单内 postgres 文件（#192）在 `-m "not postgres"` 下零收集
+            # （exit 5），跳过直通、由 blind-spot 提示接管（#1307/#304）。
+            if path in postgres_files:
+                continue
             selected.add(path)
     # The aff caller runs the offline unit tier. Explicit pytest nodeids
     # bypass --ignore, so enforce its directory exclusions here as well.
@@ -269,6 +308,17 @@ def _cmd_select(args: argparse.Namespace) -> int:
     for nodeid in selected:
         print(nodeid)
     print(f"# selected {len(selected)} of {len(changed)} changed file(s)", file=sys.stderr)
+    # #1307: the postgres blind spot as a hint, never a failure — aff runs
+    # `-m "not postgres"`, so postgres-marked files in the change set stay
+    # locally uncovered without an explicit GATE_TIER=postgres run. Only
+    # manifest-classified files are exact here; fixture-based marking needs
+    # collection (the gate's exit-5 tolerance covers those).
+    if blind_spot := sorted(p for p in changed if p in postgres_manifest_files()):
+        print(
+            f"# postgres blind spot: {len(blind_spot)} postgres-tier file(s) not run "
+            f"by aff; cover via GATE_TIER=postgres: {', '.join(blind_spot)}",
+            file=sys.stderr,
+        )
     return 0
 
 

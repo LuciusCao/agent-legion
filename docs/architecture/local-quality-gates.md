@@ -159,9 +159,14 @@ coverage intersects the changed source files (index in
 run with `--cov-context=test`, ~2.5 minutes per worktree), and the frontend lane runs `vitest related`
 over the changed frontend files. It falls back to the plain unit tier when
 no index exists, when a changed source file is missing from the index (an
-index blind spot — the affected tests are unknown), when the selection
-would run most of the suite anyway, or when the changed set includes shared
-files — the fallback never widens what runs. Deleted test files are dropped
+index blind spot — the affected tests are unknown), or when the selection
+would run most of the suite anyway — the fallback never widens what runs.
+A genuinely empty selection (nothing in the tracked change set touches the
+unit tier — postgres-tier-only edits, `tests/full` / `tests/ci` files, docs)
+is skipped explicitly instead of failing on pytest's exit 5; the dependency
+manifests (`pyproject.toml` / `uv.lock`) stay visible to the selector and
+always take the full-fallback path, so a dependency upgrade never skips the
+backend tests. Deleted test files are dropped
 from the selection (a stale path would fail pytest collection). An aff pass
 is **not** gate evidence: `scripts/run-local-gate.sh` rejects the tier, and
 the full suite remains the pre-push/CI boundary. Rebuild the index after

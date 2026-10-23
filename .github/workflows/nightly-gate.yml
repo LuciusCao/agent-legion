@@ -288,16 +288,19 @@ jobs:
       # entries living only on an unreleased release/* train had
       # no expiry check at all. Fetch those branch tips (globs: a missing
       # branch matches nothing instead of failing the fetch) and read each
-      # maintained branch's registry from git — every
-      # release/X.Y.Z above the default branch's pyproject version; shipped
-      # trains are covered by the step above. Selection rule and the
-      # lenient (pre-#941 schema) parsing live in the script, unit-tested.
-      - name: Fetch maintained branch tips
-        run: >-
-          git fetch --no-tags --depth=1 origin
-          '+refs/heads/release/*:refs/remotes/origin/release/*'
-          || echo "no release/* branches to fetch (empty glob is fatal
-          in newer git)"
+      # maintained branch's registry from git. #1333: "maintained" is decided
+      # by release-tag existence (main carrying the same version does NOT
+      # mean the train shipped), so the release tags must be fetched too —
+      # without them every release/* branch is checked, the fail-open
+      # direction. Selection rule and the lenient (pre-#941 schema) parsing
+      # live in the script, unit-tested.
+      - name: Fetch maintained branch tips and release tags
+        run: |
+          git fetch --no-tags --depth=1 origin \
+            '+refs/heads/release/*:refs/remotes/origin/release/*' \
+            || echo "no release/* branches to fetch (empty glob is fatal in newer git)"
+          git fetch --depth=1 origin '+refs/tags/v*:refs/tags/v*' \
+            || echo "no v* tags to fetch (empty glob is fatal in newer git)"
 
       - name: Detect expired flaky-registry deadlines on maintained branches
         run: uv run python -m scripts.quality.flaky_branch_deadlines
@@ -338,11 +341,19 @@ jobs:
   # exactly one tracking issue per failing lane on every failure; the search
   # by exact title dedups so a persistently red lane keeps one issue, not a
   # new one per week. GitHub emails the repo owner on new issue + comment.
+  # #1331: without `needs`, the job had no ancestor results, so failure()
+  # never saw a failed lane and the tracker stayed skipped on red schedules
+  # (run 39195751594). Depend on every lane and gate on their results
+  # explicitly; always() keeps the job alive when a need fails. 'cancelled'
+  # is covered too: a timed-out lane (all four carry timeout-minutes, and
+  # this repo has stall history — FLAKY-004) concludes as cancelled, not
+  # failure (r1 P2-1).
   failure-tracker:
     name: failure-tracker
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: failure() && github.event_name == 'schedule'
+    needs: [nightly-e2e, ci-extended, exemption-expiry, deps-audit]
+    if: always() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
     permissions:
       issues: write
     steps:

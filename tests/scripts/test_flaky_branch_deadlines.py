@@ -18,6 +18,7 @@ from scripts.quality.flaky_branch_deadlines import (
     deadline_findings,
     main,
     maintained_branches,
+    shipped_versions,
 )
 
 pytestmark = pytest.mark.no_db
@@ -36,12 +37,34 @@ def test_maintained_branches_are_unreleased_trains() -> None:
         "release/0.10.0",
         "release/next",
     ]
-    assert maintained_branches(branches, (0, 7, 15)) == [
+    shipped = {(0, 7, 13), (0, 7, 15)}  # v0.7.13 / v0.7.15 tags exist
+    assert maintained_branches(branches, (0, 7, 15), shipped) == [
         "release/0.10.0",  # numeric, not lexicographic, comparison
         "release/0.7.16",
         "release/0.8.0",
         "release/next",  # unparsable name: kept (fail towards checking)
     ]  # develop 已退役（#1150）：残留的同名远端 ref 一律忽略
+
+
+def test_maintained_branches_same_version_train_ships_only_with_tag() -> None:
+    """#1333: main 已写 0.8.0 不代表 release/0.8.0 已发布——tag 缺席时该
+    train 仍在维护窗口内，必须检查其独有的 flaky 登记；打上 v0.8.0 tag 后
+    才算 shipped（默认分支的注册表由 nightly 自身检查覆盖）。"""
+    assert maintained_branches(["release/0.8.0"], (0, 8, 0), set()) == ["release/0.8.0"]
+    assert maintained_branches(["release/0.8.0"], (0, 8, 0), {(0, 8, 0)}) == []
+
+
+def test_maintained_branches_untagged_old_train_fails_open() -> None:
+    """版本低于 main 但 tag 不存在：发布纪律是「落版 + tag」，无 tag 即无
+    shipped 证据——fail open 向检查侧，而非向跳过侧。"""
+    assert maintained_branches(["release/0.7.13"], (0, 7, 15), set()) == ["release/0.7.13"]
+
+
+def test_shipped_versions_parses_only_release_tags() -> None:
+    assert shipped_versions(["v0.8.0", "v0.8.1", "worker-v0.8.0", "velites-v0.5.9", "junk"]) == {
+        (0, 8, 0),
+        (0, 8, 1),
+    }
 
 
 def test_deadline_findings_on_old_schema_entries() -> None:
@@ -74,10 +97,10 @@ def _commit_registry(root: Path, entries: list[dict]) -> str:
     return _git(root, "rev-parse", "HEAD")
 
 
-def _repo(tmp_path: Path) -> Path:
+def _repo(tmp_path: Path, version: str = "0.7.15") -> Path:
     root = tmp_path / "repo"
     root.mkdir()
-    (root / "pyproject.toml").write_text('[project]\nversion = "0.7.15"\n', encoding="utf-8")
+    (root / "pyproject.toml").write_text(f'[project]\nversion = "{version}"\n', encoding="utf-8")
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "test@example.com")
     _git(root, "config", "user.name", "test")
@@ -93,8 +116,11 @@ def test_main_checks_only_maintained_branch_registries(
     shipped = _commit_registry(root, [expired])
     unreleased = _commit_registry(root, [fine])
     # Remote-tracking refs as the workflow's fetch step leaves them; a stale
-    # develop ref (retired branch, #1150) must stay ignored.
+    # develop ref (retired branch, #1150) must stay ignored. The shipped
+    # train's release tag exists (#1333: tag, not version parity, decides
+    # "shipped"), so its registry stays with the default-branch check.
     _git(root, "update-ref", "refs/remotes/origin/release/0.7.15", shipped)
+    _git(root, "tag", "v0.7.15", shipped)
     _git(root, "update-ref", "refs/remotes/origin/release/0.7.16", unreleased)
     _git(root, "update-ref", "refs/remotes/origin/develop", unreleased)
 
@@ -108,6 +134,25 @@ def test_main_checks_only_maintained_branch_registries(
     assert main(["--root", str(root), "--today", TODAY.isoformat()]) == 1
     out = capsys.readouterr().out
     assert "FAIL: release/0.8.0: FLAKY-9 deadline 2026-09-01 expired" in out
+
+
+def test_main_checks_same_version_train_until_tagged(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#1333 回归：main 已落版 0.8.0、release/0.8.0 未打 tag 时，该 train
+    的过期条目必须被判违规；打上 v0.8.0 tag 后同一分支跳过。"""
+    root = _repo(tmp_path, version="0.8.0")
+    expired = {"id": "FLAKY-9", "nodeid": "t::x", "deadline": "2026-09-01"}
+    train = _commit_registry(root, [expired])
+    _git(root, "update-ref", "refs/remotes/origin/release/0.8.0", train)
+
+    assert main(["--root", str(root), "--today", TODAY.isoformat()]) == 1
+    out = capsys.readouterr().out
+    assert "FAIL: release/0.8.0: FLAKY-9 deadline 2026-09-01 expired" in out
+
+    _git(root, "tag", "v0.8.0", train)
+    assert main(["--root", str(root), "--today", TODAY.isoformat()]) == 0
+    assert "release/0.8.0" not in capsys.readouterr().out
 
 
 def test_branch_without_registry_is_skipped(
@@ -135,3 +180,7 @@ def test_nightly_exemption_expiry_fetches_and_checks_maintained_branches() -> No
     assert fetch < check
     assert "refs/heads/release/*" in runs[fetch]
     assert "refs/heads/develop" not in runs[fetch]  # develop 分支已退役（#1150）
+    # #1333: “已发布”由 release tag 判定——tag 抓取必须先于检查步骤，
+    # 否则 CI 上无 tag 可查、同版本 train 被 fail-open 地重复检查（安全但嘈杂），
+    # 更关键的是已打 tag 的 train 会被误查。
+    assert "refs/tags/v*" in runs[fetch]

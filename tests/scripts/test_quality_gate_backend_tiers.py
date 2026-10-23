@@ -459,7 +459,7 @@ def test_backend_aff_tier_falls_back_when_selection_is_broad(tmp_path: Path) -> 
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "aff fallback: no index or selection too broad" in result.stdout
+    assert "aff fallback: selection too broad" in result.stdout
     calls = gate_log.read_text(encoding="utf-8")
     assert "-m\nnot postgres\n" in calls
 
@@ -632,3 +632,102 @@ def test_frontend_gate_workers_env_override_wins(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "run test -- --maxWorkers=2" in gate_log.read_text(encoding="utf-8")
+
+
+def _aff_gate_layout(root: Path, uv_stub: str) -> tuple[Path, Path]:
+    """Per-case aff layout: real backend gate script + helpers, fake uv, and
+    the index file the aff tier requires before it even asks for a selection."""
+    scripts = root / "scripts"
+    fake_bin = root / "bin"
+    scripts.mkdir(parents=True)
+    fake_bin.mkdir(parents=True)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", scripts)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
+    _write_executable(fake_bin / "uv", uv_stub)
+    (root / ".pytest-aff-index.json").write_text("{}", encoding="utf-8")
+    return scripts / "check-quick-backend.sh", fake_bin
+
+
+# Fake uv that routes by subcommand: the aff selection prints FAKE_SELECTION
+# (one nodeid per line; unset/empty = empty selection), pytest exits with
+# FAKE_PYTEST_EXIT. Every invocation is logged for assertions.
+_AFF_ROUTING_UV_STUB = (
+    "#!/usr/bin/env bash\n"
+    'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
+    'if [[ " $* " == *" scripts.pytest_aff_selection "* ]]; then\n'
+    '  [[ -z "${FAKE_SELECTION:-}" ]] || printf "%s\\n" "$FAKE_SELECTION"\n'
+    "  exit 0\n"
+    "fi\n"
+    'if [[ " $* " == *" pytest "* ]]; then\n'
+    '  exit "${FAKE_PYTEST_EXIT:-0}"\n'
+    "fi\n"
+)
+
+
+def _run_aff_gate(root: Path, fake_bin: Path, gate: Path, env: dict[str, str]):
+    return _run(
+        gate,
+        cwd=root,
+        env={
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(root / "gate.log"),
+            "GATE_TIER": "aff",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            **env,
+        },
+    )
+
+
+def test_backend_aff_tier_tolerates_exit_5_when_selection_is_postgres_only(tmp_path: Path) -> None:
+    """#1307/#304 (M55 shape): the selector forwards a nodeid whose tests are
+    all postgres-marked (fixture-based classification the manifest does not
+    list); `-m "not postgres"` deselects everything and pytest exits 5. That
+    is a legitimate empty run, not a gate failure."""
+    root = tmp_path / "exit5"
+    gate, fake_bin = _aff_gate_layout(root, _AFF_ROUTING_UV_STUB)
+
+    result = _run_aff_gate(
+        root,
+        fake_bin,
+        gate,
+        {"FAKE_SELECTION": "tests/routes/test_pg.py", "FAKE_PYTEST_EXIT": "5"},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Python Affected Tests (selected 1 of unit tier)" in result.stdout
+    assert "all selected tests belong to the postgres tier" in result.stdout
+    assert "GATE_TIER=postgres" in result.stdout
+
+
+def test_backend_aff_tier_skips_explicitly_on_empty_selection(tmp_path: Path) -> None:
+    """#1307/#304: an empty selection (postgres-tier-only or docs-only change
+    set) skips the pytest run instead of failing on exit 5 or paying a full
+    unit-tier fallback."""
+    root = tmp_path / "empty"
+    gate, fake_bin = _aff_gate_layout(root, _AFF_ROUTING_UV_STUB)
+
+    result = _run_aff_gate(root, fake_bin, gate, {})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "no affected unit-tier tests" in result.stdout
+    calls = (root / "gate.log").read_text(encoding="utf-8")
+    assert "scripts.pytest_aff_selection" in calls  # the selector ran
+    assert "run --frozen pytest" not in calls  # but pytest never did
+
+
+def test_backend_aff_tier_still_fails_on_real_pytest_failure(tmp_path: Path) -> None:
+    """The exit-5 tolerance must not widen: a genuine pytest failure (exit 1)
+    from the selected subset still fails the gate."""
+    root = tmp_path / "fail"
+    gate, fake_bin = _aff_gate_layout(root, _AFF_ROUTING_UV_STUB)
+
+    result = _run_aff_gate(
+        root,
+        fake_bin,
+        gate,
+        {"FAKE_SELECTION": "tests/test_fake.py::test_thing", "FAKE_PYTEST_EXIT": "1"},
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "all selected tests belong to the postgres tier" not in result.stdout

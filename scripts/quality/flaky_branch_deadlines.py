@@ -8,11 +8,19 @@ untouched rest by reading each maintained branch's registry from git.
 
 "Maintained" is the minimal rule that needs no hand-kept list:
 
-- every ``release/X.Y.Z`` whose version is ABOVE the version on the default
-  branch (``pyproject.toml`` of the checkout) — a train at or below it has
-  shipped into the default branch, whose own registry the nightly already
-  checks; a ``release/*`` name that is not a version is kept (fail open
-  towards checking, never towards skipping).
+- every ``release/X.Y.Z`` without its release tag — tag existence, not the
+  version comparison alone, decides "shipped" (#1333): main already carrying
+  ``0.8.0`` in ``pyproject.toml`` does not mean ``release/0.8.0`` shipped;
+  while the ``v0.8.0`` tag is absent the train is still open and its registry
+  needs checking. A train whose tag exists has shipped into the default
+  branch, whose own registry the nightly already checks; an untagged train at
+  or below the default branch's version is kept too (fail open towards
+  checking, never towards skipping), and a ``release/*`` name that is not a
+  version is kept for the same reason.
+
+The workflow fetches the release tags (``refs/tags/v*``) next to the branch
+tips; without them locally every ``release/*`` branch is checked, which is
+the fail-open direction.
 
 The ``develop`` branch was retired with the trunk-based migration (#1150);
 only ``release/*`` trains remain as maintained non-default branches.
@@ -22,8 +30,8 @@ cut before #941 have no ``registered_on`` and would fail the strict loader,
 yet their deadlines still lapse. Only ``id`` / ``recurring`` / ``deadline``
 matter here; schema validation is that branch's own PR gate's job.
 
-The workflow fetches the refs first (``git fetch ... refs/heads/release/*``);
-run locally after ``git fetch origin`` to reproduce.
+The workflow fetches the refs first (``git fetch ... refs/heads/release/*``
+plus the release tags); run locally after ``git fetch origin`` to reproduce.
 """
 
 from __future__ import annotations
@@ -62,15 +70,32 @@ def released_version(pyproject: Path) -> tuple[int, ...]:
     return version
 
 
-def maintained_branches(branches: list[str], released: tuple[int, ...]) -> list[str]:
-    """Filter ``release/*`` names down to the maintained ones."""
+def maintained_branches(
+    branches: list[str], released: tuple[int, ...], shipped: set[tuple[int, ...]]
+) -> list[str]:
+    """Filter ``release/*`` names down to the maintained ones.
+
+    ``shipped`` is the set of versions with a release tag: the only proof a
+    train shipped (#1333). ``released`` stays for the caller's messaging —
+    filtering no longer compares versions against it.
+    """
     selected: list[str] = []
     for name in sorted(set(branches)):
         if name.startswith("release/"):
             version = _version(name.removeprefix("release/"))
-            if version is None or version > released:
+            if version is None or version not in shipped:
                 selected.append(name)
     return selected
+
+
+def shipped_versions(tags: list[str]) -> set[tuple[int, ...]]:
+    """Versions with a release tag (``vX.Y.Z``); other tag lines ignored."""
+    shipped: set[tuple[int, ...]] = set()
+    for tag in tags:
+        version = _version(tag[1:]) if tag.startswith("v") else None
+        if version is not None:
+            shipped.add(version)
+    return shipped
 
 
 def deadline_findings(
@@ -110,6 +135,14 @@ def remote_branches(root: Path, remote: str) -> list[str]:
     return [line.removeprefix(prefix) for line in proc.stdout.splitlines() if line]
 
 
+def local_tags(root: Path) -> list[str]:
+    """Local tag names; the workflow fetches ``refs/tags/v*`` beforehand."""
+    proc = _git(root, "tag", "--list")
+    if proc.returncode != 0:
+        raise RegistryError(f"git tag --list failed: {proc.stderr.strip()}")
+    return proc.stdout.split()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd())
@@ -122,12 +155,18 @@ def main(argv: list[str] | None = None) -> int:
     failures: list[str] = []
     try:
         released = released_version(args.root / "pyproject.toml")
-        branches = maintained_branches(remote_branches(args.root, args.remote), released)
+        branches = maintained_branches(
+            remote_branches(args.root, args.remote),
+            released,
+            shipped_versions(local_tags(args.root)),
+        )
     except RegistryError as exc:
         print(f"flaky branch deadlines error: {exc}", file=sys.stderr)
         return 1
     released_text = ".".join(map(str, released))
-    print(f"Maintained branches (release/* above {released_text}, today {today}):")
+    print(
+        f"Maintained branches (release/* without a release tag; default at {released_text}, today {today}):"
+    )
     if not branches:
         print("  (none)")
     for branch in branches:
