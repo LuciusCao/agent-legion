@@ -155,6 +155,74 @@ def test_build_runtime_skill_versions_degrade_on_db_error(
     assert runtime["skill_versions"] == {}
 
 
+def test_build_runtime_mirrors_shard_payload_from_context_runtime(
+    context: ExecutionContext,
+) -> None:
+    """#1356: local shard dispatch carries shard_index/shard_input on
+    ``context.runtime``; build_runtime must mirror them into the child runtime
+    dict (parity with the remote Worker manifest injection). Non-shard
+    executions never see the keys; dispatch metadata (``node_execution``)
+    stays parent-side."""
+    from server.app.executors._code_runtime import build_runtime
+    from server.app.executors.cancellation import CancellationToken
+
+    executor = _executor()
+
+    plain = build_runtime(executor, context, CancellationToken())
+    assert "shard_index" not in plain
+    assert "shard_input" not in plain
+
+    shard_ctx = replace(
+        context,
+        runtime={
+            "node_execution": {"runtime": "velites"},
+            "shard_index": 2,
+            "shard_input": {"q": 2},
+        },
+    )
+    sharded = build_runtime(executor, shard_ctx, CancellationToken())
+    assert sharded["shard_index"] == 2
+    assert sharded["shard_input"] == {"q": 2}
+    assert "node_execution" not in sharded
+
+
+def test_sandboxed_shard_node_receives_shard_payload(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1356 end to end: a Host-local shard execution's node code reads
+    shard_index/shard_input from the runtime dict inside the sandbox — before
+    the fix the keys never crossed into the child."""
+    _sandboxed(monkeypatch)
+    source = _source(
+        """
+        import json
+
+        def run(job, job_dir, runtime):
+            (job_dir / "out.json").write_text(
+                json.dumps(
+                    {
+                        "shard_index": runtime.get("shard_index"),
+                        "shard_input": runtime.get("shard_input"),
+                    }
+                ),
+                encoding="utf-8",
+            )
+        """
+    )
+    shard_ctx = replace(
+        context,
+        runtime={"shard_index": 1, "shard_input": {"q": "seed"}},
+    )
+
+    result = _run(_executor(), shard_ctx, source)
+
+    assert result.status == "completed"
+    import json
+
+    data = json.loads((context.job_dir / "out.json").read_text(encoding="utf-8"))
+    assert data == {"shard_index": 1, "shard_input": {"q": "seed"}}
+
+
 def _capture_token_service(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
     from types import SimpleNamespace
 
@@ -170,16 +238,17 @@ def test_consume_auth_failure_marker_invalidates_cached_token(
     context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The node records the fact; the parent performs the privileged
-    invalidation and removes the marker (design §5.3)."""
+    invalidation and removes the marker (design §5.3). The marker is
+    namespaced per execution (#1355)."""
     from types import SimpleNamespace
 
     from server.app.executors._code_runtime import consume_auth_failure_marker
-    from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH
+    from workspace_libs.node_sdk import auth_failure_marker_path
 
     executor = _executor()
     executor.job_db = SimpleNamespace(dsn_identity="postgresql://fake")
     calls = _capture_token_service(monkeypatch)
-    marker = context.job_dir / AUTH_FAILURE_MARKER_PATH
+    marker = context.job_dir / auth_failure_marker_path(context.execution_id)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text("cms-internal", encoding="utf-8")
 
@@ -195,12 +264,12 @@ def test_consume_auth_failure_marker_falls_back_to_node_config_connection(
     from types import SimpleNamespace
 
     from server.app.executors._code_runtime import consume_auth_failure_marker
-    from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH
+    from workspace_libs.node_sdk import auth_failure_marker_path
 
     executor = _executor()
     executor.job_db = SimpleNamespace(dsn_identity="postgresql://fake")
     calls = _capture_token_service(monkeypatch)
-    marker = context.job_dir / AUTH_FAILURE_MARKER_PATH
+    marker = context.job_dir / auth_failure_marker_path(context.execution_id)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text("", encoding="utf-8")
     ctx = replace(context, node_config={"connection": "cms-fallback"})
@@ -226,6 +295,41 @@ def test_consume_auth_failure_marker_noop_without_marker(
     assert calls == []
 
 
+def test_clear_and_consume_ignore_neighbour_execution_markers(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1355: pre-run clear and post-run consume are scoped to THIS
+    execution's marker — a parallel neighbour's marker (same job_dir) must
+    survive both and never be attributed to this execution. A legacy
+    fixed-name marker (written by a hand-built context without
+    ``execution_id``) is likewise never consumed as this execution's report."""
+    from types import SimpleNamespace
+
+    from server.app.executors._code_runtime import (
+        clear_auth_failure_marker,
+        consume_auth_failure_marker,
+    )
+    from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH, auth_failure_marker_path
+
+    executor = _executor()
+    executor.job_db = SimpleNamespace(dsn_identity="postgresql://fake")
+    calls = _capture_token_service(monkeypatch)
+    neighbour = context.job_dir / auth_failure_marker_path("exec-neighbour")
+    neighbour.parent.mkdir(parents=True, exist_ok=True)
+    neighbour.write_text("cms-neighbour", encoding="utf-8")
+    legacy = context.job_dir / AUTH_FAILURE_MARKER_PATH
+    legacy.write_text("cms-legacy", encoding="utf-8")
+
+    clear_auth_failure_marker(context)
+    assert neighbour.read_text(encoding="utf-8") == "cms-neighbour"
+
+    consume_auth_failure_marker(executor, context)
+
+    assert calls == []
+    assert neighbour.read_text(encoding="utf-8") == "cms-neighbour"
+    assert legacy.read_text(encoding="utf-8") == "cms-legacy"
+
+
 def test_consume_auth_failure_marker_resolves_bare_dsn(
     context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -233,12 +337,12 @@ def test_consume_auth_failure_marker_resolves_bare_dsn(
     DSN string passes through unchanged — replacing the retired getattr
     escape hatch on `job_db` (a job_db-less executor stays a no-op)."""
     from server.app.executors._code_runtime import consume_auth_failure_marker
-    from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH
+    from workspace_libs.node_sdk import auth_failure_marker_path
 
     executor = _executor()
     executor.job_db = "postgresql://bare-dsn"
     calls = _capture_token_service(monkeypatch)
-    marker = context.job_dir / AUTH_FAILURE_MARKER_PATH
+    marker = context.job_dir / auth_failure_marker_path(context.execution_id)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text("cms-internal", encoding="utf-8")
 

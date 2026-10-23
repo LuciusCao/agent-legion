@@ -103,19 +103,29 @@ def test_auth_failure_marker_path_mirrors_node_sdk() -> None:
     node_sdk 是 ``Path(NODE_RUNTIME_DIR) / AUTH_FAILURE_MARKER``，断言的是
     「拼出来的最终路径一致」——Worker 侧 code_runner / Host 侧
     _code_runtime 各自拿自己那份定义 join 到 job_dir 上，路径不等就互相
-    读不到对方的 marker（unlink 预清 + 读取两侧都要成立）。"""
+    读不到对方的 marker（unlink 预清 + 读取两侧都要成立）。
+    #1355：marker 名按 execution_id 命名空间化，per-execution 路径函数
+    同样双镜像（shared.code_contract / node_sdk），一并钉死。"""
     from shared.code_sandbox import AUTH_FAILURE_MARKER_PATH as shared_marker
+    from shared.code_sandbox import auth_failure_marker_path as shared_marker_path
     from workspace_libs.node_sdk import (
         AUTH_FAILURE_MARKER_PATH as sdk_marker,
     )
     from workspace_libs.node_sdk import NODE_RUNTIME_DIR
+    from workspace_libs.node_sdk import auth_failure_marker_path as sdk_marker_path
 
     # shared 侧：纯相对路径 str，供 Path / str 两种 join 用。
     assert not Path(shared_marker).is_absolute()
     assert Path(shared_marker) == sdk_marker
-    # join 语义也要一致（code_runner: job_dir / AUTH_FAILURE_MARKER_PATH）。
+    # join 语义也要一致（code_runner: job_dir / auth_failure_marker_path(...)）。
     job_dir = Path("/work/exec-1/job")
     assert job_dir / shared_marker == job_dir / NODE_RUNTIME_DIR / "auth_failure"
+    # per-execution 形态（#1355）：带 execution_id 走唯一名，空值回退 legacy 固定名。
+    for execution_id in ("exec-1", "550e8400-e29b-41d4-a716-446655440000"):
+        assert job_dir / shared_marker_path(execution_id) == job_dir / sdk_marker_path(execution_id)
+        assert Path(shared_marker_path(execution_id)).name == f"auth_failure-{execution_id}"
+    assert shared_marker_path("") == shared_marker
+    assert sdk_marker_path("") == sdk_marker
 
 
 def test_code_result_metadata_keys_match_prepare_code_result(tmp_path: Path) -> None:

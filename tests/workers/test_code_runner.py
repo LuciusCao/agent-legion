@@ -414,6 +414,28 @@ def test_execute_code_reports_auth_failure_connection(
     assert metadata["auth_failure_connection"] == "cms-main"
 
 
+def test_read_auth_failure_key_scoped_to_manifest_execution(tmp_path: Path) -> None:
+    """#1355：Worker 读侧只认 manifest 自身 execution_id 的 marker——异
+    execution 的 per-execution marker 与 legacy 固定名都不得被错归属
+    （错归属 = 别人的失效请求记到本节点连接上）。"""
+    from shared.code_sandbox import auth_failure_marker_path
+    from worker.code_runner import read_auth_failure_key
+
+    job_dir = tmp_path / "job"
+    marker_dir = job_dir / ".node_runtime"
+    marker_dir.mkdir(parents=True)
+    (marker_dir / "auth_failure").write_text("legacy-conn", encoding="utf-8")
+    (job_dir / auth_failure_marker_path("exec-other")).write_text("other-conn", encoding="utf-8")
+    (job_dir / auth_failure_marker_path("exec-code-1")).write_text("my-conn", encoding="utf-8")
+
+    manifest = {"execution_id": "exec-code-1", "config": {"connection": "cfg-conn"}}
+    assert read_auth_failure_key(job_dir, manifest) == "my-conn"
+
+    # 本 execution 无 marker 时：回退 config connection，绝不拾取别人的 marker。
+    (job_dir / auth_failure_marker_path("exec-code-1")).unlink()
+    assert read_auth_failure_key(job_dir, manifest) == "cfg-conn"
+
+
 def test_execute_code_hash_mismatch_refuses_before_spawn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
