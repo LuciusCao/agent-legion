@@ -90,6 +90,25 @@ ALTER DATABASE <agent_legion_worktree> OWNER TO agent_legion_dev;
   `clean-worktree.sh` / `drop-worktree-db.sh` refuse names that collide with
   another worktree after normalization (#950) — avoid look-alike worktree
   names.
+- If `clean-worktree.sh` is SIGKILLed between removing the worktree and
+  dropping its databases (or a worktree was removed by hand without cleanup),
+  the stale derived databases survive. `init-worktree.sh` closes the
+  silent-adoption window (#1349): while holding the derived-name lock, a
+  fresh instance (no `.worktree-initialized.ok` marker, `.env` not yet
+  pointing at its own derived database) that finds the derived databases
+  already present refuses to start instead of silently reusing the previous
+  instance's data. The error message names the two resolutions: drop the
+  remnant with `scripts/drop-worktree-db.sh <name> --yes` (the refused
+  instance still counts as pending-initialization, so the delete guard does
+  not block this) and rerun init, or — after verifying the data really
+  should be inherited — rerun init with
+  `AGENT_LEGION_INIT_ADOPT_EXISTING_DB=1`. Legacy instances created before
+  the marker mechanism (no marker, but `.env` already points at their own
+  derived database) reruns are still allowed through, as are plain
+  idempotent reruns (marker present). When PostgreSQL is unreachable the
+  existence probe cannot run; init then keeps its offline-tolerant behavior
+  and only prints a warning that the check was skipped (no database action
+  is possible in that state anyway).
 - Day-to-day superuser connections (such as the OS-user role) can still
   drop anything — the guarantee covers the scripted routine path, not
   deliberate superuser operations.

@@ -4,6 +4,9 @@
 #   1. 从基准 worktree 复制 .env（若本 worktree 缺失；无法复制则 fail-fast——
 #      缺 .env 会让后端回落共享默认库/prod）
 #   2. 把 AGENT_LEGION_DATABASE_URL 指向按 worktree 名派生的专属 Postgres 库并尝试建库
+#      （建库前在锁内做静默收养护栏（#1349）：无初始化完成标记而派生库已存在
+#      且非本实例所有时 fail-fast——旧实例清理中断残留的库不得被同名新实例
+#      静默沿用）
 #   2.2 预暖 .uv-cache：克隆基准 worktree 的 uv 缓存（协议实现在
 #       scripts/uv_cache_prewarm.py，失败仅提示并回退冷启动），
 #       让首次 uv run 免于从零拉依赖树
@@ -101,6 +104,56 @@ chmod 600 .env
 DB="$(worktree_derived_db "$(basename "$ROOT")")"
 NAME="${DB#agent_legion_}"
 DB_URL="postgresql://127.0.0.1:5432/${DB}"
+
+# 静默收养护栏（#1349）：clean-worktree.sh 在「git worktree remove」与
+# 「drop 派生库」之间被 SIGKILL（或 worktree 被手工移除而未清理派生库）时，
+# 旧实例的派生库会留存；同名 worktree 重建后本脚本的 createdb 命中
+# 「已存在可忽略」，旧实例数据被新实例静默沿用（#1084 目标缺陷形态的
+# 残余窗口）。在改写 .env 之前、派生名锁内判定：
+#   - 有初始化完成标记 → 幂等重跑，库就是本实例的，不检查；
+#   - 无标记但 .env 已指向自身派生库（与删除护栏同一判定，见
+#     worktree-names-lib.sh 的 worktree_registration_owns_resources）→
+#     标记机制引入前的存量实例重跑，库是本实例的，提示后沿用；
+#   - 库不存在 → 正常新建；
+#   - 库存在且以上皆不命中 → 旧实例残留：fail-fast 并给出收口路径。此刻
+#     .env 尚未指向派生库、无完成标记——删除护栏视本实例为待初始化，不拦
+#     drop-worktree-db.sh 的清理。
+# psql 不可用或探测失败（Postgres 不可达）时降级为提示、保持原有宽容行为
+# （离线场景不阻断初始化；此刻 createdb 同样不可用，不产生任何库动作）。
+if [[ ! -f "$ROOT/$WORKTREE_INITIALIZED_MARKER" ]] && command -v psql >/dev/null 2>&1; then
+    stale_dbs=""
+    probe_failed=""
+    for probe_db in "$DB" "$(worktree_derived_test_db "$(basename "$ROOT")")"; do
+        if ! probe_out="$(psql -d postgres -tAc \
+            "select 1 from pg_database where datname='${probe_db}'" 2>/dev/null)"; then
+            probe_failed=1
+            break
+        fi
+        if [[ "$probe_out" == "1" ]]; then
+            stale_dbs="${stale_dbs} ${probe_db}"
+        fi
+    done
+    if [[ -n "$probe_failed" ]]; then
+        echo "提示: 派生库存在性探测失败（Postgres 不可达？），跳过静默收养检查（#1349）。" >&2
+        echo "      若本 worktree 是同名重建，请在 Postgres 恢复后确认上一实例的派生库已清理。" >&2
+    elif [[ -n "${stale_dbs# }" ]]; then
+        if worktree_registration_owns_resources "$ROOT" "$(basename "$ROOT")"; then
+            echo "派生库已存在且本实例 .env 已指向它（存量实例幂等重跑），沿用:${stale_dbs}"
+        elif [[ "${AGENT_LEGION_INIT_ADOPT_EXISTING_DB:-}" == "1" ]]; then
+            echo "警告: 按 AGENT_LEGION_INIT_ADOPT_EXISTING_DB=1 沿用已存在的派生库:${stale_dbs}（#1349）。" >&2
+            echo "      请确认这些确为要继承的库；若是上一实例的清理残留，应立即中断并清理。" >&2
+        else
+            echo "错误: 派生库已存在，但本 worktree 未完成初始化（无 $WORKTREE_INITIALIZED_MARKER" >&2
+            echo "      且 .env 未指向它）——这是上一同名实例清理中断（clean 在移除 worktree 后" >&2
+            echo "      被 SIGKILL）或手工移除残留的旧库:${stale_dbs}" >&2
+            echo "      静默复用会把旧实例数据带进新实例（#1349），已中止。" >&2
+            echo "      复核后二选一：" >&2
+            echo "        - 旧数据应删除: scripts/drop-worktree-db.sh $(basename "$ROOT") --yes 后重跑本脚本" >&2
+            echo "        - 确认沿用旧库: AGENT_LEGION_INIT_ADOPT_EXISTING_DB=1 重跑本脚本" >&2
+            exit 1
+        fi
+    fi
+fi
 if [[ -f .env ]]; then
     if grep -qE '^(export )?AGENT_LEGION_DATABASE_URL=' .env; then
         replace_in_place "s|^(export )?AGENT_LEGION_DATABASE_URL=.*|\1AGENT_LEGION_DATABASE_URL=${DB_URL}|" .env
