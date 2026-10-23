@@ -2,6 +2,7 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { act } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useWorkflowStudioActions } from './useWorkflowStudioActions'
+import { VALIDATION_TRIGGER_DELAY_MS } from './draftAutoValidationRunner'
 import { useUiStore } from '../../../stores/uiStore'
 import type { DraftSaveStatus } from './draftSaveTypes'
 import type { UseWorkflowStudioDraftResult } from './useWorkflowStudioDraft'
@@ -117,6 +118,21 @@ async function flushSaved(
 ) {
   await act(async () => {
     rerender({ ...props, saveStatus: 'saved' })
+  })
+  await advanceValidationTrigger()
+}
+
+/** #1360：校验触发有一拍延迟（让「未发布变更」瞬态先渲染）——越过触发
+ * 窗口后再断言校验行为。fake/real timers 两态兼容。 */
+async function advanceValidationTrigger() {
+  await act(async () => {
+    if (vi.isFakeTimers()) {
+      vi.advanceTimersByTime(VALIDATION_TRIGGER_DELAY_MS)
+    } else {
+      await new Promise((resolve) =>
+        setTimeout(resolve, VALIDATION_TRIGGER_DELAY_MS + 25)
+      )
+    }
   })
 }
 
@@ -279,6 +295,43 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(1)
   })
 
+  it('#1360：内容变化与 settled 同帧到达（chat 采用 agent 落盘草稿）时校验延迟一拍——「未发布变更」窗口可渲染', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const { result, rerender } = renderActionsHook({
+        saveStatus: 'saved',
+        definitionYaml: 'key: demo\n',
+      })
+      // 初始内容已落盘：越过触发延迟后校验通过。
+      await advanceValidationTrigger()
+      expect(result.current.validationMessage).toBe('校验通过')
+      expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(1)
+
+      // agent turn-end 落盘回同步：画布采用新草稿，保存态同帧保持 settled
+      // （hydrate 形态）。旧实现同一提交批次内即发起校验，「未发布变更」
+      // （message='' 且未在途）没有可渲染窗口，chip 停在「校验通过」。
+      await act(async () => {
+        rerender({
+          saveStatus: 'saved',
+          definitionYaml: 'key: demo\nlabel: agent\n',
+        })
+      })
+      expect(result.current.validationMessage).toBe('')
+      expect(result.current.validating).toBe(false)
+      expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(1)
+
+      // 一拍后才发起校验并落定。
+      await advanceValidationTrigger()
+      expect(mocks.validateWorkflowDraft).toHaveBeenCalledWith(
+        'ws1',
+        'key: demo\nlabel: agent\n'
+      )
+      expect(result.current.validationMessage).toBe('校验通过')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('草稿再编辑后旧校验结果作废（回「未发布变更」的数据源）', async () => {
     const { result, rerender } = renderActionsHook({
       saveStatus: 'idle',
@@ -345,6 +398,7 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     await act(async () => {
       rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
     })
+    await advanceValidationTrigger()
     expect(result.current.validationMessage).toBe('校验通过')
     expect(result.current.canPublish).toBe(true)
   })
@@ -374,6 +428,10 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
       mocks.validateWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
       await act(async () => {
         result.current.retryValidation()
+      })
+      // #1360：重跑同样经触发延迟。
+      await act(async () => {
+        vi.advanceTimersByTime(VALIDATION_TRIGGER_DELAY_MS)
       })
       expect(mocks.validateWorkflowDraft.mock.calls.length).toBeGreaterThan(
         calls
@@ -466,6 +524,7 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     await act(async () => {
       rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
     })
+    await advanceValidationTrigger()
     expect(result.current.validationMessage).toBe('校验通过')
     expect(result.current.canPublish).toBe(true)
 
@@ -499,6 +558,7 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     await act(async () => {
       rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
     })
+    await advanceValidationTrigger()
     expect(result.current.canPublish).toBe(true)
     act(() => result.current.requestPublish())
     expect(result.current.reviewDialogOpen).toBe(true)
@@ -535,6 +595,7 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     await act(async () => {
       rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
     })
+    await advanceValidationTrigger()
     expect(result.current.validationMessage).toBe('校验通过')
     expect(result.current.canPublish).toBe(true)
 
@@ -573,6 +634,7 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     await act(async () => {
       rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
     })
+    await advanceValidationTrigger()
     expect(result.current.canPublish).toBe(true)
 
     act(() => result.current.requestPublish())
@@ -612,6 +674,7 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     await act(async () => {
       rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
     })
+    await advanceValidationTrigger()
     expect(mocks.validateWorkflowDraft).toHaveBeenCalledTimes(1)
     expect(result.current.validating).toBe(true)
 
@@ -655,6 +718,7 @@ describe('useWorkflowStudioActions（#804 定案：自动校验）', () => {
     await act(async () => {
       rerender({ saveStatus: 'saved', definitionYaml: 'key: demo\n' })
     })
+    await advanceValidationTrigger()
     expect(result.current.validating).toBe(true)
     // 校验在途时发起发布（发布在途）。
     await act(async () => {

@@ -48,6 +48,113 @@ describe('WorkflowChangeSummaryPanel', () => {
     ).toBeInTheDocument()
   })
 
+  it('#1352: filters execution-only rows and their risk contribution', () => {
+    const response = makeSummaryResponse({
+      summary: {
+        // 后端 risk_level 含运行通道行（execution 变更风险档 warning）；
+        // 面板须按结构侧口径展示（方案 A：与其余四处表面同滤）。
+        risk_level: 'warning',
+        node_changes: [
+          {
+            type: 'modified',
+            node_key: 'write_script',
+            label: '撰写脚本',
+            node_type: 'agent',
+            fields: ['execution'],
+            risk: 'warning',
+          },
+        ],
+        edge_changes: [],
+        intake_changes: [],
+        metadata_changes: [],
+        risk_flags: [],
+      },
+    })
+    const summary = buildChangeSummary(response)
+
+    render(
+      <WorkflowChangeSummaryPanel
+        summary={summary}
+        loading={false}
+        errors={null}
+      />
+    )
+
+    expect(screen.queryByText('撰写脚本: 执行配置')).not.toBeInTheDocument()
+    expect(screen.queryByText(/风险等级/)).not.toBeInTheDocument()
+    expect(
+      screen.getByText('已同步 — 当前 YAML 与 active revision 一致')
+    ).toBeInTheDocument()
+  })
+
+  it('#1352: mixed structural+execution node keeps row without the execution field', () => {
+    const response = makeSummaryResponse({
+      summary: {
+        risk_level: 'warning',
+        node_changes: [
+          {
+            type: 'modified',
+            node_key: 'write_script',
+            label: '撰写脚本',
+            node_type: 'agent',
+            fields: ['label', 'execution'],
+            risk: 'warning',
+          },
+        ],
+        edge_changes: [],
+        intake_changes: [],
+        metadata_changes: [],
+        risk_flags: [],
+      },
+    })
+    const summary = buildChangeSummary(response)
+
+    render(
+      <WorkflowChangeSummaryPanel
+        summary={summary}
+        loading={false}
+        errors={null}
+      />
+    )
+
+    expect(screen.getByText('撰写脚本: 标签')).toBeInTheDocument()
+    expect(screen.queryByText(/执行配置/)).not.toBeInTheDocument()
+  })
+
+  it('#1352: execution.runtime change stays visible as a structural field', () => {
+    const response = makeSummaryResponse({
+      summary: {
+        risk_level: 'warning',
+        node_changes: [
+          {
+            type: 'modified',
+            node_key: 'write_script',
+            label: '撰写脚本',
+            node_type: 'agent',
+            fields: ['execution', 'runtime'],
+            risk: 'warning',
+          },
+        ],
+        edge_changes: [],
+        intake_changes: [],
+        metadata_changes: [],
+        risk_flags: [],
+      },
+    })
+    const summary = buildChangeSummary(response)
+
+    render(
+      <WorkflowChangeSummaryPanel
+        summary={summary}
+        loading={false}
+        errors={null}
+      />
+    )
+
+    expect(screen.getByText('撰写脚本: 执行 Runtime')).toBeInTheDocument()
+    expect(screen.getByText('风险等级: 警告')).toBeInTheDocument()
+  })
+
   it('renders loading state', () => {
     render(
       <WorkflowChangeSummaryPanel summary={null} loading={true} errors={null} />

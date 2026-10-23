@@ -731,6 +731,7 @@
     "frontend/src/features/workflowStudio/validation/workflowStudioChangeFormatters.ts": 76,
     "frontend/src/features/workflowStudio/validation/workflowStudioChanges.ts": 223,
     "frontend/src/features/workflowStudio/validation/workflowStudioErrors.ts": 60,
+    "frontend/src/features/workflowStudio/validation/workflowStudioStructuralFilter.ts": 48,
     "frontend/src/features/workflowStudio/validation/workflowStudioValidationGroups.ts": 33,
     "frontend/src/global.d.ts": 14,
     "frontend/src/hooks/jobArtifactJson.ts": 18,
