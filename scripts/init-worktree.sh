@@ -78,11 +78,15 @@ if [[ -n "$BASE" && "$BASE" == "$ROOT" ]]; then
 fi
 
 # 1. .env
+# 记录 .env 是否本趟从基准复制：静默收养护栏（#1349）的拒绝路径要移除本趟
+# 副本（它指向基准实例的库/bucket），pre-existing .env 则不动（复验 P2-1）。
+ENV_COPIED_THIS_RUN=""
 if [[ ! -f .env ]]; then
     if [[ -z "$BASE" ]]; then
         echo "警告: 未找到基准 worktree（主仓库为 bare 且无其他 worktree），跳过 .env 复制" >&2
     elif [[ -f "$BASE/.env" ]]; then
         cp "$BASE/.env" .env
+        ENV_COPIED_THIS_RUN=1
         echo "已复制 .env <- $BASE"
     else
         echo "警告: $BASE/.env 不存在，跳过 .env 复制" >&2
@@ -111,46 +115,68 @@ DB_URL="postgresql://127.0.0.1:5432/${DB}"
 # 「已存在可忽略」，旧实例数据被新实例静默沿用（#1084 目标缺陷形态的
 # 残余窗口）。在改写 .env 之前、派生名锁内判定：
 #   - 有初始化完成标记 → 幂等重跑，库就是本实例的，不检查；
-#   - 无标记但 .env 已指向自身派生库（与删除护栏同一判定，见
-#     worktree-names-lib.sh 的 worktree_registration_owns_resources）→
-#     标记机制引入前的存量实例重跑，库是本实例的，提示后沿用；
+#   - 无标记但 .env 已指向自身派生库 → 标记机制引入前的存量实例重跑，库
+#     是本实例的，提示后沿用。归属判定只用严格锚定形态（行首锚定 + 可选
+#     export 前缀 + 行尾锚定），故意不复用删除护栏
+#     worktree_registration_owns_resources 的宽松子串兜底：子串匹配为
+#     删除语境的 fail-closed 设计，在 init 语境方向反转成 fail-open——
+#     基准派生库名是自身超串时（wt-7/wt-73、victim/victim2），本趟从基准
+#     复制的 .env 会被误判为「指向自身」，静默收养原样发生（复验 P1-1）。
+#     init 自身的 replace/append 必产出严格形态，真实存量重跑无损；手改
+#     形态（引号包裹/行内注释）在 init 语境判「未指向」（与删除语境相反）；
 #   - 库不存在 → 正常新建；
-#   - 库存在且以上皆不命中 → 旧实例残留：fail-fast 并给出收口路径。此刻
-#     .env 尚未指向派生库、无完成标记——删除护栏视本实例为待初始化，不拦
-#     drop-worktree-db.sh 的清理。
+#   - 库存在且以上皆不命中 → 旧实例残留：fail-fast 并给出收口路径。拒绝
+#     时本趟从基准复制的 .env 一并移除——它指向基准实例的库/bucket，留着
+#     会被无视报错的启动误用，且基准库名是自身超串时还会让删除护栏的
+#     宽松兜底把本实例误判为资源主、堵死收口路径（复验 P2-1）；
+#     pre-existing .env 不动。无标记且移除后无 .env——删除护栏视本实例为
+#     待初始化，不拦 drop-worktree-db.sh 的清理。
 # psql 不可用或探测失败（Postgres 不可达）时降级为提示、保持原有宽容行为
 # （离线场景不阻断初始化；此刻 createdb 同样不可用，不产生任何库动作）。
-if [[ ! -f "$ROOT/$WORKTREE_INITIALIZED_MARKER" ]] && command -v psql >/dev/null 2>&1; then
-    stale_dbs=""
-    probe_failed=""
-    for probe_db in "$DB" "$(worktree_derived_test_db "$(basename "$ROOT")")"; do
-        if ! probe_out="$(psql -d postgres -tAc \
-            "select 1 from pg_database where datname='${probe_db}'" 2>/dev/null)"; then
-            probe_failed=1
-            break
-        fi
-        if [[ "$probe_out" == "1" ]]; then
-            stale_dbs="${stale_dbs} ${probe_db}"
-        fi
-    done
-    if [[ -n "$probe_failed" ]]; then
-        echo "提示: 派生库存在性探测失败（Postgres 不可达？），跳过静默收养检查（#1349）。" >&2
-        echo "      若本 worktree 是同名重建，请在 Postgres 恢复后确认上一实例的派生库已清理。" >&2
-    elif [[ -n "${stale_dbs# }" ]]; then
-        if worktree_registration_owns_resources "$ROOT" "$(basename "$ROOT")"; then
-            echo "派生库已存在且本实例 .env 已指向它（存量实例幂等重跑），沿用:${stale_dbs}"
-        elif [[ "${AGENT_LEGION_INIT_ADOPT_EXISTING_DB:-}" == "1" ]]; then
-            echo "警告: 按 AGENT_LEGION_INIT_ADOPT_EXISTING_DB=1 沿用已存在的派生库:${stale_dbs}（#1349）。" >&2
-            echo "      请确认这些确为要继承的库；若是上一实例的清理残留，应立即中断并清理。" >&2
-        else
-            echo "错误: 派生库已存在，但本 worktree 未完成初始化（无 $WORKTREE_INITIALIZED_MARKER" >&2
-            echo "      且 .env 未指向它）——这是上一同名实例清理中断（clean 在移除 worktree 后" >&2
-            echo "      被 SIGKILL）或手工移除残留的旧库:${stale_dbs}" >&2
-            echo "      静默复用会把旧实例数据带进新实例（#1349），已中止。" >&2
-            echo "      复核后二选一：" >&2
-            echo "        - 旧数据应删除: scripts/drop-worktree-db.sh $(basename "$ROOT") --yes 后重跑本脚本" >&2
-            echo "        - 确认沿用旧库: AGENT_LEGION_INIT_ADOPT_EXISTING_DB=1 重跑本脚本" >&2
-            exit 1
+if [[ ! -f "$ROOT/$WORKTREE_INITIALIZED_MARKER" ]]; then
+    if ! command -v psql >/dev/null 2>&1; then
+        echo "提示: 未找到 psql，跳过派生库静默收养检查（#1349）。" >&2
+    else
+        stale_dbs=""
+        probe_failed=""
+        for probe_db in "$DB" "$(worktree_derived_test_db "$(basename "$ROOT")")"; do
+            if ! probe_out="$(psql -d postgres -tAc \
+                "select 1 from pg_database where datname='${probe_db}'" 2>/dev/null)"; then
+                probe_failed=1
+                break
+            fi
+            if [[ "$probe_out" == "1" ]]; then
+                stale_dbs="${stale_dbs} ${probe_db}"
+            fi
+        done
+        if [[ -n "$probe_failed" ]]; then
+            echo "提示: 派生库存在性探测失败（Postgres 不可达？），跳过静默收养检查（#1349）。" >&2
+            echo "      若本 worktree 是同名重建，请在 Postgres 恢复后确认上一实例的派生库已清理。" >&2
+        elif [[ -n "${stale_dbs# }" ]]; then
+            # 严格锚定归属判定（超串安全）：派生库名只含 [a-zA-Z0-9_]，正则安全。
+            env_points_to_own_db=""
+            if grep -qE "^(export )?AGENT_LEGION_DATABASE_URL=postgresql://127\.0\.0\.1:5432/${DB}\$" .env 2>/dev/null; then
+                env_points_to_own_db=1
+            fi
+            if [[ -n "$env_points_to_own_db" ]]; then
+                echo "派生库已存在且本实例 .env 已指向它（存量实例幂等重跑），沿用:${stale_dbs}"
+            elif [[ "${AGENT_LEGION_INIT_ADOPT_EXISTING_DB:-}" == "1" ]]; then
+                echo "警告: 按 AGENT_LEGION_INIT_ADOPT_EXISTING_DB=1 沿用已存在的派生库:${stale_dbs}（#1349）。" >&2
+                echo "      请确认这些确为要继承的库；若是上一实例的清理残留，应立即中断并清理。" >&2
+            else
+                echo "错误: 派生库已存在，但本 worktree 未完成初始化（无 $WORKTREE_INITIALIZED_MARKER" >&2
+                echo "      且 .env 未指向它）——这是上一同名实例清理中断（clean 在移除 worktree 后" >&2
+                echo "      被 SIGKILL）或手工移除残留的旧库:${stale_dbs}" >&2
+                echo "      静默复用会把旧实例数据带进新实例（#1349），已中止。" >&2
+                if [[ -n "$ENV_COPIED_THIS_RUN" ]]; then
+                    rm -f .env
+                    echo "      本趟从基准复制的 .env 已移除（它指向基准实例的库/bucket）。" >&2
+                fi
+                echo "      复核后二选一：" >&2
+                echo "        - 旧数据应删除: scripts/drop-worktree-db.sh $(basename "$ROOT") --yes 后重跑本脚本" >&2
+                echo "        - 确认沿用旧库: AGENT_LEGION_INIT_ADOPT_EXISTING_DB=1 重跑本脚本" >&2
+                exit 1
+            fi
         fi
     fi
 fi

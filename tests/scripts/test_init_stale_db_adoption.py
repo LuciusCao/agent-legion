@@ -325,3 +325,78 @@ def test_probe_failure_degrades_with_warning(env: _Env) -> None:
     assert result.returncode == 0, result.stderr
     assert "跳过静默收养检查" in result.stderr
     assert (victim / ".worktree-initialized.ok").exists()
+
+
+def test_superstring_base_env_is_not_misjudged_as_own(env: _Env) -> None:
+    """复验 P1-1 回归：BASE 派生库名是自身超串（victim2 ⊃ victim）时，本趟
+    从 BASE 复制的 .env 不得被宽松子串匹配误判为「指向自身派生库」——子串
+    匹配是删除护栏的 fail-closed 设计，在 init 语境方向反转成 fail-open，
+    会把 #1349 的目标缺陷原样放行。init 必须拒绝（归属判定只认严格锚定
+    形态），并移除本趟复制的 .env；随后 drop-worktree-db.sh 收口路径可用
+    （无标记 + 无 .env = 待初始化登记，不被宽松兜底误判为资源主）。"""
+    # BASE：健康存活的 victim2，.env 指向自己的派生库（严格形态，与 init
+    # 自身产出一致）——其库名 agent_legion_victim2 是 victim 派生库名的超串。
+    base = env.add("victim2")
+    (base / ".env").write_text(
+        "AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_victim2\n"
+        "AGENT_LEGION_S3_BUCKET=agent-legion-victim2\n",
+        encoding="utf-8",
+    )
+    _seed_stale_remnant(env)
+    victim = env.add("victim")  # 同名重建，不带 .env——init 本趟从 BASE 复制
+    env.install_scripts(victim)
+    env.log.write_text("", encoding="utf-8")
+
+    result = env.run(victim / "scripts" / "init-worktree.sh", str(base))
+
+    assert result.returncode == 1
+    assert "#1349" in result.stderr
+    # 不得走「存量实例幂等重跑」臂（宽松子串兜底的误判臂）。
+    assert "存量实例" not in result.stdout
+    # P2-1：本趟从 BASE 复制的 .env 已移除（它指向 BASE 的库/bucket）。
+    assert "本趟从基准复制的 .env 已移除" in result.stderr
+    assert not (victim / ".env").exists()
+    assert not (victim / ".worktree-initialized.ok").exists()
+    assert "createdb" not in env.log.read_text(encoding="utf-8")
+    # 残留库不被误删。
+    assert (env.pg / _DEV_DB).is_dir()
+    assert (env.pg / _TEST_DB).is_dir()
+
+    # 二阶后果解除：被拒实例无标记且无 .env，删除护栏视其为待初始化登记，
+    # drop-worktree-db.sh 收口残留畅通（P1-1 修复前宽松兜底会按
+    # 「.env 含 agent_legion_victim 子串」误判资源主而拒删）。
+    runner = env.add("runner")
+    env.install_scripts(runner)
+    drop = env.run(runner / "scripts" / "drop-worktree-db.sh", "victim", "--yes")
+    assert drop.returncode == 0, drop.stderr
+    assert f"已删除: {_DEV_DB}" in drop.stdout
+    assert f"已删除: {_TEST_DB}" in drop.stdout
+
+    # 清干净后重跑 init：重新从 BASE 复制 .env 并改写为本实例的派生值。
+    reinit = env.run(victim / "scripts" / "init-worktree.sh", str(base))
+    assert reinit.returncode == 0, reinit.stderr
+    env_text = (victim / ".env").read_text(encoding="utf-8")
+    assert f"postgresql://127.0.0.1:5432/{_DEV_DB}" in env_text
+    assert "AGENT_LEGION_S3_BUCKET=agent-legion-victim\n" in env_text
+    assert "victim2" not in env_text
+    assert (victim / ".worktree-initialized.ok").exists()
+    assert env.lock_holders() == []
+
+
+def test_preexisting_env_is_kept_on_refusal(env: _Env) -> None:
+    """P2-1 另一臂：pre-existing .env（非本趟复制）在拒绝时原样保留——即使
+    其内容是手改形态（引号包裹的自身派生库 URL，严格锚定不认、init 语境
+    判「未指向」而拒绝），也不动用户自己放的文件。"""
+    _seed_stale_remnant(env)
+    victim = _rebuild_same_name(env)
+    quoted = f'AGENT_LEGION_DATABASE_URL="postgresql://127.0.0.1:5432/{_DEV_DB}"\n'
+    (victim / ".env").write_text(quoted, encoding="utf-8")
+
+    result = env.run(victim / "scripts" / "init-worktree.sh")
+
+    assert result.returncode == 1
+    assert "#1349" in result.stderr
+    # 手改形态严格锚定不认 → 不走存量臂；但 pre-existing .env 不动。
+    assert "存量实例" not in result.stdout
+    assert (victim / ".env").read_text(encoding="utf-8") == quoted
+    assert (env.pg / _DEV_DB).is_dir()
