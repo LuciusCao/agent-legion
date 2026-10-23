@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "allowlist": [
+    {
+      "path": "server/app/routes/quality_contracts.py",
+      "symbol": "LabelTarget",
+      "reason": "确认死代码（零引用类型别名）；删除属 server/ 源码变更，转 follow-up 清理（tower finding 20261023-worker-arch-checks-improve-main-14-732），删除后本条目按 stale 机制退役"
+    },
+    {
+      "path": "server/app/services/job_batch_operations/listing.py",
+      "symbol": "JobBatchOperationView",
+      "reason": "确认死代码（零引用类型别名）；同上，转 follow-up 清理"
+    },
+    {
+      "path": "server/app/services/run_bundle_candidate.py",
+      "symbol": "bundle_candidate",
+      "reason": "确认死代码（#156/#467 后调用方已绝迹）；同上，转 follow-up 清理"
+    },
+    {
+      "path": "server/app/services/skill_repo.py",
+      "symbol": "has_commit",
+      "reason": "确认死代码（#571 物化缓存改造移除末个调用方）；同上，转 follow-up 清理"
+    },
+    {
+      "path": "server/app/studio_chat/draft_events.py",
+      "symbol": "DRAFT_MESSAGE_KIND",
+      "reason": "确认死代码（零引用常量）；同上，转 follow-up 清理"
+    },
+    {
+      "path": "server/app/workflows/workflow_branching.py",
+      "symbol": "upstream_nodes",
+      "reason": "确认死代码（#759 改造后调用方已绝迹）；同上，转 follow-up 清理"
+    },
+    {
+      "path": "frontend/src/features/taskCenter/useJobBatchOps.ts",
+      "symbol": "useJobBatchOperation",
+      "reason": "确认死代码（零引用 hook）；删除属 frontend/src 源码变更，转 follow-up 清理（tower finding 20261023-worker-arch-checks-improve-main-14-732）"
+    },
+    {
+      "path": "frontend/src/features/workflowStudio/shared/useWorkflowStudioDraftStore.ts",
+      "symbol": "DraftStoreControls",
+      "reason": "确认死代码（零引用类型导出）；同上，转 follow-up 清理"
+    },
+    {
+      "path": "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.runtime.ts",
+      "symbol": "workflowDefaultRuntime",
+      "reason": "确认死代码（零引用函数）；同上，转 follow-up 清理"
+    },
+    {
+      "path": "frontend/src/hooks/jobArtifactJson.ts",
+      "symbol": "fetchJobArtifactJson",
+      "reason": "确认死代码——#732 四个样本同型：#980（#328 影子层清理）删调用方漏删实现方；同上，转 follow-up 清理"
+    },
+    {
+      "path": "frontend/src/lib/jobArtifactVersions.ts",
+      "symbol": "questionArtifactVersion",
+      "reason": "确认死代码（零引用函数）；同上，转 follow-up 清理"
+    },
+    {
+      "path": "frontend/src/lib/jobArtifactVersions.ts",
+      "symbol": "comprehensionVersion",
+      "reason": "确认死代码（零引用函数）；同上，转 follow-up 清理"
+    },
+    {
+      "path": "frontend/src/types/index.ts",
+      "symbol": "AgentVersion",
+      "reason": "确认死代码（零引用类型别名）；同上，转 follow-up 清理"
+    },
+    {
+      "path": "frontend/src/types/index.ts",
+      "symbol": "AgentRuntimeTools",
+      "reason": "确认死代码（零引用类型别名）；同上，转 follow-up 清理"
+    }
+  ]
+}
