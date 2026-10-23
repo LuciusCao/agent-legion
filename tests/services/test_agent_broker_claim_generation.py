@@ -10,8 +10,9 @@
    ``_cancel_queued_sql`` 的同语义取消该请求（state='cancelled' + manifest
    trim）并跳过，不 promote、不写 node_runs/executor_leases；
 3. 代次匹配的正常 promote 给 node_runs / executor_leases 落同一戳；
-4. 批写入段按统一全序 (ws_lock_key, job_id) 进入 evaluate/promote（code
-   候选不取 agent-ws 锁，仅借同一排序键参与全序）——SAVEPOINT 不释放
+4. 批写入段按统一全序 (ws_lock_key, job_lock_key, job_id) 进入
+   evaluate/promote（code 候选不取 agent-ws 锁，仅借同一排序键参与全序；
+   #1346：job 分量是实际 advisory 锁键而非 id 文本）——SAVEPOINT 不释放
    advisory xact 锁，无排序的两个并发批会在 job-mutation 域成环。
 """
 
@@ -214,24 +215,32 @@ def test_batch_claim_cancels_only_stale_candidates(job_db) -> None:
 
 
 def test_lock_order_sorted_uses_single_ws_job_order_for_all_kinds() -> None:
-    """批写入段排序（#645 评审 P2）：全部候选——code 候选不取 agent-ws 锁，
-    仅借同一排序键——统一按 (ws_lock_key, job_id) 升序，与 finish_many /
-    try_claim_many / sweeper 的全库批序同一；SAVEPOINT 不释放 advisory
-    xact 锁，两个并发批若按不同顺序取 job-mutation 锁即成环。"""
+    """批写入段排序（#645 评审 P2；#1346）：全部候选——code 候选不取 agent-ws
+    锁，仅借同一排序键——统一按 (ws_lock_key, job_lock_key, job_id) 升序，与
+    finish_many / try_claim_many / sweeper 的全库批序同一；job_lock_key 是
+    job-mutation 锁的实际 hashtext 键（不是 id 文本），id 只作同键决胜。
+    SAVEPOINT 不释放 advisory xact 锁，两个并发批若按不同顺序取
+    job-mutation 锁即成环。"""
     candidates = (
-        {"kind": "agent", "ws_lock_key": 20, "job_id": "job-b"},
-        {"kind": "code", "ws_lock_key": 99, "job_id": "job-z"},
-        {"kind": "agent", "ws_lock_key": 10, "job_id": "job-y"},
-        {"kind": "agent", "ws_lock_key": 10, "job_id": "job-x"},
-        {"kind": "code", "ws_lock_key": 5, "job_id": "job-a"},
+        {"kind": "agent", "ws_lock_key": 20, "job_lock_key": 1, "job_id": "job-b"},
+        {"kind": "code", "ws_lock_key": 99, "job_lock_key": 1, "job_id": "job-z"},
+        {"kind": "agent", "ws_lock_key": 10, "job_lock_key": 7, "job_id": "job-y"},
+        # 同 ws 内：job-x 的 id 文本更小但锁键更大——锁键序必须赢过文本序。
+        {"kind": "agent", "ws_lock_key": 10, "job_lock_key": 9, "job_id": "job-x"},
+        # 同键决胜：job-c 与 job-d 同 ws 同锁键（碰撞），按 id 文本决胜。
+        {"kind": "agent", "ws_lock_key": 10, "job_lock_key": 7, "job_id": "job-d"},
+        {"kind": "code", "ws_lock_key": 10, "job_lock_key": 7, "job_id": "job-c"},
+        {"kind": "code", "ws_lock_key": 5, "job_lock_key": 1, "job_id": "job-a"},
     )
 
     ordered = _lock_order_sorted(candidates)
 
     assert [(row["kind"], row["job_id"]) for row in ordered] == [
         ("code", "job-a"),
-        ("agent", "job-x"),
+        ("code", "job-c"),
+        ("agent", "job-d"),
         ("agent", "job-y"),
+        ("agent", "job-x"),
         ("agent", "job-b"),
         ("code", "job-z"),
     ]

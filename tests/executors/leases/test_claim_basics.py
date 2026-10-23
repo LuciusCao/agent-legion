@@ -402,12 +402,13 @@ def test_try_claim_many_sorts_writes_by_ws_lock_key_then_job_id(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
     """try_claim_many writes in the single global job-mutation batch order —
-    (hashtext('agent-ws:' || workspace_id)::int, job_id), shared with
-    finish_many / expire / recover / the agent sweep and the agent claim
-    batch's agent block (EXEC-GENERATION-001, #759 phase 7: every claim
-    takes the job-mutation:<job_id> advisory xact lock, never released
-    before COMMIT, so one cross-batch order prevents AB-BA) — while
-    returning verdicts in caller order."""
+    (hashtext('agent-ws:' || workspace_id)::int, hashtext('job-mutation:' || id)::int,
+    job_id), shared with finish_many / expire / recover / the agent sweep and the
+    agent claim batch's all-kinds order (EXEC-GENERATION-001, #759 phase 7;
+    #1346: the job component is the ACTUAL advisory key, not the id text): every
+    claim takes the job-mutation:<job_id> advisory xact lock, never released
+    before COMMIT, so one cross-batch order prevents AB-BA — while returning
+    verdicts in caller order."""
     import server.app.executors._lease_write_paths as _write_paths
 
     # Three jobs across two workspaces, passed out of order; the expected
@@ -415,16 +416,56 @@ def test_try_claim_many_sorts_writes_by_ws_lock_key_then_job_id(
     # test pins the ALGORITHM rather than a hardcoded hash outcome.
     ws_a = str(queries.create_workspace(name="claim-ws-a", workspace_id="a-ws")["id"])
     ws_b = str(queries.create_workspace(name="claim-ws-b", workspace_id="b-ws")["id"])
-    job_a1 = _create_job_in_workspace(queries, ws_a)
-    job_a2 = _create_job_in_workspace(queries, ws_a)
+    # 同 ws 两 job 的 job-mutation 锁键序必须与 id 文本序相反（否则「丢掉
+    # job 锁键分量」的 mutation 在本夹具上不可观测）——按真实键现挑一对
+    # source id（job id 是确定性编码，锁键打在 job id 上）。
+    from server.app.jobs.job_id_encoding import encode_job_id
+
+    with queries.connect() as conn:
+        candidates: list[tuple[str, str, int]] = []
+        for i in range(200):
+            source_id = f"src-iv{i:03d}"
+            job_id = encode_job_id(ws_a, "demo_workflow", source_id)
+            row = conn.execute(
+                "select hashtext('job-mutation:' || %s)::int as k", (job_id,)
+            ).fetchone()
+            assert row is not None
+            candidates.append((source_id, job_id, int(row["k"])))
+    inverted: tuple[str, str] | None = None
+    for source_id, job_id, key in sorted(candidates, key=lambda c: c[1]):
+        later = [
+            other
+            for other, other_job, other_key in candidates
+            if other_job > job_id and other_key < key
+        ]
+        if later:
+            inverted = (min(later), source_id)
+            break
+    assert inverted is not None, "expected an inverted (text, lock-key) job pair"
+    jobs_a = [
+        str(
+            queries.create_job(
+                workflow_key="demo_workflow",
+                source_type="question",
+                source_id=source_id,
+                run_id="",
+                title="Test Job",
+                node_keys=["review_keywords"],
+                workspace_id=ws_a,
+            )["id"]
+        )
+        for source_id in inverted
+    ]
+    job_a1, job_a2 = jobs_a
     job_b1 = _create_job_in_workspace(queries, ws_b)
     with queries.connect() as conn:
         rows = conn.execute(
-            "select id, hashtext('agent-ws:' || workspace_id)::int as k"
+            "select id, hashtext('agent-ws:' || workspace_id)::int as k,"
+            " hashtext('job-mutation:' || id)::int as jk"
             " from jobs where id = any(%s)",
             ([job_a1, job_a2, job_b1],),
         ).fetchall()
-    key_by_job = {str(row["id"]): (int(row["k"]), str(row["id"])) for row in rows}
+    key_by_job = {str(row["id"]): (int(row["k"]), int(row["jk"]), str(row["id"])) for row in rows}
     expected_order = sorted((job_a1, job_a2, job_b1), key=lambda j: key_by_job[j])
     caller_order = [expected_order[1], expected_order[2], expected_order[0]]
     ws_by_job = {job_a1: ws_a, job_a2: ws_a, job_b1: ws_b}
@@ -449,7 +490,7 @@ def test_try_claim_many_sorts_writes_by_ws_lock_key_then_job_id(
     assert all(r is not None for r in results), "capacity 99 must admit all three"
     # Verdicts are positional: caller order preserved regardless of write order.
     assert [r.job_id for r in results if r is not None] == caller_order
-    assert order == expected_order, "claims must run in (ws lock key, job_id) order"
+    assert order == expected_order, "claims must run in (ws lock key, job lock key, job_id) order"
 
 
 def test_try_claim_many_orders_by_actual_ws_lock_key(

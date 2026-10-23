@@ -18,7 +18,8 @@ sleep），thread.join(timeout=30) 后断言线程已死防假绿。
 3. 新代次对照：mutation 提交后按新代次 enqueue 正常插入（行为不变）。
 4. 混合 claim 批 × finish_many（P2）：批内 code 候选与 agent 候选的 ws
    锁键序与 job_id 序相反时，批写入段与 finish_many 共用同一
-   (ws 锁键, job_id) 全序 → 无 40P01、双方干净提交；旧「code 块按
+   (ws 锁键, job 锁键, job_id) 全序（#1346：job 分量为实际 advisory 锁键）
+   → 无 40P01、双方干净提交；旧「code 块按
    job_id 排最前」序下本案必成环（突变自检覆盖）。
 """
 
@@ -421,7 +422,7 @@ def _inverted_ws_pair(job_db, *, prefix: str) -> tuple[str, str]:
 
 def test_mixed_claim_batch_vs_finish_many_no_ab_ba(job_db) -> None:
     """钉住「混合批与 finish 批共用同一全序」（#645 评审 P2）：claim 批的
-    code 候选也按 (ws 锁键, job_id) 参与排序（code 不取 agent-ws 锁，仅借
+    code 候选也按 (ws 锁键, job 锁键, job_id) 参与排序（code 不取 agent-ws 锁，仅借
     同一排序键）。
 
     两个 workspace（锁键序与 job_id 序相反）各两节点：n1 已被 code 池认领

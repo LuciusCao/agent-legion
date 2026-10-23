@@ -153,6 +153,10 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
     # (the separate key column retired at v91, #211 M3).
     # Malformed JSON reads as "no override"; an object/array value collapses
     # to an invalid marker (→ base, workspace_override_invalid).
+    # job_lock_key (#1346): the batch write phase sorts by the ACTUAL
+    # job-mutation advisory key (hashtext), never the job_id text — a 32-bit
+    # hashtext collision could otherwise fold two batches into opposite wait
+    # orders on the same real locks.
     rows: list[Any] = conn.execute(
         """
         with eligible_workspaces as (
@@ -180,7 +184,7 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
                -- Batch agent claims retain several agent-ws capacity locks
                -- in one transaction. Carry the ACTUAL lock key so the write
                -- phase never substitutes unrelated workspace-text order.
-               hashtext('agent-ws:' || r.workspace_id)::int as ws_lock_key
+               hashtext('agent-ws:' || r.workspace_id)::int as ws_lock_key, hashtext('job-mutation:' || r.job_id)::int as job_lock_key
         from eligible_workspaces ws
         cross join lateral (
           select r2.*,

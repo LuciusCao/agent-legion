@@ -332,19 +332,21 @@ def test_kill_switch_none_batcher_takes_direct_path(job_db) -> None:
 
 def test_finish_many_sorts_writes_by_ws_lock_key_then_job(job_db) -> None:
     """The batch writes in the single global job-mutation batch order —
-    (hashtext('agent-ws:' || workspace_id)::int, job_id), shared with
-    try_claim_many / expire / recover / the agent sweep and the agent claim
-    batch's agent block (EXEC-GENERATION-001, #759 phase 7: every finish
-    takes the job-mutation:<job_id> advisory xact lock, never released before
-    COMMIT, so one cross-batch order prevents AB-BA) — and restores verdicts
-    to queue order."""
+    (hashtext('agent-ws:' || workspace_id)::int, hashtext('job-mutation:' || id)::int,
+    job_id), shared with try_claim_many / expire / recover / the agent sweep and
+    the agent claim batch's all-kinds order (EXEC-GENERATION-001, #759 phase 7;
+    #1346: the job component is the ACTUAL advisory key, not the id text — a
+    32-bit hashtext collision could otherwise fold two batches into opposite
+    wait orders): every finish takes the job-mutation:<job_id> advisory xact
+    lock, never released before COMMIT, so one cross-batch order prevents
+    AB-BA — and restores verdicts to queue order."""
     seed_request(job_db, job_id="job-01", limit=10, workspace_id="ws-a")
     seed_request(job_db, job_id="job-02", limit=10, workspace_id="ws-a")
     seed_request(job_db, job_id="job-03", limit=10, workspace_id="ws-b")
     seed_request(job_db, job_id="job-04", limit=10, workspace_id="ws-b")
     # Distinct run_ids with their own inversion inside ws-a: neither the
     # run_id nor the workspace TEXT may reorder the writes — only the
-    # server-side lock key does. The expected order is computed from the
+    # server-side lock keys do. The expected order is computed from the
     # real hashtext keys, so the test pins the algorithm itself.
     with job_db.connect() as conn:
         conn.execute("update jobs set run_id='run-B' where id='job-01'")
@@ -352,17 +354,18 @@ def test_finish_many_sorts_writes_by_ws_lock_key_then_job(job_db) -> None:
         conn.execute("update jobs set run_id='run-A' where id='job-03'")
         conn.execute("update jobs set run_id='run-B' where id='job-04'")
         rows = conn.execute(
-            "select id, hashtext('agent-ws:' || workspace_id)::int as k"
+            "select id, hashtext('agent-ws:' || workspace_id)::int as k,"
+            " hashtext('job-mutation:' || id)::int as jk"
             " from jobs where id in ('job-01', 'job-02', 'job-03', 'job-04')"
         ).fetchall()
-    key_by_job = {str(row["id"]): (int(row["k"]), str(row["id"])) for row in rows}
+    key_by_job = {str(row["id"]): (int(row["k"]), int(row["jk"]), str(row["id"])) for row in rows}
     expected_order = sorted(key_by_job, key=lambda j: key_by_job[j])
     _setup_worker(job_db)
     leases = ExecutorLeaseRepository(job_db, data_dir=job_db.jobs_dir.parent)
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     claimed = [broker.claim("worker-1") for _ in range(4)]
     assert all(c is not None for c in claimed)
-    # Reverse queue order; the batch must still write in (ws lock key, job_id).
+    # Reverse queue order; the batch must still write in (ws lock key, job lock key, job_id).
     order: list[str] = []
     real_finish_lease = _lease_finish_batch.finish_lease
 

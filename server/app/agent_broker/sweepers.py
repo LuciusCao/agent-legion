@@ -52,7 +52,8 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
         # 挤占批额的时长有界。lease 为空 / lease 行已不存在的孤儿行在选取时
         # 排除：循环对它们本就只 continue，留在批里会永久占满最老位置、让清扫停摆。
         rows = conn.execute(
-            "select r.*, hashtext('agent-ws:' || r.workspace_id)::int as ws_lock_key"
+            "select r.*, hashtext('agent-ws:' || r.workspace_id)::int as ws_lock_key,"
+            " hashtext('job-mutation:' || r.job_id)::int as job_lock_key"
             " from agent_execution_requests r"
             " where r.state in ('claimed', 'reporting') and r.heartbeat_at<%s"
             " and exists (select 1 from executor_leases l where l.id = r.lease_id)"
@@ -66,15 +67,21 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
         deferred, reclaims = 0, ReclaimTally(broker.requeue_limit)
         # EXEC-GENERATION-001 batch order: every row takes the job-mutation
         # advisory xact lock (never released early), so the sweep walks jobs
-        # in the single global (ws lock key, job_id) order shared with
-        # finish_many / try_claim_many / expire / recover and the agent
-        # claim batch's agent block (claim_batch_tx._lock_order_sorted —
-        # same hashtext('agent-ws:' || workspace_id)::int key). The FOR
-        # UPDATE row locks this sweep already holds are on
+        # in the single global (ws lock key, job lock key, job_id) order
+        # shared with finish_many / try_claim_many / expire / recover and the
+        # agent claim batch (claim_batch_tx._lock_order_sorted — same
+        # hashtext('agent-ws:' || workspace_id)::int and
+        # hashtext('job-mutation:' || job_id)::int keys; #1346: the job
+        # component is the ACTUAL advisory key, not the id text, so a
+        # hashtext collision cannot fold two batches into opposite wait
+        # orders). The FOR UPDATE row locks this sweep already holds are on
         # claimed/reporting rows — the mutation side's cancel only matches
         # 'queued' rows and never locks these, so row-lock → job-mutation
         # cannot close a cycle.
-        ordered = sorted(rows, key=lambda r: (int(r["ws_lock_key"]), str(r["job_id"])))
+        ordered = sorted(
+            rows,
+            key=lambda r: (int(r["ws_lock_key"]), int(r["job_lock_key"]), str(r["job_id"])),
+        )
         # #957: 先按同一全局序把本批涉及的 job 锁全部取到（每 job 一次，xact
         # 锁可重入、从不提前释放），再一次性批读代次与 lease 状态——每行读数
         # 仍发生在持有其 job 锁之后，与逐行"锁→读"的语义一致；循环内只剩写。

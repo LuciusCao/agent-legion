@@ -25,7 +25,7 @@ lock_timeout=5s（有环必现、意外等待有界），thread.join(timeout=30)
 7. late finish：旧代次 lease 的 finish 在 upgrade 后到达 → lease released +
    node_run 终态落库，job_nodes/jobs 不被翻转。
 8. 批 AB-BA 回归（阶段 7 任务 A）：finish_many 与 agent claim 批跨两个
-   workspace 反向 job 序并发——统一 (ws 锁键, job_id) 批序下无 40P01、双方
+   workspace 反向 job 序并发——统一 (ws 锁键, job 锁键, job_id) 批序（#1346）下无 40P01、双方
    提交；旧纯 job_id 序下本案必死锁（突变自检覆盖）。
 9. claim 盖戳（审查 P2-b）：兄弟节点 rerun bump 代次后，旁支 pending 行
    （旧戳）上的 agent claim 翻 running 必须盖 jobs 现值戳——否则该行成
@@ -658,7 +658,8 @@ def _inverted_ws_pair(job_db) -> tuple[str, str]:
 
 def test_finish_many_vs_agent_claim_batch_no_ab_ba(job_db) -> None:
     """钉住「全库 job-mutation 批序唯一」（阶段 7 任务 A）：finish_many 与
-    agent claim 批按同一 (ws 锁键, job_id) 序取 job-mutation 锁。
+    agent claim 批按同一 (ws 锁键, job 锁键, job_id) 序取 job-mutation 锁（#1346：
+    job 分量是实际 advisory 锁键，不是 id 文本）。
 
     两个 workspace（锁键序与 job_id 序相反）各两节点：n1 已被 code 池认领
     （running、lease active），n2 排队 agent 请求。A = 手工驱动的 agent 批

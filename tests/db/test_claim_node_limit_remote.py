@@ -469,7 +469,16 @@ def test_batch_takes_code_pool_lock_before_any_job_mutation(job_db) -> None:
             pool, conn, "worker-1149-p22", None, None, selection=selection
         )
 
-    assert [claim.job_id for claim in outcome.claims] == ["job-a-agent", "job-z-code"]
+    # 领取序 = 全局批序 (ws 锁键, job 锁键, job_id)：同 workspace 内由
+    # job-mutation 实际锁键（hashtext）决定，按真实键现算期望值（#1346）。
+    with psycopg.connect(TEST_DATABASE_URL) as conn:
+        rows = conn.execute(
+            "select id, hashtext('job-mutation:' || id)::int as jk"
+            " from (values ('job-a-agent'), ('job-z-code')) as t(id)"
+        ).fetchall()
+    key_by_job = {str(row[0]): (int(row[1]), str(row[0])) for row in rows}
+    expected_claim_order = sorted(key_by_job, key=lambda j: key_by_job[j])
+    assert [claim.job_id for claim in outcome.claims] == expected_claim_order
     assert "code-pool" in advisory_keys
     first_job_mutation = next(
         (i for i, key in enumerate(advisory_keys) if key.startswith("job-mutation:")), None

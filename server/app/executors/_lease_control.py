@@ -82,16 +82,24 @@ def lock_job_mutation_and_read_generation(conn: DatabaseConnection, job_id: str)
 _ORPHAN_WS_LOCK_KEY = -(2**31)
 
 
-def ws_lock_keys_by_job(conn: DatabaseConnection, job_ids: list[str]) -> dict[str, int]:
-    """EXEC-GENERATION-001 全库唯一批序的 ws 分量：每 job 的
-    hashtext('agent-ws:' || workspace_id)::int——与 agent claim 批的
-    ``_lock_order_sorted``（claim_scan 的 ws_lock_key 列）同源同事。"""
+def batch_lock_keys_by_job(
+    conn: DatabaseConnection, job_ids: list[str]
+) -> dict[str, tuple[int, int]]:
+    """EXEC-GENERATION-001 全库唯一批序的排序键：每 job 的
+    (hashtext('agent-ws:' || workspace_id)::int, hashtext('job-mutation:' || id)::int)。
+
+    ws 分量与 agent claim 批的 ``_lock_order_sorted``（claim_scan 的
+    ws_lock_key / job_lock_key 列）同源同事。job 分量是 job-mutation 锁的
+    **实际** 32 位锁键（#1346）：锁资源是 hashtext(key) 而非 id 文本，按 id
+    文本序取锁会让碰撞四元组（a<b<c<d 且 hash(a)=hash(d)、hash(b)=hash(c)）
+    把两个并发批的取锁序折叠成 AB-BA——批序必须建在真实锁键上，id 只作同键
+    决胜。jobs 行已消失的 id 的 ws 分量取 ``_ORPHAN_WS_LOCK_KEY``（advisory
+    锁键不依赖行存在，job 分量仍按真实键算）。"""
     rows = conn.execute(
-        "select id, hashtext('agent-ws:' || workspace_id)::int as ws_lock_key"
-        " from jobs where id = any(%s)",
-        (sorted(set(job_ids)),),
+        "select t.id as id, coalesce(hashtext('agent-ws:' || j.workspace_id)::int, %s) as ws_lock_key, hashtext('job-mutation:' || t.id)::int as job_lock_key from unnest(%s::text[]) as t(id) left join jobs j on j.id = t.id",
+        (_ORPHAN_WS_LOCK_KEY, sorted({str(job_id) for job_id in job_ids})),
     ).fetchall()
-    return {str(row["id"]): int(row["ws_lock_key"]) for row in rows}
+    return {str(r["id"]): (int(r["ws_lock_key"]), int(r["job_lock_key"])) for r in rows}
 
 
 def sync_job_status(conn: DatabaseConnection, job_id: str) -> None:

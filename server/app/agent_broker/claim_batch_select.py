@@ -66,8 +66,10 @@ class BatchClaimSelection:
     lock key, fairness-rotated within that constraint. Code candidates do
     not enter that lock domain and stay floor-unconstrained AT SELECTION —
     the write phase still re-sorts every candidate (code included) into the
-    global ``(ws_lock_key, job_id)`` order (EXEC-GENERATION-001, #645 P2).
-    ``timer`` carries the scan/evaluate timings across both phases (#448).
+    global ``(ws_lock_key, job_lock_key, job_id)`` order (EXEC-GENERATION-001,
+    #645 P2; #1346: the job component is the actual advisory key, not the id
+    text). ``timer`` carries the scan/evaluate timings across both phases
+    (#448).
     """
 
     candidates: tuple[Mapping[str, Any], ...]

@@ -251,7 +251,8 @@ def test_undeclared_and_empty_map_stay_unlimited(job_db) -> None:
     pool = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     legacy = claim_batch_with_retry(pool, "worker-1158-legacy", None, None, limit=2, code_limit=2)
-    assert [claim.job_id for claim in legacy.claims] == ["job-c0", "job-c1"]
+    # 领取集合是主题；返回序是批写入段的全局锁序（#1346 实际锁键，非 id 文本序）。
+    assert sorted(claim.job_id for claim in legacy.claims) == ["job-c0", "job-c1"]
     assert "worker_node_limit_full" not in legacy.skip_reasons
 
     empty = claim_batch_with_retry(

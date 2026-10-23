@@ -173,8 +173,9 @@ def test_batch_claim_keeps_prefix_when_a_candidate_races(job_db, monkeypatch) ->
     上直接注入 ClaimRacedError（测试主题是 savepoint 容错本身）。
     """
     _seed_agent_jobs(job_db, 3)
-    # 队列序：job-0（正常）→ job-1（竞态）→ job-2（不应被领到——批在竞态
-    # 处终止）。
+    # 批写入段按全局锁序 promote（#1346：同 ws 下按实际 job-mutation 锁键，
+    # 不是 job_id 文本序）——竞态 victim 必须取锁序居中者：期望前缀 = 锁序
+    # 最小者领到，锁序最大者本批不再评估。
     base = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
     with job_db.connect() as conn:
         for offset in range(3):
@@ -182,6 +183,13 @@ def test_batch_claim_keeps_prefix_when_a_candidate_races(job_db, monkeypatch) ->
                 "update agent_execution_requests set queued_at=%s where job_id=%s",
                 (base + timedelta(seconds=offset), f"job-{offset}"),
             )
+        rows = conn.execute(
+            "select id, hashtext('job-mutation:' || id)::int as jk"
+            " from jobs where id in ('job-0', 'job-1', 'job-2')"
+        ).fetchall()
+    first_job, raced_job, last_job = [
+        str(item["id"]) for item in sorted(rows, key=lambda r: (int(r["jk"]), str(r["id"])))
+    ]
     _register_worker()
 
     import server.app.agent_broker.claim_evaluate as evaluate_module
@@ -190,7 +198,7 @@ def test_batch_claim_keeps_prefix_when_a_candidate_races(job_db, monkeypatch) ->
     original_promote = evaluate_module.promote_claim
 
     def raced_promote(broker, conn, worker_id, selected, manifest, kind, **kwargs):
-        if selected["job_id"] == "job-1":
+        if selected["job_id"] == raced_job:
             raise ClaimRacedError()
         return original_promote(broker, conn, worker_id, selected, manifest, kind, **kwargs)
 
@@ -198,7 +206,7 @@ def test_batch_claim_keeps_prefix_when_a_candidate_races(job_db, monkeypatch) ->
 
     claims = claim_batch(broker(job_db.jobs_dir.parent), "worker-1", None, None, limit=3)
 
-    assert [claim.job_id for claim in claims] == ["job-0"]
+    assert [claim.job_id for claim in claims] == [first_job]
     with job_db._connect_read() as conn:
         rows = conn.execute(
             "select job_id, state from agent_execution_requests order by job_id"
@@ -206,7 +214,7 @@ def test_batch_claim_keeps_prefix_when_a_candidate_races(job_db, monkeypatch) ->
     states = {row["job_id"]: row["state"] for row in rows}
     # 竞态候选回滚到 savepoint：请求保持 queued（未被 cancel、未被 claim），
     # 后继候选本批不再评估。
-    assert states == {"job-0": "claimed", "job-1": "queued", "job-2": "queued"}
+    assert states == {first_job: "claimed", raced_job: "queued", last_job: "queued"}
 
 
 def test_batch_claim_empty_queue_returns_empty(job_db) -> None:

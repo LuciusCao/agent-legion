@@ -21,8 +21,11 @@ Lock order (EXEC-CLAIM-LOCK-001 + EXEC-GENERATION-001): the selection's
 ascending ``agent-ws:`` capacity-lock floor fixes agent promote order; on top
 of it this module re-sorts the batch into one globally consistent lock
 order — EVERY candidate (code included) ascending by ``(ws_lock_key,
-job_id)``, the same key ``finish_many`` / ``try_claim_many`` / the sweeps
-walk. Code candidates take no ``agent-ws:*`` lock and borrow the key purely
+job_lock_key, job_id)``, the same key ``finish_many`` / ``try_claim_many`` /
+the sweeps walk. ``job_lock_key`` is the ACTUAL ``job-mutation:`` advisory
+key, not the id text (#1346: a hashtext collision could otherwise fold two
+batches into opposite wait orders). Code candidates take no ``agent-ws:*``
+lock and borrow the key purely
 as a sort position (#645 review P2: the old code-first job_id block could
 AB-BA against a finish batch walking the same two jobs in ws-key order). A
 ``pg_advisory_xact_lock`` is NOT released by ROLLBACK TO SAVEPOINT, so every
@@ -119,20 +122,25 @@ def _promote_selected(
 
 
 def _lock_order_sorted(candidates: tuple[Any, ...]) -> list[Any]:
-    """Stable batch lock order (EXEC-GENERATION-001, #759 phase 1c; #645 P2).
+    """Stable batch lock order (EXEC-GENERATION-001, #759 phase 1c; #645 P2;
+    #1346).
 
     Advisory xact locks survive SAVEPOINT rollback, so the batch accumulates
     every candidate's ``job-mutation:<job_id>`` lock to COMMIT; two batches
     taking them in different orders could AB-BA. ALL candidates — code
-    included — sort by the single global batch key ``(ws_lock_key, job_id)``
-    shared with ``finish_many`` / ``try_claim_many`` / the sweeps: code
-    candidates take no ``agent-ws:*`` lock and borrow the key purely as a
+    included — sort by the single global batch key ``(ws_lock_key,
+    job_lock_key, job_id)`` shared with ``finish_many`` / ``try_claim_many``
+    / the sweeps: ``job_lock_key`` is the ACTUAL advisory key
+    (``hashtext('job-mutation:' || job_id)``), because a 32-bit hashtext
+    collision could otherwise fold two batches into opposite wait orders on
+    the same real locks; ``job_id`` is only the same-key tiebreak. Code
+    candidates take no ``agent-ws:*`` lock and borrow the ws key purely as a
     sort position, so a mixed batch can no longer walk the same two jobs
     opposite to a finish/claim batch.
     """
     return sorted(
         candidates,
-        key=lambda row: (int(row["ws_lock_key"]), str(row["job_id"])),
+        key=lambda row: (int(row["ws_lock_key"]), int(row["job_lock_key"]), str(row["job_id"])),
     )
 
 
