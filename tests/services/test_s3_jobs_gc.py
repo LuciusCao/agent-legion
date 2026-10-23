@@ -291,9 +291,10 @@ def test_staging_scan_does_not_swallow_material_key_with_rollback_segment() -> N
     """#1295：workspace id 字面为 jobs-staging 时，材料 key
     （{ws}/{hash}/g{代次}/dir/.rollback/file.bin）落在 staging 前缀扫描
     内。扫描期 /.rollback/ 豁免若先于材料形态分流命中，该 key 既不删除
-    也不进报告（永久不可见）。豁免叠加材料形态排除后：无行且超窗的该
-    形态 key 进 staging_orphans（由 CLI 分流进材料只报告集合）；真回滚
-    备份仍被豁免。"""
+    也不进报告（永久不可见）。豁免叠加材料形态排除后：无行且超材料宽限
+    窗（#1322：材料形态 key 按材料而非 staging 截止点判定）的该形态
+    key 进 staging_orphans（由 CLI 分流进材料候选）；真回滚备份仍被
+    豁免。"""
     material_key = f"jobs-staging/{'a' * 64}/g2/dir/.rollback/file.bin"
     report = scan_orphans(
         _lister(
@@ -308,6 +309,55 @@ def test_staging_scan_does_not_swallow_material_key_with_rollback_segment() -> N
         now=NOW,
     )
     assert [o.key for o in report.staging_orphans] == [material_key]
+
+
+def test_staging_lane_judges_material_keys_by_material_grace() -> None:
+    """#1322（#1318 codex r1 P2）：staging 宽限窗只约束真正的 staging 对象。
+    staging 窗（168h）比材料窗（24h）更长时，48h 的撞名材料形态 key 不再
+    被 staging 截止点吞掉——按材料宽限窗判定进 staging_orphans（由
+    collect_gc_report 分流进材料候选）；同龄的真 staging 对象仍在窗内
+    （不报）；未满材料窗（12h）的材料形态 key 与根前缀扫描同样不进候选；
+    有 DB 行的材料形态 key 不报。反向（staging 窗更短）不误伤：staging
+    1h、材料窗 24h 时 2h 的材料形态 key 同样按材料窗判定（不进报告），
+    提前删除由 partition_material_orphans 的 max(--grace-hours, 1h) 复核
+    兜底。"""
+    mid = "m_" + "e" * 32
+    old_material = f"jobs-staging/{'a' * 64}/v2g0/{mid}/doc.txt"
+    young_material = f"jobs-staging/{'b' * 64}/v2g1/{mid}/new.txt"
+    live_material = f"jobs-staging/{'c' * 64}/v2g0/{mid}/live.txt"
+    true_staging = "jobs-staging/ws-1/job-1/e1/staging.bin"
+
+    def key_exists(keys: list[str]) -> set[str]:
+        return {k for k in keys if k == live_material}
+
+    report = scan_orphans(
+        _lister(
+            {
+                "jobs-staging/": [
+                    _entry(old_material, hours_old=48),
+                    _entry(young_material, hours_old=12),
+                    _entry(live_material, hours_old=48),
+                    _entry(true_staging, hours_old=48),
+                ]
+            }
+        ),
+        key_exists,
+        grace_hours=24.0,
+        staging_grace_hours=168.0,
+        now=NOW,
+    )
+
+    assert [o.key for o in report.staging_orphans] == [old_material]
+    assert report.authority_orphans == []
+
+    short_staging = scan_orphans(
+        _lister({"jobs-staging/": [_entry(young_material, hours_old=2)]}),
+        lambda keys: set(),
+        grace_hours=24.0,
+        staging_grace_hours=1.0,
+        now=NOW,
+    )
+    assert short_staging.staging_orphans == []
 
 
 def test_apply_gc_rollback_exemption_does_not_cover_material_shaped_keys() -> None:

@@ -38,6 +38,7 @@ import logging
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any, Protocol
 
 from server.app.jobs.queries import JobQueries
@@ -64,7 +65,13 @@ class ObjectEntry:
 
 @dataclass
 class OrphanReport:
-    """dry-run 与 --apply 共用的扫描结果。"""
+    """dry-run 与 --apply 共用的扫描结果。
+
+    staging_orphans 里可能混有撞名前缀的材料形态 key——它们按材料宽限窗
+    （而非 staging 宽限窗）判定（#1322），由
+    ``s3_material_gc.collect_gc_report`` 从车道分流进材料候选；
+    ``apply_gc`` 不删材料形态 key（只经 s3_material_gc 的门禁删除）。
+    """
 
     authority_orphans: list[ObjectEntry]
     staging_orphans: list[ObjectEntry]
@@ -108,14 +115,22 @@ def scan_orphans(
     workspace id 允许叫
     ``jobs`` / ``jobs-staging``（无保留名约束），那样的材料 key 会落进
     这两个前缀——staging 不能只看宽限窗无条件回收，否则撞名 workspace
-    的材料会被整批误删。authority 侧按页攒批只是有界化每次传给
+    的材料会被整批误删。撞名 ``jobs-staging/`` 前缀下的材料形态 key 按
+    材料宽限窗（``grace_hours`` 截止点，与材料根前缀扫描同源）判定
+    （#1322）——staging 宽限窗只约束真正的 staging 对象，staging 窗比
+    材料窗更长时窗内的撞名材料孤儿不再被 staging 截止点吞掉（延迟回
+    收）；它们随 staging_orphans 返回，由 s3_material_gc.collect_gc_report
+    分流进材料候选。authority 侧按页攒批只是有界化每次传给
     ``key_exists`` 的 key 列表；两个前缀在 ListObjectsV2 上互不重叠
     （第 6 个字符 ``/`` vs ``-``）。
     """
     now = now or datetime.now(UTC)
     report = OrphanReport([], [])
+    # 材料形态 key 在 staging 道按材料宽限窗判定（#1322）；与 authority
+    # 道/材料根前缀扫描同一截止点。
+    staging_page = partial(_staging_orphans_in, material_cutoff=now - timedelta(hours=grace_hours))
     lanes = (
-        (STAGING_PREFIX, staging_grace_hours, _staging_orphans_in, report.staging_orphans),
+        (STAGING_PREFIX, staging_grace_hours, staging_page, report.staging_orphans),
         (JOBS_PREFIX, grace_hours, orphans_in_page, report.authority_orphans),
     )
     for prefix, grace, page_orphans, sink in lanes:
@@ -226,7 +241,8 @@ def _rollback_backup_exempt(key: str) -> bool:
       jobs / jobs-staging 时材料 key 落在产物前缀内，同样允许合法
       .rollback 段；若豁免先于材料形态分流命中，该 key 既不删除也不进
       报告——永久不可见。豁免前先识别材料形态（第 3 段 (v2)g{代次}）排除
-      之，由 CLI 分流进材料只报告集合（#1282 收口纪律）。
+      之，staging 道扫描期按材料宽限窗分流进材料候选（#1322，收口纪律
+      见 #1282）。
     """
     return (
         key.startswith((JOBS_PREFIX, STAGING_PREFIX))
@@ -236,18 +252,27 @@ def _rollback_backup_exempt(key: str) -> bool:
 
 
 def _staging_orphans_in(
-    entries: list[ObjectEntry], key_exists: KeyExistence, cutoff: datetime
+    entries: list[ObjectEntry],
+    key_exists: KeyExistence,
+    cutoff: datetime,
+    material_cutoff: datetime,
 ) -> list[ObjectEntry]:
     """超宽限窗且 DB 无行：staging 的 DB 对照救的是撞名 workspace 的
     materials（正常 staging 对象本就无行，宽限窗是它们的唯一防线）。
-    ``/.rollback/`` 段的回滚备份按 ``_rollback_backup_exempt`` 豁免
+    材料形态 key 按 ``material_cutoff``（材料宽限窗截止点，与材料根前缀
+    扫描同一 ``--grace-hours`` 窗口）判定，真正的 staging 对象按
+    ``cutoff``（staging 宽限窗截止点）判定（#1322，#1318 codex r1 P2）：
+    staging 窗比材料窗更长时，窗内的撞名材料孤儿不再被 staging 截止点
+    吞掉而延迟回收；未满材料宽限窗的材料形态 key 与根前缀扫描同样不进
+    候选（窗内保留）。``/.rollback/`` 段的回滚备份按
+    ``_rollback_backup_exempt`` 豁免
     （codex #774 P1 族）：promote 恢复最终失败时被刻意保留的备份是幸存
     清单行所指向旧字节的最后恢复源，其生命周期归运维处置（ERROR 日志带
     key）；代价是崩溃残留的 `.rollback` 孤儿不再被本 GC 回收（备份只在
     authority 已存在时创建、崩溃窗口毫秒级，量可忽略）。豁免判定叠加材
-    料形态排除（#1295）：撞名 workspace（id 字面 jobs-staging）的材料
-    key 文件名可含合法 .rollback 段，不豁免——进孤儿报告由 CLI 分流到
-    材料只报告集合，避免被豁免吞掉后永久不可见。bucket lifecycle
+    料形态排除（#1295）：撞名 workspace 的材料 key 文件名可含合法
+    .rollback 段，不豁免——进孤儿报告由 collect_gc_report 分流到材料
+    候选，避免被豁免吞掉后永久不可见。bucket lifecycle
     的子串不可豁免性见 docs/materials-storage-deployment.md。"""
     known = key_exists([e.key for e in entries])
     return [
@@ -255,7 +280,7 @@ def _staging_orphans_in(
         for entry in entries
         if entry.key not in known
         and not _rollback_backup_exempt(entry.key)
-        and _past_grace(entry, cutoff)
+        and _past_grace(entry, material_cutoff if material_shaped_key(entry.key) else cutoff)
     ]
 
 

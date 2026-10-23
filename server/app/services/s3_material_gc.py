@@ -3,7 +3,9 @@
 材料 key 在 bucket 根（``{ws}/{hash|id}/v2g{代次}/m_{material_id}/{filename}``），
 与 ``jobs/``、``jobs-staging/`` 平级；workspace id 字面为 jobs / jobs-staging
 时材料 key 落进两个产物前缀（撞名命名空间，#1282 r4 P1），按材料形态文法分流
-回材料集合。jobs 两条道的判定与删除在 ``s3_jobs_gc``（其 ``apply_gc`` 不删
+回材料集合——撞名 ``jobs-staging/`` 前缀下的材料形态 key 在扫描期按材料宽限窗
+（非 staging 宽限窗）判定分流，staging 窗更长时不再延迟回收（#1322）。
+jobs 两条道的判定与删除在 ``s3_jobs_gc``（其 ``apply_gc`` 不删
 材料形态 key），本模块是材料道：
 
 - 准入三道门：①``material_key_single_use``（#1279 单次使用文法，可复用 key
@@ -116,7 +118,10 @@ def collect_gc_report(
         entry_lister, key_exists, grace_hours=grace_hours, staging_grace_hours=staging_grace_hours
     )
     candidates = scan_material_root_orphans(entry_lister, key_exists, grace_hours)
-    # 撞名命名空间分流（#1282 r4 P1）：含 .rollback 段的材料形态 key 自
+    # 撞名命名空间分流（#1282 r4 P1）：staging 道的材料形态 key 自 #1322 起
+    # 在 scan_orphans 页内按材料宽限窗（而非 staging 宽限窗）判定——
+    # staging 窗比材料窗更长时，窗内的撞名材料孤儿不再被 staging 截止点
+    # 吞掉而延迟回收；含 .rollback 段的材料形态 key 自
     # #1295 起不被扫描期豁免吞掉，同样到达这里。
     for lane in (report.authority_orphans, report.staging_orphans):
         candidates.extend(e for e in lane if material_shaped_key(e.key))

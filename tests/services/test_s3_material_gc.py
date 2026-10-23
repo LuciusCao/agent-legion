@@ -164,6 +164,35 @@ def test_collect_gc_report_splits_collided_material_keys() -> None:
     )
 
 
+def test_collect_gc_report_longer_staging_window_does_not_delay_material_orphans() -> None:
+    """#1322（#1318 codex r1 P2 的回归钉）：staging 宽限窗（168h）比材料
+    宽限窗（24h）更长时，48h 的撞名 v2g 孤儿进删除批——不再被 staging
+    截止点吞掉延迟回收；同龄的撞名旧文法 key 进只报告集合；同龄的真
+    staging 对象仍在窗内（不进 jobs 报告也不进材料候选）；未满材料窗
+    （12h）的撞名 v2g key 不进候选。"""
+    v2g_key = f"jobs-staging/{'a' * 64}/v2g0/{_MID}/doc.txt"
+    legacy_key = f"jobs-staging/{'b' * 64}/g0/doc.txt"
+    young_v2g = f"jobs-staging/{'c' * 64}/v2g1/{_MID}/new.txt"
+    true_staging = "jobs-staging/ws1/j1/e1/staging.bin"
+    entries = [
+        _entry(v2g_key, hours_old=48.0),
+        _entry(legacy_key, hours_old=48.0),
+        _entry(young_v2g, hours_old=12.0),
+        _entry(true_staging, hours_old=48.0),
+    ]
+
+    report, split = s3_material_gc.collect_gc_report(
+        _lister(entries), lambda keys: set(), grace_hours=24.0, staging_grace_hours=168.0
+    )
+
+    assert [e.key for e in split.deletable] == [v2g_key]
+    assert [e.key for e in split.report_only] == [legacy_key]
+    assert split.deferred == []
+    assert report.staging_orphans == []
+    assert report.authority_orphans == []
+    assert report.count == 0
+
+
 def test_material_root_scan_pages_key_existence(monkeypatch) -> None:
     """#1287：根前缀扫描按 KEY_PAGE_SIZE 分页判定——多页输入的孤儿归并正确，
     且 key_exists 按页分批调用（全量对象清单不驻留内存）。"""
