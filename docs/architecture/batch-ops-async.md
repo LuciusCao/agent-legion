@@ -18,7 +18,10 @@ batch-pause、batch-resume、batch-upgrade-workflow、package、clear-packed）�
 - 大 filter/failure 选择的 `target_spec_json` 冻结原始筛选参数、keyset 上界与有界首
   buffer，不冻结全量 id。feeder 后续按游标增量补页；受理后晚到、排序在上界之前的
   job/failure 不会混入。jobs 上界为 `(created_at,id)`，failure 上界为
-  `(finished_at,node_run_id)`。
+  `(finished_at,node_run_id)`。failure freeze 是 entry-sided：已在冻结集内的 job 若其
+  latest failed run 在 freeze 后被新 run 取代，会从后续未消费页消失且不产生 verdict 行
+  （drop-out）。`finished_at` 的 NULL 臂目前纯属防御：现有所有写者都使用
+  `current_timestamp` 写入非空值，未来写者不得引入 NULL 而静默破坏 freeze 语义。
 - `len(ids) ≤ BATCH_OPS_ASYNC_THRESHOLD`（默认 1000，env
   `AGENT_LEGION_BATCH_OPS_ASYNC_THRESHOLD` 覆盖、重启生效；与 #1157 phase0/phase3 的
   1000 对齐）：走既有同步路径，200 + 原响应体，行为不变。
@@ -75,7 +78,10 @@ RunBatchFeeder 模式：SKIP LOCKED 认领（停滞 600s 回收）、每 tick �
   结果按 chunk 先于游标落子表，chunk 起步先探 `done_seqs`、已记录 seq 绝不重执行；
   `(op_id, seq)` 的 ON CONFLICT 是最终兜底。崩溃发生在结果写入与 CAS 之间时，旧
   target spec/cursor 重取同页，done seq 只补簿记。残留窗口 = 单条语句级别的「变更已提交、
-  结果行未落」（intake 消费者 committed-jobs-stay 同款接受度）。
+  结果行未落」（intake 消费者 committed-jobs-stay 同款接受度）。位置映射的接受口径是：
+  冻结流在崩溃窗内只会缩不会胀，条目消失只让后续位置左移，因此保留的 job 不会重执行；
+  代价是消失项及被左移覆盖的项可能静默跳过（每个消失 job 至多一次），后果是用户可
+  重触发的漏跑而非数据损坏。未来可用 `(seq, job_id)` 对校验替代纯位置映射，收紧该窗口。
 - **逐 job 执行 = 调同步路径的同一批 service 入口**（`batch_rerun` /
   `batch_delete` / `batch_run_to` / `batch_pause` / `batch_resume` / `batch_upgrade` /
   `clear_packed_status` / `rerun_by_failure_category`，chunk 显式 ids 直穿），所以逐
