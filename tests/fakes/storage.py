@@ -8,6 +8,8 @@
 * ``deleted``            — delete_object 删除过的 key 列表（record_deletions）。
 * ``presigned``          — presign_put 的 (key, expires) 记录。
 * ``put_expiries`` / ``get_expiries`` — presign TTL 断言（claim 注入测试）。
+* ``put_if_none_match``  — presign_put 的条件写参数记录（#1321：材料 URL 恒 "*"，
+  Worker 产物暂存恒 ""）。
 * ``presigned_gets``     — presign_get 的 key 记录（claim block 断言）。
 * ``get_response_headers`` — presign_get 签入的响应头覆盖（#739 直连头语义断言）。
 * ``opened``             — open_stream 调用计数（缓存命中断言）。
@@ -58,6 +60,7 @@ class FakeObjectStorage:
         self.deleted: list[str] = []
         self.presigned: list[tuple[str, int]] = []
         self.put_expiries: list[int] = []
+        self.put_if_none_match: list[str] = []
         self.get_expiries: list[int] = []
         self.presigned_gets: list[str] = []
         self.get_response_headers: list[dict[str, str]] = []
@@ -71,9 +74,11 @@ class FakeObjectStorage:
         storage_key: str,
         size_bytes: int,
         expires_seconds: int = DEFAULT_PRESIGN_EXPIRY_SECONDS,
+        if_none_match: str = "",
     ) -> str:
         self.presigned.append((storage_key, expires_seconds))
         self.put_expiries.append(expires_seconds)
+        self.put_if_none_match.append(if_none_match)
         return f"https://s3.test/upload/{storage_key}"
 
     def presign_get(

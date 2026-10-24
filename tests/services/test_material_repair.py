@@ -62,6 +62,8 @@ def test_request_reupload_repairs_poisoned_row_and_heals_consumers(
     assert repaired_key != old_key
     assert outcome["storage_key"] == repaired_key
     assert outcome["upload_url"] == f"https://s3.test/upload/{repaired_key}"
+    # #1321：修复重签的 URL 同样签入 If-None-Match: *（create-only 条件写）。
+    assert storage.put_if_none_match[-1] == "*"
 
     # 用修复签发的 URL 重传正确字节（fake：直写对象），complete 携带轮换后
     # 代次 → ready + 新 etag；历史引用（material_id）消费新字节——愈合。

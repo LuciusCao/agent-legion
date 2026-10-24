@@ -16,6 +16,10 @@ from server.app.storage.s3_settings import S3Settings, load_s3_settings
 
 _DEFAULT_PRESIGN_EXPIRY_SECONDS = 3600
 
+# 材料 PUT URL 一律签入的条件写值（#1321）：If-None-Match: * = create-only，
+# 首个 PUT 落盘后同一 URL 的任何重放/覆盖被存储层以 412 关闭。
+IF_NONE_MATCH_STAR = "*"
+
 
 @dataclass(frozen=True)
 class ObjectHead:
@@ -33,8 +37,19 @@ class ObjectStorage(Protocol):
         storage_key: str,
         size_bytes: int,
         expires_seconds: int = _DEFAULT_PRESIGN_EXPIRY_SECONDS,
+        if_none_match: str = "",
     ) -> str:
-        """Return a presigned PUT URL for direct client upload."""
+        """Return a presigned PUT URL for direct client upload.
+
+        ``if_none_match`` (#1321) is signed into the URL's SignedHeaders as
+        the S3 conditional-write header: ``IF_NONE_MATCH_STAR`` ("*") makes
+        the object create-only — the first PUT lands, any replay/overwrite
+        on the same key fails with 412 PreconditionFailed at the storage
+        layer. The uploader must send the header verbatim (omitting it is a
+        403 SignatureDoesNotMatch) and treats a 412 on network retry as
+        "already uploaded". Empty = unconditional (Worker artifact staging
+        keeps the legacy semantics).
+        """
         ...
 
     def head_object(self, storage_key: str) -> ObjectHead | None:
@@ -150,11 +165,15 @@ class S3StorageClient:
         storage_key: str,
         size_bytes: int,
         expires_seconds: int = _DEFAULT_PRESIGN_EXPIRY_SECONDS,
+        if_none_match: str = "",
     ) -> str:
         # SigV4 presigned PUT cannot constrain Content-Length (that requires a
         # presigned POST policy); size is enforced server-side at completion
-        # via head_object instead.
-        return self._presign("put_object", storage_key, expires_seconds, HttpMethod="PUT")
+        # via head_object instead. IfNoneMatch 签进 SignedHeaders（#1321）。
+        params = {"IfNoneMatch": if_none_match} if if_none_match else None
+        return self._presign(
+            "put_object", storage_key, expires_seconds, params=params, HttpMethod="PUT"
+        )
 
     def presign_get(
         self,

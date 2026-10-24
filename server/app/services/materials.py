@@ -33,7 +33,7 @@ from server.app.services.material_key_validation import (
     verify_stored_object,
 )
 from server.app.services.material_ttl import mark_ready
-from server.app.storage import ObjectStorage, is_precondition_failed
+from server.app.storage import IF_NONE_MATCH_STAR, ObjectStorage, is_precondition_failed
 
 _PRESIGN_EXPIRY_SECONDS = 3600
 _DEFAULT_LIST_LIMIT = 50
@@ -133,7 +133,14 @@ class MaterialsService:
         (``material_key_single_use`` in s3_jobs_gc, #1314). The row (and
         its key) commits BEFORE the PUT URL is signed, so every object this
         protocol writes is referenced by a row from its first byte — the
-        other half of the delete batch's safety argument.
+        other half of the delete batch's safety argument. Every issued PUT
+        URL signs ``If-None-Match: *`` into SignedHeaders (#1321): the key
+        is create-only at the storage layer, so replaying the URL after the
+        first landed PUT (notably after complete()) fails with 412 instead
+        of silently overwriting — consumption-side If-Match (#1279) drops to
+        defense-in-depth; uploaders must send the header verbatim and treat
+        a 412 on network retry as "already uploaded" (complete() stays the
+        content authority).
         Pre-namespace rows (no ``g`` segment) keep their keys untouched
         until their first retry.
         """
@@ -233,11 +240,10 @@ class MaterialsService:
         upload_url: str | None = None
         if not deduplicated:
             upload_url = storage.presign_put(
-                storage_key, size_bytes, expires_seconds=_PRESIGN_EXPIRY_SECONDS
+                storage_key, size_bytes, _PRESIGN_EXPIRY_SECONDS, if_none_match=IF_NONE_MATCH_STAR
             )
-        material = _record(self._fetch_row(workspace_id, material_id))
         return {
-            "material": material,
+            "material": _record(self._fetch_row(workspace_id, material_id)),
             "upload_url": upload_url,
             "upload_expires_in_seconds": _PRESIGN_EXPIRY_SECONDS,
             "deduplicated": deduplicated,
@@ -335,13 +341,15 @@ class MaterialsService:
         代次) 即恢复 ready。uploading/failed 行幂等重签（修复重试）；
         expired → 409；未知 → 404。修复签发的 URL 与后续 presign 重试
         互斥：presign 会再次推进代次使该 URL 指向死 key（complete 代次
-        守卫兜住，409 后可重新 presign 或重跑修复）。
+        守卫兜住，409 后可重新 presign 或重跑修复）。修复 URL 与 presign URL
+        同样签入 If-None-Match: *（#1321）：重传方的 PUT 必须携带该头。
         """
         storage = self._require_storage()
         with write_transaction(self._connect_source) as conn:
             outcome = repair_material_for_reupload_tx(conn, workspace_id, material_id)
+        key, size = str(outcome["storage_key"]), int(outcome["size_bytes"])
         outcome["upload_url"] = storage.presign_put(
-            str(outcome["storage_key"]), int(outcome["size_bytes"]), _PRESIGN_EXPIRY_SECONDS
+            key, size, _PRESIGN_EXPIRY_SECONDS, if_none_match=IF_NONE_MATCH_STAR
         )
         return outcome
 
