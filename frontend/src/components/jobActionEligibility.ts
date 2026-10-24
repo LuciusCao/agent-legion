@@ -39,6 +39,18 @@ export type JobActionDisabled = {
   delete: boolean
 }
 
+export function allMatchingActionDisabled(count: number, loading: boolean) {
+  const blocked = loading || count === 0
+  return {
+    rerun: blocked,
+    runTo: true,
+    continue: true,
+    package: blocked,
+    clearPacked: blocked,
+    delete: blocked,
+  }
+}
+
 export function computeActionDisabled(
   jobs: JobSummary[],
   loading: boolean

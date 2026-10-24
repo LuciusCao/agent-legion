@@ -152,6 +152,7 @@ describe('jobBatchOpToCard（#946 / M52）', () => {
     )
     expect(jobBatchOpToCard(op({ kind: 'approve' })).title).toBe('批量通过')
     expect(jobBatchOpToCard(op({ kind: 'reject' })).icon).toBe('cancel')
+    expect(jobBatchOpToCard(op({ kind: 'reject' })).title).toBe('批量终止')
   })
 
   it('summarizes reason_counts into translated Top 3 lines', () => {

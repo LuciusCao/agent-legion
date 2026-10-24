@@ -13,6 +13,7 @@ interface ConfirmDialogProps {
   title: string
   children: ReactNode
   confirmLabel?: string
+  confirmColor?: 'primary' | 'error'
   /** 提交在途时确认按钮的文案（默认「删除中...」）。 */
   busyLabel?: string
   onClose: () => void
@@ -20,14 +21,15 @@ interface ConfirmDialogProps {
 }
 
 /**
- * Shared destructive-action confirm dialog (MUI), replacing native
- * window.confirm; mirrors BatchDeleteDialog's busy-state handling.
+ * Shared action confirm dialog (MUI), replacing native window.confirm;
+ * mirrors BatchDeleteDialog's busy-state handling.
  */
 export function ConfirmDialog({
   open,
   title,
   children,
   confirmLabel = '删除',
+  confirmColor = 'error',
   busyLabel = '删除中...',
   onClose,
   onConfirm,
@@ -59,7 +61,7 @@ export function ConfirmDialog({
         </Button>
         <Button
           variant="contained"
-          color="error"
+          color={confirmColor}
           onClick={() => void handleConfirm()}
           disabled={isSubmitting}
         >

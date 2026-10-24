@@ -45,7 +45,6 @@ export default function WorkspaceMainPage() {
   const selectUnpacked = useJobStore((state) => state.selectUnpacked)
   const clearSelection = useJobStore((state) => state.clearSelection)
   const batchDelete = useJobStore((state) => state.batchDelete)
-  const batchRunTo = useJobStore((state) => state.batchRunTo)
   const filteredJobIds = useJobStore(selectFilteredJobIds)
   const selectMode = useJobStore((state) => state.selectMode)
   const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
@@ -54,8 +53,9 @@ export default function WorkspaceMainPage() {
   const batchClearPackedLoading = useJobStore(
     (state) => state.batchClearPackedLoading
   )
-  const batchDeleteLoading = useJobStore((state) => state.batchDeleteLoading)
-  const batchRunToLoading = useJobStore((state) => state.batchRunToLoading)
+  const batchDeleteLoading = useJobStore(
+    (state) => state.batchDeleteLoading || state.batchRunToLoading
+  )
   const batchUpgradeWorkflowLoading = useJobStore(
     (state) => state.batchUpgradeWorkflowLoading
   )
@@ -97,11 +97,8 @@ export default function WorkspaceMainPage() {
     { key: 'clear', label: '取消选择', onClick: clearSelection },
   ]
 
-  const { handleRerun, failureContext } = useWorkspaceRerunActions(workspaceId)
-
-  const handleRunTo = async (targetKey: string, startKey?: string) => {
-    if (workspaceId) await batchRunTo(workspaceId, targetKey, startKey)
-  }
+  const { handleRerun, handleRunTo, failureContext } =
+    useWorkspaceRerunActions(workspaceId)
 
   const pauseActions = useWorkspacePauseActions(workspaceId)
 
@@ -164,7 +161,6 @@ export default function WorkspaceMainPage() {
               batchPackageLoading ||
               batchClearPackedLoading ||
               batchDeleteLoading ||
-              batchRunToLoading ||
               pauseActions.pauseLoading ||
               batchUpgradeWorkflowLoading
             }
@@ -178,6 +174,7 @@ export default function WorkspaceMainPage() {
             onDelete={() => setDeleteDialogOpen(true)}
             onPause={pauseActions.handlePause}
             onResume={pauseActions.handleResume}
+            onApproval={pauseActions.handleApproval}
             onUpgradeWorkflow={handleUpgradeWorkflow}
           />
           <BatchDeleteDialog

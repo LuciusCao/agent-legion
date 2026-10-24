@@ -5,7 +5,7 @@ import type { JobBatchOperation } from '../api/jobBatchOperationsApi'
  * 任务中心受理通知（#1157 phase3）：AddItemsDialog 大批量异步受理后由
  * WorkspaceLayout 挂载的 TaskAcceptToast 消费（带「查看进度 →」的持久
  * snackbar；uiStore 的瞬时 toast 不承载动作按钮，故独立成店）。
- * #946：批量 job 操作（重跑/删除/打包等 8 端点）超阈值走 202 受理时复用
+ * #946：批量 job 操作（重跑/删除/打包/审批等）超阈值走 202 受理时复用
  * 同一通知臂，opKind/opId 携带操作语义（文案由 TaskAcceptToast 决定）。
  */
 export type AcceptedNotice = {

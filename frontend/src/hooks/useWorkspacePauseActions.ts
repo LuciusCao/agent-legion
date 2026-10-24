@@ -1,11 +1,15 @@
 import { useJobStore } from '../stores/jobStore'
 
-/** Batch pause/resume handlers plus their combined loading flag. */
+/** Batch execution-control handlers plus their combined loading flag. */
 export function useWorkspacePauseActions(workspaceId: string | undefined) {
   const batchPause = useJobStore((state) => state.batchPause)
   const batchResume = useJobStore((state) => state.batchResume)
+  const batchApproval = useJobStore((state) => state.batchApproval)
   const pauseLoading = useJobStore(
-    (state) => state.batchPauseLoading || state.batchResumeLoading
+    (state) =>
+      state.batchPauseLoading ||
+      state.batchResumeLoading ||
+      state.batchApprovalLoading
   )
 
   const handlePause = async () => {
@@ -16,5 +20,9 @@ export function useWorkspacePauseActions(workspaceId: string | undefined) {
     if (workspaceId) await batchResume(workspaceId)
   }
 
-  return { handlePause, handleResume, pauseLoading }
+  const handleApproval = async (kind: 'approve' | 'reject') => {
+    if (workspaceId) await batchApproval(workspaceId, kind)
+  }
+
+  return { handlePause, handleResume, handleApproval, pauseLoading }
 }
