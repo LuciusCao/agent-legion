@@ -71,9 +71,8 @@ def create_failed_node_runs_router(
         payload: JobRerunByFailureRequest,
         user: Annotated[dict[str, Any], Depends(require_user)],
     ) -> JobRerunByFailureResponse | JSONResponse:
-        # The scope resolution (explicit ids / filter / every matching failure)
-        # stays in the request thread in both modes (#946): the async branch
-        # freezes it into the operation's target spec.
+        # Only a bounded prefix is resolved here; large filter/failure
+        # selections freeze their keyset bounds for incremental feeder reads.
         scope, operation = batch_ops_async.dispatch_rerun_by_failure(
             job_db,
             workspace_id,

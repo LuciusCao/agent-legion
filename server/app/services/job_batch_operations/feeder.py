@@ -39,6 +39,7 @@ from server.app.services.job_batch_operations.handlers import (
     run_chunk,
     run_completion,
 )
+from server.app.services.job_batch_operations.selection import load_chunk
 from server.app.services.run_batch_feeder import RUN_BATCH_WATERMARK
 from server.app.settings import Settings
 
@@ -100,10 +101,8 @@ class JobBatchOpsFeeder:
         workspace_id = str(operation["workspace_id"])
         kind = str(operation["kind"])
         payload = json.loads(str(operation["target_spec_json"]))
-        ids: list[str] = payload["job_ids"]
         params: dict[str, Any] = payload.get("params") or {}
         start = int(operation["next_index"])
-        end = min(start + JOB_BATCH_OPS_CHUNK_SIZE, len(ids))
 
         # Watermark gate (work-creating kinds only): release the claim back to
         # pending and report no-work so the loop idles instead of hot-spinning;
@@ -114,8 +113,12 @@ class JobBatchOpsFeeder:
             )
             return False
 
+        ids, buffer_start, items_total, payload, spec_changed = load_chunk(
+            self.job_db, workspace_id, payload, start, JOB_BATCH_OPS_CHUNK_SIZE
+        )
+        end = min(start + JOB_BATCH_OPS_CHUNK_SIZE, items_total)
         done_seqs = self.job_db.list_job_batch_operation_done_seqs(op_id, start, end)
-        todo = [(seq, ids[seq]) for seq in range(start, end) if seq not in done_seqs]
+        todo = [(seq, ids[seq - buffer_start]) for seq in range(start, end) if seq not in done_seqs]
         chunk_errors = json.loads(str(operation["chunk_errors_json"] or "[]"))
         if todo:
             try:
@@ -142,7 +145,8 @@ class JobBatchOpsFeeder:
                 ]
             self.job_db.insert_job_batch_operation_results(op_id, rows)
 
-        done = end >= len(ids)
+        stream = payload.get("stream")
+        done = end >= items_total and (stream is None or stream["next_cursor"] is None)
         output: dict[str, Any] | None = None
         if done and kind == "package":
             # Replay guard: a stale reclaim re-walks the final chunk with every
@@ -166,6 +170,8 @@ class JobBatchOpsFeeder:
             error_message=error_message,
             done=done,
             output=output,
+            target_spec=payload if spec_changed else None,
+            items_total=items_total,
         )
         if advanced is None:
             # Pause/cancel landed mid-chunk (reserved control plane; the CAS

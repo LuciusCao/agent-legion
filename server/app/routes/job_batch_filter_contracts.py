@@ -7,7 +7,6 @@ from typing import Self
 from pydantic import BaseModel, Field, model_validator
 
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.services.job_selection_resolver import MAX_BATCH_JOBS
 
 
 class JobFilterPayload(BaseModel):
@@ -36,12 +35,9 @@ class JobFilterPayload(BaseModel):
 class JobSelectionMixin(BaseModel):
     """Batch target selection: exactly one of explicit ``job_ids`` or ``filter``."""
 
-    # #712: explicit lists are bounded by the same per-request cap as filter
-    # matches (``MAX_BATCH_JOBS``, enforced in the selection resolver);
-    # oversized lists fail validation with 422 before any work starts.
-    job_ids: list[str] | None = Field(default=None, max_length=MAX_BATCH_JOBS)
+    job_ids: list[str] | None = None
     filter: JobFilterPayload | None = None
-    exclude_ids: list[str] = Field(default_factory=list, max_length=MAX_BATCH_JOBS)
+    exclude_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def check_job_selection(self) -> Self:

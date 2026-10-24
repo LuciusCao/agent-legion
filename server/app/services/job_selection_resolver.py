@@ -2,63 +2,26 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Collection, Sequence
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.jobs.queries.job_bulk_sql import CHUNK_ROWS
 from server.app.jobs.queries.job_filtering import JobListFilter, filter_clauses
 
-# Batch selection resolves synchronously in the request thread (documented
-# limitation); keyset pages keep memory bounded while scanning workspaces.
 _PAGE_SIZE = 1000
-
 MAX_BATCH_JOBS_ENV = "AGENT_LEGION_MAX_BATCH_JOBS"
-# #712 / #917 B-2: upper bound on one batch selection (explicit ids are capped
-# by the request contract's max_length, filter matches here). Batch mutations
-# run per-job transactions in the sync request thread, so the cap bounds how
-# long one request can hold a threadpool slot; prefetch reads chunk by
-# ``CHUNK_ROWS`` regardless of the cap, so raising it scales linearly (#1348).
-DEFAULT_MAX_BATCH_JOBS = 20 * CHUNK_ROWS
+logger = logging.getLogger(__name__)
 
-
-def _max_batch_jobs() -> int:
-    """Env override for the batch cap (import-time read; restart to change)."""
-    try:
-        return max(1, int(os.environ.get(MAX_BATCH_JOBS_ENV, "")))
-    except ValueError:
-        return DEFAULT_MAX_BATCH_JOBS
-
-
-MAX_BATCH_JOBS = _max_batch_jobs()
+if os.environ.get(MAX_BATCH_JOBS_ENV) is not None:
+    logger.warning(
+        "%s is deprecated and ignored; batch selections are no longer capped", MAX_BATCH_JOBS_ENV
+    )
 
 
 class EmptyJobSelectionError(ValueError):
     """Raised when a batch operation's selection resolves to zero jobs."""
-
-
-class BatchSelectionTooLargeError(ValueError):
-    """A filter selection matched more jobs than one batch request may touch.
-
-    Mapped to HTTP 422 by the app-level handler (``job_http_handlers``); the caller
-    narrows the filter or splits the work into several requests.
-    """
-
-    code = "batch_selection_too_large"
-
-    def __init__(self, limit: int) -> None:
-        self.limit = limit
-        super().__init__(
-            f"Batch selection matches more than {limit} jobs (the per-request limit);"
-            " narrow the filter or run the operation in smaller batches"
-        )
-
-
-def ensure_batch_size(count: int) -> None:
-    """Raise ``BatchSelectionTooLargeError`` when ``count`` exceeds the cap."""
-    if count > MAX_BATCH_JOBS:
-        raise BatchSelectionTooLargeError(MAX_BATCH_JOBS)
 
 
 def resolve_batch_selection(
@@ -70,33 +33,35 @@ def resolve_batch_selection(
 ) -> list[str]:
     """Return explicit ids, or resolve ``job_filter`` minus ``exclude_ids``."""
     if job_filter is None:
-        ids = list(job_ids or [])
-        ensure_batch_size(len(ids))
-        return ids
-    return resolve_job_ids(job_db, workspace_id, job_filter, exclude_ids)
-
-
-def resolve_job_ids(
-    job_db: JobQueries,
-    workspace_id: str,
-    f: JobListFilter,
-    exclude_ids: Collection[str] = (),
-) -> list[str]:
-    """Collect every job id matching ``f``, newest first, minus excluded ids.
-
-    Stops scanning as soon as the selection exceeds ``MAX_BATCH_JOBS`` and
-    raises ``BatchSelectionTooLargeError`` (#712): nothing has been written
-    yet, so an oversized filter fails before any per-job work starts.
-    """
-    excluded = {value.strip() for value in exclude_ids if value.strip()}
+        return list(job_ids or [])
     ids: list[str] = []
     cursor: str | None = None
     while True:
-        page, cursor = _list_job_ids_page(job_db, workspace_id, f, _PAGE_SIZE, cursor)
-        ids.extend(job_id for job_id, _created_at in page if job_id not in excluded)
-        ensure_batch_size(len(ids))
+        page, cursor, _ = resolve_job_ids_page(
+            job_db, workspace_id, job_filter, _PAGE_SIZE, cursor=cursor, exclude_ids=exclude_ids
+        )
+        ids.extend(page)
         if cursor is None:
             return ids
+
+
+def resolve_job_ids_page(
+    job_db: JobQueries,
+    workspace_id: str,
+    f: JobListFilter,
+    limit: int,
+    *,
+    cursor: str | None = None,
+    freeze_at: str | None = None,
+    exclude_ids: Collection[str] = (),
+) -> tuple[list[str], str | None, str | None]:
+    """Return (ids, next cursor, frozen upper bound) for one keyset page."""
+    rows, next_cursor = _list_job_ids_page(job_db, workspace_id, f, limit, cursor, freeze_at)
+    if freeze_at is None and cursor is None and rows:
+        job_id, created_at = rows[0]
+        freeze_at = f"{created_at}|{job_id}"
+    excluded = {value.strip() for value in exclude_ids if value.strip()}
+    return [job_id for job_id, _ in rows if job_id not in excluded], next_cursor, freeze_at
 
 
 def _list_job_ids_page(
@@ -105,15 +70,20 @@ def _list_job_ids_page(
     f: JobListFilter,
     limit: int,
     cursor: str | None,
+    freeze_at: str | None = None,
 ) -> tuple[list[tuple[str, str]], str | None]:
     """Narrow keyset page of (id, created_at) pairs ordered newest first."""
     clauses, filter_params = filter_clauses(f)
     where = f" where workspace_id = %s{''.join(f' and {c}' for c in clauses)}"
     params: list[Any] = [workspace_id, *filter_params]
+    if freeze_at:
+        created_at, job_id = freeze_at.split("|", 1)
+        where += " and (created_at, id) <= (%s, %s)"
+        params.extend([created_at, job_id])
     if cursor:
         created_at, job_id = cursor.split("|", 1)
-        where += " and (created_at < %s or (created_at = %s and id < %s))"
-        params.extend([created_at, created_at, job_id])
+        where += " and (created_at, id) < (%s, %s)"
+        params.extend([created_at, job_id])
     with job_db._connect_read() as conn:
         rows = conn.execute(
             f"select id, created_at from jobs{where} order by created_at desc, id desc limit %s",

@@ -135,5 +135,12 @@ terms:
     retired_in: '#1103（证据矩阵改名）'
     note: 证据矩阵文件名沿用了已退役的 executor 概念（schema v47），已改名为
       docs/architecture/architecture-evidence-matrix.md；现行文档一律链接新路径
+  - pattern: 'batch_selection_too_large'
+    retired_in: '#1362'
+    note: 单请求选择上限及其 422 错误码已删除；大 filter/failure 选择转有界流式解析
+  - pattern: 'MAX_BATCH_JOBS'
+    retired_in: '#1362'
+    note: 单请求选择上限已退役；同名旧 env 在 0.8.2 仅保留 deprecation warning，
+      现行护栏是增量解析与 workspace backlog 水位
 
 exemptions: []

@@ -208,6 +208,8 @@ class JobBatchOperationQueriesMixin(ConnectionQueriesMixin):
         error_message: str,
         done: bool,
         output: dict[str, Any] | None = None,
+        target_spec: dict[str, Any] | None = None,
+        items_total: int | None = None,
     ) -> dict[str, Any] | None:
         """CAS cursor advance (pause-wins): misses when the row left 'running'.
 
@@ -218,6 +220,11 @@ class JobBatchOperationQueriesMixin(ConnectionQueriesMixin):
         """
         errors_json = json.dumps(chunk_errors, ensure_ascii=False, sort_keys=True)
         output_json = json.dumps(output or {}, ensure_ascii=False, sort_keys=True)
+        spec_json = (
+            json.dumps(target_spec, ensure_ascii=False, sort_keys=True)
+            if target_spec is not None
+            else None
+        )
         with self.connect() as conn:
             row = conn.execute(
                 """
@@ -225,6 +232,8 @@ class JobBatchOperationQueriesMixin(ConnectionQueriesMixin):
                 set next_index=%s, succeeded_count=%s, skipped_count=%s, failed_count=%s,
                     chunk_errors_json=%s, error_message=%s,
                     output_json=case when %s then %s else output_json end,
+                    target_spec_json=coalesce(%s, target_spec_json),
+                    items_total=coalesce(%s, items_total),
                     status=case when %s then 'completed' else 'pending' end,
                     finished_at=case when %s then current_timestamp else null end,
                     updated_at=current_timestamp
@@ -240,6 +249,8 @@ class JobBatchOperationQueriesMixin(ConnectionQueriesMixin):
                     error_message,
                     output is not None,
                     output_json,
+                    spec_json,
+                    items_total,
                     done,
                     done,
                     op_id,
