@@ -141,7 +141,7 @@ def test_retry_failed_refuses_non_terminal(workspace: str, job_db: JobQueries, s
         submit_retry_failed(job_db, WORKSPACE, str(op["id"]), created_by="user:tester")
 
 
-@pytest.mark.parametrize("kind", ["pause", "resume"])
+@pytest.mark.parametrize("kind", ["pause", "resume", "approve", "reject"])
 def test_retry_failed_refuses_meaningless_kinds(
     workspace: str, job_db: JobQueries, kind: str
 ) -> None:
@@ -207,6 +207,7 @@ def test_retry_failed_op_executes_through_feeder(
             pause=services.pause,
             upgrade=services.workflow_upgrade,
             packages=JobPackageService(job_db, settings),
+            approvals=services.approvals,
         ),
     )
     while feeder.consume_once():

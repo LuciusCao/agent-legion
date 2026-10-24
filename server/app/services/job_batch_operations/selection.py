@@ -27,6 +27,7 @@ def submit_operation(
     *,
     retry_of: str | None = None,
     stream: dict[str, Any] | None = None,
+    operation_id: str | None = None,
 ) -> dict[str, Any]:
     """Persist one accepted operation and its frozen target spec."""
     if kind not in JOB_BATCH_OPERATION_KINDS:
@@ -40,7 +41,7 @@ def submit_operation(
         target_spec["stream"] = stream
     if retry_of is not None:
         target_spec["retry_of"] = retry_of
-    op_id = uuid.uuid4().hex
+    op_id = operation_id or uuid.uuid4().hex
     job_db.create_job_batch_operation(
         op_id, workspace_id, kind, target_spec, len(frozen), created_by
     )

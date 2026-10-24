@@ -160,6 +160,8 @@ server/app/
 | GET | `/jobs/{job_id}/raw-artifacts/{artifact_name:path}` | `get_artifact_raw_nested` | routes/job_artifact_raw_nested.py |
 | GET | `/jobs/{job_id}/artifacts/{artifact_name:path}` | `get_artifact` | routes/job_artifacts.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/log` | `get_job_run_log` | routes/job_artifacts.py |
+| POST | `/workspaces/{workspace_id}/jobs/batch-approve` | `batch_approve` | routes/job_batch_approval.py |
+| POST | `/workspaces/{workspace_id}/jobs/batch-reject` | `batch_reject` | routes/job_batch_approval.py |
 | GET | `/workspaces/{workspace_id}/job-batch-operations/{op_id}` | `get_job_batch_operation` | routes/job_batch_operations.py |
 | GET | `/workspaces/{workspace_id}/job-batch-operations/{op_id}/results` | `list_job_batch_operation_results` | routes/job_batch_operations.py |
 | GET | `/workspaces/{workspace_id}/job-batch-operations` | `list_job_batch_operations` | routes/job_batch_operations_listing.py |
@@ -437,9 +439,11 @@ server/app/
 | InstanceResultValidateSettings | BaseModel | workers: int | app/routes/instance_settings_contracts.py |
 | InstanceAgentClaimSettings | BaseModel | worker_touch_interval_seconds: float | app/routes/instance_settings_contracts.py |
 | InstanceSettingsDocument | BaseModel | cleanup: InstanceCleanupSettings, monitoring: InstanceMonitoringSettings, hea... | app/routes/instance_settings_contracts.py |
-| ApprovalDecisionCreateRequest | BaseModel | verdict: ApprovalVerdict, note: str, rework_target: str | app/routes/job_approval_contracts.py |
+| ApprovalDecisionCreateRequest | BaseModel | verdict: ApprovalVerdict, payload: dict[str, Any], note: str, rework_target: ... | app/routes/job_approval_contracts.py |
 | ApprovalDecisionResponse | BaseModel | id: str, job_id: str, node_key: str, verdict: ApprovalVerdict, note: str, rew... | app/routes/job_approval_contracts.py |
 | ApprovalDecisionListResponse | BaseModel | decisions: list[ApprovalDecisionResponse] | app/routes/job_approval_contracts.py |
+| ApprovalBatchResultResponse | BaseModel | job_id: str, operation: Literal['approve', 'reject'], status: Literal['succee... | app/routes/job_batch_approval.py |
+| BatchApprovalJobsResponse | BaseModel | results: list[ApprovalBatchResultResponse] | app/routes/job_batch_approval.py |
 | JobFilterPayload | BaseModel | status: str | None, search: str | None, workflow_version: int | None, workflo... | app/routes/job_batch_filter_contracts.py |
 | JobSelectionMixin | BaseModel | job_ids: list[str] | None, filter: JobFilterPayload | None, exclude_ids: list... | app/routes/job_batch_filter_contracts.py |
 | JobBatchOperationResponse | BaseModel | id: str, workspace_id: str, kind: JobBatchOperationKindParam, status: JobBatc... | app/routes/job_batch_operations.py |
@@ -926,7 +930,7 @@ Studio 分离改造把 workflow 编辑分成两条通道。**结构通道**（�
   - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
   - `external_connections` / `instance_secrets` / `connection_tokens` — 实例级外部服务连接：连接只存非敏感配置，敏感字段 Fernet 加密入 `instance_secrets`（`conn:<key>:<field>` 引用），鉴权 token 加密缓存在 `connection_tokens`（v34 新增，见下文外部服务连接段）
   - `runs`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表（`job_batches` 已随 schema v53 drop，由 `runs` 取代）
-  - `approval_decisions` — `type: approval` 人工审批门的 insert-only 审计表（schema v65，EXEC-APPROVAL-001；每 (job_id, node_key) 的最新行即当前决策，历史行重建评审轮次）
+  - `approval_decisions` — `type: approval` 人工审批门的 insert-only 审计表（schema v65，EXEC-APPROVAL-001；每 (job_id, node_key) 的最新行即当前决策，历史行重建评审轮次；v104 增加 `payload_json` 与 nullable `batch_id` / `batch_selection`，批量决策仍逐行写入且 actor 保持 `user:{id}`）
   - `materials` — 材料（单文件条目）元数据；`material_bundles` / `material_bundle_members` — bundle 文件夹条目的冻结引用式清单（schema v55）
   - `job_artifacts` — Job 产物清单（权威副本在实例对象存储，schema v54）
   - `workflow_revisions` — workflow 版本修订历史

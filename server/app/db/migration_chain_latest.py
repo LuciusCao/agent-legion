@@ -6,6 +6,7 @@ migration_chain asserts the combined registry stays sorted."""
 from __future__ import annotations
 
 from server.app.db.migration_entry import SchemaMigration
+from server.app.db.migrations.approval_batch import migrate_approval_batch
 from server.app.db.migrations.job_batch_operations import (
     migrate_job_batch_operations_archive,
 )
@@ -33,4 +34,7 @@ LATEST_MIGRATIONS: list[SchemaMigration] = [
     # v101 共用模块（v99/v100 先例）。DDL-only, same guarded-ALTER home rule
     # as v87.
     SchemaMigration(103, "job_batch_operations_archive", migrate_job_batch_operations_archive),
+    # v104 (#1363): approval decision payload + batch audit context, and the
+    # approve/reject job-batch operation kinds.
+    SchemaMigration(104, "approval_batch", migrate_approval_batch),
 ]

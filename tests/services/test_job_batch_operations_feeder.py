@@ -51,6 +51,7 @@ def _executors(job_db: JobQueries, settings: Settings) -> BatchOpsExecutors:
         pause=services.pause,
         upgrade=services.workflow_upgrade,
         packages=JobPackageService(job_db, settings),
+        approvals=services.approvals,
     )
 
 

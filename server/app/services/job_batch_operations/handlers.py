@@ -14,7 +14,7 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.job_batch_operations import KIND_DELETE
-from server.app.services import job_workflow_upgrade_batch
+from server.app.services import approval_batch, job_workflow_upgrade_batch
 from server.app.services.job_rerun import batch_ops as rerun_batch_ops
 
 
@@ -28,6 +28,7 @@ class BatchOpsExecutors:
     pause: Any  # JobPauseService
     upgrade: Any  # JobWorkflowUpgradeService
     packages: Any  # JobPackageService
+    approvals: Any  # ApprovalDecisionService
 
 
 def run_chunk(
@@ -102,6 +103,20 @@ def run_chunk(
         return [
             dict(result)
             for result in executors.packages.clear_packed_status(workspace_id, job_ids=ids)
+        ]
+    if kind in ("approve", "reject"):
+        return [
+            dict(result)
+            for result in approval_batch.batch_decide(
+                executors.approvals,
+                workspace_id,
+                ids,
+                verdict="approved" if kind == "approve" else "rejected",
+                note=str(params.get("note") or ""),
+                decided_by=str(params.get("decided_by") or ""),
+                batch_id=str(params["batch_id"]),
+                batch_selection=str(params["batch_selection"]),
+            )
         ]
     raise ValueError(f"unknown batch operation kind: {kind!r}")
 

@@ -1,6 +1,6 @@
 """Batch-ops async queueing (#946): 202 handle contract + the read surface.
 
-The 8 batch job endpoints return the accepted-operation handle (202) when the
+The 11 batch job endpoints return the accepted-operation handle (202) when the
 selection exceeds the sync threshold; this module carries that response model
 plus the polling endpoints (status + keyset-paged per-job results) the UI
 progress view consumes. Mounted inside the job route group from
@@ -14,35 +14,24 @@ this router below.
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from server.app.jobs import JobQueries
+from server.app.routes.job_batch_operation_kinds import (
+    JobBatchOperationKindParam as JobBatchOperationKindParam,
+)
+from server.app.routes.job_batch_operation_kinds import (
+    JobBatchOperationStatus as JobBatchOperationStatus,
+)
 from server.app.services.job_batch_operations import (
     dispatch_batch_selection,
     get_operation_for_workspace,
     operation_record,
 )
-
-JobBatchOperationStatus = Literal[
-    "pending", "running", "paused", "completed", "failed", "cancelled"
-]
-
-
-JobBatchOperationKindParam = Literal[
-    "rerun",
-    "rerun_by_failure",
-    "delete",
-    "run_to",
-    "pause",
-    "resume",
-    "upgrade_workflow",
-    "package",
-    "clear_packed",
-]
 
 
 class JobBatchOperationResponse(BaseModel):
@@ -97,6 +86,8 @@ def async_dispatch_or_none(
     payload: Any,
     params: dict[str, Any],
     user: dict[str, Any],
+    *,
+    operation_id: str | None = None,
 ) -> tuple[list[str], JSONResponse | None]:
     """Route-side dispatch for the async-capable batch endpoints (#946):
     (resolved ids, 202 response | None). The sync branch consumes the ids.
@@ -110,6 +101,7 @@ def async_dispatch_or_none(
         payload.exclude_ids,
         params,
         f"user:{user['id']}",
+        operation_id=operation_id,
     )
     return ids, accepted_202_response(job_db, operation) if operation is not None else None
 

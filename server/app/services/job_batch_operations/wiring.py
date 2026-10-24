@@ -62,6 +62,7 @@ def build_job_batch_ops_feeder(
             pause=services.pause,
             upgrade=services.workflow_upgrade,
             packages=job_packages,
+            approvals=services.approvals,
         ),
     )
 

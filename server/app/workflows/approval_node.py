@@ -15,7 +15,9 @@ reviewer. Like a start node it declares no capability and no execution
 fields; unlike a start node it *does* enter job_nodes and supports
 ``config`` (``rework_target`` — default upstream node reset by a rework
 decision — and ``feedback_artifact`` — filename the reviewer note is
-written to, default ``review_feedback.json``).
+written to, default ``review_feedback.json``) and a typed ``config_schema``
+for the verdict payload. Secret payload fields are forbidden because decision
+rows and artifacts are ordinary audit data, not vault references.
 """
 
 from __future__ import annotations
@@ -47,7 +49,6 @@ _FORBIDDEN_APPROVAL_FIELDS = (
     "execution",
     "shard",
     "reduce",
-    "config_schema",
     "skill",
     "tools",
     "outputs",
@@ -81,6 +82,15 @@ def validate_approval_fields(raw_node: dict[str, Any], node_key: str) -> None:
             continue
         if forbidden in raw_node:
             raise WorkflowDefinitionError(f"Approval node {node_key} must not declare {forbidden}")
+    raw_schema = raw_node.get("config_schema") or {}
+    properties = raw_schema.get("properties") or {} if isinstance(raw_schema, dict) else {}
+    if any(
+        isinstance(prop, dict) and (prop.get("secret") or prop.get("secret_ref"))
+        for prop in properties.values()
+    ):
+        raise WorkflowDefinitionError(
+            f"Approval node {node_key} must not declare secret verdict payload fields"
+        )
     raw_config = raw_node.get("config") or {}
     if not isinstance(raw_config, dict):
         return  # the generic loader rejects non-mapping configs with its own error

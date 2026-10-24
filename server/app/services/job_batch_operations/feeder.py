@@ -21,10 +21,9 @@ completion phase re-runs only when the crash lands between the packaging
 side effects and the final advance.
 
 Watermark gate: kinds whose per-job effect enqueues execution work (rerun /
-rerun_by_failure / run_to / resume / upgrade_workflow — a clean upgrade
-requeues the job and resets its nodes to pending, the same execution load
-as a rerun) drip against the same workspace backlog watermark as the runs
-feeder; the other kinds don't grow the backlog and run ungated.
+rerun_by_failure / run_to / resume / upgrade_workflow / approve — approval
+unblocks downstream nodes) drip against the same workspace backlog watermark
+as the runs feeder; the other kinds don't grow the backlog and run ungated.
 """
 
 from __future__ import annotations
@@ -50,7 +49,9 @@ logger = logging.getLogger(__name__)
 # crash-replay re-scan window.
 JOB_BATCH_OPS_CHUNK_SIZE = 200
 MAX_CHUNK_ERRORS = 20
-_WATERMARK_KINDS = frozenset({"rerun", "rerun_by_failure", "run_to", "resume", "upgrade_workflow"})
+_WATERMARK_KINDS = frozenset(
+    {"rerun", "rerun_by_failure", "run_to", "resume", "upgrade_workflow", "approve"}
+)
 # run_to/pause/resume loop the raw id list (duplicates included), so their
 # chunk results map back to seqs positionally; every other kind's frozen ids
 # are unique and map by job_id.
@@ -132,7 +133,7 @@ class JobBatchOpsFeeder:
                 # selected job ends with a verdict, plus one chunk_errors
                 # entry; the remaining chunks proceed.
                 # #204 broad-except audit: the chunk's outcome space is the
-                # union of nine kinds' service surfaces (contract errors are
+                # union of eleven kinds' service surfaces (contract errors are
                 # already per-job results; what propagates is psycopg/pool
                 # failures and defects) — not enumerable as a business family,
                 # and the results table is the recovery record.

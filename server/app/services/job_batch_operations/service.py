@@ -3,10 +3,8 @@
 Phase 4 of the runs-async milestone (docs/architecture/batch-ops-async.md;
 the runs/items precedent is docs/architecture/runs-async-mode.md #1117).
 
-The 9 batch job endpoints (rerun / rerun-by-failure / run-to /
-pause / resume / upgrade-workflow / package / clear-packed and the batch
-removal) execute synchronously for small selections (unchanged fast path,
-byte-identical responses) and enqueue a background task for selections above
+The 11 batch job endpoints (the original nine plus batch-approve/reject)
+execute synchronously for small selections and enqueue a background task for selections above
 ``BATCH_OPS_ASYNC_THRESHOLD``: the request persists one
 ``job_batch_operations`` row (schema v101) with the frozen target spec and
 returns 202 with the handle; the in-process feeder
@@ -23,15 +21,19 @@ filter and a keyset upper bound, then the feeder resolves bounded buffers.
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Collection
 from typing import Any
 
-from server.app.db.rowmap import iso_optional
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.job_batch_operations import JOB_BATCH_OPERATION_KINDS
 from server.app.jobs.queries.job_filtering import JobListFilter
+from server.app.services.job_batch_operations.records import (
+    get_operation_for_workspace as get_operation_for_workspace,
+)
+from server.app.services.job_batch_operations.records import (
+    operation_record as operation_record,
+)
 from server.app.services.job_batch_operations.selection import (
     prepare_batch_selection,
     prepare_failure_selection,
@@ -82,11 +84,15 @@ def submit_operation_if_large(
     ids: list[str],
     params: dict[str, Any],
     created_by: str,
+    *,
+    operation_id: str | None = None,
 ) -> dict[str, Any] | None:
     """None = stay on the synchronous fast path; else the 202 handle row."""
     if not should_enqueue(len(ids)):
         return None
-    return submit_operation(job_db, workspace_id, kind, ids, params, created_by)
+    return submit_operation(
+        job_db, workspace_id, kind, ids, params, created_by, operation_id=operation_id
+    )
 
 
 def _submit_dispatched(
@@ -97,10 +103,22 @@ def _submit_dispatched(
     params: dict[str, Any],
     created_by: str,
     stream: dict[str, Any] | None,
+    operation_id: str | None,
 ) -> dict[str, Any] | None:
     if stream is not None:
-        return submit_operation(job_db, workspace_id, kind, ids, params, created_by, stream=stream)
-    return submit_operation_if_large(job_db, workspace_id, kind, ids, params, created_by)
+        return submit_operation(
+            job_db,
+            workspace_id,
+            kind,
+            ids,
+            params,
+            created_by,
+            stream=stream,
+            operation_id=operation_id,
+        )
+    return submit_operation_if_large(
+        job_db, workspace_id, kind, ids, params, created_by, operation_id=operation_id
+    )
 
 
 def dispatch_batch_selection(
@@ -112,6 +130,8 @@ def dispatch_batch_selection(
     exclude_ids: Collection[str],
     params: dict[str, Any],
     created_by: str,
+    *,
+    operation_id: str | None = None,
 ) -> tuple[list[str], dict[str, Any] | None]:
     """Resolve a bounded prefix, then choose the sync or async path."""
     ids, stream = prepare_batch_selection(
@@ -122,7 +142,9 @@ def dispatch_batch_selection(
         exclude_ids,
         BATCH_OPS_ASYNC_THRESHOLD,
     )
-    operation = _submit_dispatched(job_db, workspace_id, kind, ids, params, created_by, stream)
+    operation = _submit_dispatched(
+        job_db, workspace_id, kind, ids, params, created_by, stream, operation_id
+    )
     return ids, operation
 
 
@@ -150,52 +172,6 @@ def dispatch_rerun_by_failure(
     )
     params = {"category": category, "strategy": strategy, "from_node_key": from_node_key}
     operation = _submit_dispatched(
-        job_db, workspace_id, "rerun_by_failure", ids, params, created_by, stream
+        job_db, workspace_id, "rerun_by_failure", ids, params, created_by, stream, None
     )
     return ids, operation
-
-
-def operation_record(
-    job_db: JobQueries, row: dict[str, Any], *, reason_counts: dict[str, int] | None = None
-) -> dict[str, Any]:
-    """Public operation handle; target_spec (frozen ids) stays internal.
-
-    ``reason_counts`` lets the listing surface pass a page-wide precomputed
-    breakdown (one grouped query per page); None falls back to the per-row
-    single-op query (the status poll path).
-    """
-    return {
-        "id": str(row["id"]),
-        "workspace_id": str(row["workspace_id"]),
-        "kind": str(row["kind"]),
-        "status": str(row["status"]),
-        "items_total": int(row["items_total"]),
-        "processed_count": int(row["next_index"]),
-        "succeeded_count": int(row["succeeded_count"]),
-        "skipped_count": int(row["skipped_count"]),
-        "failed_count": int(row["failed_count"]),
-        # reason_code breakdown over non-succeeded results, computed on read
-        # (the counters stay crash-consistent via the per-advance recompute).
-        "reason_counts": (
-            reason_counts
-            if reason_counts is not None
-            else job_db.summarize_job_batch_operation_reasons(str(row["id"]))
-        ),
-        "output": json.loads(str(row["output_json"] or "{}")),
-        "chunk_errors": json.loads(str(row["chunk_errors_json"] or "[]")),
-        "error_message": str(row["error_message"] or ""),
-        "created_by": str(row["created_by"] or ""),
-        "created_at": iso_optional(row["created_at"]),
-        "updated_at": iso_optional(row["updated_at"]),
-        "finished_at": iso_optional(row["finished_at"]),
-    }
-
-
-def get_operation_for_workspace(
-    job_db: JobQueries, workspace_id: str, op_id: str
-) -> dict[str, Any] | None:
-    """Workspace binding is re-validated against the row (cross-workspace ids 404)."""
-    row = job_db.get_job_batch_operation(op_id)
-    if row is None or str(row["workspace_id"]) != workspace_id:
-        return None
-    return row
