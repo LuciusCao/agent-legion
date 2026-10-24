@@ -1,7 +1,7 @@
 import type { components } from '../generated/api'
 import { formatDuration, STATUS_ICON, STATUS_LABEL } from './dagNodeStatus'
 import { MaterialIcon } from './MaterialIcon'
-import type { DagNodeData } from './dag/DagNode'
+import { nodeExecutionTypeLabel, type DagNodeData } from './dag/dagNodeTypes'
 import { NodeRunCard } from './NodeRunCard'
 import styles from './NodeDetailsPanel.module.css'
 
@@ -29,6 +29,7 @@ export function NodeDetailsPanel({
   onViewLogs,
 }: NodeDetailsPanelProps) {
   const durationText = formatDuration(data.status, data.duration) || '—'
+  const executionType = nodeExecutionTypeLabel(data)
 
   return (
     <div className={styles.panel}>
@@ -47,10 +48,10 @@ export function NodeDetailsPanel({
         </div>
       </div>
 
-      {data.executorKind && (
+      {executionType && (
         <div className={styles.section}>
-          <div className={styles.sectionTitle}>Executor</div>
-          <span className={styles.tag}>{data.executorKind}</span>
+          <div className={styles.sectionTitle}>执行类型</div>
+          <span className={styles.tag}>{executionType}</span>
         </div>
       )}
 

@@ -81,12 +81,21 @@ export function JobProgressPanelNode({
       ? '等待中'
       : (computeWaitTime(node, allNodes) ?? '—')
   const executorKind = node.executor_kind
-  const executorLabel = executorKind
-    ? (EXECUTOR_KIND_LABELS[executorKind] ?? executorKind)
-    : undefined
-  const executorIcon = executorKind
-    ? (EXECUTOR_KIND_ICONS[executorKind] ?? 'computer')
-    : undefined
+  // #1180 UI 验收返工：agent 节点（契约投影 agent_id 非空、executor_kind
+  // 为 None）也显示类型 chip，词汇沿用 DAG badge 的 type 词汇（agent；
+  // job 详情契约不带节点 runtime，无从附加——与 job DAG 的 agent 徽标
+  // 同口径）。approval/start 节点 agent_id 为 null，不落入此分支。
+  const isAgentNode = !!node.agent_id
+  const executorLabel = isAgentNode
+    ? 'agent'
+    : executorKind
+      ? (EXECUTOR_KIND_LABELS[executorKind] ?? executorKind)
+      : undefined
+  const executorIcon = isAgentNode
+    ? 'smart_toy'
+    : executorKind
+      ? (EXECUTOR_KIND_ICONS[executorKind] ?? 'computer')
+      : undefined
 
   return (
     <div className={styles.timelineItem}>
@@ -133,7 +142,9 @@ export function JobProgressPanelNode({
           {executorLabel && executorIcon && (
             <span
               className={styles.executorBadge}
-              title={`执行器: ${executorLabel}`}
+              title={
+                isAgentNode ? '执行类型: agent' : `执行器: ${executorLabel}`
+              }
             >
               <MaterialIcon
                 name={executorIcon}

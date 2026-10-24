@@ -1,16 +1,14 @@
 import { formatDuration } from '../lib/formatters'
 import type { JobNode } from '../types/jobTypes'
 
+// #731/#1180：pi/openclaw 词条已摘除——运行时投影只产生 code/None
+// （agent 节点为 None），退役 runtime 不再出现在对外词汇里。
 export const EXECUTOR_KIND_LABELS: Record<string, string> = {
   code: '代码',
-  pi: 'Pi Agent',
-  openclaw: 'OpenClaw Agent',
 }
 
 export const EXECUTOR_KIND_ICONS: Record<string, string> = {
   code: 'code',
-  pi: 'smart_toy',
-  openclaw: 'smart_toy',
 }
 
 export function computeWaitTime(

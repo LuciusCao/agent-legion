@@ -16,8 +16,6 @@ function node(
   }
 }
 
-const normalize = () => null
-
 describe('isolatedNodeKeys (#417)', () => {
   it('marks every node isolated when there are no edges', () => {
     const nodes = [node('a'), node('b'), node('c')]
@@ -56,7 +54,7 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
       node('alpha'),
       node('beta'),
     ]
-    const { rfNodes } = computeLayout(nodes, [], normalize)
+    const { rfNodes } = computeLayout(nodes, [])
     const byKey = new Map(rfNodes.map((n) => [n.id, n.position]))
     const alpha = byKey.get('alpha')!
     const beta = byKey.get('beta')!
@@ -78,7 +76,7 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
     // 治理要消除的退化形态（小型 workflow 仍有离散/疑似缺失观感）。
     // n>1 必须至少两列。
     const nodes = [node('alpha'), node('beta')]
-    const { rfNodes } = computeLayout(nodes, [], normalize)
+    const { rfNodes } = computeLayout(nodes, [])
     const byKey = new Map(rfNodes.map((n) => [n.id, n.position]))
     const alpha = byKey.get('alpha')!
     const beta = byKey.get('beta')!
@@ -91,7 +89,7 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
     // n=3 时 ⌊√3⌋=1 同样退化为竖直单列；⌈√3⌉=2 列，key 序入格：
     // a(0,0) b(1,0) c(0,1)——第三个节点才换行，且 x 不全为 0。
     const nodes = [node('a'), node('b'), node('c')]
-    const { rfNodes } = computeLayout(nodes, [], normalize)
+    const { rfNodes } = computeLayout(nodes, [])
     const byKey = new Map(rfNodes.map((n) => [n.id, n.position]))
     expect(byKey.get('a')!.x).toBe(0)
     expect(byKey.get('b')!.x).toBeGreaterThan(0)
@@ -103,8 +101,8 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
   it('is deterministic across calls with shuffled node arrays', () => {
     const ordered = [node('a'), node('b'), node('c'), node('d')]
     const shuffled = [node('d'), node('b'), node('a'), node('c')]
-    const first = computeLayout(ordered, [], normalize).rfNodes
-    const second = computeLayout(shuffled, [], normalize).rfNodes
+    const first = computeLayout(ordered, []).rfNodes
+    const second = computeLayout(shuffled, []).rfNodes
     const pos = (nodes: typeof first, key: string) =>
       nodes.find((n) => n.id === key)!.position
     for (const key of ['a', 'b', 'c', 'd']) {
@@ -118,7 +116,7 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
       { from: 'a', to: 'b' },
       { from: 'b', to: 'c' },
     ]
-    const { rfNodes } = computeLayout(nodes, edges, normalize)
+    const { rfNodes } = computeLayout(nodes, edges)
     const byKey = new Map(rfNodes.map((n) => [n.id, n.position]))
     // 连通链保持 LR：a.x < b.x < c.x。
     expect(byKey.get('a')!.x).toBeLessThan(byKey.get('b')!.x)
@@ -140,13 +138,11 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
     ]
     const mixed = computeLayout(
       [node('iso1'), node('iso2'), node('a'), node('b'), node('c')],
-      chain,
-      normalize
+      chain
     ).rfNodes
     const standalone = computeLayout(
       [node('a'), node('b'), node('c')],
-      chain,
-      normalize
+      chain
     ).rfNodes
     const mixedPos = new Map(mixed.map((n) => [n.id, n.position]))
     const standalonePos = new Map(standalone.map((n) => [n.id, n.position]))
@@ -169,7 +165,7 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
     })
     const nodes = [node('iso1'), node('iso2'), tall, node('sink')]
     const edges: DagGraphEdge[] = [{ from: 'tall', to: 'sink' }]
-    const { rfNodes } = computeLayout(nodes, edges, normalize)
+    const { rfNodes } = computeLayout(nodes, edges)
     const byKey = new Map(rfNodes.map((n) => [n.id, n.position]))
     const connectedBottom = Math.max(
       ...nodes
@@ -199,7 +195,7 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
       { from: 'tall', to: 'mid' },
       { from: 'mid', to: 'sink' },
     ]
-    const { rfNodes } = computeLayout(nodes, edges, normalize)
+    const { rfNodes } = computeLayout(nodes, edges)
     for (let i = 0; i < rfNodes.length; i++) {
       for (let j = i + 1; j < rfNodes.length; j++) {
         const a = rfNodes[i]
@@ -223,7 +219,7 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
     // 最大值（position.y 是顶边，顶边 + 高度 = dagre 中心 y + 半高）。
     const nodes = [node('a'), node('b'), node('iso')]
     const edges: DagGraphEdge[] = [{ from: 'a', to: 'b' }]
-    const { rfNodes } = computeLayout(nodes, edges, normalize)
+    const { rfNodes } = computeLayout(nodes, edges)
     const byKey = new Map(rfNodes.map((n) => [n.id, n.position]))
     const connectedBottom = Math.max(
       ...nodes
@@ -245,7 +241,7 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
     })
     const nodes = [tall, node('sink'), node('iso')]
     const edges: DagGraphEdge[] = [{ from: 'tall', to: 'sink' }]
-    const { rfNodes } = computeLayout(nodes, edges, normalize)
+    const { rfNodes } = computeLayout(nodes, edges)
     const byKey = new Map(rfNodes.map((n) => [n.id, n.position]))
     const tallHeight = estimateDagNodeHeight(tall)
     expect(tallHeight).toBeGreaterThanOrEqual(200)
@@ -256,7 +252,7 @@ describe('computeLayout (#417 edgeless degenerate layout)', () => {
 
   it('places every node (none dropped by the layout)', () => {
     const nodes = [node('a'), node('b'), node('c')]
-    const { rfNodes } = computeLayout(nodes, [], normalize)
+    const { rfNodes } = computeLayout(nodes, [])
     expect(rfNodes.map((n) => n.id).sort()).toEqual(['a', 'b', 'c'])
     for (const rfNode of rfNodes) {
       expect(Number.isFinite(rfNode.position.x)).toBe(true)

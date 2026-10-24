@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildDagNodes } from './workflowStudioDag'
+import { workflowYamlToDefinitionRecord } from './workflowYamlDraftRecord'
 
 const workflow = {
   key: 'wf',
@@ -41,15 +42,15 @@ const workflow = {
 }
 
 describe('buildDagNodes', () => {
-  it('puts outline and executor information directly on graph nodes', () => {
-    // P-0.5：无 Agent 路由的节点一律标记为 code 池节点。
+  it('puts outline and execution type information directly on graph nodes', () => {
+    // #1180：类型徽标用现行 type 词汇——无 Agent 路由的节点一律是 code
+    // 池节点；不再有 executorId 'code' 池键占位（双「code」徽标的来源）。
     const nodes = buildDagNodes(workflow)
 
     expect(nodes[0]).toMatchObject({
       key: 'start',
       capability: 'fetch',
-      executorKind: 'code',
-      executorId: 'code',
+      executionType: 'code',
     })
     expect(nodes[1].topologyBadges).toContain('branch')
     expect(nodes[2]).toMatchObject({
@@ -79,20 +80,20 @@ describe('buildDagNodes', () => {
 
     expect(nodes[0]).toMatchObject({
       key: 'start',
-      executorId: 'code',
+      executionType: 'code',
       agentId: null,
       executorUnbound: false,
     })
     expect(nodes[1]).toMatchObject({
       key: 'branch',
       agentId: 'classifier-v1',
-      executorId: null,
+      executionType: 'agent',
       executorUnbound: false,
     })
     expect(nodes[2]).toMatchObject({
       key: 'done',
       agentId: null,
-      executorId: 'code',
+      executionType: 'code',
       executorUnbound: false,
     })
   })
@@ -129,9 +130,53 @@ describe('buildDagNodes', () => {
     expect(nodes[1]).toMatchObject({
       key: 'branch',
       agentId: null,
-      executorId: 'code',
-      executorKind: 'code',
+      executionType: 'code',
     })
+  })
+
+  it('carries the declared execution runtime on agent nodes (#1180)', () => {
+    const nodes = buildDagNodes({
+      ...workflow,
+      nodes: workflow.nodes.map((node) =>
+        node.key === 'branch'
+          ? {
+              ...node,
+              execution: {
+                provider: 'openai',
+                model: 'gpt-5',
+                thinking: '',
+                prompt: '',
+                prompt_mode: '',
+                runtime: 'velites',
+              },
+            }
+          : node
+      ),
+    })
+
+    expect(nodes[1]).toMatchObject({
+      executionType: 'agent',
+      executionRuntime: 'velites',
+    })
+  })
+
+  it('gives start and approval nodes no execution type (#1180)', () => {
+    // start/approval 不 dispatch（EXEC-WORKFLOW-START-001 /
+    // EXEC-APPROVAL-001）：没有执行类型，不渲染类型徽标。
+    const nodes = buildDagNodes({
+      ...workflow,
+      nodes: workflow.nodes.map((node) =>
+        node.key === 'start'
+          ? { ...node, node_type: 'start' }
+          : node.key === 'branch'
+            ? { ...node, node_type: 'approval' }
+            : node
+      ),
+    })
+
+    expect(nodes[0].executionType).toBeNull()
+    expect(nodes[1].executionType).toBeNull()
+    expect(nodes[2].executionType).toBe('code')
   })
 
   it('injects execution warnings only for agent nodes missing provider/model (#333)', () => {
@@ -183,5 +228,37 @@ describe('buildDagNodes', () => {
     expect(nodes[1].topologyBadges).toEqual(['approval', 'branch'])
     // 审批门不 dispatch：不产生 execution 缺口误报。
     expect(nodes[1].executionWarning).toBeUndefined()
+  })
+
+  it('reaches the agent·runtime badge from draft YAML through the draft record (#1180)', () => {
+    // r3 评审回归：草稿画布（主编辑视图）走 workflowYamlToDefinitionRecord
+    // → buildDagNodes 链——mergeNodeExecution 漏丢 runtime 时草稿画布
+    // agent 节点恒只显示「agent」，与只读 revision 视图的「agent·velites」
+    // 口径不一致。这里钉住全链路数据到达。
+    const draftRecord = workflowYamlToDefinitionRecord(`key: demo
+nodes:
+  _start:
+    type: start
+    inputs: []
+    outputs: []
+  review:
+    type: agent
+    capability: review
+    label: Review
+    inputs: []
+    outputs: []
+    execution:
+      provider: openai
+      model: gpt-5
+      runtime: velites
+edges: []
+`)
+    const nodes = buildDagNodes(draftRecord)
+    const review = nodes.find((node) => node.key === 'review')
+
+    expect(review).toMatchObject({
+      executionType: 'agent',
+      executionRuntime: 'velites',
+    })
   })
 })
