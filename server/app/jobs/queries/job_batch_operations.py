@@ -186,6 +186,18 @@ class JobBatchOperationQueriesMixin(ConnectionQueriesMixin):
             ).fetchall()
         return [str(row["job_id"]) for row in rows]
 
+    def list_job_batch_operation_failed_job_ids(self, op_id: str) -> list[str]:
+        """Distinct failed job ids in first-failure (seq) order — the
+        retry-failed requeue's selection (#1358; positional kinds can record
+        the same job at several seqs, a retry dedups them)."""
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                "select job_id from job_batch_operation_results"
+                " where op_id=%s and status='failed' group by job_id order by min(seq)",
+                (op_id,),
+            ).fetchall()
+        return [str(row["job_id"]) for row in rows]
+
     def advance_job_batch_operation(
         self,
         op_id: str,

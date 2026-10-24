@@ -85,17 +85,27 @@ def submit_operation(
     ids: list[str],
     params: dict[str, Any],
     created_by: str,
+    *,
+    retry_of: str | None = None,
 ) -> dict[str, Any]:
-    """Persist one accepted operation row; returns the stored row (the handle)."""
+    """Persist one accepted operation row; returns the stored row (the handle).
+
+    ``retry_of`` (#1358) records the source op of a retry-failed requeue in
+    the frozen spec — provenance only; the feeder ignores the extra key and
+    the public handle never exposes target_spec.
+    """
     if kind not in JOB_BATCH_OPERATION_KINDS:
         raise ValueError(f"unknown batch operation kind: {kind!r}")
     frozen = _freeze_ids(kind, ids)
+    target_spec: dict[str, Any] = {"job_ids": frozen, "params": params}
+    if retry_of is not None:
+        target_spec["retry_of"] = retry_of
     op_id = uuid.uuid4().hex
     job_db.create_job_batch_operation(
         op_id,
         workspace_id,
         kind,
-        {"job_ids": frozen, "params": params},
+        target_spec,
         len(frozen),
         created_by,
     )

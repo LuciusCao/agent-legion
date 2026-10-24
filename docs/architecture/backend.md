@@ -164,6 +164,7 @@ server/app/
 | GET | `/workspaces/{workspace_id}/job-batch-operations/{op_id}/results` | `list_job_batch_operation_results` | routes/job_batch_operations.py |
 | GET | `/workspaces/{workspace_id}/job-batch-operations` | `list_job_batch_operations` | routes/job_batch_operations_listing.py |
 | POST | `/workspaces/{workspace_id}/job-batch-operations/{op_id}/archive` | `archive_job_batch_operation` | routes/job_batch_operations_listing.py |
+| POST | `/workspaces/{workspace_id}/job-batch-operations/{op_id}/retry-failed` | `retry_failed_batch_operation` | routes/job_batch_operations_retry.py |
 | POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/job_batches.py |
 | GET | `/jobs/{job_id}/{invalid_path:path}` | `reject_invalid_job_subpath` | routes/job_invalid_paths.py |
 | GET | `/workspaces/{workspace_id}/jobs/snapshot` | `snapshot_workspace_jobs` | routes/job_list.py |

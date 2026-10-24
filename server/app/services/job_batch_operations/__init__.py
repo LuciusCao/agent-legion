@@ -11,6 +11,10 @@ from server.app.services.job_batch_operations.feeder import (
     JobBatchOpsFeeder,
 )
 from server.app.services.job_batch_operations.handlers import BatchOpsExecutors
+from server.app.services.job_batch_operations.retry import (
+    RETRYABLE_KINDS,
+    submit_retry_failed,
+)
 from server.app.services.job_batch_operations.service import (
     BATCH_OPS_ASYNC_THRESHOLD,
     DEFAULT_BATCH_OPS_ASYNC_THRESHOLD,
@@ -29,6 +33,7 @@ __all__ = [
     "DEFAULT_BATCH_OPS_ASYNC_THRESHOLD",
     "JOB_BATCH_OPS_CHUNK_SIZE",
     "JOB_BATCH_OPERATION_KINDS",
+    "RETRYABLE_KINDS",
     "BatchOpsExecutors",
     "JobBatchOpsFeeder",
     "dispatch_batch_selection",
@@ -38,4 +43,5 @@ __all__ = [
     "should_enqueue",
     "submit_operation",
     "submit_operation_if_large",
+    "submit_retry_failed",
 ]
