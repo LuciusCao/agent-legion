@@ -241,7 +241,7 @@ describe('JobProgressPanel', () => {
     expect(screen.getByText('1秒')).toBeInTheDocument()
   })
 
-  it('renders the executor badge only for code-pool nodes (#731/#1180)', () => {
+  it('renders type chips for both code and agent nodes (#1180 UI 验收返工)', () => {
     renderWithClient(
       <JobProgressPanel
         jobId="j1"
@@ -251,9 +251,9 @@ describe('JobProgressPanel', () => {
       />
     )
     expect(screen.getByText('代码')).toBeInTheDocument()
-    // agent 节点的契约投影是 executor_kind=None + agent_id
-    // （job_node_agent_projection），时间线不渲染执行器徽标；退役的
-    // 「Pi Agent」词条已摘除。
+    // agent 节点（契约投影 agent_id 非空、executor_kind=None）同样带类型
+    // chip，词汇沿用 DAG badge 的 type 词汇；退役的「Pi Agent」词条已摘除。
+    expect(screen.getByText('agent')).toBeInTheDocument()
     expect(screen.queryByText('Pi Agent')).not.toBeInTheDocument()
   })
 
