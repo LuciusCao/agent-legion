@@ -13,32 +13,12 @@ import json
 from typing import Any
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
-
-# The kind vocabulary, mirrored by the DDL check constraint on
-# job_batch_operations.kind. The canonical strings live here (next to the
-# DDL that pins them) because server/app/services/** must stay free of
-# SQL-keyword string literals (BOUNDARY-DATA-001's keyword scan).
-KIND_DELETE = "delete"
-
-JOB_BATCH_OPERATION_KINDS: tuple[str, ...] = (
-    "rerun",
-    "rerun_by_failure",
-    KIND_DELETE,
-    "run_to",
-    "pause",
-    "resume",
-    "upgrade_workflow",
-    "package",
-    "clear_packed",
+from server.app.jobs.queries.job_batch_operation_kinds import (
+    JOB_BATCH_OPERATION_KINDS as JOB_BATCH_OPERATION_KINDS,
 )
-
-# Kinds whose sync path silently dedups/normalizes the selection (rerun's
-# dict.fromkeys; delete/upgrade/package/clear-packed's seen-skip): the frozen
-# id list is normalized the same way at accept time so the feeder's per-chunk
-# calls reproduce the sync result set exactly. run_to/pause/resume loop the
-# raw list (duplicates included), so their frozen list stays raw.
-KINDS_DEDUP_SELECTION = frozenset(
-    {"rerun", "rerun_by_failure", KIND_DELETE, "upgrade_workflow", "package", "clear_packed"}
+from server.app.jobs.queries.job_batch_operation_kinds import KIND_DELETE as KIND_DELETE
+from server.app.jobs.queries.job_batch_operation_kinds import (
+    KINDS_DEDUP_SELECTION as KINDS_DEDUP_SELECTION,
 )
 
 

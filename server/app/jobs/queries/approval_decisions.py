@@ -10,17 +10,20 @@ raising ``ApprovalGateConflict`` when a concurrent decision or reset won.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any
 
+from server.app.jobs.queries.approval_batch_guard import guard_batch_single_awaiting
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 
 _AWAITING = "awaiting_approval"
 
 _INSERT_DECISION = """
 insert into approval_decisions(
-  id, job_id, node_key, verdict, note, rework_target, decided_by
-) values (%s, %s, %s, %s, %s, %s, %s)
+  id, job_id, node_key, verdict, note, rework_target, decided_by,
+  payload_json, batch_id, batch_selection
+) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 
@@ -70,6 +73,9 @@ def _insert_decision(conn: Any, decision: dict[str, Any]) -> None:
             decision["note"],
             decision["rework_target"],
             decision["decided_by"],
+            json.dumps(decision.get("payload") or {}, ensure_ascii=False, sort_keys=True),
+            decision.get("batch_id"),
+            decision.get("batch_selection"),
         ),
     )
 
@@ -81,7 +87,7 @@ class ApprovalDecisionQueriesMixin(ConnectionQueriesMixin):
             rows = conn.execute(
                 """
                 select id, job_id, node_key, verdict, note, rework_target,
-                       decided_by, created_at
+                       decided_by, payload_json, batch_id, batch_selection, created_at
                 from approval_decisions
                 where job_id=%s
                 order by created_at desc, id desc
@@ -89,6 +95,14 @@ class ApprovalDecisionQueriesMixin(ConnectionQueriesMixin):
                 (job_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def list_awaiting_approval_node_keys(self, job_id: str) -> list[str]:
+        with self.read() as conn:
+            rows = conn.execute(
+                "select node_key from job_nodes where job_id=%s and status=%s order by node_key",
+                (job_id, _AWAITING),
+            ).fetchall()
+        return [str(row["node_key"]) for row in rows]
 
     def count_approval_decisions(self, job_id: str, node_key: str) -> int:
         with self.read() as conn:
@@ -115,6 +129,7 @@ class ApprovalDecisionQueriesMixin(ConnectionQueriesMixin):
         with self.write() as conn:
             _lock_job_mutation(conn, job_id)
             _guard_awaiting(conn, job_id, node_key)
+            guard_batch_single_awaiting(conn, decision, ApprovalGateConflict)
             if on_guarded is not None:
                 on_guarded()
             _insert_decision(conn, decision)
@@ -136,6 +151,7 @@ class ApprovalDecisionQueriesMixin(ConnectionQueriesMixin):
         with self.write() as conn:
             _lock_job_mutation(conn, job_id)
             _guard_awaiting(conn, job_id, node_key)
+            guard_batch_single_awaiting(conn, decision, ApprovalGateConflict)
             _insert_decision(conn, decision)
             conn.execute(
                 """

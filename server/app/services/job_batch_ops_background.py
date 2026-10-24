@@ -30,7 +30,7 @@ async def consume_job_batch_operations(
             # the ONLY consumer of job_batch_operations — if it dies, accepted
             # async batch ops stop being processed until process restart.
             # consume_once's outcome space (claim + chunk + cursor
-            # transactions: psycopg/pool surface, nine kinds' service writes)
+            # transactions: psycopg/pool surface, eleven kinds' service writes)
             # is not a business family, so a transient failure degrades to
             # log + backoff + keep polling; logger.exception keeps the
             # traceback, the backoff bounds the retry rate against a down

@@ -2127,6 +2127,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/jobs/batch-approve': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Batch Approve */
+    post: operations['batch_approve_api_workspaces__workspace_id__jobs_batch_approve_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/jobs/batch-pause': {
     parameters: {
       query?: never
@@ -2138,6 +2155,23 @@ export interface paths {
     put?: never
     /** Batch Pause Workspace Jobs */
     post: operations['batch_pause_workspace_jobs_api_workspaces__workspace_id__jobs_batch_pause_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/jobs/batch-reject': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Batch Reject */
+    post: operations['batch_reject_api_workspaces__workspace_id__jobs_batch_reject_post']
     delete?: never
     options?: never
     head?: never
@@ -4149,6 +4183,27 @@ export interface components {
       /** Requests Per Minute */
       requests_per_minute: number
     }
+    /** ApprovalBatchResultResponse */
+    ApprovalBatchResultResponse: {
+      /** Job Id */
+      job_id: string
+      /** Message */
+      message?: string | null
+      /** Node Key */
+      node_key?: string | null
+      /**
+       * Operation
+       * @enum {string}
+       */
+      operation: 'approve' | 'reject'
+      /** Reason Code */
+      reason_code?: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'succeeded' | 'skipped' | 'failed'
+    }
     /** ApprovalDecisionCreateRequest */
     ApprovalDecisionCreateRequest: {
       /**
@@ -4156,6 +4211,10 @@ export interface components {
        * @default
        */
       note: string
+      /** Payload */
+      payload?: {
+        [key: string]: unknown
+      }
       /**
        * Rework Target
        * @default
@@ -4174,6 +4233,10 @@ export interface components {
     }
     /** ApprovalDecisionResponse */
     ApprovalDecisionResponse: {
+      /** Batch Id */
+      batch_id?: string | null
+      /** Batch Selection */
+      batch_selection?: ('ids' | 'filter') | null
       /** Created At */
       created_at?: string | null
       /** Decided By */
@@ -4186,6 +4249,10 @@ export interface components {
       node_key: string
       /** Note */
       note: string
+      /** Payload */
+      payload?: {
+        [key: string]: unknown
+      }
       /** Rework Target */
       rework_target: string
       /**
@@ -4215,6 +4282,24 @@ export interface components {
     BatchAgentClaimResponse: {
       /** Claims */
       claims: components['schemas']['AgentClaimResponse'][]
+    }
+    /** BatchApprovalJobsRequest */
+    BatchApprovalJobsRequest: {
+      /** Exclude Ids */
+      exclude_ids?: string[]
+      filter?: components['schemas']['JobFilterPayload'] | null
+      /** Job Ids */
+      job_ids?: string[] | null
+      /**
+       * Note
+       * @default
+       */
+      note: string
+    }
+    /** BatchApprovalJobsResponse */
+    BatchApprovalJobsResponse: {
+      /** Results */
+      results: components['schemas']['ApprovalBatchResultResponse'][]
     }
     /**
      * BatchHeartbeatItem
@@ -4950,6 +5035,8 @@ export interface components {
         | 'upgrade_workflow'
         | 'package'
         | 'clear_packed'
+        | 'approve'
+        | 'reject'
       /** Output */
       output?: {
         [key: string]: unknown
@@ -5041,6 +5128,8 @@ export interface components {
         | 'upgrade_workflow'
         | 'package'
         | 'clear_packed'
+        | 'approve'
+        | 'reject'
       /** Output */
       output?: {
         [key: string]: unknown
@@ -13619,6 +13708,50 @@ export interface operations {
       }
     }
   }
+  batch_approve_api_workspaces__workspace_id__jobs_batch_approve_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BatchApprovalJobsRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BatchApprovalJobsResponse']
+        }
+      }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   batch_pause_workspace_jobs_api_workspaces__workspace_id__jobs_batch_pause_post: {
     parameters: {
       query?: never
@@ -13641,6 +13774,50 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['BatchJobMutationResponse']
+        }
+      }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  batch_reject_api_workspaces__workspace_id__jobs_batch_reject_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BatchApprovalJobsRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BatchApprovalJobsResponse']
         }
       }
       /** @description Accepted */

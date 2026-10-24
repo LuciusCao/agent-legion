@@ -3,8 +3,9 @@
 日期：2026-10-21
 状态：现行（0.8.1；runs-async milestone Phase 4）
 
-9 个批量 job 端点（batch-rerun、rerun-by-failure、DELETE batch、batch-run-to、
-batch-pause、batch-resume、batch-upgrade-workflow、package、clear-packed）在大选择
+11 个批量 job 端点（batch-rerun、rerun-by-failure、DELETE batch、batch-run-to、
+batch-pause、batch-resume、batch-upgrade-workflow、package、clear-packed、batch-approve、
+batch-reject）在大选择
 下不再于请求线程内逐 job 执行（线程池槽位被长请求占用是调研 #M39 确认的真实痛点），
 而是秒级受理返回 202 + 任务句柄，由进程内 feeder 按游标滴灌执行。小选择保持同步
 快路径，响应逐字节不变。本设计是 [runs-async-mode.md](runs-async-mode.md)（#1117）
@@ -34,14 +35,15 @@ batch-pause、batch-resume、batch-upgrade-workflow、package、clear-packed）�
   job 结果，`result` 载荷与同步端点的逐 job 结果 dict 同形）。跨 workspace 引用一律
   404。pause/resume/cancel 控制面本期不外露（状态机预留 paused/cancelled）。
 
-## 2. 状态行（schema v101）
+## 2. 状态行（schema v101；approval 扩展为 v104）
 
 ```
 job_batch_operations(
   id text primary key,                        -- uuid4（非确定性：批量操作无去重语义）
   workspace_id text not null references workspaces(id) on delete cascade,
   kind text check(kind in ('rerun','rerun_by_failure','delete','run_to',
-                           'pause','resume','upgrade_workflow','package','clear_packed')),
+                           'pause','resume','upgrade_workflow','package','clear_packed',
+                           'approve','reject')),
   status 状态机（与 run_batches 同形：pending/running/paused/completed/failed/cancelled),
   target_spec_json,   -- 显式 id；或有界 buffer + filter/failure + freeze/next cursor
   next_index, items_total,  -- 流式选择的 total 是已发现数，随补页增长，终态精确
@@ -58,8 +60,8 @@ job_batch_operation_results(
 ```
 
 受理时的 id 归一化按 kind 对齐同步路径的消费方式：rerun/delete/upgrade/package/
-clear-packed/rerun-by-failure 去重 + strip（同步路径本就如此）；run_to/pause/resume
-保留原始列表（同步路径逐条循环、不去重，重放语义靠结果表 seq 对齐）。
+clear-packed/rerun-by-failure/approve/reject 去重 + strip（同步路径本就如此）；
+run_to/pause/resume 保留原始列表（同步路径逐条循环、不去重，重放语义靠结果表 seq 对齐）。
 
 ## 3. Feeder
 
@@ -87,21 +89,39 @@ RunBatchFeeder 模式：SKIP LOCKED 认领（停滞 600s 回收）、每 tick �
   对校验替代纯位置映射，收紧该窗口。
 - **逐 job 执行 = 调同步路径的同一批 service 入口**（`batch_rerun` /
   `batch_delete` / `batch_run_to` / `batch_pause` / `batch_resume` / `batch_upgrade` /
-  `clear_packed_status` / `rerun_by_failure_category`，chunk 显式 ids 直穿），所以逐
-  job 结果语义与写前校验纪律（lease_guarded_mutation 等 EXEC-GENERATION-002 已登记
-  写面）由构造保证不变。chunk 级意外异常归一化为该 chunk 逐 job 的
-  `failed/internal_error` 结果（#759 P1 先例），不丢任何一个选中 job 的判定；簿记级
-  失败（target_spec 损坏等）→ `failed`。
+  `clear_packed_status` / `rerun_by_failure_category` / `batch_decide`，chunk 显式 ids
+  直穿），所以逐 job 结果语义与写前校验纪律（lease_guarded_mutation 等
+  EXEC-GENERATION-002 已登记写面）由构造保证不变。chunk 级意外异常归一化为该 chunk
+  逐 job 的 `failed/internal_error` 结果（#759 P1 先例），不丢任何一个选中 job 的判定；
+  簿记级失败（target_spec 损坏等）→ `failed`。
 - **水位闸只对产生执行负载的 kind**（rerun / rerun_by_failure / run_to / resume /
-  upgrade_workflow——clean 升级把 job 翻 queued、节点全重置 pending，与 rerun 同款
-  负载）：与 runs feeder 相同的 workspace backlog 水位（`min(30000, max_items_per_run)`）；
-  delete/pause/package/clear-packed 不制造 backlog，不闸。
+  upgrade_workflow / approve——approve 解锁下游节点）：与 runs feeder 相同的 workspace
+  backlog 水位（`min(30000, max_items_per_run)`）；delete/pause/package/clear-packed/reject
+  不制造 backlog，不闸。
 - **package 是批级操作**：chunk 内只做逐 job 资格判定（结果即同步路径的
   eligibility verdicts），游标耗尽时由完成钩跑一次打包（重取 succeeded ids 的 live
   job 行再校验 completed），zip 文件名/下载 URL 落 `output_json`；重放时
   output 非空即复用，不重复打包。
 
-## 4. 边界与非目标
+## 4. 批量审批（#1363，schema v104）
+
+- `batch-approve` / `batch-reject` 复用同一双选择面与冻结流；内部 kind 为 `approve` /
+  `reject`。每次请求预分配 `batch_id`，异步时等于 operation id，同步快路径也写入审计；
+  `batch_selection` 为 `ids` / `filter`，`decided_by` 仍为 `user:{id}`。每个成功决策独立
+  append 一行 `approval_decisions`，payload、批 id 和选择形态同事务落行并进入 approval
+  artifact，不把整批合并成一条审计。
+- approval 节点的 `config_schema` 描述 verdict payload。单条 approve 合并 defaults 与请求
+  `payload` 后校验；批量 approve 只取 defaults，`required` 无 default 的 job 按
+  `skipped/needs_manual_input` 留在待审，需走单条 API 补 payload。secret 字段禁止声明，
+  避免明文进入审计行或 artifact。批量 reject 不需要 payload，rework 不进入批量面。
+- 选择单位是 job：零 awaiting gate 按 `not_awaiting_approval` 跳过，多门按
+  `multiple_awaiting_gates` 整条跳过。预检后还会在既有 job-mutation lock + awaiting guard
+  内复核单门条件；并发决策或 reset 导致的 `ApprovalGateConflict` 统一记
+  `skipped/gate_conflict`，不会重复追加 decision 或改写已提交 artifact。
+- approve/reject 不支持 retry-failed：重试需要新的 batch audit identity，不能原样复制旧批
+  参数；需要时由用户发起新批。
+
+## 5. 边界与非目标
 
 - 单请求选择上限与 `batch_selection_too_large` 已退役（#1362）；
   `AGENT_LEGION_MAX_BATCH_JOBS` 在 0.8.2 仅打 deprecation warning、不再影响行为。

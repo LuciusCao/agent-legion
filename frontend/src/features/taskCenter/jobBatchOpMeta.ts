@@ -80,6 +80,20 @@ export const JOB_BATCH_OP_META: Record<JobBatchOperationKind, JobBatchOpMeta> =
       icon: 'unarchive',
       action: '清除打包标记',
     },
+    approve: {
+      title: '批量通过',
+      subtitle: '审批门',
+      okLabel: '通过',
+      icon: 'check_circle',
+      action: '通过审批',
+    },
+    reject: {
+      title: '批量终止',
+      subtitle: '审批门',
+      okLabel: '终止',
+      icon: 'cancel',
+      action: '终止审批',
+    },
   }
 
 /** 逐 job 结果 reason_code 的中文标签；未收录的码原样展示（内部码可读）。 */
@@ -104,6 +118,10 @@ export const JOB_BATCH_OP_REASON_LABEL: Record<string, string> = {
   not_failed: '任务未失败',
   no_failed_node: '无失败节点',
   cleanup_failed: '清理失败',
+  needs_manual_input: '需要人工输入',
+  multiple_awaiting_gates: '多个待审批门',
+  not_awaiting_approval: '非待审批状态',
+  gate_conflict: '审批门已变化',
   internal_error: '内部错误',
 }
 

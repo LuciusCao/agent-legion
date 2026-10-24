@@ -19,6 +19,7 @@ from server.app.routes.job_approval_contracts import (
     ApprovalDecisionListResponse,
     ApprovalDecisionResponse,
 )
+from server.app.routes.job_batch_approval import create_job_batch_approval_router
 from server.app.routes.job_http import (
     raise_job_operation_error,
 )
@@ -50,6 +51,7 @@ def create_job_approvals_router(
                 node_key,
                 verdict=payload.verdict,
                 note=payload.note,
+                payload=payload.payload,
                 rework_target=payload.rework_target,
                 decided_by=f"user:{user['id']}",
             )
@@ -65,4 +67,5 @@ def create_job_approvals_router(
         decisions = approvals.list_decisions(workspace_id, job_id)
         return ApprovalDecisionListResponse.model_validate({"decisions": decisions})
 
+    router.include_router(create_job_batch_approval_router(approvals))
     return router

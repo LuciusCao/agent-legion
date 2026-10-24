@@ -95,6 +95,8 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-run-to", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-pause", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-resume", None),
+    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-approve", None),
+    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-reject", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/rerun-by-failure", None),
     ("POST", "/api/workspaces/{workspace_id}/job-batches", None),
     # M61 task-center manual archive: idempotent user write on the batch-op

@@ -80,6 +80,7 @@ def _drain(client: TestClient) -> None:
             pause=services.pause,
             upgrade=services.workflow_upgrade,
             packages=JobPackageService(job_db, settings),
+            approvals=services.approvals,
         ),
     )
     while feeder.consume_once():

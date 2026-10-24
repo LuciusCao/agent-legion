@@ -34,10 +34,12 @@ from server.app.services.job_errors import (
 # 与 DDL status check 一致；paused 是保留控制面态（非终态）。
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
-# M52 分诊：pause/resume 的失败项重试无意义（pause 失败多为 terminal job，
-# resume 反之），其余 kind 的失败语义都成立。
+# M52 分诊：pause/resume 的失败项重试无意义；approval 重试必须生成新的
+# batch audit identity，不走原参数直通，本期不开放。
 RETRYABLE_KINDS = frozenset(
-    kind for kind in JOB_BATCH_OPERATION_KINDS if kind not in ("pause", "resume")
+    kind
+    for kind in JOB_BATCH_OPERATION_KINDS
+    if kind not in ("pause", "resume", "approve", "reject")
 )
 
 

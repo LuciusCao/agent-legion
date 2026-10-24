@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +12,7 @@ ApprovalVerdict = Literal["approved", "rework", "rejected"]
 
 class ApprovalDecisionCreateRequest(BaseModel):
     verdict: ApprovalVerdict
+    payload: dict[str, Any] = Field(default_factory=dict)
     #: Mandatory for rework (the reviewer's 修改意见, written as the gate's
     #: feedback artifact for the regenerating skill); optional otherwise.
     note: str = Field(default="", max_length=20_000)
@@ -28,6 +29,9 @@ class ApprovalDecisionResponse(BaseModel):
     note: str
     rework_target: str
     decided_by: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    batch_id: str | None = None
+    batch_selection: Literal["ids", "filter"] | None = None
     created_at: datetime | None = None
 
 
