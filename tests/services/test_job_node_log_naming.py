@@ -1,6 +1,6 @@
-"""#1113：节点日志命名 ``by-job/<job_id>/<enc(node_key)>[.shard-<i>].log`` 的
-单射性、node_key 编码、与旧扁平名的命名空间隔离，以及删除侧按 job 独占目录
-清理时不误删碰撞对另一方的日志。"""
+"""#1113 / #1340：节点日志命名
+``by-job/<shard>/<job_id>/<enc(node_key)>[.shard-<i>].log`` 的单射性、node_key
+编码、与旧扁平名的命名空间隔离，以及删除侧清理新旧 job 独占目录时不误删兄弟日志。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from urllib.parse import unquote
 
 import pytest
 
+from server.app.job_node_log_names import job_node_log_dir_names
+from server.app.jobs.storage_layout import job_shard
 from server.app.services.job_deletion_trash import purge_deleted_job_files
 from server.app.services.job_log_paths import resolve_job_log_path
 from server.app.settings import Settings
@@ -79,6 +81,13 @@ def test_naming_is_injective_over_tricky_inputs() -> None:
     assert len(set(names)) == len(triples)
 
 
+def test_job_log_dirs_share_job_shard_and_keep_legacy_candidate() -> None:
+    assert job_node_log_dir_names(_A) == (
+        f"{JOB_NODE_LOG_ROOT}/{job_shard(_A)}/{_A}",
+        f"{JOB_NODE_LOG_ROOT}/{_A}",
+    )
+
+
 @pytest.mark.parametrize("node_key", _TRICKY_KEYS)
 @pytest.mark.parametrize("shard_index", [None, 0, 12])
 def test_node_key_encoding_is_one_safe_reversible_component(
@@ -88,8 +97,8 @@ def test_node_key_encoding_is_one_safe_reversible_component(
     不建子目录（无空目录遗留）、不逃出 job 目录，且可逆还原。"""
     name = PurePosixPath(job_node_log_name(_A, node_key, shard_index))
 
-    assert name.parts[:2] == (JOB_NODE_LOG_ROOT, _A)
-    assert len(name.parts) == 3
+    assert name.parts[:3] == (JOB_NODE_LOG_ROOT, job_shard(_A), _A)
+    assert len(name.parts) == 4
     stem = name.name.removesuffix(".log")
     if shard_index is not None:
         stem = stem.removesuffix(f".shard-{shard_index}")
@@ -121,7 +130,7 @@ _LONG_KEYS = {
 def test_file_name_is_bounded_by_name_max(node_key: str, shard_index: int | None) -> None:
     name = PurePosixPath(job_node_log_name(_A, node_key, shard_index))
 
-    assert len(name.parts) == 3
+    assert len(name.parts) == 4
     assert len(name.name.encode()) <= 255
     assert name.name.endswith(".log")
 
@@ -220,10 +229,44 @@ def test_purge_removes_whole_job_dir_including_unrecorded_logs(tmp_path: Path) -
     assert sibling.is_file()
 
 
+def test_purge_removes_coexisting_new_and_legacy_dirs_for_same_job(tmp_path: Path) -> None:
+    """升级前后同一 job_id 的目录并存时，两者都完整清理，兄弟 job 两代目录不动。"""
+    settings = _settings(tmp_path)
+    sibling_id = f"{_A}-x"
+    own_new = _write(settings, (_A, "new", None))
+    sibling_new = _write(settings, (sibling_id, "new", None))
+    own_legacy = job_log_dir(settings.logs_dir) / job_node_log_dir_names(_A)[1] / "old.log"
+    sibling_legacy = (
+        job_log_dir(settings.logs_dir) / job_node_log_dir_names(sibling_id)[1] / "old.log"
+    )
+    for path, content in ((own_legacy, "own old"), (sibling_legacy, "sibling old")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    purge_deleted_job_files(_UnlockedJobDB(), {"id": _A}, settings, "op-1")
+
+    assert not own_new.exists()
+    assert not own_legacy.exists()
+    assert not own_new.parent.exists()
+    assert not own_legacy.parent.exists()
+    assert sibling_new.is_file()
+    assert sibling_legacy.read_text(encoding="utf-8") == "sibling old"
+
+
 def test_log_api_resolves_new_layout_path(tmp_path: Path) -> None:
     """读取侧按 node_runs.log_path 原样解析：新布局在 ``logs/jobs`` 之下即放行。"""
     settings = _settings(tmp_path)
     path = _write(settings, (_A, "a/b", 1))
     stored = f"logs/jobs/{job_node_log_name(_A, 'a/b', 1)}"
+
+    assert resolve_job_log_path(stored, settings) == path.resolve()
+
+
+def test_log_api_resolves_legacy_by_job_path_without_migration(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    stored = f"logs/jobs/{job_node_log_dir_names(_A)[1]}/old.log"
+    path = settings.data_dir / stored
+    path.parent.mkdir(parents=True)
+    path.write_text("old", encoding="utf-8")
 
     assert resolve_job_log_path(stored, settings) == path.resolve()

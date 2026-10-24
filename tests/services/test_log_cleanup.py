@@ -1,12 +1,14 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from server.app.db.connection import DatabaseConnection
 from server.app.jobs import JobQueries
 from server.app.services import cleanup_sweep
 from server.app.services.cleanup_sweep_store import CleanupSweepStore
 from server.app.services.log_cleanup import CleanupConfig, cleanup_old_logs
-from server.app.storage_paths import make_data_relative
+from server.app.storage_paths import job_node_log_name, make_data_relative
 from tests.helpers.job_dirs import job_storage_ref, make_job_dir, pin_run_dir_order
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -53,11 +55,15 @@ def _insert_node_run(
     )
 
 
-def test_cleanup_removes_old_logs_and_run_dirs(tmp_path):
+@pytest.mark.parametrize("layout", ["sharded", "legacy-by-job"])
+def test_cleanup_removes_old_logs_and_run_dirs(tmp_path, layout):
     data_dir, db = _make_db(tmp_path)
     run_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a" / "tok-1"
     run_dir.mkdir(parents=True)
-    log_path = data_dir / "logs" / "jobs" / "job-1-node-a.log"
+    log_name = (
+        job_node_log_name("job-1", "node-a") if layout == "sharded" else "by-job/job-1/node-a.log"
+    )
+    log_path = data_dir / "logs" / "jobs" / log_name
     log_path.parent.mkdir(parents=True)
     log_path.write_text("old log")
 

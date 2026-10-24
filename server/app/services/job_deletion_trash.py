@@ -29,10 +29,11 @@ DB 是删除的唯一权威：``JobDeletionService`` 先在
   ``scripts/gc-s3-jobs.py`` 回收。
 
 日志路径的枚举（按快照精确生成、逐个探测存在性）在锁外完成，锁内只复核行与
-rename——锁事务保持短，不阻塞重建后新 job 的 claim。日志只删本 job 独占的
-``logs/jobs/by-job/<job_id>/`` 目录与快照 node_runs 登记过的旧命名（扁平与
-含斜杠 node_key 的嵌套形态，#1113），见 ``deleted_job_log_paths``。嵌套旧日志
-移走后逐级回收腾空的父目录（止于日志根），不留 ``<job_id>-a/`` 空壳。
+rename——锁事务保持短，不阻塞重建后新 job 的 claim。日志只删本 job 独占的新
+``logs/jobs/by-job/<shard>/<job_id>/`` 与旧 ``logs/jobs/by-job/<job_id>/``
+目录，以及快照 node_runs 登记过的旧命名（扁平与含斜杠 node_key 的嵌套形态，
+#1113），见 ``deleted_job_log_paths``。嵌套旧日志移走后逐级回收腾空的父目录
+（止于日志根），不留 ``<job_id>-a/`` 空壳。
 
 锁下只做同文件系统原子 ``os.rename`` 进 trash（跨文件系统 EXDEV 即放弃、留
 残留，绝不在锁下拷贝），rmtree 在锁外：原路径瞬间腾空，同 id 重建的 job 不会

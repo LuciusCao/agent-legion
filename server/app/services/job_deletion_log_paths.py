@@ -5,10 +5,11 @@
 
 候选枚举的三种形态与归属判定（逐格对账）：
 
-- 新命名（#1113）：写入方（``workflow_worker.claim_submit`` / ``shards``）经
-  ``storage_paths.job_node_log_name`` 把节点日志写进 job 独占目录
-  ``logs/jobs/by-job/<job_id>/``——目录名由 ``job_node_log_dir_name`` 生成
-  （拒绝含 ``/`` 的 job_id），归属即 job_id 本身，存在即整目录返回；
+- 分目录命名（#1113 / #1340）：写入方（``workflow_worker.claim_submit`` /
+  ``shards``）经 ``storage_paths.job_node_log_name`` 把节点日志写进 job 独占目录；
+  #1340 起为 ``logs/jobs/by-job/<shard>/<job_id>/``，此前为
+  ``logs/jobs/by-job/<job_id>/``。两个目录名由 ``job_node_log_dir_names`` 同源
+  生成（拒绝含 ``/`` 的 job_id），归属即 job_id 本身，存在即分别整目录返回；
 - 旧扁平名（直属层）：``logs/jobs/<job_id>-<node_key>[-shard-<i>].log``，
   只认删除事务内快照的 ``node_runs.log_path`` 中、解析后仍在日志根内、且
   相对路径逐字等于 ``legacy_job_node_log_name(job_id, 该行 node_key[, 索引])``
@@ -28,9 +29,9 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
+from server.app.job_node_log_names import job_node_log_dir_names
 from server.app.settings import Settings
 from server.app.storage_paths import (
-    job_node_log_dir_name,
     legacy_job_node_log_name,
     resolve_data_path,
 )
@@ -48,10 +49,11 @@ def deleted_job_log_paths(
     job_id: str,
     run_logs: Iterable[tuple[str, str]] = (),
 ) -> list[Path]:
-    """列出已删 job 拥有的节点日志：目录项（新命名）+ 旧命名文件（扁平 / 嵌套）。
+    """列出已删 job 拥有的节点日志：新旧目录项 + 旧命名文件（扁平 / 嵌套）。
 
-    - 新命名：``logs/jobs/by-job/<job_id>/`` 只装本 job 的日志（job_id 独占
-      目录，不同 job_id 永不同目录），存在即整目录返回——覆盖每个普通/分片
+    - 分目录命名：``logs/jobs/by-job/<shard>/<job_id>/`` 与升级前的
+      ``logs/jobs/by-job/<job_id>/`` 都只装本 job 的日志（job_id 独占目录，
+      不同 job_id 永不同目录），存在即分别整目录返回——覆盖每个普通/分片
       日志与已退出图的历史节点，也不留空目录；
     - 旧命名：job_id 与 node_key 都可含连字符（source_id 只把 ``/`` 换成
       ``_``），``{job_id}-*`` 前缀与「按节点 key 生成名字」都会命中兄弟 job 的
@@ -72,7 +74,7 @@ def deleted_job_log_paths(
     log_dir = settings.logs_dir / "jobs"
     candidates: list[Path] = []
     try:
-        candidates.append(log_dir / job_node_log_dir_name(job_id))
+        candidates.extend(log_dir / name for name in job_node_log_dir_names(job_id))
     except ValueError:
         # 不变式外的 job_id（含 ``/`` 等）从未有过分目录日志，无目录可删。
         logger.warning("Deleted job %r has no per-job log dir name", job_id)

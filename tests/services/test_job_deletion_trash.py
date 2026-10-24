@@ -250,7 +250,9 @@ def test_purge_derives_log_paths_outside_lock_and_never_lists_log_dir(tmp_path: 
     assert log_dir not in listed
     assert log_dir / JOB_NODE_LOG_ROOT not in listed
     assert sorted(p.name for p in log_dir.iterdir()) == [JOB_NODE_LOG_ROOT]
-    assert list((log_dir / JOB_NODE_LOG_ROOT).iterdir()) == []
+    # 固定数量的空 shard 目录可以保留；job 独占目录必须已移走。
+    assert list((log_dir / JOB_NODE_LOG_ROOT).iterdir()) == [new_log.parent.parent]
+    assert list(new_log.parent.parent.iterdir()) == []
 
 
 # 删除路径模型（PR #1065 codex 4203283377）：被删 job 与按命名规则可能碰撞的
