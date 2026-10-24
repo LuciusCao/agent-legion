@@ -19,7 +19,7 @@ from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.instance_settings_store import InstanceSettingsStore
 from server.app.services.material_bundles import MaterialBundlesService
-from server.app.services.material_cache import material_claim_block
+from server.app.services.material_claim_descriptors import material_claim_block
 from server.app.services.material_ttl import (
     DELETE_GRACE_SECONDS,
     collect_expired_materials,
