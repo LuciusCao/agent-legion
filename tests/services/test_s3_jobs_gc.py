@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from server.app.services import s3_jobs_gc
+from server.app.services.s3_job_authority_gc import material_key_single_use
 from server.app.services.s3_jobs_gc import ObjectEntry, scan_orphans
 
 
@@ -180,8 +181,9 @@ def test_apply_gc_never_deletes_rollback_backup_keys() -> None:
     恢复失败时留存的最后恢复源。revalidate 救不了它们（回滚 key 永无 DB
     行），所以过滤必须先于反查。"""
     deleter = _RecordingDeleter()
+    versioned = f"jobs/ws-1/job-1/.v/{'a' * 32}/gone.json"
     report = _report_with(
-        authority=["jobs/ws-1/job-1/.rollback/x.json", "jobs/ws-1/job-1/gone.json"],
+        authority=["jobs/ws-1/job-1/.rollback/x.json", versioned],
         staging=[
             "jobs-staging/ws-1/job-1/e1/.rollback/att-1/out.json",
             "jobs-staging/ws-1/job-1/e1/plain.json",
@@ -192,7 +194,7 @@ def test_apply_gc_never_deletes_rollback_backup_keys() -> None:
 
     assert sorted(deleter.deleted) == [
         "jobs-staging/ws-1/job-1/e1/plain.json",
-        "jobs/ws-1/job-1/gone.json",
+        versioned,
     ]
     assert result.deleted == 2
 
@@ -253,25 +255,25 @@ def test_material_key_single_use_grammar() -> None:
     32 位 hex」与 r2 反例「首文件名段恰为 m_<32hex>」）、legacy 无 g 段
     key、inline 旧 key、真 job 产物。"""
     mid = "m_" + "a" * 32
-    assert s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/v2g0/{mid}/doc.txt")
-    assert s3_jobs_gc.material_key_single_use(f"ws1/{mid[2:]}/v2g2/{mid}/dir/f.bin")
+    assert material_key_single_use(f"ws1/{'b' * 64}/v2g0/{mid}/doc.txt")
+    assert material_key_single_use(f"ws1/{mid[2:]}/v2g2/{mid}/dir/f.bin")
     # 撞名前缀下的新文法材料 key 同门禁。
-    assert s3_jobs_gc.material_key_single_use(f"jobs-staging/{'c' * 64}/v2g1/{mid}/f.bin")
+    assert material_key_single_use(f"jobs-staging/{'c' * 64}/v2g1/{mid}/f.bin")
     # 旧文法（g 段无 v2 标记）：可复用，排除。
-    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/doc.txt")
+    assert not material_key_single_use(f"ws1/{'b' * 64}/g0/doc.txt")
     # r1 反例：旧文法 + 首文件名段恰为 32 位 hex。
-    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/{'a' * 32}/doc.txt")
+    assert not material_key_single_use(f"ws1/{'b' * 64}/g0/{'a' * 32}/doc.txt")
     # r2 反例：旧文法 + 首文件名段恰为 m_<32hex>。
-    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/g0/{mid}/doc.txt")
+    assert not material_key_single_use(f"ws1/{'b' * 64}/g0/{mid}/doc.txt")
     # legacy 无 g 段 / inline 尾段（旧文法）。
-    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/doc.txt")
-    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/inline-{'d' * 32}")
+    assert not material_key_single_use(f"ws1/{'b' * 64}/doc.txt")
+    assert not material_key_single_use(f"ws1/{'b' * 64}/inline-{'d' * 32}")
     # 第 4 段不是 m_ + 32 位 hex / 代次段缺数字的形态。
-    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/v2g0/notanid/doc.txt")
-    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/v2g0/m_{'a' * 31}/doc.txt")
-    assert not s3_jobs_gc.material_key_single_use(f"ws1/{'b' * 64}/v2gx/{mid}/doc.txt")
+    assert not material_key_single_use(f"ws1/{'b' * 64}/v2g0/notanid/doc.txt")
+    assert not material_key_single_use(f"ws1/{'b' * 64}/v2g0/m_{'a' * 31}/doc.txt")
+    assert not material_key_single_use(f"ws1/{'b' * 64}/v2gx/{mid}/doc.txt")
     # 真 job 产物（第 3 段 job id 恒含下划线）。
-    assert not s3_jobs_gc.material_key_single_use("jobs/ws-x/ws-x_q1/dead.json")
+    assert not material_key_single_use("jobs/ws-x/ws-x_q1/dead.json")
 
 
 def test_rollback_exemption_excludes_material_shaped_keys() -> None:
@@ -383,39 +385,77 @@ def test_apply_gc_rollback_exemption_does_not_cover_material_shaped_keys() -> No
     assert result.deleted == 1
 
 
+def test_job_authority_key_single_use_grammar() -> None:
+    """#1309：只有 #853 的 uuid4 hex 版本 key 可进 authority 删除批。"""
+    attempt = "a" * 32
+    assert s3_jobs_gc.job_authority_key_single_use(f"jobs/ws/job/.v/{attempt}/out.json")
+    assert s3_jobs_gc.job_authority_key_single_use(f"jobs/ws/job/.v/{attempt}/dir/out.json.gz")
+    assert not s3_jobs_gc.job_authority_key_single_use("jobs/ws/job/out.json")
+    assert not s3_jobs_gc.job_authority_key_single_use(f"jobs/ws/job/.v/{attempt}/")
+    assert not s3_jobs_gc.job_authority_key_single_use(f"jobs/ws/job/.v/{'A' * 32}/out.json")
+    assert not s3_jobs_gc.job_authority_key_single_use(f"jobs/ws/job/.v/{'g' * 32}/out.json")
+    assert not s3_jobs_gc.job_authority_key_single_use(f"other/ws/job/.v/{attempt}/out.json")
+
+
 def test_apply_revalidate_skips_keys_that_gained_rows() -> None:
     """TOCTOU（#344 评审 P1）：扫描判孤儿后、删除前同名 key 被并发 promote
     重建行——删除批经新鲜反查过滤，不删新权威对象；被救下的计入
     skipped_revalidated。"""
     deleter = _RecordingDeleter()
+    kept = f"jobs/ws-1/job-1/.v/{'a' * 32}/kept.json"
+    gone = f"jobs/ws-1/job-1/.v/{'b' * 32}/gone.json"
     report = _report_with(
-        authority=["jobs/ws-1/kept.json", "jobs/ws-1/gone.json"],
+        authority=[kept, gone],
         staging=["jobs-staging/ws-1/job-1/exec-1/s.json"],
     )
-    # 新鲜反查：kept.json 此刻已有 DB 行（并发 promote），gone.json 仍无。
-    fresh = {"jobs/ws-1/kept.json"}
+    fresh = {kept}
 
     result = s3_jobs_gc.apply_gc(
         deleter, "bkt", report, revalidate=lambda keys: {k for k in keys if k in fresh}
     )
 
-    assert result.deleted == 2  # gone.json + staging
+    assert result.deleted == 2  # gone + staging
     assert result.skipped_revalidated == 1
-    assert "jobs/ws-1/kept.json" not in deleter.deleted
-    assert "jobs/ws-1/gone.json" in deleter.deleted
+    assert kept not in deleter.deleted
+    assert gone in deleter.deleted
     assert "jobs-staging/ws-1/job-1/exec-1/s.json" in deleter.deleted
 
 
-def test_apply_without_revalidate_deletes_all_reported() -> None:
-    """未提供 revalidate（旧行为，纯函数调用方）：按报告全删。"""
+def test_apply_legacy_authority_key_is_report_only() -> None:
+    """#1309 故障注入：手工报告混入 legacy 固定 key 时，即使反查仍称无行，
+    它也在反查前被扣下；同名重建再也到不了 delete。版本化孤儿照删。"""
     deleter = _RecordingDeleter()
-    report = _report_with(authority=["jobs/ws-1/a.json"], staging=["jobs-staging/x/y.json"])
+    legacy = "jobs/ws-1/job-1/out.json"
+    versioned = f"jobs/ws-1/job-1/.v/{'c' * 32}/out.json"
+    revalidated: list[list[str]] = []
+
+    def no_rows(keys: list[str]) -> set[str]:
+        revalidated.append(keys)
+        return set()
+
+    result = s3_jobs_gc.apply_gc(
+        deleter, "bkt", _report_with(authority=[legacy, versioned]), revalidate=no_rows
+    )
+
+    assert result.deleted == 1
+    assert deleter.deleted == [versioned]
+    assert revalidated == [[versioned]]
+
+
+def test_apply_without_revalidate_deletes_all_eligible() -> None:
+    """未提供 revalidate 时删除全部合格候选；legacy 门禁仍不可绕过。"""
+    deleter = _RecordingDeleter()
+    versioned = f"jobs/ws-1/job-1/.v/{'d' * 32}/a.json"
+    report = _report_with(
+        authority=[versioned, "jobs/ws-1/job-1/legacy.json"],
+        staging=["jobs-staging/x/y.json"],
+    )
 
     result = s3_jobs_gc.apply_gc(deleter, "bkt", report)
 
     assert result.deleted == 2
     assert result.skipped_revalidated == 0
-    assert sorted(deleter.deleted) == ["jobs-staging/x/y.json", "jobs/ws-1/a.json"]
+    assert sorted(deleter.deleted) == ["jobs-staging/x/y.json", versioned]
 
 
 def test_materials_of_workspace_named_jobs_is_not_orphan() -> None:

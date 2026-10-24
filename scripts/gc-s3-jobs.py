@@ -132,7 +132,10 @@ def main() -> int:
     )
     if not args.apply:
         if report.count or split.deletable or split.report_only:
-            print("加 --apply 执行删除（幂等可重跑；旧文法材料孤儿不删）。")
+            print(
+                "加 --apply 执行删除（幂等可重跑；"
+                "legacy 固定 authority key 与旧文法材料孤儿不删）。"
+            )
         return 0
 
     # 删除前逐批新鲜反查（TOCTOU，#344 评审 P1）：不用扫描阶段的缓存

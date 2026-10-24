@@ -28,13 +28,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from server.app.services import s3_jobs_gc
+from server.app.services.s3_job_authority_gc import material_key_single_use
 from server.app.services.s3_jobs_gc import (
     BatchDeleter,
     KeyExistence,
     Lister,
     ObjectEntry,
     OrphanReport,
-    material_key_single_use,
     material_shaped_key,
 )
 

@@ -681,6 +681,13 @@ remote worker 的 presigned URL 用 `AGENT_LEGION_S3_PUBLIC_ENDPOINT`
   直读、缺失回退对象存储」解析，不搬历史数据。例外是 quality
   artifact_contents：刻意 manifest-first，直接读对象存储的持久化记录
   （回退 legacy CAS），不读本地 job_dir，保证质量评审反映落盘权威副本。
+- **legacy 固定 authority key 尾巴（#1309）**：`verify_remote` 缺少
+  `execution_id` 时 fail-closed，生产结果提交只接受 per-execution staging key；
+  `record_remote` 仅作 deprecated 存量/测试播种 API。S3 GC 仍扫描报告固定 key
+  孤儿，但 authority 删除批只接受 `.v/{32 位 hex attempt}/` 单次使用文法，
+  从删除动作上关闭 revalidate→delete 的同名重建窗口。存量固定 key 行按
+  `storage_key` 原样读取、不批量重签；节点重跑自然切换到版本 key，只报告孤儿
+  由 bucket lifecycle 或专项运维清理。
 
 评审修复后的加固语义（#162）：
 
