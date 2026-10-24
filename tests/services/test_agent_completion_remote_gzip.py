@@ -296,6 +296,22 @@ def test_verify_remote_accepts_both_staging_key_forms(tmp_path: Path) -> None:
         )
 
 
+def test_verify_remote_rejects_legacy_fixed_authority_key() -> None:
+    """#1309：裸 authority 核验臂已退役；对象存在且尺寸匹配也不能重开。"""
+    storage = FakeStorage()
+    storage.objects[AUTHORITY_KEY] = PAYLOAD
+    object_store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    with pytest.raises(ValueError, match="execution id is required"):
+        object_store.verify_remote(
+            workspace_id="ws-1",
+            job_id="job-1",
+            name="out.json",
+            storage_key=AUTHORITY_KEY,
+            size_bytes=len(PAYLOAD),
+        )
+
+
 # --- #338 评审 r1 P2-2：decompression-bomb 缺口 ------------------------------
 
 

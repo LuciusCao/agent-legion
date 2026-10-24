@@ -154,7 +154,7 @@ def _make_pystub(tmp_path: Path, storage_probe: str) -> Path:
     (pystub / "server/app/__init__.py").write_text("")
     (pystub / "server/app/storage/__init__.py").write_text(storage_probe)
     (pystub / "server/app/services/__init__.py").write_text("")
-    for name in ("s3_jobs_gc.py", "s3_material_gc.py"):
+    for name in ("s3_job_authority_gc.py", "s3_jobs_gc.py", "s3_material_gc.py"):
         source = ROOT / "server/app/services" / name
         (pystub / "server/app/services" / name).write_text(source.read_text())
     return pystub
@@ -224,12 +224,13 @@ def test_dry_run_reports_without_deleting(tmp_path: Path) -> None:
     assert "dry-run" in result.stdout
     assert "jobs/ 孤儿 1 个" in result.stdout
     assert "jobs-staging/ 孤儿 1 个" in result.stdout
+    assert "legacy 固定 authority key 与旧文法材料孤儿不删" in result.stdout
     assert "delete_objects" not in log
     assert "revalidate" not in log
 
 
 def test_apply_deletes_reported_orphans(tmp_path: Path):
-    """--apply：删除前逐批新鲜反查（TOCTOU，#344），打印删除数。"""
+    """--apply：staging 删除前新鲜反查（#344）；legacy 固定 key 只报告。"""
     pystub = _make_pystub(tmp_path, _STORAGE_PROBE_CONFIGURED)
 
     result, log = _run(
@@ -243,9 +244,9 @@ def test_apply_deletes_reported_orphans(tmp_path: Path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert "已删除 2 个孤儿对象（其中材料 0 个）" in result.stdout
+    assert "已删除 1 个孤儿对象（其中材料 0 个）" in result.stdout
     assert "revalidate n=" in log
-    assert _deleted(log) == ["jobs-staging/x/e/b.json", "jobs/x/a.json"]
+    assert _deleted(log) == ["jobs-staging/x/e/b.json"]
 
 
 def test_grace_args_reach_scan(tmp_path: Path):
@@ -282,7 +283,7 @@ def _material_gate_objects(now: float) -> list[list]:
         [f"ws1/hash-old/g0/{'a' * 32}/ambiguous.txt", old, 10],  # r1 反例形态 → 只报告
         [f"ws1/hash-old/g0/{_MID}/ambiguous2.txt", old, 10],  # r2 反例形态 → 只报告
         [f"ws1/hash-live/v2g0/{_MID}/live.txt", old, 10],  # 有行 → 非孤儿
-        ["jobs/ws1/j1/a.json", old, 10],  # jobs/ 孤儿 → 删
+        ["jobs/ws1/j1/a.json", old, 10],  # legacy 固定 authority key → 只报告
         ["jobs-staging/ws1/j1/e1/b.json", old, 10],  # staging 孤儿 → 删
         [f"jobs/{'e' * 64}/v2g0/{_MID}/new.txt", old, 10],  # 撞名、单次使用 → 材料道删
         [f"jobs-staging/{'d' * 64}/g2/dir/.rollback/file.bin", old, 10],  # 撞名旧文法 → 只报告
@@ -328,11 +329,10 @@ def test_material_orphans_delete_batch_gates_end_to_end(tmp_path: Path, apply: b
         [
             f"ws1/hash-old/v2g0/{_MID}/superseded.txt",
             f"jobs/{'e' * 64}/v2g0/{_MID}/new.txt",
-            "jobs/ws1/j1/a.json",
             "jobs-staging/ws1/j1/e1/b.json",
         ]
     )
-    assert "已删除 4 个孤儿对象（其中材料 2 个）" in result.stdout
+    assert "已删除 3 个孤儿对象（其中材料 2 个）" in result.stdout
     assert "反查救下 1 个对象" in result.stdout
 
 

@@ -1851,6 +1851,7 @@
     "server/app/services/runtime_profile/sampling.py": 72,
     "server/app/services/runtime_profile/stage_gauges.py": 47,
     "server/app/services/runtime_reserved_config.py": 68,
+    "server/app/services/s3_job_authority_gc.py": 42,
     "server/app/services/s3_jobs_gc.py": 154,
     "server/app/services/s3_material_gc.py": 107,
     "server/app/services/skill_browser.py": 30,

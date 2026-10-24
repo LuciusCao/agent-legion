@@ -68,7 +68,7 @@ STAGING_KEY_PREFIX = "jobs-staging"
 
 
 def artifact_storage_key(workspace_id: str, job_id: str, name: str) -> str:
-    """Legacy fixed authority key (pre-#853 rows; the bare verify arm)."""
+    """Legacy fixed authority key for pre-#853 rows and compatibility fixtures."""
     return f"{KEY_PREFIX}/{workspace_id}/{job_id}/{name}"
 
 
@@ -215,25 +215,27 @@ class JobArtifactObjectStore:
     ) -> None:
         """HEAD-verify a Worker-reported object WITHOUT registering it.
 
-        The validation half of ``record_remote``: the result-commit path
-        verifies ALL reported refs before applying ANY (no half-applied
-        state), then registers/downloads them in the apply phase. With
-        ``execution_id`` the expected key is the per-execution staging key
-        (Worker uploads); without it, the authority key. ``max_size_bytes``
-        applies the same size ceiling the legacy archive channel enforces
-        (instance setting ``agent_workers.max_archive_bytes``).
+        The result-commit path verifies ALL reported refs before applying ANY
+        (no half-applied state), then registers/downloads them in the apply
+        phase. The expected key is the per-execution staging key (Worker
+        uploads). ``max_size_bytes`` applies the same size ceiling the legacy
+        archive channel enforces (instance setting
+        ``agent_workers.max_archive_bytes``). The pre-#853 bare authority-key
+        arm is closed (#1309): a missing execution id is rejected instead of
+        accepting a reusable fixed key.
         """
         if self.storage is None:
             raise ValueError("object storage is not configured")
+        if not execution_id:
+            raise ValueError(
+                "execution id is required; legacy fixed authority keys are no longer accepted"
+            )
         if max_size_bytes is not None and size_bytes > max_size_bytes:
             raise ValueError(
                 f"uploaded object size {size_bytes} exceeds the artifact size "
                 f"limit {max_size_bytes} for {name!r}"
             )
-        if execution_id:
-            expected_key = artifact_staging_key(workspace_id, job_id, execution_id, name)
-        else:
-            expected_key = artifact_storage_key(workspace_id, job_id, name)
+        expected_key = artifact_staging_key(workspace_id, job_id, execution_id, name)
         # #338 dual-form: v4+ Workers upload to the ``.gz``-suffixed key,
         # older Workers to the bare key — the Host accepts both and the
         # suffix alone decides the stored form downstream.
@@ -259,20 +261,14 @@ class JobArtifactObjectStore:
         size_bytes: int,
         content_hash: str = "",
     ) -> dict[str, Any] | None:
-        """Register an artifact a Worker uploaded directly (HEAD-verified).
+        """Deprecated compatibility/test seed for a pre-existing legacy row.
 
-        The key must match the server-side layout and the stored object must
-        exist with the declared size — Worker reports are untrusted.
+        This deliberately does not reopen the retired bare ``verify_remote``
+        arm (#1309). Production writes must use ``upload`` or the Worker
+        promote path, which always derive a fresh per-attempt version key.
         """
         if self.storage is None:
             return None
-        self.verify_remote(
-            workspace_id=workspace_id,
-            job_id=job_id,
-            name=name,
-            storage_key=storage_key,
-            size_bytes=size_bytes,
-        )
         return self._register_row(
             job_id=job_id,
             node_key=node_key,
@@ -323,7 +319,7 @@ class JobArtifactObjectStore:
         """Single-row upsert in its own transaction (batch path inlines it).
 
         Ungated by design: the only callers left are the no-lease paths
-        (``record_remote`` HEAD-verified registrations, the reconciler and
+        (deprecated ``record_remote`` compatibility seeds, the reconciler and
         approval direct writes) — lease-carrying writes go through
         ``register_rows_guarded`` inside the shared promote primitive.
         ``superseded`` (#853) collects the key the row pointed at before.
