@@ -6,7 +6,10 @@
 
 import hashlib
 
-# #1113：节点日志按 job 分目录的根（``<logs_dir>/jobs/by-job/<job_id>/``）。
+from server.app.jobs.storage_layout import job_shard
+
+# #1113：节点日志按 job 分目录的根；#1340 起为
+# ``<logs_dir>/jobs/by-job/<shard>/<job_id>/``。
 # 旧扁平名一律以 ``.log`` 结尾，此目录名不可能与任何旧日志文件同名，新旧
 # 命名空间物理上不相交。
 JOB_NODE_LOG_ROOT = "by-job"
@@ -60,27 +63,33 @@ def _bounded_node_log_stem(node_key: str, suffix: str) -> str:
 
 
 def job_node_log_dir_name(job_id: str) -> str:
-    """``<logs_dir>/jobs`` 下某 job 独占的日志目录（POSIX 相对路径）。
+    """#1340 新布局 ``by-job/<shard>/<job_id>``（POSIX 相对路径）。
 
-    job_id = ``<ws>_<wf>_<source_id>``（source_id 的 ``/`` 已换成 ``_``），不含
-    ``/``、恒带前缀，不会是 ``.`` / ``..``；不满足即违反不变式，直接拒绝。
+    shard 与 job 产物目录共用 ``job_shard``。job_id = ``<ws>_<wf>_<source_id>``
+    （source_id 的 ``/`` 已换成 ``_``），不含 ``/``、恒带前缀，不会是 ``.`` /
+    ``..``；不满足即违反不变式，直接拒绝。
     """
     if not job_id or "/" in job_id or "\0" in job_id or job_id in {".", ".."}:
         raise ValueError(f"job id cannot name a log directory: {job_id!r}")
-    return f"{JOB_NODE_LOG_ROOT}/{job_id}"
+    return f"{JOB_NODE_LOG_ROOT}/{job_shard(job_id)}/{job_id}"
+
+
+def job_node_log_dir_names(job_id: str) -> tuple[str, str]:
+    """返回新分片目录与 #1113 旧 ``by-job/<job_id>`` 目录，供删除侧兼容。"""
+    return job_node_log_dir_name(job_id), f"{JOB_NODE_LOG_ROOT}/{job_id}"
 
 
 def job_node_log_name(job_id: str, node_key: str, shard_index: int | None = None) -> str:
-    """``<logs_dir>/jobs`` 下节点日志的唯一命名规则（#1113，POSIX 相对路径）：
-    普通节点 ``by-job/<job_id>/<enc(node_key)>.log``，分片
-    ``by-job/<job_id>/<enc(node_key)>.shard-<i>.log``。
+    """``<logs_dir>/jobs`` 下节点日志的唯一命名规则（POSIX 相对路径）：
+    普通节点 ``by-job/<shard>/<job_id>/<enc(node_key)>.log``，分片
+    ``by-job/<shard>/<job_id>/<enc(node_key)>.shard-<i>.log``。
 
     job_id 独占目录、node_key 经 ``_encode_node_log_key`` 编码（不含 ``.``；
     文件名超 NAME_MAX 时改为有界的 ``<前缀>.<sha256>`` 形态，见
     ``_bounded_node_log_stem``），故 (job_id, node_key, shard_index) → 路径是单射：旧扁平名
     ``<job_id>-<node_key>[-shard-<i>].log`` 在 job_id 与 node_key 都可含连字符时
     跨 job 碰撞的问题不再存在。写入方（claim_submit / shards）唯一入口；job
-    删除按 ``job_node_log_dir_name`` 整目录清理，旧扁平名见
+    删除按 ``job_node_log_dir_names`` 清理新旧两个独占目录，旧扁平名见
     ``legacy_job_node_log_name``。
     """
     suffix = "" if shard_index is None else f".shard-{shard_index}"

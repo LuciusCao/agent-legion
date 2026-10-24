@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 # #1113：节点日志命名拆在 job_node_log_names（文件预算），此处再导出——写入方
-# 与删除侧仍经 storage_paths 取名。
+# 仍经 storage_paths 取名；删除侧的新旧目录候选直接从命名模块读取。
 from server.app.job_node_log_names import JOB_NODE_LOG_ROOT as JOB_NODE_LOG_ROOT
 from server.app.job_node_log_names import job_node_log_dir_name as job_node_log_dir_name
 from server.app.job_node_log_names import job_node_log_name as job_node_log_name

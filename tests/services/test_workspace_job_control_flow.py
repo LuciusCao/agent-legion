@@ -318,7 +318,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         # 8. delete removes database rows, storage, and logs.
         job = app.state.job_db.get_job(job_id)
         storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
-        # #1113：节点日志写进 job 独占目录 logs/jobs/by-job/<job_id>/。
+        # #1340：节点日志写进分片的 job 独占目录。
         log_dir = app.state.settings.logs_dir / "jobs" / job_node_log_dir_name(job_id)
         log_files = list(log_dir.glob("*.log"))
         assert storage_dir.exists()
