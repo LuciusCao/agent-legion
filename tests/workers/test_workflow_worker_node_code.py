@@ -507,3 +507,129 @@ def test_shard_claim_gate_is_shard_scoped(tmp_path: Path) -> None:
     dispatch.broker.has_active_request.assert_called_once_with(
         str(job["id"]), node.key, shard_index=None
     )
+
+
+# --- #1320 (A4): the material ETag gate shapes the enqueue decision --------
+# A job hitting the v6 gate predicate is unclaimable by a pre-v6 fleet (claim
+# admission skips it forever), so it must not be enqueued against a v5-only
+# fleet: it falls back to the local pool, or — pure-remote shape — stays
+# pending without occupying code stock until a v6 Worker appears.
+
+
+def _etag_probe_dispatch(*, etag_capable: bool) -> MagicMock:
+    """A code dispatch mock at the #1320 seam: online v2+ fleet, v6 presence
+    pinned by ``etag_capable``."""
+    dispatch = MagicMock()
+    dispatch.is_in_flight.return_value = False
+    dispatch.broker.has_active_request.return_value = False
+    dispatch.online_code_worker_available.return_value = True
+    dispatch.online_etag_capable_code_worker_available.return_value = etag_capable
+    dispatch.try_mark_in_flight.return_value = True
+    dispatch.enqueue_pool.submit.side_effect = lambda fn: (fn(), True)[1]
+    return dispatch
+
+
+def _etag_probe_worker(dispatch: MagicMock, job_db: JobQueries, tmp_path: Path) -> MagicMock:
+    worker = MagicMock()
+    worker.job_db = job_db
+    worker.code_dispatch = dispatch
+    worker.state.etag_gate_alerted = set()
+    worker.state.batch_payload_cache = {}
+    worker.state.pass_claim_counts = {}
+    worker.settings.root_dir = tmp_path
+    worker.settings.config = {}
+    worker.settings.executor_runtime.workflows.custom_nodes_enabled = True
+    return worker
+
+
+def _etag_gate_job(
+    tmp_path: Path, node: WorkflowNode, *, gated: bool
+) -> tuple[JobQueries, dict, dict]:
+    """A published-code job whose input is (gated=True) a no-hash material with
+    a bound etag — the v6 gate predicate hits — or (False) a plain question."""
+    job_db, ws = _prepare_job(tmp_path, node)
+    _publish_v1_v2(ws)
+    fat = _attach_snapshot(job_db, ws, node, None)
+    job = {
+        **fat,
+        "workflow_definition_snapshot_json": "",
+        "node_code_pins": node_code_pins_from_job_snapshot(fat),
+    }
+    if gated:
+        with job_db.connect() as conn:
+            conn.execute(
+                "insert into materials(id, workspace_id, content_hash, filename, content_type,"
+                " size_bytes, storage_key, status, created_by, object_etag)"
+                " values ('mat-gated', %s, '', 'g.txt', 'text/plain', 1,"
+                " 'x/v2g0/m_mat-gated/g.txt', 'ready', 'user-1', 'etag-1')",
+                (ws["id"],),
+            )
+            conn.execute(
+                "update jobs set input_json=%s where id=%s",
+                (json.dumps({"type": "material", "material_id": "mat-gated"}), job["id"]),
+            )
+    return job_db, ws, job
+
+
+def _try_claim(
+    worker: MagicMock, job_db: JobQueries, ws: dict, job: dict, node: WorkflowNode, tmp_path: Path
+) -> bool:
+    return try_claim_code_worker_node(
+        worker,
+        job_db.get_workspace(ws["id"]),
+        job,
+        node,
+        tmp_path,
+        tmp_path / "claim.log",
+        (),
+        "test",
+    )
+
+
+def test_etag_gated_job_stays_off_broker_without_v6_worker(tmp_path: Path) -> None:
+    """v5-only fleet: the gate-hit job is NOT enqueued (no stock, no wedged
+    queue entry) — False hands it to the local pool / parks it pending; the
+    deferral raises a once-per-job ops alert."""
+    node = _local_node("fetch")
+    job_db, ws, job = _etag_gate_job(tmp_path, node, gated=True)
+    dispatch = _etag_probe_dispatch(etag_capable=False)
+    worker = _etag_probe_worker(dispatch, job_db, tmp_path)
+
+    handled = _try_claim(worker, job_db, ws, job, node, tmp_path)
+
+    assert handled is False
+    dispatch.try_mark_in_flight.assert_not_called()
+    dispatch.enqueue.assert_not_called()
+    assert str(job["id"]) in worker.state.etag_gate_alerted
+    # The predicate is re-read live: unbind the etag and the next pass ships it.
+    with job_db.connect() as conn:
+        conn.execute("update materials set object_etag='' where id='mat-gated'")
+    handled = _try_claim(worker, job_db, ws, job, node, tmp_path)
+    assert handled is True
+    assert dispatch.enqueue.called
+
+
+def test_etag_gated_job_enqueues_with_v6_worker(tmp_path: Path) -> None:
+    """v6 in fleet: the gate-hit job enqueues normally — a v6 Worker claims it
+    (the live gate predicate is never consulted on this path)."""
+    node = _local_node("fetch")
+    job_db, ws, job = _etag_gate_job(tmp_path, node, gated=True)
+    dispatch = _etag_probe_dispatch(etag_capable=True)
+    worker = _etag_probe_worker(dispatch, job_db, tmp_path)
+
+    assert _try_claim(worker, job_db, ws, job, node, tmp_path) is True
+    assert dispatch.enqueue.called
+    assert worker.state.etag_gate_alerted == set()
+
+
+def test_non_gated_job_enqueues_without_v6_worker(tmp_path: Path) -> None:
+    """v5-only fleet: a job that does NOT hit the gate predicate is unaffected
+    — pre-v6 Workers claim it as before."""
+    node = _local_node("fetch")
+    job_db, ws, job = _etag_gate_job(tmp_path, node, gated=False)
+    dispatch = _etag_probe_dispatch(etag_capable=False)
+    worker = _etag_probe_worker(dispatch, job_db, tmp_path)
+
+    assert _try_claim(worker, job_db, ws, job, node, tmp_path) is True
+    assert dispatch.enqueue.called
+    assert worker.state.etag_gate_alerted == set()

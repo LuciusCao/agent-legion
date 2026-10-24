@@ -32,6 +32,7 @@ from server.app.services.node_execution_config import (
 )
 from server.app.services.vault import VaultError, VaultService
 from server.app.workflow_worker.agent_claim import cached_run_payload, fail_node_config
+from server.app.workflow_worker.code_dispatch import etag_gate_blocks_remote_enqueue
 from server.app.workflows.definition import WorkflowNode
 
 if TYPE_CHECKING:
@@ -92,6 +93,11 @@ def try_claim_code_worker_node(
         # queued-timeout fallback, batch-2 decision 3).
         return True
     if not dispatch.online_code_worker_available(node.capability, workspace_id):
+        return False
+    # #1320 (A4): a job whose material inputs hit the v6 ETag gate predicate is
+    # unclaimable by a pre-v6 fleet — hold it off the broker queue when no
+    # online >= v6 code Worker exists (semantics in code_dispatch.etag_gate_blocks_remote_enqueue).
+    if etag_gate_blocks_remote_enqueue(worker, workspace_id, job_id, node.key):
         return False
     if not worker.code_stock.allows():
         # Code stockpile full (issue #125): leave the node pending for the

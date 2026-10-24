@@ -6,10 +6,16 @@ currently published workspace version (EXEC-CODE-002 — since #115 ordinary
 jobs no longer honor the frozen
 intake/snapshot pins, only quality-replay batches do), and a node without
 any published code fails fast as a configuration error.
+
+Also hosts the #1320 (A4) enqueue-admission decision: a job whose material
+inputs hit the v6 ETag gate predicate is unclaimable by a pre-v6 fleet, so
+against a fleet with no online >= v6 code Worker it must not be shipped to
+the broker at all.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from server.app.services.node_code_pins import frozen_dispatch_pin
@@ -19,6 +25,8 @@ from server.app.services.node_codes import node_code_publish_generation
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
     from server.app.workflows.definition import WorkflowNode
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_code_node_dispatch(
@@ -62,3 +70,37 @@ def resolve_code_node_dispatch(
             "(workspace version, EXEC-CODE-002)"
         )
     return node_code
+
+
+def etag_gate_blocks_remote_enqueue(
+    worker: WorkflowWorkerThread, workspace_id: str, job_id: str, node_key: str
+) -> bool:
+    """#1320 (A4): True = hold this node off the broker queue.
+
+    A job hitting the material ETag gate predicate
+    (``jobs/queries/material_claim_gate.py``) is unclaimable by a pre-v6
+    fleet — claim admission skips it forever, so enqueueing it against a
+    fleet with no online >= v6 code Worker would park it in queued with no
+    exit while occupying global code stock. The caller falls back to the
+    local pool instead (Host-side materialization verifies the ETag itself,
+    design §6.4.1); in pure-remote shape (code_capacity=0) the node stays
+    pending for the next pass without touching the stock, until a v6 Worker
+    comes online. The fleet probe is TTL-cached; the gate predicate is read
+    live only when the probe reports no v6 Worker (etag lands at complete,
+    possibly after the job was created), so mixed/v6 fleets never pay the
+    query. The first deferral per job raises a WARNING — the ops alert to
+    upgrade the fleet (docs/remote-execution-runbook.md §5).
+    """
+    dispatch = worker.code_dispatch
+    if dispatch is None or dispatch.online_etag_capable_code_worker_available(workspace_id):
+        return False
+    if not worker.job_db.job_material_inputs_require_etag_protocol(workspace_id, job_id):
+        return False
+    if job_id not in worker.state.etag_gate_alerted:
+        worker.state.etag_gate_alerted.add(job_id)
+        logger.warning(
+            "job %s node %s needs a >= v6 code Worker (material ETag gate); none online — held for local execution / pending; upgrade the fleet (docs/remote-execution-runbook.md)",
+            job_id,
+            node_key,
+        )
+    return True

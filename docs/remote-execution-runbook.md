@@ -203,6 +203,21 @@ mixed-fleet compatibility and upgrade order.
   Workers keep claiming everything EXCEPT etag-gated material jobs — those
   queue until the fleet upgrades; no manual drain needed.
 
+  **v5-only fleets and the material ETag gate (#1320).** A gate-hit job is
+  unclaimable by pre-v6 Workers, so the Host's enqueue path checks the fleet
+  BEFORE shipping it: with no online ≥ v6 code Worker for the workspace, a
+  gate-hit node is not enqueued at all — it falls back to the Host's local
+  code pool (Host-side materialization verifies the ETag itself), and in
+  pure-remote shape (`code_capacity=0`) it stays pending, occupying no code
+  stock, until a v6 Worker appears. Requests already queued when the last
+  v6 Worker went away are excluded from the code-stock count, so the
+  unclaimable backlog cannot starve claimable requests. Each deferred job
+  raises a once-per-job-per-process WARNING on the Host log
+  (`needs a >= v6 code Worker (material ETag gate); none online`): on a
+  v5-only fleet that alert means upgrade any code Worker to worker-v0.8.0+
+  (the queue drains automatically afterwards), or keep the Host's local
+  `code_capacity` > 0 as the outlet.
+
   Two things decide whether a mixed fleet works, and the protocol number is
   only one of them. The first is the Worker-side handshake
   (`worker/host/client.py`): a v3+ Worker refuses to start unless the
