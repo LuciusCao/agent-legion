@@ -20,8 +20,8 @@ batch-pause、batch-resume、batch-upgrade-workflow、package、clear-packed）�
   job/failure 不会混入。jobs 上界为 `(created_at,id)`，failure 上界为
   `(finished_at,node_run_id)`。failure freeze 是 entry-sided：已在冻结集内的 job 若其
   latest failed run 在 freeze 后被新 run 取代，会从后续未消费页消失且不产生 verdict 行
-  （drop-out）。`finished_at` 的 NULL 臂目前纯属防御：五个写者均绑定非空值（lease
-  路径三个写者使用应用侧时间戳），未来写者不得引入 NULL 而静默破坏 freeze 语义。
+  （drop-out）。`finished_at` 的 NULL 臂目前纯属防御：现有写者均绑定非空值（部分经
+  应用侧时间戳），未来写者不得引入 NULL 而静默破坏 freeze 语义。
 - `len(ids) ≤ BATCH_OPS_ASYNC_THRESHOLD`（默认 1000，env
   `AGENT_LEGION_BATCH_OPS_ASYNC_THRESHOLD` 覆盖、重启生效；与 #1157 phase0/phase3 的
   1000 对齐）：走既有同步路径，200 + 原响应体，行为不变。
@@ -82,8 +82,8 @@ RunBatchFeeder 模式：SKIP LOCKED 认领（停滞 600s 回收）、每 tick �
   failure 与不可变属性 filter 的冻结流在崩溃窗内只缩不胀，位置左移保证保留的 job 不重执行，
   代价是消失项及被左移覆盖的项可能静默跳过（每个消失 job 至多一次），形成用户可重触发的
   漏跑。可变属性 filter（status/paused/packed/active_node_key/workflow_version）下，freeze 前
-  已存在的 job 可能翻入 filter；若其 keyset 位置落在重取页内，页会胀、位置右移，至多让边界
-  一个 job 重执行一次。两类后果均为幂等级漏跑/重跑而非数据损坏。未来可用 `(seq, job_id)`
+  已存在的 job 可能翻入 filter；若其 keyset 位置落在重取页内，页会胀、位置右移，每个翻入项
+  至多让边界一个 job 重执行一次。两类后果均为幂等级漏跑/重跑而非数据损坏。未来可用 `(seq, job_id)`
   对校验替代纯位置映射，收紧该窗口。
 - **逐 job 执行 = 调同步路径的同一批 service 入口**（`batch_rerun` /
   `batch_delete` / `batch_run_to` / `batch_pause` / `batch_resume` / `batch_upgrade` /
