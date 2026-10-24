@@ -29,7 +29,6 @@ from server.app.services.job_errors import (
 )
 from server.app.services.job_log_raw import PayloadTooLargeError
 from server.app.services.job_operation_error import JobOperationError
-from server.app.services.job_selection_resolver import BatchSelectionTooLargeError
 from server.app.services.material_bundles import BundleInUseError
 from server.app.services.materials import (
     MaterialInUseError,
@@ -126,10 +125,6 @@ def _build_app() -> FastAPI:
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @app.get("/batch-too-large")
-    def batch_too_large() -> None:
-        raise BatchSelectionTooLargeError(1000)
-
     return app
 
 
@@ -170,14 +165,7 @@ def test_unmapped_subclass_propagates_unchanged():
         strict.get("/handler/skill_git")
 
 
-def test_batch_selection_handler_unaffected(client):
-    resp = client.get("/batch-too-large")
-    assert resp.status_code == 422
-    assert resp.json()["detail"]["code"] == BatchSelectionTooLargeError(1000).code
-
-
 def test_register_installs_job_service_error_handler():
     app = FastAPI()
     register_job_http_exception_handlers(app)
     assert JobServiceError in app.exception_handlers
-    assert BatchSelectionTooLargeError in app.exception_handlers

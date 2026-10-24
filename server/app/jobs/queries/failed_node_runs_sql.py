@@ -14,6 +14,34 @@ from typing import Any
 FailedRunCursor = tuple[datetime | None, int]
 
 
+def failed_run_cursor_clause(cursor: str, operator: str) -> tuple[str, list[Any]]:
+    """SQL predicate for a serialized distinct-job failure cursor."""
+    finished_at, run_id = cursor.rsplit("|", 1)
+    if finished_at:
+        return (
+            f"(finished_at is null or (finished_at, node_run_id) {operator} (%s, %s))",
+            [finished_at, int(run_id)],
+        )
+    return f"finished_at is null and node_run_id {operator} %s", [int(run_id)]
+
+
+def failed_job_page_cursor_sql(
+    freeze_at: str | None, before: str | None, params: list[Any]
+) -> tuple[str, str]:
+    """Freeze applies before per-job dedup; before applies after it."""
+    freeze_sql = ""
+    before_sql = ""
+    if freeze_at is not None:
+        clause, values = failed_run_cursor_clause(freeze_at, "<=")
+        freeze_sql = f" where {clause}"
+        params.extend(values)
+    if before is not None:
+        clause, values = failed_run_cursor_clause(before, "<")
+        before_sql = f" where {clause}"
+        params.extend(values)
+    return freeze_sql, before_sql
+
+
 def latest_failed_runs_sql(
     workspace_id: str,
     *,

@@ -12,10 +12,13 @@ batch-pause、batch-resume、batch-upgrade-workflow、package、clear-packed）�
 
 ## 1. 请求契约
 
-- 选择解析（显式 `job_ids` / `filter` / `exclude_ids`，rerun-by-failure 的「全部匹配
-  失败」空选择）**始终留在请求线程**：`resolve_batch_selection` /
-  `resolve_failure_rerun_scope` 的既有 fail-fast 语义（超限 422、空选择 400/空结果）
-  跨模式逐字一致。冻结后的 id 列表入 `target_spec_json`，feeder 永不回读 live filter。
+- 显式 `job_ids` 仍是请求线程的直通选择；`filter` / `exclude_ids` 与 rerun-by-failure
+  的「全部匹配失败」空选择只先读取至多阈值+1 个 id 来决定同步/异步，不再有单请求
+  选择数上限或 `batch_selection_too_large` 422。空选择 400/空结果语义不变。
+- 大 filter/failure 选择的 `target_spec_json` 冻结原始筛选参数、keyset 上界与有界首
+  buffer，不冻结全量 id。feeder 后续按游标增量补页；受理后晚到、排序在上界之前的
+  job/failure 不会混入。jobs 上界为 `(created_at,id)`，failure 上界为
+  `(finished_at,node_run_id)`。
 - `len(ids) ≤ BATCH_OPS_ASYNC_THRESHOLD`（默认 1000，env
   `AGENT_LEGION_BATCH_OPS_ASYNC_THRESHOLD` 覆盖、重启生效；与 #1157 phase0/phase3 的
   1000 对齐）：走既有同步路径，200 + 原响应体，行为不变。
@@ -37,8 +40,8 @@ job_batch_operations(
   kind text check(kind in ('rerun','rerun_by_failure','delete','run_to',
                            'pause','resume','upgrade_workflow','package','clear_packed')),
   status 状态机（与 run_batches 同形：pending/running/paused/completed/failed/cancelled),
-  target_spec_json,   -- 冻结的归一化 job_ids + kind 参数
-  next_index, items_total,
+  target_spec_json,   -- 显式 id；或有界 buffer + filter/failure + freeze/next cursor
+  next_index, items_total,  -- 流式选择的 total 是已发现数，随补页增长，终态精确
   succeeded_count/skipped_count/failed_count,  -- 每次推进按结果子表重算（自愈）
   output_json,        -- kind 级终态产物（package）
   chunk_errors_json（至多 20 条）, error_message, created_by, 时间戳
@@ -65,9 +68,13 @@ RunBatchFeeder 模式：SKIP LOCKED 认领（停滞 600s 回收）、每 tick �
 
 与 runs feeder 的关键差异：
 
+- **流式补页**：首 buffer 至多阈值+1 条，后续每 tick 至多 200 条；水位闸在补页之前，
+  背压时不继续扩大选择。补页后的 target spec、已发现 `items_total`、结果计数和
+  `next_index` 由同一个 pause-wins CAS 推进，feeder 不再每 chunk 解析全量 id JSON。
 - **重放护栏**：rerun/package 等变更天然不幂等（无 dedup 探测可吸收重走），所以
   结果按 chunk 先于游标落子表，chunk 起步先探 `done_seqs`、已记录 seq 绝不重执行；
-  `(op_id, seq)` 的 ON CONFLICT 是最终兜底。残留窗口 = 单条语句级别的「变更已提交、
+  `(op_id, seq)` 的 ON CONFLICT 是最终兜底。崩溃发生在结果写入与 CAS 之间时，旧
+  target spec/cursor 重取同页，done seq 只补簿记。残留窗口 = 单条语句级别的「变更已提交、
   结果行未落」（intake 消费者 committed-jobs-stay 同款接受度）。
 - **逐 job 执行 = 调同步路径的同一批 service 入口**（`batch_rerun` /
   `batch_delete` / `batch_run_to` / `batch_pause` / `batch_resume` / `batch_upgrade` /
@@ -87,9 +94,10 @@ RunBatchFeeder 模式：SKIP LOCKED 认领（停滞 600s 回收）、每 tick �
 
 ## 4. 边界与非目标
 
-- `MAX_BATCH_JOBS`（默认 20000，env 可配，#1348）**保留不动**：异步化后它不再保护
-  线程池槽位，但仍是请求体大小与「一键全 workspace 误操作」blast radius 的产品级
-  护栏；超限仍 422（任何写入前拒绝）。取消它属产品决策，不在本期。
+- 单请求选择上限与 `batch_selection_too_large` 已退役（#1362）；
+  `AGENT_LEGION_MAX_BATCH_JOBS` 在 0.8.2 仅打 deprecation warning、不再影响行为。
+  在途执行负载由 backlog 水位约束；任务中心的 pause/cancel 仍是状态机预留，尚无公开
+  控制端点，不把「可取消」当作当前已交付的护栏。
 - 前端进度呈现（轮询 + 结果汇总替换一次性 toast）是独立的 UI 变更切片，按 0.8.1 的
   原型先行纪律走用户验收；后端合并不依赖它，但 >1000 选择的 UI 消费需前端跟进
   （202 句柄的轮询接线）。

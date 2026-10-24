@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.services import job_selection_resolver
+from server.app.services.job_failure_selection import resolve_failed_job_ids_page
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_rerun.by_failure_results import (
     assemble_rerun_targets,
@@ -32,7 +32,7 @@ from server.app.services.job_rerun.preview_checks import (
     resolve_rerun_node_from_nodes,
 )
 from server.app.services.job_rerun.single import commit_rerun_result
-from server.app.services.job_selection_resolver import ensure_batch_size, resolve_batch_selection
+from server.app.services.job_selection_resolver import resolve_batch_selection
 from server.app.workflows.workflow_consumption import dependency_downstream
 
 if TYPE_CHECKING:
@@ -159,26 +159,20 @@ def resolve_failure_rerun_scope(
     job_filter: JobListFilter | None = None,
     exclude_ids: Collection[str] = (),
 ) -> tuple[list[str], list[str]]:
-    """Resolve (requested, scope): the stripped explicit/filter selection, and
-    the target id list (``requested``, or every job with a matching failure —
-    capped — when the selection is empty).
-
-    Shared by ``rerun_by_failure_category`` (sync path) and the #946 async
-    dispatch (the route freezes ``scope`` into the operation's target spec),
-    so both modes resolve identically.
-    """
+    """Resolve explicit/filter ids, or every matching failure when empty."""
     ids = resolve_batch_selection(job_db, workspace_id, job_ids, job_filter, exclude_ids)
     requested = [value.strip() for value in ids if value.strip()]
     if requested:
         return requested, requested
-    # An empty selection means "every job with a matching failure": cap it
-    # the same way as filter selections (#712 / #917 B-2) with a LIMITed
-    # distinct-job query, before any failed-run rows are materialized.
-    scope = job_db.list_failed_job_ids(
-        workspace_id, category=category, limit=job_selection_resolver.MAX_BATCH_JOBS + 1
-    )
-    ensure_batch_size(len(scope))
-    return requested, scope
+    scope: list[str] = []
+    cursor: str | None = None
+    while True:
+        page, cursor, _ = resolve_failed_job_ids_page(
+            job_db, workspace_id, category, 1000, cursor=cursor
+        )
+        scope.extend(page)
+        if cursor is None:
+            return requested, scope
 
 
 def rerun_by_failure_category(

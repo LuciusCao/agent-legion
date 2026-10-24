@@ -8,38 +8,35 @@ pause / resume / upgrade-workflow / package / clear-packed and the batch
 removal) execute synchronously for small selections (unchanged fast path,
 byte-identical responses) and enqueue a background task for selections above
 ``BATCH_OPS_ASYNC_THRESHOLD``: the request persists one
-``job_batch_operations`` row (schema v101) with the frozen, normalized target
-ids + kind params and returns 202 with the handle; the in-process feeder
+``job_batch_operations`` row (schema v101) with the frozen target spec and
+returns 202 with the handle; the in-process feeder
 (``job_batch_operations.feeder``) walks the cursor, executing each job
 through the SAME per-job service functions the sync path calls, so per-job
 result semantics (succeeded/skipped/failed + reason_code) and the
 write-time guard discipline (EXEC-GENERATION-002 surfaces) are preserved by
 construction.
 
-Selection resolution stays in the request thread (one keyset scan, the
-existing ``resolve_batch_selection`` — MAX_BATCH_JOBS still caps it, see the
-module docstring in ``job_selection_resolver``); only the per-job mutation
-loop moves to the feeder. The frozen id list means the feeder never
-re-resolves against live filters.
+Explicit ids freeze in full. Filter and unrestricted-failure selections read
+at most threshold+1 ids to choose the sync/async path; larger ones freeze the
+filter and a keyset upper bound, then the feeder resolves bounded buffers.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import uuid
 from collections.abc import Collection
 from typing import Any
 
 from server.app.db.rowmap import iso_optional
 from server.app.jobs import JobQueries
-from server.app.jobs.queries.job_batch_operations import (
-    JOB_BATCH_OPERATION_KINDS,
-    KINDS_DEDUP_SELECTION,
-)
+from server.app.jobs.queries.job_batch_operations import JOB_BATCH_OPERATION_KINDS
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.services.job_rerun.batch import resolve_failure_rerun_scope
-from server.app.services.job_selection_resolver import resolve_batch_selection
+from server.app.services.job_batch_operations.selection import (
+    prepare_batch_selection,
+    prepare_failure_selection,
+    submit_operation,
+)
 
 # The kind vocabulary is canonical in the queries layer (next to the DDL);
 # services only re-export it for route typing.
@@ -78,50 +75,6 @@ def should_enqueue(selection_size: int) -> bool:
     return selection_size > BATCH_OPS_ASYNC_THRESHOLD
 
 
-def submit_operation(
-    job_db: JobQueries,
-    workspace_id: str,
-    kind: str,
-    ids: list[str],
-    params: dict[str, Any],
-    created_by: str,
-    *,
-    retry_of: str | None = None,
-) -> dict[str, Any]:
-    """Persist one accepted operation row; returns the stored row (the handle).
-
-    ``retry_of`` (#1358) records the source op of a retry-failed requeue in
-    the frozen spec — provenance only; the feeder ignores the extra key and
-    the public handle never exposes target_spec.
-    """
-    if kind not in JOB_BATCH_OPERATION_KINDS:
-        raise ValueError(f"unknown batch operation kind: {kind!r}")
-    frozen = _freeze_ids(kind, ids)
-    target_spec: dict[str, Any] = {"job_ids": frozen, "params": params}
-    if retry_of is not None:
-        target_spec["retry_of"] = retry_of
-    op_id = uuid.uuid4().hex
-    job_db.create_job_batch_operation(
-        op_id,
-        workspace_id,
-        kind,
-        target_spec,
-        len(frozen),
-        created_by,
-    )
-    row = job_db.get_job_batch_operation(op_id)
-    if row is None:
-        raise RuntimeError("job batch operation row missing right after its write")
-    return row
-
-
-def _freeze_ids(kind: str, ids: list[str]) -> list[str]:
-    """Freeze the selection the way the kind's sync loop would consume it."""
-    if kind in KINDS_DEDUP_SELECTION:
-        return list(dict.fromkeys(value.strip() for value in ids if value.strip()))
-    return list(ids)
-
-
 def submit_operation_if_large(
     job_db: JobQueries,
     workspace_id: str,
@@ -136,6 +89,20 @@ def submit_operation_if_large(
     return submit_operation(job_db, workspace_id, kind, ids, params, created_by)
 
 
+def _submit_dispatched(
+    job_db: JobQueries,
+    workspace_id: str,
+    kind: str,
+    ids: list[str],
+    params: dict[str, Any],
+    created_by: str,
+    stream: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if stream is not None:
+        return submit_operation(job_db, workspace_id, kind, ids, params, created_by, stream=stream)
+    return submit_operation_if_large(job_db, workspace_id, kind, ids, params, created_by)
+
+
 def dispatch_batch_selection(
     job_db: JobQueries,
     workspace_id: str,
@@ -146,16 +113,16 @@ def dispatch_batch_selection(
     params: dict[str, Any],
     created_by: str,
 ) -> tuple[list[str], dict[str, Any] | None]:
-    """Resolve the selection, then dispatch: (ids, operation row | None).
-
-    Shared by every async-capable batch endpoint: resolution (with its
-    fail-fast 422/empty-selection semantics) always runs in the request
-    thread; the operation row exists only above the threshold. The sync
-    branch consumes ``ids`` as explicit job ids — resolution of an explicit
-    list is a passthrough, so the per-job outcomes are unchanged.
-    """
-    ids = resolve_batch_selection(job_db, workspace_id, job_ids, job_filter, exclude_ids)
-    operation = submit_operation_if_large(job_db, workspace_id, kind, ids, params, created_by)
+    """Resolve a bounded prefix, then choose the sync or async path."""
+    ids, stream = prepare_batch_selection(
+        job_db,
+        workspace_id,
+        job_ids,
+        job_filter,
+        exclude_ids,
+        BATCH_OPS_ASYNC_THRESHOLD,
+    )
+    operation = _submit_dispatched(job_db, workspace_id, kind, ids, params, created_by, stream)
     return ids, operation
 
 
@@ -171,23 +138,21 @@ def dispatch_rerun_by_failure(
     exclude_ids: Collection[str],
     created_by: str,
 ) -> tuple[list[str], dict[str, Any] | None]:
-    """rerun-by-failure's dispatch: the scope resolution (explicit ids /
-    filter / every matching failure) is shared with the sync service
-    (``job_rerun.batch.resolve_failure_rerun_scope``) so both modes freeze
-    the same target set.
-    """
-    _requested, scope = resolve_failure_rerun_scope(
-        job_db, workspace_id, category, job_ids, job_filter, exclude_ids
-    )
-    operation = submit_operation_if_large(
+    """Dispatch explicit/filter ids, or stream every matching failure."""
+    ids, stream = prepare_failure_selection(
         job_db,
         workspace_id,
-        "rerun_by_failure",
-        scope,
-        {"category": category, "strategy": strategy, "from_node_key": from_node_key},
-        created_by,
+        category,
+        job_ids,
+        job_filter,
+        exclude_ids,
+        BATCH_OPS_ASYNC_THRESHOLD,
     )
-    return scope, operation
+    params = {"category": category, "strategy": strategy, "from_node_key": from_node_key}
+    operation = _submit_dispatched(
+        job_db, workspace_id, "rerun_by_failure", ids, params, created_by, stream
+    )
+    return ids, operation
 
 
 def operation_record(

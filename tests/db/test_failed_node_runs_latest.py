@@ -135,9 +135,25 @@ def test_anti_join_matches_retired_window_query(
 def test_failed_job_ids_match_window_query(job_db: JobQueries) -> None:
     _seed_random_runs(job_db, seed=11)
     expected = {str(row["job_id"]) for row in _oracle(job_db, "ws-a", category="technical")}
-    actual = job_db.list_failed_job_ids("ws-a", category="technical", limit=1000)
-    assert sorted(actual) == sorted(expected)
-    assert len(job_db.list_failed_job_ids("ws-a", category="technical", limit=2)) == 2
+    actual = job_db.list_failed_job_ids_page("ws-a", category="technical", limit=1000)
+    assert sorted(str(row["job_id"]) for row in actual) == sorted(expected)
+    assert len(job_db.list_failed_job_ids_page("ws-a", category="technical", limit=2)) == 2
+
+
+def test_failed_job_id_pages_are_deterministic_and_unique(job_db: JobQueries) -> None:
+    _seed_random_runs(job_db, seed=11)
+    expected = job_db.list_failed_job_ids_page("ws-a", category="technical", limit=1000)
+    collected: list[str] = []
+    cursor: str | None = None
+    for _ in range(len(expected) + 1):
+        page = job_db.list_failed_job_ids_page("ws-a", category="technical", limit=2, before=cursor)
+        collected.extend(str(row["job_id"]) for row in page)
+        if len(page) < 2:
+            break
+        last = page[-1]
+        cursor = f"{last['finished_at'] or ''}|{last['node_run_id']}"
+    assert collected == [str(row["job_id"]) for row in expected]
+    assert len(collected) == len(set(collected))
 
 
 @pytest.mark.parametrize("page_size", [1, 3, 7])
