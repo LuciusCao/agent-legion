@@ -10,7 +10,9 @@ server/app/services/s3_jobs_gc.py；材料根前缀（bucket 根排除两个 job
 的扫描、删除门禁与删除批见 server/app/services/s3_material_gc.py（#1314）：
 单次使用 key 文法（#1279）的材料孤儿在对象年龄过 max(--grace-hours,
 材料下限 1h) 后进入 --apply 删除批、删除前逐批新鲜反查；旧文法（可复用
-key）材料孤儿只报告不删除。承重墙是写端「行先于对象」协议（presign 先建
+key）材料孤儿只报告不删除。撞名 jobs-staging/ 前缀下的材料形态 key 按
+--grace-hours（而非 --staging-grace-hours）宽限窗分流判定（#1322）——
+staging 窗更长时窗内的撞名材料孤儿不再延迟回收。承重墙是写端「行先于对象」协议（presign 先建
 行后签 URL；inline 与 demo seed 先落 uploading intent 行再 PUT）。
 DB 侧对照 job_artifacts ∪ materials（须能连上本 worktree 的 Postgres）。
 

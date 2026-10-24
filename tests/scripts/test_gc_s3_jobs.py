@@ -334,3 +334,45 @@ def test_material_orphans_delete_batch_gates_end_to_end(tmp_path: Path, apply: b
     )
     assert "已删除 4 个孤儿对象（其中材料 2 个）" in result.stdout
     assert "反查救下 1 个对象" in result.stdout
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_longer_staging_window_does_not_delay_collided_material_orphans(
+    tmp_path: Path, apply: bool
+):
+    """#1322（#1318 codex r1 P2）的 CLI 端到端钉：--staging-grace-hours 168
+    大于 --grace-hours 24 时，48h 的撞名 jobs-staging/ 前缀 v2g 材料孤儿
+    进材料删除批（不再被 staging 截止点吞掉延迟回收）；同龄的真 staging
+    对象仍在窗内不报；未满材料窗（12h）的撞名材料 key 不进候选。"""
+    now = time.time()
+    old = now - 48 * _HOUR
+    v2g_key = f"jobs-staging/{'b' * 64}/v2g0/{_MID}/doc.txt"
+    objects = [
+        [v2g_key, old, 10],  # 撞名、单次使用、48h → 材料道删
+        ["jobs-staging/ws1/j1/e1/staging.bin", old, 10],  # 真 staging，窗内 → 不报
+        [f"jobs-staging/{'c' * 64}/v2g1/{_MID}/new.txt", now - 12 * _HOUR, 10],  # 窗内 → 不进候选
+    ]
+    pystub = _make_pystub(tmp_path, _STORAGE_PROBE_CONFIGURED)
+
+    result, log = _run(
+        tmp_path,
+        pystub,
+        "--grace-hours",
+        "24",
+        "--staging-grace-hours",
+        "168",
+        *(["--apply"] if apply else []),
+        env_extra={
+            "STUB_OBJECTS_JSON": json.dumps(objects),
+            "STUB_REVALIDATE_KNOWN_JSON": "[]",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "jobs-staging/ 孤儿 0 个" in result.stdout
+    assert "材料孤儿 1 个（10 字节）进删除批" in result.stdout
+    if not apply:
+        assert _deleted(log) == []
+        return
+    assert _deleted(log) == [v2g_key]
+    assert "已删除 1 个孤儿对象（其中材料 1 个）" in result.stdout
