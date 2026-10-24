@@ -217,6 +217,46 @@ describe('hasStructuralYamlChanges', () => {
     ).toBe(true)
   })
 
+  it('#1353：纯 code 节点 workflow 改顶层 execution.runtime 非结构改动（后端默认只合并进 agent 节点）', () => {
+    const base = `key: ws1
+execution:
+  runtime: velites
+nodes:
+  _start:
+    type: start
+  intake:
+    type: code
+    capability: intake
+    after: [_start]
+`
+    expect(
+      hasStructuralYamlChanges(
+        base,
+        base.replace('runtime: velites', 'runtime: pi')
+      )
+    ).toBe(false)
+  })
+
+  it('#1353：agent 节点继承顶层 runtime 默认，顶层变化仍是结构改动', () => {
+    const base = `key: ws1
+execution:
+  runtime: velites
+nodes:
+  _start:
+    type: start
+  write_script:
+    type: agent
+    capability: write_script
+    after: [_start]
+`
+    expect(
+      hasStructuralYamlChanges(
+        base,
+        base.replace('runtime: velites', 'runtime: pi')
+      )
+    ).toBe(true)
+  })
+
   it('键序不同的同义 YAML 不误判', () => {
     const reordered = `label: demo
 key: ws1

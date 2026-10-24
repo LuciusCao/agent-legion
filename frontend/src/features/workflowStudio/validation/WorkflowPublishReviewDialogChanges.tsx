@@ -1,8 +1,6 @@
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
-import {
-  hasStructuralChanges,
-  isRuntimeOnlyNodeChange,
-} from './workflowStudioChanges'
+import { hasStructuralChanges } from './workflowStudioChanges'
+import { structuralNodeChangeGroups } from './workflowStudioStructuralFilter'
 import { WorkflowPublishReviewDialogRuntimeNote } from './WorkflowPublishReviewDialogRuntimeNote'
 import {
   formatEdgeChange,
@@ -36,12 +34,7 @@ export function WorkflowPublishReviewDialogChanges({
   runtimeChangedKeys = [],
   runtimeSavedKeys = [],
 }: Props) {
-  const structuralNodeChanges = (summary?.nodeChanges ?? [])
-    .filter((change) => !isRuntimeOnlyNodeChange(change))
-    .map((change) => ({
-      ...change,
-      fields: change.fields.filter((field) => field !== 'execution'),
-    }))
+  const structuralNodeChanges = structuralNodeChangeGroups(summary)
   // 与发布门控同口径（hasStructuralChanges || riskFlags，M48；结构徽标计数
   // 仍用上方剥离了 execution 字段的 structuralNodeChanges）。
   const hasChanges =

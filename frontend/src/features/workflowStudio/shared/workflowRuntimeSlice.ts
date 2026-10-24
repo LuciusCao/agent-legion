@@ -216,7 +216,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /** 结构载荷：剥掉 runtime 切片后的定义——镜像后端 structural_payload
  * （节点 execution 折成 profile_runtime = 节点值 || 顶层默认；tools /
- * requires_labels / 顶层 execution 整块移除）。 */
+ * requires_labels / 顶层 execution 整块移除）。顶层默认只折进 agent 节点
+ * ——后端 merge_execution_defaults 对 code/start/approval 节点不合并
+ * runtime 默认（#1353：纯 code 节点 workflow 改顶层 execution.runtime
+ * 在后端是非结构变更，前端不得判保守）。 */
 function structuralPayload(rawYaml: string): unknown {
   const doc = parseWorkflowYaml(rawYaml) as YamlWithTopExecution
   const topRuntime = asConfigValue(doc.execution?.runtime)
@@ -224,7 +227,9 @@ function structuralPayload(rawYaml: string): unknown {
     nodes?: Record<string, WorkflowYamlNode & { profile_runtime?: string }>
   }
   for (const node of Object.values(payload.nodes ?? {})) {
-    node.profile_runtime = asConfigValue(node.execution?.runtime) || topRuntime
+    node.profile_runtime =
+      asConfigValue(node.execution?.runtime) ||
+      (node.type === 'agent' ? topRuntime : '')
     delete node.execution
     delete node.tools
     delete node.requires_labels
