@@ -51,6 +51,8 @@ const browserTestFiles = [
   'src/features/workflowStudio/shared/useWorkflowDraftPersistence.flush.test.ts',
   'src/features/workflowStudio/shared/useWorkflowStudioActions.test.ts',
   'src/stores/agentsStore.test.ts',
+  // approvalActions.test.ts 经 testing/fixtures 链到 agentsStore 的 DOM 全局。
+  'src/stores/job/actions/approvalActions.test.ts',
 ]
 
 // Dev-server proxy noise filter: when the browser reloads / HMR restarts, the
