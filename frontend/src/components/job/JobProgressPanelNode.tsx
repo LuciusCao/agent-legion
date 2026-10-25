@@ -84,7 +84,8 @@ export function JobProgressPanelNode({
   const executionType = resolveExecutionType(node)
   // #1180 UI 验收返工：agent 节点也显示类型 chip，词汇沿用 DAG badge 的
   // type 词汇；job 详情契约不带节点 runtime，无从附加。approval/start
-  // 节点不携带 capability，不显示 code chip。
+  // 节点投影 execution_type='code'，timeline 无 capability 守卫，仍显示
+  // 「代码」chip；DAG 侧的 #1365 守卫见 resolveDagExecutionType。
   const isAgentNode = executionType === 'agent'
   const executorLabel = isAgentNode
     ? 'agent'
