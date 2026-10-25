@@ -77,12 +77,12 @@ def node_executor_projection(
     definition: WorkflowDefinition,
     nodes: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    """node_key → executor_id / executor_kind / worker_id / agent_id for job detail.
+    """node_key → execution type and identities for job detail.
 
     P-0.5: non-Agent nodes always run on the implicit code pool; agent-ness
     follows the job snapshot's frozen execution kind (#935 R1, #1091 — the
     dispatch decision), falling back to the route projection only for job
-    nodes the snapshot does not declare.
+    nodes the snapshot does not declare. A route error has no execution type.
     """
     keys = [str(node["node_key"]) for node in nodes]
     worker_map = claimed_worker_map(connect_source, job_id)
@@ -95,13 +95,17 @@ def node_executor_projection(
             if snapshot_node is not None
             else key in agent_map
         )
+        route_error = route_errors.get(key)
         projection[key] = {
+            "execution_type": (
+                None if route_error is not None else "agent" if is_agent else "code"
+            ),
             "executor_id": None if is_agent else CODE_EXECUTOR_ID,
             "executor_kind": None if is_agent else "code",
             "worker_id": worker_map.get(key),
             "agent_id": agent_map.get(key),
             # #1128: dispatch's configuration error for a stale legacy route;
-            # executor_kind and agent_id are both None then (contract).
-            "route_error": route_errors.get(key),
+            # execution_type, executor_kind and agent_id are all None then.
+            "route_error": route_error,
         }
     return projection

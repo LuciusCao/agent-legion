@@ -68,6 +68,7 @@ const mockDetail = {
       label: '提取',
       status: 'completed',
       capability: 'extract',
+      execution_type: 'code',
       executor_id: 'code-default',
       executor_kind: 'code',
       after: [],
@@ -85,6 +86,7 @@ const mockDetail = {
       status: 'failed',
       capability: 'generate',
       // #1180/#731：agent 节点的真实投影形状（pi 词汇已退役）。
+      execution_type: 'agent',
       executor_id: null,
       executor_kind: null,
       agent_id: 'generate',
@@ -101,6 +103,7 @@ const mockDetail = {
       label: '审核',
       status: 'failed',
       capability: 'review',
+      execution_type: 'agent',
       executor_id: null,
       executor_kind: null,
       agent_id: 'review',

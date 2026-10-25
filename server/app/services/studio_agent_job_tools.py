@@ -130,6 +130,7 @@ class StudioAgentJobToolsService:
                 "error_message": str(node.get("error_message") or ""),
                 "inputs": [str(item) for item in node.get("inputs") or []],
                 "outputs": [str(item) for item in node.get("outputs") or []],
+                "execution_type": node.get("execution_type"),
                 "executor_kind": node.get("executor_kind"),
                 "agent_id": node.get("agent_id"),
                 "route_error": node.get("route_error"),

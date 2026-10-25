@@ -81,20 +81,38 @@ def _scoped_client(client, job_db, workspace_id: str | None = None):
     return scoped, admin_id
 
 
+def _studio_node_kwargs(**overrides):
+    return {
+        "node_key": "node-1",
+        "label": "Node 1",
+        "capability": "capability",
+        "status": "running",
+        "error_message": "",
+        "inputs": [],
+        "outputs": [],
+        "execution_type": None,
+        "executor_kind": None,
+        "agent_id": None,
+        **overrides,
+    }
+
+
 @pytest.mark.parametrize("retired", ["pi", "openclaw"])
 def test_studio_agent_job_node_rejects_retired_executor_kinds(retired: str) -> None:
     with pytest.raises(ValidationError):
-        StudioAgentJobNode(
-            node_key="node-1",
-            label="Node 1",
-            capability="capability",
-            status="running",
-            error_message="",
-            inputs=[],
-            outputs=[],
-            executor_kind=retired,
-            agent_id=None,
-        )
+        StudioAgentJobNode(**_studio_node_kwargs(executor_kind=retired))
+
+
+@pytest.mark.parametrize("execution_type", ["code", "agent", None])
+def test_studio_agent_job_node_accepts_execution_type(execution_type: str | None) -> None:
+    node = StudioAgentJobNode(**_studio_node_kwargs(execution_type=execution_type))
+    assert node.execution_type == execution_type
+
+
+@pytest.mark.parametrize("invalid", ["pi", "openclaw", "remote"])
+def test_studio_agent_job_node_rejects_unknown_execution_types(invalid: str) -> None:
+    with pytest.raises(ValidationError):
+        StudioAgentJobNode(**_studio_node_kwargs(execution_type=invalid))
 
 
 def _seed_workspace(job_db, workspace_id: str) -> None:
@@ -242,8 +260,13 @@ def test_get_job_detail_trims_payload_and_suggests_rerun(tools_client) -> None:
     assert "log_path" not in payload["runs"][0]
     assert payload["runs"][0]["id"] == run_id
     assert payload["runs"][0]["has_log"] is True
-    node = next(n for n in payload["nodes"] if n["node_key"] == "write_script")
+    nodes = {n["node_key"]: n for n in payload["nodes"]}
+    node = nodes["write_script"]
+    assert node["execution_type"] == "agent"
+    assert node["executor_kind"] is None
     assert node["error_message"] == "LLM timeout"
+    assert nodes["intake_knowledge_points"]["execution_type"] == "code"
+    assert nodes["intake_knowledge_points"]["executor_kind"] == "code"
     assert payload["suggested_actions"] == [
         {
             "action": "rerun_node",
@@ -520,6 +543,8 @@ def test_get_job_context_binds_session_workspace_and_focus(tools_client) -> None
     assert payload["workspace_id"] == "ws-ctx"
     assert payload["focus_node_key"] == "write_script"
     assert payload["job"]["job"]["id"] == "job-1"
+    assert payload["job"]["nodes"][0]["execution_type"] == "agent"
+    assert payload["job"]["nodes"][0]["executor_kind"] is None
     assert payload["job"]["suggested_actions"][0]["action"] == "rerun_node"
     assert payload["recent_failures"] == []
 

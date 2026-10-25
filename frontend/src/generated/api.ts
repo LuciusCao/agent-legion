@@ -5387,9 +5387,19 @@ export interface components {
       created_at: string
       /** Error Message */
       error_message: string
-      /** Executor Id */
+      /** Execution Type */
+      execution_type?: ('code' | 'agent') | null
+      /**
+       * Executor Id
+       * @deprecated
+       * @description Deprecated: use execution_type.
+       */
       executor_id?: string | null
-      /** Executor Kind */
+      /**
+       * Executor Kind
+       * @deprecated
+       * @description Deprecated: use execution_type.
+       */
       executor_kind?: 'code' | null
       /** Finished At */
       finished_at?: string | null
@@ -7597,7 +7607,13 @@ export interface components {
       capability: string
       /** Error Message */
       error_message: string
-      /** Executor Kind */
+      /** Execution Type */
+      execution_type: ('code' | 'agent') | null
+      /**
+       * Executor Kind
+       * @deprecated
+       * @description Deprecated: use execution_type.
+       */
       executor_kind: 'code' | null
       /** Inputs */
       inputs: string[]

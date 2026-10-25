@@ -68,7 +68,9 @@ def test_detail_classifies_nodes_by_snapshot_type_not_route_rows(query_service, 
     nodes = {node["node_key"]: node for node in query_service.detail(job["id"])["nodes"]}
 
     assert json.loads(snapshot)["nodes"]["turned_code"]["node_type"] == "code"
+    assert nodes["turned_code"]["execution_type"] == "code"
     assert nodes["turned_code"]["executor_kind"] == "code"
     assert nodes["turned_code"]["agent_id"] is None
+    assert nodes["inlined"]["execution_type"] == "agent"
     assert nodes["inlined"]["executor_kind"] is None
     assert nodes["inlined"]["agent_id"] == "inlined"

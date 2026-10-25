@@ -23,6 +23,7 @@ function makeNode(
     after: [],
     inputs: [],
     outputs: [],
+    execution_type: null,
     executor_id: null,
     executor_kind: null,
     ...overrides,
@@ -121,10 +122,9 @@ describe('toNodeCatalog', () => {
 
 describe('toDagNodes', () => {
   it('maps agent nodes to the agent execution type and keeps Worker identity separately', () => {
-    // #1180：agent 节点的契约投影是 executor_kind=None + agent_id 非空
-    // （job_node_agent_projection），类型徽标显示 agent。
     const nodes = toDagNodes([
       makeNode('generate', 'running', {
+        execution_type: 'agent',
         agent_id: 'key-info-generator',
         worker_id: 'worker-abc123',
       }),
@@ -139,6 +139,7 @@ describe('toDagNodes', () => {
     // executor_id 的 'code' 池键占位不再进入展示层（双「code」徽标的来源）。
     const nodes = toDagNodes([
       makeNode('generate', 'pending', {
+        execution_type: 'code',
         executor_kind: 'code',
         executor_id: 'code',
       }),
@@ -149,12 +150,28 @@ describe('toDagNodes', () => {
     expect(nodes[0].workerId).toBeNull()
   })
 
+  it('falls back to legacy fields only when execution_type is absent', () => {
+    const nodes = toDagNodes([
+      makeNode('legacy-code', 'pending', {
+        execution_type: undefined,
+        executor_kind: 'code',
+      }),
+      makeNode('legacy-agent', 'pending', {
+        execution_type: undefined,
+        agent_id: 'legacy-agent',
+      }),
+    ])
+
+    expect(nodes.map((node) => node.executionType)).toEqual(['code', 'agent'])
+  })
+
   it.each(['_start', 'review_gate'])(
     'renders no code execution type for non-dispatching node %s (#1365)',
     (nodeKey) => {
       const nodes = toDagNodes([
         makeNode(nodeKey, 'completed', {
           capability: '',
+          execution_type: 'code',
           executor_kind: 'code',
         }),
       ])
@@ -166,6 +183,7 @@ describe('toDagNodes', () => {
   it('carries capability so a self-contained agent execution badge can be deduplicated (#1366)', () => {
     const nodes = toDagNodes([
       makeNode('review_keywords', 'pending', {
+        execution_type: 'agent',
         agent_id: 'review_keywords',
       }),
     ])
@@ -174,9 +192,23 @@ describe('toDagNodes', () => {
     expect(nodes[0].agentId).toBe('review_keywords')
   })
 
-  it('renders no execution type when the projection carries neither kind nor agent', () => {
-    // route_error 节点（#1128）：executor_kind 与 agent_id 皆 None。
-    const nodes = toDagNodes([makeNode('generate', 'pending')])
+  it('renders no execution type for route_error even if legacy fields disagree', () => {
+    const nodes = toDagNodes([
+      makeNode('generate', 'pending', {
+        execution_type: null,
+        executor_kind: 'code',
+        agent_id: 'stale-agent',
+      }),
+    ])
+
+    expect(nodes[0].executionType).toBeNull()
+    expect(nodes[0].agentId).toBe('stale-agent')
+  })
+
+  it('renders no execution type for a legacy route_error projection', () => {
+    const nodes = toDagNodes([
+      makeNode('generate', 'pending', { execution_type: undefined }),
+    ])
 
     expect(nodes[0].executionType).toBeNull()
     expect(nodes[0].agentId).toBeNull()
