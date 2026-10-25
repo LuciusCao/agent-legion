@@ -46,7 +46,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from scripts.pytest_aff_unmapped import new_route_inventory_test, unmapped_source_files
+from scripts.pytest_aff_unmapped import unmapped_source_files
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = REPO_ROOT / ".pytest-aff-index.json"
@@ -222,17 +222,14 @@ def select_affected_tests(
             for nodeid in nodeids:
                 if _nodeid_file_exists(nodeid, root):
                     selected.add(nodeid)
-        elif (inventory := new_route_inventory_test(path, root)) is not None:
-            # Route-walking inventories enumerate the app, so coverage of the
-            # new module cannot link them retroactively (#1385).
-            selected.add(inventory)
         elif path.startswith("tests/") and _is_test_module(path) and (root / path).is_file():
             # A changed test file with no coverage record (new file, or the
             # indexer never ran it): every test in that file must run.
             # Non-test files under tests/ never pass through as nodeids:
             # YAML/JSON 等不影响测试执行的文件由本臂静默忽略；Python 辅助
             # 文件（helpers/conftest 等）由 unmapped_source_files 计入盲区
-            # 回退（exit 4 → 全量 unit 档）——见该函数的注释。
+            # 回退（exit 4 → 全量 unit 档）——rationale 见
+            # scripts/pytest_aff_unmapped.py 的 unmapped_source_files。
             # 清单内 postgres 文件（#192）在 `-m "not postgres"` 下零收集
             # （exit 5），跳过直通、由 blind-spot 提示接管（#1307/#304）。
             if path in postgres_files:
