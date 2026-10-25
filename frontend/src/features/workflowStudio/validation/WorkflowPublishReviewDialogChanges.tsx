@@ -1,6 +1,9 @@
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
 import { hasStructuralChanges } from './workflowStudioChanges'
-import { structuralNodeChangeGroups } from './workflowStudioStructuralFilter'
+import {
+  structuralNodeChangeGroups,
+  structuralRiskLevel,
+} from './workflowStudioStructuralFilter'
 import { WorkflowPublishReviewDialogRuntimeNote } from './WorkflowPublishReviewDialogRuntimeNote'
 import {
   formatEdgeChange,
@@ -35,6 +38,7 @@ export function WorkflowPublishReviewDialogChanges({
   runtimeSavedKeys = [],
 }: Props) {
   const structuralNodeChanges = structuralNodeChangeGroups(summary)
+  const structuralRisk = structuralRiskLevel(summary)
   // 与发布门控同口径（hasStructuralChanges || riskFlags，M48；结构徽标计数
   // 仍用上方剥离了 execution 字段的 structuralNodeChanges）。
   const hasChanges =
@@ -68,10 +72,8 @@ export function WorkflowPublishReviewDialogChanges({
               count={summary.metadataChanges.length}
               label="元数据变更"
             />
-            {summary.riskLevel !== 'none' && (
-              <WorkflowPublishReviewDialogRiskChip
-                severity={summary.riskLevel as 'info' | 'warning' | 'breaking'}
-              />
+            {structuralRisk !== 'none' && (
+              <WorkflowPublishReviewDialogRiskChip severity={structuralRisk} />
             )}
           </div>
 
