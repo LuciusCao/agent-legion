@@ -6,8 +6,9 @@ import type { WorkflowYamlNode } from './workflowStudioYamlDraft.parse'
 export class WorkflowNodeTypeSwitchError extends Error {}
 
 // 字段清洗规则镜像后端 loader 的类型禁令（唯一蓝本）：
-// - approval 禁 capability/execution/skill/shard/reduce/config_schema
+// - approval 禁 capability/execution/skill/shard/reduce
 //   （server/app/workflows/approval_node.py _FORBIDDEN_APPROVAL_FIELDS），
+//   保留 config_schema 作为 verdict payload 契约（schema v104）；
 //   config 只留 rework_target/feedback_artifact 白名单
 //   （_ALLOWED_CONFIG_KEYS，未知键同样会被 loader 拒绝）。
 // - code 禁 skill（EXEC-SKILL-NODE-001：code 节点不得声明 skill），
@@ -23,7 +24,6 @@ const APPROVAL_FORBIDDEN_FIELDS = [
   'skill',
   'shard',
   'reduce',
-  'config_schema',
 ] as const
 const APPROVAL_CONFIG_KEYS = ['rework_target', 'feedback_artifact'] as const
 

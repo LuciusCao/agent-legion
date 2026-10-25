@@ -68,10 +68,11 @@ section 集，切换类型时按目标类型清洗 YAML 字段。**
   parse/dump → `setDefinitionYaml`（现有链路），不引入平行状态。类型
   切换只是「改 `type` + 清洗字段」的复合 patch。
 - **loader 禁令前端镜像**：切换到 approval 时必须剥掉
-  `execution/skill/shard/reduce/config_schema/capability`，否则下一次
+  `execution/skill/shard/reduce/capability`，否则下一次
   validate/publish 就被 loader 拒绝（
-  `server/app/workflows/approval_node.py:38` `_FORBIDDEN_APPROVAL_FIELDS`）。
-  清洗规则以后端禁令为唯一蓝本，禁令变更时同步镜像。
+  `server/app/workflows/approval_node.py` `_FORBIDDEN_APPROVAL_FIELDS`）。
+  `config_schema` 不在禁令内：schema v104 起 approval 用它声明 verdict
+  payload，切换时必须保留。清洗规则以后端禁令为唯一蓝本，禁令变更时同步镜像。
 - **现有 Agent 闭环逻辑保留、入口归位**：「建 Agent 草稿 → 发布 →
   type 切换生效」的面板内闭环（#387）不丢，但触发方式改为：切到
   agent 且 capability 无 published Agent 时内联引导。
@@ -105,7 +106,7 @@ patchWorkflowNodeType(rawYaml, nodeKey, targetType: NodeType): string
 |---|---|
 | code | 剥 `skill`（#76：code 节点禁 skill）；源是 approval 时剥审批专属 config 键 |
 | agent | 保留 `skill`；源是 approval 时剥审批专属 config 键；保留 `capability`（门禁要求） |
-| approval | 剥 `capability/execution/skill/shard/reduce/config_schema`；config 只留 `rework_target/feedback_artifact`（白名单） |
+| approval | 剥 `capability/execution/skill/shard/reduce`；保留 `config_schema`（schema v104 verdict payload）；config 只留 `rework_target/feedback_artifact`（白名单） |
 
   清洗放独立纯函数 `sanitizeNodeForType(node, targetType)`，便于单测
   直接对拍后端 `validate_approval_fields` 的用例。审批 config 键

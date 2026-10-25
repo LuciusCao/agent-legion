@@ -54,7 +54,7 @@ describe('patchWorkflowNodeType', () => {
     expect(node?.label).toBe('读取知识点')
   })
 
-  it('switches to approval and strips forbidden fields (loader mirror)', () => {
+  it('switches to approval, strips forbidden fields, and preserves the verdict schema (#1410)', () => {
     const target = [
       'key: demo',
       'nodes:',
@@ -69,7 +69,7 @@ describe('patchWorkflowNodeType', () => {
       '    capability: intake',
       '    skill: demo/skill',
       '    execution: {provider: openai, model: gpt-4o}',
-      '    config_schema: {foo: {type: string}}',
+      '    config_schema: {type: object, properties: {verdict_note: {type: string}}, required: [verdict_note]}',
       '    config: {rework_target: intake2, feedback_artifact: review.json, other: 1}',
       '    after: [intake2]',
       '',
@@ -77,11 +77,16 @@ describe('patchWorkflowNodeType', () => {
     const out = patchWorkflowNodeType(target, 'intake', 'approval')
     const node = parseNodes(out).nodes?.intake
     expect(node?.type).toBe('approval')
-    // _FORBIDDEN_APPROVAL_FIELDS：capability/execution/skill/config_schema。
+    // _FORBIDDEN_APPROVAL_FIELDS：capability/execution/skill。
     expect(node).not.toHaveProperty('capability')
     expect(node).not.toHaveProperty('execution')
     expect(node).not.toHaveProperty('skill')
-    expect(node).not.toHaveProperty('config_schema')
+    // schema v104 起 approval 用 config_schema 声明 verdict payload。
+    expect(node?.config_schema).toEqual({
+      type: 'object',
+      properties: { verdict_note: { type: 'string' } },
+      required: ['verdict_note'],
+    })
     // config 白名单只剩 rework_target / feedback_artifact。
     expect(node?.config).toEqual({
       rework_target: 'intake2',
