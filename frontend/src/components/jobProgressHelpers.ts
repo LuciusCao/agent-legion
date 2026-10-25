@@ -20,7 +20,6 @@ export function resolveExecutionType(node: JobNode): 'code' | 'agent' | null {
           ? 'code'
           : null
       : node.execution_type
-  if (executionType === 'code' && !node.capability) return null
   return executionType
 }
 

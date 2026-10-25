@@ -259,6 +259,31 @@ describe('JobProgressPanel', () => {
     expect(screen.queryByText('Pi Agent')).not.toBeInTheDocument()
   })
 
+  it('keeps the main timeline code chip for approval nodes without capability', () => {
+    renderWithClient(
+      <JobProgressPanel
+        jobId="j1"
+        nodes={[
+          {
+            ...mockNodes[0],
+            node_key: 'review_gate_new',
+            capability: '',
+          },
+          {
+            ...mockNodes[0],
+            node_key: 'review_gate_legacy',
+            capability: '',
+            execution_type: undefined,
+          },
+        ]}
+        runs={[]}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+
+    expect(screen.getAllByText('代码')).toHaveLength(2)
+  })
+
   it('keeps legacy type chips when an old backend omits execution_type', () => {
     renderWithClient(
       <JobProgressPanel

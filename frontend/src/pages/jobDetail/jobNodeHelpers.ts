@@ -34,6 +34,11 @@ export function computeNodeDuration(
   return (Date.now() - start) / 1000
 }
 
+function resolveDagExecutionType(node: JobNode): 'code' | 'agent' | null {
+  const executionType = resolveExecutionType(node)
+  return executionType === 'code' && !node.capability ? null : executionType
+}
+
 export function toDagNodes(nodes: JobNode[]): DagGraphNode[] {
   return nodes.map((n) => ({
     key: n.node_key,
@@ -45,7 +50,7 @@ export function toDagNodes(nodes: JobNode[]): DagGraphNode[] {
     duration: computeNodeDuration(n.started_at, n.finished_at),
     // start/approval 不携带 capability；route_error 的 execution_type 为
     // null。executor_id 的 'code' 池键不进入展示层。
-    executionType: resolveExecutionType(n),
+    executionType: resolveDagExecutionType(n),
     agentId: n.agent_id ?? null,
     workerId: n.worker_id ?? null,
     capability: n.capability,
