@@ -39,20 +39,26 @@ def feeding_gate_fields(
     next_index: int,
     items_total: int,
     watermark_applies: bool = True,
+    has_remaining_work: bool | None = None,
 ) -> dict[str, Any]:
+    remaining = next_index < items_total if has_remaining_work is None else has_remaining_work
     return {
         **snapshot,
         "feeding_gated": bool(
             watermark_applies
             and status in ("pending", "running")
-            and next_index < items_total
+            and remaining
             and snapshot["workspace_backlog"] >= snapshot["watermark"]
         ),
     }
 
 
 def feeding_gate_for_row(
-    snapshot: dict[str, int], row: dict[str, Any], *, watermark_applies: bool = True
+    snapshot: dict[str, int],
+    row: dict[str, Any],
+    *,
+    watermark_applies: bool = True,
+    has_remaining_work: bool | None = None,
 ) -> dict[str, Any]:
     return feeding_gate_fields(
         snapshot,
@@ -60,6 +66,7 @@ def feeding_gate_for_row(
         next_index=int(row["next_index"]),
         items_total=int(row["items_total"]),
         watermark_applies=watermark_applies,
+        has_remaining_work=has_remaining_work,
     )
 
 

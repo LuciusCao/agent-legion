@@ -11,6 +11,7 @@ no sleep).
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -48,14 +49,15 @@ def _insert_operation(
     created_at: datetime | None = None,
     items_total: int = 2,
     processed: int | None = None,
+    target_spec: dict | None = None,
 ) -> None:
     _seed_workspace(job_db, workspace_id)
     with job_db.connect() as conn:
         conn.execute(
             "insert into job_batch_operations("
-            " id, workspace_id, kind, status, items_total, next_index,"
+            " id, workspace_id, kind, status, items_total, next_index, target_spec_json,"
             " created_at, finished_at, archived_at, created_by)"
-            " values (%s, %s, %s, %s, %s, %s,"
+            " values (%s, %s, %s, %s, %s, %s, %s,"
             " coalesce(%s, current_timestamp), %s, %s, 'tester')",
             (
                 op_id,
@@ -64,6 +66,7 @@ def _insert_operation(
                 status,
                 items_total,
                 (items_total if status == "completed" else 0) if processed is None else processed,
+                json.dumps(target_spec or {}),
                 created_at,
                 finished_at,
                 archived_at,
@@ -332,6 +335,22 @@ def test_active_view_gates_only_work_creating_unfinished_operations(
     _insert_operation(job_db, "op-ungated-kind", status="running", kind="pause")
     _insert_operation(job_db, "op-paused", status="paused", kind="rerun")
     _insert_operation(job_db, "op-cursor-complete", status="running", kind="rerun", processed=2)
+    _insert_operation(
+        job_db,
+        "op-stream-waiting",
+        status="running",
+        kind="rerun",
+        processed=2,
+        target_spec={"job_ids": [], "stream": {"next_cursor": "job-200"}},
+    )
+    _insert_operation(
+        job_db,
+        "op-stream-drained",
+        status="running",
+        kind="rerun",
+        processed=2,
+        target_spec={"job_ids": [], "stream": {"next_cursor": None}},
+    )
     _insert_operation(job_db, "op-ended", status="completed", kind="rerun", finished_at=_now())
     calls = 0
 
@@ -350,6 +369,8 @@ def test_active_view_gates_only_work_creating_unfinished_operations(
     assert by_id["op-ungated-kind"]["feeding_gated"] is False
     assert by_id["op-paused"]["feeding_gated"] is False
     assert by_id["op-cursor-complete"]["feeding_gated"] is False
+    assert by_id["op-stream-waiting"]["feeding_gated"] is True
+    assert by_id["op-stream-drained"]["feeding_gated"] is False
     assert all(operation["workspace_backlog"] == 100 for operation in active["operations"])
     assert all(operation["watermark"] == 100 for operation in active["operations"])
     assert calls == 1
