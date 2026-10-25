@@ -164,10 +164,15 @@ would run most of the suite anyway — the fallback never widens what runs.
 A genuinely empty selection (nothing in the tracked change set touches the
 unit tier — postgres-tier-only edits, `tests/full` / `tests/ci` files, docs)
 is skipped explicitly instead of failing on pytest's exit 5; the dependency
-manifests (`pyproject.toml` / `uv.lock`) stay visible to the selector and
-always take the full-fallback path, so a dependency upgrade never skips the
-backend tests. Deleted test files are dropped
-from the selection (a stale path would fail pytest collection). An aff pass
+manifests (`pyproject.toml` / `uv.lock`) and backend-affecting uncovered trees
+(`config/` / `deploy/` / `examples/`) stay visible to the selector and always
+take the full-fallback path, so neither a dependency upgrade nor one of those
+changes skips the backend tests. New or already tracked
+`server/app/routes/**` files missing from the index likewise take the full
+fallback: their route-walking inventory tests may belong to the postgres
+tier, so selecting one in aff could otherwise degrade to a zero-test pass.
+Deleted test files are dropped from the
+selection (a stale path would fail pytest collection). An aff pass
 is **not** gate evidence: `scripts/run-local-gate.sh` rejects the tier, and
 the full suite remains the pre-push/CI boundary. Rebuild the index after
 dependency or conftest changes (a stale index only slows the loop —

@@ -194,10 +194,12 @@ run_tests() {
           # files, docs/registries). Skip explicitly instead of letting an
           # empty pytest invocation fail with exit 5 or paying a full
           # unit-tier fallback for nothing. "Empty" means "nothing affected"
-          # only inside the tracked change set (source roots + the two
-          # dependency manifests): pyproject.toml/uv.lock stay visible to the
-          # selector and take the exit-4 full fallback, so a dependency
-          # upgrade never skips the backend tests (#1307 r1 P2-2).
+          # only inside the tracked change set (source roots, backend-affecting
+          # config/deploy/examples trees + the two dependency manifests):
+          # those uncovered trees and pyproject.toml/uv.lock stay visible to
+          # the selector and take the exit-4 full fallback, so neither a
+          # backend-relevant config change nor a dependency upgrade skips the
+          # backend tests (#1307 r1 P2-2, #1376).
           aff_skip=1
         elif [[ -n "$selected" ]] && [[ "$(printf '%s\n' "$selected" | wc -l | tr -d ' ')" -lt 400 ]]; then
           echo "=== Python Affected Tests (selected $(printf '%s\n' "$selected" | wc -l | tr -d ' ') of unit tier) ==="

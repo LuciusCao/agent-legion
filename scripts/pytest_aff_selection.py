@@ -24,10 +24,11 @@ Semantics and guardrails:
   under the tier's ``-m "not postgres"`` they would collect zero tests and
   exit 5. Changed postgres files are instead reported as a blind-spot hint
   on stderr (#1307).
-* Only files under the repo's tracked source roots (``server/``,
-  ``worker/``, ``shared/``, ``workflow_nodes/``, ``scripts/``,
-  ``workspace_libs/``, ``tests/``) are mapped; anything else (venv,
-  generated, data) is ignored.
+* Files under the repo's tracked source roots (``server/``, ``worker/``,
+  ``shared/``, ``workflow_nodes/``, ``scripts/``, ``workspace_libs/``,
+  ``tests/``) are coverage-mapped. Backend-affecting ``config/``, ``deploy/``
+  and ``examples/`` changes stay visible and conservatively trigger the full
+  unit fallback when no coverage mapping exists; unrelated paths are ignored.
 * The index stores the pytest nodeids verbatim; a nodeid that no longer
   exists is dropped at selection time (collection failure would otherwise
   fail the run).
@@ -45,6 +46,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts.pytest_aff_unmapped import unmapped_source_files
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = REPO_ROOT / ".pytest-aff-index.json"
 # Tracked change-set roots. The two dependency manifests live at the repo
@@ -60,6 +63,9 @@ _GIT_PATH_PREFIXES = (
     "scripts/",
     "workspace_libs/",
     "tests/",
+    "config/",
+    "deploy/",
+    "examples/",
     "pyproject.toml",
     "uv.lock",
 )
@@ -222,7 +228,8 @@ def select_affected_tests(
             # Non-test files under tests/ never pass through as nodeids:
             # YAML/JSON 等不影响测试执行的文件由本臂静默忽略；Python 辅助
             # 文件（helpers/conftest 等）由 unmapped_source_files 计入盲区
-            # 回退（exit 4 → 全量 unit 档）——见该函数的注释。
+            # 回退（exit 4 → 全量 unit 档）——rationale 见
+            # scripts/pytest_aff_unmapped.py 的 unmapped_source_files。
             # 清单内 postgres 文件（#192）在 `-m "not postgres"` 下零收集
             # （exit 5），跳过直通、由 blind-spot 提示接管（#1307/#304）。
             if path in postgres_files:
@@ -244,38 +251,6 @@ def _nodeid_file_exists(nodeid: str, root: Path) -> bool:
     """
     file_part = nodeid.split("::", 1)[0]
     return (root / file_part).is_file()
-
-
-def unmapped_source_files(
-    changed: list[str], mapping: dict[str, list[str]], repo_root: Path | None = None
-) -> list[str]:
-    """Changed non-test source files the index has no record of.
-
-    The aff tier refuses to select when this is non-empty (the gate falls
-    back to the full unit tier): a source file outside the index means the
-    index was built without coverage for that tree (e.g. a --cov root was
-    missed, or a brand-new module), so the tests it affects are unknown.
-    Falling back only widens what runs — the documented aff semantics.
-    """
-    root = repo_root if repo_root is not None else REPO_ROOT
-    unmapped: list[str] = []
-    for path in changed:
-        if path.startswith("tests/"):
-            # codex 复审 P2（PR #792）：tests/ 下的 Python 辅助文件
-            # （helpers/conftest 等）改动会影响其全部消费者，而 --cov 不覆盖
-            # tests/ 树、索引无法映射受影响面——静默丢弃会让「helper + 可映射
-            # 源码」的混合改动只跑局部子集（aff 内环误报通过）。计入 unmapped
-            # 触发 exit 4 全量回退。test_*.py 由选择器直通/映射处理（其删除
-            # 语义 = 用例随文件消失，nodeid 级丢弃即可，无需回退）；YAML/
-            # JSON 等确定不影响测试执行的文件才可静默忽略。
-            # 跟进 P2：删除形态（is_file() 为 False）也必须计入——已删除
-            # helper 的消费者 import 即炸，而子集可能根本收集不到它们。
-            if not _is_test_module(path) and path.endswith(".py"):
-                unmapped.append(path)
-            continue
-        if mapping.get(path) is None and (root / path).is_file():
-            unmapped.append(path)
-    return sorted(unmapped)
 
 
 def _cmd_build(args: argparse.Namespace) -> int:

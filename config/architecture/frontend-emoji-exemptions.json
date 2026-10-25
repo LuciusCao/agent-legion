@@ -4,147 +4,176 @@
     {
       "path": "frontend/src/features/workflowStudio/chat/StudioChatDraftCards.test.tsx",
       "code_point": "U+1F9E9",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/chat/StudioChatStatusLine.test.tsx",
       "code_point": "U+26A0",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 4,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/chat/StudioChatStatusWarning.tsx",
       "code_point": "U+26A0",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 5,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/chat/StudioChatToolCallCard.tsx",
       "code_point": "U+2713",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/chat/StudioChatToolCallCard.tsx",
       "code_point": "U+2717",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/inspector/WorkflowNodeDetailDrawer.test.tsx",
       "code_point": "U+2715",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 5,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/inspector/WorkflowNodeDetailDrawer.tsx",
       "code_point": "U+2715",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 5,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/inspector/WorkflowNodeInspectorHeader.tsx",
       "code_point": "U+2715",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/StudioCanvasIslands.test.tsx",
       "code_point": "U+2713",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 2,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/StudioCanvasIslands.test.tsx",
       "code_point": "U+2717",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/StudioCanvasIslands.tsx",
       "code_point": "U+2713",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/StudioCanvasIslands.tsx",
       "code_point": "U+2717",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/WorkflowStudioDraftSaveControl.test.tsx",
       "code_point": "U+26A0",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 5,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/WorkflowStudioDraftSaveControl.tsx",
       "code_point": "U+26A0",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 5,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/WorkflowStudioDraftWarningCluster.tsx",
       "code_point": "U+26A0",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 4,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/WorkflowStudioSharedMaterialsDrawer.tsx",
       "code_point": "U+2715",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/WorkflowStudioStatusChip.test.tsx",
       "code_point": "U+2713",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 4,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/WorkflowStudioStatusChip.test.tsx",
       "code_point": "U+2717",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 4,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/WorkflowStudioStatusChip.tsx",
       "code_point": "U+2713",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/WorkflowStudioStatusChip.tsx",
       "code_point": "U+2717",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/WorkflowStudioValidationChip.tsx",
       "code_point": "U+2713",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 2,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/WorkflowStudioValidationChip.tsx",
       "code_point": "U+2717",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 2,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/WorkflowStudioWorkspace.test.tsx",
       "code_point": "U+2715",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/studioIslandPublishTooltip.ts",
       "code_point": "U+26A0",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/useDraftAutoValidation.ts",
       "code_point": "U+2713",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/useDraftAutoValidation.ts",
       "code_point": "U+2717",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/features/workflowStudio/shared/useWorkflowStudioActions.ts",
       "code_point": "U+2717",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 1,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/pages/WorkflowStudioPage.test.tsx",
       "code_point": "U+2713",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 3,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     },
     {
       "path": "frontend/src/pages/WorkflowStudioPage.test.tsx",
       "code_point": "U+2717",
-      "reason": "存量 workflowStudio 状态字形惯例（#1354 豁免对象）；迁移 MaterialIcon 前钉住，新增命中不在豁免内"
+      "occurrences": 2,
+      "reason": "存量 workflowStudio 状态字形（#1354）；次数钉住，新增同码点命中会失败"
     }
   ]
 }

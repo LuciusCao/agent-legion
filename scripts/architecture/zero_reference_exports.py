@@ -7,9 +7,11 @@ guard the issue asks for, unified across the two stacks:
 
 - backend (Python): public module-level ``def`` / ``class`` / assignments in
   ``server/app``, ``worker``, ``shared``, ``workspace_libs`` and
-  ``workflow_nodes``. Decorated definitions are exempt (route decorators,
-  pytest fixtures and ``@entrypoint`` register by reference, not by name), as
-  are ``__init__.py`` re-export surfaces and ``_``-private names. ``scripts/``
+  ``workflow_nodes``. Definitions with known registration decorators (route
+  decorators, pytest fixtures and ``@entrypoint``) are exempt; transforming
+  decorators such as ``@dataclass`` and ``@lru_cache`` do not hide dead code.
+  ``__init__.py`` re-export surfaces and ``_``-private names are also exempt.
+  ``scripts/``
   is out of scope — those modules are invoked by path from the Makefile/CI.
 - frontend (TypeScript): ``export <kind> NAME`` and ``export { … }`` symbols
   under ``frontend/src`` (``.ts``/``.tsx``), excluding ``export default``
@@ -24,8 +26,10 @@ That makes the check conservative in the safe direction: a false *negative*
 needs the name quoted somewhere, a false *positive* is near-impossible.
 
 A definition is flagged when its identifier occurs nowhere repository-wide
-beyond the declaration site itself. Common names (``main``, ``run``, …)
-self-exempt through sheer occurrence count. Surviving known-dead symbols are
+beyond its declaration sites. Frontend barrel re-exports are declaration
+sites too: their tokens are deducted instead of acting as self-justifying
+consumers (#1380). Common names (``main``, ``run``, …) self-exempt through
+sheer occurrence count. Surviving known-dead symbols are
 pinned with reasons in
 ``config/architecture/zero-reference-exports-allowlist.json``, matched both
 directions — deleting the dead symbol makes its pin stale and fails the check
@@ -40,6 +44,8 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+
+from scripts.architecture.zero_reference_decorators import registers_definition
 
 __test__ = False
 
@@ -161,7 +167,9 @@ def _backend_definitions(path: Path, relative: str) -> list[_Definition]:
     definitions: list[_Definition] = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if node.decorator_list or node.name.startswith("_"):
+            if node.name.startswith("_") or any(
+                registers_definition(decorator) for decorator in node.decorator_list
+            ):
                 continue
             definitions.append(_Definition(relative, node.name, "symbol", node.lineno))
         elif isinstance(node, ast.Assign):
@@ -265,9 +273,14 @@ def check_zero_reference_exports(root: Path) -> list[str]:
         return [f"zero-reference exports configuration: {exc}"]
 
     references = count_identifier_references(root)
+    definitions = collect_definitions(root)
+    declaration_counts = Counter(
+        definition.symbol for definition in definitions if definition.kind == "export"
+    )
     hits: list[_Definition] = []
-    for definition in collect_definitions(root):
-        if references.get(definition.symbol, 0) <= 1:
+    for definition in definitions:
+        declaration_count = max(1, declaration_counts.get(definition.symbol, 0))
+        if references.get(definition.symbol, 0) <= declaration_count:
             hits.append(definition)
 
     hit_keys = {(hit.path, hit.symbol) for hit in hits}

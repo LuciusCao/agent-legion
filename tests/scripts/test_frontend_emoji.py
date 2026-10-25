@@ -15,7 +15,7 @@ def write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def write_exemptions(root: Path, entries: list[dict[str, str]] | None = None) -> None:
+def write_exemptions(root: Path, entries: list[dict[str, object]] | None = None) -> None:
     payload = {"version": 1, "exemptions": entries or []}
     write(
         root / "config/architecture/frontend-emoji-exemptions.json",
@@ -71,7 +71,12 @@ def test_ignores_non_code_files(tmp_path):
 
 def test_exemption_suppresses_and_stale_exemption_fails(tmp_path):
     write(tmp_path / "frontend/src/legacy.tsx", "export const mark = '✓';\n")
-    entry = {"path": "frontend/src/legacy.tsx", "code_point": "U+2713", "reason": "存量字形"}
+    entry = {
+        "path": "frontend/src/legacy.tsx",
+        "code_point": "U+2713",
+        "occurrences": 1,
+        "reason": "存量字形",
+    }
     write_exemptions(tmp_path, [entry])
 
     assert not check_frontend_emoji(tmp_path)
@@ -87,10 +92,40 @@ def test_exemption_suppresses_and_stale_exemption_fails(tmp_path):
     assert any("stale" in error and "legacy.tsx" in error for error in errors)
 
 
+def test_same_code_point_occurrence_count_is_pinned(tmp_path):
+    """#1374 E1: a new line with an already-exempt code point must not escape."""
+    path = tmp_path / "frontend/src/legacy.tsx"
+    entry = {
+        "path": "frontend/src/legacy.tsx",
+        "code_point": "U+2713",
+        "occurrences": 1,
+        "reason": "one legacy glyph",
+    }
+    write(path, "export const oldMark = '✓';\n")
+    write_exemptions(tmp_path, [entry])
+    assert not check_frontend_emoji(tmp_path)
+
+    write(path, "export const oldMark = '✓';\nexport const newMark = '✓';\n")
+    errors = check_frontend_emoji(tmp_path)
+    assert any("occurs 2 times" in error and "pins 1" in error for error in errors)
+
+    write(path, "export const oldMark = '✓✓';\n")
+    errors = check_frontend_emoji(tmp_path)
+    assert any("occurs 2 times" in error for error in errors)
+
+
 def test_exemption_entries_require_reason(tmp_path):
     write(tmp_path / "frontend/src/x.ts", "export const x = 1;\n")
     write_exemptions(
-        tmp_path, [{"path": "frontend/src/x.ts", "code_point": "U+26A0", "reason": " "}]
+        tmp_path,
+        [
+            {
+                "path": "frontend/src/x.ts",
+                "code_point": "U+26A0",
+                "occurrences": 1,
+                "reason": " ",
+            }
+        ],
     )
 
     errors = check_frontend_emoji(tmp_path)

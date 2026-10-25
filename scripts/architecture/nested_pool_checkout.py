@@ -430,6 +430,23 @@ def _find_hits(root: Path) -> list[tuple[str, int, str]]:
                 own_calls = calls_cache.get(fn_keys.get(id(node), ("", "")))
                 if own_calls is None:
                     own_calls = _called_candidates(node, module)
+                for call in _iter_own_calls(node):
+                    receiver, attr = _call_name(call)
+                    if (
+                        receiver is not None
+                        and receiver != "self"
+                        and _receiver_db_like(receiver)
+                        and attr in facade_methods
+                    ):
+                        hits.append(
+                            (
+                                module.rel,
+                                call.lineno,
+                                f"conn-first function {node.name} calls JobQueries "
+                                f"self-checkout method {attr}: a fresh checkout nests "
+                                "under the caller's held connection",
+                            )
+                        )
                 for candidate, lineno, rendered in own_calls:
                     if candidate not in acquirers:
                         continue

@@ -9,11 +9,14 @@ tests/scripts/test_quality_gate_scripts.py.
 
 from __future__ import annotations
 
+import argparse
 import pathlib
 import sqlite3
 
 import pytest
 
+import scripts.pytest_aff_selection as aff_selection
+import scripts.pytest_aff_unmapped as aff_unmapped
 from scripts.pytest_aff_selection import (
     build_index_from_coverage,
     postgres_manifest_files,
@@ -343,3 +346,45 @@ def test_dependency_manifests_stay_visible_to_the_selector(tmp_path):
         "pyproject.toml",
         "uv.lock",
     ]
+
+
+def test_uncovered_backend_trees_stay_visible_and_force_full_fallback(tmp_path):
+    """#1376: deploy/config/examples changes must not produce an empty skip."""
+    from scripts.pytest_aff_selection import _GIT_PATH_PREFIXES
+
+    changed = ["deploy/compose.worker.yaml", "config/workflow.yaml", "examples/demo.yaml"]
+    assert all(path.split("/", 1)[0] + "/" in _GIT_PATH_PREFIXES for path in changed)
+    assert unmapped_source_files(changed, {}, repo_root=tmp_path) == sorted(changed)
+    assert select_affected_tests(changed, {}, repo_root=tmp_path) == []
+
+
+def test_new_route_file_exits_4_for_full_unit_fallback(tmp_path, monkeypatch, capsys):
+    """#1385: the postgres-marked route inventory cannot run in aff; a new
+    route therefore stays unmapped instead of selecting a zero-test nodeid."""
+    route = tmp_path / "server/app/routes/new_feature.py"
+    route.parent.mkdir(parents=True)
+    route.write_text("router = None\n", encoding="utf-8")
+    changed = ["server/app/routes/new_feature.py"]
+
+    assert unmapped_source_files(changed, {}, repo_root=tmp_path) == changed
+    assert select_affected_tests(changed, {}, repo_root=tmp_path) == []
+    monkeypatch.setattr(aff_selection, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(aff_unmapped, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(aff_selection, "load_index", lambda: {})
+    monkeypatch.setattr(aff_selection, "changed_source_files", lambda base: changed)
+
+    assert aff_selection._cmd_select(argparse.Namespace(base=None)) == 4
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "unmapped-source-files" in captured.err
+    assert "# unmapped server/app/routes/new_feature.py" in captured.err
+
+
+def test_tracked_route_without_coverage_still_forces_full_fallback():
+    """An existing route missing from the index retains the same conservative
+    unknown-impact fallback as a new route."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    changed = ["server/app/routes/workspaces.py"]
+
+    assert unmapped_source_files(changed, {}, repo_root=root) == changed
+    assert select_affected_tests(changed, {}, repo_root=root) == []
