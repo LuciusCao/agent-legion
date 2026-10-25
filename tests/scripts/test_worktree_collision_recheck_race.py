@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.scripts.test_worktree_name_collision import (
+from tests.helpers.worktree_collision import (
     _GIT,
     _PSQL_DB_APPEARS_STUB,
     _PSQL_DB_PRESENT_STUB,
@@ -17,7 +17,7 @@ from tests.scripts.test_worktree_name_collision import (
     _Repo,
     _ScriptRun,
 )
-from tests.scripts.test_worktree_name_collision import (
+from tests.helpers.worktree_collision import (
     repo as repo,
 )
 
