@@ -34,7 +34,7 @@ source "$ROOT/scripts/worktree-names-lib.sh"
 
 # 0. 嵌套防护（AGENTS.md §1）：普通 worktree 必须是主仓库根的平级子目录。
 #    唯一例外是已注册父 worktree 下的 .tower/worktrees/wt-*（#1409）；
-#    它复用父实例资源，不进入独立派生名锁、建库或建 bucket 流程。
+#    它复用父开发库/bucket，但测试库按含父名的独立标识参与撞名检查。
 MAIN="$(git worktree list --porcelain | awk '/^worktree /&&!seen{print $2; seen=1}')"
 TOWER_PARENT="$(worktree_tower_parent "$ROOT")"
 if [[ -n "$TOWER_PARENT" ]]; then
@@ -105,10 +105,12 @@ if [[ -n "$BASE" && "$BASE" == "$ROOT" ]]; then
     exit 0
 fi
 
-# 0.5 独立派生资源才需要撞名防护与派生名锁（#950/#1084）。tower 子实例只
-#     复制父配置，不能占用与自身短名关联的库/bucket 名称。
-if [[ -z "$TOWER_PARENT" ]]; then
-    worktree_name_lock_acquire "$ROOT" "初始化 $(basename "$ROOT")（建库/建 bucket）" || exit 1
+# 0.5 tower 只豁免开发库/bucket；其独立测试库仍按含父名的路径参与撞名
+#     检查（#1409 P2）。检查与后续资源动作统一持派生名锁（#950/#1084）。
+worktree_name_lock_acquire "$ROOT" "初始化 $(basename "$ROOT")（建库/建 bucket）" || exit 1
+if [[ -n "$TOWER_PARENT" ]]; then
+    worktree_require_unique_derived_names "$ROOT" "$(basename "$ROOT")" "初始化（测试库撞名检查）" 0 "$ROOT" || exit 1
+else
     worktree_require_unique_derived_names "$ROOT" "$(basename "$ROOT")" "初始化（建库/建 bucket）" || exit 1
 fi
 NAME="$(worktree_derived_db "$(basename "$ROOT")")"
@@ -296,11 +298,11 @@ fi
 # 登记为资源主；无标记的同名登记是阻塞在锁上的待初始化实例，不构成资源主。
 # 标记已加入 .gitignore，不阻塞 git worktree remove，随 worktree 目录消失。
 printf 'initialized_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$ROOT/$WORKTREE_INITIALIZED_MARKER"
-# 派生资源已建完，其余步骤（vault key、worker 状态副本）与派生名无关。
-worktree_name_lock_release
 else
     echo "tower 布局：复用父 worktree 的 AGENT_LEGION_S3_BUCKET（不创建独立 bucket）"
 fi
+# 撞名检查与资源动作已完成，其余步骤与派生名无关。
+worktree_name_lock_release
 
 # 3. deploy/secrets
 mkdir -p deploy/secrets

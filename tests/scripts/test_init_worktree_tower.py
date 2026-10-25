@@ -30,10 +30,12 @@ if [[ "$1" == "worktree" && "$2" == "list" ]]; then
   echo "worktree {main}"
   echo "bare"
   echo
-  echo "worktree {main}/.worktrees/develop"
-  echo "HEAD 0000000000000000000000000000000000000000"
-  echo "branch refs/heads/main"
-  echo
+  if [[ "${{STUB_PARENT_REGISTERED:-1}}" == "1" ]]; then
+    echo "worktree {main}/.worktrees/develop"
+    echo "HEAD 0000000000000000000000000000000000000000"
+    echo "branch refs/heads/main"
+    echo
+  fi
   echo "worktree {main}/.worktrees/develop/.tower/worktrees/wt-101"
   echo "HEAD 1111111111111111111111111111111111111111"
   echo "branch refs/heads/feat/tower"
@@ -105,12 +107,18 @@ def _seed_parent(main: Path, *, env: bool = True, vault: bool = True) -> None:
         key.write_text("parent-vault-master-key\n", encoding="utf-8")
 
 
-def _run(script_path: Path, bin_dir: Path, stub_log: Path) -> subprocess.CompletedProcess[str]:
+def _run(
+    script_path: Path,
+    bin_dir: Path,
+    stub_log: Path,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     env = {
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "HOME": os.environ.get("HOME", ""),
         "STUB_LOG": str(stub_log),
     }
+    env.update(extra_env or {})
     return subprocess.run(
         ["bash", str(script_path)],
         capture_output=True,
@@ -205,6 +213,10 @@ def test_tower_child_fails_when_parent_vault_key_is_missing(tmp_path: Path) -> N
     "worktree_rel",
     [
         ".worktrees/develop/.tower/worktrees/feature",
+        ".worktrees/develop/.tower/worktrees/wt",
+        ".worktrees/develop/.tower/worktrees/wt-",
+        ".worktrees/develop/.tower/worktrees/wtx-1",
+        ".worktrees/develop/.tower/worktrees/WT-1",
         ".worktrees/develop/.tower/worktrees/wt-101/nested",
     ],
 )
@@ -236,3 +248,23 @@ def test_tower_child_rejects_an_explicit_non_parent_base(tmp_path: Path) -> None
     assert result.returncode == 1
     assert "不能指定其他基准" in result.stderr
     assert not (_child(main) / ".env").exists()
+
+
+def test_tower_child_fails_when_parent_is_not_registered(tmp_path: Path) -> None:
+    main, bin_dir, stub_log = _setup(tmp_path)
+    _seed_parent(main)
+
+    result = _run(
+        _child(main) / "scripts" / "init-worktree.sh",
+        bin_dir,
+        stub_log,
+        extra_env={"STUB_PARENT_REGISTERED": "0"},
+    )
+
+    assert result.returncode == 1
+    assert "父 worktree 未注册" in result.stderr
+    child = _child(main)
+    assert not (child / ".env").exists()
+    assert not (child / "deploy").exists()
+    assert not (child / "data").exists()
+    assert not stub_log.exists() or stub_log.read_text() == ""

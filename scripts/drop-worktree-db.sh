@@ -46,7 +46,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=worktree-names-lib.sh
 source "$SCRIPT_DIR/worktree-names-lib.sh"
-MAIN="$(git worktree list --porcelain | awk '/^worktree /&&!seen{print $2; seen=1}')"
+MAIN="$(git -C "$SCRIPT_DIR" worktree list --porcelain | awk '/^worktree /&&!seen{print $2; seen=1}')"
 TARGET="$MAIN/.worktrees/$WT"
 
 # 护栏 0（#950）：派生名映射不是单射，另一个仍存在的 worktree 派生出同名

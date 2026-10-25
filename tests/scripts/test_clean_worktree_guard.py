@@ -37,6 +37,7 @@ NAMES_LIB = ROOT / "scripts" / "worktree-names-lib.sh"
 # buffered stdout): the script reads it via `... | awk '{...; exit}'` under
 # pipefail, and per-line echoes would race awk's early exit into SIGPIPE.
 _GIT_STUB = """#!/usr/bin/env bash
+if [[ "$1" == "-C" ]]; then shift 2; fi
 if [[ "$1" == "worktree" && "$2" == "list" ]]; then
   printf '%s\\n' \\
     "worktree __MAIN__" \\

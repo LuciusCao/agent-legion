@@ -16,11 +16,11 @@
 - 每次独立开发任务优先在新的 git worktree 中进行。
 - 普通 worktree 一律建为主仓库根的平级子目录：先 `cd` 到主仓库根（`git worktree list` 的第一个条目），再 `git worktree add .worktrees/<name> -b <branch> <base>`。禁止嵌套；唯一例外是已注册父 worktree 内由 tower 管理的 `.tower/worktrees/wt-*`（#1409）。
 - 普通 worktree 使用不同 backend/frontend 端口、独立 `data/` 目录与派生库/bucket；tower 子 worktree 复用父实例的库/bucket，避免 teardown 留下孤儿资源。
-- **创建 worktree 后必须立即跑 `scripts/init-worktree.sh`（强制，幂等），临时试验也不例外**：普通实例复制 `.env`、派生 Postgres 库与 S3 bucket、生成 vault_master_key；tower 子实例改为复制父实例的 `.env` 与 vault key，不派生独立资源。两者都预暖 `.uv-cache`、种子 worker 状态副本；派生规则与护栏见 [docs/postgresql-runbook.md](docs/postgresql-runbook.md)。
+- **创建 worktree 后必须立即跑 `scripts/init-worktree.sh`（强制，幂等），临时试验也不例外**：普通实例复制 `.env`、派生 Postgres 库与 S3 bucket、生成 vault_master_key；tower 子实例改为复制父实例的 `.env` 与 vault key，不派生独立开发库/bucket。两者都预暖 `.uv-cache`、种子 worker 状态副本；派生规则与护栏见 [docs/postgresql-runbook.md](docs/postgresql-runbook.md)。
 - worker 注册用 workspace-scoped token：admin UI（workspace 设置 → Agent 与 Worker）按 workspace 签发，worker 控制台添加后按全部 token 重注册，见 [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md)。遗留的全局 register token env / yaml 配置启动即报错（fail-fast 带迁移指引，#35）。
 - 开发实例两个默认关闭的开关（刻意设计，防失控自跑）：后端每次启动把全部 workspace 重置为暂停，需恢复调度时跑 `scripts/resume-workspaces.sh`（**必须在后端首次启动建表之后**）或在控制台手动恢复；worker 的 `claim_enabled` 默认 false，经 worker 控制台或 `PUT /api/config` 打开。worker 唯一生效配置是状态副本 `data/agent-worker-service/worker.yaml`，修改一律走控制台/API（#323）。
 - 普通 worktree 的 `.env` 必须配置 `AGENT_LEGION_DATABASE_URL` 指向自身派生库；tower 子 worktree 指向父实例派生库。`database.url` 为 env-only，代码默认库是共享库（即 prod 库），不要依赖默认值。结构防线：`init_db` 对裸共享库名（`agent_legion`）要求 `AGENT_LEGION_ALLOW_SHARED_DB_SCHEMA=1` 才放行（prod 启动器已内置），`export_openapi` 直接拒绝在共享库上运行（背景见 [docs/postgresql-runbook.md](docs/postgresql-runbook.md)）。
-- 测试库无需手动配置：`tests/postgres_support.py` 按 worktree 目录名派生专属测试库（`agent_legion_test_<worktree>`）并自动建库；只有需要覆盖时才设 `AGENT_LEGION_TEST_DATABASE_URL`。
+- 测试库无需手动配置：`tests/postgres_support.py` 按 worktree 目录名派生专属测试库并自动建库；tower 子实例用 `agent_legion_test_<父名>_<子名>`，避免跨父撞名。只有需要覆盖时才设 `AGENT_LEGION_TEST_DATABASE_URL`。
 - 普通 worktree 收尾（用户确认清理后）统一用 `scripts/clean-worktree.sh <worktree名> [--yes]` 一键清理 worktree/本地分支/派生库/派生 bucket；仍有 tower 子 worktree 时拒绝清理父资源。tower 子 worktree 由 tower 自己 teardown；远端分支默认只提示不删（`--delete-remote-branch` 才删）。
 - 只需单独清理派生库时（收尾场景已被 clean-worktree.sh 覆盖，它内部即转调本脚本）走 `scripts/drop-worktree-db.sh <worktree名>`，不要裸 `dropdb`：脚本自带护栏（按 worktree 名派生库名、以非 superuser role 连接，物理上碰不到共享/prod 库），role 设置见 [docs/postgresql-runbook.md](docs/postgresql-runbook.md)。
 - 测试并行度由 gate 自动均分：后端 pytest-xdist 与 rust `-j` 按机器级并发 gate 数 N 取 (核数−2)/N、夹 [2, 8]（`scripts/gate-jobs.sh`；`AGENT_LEGION_TEST_WORKERS` / `AGENT_LEGION_RUST_WORKERS` 覆盖），前端 vitest `--maxWorkers=4`（`AGENT_LEGION_FRONTEND_TEST_WORKERS` 覆盖）。

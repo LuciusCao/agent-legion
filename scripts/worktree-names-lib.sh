@@ -8,7 +8,8 @@
 #
 # 派生规则（存量 worktree 靠它找到自己的库/bucket，不得修改）：
 #   - 开发库: agent_legion_<非 [a-zA-Z0-9_] 归并为 '_'>（保留大小写）
-#   - 测试库: agent_legion_test_<开发库后缀小写化>（tests/postgres_support.py）
+#   - 测试库: agent_legion_test_<开发库后缀小写化>；tower 子实例改用
+#     <父worktree名>_<子名> 作为后缀（tests/postgres_support.py 同规则）
 #   - bucket: agent-legion-<小写化后非 [a-z0-9-] 归并为 '-'>
 # 映射不是单射（#950）：foo_bar / foo-bar / foo.bar 派生同一开发库，Foo 与
 # foo 派生同一测试库与 bucket。规则不改，改为在建/删前检测与其他已注册
@@ -32,8 +33,8 @@ worktree_derived_bucket() {
     printf 'agent-legion-%s' "$(printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-')"
 }
 
-# tower 子 worktree 使用 <父 worktree>/.tower/worktrees/wt-* 布局，不拥有
-# 独立派生库/bucket；其父路径仅由这个严格布局得出，调用方仍需核验父 worktree
+# tower 子 worktree 使用 <父 worktree>/.tower/worktrees/wt-* 布局，复用父
+# 开发库/bucket；其父路径仅由这个严格布局得出，调用方仍需核验父 worktree
 # 已注册。非 tower 路径输出空字符串。
 worktree_tower_parent() {
     local path="$1" name container parent
@@ -46,6 +47,18 @@ worktree_tower_parent() {
     [[ -n "$parent" && "$parent" != "$path" ]] || return 0
     printf '%s\n' "$parent"
     return 0
+}
+
+# 测试库始终按当前 worktree 独立派生；tower 子实例把父名纳入标识，避免
+# 不同父实例下的同名 wt-* 共用测试库。与 tests/postgres_support.py 同规则。
+worktree_derived_test_db_for_path() {
+    local path="$1" parent
+    parent="$(worktree_tower_parent "$path")"
+    if [[ -n "$parent" ]]; then
+        worktree_derived_test_db "$(basename "$parent")_$(basename "$path")"
+    else
+        worktree_derived_test_db "$(basename "$path")"
+    fi
 }
 
 # 列出仍注册且目录存在的 tower 子 worktree（每行一个绝对路径）。git 查询
@@ -124,23 +137,24 @@ worktree_registration_owns_resources() {
 # 列出与 WT 派生出同名资源的其他已注册 worktree，每行
 # `<worktree名><TAB><撞名的资源名>`（一个 worktree 撞多个资源则多行）。
 # 只看目录仍存在的 worktree（目录已不在的 prunable 条目没有使用方）；跳过
-# 主仓库根（第一个条目，从不初始化派生资源）、tower 子 worktree（复用父
-# 资源、不按自己的名字派生）与同名条目（WT 自身）。
-# INCLUDE_SELF=1 时同名条目也算冲突——但只认「已完成初始化的登记」为资源
-# 主，且该判定覆盖**所有**派生名碰撞的登记（含别名：foo_bar 与 foo-bar
-# 归一派生同一库名）：无完成标记且 .env 未指向自身派生库的登记，是阻塞在
-# 锁上的待初始化实例（init 在取锁后才碰资源），不拥有任何资源，不构成
-# 冲突——删除旧资源后它的 init 在干净石板上自建，不会复用旧实例的数据
-# （#1084）。别名场景若把待初始化登记当冲突中止删除，遗留资源会被它的
-# init 当作已有资源复用（跨实例数据复用）。
+# 主仓库根与目标自身。tower 子 worktree 只豁免开发库/bucket，其测试库仍
+# 按完整路径（含父名）参与撞名检查；WT_PATH 用于 tower 目标自身。
+# INCLUDE_SELF=1 时同名条目也算冲突——普通 worktree 只认「已完成初始化的
+# 登记」为资源主（#1084）；tower 没有独立开发资源标记，但其测试库仍须保留
+# 检查，不能用开发库/.env 的归属判定把它整体跳过。
 # `git worktree list` 失败返回 2（调用方必须当作「无法确认」拒绝继续）。
-#   用法: worktree_derived_name_conflicts REPO_DIR WT [INCLUDE_SELF]
+#   用法: worktree_derived_name_conflicts REPO_DIR WT [INCLUDE_SELF] [WT_PATH]
 worktree_derived_name_conflicts() {
-    local repo="$1" wt="$2" include_self="${3:-0}" listing path other first=1
-    local db test_db bucket
+    local repo="$1" wt="$2" include_self="${3:-0}" wt_path="${4:-}"
+    local listing path other first=1 db test_db bucket tower_parent target_tower_parent=""
     listing="$(cd "$repo" && git worktree list --porcelain)" || return 2
     db="$(worktree_derived_db "$wt")"
-    test_db="$(worktree_derived_test_db "$wt")"
+    if [[ -n "$wt_path" ]]; then
+        test_db="$(worktree_derived_test_db_for_path "$wt_path")"
+        target_tower_parent="$(worktree_tower_parent "$wt_path")"
+    else
+        test_db="$(worktree_derived_test_db "$wt")"
+    fi
     bucket="$(worktree_derived_bucket "$wt")"
     while IFS= read -r path; do
         if [[ "$first" -eq 1 ]]; then
@@ -148,22 +162,28 @@ worktree_derived_name_conflicts() {
             continue
         fi
         [[ -d "$path" ]] || continue
-        [[ -z "$(worktree_tower_parent "$path")" ]] || continue
         other="$(basename "$path")"
-        if [[ "$other" == "$wt" && "$include_self" != "1" ]]; then
-            continue
+        if [[ "$include_self" != "1" ]]; then
+            if [[ -n "$wt_path" && "$path" == "$wt_path" ]]; then
+                continue
+            elif [[ -z "$wt_path" && "$other" == "$wt" ]]; then
+                continue
+            fi
         fi
-        if [[ "$include_self" == "1" ]]; then
+        tower_parent="$(worktree_tower_parent "$path")"
+        if [[ "$include_self" == "1" && -z "$tower_parent" ]]; then
             worktree_registration_owns_resources "$path" "$other" || continue
         fi
-        if [[ "$(worktree_derived_db "$other")" == "$db" ]]; then
-            printf '%s\t%s\n' "$other" "$db"
+        if [[ -z "$target_tower_parent" && -z "$tower_parent" ]]; then
+            if [[ "$(worktree_derived_db "$other")" == "$db" ]]; then
+                printf '%s\t%s\n' "$other" "$db"
+            fi
+            if [[ "$(worktree_derived_bucket "$other")" == "$bucket" ]]; then
+                printf '%s\t%s\n' "$other" "$bucket"
+            fi
         fi
-        if [[ "$(worktree_derived_test_db "$other")" == "$test_db" ]]; then
+        if [[ "$(worktree_derived_test_db_for_path "$path")" == "$test_db" ]]; then
             printf '%s\t%s\n' "$other" "$test_db"
-        fi
-        if [[ "$(worktree_derived_bucket "$other")" == "$bucket" ]]; then
-            printf '%s\t%s\n' "$other" "$bucket"
         fi
     done <<EOF
 $(printf '%s\n' "$listing" | awk '/^worktree /{print substr($0, 10)}')
@@ -174,11 +194,11 @@ EOF
 # 存在派生名冲突（或无法列出 worktree）时向 stderr 打印原因并返回 1。
 # ACTION 是给人看的动作描述（如「建库/建 bucket」「删除派生库」）。
 # INCLUDE_SELF=1（删除派生资源前的权威检查）：同名 worktree 仍/又注册着
-# 也拒绝，见 worktree_derived_name_conflicts。
-#   用法: worktree_require_unique_derived_names REPO_DIR WT ACTION [INCLUDE_SELF]
+# 也拒绝，见 worktree_derived_name_conflicts。WT_PATH 仅 tower init 传入。
+#   用法: worktree_require_unique_derived_names REPO_DIR WT ACTION [INCLUDE_SELF] [WT_PATH]
 worktree_require_unique_derived_names() {
-    local repo="$1" wt="$2" action="$3" include_self="${4:-0}" conflicts rc=0
-    conflicts="$(worktree_derived_name_conflicts "$repo" "$wt" "$include_self")" || rc=$?
+    local repo="$1" wt="$2" action="$3" include_self="${4:-0}" wt_path="${5:-}" conflicts rc=0
+    conflicts="$(worktree_derived_name_conflicts "$repo" "$wt" "$include_self" "$wt_path")" || rc=$?
     if [[ "$rc" -ne 0 ]]; then
         echo "错误: 无法列出已注册 worktree（git worktree list 失败），无法确认派生名不冲突，拒绝${action}。" >&2
         return 1

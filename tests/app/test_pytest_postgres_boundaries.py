@@ -59,6 +59,36 @@ def test_postgres_support_import_has_no_database_creation_side_effect() -> None:
     assert "ensure_test_database" not in top_level_calls
 
 
+@pytest.mark.no_db
+@pytest.mark.parametrize(
+    ("module_path", "expected"),
+    [
+        ("repo/.worktrees/wt_101", "agent_legion_test_wt_101"),
+        (
+            "repo/.worktrees/develop/.tower/worktrees/wt-101",
+            "agent_legion_test_develop_wt_101",
+        ),
+        (
+            "repo/.worktrees/other/.tower/worktrees/wt-101",
+            "agent_legion_test_other_wt_101",
+        ),
+    ],
+)
+def test_worktree_database_name_scopes_tower_children_to_parent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    module_path: str,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(
+        postgres_support,
+        "__file__",
+        str(tmp_path / module_path / "tests" / "postgres_support.py"),
+    )
+
+    assert postgres_support._worktree_database_name() == expected
+
+
 @pytest.mark.parametrize(("database_exists", "expected_execution_count"), [(False, 4), (True, 3)])
 def test_database_creation_is_serialized_before_catalog_check(
     monkeypatch: pytest.MonkeyPatch,

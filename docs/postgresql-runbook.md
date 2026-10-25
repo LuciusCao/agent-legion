@@ -96,8 +96,11 @@ ALTER DATABASE <agent_legion_worktree> OWNER TO agent_legion_dev;
   creating a child-specific database, bucket, or initialization marker. The
   parent must already have `.env` (including database and bucket settings) and
   `deploy/secrets/vault_master_key`; otherwise child init fails before making
-  changes. Tower children do not participate in derived-name collisions.
-  `clean-worktree.sh` and `drop-worktree-db.sh` refuse to delete parent
+  changes. Tower test databases remain independent and use
+  `agent_legion_test_<parent>_<child>` so same-named children under different
+  parents cannot share pytest schemas. Development-database/bucket collision
+  exemptions do not skip this test-database check. `clean-worktree.sh` and
+  `drop-worktree-db.sh` refuse to delete parent
   resources while registered tower children still exist; tear down those
   children through tower first.
 - If `clean-worktree.sh` is SIGKILLed between removing the worktree and
