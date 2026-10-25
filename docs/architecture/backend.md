@@ -446,7 +446,6 @@ server/app/
 | BatchApprovalJobsResponse | BaseModel | results: list[ApprovalBatchResultResponse] | app/routes/job_batch_approval.py |
 | JobFilterPayload | BaseModel | status: str | None, search: str | None, workflow_version: int | None, workflo... | app/routes/job_batch_filter_contracts.py |
 | JobSelectionMixin | BaseModel | job_ids: list[str] | None, filter: JobFilterPayload | None, exclude_ids: list... | app/routes/job_batch_filter_contracts.py |
-| JobBatchOperationResponse | BaseModel | id: str, workspace_id: str, kind: JobBatchOperationKindParam, status: JobBatc... | app/routes/job_batch_operations.py |
 | JobBatchOperationAcceptedResponse | BaseModel | operation: JobBatchOperationResponse | app/routes/job_batch_operations.py |
 | JobBatchOperationResultItem | BaseModel | seq: int, result: dict[str, Any] | app/routes/job_batch_operations.py |
 | JobBatchOperationResultsResponse | BaseModel | results: list[JobBatchOperationResultItem], next_cursor: str | None | app/routes/job_batch_operations.py |
@@ -541,13 +540,13 @@ server/app/
 | QualityConfusionMatrix | BaseModel | tp: int, fp: int, fn: int, tn: int, precision: float | None, recall: float | ... | app/routes/quality_contracts.py |
 | QualityStatsGroup | BaseModel | node_key: str, skill_version: str, provider: str, model: str, runs: int, succ... | app/routes/quality_contracts.py |
 | QualityBatchStatsResponse | BaseModel | batch_id: str, groups: list[QualityStatsGroup] | app/routes/quality_contracts.py |
+| FeedingGateFields | BaseModel | feeding_gated: bool | None, workspace_backlog: int | None, watermark: int | N... | app/routes/run_batch_record.py |
 | RunBatchListResponse | BaseModel | batches: list[RunBatchListItem], next_cursor: str | None, active_count: int | app/routes/run_batches_contracts.py |
 | RunBatchArchiveResponse | BaseModel | batch: RunBatchListItem | app/routes/run_batches_contracts.py |
 | RunCreateRequest | BaseModel | items: list[RunItem], mode: Literal['sync', 'async'] | None | app/routes/run_contracts.py |
 | RunRecord | BaseModel | id: str, workspace_id: str, source_kind: str, status: str, created_count: int... | app/routes/run_contracts.py |
 | RunCreateResponse | BaseModel | run: RunRecord, created_count: int, job_ids: list[str], skipped_count: int | app/routes/run_contracts.py |
 | RunListResponse | BaseModel | runs: list[RunRecord] | app/routes/run_contracts.py |
-| RunBatchRecord | BaseModel | run_id: str, status: str, items_total: int, processed_count: int, jobs_create... | app/routes/run_contracts.py |
 | RunAcceptedResponse | BaseModel | run: RunRecord, batch: RunBatchRecord | app/routes/run_contracts.py |
 | RunJobStats | BaseModel | total: int, by_status: dict[str, int] | app/routes/run_contracts.py |
 | RunDetailResponse | BaseModel | run: RunRecord, job_stats: RunJobStats, batch: RunBatchRecord | None | app/routes/run_contracts.py |

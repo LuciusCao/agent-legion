@@ -91,5 +91,8 @@ export function jobBatchOpToCard(
     createdBy: op.created_by ?? '',
     archivedAt: 'archived_at' in op ? (op.archived_at ?? null) : null,
     archiveSource: 'archive_source' in op ? (op.archive_source ?? null) : null,
+    feedingGated: op.feeding_gated ?? false,
+    workspaceBacklog: op.workspace_backlog ?? null,
+    watermark: op.watermark ?? null,
   }
 }

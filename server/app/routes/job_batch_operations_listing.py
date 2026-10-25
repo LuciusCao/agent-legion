@@ -17,7 +17,7 @@ routes/job_batch_operations.py sits inside its growth-allowance band).
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 
 from server.app.auth.dependencies import reject_studio_agent_scope
@@ -61,6 +61,7 @@ def create_job_batch_operations_listing_router(job_db: JobQueries) -> APIRouter:
         response_model=JobBatchOperationListResponse,
     )
     def list_job_batch_operations(
+        request: Request,
         workspace_id: str,
         view: Literal["active", "ended", "archived"] = "active",
         limit: Annotated[int, Query(ge=1, le=200)] = 20,
@@ -68,7 +69,12 @@ def create_job_batch_operations_listing_router(job_db: JobQueries) -> APIRouter:
     ) -> JobBatchOperationListResponse:
         return JobBatchOperationListResponse(
             **batch_ops_listing.list_job_batch_operations(
-                job_db, workspace_id, view=view, limit=limit, cursor=cursor
+                job_db,
+                workspace_id,
+                settings=request.app.state.settings,
+                view=view,
+                limit=limit,
+                cursor=cursor,
             )
         )
 

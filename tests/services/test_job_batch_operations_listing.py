@@ -47,6 +47,7 @@ def _insert_operation(
     archived_at: datetime | None = None,
     created_at: datetime | None = None,
     items_total: int = 2,
+    processed: int | None = None,
 ) -> None:
     _seed_workspace(job_db, workspace_id)
     with job_db.connect() as conn:
@@ -62,7 +63,7 @@ def _insert_operation(
                 kind,
                 status,
                 items_total,
-                items_total if status == "completed" else 0,
+                (items_total if status == "completed" else 0) if processed is None else processed,
                 created_at,
                 finished_at,
                 archived_at,
@@ -70,13 +71,13 @@ def _insert_operation(
         )
 
 
-def _list(job_db, view: str, limit: int = 20, cursor: str | None = None) -> dict:
+def _list(job_db, settings, view: str, limit: int = 20, cursor: str | None = None) -> dict:
     return listing.list_job_batch_operations(
-        job_db, _WORKSPACE, view=view, limit=limit, cursor=cursor
+        job_db, _WORKSPACE, settings=settings, view=view, limit=limit, cursor=cursor
     )
 
 
-def test_auto_archive_boundary_is_seven_days(job_db) -> None:
+def test_auto_archive_boundary_is_seven_days(job_db, settings) -> None:
     """finished_at 恰好落在窗口内的一侧进 ended，另一侧进 archived(auto)。"""
     # 余量取 1 小时而非分钟级（run_batches 同形测试的既有纪律）：测试读时钟
     # 与 service 读时钟之间隔着整段 seed/查询，collection→execution 漂移永远
@@ -87,36 +88,36 @@ def test_auto_archive_boundary_is_seven_days(job_db) -> None:
     _insert_operation(job_db, "op-inside", status="completed", finished_at=inside)
     _insert_operation(job_db, "op-outside", status="completed", finished_at=outside)
 
-    ended = _list(job_db, "ended")
+    ended = _list(job_db, settings, "ended")
     assert [op["id"] for op in ended["operations"]] == ["op-inside"]
-    archived = _list(job_db, "archived")
+    archived = _list(job_db, settings, "archived")
     assert [op["id"] for op in archived["operations"]] == ["op-outside"]
     assert archived["operations"][0]["archive_source"] == "auto"
 
 
-def test_bad_cursor_raises_400_family(job_db) -> None:
+def test_bad_cursor_raises_400_family(job_db, settings) -> None:
     _seed_workspace(job_db)
     for bad in ("no-pipe", "2026-13-99T00:00:00+00:00|op-x", "|op-x"):
         with pytest.raises(InvalidOperationError):
-            _list(job_db, "ended", cursor=bad)
+            _list(job_db, settings, "ended", cursor=bad)
     # 空串 cursor 等价于未传（首页），不报错。
-    assert _list(job_db, "ended", cursor="")["operations"] == []
+    assert _list(job_db, settings, "ended", cursor="")["operations"] == []
     # active 视图不分页：带 cursor 即错。
     with pytest.raises(InvalidOperationError):
-        _list(job_db, "active", cursor=f"{_now().isoformat()}|op-x")
+        _list(job_db, settings, "active", cursor=f"{_now().isoformat()}|op-x")
 
 
-def test_unknown_view_and_workspace(job_db) -> None:
+def test_unknown_view_and_workspace(job_db, settings) -> None:
     _seed_workspace(job_db)
     with pytest.raises(InvalidOperationError):
-        _list(job_db, "later")
+        _list(job_db, settings, "later")
     with pytest.raises(NotFoundError):
         listing.list_job_batch_operations(
-            job_db, "missing-ws", view="active", limit=20, cursor=None
+            job_db, "missing-ws", settings=settings, view="active", limit=20, cursor=None
         )
 
 
-def test_active_view_orders_queued_then_in_flight_and_counts(job_db) -> None:
+def test_active_view_orders_queued_then_in_flight_and_counts(job_db, settings) -> None:
     """进行中（含 paused）按发起时间倒序、排队按提交顺序；终态不出现；
     active_count 与视图无关。"""
     now = _now()
@@ -130,7 +131,7 @@ def test_active_view_orders_queued_then_in_flight_and_counts(job_db) -> None:
     _insert_operation(job_db, "op-paused", status="paused", created_at=now)
     _insert_operation(job_db, "op-ended", status="completed", finished_at=now - timedelta(hours=1))
 
-    active = _list(job_db, "active")
+    active = _list(job_db, settings, "active")
     assert [op["id"] for op in active["operations"]] == [
         "op-paused",
         "op-running-new",
@@ -145,10 +146,10 @@ def test_active_view_orders_queued_then_in_flight_and_counts(job_db) -> None:
     assert item["kind"] == "pause" and item["created_by"] == "tester"
     assert item["reason_counts"] == {}
     # ended 视图同快照读同一徽标口径。
-    assert _list(job_db, "ended")["active_count"] == 4
+    assert _list(job_db, settings, "ended")["active_count"] == 4
 
 
-def test_ended_view_pages_by_keyset(job_db) -> None:
+def test_ended_view_pages_by_keyset(job_db, settings) -> None:
     now = _now()
     for index in range(3):
         _insert_operation(
@@ -168,16 +169,16 @@ def test_ended_view_pages_by_keyset(job_db) -> None:
         archived_at=now,
     )
 
-    page1 = _list(job_db, "ended", limit=2)
+    page1 = _list(job_db, settings, "ended", limit=2)
     assert [op["id"] for op in page1["operations"]] == ["op-ended-0", "op-ended-1"]
     assert page1["next_cursor"] is not None
-    page2 = _list(job_db, "ended", limit=2, cursor=page1["next_cursor"])
+    page2 = _list(job_db, settings, "ended", limit=2, cursor=page1["next_cursor"])
     assert [op["id"] for op in page2["operations"]] == ["op-ended-2"]
     # 短页不再发游标（瀑布流结束）。
     assert page2["next_cursor"] is None
 
 
-def test_archived_view_mixes_manual_and_auto_in_coalesce_order(job_db) -> None:
+def test_archived_view_mixes_manual_and_auto_in_coalesce_order(job_db, settings) -> None:
     now = _now()
     _insert_operation(
         job_db,
@@ -193,14 +194,14 @@ def test_archived_view_mixes_manual_and_auto_in_coalesce_order(job_db) -> None:
         archived_at=now - timedelta(hours=2),
     )
 
-    archived = _list(job_db, "archived")
+    archived = _list(job_db, settings, "archived")
     assert [op["id"] for op in archived["operations"]] == ["op-manual-recent", "op-auto-old"]
     by_id = {op["id"]: op for op in archived["operations"]}
     assert by_id["op-manual-recent"]["archive_source"] == "manual"
     assert by_id["op-auto-old"]["archive_source"] == "auto"
 
 
-def test_list_page_groups_reason_counts_in_one_query(job_db) -> None:
+def test_list_page_groups_reason_counts_in_one_query(job_db, settings) -> None:
     """列表页的 reason_counts 来自一次 group-by（不逐行查）：有结果行的 op
     拿到分解，无结果行的 op 拿空 dict。"""
     now = _now()
@@ -217,7 +218,7 @@ def test_list_page_groups_reason_counts_in_one_query(job_db) -> None:
                 (seq, f"job-{seq}", status, reason),
             )
 
-    ended = _list(job_db, "ended")
+    ended = _list(job_db, settings, "ended")
     by_id = {op["id"]: op for op in ended["operations"]}
     assert by_id["op-with-results"]["reason_counts"] == {"not_found": 2}
     assert by_id["op-no-results"]["reason_counts"] == {}
@@ -225,7 +226,7 @@ def test_list_page_groups_reason_counts_in_one_query(job_db) -> None:
     assert by_id["op-with-results"]["processed_count"] == 2
 
 
-def test_archive_404_409_and_idempotent_replay(job_db) -> None:
+def test_archive_404_409_and_idempotent_replay(job_db, settings) -> None:
     _insert_operation(job_db, "op-open", status="running")
     _insert_operation(
         job_db,
@@ -254,7 +255,7 @@ def test_archive_404_409_and_idempotent_replay(job_db) -> None:
     assert replay["operation"]["archive_source"] == "manual"
 
 
-def test_sweep_window_edges_and_results_cascade(job_db) -> None:
+def test_sweep_window_edges_and_results_cascade(job_db, settings) -> None:
     """归档后 90 天物理删除：manual 按 archived_at、auto 按 finished_at+7d+90d；
     窗口内与非终态存活；结果子表随 FK 级联。时钟注入，禁 sleep。"""
     moment = _now()
@@ -307,7 +308,7 @@ def test_sweep_window_edges_and_results_cascade(job_db) -> None:
     assert listing.sweep_archived_job_batch_operations(job_db, moment) == 0
 
 
-def test_sweep_accepts_bare_dsn(job_db) -> None:
+def test_sweep_accepts_bare_dsn(job_db, settings) -> None:
     """sweeper 入口持裸 DSN（#187 ConnectSource）：from_dsn 适配器同形工作。
     DSN 取自 facade 的 data-layer-private ``_path``（不 import
     tests.postgres_support——直接 import 会触发 postgres 清单登记要求，
@@ -321,3 +322,36 @@ def test_sweep_accepts_bare_dsn(job_db) -> None:
         archived_at=moment - timedelta(days=91),
     )
     assert listing.sweep_archived_job_batch_operations(job_db._path, moment) == 1
+
+
+def test_active_view_gates_only_work_creating_unfinished_operations(
+    job_db, settings, monkeypatch
+) -> None:
+    settings.executor_runtime.workflows.max_items_per_run = 100
+    _insert_operation(job_db, "op-gated", status="running", kind="rerun")
+    _insert_operation(job_db, "op-ungated-kind", status="running", kind="pause")
+    _insert_operation(job_db, "op-paused", status="paused", kind="rerun")
+    _insert_operation(job_db, "op-cursor-complete", status="running", kind="rerun", processed=2)
+    _insert_operation(job_db, "op-ended", status="completed", kind="rerun", finished_at=_now())
+    calls = 0
+
+    def counted_backlog(workspace_id: str) -> dict[str, int]:
+        nonlocal calls
+        calls += 1
+        assert workspace_id == _WORKSPACE
+        return {"pending": 100, "running": 0, "completed": 500}
+
+    monkeypatch.setattr(job_db, "count_jobs_by_status", counted_backlog)
+
+    active = _list(job_db, settings, "active")
+
+    by_id = {operation["id"]: operation for operation in active["operations"]}
+    assert by_id["op-gated"]["feeding_gated"] is True
+    assert by_id["op-ungated-kind"]["feeding_gated"] is False
+    assert by_id["op-paused"]["feeding_gated"] is False
+    assert by_id["op-cursor-complete"]["feeding_gated"] is False
+    assert all(operation["workspace_backlog"] == 100 for operation in active["operations"])
+    assert all(operation["watermark"] == 100 for operation in active["operations"])
+    assert calls == 1
+    _list(job_db, settings, "ended")
+    assert calls == 1

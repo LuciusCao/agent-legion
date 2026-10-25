@@ -32,6 +32,7 @@ from typing import Any
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.job_creation_pipeline import JobCreationPipeline
+from server.app.services.run_batches.feeding_gate import run_batch_watermark, workspace_backlog
 from server.app.services.run_item_resolution import resolve_run_items
 from server.app.services.run_text_items import is_text_item, materialize_text_items
 from server.app.settings import Settings
@@ -44,11 +45,6 @@ logger = logging.getLogger(__name__)
 # claim/update round trips while create_jobs_bulk still commits in its own
 # bounded sub-chunks.
 RUN_BATCH_CHUNK_SIZE = 500
-# Workspace-wide drip watermark (#505 CLI semantics): stop feeding while the
-# workspace's non-terminal job backlog is at/above this level; clamped by
-# workflows.max_items_per_run so the instance's per-run cap stays the tighter
-# bound (0 = unlimited → bare 30000).
-RUN_BATCH_WATERMARK = 30_000
 MAX_CHUNK_ERRORS = 20
 
 
@@ -68,13 +64,10 @@ class RunBatchFeeder:
         self.pipeline = JobCreationPipeline(job_db, settings, job_event_buffer=job_event_buffer)
 
     def _watermark(self) -> int:
-        cap = int(self.settings.executor_runtime.workflows.max_items_per_run or 0)
-        return min(RUN_BATCH_WATERMARK, cap) if cap > 0 else RUN_BATCH_WATERMARK
+        return run_batch_watermark(self.settings)
 
     def _workspace_backlog(self, workspace_id: str) -> int:
-        counts = self.job_db.count_jobs_by_status(workspace_id)
-        # count_jobs_by_status renames queued→pending for display.
-        return int(counts.get("pending", 0)) + int(counts.get("running", 0))
+        return workspace_backlog(self.job_db, workspace_id)
 
     def consume_once(self) -> bool:
         batch = self.job_db.claim_run_batch()

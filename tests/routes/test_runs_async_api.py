@@ -39,7 +39,7 @@ def _submit_async(client: TestClient, workspace_id: str, items: list[dict]):
     )
 
 
-def test_async_submit_returns_202_handle(client: TestClient) -> None:
+def test_async_submit_returns_202_handle(client: TestClient, monkeypatch) -> None:
     ws = _create_workspace(client)
     _insert_material(client, ws, "mat-1")
 
@@ -54,11 +54,24 @@ def test_async_submit_returns_202_handle(client: TestClient) -> None:
     assert batch["status"] == "pending"
     assert batch["items_total"] == 1
     assert batch["processed_count"] == 0 and batch["jobs_created"] == 0
+    assert batch["feeding_gated"] is None
+    assert batch["workspace_backlog"] is None and batch["watermark"] is None
 
-    # 轮询面：GET detail 携带 batch 句柄 + job_stats。
+    # 轮询面：GET detail 携带 batch 句柄 + job_stats + 同源水位派生态。
+    monkeypatch.setattr(
+        client.app.state.settings.executor_runtime.workflows, "max_items_per_run", 1
+    )
+    monkeypatch.setattr(
+        client.app.state.job_db,
+        "count_jobs_by_status",
+        lambda workspace_id: {"pending": 1, "running": 0} if workspace_id == ws else {},
+    )
     detail = client.get(f"/api/workspaces/{ws}/runs/{body['run']['id']}")
     assert detail.status_code == 200, detail.text
-    assert detail.json()["batch"]["status"] == "pending"
+    detail_batch = detail.json()["batch"]
+    assert detail_batch["status"] == "pending"
+    assert detail_batch["feeding_gated"] is True
+    assert detail_batch["workspace_backlog"] == 1 and detail_batch["watermark"] == 1
     assert detail.json()["job_stats"] == {"total": 0, "by_status": {}}
 
 

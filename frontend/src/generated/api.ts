@@ -5015,6 +5015,11 @@ export interface components {
       error_message: string
       /** Failed Count */
       failed_count: number
+      /**
+       * Feeding Gated
+       * @description 未完成投喂是否正被 workspace 积压水位门控
+       */
+      feeding_gated?: boolean | null
       /** Finished At */
       finished_at?: string | null
       /** Id */
@@ -5064,6 +5069,16 @@ export interface components {
       succeeded_count: number
       /** Updated At */
       updated_at?: string | null
+      /**
+       * Watermark
+       * @description feeder 当前生效的 workspace 积压水位
+       */
+      watermark?: number | null
+      /**
+       * Workspace Backlog
+       * @description 派生快照中的 pending + running 任务数
+       */
+      workspace_backlog?: number | null
       /** Workspace Id */
       workspace_id: string
     }
@@ -5108,6 +5123,11 @@ export interface components {
       error_message: string
       /** Failed Count */
       failed_count: number
+      /**
+       * Feeding Gated
+       * @description 未完成投喂是否正被 workspace 积压水位门控
+       */
+      feeding_gated?: boolean | null
       /** Finished At */
       finished_at?: string | null
       /** Id */
@@ -5157,6 +5177,16 @@ export interface components {
       succeeded_count: number
       /** Updated At */
       updated_at?: string | null
+      /**
+       * Watermark
+       * @description feeder 当前生效的 workspace 积压水位
+       */
+      watermark?: number | null
+      /**
+       * Workspace Backlog
+       * @description 派生快照中的 pending + running 任务数
+       */
+      workspace_backlog?: number | null
       /** Workspace Id */
       workspace_id: string
     }
@@ -6691,6 +6721,11 @@ export interface components {
        * @description chunk_errors 已达 20 条上限时为 true：真实失败数 ≥ failed_item_count
        */
       failed_item_count_lower_bound: boolean
+      /**
+       * Feeding Gated
+       * @description 未完成投喂是否正被 workspace 积压水位门控
+       */
+      feeding_gated?: boolean | null
       /** Finished At */
       finished_at: string | null
       /** Items Total */
@@ -6714,6 +6749,16 @@ export interface components {
       status: string
       /** Updated At */
       updated_at: string | null
+      /**
+       * Watermark
+       * @description feeder 当前生效的 workspace 积压水位
+       */
+      watermark?: number | null
+      /**
+       * Workspace Backlog
+       * @description 派生快照中的 pending + running 任务数
+       */
+      workspace_backlog?: number | null
     }
     /**
      * RunBatchListResponse
@@ -6749,6 +6794,11 @@ export interface components {
       created_at: string | null
       /** Error Message */
       error_message: string
+      /**
+       * Feeding Gated
+       * @description 未完成投喂是否正被 workspace 积压水位门控
+       */
+      feeding_gated?: boolean | null
       /** Finished At */
       finished_at: string | null
       /** Items Total */
@@ -6772,6 +6822,16 @@ export interface components {
       status: string
       /** Updated At */
       updated_at: string | null
+      /**
+       * Watermark
+       * @description feeder 当前生效的 workspace 积压水位
+       */
+      watermark?: number | null
+      /**
+       * Workspace Backlog
+       * @description 派生快照中的 pending + running 任务数
+       */
+      workspace_backlog?: number | null
     }
     /**
      * RunBatchResponse

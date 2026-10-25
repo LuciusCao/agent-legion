@@ -46,6 +46,11 @@ const mockCancel = vi.mocked(cancelRunBatch)
 const mockOpList = vi.mocked(listJobBatchOperations)
 const mockOpArchive = vi.mocked(archiveJobBatchOperation)
 const mockOpResults = vi.mocked(listJobBatchOperationResults)
+const workerPausedState = { paused: false }
+
+vi.mock('../hooks/useWorkerPausedStatus', () => ({
+  useWorkerPausedStatus: () => ({ data: workerPausedState.paused }),
+}))
 
 function batch(overrides: Record<string, unknown>) {
   return {
@@ -127,6 +132,7 @@ function op(overrides: Record<string, unknown>) {
 describe('TaskCenterPage（#1157 phase3）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    workerPausedState.paused = false
     useUiStore.setState({ toast: null })
     mockList.mockImplementation((_ws, options: { view: string }) => {
       if (options.view === 'active')
@@ -495,6 +501,83 @@ describe('TaskCenterPage（#1157 phase3）', () => {
     fireEvent.click(screen.getByText('关闭'))
     await waitFor(() =>
       expect(screen.queryByText('批量重跑 · 逐条结果')).not.toBeInTheDocument()
+    )
+  })
+
+  it('shows an independent feeding-gate badge and explanation on both card sources', async () => {
+    mockList.mockImplementation((_ws, options: { view: string }) =>
+      Promise.resolve(
+        options.view === 'active'
+          ? (page(
+              [
+                batch({
+                  run_id: 'run-gated',
+                  feeding_gated: true,
+                  workspace_backlog: 30000,
+                  watermark: 30000,
+                }),
+              ],
+              1
+            ) as never)
+          : (page([], 1) as never)
+      )
+    )
+    mockOpList.mockImplementation((_ws, options: { view: string }) =>
+      Promise.resolve(
+        options.view === 'active'
+          ? (opPage(
+              [
+                op({
+                  id: 'op-gated',
+                  feeding_gated: true,
+                  workspace_backlog: 30000,
+                  watermark: 30000,
+                }),
+              ],
+              1
+            ) as never)
+          : (opPage([], 1) as never)
+      )
+    )
+    renderPage()
+
+    await screen.findByTestId('task-card-run-gated')
+    expect(await screen.findByTestId('task-card-op-gated')).toBeInTheDocument()
+    const badges = screen.getAllByText('水位等待')
+    expect(badges).toHaveLength(2)
+    expect(badges[0]).toHaveAttribute(
+      'title',
+      '当前任务积压 30,000，水位 30,000。积压降至水位以下后会自动继续。'
+    )
+    expect(screen.getAllByTestId('feeding-gate-note')[0]).toHaveTextContent(
+      '当前任务积压 30,000，水位 30,000。积压降至水位以下后会自动继续。'
+    )
+  })
+
+  it('combines workspace-paused and feeding-gated guidance', async () => {
+    workerPausedState.paused = true
+    mockList.mockImplementation((_ws, options: { view: string }) =>
+      Promise.resolve(
+        options.view === 'active'
+          ? (page(
+              [
+                batch({
+                  run_id: 'run-gated',
+                  feeding_gated: true,
+                  workspace_backlog: 100,
+                  watermark: 100,
+                }),
+              ],
+              1
+            ) as never)
+          : (page([], 1) as never)
+      )
+    )
+    renderPage()
+
+    const card = await screen.findByTestId('task-card-run-gated')
+    expect(card).toHaveTextContent(
+      '调度已暂停；当前任务积压 100，水位 100。恢复调度且积压降至水位以下后会自动继续。'
     )
   })
 })

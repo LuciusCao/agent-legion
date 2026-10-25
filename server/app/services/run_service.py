@@ -48,6 +48,7 @@ from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services import run_batch
 from server.app.services.job_creation_pipeline import JobCreationPipeline
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.run_batches.feeding_gate import batch_with_feeding_gate
 from server.app.services.run_item_resolution import create_run_response, resolve_run_items
 from server.app.services.run_text_items import is_text_item, materialize_text_items
 from server.app.settings import Settings
@@ -249,10 +250,11 @@ class RunService:
         # #1117: async runs carry their feeder handle on the detail payload —
         # the polling loop reads batch progress + job_stats from one response.
         batch = run_batch.get_run_batch_for_run(self.job_db, workspace_id, run_id)
+        record = run_batch.batch_record(batch) if batch is not None else None
         return {
             "run": _run_record(row),
             "job_stats": {"total": sum(by_status.values()), "by_status": by_status},
-            "batch": run_batch.batch_record(batch) if batch is not None else None,
+            "batch": batch_with_feeding_gate(self.job_db, self.settings, workspace_id, record),
         }
 
     def pause_run_batch(self, workspace_id: str, run_id: str) -> dict[str, Any]:

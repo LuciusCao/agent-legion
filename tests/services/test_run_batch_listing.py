@@ -73,7 +73,7 @@ def _insert_batch(
         )
 
 
-def test_auto_archive_boundary_is_seven_days(job_db) -> None:
+def test_auto_archive_boundary_is_seven_days(job_db, settings) -> None:
     """finished_at 恰好落在窗口内的一侧进 ended，另一侧进 archived(auto)。"""
     # 余量取 1 小时而非分钟级：测试读时钟与 service 读时钟之间隔着整段
     # seed/查询，边界语义不受余量影响，但 collection→execution 漂移永远
@@ -85,46 +85,53 @@ def test_auto_archive_boundary_is_seven_days(job_db) -> None:
     _insert_batch(job_db, "run-outside", status="completed", finished_at=outside)
 
     ended = run_batch_listing.list_run_batches(
-        job_db, _WORKSPACE, view="ended", limit=20, cursor=None
+        job_db, _WORKSPACE, settings=settings, view="ended", limit=20, cursor=None
     )
     assert [b["run_id"] for b in ended["batches"]] == ["run-inside"]
     archived = run_batch_listing.list_run_batches(
-        job_db, _WORKSPACE, view="archived", limit=20, cursor=None
+        job_db, _WORKSPACE, settings=settings, view="archived", limit=20, cursor=None
     )
     assert [b["run_id"] for b in archived["batches"]] == ["run-outside"]
     assert archived["batches"][0]["archive_source"] == "auto"
 
 
-def test_bad_cursor_raises_400_family(job_db) -> None:
+def test_bad_cursor_raises_400_family(job_db, settings) -> None:
     _seed_workspace(job_db)
     for bad in ("no-pipe", "2026-13-99T00:00:00+00:00|run-x", "|run-x"):
         with pytest.raises(InvalidOperationError):
             run_batch_listing.list_run_batches(
-                job_db, _WORKSPACE, view="ended", limit=20, cursor=bad
+                job_db, _WORKSPACE, settings=settings, view="ended", limit=20, cursor=bad
             )
     # 空串 cursor 等价于未传（首页），不报错。
     first = run_batch_listing.list_run_batches(
-        job_db, _WORKSPACE, view="ended", limit=20, cursor=""
+        job_db, _WORKSPACE, settings=settings, view="ended", limit=20, cursor=""
     )
     assert first["batches"] == []
     # active 视图不分页：带 cursor 即错。
     with pytest.raises(InvalidOperationError):
         run_batch_listing.list_run_batches(
-            job_db, _WORKSPACE, view="active", limit=20, cursor=f"{_now().isoformat()}|run-x"
+            job_db,
+            _WORKSPACE,
+            settings=settings,
+            view="active",
+            limit=20,
+            cursor=f"{_now().isoformat()}|run-x",
         )
 
 
-def test_unknown_view_and_workspace(job_db) -> None:
+def test_unknown_view_and_workspace(job_db, settings) -> None:
     _seed_workspace(job_db)
     with pytest.raises(InvalidOperationError):
-        run_batch_listing.list_run_batches(job_db, _WORKSPACE, view="later", limit=20, cursor=None)
+        run_batch_listing.list_run_batches(
+            job_db, _WORKSPACE, settings=settings, view="later", limit=20, cursor=None
+        )
     with pytest.raises(NotFoundError):
         run_batch_listing.list_run_batches(
-            job_db, "missing-ws", view="active", limit=20, cursor=None
+            job_db, "missing-ws", settings=settings, view="active", limit=20, cursor=None
         )
 
 
-def test_archive_service_404_and_409(job_db) -> None:
+def test_archive_service_404_and_409(job_db, settings) -> None:
     _insert_batch(job_db, "run-open", status="running")
     _insert_batch(
         job_db,
@@ -149,7 +156,7 @@ def test_archive_service_404_and_409(job_db) -> None:
         run_batch_listing.archive_run_batch(job_db, _WORKSPACE, "run-done")
 
 
-def test_failed_item_count_from_chunk_errors(job_db) -> None:
+def test_failed_item_count_from_chunk_errors(job_db, settings) -> None:
     """reviewer r1 P2-1：chunk 失败条目数按 chunk_start + 500 推导、以
     items_total 钳制、打满 20 条标下限；缺 chunk_start 的异形条目不炸。"""
     _insert_batch(
@@ -184,7 +191,7 @@ def test_failed_item_count_from_chunk_errors(job_db) -> None:
     )
 
     ended = run_batch_listing.list_run_batches(
-        job_db, _WORKSPACE, view="ended", limit=20, cursor=None
+        job_db, _WORKSPACE, settings=settings, view="ended", limit=20, cursor=None
     )
     by_id = {b["run_id"]: b for b in ended["batches"]}
     # min(500, 3000-2800) = 200；跳过（已有任务）= 3000-2788-200 = 12。
@@ -197,7 +204,7 @@ def test_failed_item_count_from_chunk_errors(job_db) -> None:
     assert by_id["run-legacy-shape"]["failed_item_count"] == 0
 
 
-def test_resubmit_heal_clears_archived_at(job_db) -> None:
+def test_resubmit_heal_clears_archived_at(job_db, settings) -> None:
     """failed+archived 的 batch 被同 digest 重提治愈后重回 active，归档位清空。"""
     run_id = "run-heal"
     _insert_batch(job_db, run_id, status="failed", finished_at=_now(), archived_at=_now())
@@ -209,10 +216,45 @@ def test_resubmit_heal_clears_archived_at(job_db) -> None:
     assert reset["status"] == "pending"
     assert reset["archived_at"] is None
     active = run_batch_listing.list_run_batches(
-        job_db, _WORKSPACE, view="active", limit=20, cursor=None
+        job_db, _WORKSPACE, settings=settings, view="active", limit=20, cursor=None
     )
     assert [b["run_id"] for b in active["batches"]] == [run_id]
     archived = run_batch_listing.list_run_batches(
-        job_db, _WORKSPACE, view="archived", limit=20, cursor=None
+        job_db, _WORKSPACE, settings=settings, view="archived", limit=20, cursor=None
     )
     assert archived["batches"] == []
+
+
+def test_active_view_derives_feeding_gate_from_one_backlog_read(
+    job_db, settings, monkeypatch
+) -> None:
+    settings.executor_runtime.workflows.max_items_per_run = 100
+    _insert_batch(job_db, "run-gated", status="running")
+    _insert_batch(job_db, "run-paused", status="paused")
+    _insert_batch(job_db, "run-cursor-complete", status="running", processed=3)
+    _insert_batch(job_db, "run-ended", status="completed", processed=3, finished_at=_now())
+    calls = 0
+
+    def counted_backlog(workspace_id: str) -> dict[str, int]:
+        nonlocal calls
+        calls += 1
+        assert workspace_id == _WORKSPACE
+        return {"pending": 80, "running": 20, "completed": 500}
+
+    monkeypatch.setattr(job_db, "count_jobs_by_status", counted_backlog)
+
+    active = run_batch_listing.list_run_batches(
+        job_db, _WORKSPACE, settings=settings, view="active", limit=20, cursor=None
+    )
+
+    by_id = {batch["run_id"]: batch for batch in active["batches"]}
+    assert by_id["run-gated"]["feeding_gated"] is True
+    assert by_id["run-paused"]["feeding_gated"] is False
+    assert by_id["run-cursor-complete"]["feeding_gated"] is False
+    assert all(batch["workspace_backlog"] == 100 for batch in active["batches"])
+    assert all(batch["watermark"] == 100 for batch in active["batches"])
+    assert calls == 1
+    run_batch_listing.list_run_batches(
+        job_db, _WORKSPACE, settings=settings, view="ended", limit=20, cursor=None
+    )
+    assert calls == 1

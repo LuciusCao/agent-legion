@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from server.app.routes.run_contracts import RunBatchRecord
+from server.app.routes.run_batch_record import RunBatchRecord
 
 RunBatchView = Literal["active", "ended", "archived"]
 
