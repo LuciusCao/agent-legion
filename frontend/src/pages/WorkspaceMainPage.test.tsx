@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
+import {
+  render,
+  screen,
+  act,
+  configure,
+  fireEvent,
+  waitFor,
+} from '@testing-library/react'
 import { Link, Routes, Route } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import WorkspaceMainPage from './WorkspaceMainPage'
@@ -16,6 +23,9 @@ import { EventSourceMock } from '../testing/eventSourceMock'
 import type { WorkspaceStats } from '../types/workspaceTypes'
 import { makeJob } from '../testing/fixtures'
 import { makeAgentStatus } from '../testing/workspaceFixtures'
+
+// #1368：高负载下仍等待 DOM/store 信号，预算低于 20s 单测上限。
+configure({ asyncUtilTimeout: 10_000 })
 
 const mockApi = vi.fn()
 const mockFetchJobsSnapshot = vi.fn()
@@ -407,22 +417,26 @@ describe('WorkspaceMainPage', () => {
     await act(async () => {
       renderPageWithWorkspaceSwitcher()
     })
-    expect(screen.getByPlaceholderText('搜索 ID / 标题 / 批次')).toHaveValue(
-      'algebra'
-    )
+    expect(
+      await screen.findByPlaceholderText('搜索 ID / 标题 / 批次')
+    ).toHaveValue('algebra')
 
     await act(async () => {
       screen.getByRole('link', { name: '切换 Workspace' }).click()
     })
 
-    expect(useJobStore.getState().filterConfig).toEqual({
-      status: null,
-      search: '',
-      workflowVersion: null,
-      activeNodeKey: null,
-      paused: null,
-    })
-    expect(screen.getByPlaceholderText('搜索 ID / 标题 / 批次')).toHaveValue('')
+    await waitFor(() =>
+      expect(useJobStore.getState().filterConfig).toEqual({
+        status: null,
+        search: '',
+        workflowVersion: null,
+        activeNodeKey: null,
+        paused: null,
+      })
+    )
+    expect(
+      await screen.findByPlaceholderText('搜索 ID / 标题 / 批次')
+    ).toHaveValue('')
   })
 
   it('guides through Studio as step 1 for a workspace without a published workflow', async () => {

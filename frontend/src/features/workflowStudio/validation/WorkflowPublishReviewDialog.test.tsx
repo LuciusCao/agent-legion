@@ -231,6 +231,47 @@ describe('WorkflowPublishReviewDialog', () => {
     expect(screen.getByRole('button', { name: '确认发布' })).toBeEnabled()
   })
 
+  it('#1369/#1381: uses the filtered structural risk for mixed execution and label changes', () => {
+    const summary = buildChangeSummary(
+      makeSummaryResponse({
+        summary: {
+          risk_level: 'warning',
+          node_changes: [
+            {
+              type: 'modified',
+              node_key: 'write_script',
+              label: '撰写脚本',
+              node_type: 'agent',
+              fields: ['label', 'execution'],
+              risk: 'warning',
+            },
+          ],
+          edge_changes: [],
+          intake_changes: [],
+          metadata_changes: [],
+          risk_flags: [],
+        },
+      })
+    )
+
+    render(
+      <WorkflowPublishReviewDialog
+        open
+        activeRevision={revision}
+        nextVersion={2}
+        definitionHash="abcdef1234567890"
+        summary={summary}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('撰写脚本: 标签')).toBeInTheDocument()
+    expect(screen.queryByText(/执行配置/)).not.toBeInTheDocument()
+    expect(screen.getAllByText('提示').length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryByText('警告')).not.toBeInTheDocument()
+  })
+
   it('calls confirm once when user explicitly confirms', async () => {
     const onConfirm = vi.fn()
     const summary = buildChangeSummary(

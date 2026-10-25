@@ -119,6 +119,8 @@ describe('WorkflowChangeSummaryPanel', () => {
 
     expect(screen.getByText('撰写脚本: 标签')).toBeInTheDocument()
     expect(screen.queryByText(/执行配置/)).not.toBeInTheDocument()
+    expect(screen.getByText('风险等级: 提示')).toBeInTheDocument()
+    expect(screen.queryByText('警告')).not.toBeInTheDocument()
   })
 
   it('#1352: execution.runtime change stays visible as a structural field', () => {

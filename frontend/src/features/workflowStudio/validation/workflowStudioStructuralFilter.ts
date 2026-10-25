@@ -9,18 +9,40 @@ import {
   type NodeChangeGroup,
 } from './workflowStudioChanges'
 
+const INFO_ONLY_STRUCTURAL_FIELDS = new Set(['label', 'text_input'])
+
+function structuralSeverity(
+  change: NodeChangeGroup,
+  fields: string[]
+): ChangeSeverity {
+  if (
+    change.type !== 'modified' ||
+    change.severity !== 'warning' ||
+    !change.fields.includes('execution')
+  ) {
+    return change.severity
+  }
+  return fields.every((field) => INFO_ONLY_STRUCTURAL_FIELDS.has(field))
+    ? 'info'
+    : change.severity
+}
+
 /** 结构侧节点变更视图：execution-only 行整行剔除、结构/execution 混合
- * 节点剥掉 execution 字段（保留 runtime 等结构字段）。变更摘要面板与
- * 发布复核框共用此口径。 */
+ * 节点剥掉 execution 字段（保留 runtime 等结构字段）并重算风险。未知或
+ * 严重度依赖上下文的字段保留原档，避免误降级。 */
 export function structuralNodeChangeGroups(
   summary: ChangeSummaryViewModel | null
 ): NodeChangeGroup[] {
   return (summary?.nodeChanges ?? [])
     .filter((change) => !isRuntimeOnlyNodeChange(change))
-    .map((change) => ({
-      ...change,
-      fields: change.fields.filter((field) => field !== 'execution'),
-    }))
+    .map((change) => {
+      const fields = change.fields.filter((field) => field !== 'execution')
+      return {
+        ...change,
+        fields,
+        severity: structuralSeverity(change, fields),
+      }
+    })
 }
 
 /** 结构侧风险等级——execution-only 行（运行通道）不抬风险；后端

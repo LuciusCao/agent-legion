@@ -42,17 +42,16 @@ export function toDagNodes(nodes: JobNode[]): DagGraphNode[] {
     inputs: n.inputs,
     outputs: n.outputs,
     duration: computeNodeDuration(n.started_at, n.finished_at),
-    // #1180：类型徽标跟现行 type 词汇——agent 节点（契约投影 agent_id
-    // 非空）显示 agent；code 节点显示 code；route_error 节点（两者皆
-    // None，#1128）不渲染类型徽标。executor_id 的 'code' 池键占位不再
-    // 进入展示层。
+    // start/approval 不携带 capability；route_error 的 executor_kind 与
+    // agent_id 皆 None。executor_id 的 'code' 池键不进入展示层。
     executionType: n.agent_id
       ? 'agent'
-      : n.executor_kind === 'code'
+      : n.executor_kind === 'code' && n.capability
         ? 'code'
         : null,
     agentId: n.agent_id ?? null,
     workerId: n.worker_id ?? null,
+    capability: n.capability,
   }))
 }
 

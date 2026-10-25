@@ -1,5 +1,6 @@
 import React from 'react'
 import {
+  configure,
   render,
   screen,
   waitFor,
@@ -11,6 +12,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioPage } from './WorkflowStudioPage'
 import { TestQueryProvider } from '../testing/testQueryClient'
 import { useUiStore } from '../stores/uiStore'
+
+// #1368：高负载下仍等待 UI 信号，预算低于 20s 单测上限。
+configure({ asyncUtilTimeout: 10_000 })
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ workspaceId: 'ws1' }),
@@ -282,7 +286,7 @@ describe('WorkflowStudioPage', () => {
     const passedChip = await within(identityIsland()).findByText(
       '✓ 校验通过',
       undefined,
-      { timeout: 4000 }
+      { timeout: 10000 }
     )
     expect(
       screen.queryByRole('dialog', { name: '变更与校验' })
@@ -311,7 +315,7 @@ describe('WorkflowStudioPage', () => {
 
     await within(identityIsland()).findByText(/未发布变更/)
     await within(identityIsland()).findByText('✗ 校验失败', undefined, {
-      timeout: 4000,
+      timeout: 10000,
     })
     // 发布按钮由自动校验结果门控：失败即禁用。
     const publish = within(identityIsland()).getByRole('button', {
@@ -416,11 +420,11 @@ describe('WorkflowStudioPage', () => {
         expect(
           screen.queryByRole('dialog', { name: /发布 workflow revision/ })
         ).toBeNull(),
-      { timeout: 4000 }
+      { timeout: 10000 }
     )
     const { getState } = useUiStore
     await waitFor(() => expect(getState().toast?.message).toBe('保存成功'), {
-      timeout: 4000,
+      timeout: 10000,
     })
   })
 })

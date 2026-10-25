@@ -149,6 +149,31 @@ describe('toDagNodes', () => {
     expect(nodes[0].workerId).toBeNull()
   })
 
+  it.each(['_start', 'review_gate'])(
+    'renders no code execution type for non-dispatching node %s (#1365)',
+    (nodeKey) => {
+      const nodes = toDagNodes([
+        makeNode(nodeKey, 'completed', {
+          capability: '',
+          executor_kind: 'code',
+        }),
+      ])
+
+      expect(nodes[0].executionType).toBeNull()
+    }
+  )
+
+  it('carries capability so a self-contained agent execution badge can be deduplicated (#1366)', () => {
+    const nodes = toDagNodes([
+      makeNode('review_keywords', 'pending', {
+        agent_id: 'review_keywords',
+      }),
+    ])
+
+    expect(nodes[0].capability).toBe('review_keywords')
+    expect(nodes[0].agentId).toBe('review_keywords')
+  })
+
   it('renders no execution type when the projection carries neither kind nor agent', () => {
     // route_error 节点（#1128）：executor_kind 与 agent_id 皆 None。
     const nodes = toDagNodes([makeNode('generate', 'pending')])
