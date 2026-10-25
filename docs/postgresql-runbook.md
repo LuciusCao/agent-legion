@@ -90,6 +90,19 @@ ALTER DATABASE <agent_legion_worktree> OWNER TO agent_legion_dev;
   `clean-worktree.sh` / `drop-worktree-db.sh` refuse names that collide with
   another worktree after normalization (#950) — avoid look-alike worktree
   names.
+- A registered parent worktree may contain tower children at
+  `.tower/worktrees/wt-*` (#1409). Their init accepts only this exact layout,
+  copies the parent's `.env` and vault key, and seeds worker state without
+  creating a child-specific database, bucket, or initialization marker. The
+  parent must already have `.env` (including database and bucket settings) and
+  `deploy/secrets/vault_master_key`; otherwise child init fails before making
+  changes. Tower test databases remain independent and use
+  `agent_legion_test_<parent>_<child>` so same-named children under different
+  parents cannot share pytest schemas. Development-database/bucket collision
+  exemptions do not skip this test-database check. `clean-worktree.sh` and
+  `drop-worktree-db.sh` refuse to delete parent
+  resources while registered tower children still exist; tear down those
+  children through tower first.
 - If `clean-worktree.sh` is SIGKILLed between removing the worktree and
   dropping its databases (or a worktree was removed by hand without cleanup),
   the stale derived databases survive. `init-worktree.sh` closes the

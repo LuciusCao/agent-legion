@@ -12,10 +12,18 @@ def _worker_schema() -> str:
 
 
 def _worktree_database_name() -> str:
-    # Isolate the test database per worktree: every worktree gets its own
-    # database derived from its directory name, so concurrent test runs from
-    # different worktrees can no longer drop each other's schemas.
-    slug = re.sub(r"[^a-zA-Z0-9_]", "_", Path(__file__).resolve().parents[1].name).lower()
+    # Isolate the test database per worktree. Tower children include the parent
+    # name because their short wt-* names are unique only within one parent.
+    worktree = Path(__file__).resolve().parents[1]
+    slug_source = worktree.name
+    if (
+        worktree.name.startswith("wt-")
+        and len(worktree.name) > 3
+        and worktree.parent.name == "worktrees"
+        and worktree.parent.parent.name == ".tower"
+    ):
+        slug_source = f"{worktree.parents[2].name}_{worktree.name}"
+    slug = re.sub(r"[^a-zA-Z0-9_]", "_", slug_source).lower()
     return f"agent_legion_test_{slug}"
 
 

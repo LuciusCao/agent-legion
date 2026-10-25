@@ -33,6 +33,7 @@
 #     漏删（#1084）；锁内集合比确认计划扩大（计划外资源）时交互模式中止、
 #     --yes 模式警告后继续——不删除用户从未见过、未确认的资源（#1084）；
 #   - 删库/删 bucket 前持锁重查：同名 worktree 被重建后又注册着也拒绝；
+#   - 父 worktree 仍有复用其资源的 tower 子 worktree 时拒绝清理（#1409）；
 #   - 全部建/删步骤在持锁进程内同步执行（R5 熔断收窄）：锁内没有嵌套或
 #     后台执行者，holder 的 pid 即执行者本身；本进程被 SIGKILL 的残余
 #     窗口只有「在途的那一条命令执行完」，不会有孤儿进程继续推进删除。
@@ -471,6 +472,9 @@ if [[ -d "$TARGET" ]]; then
     ')"
     BRANCH="${BRANCH#refs/heads/}"
 fi
+# tower 子 worktree 复用父实例的库/bucket；先确认没有依赖方，再以原有身份
+# 指纹作为 remove 前最后一次读（#1084 的读序不变）。
+worktree_require_no_tower_dependents "$ROOT" "$TARGET" "清理父 worktree" || exit 1
 if [[ "$(worktree_porcelain_entry)" != "$PLANNED_ENTRY" ]] \
     || [[ "$(target_identity)" != "$PLANNED_IDENTITY" ]]; then
     echo "错误: worktree '${WT}' 状态在确认/等锁期间已变化（被移除或重建），拒绝清理（#1084）。" >&2

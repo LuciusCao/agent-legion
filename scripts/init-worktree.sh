@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # 初始化新 git worktree 的开发环境（幂等，可重复执行）：
-#   0. 嵌套防护：worktree 必须是主仓库根的平级子目录，嵌套直接报错
+#   0. 嵌套防护：普通 worktree 必须是主仓库根的平级子目录；唯一例外是
+#      已注册父 worktree 下的 .tower/worktrees/wt-*（复用父资源，#1409）
 #   1. 从基准 worktree 复制 .env（若本 worktree 缺失；无法复制则 fail-fast——
 #      缺 .env 会让后端回落共享默认库/prod）
-#   2. 把 AGENT_LEGION_DATABASE_URL 指向按 worktree 名派生的专属 Postgres 库并尝试建库
+#   2. 普通 worktree 把 AGENT_LEGION_DATABASE_URL 指向按名字派生的专属库并尝试建库；
+#      tower 子 worktree 保留父配置，不建库/bucket，vault key 也从父实例复制
 #      （建库前在锁内做静默收养护栏（#1349）：无初始化完成标记而派生库已存在
 #      且非本实例所有时 fail-fast——旧实例清理中断残留的库不得被同名新实例
 #      静默沿用）
@@ -30,10 +32,20 @@ cd "$ROOT"
 # shellcheck source=worktree-names-lib.sh
 source "$ROOT/scripts/worktree-names-lib.sh"
 
-# 0. 嵌套防护（AGENTS.md §1）：worktree 一律是主仓库根的平级子目录，
-#    嵌套会让 data/、测试库派生与清理路径全部混乱，直接拒绝。
+# 0. 嵌套防护（AGENTS.md §1）：普通 worktree 必须是主仓库根的平级子目录。
+#    唯一例外是已注册父 worktree 下的 .tower/worktrees/wt-*（#1409）；
+#    它复用父开发库/bucket，但测试库按含父名的独立标识参与撞名检查。
 MAIN="$(git worktree list --porcelain | awk '/^worktree /&&!seen{print $2; seen=1}')"
-if [[ "$ROOT" != "$MAIN" && "$(dirname "$ROOT")" != "$MAIN/.worktrees" ]]; then
+TOWER_PARENT="$(worktree_tower_parent "$ROOT")"
+if [[ -n "$TOWER_PARENT" ]]; then
+    if ! git worktree list --porcelain | awk -v parent="$TOWER_PARENT" '
+        $0 == "worktree " parent { found = 1 }
+        END { exit !found }
+    '; then
+        echo "错误: tower 父 worktree 未注册（${TOWER_PARENT}），拒绝初始化。" >&2
+        exit 1
+    fi
+elif [[ "$ROOT" != "$MAIN" && "$(dirname "$ROOT")" != "$MAIN/.worktrees" ]]; then
     echo "错误: worktree 禁止嵌套（当前: ${ROOT}）。" >&2
     echo "请先 cd 到主仓库根（${MAIN}），再 git worktree add .worktrees/<name> -b <branch> <base>。" >&2
     exit 1
@@ -45,17 +57,33 @@ if [[ "$ROOT" == "$MAIN" ]]; then
     exit 0
 fi
 
-# 0.5 派生名撞名防护（#950）：worktree 名到库/bucket 名的映射不是单射，
-#     与其他已注册 worktree 派生出同名资源时 fail-fast（在任何副作用之前），
-#     否则两个 worktree 会静默共用同一个库与 bucket。
-#     检查到建库/建 bucket（2.5 末尾）持派生名锁（#1084）：并发的 clean/drop
-#     要么在本次检查前删完，要么在建完后才重新检查（届时本 worktree 已注册，
-#     对方撞名拒绝）。本脚本无交互，持锁期间不等用户输入。
-worktree_name_lock_acquire "$ROOT" "初始化 $(basename "$ROOT")（建库/建 bucket）" || exit 1
-worktree_require_unique_derived_names "$ROOT" "$(basename "$ROOT")" "初始化（建库/建 bucket）" || exit 1
-
 BASE="${1:-}"
-if [[ -z "$BASE" ]]; then
+if [[ -n "$TOWER_PARENT" ]]; then
+    if [[ $# -gt 0 && "$BASE" != "$TOWER_PARENT" ]]; then
+        echo "错误: tower worktree 只能从父 worktree 复用资源，不能指定其他基准（${BASE}）。" >&2
+        exit 1
+    fi
+    BASE="$TOWER_PARENT"
+    # 在任何复制/生成动作前确认父实例已具备可复用配置。缺项时先在父实例
+    # 重跑 init，不能给 tower 子实例另建库/bucket 或另生成 vault key。
+    if [[ ! -f "$BASE/.env" ]]; then
+        echo "错误: tower 父 worktree 缺少 .env（${BASE}/.env）。" >&2
+        echo "      请先在父 worktree 运行 scripts/init-worktree.sh，再重试。" >&2
+        exit 1
+    fi
+    for required_key in AGENT_LEGION_DATABASE_URL AGENT_LEGION_S3_BUCKET; do
+        if ! grep -qE "^(export )?${required_key}=." "$BASE/.env"; then
+            echo "错误: tower 父 worktree 的 .env 缺少 ${required_key}，无法复用派生资源。" >&2
+            echo "      请先在父 worktree 运行 scripts/init-worktree.sh，再重试。" >&2
+            exit 1
+        fi
+    done
+    if [[ ! -s "$BASE/deploy/secrets/vault_master_key" ]]; then
+        echo "错误: tower 父 worktree 缺少 vault_master_key，无法复用父实例 vault。" >&2
+        echo "      请先在父 worktree 运行 scripts/init-worktree.sh，再重试。" >&2
+        exit 1
+    fi
+elif [[ -z "$BASE" ]]; then
     # 默认取第一个非 bare、非当前、非主仓库根的 worktree 作基准（主仓库根是
     # bare/无工作区配置，永不适合作基准）。注意选中的基准自身也可能缺 .env，
     # 由下方 fail-fast 兜底（2026-08-18 事故：基准 worktree 缺 .env → 新
@@ -76,6 +104,17 @@ if [[ -n "$BASE" && "$BASE" == "$ROOT" ]]; then
     echo "当前就是基准 worktree，无需初始化。" >&2
     exit 0
 fi
+
+# 0.5 tower 只豁免开发库/bucket；其独立测试库仍按含父名的路径参与撞名
+#     检查（#1409 P2）。检查与后续资源动作统一持派生名锁（#950/#1084）。
+worktree_name_lock_acquire "$ROOT" "初始化 $(basename "$ROOT")（建库/建 bucket）" || exit 1
+if [[ -n "$TOWER_PARENT" ]]; then
+    worktree_require_unique_derived_names "$ROOT" "$(basename "$ROOT")" "初始化（测试库撞名检查）" 0 "$ROOT" || exit 1
+else
+    worktree_require_unique_derived_names "$ROOT" "$(basename "$ROOT")" "初始化（建库/建 bucket）" || exit 1
+fi
+NAME="$(worktree_derived_db "$(basename "$ROOT")")"
+NAME="${NAME#agent_legion_}"
 
 # 1. .env
 # 记录 .env 是否本趟从基准复制：静默收养护栏（#1349）的拒绝路径要移除本趟
@@ -104,9 +143,9 @@ fi
 # .env 含真实凭据（S3 key 等），权限收紧（幂等，与 install-deps.sh 一致）。
 chmod 600 .env
 
-# 2. 专属 Postgres 库
+# 2. 普通 worktree 建专属 Postgres 库；tower 子实例保留父 .env 中的值。
+if [[ -z "$TOWER_PARENT" ]]; then
 DB="$(worktree_derived_db "$(basename "$ROOT")")"
-NAME="${DB#agent_legion_}"
 DB_URL="postgresql://127.0.0.1:5432/${DB}"
 
 # 静默收养护栏（#1349）：clean-worktree.sh 在「git worktree remove」与
@@ -202,6 +241,9 @@ if command -v createdb >/dev/null 2>&1; then
 else
     echo "提示: 未找到 createdb，请手动创建数据库 ${DB}" >&2
 fi
+else
+    echo "tower 布局：复用父 worktree 的 AGENT_LEGION_DATABASE_URL（不创建独立库）"
+fi
 
 # 2.2 预暖 per-worktree .uv-cache：下方第一次 `uv run`（建 bucket / 生成
 #     vault key）在空 cache 上要从零拉整棵依赖树（分钟级，慢网更甚）。克隆
@@ -222,11 +264,12 @@ if [[ -n "$BASE" ]]; then
     fi
 fi
 
-# 2.5 专属 S3 bucket（材料存储，materials-and-runs 设计 §6.3）：开发机共享一个
-#     RustFS 实例，bucket 按 worktree 名派生并无条件改写 .env（与专属
-#     Postgres 库同一模式）；endpoint 与凭据随 .env 整体从基准 worktree 继承。
-#     endpoint 不可达时跳过建 bucket / 配 CORS（warning，不 fail——离线/CI
-#     场景），此后材料 API 仅降级为 503。
+# 2.5 普通 worktree 建专属 S3 bucket；tower 子实例复用父 bucket。
+if [[ -z "$TOWER_PARENT" ]]; then
+# 材料存储（materials-and-runs 设计 §6.3）：开发机共享一个 RustFS 实例，
+# bucket 按 worktree 名派生并无条件改写 .env；endpoint 与凭据随 .env 整体
+# 从基准 worktree 继承。endpoint 不可达时跳过建 bucket / 配 CORS（warning，
+# 不 fail——离线/CI 场景），此后材料 API 仅降级为 503。
 BUCKET="$(worktree_derived_bucket "$(basename "$ROOT")")"
 # 无条件改写为派生值（与上方 DATABASE_URL 块同一模式）：.env 是从基准
 # worktree 复制的，本就带着基准的 bucket，「保留原值」会让所有派生
@@ -255,34 +298,41 @@ fi
 # 登记为资源主；无标记的同名登记是阻塞在锁上的待初始化实例，不构成资源主。
 # 标记已加入 .gitignore，不阻塞 git worktree remove，随 worktree 目录消失。
 printf 'initialized_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$ROOT/$WORKTREE_INITIALIZED_MARKER"
-# 派生资源已建完，其余步骤（vault key、worker 状态副本）与派生名无关。
+else
+    echo "tower 布局：复用父 worktree 的 AGENT_LEGION_S3_BUCKET（不创建独立 bucket）"
+fi
+# 撞名检查与资源动作已完成，其余步骤与派生名无关。
 worktree_name_lock_release
 
 # 3. deploy/secrets
 mkdir -p deploy/secrets
 if [[ ! -s deploy/secrets/vault_master_key ]]; then
-    # --frozen 同上（issue #526）：frozen 调用从不写 lock。
-    UV_CACHE_DIR=.uv-cache uv run --frozen python -c \
-        "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
-        > deploy/secrets/vault_master_key
-    echo "已生成 deploy/secrets/vault_master_key"
+    if [[ -n "$TOWER_PARENT" ]]; then
+        cp "$BASE/deploy/secrets/vault_master_key" deploy/secrets/vault_master_key
+        echo "已复制 deploy/secrets/vault_master_key <- $BASE"
+    else
+        # --frozen 同上（issue #526）：frozen 调用从不写 lock。
+        UV_CACHE_DIR=.uv-cache uv run --frozen python -c \
+            "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" \
+            > deploy/secrets/vault_master_key
+        echo "已生成 deploy/secrets/vault_master_key"
+    fi
 fi
 chmod 600 deploy/secrets/vault_master_key
 
 # 4. worker 状态副本 data/agent-worker-service/worker.yaml：worker 唯一生效
 #    配置（issue #323，dev 侧不再有 config/agent-worker.yaml 种子）。缺失时
-#    从基准 worktree 的状态副本复制并改写本实例字段（host_url 按 worktree
-#    角色分流端口：prod worktree 的后端在 NATIVE_BACKEND_PORT（默认 8000，
-#    make prod-up），其余指向开发后端 DEV_BACKEND_PORT（默认 8001）——无
-#    条件种子 dev 端口会让 prod worktree 的 worker 静默连错端口、退避重试
-#    不易察觉（#625）；worker_id 按 worktree 派生）。后续修改走 worker
-#    控制台或 PUT /api/config。
+#    从基准 worktree 的状态副本复制并改写本实例 worker_id/name；普通实例按
+#    角色设置 host_url，tower 子实例保留父实例的实际 host_url（#1409）。
+#    后续修改走 worker 控制台或 PUT /api/config。
 STATE_COPY=data/agent-worker-service/worker.yaml
 if [[ ! -f "$STATE_COPY" ]]; then
     if [[ -n "$BASE" && -f "$BASE/$STATE_COPY" ]]; then
-        # 与 native-prod-up.sh 的端口约定一致（NATIVE_BACKEND_PORT 默认 8000）；
-        # 目录名按 basename 精确匹配 prod（AGENTS.md §1 的生产 worktree 惯例）。
-        if [[ "$(basename "$ROOT")" == "prod" ]]; then
+        # tower 子实例复用父后端的实际地址；普通实例按 worktree 角色分流端口
+        # （prod=NATIVE_BACKEND_PORT，其余=DEV_BACKEND_PORT，#625）。
+        if [[ -n "$TOWER_PARENT" ]]; then
+            SEEDED_HOST_URL="$(sed -n 's/^host_url:[[:space:]]*//p' "$BASE/$STATE_COPY" | tail -n 1)"
+        elif [[ "$(basename "$ROOT")" == "prod" ]]; then
             SEEDED_HOST_URL="http://127.0.0.1:${NATIVE_BACKEND_PORT:-8000}"
         else
             SEEDED_HOST_URL="http://127.0.0.1:${DEV_BACKEND_PORT:-8001}"

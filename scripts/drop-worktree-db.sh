@@ -17,7 +17,8 @@
 #      的撞名检查把同名 worktree 本身也算冲突，但只认已完成初始化的登记
 #      为资源主（#1084 R5）：无初始化完成标记且 .env 未指向派生库的同名
 #      登记是阻塞在锁上的待初始化实例，不拥有资源，不阻断删除——删完后
-#      它的 init 在干净石板上自建。
+#      它的 init 在干净石板上自建；
+#   5. 父 worktree 仍有复用其派生库的 tower 子 worktree 时拒绝删除（#1409）。
 #
 # 用法: scripts/drop-worktree-db.sh <worktree名> [--yes | --list]
 #   --list：只列出存在的目标库后退出（0=没有、10=有待删），不确认、不取锁、
@@ -45,6 +46,8 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=worktree-names-lib.sh
 source "$SCRIPT_DIR/worktree-names-lib.sh"
+MAIN="$(git -C "$SCRIPT_DIR" worktree list --porcelain | awk '/^worktree /&&!seen{print $2; seen=1}')"
+TARGET="$MAIN/.worktrees/$WT"
 
 # 护栏 0（#950）：派生名映射不是单射，另一个仍存在的 worktree 派生出同名
 # 库时拒绝删除——那是对方正在用的库。这里是不持锁的预检（尽早拒绝、免得白
@@ -119,4 +122,6 @@ if [[ "$_WT_DB_FOUND" -eq 0 ]]; then
     exit 0
 fi
 
+# tower 子 worktree 复用父实例的库；删除前重查已注册依赖方（#1409）。
+worktree_require_no_tower_dependents "$SCRIPT_DIR" "$TARGET" "删除父 worktree 派生库" || exit 1
 worktree_db_drop
