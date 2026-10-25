@@ -9,8 +9,8 @@ authoritative copy, EXEC-ARTIFACT-STORE-001) with legacy local job_dir names.
 
 #739 appends presigned GET download URLs to the object-backed entries: the
 signature covers ONLY the manifest row's storage_key (a server-generated key
-under jobs/{workspace_id}/{job_id}/ — record_remote/verify_remote reject any
-key outside that layout, so no request input reaches the signed string), and
+under jobs/{workspace_id}/{job_id}/ — current artifact layout validation
+rejects any key outside that layout, so no request input reaches the signed string), and
 the URL carries just SigV4 query parameters — no credentials. The URL is a
 channel to the SAME representation the raw endpoint serves: the raw
 endpoint's response headers (whitelisted Content-Type, attachment
