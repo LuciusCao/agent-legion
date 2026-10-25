@@ -466,6 +466,36 @@ describe('add/rename/remove schema properties', () => {
 })
 
 describe('patchWorkflowNodeConfigSchema (whole-block replace)', () => {
+  it('adds a verdict payload schema to an approval node (#1410)', () => {
+    const approval = [
+      'key: demo',
+      'nodes:',
+      '  gate:',
+      '    type: approval',
+      '    config: {rework_target: generate, feedback_artifact: review.json}',
+      '',
+    ].join('\n')
+    const next = patchWorkflowNodeConfigSchema(approval, 'gate', {
+      type: 'object',
+      properties: { verdict_note: { type: 'string' } },
+      required: ['verdict_note'],
+    })
+    const node = (
+      yaml.load(next) as {
+        nodes?: Record<string, Record<string, unknown>>
+      }
+    ).nodes?.gate
+    expect(node?.config_schema).toEqual({
+      type: 'object',
+      properties: { verdict_note: { type: 'string' } },
+      required: ['verdict_note'],
+    })
+    expect(node?.config).toEqual({
+      rework_target: 'generate',
+      feedback_artifact: 'review.json',
+    })
+  })
+
   it('replaces and deletes the whole schema block', () => {
     const replaced = patchWorkflowNodeConfigSchema(dagYaml, 'generate', {
       type: 'object',

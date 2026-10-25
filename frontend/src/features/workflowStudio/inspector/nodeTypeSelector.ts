@@ -11,7 +11,7 @@ export function isSwitchableNodeType(
 // APPROVAL_FORBIDDEN_FIELDS 镜像清单保持同步）。
 export const APPROVAL_SWITCH_WARNING =
   '切换为审批门将清除该节点的 capability、execution、skill、' +
-  'shard/reduce、config_schema 与审批白名单以外的 config，且不可撤销' +
+  'shard/reduce 与审批白名单以外的 config，且不可撤销' +
   '（草稿历史可在 workflow-draft 版本中回退）。确定切换吗？'
 
 // 破坏性清洗的确认（P1：设计稿 §4 要求确认文案明示清除范围；草稿自动
