@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from server.app.routes.run_batch_record import RunBatchRecord
 from server.app.routes.run_item_contracts import RunItem
 
 
@@ -60,29 +61,6 @@ class RunCreateResponse(BaseModel):
 
 class RunListResponse(BaseModel):
     runs: list[RunRecord]
-
-
-class RunBatchRecord(BaseModel):
-    """异步 run 的 feeder 句柄（#1117）：状态机 + 游标 + 计数器。
-
-    jobs_skipped 由调用方按 processed_count − jobs_created 推导（dedup 过滤
-    与 chunk 跳过同源，不单独物化）；chunk_errors 至多 20 条（intake 先例）。
-    """
-
-    run_id: str
-    status: str = Field(
-        description="pending/running/paused/completed/failed/cancelled（语义见 runs-async-mode.md §2）"
-    )
-    items_total: int
-    processed_count: int = Field(description="游标：已处理的条目数（含 dedup 跳过与失败 chunk）")
-    jobs_created: int = Field(
-        description="该 run 当前实有 job 数（每 tick 按 count_jobs_in_run 重算）"
-    )
-    chunk_errors: list[dict[str, Any]]
-    error_message: str
-    created_at: str | None
-    updated_at: str | None
-    finished_at: str | None
 
 
 class RunAcceptedResponse(BaseModel):

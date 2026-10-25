@@ -7,6 +7,7 @@ import { useRunBatchActions } from '../features/taskCenter/useRunBatches'
 import { useJobBatchOpArchive } from '../features/taskCenter/useJobBatchOpListing'
 import { useTaskCenterCards } from '../features/taskCenter/useTaskCenterCards'
 import { TaskOpResultsDialog } from '../features/taskCenter/TaskOpResultsDialog'
+import { useWorkerPausedStatus } from '../hooks/useWorkerPausedStatus'
 import styles from '../features/taskCenter/TaskCenterPage.module.css'
 
 /** 卡片底部「已进行 / 等待」行的重绘节拍（数据本身由查询轮询刷新）。 */
@@ -34,6 +35,7 @@ export default function TaskCenterPage() {
   const { showToast } = useUiStore()
   const nowMs = useNowMs()
   const archivedView = searchParams.get('view') === 'archived'
+  const workerPaused = useWorkerPausedStatus(workspaceId, !archivedView)
 
   const cards = useTaskCenterCards(workspaceId, archivedView)
   const runBatchActions = useRunBatchActions(workspaceId)
@@ -75,6 +77,7 @@ export default function TaskCenterPage() {
           card={card}
           nowMs={nowMs}
           readonly={readonly}
+          workspacePaused={workerPaused.data === true}
           actions={readonly ? {} : actionsFor(card)}
         />
       ))}

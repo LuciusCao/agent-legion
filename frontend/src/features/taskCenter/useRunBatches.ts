@@ -12,6 +12,7 @@ import {
   resumeRunBatch,
   type RunBatchView,
 } from '../../api/runBatchesApi'
+import { useActiveMigrationInvalidation } from './useActiveMigrationInvalidation'
 
 /**
  * 任务中心数据 hooks（#1157 phase3）。查询 key 集中在本地（feature 内聚，
@@ -26,13 +27,21 @@ export const runBatchKeys = {
 
 /** active 视图轮询间隔：进行中 3s，空闲 15s。 */
 export function useActiveRunBatches(workspaceId: string | undefined) {
-  return useQuery({
+  const query = useQuery({
     queryKey: runBatchKeys.view(workspaceId ?? '', 'active'),
     queryFn: () => listRunBatches(workspaceId!, { view: 'active' }),
     enabled: Boolean(workspaceId),
     refetchInterval: (query) =>
       (query.state.data?.active_count ?? 0) > 0 ? 3000 : 15000,
   })
+  useActiveMigrationInvalidation(
+    workspaceId,
+    query.data?.batches.map((batch) => batch.run_id),
+    query.data?.active_count,
+    runBatchKeys.view(workspaceId ?? '', 'ended'),
+    runBatchKeys.view(workspaceId ?? '', 'archived')
+  )
+  return query
 }
 
 const ENDED_PAGE_SIZE = 12

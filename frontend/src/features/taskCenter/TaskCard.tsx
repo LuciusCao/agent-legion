@@ -6,6 +6,7 @@ import {
   type TaskCardStatus,
 } from './taskCardModel'
 import { TaskCardFooter, type TaskCardActions } from './TaskCardFooter'
+import { TaskCardGate } from './TaskCardGate'
 
 export type { TaskCardActions } from './TaskCardFooter'
 
@@ -44,11 +45,13 @@ export function TaskCard({
   card,
   nowMs,
   readonly = false,
+  workspacePaused = false,
   actions = {},
 }: {
   card: TaskCardModel
   nowMs: number
   readonly?: boolean
+  workspacePaused?: boolean
   actions?: TaskCardActions
 }) {
   const percent =
@@ -76,6 +79,7 @@ export function TaskCard({
           {STATUS_LABEL[card.status]}
         </span>
       </div>
+      <TaskCardGate card={card} workspacePaused={workspacePaused} />
       <div className={styles.tcMeta}>
         {card.refLabel} <span className={styles.mono}>{card.refId}</span>
         {card.startedAt ? ` · ${formatDayTime(card.startedAt)} 发起` : ''}

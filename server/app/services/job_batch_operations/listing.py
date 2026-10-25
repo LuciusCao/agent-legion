@@ -25,9 +25,12 @@ from server.app.jobs.queries.job_batch_operations_listing import (  # fmt: skip
     AUTO_ARCHIVE_DAYS,
     job_batch_operation_listing_queries_from_dsn,
 )
+from server.app.services.job_batch_operations.feeding_gate import operation_feeding_gate
 from server.app.services.job_batch_operations.service import operation_record
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.services.job_intake_workspace import get_workspace
+from server.app.services.run_batches.feeding_gate import feeding_gate_snapshot
+from server.app.settings import Settings
 
 JobBatchOperationView = Literal["active", "ended", "archived"]
 _VIEWS: tuple[str, ...] = ("active", "ended", "archived")
@@ -77,11 +80,12 @@ def operation_list_item(
     *,
     now: datetime,
     reason_counts: dict[str, int] | None = None,
+    gate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The task-center card payload: the #946 operation handle plus the
     archive fields (归档时间 + 来源标注 manual/auto), exactly the run_batches
     card rule."""
-    item = operation_record(job_db, row, reason_counts=reason_counts)
+    item = {**operation_record(job_db, row, reason_counts=reason_counts), **(gate or {})}
     archived_at = iso_optional(row.get("archived_at"))
     finished_at = row.get("finished_at")
     archive_source: str | None = None
@@ -111,13 +115,23 @@ def _decode_cursor(raw: str) -> tuple[datetime, str]:
 
 
 def _page_items(
-    job_db: JobQueries, rows: list[dict[str, Any]], *, now: datetime
+    job_db: JobQueries,
+    rows: list[dict[str, Any]],
+    *,
+    now: datetime,
+    gate_snapshot: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """One page of cards with a page-wide reason-code breakdown (one grouped
     query, not one per row)."""
     reasons = job_db.summarize_job_batch_operation_reasons_many([str(row["id"]) for row in rows])
     return [
-        operation_list_item(job_db, row, now=now, reason_counts=reasons.get(str(row["id"]), {}))
+        operation_list_item(
+            job_db,
+            row,
+            now=now,
+            reason_counts=reasons.get(str(row["id"]), {}),
+            gate=operation_feeding_gate(gate_snapshot, row),
+        )
         for row in rows
     ]
 
@@ -126,6 +140,7 @@ def list_job_batch_operations(
     job_db: JobQueries,
     workspace_id: str,
     *,
+    settings: Settings,
     view: str,
     limit: int,
     cursor: str | None,
@@ -144,7 +159,8 @@ def list_job_batch_operations(
         if decoded is not None:
             raise InvalidOperationError("The active view is not paginated")
         rows = job_db.list_active_job_batch_operations(workspace_id)
-        operations = _page_items(job_db, rows, now=now)
+        snapshot = feeding_gate_snapshot(job_db, settings, workspace_id) if rows else None
+        operations = _page_items(job_db, rows, now=now, gate_snapshot=snapshot)
     elif view == "ended":
         rows = job_db.list_ended_job_batch_operations(
             workspace_id, auto_archive_cutoff=auto_cutoff, cursor=decoded, limit=limit

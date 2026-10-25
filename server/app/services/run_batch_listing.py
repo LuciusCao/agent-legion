@@ -23,6 +23,8 @@ from server.app.services import run_batch
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.services.job_intake_workspace import get_workspace
 from server.app.services.run_batch_feeder import MAX_CHUNK_ERRORS, RUN_BATCH_CHUNK_SIZE
+from server.app.services.run_batches.feeding_gate import add_feeding_gate_to_batches
+from server.app.settings import Settings
 
 RunBatchView = Literal["active", "ended", "archived"]
 _VIEWS: tuple[str, ...] = ("active", "ended", "archived")
@@ -120,6 +122,7 @@ def list_run_batches(
     job_db: JobQueries,
     workspace_id: str,
     *,
+    settings: Settings,
     view: str,
     limit: int,
     cursor: str | None,
@@ -139,6 +142,7 @@ def list_run_batches(
             raise InvalidOperationError("The active view is not paginated")
         rows = job_db.list_active_run_batches(workspace_id)
         batches = [batch_list_item(row, now=now) for row in rows]
+        add_feeding_gate_to_batches(job_db, settings, workspace_id, batches, rows)
     elif view == "ended":
         rows = job_db.list_ended_run_batches(
             workspace_id, auto_archive_cutoff=auto_cutoff, cursor=decoded, limit=limit

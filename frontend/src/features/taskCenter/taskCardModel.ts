@@ -1,4 +1,5 @@
 import type { RunBatchListItem } from '../../api/runBatchesApi'
+import type { FeedingGateCardModel } from './taskCardGateModel'
 
 // job-batch-op（#946）适配器姊妹分列在 jobBatchOpCardModel.ts（体积预算），
 // 此处 re-export 保持既有 import 路径稳定。
@@ -26,7 +27,7 @@ export type TaskCardReason = {
   count: number
 }
 
-export type TaskCardModel = {
+export type TaskCardModel = FeedingGateCardModel & {
   kind: TaskCardKind
   /** run_batches 视角下即 run_id（控制面与归档的操作键）。 */
   id: string
@@ -121,6 +122,9 @@ export function runBatchToCard(item: RunBatchListItem): TaskCardModel {
     createdBy: item.created_by,
     archivedAt: item.archived_at,
     archiveSource: item.archive_source ?? null,
+    feedingGated: item.feeding_gated ?? false,
+    workspaceBacklog: item.workspace_backlog ?? null,
+    watermark: item.watermark ?? null,
   }
 }
 

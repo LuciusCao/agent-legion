@@ -39,7 +39,10 @@ from server.app.services.job_batch_operations.handlers import (
     run_completion,
 )
 from server.app.services.job_batch_operations.selection import load_chunk
-from server.app.services.run_batch_feeder import RUN_BATCH_WATERMARK
+from server.app.services.run_batches.feeding_gate import (
+    WATERMARK_JOB_BATCH_OPERATION_KINDS as _WATERMARK_KINDS,
+)
+from server.app.services.run_batches.feeding_gate import run_batch_watermark, workspace_backlog
 from server.app.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -49,9 +52,6 @@ logger = logging.getLogger(__name__)
 # crash-replay re-scan window.
 JOB_BATCH_OPS_CHUNK_SIZE = 200
 MAX_CHUNK_ERRORS = 20
-_WATERMARK_KINDS = frozenset(
-    {"rerun", "rerun_by_failure", "run_to", "resume", "upgrade_workflow", "approve"}
-)
 # run_to/pause/resume loop the raw id list (duplicates included), so their
 # chunk results map back to seqs positionally; every other kind's frozen ids
 # are unique and map by job_id.
@@ -67,13 +67,10 @@ class JobBatchOpsFeeder:
         self.executors = executors
 
     def _watermark(self) -> int:
-        cap = int(self.settings.executor_runtime.workflows.max_items_per_run or 0)
-        return min(RUN_BATCH_WATERMARK, cap) if cap > 0 else RUN_BATCH_WATERMARK
+        return run_batch_watermark(self.settings)
 
     def _workspace_backlog(self, workspace_id: str) -> int:
-        counts = self.job_db.count_jobs_by_status(workspace_id)
-        # count_jobs_by_status renames queued→pending for display.
-        return int(counts.get("pending", 0)) + int(counts.get("running", 0))
+        return workspace_backlog(self.job_db, workspace_id)
 
     def consume_once(self) -> bool:
         operation = self.job_db.claim_job_batch_operation()

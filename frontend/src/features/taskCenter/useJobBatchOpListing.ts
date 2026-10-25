@@ -9,16 +9,25 @@ import {
   listJobBatchOperations,
 } from '../../api/jobBatchOperationsListApi'
 import { jobBatchOpKeys } from './useJobBatchOps'
+import { useActiveMigrationInvalidation } from './useActiveMigrationInvalidation'
 
 /** active 视图轮询间隔与 run-batches 对齐：进行中 3s，空闲 15s。 */
 export function useActiveJobBatchOps(workspaceId: string | undefined) {
-  return useQuery({
+  const query = useQuery({
     queryKey: [...jobBatchOpKeys.all(workspaceId ?? ''), 'active'] as const,
     queryFn: () => listJobBatchOperations(workspaceId!, { view: 'active' }),
     enabled: Boolean(workspaceId),
     refetchInterval: (query) =>
       (query.state.data?.active_count ?? 0) > 0 ? 3000 : 15000,
   })
+  useActiveMigrationInvalidation(
+    workspaceId,
+    query.data?.operations.map((operation) => operation.id),
+    query.data?.active_count,
+    [...jobBatchOpKeys.all(workspaceId ?? ''), 'ended'],
+    [...jobBatchOpKeys.all(workspaceId ?? ''), 'archived']
+  )
+  return query
 }
 
 const ENDED_PAGE_SIZE = 12

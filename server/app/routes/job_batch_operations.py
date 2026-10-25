@@ -27,6 +27,7 @@ from server.app.routes.job_batch_operation_kinds import (
 from server.app.routes.job_batch_operation_kinds import (
     JobBatchOperationStatus as JobBatchOperationStatus,
 )
+from server.app.routes.run_batch_record import FeedingGateFields
 from server.app.services.job_batch_operations import (
     dispatch_batch_selection,
     get_operation_for_workspace,
@@ -34,7 +35,7 @@ from server.app.services.job_batch_operations import (
 )
 
 
-class JobBatchOperationResponse(BaseModel):
+class JobBatchOperationResponse(FeedingGateFields):
     """The public operation handle (accept response + status poll)."""
 
     id: str

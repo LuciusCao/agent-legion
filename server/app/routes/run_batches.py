@@ -16,7 +16,7 @@ are identical, and the module stays mountable from main.py.
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from server.app.auth.api_intake import require_workspace_api_intake
 from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_TAG
@@ -38,6 +38,7 @@ def create_run_batches_router(job_db: JobQueries) -> APIRouter:
         tags=[API_SCOPE_INTAKE_TAG],
     )
     def list_run_batches(
+        request: Request,
         workspace_id: str,
         view: Literal["active", "ended", "archived"] = "active",
         limit: Annotated[int, Query(ge=1, le=200)] = 20,
@@ -45,7 +46,12 @@ def create_run_batches_router(job_db: JobQueries) -> APIRouter:
     ) -> RunBatchListResponse:
         return RunBatchListResponse(
             **run_batch_listing.list_run_batches(
-                job_db, workspace_id, view=view, limit=limit, cursor=cursor
+                job_db,
+                workspace_id,
+                settings=request.app.state.settings,
+                view=view,
+                limit=limit,
+                cursor=cursor,
             )
         )
 
