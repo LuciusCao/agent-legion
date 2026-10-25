@@ -130,16 +130,19 @@ code-pool 持有者请求 workspaces 行）。
 **批序全序**：每个跨 job 的批（finish_many、try_claim_many、expire、recover、
 agent sweep、两个 queued-request sweep、批 claim 的每个候选——code 也包括，
 借 ws 锁键纯当排序位，code 本不取 agent-ws 锁）一律按全库唯一序
-`(hashtext('agent-ws:' || workspace_id)::int, job_id)` 遍历；jobs 行已消失的
+`(hashtext('agent-ws:' || workspace_id)::int, hashtext('job-mutation:' || job_id)::int, job_id)` 遍历；jobs 行已消失的
 孤儿项用哨兵 `-(2**31)` 定位（`_ORPHAN_WS_LOCK_KEY`），job_id 收尾决胜。单一
 全序保证任意两批不会以相反顺序走同一对 job。job 创建批（`create_jobs_bulk`
-的每个 chunk，#1083）只含单一 workspace，全序在其上退化为 job_id 升序
-（`lock_job_mutations_sorted`），与上述各批一致。
+的每个 chunk，#1083）只含单一 workspace，`lock_job_mutations_sorted` 使用同一
+全序的 `(hashtext('job-mutation:' || job_id)::int, job_id)` 后缀，而不是另起
+纯 job_id 排序。
 
 **创建入锁域**（#1083）：job 删除的提交后清理在 `job-mutation` 锁下复核行
 不存在才把 job_dir rename 入 `.trash`；创建路径在 mkdir / upsert 之前取同一把
 锁并持到提交，二者互斥，同源重建要么在复核前已提交（清理整体跳过），要么等
-rename 完成后才 mkdir 空目录。
+rename 完成后才 mkdir 空目录。删除事件广播也在 `job-mutation` 锁的只读短事务内
+复核 jobs 行仍不存在后才记录/发送；复核发现同源重建或复核失败时跳过广播，避免
+旧 job 的 deleted 事件误删新 job（#1357）。
 
 ### 2.6 artifact 消费关系索引：唯一枚举处
 
@@ -477,7 +480,7 @@ manifest 按 legacy 消耗规则兜底：Worker 按排序后键序物化、同�
       有没有「先拿行锁再取 advisory 锁」的 AB-BA（历史教训：请求行 FOR UPDATE
       必须先移到 advisory 锁之后）？
 - [ ] 批路径是否只有一个全序？新增批是否沿用
-      `(hashtext('agent-ws:' || workspace_id)::int, job_id)`，包括不取 ws 锁的
+      `(hashtext('agent-ws:' || workspace_id)::int, hashtext('job-mutation:' || job_id)::int, job_id)`，包括不取 ws 锁的
       code 候选？有没有第二条排序规则（纯 job_id、按扫描返回序）混入？
 - [ ] advisory xact 锁语义是否被正确对待：savepoint 回滚不释放锁、xact 锁不可
       跨连接重入（持锁事务内不要另起短事务取同一把锁，会自锁）？

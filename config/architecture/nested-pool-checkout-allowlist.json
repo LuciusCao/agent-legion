@@ -6,6 +6,7 @@
     "server/app/agent_broker/claim_batch_select.py:241": "#1279 根因链：批选择 with 块调 _select_kind_batch（传递自 checkout）。同上。",
     "server/app/agent_broker/claim_evaluate.py:65": "#1279 根因链 conn-first 过渡边：evaluate_candidate 骑写事务调 admit_candidate（自 checkout）——本族缺陷的真实起源边。同上。",
     "server/app/agent_broker/claim_retry.py:58": "#1279 根因链：单条 claim with 块调 claim_in_transaction（传递自 checkout）。同上。",
+    "tests/db/test_claim_node_limit_remote.py:346": "#1379 检查器补齐后识别的既有竞态夹具：enter_with_mid_claim_insert 在调用方连接仍持有时，刻意用另一会话插入并提交 limit 行；独立连接正是竞态编排目的。",
     "tests/db/test_claim_node_limit_remote.py:361": "#1279 根因链：测试在持有写事务块内调 conn-first evaluate_candidate（其传递闭包含门禁自 checkout）。同上。",
     "tests/db/test_claim_node_limit_remote.py:373": "#1279 根因链，同上。",
     "tests/db/test_claim_node_limit_remote.py:517": "#1279 根因链，同上。",

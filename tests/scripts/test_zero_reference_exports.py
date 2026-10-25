@@ -90,6 +90,29 @@ def test_decorated_route_handler_is_exempt(tmp_path):
     assert not any("'router'" in error for error in errors)  # the decorator references it
 
 
+@pytest.mark.parametrize(
+    ("decorator", "definition"),
+    [
+        ("dataclass", "class DeadRecord:\n    value: int\n"),
+        ("functools.lru_cache(maxsize=None)", "def dead_cached():\n    return 1\n"),
+        ("contextlib.contextmanager", "def dead_context():\n    yield None\n"),
+    ],
+)
+def test_transforming_decorators_do_not_hide_dead_definitions(tmp_path, decorator, definition):
+    """#1375: only registration decorators exempt a zero-reference symbol."""
+    write_allowlist(tmp_path)
+    write(
+        tmp_path / "server/app/services/decorated.py",
+        f"import contextlib\nimport functools\nfrom dataclasses import dataclass\n\n"
+        f"@{decorator}\n{definition}",
+    )
+
+    errors = check_zero_reference_exports(tmp_path)
+
+    dead_name = definition.split()[1].split("(")[0].rstrip(":")
+    assert any(dead_name in error for error in errors)
+
+
 def test_init_py_reexport_surface_is_not_scanned(tmp_path):
     write_allowlist(tmp_path)
     write(tmp_path / "shared/__init__.py", "def helper():\n    return 1\n")
@@ -129,6 +152,31 @@ def test_frontend_live_import_and_export_default(tmp_path):
 
     assert not any("PanelTitle" in error for error in errors)
     assert not any("Panel'" in error for error in errors)  # export default is not tracked
+
+
+def test_frontend_barrel_reexport_does_not_keep_dead_export_alive(tmp_path):
+    """#1380: source + barrel contributes two declaration tokens, not a caller."""
+    write_allowlist(tmp_path)
+    write(tmp_path / "frontend/src/source.ts", "export interface DeadThing { x: string }\n")
+    write(tmp_path / "frontend/src/barrel.ts", "export { DeadThing } from './source';\n")
+
+    errors = check_zero_reference_exports(tmp_path)
+
+    assert sum("DeadThing" in error for error in errors) == 2
+
+
+def test_frontend_consumer_beyond_source_and_barrel_keeps_export_alive(tmp_path):
+    write_allowlist(tmp_path)
+    write(tmp_path / "frontend/src/source.ts", "export interface LiveThing { x: string }\n")
+    write(tmp_path / "frontend/src/barrel.ts", "export { LiveThing } from './source';\n")
+    write(
+        tmp_path / "frontend/src/consumer.ts",
+        "import type { LiveThing } from './barrel';\nexport const value: LiveThing = { x: 'x' };\n",
+    )
+
+    errors = check_zero_reference_exports(tmp_path)
+
+    assert not any("LiveThing" in error for error in errors)
 
 
 def test_allowlist_suppresses_stale_entry_fails(tmp_path):

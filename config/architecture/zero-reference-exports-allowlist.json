@@ -70,6 +70,36 @@
       "path": "frontend/src/types/index.ts",
       "symbol": "AgentRuntimeTools",
       "reason": "确认死代码（零引用类型别名）；同上，转 follow-up 清理"
+    },
+    {
+      "path": "frontend/src/components/jobActionEligibility.ts",
+      "symbol": "canDeleteJob",
+      "reason": "#1380 barrel 计数修复暴露的存量死导出（仅 barrel 自引用）；删除属 frontend/src 源码变更，转 follow-up 清理"
+    },
+    {
+      "path": "frontend/src/components/job/JobActionBar.tsx",
+      "symbol": "canDeleteJob",
+      "reason": "#1380 同一死导出的 barrel 重声明；随源定义一并做 follow-up 清理"
+    },
+    {
+      "path": "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.parse.ts",
+      "symbol": "parseWorkflowEdgeConditions",
+      "reason": "#1380 barrel 计数修复暴露的存量死导出（仅 barrel 自引用）；删除属 frontend/src 源码变更，转 follow-up 清理"
+    },
+    {
+      "path": "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.parse.ts",
+      "symbol": "parseWorkflowLabel",
+      "reason": "#1380 barrel 计数修复暴露的存量死导出（仅 barrel 自引用）；删除属 frontend/src 源码变更，转 follow-up 清理"
+    },
+    {
+      "path": "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.ts",
+      "symbol": "parseWorkflowEdgeConditions",
+      "reason": "#1380 同一死导出的 barrel 重声明；随源定义一并做 follow-up 清理"
+    },
+    {
+      "path": "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.ts",
+      "symbol": "parseWorkflowLabel",
+      "reason": "#1380 同一死导出的 barrel 重声明；随源定义一并做 follow-up 清理"
     }
   ]
 }

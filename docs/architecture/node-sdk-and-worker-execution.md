@@ -69,14 +69,17 @@ materials        # material 类 job 的本地物化块（design §6.2）
     审计哈希预取（`code_dispatch._prefetch_job_batch`）同样降级。节点侧 `ctx.batch` 因此可能为
     `None`，依赖它的节点须自行处理。
 - **特权动作留在父进程**：节点只记录事实，父进程执行。`ctx.report_auth_failure()` 在
-  `job_dir/.node_runtime/auth_failure` 写标记（内容为 node_config 里的 connection key，
-  可为空串）。`.node_runtime/` 是目录，不会被产物顶层文件清单捞走。失效按入口分路径：
+  `job_dir/.node_runtime/auth_failure-<execution_id>` 写本 execution 的标记（内容为
+  node_config 里的 connection key，可为空串）；只有手工构造、runtime 未携带 execution_id
+  的旧式上下文才回退固定名 `auth_failure`。生产 dispatch 始终提供 execution_id，因此并行
+  节点、分片与重试不会互相清理或错认标记（#1355）。`.node_runtime/` 是目录，不会被产物
+  顶层文件清单捞走。失效按入口分路径：
   - Host 本地 code 池：父进程（`_code_runtime.consume_auth_failure_marker`）在子进程
-    退出后检查标记，经 `ConnectionTokenService` 失效该连接的缓存 token 并删除标记，
-    运行前先做 stale 清理。失效发生在「节点退出后、下次 dispatch 前」，与连接 token
-    缓存的读取时机等价。
-  - 远程 Worker：`code_runner.read_auth_failure_key` 只读取标记，把 key 放进结果元数据
-    `auth_failure_connection` 随结果回报；真正的失效由 Host 在结果提交
+    退出后检查并删除本 execution 的标记，经 `ConnectionTokenService` 失效该连接的缓存
+    token；运行前也只清理本 execution 的 stale 标记。失效发生在「节点退出后、下次
+    dispatch 前」，与连接 token 缓存的读取时机等价。
+  - 远程 Worker：`code_runner.read_auth_failure_key` 只读取本 execution 的标记，把 key
+    放进结果元数据 `auth_failure_connection` 随结果回报；真正的失效由 Host 在结果提交
     （`agent_broker/agent_result_commit.py`，`mark_done` 之后）执行。结果提交失败或延迟时
     不在「下次 dispatch 前已失效」的保证内——该时序承诺只对 Host 本地路径成立。
 

@@ -165,6 +165,33 @@ def test_conn_first_function_calling_self_checkout_is_flagged(tmp_path):
     )
 
 
+def test_conn_first_facade_self_checkout_is_flagged(tmp_path):
+    """#1379: instance-receiver facade calls have no import candidate, but
+    they still make the riding→fresh transition."""
+    root = fixture_root(tmp_path)
+    write(
+        root / "server/app/jobs/queries/reads.py",
+        "class ReadsMixin:\n"
+        "    def read(self): ...\n"
+        "    def fresh(self):\n"
+        "        with self.read() as conn:\n"
+        "            return conn.execute('select 1')\n"
+        "    def ride(self, conn):\n"
+        "        return conn.execute('select 1')\n",
+    )
+    write(
+        root / "server/app/admission.py",
+        "def admit(conn, job_db):\n    job_db.fresh()\n    return job_db.ride(conn)\n",
+    )
+
+    errors = check_nested_pool_checkout(root)
+
+    assert any(
+        "admission.py:2" in error and "conn-first" in error and "fresh" in error for error in errors
+    )
+    assert not any("admission.py:3" in error for error in errors)
+
+
 def test_conn_first_ride_chain_is_not_flagged(tmp_path):
     """A conn-first helper calling another conn-first helper keeps riding."""
     root = fixture_root(tmp_path)

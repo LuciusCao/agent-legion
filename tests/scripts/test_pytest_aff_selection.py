@@ -343,3 +343,37 @@ def test_dependency_manifests_stay_visible_to_the_selector(tmp_path):
         "pyproject.toml",
         "uv.lock",
     ]
+
+
+def test_uncovered_backend_trees_stay_visible_and_force_full_fallback(tmp_path):
+    """#1376: deploy/config/examples changes must not produce an empty skip."""
+    from scripts.pytest_aff_selection import _GIT_PATH_PREFIXES
+
+    changed = ["deploy/compose.worker.yaml", "config/workflow.yaml", "examples/demo.yaml"]
+    assert all(path.split("/", 1)[0] + "/" in _GIT_PATH_PREFIXES for path in changed)
+    assert unmapped_source_files(changed, {}, repo_root=tmp_path) == sorted(changed)
+    assert select_affected_tests(changed, {}, repo_root=tmp_path) == []
+
+
+def test_new_route_file_selects_route_walking_inventory(tmp_path):
+    """#1385: a new route cannot have retroactive coverage of app enumeration."""
+    route = tmp_path / "server/app/routes/new_feature.py"
+    route.parent.mkdir(parents=True)
+    route.write_text("router = None\n", encoding="utf-8")
+    changed = ["server/app/routes/new_feature.py"]
+
+    assert unmapped_source_files(changed, {}, repo_root=tmp_path) == []
+    assert select_affected_tests(changed, {}, repo_root=tmp_path) == [
+        "tests/routes/test_studio_agent_scope.py::"
+        "test_every_write_endpoint_guarded_or_explicitly_exempt"
+    ]
+
+
+def test_tracked_route_without_coverage_still_forces_full_fallback():
+    """Only a genuinely new route takes the inventory shortcut; an existing
+    file missing from the index retains the conservative unknown-impact path."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    changed = ["server/app/routes/workspaces.py"]
+
+    assert unmapped_source_files(changed, {}, repo_root=root) == changed
+    assert select_affected_tests(changed, {}, repo_root=root) == []

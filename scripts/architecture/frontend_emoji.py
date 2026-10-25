@@ -11,11 +11,12 @@ box-drawing, CJK) sits outside these ranges and is deliberately unaffected.
 The scan is full-content rather than diff-based (the issue's minimal form):
 deterministic without a git base ref, and stricter per file — the pre-existing
 workflowStudio status glyphs (⚠/✓/✗/✕/🧩, the 存量 convention the issue
-exempts) are pinned as (path, code point) entries with reasons in
-``config/architecture/frontend-emoji-exemptions.json`` instead. The pin is
-matched both directions: a hit outside the pins fails, and a pin whose
-character no longer appears in the file fails as stale (the exemption set
-only shrinks — cleaning a file's glyphs forces the pin out).
+exempts) are pinned as (path, code point, occurrence count) entries with
+reasons in ``config/architecture/frontend-emoji-exemptions.json`` instead.
+The pin is matched both directions: a different occurrence count or a hit
+outside the pins fails, and a pin whose character no longer appears in the
+file fails as stale (the exemption set only shrinks — cleaning a file's
+glyphs forces the pin out).
 """
 
 from __future__ import annotations
@@ -53,8 +54,8 @@ def find_emoji(source: str) -> list[tuple[int, str]]:
     return hits
 
 
-def load_frontend_emoji_exemptions(path: Path) -> dict[tuple[str, str], str]:
-    """Load the pinned pre-existing glyphs: (path, code point) -> reason."""
+def load_frontend_emoji_exemptions(path: Path) -> dict[tuple[str, str], int]:
+    """Load pinned pre-existing glyphs: (path, code point) -> occurrence count."""
     # Missing exemptions file == no exemptions: hits still fail unexempted,
     # so deleting the file equals emptying it (fixture-friendly).
     if not path.is_file():
@@ -72,18 +73,30 @@ def load_frontend_emoji_exemptions(path: Path) -> dict[tuple[str, str], str]:
     entries = raw["exemptions"]
     if not isinstance(entries, list):
         raise FrontendEmojiConfigurationError("exemptions must be a list")
-    normalized: dict[tuple[str, str], str] = {}
+    normalized: dict[tuple[str, str], int] = {}
     for entry in entries:
-        if not isinstance(entry, dict) or set(entry) != {"path", "code_point", "reason"}:
+        if not isinstance(entry, dict) or set(entry) != {
+            "path",
+            "code_point",
+            "occurrences",
+            "reason",
+        }:
             raise FrontendEmojiConfigurationError(
-                f"exemption entries need exactly path/code_point/reason: {entry!r}"
+                f"exemption entries need exactly path/code_point/occurrences/reason: {entry!r}"
             )
         key = (str(PurePosixPath(entry["path"])), str(entry["code_point"]))
         if not str(entry["reason"]).strip():
             raise FrontendEmojiConfigurationError(f"exemption reason must be non-empty: {key!r}")
         if not re.fullmatch(r"U\+[0-9A-F]{4,6}", key[1]):
             raise FrontendEmojiConfigurationError(f"code_point must look like 'U+26A0': {key!r}")
-        normalized[key] = entry["reason"]
+        occurrences = entry["occurrences"]
+        if not isinstance(occurrences, int) or isinstance(occurrences, bool) or occurrences < 1:
+            raise FrontendEmojiConfigurationError(
+                f"occurrences must be a positive integer: {key!r}"
+            )
+        if key in normalized:
+            raise FrontendEmojiConfigurationError(f"duplicate exemption: {key!r}")
+        normalized[key] = occurrences
     return normalized
 
 
@@ -117,9 +130,17 @@ def check_frontend_emoji(root: Path) -> list[str]:
     hits = scan_frontend_emoji(root)
     errors: list[str] = []
     for (relative, code_point), linenos in sorted(hits.items()):
-        if (relative, code_point) in exemptions:
-            continue
+        pinned = exemptions.get((relative, code_point))
         lines = ",".join(str(lineno) for lineno in linenos)
+        if pinned == len(linenos):
+            continue
+        if pinned is not None:
+            errors.append(
+                f"{relative}:{lines}: emoji-range character {code_point} occurs "
+                f"{len(linenos)} times, but the exemption pins {pinned}; remove new "
+                "glyphs or shrink the exemption after migration (#1374)"
+            )
+            continue
         errors.append(
             f"{relative}:{lines}: emoji-range character {code_point} in frontend code; "
             "use MaterialIcon (@mui/icons-material) for UI glyphs (#1354)"

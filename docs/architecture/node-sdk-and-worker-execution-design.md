@@ -207,14 +207,17 @@ SDK 不自定义异常类型，builtin 子进程与沙箱 child 的两种 token 
 
 ### 5.3 auth 失败上报：节点记录事实，父进程执行特权动作
 
-- 节点侧：`ctx.report_auth_failure()` 在 `job_dir/.node_runtime/auth_failure`
-  写标记文件（内容为 node_config 里的 connection key，可为空串）。job_dir 在
-  内置子进程、沙箱（可写白名单含 job_dir）、未来 Worker 三条路径都可写，无需
-  协议扩展；`.node_runtime/` 是目录，不会被节点产物的顶层文件清单
-  （`iterdir()` + `is_file()`）捞走。
+- 节点侧：`ctx.report_auth_failure()` 在
+  `job_dir/.node_runtime/auth_failure-<execution_id>` 写本 execution 的标记文件
+  （内容为 node_config 里的 connection key，可为空串）；runtime 无 execution_id 的
+  旧式手工上下文才回退固定名 `auth_failure`（#1355）。生产 dispatch 始终提供
+  execution_id，使并行节点、分片与重试的标记互相隔离。job_dir 在内置子进程、沙箱
+  （可写白名单含 job_dir）、Worker 三条路径都可写，无需协议扩展；`.node_runtime/`
+  是目录，不会被节点产物的顶层文件清单（`iterdir()` + `is_file()`）捞走。
 - 父进程侧：`_execute_isolated` 与 `execute_custom_sandboxed` 在子进程退出后
-  检查标记；存在则用 `ConnectionTokenService` 失效该连接的缓存 token，随后删除
-  标记。运行前先做 stale 清理（与 result 文件「上次残留不得伪装成功」同理）。
+  检查本 execution 的标记；存在则用 `ConnectionTokenService` 失效该连接的缓存
+  token，随后删除该标记。运行前只清理本 execution 的 stale 标记（与 result 文件
+  「上次残留不得伪装成功」同理），不会清掉并行邻节点的上报。
 - 语义变化：失效动作从「节点运行中立即」变为「节点退出后、dispatch 前」——
   连接 token 缓存在下一次 dispatch 才被读取，行为等价。自定义沙箱节点从
   「无法上报」变为「可上报」，属能力补齐。
