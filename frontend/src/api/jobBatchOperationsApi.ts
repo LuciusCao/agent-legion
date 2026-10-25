@@ -25,7 +25,7 @@ export {
   archiveJobBatchOperation,
 } from './jobBatchOperationsListApi'
 
-/** 8 个批量端点的返回：≤ 阈值走同步结果，超阈值返回 202 受理句柄。 */
+/** 批量端点的返回：≤ 阈值走同步结果，超阈值返回 202 受理句柄。 */
 export type BatchOpMaybeAccepted<T> = T | JobBatchOperationAccepted
 
 /** 判别 202 受理体。同步结果顶层没有 operation 键（operation 只出现在逐

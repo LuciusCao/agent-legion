@@ -22,6 +22,7 @@ export const useJobStore = create<JobState>((set, get) => ({
   batchClearPackedLoading: false,
   batchRerunLoading: false,
   batchRunToLoading: false,
+  batchApprovalLoading: false,
   continueLoading: false,
   batchUpgradeWorkflowLoading: false,
   ...fetchActions(set),

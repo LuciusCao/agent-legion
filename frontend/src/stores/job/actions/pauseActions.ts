@@ -6,6 +6,7 @@ import { applyMutationResults } from './mutationResults'
 import {
   refreshAfterBatchOperation,
   resolveBatchTarget,
+  runBatchApproval,
 } from './selectionModeState'
 import type { JobState, JobStoreSet } from '../state'
 
@@ -56,6 +57,20 @@ export function pauseActions(set: JobStoreSet, get: () => JobState) {
         throw err
       } finally {
         set({ batchResumeLoading: false })
+      }
+    },
+
+    async batchApproval(workspaceId: string, kind: 'approve' | 'reject') {
+      set({ batchApprovalLoading: true })
+      try {
+        return await runBatchApproval(set, get, workspaceId, kind)
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Batch approval failed'
+        useUiStore.getState().showToast(message, 'error')
+        throw err
+      } finally {
+        set({ batchApprovalLoading: false })
       }
     },
   }

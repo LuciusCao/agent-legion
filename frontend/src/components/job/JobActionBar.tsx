@@ -1,5 +1,6 @@
 import { Button } from '@mui/material'
 import type { JobSummary, UpgradeMode } from '../../types'
+import type { ApprovalBatchKind } from '../../api/jobApprovalApi'
 import type { NodeCatalog } from '../../lib/nodeCatalog'
 import type { FailureCategory } from '../../types/failureTypes'
 import type { WorkflowNodesByKey } from '../JobRerunDialog'
@@ -50,6 +51,7 @@ export type JobActionBarProps = {
   onDelete: () => void | Promise<void>
   onPause?: () => void | Promise<void>
   onResume?: () => void | Promise<void>
+  onApproval?: (kind: ApprovalBatchKind) => void | Promise<unknown>
   onUpgradeWorkflow?: (
     jobIds?: string[],
     mode?: UpgradeMode

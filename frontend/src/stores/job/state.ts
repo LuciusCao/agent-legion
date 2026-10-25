@@ -7,7 +7,7 @@ import type {
 import type { BatchOpMaybeAccepted } from '../../api/jobBatchOperationsApi'
 export type { UpgradeMode } from '../../types/jobTypes'
 import type { ClearPackedActions } from './actions/clearPackedActions'
-import type { ContinueJobResult, RerunByFailureActions } from './stateTypes'
+import type { ContinueJobResult, JobSupplementalActions } from './stateTypes'
 import type { JobPaginationState } from './paginationTypes'
 import type { JobSelectionModeState } from './selectionModeTypes'
 export {
@@ -22,7 +22,7 @@ export type { FilterCounts } from './filterLogic/types'
 export interface JobState
   extends
     ClearPackedActions,
-    RerunByFailureActions,
+    JobSupplementalActions,
     JobPaginationState,
     JobSelectionModeState {
   jobs: JobSummary[]

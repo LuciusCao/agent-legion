@@ -107,6 +107,13 @@ describe('JobFilterBar', () => {
     ).toBeInTheDocument()
   })
 
+  it('offers the awaiting approval status filter', () => {
+    const { onChange } = renderBar()
+    fireEvent.mouseDown(screen.getByLabelText('状态'))
+    fireEvent.click(screen.getByRole('option', { name: '待审批 (0)' }))
+    expect(onChange).toHaveBeenCalledWith({ status: 'awaiting_approval' })
+  })
+
   it('calls onChange when status changes', () => {
     const { onChange } = renderBar()
     fireEvent.mouseDown(screen.getByLabelText('状态'))
