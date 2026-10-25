@@ -259,19 +259,27 @@ describe('JobProgressPanel', () => {
     expect(screen.queryByText('Pi Agent')).not.toBeInTheDocument()
   })
 
-  it('keeps the main timeline code chip for approval nodes without capability', () => {
+  it('#1412: suppresses timeline code chips for start/approval nodes without capability', () => {
     renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={[
           {
             ...mockNodes[0],
+            node_key: '_start',
+            label: '入口',
+            capability: '',
+          },
+          {
+            ...mockNodes[0],
             node_key: 'review_gate_new',
+            label: '审批',
             capability: '',
           },
           {
             ...mockNodes[0],
             node_key: 'review_gate_legacy',
+            label: '旧审批',
             capability: '',
             execution_type: undefined,
           },
@@ -281,7 +289,7 @@ describe('JobProgressPanel', () => {
       />
     )
 
-    expect(screen.getAllByText('代码')).toHaveLength(2)
+    expect(screen.queryByText('代码')).not.toBeInTheDocument()
   })
 
   it('keeps legacy type chips when an old backend omits execution_type', () => {

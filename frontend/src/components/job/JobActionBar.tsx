@@ -11,7 +11,6 @@ import styles from './JobActionBar.module.css'
 export {
   canRerunJob,
   canPackageJob,
-  canDeleteJob,
   canContinueJob,
 } from '../jobActionEligibility'
 

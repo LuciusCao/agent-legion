@@ -6,7 +6,7 @@ import {
   computeWaitTime,
   EXECUTOR_KIND_ICONS,
   EXECUTOR_KIND_LABELS,
-  resolveExecutionType,
+  resolveVisibleExecutionType,
 } from '../jobProgressHelpers'
 import { TokenUsageRunDetail } from '../tokenUsage/TokenUsageRunDetail'
 import { JobNodeHydrationDefer } from './JobNodeHydrationDefer'
@@ -81,11 +81,9 @@ export function JobProgressPanelNode({
     node.status === 'pending'
       ? '等待中'
       : (computeWaitTime(node, allNodes) ?? '—')
-  const executionType = resolveExecutionType(node)
-  // #1180 UI 验收返工：agent 节点也显示类型 chip，词汇沿用 DAG badge 的
-  // type 词汇；job 详情契约不带节点 runtime，无从附加。approval/start
-  // 节点投影 execution_type='code'，timeline 无 capability 守卫，仍显示
-  // 「代码」chip；DAG 侧的 #1365 守卫见 resolveDagExecutionType。
+  // #1180/#1412：agent 节点也显示类型 chip；start/approval 投影的 code
+  // 类型与 DAG 一样经 capability 守卫抑制。
+  const executionType = resolveVisibleExecutionType(node)
   const isAgentNode = executionType === 'agent'
   const executorLabel = isAgentNode
     ? 'agent'

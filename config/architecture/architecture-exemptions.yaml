@@ -745,15 +745,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1012
   ceiling: 121
 - check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.parse.ts
-  reason: '#443: WorkflowYamlNode gains the optional tools field (one line plus its contract
-    comment). The node shape lives in one type by design. Remove with the field itself. Re-anchored
-    by #926 from #456 (closed) to #1012: the overage above is the shipped feature itself and
-    the removal condition above stands; #1012 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1012
-  ceiling: 83
-- check: architecture.file_budget
   path: velites/src/tools/specs.rs
   reason: '#518 adds the json tool''s provider spec (description + JSON Schema parameters) —
     the file is the per-tool spec table by design, one arm per ToolKind; the spec IS the content,

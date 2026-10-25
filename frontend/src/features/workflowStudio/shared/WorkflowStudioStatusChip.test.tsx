@@ -117,7 +117,10 @@ describe('WorkflowStudioStatusChip', () => {
   it('renders the change count with risk color and breakdown title', () => {
     renderChip({
       summary: makeSummary({
-        nodeChanges: makeNodeChanges(),
+        nodeChanges: makeNodeChanges().map((change) => ({
+          ...change,
+          severity: 'breaking',
+        })),
         riskLevel: 'breaking',
       }),
       dirty: true,
@@ -135,13 +138,45 @@ describe('WorkflowStudioStatusChip', () => {
     ['info', 'MuiChip-colorInfo'],
   ] as const)('maps risk %s to chip color %s', (riskLevel, colorClass) => {
     renderChip({
-      summary: makeSummary({ nodeChanges: makeNodeChanges(), riskLevel }),
+      summary: makeSummary({
+        nodeChanges: makeNodeChanges().map((change) => ({
+          ...change,
+          severity: riskLevel,
+        })),
+        riskLevel,
+      }),
       dirty: true,
     })
     expect(
       screen.getByText('未发布变更 3').closest('.MuiChip-root')
     ).toHaveClass(colorClass)
   })
+
+  it.each(['label', 'text_input'])(
+    '#1402: uses structural risk for mixed execution and %s changes',
+    (field) => {
+      renderChip({
+        summary: makeSummary({
+          riskLevel: 'warning',
+          nodeChanges: [
+            {
+              type: 'modified',
+              nodeKey: 'a',
+              label: 'A',
+              nodeType: 'code',
+              fields: ['execution', field],
+              severity: 'warning',
+            },
+          ],
+        }),
+        dirty: true,
+      })
+
+      const chip = screen.getByText('未发布变更 1').closest('.MuiChip-root')
+      expect(chip).toHaveClass('MuiChip-colorInfo')
+      expect(chip).toHaveAttribute('title', expect.stringContaining('风险：低'))
+    }
+  )
 
   it('opens the changes panel when the change chip is clicked', () => {
     const { onShowChanges } = renderChip({
