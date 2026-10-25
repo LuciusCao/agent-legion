@@ -24,6 +24,7 @@ export const mockDetail = {
       label: '提取',
       status: 'completed',
       capability: 'extract',
+      execution_type: 'code',
       executor_id: 'code-default',
       executor_kind: 'code',
       after: [],
@@ -40,8 +41,9 @@ export const mockDetail = {
       label: '生成',
       status: 'running',
       capability: 'generate',
-      // #1180/#731：agent 节点的真实投影形状——executor_kind/executor_id
-      // 皆 null，agent_id 非空（pi/openclaw 词汇已退役）。
+      // agent 节点的真实投影形状：execution_type=agent，旧 executor 字段
+      // 皆 null，agent_id 非空。
+      execution_type: 'agent',
       executor_id: null,
       executor_kind: null,
       agent_id: 'generate',
@@ -58,6 +60,7 @@ export const mockDetail = {
       label: '审核',
       status: 'stale',
       capability: 'review',
+      execution_type: 'agent',
       executor_id: null,
       executor_kind: null,
       agent_id: 'review',

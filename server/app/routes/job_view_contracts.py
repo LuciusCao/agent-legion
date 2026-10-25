@@ -76,16 +76,25 @@ class JobNodeResponse(BaseModel):
     after: list[str]
     inputs: list[str]
     outputs: list[str]
-    executor_id: str | None = None
+    execution_type: Literal["code", "agent"] | None = None
+    executor_id: str | None = Field(
+        default=None,
+        description="Deprecated: use execution_type.",
+        json_schema_extra={"deprecated": True},
+    )
     # #731: retired executor vocabulary removed — the runtime projection only
     # ever produces "code" (implicit code pool) or None (agent nodes,
     # job_node_agent_projection); pi/openclaw retired with their runtimes (#75).
-    executor_kind: Literal["code"] | None = None
+    executor_kind: Literal["code"] | None = Field(
+        default=None,
+        description="Deprecated: use execution_type.",
+        json_schema_extra={"deprecated": True},
+    )
     agent_id: str | None = None
     worker_id: str | None = None
     # PR #1085: the shared route decision (same as dispatch) says this node
     # would fail as a configuration error (e.g. a route to an unpublished
-    # Agent); executor_kind and agent_id are then both None.
+    # Agent); execution_type, executor_kind and agent_id are then all None.
     route_error: str | None = None
     hydration_defer: HydrationDeferResponse | None = None
 

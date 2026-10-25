@@ -189,6 +189,7 @@ def test_job_query_service_detail_enriches_nodes(query_service, job_db):
     assert "artifacts" in detail
     for node in detail["nodes"]:
         # P-0.5：非 Agent 路由节点投影为常量 code 池。
+        assert node["execution_type"] == "code"
         assert node["executor_id"] == "code"
         assert node["executor_kind"] == "code"
 
@@ -292,8 +293,10 @@ def test_job_detail_projects_agent_route_over_code_pool(query_service, job_db):
     detail = query_service.detail(job["id"])
 
     nodes = {node["node_key"]: node for node in detail["nodes"]}
+    assert nodes["question_understanding"]["execution_type"] == "code"
     assert nodes["question_understanding"]["executor_id"] == "code"
     assert nodes["question_understanding"]["executor_kind"] == "code"
+    assert nodes["assemble_package"]["execution_type"] == "agent"
     assert nodes["assemble_package"]["executor_id"] is None
     assert nodes["assemble_package"]["executor_kind"] is None
     assert nodes["assemble_package"]["agent_id"] == "agent-v1"

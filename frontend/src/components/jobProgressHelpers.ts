@@ -11,6 +11,19 @@ export const EXECUTOR_KIND_ICONS: Record<string, string> = {
   code: 'code',
 }
 
+export function resolveExecutionType(node: JobNode): 'code' | 'agent' | null {
+  const executionType =
+    node.execution_type === undefined
+      ? node.agent_id
+        ? 'agent'
+        : node.executor_kind === 'code'
+          ? 'code'
+          : null
+      : node.execution_type
+  if (executionType === 'code' && !node.capability) return null
+  return executionType
+}
+
 export function computeWaitTime(
   node: JobNode,
   nodes: JobNode[]

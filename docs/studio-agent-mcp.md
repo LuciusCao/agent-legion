@@ -60,6 +60,15 @@ workflow、预览面板与节点代码 / prompt 相关工具都是**读取 / 校
 - `list_jobs`：列最近 job（最新在前），状态过滤 + limit ≤100（MCP 侧收紧，REST 列表上限更高）；响应带 `next_cursor`，传回 `cursor` 入参翻页取更早的 job，不传即最新一页（#1261）。
 - `compare_jobs`：对比两个 job，per-node 状态/错误并排 + newly_failed / recovered 摘要。
 
+节点执行类型请使用 `execution_type`；旧字段处于弃用窗口，将在下一完整发布周期的 Phase 2 移除：
+
+| 旧字段 | 替换字段 |
+| --- | --- |
+| `executor_kind`（Studio job detail/context） | `execution_type`：`"code"` / `"agent"` / `null` |
+| `executor_id`（裸 `GET /api/jobs/{job_id}`） | `execution_type`；Worker 身份仍读 `worker_id` |
+
+`execution_type` 为 `null` 且 `route_error` 非空表示节点路由配置错误，此时没有可展示的执行类型，`agent_id` 也为 `null`；不要根据旧字段或节点名称反推为 agent。正常 code / agent 节点分别为 `"code"` / `"agent"`，Agent 身份仍独立读 `agent_id`。弃用窗口内旧字段继续返回，新调用方应立即迁移，不再新增依赖。
+
 job 观测组没有任何生效工具：重跑类动作由 agent 引用 `suggested_actions` payload 输出建议，UI 渲染确认卡片，人确认后由宿主会话走常规 job 路由执行（scoped token 直接调动作端点被拒）。
 
 **权限边界**：MCP server 只是薄转发，真正的约束在后端——scoped token 只能走工具面（草稿/校验/读取，外加上文 Skill 写工具对本地 skill 仓库的提交——它们对 `latest` 节点立即生效），workflow 发布、回滚、归档与预览面板发布等生效操作永远由人在 Studio 里完成（STUDIO-AGENT-001）。token 只存 sha256 digest，明文只在铸造时返回一次。Studio 对话内铸造的 run token（origin='run'）还绑定会话所在 workspace（schema v45，绑定与 token 行同一条 INSERT 原子写入）：带 workspace 路径的工具端点对其它 workspace 一律 403；自助 token（origin='user'，本文档流程铸造的）不带绑定，按 workspace 成员关系校验（成员/admin 放行，非成员 404）。注意铸造端点自 P4 起 admin-only——「自助」仅指 admin 用户自助，member 无法铸造新 token（已铸造未过期的 token 在 TTL 内仍可用）。

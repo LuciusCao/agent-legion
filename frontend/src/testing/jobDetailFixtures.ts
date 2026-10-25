@@ -22,6 +22,7 @@ export function makeJobDetail(
       outputs: node.outputs ?? [],
       error_message: node.error_message ?? '',
       stale_reason: node.stale_reason ?? '',
+      execution_type: node.agent_id ? 'agent' : 'code',
       executor_kind: node.executor_kind ?? 'code',
       ...node,
     })),

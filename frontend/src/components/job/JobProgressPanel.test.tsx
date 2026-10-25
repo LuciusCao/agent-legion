@@ -32,6 +32,7 @@ const mockNodes: JobNode[] = [
     capability: 'extract',
     inputs: [],
     outputs: [],
+    execution_type: 'code',
     executor_kind: 'code',
     executor_id: 'local-1',
   },
@@ -49,6 +50,7 @@ const mockNodes: JobNode[] = [
     capability: 'generate',
     inputs: [],
     outputs: [],
+    execution_type: 'agent',
     executor_kind: null,
     executor_id: null,
     agent_id: 'generate',
@@ -251,10 +253,48 @@ describe('JobProgressPanel', () => {
       />
     )
     expect(screen.getByText('代码')).toBeInTheDocument()
-    // agent 节点（契约投影 agent_id 非空、executor_kind=None）同样带类型
-    // chip，词汇沿用 DAG badge 的 type 词汇；退役的「Pi Agent」词条已摘除。
+    // agent 节点同样带类型 chip，词汇沿用 DAG badge 的 type 词汇；退役的
+    // 「Pi Agent」词条已摘除。
     expect(screen.getByText('agent')).toBeInTheDocument()
     expect(screen.queryByText('Pi Agent')).not.toBeInTheDocument()
+  })
+
+  it('keeps legacy type chips when an old backend omits execution_type', () => {
+    renderWithClient(
+      <JobProgressPanel
+        jobId="j1"
+        nodes={mockNodes.map((node) => ({
+          ...node,
+          execution_type: undefined,
+        }))}
+        runs={mockRuns}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('代码')).toBeInTheDocument()
+    expect(screen.getByText('agent')).toBeInTheDocument()
+  })
+
+  it('renders no type chip for route_error even if legacy fields disagree', () => {
+    renderWithClient(
+      <JobProgressPanel
+        jobId="j1"
+        nodes={[
+          {
+            ...mockNodes[1],
+            execution_type: null,
+            executor_kind: 'code',
+            agent_id: 'stale-agent',
+          },
+        ]}
+        runs={[]}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByText('代码')).not.toBeInTheDocument()
+    expect(screen.queryByText('agent')).not.toBeInTheDocument()
   })
 
   it('renders the run skill version when present (#410)', () => {

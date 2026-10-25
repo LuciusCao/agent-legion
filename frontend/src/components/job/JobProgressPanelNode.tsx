@@ -6,6 +6,7 @@ import {
   computeWaitTime,
   EXECUTOR_KIND_ICONS,
   EXECUTOR_KIND_LABELS,
+  resolveExecutionType,
 } from '../jobProgressHelpers'
 import { TokenUsageRunDetail } from '../tokenUsage/TokenUsageRunDetail'
 import { JobNodeHydrationDefer } from './JobNodeHydrationDefer'
@@ -80,21 +81,20 @@ export function JobProgressPanelNode({
     node.status === 'pending'
       ? '等待中'
       : (computeWaitTime(node, allNodes) ?? '—')
-  const executorKind = node.executor_kind
-  // #1180 UI 验收返工：agent 节点（契约投影 agent_id 非空、executor_kind
-  // 为 None）也显示类型 chip，词汇沿用 DAG badge 的 type 词汇（agent；
-  // job 详情契约不带节点 runtime，无从附加——与 job DAG 的 agent 徽标
-  // 同口径）。approval/start 节点 agent_id 为 null，不落入此分支。
-  const isAgentNode = !!node.agent_id
+  const executionType = resolveExecutionType(node)
+  // #1180 UI 验收返工：agent 节点也显示类型 chip，词汇沿用 DAG badge 的
+  // type 词汇；job 详情契约不带节点 runtime，无从附加。approval/start
+  // 节点不携带 capability，不显示 code chip。
+  const isAgentNode = executionType === 'agent'
   const executorLabel = isAgentNode
     ? 'agent'
-    : executorKind
-      ? (EXECUTOR_KIND_LABELS[executorKind] ?? executorKind)
+    : executionType
+      ? (EXECUTOR_KIND_LABELS[executionType] ?? executionType)
       : undefined
   const executorIcon = isAgentNode
     ? 'smart_toy'
-    : executorKind
-      ? (EXECUTOR_KIND_ICONS[executorKind] ?? 'computer')
+    : executionType
+      ? (EXECUTOR_KIND_ICONS[executionType] ?? 'computer')
       : undefined
 
   return (

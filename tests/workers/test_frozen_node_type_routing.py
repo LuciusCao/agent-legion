@@ -112,8 +112,10 @@ def _assert_consistent(dispatched: tuple[str, str], detail: dict) -> None:
     """Job detail shows exactly what dispatch decided for the same frozen node."""
     kind, target = dispatched
     if kind == "agent":
+        assert detail["execution_type"] == "agent"
         assert (detail["executor_kind"], detail["agent_id"]) == (None, target)
     else:
+        assert detail["execution_type"] == "code"
         assert (detail["executor_kind"], detail["agent_id"]) == ("code", None)
     # #1128: a dispatchable route never carries a route_error.
     assert detail["route_error"] is None
@@ -192,6 +194,7 @@ def _assert_route_error_consistent(route: NodeRoute, detail: dict) -> None:
     mirrors it through ``route_error`` instead of projecting a stale Agent."""
     assert route.kind == "error"
     assert detail["route_error"] == route.error_message
+    assert detail["execution_type"] is None
     assert (detail["executor_kind"], detail["agent_id"]) == (None, None)
 
 
