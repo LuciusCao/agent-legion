@@ -27,6 +27,7 @@ from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from tests.fakes.artifact_keys import manifest_key
+from tests.fakes.artifact_rows import seed_artifact_row
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -197,7 +198,8 @@ def _seed_gz_input_row(store: JobArtifactObjectStore, storage: FakeStorage) -> N
     """登记一个 .gz 形态的上游产物行（content_hash 按未压缩字节）。"""
     compressed = gzip.compress(PAYLOAD)
     storage.objects["jobs/ws-1/job-1/q.json.gz"] = compressed
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id="ws-1",
         job_id="job-1",
         node_key="upstream",
@@ -308,7 +310,8 @@ def test_inject_v4_worker_keeps_cas_form_for_rewritten_gz_row() -> None:
     store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
     compressed = gzip.compress(REWROTE)
     storage.objects["jobs/ws-1/job-1/q.json.gz"] = compressed
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id="ws-1",
         job_id="job-1",
         node_key="upstream",

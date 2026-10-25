@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.fakes.artifact_rows import seed_artifact_row
 from tests.helpers import publish_legacy_intake_revision
 
 WORKSPACE = "api-token-ws"
@@ -393,7 +394,8 @@ def test_api_token_external_loop_end_to_end(client_factory, monkeypatch) -> None
         stored = gzip.compress(payload)
         storage_key = f"jobs/{workspace}/{job_id}/report.json.gz"
         store.storage.objects[storage_key] = stored
-        store.record_remote(
+        seed_artifact_row(
+            store,
             workspace_id=workspace,
             job_id=job_id,
             node_key="upstream",

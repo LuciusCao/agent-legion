@@ -1705,7 +1705,7 @@
     "server/app/services/job_artifact_media.py": 32,
     "server/app/services/job_artifact_mutation.py": 108,
     "server/app/services/job_artifact_names.py": 32,
-    "server/app/services/job_artifact_objects.py": 243,
+    "server/app/services/job_artifact_objects.py": 239,
     "server/app/services/job_artifact_raw.py": 62,
     "server/app/services/job_artifact_raw_gzip.py": 54,
     "server/app/services/job_artifact_raw_types.py": 23,

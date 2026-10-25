@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import pytest
 from fastapi import APIRouter, Depends
+from pydantic import ValidationError
 
 from server.app.auth import scoped_tokens
 from server.app.auth.workspace_access import require_workspace_access
+from server.app.routes.studio_agent_job_tool_contracts import StudioAgentJobNode
 from server.app.routes.studio_agent_job_tools import create_studio_agent_job_tools_router
 from tests.helpers import publish_builtin_revision
 from tests.helpers.seed import insert_job, insert_workspace
@@ -77,6 +79,22 @@ def _scoped_client(client, job_db, workspace_id: str | None = None):
     scoped = client.__class__(client.app)
     scoped.headers["authorization"] = f"Bearer {token}"
     return scoped, admin_id
+
+
+@pytest.mark.parametrize("retired", ["pi", "openclaw"])
+def test_studio_agent_job_node_rejects_retired_executor_kinds(retired: str) -> None:
+    with pytest.raises(ValidationError):
+        StudioAgentJobNode(
+            node_key="node-1",
+            label="Node 1",
+            capability="capability",
+            status="running",
+            error_message="",
+            inputs=[],
+            outputs=[],
+            executor_kind=retired,
+            agent_id=None,
+        )
 
 
 def _seed_workspace(job_db, workspace_id: str) -> None:
