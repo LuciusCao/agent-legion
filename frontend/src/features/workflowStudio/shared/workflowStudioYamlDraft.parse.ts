@@ -86,14 +86,6 @@ export function dumpWorkflowYaml(value: WorkflowYamlObject): string {
   })
 }
 
-export function parseWorkflowLabel(rawYaml: string): string | undefined {
-  try {
-    return parseWorkflowYaml(rawYaml).label
-  } catch {
-    return undefined
-  }
-}
-
 export function parseWorkflowNode(
   rawYaml: string,
   nodeKey: string
@@ -103,16 +95,6 @@ export function parseWorkflowNode(
     return draft.nodes?.[nodeKey]
   } catch {
     return undefined
-  }
-}
-
-export function parseWorkflowEdgeConditions(
-  rawYaml: string
-): WorkflowYamlEdge[] {
-  try {
-    return parseWorkflowYaml(rawYaml).edges ?? []
-  } catch {
-    return []
   }
 }
 

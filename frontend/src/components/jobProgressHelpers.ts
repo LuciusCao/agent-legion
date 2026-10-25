@@ -23,6 +23,13 @@ export function resolveExecutionType(node: JobNode): 'code' | 'agent' | null {
   return executionType
 }
 
+export function resolveVisibleExecutionType(
+  node: JobNode
+): 'code' | 'agent' | null {
+  const executionType = resolveExecutionType(node)
+  return executionType === 'code' && !node.capability ? null : executionType
+}
+
 export function computeWaitTime(
   node: JobNode,
   nodes: JobNode[]

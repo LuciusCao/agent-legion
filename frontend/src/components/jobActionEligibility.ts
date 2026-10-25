@@ -8,10 +8,6 @@ export function canPackageJob(job: JobSummary): boolean {
   return job.status === 'completed' && !job.packed
 }
 
-export function canDeleteJob(): boolean {
-  return true
-}
-
 export function canContinueJob(job: JobSummary): boolean {
   return (
     job.status === 'paused' &&

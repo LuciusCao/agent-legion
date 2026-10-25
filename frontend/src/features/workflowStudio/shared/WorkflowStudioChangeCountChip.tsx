@@ -1,5 +1,6 @@
 import { Chip } from '@mui/material'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
+import { structuralRiskLevel } from '../validation/workflowStudioStructuralFilter'
 import { countNodeChanges } from '../canvas/workflowStudioDagChanges'
 
 const RISK_TEXT = {
@@ -22,7 +23,7 @@ type Props = {
 export function WorkflowStudioChangeCountChip(props: Props) {
   const counts = countNodeChanges(props.summary)
   if (!counts) return null
-  const risk = props.summary?.riskLevel
+  const risk = structuralRiskLevel(props.summary)
   const color =
     risk === 'breaking' ? 'error' : risk === 'warning' ? 'warning' : 'info'
   const riskText =
