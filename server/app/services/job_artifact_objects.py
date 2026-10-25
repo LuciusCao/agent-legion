@@ -250,36 +250,8 @@ class JobArtifactObjectStore:
                 f"the declared size {size_bytes} for {name!r}"
             )
 
-    def record_remote(
-        self,
-        *,
-        workspace_id: str,
-        job_id: str,
-        node_key: str,
-        name: str,
-        storage_key: str,
-        size_bytes: int,
-        content_hash: str = "",
-    ) -> dict[str, Any] | None:
-        """Deprecated compatibility/test seed for a pre-existing legacy row.
-
-        This deliberately does not reopen the retired bare ``verify_remote``
-        arm (#1309). Production writes must use ``upload`` or the Worker
-        promote path, which always derive a fresh per-attempt version key.
-        """
-        if self.storage is None:
-            return None
-        return self._register_row(
-            job_id=job_id,
-            node_key=node_key,
-            name=name,
-            storage_key=storage_key,
-            size_bytes=size_bytes,
-            content_hash=content_hash,
-        )
-
     def record_remote_many(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
-        """Batch variant of ``record_remote``: ONE write transaction.
+        """Atomically upsert already-verified refs in ONE write transaction.
 
         The promote phase of the Worker-direct channel registers every
         already-verified ref atomically — a mid-batch failure rolls the whole
@@ -318,9 +290,8 @@ class JobArtifactObjectStore:
     ) -> dict[str, Any] | None:
         """Single-row upsert in its own transaction (batch path inlines it).
 
-        Ungated by design: the only callers left are the no-lease paths
-        (deprecated ``record_remote`` compatibility seeds, the reconciler and
-        approval direct writes) — lease-carrying writes go through
+        Ungated by design: the only callers left are the no-lease reconciler
+        and approval direct writes — lease-carrying writes go through
         ``register_rows_guarded`` inside the shared promote primitive.
         ``superseded`` (#853) collects the key the row pointed at before.
         """

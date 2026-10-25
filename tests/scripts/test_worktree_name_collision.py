@@ -786,11 +786,11 @@ def test_drop_db_aborts_when_locked_reprobe_fails(repo: _Repo) -> None:
 
 # --- 熔断重估第 2 轮：校验-remove 同互斥 / 计划外资源重确认（#1084 codex）----
 
-# git 包装：目标路径经 STUB_GIT_TARGET 文件给出；`worktree list`（porcelain）
-# 计数到第 STUB_GIT_FIRE_AT 次时，应答前先重建目标——模拟「最终校验读与
-# git worktree remove 之间插入裸 git worktree add」（裸 git 不入派生名锁
-# 协议）。STUB_GIT_SAME_BRANCH=1 时同分支同 HEAD 重建（porcelain 条目逐字节
-# 不变，只有指纹成分能区分）。状态经文件传递（每次调用都是新进程）。
+# git 包装：目标路径经 STUB_GIT_TARGET 文件给出。第 STUB_GIT_FIRE_AT 次
+# `worktree list`（最终校验的条目读）只落下阶段标记；紧随其后的身份 HEAD
+# 读在应答前重建目标，确定性覆盖「porcelain 已读、最终指纹未读」窗口。
+# STUB_GIT_SAME_BRANCH=1 时同分支同 HEAD 重建（porcelain 条目逐字节不变，
+# 只有指纹成分能区分）。状态经文件传递（每次调用都是新进程）。
 # 本测试布景下最终校验的条目读是第 6 次 porcelain（MAIN 解析、计划预检、
 # 计划条目、锁内重查、分支解析之后）。注意（复验 P2，不修）：计数是硬编码
 # 的——clean 在最终校验之前新增任何 porcelain 调用都会让注入点静默提前，
@@ -801,16 +801,23 @@ if [[ "${1:-}" == "worktree" && "${2:-}" == "list" && -e "$STUB_GIT_TARGET" ]]; 
     n=$(( $(cat "$STUB_GIT_COUNT" 2>/dev/null || echo 0) + 1 ))
     echo "$n" > "$STUB_GIT_COUNT"
     if [[ "$n" -eq "$STUB_GIT_FIRE_AT" ]]; then
-        target="$(cat "$STUB_GIT_TARGET")"
-        rm -f "$STUB_GIT_TARGET"
-        if [[ "$STUB_GIT_SAME_BRANCH" == "1" ]]; then
-            branch="$("$REAL" -C "$target" symbolic-ref --short -q HEAD)"
-            "$REAL" -C "$STUB_GIT_MAIN" worktree remove "$target" >/dev/null
-            "$REAL" -C "$STUB_GIT_MAIN" worktree add -q "$target" "$branch" >/dev/null
-        else
-            "$REAL" -C "$STUB_GIT_MAIN" worktree remove "$target" >/dev/null
-            "$REAL" -C "$STUB_GIT_MAIN" worktree add -q -b rebuilt-in-window "$target" >/dev/null
-        fi
+        : > "$STUB_GIT_FINAL_CHECK"
+    fi
+fi
+if [[ -e "$STUB_GIT_FINAL_CHECK" && -e "$STUB_GIT_TARGET" \
+    && "${1:-}" == "-C" && "${3:-}" == "rev-parse" && "${4:-}" == "HEAD" ]]; then
+    target="$(cat "$STUB_GIT_TARGET")"
+    rm -f "$STUB_GIT_TARGET"
+    # 保活旧目录 inode 到重建完成，避免文件系统立刻复用 inode、叠加秒级
+    # ctime/birthtime 粒度后让新旧指纹偶然相同（#1387）。
+    exec 9<"$target"
+    if [[ "$STUB_GIT_SAME_BRANCH" == "1" ]]; then
+        branch="$("$REAL" -C "$target" symbolic-ref --short -q HEAD)"
+        "$REAL" -C "$STUB_GIT_MAIN" worktree remove "$target" >/dev/null
+        "$REAL" -C "$STUB_GIT_MAIN" worktree add -q "$target" "$branch" >/dev/null
+    else
+        "$REAL" -C "$STUB_GIT_MAIN" worktree remove "$target" >/dev/null
+        "$REAL" -C "$STUB_GIT_MAIN" worktree add -q -b rebuilt-in-window "$target" >/dev/null
     fi
 fi
 exec "$REAL" "$@"
@@ -834,13 +841,14 @@ def _run_clean_with_swap_hook(
             "STUB_GIT_TARGET": str(repo.tmp / "swap-target"),
             "STUB_GIT_MAIN": str(repo.main),
             "STUB_GIT_FIRE_AT": "6",
+            "STUB_GIT_FINAL_CHECK": str(repo.tmp / "final-entry-read"),
             "STUB_GIT_SAME_BRANCH": "1" if same_branch else "0",
         },
     )
 
 
 def test_clean_aborts_when_target_swapped_between_final_check_and_remove(repo: _Repo) -> None:
-    """P1-a：锁内最终校验与 remove 之间插入同名 `git worktree add`（裸 git
+    """P1-a：最终 porcelain 与指纹读之间插入同名 `git worktree add`（裸 git
     不拿锁，重建为不同分支）→ clean 必须中止，新实例与全部资源不动。"""
     victim_path = repo.add("victim")
 
@@ -848,6 +856,7 @@ def test_clean_aborts_when_target_swapped_between_final_check_and_remove(repo: _
 
     assert result.returncode == 1
     assert "已变化" in result.stderr
+    assert not (repo.tmp / "swap-target").exists(), result.stderr
     # 新实例（重建的 checkout 与其分支）未被误删，派生库未被碰。
     assert victim_path.is_dir()
     assert "dropdb" not in repo.log.read_text(encoding="utf-8")
@@ -864,7 +873,7 @@ def test_clean_aborts_when_target_swapped_between_final_check_and_remove(repo: _
         env={**_git_env(repo.tmp), "PATH": "/usr/bin:/bin"},
         check=False,
     )
-    assert ref.returncode == 0
+    assert ref.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
 
 def test_clean_aborts_when_identical_branch_rebuild_slips_past_porcelain(repo: _Repo) -> None:
@@ -883,6 +892,7 @@ def test_clean_aborts_when_identical_branch_rebuild_slips_past_porcelain(repo: _
 
     assert result.returncode == 1
     assert "已变化" in result.stderr
+    assert not (repo.tmp / "swap-target").exists(), result.stderr
     # 新实例未被误删：目录仍在，且仍检出原分支（同名同 HEAD 重建）。
     assert victim_path.is_dir()
     assert "dropdb" not in repo.log.read_text(encoding="utf-8")

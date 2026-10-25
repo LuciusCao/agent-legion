@@ -3,7 +3,7 @@
 Worker 直传到每次 execution 唯一的 staging key（jobs-staging/...）；Host
 先全部核验（staging 布局绑定本 execution、HEAD size、下载 hash），再统一
 服务端 copy 提升到权威 key + 原子落盘（只落 expected_outputs 白名单）+
-record_remote 登记 + best-effort 删 staging；任一失败整个 result 判
+record_remote_many 登记 + best-effort 删 staging；任一失败整个 result 判
 failed，且不留半应用状态。旧形态 str ref 的 add_ref 路径不变（回归由
 tests/services/test_agent_completion_validation.py 覆盖）。
 

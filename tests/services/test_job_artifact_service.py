@@ -9,6 +9,7 @@ from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.storage_paths import resolve_job_dir
+from tests.fakes.artifact_rows import seed_artifact_row
 from tests.fakes.storage import FakeObjectStorage
 
 
@@ -383,7 +384,8 @@ def _seed_gz_row(job_db, job) -> JobArtifactObjectStore:
     storage_key = f"jobs/{workspace_id}/{job['id']}/result.json.gz"
     storage = FakeObjectStorage(objects={storage_key: _GZ_COMPRESSED})
     store = JobArtifactObjectStore(job_db, storage)
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id=workspace_id,
         job_id=job["id"],
         node_key="upstream",
@@ -535,7 +537,8 @@ def test_object_store_open_stream_dual_form(job_db, job):
     # 裸形态行（存量数据）：open_stream 原样返回。
     bare_key = f"jobs/{job['workspace_id']}/{job['id']}/bare.json"
     store.storage.objects[bare_key] = _GZ_RAW
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id=job["workspace_id"],
         job_id=job["id"],
         node_key="upstream",

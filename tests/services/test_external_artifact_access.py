@@ -19,6 +19,7 @@ from server.app.services.job_artifact_media import attachment_disposition
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from server.app.services.job_errors import NotFoundError
 from server.app.storage_paths import resolve_job_dir
+from tests.fakes.artifact_rows import seed_artifact_row
 from tests.fakes.storage import FakeObjectStorage
 
 
@@ -66,7 +67,8 @@ def _seed_manifest_row(
     stored = gzip.compress(payload)
     storage_key = f"jobs/{job['workspace_id']}/{job['id']}/{name}.gz"
     store.storage.objects[storage_key] = stored
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id=job["workspace_id"],
         job_id=job["id"],
         node_key=node_key,
@@ -82,7 +84,8 @@ def _seed_bare_key_row(store, job, name: str, payload: bytes) -> str:
     storage key carries no .gz suffix — the only form presigned for #739."""
     storage_key = f"jobs/{job['workspace_id']}/{job['id']}/{name}"
     store.storage.objects[storage_key] = payload
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id=job["workspace_id"],
         job_id=job["id"],
         node_key="upstream",
@@ -557,7 +560,7 @@ def test_status_poll_is_unsigned_and_survives_signing_failure(job_db, settings, 
 
 def test_presign_targets_exactly_the_manifest_row_key(job_db, settings):
     """安全面（签名目标）：presign_get 收到的必须逐位等于权威 manifest 行
-    的 storage_key——行由服务端布局生成（record_remote/verify_remote 拒绝
+    的 storage_key——行由服务端布局生成（record_remote_many/verify_remote 拒绝
     布局外 key），这是「请求输入无法影响签名目标」的落点。测试从 DB 读回
     行断言（不自己拼 key），并混入一条 gzip 行钉住逐行对应：签错对象
     （拼名、漏 workspace 段、签成别行的 key、跨条目乱签）都会红。"""

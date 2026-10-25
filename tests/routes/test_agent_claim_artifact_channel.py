@@ -21,6 +21,7 @@ from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.routes.agent_worker_claims import create_agent_worker_claim_router
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from tests.fakes.artifact_rows import seed_artifact_row
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -122,7 +123,8 @@ def test_agent_claim_injects_object_channel(monkeypatch: pytest.MonkeyPatch) -> 
     store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
     # 上游产物已有 job_artifacts 行 → input 升级为 presigned GET。
     storage.objects["jobs/ws-1/job-1/q.json"] = PAYLOAD
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id="ws-1",
         job_id="job-1",
         node_key="upstream",
@@ -177,7 +179,8 @@ def test_agent_claim_v4_worker_gets_gzip_specs(monkeypatch: pytest.MonkeyPatch) 
     store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
     compressed = gzip_mod.compress(PAYLOAD)
     storage.objects["jobs/ws-1/job-1/q.json.gz"] = compressed
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id="ws-1",
         job_id="job-1",
         node_key="upstream",
@@ -223,7 +226,8 @@ def test_agent_claim_mixed_fleet_v3_worker_keeps_raw_specs(monkeypatch: pytest.M
     store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
     compressed = gzip_mod.compress(PAYLOAD)
     storage.objects["jobs/ws-1/job-1/q.json.gz"] = compressed
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id="ws-1",
         job_id="job-1",
         node_key="upstream",
@@ -251,7 +255,8 @@ def test_agent_claim_presign_expiry_follows_execution_timeout(
     storage = FakeStorage()
     store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
     storage.objects["jobs/ws-1/job-1/q.json"] = PAYLOAD
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id="ws-1",
         job_id="job-1",
         node_key="upstream",

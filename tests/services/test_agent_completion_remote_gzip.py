@@ -26,6 +26,7 @@ from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from tests.fakes.artifact_keys import pin_legacy_authority_keys
+from tests.fakes.artifact_rows import seed_artifact_row
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -243,7 +244,8 @@ def test_finish_rerun_form_change_raw_to_gzip(tmp_path: Path) -> None:
     storage.objects[GZ_STAGING_KEY] = GZ_PAYLOAD
     handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
     # 上一次运行的存量清单行（裸形态）。
-    object_store.record_remote(
+    seed_artifact_row(
+        object_store,
         workspace_id="ws-1",
         job_id="job-1",
         node_key="node_a",

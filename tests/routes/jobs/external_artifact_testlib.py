@@ -11,6 +11,7 @@ import gzip
 import hashlib
 
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
+from tests.fakes.artifact_rows import seed_artifact_row
 
 
 def _seed_workspace(c, workspace_id: str) -> None:
@@ -36,15 +37,15 @@ def _create_job(c, workspace_id: str, source_id: str = "Q003") -> dict:
 def _register_object_artifact(
     c, job: dict, name: str, payload: bytes, *, node_key: str = "upstream", gzipped: bool = True
 ) -> None:
-    """Register an authority-copy manifest row the way the Worker-direct
-    channel does (HEAD-verified record_remote), storing the given bytes."""
+    """Store authority bytes and directly seed their pre-existing manifest row."""
     store: JobArtifactObjectStore = c.app.state.job_artifact_objects
     stored = gzip.compress(payload) if gzipped else payload
     storage_key = f"jobs/{job['workspace_id']}/{job['id']}/{name}"
     if gzipped:
         storage_key += ".gz"
     store.storage.objects[storage_key] = stored
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id=job["workspace_id"],
         job_id=job["id"],
         node_key=node_key,
