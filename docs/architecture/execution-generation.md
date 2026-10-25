@@ -131,8 +131,8 @@ code-pool 持有者请求 workspaces 行）。
 agent sweep、两个 queued-request sweep、批 claim 的每个候选——code 也包括）
 一律按全库唯一序 `(hashtext('job-mutation:' || job_id)::int, job_id)` 遍历，
 没有 ws 分桶；agent-ws 是 pool 级锁，批 claim 在起始阶段按实际 ws 锁键升序
-预获取，不作为 job-mutation 批序的元组前缀。jobs 行已消失的孤儿项用哨兵
-`-(2**31)` 定位（`_ORPHAN_WS_LOCK_KEY`），job_id 收尾决胜。单一
+预获取，不作为 job-mutation 批序的元组前缀。孤儿项的锁键同样按 id 直接计算
+（advisory 锁不依赖 jobs 行存在），job_id 收尾决胜。单一
 全序保证任意两批不会以相反顺序走同一对 job。job 创建批（`create_jobs_bulk`
 的每个 chunk，#1083）只含单一 workspace，`lock_job_mutations_sorted` 使用同一
 全序的 `(hashtext('job-mutation:' || job_id)::int, job_id)` 后缀，而不是另起
