@@ -4,14 +4,56 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-25
+
+主打批量审批与大批量操作收口、材料内容身份与孤儿回收加固：新增批量通过/终止和失败项重试，批量筛选取消单请求数量上限并改为冻结上界后的流式补页；材料上传引入 create-only 条件写、存量无 hash 材料自动绑定 ETag，材料与 job 产物 GC 按 key 文法重开或收紧删除批；另含分片输入与并行 marker 归属、job 锁序与删除广播、Studio 双通道和日志目录等一批修复。
+
+### Added
+
+- 批量审批与现有多选 UI（issue #1363，schema v104）：新增 `POST /workspaces/{id}/jobs/batch-approve` 与 `POST .../batch-reject`，显式 ids 与 filter 双选择面复用 0.8.1 批量操作框架，小选择同步返回、超过阈值转 202 并由 feeder 执行，任务中心展示逐 job 结果；现有任务列表多选操作区新增「通过」「终止」，本版不新增独立待审批聚合页或键盘快审流。每次成功决策仍逐 job 追加 `approval_decisions` 并记录 batch id、ids/filter 选择形态与 actor；批量 approve 只采用节点 defaults，`required` 且无 default 的门按 `needs_manual_input` 跳过并留在待审，多门 job 按 `multiple_awaiting_gates` 整条跳过，并发/reset 冲突记 `gate_conflict`，rework 不进批量面；approve 会解锁下游，故与 rerun 族同受 workspace backlog 水位约束。
+- 批量操作失败项重试 API（issue #1358）：新增 `POST /workspaces/{id}/job-batch-operations/{op_id}/retry-failed`，终态（completed/failed/cancelled）操作的 failed 项按原 kind 与原参数生成带 `retry_of` 溯源的新 operation，始终异步返回 202，原操作及其结果不被改写；package 表示重打包失败项，pause/resume 因无意义、approve/reject 因必须生成新的批审计身份而明确拒绝，非终态返回 409、不可重试 kind 或无失败项返回 400。
+
 ### Changed
 
+- 批量选择流式化并退役单请求数量上限（issue #1362）：删除 `MAX_BATCH_JOBS`、显式 id 列表的 `max_length` 与 `batch_selection_too_large` 422，`AGENT_LEGION_MAX_BATCH_JOBS` 在 0.8.2 仅打 deprecation warning、不再影响行为；filter/failure 大选择只预读阈值+1 条决定同步或异步，操作行冻结原始筛选参数、keyset 上界与有界首 buffer，feeder 每 tick 增量补页而非反复解析全量 id，`items_total` 随发现增长、终态精确。jobs 以 `(created_at,id)`、failure 以 `(finished_at,node_run_id)` 冻结上界，受理后晚到或排序进入上界之前的项不混入；failure 冻结为 entry-sided，已在集中的 job 若 latest failed run 被新 run 取代可从后续页退出。小选择同步快路径不变，在途执行负载仍由 backlog 水位约束；任务中心 pause/cancel 尚无公开控制端点，不把状态机预留当作已交付止损能力。
 - S3 孤儿 GC 材料删除批重开（issue #1314）：inline 文本与 demo seed 改走服务端材料写入 chokepoint（先落无 hash 的 uploading intent 行、再 PUT、再同事务换成 ready 行），所有材料对象从第一个字节起都被行引用；`scripts/gc-s3-jobs.py --apply` 据此删除 v2g 单次使用文法、对象年龄过 max(--grace-hours, 1h 下限)、删除前新鲜反查无行的材料孤儿，旧文法材料孤儿仍只报告；交错决策表见 materials-and-runs-design §6.4.2。
+- DAG 节点类型与执行主体徽标改用现行词汇（issues #1180、#731）：Studio 与 job 详情统一展示 `code` / `agent` 类型，Studio agent 节点可附 runtime（如 `agent·velites`）；执行徽标只显示真实执行主体（worker 短码或不等于 node key 的 agent 身份），删除隐含 code 池键的占位回落，code 节点不再出现双「code」、自含 agent 节点不再重复 node key。job-view 与 Studio MCP 契约的 `executor_kind` 同步收窄为 `"code" | null`，摘除已退役的 pi/openclaw 枚举；lease/容量层内部 code 池键不变。
 
 ### Fixed
 
 - 材料 ETag 恢复重绑（`scripts/rebind_material_etags.py`）的 CAS 从 (object_etag, storage_key) 扩为四钉：再钉扫描时的 `upload_generation` 与 `status`（TTL 过期、complete 失败只翻 status，旧 CAS 拦不住）；CAS 落空单列为「竞态失败」报告、退出码 1（issue #1313）。
-- 存量无 hash 材料的 ETag 身份绑定（issue #1316）：v98 前完成、`object_etag=''` 的无 hash 材料由新 Host 每次启动时的后台线程按当前 HEAD 一次性绑定（不受 sweeper_enabled / code_capacity 等开关影响；失败只报告、行保持 size-only，不挂起不翻 failed；`scripts/bind_legacy_material_etags.py` 可补跑），绑定 CAS 同条 UPDATE 把 `upload_generation` +1，未绑窗口内写入的 `{id}-v2g{gen}` 缓存地址孤儿化；绑定后升级前签出的 PUT URL 的同尺寸覆盖在 Host 与 v6 Worker 上 412 响亮失败；旧 Worker（< v6）对已绑 ETag 的无 hash 材料**永久门禁**（任务保持 queued、不随时间放行——pre-v6 Worker 命中升级前裸 material_id 缓存时不发 GET 也不核验字节，任何排空期都不能证明其缓存与已绑 ETag 相符，codex r2 P1），repair 进行中（uploading）的无 hash 行也对旧 Worker 门禁，claim 描述符按同一行快照复判，关闭准入与描述符组装之间的跨事务窗口。
+- 旧 Worker 材料门禁的入队出口与容量计数（issue #1320）：无在线 v6+ code Worker 时，命中 ETag 门禁的远程 code 节点不再入队——Host 有本地容量则回落本地、自行做 If-Match 核验，纯远程形态保持 pending 且不占 code stock，v6 Worker 上线后自动恢复；已入队的门禁请求在无 v6+ Worker 时也从 stock 排除，避免不可领 backlog 饿死可领请求。每个 job 每进程首次 deferral 记 WARNING，v5-only 车队可据此升级 Worker 或保留 Host 本地产能。
+- 并行 code 节点的分片输入与认证失败 marker 归属（issues #1355、#1356）：Host 本地分片把 `shard_index` / `shard_input` 镜像进节点 SDK runtime，与 Worker 远程路径对齐；`.node_runtime/auth_failure` 改为 `auth_failure-<execution_id>`，SDK 写入、Host 清理/消费与 Worker 读取三侧同按 execution 隔离，邻节点或分片不再互删、错认 marker，手工构造且无 execution_id 的 runtime 保留 legacy 固定名兼容。
+- job-mutation 全域锁序与删除广播身份复核（issues #1346、#1357，含 #1342/#1343 测试补强）：创建、claim、finish、expire/recover 与 sweep 等多 job 路径统一按实际 advisory 锁资源 `(hashtext('job-mutation:' || job_id), job_id)` 的纯全序取锁，不再按 id 文本或 workspace 分桶，关闭 32 位 hash 碰撞别名导致的跨批 AB-BA；claim 批在首个 job-mutation 锁前按实际 key 预取 agent-ws 池锁，保持池锁 → job-mutation 的层级序。删除广播改在同一把 job 锁下复核 jobs 行仍不存在才发出，同源重建已落行则跳过，未重建时 created 事件必在 deleted 之后，客户端不会把新 job 误删；复核或事件 sink 失败不反转已提交删除。
+- 节点日志目录确定性分片（issue #1340）：新日志写入 `logs/jobs/by-job/<sha1(job_id)[:2]>/<job_id>/`，避免长期保留 job 时单目录条目无界增长；#1113 期未分片目录与更早扁平名不搬迁，读取、retention 与 job 删除按 `node_runs.log_path` 和各代命名规则兼容，删除时两代 per-job 目录均可清理。
+- Studio 双通道与草稿校验四处修复（issues #1352、#1353、#1359、#1360）：变更摘要面板与 chip/发布门控同滤 execution-only 行，混合节点只展示结构字段并按结构侧计算风险；顶层 `execution.runtime` 只折入 agent 节点的结构载荷，纯 code workflow 不再被前端误判为结构变更；自动校验对 4xx 确定性拒绝立即终结，仅网络/5xx 走 2s/4s/8s 退避；chat 卡「存为草稿」后的自动校验延迟 400ms 触发，给「未发布变更」瞬态 chip 留下可渲染窗口。
+- worktree 清理中断后的派生库静默收养（issue #1349）：`init-worktree.sh` 在派生名锁内识别「无初始化标记、`.env` 尚未指向自身派生库、但派生库已存在」的新实例并拒绝初始化，避免 clean 在 remove 与 drop 之间被 SIGKILL 后同名实例继承旧库；拒绝时移除本趟从 base 复制且指向 base 资源的 `.env`，既有 `.env` 不删。管理员可用 `scripts/drop-worktree-db.sh <name> --yes` 清理残留后重跑，或核实确需继承后以 `AGENT_LEGION_INIT_ADOPT_EXISTING_DB=1` 显式收养；离线无法探测时维持原有跳过提示。
+- 撞名 `jobs-staging` 前缀的材料孤儿宽限窗（issue #1322）：材料形态 key 在 staging 扫描页内先分流并按材料 `--grace-hours` 判定，`--staging-grace-hours` 只约束真正 staging 对象；staging 窗更长时撞名材料不再从候选与报告中消失，反向情形仍经材料 1h 下限复核，不会提前删除。
+
+### Security
+
+- 材料 presign PUT 引入 create-only 条件写（issue #1321）：材料首发、presign 重试与 repair 重传 URL 把 `If-None-Match: *` 签入 SigV4 SignedHeaders，客户端必须原样携带，首个 PUT 后同 URL 重放/覆盖由存储层返回 412，缺头返回 403；前端网络重试把 412 视为「已上传」，complete 后覆盖在存储层一次性关闭，消费侧 If-Match 降为纵深。Worker 产物 staging PUT 保持原语义，不受此变更影响。
+- 存量无 hash 材料的 ETag 身份绑定（issue #1316）：v98 前完成、`object_etag=''` 的无 hash 材料由新 Host 每次启动时的后台线程按当前 HEAD 一次性绑定（不受 sweeper_enabled / code_capacity 等开关影响；失败只报告、行保持 size-only，不挂起不翻 failed；`scripts/bind_legacy_material_etags.py` 可补跑），绑定 CAS 同条 UPDATE 把 `upload_generation` +1，未绑窗口内写入的 `{id}-v2g{gen}` 缓存地址孤儿化；绑定后升级前签出的 PUT URL 的同尺寸覆盖在 Host 与 v6 Worker 上 412 响亮失败；旧 Worker（< v6）对已绑 ETag 的无 hash 材料**永久门禁**（任务保持 queued、不随时间放行——pre-v6 Worker 命中升级前裸 material_id 缓存时不发 GET 也不核验字节，任何排空期都不能证明其缓存与已绑 ETag 相符），repair 进行中（uploading）的无 hash 行也对旧 Worker 门禁，claim 描述符按同一行快照复判，关闭准入与描述符组装之间的跨事务窗口。
+- legacy 固定 job authority key 退出 GC 删除批（issue #1309）：`scripts/gc-s3-jobs.py --apply` 只删除 #853 起 `jobs/{workspace}/{job}/.v/{32hex attempt}/...` 的一次性版本 key，旧固定 authority key 因同 job 重建窗口无法由一次 fresh revalidate 关闭而仅报告不删除；门禁钉在删除动作上，手工构造报告也不能绕过，staging 回收与 rollback 备份豁免不变。
+
+### Maintenance
+
+- 架构治理检查产品化（issues #1308、#1344、#1354、#732）：新增嵌套池 checkout AST 检查（JobQueries 自 checkout 方法集 + 两层 callee 闭包，注册 DB-POOL-CHECKOUT-001）、前后端零引用导出检查与 frontend emoji 区段检查，均接入不可按 lane 裁剪的 `check_architecture`；存量命中以双向校验、只降不升的显式 allowlist 钉住，执行代次 registry 长文本同步补齐 job 创建锁域与 `lock_job_mutations_sorted`。
+- quick gate 与 nightly 修复（issues #1307、#304、#1331、#1333、#1387）：aff 对空选择显式跳过并提示未跑的 postgres 关联测试，依赖清单变更走全额回落，输出管道保留真实退出码；nightly failure-tracker 补全 needs 并覆盖 cancelled 超时 lane；release train 是否已发布改按 tag/合并状态判定，避免与 main 同版本时漏查 flaky deadline；登记 worktree-collision clean-abort 的 FLAKY-022 以继续追踪。
+- GitHub Actions 依赖更新（PR #1323、#1324、#1325、#1326、#1327）：`docker/login-action` 4.6.0、`docker/setup-buildx-action` 4.4.1、`astral-sh/setup-uv` 10.3.0、`actions/upload-artifact` 7.0.2、`actions/checkout` 7.0.1，继续使用完整 commit SHA 钉版。
+
+### 升级注意
+
+- **数据库：** 升级前备份 PostgreSQL；Host 启动自动执行 schema v104，给 `approval_decisions` 增加 payload 与批审计上下文字段/索引，并把 approve/reject 加入 `job_batch_operations.kind` 约束。迁移只向前，不要把 v104 dump 恢复给旧代码；回滚使用升级前备份。
+- **Host / Worker 顺序与 tag：** 必须先升 Host 到 v0.8.2 并确认健康，再逐台升级 Worker 到 worker-v0.8.2；Worker 协议保持 v6。pre-v6 Worker 对已绑 ETag 或 repair 中的无 hash 材料任务不可领，纯远程且无 v6 Worker 时任务保持 pending、不占 code stock，升级后自动恢复；本版 worker 线包含并行 code 节点 marker 隔离修复，不能用「协议号未变」替代 worker-v0.8.2 发布。
+- **批量选择配置与 API：** `AGENT_LEGION_MAX_BATCH_JOBS` 已失效，设置后只打 deprecation warning，请从部署配置移除；自写客户端不应再依赖 `batch_selection_too_large` 422 或旧显式 id 数量上限，大 filter/failure 操作会按冻结上界流式执行，需用任务句柄和逐 job 结果判断完成与跳过。
+- **对象存储与上传客户端：** 材料 PUT 后端必须支持签名 `If-None-Match: *` 条件写；自写上传/重传客户端必须携带 `-H 'If-None-Match: *'`，缺头 403、同 URL 重放 412，网络重试遇 412 按已上传处理。SeaweedFS 4.45 已实测，RustFS 条件写尚待实测，使用该后端升级前必须先验证；不兼容的后端不能用于本版材料上传。
+- **存量材料绑定与 GC：** 新 Host 启动会自动绑定 v98 前的无 hash 材料 ETag，失败行保持 size-only 并报告，可用 `scripts/bind_legacy_material_etags.py` dry-run → `--apply` 补跑；升级采用停机、单副本 Host，避免新旧 Host 同时在役签发 URL。`scripts/gc-s3-jobs.py` 现在会删除符合门禁的材料孤儿，请先 dry-run 审查删除批再 `--apply`；旧文法材料与 legacy 固定 job authority key 仍只报告。
+- **一键安装与 velites：** `scripts/install-worker.sh` 默认钉到 worker 0.8.2 / velites 0.5.9；`velites/` 自 velites-v0.5.9 无源码差异，本版不发布新 velites tag。
+
+### 已知后续
+
+- RustFS 的签名 `If-None-Match: *` 条件 PUT 尚待实测；在该后端完成验证前，不应把本版材料上传切换到 RustFS。
 
 ## [0.8.1] - 2026-10-22
 
@@ -883,7 +925,8 @@ Initial open-source release.
 - Demo workflow `education_video_problems_generation` under `examples/`, runnable out of the box against a real LLM.
 - Docker deployment stacks (`deploy/`) and remote worker deployment runbook.
 
-[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/LuciusCao/agent-legion/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/LuciusCao/agent-legion/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/LuciusCao/agent-legion/compare/v0.7.19...v0.8.0
 [0.7.6]: https://github.com/LuciusCao/agent-legion/compare/v0.7.5...v0.7.6
