@@ -49,6 +49,13 @@ if [[ "$1" == "worktree" && "$2" == "list" ]]; then
     "worktree __MAIN__/.worktrees/other" \\
     "HEAD 0000000000000000000000000000000000000000" \\
     "branch refs/heads/feat/other"
+  if [[ -n "${STUB_TOWER_WT:-}" ]]; then
+    printf '%s\n' \
+      "" \
+      "worktree __MAIN__/.worktrees/victim/.tower/worktrees/${STUB_TOWER_WT}" \
+      "HEAD 1111111111111111111111111111111111111111" \
+      "branch refs/heads/feat/tower"
+  fi
   exit 0
 fi
 # 派生名锁（#1084）落在 git common dir 下；只读查询，不记入 stub 日志。
@@ -172,6 +179,60 @@ def test_cwd_outside_target_worktree_proceeds(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert "收尾清理结束" in result.stdout
     assert "工作目录在待清理的 worktree 内" not in result.stderr
+
+
+def test_parent_cleanup_refuses_registered_tower_dependent(tmp_path: Path) -> None:
+    main, bin_dir, stub_log = _setup(tmp_path)
+    parent = main / ".worktrees" / "victim"
+    tower = parent / ".tower" / "worktrees" / "wt-1"
+    tower.mkdir(parents=True)
+    stub_log.write_text("", encoding="utf-8")
+
+    result = _run(
+        main / ".worktrees" / "other" / "scripts" / "clean-worktree.sh",
+        bin_dir,
+        cwd=main,
+        extra_env={"STUB_LOG": str(stub_log), "STUB_TOWER_WT": "wt-1"},
+    )
+
+    assert result.returncode == 1
+    assert "tower 子 worktree 复用其派生库/bucket" in result.stderr
+    assert str(tower) in result.stderr
+    assert "worktree remove" not in stub_log.read_text()
+
+
+_PSQL_EXISTING_DB_STUB = """#!/usr/bin/env bash
+if [[ "$*" == *pg_database_size* ]]; then
+  echo "agent_legion_dev|1 MB"
+elif [[ "$*" == *"select 1 from pg_database"* ]]; then
+  echo 1
+fi
+exit 0
+"""
+
+_DROPDB_PROBE = """#!/usr/bin/env bash
+echo "dropdb $*" >> "${STUB_LOG:-/dev/null}"
+"""
+
+
+def test_parent_db_drop_refuses_registered_tower_dependent(tmp_path: Path) -> None:
+    main, bin_dir, stub_log = _setup(tmp_path)
+    tower = main / ".worktrees" / "victim" / ".tower" / "worktrees" / "wt-1"
+    tower.mkdir(parents=True)
+    _write_stub(bin_dir / "psql", _PSQL_EXISTING_DB_STUB)
+    _write_stub(bin_dir / "dropdb", _DROPDB_PROBE)
+    stub_log.write_text("", encoding="utf-8")
+
+    result = _run(
+        main / ".worktrees" / "other" / "scripts" / "drop-worktree-db.sh",
+        bin_dir,
+        cwd=main,
+        extra_env={"STUB_LOG": str(stub_log), "STUB_TOWER_WT": "wt-1"},
+    )
+
+    assert result.returncode == 1
+    assert "拒绝删除父 worktree 派生库" in result.stderr
+    assert "dropdb" not in stub_log.read_text()
 
 
 # --- remote-branch protection (#930) ---------------------------------------

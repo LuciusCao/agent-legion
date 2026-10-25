@@ -32,6 +32,56 @@ worktree_derived_bucket() {
     printf 'agent-legion-%s' "$(printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-')"
 }
 
+# tower 子 worktree 使用 <父 worktree>/.tower/worktrees/wt-* 布局，不拥有
+# 独立派生库/bucket；其父路径仅由这个严格布局得出，调用方仍需核验父 worktree
+# 已注册。非 tower 路径输出空字符串。
+worktree_tower_parent() {
+    local path="$1" name container parent
+    name="${path##*/}"
+    container="${path%/*}"
+    [[ "$name" == wt-?* && "${container##*/}" == "worktrees" ]] || return 0
+    parent="${container%/*}"
+    [[ "${parent##*/}" == ".tower" ]] || return 0
+    parent="${parent%/*}"
+    [[ -n "$parent" && "$parent" != "$path" ]] || return 0
+    printf '%s\n' "$parent"
+    return 0
+}
+
+# 列出仍注册且目录存在的 tower 子 worktree（每行一个绝对路径）。git 查询
+# 失败返回 2，删除护栏必须把它当作无法确认而拒绝继续。
+worktree_tower_dependents() {
+    local repo="$1" parent="$2" listing path
+    listing="$(cd "$repo" && git worktree list --porcelain)" || return 2
+    while IFS= read -r path; do
+        [[ -d "$path" ]] || continue
+        if [[ "$(worktree_tower_parent "$path")" == "$parent" ]]; then
+            printf '%s\n' "$path"
+        fi
+    done <<EOF
+$(printf '%s\n' "$listing" | awk '/^worktree /{print substr($0, 10)}')
+EOF
+    return 0
+}
+
+# 父 worktree 的派生库/bucket 被 tower 子 worktree 复用；仍有子实例时拒绝
+# 清理父资源。ACTION 是给人看的动作描述。
+worktree_require_no_tower_dependents() {
+    local repo="$1" parent="$2" action="$3" dependents rc=0
+    dependents="$(worktree_tower_dependents "$repo" "$parent")" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        echo "错误: 无法列出已注册 worktree（git worktree list 失败），无法确认 tower 子 worktree 状态，拒绝${action}。" >&2
+        return 1
+    fi
+    [[ -n "$dependents" ]] || return 0
+    echo "错误: worktree '${parent}' 仍有 tower 子 worktree 复用其派生库/bucket，拒绝${action}:" >&2
+    printf '%s\n' "$dependents" | while IFS= read -r dependent; do
+        echo "        ${dependent}" >&2
+    done
+    echo "      请先由 tower 清理这些子 worktree，再重试。" >&2
+    return 1
+}
+
 # 初始化完成标记（#1084 R5）：init-worktree.sh 在锁内、派生资源建完后写
 # <worktree>/.worktree-initialized.ok（已加入 .gitignore，不阻塞
 # git worktree remove，随 worktree 目录一起消失）。删除护栏据此区分同名
@@ -74,7 +124,8 @@ worktree_registration_owns_resources() {
 # 列出与 WT 派生出同名资源的其他已注册 worktree，每行
 # `<worktree名><TAB><撞名的资源名>`（一个 worktree 撞多个资源则多行）。
 # 只看目录仍存在的 worktree（目录已不在的 prunable 条目没有使用方）；跳过
-# 主仓库根（第一个条目，从不初始化派生资源）与同名条目（WT 自身）。
+# 主仓库根（第一个条目，从不初始化派生资源）、tower 子 worktree（复用父
+# 资源、不按自己的名字派生）与同名条目（WT 自身）。
 # INCLUDE_SELF=1 时同名条目也算冲突——但只认「已完成初始化的登记」为资源
 # 主，且该判定覆盖**所有**派生名碰撞的登记（含别名：foo_bar 与 foo-bar
 # 归一派生同一库名）：无完成标记且 .env 未指向自身派生库的登记，是阻塞在
@@ -97,6 +148,7 @@ worktree_derived_name_conflicts() {
             continue
         fi
         [[ -d "$path" ]] || continue
+        [[ -z "$(worktree_tower_parent "$path")" ]] || continue
         other="$(basename "$path")"
         if [[ "$other" == "$wt" && "$include_self" != "1" ]]; then
             continue
