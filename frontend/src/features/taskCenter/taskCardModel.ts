@@ -55,8 +55,7 @@ export type TaskCardModel = FeedingGateCardModel & {
   reasons: TaskCardReason[]
   /** package 终态的 zip 下载地址（output.download_url），有则渲染下载按钮。 */
   downloadUrl: string | null
-  /** 进行中是否暴露暂停/取消（run_batches 控制面已就绪；job-batch-op 的
-   * pause/cancel 控制面本期不外露，卡片只读展示进度——M52 裁决）。 */
+  /** 进行中是否暴露暂停/继续/取消控制入口。 */
   controllable: boolean
   errorMessage: string
   createdBy: string

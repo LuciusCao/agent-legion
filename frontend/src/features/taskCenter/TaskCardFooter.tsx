@@ -63,9 +63,8 @@ function archiveLine(card: TaskCardModel): string {
 
 /**
  * 卡片底行（从 TaskCard 拆出守体积预算）：左侧耗时/归档口径，右侧状态相关
- * 操作按钮。暂停/继续/取消只出现在 controllable 卡片（run_batches）；
- * job-batch-op 的 pause/cancel 控制面本期不外露（M52 裁决）。终态动作按
- * 调用方提供的 handler 渲染（归档端点由 M61 落地后接入）。
+ * 操作按钮。暂停/继续/取消只出现在 controllable 卡片；终态动作按调用方
+ * 提供的 handler 渲染。
  */
 export function TaskCardFooter({
   card,

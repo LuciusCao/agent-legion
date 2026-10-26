@@ -32,6 +32,12 @@ vi.mock('../api/jobBatchOperationsApi', () => ({
   listJobBatchOperationResults: vi.fn(),
 }))
 
+vi.mock('../api/jobBatchOperationControlApi', () => ({
+  pauseJobBatchOperation: vi.fn(),
+  resumeJobBatchOperation: vi.fn(),
+  cancelJobBatchOperation: vi.fn(),
+}))
+
 vi.mock('../api/jobBatchOperationsListApi', () => ({
   listJobBatchOperations: vi.fn(),
   archiveJobBatchOperation: vi.fn(),
@@ -423,7 +429,7 @@ describe('TaskCenterPage（#1157 phase3）', () => {
     })
     renderPage()
 
-    // 进行中：op 卡片与 run-batch 卡片同区混排；op 卡片不暴露暂停/取消。
+    // 进行中：op 卡片与 run-batch 卡片同区混排，并复用控制入口。
     const opCard = await screen.findByTestId('task-card-op-active-1')
     expect(opCard).toHaveTextContent('批量重跑')
     expect(opCard).toHaveTextContent('已处理 8,400 / 20,000')
@@ -432,7 +438,7 @@ describe('TaskCenterPage（#1157 phase3）', () => {
     expect(screen.getByTestId('task-card-run-running-1')).toBeInTheDocument()
     expect(
       Array.from(opCard.querySelectorAll('button')).map((b) => b.textContent)
-    ).toEqual([])
+    ).toEqual(['暂停', '取消'])
 
     // 终态 op 卡片：下载打包 + 逐条结果 + 归档。
     const doneOp = await screen.findByTestId('task-card-op-done-1')

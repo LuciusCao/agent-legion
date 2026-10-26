@@ -181,9 +181,9 @@ describe('jobBatchOpToCard（#946 / M52）', () => {
     expect(jobBatchOpToCard(op({})).downloadUrl).toBeNull()
   })
 
-  it('never exposes pause/cancel（控制面本期不外露）nor archive provenance', () => {
+  it('exposes controls and defaults single-op archive provenance', () => {
     const card = jobBatchOpToCard(op({}))
-    expect(card.controllable).toBe(false)
+    expect(card.controllable).toBe(true)
     expect(card.archivedAt).toBeNull()
     expect(card.archiveSource).toBeNull()
     expect(card.refId).toBe('op-a1b2c3d4')

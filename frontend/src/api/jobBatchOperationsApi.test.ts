@@ -6,6 +6,11 @@ import {
   listJobBatchOperationResults,
   type JobBatchOperationAccepted,
 } from './jobBatchOperationsApi'
+import {
+  cancelJobBatchOperation,
+  pauseJobBatchOperation,
+  resumeJobBatchOperation,
+} from './jobBatchOperationControlApi'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -105,4 +110,27 @@ describe('jobBatchOperationsApi polling surface（#946）', () => {
       expect.anything()
     )
   })
+})
+
+describe('jobBatchOperationsApi control surface（#1397）', () => {
+  const controls = [
+    ['pause', pauseJobBatchOperation],
+    ['resume', resumeJobBatchOperation],
+    ['cancel', cancelJobBatchOperation],
+  ] as const
+
+  it.each(controls)(
+    'posts %s and returns the operation',
+    async (action, control) => {
+      const payload = accepted().operation
+      const fetchMock = mockFetchJson(payload)
+      global.fetch = fetchMock
+
+      await expect(control('ws 1', 'op/9')).resolves.toEqual(payload)
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/workspaces/ws%201/job-batch-operations/op%2F9/${action}`,
+        expect.objectContaining({ method: 'POST' })
+      )
+    }
+  )
 })
