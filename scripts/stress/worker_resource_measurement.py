@@ -303,6 +303,18 @@ def collect_host_metadata(container: str, image: str, velites: Path) -> dict[str
     container_image = json.loads(
         _command(["docker", "inspect", "--format", "{{json .Image}}", container])
     )
+    velites_version = _command(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{velites}:/tmp/velites:ro",
+            "agent-legion-host:measurement",
+            "/tmp/velites",
+            "--version",
+        ]
+    )
     return {
         "captured_at": _utc_now(),
         "kernel": platform.release(),
@@ -310,7 +322,11 @@ def collect_host_metadata(container: str, image: str, velites: Path) -> dict[str
         "os": platform.system(),
         "arch": platform.machine(),
         "cgroup_version": 2,
-        "cgroup_filesystem": _command(["stat", "-fc", "%T", "/sys/fs/cgroup"]),
+        "cgroup_filesystem": (
+            "docker-desktop-sidecar"
+            if platform.system() == "Darwin"
+            else _command(["stat", "-fc", "%T", "/sys/fs/cgroup"])
+        ),
         "docker_server": json.loads(
             _command(["docker", "version", "--format", "{{json .Server}}"])
         ),
@@ -325,7 +341,7 @@ def collect_host_metadata(container: str, image: str, velites: Path) -> dict[str
         },
         "velites": {
             "sha256": hashlib.sha256(velites.read_bytes()).hexdigest(),
-            "version": _command([str(velites), "--version"]),
+            "version": velites_version,
         },
     }
 

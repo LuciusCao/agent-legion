@@ -10,10 +10,13 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from scripts.stress.worker_resource_evidence import (
-    BacklogEvidence,
-    measure_upload_backlog,
+from scripts.stress.worker_resource_evidence import BacklogEvidence, measure_upload_backlog
+from scripts.stress.worker_resource_identity import (
+    ContractViolationError,
+    ExecutionReadinessError,
+    build_execution_expectations,
     require_direct_outputs,
+    require_done_executions,
     verify_authority_object,
 )
 from scripts.stress.worker_resource_measurement import (
@@ -190,7 +193,10 @@ def test_workload_covers_real_execution_and_restart_scenarios() -> None:
     }
     source = (ROOT / "scripts/stress/worker_resource_workload.py").read_text(encoding="utf-8")
     assert "simulate_agents" not in source
-    assert "agent_execution_requests" in source
+    evidence_source = (ROOT / "scripts/stress/worker_resource_identity.py").read_text(
+        encoding="utf-8"
+    )
+    assert "agent_execution_requests" in evidence_source
     args = parse_args(["--cold-repetitions", "1", "--warm-repetitions", "1"])
     assert args.pids_interval_ms == 100
     assert args.artifact_chars == 64 * 1024
@@ -281,6 +287,8 @@ def test_direct_output_and_authority_object_evidence_passes() -> None:
     evidence = verify_authority_object(
         _Storage(),
         execution_id="exec1",
+        workspace_id="resource_code",
+        job_id="job1",
         name="code_output.json",
         ref=refs["code_output.json"],
         row=_authority_row(),
@@ -329,7 +337,13 @@ def test_authority_or_object_mismatch_fails(mutation: str) -> None:
         storage = _Storage(data=b"abd")
     with pytest.raises(RuntimeError, match="job_artifacts|missing|mismatch"):
         verify_authority_object(
-            storage, execution_id="exec1", name="code_output.json", ref=_direct_ref(), row=row
+            storage,
+            execution_id="exec1",
+            workspace_id="resource_code",
+            job_id="job1",
+            name="code_output.json",
+            ref=_direct_ref(),
+            row=row,
         )
 
 
@@ -338,7 +352,13 @@ def test_gzip_authority_object_checks_compressed_size_and_plaintext_hash() -> No
     ref = {**_direct_ref(), "storage_key": STAGING_KEY + ".gz", "size_bytes": len(compressed)}
     row = {**_authority_row(), "storage_key": AUTHORITY_KEY + ".gz", "size_bytes": len(compressed)}
     evidence = verify_authority_object(
-        _Storage(data=compressed), execution_id="exec1", name="code_output.json", ref=ref, row=row
+        _Storage(data=compressed),
+        execution_id="exec1",
+        workspace_id="resource_code",
+        job_id="job1",
+        name="code_output.json",
+        ref=ref,
+        row=row,
     )
     assert evidence["object_verified"] is True
 
@@ -365,6 +385,9 @@ class _FakeResponse:
 
     def json(self) -> dict:
         return self.payload
+
+    def raise_for_status(self) -> None:
+        return
 
 
 class _FakeBacklogRun:
@@ -442,3 +465,231 @@ def test_pause_error_still_attempts_unpause_and_restores_concurrency() -> None:
     assert ("unpause", "seaweedfs") in run.events
     assert ("PUT", "/api/config", {"upload_max_concurrency": 3}) in run.events
     assert "create" not in run.events
+
+
+def test_seed_initializes_schema_before_first_connection_insert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import contextmanager
+
+    from scripts.stress import worker_resource_workload as workload
+
+    events: list[str] = []
+
+    class JobDB:
+        def list_workspaces(self) -> list[dict]:
+            return [{"id": workspace} for workspace in workload.WORKSPACES.values()]
+
+    monkeypatch.setattr(
+        workload,
+        "JobQueries",
+        lambda *_args, **_kwargs: events.append("schema") or JobDB(),
+    )
+
+    @contextmanager
+    def transaction(_dsn: str):
+        events.append("insert")
+        yield SimpleNamespace(execute=lambda *_args: None)
+
+    monkeypatch.setattr(workload, "write_transaction", transaction)
+    monkeypatch.setattr(workload, "_ensure_skill_repo", lambda _path: None)
+    monkeypatch.setattr(workload, "NodeCodeService", lambda _dsn: object())
+    monkeypatch.setattr(workload, "seed_workspace_node_code", lambda *_args: None)
+    monkeypatch.setattr(
+        workload,
+        "WorkflowRevisionService",
+        lambda _db: SimpleNamespace(ensure_active_revision=lambda *_args: None),
+    )
+    workload.seed_measurement_workspaces("dsn", Path("skills"), 3)
+    assert events[:2] == ["schema", "insert"]
+
+
+def _identity_nodes() -> dict:
+    return {
+        "first": {"type": "code", "outputs": ["a.json", "b.json"]},
+        "second": {"type": "agent", "outputs": ["c.json"]},
+    }
+
+
+def _identity_expectations() -> dict:
+    jobs = ["job1", "job2"]
+    nodes = _identity_nodes()
+    return build_execution_expectations(
+        job_ids=jobs,
+        workspace_id="resource_mixed",
+        nodes=nodes,
+        job_rows=[{"id": job, "workspace_id": "resource_mixed"} for job in jobs],
+        job_node_rows=[{"job_id": job, "node_key": node} for job in jobs for node in nodes],
+        node_run_rows=[
+            {"id": 1, "job_id": "job1", "node_key": "first"},
+            {"id": 11, "job_id": "job1", "node_key": "first"},
+            {"id": 12, "job_id": "job1", "node_key": "second"},
+            {"id": 21, "job_id": "job2", "node_key": "first"},
+            {"id": 22, "job_id": "job2", "node_key": "second"},
+        ],
+    )
+
+
+def _execution_row(job: str, node: str, run: int, execution: str) -> dict:
+    return {
+        "execution_id": execution,
+        "workspace_id": "resource_mixed",
+        "job_id": job,
+        "node_key": node,
+        "node_run_id": run,
+        "kind": "agent" if node == "second" else "code",
+        "worker_id": "resource-measurement-worker",
+        "state": "done",
+        "outcome_json": {"output_artifacts": {}},
+    }
+
+
+def test_duplicate_rows_cannot_replace_another_jobs_missing_execution() -> None:
+    expected = _identity_expectations()
+    rows = [_execution_row("job1", "first", 11, "e11"), _execution_row("job1", "second", 12, "e12")]
+    with pytest.raises(ExecutionReadinessError, match="job2"):
+        require_done_executions(expected, rows, worker_id="resource-measurement-worker")
+
+
+def test_duplicate_current_execution_identity_fails() -> None:
+    expected = _identity_expectations()
+    rows = [
+        _execution_row("job1", "first", 11, "e11"),
+        _execution_row("job1", "first", 11, "e11-duplicate"),
+    ]
+    with pytest.raises(ContractViolationError, match="duplicate current execution"):
+        require_done_executions(expected, rows, worker_id="resource-measurement-worker")
+
+
+def test_legal_multi_node_and_multi_output_identities_pass() -> None:
+    expected = _identity_expectations()
+    rows = [
+        _execution_row("job1", "first", 11, "e11"),
+        _execution_row("job1", "second", 12, "e12"),
+        _execution_row("job2", "first", 21, "e21"),
+        _execution_row("job2", "second", 22, "e22"),
+    ]
+    assert (
+        len(require_done_executions(expected, rows, worker_id="resource-measurement-worker")) == 4
+    )
+    execution = {
+        "execution_id": "e11",
+        "job_id": "job1",
+        "outcome_json": {
+            "output_artifacts": {
+                "a.json": {
+                    **_direct_ref(),
+                    "storage_key": "jobs-staging/resource_mixed/job1/e11/a.json",
+                },
+                "b.json": {
+                    **_direct_ref(),
+                    "storage_key": "jobs-staging/resource_mixed/job1/e11/b.json",
+                },
+            }
+        },
+    }
+    assert len(require_direct_outputs(execution, ["a.json", "b.json"], "resource_mixed")) == 2
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "jobs/other/job1/.v/attempt/code_output.json",
+        "jobs/resource_code/other/.v/attempt/code_output.json",
+        "jobs/resource_code/job1/.v/attempt/other.json",
+    ],
+)
+def test_cross_workspace_job_or_output_authority_key_fails(key: str) -> None:
+    with pytest.raises(ContractViolationError, match="authority key is not for"):
+        verify_authority_object(
+            _Storage(),
+            execution_id="exec1",
+            workspace_id="resource_code",
+            job_id="job1",
+            name="code_output.json",
+            ref=_direct_ref(),
+            row={**_authority_row(), "storage_key": key},
+        )
+
+
+def test_authority_form_mismatch_fails_and_legacy_layout_passes() -> None:
+    with pytest.raises(ContractViolationError, match="gzip form mismatch"):
+        verify_authority_object(
+            _Storage(),
+            execution_id="exec1",
+            workspace_id="resource_code",
+            job_id="job1",
+            name="code_output.json",
+            ref={**_direct_ref(), "storage_key": STAGING_KEY + ".gz"},
+            row=_authority_row(),
+        )
+    evidence = verify_authority_object(
+        _Storage(),
+        execution_id="exec1",
+        workspace_id="resource_code",
+        job_id="job1",
+        name="code_output.json",
+        ref=_direct_ref(),
+        row={**_authority_row(), "storage_key": "jobs/resource_code/job1/code_output.json"},
+    )
+    assert evidence["object_verified"] is True
+
+
+def _completed_session() -> object:
+    response = _FakeResponse({"job_stats": {"total": 1, "by_status": {"completed": 1}}})
+    return SimpleNamespace(get=lambda *_args, **_kwargs: response)
+
+
+def _ready_run() -> object:
+    from scripts.stress.worker_resource_workload import MeasurementRun
+
+    run = MeasurementRun.__new__(MeasurementRun)
+    run.args = SimpleNamespace(jobs_per_wave=1, job_timeout_seconds=2.0)
+    run.host_url = "http://host"
+    return run
+
+
+def test_completed_before_done_waits_until_execution_outcome_appears(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("scripts.stress.worker_resource_workload.time.sleep", lambda _: None)
+    run = _ready_run()
+    calls = 0
+
+    def verify(_job_ids: list[str], _scenario: str) -> dict:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise ExecutionReadinessError("not visible")
+        return {"direct_upload_verified": True}
+
+    monkeypatch.setattr(run, "_verify_remote", verify)
+    result = run._await_run(
+        _completed_session(),
+        "code",
+        {"workspace_id": "resource_code", "run_id": "run1", "job_ids": ["job1"]},
+    )
+    assert result["direct_upload_verified"] is True
+    assert calls == 3
+
+
+def test_contract_failure_is_not_retried_after_job_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("scripts.stress.worker_resource_workload.time.sleep", lambda _: None)
+    run = _ready_run()
+    calls = 0
+
+    def verify(_job_ids: list[str], _scenario: str) -> dict:
+        nonlocal calls
+        calls += 1
+        raise ContractViolationError("CAS fallback")
+
+    monkeypatch.setattr(run, "_verify_remote", verify)
+    with pytest.raises(ContractViolationError, match="CAS fallback"):
+        run._await_run(
+            _completed_session(),
+            "code",
+            {"workspace_id": "resource_code", "run_id": "run1", "job_ids": ["job1"]},
+        )
+    assert calls == 1

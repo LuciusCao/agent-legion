@@ -516,13 +516,17 @@ uv run python scripts/stress/worker_resource_workload.py \
   --cold-repetitions 1 --warm-repetitions 2
 ```
 
-每次迭代都走真实 scoped-token register → claim → Worker code sandbox / velites agent → presigned S3 upload → restart，并校验 agent/code execution 的记录确属被测 Worker；不使用 `simulate_agents.py` 代替 executor。每个 execution 的每个声明 output 都必须携带 direct 新形态 ref（`storage_key` / `size_bytes` / `content_hash` 及正确 staging key），并逐项核对 promoted `job_artifacts` 行、authority object 的 HEAD size 与（gzip 解压后的）内容 SHA256；无 spec、CAS 字符串、ref 缺失或对象证据不符都会使测量失败，job completed/done 本身不算上传通道证据。
+Docker Desktop 只允许显式功能验收，不允许 sizing：准备与容器同为 Linux/arm64 或 Linux/amd64 的 velites 后，加 `--allow-docker-desktop`，例如 `--cold-repetitions 1 --warm-repetitions 0 --jobs-per-wave 1`。此模式用独立 sidecar 在 Docker VM 的 host PID namespace 读取同一组 cgroup 字段，metadata 标记 `docker-desktop-functional-only`；project、volumes、workdir 与 sidecar 都是 measurement 专用并会清理。原生 Linux workflow 仍是资源数值的唯一验收来源。
+
+每次迭代都走真实 scoped-token register → claim → Worker code sandbox / velites agent → presigned S3 upload → restart，并校验 agent/code execution 的记录确属被测 Worker；不使用 `simulate_agents.py` 代替 executor。身份校验按本波次 jobs、实际 DAG/job_nodes 和 current node_run 建立 `(workspace, job, node, kind, execution)` 精确集合，历史或重复行不能顶替另一 job 的缺失。测量先等 job completed，再等预期 done execution/outcome 可见；缺失是 readiness 等待，CAS 或错误证据是立即合约失败。
+
+每个 execution 的每个声明 output 都必须携带 direct 新形态 ref（`storage_key` / `size_bytes` / `content_hash` 及正确 staging key），并逐项核对 promoted `job_artifacts` 行、同一 workspace/job/name 的 version/legacy authority key、staging→authority gzip form 一致、authority object 的 HEAD size 与（gzip 解压后的）内容 SHA256；无 spec、CAS 字符串、ref 缺失、跨 workspace/job key、form mismatch 或对象证据不符都会使测量失败，job completed/done 本身不算上传通道证据。
 
 场景包括 agent-only、code-only、mixed、upload/backlog、runtime pending-restart、executor restart 与 container restart。upload/backlog 把上传并发临时固定为 1，并暂停测量专用 SeaweedFS 容器作为受控上传屏障；波次使用不需要对象存储的预置 enabled ref connection 提交，轮询 Worker `/api/status`，必须在同一观测点看到 `upload_active_count >= 1` 与 `upload_queued_count >= 1`。观测次数、峰值和 UTC/monotonic 时间写入 result，逐次观测也写入 raw samples；`finally` 必须 unpause 并恢复上传并发，然后才等待 direct PUT 与最终证据链成功。零 backlog 或最终 CAS 回落均失败，异常路径同样恢复屏障，不污染后续场景。pending-restart 通过控制 API 短暂停用再恢复 velites 来观测配置与 Host 登记差；该过渡触发的 fail-closed 预检是测量路径的一部分，恢复后必须重新注册并完成后续 restart。cold 每次重建容器与命名卷，warm 复用镜像和命名卷；两者都运行完整场景。
 
 采样边界是 Worker 容器的整个 cgroup v2，而不是单个进程或 Docker stats 近似值：`memory.current/peak/max/stat` 包含全部子孙和 page cache，`pids.current/max/events` 按内核线程计数，pids 默认约 100ms、memory 默认 500ms 独立采样。每个迭代的 `samples.jsonl` 保留原始样本与场景 marker；`summary.json` 提供 nearest-rank p95、max、kernel peak、events 和相对**当前已有** cgroup limit 的 headroom。limit 为 `max` 时 headroom 为 `null`，`recommended_limits` 永远为 `null`；后续 PR 必须依据合入工具后的原生 Linux 实测另行决定数值。
 
-artifact 还包括 Worker image ID/digest、velites SHA256/version、kernel/cgroup/arch/Docker 元数据、采样参数与脱敏 Host/Worker 日志。模型文件只记录 SHA256，不上传内容；注册 token、控制 token、stub models 与运行配置留在不上传的 work dir，日志中的 Bearer/register token/presigned query 会脱敏。workflow 不使用真实 provider secret 或生产数据，也不调用真实 LLM。cgroup v2 路径、Linux namespace/AppArmor/seccomp、容器内 bwrap、真实 S3 上传和 restart 只能由该原生 Linux 链路验收；macOS 单元测试只检查解析、汇总与安全契约，不能替代这些结果。
+artifact 还包括 Worker image ID/digest、velites SHA256/version、kernel/cgroup/arch/Docker 元数据、采样参数与脱敏 Host/Worker 日志。模型文件只记录 SHA256，不上传内容；注册 token、控制 token、stub models 与运行配置留在不上传的 work dir，日志中的 Bearer/register token/presigned query 会脱敏。workflow 不使用真实 provider secret 或生产数据，也不调用真实 LLM。Docker Desktop 功能模式可以验证 fresh schema、register、direct S3、backlog 与 restart，但不能验证原生 Linux 的 AppArmor/userns/发行版差异，也不能提供 sizing；这些原生 Linux namespace/cgroup/bwrap 与资源数值仍只能由 workflow 链路验收。macOS 单元测试只检查解析、汇总与安全契约，不能替代任何真实容器结果。
 
 ## 6. 验证两个 Worker
 

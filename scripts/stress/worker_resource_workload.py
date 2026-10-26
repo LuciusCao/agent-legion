@@ -31,22 +31,24 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.e2e._llm_stub import _sse  # noqa: E402
 from scripts.e2e._main_flow_seed import DRAFT_OUTPUT, SKILL_KEY, _ensure_skill_repo  # noqa: E402
 from scripts.stress._stress_auth import ensure_admin_session  # noqa: E402
+from scripts.stress.worker_resource_desktop import cgroup_reader  # noqa: E402
 from scripts.stress.worker_resource_evidence import (  # noqa: E402
     ensure_measurement_bucket,
     measure_upload_backlog,
-    require_direct_outputs,
-    verify_authority_object,
     write_iteration_metadata,
     write_sanitized_logs,
 )
+from scripts.stress.worker_resource_identity import (  # noqa: E402
+    ContractViolationError,
+    ExecutionReadinessError,
+    verify_remote_uploads,
+)
 from scripts.stress.worker_resource_measurement import (  # noqa: E402
     CgroupSampler,
-    CgroupV2Reader,
-    discover_cgroup_v2,
     sanitize_log_text,
 )
 from server.app.agent_control.register_tokens import AgentRegisterTokenStore  # noqa: E402
-from server.app.db.transaction import read_connection, write_transaction  # noqa: E402
+from server.app.db.transaction import write_transaction  # noqa: E402
 from server.app.jobs import JobQueries  # noqa: E402
 from server.app.services.node_code_seeding import seed_workspace_node_code  # noqa: E402
 from server.app.services.node_codes import NodeCodeService  # noqa: E402
@@ -241,6 +243,7 @@ def _node_sources(artifact_chars: int) -> dict[str, str]:
 
 
 def seed_measurement_workspaces(dsn: str, skills_dir: Path, artifact_chars: int) -> None:
+    job_db = JobQueries(dsn, jobs_dir=skills_dir / "unused-jobs")
     with write_transaction(dsn) as conn:
         conn.execute(
             "insert into external_connections(key, type, display_name, config_json)"
@@ -248,7 +251,6 @@ def seed_measurement_workspaces(dsn: str, skills_dir: Path, artifact_chars: int)
             " on conflict(key) do nothing"
         )
     _ensure_skill_repo(skills_dir / SKILL_KEY)
-    job_db = JobQueries(dsn, jobs_dir=skills_dir / "unused-jobs")
     codes = NodeCodeService(dsn)
     revisions = WorkflowRevisionService(job_db)
     sources = _node_sources(artifact_chars)
@@ -309,6 +311,7 @@ class MeasurementRun:
                 secret_key="measurement-secret-key",
             )
         )
+        self.cgroup_reader_id = ""
 
     def compose(self, *arguments: str, capture: bool = False) -> str:
         result = subprocess.run(
@@ -322,9 +325,10 @@ class MeasurementRun:
         return result.stdout.strip() if capture else ""
 
     def prepare(self) -> None:
-        if platform.system() != "Linux":
+        system = platform.system()
+        if system != "Linux" and not (system == "Darwin" and self.args.allow_docker_desktop):
             raise RuntimeError(
-                "real cgroup measurement requires native Linux; macOS reports are not sizing evidence"
+                "real measurement requires native Linux or explicit Docker Desktop functional mode"
             )
         if not self.velites.is_file():
             raise RuntimeError(f"build velites first: {self.velites}")
@@ -381,6 +385,8 @@ class MeasurementRun:
                 value = probe()
                 if value:
                     return value
+            except ContractViolationError:
+                raise
             except (
                 requests.RequestException,
                 OSError,
@@ -494,7 +500,18 @@ class MeasurementRun:
             ) == len(pending["job_ids"])
 
         self._wait(f"{scenario} run completion", completed, timeout=self.args.job_timeout_seconds)
-        evidence = self._verify_remote(pending["job_ids"], scenario)
+
+        def execution_ready() -> dict[str, Any] | None:
+            try:
+                return self._verify_remote(pending["job_ids"], scenario)
+            except ExecutionReadinessError:
+                return None
+
+        evidence = self._wait(
+            f"{scenario} done execution identities",
+            execution_ready,
+            timeout=self.args.job_timeout_seconds,
+        )
         return {
             "run_id": pending["run_id"],
             "job_count": len(pending["job_ids"]),
@@ -511,47 +528,14 @@ class MeasurementRun:
             for key, node in _definitions()[workspace_id]["nodes"].items()
             if node.get("type") in {"agent", "code"}
         }
-        expected: dict[str, int] = {}
-        for node in nodes.values():
-            expected[node["type"]] = expected.get(node["type"], 0) + len(job_ids)
-        with read_connection(self.dsn) as conn:
-            rows = conn.execute(
-                "select execution_id, job_id, node_key, kind, worker_id, outcome_json"
-                " from agent_execution_requests where job_id = any(%s) and state = 'done'",
-                (job_ids,),
-            ).fetchall()
-            artifact_rows = conn.execute(
-                "select job_id, node_key, name, storage_key, size_bytes, content_hash"
-                " from job_artifacts where job_id = any(%s)",
-                (job_ids,),
-            ).fetchall()
-        authority = {(row["job_id"], row["node_key"], row["name"]): row for row in artifact_rows}
-        actual: dict[str, int] = {}
-        evidence: list[dict[str, Any]] = []
-        for row in rows:
-            if row["worker_id"] != WORKER_ID:
-                raise RuntimeError(f"execution ran on unexpected Worker: {row['worker_id']}")
-            actual[row["kind"]] = actual.get(row["kind"], 0) + 1
-            refs = require_direct_outputs(row, nodes[row["node_key"]]["outputs"], workspace_id)
-            for name, ref in refs.items():
-                evidence.append(
-                    verify_authority_object(
-                        self.storage,
-                        execution_id=row["execution_id"],
-                        name=name,
-                        ref=ref,
-                        row=authority.get((row["job_id"], row["node_key"], name)),
-                    )
-                )
-        if actual != expected:
-            raise RuntimeError(
-                f"remote execution mismatch for {scenario}: expected {expected}, got {actual}"
-            )
-        return {
-            "remote_execution_verified": True,
-            "direct_upload_verified": True,
-            "artifacts": evidence,
-        }
+        return verify_remote_uploads(
+            dsn=self.dsn,
+            storage=self.storage,
+            workspace_id=workspace_id,
+            nodes=nodes,
+            job_ids=job_ids,
+            worker_id=WORKER_ID,
+        )
 
     def run_iteration(self, mode: str, repetition: int) -> dict[str, Any]:
         iteration = f"{mode}-{repetition}"
@@ -593,9 +577,9 @@ class MeasurementRun:
                     text=True,
                 ).stdout.strip()
             )
-            cgroup = self._wait("Worker cgroup v2", lambda: discover_cgroup_v2(pid))
+            reader = self._wait("Worker cgroup reader", lambda: cgroup_reader(self, pid))
             sampler = CgroupSampler(
-                CgroupV2Reader(cgroup),
+                reader,
                 iteration_dir / "samples.jsonl",
                 pids_interval_seconds=self.args.pids_interval_ms / 1000,
                 memory_interval_seconds=self.args.memory_interval_ms / 1000,
@@ -683,6 +667,13 @@ class MeasurementRun:
             except (OSError, subprocess.CalledProcessError) as exc:
                 result["success"] = False
                 result["error"] = f"log collection failed: {exc}"
+            if self.cgroup_reader_id:
+                subprocess.run(
+                    ["docker", "rm", "-f", self.cgroup_reader_id],
+                    check=False,
+                    capture_output=True,
+                )
+                self.cgroup_reader_id = ""
             try:
                 self.compose("down", "--remove-orphans")
             except subprocess.CalledProcessError as exc:
@@ -727,6 +718,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--host-port", type=int, default=58080)
     parser.add_argument("--worker-port", type=int, default=58787)
     parser.add_argument("--stub-port", type=int, default=58081)
+    parser.add_argument("--cgroup-reader-port", type=int, default=58082)
+    parser.add_argument("--allow-docker-desktop", action="store_true")
     parser.add_argument("--skip-build", action="store_true")
     args = parser.parse_args(argv)
     if (

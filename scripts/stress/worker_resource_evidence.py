@@ -1,13 +1,13 @@
-"""Fail-closed upload-channel and backlog evidence for Worker measurement."""
+"""Controlled backlog evidence and reporting helpers for Worker measurement."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-import re
+import platform
 import subprocess
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -15,102 +15,6 @@ from scripts.stress.worker_resource_measurement import (
     collect_host_metadata,
     sanitize_log_text,
 )
-from server.app.services.job_artifact_gzip import content_stream
-from server.app.storage import ObjectStorage
-
-_HASH = re.compile(r"^[0-9a-f]{64}$")
-
-
-def require_direct_outputs(
-    execution: Mapping[str, Any], expected_names: Iterable[str], workspace_id: str
-) -> dict[str, dict[str, Any]]:
-    """Require every declared output to carry its complete direct staging ref.
-
-    A terminal/done row and a legacy CAS string are not upload-channel evidence.
-    """
-    outcome_raw = execution.get("outcome_json")
-    outcome = json.loads(outcome_raw) if isinstance(outcome_raw, str) else outcome_raw
-    if not isinstance(outcome, Mapping):
-        raise RuntimeError(f"execution {execution.get('execution_id')} has no final outcome")
-    outputs = outcome.get("output_artifacts")
-    expected = set(expected_names)
-    if not expected or not isinstance(outputs, Mapping) or set(outputs) != expected:
-        raise RuntimeError(
-            f"execution {execution.get('execution_id')} output set mismatch: "
-            f"expected {sorted(expected)}, got {sorted(outputs) if isinstance(outputs, Mapping) else type(outputs).__name__}"
-        )
-    refs: dict[str, dict[str, Any]] = {}
-    for name in sorted(expected):
-        ref = outputs[name]
-        if not isinstance(ref, Mapping):
-            raise RuntimeError(
-                f"execution {execution['execution_id']} output {name} used legacy CAS or missing ref"
-            )
-        storage_key = ref.get("storage_key")
-        size = ref.get("size_bytes")
-        digest = ref.get("content_hash")
-        expected_key = (
-            f"jobs-staging/{workspace_id}/{execution['job_id']}/{execution['execution_id']}/{name}"
-        )
-        if not isinstance(storage_key, str) or storage_key not in {
-            expected_key,
-            expected_key + ".gz",
-        }:
-            raise RuntimeError(
-                f"execution {execution['execution_id']} output {name} has wrong staging key"
-            )
-        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
-            raise RuntimeError(
-                f"execution {execution['execution_id']} output {name} has invalid size"
-            )
-        if not isinstance(digest, str) or not _HASH.fullmatch(digest):
-            raise RuntimeError(
-                f"execution {execution['execution_id']} output {name} has invalid hash"
-            )
-        refs[name] = {
-            "storage_key": storage_key,
-            "size_bytes": size,
-            "content_hash": digest,
-        }
-    return refs
-
-
-def verify_authority_object(
-    storage: ObjectStorage,
-    *,
-    execution_id: str,
-    name: str,
-    ref: Mapping[str, Any],
-    row: Mapping[str, Any] | None,
-) -> dict[str, Any]:
-    """Cross-check direct ref, promoted manifest row, HEAD size and content digest."""
-    if row is None:
-        raise RuntimeError(f"execution {execution_id} output {name} has no job_artifacts row")
-    authority_key = row.get("storage_key")
-    if not isinstance(authority_key, str) or not authority_key.startswith("jobs/"):
-        raise RuntimeError(f"execution {execution_id} output {name} has no promoted authority key")
-    if int(row.get("size_bytes", -1)) != int(ref["size_bytes"]):
-        raise RuntimeError(f"execution {execution_id} output {name} manifest size mismatch")
-    if row.get("content_hash") != ref["content_hash"]:
-        raise RuntimeError(f"execution {execution_id} output {name} manifest hash mismatch")
-    head = storage.head_object(authority_key)
-    if head is None:
-        raise RuntimeError(f"execution {execution_id} output {name} authority object is missing")
-    if head.size_bytes != int(ref["size_bytes"]):
-        raise RuntimeError(f"execution {execution_id} output {name} object size mismatch")
-    digest = hashlib.sha256()
-    with content_stream(storage, authority_key) as stream:
-        for chunk in iter(lambda: stream.read(1 << 20), b""):
-            digest.update(chunk)
-    if digest.hexdigest() != ref["content_hash"]:
-        raise RuntimeError(f"execution {execution_id} output {name} object hash mismatch")
-    return {
-        "execution_id": execution_id,
-        "output": name,
-        "direct_ref": dict(ref),
-        "authority_key": authority_key,
-        "object_verified": True,
-    }
 
 
 class BacklogEvidence:
@@ -245,6 +149,11 @@ def write_iteration_metadata(run: Any, iteration_dir: Path, iteration: str, cont
     metadata = collect_host_metadata(container, "agent-legion-worker:measurement", run.velites)
     metadata["measurement"] = {
         "iteration": iteration,
+        "evidence_scope": (
+            "docker-desktop-functional-only"
+            if platform.system() == "Darwin"
+            else "native-linux-measurement"
+        ),
         "shipped_envelope": {
             "user": "root(image default)",
             "cap_add": ["SYS_ADMIN"],
