@@ -10,12 +10,9 @@ limit; it deliberately never derives a recommended production limit.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
-import platform
 import re
-import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -55,6 +52,15 @@ def discover_cgroup_v2(
     if len(unified) != 1:
         raise RuntimeError(f"container pid {container_pid} has no unique cgroup-v2 entry")
     relative = PurePosixPath(unified[0].partition("::")[2])
+    if (
+        relative.is_absolute()
+        and relative.parts[1] == ".."
+        and re.fullmatch(r"[0-9a-f]{64}", relative.name)
+    ):
+        desktop = cgroup_root / "docker" / relative.name
+        missing = [name for name in (*MEMORY_FILES, *PIDS_FILES) if not (desktop / name).is_file()]
+        if desktop.is_dir() and not missing:
+            return desktop
     if relative.is_absolute() and ".." not in relative.parts:
         path = cgroup_root.joinpath(*relative.parts[1:])
         if path.is_dir():
@@ -242,7 +248,11 @@ class CgroupSampler:
             except (OSError, ValueError, RuntimeError) as exc:
                 with self._lock:
                     self._errors.append(f"{kind}: {exc}")
-                return
+            else:
+                with self._lock:
+                    self._errors = [
+                        error for error in self._errors if not error.startswith(f"{kind}:")
+                    ]
             self._stop.wait(max(0.0, interval - (self.monotonic() - started)))
 
     def start(self) -> None:
@@ -265,6 +275,16 @@ class CgroupSampler:
         self._stop.set()
         for thread in self._threads:
             thread.join(timeout=5)
+        for kind, sample in (("memory", self.sample_memory), ("pids", self.sample_pids)):
+            try:
+                sample()
+            except (OSError, ValueError, RuntimeError):
+                pass
+            else:
+                with self._lock:
+                    self._errors = [
+                        error for error in self._errors if not error.startswith(f"{kind}:")
+                    ]
         if self._file is not None:
             self._file.close()
             self._file = None
@@ -282,68 +302,6 @@ class CgroupSampler:
             json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         return summary
-
-
-def _command(command: list[str]) -> str:
-    return subprocess.run(command, check=True, capture_output=True, text=True).stdout.strip()
-
-
-def collect_host_metadata(container: str, image: str, velites: Path) -> dict[str, Any]:
-    """Collect only non-secret identity fields, never the container/image environment."""
-    image_fields = _command(
-        [
-            "docker",
-            "image",
-            "inspect",
-            "--format",
-            "{{json .Id}}|{{json .RepoTags}}|{{json .RepoDigests}}|{{json .Os}}|{{json .Architecture}}",
-            image,
-        ]
-    ).split("|")
-    container_image = json.loads(
-        _command(["docker", "inspect", "--format", "{{json .Image}}", container])
-    )
-    velites_version = _command(
-        [
-            "docker",
-            "run",
-            "--rm",
-            "-v",
-            f"{velites}:/tmp/velites:ro",
-            "agent-legion-host:measurement",
-            "/tmp/velites",
-            "--version",
-        ]
-    )
-    return {
-        "captured_at": _utc_now(),
-        "kernel": platform.release(),
-        "kernel_version": platform.version(),
-        "os": platform.system(),
-        "arch": platform.machine(),
-        "cgroup_version": 2,
-        "cgroup_filesystem": (
-            "docker-desktop-sidecar"
-            if platform.system() == "Darwin"
-            else _command(["stat", "-fc", "%T", "/sys/fs/cgroup"])
-        ),
-        "docker_server": json.loads(
-            _command(["docker", "version", "--format", "{{json .Server}}"])
-        ),
-        "worker_container": container,
-        "worker_container_image_id": container_image,
-        "worker_image": {
-            "id": json.loads(image_fields[0]),
-            "repo_tags": json.loads(image_fields[1]),
-            "repo_digests": json.loads(image_fields[2]),
-            "os": json.loads(image_fields[3]),
-            "architecture": json.loads(image_fields[4]),
-        },
-        "velites": {
-            "sha256": hashlib.sha256(velites.read_bytes()).hexdigest(),
-            "version": velites_version,
-        },
-    }
 
 
 _SECRET_PATTERNS = (

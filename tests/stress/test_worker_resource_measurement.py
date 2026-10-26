@@ -17,6 +17,7 @@ from scripts.stress.worker_resource_identity import (
     build_execution_expectations,
     require_direct_outputs,
     require_done_executions,
+    require_pending_restart,
     verify_authority_object,
 )
 from scripts.stress.worker_resource_measurement import (
@@ -66,6 +67,18 @@ def test_discover_cgroup_v2_uses_container_descendant_root(tmp_path: Path) -> No
     proc.joinpath("42/cgroup").write_text("0::/system.slice/docker-abc.scope\n", encoding="utf-8")
     root = _cgroup(tmp_path / "sys/fs/cgroup/system.slice/docker-abc.scope")
     assert discover_cgroup_v2(42, proc_root=proc, cgroup_root=tmp_path / "sys/fs/cgroup") == root
+
+
+def test_discover_cgroup_v2_normalizes_only_docker_desktop_id_form(tmp_path: Path) -> None:
+    proc = tmp_path / "proc"
+    proc.joinpath("42").mkdir(parents=True)
+    container_id = "a" * 64
+    proc.joinpath("42/cgroup").write_text(f"0::/../{container_id}\n", encoding="utf-8")
+    root = _cgroup(tmp_path / "sys/fs/cgroup/docker" / container_id)
+    assert discover_cgroup_v2(42, proc_root=proc, cgroup_root=tmp_path / "sys/fs/cgroup") == root
+    proc.joinpath("42/cgroup").write_text("0::/../..\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="invalid or inaccessible"):
+        discover_cgroup_v2(42, proc_root=proc, cgroup_root=tmp_path / "sys/fs/cgroup")
 
 
 def test_cgroup_reader_fails_closed_and_reads_required_files(tmp_path: Path) -> None:
@@ -159,6 +172,58 @@ def test_sampler_retains_raw_samples_and_scenario_markers(tmp_path: Path) -> Non
     assert json.loads(summary_path.read_text(encoding="utf-8"))["sampling_errors"] == []
 
 
+def test_sampler_recovers_transient_reader_errors_but_keeps_persistent_errors(
+    tmp_path: Path,
+) -> None:
+    class Reader:
+        def __init__(self) -> None:
+            import threading
+
+            self.memory_calls = 0
+            self.recovered = threading.Event()
+
+        def memory_sample(self) -> dict:
+            self.memory_calls += 1
+            if self.memory_calls == 1:
+                raise OSError("cgroup replaced")
+            self.recovered.set()
+            return {"current_bytes": 1, "peak_bytes": 1, "max": "max", "stat": {}}
+
+        def pids_sample(self) -> dict:
+            raise OSError("persistent reader failure")
+
+    reader = Reader()
+    sampler = CgroupSampler(reader, tmp_path / "samples.jsonl")
+    sampler.start()
+    assert reader.recovered.wait(2)
+    errors = sampler.stop()
+    assert not any(error.startswith("memory:") for error in errors)
+    assert any(error.startswith("pids:") for error in errors)
+
+
+def test_stop_final_sample_can_clear_transient_reader_errors(tmp_path: Path) -> None:
+    class Reader:
+        def __init__(self) -> None:
+            self.memory_calls = 0
+            self.pids_calls = 0
+
+        def memory_sample(self) -> dict:
+            self.memory_calls += 1
+            if self.memory_calls == 1:
+                raise OSError("restart")
+            return {"current_bytes": 1, "peak_bytes": 1, "max": "max", "stat": {}}
+
+        def pids_sample(self) -> dict:
+            self.pids_calls += 1
+            if self.pids_calls == 1:
+                raise OSError("restart")
+            return {"current": 1, "max": "max", "events": {"max": 0}}
+
+    sampler = CgroupSampler(Reader(), tmp_path / "samples.jsonl")
+    sampler.start()
+    assert sampler.stop() == []
+
+
 def test_log_sanitizer_removes_credentials_and_presigned_query() -> None:
     text = 'Authorization: Bearer control-secret {"register_token":"register-secret"} ?X-Amz-Signature=abc&x=1'
     result = sanitize_log_text(text, ["control-secret", "register-secret"])
@@ -173,7 +238,7 @@ def test_measurement_compose_preserves_shipped_envelope_without_new_limits() -> 
         (ROOT / "deploy/compose.worker.measurement.yaml").read_text(encoding="utf-8")
     )
     worker = document["services"]["worker"]
-    assert worker["cap_add"] == ["SYS_ADMIN"]
+    assert worker["cap_add"] == ["SYS_ADMIN", "${MEASUREMENT_NET_ADMIN:-SYS_ADMIN}"]
     assert worker["security_opt"] == ["seccomp:unconfined"]
     assert "mem_limit" not in worker
     assert "pids_limit" not in worker
@@ -693,3 +758,18 @@ def test_contract_failure_is_not_retried_after_job_completion(
             {"workspace_id": "resource_code", "run_id": "run1", "job_ids": ["job1"]},
         )
     assert calls == 1
+
+
+def test_pending_restart_uses_registration_and_disabled_config_facts() -> None:
+    evidence = require_pending_restart(
+        {"registered_runtimes": ["velites"]},
+        {"disabled_runtimes": ["velites"], "runtime_status": []},
+        "velites",
+    )
+    assert evidence["observed"] is True
+    with pytest.raises(ContractViolationError, match="pending-restart"):
+        require_pending_restart(
+            {"registered_runtimes": ["velites"]},
+            {"disabled_runtimes": []},
+            "velites",
+        )

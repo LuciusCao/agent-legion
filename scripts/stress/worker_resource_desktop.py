@@ -1,4 +1,4 @@
-"""Docker Desktop functional-only cgroup reader sidecar (never sizing evidence)."""
+"""Docker Desktop functional-only cgroup reader lifecycle."""
 
 from __future__ import annotations
 
@@ -13,8 +13,6 @@ from scripts.stress.worker_resource_measurement import CgroupV2Reader, discover_
 
 
 class RemoteCgroupReader:
-    """Read the same fields from the measurement-only Docker Desktop sidecar."""
-
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
 
@@ -87,6 +85,27 @@ def cgroup_reader(run: Any, container_pid: int) -> Any:
     base_url = f"http://127.0.0.1:{run.args.cgroup_reader_port}"
     run._wait_http(f"{base_url}/health")
     return RemoteCgroupReader(base_url)
+
+
+def refresh_cgroup_reader(run: Any, container: str) -> None:
+    if run.cgroup_reader_id:
+        subprocess.run(
+            ["docker", "rm", "-f", run.cgroup_reader_id],
+            check=False,
+            capture_output=True,
+            env=run.env,
+        )
+        run.cgroup_reader_id = ""
+    pid = int(
+        subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Pid}}", container],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=run.env,
+        ).stdout.strip()
+    )
+    cgroup_reader(run, pid)
 
 
 def main(argv: list[str] | None = None) -> int:

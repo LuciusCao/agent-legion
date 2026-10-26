@@ -11,10 +11,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from scripts.stress.worker_resource_measurement import (
-    collect_host_metadata,
-    sanitize_log_text,
-)
+from scripts.stress.worker_resource_reporting import collect_host_metadata
 
 
 class BacklogEvidence:
@@ -161,6 +158,7 @@ def write_iteration_metadata(run: Any, iteration_dir: Path, iteration: str, cont
             "mem_limit": None,
             "pids_limit": None,
         },
+        "functional_cap_override": run.env.get("MEASUREMENT_NET_ADMIN", "SYS_ADMIN"),
         "envelope_not_a_production_recommendation": True,
         "agent_concurrency": run.args.agent_concurrency,
         "code_concurrency": run.args.code_concurrency,
@@ -175,11 +173,3 @@ def write_iteration_metadata(run: Any, iteration_dir: Path, iteration: str, cont
     (iteration_dir / "metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-
-
-def write_sanitized_logs(run: Any, iteration_dir: Path) -> None:
-    for service in ("host", "worker"):
-        text = run.compose("logs", "--no-color", service, capture=True)
-        (iteration_dir / f"{service}.log").write_text(
-            sanitize_log_text(text, run.secrets) + "\n", encoding="utf-8"
-        )

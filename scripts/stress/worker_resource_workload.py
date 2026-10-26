@@ -31,24 +31,28 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.e2e._llm_stub import _sse  # noqa: E402
 from scripts.e2e._main_flow_seed import DRAFT_OUTPUT, SKILL_KEY, _ensure_skill_repo  # noqa: E402
 from scripts.stress._stress_auth import ensure_admin_session  # noqa: E402
-from scripts.stress.worker_resource_desktop import cgroup_reader  # noqa: E402
+from scripts.stress.worker_resource_desktop import (  # noqa: E402
+    cgroup_reader,
+    refresh_cgroup_reader,
+)
 from scripts.stress.worker_resource_evidence import (  # noqa: E402
     ensure_measurement_bucket,
     measure_upload_backlog,
     write_iteration_metadata,
-    write_sanitized_logs,
 )
 from scripts.stress.worker_resource_identity import (  # noqa: E402
     ContractViolationError,
     ExecutionReadinessError,
+    require_pending_restart,
     verify_remote_uploads,
 )
 from scripts.stress.worker_resource_measurement import (  # noqa: E402
     CgroupSampler,
     sanitize_log_text,
 )
+from scripts.stress.worker_resource_reporting import write_sanitized_logs  # noqa: E402
 from server.app.agent_control.register_tokens import AgentRegisterTokenStore  # noqa: E402
-from server.app.db.transaction import write_transaction  # noqa: E402
+from server.app.db.transaction import read_connection, write_transaction  # noqa: E402
 from server.app.jobs import JobQueries  # noqa: E402
 from server.app.services.node_code_seeding import seed_workspace_node_code  # noqa: E402
 from server.app.services.node_codes import NodeCodeService  # noqa: E402
@@ -312,6 +316,7 @@ class MeasurementRun:
             )
         )
         self.cgroup_reader_id = ""
+        self.control_token = ""
 
     def compose(self, *arguments: str, capture: bool = False) -> str:
         result = subprocess.run(
@@ -482,7 +487,7 @@ class MeasurementRun:
         self, session: requests.Session, scenario: str, pending: dict[str, Any]
     ) -> dict[str, Any]:
         if len(pending["job_ids"]) != self.args.jobs_per_wave:
-            raise RuntimeError(f"{scenario} did not create the expected measurement wave")
+            raise ContractViolationError(f"{scenario} did not create the expected measurement wave")
 
         def completed() -> bool:
             detail = session.get(
@@ -494,7 +499,14 @@ class MeasurementRun:
             by_status = stats["by_status"]
             failed = sum(int(by_status.get(status, 0)) for status in ("failed", "cancelled"))
             if failed:
-                raise RuntimeError(f"{scenario} has {failed} failed/cancelled jobs")
+                with read_connection(self.dsn) as conn:
+                    errors = conn.execute(
+                        "select node_key, error_message from job_nodes where job_id = any(%s)",
+                        (pending["job_ids"],),
+                    ).fetchall()
+                raise ContractViolationError(
+                    f"{scenario} has {failed} failed/cancelled jobs: {errors}"
+                )
             return stats["total"] == len(pending["job_ids"]) and int(
                 by_status.get("completed", 0)
             ) == len(pending["job_ids"])
@@ -589,6 +601,7 @@ class MeasurementRun:
             write_iteration_metadata(self, iteration_dir, iteration, container)
             self._wait_http(f"{self.worker_url}/api/health")
             control_token = self._control_token()
+            self.control_token = control_token
             self.secrets.append(control_token)
 
             for workspace_id in sorted(set(WORKSPACES.values())):
@@ -618,15 +631,13 @@ class MeasurementRun:
                     result["scenarios"][scenario] = self._submit(session, scenario, iteration)
 
             sampler.mark(iteration, "pending-restart")
+            previous = self._worker_request("GET", "/api/config", control_token).json()
             pending = self._worker_request(
                 "PUT", "/api/config", control_token, json={"disabled_runtimes": ["velites"]}
             ).json()
-            rows = pending.get("config", {}).get("runtime_status", [])
-            if not any(
-                row.get("runtime") == "velites" and row.get("pending_restart") for row in rows
-            ):
-                raise RuntimeError("velites pending-restart state was not observable")
-            result["scenarios"]["pending-restart"] = {"observed": True}
+            result["scenarios"]["pending-restart"] = require_pending_restart(
+                previous, pending["config"], "velites"
+            )
             time.sleep(self.args.idle_seconds)
             self._worker_request(
                 "PUT", "/api/config", control_token, json={"disabled_runtimes": []}
@@ -641,6 +652,7 @@ class MeasurementRun:
 
             sampler.mark(iteration, "container-restart")
             self.compose("restart", "worker")
+            refresh_cgroup_reader(self, container)
             self._wait_http(f"{self.worker_url}/api/health")
             self._enable_claim(control_token, session)
             time.sleep(self.args.idle_seconds)
