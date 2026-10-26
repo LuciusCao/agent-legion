@@ -42,7 +42,7 @@ vi.mock('./routes/pages', async () => {
     UsersAdminPage: stub('用户管理'),
     JobDetailPage: stub('job-detail'),
     DashboardPage: stub('dashboard'),
-    // 渲染子路由出口（任务中心等嵌套页断言需要）。
+    // 渲染子路由出口（job detail 等嵌套页断言需要）。
     WorkspaceLayout: () => (
       <div>
         workspace-layout
