@@ -95,10 +95,10 @@ def changed_source_files(base: str | None) -> list[str]:
     the unmapped-source full fallback (#1307 r1 P2-2).
     """
     files: set[str] = set()
-    commands = [["git", "status", "--porcelain=v1", "--untracked-files=all"]]
+    commands = [(["git", "status", "--porcelain=v1", "--untracked-files=all"], True)]
     if base:
-        commands.append(["git", "diff", "--name-only", f"{base}..HEAD"])
-    for command in commands:
+        commands.append((["git", "diff", "--name-only", f"{base}..HEAD"], False))
+    for command, has_status_prefix in commands:
         try:
             output = subprocess.run(
                 command, capture_output=True, text=True, check=True, cwd=REPO_ROOT
@@ -106,7 +106,7 @@ def changed_source_files(base: str | None) -> list[str]:
         except (subprocess.CalledProcessError, OSError):
             continue
         for line in output.splitlines():
-            path = line[3:] if line[:2] in ("??", "!!") else line[3:]
+            path = line[3:] if has_status_prefix else line
             path = path.split(" -> ")[-1].strip()
             if path.startswith('"') and path.endswith('"'):
                 path = path[1:-1]
