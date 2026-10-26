@@ -10,6 +10,7 @@ pub mod cancel;
 pub mod cli;
 pub mod contract;
 pub mod contract_gate;
+pub mod entrypoint;
 pub mod event_sink;
 pub mod events;
 pub mod models;
