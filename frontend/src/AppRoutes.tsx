@@ -31,10 +31,10 @@ export default function AppRoutes() {
         <Route path="/workspaces" element={<Navigate to="/" replace />} />
         <Route path="/workspaces/:workspaceId" element={<WorkspaceLayout />}>
           <Route index element={<WorkspaceMainPage />} />
-          <Route path="tasks" element={<TaskCenterPage />} />
           <Route path="jobs/:jobId" element={<JobDetailPage />} />
         </Route>
         <Route path="/workspaces/:workspaceId">
+          <Route path="tasks" element={<TaskCenterPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="token-usage" element={<TokenUsagePage />} />
           <Route path="monitoring" element={<MonitoringPage />} />

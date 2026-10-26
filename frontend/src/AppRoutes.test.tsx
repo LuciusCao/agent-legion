@@ -124,7 +124,7 @@ describe('AppRoutes auth guard', () => {
     ).toBeInTheDocument()
   })
 
-  it('serves the task center inside the workspace layout (#1157 phase3)', async () => {
+  it('serves the task center as a standalone page (#1391)', async () => {
     authState.status = 'authenticated'
     authState.user = {
       id: 'u1',
@@ -138,8 +138,8 @@ describe('AppRoutes auth guard', () => {
     renderRoutes('/workspaces/ws1/tasks')
 
     expect(
-      await screen.findByText('workspace-layout', undefined, { timeout: 5000 })
+      await screen.findByText('task-center', undefined, { timeout: 5000 })
     ).toBeInTheDocument()
-    expect(screen.getByText('task-center')).toBeInTheDocument()
+    expect(screen.queryByText('workspace-layout')).not.toBeInTheDocument()
   })
 })

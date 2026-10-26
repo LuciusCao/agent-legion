@@ -13,11 +13,6 @@
   margin-bottom: 4px;
 }
 
-.summary h1 {
-  font-size: 20px;
-  margin: 0;
-}
-
 .chips {
   display: flex;
   gap: 10px;
