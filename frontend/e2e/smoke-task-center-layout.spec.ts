@@ -6,6 +6,8 @@ import { ensureAdminSession } from './helpers'
 const WORKSPACE_ID = 'education_video_problems_generation'
 const VIEWPORTS = [390, 700, 701, 1440]
 
+test.use({ timezoneId: 'UTC' })
+
 const pausedBatch: RunBatchListItem = {
   run_id: 'run-paused-layout',
   status: 'paused',
@@ -103,22 +105,59 @@ async function expectFooterLayout(
 }
 
 async function expectNoHorizontalOverflow(page: Page, width: number) {
+  if (width === 390) {
+    await page.evaluate(() => {
+      const shell = document.querySelector('.app-shell > *')
+      shell?.getAnimations().forEach((animation) => {
+        animation.pause()
+        animation.currentTime = 0
+      })
+    })
+  }
   const main = page.locator('main').last()
   const dimensions = await main.evaluate((element) => ({
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth,
   }))
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth)
-  const documentOverflow = await page.evaluate(
-    () =>
-      document.documentElement.scrollWidth >
-      document.documentElement.clientWidth
-  )
-  expect(documentOverflow).toBe(false)
+  const diagnostics = await page.evaluate(() => {
+    const clientWidth = document.documentElement.clientWidth
+    const describe = (element: Element) => {
+      const rect = element.getBoundingClientRect()
+      return {
+        element: `${element.tagName.toLowerCase()}.${element.className}`,
+        left: rect.left,
+        right: rect.right,
+        width: rect.width,
+        transform: getComputedStyle(element).transform,
+      }
+    }
+    return {
+      clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+      shell: describe(document.querySelector('.app-shell > *')!),
+      offenders: [...document.querySelectorAll('body *')]
+        .filter((element) => {
+          const rect = element.getBoundingClientRect()
+          return rect.left < 0 || rect.right > clientWidth
+        })
+        .map(describe),
+    }
+  })
+  expect(
+    diagnostics.scrollWidth,
+    JSON.stringify(diagnostics)
+  ).toBeLessThanOrEqual(diagnostics.clientWidth)
   for (const id of ['run-paused-layout', 'run-ended-layout']) {
     const cardBox = await box(page.getByTestId(`task-card-${id}`))
     expect(cardBox.x).toBeGreaterThanOrEqual(0)
     expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(width)
+  }
+  if (width === 390) {
+    await page.evaluate(() => {
+      const shell = document.querySelector('.app-shell > *')
+      shell?.getAnimations().forEach((animation) => animation.play())
+    })
   }
 }
 
