@@ -378,14 +378,14 @@ release-train `HEAD`-only exception.
   `check.sh` keeps partitions report-only — its coverage file may hold a
   partial tier, and floors on partial data produce false reds. It also runs
   `check_reruns.py` against every shard report: a retry-pass is merge-blocking
-  unless its exact nodeid has a registry entry. An untouched, pre-existing
-  expired entry is only a note here and does not make an unrelated PR red; the
-  nightly `exemption-expiry` job enforces expiry. For each PR or merge-group
-  run of this job (any target branch), the target branch's registry
-  (`--base-registry`) is also checked: entries the change adds or re-targets
-  (including re-dating, nodeid, scope, recurring, registered_on / extended_on
-  changes — #1034) fail if their deadline is already expired. Scheduled jobs
-  see only the default branch, and the nightly check runs only after merge.
+  unless its exact nodeid has a registry entry. An expired deadline is only
+  listed here, never fails the PR (#941: a calendar date must not red
+  unrelated PRs); the nightly `exemption-expiry` job enforces it. Every PR
+  (any target branch; scheduled jobs only see the default branch and only
+  after the merge) additionally passes the target branch's registry
+  (`--base-registry`) and fails on entries the PR itself adds or re-targets
+  (deadline, nodeid, scope, recurring, registered_on / extended_on — #1034)
+  with an already expired deadline.
 - **frontend-logic / frontend-component-a/b / frontend-coverage** — frontend
   static checks and the two Vitest projects (node / jsdom) as parallel jobs;
   the slower component project is split again with Vitest's deterministic
@@ -413,11 +413,9 @@ release-train `HEAD`-only exception.
   `server.app`) and full history (budget monotonicity anchors on `HEAD^`),
   and carries the same release-train anchor opt-out as `backend-unit`.
 - **docker-build** — CI-only image build lane (host + worker targets). It runs
-  only when the `changes` job detects `Dockerfile`, `.dockerignore`,
-  `pyproject.toml`, `uv.lock`, `worker/**`, `shared/**` or `deploy/**`;
-  `frontend/package.json`, `frontend/package-lock.json` and
-  `velites/Cargo.lock` do not enable this lane under the current filter. No
-  other job exercises the Dockerfile.
+  only when the `changes` job detects image-relevant path changes
+  (`Dockerfile`, `.dockerignore`, dependency locks, `worker/`, `shared/`,
+  `deploy/`); no other job exercises the Dockerfile.
 - **quality-gate** — stable final context required by branch protection;
   succeeds only when every selected lane succeeded (intentional path skips are
   neutral).
@@ -439,23 +437,17 @@ In `nightly-gate.yml`:
   by the job itself (#1150: the manual
   `make architecture-issue-states` ritual rots on a single-maintainer repo —
   five weeks of red nightly proved it), while a closed anchor issue still
-  fails the job so the exemption gets fulfilled or re-anchored first. The
-  `config/architecture/issue-states.json` PR takes the path-selected
-  backend+frontend quality gate; standalone `docs-terms` and
-  `governance-guard` skip because backend is selected. The selected
-  `backend-unit` static phase carries governance and retired-terms checks, so the bot
-  does not bypass the trunk ruleset. Since #295 it also detects expired
-  flaky-registry deadlines (`check_reruns.py --check-deadlines`, without
-  needing extended rerun evidence), and checks maintained unreleased branches
-  (`scripts/quality/flaky_branch_deadlines.py`: every `release/*` without its
-  corresponding release tag, including unversioned names; registries are read
-  leniently from fetched branch tips). The nightly deadline-only checks
-  enforce every expired non-recurring entry and warn seven days ahead.
-  PR/merge-group backend-coverage checks registration for all observed
-  reruns, but enforces expiry only for entries the change adds or re-targets;
-  untouched, pre-existing expired entries remain notes and do not fail
-  unrelated PRs.
-  The registry's clock-free rules (one entry per nodeid, deadline at most 45
+  fails the job so the exemption gets fulfilled or re-anchored first — the
+  docs-only lane (changes + docs-terms) gates the merge, so the bot never
+  bypasses the trunk ruleset. Since #295 it also detects expired
+  flaky-registry deadlines (`check_reruns.py --check-deadlines`, deadline
+  evidence without needing the extended rerun report), and since #1024 on
+  every maintained branch too (`scripts/quality/flaky_branch_deadlines.py`:
+  each `release/X.Y.Z` above the default branch's version,
+  registries read leniently from the fetched branch tips). It is the only lane
+  that fails on an expired deadline (#941) and annotates entries due within
+  7 days as warnings; PR backend-coverage enforces observed reruns only. The
+  registry's clock-free rules (one entry per nodeid, deadline at most 45
   days after the entry's `registered_on` / `extended_on`) are enforced on
   every load, including the unit-tier `tests/scripts/test_flaky_registry_entries.py`.
 - **nightly-e2e** — multi-browser smoke E2E (the deterministic browser suite
@@ -499,11 +491,10 @@ CI environment notes:
 - The workflow declares `permissions: contents: read`; PR test code and build
   scripts receive no write token, and release workflows grant their own
   permissions separately.
-- Jobs that need PostgreSQL get a fresh `postgres:17` service container;
-  `AGENT_LEGION_DATABASE_URL` and `AGENT_LEGION_TEST_DATABASE_URL` point at it.
-  The test database and worker schemas are created lazily when the PostgreSQL
-  layer starts; importing the test support module and running the unit layer
-  never connects to PostgreSQL.
+- Each job gets a fresh `postgres:17` service container; `AGENT_LEGION_DATABASE_URL`
+  and `AGENT_LEGION_TEST_DATABASE_URL` point at it. The test database and worker
+  schemas are created lazily when the PostgreSQL layer starts; importing the
+  test support module and running the unit layer never connects to PostgreSQL.
 - The api:check contract step regenerates frontend API types through
   `create_app` + node_modules, so it lives in the api-check job; the
   frontend test jobs need neither Python nor Postgres.
@@ -551,15 +542,7 @@ verification comes from the CI workflow, not from these files.
 
 Configure the repository on GitHub as follows:
 
-1. Protect `main` via the **repository ruleset `trunk-protection-main`**
-   (Settings → Rules → Rulesets): required status check `quality-gate`,
-   deletion and non-fast-forward blocked. It replaced the legacy
-   branch-protection object (#1150). The nightly exemption-expiry job's
-   manifest refresh merges through an auto-merge PR's path-selected
-   backend+frontend quality gate instead of a direct push — the Actions bot
-   has no clean Integration bypass on personal repos, and the PR path keeps
-   the trunk ruleset intact. `release/*` trains get the same ruleset shape
-   when they exist.
+1. Protect `main` via the **repository ruleset `trunk-protection-main`** (Settings → Rules → Rulesets): required status check `quality-gate`, deletion and non-fast-forward blocked. It replaced the legacy branch-protection object (#1150); the nightly exemption-expiry job's manifest refresh merges through an auto-merge PR on the docs-only lane instead of a direct push — the Actions bot has no clean Integration bypass on personal repos, and the PR path keeps the trunk ruleset intact. `release/*` trains get the same ruleset shape when they exist.
 2. Require only the stable `quality-gate` status check before merging. It
    validates selected internal lanes, including `docs-terms` for docs-only
    changes; do not require volatile shard names individually.
