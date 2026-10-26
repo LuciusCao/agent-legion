@@ -61,3 +61,25 @@ class JobBatchOperationControlQueriesMixin(ConnectionQueriesMixin):
                 ),
             ).fetchone()
         return dict(row) if row else None
+
+    def preserve_resumed_job_batch_operation_stream(
+        self,
+        op_id: str,
+        *,
+        expected_next_index: int,
+        target_spec: dict[str, Any],
+        items_total: int,
+    ) -> dict[str, Any] | None:
+        """Keep a refilled chunk's identity stable before its resumed replay."""
+        spec_json = json.dumps(target_spec, ensure_ascii=False, sort_keys=True)
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                update job_batch_operations
+                set target_spec_json=%s, items_total=%s, updated_at=current_timestamp
+                where id=%s and status='pending' and next_index=%s
+                returning *
+                """,
+                (spec_json, items_total, op_id, expected_next_index),
+            ).fetchone()
+        return dict(row) if row else None

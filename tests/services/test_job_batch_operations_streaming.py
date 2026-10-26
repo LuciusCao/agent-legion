@@ -286,6 +286,54 @@ def test_pause_does_not_refill_and_resume_keeps_frozen_stream_cursor(
     assert set(calls) == {str(job["id"]) for job in jobs}
 
 
+def test_quick_resume_preserves_refilled_delete_chunk_snapshot(
+    workspace: str, job_db: JobQueries, settings: Settings, monkeypatch
+) -> None:
+    """A/B commit, C/D commit then pause+resume: E/F must not inherit C/D seqs."""
+    monkeypatch.setattr(
+        "server.app.services.job_batch_operations.service.BATCH_OPS_ASYNC_THRESHOLD", 1
+    )
+    monkeypatch.setattr(
+        "server.app.services.job_batch_operations.feeder.JOB_BATCH_OPS_CHUNK_SIZE", 2
+    )
+    jobs = [_create_job(job_db, workspace, f"ABCDEF-{label}") for label in "ABCDEF"]
+    all_ids = {str(job["id"]) for job in jobs}
+    _, operation = dispatch_batch_selection(
+        job_db, workspace, "delete", None, JobListFilter(), (), {}, "user:tester"
+    )
+    assert operation is not None
+    op_id = str(operation["id"])
+    original_advance = job_db.advance_job_batch_operation
+    advance_calls = 0
+
+    def pause_and_resume_on_second_advance(op_id: str, **kwargs: Any) -> Any:
+        nonlocal advance_calls
+        advance_calls += 1
+        if advance_calls == 2:
+            job_db.transition_job_batch_operation(
+                op_id, from_statuses=("running",), to_status="paused"
+            )
+            job_db.transition_job_batch_operation(
+                op_id, from_statuses=("paused",), to_status="pending"
+            )
+        return original_advance(op_id, **kwargs)
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", pause_and_resume_on_second_advance)
+    feeder = _feeder(job_db, settings)
+    assert feeder.consume_once() is True
+    assert feeder.consume_once() is True
+    assert job_db.get_job_batch_operation(op_id)["next_index"] == 2
+    assert len(_result_ids(job_db, op_id)) == 4
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", original_advance)
+    _drain(feeder)
+
+    operation = job_db.get_job_batch_operation(op_id)
+    assert operation["status"] == "completed"
+    assert set(_result_ids(job_db, op_id)) == all_ids
+    assert [job_db.get_job(job_id) for job_id in all_ids] == [None] * len(all_ids)
+
+
 def test_stream_page_failure_marks_operation_failed(
     workspace: str, job_db: JobQueries, settings: Settings, monkeypatch
 ) -> None:

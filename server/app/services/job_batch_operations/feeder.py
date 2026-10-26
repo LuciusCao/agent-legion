@@ -185,6 +185,13 @@ class JobBatchOpsFeeder:
                     target_spec=payload if spec_changed else None,
                     items_total=items_total,
                 )
+            elif current is not None and current["status"] == "pending" and spec_changed:
+                self.job_db.preserve_resumed_job_batch_operation_stream(
+                    op_id,
+                    expected_next_index=start,
+                    target_spec=payload,
+                    items_total=items_total,
+                )
         return True
 
     @staticmethod
