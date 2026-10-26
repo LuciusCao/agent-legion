@@ -4,6 +4,45 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-10-26
+
+主打批量异步操作控制面与任务中心可用性：批量操作新增暂停、继续、取消及任务中心入口，并修复快速恢复时的漏执行与重复打包；任务中心独立为完整页面，补齐结束卡片迁移与水位停喂提示。job 节点契约新增 `execution_type`，旧 `executor_id` / `executor_kind` 进入弃用窗口；另收口执行徽标与 Studio 风险口径、approval schema 保留、内部产物写入退役及门禁稳定性。
+
+### Added
+
+- 批量异步操作 pause/resume/cancel 控制面（issue #1397）：新增 `POST /workspaces/{id}/job-batch-operations/{op_id}/pause|resume|cancel`，任务中心进行中卡片提供对应操作；pause 接受 pending/running，resume 只接受 paused，cancel 接受 pending/running/paused，其他状态迁移与重复 cancel 返回 409。控制粒度为 chunk 边界：暂停或取消阻止后续 chunk 认领与流式补页，已开始的本 chunk 仍提交逐 job 结果，不回滚既有副作用，也不承诺即时取消单个 job 或中断已开始的打包完成钩。
+- 任务中心独立完整页面（issue #1391）：任务路由移出 workspace 内嵌布局，active 与 archived 视图统一使用 AppShell/AppBar，提供返回当前 workspace 与首页的导航；原 `/workspaces/:id/tasks` URL 与 AuthGate 保持不变。
+
+### Changed
+
+- job 节点执行类型契约 Phase 1（issue #1367，additive）：job 详情与 Studio job detail/context 的节点投影新增 `execution_type: "code" | "agent" | null`，前端执行徽标改读该字段；job 详情的 `executor_id` / `executor_kind` 与 Studio 契约的 `executor_kind` 均标 deprecated，弃用窗口内继续返回。Worker 身份仍读 `worker_id`、Agent 身份仍读 `agent_id`；`execution_type=null` 且 `route_error` 非空表示路由配置错误，不应按旧字段或节点名反推类型。timeline 徽标维持既有展示语义，契约新增不改变其布局。
+
+### Fixed
+
+- 批量操作 pause 后立即 resume 的两处竞态（issue #1397）：旧 feeder 在 pause-wins 后先保存新 buffer、分页 cursor、已发现 total 与可选完成 output，再推进游标和计数，恢复重查不会把其他 job 映射到已记录 seq，关闭漏执行窗口；package 完成 output 在恢复与重放间复用，不再重复执行批级打包。正常 mid-chunk 簿记与取消时的 output 保留语义不变。
+- 任务中心历史视图与停喂状态可见性（issues #1392、#1393）：active→ended 的批次迁移会同步失效 ended 查询，完成卡片无需手动刷新即可出现；run-batch 与 job-batch-op 列表按同一 backlog 快照暴露 `feeding_gate`，卡片明确展示水位停喂原因，流式批量操作在等待水位时也不再被误判为仍在推进。
+- 执行徽标口径族（issues #1365、#1366、#1412）：无 capability 的 start/approval 节点不再在 DAG 或进度 timeline 显示 code chip；自含 agent 节点的执行徽标与卡片标题去重，label 等于 node key 时不再重复，同时保留 capability 元信息。DAG 与 timeline 共用可见执行类型判定，新契约与 legacy 投影一致。
+- Studio 结构风险口径族（issues #1369、#1381、#1402）：变更摘要面板、发布复核框与变更计数 chip 统一按过滤后的结构字段重算风险，混合 execution-only 与 label/text_input 变更降为 info，runtime 等真实结构风险保留 warning，不再直接消费后端聚合风险等级。
+- approval 节点 verdict schema 保留（issue #1410）：Studio 节点类型切换与 YAML 清洗按 schema v104 契约保留 approval `config_schema`，添加审批 verdict 字段及类型往返不再丢配置；破坏性切换提示与后端校验矩阵对齐。
+- 里程碑历史归属校准（issue #495，实际修复 PR #886 / commit `65e951910`）：纯本地 shard 早已统一经 dispatch 判定入口传入 `node_code`，不会误报 EXEC-CODE-002；该 issue 于 2026-10-10 关闭，不在 `v0.8.2..main` 新差异内，本版仅完成 0.8.3 里程碑对账，不重复声明新运行时修复。
+
+### Maintenance
+
+- legacy 产物清单写入 helper 退役（issues #1394、#1407）：测试改用共享 SQL fake 播种 legacy 行，删除 `JobArtifactObjectStore.record_remote` 及剩余旧 API 文档表述；权威产物对象写入与读取路径不变。
+- 架构检查器与 aff 选择收口（issues #1374、#1375、#1376、#1379、#1380、#1385）：frontend emoji 豁免按出现次数钉住；零引用导出检查收窄装饰器豁免并排除 barrel 自引用；嵌套池 checkout 纳入 conn-first 门面调用；未跟踪路径与新增 route 保持 unmapped 并回退 unit 全量，避免 aff 空选择漏跑。
+- 门禁与测试稳定性族（issues #1364、#1368、#1387）：StudioAgentJobNode 补齐退役 executor_kind 值拒绝参数化；WorkspaceMainPage/WorkflowStudioPage 改为等待可观察信号；worktree 撞名竞态测试采用两阶段文件握手与 inode 保活，连续验证后摘除 FLAKY-022 注册条目。
+- 架构文档同步（issues #1377、#1382）：锁域说明对齐 job-mutation 纯全序与 agent-ws 池锁预取，删除退役 orphan-lock 哨兵句；auth failure marker 文档更新为按 execution 隔离的唯一名。
+- tower 嵌套 worktree 兼容（issue #1409）：初始化、清理与派生名护栏识别 `.tower/worktrees/wt-*` 布局，tower 子实例复用父实例 `.env`、数据库与 bucket，测试库按父名与子名派生，避免嵌套实例误派生或互相 TRUNCATE。
+- 前端死导出清理（issue #1408）：删除三组已无消费者的实现与 barrel 重导出，并移除对应零引用豁免和失效体积预算豁免。
+
+### 升级注意
+
+- **数据库：** 本版没有新 schema 迁移，当前版本保持 v104；仍建议升级前备份 PostgreSQL。已由 0.8.2 完成 v104 的实例无需额外迁移，回滚使用与目标 schema 匹配的备份。
+- **`execution_type` 弃用迁移：** 新调用方立即改读 `execution_type`；job 详情的 `executor_id` / `executor_kind` 不再用于判断执行类型，Worker 身份改读 `worker_id`，Agent 身份继续读 `agent_id`。旧 `executor_id` / `executor_kind` 在 Phase 1 仍返回，将在下一完整发布周期的 Phase 2 移除，请勿新增依赖。
+- **批量控制面语义：** pause/resume/cancel 只控制异步批量操作的后续 chunk，不是单 job 即时取消协议；已提交逐 job 变更与审批 decision 不回滚。快速暂停再恢复会保留流式快照与 package output，客户端继续按 operation 状态和逐 job 结果判断完成，不把暂停视为终态。
+- **Host / Worker / velites：** `worker-v0.8.2..main` 的 `worker/`、`shared/`、`velites/` 无差异，本版不发布 worker-v0.8.3；`velites-v0.5.9..main` 的 `velites/` 也无差异，不发布新 velites tag。Host 升到 v0.8.3 后继续使用 worker-v0.8.2 与 velites-v0.5.9，`scripts/install-worker.sh` 默认钉版保持 worker 0.8.2 / velites 0.5.9。
+- **frontend 独立版本线：** 本次包含 frontend 修复但不单独发布 npm 包，`frontend/package.json` 与 lockfile 保持 0.4.0-alpha；仓库主版本前进不触发独立组件锁步 bump。
+
 ## [0.8.2] - 2026-10-25
 
 主打批量审批与大批量操作收口、材料内容身份与孤儿回收加固：新增批量通过/终止和失败项重试，批量筛选取消单请求数量上限并改为冻结上界后的流式补页；材料上传引入 create-only 条件写、存量无 hash 材料自动绑定 ETag，材料与 job 产物 GC 按 key 文法重开或收紧删除批；另含分片输入与并行 marker 归属、job 锁序与删除广播、Studio 双通道和日志目录等一批修复。
@@ -925,7 +964,8 @@ Initial open-source release.
 - Demo workflow `education_video_problems_generation` under `examples/`, runnable out of the box against a real LLM.
 - Docker deployment stacks (`deploy/`) and remote worker deployment runbook.
 
-[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/LuciusCao/agent-legion/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/LuciusCao/agent-legion/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/LuciusCao/agent-legion/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/LuciusCao/agent-legion/compare/v0.7.19...v0.8.0
