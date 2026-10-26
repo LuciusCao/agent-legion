@@ -503,6 +503,25 @@ Host 设置页顶部的「Worker 与 Worker 控制台」卡片、签发成功后
 
 新 workspace 引导、排查横幅与「在线·未领取」状态的判定规则（未知状态不推断、领取状态绑定当前注册凭据）见 [architecture/agent-worker.md §6](architecture/agent-worker.md#6-领取状态与引导--排查横幅的判定)。
 
+### Worker 资源测量（#1049 前置工具）
+
+`deploy/compose.worker.measurement.yaml` 与 `scripts/stress/worker_resource_workload.py` 是一次性真实测量栈，不是生产部署示例。Worker 明示保持当前 shipped envelope：镜像默认 root、`SYS_ADMIN`、`seccomp:unconfined`，且不设置 `mem_limit` / `pids_limit`；这些字段描述被测对象，不是推荐值。工具不按核数、协议并发上限、历史 RSS 或 Docker Desktop 结果推导生产限制，也不修改现有 Compose 的资源或权限。
+
+优先在 GitHub Actions 手动运行 **Worker Resource Measurement**（仅 `workflow_dispatch`，原生 Ubuntu 24.04）。矩阵的 single / mixed / upload-backlog 只是显式测量 envelope；dispatch 可设置 cold/warm 重复次数与 pids/memory 采样间隔。原生 Linux 也可在仓库根执行：
+
+```bash
+./scripts/ensure-velites.sh --dest data/bin
+uv run python scripts/stress/worker_resource_workload.py \
+  --output-dir worker-resource-results/manual \
+  --cold-repetitions 1 --warm-repetitions 2
+```
+
+每次迭代都走真实 scoped-token register → claim → Worker code sandbox / velites agent → presigned S3 upload → restart，并校验 agent/code execution 的记录确属被测 Worker；不使用 `simulate_agents.py` 代替 executor。场景包括 agent-only、code-only、mixed、upload/backlog（上传并发临时固定为 1）、runtime pending-restart、executor restart 与 container restart。pending-restart 通过控制 API 短暂停用再恢复 velites 来观测配置与 Host 登记差；该过渡触发的 fail-closed 预检是测量路径的一部分，恢复后必须重新注册并完成后续 restart。cold 每次重建容器与命名卷，warm 复用镜像和命名卷；两者都运行完整场景。
+
+采样边界是 Worker 容器的整个 cgroup v2，而不是单个进程或 Docker stats 近似值：`memory.current/peak/max/stat` 包含全部子孙和 page cache，`pids.current/max/events` 按内核线程计数，pids 默认约 100ms、memory 默认 500ms 独立采样。每个迭代的 `samples.jsonl` 保留原始样本与场景 marker；`summary.json` 提供 nearest-rank p95、max、kernel peak、events 和相对**当前已有** cgroup limit 的 headroom。limit 为 `max` 时 headroom 为 `null`，`recommended_limits` 永远为 `null`；后续 PR 必须依据合入工具后的原生 Linux 实测另行决定数值。
+
+artifact 还包括 Worker image ID/digest、velites SHA256/version、kernel/cgroup/arch/Docker 元数据、采样参数与脱敏 Host/Worker 日志。模型文件只记录 SHA256，不上传内容；注册 token、控制 token、stub models 与运行配置留在不上传的 work dir，日志中的 Bearer/register token/presigned query 会脱敏。workflow 不使用真实 provider secret 或生产数据，也不调用真实 LLM。cgroup v2 路径、Linux namespace/AppArmor/seccomp、容器内 bwrap、真实 S3 上传和 restart 只能由该原生 Linux 链路验收；macOS 单元测试只检查解析、汇总与安全契约，不能替代这些结果。
+
 ## 6. 验证两个 Worker
 
 可以直接查看 Worker 控制台或 Host Web UI，也可以在部署机按 §4 的登录命令重新登录得到 cookie 文件后查询（用完同样注销并删除）（`GET /api/agent-workers` 要求登录用户会话；只读 GET 不需要 `x-agent-legion-request` 头，不带 cookie 返回 401）：
