@@ -5,6 +5,8 @@ import type { TaskCardModel } from '../features/taskCenter/taskCardModel'
 import { TaskCard, type TaskCardActions } from '../features/taskCenter/TaskCard'
 import { useRunBatchActions } from '../features/taskCenter/useRunBatches'
 import { useJobBatchOpArchive } from '../features/taskCenter/useJobBatchOpListing'
+import { useJobBatchOpCardActions } from '../features/taskCenter/useJobBatchOpActions'
+import { JobBatchOpControlDialog } from '../features/taskCenter/JobBatchOpControlDialog'
 import { useTaskCenterCards } from '../features/taskCenter/useTaskCenterCards'
 import { TaskOpResultsDialog } from '../features/taskCenter/TaskOpResultsDialog'
 import { useWorkerPausedStatus } from '../hooks/useWorkerPausedStatus'
@@ -25,10 +27,9 @@ function useNowMs(): number {
 }
 
 /**
- * 任务中心（#1157 phase3 + #946 M52）：workspace 级批量操作进度页。run_batches
+ * 任务中心（#1157 phase3 + #946）：workspace 级批量操作进度页。run_batches
  * （批量创建）与 job_batch_operations（重跑/升级/删除/打包等）的卡片在同一
- * 列表按时间混排（active/ended/archived 三视图统一）；job-batch-op 卡片的
- * 暂停/取消控制面本期不外露（M52 裁决），终态给逐条结果/查看任务/归档。
+ * 列表按时间混排（active/ended/archived 三视图统一）。
  */
 export default function TaskCenterPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
@@ -41,6 +42,7 @@ export default function TaskCenterPage() {
 
   const cards = useTaskCenterCards(workspaceId, archivedView)
   const runBatchActions = useRunBatchActions(workspaceId)
+  const opControls = useJobBatchOpCardActions(workspaceId)
   const opArchive = useJobBatchOpArchive(workspaceId)
   const [resultsOp, setResultsOp] = useState<{
     id: string
@@ -53,8 +55,6 @@ export default function TaskCenterPage() {
       'success'
     )
 
-  /** 按卡片来源分发操作：run-batch 有暂停/继续/取消控制面；job-batch-op
-   * 只读进度 + 终态归档（M61）与逐条结果。 */
   const actionsFor = (card: TaskCardModel): TaskCardActions =>
     card.kind === 'run-batch'
       ? {
@@ -66,6 +66,7 @@ export default function TaskCenterPage() {
           onViewJobs: () => navigate(`/workspaces/${workspaceId}`),
         }
       : {
+          ...opControls.actionsFor(card),
           onArchive: (id) => opArchive.mutate(id, { onSuccess: onArchived }),
           onViewJobs: () => navigate(`/workspaces/${workspaceId}`),
           onViewResults: (id) => setResultsOp({ id, title: card.title }),
@@ -226,6 +227,11 @@ export default function TaskCenterPage() {
           )}
         </>
       )}
+      <JobBatchOpControlDialog
+        workspaceId={workspaceId}
+        control={opControls.pendingControl}
+        onClose={opControls.closeControl}
+      />
       <TaskOpResultsDialog
         workspaceId={workspaceId ?? ''}
         opId={resultsOp?.id ?? null}

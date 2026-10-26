@@ -38,7 +38,12 @@ export function ConfirmDialog({
 
   if (!open) return null
 
+  const handleClose = () => {
+    if (!isSubmitting) onClose()
+  }
+
   const handleConfirm = async () => {
+    if (isSubmitting) return
     setIsSubmitting(true)
     try {
       await onConfirm()
@@ -52,11 +57,11 @@ export function ConfirmDialog({
   }
 
   return (
-    <Dialog open={open} onClose={onClose}>
+    <Dialog open={open} onClose={handleClose}>
       <DialogTitle>{title}</DialogTitle>
       <DialogContent>{children}</DialogContent>
       <DialogActions>
-        <Button variant="text" onClick={onClose} disabled={isSubmitting}>
+        <Button variant="text" onClick={handleClose} disabled={isSubmitting}>
           取消
         </Button>
         <Button

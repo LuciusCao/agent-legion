@@ -35,8 +35,7 @@ export function topReasons(
     }))
 }
 
-/** completed 且有失败记为部分完成；暂停/取消控制面本期不外露
- * （controllable=false，M52 裁决）。列表项（M61）携带归档位；单 op 轮询
+/** completed 且有失败记为部分完成。列表项（M61）携带归档位；单 op 轮询
  * 句柄没有这两个字段，按缺省 null 处理。 */
 export function jobBatchOpToCard(
   op: JobBatchOperation | JobBatchOperationListItem
@@ -84,7 +83,7 @@ export function jobBatchOpToCard(
     failedLowerBound: false,
     reasons: topReasons(op.reason_counts),
     downloadUrl,
-    controllable: false,
+    controllable: true,
     errorMessage:
       op.error_message ||
       (firstChunkError ? String(firstChunkError.error ?? firstChunkError) : ''),
