@@ -85,22 +85,31 @@ documented in
 
 Use `aff` while editing, then the matching smoke lane for pre-push feedback.
 The measured times below are one warm-cache sample on the 10-core Mac and at
-the SHA documented in the gate guide; they are observations, not an SLA. They
-use the gate's execution timer and exclude time waiting for another worktree's
-machine-wide gate slot.
+the SHA documented in the gate guide; they are observations, not an SLA. The
+independent backend/frontend/Rust/static rows use the gate's execution timer
+and exclude time waiting for another worktree's machine-wide gate slot. The
+complete all-lane value uses `/usr/bin/time` total wall time; that complete run
+did not queue. Combinations without a measurement are not estimates.
 
-| Files changed | Preferred local command | Observed execution |
+| Files changed | Path-trimmed local command | Observed execution |
 | --- | --- | ---: |
-| Backend (`server/`, `worker/`, `shared/`, `tests/`, `workflow_nodes/`) | `GATE_LANES=backend GATE_TIER=smoke ./scripts/check-quick.sh` | 189s (3m09s) |
-| Frontend (`frontend/`) | `GATE_LANES=frontend GATE_TIER=smoke ./scripts/check-quick.sh` | 841s (14m01s) |
-| Rust (`velites/`, except shared schema changes) | `GATE_LANES=rust GATE_TIER=smoke ./scripts/check-quick.sh` | 101s (1m41s) |
+| Backend only (`server/`, `worker/`, `shared/`, `tests/`, `workflow_nodes/`) | `GATE_LANES=backend GATE_TIER=smoke ./scripts/check-quick.sh` | 189s (3m09s) |
+| Frontend only (`frontend/**`, except its manifest/lock below) | `GATE_LANES=frontend GATE_TIER=smoke ./scripts/check-quick.sh` | 841s (14m01s) |
+| `frontend/package.json` or `frontend/package-lock.json` | `GATE_LANES="backend frontend rust" GATE_TIER=smoke ./scripts/check-quick.sh` | 667.03s (11m07s), complete gate |
+| Rust only (`velites/**`, including `velites/Cargo.lock`, except schema) | `GATE_LANES=rust GATE_TIER=smoke ./scripts/check-quick.sh` | 101s (1m41s) |
+| `velites/schema/**` only | `GATE_LANES="backend rust" GATE_TIER=smoke ./scripts/check-quick.sh` | not separately measured |
 | Docs only (`docs/**`, root `*.md`, `LICENSE`) | `GATE_LANES=static GATE_TIER=smoke ./scripts/check-quick.sh` | 154s (2m34s) |
-| Mixed or shared changes (`scripts/`, `config/`, dependency locks, `velites/schema/**`) | `GATE_LANES="backend frontend rust" GATE_TIER=smoke ./scripts/check-quick.sh` | 667.03s (11m07s) |
+| Ordinary mixed known paths | Take the union; for example, `server/` + `frontend/` uses `GATE_LANES="backend frontend" GATE_TIER=smoke ./scripts/check-quick.sh` | not separately measured |
+| Shared/global or indeterminate diff: `pyproject.toml`, `uv.lock`, `Makefile`, `scripts/**`, `.githooks/**`, `.github/**`, `config/**`; new refs, diff failure, or a clean-tree local invocation | `GATE_LANES="backend frontend rust" GATE_TIER=smoke ./scripts/check-quick.sh` | 667.03s (11m07s), complete gate |
 
-The complete smoke gate still runs frontend and Rust tests; the ~90-second
-soft target covers only its curated backend pytest selection. Database changes
-also need their directly related PostgreSQL tests in the inner loop; CI runs
-the complete unit and PostgreSQL tiers. See the
+An explicit all-lane run is also a valid **optional conservative superset** for
+any other change, but it is not the classifier's minimal path-trimmed choice;
+do not read its 667.03s sample as a schema-only or ordinary-mixed measurement.
+Nested Markdown runtime inputs follow their directory's lane rather than the
+docs-only rule. The complete smoke gate still runs frontend and Rust tests;
+the ~90-second soft target covers only its curated backend pytest selection.
+Database changes also need their directly related PostgreSQL tests in the
+inner loop; CI runs the complete unit and PostgreSQL tiers. See the
 [measurement method, cold/warm breakdown, and slow-test attribution](docs/architecture/local-quality-gates.md#measured-local-smoke-one-coldwarm-pair)
 before comparing your own timings.
 

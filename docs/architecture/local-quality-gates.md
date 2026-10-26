@@ -290,8 +290,10 @@ fallback: their route-walking inventory tests may belong to the postgres
 tier, so selecting one in aff could otherwise degrade to a zero-test pass.
 Deleted test files are dropped from the
 selection (a stale path would fail pytest collection). An aff pass
-is **not** gate evidence: `scripts/run-local-gate.sh` rejects the tier, and
-the full suite remains the pre-push/CI boundary. Rebuild the index after
+is **not** gate evidence: `scripts/run-local-gate.sh` rejects the tier.
+Pre-push runs its selected non-aff gate (smoke by default, or the explicitly
+requested quick/full gate); CI runs the complete unit and PostgreSQL layers
+for applicable paths. Rebuild the index after
 dependency or conftest changes (a stale index only slows the loop —
 unmapped sources force the fallback, and unmapped test files still run
 wholesale via the tests/ rule in `scripts/pytest_aff_selection.py`).
