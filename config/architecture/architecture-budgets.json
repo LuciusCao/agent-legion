@@ -1386,6 +1386,7 @@
     "server/app/jobs/queries/job_artifact_keys.py": 23,
     "server/app/jobs/queries/job_batch_operation_control.py": 61,
     "server/app/jobs/queries/job_batch_operation_kinds.py": 36,
+    "server/app/jobs/queries/job_batch_operation_resume.py": 51,
     "server/app/jobs/queries/job_batch_operations.py": 218,
     "server/app/jobs/queries/job_batch_operations_listing.py": 160,
     "server/app/jobs/queries/job_bulk.py": 130,

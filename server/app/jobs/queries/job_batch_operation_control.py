@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.job_batch_operation_resume import JobBatchOperationResumeQueriesMixin
 
 
-class JobBatchOperationControlQueriesMixin(ConnectionQueriesMixin):
+class JobBatchOperationControlQueriesMixin(JobBatchOperationResumeQueriesMixin):
     def record_interrupted_job_batch_operation(
         self,
         op_id: str,
@@ -59,27 +59,5 @@ class JobBatchOperationControlQueriesMixin(ConnectionQueriesMixin):
                     items_total,
                     op_id,
                 ),
-            ).fetchone()
-        return dict(row) if row else None
-
-    def preserve_resumed_job_batch_operation_stream(
-        self,
-        op_id: str,
-        *,
-        expected_next_index: int,
-        target_spec: dict[str, Any],
-        items_total: int,
-    ) -> dict[str, Any] | None:
-        """Keep a refilled chunk's identity stable before its resumed replay."""
-        spec_json = json.dumps(target_spec, ensure_ascii=False, sort_keys=True)
-        with self.connect() as conn:
-            row = conn.execute(
-                """
-                update job_batch_operations
-                set target_spec_json=%s, items_total=%s, updated_at=current_timestamp
-                where id=%s and status='pending' and next_index=%s
-                returning *
-                """,
-                (spec_json, items_total, op_id, expected_next_index),
             ).fetchone()
         return dict(row) if row else None

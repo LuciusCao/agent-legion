@@ -84,10 +84,11 @@ RunBatchFeeder 模式：SKIP LOCKED 认领（停滞 600s 回收）、每 tick �
 - **mid-chunk 簿记**：结果落子表后，正常 CAS 只从 running 推进；若 pause/cancel 抢先，
   feeder 重读状态并用第二条 guarded update（`status IN ('paused','cancelled')`）提交本
   chunk 的 cursor、结果计数、流式 spec 和可选 output，不改操作员状态或 `finished_at`。
-  若 pause 后又立即 resume，则旧 cursor 暂留并由重放护栏重走；若本 chunk 刚补页，
-  feeder 先用 `status='pending' AND next_index=本 chunk 起点` 的第三条 guarded update
-  保存新 buffer、分页 cursor 与 discovered total，防止恢复重查把其他 job 映射到已记录
-  seq。正常推进仍负责提交 cursor 和计数；`processed_count` 不能用 results 行数代替。
+  若 pause 后又立即 resume，则旧 cursor 暂留并由重放护栏重走；feeder 先用
+  `status='pending' AND next_index=本 chunk 起点` 的第三条 guarded update 保存可选的
+  新 buffer、分页 cursor、discovered total 与 completion output。这样恢复重查不会把其他
+  job 映射到已记录 seq，package 也会复用已生成 output 而不重复完成钩。正常推进仍负责
+  提交 cursor 和计数；`processed_count` 不能用 results 行数代替。
 - **重放护栏**：rerun/package 等变更天然不幂等（无 dedup 探测可吸收重走），所以
   结果按 chunk 先于游标落子表，chunk 起步先探 `done_seqs`、已记录 seq 绝不重执行；
   `(op_id, seq)` 的 ON CONFLICT 是最终兜底。崩溃发生在结果写入与 CAS 之间时，旧

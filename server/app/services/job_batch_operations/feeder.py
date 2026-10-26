@@ -161,36 +161,31 @@ class JobBatchOpsFeeder:
         error_message = "; ".join(
             f"chunk {error['chunk_start']}: {error['error']}" for error in chunk_errors[-5:]
         )[:1000]
-        advanced = self.job_db.advance_job_batch_operation(
-            op_id,
-            next_index=end,
-            counts=counts,
-            chunk_errors=chunk_errors,
-            error_message=error_message,
-            done=done,
-            output=output,
-            target_spec=payload if spec_changed else None,
-            items_total=items_total,
-        )
+        bookkeeping: dict[str, Any] = {
+            "next_index": end,
+            "counts": counts,
+            "chunk_errors": chunk_errors,
+            "error_message": error_message,
+            "output": output,
+            "target_spec": payload if spec_changed else None,
+            "items_total": items_total,
+        }
+        advanced = self.job_db.advance_job_batch_operation(op_id, **bookkeeping, done=done)
         if advanced is None:
             current = self.job_db.get_job_batch_operation(op_id)
             if current is not None and current["status"] in ("paused", "cancelled"):
-                self.job_db.record_interrupted_job_batch_operation(
-                    op_id,
-                    next_index=end,
-                    counts=counts,
-                    chunk_errors=chunk_errors,
-                    error_message=error_message,
-                    output=output,
-                    target_spec=payload if spec_changed else None,
-                    items_total=items_total,
-                )
-            elif current is not None and current["status"] == "pending" and spec_changed:
-                self.job_db.preserve_resumed_job_batch_operation_stream(
+                self.job_db.record_interrupted_job_batch_operation(op_id, **bookkeeping)
+            elif (
+                current is not None
+                and current["status"] == "pending"
+                and (spec_changed or output is not None)
+            ):
+                self.job_db.preserve_resumed_job_batch_operation_snapshot(
                     op_id,
                     expected_next_index=start,
-                    target_spec=payload,
-                    items_total=items_total,
+                    target_spec=payload if spec_changed else None,
+                    items_total=items_total if spec_changed else None,
+                    output=output,
                 )
         return True
 

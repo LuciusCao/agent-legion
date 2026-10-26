@@ -608,6 +608,49 @@ def test_interrupted_bookkeeping_rejects_pending_operation(workspace, job_db) ->
     assert pending["finished_at"] is None
 
 
+def test_quick_resume_reuses_package_completion_output(
+    workspace, job_db, settings, monkeypatch
+) -> None:
+    job = _create_job(job_db, WORKSPACE, "QR-package", status="completed")
+    job_dir = resolve_job_dir(job, settings.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "question_context.json").write_text('{"question_id":"QR-package"}', encoding="utf-8")
+    op_id = _submit(job_db, "package", [str(job["id"])])
+    executors = _executors(job_db, settings)
+    original_package = executors.packages.package_eligible_jobs
+    package_calls = 0
+
+    def counting_package(*args: Any, **kwargs: Any) -> Any:
+        nonlocal package_calls
+        package_calls += 1
+        return original_package(*args, **kwargs)
+
+    monkeypatch.setattr(executors.packages, "package_eligible_jobs", counting_package)
+    original_advance = job_db.advance_job_batch_operation
+
+    def pause_and_resume_before_advance(op_id: str, **kwargs: Any) -> Any:
+        assert kwargs["output"]["package_filename"].endswith(".zip")
+        job_db.transition_job_batch_operation(op_id, from_statuses=("running",), to_status="paused")
+        job_db.transition_job_batch_operation(op_id, from_statuses=("paused",), to_status="pending")
+        return original_advance(op_id, **kwargs)
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", pause_and_resume_before_advance)
+    feeder = JobBatchOpsFeeder(job_db, settings, executors)
+    assert feeder.consume_once() is True
+    assert package_calls == 1
+    pending_output = json.loads(job_db.get_job_batch_operation(op_id)["output_json"])
+    assert pending_output["package_filename"].endswith(".zip")
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", original_advance)
+    _drain(feeder)
+
+    completed = job_db.get_job_batch_operation(op_id)
+    assert completed["status"] == "completed"
+    assert json.loads(completed["output_json"])["package_filename"].endswith(".zip")
+    assert package_calls == 1
+    assert len(job_db.list_workspace_packages(WORKSPACE, limit=10)) == 1
+
+
 def test_cancel_before_package_completion_does_not_start_zip(
     workspace, job_db, settings, monkeypatch
 ) -> None:
