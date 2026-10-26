@@ -403,6 +403,132 @@ async fn unrecovered_error_ends_run_with_exit_0() {
 }
 
 #[tokio::test]
+async fn tool_result_error_flag_maps_to_wire_content() {
+    let server = MockServer::start(vec![MockResponse::sse(sse_body(&[json!({
+        "choices": [{"delta": {}, "finish_reason": "stop"}]
+    })]))])
+    .await;
+    let mut legacy_result = Message::tool_result(
+        "call_legacy".into(),
+        "read".into(),
+        vec![ContentBlock::Text {
+            text: "legacy".into(),
+        }],
+        false,
+    );
+    legacy_result.is_error = None;
+    let messages = vec![
+        Message::tool_result(
+            "call_error".into(),
+            "read".into(),
+            vec![ContentBlock::Text {
+                text: "boom".into(),
+            }],
+            true,
+        ),
+        Message::tool_result("call_empty".into(), "read".into(), Vec::new(), true),
+        Message::tool_result(
+            "call_ok".into(),
+            "read".into(),
+            vec![ContentBlock::Text { text: "ok".into() }],
+            false,
+        ),
+        legacy_result,
+    ];
+
+    provider(&server)
+        .complete(&request(&messages, &[]))
+        .await
+        .unwrap();
+
+    let sent = server.recorded()[0].body_json();
+    assert_eq!(
+        sent["messages"][1],
+        json!({"role": "tool", "tool_call_id": "call_error", "content": "[ERROR] boom"})
+    );
+    assert_eq!(
+        sent["messages"][2],
+        json!({"role": "tool", "tool_call_id": "call_empty", "content": "[ERROR]"})
+    );
+    assert_eq!(
+        sent["messages"][3],
+        json!({"role": "tool", "tool_call_id": "call_ok", "content": "ok"})
+    );
+    assert_eq!(
+        sent["messages"][4],
+        json!({"role": "tool", "tool_call_id": "call_legacy", "content": "legacy"})
+    );
+}
+
+#[tokio::test]
+async fn full_tool_error_round_over_gateway() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().canonicalize().unwrap();
+    let first = sse_body(&[
+        json!({"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "call_1", "function": {"name": "read", "arguments": "{\"path\": \"missing.txt\"}"}}
+        ]}, "finish_reason": null}]}),
+        json!({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]}),
+    ]);
+    let second = sse_body(&[json!({
+        "choices": [{"delta": {"content": "The read failed."}, "finish_reason": "stop"}]
+    })]);
+    let server = MockServer::start(vec![MockResponse::sse(first), MockResponse::sse(second)]).await;
+    let provider = retrying(&server, 0);
+    let config = velites::agent::AgentConfig {
+        name: Some("tool-error-round".into()),
+        provider_name: "gateway".into(),
+        model: "kimi-k2.6".into(),
+        thinking: None,
+        system_prompt: "sys".into(),
+        instruction: "read missing.txt".into(),
+        tools: vec![ToolKind::Read],
+        budget: velites::budget::Budget::new(Some(5), None, std::time::Duration::from_secs(600)),
+        require_output: Vec::new(),
+        session: None,
+        cwd,
+        read_roots: Vec::new(),
+        skill_dirs: Vec::new(),
+        sandbox: None,
+        cancel: velites::cancel::CancelToken::default(),
+    };
+    let mut sink = MemorySink::default();
+
+    let exit = velites::agent::run(config, &provider, &mut sink)
+        .await
+        .unwrap();
+
+    assert_eq!(exit, 0);
+    let tool_end = sink
+        .events
+        .iter()
+        .find_map(|event| match event {
+            Event::ToolExecutionEnd(payload) => Some(payload),
+            _ => None,
+        })
+        .unwrap();
+    assert!(tool_end.is_error);
+    let event_text = tool_end
+        .result
+        .content
+        .iter()
+        .find_map(|block| match block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(!event_text.starts_with("[ERROR]"));
+
+    let recorded = server.recorded();
+    assert_eq!(recorded.len(), 2);
+    let second_request = recorded[1].body_json();
+    let wire_result = &second_request["messages"][3];
+    assert_eq!(wire_result["role"], "tool");
+    assert_eq!(wire_result["tool_call_id"], "call_1");
+    assert_eq!(wire_result["content"], format!("[ERROR] {event_text}"));
+}
+
+#[tokio::test]
 async fn full_tool_round_over_gateway() {
     // Turn 1: model asks for the read tool; turn 2: final answer. Asserts
     // the second request carries the assistant tool_calls and the tool
