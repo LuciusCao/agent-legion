@@ -2275,7 +2275,7 @@
     "worker/host/transfer.py": 126,
     "worker/hot_controls.py": 63,
     "worker/lease_snapshot.py": 79,
-    "worker/load_shedding.py": 91,
+    "worker/load_shedding.py": 69,
     "worker/material_fetch.py": 61,
     "worker/metrics_cache.py": 84,
     "worker/metrics_proxy.py": 28,
