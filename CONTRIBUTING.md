@@ -109,7 +109,8 @@ Nested Markdown runtime inputs follow their directory's lane rather than the
 docs-only rule. The complete smoke gate still runs frontend and Rust tests;
 the ~90-second soft target covers only its curated backend pytest selection.
 Database changes also need their directly related PostgreSQL tests in the
-inner loop; CI runs the complete unit and PostgreSQL tiers. See the
+inner loop; CI runs the complete unit and PostgreSQL tiers for applicable
+paths. See the
 [measurement method, cold/warm breakdown, and slow-test attribution](docs/architecture/local-quality-gates.md#measured-local-smoke-one-coldwarm-pair)
 before comparing your own timings.
 
@@ -125,10 +126,13 @@ before comparing your own timings.
    runs the fast gate, pre-push runs the smoke tier trimmed by the pushed
    paths. Never bypass them with `--no-verify`.
 
-3. The full gate runs on GitHub Actions for every PR
-   (`.github/workflows/quality-gate.yml`). The stable `quality-gate` aggregate
-   check is the required merge boundary; run `./scripts/check.sh` locally only
-   when CI is unavailable or an offline release credential is required.
+3. The CI quality gate runs on GitHub Actions for PRs targeting
+   `main`/`master`/`release/*`, with lanes selected by changed paths
+   (`.github/workflows/quality-gate.yml`). Selected
+   backend lanes run the complete unit and PostgreSQL tiers; the stable
+   `quality-gate` aggregate check is the required merge boundary. Run
+   `./scripts/check.sh` locally only when CI is unavailable or an offline
+   release credential is required.
 
 ### PR target branch
 

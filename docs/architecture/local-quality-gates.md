@@ -17,23 +17,26 @@ provide.
 | Push (any branch) | Smoke (default): static checks + smoke test tier, lanes trimmed by pushed paths | `.githooks/pre-push` → `scripts/run-local-gate.sh` → `scripts/check-quick.sh` with `GATE_TIER=smoke` |
 | Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: unit-tier quick suite, lanes trimmed | same hook path → `scripts/check-quick.sh` |
 | Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | same hook path → `scripts/check.sh` |
-| PR to `main`/`master`/`release/*`, push to `main`/`master` | Full | CI lanes run in parallel; stable aggregate check `quality-gate` is the merge boundary |
+| PR to `main`/`master`/`release/*`, push to `main`/`master` | Full tiers in selected CI lanes | Changed-path-selected CI lanes run in parallel; stable aggregate check `quality-gate` is the merge boundary |
 | Weekly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` + `exemption-expiry` + `deps-audit` (`nightly-gate.yml`) |
 
 The pre-push hook diffs the pushed commits against their remote base and runs
 only the affected quick-gate lanes locally: frontend-only changes skip the
 backend pytest lane, docs-only changes run static checks only, and
-backend-only changes skip Vitest. New branches/tags, shared files
-(`pyproject.toml`, `uv.lock`, `scripts/`, `.github/`, `config/`, …), mixed
-diffs, and any diff failure fall back to all lanes. Only `docs/**`,
-repository-root `*.md` and `LICENSE` count as docs: nested markdown such as
-the Studio bootstrap prompt, MCP guides or example `SKILL.md` files is a
-runtime input and runs its directory's lane, and `velites/schema/**` also runs
-the backend lane (Python contract tests read it). The rule lives in
+backend-only changes skip Vitest. Ordinary mixed known paths take the union of
+their lanes. Shared/global files (`pyproject.toml`, `uv.lock`, `scripts/`,
+`.github/`, `config/`, …), new branches/tags, diff failures, and clean-tree or
+otherwise indeterminate local invocations fall back to all lanes. Only
+`docs/**`, repository-root `*.md` and `LICENSE` count as docs: nested markdown
+such as the Studio bootstrap prompt, MCP guides or example `SKILL.md` files is
+a runtime input and runs its directory's lane, and `velites/schema/**` also
+runs the backend lane (Python contract tests read it). The rule lives in
 `scripts/lane-paths.sh`, sourced by the CI `changes` job, `check-quick.sh` and
 the pre-push hook, and `tests/scripts/test_lane_paths.py` pins all three to
-one path table (#941). CI always runs every lane
-of the full quick suite, so trimming never weakens the server-side boundary.
+one path table (#941). CI applies its own changed-path selection: selected
+backend jobs run the complete unit/PostgreSQL layers rather than smoke, while
+other selected lanes run their own checks. Local trimming therefore does not
+reduce server-side coverage for applicable changes.
 
 Lane trimming never covers the repo-wide governance checks (issue #1201):
 `check_invariants`, `check_versions`, `check_architecture` and
@@ -255,7 +258,8 @@ The full tier (`GATE_TIER=full`, the default for `check-quick.sh` without a
 tier override) selects the same unit layer as `GATE_TIER=unit`: the
 PostgreSQL integration layer (~3,900 of the quick suite's ~9,000 tests and
 ~2.2x the unit tier's wall time) moved out of the local default because CI
-re-runs all of it on every PR — paying it on every local gate bought little. Database
+re-runs all of it whenever the backend lane is selected — paying it on every
+local gate bought little. Database
 development runs directly related postgres tests in the inner loop and relies
 on the PR shards for the complete tier.
 `scripts/check.sh` — the local full-gate substitute — still pins both tiers
@@ -277,7 +281,8 @@ run with `--cov-context=test`, ~2.5 minutes per worktree), and the frontend lane
 over the changed frontend files. It falls back to the plain unit tier when
 no index exists, when a changed source file is missing from the index (an
 index blind spot — the affected tests are unknown), or when the selection
-would run most of the suite anyway — the fallback never widens what runs.
+would run most of the suite anyway — the fallback never selects beyond the
+plain unit tier.
 A genuinely empty selection (nothing in the tracked change set touches the
 unit tier — postgres-tier-only edits, `tests/full` / `tests/ci` files, docs)
 is skipped explicitly instead of failing on pytest's exit 5; the dependency
@@ -314,15 +319,15 @@ unaffected. Passing evidence is shared through the same Git common directory.
 `.github/workflows/quality-gate.yml` runs on pull requests to
 `main` / `master` / `release/*`, merge-queue synthetic commits,
 pushes to `main` / `master`, plus manual dispatch. Docs-only changes (`docs/**`,
-repository-root `*.md`, `LICENSE`) still trigger the workflow but every backend/frontend
-lane evaluates to false in the `changes` job and skips without acquiring a
-runner, including the complete `backend-postgres` matrix. The `docs-terms`
-guard is the one check that still runs on
-that path (codex review on #375/#377): docs-only PRs are exactly the ones
-that can reintroduce retired terminology into current-state docs, so the
-retired-terms check gets its own lightweight job that executes whenever the
-backend lane is off (`backend-unit` runs it inside `check_architecture`
-whenever the backend lane is on — the two entries are exact complements).
+repository-root `*.md`, `LICENSE`) still trigger the workflow, but the
+backend, frontend and Rust flags evaluate to false in the `changes` job and
+those lanes skip without acquiring runners, including the complete
+`backend-postgres` matrix. The `docs-terms` and `governance-guard` checks
+still run on that path. Docs-only and mixed documentation changes can
+reintroduce retired terminology into current-state docs; because docs-only
+changes have no `backend-unit` static step, the retired-terms check gets its
+own lightweight job whenever the backend lane is off (`backend-unit` runs it
+inside `check_architecture` whenever that lane is on — exact complements).
 A `paths-ignore` trigger would keep the workflow from
 starting at all and leave required checks pending forever — the docs-only
 PR deadlock first hit on #316 (single jobs) and #319 (matrix shards).
@@ -375,7 +380,7 @@ release-train `HEAD`-only exception.
   `check_reruns.py` against every shard report: a retry-pass is merge-blocking
   unless its exact nodeid has a registry entry. An expired deadline is only
   listed here, never fails the PR (#941: a calendar date must not red
-  unrelated PRs); the nightly `exemption-expiry` job enforces it. Every PR
+  unrelated PRs); the nightly `exemption-expiry` job enforces it. For each PR that runs this job
   (any target branch; scheduled jobs only see the default branch and only
   after the merge) additionally passes the target branch's registry
   (`--base-registry`) and fails on entries the PR itself adds or re-targets
@@ -433,15 +438,15 @@ In `nightly-gate.yml`:
   `make architecture-issue-states` ritual rots on a single-maintainer repo —
   five weeks of red nightly proved it), while a closed anchor issue still
   fails the job so the exemption gets fulfilled or re-anchored first — the
-  docs-only lane (changes + docs-terms) gates the merge, so the bot never
+  docs-only checks (changes + docs-terms + governance-guard) gate the merge, so the bot never
   bypasses the trunk ruleset. Since #295 it also detects expired
   flaky-registry deadlines (`check_reruns.py --check-deadlines`, deadline
   evidence without needing the extended rerun report), and since #1024 on
   every maintained branch too (`scripts/quality/flaky_branch_deadlines.py`:
   each `release/X.Y.Z` above the default branch's version,
   registries read leniently from the fetched branch tips). It is the only lane
-  that fails on an expired deadline (#941) and annotates entries due within
-  7 days as warnings; PR backend-coverage enforces observed reruns only. The
+  that fails on an already-registered expired deadline (#941) and annotates entries due within
+  7 days as warnings; PR backend-coverage enforces observed reruns and expired deadlines in entries the PR adds or re-targets. The
   registry's clock-free rules (one entry per nodeid, deadline at most 45
   days after the entry's `registered_on` / `extended_on`) are enforced on
   every load, including the unit-tier `tests/scripts/test_flaky_registry_entries.py`.
@@ -486,10 +491,11 @@ CI environment notes:
 - The workflow declares `permissions: contents: read`; PR test code and build
   scripts receive no write token, and release workflows grant their own
   permissions separately.
-- Each job gets a fresh `postgres:17` service container; `AGENT_LEGION_DATABASE_URL`
-  and `AGENT_LEGION_TEST_DATABASE_URL` point at it. The test database and worker
-  schemas are created lazily when the PostgreSQL layer starts; importing the
-  test support module and running the unit layer never connects to PostgreSQL.
+- Jobs that need PostgreSQL get a fresh `postgres:17` service container;
+  `AGENT_LEGION_DATABASE_URL` and `AGENT_LEGION_TEST_DATABASE_URL` point at it.
+  The test database and worker schemas are created lazily when the PostgreSQL
+  layer starts; importing the test support module and running the unit layer
+  never connects to PostgreSQL.
 - The api:check contract step regenerates frontend API types through
   `create_app` + node_modules, so it lives in the api-check job; the
   frontend test jobs need neither Python nor Postgres.
@@ -578,9 +584,10 @@ available. Do not record passing evidence for a partial gate.
 
 - Fast feedback remains cheap enough to run on every commit; pushes default
   to the curated smoke tier, while the complete unit and PostgreSQL layers
-  run as parallel CI jobs on every PR/push.
-- CI adds the PostgreSQL and full layers on every PR/push, so database and
-  cross-control-plane regressions are still caught server-side before merge.
+  run as parallel CI jobs whenever the backend lane is selected.
+- For applicable PR/push paths, CI adds the PostgreSQL and full-gate evidence
+  layers, so database and cross-control-plane regressions are still caught
+  server-side before merge.
 - Stress evidence runs weekly instead of on every push, trading same-day
   detection for a much cheaper push loop; risky changes can trigger it on
   demand via `workflow_dispatch`.
