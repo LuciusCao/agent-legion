@@ -42,7 +42,7 @@ vi.mock('./routes/pages', async () => {
     UsersAdminPage: stub('用户管理'),
     JobDetailPage: stub('job-detail'),
     DashboardPage: stub('dashboard'),
-    // 渲染子路由出口（任务中心等嵌套页断言需要）。
+    // 渲染子路由出口（job detail 等嵌套页断言需要）。
     WorkspaceLayout: () => (
       <div>
         workspace-layout
@@ -124,7 +124,7 @@ describe('AppRoutes auth guard', () => {
     ).toBeInTheDocument()
   })
 
-  it('serves the task center inside the workspace layout (#1157 phase3)', async () => {
+  it('serves the task center as a standalone page (#1391)', async () => {
     authState.status = 'authenticated'
     authState.user = {
       id: 'u1',
@@ -138,8 +138,8 @@ describe('AppRoutes auth guard', () => {
     renderRoutes('/workspaces/ws1/tasks')
 
     expect(
-      await screen.findByText('workspace-layout', undefined, { timeout: 5000 })
+      await screen.findByText('task-center', undefined, { timeout: 5000 })
     ).toBeInTheDocument()
-    expect(screen.getByText('task-center')).toBeInTheDocument()
+    expect(screen.queryByText('workspace-layout')).not.toBeInTheDocument()
   })
 })

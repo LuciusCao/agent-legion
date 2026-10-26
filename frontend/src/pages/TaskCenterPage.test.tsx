@@ -90,6 +90,12 @@ function renderPage(entry = '/workspaces/ws1/tasks') {
             path="/workspaces/:workspaceId/tasks"
             element={<TaskCenterPage />}
           />
+          <Route path="/tasks" element={<TaskCenterPage />} />
+          <Route
+            path="/workspaces/:workspaceId"
+            element={<div>workspace-home</div>}
+          />
+          <Route path="/" element={<div>dashboard-home</div>} />
         </Routes>
       </MemoryRouter>
     </TestQueryProvider>
@@ -317,6 +323,24 @@ describe('TaskCenterPage（#1157 phase3）', () => {
     expect(screen.getByText(/结束超过 7 天的记录自动移入/)).toBeInTheDocument()
   })
 
+  it('renders one app-bar title and returns to the workspace (#1391)', async () => {
+    renderPage()
+
+    expect(
+      await screen.findByRole('heading', { name: '任务中心', level: 1 })
+    ).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: '任务中心' })).toHaveLength(1)
+    fireEvent.click(screen.getByTestId('app-bar-back'))
+    expect(await screen.findByText('workspace-home')).toBeInTheDocument()
+  })
+
+  it('returns to the dashboard when no workspace is present (#1391)', async () => {
+    renderPage('/tasks')
+
+    fireEvent.click(await screen.findByTestId('app-bar-back'))
+    expect(await screen.findByText('dashboard-home')).toBeInTheDocument()
+  })
+
   it('renders the archived view read-only with provenance lines', async () => {
     mockList.mockImplementation((_ws, options: { view: string }) => {
       if (options.view === 'archived')
@@ -348,7 +372,11 @@ describe('TaskCenterPage（#1157 phase3）', () => {
     })
     renderPage('/workspaces/ws1/tasks?view=archived')
 
-    expect(await screen.findByText('已归档')).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: '已归档', level: 1 })
+    ).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: '已归档' })).toHaveLength(1)
+    expect(screen.getByTestId('app-bar-back')).toBeInTheDocument()
     const manualCard = await screen.findByTestId('task-card-run-manual-1')
     expect(manualCard).toHaveTextContent('手动归档')
     const autoCard = await screen.findByTestId('task-card-run-auto-1')

@@ -8,6 +8,8 @@ import { useJobBatchOpArchive } from '../features/taskCenter/useJobBatchOpListin
 import { useTaskCenterCards } from '../features/taskCenter/useTaskCenterCards'
 import { TaskOpResultsDialog } from '../features/taskCenter/TaskOpResultsDialog'
 import { useWorkerPausedStatus } from '../hooks/useWorkerPausedStatus'
+import { AppShell } from '../layouts/AppShell'
+import { AppBar } from '../components/AppBar'
 import styles from '../features/taskCenter/TaskCenterPage.module.css'
 
 /** 卡片底部「已进行 / 等待」行的重绘节拍（数据本身由查询轮询刷新）。 */
@@ -84,11 +86,24 @@ export default function TaskCenterPage() {
     </div>
   )
 
+  const pageShell = (content: React.ReactNode) => (
+    <AppShell
+      appBar={({ scrolled }) => (
+        <AppBar
+          title={archivedView ? '已归档' : '任务中心'}
+          backTo={workspaceId ? `/workspaces/${workspaceId}` : '/'}
+          scrolled={scrolled}
+        />
+      )}
+    >
+      {content}
+    </AppShell>
+  )
+
   if (archivedView) {
-    return (
+    return pageShell(
       <div className={styles.page}>
         <div className={styles.summary}>
-          <h1>已归档</h1>
           <span className={styles.summaryNote}>
             归档记录保留 90 天，超期自动清理 ·
           </span>
@@ -139,10 +154,9 @@ export default function TaskCenterPage() {
     cards.activeCards.length === 0 &&
     cards.endedCards.length === 0
 
-  return (
+  return pageShell(
     <div className={styles.page}>
       <div className={styles.summary}>
-        <h1>任务中心</h1>
         <div className={styles.chips}>
           <span>
             进行中 <b>{runningCount}</b>
