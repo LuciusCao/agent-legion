@@ -225,6 +225,14 @@ class CgroupSampler:
             if self._file is not None:
                 self._write_locked("pids", self.reader.pids_sample())
 
+    def record_backlog(self, *, active: int, queued: int) -> None:
+        with self._lock:
+            if self._file is not None:
+                self._write_locked(
+                    "backlog",
+                    {"upload_active_count": active, "upload_queued_count": queued},
+                )
+
     def _loop(self, kind: str, interval: float) -> None:
         sample = self.sample_memory if kind == "memory" else self.sample_pids
         while not self._stop.is_set():

@@ -31,19 +31,27 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.e2e._llm_stub import _sse  # noqa: E402
 from scripts.e2e._main_flow_seed import DRAFT_OUTPUT, SKILL_KEY, _ensure_skill_repo  # noqa: E402
 from scripts.stress._stress_auth import ensure_admin_session  # noqa: E402
+from scripts.stress.worker_resource_evidence import (  # noqa: E402
+    ensure_measurement_bucket,
+    measure_upload_backlog,
+    require_direct_outputs,
+    verify_authority_object,
+    write_iteration_metadata,
+    write_sanitized_logs,
+)
 from scripts.stress.worker_resource_measurement import (  # noqa: E402
     CgroupSampler,
     CgroupV2Reader,
-    collect_host_metadata,
     discover_cgroup_v2,
     sanitize_log_text,
 )
 from server.app.agent_control.register_tokens import AgentRegisterTokenStore  # noqa: E402
-from server.app.db.transaction import read_connection  # noqa: E402
+from server.app.db.transaction import read_connection, write_transaction  # noqa: E402
 from server.app.jobs import JobQueries  # noqa: E402
 from server.app.services.node_code_seeding import seed_workspace_node_code  # noqa: E402
 from server.app.services.node_codes import NodeCodeService  # noqa: E402
 from server.app.services.workflow_revisions import WorkflowRevisionService  # noqa: E402
+from server.app.storage import S3Settings, S3StorageClient  # noqa: E402
 from server.app.worker_control import WorkspaceWorkerControl  # noqa: E402
 from server.app.workflows.loader import workflow_definition_from_dict  # noqa: E402
 
@@ -130,7 +138,7 @@ class DeterministicStub:
 
 
 def _start_node() -> dict[str, Any]:
-    return {"label": "measurement input", "type": "start", "accepted_item_types": ["text"]}
+    return {"label": "measurement input", "type": "start", "accepted_item_types": ["ref"]}
 
 
 def _agent_node(after: list[str], inputs: list[str]) -> dict[str, Any]:
@@ -233,6 +241,12 @@ def _node_sources(artifact_chars: int) -> dict[str, str]:
 
 
 def seed_measurement_workspaces(dsn: str, skills_dir: Path, artifact_chars: int) -> None:
+    with write_transaction(dsn) as conn:
+        conn.execute(
+            "insert into external_connections(key, type, display_name, config_json)"
+            " values ('measurement-ref', 'static_bearer', 'Measurement refs', '{}')"
+            " on conflict(key) do nothing"
+        )
     _ensure_skill_repo(skills_dir / SKILL_KEY)
     job_db = JobQueries(dsn, jobs_dir=skills_dir / "unused-jobs")
     codes = NodeCodeService(dsn)
@@ -287,6 +301,14 @@ class MeasurementRun:
             "VELITES_BIN": str(self.velites),
             "AGENT_LEGION_SKIP_DOTENV": "1",
         }
+        self.storage = S3StorageClient(
+            S3Settings(
+                bucket="agent-legion-measurement",
+                endpoint_url=f"http://127.0.0.1:{args.s3_port}",
+                access_key="measurement-access-key",
+                secret_key="measurement-secret-key",
+            )
+        )
 
     def compose(self, *arguments: str, capture: bool = False) -> str:
         result = subprocess.run(
@@ -425,28 +447,15 @@ class MeasurementRun:
         self._wait_worker_process(token)
         self._wait_registered(session)
 
-    def _ensure_bucket(self) -> None:
-        env = self.env | {
-            "AGENT_LEGION_S3_ENDPOINT": f"http://127.0.0.1:{self.args.s3_port}",
-            "AGENT_LEGION_S3_PUBLIC_ENDPOINT": f"http://127.0.0.1:{self.args.s3_port}",
-            "AGENT_LEGION_S3_BUCKET": "agent-legion-measurement",
-            "AGENT_LEGION_S3_ACCESS_KEY": "measurement-access-key",
-            "AGENT_LEGION_S3_SECRET_KEY": "measurement-secret-key",
-        }
-        subprocess.run(
-            [sys.executable, "scripts/ensure-s3-bucket.py", str(self.work_dir / "no-secrets.env")],
-            cwd=PROJECT_ROOT,
-            env=env,
-            check=True,
-        )
-
-    def _submit(self, session: requests.Session, scenario: str, iteration: str) -> dict[str, Any]:
+    def _create_run(
+        self, session: requests.Session, scenario: str, iteration: str
+    ) -> dict[str, Any]:
         workspace_id = WORKSPACES[scenario]
         items = [
             {
-                "type": "text",
-                "content": f"measurement {iteration} {scenario} {index}",
-                "filename": "measurement.txt",
+                "type": "ref",
+                "connection_key": "measurement-ref",
+                "external_id": f"measurement-{iteration}-{scenario}-{index}",
             }
             for index in range(self.args.jobs_per_wave)
         ]
@@ -457,12 +466,22 @@ class MeasurementRun:
         )
         response.raise_for_status()
         payload = response.json()
-        run_id = payload["run"]["id"]
-        job_ids = payload["job_ids"]
+        return {
+            "workspace_id": workspace_id,
+            "run_id": payload["run"]["id"],
+            "job_ids": payload["job_ids"],
+        }
+
+    def _await_run(
+        self, session: requests.Session, scenario: str, pending: dict[str, Any]
+    ) -> dict[str, Any]:
+        if len(pending["job_ids"]) != self.args.jobs_per_wave:
+            raise RuntimeError(f"{scenario} did not create the expected measurement wave")
 
         def completed() -> bool:
             detail = session.get(
-                f"{self.host_url}/api/workspaces/{workspace_id}/runs/{run_id}", timeout=10
+                f"{self.host_url}/api/workspaces/{pending['workspace_id']}/runs/{pending['run_id']}",
+                timeout=10,
             )
             detail.raise_for_status()
             stats = detail.json()["job_stats"]
@@ -470,71 +489,69 @@ class MeasurementRun:
             failed = sum(int(by_status.get(status, 0)) for status in ("failed", "cancelled"))
             if failed:
                 raise RuntimeError(f"{scenario} has {failed} failed/cancelled jobs")
-            return (
-                stats["total"] == self.args.jobs_per_wave
-                and int(by_status.get("completed", 0)) == self.args.jobs_per_wave
-            )
+            return stats["total"] == len(pending["job_ids"]) and int(
+                by_status.get("completed", 0)
+            ) == len(pending["job_ids"])
 
         self._wait(f"{scenario} run completion", completed, timeout=self.args.job_timeout_seconds)
-        self._verify_remote(job_ids, scenario)
-        return {"run_id": run_id, "job_count": len(job_ids), "remote_execution_verified": True}
+        evidence = self._verify_remote(pending["job_ids"], scenario)
+        return {
+            "run_id": pending["run_id"],
+            "job_count": len(pending["job_ids"]),
+            **evidence,
+        }
 
-    def _verify_remote(self, job_ids: list[str], scenario: str) -> None:
-        expected = {
-            "agent": {"agent": len(job_ids)},
-            "code": {"code": len(job_ids)},
-            "upload-backlog": {"code": len(job_ids)},
-            "mixed": {"agent": len(job_ids), "code": 2 * len(job_ids)},
-        }[scenario]
+    def _submit(self, session: requests.Session, scenario: str, iteration: str) -> dict[str, Any]:
+        return self._await_run(session, scenario, self._create_run(session, scenario, iteration))
+
+    def _verify_remote(self, job_ids: list[str], scenario: str) -> dict[str, Any]:
+        workspace_id = WORKSPACES[scenario]
+        nodes = {
+            key: node
+            for key, node in _definitions()[workspace_id]["nodes"].items()
+            if node.get("type") in {"agent", "code"}
+        }
+        expected: dict[str, int] = {}
+        for node in nodes.values():
+            expected[node["type"]] = expected.get(node["type"], 0) + len(job_ids)
         with read_connection(self.dsn) as conn:
             rows = conn.execute(
-                "select kind, worker_id from agent_execution_requests where job_id = any(%s) and state = 'done'",
+                "select execution_id, job_id, node_key, kind, worker_id, outcome_json"
+                " from agent_execution_requests where job_id = any(%s) and state = 'done'",
                 (job_ids,),
             ).fetchall()
+            artifact_rows = conn.execute(
+                "select job_id, node_key, name, storage_key, size_bytes, content_hash"
+                " from job_artifacts where job_id = any(%s)",
+                (job_ids,),
+            ).fetchall()
+        authority = {(row["job_id"], row["node_key"], row["name"]): row for row in artifact_rows}
         actual: dict[str, int] = {}
+        evidence: list[dict[str, Any]] = []
         for row in rows:
             if row["worker_id"] != WORKER_ID:
                 raise RuntimeError(f"execution ran on unexpected Worker: {row['worker_id']}")
             actual[row["kind"]] = actual.get(row["kind"], 0) + 1
+            refs = require_direct_outputs(row, nodes[row["node_key"]]["outputs"], workspace_id)
+            for name, ref in refs.items():
+                evidence.append(
+                    verify_authority_object(
+                        self.storage,
+                        execution_id=row["execution_id"],
+                        name=name,
+                        ref=ref,
+                        row=authority.get((row["job_id"], row["node_key"], name)),
+                    )
+                )
         if actual != expected:
             raise RuntimeError(
                 f"remote execution mismatch for {scenario}: expected {expected}, got {actual}"
             )
-
-    def _save_logs(self, iteration_dir: Path) -> None:
-        for service in ("host", "worker"):
-            text = self.compose("logs", "--no-color", service, capture=True)
-            (iteration_dir / f"{service}.log").write_text(
-                sanitize_log_text(text, self.secrets) + "\n", encoding="utf-8"
-            )
-
-    def _write_metadata(self, iteration_dir: Path, iteration: str, container: str) -> None:
-        metadata = collect_host_metadata(container, "agent-legion-worker:measurement", self.velites)
-        metadata["measurement"] = {
-            "iteration": iteration,
-            "shipped_envelope": {
-                "user": "root(image default)",
-                "cap_add": ["SYS_ADMIN"],
-                "seccomp": "unconfined",
-                "mem_limit": None,
-                "pids_limit": None,
-            },
-            "envelope_not_a_production_recommendation": True,
-            "agent_concurrency": self.args.agent_concurrency,
-            "code_concurrency": self.args.code_concurrency,
-            "upload_concurrency": self.args.upload_concurrency,
-            "jobs_per_wave": self.args.jobs_per_wave,
-            "artifact_chars": self.args.artifact_chars,
-            "pids_interval_seconds": self.args.pids_interval_ms / 1000,
-            "memory_interval_seconds": self.args.memory_interval_ms / 1000,
-            "source_commit": os.environ.get("GITHUB_SHA"),
-            "models_sha256": __import__("hashlib")
-            .sha256(self.models_path.read_bytes())
-            .hexdigest(),
+        return {
+            "remote_execution_verified": True,
+            "direct_upload_verified": True,
+            "artifacts": evidence,
         }
-        (iteration_dir / "metadata.json").write_text(
-            json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
 
     def run_iteration(self, mode: str, repetition: int) -> dict[str, Any]:
         iteration = f"{mode}-{repetition}"
@@ -562,7 +579,7 @@ class MeasurementRun:
                 ),
             )
             seed_measurement_workspaces(self.dsn, self.skills_dir, self.args.artifact_chars)
-            self._ensure_bucket()
+            ensure_measurement_bucket(self)
             self.compose("up", "-d", "host")
             self._wait_http(f"{self.host_url}/api/health")
             session = ensure_admin_session(self.host_url)
@@ -585,7 +602,7 @@ class MeasurementRun:
             )
             sampler.mark(iteration, "register")
             sampler.start()
-            self._write_metadata(iteration_dir, iteration, container)
+            write_iteration_metadata(self, iteration_dir, iteration, container)
             self._wait_http(f"{self.worker_url}/api/health")
             control_token = self._control_token()
             self.secrets.append(control_token)
@@ -610,19 +627,11 @@ class MeasurementRun:
             for scenario in ("agent", "code", "mixed", "upload-backlog"):
                 sampler.mark(iteration, scenario)
                 if scenario == "upload-backlog":
-                    self._worker_request(
-                        "PUT", "/api/config", control_token, json={"upload_max_concurrency": 1}
+                    result["scenarios"][scenario] = measure_upload_backlog(
+                        self, session, iteration, control_token, sampler
                     )
-                try:
+                else:
                     result["scenarios"][scenario] = self._submit(session, scenario, iteration)
-                finally:
-                    if scenario == "upload-backlog":
-                        self._worker_request(
-                            "PUT",
-                            "/api/config",
-                            control_token,
-                            json={"upload_max_concurrency": self.args.upload_concurrency},
-                        )
 
             sampler.mark(iteration, "pending-restart")
             pending = self._worker_request(
@@ -670,7 +679,7 @@ class MeasurementRun:
                     .get("sample_counts", {})
                 )
             try:
-                self._save_logs(iteration_dir)
+                write_sanitized_logs(self, iteration_dir)
             except (OSError, subprocess.CalledProcessError) as exc:
                 result["success"] = False
                 result["error"] = f"log collection failed: {exc}"
@@ -708,6 +717,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--stub-delay-seconds", type=float, default=0.05)
     parser.add_argument("--idle-seconds", type=float, default=2.0)
     parser.add_argument("--job-timeout-seconds", type=float, default=300.0)
+    parser.add_argument("--backlog-timeout-seconds", type=float, default=60.0)
     parser.add_argument("--pids-interval-ms", type=_positive, default=100)
     parser.add_argument("--memory-interval-ms", type=_positive, default=500)
     parser.add_argument("--cold-repetitions", type=int, default=1)
@@ -725,8 +735,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         or args.cold_repetitions + args.warm_repetitions == 0
     ):
         parser.error("cold/warm repetitions must be non-negative and not both zero")
-    if args.stub_delay_seconds < 0 or args.idle_seconds < 0 or args.job_timeout_seconds <= 0:
-        parser.error("delays must be non-negative and job timeout must be positive")
+    if (
+        args.stub_delay_seconds < 0
+        or args.idle_seconds < 0
+        or args.job_timeout_seconds <= 0
+        or args.backlog_timeout_seconds <= 0
+    ):
+        parser.error("delays must be non-negative and timeouts must be positive")
     args.artifact_chars = args.artifact_kib * 1024
     return args
 

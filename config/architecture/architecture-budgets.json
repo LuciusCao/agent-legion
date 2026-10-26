@@ -1079,6 +1079,7 @@
     "scripts/stress/_validation_stub.py": 27,
     "scripts/stress/run_e2e_stress.py": 304,
     "scripts/stress/simulate_agents.py": 355,
+    "scripts/stress/worker_resource_evidence.py": 253,
     "scripts/stress/worker_resource_measurement.py": 314,
     "scripts/stress/worker_resource_workload.py": 720,
     "scripts/studio_chat_smoke.py": 103,
