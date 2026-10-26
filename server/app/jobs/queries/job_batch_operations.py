@@ -12,7 +12,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.job_batch_operation_control import (
+    JobBatchOperationControlQueriesMixin,
+)
 from server.app.jobs.queries.job_batch_operation_kinds import (
     JOB_BATCH_OPERATION_KINDS as JOB_BATCH_OPERATION_KINDS,
 )
@@ -22,7 +24,7 @@ from server.app.jobs.queries.job_batch_operation_kinds import (
 )
 
 
-class JobBatchOperationQueriesMixin(ConnectionQueriesMixin):
+class JobBatchOperationQueriesMixin(JobBatchOperationControlQueriesMixin):
     def create_job_batch_operation(
         self,
         op_id: str,
@@ -241,7 +243,7 @@ class JobBatchOperationQueriesMixin(ConnectionQueriesMixin):
     def transition_job_batch_operation(
         self, op_id: str, *, from_statuses: tuple[str, ...], to_status: str
     ) -> dict[str, Any] | None:
-        """Control-plane CAS (reserved pause/cancel) and the watermark release.
+        """Control-plane CAS (pause/cancel) and the watermark release.
 
         None = the row is not in one of ``from_statuses``. Terminal
         transitions stamp finished_at. (run_batches precedent.)

@@ -33,7 +33,11 @@ batch-reject）在大选择
   `reason_counts` 失败/跳过原因分布 + `output` 终态产物，如 package 的
   package_filename/download_url）；`GET .../results?limit&cursor`（keyset 分页的逐
   job 结果，`result` 载荷与同步端点的逐 job 结果 dict 同形）。跨 workspace 引用一律
-  404。pause/resume/cancel 控制面本期不外露（状态机预留 paused/cancelled）。
+  404。
+- 控制：`POST .../{op_id}/pause|resume|cancel` 返回更新后的 `JobBatchOperationResponse`。
+  pause 接受 pending/running，resume 只接受 paused，cancel 接受 pending/running/paused；
+  其余迁移（含重复 cancel）409，未知或跨 workspace operation 404。控制粒度是 chunk
+  边界：已开始的本 chunk 会提交结果，不回滚逐 job 副作用，也不承诺即时取消单个 job。
 
 ## 2. 状态行（schema v101；approval 扩展为 v104）
 
@@ -76,6 +80,12 @@ RunBatchFeeder 模式：SKIP LOCKED 认领（停滞 600s 回收）、每 tick �
 - **流式补页**：首 buffer 至多阈值+1 条，后续每 tick 至多 200 条；水位闸在补页之前，
   背压时不继续扩大选择。补页后的 target spec、已发现 `items_total`、结果计数和
   `next_index` 由同一个 pause-wins CAS 推进，feeder 不再每 chunk 解析全量 id JSON。
+  paused/cancelled 不会被认领，因此暂停期间不补页。
+- **mid-chunk 簿记**：结果落子表后，正常 CAS 只从 running 推进；若 pause/cancel 抢先，
+  feeder 重读状态并用第二条 guarded update（`status IN ('paused','cancelled')`）提交本
+  chunk 的 cursor、结果计数、流式 spec 和可选 output，不改操作员状态或 `finished_at`。
+  若 pause 后又立即 resume 导致第二条 update 也 miss，则保留旧 cursor，由重放护栏安全
+  重走；`processed_count` 始终是提交的 cursor，不能用 results 行数代替。
 - **重放护栏**：rerun/package 等变更天然不幂等（无 dedup 探测可吸收重走），所以
   结果按 chunk 先于游标落子表，chunk 起步先探 `done_seqs`、已记录 seq 绝不重执行；
   `(op_id, seq)` 的 ON CONFLICT 是最终兜底。崩溃发生在结果写入与 CAS 之间时，旧
@@ -101,7 +111,10 @@ RunBatchFeeder 模式：SKIP LOCKED 认领（停滞 600s 回收）、每 tick �
 - **package 是批级操作**：chunk 内只做逐 job 资格判定（结果即同步路径的
   eligibility verdicts），游标耗尽时由完成钩跑一次打包（重取 succeeded ids 的 live
   job 行再校验 completed），zip 文件名/下载 URL 落 `output_json`；重放时
-  output 非空即复用，不重复打包。
+  output 非空即复用，不重复打包。完成钩启动前重读父状态，已 paused/cancelled 就不再
+  启动 zip；取消不承诺中断已经开始的 zip 完成钩：若 cancel 在完成钩期间落地，zip 与
+  output 可以保留，但父状态仍为 cancelled，`finished_at` 仍是取消 CAS 的时间，不会被
+  完成钩改成 completed。
 
 ## 4. 批量审批（#1363，schema v104）
 
@@ -125,8 +138,8 @@ RunBatchFeeder 模式：SKIP LOCKED 认领（停滞 600s 回收）、每 tick �
 
 - 单请求选择上限与 `batch_selection_too_large` 已退役（#1362）；
   `AGENT_LEGION_MAX_BATCH_JOBS` 在 0.8.2 仅打 deprecation warning、不再影响行为。
-  在途执行负载由 backlog 水位约束；任务中心的 pause/cancel 仍是状态机预留，尚无公开
-  控制端点，不把「可取消」当作当前已交付的护栏。
+  在途执行负载由 backlog 水位约束；pause/cancel 只约束后续 chunk 的认领与执行，不是
+  单 job 即时取消协议，也不撤销已提交的逐 job 变更或审批 decision。
 - 前端进度呈现（轮询 + 结果汇总替换一次性 toast）是独立的 UI 变更切片，按 0.8.1 的
   原型先行纪律走用户验收；后端合并不依赖它，但 >1000 选择的 UI 消费需前端跟进
   （202 句柄的轮询接线）。

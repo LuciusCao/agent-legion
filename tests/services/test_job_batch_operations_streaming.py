@@ -227,6 +227,65 @@ def test_stream_crash_after_results_replays_without_reexecuting(
     assert len(_result_ids(job_db, op_id)) == 3
 
 
+def test_pause_does_not_refill_and_resume_keeps_frozen_stream_cursor(
+    workspace: str, job_db: JobQueries, settings: Settings, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "server.app.services.job_batch_operations.service.BATCH_OPS_ASYNC_THRESHOLD", 1
+    )
+    monkeypatch.setattr(
+        "server.app.services.job_batch_operations.feeder.JOB_BATCH_OPS_CHUNK_SIZE", 1
+    )
+    jobs = [_create_job(job_db, workspace, f"P-{index}") for index in range(3)]
+    _, operation = dispatch_batch_selection(
+        job_db, workspace, "pause", None, JobListFilter(), (), {}, "user:tester"
+    )
+    assert operation is not None
+    op_id = str(operation["id"])
+    frozen_spec = str(operation["target_spec_json"])
+    executors = _executors(job_db, settings)
+    calls: list[str] = []
+    original_pause = executors.pause.pause
+
+    def counting_pause(workspace_id: str, job_id: str, *args: Any, **kwargs: Any) -> Any:
+        calls.append(job_id)
+        return original_pause(workspace_id, job_id, *args, **kwargs)
+
+    monkeypatch.setattr(executors.pause, "pause", counting_pause)
+    original_advance = job_db.advance_job_batch_operation
+    advance_calls = 0
+
+    def pause_on_second_advance(op_id: str, **kwargs: Any) -> Any:
+        nonlocal advance_calls
+        advance_calls += 1
+        if advance_calls == 2:
+            job_db.transition_job_batch_operation(
+                op_id, from_statuses=("running",), to_status="paused"
+            )
+        return original_advance(op_id, **kwargs)
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", pause_on_second_advance)
+    feeder = JobBatchOpsFeeder(job_db, settings, executors)
+    assert feeder.consume_once() is True
+    assert feeder.consume_once() is True
+
+    paused = job_db.get_job_batch_operation(op_id)
+    assert paused["status"] == "paused" and paused["next_index"] == 2
+    assert paused["items_total"] == 2
+    assert str(paused["target_spec_json"]) == frozen_spec
+    assert feeder.consume_once() is False
+    assert len(calls) == 2
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", original_advance)
+    job_db.transition_job_batch_operation(op_id, from_statuses=("paused",), to_status="pending")
+    _drain(feeder)
+
+    completed = job_db.get_job_batch_operation(op_id)
+    assert completed["status"] == "completed" and completed["next_index"] == 3
+    assert len(calls) == len(set(calls)) == 3
+    assert set(calls) == {str(job["id"]) for job in jobs}
+
+
 def test_stream_page_failure_marks_operation_failed(
     workspace: str, job_db: JobQueries, settings: Settings, monkeypatch
 ) -> None:

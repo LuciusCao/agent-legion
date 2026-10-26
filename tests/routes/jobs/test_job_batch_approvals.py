@@ -201,6 +201,69 @@ def test_async_filter_uses_operation_id_as_batch_id(client: TestClient, monkeypa
     assert decision["batch_selection"] == "filter"
 
 
+def test_async_approval_pause_resume_does_not_duplicate_decisions(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "server.app.services.job_batch_operations.service.BATCH_OPS_ASYNC_THRESHOLD", 0
+    )
+    monkeypatch.setattr(
+        "server.app.services.job_batch_operations.feeder.JOB_BATCH_OPS_CHUNK_SIZE", 1
+    )
+    ws = _workspace(client)
+    job_ids = [_create_job(client, ws, "pause-a"), _create_job(client, ws, "pause-b")]
+    accepted = client.post(f"/api/workspaces/{ws}/jobs/batch-approve", json={"job_ids": job_ids})
+    assert accepted.status_code == 202, accepted.text
+    op_id = accepted.json()["operation"]["id"]
+    job_db = client.app.state.job_db
+    settings = client.app.state.settings
+    services = JobServices(
+        job_db,
+        settings,
+        WorkspaceExecutionConfigurationService(job_db, settings),
+        None,
+        None,
+    )
+    feeder = JobBatchOpsFeeder(
+        job_db,
+        settings,
+        BatchOpsExecutors(
+            rerun=services.rerun,
+            deletion=services.deletion,
+            execution=services.execution,
+            pause=services.pause,
+            upgrade=services.workflow_upgrade,
+            packages=JobPackageService(job_db, settings),
+            approvals=services.approvals,
+        ),
+    )
+    original_advance = job_db.advance_job_batch_operation
+
+    def pause_before_advance(op_id: str, **kwargs: Any) -> Any:
+        job_db.transition_job_batch_operation(op_id, from_statuses=("running",), to_status="paused")
+        return original_advance(op_id, **kwargs)
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", pause_before_advance)
+    assert feeder.consume_once() is True
+    decisions_url = f"/api/workspaces/{ws}/jobs/{{job_id}}/approvals"
+    assert len(client.get(decisions_url.format(job_id=job_ids[0])).json()["decisions"]) == 1
+    assert client.get(decisions_url.format(job_id=job_ids[1])).json()["decisions"] == []
+    assert feeder.consume_once() is False
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", original_advance)
+    resumed = client.post(f"/api/workspaces/{ws}/job-batch-operations/{op_id}/resume")
+    assert resumed.status_code == 200, resumed.text
+    _drain(client)
+
+    for job_id in job_ids:
+        decisions = client.get(decisions_url.format(job_id=job_id)).json()["decisions"]
+        assert len(decisions) == 1
+        assert decisions[0]["batch_id"] == op_id
+    operation = client.get(f"/api/workspaces/{ws}/job-batch-operations/{op_id}").json()
+    assert operation["status"] == "completed"
+    assert operation["processed_count"] == operation["succeeded_count"] == 2
+
+
 def test_batch_approval_selection_and_auth_validation(
     client: TestClient, anon_client: TestClient
 ) -> None:

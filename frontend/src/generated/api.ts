@@ -2042,6 +2042,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/cancel': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Cancel Batch Operation */
+    post: operations['cancel_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__cancel_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/pause': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Pause Batch Operation */
+    post: operations['pause_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__pause_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/results': {
     parameters: {
       query?: never
@@ -2053,6 +2087,23 @@ export interface paths {
     get: operations['list_job_batch_operation_results_api_workspaces__workspace_id__job_batch_operations__op_id__results_get']
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/resume': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Resume Batch Operation */
+    post: operations['resume_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__resume_post']
     delete?: never
     options?: never
     head?: never
@@ -13603,6 +13654,70 @@ export interface operations {
       }
     }
   }
+  cancel_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__cancel_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        op_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  pause_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__pause_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        op_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   list_job_batch_operation_results_api_workspaces__workspace_id__job_batch_operations__op_id__results_get: {
     parameters: {
       query?: {
@@ -13625,6 +13740,38 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['JobBatchOperationResultsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  resume_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__resume_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        op_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationResponse']
         }
       }
       /** @description Validation Error */

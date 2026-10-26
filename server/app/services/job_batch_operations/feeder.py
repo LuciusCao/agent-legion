@@ -152,9 +152,10 @@ class JobBatchOpsFeeder:
             # run twice, so reuse the already-stored output when present.
             fresh = self.job_db.get_job_batch_operation(op_id)
             existing = json.loads(str(fresh["output_json"] or "{}")) if fresh else {}
-            output = existing or run_completion(
-                self.executors, self.job_db, workspace_id, kind, op_id
-            )
+            if existing:
+                output = existing
+            elif fresh is not None and fresh["status"] == "running":
+                output = run_completion(self.executors, self.job_db, workspace_id, kind, op_id)
 
         counts = self.job_db.count_job_batch_operation_results(op_id)
         error_message = "; ".join(
@@ -172,9 +173,18 @@ class JobBatchOpsFeeder:
             items_total=items_total,
         )
         if advanced is None:
-            # Pause/cancel landed mid-chunk (reserved control plane; the CAS
-            # keeps operator intent over feeder progress, run feeder parity).
-            return True
+            current = self.job_db.get_job_batch_operation(op_id)
+            if current is not None and current["status"] in ("paused", "cancelled"):
+                self.job_db.record_interrupted_job_batch_operation(
+                    op_id,
+                    next_index=end,
+                    counts=counts,
+                    chunk_errors=chunk_errors,
+                    error_message=error_message,
+                    output=output,
+                    target_spec=payload if spec_changed else None,
+                    items_total=items_total,
+                )
         return True
 
     @staticmethod
