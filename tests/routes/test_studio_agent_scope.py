@@ -102,6 +102,9 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     # M61 task-center manual archive: idempotent user write on the batch-op
     # card, guarded like every other effecting workspace write.
     ("POST", "/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/archive", None),
+    ("POST", "/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/pause", None),
+    ("POST", "/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/resume", None),
+    ("POST", "/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/cancel", None),
     # #1358 retry-failed requeue: effecting write (enqueues a new operation),
     # router-level reject_studio_agent_scope like archive.
     ("POST", "/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/retry-failed", None),

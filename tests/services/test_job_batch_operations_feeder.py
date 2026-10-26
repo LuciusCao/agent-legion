@@ -464,3 +464,248 @@ def test_stale_running_claim_is_reclaimed(workspace, job_db, settings) -> None:
 
     assert job_db.get_job_batch_operation(op_id)["status"] == "completed"
     assert job_db.get_job(str(job["id"]))["execution_paused"]
+
+
+def test_pause_mid_chunk_commits_cursor_and_resume_does_not_reexecute(
+    workspace, job_db, settings, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "server.app.services.job_batch_operations.feeder.JOB_BATCH_OPS_CHUNK_SIZE", 1
+    )
+    jobs = [_create_job(job_db, WORKSPACE, f"PC-{index}") for index in range(3)]
+    ids = [str(job["id"]) for job in jobs]
+    op_id = _submit(job_db, "pause", ids)
+    executors = _executors(job_db, settings)
+    calls: list[str] = []
+    original_pause = executors.pause.pause
+
+    def counting_pause(workspace_id: str, job_id: str, *args: Any, **kwargs: Any) -> Any:
+        calls.append(job_id)
+        return original_pause(workspace_id, job_id, *args, **kwargs)
+
+    monkeypatch.setattr(executors.pause, "pause", counting_pause)
+    original_advance = job_db.advance_job_batch_operation
+
+    def pause_before_advance(op_id: str, **kwargs: Any) -> Any:
+        job_db.transition_job_batch_operation(op_id, from_statuses=("running",), to_status="paused")
+        return original_advance(op_id, **kwargs)
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", pause_before_advance)
+    feeder = JobBatchOpsFeeder(job_db, settings, executors)
+    assert feeder.consume_once() is True
+
+    paused = job_db.get_job_batch_operation(op_id)
+    assert paused["status"] == "paused"
+    assert paused["next_index"] == 1
+    assert paused["succeeded_count"] == 1
+    assert paused["finished_at"] is None
+    assert calls == [ids[0]]
+    assert feeder.consume_once() is False
+    assert job_db.get_job_batch_operation(op_id)["next_index"] == 1
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", original_advance)
+    job_db.transition_job_batch_operation(op_id, from_statuses=("paused",), to_status="pending")
+    _drain(feeder)
+
+    completed = job_db.get_job_batch_operation(op_id)
+    assert completed["status"] == "completed"
+    assert completed["next_index"] == 3
+    assert completed["succeeded_count"] == 3
+    assert calls == ids
+    assert len(job_db.list_job_batch_operation_results_page(op_id, limit=10)) == 3
+
+
+def test_cancel_mid_chunk_preserves_committed_results_and_stops(
+    workspace, job_db, settings, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "server.app.services.job_batch_operations.feeder.JOB_BATCH_OPS_CHUNK_SIZE", 1
+    )
+    jobs = [_create_job(job_db, WORKSPACE, f"CC-{index}") for index in range(3)]
+    ids = [str(job["id"]) for job in jobs]
+    op_id = _submit(job_db, "pause", ids)
+    original_advance = job_db.advance_job_batch_operation
+
+    def cancel_before_advance(op_id: str, **kwargs: Any) -> Any:
+        job_db.transition_job_batch_operation(
+            op_id, from_statuses=("running",), to_status="cancelled"
+        )
+        return original_advance(op_id, **kwargs)
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", cancel_before_advance)
+    feeder = _feeder(job_db, settings)
+    assert feeder.consume_once() is True
+    cancelled_at = job_db.get_job_batch_operation(op_id)["finished_at"]
+    assert feeder.consume_once() is False
+
+    cancelled = job_db.get_job_batch_operation(op_id)
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["next_index"] == 1
+    assert cancelled["succeeded_count"] == 1
+    assert cancelled["finished_at"] == cancelled_at
+    results = job_db.list_job_batch_operation_results_page(op_id, limit=10)
+    assert [int(row["seq"]) for row in results] == [0]
+    assert not job_db.get_job(ids[1])["execution_paused"]
+
+
+def test_quick_resume_misses_interrupted_bookkeeping_and_replays_done_seqs(
+    workspace, job_db, settings, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "server.app.services.job_batch_operations.feeder.JOB_BATCH_OPS_CHUNK_SIZE", 1
+    )
+    jobs = [_create_job(job_db, WORKSPACE, f"QR-{index}") for index in range(2)]
+    ids = [str(job["id"]) for job in jobs]
+    op_id = _submit(job_db, "pause", ids)
+    executors = _executors(job_db, settings)
+    calls: list[str] = []
+    original_pause = executors.pause.pause
+
+    def counting_pause(workspace_id: str, job_id: str, *args: Any, **kwargs: Any) -> Any:
+        calls.append(job_id)
+        return original_pause(workspace_id, job_id, *args, **kwargs)
+
+    monkeypatch.setattr(executors.pause, "pause", counting_pause)
+    original_advance = job_db.advance_job_batch_operation
+
+    def pause_and_resume_before_advance(op_id: str, **kwargs: Any) -> Any:
+        job_db.transition_job_batch_operation(op_id, from_statuses=("running",), to_status="paused")
+        job_db.transition_job_batch_operation(op_id, from_statuses=("paused",), to_status="pending")
+        return original_advance(op_id, **kwargs)
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", pause_and_resume_before_advance)
+    feeder = JobBatchOpsFeeder(job_db, settings, executors)
+    assert feeder.consume_once() is True
+    pending = job_db.get_job_batch_operation(op_id)
+    assert pending["status"] == "pending" and pending["next_index"] == 0
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", original_advance)
+    _drain(feeder)
+
+    completed = job_db.get_job_batch_operation(op_id)
+    assert completed["status"] == "completed" and completed["next_index"] == 2
+    assert calls == ids
+    assert len(job_db.list_job_batch_operation_results_page(op_id, limit=10)) == 2
+
+
+def test_interrupted_bookkeeping_rejects_pending_operation(workspace, job_db) -> None:
+    op_id = _submit(job_db, "pause", ["job-1"])
+
+    updated = job_db.record_interrupted_job_batch_operation(
+        op_id,
+        next_index=1,
+        counts={"succeeded": 1},
+        chunk_errors=[],
+        error_message="",
+        output={"unexpected": True},
+    )
+
+    assert updated is None
+    pending = job_db.get_job_batch_operation(op_id)
+    assert pending["status"] == "pending"
+    assert pending["next_index"] == pending["succeeded_count"] == 0
+    assert json.loads(pending["output_json"]) == {}
+    assert pending["finished_at"] is None
+
+
+def test_quick_resume_reuses_package_completion_output(
+    workspace, job_db, settings, monkeypatch
+) -> None:
+    job = _create_job(job_db, WORKSPACE, "QR-package", status="completed")
+    job_dir = resolve_job_dir(job, settings.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "question_context.json").write_text('{"question_id":"QR-package"}', encoding="utf-8")
+    op_id = _submit(job_db, "package", [str(job["id"])])
+    executors = _executors(job_db, settings)
+    original_package = executors.packages.package_eligible_jobs
+    package_calls = 0
+
+    def counting_package(*args: Any, **kwargs: Any) -> Any:
+        nonlocal package_calls
+        package_calls += 1
+        return original_package(*args, **kwargs)
+
+    monkeypatch.setattr(executors.packages, "package_eligible_jobs", counting_package)
+    original_advance = job_db.advance_job_batch_operation
+
+    def pause_and_resume_before_advance(op_id: str, **kwargs: Any) -> Any:
+        assert kwargs["output"]["package_filename"].endswith(".zip")
+        job_db.transition_job_batch_operation(op_id, from_statuses=("running",), to_status="paused")
+        job_db.transition_job_batch_operation(op_id, from_statuses=("paused",), to_status="pending")
+        return original_advance(op_id, **kwargs)
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", pause_and_resume_before_advance)
+    feeder = JobBatchOpsFeeder(job_db, settings, executors)
+    assert feeder.consume_once() is True
+    assert package_calls == 1
+    pending_output = json.loads(job_db.get_job_batch_operation(op_id)["output_json"])
+    assert pending_output["package_filename"].endswith(".zip")
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", original_advance)
+    _drain(feeder)
+
+    completed = job_db.get_job_batch_operation(op_id)
+    assert completed["status"] == "completed"
+    assert json.loads(completed["output_json"])["package_filename"].endswith(".zip")
+    assert package_calls == 1
+    assert len(job_db.list_workspace_packages(WORKSPACE, limit=10)) == 1
+
+
+def test_cancel_before_package_completion_does_not_start_zip(
+    workspace, job_db, settings, monkeypatch
+) -> None:
+    job = _create_job(job_db, WORKSPACE, "PC-before", status="completed")
+    op_id = _submit(job_db, "package", [str(job["id"])])
+    original_get = job_db.get_job_batch_operation
+
+    def cancel_before_completion(op_id: str) -> Any:
+        current = original_get(op_id)
+        if current["status"] == "running":
+            current = job_db.transition_job_batch_operation(
+                op_id, from_statuses=("running",), to_status="cancelled"
+            )
+        return current
+
+    def completion_must_not_run(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("package completion started after cancellation")
+
+    monkeypatch.setattr(job_db, "get_job_batch_operation", cancel_before_completion)
+    monkeypatch.setattr(
+        "server.app.services.job_batch_operations.feeder.run_completion", completion_must_not_run
+    )
+    assert _feeder(job_db, settings).consume_once() is True
+
+    cancelled = original_get(op_id)
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["next_index"] == cancelled["succeeded_count"] == 1
+    assert json.loads(cancelled["output_json"]) == {}
+    assert job_db.list_workspace_packages(WORKSPACE, limit=10) == []
+
+
+def test_package_completion_racing_cancel_keeps_output_and_cancelled_status(
+    workspace, job_db, settings, monkeypatch
+) -> None:
+    job = _create_job(job_db, WORKSPACE, "PC-package", status="completed")
+    job_dir = resolve_job_dir(job, settings.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "question_context.json").write_text('{"question_id":"PC-package"}', encoding="utf-8")
+    op_id = _submit(job_db, "package", [str(job["id"])])
+    original_advance = job_db.advance_job_batch_operation
+
+    def cancel_before_advance(op_id: str, **kwargs: Any) -> Any:
+        assert kwargs["output"]["package_filename"].endswith(".zip")
+        job_db.transition_job_batch_operation(
+            op_id, from_statuses=("running",), to_status="cancelled"
+        )
+        return original_advance(op_id, **kwargs)
+
+    monkeypatch.setattr(job_db, "advance_job_batch_operation", cancel_before_advance)
+    assert _feeder(job_db, settings).consume_once() is True
+
+    cancelled = job_db.get_job_batch_operation(op_id)
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["next_index"] == 1
+    assert cancelled["succeeded_count"] == 1
+    assert json.loads(cancelled["output_json"])["package_filename"].endswith(".zip")
+    assert cancelled["finished_at"] is not None
+    assert len(job_db.list_workspace_packages(WORKSPACE, limit=10)) == 1

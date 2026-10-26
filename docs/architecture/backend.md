@@ -164,6 +164,9 @@ server/app/
 | POST | `/workspaces/{workspace_id}/jobs/batch-reject` | `batch_reject` | routes/job_batch_approval.py |
 | GET | `/workspaces/{workspace_id}/job-batch-operations/{op_id}` | `get_job_batch_operation` | routes/job_batch_operations.py |
 | GET | `/workspaces/{workspace_id}/job-batch-operations/{op_id}/results` | `list_job_batch_operation_results` | routes/job_batch_operations.py |
+| POST | `/workspaces/{workspace_id}/job-batch-operations/{op_id}/pause` | `pause_batch_operation` | routes/job_batch_operations_control.py |
+| POST | `/workspaces/{workspace_id}/job-batch-operations/{op_id}/resume` | `resume_batch_operation` | routes/job_batch_operations_control.py |
+| POST | `/workspaces/{workspace_id}/job-batch-operations/{op_id}/cancel` | `cancel_batch_operation` | routes/job_batch_operations_control.py |
 | GET | `/workspaces/{workspace_id}/job-batch-operations` | `list_job_batch_operations` | routes/job_batch_operations_listing.py |
 | POST | `/workspaces/{workspace_id}/job-batch-operations/{op_id}/archive` | `archive_job_batch_operation` | routes/job_batch_operations_listing.py |
 | POST | `/workspaces/{workspace_id}/job-batch-operations/{op_id}/retry-failed` | `retry_failed_batch_operation` | routes/job_batch_operations_retry.py |

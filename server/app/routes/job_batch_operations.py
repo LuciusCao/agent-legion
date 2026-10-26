@@ -178,4 +178,10 @@ def create_job_batch_operations_router(job_db: JobQueries) -> APIRouter:
 
     router.include_router(create_job_batch_operations_listing_router(job_db))
 
+    from server.app.routes.job_batch_operations_control import (
+        create_job_batch_operations_control_router,
+    )
+
+    router.include_router(create_job_batch_operations_control_router(job_db))
+
     return router

@@ -6,6 +6,11 @@ the sync per-job semantics through the same service entry points. Design:
 docs/architecture/batch-ops-async.md.
 """
 
+from server.app.services.job_batch_operations.control import (
+    cancel_job_batch_operation,
+    pause_job_batch_operation,
+    resume_job_batch_operation,
+)
 from server.app.services.job_batch_operations.feeder import (
     JOB_BATCH_OPS_CHUNK_SIZE,
     JobBatchOpsFeeder,
@@ -36,10 +41,13 @@ __all__ = [
     "RETRYABLE_KINDS",
     "BatchOpsExecutors",
     "JobBatchOpsFeeder",
+    "cancel_job_batch_operation",
     "dispatch_batch_selection",
     "dispatch_rerun_by_failure",
     "get_operation_for_workspace",
     "operation_record",
+    "pause_job_batch_operation",
+    "resume_job_batch_operation",
     "should_enqueue",
     "submit_operation",
     "submit_operation_if_large",

@@ -139,6 +139,7 @@
     "tests/routes/test_demo_workflow_republish.py",
     "tests/routes/test_infra_connections_routes.py",
     "tests/routes/test_job_batch_operations.py",
+    "tests/routes/test_job_batch_operations_control.py",
     "tests/routes/test_jobs_route_contracts.py",
     "tests/routes/test_metrics.py",
     "tests/routes/test_misc.py",
