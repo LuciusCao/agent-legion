@@ -118,13 +118,130 @@ The static round stays fully parallel (lint/typecheck are light), and the
 `test` round inside `check-quick-frontend.sh`/`run_rust_round` lanes is
 unaffected when invoked standalone.
 
-The smoke tier (`GATE_TIER=smoke`) replaces the backend pytest lane with a
-curated subset — every architecture governance test plus one core behavioral
-file per subsystem, listed in `config/architecture/smoke-test-files.json`
-(loaded by `tests/conftest.py`) and selected with `-m "smoke"`.
-It runs without coverage because the 85% floor only applies to the full
-suite. Keep the tier under ~90 seconds: when adding tests for a new
-subsystem, add one core file to the smoke set rather than raising the budget.
+The smoke tier (`GATE_TIER=smoke`) replaces only the backend **pytest**
+selection with a curated subset. The backend/frontend/Rust static rounds,
+worker UI tests, OpenAPI contract check, frontend tests and Rust tests still
+run; smoke is not a docs-only or backend-only gate. Backend smoke runs without
+coverage because the 85% floor only applies to the full suite. The ~90-second
+soft target applies to the curated backend pytest invocation, **not** to the
+complete gate's wall time.
+
+`tests/conftest.py` marks a collected test as smoke when its path is in
+`config/architecture/smoke-test-files.json` or its basename starts with
+`test_architecture_`; pytest then selects those items with `-m "smoke"`. At
+SHA `dfd129c1399a2a40662fd7d3b45a0188e3410b72`, the manifest's behavioral
+files are:
+
+- `tests/db/test_retry.py`
+- `tests/executors/leases/test_claim_basics.py`
+- `tests/executors/test_shard_contract.py`
+- `tests/routes/jobs/test_job_lifecycle.py`
+- `tests/routes/test_auth_routes.py`
+- `tests/services/test_vault.py`
+- `tests/workflows/test_sharding.py`
+
+When adding coverage for a new subsystem, prefer one core behavioral file in
+the manifest over weakening the backend smoke time target. Membership changes
+must be reviewed against the actual selection rather than assuming that the
+manifest alone lists every smoke test.
+
+### Measured local smoke: one cold/warm pair
+
+These are observed samples from 2026-10-26, not an SLA or a promised expected
+time. The base was `dfd129c1399a2a40662fd7d3b45a0188e3410b72` plus the
+documentation-only edits for this guide; no source or gate logic changed. The
+host was a Mac16,12 (10 cores, 24 GiB) running macOS 15.6, uv 0.11.21, Node
+26.3.0 and cargo 1.98.0. Pytest used eight xdist workers and Vitest used four
+workers. Backend coverage was off in both runs.
+
+Before the cold run, `scripts/init-worktree.sh` had pre-warmed `.uv-cache`;
+`./scripts/ensure-frontend-deps.sh` installed `frontend/node_modules` in
+15.11s. Cold means `.venv` and `velites/target` were absent (remove only those
+disposable directories in a private timing worktree, never a shared checkout),
+with the initialized uv cache and frontend dependencies retained. Warm means
+an immediate rerun in the same worktree without cleanup. Both complete runs
+used:
+
+```bash
+/usr/bin/time -p env \
+  GATE_LANES="backend frontend rust" GATE_TIER=smoke \
+  AGENT_LEGION_GATE_OUTPUT_LINES=0 \
+  PYTEST_ADDOPTS="--durations=10 --junitxml=/tmp/smoke-backend-junit.xml" \
+  ./scripts/check-quick.sh
+```
+
+The machine-wide queue was at its default of one. Neither measured complete
+run waited for a slot; the independent lane measurements for CONTRIBUTING
+likewise exclude any announced queue wait and use the gate's execution timer.
+`/usr/bin/time` supplies total wall time, pytest/Vitest supply their own test time, and
+one-second process samples delimit the other warm phases. Static lanes and the
+frontend/Rust test lanes overlap, so phase rows do not sum to total wall time.
+
+| Step | Cold | Warm |
+| --- | ---: | ---: |
+| Frontend dependency setup (`npm ci`, outside gate) | 15.11s | not rerun |
+| Backend static lane | not separately recorded | 49s |
+| Frontend static lane | not separately recorded | 50s |
+| OpenAPI contract step | not separately recorded | 5s |
+| Backend test phase (worker UI + curated pytest) | not separately recorded | 85s |
+| Backend curated pytest alone (642 tests, no coverage) | 447.07s | 80.74s |
+| Frontend Vitest (3,308 tests) | 1,268.00s | 519.30s |
+| Complete smoke gate (`/usr/bin/time`) | 2,105.90s | 667.03s |
+
+Cold Rust static compilation reported 2m59s; the warm Rust test command's
+compilation stage reported 0.56s before its test binaries ran. Those are stage
+times, not complete Rust-lane times; use the independently measured lane table
+in CONTRIBUTING for the latter. The cold run passed all lanes, as did the warm
+run. Cold backend pytest exceeded the ~90-second soft target and warm backend
+pytest met it; neither result says anything about the complete gate meeting
+that target.
+
+This is one machine, one pair of runs, with diagnostic process sampling and
+uncontrolled unrelated host load. It is not a controlled benchmark or a
+confidence interval. Unrecorded phases are unknown, not zero. Reuse the
+commands to obtain a new local sample instead of treating these numbers as a
+budget; CI full-unit/PostgreSQL telemetry measures a different tier and was
+not substituted for these smoke results.
+
+### Smoke slow-test attribution
+
+The warm sample's `--durations=10` report separates fixture costs from test
+bodies. Class A is the session-scoped `real_repo_check_errors` full-repository
+scan running once in each of two xdist workers (filesystem checks plus
+Git/helper subprocesses, not a fixed-sleep test). Class B is the
+per-xdist-worker PostgreSQL session schema rebuild charged to that worker's
+first database test. Class C is a private `create_app` + `TestClient` and
+several database-backed API requests; these four call-phase test bodies have
+no fixed-sleep or explicit external-subprocess call (the `pi` argv in one test
+is stored as data, not run). JUnit's combined case time is a different metric and
+must not be substituted for this phase breakdown.
+
+| Rank | Pytest nodeid | Phase/time | Class |
+| ---: | --- | ---: | --- |
+| 1 | `tests/scripts/test_architecture_video_legacy.py::test_video_legacy_current_repository_has_no_errors` | setup 56.43s | A |
+| 2 | `tests/scripts/test_architecture_phase6.py::test_phase6_current_repository_has_no_errors` | setup 54.19s | A |
+| 3 | `tests/executors/leases/test_claim_basics.py::test_two_workers_claim_one_node_only_one_succeeds` | setup 6.47s | B |
+| 4 | `tests/routes/test_auth_routes.py::test_bootstrap_only_available_for_first_user` | setup 5.27s | B |
+| 5 | `tests/routes/jobs/test_job_lifecycle.py::test_job_detail_includes_node_inputs_outputs` | call 5.18s | C |
+| 6 | `tests/routes/jobs/test_job_lifecycle.py::test_job_detail_includes_pi_run_trace` | call 4.80s | C |
+| 7 | `tests/workflows/test_sharding.py::test_aggregate_all_pending` | setup 4.26s | B |
+| 8 | `tests/routes/jobs/test_job_lifecycle.py::test_job_detail_includes_pi_run_trace` | setup 3.93s | B |
+| 9 | `tests/routes/jobs/test_job_lifecycle.py::test_list_workspace_runs_filters_by_status_and_node` | call 3.89s | C |
+| 10 | `tests/routes/jobs/test_job_lifecycle.py::test_get_job_detail_and_artifact_when_enabled` | call 3.87s | C |
+
+For class A, run the real-repository assertion once outside xdist or share
+its immutable scan result across workers; keep the fast temporary-repository
+cases in smoke. For class B, profile and reduce shared schema initialization
+(or safely share its immutable setup) before changing test selection. For
+class C, profile app construction, authentication and request seeding before
+reusing more app state; do not trade away the isolation that these private-app
+tests rely on. None should be marked `slow` or moved out of smoke merely from
+this single sample. Re-measure phase durations after any optimization.
+
+The cold top10 contained only setup entries: class A dominated at 196.05s and
+195.36s, while eight class-B entries ranged from 38.63s to 62.74s. That is
+consistent with cold filesystem and schema initialization, not with ten
+newly discovered sleep-dependent test bodies.
 
 The unit tier (`GATE_TIER=unit`) runs the complete PostgreSQL-offline unit
 layer, selected with `-m "not postgres"` against an
