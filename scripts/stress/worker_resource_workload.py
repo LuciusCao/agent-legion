@@ -48,6 +48,7 @@ from scripts.stress.worker_resource_identity import (  # noqa: E402
 )
 from scripts.stress.worker_resource_measurement import (  # noqa: E402
     CgroupSampler,
+    report_sample_counts,
     sanitize_log_text,
 )
 from scripts.stress.worker_resource_reporting import write_sanitized_logs  # noqa: E402
@@ -669,11 +670,7 @@ class MeasurementRun:
                 if errors:
                     result["success"] = False
                     result["error"] = f"sampling failed: {errors}"
-                result["sample_counts"] = (
-                    summary["groups"]
-                    .get(f"{iteration}/idle-registered", {})
-                    .get("sample_counts", {})
-                )
+                result["sample_counts"] = report_sample_counts(summary)
             try:
                 write_sanitized_logs(self, iteration_dir)
             except (OSError, subprocess.CalledProcessError) as exc:

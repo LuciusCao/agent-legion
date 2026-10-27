@@ -169,6 +169,12 @@ def summarize_samples(samples: Iterable[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def report_sample_counts(summary: dict[str, Any]) -> dict[str, int]:
+    """Total iteration counts, sourced from summary's all/all aggregate."""
+    counts = summary.get("groups", {}).get("all/all", {}).get("sample_counts", {})
+    return {"memory": int(counts.get("memory", 0)), "pids": int(counts.get("pids", 0))}
+
+
 class CgroupSampler:
     """Independent memory/pids writers with scenario markers and raw JSONL retention."""
 

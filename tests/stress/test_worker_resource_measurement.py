@@ -27,6 +27,7 @@ from scripts.stress.worker_resource_measurement import (
     CgroupV2Reader,
     discover_cgroup_v2,
     percentile_95,
+    report_sample_counts,
     sanitize_log_text,
     summarize_samples,
 )
@@ -144,6 +145,17 @@ def test_summary_unlimited_headroom_is_null_not_a_default() -> None:
     assert group["memory"]["headroom_max_bytes"] is None
     assert group["pids"]["headroom_max"] is None
     assert result["recommended_limits"] is None
+
+
+def test_outer_sample_counts_match_all_all_not_idle_subset() -> None:
+    summary = {
+        "groups": {
+            "all/all": {"sample_counts": {"memory": 28, "pids": 132}},
+            "cold-1/idle-registered": {"sample_counts": {"memory": 0, "pids": 2}},
+        }
+    }
+    assert report_sample_counts(summary) == {"memory": 28, "pids": 132}
+    assert report_sample_counts({"groups": {}}) == {"memory": 0, "pids": 0}
 
 
 def test_sampler_retains_raw_samples_and_scenario_markers(tmp_path: Path) -> None:
