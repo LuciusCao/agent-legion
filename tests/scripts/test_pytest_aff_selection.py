@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import sqlite3
+import subprocess
 
 import pytest
 
@@ -388,3 +389,50 @@ def test_tracked_route_without_coverage_still_forces_full_fallback():
 
     assert unmapped_source_files(changed, {}, repo_root=root) == changed
     assert select_affected_tests(changed, {}, repo_root=root) == []
+
+
+def _git(repo: pathlib.Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _commit_all(repo: pathlib.Path, message: str) -> None:
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", message)
+
+
+@pytest.mark.parametrize("state", ["committed_clean", "uncommitted", "mixed"])
+def test_changed_source_files_parses_real_git_output_by_command(tmp_path, monkeypatch, state):
+    _git(tmp_path, "init")
+    _git(tmp_path, "config", "user.email", "aff@example.test")
+    _git(tmp_path, "config", "user.name", "Aff Test")
+    source = tmp_path / "server" / "app" / "settings.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("INITIAL = True\n", encoding="utf-8")
+    _commit_all(tmp_path, "initial")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    source.write_text("INITIAL = False\n", encoding="utf-8")
+
+    expected = ["server/app/settings.py"]
+    if state in ("committed_clean", "mixed"):
+        _commit_all(tmp_path, "committed backend change")
+    if state in ("uncommitted", "mixed"):
+        staged = tmp_path / "server" / "app" / "staged.py"
+        staged.write_text("STAGED = True\n", encoding="utf-8")
+        _git(tmp_path, "add", "server/app/staged.py")
+        untracked = tmp_path / "server" / "app" / "untracked.py"
+        untracked.write_text("UNTRACKED = True\n", encoding="utf-8")
+        expected.extend(["server/app/staged.py", "server/app/untracked.py"])
+    monkeypatch.setattr(aff_selection, "REPO_ROOT", tmp_path)
+
+    changed = aff_selection.changed_source_files(None if state == "uncommitted" else base)
+
+    assert changed == sorted(expected)
+    test_file = tmp_path / "tests" / "test_aff.py"
+    test_file.parent.mkdir()
+    test_file.write_text("def test_changed():\n    pass\n", encoding="utf-8")
+    mapping = {path: ["tests/test_aff.py::test_changed"] for path in expected}
+    assert select_affected_tests(changed, mapping, repo_root=tmp_path) == [
+        "tests/test_aff.py::test_changed"
+    ]
