@@ -94,6 +94,9 @@ services:
         condition: service_healthy
     security_opt:
       - seccomp:unconfined
+      # Measurement-only: Ubuntu's default AppArmor profile can deny bwrap's
+      # mount propagation; production keeps the Docker default profile.
+      - ${MEASUREMENT_APPARMOR:-apparmor:unconfined}
     cap_add:
       - SYS_ADMIN
       # Default repeats SYS_ADMIN (no new privilege). Desktop functional runs

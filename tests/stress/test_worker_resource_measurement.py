@@ -250,7 +250,10 @@ def test_measurement_compose_preserves_shipped_envelope_without_new_limits() -> 
     )
     worker = document["services"]["worker"]
     assert worker["cap_add"] == ["SYS_ADMIN", "${MEASUREMENT_NET_ADMIN:-SYS_ADMIN}"]
-    assert worker["security_opt"] == ["seccomp:unconfined"]
+    assert worker["security_opt"] == [
+        "seccomp:unconfined",
+        "${MEASUREMENT_APPARMOR:-apparmor:unconfined}",
+    ]
     assert "mem_limit" not in worker
     assert "pids_limit" not in worker
     assert "env_file" not in worker
@@ -264,6 +267,7 @@ def test_measurement_compose_preserves_shipped_envelope_without_new_limits() -> 
     assert "safe.directory" not in startup
     production = yaml.safe_load((ROOT / "deploy/compose.worker.yaml").read_text(encoding="utf-8"))
     assert production["services"]["worker"]["cap_add"] == ["SYS_ADMIN"]
+    assert production["services"]["worker"]["security_opt"] == ["seccomp:unconfined"]
     assert "--no-sandbox" not in yaml.safe_dump(document)
 
 

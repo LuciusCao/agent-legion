@@ -38,6 +38,7 @@ from scripts.stress.worker_resource_desktop import (  # noqa: E402
 from scripts.stress.worker_resource_evidence import (  # noqa: E402
     ensure_measurement_bucket,
     measure_upload_backlog,
+    require_sandbox_ready,
     write_iteration_metadata,
 )
 from scripts.stress.worker_resource_identity import (  # noqa: E402
@@ -580,6 +581,7 @@ class MeasurementRun:
             self._wait_http(f"{self.host_url}/api/health")
             session = ensure_admin_session(self.host_url)
             self.compose("up", "-d", "worker")
+            require_sandbox_ready(self)
             container = self.compose("ps", "-q", "worker", capture=True)
             pid = int(
                 subprocess.run(

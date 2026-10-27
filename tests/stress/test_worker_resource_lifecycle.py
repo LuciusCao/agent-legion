@@ -362,6 +362,23 @@ def test_outer_finalization_counts_match_result_run_report_summary_and_raw(
     )
 
     reports = [run.run_iteration("cold", 1), run.run_iteration("warm", 1)]
+    preflight = (
+        "exec",
+        "-T",
+        "worker",
+        "/app/data/bin/velites",
+        "sandbox",
+        "wrap",
+        "--cwd",
+        "/tmp",
+        "--",
+        "/bin/true",
+    )
+    assert (
+        events.index(("up", "-d", "worker"))
+        < events.index(preflight)
+        < events.index(("ps", "-q", "worker"))
+    )
     assert claim_previous[1] is pending_response["status"]
     assert claim_previous[5] is pending_response["status"]
     outer = finalize_measurement_run(run, run.output_dir, reports, write_run_report)
@@ -550,6 +567,7 @@ def test_workflow_dispatch_and_pr_inputs_reach_real_parser() -> None:
     assert custom.pids_interval_ms == 125
     assert custom.memory_interval_ms == 750
     assert document["jobs"]["measure"]["env"]["MEASUREMENT_NET_ADMIN"] == "NET_ADMIN"
+    assert document["jobs"]["measure"]["env"]["MEASUREMENT_APPARMOR"] == "apparmor:unconfined"
     assert document["permissions"] == {"contents": "read"}
     assert len(document["jobs"]["measure"]["strategy"]["matrix"]["include"]) == 3
     assert "ubuntu-24.04" in source
@@ -557,3 +575,31 @@ def test_workflow_dispatch_and_pr_inputs_reach_real_parser() -> None:
     assert "data/worker-resource-measurement/work" not in source
     assert "secrets." not in source
     assert "workflow_run" not in source
+
+
+def test_metadata_distinguishes_measurement_apparmor_from_shipped_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.stress import worker_resource_evidence as evidence
+
+    monkeypatch.setattr(evidence, "collect_host_metadata", lambda *_args: {})
+    models = tmp_path / "models.json"
+    models.write_text("{}", encoding="utf-8")
+    run = SimpleNamespace(
+        env={"MEASUREMENT_APPARMOR": "apparmor:unconfined"},
+        velites=tmp_path / "velites",
+        models_path=models,
+        args=SimpleNamespace(
+            agent_concurrency=1,
+            code_concurrency=1,
+            upload_concurrency=1,
+            jobs_per_wave=2,
+            artifact_chars=1,
+            pids_interval_ms=100,
+            memory_interval_ms=500,
+        ),
+    )
+    evidence.write_iteration_metadata(run, tmp_path, "cold-1", "container")
+    measurement = json.loads((tmp_path / "metadata.json").read_text())["measurement"]
+    assert measurement["shipped_apparmor"] == "docker-default"
+    assert measurement["functional_apparmor_override"] == "apparmor:unconfined"

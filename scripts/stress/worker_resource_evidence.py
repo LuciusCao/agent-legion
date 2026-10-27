@@ -126,6 +126,21 @@ def measure_upload_backlog(
     return result
 
 
+def require_sandbox_ready(run: Any) -> None:
+    run.compose(
+        "exec",
+        "-T",
+        "worker",
+        "/app/data/bin/velites",
+        "sandbox",
+        "wrap",
+        "--cwd",
+        "/tmp",
+        "--",
+        "/bin/true",
+    )
+
+
 def ensure_measurement_bucket(run: Any) -> None:
     env = run.env | {
         "AGENT_LEGION_S3_ENDPOINT": f"http://127.0.0.1:{run.args.s3_port}",
@@ -159,6 +174,8 @@ def write_iteration_metadata(run: Any, iteration_dir: Path, iteration: str, cont
             "pids_limit": None,
         },
         "functional_cap_override": run.env.get("MEASUREMENT_NET_ADMIN", "SYS_ADMIN"),
+        "functional_apparmor_override": run.env.get("MEASUREMENT_APPARMOR", "apparmor:unconfined"),
+        "shipped_apparmor": "docker-default",
         "envelope_not_a_production_recommendation": True,
         "agent_concurrency": run.args.agent_concurrency,
         "code_concurrency": run.args.code_concurrency,

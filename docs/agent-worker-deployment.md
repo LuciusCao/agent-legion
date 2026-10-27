@@ -513,6 +513,8 @@ Host 支持容器只在启动阶段以 root 安装 git 并初始化 `host-data` 
 
 原生测量 workflow 显式设置 `MEASUREMENT_NET_ADMIN=NET_ADMIN`，因为 velites 的 bash 工具在私有 network namespace 配置 loopback 时需要该能力（#39）；否则 bwrap 按 fail-closed 启动失败。此 delta 仅限 measurement 场景，Compose 未设置该变量时仍重复 SYS_ADMIN、生产 Compose 仍只含 SYS_ADMIN；artifact 的 `functional_cap_override` 记录实际覆盖值，且不构成生产权限建议。生产 envelope 与该测量必要能力的收敛由 M128 后续处理。
 
+测量 Worker 还以 `apparmor:unconfined` 覆盖 Docker 默认 AppArmor，因为 `/` 的 slave mount propagation 也可能被默认 LSM profile 拒绝；该设置只作用于隔离测量容器，不修改生产 Compose 或宿主全局 AppArmor/sysctl。artifact 以 `shipped_apparmor=docker-default` 与 `functional_apparmor_override` 区分两层，和 NET_ADMIN 一样由 M128 收敛。每次 Worker 启动后、采样与首个 agent 之前，先执行真实 `velites sandbox wrap --cwd /tmp -- /bin/true`，同时验证私有 mount/pid/net namespace、mount propagation 与 loopback；预检失败立即终止测量，不降级、不伪造沙箱成功。
+
 ```bash
 ./scripts/ensure-velites.sh --dest data/bin
 uv run python scripts/stress/worker_resource_workload.py \

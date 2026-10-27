@@ -39,6 +39,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       MEASUREMENT_NET_ADMIN: NET_ADMIN
+      MEASUREMENT_APPARMOR: apparmor:unconfined
       MEASUREMENT_COLD_REPETITIONS: ${{ inputs.cold_repetitions || '1' }}
       MEASUREMENT_WARM_REPETITIONS: ${{ inputs.warm_repetitions || '2' }}
       MEASUREMENT_PIDS_INTERVAL_MS: ${{ inputs.pids_interval_ms || '100' }}
