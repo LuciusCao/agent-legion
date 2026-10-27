@@ -26,22 +26,27 @@ class ExecutionReadinessError(RuntimeError):
 
 def require_restart_process_response(
     previous_status: Mapping[str, Any], pending: Mapping[str, Any], runtime: str
-) -> tuple[int, float]:
+) -> tuple[int | None, float]:
     restarted = pending["status"]
-    disabled = set(pending["config"].get("disabled_runtimes") or [])
     pid = restarted.get("pid")
     started = restarted.get("started_at")
-    if not isinstance(pid, int) or pid <= 0 or not isinstance(started, (int, float)):
+    if not isinstance(started, (int, float)) or not isinstance(
+        previous_status.get("started_at"), (int, float)
+    ):
         raise ContractViolationError("restart response has no current executor process identity")
     if (
         pending.get("restarted") is not True
-        or runtime not in disabled
-        or restarted.get("worker_running") is not True
+        or runtime not in (pending["config"].get("disabled_runtimes") or [])
+        or restarted.get("worker_running") not in (True, False)
         or restarted.get("registered") is not False
-        or pid == previous_status.get("pid")
-        or started <= previous_status.get("started_at", 0)
+        or started <= previous_status["started_at"]
     ):
         raise ContractViolationError(f"{runtime} restart response was not a new pending process")
+    if restarted.get("worker_running") is True:
+        if not isinstance(pid, int) or pid <= 0 or pid == previous_status.get("pid"):
+            raise ContractViolationError("restart response has no process identity")
+    elif not restarted.get("failed") or restarted.get("exit_code") != 2:
+        raise ContractViolationError("restart response was not a startup refusal")
     return pid, started
 
 

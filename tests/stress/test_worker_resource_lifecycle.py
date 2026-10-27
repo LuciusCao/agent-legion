@@ -129,6 +129,32 @@ def test_pending_restart_requires_new_process_and_terminal_startup_refusal() -> 
     }
 
 
+def test_pending_restart_accepts_response_already_at_startup_refusal() -> None:
+    response = _pending_response()
+    response["status"] = {**_refused_status(), "pid": None}
+    evidence = require_pending_restart(_status(1), response, _refused_status(), "velites")
+    assert evidence["observed"] is True
+    assert evidence["after"]["pid"] is None
+    assert evidence["after"]["started_at"] > evidence["before"]["started_at"]
+
+
+def test_pending_restart_rejects_old_terminal_generation_and_missing_identity() -> None:
+    old_terminal = _pending_response()
+    old_terminal["status"] = {**_refused_status(), "pid": None, "started_at": 1767225601.0}
+    with pytest.raises(ContractViolationError, match="new pending process"):
+        require_pending_restart(_status(1), old_terminal, _refused_status(), "velites")
+    missing_started = _pending_response()
+    missing_started["status"]["started_at"] = None
+    with pytest.raises(ContractViolationError, match="process identity"):
+        require_pending_restart(_status(1), missing_started, _refused_status(), "velites")
+    with pytest.raises(ContractViolationError, match="process identity"):
+        require_pending_restart({"pid": 1}, _pending_response(), _refused_status(), "velites")
+    missing_failure = _pending_response()
+    missing_failure["status"] = {**_refused_status(), "failed": None}
+    with pytest.raises(ContractViolationError, match="startup refusal"):
+        require_pending_restart(_status(1), missing_failure, _refused_status(), "velites")
+
+
 def test_pending_restart_rejects_stale_response_and_non_refusal_states() -> None:
     with pytest.raises(ContractViolationError, match="new pending process"):
         require_pending_restart(_status(1), _pending_response(1), _refused_status(), "velites")
