@@ -12,6 +12,7 @@ import yaml
 
 from scripts.stress.worker_resource_evidence import BacklogEvidence, measure_upload_backlog
 from scripts.stress.worker_resource_identity import (
+    ContractViolationError,
     ExecutionReadinessError,
     build_execution_expectations,
     require_direct_outputs,
@@ -29,7 +30,6 @@ from scripts.stress.worker_resource_measurement import (
     sanitize_log_text,
     summarize_samples,
 )
-from scripts.stress.worker_resource_restart import ContractViolationError, require_pending_restart
 from scripts.stress.worker_resource_workload import SCENARIOS, _definitions, parse_args
 
 pytestmark = pytest.mark.no_db
@@ -772,18 +772,3 @@ def test_contract_failure_is_not_retried_after_job_completion(
             {"workspace_id": "resource_code", "run_id": "run1", "job_ids": ["job1"]},
         )
     assert calls == 1
-
-
-def test_pending_restart_uses_registration_and_disabled_config_facts() -> None:
-    evidence = require_pending_restart(
-        {"registered_runtimes": ["velites"]},
-        {"disabled_runtimes": ["velites"], "runtime_status": []},
-        "velites",
-    )
-    assert evidence["observed"] is True
-    with pytest.raises(ContractViolationError, match="pending-restart"):
-        require_pending_restart(
-            {"registered_runtimes": ["velites"]},
-            {"disabled_runtimes": []},
-            "velites",
-        )

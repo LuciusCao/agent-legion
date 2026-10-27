@@ -8,12 +8,14 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.stress import worker_resource_restart as restart
+from scripts.stress.worker_resource_identity import ContractViolationError
 from scripts.stress.worker_resource_measurement import summarize_samples
 from scripts.stress.worker_resource_reporting import finalize_measurement_run
 from scripts.stress.worker_resource_restart import (
     ExecutionReadinessError,
     enable_claim,
     require_current_registration,
+    require_pending_restart,
 )
 from scripts.stress.worker_resource_workload import MeasurementRun, write_run_report
 
@@ -93,6 +95,53 @@ def test_restart_readiness_returns_current_pid_and_registration_evidence() -> No
     assert evidence["observed_at"]
     initial = require_current_registration(_status(2), [current_host], None, _expected())
     assert initial["before"] == {"pid": None, "started_at": None}
+
+
+def _pending_response(pid: int = 2, *, registered: bool = False) -> dict:
+    return {
+        "restarted": True,
+        "config": {"disabled_runtimes": ["velites"]},
+        "status": _status(pid, registered=registered),
+    }
+
+
+def _refused_status() -> dict:
+    return {
+        **_status(2, registered=False, running=False),
+        "failed": "startup preflight refused disabled expected runtime",
+        "exit_code": 2,
+    }
+
+
+def test_pending_restart_requires_new_process_and_terminal_startup_refusal() -> None:
+    evidence = require_pending_restart(
+        _status(1), _pending_response(), _refused_status(), "velites"
+    )
+    assert evidence["observed"] is True
+    assert evidence["before"]["pid"] == 1
+    assert evidence["after"]["pid"] == 2
+    assert evidence["terminal"] == {
+        "worker_running": False,
+        "registered": False,
+        "exit_code": 2,
+        "failed": "startup preflight refused disabled expected runtime",
+    }
+
+
+def test_pending_restart_rejects_stale_response_and_non_refusal_states() -> None:
+    with pytest.raises(ContractViolationError, match="new pending process"):
+        require_pending_restart(_status(1), _pending_response(1), _refused_status(), "velites")
+    with pytest.raises(ContractViolationError, match="new pending process"):
+        require_pending_restart(
+            _status(1), _pending_response(registered=True), _refused_status(), "velites"
+        )
+    for terminal in (
+        _status(2),
+        {**_refused_status(), "registered": True},
+        {**_refused_status(), "failed": None, "exit_code": 0},
+    ):
+        with pytest.raises(ExecutionReadinessError, match="startup refusal"):
+            require_pending_restart(_status(1), _pending_response(), terminal, "velites")
 
 
 class _FixedDatetime(datetime):
@@ -266,8 +315,23 @@ def test_outer_finalization_counts_match_result_run_report_summary_and_raw(
     run.compose = compose
     run._wait_http = lambda _url: None
     run._control_token = lambda: "token"
-    run._worker_request = lambda *_args, **_kwargs: SimpleNamespace(json=lambda: {"config": {}})
-    run._enable_claim = lambda *_args, **_kwargs: None
+    pending_response = _pending_response()
+    claim_previous: list[dict | None] = []
+
+    def worker_request(method, path, _token, **kwargs):
+        if method == "GET" and path == "/api/status":
+            payload = _refused_status()
+        elif method == "PUT" and kwargs.get("json", {}).get("disabled_runtimes"):
+            payload = pending_response
+        else:
+            payload = {}
+        return SimpleNamespace(json=lambda: payload)
+
+    def enable_claim_mock(_token, _session, previous_status=None):
+        claim_previous.append(previous_status)
+
+    run._worker_request = worker_request
+    run._enable_claim = enable_claim_mock
     run._submit = lambda *_args, **_kwargs: {"direct_upload_verified": True}
     monkeypatch.setattr(workload, "seed_measurement_workspaces", lambda *_args: None)
     monkeypatch.setattr(workload, "ensure_measurement_bucket", lambda *_args: None)
@@ -297,6 +361,8 @@ def test_outer_finalization_counts_match_result_run_report_summary_and_raw(
     )
 
     reports = [run.run_iteration("cold", 1), run.run_iteration("warm", 1)]
+    assert claim_previous[1] is pending_response["status"]
+    assert claim_previous[5] is pending_response["status"]
     outer = finalize_measurement_run(run, run.output_dir, reports, write_run_report)
     for index, iteration in enumerate(("cold-1", "warm-1")):
         result_doc = json.loads(

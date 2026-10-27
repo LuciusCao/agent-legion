@@ -628,19 +628,23 @@ class MeasurementRun:
 
             sampler.mark(iteration, "pending-restart")
             previous_status = self._worker_request("GET", "/api/status", control_token).json()
-            previous = self._worker_request("GET", "/api/config", control_token).json()
             pending = self._worker_request(
                 "PUT", "/api/config", control_token, json={"disabled_runtimes": ["velites"]}
             ).json()
-            result["scenarios"]["pending-restart"] = require_pending_restart(
-                previous, pending["config"], "velites"
+
+            def startup_refused() -> dict[str, Any]:
+                current = self._worker_request("GET", "/api/status", control_token).json()
+                return require_pending_restart(previous_status, pending, current, "velites")
+
+            result["scenarios"]["pending-restart"] = self._wait(
+                "disabled runtime startup refusal", startup_refused
             )
             time.sleep(self.args.idle_seconds)
             self._worker_request(
                 "PUT", "/api/config", control_token, json={"disabled_runtimes": []}
             )
             result["scenarios"]["pending-restart"]["recovery"] = self._enable_claim(
-                control_token, session, previous_status
+                control_token, session, pending["status"]
             )
 
             sampler.mark(iteration, "executor-restart")

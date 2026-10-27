@@ -7,25 +7,43 @@ from datetime import UTC, datetime
 from typing import Any
 
 from scripts.stress.worker_resource_identity import (
-    ContractViolationError,
     ExecutionReadinessError,
+    require_restart_process_response,
 )
 
 
+def _process_identity(status: Mapping[str, Any]) -> dict[str, Any]:
+    return {"pid": status.get("pid"), "started_at": status.get("started_at")}
+
+
 def require_pending_restart(
-    previous_config: Mapping[str, Any], current_config: Mapping[str, Any], runtime: str
+    previous_status: Mapping[str, Any],
+    pending: Mapping[str, Any],
+    current_status: Mapping[str, Any],
+    runtime: str,
 ) -> dict[str, Any]:
-    """Prove registered runtime state differs from the not-yet-restarted config."""
-    registered = set(previous_config.get("registered_runtimes") or [])
-    disabled = set(current_config.get("disabled_runtimes") or [])
-    if runtime not in registered or runtime not in disabled:
-        raise ContractViolationError(f"{runtime} pending-restart state was not observable")
+    """Prove the disabled-runtime restart reached a new process and startup refusal."""
+    pid, started = require_restart_process_response(previous_status, pending, runtime)
+    disabled = set(pending["config"].get("disabled_runtimes") or [])
+    if (
+        current_status.get("worker_running") is not False
+        or current_status.get("registered") is not False
+        or not current_status.get("failed")
+        or current_status.get("exit_code") != 2
+    ):
+        raise ExecutionReadinessError("disabled runtime startup refusal is not observable")
     return {
         "observed": True,
         "runtime": runtime,
-        "registered_runtimes": sorted(registered),
         "disabled_runtimes": sorted(disabled),
-        "evidence": "registered runtime is disabled in config and has not re-registered",
+        "before": _process_identity(previous_status),
+        "after": {"pid": pid, "started_at": started},
+        "terminal": {
+            "worker_running": False,
+            "registered": False,
+            "exit_code": 2,
+            "failed": current_status["failed"],
+        },
     }
 
 
@@ -79,10 +97,7 @@ def require_current_registration(
     return {
         "observed": True,
         "observed_at": observed_at.isoformat(),
-        "before": {
-            "pid": (previous_status or {}).get("pid"),
-            "started_at": (previous_status or {}).get("started_at"),
-        },
+        "before": _process_identity(previous_status or {}),
         "after": {"pid": pid, "started_at": started_at},
         "host_worker": {
             "worker_id": current_row["worker_id"],
