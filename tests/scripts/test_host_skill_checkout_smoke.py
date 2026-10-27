@@ -44,10 +44,12 @@ def test_docker_build_loads_and_runs_host_smoke() -> None:
     assert "load: true" in host_build
     assert "tags: agent-legion-host:ci" in host_build
     assert (
-        'docker run --rm --network none -v "$RUNNER_TEMP/host-skill-checkout-smoke:/smoke" '
+        'docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp '
+        '-v "$RUNNER_TEMP/host-skill-checkout-smoke:/smoke" '
         "agent-legion-host:ci python -m scripts.e2e.host_skill_checkout_smoke run "
         "--workspace /smoke"
     ) in docker_lane
+    assert "safe.directory" not in docker_lane
 
 
 def test_only_host_stage_installs_runtime_git() -> None:
