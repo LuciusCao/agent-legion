@@ -176,8 +176,8 @@ def test_evaluate_flags_expired_deadlines(tmp_path: Path) -> None:
 
 
 def test_rerun_mode_reports_expired_deadlines_without_failing(tmp_path: Path) -> None:
-    # #941: PR CI must not turn red because a calendar date passed; only the
-    # nightly deadline-only mode enforces expiry.
+    # #941: PR CI must not turn red because an untouched pre-existing entry's
+    # calendar date passed; the nightly deadline-only mode enforces that expiry.
     entries = load_registry(
         _write_registry(
             tmp_path / "registry.yaml", [_entry(deadline="2026-08-01", registered_on="2026-07-20")]
