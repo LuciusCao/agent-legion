@@ -138,6 +138,14 @@ def test_pending_restart_accepts_response_already_at_startup_refusal() -> None:
     assert evidence["after"]["started_at"] > evidence["before"]["started_at"]
 
 
+@pytest.mark.parametrize("running", [0, 1, None, "true", "false"])
+def test_pending_restart_rejects_non_boolean_running_state(running: object) -> None:
+    response = _pending_response()
+    response["status"] = {**_refused_status(), "pid": None, "worker_running": running}
+    with pytest.raises(ContractViolationError, match="new pending process"):
+        require_pending_restart(_status(1), response, _refused_status(), "velites")
+
+
 def test_pending_restart_rejects_old_terminal_generation_and_missing_identity() -> None:
     old_terminal = _pending_response()
     old_terminal["status"] = {**_refused_status(), "pid": None, "started_at": 1767225601.0}

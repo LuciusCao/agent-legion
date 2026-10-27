@@ -37,7 +37,7 @@ def require_restart_process_response(
     if (
         pending.get("restarted") is not True
         or runtime not in (pending["config"].get("disabled_runtimes") or [])
-        or restarted.get("worker_running") not in (True, False)
+        or not isinstance(restarted.get("worker_running"), bool)
         or restarted.get("registered") is not False
         or started <= previous_status["started_at"]
     ):
