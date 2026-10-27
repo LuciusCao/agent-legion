@@ -705,17 +705,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1012
   ceiling: 121
 - check: architecture.file_budget
-  path: velites/src/tools/specs.rs
-  reason: '#518 adds the json tool''s provider spec (description + JSON Schema parameters) —
-    the file is the per-tool spec table by design, one arm per ToolKind; the spec IS the content,
-    there is nothing to split without separating a tool''s spec from its siblings'' in a way
-    no consumer wants. Remove only with the json tool itself. Re-anchored by #926 from #456
-    (closed) to #995: the overage above is the shipped feature itself and the removal condition
-    above stands; #995 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/995
-  ceiling: 112
-- check: architecture.file_budget
   path: frontend/src/features/workflowStudio/inspector/WorkflowNodePromptEditor.tsx
   reason: '#513 adds the prompt-mode selector (append/overwrite) to the custom prompt editor:
     one TextField select with two labeled options plus the state-switching hint line — the interaction
