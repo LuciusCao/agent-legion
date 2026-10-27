@@ -2,9 +2,9 @@
 //! driven offline by a scripted in-process provider and an in-memory sink.
 //!
 //! These exercise the library surface (`velites::agent::run`) the same way
-//! future embedders would; the pure private helpers (`enabled_tool_names`,
-//! `outputs_remediation_message`, `resolve_required_outputs`) stay covered by
-//! inline `#[cfg(test)]` unit tests in src/agent.rs.
+//! future embedders would; the pure private helpers stay covered by inline
+//! `#[cfg(test)]` unit tests in src/agent/output.rs (`missing_outputs` and
+//! `resolve_required_outputs`) and src/agent/tools.rs (`enabled_tool_names`).
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
