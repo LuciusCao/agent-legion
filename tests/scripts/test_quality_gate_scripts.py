@@ -525,6 +525,91 @@ def test_quick_gate_cleanup_only_removes_coverage_data_files(tmp_path: Path) -> 
     assert sibling.exists()
 
 
+def _run_smoke_backend_gate(
+    tmp_path: Path, env: dict[str, str]
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'printf "%s\\n" "$*" >"$GATE_LOG"\n'
+        'printf "rerun:%s\\n" "${AGENT_LEGION_RERUN_REPORT:-unset}" >>"$GATE_LOG"\n'
+        'for arg in "$@"; do\n'
+        '  case "$arg" in\n'
+        '    --junitxml=*) printf "<testsuite tests=\\"0\\"/>\\n" >"${arg#--junitxml=}" ;;\n'
+        "  esac\n"
+        "done\n"
+        'exit "$FAKE_PYTEST_EXIT"\n',
+    )
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "AGENT_LEGION_RERUN_REPORT": "",
+            "AGENT_LEGION_TEST_DURATIONS": "",
+            "AGENT_LEGION_TEST_RESULT_NAME": "",
+            "AGENT_LEGION_TEST_RESULTS_DIR": "",
+            "AGENT_LEGION_TEST_WORKERS": "2",
+            "BACKEND_GATE_PHASE": "test",
+            "FAKE_PYTEST_EXIT": "0",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "smoke",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            **env,
+        },
+    )
+    return result, gate_log
+
+
+@pytest.mark.parametrize("pytest_exit", [0, 5])
+def test_smoke_backend_gate_forwards_telemetry_and_preserves_exit_code(
+    tmp_path: Path, pytest_exit: int
+) -> None:
+    results = tmp_path / "results"
+    result, gate_log = _run_smoke_backend_gate(
+        tmp_path,
+        {
+            "AGENT_LEGION_TEST_DURATIONS": "12",
+            "AGENT_LEGION_TEST_RESULT_NAME": "smoke",
+            "AGENT_LEGION_TEST_RESULTS_DIR": str(results),
+            "FAKE_PYTEST_EXIT": str(pytest_exit),
+        },
+    )
+
+    assert result.returncode == pytest_exit, result.stdout + result.stderr
+    calls = gate_log.read_text(encoding="utf-8").splitlines()
+    assert calls == [
+        "run --frozen pytest -q --ignore=tests/full --ignore=tests/ci "
+        "-m smoke -n 2 --dist worksteal --reruns 1 --reruns-delay 2 "
+        f"--durations=12 --junitxml={results / 'smoke-junit.xml'} "
+        "-p scripts.pytest_telemetry",
+        f"rerun:{results / 'smoke-reruns.json'}",
+    ]
+    assert (results / "smoke-junit.xml").read_text(encoding="utf-8") == '<testsuite tests="0"/>\n'
+
+
+def test_smoke_backend_gate_without_results_dir_keeps_default_invocation(tmp_path: Path) -> None:
+    results = tmp_path / "results"
+    result, gate_log = _run_smoke_backend_gate(tmp_path, {})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert gate_log.read_text(encoding="utf-8").splitlines() == [
+        "run --frozen pytest -q --ignore=tests/full --ignore=tests/ci "
+        "-m smoke -n 2 --dist worksteal --reruns 1 --reruns-delay 2",
+        "rerun:unset",
+    ]
+    assert not results.exists()
+
+
 def test_frontend_gate_emits_junit_and_json_reports(tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
     frontend = tmp_path / "frontend"

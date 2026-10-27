@@ -149,7 +149,8 @@ run_tests() {
         -m "smoke" \
         -n "$workers" --dist worksteal \
         --reruns 1 \
-        --reruns-delay 2
+        --reruns-delay 2 \
+        ${telemetry_args[@]+"${telemetry_args[@]}"}
       ;;
     unit)
       echo "=== Python Unit Tests (PostgreSQL offline) ==="
