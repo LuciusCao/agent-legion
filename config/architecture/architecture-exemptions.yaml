@@ -401,24 +401,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/311
   ceiling: 329
 - check: architecture.file_budget
-  path: velites/src/cli.rs
-  reason: 'Issue #297 added inline unit tests for the clap argument surface (flag parsing, defaults, trailing-command
-    sandbox wrap, @file prompt expansion). Rust inline #[cfg(test)] convention (see policy comment on
-    velites/tests/); the CLI structs are pub but the parse-behavior tests assert on private helper edges.
-    Ceiling 91 to 261 covers the test module; drop when the module shrinks.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/311
-  ceiling: 260
-- check: architecture.file_budget
-  path: velites/src/session.rs
-  reason: 'Issue #297 added inline unit tests for SessionLog (open creates the dir, append is NDJSON with
-    order preserved, metadata round-trips, append-only never truncates). Rust inline #[cfg(test)] convention;
-    SessionLog is pub but the tests assert the append-only mirror semantics next to the implementation.
-    Ceiling 34 to 149 covers the test module; drop when the module shrinks.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/311
-  ceiling: 139
-- check: architecture.file_budget
   path: server/app/db/migrations/jobs_workflow_key_alignment.py
   reason: The issue-211 Phase 3 v68 data migration aligns every stored workflow_key with the v62 binding
     across the live tables plus the node_code entity-key prefix. Each composite-unique surface carries
