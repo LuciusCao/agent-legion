@@ -5,11 +5,13 @@ but a retry-pass must not become invisible. PR backend-coverage feeds every
 ``scripts/pytest_telemetry.py`` JSON report to this script and fails when a
 rerun lands on a nodeid without a registry entry.
 
-Deadline expiry is a wall-clock judgement, so it only fails the nightly
-deadline-only mode (``--check-deadlines``, #941): PR runs and the unit tier
-must stay deterministic, otherwise every entry reaching its deadline turns
-unrelated PRs red on the same day. Rerun-report mode merely lists expired
-entries. Deadline-only mode also warns ``DEADLINE_WARNING_DAYS`` ahead.
+Deadline expiry for untouched pre-existing entries is a wall-clock judgement,
+so only the nightly deadline-only mode enforces it (``--check-deadlines``,
+#941): unrelated PR runs and the unit tier must stay deterministic, otherwise
+every entry reaching its deadline turns unrelated PRs red on the same day.
+Rerun-report mode lists those expired entries as notes. With
+``--base-registry``, PR / merge-group runs still fail expired entries they add
+or re-target. Deadline-only mode also warns ``DEADLINE_WARNING_DAYS`` ahead.
 
 The registry schema and its clock-free rules (nodeid uniqueness, deadline
 window) live in ``scripts/quality/flaky_registry.py``; lenient reads of a
@@ -85,7 +87,7 @@ def evaluate(
 
     Expired deadlines are violations only with ``enforce_deadlines`` (the
     nightly deadline-only mode) or for ``enforce_ids`` (entries the PR itself
-    added or re-dated); otherwise they are reported as notes so a calendar
+    added or re-targeted); otherwise they are reported as notes so a calendar
     date can never red an unrelated PR (#941).
     """
     lines: list[str] = []
@@ -157,16 +159,17 @@ def main(argv: list[str] | None = None) -> int:
         "--check-deadlines",
         action="store_true",
         help="deadline-only mode: no rerun report required (#295 — nightly "
-        "exemption-expiry job detects an expired flaky registry deadline "
-        "even when the extended rerun evidence did not run); the only mode "
-        "in which an expired deadline fails (#941)",
+        "exemption-expiry detects every expired deadline on the default "
+        "branch even without extended rerun evidence); without this flag, "
+        "untouched pre-existing expiry is note-only, while --base-registry "
+        "still enforces touched entries (#941)",
     )
     parser.add_argument(
         "--base-registry",
         type=Path,
         default=None,
         metavar="PATH",
-        help="the target branch's registry: entries added or re-dated "
+        help="the target branch's registry: entries added or re-targeted "
         "relative to it must not already be expired (#941 R3/R4, passed by "
         "every PR run regardless of target branch)",
     )
