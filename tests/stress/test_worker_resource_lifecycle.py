@@ -549,6 +549,7 @@ def test_workflow_dispatch_and_pr_inputs_reach_real_parser() -> None:
     assert custom.warm_repetitions == 4
     assert custom.pids_interval_ms == 125
     assert custom.memory_interval_ms == 750
+    assert document["jobs"]["measure"]["env"]["MEASUREMENT_NET_ADMIN"] == "NET_ADMIN"
     assert document["permissions"] == {"contents": "read"}
     assert len(document["jobs"]["measure"]["strategy"]["matrix"]["include"]) == 3
     assert "ubuntu-24.04" in source

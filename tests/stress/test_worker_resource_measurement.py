@@ -262,6 +262,9 @@ def test_measurement_compose_preserves_shipped_envelope_without_new_limits() -> 
     assert "env HOME=/tmp uvicorn" in startup
     assert host["volumes"][1].endswith(":/tmp/.agents/skills:ro")
     assert "safe.directory" not in startup
+    production = yaml.safe_load((ROOT / "deploy/compose.worker.yaml").read_text(encoding="utf-8"))
+    assert production["services"]["worker"]["cap_add"] == ["SYS_ADMIN"]
+    assert "--no-sandbox" not in yaml.safe_dump(document)
 
 
 def test_workload_covers_real_execution_and_restart_scenarios() -> None:

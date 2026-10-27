@@ -509,7 +509,9 @@ Host 设置页顶部的「Worker 与 Worker 控制台」卡片、签发成功后
 
 Host 支持容器只在启动阶段以 root 安装 git 并初始化 `host-data` 卷，随后按 bind owner 用 `setpriv` 设置身份并以 `HOME=/tmp` 启动：原生 Linux 使用执行 seed 的宿主 UID/GID，Docker Desktop 的 root-owned 映射使用 0:0。skills 以只读方式挂到 `/tmp/.agents/skills`，使 Git 仓库 owner 与 SkillManager 读取 UID 一致。该测量专用对齐不配置 `safe.directory`，不修改生产 SkillManager，也不改变 Worker、模型或 velites 绑定身份；Desktop 的 0:0 只是功能兼容，不替代原生非 root 验证。
 
-优先在 GitHub Actions 手动运行 **Worker Resource Measurement**（仅 `workflow_dispatch`，原生 Ubuntu 24.04）。矩阵的 single / mixed / upload-backlog 只是显式测量 envelope；dispatch 可设置 cold/warm 重复次数与 pids/memory 采样间隔。原生 Linux 也可在仓库根执行：
+优先通过限定 paths 的 PR 或手动 `workflow_dispatch` 在 GitHub Actions 运行 **Worker Resource Measurement**（原生 Ubuntu 24.04）。矩阵的 single / mixed / upload-backlog 只是显式测量 envelope；dispatch 可设置 cold/warm 重复次数与 pids/memory 采样间隔。原生 Linux 也可在仓库根执行：
+
+原生测量 workflow 显式设置 `MEASUREMENT_NET_ADMIN=NET_ADMIN`，因为 velites 的 bash 工具在私有 network namespace 配置 loopback 时需要该能力（#39）；否则 bwrap 按 fail-closed 启动失败。此 delta 仅限 measurement 场景，Compose 未设置该变量时仍重复 SYS_ADMIN、生产 Compose 仍只含 SYS_ADMIN；artifact 的 `functional_cap_override` 记录实际覆盖值，且不构成生产权限建议。生产 envelope 与该测量必要能力的收敛由 M128 后续处理。
 
 ```bash
 ./scripts/ensure-velites.sh --dest data/bin
