@@ -958,43 +958,6 @@ exemptions:
   ceiling: 353
   expires: 2026-12-31
 - check: architecture.file_budget
-  path: velites/src/tools/bash.rs
-  reason: 'Issue #637 hardens the bash tool against unbounded pipe reads (the allocation-storm
-    incident): read_with_first_byte returns a PipeCapture (head kept to the per-stream 4 MiB cap,
-    total_bytes counted, hit_cap flag), the drain loop keeps reading to EOF past the cap (no pipe
-    backpressure on the child), and the capped-output display branch (truncate_head + the honest
-    no-full-output notice) grew alongside. The capture cap, its tests, and the display branches are
-    one cohesive read/display flow; splitting them would fork the child-output lifecycle across
-    modules. #779 train R4 review P2 grew the same capped-display branch further (per-stream display
-    budgets: stderr gets a reserved half-share, each stream keeps its head when capture-capped and
-    its tail when fully collected). Ceiling re-seated at actual + 10 per the dated-exemption
-    convention (#431/#458 precedents). Remove when the capped-display branches move into truncate.rs
-    or the module gets a bash-output split. #942/#922 moved the child-process lifecycle (env
-    allowlist, group termination, bounded drain, pipe reader) into bash_proc.rs; ceiling re-seated
-    at actual + 10. Re-anchored by #926 from #637 (closed) to #995: the overage above is the shipped
-    feature itself and the removal condition above stands; #995 tracks at most five entries
-    (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/995
-  ceiling: 312
-  expires: 2027-03-31
-- check: architecture.file_budget
-  path: velites/src/tools/truncate.rs
-  reason: '#779 train R4 review P2 (#689 follow-up): the bash capture-capped display branch
-    now splits the 2000-line/50KB budget between the two stream heads (stderr gets a reserved
-    half-share so a capped 4 MiB stdout head can no longer squeeze the fully captured stderr
-    — the error reason of the failing command — out of the display). The budget-splitting primitive
-    (truncate_head_within) belongs in the shared truncation module, the home the bash.rs exemption
-    already names for the capped-display branches. Ceiling at actual + 10 per the dated-exemption
-    convention (#431/#458). Remove when the bash capped-display branch migrates here per the
-    bash.rs exemption and the pair is re-balanced, or the module shrinks below the old floor.
-    Re-anchored by #926 from #689 (closed) to #995: the overage above is the shipped feature
-    itself and the removal condition above stands; #995 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/995
-  ceiling: 340
-  expires: 2027-03-31
-- check: architecture.file_budget
   path: velites/src/provider/openai_compat/aggregate.rs
   reason: 'Issue #637 closes the compound-storm surface the per-field cap missed: MAX_AGGREGATE_CHARS
     adds a whole-completion aggregate cap over text/thinking/tool-call id/name/arguments (check_total

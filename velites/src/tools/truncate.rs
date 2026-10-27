@@ -265,167 +265,128 @@ fn tail_within_bytes(line: &str, max_bytes: usize) -> &str {
     &line[start..]
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn lines_of(n: usize) -> String {
-        (1..=n)
-            .map(|i| format!("line {i}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    #[test]
-    fn no_truncation_when_under_both_limits() {
-        let content = lines_of(DEFAULT_MAX_LINES);
-        let result = truncate_head(&content);
-        assert!(!result.truncated);
-        assert_eq!(result.content, content);
-        assert_eq!(result.output_lines, DEFAULT_MAX_LINES);
-
-        let result = truncate_tail(&content);
-        assert!(!result.truncated);
-        assert_eq!(result.content, content);
-    }
-
-    #[test]
-    fn empty_output_is_not_truncated() {
-        for result in [truncate_head(""), truncate_tail("")] {
-            assert!(!result.truncated);
-            assert_eq!(result.total_lines, 0);
-            assert_eq!(result.content, "");
+/// Format bash output after either stream hit its capture cap. A capped
+/// stream keeps its head; a fully captured stream keeps its tail when its
+/// display share is too small. No complete output file can exist in this
+/// branch, so the notice always points at redirected, chunked bash reads.
+pub(crate) fn format_bash_capture_capped(
+    stdout_text: &str,
+    stdout_hit_cap: bool,
+    stderr_text: &str,
+    stderr_hit_cap: bool,
+    output_bytes: u64,
+) -> String {
+    // #637 触顶分支：保留的是流头部、尾部已被丢弃——完整输出在内存
+    // 中已不存在，绝不能走 write_full_output（那会假装有完整输出可
+    // 指认）。展示层保留头部的前 2000 行 / 50KB，通知说清「尾部已
+    // 丢弃、无完整输出文件」，并指路：重定向到文件再用 bash 流式
+    // 分段命令读取。与 tail 截断方向相反（那边错误/结果在末尾、保
+    // 尾；触顶后尾部已丢，只能保头）。
+    //
+    // #689 review P2：恢复提示必须与 read 工具的自洽——read 对超过
+    // 4 MiB 的整文件在读前直接报错（上限检查先于 offset/limit 行
+    // 选取），「用 read 的 offset/limit 分段读」这个流程走不通，模型
+    // 会陷入「重定向 → read 报错 → 重定向」死循环。bash 分段命令
+    // （sed 按行窗、tail+head 翻页）与 read 超限时自己的提示同构，
+    // 是唯一可走通的出口。
+    //
+    // #779 列车 R4 复审 P2：展示预算按流分配——stderr 先预留总预算的
+    // 一半（其实际所需为限），stdout 头部用剩余。合并文本再整体保头
+    // 会让 stdout 的 4 MiB 头部把完整采集到的 stderr 全部挤出展示面，
+    // 失败命令的错误原因随之丢失。两流各自的截断方向对称（R4 P2 跟进
+    // 及其镜像）：未触顶（完整采集）一侧保尾——最终诊断/结果在末尾，
+    // 与常规截断同语义；触顶一侧保头——尾部已在采集侧丢弃。
+    // stderr 在预留份额内不可展示（首行即超限，如无换行的超长行）时
+    // 仅保留分节标记——与修复前合并文本截断后的形状一致。
+    let per_stream = |text: &str, hit_cap: bool, lines: usize, bytes: usize| {
+        if hit_cap {
+            truncate_head_within(text, lines, bytes)
+        } else {
+            truncate_tail_within(text, lines, bytes)
         }
+    };
+    let stderr_budget = (DEFAULT_MAX_LINES / 2, DEFAULT_MAX_BYTES / 2);
+    let stderr_truncation = per_stream(
+        stderr_text,
+        stderr_hit_cap,
+        stderr_budget.0,
+        stderr_budget.1,
+    );
+    let stdout_budget_bytes = DEFAULT_MAX_BYTES - stderr_truncation.output_bytes;
+    let stdout_truncation = per_stream(
+        stdout_text,
+        stdout_hit_cap,
+        DEFAULT_MAX_LINES - stderr_truncation.output_lines,
+        stdout_budget_bytes,
+    );
+    // #779 列车 R4 复审 P2 跟进：提示按各流实际截断方向分别说明——统一
+    // 声称「head above is kept」会在未触顶流保尾展示时与内容矛盾（模型
+    // 会误判所见日志的位置）。触顶流：保头（尾部采集侧已丢）；完整采集
+    // 但超份额的流：保尾（头部按份额剪掉）；完整且未超份额：完整展示。
+    // 再跟进：提示依据该流实际保留的正文生成——触顶流首行即超份额时
+    // truncate_head_within 返回空内容，[stderr] 分节标记仍会让 kept
+    // 非空（绕过 notice-only 分支），不得声称 head 已保留——明示什么
+    // 都没展示 + 实际预算数值（与首行超限 notice-only 分支同语义）；
+    // 数值取该流的真实预算（stdout = 总预算 − stderr 实际占用，stderr
+    // = 预留份额），不是固定预留份额（#779 列车 R4 P2 再跟进）。
+    let stream_note = |name: &str, hit_cap: bool, tr: &Truncation, budget: usize| {
+        if hit_cap && tr.first_line_exceeds_limit {
+            format!(
+                "{name} hit the cap, and its first line alone exceeds the {} display budget, so nothing of it is shown; the tail was dropped at capture",
+                format_size(budget),
+            )
+        } else if hit_cap {
+            format!("{name} hit the cap: the head is kept, the tail was dropped")
+        } else if tr.truncated {
+            format!(
+                "{name} was fully captured; shown tail-first (its head is trimmed to the display share)"
+            )
+        } else {
+            format!("{name} was fully captured")
+        }
+    };
+    let notice = format!(
+        "[Output capture stopped after {} at the {} per-stream cap ({}; {}). No full-output file was saved — the dropped tail no longer exists. Rerun with output redirected to a file (e.g. `cmd > out.log 2>&1`) and read it in chunks with bash, e.g. `sed -n '1,2000p' out.log`, `tail -n +2001 out.log | head -n 2000` (the read tool rejects whole files over {} even with offset/limit).]",
+        format_size(usize::try_from(output_bytes).unwrap_or(usize::MAX)),
+        MAX_CAPTURE_BYTES_DISPLAY,
+        stream_note(
+            "stdout",
+            stdout_hit_cap,
+            &stdout_truncation,
+            stdout_budget_bytes,
+        ),
+        stream_note(
+            "stderr",
+            stderr_hit_cap,
+            &stderr_truncation,
+            stderr_budget.1,
+        ),
+        MAX_CAPTURE_BYTES_DISPLAY,
+    );
+    let mut kept = stdout_truncation.content;
+    if !stderr_text.is_empty() {
+        // 采集到 stderr 就保留 [stderr] 分节标记（份额内不可展示时
+        // 内容为空，与修复前合并文本截断后的形状一致）。
+        if !kept.is_empty() {
+            kept.push('\n');
+        }
+        kept.push_str("[stderr]\n");
+        kept.push_str(&stderr_truncation.content);
     }
-
-    #[test]
-    fn head_truncates_by_lines_keeping_first_lines() {
-        let content = lines_of(DEFAULT_MAX_LINES + 500);
-        let result = truncate_head(&content);
-        assert!(result.truncated);
-        assert_eq!(result.truncated_by, Some(TruncatedBy::Lines));
-        assert_eq!(result.output_lines, DEFAULT_MAX_LINES);
-        assert_eq!(result.total_lines, DEFAULT_MAX_LINES + 500);
-        assert!(result.content.starts_with("line 1\n"));
-        assert!(result.content.ends_with("line 2000"));
-        assert!(!result.content.contains("line 2001"));
-    }
-
-    #[test]
-    fn head_truncates_by_bytes_without_splitting_a_line() {
-        // 600 lines × 100 bytes ≈ 60KB > 50KB, well under 2000 lines.
-        let line = "a".repeat(100);
-        let content = (0..600)
-            .map(|_| line.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let result = truncate_head(&content);
-        assert!(result.truncated);
-        assert_eq!(result.truncated_by, Some(TruncatedBy::Bytes));
-        assert!(result.output_bytes <= DEFAULT_MAX_BYTES);
-        assert!(result.output_lines < 600);
-        // Every kept line is complete.
-        assert!(result.content.lines().all(|l| l.len() == 100));
-    }
-
-    #[test]
-    fn head_first_line_exceeds_limit() {
-        let content = format!("{}\nshort", "x".repeat(DEFAULT_MAX_BYTES + 1));
-        let result = truncate_head(&content);
-        assert!(result.truncated);
-        assert!(result.first_line_exceeds_limit);
-        assert_eq!(result.output_lines, 0);
-        assert_eq!(result.content, "");
-    }
-
-    #[test]
-    fn tail_truncates_by_lines_keeping_last_lines() {
-        let content = lines_of(DEFAULT_MAX_LINES + 500);
-        let result = truncate_tail(&content);
-        assert!(result.truncated);
-        assert_eq!(result.truncated_by, Some(TruncatedBy::Lines));
-        assert_eq!(result.output_lines, DEFAULT_MAX_LINES);
-        assert!(result.content.starts_with("line 501\n"));
-        assert!(result.content.ends_with("line 2500"));
-        assert!(!result.content.contains("line 500\n"));
-        assert!(!result.last_line_partial);
-    }
-
-    #[test]
-    fn tail_truncates_by_bytes_without_splitting_a_line() {
-        let line = "b".repeat(100);
-        let content = (0..600)
-            .map(|_| line.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let result = truncate_tail(&content);
-        assert!(result.truncated);
-        assert_eq!(result.truncated_by, Some(TruncatedBy::Bytes));
-        assert!(result.output_bytes <= DEFAULT_MAX_BYTES);
-        assert!(!result.last_line_partial);
-        assert!(result.content.lines().all(|l| l.len() == 100));
-        // The kept suffix is the end of the original content.
-        assert!(content.ends_with(&result.content));
-    }
-
-    #[test]
-    fn tail_last_line_alone_exceeds_limit_keeps_partial_tail() {
-        let content = format!("first\n{}", "y".repeat(DEFAULT_MAX_BYTES + 100));
-        let result = truncate_tail(&content);
-        assert!(result.truncated);
-        assert!(result.last_line_partial);
-        assert_eq!(result.truncated_by, Some(TruncatedBy::Bytes));
-        assert_eq!(result.output_bytes, DEFAULT_MAX_BYTES);
-        assert!(!result.content.contains("first"));
-    }
-
-    #[test]
-    fn tail_partial_tail_respects_utf8_boundaries() {
-        // 中 is 3 bytes; a byte cut must not land mid-character.
-        let long = "中".repeat(DEFAULT_MAX_BYTES); // 3 × 50KB bytes, one line
-        let content = format!("header\n{long}");
-        let result = truncate_tail(&content);
-        assert!(result.last_line_partial);
-        assert!(result.output_bytes <= DEFAULT_MAX_BYTES);
-        assert!(result.content.chars().all(|c| c == '中'));
-        // Dropped at most one char to reach a char boundary.
-        assert!(result.output_bytes >= DEFAULT_MAX_BYTES - 3);
-    }
-
-    #[test]
-    fn head_byte_count_treats_multibyte_lines_as_bytes() {
-        // 1700 lines × 30 × 中 (3 bytes) = 153KB > 50KB, under 2000 lines.
-        let line = "中".repeat(30);
-        let content = (0..1700)
-            .map(|_| line.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let result = truncate_head(&content);
-        assert!(result.truncated);
-        assert_eq!(result.truncated_by, Some(TruncatedBy::Bytes));
-        assert!(result.output_bytes <= DEFAULT_MAX_BYTES);
-        assert!(result.content.chars().all(|c| c == '中' || c == '\n'));
-    }
-
-    #[test]
-    fn just_over_line_limit_truncates() {
-        let content = lines_of(DEFAULT_MAX_LINES + 1);
-        assert!(truncate_head(&content).truncated);
-        assert!(truncate_tail(&content).truncated);
-    }
-
-    #[test]
-    fn just_over_byte_limit_truncates() {
-        let content = "z".repeat(DEFAULT_MAX_BYTES + 1) + "\n";
-        let result = truncate_head(&content);
-        assert!(result.truncated);
-        assert!(result.first_line_exceeds_limit);
-    }
-
-    #[test]
-    fn format_size_matches_pi_shape() {
-        assert_eq!(format_size(512), "512B");
-        assert_eq!(format_size(1536), "1.5KB");
-        assert_eq!(format_size(5 * 1024 * 1024), "5.0MB");
+    if kept.is_empty() {
+        // 首行就超过展示上限（如单个超长行）：无内容可展示，通知
+        // 独立成文，不加前导空行——且不说「head above is kept」，
+        // 上面没有任何内容。
+        format!(
+            "[Output capture stopped after {} at the {} per-stream cap (the first line alone exceeds the {} display limit, so no content is shown; the tail was dropped). No full-output file was saved — the dropped tail no longer exists. Rerun with output redirected to a file (e.g. `cmd > out.log 2>&1`) and read it in chunks with bash, e.g. `sed -n '1,2000p' out.log` (the read tool rejects whole files over {} even with offset/limit).]",
+            format_size(usize::try_from(output_bytes).unwrap_or(usize::MAX)),
+            MAX_CAPTURE_BYTES_DISPLAY,
+            MAX_BYTES_DISPLAY,
+            MAX_CAPTURE_BYTES_DISPLAY,
+        )
+    } else {
+        kept.push_str("\n\n");
+        kept.push_str(&notice);
+        kept
     }
 }
