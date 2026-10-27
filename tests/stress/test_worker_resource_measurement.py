@@ -317,12 +317,21 @@ def test_wait_retries_compose_readiness_failures(monkeypatch: pytest.MonkeyPatch
     assert calls == 2
 
 
-def test_workflow_is_dispatch_only_native_linux_and_uploads_only_results() -> None:
+def test_workflow_supports_dispatch_and_scoped_prs_on_native_linux() -> None:
     workflow_path = ROOT / ".github/workflows/worker-resource-measurement.yml"
     source = workflow_path.read_text(encoding="utf-8")
     document = yaml.safe_load(source)
-    assert set(document[True]) == {"workflow_dispatch"}
+    triggers = document[True]
+    assert set(triggers) == {"workflow_dispatch", "pull_request"}
+    assert triggers["pull_request"]["paths"] == [
+        ".github/workflows/worker-resource-measurement.yml",
+        "deploy/compose.worker.measurement.yaml",
+        "Dockerfile",
+        "scripts/stress/worker_resource_*.py",
+        "tests/stress/test_worker_resource_*.py",
+    ]
     assert document["permissions"] == {"contents": "read"}
+    assert len(document["jobs"]["measure"]["strategy"]["matrix"]["include"]) == 3
     assert "ubuntu-24.04" in source
     assert "worker-resource-results/" in source
     assert "data/worker-resource-measurement/work" not in source

@@ -1,6 +1,13 @@
 name: Worker Resource Measurement
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/worker-resource-measurement.yml"
+      - "deploy/compose.worker.measurement.yaml"
+      - "Dockerfile"
+      - "scripts/stress/worker_resource_*.py"
+      - "tests/stress/test_worker_resource_*.py"
   workflow_dispatch:
     inputs:
       cold_repetitions:
