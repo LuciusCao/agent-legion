@@ -317,28 +317,6 @@ def test_wait_retries_compose_readiness_failures(monkeypatch: pytest.MonkeyPatch
     assert calls == 2
 
 
-def test_workflow_supports_dispatch_and_scoped_prs_on_native_linux() -> None:
-    workflow_path = ROOT / ".github/workflows/worker-resource-measurement.yml"
-    source = workflow_path.read_text(encoding="utf-8")
-    document = yaml.safe_load(source)
-    triggers = document[True]
-    assert set(triggers) == {"workflow_dispatch", "pull_request"}
-    assert triggers["pull_request"]["paths"] == [
-        ".github/workflows/worker-resource-measurement.yml",
-        "deploy/compose.worker.measurement.yaml",
-        "Dockerfile",
-        "scripts/stress/worker_resource_*.py",
-        "tests/stress/test_worker_resource_*.py",
-    ]
-    assert document["permissions"] == {"contents": "read"}
-    assert len(document["jobs"]["measure"]["strategy"]["matrix"]["include"]) == 3
-    assert "ubuntu-24.04" in source
-    assert "worker-resource-results/" in source
-    assert "data/worker-resource-measurement/work" not in source
-    assert "secrets." not in source
-    assert "workflow_run" not in source
-
-
 DIGEST = hashlib.sha256(b"abc").hexdigest()
 STAGING_KEY = "jobs-staging/resource_code/job1/exec1/code_output.json"
 AUTHORITY_KEY = "jobs/resource_code/job1/.v/attempt/code_output.json"

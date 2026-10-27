@@ -37,6 +37,11 @@ jobs:
   measure:
     name: measure-${{ matrix.envelope }}
     runs-on: ubuntu-24.04
+    env:
+      MEASUREMENT_COLD_REPETITIONS: ${{ inputs.cold_repetitions || '1' }}
+      MEASUREMENT_WARM_REPETITIONS: ${{ inputs.warm_repetitions || '2' }}
+      MEASUREMENT_PIDS_INTERVAL_MS: ${{ inputs.pids_interval_ms || '100' }}
+      MEASUREMENT_MEMORY_INTERVAL_MS: ${{ inputs.memory_interval_ms || '500' }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -91,10 +96,10 @@ jobs:
           --upload-concurrency ${{ matrix.upload_concurrency }}
           --jobs-per-wave ${{ matrix.jobs_per_wave }}
           --artifact-kib ${{ matrix.artifact_kib }}
-          --cold-repetitions '${{ inputs.cold_repetitions }}'
-          --warm-repetitions '${{ inputs.warm_repetitions }}'
-          --pids-interval-ms '${{ inputs.pids_interval_ms }}'
-          --memory-interval-ms '${{ inputs.memory_interval_ms }}'
+          --cold-repetitions "$MEASUREMENT_COLD_REPETITIONS"
+          --warm-repetitions "$MEASUREMENT_WARM_REPETITIONS"
+          --pids-interval-ms "$MEASUREMENT_PIDS_INTERVAL_MS"
+          --memory-interval-ms "$MEASUREMENT_MEMORY_INTERVAL_MS"
 
       # Only generated reports, numeric samples and sanitized logs are uploaded.
       # The work dir (models, configs, tokens) is deliberately outside this path.

@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from scripts.stress import worker_resource_restart as restart
 from scripts.stress.worker_resource_identity import ContractViolationError
@@ -17,7 +18,7 @@ from scripts.stress.worker_resource_restart import (
     require_current_registration,
     require_pending_restart,
 )
-from scripts.stress.worker_resource_workload import MeasurementRun, write_run_report
+from scripts.stress.worker_resource_workload import MeasurementRun, parse_args, write_run_report
 
 pytestmark = pytest.mark.no_db
 
@@ -485,3 +486,73 @@ def test_measurement_host_identity_matches_mount_owner(
     desktop = workload.MeasurementRun(args)
     assert desktop.env["MEASUREMENT_HOST_UID"] == "0"
     assert desktop.env["MEASUREMENT_HOST_GID"] == "0"
+
+
+_WORKFLOW_INPUTS = {
+    "MEASUREMENT_COLD_REPETITIONS": "cold_repetitions",
+    "MEASUREMENT_WARM_REPETITIONS": "warm_repetitions",
+    "MEASUREMENT_PIDS_INTERVAL_MS": "pids_interval_ms",
+    "MEASUREMENT_MEMORY_INTERVAL_MS": "memory_interval_ms",
+}
+
+
+def _render_workflow_inputs(document: dict, inputs: dict[str, str]) -> list[str]:
+    arguments: list[str] = []
+    for env_name, input_name in _WORKFLOW_INPUTS.items():
+        expression = document["jobs"]["measure"]["env"][env_name]
+        assert expression.startswith("${{ inputs.")
+        body = expression[3:-2].strip().removeprefix("inputs.")
+        key, _, fallback = body.partition("||")
+        value = inputs.get(key.strip(), "")
+        if not value and fallback:
+            value = fallback.strip().strip("'")
+        arguments.extend((f"--{input_name.replace('_', '-')}", value))
+    return arguments
+
+
+def test_workflow_dispatch_and_pr_inputs_reach_real_parser() -> None:
+    workflow_path = Path(__file__).parents[2] / ".github/workflows/worker-resource-measurement.yml"
+    source = workflow_path.read_text(encoding="utf-8")
+    document = yaml.safe_load(source)
+    triggers = document[True]
+    assert set(triggers) == {"workflow_dispatch", "pull_request"}
+    assert triggers["pull_request"]["paths"] == [
+        ".github/workflows/worker-resource-measurement.yml",
+        "deploy/compose.worker.measurement.yaml",
+        "Dockerfile",
+        "scripts/stress/worker_resource_*.py",
+        "tests/stress/test_worker_resource_*.py",
+    ]
+    definitions = triggers["workflow_dispatch"]["inputs"]
+    defaults = {name: definition["default"] for name, definition in definitions.items()}
+    for event_inputs in (
+        defaults,
+        {name: "" for name in definitions},
+    ):
+        args = parse_args(_render_workflow_inputs(document, event_inputs))
+        assert args.cold_repetitions == 1
+        assert args.warm_repetitions == 2
+        assert args.pids_interval_ms == 100
+        assert args.memory_interval_ms == 500
+    custom = parse_args(
+        _render_workflow_inputs(
+            document,
+            {
+                "cold_repetitions": "3",
+                "warm_repetitions": "4",
+                "pids_interval_ms": "125",
+                "memory_interval_ms": "750",
+            },
+        )
+    )
+    assert custom.cold_repetitions == 3
+    assert custom.warm_repetitions == 4
+    assert custom.pids_interval_ms == 125
+    assert custom.memory_interval_ms == 750
+    assert document["permissions"] == {"contents": "read"}
+    assert len(document["jobs"]["measure"]["strategy"]["matrix"]["include"]) == 3
+    assert "ubuntu-24.04" in source
+    assert "worker-resource-results/" in source
+    assert "data/worker-resource-measurement/work" not in source
+    assert "secrets." not in source
+    assert "workflow_run" not in source
