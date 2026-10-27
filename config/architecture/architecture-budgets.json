@@ -1031,6 +1031,7 @@
     "scripts/e2e/_main_flow_seed.py": 179,
     "scripts/e2e/_preview_panel_seed.py": 40,
     "scripts/e2e/_worker.py": 110,
+    "scripts/e2e/host_skill_checkout_smoke.py": 140,
     "scripts/e2e/run_browser_smoke.py": 230,
     "scripts/ensure-s3-bucket.py": 74,
     "scripts/export_openapi.py": 102,
