@@ -38,6 +38,7 @@ from scripts.stress.worker_resource_desktop import (  # noqa: E402
 from scripts.stress.worker_resource_evidence import (  # noqa: E402
     ensure_measurement_bucket,
     measure_upload_backlog,
+    require_empty_output_dir,
     require_sandbox_ready,
     write_iteration_metadata,
 )
@@ -762,6 +763,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    require_empty_output_dir(args.output_dir)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     run = MeasurementRun(args)
     run.stub = None

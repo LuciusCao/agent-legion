@@ -448,6 +448,86 @@ def test_outer_finalization_counts_match_result_run_report_summary_and_raw(
     assert evidence_ready == [True]
 
 
+def _successful_run(project: str):
+    run = SimpleNamespace(
+        stub=None,
+        secrets=[],
+        project=project,
+        env={"COMPOSE_PROJECT_NAME": project},
+        events=[],
+    )
+    run.prepare = lambda: None
+    run.run_iteration = lambda mode, repetition: {
+        "iteration": f"{mode}-{repetition}",
+        "success": True,
+        "scenarios": {},
+    }
+
+    def compose(*arguments: str, **_kwargs: object) -> str:
+        run.events.append(arguments)
+        if arguments == ("config", "--format", "json"):
+            return json.dumps({"name": run.project})
+        return ""
+
+    run.compose = compose
+    return run
+
+
+def test_nonempty_output_dir_has_no_side_effects_and_preserves_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.stress import worker_resource_workload as workload
+
+    output = tmp_path / "evidence"
+    (output / "cold-1").mkdir(parents=True)
+    samples = output / "cold-1" / "samples.jsonl"
+    samples.write_text("old samples\n", encoding="utf-8")
+    report = output / "run-report.json"
+    report.write_text('{"old": true}\n', encoding="utf-8")
+    run = _successful_run("measure-must-not-start")
+    monkeypatch.setattr(workload, "MeasurementRun", lambda _args: run)
+    with pytest.raises(ContractViolationError, match="output-dir"):
+        workload.main(["--output-dir", str(output)])
+    assert run.events == []
+    assert samples.read_text(encoding="utf-8") == "old samples\n"
+    assert report.read_text(encoding="utf-8") == '{"old": true}\n'
+    file_output = tmp_path / "not-a-directory"
+    file_output.write_text("old file", encoding="utf-8")
+    with pytest.raises(ContractViolationError, match="output-dir"):
+        workload.main(["--output-dir", str(file_output)])
+    assert file_output.read_text(encoding="utf-8") == "old file"
+    assert run.events == []
+
+
+def test_main_allows_absent_and_empty_output_dirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.stress import worker_resource_workload as workload
+
+    absent = tmp_path / "new-results"
+    empty = tmp_path / "empty-results"
+    empty.mkdir()
+    for index, output in enumerate((absent, empty)):
+        run = _successful_run(f"measure-new-{index}")
+        monkeypatch.setattr(workload, "MeasurementRun", lambda _args, run=run: run)
+        assert (
+            workload.main(
+                [
+                    "--output-dir",
+                    str(output),
+                    "--cold-repetitions",
+                    "1",
+                    "--warm-repetitions",
+                    "0",
+                ]
+            )
+            == 0
+        )
+        report = json.loads((output / "run-report.json").read_text(encoding="utf-8"))
+        assert report["success"] is True
+        assert report["iterations"][0]["iteration"] == "cold-1"
+
+
 def test_main_cleans_project_volumes_after_prepare_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

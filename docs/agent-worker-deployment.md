@@ -522,6 +522,8 @@ uv run python scripts/stress/worker_resource_workload.py \
   --cold-repetitions 1 --warm-repetitions 2
 ```
 
+`--output-dir` 必须不存在或确认为空。若是普通文件或已有任何内容（包括上次 cold/warm 的 samples、summary 或 run-report），测量会在创建容器、执行 Compose 或 seed 之前以 ContractViolation 拒绝，且不执行 outer finalizer；不会删除或混合旧证据，也不会重写旧 run-report。重复运行时请改用新的 output-dir，或先自行确认并清理旧目录；默认 `worker-resource-results/latest` 也因此不能直接用于第二次测量。
+
 Docker Desktop 只允许显式功能验收，不允许 sizing：准备与容器同为 Linux/arm64 或 Linux/amd64 的 velites 后，加 `--allow-docker-desktop`，例如 `--cold-repetitions 1 --warm-repetitions 0 --jobs-per-wave 2`（全场景最小波次；`<2` 会 fail-fast，因为 upload-backlog 无法同时形成 active 与 queued）。此模式用独立 sidecar 在 Docker VM 的 host PID namespace 读取同一组 cgroup 字段，metadata 标记 `docker-desktop-functional-only`；project、volumes、workdir 与 sidecar 都是 measurement 专用并会清理。Docker Desktop 的私有 netns loopback 还需显式 `MEASUREMENT_NET_ADMIN=NET_ADMIN`（#39），该 functional override 会写入 metadata，不改变 shipped 默认 capability，也不作为生产 privilege 建议。原生 Linux workflow 仍是资源数值的唯一验收来源。
 
 每次迭代都走真实 scoped-token register → claim → Worker code sandbox / velites agent → presigned S3 upload → restart，并校验 agent/code execution 的记录确属被测 Worker；不使用 `simulate_agents.py` 代替 executor。身份校验按本波次 jobs、实际 DAG/job_nodes 和 current node_run 建立 `(workspace, job, node, kind, execution)` 精确集合，历史或重复行不能顶替另一 job 的缺失。测量先等 job completed，再等预期 done execution/outcome 可见；缺失是 readiness 等待，CAS 或错误证据是立即合约失败。
