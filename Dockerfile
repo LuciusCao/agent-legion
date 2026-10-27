@@ -30,8 +30,9 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 # g++：兜底编译无预编译 wheel 的 sdist 依赖。
 # ffmpeg：视频管线（转写前转 wav、章节切片、yt-dlp 合并）在 host 上直接调用。
+# git：SkillManager 在 host 上解析 latest/pinned 并用 git archive 物化 skill。
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends g++ ffmpeg \
+    && apt-get install -y --no-install-recommends g++ ffmpeg git \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 COPY pyproject.toml uv.lock ./
