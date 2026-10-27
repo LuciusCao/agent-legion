@@ -458,3 +458,30 @@ def test_final_cleanup_rejects_changed_project_identity(tmp_path: Path) -> None:
     assert events == [("config", "--format", "json")]
     persisted = json.loads((tmp_path / "run-report.json").read_text(encoding="utf-8"))
     assert persisted["cleanup_error"] == report["cleanup_error"]
+
+
+def test_measurement_host_identity_matches_mount_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.stress import worker_resource_workload as workload
+
+    monkeypatch.setattr(workload.os, "getuid", lambda: 1234)
+    monkeypatch.setattr(workload.os, "getgid", lambda: 2345)
+    args = workload.parse_args(
+        [
+            "--work-dir",
+            str(tmp_path / "work"),
+            "--output-dir",
+            str(tmp_path / "results"),
+            "--velites-bin",
+            str(tmp_path / "velites"),
+        ]
+    )
+    monkeypatch.setattr(workload.platform, "system", lambda: "Linux")
+    native = workload.MeasurementRun(args)
+    assert native.env["MEASUREMENT_HOST_UID"] == "1234"
+    assert native.env["MEASUREMENT_HOST_GID"] == "2345"
+    monkeypatch.setattr(workload.platform, "system", lambda: "Darwin")
+    desktop = workload.MeasurementRun(args)
+    assert desktop.env["MEASUREMENT_HOST_UID"] == "0"
+    assert desktop.env["MEASUREMENT_HOST_GID"] == "0"

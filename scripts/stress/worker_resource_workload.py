@@ -314,6 +314,8 @@ class MeasurementRun:
             "MEASUREMENT_WORKER_PORT": str(args.worker_port),
             "MEASUREMENT_VAULT_KEY": self.vault_key,
             "MEASUREMENT_SKILLS_DIR": str(self.skills_dir),
+            "MEASUREMENT_HOST_UID": "0" if platform.system() == "Darwin" else str(os.getuid()),
+            "MEASUREMENT_HOST_GID": "0" if platform.system() == "Darwin" else str(os.getgid()),
             "MEASUREMENT_WORKER_CONFIG": str(self.worker_config),
             "MEASUREMENT_MODELS_PATH": str(self.models_path),
             "VELITES_BIN": str(self.velites),

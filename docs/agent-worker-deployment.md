@@ -507,6 +507,8 @@ Host 设置页顶部的「Worker 与 Worker 控制台」卡片、签发成功后
 
 `deploy/compose.worker.measurement.yaml` 与 `scripts/stress/worker_resource_workload.py` 是一次性真实测量栈，不是生产部署示例。Worker 明示保持当前 shipped envelope：镜像默认 root、`SYS_ADMIN`、`seccomp:unconfined`，且不设置 `mem_limit` / `pids_limit`；这些字段描述被测对象，不是推荐值。工具不按核数、协议并发上限、历史 RSS 或 Docker Desktop 结果推导生产限制，也不修改现有 Compose 的资源或权限。
 
+Host 支持容器只在启动阶段以 root 安装 git 并初始化 `host-data` 卷，随后按 bind owner 用 `setpriv` 设置身份并以 `HOME=/tmp` 启动：原生 Linux 使用执行 seed 的宿主 UID/GID，Docker Desktop 的 root-owned 映射使用 0:0。skills 以只读方式挂到 `/tmp/.agents/skills`，使 Git 仓库 owner 与 SkillManager 读取 UID 一致。该测量专用对齐不配置 `safe.directory`，不修改生产 SkillManager，也不改变 Worker、模型或 velites 绑定身份；Desktop 的 0:0 只是功能兼容，不替代原生非 root 验证。
+
 优先在 GitHub Actions 手动运行 **Worker Resource Measurement**（仅 `workflow_dispatch`，原生 Ubuntu 24.04）。矩阵的 single / mixed / upload-backlog 只是显式测量 envelope；dispatch 可设置 cold/warm 重复次数与 pids/memory 采样间隔。原生 Linux 也可在仓库根执行：
 
 ```bash

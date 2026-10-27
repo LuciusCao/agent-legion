@@ -255,6 +255,13 @@ def test_measurement_compose_preserves_shipped_envelope_without_new_limits() -> 
     assert "pids_limit" not in worker
     assert "env_file" not in worker
     assert "user" not in worker
+    host = document["services"]["host"]
+    startup = host["command"][0]
+    assert 'exec setpriv --reuid="${MEASUREMENT_HOST_UID}"' in startup
+    assert '--regid="${MEASUREMENT_HOST_GID}" --clear-groups' in startup
+    assert "env HOME=/tmp uvicorn" in startup
+    assert host["volumes"][1].endswith(":/tmp/.agents/skills:ro")
+    assert "safe.directory" not in startup
 
 
 def test_workload_covers_real_execution_and_restart_scenarios() -> None:
