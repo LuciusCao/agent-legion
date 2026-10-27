@@ -24,23 +24,6 @@ class ExecutionReadinessError(RuntimeError):
     """The normal two-phase commit has not published the expected execution yet."""
 
 
-def require_pending_restart(
-    previous_config: Mapping[str, Any], current_config: Mapping[str, Any], runtime: str
-) -> dict[str, Any]:
-    """Prove registered runtime state differs from the not-yet-restarted config."""
-    registered = set(previous_config.get("registered_runtimes") or [])
-    disabled = set(current_config.get("disabled_runtimes") or [])
-    if runtime not in registered or runtime not in disabled:
-        raise ContractViolationError(f"{runtime} pending-restart state was not observable")
-    return {
-        "observed": True,
-        "runtime": runtime,
-        "registered_runtimes": sorted(registered),
-        "disabled_runtimes": sorted(disabled),
-        "evidence": "registered runtime is disabled in config and has not re-registered",
-    }
-
-
 def build_execution_expectations(
     *,
     job_ids: Iterable[str],

@@ -1084,6 +1084,7 @@
     "scripts/stress/worker_resource_identity.py": 289,
     "scripts/stress/worker_resource_measurement.py": 290,
     "scripts/stress/worker_resource_reporting.py": 100,
+    "scripts/stress/worker_resource_restart.py": 105,
     "scripts/stress/worker_resource_workload.py": 720,
     "scripts/studio_chat_smoke.py": 103,
     "scripts/summarize_test_results.py": 159,

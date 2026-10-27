@@ -43,7 +43,6 @@ from scripts.stress.worker_resource_evidence import (  # noqa: E402
 from scripts.stress.worker_resource_identity import (  # noqa: E402
     ContractViolationError,
     ExecutionReadinessError,
-    require_pending_restart,
     verify_remote_uploads,
 )
 from scripts.stress.worker_resource_measurement import (  # noqa: E402
@@ -52,6 +51,10 @@ from scripts.stress.worker_resource_measurement import (  # noqa: E402
     sanitize_log_text,
 )
 from scripts.stress.worker_resource_reporting import write_sanitized_logs  # noqa: E402
+from scripts.stress.worker_resource_restart import (  # noqa: E402
+    enable_claim,
+    require_pending_restart,
+)
 from server.app.agent_control.register_tokens import AgentRegisterTokenStore  # noqa: E402
 from server.app.db.transaction import read_connection, write_transaction  # noqa: E402
 from server.app.jobs import JobQueries  # noqa: E402
@@ -278,6 +281,8 @@ def seed_measurement_workspaces(dsn: str, skills_dir: Path, artifact_chars: int)
 class MeasurementRun:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
+        self.worker_id = WORKER_ID
+        self.workspaces = WORKSPACES
         self.work_dir = args.work_dir.resolve()
         self.output_dir = args.output_dir.resolve()
         self.velites = args.velites_bin.resolve()
@@ -437,27 +442,13 @@ class MeasurementRun:
 
         self._wait("Worker execution process", ready)
 
-    def _wait_registered(self, session: requests.Session) -> None:
-        def registered() -> bool:
-            response = session.get(f"{self.host_url}/api/agent-workers", timeout=5)
-            response.raise_for_status()
-            for worker in response.json().get("workers", []):
-                if worker.get("worker_id") != WORKER_ID:
-                    continue
-                scopes = set(worker.get("allowed_workspaces") or [])
-                return (
-                    scopes == set(WORKSPACES.values())
-                    and int(worker.get("max_code_concurrency") or 0) == self.args.code_concurrency
-                    and "velites" in (worker.get("runtimes") or [])
-                )
-            return False
-
-        self._wait("remote agent/code registration", registered)
-
-    def _enable_claim(self, token: str, session: requests.Session) -> None:
-        self._worker_request("PUT", "/api/config", token, json={"claim_enabled": True})
-        self._wait_worker_process(token)
-        self._wait_registered(session)
+    def _enable_claim(
+        self,
+        token: str,
+        session: requests.Session,
+        previous_status: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return enable_claim(self, token, session, previous_status)
 
     def _create_run(
         self, session: requests.Session, scenario: str, iteration: str
@@ -632,6 +623,7 @@ class MeasurementRun:
                     result["scenarios"][scenario] = self._submit(session, scenario, iteration)
 
             sampler.mark(iteration, "pending-restart")
+            previous_status = self._worker_request("GET", "/api/status", control_token).json()
             previous = self._worker_request("GET", "/api/config", control_token).json()
             pending = self._worker_request(
                 "PUT", "/api/config", control_token, json={"disabled_runtimes": ["velites"]}
@@ -643,21 +635,27 @@ class MeasurementRun:
             self._worker_request(
                 "PUT", "/api/config", control_token, json={"disabled_runtimes": []}
             )
-            self._enable_claim(control_token, session)
+            result["scenarios"]["pending-restart"]["recovery"] = self._enable_claim(
+                control_token, session, previous_status
+            )
 
             sampler.mark(iteration, "executor-restart")
+            executor_previous = self._worker_request("GET", "/api/status", control_token).json()
             self._worker_request("POST", "/api/restart", control_token)
-            self._enable_claim(control_token, session)
+            result["scenarios"]["executor-restart"] = self._enable_claim(
+                control_token, session, executor_previous
+            )
             time.sleep(self.args.idle_seconds)
-            result["scenarios"]["executor-restart"] = {"observed": True}
 
             sampler.mark(iteration, "container-restart")
+            container_previous = self._worker_request("GET", "/api/status", control_token).json()
             self.compose("restart", "worker")
             refresh_cgroup_reader(self, container)
             self._wait_http(f"{self.worker_url}/api/health")
-            self._enable_claim(control_token, session)
+            result["scenarios"]["container-restart"] = self._enable_claim(
+                control_token, session, container_previous
+            )
             time.sleep(self.args.idle_seconds)
-            result["scenarios"]["container-restart"] = {"observed": True}
             result["success"] = True
         except Exception as exc:
             result["error"] = sanitize_log_text(f"{type(exc).__name__}: {exc}", self.secrets)
@@ -692,6 +690,19 @@ class MeasurementRun:
                 json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
         return result
+
+
+def write_run_report(output_dir: Path, reports: list[dict[str, Any]]) -> dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report = {
+        "schema_version": 1,
+        "success": bool(reports) and all(item["success"] for item in reports),
+        "iterations": reports,
+    }
+    (output_dir / "run-report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return report
 
 
 def _positive(value: str) -> int:
@@ -731,6 +742,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--allow-docker-desktop", action="store_true")
     parser.add_argument("--skip-build", action="store_true")
     args = parser.parse_args(argv)
+    if args.jobs_per_wave < 2:
+        parser.error("jobs-per-wave must be >= 2 for simultaneous active and queued uploads")
     if (
         args.cold_repetitions < 0
         or args.warm_repetitions < 0
@@ -776,15 +789,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if run.stub is not None:
             run.stub.close()
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    report = {
-        "schema_version": 1,
-        "success": bool(reports) and all(item["success"] for item in reports),
-        "iterations": reports,
-    }
-    (args.output_dir / "run-report.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    report = write_run_report(args.output_dir, reports)
     return 0 if report["success"] else 1
 
 

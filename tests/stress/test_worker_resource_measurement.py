@@ -12,12 +12,10 @@ import yaml
 
 from scripts.stress.worker_resource_evidence import BacklogEvidence, measure_upload_backlog
 from scripts.stress.worker_resource_identity import (
-    ContractViolationError,
     ExecutionReadinessError,
     build_execution_expectations,
     require_direct_outputs,
     require_done_executions,
-    require_pending_restart,
     verify_authority_object,
 )
 from scripts.stress.worker_resource_measurement import (
@@ -31,6 +29,7 @@ from scripts.stress.worker_resource_measurement import (
     sanitize_log_text,
     summarize_samples,
 )
+from scripts.stress.worker_resource_restart import ContractViolationError, require_pending_restart
 from scripts.stress.worker_resource_workload import SCENARIOS, _definitions, parse_args
 
 pytestmark = pytest.mark.no_db
@@ -277,6 +276,9 @@ def test_workload_covers_real_execution_and_restart_scenarios() -> None:
     args = parse_args(["--cold-repetitions", "1", "--warm-repetitions", "1"])
     assert args.pids_interval_ms == 100
     assert args.artifact_chars == 64 * 1024
+    with pytest.raises(SystemExit):
+        parse_args(["--jobs-per-wave", "1"])
+    assert parse_args(["--jobs-per-wave", "2"]).jobs_per_wave == 2
 
 
 def test_empty_or_deduplicated_wave_cannot_pass_as_complete() -> None:
