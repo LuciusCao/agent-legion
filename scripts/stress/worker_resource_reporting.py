@@ -99,3 +99,24 @@ def write_sanitized_logs(run: Any, iteration_dir: Path) -> None:
             sanitize_log_text(result.stdout + result.stderr, run.secrets) + "\n",
             encoding="utf-8",
         )
+
+
+def finalize_measurement_run(
+    run: Any, output_dir: Path, reports: list[dict[str, Any]], write_report: Any
+) -> dict[str, Any]:
+    report = write_report(output_dir, reports)
+    try:
+        project = run.project
+        if not project or run.env.get("COMPOSE_PROJECT_NAME") != project:
+            raise RuntimeError("measurement project identity changed before volume cleanup")
+        config = json.loads(run.compose("config", "--format", "json", capture=True))
+        if not isinstance(config, dict) or config.get("name") != project:
+            raise RuntimeError("compose project identity mismatch before volume cleanup")
+        run.compose("down", "--volumes", "--remove-orphans")
+    except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:
+        report["success"] = False
+        report["cleanup_error"] = sanitize_log_text(f"{type(exc).__name__}: {exc}", run.secrets)
+        (output_dir / "run-report.json").write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    return report

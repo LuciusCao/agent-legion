@@ -310,6 +310,19 @@ class CgroupSampler:
         return summary
 
 
+def write_run_report(output_dir: Path, reports: list[dict[str, Any]]) -> dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report = {
+        "schema_version": 1,
+        "success": bool(reports) and all(item["success"] for item in reports),
+        "iterations": reports,
+    }
+    (output_dir / "run-report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return report
+
+
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(authorization[\"'\s:=]+bearer\s+)[^\s,}\"']+"),
     re.compile(r"(?i)([\"']?(?:register_token|apiKey|api_key)[\"']?\s*[:=]\s*[\"'])[^\"']+"),

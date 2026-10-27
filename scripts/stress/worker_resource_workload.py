@@ -49,13 +49,18 @@ from scripts.stress.worker_resource_measurement import (  # noqa: E402
     CgroupSampler,
     report_sample_counts,
     sanitize_log_text,
+    write_run_report,
 )
-from scripts.stress.worker_resource_reporting import write_sanitized_logs  # noqa: E402
+from scripts.stress.worker_resource_reporting import (  # noqa: E402
+    finalize_measurement_run,
+    write_sanitized_logs,
+)
 from scripts.stress.worker_resource_restart import (  # noqa: E402
     enable_claim,
     require_pending_restart,
 )
 from server.app.agent_control.register_tokens import AgentRegisterTokenStore  # noqa: E402
+from server.app.db.connection import close_database_pools  # noqa: E402
 from server.app.db.transaction import read_connection, write_transaction  # noqa: E402
 from server.app.jobs import JobQueries  # noqa: E402
 from server.app.services.node_code_seeding import seed_workspace_node_code  # noqa: E402
@@ -251,6 +256,7 @@ def _node_sources(artifact_chars: int) -> dict[str, str]:
 
 
 def seed_measurement_workspaces(dsn: str, skills_dir: Path, artifact_chars: int) -> None:
+    close_database_pools()
     job_db = JobQueries(dsn, jobs_dir=skills_dir / "unused-jobs")
     with write_transaction(dsn) as conn:
         conn.execute(
@@ -595,7 +601,6 @@ class MeasurementRun:
             control_token = self._control_token()
             self.control_token = control_token
             self.secrets.append(control_token)
-
             for workspace_id in sorted(set(WORKSPACES.values())):
                 _token_id, register_token = AgentRegisterTokenStore(self.dsn).issue_register_token(
                     workspace_id=workspace_id, label=f"measurement {iteration}"
@@ -612,7 +617,6 @@ class MeasurementRun:
                 WorkspaceWorkerControl(self.dsn).resume(workspace_id)
             sampler.mark(iteration, "idle-registered")
             time.sleep(self.args.idle_seconds)
-
             for scenario in ("agent", "code", "mixed", "upload-backlog"):
                 sampler.mark(iteration, scenario)
                 if scenario == "upload-backlog":
@@ -690,19 +694,6 @@ class MeasurementRun:
                 json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
         return result
-
-
-def write_run_report(output_dir: Path, reports: list[dict[str, Any]]) -> dict[str, Any]:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    report = {
-        "schema_version": 1,
-        "success": bool(reports) and all(item["success"] for item in reports),
-        "iterations": reports,
-    }
-    (output_dir / "run-report.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    return report
 
 
 def _positive(value: str) -> int:
@@ -789,7 +780,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if run.stub is not None:
             run.stub.close()
-    report = write_run_report(args.output_dir, reports)
+        report = finalize_measurement_run(run, args.output_dir, reports, write_run_report)
     return 0 if report["success"] else 1
 
 

@@ -9,6 +9,7 @@ import pytest
 
 from scripts.stress import worker_resource_restart as restart
 from scripts.stress.worker_resource_measurement import summarize_samples
+from scripts.stress.worker_resource_reporting import finalize_measurement_run
 from scripts.stress.worker_resource_restart import (
     ExecutionReadinessError,
     enable_claim,
@@ -164,31 +165,31 @@ class _FakeSampler:
         self.rows = [
             {
                 "kind": "memory",
-                "iteration": "cold-1",
+                "iteration": self.iteration,
                 "scenario": "agent",
                 "values": {"current_bytes": 1, "peak_bytes": 1, "max": "max", "stat": {}},
             },
             {
                 "kind": "memory",
-                "iteration": "cold-1",
+                "iteration": self.iteration,
                 "scenario": "agent",
                 "values": {"current_bytes": 2, "peak_bytes": 2, "max": "max", "stat": {}},
             },
             {
                 "kind": "pids",
-                "iteration": "cold-1",
+                "iteration": self.iteration,
                 "scenario": "agent",
                 "values": {"current": 1, "max": "max", "events": {"max": 0}},
             },
             {
                 "kind": "pids",
-                "iteration": "cold-1",
+                "iteration": self.iteration,
                 "scenario": "agent",
                 "values": {"current": 2, "max": "max", "events": {"max": 0}},
             },
             {
                 "kind": "pids",
-                "iteration": "cold-1",
+                "iteration": self.iteration,
                 "scenario": "idle-registered",
                 "values": {"current": 3, "max": "max", "events": {"max": 0}},
             },
@@ -237,11 +238,32 @@ def test_outer_finalization_counts_match_result_run_report_summary_and_raw(
     run.worker_config = run.work_dir / "worker.yaml"
     run.vault_key = "vault"
     run.secrets = []
-    run.env = {}
+    run.env = {"COMPOSE_PROJECT_NAME": run.project}
     run.storage = object()
     run.cgroup_reader_id = ""
     run.control_token = "token"
-    run.compose = lambda *_args, **_kwargs: "ready"
+    events: list[tuple[str, ...]] = []
+    evidence_ready: list[bool] = []
+
+    def compose(*arguments: str, **_kwargs: object) -> str:
+        events.append(arguments)
+        if arguments == ("config", "--format", "json"):
+            return json.dumps({"name": run.project})
+        if arguments == ("down", "--volumes", "--remove-orphans"):
+            evidence_ready.append(
+                (run.output_dir / "run-report.json").is_file()
+                and all(
+                    (run.output_dir / iteration / name).is_file()
+                    for iteration in ("cold-1", "warm-1")
+                    for name in ("result.json", "host.log")
+                )
+            )
+        return "ready"
+
+    def write_logs(_run: object, iteration_dir: Path) -> None:
+        (iteration_dir / "host.log").write_text("sanitized\n", encoding="utf-8")
+
+    run.compose = compose
     run._wait_http = lambda _url: None
     run._control_token = lambda: "token"
     run._worker_request = lambda *_args, **_kwargs: SimpleNamespace(json=lambda: {"config": {}})
@@ -253,7 +275,7 @@ def test_outer_finalization_counts_match_result_run_report_summary_and_raw(
     monkeypatch.setattr(workload, "cgroup_reader", lambda *_args: object())
     monkeypatch.setattr(workload, "CgroupSampler", _FakeSampler)
     monkeypatch.setattr(workload, "write_iteration_metadata", lambda *_args: None)
-    monkeypatch.setattr(workload, "write_sanitized_logs", lambda *_args: None)
+    monkeypatch.setattr(workload, "write_sanitized_logs", write_logs)
     monkeypatch.setattr(
         workload, "measure_upload_backlog", lambda *_args: {"direct_upload_verified": True}
     )
@@ -274,20 +296,99 @@ def test_outer_finalization_counts_match_result_run_report_summary_and_raw(
         lambda _self, **_kwargs: ("token-id", "plaintext"),
     )
 
-    result = run.run_iteration("cold", 1)
-    outer = write_run_report(run.output_dir, [result])
-    result_path = run.output_dir / "cold-1" / "result.json"
-    summary_path = run.output_dir / "cold-1" / "summary.json"
-    raw_path = run.output_dir / "cold-1" / "samples.jsonl"
-    result_doc = json.loads(result_path.read_text(encoding="utf-8"))
-    summary_doc = json.loads(summary_path.read_text(encoding="utf-8"))
-    raw = [json.loads(line) for line in raw_path.read_text(encoding="utf-8").splitlines()]
-    expected = {
-        "memory": sum(row["kind"] == "memory" for row in raw),
-        "pids": sum(row["kind"] == "pids" for row in raw),
-    }
-    assert result_doc["success"] is True
-    assert result_doc["sample_counts"] == expected
-    assert summary_doc["groups"]["all/all"]["sample_counts"] == expected
-    assert outer["iterations"][0]["sample_counts"] == expected
-    assert summary_doc["groups"]["cold-1/idle-registered"]["sample_counts"] != expected
+    reports = [run.run_iteration("cold", 1), run.run_iteration("warm", 1)]
+    outer = finalize_measurement_run(run, run.output_dir, reports, write_run_report)
+    for index, iteration in enumerate(("cold-1", "warm-1")):
+        result_doc = json.loads(
+            (run.output_dir / iteration / "result.json").read_text(encoding="utf-8")
+        )
+        summary_doc = json.loads(
+            (run.output_dir / iteration / "summary.json").read_text(encoding="utf-8")
+        )
+        raw = [
+            json.loads(line)
+            for line in (run.output_dir / iteration / "samples.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        expected = {
+            "memory": sum(row["kind"] == "memory" for row in raw),
+            "pids": sum(row["kind"] == "pids" for row in raw),
+        }
+        assert result_doc["success"] is True
+        assert result_doc["sample_counts"] == expected
+        assert summary_doc["groups"]["all/all"]["sample_counts"] == expected
+        assert outer["iterations"][index]["sample_counts"] == expected
+        assert summary_doc["groups"][f"{iteration}/idle-registered"]["sample_counts"] != expected
+    assert [event for event in events if event[0] == "down"] == [
+        ("down", "--remove-orphans", "-v"),
+        ("down", "--remove-orphans"),
+        ("down", "--remove-orphans"),
+        ("down", "--remove-orphans"),
+        ("down", "--volumes", "--remove-orphans"),
+    ]
+    assert evidence_ready == [True]
+
+
+def test_main_cleans_project_volumes_after_prepare_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.stress import worker_resource_workload as workload
+
+    events: list[str] = []
+    report_ready: list[bool] = []
+    run = SimpleNamespace(
+        stub=None,
+        secrets=[],
+        project="measure-failure",
+        env={"COMPOSE_PROJECT_NAME": "measure-failure"},
+    )
+
+    def prepare() -> None:
+        events.append("prepare")
+        raise RuntimeError("injected prepare failure")
+
+    def compose(*arguments: str, **_kwargs: object) -> str:
+        events.append(" ".join(arguments))
+        if arguments == ("config", "--format", "json"):
+            return json.dumps({"name": run.project})
+        if arguments == ("down", "--volumes", "--remove-orphans"):
+            report_ready.append((tmp_path / "run-report.json").is_file())
+        return ""
+
+    run.prepare = prepare
+    run.compose = compose
+    monkeypatch.setattr(workload, "MeasurementRun", lambda _args: run)
+    assert workload.main(["--output-dir", str(tmp_path)]) == 1
+    assert events == [
+        "prepare",
+        "config --format json",
+        "down --volumes --remove-orphans",
+    ]
+    assert report_ready == [True]
+    report = json.loads((tmp_path / "run-report.json").read_text(encoding="utf-8"))
+    assert report["success"] is False
+    assert "injected prepare failure" in report["iterations"][0]["error"]
+
+
+def test_final_cleanup_rejects_changed_project_identity(tmp_path: Path) -> None:
+    events: list[tuple[str, ...]] = []
+    run = SimpleNamespace(
+        project="measure-expected",
+        env={"COMPOSE_PROJECT_NAME": "measure-expected"},
+        secrets=[],
+    )
+
+    def compose(*arguments: str, **_kwargs: object) -> str:
+        events.append(arguments)
+        return json.dumps({"name": "measure-other"})
+
+    run.compose = compose
+    report = finalize_measurement_run(
+        run, tmp_path, [{"iteration": "cold-1", "success": True}], write_run_report
+    )
+    assert report["success"] is False
+    assert "identity mismatch" in report["cleanup_error"]
+    assert events == [("config", "--format", "json")]
+    persisted = json.loads((tmp_path / "run-report.json").read_text(encoding="utf-8"))
+    assert persisted["cleanup_error"] == report["cleanup_error"]
