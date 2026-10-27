@@ -274,20 +274,28 @@ def test_marker_check_with_snapshot_rereads_live_membership(tmp_path: Path) -> N
     assert proc_groups.pgid_members(tmp_path / "none") is None
 
 
-def test_reap_many_groups_waits_once_not_per_record(tmp_path: Path) -> None:
+def test_reap_many_groups_waits_once_not_per_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """一次 executor 被杀会遗留大量记录：整批 TERM/KILL 只等一次，而非每条 1s。"""
     procs = [_spawn_group(marker=f"agent-legion-exec-{i}") for i in range(4)]
     for i, proc in enumerate(procs):
         _write_record(tmp_path, f"exec-{i}", proc.pid)
+    waits: list[float] = []
+    real_sleep = orphan_reaper.time.sleep
+
+    def _record_wait(seconds: float) -> None:
+        waits.append(seconds)
+        real_sleep(seconds)
+
+    monkeypatch.setattr(orphan_reaper.time, "sleep", _record_wait)
     try:
-        started = time.monotonic()
         reap_orphaned_agents(tmp_path, lambda _msg: None)
-        elapsed = time.monotonic() - started
     finally:
         for proc in procs:
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(proc.pid, 9)
-    assert elapsed < 3.5, elapsed  # per-record sleeps would take >= 4s
+    assert waits == [1]
     for proc in procs:
         with pytest.raises(ChildProcessError):
             os.waitpid(proc.pid, os.WNOHANG)
