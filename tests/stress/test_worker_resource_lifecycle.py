@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from scripts.stress import worker_resource_restart as restart
 from scripts.stress.worker_resource_measurement import summarize_samples
 from scripts.stress.worker_resource_restart import (
     ExecutionReadinessError,
+    enable_claim,
     require_current_registration,
 )
 from scripts.stress.worker_resource_workload import MeasurementRun, write_run_report
@@ -89,6 +92,63 @@ def test_restart_readiness_returns_current_pid_and_registration_evidence() -> No
     assert evidence["observed_at"]
     initial = require_current_registration(_status(2), [current_host], None, _expected())
     assert initial["before"] == {"pid": None, "started_at": None}
+
+
+class _FixedDatetime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        value = cls(2026, 1, 1, 0, 0, 10, tzinfo=UTC)
+        return value if tz is not None else value.replace(tzinfo=None)
+
+
+def _enable_claim_with_heartbeats(host_last_seen: str, local_last_seen: str) -> dict:
+    status = _status(2)
+    status["host_worker"]["last_seen_at"] = local_last_seen
+    host_row = {**_host_row(), "last_seen_at": host_last_seen}
+    run = SimpleNamespace(
+        worker_id="resource-measurement-worker",
+        workspaces={value: value for value in _expected()["workspace_ids"]},
+        args=SimpleNamespace(agent_concurrency=1, code_concurrency=1),
+        control_token="control-token",
+        host_url="http://host",
+        _wait_worker_process=lambda _token: None,
+        _wait=lambda _description, probe: probe(),
+    )
+
+    def worker_request(method, path, token, **_kwargs):
+        assert token == "control-token"
+        if method == "GET":
+            assert path == "/api/status"
+            return SimpleNamespace(json=lambda: status)
+        return SimpleNamespace()
+
+    run._worker_request = worker_request
+    response = SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"workers": [host_row]})
+    session = SimpleNamespace(get=lambda _url, **_kwargs: response)
+    return enable_claim(run, "control-token", session, _status(1))
+
+
+@pytest.mark.parametrize("future_side", ["host", "local"])
+def test_enable_claim_rejects_future_heartbeat(
+    future_side: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(restart, "datetime", _FixedDatetime)
+    future = "2026-01-01T00:00:11+00:00"
+    host = future if future_side == "host" else "2026-01-01T00:00:03+00:00"
+    local = future if future_side == "local" else "2026-01-01T00:00:04+00:00"
+    with pytest.raises(ExecutionReadinessError, match="not the current executor registration"):
+        _enable_claim_with_heartbeats(host, local)
+
+
+def test_enable_claim_accepts_legal_heartbeat_offsets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(restart, "datetime", _FixedDatetime)
+    evidence = _enable_claim_with_heartbeats(
+        "2026-01-01T00:00:03+00:00", "2026-01-01T00:00:04+00:00"
+    )
+    assert evidence["observed"] is True
+    observed_at = datetime.fromisoformat(evidence["observed_at"])
+    assert observed_at == datetime(2026, 1, 1, 0, 0, 10, tzinfo=UTC)
+    assert observed_at.tzinfo is UTC
 
 
 class _FakeSampler:

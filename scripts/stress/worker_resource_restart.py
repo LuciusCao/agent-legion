@@ -70,14 +70,15 @@ def require_current_registration(
         ]
     except (KeyError, ValueError) as exc:
         raise ExecutionReadinessError("current registration timestamp is unavailable") from exc
-    if (
-        any(value.tzinfo is None for value in last_seen)
-        or min(value.timestamp() for value in last_seen) < started_at
+    observed_at = datetime.now(UTC)
+    started = datetime.fromtimestamp(started_at, UTC)
+    if any(value.tzinfo is None for value in last_seen) or any(
+        not started <= value <= observed_at for value in last_seen
     ):
         raise ExecutionReadinessError("Host row is not the current executor registration")
     return {
         "observed": True,
-        "observed_at": datetime.now(UTC).isoformat(),
+        "observed_at": observed_at.isoformat(),
         "before": {
             "pid": (previous_status or {}).get("pid"),
             "started_at": (previous_status or {}).get("started_at"),
