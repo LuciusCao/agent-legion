@@ -390,17 +390,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1004
   ceiling: 111
 - check: architecture.file_budget
-  path: velites/src/agent.rs
-  reason: 'Issue #297 added the first inline unit tests to the agent loop module (pure-function coverage:
-    enabled_tool_names, outputs_remediation, resolve_required_outputs incl. sandbox-escape rejection).
-    Rust inline #[cfg(test)] tests colocate with the implementation by convention (the budget policy itself
-    exempts velites/tests/ for this reason), and the loop tests already live in velites/tests/agent_loop.rs;
-    what remains inline needs private-fn access. Ceiling 282 to 331 covers the ~49 effective test lines;
-    drop the exemption when the module shrinks or the pure helpers become pub and testable from tests/.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/311
-  ceiling: 329
-- check: architecture.file_budget
   path: server/app/db/migrations/jobs_workflow_key_alignment.py
   reason: The issue-211 Phase 3 v68 data migration aligns every stored workflow_key with the v62 binding
     across the live tables plus the node_code entity-key prefix. Each composite-unique surface carries

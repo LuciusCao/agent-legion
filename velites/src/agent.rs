@@ -41,24 +41,26 @@
 //!   After `MAX_CONSECUTIVE_LENGTH_STOPS` consecutive truncations the run
 //!   falls back to the pre-#865 ending (remediation turn / normal stop).
 
-use std::path::{Path, PathBuf};
+mod output;
+mod tools;
+
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::anyhow;
-
+use self::output::{emit_outputs_validation, missing_outputs, resolve_required_outputs};
+use self::tools::enabled_tool_names;
 use crate::budget::Budget;
 use crate::cancel::CancelToken;
-use crate::contract::{self, Contract, ContractError};
+use crate::contract;
 use crate::contract_gate::{gate_outcome, remediation_message};
 use crate::events::{
     AgentEndEvent, AgentStartEvent, EndReason, Event, EventSink, Message, MessageEndEvent,
-    MessageStartEvent, OutputsValidationEvent, Role, SessionEvent, StopReason,
-    ToolExecutionEndEvent, ToolExecutionStartEvent, ToolResultData, TurnEndEvent, TurnStartEvent,
-    Usage,
+    MessageStartEvent, Role, SessionEvent, StopReason, ToolExecutionEndEvent,
+    ToolExecutionStartEvent, ToolResultData, TurnEndEvent, TurnStartEvent, Usage,
 };
 use crate::provider::{CompletionRequest, Provider, ToolSpec};
 use crate::session::SessionLog;
-use crate::tools::{resolve_in_cwd, ToolContext, ToolKind, ToolOutput};
+use crate::tools::{ToolContext, ToolKind, ToolOutput};
 use crate::truncation::{continuation_message, track_stop, MAX_CONSECUTIVE_LENGTH_STOPS};
 
 /// Exit code for a run that ended without its declared `--require-output`
@@ -111,14 +113,6 @@ enum WrapUp {
     /// remediation turn, then the run ends normally and `outputs_validation`
     /// reports the final state.
     Outputs,
-}
-
-/// A `--require-output` entry after sandbox validation.
-struct RequiredOutput {
-    /// The path as passed on the CLI (reported in `outputs_validation`).
-    display: String,
-    /// Sandbox-resolved absolute path (existence checks).
-    resolved: PathBuf,
 }
 
 pub async fn run<P: Provider>(
@@ -406,120 +400,9 @@ pub async fn run<P: Provider>(
     Ok(0)
 }
 
-/// Validate `--require-output` paths against the cwd sandbox (same resolver
-/// the tools use); escapes are a harness-side configuration error.
-fn resolve_required_outputs(paths: &[PathBuf], cwd: &Path) -> anyhow::Result<Vec<RequiredOutput>> {
-    paths
-        .iter()
-        .map(|path| {
-            let display = path.to_string_lossy().into_owned();
-            let resolved = resolve_in_cwd(cwd, &display)
-                .map_err(|err| anyhow!("invalid --require-output `{display}`: {err}"))?;
-            Ok(RequiredOutput { display, resolved })
-        })
-        .collect()
-}
-
-/// Declared artifacts that do not exist right now (CLI-relative display form).
-fn missing_outputs(required: &[RequiredOutput]) -> Vec<String> {
-    required
-        .iter()
-        .filter(|output| !output.resolved.exists())
-        .map(|output| output.display.clone())
-        .collect()
-}
-
-/// Always emit `outputs_validation` when `--require-output` was given (even
-/// with an empty `missing` list) so the Host can decide explicitly. `mode`
-/// reports whether the contract engine ran (#443); `violations` is empty in
-/// existence mode or when every contract rule holds.
-fn emit_outputs_validation(
-    sink: &mut dyn EventSink,
-    required: &[RequiredOutput],
-    contract: Option<&Result<Contract, ContractError>>,
-    cwd: &Path,
-) {
-    if required.is_empty() {
-        return;
-    }
-    let (mode, violations) = gate_outcome(contract, cwd);
-    sink.emit(&Event::OutputsValidation(OutputsValidationEvent {
-        missing: missing_outputs(required),
-        mode: mode.to_string(),
-        violations,
-    }));
-}
-
 fn append_session(session: &mut Option<SessionLog>, message: &Message) -> anyhow::Result<()> {
     if let Some(log) = session {
         log.append(message)?;
     }
     Ok(())
-}
-
-fn enabled_tool_names(tools: &[ToolKind]) -> String {
-    tools
-        .iter()
-        .map(|kind| kind.name())
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // The agent loop itself (`run`) is exercised by the library integration
-    // tests in tests/agent_loop.rs (ScriptedProvider + MemorySink); what
-    // stays here are the private pure helpers only the same crate/file can
-    // reach: enabled_tool_names, resolve_required_outputs / missing_outputs.
-    // The remediation message lives in contract.rs, the #865 truncation
-    // helpers in truncation.rs (both with their own tests).
-
-    #[test]
-    fn enabled_tool_names_joins_in_order() {
-        assert_eq!(enabled_tool_names(&[ToolKind::Read]), "read");
-        assert_eq!(
-            enabled_tool_names(&[ToolKind::Read, ToolKind::Write, ToolKind::Bash]),
-            "read,write,bash"
-        );
-    }
-
-    #[test]
-    fn resolve_required_outputs_reports_missing_by_display_path() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("out")).unwrap();
-        let cwd = dir.path().canonicalize().unwrap();
-
-        let required = resolve_required_outputs(&[PathBuf::from("out/result.json")], &cwd).unwrap();
-        assert_eq!(required.len(), 1);
-        assert_eq!(required[0].display, "out/result.json");
-        assert!(required[0].resolved.ends_with("out/result.json"));
-        // Not yet written: reported missing under the CLI-relative name.
-        assert_eq!(missing_outputs(&required), vec!["out/result.json"]);
-
-        std::fs::write(dir.path().join("out/result.json"), "data").unwrap();
-        assert!(missing_outputs(&required).is_empty());
-    }
-
-    #[test]
-    fn resolve_required_outputs_rejects_sandbox_escapes() {
-        // An escaping --require-output path is a caller misconfiguration,
-        // never a runtime "missing" entry.
-        let dir = tempfile::tempdir().unwrap();
-        let cwd = dir.path().canonicalize().unwrap();
-        for escape in ["../outside.txt", "/etc/passwd"] {
-            // Match instead of unwrap_err: RequiredOutput is not Debug.
-            let err = match resolve_required_outputs(&[PathBuf::from(escape)], &cwd) {
-                Ok(_) => panic!("escaping --require-output `{escape}` must be rejected"),
-                Err(err) => err,
-            };
-            let message = err.to_string();
-            assert!(
-                message.contains(&format!("invalid --require-output `{escape}`")),
-                "unexpected error: {message}"
-            );
-            assert!(message.contains("escapes"));
-        }
-    }
 }
