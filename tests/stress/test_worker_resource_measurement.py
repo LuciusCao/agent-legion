@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from scripts.stress.worker_resource_evidence import BacklogEvidence, measure_upload_backlog
+from scripts.stress.worker_resource_execution import require_exclusive_execution_routes
 from scripts.stress.worker_resource_host_code import (
     HOST_CODE_SANDBOX_OVERRIDE,
     host_code_sandbox_metadata,
@@ -22,6 +23,7 @@ from scripts.stress.worker_resource_identity import (
     require_direct_outputs,
     require_done_executions,
     verify_authority_object,
+    verify_remote_uploads,
 )
 from scripts.stress.worker_resource_local_code import (
     host_code_direct_refs,
@@ -735,6 +737,131 @@ def test_default_code_zero_uses_current_host_leases_and_authority_refs() -> None
     refs = host_code_direct_refs(execution, ["a.json", "b.json"], "resource_mixed", authority)
     assert refs["a.json"]["storage_key"].endswith("/e11/a.json.gz")
     assert refs["b.json"]["size_bytes"] == 3
+
+
+def _lease_row(job: str, node: str, run: int, execution: str) -> dict:
+    return {
+        "execution_id": execution,
+        "workspace_id": "resource_mixed",
+        "job_id": job,
+        "node_key": node,
+        "node_run_id": run,
+        "status": "released",
+    }
+
+
+def _exclusive_inputs() -> dict:
+    expected = _identity_expectations()
+    host_expected = {key: value for key, value in expected.items() if value["kind"] == "code"}
+    remote_expected = {key: value for key, value in expected.items() if key not in host_expected}
+    execution_rows = [
+        _execution_row("job1", "second", 12, "e12"),
+        _execution_row("job2", "second", 22, "e22"),
+    ]
+    lease_rows = [
+        _lease_row("job1", "first", 11, "e11"),
+        _lease_row("job2", "first", 21, "e21"),
+    ]
+    return {
+        "remote_expected": remote_expected,
+        "host_expected": host_expected,
+        "execution_rows": execution_rows,
+        "lease_rows": lease_rows,
+        "remote_done": require_done_executions(
+            remote_expected, execution_rows, worker_id="resource-measurement-worker"
+        ),
+        "host_done": require_host_code_leases(host_expected, lease_rows),
+    }
+
+
+def test_current_execution_routes_are_unique_and_history_cannot_fill_or_conflict() -> None:
+    inputs = _exclusive_inputs()
+    inputs["execution_rows"].append(_execution_row("job1", "first", 1, "historical-worker"))
+    inputs["lease_rows"].append(_lease_row("job1", "second", 2, "historical-host"))
+    require_exclusive_execution_routes(**inputs)
+
+
+def test_host_lease_and_done_worker_execution_on_same_current_key_fails() -> None:
+    inputs = _exclusive_inputs()
+    inputs["execution_rows"].append(_execution_row("job1", "first", 11, "worker-code"))
+    with pytest.raises(ContractViolationError, match="conflicting Worker execution"):
+        require_exclusive_execution_routes(**inputs)
+
+
+@pytest.mark.parametrize("status", ["queued", "claimed", "failed"])
+def test_any_worker_status_on_host_expected_current_key_fails(status: str) -> None:
+    inputs = _exclusive_inputs()
+    conflict = _execution_row("job1", "first", 11, "worker-code")
+    conflict["state"] = status
+    inputs["execution_rows"].append(conflict)
+    with pytest.raises(ContractViolationError, match="conflicting Worker execution"):
+        require_exclusive_execution_routes(**inputs)
+
+
+def test_host_lease_on_worker_expected_current_key_fails() -> None:
+    inputs = _exclusive_inputs()
+    inputs["lease_rows"].append(_lease_row("job1", "second", 12, "host-agent"))
+    with pytest.raises(ContractViolationError, match="conflicting Host lease"):
+        require_exclusive_execution_routes(**inputs)
+
+
+def test_worker_and_host_execution_ids_must_be_globally_disjoint() -> None:
+    inputs = _exclusive_inputs()
+    inputs["host_done"][("job1", "first", 11)]["execution_id"] = "e12"
+    with pytest.raises(ContractViolationError, match="not disjoint"):
+        require_exclusive_execution_routes(**inputs)
+
+
+def test_verify_remote_uploads_rejects_conflicting_worker_row_on_host_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import contextmanager
+
+    execution_rows = _exclusive_inputs()["execution_rows"]
+    execution_rows.append(_execution_row("job1", "first", 11, "worker-code"))
+    lease_rows = _exclusive_inputs()["lease_rows"]
+
+    class Conn:
+        def execute(self, sql: str, _params: object) -> object:
+            rows = {
+                " from jobs ": [
+                    {"id": "job1", "workspace_id": "resource_mixed"},
+                    {"id": "job2", "workspace_id": "resource_mixed"},
+                ],
+                " from job_nodes ": [
+                    {"job_id": job, "node_key": node}
+                    for job in ("job1", "job2")
+                    for node in ("first", "second")
+                ],
+                " from node_runs ": [
+                    {"id": 11, "job_id": "job1", "node_key": "first"},
+                    {"id": 12, "job_id": "job1", "node_key": "second"},
+                    {"id": 21, "job_id": "job2", "node_key": "first"},
+                    {"id": 22, "job_id": "job2", "node_key": "second"},
+                ],
+                " from agent_execution_requests": execution_rows,
+                " from executor_leases": lease_rows,
+            }
+            for fragment, result in rows.items():
+                if fragment in sql:
+                    return SimpleNamespace(fetchall=lambda result=result: result)
+            raise AssertionError(f"unexpected SQL: {sql}")
+
+    @contextmanager
+    def fake_connection(_dsn: str):
+        yield Conn()
+
+    monkeypatch.setattr("scripts.stress.worker_resource_identity.read_connection", fake_connection)
+    with pytest.raises(ContractViolationError, match="conflicting Worker execution"):
+        verify_remote_uploads(
+            dsn="dsn",
+            storage=_Storage(),
+            workspace_id="resource_mixed",
+            nodes=_identity_nodes(),
+            job_ids=["job1", "job2"],
+            worker_id="resource-measurement-worker",
+            allow_host_code=True,
+        )
 
 
 @pytest.mark.parametrize(

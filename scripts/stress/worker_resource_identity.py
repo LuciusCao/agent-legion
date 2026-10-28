@@ -22,7 +22,9 @@ from scripts.stress.worker_resource_execution import (
 )
 from scripts.stress.worker_resource_local_code import (
     host_code_direct_refs,
+    partition_execution_expectations,
     read_host_code_leases,
+    require_exclusive_execution_routes,
     require_host_code_leases,
 )
 from server.app.db.transaction import read_connection
@@ -215,12 +217,12 @@ def verify_remote_uploads(
         job_node_rows=job_node_rows,
         node_run_rows=node_run_rows,
     )
-    host_expected = {
-        key: value for key, value in expected.items() if allow_host_code and value["kind"] == "code"
-    }
-    remote_expected = {key: value for key, value in expected.items() if key not in host_expected}
+    host_expected, remote_expected = partition_execution_expectations(expected, allow_host_code)
     done = require_done_executions(remote_expected, execution_rows, worker_id=worker_id)
     host_done = require_host_code_leases(host_expected, lease_rows)
+    require_exclusive_execution_routes(
+        remote_expected, host_expected, execution_rows, lease_rows, done, host_done
+    )
     done.update(host_done)
     with read_connection(dsn) as conn:
         artifact_rows = conn.execute(

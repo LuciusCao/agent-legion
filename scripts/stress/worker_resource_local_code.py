@@ -6,6 +6,20 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from scripts.stress.worker_resource_execution import ContractViolationError
+from scripts.stress.worker_resource_execution import (
+    require_exclusive_execution_routes as require_exclusive_execution_routes,
+)
+
+
+def partition_execution_expectations(
+    expected: Mapping[tuple[str, str, int], Mapping[str, Any]], allow_host_code: bool
+) -> tuple[
+    dict[tuple[str, str, int], Mapping[str, Any]], dict[tuple[str, str, int], Mapping[str, Any]]
+]:
+    host = {
+        key: value for key, value in expected.items() if allow_host_code and value["kind"] == "code"
+    }
+    return host, {key: value for key, value in expected.items() if key not in host}
 
 
 def read_host_code_leases(conn: Any, job_ids: list[str], enabled: bool) -> list[Mapping[str, Any]]:

@@ -58,6 +58,38 @@ def build_execution_expectations(
     return expected
 
 
+def _matches_current_key(row: Mapping[str, Any], key: tuple[str, str, int]) -> bool:
+    job_id, node_key, node_run_id = key
+    return (
+        str(row["job_id"]) == job_id
+        and str(row["node_key"]) == node_key
+        and row.get("node_run_id") is not None
+        and int(row["node_run_id"]) == node_run_id
+    )
+
+
+def require_exclusive_execution_routes(
+    remote_expected: Mapping[tuple[str, str, int], Mapping[str, Any]],
+    host_expected: Mapping[tuple[str, str, int], Mapping[str, Any]],
+    execution_rows: Iterable[Mapping[str, Any]],
+    lease_rows: Iterable[Mapping[str, Any]],
+    remote_done: Mapping[tuple[str, str, int], Mapping[str, Any]],
+    host_done: Mapping[tuple[str, str, int], Mapping[str, Any]],
+) -> None:
+    executions = list(execution_rows)
+    leases = list(lease_rows)
+    for key in host_expected:
+        if any(_matches_current_key(row, key) for row in executions):
+            raise ContractViolationError(f"conflicting Worker execution for Host key {key}")
+    for key in remote_expected:
+        if any(_matches_current_key(row, key) for row in leases):
+            raise ContractViolationError(f"conflicting Host lease for Worker key {key}")
+    remote_ids = {str(row["execution_id"]) for row in remote_done.values()}
+    host_ids = {str(row["execution_id"]) for row in host_done.values()}
+    if remote_ids & host_ids:
+        raise ContractViolationError("Worker and Host execution ids are not disjoint")
+
+
 def require_done_executions(
     expected: Mapping[tuple[str, str, int], Mapping[str, Any]],
     execution_rows: Iterable[Mapping[str, Any]],
@@ -69,15 +101,7 @@ def require_done_executions(
     done: dict[tuple[str, str, int], Mapping[str, Any]] = {}
     execution_ids: set[str] = set()
     for key, expectation in expected.items():
-        job_id, node_key, node_run_id = key
-        candidates = [
-            row
-            for row in rows
-            if str(row["job_id"]) == job_id
-            and str(row["node_key"]) == node_key
-            and row.get("node_run_id") is not None
-            and int(row["node_run_id"]) == node_run_id
-        ]
+        candidates = [row for row in rows if _matches_current_key(row, key)]
         if not candidates:
             raise ExecutionReadinessError(f"execution for {key} is not visible")
         if len(candidates) != 1:
