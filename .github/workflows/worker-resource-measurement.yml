@@ -154,6 +154,8 @@ jobs:
   installer-lifecycle:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      AGENT_LEGION_DOCKER_TESTS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -165,7 +167,7 @@ jobs:
       - run: uv sync
 
       - name: Exercise real installer fresh, idempotent, upgrade and rollback paths
-        run: uv run pytest -q tests/scripts/test_install_worker.py
+        run: uv run pytest -q tests/scripts/test_install_worker.py tests/scripts/test_install_worker_docker.py
 
       - name: Assert default resource limits in real Compose renders
         run: |

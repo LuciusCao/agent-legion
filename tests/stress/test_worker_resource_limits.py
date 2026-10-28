@@ -199,6 +199,8 @@ def test_workflow_dispatch_and_pr_inputs_reach_real_parser() -> None:
         step.get("run", "") for step in document["jobs"]["installer-lifecycle"]["steps"]
     )
     assert "uv run pytest -q tests/scripts/test_install_worker.py" in lifecycle
+    assert "tests/scripts/test_install_worker_docker.py" in lifecycle
+    assert document["jobs"]["installer-lifecycle"]["env"]["AGENT_LEGION_DOCKER_TESTS"] == "1"
     assert lifecycle.count("config --format json") == 3
     default_render = next(
         step["run"]
