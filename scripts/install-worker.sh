@@ -239,16 +239,41 @@ case "$pids_limit_final" in
   ''|*[!0-9]*) die "非法 AGENT_WORKER_PIDS_LIMIT: ${pids_limit_final}（正整数或 -1）" ;;
   *) [ "$pids_limit_final" -gt 0 ] || die "AGENT_WORKER_PIDS_LIMIT 必须为正整数或 -1" ;;
 esac
-if [ -f ./worker.yaml ]; then
+compose_for_resolution="./docker-compose.yaml"
+[ -f "$compose_for_resolution" ] || compose_for_resolution="$TMPDIR_/docker-compose.yaml"
+if ! control_volume="$(docker compose -f "$compose_for_resolution" config --format json 2>"$TMPDIR_/control-volume.err" | \
+  docker run --rm -i --network none --entrypoint python3 "${IMAGE_REPO}:${WORKER_VERSION}" -c \
+  'import json,sys
+config = json.load(sys.stdin)
+print(config["volumes"]["worker-control"]["name"])' 2>>"$TMPDIR_/control-volume.err")"; then
+  die "无法按实际 Compose 解析 worker-control 卷名，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
+fi
+if ! volume_names="$(docker volume ls --format '{{.Name}}' 2>>"$TMPDIR_/control-volume.err")"; then
+  die "无法核查 worker-control 卷是否存在，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
+fi
+control_volume_present=0
+if printf '%s\n' "$volume_names" | grep -Fxq "$control_volume"; then
+  control_volume_present=1
+fi
+if [ -f ./worker.yaml ] || [ "$control_volume_present" = 1 ]; then
+  set --
+  if [ "$control_volume_present" = 1 ]; then
+    set -- -v "$control_volume:/control:ro"
+  fi
   if ! concurrency="$(docker run --rm --network none --entrypoint python3 \
-    -v "$PWD:/work:ro" "${IMAGE_REPO}:${WORKER_VERSION}" -c \
-    'import yaml
+    "$@" -v "$PWD:/work:ro" "${IMAGE_REPO}:${WORKER_VERSION}" -c \
+    'from pathlib import Path
+import yaml
 from worker.config_validation import validate_config
-with open("/work/worker.yaml", encoding="utf-8") as stream:
+state = Path("/control/worker.yaml")
+if state.exists() and not state.is_file():
+    raise ValueError("控制卷 worker.yaml 不是 regular file")
+source = state if state.is_file() else Path("/work/worker.yaml")
+with source.open(encoding="utf-8") as stream:
     config = validate_config(yaml.safe_load(stream), require_identity=False)
 print(config["max_concurrency"], config["max_code_concurrency"], config["upload_max_concurrency"])' \
     2>"$TMPDIR_/concurrency.err")"; then
-    die "无法按 Worker YAML/整数语义可靠解析现有 worker.yaml 的并发键，未修改 compose/.env。请修正 YAML 或将三个并发键改为未加引号的整数后重试：$(tail -1 "$TMPDIR_/concurrency.err")"
+    die "无法按 Worker YAML/整数语义可靠解析实际生效控制副本，未修改 compose/.env。请修正控制卷 worker.yaml（不存在时才使用引导文件），或将三个并发键改为未加引号的整数后重试：$(tail -1 "$TMPDIR_/concurrency.err")"
   fi
   agent_limit="${concurrency%% *}"
   code_limit="${concurrency#* }"
