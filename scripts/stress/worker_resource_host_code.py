@@ -4,6 +4,22 @@ from __future__ import annotations
 
 from typing import Any
 
+_READ_LOG = (
+    "import functools,os,stat,sys; "
+    "fd=os.open(sys.argv[2],os.O_RDONLY|os.O_DIRECTORY); parts=sys.argv[1].split('/'); "
+    "assert parts[:3]==['logs','jobs','by-job'] and len(parts)==6; "
+    "fd=functools.reduce(lambda current,part: (os.open(part,os.O_RDONLY|os.O_NOFOLLOW|os.O_DIRECTORY,dir_fd=current), "
+    "os.close(current))[0], parts[:-1], fd); "
+    "leaf=os.open(parts[-1],os.O_RDONLY|os.O_NOFOLLOW,dir_fd=fd); os.close(fd); "
+    "assert stat.S_ISREG(os.fstat(leaf).st_mode); "
+    "sys.stdout.buffer.write(os.read(leaf,65536)); os.close(leaf)"
+)
+
+
+def _bounded(text: object, limit: int) -> str:
+    return str(text).encode("utf-8")[:limit].decode("utf-8", "ignore")
+
+
 HOST_CODE_SANDBOX_OVERRIDE = """services:
   host:
     security_opt:

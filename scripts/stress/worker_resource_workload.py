@@ -714,9 +714,11 @@ class MeasurementRun:
                 result["sample_counts"] = report_sample_counts(summary)
             try:
                 write_sanitized_logs(self, iteration_dir)
-            except (OSError, subprocess.CalledProcessError) as exc:
+            except Exception as exc:
+                # Diagnostic isolation never replaces the original workload failure or skips cleanup.
                 result["success"] = False
-                result["error"] = f"log collection failed: {exc}"
+                result["diagnostic_error"] = sanitize_log_text(repr(exc), self.secrets)
+                result.setdefault("error", f"log collection failed: {exc}")
             if self.cgroup_reader_id:
                 subprocess.run(
                     ["docker", "rm", "-f", self.cgroup_reader_id],
