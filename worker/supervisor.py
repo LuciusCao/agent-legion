@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
-import os
 import subprocess
-import sys
 import threading
 import time
 from collections import deque
@@ -18,7 +15,7 @@ from yaml import YAMLError
 from worker.config_store import WorkerConfigStore, public_config, validate_config
 from worker.executor_log import PanelLogSinks
 from worker.executor_processes import ExecutorProcesses
-from worker.lease_snapshot import RESULT_FILENAME, SNAPSHOT_ENV_VAR, SNAPSHOT_FILENAME
+from worker.lease_snapshot import RESULT_FILENAME, SNAPSHOT_FILENAME
 from worker.metrics_cache import METRICS_FILENAME
 from worker.orphan_reaper import reap_orphaned_agents
 from worker.registration.token import registration_tokens
@@ -32,9 +29,9 @@ from worker.restart_policy import (
     claim_resume_verdict,
     restart_delay,
 )
-from worker.service_env import proxy_env_overrides
-from worker.status import ENV_VAR, STATUS_FILENAME, read_runtime_status
+from worker.status import STATUS_FILENAME, read_runtime_status
 from worker.status.projection import host_view, process_snapshot, status_payload
+from worker.supervisor_launch import executor_launch, mounted_config_diverged
 from worker.token_status import token_status
 
 __all__ = ["WorkerConfigStore", "WorkerSupervisor", "public_config", "validate_config"]
@@ -117,7 +114,7 @@ class WorkerSupervisor:
                 directory = self.store.token_dir()
                 self._log(f"配置等待中：没有可用的注册 Token（{directory} 为空）")
                 return
-            if not self._warned_divergence and self._mounted_config_diverged():
+            if not self._warned_divergence and mounted_config_diverged(self.store):
                 self._warned_divergence = True
                 self._log(
                     "警告：挂载的配置文件与本地状态副本不一致，挂载修改不会自动生效；"
@@ -125,20 +122,14 @@ class WorkerSupervisor:
                 )
             self._generation += 1
             generation = self._generation
-            status_file = self.store.state_dir / STATUS_FILENAME
             self._cleanup_runtime_files()
             # proxy 配置（#444）在派生点注入：executor 与其 agent 子进程全部
             # 出网（backend 上传 + LLM 流量）统一走代理或统一直连；配置变更
             # 经控制台 restart 落到新 executor，与 restarted 语义对齐。
-            process = self._process = self.executors.spawn(
-                [sys.executable, str(self.worker_script), "--config", str(self.store.path)],
-                {
-                    **os.environ,
-                    **proxy_env_overrides(config.get("proxy", "")),
-                    ENV_VAR: str(status_file),
-                    SNAPSHOT_ENV_VAR: str(self.store.state_dir / SNAPSHOT_FILENAME),
-                },
+            launch = executor_launch(
+                self.worker_script, self.store.path, self.store.state_dir, config.get("proxy", "")
             )
+            process = self._process = self.executors.spawn(launch.argv, launch.env)
             self._started_at = time.time()
             self._exit_code = None
         # 锁外 reap（新进程尚在解释器启动阶段，clean_work_root 远落后于 killpg）。
@@ -244,17 +235,6 @@ class WorkerSupervisor:
         with self._lock:  # 锁内复制，避免迭代时被 collector append
             return list(self._logs)[-max(1, min(limit, 500)) :]
 
-    def _mounted_config_diverged(self) -> bool:
-        bootstrap = self.store.bootstrap_path
-        if bootstrap is None or not bootstrap.is_file() or not self.store.path.is_file():
-            return False
-        try:
-            mounted = hashlib.sha256(bootstrap.read_bytes()).digest()
-            current = hashlib.sha256(self.store.path.read_bytes()).digest()
-        except OSError:
-            return False
-        return mounted != current
-
     def status(self) -> dict[str, Any]:
         """本地与 Host 状态；connected 表示已登记且未被吊销，不代表实时连接。"""
         configured = self.store.configured()
@@ -280,7 +260,7 @@ class WorkerSupervisor:
             config,
             executions,
             self.store.bootstrap_error,
-            self._mounted_config_diverged(),
+            mounted_config_diverged(self.store),
             snapshot,
             remote,
             runtime.get("ramp_up"),

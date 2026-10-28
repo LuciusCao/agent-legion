@@ -83,6 +83,7 @@ COPY worker /app/worker
 COPY shared /app/shared
 COPY worker/client.py /usr/local/bin/agent_worker_client.py
 COPY worker/cli_args.py /usr/local/bin/agent_worker_cli_args.py
+COPY worker/cli_payload.py /usr/local/bin/agent_worker_cli_payload.py
 COPY --chmod=755 worker/cli.py /usr/local/bin/workerctl
 # Smoke: the image must be able to import every worker entry point;
 # a missing COPY fails the build here instead of crash-looping at runtime.

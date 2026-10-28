@@ -1,9 +1,13 @@
-"""Argument parsing and configuration payloads for workerctl."""
+"""Argument parsing for workerctl."""
 
 import argparse
 import os
 from pathlib import Path
-from typing import Any
+
+try:
+    from agent_worker_cli_payload import configure_payload
+except ModuleNotFoundError:  # worker 包内导入；独立 workerctl 使用上方同级模块。
+    from worker.cli_payload import configure_payload as configure_payload
 
 # Worker 状态目录的环境变量名与本地默认值（#1106）：workerctl 与
 # worker.service 的 --state-dir 默认值共用这一来源。与 Makefile 的
@@ -19,31 +23,6 @@ def default_state_dir() -> Path:
     在 build_parser 调用时求值（而非 import 时），测试可 monkeypatch 环境。
     """
     return Path(os.environ.get(STATE_DIR_ENV) or LOCAL_STATE_DIR)
-
-
-def _labels(values: list[str]) -> dict[str, str]:
-    labels: dict[str, str] = {}
-    for value in values:
-        key, separator, label_value = value.partition("=")
-        if not separator or not key:
-            raise ValueError(f"标签必须使用 key=value 格式: {value!r}")
-        labels[key] = label_value
-    return labels
-
-
-def _models(values: list[str]) -> list[dict[str, str]]:
-    models: list[dict[str, str]] = []
-    for value in values:
-        scope, colon, remainder = value.partition(":")
-        provider, separator, model = (remainder if colon else value).partition("/")
-        provider, model = provider.strip(), model.strip()
-        if not separator or not provider or not model:
-            raise ValueError(f"模型必须使用 [runtime:]provider/model 格式: {value!r}")
-        item = {"provider": provider, "model": model}
-        if colon:
-            item["runtime"] = scope.strip()
-        models.append(item)
-    return models
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -92,32 +71,3 @@ def build_parser() -> argparse.ArgumentParser:
         help="从文件读取 Host 签发的注册 token，避免密钥出现在进程参数中",
     )
     return parser
-
-
-def configure_payload(args: argparse.Namespace) -> dict[str, Any]:
-    payload: dict[str, Any] = {}
-    for argument, field in (
-        ("host_url", "host_url"),
-        ("worker_id", "worker_id"),
-        ("name", "name"),
-        ("disable_runtime", "disabled_runtimes"),
-        ("max_concurrency", "max_concurrency"),
-        ("upload_concurrency", "upload_max_concurrency"),
-        ("claim_enabled", "claim_enabled"),
-        ("proxy", "proxy"),
-    ):
-        value = getattr(args, argument)
-        if value is not None:
-            payload[field] = value
-    if args.model:
-        payload["models"] = _models(args.model)
-    if args.label:
-        payload["labels"] = _labels(args.label)
-    if args.register_token_file is not None:
-        try:
-            payload["register_token"] = args.register_token_file.read_text(encoding="utf-8").strip()
-        except OSError as exc:
-            raise ValueError(f"无法读取注册 token 文件: {exc}") from exc
-        if not payload["register_token"]:
-            raise ValueError("注册 token 文件不能为空")
-    return payload

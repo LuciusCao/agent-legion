@@ -27,6 +27,7 @@ def test_compose_keeps_control_api_local_and_state_separate_from_executions() ->
     assert "COPY shared /app/shared" in dockerfile
     assert 'python3 -c "import worker.service' in dockerfile
     assert "worker/cli_args.py /usr/local/bin/agent_worker_cli_args.py" in dockerfile
+    assert "worker/cli_payload.py /usr/local/bin/agent_worker_cli_payload.py" in dockerfile
 
 
 def test_compose_files_publish_effective_bind_to_worker_service() -> None:
