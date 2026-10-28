@@ -832,6 +832,24 @@ def test_workflow_dispatch_and_pr_inputs_reach_real_parser() -> None:
     )
     assert "uv run pytest -q tests/scripts/test_install_worker.py" in lifecycle
     assert lifecycle.count("config --format json") == 3
+    default_render = next(
+        step["run"]
+        for step in document["jobs"]["installer-lifecycle"]["steps"]
+        if step.get("name") == "Assert default resource limits in real Compose renders"
+    )
+    for key in (
+        "AGENT_WORKER_RESOURCE_LIMITS_MODE",
+        "AGENT_WORKER_MEM_LIMIT",
+        "AGENT_WORKER_PIDS_LIMIT",
+    ):
+        assert f"-u {key}" in default_render
+    assert "--env-file /dev/null" in default_render
+    for injected in (
+        "AGENT_WORKER_RESOURCE_LIMITS_MODE=default",
+        "AGENT_WORKER_MEM_LIMIT=256m",
+        "AGENT_WORKER_PIDS_LIMIT=96",
+    ):
+        assert injected not in default_render
     for name in ("compose.worker.yaml", "compose.worker.standalone.yaml", "compose.host.yaml"):
         assert name in lifecycle
     assert document["permissions"] == {"contents": "read"}

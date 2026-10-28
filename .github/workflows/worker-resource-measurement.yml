@@ -170,8 +170,8 @@ jobs:
       - name: Assert default resource limits in real Compose renders
         run: |
           for file in deploy/compose.worker.yaml deploy/compose.worker.standalone.yaml deploy/compose.host.yaml; do
-            env AGENT_WORKER_RESOURCE_LIMITS_MODE=default AGENT_WORKER_MEM_LIMIT=256m AGENT_WORKER_PIDS_LIMIT=96 \
-              docker compose -f "$file" config --format json |
+            env -u AGENT_WORKER_RESOURCE_LIMITS_MODE -u AGENT_WORKER_MEM_LIMIT -u AGENT_WORKER_PIDS_LIMIT \
+              docker compose --env-file /dev/null -f "$file" config --format json |
               uv run python -c 'import json,sys; w=json.load(sys.stdin)["services"]["worker"]; assert str(w["mem_limit"]) == "268435456" and w["pids_limit"] == 96; assert w["environment"]["AGENT_WORKER_RESOURCE_LIMITS_MODE"] == "default"; assert w["cap_add"] == ["SYS_ADMIN"]'
           done
 
