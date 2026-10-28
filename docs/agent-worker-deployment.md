@@ -522,7 +522,7 @@ uv run python scripts/stress/worker_resource_workload.py \
   --cold-repetitions 1 --warm-repetitions 2
 ```
 
-`--output-dir` 必须不存在或确认为空。若是普通文件或已有任何内容（包括上次 cold/warm 的 samples、summary 或 run-report），测量会在创建容器、执行 Compose 或 seed 之前以 ContractViolation 拒绝，且不执行 outer finalizer；不会删除或混合旧证据，也不会重写旧 run-report。重复运行时请改用新的 output-dir，或先自行确认并清理旧目录；默认 `worker-resource-results/latest` 也因此不能直接用于第二次测量。
+`--output-dir` 必须不存在或确认为空。若是普通文件或已有任何内容（包括上次 cold/warm 的 samples、summary 或 run-report），测量会在创建容器、执行 Compose 或 seed 之前以 ContractViolation 拒绝，且不执行 outer finalizer；不会删除或混合旧证据，也不会重写旧 run-report。重复运行时请改用新的 output-dir，或先自行确认并清理旧目录；默认 `worker-resource-results/latest` 也因此不能直接用于第二次测量。测量还在 output-dir 同级持有非阻塞 `flock`，从入口检查持续到最终报告与清理完成；并发第二次运行会在任何 Compose/seed/report 写入前失败，锁文件不属于测量 artifact。
 
 Docker Desktop 只允许显式功能验收，不允许 sizing：准备与容器同为 Linux/arm64 或 Linux/amd64 的 velites 后，加 `--allow-docker-desktop`，例如 `--cold-repetitions 1 --warm-repetitions 0 --jobs-per-wave 2`（全场景最小波次；`<2` 会 fail-fast，因为 upload-backlog 无法同时形成 active 与 queued）。此模式用独立 sidecar 在 Docker VM 的 host PID namespace 读取同一组 cgroup 字段，metadata 标记 `docker-desktop-functional-only`；project、volumes、workdir 与 sidecar 都是 measurement 专用并会清理。Docker Desktop 的私有 netns loopback 还需显式 `MEASUREMENT_NET_ADMIN=NET_ADMIN`（#39），该 functional override 会写入 metadata，不改变 shipped 默认 capability，也不作为生产 privilege 建议。原生 Linux workflow 仍是资源数值的唯一验收来源。
 

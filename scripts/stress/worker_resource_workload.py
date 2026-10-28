@@ -38,7 +38,6 @@ from scripts.stress.worker_resource_desktop import (  # noqa: E402
 from scripts.stress.worker_resource_evidence import (  # noqa: E402
     ensure_measurement_bucket,
     measure_upload_backlog,
-    require_empty_output_dir,
     require_sandbox_ready,
     write_iteration_metadata,
 )
@@ -52,6 +51,11 @@ from scripts.stress.worker_resource_measurement import (  # noqa: E402
     report_sample_counts,
     sanitize_log_text,
     write_run_report,
+)
+from scripts.stress.worker_resource_output import (  # noqa: E402
+    _positive,
+    output_dir_lock,
+    require_empty_output_dir,
 )
 from scripts.stress.worker_resource_reporting import (  # noqa: E402
     finalize_measurement_run,
@@ -705,13 +709,6 @@ class MeasurementRun:
         return result
 
 
-def _positive(value: str) -> int:
-    parsed = int(value)
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("must be positive")
-    return parsed
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -764,34 +761,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     require_empty_output_dir(args.output_dir)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    run = MeasurementRun(args)
-    run.stub = None
-    reports: list[dict[str, Any]] = []
-    try:
-        run.prepare()
-        for mode, count in (("cold", args.cold_repetitions), ("warm", args.warm_repetitions)):
-            for repetition in range(1, count + 1):
-                report = run.run_iteration(mode, repetition)
-                reports.append(report)
-                if not report["success"]:
+    with output_dir_lock(args.output_dir):
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+        run = MeasurementRun(args)
+        run.stub = None
+        reports: list[dict[str, Any]] = []
+        try:
+            run.prepare()
+            for mode, count in (("cold", args.cold_repetitions), ("warm", args.warm_repetitions)):
+                for repetition in range(1, count + 1):
+                    report = run.run_iteration(mode, repetition)
+                    reports.append(report)
+                    if not report["success"]:
+                        break
+                if reports and not reports[-1]["success"]:
                     break
-            if reports and not reports[-1]["success"]:
-                break
-    except Exception as exc:
-        reports.append(
-            {
-                "iteration": "prepare",
-                "success": False,
-                "error": sanitize_log_text(f"{type(exc).__name__}: {exc}", run.secrets),
-            }
-        )
-        LOGGER.exception("measurement preparation failed")
-    finally:
-        if run.stub is not None:
-            run.stub.close()
-        report = finalize_measurement_run(run, args.output_dir, reports, write_run_report)
-    return 0 if report["success"] else 1
+        except Exception as exc:
+            reports.append(
+                {
+                    "iteration": "prepare",
+                    "success": False,
+                    "error": sanitize_log_text(f"{type(exc).__name__}: {exc}", run.secrets),
+                }
+            )
+            LOGGER.exception("measurement preparation failed")
+        finally:
+            if run.stub is not None:
+                run.stub.close()
+            report = finalize_measurement_run(run, args.output_dir, reports, write_run_report)
+        return 0 if report["success"] else 1
 
 
 if __name__ == "__main__":

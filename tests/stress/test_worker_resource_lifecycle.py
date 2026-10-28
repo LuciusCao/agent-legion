@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -497,6 +499,7 @@ def test_nonempty_output_dir_has_no_side_effects_and_preserves_evidence(
         workload.main(["--output-dir", str(file_output)])
     assert file_output.read_text(encoding="utf-8") == "old file"
     assert run.events == []
+    assert not (output.parent / f".{output.name}.worker-resource-measurement.lock").exists()
 
 
 def test_main_allows_absent_and_empty_output_dirs(
@@ -526,6 +529,79 @@ def test_main_allows_absent_and_empty_output_dirs(
         report = json.loads((output / "run-report.json").read_text(encoding="utf-8"))
         assert report["success"] is True
         assert report["iterations"][0]["iteration"] == "cold-1"
+
+
+def test_main_rejects_concurrent_output_dir_owner_without_mixing_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.stress import worker_resource_workload as workload
+
+    output = tmp_path / "shared-results"
+    prepare_started = threading.Event()
+    finish_prepare = threading.Event()
+    first = _successful_run("measure-first")
+    second = _successful_run("measure-second")
+    constructed = 0
+
+    def prepare() -> None:
+        output.mkdir(parents=True, exist_ok=True)
+        prepare_started.set()
+        assert finish_prepare.wait(timeout=5)
+
+    first.prepare = prepare
+    first.run_iteration = lambda mode, repetition: {
+        "iteration": f"{mode}-{repetition}",
+        "success": True,
+        "owner": "first",
+        "scenarios": {},
+    }
+
+    def factory(_args):
+        nonlocal constructed
+        constructed += 1
+        return first if constructed == 1 else second
+
+    monkeypatch.setattr(workload, "MeasurementRun", factory)
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(workload.main, ["--output-dir", str(output)])
+    try:
+        assert prepare_started.wait(timeout=5)
+        with pytest.raises(ContractViolationError, match="already being measured"):
+            workload.main(["--output-dir", str(output)])
+        assert constructed == 1
+        assert not (output / "run-report.json").exists()
+    finally:
+        finish_prepare.set()
+        assert future.result(timeout=5) == 0
+        executor.shutdown()
+    report = json.loads((output / "run-report.json").read_text(encoding="utf-8"))
+    assert report["iterations"][0]["owner"] == "first"
+    assert not (output / f".{output.name}.worker-resource-measurement.lock").exists()
+    with pytest.raises(ContractViolationError, match="absent or empty"):
+        workload.main(["--output-dir", str(output)])
+    assert constructed == 1
+
+
+def test_main_releases_output_dir_lock_after_prepare_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.stress import worker_resource_workload as workload
+
+    output = tmp_path / "failure-results"
+    failing = _successful_run("measure-failing")
+
+    def prepare() -> None:
+        output.mkdir(parents=True, exist_ok=True)
+        raise RuntimeError("injected prepare failure")
+
+    failing.prepare = prepare
+    monkeypatch.setattr(workload, "MeasurementRun", lambda _args: failing)
+    assert workload.main(["--output-dir", str(output)]) == 1
+    (output / "run-report.json").unlink()
+    succeeding = _successful_run("measure-after-failure")
+    monkeypatch.setattr(workload, "MeasurementRun", lambda _args: succeeding)
+    assert workload.main(["--output-dir", str(output)]) == 0
+    assert json.loads((output / "run-report.json").read_text())["success"] is True
 
 
 def test_main_cleans_project_volumes_after_prepare_failure(

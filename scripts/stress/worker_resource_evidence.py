@@ -11,7 +11,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from scripts.stress.worker_resource_identity import ContractViolationError
 from scripts.stress.worker_resource_reporting import collect_host_metadata
 
 
@@ -127,25 +126,20 @@ def measure_upload_backlog(
     return result
 
 
-def require_empty_output_dir(output_dir: Path) -> None:
-    if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
-        raise ContractViolationError(
-            f"output-dir must be absent or empty; use a new directory or clean it yourself: {output_dir}"
-        )
-
-
 def require_sandbox_ready(run: Any) -> None:
     run.compose(
-        "exec",
-        "-T",
-        "worker",
-        "/app/data/bin/velites",
-        "sandbox",
-        "wrap",
-        "--cwd",
-        "/tmp",
-        "--",
-        "/bin/true",
+        *[
+            "exec",
+            "-T",
+            "worker",
+            "/app/data/bin/velites",
+            "sandbox",
+            "wrap",
+            "--cwd",
+            "/tmp",
+            "--",
+            "/bin/true",
+        ]
     )
 
 
