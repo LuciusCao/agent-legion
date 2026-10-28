@@ -91,6 +91,8 @@ def test_log_path_rejects_parent_other_job_and_run_dir_mismatch() -> None:
     row = _code_row()
     shard = job_shard(row["job_id"])
     wrong_shard = "00" if shard != "00" else "01"
+    for absent in (None, ""):
+        assert _log_path({**row, "run_dir": absent}) == row["log_path"]
     for path in (
         "../escape.log",
         f"logs/jobs/by-job/{shard}/other/resource_code.log",
@@ -229,7 +231,9 @@ def test_host_code_diagnostics_uses_real_join_iteration_and_node_scope(tmp_path:
                     "failed",
                     "no result secret",
                     f"logs/jobs/by-job/{job_shard(job)}/{job}/resource_code.log",
-                    f"jobs/resource_code/{job_shard(job)}/{job}/runs/resource_code/token",
+                    ""
+                    if job == jobs[0]
+                    else f"jobs/resource_code/{job_shard(job)}/{job}/runs/resource_code/token",
                 ),
             )
         conn.execute(
@@ -258,6 +262,7 @@ def test_host_code_diagnostics_uses_real_join_iteration_and_node_scope(tmp_path:
 
     metadata = json.loads((iteration_dir / "host-code-runs.json").read_text(encoding="utf-8"))
     assert [item["job_id"] for item in metadata] == jobs[:2]
+    assert metadata[0]["run_dir"] == ""
     assert all("cold-0" not in item["job_id"] for item in metadata)
     assert all(item["error_message"] == "no result <redacted>" for item in metadata)
     log = (iteration_dir / "host-code.log").read_text(encoding="utf-8")

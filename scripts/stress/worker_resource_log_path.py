@@ -28,15 +28,19 @@ def _log_path(row: dict[str, Any]) -> str:
         or ".." in parts
     ):
         raise ValueError(f"rejected Host code log path: {path}")
-    run_dir = PurePosixPath(row.get("run_dir") or "")
-    run_dir = run_dir.relative_to(_DATA_ROOT) if run_dir.is_absolute() else run_dir
-    if run_dir.parts[:6] != (
-        "jobs",
-        row["workspace_id"],
-        job_shard(row["job_id"]),
-        row["job_id"],
-        "runs",
-        row["node_key"],
-    ) or (len(run_dir.parts) != 7 or run_dir.parts[-1] in {"", ".", ".."} or ".." in run_dir.parts):
-        raise ValueError(f"Host code run_dir ownership mismatch: {run_dir}")
+    raw_run_dir = row.get("run_dir") or ""
+    if raw_run_dir:
+        run_dir = PurePosixPath(raw_run_dir)
+        run_dir = run_dir.relative_to(_DATA_ROOT) if run_dir.is_absolute() else run_dir
+        if run_dir.parts[:6] != (
+            "jobs",
+            row["workspace_id"],
+            job_shard(row["job_id"]),
+            row["job_id"],
+            "runs",
+            row["node_key"],
+        ) or (
+            len(run_dir.parts) != 7 or run_dir.parts[-1] in {"", ".", ".."} or ".." in run_dir.parts
+        ):
+            raise ValueError(f"Host code run_dir ownership mismatch: {run_dir}")
     return path.as_posix()
