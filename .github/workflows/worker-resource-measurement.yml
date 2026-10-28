@@ -4,9 +4,15 @@ on:
   pull_request:
     paths:
       - ".github/workflows/worker-resource-measurement.yml"
+      - "deploy/.env.example"
+      - "deploy/compose.host.yaml"
       - "deploy/compose.worker.measurement.yaml"
+      - "deploy/compose.worker.standalone.yaml"
+      - "deploy/compose.worker.yaml"
       - "Dockerfile"
+      - "scripts/install-worker.sh"
       - "scripts/stress/worker_resource_*.py"
+      - "tests/scripts/test_install_worker*.py"
       - "tests/stress/test_worker_resource_*.py"
   workflow_dispatch:
     inputs:
@@ -144,6 +150,42 @@ jobs:
           uv run python -c
           "import json,pathlib; p=pathlib.Path('worker-resource-results/${{ matrix.envelope }}/run-report.json');
           d=json.loads(p.read_text()); print(json.dumps(d, indent=2)); raise SystemExit(0 if d['success'] else 1)"
+
+  installer-lifecycle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      - name: Exercise real installer fresh, idempotent, upgrade and rollback paths
+        run: uv run pytest -q tests/scripts/test_install_worker.py
+
+      - name: Assert default resource limits in real Compose renders
+        run: |
+          for file in deploy/compose.worker.yaml deploy/compose.worker.standalone.yaml deploy/compose.host.yaml; do
+            env AGENT_WORKER_RESOURCE_LIMITS_MODE=default AGENT_WORKER_MEM_LIMIT=256m AGENT_WORKER_PIDS_LIMIT=96 \
+              docker compose -f "$file" config --format json |
+              uv run python -c 'import json,sys; w=json.load(sys.stdin)["services"]["worker"]; assert str(w["mem_limit"]) == "268435456" and w["pids_limit"] == 96; assert w["environment"]["AGENT_WORKER_RESOURCE_LIMITS_MODE"] == "default"; assert w["cap_add"] == ["SYS_ADMIN"]'
+          done
+
+      - name: Assert explicit resource limits in a real Compose render
+        run: |
+          env AGENT_WORKER_RESOURCE_LIMITS_MODE=explicit AGENT_WORKER_MEM_LIMIT=512m AGENT_WORKER_PIDS_LIMIT=128 \
+            docker compose -f deploy/compose.worker.standalone.yaml config --format json |
+            uv run python -c 'import json,sys; w=json.load(sys.stdin)["services"]["worker"]; assert str(w["mem_limit"]) == "536870912" and w["pids_limit"] == 128; assert w["environment"]["AGENT_WORKER_RESOURCE_LIMITS_MODE"] == "explicit"'
+
+      - name: Assert explicit unlimited values in a real Compose render
+        run: |
+          env AGENT_WORKER_RESOURCE_LIMITS_MODE=explicit AGENT_WORKER_MEM_LIMIT=0 AGENT_WORKER_PIDS_LIMIT=-1 \
+            docker compose -f deploy/compose.worker.standalone.yaml config --format json |
+            uv run python -c 'import json,sys; w=json.load(sys.stdin)["services"]["worker"]; assert w.get("mem_limit", 0) == 0 and w["pids_limit"] == -1; assert w["environment"]["AGENT_WORKER_RESOURCE_LIMITS_MODE"] == "explicit"'
 
   fault-injection:
     runs-on: ubuntu-24.04

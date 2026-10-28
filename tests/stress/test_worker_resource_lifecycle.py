@@ -778,9 +778,15 @@ def test_workflow_dispatch_and_pr_inputs_reach_real_parser() -> None:
     assert set(triggers) == {"workflow_dispatch", "pull_request"}
     assert triggers["pull_request"]["paths"] == [
         ".github/workflows/worker-resource-measurement.yml",
+        "deploy/.env.example",
+        "deploy/compose.host.yaml",
         "deploy/compose.worker.measurement.yaml",
+        "deploy/compose.worker.standalone.yaml",
+        "deploy/compose.worker.yaml",
         "Dockerfile",
+        "scripts/install-worker.sh",
         "scripts/stress/worker_resource_*.py",
+        "tests/scripts/test_install_worker*.py",
         "tests/stress/test_worker_resource_*.py",
     ]
     definitions = triggers["workflow_dispatch"]["inputs"]
@@ -821,6 +827,13 @@ def test_workflow_dispatch_and_pr_inputs_reach_real_parser() -> None:
     )
     fault = yaml.safe_dump(document["jobs"]["fault-injection"])
     assert "OOMKilled" in fault and "can't start new thread" in fault
+    lifecycle = "\n".join(
+        step.get("run", "") for step in document["jobs"]["installer-lifecycle"]["steps"]
+    )
+    assert "uv run pytest -q tests/scripts/test_install_worker.py" in lifecycle
+    assert lifecycle.count("config --format json") == 3
+    for name in ("compose.worker.yaml", "compose.worker.standalone.yaml", "compose.host.yaml"):
+        assert name in lifecycle
     assert document["permissions"] == {"contents": "read"}
     matrix = document["jobs"]["measure"]["strategy"]["matrix"]["include"]
     assert len(matrix) == 4
