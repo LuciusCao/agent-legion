@@ -110,6 +110,10 @@ def _run_installer(
         '  [ "${FAKE_CONTROL_VOLUME_PRESENT:-0}" = 1 ] && printf "%s\\n" agent-legion-worker_worker-control\n'
         "  exit 0\n"
         "fi\n"
+        'if [ "$1" = compose ] && [ "${5:-}" = --format ] && [ "${FAKE_COMPOSE_CONFIG_EXIT:-0}" != 0 ]; then\n'
+        '  printf "%s\\n" \'{"volumes":{"worker-control":{"name":"agent-legion-worker_worker-control"}}}\'\n'
+        '  exit "$FAKE_COMPOSE_CONFIG_EXIT"\n'
+        "fi\n"
         'if [ "$1" = compose ] && [ "$2" = version ]; then\n'
         '  [ "${3:-}" = --short ] && echo v2.29.0 || echo Docker Compose version v2.29.0\n'
         "fi\n"
@@ -261,6 +265,19 @@ def test_installer_unavailable_yaml_parser_fails_closed_before_commit(tmp_path: 
     (target / "docker-compose.yaml").write_text("old-compose\n", encoding="utf-8")
     result = _run_installer(tmp_path, target, extra_env={"FAKE_DOCKER_RUN_FAIL": "1"})
     assert result.returncode == 1 and "可靠解析" in result.stderr
+    assert (target / ".env").read_bytes() == b"AGENT_WORKER_IMAGE=old\n"
+    assert (target / "docker-compose.yaml").read_bytes() == b"old-compose\n"
+
+
+def test_installer_compose_config_nonzero_with_valid_json_fails_before_commit(
+    tmp_path: Path,
+) -> None:
+    target = _target(tmp_path, "compose-config-failure")
+    (target / "worker.yaml").write_text("max_concurrency: 10\n", encoding="utf-8")
+    (target / ".env").write_text("AGENT_WORKER_IMAGE=old\n", encoding="utf-8")
+    (target / "docker-compose.yaml").write_text("old-compose\n", encoding="utf-8")
+    result = _run_installer(tmp_path, target, extra_env={"FAKE_COMPOSE_CONFIG_EXIT": "7"})
+    assert result.returncode == 1 and "Compose config 执行失败" in result.stderr
     assert (target / ".env").read_bytes() == b"AGENT_WORKER_IMAGE=old\n"
     assert (target / "docker-compose.yaml").read_bytes() == b"old-compose\n"
 

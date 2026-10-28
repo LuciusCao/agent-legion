@@ -241,11 +241,16 @@ case "$pids_limit_final" in
 esac
 compose_for_resolution="./docker-compose.yaml"
 [ -f "$compose_for_resolution" ] || compose_for_resolution="$TMPDIR_/docker-compose.yaml"
-if ! control_volume="$(docker compose -f "$compose_for_resolution" config --format json 2>"$TMPDIR_/control-volume.err" | \
-  docker run --rm -i --network none --entrypoint python3 "${IMAGE_REPO}:${WORKER_VERSION}" -c \
+if ! docker compose -f "$compose_for_resolution" config --format json \
+  >"$TMPDIR_/compose-config.json" 2>"$TMPDIR_/control-volume.err"; then
+  die "实际 Compose config 执行失败，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
+fi
+if ! control_volume="$(docker run --rm -i --network none --entrypoint python3 \
+  "${IMAGE_REPO}:${WORKER_VERSION}" -c \
   'import json,sys
 config = json.load(sys.stdin)
-print(config["volumes"]["worker-control"]["name"])' 2>>"$TMPDIR_/control-volume.err")"; then
+print(config["volumes"]["worker-control"]["name"])' \
+  <"$TMPDIR_/compose-config.json" 2>>"$TMPDIR_/control-volume.err")"; then
   die "无法按实际 Compose 解析 worker-control 卷名，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
 fi
 if ! volume_names="$(docker volume ls --format '{{.Name}}' 2>>"$TMPDIR_/control-volume.err")"; then
