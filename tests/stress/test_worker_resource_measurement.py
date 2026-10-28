@@ -269,8 +269,7 @@ def test_measurement_compose_preserves_shipped_envelope_and_optional_limits() ->
     ]
     assert worker["mem_limit"] == "${MEASUREMENT_MEM_LIMIT:-0}"
     assert worker["pids_limit"] == "${MEASUREMENT_PIDS_LIMIT:--1}"
-    assert "env_file" not in worker
-    assert "user" not in worker
+    assert "env_file" not in worker and "user" not in worker
     host = document["services"]["host"]
     assert "cap_add" not in host and "security_opt" not in host
     startup = host["command"][0]
@@ -282,7 +281,7 @@ def test_measurement_compose_preserves_shipped_envelope_and_optional_limits() ->
     production = yaml.safe_load((ROOT / "deploy/compose.host.yaml").read_text(encoding="utf-8"))
     assert production["services"]["worker"]["cap_add"] == ["SYS_ADMIN"]
     assert production["services"]["worker"]["security_opt"] == ["seccomp:unconfined"]
-    assert "apparmor:" not in yaml.safe_dump(production)
+    assert all(value not in yaml.safe_dump(production) for value in ("apparmor:", "SYS_PTRACE"))
     assert "--no-sandbox" not in yaml.safe_dump(document)
 
 
@@ -290,13 +289,14 @@ def test_default_host_code_sandbox_is_disposable_and_probed() -> None:
     document = yaml.safe_load(HOST_CODE_SANDBOX_OVERRIDE)
     assert set(document["services"]) == {"host"}
     host = document["services"]["host"]
-    assert host["cap_add"] == ["SYS_ADMIN", "NET_ADMIN"]
+    assert host["cap_add"] == ["SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE"]
     assert host["security_opt"] == ["seccomp:unconfined", "apparmor:unconfined"]
     assert "bubblewrap" in host["command"][0] and "test -u /usr/bin/bwrap" in host["command"][0]
     run = SimpleNamespace(compose=lambda *_args, **_kwargs: "bubblewrap 0.10.0\n4755")
     metadata = host_code_sandbox_metadata(run)
     assert metadata["path"] == "/usr/bin/bwrap" and metadata["setuid"] is True
     assert metadata["security_opt"] == host["security_opt"]
+    assert metadata["support"] == "non-root setuid bwrap REQUIRED_CAPS_0"
     assert metadata["production_recommendation"] is False
 
 

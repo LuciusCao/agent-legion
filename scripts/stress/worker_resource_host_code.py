@@ -26,9 +26,8 @@ HOST_CODE_SANDBOX_OVERRIDE = """services:
       - seccomp:unconfined
       # Measurement-only: Ubuntu's default AppArmor profile can deny bwrap capset.
       - apparmor:unconfined
-    cap_add:
-      - SYS_ADMIN
-      - NET_ADMIN
+    # Measurement-only: non-root setuid bwrap restores REQUIRED_CAPS_0.
+    cap_add: [SYS_ADMIN, NET_ADMIN, SYS_PTRACE]
     command:
       - |
         apt-get update && apt-get install -y --no-install-recommends git bubblewrap strace && \
@@ -58,6 +57,7 @@ def host_code_sandbox_metadata(run: Any) -> dict[str, Any]:
         "path": "/usr/bin/bwrap",
         "setuid": True,
         "security_opt": ["seccomp:unconfined", "apparmor:unconfined"],
-        "cap_add": ["SYS_ADMIN", "NET_ADMIN"],
+        "cap_add": ["SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE"],
+        "support": "non-root setuid bwrap REQUIRED_CAPS_0",
         "production_recommendation": False,
     }
