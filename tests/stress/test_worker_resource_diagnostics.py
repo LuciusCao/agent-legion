@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,17 +12,19 @@ pytestmark = pytest.mark.no_db
 
 
 def _code_row(absolute: bool = False, iteration: str = "cold-1") -> dict:
-    job = f"resource~ucode_resource~ucode_measurement-ref:measurement-{iteration}-code-0"
+    job = f"resource~ucode_resource~ucode_measurement-ref:measurement-{iteration}-code-0-secret"
     relative = f"logs/jobs/by-job/ab/{job}/resource_code.log"
+    run_dir = f"jobs/resource_code/{job}/runs/resource_code/token"
     return {
         "id": 1,
         "job_id": job,
         "node_key": "resource_code",
+        "workspace_id": "resource_code",
         "status": "failed",
-        "error_message": "no result",
+        "error_message": "no result secret",
         "command_json": ["--password", "unknown-secret"],
         "log_path": f"/var/lib/agent-legion/{relative}" if absolute else relative,
-        "run_dir": f"jobs/resource_code/{job}/runs/resource_code/token",
+        "run_dir": f"/var/lib/agent-legion/{run_dir}" if absolute else run_dir,
     }
 
 
@@ -66,9 +69,12 @@ def test_production_relative_absolute_and_iteration_scoped_diagnostics(
     )
     run = _diagnostic_run()
     write_sanitized_logs(run, tmp_path)
-    assert "sandbox stderr" in (tmp_path / "host-code.log").read_text()
+    text = (tmp_path / "host-code.log").read_text()
+    assert "sandbox stderr" in text and "secret" not in text
     metadata = (tmp_path / "host-code-runs.json").read_text()
-    assert "unknown-secret" not in metadata and "cold-0" not in metadata
+    assert (
+        "secret" not in metadata and "unknown-secret" not in metadata and "cold-0" not in metadata
+    )
     assert "O_NOFOLLOW" in str(run.calls) and "O_DIRECTORY" in str(run.calls)
     run.args.code_concurrency = 1
     other = tmp_path / "worker-code"
@@ -84,8 +90,14 @@ def test_log_path_rejects_parent_other_job_and_run_dir_mismatch() -> None:
     for path in ("../escape.log", "logs/jobs/by-job/ab/other/resource_code.log", "/etc/passwd"):
         with pytest.raises(ValueError):
             _log_path({**row, "log_path": path})
-    with pytest.raises(ValueError, match="run_dir ownership"):
-        _log_path({**row, "run_dir": "jobs/other/runs/resource_code/token"})
+    for run_dir in (
+        "jobs/other/runs/resource_code/token",
+        f"jobs/not-a-workspace/{row['job_id']}/not-runs/resource_code/token",
+        f"jobs/not-a-workspace/{row['job_id']}/runs/resource_code/token",
+        f"jobs/resource_code/{row['job_id']}/runs/resource_code",
+    ):
+        with pytest.raises(ValueError, match="run_dir ownership"):
+            _log_path({**row, "run_dir": run_dir})
 
 
 def test_read_log_rejects_intermediate_and_leaf_symlinks(tmp_path: Path) -> None:
@@ -93,11 +105,11 @@ def test_read_log_rejects_intermediate_and_leaf_symlinks(tmp_path: Path) -> None
 
     from scripts.stress.worker_resource_diagnostics import _READ_LOG
 
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "resource_code.log").write_text("outside", encoding="utf-8")
     root = tmp_path / "root"
     job = "resource~ucode_resource~ucode_measurement-ref:measurement-cold-1-code-0"
+    outside = tmp_path / "outside" / job
+    outside.mkdir(parents=True)
+    (outside / "resource_code.log").write_text("OUTSIDE-REGULAR-FILE", encoding="utf-8")
     relative = f"logs/jobs/by-job/ab/{job}/resource_code.log"
     for leaf in (False, True):
         link = (
@@ -107,7 +119,7 @@ def test_read_log_rejects_intermediate_and_leaf_symlinks(tmp_path: Path) -> None
         )
         link.parent.mkdir(parents=True, exist_ok=True)
         link.symlink_to(
-            outside / "resource_code.log" if leaf else outside, target_is_directory=not leaf
+            outside / "resource_code.log" if leaf else outside.parent, target_is_directory=not leaf
         )
         result = subprocess.run(
             ["python3", "-c", _READ_LOG, relative, str(root)], capture_output=True
@@ -127,9 +139,11 @@ def test_operational_error_preserves_original_failure_cleanup_and_result(
     run = MeasurementRun.__new__(MeasurementRun)
     run.args = SimpleNamespace(code_concurrency=0)
     run.output_dir = tmp_path / "cold-1"
-    run.secrets = []
+    run.secrets = ["secret"]
+    run.env = {}
+    run.dsn = "dsn"
     run.control_token = ""
-    run.cgroup_reader_id = ""
+    run.cgroup_reader_id = "reader-1"
     downs = []
 
     def compose(*arguments: str, **_kwargs: object) -> str:
@@ -140,13 +154,21 @@ def test_operational_error_preserves_original_failure_cleanup_and_result(
 
     run.compose = compose
     monkeypatch.setattr(
-        "scripts.stress.worker_resource_workload.write_sanitized_logs",
-        lambda *_args: (_ for _ in ()).throw(psycopg.OperationalError("db down")),
+        "scripts.stress.worker_resource_diagnostics.read_connection",
+        lambda *_args: (_ for _ in ()).throw(psycopg.OperationalError("db down secret")),
+    )
+    removals = []
+    monkeypatch.setattr(
+        "scripts.stress.worker_resource_workload.subprocess.run",
+        lambda *args, **_kwargs: removals.append(args) or SimpleNamespace(stdout="", stderr=""),
     )
     result = run.run_iteration("cold", 1)
     assert result["error"] == "RuntimeError: original workload failure"
-    assert "OperationalError" in result["diagnostic_error"]
+    error_file = tmp_path / "cold-1/cold-1/host-code-diagnostics-error.txt"
+    assert error_file.is_file()
+    assert "OperationalError" in error_file.read_text() and "secret" not in error_file.read_text()
     assert len(downs) == 2 and (tmp_path / "cold-1/cold-1/result.json").is_file()
+    assert run.cgroup_reader_id == "" and any("reader-1" in str(call) for call in removals)
 
 
 def test_artifact_byte_budgets_and_unknown_argv_never_leak(
@@ -164,3 +186,4 @@ def test_artifact_byte_budgets_and_unknown_argv_never_leak(
     metadata_path = tmp_path / "host-code-runs.json"
     assert metadata_path.stat().st_size <= 256 * 1024 + 2
     assert "unknown-secret" not in metadata_path.read_text()
+    assert isinstance(json.loads(metadata_path.read_text()), list)
