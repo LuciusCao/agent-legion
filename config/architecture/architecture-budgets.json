@@ -1087,6 +1087,7 @@
     "scripts/stress/worker_resource_host_code.py": 39,
     "scripts/stress/worker_resource_identity.py": 240,
     "scripts/stress/worker_resource_local_code.py": 64,
+    "scripts/stress/worker_resource_log_path.py": 30,
     "scripts/stress/worker_resource_measurement.py": 290,
     "scripts/stress/worker_resource_output.py": 45,
     "scripts/stress/worker_resource_reporting.py": 100,
