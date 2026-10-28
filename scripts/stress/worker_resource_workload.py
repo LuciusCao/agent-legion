@@ -760,6 +760,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    args.output_dir = args.output_dir.resolve()
     require_empty_output_dir(args.output_dir)
     with output_dir_lock(args.output_dir):
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

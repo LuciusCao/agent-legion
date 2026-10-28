@@ -531,12 +531,16 @@ def test_main_allows_absent_and_empty_output_dirs(
         assert report["iterations"][0]["iteration"] == "cold-1"
 
 
+@pytest.mark.parametrize("alias", [False, True])
 def test_main_rejects_concurrent_output_dir_owner_without_mixing_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, alias: bool
 ) -> None:
     from scripts.stress import worker_resource_workload as workload
 
     output = tmp_path / "shared-results"
+    contender_output = tmp_path / "alias-results" if alias else output
+    if alias:
+        contender_output.symlink_to(output, target_is_directory=True)
     prepare_started = threading.Event()
     finish_prepare = threading.Event()
     first = _successful_run("measure-first")
@@ -567,7 +571,7 @@ def test_main_rejects_concurrent_output_dir_owner_without_mixing_evidence(
     try:
         assert prepare_started.wait(timeout=5)
         with pytest.raises(ContractViolationError, match="already being measured"):
-            workload.main(["--output-dir", str(output)])
+            workload.main(["--output-dir", str(contender_output)])
         assert constructed == 1
         assert not (output / "run-report.json").exists()
     finally:
@@ -578,8 +582,44 @@ def test_main_rejects_concurrent_output_dir_owner_without_mixing_evidence(
     assert report["iterations"][0]["owner"] == "first"
     assert not (output / f".{output.name}.worker-resource-measurement.lock").exists()
     with pytest.raises(ContractViolationError, match="absent or empty"):
+        workload.main(["--output-dir", str(contender_output)])
+    assert constructed == 1
+
+
+def test_main_rechecks_output_dir_after_lock_before_constructing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.stress import worker_resource_workload as workload
+
+    output = tmp_path / "transition-results"
+    first = _successful_run("measure-first")
+    second = _successful_run("measure-second")
+    constructed = 0
+    checks = 0
+    first_report = b""
+
+    def factory(_args):
+        nonlocal constructed
+        constructed += 1
+        return first if constructed == 1 else second
+
+    original_check = workload.require_empty_output_dir
+
+    def checked(path: Path) -> None:
+        nonlocal checks, first_report
+        checks += 1
+        original_check(path)
+        if checks == 1:
+            assert workload.main(["--output-dir", str(output)]) == 0
+            first_report = (output / "run-report.json").read_bytes()
+
+    monkeypatch.setattr(workload, "MeasurementRun", factory)
+    monkeypatch.setattr(workload, "require_empty_output_dir", checked)
+    with pytest.raises(ContractViolationError, match="absent or empty"):
         workload.main(["--output-dir", str(output)])
     assert constructed == 1
+    assert second.events == []
+    assert (output / "run-report.json").read_bytes() == first_report
 
 
 def test_main_releases_output_dir_lock_after_prepare_failure(

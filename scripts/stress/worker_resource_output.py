@@ -34,6 +34,7 @@ def acquire_output_dir_lock(output_dir: Path) -> int:
 def output_dir_lock(output_dir: Path) -> Iterator[int]:
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     descriptor = acquire_output_dir_lock(output_dir)
+    require_empty_output_dir(output_dir)
     try:
         yield descriptor
     finally:
