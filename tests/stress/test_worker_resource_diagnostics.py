@@ -7,12 +7,14 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.stress.worker_resource_workload import MeasurementRun
+from server.app.jobs.storage_layout import job_shard
 
 
 def _code_row(absolute: bool = False, iteration: str = "cold-1") -> dict:
     job = f"resource~ucode_resource~ucode_measurement-ref:measurement-{iteration}-code-0-secret"
-    relative = f"logs/jobs/by-job/ab/{job}/resource_code.log"
-    run_dir = f"jobs/resource_code/{job}/runs/resource_code/token"
+    shard = job_shard(job)
+    relative = f"logs/jobs/by-job/{shard}/{job}/resource_code.log"
+    run_dir = f"jobs/resource_code/{shard}/{job}/runs/resource_code/token"
     return {
         "id": 1,
         "job_id": job,
@@ -87,14 +89,24 @@ def test_log_path_rejects_parent_other_job_and_run_dir_mismatch() -> None:
     from scripts.stress.worker_resource_diagnostics import _log_path
 
     row = _code_row()
-    for path in ("../escape.log", "logs/jobs/by-job/ab/other/resource_code.log", "/etc/passwd"):
+    shard = job_shard(row["job_id"])
+    wrong_shard = "00" if shard != "00" else "01"
+    for path in (
+        "../escape.log",
+        f"logs/jobs/by-job/{shard}/other/resource_code.log",
+        f"logs/jobs/by-job/{wrong_shard}/{row['job_id']}/resource_code.log",
+        "/etc/passwd",
+    ):
         with pytest.raises(ValueError):
             _log_path({**row, "log_path": path})
     for run_dir in (
         "jobs/other/runs/resource_code/token",
-        f"jobs/not-a-workspace/{row['job_id']}/not-runs/resource_code/token",
-        f"jobs/not-a-workspace/{row['job_id']}/runs/resource_code/token",
-        f"jobs/resource_code/{row['job_id']}/runs/resource_code",
+        f"jobs/not-a-workspace/{shard}/{row['job_id']}/not-runs/resource_code/token",
+        f"jobs/not-a-workspace/{shard}/{row['job_id']}/runs/resource_code/token",
+        f"jobs/resource_code/{wrong_shard}/{row['job_id']}/runs/resource_code/token",
+        f"jobs/resource_code/{shard}/other/runs/resource_code/token",
+        f"jobs/resource_code/{shard}/{row['job_id']}/runs/resource_code",
+        f"jobs/resource_code/{shard}/{row['job_id']}/runs/resource_code/..",
     ):
         with pytest.raises(ValueError, match="run_dir ownership"):
             _log_path({**row, "run_dir": run_dir})
@@ -111,13 +123,10 @@ def test_read_log_rejects_intermediate_and_leaf_symlinks(tmp_path: Path) -> None
     outside = tmp_path / "outside" / job
     outside.mkdir(parents=True)
     (outside / "resource_code.log").write_text("OUTSIDE-REGULAR-FILE", encoding="utf-8")
-    relative = f"logs/jobs/by-job/ab/{job}/resource_code.log"
+    shard = job_shard(job)
+    relative = f"logs/jobs/by-job/{shard}/{job}/resource_code.log"
     for leaf in (False, True):
-        link = (
-            root / f"logs/jobs/by-job/ab/{job}/resource_code.log"
-            if leaf
-            else root / "logs/jobs/by-job/ab"
-        )
+        link = root / relative if leaf else root / "logs/jobs/by-job" / shard
         link.parent.mkdir(parents=True, exist_ok=True)
         link.symlink_to(
             outside / "resource_code.log" if leaf else outside.parent, target_is_directory=not leaf
@@ -127,7 +136,7 @@ def test_read_log_rejects_intermediate_and_leaf_symlinks(tmp_path: Path) -> None
         )
         assert result.returncode != 0
         link.unlink()
-    (root / f"logs/jobs/by-job/ab/{job}/resource_code.log").write_text("safe")
+    (root / relative).write_text("safe")
     result = subprocess.run(["python3", "-c", _READ_LOG, relative, str(root)], capture_output=True)
     assert result.returncode == 0 and result.stdout == b"safe"
 
@@ -193,7 +202,7 @@ def test_artifact_byte_budgets_and_unknown_argv_never_leak(
 
 
 @pytest.mark.postgres
-def test_host_code_diagnostics_uses_real_join_and_iteration_scope(tmp_path: Path) -> None:
+def test_host_code_diagnostics_uses_real_join_iteration_and_node_scope(tmp_path: Path) -> None:
     from scripts.stress.worker_resource_diagnostics import write_host_code_diagnostics
     from server.app.db.transaction import write_transaction
     from tests.postgres_support import TEST_DATABASE_URL
@@ -202,8 +211,10 @@ def test_host_code_diagnostics_uses_real_join_and_iteration_scope(tmp_path: Path
         f"resource~ucode_resource~ucode_measurement-ref:measurement-{iteration}-code-{index}"
         for iteration, index in (("cold-1", 0), ("cold-1", 1), ("cold-0", 0))
     ]
+    agent_job = "resource~uagent_resource~uagent_measurement-ref:measurement-cold-1-agent-0"
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("insert into workspaces(id, name) values ('resource_code', 'Resource code')")
+        conn.execute("insert into workspaces(id, name) values ('resource_agent', 'Resource agent')")
         for job in jobs:
             conn.execute(
                 "insert into jobs(id, workspace_id, source_type, source_id) values (%s, %s, %s, %s)",
@@ -217,10 +228,27 @@ def test_host_code_diagnostics_uses_real_join_and_iteration_scope(tmp_path: Path
                     "resource_code",
                     "failed",
                     "no result secret",
-                    f"logs/jobs/by-job/ab/{job}/resource_code.log",
-                    f"jobs/resource_code/{job}/runs/resource_code/token",
+                    f"logs/jobs/by-job/{job_shard(job)}/{job}/resource_code.log",
+                    f"jobs/resource_code/{job_shard(job)}/{job}/runs/resource_code/token",
                 ),
             )
+        conn.execute(
+            "insert into jobs(id, workspace_id, source_type, source_id) values (%s, %s, %s, %s)",
+            (agent_job, "resource_agent", "measurement", agent_job),
+        )
+        conn.execute(
+            "insert into node_runs(job_id, node_key, status, error_message, log_path, run_dir)"
+            " values (%s, %s, %s, %s, %s, %s)",
+            (
+                agent_job,
+                "resource_agent",
+                "failed",
+                "agent failure secret",
+                f"logs/jobs/by-job/{job_shard(agent_job)}/{agent_job}/resource_agent.log",
+                f"jobs/resource_agent/{job_shard(agent_job)}/{agent_job}"
+                "/runs/resource_agent/worker",
+            ),
+        )
 
     iteration_dir = tmp_path / "cold-1"
     iteration_dir.mkdir()
@@ -233,4 +261,4 @@ def test_host_code_diagnostics_uses_real_join_and_iteration_scope(tmp_path: Path
     assert all("cold-0" not in item["job_id"] for item in metadata)
     assert all(item["error_message"] == "no result <redacted>" for item in metadata)
     log = (iteration_dir / "host-code.log").read_text(encoding="utf-8")
-    assert log.count("postgres log") == 2 and "secret" not in log
+    assert log.count("postgres log") == 2 and "secret" not in log and agent_job not in log

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import Any
 
+from server.app.jobs.storage_layout import job_shard
+
 _DATA_ROOT = PurePosixPath("/var/lib/agent-legion")
 
 
@@ -14,9 +16,12 @@ def _log_path(row: dict[str, Any]) -> str:
     parts = path.parts
     if (
         len(parts) != 6
-        or parts[:3] != ("logs", "jobs", "by-job")
-        or parts[4:]
+        or parts
         != (
+            "logs",
+            "jobs",
+            "by-job",
+            job_shard(row["job_id"]),
             row["job_id"],
             f"{row['node_key']}.log",
         )
@@ -25,12 +30,13 @@ def _log_path(row: dict[str, Any]) -> str:
         raise ValueError(f"rejected Host code log path: {path}")
     run_dir = PurePosixPath(row.get("run_dir") or "")
     run_dir = run_dir.relative_to(_DATA_ROOT) if run_dir.is_absolute() else run_dir
-    if run_dir.parts[:5] != (
+    if run_dir.parts[:6] != (
         "jobs",
         row["workspace_id"],
+        job_shard(row["job_id"]),
         row["job_id"],
         "runs",
         row["node_key"],
-    ) or (len(run_dir.parts) != 6 or run_dir.parts[-1] in {"", ".", ".."}):
+    ) or (len(run_dir.parts) != 7 or run_dir.parts[-1] in {"", ".", ".."} or ".." in run_dir.parts):
         raise ValueError(f"Host code run_dir ownership mismatch: {run_dir}")
     return path.as_posix()
