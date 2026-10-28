@@ -1,0 +1,122 @@
+name: Worker Resource Measurement
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/worker-resource-measurement.yml"
+      - "deploy/compose.worker.measurement.yaml"
+      - "Dockerfile"
+      - "scripts/stress/worker_resource_*.py"
+      - "tests/stress/test_worker_resource_*.py"
+  workflow_dispatch:
+    inputs:
+      cold_repetitions:
+        description: Fresh-volume iterations per measurement envelope
+        required: true
+        default: "1"
+      warm_repetitions:
+        description: Reused-volume/image iterations per measurement envelope
+        required: true
+        default: "2"
+      pids_interval_ms:
+        description: High-frequency thread-count sampling interval
+        required: true
+        default: "100"
+      memory_interval_ms:
+        description: Whole-cgroup memory sampling interval
+        required: true
+        default: "500"
+
+permissions:
+  contents: read
+
+env:
+  UV_CACHE_DIR: /home/runner/.cache/uv
+
+jobs:
+  measure:
+    name: measure-${{ matrix.envelope }}
+    runs-on: ubuntu-24.04
+    env:
+      MEASUREMENT_NET_ADMIN: NET_ADMIN
+      MEASUREMENT_APPARMOR: apparmor:unconfined
+      MEASUREMENT_COLD_REPETITIONS: ${{ inputs.cold_repetitions || '1' }}
+      MEASUREMENT_WARM_REPETITIONS: ${{ inputs.warm_repetitions || '2' }}
+      MEASUREMENT_PIDS_INTERVAL_MS: ${{ inputs.pids_interval_ms || '100' }}
+      MEASUREMENT_MEMORY_INTERVAL_MS: ${{ inputs.memory_interval_ms || '500' }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - envelope: single
+            agent_concurrency: 1
+            code_concurrency: 1
+            upload_concurrency: 1
+            jobs_per_wave: 2
+            artifact_kib: 64
+          - envelope: mixed
+            agent_concurrency: 2
+            code_concurrency: 2
+            upload_concurrency: 2
+            jobs_per_wave: 4
+            artifact_kib: 256
+          - envelope: upload-backlog
+            agent_concurrency: 2
+            code_concurrency: 2
+            upload_concurrency: 2
+            jobs_per_wave: 8
+            artifact_kib: 1024
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: velites
+          shared-key: worker-resource-measurement
+
+      - name: Build the external velites runtime
+        run: ./scripts/ensure-velites.sh --dest data/bin
+
+      - name: Measure the real Worker container
+        run: >-
+          uv run python scripts/stress/worker_resource_workload.py
+          --output-dir worker-resource-results/${{ matrix.envelope }}
+          --agent-concurrency ${{ matrix.agent_concurrency }}
+          --code-concurrency ${{ matrix.code_concurrency }}
+          --upload-concurrency ${{ matrix.upload_concurrency }}
+          --jobs-per-wave ${{ matrix.jobs_per_wave }}
+          --artifact-kib ${{ matrix.artifact_kib }}
+          --cold-repetitions "$MEASUREMENT_COLD_REPETITIONS"
+          --warm-repetitions "$MEASUREMENT_WARM_REPETITIONS"
+          --pids-interval-ms "$MEASUREMENT_PIDS_INTERVAL_MS"
+          --memory-interval-ms "$MEASUREMENT_MEMORY_INTERVAL_MS"
+
+      # Only generated reports, numeric samples and sanitized logs are uploaded.
+      # The work dir (models, configs, tokens) is deliberately outside this path.
+      - name: Upload raw samples, summaries and sanitized logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: worker-resource-measurement-${{ matrix.envelope }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: worker-resource-results/${{ matrix.envelope }}/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Surface measurement status
+        if: always()
+        run: >-
+          uv run python -c
+          "import json,pathlib; p=pathlib.Path('worker-resource-results/${{ matrix.envelope }}/run-report.json');
+          d=json.loads(p.read_text()); print(json.dumps(d, indent=2)); raise SystemExit(0 if d['success'] else 1)"

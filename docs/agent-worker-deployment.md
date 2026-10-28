@@ -503,6 +503,39 @@ Host 设置页顶部的「Worker 与 Worker 控制台」卡片、签发成功后
 
 新 workspace 引导、排查横幅与「在线·未领取」状态的判定规则（未知状态不推断、领取状态绑定当前注册凭据）见 [architecture/agent-worker.md §6](architecture/agent-worker.md#6-领取状态与引导--排查横幅的判定)。
 
+### Worker 资源测量（#1049 前置工具）
+
+`deploy/compose.worker.measurement.yaml` 与 `scripts/stress/worker_resource_workload.py` 是一次性真实测量栈，不是生产部署示例。Worker 明示保持当前 shipped envelope：镜像默认 root、`SYS_ADMIN`、`seccomp:unconfined`，且不设置 `mem_limit` / `pids_limit`；这些字段描述被测对象，不是推荐值。工具不按核数、协议并发上限、历史 RSS 或 Docker Desktop 结果推导生产限制，也不修改现有 Compose 的资源或权限。
+
+Host 支持容器只在启动阶段以 root 安装 git 并初始化 `host-data` 卷，随后按 bind owner 用 `setpriv` 设置身份并以 `HOME=/tmp` 启动：原生 Linux 使用执行 seed 的宿主 UID/GID，Docker Desktop 的 root-owned 映射使用 0:0。skills 以只读方式挂到 `/tmp/.agents/skills`，使 Git 仓库 owner 与 SkillManager 读取 UID 一致。该测量专用对齐不配置 `safe.directory`，不修改生产 SkillManager，也不改变 Worker、模型或 velites 绑定身份；Desktop 的 0:0 只是功能兼容，不替代原生非 root 验证。
+
+优先通过限定 paths 的 PR 或手动 `workflow_dispatch` 在 GitHub Actions 运行 **Worker Resource Measurement**（原生 Ubuntu 24.04）。矩阵的 single / mixed / upload-backlog 只是显式测量 envelope；dispatch 可设置 cold/warm 重复次数与 pids/memory 采样间隔。原生 Linux 也可在仓库根执行：
+
+原生测量 workflow 显式设置 `MEASUREMENT_NET_ADMIN=NET_ADMIN`，因为 velites 的 bash 工具在私有 network namespace 配置 loopback 时需要该能力（#39）；否则 bwrap 按 fail-closed 启动失败。此 delta 仅限 measurement 场景，Compose 未设置该变量时仍重复 SYS_ADMIN、生产 Compose 仍只含 SYS_ADMIN；artifact 的 `functional_cap_override` 记录实际覆盖值，且不构成生产权限建议。生产 envelope 与该测量必要能力的收敛由 M128 后续处理。
+
+测量 Worker 还以 `apparmor:unconfined` 覆盖 Docker 默认 AppArmor，因为 `/` 的 slave mount propagation 也可能被默认 LSM profile 拒绝；该设置只作用于隔离测量容器，不修改生产 Compose 或宿主全局 AppArmor/sysctl。artifact 以 `shipped_apparmor=docker-default` 与 `functional_apparmor_override` 区分两层，和 NET_ADMIN 一样由 M128 收敛。每次 Worker 启动后、采样与首个 agent 之前，先执行真实 `velites sandbox wrap --cwd /tmp -- /bin/true`，同时验证私有 mount/pid/net namespace、mount propagation 与 loopback；预检失败立即终止测量，不降级、不伪造沙箱成功。
+
+```bash
+./scripts/ensure-velites.sh --dest data/bin
+uv run python scripts/stress/worker_resource_workload.py \
+  --output-dir worker-resource-results/manual \
+  --cold-repetitions 1 --warm-repetitions 2
+```
+
+`--output-dir` 必须不存在或确认为空。若是普通文件或已有任何内容（包括上次 cold/warm 的 samples、summary 或 run-report），测量会在创建容器、执行 Compose 或 seed 之前以 ContractViolation 拒绝，且不执行 outer finalizer；不会删除或混合旧证据，也不会重写旧 run-report。重复运行时请改用新的 output-dir，或先自行确认并清理旧目录；默认 `worker-resource-results/latest` 也因此不能直接用于第二次测量。测量还在 output-dir 同级持有非阻塞 `flock`，从入口检查持续到最终报告与清理完成；并发第二次运行会在任何 Compose/seed/report 写入前失败，锁文件不属于测量 artifact。
+
+Docker Desktop 只允许显式功能验收，不允许 sizing：准备与容器同为 Linux/arm64 或 Linux/amd64 的 velites 后，加 `--allow-docker-desktop`，例如 `--cold-repetitions 1 --warm-repetitions 0 --jobs-per-wave 2`（全场景最小波次；`<2` 会 fail-fast，因为 upload-backlog 无法同时形成 active 与 queued）。此模式用独立 sidecar 在 Docker VM 的 host PID namespace 读取同一组 cgroup 字段，metadata 标记 `docker-desktop-functional-only`；project、volumes、workdir 与 sidecar 都是 measurement 专用并会清理。Docker Desktop 的私有 netns loopback 还需显式 `MEASUREMENT_NET_ADMIN=NET_ADMIN`（#39），该 functional override 会写入 metadata，不改变 shipped 默认 capability，也不作为生产 privilege 建议。原生 Linux workflow 仍是资源数值的唯一验收来源。
+
+每次迭代都走真实 scoped-token register → claim → Worker code sandbox / velites agent → presigned S3 upload → restart，并校验 agent/code execution 的记录确属被测 Worker；不使用 `simulate_agents.py` 代替 executor。身份校验按本波次 jobs、实际 DAG/job_nodes 和 current node_run 建立 `(workspace, job, node, kind, execution)` 精确集合，历史或重复行不能顶替另一 job 的缺失。测量先等 job completed，再等预期 done execution/outcome 可见；缺失是 readiness 等待，CAS 或错误证据是立即合约失败。
+
+每个 execution 的每个声明 output 都必须携带 direct 新形态 ref（`storage_key` / `size_bytes` / `content_hash` 及正确 staging key），并逐项核对 promoted `job_artifacts` 行、同一 workspace/job/name 的 version/legacy authority key、staging→authority gzip form 一致、authority object 的 HEAD size 与（gzip 解压后的）内容 SHA256；无 spec、CAS 字符串、ref 缺失、跨 workspace/job key、form mismatch 或对象证据不符都会使测量失败，job completed/done 本身不算上传通道证据。
+
+场景包括 agent-only、code-only、mixed、upload/backlog、runtime pending-restart、executor restart 与 container restart。upload/backlog 把上传并发临时固定为 1，并暂停测量专用 SeaweedFS 容器作为受控上传屏障；波次使用不需要对象存储的预置 enabled ref connection 提交，轮询 Worker `/api/status`，必须在同一观测点看到 `upload_active_count >= 1` 与 `upload_queued_count >= 1`。观测次数、峰值和 UTC/monotonic 时间写入 result，逐次观测也写入 raw samples；`finally` 必须 unpause 并恢复上传并发，然后才等待 direct PUT 与最终证据链成功。零 backlog 或最终 CAS 回落均失败，异常路径同样恢复屏障，不污染后续场景。pending-restart 通过控制 API 短暂停用再恢复 velites：要求 PUT `restarted=true` 的响应暴露 PID/started_at 已前进的未注册新进程，并等待禁用期望 runtime 的新进程以 `exit_code=2`、`failed`、`worker_running=false`、`registered=false` 的启动预检拒绝终态收敛；不得用修改前 registered_runtimes 与修改后 disabled 配置拼接成功。恢复后必须相对该禁用代次验证新 PID、重新注册并完成后续 restart。pending 恢复、executor restart 与 container restart 只有在当前本地 `registered=true`、当前 `host_worker` 的 scope/runtime/capacity 完整且 PID/started_at 相对前代发生变化后才写 `observed=true`；result 同时保存 `observed_at`、前后 PID/started_at 与当前 Host `last_seen_at`，Host 旧登记行不能单独满足 readiness。cold 每次重建容器与命名卷，warm 复用镜像和命名卷；两者都运行完整场景。
+
+采样边界是 Worker 容器的整个 cgroup v2，而不是单个进程或 Docker stats 近似值：`memory.current/peak/max/stat` 包含全部子孙和 page cache，`pids.current/max/events` 按内核线程计数，pids 默认约 100ms、memory 默认 500ms 独立采样。每个迭代的 `samples.jsonl` 保留原始样本与场景 marker；`result.json` 的 `sample_counts` 与 `summary.json` 的 `all/all.sample_counts` 都直接表示全迭代 memory/pids 样本总数，场景分组只用于分场景统计，不能混作总数。`summary.json` 提供 nearest-rank p95、max、kernel peak、events 和相对**当前已有** cgroup limit 的 headroom。limit 为 `max` 时 headroom 为 `null`，`recommended_limits` 永远为 `null`；后续 PR 必须依据合入工具后的原生 Linux 实测另行决定数值。
+
+artifact 还包括 Worker image ID/digest、velites SHA256/version、kernel/cgroup/arch/Docker 元数据、采样参数与脱敏 Host/Worker 日志。模型文件只记录 SHA256，不上传内容；注册 token、控制 token、stub models 与运行配置留在不上传的 work dir，日志中的 Bearer/register token/presigned query 会脱敏。workflow 不使用真实 provider secret 或生产数据，也不调用真实 LLM。Docker Desktop 功能模式可以验证 fresh schema、register、direct S3、backlog 与 restart，但不能验证原生 Linux 的 AppArmor/userns/发行版差异，也不能提供 sizing；这些原生 Linux namespace/cgroup/bwrap 与资源数值仍只能由 workflow 链路验收。macOS 单元测试只检查解析、汇总与安全契约，不能替代任何真实容器结果。
+
 ## 6. 验证两个 Worker
 
 可以直接查看 Worker 控制台或 Host Web UI，也可以在部署机按 §4 的登录命令重新登录得到 cookie 文件后查询（用完同样注销并删除）（`GET /api/agent-workers` 要求登录用户会话；只读 GET 不需要 `x-agent-legion-request` 头，不带 cookie 返回 401）：
