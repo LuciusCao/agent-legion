@@ -127,6 +127,7 @@ def test_container_style_workerctl_status_needs_no_state_dir_flag(
     shutil.copyfile(ROOT / "worker/cli.py", bin_dir / "workerctl")
     shutil.copyfile(ROOT / "worker/client.py", bin_dir / "agent_worker_client.py")
     shutil.copyfile(ROOT / "worker/cli_args.py", bin_dir / "agent_worker_cli_args.py")
+    shutil.copyfile(ROOT / "worker/cli_payload.py", bin_dir / "agent_worker_cli_payload.py")
     state = tmp_path / "state"
     state.mkdir()
     (state / "control_token").write_text("ctl-token\n", encoding="utf-8")

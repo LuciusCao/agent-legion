@@ -325,17 +325,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1010
   ceiling: 55
 - check: architecture.file_budget
-  path: worker/cli_args.py
-  reason: 'The workerctl --proxy flag (#444 rework) gives headless workers (Docker form, console behind
-    an ssh tunnel) the same config surface the UI already has: the console path needs a tunnel and hand-editing
-    the mounted yaml triggers the supervisor divergence warning without taking effect. Five lines of honest
-    cost (one argparse declaration with its help text, one payload mapping entry); the file is a flat
-    argv table where each line IS a flag — nothing to split without forking the parser. Remove together
-    with the supervisor spawn split (#451).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/451
-  ceiling: 94
-- check: architecture.file_budget
   path: worker/executor_log.py
   reason: '#510 grew this module by the events split: events_log_path anchoring, the is_structured_event
     sniff (containment-shaped after review R1 — a prefix check dropped the forensic events),
@@ -347,16 +336,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/997
   ceiling: 83
-- check: architecture.file_budget
-  path: worker/supervisor.py
-  reason: The proxy config injection (#444) adds the env override dict at the single executor spawn site
-    — the one place where os.environ is snapshotted into the child — so proxy semantics (configured proxy
-    vs stripped default) apply to the executor and all agent subprocesses in one hop. Moving the Popen
-    call out just to dodge 2 lines would split supervision state (_process/_generation) across modules;
-    revisit when supervisor grows its next feature, not for this.
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/451
-  ceiling: 231
 - check: architecture.route_response_model
   path: server/app/routes/agent_workers.py:result
   reason: Agent Worker result acknowledgement returns an empty 204 response by protocol.

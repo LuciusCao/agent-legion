@@ -58,3 +58,4 @@ def test_worker_image_copies_whole_dirs_and_smoke_imports() -> None:
     assert 'python3 -c "import worker.service' in dockerfile
     # Standalone workerctl COPY 的单文件清单锚点（防 #16 式腐烂）。
     assert "worker/cli_args.py /usr/local/bin/agent_worker_cli_args.py" in dockerfile
+    assert "worker/cli_payload.py /usr/local/bin/agent_worker_cli_payload.py" in dockerfile
