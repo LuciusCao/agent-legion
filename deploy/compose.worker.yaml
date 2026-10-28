@@ -15,6 +15,8 @@ services:
       - seccomp:unconfined
     cap_add:
       - SYS_ADMIN
+    mem_limit: ${AGENT_WORKER_MEM_LIMIT:-256m}
+    pids_limit: ${AGENT_WORKER_PIDS_LIMIT:-96}
     volumes:
       - ${AGENT_WORKER_CONFIG:-../deploy/worker.remote.example.yaml}:/etc/agent-legion/worker.yaml:ro
       # velites 二进制外挂（issue #381）：worker 镜像不含任何 agent runtime
@@ -52,6 +54,7 @@ services:
       # (git- and docker-ignored) or the shell environment — never inline here.
       LLM_GATEWAY_TOKEN: ${LLM_GATEWAY_TOKEN:-}
       AGENT_WORKER_IMAGE_VERSION: ${AGENT_WORKER_IMAGE_VERSION:-agent-legion-worker:local}
+      AGENT_WORKER_RESOURCE_LIMITS_MODE: ${AGENT_WORKER_RESOURCE_LIMITS_MODE:-default}
       # Expected-runtime guard (issue #381): fail-fast (exit 2) at startup
       # when these runtimes cannot be probed, turning "forgot to mount
       # velites" from silent zero capacity into an explicit startup error.

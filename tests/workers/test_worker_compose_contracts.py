@@ -85,3 +85,27 @@ def test_compose_host_worker_network_isolated_from_peer_services() -> None:
     )
     # host 双挂 default：postgres / 对象存储的既有依赖不受隔离影响
     assert "default" in service_networks("host")
+
+
+def test_worker_resource_limits_share_measured_defaults_without_permission_changes() -> None:
+    for name in (
+        "deploy/compose.worker.yaml",
+        "deploy/compose.worker.standalone.yaml",
+        "deploy/compose.host.yaml",
+    ):
+        worker = yaml.safe_load((ROOT / name).read_text(encoding="utf-8"))["services"]["worker"]
+        assert worker["mem_limit"] == "${AGENT_WORKER_MEM_LIMIT:-256m}"
+        assert worker["pids_limit"] == "${AGENT_WORKER_PIDS_LIMIT:-96}"
+        assert worker["cap_add"] == ["SYS_ADMIN"]
+        environment = worker["environment"]
+        assert environment["AGENT_WORKER_RESOURCE_LIMITS_MODE"] == (
+            "${AGENT_WORKER_RESOURCE_LIMITS_MODE:-default}"
+        )
+    for name in (
+        "deploy/compose.worker.zero-runtime.yaml",
+        "deploy/compose.worker.pull.example.yaml",
+        "deploy/compose.host.pull.example.yaml",
+    ):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert "mem_limit" not in text and "pids_limit" not in text
+        assert "AGENT_WORKER_RESOURCE_LIMITS_MODE" not in text

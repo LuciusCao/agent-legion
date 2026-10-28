@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -76,3 +77,138 @@ def test_installer_default_version_matches_velites_crate() -> None:
         f"install-worker.sh 默认 velites 版本 {default.group(1)} 与 "
         f"velites/Cargo.toml {package.group(1)} 不一致——velites 落版时两处必须同步 bump"
     )
+
+
+def _target(tmp_path: Path, name: str) -> Path:
+    target = tmp_path / name
+    (target / "velites-bin").mkdir(parents=True)
+    (target / "velites-bin/velites").write_text("binary", encoding="utf-8")
+    (target / "velites-bin/.velites-version").write_text("0.5.9", encoding="utf-8")
+    return target
+
+
+def _run_installer(
+    tmp_path: Path, target: Path, *, version: str = "0.8.2", extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir(exist_ok=True)
+    (fake_bin / "docker").write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = compose ] && [ "$2" = version ]; then\n'
+        '  [ "${3:-}" = --short ] && echo v2.29.0 || echo Docker Compose version v2.29.0\n'
+        "fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "curl").write_text(
+        "#!/bin/sh\n"
+        "out=; url=\n"
+        "while [ $# -gt 0 ]; do\n"
+        '  if [ "$1" = -o ]; then out="$2"; shift 2; else url="$1"; shift; fi\n'
+        "done\n"
+        'case "$url" in\n'
+        '  */deploy/compose.worker.standalone.yaml) cp "$FAKE_COMPOSE" "$out" ;;\n'
+        "  *) exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    for command in ("docker", "curl"):
+        (fake_bin / command).chmod(0o755)
+    env = os.environ.copy()
+    for key in (
+        "AGENT_WORKER_RESOURCE_LIMITS_MODE",
+        "AGENT_WORKER_MEM_LIMIT",
+        "AGENT_WORKER_PIDS_LIMIT",
+    ):
+        env.pop(key, None)
+    env.update(extra_env or {})
+    env.update(
+        {
+            "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
+            "FAKE_COMPOSE": str(REPO_ROOT / "deploy/compose.worker.standalone.yaml"),
+            "AGENT_WORKER_VERSION": version,
+            "AGENT_WORKER_COMPOSE_REF": "test-ref",
+        }
+    )
+    return subprocess.run(
+        [str(INSTALLER), "--target", str(target), "--no-up"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _env(target: Path) -> dict[str, str]:
+    return {
+        key: value
+        for line in (target / ".env").read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+        for key, value in [line.split("=", 1)]
+    }
+
+
+def test_installer_fresh_limits_are_persistent_and_idempotent(tmp_path: Path) -> None:
+    target = _target(tmp_path, "fresh")
+    result = _run_installer(tmp_path, target)
+    assert result.returncode == 0, result.stderr
+    expected = {
+        "AGENT_WORKER_RESOURCE_LIMITS_MODE": "default",
+        "AGENT_WORKER_MEM_LIMIT": "256m",
+        "AGENT_WORKER_PIDS_LIMIT": "96",
+    }
+    assert _env(target) | expected == _env(target)
+    before = (target / ".env").read_bytes()
+    result = _run_installer(tmp_path, target)
+    assert result.returncode == 0, result.stderr
+    assert (target / ".env").read_bytes() == before
+
+
+def test_installer_upgrade_rollback_preserves_explicit_limits_and_upload_state(
+    tmp_path: Path,
+) -> None:
+    target = _target(tmp_path, "upgrade")
+    (target / "worker.yaml").write_text("max_concurrency: 11\n", encoding="utf-8")
+    (target / ".env").write_text(
+        "AGENT_WORKER_RESOURCE_LIMITS_MODE=explicit\n"
+        "AGENT_WORKER_MEM_LIMIT=512m\n"
+        "AGENT_WORKER_PIDS_LIMIT=128\n",
+        encoding="utf-8",
+    )
+    for version in ("0.8.3", "0.8.2"):
+        result = _run_installer(tmp_path, target, version=version)
+        assert result.returncode == 0, result.stderr
+        assert _env(target)["AGENT_WORKER_MEM_LIMIT"] == "512m"
+        assert _env(target)["AGENT_WORKER_PIDS_LIMIT"] == "128"
+        assert _env(target)["AGENT_WORKER_RESOURCE_LIMITS_MODE"] == "explicit"
+        assert _env(target)["AGENT_WORKER_IMAGE"].endswith(f":{version}")
+    compose = (target / "docker-compose.yaml").read_text(encoding="utf-8")
+    assert "worker-data:/var/lib/agent-legion-worker" in compose
+    assert (target / "worker.yaml").read_text(encoding="utf-8") == "max_concurrency: 11\n"
+
+
+def test_installer_default_upgrade_rejects_high_concurrency_before_commit(tmp_path: Path) -> None:
+    target = _target(tmp_path, "reject")
+    (target / "worker.yaml").write_text("max_concurrency: 11\n", encoding="utf-8")
+    (target / ".env").write_text("AGENT_WORKER_IMAGE=old\n", encoding="utf-8")
+    (target / "docker-compose.yaml").write_text("old-compose\n", encoding="utf-8")
+    result = _run_installer(tmp_path, target)
+    assert result.returncode == 1
+    assert "测量 envelope" in result.stderr and "explicit" in result.stderr
+    assert (target / ".env").read_text(encoding="utf-8") == "AGENT_WORKER_IMAGE=old\n"
+    assert (target / "docker-compose.yaml").read_text(encoding="utf-8") == "old-compose\n"
+
+
+def test_installer_persists_explicit_limits_and_unlimited(tmp_path: Path) -> None:
+    for name, mem, pids in (("finite", "512m", "128"), ("unlimited", "0", "-1")):
+        target = _target(tmp_path, name)
+        (target / "worker.yaml").write_text("max_concurrency: 11\n", encoding="utf-8")
+        result = _run_installer(
+            tmp_path,
+            target,
+            extra_env={"AGENT_WORKER_MEM_LIMIT": mem, "AGENT_WORKER_PIDS_LIMIT": pids},
+        )
+        assert result.returncode == 0, result.stderr
+        assert _env(target)["AGENT_WORKER_RESOURCE_LIMITS_MODE"] == "explicit"
+        assert _env(target)["AGENT_WORKER_MEM_LIMIT"] == mem
+        assert _env(target)["AGENT_WORKER_PIDS_LIMIT"] == pids

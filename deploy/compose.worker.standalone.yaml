@@ -21,6 +21,8 @@ services:
       - seccomp:unconfined
     cap_add:
       - SYS_ADMIN
+    mem_limit: ${AGENT_WORKER_MEM_LIMIT:-256m}
+    pids_limit: ${AGENT_WORKER_PIDS_LIMIT:-96}
     volumes:
       - ./worker.yaml:/etc/agent-legion/worker.yaml:ro
       # velites 二进制外挂（issue #381）：worker 镜像不含任何 agent runtime
@@ -51,6 +53,7 @@ services:
     environment:
       LLM_GATEWAY_TOKEN: ${LLM_GATEWAY_TOKEN:-}
       AGENT_WORKER_IMAGE_VERSION: ${AGENT_WORKER_IMAGE:-ghcr.io/luciuscao/agent-legion-worker:0.6.0}
+      AGENT_WORKER_RESOURCE_LIMITS_MODE: ${AGENT_WORKER_RESOURCE_LIMITS_MODE:-default}
       # 期望 runtime 守卫：探测不到 velites 或模型发现失败（含架构错配）
       # 即 fail-fast（退出码 2）。纯 code 池形态置空并去掉 velites bind
       # mount（参照 compose.worker.zero-runtime.yaml）。
