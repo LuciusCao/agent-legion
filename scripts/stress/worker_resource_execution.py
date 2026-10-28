@@ -58,6 +58,9 @@ def build_execution_expectations(
     return expected
 
 
+HOST_CODE_EXECUTOR_ID = "code"
+
+
 def _matches_current_key(row: Mapping[str, Any], key: tuple[str, str, int]) -> bool:
     job_id, node_key, node_run_id = key
     return (
@@ -77,7 +80,7 @@ def require_exclusive_execution_routes(
     host_done: Mapping[tuple[str, str, int], Mapping[str, Any]],
 ) -> None:
     executions = list(execution_rows)
-    leases = list(lease_rows)
+    leases = [row for row in lease_rows if row.get("executor_id") == HOST_CODE_EXECUTOR_ID]
     for key in host_expected:
         if any(_matches_current_key(row, key) for row in executions):
             raise ContractViolationError(f"conflicting Worker execution for Host key {key}")

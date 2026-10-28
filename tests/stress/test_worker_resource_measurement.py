@@ -710,6 +710,7 @@ def test_default_code_zero_uses_current_host_leases_and_authority_refs() -> None
     leases = [
         {
             "execution_id": execution_id,
+            "executor_id": "code",
             "workspace_id": "resource_mixed",
             "job_id": job_id,
             "node_key": "first",
@@ -739,9 +740,10 @@ def test_default_code_zero_uses_current_host_leases_and_authority_refs() -> None
     assert refs["b.json"]["size_bytes"] == 3
 
 
-def _lease_row(job: str, node: str, run: int, execution: str) -> dict:
+def _lease_row(job: str, node: str, run: int, execution: str, executor_id: str = "code") -> dict:
     return {
         "execution_id": execution,
+        "executor_id": executor_id,
         "workspace_id": "resource_mixed",
         "job_id": job,
         "node_key": node,
@@ -779,6 +781,34 @@ def test_current_execution_routes_are_unique_and_history_cannot_fill_or_conflict
     inputs["execution_rows"].append(_execution_row("job1", "first", 1, "historical-worker"))
     inputs["lease_rows"].append(_lease_row("job1", "second", 2, "historical-host"))
     require_exclusive_execution_routes(**inputs)
+
+
+def test_remote_code_and_agent_lane_leases_are_not_host_code_conflicts() -> None:
+    inputs = _exclusive_inputs()
+    inputs["lease_rows"].append(_lease_row("job1", "second", 12, "agent-lane", "agent:worker"))
+    require_exclusive_execution_routes(**inputs)
+    code_key = ("job1", "first", 11)
+    code_row = _execution_row("job1", "first", 11, "remote-code")
+    inputs["execution_rows"].append(code_row)
+    inputs["remote_done"][code_key] = code_row
+    inputs["remote_expected"][code_key] = inputs["host_expected"][code_key]
+    inputs["host_expected"] = {}
+    inputs["host_done"] = {}
+    inputs["lease_rows"] = [row for row in inputs["lease_rows"] if row["node_key"] == "second"]
+    inputs["lease_rows"].append(
+        _lease_row("job1", "first", 11, "remote-code-lease", "agent:code:worker")
+    )
+    require_exclusive_execution_routes(**inputs)
+
+
+def test_host_lease_matching_only_selects_local_code() -> None:
+    expected = {("job1", "first", 11): _identity_expectations()[("job1", "first", 11)]}
+    leases = [
+        _lease_row("job1", "first", 11, "local"),
+        _lease_row("job1", "first", 11, "remote", "agent:code:worker"),
+        _lease_row("job1", "first", 11, "agent", "agent:worker"),
+    ]
+    assert len(require_host_code_leases(expected, leases)) == 1
 
 
 def test_host_lease_and_done_worker_execution_on_same_current_key_fails() -> None:
@@ -840,7 +870,7 @@ def test_verify_remote_uploads_rejects_conflicting_worker_row_on_host_key(
                     {"id": 22, "job_id": "job2", "node_key": "second"},
                 ],
                 " from agent_execution_requests": execution_rows,
-                " from executor_leases": lease_rows,
+                " from executor_leases where job_id = any(%s) and executor_id = %s": lease_rows,
             }
             for fragment, result in rows.items():
                 if fragment in sql:

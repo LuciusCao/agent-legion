@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from scripts.stress.worker_resource_execution import ContractViolationError
+from scripts.stress.worker_resource_execution import (
+    HOST_CODE_EXECUTOR_ID,
+    ContractViolationError,
+)
 from scripts.stress.worker_resource_execution import (
     require_exclusive_execution_routes as require_exclusive_execution_routes,
 )
@@ -26,9 +29,9 @@ def read_host_code_leases(conn: Any, job_ids: list[str], enabled: bool) -> list[
     if not enabled:
         return []
     return conn.execute(
-        "select execution_id, workspace_id, job_id, node_key, node_run_id, status"
-        " from executor_leases where job_id = any(%s)",
-        (job_ids,),
+        "select execution_id, executor_id, workspace_id, job_id, node_key, node_run_id, status"
+        " from executor_leases where job_id = any(%s) and executor_id = %s",
+        (job_ids, HOST_CODE_EXECUTOR_ID),
     ).fetchall()
 
 
@@ -36,7 +39,7 @@ def require_host_code_leases(
     expected: Mapping[tuple[str, str, int], Mapping[str, Any]],
     lease_rows: Iterable[Mapping[str, Any]],
 ) -> dict[tuple[str, str, int], Mapping[str, Any]]:
-    rows = list(lease_rows)
+    rows = [row for row in lease_rows if row.get("executor_id") == HOST_CODE_EXECUTOR_ID]
     done: dict[tuple[str, str, int], Mapping[str, Any]] = {}
     execution_ids: set[str] = set()
     for key, expectation in expected.items():
