@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -94,6 +95,15 @@ def _run_installer(
     fake_bin.mkdir(exist_ok=True)
     (fake_bin / "docker").write_text(
         "#!/bin/sh\n"
+        'if [ "$1" = run ]; then\n'
+        '  [ "${FAKE_DOCKER_RUN_FAIL:-0}" = 0 ] || exit 1\n'
+        '  "$FAKE_PYTHON" -c \'import os,yaml\n'
+        "from worker.config_validation import validate_config\n"
+        'with open(os.environ["FAKE_WORKER_YAML"], encoding="utf-8") as stream:\n'
+        "    config = validate_config(yaml.safe_load(stream), require_identity=False)\n"
+        'print(config["max_concurrency"], config["max_code_concurrency"], config["upload_max_concurrency"])\'\n'
+        "  exit $?\n"
+        "fi\n"
         'if [ "$1" = compose ] && [ "$2" = version ]; then\n'
         '  [ "${3:-}" = --short ] && echo v2.29.0 || echo Docker Compose version v2.29.0\n'
         "fi\n"
@@ -126,6 +136,9 @@ def _run_installer(
         {
             "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
             "FAKE_COMPOSE": str(REPO_ROOT / "deploy/compose.worker.standalone.yaml"),
+            "FAKE_WORKER_YAML": str(target / "worker.yaml"),
+            "FAKE_PYTHON": sys.executable,
+            "PYTHONPATH": str(REPO_ROOT),
             "AGENT_WORKER_VERSION": version,
             "AGENT_WORKER_COMPOSE_REF": "test-ref",
         }
@@ -197,6 +210,52 @@ def test_installer_default_upgrade_rejects_high_concurrency_before_commit(tmp_pa
     assert "测量 envelope" in result.stderr and "explicit" in result.stderr
     assert (target / ".env").read_text(encoding="utf-8") == "AGENT_WORKER_IMAGE=old\n"
     assert (target / "docker-compose.yaml").read_text(encoding="utf-8") == "old-compose\n"
+
+
+@pytest.mark.parametrize(
+    ("document", "error"),
+    [
+        ("  max_concurrency: 0xB\n", "测量 envelope"),
+        ("max_code_concurrency: 0xB\n", "测量 envelope"),
+        ("upload_max_concurrency: 0xB\n", "测量 envelope"),
+        ("max_concurrency: 0xB # eleven\n", "测量 envelope"),
+        ("max_concurrency: 10\nmax_concurrency: 0xB\n", "测量 envelope"),
+        ("max_concurrency: '0xB'\n", "可靠解析"),
+        ('max_concurrency: "11"\n', "可靠解析"),
+        ("max_concurrency: true\n", "可靠解析"),
+        ("max_concurrency: eleven\n", "可靠解析"),
+        ("max_concurrency: [11\n", "可靠解析"),
+        ("- max_concurrency\n", "可靠解析"),
+        ("max_concurrency: 0xB\nmax_concurrency: 10\n", None),
+    ],
+)
+def test_installer_uses_worker_yaml_semantics_before_commit(
+    tmp_path: Path, document: str, error: str | None
+) -> None:
+    target = _target(tmp_path, "yaml-semantics")
+    (target / "worker.yaml").write_text(document, encoding="utf-8")
+    (target / ".env").write_text("AGENT_WORKER_IMAGE=old\n", encoding="utf-8")
+    (target / "docker-compose.yaml").write_text("old-compose\n", encoding="utf-8")
+    result = _run_installer(tmp_path, target)
+    if error is None:
+        assert result.returncode == 0, result.stderr
+        assert _env(target)["AGENT_WORKER_RESOURCE_LIMITS_MODE"] == "default"
+        return
+    assert result.returncode == 1
+    assert error in result.stderr
+    assert (target / ".env").read_bytes() == b"AGENT_WORKER_IMAGE=old\n"
+    assert (target / "docker-compose.yaml").read_bytes() == b"old-compose\n"
+
+
+def test_installer_unavailable_yaml_parser_fails_closed_before_commit(tmp_path: Path) -> None:
+    target = _target(tmp_path, "parser-unavailable")
+    (target / "worker.yaml").write_text("max_concurrency: 0xB\n", encoding="utf-8")
+    (target / ".env").write_text("AGENT_WORKER_IMAGE=old\n", encoding="utf-8")
+    (target / "docker-compose.yaml").write_text("old-compose\n", encoding="utf-8")
+    result = _run_installer(tmp_path, target, extra_env={"FAKE_DOCKER_RUN_FAIL": "1"})
+    assert result.returncode == 1 and "可靠解析" in result.stderr
+    assert (target / ".env").read_bytes() == b"AGENT_WORKER_IMAGE=old\n"
+    assert (target / "docker-compose.yaml").read_bytes() == b"old-compose\n"
 
 
 def test_installer_persists_explicit_limits_and_unlimited(tmp_path: Path) -> None:

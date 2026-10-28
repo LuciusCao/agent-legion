@@ -332,7 +332,7 @@ AGENT_WORKER_RESOURCE_LIMITS_MODE=default
 
 超出 reference envelope（agent>10、code>0 或 upload>4）时不得只继承 default limits：先评审实际内存与线程需求，再显式设置合适的 limits 并设 `AGENT_WORKER_RESOURCE_LIMITS_MODE=explicit`。明确接受无限额时使用 `AGENT_WORKER_MEM_LIMIT=0`、`AGENT_WORKER_PIDS_LIMIT=-1`，同样必须设 `explicit`。启动、控制台/API 写入前和配置文件热更共用同一 envelope guard：default 超 envelope 直接拒绝，不写配置、不静默 clamp；显式模式不自动改并发，也不承诺任意配置都安全。
 
-一键安装脚本把最终 mode/limits 幂等写入 `.env`，fresh 缺省补 256m/96/default；环境变量显式传 limits 时若未传 mode，会按显式评审持久化为 `explicit`。升级预检在任何 compose/.env 提交前检查当前可见引导配置，default 超 envelope 会保留旧文件并中止；运行后控制卷里的配置仍以运行时三道 guard 为准。升级或回滚版本不会重置显式 limits，也不会改写 `worker.yaml`、`worker-data` 或 `worker-control`，pending upload 标记与上传队列保留，容器/executor restart 继续按既有恢复语义完成未上传结果。需要回滚时同时回退 Host/Worker 镜像，并保留已评审的资源配置。
+一键安装脚本把最终 mode/limits 幂等写入 `.env`，fresh 缺省补 256m/96/default；环境变量显式传 limits 时若未传 mode，会按显式评审持久化为 `explicit`。升级预检在任何 compose/.env 提交前，复用目标 Worker 镜像中固定版本的 PyYAML 与 `validate_config` 解析当前可见引导配置，不在宿主新增依赖；YAML 缩进、0x 整数、行内注释与重复键 last-wins 与 Worker 一致，引号数字等 Worker 本身不支持的类型会明确报错，而不是放宽成另一套语义。default 超 envelope、镜像不可用或配置无法可靠解析都会保留旧文件并中止；运行后控制卷里的配置仍以运行时三道 guard 为准。升级或回滚版本不会重置显式 limits，也不会改写 `worker.yaml`、`worker-data` 或 `worker-control`，pending upload 标记与上传队列保留，容器/executor restart 继续按既有恢复语义完成未上传结果。需要回滚时同时回退 Host/Worker 镜像，并保留已评审的资源配置。
 
 ### 出网代理（#444）
 

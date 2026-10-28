@@ -239,12 +239,26 @@ case "$pids_limit_final" in
   ''|*[!0-9]*) die "非法 AGENT_WORKER_PIDS_LIMIT: ${pids_limit_final}（正整数或 -1）" ;;
   *) [ "$pids_limit_final" -gt 0 ] || die "AGENT_WORKER_PIDS_LIMIT 必须为正整数或 -1" ;;
 esac
-agent_limit="$(sed -n 's/^max_concurrency:[[:space:]]*\([0-9][0-9]*\).*$/\1/p' ./worker.yaml 2>/dev/null | tail -1)"
-code_limit="$(sed -n 's/^max_code_concurrency:[[:space:]]*\([0-9][0-9]*\).*$/\1/p' ./worker.yaml 2>/dev/null | tail -1)"
-upload_limit="$(sed -n 's/^upload_max_concurrency:[[:space:]]*\([0-9][0-9]*\).*$/\1/p' ./worker.yaml 2>/dev/null | tail -1)"
-agent_limit="${agent_limit:-10}"
-code_limit="${code_limit:-0}"
-upload_limit="${upload_limit:-4}"
+if [ -f ./worker.yaml ]; then
+  if ! concurrency="$(docker run --rm --network none --entrypoint python3 \
+    -v "$PWD:/work:ro" "${IMAGE_REPO}:${WORKER_VERSION}" -c \
+    'import yaml
+from worker.config_validation import validate_config
+with open("/work/worker.yaml", encoding="utf-8") as stream:
+    config = validate_config(yaml.safe_load(stream), require_identity=False)
+print(config["max_concurrency"], config["max_code_concurrency"], config["upload_max_concurrency"])' \
+    2>"$TMPDIR_/concurrency.err")"; then
+    die "无法按 Worker YAML/整数语义可靠解析现有 worker.yaml 的并发键，未修改 compose/.env。请修正 YAML 或将三个并发键改为未加引号的整数后重试：$(tail -1 "$TMPDIR_/concurrency.err")"
+  fi
+  agent_limit="${concurrency%% *}"
+  code_limit="${concurrency#* }"
+  code_limit="${code_limit%% *}"
+  upload_limit="${concurrency##* }"
+else
+  agent_limit=10
+  code_limit=0
+  upload_limit=4
+fi
 if [ "$limits_mode_final" = default ] && {
   [ "$agent_limit" -gt 10 ] || [ "$code_limit" -gt 0 ] || [ "$upload_limit" -gt 4 ];
 }; then
