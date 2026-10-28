@@ -24,6 +24,7 @@ from worker.runtime.controls import (
     strip_removed_keys,
     validate_claim_controls,
 )
+from worker.runtime.preflight import resource_envelope_error
 
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _EDITABLE_FIELDS = {
@@ -111,6 +112,7 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     concurrency = config.get("max_concurrency")
     claim_enabled = config.get("claim_enabled")
     validate_claim_controls(concurrency, claim_enabled)
+    assert isinstance(concurrency, int)
     # 批次 2 code 执行池；0 = 仅 agent。上限与 Host 注册契约引用同一常量。
     code_concurrency = config.get("max_code_concurrency", 0)
     if (
@@ -158,6 +160,10 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     # 冷启动爬坡（#471）：None/False = 禁用（一次性全量，行为回到现状）；
     # 归一化出口（键补齐、int→float）在 ramp_up.normalized_ramp_up_block。
     ramp_up = normalized_ramp_up_block(validate_ramp_up(config.get("ramp_up")))
+    if error := resource_envelope_error(
+        agent=concurrency, code=code_concurrency, upload=upload_concurrency
+    ):
+        raise ValueError(error)
     return {
         **config,
         "host_url": host_url,

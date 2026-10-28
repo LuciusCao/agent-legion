@@ -26,6 +26,22 @@ on:
         description: Whole-cgroup memory sampling interval
         required: true
         default: "500"
+      mem_limit:
+        description: Candidate Worker memory limit (empty keeps unlimited)
+        required: false
+        default: ""
+      pids_limit:
+        description: Candidate Worker pids limit (empty keeps unlimited)
+        required: false
+        default: ""
+      fault_mem_limit:
+        description: Disposable-container memory fault limit (empty skips)
+        required: false
+        default: ""
+      fault_pids_limit:
+        description: Disposable-container pids fault limit (empty skips)
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -44,6 +60,8 @@ jobs:
       MEASUREMENT_WARM_REPETITIONS: ${{ inputs.warm_repetitions || '2' }}
       MEASUREMENT_PIDS_INTERVAL_MS: ${{ inputs.pids_interval_ms || '100' }}
       MEASUREMENT_MEMORY_INTERVAL_MS: ${{ inputs.memory_interval_ms || '500' }}
+      MEASUREMENT_MEM_LIMIT: ${{ inputs.mem_limit || '0' }}
+      MEASUREMENT_PIDS_LIMIT: ${{ inputs.pids_limit || '-1' }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -66,6 +84,12 @@ jobs:
             code_concurrency: 2
             upload_concurrency: 2
             jobs_per_wave: 8
+            artifact_kib: 1024
+          - envelope: default
+            agent_concurrency: 10
+            code_concurrency: 0
+            upload_concurrency: 4
+            jobs_per_wave: 20
             artifact_kib: 1024
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -120,3 +144,41 @@ jobs:
           uv run python -c
           "import json,pathlib; p=pathlib.Path('worker-resource-results/${{ matrix.envelope }}/run-report.json');
           d=json.loads(p.read_text()); print(json.dumps(d, indent=2)); raise SystemExit(0 if d['success'] else 1)"
+
+  fault-injection:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Prove a lower memory limit kills a disposable container
+        if: ${{ inputs.fault_mem_limit != '' }}
+        env:
+          FAULT_MEM_LIMIT: ${{ inputs.fault_mem_limit }}
+        run: |
+          name="worker-resource-memory-fault-$$"
+          trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+          set +e
+          docker run --name "$name" --memory "$FAULT_MEM_LIMIT" --memory-swap "$FAULT_MEM_LIMIT" \
+            python:3.13-slim python -c \
+            'blocks=[]; exec("while True:\n    blocks.append(bytearray(16 * 1024 * 1024))")'
+          status=$?
+          set -e
+          test "$status" -ne 0
+          test "$(docker inspect --format '{{.State.OOMKilled}}' "$name")" = true
+          test "$(docker inspect --format '{{.HostConfig.Memory}}' "$name")" -gt 0
+
+      - name: Prove a lower pids limit rejects disposable-container threads
+        if: ${{ inputs.fault_pids_limit != '' }}
+        env:
+          FAULT_PIDS_LIMIT: ${{ inputs.fault_pids_limit }}
+        run: |
+          name="worker-resource-pids-fault-$$"
+          trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+          set +e
+          output="$(docker run --name "$name" --pids-limit "$FAULT_PIDS_LIMIT" \
+            python:3.13-slim python -c \
+            'import threading,time; [threading.Thread(target=time.sleep,args=(30,)).start() for _ in range(256)]' 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -ne 0
+          case "$output" in *"can't start new thread"*) ;; *) exit 1 ;; esac
+          test "$(docker inspect --format '{{.HostConfig.PidsLimit}}' "$name")" = "$FAULT_PIDS_LIMIT"

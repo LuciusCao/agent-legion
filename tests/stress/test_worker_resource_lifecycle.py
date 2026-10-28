@@ -811,8 +811,25 @@ def test_workflow_dispatch_and_pr_inputs_reach_real_parser() -> None:
     assert custom.memory_interval_ms == 750
     assert document["jobs"]["measure"]["env"]["MEASUREMENT_NET_ADMIN"] == "NET_ADMIN"
     assert document["jobs"]["measure"]["env"]["MEASUREMENT_APPARMOR"] == "apparmor:unconfined"
+    assert (
+        document["jobs"]["measure"]["env"]["MEASUREMENT_MEM_LIMIT"]
+        == "${{ inputs.mem_limit || '0' }}"
+    )
+    assert (
+        document["jobs"]["measure"]["env"]["MEASUREMENT_PIDS_LIMIT"]
+        == "${{ inputs.pids_limit || '-1' }}"
+    )
+    fault = yaml.safe_dump(document["jobs"]["fault-injection"])
+    assert "OOMKilled" in fault and "can't start new thread" in fault
     assert document["permissions"] == {"contents": "read"}
-    assert len(document["jobs"]["measure"]["strategy"]["matrix"]["include"]) == 3
+    matrix = document["jobs"]["measure"]["strategy"]["matrix"]["include"]
+    assert len(matrix) == 4
+    default = next(item for item in matrix if item["envelope"] == "default")
+    assert (
+        default["agent_concurrency"],
+        default["code_concurrency"],
+        default["upload_concurrency"],
+    ) == (10, 0, 4)
     assert "ubuntu-24.04" in source
     assert "worker-resource-results/" in source
     assert "data/worker-resource-measurement/work" not in source

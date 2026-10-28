@@ -11,6 +11,10 @@ import pytest
 import yaml
 
 from scripts.stress.worker_resource_evidence import BacklogEvidence, measure_upload_backlog
+from scripts.stress.worker_resource_host_code import (
+    HOST_CODE_SANDBOX_OVERRIDE,
+    host_code_sandbox_metadata,
+)
 from scripts.stress.worker_resource_identity import (
     ContractViolationError,
     ExecutionReadinessError,
@@ -18,6 +22,10 @@ from scripts.stress.worker_resource_identity import (
     require_direct_outputs,
     require_done_executions,
     verify_authority_object,
+)
+from scripts.stress.worker_resource_local_code import (
+    host_code_direct_refs,
+    require_host_code_leases,
 )
 from scripts.stress.worker_resource_measurement import (
     MEMORY_FILES,
@@ -39,10 +47,13 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_all_measurement_workflows_pass_the_production_loader() -> None:
     from server.app.workflows.loader import workflow_definition_from_dict
 
-    for workspace_id, definition in _definitions().items():
-        loaded = workflow_definition_from_dict(definition)
-        assert loaded.key == workspace_id
-        assert loaded.nodes["_start"].node_type == "start"
+    for code_concurrency in (1, 0):
+        for workspace_id, definition in _definitions(code_concurrency).items():
+            loaded = workflow_definition_from_dict(definition)
+            assert loaded.key == workspace_id
+            assert loaded.nodes["_start"].node_type == "start"
+    assert set(_definitions(0)["resource_upload"]["nodes"]) == {"_start", "agent"}
+    assert set(_definitions(1)["resource_upload"]["nodes"]) == {"_start", "resource_code"}
 
 
 def _cgroup(root: Path, *, memory_max: str = "max", pids_max: str = "max") -> Path:
@@ -244,7 +255,7 @@ def test_log_sanitizer_removes_credentials_and_presigned_query() -> None:
     assert "x=1" in result
 
 
-def test_measurement_compose_preserves_shipped_envelope_without_new_limits() -> None:
+def test_measurement_compose_preserves_shipped_envelope_and_optional_limits() -> None:
     document = yaml.safe_load(
         (ROOT / "deploy/compose.worker.measurement.yaml").read_text(encoding="utf-8")
     )
@@ -254,11 +265,12 @@ def test_measurement_compose_preserves_shipped_envelope_without_new_limits() -> 
         "seccomp:unconfined",
         "${MEASUREMENT_APPARMOR:-apparmor:unconfined}",
     ]
-    assert "mem_limit" not in worker
-    assert "pids_limit" not in worker
+    assert worker["mem_limit"] == "${MEASUREMENT_MEM_LIMIT:-0}"
+    assert worker["pids_limit"] == "${MEASUREMENT_PIDS_LIMIT:--1}"
     assert "env_file" not in worker
     assert "user" not in worker
     host = document["services"]["host"]
+    assert "cap_add" not in host and "security_opt" not in host
     startup = host["command"][0]
     assert 'exec setpriv --reuid="${MEASUREMENT_HOST_UID}"' in startup
     assert '--regid="${MEASUREMENT_HOST_GID}" --clear-groups' in startup
@@ -269,6 +281,19 @@ def test_measurement_compose_preserves_shipped_envelope_without_new_limits() -> 
     assert production["services"]["worker"]["cap_add"] == ["SYS_ADMIN"]
     assert production["services"]["worker"]["security_opt"] == ["seccomp:unconfined"]
     assert "--no-sandbox" not in yaml.safe_dump(document)
+
+
+def test_default_host_code_sandbox_is_disposable_and_probed() -> None:
+    document = yaml.safe_load(HOST_CODE_SANDBOX_OVERRIDE)
+    assert set(document["services"]) == {"host"}
+    host = document["services"]["host"]
+    assert host["cap_add"] == ["SYS_ADMIN", "NET_ADMIN"]
+    assert host["security_opt"] == ["seccomp:unconfined"]
+    assert "bubblewrap" in host["command"][0] and "test -u /usr/bin/bwrap" in host["command"][0]
+    run = SimpleNamespace(compose=lambda *_args, **_kwargs: "bubblewrap 0.10.0\n4755")
+    metadata = host_code_sandbox_metadata(run)
+    assert metadata["path"] == "/usr/bin/bwrap" and metadata["setuid"] is True
+    assert metadata["production_recommendation"] is False
 
 
 def test_workload_covers_real_execution_and_restart_scenarios() -> None:
@@ -293,6 +318,11 @@ def test_workload_covers_real_execution_and_restart_scenarios() -> None:
     with pytest.raises(SystemExit):
         parse_args(["--jobs-per-wave", "1"])
     assert parse_args(["--jobs-per-wave", "2"]).jobs_per_wave == 2
+    limited = parse_args(["--code-concurrency", "0", "--mem-limit", "200m", "--pids-limit", "48"])
+    assert (limited.code_concurrency, limited.mem_limit, limited.pids_limit) == (0, "200m", 48)
+    for invalid in (["--code-concurrency", "-1"], ["--pids-limit", "0"], ["--mem-limit", " "]):
+        with pytest.raises(SystemExit):
+            parse_args(invalid)
 
 
 def test_empty_or_deduplicated_wave_cannot_pass_as_complete() -> None:
@@ -669,6 +699,42 @@ def test_legal_multi_node_and_multi_output_identities_pass() -> None:
         },
     }
     assert len(require_direct_outputs(execution, ["a.json", "b.json"], "resource_mixed")) == 2
+
+
+def test_default_code_zero_uses_current_host_leases_and_authority_refs() -> None:
+    expected = {
+        key: value for key, value in _identity_expectations().items() if value["kind"] == "code"
+    }
+    leases = [
+        {
+            "execution_id": execution_id,
+            "workspace_id": "resource_mixed",
+            "job_id": job_id,
+            "node_key": "first",
+            "node_run_id": run_id,
+            "status": "released",
+        }
+        for job_id, run_id, execution_id in (("job1", 11, "e11"), ("job2", 21, "e21"))
+    ]
+    done = require_host_code_leases(expected, leases)
+    assert len(done) == 2
+    with pytest.raises(ContractViolationError, match="one current Host code lease"):
+        require_host_code_leases(expected, [leases[0], leases[0]])
+    leases[1]["status"] = "active"
+    with pytest.raises(ContractViolationError, match="terminal state"):
+        require_host_code_leases(expected, leases)
+    execution = done[("job1", "first", 11)]
+    authority = {
+        ("job1", "first", name): {
+            "storage_key": f"jobs/resource_mixed/job1/.v/attempt/{name}.gz",
+            "size_bytes": 3,
+            "content_hash": DIGEST,
+        }
+        for name in ("a.json", "b.json")
+    }
+    refs = host_code_direct_refs(execution, ["a.json", "b.json"], "resource_mixed", authority)
+    assert refs["a.json"]["storage_key"].endswith("/e11/a.json.gz")
+    assert refs["b.json"]["size_bytes"] == 3
 
 
 @pytest.mark.parametrize(
