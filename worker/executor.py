@@ -154,8 +154,8 @@ def main() -> int:
     # 与 pacing（两次 claim 之间的等待）正交；未配置 ramp_up 块 = None，
     # 预算直通目标——行为与现状完全一致（一次性全量）。
     ramp = apply_ramp_hot_reload(None, ramp_controls, _print)
-    # #566 三期：load average 回压（构造即做容量合理性告警）。
-    shedder = LoadShedder(max_concurrency, log=_print)
+    # #566 三期：load average 回压。
+    shedder = LoadShedder(log=_print)
     ramp_view, ramp_paused_since = None, None
     # #647：executor 事件面预热——exit watcher（退出等待事件化，#578 二期）
     # 在首个执行前起好（模式经 AGENT_WORKER_EXIT_WATCH=kqueue|pidfd|scan|auto，

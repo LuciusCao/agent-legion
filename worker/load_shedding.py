@@ -11,10 +11,6 @@ application rounds UP so a positive budget always keeps at least one slot.
 Sampling is ``os.getloadavg`` cached for a few seconds — cheap by
 construction, and platforms without getloadavg (Windows) pass load through
 as unknown → no decay.
-
-The same module owns the capacity sanity warning: a configured
-max_concurrency far beyond the machine (default 4× cores) gets one startup
-WARNING — over-declared capacity is the quiet version of the same bug.
 """
 
 from __future__ import annotations
@@ -31,8 +27,6 @@ LOAD_FLOOR_RATIO = 3.0
 # Never shed below this factor: a positive budget always keeps ceil(value ×
 # factor) ≥ 1 slot, so refill never fully stalls on a shared/loaded box.
 LOAD_FLOOR_FACTOR = 0.25
-# max_concurrency beyond cores × this multiplier is flagged at startup.
-CONCURRENCY_WARN_MULTIPLIER = 4
 
 
 def load_budget_factor(load1: float, cores: int) -> float:
@@ -51,18 +45,6 @@ def shed_value(value: int, factor: float) -> int:
     if value <= 0:
         return value
     return max(1, math.ceil(value * factor))
-
-
-def concurrency_capacity_warning(max_concurrency: int, cores: int) -> str | None:
-    """One-line startup warning when the declared capacity far exceeds the
-    machine; None when the declaration is sane or cores are undetectable."""
-    if cores <= 0 or max_concurrency <= cores * CONCURRENCY_WARN_MULTIPLIER:
-        return None
-    return (
-        f"警告：max_concurrency={max_concurrency} 明显超出机器承载"
-        f"（{cores} 核 ×{CONCURRENCY_WARN_MULTIPLIER}）——过载时租约心跳/上传会被拖垮，"
-        "建议按机器实际容量下调"
-    )
 
 
 class LoadSampler:
@@ -99,7 +81,6 @@ class LoadShedder:
 
     def __init__(
         self,
-        max_concurrency: int,
         *,
         log: Callable[[str], None],
         sampler: LoadSampler | None = None,
@@ -107,8 +88,6 @@ class LoadShedder:
         self._sampler = sampler or LoadSampler()
         self._log = log
         self._shedding = False
-        if warning := concurrency_capacity_warning(max_concurrency, os.cpu_count() or 0):
-            log(warning)
 
     def shed(self, budget: dict[str, int]) -> dict[str, int]:
         """Decay one pass's budget by the current load factor (0.0–1.0)."""
