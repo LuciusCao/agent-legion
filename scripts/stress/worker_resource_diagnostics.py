@@ -16,8 +16,10 @@ from server.app.db.transaction import read_connection
 def write_host_code_diagnostics(run: Any, iteration_dir: Path) -> None:
     with read_connection(run.dsn) as conn:
         rows = conn.execute(
-            "select id, job_id, node_key, status, error_message, log_path, run_dir, workspace_id"
-            " from node_runs join jobs on jobs.id = node_runs.job_id where job_id like %s order by id",
+            "select node_runs.id, node_runs.job_id, node_runs.node_key, node_runs.status,"
+            " node_runs.error_message, node_runs.log_path, node_runs.run_dir, jobs.workspace_id"
+            " from node_runs join jobs on jobs.id = node_runs.job_id"
+            " where node_runs.job_id like %s order by node_runs.id",
             (f"%measurement-{iteration_dir.name}-%",),
         ).fetchall()
     metadata, metadata_bytes = [], 2

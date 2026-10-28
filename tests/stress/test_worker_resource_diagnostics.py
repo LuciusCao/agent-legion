@@ -8,8 +8,6 @@ import pytest
 
 from scripts.stress.worker_resource_workload import MeasurementRun
 
-pytestmark = pytest.mark.no_db
-
 
 def _code_row(absolute: bool = False, iteration: str = "cold-1") -> dict:
     job = f"resource~ucode_resource~ucode_measurement-ref:measurement-{iteration}-code-0-secret"
@@ -58,6 +56,7 @@ def _diagnostic_connection(rows: list[dict]):
     return connection
 
 
+@pytest.mark.no_db
 def test_production_relative_absolute_and_iteration_scoped_diagnostics(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -83,6 +82,7 @@ def test_production_relative_absolute_and_iteration_scoped_diagnostics(
     assert not (other / "host-code.log").exists()
 
 
+@pytest.mark.no_db
 def test_log_path_rejects_parent_other_job_and_run_dir_mismatch() -> None:
     from scripts.stress.worker_resource_diagnostics import _log_path
 
@@ -100,6 +100,7 @@ def test_log_path_rejects_parent_other_job_and_run_dir_mismatch() -> None:
             _log_path({**row, "run_dir": run_dir})
 
 
+@pytest.mark.no_db
 def test_read_log_rejects_intermediate_and_leaf_symlinks(tmp_path: Path) -> None:
     import subprocess
 
@@ -131,6 +132,7 @@ def test_read_log_rejects_intermediate_and_leaf_symlinks(tmp_path: Path) -> None
     assert result.returncode == 0 and result.stdout == b"safe"
 
 
+@pytest.mark.no_db
 def test_operational_error_preserves_original_failure_cleanup_and_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -171,6 +173,7 @@ def test_operational_error_preserves_original_failure_cleanup_and_result(
     assert run.cgroup_reader_id == "" and any("reader-1" in str(call) for call in removals)
 
 
+@pytest.mark.no_db
 def test_artifact_byte_budgets_and_unknown_argv_never_leak(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -187,3 +190,47 @@ def test_artifact_byte_budgets_and_unknown_argv_never_leak(
     assert metadata_path.stat().st_size <= 256 * 1024 + 2
     assert "unknown-secret" not in metadata_path.read_text()
     assert isinstance(json.loads(metadata_path.read_text()), list)
+
+
+@pytest.mark.postgres
+def test_host_code_diagnostics_uses_real_join_and_iteration_scope(tmp_path: Path) -> None:
+    from scripts.stress.worker_resource_diagnostics import write_host_code_diagnostics
+    from server.app.db.transaction import write_transaction
+    from tests.postgres_support import TEST_DATABASE_URL
+
+    jobs = [
+        f"resource~ucode_resource~ucode_measurement-ref:measurement-{iteration}-code-{index}"
+        for iteration, index in (("cold-1", 0), ("cold-1", 1), ("cold-0", 0))
+    ]
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("insert into workspaces(id, name) values ('resource_code', 'Resource code')")
+        for job in jobs:
+            conn.execute(
+                "insert into jobs(id, workspace_id, source_type, source_id) values (%s, %s, %s, %s)",
+                (job, "resource_code", "measurement", job),
+            )
+            conn.execute(
+                "insert into node_runs(job_id, node_key, status, error_message, log_path, run_dir)"
+                " values (%s, %s, %s, %s, %s, %s)",
+                (
+                    job,
+                    "resource_code",
+                    "failed",
+                    "no result secret",
+                    f"logs/jobs/by-job/ab/{job}/resource_code.log",
+                    f"jobs/resource_code/{job}/runs/resource_code/token",
+                ),
+            )
+
+    iteration_dir = tmp_path / "cold-1"
+    iteration_dir.mkdir()
+    run = _diagnostic_run(log="postgres log secret")
+    run.dsn = TEST_DATABASE_URL
+    write_host_code_diagnostics(run, iteration_dir)
+
+    metadata = json.loads((iteration_dir / "host-code-runs.json").read_text(encoding="utf-8"))
+    assert [item["job_id"] for item in metadata] == jobs[:2]
+    assert all("cold-0" not in item["job_id"] for item in metadata)
+    assert all(item["error_message"] == "no result <redacted>" for item in metadata)
+    log = (iteration_dir / "host-code.log").read_text(encoding="utf-8")
+    assert log.count("postgres log") == 2 and "secret" not in log
