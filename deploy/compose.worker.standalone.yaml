@@ -22,7 +22,7 @@ services:
     cap_add:
       - SYS_ADMIN
     mem_limit: ${AGENT_WORKER_MEM_LIMIT:-256m}
-    pids_limit: ${AGENT_WORKER_PIDS_LIMIT:-96}
+    pids_limit: ${AGENT_WORKER_PIDS_LIMIT:-128}
     volumes:
       - ./worker.yaml:/etc/agent-legion/worker.yaml:ro
       # velites 二进制外挂（issue #381）：worker 镜像不含任何 agent runtime

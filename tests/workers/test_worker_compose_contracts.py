@@ -95,7 +95,7 @@ def test_worker_resource_limits_share_measured_defaults_without_permission_chang
     ):
         worker = yaml.safe_load((ROOT / name).read_text(encoding="utf-8"))["services"]["worker"]
         assert worker["mem_limit"] == "${AGENT_WORKER_MEM_LIMIT:-256m}"
-        assert worker["pids_limit"] == "${AGENT_WORKER_PIDS_LIMIT:-96}"
+        assert worker["pids_limit"] == "${AGENT_WORKER_PIDS_LIMIT:-128}"
         assert worker["cap_add"] == ["SYS_ADMIN"]
         environment = worker["environment"]
         assert environment["AGENT_WORKER_RESOURCE_LIMITS_MODE"] == (

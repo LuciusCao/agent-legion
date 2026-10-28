@@ -217,7 +217,7 @@ if [ "${AGENT_WORKER_PIDS_LIMIT+x}" = x ]; then
 else
   pids_limit_final="$(sed -n 's/^AGENT_WORKER_PIDS_LIMIT=//p' ./.env 2>/dev/null | tail -1)"
 fi
-pids_limit_final="${pids_limit_final:-96}"
+pids_limit_final="${pids_limit_final:-128}"
 if [ "${AGENT_WORKER_RESOURCE_LIMITS_MODE+x}" = x ]; then
   limits_mode_final="$AGENT_WORKER_RESOURCE_LIMITS_MODE"
 else

@@ -168,7 +168,7 @@ def test_installer_fresh_limits_are_persistent_and_idempotent(tmp_path: Path) ->
     expected = {
         "AGENT_WORKER_RESOURCE_LIMITS_MODE": "default",
         "AGENT_WORKER_MEM_LIMIT": "256m",
-        "AGENT_WORKER_PIDS_LIMIT": "96",
+        "AGENT_WORKER_PIDS_LIMIT": "128",
     }
     assert _env(target) | expected == _env(target)
     before = (target / ".env").read_bytes()

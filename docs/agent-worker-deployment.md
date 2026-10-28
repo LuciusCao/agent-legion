@@ -318,21 +318,21 @@ Docker、目录自包含）。两者最终形态等价（同一镜像 + 同一�
 
 ### Worker 容器资源限额（#1049）
 
-三份基础 Compose（`compose.worker.yaml`、`compose.worker.standalone.yaml`、`compose.host.yaml`）的 Worker 默认使用 `mem_limit=256m`、`pids_limit=96` 和 `AGENT_WORKER_RESOURCE_LIMITS_MODE=default`；zero-runtime 与 pull override 不另写资源字段，直接继承同一组值。默认承诺只覆盖下述原生 Linux reference envelope：**agent=10、code=0（Host local code）、upload=4、每波 20 jobs、每个 artifact 1MiB**，不是按 CPU 核数或协议并发上限推导的通用保证，也不改变 `max_concurrency`、bwrap、capability、seccomp 或 CPU 限制。
+三份基础 Compose（`compose.worker.yaml`、`compose.worker.standalone.yaml`、`compose.host.yaml`）的 Worker 默认使用 `mem_limit=256m`、`pids_limit=128` 和 `AGENT_WORKER_RESOURCE_LIMITS_MODE=default`；zero-runtime 与 pull override 不另写资源字段，直接继承同一组值。默认承诺只覆盖下述原生 Linux reference envelope：**agent=10、code=0（Host local code）、upload=4、每波 20 jobs、每个 artifact 1MiB**，不是按 CPU 核数或协议并发上限推导的通用保证，也不改变 `max_concurrency`、bwrap、capability、seccomp 或 CPU 限制。
 
-默认值的证据与公式见 §5「Worker 资源测量」：最坏 upload-backlog 的 `memory.peak` p95 为 211,406,848B，乘 1.25 后按 8MiB 向上取整为 256MiB；100ms `pids.current` p95 为 71，乘 1.25 后按 8 向上取整为 96。默认 limit 低于个别迭代的观测 max 是刻意的 p95+headroom 选择，不是照抄 max；需要覆盖所有瞬时峰值的部署必须显式评审更高值或 unlimited。
+默认值的证据与公式见 §5「Worker 资源测量」：最坏 upload-backlog 的 `memory.peak` p95 为 211,406,848B，乘 1.25 后按 8MiB 向上取整为 256MiB；pids 则按每轮 100ms 高频峰值 99/98/97 的分布计算 p95，小样本保守为 99，乘 1.25 得 123.75 后按 8 向上取整为 128。需要覆盖超过 reference 峰值或更高并发的部署必须显式评审更高值或 unlimited。
 
 在 `deploy/.env` 或一键安装目录的 `.env` 配置：
 
 ```dotenv
 AGENT_WORKER_MEM_LIMIT=256m
-AGENT_WORKER_PIDS_LIMIT=96
+AGENT_WORKER_PIDS_LIMIT=128
 AGENT_WORKER_RESOURCE_LIMITS_MODE=default
 ```
 
 超出 reference envelope（agent>10、code>0 或 upload>4）时不得只继承 default limits：先评审实际内存与线程需求，再显式设置合适的 limits 并设 `AGENT_WORKER_RESOURCE_LIMITS_MODE=explicit`。明确接受无限额时使用 `AGENT_WORKER_MEM_LIMIT=0`、`AGENT_WORKER_PIDS_LIMIT=-1`，同样必须设 `explicit`。启动、控制台/API 写入前和配置文件热更共用同一 envelope guard：default 超 envelope 直接拒绝，不写配置、不静默 clamp；显式模式不自动改并发，也不承诺任意配置都安全。
 
-一键安装脚本把最终 mode/limits 幂等写入 `.env`，fresh 缺省补 256m/96/default；环境变量显式传 limits 时若未传 mode，会按显式评审持久化为 `explicit`。升级预检在任何 compose/.env 提交前，复用目标 Worker 镜像中固定版本的 PyYAML 与 `validate_config` 解析当前可见引导配置，不在宿主新增依赖；YAML 缩进、0x 整数、行内注释与重复键 last-wins 与 Worker 一致，引号数字等 Worker 本身不支持的类型会明确报错，而不是放宽成另一套语义。default 超 envelope、镜像不可用或配置无法可靠解析都会保留旧文件并中止；运行后控制卷里的配置仍以运行时三道 guard 为准。升级或回滚版本不会重置显式 limits，也不会改写 `worker.yaml`、`worker-data` 或 `worker-control`，pending upload 标记与上传队列保留，容器/executor restart 继续按既有恢复语义完成未上传结果。需要回滚时同时回退 Host/Worker 镜像，并保留已评审的资源配置。
+一键安装脚本把最终 mode/limits 幂等写入 `.env`，fresh 缺省补 256m/128/default；环境变量显式传 limits 时若未传 mode，会按显式评审持久化为 `explicit`。升级预检在任何 compose/.env 提交前，复用目标 Worker 镜像中固定版本的 PyYAML 与 `validate_config` 解析当前可见引导配置，不在宿主新增依赖；YAML 缩进、0x 整数、行内注释与重复键 last-wins 与 Worker 一致，引号数字等 Worker 本身不支持的类型会明确报错，而不是放宽成另一套语义。default 超 envelope、镜像不可用或配置无法可靠解析都会保留旧文件并中止；运行后控制卷里的配置仍以运行时三道 guard 为准。升级或回滚版本不会重置显式 limits，也不会改写 `worker.yaml`、`worker-data` 或 `worker-control`，pending upload 标记与上传队列保留，容器/executor restart 继续按既有恢复语义完成未上传结果。需要回滚时同时回退 Host/Worker 镜像，并保留已评审的资源配置。
 
 ### 出网代理（#444）
 
@@ -569,7 +569,7 @@ Worker 的每个 execution 的每个声明 output 都必须携带 direct 新形�
 
 最坏 memory 场景是 upload-backlog；其 raw stat 的 p95/max 也一并复核：anon 为 140,947,456 / 164,126,720B，file 为 43,298,816 / 43,786,240B，kernel 为 6,082,560 / 7,692,288B，说明整个 cgroup 的匿名页、page cache 与内核开销均已纳入，而不是只看进程 RSS。三次迭代的 nearest-rank peak p95 恰好等于合并 max 是数据分布结果，并非直接指定 max。
 
-默认公式固定为「最坏场景 p95 × 1.25，再向上取整」：memory 为 211,406,848 × 1.25 = 264,258,560B（252.0166MiB），按 8MiB 向上取整为 **256MiB**；pids 为 71 × 1.25 = 88.75，按 8 向上取整为 **96**。没有沿用 2/2/2 的 200MiB/48，也没有直接采用各迭代 max。候选值的最终全链路与较低值 fault 验收沿用上述 dispatch 输入，不以 unlimited 的参考运行代替候选验收。
+memory 公式为「最坏场景 p95 × 1.25，再向上取整」：211,406,848 × 1.25 = 264,258,560B（252.0166MiB），按 8MiB 向上取整为 **256MiB**。pids 不能直接合并全时间序列求 current p95：空闲时段会稀释每轮突发峰值，按该口径得到的 71 → 96 在 candidate run `40767031564` 中出现了 `pids.events.max=2` 的真实拒绝。修正为先取每轮 100ms 高频峰值，再对峰值集合求 p95；reference 三轮峰值为 99/98/97，小样本 nearest-rank p95=99，99 × 1.25 = 123.75，按 8 向上取整为 **128**。这不是任意加值或修改 `max_concurrency`；memory 保持 256MiB（该 candidate 无 OOM 证据），fault 输入保持 128m/64。最终 candidate/fault 仍需按修正后的精确 tip 验收，不能仅凭单次成功定值。
 
 artifact 还包括 Worker image ID/digest、velites SHA256/version、kernel/cgroup/arch/Docker 元数据、采样参数与脱敏 Host/Worker 日志。模型文件只记录 SHA256，不上传内容；注册 token、控制 token、stub models 与运行配置留在不上传的 work dir，日志中的 Bearer/register token/presigned query 会脱敏。workflow 不使用真实 provider secret 或生产数据，也不调用真实 LLM。Docker Desktop 功能模式可以验证 fresh schema、register、direct S3、backlog 与 restart，但不能验证原生 Linux 的 AppArmor/userns/发行版差异，也不能提供 sizing；这些原生 Linux namespace/cgroup/bwrap 与资源数值仍只能由 workflow 链路验收。macOS 单元测试只检查解析、汇总与安全契约，不能替代任何真实容器结果。
 

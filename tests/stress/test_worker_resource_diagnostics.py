@@ -293,8 +293,8 @@ def test_runtime_probe_reports_real_process_and_bwrap_shape(tmp_path: Path) -> N
     )
     (proc / "self/attr/current").write_text("docker-default (enforce)\n", encoding="utf-8")
     (proc / "self/mountinfo").write_text(
-        "1 0 0:1 / / rw,nosuid - ext4 /dev/root rw\n"
-        "2 1 0:2 /tmp /tmp rw,relatime - tmpfs tmpfs rw\n",
+        "1 0 0:1 /rootfs / rw,nosuid - ext4 /dev/root rw\n"
+        "2 1 0:2 /private/tmp /tmp rw,relatime - tmpfs tmpfs rw\n",
         encoding="utf-8",
     )
     bwrap = tmp_path / "bwrap"
@@ -326,7 +326,11 @@ def test_runtime_probe_reports_real_process_and_bwrap_shape(tmp_path: Path) -> N
     assert evidence["identity"]["uid"] == bwrap.stat().st_uid == evidence["identity"]["uid"]
     assert evidence["bwrap"]["realpath"] == str(bwrap)
     assert evidence["bwrap"]["mode"] == "4755" and evidence["bwrap"]["setuid"] is True
-    assert evidence["bwrap"]["mount"] == {"mount_point": "/", "nosuid": True}
+    expected_mount = "/tmp" if str(bwrap).startswith("/tmp/") else "/"
+    assert evidence["bwrap"]["mount"] == {
+        "mount_point": expected_mount,
+        "nosuid": expected_mount != "/tmp",
+    }
     assert evidence["bwrap"]["tmp_mount"] == {"mount_point": "/tmp", "nosuid": False}
     assert evidence["bwrap"]["version"]["stdout"] == "bubblewrap 0.10.0\n"
     assert evidence["bwrap"]["smoke"] == {
@@ -334,6 +338,15 @@ def test_runtime_probe_reports_real_process_and_bwrap_shape(tmp_path: Path) -> N
         "stdout": "",
         "stderr": "capset failed\n",
     }
+    (proc / "self/mountinfo").write_text(
+        "1 0 0:1 /rootfs / rw,nosuid - ext4 /dev/root rw\n", encoding="utf-8"
+    )
+    result = subprocess.run(
+        ["python3", "-c", _RUNTIME_PROBE, str(proc), str(bwrap)], capture_output=True, text=True
+    )
+    root_evidence = json.loads(result.stdout)
+    assert root_evidence["bwrap"]["mount"] == {"mount_point": "/", "nosuid": True}
+    assert root_evidence["bwrap"]["tmp_mount"] == {"mount_point": "/", "nosuid": True}
 
 
 @pytest.mark.no_db
