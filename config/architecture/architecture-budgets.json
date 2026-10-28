@@ -1081,6 +1081,7 @@
     "scripts/stress/simulate_agents.py": 355,
     "scripts/stress/worker_resource_cli.py": 59,
     "scripts/stress/worker_resource_desktop.py": 93,
+    "scripts/stress/worker_resource_diagnostics.py": 58,
     "scripts/stress/worker_resource_evidence.py": 164,
     "scripts/stress/worker_resource_execution.py": 90,
     "scripts/stress/worker_resource_host_code.py": 39,
