@@ -9,6 +9,7 @@ from typing import Any
 
 from scripts.stress.worker_resource_host_code import _bounded
 from scripts.stress.worker_resource_measurement import sanitize_log_text
+from scripts.stress.worker_resource_setuid_evidence import setuid_bwrap_strace
 
 _RUNTIME_PROBE = r"""
 import json, os, stat, subprocess, sys
@@ -57,9 +58,11 @@ def mount(path):
 
 status_text = read(proc + "/self/status")
 status = {}
+keys = "Uid Gid Securebits CapPrm CapInh CapAmb"
+keys += " CapEff CapBnd NoNewPrivs Seccomp Seccomp_filters"
 for line in status_text.splitlines():
     key, separator, value = line.partition(":")
-    if separator and key in {"CapEff", "CapBnd", "NoNewPrivs"}:
+    if separator and key in keys.split():
         status[key] = value.strip()
 if not status:
     status["error"] = status_text
@@ -143,10 +146,13 @@ def write_host_code_runtime_evidence(run: Any, iteration_dir: Path) -> None:
         container = run.compose("ps", "-q", service, capture=True).strip()
         if not container or "\n" in container:
             raise RuntimeError(f"expected one {service} container")
-        evidence["containers"][service] = {
+        container_evidence = {
             "inspect": _inspect_security(container),
             "process": _process_evidence(run, service),
         }
+        if service == "host":
+            container_evidence["setuid_strace"] = setuid_bwrap_strace(run)
+        evidence["containers"][service] = container_evidence
     text = json.dumps(evidence, indent=2, sort_keys=True)
     (iteration_dir / "host-code-runtime.json").write_text(
         _bounded(sanitize_log_text(text, run.secrets), 65536) + "\n", encoding="utf-8"

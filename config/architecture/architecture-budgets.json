@@ -1093,6 +1093,7 @@
     "scripts/stress/worker_resource_reporting.py": 100,
     "scripts/stress/worker_resource_restart.py": 105,
     "scripts/stress/worker_resource_runtime_evidence.py": 139,
+    "scripts/stress/worker_resource_setuid_evidence.py": 51,
     "scripts/stress/worker_resource_workload.py": 700,
     "scripts/studio_chat_smoke.py": 103,
     "scripts/summarize_test_results.py": 159,

@@ -285,7 +285,11 @@ def test_runtime_probe_reports_real_process_and_bwrap_shape(tmp_path: Path) -> N
     proc = tmp_path / "proc"
     (proc / "self/attr").mkdir(parents=True)
     (proc / "self/status").write_text(
-        "CapEff:\t00000100\nCapBnd:\t000001ff\nNoNewPrivs:\t0\n", encoding="utf-8"
+        "Uid:\t1001\t0\t0\t1001\nGid:\t1001\t1001\t1001\t1001\n"
+        "Securebits:\t00\nCapPrm:\t000001ff\nCapInh:\t00000000\nCapAmb:\t00000000\n"
+        "CapEff:\t00000100\nCapBnd:\t000001ff\nNoNewPrivs:\t0\n"
+        "Seccomp:\t0\nSeccomp_filters:\t0\n",
+        encoding="utf-8",
     )
     (proc / "self/attr/current").write_text("docker-default (enforce)\n", encoding="utf-8")
     (proc / "self/mountinfo").write_text(
@@ -305,7 +309,19 @@ def test_runtime_probe_reports_real_process_and_bwrap_shape(tmp_path: Path) -> N
     )
     assert result.returncode == 0, result.stderr
     evidence = json.loads(result.stdout)
-    assert evidence["status"] == {"CapEff": "00000100", "CapBnd": "000001ff", "NoNewPrivs": "0"}
+    assert evidence["status"] == {
+        "Uid": "1001\t0\t0\t1001",
+        "Gid": "1001\t1001\t1001\t1001",
+        "Securebits": "00",
+        "CapPrm": "000001ff",
+        "CapInh": "00000000",
+        "CapAmb": "00000000",
+        "CapEff": "00000100",
+        "CapBnd": "000001ff",
+        "NoNewPrivs": "0",
+        "Seccomp": "0",
+        "Seccomp_filters": "0",
+    }
     assert evidence["app_armor_current"] == "docker-default (enforce)"
     assert evidence["identity"]["uid"] == bwrap.stat().st_uid == evidence["identity"]["uid"]
     assert evidence["bwrap"]["realpath"] == str(bwrap)
@@ -368,6 +384,51 @@ def test_runtime_evidence_uses_actual_compose_identity_and_allowlisted_inspect(
         "docker-default <redacted>"
     )
     assert [call[-1] for call in inspect_calls] == ["host-id", "worker-id"]
+    assert "setuid_strace" in document["containers"]["host"]
+    assert "setuid_strace" not in document["containers"]["worker"]
     exec_calls = [call for call in calls if call[0] == "exec"]
     assert exec_calls[0][3:7] == ("setpriv", "--reuid=123", "--regid=456", "--clear-groups")
-    assert exec_calls[1][3] == "python3" and "setpriv" not in exec_calls[1]
+    worker_exec = next(call for call in exec_calls if call[2] == "worker")
+    assert worker_exec[3] == "python3" and "setpriv" not in worker_exec
+
+
+@pytest.mark.no_db
+def test_setuid_strace_probe_traces_transition_and_preserves_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+    import subprocess
+
+    from scripts.stress.worker_resource_setuid_evidence import _SETUID_STRACE_PROBE
+
+    strace = tmp_path / "strace"
+    strace.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\"\n"
+        "echo 'setuid(123) = 0' >&2\n"
+        "echo 'capset(...) = -1 EPERM (Operation not permitted)' >&2\n"
+        "echo 'ptrace(PTRACE_TRACEME) = -1 EPERM (Operation not permitted)' >&2\n"
+        "exit 7\n",
+        encoding="utf-8",
+    )
+    strace.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    result = subprocess.run(
+        ["python3", "-c", _SETUID_STRACE_PROBE, "123", "456", "/usr/bin/bwrap"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(result.stdout)
+    assert evidence["returncode"] == 7
+    assert "setuid(123) = 0" in evidence["stderr"]
+    assert "capset(...) = -1 EPERM" in evidence["stderr"]
+    assert "ptrace(PTRACE_TRACEME) = -1 EPERM" in evidence["stderr"]
+    arguments = evidence["stdout"].splitlines()
+    transition = arguments[arguments.index("setpriv") : arguments.index("setpriv") + 4]
+    assert transition == ["setpriv", "--reuid=123", "--regid=456", "--clear-groups"]
+    assert arguments[-4:] == [
+        "/usr/bin/bwrap",
+        "--unshare-all",
+        "--die-with-parent",
+        "/bin/true",
+    ]

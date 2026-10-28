@@ -31,7 +31,7 @@ HOST_CODE_SANDBOX_OVERRIDE = """services:
       - NET_ADMIN
     command:
       - |
-        apt-get update && apt-get install -y --no-install-recommends git bubblewrap && \
+        apt-get update && apt-get install -y --no-install-recommends git bubblewrap strace && \
         chmod u+s /usr/bin/bwrap && \
         test -x /usr/bin/bwrap && test -u /usr/bin/bwrap && \
         chown -R "${MEASUREMENT_HOST_UID}:${MEASUREMENT_HOST_GID}" /var/lib/agent-legion && \
