@@ -279,9 +279,10 @@ def test_measurement_compose_preserves_shipped_envelope_and_optional_limits() ->
     assert "env HOME=/tmp uvicorn" in startup
     assert host["volumes"][1].endswith(":/tmp/.agents/skills:ro")
     assert "safe.directory" not in startup
-    production = yaml.safe_load((ROOT / "deploy/compose.worker.yaml").read_text(encoding="utf-8"))
+    production = yaml.safe_load((ROOT / "deploy/compose.host.yaml").read_text(encoding="utf-8"))
     assert production["services"]["worker"]["cap_add"] == ["SYS_ADMIN"]
     assert production["services"]["worker"]["security_opt"] == ["seccomp:unconfined"]
+    assert "apparmor:" not in yaml.safe_dump(production)
     assert "--no-sandbox" not in yaml.safe_dump(document)
 
 
@@ -290,11 +291,12 @@ def test_default_host_code_sandbox_is_disposable_and_probed() -> None:
     assert set(document["services"]) == {"host"}
     host = document["services"]["host"]
     assert host["cap_add"] == ["SYS_ADMIN", "NET_ADMIN"]
-    assert host["security_opt"] == ["seccomp:unconfined"]
+    assert host["security_opt"] == ["seccomp:unconfined", "apparmor:unconfined"]
     assert "bubblewrap" in host["command"][0] and "test -u /usr/bin/bwrap" in host["command"][0]
     run = SimpleNamespace(compose=lambda *_args, **_kwargs: "bubblewrap 0.10.0\n4755")
     metadata = host_code_sandbox_metadata(run)
     assert metadata["path"] == "/usr/bin/bwrap" and metadata["setuid"] is True
+    assert metadata["security_opt"] == host["security_opt"]
     assert metadata["production_recommendation"] is False
 
 

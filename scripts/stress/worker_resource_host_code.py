@@ -24,6 +24,8 @@ HOST_CODE_SANDBOX_OVERRIDE = """services:
   host:
     security_opt:
       - seccomp:unconfined
+      # Measurement-only: Ubuntu's default AppArmor profile can deny bwrap capset.
+      - apparmor:unconfined
     cap_add:
       - SYS_ADMIN
       - NET_ADMIN
@@ -55,7 +57,7 @@ def host_code_sandbox_metadata(run: Any) -> dict[str, Any]:
         "version_and_mode": probe,
         "path": "/usr/bin/bwrap",
         "setuid": True,
-        "security_opt": "seccomp:unconfined",
+        "security_opt": ["seccomp:unconfined", "apparmor:unconfined"],
         "cap_add": ["SYS_ADMIN", "NET_ADMIN"],
         "production_recommendation": False,
     }
