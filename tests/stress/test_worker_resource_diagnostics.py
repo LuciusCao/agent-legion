@@ -68,8 +68,13 @@ def test_production_relative_absolute_and_iteration_scoped_diagnostics(
     monkeypatch.setattr(
         "scripts.stress.worker_resource_diagnostics.read_connection", _diagnostic_connection(rows)
     )
+    monkeypatch.setattr(
+        "scripts.stress.worker_resource_reporting.write_host_code_runtime_evidence_safely",
+        lambda _run, path: (path / "host-code-runtime.json").write_text("{}", encoding="utf-8"),
+    )
     run = _diagnostic_run()
     write_sanitized_logs(run, tmp_path)
+    assert (tmp_path / "host-code-runtime.json").is_file()
     text = (tmp_path / "host-code.log").read_text()
     assert "sandbox stderr" in text and "secret" not in text
     metadata = (tmp_path / "host-code-runs.json").read_text()
@@ -82,6 +87,7 @@ def test_production_relative_absolute_and_iteration_scoped_diagnostics(
     other.mkdir()
     write_sanitized_logs(run, other)
     assert not (other / "host-code.log").exists()
+    assert not (other / "host-code-runtime.json").exists()
 
 
 @pytest.mark.no_db
@@ -180,6 +186,7 @@ def test_operational_error_preserves_original_failure_cleanup_and_result(
     error_file = tmp_path / "cold-1/cold-1/host-code-diagnostics-error.txt"
     assert error_file.is_file()
     assert "OperationalError" in error_file.read_text() and "secret" not in error_file.read_text()
+    assert (tmp_path / "cold-1/cold-1/host-code-runtime-error.txt").is_file()
     assert len(downs) == 2 and (tmp_path / "cold-1/cold-1/result.json").is_file()
     assert run.cgroup_reader_id == "" and any("reader-1" in str(call) for call in removals)
 
@@ -267,3 +274,100 @@ def test_host_code_diagnostics_uses_real_join_iteration_and_node_scope(tmp_path:
     assert all(item["error_message"] == "no result <redacted>" for item in metadata)
     log = (iteration_dir / "host-code.log").read_text(encoding="utf-8")
     assert log.count("postgres log") == 2 and "secret" not in log and agent_job not in log
+
+
+@pytest.mark.no_db
+def test_runtime_probe_reports_real_process_and_bwrap_shape(tmp_path: Path) -> None:
+    import subprocess
+
+    from scripts.stress.worker_resource_runtime_evidence import _RUNTIME_PROBE
+
+    proc = tmp_path / "proc"
+    (proc / "self/attr").mkdir(parents=True)
+    (proc / "self/status").write_text(
+        "CapEff:\t00000100\nCapBnd:\t000001ff\nNoNewPrivs:\t0\n", encoding="utf-8"
+    )
+    (proc / "self/attr/current").write_text("docker-default (enforce)\n", encoding="utf-8")
+    (proc / "self/mountinfo").write_text(
+        "1 0 0:1 / / rw,nosuid - ext4 /dev/root rw\n"
+        "2 1 0:2 /tmp /tmp rw,relatime - tmpfs tmpfs rw\n",
+        encoding="utf-8",
+    )
+    bwrap = tmp_path / "bwrap"
+    bwrap.write_text(
+        '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "bubblewrap 0.10.0"; exit 0; fi\n'
+        'echo "capset failed" >&2; exit 1\n',
+        encoding="utf-8",
+    )
+    bwrap.chmod(0o4755)
+    result = subprocess.run(
+        ["python3", "-c", _RUNTIME_PROBE, str(proc), str(bwrap)], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(result.stdout)
+    assert evidence["status"] == {"CapEff": "00000100", "CapBnd": "000001ff", "NoNewPrivs": "0"}
+    assert evidence["app_armor_current"] == "docker-default (enforce)"
+    assert evidence["identity"]["uid"] == bwrap.stat().st_uid == evidence["identity"]["uid"]
+    assert evidence["bwrap"]["realpath"] == str(bwrap)
+    assert evidence["bwrap"]["mode"] == "4755" and evidence["bwrap"]["setuid"] is True
+    assert evidence["bwrap"]["mount"] == {"mount_point": "/", "nosuid": True}
+    assert evidence["bwrap"]["tmp_mount"] == {"mount_point": "/tmp", "nosuid": False}
+    assert evidence["bwrap"]["version"]["stdout"] == "bubblewrap 0.10.0\n"
+    assert evidence["bwrap"]["smoke"] == {
+        "returncode": 1,
+        "stdout": "",
+        "stderr": "capset failed\n",
+    }
+
+
+@pytest.mark.no_db
+def test_runtime_evidence_uses_actual_compose_identity_and_allowlisted_inspect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.stress import worker_resource_runtime_evidence as evidence
+
+    calls = []
+    config = {
+        "services": {
+            service: {
+                "cap_add": ["SYS_ADMIN"],
+                "security_opt": ["seccomp:unconfined"],
+                "environment": {"PASSWORD": "secret"},
+            }
+            for service in ("host", "worker")
+        }
+    }
+
+    def compose(*arguments: str, **_kwargs: object) -> str:
+        calls.append(arguments)
+        if arguments[:3] == ("config", "--format", "json"):
+            return json.dumps(config)
+        if arguments[:2] == ("ps", "-q"):
+            return f"{arguments[2]}-id"
+        return json.dumps({"app_armor_current": "docker-default secret"})
+
+    inspect_calls = []
+
+    def inspect(command: list[str], **_kwargs: object) -> object:
+        inspect_calls.append(command)
+        assert command[3] == "{{json .HostConfig.CapAdd}}|{{json .HostConfig.SecurityOpt}}"
+        return SimpleNamespace(stdout='["SYS_ADMIN"]|["seccomp:unconfined"]')
+
+    monkeypatch.setattr(evidence.subprocess, "run", inspect)
+    run = SimpleNamespace(
+        compose=compose,
+        env={"MEASUREMENT_HOST_UID": "123", "MEASUREMENT_HOST_GID": "456"},
+        secrets=["secret"],
+    )
+    evidence.write_host_code_runtime_evidence(run, tmp_path)
+    text = (tmp_path / "host-code-runtime.json").read_text(encoding="utf-8")
+    document = json.loads(text)
+    assert "secret" not in text and "environment" not in text
+    assert set(document["compose"]["host"]) == {"cap_add", "security_opt", "privileged", "user"}
+    assert document["containers"]["host"]["process"]["app_armor_current"] == (
+        "docker-default <redacted>"
+    )
+    assert [call[-1] for call in inspect_calls] == ["host-id", "worker-id"]
+    exec_calls = [call for call in calls if call[0] == "exec"]
+    assert exec_calls[0][3:7] == ("setpriv", "--reuid=123", "--regid=456", "--clear-groups")
+    assert exec_calls[1][3] == "python3" and "setpriv" not in exec_calls[1]
