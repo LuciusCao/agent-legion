@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -620,6 +622,17 @@ def test_main_rechecks_output_dir_after_lock_before_constructing(
     assert constructed == 1
     assert second.events == []
     assert (output / "run-report.json").read_bytes() == first_report
+    lock_path = output.parent / f".{output.name}.worker-resource-measurement.lock"
+    descriptor = os.open(lock_path, os.O_RDWR)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        os.close(descriptor)
+    (output / "run-report.json").unlink()
+    succeeding = _successful_run("measure-after-recheck")
+    monkeypatch.setattr(workload, "MeasurementRun", lambda _args: succeeding)
+    assert workload.main(["--output-dir", str(output)]) == 0
+    assert json.loads((output / "run-report.json").read_text())["success"] is True
 
 
 def test_main_releases_output_dir_lock_after_prepare_failure(
