@@ -151,6 +151,8 @@ def test_container_style_workerctl_status_needs_no_state_dir_flag(
 def test_dockerfile_env_is_the_only_state_dir_source_and_matches_volume() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert f"ENV {STATE_DIR_ENV}={CONTAINER_STATE_DIR}" in dockerfile
+    assert "HOME=/home/agent-worker" in dockerfile
+    assert "USER ${WORKER_UID}:${WORKER_GID}" in dockerfile
     cmd = re.search(r'^CMD \[.*/worker\.yaml".*\]$', dockerfile, re.MULTILINE)
     assert cmd is not None
     # CMD 不再重复声明 --state-dir：ENV 是镜像内 service 与 workerctl 的唯一来源

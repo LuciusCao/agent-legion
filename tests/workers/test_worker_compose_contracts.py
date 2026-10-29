@@ -109,3 +109,36 @@ def test_worker_resource_limits_share_measured_defaults_without_permission_chang
         text = (ROOT / name).read_text(encoding="utf-8")
         assert "mem_limit" not in text and "pids_limit" not in text
         assert "AGENT_WORKER_RESOURCE_LIMITS_MODE" not in text
+
+
+def test_worker_identity_is_nonroot_configurable_and_host_stage_is_unchanged() -> None:
+    for name in (
+        "deploy/compose.worker.yaml",
+        "deploy/compose.worker.standalone.yaml",
+        "deploy/compose.host.yaml",
+    ):
+        worker = yaml.safe_load((ROOT / name).read_text(encoding="utf-8"))["services"]["worker"]
+        assert worker["user"] == "${AGENT_WORKER_UID:-10001}:${AGENT_WORKER_GID:-10001}"
+        assert worker["environment"]["HOME"] == "/home/agent-worker"
+        mounts = worker["volumes"]
+        assert any("/home/agent-worker/.velites:ro" in mount for mount in mounts)
+        assert any("/home/agent-worker/.pi/agent:ro" in mount for mount in mounts)
+        assert not any("/root/.velites" in mount or "/root/.pi" in mount for mount in mounts)
+        assert worker["security_opt"] == ["seccomp:unconfined"]
+        if build := worker.get("build"):
+            assert build["args"] == {
+                "WORKER_UID": "${AGENT_WORKER_UID:-10001}",
+                "WORKER_GID": "${AGENT_WORKER_GID:-10001}",
+            }
+
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    host_stage, worker_stage = dockerfile.split(" AS worker", 1)
+    assert "USER" not in host_stage.split(" AS host", 1)[1]
+    assert "ARG WORKER_UID=10001" in worker_stage
+    assert "ARG WORKER_GID=10001" in worker_stage
+    assert "HOME=/home/agent-worker" in worker_stage
+    assert "USER ${WORKER_UID}:${WORKER_GID}" in worker_stage
+    assert "/var/lib/agent-legion-worker/.volume-keep" in worker_stage
+    assert "/var/lib/agent-legion-worker-control/.volume-keep" in worker_stage
+    assert "chmod u-s /usr/bin/bwrap" in worker_stage
+    assert "chmod u+s /usr/bin/bwrap" not in worker_stage

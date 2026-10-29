@@ -115,6 +115,8 @@ def _write_control_volume(project: str, document: str) -> str:
             "--rm",
             "--network",
             "none",
+            "--user",
+            "0:0",
             "--entrypoint",
             "python3",
             "-v",

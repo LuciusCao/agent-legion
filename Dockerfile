@@ -59,10 +59,12 @@ CMD ["uvicorn", "server.app.main:create_prod_app", "--factory", "--host", "0.0.0
 # code 池沙箱是镜像基础设施（issue #383）：velites-sandbox 与 agent runtime
 # 无关，烤进镜像使 max_code_concurrency 不依赖外挂 velites。
 FROM python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419 AS worker
+ARG WORKER_UID=10001
+ARG WORKER_GID=10001
 # bubblewrap is velites-sandbox' Linux sandbox backend (EXEC-HARNESS-SANDBOX-001);
 # the wrapper fails closed at startup without it unless --no-sandbox is set.
-# Runtime requirements: bwrap needs either its setuid bit or unprivileged
-# user namespaces, and a seccomp profile that allows unshare/clone — the
+# Runtime requirements: the non-root worker uses CAP_SYS_ADMIN (or unprivileged
+# user namespaces) and a seccomp profile that allows unshare/clone — the
 # default Docker seccomp profile blocks unshare, so deployments must relax
 # it (validated on the real worker before M5; see velites-harness.md §5).
 # velites 二进制外挂（#381）后 bwrap 仍是镜像必备：沙箱后端与二进制来源
@@ -70,8 +72,14 @@ FROM python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7
 RUN apt-get update \
     && apt-get install -y --no-install-recommends bubblewrap \
     && rm -rf /var/lib/apt/lists/* \
-    && chmod u+s /usr/bin/bwrap \
+    && chmod u-s /usr/bin/bwrap \
     && pip install --no-cache-dir "fastapi==0.116.1" "pyyaml==6.0.3" "uvicorn==0.35.0" "requests==2.34.2"
+RUN test "$WORKER_UID" -gt 0 && test "$WORKER_GID" -gt 0 \
+    && groupadd --gid "$WORKER_GID" agent-worker \
+    && useradd --uid "$WORKER_UID" --gid "$WORKER_GID" --create-home --home-dir /home/agent-worker --shell /usr/sbin/nologin agent-worker \
+    && mkdir -p /app/data/bin /var/lib/agent-legion-worker /var/lib/agent-legion-worker-control \
+    && touch /var/lib/agent-legion-worker/.volume-keep /var/lib/agent-legion-worker-control/.volume-keep \
+    && chown -R "$WORKER_UID:$WORKER_GID" /home/agent-worker /app/data /var/lib/agent-legion-worker /var/lib/agent-legion-worker-control
 # Code-node sandbox wrapper (#383): /usr/local/bin is on PATH, so the
 # resolve order (velites-sandbox → velites) finds it without any mount.
 COPY --from=velites-sandbox-build /src/velites/target/release/velites-sandbox /usr/local/bin/velites-sandbox
@@ -92,7 +100,9 @@ ENV PYTHONUNBUFFERED=1
 # Worker state dir (#1106): the single source for both the service and
 # `workerctl` (their --state-dir defaults read it), so `docker compose exec
 # worker workerctl status` finds control_token without extra flags.
-ENV AGENT_WORKER_STATE_DIR=/var/lib/agent-legion-worker-control
+ENV AGENT_WORKER_STATE_DIR=/var/lib/agent-legion-worker-control \
+    HOME=/home/agent-worker
+USER ${WORKER_UID}:${WORKER_GID}
 EXPOSE 8787
 ENTRYPOINT ["python3", "-m", "worker.service"]
 CMD ["--config", "/etc/agent-legion/worker.yaml", "--host", "0.0.0.0", "--port", "8787"]

@@ -15,6 +15,7 @@ services:
   worker:
     image: ${AGENT_WORKER_IMAGE:-ghcr.io/luciuscao/agent-legion-worker:0.6.0}
     restart: unless-stopped
+    user: ${AGENT_WORKER_UID:-10001}:${AGENT_WORKER_GID:-10001}
     # velites 沙箱（bwrap）在容器内需要：seccomp 放行 unshare + CAP_SYS_ADMIN
     #（同 compose.worker.yaml 注释）。缺失时沙箱 fail-closed，agent 全部秒退。
     security_opt:
@@ -37,8 +38,8 @@ services:
         read_only: true
       # pi 在 docker 镜像内不可用（npm 入口依赖 node，#381 已移出镜像）；
       # 挂载点保留空目录，纯 code 池 / 未来形态可自行填充。
-      - ./pi-config:/root/.pi/agent:ro
-      - ./velites-config:/root/.velites:ro
+      - ./pi-config:/home/agent-worker/.pi/agent:ro
+      - ./velites-config:/home/agent-worker/.velites:ro
       - worker-data:/var/lib/agent-legion-worker
       - worker-control:/var/lib/agent-legion-worker-control
     ports:
@@ -51,6 +52,7 @@ services:
       - path: ${VELITES_PROVIDER_ENV_FILE:-./velites-provider.env}
         required: false
     environment:
+      HOME: /home/agent-worker
       LLM_GATEWAY_TOKEN: ${LLM_GATEWAY_TOKEN:-}
       AGENT_WORKER_IMAGE_VERSION: ${AGENT_WORKER_IMAGE:-ghcr.io/luciuscao/agent-legion-worker:0.6.0}
       AGENT_WORKER_RESOURCE_LIMITS_MODE: ${AGENT_WORKER_RESOURCE_LIMITS_MODE:-default}

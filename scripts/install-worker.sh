@@ -9,10 +9,10 @@
 #   - velites-bin/velites：GitHub Release 的 linux 二进制（sha256 校验，架构自动匹配）
 #   - worker.yaml：引导配置（仅首次创建；此后以 Worker 控制台为准）
 #   - velites-config/models.json(.example)：provider 注册表（用户资产，仅缺失时生成示例）
-#   - .env：compose 插值变量（版本/资源自管行由本脚本维护，其余用户资产）
+#   - .env：compose 插值变量（版本/身份/资源自管行由本脚本维护，其余用户资产）
 #
 # 幂等语义（重复执行收敛到同一状态）：
-#   - 自有文件（compose、velites 二进制、.env 的版本/资源自管行）刷新到目标状态；
+#   - 自有文件（compose、velites 二进制、.env 的版本/身份/资源自管行）刷新到目标状态；
 #   - 用户资产（worker.yaml、models.json、.env 其余内容、velites-provider.env）
 #     已存在即跳过，绝不覆盖——worker.yaml 首次启动导入控制卷后，覆盖只会制造
 #     mounted_config_diverged；
@@ -67,6 +67,35 @@ EOF
 die() {
   echo "错误: $*" >&2
   exit 1
+}
+
+stat_uid() {
+  stat -c %u "$1" 2>/dev/null || stat -f %u "$1"
+}
+
+stat_mode() {
+  stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"
+}
+
+check_secret_file() {
+  secret_path="$1"
+  [ -f "$secret_path" ] && [ ! -L "$secret_path" ] || die "$secret_path 必须是非 symlink regular file"
+  # 旧安装可能留下较宽 mode；只允许向 0600 收紧，绝不反向放宽。
+  chmod 600 "$secret_path" || die "无法把 $secret_path 收紧为 0600"
+  secret_mode="$(stat_mode "$secret_path")"
+  [ "$secret_mode" = 600 ] || die "${secret_path} 必须为 0600（实际 ${secret_mode}）"
+  secret_uid="$(stat_uid "$secret_path")"
+  [ "$secret_uid" = "$WORKER_UID_FINAL" ] || die "${secret_path} 的数值属主 UID=$secret_uid 与运行 UID=$WORKER_UID_FINAL 不匹配；请先 chown --no-dereference $WORKER_UID_FINAL ${secret_path}，不要放宽 secret 权限"
+}
+
+check_mount_parent() {
+  parent_path="$1"
+  [ -d "$parent_path" ] && [ ! -L "$parent_path" ] || die "$parent_path 必须是非 symlink 目录"
+  parent_uid="$(stat_uid "$parent_path")"
+  [ "$parent_uid" = "$WORKER_UID_FINAL" ] || die "挂载父目录 $parent_path 的 UID=$parent_uid 与运行 UID=$WORKER_UID_FINAL 不匹配，无法保证安全遍历"
+  parent_mode="$(stat_mode "$parent_path")"
+  [ "$((0$parent_mode & 0300))" -eq 192 ] || die "挂载父目录 $parent_path 必须为运行 UID 提供 u+rx"
+  [ "$((0$parent_mode & 022))" -eq 0 ] || die "挂载父目录 $parent_path 不得被 group/other 写入"
 }
 
 # YAML 单引号风格转义（codex P2）：用户可控字符串（--name / --worker-id /
@@ -147,7 +176,35 @@ esac
 mkdir -p "$TARGET/velites-bin" "$TARGET/velites-config" "$TARGET/pi-config"
 cd "$TARGET"
 
+if [ "${AGENT_WORKER_UID+x}" = x ]; then
+  WORKER_UID_FINAL="$AGENT_WORKER_UID"
+else
+  WORKER_UID_FINAL="$(sed -n 's/^AGENT_WORKER_UID=//p' ./.env 2>/dev/null | tail -1)"
+fi
+if [ "${AGENT_WORKER_GID+x}" = x ]; then
+  WORKER_GID_FINAL="$AGENT_WORKER_GID"
+else
+  WORKER_GID_FINAL="$(sed -n 's/^AGENT_WORKER_GID=//p' ./.env 2>/dev/null | tail -1)"
+fi
+host_uid="$(id -u)"
+host_gid="$(id -g)"
+if [ "$host_uid" = 0 ] || [ "$host_gid" = 0 ]; then
+  host_uid=10001
+  host_gid=10001
+fi
+WORKER_UID_FINAL="${WORKER_UID_FINAL:-$host_uid}"
+WORKER_GID_FINAL="${WORKER_GID_FINAL:-$host_gid}"
+case "$WORKER_UID_FINAL" in
+  ''|0|0*|*[!0-9]*) die "AGENT_WORKER_UID 必须是无前导零的非 root 数值 UID" ;;
+esac
+case "$WORKER_GID_FINAL" in
+  ''|0|0*|*[!0-9]*) die "AGENT_WORKER_GID 必须是无前导零的非 root 数值 GID" ;;
+esac
+[ "$WORKER_UID_FINAL" -le 4294967295 ] || die "AGENT_WORKER_UID 超出数值范围"
+[ "$WORKER_GID_FINAL" -le 4294967295 ] || die "AGENT_WORKER_GID 超出数值范围"
+
 echo "==> 安装目录: $TARGET"
+echo "==> 运行身份: ${WORKER_UID_FINAL}:${WORKER_GID_FINAL}（HOME=/home/agent-worker）"
 echo "==> 镜像: ${IMAGE_REPO}:${WORKER_VERSION}（linux/${WORKER_ARCH}）"
 echo "==> velites: ${VELITES_VERSION}（${VELITES_TRIPLE}）"
 
@@ -239,46 +296,102 @@ case "$pids_limit_final" in
   ''|*[!0-9]*) die "非法 AGENT_WORKER_PIDS_LIMIT: ${pids_limit_final}（正整数或 -1）" ;;
   *) [ "$pids_limit_final" -gt 0 ] || die "AGENT_WORKER_PIDS_LIMIT 必须为正整数或 -1" ;;
 esac
+# 宿主 bind 资产预检：secret 只能收紧到 0600，不能靠放宽权限让非 root 读取。
+check_mount_parent .
+check_mount_parent ./velites-bin
+check_mount_parent ./velites-config
+check_mount_parent ./pi-config
+if [ -e ./worker.yaml ] || [ -L ./worker.yaml ]; then
+  check_secret_file ./worker.yaml
+elif [ "$WORKER_UID_FINAL" != "$(id -u)" ]; then
+  die "fresh worker.yaml 将由当前 UID=$(id -u) 创建，与自定义运行 UID=$WORKER_UID_FINAL 不匹配；请先预建 0600 且属主正确的 worker.yaml"
+fi
+if [ -e ./velites-config/models.json ] || [ -L ./velites-config/models.json ]; then
+  check_secret_file ./velites-config/models.json
+elif [ -n "$MODELS_JSON" ] && [ "$WORKER_UID_FINAL" != "$(id -u)" ]; then
+  die "--models-json 将创建当前 UID=$(id -u) 的文件，与自定义运行 UID=$WORKER_UID_FINAL 不匹配；请先预建 0600 且属主正确的 models.json"
+fi
+binary_to_check="./velites-bin/velites"
+if [ ! -e "$binary_to_check" ]; then
+  binary_to_check="$TMPDIR_/velites-${VELITES_VERSION}-${VELITES_TRIPLE}/velites"
+fi
+[ -f "$binary_to_check" ] && [ ! -L "$binary_to_check" ] || die "velites 必须是非 symlink regular file: $binary_to_check"
+chmod a+rx "$binary_to_check" || die "无法为 velites 设置 a+rx"
+binary_mode="$(stat_mode "$binary_to_check")"
+[ "$((0$binary_mode & 0444))" -eq 292 ] && [ "$((0$binary_mode & 0111))" -eq 73 ] || die "velites 必须 a+rx（实际 mode=${binary_mode}）"
+
 compose_for_resolution="./docker-compose.yaml"
 [ -f "$compose_for_resolution" ] || compose_for_resolution="$TMPDIR_/docker-compose.yaml"
 if ! docker compose -f "$compose_for_resolution" config --format json \
   >"$TMPDIR_/compose-config.json" 2>"$TMPDIR_/control-volume.err"; then
   die "实际 Compose config 执行失败，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
 fi
-if ! control_volume="$(docker run --rm -i --network none --entrypoint python3 \
+if ! resolved_volumes="$(docker run --rm -i --network none --entrypoint python3 \
   "${IMAGE_REPO}:${WORKER_VERSION}" -c \
   'import json,sys
 config = json.load(sys.stdin)
-print(config["volumes"]["worker-control"]["name"])' \
+expected = {"worker-control": "/var/lib/agent-legion-worker-control", "worker-data": "/var/lib/agent-legion-worker"}
+mounts = {(item.get("source"), item.get("target")) for item in config["services"]["worker"]["volumes"] if item.get("type") == "volume"}
+for source, target in expected.items():
+    if (source, target) not in mounts:
+        raise ValueError(f"Compose 缺少 named-volume 挂载 {source}:{target}")
+print(*(config["volumes"][source]["name"] for source in expected))' \
   <"$TMPDIR_/compose-config.json" 2>>"$TMPDIR_/control-volume.err")"; then
-  die "无法按实际 Compose 解析 worker-control 卷名，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
+  die "无法按实际 Compose 解析 worker-control/worker-data 卷名与挂载，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
 fi
+# shellcheck disable=SC2086 # Compose 卷名不含空白，这里刻意拆成两个位置参数
+set -- $resolved_volumes
+control_volume="$1"
+data_volume="$2"
 if ! volume_names="$(docker volume ls --format '{{.Name}}' 2>>"$TMPDIR_/control-volume.err")"; then
-  die "无法核查 worker-control 卷是否存在，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
+  die "无法核查 Worker named volumes 是否存在，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
 fi
 control_volume_present=0
 if printf '%s\n' "$volume_names" | grep -Fxq "$control_volume"; then
   control_volume_present=1
 fi
+data_volume_present=0
+if printf '%s\n' "$volume_names" | grep -Fxq "$data_volume"; then
+  data_volume_present=1
+fi
 if [ -f ./worker.yaml ] || [ "$control_volume_present" = 1 ]; then
   set --
   if [ "$control_volume_present" = 1 ]; then
-    set -- -v "$control_volume:/control:ro"
+    set -- -v "$control_volume:/control:ro" -v "$control_volume:/var/lib/agent-legion-worker-control:ro"
   fi
-  if ! concurrency="$(docker run --rm --network none --entrypoint python3 \
+  if [ "$data_volume_present" = 1 ]; then
+    set -- "$@" -v "$data_volume:/var/lib/agent-legion-worker:ro"
+  fi
+  if ! concurrency="$(docker run --rm --network none --user 0:0 --entrypoint python3 \
     "$@" -v "$PWD:/work:ro" "${IMAGE_REPO}:${WORKER_VERSION}" -c \
     'from pathlib import Path
 import yaml
 from worker.config_validation import validate_config
 state = Path("/control/worker.yaml")
-if state.exists() and not state.is_file():
-    raise ValueError("控制卷 worker.yaml 不是 regular file")
+if state.is_symlink() or (state.exists() and not state.is_file()):
+    raise ValueError("控制卷 worker.yaml 必须是非 symlink regular file")
 source = state if state.is_file() else Path("/work/worker.yaml")
 with source.open(encoding="utf-8") as stream:
     config = validate_config(yaml.safe_load(stream), require_identity=False)
+roots = (Path("/var/lib/agent-legion-worker"), Path("/var/lib/agent-legion-worker-control"))
+def check_path(key, value):
+    path = Path(str(value))
+    root = next((root for root in roots if path == root or root in path.parents), None)
+    if not path.is_absolute() or ".." in path.parts or root is None:
+        raise ValueError(f"{key}={value} 不在两个 named volumes 的递归迁移覆盖树下")
+    current = root
+    for part in path.relative_to(root).parts:
+        current /= part
+        if current.is_symlink():
+            raise ValueError(f"{key}={value} 经过卷内 symlink {current}，无法保证迁移覆盖")
+check_path("work_root", config.get("work_root", "/var/lib/agent-legion-worker"))
+for key in ("register_token_file", "register_token_dir"):
+    value = config.get(key)
+    if value:
+        check_path(key, value)
 print(config["max_concurrency"], config["max_code_concurrency"], config["upload_max_concurrency"])' \
     2>"$TMPDIR_/concurrency.err")"; then
-    die "无法按 Worker YAML/整数语义可靠解析实际生效控制副本，未修改 compose/.env。请修正控制卷 worker.yaml（不存在时才使用引导文件），或将三个并发键改为未加引号的整数后重试：$(tail -1 "$TMPDIR_/concurrency.err")"
+    die "无法按 Worker YAML/整数语义可靠解析实际生效控制副本或安全迁移路径，未修改 compose/.env。请修正控制卷 worker.yaml（不存在时才使用引导文件）；自定义 work_root/register_token_file/register_token_dir 必须位于两个 named volumes 下：$(tail -1 "$TMPDIR_/concurrency.err")"
   fi
   agent_limit="${concurrency%% *}"
   code_limit="${concurrency#* }"
@@ -295,13 +408,6 @@ if [ "$limits_mode_final" = default ] && {
   die "当前并发超出默认 limits 的测量 envelope（agent=10/code=0/upload=4）。请评审并显式设置 AGENT_WORKER_MEM_LIMIT/AGENT_WORKER_PIDS_LIMIT（或 0/-1 unlimited）及 AGENT_WORKER_RESOURCE_LIMITS_MODE=explicit 后重跑；不会静默 clamp 或继承默认 limits"
 fi
 
-# ---- 2a. compose 文件 ----
-if [ "$compose_new" = 1 ]; then
-  # 原子替换（mv 同盘）；compose 自身插值默认值与 .env 的显式声明保持一致
-  mv -f "$TMPDIR_/docker-compose.yaml" ./docker-compose.yaml
-  echo "==> compose 文件已更新（ref: ${COMPOSE_REF}）"
-fi
-
 # 混合态守卫（subagent P2）：compose 拉取失败保留旧文件时，若本次是版本
 # 变更运行，继续会把 .env 刷成新版本——形成「新镜像声明 × 旧编排文件」
 # 的混合态（正是 codex P1 修复要消灭的组合）。版本变更必须 compose 与
@@ -311,7 +417,41 @@ if [ "$compose_new" = 0 ] && [ -n "$env_image_now" ] && [ "$env_image_now" != "$
   die "compose 拉取失败（ref ${COMPOSE_REF}）且本次为版本变更（${env_image_now} → ${WORKER_VERSION}）：保留旧编排而刷新 .env 会制造镜像×编排混合态，已中止。确认 worker-v${WORKER_VERSION} tag 已发布后重跑"
 fi
 
-# ---- 2b. .env：版本/资源/UI 自管行由脚本维护，其余内容不动 ----
+# 跨进程迁移前先停写者并重验状态；helper 只挂两个 named volumes，不接触宿主 bind 树。
+if ! docker compose -f "$compose_for_resolution" stop worker >"$TMPDIR_/migration-stop.log" 2>&1; then
+  die "停止 Worker 失败，未迁移卷、未提交 compose/.env：$(tail -1 "$TMPDIR_/migration-stop.log")"
+fi
+running_workers="$(docker compose -f "$compose_for_resolution" ps --status running -q worker 2>"$TMPDIR_/migration-ps.err")" || die "无法重验 Worker 停止状态，未迁移卷、未提交 compose/.env：$(tail -1 "$TMPDIR_/migration-ps.err")"
+[ -z "$running_workers" ] || die "Worker 仍在运行（${running_workers}），拒绝并发 chown；未提交 compose/.env"
+if ! docker run --rm --network none --user 0:0 --entrypoint python3 \
+  -v "$control_volume:/var/lib/agent-legion-worker-control" \
+  -v "$data_volume:/var/lib/agent-legion-worker" \
+  "${IMAGE_REPO}:${WORKER_VERSION}" -c \
+  'import os,stat,sys
+uid,gid = (int(value) for value in sys.argv[1:])
+def migrate(path):
+    mode = os.lstat(path).st_mode
+    os.chown(path, uid, gid, follow_symlinks=False)
+    if stat.S_ISDIR(mode):
+        with os.scandir(path) as entries:
+            for entry in entries:
+                migrate(entry.path)
+for root in ("/var/lib/agent-legion-worker-control", "/var/lib/agent-legion-worker"):
+    migrate(root)
+print("worker named-volume ownership migrated")' \
+  "$WORKER_UID_FINAL" "$WORKER_GID_FINAL" >"$TMPDIR_/migration.log" 2>&1; then
+  die "named-volume 属主迁移失败，未提交 compose/.env；旧 root 容器仍可读取卷，请按日志修复后重跑：$(tail -1 "$TMPDIR_/migration.log")"
+fi
+echo "==> worker-control/worker-data 已递归迁移到 ${WORKER_UID_FINAL}:${WORKER_GID_FINAL}（内容与 mode 不变）"
+
+# ---- 2a. compose 文件 ----
+if [ "$compose_new" = 1 ]; then
+  # 原子替换（mv 同盘）；compose 自身插值默认值与 .env 的显式声明保持一致
+  mv -f "$TMPDIR_/docker-compose.yaml" ./docker-compose.yaml
+  echo "==> compose 文件已更新（ref: ${COMPOSE_REF}）"
+fi
+
+# ---- 2b. .env：版本/资源/身份/UI 自管行由脚本维护，其余内容不动 ----
 if [ ! -f ./.env ]; then
   cat > ./.env <<'EOF'
 # compose 插值变量（本文件只被 compose 读取，不进容器；chmod 600 保护凭据）
@@ -334,6 +474,8 @@ set_self_managed_line() {
   fi
 }
 
+set_self_managed_line AGENT_WORKER_UID "$WORKER_UID_FINAL"
+set_self_managed_line AGENT_WORKER_GID "$WORKER_GID_FINAL"
 set_self_managed_line AGENT_WORKER_RESOURCE_LIMITS_MODE "$limits_mode_final"
 set_self_managed_line AGENT_WORKER_MEM_LIMIT "$mem_limit_final"
 set_self_managed_line AGENT_WORKER_PIDS_LIMIT "$pids_limit_final"

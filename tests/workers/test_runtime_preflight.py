@@ -416,8 +416,13 @@ def test_compose_files_carry_velites_mount_and_guard() -> None:
     zero = (ROOT / "deploy" / "compose.worker.zero-runtime.yaml").read_text(encoding="utf-8")
     assert "!override" in zero
     assert "/app/data/bin/velites" not in zero
-    for mount in ("/etc/agent-legion/worker.yaml", "/root/.pi/agent", "/root/.velites"):
+    for mount in (
+        "/etc/agent-legion/worker.yaml",
+        "/home/agent-worker/.pi/agent",
+        "/home/agent-worker/.velites",
+    ):
         assert mount in zero, f"zero-runtime override 丢了基础挂载 {mount}"
+    assert "/root/.pi" not in zero and "/root/.velites" not in zero
 
     for name in ("deploy/compose.worker.yaml", "deploy/compose.host.yaml"):
         text = (ROOT / name).read_text(encoding="utf-8")

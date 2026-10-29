@@ -54,12 +54,13 @@ export AGENT_SKILLS_DIR="$HOME/.agents/skills"
 export VELITES_CONFIG_DIR="$HOME/.velites"
 ```
 
-compose 还保留了 `PI_CONFIG_DIR`（→ `/root/.pi/agent`）挂载点，但 worker 镜像不含 pi 运行时（#381，见 §5「velites 二进制来源」），Docker 形态无需设置它；pi 只在裸机形态可用。
+compose 还保留了 `PI_CONFIG_DIR`（→ `/home/agent-worker/.pi/agent`）挂载点，但 worker 镜像不含 pi 运行时（#381，见 §5「velites 二进制来源」），Docker 形态无需设置它；pi 只在裸机形态可用。
 
 `$VELITES_CONFIG_DIR/models.json` 至少声明 provider 的 `api`（`openai-completions` 或
 `anthropic-messages`）、`baseUrl`、`apiKey` 和模型列表；完整格式见
 `docs/architecture/velites-model-registry.md`。建议 `apiKey` 使用 `$ENV` 引用并将文件设为
-0600。容器通过 `VELITES_CONFIG_DIR` 只读挂载到 `/root/.velites`。
+0600。容器通过 `VELITES_CONFIG_DIR` 只读挂载到 `/home/agent-worker/.velites`；该 0600 文件与
+引导 `worker.yaml` 必须由同一数值 UID 持有，且 UID 等于 Worker 的 `AGENT_WORKER_UID`。
 
 Docker Worker 使用独立、git-ignored 的 env file 注入这些引用变量。不要误以为 Compose
 用于自身插值的 `deploy/.env` 会自动进入容器：复制示例文件，写入
@@ -316,6 +317,26 @@ Docker、目录自包含）。两者最终形态等价（同一镜像 + 同一�
 ——一键安装的 up 会 recreate 仓库形态的容器并共享同名卷；要换形态先
 `down` 另一边。
 
+### Worker 非 root 身份与 named-volume 迁移（#1049）
+
+Worker 镜像和三份基础 Compose 默认以数值 `10001:10001` 运行，`HOME=/home/agent-worker`；pi/velites 配置分别挂在该 HOME 下的 `.pi/agent` 与 `.velites`，zero-runtime override 使用同一组路径。可用 `AGENT_WORKER_UID` / `AGENT_WORKER_GID` 改为其他非零数值身份。一键安装按「进程环境 > 既有 `.env` > 当前非零宿主 UID/GID」选定并持久化身份，因此普通用户 fresh 安装不需要 chown 宿主文件；以 root 跑安装器时默认回落到 `10001:10001`，宿主 secret 必须预先具有匹配属主。镜像内 bwrap 使用非 setuid 形态，由既有 `SYS_ADMIN + seccomp:unconfined` 建立沙箱；非 root + setuid 的 capset 在原生 Linux 与 Docker Desktop 均实测 EPERM，因此不保留 setuid 位，也不新增 `SYS_PTRACE`。
+
+挂载的引导 `worker.yaml` 与已有 `velites-config/models.json` 必须是非 symlink regular file、精确 `0600`、由同一数值 UID 持有且等于运行 UID；安装器只会把旧文件过宽的 mode **收紧**为 0600，绝不通过 group/other read 让容器读取 secret。直接父目录必须可归运行 UID 安全遍历且不能被 group/other 写入，velites 二进制必须 regular file 且 a+rx。`work_root`、`register_token_file`、`register_token_dir` 可以位于 `/var/lib/agent-legion-worker` 或 `/var/lib/agent-legion-worker-control` 的子树下，由递归迁移覆盖；指向其他路径时安装器在提交 Compose/.env 前 fail-fast，不会猜测或额外 chown 宿主目录。
+
+fresh 与 root-owned 存量升级共用一次性迁移：全部下载、权威控制副本解析和宿主预检通过后，安装器先 `stop worker` 并重验没有 running worker，再用 `--user 0:0 --network none` 的短生命周期容器仅挂载实际 Compose 解析出的 `worker-control`、`worker-data` 两个 named volumes，递归 chown 到目标 UID/GID，不跟随 symlink。它不是常驻 root entrypoint，也不挂载或递归处理安装目录。fresh 缺卷在这一步创建并赋属主；镜像挂载点的 `.volume-keep` 让卷首次初始化后保持非空，避免 Docker 后续 copy-up 重置 owner。存量卷只改 owner，不清卷、不改既有业务文件的内容与 mode，bootstrap/control/register tokens、日志、evidence、metrics、tombstone 和 pending upload 均保留。停止或重验失败、路径不安全、secret UID/mode 不满足约束时，不提交新 Compose/.env。
+
+仓库 Compose 不走 standalone installer：fresh 的 build args 与运行 UID/GID 同源，无需额外迁移；root-owned 存量卷先 `docker compose -f <实际文件> stop worker` 并确认 `ps --status running -q worker` 无输出，再从 `docker compose config --format json` 取两个实际卷名，执行下列一次性 helper（替换卷名与 UID/GID），最后 `up -d --build`。Host stack 的 project/卷名与 standalone 不同，不要硬编码互用。
+
+```bash
+docker run --rm --network none --user 0:0 --entrypoint sh \
+  -v <project>_worker-control:/var/lib/agent-legion-worker-control \
+  -v <project>_worker-data:/var/lib/agent-legion-worker \
+  agent-legion-worker:local \
+  -c 'chown -R 10001:10001 /var/lib/agent-legion-worker-control /var/lib/agent-legion-worker'
+```
+
+回滚使用同一个安装器指定旧版本：`./scripts/install-worker.sh --version <旧版本>`。脚本按旧 `worker-v<旧版本>` tag 恢复旧 Compose 与旧 root 镜像；root 能读取非 root-owned 的 0600 文件，两个卷和 pending upload 原样保留。也可在仓库部署中恢复旧 Compose/image 后 `docker compose up -d`。**不要执行 `docker compose down -v`、删除 named volumes 或清空 work/state 目录来“修复”属主或回滚**；Host/Worker 版本回滚顺序仍遵守 §5 的协议兼容要求。
+
 ### Worker 容器资源限额（#1049）
 
 三份基础 Compose（`compose.worker.yaml`、`compose.worker.standalone.yaml`、`compose.host.yaml`）的 Worker 默认使用 `mem_limit=256m`、`pids_limit=128` 和 `AGENT_WORKER_RESOURCE_LIMITS_MODE=default`；zero-runtime 与 pull override 不另写资源字段，直接继承同一组值。默认承诺只覆盖下述原生 Linux reference envelope：**agent=10、code=0（Host local code）、upload=4、每波 20 jobs、每个 artifact 1MiB**，不是按 CPU 核数或协议并发上限推导的通用保证，也不改变 `max_concurrency`、bwrap、capability、seccomp 或 CPU 限制。
@@ -332,7 +353,7 @@ AGENT_WORKER_RESOURCE_LIMITS_MODE=default
 
 超出 reference envelope（agent>10、code>0 或 upload>4）时不得只继承 default limits：先评审实际内存与线程需求，再显式设置合适的 limits 并设 `AGENT_WORKER_RESOURCE_LIMITS_MODE=explicit`。明确接受无限额时使用 `AGENT_WORKER_MEM_LIMIT=0`、`AGENT_WORKER_PIDS_LIMIT=-1`，同样必须设 `explicit`。启动、控制台/API 写入前和配置文件热更共用同一 envelope guard：default 超 envelope 直接拒绝，不写配置、不静默 clamp；显式模式不自动改并发，也不承诺任意配置都安全。
 
-一键安装脚本把最终 mode/limits 幂等写入 `.env`，fresh 缺省补 256m/128/default；环境变量显式传 limits 时若未传 mode，会按显式评审持久化为 `explicit`。升级预检在任何 compose/.env 提交前，先用实际 Compose project 解析 `worker-control` 卷名并核查该卷，优先读取与运行时一致的控制副本 `/var/lib/agent-legion-worker-control/worker.yaml`，只有副本不存在才回退引导文件；卷不存在不创建空卷。解析复用目标 Worker 镜像中固定版本的 PyYAML 与 `validate_config`（`--network none`），不在宿主新增依赖；YAML 缩进、0x 整数、行内注释与重复键 last-wins 与 Worker 一致，引号数字等 Worker 本身不支持的类型会明确报错，而不是放宽成另一套语义。default 超 envelope、镜像/卷不可用或配置无法可靠解析都会保留旧文件并中止；运行后控制卷里的配置仍以运行时三道 guard 为准。升级或回滚版本不会重置显式 limits，也不会改写 `worker.yaml`、`worker-data` 或 `worker-control`，pending upload 标记与上传队列保留，容器/executor restart 继续按既有恢复语义完成未上传结果。需要回滚时同时回退 Host/Worker 镜像，并保留已评审的资源配置。
+一键安装脚本把最终 mode/limits 幂等写入 `.env`，fresh 缺省补 256m/128/default；环境变量显式传 limits 时若未传 mode，会按显式评审持久化为 `explicit`。升级预检在任何 compose/.env 提交前，先用实际 Compose project 解析 `worker-control` 卷名并核查该卷，优先读取与运行时一致的控制副本 `/var/lib/agent-legion-worker-control/worker.yaml`，只有副本不存在才回退引导文件；预检本身不创建空卷，fresh 卷由后续迁移 helper 创建。解析复用目标 Worker 镜像中固定版本的 PyYAML 与 `validate_config`（`--network none`），不在宿主新增依赖；YAML 缩进、0x 整数、行内注释与重复键 last-wins 与 Worker 一致，引号数字等 Worker 本身不支持的类型会明确报错，而不是放宽成另一套语义。default 超 envelope、镜像/卷不可用或配置无法可靠解析都会保留旧文件并中止；运行后控制卷里的配置仍以运行时三道 guard 为准。升级或回滚版本不会重置显式 limits，也不会改写 `worker.yaml` 内容；named-volume owner 迁移及 pending upload 保留语义见上一节。需要回滚时同时回退 Host/Worker 镜像，并保留已评审的资源配置。
 
 ### 出网代理（#444）
 
@@ -523,9 +544,9 @@ Host 设置页顶部的「Worker 与 Worker 控制台」卡片、签发成功后
 
 ### Worker 资源测量（#1049 前置工具）
 
-`deploy/compose.worker.measurement.yaml` 与 `scripts/stress/worker_resource_workload.py` 是一次性真实测量栈，不是生产部署示例。Worker 明示保持当前 shipped 身份与权限：镜像默认 root、`SYS_ADMIN`、`seccomp:unconfined`；测量采样时 mem/pids 默认 unlimited，候选值只经显式输入注入并记录，不能用测量专用字段替代生产配置。工具不按核数、协议并发上限、历史 RSS 或 Docker Desktop 结果推导生产限制，生产 Compose 的限额来自独立 default 原生证据。
+`deploy/compose.worker.measurement.yaml` 与 `scripts/stress/worker_resource_workload.py` 是一次性真实测量栈，不是生产部署示例。Worker 明示保持当前 shipped 身份与权限：默认非 root UID/GID、`HOME=/home/agent-worker`、`SYS_ADMIN`、`seccomp:unconfined`；测量采样时 mem/pids 默认 unlimited，候选值只经显式输入注入并记录，不能用测量专用字段替代生产配置。工具不按核数、协议并发上限、历史 RSS 或 Docker Desktop 结果推导生产限制，生产 Compose 的限额来自独立 default 原生证据。
 
-Host 支持容器只在启动阶段以 root 安装 git 并初始化 `host-data` 卷，随后按 bind owner 用 `setpriv` 设置身份并以 `HOME=/tmp` 启动：原生 Linux 使用执行 seed 的宿主 UID/GID，Docker Desktop 的 root-owned 映射使用 0:0。skills 以只读方式挂到 `/tmp/.agents/skills`，使 Git 仓库 owner 与 SkillManager 读取 UID 一致。该测量专用对齐不配置 `safe.directory`，不修改生产 SkillManager，也不改变 Worker、模型或 velites 绑定身份；Desktop 的 0:0 只是功能兼容，不替代原生非 root 验证。仅 default code=0 时，workload 另生成 disposable Host override，安装 Debian `bubblewrap` 与诊断用 `strace` 并设置 Worker 同款 setuid，给 **Host 支持容器** 增加 `SYS_ADMIN` + `NET_ADMIN` + `SYS_PTRACE`、`seccomp:unconfined` 和 `apparmor:unconfined`，使 Host code 真走 OS sandbox。`NET_ADMIN` 由 loopback 探针要求；`SYS_PTRACE` 由 strace 证实的 non-root setuid bwrap 恢复 `REQUIRED_CAPS_0` 路径要求，不能只用执行前 CapEff=0 解释。base Compose 与 code>0 路径不加载此 override。每次执行前必须验证 `/usr/bin/bwrap` 可执行且 setuid，metadata 记录 apt 来源、版本、路径、mode 与 support 权限 delta，缺失即 fail-closed；这些 Host support 权限同样不是生产建议，绝不扩到生产 Host/Dockerfile 或 Worker。
+Host 支持容器只在启动阶段以 root 安装 git 并初始化 `host-data` 卷，随后按 bind owner 用 `setpriv` 设置身份并以 `HOME=/tmp` 启动：原生 Linux 使用执行 seed 的宿主 UID/GID，Docker Desktop 的 root-owned 映射使用 0:0。skills 以只读方式挂到 `/tmp/.agents/skills`，使 Git 仓库 owner 与 SkillManager 读取 UID 一致。该测量专用对齐不配置 `safe.directory`，不修改生产 SkillManager，也不改变 Worker、模型或 velites 绑定身份；Desktop 的 0:0 只是功能兼容，不替代原生非 root 验证。仅 default code=0 时，workload 另生成 disposable Host override，安装 Debian `bubblewrap` 与诊断用 `strace` 并设置仅用于该支持容器的 setuid（生产 Worker 已非 setuid），给 **Host 支持容器** 增加 `SYS_ADMIN` + `NET_ADMIN` + `SYS_PTRACE`、`seccomp:unconfined` 和 `apparmor:unconfined`，使 Host code 真走 OS sandbox。`NET_ADMIN` 由 loopback 探针要求；`SYS_PTRACE` 由 strace 证实的 non-root setuid bwrap 恢复 `REQUIRED_CAPS_0` 路径要求，不能只用执行前 CapEff=0 解释。base Compose 与 code>0 路径不加载此 override。每次执行前必须验证 `/usr/bin/bwrap` 可执行且 setuid，metadata 记录 apt 来源、版本、路径、mode 与 support 权限 delta，缺失即 fail-closed；这些 Host support 权限同样不是生产建议，绝不扩到生产 Host/Dockerfile 或 Worker。
 
 优先通过限定 paths 的 PR 或手动 `workflow_dispatch` 在 GitHub Actions 运行 **Worker Resource Measurement**（原生 Ubuntu 24.04）。矩阵的 single / mixed / upload-backlog 是显式测量 envelope；default 则固定为当前 installer/Compose 的 agent=10、code=0、upload=4，code 节点合法回落 Host，upload-backlog 改用 Worker agent 产物以形成真实 Worker 上传队列，evidence 仍分别校验 Host code 与 Worker agent 身份。dispatch 可设置 cold/warm 重复次数与 pids/memory 采样间隔；`mem_limit` / `pids_limit` 仅用于候选值全链路复验，留空保持 unlimited，`fault_mem_limit` / `fault_pids_limit` 则在独立 disposable 容器中验证低于候选值时 OOM/pids 拒绝确实生效，不替代业务链路。原生 Linux 也可在仓库根执行：
 
