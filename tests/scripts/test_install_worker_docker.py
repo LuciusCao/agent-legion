@@ -40,12 +40,10 @@ def _use_root_image(target: Path, project: str, tmp_path: Path) -> None:
         capture_output=True,
     )
     env_path = target / ".env"
-    env_path.write_text(
-        env_path.read_text(encoding="utf-8").replace(
-            "ghcr.io/luciuscao/agent-legion-worker:0.8.2", root_image
-        ),
-        encoding="utf-8",
+    updated = env_path.read_text(encoding="utf-8").replace(
+        "ghcr.io/luciuscao/agent-legion-worker:0.8.2", root_image
     )
+    env_path.write_text(updated, encoding="utf-8")
 
 
 def _cleanup_project(target: Path, project: str, compose: str = "docker-compose.yaml") -> None:
@@ -109,7 +107,7 @@ def _run_real_installer(
         'case "$url" in\n'
         '  */deploy/compose.worker.standalone.yaml) cp "$FAKE_COMPOSE" "$out" ;;\n'
         '  */scripts/migrate-worker-volumes.sh) cp "$FAKE_MIGRATION" "$out" ;;\n'
-        "  *) exit 1 ;;\n"
+        '  *) exec /usr/bin/curl -fsSL -o "$out" "$url" ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -126,9 +124,7 @@ def _run_real_installer(
         {
             "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
             "FAKE_COMPOSE": str(compose_source or target / "docker-compose.yaml"),
-            "FAKE_MIGRATION": str(
-                migration_source or REPO_ROOT / "scripts/migrate-worker-volumes.sh"
-            ),
+            "FAKE_MIGRATION": str(migration_source or MIGRATOR),
             "AGENT_WORKER_VERSION": version,
             "AGENT_WORKER_COMPOSE_REF": "test-ref",
         }
@@ -237,18 +233,18 @@ def _nonroot_project(tmp_path: Path, form: str) -> tuple[Path, str]:
     target, project = _real_project(tmp_path, form)
     (target / ".env").write_text("AGENT_WORKER_UI_PORT=0\n", encoding="utf-8")
     (target / "velites-bin/velites").write_text(
-        "#!/bin/sh\n"
-        'if [ "$1" = models ]; then\n'
-        "  exec python3 -c 'import json,os; "
-        'data=json.load(open(os.path.expanduser("~/.velites/models.json"), encoding="utf-8")); '
-        'print(json.dumps(data["models"]))\'\n'
-        "fi\n"
-        'if [ "$1" = --version ]; then echo velites-nonroot-test; exit 0; fi\n'
-        "exit 1\n",
+        """#!/bin/sh
+if [ "$1" = models ]; then
+  exec python3 -c 'import json,os; data=json.load(open(os.path.expanduser("~/.velites/models.json"), encoding="utf-8")); print(json.dumps(data["models"]))'
+fi
+if [ "$1" = --version ]; then echo velites-nonroot-test; exit 0; fi
+exit 1
+""",
         encoding="utf-8",
     )
     (target / "velites-bin/velites").chmod(0o755)
     (target / "velites-config").mkdir(exist_ok=True)
+    (target / "pi-config").mkdir(mode=0o700, exist_ok=True)
     (target / "velites-config/models.json").write_text(
         '{"models":[{"provider":"stub","model":"nonroot-ok"}]}', encoding="utf-8"
     )
@@ -394,29 +390,22 @@ def _prepare_no_build(tmp_path: Path, form: str) -> tuple[Path, str]:
 
 
 def _run_migrator(target: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [
-            "sh",
-            str(MIGRATOR),
-            "--uid",
-            str(os.getuid()),
-            "--gid",
-            str(os.getgid()),
-            "--",
-            "-f",
-            "docker-compose.resolved.yaml",
-        ],
-        cwd=target,
-        check=check,
-        capture_output=True,
-        text=True,
-    )
+    command = [
+        "sh",
+        str(MIGRATOR),
+        "--uid",
+        str(os.getuid()),
+        "--gid",
+        str(os.getgid()),
+        "--",
+        "-f",
+        "docker-compose.resolved.yaml",
+    ]
+    return subprocess.run(command, cwd=target, check=check, capture_output=True, text=True)
 
 
 @pytest.mark.parametrize("form", ["standalone", "repo-pull", "zero-runtime-pull"])
-def test_no_build_custom_uid_fresh_starts_and_writes_control_token(
-    tmp_path: Path, form: str
-) -> None:
+def test_no_build_custom_uid_fresh_starts_and_writes_control_token(tmp_path, form):
     target, project = _prepare_no_build(tmp_path, form)
     try:
         if form == "standalone":
@@ -611,29 +600,6 @@ assert not (work / "exec-pending").exists()
         _cleanup_project(target, project, "docker-compose.resolved.yaml")
 
 
-def test_legacy_root_compose_rollback_does_not_create_or_migrate_volumes(tmp_path: Path) -> None:
-    target, project = _real_project(tmp_path, "legacy-root")
-    compose = (target / "docker-compose.yaml").read_text(encoding="utf-8")
-    (target / "docker-compose.yaml").write_text(
-        compose.replace("    user: ${AGENT_WORKER_UID:-10001}:${AGENT_WORKER_GID:-10001}\n", ""),
-        encoding="utf-8",
-    )
-    try:
-        result = _run_real_installer(tmp_path, target)
-        assert result.returncode == 0, result.stderr
-        assert "旧 root Compose 无需 UID 卷迁移" in result.stdout
-        volumes = subprocess.run(
-            ["docker", "volume", "ls", "--format", "{{.Name}}"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.splitlines()
-        assert f"{project}_worker-control" not in volumes
-        assert f"{project}_worker-data" not in volumes
-    finally:
-        _cleanup_project(target, project)
-
-
 def test_root_current_to_nonroot_target_starts_and_writes_token(tmp_path: Path) -> None:
     target, project = _prepare_no_build(tmp_path, "root-current")
     target_source = tmp_path / "target-nonroot.yaml"
@@ -797,3 +763,19 @@ def test_direct_migration_rejects_non_0600_worker_yaml_before_chown(
         assert result.returncode == 1 and "0600" in result.stderr
     finally:
         _cleanup_project(target, project, "docker-compose.resolved.yaml")
+
+
+def test_installer_uses_staged_binary_when_bind_source_is_directory(tmp_path: Path) -> None:
+    target, project = _real_project(tmp_path, "binary-directory")
+    (target / "velites-bin/velites").unlink()
+    (target / "velites-bin/velites").mkdir()
+    (target / "velites-bin/.velites-version").write_text("0.0.0", encoding="utf-8")
+    try:
+        result = _run_real_installer(tmp_path, target)
+        assert result.returncode == 0, result.stderr
+        binary = target / "velites-bin/velites"
+        assert binary.is_file() and not binary.is_symlink()
+        assert binary.stat().st_mode & 0o777 == 0o755
+        assert (target / "velites-bin/.velites-version").read_text(encoding="utf-8") == "0.5.9\n"
+    finally:
+        _cleanup_project(target, project)

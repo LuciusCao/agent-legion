@@ -312,7 +312,7 @@ elif [ -n "$MODELS_JSON" ] && [ "$WORKER_UID_FINAL" != "$(id -u)" ]; then
   die "--models-json 将创建当前 UID=$(id -u) 的文件，与自定义运行 UID=$WORKER_UID_FINAL 不匹配；请先预建 0600 且属主正确的 models.json"
 fi
 binary_to_check="./velites-bin/velites"
-if [ ! -e "$binary_to_check" ]; then
+if [ ! -f "$binary_to_check" ] || [ -L "$binary_to_check" ]; then
   binary_to_check="$TMPDIR_/velites-${VELITES_VERSION}-${VELITES_TRIPLE}/velites"
 fi
 [ -f "$binary_to_check" ] && [ ! -L "$binary_to_check" ] || die "velites 必须是非 symlink regular file: $binary_to_check"
