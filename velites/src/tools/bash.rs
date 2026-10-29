@@ -110,8 +110,9 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
             Some(sandbox) => sandbox.wrap(&argv),
             None => (argv[0].clone(), argv[1..].to_vec()),
         };
-        let mut cmd = tokio::process::Command::new(program);
-        cmd.args(wrapped_argv);
+        let spec = crate::sandbox::userns::command_spec(&program, &wrapped_argv)?;
+        let mut cmd = tokio::process::Command::new(spec.program);
+        cmd.args(spec.args);
         cmd
     };
     // #469: the child's stdin stays inherited (the command travels as

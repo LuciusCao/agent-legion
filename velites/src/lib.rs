@@ -263,9 +263,13 @@ pub fn run_sandbox_wrap(cli: cli::SandboxWrapCli) -> anyhow::Result<u8> {
     let sandbox = sandbox::Sandbox::for_wrap(&cli.cwd, &options)
         .context("filesystem sandbox unavailable (fail-closed)")?;
     let (program, argv) = sandbox.wrap(&cli.command);
-    let status = std::process::Command::new(&program)
-        .args(&argv)
-        .current_dir(&cli.cwd)
+    let spec = sandbox::userns::command_spec(&program, &argv)?;
+    let mut command = std::process::Command::new(&spec.program);
+    command.args(&spec.args).current_dir(&cli.cwd);
+    if spec.helper {
+        command.env_clear().env("PATH", sandbox::userns::SAFE_PATH);
+    }
+    let status = command
         .status()
         .with_context(|| format!("failed to spawn sandboxed command `{program}`"))?;
     Ok(u8::try_from(status.code().unwrap_or(1)).unwrap_or(1))

@@ -15,6 +15,7 @@
 //!   cwd/session/$TMPDIR, tmpfs on /tmp; a private pid namespace with its
 //!   own /proc and, unless network is explicitly allowed, a private network
 //!   namespace — one argv builder for the bash tool and `sandbox wrap`).
+//!   Non-root non-setuid bwrap uses a prebuilt user namespace passed by FD.
 //!
 //! Network is denied by default on both platforms for both callers (#715);
 //! the bash tool opts in via `--allow-network`, `sandbox wrap` via its own
@@ -30,6 +31,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context};
 
 mod macos;
+pub mod userns;
 
 #[cfg(any(target_os = "macos", test))]
 use macos::ancestor_list_only;
@@ -491,8 +493,13 @@ fn probe_bwrap_policy(policy: &BwrapPolicy) -> anyhow::Result<()> {
         &["true".to_string()],
         policy.allow_network,
     );
-    let output = std::process::Command::new("bwrap")
-        .args(argv)
+    let spec = userns::command_spec("bwrap", &argv)?;
+    let mut command = std::process::Command::new(spec.program);
+    command.args(spec.args);
+    if spec.helper {
+        command.env_clear().env("PATH", userns::SAFE_PATH);
+    }
+    let output = command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())

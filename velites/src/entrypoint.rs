@@ -3,6 +3,17 @@ use std::process::ExitCode;
 use clap::Parser;
 
 pub async fn run(args: Vec<String>) -> ExitCode {
+    if args.get(1).map(String::as_str) == Some("sandbox")
+        && args.get(2).map(String::as_str) == Some("userns-launcher")
+    {
+        return match crate::sandbox::userns::run_launcher(&args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("error: {error:#}");
+                ExitCode::from(2)
+            }
+        };
+    }
     // `velites sandbox wrap -- <cmd>` runs one command inside the OS sandbox;
     // it is dispatched before the agent-run CLI parse because that CLI
     // requires a positional instruction.

@@ -26,6 +26,17 @@ use clap::Parser;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("sandbox")
+        && args.get(2).map(String::as_str) == Some("userns-launcher")
+    {
+        return match velites::sandbox::userns::run_launcher(&args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("error: {error:#}");
+                ExitCode::from(2)
+            }
+        };
+    }
     // Clap-owned flags must reach clap untouched (the pre-clap prefix dispatch
     // below would otherwise swallow `--version`, which #381's registration
     // handshake uses for drift diagnostics).

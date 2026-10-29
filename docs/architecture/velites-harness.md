@@ -62,7 +62,7 @@ velites/                 # Cargo crate（本仓库根下新目录）
     skill.rs             # SKILL.md 加载
     budget.rs            # 预算治理
     cancel.rs            # 取消/信号
-    sandbox/             # OS 沙箱：mod.rs（跨平台类型 + Linux bubblewrap）、macos.rs（seatbelt），§5
+    sandbox/             # OS 沙箱：mod.rs（跨平台类型 + Linux bubblewrap）、macos.rs（seatbelt）、userns.rs（nonroot nonsetuid 预建 launcher），§5
     bin/velites_schema.rs # 事件流 JSON Schema 导出（schemars）
     bin/velites_sandbox.rs # 独立沙箱 wrapper 二进制（code 节点执行，#383）
   tests/                 # Rust 集成测试（含 golden event fixtures）
@@ -219,12 +219,18 @@ TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计�
 - 沙箱拒绝表现为工具失败：`tool_execution_end{isError: true}`，错误消息含
   sandbox 拒绝信息，随 events.jsonl 落盘可审计。
 
-Linux 运行时要求（CI run 30683781370 实测）：bwrap 需要 setuid 位或非特权
-user namespace 之一；Ubuntu 24.04 默认通过 AppArmor 限制非特权 userns
-（`bwrap: setting up uid map: Permission denied`），CI 与 worker 镜像统一
-采用 setuid 方案（`chmod u+s /usr/bin/bwrap`）。另外默认 Docker seccomp
-profile 拦截 `unshare`，容器部署需放行（compose 侧配置，M5 灰度前在真
-worker 上验证）。
+Linux 运行时要求：root 或带 setuid 位的 bwrap 沿用原 argv；nonroot nonsetuid
+bwrap 则经 `sandbox/userns.rs` 的专用预建 launcher。该入口在模型发现/provider
+初始化前启动 fresh 进程，仅接收当前 UID/GID、绝对 bwrap 路径与原 argv。launcher
+的子进程创建 user namespace，写入当前 UID/GID 的单行映射和 `setgroups=deny`，
+通过 `SCM_RIGHTS` 把 `/proc/self/ns/user` FD 交给原父进程，再以 `--userns FD`
+执行 bwrap；FD 不随 exec 关闭，也不跨代复用。若子进程短暂设置 dumpable 以取得
+proc-owner，设置仅限该无敏感地址空间子进程，map 完成立即复位。父进程先校验
+子进程退出（异常或 5 秒超时均中止）再接收 FD；fork、unshare、map、open/write/prctl、
+FD 传递或 exec 任一步失败都不执行 payload，不增加 cap、
+privileged、subuid/newuidmap 或 unsandboxed 路径。root/no-network 的 netns 与
+nonroot 的 allow/no-network 政策不因 launcher 改变；RTM_NEWADDR 与完整链路仍须
+独立原生验收。默认 Docker seccomp profile 拦截 `unshare`，容器部署需放行。
 
 macOS seatbelt 的两处实现注记（实测 macOS 15，`deny default` 下 dyld/libsystem
 在 exec 时直接 abort/bus error，profile 必须放宽这两处，进程才起得来）：
@@ -526,8 +532,8 @@ pi 作为备选实现与对照基线继续可用（`runtime: pi` 即完整 pi �
 兜底），探测到即启用、`disabled_runtimes` 反选停用；#381 起执行器不进
 worker 镜像——velites 经 compose 外挂（`AGENT_WORKER_EXPECT_RUNTIMES`
 守卫防漏挂载），code 池沙箱则由镜像内置的 `velites-sandbox` 独立 bin 承担
-（#383，与 harness 分家）。容器部署前置：bwrap setuid 仍在镜像内；容器
-seccomp 需放行 `unshare`（见 §5 沙箱小节的运行时要求）。
+（#383，与 harness 分家）。容器部署前置：bwrap 可用 setuid，nonroot nonsetuid
+则使用 §5 的预建 launcher；容器 seccomp 需放行 `unshare`（见同节运行时要求）。
 
 **Pi CLI 安装与验证**（仅 `execution.runtime: pi` 的 agent 节点需要）：
 
