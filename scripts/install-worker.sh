@@ -320,8 +320,11 @@ chmod a+rx "$binary_to_check" || die "无法为 velites 设置 a+rx"
 binary_mode="$(stat_mode "$binary_to_check")"
 [ "$((0$binary_mode & 0444))" -eq 292 ] && [ "$((0$binary_mode & 0111))" -eq 73 ] || die "velites 必须 a+rx（实际 mode=${binary_mode}）"
 
-compose_for_resolution="./docker-compose.yaml"
-[ -f "$compose_for_resolution" ] || compose_for_resolution="$TMPDIR_/docker-compose.yaml"
+current_compose="./docker-compose.yaml"
+[ -f "$current_compose" ] || current_compose="$TMPDIR_/docker-compose.yaml"
+compose_for_resolution="$current_compose"
+target_compose="$TMPDIR_/docker-compose.yaml"
+[ "$compose_new" = 1 ] || target_compose="$current_compose"
 if ! docker compose -f "$compose_for_resolution" config --format json \
   >"$TMPDIR_/compose-config.json" 2>"$TMPDIR_/control-volume.err"; then
   die "实际 Compose config 执行失败，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
@@ -338,6 +341,26 @@ for source, target in expected.items():
 print(*(config["volumes"][source]["name"] for source in expected))' \
   <"$TMPDIR_/compose-config.json" 2>>"$TMPDIR_/control-volume.err")"; then
   die "无法按实际 Compose 解析 worker-control/worker-data 卷名与挂载，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
+fi
+if [ "$target_compose" != "$current_compose" ]; then
+  if ! docker compose -f "$target_compose" config --format json \
+    >"$TMPDIR_/target-compose-config.json" 2>"$TMPDIR_/control-volume.err"; then
+    die "目标 Compose config 执行失败，未迁移或提交：$(tail -1 "$TMPDIR_/control-volume.err")"
+  fi
+  if ! target_resolved_volumes="$(docker run --rm -i --network none --entrypoint python3 \
+    "${IMAGE_REPO}:${WORKER_VERSION}" -c \
+    'import json,sys
+config = json.load(sys.stdin)
+expected = {"worker-control": "/var/lib/agent-legion-worker-control", "worker-data": "/var/lib/agent-legion-worker"}
+mounts = {(item.get("source"), item.get("target")) for item in config["services"]["worker"]["volumes"] if item.get("type") == "volume"}
+for source, target in expected.items():
+    if (source, target) not in mounts:
+        raise ValueError(f"Compose 缺少 named-volume 挂载 {source}:{target}")
+print(*(config["volumes"][source]["name"] for source in expected))' \
+    <"$TMPDIR_/target-compose-config.json" 2>>"$TMPDIR_/control-volume.err")"; then
+    die "无法按目标 Compose 解析卷身份，未迁移或提交：$(tail -1 "$TMPDIR_/control-volume.err")"
+  fi
+  [ "$target_resolved_volumes" = "$resolved_volumes" ] || die "现有/目标 Compose 的 named-volume 身份不一致（${resolved_volumes} vs ${target_resolved_volumes}），拒绝误 chown；请手工核对项目与卷映射"
 fi
 # shellcheck disable=SC2086 # Compose 卷名不含空白，这里刻意拆成两个位置参数
 set -- $resolved_volumes
@@ -417,19 +440,20 @@ if [ "$compose_new" = 0 ] && [ -n "$env_image_now" ] && [ "$env_image_now" != "$
   die "compose 拉取失败（ref ${COMPOSE_REF}）且本次为版本变更（${env_image_now} → ${WORKER_VERSION}）：保留旧编排而刷新 .env 会制造镜像×编排混合态，已中止。确认 worker-v${WORKER_VERSION} tag 已发布后重跑"
 fi
 
-if grep -q 'user: ${AGENT_WORKER_UID' "$compose_for_resolution"; then
-  # helper 与 compose 使用同一固定 ref；未备妥前不得迁移或提交。
+if grep -q 'user: ${AGENT_WORKER_UID' "$target_compose"; then
+  # helper 与目标 Compose 使用同一固定 ref；未备妥前不得迁移或提交。
   MIGRATION_URL="${REPO_RAW_BASE}/${COMPOSE_REF}/scripts/migrate-worker-volumes.sh"
   if ! curl -fsSL -o "$TMPDIR_/migrate-worker-volumes.sh" "$MIGRATION_URL"; then
     die "拉取一次性卷迁移 helper 失败（ref ${COMPOSE_REF}），未迁移或修改 compose/.env"
   fi
   sh -n "$TMPDIR_/migrate-worker-volumes.sh" || die "下载的卷迁移 helper 语法校验失败"
-  # 共用 helper 再做控制副本/挂载资产预检、stop+running 重验与两卷递归迁移。
+  # 目标决定迁移/镜像；现有 Compose 仅用于 stop/running 重验和当前卷定位。
   if ! AGENT_WORKER_UID="$WORKER_UID_FINAL" AGENT_WORKER_GID="$WORKER_GID_FINAL" \
     sh "$TMPDIR_/migrate-worker-volumes.sh" \
     --uid "$WORKER_UID_FINAL" --gid "$WORKER_GID_FINAL" \
-    --image "${IMAGE_REPO}:${WORKER_VERSION}" --preflight-complete -- \
-    -f "$compose_for_resolution" >"$TMPDIR_/migration.log" 2>&1; then
+    --image "${IMAGE_REPO}:${WORKER_VERSION}" --preflight-complete \
+    --current-compose-file "$current_compose" -- \
+    -f "$target_compose" >"$TMPDIR_/migration.log" 2>&1; then
     die "named-volume 属主迁移失败，未提交 compose/.env；旧 root 容器仍可读取卷，请按日志修复后重跑：$(tail -1 "$TMPDIR_/migration.log")"
   fi
   echo "==> worker-control/worker-data 已递归迁移到 ${WORKER_UID_FINAL}:${WORKER_GID_FINAL}（内容与 mode 不变）"

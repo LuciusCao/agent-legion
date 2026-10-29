@@ -10,16 +10,30 @@ die() {
   exit 1
 }
 
+stat_uid() {
+  stat -c %u "$1" 2>/dev/null || stat -f %u "$1"
+}
+
+stat_gid() {
+  stat -c %g "$1" 2>/dev/null || stat -f %g "$1"
+}
+
+stat_mode() {
+  stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"
+}
+
 WORKER_UID=""
 WORKER_GID=""
 PREFLIGHT_COMPLETE=0
 IMAGE_OVERRIDE=""
+CURRENT_COMPOSE_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --uid) WORKER_UID="${2:?--uid 缺参数}"; shift 2 ;;
     --gid) WORKER_GID="${2:?--gid 缺参数}"; shift 2 ;;
     --preflight-complete) PREFLIGHT_COMPLETE=1; shift ;;
     --image) IMAGE_OVERRIDE="${2:?--image 缺参数}"; shift 2 ;;
+    --current-compose-file) CURRENT_COMPOSE_FILE="${2:?--current-compose-file 缺参数}"; shift 2 ;;
     --) shift; break ;;
     *) die "未知参数: $1（--uid/--gid 后必须以 -- 分隔 Compose 参数）" ;;
   esac
@@ -62,7 +76,42 @@ fi
 control_volume="${resolved%% *}"
 data_volume="${resolved##* }"
 [ -n "$control_volume" ] && [ -n "$data_volume" ] && [ "$control_volume" != "$data_volume" ] || die "Compose 卷名解析异常"
+if [ -n "$CURRENT_COMPOSE_FILE" ]; then
+  if ! docker compose -f "$CURRENT_COMPOSE_FILE" config --format json >"$TMPDIR_/current.json" 2>"$TMPDIR_/current.err"; then
+    die "现有 Compose config 失败，未迁移：$(tail -1 "$TMPDIR_/current.err")"
+  fi
+  if ! current_resolved="$(docker run --rm -i --network none --entrypoint python3 "$image" -c \
+    'import json,sys
+config = json.load(sys.stdin)
+expected = {"worker-control": "/var/lib/agent-legion-worker-control", "worker-data": "/var/lib/agent-legion-worker"}
+mounts = {(item.get("source"), item.get("target")) for item in config["services"]["worker"]["volumes"] if item.get("type") == "volume"}
+for source, target in expected.items():
+    if (source, target) not in mounts:
+        raise ValueError(f"Compose 缺少 named-volume 挂载 {source}:{target}")
+print(*(config["volumes"][source]["name"] for source in expected))' \
+    <"$TMPDIR_/current.json" 2>>"$TMPDIR_/current.err")"; then
+    die "无法解析现有 named volumes，未迁移：$(tail -1 "$TMPDIR_/current.err")"
+  fi
+  [ "$current_resolved" = "$resolved" ] || die "现有/目标 Compose 卷身份不一致（${current_resolved} vs ${resolved}），拒绝误 chown"
+fi
 if [ "$PREFLIGHT_COMPLETE" = 0 ]; then
+bootstrap_source="$(docker run --rm -i --network none --entrypoint python3 "$image" -c \
+  'import json,sys
+config = json.load(sys.stdin)
+for item in config["services"]["worker"]["volumes"]:
+    if item.get("type") == "bind" and item.get("target") == "/etc/agent-legion/worker.yaml":
+        print(item["source"])
+        break' <"$TMPDIR_/compose.json" 2>>"$TMPDIR_/compose.err")" || die "无法定位 bootstrap worker.yaml 宿主路径"
+case "$bootstrap_source" in
+  */worker.remote.example.yaml|*/worker.host.example.yaml)
+    # 仓库自带的非 secret 示例允许 0644；自定义 secret 按 installer 同一安全语义。
+    ;;
+  *)
+    [ -f "$bootstrap_source" ] && [ ! -L "$bootstrap_source" ] || die "bootstrap 必须是非 symlink regular file: $bootstrap_source"
+    [ "$(stat_mode "$bootstrap_source")" = 600 ] || die "bootstrap $bootstrap_source 必须精确 0600，拒绝 stop/chown"
+    [ "$(stat_uid "$bootstrap_source")" = "$WORKER_UID" ] && [ "$(stat_gid "$bootstrap_source")" = "$WORKER_GID" ] || die "bootstrap $bootstrap_source 的共同数值 UID/GID 必须等于运行身份 $WORKER_UID:$WORKER_GID"
+    ;;
+esac
 # This root one-shot only reads the exact mounts produced by Compose. It never
 # starts the service or makes the worker root long-lived.
 if ! docker compose "$@" run --rm --no-deps --user 0:0 --entrypoint python3 worker -c \
@@ -80,6 +129,8 @@ def regular(path, required=True):
         raise ValueError(f"缺少 regular file: {path}")
 regular(bootstrap)
 regular(state, required=False)
+if state.exists() and stat.S_IMODE(state.lstat().st_mode) != 0o600:
+    raise ValueError("控制卷 worker.yaml 必须精确 0600；不会放宽 mode 或执行 stop/chown")
 regular(models, required=False)
 if models.exists() and stat.S_IMODE(models.lstat().st_mode) != 0o600:
     raise ValueError("models.json 必须精确 0600，且能由目标 UID 实际读取")
@@ -125,10 +176,17 @@ if binary.exists() and not os.access(binary, os.R_OK | os.X_OK):
   die "目标 UID 无法遍历父目录或读取 0600 secret，未 stop 或迁移：$(tail -1 "$TMPDIR_/identity-probe.log")"
 fi
 fi
-if ! docker compose "$@" stop worker >"$TMPDIR_/stop.log" 2>&1; then
-  die "停止 Worker 失败，未迁移：$(tail -1 "$TMPDIR_/stop.log")"
+if [ -n "$CURRENT_COMPOSE_FILE" ]; then
+  if ! docker compose -f "$CURRENT_COMPOSE_FILE" stop worker >"$TMPDIR_/stop.log" 2>&1; then
+    die "按现有 Compose 停止 Worker 失败，未迁移：$(tail -1 "$TMPDIR_/stop.log")"
+  fi
+  running="$(docker compose -f "$CURRENT_COMPOSE_FILE" ps --status running -q worker 2>"$TMPDIR_/ps.err")" || die "无法按现有 Compose 重验 Worker 停止状态：$(tail -1 "$TMPDIR_/ps.err")"
+else
+  if ! docker compose "$@" stop worker >"$TMPDIR_/stop.log" 2>&1; then
+    die "停止 Worker 失败，未迁移：$(tail -1 "$TMPDIR_/stop.log")"
+  fi
+  running="$(docker compose "$@" ps --status running -q worker 2>"$TMPDIR_/ps.err")" || die "无法重验 Worker 停止状态：$(tail -1 "$TMPDIR_/ps.err")"
 fi
-running="$(docker compose "$@" ps --status running -q worker 2>"$TMPDIR_/ps.err")" || die "无法重验 Worker 停止状态：$(tail -1 "$TMPDIR_/ps.err")"
 [ -z "$running" ] || die "Worker 仍在运行（${running}），拒绝并发 chown"
 if ! docker run --rm --network none --user 0:0 --entrypoint python3 \
   -v "$control_volume:/var/lib/agent-legion-worker-control" \

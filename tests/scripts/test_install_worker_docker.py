@@ -30,6 +30,14 @@ def _env(target: Path) -> dict[str, str]:
     }
 
 
+def _cleanup_project(target: Path, project: str, compose: str = "docker-compose.yaml") -> None:
+    subprocess.run(["docker", "compose", "-f", compose, "down"], cwd=target, capture_output=True)
+    subprocess.run(
+        ["docker", "volume", "rm", "-f", f"{project}_worker-control", f"{project}_worker-data"],
+        capture_output=True,
+    )
+
+
 def _ensure_real_worker_image() -> None:
     source = "agent-legion-worker:measurement"
     inspect = subprocess.run(
@@ -63,7 +71,13 @@ def _real_project(tmp_path: Path, name: str) -> tuple[Path, str]:
 
 
 def _run_real_installer(
-    tmp_path: Path, target: Path, *, version: str = "0.8.2", extra_env: dict[str, str] | None = None
+    tmp_path: Path,
+    target: Path,
+    *,
+    version: str = "0.8.2",
+    extra_env: dict[str, str] | None = None,
+    compose_source: Path | None = None,
+    migration_source: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     _ensure_real_worker_image()
     fake_bin = tmp_path / "real-fake-bin"
@@ -93,8 +107,10 @@ def _run_real_installer(
     env.update(
         {
             "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
-            "FAKE_COMPOSE": str(target / "docker-compose.yaml"),
-            "FAKE_MIGRATION": str(REPO_ROOT / "scripts/migrate-worker-volumes.sh"),
+            "FAKE_COMPOSE": str(compose_source or target / "docker-compose.yaml"),
+            "FAKE_MIGRATION": str(
+                migration_source or REPO_ROOT / "scripts/migrate-worker-volumes.sh"
+            ),
             "AGENT_WORKER_VERSION": version,
             "AGENT_WORKER_COMPOSE_REF": "test-ref",
         }
@@ -135,14 +151,17 @@ def _write_control_volume(project: str, document: str) -> str:
 
 
 def test_installer_real_docker_fresh_and_idempotent(tmp_path: Path) -> None:
-    target, _project = _real_project(tmp_path, "real-fresh")
-    result = _run_real_installer(tmp_path, target)
-    assert result.returncode == 0, result.stderr
-    assert _env(target)["AGENT_WORKER_RESOURCE_LIMITS_MODE"] == "default"
-    before = (target / ".env").read_bytes()
-    result = _run_real_installer(tmp_path, target)
-    assert result.returncode == 0, result.stderr
-    assert (target / ".env").read_bytes() == before
+    target, project = _real_project(tmp_path, "real-fresh")
+    try:
+        result = _run_real_installer(tmp_path, target)
+        assert result.returncode == 0, result.stderr
+        assert _env(target)["AGENT_WORKER_RESOURCE_LIMITS_MODE"] == "default"
+        before = (target / ".env").read_bytes()
+        result = _run_real_installer(tmp_path, target)
+        assert result.returncode == 0, result.stderr
+        assert (target / ".env").read_bytes() == before
+    finally:
+        _cleanup_project(target, project)
 
 
 @pytest.mark.parametrize("document", ["max_concurrency: 11\n", "max_code_concurrency: 1\n"])
@@ -153,14 +172,14 @@ def test_installer_real_control_volume_rejects_default_without_writing(
     (target / "worker.yaml").write_text("max_concurrency: 10\n", encoding="utf-8")
     (target / ".env").write_text("AGENT_WORKER_IMAGE=old\n", encoding="utf-8")
     before_compose = (target / "docker-compose.yaml").read_bytes()
-    volume = _write_control_volume(project, document)
+    _write_control_volume(project, document)
     try:
         result = _run_real_installer(tmp_path, target)
         assert result.returncode == 1 and "测量 envelope" in result.stderr
         assert (target / ".env").read_bytes() == b"AGENT_WORKER_IMAGE=old\n"
         assert (target / "docker-compose.yaml").read_bytes() == before_compose
     finally:
-        subprocess.run(["docker", "volume", "rm", "-f", volume], capture_output=True)
+        _cleanup_project(target, project)
 
 
 def test_installer_real_control_volume_explicit_upgrade_rollback_and_invalid_yaml(
@@ -174,7 +193,7 @@ def test_installer_real_control_volume_explicit_upgrade_rollback_and_invalid_yam
         "AGENT_WORKER_PIDS_LIMIT=256\n",
         encoding="utf-8",
     )
-    volume = _write_control_volume(project, "max_concurrency: 11\n")
+    _write_control_volume(project, "max_concurrency: 11\n")
     try:
         for version in ("0.8.3", "0.8.2"):
             result = _run_real_installer(tmp_path, target, version=version)
@@ -190,7 +209,7 @@ def test_installer_real_control_volume_explicit_upgrade_rollback_and_invalid_yam
         assert (target / ".env").read_bytes() == before_env
         assert (target / "docker-compose.yaml").read_bytes() == before_compose
     finally:
-        subprocess.run(["docker", "volume", "rm", "-f", volume], capture_output=True)
+        _cleanup_project(target, project)
 
 
 MIGRATOR = REPO_ROOT / "scripts/migrate-worker-volumes.sh"
@@ -270,6 +289,7 @@ data = Path("/data")
 (data / "exec-pending").mkdir(parents=True, exist_ok=True)
 config = {{"host_url": "http://127.0.0.1:9", "worker_id": "pending", "work_root": "/var/lib/agent-legion-worker"}}
 (control / "worker.yaml").write_text(json.dumps(config), encoding="utf-8")
+(control / "control_token").write_text("root-owned-control-token\\n", encoding="utf-8")
 (data / "exec-pending/upload_pending.json").write_text(json.dumps({marker!r}), encoding="utf-8")
 for root in (control, data):
     for directory, dirs, files in os.walk(root):
@@ -355,8 +375,8 @@ def _prepare_no_build(tmp_path: Path, form: str) -> tuple[Path, str]:
     return target, project
 
 
-def _run_migrator(target: Path) -> None:
-    subprocess.run(
+def _run_migrator(target: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         [
             "sh",
             str(MIGRATOR),
@@ -369,8 +389,9 @@ def _run_migrator(target: Path) -> None:
             "docker-compose.resolved.yaml",
         ],
         cwd=target,
-        check=True,
+        check=check,
         capture_output=True,
+        text=True,
     )
 
 
@@ -416,15 +437,7 @@ def test_no_build_custom_uid_fresh_starts_and_writes_control_token(
         assert lines[1] == f"{os.getuid()}:{os.getgid()}:600"
         assert "服务: running" in result.stdout
     finally:
-        subprocess.run(
-            ["docker", "compose", "-f", "docker-compose.resolved.yaml", "down"],
-            cwd=target,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["docker", "volume", "rm", "-f", f"{project}_worker-control", f"{project}_worker-data"],
-            capture_output=True,
-        )
+        _cleanup_project(target, project, "docker-compose.resolved.yaml")
 
 
 @pytest.mark.parametrize("key", ["AGENT_WORKER_UID", "AGENT_WORKER_GID"])
@@ -436,24 +449,27 @@ def test_installer_rejects_chown_sentinel_without_partial_application(
     (target / ".env").write_text("AGENT_WORKER_IMAGE=old\n", encoding="utf-8")
     (target / "docker-compose.yaml").write_text("old-compose\n", encoding="utf-8")
     extra_env = {key: "4294967295"} if source == "env" else {}
-    if source == "dotenv":
-        with (target / ".env").open("a", encoding="utf-8") as stream:
-            stream.write(f"{key}=4294967295\n")
-    result = _run_real_installer(tmp_path, target, extra_env=extra_env)
-    assert result.returncode == 1 and "不修改哨兵" in result.stderr
-    assert (target / "docker-compose.yaml").read_bytes() == b"old-compose\n"
-    expected_env = "AGENT_WORKER_IMAGE=old\n"
-    if source == "dotenv":
-        expected_env += f"{key}=4294967295\n"
-    assert (target / ".env").read_text(encoding="utf-8") == expected_env
-    volumes = subprocess.run(
-        ["docker", "volume", "ls", "--format", "{{.Name}}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.splitlines()
-    assert f"{project}_worker-control" not in volumes
-    assert f"{project}_worker-data" not in volumes
+    try:
+        if source == "dotenv":
+            with (target / ".env").open("a", encoding="utf-8") as stream:
+                stream.write(f"{key}=4294967295\n")
+        result = _run_real_installer(tmp_path, target, extra_env=extra_env)
+        assert result.returncode == 1 and "不修改哨兵" in result.stderr
+        assert (target / "docker-compose.yaml").read_bytes() == b"old-compose\n"
+        expected_env = "AGENT_WORKER_IMAGE=old\n"
+        if source == "dotenv":
+            expected_env += f"{key}=4294967295\n"
+        assert (target / ".env").read_text(encoding="utf-8") == expected_env
+        volumes = subprocess.run(
+            ["docker", "volume", "ls", "--format", "{{.Name}}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.splitlines()
+        assert f"{project}_worker-control" not in volumes
+        assert f"{project}_worker-data" not in volumes
+    finally:
+        _cleanup_project(target, project)
 
 
 def test_pending_upload_restores_and_delivers_after_volume_migration(tmp_path: Path) -> None:
@@ -574,15 +590,7 @@ assert not (work / "exec-pending").exists()
         assert "exec-pending/result" in evidence.stdout
     finally:
         subprocess.run(["docker", "rm", "-f", server], capture_output=True)
-        subprocess.run(
-            ["docker", "compose", "-f", "docker-compose.resolved.yaml", "down"],
-            cwd=target,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["docker", "volume", "rm", "-f", f"{project}_worker-control", f"{project}_worker-data"],
-            capture_output=True,
-        )
+        _cleanup_project(target, project, "docker-compose.resolved.yaml")
 
 
 def test_legacy_root_compose_rollback_does_not_create_or_migrate_volumes(tmp_path: Path) -> None:
@@ -592,14 +600,153 @@ def test_legacy_root_compose_rollback_does_not_create_or_migrate_volumes(tmp_pat
         compose.replace("    user: ${AGENT_WORKER_UID:-10001}:${AGENT_WORKER_GID:-10001}\n", ""),
         encoding="utf-8",
     )
-    result = _run_real_installer(tmp_path, target)
-    assert result.returncode == 0, result.stderr
-    assert "旧 root Compose 无需 UID 卷迁移" in result.stdout
-    volumes = subprocess.run(
-        ["docker", "volume", "ls", "--format", "{{.Name}}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.splitlines()
-    assert f"{project}_worker-control" not in volumes
-    assert f"{project}_worker-data" not in volumes
+    try:
+        result = _run_real_installer(tmp_path, target)
+        assert result.returncode == 0, result.stderr
+        assert "旧 root Compose 无需 UID 卷迁移" in result.stdout
+        volumes = subprocess.run(
+            ["docker", "volume", "ls", "--format", "{{.Name}}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.splitlines()
+        assert f"{project}_worker-control" not in volumes
+        assert f"{project}_worker-data" not in volumes
+    finally:
+        _cleanup_project(target, project)
+
+
+def test_root_current_to_nonroot_target_starts_and_writes_token(tmp_path: Path) -> None:
+    target, project = _prepare_no_build(tmp_path, "root-current")
+    target_source = tmp_path / "target-nonroot.yaml"
+    target_source.write_text((target / "docker-compose.yaml").read_text(encoding="utf-8"))
+    current = (target / "docker-compose.yaml").read_text(encoding="utf-8")
+    (target / "docker-compose.yaml").write_text(
+        current.replace("    user: ${AGENT_WORKER_UID:-10001}:${AGENT_WORKER_GID:-10001}\n", ""),
+        encoding="utf-8",
+    )
+    try:
+        _seed_pending_upload(project)
+        result = _run_real_installer(tmp_path, target, compose_source=target_source)
+        assert result.returncode == 0, result.stderr
+        _compose(target, "up", "-d")
+        _wait_worker_api(target, "docker-compose.yaml")
+        status = _compose(
+            target,
+            "exec",
+            "-T",
+            "worker",
+            "sh",
+            "-c",
+            "stat -c '%u:%g:%a' /var/lib/agent-legion-worker-control/control_token; workerctl status",
+        )
+        assert status.stdout.splitlines()[0] == f"{os.getuid()}:{os.getgid()}:600"
+        assert "服务: running" in status.stdout
+    finally:
+        _cleanup_project(target, project)
+
+
+def test_nonroot_current_to_legacy_target_rolls_back_without_helper(tmp_path: Path) -> None:
+    target, project = _prepare_no_build(tmp_path, "nonroot-current")
+    legacy_source = tmp_path / "target-root.yaml"
+    current = (target / "docker-compose.yaml").read_text(encoding="utf-8")
+    legacy_source.write_text(
+        current.replace("    user: ${AGENT_WORKER_UID:-10001}:${AGENT_WORKER_GID:-10001}\n", ""),
+        encoding="utf-8",
+    )
+    root_image = f"agent-legion-worker:{project}-root"
+    try:
+        _seed_pending_upload(project)
+        _run_migrator(target)
+        result = _run_real_installer(
+            tmp_path,
+            target,
+            compose_source=legacy_source,
+            migration_source=tmp_path / "helper-does-not-exist",
+        )
+        assert result.returncode == 0, result.stderr
+        assert "旧 root Compose 无需 UID 卷迁移" in result.stdout
+        subprocess.run(
+            ["docker", "build", "-t", root_image, "-f", "-", str(tmp_path)],
+            input="FROM ghcr.io/luciuscao/agent-legion-worker:0.8.2\nUSER 0:0\n",
+            text=True,
+            check=True,
+            capture_output=True,
+        )
+        env_text = (target / ".env").read_text(encoding="utf-8")
+        (target / ".env").write_text(
+            "".join(
+                f"AGENT_WORKER_IMAGE={root_image}\n"
+                if line.startswith("AGENT_WORKER_IMAGE=")
+                else f"{line}\n"
+                for line in env_text.splitlines()
+            ),
+            encoding="utf-8",
+        )
+        _compose(target, "up", "-d")
+        _wait_worker_api(target, "docker-compose.yaml")
+        rollback = _compose(
+            target,
+            "exec",
+            "-T",
+            "worker",
+            "sh",
+            "-c",
+            "id -u; cat /var/lib/agent-legion-worker-control/control_token; workerctl status",
+        )
+        assert rollback.stdout.splitlines()[0] == "0"
+        assert "root-owned-control-token" in rollback.stdout
+        assert "服务: running" in rollback.stdout
+    finally:
+        _cleanup_project(target, project)
+
+
+def test_installer_rejects_changed_volume_identity_before_chown(tmp_path: Path) -> None:
+    target, project = _prepare_no_build(tmp_path, "identity-mismatch")
+    target_source = tmp_path / "target-other-project.yaml"
+    current = (target / "docker-compose.yaml").read_text(encoding="utf-8")
+    target_source.write_text(current.replace(project, f"{project}-other", 1), encoding="utf-8")
+    before = (target / "docker-compose.yaml").read_bytes()
+    try:
+        _seed_pending_upload(project)
+        result = _run_real_installer(tmp_path, target, compose_source=target_source)
+        assert result.returncode == 1 and "身份不一致" in result.stderr
+        assert (target / "docker-compose.yaml").read_bytes() == before
+    finally:
+        _cleanup_project(target, project)
+
+
+@pytest.mark.parametrize("kind", ["bootstrap", "state"])
+def test_direct_migration_rejects_non_0600_worker_yaml_before_chown(
+    tmp_path: Path, kind: str
+) -> None:
+    target, project = _prepare_no_build(tmp_path, f"bad-mode-{kind}")
+    try:
+        _seed_pending_upload(project)
+        if kind == "bootstrap":
+            (target / "worker.yaml").chmod(0o644)
+        else:
+            subprocess.run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--network",
+                    "none",
+                    "--user",
+                    "0:0",
+                    "--entrypoint",
+                    "chmod",
+                    "-v",
+                    f"{project}_worker-control:/control",
+                    "ghcr.io/luciuscao/agent-legion-worker:0.8.2",
+                    "644",
+                    "/control/worker.yaml",
+                ],
+                check=True,
+                capture_output=True,
+            )
+        result = _run_migrator(target, check=False)
+        assert result.returncode == 1 and "0600" in result.stderr
+    finally:
+        _cleanup_project(target, project, "docker-compose.resolved.yaml")
