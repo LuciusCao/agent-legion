@@ -47,6 +47,8 @@ no_network = [
     "/app/data/bin/velites", "sandbox", "wrap", "--cwd", "/tmp", "--", "/bin/true",
 ]
 allow_network = [*no_network[:-4], "--allow-network", *no_network[-4:]]
+launcher = "import ctypes,os,sys; os.environ.clear(); assert ctypes.CDLL(None).prctl(4,1,0,0,0) == 0; os.execvp(sys.argv[1],sys.argv[1:])"
+reset = "import ctypes,os; os.environ.clear(); assert ctypes.CDLL(None).prctl(4,0,0,0,0) == 0; os.execv('/bin/true',['/bin/true'])"
 
 
 def run_case(command):
@@ -54,8 +56,8 @@ def run_case(command):
         result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
         inner = {
             "returncode": result.returncode,
-            "stdout": result.stdout[-2048:],
-            "stderr": result.stderr[-8192:],
+            "stdout": result.stdout[-1024:],
+            "stderr": result.stderr[-4096:],
         }
     except (OSError, subprocess.TimeoutExpired) as exc:
         inner = {"error": f"{type(exc).__name__}: {exc}"}
@@ -73,12 +75,14 @@ if uid != 0:
         "--ro-bind", "/etc", "/etc", "--proc", "/proc", "--", "/bin/true",
     ]
     cases["explicit_userns_no_network"] = run_case(explicit)
+    for name, command in (("allow_network", allow_network), ("no_network", no_network)):
+        cases[f"{name}_dumpable_first"] = run_case([*command[:4], "python3", "-c", launcher, *command[4:-1], "python3", "-c", reset])
 print(json.dumps({"outer": outer, "cases": cases}, sort_keys=True))
 """
 
 
 def _probe(run: Any, uid: str, gid: str) -> dict[str, Any]:
-    output = run.compose(
+    command = (
         "exec",
         "-T",
         "--user",
@@ -89,8 +93,8 @@ def _probe(run: Any, uid: str, gid: str) -> dict[str, Any]:
         _WRAP_PROBE,
         uid,
         gid,
-        capture=True,
     )
+    output = run.compose(*command, capture=True)
     return json.loads(output.strip().splitlines()[-1])
 
 
