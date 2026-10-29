@@ -298,8 +298,7 @@ def seed_measurement_workspaces(
 
 class MeasurementRun:
     def __init__(self, args: argparse.Namespace) -> None:
-        self.args = args
-        self.worker_id = WORKER_ID
+        self.args, self.worker_id = args, WORKER_ID
         self.workspaces = WORKSPACES
         self.work_dir = args.work_dir.resolve()
         self.output_dir = args.output_dir.resolve()
@@ -328,6 +327,8 @@ class MeasurementRun:
             "MEASUREMENT_SKILLS_DIR": str(self.skills_dir),
             "MEASUREMENT_HOST_UID": "0" if platform.system() == "Darwin" else str(os.getuid()),
             "MEASUREMENT_HOST_GID": "0" if platform.system() == "Darwin" else str(os.getgid()),
+            "MEASUREMENT_WORKER_UID": str(os.getuid()),
+            "MEASUREMENT_WORKER_GID": str(os.getgid()),
             "MEASUREMENT_WORKER_CONFIG": str(self.worker_config),
             "MEASUREMENT_MODELS_PATH": str(self.models_path),
             "VELITES_BIN": str(self.velites),
@@ -346,8 +347,7 @@ class MeasurementRun:
         if args.pids_limit is not None:
             self.env["MEASUREMENT_PIDS_LIMIT"] = str(args.pids_limit)
         self.compose_args = ["-f", str(COMPOSE_FILE)]
-        self.cgroup_reader_id = ""
-        self.control_token = ""
+        self.cgroup_reader_id = self.control_token = ""
 
     def compose(self, *arguments: str, capture: bool = False) -> str:
         result = subprocess.run(
