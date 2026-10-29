@@ -307,18 +307,22 @@ def test_wrap_probe_separates_outer_and_inner_bwrap_without_secret_reads() -> No
     from scripts.stress.worker_resource_wrap_evidence import _WRAP_PROBE
 
     assert '"outer": outer' in _WRAP_PROBE
-    assert '"inner_bwrap": inner' in _WRAP_PROBE
+    assert '"cases": cases' in _WRAP_PROBE
     assert "strace" in _WRAP_PROBE
+    assert "trace=clone,clone3," in _WRAP_PROBE
     assert (
         '"/app/data/bin/velites", "sandbox", "wrap", "--cwd", "/tmp", "--", "/bin/true"'
         in _WRAP_PROBE
     )
+    assert 'allow_network = [*no_network[:-4], "--allow-network", *no_network[-4:]]' in _WRAP_PROBE
+    assert 'cases["explicit_userns_no_network"] = run_case(explicit)' in _WRAP_PROBE
+    assert "if uid != 0:" in _WRAP_PROBE
     for key in ("CapEff", "CapPrm", "CapBnd", "NoNewPrivs"):
         assert key in _WRAP_PROBE
     for namespace in ("user", "pid", "net", "mnt"):
         assert namespace in _WRAP_PROBE
     assert "app_armor_current" in _WRAP_PROBE
-    assert "result.stderr[-16384:]" in _WRAP_PROBE
+    assert "result.stderr[-8192:]" in _WRAP_PROBE
     for forbidden in (
         "docker inspect",
         "models.json",
@@ -344,15 +348,30 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
     def compose(*arguments: str, **kwargs: object) -> str:
         assert kwargs == {"capture": True}
         calls.append(arguments)
-        return '{"outer": {}, "inner_bwrap": {}}' if "python3" in arguments else ""
+        return '{"outer": {}, "cases": {}}' if "python3" in arguments else ""
 
     run = SimpleNamespace(
         compose=compose,
         env={"MEASUREMENT_WORKER_UID": "501", "MEASUREMENT_WORKER_GID": "20"},
     )
-    assert _wrap_evidence(run) == {"outer": {}, "inner_bwrap": {}}
+    assert _wrap_evidence(run) == {
+        "root": {"outer": {}, "cases": {}},
+        "nonroot": {"outer": {}, "cases": {}},
+    }
     assert calls == [
         ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT),
+        (
+            "exec",
+            "-T",
+            "--user",
+            "0:0",
+            "worker",
+            "python3",
+            "-c",
+            _WRAP_PROBE,
+            "0",
+            "0",
+        ),
         (
             "exec",
             "-T",

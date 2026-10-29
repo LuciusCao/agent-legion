@@ -41,29 +41,43 @@ outer = {
     },
     "app_armor_current": read("/proc/self/attr/current").strip(),
 }
-command = [
-    "strace", "-f", "-e",
-    "trace=capset,unshare,setuid,setgid,prctl,mount,umount2,setns,socket,bind,sendto,recvmsg",
+trace = "trace=clone,clone3,capset,unshare,setuid,setgid,prctl,mount,umount2,setns,socket,bind,sendto,recvmsg"
+no_network = [
+    "strace", "-f", "-e", trace,
     "/app/data/bin/velites", "sandbox", "wrap", "--cwd", "/tmp", "--", "/bin/true",
 ]
-try:
-    result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
-    inner = {
-        "returncode": result.returncode,
-        "stdout": result.stdout[-2048:],
-        "stderr": result.stderr[-16384:],
-    }
-except (OSError, subprocess.TimeoutExpired) as exc:
-    inner = {"error": f"{type(exc).__name__}: {exc}"}
-inner["command"] = command
-print(json.dumps({"outer": outer, "inner_bwrap": inner}, sort_keys=True))
+allow_network = [*no_network[:-4], "--allow-network", *no_network[-4:]]
+
+
+def run_case(command):
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+        inner = {
+            "returncode": result.returncode,
+            "stdout": result.stdout[-2048:],
+            "stderr": result.stderr[-8192:],
+        }
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        inner = {"error": f"{type(exc).__name__}: {exc}"}
+    inner["command"] = command
+    return inner
+
+
+cases = {"allow_network": run_case(allow_network), "no_network": run_case(no_network)}
+if uid != 0:
+    explicit = [
+        "strace", "-f", "-e", trace, "bwrap", "--die-with-parent",
+        "--unshare-user", "--unshare-pid", "--unshare-net",
+        "--ro-bind", "/usr", "/usr", "--ro-bind", "/lib", "/lib",
+        "--ro-bind-try", "/lib64", "/lib64", "--ro-bind", "/bin", "/bin",
+        "--ro-bind", "/etc", "/etc", "--proc", "/proc", "--", "/bin/true",
+    ]
+    cases["explicit_userns_no_network"] = run_case(explicit)
+print(json.dumps({"outer": outer, "cases": cases}, sort_keys=True))
 """
 
 
-def _wrap_evidence(run: Any) -> dict[str, Any]:
-    uid = run.env["MEASUREMENT_WORKER_UID"]
-    gid = run.env["MEASUREMENT_WORKER_GID"]
-    run.compose("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT, capture=True)
+def _probe(run: Any, uid: str, gid: str) -> dict[str, Any]:
     output = run.compose(
         "exec",
         "-T",
@@ -78,3 +92,10 @@ def _wrap_evidence(run: Any) -> dict[str, Any]:
         capture=True,
     )
     return json.loads(output.strip().splitlines()[-1])
+
+
+def _wrap_evidence(run: Any) -> dict[str, Any]:
+    uid = run.env["MEASUREMENT_WORKER_UID"]
+    gid = run.env["MEASUREMENT_WORKER_GID"]
+    run.compose("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT, capture=True)
+    return {"root": _probe(run, "0", "0"), "nonroot": _probe(run, uid, gid)}
