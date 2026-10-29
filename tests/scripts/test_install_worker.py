@@ -476,25 +476,20 @@ def _migrator_image_probe(
     log = tmp_path / "image-probe.log"
     (fake_bin / "docker").write_text(
         f"#!{sys.executable}\n"
-        "import os,sys\n"
+        "import json,os,sys\n"
         "args = sys.argv[1:]\n"
         "with open(os.environ['FAKE_DOCKER_LOG'], 'a', encoding='utf-8') as stream:\n"
         "    stream.write(' '.join(args) + '\\n')\n"
         "if 'config' in args and '--format' in args:\n"
-        '    print(\'{"services":{"worker":{"volumes":[]}},"volumes":{}}\')\n'
-        "    raise SystemExit(0)\n"
-        "if 'config' in args and '--images' in args:\n"
-        "    if args[-2:] != ['--images', 'worker']:\n"
-        "        print('host-image\\nworker-image')\n"
-        "        raise SystemExit(0)\n"
         "    mode = os.environ['FAKE_IMAGES_MODE']\n"
         "    if mode == 'fail':\n"
         "        print('image lookup failed', file=sys.stderr)\n"
         "        raise SystemExit(7)\n"
-        "    if mode == 'multiple':\n"
-        "        print('worker-image\\nother-image')\n"
-        "    elif mode == 'single':\n"
-        "        print('worker-image')\n"
+        "    worker = {'image': 'worker-image', 'volumes': []}\n"
+        "    if mode == 'empty':\n"
+        "        worker['image'] = ''\n"
+        "    services = {} if mode == 'missing' else {'worker': worker}\n"
+        "    print(json.dumps({'services': services, 'volumes': {}}))\n"
         "    raise SystemExit(0)\n"
         "raise SystemExit(1 if args[0] == 'run' else 0)\n",
         encoding="utf-8",
@@ -534,15 +529,13 @@ def test_migrator_without_override_selects_only_worker_image(
     assert (len(services) > 1) == (compose_name == "compose.host.yaml")
     result, log = _migrator_image_probe(tmp_path, compose_file)
     assert result.returncode == 1 and "无法解析两个 named volumes" in result.stderr
-    assert "config --images worker" in log
+    assert "config --images" not in log
     assert "python3 worker-image -c" in log
     assert "python3 host-image -c" not in log
 
 
-@pytest.mark.parametrize("mode", ["empty", "multiple", "fail"])
-def test_migrator_rejects_failed_or_non_unique_worker_image_lookup(
-    tmp_path: Path, mode: str
-) -> None:
+@pytest.mark.parametrize("mode", ["empty", "missing", "fail"])
+def test_migrator_rejects_failed_or_missing_worker_image_lookup(tmp_path: Path, mode: str) -> None:
     result, log = _migrator_image_probe(
         tmp_path, REPO_ROOT / "deploy/compose.worker.standalone.yaml", mode
     )
@@ -551,4 +544,62 @@ def test_migrator_rejects_failed_or_non_unique_worker_image_lookup(
     if mode == "fail":
         assert "image lookup failed" in result.stderr
     else:
-        assert "唯一非空 Worker 镜像" in result.stderr
+        assert "精确解析 Worker 镜像" in result.stderr
+
+
+@pytest.mark.skipif(
+    os.environ.get("AGENT_LEGION_DOCKER_TESTS") != "1",
+    reason="真实 Compose CLI 契约需 AGENT_LEGION_DOCKER_TESTS=1",
+)
+@pytest.mark.parametrize("compose_name", ["compose.host.yaml", "compose.worker.standalone.yaml"])
+def test_migrator_uses_worker_image_from_real_compose_cli(
+    tmp_path: Path, compose_name: str
+) -> None:
+    compose_file = REPO_ROOT / "deploy" / compose_name
+    resolved = subprocess.run(
+        ["docker", "compose", "-f", str(compose_file), "config", "--format", "json"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    expected = yaml.safe_load(resolved.stdout)["services"]["worker"]["image"]
+    fake_bin = tmp_path / "real-compose-bin"
+    fake_bin.mkdir()
+    run_log = tmp_path / "docker-run.log"
+    (fake_bin / "docker").write_text(
+        f"#!{sys.executable}\n"
+        "import os,sys\n"
+        "if sys.argv[1] == 'run':\n"
+        "    with open(os.environ['FAKE_DOCKER_RUN_LOG'], 'a', encoding='utf-8') as stream:\n"
+        "        stream.write(' '.join(sys.argv[2:]) + '\\n')\n"
+        "    raise SystemExit(1)\n"
+        "env = os.environ.copy()\n"
+        "env['PATH'] = os.environ['REAL_PATH']\n"
+        "os.execvpe('docker', ['docker', *sys.argv[1:]], env)\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "docker").chmod(0o755)
+    result = subprocess.run(
+        [
+            "sh",
+            str(REPO_ROOT / "scripts/migrate-worker-volumes.sh"),
+            "--uid",
+            "501",
+            "--gid",
+            "20",
+            "--",
+            "-f",
+            str(compose_file),
+        ],
+        env=os.environ
+        | {
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "REAL_PATH": os.environ["PATH"],
+            "FAKE_DOCKER_RUN_LOG": str(run_log),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1 and "无法解析两个 named volumes" in result.stderr
+    assert f"--entrypoint python3 {expected} -c" in run_log.read_text(encoding="utf-8")
