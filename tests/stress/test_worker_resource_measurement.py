@@ -334,6 +334,9 @@ def test_wrap_probe_separates_outer_and_inner_bwrap_without_secret_reads() -> No
         in _WRAP_PROBE
     )
     assert "prctl(4,1,0,0,0)" in _WRAP_PROBE
+    assert "raise SystemExit(subprocess.run(sys.argv[1:], check=False).returncode)" in _WRAP_PROBE
+    assert "os.execvp" not in _WRAP_PROBE
+    assert _WRAP_PROBE.count("os.execv(") == 1
     assert "prctl(4,0,0,0,0)" in _WRAP_PROBE
     assert "os.execv('/bin/true',['/bin/true'])" in _WRAP_PROBE
     assert _WRAP_PROBE.count("os.environ") == 2

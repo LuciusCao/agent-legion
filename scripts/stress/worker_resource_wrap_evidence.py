@@ -47,7 +47,7 @@ no_network = [
     "/app/data/bin/velites", "sandbox", "wrap", "--cwd", "/tmp", "--", "/bin/true",
 ]
 allow_network = [*no_network[:-4], "--allow-network", *no_network[-4:]]
-launcher = "import ctypes,os,sys; os.environ.clear(); assert ctypes.CDLL(None).prctl(4,1,0,0,0) == 0; os.execvp(sys.argv[1],sys.argv[1:])"
+launcher = "import ctypes,os,subprocess,sys; os.environ.clear(); assert ctypes.CDLL(None).prctl(4,1,0,0,0) == 0; raise SystemExit(subprocess.run(sys.argv[1:], check=False).returncode)"
 reset = "import ctypes,os; os.environ.clear(); assert ctypes.CDLL(None).prctl(4,0,0,0,0) == 0; os.execv('/bin/true',['/bin/true'])"
 
 
