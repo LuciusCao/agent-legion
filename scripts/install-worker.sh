@@ -200,8 +200,8 @@ esac
 case "$WORKER_GID_FINAL" in
   ''|0|0*|*[!0-9]*) die "AGENT_WORKER_GID 必须是无前导零的非 root 数值 GID" ;;
 esac
-[ "$WORKER_UID_FINAL" -le 4294967295 ] || die "AGENT_WORKER_UID 超出数值范围"
-[ "$WORKER_GID_FINAL" -le 4294967295 ] || die "AGENT_WORKER_GID 超出数值范围"
+[ "$WORKER_UID_FINAL" -le 4294967294 ] || die "AGENT_WORKER_UID 超出数值范围（4294967295 是 chown 不修改哨兵）"
+[ "$WORKER_GID_FINAL" -le 4294967294 ] || die "AGENT_WORKER_GID 超出数值范围（4294967295 是 chown 不修改哨兵）"
 
 echo "==> 安装目录: $TARGET"
 echo "==> 运行身份: ${WORKER_UID_FINAL}:${WORKER_GID_FINAL}（HOME=/home/agent-worker）"
@@ -417,32 +417,25 @@ if [ "$compose_new" = 0 ] && [ -n "$env_image_now" ] && [ "$env_image_now" != "$
   die "compose 拉取失败（ref ${COMPOSE_REF}）且本次为版本变更（${env_image_now} → ${WORKER_VERSION}）：保留旧编排而刷新 .env 会制造镜像×编排混合态，已中止。确认 worker-v${WORKER_VERSION} tag 已发布后重跑"
 fi
 
-# 跨进程迁移前先停写者并重验状态；helper 只挂两个 named volumes，不接触宿主 bind 树。
-if ! docker compose -f "$compose_for_resolution" stop worker >"$TMPDIR_/migration-stop.log" 2>&1; then
-  die "停止 Worker 失败，未迁移卷、未提交 compose/.env：$(tail -1 "$TMPDIR_/migration-stop.log")"
+if grep -q 'user: ${AGENT_WORKER_UID' "$compose_for_resolution"; then
+  # helper 与 compose 使用同一固定 ref；未备妥前不得迁移或提交。
+  MIGRATION_URL="${REPO_RAW_BASE}/${COMPOSE_REF}/scripts/migrate-worker-volumes.sh"
+  if ! curl -fsSL -o "$TMPDIR_/migrate-worker-volumes.sh" "$MIGRATION_URL"; then
+    die "拉取一次性卷迁移 helper 失败（ref ${COMPOSE_REF}），未迁移或修改 compose/.env"
+  fi
+  sh -n "$TMPDIR_/migrate-worker-volumes.sh" || die "下载的卷迁移 helper 语法校验失败"
+  # 共用 helper 再做控制副本/挂载资产预检、stop+running 重验与两卷递归迁移。
+  if ! AGENT_WORKER_UID="$WORKER_UID_FINAL" AGENT_WORKER_GID="$WORKER_GID_FINAL" \
+    sh "$TMPDIR_/migrate-worker-volumes.sh" \
+    --uid "$WORKER_UID_FINAL" --gid "$WORKER_GID_FINAL" \
+    --image "${IMAGE_REPO}:${WORKER_VERSION}" --preflight-complete -- \
+    -f "$compose_for_resolution" >"$TMPDIR_/migration.log" 2>&1; then
+    die "named-volume 属主迁移失败，未提交 compose/.env；旧 root 容器仍可读取卷，请按日志修复后重跑：$(tail -1 "$TMPDIR_/migration.log")"
+  fi
+  echo "==> worker-control/worker-data 已递归迁移到 ${WORKER_UID_FINAL}:${WORKER_GID_FINAL}（内容与 mode 不变）"
+else
+  echo "==> 旧 root Compose 无需 UID 卷迁移；保留现有卷直接回滚"
 fi
-running_workers="$(docker compose -f "$compose_for_resolution" ps --status running -q worker 2>"$TMPDIR_/migration-ps.err")" || die "无法重验 Worker 停止状态，未迁移卷、未提交 compose/.env：$(tail -1 "$TMPDIR_/migration-ps.err")"
-[ -z "$running_workers" ] || die "Worker 仍在运行（${running_workers}），拒绝并发 chown；未提交 compose/.env"
-if ! docker run --rm --network none --user 0:0 --entrypoint python3 \
-  -v "$control_volume:/var/lib/agent-legion-worker-control" \
-  -v "$data_volume:/var/lib/agent-legion-worker" \
-  "${IMAGE_REPO}:${WORKER_VERSION}" -c \
-  'import os,stat,sys
-uid,gid = (int(value) for value in sys.argv[1:])
-def migrate(path):
-    mode = os.lstat(path).st_mode
-    os.chown(path, uid, gid, follow_symlinks=False)
-    if stat.S_ISDIR(mode):
-        with os.scandir(path) as entries:
-            for entry in entries:
-                migrate(entry.path)
-for root in ("/var/lib/agent-legion-worker-control", "/var/lib/agent-legion-worker"):
-    migrate(root)
-print("worker named-volume ownership migrated")' \
-  "$WORKER_UID_FINAL" "$WORKER_GID_FINAL" >"$TMPDIR_/migration.log" 2>&1; then
-  die "named-volume 属主迁移失败，未提交 compose/.env；旧 root 容器仍可读取卷，请按日志修复后重跑：$(tail -1 "$TMPDIR_/migration.log")"
-fi
-echo "==> worker-control/worker-data 已递归迁移到 ${WORKER_UID_FINAL}:${WORKER_GID_FINAL}（内容与 mode 不变）"
 
 # ---- 2a. compose 文件 ----
 if [ "$compose_new" = 1 ]; then

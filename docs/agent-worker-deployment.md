@@ -325,15 +325,24 @@ Worker 镜像和三份基础 Compose 默认以数值 `10001:10001` 运行，`HOM
 
 fresh 与 root-owned 存量升级共用一次性迁移：全部下载、权威控制副本解析和宿主预检通过后，安装器先 `stop worker` 并重验没有 running worker，再用 `--user 0:0 --network none` 的短生命周期容器仅挂载实际 Compose 解析出的 `worker-control`、`worker-data` 两个 named volumes，递归 chown 到目标 UID/GID，不跟随 symlink。它不是常驻 root entrypoint，也不挂载或递归处理安装目录。fresh 缺卷在这一步创建并赋属主；镜像挂载点的 `.volume-keep` 让卷首次初始化后保持非空，避免 Docker 后续 copy-up 重置 owner。存量卷只改 owner，不清卷、不改既有业务文件的内容与 mode，bootstrap/control/register tokens、日志、evidence、metrics、tombstone 和 pending upload 均保留。停止或重验失败、路径不安全、secret UID/mode 不满足约束时，不提交新 Compose/.env。
 
-仓库 Compose 不走 standalone installer：fresh 的 build args 与运行 UID/GID 同源，无需额外迁移；root-owned 存量卷先 `docker compose -f <实际文件> stop worker` 并确认 `ps --status running -q worker` 无输出，再从 `docker compose config --format json` 取两个实际卷名，执行下列一次性 helper（替换卷名与 UID/GID），最后 `up -d --build`。Host stack 的 project/卷名与 standalone 不同，不要硬编码互用。
+不使用 installer 的 no-build 形态必须在**首次 up 前**运行同一个 `scripts/migrate-worker-volumes.sh`，否则 registry 镜像仍按构建 UID 初始化卷，自定义运行 UID 会在写 `control_token` 时失败。standalone 直接用户在安装目录准备 0600 的 `worker.yaml` / `models.json` 后执行（版本 ref 与镜像一致）：
 
 ```bash
-docker run --rm --network none --user 0:0 --entrypoint sh \
-  -v <project>_worker-control:/var/lib/agent-legion-worker-control \
-  -v <project>_worker-data:/var/lib/agent-legion-worker \
-  agent-legion-worker:local \
-  -c 'chown -R 10001:10001 /var/lib/agent-legion-worker-control /var/lib/agent-legion-worker'
+curl -fsSL https://raw.githubusercontent.com/LuciusCao/agent-legion/worker-v<版本>/scripts/migrate-worker-volumes.sh \
+  | sh -s -- --uid <UID> --gid <GID> -- -f docker-compose.yaml
+docker compose up -d
 ```
+
+仓库 base+pull 或 zero-runtime+pull 在仓库根执行（zero-runtime 另在 `pull` 前插入 `-f deploy/compose.worker.zero-runtime.yaml`）：
+
+```bash
+sh scripts/migrate-worker-volumes.sh --uid <UID> --gid <GID> -- \
+  -f deploy/compose.worker.yaml -f deploy/compose.worker.pull.example.yaml
+docker compose -f deploy/compose.worker.yaml \
+  -f deploy/compose.worker.pull.example.yaml up -d
+```
+
+本地 build 的 fresh 因 build args 与运行 UID/GID 同源，无需额外迁移；root-owned 存量与所有 no-build/custom UID 都走同一 helper。它按实际 Compose config 解析卷名与挂载点，先校验控制副本、custom 路径、secret 与 binary，stop 并重验后才 chown。UID/GID 必须是非零且不超过 `4294967294`（`4294967295` 是 chown 的不修改哨兵）。Host stack 的 project/卷名与 standalone 不同，不要硬编码互用。
 
 回滚使用同一个安装器指定旧版本：`./scripts/install-worker.sh --version <旧版本>`。脚本按旧 `worker-v<旧版本>` tag 恢复旧 Compose 与旧 root 镜像；root 能读取非 root-owned 的 0600 文件，两个卷和 pending upload 原样保留。也可在仓库部署中恢复旧 Compose/image 后 `docker compose up -d`。**不要执行 `docker compose down -v`、删除 named volumes 或清空 work/state 目录来“修复”属主或回滚**；Host/Worker 版本回滚顺序仍遵守 §5 的协议兼容要求。
 

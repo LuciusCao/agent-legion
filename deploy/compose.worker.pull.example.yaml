@@ -11,6 +11,10 @@
 #
 # 固定版本 tag 时 compose 默认 pull 策略（missing）即可；若固定 latest 追新，
 # 需另加 pull_policy: always，否则本机已有镜像不会更新。
+# 自定义 UID/GID 或 root-owned 存量卷：首次 up 前先运行
+# scripts/migrate-worker-volumes.sh（base+pull/zero-runtime 共用同一入口），
+# 让两个 named volumes 在实际挂载点完成一次性属主迁移；详见
+# docs/agent-worker-deployment.md「Worker 非 root 身份与 named-volume 迁移」。
 services:
   worker:
     # !reset 清掉基础文件的 build 段（compose v2.24+ 语义）：up 一律使用

@@ -122,6 +122,7 @@ def _run_installer(
         '  [ "${FAKE_CONTROL_VOLUME_PRESENT:-0}" = 1 ] && printf "%s\\n" agent-legion-worker_worker-control\n'
         "  exit 0\n"
         "fi\n"
+        'if [ "$1" = compose ] && [ "${5:-}" = --images ]; then printf "%s\\n" ghcr.io/luciuscao/agent-legion-worker:0.8.2; exit 0; fi\n'
         'if [ "$1" = compose ] && [ "${4:-}" = stop ]; then\n'
         '  [ "${FAKE_STOP_FAIL:-0}" = 0 ]; exit $?\n'
         "fi\n"
@@ -146,6 +147,7 @@ def _run_installer(
         "done\n"
         'case "$url" in\n'
         '  */deploy/compose.worker.standalone.yaml) cp "$FAKE_COMPOSE" "$out" ;;\n'
+        '  */scripts/migrate-worker-volumes.sh) cp "$FAKE_MIGRATION" "$out" ;;\n'
         "  *) exit 1 ;;\n"
         "esac\n",
         encoding="utf-8",
@@ -167,6 +169,7 @@ def _run_installer(
             "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
             "FAKE_DOCKER_LOG": str(tmp_path / "docker.log"),
             "FAKE_COMPOSE": str(REPO_ROOT / "deploy/compose.worker.standalone.yaml"),
+            "FAKE_MIGRATION": str(REPO_ROOT / "scripts/migrate-worker-volumes.sh"),
             "FAKE_WORKER_YAML": str(target / "worker.yaml"),
             "FAKE_CONTROL_YAML": str(target / "control-worker.yaml"),
             "FAKE_PYTHON": sys.executable,
@@ -437,16 +440,15 @@ def test_installer_allows_custom_paths_covered_by_recursive_volume_migration(
         ({"FAKE_MIGRATION_FAIL": "1"}, "属主迁移失败"),
     ],
 )
-def test_installer_migration_failures_do_not_commit_compose_or_env(
-    tmp_path: Path, failure_env: dict[str, str], message: str
-) -> None:
+def test_installer_migration_failures_do_not_commit_compose_or_env(tmp_path, failure_env, message):
     target = _target(tmp_path, "migration-failure")
     (target / ".env").write_text("AGENT_WORKER_IMAGE=old\n", encoding="utf-8")
-    (target / "docker-compose.yaml").write_text("old-compose\n", encoding="utf-8")
+    compose_path = target / "docker-compose.yaml"
+    compose_path.write_text("old-compose\n  user: ${AGENT_WORKER_UID}\n", encoding="utf-8")
     result = _run_installer(tmp_path, target, extra_env=failure_env)
     assert result.returncode == 1 and message in result.stderr
     assert (target / ".env").read_bytes() == b"AGENT_WORKER_IMAGE=old\n"
-    assert (target / "docker-compose.yaml").read_bytes() == b"old-compose\n"
+    assert compose_path.read_bytes() == b"old-compose\n  user: ${AGENT_WORKER_UID}\n"
 
 
 def test_installer_rejects_group_writable_mount_parent_before_commit(tmp_path: Path) -> None:
@@ -523,6 +525,7 @@ def _run_real_nonroot_installer(tmp_path: Path, target: Path) -> subprocess.Comp
         "done\n"
         'case "$url" in\n'
         '  */deploy/compose.worker.standalone.yaml) cp "$FAKE_COMPOSE" "$out" ;;\n'
+        '  */scripts/migrate-worker-volumes.sh) cp "$FAKE_MIGRATION" "$out" ;;\n'
         "  *) exit 1 ;;\n"
         "esac\n",
         encoding="utf-8",
@@ -535,6 +538,7 @@ def _run_real_nonroot_installer(tmp_path: Path, target: Path) -> subprocess.Comp
         {
             "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
             "FAKE_COMPOSE": str(target / "docker-compose.yaml"),
+            "FAKE_MIGRATION": str(REPO_ROOT / "scripts/migrate-worker-volumes.sh"),
             "AGENT_WORKER_VERSION": "0.8.2",
             "AGENT_WORKER_COMPOSE_REF": "test-ref",
         }
@@ -548,9 +552,7 @@ def _run_real_nonroot_installer(tmp_path: Path, target: Path) -> subprocess.Comp
     )
 
 
-def _compose(
-    target: Path, *args: str, compose: str = "docker-compose.yaml", check: bool = True
-) -> subprocess.CompletedProcess[str]:
+def _compose(target: Path, *args: str, compose="docker-compose.yaml", check=True):
     return subprocess.run(
         ["docker", "compose", "-f", compose, *args],
         cwd=target,
@@ -678,10 +680,9 @@ def test_installer_real_nonroot_migration_service_and_rollback(
     try:
         result = _run_real_nonroot_installer(tmp_path, target)
         assert result.returncode == 0, result.stderr
-        assert (target / "worker.yaml").stat().st_mode & 0o777 == 0o600
-        assert (target / "velites-config/models.json").stat().st_mode & 0o777 == 0o600
-        assert (target / "worker.yaml").stat().st_uid == os.getuid()
-        assert (target / "velites-config/models.json").stat().st_uid == os.getuid()
+        secrets = (target / "worker.yaml", target / "velites-config/models.json")
+        assert {path.stat().st_mode & 0o777 for path in secrets} == {0o600}
+        assert {path.stat().st_uid for path in secrets} == {os.getuid()}
         _compose(target, "up", "-d")
         _wait_worker_api(target)
         identity = _compose(
@@ -700,7 +701,7 @@ def test_installer_real_nonroot_migration_service_and_rollback(
         ]
         status = _compose(target, "exec", "-T", "worker", "workerctl", "status")
         assert "服务: running" in status.stdout
-        models = _compose(
+        _compose(
             target,
             "exec",
             "-T",
@@ -712,7 +713,6 @@ def test_installer_real_nonroot_migration_service_and_rollback(
             "assert not errors, errors; "
             "assert effective == [{'runtime': 'velites', 'provider': 'stub', 'model': 'nonroot-ok'}], effective",
         )
-        assert models.returncode == 0
         _assert_volume_tree_owned(project, nonroot_worker_image, os.getuid(), os.getgid())
         if root_owned:
             token = _compose(
