@@ -309,15 +309,81 @@ def test_wrap_probe_separates_outer_and_inner_bwrap_without_secret_reads() -> No
     assert '"outer": outer' in _WRAP_PROBE
     assert '"inner_bwrap": inner' in _WRAP_PROBE
     assert "strace" in _WRAP_PROBE
-    assert '"/app/data/bin/velites", "sandbox", "wrap"' in _WRAP_PROBE
+    assert (
+        '"/app/data/bin/velites", "sandbox", "wrap", "--cwd", "/tmp", "--", "/bin/true"'
+        in _WRAP_PROBE
+    )
     for key in ("CapEff", "CapPrm", "CapBnd", "NoNewPrivs"):
         assert key in _WRAP_PROBE
     for namespace in ("user", "pid", "net", "mnt"):
         assert namespace in _WRAP_PROBE
     assert "app_armor_current" in _WRAP_PROBE
     assert "result.stderr[-16384:]" in _WRAP_PROBE
-    for forbidden in ("docker inspect", "models.json", "control_token", "os.environ", "ptrace"):
+    for forbidden in (
+        "docker inspect",
+        "models.json",
+        "control_token",
+        "os.environ",
+        "ptrace",
+        "os.setuid",
+        "os.setgid",
+        "apt-get",
+    ):
         assert forbidden not in _WRAP_PROBE
+
+
+def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() -> None:
+    from scripts.stress.worker_resource_wrap_evidence import (
+        _STRACE_SUPPORT,
+        _WRAP_PROBE,
+        _wrap_evidence,
+    )
+
+    calls = []
+
+    def compose(*arguments: str, **kwargs: object) -> str:
+        assert kwargs == {"capture": True}
+        calls.append(arguments)
+        return '{"outer": {}, "inner_bwrap": {}}' if "python3" in arguments else ""
+
+    run = SimpleNamespace(
+        compose=compose,
+        env={"MEASUREMENT_WORKER_UID": "501", "MEASUREMENT_WORKER_GID": "20"},
+    )
+    assert _wrap_evidence(run) == {"outer": {}, "inner_bwrap": {}}
+    assert calls == [
+        ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT),
+        (
+            "exec",
+            "-T",
+            "--user",
+            "501:20",
+            "worker",
+            "python3",
+            "-c",
+            _WRAP_PROBE,
+            "501",
+            "20",
+        ),
+    ]
+
+
+def test_wrap_evidence_preserves_support_install_failure() -> None:
+    from scripts.stress.worker_resource_wrap_evidence import _STRACE_SUPPORT, _wrap_evidence
+
+    calls = []
+
+    def compose(*arguments: str, **_kwargs: object) -> str:
+        calls.append(arguments)
+        raise RuntimeError("support install failed")
+
+    run = SimpleNamespace(
+        compose=compose,
+        env={"MEASUREMENT_WORKER_UID": "501", "MEASUREMENT_WORKER_GID": "20"},
+    )
+    with pytest.raises(RuntimeError, match="support install failed"):
+        _wrap_evidence(run)
+    assert calls == [("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT)]
 
 
 def test_installer_apparmor_override_is_explicitly_test_only() -> None:

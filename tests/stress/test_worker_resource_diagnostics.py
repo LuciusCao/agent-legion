@@ -385,7 +385,12 @@ def test_runtime_evidence_uses_actual_compose_identity_and_allowlisted_inspect(
     monkeypatch.setattr(evidence.subprocess, "run", inspect)
     run = SimpleNamespace(
         compose=compose,
-        env={"MEASUREMENT_HOST_UID": "123", "MEASUREMENT_HOST_GID": "456"},
+        env={
+            "MEASUREMENT_HOST_UID": "123",
+            "MEASUREMENT_HOST_GID": "456",
+            "MEASUREMENT_WORKER_UID": "501",
+            "MEASUREMENT_WORKER_GID": "20",
+        },
         secrets=["secret"],
     )
     evidence.write_host_code_runtime_evidence(run, tmp_path)
@@ -400,7 +405,10 @@ def test_runtime_evidence_uses_actual_compose_identity_and_allowlisted_inspect(
     assert "setuid_strace" in document["containers"]["host"]
     assert "setuid_strace" not in document["containers"]["worker"]
     exec_calls = [call for call in calls if call[0] == "exec"]
-    assert exec_calls[0][3:7] == ("setpriv", "--reuid=123", "--regid=456", "--clear-groups")
+    assert exec_calls[0][3:6] == ("0:0", "worker", "sh")
+    assert exec_calls[1][3:6] == ("501:20", "worker", "python3")
+    host_exec = next(call for call in exec_calls if call[2] == "host")
+    assert host_exec[3:7] == ("setpriv", "--reuid=123", "--regid=456", "--clear-groups")
     worker_exec = next(call for call in exec_calls if call[2] == "worker")
     assert worker_exec[3] == "python3" and "setpriv" not in worker_exec
 

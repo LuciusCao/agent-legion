@@ -5,8 +5,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+_STRACE_SUPPORT = (
+    "command -v strace || "
+    "(apt-get update -qq && apt-get install -y -qq --no-install-recommends strace)"
+)
+
 _WRAP_PROBE = r"""
-import json, os, stat, subprocess, sys
+import json, os, subprocess, sys
 
 uid, gid = (int(value) for value in sys.argv[1:3])
 
@@ -19,15 +24,6 @@ def read(path):
         return f"{type(exc).__name__}: {exc}"
 
 
-subprocess.run(
-    [
-        "sh", "-c",
-        "command -v strace || (apt-get update -qq && apt-get install -y -qq --no-install-recommends strace)",
-    ],
-    check=True,
-)
-os.setgid(gid)
-os.setuid(uid)
 status_text = read("/proc/self/status")
 status = {}
 keys = "Uid Gid Securebits CapPrm CapInh CapAmb CapEff CapBnd NoNewPrivs Seccomp Seccomp_filters"
@@ -65,19 +61,20 @@ print(json.dumps({"outer": outer, "inner_bwrap": inner}, sort_keys=True))
 
 
 def _wrap_evidence(run: Any) -> dict[str, Any]:
+    uid = run.env["MEASUREMENT_WORKER_UID"]
+    gid = run.env["MEASUREMENT_WORKER_GID"]
+    run.compose("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT, capture=True)
     output = run.compose(
-        "run",
-        "--rm",
-        "--no-deps",
+        "exec",
+        "-T",
         "--user",
-        "0:0",
-        "--entrypoint",
-        "python3",
+        f"{uid}:{gid}",
         "worker",
+        "python3",
         "-c",
         _WRAP_PROBE,
-        run.env["MEASUREMENT_WORKER_UID"],
-        run.env["MEASUREMENT_WORKER_GID"],
+        uid,
+        gid,
         capture=True,
     )
     return json.loads(output.strip().splitlines()[-1])
