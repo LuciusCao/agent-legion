@@ -10,6 +10,7 @@ from typing import Any
 from scripts.stress.worker_resource_host_code import _bounded
 from scripts.stress.worker_resource_measurement import sanitize_log_text
 from scripts.stress.worker_resource_setuid_evidence import setuid_bwrap_strace
+from scripts.stress.worker_resource_wrap_evidence import _wrap_evidence
 
 _RUNTIME_PROBE = r"""
 import json, os, stat, subprocess, sys
@@ -141,7 +142,7 @@ def _process_evidence(run: Any, service: str) -> dict[str, Any]:
 
 
 def write_host_code_runtime_evidence(run: Any, iteration_dir: Path) -> None:
-    evidence = {"compose": _compose_security(run), "containers": {}}
+    evidence = {"compose": _compose_security(run), "containers": {}, "wrap": _wrap_evidence(run)}
     for service in ("host", "worker"):
         container = run.compose("ps", "-q", service, capture=True).strip()
         if not container or "\n" in container:

@@ -77,10 +77,22 @@ def _ensure_real_worker_image() -> None:
             subprocess.run(["docker", "tag", source, target], check=True, capture_output=True)
 
 
+def _with_measurement_apparmor(compose: str) -> str:
+    if not os.environ.get("MEASUREMENT_APPARMOR"):
+        return compose
+    return compose.replace(
+        "      - seccomp:unconfined\n",
+        "      - seccomp:unconfined\n      - ${MEASUREMENT_APPARMOR}\n",
+        1,
+    )
+
+
 def _real_project(tmp_path: Path, name: str) -> tuple[Path, str]:
     target = _target(tmp_path, name)
     project = f"m126-test-{uuid.uuid4().hex[:12]}"
-    compose = (REPO_ROOT / "deploy/compose.worker.standalone.yaml").read_text(encoding="utf-8")
+    compose = _with_measurement_apparmor(
+        (REPO_ROOT / "deploy/compose.worker.standalone.yaml").read_text(encoding="utf-8")
+    )
     compose = compose.replace("name: agent-legion-worker", f"name: {project}", 1)
     (target / "docker-compose.yaml").write_text(compose, encoding="utf-8")
     return target, project

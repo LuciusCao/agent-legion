@@ -156,6 +156,9 @@ jobs:
     timeout-minutes: 20
     env:
       AGENT_LEGION_DOCKER_TESTS: "1"
+      # Test-only mount-propagation diagnosis, matching the disposable
+      # measurement stack. Never enables AppArmor overrides in production.
+      MEASUREMENT_APPARMOR: "apparmor:unconfined"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

@@ -486,10 +486,22 @@ def nonroot_worker_image() -> str:
     return image
 
 
+def _with_measurement_apparmor(compose: str) -> str:
+    if not os.environ.get("MEASUREMENT_APPARMOR"):
+        return compose
+    return compose.replace(
+        "      - seccomp:unconfined\n",
+        "      - seccomp:unconfined\n      - ${MEASUREMENT_APPARMOR}\n",
+        1,
+    )
+
+
 def _real_nonroot_project(tmp_path: Path, name: str) -> tuple[Path, str]:
     target = _target(tmp_path, name)
     project = f"m127-test-{uuid.uuid4().hex[:12]}"
-    compose = (REPO_ROOT / "deploy/compose.worker.standalone.yaml").read_text(encoding="utf-8")
+    compose = _with_measurement_apparmor(
+        (REPO_ROOT / "deploy/compose.worker.standalone.yaml").read_text(encoding="utf-8")
+    )
     (target / "docker-compose.yaml").write_text(
         compose.replace("name: agent-legion-worker", f"name: {project}", 1), encoding="utf-8"
     )

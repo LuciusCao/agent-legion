@@ -301,3 +301,33 @@ def test_measurement_worker_identity_and_models_home_match_host(tmp_path: Path) 
     run = MeasurementRun(args)
     assert run.env["MEASUREMENT_WORKER_UID"] == str(os.getuid())
     assert run.env["MEASUREMENT_WORKER_GID"] == str(os.getgid())
+
+
+def test_wrap_probe_separates_outer_and_inner_bwrap_without_secret_reads() -> None:
+    from scripts.stress.worker_resource_wrap_evidence import _WRAP_PROBE
+
+    assert '"outer": outer' in _WRAP_PROBE
+    assert '"inner_bwrap": inner' in _WRAP_PROBE
+    assert "strace" in _WRAP_PROBE
+    assert '"/app/data/bin/velites", "sandbox", "wrap"' in _WRAP_PROBE
+    for key in ("CapEff", "CapPrm", "CapBnd", "NoNewPrivs"):
+        assert key in _WRAP_PROBE
+    for namespace in ("user", "pid", "net", "mnt"):
+        assert namespace in _WRAP_PROBE
+    assert "app_armor_current" in _WRAP_PROBE
+    assert "result.stderr[-16384:]" in _WRAP_PROBE
+    for forbidden in ("docker inspect", "models.json", "control_token", "os.environ", "ptrace"):
+        assert forbidden not in _WRAP_PROBE
+
+
+def test_installer_apparmor_override_is_explicitly_test_only() -> None:
+    root = Path(__file__).resolve().parents[2]
+    workflow = yaml.safe_load(
+        (root / ".github/workflows/worker-resource-measurement.yml").read_text()
+    )
+    assert workflow["jobs"]["installer-lifecycle"]["env"]["MEASUREMENT_APPARMOR"] == (
+        "apparmor:unconfined"
+    )
+    for name in ("compose.worker.yaml", "compose.worker.standalone.yaml", "compose.host.yaml"):
+        worker = yaml.safe_load((root / "deploy" / name).read_text())["services"]["worker"]
+        assert worker["security_opt"] == ["seccomp:unconfined"]
