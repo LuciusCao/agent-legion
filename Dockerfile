@@ -75,9 +75,17 @@ RUN apt-get update \
     && chmod u-s /usr/bin/bwrap \
     && pip install --no-cache-dir "fastapi==0.116.1" "pyyaml==6.0.3" "uvicorn==0.35.0" "requests==2.34.2"
 RUN test "$WORKER_UID" -gt 0 && test "$WORKER_GID" -gt 0 \
-    && groupadd --gid "$WORKER_GID" agent-worker \
-    && useradd --uid "$WORKER_UID" --gid "$WORKER_GID" --create-home --home-dir /home/agent-worker --shell /usr/sbin/nologin agent-worker \
-    && mkdir -p /app/data/bin /var/lib/agent-legion-worker /var/lib/agent-legion-worker-control \
+    && if ! getent group "$WORKER_GID" >/dev/null; then \
+        group_name=agent-worker; suffix=0; \
+        while getent group "$group_name" >/dev/null; do suffix=$((suffix + 1)); group_name="agent-worker-$suffix"; done; \
+        groupadd --gid "$WORKER_GID" "$group_name"; \
+    fi \
+    && if ! getent passwd "$WORKER_UID" >/dev/null; then \
+        user_name=agent-worker; suffix=0; \
+        while getent passwd "$user_name" >/dev/null; do suffix=$((suffix + 1)); user_name="agent-worker-$suffix"; done; \
+        useradd --uid "$WORKER_UID" --gid "$WORKER_GID" --create-home --home-dir /home/agent-worker --shell /usr/sbin/nologin "$user_name"; \
+    fi \
+    && mkdir -p /home/agent-worker /app/data/bin /var/lib/agent-legion-worker /var/lib/agent-legion-worker-control \
     && touch /var/lib/agent-legion-worker/.volume-keep /var/lib/agent-legion-worker-control/.volume-keep \
     && chown -R "$WORKER_UID:$WORKER_GID" /home/agent-worker /app/data /var/lib/agent-legion-worker /var/lib/agent-legion-worker-control
 # Code-node sandbox wrapper (#383): /usr/local/bin is on PATH, so the

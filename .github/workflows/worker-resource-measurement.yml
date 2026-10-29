@@ -13,6 +13,7 @@ on:
       - "scripts/install-worker.sh"
       - "scripts/stress/worker_resource_*.py"
       - "tests/scripts/test_install_worker*.py"
+      - "tests/scripts/test_worker_image_identity.py"
       - "tests/stress/test_worker_resource_*.py"
   workflow_dispatch:
     inputs:
@@ -169,8 +170,13 @@ jobs:
 
       - run: uv sync
 
-      - name: Exercise real installer fresh, idempotent, upgrade and rollback paths
-        run: uv run pytest -q tests/scripts/test_install_worker.py tests/scripts/test_install_worker_docker.py
+      - name: Exercise real image identity and installer lifecycle paths
+        run: >-
+          uv run pytest -q
+          tests/scripts/test_worker_image_identity.py
+          tests/scripts/test_install_worker.py
+          tests/scripts/test_install_worker_nonroot.py
+          tests/scripts/test_install_worker_docker.py
 
       - name: Assert default resource limits in real Compose renders
         run: |

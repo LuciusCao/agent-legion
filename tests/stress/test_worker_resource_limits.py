@@ -159,6 +159,7 @@ def test_workflow_dispatch_and_pr_inputs_reach_real_parser() -> None:
         "scripts/install-worker.sh",
         "scripts/stress/worker_resource_*.py",
         "tests/scripts/test_install_worker*.py",
+        "tests/scripts/test_worker_image_identity.py",
         "tests/stress/test_worker_resource_*.py",
     ]
     definitions = triggers["workflow_dispatch"]["inputs"]
@@ -202,8 +203,13 @@ def test_workflow_dispatch_and_pr_inputs_reach_real_parser() -> None:
     lifecycle = "\n".join(
         step.get("run", "") for step in document["jobs"]["installer-lifecycle"]["steps"]
     )
-    assert "uv run pytest -q tests/scripts/test_install_worker.py" in lifecycle
-    assert "tests/scripts/test_install_worker_docker.py" in lifecycle
+    for test_file in (
+        "tests/scripts/test_worker_image_identity.py",
+        "tests/scripts/test_install_worker.py",
+        "tests/scripts/test_install_worker_nonroot.py",
+        "tests/scripts/test_install_worker_docker.py",
+    ):
+        assert test_file in lifecycle
     assert document["jobs"]["installer-lifecycle"]["env"]["AGENT_LEGION_DOCKER_TESTS"] == "1"
     assert lifecycle.count("config --format json") == 3
     default_render = next(
