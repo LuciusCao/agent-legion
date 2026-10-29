@@ -76,7 +76,7 @@ if uid != 0:
     ]
     cases["explicit_userns_no_network"] = run_case(explicit)
     for name, command in (("allow_network", allow_network), ("no_network", no_network)):
-        cases[f"{name}_dumpable_first"] = run_case([*command[:4], "python3", "-c", launcher, *command[4:-1], "python3", "-c", reset])
+        cases[f"{name}_dumpable_first"] = run_case([*command[:4], sys.executable, "-c", launcher, *command[4:-1], sys.executable, "-c", reset])
 print(json.dumps({"outer": outer, "cases": cases}, sort_keys=True))
 """
 

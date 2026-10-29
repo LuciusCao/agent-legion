@@ -330,9 +330,11 @@ def test_wrap_probe_separates_outer_and_inner_bwrap_without_secret_reads() -> No
     assert "result.stderr[-4096:]" in _WRAP_PROBE
     assert 'cases[f"{name}_dumpable_first"]' in _WRAP_PROBE
     assert (
-        '[*command[:4], "python3", "-c", launcher, *command[4:-1], "python3", "-c", reset]'
+        '[*command[:4], sys.executable, "-c", launcher, *command[4:-1], sys.executable, "-c", reset]'
         in _WRAP_PROBE
     )
+    assert _WRAP_PROBE.count("sys.executable") == 2
+    assert '"/app/data/bin/velites"' in _WRAP_PROBE
     assert "prctl(4,1,0,0,0)" in _WRAP_PROBE
     assert "raise SystemExit(subprocess.run(sys.argv[1:], check=False).returncode)" in _WRAP_PROBE
     assert "os.execvp" not in _WRAP_PROBE
