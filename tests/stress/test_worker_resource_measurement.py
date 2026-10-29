@@ -309,7 +309,11 @@ def test_wrap_probe_separates_outer_and_inner_bwrap_without_secret_reads() -> No
     assert '"outer": outer' in _WRAP_PROBE
     assert '"cases": cases' in _WRAP_PROBE
     assert "strace" in _WRAP_PROBE
-    assert "trace=clone,clone3," in _WRAP_PROBE
+    expected_trace = (
+        "trace=clone,clone3,capset,unshare,setuid,setgid,prctl,mount,umount2,setns,"
+        "socket,bind,sendto,recvmsg,openat,write,setgroups"
+    )
+    assert f'trace = "{expected_trace}"' in _WRAP_PROBE
     assert (
         '"/app/data/bin/velites", "sandbox", "wrap", "--cwd", "/tmp", "--", "/bin/true"'
         in _WRAP_PROBE

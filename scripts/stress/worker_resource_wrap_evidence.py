@@ -41,7 +41,7 @@ outer = {
     },
     "app_armor_current": read("/proc/self/attr/current").strip(),
 }
-trace = "trace=clone,clone3,capset,unshare,setuid,setgid,prctl,mount,umount2,setns,socket,bind,sendto,recvmsg"
+trace = "trace=clone,clone3,capset,unshare,setuid,setgid,prctl,mount,umount2,setns,socket,bind,sendto,recvmsg,openat,write,setgroups"
 no_network = [
     "strace", "-f", "-e", trace,
     "/app/data/bin/velites", "sandbox", "wrap", "--cwd", "/tmp", "--", "/bin/true",
