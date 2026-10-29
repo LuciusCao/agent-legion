@@ -388,11 +388,13 @@ if [ -f ./worker.yaml ] || [ "$control_volume_present" = 1 ]; then
   if ! concurrency="$(docker run --rm --network none --user 0:0 --entrypoint python3 \
     "$@" -v "$PWD:/work:ro" "${IMAGE_REPO}:${WORKER_VERSION}" -c \
     'from pathlib import Path
-import yaml
+import stat,yaml
 from worker.config_validation import validate_config
 state = Path("/control/worker.yaml")
 if state.is_symlink() or (state.exists() and not state.is_file()):
     raise ValueError("控制卷 worker.yaml 必须是非 symlink regular file")
+if state.exists() and stat.S_IMODE(state.lstat().st_mode) != 0o600:
+    raise ValueError("控制卷 worker.yaml 必须精确 0600；拒绝 stop/chown 或提交 Compose/.env")
 source = state if state.is_file() else Path("/work/worker.yaml")
 with source.open(encoding="utf-8") as stream:
     config = validate_config(yaml.safe_load(stream), require_identity=False)

@@ -30,6 +30,24 @@ def _env(target: Path) -> dict[str, str]:
     }
 
 
+def _use_root_image(target: Path, project: str, tmp_path: Path) -> None:
+    root_image = f"agent-legion-worker:{project}-root"
+    subprocess.run(
+        ["docker", "build", "-t", root_image, "-f", "-", str(tmp_path)],
+        input="FROM ghcr.io/luciuscao/agent-legion-worker:0.8.2\nUSER 0:0\n",
+        text=True,
+        check=True,
+        capture_output=True,
+    )
+    env_path = target / ".env"
+    env_path.write_text(
+        env_path.read_text(encoding="utf-8").replace(
+            "ghcr.io/luciuscao/agent-legion-worker:0.8.2", root_image
+        ),
+        encoding="utf-8",
+    )
+
+
 def _cleanup_project(target: Path, project: str, compose: str = "docker-compose.yaml") -> None:
     subprocess.run(["docker", "compose", "-f", compose, "down"], cwd=target, capture_output=True)
     subprocess.run(
@@ -142,7 +160,7 @@ def _write_control_volume(project: str, document: str) -> str:
             f"{volume}:/control",
             "ghcr.io/luciuscao/agent-legion-worker:0.8.2",
             "-c",
-            f"from pathlib import Path; Path('/control/worker.yaml').write_text({document!r}, encoding='utf-8')",
+            f"from pathlib import Path; path = Path('/control/worker.yaml'); path.write_text({document!r}, encoding='utf-8'); path.chmod(0o600)",
         ],
         check=True,
         capture_output=True,
@@ -646,6 +664,52 @@ def test_root_current_to_nonroot_target_starts_and_writes_token(tmp_path: Path) 
         _cleanup_project(target, project)
 
 
+def test_root_current_rejects_non_0600_state_without_touching_running_worker(
+    tmp_path: Path,
+) -> None:
+    target, project = _prepare_no_build(tmp_path, "root-state-mode")
+    target_source = tmp_path / "target-nonroot.yaml"
+    target_source.write_text((target / "docker-compose.yaml").read_text(encoding="utf-8"))
+    current = (target / "docker-compose.yaml").read_text(encoding="utf-8")
+    (target / "docker-compose.yaml").write_text(
+        current.replace("    user: ${AGENT_WORKER_UID:-10001}:${AGENT_WORKER_GID:-10001}\n", ""),
+        encoding="utf-8",
+    )
+    try:
+        _use_root_image(target, project, tmp_path)
+        _seed_pending_upload(project)
+        _compose(target, "up", "-d")
+        _wait_worker_api(target, "docker-compose.yaml")
+        _compose(
+            target,
+            "exec",
+            "-T",
+            "worker",
+            "chmod",
+            "644",
+            "/var/lib/agent-legion-worker-control/worker.yaml",
+        )
+        before_compose = (target / "docker-compose.yaml").read_bytes()
+        before_env = (target / ".env").read_bytes()
+        result = _run_real_installer(tmp_path, target, compose_source=target_source)
+        assert result.returncode == 1 and "0600" in result.stderr
+        assert (target / "docker-compose.yaml").read_bytes() == before_compose
+        assert (target / ".env").read_bytes() == before_env
+        running = _compose(
+            target,
+            "exec",
+            "-T",
+            "worker",
+            "sh",
+            "-c",
+            "id -u; stat -c '%u:%g:%a' /var/lib/agent-legion-worker-control/worker.yaml; workerctl status",
+        )
+        assert running.stdout.splitlines()[:2] == ["0", "0:0:644"]
+        assert "服务: running" in running.stdout
+    finally:
+        _cleanup_project(target, project)
+
+
 def test_nonroot_current_to_legacy_target_rolls_back_without_helper(tmp_path: Path) -> None:
     target, project = _prepare_no_build(tmp_path, "nonroot-current")
     legacy_source = tmp_path / "target-root.yaml"
@@ -654,7 +718,6 @@ def test_nonroot_current_to_legacy_target_rolls_back_without_helper(tmp_path: Pa
         current.replace("    user: ${AGENT_WORKER_UID:-10001}:${AGENT_WORKER_GID:-10001}\n", ""),
         encoding="utf-8",
     )
-    root_image = f"agent-legion-worker:{project}-root"
     try:
         _seed_pending_upload(project)
         _run_migrator(target)
@@ -666,23 +729,7 @@ def test_nonroot_current_to_legacy_target_rolls_back_without_helper(tmp_path: Pa
         )
         assert result.returncode == 0, result.stderr
         assert "旧 root Compose 无需 UID 卷迁移" in result.stdout
-        subprocess.run(
-            ["docker", "build", "-t", root_image, "-f", "-", str(tmp_path)],
-            input="FROM ghcr.io/luciuscao/agent-legion-worker:0.8.2\nUSER 0:0\n",
-            text=True,
-            check=True,
-            capture_output=True,
-        )
-        env_text = (target / ".env").read_text(encoding="utf-8")
-        (target / ".env").write_text(
-            "".join(
-                f"AGENT_WORKER_IMAGE={root_image}\n"
-                if line.startswith("AGENT_WORKER_IMAGE=")
-                else f"{line}\n"
-                for line in env_text.splitlines()
-            ),
-            encoding="utf-8",
-        )
+        _use_root_image(target, project, tmp_path)
         _compose(target, "up", "-d")
         _wait_worker_api(target, "docker-compose.yaml")
         rollback = _compose(
