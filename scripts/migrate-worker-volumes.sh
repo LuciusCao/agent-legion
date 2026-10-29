@@ -56,11 +56,16 @@ if ! docker compose "$@" config --format json >"$TMPDIR_/compose.json" 2>"$TMPDI
   die "实际 Compose config 失败，未迁移：$(tail -1 "$TMPDIR_/compose.err")"
 fi
 if [ -z "$IMAGE_OVERRIDE" ]; then
-  image="$(docker compose "$@" config --images 2>>"$TMPDIR_/compose.err" | head -1)"
+  if ! image="$(docker compose "$@" config --images worker 2>>"$TMPDIR_/compose.err")"; then
+    die "实际 Compose Worker 镜像查询失败，未迁移：$(tail -1 "$TMPDIR_/compose.err")"
+  fi
 else
   image="$IMAGE_OVERRIDE"
 fi
-[ -n "$image" ] || die "实际 Compose 未解析到 Worker 镜像"
+case "$image" in
+  ''|*"
+"*) die "实际 Compose 未解析到唯一非空 Worker 镜像" ;;
+esac
 if ! resolved="$(docker run --rm -i --network none --entrypoint python3 "$image" -c \
   'import json,sys
 config = json.load(sys.stdin)

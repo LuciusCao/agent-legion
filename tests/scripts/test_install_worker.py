@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.no_db
 
@@ -465,3 +466,89 @@ def test_installer_rejects_symlink_bootstrap_without_touching_target(tmp_path: P
     result = _run_installer(tmp_path, target)
     assert result.returncode == 1 and "symlink" in result.stderr
     assert outside.stat().st_mode & 0o777 != 0o600
+
+
+def _migrator_image_probe(
+    tmp_path: Path, compose_file: Path, mode: str = "single"
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    fake_bin = tmp_path / "image-probe-bin"
+    fake_bin.mkdir(exist_ok=True)
+    log = tmp_path / "image-probe.log"
+    (fake_bin / "docker").write_text(
+        f"#!{sys.executable}\n"
+        "import os,sys\n"
+        "args = sys.argv[1:]\n"
+        "with open(os.environ['FAKE_DOCKER_LOG'], 'a', encoding='utf-8') as stream:\n"
+        "    stream.write(' '.join(args) + '\\n')\n"
+        "if 'config' in args and '--format' in args:\n"
+        '    print(\'{"services":{"worker":{"volumes":[]}},"volumes":{}}\')\n'
+        "    raise SystemExit(0)\n"
+        "if 'config' in args and '--images' in args:\n"
+        "    if args[-2:] != ['--images', 'worker']:\n"
+        "        print('host-image\\nworker-image')\n"
+        "        raise SystemExit(0)\n"
+        "    mode = os.environ['FAKE_IMAGES_MODE']\n"
+        "    if mode == 'fail':\n"
+        "        print('image lookup failed', file=sys.stderr)\n"
+        "        raise SystemExit(7)\n"
+        "    if mode == 'multiple':\n"
+        "        print('worker-image\\nother-image')\n"
+        "    elif mode == 'single':\n"
+        "        print('worker-image')\n"
+        "    raise SystemExit(0)\n"
+        "raise SystemExit(1 if args[0] == 'run' else 0)\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "docker").chmod(0o755)
+    env = os.environ | {
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "FAKE_DOCKER_LOG": str(log),
+        "FAKE_IMAGES_MODE": mode,
+    }
+    result = subprocess.run(
+        [
+            "sh",
+            str(REPO_ROOT / "scripts/migrate-worker-volumes.sh"),
+            "--uid",
+            "501",
+            "--gid",
+            "20",
+            "--",
+            "-f",
+            str(compose_file),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result, log.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("compose_name", ["compose.host.yaml", "compose.worker.standalone.yaml"])
+def test_migrator_without_override_selects_only_worker_image(
+    tmp_path: Path, compose_name: str
+) -> None:
+    compose_file = REPO_ROOT / "deploy" / compose_name
+    services = yaml.safe_load(compose_file.read_text(encoding="utf-8"))["services"]
+    assert (len(services) > 1) == (compose_name == "compose.host.yaml")
+    result, log = _migrator_image_probe(tmp_path, compose_file)
+    assert result.returncode == 1 and "无法解析两个 named volumes" in result.stderr
+    assert "config --images worker" in log
+    assert "python3 worker-image -c" in log
+    assert "python3 host-image -c" not in log
+
+
+@pytest.mark.parametrize("mode", ["empty", "multiple", "fail"])
+def test_migrator_rejects_failed_or_non_unique_worker_image_lookup(
+    tmp_path: Path, mode: str
+) -> None:
+    result, log = _migrator_image_probe(
+        tmp_path, REPO_ROOT / "deploy/compose.worker.standalone.yaml", mode
+    )
+    assert result.returncode == 1
+    assert not any(line.startswith("run ") for line in log.splitlines())
+    if mode == "fail":
+        assert "image lookup failed" in result.stderr
+    else:
+        assert "唯一非空 Worker 镜像" in result.stderr
