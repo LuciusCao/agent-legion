@@ -31,6 +31,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.e2e._llm_stub import _sse  # noqa: E402
 from scripts.e2e._main_flow_seed import DRAFT_OUTPUT, SKILL_KEY, _ensure_skill_repo  # noqa: E402
 from scripts.stress._stress_auth import ensure_admin_session  # noqa: E402
+from scripts.stress.worker_resource_cli import parse_args  # noqa: E402
 from scripts.stress.worker_resource_desktop import (  # noqa: E402
     cgroup_reader,
     refresh_cgroup_reader,
@@ -40,6 +41,10 @@ from scripts.stress.worker_resource_evidence import (  # noqa: E402
     measure_upload_backlog,
     require_sandbox_ready,
     write_iteration_metadata,
+)
+from scripts.stress.worker_resource_host_code import (  # noqa: E402
+    HOST_CODE_SANDBOX_OVERRIDE,
+    host_code_sandbox_metadata,
 )
 from scripts.stress.worker_resource_identity import (  # noqa: E402
     ContractViolationError,
@@ -53,7 +58,6 @@ from scripts.stress.worker_resource_measurement import (  # noqa: E402
     write_run_report,
 )
 from scripts.stress.worker_resource_output import (  # noqa: E402
-    _positive,
     output_dir_lock,
     require_empty_output_dir,
 )
@@ -191,7 +195,7 @@ def _code_node(key: str, after: list[str], inputs: list[str], output: str) -> di
     }
 
 
-def _definitions() -> dict[str, dict[str, Any]]:
+def _definitions(code_concurrency: int = 1) -> dict[str, dict[str, Any]]:
     agent_nodes = {
         "_start": _start_node(),
         "agent": {**_agent_node([], []), "terminal": {"outcome": "published"}},
@@ -247,8 +251,8 @@ def _definitions() -> dict[str, dict[str, Any]]:
             "key": WORKSPACES["upload-backlog"],
             "label": "resource upload",
             "schema_version": 2,
-            "nodes": code_nodes | {"_start": _start_node()},
-            "edges": [{"from": "_start", "to": "resource_code"}],
+            "nodes": code_nodes if code_concurrency else agent_nodes,
+            "edges": [{"from": "_start", "to": "resource_code" if code_concurrency else "agent"}],
         },
     }
 
@@ -261,7 +265,9 @@ def _node_sources(artifact_chars: int) -> dict[str, str]:
     }
 
 
-def seed_measurement_workspaces(dsn: str, skills_dir: Path, artifact_chars: int) -> None:
+def seed_measurement_workspaces(
+    dsn: str, skills_dir: Path, artifact_chars: int, code_concurrency: int = 1
+) -> None:
     close_database_pools()
     job_db = JobQueries(dsn, jobs_dir=skills_dir / "unused-jobs")
     with write_transaction(dsn) as conn:
@@ -274,7 +280,7 @@ def seed_measurement_workspaces(dsn: str, skills_dir: Path, artifact_chars: int)
     codes = NodeCodeService(dsn)
     revisions = WorkflowRevisionService(job_db)
     sources = _node_sources(artifact_chars)
-    for workspace_id, definition in _definitions().items():
+    for workspace_id, definition in _definitions(code_concurrency).items():
         if workspace_id not in {row["id"] for row in job_db.list_workspaces()}:
             job_db.create_workspace(definition["label"], workspace_id=workspace_id)
         for node in definition["nodes"].values():
@@ -335,12 +341,17 @@ class MeasurementRun:
                 secret_key="measurement-secret-key",
             )
         )
+        if args.mem_limit is not None:
+            self.env["MEASUREMENT_MEM_LIMIT"] = args.mem_limit
+        if args.pids_limit is not None:
+            self.env["MEASUREMENT_PIDS_LIMIT"] = str(args.pids_limit)
+        self.compose_args = ["-f", str(COMPOSE_FILE)]
         self.cgroup_reader_id = ""
         self.control_token = ""
 
     def compose(self, *arguments: str, capture: bool = False) -> str:
         result = subprocess.run(
-            ["docker", "compose", "-f", str(COMPOSE_FILE), *arguments],
+            ["docker", "compose", *self.compose_args, *arguments],
             cwd=PROJECT_ROOT,
             env=self.env,
             check=True,
@@ -359,6 +370,10 @@ class MeasurementRun:
             raise RuntimeError(f"build velites first: {self.velites}")
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        if self.args.code_concurrency == 0:
+            override = self.work_dir / "host-code-sandbox.yaml"
+            override.write_text(HOST_CODE_SANDBOX_OVERRIDE, encoding="utf-8")
+            self.compose_args += ["-f", str(override)]
         self.worker_config.write_text(
             yaml.safe_dump(
                 {
@@ -543,7 +558,7 @@ class MeasurementRun:
         workspace_id = WORKSPACES[scenario]
         nodes = {
             key: node
-            for key, node in _definitions()[workspace_id]["nodes"].items()
+            for key, node in _definitions(self.args.code_concurrency)[workspace_id]["nodes"].items()
             if node.get("type") in {"agent", "code"}
         }
         return verify_remote_uploads(
@@ -553,6 +568,7 @@ class MeasurementRun:
             nodes=nodes,
             job_ids=job_ids,
             worker_id=WORKER_ID,
+            allow_host_code=self.args.code_concurrency == 0,
         )
 
     def run_iteration(self, mode: str, repetition: int) -> dict[str, Any]:
@@ -580,7 +596,12 @@ class MeasurementRun:
                     capture=True,
                 ),
             )
-            seed_measurement_workspaces(self.dsn, self.skills_dir, self.args.artifact_chars)
+            seed_measurement_workspaces(
+                self.dsn,
+                self.skills_dir,
+                self.args.artifact_chars,
+                self.args.code_concurrency,
+            )
             ensure_measurement_bucket(self)
             self.compose("up", "-d", "host")
             self._wait_http(f"{self.host_url}/api/health")
@@ -606,6 +627,11 @@ class MeasurementRun:
             sampler.mark(iteration, "register")
             sampler.start()
             write_iteration_metadata(self, iteration_dir, iteration, container)
+            if self.args.code_concurrency == 0:
+                metadata_path = iteration_dir / "metadata.json"
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                metadata["measurement"]["host_code_sandbox"] = host_code_sandbox_metadata(self)
+                metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
             self._wait_http(f"{self.worker_url}/api/health")
             control_token = self._control_token()
             self.control_token = control_token
@@ -688,9 +714,11 @@ class MeasurementRun:
                 result["sample_counts"] = report_sample_counts(summary)
             try:
                 write_sanitized_logs(self, iteration_dir)
-            except (OSError, subprocess.CalledProcessError) as exc:
+            except Exception as exc:
+                # Diagnostic isolation never replaces the original workload failure or skips cleanup.
                 result["success"] = False
-                result["error"] = f"log collection failed: {exc}"
+                result["diagnostic_error"] = sanitize_log_text(repr(exc), self.secrets)
+                result.setdefault("error", f"log collection failed: {exc}")
             if self.cgroup_reader_id:
                 subprocess.run(
                     ["docker", "rm", "-f", self.cgroup_reader_id],
@@ -707,55 +735,6 @@ class MeasurementRun:
                 json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
         return result
-
-
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--work-dir", type=Path, default=Path("data/worker-resource-measurement/work")
-    )
-    parser.add_argument("--output-dir", type=Path, default=Path("worker-resource-results/latest"))
-    parser.add_argument("--velites-bin", type=Path, default=Path("data/bin/velites"))
-    parser.add_argument("--agent-concurrency", type=_positive, default=2)
-    parser.add_argument("--code-concurrency", type=_positive, default=2)
-    parser.add_argument("--upload-concurrency", type=_positive, default=2)
-    parser.add_argument("--claim-batch-limit", type=_positive, default=8)
-    parser.add_argument("--jobs-per-wave", type=_positive, default=4)
-    parser.add_argument("--artifact-kib", type=_positive, default=64)
-    parser.add_argument("--stub-delay-seconds", type=float, default=0.05)
-    parser.add_argument("--idle-seconds", type=float, default=2.0)
-    parser.add_argument("--job-timeout-seconds", type=float, default=300.0)
-    parser.add_argument("--backlog-timeout-seconds", type=float, default=60.0)
-    parser.add_argument("--pids-interval-ms", type=_positive, default=100)
-    parser.add_argument("--memory-interval-ms", type=_positive, default=500)
-    parser.add_argument("--cold-repetitions", type=int, default=1)
-    parser.add_argument("--warm-repetitions", type=int, default=2)
-    parser.add_argument("--postgres-port", type=int, default=55432)
-    parser.add_argument("--s3-port", type=int, default=58333)
-    parser.add_argument("--host-port", type=int, default=58080)
-    parser.add_argument("--worker-port", type=int, default=58787)
-    parser.add_argument("--stub-port", type=int, default=58081)
-    parser.add_argument("--cgroup-reader-port", type=int, default=58082)
-    parser.add_argument("--allow-docker-desktop", action="store_true")
-    parser.add_argument("--skip-build", action="store_true")
-    args = parser.parse_args(argv)
-    if args.jobs_per_wave < 2:
-        parser.error("jobs-per-wave must be >= 2 for simultaneous active and queued uploads")
-    if (
-        args.cold_repetitions < 0
-        or args.warm_repetitions < 0
-        or args.cold_repetitions + args.warm_repetitions == 0
-    ):
-        parser.error("cold/warm repetitions must be non-negative and not both zero")
-    if (
-        args.stub_delay_seconds < 0
-        or args.idle_seconds < 0
-        or args.job_timeout_seconds <= 0
-        or args.backlog_timeout_seconds <= 0
-    ):
-        parser.error("delays must be non-negative and timeouts must be positive")
-    args.artifact_chars = args.artifact_kib * 1024
-    return args
 
 
 def main(argv: list[str] | None = None) -> int:

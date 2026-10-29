@@ -10,7 +10,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from scripts.stress.worker_resource_diagnostics import write_host_code_diagnostics_safely
 from scripts.stress.worker_resource_measurement import sanitize_log_text
+from scripts.stress.worker_resource_runtime_evidence import write_host_code_runtime_evidence_safely
 
 
 def _command(command: list[str]) -> str:
@@ -99,6 +101,9 @@ def write_sanitized_logs(run: Any, iteration_dir: Path) -> None:
             sanitize_log_text(result.stdout + result.stderr, run.secrets) + "\n",
             encoding="utf-8",
         )
+    if run.args.code_concurrency == 0:
+        write_host_code_runtime_evidence_safely(run, iteration_dir)
+        write_host_code_diagnostics_safely(run, iteration_dir)
 
 
 def finalize_measurement_run(

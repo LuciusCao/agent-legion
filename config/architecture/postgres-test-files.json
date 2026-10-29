@@ -277,6 +277,7 @@
     "tests/services/test_workspace_settings_api.py",
     "tests/skills/test_skill_catalog_service.py",
     "tests/skills/test_skill_sources_retirement.py",
+    "tests/stress/test_worker_resource_diagnostics.py",
     "tests/workers/test_code_stock_gate.py",
     "tests/workers/test_frozen_node_type_routing.py",
     "tests/workers/test_pure_remote_mode.py",

@@ -9,10 +9,10 @@
 #   - velites-bin/velites：GitHub Release 的 linux 二进制（sha256 校验，架构自动匹配）
 #   - worker.yaml：引导配置（仅首次创建；此后以 Worker 控制台为准）
 #   - velites-config/models.json(.example)：provider 注册表（用户资产，仅缺失时生成示例）
-#   - .env：compose 插值变量（AGENT_WORKER_IMAGE 由本脚本管理，其余用户资产）
+#   - .env：compose 插值变量（版本/资源自管行由本脚本维护，其余用户资产）
 #
 # 幂等语义（重复执行收敛到同一状态）：
-#   - 自有文件（compose、velites 二进制、.env 的 AGENT_WORKER_IMAGE 行）刷新到目标版本；
+#   - 自有文件（compose、velites 二进制、.env 的版本/资源自管行）刷新到目标状态；
 #   - 用户资产（worker.yaml、models.json、.env 其余内容、velites-provider.env）
 #     已存在即跳过，绝不覆盖——worker.yaml 首次启动导入控制卷后，覆盖只会制造
 #     mounted_config_diverged；
@@ -205,6 +205,96 @@ else
 fi
 
 # ---- 2. 提交阶段（资产已全部备妥，逐项原子落位）----
+# 资源限额先在内存中归一，default 超测量 envelope 时不得部分应用新 compose/.env。
+if [ "${AGENT_WORKER_MEM_LIMIT+x}" = x ]; then
+  mem_limit_final="$AGENT_WORKER_MEM_LIMIT"
+else
+  mem_limit_final="$(sed -n 's/^AGENT_WORKER_MEM_LIMIT=//p' ./.env 2>/dev/null | tail -1)"
+fi
+mem_limit_final="${mem_limit_final:-256m}"
+if [ "${AGENT_WORKER_PIDS_LIMIT+x}" = x ]; then
+  pids_limit_final="$AGENT_WORKER_PIDS_LIMIT"
+else
+  pids_limit_final="$(sed -n 's/^AGENT_WORKER_PIDS_LIMIT=//p' ./.env 2>/dev/null | tail -1)"
+fi
+pids_limit_final="${pids_limit_final:-128}"
+if [ "${AGENT_WORKER_RESOURCE_LIMITS_MODE+x}" = x ]; then
+  limits_mode_final="$AGENT_WORKER_RESOURCE_LIMITS_MODE"
+else
+  limits_mode_final="$(sed -n 's/^AGENT_WORKER_RESOURCE_LIMITS_MODE=//p' ./.env 2>/dev/null | tail -1)"
+  if [ "${AGENT_WORKER_MEM_LIMIT+x}" = x ] || [ "${AGENT_WORKER_PIDS_LIMIT+x}" = x ]; then
+    limits_mode_final="explicit"
+  fi
+fi
+limits_mode_final="${limits_mode_final:-default}"
+case "$limits_mode_final" in
+  default|explicit) ;;
+  *) die "AGENT_WORKER_RESOURCE_LIMITS_MODE 仅支持 default/explicit" ;;
+esac
+case "$mem_limit_final" in
+  ''|*[!0-9a-zA-Z.]*) die "非法 AGENT_WORKER_MEM_LIMIT: ${mem_limit_final}" ;;
+esac
+case "$pids_limit_final" in
+  -1) ;;
+  ''|*[!0-9]*) die "非法 AGENT_WORKER_PIDS_LIMIT: ${pids_limit_final}（正整数或 -1）" ;;
+  *) [ "$pids_limit_final" -gt 0 ] || die "AGENT_WORKER_PIDS_LIMIT 必须为正整数或 -1" ;;
+esac
+compose_for_resolution="./docker-compose.yaml"
+[ -f "$compose_for_resolution" ] || compose_for_resolution="$TMPDIR_/docker-compose.yaml"
+if ! docker compose -f "$compose_for_resolution" config --format json \
+  >"$TMPDIR_/compose-config.json" 2>"$TMPDIR_/control-volume.err"; then
+  die "实际 Compose config 执行失败，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
+fi
+if ! control_volume="$(docker run --rm -i --network none --entrypoint python3 \
+  "${IMAGE_REPO}:${WORKER_VERSION}" -c \
+  'import json,sys
+config = json.load(sys.stdin)
+print(config["volumes"]["worker-control"]["name"])' \
+  <"$TMPDIR_/compose-config.json" 2>>"$TMPDIR_/control-volume.err")"; then
+  die "无法按实际 Compose 解析 worker-control 卷名，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
+fi
+if ! volume_names="$(docker volume ls --format '{{.Name}}' 2>>"$TMPDIR_/control-volume.err")"; then
+  die "无法核查 worker-control 卷是否存在，未修改 compose/.env：$(tail -1 "$TMPDIR_/control-volume.err")"
+fi
+control_volume_present=0
+if printf '%s\n' "$volume_names" | grep -Fxq "$control_volume"; then
+  control_volume_present=1
+fi
+if [ -f ./worker.yaml ] || [ "$control_volume_present" = 1 ]; then
+  set --
+  if [ "$control_volume_present" = 1 ]; then
+    set -- -v "$control_volume:/control:ro"
+  fi
+  if ! concurrency="$(docker run --rm --network none --entrypoint python3 \
+    "$@" -v "$PWD:/work:ro" "${IMAGE_REPO}:${WORKER_VERSION}" -c \
+    'from pathlib import Path
+import yaml
+from worker.config_validation import validate_config
+state = Path("/control/worker.yaml")
+if state.exists() and not state.is_file():
+    raise ValueError("控制卷 worker.yaml 不是 regular file")
+source = state if state.is_file() else Path("/work/worker.yaml")
+with source.open(encoding="utf-8") as stream:
+    config = validate_config(yaml.safe_load(stream), require_identity=False)
+print(config["max_concurrency"], config["max_code_concurrency"], config["upload_max_concurrency"])' \
+    2>"$TMPDIR_/concurrency.err")"; then
+    die "无法按 Worker YAML/整数语义可靠解析实际生效控制副本，未修改 compose/.env。请修正控制卷 worker.yaml（不存在时才使用引导文件），或将三个并发键改为未加引号的整数后重试：$(tail -1 "$TMPDIR_/concurrency.err")"
+  fi
+  agent_limit="${concurrency%% *}"
+  code_limit="${concurrency#* }"
+  code_limit="${code_limit%% *}"
+  upload_limit="${concurrency##* }"
+else
+  agent_limit=10
+  code_limit=0
+  upload_limit=4
+fi
+if [ "$limits_mode_final" = default ] && {
+  [ "$agent_limit" -gt 10 ] || [ "$code_limit" -gt 0 ] || [ "$upload_limit" -gt 4 ];
+}; then
+  die "当前并发超出默认 limits 的测量 envelope（agent=10/code=0/upload=4）。请评审并显式设置 AGENT_WORKER_MEM_LIMIT/AGENT_WORKER_PIDS_LIMIT（或 0/-1 unlimited）及 AGENT_WORKER_RESOURCE_LIMITS_MODE=explicit 后重跑；不会静默 clamp 或继承默认 limits"
+fi
+
 # ---- 2a. compose 文件 ----
 if [ "$compose_new" = 1 ]; then
   # 原子替换（mv 同盘）；compose 自身插值默认值与 .env 的显式声明保持一致
@@ -221,8 +311,7 @@ if [ "$compose_new" = 0 ] && [ -n "$env_image_now" ] && [ "$env_image_now" != "$
   die "compose 拉取失败（ref ${COMPOSE_REF}）且本次为版本变更（${env_image_now} → ${WORKER_VERSION}）：保留旧编排而刷新 .env 会制造镜像×编排混合态，已中止。确认 worker-v${WORKER_VERSION} tag 已发布后重跑"
 fi
 
-# ---- 2b. .env：自管行（AGENT_WORKER_IMAGE / AGENT_WORKER_UI_BIND /
-# AGENT_WORKER_UI_PORT）由脚本维护，其余内容不动 ----
+# ---- 2b. .env：版本/资源/UI 自管行由脚本维护，其余内容不动 ----
 if [ ! -f ./.env ]; then
   cat > ./.env <<'EOF'
 # compose 插值变量（本文件只被 compose 读取，不进容器；chmod 600 保护凭据）
@@ -245,6 +334,9 @@ set_self_managed_line() {
   fi
 }
 
+set_self_managed_line AGENT_WORKER_RESOURCE_LIMITS_MODE "$limits_mode_final"
+set_self_managed_line AGENT_WORKER_MEM_LIMIT "$mem_limit_final"
+set_self_managed_line AGENT_WORKER_PIDS_LIMIT "$pids_limit_final"
 set_self_managed_line AGENT_WORKER_IMAGE "${IMAGE_REPO}:${WORKER_VERSION}"
 # 环境变量携带的 UI 绑定/端口持久化（subagent P2）：只活在本次进程的话，
 # 用户事后按脚本指引手动 up、或升级重跑忘带 env，端口冲突就会复发——

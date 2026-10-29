@@ -1,0 +1,266 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+import yaml
+
+from scripts.stress.worker_resource_host_code import (
+    HOST_CODE_SANDBOX_OVERRIDE,
+    host_code_sandbox_metadata,
+)
+from scripts.stress.worker_resource_workload import SCENARIOS, parse_args
+
+pytestmark = pytest.mark.no_db
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_measurement_compose_preserves_shipped_envelope_and_optional_limits() -> None:
+    document = yaml.safe_load(
+        (ROOT / "deploy/compose.worker.measurement.yaml").read_text(encoding="utf-8")
+    )
+    worker = document["services"]["worker"]
+    assert worker["cap_add"] == ["SYS_ADMIN", "${MEASUREMENT_NET_ADMIN:-SYS_ADMIN}"]
+    assert worker["security_opt"] == [
+        "seccomp:unconfined",
+        "${MEASUREMENT_APPARMOR:-apparmor:unconfined}",
+    ]
+    assert worker["mem_limit"] == "${MEASUREMENT_MEM_LIMIT:-0}"
+    assert worker["pids_limit"] == "${MEASUREMENT_PIDS_LIMIT:--1}"
+    assert "env_file" not in worker and "user" not in worker
+    host = document["services"]["host"]
+    assert "cap_add" not in host and "security_opt" not in host
+    startup = host["command"][0]
+    assert 'exec setpriv --reuid="${MEASUREMENT_HOST_UID}"' in startup
+    assert '--regid="${MEASUREMENT_HOST_GID}" --clear-groups' in startup
+    assert "env HOME=/tmp uvicorn" in startup
+    assert host["volumes"][1].endswith(":/tmp/.agents/skills:ro")
+    assert "safe.directory" not in startup
+    production = yaml.safe_load((ROOT / "deploy/compose.host.yaml").read_text(encoding="utf-8"))
+    assert production["services"]["worker"]["cap_add"] == ["SYS_ADMIN"]
+    assert production["services"]["worker"]["security_opt"] == ["seccomp:unconfined"]
+    assert all(value not in yaml.safe_dump(production) for value in ("apparmor:", "SYS_PTRACE"))
+    assert "--no-sandbox" not in yaml.safe_dump(document)
+
+
+def test_default_host_code_sandbox_is_disposable_and_probed() -> None:
+    document = yaml.safe_load(HOST_CODE_SANDBOX_OVERRIDE)
+    assert set(document["services"]) == {"host"}
+    host = document["services"]["host"]
+    assert host["cap_add"] == ["SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE"]
+    assert host["security_opt"] == ["seccomp:unconfined", "apparmor:unconfined"]
+    assert "bubblewrap" in host["command"][0] and "test -u /usr/bin/bwrap" in host["command"][0]
+    run = SimpleNamespace(compose=lambda *_args, **_kwargs: "bubblewrap 0.10.0\n4755")
+    metadata = host_code_sandbox_metadata(run)
+    assert metadata["path"] == "/usr/bin/bwrap" and metadata["setuid"] is True
+    assert metadata["security_opt"] == host["security_opt"]
+    assert metadata["support"] == "non-root setuid bwrap REQUIRED_CAPS_0"
+    assert metadata["production_recommendation"] is False
+
+
+def test_workload_covers_real_execution_and_restart_scenarios() -> None:
+    assert set(SCENARIOS) == {
+        "agent",
+        "code",
+        "mixed",
+        "upload-backlog",
+        "pending-restart",
+        "executor-restart",
+        "container-restart",
+    }
+    source = (ROOT / "scripts/stress/worker_resource_workload.py").read_text(encoding="utf-8")
+    assert "simulate_agents" not in source
+    evidence_source = (ROOT / "scripts/stress/worker_resource_identity.py").read_text(
+        encoding="utf-8"
+    )
+    assert "agent_execution_requests" in evidence_source
+    args = parse_args(["--cold-repetitions", "1", "--warm-repetitions", "1"])
+    assert args.pids_interval_ms == 100
+    assert args.artifact_chars == 64 * 1024
+    with pytest.raises(SystemExit):
+        parse_args(["--jobs-per-wave", "1"])
+    assert parse_args(["--jobs-per-wave", "2"]).jobs_per_wave == 2
+    limited = parse_args(["--code-concurrency", "0", "--mem-limit", "200m", "--pids-limit", "48"])
+    assert (limited.code_concurrency, limited.mem_limit, limited.pids_limit) == (0, "200m", 48)
+    for invalid in (["--code-concurrency", "-1"], ["--pids-limit", "0"], ["--mem-limit", " "]):
+        with pytest.raises(SystemExit):
+            parse_args(invalid)
+
+
+def test_measurement_host_identity_matches_mount_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.stress import worker_resource_workload as workload
+
+    monkeypatch.setattr(workload.os, "getuid", lambda: 1234)
+    monkeypatch.setattr(workload.os, "getgid", lambda: 2345)
+    args = workload.parse_args(
+        [
+            "--work-dir",
+            str(tmp_path / "work"),
+            "--output-dir",
+            str(tmp_path / "results"),
+            "--velites-bin",
+            str(tmp_path / "velites"),
+        ]
+    )
+    monkeypatch.setattr(workload.platform, "system", lambda: "Linux")
+    native = workload.MeasurementRun(args)
+    assert native.env["MEASUREMENT_HOST_UID"] == "1234"
+    assert native.env["MEASUREMENT_HOST_GID"] == "2345"
+    monkeypatch.setattr(workload.platform, "system", lambda: "Darwin")
+    desktop = workload.MeasurementRun(args)
+    assert desktop.env["MEASUREMENT_HOST_UID"] == "0"
+    assert desktop.env["MEASUREMENT_HOST_GID"] == "0"
+
+
+_WORKFLOW_INPUTS = {
+    "MEASUREMENT_COLD_REPETITIONS": "cold_repetitions",
+    "MEASUREMENT_WARM_REPETITIONS": "warm_repetitions",
+    "MEASUREMENT_PIDS_INTERVAL_MS": "pids_interval_ms",
+    "MEASUREMENT_MEMORY_INTERVAL_MS": "memory_interval_ms",
+}
+
+
+def _render_workflow_inputs(document: dict, inputs: dict[str, str]) -> list[str]:
+    arguments: list[str] = []
+    for env_name, input_name in _WORKFLOW_INPUTS.items():
+        expression = document["jobs"]["measure"]["env"][env_name]
+        assert expression.startswith("${{ inputs.")
+        body = expression[3:-2].strip().removeprefix("inputs.")
+        key, _, fallback = body.partition("||")
+        value = inputs.get(key.strip(), "")
+        if not value and fallback:
+            value = fallback.strip().strip("'")
+        arguments.extend((f"--{input_name.replace('_', '-')}", value))
+    return arguments
+
+
+def test_workflow_dispatch_and_pr_inputs_reach_real_parser() -> None:
+    workflow_path = Path(__file__).parents[2] / ".github/workflows/worker-resource-measurement.yml"
+    source = workflow_path.read_text(encoding="utf-8")
+    document = yaml.safe_load(source)
+    triggers = document[True]
+    assert set(triggers) == {"workflow_dispatch", "pull_request"}
+    assert triggers["pull_request"]["paths"] == [
+        ".github/workflows/worker-resource-measurement.yml",
+        "deploy/.env.example",
+        "deploy/compose.host.yaml",
+        "deploy/compose.worker.measurement.yaml",
+        "deploy/compose.worker.standalone.yaml",
+        "deploy/compose.worker.yaml",
+        "Dockerfile",
+        "scripts/install-worker.sh",
+        "scripts/stress/worker_resource_*.py",
+        "tests/scripts/test_install_worker*.py",
+        "tests/stress/test_worker_resource_*.py",
+    ]
+    definitions = triggers["workflow_dispatch"]["inputs"]
+    defaults = {name: definition["default"] for name, definition in definitions.items()}
+    for event_inputs in (
+        defaults,
+        {name: "" for name in definitions},
+    ):
+        args = parse_args(_render_workflow_inputs(document, event_inputs))
+        assert args.cold_repetitions == 1
+        assert args.warm_repetitions == 2
+        assert args.pids_interval_ms == 100
+        assert args.memory_interval_ms == 500
+    custom = parse_args(
+        _render_workflow_inputs(
+            document,
+            {
+                "cold_repetitions": "3",
+                "warm_repetitions": "4",
+                "pids_interval_ms": "125",
+                "memory_interval_ms": "750",
+            },
+        )
+    )
+    assert custom.cold_repetitions == 3
+    assert custom.warm_repetitions == 4
+    assert custom.pids_interval_ms == 125
+    assert custom.memory_interval_ms == 750
+    assert document["jobs"]["measure"]["env"]["MEASUREMENT_NET_ADMIN"] == "NET_ADMIN"
+    assert document["jobs"]["measure"]["env"]["MEASUREMENT_APPARMOR"] == "apparmor:unconfined"
+    assert (
+        document["jobs"]["measure"]["env"]["MEASUREMENT_MEM_LIMIT"]
+        == "${{ inputs.mem_limit || '0' }}"
+    )
+    assert (
+        document["jobs"]["measure"]["env"]["MEASUREMENT_PIDS_LIMIT"]
+        == "${{ inputs.pids_limit || '-1' }}"
+    )
+    fault = yaml.safe_dump(document["jobs"]["fault-injection"])
+    assert "OOMKilled" in fault and "can't start new thread" in fault
+    lifecycle = "\n".join(
+        step.get("run", "") for step in document["jobs"]["installer-lifecycle"]["steps"]
+    )
+    assert "uv run pytest -q tests/scripts/test_install_worker.py" in lifecycle
+    assert "tests/scripts/test_install_worker_docker.py" in lifecycle
+    assert document["jobs"]["installer-lifecycle"]["env"]["AGENT_LEGION_DOCKER_TESTS"] == "1"
+    assert lifecycle.count("config --format json") == 3
+    default_render = next(
+        step["run"]
+        for step in document["jobs"]["installer-lifecycle"]["steps"]
+        if step.get("name") == "Assert default resource limits in real Compose renders"
+    )
+    for key in (
+        "AGENT_WORKER_RESOURCE_LIMITS_MODE",
+        "AGENT_WORKER_MEM_LIMIT",
+        "AGENT_WORKER_PIDS_LIMIT",
+    ):
+        assert f"-u {key}" in default_render
+    assert "--env-file /dev/null" in default_render
+    for injected in (
+        "AGENT_WORKER_RESOURCE_LIMITS_MODE=default",
+        "AGENT_WORKER_MEM_LIMIT=256m",
+        "AGENT_WORKER_PIDS_LIMIT=128",
+    ):
+        assert injected not in default_render
+    for name in ("compose.worker.yaml", "compose.worker.standalone.yaml", "compose.host.yaml"):
+        assert name in lifecycle
+    assert document["permissions"] == {"contents": "read"}
+    matrix = document["jobs"]["measure"]["strategy"]["matrix"]["include"]
+    assert len(matrix) == 4
+    default = next(item for item in matrix if item["envelope"] == "default")
+    assert (
+        default["agent_concurrency"],
+        default["code_concurrency"],
+        default["upload_concurrency"],
+    ) == (10, 0, 4)
+    assert "ubuntu-24.04" in source
+    assert "worker-resource-results/" in source
+    assert "data/worker-resource-measurement/work" not in source
+    assert "secrets." not in source
+    assert "workflow_run" not in source
+
+
+def test_metadata_distinguishes_measurement_apparmor_from_shipped_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.stress import worker_resource_evidence as evidence
+
+    monkeypatch.setattr(evidence, "collect_host_metadata", lambda *_args: {})
+    models = tmp_path / "models.json"
+    models.write_text("{}", encoding="utf-8")
+    run = SimpleNamespace(
+        env={"MEASUREMENT_APPARMOR": "apparmor:unconfined"},
+        velites=tmp_path / "velites",
+        models_path=models,
+        args=SimpleNamespace(
+            agent_concurrency=1,
+            code_concurrency=1,
+            upload_concurrency=1,
+            jobs_per_wave=2,
+            artifact_chars=1,
+            pids_interval_ms=100,
+            memory_interval_ms=500,
+        ),
+    )
+    evidence.write_iteration_metadata(run, tmp_path, "cold-1", "container")
+    measurement = json.loads((tmp_path / "metadata.json").read_text())["measurement"]
+    assert measurement["shipped_apparmor"] == "docker-default"
+    assert measurement["functional_apparmor_override"] == "apparmor:unconfined"

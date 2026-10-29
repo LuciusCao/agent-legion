@@ -316,6 +316,24 @@ Docker、目录自包含）。两者最终形态等价（同一镜像 + 同一�
 ——一键安装的 up 会 recreate 仓库形态的容器并共享同名卷；要换形态先
 `down` 另一边。
 
+### Worker 容器资源限额（#1049）
+
+三份基础 Compose（`compose.worker.yaml`、`compose.worker.standalone.yaml`、`compose.host.yaml`）的 Worker 默认使用 `mem_limit=256m`、`pids_limit=128` 和 `AGENT_WORKER_RESOURCE_LIMITS_MODE=default`；zero-runtime 与 pull override 不另写资源字段，直接继承同一组值。默认承诺只覆盖下述原生 Linux reference envelope：**agent=10、code=0（Host local code）、upload=4、每波 20 jobs、每个 artifact 1MiB**，不是按 CPU 核数或协议并发上限推导的通用保证，也不改变 `max_concurrency`、bwrap、capability、seccomp 或 CPU 限制。
+
+默认值的证据与公式见 §5「Worker 资源测量」：最坏 upload-backlog 的 `memory.peak` p95 为 211,406,848B，乘 1.25 后按 8MiB 向上取整为 256MiB；pids 则按每轮 100ms 高频峰值 99/98/97 的分布计算 p95，小样本保守为 99，乘 1.25 得 123.75 后按 8 向上取整为 128。需要覆盖超过 reference 峰值或更高并发的部署必须显式评审更高值或 unlimited。
+
+在 `deploy/.env` 或一键安装目录的 `.env` 配置：
+
+```dotenv
+AGENT_WORKER_MEM_LIMIT=256m
+AGENT_WORKER_PIDS_LIMIT=128
+AGENT_WORKER_RESOURCE_LIMITS_MODE=default
+```
+
+超出 reference envelope（agent>10、code>0 或 upload>4）时不得只继承 default limits：先评审实际内存与线程需求，再显式设置合适的 limits 并设 `AGENT_WORKER_RESOURCE_LIMITS_MODE=explicit`。明确接受无限额时使用 `AGENT_WORKER_MEM_LIMIT=0`、`AGENT_WORKER_PIDS_LIMIT=-1`，同样必须设 `explicit`。启动、控制台/API 写入前和配置文件热更共用同一 envelope guard：default 超 envelope 直接拒绝，不写配置、不静默 clamp；显式模式不自动改并发，也不承诺任意配置都安全。
+
+一键安装脚本把最终 mode/limits 幂等写入 `.env`，fresh 缺省补 256m/128/default；环境变量显式传 limits 时若未传 mode，会按显式评审持久化为 `explicit`。升级预检在任何 compose/.env 提交前，先用实际 Compose project 解析 `worker-control` 卷名并核查该卷，优先读取与运行时一致的控制副本 `/var/lib/agent-legion-worker-control/worker.yaml`，只有副本不存在才回退引导文件；卷不存在不创建空卷。解析复用目标 Worker 镜像中固定版本的 PyYAML 与 `validate_config`（`--network none`），不在宿主新增依赖；YAML 缩进、0x 整数、行内注释与重复键 last-wins 与 Worker 一致，引号数字等 Worker 本身不支持的类型会明确报错，而不是放宽成另一套语义。default 超 envelope、镜像/卷不可用或配置无法可靠解析都会保留旧文件并中止；运行后控制卷里的配置仍以运行时三道 guard 为准。升级或回滚版本不会重置显式 limits，也不会改写 `worker.yaml`、`worker-data` 或 `worker-control`，pending upload 标记与上传队列保留，容器/executor restart 继续按既有恢复语义完成未上传结果。需要回滚时同时回退 Host/Worker 镜像，并保留已评审的资源配置。
+
 ### 出网代理（#444）
 
 Worker 默认**直连出网**：service 入口会剥离启动 shell 继承的代理环境变量
@@ -505,11 +523,11 @@ Host 设置页顶部的「Worker 与 Worker 控制台」卡片、签发成功后
 
 ### Worker 资源测量（#1049 前置工具）
 
-`deploy/compose.worker.measurement.yaml` 与 `scripts/stress/worker_resource_workload.py` 是一次性真实测量栈，不是生产部署示例。Worker 明示保持当前 shipped envelope：镜像默认 root、`SYS_ADMIN`、`seccomp:unconfined`，且不设置 `mem_limit` / `pids_limit`；这些字段描述被测对象，不是推荐值。工具不按核数、协议并发上限、历史 RSS 或 Docker Desktop 结果推导生产限制，也不修改现有 Compose 的资源或权限。
+`deploy/compose.worker.measurement.yaml` 与 `scripts/stress/worker_resource_workload.py` 是一次性真实测量栈，不是生产部署示例。Worker 明示保持当前 shipped 身份与权限：镜像默认 root、`SYS_ADMIN`、`seccomp:unconfined`；测量采样时 mem/pids 默认 unlimited，候选值只经显式输入注入并记录，不能用测量专用字段替代生产配置。工具不按核数、协议并发上限、历史 RSS 或 Docker Desktop 结果推导生产限制，生产 Compose 的限额来自独立 default 原生证据。
 
-Host 支持容器只在启动阶段以 root 安装 git 并初始化 `host-data` 卷，随后按 bind owner 用 `setpriv` 设置身份并以 `HOME=/tmp` 启动：原生 Linux 使用执行 seed 的宿主 UID/GID，Docker Desktop 的 root-owned 映射使用 0:0。skills 以只读方式挂到 `/tmp/.agents/skills`，使 Git 仓库 owner 与 SkillManager 读取 UID 一致。该测量专用对齐不配置 `safe.directory`，不修改生产 SkillManager，也不改变 Worker、模型或 velites 绑定身份；Desktop 的 0:0 只是功能兼容，不替代原生非 root 验证。
+Host 支持容器只在启动阶段以 root 安装 git 并初始化 `host-data` 卷，随后按 bind owner 用 `setpriv` 设置身份并以 `HOME=/tmp` 启动：原生 Linux 使用执行 seed 的宿主 UID/GID，Docker Desktop 的 root-owned 映射使用 0:0。skills 以只读方式挂到 `/tmp/.agents/skills`，使 Git 仓库 owner 与 SkillManager 读取 UID 一致。该测量专用对齐不配置 `safe.directory`，不修改生产 SkillManager，也不改变 Worker、模型或 velites 绑定身份；Desktop 的 0:0 只是功能兼容，不替代原生非 root 验证。仅 default code=0 时，workload 另生成 disposable Host override，安装 Debian `bubblewrap` 与诊断用 `strace` 并设置 Worker 同款 setuid，给 **Host 支持容器** 增加 `SYS_ADMIN` + `NET_ADMIN` + `SYS_PTRACE`、`seccomp:unconfined` 和 `apparmor:unconfined`，使 Host code 真走 OS sandbox。`NET_ADMIN` 由 loopback 探针要求；`SYS_PTRACE` 由 strace 证实的 non-root setuid bwrap 恢复 `REQUIRED_CAPS_0` 路径要求，不能只用执行前 CapEff=0 解释。base Compose 与 code>0 路径不加载此 override。每次执行前必须验证 `/usr/bin/bwrap` 可执行且 setuid，metadata 记录 apt 来源、版本、路径、mode 与 support 权限 delta，缺失即 fail-closed；这些 Host support 权限同样不是生产建议，绝不扩到生产 Host/Dockerfile 或 Worker。
 
-优先通过限定 paths 的 PR 或手动 `workflow_dispatch` 在 GitHub Actions 运行 **Worker Resource Measurement**（原生 Ubuntu 24.04）。矩阵的 single / mixed / upload-backlog 只是显式测量 envelope；dispatch 可设置 cold/warm 重复次数与 pids/memory 采样间隔。原生 Linux 也可在仓库根执行：
+优先通过限定 paths 的 PR 或手动 `workflow_dispatch` 在 GitHub Actions 运行 **Worker Resource Measurement**（原生 Ubuntu 24.04）。矩阵的 single / mixed / upload-backlog 是显式测量 envelope；default 则固定为当前 installer/Compose 的 agent=10、code=0、upload=4，code 节点合法回落 Host，upload-backlog 改用 Worker agent 产物以形成真实 Worker 上传队列，evidence 仍分别校验 Host code 与 Worker agent 身份。dispatch 可设置 cold/warm 重复次数与 pids/memory 采样间隔；`mem_limit` / `pids_limit` 仅用于候选值全链路复验，留空保持 unlimited，`fault_mem_limit` / `fault_pids_limit` 则在独立 disposable 容器中验证低于候选值时 OOM/pids 拒绝确实生效，不替代业务链路。原生 Linux 也可在仓库根执行：
 
 原生测量 workflow 显式设置 `MEASUREMENT_NET_ADMIN=NET_ADMIN`，因为 velites 的 bash 工具在私有 network namespace 配置 loopback 时需要该能力（#39）；否则 bwrap 按 fail-closed 启动失败。此 delta 仅限 measurement 场景，Compose 未设置该变量时仍重复 SYS_ADMIN、生产 Compose 仍只含 SYS_ADMIN；artifact 的 `functional_cap_override` 记录实际覆盖值，且不构成生产权限建议。生产 envelope 与该测量必要能力的收敛由 M128 后续处理。
 
@@ -526,13 +544,32 @@ uv run python scripts/stress/worker_resource_workload.py \
 
 Docker Desktop 只允许显式功能验收，不允许 sizing：准备与容器同为 Linux/arm64 或 Linux/amd64 的 velites 后，加 `--allow-docker-desktop`，例如 `--cold-repetitions 1 --warm-repetitions 0 --jobs-per-wave 2`（全场景最小波次；`<2` 会 fail-fast，因为 upload-backlog 无法同时形成 active 与 queued）。此模式用独立 sidecar 在 Docker VM 的 host PID namespace 读取同一组 cgroup 字段，metadata 标记 `docker-desktop-functional-only`；project、volumes、workdir 与 sidecar 都是 measurement 专用并会清理。Docker Desktop 的私有 netns loopback 还需显式 `MEASUREMENT_NET_ADMIN=NET_ADMIN`（#39），该 functional override 会写入 metadata，不改变 shipped 默认 capability，也不作为生产 privilege 建议。原生 Linux workflow 仍是资源数值的唯一验收来源。
 
-每次迭代都走真实 scoped-token register → claim → Worker code sandbox / velites agent → presigned S3 upload → restart，并校验 agent/code execution 的记录确属被测 Worker；不使用 `simulate_agents.py` 代替 executor。身份校验按本波次 jobs、实际 DAG/job_nodes 和 current node_run 建立 `(workspace, job, node, kind, execution)` 精确集合，历史或重复行不能顶替另一 job 的缺失。测量先等 job completed，再等预期 done execution/outcome 可见；缺失是 readiness 等待，CAS 或错误证据是立即合约失败。
+每次迭代都走真实 scoped-token register → claim → code sandbox / velites agent → presigned S3 upload → restart，并校验执行路由：非零 code envelope 的 agent/code 都属被测 Worker，默认 code=0 envelope 的 code 必须是 Host 本地执行而 agent 仍属被测 Worker；不使用 `simulate_agents.py` 代替 executor。身份校验按本波次 jobs、实际 DAG/job_nodes 和 current node_run 建立 `(workspace, job, node, kind, execution)` 精确集合，历史或重复行不能顶替另一 job 的缺失。Worker 路径先等 job completed，再等预期 done execution/outcome 可见；Host local code 不写 `agent_execution_requests`，改为逐项匹配 current node_run 对应的 released `executor_leases`，排除历史、重复和跨 job/代次覆盖。缺失是 readiness 等待，CAS 或错误证据是立即合约失败。
 
-每个 execution 的每个声明 output 都必须携带 direct 新形态 ref（`storage_key` / `size_bytes` / `content_hash` 及正确 staging key），并逐项核对 promoted `job_artifacts` 行、同一 workspace/job/name 的 version/legacy authority key、staging→authority gzip form 一致、authority object 的 HEAD size 与（gzip 解压后的）内容 SHA256；无 spec、CAS 字符串、ref 缺失、跨 workspace/job key、form mismatch 或对象证据不符都会使测量失败，job completed/done 本身不算上传通道证据。
+Worker 的每个 execution 的每个声明 output 都必须携带 direct 新形态 ref（`storage_key` / `size_bytes` / `content_hash` 及正确 staging key）；Host local code 则由唯一 lease execution_id 派生 staging key，并以 `job_artifacts` 的 size/hash/gzip form 重建 Host authority ref。两侧都逐项核对 promoted `job_artifacts` 行、同一 workspace/job/name 的 version/legacy authority key、staging→authority gzip form 一致、authority object 的 HEAD size 与（gzip 解压后的）内容 SHA256；无 spec、CAS 字符串、ref 缺失、跨 workspace/job key、form mismatch 或对象证据不符都会使测量失败，job completed/done 本身不算输出集合或上传通道证据。result 分别报告 `remote_execution_verified`、Worker `direct_upload_verified` 与 `host_authority_verified`，Host authority 不得冒称 Worker direct upload。
 
 场景包括 agent-only、code-only、mixed、upload/backlog、runtime pending-restart、executor restart 与 container restart。upload/backlog 把上传并发临时固定为 1，并暂停测量专用 SeaweedFS 容器作为受控上传屏障；波次使用不需要对象存储的预置 enabled ref connection 提交，轮询 Worker `/api/status`，必须在同一观测点看到 `upload_active_count >= 1` 与 `upload_queued_count >= 1`。观测次数、峰值和 UTC/monotonic 时间写入 result，逐次观测也写入 raw samples；`finally` 必须 unpause 并恢复上传并发，然后才等待 direct PUT 与最终证据链成功。零 backlog 或最终 CAS 回落均失败，异常路径同样恢复屏障，不污染后续场景。pending-restart 通过控制 API 短暂停用再恢复 velites：要求 PUT `restarted=true` 的响应暴露 PID/started_at 已前进的未注册新进程，并等待禁用期望 runtime 的新进程以 `exit_code=2`、`failed`、`worker_running=false`、`registered=false` 的启动预检拒绝终态收敛；不得用修改前 registered_runtimes 与修改后 disabled 配置拼接成功。恢复后必须相对该禁用代次验证新 PID、重新注册并完成后续 restart。pending 恢复、executor restart 与 container restart 只有在当前本地 `registered=true`、当前 `host_worker` 的 scope/runtime/capacity 完整且 PID/started_at 相对前代发生变化后才写 `observed=true`；result 同时保存 `observed_at`、前后 PID/started_at 与当前 Host `last_seen_at`，Host 旧登记行不能单独满足 readiness。cold 每次重建容器与命名卷，warm 复用镜像和命名卷；两者都运行完整场景。
 
-采样边界是 Worker 容器的整个 cgroup v2，而不是单个进程或 Docker stats 近似值：`memory.current/peak/max/stat` 包含全部子孙和 page cache，`pids.current/max/events` 按内核线程计数，pids 默认约 100ms、memory 默认 500ms 独立采样。每个迭代的 `samples.jsonl` 保留原始样本与场景 marker；`result.json` 的 `sample_counts` 与 `summary.json` 的 `all/all.sample_counts` 都直接表示全迭代 memory/pids 样本总数，场景分组只用于分场景统计，不能混作总数。`summary.json` 提供 nearest-rank p95、max、kernel peak、events 和相对**当前已有** cgroup limit 的 headroom。limit 为 `max` 时 headroom 为 `null`，`recommended_limits` 永远为 `null`；后续 PR 必须依据合入工具后的原生 Linux 实测另行决定数值。
+采样边界是 Worker 容器的整个 cgroup v2，而不是单个进程或 Docker stats 近似值：`memory.current/peak/max/stat` 包含全部子孙和 page cache，`pids.current/max/events` 按内核线程计数，pids 默认约 100ms、memory 默认 500ms 独立采样。每个迭代的 `samples.jsonl` 保留原始样本与场景 marker；`result.json` 的 `sample_counts` 与 `summary.json` 的 `all/all.sample_counts` 都直接表示全迭代 memory/pids 样本总数，场景分组只用于分场景统计，不能混作总数。`summary.json` 提供 nearest-rank p95、max、kernel peak、events 和相对**当前已有** cgroup limit 的 headroom。limit 为 `max` 时 headroom 为 `null`，`recommended_limits` 永远为 `null`；工具本身不推荐数值，生产默认值按下列原始证据与公式独立计算。
+
+生产默认值的 reference 证据来自原生 Linux run `40748230269` 的 default 三次 cold/warm 迭代（227 个 memory、1110 个 pids 原始样本，非生产数据），每波 20 jobs、artifact 1MiB。下表直接从 raw `memory.peak/current/stat` 与 100ms `pids.current` 合并计算；memory 单位为 MiB，var 为总体方差（memory 为 MiB²），不是标准差或 Docker stats 近似值：
+
+| 场景 | memory/pids 样本 | peak p95 | peak max | peak var | current p95 | pids p95 / max | pids var |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| agent | 36 / 180 | 201.180 | 201.180 | 1359.71 | 176.586 | 68 / 99 | 246.85 |
+| code | 11 / 58 | 201.180 | 201.180 | 14.05 | 115.152 | 39 / 39 | 24.85 |
+| mixed | 64 / 315 | 201.180 | 201.180 | 12.81 | 162.227 | 61 / 97 | 116.17 |
+| upload-backlog | 45 / 225 | 201.613 | 201.613 | 9.81 | 178.957 | 71 / 98 | 177.88 |
+| pending-restart | 16 / 77 | 201.613 | 201.613 | 7.51 | 115.324 | 17 / 38 | 35.97 |
+| executor-restart | 14 / 69 | 201.613 | 201.613 | 8.34 | 61.805 | 8 / 10 | 0.36 |
+| container-restart | 19 / 92 | 201.613 | 201.613 | 2269.57 | 61.270 | 7 / 9 | 4.68 |
+| idle-registered | 12 / 60 | 60.859 | 60.859 | 0.01 | 60.555 | 9 / 9 | 0.22 |
+| register | 7 / 31 | 59.328 | 59.328 | 221.04 | 58.520 | 8 / 8 | 4.38 |
+| teardown | 3 / 3 | 58.457 | 58.457 | 0.05 | 57.953 | 7 / 7 | 0.00 |
+
+最坏 memory 场景是 upload-backlog；其 raw stat 的 p95/max 也一并复核：anon 为 140,947,456 / 164,126,720B，file 为 43,298,816 / 43,786,240B，kernel 为 6,082,560 / 7,692,288B，说明整个 cgroup 的匿名页、page cache 与内核开销均已纳入，而不是只看进程 RSS。三次迭代的 nearest-rank peak p95 恰好等于合并 max 是数据分布结果，并非直接指定 max。
+
+memory 公式为「最坏场景 p95 × 1.25，再向上取整」：211,406,848 × 1.25 = 264,258,560B（252.0166MiB），按 8MiB 向上取整为 **256MiB**。pids 不能直接合并全时间序列求 current p95：空闲时段会稀释每轮突发峰值，按该口径得到的 71 → 96 在 candidate run `40767031564` 中出现了 `pids.events.max=2` 的真实拒绝。修正为先取每轮 100ms 高频峰值，再对峰值集合求 p95；reference 三轮峰值为 99/98/97，小样本 nearest-rank p95=99，99 × 1.25 = 123.75，按 8 向上取整为 **128**。这不是任意加值或修改 `max_concurrency`；memory 保持 256MiB（该 candidate 无 OOM 证据），fault 输入保持 128m/64。最终 candidate/fault 仍需按修正后的精确 tip 验收，不能仅凭单次成功定值。
 
 artifact 还包括 Worker image ID/digest、velites SHA256/version、kernel/cgroup/arch/Docker 元数据、采样参数与脱敏 Host/Worker 日志。模型文件只记录 SHA256，不上传内容；注册 token、控制 token、stub models 与运行配置留在不上传的 work dir，日志中的 Bearer/register token/presigned query 会脱敏。workflow 不使用真实 provider secret 或生产数据，也不调用真实 LLM。Docker Desktop 功能模式可以验证 fresh schema、register、direct S3、backlog 与 restart，但不能验证原生 Linux 的 AppArmor/userns/发行版差异，也不能提供 sizing；这些原生 Linux namespace/cgroup/bwrap 与资源数值仍只能由 workflow 链路验收。macOS 单元测试只检查解析、汇总与安全契约，不能替代任何真实容器结果。
 
