@@ -362,6 +362,7 @@ def test_bwrap_inner_preload_scopes_state_and_cleans_failures() -> None:
     from scripts.stress.worker_resource_bwrap_inner_evidence import (
         _C_SOURCE,
         _CLEANUP,
+        _LOCK,
         _MARKER,
         _PRELOAD_GUARD,
         _SUPPORT,
@@ -396,9 +397,13 @@ def test_bwrap_inner_preload_scopes_state_and_cleans_failures() -> None:
     assert _SUPPORT.startswith("set -e; ")
     assert "test ! -e /etc/ld.so.preload" in _SUPPORT
     assert "test ! -L /etc/ld.so.preload" in _PRELOAD_GUARD
-    assert "test ! -h /etc/ld.so.preload" in _PRELOAD_GUARD
     assert f"touch {_MARKER}" in _SUPPORT and _MARKER in _CLEANUP
     assert "/etc/ld.so.preload" in _CLEANUP and "/tmp/bwrap-inner.so" in _CLEANUP
+    source = __import__("inspect").getsource(capture_inner_evidence)
+    assert "with open(_LOCK" in source
+    assert "fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)" in source
+    assert source.index("with open(_LOCK") < source.index("rm -f {_MARKER}")
+    assert _LOCK not in _CLEANUP
 
     calls = []
 
@@ -476,6 +481,45 @@ def test_bwrap_inner_guard_race_does_not_cleanup_user_file() -> None:
     with pytest.raises(RuntimeError, match="existing /etc/ld.so.preload"):
         capture_inner_evidence(run)
     assert calls[-1][-1].startswith(f"test ! -f {_MARKER}")
+
+
+def test_bwrap_inner_lock_rejects_second_capture_until_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from threading import Event, Thread
+
+    from scripts.stress import worker_resource_bwrap_inner_evidence as evidence
+
+    lock = tmp_path / "inner.lock"
+    started, release = Event(), Event()
+    calls = []
+
+    def compose(*arguments: str, **_kwargs: object) -> str:
+        calls.append(arguments)
+        if "python3" in arguments:
+            started.set()
+            assert release.wait(5)
+            return '{"outer": {}, "cases": {}}'
+        return ""
+
+    run = SimpleNamespace(
+        compose=compose,
+        env={"MEASUREMENT_WORKER_UID": "501", "MEASUREMENT_WORKER_GID": "20"},
+    )
+    monkeypatch.setattr(evidence, "_LOCK", str(lock))
+    result = {}
+    thread = Thread(target=lambda: result.setdefault("first", evidence.capture_inner_evidence(run)))
+    thread.start()
+    assert started.wait(5)
+    before = len(calls)
+    with pytest.raises(RuntimeError, match="already running"):
+        evidence.capture_inner_evidence(run)
+    assert len(calls) == before
+    release.set()
+    thread.join(5)
+    assert not thread.is_alive()
+    assert result["first"]["root"]["preload_events"] == []
+    assert evidence.capture_inner_evidence(run)["root"]["preload_events"] == []
 
 
 def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() -> None:
