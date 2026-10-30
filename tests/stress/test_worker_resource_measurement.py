@@ -546,8 +546,14 @@ def test_parent_write_probe_uses_bidirectional_sync_and_fail_closed() -> None:
         'libc.open(f"/proc/{child}/ns/user".encode(), os.O_RDONLY)',
         "libc.fcntl(ns_fd, 1)",
         "libc.setns(ns_fd, 0x10000000)",
+        "select.select([read], [], [], 5)",
+        "for _ in range(500)",
+        'else: raise TimeoutError("validator exit")',
+        'report["cleanup_status"] = cleanup(pid)',
+        'parent_report["target_cleanup_status"] = cleanup(child)',
+        'parent_report["target_reaped"] = True',
         "os.close(ns_fd)",
-        "os.kill(child, 9)",
+        "os.kill(pid, 9)",
         "os.waitpid(child, 0)",
         "os.environ.clear()",
     ):
@@ -564,10 +570,24 @@ def test_parent_write_probe_uses_bidirectional_sync_and_fail_closed() -> None:
         < _PARENT_WRITE_PROBE.index("os.write(go_write")
     )
     assert _PARENT_WRITE_PROBE.index("os.waitpid(child, 0)") < _PARENT_WRITE_PROBE.index(
-        "libc.setns(ns_fd"
+        'parent_report["setns"] = validate(ns_fd)'
     )
     for forbidden in ("os.environ[", "os.environ.get", "os.getenv", "models.json", "control_token"):
         assert forbidden not in _PARENT_WRITE_PROBE
+
+
+def test_parent_write_validator_success_requires_lifecycle_and_namespace() -> None:
+    from scripts.stress.worker_resource_parent_userns_evidence import _PARENT_WRITE_PROBE
+
+    for required in (
+        'validation.get("result") == 0',
+        "os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0",
+        'validation.get("reaped") is True',
+        'validation.get("namespace") == parent_report["parent_open"]["namespace"]',
+        'not parent_report["parent_open"]["flags"] & 1',
+        'parent_report.get("failure") or validation.get("failure", "validator validation failed")',
+    ):
+        assert required in _PARENT_WRITE_PROBE
 
 
 def test_wrap_evidence_preserves_support_install_failure() -> None:
