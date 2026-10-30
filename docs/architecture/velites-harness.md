@@ -226,8 +226,9 @@ bwrap 则经 `sandbox/userns.rs` 的专用预建 launcher。该入口在模型�
 通过 `SCM_RIGHTS` 把 `/proc/self/ns/user` FD 交给原父进程，再以 `--userns FD`
 执行 bwrap；FD 不随 exec 关闭，也不跨代复用。bwrap 可执行文件仅在 helper 分支
 规范化绝对路径，root/setuid 不改变旧 PATH 语义；payload 分隔符后的同名参数原样
-保留。exec 前环境只沿用 `bash_env` 既有白名单（PATH、HOME、TMPDIR、PYTHONPATH
-及 locale），不恢复完整敏感环境；显式 `--no-sandbox` 不进入 helper。若子进程短暂设置 dumpable 以取得
+保留。helper spawn 与最终 bwrap exec 前均只沿用 `bash_env` 既有白名单（PATH、
+HOME、TMPDIR、PYTHONPATH 及 locale），确保 dumpable 子进程地址空间不含 secret；
+root/setuid 与显式 `--no-sandbox` 不进入 helper，原环境语义不变。若子进程短暂设置 dumpable 以取得
 proc-owner，设置仅限该无敏感地址空间子进程，map 完成立即复位。父进程先校验
 子进程退出（异常或 5 秒超时均中止）再接收 FD；fork、unshare、map、open/write/prctl、
 FD 传递或 exec 任一步失败都不执行 payload，不增加 cap、

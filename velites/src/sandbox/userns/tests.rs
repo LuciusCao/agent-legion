@@ -1,4 +1,3 @@
-#[cfg(target_os = "linux")]
 use super::*;
 
 #[cfg(target_os = "linux")]
@@ -14,6 +13,33 @@ fn launcher_is_limited_to_nonroot_nonsetuid() {
 fn mapping_is_one_identity_line() {
     assert_eq!(mapping_line(1001), "1001 1001 1\n");
     assert_eq!(mapping_line(20), "20 20 1\n");
+}
+
+#[test]
+fn command_filters_environment_only_for_helper() {
+    let direct = CommandSpec::direct("bwrap", &[]).command();
+    assert_eq!(direct.get_envs().count(), 0);
+
+    let helper = CommandSpec {
+        program: PathBuf::from("velites-sandbox"),
+        args: Vec::new(),
+        helper: true,
+    }
+    .command();
+    let actual: Vec<_> = helper
+        .get_envs()
+        .map(|(name, value)| {
+            (
+                name.to_os_string(),
+                value.map(std::ffi::OsStr::to_os_string),
+            )
+        })
+        .collect();
+    let expected: Vec<_> = crate::tools::bash_env::inherited_env()
+        .into_iter()
+        .map(|(name, value)| (name, Some(value)))
+        .collect();
+    assert_eq!(actual, expected);
 }
 
 #[cfg(target_os = "linux")]

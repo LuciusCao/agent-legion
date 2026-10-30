@@ -20,6 +20,17 @@ impl CommandSpec {
             helper: false,
         }
     }
+
+    pub fn command(self) -> std::process::Command {
+        let mut command = std::process::Command::new(self.program);
+        command.args(self.args);
+        if self.helper {
+            command
+                .env_clear()
+                .envs(crate::tools::bash_env::inherited_env());
+        }
+        command
+    }
 }
 
 #[cfg(target_os = "linux")]

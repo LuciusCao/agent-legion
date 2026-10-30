@@ -111,8 +111,7 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         None => (argv[0].clone(), argv[1..].to_vec()),
     };
     let spec = userns::command_spec(&program, &wrapped_argv, ctx.sandbox.is_some(), &ctx.cwd)?;
-    let mut cmd = tokio::process::Command::new(spec.program);
-    cmd.args(spec.args);
+    let mut cmd = tokio::process::Command::from(spec.command());
     // #469: the child's stdin stays inherited (the command travels as
     // `bash -c <command>` argv; nothing is written by the harness).
     cmd.current_dir(&ctx.cwd)

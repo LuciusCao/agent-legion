@@ -494,8 +494,7 @@ fn probe_bwrap_policy(policy: &BwrapPolicy) -> anyhow::Result<()> {
         policy.allow_network,
     );
     let spec = userns::command_spec("bwrap", &argv, true, &std::env::current_dir()?)?;
-    let mut command = std::process::Command::new(spec.program);
-    command.args(spec.args);
+    let mut command = spec.command();
     let output = command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
