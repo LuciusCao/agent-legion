@@ -436,7 +436,7 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
             "strace",
             "-f",
             "-e",
-            "trace=clone,clone3,fork,vfork,unshare,prctl,openat,write,setgroups",
+            "trace=clone,clone3,fork,vfork,unshare,prctl,openat,write,setgroups,setns,fcntl,readlink,wait4,kill",
             "python3",
             "-c",
             _PARENT_WRITE_PROBE,
@@ -543,6 +543,10 @@ def test_parent_write_probe_uses_bidirectional_sync_and_fail_closed() -> None:
         'write_once("uid_map", f"/proc/{child}/uid_map"',
         'write_once("setgroups", f"/proc/{child}/setgroups", "deny\\n")',
         'write_once("gid_map", f"/proc/{child}/gid_map"',
+        'libc.open(f"/proc/{child}/ns/user".encode(), os.O_RDONLY)',
+        "libc.fcntl(ns_fd, 1)",
+        "libc.setns(ns_fd, 0x10000000)",
+        "os.close(ns_fd)",
         "os.kill(child, 9)",
         "os.waitpid(child, 0)",
         "os.environ.clear()",
@@ -553,6 +557,14 @@ def test_parent_write_probe_uses_bidirectional_sync_and_fail_closed() -> None:
     )
     assert _PARENT_WRITE_PROBE.index("os.write(ready_write") < _PARENT_WRITE_PROBE.index(
         "select.select([go_read]"
+    )
+    assert (
+        _PARENT_WRITE_PROBE.index('write_once("gid_map"')
+        < _PARENT_WRITE_PROBE.index('libc.open(f"/proc/{child}/ns/user"')
+        < _PARENT_WRITE_PROBE.index("os.write(go_write")
+    )
+    assert _PARENT_WRITE_PROBE.index("os.waitpid(child, 0)") < _PARENT_WRITE_PROBE.index(
+        "libc.setns(ns_fd"
     )
     for forbidden in ("os.environ[", "os.environ.get", "os.getenv", "models.json", "control_token"):
         assert forbidden not in _PARENT_WRITE_PROBE

@@ -90,6 +90,15 @@ try:
     write_once("uid_map", f"/proc/{child}/uid_map", f"{uid} {uid} 1\n")
     write_once("setgroups", f"/proc/{child}/setgroups", "deny\n")
     write_once("gid_map", f"/proc/{child}/gid_map", f"{gid} {gid} 1\n")
+    ns_fd = libc.open(f"/proc/{child}/ns/user".encode(), os.O_RDONLY)
+    if ns_fd < 0:
+        raise OSError(ctypes.get_errno(), f"open /proc/{child}/ns/user")
+    parent_report["parent_open"] = {
+        "fd": ns_fd, "flags": libc.fcntl(ns_fd, 1),
+        "namespace": os.readlink(f"/proc/self/fd/{ns_fd}"),
+    }
+    if parent_report["parent_open"]["flags"] & 1:
+        raise RuntimeError("namespace fd must not be close-on-exec")
     os.write(go_write, b"G")
     os.close(go_write)
     ready, _, _ = select.select([report_read], [], [], 5)
@@ -100,6 +109,22 @@ try:
     _, status = os.waitpid(child, 0)
     parent_report.update(child_report)
     parent_report["child_wait_status"] = status
+    validator_read, validator_write = os.pipe()
+    validator = os.fork()
+    if validator == 0:
+        os.close(validator_read)
+        result = libc.setns(ns_fd, 0x10000000)
+        validation = {"result": result, "errno": ctypes.get_errno()}
+        if result == 0:
+            validation["namespace"] = os.readlink("/proc/self/ns/user")
+        os.write(validator_write, json.dumps(validation).encode())
+        os._exit(0)
+    os.close(validator_write)
+    with os.fdopen(validator_read, "rb") as stream:
+        parent_report["setns"] = json.load(stream)
+    parent_report["setns"]["wait_status"] = os.waitpid(validator, 0)[1]
+    os.close(ns_fd)
+    parent_report["success"] = parent_report["success"] and parent_report["setns"]["result"] == 0
 except Exception as exc:
     parent_report["success"] = False
     parent_report["failure"] = f"{type(exc).__name__}: {exc}"
@@ -126,7 +151,7 @@ def run_parent_write_evidence(run: Any) -> dict[str, Any]:
             "strace",
             "-f",
             "-e",
-            "trace=clone,clone3,fork,vfork,unshare,prctl,openat,write,setgroups",
+            "trace=clone,clone3,fork,vfork,unshare,prctl,openat,write,setgroups,setns,fcntl,readlink,wait4,kill",
             "python3",
             "-c",
             _PARENT_WRITE_PROBE,
