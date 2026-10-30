@@ -362,6 +362,7 @@ def test_bwrap_inner_preload_scopes_state_and_cleans_failures() -> None:
     from scripts.stress.worker_resource_bwrap_inner_evidence import (
         _C_SOURCE,
         _CLEANUP,
+        _MARKER,
         _PRELOAD_GUARD,
         _SUPPORT,
         capture_inner_evidence,
@@ -396,6 +397,7 @@ def test_bwrap_inner_preload_scopes_state_and_cleans_failures() -> None:
     assert "test ! -e /etc/ld.so.preload" in _SUPPORT
     assert "test ! -L /etc/ld.so.preload" in _PRELOAD_GUARD
     assert "test ! -h /etc/ld.so.preload" in _PRELOAD_GUARD
+    assert f"touch {_MARKER}" in _SUPPORT and _MARKER in _CLEANUP
     assert "/etc/ld.so.preload" in _CLEANUP and "/tmp/bwrap-inner.so" in _CLEANUP
 
     calls = []
@@ -412,12 +414,13 @@ def test_bwrap_inner_preload_scopes_state_and_cleans_failures() -> None:
     )
     with pytest.raises(RuntimeError, match="probe failed"):
         capture_inner_evidence(run)
-    assert calls[-1][-1] == _CLEANUP
+    assert calls[-1][-1].endswith(_CLEANUP)
 
 
 def test_bwrap_inner_support_and_cleanup_failures_preserve_lifecycle() -> None:
     from scripts.stress.worker_resource_bwrap_inner_evidence import (
         _CLEANUP,
+        _MARKER,
         _PRELOAD_GUARD,
         _SUPPORT,
         capture_inner_evidence,
@@ -429,7 +432,7 @@ def test_bwrap_inner_support_and_cleanup_failures_preserve_lifecycle() -> None:
         calls.append(arguments)
         if arguments[-1] == _SUPPORT:
             raise RuntimeError("compile failed")
-        if arguments[-1] == _CLEANUP:
+        if arguments[-1].endswith(_CLEANUP):
             raise RuntimeError("cleanup failed")
         return ""
 
@@ -443,14 +446,43 @@ def test_bwrap_inner_support_and_cleanup_failures_preserve_lifecycle() -> None:
     assert "cleanup failed" in str(caught.value)
     assert isinstance(caught.value.__cause__, RuntimeError)
     assert "compile failed" in str(caught.value.__cause__)
-    assert calls[0][-1].startswith(_PRELOAD_GUARD)
-    assert calls[-1][-1] == _CLEANUP
+    assert calls[0][-1] == f"rm -f {_MARKER}"
+    assert calls[1][-1].startswith(_PRELOAD_GUARD)
+    assert calls[-1][-1].endswith(_CLEANUP)
+
+
+def test_bwrap_inner_guard_race_does_not_cleanup_user_file() -> None:
+    from scripts.stress.worker_resource_bwrap_inner_evidence import (
+        _CLEANUP,
+        _MARKER,
+        _SUPPORT,
+        capture_inner_evidence,
+    )
+
+    calls = []
+
+    def compose(*arguments: str, **_kwargs: object) -> str:
+        calls.append(arguments)
+        if arguments[-1] == _SUPPORT:
+            raise RuntimeError("existing /etc/ld.so.preload")
+        if arguments[-1] == _CLEANUP:
+            raise AssertionError("cleanup must not run without the marker")
+        return ""
+
+    run = SimpleNamespace(
+        compose=compose,
+        env={"MEASUREMENT_WORKER_UID": "501", "MEASUREMENT_WORKER_GID": "20"},
+    )
+    with pytest.raises(RuntimeError, match="existing /etc/ld.so.preload"):
+        capture_inner_evidence(run)
+    assert calls[-1][-1].startswith(f"test ! -f {_MARKER}")
 
 
 def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() -> None:
     from scripts.stress.worker_resource_bwrap_inner_evidence import (
         _CLEANUP,
         _EVENTS,
+        _MARKER,
         _PRELOAD_GUARD,
         _SUPPORT,
     )
@@ -538,6 +570,7 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
             "501",
             "20",
         ),
+        ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", f"rm -f {_MARKER}"),
         (
             "exec",
             "-T",
@@ -595,7 +628,7 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
             "-c",
             f"test ! -f {_EVENTS} || cat {_EVENTS}",
         ),
-        ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _CLEANUP),
+        ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", f"test ! -f {_MARKER} || {_CLEANUP}"),
     ]
 
 

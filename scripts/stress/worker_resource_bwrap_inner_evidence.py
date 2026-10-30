@@ -178,15 +178,14 @@ _PRELOAD_GUARD = (
 _SUPPORT = (
     "set -e; "
     f"{_PRELOAD_GUARD} || {{ echo 'existing /etc/ld.so.preload' >&2; exit 1; }}; "
+    "touch /tmp/bwrap-inner.active; "
     "command -v cc || (apt-get update -qq && apt-get install -y -qq --no-install-recommends gcc libc6-dev); "
     f"printf '%s' '{base64.b64encode(_C_SOURCE.encode()).decode()}' | base64 -d > /tmp/bwrap-inner.c; "
     "cc -shared -fPIC -O2 -o /tmp/bwrap-inner.so /tmp/bwrap-inner.c -ldl; "
     "printf '%s\\n' /tmp/bwrap-inner.so > /etc/ld.so.preload"
 )
-_CLEANUP = (
-    "rm -f /etc/ld.so.preload /tmp/bwrap-inner.c /tmp/bwrap-inner.so /tmp/bwrap-inner-events.jsonl"
-)
-_EVENTS = "/tmp/bwrap-inner-events.jsonl"
+_CLEANUP = "rm -f /etc/ld.so.preload /tmp/bwrap-inner.c /tmp/bwrap-inner.so /tmp/bwrap-inner-events.jsonl /tmp/bwrap-inner.active"
+_MARKER, _EVENTS = "/tmp/bwrap-inner.active", "/tmp/bwrap-inner-events.jsonl"
 
 
 def _root(run: Any, command: str) -> str:
@@ -196,12 +195,11 @@ def _root(run: Any, command: str) -> str:
 def capture_inner_evidence(run: Any) -> dict[str, Any]:
     from scripts.stress.worker_resource_wrap_evidence import _probe
 
-    installed = False
     probe_error = None
     reports = {}
     try:
+        _root(run, f"rm -f {_MARKER}")
         _root(run, f"{_PRELOAD_GUARD} || {{ echo 'existing /etc/ld.so.preload' >&2; exit 1; }}")
-        installed = True
         _root(run, _SUPPORT)
         for name, uid, gid in (
             ("root", "0", "0"),
@@ -218,12 +216,11 @@ def capture_inner_evidence(run: Any) -> dict[str, Any]:
         probe_error = exc
         raise
     finally:
-        if installed:
-            try:
-                _root(run, _CLEANUP)
-            except Exception as cleanup_error:
-                if probe_error is not None:
-                    raise RuntimeError(
-                        f"probe failed: {probe_error}; cleanup failed: {cleanup_error}"
-                    ) from probe_error
-                raise
+        try:
+            _root(run, f"test ! -f {_MARKER} || {_CLEANUP}")
+        except Exception as cleanup_error:
+            if probe_error is not None:
+                raise RuntimeError(
+                    f"probe failed: {probe_error}; cleanup failed: {cleanup_error}"
+                ) from probe_error
+            raise
