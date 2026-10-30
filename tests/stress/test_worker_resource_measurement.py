@@ -362,6 +362,7 @@ def test_bwrap_inner_preload_scopes_state_and_cleans_failures() -> None:
     from scripts.stress.worker_resource_bwrap_inner_evidence import (
         _C_SOURCE,
         _CLEANUP,
+        _PRELOAD_GUARD,
         _SUPPORT,
         capture_inner_evidence,
     )
@@ -393,6 +394,8 @@ def test_bwrap_inner_preload_scopes_state_and_cleans_failures() -> None:
         assert forbidden not in _C_SOURCE
     assert _SUPPORT.startswith("set -e; ")
     assert "test ! -e /etc/ld.so.preload" in _SUPPORT
+    assert "test ! -L /etc/ld.so.preload" in _PRELOAD_GUARD
+    assert "test ! -h /etc/ld.so.preload" in _PRELOAD_GUARD
     assert "/etc/ld.so.preload" in _CLEANUP and "/tmp/bwrap-inner.so" in _CLEANUP
 
     calls = []
@@ -412,8 +415,45 @@ def test_bwrap_inner_preload_scopes_state_and_cleans_failures() -> None:
     assert calls[-1][-1] == _CLEANUP
 
 
+def test_bwrap_inner_support_and_cleanup_failures_preserve_lifecycle() -> None:
+    from scripts.stress.worker_resource_bwrap_inner_evidence import (
+        _CLEANUP,
+        _PRELOAD_GUARD,
+        _SUPPORT,
+        capture_inner_evidence,
+    )
+
+    calls = []
+
+    def compose(*arguments: str, **_kwargs: object) -> str:
+        calls.append(arguments)
+        if arguments[-1] == _SUPPORT:
+            raise RuntimeError("compile failed")
+        if arguments[-1] == _CLEANUP:
+            raise RuntimeError("cleanup failed")
+        return ""
+
+    run = SimpleNamespace(
+        compose=compose,
+        env={"MEASUREMENT_WORKER_UID": "501", "MEASUREMENT_WORKER_GID": "20"},
+    )
+    with pytest.raises(RuntimeError) as caught:
+        capture_inner_evidence(run)
+    assert "compile failed" in str(caught.value)
+    assert "cleanup failed" in str(caught.value)
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert "compile failed" in str(caught.value.__cause__)
+    assert calls[0][-1].startswith(_PRELOAD_GUARD)
+    assert calls[-1][-1] == _CLEANUP
+
+
 def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() -> None:
-    from scripts.stress.worker_resource_bwrap_inner_evidence import _CLEANUP, _EVENTS, _SUPPORT
+    from scripts.stress.worker_resource_bwrap_inner_evidence import (
+        _CLEANUP,
+        _EVENTS,
+        _PRELOAD_GUARD,
+        _SUPPORT,
+    )
     from scripts.stress.worker_resource_parent_userns_evidence import _PARENT_WRITE_PROBE
     from scripts.stress.worker_resource_userns_evidence import _SELF_MAP_PROBE
     from scripts.stress.worker_resource_wrap_evidence import (
@@ -497,6 +537,16 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
             _PARENT_WRITE_PROBE,
             "501",
             "20",
+        ),
+        (
+            "exec",
+            "-T",
+            "--user",
+            "0:0",
+            "worker",
+            "sh",
+            "-c",
+            f"{_PRELOAD_GUARD} || {{ echo 'existing /etc/ld.so.preload' >&2; exit 1; }}",
         ),
         ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _SUPPORT),
         ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", f"rm -f {_EVENTS}"),

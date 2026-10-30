@@ -172,9 +172,12 @@ long syscall(long number, ...) {
 }
 """
 
+_PRELOAD_GUARD = (
+    "test ! -e /etc/ld.so.preload && test ! -L /etc/ld.so.preload && test ! -h /etc/ld.so.preload"
+)
 _SUPPORT = (
     "set -e; "
-    "test ! -e /etc/ld.so.preload || { echo 'existing /etc/ld.so.preload' >&2; exit 1; }; "
+    f"{_PRELOAD_GUARD} || {{ echo 'existing /etc/ld.so.preload' >&2; exit 1; }}; "
     "command -v cc || (apt-get update -qq && apt-get install -y -qq --no-install-recommends gcc libc6-dev); "
     f"printf '%s' '{base64.b64encode(_C_SOURCE.encode()).decode()}' | base64 -d > /tmp/bwrap-inner.c; "
     "cc -shared -fPIC -O2 -o /tmp/bwrap-inner.so /tmp/bwrap-inner.c -ldl; "
@@ -194,10 +197,12 @@ def capture_inner_evidence(run: Any) -> dict[str, Any]:
     from scripts.stress.worker_resource_wrap_evidence import _probe
 
     installed = False
+    probe_error = None
     reports = {}
     try:
-        _root(run, _SUPPORT)
+        _root(run, f"{_PRELOAD_GUARD} || {{ echo 'existing /etc/ld.so.preload' >&2; exit 1; }}")
         installed = True
+        _root(run, _SUPPORT)
         for name, uid, gid in (
             ("root", "0", "0"),
             ("nonroot", run.env["MEASUREMENT_WORKER_UID"], run.env["MEASUREMENT_WORKER_GID"]),
@@ -209,6 +214,16 @@ def capture_inner_evidence(run: Any) -> dict[str, Any]:
                 json.loads(line) for line in output.splitlines() if line
             ]
         return reports
+    except Exception as exc:
+        probe_error = exc
+        raise
     finally:
         if installed:
-            _root(run, _CLEANUP)
+            try:
+                _root(run, _CLEANUP)
+            except Exception as cleanup_error:
+                if probe_error is not None:
+                    raise RuntimeError(
+                        f"probe failed: {probe_error}; cleanup failed: {cleanup_error}"
+                    ) from probe_error
+                raise
