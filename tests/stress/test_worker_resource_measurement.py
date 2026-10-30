@@ -359,6 +359,7 @@ def test_wrap_probe_separates_outer_and_inner_bwrap_without_secret_reads() -> No
 
 
 def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() -> None:
+    from scripts.stress.worker_resource_userns_evidence import _SELF_MAP_PROBE
     from scripts.stress.worker_resource_wrap_evidence import (
         _STRACE_SUPPORT,
         _WRAP_PROBE,
@@ -370,6 +371,8 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
     def compose(*arguments: str, **kwargs: object) -> str:
         assert kwargs == {"capture": True}
         calls.append(arguments)
+        if _SELF_MAP_PROBE in arguments:
+            return '{"success": true}'
         return '{"outer": {}, "cases": {}}' if "python3" in arguments else ""
 
     run = SimpleNamespace(
@@ -379,9 +382,32 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
     assert _wrap_evidence(run) == {
         "root": {"outer": {}, "cases": {}},
         "nonroot": {"outer": {}, "cases": {}},
+        "nonroot_self_map": {"success": True, "trace": '{"success": true}'},
     }
     assert calls == [
         ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT),
+        (
+            "exec",
+            "-T",
+            "--user",
+            "501:20",
+            "worker",
+            "strace",
+            "-f",
+            "-e",
+            "trace=clone,clone3,fork,vfork,unshare,prctl,openat,write,setgroups",
+            "-P",
+            "/proc/self/uid_map",
+            "-P",
+            "/proc/self/status",
+            "-P",
+            "/proc/self/attr/current",
+            "python3",
+            "-c",
+            _SELF_MAP_PROBE,
+            "501",
+            "20",
+        ),
         (
             "exec",
             "-T",
@@ -407,6 +433,50 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
             "20",
         ),
     ]
+
+
+def test_self_map_probe_is_minimal_and_stops_matrix_on_failure() -> None:
+    from scripts.stress.worker_resource_userns_evidence import _SELF_MAP_PROBE
+    from scripts.stress.worker_resource_wrap_evidence import _STRACE_SUPPORT, _wrap_evidence
+
+    for required in (
+        "before_unshare",
+        "after_unshare",
+        "before_map_write",
+        "write_uid_map",
+        "CapPrm",
+        "CapEff",
+        "CapBnd",
+        "NoNewPrivs",
+        "Seccomp",
+        "dumpable",
+        "app_armor_current",
+        "parent_pid",
+        "real_uid",
+        "effective_uid",
+        "uid_map",
+    ):
+        assert required in _SELF_MAP_PROBE
+    assert "os.environ.clear()" in _SELF_MAP_PROBE
+    for forbidden in ("os.environ[", "os.environ.get", "os.getenv", "models.json", "control_token"):
+        assert forbidden not in _SELF_MAP_PROBE
+
+    calls = []
+
+    def compose(*arguments: str, **_kwargs: object) -> str:
+        calls.append(arguments)
+        if "sh" in arguments:
+            return ""
+        if _SELF_MAP_PROBE in arguments:
+            return '{"success": false, "failure": "write EPERM"}'
+        raise AssertionError("self-map failure must stop the full matrix")
+
+    run = SimpleNamespace(
+        compose=compose, env={"MEASUREMENT_WORKER_UID": "501", "MEASUREMENT_WORKER_GID": "20"}
+    )
+    result = _wrap_evidence(run)
+    assert result["nonroot_self_map"]["success"] is False
+    assert len(calls) == 2 and calls[0][-1] == _STRACE_SUPPORT
 
 
 def test_wrap_evidence_preserves_support_install_failure() -> None:

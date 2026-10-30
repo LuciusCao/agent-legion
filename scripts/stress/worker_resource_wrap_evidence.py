@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from scripts.stress.worker_resource_userns_evidence import wrap_evidence as _wrap_evidence
+
+__all__ = ["_wrap_evidence"]
+
 _STRACE_SUPPORT = (
     "command -v strace || "
     "(apt-get update -qq && apt-get install -y -qq --no-install-recommends strace)"
@@ -96,10 +100,3 @@ def _probe(run: Any, uid: str, gid: str) -> dict[str, Any]:
     )
     output = run.compose(*command, capture=True)
     return json.loads(output.strip().splitlines()[-1])
-
-
-def _wrap_evidence(run: Any) -> dict[str, Any]:
-    uid = run.env["MEASUREMENT_WORKER_UID"]
-    gid = run.env["MEASUREMENT_WORKER_GID"]
-    run.compose("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT, capture=True)
-    return {"root": _probe(run, "0", "0"), "nonroot": _probe(run, uid, gid)}

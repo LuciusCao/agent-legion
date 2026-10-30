@@ -230,6 +230,76 @@ for root in ("/control", "/data"):
     _volume_python(project, image, script, str(uid), str(gid))
 
 
+@pytest.mark.skipif(
+    os.environ.get("AGENT_LEGION_DOCKER_TESTS") != "1",
+    reason="真实 Compose 身份负例需 AGENT_LEGION_DOCKER_TESTS=1",
+)
+def test_direct_migration_rejects_compose_identity_mismatch_without_side_effects(
+    tmp_path: Path, nonroot_worker_image: str
+) -> None:
+    target, project = _real_nonroot_project(tmp_path, "identity-mismatch")
+    try:
+        result = _run_real_nonroot_installer(tmp_path, target)
+        assert result.returncode == 0, result.stderr
+        _compose(target, "up", "-d")
+        _wait_worker_api(target)
+        before_compose = (target / "docker-compose.yaml").read_bytes()
+        before_env = (target / ".env").read_bytes()
+        before_token = _compose(
+            target,
+            "exec",
+            "-T",
+            "worker",
+            "cat",
+            "/var/lib/agent-legion-worker-control/control_token",
+        ).stdout
+        result = subprocess.run(
+            [
+                "sh",
+                str(REPO_ROOT / "scripts/migrate-worker-volumes.sh"),
+                "--uid",
+                "1000",
+                "--gid",
+                "1000",
+                "--image",
+                nonroot_worker_image,
+                "--preflight-complete",
+                "--",
+                "-f",
+                "docker-compose.yaml",
+            ],
+            cwd=target,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 1
+        assert "AGENT_WORKER_UID/AGENT_WORKER_GID" in result.stderr
+        assert (target / "docker-compose.yaml").read_bytes() == before_compose
+        assert (target / ".env").read_bytes() == before_env
+        assert _compose(target, "exec", "-T", "worker", "workerctl", "status").returncode == 0
+        after_token = _compose(
+            target,
+            "exec",
+            "-T",
+            "worker",
+            "cat",
+            "/var/lib/agent-legion-worker-control/control_token",
+        ).stdout
+        assert after_token == before_token
+        _assert_volume_tree_owned(project, nonroot_worker_image, os.getuid(), os.getgid())
+    finally:
+        subprocess.run(
+            ["docker", "compose", "-f", "docker-compose.yaml", "down"],
+            cwd=target,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["docker", "volume", "rm", "-f", f"{project}_worker-control", f"{project}_worker-data"],
+            capture_output=True,
+        )
+
+
 @pytest.mark.parametrize("root_owned", [False, True], ids=["fresh", "root-owned"])
 @pytest.mark.skipif(
     os.environ.get("AGENT_LEGION_DOCKER_TESTS") != "1",

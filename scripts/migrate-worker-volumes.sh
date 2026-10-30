@@ -55,6 +55,15 @@ trap 'exit 1' INT TERM HUP
 if ! docker compose "$@" config --format json >"$TMPDIR_/compose.json" 2>"$TMPDIR_/compose.err"; then
   die "实际 Compose config 失败，未迁移：$(tail -1 "$TMPDIR_/compose.err")"
 fi
+command -v python3 >/dev/null 2>&1 || die "需要 python3 精确解析目标 Compose 的 Worker 运行身份"
+if ! compose_identity="$(python3 -c 'import json,sys
+user = json.load(sys.stdin)["services"]["worker"].get("user")
+if not isinstance(user, str) or not user.strip():
+    raise ValueError("services.worker.user 必须是非空 UID:GID 字符串")
+print(user)' <"$TMPDIR_/compose.json" 2>>"$TMPDIR_/compose.err")"; then
+  die "无法从目标 Compose 精确解析 Worker 运行身份，未迁移：$(tail -1 "$TMPDIR_/compose.err")"
+fi
+[ "$compose_identity" = "$WORKER_UID:$WORKER_GID" ] || die "目标 Compose services.worker.user=$compose_identity 与迁移身份 $WORKER_UID:$WORKER_GID 不一致；请配置对应的 AGENT_WORKER_UID/AGENT_WORKER_GID，未 stop/chown"
 if [ -z "$IMAGE_OVERRIDE" ]; then
   command -v python3 >/dev/null 2>&1 || die "未传 --image 时需要 python3 精确解析 Worker 镜像"
   if ! image="$(python3 -c 'import json,sys

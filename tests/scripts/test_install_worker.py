@@ -127,9 +127,12 @@ def _run_installer(
         'if [ "$1" = compose ] && [ "${4:-}" = ps ]; then\n'
         '  printf "%s\\n" "${FAKE_RUNNING_WORKER:-}"; exit 0\n'
         "fi\n"
-        'if [ "$1" = compose ] && [ "${5:-}" = --format ] && [ "${FAKE_COMPOSE_CONFIG_EXIT:-0}" != 0 ]; then\n'
-        '  printf "%s\\n" \'{"volumes":{"worker-control":{"name":"agent-legion-worker_worker-control"}}}\'\n'
-        '  exit "$FAKE_COMPOSE_CONFIG_EXIT"\n'
+        'if [ "$1" = compose ] && [ "${5:-}" = --format ]; then\n'
+        '  if [ "${FAKE_COMPOSE_CONFIG_EXIT:-0}" != 0 ]; then\n'
+        '    printf "%s\\n" \'{"volumes":{"worker-control":{"name":"agent-legion-worker_worker-control"}}}\'\n'
+        '    exit "$FAKE_COMPOSE_CONFIG_EXIT"\n'
+        "  fi\n"
+        '  printf \'{"services":{"worker":{"user":"%s"}}}\\n\' "${FAKE_COMPOSE_WORKER_USER:-$AGENT_WORKER_UID:$AGENT_WORKER_GID}"\n'
         "fi\n"
         'if [ "$1" = compose ] && [ "$2" = version ]; then\n'
         '  [ "${3:-}" = --short ] && echo v2.29.0 || echo Docker Compose version v2.29.0\n'
@@ -436,6 +439,7 @@ def test_installer_allows_custom_paths_covered_by_recursive_volume_migration(
         ({"FAKE_STOP_FAIL": "1"}, "停止 Worker 失败"),
         ({"FAKE_RUNNING_WORKER": "container-still-running"}, "仍在运行"),
         ({"FAKE_MIGRATION_FAIL": "1"}, "属主迁移失败"),
+        ({"FAKE_COMPOSE_WORKER_USER": "1000:1000"}, "AGENT_WORKER_UID/AGENT_WORKER_GID"),
     ],
 )
 def test_installer_migration_failures_do_not_commit_compose_or_env(tmp_path, failure_env, message):
@@ -485,9 +489,11 @@ def _migrator_image_probe(
         "    if mode == 'fail':\n"
         "        print('image lookup failed', file=sys.stderr)\n"
         "        raise SystemExit(7)\n"
-        "    worker = {'image': 'worker-image', 'volumes': []}\n"
+        "    worker = {'image': 'worker-image', 'volumes': [], 'user': '501:20'}\n"
         "    if mode == 'empty':\n"
         "        worker['image'] = ''\n"
+        "    if mode == 'identity-mismatch':\n"
+        "        worker['user'] = '1000:1000'\n"
         "    services = {} if mode == 'missing' else {'worker': worker}\n"
         "    print(json.dumps({'services': services, 'volumes': {}}))\n"
         "    raise SystemExit(0)\n"
@@ -543,8 +549,20 @@ def test_migrator_rejects_failed_or_missing_worker_image_lookup(tmp_path: Path, 
     assert not any(line.startswith("run ") for line in log.splitlines())
     if mode == "fail":
         assert "image lookup failed" in result.stderr
+    elif mode == "missing":
+        assert "精确解析 Worker 运行身份" in result.stderr
     else:
         assert "精确解析 Worker 镜像" in result.stderr
+
+
+def test_migrator_rejects_target_compose_identity_mismatch_before_docker_run(
+    tmp_path: Path,
+) -> None:
+    result, log = _migrator_image_probe(
+        tmp_path, REPO_ROOT / "deploy/compose.worker.standalone.yaml", "identity-mismatch"
+    )
+    assert result.returncode == 1 and "AGENT_WORKER_UID/AGENT_WORKER_GID" in result.stderr
+    assert not any(line.startswith(("run ", "compose stop ")) for line in log.splitlines())
 
 
 @pytest.mark.skipif(
@@ -596,6 +614,8 @@ def test_migrator_uses_worker_image_from_real_compose_cli(
             "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
             "REAL_PATH": os.environ["PATH"],
             "FAKE_DOCKER_RUN_LOG": str(run_log),
+            "AGENT_WORKER_UID": "501",
+            "AGENT_WORKER_GID": "20",
         },
         capture_output=True,
         text=True,

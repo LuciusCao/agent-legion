@@ -178,7 +178,7 @@ fn send_fd(socket: i32, fd: i32) -> Result<()> {
     message.msg_iovlen = 1;
     message.msg_control = control.as_mut_ptr().cast();
     message.msg_controllen = control.len();
-    let header = unsafe { libc::CMSG_FIRSTHDR(&mut message) };
+    let header = unsafe { libc::CMSG_FIRSTHDR(&message) };
     if header.is_null() {
         return Err(anyhow!("SCM_RIGHTS header missing"));
     }
@@ -214,7 +214,7 @@ fn recv_fd(socket: i32) -> Result<i32> {
     if message.msg_flags & libc::MSG_CTRUNC != 0 {
         return Err(anyhow!("SCM_RIGHTS control data truncated"));
     }
-    let header = unsafe { libc::CMSG_FIRSTHDR(&mut message) };
+    let header = unsafe { libc::CMSG_FIRSTHDR(&message) };
     if header.is_null() {
         return Err(anyhow!("SCM_RIGHTS header missing"));
     }
