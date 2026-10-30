@@ -163,3 +163,11 @@ fn parent_write_prepares_single_line_maps_and_live_fd() {
     drop(fd);
     assert_eq!(unsafe { libc::fcntl(raw, libc::F_GETFD) }, -1);
 }
+
+#[ignore = "requires unprivileged user namespaces; run explicitly in the native probe"]
+#[test]
+fn final_phase_faults_are_fail_closed() {
+    for fault in ["open", "reset"] {
+        assert!(!fault_child_succeeded(fault));
+    }
+}

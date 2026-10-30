@@ -21,6 +21,12 @@ struct ResetDumpable;
 
 impl ResetDumpable {
     fn finish(self) -> Result<()> {
+        #[cfg(test)]
+        if std::env::var_os("VELITES_USERNS_TEST_FAULT").as_deref()
+            == Some(std::ffi::OsStr::new("reset"))
+        {
+            return Err(anyhow!("injected reset failure"));
+        }
         prctl_dumpable(0)
     }
 }
@@ -203,6 +209,16 @@ pub(crate) fn wait_child(child: i32, parent_socket: i32) -> Result<()> {
     result
 }
 
+#[cfg(test)]
+pub(crate) fn fault_child_succeeded(fault: &str) -> bool {
+    std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["parent_write_prepares", "--ignored"])
+        .env("VELITES_USERNS_TEST_FAULT", fault)
+        .status()
+        .unwrap()
+        .success()
+}
+
 fn namespace_child(socket: i32, deadline: Instant) -> ! {
     let result = (|| {
         if unsafe { libc::unshare(libc::CLONE_NEWUSER) } != 0 {
@@ -212,13 +228,19 @@ fn namespace_child(socket: i32, deadline: Instant) -> ! {
         let reset = ResetDumpable;
         send_control(socket, b'R')?;
         receive_control(socket, b'G', deadline, None)?;
-        reset.finish()?;
+        #[cfg(test)]
+        if std::env::var_os("VELITES_USERNS_TEST_FAULT").as_deref()
+            == Some(std::ffi::OsStr::new("open"))
+        {
+            return Err(anyhow!("injected open failure"));
+        }
         let path = std::ffi::CString::new("/proc/self/ns/user").expect("static path");
         let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDONLY) };
         if fd < 0 {
             return Err(std::io::Error::last_os_error()).context("open user namespace");
         }
         let owned = unsafe { OwnedFd::from_raw_fd(fd) };
+        reset.finish()?;
         send_fd(socket, owned.as_raw_fd())?;
         Ok(owned)
     })();

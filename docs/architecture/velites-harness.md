@@ -228,15 +228,16 @@ namespace/AppArmor 上下文的父进程派生可监督 map-writer，按
 单行映射，全部成功才发送 go，避免受限 AppArmor user-namespace 上下文拒绝
 child self-map。target child 在 writer 完全结束前保持 unreaped，zombie 保留 PID，
 writer 先回收后才处理 target，避免 PID 复用后的误写或误杀；已回收/未知状态
-绝不再发送信号，只有确认 live 的进程才可被 kill 并 reap。child 随后复位
-dumpable，通过 `SCM_RIGHTS` 把 `/proc/self/ns/user` FD 交给父进程，再以
-`--userns FD` 执行 bwrap；map 未完成不得复位或传 FD。FD 不随 exec 关闭，也不跨代
-复用。bwrap 可执行文件仅在 helper 分支
-规范化绝对路径，root/setuid 不改变旧 PATH 语义；payload 分隔符后的同名参数原样
-保留。helper spawn 与最终 bwrap exec 前均只沿用 `bash_env` 既有白名单（PATH、
-HOME、TMPDIR、PYTHONPATH 及 locale），确保 dumpable 子进程地址空间不含 secret；
-root/setuid 与显式 `--no-sandbox` 不进入 helper，原环境语义不变。若子进程短暂设置 dumpable 以取得
-proc-owner，设置仅限该无敏感地址空间子进程，map 完成立即复位。全阶段共用 5 秒
+绝不再发送信号，只有确认 live 的进程才可被 kill 并 reap。child 随后先在 dumpable
+上下文中打开 `/proc/self/ns/user` 取得私有 FD，再复位 dumpable，最后通过
+`SCM_RIGHTS` 把 FD 交给父进程并以 `--userns FD` 执行 bwrap；map 未完成不得 open、
+复位或传 FD，复位前 FD 不得传出无敏感 child。open 失败仍由 guard 复位，reset 失败
+不得 send；两者均不执行 payload。FD 不随 exec 关闭，也不跨代复用。bwrap 可执行文件
+仅在 helper 分支规范化绝对路径，root/setuid 不改变旧 PATH 语义；payload 分隔符后的
+同名参数原样保留。helper spawn 与最终 bwrap exec 前均只沿用 `bash_env` 既有白名单
+（PATH、HOME、TMPDIR、PYTHONPATH 及 locale），确保 dumpable 子进程地址空间不含
+secret；root/setuid 与显式 `--no-sandbox` 不进入 helper，原环境语义不变。短暂
+dumpable 仅限该无敏感地址空间子进程，取得私有 FD 后立即复位。全阶段共用 5 秒
 deadline，map open/write 由 supervisor 等待 writer，超时同时清理 writer 与 target；
 同步乱序、child 早退、fork、unshare、map、open/write/prctl、FD 传递或 exec
 任一步失败都不执行 payload。5 秒是可 kill 状态下的调度预算，内核 D 状态的
