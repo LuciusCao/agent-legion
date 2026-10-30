@@ -198,12 +198,7 @@ fn wait_child_deadline(child: i32, deadline: Instant) -> Result<()> {
 pub(crate) fn wait_child(child: i32, parent_socket: i32) -> Result<()> {
     let result = wait_child_deadline(child, Instant::now() + Duration::from_secs(5));
     if result.is_err() {
-        unsafe {
-            libc::kill(child, libc::SIGKILL);
-            let mut status = 0;
-            libc::waitpid(child, &mut status, 0);
-            libc::close(parent_socket);
-        }
+        super::process::abort(child, parent_socket);
     }
     result
 }

@@ -51,6 +51,20 @@ fn reaped_process_is_not_killed_again() {
 }
 
 #[test]
+fn wait_child_preserves_nonzero_exit_after_reap() {
+    let child = unsafe { libc::fork() };
+    assert!(child >= 0);
+    if child == 0 {
+        unsafe { libc::_exit(7) }
+    }
+    let socket = socket();
+    let error = super::namespace::wait_child(child, socket)
+        .expect_err("nonzero child exit must be preserved");
+    assert!(error.to_string().contains("status 1792"));
+    assert_eq!(process_state(child), ProcessState::Unknown);
+}
+
+#[test]
 fn writer_deadline_cleans_both_participants() {
     let target = sleeping_child();
     let writer = sleeping_child();
