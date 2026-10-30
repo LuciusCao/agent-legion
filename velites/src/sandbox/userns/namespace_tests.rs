@@ -167,7 +167,7 @@ fn parent_write_prepares_single_line_maps_and_live_fd() {
 #[ignore = "requires unprivileged user namespaces; run explicitly in the native probe"]
 #[test]
 fn final_phase_faults_are_fail_closed() {
-    for fault in ["open", "reset"] {
+    for fault in ["open", "send", "reset"] {
         assert!(!fault_child_succeeded(fault));
     }
 }

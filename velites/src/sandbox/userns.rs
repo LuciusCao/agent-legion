@@ -122,6 +122,8 @@ pub fn command_spec(
 }
 
 #[cfg(target_os = "linux")]
+mod fd;
+#[cfg(target_os = "linux")]
 mod namespace;
 #[cfg(target_os = "linux")]
 mod process;
@@ -129,6 +131,8 @@ mod process;
 pub(crate) use namespace::prepare_user_namespace;
 #[cfg(all(target_os = "linux", test))]
 pub(crate) use namespace::{mapping_line, wait_child};
+#[cfg(test)]
+mod fd_tests;
 #[cfg(test)]
 mod namespace_tests;
 #[cfg(test)]

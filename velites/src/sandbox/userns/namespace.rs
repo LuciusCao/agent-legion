@@ -1,4 +1,4 @@
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::OwnedFd;
 use std::time::{Duration, Instant};
 
 use super::process::abort_with_writer;
@@ -37,71 +37,6 @@ impl Drop for ResetDumpable {
     }
 }
 
-fn send_fd(socket: i32, fd: i32) -> Result<()> {
-    let mut data = [0u8; 1];
-    let mut iov = libc::iovec {
-        iov_base: data.as_mut_ptr().cast(),
-        iov_len: 1,
-    };
-    let mut control =
-        [0u8; unsafe { libc::CMSG_SPACE(std::mem::size_of::<i32>() as u32) as usize }];
-    let mut message: libc::msghdr = unsafe { std::mem::zeroed() };
-    message.msg_iov = &mut iov;
-    message.msg_iovlen = 1;
-    message.msg_control = control.as_mut_ptr().cast();
-    message.msg_controllen = control.len();
-    let header = unsafe { libc::CMSG_FIRSTHDR(&message) };
-    if header.is_null() {
-        return Err(anyhow!("SCM_RIGHTS header missing"));
-    }
-    unsafe {
-        (*header).cmsg_level = libc::SOL_SOCKET;
-        (*header).cmsg_type = libc::SCM_RIGHTS;
-        (*header).cmsg_len = libc::CMSG_LEN(std::mem::size_of::<i32>() as u32) as usize;
-        std::ptr::copy_nonoverlapping(&fd, libc::CMSG_DATA(header).cast::<i32>(), 1);
-    }
-    if unsafe { libc::sendmsg(socket, &message, 0) } < 0 {
-        return Err(std::io::Error::last_os_error()).context("sendmsg SCM_RIGHTS");
-    }
-    Ok(())
-}
-
-fn recv_fd(socket: i32) -> Result<i32> {
-    let mut data = [0u8; 1];
-    let mut iov = libc::iovec {
-        iov_base: data.as_mut_ptr().cast(),
-        iov_len: 1,
-    };
-    let mut control =
-        [0u8; unsafe { libc::CMSG_SPACE(std::mem::size_of::<i32>() as u32) as usize }];
-    let mut message: libc::msghdr = unsafe { std::mem::zeroed() };
-    message.msg_iov = &mut iov;
-    message.msg_iovlen = 1;
-    message.msg_control = control.as_mut_ptr().cast();
-    message.msg_controllen = control.len();
-    if unsafe { libc::recvmsg(socket, &mut message, 0) } <= 0 {
-        return Err(std::io::Error::last_os_error()).context("recvmsg SCM_RIGHTS");
-    }
-    if message.msg_flags & libc::MSG_CTRUNC != 0 {
-        return Err(anyhow!("SCM_RIGHTS control data truncated"));
-    }
-    let header = unsafe { libc::CMSG_FIRSTHDR(&message) };
-    if header.is_null() {
-        return Err(anyhow!("SCM_RIGHTS header missing"));
-    }
-    unsafe {
-        if (*header).cmsg_level != libc::SOL_SOCKET || (*header).cmsg_type != libc::SCM_RIGHTS {
-            return Err(anyhow!("unexpected control message"));
-        }
-        if (*header).cmsg_len < libc::CMSG_LEN(std::mem::size_of::<i32>() as u32) as usize {
-            return Err(anyhow!("short file descriptor payload"));
-        }
-        Ok(std::ptr::read_unaligned(
-            libc::CMSG_DATA(header) as *const i32
-        ))
-    }
-}
-
 pub(crate) fn child_exit(child: i32) -> Result<()> {
     let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
     let result = unsafe {
@@ -124,7 +59,7 @@ pub(crate) fn child_exit(child: i32) -> Result<()> {
     Ok(())
 }
 
-fn wait_socket(socket: i32, deadline: Instant, child: Option<i32>) -> Result<()> {
+pub(crate) fn wait_socket(socket: i32, deadline: Instant, child: Option<i32>) -> Result<()> {
     loop {
         if let Some(child) = child {
             child_exit(child)?;
@@ -228,21 +163,8 @@ fn namespace_child(socket: i32, deadline: Instant) -> ! {
         let reset = ResetDumpable;
         send_control(socket, b'R')?;
         receive_control(socket, b'G', deadline, None)?;
-        #[cfg(test)]
-        if std::env::var_os("VELITES_USERNS_TEST_FAULT").as_deref()
-            == Some(std::ffi::OsStr::new("open"))
-        {
-            return Err(anyhow!("injected open failure"));
-        }
-        let path = std::ffi::CString::new("/proc/self/ns/user").expect("static path");
-        let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDONLY) };
-        if fd < 0 {
-            return Err(std::io::Error::last_os_error()).context("open user namespace");
-        }
-        let owned = unsafe { OwnedFd::from_raw_fd(fd) };
         reset.finish()?;
-        send_fd(socket, owned.as_raw_fd())?;
-        Ok(owned)
+        Ok(())
     })();
     match result {
         Ok(_) => unsafe { libc::_exit(0) },
@@ -301,13 +223,9 @@ pub(crate) fn prepare_user_namespace() -> Result<OwnedFd> {
             deadline,
             &mut writer,
         )?;
+        let fd = super::fd::receive_namespace_fd(child, deadline, &mut writer)?;
         send_control(parent_socket, b'G')?;
-        wait_socket(parent_socket, deadline, None)?;
-        let fd = unsafe { OwnedFd::from_raw_fd(recv_fd(parent_socket)?) };
         wait_child_deadline(child, deadline)?;
-        if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) } < 0 {
-            return Err(std::io::Error::last_os_error()).context("validate namespace descriptor");
-        }
         Ok(fd)
     })();
     match result {
