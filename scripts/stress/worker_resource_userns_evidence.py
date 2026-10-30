@@ -125,6 +125,9 @@ def run_self_map_evidence(run: Any) -> dict[str, Any]:
     )
     report = json.loads(result.stdout.strip().splitlines()[-1])
     report["trace"] = result.stderr[-8192:]
+    from scripts.stress.worker_resource_parent_userns_evidence import run_parent_write_evidence
+
+    report["parent_write"] = run_parent_write_evidence(run)
     return report
 
 

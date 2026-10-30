@@ -359,6 +359,7 @@ def test_wrap_probe_separates_outer_and_inner_bwrap_without_secret_reads() -> No
 
 
 def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() -> None:
+    from scripts.stress.worker_resource_parent_userns_evidence import _PARENT_WRITE_PROBE
     from scripts.stress.worker_resource_userns_evidence import _SELF_MAP_PROBE
     from scripts.stress.worker_resource_wrap_evidence import (
         _STRACE_SUPPORT,
@@ -381,6 +382,11 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
 
     def compose_result(*arguments: str) -> object:
         calls.append(arguments)
+        if _PARENT_WRITE_PROBE in arguments:
+            return SimpleNamespace(
+                stdout='{"success": true, "after_maps": {"uid_map": "501 501 1\\n"}}',
+                stderr="parent write uid_map = 10\n",
+            )
         assert _SELF_MAP_PROBE in arguments
         return SimpleNamespace(stdout='{"success": true}', stderr=trace)
 
@@ -392,7 +398,15 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
     assert _wrap_evidence(run) == {
         "root": {"outer": {}, "cases": {}},
         "nonroot": {"outer": {}, "cases": {}},
-        "nonroot_self_map": {"success": True, "trace": trace},
+        "nonroot_self_map": {
+            "success": True,
+            "trace": trace,
+            "parent_write": {
+                "success": True,
+                "after_maps": {"uid_map": "501 501 1\n"},
+                "trace": "parent write uid_map = 10\n",
+            },
+        },
     }
     assert "unshare(CLONE_NEWUSER)" in trace and "write(3, mapping, 14)" in trace
     assert calls == [
@@ -410,6 +424,22 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
             "python3",
             "-c",
             _SELF_MAP_PROBE,
+            "501",
+            "20",
+        ),
+        (
+            "exec",
+            "-T",
+            "--user",
+            "501:20",
+            "worker",
+            "strace",
+            "-f",
+            "-e",
+            "trace=clone,clone3,fork,vfork,unshare,prctl,openat,write,setgroups",
+            "python3",
+            "-c",
+            _PARENT_WRITE_PROBE,
             "501",
             "20",
         ),
@@ -441,6 +471,7 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
 
 
 def test_self_map_probe_is_minimal_and_stops_matrix_on_failure() -> None:
+    from scripts.stress.worker_resource_parent_userns_evidence import _PARENT_WRITE_PROBE
     from scripts.stress.worker_resource_userns_evidence import _SELF_MAP_PROBE
     from scripts.stress.worker_resource_wrap_evidence import _STRACE_SUPPORT, _wrap_evidence
 
@@ -476,6 +507,11 @@ def test_self_map_probe_is_minimal_and_stops_matrix_on_failure() -> None:
 
     def compose_result(*arguments: str) -> object:
         calls.append(arguments)
+        if _PARENT_WRITE_PROBE in arguments:
+            return SimpleNamespace(
+                stdout='{"success": true, "after_maps": {"uid_map": "501 501 1\\n"}}',
+                stderr="parent write uid_map = 10\n",
+            )
         assert _SELF_MAP_PROBE in arguments
         return SimpleNamespace(
             stdout='{"success": false, "failure": "write EPERM"}',
@@ -494,7 +530,32 @@ def test_self_map_probe_is_minimal_and_stops_matrix_on_failure() -> None:
     result = _wrap_evidence(run)
     assert result["nonroot_self_map"]["success"] is False
     assert "write(3, mapping, 14) = -1 EPERM" in result["nonroot_self_map"]["trace"]
-    assert len(calls) == 2 and calls[0][-1] == _STRACE_SUPPORT
+    assert result["nonroot_self_map"]["parent_write"]["success"] is True
+    assert len(calls) == 3 and calls[0][-1] == _STRACE_SUPPORT
+
+
+def test_parent_write_probe_uses_bidirectional_sync_and_fail_closed() -> None:
+    from scripts.stress.worker_resource_parent_userns_evidence import _PARENT_WRITE_PROBE
+
+    for required in (
+        "select.select([go_read], [], [], 5)",
+        "select.select([ready_read], [], [], 5)",
+        'write_once("uid_map", f"/proc/{child}/uid_map"',
+        'write_once("setgroups", f"/proc/{child}/setgroups", "deny\\n")',
+        'write_once("gid_map", f"/proc/{child}/gid_map"',
+        "os.kill(child, 9)",
+        "os.waitpid(child, 0)",
+        "os.environ.clear()",
+    ):
+        assert required in _PARENT_WRITE_PROBE
+    assert _PARENT_WRITE_PROBE.index('write_once("setgroups"') < _PARENT_WRITE_PROBE.index(
+        'write_once("gid_map"'
+    )
+    assert _PARENT_WRITE_PROBE.index("os.write(ready_write") < _PARENT_WRITE_PROBE.index(
+        "select.select([go_read]"
+    )
+    for forbidden in ("os.environ[", "os.environ.get", "os.getenv", "models.json", "control_token"):
+        assert forbidden not in _PARENT_WRITE_PROBE
 
 
 def test_wrap_evidence_preserves_support_install_failure() -> None:

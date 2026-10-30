@@ -1090,6 +1090,7 @@
     "scripts/stress/worker_resource_log_path.py": 30,
     "scripts/stress/worker_resource_measurement.py": 290,
     "scripts/stress/worker_resource_output.py": 45,
+    "scripts/stress/worker_resource_parent_userns_evidence.py": 141,
     "scripts/stress/worker_resource_reporting.py": 100,
     "scripts/stress/worker_resource_restart.py": 105,
     "scripts/stress/worker_resource_runtime_evidence.py": 139,
