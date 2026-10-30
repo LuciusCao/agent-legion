@@ -378,14 +378,17 @@ release-train `HEAD`-only exception.
   `check.sh` keeps partitions report-only — its coverage file may hold a
   partial tier, and floors on partial data produce false reds. It also runs
   `check_reruns.py` against every shard report: a retry-pass is merge-blocking
-  unless its exact nodeid has a registry entry. An expired deadline is only
-  listed here, never fails the PR (#941: a calendar date must not red
-  unrelated PRs); the nightly `exemption-expiry` job enforces it. Every PR
-  (any target branch; scheduled jobs only see the default branch and only
-  after the merge) additionally passes the target branch's registry
-  (`--base-registry`) and fails on entries the PR itself adds or re-targets
-  (deadline, nodeid, scope, recurring, registered_on / extended_on — #1034)
-  with an already expired deadline.
+  unless its exact nodeid has a registry entry. Untouched pre-existing expired
+  deadlines are only listed here (#941: a calendar date must not red unrelated
+  PRs); the nightly `exemption-expiry` job enforces them. Every PR /
+  merge-group run (any target branch; scheduled jobs only see the default
+  branch and only after the merge) additionally passes the target branch's
+  registry (`--base-registry`) and fails on entries the change itself adds or
+  re-targets (deadline, nodeid, scope, recurring, registered_on / extended_on
+  — #1034) with an already expired deadline. The current registry is loaded
+  strictly, while the base is read leniently so pre-#941 entries without
+  `registered_on` remain comparable; backfilling anchor dates on such an
+  old-schema entry is a schema migration, not a touch.
 - **frontend-logic / frontend-component-a/b / frontend-coverage** — frontend
   static checks and the two Vitest projects (node / jsdom) as parallel jobs;
   the slower component project is split again with Vitest's deterministic
@@ -412,10 +415,12 @@ release-train `HEAD`-only exception.
   way). Needs the full project env (`check_architecture` imports
   `server.app`) and full history (budget monotonicity anchors on `HEAD^`),
   and carries the same release-train anchor opt-out as `backend-unit`.
-- **docker-build** — CI-only image build lane (host + worker targets). It runs
-  only when the `changes` job detects image-relevant path changes
-  (`Dockerfile`, `.dockerignore`, dependency locks, `worker/`, `shared/`,
-  `deploy/`); no other job exercises the Dockerfile.
+- **docker-build** — CI-only image build lane (host + worker targets). The
+  `changes` job selects it for image-relevant paths (`Dockerfile`,
+  `.dockerignore`, dependency locks, `worker/`, `shared/`, `deploy/`); no
+  other job exercises the Dockerfile. Workflow/composite-action or
+  lane-classifier edits, dispatch, and any run without a usable diff base
+  force it on together with every other lane.
 - **quality-gate** — stable final context required by branch protection;
   succeeds only when every selected lane succeeded (intentional path skips are
   neutral).
@@ -434,22 +439,25 @@ In `nightly-gate.yml`:
 - **exemption-expiry** — refreshes the issue-state manifest and detects
   expired architecture exemptions; the refreshed manifest is committed to a
   dedicated `chore/issue-states-sync` branch and merged via an auto-merge PR
-  by the job itself (#1150: the manual
-  `make architecture-issue-states` ritual rots on a single-maintainer repo —
-  five weeks of red nightly proved it), while a closed anchor issue still
-  fails the job so the exemption gets fulfilled or re-anchored first — the
-  docs-only lane (changes + docs-terms) gates the merge, so the bot never
-  bypasses the trunk ruleset. Since #295 it also detects expired
-  flaky-registry deadlines (`check_reruns.py --check-deadlines`, deadline
-  evidence without needing the extended rerun report), and since #1024 on
-  every maintained branch too (`scripts/quality/flaky_branch_deadlines.py`:
-  each `release/X.Y.Z` above the default branch's version,
-  registries read leniently from the fetched branch tips). It is the only lane
-  that fails on an expired deadline (#941) and annotates entries due within
-  7 days as warnings; PR backend-coverage enforces observed reruns only. The
-  registry's clock-free rules (one entry per nodeid, deadline at most 45
-  days after the entry's `registered_on` / `extended_on`) are enforced on
-  every load, including the unit-tier `tests/scripts/test_flaky_registry_entries.py`.
+  by the job itself (#1150: the manual `make architecture-issue-states` ritual
+  rots on a single-maintainer repo — five weeks of red nightly proved it),
+  while a closed anchor issue still fails the job so the exemption gets
+  fulfilled or re-anchored. The manifest's `config/` path selects backend and
+  frontend in the PR gate; `backend-unit`'s static phase owns repo-wide
+  governance while standalone `docs-terms` and `governance-guard` skip, so the
+  bot never bypasses the trunk ruleset. Since #295 the job also enforces
+  untouched pre-existing expired flaky-registry deadlines on the default
+  branch (`check_reruns.py --check-deadlines`, without needing the extended
+  rerun report), and since #1024 on maintained branches too
+  (`scripts/quality/flaky_branch_deadlines.py`): every `release/X.Y.Z` without
+  its `vX.Y.Z` tag is maintained, unversioned `release/*` names fail open
+  towards checking, and registries are read leniently from the fetched branch
+  tips. Entries due within 7 days are warnings; PR / merge-group
+  backend-coverage still enforces observed reruns and touched-entry expiry as
+  described above. The current registry's clock-free rules (one entry per
+  nodeid, deadline at most 45 days after the entry's `registered_on` /
+  `extended_on`) are enforced by strict loads, including the unit-tier
+  `tests/scripts/test_flaky_registry_entries.py`.
 - **nightly-e2e** — multi-browser smoke E2E (the deterministic browser suite
   re-run on Chromium, Firefox, and WebKit via `scripts/e2e/run_browser_smoke.py`;
   PR/push stays Chromium-only) plus a workspace stress run
@@ -542,7 +550,7 @@ verification comes from the CI workflow, not from these files.
 
 Configure the repository on GitHub as follows:
 
-1. Protect `main` via the **repository ruleset `trunk-protection-main`** (Settings → Rules → Rulesets): required status check `quality-gate`, deletion and non-fast-forward blocked. It replaced the legacy branch-protection object (#1150); the nightly exemption-expiry job's manifest refresh merges through an auto-merge PR on the docs-only lane instead of a direct push — the Actions bot has no clean Integration bypass on personal repos, and the PR path keeps the trunk ruleset intact. `release/*` trains get the same ruleset shape when they exist.
+1. Protect `main` via the **repository ruleset `trunk-protection-main`** (Settings → Rules → Rulesets): required status check `quality-gate`, deletion and non-fast-forward blocked. It replaced the legacy branch-protection object (#1150); the nightly exemption-expiry job's manifest refresh merges through an auto-merge PR whose `config/` path selects backend+frontend and `backend-unit`'s static governance instead of a direct push — the Actions bot has no clean Integration bypass on personal repos, and the PR path keeps the trunk ruleset intact. `release/*` trains get the same ruleset shape when they exist.
 2. Require only the stable `quality-gate` status check before merging. It
    validates selected internal lanes, including `docs-terms` for docs-only
    changes; do not require volatile shard names individually.

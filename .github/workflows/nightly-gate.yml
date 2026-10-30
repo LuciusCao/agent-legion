@@ -206,12 +206,10 @@ jobs:
   # issue-state manifest from GitHub (the only networked step of the
   # exemption lifecycle), then run the offline expiry detection that the
   # quick gate also runs. A closed anchor issue fails here so the exemption
-  # gets fulfilled or re-anchored before the manifest lands on trunk.
-  # #1150: the manifest commit is automated — the stale-manual-ritual gap is
-  # what kept this lane (and the whole nightly) red for five weeks. The job
-  # commits the refreshed manifest directly to the default branch; the
-  # detection still fails the job when an anchor issue closed, so the
-  # exemption gets fulfilled or re-anchored before the commit lands.
+  # gets fulfilled or re-anchored. #1150: the manifest commit is automated —
+  # the stale-manual-ritual gap is what kept this lane (and the whole nightly)
+  # red for five weeks. The job proposes the refreshed manifest through an
+  # auto-merge PR instead of committing directly to the default branch.
   exemption-expiry:
     name: exemption-expiry
     runs-on: ubuntu-latest
@@ -242,9 +240,11 @@ jobs:
       # nightly, #1150). Direct pushes to main are ruleset-blocked for the
       # Actions bot (required quality-gate check; no clean Integration bypass
       # exists on personal repos), so the commit rides a dedicated branch and
-      # a PR with auto-merge — the docs-only lane (changes + docs-terms) is
-      # exactly the gate this manifest change should pass. Detection below
-      # still fails the job on a closed anchor, before anything is proposed.
+      # a PR with auto-merge. The config/ manifest path selects backend and
+      # frontend in quality-gate's changes job; backend-unit's static phase
+      # owns repo-wide governance while standalone docs-terms and
+      # governance-guard skip. Detection below still fails the job on a
+      # closed anchor.
       - name: Propose refreshed manifest
         env:
           GH_TOKEN: ${{ github.token }}
@@ -278,9 +278,11 @@ jobs:
       # exemption lifecycle above — an expired entry surfaced only when the
       # nightly extended suite happened to run (or never). Same cadence,
       # same job: the check is deadline-only here, rerun evidence stays on
-      # the ci-extended job. Since #941 this is the only place an expired
-      # deadline fails (PR CI and the unit tier stay clock-free); entries
-      # due within 7 days surface as ::warning:: annotations on the run.
+      # the ci-extended job. Since #941 this enforces untouched pre-existing
+      # expired entries on the default branch; PR / merge-group CI separately
+      # rejects expired entries the change adds or re-targets, while unit-tier
+      # registry validation stays clock-free. Entries due within 7 days
+      # surface as ::warning:: annotations on the run.
       - name: Detect expired flaky-registry deadlines
         run: uv run python scripts/check_reruns.py --check-deadlines
 
