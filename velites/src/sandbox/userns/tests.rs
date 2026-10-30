@@ -26,7 +26,7 @@ fn command_filters_environment_only_for_helper() {
         helper: true,
     }
     .command();
-    let actual: Vec<_> = helper
+    let actual: std::collections::BTreeMap<_, _> = helper
         .get_envs()
         .map(|(name, value)| {
             (
@@ -35,7 +35,7 @@ fn command_filters_environment_only_for_helper() {
             )
         })
         .collect();
-    let expected: Vec<_> = crate::tools::bash_env::inherited_env()
+    let expected: std::collections::BTreeMap<_, _> = crate::tools::bash_env::inherited_env()
         .into_iter()
         .map(|(name, value)| (name, Some(value)))
         .collect();
