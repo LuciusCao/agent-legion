@@ -1,6 +1,7 @@
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::time::{Duration, Instant};
 
+use super::process::abort_with_writer;
 use anyhow::{anyhow, Context, Result};
 
 pub(crate) fn mapping_line(id: u32) -> String {
@@ -28,18 +29,6 @@ impl Drop for ResetDumpable {
     fn drop(&mut self) {
         let _ = prctl_dumpable(0);
     }
-}
-
-fn write_map(path: &str, contents: &str) -> Result<()> {
-    use std::io::Write;
-
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
-        .with_context(|| format!("open {path}"))?;
-    file.write_all(contents.as_bytes())
-        .with_context(|| format!("write {path}"))
 }
 
 fn send_fd(socket: i32, fd: i32) -> Result<()> {
@@ -107,14 +96,24 @@ fn recv_fd(socket: i32) -> Result<i32> {
     }
 }
 
-fn child_exit(child: i32) -> Result<()> {
-    let mut status = 0;
-    let result = unsafe { libc::waitpid(child, &mut status, libc::WNOHANG) };
+pub(crate) fn child_exit(child: i32) -> Result<()> {
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let result = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            child as u32,
+            &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
     if result < 0 {
-        return Err(std::io::Error::last_os_error()).context("waitpid");
+        return Err(std::io::Error::last_os_error()).context("waitid");
     }
-    if result == child {
-        return Err(anyhow!("userns launcher child exited with status {status}"));
+    if unsafe { info.si_pid() } == child {
+        return Err(anyhow!(
+            "userns launcher child exited with status {}",
+            unsafe { info.si_status() }
+        ));
     }
     Ok(())
 }
@@ -237,20 +236,6 @@ fn namespace_child(socket: i32, deadline: Instant) -> ! {
     }
 }
 
-pub(crate) fn write_parent_map(child: i32, name: &str, contents: &str) -> Result<()> {
-    child_exit(child)?;
-    write_map(&format!("/proc/{child}/{name}"), contents)
-}
-
-pub(crate) fn abort(child: i32, socket: i32) {
-    unsafe {
-        libc::close(socket);
-        libc::kill(child, libc::SIGKILL);
-        let mut status = 0;
-        libc::waitpid(child, &mut status, 0);
-    }
-}
-
 pub(crate) fn prepare_user_namespace() -> Result<OwnedFd> {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut sockets = [0i32; 2];
@@ -279,13 +264,26 @@ pub(crate) fn prepare_user_namespace() -> Result<OwnedFd> {
         namespace_child(child_socket, deadline);
     }
     unsafe { libc::close(child_socket) };
+    let mut writer = None;
     let result = (|| {
         receive_control(parent_socket, b'R', deadline, Some(child))?;
         let uid = unsafe { libc::getuid() };
         let gid = unsafe { libc::getgid() };
-        write_parent_map(child, "uid_map", &mapping_line(uid))?;
-        write_parent_map(child, "setgroups", "deny\n")?;
-        write_parent_map(child, "gid_map", &mapping_line(gid))?;
+        super::process::write_parent_map(
+            child,
+            "uid_map",
+            &mapping_line(uid),
+            deadline,
+            &mut writer,
+        )?;
+        super::process::write_parent_map(child, "setgroups", "deny\n", deadline, &mut writer)?;
+        super::process::write_parent_map(
+            child,
+            "gid_map",
+            &mapping_line(gid),
+            deadline,
+            &mut writer,
+        )?;
         send_control(parent_socket, b'G')?;
         wait_socket(parent_socket, deadline, None)?;
         let fd = unsafe { OwnedFd::from_raw_fd(recv_fd(parent_socket)?) };
@@ -301,7 +299,7 @@ pub(crate) fn prepare_user_namespace() -> Result<OwnedFd> {
             Ok(fd)
         }
         Err(error) => {
-            abort(child, parent_socket);
+            abort_with_writer(child, parent_socket, writer);
             Err(error)
         }
     }

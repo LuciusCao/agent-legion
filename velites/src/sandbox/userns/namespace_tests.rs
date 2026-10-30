@@ -1,6 +1,7 @@
 #![cfg(target_os = "linux")]
 
 use super::namespace::*;
+use super::process::{abort, abort_with_writer, write_parent_map};
 use std::os::fd::AsRawFd;
 use std::time::{Duration, Instant};
 
@@ -67,7 +68,7 @@ fn early_child_exit_is_rejected() {
     )
     .expect_err("early child exit must fail");
     assert!(error.to_string().contains("child exited"));
-    unsafe { libc::close(parent) };
+    abort(child, parent);
     assert_reaped(child);
 }
 
@@ -103,9 +104,17 @@ fn parent_map_open_failure_aborts_child() {
         unsafe { libc::_exit(0) }
     }
     unsafe { libc::close(child_socket) };
-    let error = write_parent_map(child, "missing", "deny\n").expect_err("bad map path must fail");
-    assert!(error.to_string().contains("open /proc/"));
-    abort(child, parent);
+    let mut writer = None;
+    let error = write_parent_map(
+        child,
+        "missing",
+        "deny\n",
+        Instant::now() + Duration::from_secs(1),
+        &mut writer,
+    )
+    .expect_err("bad map path must fail");
+    assert!(error.to_string().contains("map writer exited"));
+    abort_with_writer(child, parent, writer);
     assert_reaped(child);
 }
 
@@ -117,9 +126,17 @@ fn parent_map_requires_live_child() {
         unsafe { libc::_exit(0) }
     }
     std::thread::sleep(Duration::from_millis(20));
-    let error = write_parent_map(child, "uid_map", &mapping_line(1001))
-        .expect_err("exited child cannot receive maps");
+    let mut writer = None;
+    let error = write_parent_map(
+        child,
+        "uid_map",
+        &mapping_line(1001),
+        Instant::now() + Duration::from_secs(1),
+        &mut writer,
+    )
+    .expect_err("exited child cannot receive maps");
     assert!(error.to_string().contains("child exited"));
+    reap(child);
 }
 
 #[test]

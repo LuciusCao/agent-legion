@@ -124,11 +124,15 @@ pub fn command_spec(
 #[cfg(target_os = "linux")]
 mod namespace;
 #[cfg(target_os = "linux")]
+mod process;
+#[cfg(target_os = "linux")]
 pub(crate) use namespace::prepare_user_namespace;
 #[cfg(all(target_os = "linux", test))]
 pub(crate) use namespace::{mapping_line, wait_child};
 #[cfg(test)]
 mod namespace_tests;
+#[cfg(test)]
+mod process_tests;
 
 #[cfg(target_os = "linux")]
 fn validate_bwrap_args(args: &[String]) -> Result<()> {

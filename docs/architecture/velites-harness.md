@@ -223,9 +223,12 @@ Linux 运行时要求：root 或带 setuid 位的 bwrap 沿用原 argv；nonroot
 bwrap 则经 `sandbox/userns.rs` 的专用预建 launcher。该入口在模型发现/provider
 初始化前启动 fresh 进程，仅接收当前 UID/GID、绝对 bwrap 路径与原 argv。launcher
 子进程创建 user namespace 并短暂设置 dumpable 后进入 ready 等待；仍在原 user
-namespace/AppArmor 上下文的父进程按 `/proc/<child>/uid_map`、
-`setgroups=deny`、`gid_map` 顺序写入当前 UID/GID 的单行映射，全部成功才发送 go，
-避免受限 AppArmor user-namespace 上下文拒绝 child self-map。child 随后复位
+namespace/AppArmor 上下文的父进程派生可监督 map-writer，按
+`/proc/<child>/uid_map`、`setgroups=deny`、`gid_map` 顺序写入当前 UID/GID 的
+单行映射，全部成功才发送 go，避免受限 AppArmor user-namespace 上下文拒绝
+child self-map。target child 在 writer 完全结束前保持 unreaped，zombie 保留 PID，
+writer 先回收后才处理 target，避免 PID 复用后的误写或误杀；已回收/未知状态
+绝不再发送信号，只有确认 live 的进程才可被 kill 并 reap。child 随后复位
 dumpable，通过 `SCM_RIGHTS` 把 `/proc/self/ns/user` FD 交给父进程，再以
 `--userns FD` 执行 bwrap；map 未完成不得复位或传 FD。FD 不随 exec 关闭，也不跨代
 复用。bwrap 可执行文件仅在 helper 分支
@@ -234,8 +237,10 @@ dumpable，通过 `SCM_RIGHTS` 把 `/proc/self/ns/user` FD 交给父进程，再
 HOME、TMPDIR、PYTHONPATH 及 locale），确保 dumpable 子进程地址空间不含 secret；
 root/setuid 与显式 `--no-sandbox` 不进入 helper，原环境语义不变。若子进程短暂设置 dumpable 以取得
 proc-owner，设置仅限该无敏感地址空间子进程，map 完成立即复位。全阶段共用 5 秒
-deadline，同步乱序、child 早退、fork、unshare、map、open/write/prctl、
-FD 传递或 exec 任一步失败都 kill/reap 且不执行 payload，不增加 cap、
+deadline，map open/write 由 supervisor 等待 writer，超时同时清理 writer 与 target；
+同步乱序、child 早退、fork、unshare、map、open/write/prctl、FD 传递或 exec
+任一步失败都不执行 payload。5 秒是可 kill 状态下的调度预算，内核 D 状态的
+kill/reap 可能延迟，不宣称硬实时上限；不增加 cap、
 privileged、subuid/newuidmap 或 unsandboxed 路径。root/no-network 的 netns 与
 nonroot 的 allow/no-network 政策不因 launcher 改变；RTM_NEWADDR 与完整链路仍须
 独立原生验收。默认 Docker seccomp profile 拦截 `unshare`，容器部署需放行。

@@ -2219,6 +2219,8 @@
     "velites/src/sandbox/userns.rs": 167,
     "velites/src/sandbox/userns/namespace.rs": 293,
     "velites/src/sandbox/userns/namespace_tests.rs": 147,
+    "velites/src/sandbox/userns/process.rs": 119,
+    "velites/src/sandbox/userns/process_tests.rs": 101,
     "velites/src/sandbox/userns/tests.rs": 134,
     "velites/src/session.rs": 34,
     "velites/src/skill.rs": 83,
