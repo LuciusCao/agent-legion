@@ -73,6 +73,7 @@ use super::command_guard;
 use super::truncate::{self, TruncatedBy};
 use super::{elapsed_ms, ToolContext, ToolError, ToolOutput};
 use crate::events::ToolTiming;
+use crate::sandbox::userns;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 /// Hard ceiling on one bash call's timeout. The model controls the
@@ -102,19 +103,16 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     // or without the OS sandbox.
     command_guard::check(command)?;
 
-    let mut cmd = {
-        let argv = vec!["bash".to_string(), "-c".to_string(), command.to_string()];
-        // OS-level filesystem sandbox (design §5, M4.5): the whole child
-        // tree inherits the seatbelt/bwrap confinement. `None` = --no-sandbox.
-        let (program, wrapped_argv) = match &ctx.sandbox {
-            Some(sandbox) => sandbox.wrap(&argv),
-            None => (argv[0].clone(), argv[1..].to_vec()),
-        };
-        let spec = crate::sandbox::userns::command_spec(&program, &wrapped_argv)?;
-        let mut cmd = tokio::process::Command::new(spec.program);
-        cmd.args(spec.args);
-        cmd
+    let argv = vec!["bash".to_string(), "-c".to_string(), command.to_string()];
+    // OS-level filesystem sandbox (design §5, M4.5): the whole child
+    // tree inherits the seatbelt/bwrap confinement. `None` = --no-sandbox.
+    let (program, wrapped_argv) = match &ctx.sandbox {
+        Some(sandbox) => sandbox.wrap(&argv),
+        None => (argv[0].clone(), argv[1..].to_vec()),
     };
+    let spec = userns::command_spec(&program, &wrapped_argv, ctx.sandbox.is_some(), &ctx.cwd)?;
+    let mut cmd = tokio::process::Command::new(spec.program);
+    cmd.args(spec.args);
     // #469: the child's stdin stays inherited (the command travels as
     // `bash -c <command>` argv; nothing is written by the harness).
     cmd.current_dir(&ctx.cwd)

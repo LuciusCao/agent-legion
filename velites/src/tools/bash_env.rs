@@ -48,7 +48,7 @@ fn is_inherited(name: &str) -> bool {
 
 /// The allowlisted subset of the harness environment for the bash child;
 /// the caller clears the inherited environment and sets exactly these.
-pub(super) fn inherited_env() -> Vec<(OsString, OsString)> {
+pub(crate) fn inherited_env() -> Vec<(OsString, OsString)> {
     std::env::vars_os()
         .filter(|(name, _)| name.to_str().is_some_and(is_inherited))
         .collect()
