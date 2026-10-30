@@ -375,6 +375,18 @@ def test_runtime_evidence_uses_actual_compose_identity_and_allowlisted_inspect(
             return f"{arguments[2]}-id"
         return json.dumps({"app_armor_current": "docker-default secret"})
 
+    def compose_result(*arguments: str) -> object:
+        calls.append(arguments)
+        assert "strace" in arguments
+        return SimpleNamespace(
+            stdout=json.dumps({"success": True}),
+            stderr=(
+                "clone(...) = 123\nunshare(CLONE_NEWUSER) = 0\n"
+                'openat(AT_FDCWD, "/proc/self/uid_map", O_RDWR) = 3\n'
+                "write(3, mapping, 14) = 14\n"
+            ),
+        )
+
     inspect_calls = []
 
     def inspect(command: list[str], **_kwargs: object) -> object:
@@ -385,6 +397,7 @@ def test_runtime_evidence_uses_actual_compose_identity_and_allowlisted_inspect(
     monkeypatch.setattr(evidence.subprocess, "run", inspect)
     run = SimpleNamespace(
         compose=compose,
+        compose_result=compose_result,
         env={
             "MEASUREMENT_HOST_UID": "123",
             "MEASUREMENT_HOST_GID": "456",
@@ -406,12 +419,14 @@ def test_runtime_evidence_uses_actual_compose_identity_and_allowlisted_inspect(
     assert "setuid_strace" not in document["containers"]["worker"]
     exec_calls = [call for call in calls if call[0] == "exec"]
     assert exec_calls[0][3:6] == ("0:0", "worker", "sh")
-    assert exec_calls[1][3:6] == ("0:0", "worker", "python3")
-    assert exec_calls[2][3:6] == ("501:20", "worker", "python3")
+    assert exec_calls[1][3:6] == ("501:20", "worker", "strace")
+    assert exec_calls[2][3:6] == ("0:0", "worker", "python3")
+    assert exec_calls[3][3:6] == ("501:20", "worker", "python3")
+    trace = document["wrap"]["nonroot_self_map"]["trace"]
+    assert "unshare(CLONE_NEWUSER)" in trace and "write(3, mapping, 14) = 14" in trace
     host_exec = next(call for call in exec_calls if call[2] == "host")
     assert host_exec[3:7] == ("setpriv", "--reuid=123", "--regid=456", "--clear-groups")
-    worker_exec = next(call for call in exec_calls if call[2] == "worker")
-    assert worker_exec[3] == "python3" and "setpriv" not in worker_exec
+    assert all("setpriv" not in call for call in exec_calls[2:3])
 
 
 @pytest.mark.no_db

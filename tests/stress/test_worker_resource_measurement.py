@@ -367,23 +367,34 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
     )
 
     calls = []
+    trace = (
+        "clone(child_stack=NULL, flags=SIGCHLD) = 123\n"
+        "unshare(CLONE_NEWUSER) = 0\n"
+        'openat(AT_FDCWD, "/proc/self/uid_map", O_RDWR) = 3\n'
+        "write(3, mapping, 14) = 14\n"
+    )
 
-    def compose(*arguments: str, **kwargs: object) -> str:
-        assert kwargs == {"capture": True}
+    def compose(*arguments: str, **kwargs: object) -> object:
         calls.append(arguments)
-        if _SELF_MAP_PROBE in arguments:
-            return '{"success": true}'
+        assert kwargs == {"capture": True}
         return '{"outer": {}, "cases": {}}' if "python3" in arguments else ""
+
+    def compose_result(*arguments: str) -> object:
+        calls.append(arguments)
+        assert _SELF_MAP_PROBE in arguments
+        return SimpleNamespace(stdout='{"success": true}', stderr=trace)
 
     run = SimpleNamespace(
         compose=compose,
+        compose_result=compose_result,
         env={"MEASUREMENT_WORKER_UID": "501", "MEASUREMENT_WORKER_GID": "20"},
     )
     assert _wrap_evidence(run) == {
         "root": {"outer": {}, "cases": {}},
         "nonroot": {"outer": {}, "cases": {}},
-        "nonroot_self_map": {"success": True, "trace": '{"success": true}'},
+        "nonroot_self_map": {"success": True, "trace": trace},
     }
+    assert "unshare(CLONE_NEWUSER)" in trace and "write(3, mapping, 14)" in trace
     assert calls == [
         ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT),
         (
@@ -396,12 +407,6 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
             "-f",
             "-e",
             "trace=clone,clone3,fork,vfork,unshare,prctl,openat,write,setgroups",
-            "-P",
-            "/proc/self/uid_map",
-            "-P",
-            "/proc/self/status",
-            "-P",
-            "/proc/self/attr/current",
             "python3",
             "-c",
             _SELF_MAP_PROBE,
@@ -463,19 +468,32 @@ def test_self_map_probe_is_minimal_and_stops_matrix_on_failure() -> None:
 
     calls = []
 
-    def compose(*arguments: str, **_kwargs: object) -> str:
+    def compose(*arguments: str, **_kwargs: object) -> object:
         calls.append(arguments)
-        if "sh" in arguments:
+        if _STRACE_SUPPORT in arguments:
             return ""
-        if _SELF_MAP_PROBE in arguments:
-            return '{"success": false, "failure": "write EPERM"}'
         raise AssertionError("self-map failure must stop the full matrix")
 
+    def compose_result(*arguments: str) -> object:
+        calls.append(arguments)
+        assert _SELF_MAP_PROBE in arguments
+        return SimpleNamespace(
+            stdout='{"success": false, "failure": "write EPERM"}',
+            stderr=(
+                "unshare(CLONE_NEWUSER) = 0\n"
+                'openat(AT_FDCWD, "/proc/self/uid_map", O_RDWR) = 3\n'
+                "write(3, mapping, 14) = -1 EPERM (Operation not permitted)\n"
+            ),
+        )
+
     run = SimpleNamespace(
-        compose=compose, env={"MEASUREMENT_WORKER_UID": "501", "MEASUREMENT_WORKER_GID": "20"}
+        compose=compose,
+        compose_result=compose_result,
+        env={"MEASUREMENT_WORKER_UID": "501", "MEASUREMENT_WORKER_GID": "20"},
     )
     result = _wrap_evidence(run)
     assert result["nonroot_self_map"]["success"] is False
+    assert "write(3, mapping, 14) = -1 EPERM" in result["nonroot_self_map"]["trace"]
     assert len(calls) == 2 and calls[0][-1] == _STRACE_SUPPORT
 
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+from pathlib import Path
 from typing import Any
 
 _SELF_MAP_PROBE = r"""
@@ -86,34 +88,43 @@ print(json.dumps(report, sort_keys=True))
 _TRACE = "trace=clone,clone3,fork,vfork,unshare,prctl,openat,write,setgroups"
 
 
+def _compose_result(run: Any, arguments: list[str]) -> Any:
+    if hasattr(run, "compose_result"):
+        return run.compose_result(*arguments)
+    return subprocess.run(
+        ["docker", "compose", *run.compose_args, *arguments],
+        cwd=Path(__file__).resolve().parents[2],
+        env=run.env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def run_self_map_evidence(run: Any) -> dict[str, Any]:
     uid = run.env["MEASUREMENT_WORKER_UID"]
     gid = run.env["MEASUREMENT_WORKER_GID"]
-    output = run.compose(
-        "exec",
-        "-T",
-        "--user",
-        f"{uid}:{gid}",
-        "worker",
-        "strace",
-        "-f",
-        "-e",
-        _TRACE,
-        "-P",
-        "/proc/self/uid_map",
-        "-P",
-        "/proc/self/status",
-        "-P",
-        "/proc/self/attr/current",
-        "python3",
-        "-c",
-        _SELF_MAP_PROBE,
-        uid,
-        gid,
-        capture=True,
+    result = _compose_result(
+        run,
+        [
+            "exec",
+            "-T",
+            "--user",
+            f"{uid}:{gid}",
+            "worker",
+            "strace",
+            "-f",
+            "-e",
+            _TRACE,
+            "python3",
+            "-c",
+            _SELF_MAP_PROBE,
+            uid,
+            gid,
+        ],
     )
-    report = json.loads(output.strip().splitlines()[-1])
-    report["trace"] = output[-8192:]
+    report = json.loads(result.stdout.strip().splitlines()[-1])
+    report["trace"] = result.stderr[-8192:]
     return report
 
 
