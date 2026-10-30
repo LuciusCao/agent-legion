@@ -354,7 +354,9 @@ def test_runtime_evidence_uses_actual_compose_identity_and_allowlisted_inspect(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from scripts.stress import worker_resource_runtime_evidence as evidence
+    from scripts.stress.worker_resource_bwrap_inner_evidence import _CLEANUP, _EVENTS
     from scripts.stress.worker_resource_parent_userns_evidence import _PARENT_WRITE_PROBE
+    from scripts.stress.worker_resource_wrap_evidence import _WRAP_PROBE
 
     calls = []
     config = {
@@ -374,6 +376,8 @@ def test_runtime_evidence_uses_actual_compose_identity_and_allowlisted_inspect(
             return json.dumps(config)
         if arguments[:2] == ("ps", "-q"):
             return f"{arguments[2]}-id"
+        if arguments[-1] in {f"rm -f {_EVENTS}", f"test ! -f {_EVENTS} || cat {_EVENTS}", _CLEANUP}:
+            return ""
         return json.dumps({"app_armor_current": "docker-default secret"})
 
     def compose_result(*arguments: str) -> object:
@@ -427,15 +431,16 @@ def test_runtime_evidence_uses_actual_compose_identity_and_allowlisted_inspect(
     assert exec_calls[0][3:6] == ("0:0", "worker", "sh")
     assert exec_calls[1][3:6] == ("501:20", "worker", "strace")
     assert exec_calls[2][3:6] == ("501:20", "worker", "strace")
-    assert exec_calls[3][3:6] == ("0:0", "worker", "python3")
-    assert exec_calls[4][3:6] == ("501:20", "worker", "python3")
+    wrap_calls = [call for call in exec_calls if _WRAP_PROBE in call]
+    assert wrap_calls[0][3:6] == ("0:0", "worker", "python3")
+    assert wrap_calls[1][3:6] == ("501:20", "worker", "python3")
     trace = document["wrap"]["nonroot_self_map"]["trace"]
     assert "unshare(CLONE_NEWUSER)" in trace and "write(3, mapping, 14) = 14" in trace
     parent = document["wrap"]["nonroot_self_map"]["parent_write"]
     assert parent["success"] is True and "parent write uid_map" in parent["trace"]
     host_exec = next(call for call in exec_calls if call[2] == "host")
     assert host_exec[3:7] == ("setpriv", "--reuid=123", "--regid=456", "--clear-groups")
-    assert all("setpriv" not in call for call in exec_calls[3:4])
+    assert all("setpriv" not in call for call in wrap_calls)
 
 
 @pytest.mark.no_db

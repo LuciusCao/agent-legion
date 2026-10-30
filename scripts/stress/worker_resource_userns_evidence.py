@@ -139,11 +139,8 @@ def with_self_map_evidence(run: Any, cases: Any) -> dict[str, Any]:
 
 
 def wrap_evidence(run: Any) -> dict[str, Any]:
-    from scripts.stress.worker_resource_wrap_evidence import _STRACE_SUPPORT, _probe
+    from scripts.stress.worker_resource_bwrap_inner_evidence import capture_inner_evidence
+    from scripts.stress.worker_resource_wrap_evidence import _STRACE_SUPPORT
 
-    uid = run.env["MEASUREMENT_WORKER_UID"]
-    gid = run.env["MEASUREMENT_WORKER_GID"]
     run.compose("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT, capture=True)
-    return with_self_map_evidence(
-        run, lambda: {"root": _probe(run, "0", "0"), "nonroot": _probe(run, uid, gid)}
-    )
+    return with_self_map_evidence(run, lambda: capture_inner_evidence(run))

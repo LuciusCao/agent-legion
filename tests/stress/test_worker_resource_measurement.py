@@ -358,7 +358,62 @@ def test_wrap_probe_separates_outer_and_inner_bwrap_without_secret_reads() -> No
         assert forbidden not in _WRAP_PROBE
 
 
+def test_bwrap_inner_preload_scopes_state_and_cleans_failures() -> None:
+    from scripts.stress.worker_resource_bwrap_inner_evidence import (
+        _C_SOURCE,
+        _CLEANUP,
+        _SUPPORT,
+        capture_inner_evidence,
+    )
+
+    for required in (
+        "setns_before",
+        "setns_after",
+        "unshare_before",
+        "unshare_after",
+        "mount_before",
+        "mount_after",
+        "long syscall(long number, ...)",
+        "SYS_mount",
+        "SYS_setns",
+        "SYS_unshare",
+        "CapPrm",
+        "CapEff",
+        "CapBnd",
+        "Securebits",
+        "NoNewPrivs",
+        "Seccomp",
+        "/proc/self/ns/user",
+        "/proc/self/ns/mnt",
+        "/proc/self/ns/pid",
+        "/proc/self/attr/current",
+    ):
+        assert required in _C_SOURCE
+    for forbidden in ("getenv", "models.json", "control_token", "SECRET"):
+        assert forbidden not in _C_SOURCE
+    assert _SUPPORT.startswith("set -e; ")
+    assert "test ! -e /etc/ld.so.preload" in _SUPPORT
+    assert "/etc/ld.so.preload" in _CLEANUP and "/tmp/bwrap-inner.so" in _CLEANUP
+
+    calls = []
+
+    def compose(*arguments: str, **_kwargs: object) -> str:
+        calls.append(arguments)
+        if "python3" in arguments:
+            raise RuntimeError("probe failed")
+        return ""
+
+    run = SimpleNamespace(
+        compose=compose,
+        env={"MEASUREMENT_WORKER_UID": "501", "MEASUREMENT_WORKER_GID": "20"},
+    )
+    with pytest.raises(RuntimeError, match="probe failed"):
+        capture_inner_evidence(run)
+    assert calls[-1][-1] == _CLEANUP
+
+
 def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() -> None:
+    from scripts.stress.worker_resource_bwrap_inner_evidence import _CLEANUP, _EVENTS, _SUPPORT
     from scripts.stress.worker_resource_parent_userns_evidence import _PARENT_WRITE_PROBE
     from scripts.stress.worker_resource_userns_evidence import _SELF_MAP_PROBE
     from scripts.stress.worker_resource_wrap_evidence import (
@@ -396,8 +451,8 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
         env={"MEASUREMENT_WORKER_UID": "501", "MEASUREMENT_WORKER_GID": "20"},
     )
     assert _wrap_evidence(run) == {
-        "root": {"outer": {}, "cases": {}},
-        "nonroot": {"outer": {}, "cases": {}},
+        "root": {"outer": {}, "cases": {}, "preload_events": []},
+        "nonroot": {"outer": {}, "cases": {}, "preload_events": []},
         "nonroot_self_map": {
             "success": True,
             "trace": trace,
@@ -443,6 +498,8 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
             "501",
             "20",
         ),
+        ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _SUPPORT),
+        ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", f"rm -f {_EVENTS}"),
         (
             "exec",
             "-T",
@@ -459,6 +516,17 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
             "exec",
             "-T",
             "--user",
+            "0:0",
+            "worker",
+            "sh",
+            "-c",
+            f"test ! -f {_EVENTS} || cat {_EVENTS}",
+        ),
+        ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", f"rm -f {_EVENTS}"),
+        (
+            "exec",
+            "-T",
+            "--user",
             "501:20",
             "worker",
             "python3",
@@ -467,6 +535,17 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
             "501",
             "20",
         ),
+        (
+            "exec",
+            "-T",
+            "--user",
+            "0:0",
+            "worker",
+            "sh",
+            "-c",
+            f"test ! -f {_EVENTS} || cat {_EVENTS}",
+        ),
+        ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _CLEANUP),
     ]
 
 
