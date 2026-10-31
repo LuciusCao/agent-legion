@@ -1,5 +1,5 @@
 import type { ChatMessage, PermissionView } from './studioChatMessages'
-import styles from './StudioChatPanel.module.css'
+import styles from './StudioChatPermission.module.css'
 
 /** 权限消息行的 request_id（消息列表按它查 PermissionView；从
  * StudioChatMessageList 迁来，#882 体积预算拆分）。 */
