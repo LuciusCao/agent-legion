@@ -547,21 +547,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1000
   ceiling: 137
 - check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/chat/StudioChatPanel.module.css
-  reason: '#429 added scopeNoteDismiss (resolved-notice close button) flexing scopeNote; the
-    #692 draft-card type redesign (MUI icon header, per-type title/icon tones, draftError, shared
-    publish entry) re-signed the ceiling from 356 to cover the growth to 395 effective lines
-    — beyond the +15 growth allowance band, so time-boxed per #641. After merging base''s #695
-    skeleton unification moved shared panel rules out and the module now sits at 306 effective
-    lines (merged-tree state); ceiling ratchets DOWN with it (monotonic discipline). The draft-card
-    family moving to its own module remains the preferred next step; harvest at the #456 sweep.
-    Re-anchored by #926 from #456 (closed) to #999: the overage above is the shipped feature
-    itself and the removal condition above stands; #999 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/999
-  ceiling: 306
-  expires: 2026-10-31
-- check: architecture.file_budget
   path: frontend/src/lib/queryKeysExtra.ts
   reason: 'Merge-growth class (PR 317 precedent): develop''s #419 connectionKeys and #427 nodeRuns
     entries plus this branch''s studioPublishRequest key (the agent publish request poll, #416)
