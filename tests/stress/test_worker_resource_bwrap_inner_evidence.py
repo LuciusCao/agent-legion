@@ -83,10 +83,15 @@ def test_bwrap_inner_preload_scopes_state_and_cleans_failures() -> None:
         "SYS_mount",
         "SYS_setns",
         "SYS_unshare",
+        "NS_GET_USERNS",
+        "PR_GET_SECUREBITS",
+        "mnt_owner_userns",
+        "pid_owner_userns",
+        "flags",
         "CapPrm",
         "CapEff",
         "CapBnd",
-        "Securebits",
+        "securebits",
         "NoNewPrivs",
         "Seccomp",
         "/proc/self/ns/user",
@@ -397,3 +402,35 @@ def test_wrap_evidence_preserves_support_install_failure() -> None:
     result = _wrap_evidence(run)
     assert result == {"inner_error": "RuntimeError: support install failed"}
     assert calls == [("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT)]
+
+
+def test_bounded_json_preserves_inner_events_and_long_string_tails() -> None:
+    import json
+
+    from scripts.stress.worker_resource_output import bounded_json
+
+    trace = "trace-prefix" + "x" * 5000 + "trace-tail"
+    message = "message-prefix" + "y" * 5000 + "message-tail"
+    document = {
+        "wrap": {
+            "root": {
+                "preload_events": [
+                    {"event": "setns_before", "trace": trace},
+                    {"event": "setns_after"},
+                    {"event": "mount_before", "message": message},
+                    {"event": "mount_after"},
+                ]
+            }
+        }
+    }
+    text = bounded_json(document, 4096)
+    assert len(text.encode("utf-8")) <= 4096
+    events = json.loads(text)["wrap"]["root"]["preload_events"]
+    assert [event["event"] for event in events] == [
+        "setns_before",
+        "setns_after",
+        "mount_before",
+        "mount_after",
+    ]
+    assert events[0]["trace"] == trace[-128:]
+    assert events[2]["message"] == message[-128:]

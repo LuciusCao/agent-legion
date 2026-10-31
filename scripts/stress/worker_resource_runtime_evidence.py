@@ -9,6 +9,7 @@ from typing import Any
 
 from scripts.stress.worker_resource_host_code import _bounded
 from scripts.stress.worker_resource_measurement import sanitize_log_text
+from scripts.stress.worker_resource_output import bounded_json
 from scripts.stress.worker_resource_setuid_evidence import setuid_bwrap_strace
 from scripts.stress.worker_resource_wrap_evidence import _wrap_evidence
 
@@ -154,9 +155,9 @@ def write_host_code_runtime_evidence(run: Any, iteration_dir: Path) -> None:
         if service == "host":
             container_evidence["setuid_strace"] = setuid_bwrap_strace(run)
         evidence["containers"][service] = container_evidence
-    text = json.dumps(evidence, indent=2, sort_keys=True)
+    text = bounded_json(evidence, 65536)
     (iteration_dir / "host-code-runtime.json").write_text(
-        _bounded(sanitize_log_text(text, run.secrets), 65536) + "\n", encoding="utf-8"
+        sanitize_log_text(text, run.secrets) + "\n", encoding="utf-8"
     )
 
 
