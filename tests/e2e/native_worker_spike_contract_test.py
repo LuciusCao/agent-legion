@@ -14,6 +14,7 @@ import pytest
 import yaml
 
 from scripts.e2e.native_worker_spike_payload import REQUIRED_CHECKS, _stdio_only, check_failures
+from scripts.e2e.native_worker_spike_runtime import materialize_python_runtime, secure_release
 
 pytestmark = pytest.mark.no_db
 ROOT = Path(__file__).resolve().parents[2]
@@ -217,6 +218,61 @@ def test_linux_inherited_extra_fd_fails_closed() -> None:
     finally:
         os.close(extra_fd)
     assert completed.returncode == 1, completed.stderr
+
+
+def _release_with_external_python(tmp_path):
+    source_bin = tmp_path / "source-python" / "bin"
+    source_bin.mkdir(parents=True)
+    source_python = source_bin / "python3.13"
+    source_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    source_python.chmod(0o755)
+    install_root = tmp_path / "release"
+    venv = install_root / "repo" / ".venv"
+    venv_bin = venv / "bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "python").symlink_to(source_python)
+    (venv_bin / "python3").symlink_to("python")
+    (venv_bin / "python3.13").symlink_to("python")
+    (venv / "pyvenv.cfg").write_text(f"home = {source_bin}\n", encoding="utf-8")
+    return install_root, venv, source_python
+
+
+def test_release_python_dereferences_external_venv_link(tmp_path) -> None:
+    install_root, venv, source_python = _release_with_external_python(tmp_path)
+    materialize_python_runtime(install_root / "repo", install_root)
+    expected = install_root / "python" / "bin" / source_python.name
+    assert (venv / "bin" / "python").resolve() == expected
+    assert expected.is_file()
+    assert (venv / "pyvenv.cfg").read_text(encoding="utf-8").splitlines()[0] == (
+        f"home = {install_root / 'python' / 'bin'}"
+    )
+
+
+def test_release_permissions_allow_target_uid_traversal(tmp_path) -> None:
+    install_root, venv, source_python = _release_with_external_python(tmp_path)
+    source_python.parent.chmod(0o700)
+    venv.chmod(0o700)
+    materialize_python_runtime(install_root / "repo", install_root)
+    secure_release(install_root)
+    for path in (install_root, *install_root.rglob("*")):
+        if path.is_symlink():
+            continue
+        mode = path.stat().st_mode
+        if path.is_dir():
+            assert mode & 0o055 == 0o055
+        else:
+            assert mode & 0o444 == 0o444
+    assert (install_root / "python" / "bin" / source_python.name).stat().st_mode & 0o111
+
+
+def test_install_preflight_executes_release_as_target_uid() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert source.index("native_worker_spike_runtime.py") < source.index("preflight_service\n")
+    assert 'runuser -u agent-legion-spike -- env HOME="$STATE_DIR"' in source
+    assert '"$INSTALL_ROOT/repo/.venv/bin/python" -c' in source
+    assert '"$INSTALL_ROOT/repo/data/bin/velites" --version' in source
+    assert "chown -R root:root" in source
+    assert "chmod -R 777" not in source
 
 
 def test_worker_path_uses_real_dispatch_claim_and_process_entrypoints() -> None:

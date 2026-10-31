@@ -1037,6 +1037,7 @@
     "scripts/e2e/native_worker_spike_agent.py": 113,
     "scripts/e2e/native_worker_spike_control.py": 18,
     "scripts/e2e/native_worker_spike_payload.py": 133,
+    "scripts/e2e/native_worker_spike_runtime.py": 47,
     "scripts/e2e/native_worker_spike_stub.py": 103,
     "scripts/e2e/run_browser_smoke.py": 230,
     "scripts/ensure-s3-bucket.py": 74,

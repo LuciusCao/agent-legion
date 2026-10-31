@@ -28,6 +28,15 @@ verify_unit() {
   systemd-analyze verify "$UNIT_SOURCE"
 }
 
+preflight_service() {
+  require_ci_root
+  runuser -u agent-legion-spike -- env HOME="$STATE_DIR" \
+    "$INSTALL_ROOT/repo/.venv/bin/python" -c \
+    'import cryptography, sys, uvicorn; assert sys.prefix == "/opt/agent-legion-native-spike/repo/.venv"'
+  runuser -u agent-legion-spike -- env HOME="$STATE_DIR" \
+    "$INSTALL_ROOT/repo/data/bin/velites" --version
+}
+
 install_service() {
   local repo=$1
   require_ci_root
@@ -48,12 +57,16 @@ install_service() {
   for path in .venv server worker shared workspace_libs workflow_nodes scripts config data/bin; do
     cp -a "$repo/$path" "$INSTALL_ROOT/repo/$path"
   done
+  "$repo/.venv/bin/python" "$SCRIPT_DIR/native_worker_spike_runtime.py" \
+    --release-repo "$INSTALL_ROOT/repo" --install-root "$INSTALL_ROOT"
+  chown -R root:root "$INSTALL_ROOT"
   install -m 0644 "$UNIT_SOURCE" "/etc/systemd/system/$UNIT_NAME"
   systemd-analyze verify "/etc/systemd/system/$UNIT_NAME"
   mkdir -p "$STATE_DIR"
   chown agent-legion-spike:agent-legion-spike "$STATE_DIR"
   chmod 0700 "$STATE_DIR"
   rm -rf "$STATE_DIR/evidence" "$STATE_DIR/work" "$STATE_DIR/host-data"
+  preflight_service
   systemctl daemon-reload
 }
 
