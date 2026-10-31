@@ -71,15 +71,16 @@ jobs:
           uv run pytest -q tests/e2e/native_worker_spike_contract_test.py
           tests/e2e/native_worker_spike_resume_test.py
 
-      - name: Verify shell and exact systemd unit
-        run: |
-          bash -n scripts/e2e/native_worker_spike.sh
-          systemd-analyze verify scripts/e2e/native_worker_spike.service
+      - name: Verify shell
+        run: bash -n scripts/e2e/native_worker_spike.sh
 
       - name: Install the one-shot N0 CI service
         run: >-
           sudo --preserve-env=CI,NATIVE_SPIKE_ALLOW_SYSTEMD_INSTALL
           ./scripts/e2e/native_worker_spike.sh install --repo "$GITHUB_WORKSPACE"
+
+      - name: Verify installed systemd unit
+        run: systemd-analyze verify /etc/systemd/system/agent-legion-native-spike.service
 
       - name: Run direct, Host, real-claim Worker and agent probes under N0
         run: >-

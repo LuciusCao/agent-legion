@@ -27,21 +27,16 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.e2e._database import db_dsn, reset_database  # noqa: E402
+from scripts.e2e.native_worker_spike_agent import enqueue_agent_job  # noqa: E402
 from scripts.e2e.native_worker_spike_control import resume_workspace  # noqa: E402
 from scripts.e2e.native_worker_spike_payload import (  # noqa: E402
     CLAIM_SECRET,
     PARENT_SECRET_ENV,
     check_failures,
 )
-from scripts.e2e.native_worker_spike_stub import (  # noqa: E402
-    AgentGateway,
-    LocalSkillManager,
-    ProbeListener,
-)
+from scripts.e2e.native_worker_spike_stub import AgentGateway, ProbeListener  # noqa: E402
 from server.app.agent_broker import AgentExecutionBroker  # noqa: E402
 from server.app.agent_broker.code_dispatch import CodeDispatchService  # noqa: E402
-from server.app.agent_broker.dispatch import AgentDispatchService  # noqa: E402
-from server.app.agent_catalog import AgentDefinition  # noqa: E402
 from server.app.agent_control.register_tokens import AgentRegisterTokenStore  # noqa: E402
 from server.app.executors.code import CodeExecutor  # noqa: E402
 from server.app.executors.contracts import CodeCapabilityConfig  # noqa: E402
@@ -50,7 +45,7 @@ from server.app.jobs import JobQueries  # noqa: E402
 from server.app.services.artifact_store import ArtifactStore  # noqa: E402
 from server.app.services.vault import VaultService  # noqa: E402
 from server.app.settings import Settings  # noqa: E402
-from server.app.workflows.schema import WorkflowNode, WorkflowNodeExecution  # noqa: E402
+from server.app.workflows.schema import WorkflowNode  # noqa: E402
 from shared.code_sandbox import read_roots  # noqa: E402
 
 WORKSPACE_ID = "native-spike"
@@ -264,7 +259,7 @@ def _settings(dsn: str, data_dir: Path) -> Settings:
     )
 
 
-def _insert_job(job_db: JobQueries, job_id: str, node_key: str, agent: bool) -> None:
+def _insert_job(job_db: JobQueries, job_id: str, node_key: str) -> None:
     with job_db.connect() as conn:
         conn.execute(
             "insert into workspaces(id, name) values (%s, 'Native spike') on conflict(id) do nothing",
@@ -280,25 +275,18 @@ def _insert_job(job_db: JobQueries, job_id: str, node_key: str, agent: bool) -> 
             " on conflict(workspace_id) do nothing",
             (WORKSPACE_ID,),
         )
-        if agent:
-            conn.execute(
-                "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
-                " values (%s, %s, 'agent', 'native-agent')",
-                (WORKSPACE_ID, node_key),
-            )
 
 
 def _enqueue_worker_jobs(
     *,
     dsn: str,
     settings: Settings,
-    state_dir: Path,
     code_config: dict[str, Any],
     code_allow_config: dict[str, Any],
     agent_config: dict[str, Any],
 ) -> None:
     job_db = JobQueries(dsn, jobs_dir=settings.jobs_dir)
-    _insert_job(job_db, "worker-agent", "agent", agent=True)
+    _insert_job(job_db, "worker-agent", "agent")
     broker = AgentExecutionBroker(
         dsn, bundle_dir=settings.data_dir / "agent_bundles", data_dir=settings.data_dir
     )
@@ -311,7 +299,7 @@ def _enqueue_worker_jobs(
         ("worker-code", code_config, False),
         ("worker-code-allow", code_allow_config, True),
     ):
-        _insert_job(job_db, job_id, "probe", agent=False)
+        _insert_job(job_db, job_id, "probe")
         code_job_dir = settings.jobs_dir / job_id
         code_job_dir.mkdir(parents=True, exist_ok=True)
         node = WorkflowNode(
@@ -344,46 +332,12 @@ def _enqueue_worker_jobs(
         if not enqueued:
             raise RuntimeError(f"failed to enqueue real Worker code request {job_id}")
 
-    skill_dir = state_dir / "skill"
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(
-        "# Native spike\nRun the deterministic bash probe, write the required output, then stop.\n",
-        encoding="utf-8",
+    enqueue_agent_job(
+        settings=settings,
+        agent_config=agent_config,
+        broker=broker,
+        store=store,
     )
-    agent_job_dir = settings.jobs_dir / "worker-agent"
-    agent_job_dir.mkdir(parents=True, exist_ok=True)
-    (agent_job_dir / "agent_probe_config.json").write_text(
-        json.dumps(agent_config), encoding="utf-8"
-    )
-    shutil.copyfile(
-        REPO_ROOT / "scripts" / "e2e" / "native_worker_spike_payload.py",
-        agent_job_dir / "native_worker_spike_payload.py",
-    )
-    agent_node = WorkflowNode(
-        key="agent",
-        label="agent",
-        capability="native_agent",
-        outputs=["agent_result.json", "agent_bash_evidence.json"],
-        execution=WorkflowNodeExecution(provider="gateway", model="stub-model", thinking="low"),
-        tools=("read", "write", "bash"),
-    )
-    agents = AgentDispatchService(settings, broker, store)
-    agents.skill_manager = LocalSkillManager(skill_dir)
-    if not agents.enqueue(
-        agent_id="native-agent",
-        definition=AgentDefinition(
-            capability="native_agent", runtime="velites", tools=("read", "write", "bash")
-        ),
-        workspace={"id": WORKSPACE_ID},
-        job={"id": "worker-agent"},
-        workflow_key=WORKSPACE_ID,
-        node=agent_node,
-        job_dir=agent_job_dir,
-        log_path=settings.logs_dir / "worker-agent.log",
-        inputs=("agent_probe_config.json", "native_worker_spike_payload.py"),
-        node_config={"sandbox_network": True, "timeout_seconds": 120},
-    ):
-        raise RuntimeError("failed to enqueue the real Worker agent request")
 
 
 def _wait_http(url: str, process: subprocess.Popen[bytes], timeout: float) -> None:
@@ -509,7 +463,6 @@ def _run_worker_chain(
     _enqueue_worker_jobs(
         dsn=dsn,
         settings=settings,
-        state_dir=state_dir,
         code_config=code_config,
         code_allow_config=code_allow_config,
         agent_config=agent_config,

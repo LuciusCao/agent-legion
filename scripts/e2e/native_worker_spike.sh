@@ -60,7 +60,8 @@ install_service() {
 run_service() {
   require_ci_root
   systemctl reset-failed "$UNIT_NAME" >/dev/null 2>&1 || true
-  systemctl start --no-block "$UNIT_NAME"
+  systemctl start --wait "$UNIT_NAME" &
+  local start_wait_pid=$!
   local ready=$STATE_DIR/evidence/n0-ready.json
   for _ in {1..300}; do
     [[ -f $ready ]] && break
@@ -90,7 +91,7 @@ if int(sys.argv[2]) <= 0 or ready["pid"] != int(sys.argv[2]):
 if not any(".service" in row for row in ready["cgroup"]):
     raise SystemExit("N0 harness is not in its systemd service cgroup")
 PY
-  systemctl wait "$UNIT_NAME"
+  wait "$start_wait_pid"
   [[ $(systemctl show "$UNIT_NAME" --property=Result --value) == success ]] || {
     echo "N0 native spike service failed; preserving evidence" >&2
     return 1

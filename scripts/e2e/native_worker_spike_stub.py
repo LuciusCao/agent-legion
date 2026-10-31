@@ -6,7 +6,6 @@ import http.server
 import json
 import socketserver
 import threading
-from pathlib import Path
 from typing import Any
 
 from scripts.e2e.native_worker_spike_payload import LISTENER_TOKEN
@@ -123,18 +122,3 @@ class AgentGateway:
         self._server.shutdown()
         self._thread.join(timeout=5)
         self._server.server_close()
-
-
-class LocalSkillManager:
-    def __init__(self, skill_dir: Path) -> None:
-        self.skill_dir = skill_dir
-
-    def checkout_skill(
-        self, skill: str, execution_id: str, ref: str | None = None
-    ) -> tuple[Path, str, str]:
-        del skill, execution_id
-        effective_ref = ref or "local"
-        return self.skill_dir, "0" * 40, f"{effective_ref}@{'0' * 12}"
-
-    def cleanup_execution(self, execution_id: str) -> None:
-        return None

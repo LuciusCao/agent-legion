@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 UNIT = ROOT / "scripts" / "e2e" / "native_worker_spike.service"
 SCRIPT = ROOT / "scripts" / "e2e" / "native_worker_spike.sh"
 HARNESS = ROOT / "scripts" / "e2e" / "native_worker_spike.py"
+AGENT = ROOT / "scripts" / "e2e" / "native_worker_spike_agent.py"
 WORKFLOW = ROOT / ".github" / "workflows" / "worker-native-spike.yml"
 
 
@@ -104,12 +105,37 @@ def test_ci_systemd_install_is_explicitly_guarded() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
     assert "CI:-} != true" in source
     assert "NATIVE_SPIKE_ALLOW_SYSTEMD_INSTALL:-} != 1" in source
-    assert "systemctl start --no-block" in source
+    assert "systemctl start --wait" in source
     assert "systemd-runtime.txt" in source
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "sudo --preserve-env=CI,NATIVE_SPIKE_ALLOW_SYSTEMD_INSTALL" in workflow
     assert "systemd-analyze verify" in workflow
     assert "actions/upload-artifact@" in workflow
+
+
+def test_systemd_verify_and_wait_follow_the_installed_service_lifecycle() -> None:
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = {step.get("name"): step for step in workflow["jobs"]["native-spike"]["steps"]}
+    names = list(steps)
+    assert names.index("Verify shell") < names.index("Install the one-shot N0 CI service")
+    assert (
+        names.index("Install the one-shot N0 CI service")
+        < names.index("Verify installed systemd unit")
+        < names.index("Run direct, Host, real-claim Worker and agent probes under N0")
+    )
+    assert "bash -n" in steps["Verify shell"]["run"]
+    assert steps["Verify installed systemd unit"]["run"] == (
+        "systemd-analyze verify /etc/systemd/system/agent-legion-native-spike.service"
+    )
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert 'systemctl start --wait "$UNIT_NAME" &' in source
+    assert source.count("systemctl start ") == 1
+    assert "systemctl wait " not in source
+    assert (
+        source.index("main_pid=$(systemctl show")
+        < source.index('wait "$start_wait_pid"')
+        < source.index("--property=Result")
+    )
 
 
 def test_every_payload_boundary_is_mandatory_and_mutation_detected() -> None:
@@ -201,7 +227,11 @@ def test_worker_path_uses_real_dispatch_claim_and_process_entrypoints() -> None:
         < source.index("worker = _start_process(")
     )
     assert "CodeDispatchService(settings, broker, store, job_db).enqueue(" in source
-    assert "AgentDispatchService(settings, broker, store)" in source
+    agent_source = AGENT.read_text(encoding="utf-8")
+    assert "AgentDispatchService(settings, broker, store)" in agent_source
+    assert "profile_from_node(node)" in agent_source
+    assert 'profile_source="node"' in agent_source
+    assert "LocalSkillManager" not in agent_source
     assert '"worker/executor.py", "--config"' in source
     assert "server.app.main:create_app" in source
     assert "agent_execution_requests" in source
