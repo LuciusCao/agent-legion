@@ -429,8 +429,9 @@ def test_runtime_evidence_uses_actual_compose_identity_and_allowlisted_inspect(
     assert "setuid_strace" not in document["containers"]["worker"]
     exec_calls = [call for call in calls if call[0] == "exec"]
     assert exec_calls[0][3:6] == ("0:0", "worker", "sh")
-    assert exec_calls[1][3:6] == ("501:20", "worker", "strace")
-    assert exec_calls[2][3:6] == ("501:20", "worker", "strace")
+    probe_calls = [call for call in exec_calls if "strace" in call]
+    assert probe_calls[0][3:6] == ("501:20", "worker", "strace")
+    assert probe_calls[1][3:6] == ("501:20", "worker", "strace")
     wrap_calls = [call for call in exec_calls if _WRAP_PROBE in call]
     assert wrap_calls[0][3:6] == ("0:0", "worker", "python3")
     assert wrap_calls[1][3:6] == ("501:20", "worker", "python3")

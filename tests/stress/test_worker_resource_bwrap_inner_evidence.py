@@ -283,40 +283,8 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
         },
     }
     assert "unshare(CLONE_NEWUSER)" in trace and "write(3, mapping, 14)" in trace
-    assert calls == [
-        ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT),
-        (
-            "exec",
-            "-T",
-            "--user",
-            "501:20",
-            "worker",
-            "strace",
-            "-f",
-            "-e",
-            "trace=clone,clone3,fork,vfork,unshare,prctl,openat,write,setgroups",
-            "python3",
-            "-c",
-            _SELF_MAP_PROBE,
-            "501",
-            "20",
-        ),
-        (
-            "exec",
-            "-T",
-            "--user",
-            "501:20",
-            "worker",
-            "strace",
-            "-f",
-            "-e",
-            "trace=clone,clone3,fork,vfork,unshare,prctl,openat,write,setgroups,setns,fcntl,readlink,wait4,kill",
-            "python3",
-            "-c",
-            _PARENT_WRITE_PROBE,
-            "501",
-            "20",
-        ),
+    assert calls[0] == ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT)
+    assert calls[1:-2] == [
         ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", f"rm -f {_MARKER}"),
         (
             "exec",
@@ -377,6 +345,40 @@ def test_wrap_evidence_installs_support_as_root_then_execs_requested_identity() 
         ),
         ("exec", "-T", "--user", "0:0", "worker", "sh", "-c", f"test ! -f {_MARKER} || {_CLEANUP}"),
     ]
+    assert calls[-2:] == [
+        (
+            "exec",
+            "-T",
+            "--user",
+            "501:20",
+            "worker",
+            "strace",
+            "-f",
+            "-e",
+            "trace=clone,clone3,fork,vfork,unshare,prctl,openat,write,setgroups",
+            "python3",
+            "-c",
+            _SELF_MAP_PROBE,
+            "501",
+            "20",
+        ),
+        (
+            "exec",
+            "-T",
+            "--user",
+            "501:20",
+            "worker",
+            "strace",
+            "-f",
+            "-e",
+            "trace=clone,clone3,fork,vfork,unshare,prctl,openat,write,setgroups,setns,fcntl,readlink,wait4,kill",
+            "python3",
+            "-c",
+            _PARENT_WRITE_PROBE,
+            "501",
+            "20",
+        ),
+    ]
 
 
 def test_wrap_evidence_preserves_support_install_failure() -> None:
@@ -392,6 +394,6 @@ def test_wrap_evidence_preserves_support_install_failure() -> None:
         compose=compose,
         env={"MEASUREMENT_WORKER_UID": "501", "MEASUREMENT_WORKER_GID": "20"},
     )
-    with pytest.raises(RuntimeError, match="support install failed"):
-        _wrap_evidence(run)
+    result = _wrap_evidence(run)
+    assert result == {"inner_error": "RuntimeError: support install failed"}
     assert calls == [("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT)]

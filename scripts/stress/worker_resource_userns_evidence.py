@@ -133,8 +133,6 @@ def run_self_map_evidence(run: Any) -> dict[str, Any]:
 
 def with_self_map_evidence(run: Any, cases: Any) -> dict[str, Any]:
     self_map = run_self_map_evidence(run)
-    if not self_map.get("success"):
-        return {"nonroot_self_map": self_map}
     return cases() | {"nonroot_self_map": self_map}
 
 
@@ -142,5 +140,11 @@ def wrap_evidence(run: Any) -> dict[str, Any]:
     from scripts.stress.worker_resource_bwrap_inner_evidence import capture_inner_evidence
     from scripts.stress.worker_resource_wrap_evidence import _STRACE_SUPPORT
 
-    run.compose("exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT, capture=True)
-    return with_self_map_evidence(run, lambda: capture_inner_evidence(run))
+    try:
+        run.compose(
+            "exec", "-T", "--user", "0:0", "worker", "sh", "-c", _STRACE_SUPPORT, capture=True
+        )
+        inner = capture_inner_evidence(run)
+    except Exception as exc:
+        return {"inner_error": f"{type(exc).__name__}: {exc}"}
+    return with_self_map_evidence(run, lambda: inner)

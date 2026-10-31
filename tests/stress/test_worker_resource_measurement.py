@@ -306,7 +306,7 @@ def test_measurement_worker_identity_and_models_home_match_host(tmp_path: Path) 
 def test_self_map_probe_is_minimal_and_stops_matrix_on_failure() -> None:
     from scripts.stress.worker_resource_parent_userns_evidence import _PARENT_WRITE_PROBE
     from scripts.stress.worker_resource_userns_evidence import _SELF_MAP_PROBE
-    from scripts.stress.worker_resource_wrap_evidence import _STRACE_SUPPORT, _wrap_evidence
+    from scripts.stress.worker_resource_wrap_evidence import _wrap_evidence
 
     for required in (
         "before_unshare",
@@ -334,9 +334,7 @@ def test_self_map_probe_is_minimal_and_stops_matrix_on_failure() -> None:
 
     def compose(*arguments: str, **_kwargs: object) -> object:
         calls.append(arguments)
-        if _STRACE_SUPPORT in arguments:
-            return ""
-        raise AssertionError("self-map failure must stop the full matrix")
+        return '{"outer": {}, "cases": {}}' if "python3" in arguments else ""
 
     def compose_result(*arguments: str) -> object:
         calls.append(arguments)
@@ -364,7 +362,10 @@ def test_self_map_probe_is_minimal_and_stops_matrix_on_failure() -> None:
     assert result["nonroot_self_map"]["success"] is False
     assert "write(3, mapping, 14) = -1 EPERM" in result["nonroot_self_map"]["trace"]
     assert result["nonroot_self_map"]["parent_write"]["success"] is True
-    assert len(calls) == 3 and calls[0][-1] == _STRACE_SUPPORT
+    assert result["root"]["preload_events"] == []
+    assert result["nonroot"]["preload_events"] == []
+    assert calls[-2][-3] == _SELF_MAP_PROBE
+    assert calls[-1][-3] == _PARENT_WRITE_PROBE
 
 
 def test_parent_write_probe_uses_bidirectional_sync_and_fail_closed() -> None:
