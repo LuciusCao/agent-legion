@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.no_db
+
 
 def test_wrap_probe_separates_outer_and_inner_bwrap_without_secret_reads() -> None:
     from scripts.stress.worker_resource_wrap_evidence import _WRAP_PROBE
