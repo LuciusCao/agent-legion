@@ -1,0 +1,99 @@
+name: Native Ubuntu Worker Sandbox Spike
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/worker-native-spike.yml"
+      - "scripts/e2e/native_worker_spike*"
+      - "tests/e2e/native_worker_spike*"
+      - "shared/code_sandbox.py"
+      - "worker/code_runner.py"
+      - "server/app/executors/_code_sandbox.py"
+      - "velites/src/sandbox/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-worker-spike-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-spike:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      NATIVE_SPIKE_ALLOW_SYSTEMD_INSTALL: "1"
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: velites
+          shared-key: native-worker-spike
+
+      - name: Build the current velites sandbox and runtime
+        run: ./scripts/ensure-velites.sh --dest data/bin
+
+      - name: Install the stock Ubuntu bubblewrap package
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap
+
+      - name: Run static native-spike contracts
+        run: uv run pytest -q tests/e2e/native_worker_spike_contract_test.py
+
+      - name: Verify shell and exact systemd unit
+        run: |
+          bash -n scripts/e2e/native_worker_spike.sh
+          systemd-analyze verify scripts/e2e/native_worker_spike.service
+
+      - name: Install the one-shot N0 CI service
+        run: >-
+          sudo --preserve-env=CI,NATIVE_SPIKE_ALLOW_SYSTEMD_INSTALL
+          ./scripts/e2e/native_worker_spike.sh install --repo "$GITHUB_WORKSPACE"
+
+      - name: Run direct, Host, real-claim Worker and agent probes under N0
+        run: >-
+          sudo --preserve-env=CI,NATIVE_SPIKE_ALLOW_SYSTEMD_INSTALL
+          ./scripts/e2e/native_worker_spike.sh run
+
+      - name: Collect sanitized native evidence
+        if: always()
+        run: >-
+          sudo --preserve-env=CI,NATIVE_SPIKE_ALLOW_SYSTEMD_INSTALL
+          ./scripts/e2e/native_worker_spike.sh collect
+          --output "$GITHUB_WORKSPACE/native-worker-spike-results"
+
+      - name: Upload native evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-ubuntu-worker-spike-${{ github.run_id }}-${{ github.run_attempt }}
+          path: native-worker-spike-results/
+          if-no-files-found: error
+          retention-days: 14

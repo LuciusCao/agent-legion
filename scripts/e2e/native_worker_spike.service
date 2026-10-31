@@ -1,0 +1,45 @@
+[Unit]
+Description=Agent Legion native Ubuntu Worker sandbox spike (CI only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=agent-legion-spike
+Group=agent-legion-spike
+WorkingDirectory=/var/lib/agent-legion-native-spike
+Environment=HOME=/var/lib/agent-legion-native-spike
+Environment=USER=agent-legion-spike
+Environment=LOGNAME=agent-legion-spike
+Environment=AGENT_LEGION_E2E_ADMIN_DSN=postgresql://postgres:postgres@127.0.0.1:5432/postgres
+Environment=AGENT_LEGION_SKIP_DOTENV=1
+StateDirectory=agent-legion-native-spike
+StateDirectoryMode=0700
+ExecStart=/opt/agent-legion-native-spike/repo/.venv/bin/python /opt/agent-legion-native-spike/repo/scripts/e2e/native_worker_spike.py --state-dir /var/lib/agent-legion-native-spike --output-dir /var/lib/agent-legion-native-spike/evidence
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SecureBits=noroot noroot-locked no-setuid-fixup no-setuid-fixup-locked
+UMask=0077
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/agent-legion-native-spike
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+LimitNOFILE=65535
+TimeoutStopSec=35s
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agent-legion-native-spike
+
+[Install]
+WantedBy=multi-user.target
