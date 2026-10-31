@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
-from scripts.e2e.native_worker_spike_payload import REQUIRED_CHECKS, check_failures
+from scripts.e2e.native_worker_spike_payload import REQUIRED_CHECKS, _stdio_only, check_failures
 
 pytestmark = pytest.mark.no_db
 ROOT = Path(__file__).resolve().parents[2]
@@ -102,8 +107,82 @@ def test_every_payload_boundary_is_mandatory_and_mutation_detected() -> None:
     assert "private_proc" in check_failures(document)
 
 
+@pytest.mark.parametrize(
+    ("directory_fd", "extra_fd", "expected"),
+    [(3, None, True), (4, 3, False)],
+    ids=["enumeration-only", "inherited-extra-fd"],
+)
+def test_stdio_only_excludes_only_current_enumeration(
+    monkeypatch, directory_fd, extra_fd, expected
+) -> None:
+    directory_stat = SimpleNamespace(st_dev=2, st_ino=2)
+    other_stat = SimpleNamespace(st_dev=1, st_ino=1)
+    stats = {0: other_stat, 1: other_stat, 2: other_stat, directory_fd: directory_stat}
+    if extra_fd is not None:
+        stats[extra_fd] = other_stat
+    entries = [
+        SimpleNamespace(name=str(fd), stat=lambda *, follow_symlinks, stat=stat: stat)
+        for fd, stat in sorted(stats.items())
+    ]
+    closed = []
+
+    @contextmanager
+    def fake_scandir(_path):
+        yield iter(entries)
+        closed.append(True)
+
+    real_stat = os.stat
+
+    def fake_stat(path, **kwargs):
+        if str(path) == "/proc/self/fd":
+            return directory_stat
+        return real_stat(path, **kwargs)
+
+    monkeypatch.setattr(os, "stat", fake_stat)
+    monkeypatch.setattr(os, "scandir", fake_scandir)
+    monkeypatch.setattr(os, "listdir", lambda _path: [entry.name for entry in entries])
+    assert _stdio_only() is expected
+    assert closed == [True]
+
+
+def _linux_fd_child(*, pass_fds=()) -> subprocess.CompletedProcess:
+    code = (
+        "from scripts.e2e.native_worker_spike_payload import _stdio_only; "
+        "raise SystemExit(0 if _stdio_only() else 1)"
+    )
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        pass_fds=pass_fds,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="requires Linux procfs")
+def test_linux_clean_child_has_stdio_only() -> None:
+    completed = _linux_fd_child()
+    assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="requires Linux procfs")
+def test_linux_inherited_extra_fd_fails_closed() -> None:
+    extra_fd = os.open("/dev/null", os.O_RDONLY)
+    try:
+        completed = _linux_fd_child(pass_fds=(extra_fd,))
+    finally:
+        os.close(extra_fd)
+    assert completed.returncode == 1, completed.stderr
+
+
 def test_worker_path_uses_real_dispatch_claim_and_process_entrypoints() -> None:
     source = HARNESS.read_text(encoding="utf-8")
+    assert (
+        source.index('_wait_http(f"{host_url}/api/health", host, 60)')
+        < source.index("resume_workspace(control, host_url, WORKSPACE_ID)")
+        < source.index("worker = _start_process(")
+    )
     assert "CodeDispatchService(settings, broker, store, job_db).enqueue(" in source
     assert "AgentDispatchService(settings, broker, store)" in source
     assert '"worker/executor.py", "--config"' in source

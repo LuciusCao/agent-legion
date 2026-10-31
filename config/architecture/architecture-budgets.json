@@ -1034,6 +1034,7 @@
     "scripts/e2e/_worker.py": 110,
     "scripts/e2e/host_skill_checkout_smoke.py": 140,
     "scripts/e2e/native_worker_spike.py": 715,
+    "scripts/e2e/native_worker_spike_control.py": 18,
     "scripts/e2e/native_worker_spike_payload.py": 133,
     "scripts/e2e/native_worker_spike_stub.py": 115,
     "scripts/e2e/run_browser_smoke.py": 230,

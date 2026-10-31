@@ -39,6 +39,21 @@ def check_failures(document: dict[str, Any]) -> list[str]:
     return [name for name in REQUIRED_CHECKS if checks.get(name) is not True]
 
 
+def _stdio_only() -> bool:
+    directory_stat = os.stat("/proc/self/fd")
+    directory_identity = (directory_stat.st_dev, directory_stat.st_ino)
+    with os.scandir("/proc/self/fd") as entries:
+        observed = set()
+        enumeration_fds = set()
+        for entry in entries:
+            fd = int(entry.name)
+            observed.add(fd)
+            stat = entry.stat(follow_symlinks=True)
+            if (stat.st_dev, stat.st_ino) == directory_identity:
+                enumeration_fds.add(fd)
+    return len(enumeration_fds) == 1 and observed == {0, 1, 2} | enumeration_fds
+
+
 def _namespace(name: str) -> str:
     return os.readlink(Path("/proc/self/ns") / name)
 
@@ -115,7 +130,7 @@ def run(job: dict[str, Any], job_dir: str, runtime: dict[str, Any]) -> None:
         "canary_read_denied": _canary_denied(Path(config["canary_path"]), write=False),
         "canary_write_denied": _canary_denied(Path(config["canary_path"]), write=True),
         "parent_secret_env_absent": PARENT_SECRET_ENV not in os.environ,
-        "stdio_only": {int(name) for name in os.listdir("/proc/self/fd")} == {0, 1, 2},
+        "stdio_only": _stdio_only(),
         "claim_secret_channel": runtime["node_config"].get("claim_secret") == CLAIM_SECRET,
     }
     document = {

@@ -27,6 +27,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.e2e._database import db_dsn, reset_database  # noqa: E402
+from scripts.e2e.native_worker_spike_control import resume_workspace  # noqa: E402
 from scripts.e2e.native_worker_spike_payload import (  # noqa: E402
     CLAIM_SECRET,
     PARENT_SECRET_ENV,
@@ -564,6 +565,8 @@ def _run_worker_chain(
     worker = None
     try:
         _wait_http(f"{host_url}/api/health", host, 60)
+        with requests.Session() as control:
+            resume_workspace(control, host_url, WORKSPACE_ID)
         _token_id, token = AgentRegisterTokenStore(dsn).issue_register_token(
             workspace_id=WORKSPACE_ID, label="native-spike"
         )
