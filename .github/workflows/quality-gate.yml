@@ -1055,8 +1055,16 @@ jobs:
           context: .
           target: host
           push: false
+          load: true
+          tags: agent-legion-host:ci
           cache-from: type=gha,scope=host
           cache-to: type=gha,mode=max,scope=host
+
+      - name: Prepare Host skill checkout smoke
+        run: python scripts/e2e/host_skill_checkout_smoke.py prepare --workspace "$RUNNER_TEMP/host-skill-checkout-smoke"
+
+      - name: Run Host skill checkout smoke
+        run: docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$RUNNER_TEMP/host-skill-checkout-smoke:/smoke" agent-legion-host:ci python -m scripts.e2e.host_skill_checkout_smoke run --workspace /smoke
 
       - name: Build worker image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
