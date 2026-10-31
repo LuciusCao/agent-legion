@@ -48,14 +48,13 @@ jobs:
   # Lane detection (Actions minutes cost control): push/PR runs narrow the
   # gate by changed paths, mirroring the local pre-push lane policy —
   # frontend-only changes skip the backend pytest shards (api-check still
-  # runs), velites-only changes run just the rust job, docs-only changes
-  # skip every backend/frontend lane (only this detection job and the
-  # docs-terms guard run — triggers carry no paths-ignore, because a
+  # runs), velites-only changes select rust rather than backend/frontend, and
+  # docs-only changes skip those test/build lanes while docs-terms and
+  # governance-guard still run. Triggers carry no paths-ignore because a
   # workflow that never starts leaves required checks pending forever and
-  # blocks docs-only PRs, first hit on #316).
-  # Shared files (config, scripts, tests,
-  # workflows, anything outside frontend//velites//docs/) run the full
-  # backend+frontend gate; dispatch runs always get every lane.
+  # blocks docs-only PRs (first hit on #316). Shared files (config, scripts,
+  # tests, anything outside frontend//velites//docs/) select backend+frontend;
+  # workflow/composite-action edits and dispatch runs select every lane.
   changes:
     name: changes
     runs-on: ubuntu-latest
@@ -652,14 +651,15 @@ jobs:
 
       # A retry-pass is still a loss of test determinism. Known nodeids may
       # carry a short-lived registry entry, but a new rerun turns the PR red
-      # immediately. Deadline expiry is a wall-clock judgement and is only
-      # enforced by nightly-gate.yml exemption-expiry (#941): enforcing it
-      # here turned every deadline day red for unrelated PRs.
-      # Every PR / merge-group run (whatever its target branch) still rejects
-      # entries it adds or re-dates with an already expired deadline, judged
-      # against the target's registry (--base-registry); untouched entries
-      # stay clock-free (#941 R3/R4). Scheduled jobs only see the default
-      # branch, and the nightly check runs only after the merge.
+      # immediately. Untouched pre-existing deadline expiry is a wall-clock
+      # judgement enforced by nightly-gate.yml exemption-expiry (#941), not
+      # here: enforcing it here turned every deadline day red for unrelated
+      # PRs. Every PR / merge-group run (whatever its target branch) still
+      # rejects entries it adds or re-targets with an already expired
+      # deadline, judged against the target's registry (--base-registry);
+      # untouched pre-existing entries remain notes (#941 R3/R4). Scheduled
+      # jobs only see the default branch, and the nightly check runs only
+      # after the merge.
       - name: Enforce flaky rerun registry
         if: always()
         env:
