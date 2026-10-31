@@ -65,6 +65,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends bubblewrap
 
       - name: Run native-spike mechanism contracts
+        env:
+          AGENT_LEGION_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_native_spike_test
         run: >-
           uv run pytest -q tests/e2e/native_worker_spike_contract_test.py
           tests/e2e/native_worker_spike_resume_test.py

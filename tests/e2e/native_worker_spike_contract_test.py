@@ -83,6 +83,23 @@ def test_no_privilege_or_docker_worker_escape_hatches() -> None:
     assert "image" not in job
 
 
+def test_mechanism_contracts_use_dedicated_service_test_database() -> None:
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["native-spike"]
+    postgres = job["services"]["postgres"]
+    step = next(
+        step for step in job["steps"] if step.get("name") == "Run native-spike mechanism contracts"
+    )
+    user = postgres["env"].get("POSTGRES_USER", "postgres")
+    password = postgres["env"]["POSTGRES_PASSWORD"]
+    host_port = str(postgres["ports"][0]).split(":", 1)[0]
+    expected = (
+        f"postgresql://{user}:{password}@127.0.0.1:{host_port}/agent_legion_native_spike_test"
+    )
+    assert step["env"]["AGENT_LEGION_TEST_DATABASE_URL"] == expected
+    assert "tests/e2e/native_worker_spike_resume_test.py" in step["run"]
+
+
 def test_ci_systemd_install_is_explicitly_guarded() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
     assert "CI:-} != true" in source
