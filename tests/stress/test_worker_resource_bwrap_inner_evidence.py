@@ -434,3 +434,37 @@ def test_bounded_json_preserves_inner_events_and_long_string_tails() -> None:
     ]
     assert events[0]["trace"] == trace[-128:]
     assert events[2]["message"] == message[-128:]
+
+
+@pytest.mark.parametrize("count", [100, 1000, 5000])
+def test_bounded_json_enforces_total_budget_with_ordered_event_omissions(count: int) -> None:
+    import json
+
+    from scripts.stress.worker_resource_output import bounded_json
+
+    long_key = "诊断" + "键" * 200
+    events = [
+        {
+            "event": ("setns_before", "mount_before", "unshare_after")[index % 3],
+            "sequence": index,
+            "result": -1 if index % 499 == 0 else 0,
+            "errno": 1 if index % 499 == 0 else 0,
+            "trace": "界" * 400 + str(index),
+        }
+        for index in range(count)
+    ]
+    text = bounded_json({long_key: "值" * 400, "wrap": {"root": {"preload_events": events}}}, 4096)
+    assert len(text.encode("utf-8")) <= 4096
+    document = json.loads(text)
+    assert long_key in document
+    root = document["wrap"]["root"]
+    retained = root["preload_events"]
+    omitted = root["preload_events_omitted"]
+    assert 0 < len(retained) < count
+    assert len(retained) + omitted == count
+    sequences = [event["sequence"] for event in retained]
+    assert sequences == sorted(sequences)
+    assert {0, count - 1} <= set(sequences)
+    assert any(event["errno"] == 1 for event in retained)
+    assert any(event["event"].startswith("mount_") for event in retained)
+    assert any(event["event"].startswith("setns_") for event in retained)

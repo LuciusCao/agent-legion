@@ -155,10 +155,10 @@ def write_host_code_runtime_evidence(run: Any, iteration_dir: Path) -> None:
         if service == "host":
             container_evidence["setuid_strace"] = setuid_bwrap_strace(run)
         evidence["containers"][service] = container_evidence
-    text = bounded_json(evidence, 65536)
-    (iteration_dir / "host-code-runtime.json").write_text(
-        sanitize_log_text(text, run.secrets) + "\n", encoding="utf-8"
-    )
+    serialized = json.dumps(evidence, ensure_ascii=False)
+    sanitized = json.loads(sanitize_log_text(serialized, run.secrets))
+    text = bounded_json(sanitized, 65535)
+    (iteration_dir / "host-code-runtime.json").write_text(text + "\n", encoding="utf-8")
 
 
 def write_host_code_runtime_evidence_safely(run: Any, iteration_dir: Path) -> None:

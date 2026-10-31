@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import argparse
 import fcntl
-import json
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 from scripts.stress.worker_resource_identity import ContractViolationError
+from scripts.stress.worker_resource_json_budget import bounded_json as bounded_json
 
 
 def require_empty_output_dir(output_dir: Path) -> None:
@@ -47,18 +47,3 @@ def _positive(value: str) -> int:
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be positive")
     return parsed
-
-
-def bounded_json(document: dict, limit: int) -> str:
-    def clip(value, width):
-        if isinstance(value, str):
-            return value[-width:]
-        if isinstance(value, (dict, list)):
-            return (
-                {key: clip(item, width) for key, item in value.items()}
-                if isinstance(value, dict)
-                else [clip(item, width) for item in value]
-            )
-        return value
-
-    return json.dumps(clip(document, min(128, limit)), indent=2, sort_keys=True)

@@ -445,6 +445,72 @@ def test_runtime_evidence_uses_actual_compose_identity_and_allowlisted_inspect(
 
 
 @pytest.mark.no_db
+def test_runtime_writer_enforces_budget_and_sanitizes_before_clipping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.stress import worker_resource_runtime_evidence as evidence
+
+    secret = "a" * 120 + "TOPSECRET" + "b" * 120
+    long_key = "诊断" + "键" * 100
+    events = [
+        {
+            "event": ("setns_after", "mount_after")[index % 2],
+            "sequence": index,
+            "result": -1 if index % 10 == 0 else 0,
+            "errno": 1 if index % 10 == 0 else 0,
+            "target": "/newroot/proc",
+            "flags": 14,
+            "uid": "0 0 0 0",
+            "gid": "0 0 0 0",
+            "securebits": 0,
+            "cap_prm": "000001ffffffffff",
+            "cap_eff": "000001ffffffffff",
+            "cap_bnd": "0000000000000000",
+            "no_new_privs": "1",
+            "seccomp": "0",
+            "user_ns": "user:[4026532980]",
+            "mnt_ns": "mnt:[4026532982]",
+            "pid_ns": "pid:[4026532983]",
+            "mnt_owner_userns": "user:[4026532980]",
+            "pid_owner_userns": "user:[4026532980]",
+            "app_armor_current": "unconfined",
+            "trace": secret if index == 0 else "界" * 1000,
+        }
+        for index in range(40)
+    ]
+    monkeypatch.setattr(evidence, "_compose_security", lambda _run: {})
+    monkeypatch.setattr(evidence, "_inspect_security", lambda _container: {})
+    monkeypatch.setattr(evidence, "_process_evidence", lambda _run, _service: {})
+    monkeypatch.setattr(evidence, "setuid_bwrap_strace", lambda _run: {})
+    monkeypatch.setattr(
+        evidence,
+        "_wrap_evidence",
+        lambda _run: {
+            long_key: "值" * 1000,
+            "root": {"preload_events": events},
+            "nonroot": {"cases": {"no_network": {"returncode": 1}}},
+        },
+    )
+    run = SimpleNamespace(
+        compose=lambda *arguments, **_kwargs: f"{arguments[2]}-id", secrets=["TOPSECRET"]
+    )
+    evidence.write_host_code_runtime_evidence(run, tmp_path)
+    text = (tmp_path / "host-code-runtime.json").read_text(encoding="utf-8")
+    assert len(text.encode("utf-8")) <= 65536
+    assert "TOPSECRET" not in text and "OPSECRET" not in text
+    document = json.loads(text)
+    assert long_key in document["wrap"]
+    root = document["wrap"]["root"]
+    retained = root["preload_events"]
+    assert len(retained) + root.get("preload_events_omitted", 0) == 40
+    assert [event["sequence"] for event in retained] == sorted(
+        event["sequence"] for event in retained
+    )
+    assert any(event["errno"] == 1 for event in retained)
+    assert document["wrap"]["nonroot"]["cases"]["no_network"]["returncode"] == 1
+
+
+@pytest.mark.no_db
 def test_setuid_strace_probe_traces_transition_and_preserves_failures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
