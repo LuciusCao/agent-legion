@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import signal
 import socket
 import stat
@@ -200,9 +201,12 @@ class NativeSandboxProbe:
                 "profile_count": len(profile_text.splitlines()),
                 "sha256": hashlib.sha256(profile_text.encode()).hexdigest(),
             }
-        aa_enabled = subprocess.run(
-            ["/usr/sbin/aa-enabled"], capture_output=True, text=True, timeout=10, check=False
-        )
+        aa_enabled_path = shutil.which("aa-enabled")
+        aa_enabled = None
+        if aa_enabled_path is not None:
+            aa_enabled = subprocess.run(
+                [aa_enabled_path], capture_output=True, text=True, timeout=10, check=False
+            )
         return {
             "captured_at": _utc_now(),
             "context": self.context,
@@ -243,7 +247,8 @@ class NativeSandboxProbe:
             },
             "apparmor": {
                 "module_enabled": _read(Path("/sys/module/apparmor/parameters/enabled")),
-                "aa_enabled_returncode": aa_enabled.returncode,
+                "aa_enabled_path": aa_enabled_path,
+                "aa_enabled_returncode": aa_enabled.returncode if aa_enabled is not None else None,
                 "policy": policy,
             },
             "read_only_sysctls": {
@@ -413,7 +418,7 @@ class NativeSandboxProbe:
                 stderr=subprocess.PIPE,
                 text=True,
                 start_new_session=True,
-                pass_fds=(extra_fd,),
+                close_fds=True,
             )
             try:
                 stdout, stderr = process.communicate(timeout=40)
@@ -527,8 +532,12 @@ class NativeSandboxProbe:
             "diagnostic_only": False,
             "prerequisite": prerequisite,
             "prerequisite_outcome": self.results.get(prerequisite, {}).get("outcome", "missing"),
-            "baseline": self._baseline(),
         }
+        try:
+            result["baseline"] = self._baseline()
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError) as exc:
+            result["evidence_collected"] = False
+            result["baseline_error"] = f"{type(exc).__name__}: {exc}"
         path = self._case_dir(case) / "result.json"
         path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         self.results[case] = result

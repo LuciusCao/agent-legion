@@ -119,6 +119,10 @@ def test_no_privilege_network_or_lifecycle_escape_hatches() -> None:
     assert "apparmor" in source
     collector = (ROOT / "scripts" / "e2e" / "native_sandbox_probe_collect.py").read_text()
     assert '["aa-status", "--json"]' in collector
+    assert 'shutil.which("aa-enabled")' in source
+    assert "/usr/sbin/aa-enabled" not in source
+    assert "close_fds=true" in source
+    assert "pass_fds" not in source
 
 
 def test_matrix_contains_independent_e0_through_e5_cases() -> None:
@@ -236,6 +240,21 @@ def test_expected_prerequisite_failure_does_not_stop_diagnostics(monkeypatch, tm
     assert len(skipped) == 4
     assert results["e2-n0-private-loopback"]["prerequisite"] == "e1-n0-user-net-namespace"
     assert calls[-1] == ("close",)
+
+
+def test_skip_baseline_failure_is_evidence_not_a_matrix_abort(monkeypatch, tmp_path) -> None:
+    probe = _bare_probe(tmp_path)
+    probe.results = {}
+
+    def missing_aa_enabled():
+        raise FileNotFoundError("aa-enabled")
+
+    monkeypatch.setattr(probe, "_baseline", missing_aa_enabled)
+    result = probe.skip("e5-n0-single", "e1-n0-user-net-namespace")
+    assert result["outcome"] == "skipped"
+    assert result["evidence_collected"] is False
+    assert result["baseline_error"] == "FileNotFoundError: aa-enabled"
+    assert probe.results["e5-n0-single"] is result
 
 
 def _summary_probe(tmp_path: Path) -> NativeSandboxProbe:
