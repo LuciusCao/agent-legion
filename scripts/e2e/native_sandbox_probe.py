@@ -80,6 +80,14 @@ def _read(path: Path) -> str:
         return f"unavailable: {type(exc).__name__}: {exc.errno}"
 
 
+def _os_release_value(key: str) -> str:
+    prefix = f"{key}="
+    for line in _read(Path("/etc/os-release")).splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix) :].strip('"')
+    return "unavailable"
+
+
 def _proc_status() -> dict[str, str]:
     rows = {}
     for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
@@ -211,13 +219,7 @@ class NativeSandboxProbe:
             "captured_at": _utc_now(),
             "context": self.context,
             "git_sha": self.git_sha,
-            "os_release": {
-                key: _read(Path("/etc/os-release"))
-                .split(f"{key}=", 1)[-1]
-                .splitlines()[0]
-                .strip('"')
-                for key in ("ID", "VERSION_ID")
-            },
+            "os_release": {key: _os_release_value(key) for key in ("ID", "VERSION_ID")},
             "bubblewrap": {
                 "package_version": _command_output(
                     ["dpkg-query", "--show", "--showformat=${Version}", "bubblewrap"]

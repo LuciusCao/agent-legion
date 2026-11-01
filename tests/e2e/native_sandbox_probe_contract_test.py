@@ -11,8 +11,13 @@ import pytest
 import yaml
 
 from scripts.e2e import native_sandbox_probe as probe_module
-from scripts.e2e.native_sandbox_probe import ALL_CASES, N0_CASES, NativeSandboxProbe
-from scripts.e2e.native_sandbox_probe_collect import _sanitize
+from scripts.e2e.native_sandbox_probe import (
+    ALL_CASES,
+    N0_CASES,
+    NativeSandboxProbe,
+    _os_release_value,
+)
+from scripts.e2e.native_sandbox_probe_collect import _case_audit, _sanitize
 from scripts.e2e.native_sandbox_probe_payload import E5_CHECKS, check_failures
 
 pytestmark = pytest.mark.no_db
@@ -326,6 +331,29 @@ def test_default_reaper_and_descendant_contract_do_not_require_payload_pid1() ->
     assert 'document["descendant"]["pid"] != 1' in source
     assert "os.getpid() == 1" not in source
     assert "--as-pid-1" not in source
+
+
+def test_os_release_parser_does_not_confuse_version_id_with_id(monkeypatch) -> None:
+    monkeypatch.setattr(
+        probe_module,
+        "_read",
+        lambda _path: 'NAME="Ubuntu"\nVERSION_ID="24.04"\nID="ubuntu"',
+    )
+    assert _os_release_value("ID") == "ubuntu"
+    assert _os_release_value("VERSION_ID") == "24.04"
+
+
+def test_audit_window_allows_delayed_kernel_journal_delivery(monkeypatch) -> None:
+    calls = []
+
+    def fake_journal(*args):
+        calls.append(args)
+        return 'kernel: apparmor="DENIED" operation="capable"\n'
+
+    monkeypatch.setitem(_case_audit.__globals__, "_journal", fake_journal)
+    raw = _case_audit({"started_epoch": 100.0, "ended_epoch": 101.0})
+    assert 'apparmor="DENIED"' in raw
+    assert calls == [("-k", "--since", "@99.500000", "--until", "@103.000000")]
 
 
 def test_evidence_sanitization_removes_probe_canaries() -> None:

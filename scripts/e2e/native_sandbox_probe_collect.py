@@ -27,8 +27,8 @@ def _journal(*args: str) -> str:
 
 
 def _case_audit(case: dict[str, Any]) -> str:
-    start = math.floor((float(case["started_epoch"]) - 0.1) * 1_000_000) / 1_000_000
-    end = math.ceil((float(case["ended_epoch"]) + 0.1) * 1_000_000) / 1_000_000
+    start = math.floor((float(case["started_epoch"]) - 0.5) * 1_000_000) / 1_000_000
+    end = math.ceil((float(case["ended_epoch"]) + 2.0) * 1_000_000) / 1_000_000
     raw = _journal("-k", "--since", f"@{start:.6f}", "--until", f"@{end:.6f}")
     relevant = [
         line for line in raw.splitlines() if any(word in line.lower() for word in RELEVANT_AUDIT)
@@ -66,10 +66,18 @@ def main() -> int:
         case_dir = args.output / "cases" / case["case"]
         case_dir.mkdir(parents=True, exist_ok=True)
         (case_dir / "kernel-audit.log").write_text(_case_audit(case), encoding="utf-8")
+    if cases:
+        start = min(float(case["started_epoch"]) for case in cases) - 1
+        end = max(float(case["ended_epoch"]) for case in cases) + 3
+        (args.output / "kernel-audit.log").write_text(
+            _journal("-k", "--since", f"@{start:.6f}", "--until", f"@{end:.6f}"),
+            encoding="utf-8",
+        )
     collection = {
         "schema_version": 1,
         "case_audit_logs": [f"cases/{case['case']}/kernel-audit.log" for case in cases],
         "apparmor_policy_status": "apparmor-status.json",
+        "kernel_audit": "kernel-audit.log",
         "systemd_journal": "systemd-journal.log",
         "collection_is_read_only": True,
     }
