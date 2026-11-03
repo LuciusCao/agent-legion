@@ -1,6 +1,6 @@
 [project]
 name = "agent-legion"
-version = "0.8.3"
+version = "0.8.4"
 description = "Local processing console for educational videos and Agent Legion workflows"
 requires-python = ">=3.11"
 dependencies = [
@@ -13,7 +13,7 @@ dependencies = [
   "boto3>=1.35",
   "cryptography",
   "fastapi",
-  "filelock",
+  "filelock>=4.2.1",
   # Pinned below 2.0: mcp 2.0 removed mcp.server.fastmcp (breaking change) and
   # the standalone fastmcp 3.x package is incompatible with mcp 2.x; the MCP
   # server (server/app/mcp_server) uses FastMCP from mcp.server.fastmcp.

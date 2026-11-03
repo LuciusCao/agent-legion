@@ -4,6 +4,53 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-11-03
+
+主打 Worker 容器资源限额实测落地与 velites 工具错误可见性：Worker 各 Compose 形态新增 256MiB / 128 pids 默认值及测量 envelope 守卫，一键安装升级会按实际控制卷预检并保留用户状态；velites 修复 OpenAI 兼容 provider 的工具错误标记透传。另含任务中心窄屏排版、Worker 静态容量误报移除、资源测量与原生沙箱诊断工具，以及入口/工具层/测试预算重构。原生非 root systemd 与 AppArmor 验证不在本版完成范围内。
+
+### Added
+
+- Worker 容器实测资源限额（issue #1049 的 Docker/Compose 子集，PR #1448）：`compose.worker.yaml`、`compose.worker.standalone.yaml` 与 `compose.host.yaml` 默认设置 `mem_limit=256m`、`pids_limit=128`、`AGENT_WORKER_RESOURCE_LIMITS_MODE=default`，zero-runtime 与 pull override 继承同一默认值。默认值仅覆盖原生 Linux reference envelope：agent=10、code=0（Host local code）、upload=4、每波 20 jobs、每个 artifact 1MiB；不改变 `max_concurrency`、bwrap、capability、seccomp 或 CPU 限制。启动、控制台/API 写入与热更共用 envelope guard，超 envelope 的 default 配置 fail-closed，不静默 clamp；自定义或明确无限额须评审后设置 `AGENT_WORKER_RESOURCE_LIMITS_MODE=explicit`。该子集不代表 #1049 的原生非 root systemd 目标已经完成。
+- Worker 资源测量与故障注入工具（issue #1049 前置工具，PR #1434、#1448）：新增隔离 measurement Compose、原生 Ubuntu workflow 与 cgroup v2 全容器 memory/pids 采样，覆盖 agent/code/mixed、direct S3 upload、受控 upload backlog、pending/executor/container restart，并校验精确 execution 身份、产物对象字节与当前代次注册。Docker Desktop 只作功能证据，不作 sizing；测量专用权限、Host support 容器和 AppArmor override 不进入生产配置，工具本身不推荐限额数值。
+
+### Changed
+
+- 一键 Worker 安装/升级资源预检（issue #1049，PR #1448 及后续修复）：`scripts/install-worker.sh` 幂等维护版本与资源自管行，在任何 compose/.env 提交前按实际 Compose project 解析并核查 `worker-control` 卷，优先用目标 Worker 镜像的 PyYAML 与 `validate_config` 读取运行时控制副本，只有副本不存在才回退引导文件；default 超 envelope、镜像/卷不可用或配置无法可靠解析都会保留旧文件并中止。升级或回滚不重置显式 limits，不改写 `worker.yaml`、pending upload 或上传队列；同时修复 Compose config 退出码检查与控制副本并发解析，fresh 缺省写入 256m/128/default。
+
+### Fixed
+
+- velites OpenAI 兼容工具结果错误透传（issue #450，PR #1426）：`openai_compat` 回传 tool result 时在 `is_error=true` 的文本前加 `[ERROR]`，模型不再把 read/write/bash/validate 等工具失败当作普通成功结果；Anthropic 原生 `is_error` 字段、事件流与成功结果形状不变。
+- Worker agent 并发静态容量误报（issue #1126，PR #1424）：移除按「CPU 核数 ×4」对网络等待型 agent `max_concurrency` 发出的启动 WARNING，避免诱导运维错误压低健康并发；基于实测 load1 的动态 claim 衰减与恢复逻辑保持不变。
+- 任务中心与 shell 窄屏排版（issue #1422，PR #1425）：≤700px 的任务中心分区标题与卡片底行改为纵向堆叠，390px 下不再挤压标题或留下孤行；同时修复 shell fade 的横向溢出，桌面布局不变。
+- Host 镜像 Skill checkout 运行依赖（issue #1049 配套，PR #1448）：Host 镜像补装 `git`，容器内解析 latest/pinned skill 并执行 `git archive` 物化时不再缺少系统工具；Worker 镜像同步打包拆分后的 CLI payload 模块。
+
+### Security
+
+- certifi 与 filelock 定向安全升级（#1150 nightly deps-audit 跟进）：certifi 2026.5.20 → 2026.10.23，消除 GHSA-6q48-6c7w-9gw2 / PYSEC-2026-4320（同一公告的两条 feed 记录），requests 的真实 TLS 链不再使用受影响 CA 数据；filelock 3.29.0 → 4.2.7，修复 CVE-2026-112907、112909、112910、112913、112915、112935、112936、112939、112940，其中 112909 直接覆盖项目使用的 POSIX FileLock。`pyproject.toml` 新增 `filelock>=4.2.1` 安全下限，避免后续 lock 回退到受影响版本；本次不沿用 0.8.3 的依赖漏洞豁免。
+
+### Maintenance
+
+- 过期 FLAKY 注册清理（#1150 nightly exemption-expiry 跟进）：删除 FLAKY-006/007/009/010/011/012/013/014/019/020 共 10 条注册而非再次延长 deadline；#1151 run 37902305361 与 #1453 run 41578924892 的 backend-coverage 均为 `Rerun nodeids observed: 0`，#1453 五份原始 rerun artifacts 全 attempts=0 且 JUnit 确认目标均实际执行、无 failure/error。007/009/012/020 有明确根因修复，其余由 CI postgres `-n1` 与连续零复发证据支撑；FLAKY-021 保留，任何已删条目复发将按未注册 rerun 硬失败处理。
+- velites 入口、工具层与测试预算回落（issues #996、#995、#311，PR #1431、#1436、#1437、#1439、#1440、#1441）：argv 入口、agent output、bash 输出截断、JSON 宽容解析重复键与工具 spec 按职责拆分，CLI/session 内联测试迁至集成测试并删除到期豁免；不改变命令、事件或配置契约。`config.rs` 迁移桥退役早已随 velites 0.5.9 / 主仓 0.8.1 发布，本区间 #996 只完成入口拆分，不重复声明配置行为变化。
+- Worker supervisor 与 CLI 拆分（issue #451，PR #1442）：进程派生/env 组装与 CLI payload 收进独立模块，移除 supervisor 体积豁免；监督状态、生命周期与代理注入语义不变。
+- 原生沙箱网络诊断（issues #39、#1049，PR #1453）：新增 stock Ubuntu 24.04 N0 权限矩阵、统一 fail-closed 原始证据契约与 mutation 覆盖，记录当前硬边界下 no-network bwrap/userns 失败及未触发的后续实验；未修改 velites/Worker 生产沙箱、宿主 AppArmor/seccomp/sysctl、capabilities 或共享网络，结论为诊断证据而非生产修复。
+- 贡献者首反馈循环与门禁口径（issue #723，PR #1427、#1428、#1432 及 #1438 对应文档提交）：CONTRIBUTING 与本地门禁文档补齐路径→lane→耗时指引、smoke 冷热缓存与慢测试归因，aff committed-diff 路径解析保留真实文件名，telemetry 参数传递及 CI 注释口径同步校准。
+- StudioChatPermission 样式拆分（issue #999，PR #1451，属 0.8.5 里程碑提前合入）：权限样式迁至独立 CSS module 并删除到期豁免，组件仅切换 import；既有 UI 验收三状态截图逐字节一致，无视觉或交互变化，本版不重复验收。
+- 里程碑历史归属校准（issue #507）：原生 velites 双安置点的新鲜度维护实际已由 PR #835 在此前版本交付，`v0.8.3..v0.8.4` 不含该问题的新运行时差异；本版仅完成 0.8.4 里程碑对账，不重复声明 PATH 单副本方案或新生产升级 E2E。
+- 测试与 CI 依赖维护（PR #1433、#1443）：orphan reaper 测试断言实际批等待次数并隔离 grace wait，`actions/download-artifact` 升至 8.0.2 且继续按完整 commit SHA 钉版；运行时行为不变。
+
+### 升级注意
+
+- **数据库：** 本版没有 server 代码或新 schema 迁移，当前版本保持 v104；仍建议升级前备份 PostgreSQL。已由 0.8.2/0.8.3 完成 v104 的实例无需额外迁移，回滚使用与目标 schema 匹配的备份。
+- **Host / Worker / velites 顺序：** 必须先升 Host 到 v0.8.4 并确认健康，再逐台升级 Worker 到 worker-v0.8.4，并配套 velites-v0.5.10。Worker 注册/claim 协议保持 v6，`min_protocol_version` 不变；新 Worker 对低于 v6 的旧 Host 仍会在注册握手拒绝，不能把「协议号未变」理解为可以反向先升 Worker。
+- **Worker 资源 envelope：** 默认 256MiB / 128 pids 只适用于 agent≤10、code=0、upload≤4 的已测 envelope；超过任一上限时，升级前必须评审实际内存与线程需求，显式设置 `AGENT_WORKER_MEM_LIMIT` / `AGENT_WORKER_PIDS_LIMIT`（明确无限额为 `0` / `-1`）并设 `AGENT_WORKER_RESOURCE_LIMITS_MODE=explicit`。安装器预检失败会保留旧 compose/.env；不要为绕过启动拒绝而直接删除 guard 或静默降低并发。
+- **一键安装钉版与状态：** `scripts/install-worker.sh` 默认钉到 worker 0.8.4 / velites 0.5.10；重复执行会保留 `worker.yaml`、模型配置、显式资源 limits、控制卷与 pending upload。需等 worker-v0.8.4 镜像与 velites-v0.5.10 三平台 release 产物发布成功后，才能使用默认版本执行一键升级。
+- **frontend 独立版本线：** 本次包含 frontend 窄屏修复与无视觉变化的 CSS 拆分，但不单独发布 npm 包；`frontend/package.json` 与 lockfile 保持 0.4.0-alpha，仓库主版本前进不触发独立组件锁步 bump。
+
+### 已知后续
+
+- **原生 Linux 部署（#1049、#39，milestone #37）：** 两项 issue 均保持 open；原生非 root 专用系统账户、systemd 资源约束、目录/secret 权限、迁移/回滚与真实 Host/Worker 验收尚未完成。PR #1453 只提供诊断工具，stock Ubuntu 24.04 在当前非 root、空 capabilities、不修改宿主 AppArmor/seccomp/sysctl 的边界下结论为 no-go，E2/E5 未触发；targeted AppArmor profile 仍是后续待原生 A/B/R 与真实部署验收的候选方向，不在本版宣称支持或完成。
+
 ## [0.8.3] - 2026-10-26
 
 主打批量异步操作控制面与任务中心可用性：批量操作新增暂停、继续、取消及任务中心入口，并修复快速恢复时的漏执行与重复打包；任务中心独立为完整页面，补齐结束卡片迁移与水位停喂提示。job 节点契约新增 `execution_type`，旧 `executor_id` / `executor_kind` 进入弃用窗口；另收口执行徽标与 Studio 风险口径、approval schema 保留、内部产物写入退役及门禁稳定性。
