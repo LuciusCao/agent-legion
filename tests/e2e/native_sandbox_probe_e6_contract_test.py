@@ -243,6 +243,64 @@ def test_source_drift_stops_before_profile_installation(monkeypatch, tmp_path: P
         apparmor._require_source()
 
 
+def test_enable_persists_rollback_baseline_before_parser_failure(monkeypatch, tmp_path) -> None:
+    state = tmp_path / "state.json"
+    managed = tmp_path / "managed"
+    source = tmp_path / "source"
+    source.write_text("profile", encoding="utf-8")
+    monkeypatch.setattr(apparmor, "STATE", state)
+    monkeypatch.setattr(apparmor, "MANAGED", managed)
+    monkeypatch.setattr(apparmor, "SOURCE", source)
+    monkeypatch.setattr(apparmor, "_require_root_ci", lambda: None)
+    monkeypatch.setattr(apparmor, "_require_source", lambda: {"reviewed": True})
+    monkeypatch.setattr(apparmor, "_static_snapshot", lambda: {"Seccomp": "2"})
+    monkeypatch.setattr(apparmor, "_profiles", lambda: {"stock": "(enforce)"})
+    monkeypatch.setattr(apparmor.os, "chown", lambda *args: None)
+
+    def fail_parser(command):
+        raise RuntimeError("parser failed")
+
+    monkeypatch.setattr(apparmor, "_run", fail_parser)
+    with pytest.raises(RuntimeError, match="parser failed"):
+        apparmor.enable(tmp_path / "evidence.json")
+    pending = json.loads(state.read_text(encoding="utf-8"))
+    assert pending["pending"] is True
+    assert pending["before"] == {"Seccomp": "2"}
+    assert pending["before_profiles"] == {"stock": "(enforce)"}
+
+
+def test_rollback_rejects_any_remaining_apparmor_profile_delta(monkeypatch, tmp_path) -> None:
+    state = tmp_path / "state.json"
+    state.write_text(
+        json.dumps(
+            {
+                "before": {"Seccomp": "2"},
+                "before_profiles": {"stock": "(enforce)"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(apparmor, "STATE", state)
+    monkeypatch.setattr(apparmor, "MANAGED", tmp_path / "managed")
+    monkeypatch.setattr(apparmor, "_require_root_ci", lambda: None)
+    monkeypatch.setattr(apparmor, "_static_snapshot", lambda: {"Seccomp": "2"})
+    monkeypatch.setattr(
+        apparmor,
+        "_profiles",
+        lambda: {"stock": "(enforce)", "unexpected": "(enforce)"},
+    )
+    with pytest.raises(RuntimeError, match="complete AppArmor profile set"):
+        apparmor.disable(tmp_path / "rollback.json")
+
+    monkeypatch.setattr(apparmor, "_profiles", lambda: {"stock": "(enforce)"})
+    monkeypatch.setattr(apparmor, "_run", lambda command: {"stdout": "{}"})
+    evidence = tmp_path / "rollback.json"
+    apparmor.disable(evidence)
+    document = json.loads(evidence.read_text(encoding="utf-8"))
+    assert document["apparmor_profiles_restored"] is True
+    assert document["static_state_restored"] is True
+
+
 @pytest.mark.parametrize("mutation", ["delete", "false"])
 def test_every_e6_payload_evidence_mutation_fails_result_and_summary(tmp_path, mutation) -> None:
     for name in E6_PAYLOAD_CHECKS:

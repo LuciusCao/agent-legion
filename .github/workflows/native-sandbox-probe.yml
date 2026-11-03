@@ -193,6 +193,7 @@ jobs:
           assert len(candidate["cases"]) == 3 and candidate["rollback_failures"] == []
           assert candidate["production_fixed"] is False
           assert disabled["managed_absent"] is True and disabled["target_profiles_absent"] is True
+          assert disabled["apparmor_profiles_restored"] is True
           assert disabled["static_state_restored"] is True
           print("rollback restored: stock current and all E6 candidates are pre-payload no-go")
           PY

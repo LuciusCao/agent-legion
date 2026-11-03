@@ -175,6 +175,17 @@ def enable(evidence_path: Path) -> None:
     review = _require_source()
     before = _static_snapshot()
     before_profiles = _profiles()
+    _write_evidence(
+        STATE,
+        {
+            "schema_version": 1,
+            "operation": "enable",
+            "pending": True,
+            "review": review,
+            "before": before,
+            "before_profiles": before_profiles,
+        },
+    )
     if os.path.lexists(MANAGED) and (
         MANAGED.is_symlink() or _sha256(MANAGED) != EXPECTED_SOURCE_SHA256
     ):
@@ -215,6 +226,7 @@ def enable(evidence_path: Path) -> None:
         "load": load,
         "enforce": enforce,
         "before": before,
+        "before_profiles": before_profiles,
         "after": after,
         "added_profiles": added,
         "removed_profiles": removed,
@@ -251,6 +263,9 @@ def disable(evidence_path: Path) -> None:
     after = _static_snapshot()
     if previous is not None and previous["before"] != after:
         raise RuntimeError("rollback did not restore unit, bwrap, and sysctl state")
+    profiles_restored = previous is None or previous["before_profiles"] == after_profiles
+    if not profiles_restored:
+        raise RuntimeError("rollback did not restore the complete AppArmor profile set")
     document = {
         "schema_version": 1,
         "operation": "disable",
@@ -260,6 +275,7 @@ def disable(evidence_path: Path) -> None:
         "before_profiles": before_profiles,
         "after_profiles": after_profiles,
         "target_profiles_absent": True,
+        "apparmor_profiles_restored": profiles_restored,
         "static_state_restored": previous is None or previous["before"] == after,
         "after": after,
         "global_apparmor_enabled": _read(Path("/sys/module/apparmor/parameters/enabled")),
