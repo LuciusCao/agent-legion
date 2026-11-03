@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -163,37 +165,126 @@ def test_parent_tcp_token_controls_are_real_and_dead_listener_fails(monkeypatch)
     nonloopback = ProbeListener()
     counts = iter((0, 1))
     probe = E6Probe.__new__(E6Probe)
-    probe.listener = loopback
-    probe.nonloopback_listener = nonloopback
-    probe.abstract_listener = SimpleNamespace(name="static-only", count=lambda: next(counts))
+    probe._case_listeners = {
+        "case": {
+            "loopback": loopback,
+            "nonloopback": nonloopback,
+            "abstract_unix": SimpleNamespace(name="static-only", count=lambda: next(counts)),
+        }
+    }
     monkeypatch.setattr(
         probe,
         "_abstract_control",
-        lambda: {"connected": True, "token_valid": True, "detail": "static-contract"},
+        lambda case: {"connected": True, "token_valid": True, "detail": "static-contract"},
     )
     try:
-        controls = probe._positive_controls()
+        controls = probe._positive_controls("case")
         assert all(row["token_valid"] is True for row in controls.values())
         assert all(row["after"] - row["before"] == 1 for row in controls.values())
         loopback.close()
         with pytest.raises(RuntimeError, match="positive control failed"):
-            probe._positive_controls()
+            probe._positive_controls("case")
     finally:
         nonloopback.close()
 
 
+def test_concurrent_listener_controls_are_isolated_with_forced_interleaving(monkeypatch) -> None:
+    probe = E6Probe.__new__(E6Probe)
+    probe._case_listeners = {}
+    actual_tcp = probe._control_connection
+    barrier = threading.Barrier(2)
+    for case in ("a", "b"):
+        abstract = SimpleNamespace(name=f"abstract-{case}", value=0)
+        abstract.count = lambda abstract=abstract: abstract.value
+        probe._case_listeners[case] = {
+            "loopback": ProbeListener(),
+            "nonloopback": ProbeListener(),
+            "abstract_unix": abstract,
+        }
+
+    def interleaved(host, port):
+        barrier.wait(timeout=5)
+        return actual_tcp(host, port)
+
+    def abstract_attempt(case):
+        listener = probe._case_listeners[case]["abstract_unix"]
+        listener.value += 1
+        return {"connected": True, "token_valid": True, "detail": "static-contract"}
+
+    monkeypatch.setattr(probe, "_control_connection", interleaved)
+    monkeypatch.setattr(probe, "_abstract_control", abstract_attempt)
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            controls = list(pool.map(probe._positive_controls, ("a", "b")))
+        assert len(controls) == 2
+        assert all(row["after"] - row["before"] == 1 for case in controls for row in case.values())
+        groups = list(probe._case_listeners.values())
+        assert groups[0]["loopback"].port != groups[1]["loopback"].port
+        assert groups[0]["nonloopback"].port != groups[1]["nonloopback"].port
+        assert groups[0]["abstract_unix"].name != groups[1]["abstract_unix"].name
+    finally:
+        for group in probe._case_listeners.values():
+            group["loopback"].close()
+            group["nonloopback"].close()
+
+
+@pytest.mark.parametrize("phase", ["targeted", "rollback"])
+def test_concurrent_execute_main_and_summary_keep_listener_and_namespace_independence(
+    tmp_path, phase
+) -> None:
+    def rollback_evidence(fixtures):
+        for result in fixtures.values():
+            result["outcome"] = "failed"
+            result["execution"]["returncode"] = 1
+            result["execution"]["payload_started"] = False
+            del result["payload"]
+
+    probe = _matrix_probe(tmp_path, rollback_evidence if phase == "rollback" else None)
+    probe.phase = phase
+    observed = {}
+    command = probe._command
+
+    def observe_command(case):
+        result = command(case)
+        observed[case] = probe._case_listeners[case]
+        return result
+
+    run = probe._run
+    barrier = threading.Barrier(3 if phase == "rollback" else 2)
+
+    def synchronized_run(case, command, work):
+        if phase == "rollback" or case != "e6-n0-single":
+            barrier.wait(timeout=5)
+        return run(case, command, work)
+
+    probe._command = observe_command
+    probe._run = synchronized_run
+    probe.run()
+    summary = probe.summarize()
+    if phase == "targeted":
+        assert summary["decision"] == "go"
+    else:
+        assert summary["decision"] == "no-go" and summary["rollback_restored"] is True
+    assert len({group["abstract_unix"].name for group in observed.values()}) == 3
+    assert len({id(group) for group in observed.values()}) == 3
+
+
 def test_wrong_parent_control_token_is_infrastructure_failure(monkeypatch) -> None:
     probe = E6Probe.__new__(E6Probe)
-    probe.listener = SimpleNamespace(host="127.0.0.1", port=1, count=lambda: 0)
-    probe.nonloopback_listener = SimpleNamespace(count=lambda: 0)
-    probe.abstract_listener = SimpleNamespace(count=lambda: 0)
+    probe._case_listeners = {
+        "case": {
+            "loopback": SimpleNamespace(host="127.0.0.1", port=1, count=lambda: 0),
+            "nonloopback": SimpleNamespace(count=lambda: 0),
+            "abstract_unix": SimpleNamespace(count=lambda: 0),
+        }
+    }
     monkeypatch.setattr(
         probe,
         "_control_connection",
         lambda host, port: {"connected": True, "token_valid": False, "detail": "wrong"},
     )
     with pytest.raises(RuntimeError, match="positive control failed"):
-        probe._positive_controls()
+        probe._positive_controls("case")
 
 
 def test_abstract_unix_has_static_contract_and_native_only_dynamic_proof() -> None:

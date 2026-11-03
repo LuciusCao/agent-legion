@@ -43,9 +43,8 @@ class E6Probe(NativeSandboxProbe):
         super().__init__(state_dir=state_dir, output_dir=output_dir, context="n0")
         self.phase = phase
         self._expectations: dict[str, dict[str, Any]] = {}
+        self._case_listeners: dict[str, dict[str, Any]] = {}
         self.nonloopback_host = self._nonloopback_host()
-        self.nonloopback_listener = self._tcp_listener(self.nonloopback_host)
-        self.abstract_listener = AbstractUnixListener(f"native-sandbox-probe-{os.getpid()}")
 
     @staticmethod
     def _nonloopback_host() -> str:
@@ -62,12 +61,32 @@ class E6Probe(NativeSandboxProbe):
 
         return ProbeListener(host=host)
 
+    def _new_listeners(self, case: str) -> dict[str, Any]:
+        listeners = {}
+        try:
+            listeners["loopback"] = self._tcp_listener("127.0.0.1")
+            listeners["nonloopback"] = self._tcp_listener(self.nonloopback_host)
+            listeners["abstract_unix"] = AbstractUnixListener(
+                f"native-sandbox-probe-{os.getpid()}-{case}"
+            )
+        except (OSError, RuntimeError):
+            for listener in listeners.values():
+                listener.close()
+            raise
+        self._case_listeners[case] = listeners
+        return listeners
+
+    def _close_case_listeners(self, case: str) -> None:
+        for listener in self._case_listeners.pop(case, {}).values():
+            listener.close()
+
     def close(self) -> None:
-        self.nonloopback_listener.close()
-        self.abstract_listener.close()
+        for case in list(self._case_listeners):
+            self._close_case_listeners(case)
         super().close()
 
     def _payload_config(self, case: str, work: Path) -> Path:
+        listeners = self._new_listeners(case)
         config = {
             "case": case,
             "mode": "e6",
@@ -84,11 +103,11 @@ class E6Probe(NativeSandboxProbe):
             "canary_path": str(self.canary),
             "state_dir": str(self.state_dir),
             "work_path": str(work),
-            "listener_host": self.listener.host,
-            "listener_port": self.listener.port,
+            "listener_host": listeners["loopback"].host,
+            "listener_port": listeners["loopback"].port,
             "nonloopback_host": self.nonloopback_host,
-            "nonloopback_port": self.nonloopback_listener.port,
-            "abstract_socket": self.abstract_listener.name,
+            "nonloopback_port": listeners["nonloopback"].port,
+            "abstract_socket": listeners["abstract_unix"].name,
         }
         path = work / "payload-config.json"
         path.write_text(json.dumps(config), encoding="utf-8")
@@ -107,30 +126,21 @@ class E6Probe(NativeSandboxProbe):
         inner = ["/usr/bin/python3", str(E6_PAYLOAD), "--config", str(config)]
         return [*self._bwrap_prefix(work), *inner], work
 
-    def _listener_counts(self) -> dict[str, int]:
-        return {
-            "loopback": self.listener.count(),
-            "nonloopback": self.nonloopback_listener.count(),
-            "abstract_unix": self.abstract_listener.count(),
-        }
+    def _listener_counts(self, case: str) -> dict[str, int]:
+        return {name: listener.count() for name, listener in self._case_listeners[case].items()}
 
     @staticmethod
     def _control_connection(host: str, port: int) -> dict[str, Any]:
         return control_connection(host, port)
 
-    def _abstract_control(self) -> dict[str, Any]:
-        return abstract_control(self.abstract_listener.name)
+    def _abstract_control(self, case: str) -> dict[str, Any]:
+        return abstract_control(self._case_listeners[case]["abstract_unix"].name)
 
-    def _positive_controls(self) -> dict[str, dict[str, Any]]:
-        listeners = {
-            "loopback": self.listener,
-            "nonloopback": self.nonloopback_listener,
-            "abstract_unix": self.abstract_listener,
-        }
+    def _positive_controls(self, case: str) -> dict[str, dict[str, Any]]:
         return positive_controls(
-            listeners,
+            self._case_listeners[case],
             tcp_attempt=self._control_connection,
-            abstract_attempt=self._abstract_control,
+            abstract_attempt=lambda: self._abstract_control(case),
         )
 
     @staticmethod
@@ -146,9 +156,9 @@ class E6Probe(NativeSandboxProbe):
         }
 
     def _run(self, case: str, command: list[str], work: Path) -> dict[str, Any]:
-        initial = self._listener_counts()
-        before_controls = self._positive_controls()
-        candidate_before = self._listener_counts()
+        initial = self._listener_counts(case)
+        before_controls = self._positive_controls(case)
+        candidate_before = self._listener_counts(case)
         ready = work / "payload-ready.json"
         process = subprocess.Popen(
             command,
@@ -198,9 +208,9 @@ class E6Probe(NativeSandboxProbe):
             time.sleep(0.02)
         if not process_group_cleaned:
             os.killpg(process.pid, signal.SIGKILL)
-        candidate_after = self._listener_counts()
-        after_controls = self._positive_controls()
-        final = self._listener_counts()
+        candidate_after = self._listener_counts(case)
+        after_controls = self._positive_controls(case)
+        final = self._listener_counts(case)
         log = self._case_dir(case) / "command.log"
         log.write_text(stdout + stderr, encoding="utf-8")
         return {
@@ -278,6 +288,8 @@ class E6Probe(NativeSandboxProbe):
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             )
+        finally:
+            self._close_case_listeners(case)
         result["ended_epoch"] = time.time()
         result["ended_at"] = _utc_now()
         self._write_result(result)

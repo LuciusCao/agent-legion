@@ -197,10 +197,25 @@ def _bare_probe(tmp_path: Path) -> E6Probe:
     probe.state_dir = tmp_path / "state"
     probe.parent_namespaces = {name: f"{name}:[1]" for name in ("user", "mnt", "pid", "net")}
     probe.canary = tmp_path / "canary"
-    probe.listener = SimpleNamespace(host="127.0.0.1", port=10001)
     probe.nonloopback_host = "192.0.2.10"
-    probe.nonloopback_listener = SimpleNamespace(port=10002)
-    probe.abstract_listener = SimpleNamespace(name="native-test")
+    probe._case_listeners = {}
+
+    def new_listeners(case):
+        listeners = {
+            "loopback": SimpleNamespace(
+                host="127.0.0.1", port=10001, count=lambda: 0, close=lambda: None
+            ),
+            "nonloopback": SimpleNamespace(
+                host="192.0.2.10", port=10002, count=lambda: 0, close=lambda: None
+            ),
+            "abstract_unix": SimpleNamespace(
+                name=f"native-{case}", count=lambda: 0, close=lambda: None
+            ),
+        }
+        probe._case_listeners[case] = listeners
+        return listeners
+
+    probe._new_listeners = new_listeners
     probe._expectations = {}
     probe._baseline = lambda: {"process": {"status": {"Seccomp": "2"}}}
     return probe
@@ -217,14 +232,16 @@ def _matrix_probe(tmp_path: Path, mutate=None) -> E6Probe:
     def fake_command(case):
         work = tmp_path / "injected" / case
         work.mkdir(parents=True, exist_ok=True)
+        probe._new_listeners(case)
         probe._expectations[case] = copy.deepcopy(fixtures[case]["expectations"])
         return ["injected"], work
 
     def fake_run(case, command, work):
         fixture = fixtures[case]
-        (work / "payload-evidence.json").write_text(
-            json.dumps(fixture["payload"]), encoding="utf-8"
-        )
+        if "payload" in fixture:
+            (work / "payload-evidence.json").write_text(
+                json.dumps(fixture["payload"]), encoding="utf-8"
+            )
         return copy.deepcopy(fixture["execution"])
 
     def complete_cleanup(result):
