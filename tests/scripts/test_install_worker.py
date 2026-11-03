@@ -84,7 +84,7 @@ def _target(tmp_path: Path, name: str) -> Path:
     target = tmp_path / name
     (target / "velites-bin").mkdir(parents=True)
     (target / "velites-bin/velites").write_text("binary", encoding="utf-8")
-    (target / "velites-bin/.velites-version").write_text("0.5.9", encoding="utf-8")
+    (target / "velites-bin/.velites-version").write_text("0.5.10", encoding="utf-8")
     return target
 
 
