@@ -1,0 +1,102 @@
+name: Native Sandbox Network Probe
+
+on:
+  push:
+    branches: [feat/084-native-sandbox-network-probe-39]
+  pull_request:
+    paths:
+      - ".github/workflows/native-sandbox-probe.yml"
+      - "scripts/e2e/native_sandbox_probe*"
+      - "tests/e2e/native_sandbox_probe*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-sandbox-probe-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: velites
+          shared-key: native-sandbox-probe
+
+      - name: Build the current-SHA velites sandbox
+        run: ./scripts/ensure-velites.sh --dest data/bin
+
+      - name: Install stock Ubuntu diagnostic tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            apparmor bubblewrap iproute2 libcap2-bin strace util-linux
+
+      - name: Run native probe contract tests
+        run: uv run pytest -q tests/e2e/native_sandbox_probe_contract_test.py
+
+      - name: Verify probe shell and systemd unit
+        run: ./scripts/e2e/native_sandbox_probe.sh verify
+
+      - name: Install the one-shot N0 probe service
+        run: >-
+          sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA
+          ./scripts/e2e/native_sandbox_probe.sh install --repo "$GITHUB_WORKSPACE"
+
+      - name: Run the independent E0-E5 native matrix
+        run: >-
+          sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA
+          ./scripts/e2e/native_sandbox_probe.sh run
+
+      - name: Collect sanitized native and kernel-audit evidence
+        if: always()
+        run: >-
+          sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA
+          ./scripts/e2e/native_sandbox_probe.sh collect
+          --output "$GITHUB_WORKSPACE/native-sandbox-probe-results"
+
+      - name: Validate machine-readable outcomes without hiding no-go
+        if: always()
+        env:
+          RESULTS_DIR: native-sandbox-probe-results
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          summary = json.loads((Path(os.environ["RESULTS_DIR"]) / "summary.json").read_text())
+          assert summary["git_sha"] == os.environ["GITHUB_SHA"]
+          assert summary["harness_complete"] is True
+          assert len(summary["cases"]) == 15
+          assert summary["production_fixed"] is False
+          print(f"native probe decision: {summary['decision']}")
+          print(f"native probe reasons: {summary['reason_codes']}")
+          PY
+
+      - name: Upload native probe evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-sandbox-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: native-sandbox-probe-results/
+          if-no-files-found: error
+          retention-days: 30
