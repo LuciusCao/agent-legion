@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 from pathlib import Path
@@ -32,19 +33,103 @@ STOCK_UNIT = ROOT / "scripts" / "e2e" / "native_sandbox_probe.service"
 E6_UNIT = ROOT / "scripts" / "e2e" / "native_sandbox_probe_e6@.service"
 
 
+def _expectations(case: str) -> dict:
+    return {
+        "parent_namespaces": {name: f"{name}:[1]" for name in ("user", "mnt", "pid", "net")},
+        "parent_pid": 999,
+        "expected_uid": 999,
+        "expected_gid": 999,
+        "parent_apparmor": "unconfined",
+        "parent_seccomp": "2",
+        "canary_path": "/var/lib/probe/parent-canary",
+        "state_dir": "/var/lib/probe",
+        "work_path": f"/var/lib/probe/work/{case}",
+    }
+
+
+def _raw_payload(case: str) -> dict:
+    work = f"/var/lib/probe/work/{case}"
+    return {
+        "case": case,
+        "identity": {"uid": 999, "euid": 999, "gid": 999, "egid": 999, "pid": 2, "ppid": 1},
+        "status": {
+            "NoNewPrivs": "1",
+            "Seccomp": "2",
+            "CapInh": "0",
+            "CapPrm": "0",
+            "CapEff": "0",
+            "CapBnd": "0",
+            "CapAmb": "0",
+        },
+        "apparmor": {"current": "bwrap//&unpriv_bwrap (enforce)"},
+        "host_network": {
+            name: {"connected": False, "detail": "ConnectionRefusedError: 111"}
+            for name in LISTENERS
+        },
+        "mountinfo": f"100 99 8:1 / {work} rw - ext4 /dev/sda rw",
+        "uid_map": "999 999 1",
+        "gid_map": "999 999 1",
+        "reaper": "bwrap",
+        "descendant": {"returncode": 0, "pid": 3, "reaper_visible": True},
+        "namespaces": {name: f"{name}:[{case}]" for name in ("user", "mnt", "pid", "net")},
+        "interfaces": ["lo"],
+        "loopback": {"flags": 9, "ipv4": "127.0.0.1"},
+        "parent_proc_visible": False,
+        "parent_secret_present": False,
+        "cwd_writable_observed": True,
+        "canary": {"read_denied": True, "write_denied": True},
+        "stdio": {"observed": [0, 1, 2, 3], "enumeration_fds": [3]},
+        "mount_escape": {
+            "attempts": [{"returncode": 1}, {"returncode": 1}, {"returncode": 1}],
+            "denied": True,
+        },
+        "handshake": {"release_observed": True},
+        "checks": {name: True for name in E6_PAYLOAD_CHECKS},
+    }
+
+
+def _listener_row() -> dict:
+    return {
+        "before": 0,
+        "after": 2,
+        "before_control": {
+            "connected": True,
+            "token_valid": True,
+            "before": 0,
+            "after": 1,
+        },
+        "candidate_before": 1,
+        "candidate_after": 1,
+        "after_control": {
+            "connected": True,
+            "token_valid": True,
+            "before": 1,
+            "after": 2,
+        },
+    }
+
+
 def _cleanup_trials() -> list[dict]:
-    return [
-        {
-            "mode": mode,
-            "launcher_pid": 20000 + index,
-            "observed_pids": [20000 + index, 30000 + index],
-            "expected_signal_used": True,
-            "process_group_cleaned": True,
-            "processes_reaped": True,
-            "namespaces_released": True,
-        }
-        for index, mode in enumerate(CLEANUP_MODES)
-    ]
+    rows = []
+    for index, mode in enumerate(CLEANUP_MODES):
+        pids = [20000 + index, 30000 + index]
+        rows.append(
+            {
+                "mode": mode,
+                "launcher_pid": pids[0],
+                "observed_pids": pids,
+                "namespace_paths": [
+                    f"/proc/{pid}/ns/{name}"
+                    for pid in pids
+                    for name in ("user", "mnt", "pid", "net")
+                ],
+                "expected_signal_used": True,
+                "process_group_cleaned": True,
+                "processes_reaped": True,
+                "namespaces_released": True,
+            }
+        )
+    return rows
 
 
 def _passed_result(case: str) -> dict:
@@ -52,8 +137,8 @@ def _passed_result(case: str) -> dict:
         "returncode": 0,
         "timed_out": False,
         "process_group_cleaned": True,
-        "listener_connections_before": 0,
-        "listener_connections_after": 0,
+        "listener_connections_before": 1,
+        "listener_connections_after": 1,
         "launcher_pid": 12345,
         "payload_started": True,
         "bwrap_main": {
@@ -61,7 +146,7 @@ def _passed_result(case: str) -> dict:
             "apparmor_current": "bwrap (enforce)",
             "status": {"NoNewPrivs": "1"},
         },
-        "candidate_listeners": {name: {"before": 0, "after": 0} for name in LISTENERS},
+        "candidate_listeners": {name: _listener_row() for name in LISTENERS},
         "command_log": f"cases/{case}/command.log",
         "stderr_tail": "",
     }
@@ -74,12 +159,9 @@ def _passed_result(case: str) -> dict:
         "baseline": {"git_sha": "a" * 40},
         "started_epoch": 1.0,
         "ended_epoch": 2.0,
+        "expectations": _expectations(case),
         "execution": execution,
-        "payload": {
-            "case": case,
-            "checks": {name: True for name in E6_PAYLOAD_CHECKS},
-            "namespaces": {name: f"{name}:[{case}]" for name in ("user", "mnt", "pid", "net")},
-        },
+        "payload": _raw_payload(case),
     }
 
 
@@ -119,7 +201,41 @@ def _bare_probe(tmp_path: Path) -> E6Probe:
     probe.nonloopback_host = "192.0.2.10"
     probe.nonloopback_listener = SimpleNamespace(port=10002)
     probe.abstract_listener = SimpleNamespace(name="native-test")
+    probe._expectations = {}
     probe._baseline = lambda: {"process": {"status": {"Seccomp": "2"}}}
+    return probe
+
+
+def _matrix_probe(tmp_path: Path, mutate=None) -> E6Probe:
+    probe = _bare_probe(tmp_path)
+    probe.results = {}
+    probe.git_sha = "a" * 40
+    fixtures = {case: _passed_result(case) for case in E6_CASES}
+    if mutate is not None:
+        mutate(fixtures)
+
+    def fake_command(case):
+        work = tmp_path / "injected" / case
+        work.mkdir(parents=True, exist_ok=True)
+        probe._expectations[case] = copy.deepcopy(fixtures[case]["expectations"])
+        return ["injected"], work
+
+    def fake_run(case, command, work):
+        fixture = fixtures[case]
+        (work / "payload-evidence.json").write_text(
+            json.dumps(fixture["payload"]), encoding="utf-8"
+        )
+        return copy.deepcopy(fixture["execution"])
+
+    def complete_cleanup(result):
+        failures = validate_e6_result(result["case"], result)
+        result["outcome"] = "failed" if failures else "passed"
+        result["invariant_failures"] = failures
+
+    probe._baseline = lambda: {"git_sha": "a" * 40}
+    probe._command = fake_command
+    probe._run = fake_run
+    probe._add_cleanup = complete_cleanup
     return probe
 
 
@@ -289,11 +405,11 @@ def test_rollback_rejects_any_remaining_apparmor_profile_delta(monkeypatch, tmp_
         "_profiles",
         lambda: {"stock": "(enforce)", "unexpected": "(enforce)"},
     )
+    monkeypatch.setattr(apparmor, "_run", lambda command: {"stdout": "{}"})
     with pytest.raises(RuntimeError, match="complete AppArmor profile set"):
         apparmor.disable(tmp_path / "rollback.json")
 
     monkeypatch.setattr(apparmor, "_profiles", lambda: {"stock": "(enforce)"})
-    monkeypatch.setattr(apparmor, "_run", lambda command: {"stdout": "{}"})
     evidence = tmp_path / "rollback.json"
     apparmor.disable(evidence)
     document = json.loads(evidence.read_text(encoding="utf-8"))
@@ -360,7 +476,10 @@ def test_apparmor_main_identity_and_handshake_mutations_fail_closed(tmp_path) ->
 def test_every_host_listener_connection_mutation_fails_closed(listener) -> None:
     result = _passed_result("e6-n0-single")
     result["execution"]["candidate_listeners"][listener]["after"] = 1
-    assert f"candidate_listener_{listener}" in validate_e6_result("e6-n0-single", result)
+    assert any(
+        failure.startswith(f"candidate_listener_{listener}")
+        for failure in validate_e6_result("e6-n0-single", result)
+    )
     del result["execution"]["candidate_listeners"][listener]
     assert f"candidate_listener_{listener}" in validate_e6_result("e6-n0-single", result)
 

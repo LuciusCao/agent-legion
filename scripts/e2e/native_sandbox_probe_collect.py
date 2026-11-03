@@ -4,36 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
 
-RELEVANT_AUDIT = ("audit", "apparmor", "seccomp", "denied", "bwrap", "unshare")
-
-
-def _sanitize(text: str) -> str:
-    return text.replace("native-sandbox-probe-parent-canary", "[redacted-probe-canary]").replace(
-        "native-sandbox-probe-canary", "[redacted-probe-canary]"
-    )
-
-
-def _journal(*args: str) -> str:
-    completed = subprocess.run(
-        ["journalctl", "--no-pager", *args], capture_output=True, text=True, timeout=30, check=False
-    )
-    return _sanitize(completed.stdout + completed.stderr)
-
-
-def _case_audit(case: dict[str, Any]) -> str:
-    start = math.floor((float(case["started_epoch"]) - 0.5) * 1_000_000) / 1_000_000
-    end = math.ceil((float(case["ended_epoch"]) + 2.0) * 1_000_000) / 1_000_000
-    raw = _journal("-k", "--since", f"@{start:.6f}", "--until", f"@{end:.6f}")
-    relevant = [
-        line for line in raw.splitlines() if any(word in line.lower() for word in RELEVANT_AUDIT)
-    ]
-    return "\n".join(relevant) + ("\n" if relevant else "<no matching kernel audit diagnostics>\n")
+from scripts.e2e.native_sandbox_probe_audit import _case_audit, _journal, _sanitize
 
 
 def main() -> int:
@@ -62,6 +37,20 @@ def main() -> int:
     (args.output / "apparmor-status.json").write_text(
         _sanitize(aa_status.stdout + aa_status.stderr), encoding="utf-8"
     )
+    (args.output / "apparmor-collection.json").write_text(
+        json.dumps(
+            {
+                "returncode": aa_status.returncode,
+                "stdout_nonempty": bool(aa_status.stdout.strip()),
+                "stderr": _sanitize(aa_status.stderr),
+                "passed": aa_status.returncode == 0 and bool(aa_status.stdout.strip()),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     cases = []
     for summary_name in ("summary.json", "candidate-summary.json"):
         summary_path = args.output / summary_name
@@ -76,7 +65,11 @@ def main() -> int:
     for case in cases:
         case_dir = args.output / "cases" / case["case"]
         case_dir.mkdir(parents=True, exist_ok=True)
-        (case_dir / "kernel-audit.log").write_text(_case_audit(case), encoding="utf-8")
+        audit = _case_audit(case)
+        (case_dir / "kernel-audit.log").write_text(audit.pop("rendered"), encoding="utf-8")
+        (case_dir / "kernel-audit.json").write_text(
+            json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
     if cases:
         start = min(float(case["started_epoch"]) for case in cases) - 1
         end = max(float(case["ended_epoch"]) for case in cases) + 3

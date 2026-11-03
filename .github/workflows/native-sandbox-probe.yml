@@ -52,7 +52,7 @@ jobs:
             apparmor apparmor-profiles bubblewrap iproute2 libcap2-bin strace util-linux
 
       - name: Run native probe contract tests
-        run: uv run pytest -q tests/e2e/native_sandbox_probe_contract_test.py tests/e2e/native_sandbox_probe_e6_contract_test.py
+        run: uv run pytest -q tests/e2e/native_sandbox_probe_contract_test.py tests/e2e/native_sandbox_probe_e6_contract_test.py tests/e2e/native_sandbox_probe_e6_mutation_test.py
 
       - name: Verify probe shell and systemd units
         run: ./scripts/e2e/native_sandbox_probe.sh verify
@@ -137,11 +137,18 @@ jobs:
           assert enabled["added_profiles"] == ["bwrap", "unpriv_bwrap"]
           assert enabled["removed_profiles"] == []
           assert enabled["before"] == enabled["after"]
-          assert (root / "apparmor-status.json").stat().st_size > 0
+          apparmor_collection = json.loads((root / "apparmor-collection.json").read_text())
+          assert apparmor_collection["passed"] is True
           for case in candidate["cases"]:
-              audit = root / "cases" / case["case"] / "kernel-audit.log"
-              assert audit.is_file() and audit.stat().st_size > 0
-              text = audit.read_text()
+              case_dir = root / "cases" / case["case"]
+              audit_meta = json.loads((case_dir / "kernel-audit.json").read_text())
+              assert audit_meta["passed"] is True
+              assert audit_meta["journal_returncode"] == 0
+              assert audit_meta["raw_nonempty"] is True and audit_meta["relevant_count"] > 0
+              text = (case_dir / "kernel-audit.log").read_text()
+              assert "no matching kernel audit" not in text and "journal acquisition failed" not in text
+              assert 'apparmor="DENIED"' in text and 'operation="capable"' in text
+              assert 'profile="bwrap//&unpriv_bwrap"' in text and "capability=" in text
               assert not ("change_onexec" in text and 'apparmor="DENIED"' in text)
           print(f"targeted E6 candidate decision: {candidate['decision']}; production_fixed=false")
           PY
@@ -151,13 +158,20 @@ jobs:
         run: |
           set +e
           status=0
-          sudo systemctl stop agent-legion-native-sandbox-probe-e6@targeted.service \
-            agent-legion-native-sandbox-probe.service >/dev/null 2>&1 || true
           sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
-            ./scripts/e2e/native_sandbox_probe.sh install --repo "$GITHUB_WORKSPACE" || status=$?
+            /usr/bin/python3 scripts/e2e/native_sandbox_probe_quiesce.py \
+            --stock-summary /var/lib/agent-legion-native-sandbox-probe/evidence/summary.json \
+            --candidate-summary /var/lib/agent-legion-native-sandbox-probe/evidence/candidate-summary.json \
+            --evidence /var/lib/agent-legion-native-sandbox-probe/rollback-quiesce.json || status=$?
+          if [[ $status -eq 0 ]]; then
+            sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
+              ./scripts/e2e/native_sandbox_probe.sh install --repo "$GITHUB_WORKSPACE" || status=$?
+          fi
           sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
             /usr/bin/python3 scripts/e2e/native_sandbox_probe_apparmor.py disable \
             --evidence /var/lib/agent-legion-native-sandbox-probe/evidence/apparmor-rollback.json || status=$?
+          sudo install -m 0644 /var/lib/agent-legion-native-sandbox-probe/rollback-quiesce.json \
+            /var/lib/agent-legion-native-sandbox-probe/evidence/rollback-quiesce.json || status=$?
           if [[ $status -eq 0 ]]; then
             sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
               ./scripts/e2e/native_sandbox_probe.sh run || status=$?
@@ -182,6 +196,13 @@ jobs:
           stock_r = json.loads((root / "summary.json").read_text())
           candidate = json.loads((root / "candidate-summary.json").read_text())
           disabled = json.loads((root / "apparmor-rollback.json").read_text())
+          quiesce = json.loads((root / "rollback-quiesce.json").read_text())
+          before_aa = json.loads(Path("native-sandbox-probe-stock/apparmor-status.json").read_text())
+          after_aa = json.loads((root / "apparmor-status.json").read_text())
+          after_collection = json.loads((root / "apparmor-collection.json").read_text())
+          assert quiesce["quiesced"] is True
+          assert before_aa["profiles"] == after_aa["profiles"]
+          assert after_collection["passed"] is True
           assert stock_a["harness_complete"] is True and stock_r["harness_complete"] is True
           assert len(stock_r["cases"]) == 15 and stock_r["decision"] == "no-go"
           current_a = next(case for case in stock_a["cases"] if case["case"] == "e0-n0-current-no-network")

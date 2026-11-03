@@ -16,8 +16,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.e2e.native_sandbox_probe_e6_posix import (  # noqa: E402
+    host_mounts_hidden as _host_mounts_hidden,
+)
+from scripts.e2e.native_sandbox_probe_e6_posix import (  # noqa: E402
+    stdio_evidence as _stdio_evidence,
+)
 from scripts.e2e.native_sandbox_probe_payload import (  # noqa: E402
     LISTENER_TOKEN,
+    PARENT_SECRET_ENV,
     _base_document,
     _read,
     _run_e5,
@@ -100,14 +107,6 @@ def _mount_escape() -> dict[str, Any]:
     return {"attempts": results, "denied": all(row["returncode"] != 0 for row in results)}
 
 
-def _host_mounts_hidden(config: dict[str, Any], mountinfo: str) -> bool:
-    return config["canary_path"] not in mountinfo and all(
-        field == config["work_path"] or config["state_dir"] not in field
-        for line in mountinfo.splitlines()
-        for field in line.split()
-    )
-
-
 def _handshake(config: dict[str, Any]) -> bool:
     ready = Path(config["ready_path"])
     ready.write_text(json.dumps({"pid": os.getpid()}) + "\n", encoding="utf-8")
@@ -136,7 +135,16 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
     }
     document["mount_escape"] = _mount_escape()
     document["mountinfo"] = _read(Path("/proc/self/mountinfo"))
+    document["parent_proc_visible"] = Path(f"/proc/{config['parent_pid']}").exists()
+    document["parent_secret_present"] = PARENT_SECRET_ENV in os.environ
+    document["cwd_writable_observed"] = checks["cwd_writable"]
+    document["canary"] = {
+        "read_denied": checks["canary_read_denied"],
+        "write_denied": checks["canary_write_denied"],
+    }
+    document["stdio"] = _stdio_evidence()
     handshake = _handshake(config)
+    document["handshake"] = {"release_observed": handshake}
     checks.update(
         {
             "loopback_up": bool(document["loopback"]["flags"] & 0x1),

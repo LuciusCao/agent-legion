@@ -653,7 +653,8 @@ def test_audit_window_allows_delayed_kernel_journal_delivery(monkeypatch) -> Non
 
     monkeypatch.setitem(_case_audit.__globals__, "_journal", fake_journal)
     raw = _case_audit({"started_epoch": 100.0, "ended_epoch": 101.0})
-    assert 'apparmor="DENIED"' in raw
+    assert 'apparmor="DENIED"' in raw["rendered"]
+    assert raw["passed"] is True and raw["relevant_count"] == 1
     assert calls == [("-k", "--since", "@99.500000", "--until", "@103.000000")]
 
 

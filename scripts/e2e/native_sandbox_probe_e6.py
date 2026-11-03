@@ -10,7 +10,6 @@ import signal
 import socket
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -28,55 +27,22 @@ from scripts.e2e.native_sandbox_probe_e6_contract import (  # noqa: E402
     validate_e6_result,
     validate_rollback,
 )
-from scripts.e2e.native_sandbox_probe_payload import (  # noqa: E402
-    LISTENER_TOKEN,
-    _read,
-    _utc_now,
+from scripts.e2e.native_sandbox_probe_e6_listeners import (  # noqa: E402
+    AbstractUnixListener,
+    abstract_control,
+    control_connection,
+    positive_controls,
 )
+from scripts.e2e.native_sandbox_probe_payload import _read, _utc_now  # noqa: E402
 
 E6_PAYLOAD = Path(__file__).resolve().with_name("native_sandbox_probe_e6_payload.py")
-
-
-class AbstractUnixListener:
-    def __init__(self, name: str) -> None:
-        self.name = name
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._sock.bind("\0" + name)
-        self._sock.listen()
-        self._sock.settimeout(0.2)
-        self._count = 0
-        self._lock = threading.Lock()
-        self._stopping = threading.Event()
-        self._thread = threading.Thread(target=self._serve, daemon=True)
-        self._thread.start()
-
-    def _serve(self) -> None:
-        while not self._stopping.is_set():
-            try:
-                connection, _ = self._sock.accept()
-            except TimeoutError:
-                continue
-            except OSError:
-                break
-            with connection:
-                connection.sendall(LISTENER_TOKEN)
-                with self._lock:
-                    self._count += 1
-
-    def count(self) -> int:
-        with self._lock:
-            return self._count
-
-    def close(self) -> None:
-        self._stopping.set()
-        self._sock.close()
-        self._thread.join(timeout=2)
 
 
 class E6Probe(NativeSandboxProbe):
     def __init__(self, *, state_dir: Path, output_dir: Path, phase: str) -> None:
         super().__init__(state_dir=state_dir, output_dir=output_dir, context="n0")
         self.phase = phase
+        self._expectations: dict[str, dict[str, Any]] = {}
         self.nonloopback_host = self._nonloopback_host()
         self.nonloopback_listener = self._tcp_listener(self.nonloopback_host)
         self.abstract_listener = AbstractUnixListener(f"native-sandbox-probe-{os.getpid()}")
@@ -126,6 +92,7 @@ class E6Probe(NativeSandboxProbe):
         }
         path = work / "payload-config.json"
         path.write_text(json.dumps(config), encoding="utf-8")
+        self._expectations[case] = dict(config)
         return path
 
     def _bwrap_prefix(self, work: Path) -> list[str]:
@@ -148,6 +115,25 @@ class E6Probe(NativeSandboxProbe):
         }
 
     @staticmethod
+    def _control_connection(host: str, port: int) -> dict[str, Any]:
+        return control_connection(host, port)
+
+    def _abstract_control(self) -> dict[str, Any]:
+        return abstract_control(self.abstract_listener.name)
+
+    def _positive_controls(self) -> dict[str, dict[str, Any]]:
+        listeners = {
+            "loopback": self.listener,
+            "nonloopback": self.nonloopback_listener,
+            "abstract_unix": self.abstract_listener,
+        }
+        return positive_controls(
+            listeners,
+            tcp_attempt=self._control_connection,
+            abstract_attempt=self._abstract_control,
+        )
+
+    @staticmethod
     def _main_status(pid: int) -> dict[str, str]:
         rows = {}
         for line in Path(f"/proc/{pid}/status").read_text(encoding="utf-8").splitlines():
@@ -160,7 +146,9 @@ class E6Probe(NativeSandboxProbe):
         }
 
     def _run(self, case: str, command: list[str], work: Path) -> dict[str, Any]:
-        before = self._listener_counts()
+        initial = self._listener_counts()
+        before_controls = self._positive_controls()
+        candidate_before = self._listener_counts()
         ready = work / "payload-ready.json"
         process = subprocess.Popen(
             command,
@@ -210,7 +198,9 @@ class E6Probe(NativeSandboxProbe):
             time.sleep(0.02)
         if not process_group_cleaned:
             os.killpg(process.pid, signal.SIGKILL)
-        after = self._listener_counts()
+        candidate_after = self._listener_counts()
+        after_controls = self._positive_controls()
+        final = self._listener_counts()
         log = self._case_dir(case) / "command.log"
         log.write_text(stdout + stderr, encoding="utf-8")
         return {
@@ -220,10 +210,18 @@ class E6Probe(NativeSandboxProbe):
             "launcher_pid": process.pid,
             "payload_started": payload_started,
             "bwrap_main": main,
-            "listener_connections_before": before["loopback"],
-            "listener_connections_after": after["loopback"],
+            "listener_connections_before": candidate_before["loopback"],
+            "listener_connections_after": candidate_after["loopback"],
             "candidate_listeners": {
-                name: {"before": before[name], "after": after[name]} for name in before
+                name: {
+                    "before": initial[name],
+                    "after": final[name],
+                    "before_control": before_controls[name],
+                    "candidate_before": candidate_before[name],
+                    "candidate_after": candidate_after[name],
+                    "after_control": after_controls[name],
+                }
+                for name in initial
             },
             "stderr_tail": stderr[-4000:],
             "command_log": str(log.relative_to(self.output_dir)),
@@ -249,6 +247,7 @@ class E6Probe(NativeSandboxProbe):
             result["baseline"] = self._baseline()
             command, work = self._command(case)
             result["command"] = command
+            result["expectations"] = self._expectations[case]
             result["execution"] = self._run(case, command, work)
             payload_path = work / "payload-evidence.json"
             if payload_path.is_file():
@@ -263,7 +262,14 @@ class E6Probe(NativeSandboxProbe):
             result["evidence_collected"] = True
             if failures:
                 result["invariant_failures"] = failures
-        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError) as exc:
+        except (
+            OSError,
+            RuntimeError,
+            subprocess.SubprocessError,
+            ValueError,
+            KeyError,
+            TypeError,
+        ) as exc:
             result.update(
                 {
                     "outcome": "infrastructure_error",

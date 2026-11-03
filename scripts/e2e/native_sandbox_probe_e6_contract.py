@@ -9,6 +9,11 @@ from scripts.e2e.native_sandbox_probe_contract import (
     _baseline_failures,
     _execution_failures,
 )
+from scripts.e2e.native_sandbox_probe_e6_evidence import (
+    validate_cleanup_namespace_paths,
+    validate_e6_raw,
+    validate_listener_evidence,
+)
 from scripts.e2e.native_sandbox_probe_e6_payload import check_e6_payload_failures
 
 E6_CASES = ("e6-n0-single", "e6-n0-concurrent-a", "e6-n0-concurrent-b")
@@ -32,20 +37,7 @@ def _main_failures(execution: dict[str, Any]) -> list[str]:
 
 
 def _listener_failures(execution: dict[str, Any]) -> list[str]:
-    listeners = execution.get("candidate_listeners")
-    if not isinstance(listeners, dict):
-        return ["candidate_listeners"]
-    failures = []
-    for name in LISTENERS:
-        row = listeners.get(name)
-        if not isinstance(row, dict):
-            failures.append(f"candidate_listener_{name}")
-            continue
-        before = row.get("before")
-        after = row.get("after")
-        if type(before) is not int or type(after) is not int or after != before:
-            failures.append(f"candidate_listener_{name}")
-    return failures
+    return validate_listener_evidence(execution)
 
 
 def _cleanup_failures(execution: dict[str, Any]) -> list[str]:
@@ -69,8 +61,7 @@ def _cleanup_failures(execution: dict[str, Any]) -> list[str]:
                 failures.append(f"{mode}_{field}")
         if type(row.get("launcher_pid")) is not int or row["launcher_pid"] <= 0:
             failures.append(f"{mode}_launcher_pid")
-        if not isinstance(row.get("observed_pids"), list) or len(row["observed_pids"]) < 2:
-            failures.append(f"{mode}_observed_pids")
+        failures.extend(f"{mode}_{failure}" for failure in validate_cleanup_namespace_paths(row))
     return failures
 
 
@@ -96,6 +87,7 @@ def validate_e6_result(case: str, result: Any, *, require_cleanup: bool = True) 
             if payload.get("case") != case:
                 failures.append("payload_case")
             failures.extend(check_e6_payload_failures(payload))
+            failures.extend(validate_e6_raw(result.get("expectations"), payload))
             namespaces = payload.get("namespaces")
             if not isinstance(namespaces, dict):
                 failures.append("namespaces")

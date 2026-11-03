@@ -11,6 +11,13 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from scripts.e2e.native_sandbox_probe_apparmor_state import (
+    load_rollback_baseline,
+    managed_profile_valid,
+    read_profiles,
+    write_evidence_atomic,
+)
+
 SOURCE = Path("/usr/share/apparmor/extra-profiles/bwrap-userns-restrict")
 MANAGED = Path("/etc/apparmor.d/bwrap-userns-restrict")
 LOCAL_INCLUDES = (
@@ -78,12 +85,7 @@ def _package_version(package: str) -> str:
 
 
 def _profiles() -> dict[str, str]:
-    rows = {}
-    for line in _read(PROFILES).splitlines():
-        fields = line.split()
-        if len(fields) >= 2:
-            rows[fields[0]] = fields[1]
-    return rows
+    return read_profiles(PROFILES)
 
 
 def _static_snapshot() -> dict[str, Any]:
@@ -166,8 +168,7 @@ def _require_source() -> dict[str, Any]:
 
 
 def _write_evidence(path: Path, document: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_evidence_atomic(path, document)
 
 
 def enable(evidence_path: Path) -> None:
@@ -239,18 +240,11 @@ def enable(evidence_path: Path) -> None:
 
 def disable(evidence_path: Path) -> None:
     _require_root_ci()
-    previous = json.loads(STATE.read_text(encoding="utf-8")) if STATE.is_file() else None
+    previous, baseline_error = load_rollback_baseline(STATE)
     before_profiles = _profiles()
     removed_with_parser = False
     if os.path.lexists(MANAGED):
-        managed_stat = MANAGED.stat()
-        if (
-            MANAGED.is_symlink()
-            or managed_stat.st_uid != 0
-            or managed_stat.st_gid != 0
-            or stat.S_IMODE(managed_stat.st_mode) != 0o644
-            or _sha256(MANAGED) != EXPECTED_SOURCE_SHA256
-        ):
+        if not managed_profile_valid(MANAGED, EXPECTED_SOURCE_SHA256):
             raise RuntimeError("refusing to remove an unmanaged or drifted AppArmor file")
         _run(["apparmor_parser", "-R", str(MANAGED)])
         removed_with_parser = True
@@ -261,11 +255,8 @@ def disable(evidence_path: Path) -> None:
     if os.path.lexists(MANAGED):
         raise RuntimeError("managed AppArmor profile remains after rollback")
     after = _static_snapshot()
-    if previous is not None and previous["before"] != after:
-        raise RuntimeError("rollback did not restore unit, bwrap, and sysctl state")
-    profiles_restored = previous is None or previous["before_profiles"] == after_profiles
-    if not profiles_restored:
-        raise RuntimeError("rollback did not restore the complete AppArmor profile set")
+    static_restored = previous is not None and previous["before"] == after
+    profiles_restored = previous is not None and previous["before_profiles"] == after_profiles
     document = {
         "schema_version": 1,
         "operation": "disable",
@@ -276,12 +267,19 @@ def disable(evidence_path: Path) -> None:
         "after_profiles": after_profiles,
         "target_profiles_absent": True,
         "apparmor_profiles_restored": profiles_restored,
-        "static_state_restored": previous is None or previous["before"] == after,
+        "static_state_restored": static_restored,
+        "baseline_error": baseline_error,
         "after": after,
         "global_apparmor_enabled": _read(Path("/sys/module/apparmor/parameters/enabled")),
         "aa_status": _run(["aa-status", "--json"])["stdout"],
     }
     _write_evidence(evidence_path, document)
+    if baseline_error is not None:
+        raise RuntimeError(baseline_error)
+    if not static_restored:
+        raise RuntimeError("rollback did not restore unit, bwrap, and sysctl state")
+    if not profiles_restored:
+        raise RuntimeError("rollback did not restore the complete AppArmor profile set")
     if STATE.exists():
         STATE.unlink()
 
@@ -299,7 +297,15 @@ def main() -> int:
     except (OSError, RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
         _write_evidence(
             args.evidence,
-            {"schema_version": 1, "operation": args.operation, "error": str(exc), "passed": False},
+            {
+                "schema_version": 1,
+                "operation": args.operation,
+                "error": str(exc),
+                "passed": False,
+                "managed_absent": not os.path.lexists(MANAGED),
+                "apparmor_profiles_restored": False,
+                "static_state_restored": False,
+            },
         )
         print(f"targeted AppArmor {args.operation} failed: {exc}")
         return 1
