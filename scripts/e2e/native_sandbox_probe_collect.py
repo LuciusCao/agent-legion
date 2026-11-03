@@ -45,19 +45,30 @@ def main() -> int:
     if args.evidence.is_dir():
         shutil.copytree(args.evidence, args.output, dirs_exist_ok=True)
     args.output.mkdir(parents=True, exist_ok=True)
-    (args.output / "systemd-journal.log").write_text(_journal("-u", args.unit), encoding="utf-8")
+    (args.output / "systemd-journal.log").write_text(
+        _journal(
+            "-u",
+            args.unit,
+            "-u",
+            "agent-legion-native-sandbox-probe-e6@targeted.service",
+            "-u",
+            "agent-legion-native-sandbox-probe-e6@rollback.service",
+        ),
+        encoding="utf-8",
+    )
     aa_status = subprocess.run(
         ["aa-status", "--json"], capture_output=True, text=True, timeout=30, check=False
     )
     (args.output / "apparmor-status.json").write_text(
         _sanitize(aa_status.stdout + aa_status.stderr), encoding="utf-8"
     )
-    summary_path = args.output / "summary.json"
     cases = []
-    if summary_path.is_file():
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        cases = summary.get("cases", [])
-    else:
+    for summary_name in ("summary.json", "candidate-summary.json"):
+        summary_path = args.output / summary_name
+        if summary_path.is_file():
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            cases.extend(summary.get("cases", []))
+    if not cases:
         cases = [
             json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(args.output.glob("cases/*/result.json"))

@@ -2,7 +2,7 @@ name: Native Sandbox Network Probe
 
 on:
   push:
-    branches: [feat/084-native-sandbox-network-probe-39]
+    branches: [feat/linux-targeted-apparmor-validation-39]
   pull_request:
     paths:
       - ".github/workflows/native-sandbox-probe.yml"
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   native-probe:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 60
     env:
       NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL: "1"
     steps:
@@ -49,54 +49,177 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            apparmor bubblewrap iproute2 libcap2-bin strace util-linux
+            apparmor apparmor-profiles bubblewrap iproute2 libcap2-bin strace util-linux
 
       - name: Run native probe contract tests
-        run: uv run pytest -q tests/e2e/native_sandbox_probe_contract_test.py
+        run: uv run pytest -q tests/e2e/native_sandbox_probe_contract_test.py tests/e2e/native_sandbox_probe_e6_contract_test.py
 
-      - name: Verify probe shell and systemd unit
+      - name: Verify probe shell and systemd units
         run: ./scripts/e2e/native_sandbox_probe.sh verify
 
-      - name: Install the one-shot N0 probe service
-        run: >-
-          sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA
-          ./scripts/e2e/native_sandbox_probe.sh install --repo "$GITHUB_WORKSPACE"
+      - name: A - install and run the unchanged stock 15-case matrix
+        run: |
+          sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
+            ./scripts/e2e/native_sandbox_probe.sh install --repo "$GITHUB_WORKSPACE"
+          sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
+            ./scripts/e2e/native_sandbox_probe.sh run
 
-      - name: Run the independent E0-E5 native matrix
-        run: >-
-          sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA
-          ./scripts/e2e/native_sandbox_probe.sh run
-
-      - name: Collect sanitized native and kernel-audit evidence
+      - name: A - collect stock evidence
         if: always()
         run: >-
           sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA
           ./scripts/e2e/native_sandbox_probe.sh collect
-          --output "$GITHUB_WORKSPACE/native-sandbox-probe-results"
+          --output "$GITHUB_WORKSPACE/native-sandbox-probe-stock"
 
-      - name: Validate machine-readable outcomes without hiding no-go
+      - name: A - require the complete stock no-go baseline
         if: always()
-        env:
-          RESULTS_DIR: native-sandbox-probe-results
         run: |
           python3 - <<'PY'
           import json
           import os
           from pathlib import Path
-          summary = json.loads((Path(os.environ["RESULTS_DIR"]) / "summary.json").read_text())
+          summary = json.loads(Path("native-sandbox-probe-stock/summary.json").read_text())
           assert summary["git_sha"] == os.environ["GITHUB_SHA"]
           assert summary["harness_complete"] is True
           assert len(summary["cases"]) == 15
+          assert summary["decision"] == "no-go"
           assert summary["production_fixed"] is False
-          print(f"native probe decision: {summary['decision']}")
-          print(f"native probe reasons: {summary['reason_codes']}")
+          current = next(case for case in summary["cases"] if case["case"] == "e0-n0-current-no-network")
+          assert current["outcome"] != "passed"
+          assert current["execution"]["returncode"] != 0
+          assert all(case["outcome"] != "passed" for case in summary["cases"] if case["case"].startswith("e5-"))
+          print(f"stock decision: {summary['decision']}; reasons: {summary['reason_codes']}")
           PY
 
-      - name: Upload native probe evidence
+      - name: B - enable only the reviewed bwrap profile and run stock plus E6
+        run: |
+          set +e
+          status=0
+          sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
+            ./scripts/e2e/native_sandbox_probe.sh install --repo "$GITHUB_WORKSPACE" || status=$?
+          if [[ $status -eq 0 ]]; then
+            sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
+              /usr/bin/python3 scripts/e2e/native_sandbox_probe_apparmor.py enable \
+              --evidence /var/lib/agent-legion-native-sandbox-probe/evidence/apparmor-targeted.json || status=$?
+          fi
+          if [[ $status -eq 0 ]]; then
+            sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
+              ./scripts/e2e/native_sandbox_probe.sh run || status=$?
+          fi
+          if [[ $status -eq 0 ]]; then
+            sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
+              ./scripts/e2e/native_sandbox_probe.sh run-candidate targeted || status=$?
+          fi
+          sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
+            ./scripts/e2e/native_sandbox_probe.sh collect \
+            --output "$GITHUB_WORKSPACE/native-sandbox-probe-targeted" || status=$?
+          exit "$status"
+
+      - name: B - require candidate-only go and preserved negative controls
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path("native-sandbox-probe-targeted")
+          stock = json.loads((root / "summary.json").read_text())
+          candidate = json.loads((root / "candidate-summary.json").read_text())
+          enabled = json.loads((root / "apparmor-targeted.json").read_text())
+          assert stock["git_sha"] == candidate["git_sha"] == os.environ["GITHUB_SHA"]
+          assert stock["harness_complete"] is True and len(stock["cases"]) == 15
+          assert stock["production_fixed"] is False and candidate["production_fixed"] is False
+          assert all(case["outcome"] != "passed" for case in stock["cases"] if case["case"] == "e1-n0-user-net-namespace" or case["case"].startswith("e5-"))
+          assert candidate["phase"] == "targeted" and candidate["candidate_only"] is True
+          assert candidate["harness_complete"] is True and candidate["decision"] == "go"
+          assert len(candidate["cases"]) == 3 and candidate["rollback_restored"] is False
+          assert enabled["managed"]["sha256"] == enabled["review"]["source_sha256"]
+          assert enabled["added_profiles"] == ["bwrap", "unpriv_bwrap"]
+          assert enabled["removed_profiles"] == []
+          assert enabled["before"] == enabled["after"]
+          assert (root / "apparmor-status.json").stat().st_size > 0
+          for case in candidate["cases"]:
+              audit = root / "cases" / case["case"] / "kernel-audit.log"
+              assert audit.is_file() and audit.stat().st_size > 0
+              text = audit.read_text()
+              assert not ("change_onexec" in text and 'apparmor="DENIED"' in text)
+          print(f"targeted E6 candidate decision: {candidate['decision']}; production_fixed=false")
+          PY
+
+      - name: R - unload only the managed profile and rerun current plus E6
+        if: always()
+        run: |
+          set +e
+          status=0
+          sudo systemctl stop agent-legion-native-sandbox-probe-e6@targeted.service \
+            agent-legion-native-sandbox-probe.service >/dev/null 2>&1 || true
+          sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
+            ./scripts/e2e/native_sandbox_probe.sh install --repo "$GITHUB_WORKSPACE" || status=$?
+          sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
+            /usr/bin/python3 scripts/e2e/native_sandbox_probe_apparmor.py disable \
+            --evidence /var/lib/agent-legion-native-sandbox-probe/evidence/apparmor-rollback.json || status=$?
+          if [[ $status -eq 0 ]]; then
+            sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
+              ./scripts/e2e/native_sandbox_probe.sh run || status=$?
+          fi
+          if [[ $status -eq 0 ]]; then
+            sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
+              ./scripts/e2e/native_sandbox_probe.sh run-candidate rollback || status=$?
+          fi
+          sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
+            ./scripts/e2e/native_sandbox_probe.sh collect \
+            --output "$GITHUB_WORKSPACE/native-sandbox-probe-rollback" || status=$?
+          exit "$status"
+
+      - name: R - require stock and pre-payload E6 no-go restoration
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          stock_a = json.loads(Path("native-sandbox-probe-stock/summary.json").read_text())
+          root = Path("native-sandbox-probe-rollback")
+          stock_r = json.loads((root / "summary.json").read_text())
+          candidate = json.loads((root / "candidate-summary.json").read_text())
+          disabled = json.loads((root / "apparmor-rollback.json").read_text())
+          assert stock_a["harness_complete"] is True and stock_r["harness_complete"] is True
+          assert len(stock_r["cases"]) == 15 and stock_r["decision"] == "no-go"
+          current_a = next(case for case in stock_a["cases"] if case["case"] == "e0-n0-current-no-network")
+          current_r = next(case for case in stock_r["cases"] if case["case"] == "e0-n0-current-no-network")
+          assert current_a["outcome"] != "passed" and current_r["outcome"] != "passed"
+          assert current_a["execution"]["returncode"] != 0 and current_r["execution"]["returncode"] != 0
+          assert candidate["phase"] == "rollback" and candidate["harness_complete"] is True
+          assert candidate["decision"] == "no-go" and candidate["rollback_restored"] is True
+          assert len(candidate["cases"]) == 3 and candidate["rollback_failures"] == []
+          assert candidate["production_fixed"] is False
+          assert disabled["managed_absent"] is True and disabled["target_profiles_absent"] is True
+          assert disabled["static_state_restored"] is True
+          print("rollback restored: stock current and all E6 candidates are pre-payload no-go")
+          PY
+
+      - name: Upload stock probe evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: native-sandbox-probe-${{ github.run_id }}-${{ github.run_attempt }}
-          path: native-sandbox-probe-results/
+          name: native-sandbox-probe-stock-${{ github.run_id }}-${{ github.run_attempt }}
+          path: native-sandbox-probe-stock/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload targeted probe evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-sandbox-probe-targeted-${{ github.run_id }}-${{ github.run_attempt }}
+          path: native-sandbox-probe-targeted/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload rollback probe evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-sandbox-probe-rollback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: native-sandbox-probe-rollback/
           if-no-files-found: error
           retention-days: 30

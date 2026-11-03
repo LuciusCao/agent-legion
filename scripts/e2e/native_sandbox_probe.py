@@ -88,10 +88,10 @@ CAPABILITY_KEYS = ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")
 
 
 class ProbeListener:
-    def __init__(self) -> None:
+    def __init__(self, host: str = "127.0.0.1") -> None:
         self._sock = socket.socket()
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._sock.bind(("127.0.0.1", 0))
+        self._sock.bind((host, 0))
         self._sock.listen()
         self._sock.settimeout(0.2)
         self.host, self.port = self._sock.getsockname()

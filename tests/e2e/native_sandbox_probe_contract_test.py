@@ -98,7 +98,7 @@ def _passed_result(case: str) -> dict:
 def test_workflow_runs_on_branch_push_at_the_current_sha() -> None:
     workflow = _workflow()
     triggers = workflow[True]
-    assert triggers["push"]["branches"] == ["feat/084-native-sandbox-network-probe-39"]
+    assert triggers["push"]["branches"] == ["feat/linux-targeted-apparmor-validation-39"]
     assert set(triggers["pull_request"]["paths"]) == {
         ".github/workflows/native-sandbox-probe.yml",
         "scripts/e2e/native_sandbox_probe*",
