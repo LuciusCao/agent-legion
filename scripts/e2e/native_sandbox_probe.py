@@ -23,6 +23,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.e2e.native_sandbox_probe_contract import (  # noqa: E402
+    result_passed as _result_passed,
+)
+from scripts.e2e.native_sandbox_probe_contract import (  # noqa: E402
+    validate_e5_independence,
+    validate_result,
+)
 from scripts.e2e.native_sandbox_probe_payload import (  # noqa: E402
     LISTENER_TOKEN,
     PARENT_SECRET_ENV,
@@ -32,7 +39,6 @@ from scripts.e2e.native_sandbox_probe_payload import (  # noqa: E402
     _read,
     _sha256,
     _utc_now,
-    check_failures,
 )
 from scripts.e2e.native_sandbox_probe_payload import (  # noqa: E402
     _status as _proc_status,
@@ -79,46 +85,6 @@ ALL_CASES = (
     "e5-n0-concurrent-b",
 )
 CAPABILITY_KEYS = ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")
-
-
-def _payload_failures(case: str, payload: Any) -> list[str]:
-    if case == "e1-n0-user-namespace":
-        return []
-    if not isinstance(payload, dict):
-        return check_failures({}) if case.startswith("e5-") else ["payload_missing"]
-    if case.startswith("e5-"):
-        return check_failures(payload)
-    checks = payload.get("checks")
-    if not isinstance(checks, dict) or not checks:
-        return ["checks_missing_or_empty"]
-    return [name for name, value in checks.items() if value is not True]
-
-
-def _result_failures(case: str, result: dict[str, Any]) -> list[str]:
-    execution = result.get("execution")
-    if not isinstance(execution, dict):
-        return ["execution_missing"]
-    failures = []
-    if execution.get("returncode") != 0:
-        failures.append("returncode")
-    if execution.get("timed_out") is True:
-        failures.append("timed_out")
-    if execution.get("process_group_cleaned") is not True:
-        failures.append("process_group_cleanup")
-    expected = 1 if case.endswith("bwrap-no-net-control") else 0
-    before = execution.get("listener_connections_before")
-    after = execution.get("listener_connections_after")
-    if not isinstance(before, int) or not isinstance(after, int) or after - before != expected:
-        failures.append("listener_connection_count")
-    payload = result.get("payload")
-    if execution.get("returncode") == 0 or payload is not None:
-        failures.extend(_payload_failures(case, payload))
-    failures.extend(str(name) for name in result.get("invariant_failures", []))
-    return failures
-
-
-def _result_passed(case: str, result: dict[str, Any]) -> bool:
-    return result.get("outcome") == "passed" and not _result_failures(case, result)
 
 
 class ProbeListener:
@@ -481,7 +447,7 @@ class NativeSandboxProbe:
             payload_path = work / "payload-evidence.json"
             if payload_path.is_file():
                 result["payload"] = json.loads(payload_path.read_text(encoding="utf-8"))
-            evidence_failures = _result_failures(case, result)
+            evidence_failures = validate_result(case, result)
             result["outcome"] = "passed" if not evidence_failures else "failed"
             result["expected_failure"] = (
                 case.endswith("current-no-network")
@@ -553,9 +519,14 @@ class NativeSandboxProbe:
             if outcome != "passed":
                 reasons.append(f"E5_NOT_PASSED:{case}:{outcome}")
             else:
-                failures = _result_failures(case, result)
+                failures = validate_result(case, result)
                 if failures:
                     reasons.append(f"E5_EVIDENCE_INVALID:{case}:{','.join(failures)}")
+        if all(self.results.get(case, {}).get("outcome") == "passed" for case in e5_cases):
+            reasons.extend(
+                f"E5_NAMESPACE_INVALID:{failure}"
+                for failure in validate_e5_independence(self.results)
+            )
         reasons.extend(f"CASE_NOT_RECORDED:{case}" for case in missing)
         incomplete = [
             case
@@ -566,7 +537,7 @@ class NativeSandboxProbe:
         invalid_passed = [
             case
             for case, result in self.results.items()
-            if result.get("outcome") == "passed" and _result_failures(case, result)
+            if result.get("outcome") == "passed" and validate_result(case, result)
         ]
         reasons.extend(
             f"CASE_EVIDENCE_INVALID:{case}" for case in invalid_passed if case not in e5_cases
@@ -638,22 +609,16 @@ def main() -> int:
         elif e5_selected:
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(e5_selected)) as pool:
                 list(pool.map(probe.execute, e5_selected))
-            payloads = [probe.results[case].get("payload", {}) for case in e5_selected]
-            for namespace in ("user", "mnt", "pid", "net"):
-                observed = [
-                    payload.get("namespaces", {}).get(namespace) for payload in payloads if payload
-                ]
-                if len(observed) != len(set(observed)):
-                    for case in e5_selected:
-                        probe.results[case]["outcome"] = "failed"
-                        probe.results[case].setdefault("invariant_failures", []).append(
-                            f"concurrent_{namespace}_namespace_independence"
-                        )
-                        path = probe._case_dir(case) / "result.json"
-                        path.write_text(
-                            json.dumps(probe.results[case], indent=2, sort_keys=True) + "\n",
-                            encoding="utf-8",
-                        )
+            independence_failures = validate_e5_independence(probe.results)
+            if independence_failures:
+                for case in e5_selected:
+                    probe.results[case]["outcome"] = "failed"
+                    probe.results[case]["invariant_failures"] = independence_failures
+                    path = probe._case_dir(case) / "result.json"
+                    path.write_text(
+                        json.dumps(probe.results[case], indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
         if args.summarize:
             summary = probe.summarize()
             print(json.dumps({"decision": summary["decision"], "reasons": summary["reason_codes"]}))

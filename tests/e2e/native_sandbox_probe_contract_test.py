@@ -18,6 +18,12 @@ from scripts.e2e.native_sandbox_probe import (
     _os_release_value,
 )
 from scripts.e2e.native_sandbox_probe_collect import _case_audit, _sanitize
+from scripts.e2e.native_sandbox_probe_contract import (
+    E5_PREREQUISITES,
+    NAMESPACE_KEYS,
+    required_checks,
+    validate_result,
+)
 from scripts.e2e.native_sandbox_probe_payload import E5_CHECKS, check_failures
 
 pytestmark = pytest.mark.no_db
@@ -66,6 +72,7 @@ def _passed_result(case: str) -> dict:
         "case": case,
         "outcome": "passed",
         "evidence_collected": True,
+        "baseline": {"git_sha": "a" * 40},
         "started_epoch": 1.0,
         "ended_epoch": 2.0,
         "execution": {
@@ -74,14 +81,16 @@ def _passed_result(case: str) -> dict:
             "process_group_cleaned": True,
             "listener_connections_before": 0,
             "listener_connections_after": expected_connections,
+            "launcher_pid": 12345,
+            "command_log": f"cases/{case}/command.log",
+            "stderr_tail": "",
         },
     }
     if case != "e1-n0-user-namespace":
-        checks = {name: True for name in E5_CHECKS} if case.startswith("e5-") else {"probe": True}
-        result["payload"] = {"case": case, "checks": checks}
-    if case.startswith("e5-"):
-        result["payload"]["namespaces"] = {
-            name: f"{name}:[{case}]" for name in ("user", "mnt", "pid", "net")
+        result["payload"] = {
+            "case": case,
+            "checks": {name: True for name in required_checks(case)},
+            "namespaces": {name: f"{name}:[{case}]" for name in NAMESPACE_KEYS},
         }
     return result
 
@@ -202,19 +211,28 @@ def test_e4_is_single_variable_and_never_a_delivery_candidate() -> None:
     assert '"delivery_candidate": case.startswith("e5-")' in harness
 
 
-def _run_fake_matrix(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, e1_outcome: str) -> tuple:
+def _run_fake_matrix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, e1_outcome: str, mutate=None
+) -> tuple:
     calls = []
     results = {}
 
     class FakeProbe:
         def __init__(self, **kwargs):
             self.results = results
+            for e5_case in ALL_CASES:
+                if e5_case.startswith("e5-") and e5_case not in self.results:
+                    self.results[e5_case] = _passed_result(e5_case)
 
         def execute(self, case):
             calls.append(("execute", case))
             outcome = e1_outcome if case == "e1-n0-user-net-namespace" else "passed"
             self.results[case] = _passed_result(case)
             self.results[case]["outcome"] = outcome
+            if outcome == "failed":
+                self.results[case]["execution"]["returncode"] = 1
+            if case in {"e3-n0-raw-netlink-trace", "e5-n0-concurrent-b"} and mutate is not None:
+                mutate(self.results)
             return self.results[case]
 
         def skip(self, case, prerequisite):
@@ -227,6 +245,11 @@ def _run_fake_matrix(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, e1_outcome
 
         def summarize(self):
             return {"decision": "no-go", "reason_codes": []}
+
+        def _case_dir(self, case):
+            path = tmp_path / "fake-results" / case
+            path.mkdir(parents=True, exist_ok=True)
+            return path
 
     monkeypatch.setattr(probe_module, "NativeSandboxProbe", FakeProbe)
     monkeypatch.setattr(
@@ -289,10 +312,12 @@ def test_skip_baseline_failure_is_evidence_not_a_matrix_abort(monkeypatch, tmp_p
     assert probe.results["e5-n0-single"] is result
 
 
-def _execute_with_payload(tmp_path: Path, case: str, payload: dict | None) -> dict:
+def _execute_with_payload(
+    tmp_path: Path, case: str, payload: dict | None, execution_mutate=None
+) -> dict:
     probe = _bare_probe(tmp_path)
     probe.results = {}
-    probe._baseline = lambda: {}
+    probe._baseline = lambda: {"git_sha": "a" * 40}
     work = tmp_path / "injected" / case
     work.mkdir(parents=True, exist_ok=True)
     probe._command = lambda _case: (["injected"], work)
@@ -300,15 +325,22 @@ def _execute_with_payload(tmp_path: Path, case: str, payload: dict | None) -> di
     def fake_run(_case, _command, _work):
         if payload is not None:
             payload["case"] = case
+            payload.setdefault("namespaces", {name: f"{name}:[{case}]" for name in NAMESPACE_KEYS})
             (work / "payload-evidence.json").write_text(json.dumps(payload), encoding="utf-8")
         expected = 1 if case.endswith("bwrap-no-net-control") else 0
-        return {
+        execution = {
             "returncode": 0,
             "timed_out": False,
             "process_group_cleaned": True,
             "listener_connections_before": 0,
             "listener_connections_after": expected,
+            "launcher_pid": 12345,
+            "command_log": f"cases/{case}/command.log",
+            "stderr_tail": "",
         }
+        if execution_mutate is not None:
+            execution_mutate(execution)
+        return execution
 
     probe._run = fake_run
     return probe.execute(case)
@@ -417,6 +449,149 @@ def test_summary_rejects_missing_prerequisite_evidence(tmp_path) -> None:
     assert summary["decision"] == "no-go"
     assert "E5_PREREQUISITE_FAILED:e1-n0-user-net-namespace" in summary["reason_codes"]
     assert "CASE_EVIDENCE_INVALID:e1-n0-user-net-namespace" in summary["reason_codes"]
+
+
+def _mutate_value(document: dict, key: str, mutation: str, invalid=None) -> None:
+    if mutation == "delete":
+        del document[key]
+    elif mutation == "false":
+        document[key] = False
+    else:
+        document[key] = invalid
+
+
+def test_contract_fixtures_use_real_checks_and_precise_true_only_exemption() -> None:
+    assert required_checks("e1-n0-user-namespace") == ()
+    assert "e1-n0-user-namespace" not in E5_PREREQUISITES
+    for case in ALL_CASES:
+        assert validate_result(case, _passed_result(case)) == []
+
+
+@pytest.mark.parametrize("case", E5_PREREQUISITES)
+@pytest.mark.parametrize("mutation", ["delete", "false"])
+def test_every_prerequisite_check_mutation_fails_execute_main_and_summary(
+    monkeypatch, tmp_path, case, mutation
+) -> None:
+    for name in required_checks(case):
+        payload = _passed_result(case)["payload"]
+        _mutate_value(payload["checks"], name, mutation)
+        assert _execute_with_payload(tmp_path, case, payload)["outcome"] == "failed"
+
+        def mutate_main(results, name=name):
+            _mutate_value(results[case]["payload"]["checks"], name, mutation)
+
+        _, main_results = _run_fake_matrix(monkeypatch, tmp_path, "passed", mutate=mutate_main)
+        assert all(
+            result["outcome"] == "skipped"
+            for key, result in main_results.items()
+            if key.startswith("e5-")
+        ), (case, mutation, name)
+
+        probe = _summary_probe(tmp_path)
+        _mutate_value(probe.results[case]["payload"]["checks"], name, mutation)
+        summary = probe.summarize()
+        assert summary["decision"] == "no-go", (case, mutation, name)
+        assert f"E5_PREREQUISITE_FAILED:{case}" in summary["reason_codes"]
+
+
+@pytest.mark.parametrize("namespace", NAMESPACE_KEYS)
+def test_e5_namespace_missing_fails_execute_main_and_summary(
+    monkeypatch, tmp_path, namespace
+) -> None:
+    payload = _passed_result("e5-n0-single")["payload"]
+    del payload["namespaces"][namespace]
+    assert _execute_with_payload(tmp_path, "e5-n0-single", payload)["outcome"] == "failed"
+
+    def mutate_main(results):
+        del results["e5-n0-single"]["payload"]["namespaces"][namespace]
+
+    _, main_results = _run_fake_matrix(monkeypatch, tmp_path, "passed", mutate=mutate_main)
+    assert all(
+        result["outcome"] == "failed"
+        for key, result in main_results.items()
+        if key.startswith("e5-")
+    )
+
+    probe = _summary_probe(tmp_path)
+    del probe.results["e5-n0-single"]["payload"]["namespaces"][namespace]
+    summary = probe.summarize()
+    assert summary["decision"] == "no-go"
+    assert any("NAMESPACE_INVALID" in reason for reason in summary["reason_codes"])
+
+
+@pytest.mark.parametrize("namespace", NAMESPACE_KEYS)
+def test_e5_duplicate_namespace_fails_main_and_summary(monkeypatch, tmp_path, namespace) -> None:
+    def mutate_main(results):
+        results["e5-n0-single"]["payload"]["namespaces"][namespace] = results["e5-n0-concurrent-a"][
+            "payload"
+        ]["namespaces"][namespace]
+
+    _, main_results = _run_fake_matrix(monkeypatch, tmp_path, "passed", mutate=mutate_main)
+    assert all(
+        result["outcome"] == "failed"
+        for key, result in main_results.items()
+        if key.startswith("e5-")
+    )
+
+    probe = _summary_probe(tmp_path)
+    mutate_main(probe.results)
+    probe.results["e5-n0-single"]["invariant_failures"] = []
+    summary = probe.summarize()
+    assert summary["decision"] == "no-go"
+    assert f"E5_NAMESPACE_INVALID:duplicate_namespace_{namespace}" in summary["reason_codes"]
+
+
+EXECUTION_INVALID_VALUES = {
+    "returncode": "0",
+    "timed_out": True,
+    "process_group_cleaned": False,
+    "listener_connections_before": "0",
+    "listener_connections_after": "1",
+    "launcher_pid": 0,
+    "command_log": "",
+    "stderr_tail": None,
+}
+
+
+@pytest.mark.parametrize("mutation", ["delete", "invalid"])
+def test_every_execution_field_mutation_fails_execute_main_and_summary(
+    monkeypatch, tmp_path, mutation
+) -> None:
+    for field, invalid in EXECUTION_INVALID_VALUES.items():
+        payload = _passed_result("e5-n0-single")["payload"]
+        result = _execute_with_payload(
+            tmp_path,
+            "e5-n0-single",
+            payload,
+            execution_mutate=lambda execution, field=field, invalid=invalid: _mutate_value(
+                execution, field, mutation, invalid
+            ),
+        )
+        assert result["outcome"] == "failed", (mutation, field)
+
+        for prerequisite in E5_PREREQUISITES:
+
+            def mutate_main(results, prerequisite=prerequisite, field=field, invalid=invalid):
+                _mutate_value(results[prerequisite]["execution"], field, mutation, invalid)
+
+            _, main_results = _run_fake_matrix(monkeypatch, tmp_path, "passed", mutate=mutate_main)
+            assert all(
+                result["outcome"] == "skipped"
+                for key, result in main_results.items()
+                if key.startswith("e5-")
+            ), (mutation, field, prerequisite)
+
+        probe = _summary_probe(tmp_path)
+        _mutate_value(probe.results["e5-n0-single"]["execution"], field, mutation, invalid)
+        assert probe.summarize()["decision"] == "no-go", (mutation, field)
+
+
+def test_summary_ignores_prewrite_invariant_failures_but_not_raw_namespace_evidence(
+    tmp_path,
+) -> None:
+    probe = _summary_probe(tmp_path)
+    probe.results["e5-n0-single"]["invariant_failures"] = ["returncode", "timed_out"]
+    assert probe.summarize()["decision"] == "go"
 
 
 def test_summary_no_go_is_not_an_incomplete_or_all_green_harness(tmp_path: Path) -> None:
