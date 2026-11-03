@@ -16,7 +16,6 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +23,20 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.e2e.native_sandbox_probe_payload import LISTENER_TOKEN, PARENT_SECRET_ENV  # noqa: E402
+from scripts.e2e.native_sandbox_probe_payload import (  # noqa: E402
+    LISTENER_TOKEN,
+    PARENT_SECRET_ENV,
+    _command_output,
+    _namespace,
+    _os_release_value,
+    _read,
+    _sha256,
+    _utc_now,
+    check_failures,
+)
+from scripts.e2e.native_sandbox_probe_payload import (  # noqa: E402
+    _status as _proc_status,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PAYLOAD = SCRIPT_DIR / "native_sandbox_probe_payload.py"
@@ -69,49 +81,44 @@ ALL_CASES = (
 CAPABILITY_KEYS = ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")
 
 
-def _utc_now() -> str:
-    return datetime.now(UTC).isoformat()
+def _payload_failures(case: str, payload: Any) -> list[str]:
+    if case == "e1-n0-user-namespace":
+        return []
+    if not isinstance(payload, dict):
+        return check_failures({}) if case.startswith("e5-") else ["payload_missing"]
+    if case.startswith("e5-"):
+        return check_failures(payload)
+    checks = payload.get("checks")
+    if not isinstance(checks, dict) or not checks:
+        return ["checks_missing_or_empty"]
+    return [name for name, value in checks.items() if value is not True]
 
 
-def _read(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        return f"unavailable: {type(exc).__name__}: {exc.errno}"
+def _result_failures(case: str, result: dict[str, Any]) -> list[str]:
+    execution = result.get("execution")
+    if not isinstance(execution, dict):
+        return ["execution_missing"]
+    failures = []
+    if execution.get("returncode") != 0:
+        failures.append("returncode")
+    if execution.get("timed_out") is True:
+        failures.append("timed_out")
+    if execution.get("process_group_cleaned") is not True:
+        failures.append("process_group_cleanup")
+    expected = 1 if case.endswith("bwrap-no-net-control") else 0
+    before = execution.get("listener_connections_before")
+    after = execution.get("listener_connections_after")
+    if not isinstance(before, int) or not isinstance(after, int) or after - before != expected:
+        failures.append("listener_connection_count")
+    payload = result.get("payload")
+    if execution.get("returncode") == 0 or payload is not None:
+        failures.extend(_payload_failures(case, payload))
+    failures.extend(str(name) for name in result.get("invariant_failures", []))
+    return failures
 
 
-def _os_release_value(key: str) -> str:
-    prefix = f"{key}="
-    for line in _read(Path("/etc/os-release")).splitlines():
-        if line.startswith(prefix):
-            return line[len(prefix) :].strip('"')
-    return "unavailable"
-
-
-def _proc_status() -> dict[str, str]:
-    rows = {}
-    for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
-        key, separator, value = line.partition(":")
-        if separator:
-            rows[key] = value.strip()
-    return rows
-
-
-def _namespace(name: str) -> str:
-    return os.readlink(Path("/proc/self/ns") / name)
-
-
-def _command_output(command: list[str]) -> str:
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
-    return (completed.stdout + completed.stderr).strip()
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _result_passed(case: str, result: dict[str, Any]) -> bool:
+    return result.get("outcome") == "passed" and not _result_failures(case, result)
 
 
 class ProbeListener:
@@ -474,35 +481,16 @@ class NativeSandboxProbe:
             payload_path = work / "payload-evidence.json"
             if payload_path.is_file():
                 result["payload"] = json.loads(payload_path.read_text(encoding="utf-8"))
-            execution = result["execution"]
-            expected_connections = 1 if case.endswith("bwrap-no-net-control") else 0
-            connection_delta = (
-                execution["listener_connections_after"] - execution["listener_connections_before"]
-            )
-            payload_checks = result.get("payload", {}).get("checks", {})
-            checks_passed = all(value is True for value in payload_checks.values())
-            passed = (
-                execution["returncode"] == 0
-                and not execution["timed_out"]
-                and execution["process_group_cleaned"]
-                and connection_delta == expected_connections
-                and checks_passed
-            )
-            result["outcome"] = "passed" if passed else "failed"
+            evidence_failures = _result_failures(case, result)
+            result["outcome"] = "passed" if not evidence_failures else "failed"
             result["expected_failure"] = (
                 case.endswith("current-no-network")
                 or case.startswith("e4-")
                 or case == "e3-n0-raw-netlink-trace"
             )
             result["evidence_collected"] = True
-            if not execution["process_group_cleaned"]:
-                result["invariant_failures"] = ["process_group_cleanup"]
-            elif connection_delta != expected_connections:
-                result["invariant_failures"] = ["listener_connection_count"]
-            elif payload_checks and not checks_passed:
-                result["invariant_failures"] = [
-                    name for name, value in payload_checks.items() if value is not True
-                ]
+            if evidence_failures:
+                result["invariant_failures"] = evidence_failures
         except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError) as exc:
             result.update(
                 {
@@ -557,12 +545,17 @@ class NativeSandboxProbe:
         e5_cases = [case for case in ALL_CASES if case.startswith("e5-")]
         reasons = []
         for prerequisite in ("e0-n0-bwrap-no-net-control", "e1-n0-user-net-namespace"):
-            if self.results.get(prerequisite, {}).get("outcome") != "passed":
+            if not _result_passed(prerequisite, self.results.get(prerequisite, {})):
                 reasons.append(f"E5_PREREQUISITE_FAILED:{prerequisite}")
         for case in e5_cases:
-            outcome = self.results.get(case, {}).get("outcome", "missing")
+            result = self.results.get(case, {})
+            outcome = result.get("outcome", "missing")
             if outcome != "passed":
                 reasons.append(f"E5_NOT_PASSED:{case}:{outcome}")
+            else:
+                failures = _result_failures(case, result)
+                if failures:
+                    reasons.append(f"E5_EVIDENCE_INVALID:{case}:{','.join(failures)}")
         reasons.extend(f"CASE_NOT_RECORDED:{case}" for case in missing)
         incomplete = [
             case
@@ -570,13 +563,21 @@ class NativeSandboxProbe:
             if not result.get("evidence_collected", True)
         ]
         reasons.extend(f"CASE_INFRASTRUCTURE_ERROR:{case}" for case in incomplete)
+        invalid_passed = [
+            case
+            for case, result in self.results.items()
+            if result.get("outcome") == "passed" and _result_failures(case, result)
+        ]
+        reasons.extend(
+            f"CASE_EVIDENCE_INVALID:{case}" for case in invalid_passed if case not in e5_cases
+        )
         decision = "no-go" if reasons else "go"
         summary = {
             "schema_version": 1,
             "probe": "native-sandbox-network-probe",
             "git_sha": self.git_sha,
             "generated_at": _utc_now(),
-            "harness_complete": not missing and not incomplete,
+            "harness_complete": not missing and not incomplete and not invalid_passed,
             "decision": decision,
             "decision_scope": "E5 probe candidate only; production behavior is unchanged",
             "production_fixed": False,
@@ -612,23 +613,25 @@ def main() -> int:
         for case in cases:
             if case.startswith("e5-"):
                 continue
-            if (
-                case == "e2-n0-private-loopback"
-                and probe.results.get("e1-n0-user-net-namespace", {}).get("outcome") != "passed"
+            if case == "e2-n0-private-loopback" and not _result_passed(
+                "e1-n0-user-net-namespace",
+                probe.results.get("e1-n0-user-net-namespace", {}),
             ):
                 probe.skip(case, "e1-n0-user-net-namespace")
                 continue
             probe.execute(case)
         prerequisites_met = all(
-            probe.results.get(case, {}).get("outcome") == "passed"
+            _result_passed(case, probe.results.get(case, {}))
             for case in ("e0-n0-bwrap-no-net-control", "e1-n0-user-net-namespace")
         )
         if e5_selected and not prerequisites_met:
             for case in e5_selected:
                 prerequisite = (
                     "e0-n0-bwrap-no-net-control"
-                    if probe.results.get("e0-n0-bwrap-no-net-control", {}).get("outcome")
-                    != "passed"
+                    if not _result_passed(
+                        "e0-n0-bwrap-no-net-control",
+                        probe.results.get("e0-n0-bwrap-no-net-control", {}),
+                    )
                     else "e1-n0-user-net-namespace"
                 )
                 probe.skip(case, prerequisite)

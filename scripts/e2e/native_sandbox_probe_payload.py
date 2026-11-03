@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 import socket
 import struct
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +45,38 @@ def check_failures(document: dict[str, Any]) -> list[str]:
     if not isinstance(checks, dict):
         return list(E5_CHECKS)
     return [name for name in E5_CHECKS if checks.get(name) is not True]
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _read(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        return f"unavailable: {type(exc).__name__}: {exc.errno}"
+
+
+def _os_release_value(key: str) -> str:
+    prefix = f"{key}="
+    for line in _read(Path("/etc/os-release")).splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix) :].strip('"')
+    return "unavailable"
+
+
+def _command_output(command: list[str]) -> str:
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    return (completed.stdout + completed.stderr).strip()
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _status() -> dict[str, str]:

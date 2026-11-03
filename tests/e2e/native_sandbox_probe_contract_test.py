@@ -60,6 +60,32 @@ def _bare_probe(tmp_path: Path) -> NativeSandboxProbe:
     return probe
 
 
+def _passed_result(case: str) -> dict:
+    expected_connections = 1 if case.endswith("bwrap-no-net-control") else 0
+    result = {
+        "case": case,
+        "outcome": "passed",
+        "evidence_collected": True,
+        "started_epoch": 1.0,
+        "ended_epoch": 2.0,
+        "execution": {
+            "returncode": 0,
+            "timed_out": False,
+            "process_group_cleaned": True,
+            "listener_connections_before": 0,
+            "listener_connections_after": expected_connections,
+        },
+    }
+    if case != "e1-n0-user-namespace":
+        checks = {name: True for name in E5_CHECKS} if case.startswith("e5-") else {"probe": True}
+        result["payload"] = {"case": case, "checks": checks}
+    if case.startswith("e5-"):
+        result["payload"]["namespaces"] = {
+            name: f"{name}:[{case}]" for name in ("user", "mnt", "pid", "net")
+        }
+    return result
+
+
 def test_workflow_runs_on_branch_push_at_the_current_sha() -> None:
     workflow = _workflow()
     triggers = workflow[True]
@@ -187,7 +213,8 @@ def _run_fake_matrix(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, e1_outcome
         def execute(self, case):
             calls.append(("execute", case))
             outcome = e1_outcome if case == "e1-n0-user-net-namespace" else "passed"
-            self.results[case] = {"outcome": outcome}
+            self.results[case] = _passed_result(case)
+            self.results[case]["outcome"] = outcome
             return self.results[case]
 
         def skip(self, case, prerequisite):
@@ -262,19 +289,75 @@ def test_skip_baseline_failure_is_evidence_not_a_matrix_abort(monkeypatch, tmp_p
     assert probe.results["e5-n0-single"] is result
 
 
+def _execute_with_payload(tmp_path: Path, case: str, payload: dict | None) -> dict:
+    probe = _bare_probe(tmp_path)
+    probe.results = {}
+    probe._baseline = lambda: {}
+    work = tmp_path / "injected" / case
+    work.mkdir(parents=True, exist_ok=True)
+    probe._command = lambda _case: (["injected"], work)
+
+    def fake_run(_case, _command, _work):
+        if payload is not None:
+            payload["case"] = case
+            (work / "payload-evidence.json").write_text(json.dumps(payload), encoding="utf-8")
+        expected = 1 if case.endswith("bwrap-no-net-control") else 0
+        return {
+            "returncode": 0,
+            "timed_out": False,
+            "process_group_cleaned": True,
+            "listener_connections_before": 0,
+            "listener_connections_after": expected,
+        }
+
+    probe._run = fake_run
+    return probe.execute(case)
+
+
+@pytest.mark.parametrize("payload", [None, {"checks": {}}, {"checks": {"original_uid": True}}])
+def test_execute_e5_rejects_missing_empty_and_partial_payload(tmp_path, payload) -> None:
+    result = _execute_with_payload(tmp_path, "e5-n0-single", payload)
+    assert result["outcome"] == "failed"
+    assert result["invariant_failures"]
+
+
+def test_execute_e5_accepts_only_complete_payload(tmp_path) -> None:
+    payload = {"checks": {name: True for name in E5_CHECKS}}
+    result = _execute_with_payload(tmp_path, "e5-n0-single", payload)
+    assert result["outcome"] == "passed"
+    assert check_failures(result["payload"]) == []
+
+
+@pytest.mark.parametrize("mutation", ["delete", "false"])
+def test_execute_e5_detects_every_required_check_mutation(tmp_path, mutation) -> None:
+    for name in E5_CHECKS:
+        payload = {"checks": {check: True for check in E5_CHECKS}}
+        if mutation == "delete":
+            del payload["checks"][name]
+        else:
+            payload["checks"][name] = False
+        result = _execute_with_payload(tmp_path, "e5-n0-single", payload)
+        assert result["outcome"] == "failed", (mutation, name)
+        assert name in result["invariant_failures"], (mutation, name)
+
+
+def test_execute_payload_free_case_is_the_only_missing_payload_exception(tmp_path) -> None:
+    result = _execute_with_payload(tmp_path, "e1-n0-user-namespace", None)
+    assert result["outcome"] == "passed"
+    for case in (
+        "e0-n0-bwrap-no-net-control",
+        "e1-n0-user-net-namespace",
+        "e2-n0-private-loopback",
+        "e4-nnp-yes-cap-empty",
+    ):
+        assert _execute_with_payload(tmp_path, case, None)["outcome"] == "failed"
+        assert _execute_with_payload(tmp_path, case, {"checks": {}})["outcome"] == "failed"
+
+
 def _summary_probe(tmp_path: Path) -> NativeSandboxProbe:
     probe = _bare_probe(tmp_path)
     probe.git_sha = "a" * 40
-    probe.results = {
-        case: {
-            "case": case,
-            "outcome": "passed",
-            "evidence_collected": True,
-            "started_epoch": 1.0,
-            "ended_epoch": 2.0,
-        }
-        for case in ALL_CASES
-    }
+    probe.results = {case: _passed_result(case) for case in ALL_CASES}
     return probe
 
 
@@ -291,6 +374,49 @@ def test_summary_go_requires_every_e5_case_and_never_claims_production_fixed(
     assert summary["decision"] == "no-go"
     assert "E5_NOT_PASSED:e5-n0-concurrent-b:skipped" in summary["reason_codes"]
     assert summary["production_fixed"] is False
+
+
+@pytest.mark.parametrize("shape", ["missing", "empty", "partial"])
+def test_summary_rejects_missing_empty_and_partial_e5_evidence(tmp_path, shape) -> None:
+    probe = _summary_probe(tmp_path)
+    if shape == "missing":
+        del probe.results["e5-n0-single"]["payload"]
+    elif shape == "empty":
+        probe.results["e5-n0-single"]["payload"]["checks"] = {}
+    else:
+        probe.results["e5-n0-single"]["payload"]["checks"] = {"original_uid": True}
+    summary = probe.summarize()
+    assert summary["decision"] == "no-go"
+    assert summary["harness_complete"] is False
+    assert any(
+        reason.startswith("E5_EVIDENCE_INVALID:e5-n0-single:") for reason in summary["reason_codes"]
+    )
+
+
+@pytest.mark.parametrize("mutation", ["delete", "false"])
+def test_summary_detects_every_required_e5_check_mutation(tmp_path, mutation) -> None:
+    for name in E5_CHECKS:
+        probe = _summary_probe(tmp_path)
+        checks = probe.results["e5-n0-single"]["payload"]["checks"]
+        if mutation == "delete":
+            del checks[name]
+        else:
+            checks[name] = False
+        summary = probe.summarize()
+        assert summary["decision"] == "no-go", (mutation, name)
+        assert any(
+            reason.startswith("E5_EVIDENCE_INVALID:e5-n0-single:") and name in reason
+            for reason in summary["reason_codes"]
+        ), (mutation, name)
+
+
+def test_summary_rejects_missing_prerequisite_evidence(tmp_path) -> None:
+    probe = _summary_probe(tmp_path)
+    del probe.results["e1-n0-user-net-namespace"]["payload"]
+    summary = probe.summarize()
+    assert summary["decision"] == "no-go"
+    assert "E5_PREREQUISITE_FAILED:e1-n0-user-net-namespace" in summary["reason_codes"]
+    assert "CASE_EVIDENCE_INVALID:e1-n0-user-net-namespace" in summary["reason_codes"]
 
 
 def test_summary_no_go_is_not_an_incomplete_or_all_green_harness(tmp_path: Path) -> None:
@@ -334,8 +460,8 @@ def test_default_reaper_and_descendant_contract_do_not_require_payload_pid1() ->
 
 
 def test_os_release_parser_does_not_confuse_version_id_with_id(monkeypatch) -> None:
-    monkeypatch.setattr(
-        probe_module,
+    monkeypatch.setitem(
+        _os_release_value.__globals__,
         "_read",
         lambda _path: 'NAME="Ubuntu"\nVERSION_ID="24.04"\nID="ubuntu"',
     )
