@@ -387,7 +387,7 @@ def test_enable_persists_rollback_baseline_before_parser_failure(monkeypatch, tm
     monkeypatch.setattr(apparmor, "_require_root_ci", lambda: None)
     monkeypatch.setattr(apparmor, "_require_source", lambda: {"reviewed": True})
     monkeypatch.setattr(apparmor, "_static_snapshot", lambda: {"Seccomp": "2"})
-    monkeypatch.setattr(apparmor, "_profiles", lambda: {"stock": "(enforce)"})
+    monkeypatch.setattr(apparmor, "read_profiles", lambda path: {"stock": "(enforce)"})
     monkeypatch.setattr(apparmor.os, "chown", lambda *args: None)
 
     def fail_parser(command):
@@ -419,14 +419,14 @@ def test_rollback_rejects_any_remaining_apparmor_profile_delta(monkeypatch, tmp_
     monkeypatch.setattr(apparmor, "_static_snapshot", lambda: {"Seccomp": "2"})
     monkeypatch.setattr(
         apparmor,
-        "_profiles",
-        lambda: {"stock": "(enforce)", "unexpected": "(enforce)"},
+        "read_profiles",
+        lambda path: {"stock": "(enforce)", "unexpected": "(enforce)"},
     )
     monkeypatch.setattr(apparmor, "_run", lambda command: {"stdout": "{}"})
     with pytest.raises(RuntimeError, match="complete AppArmor profile set"):
         apparmor.disable(tmp_path / "rollback.json")
 
-    monkeypatch.setattr(apparmor, "_profiles", lambda: {"stock": "(enforce)"})
+    monkeypatch.setattr(apparmor, "read_profiles", lambda path: {"stock": "(enforce)"})
     evidence = tmp_path / "rollback.json"
     apparmor.disable(evidence)
     document = json.loads(evidence.read_text(encoding="utf-8"))

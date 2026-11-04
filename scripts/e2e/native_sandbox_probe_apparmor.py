@@ -8,10 +8,15 @@ import json
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
-from scripts.e2e.native_sandbox_probe_apparmor_state import (
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.e2e.native_sandbox_probe_apparmor_state import (  # noqa: E402
     load_rollback_baseline,
     managed_profile_valid,
     read_profiles,
@@ -82,10 +87,6 @@ def _package_version(package: str) -> str:
     if completed.returncode != 0:
         raise RuntimeError(f"package version unavailable: {package}")
     return completed.stdout.strip()
-
-
-def _profiles() -> dict[str, str]:
-    return read_profiles(PROFILES)
 
 
 def _static_snapshot() -> dict[str, Any]:
@@ -175,7 +176,7 @@ def enable(evidence_path: Path) -> None:
     _require_root_ci()
     review = _require_source()
     before = _static_snapshot()
-    before_profiles = _profiles()
+    before_profiles = read_profiles(PROFILES)
     _write_evidence(
         STATE,
         {
@@ -200,7 +201,7 @@ def enable(evidence_path: Path) -> None:
     load = _run(["apparmor_parser", "-r", str(MANAGED)])
     enforce = _run(["aa-enforce", str(MANAGED)])
     after = _static_snapshot()
-    after_profiles = _profiles()
+    after_profiles = read_profiles(PROFILES)
     added = sorted(set(after_profiles) - set(before_profiles))
     removed = sorted(set(before_profiles) - set(after_profiles))
     if before != after:
@@ -241,7 +242,7 @@ def enable(evidence_path: Path) -> None:
 def disable(evidence_path: Path) -> None:
     _require_root_ci()
     previous, baseline_error = load_rollback_baseline(STATE)
-    before_profiles = _profiles()
+    before_profiles = read_profiles(PROFILES)
     removed_with_parser = False
     if os.path.lexists(MANAGED):
         if not managed_profile_valid(MANAGED, EXPECTED_SOURCE_SHA256):
@@ -249,7 +250,7 @@ def disable(evidence_path: Path) -> None:
         _run(["apparmor_parser", "-R", str(MANAGED)])
         removed_with_parser = True
         MANAGED.unlink()
-    after_profiles = _profiles()
+    after_profiles = read_profiles(PROFILES)
     if "bwrap" in after_profiles or "unpriv_bwrap" in after_profiles:
         raise RuntimeError("target AppArmor profiles remain loaded after rollback")
     if os.path.lexists(MANAGED):

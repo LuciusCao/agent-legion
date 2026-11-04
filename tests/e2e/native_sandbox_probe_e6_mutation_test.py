@@ -413,7 +413,7 @@ def test_corrupt_baseline_still_unloads_managed_but_never_reports_restored(
     monkeypatch.setattr(apparmor, "MANAGED", managed)
     monkeypatch.setattr(apparmor, "_require_root_ci", lambda: None)
     monkeypatch.setattr(apparmor, "managed_profile_valid", lambda path, expected: True)
-    monkeypatch.setattr(apparmor, "_profiles", lambda: {"stock": "(enforce)"})
+    monkeypatch.setattr(apparmor, "read_profiles", lambda path: {"stock": "(enforce)"})
     monkeypatch.setattr(apparmor, "_static_snapshot", lambda: {"Seccomp": "2"})
     monkeypatch.setattr(apparmor, "_run", lambda command: calls.append(command) or {"stdout": "{}"})
     evidence = tmp_path / "rollback.json"
@@ -432,7 +432,7 @@ def test_missing_baseline_cannot_claim_restored(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(apparmor, "MANAGED", tmp_path / "managed")
     monkeypatch.setattr(apparmor, "_require_root_ci", lambda: None)
     monkeypatch.setattr(
-        apparmor, "_profiles", lambda: {"stock": "(enforce)", "unexpected": "(enforce)"}
+        apparmor, "read_profiles", lambda path: {"stock": "(enforce)", "unexpected": "(enforce)"}
     )
     monkeypatch.setattr(apparmor, "_static_snapshot", lambda: {"Seccomp": "2"})
     monkeypatch.setattr(apparmor, "_run", lambda command: {"stdout": "{}"})
@@ -469,7 +469,11 @@ def test_pending_write_uses_atomic_replace_and_workflow_compares_independent_pro
 
 def test_absolute_entry_points_import_repo_modules_outside_checkout(tmp_path) -> None:
     root = WORKFLOW.parents[2]
-    for name in ("native_sandbox_probe_collect.py", "native_sandbox_probe_quiesce.py"):
+    for name in (
+        "native_sandbox_probe_apparmor.py",
+        "native_sandbox_probe_collect.py",
+        "native_sandbox_probe_quiesce.py",
+    ):
         completed = subprocess.run(
             [sys.executable, str(root / "scripts/e2e" / name), "--help"],
             cwd=tmp_path,
