@@ -1,10 +1,13 @@
 import { Edge, MarkerType, Node } from '@xyflow/react'
 import type { DagNodeData } from './dag/dagNodeTypes'
+import { buildRelationMaps } from './dagGraphRelations'
 import {
-  buildRelationMaps,
-  collectAncestors,
-  collectDescendants,
-} from './dagGraphRelations'
+  applyNodeHighlight,
+  collectHighlightRelations,
+} from './dagHighlightNodes'
+
+export { hoverReducer } from './dagHighlightNodes'
+export type { HoverAction, HoverState } from './dagHighlightNodes'
 
 /**
  * #276 的 hover/选中高亮计算（从 DagGraph.tsx 抽出，纯函数）：
@@ -59,32 +62,18 @@ export function applyHighlight(
             }
           : edge
       ),
-      highlightedNodes: rfNodes.map((node) => {
-        const prevData = prevNodeData.get(node.id)
-        if (prevData?.active === true || prevData?.dimmed === true) {
-          return {
-            ...node,
-            data: { ...node.data, active: false, dimmed: false },
-          }
-        }
-        return node
-      }),
+      highlightedNodes: applyNodeHighlight(
+        rfNodes,
+        null,
+        new Set(),
+        prevNodeData
+      ),
     }
   }
 
   const { edgeBySource, edgeByTarget } = buildRelationMaps(rfEdges)
-  const ancestors = new Set<string>()
-  const descendants = new Set<string>()
-  collectAncestors(activeNode, edgeByTarget, ancestors)
-  collectDescendants(activeNode, edgeBySource, descendants)
-  // 与选中节点同链路（自身/祖先/后代）的节点保持全亮，其余节点置灰。
-  // activeNode 自身也进 highlighted，保证从 activeNode 出发无法回溯自身
-  // 的退化图（如仅剩孤立节点）仍能正确全亮。
-  const highlightedNodeIds = new Set<string>([
-    activeNode,
-    ...ancestors,
-    ...descendants,
-  ])
+  const { ancestors, descendants, highlightedNodeIds } =
+    collectHighlightRelations(activeNode, edgeBySource, edgeByTarget)
 
   // 三态视觉判定（#668）：data.highlighted 的 undefined=常态（透传
   // buildRfEdges 原始 style：加深加粗的全亮描边）、false=置灰、
@@ -123,52 +112,13 @@ export function applyHighlight(
     }
   })
 
-  const highlightedNodes = rfNodes.map((node) => {
-    const active = node.id === activeNode
-    const shouldDim = !highlightedNodeIds.has(node.id)
-    const prevData = prevNodeData.get(node.id)
-    if (
-      (prevData?.dimmed === true) === shouldDim &&
-      (prevData?.active === true) === active
-    ) {
-      return node
-    }
-    return {
-      ...node,
-      data: { ...node.data, active, dimmed: shouldDim },
-    }
-  })
-
-  return { highlightedNodes, highlightedEdges }
-}
-
-/**
- * hover 链式状态机（Codex review on #285 的 P2-3）：prevActiveNode 与
- * hoveredNode 必须原子更新——两个独立 useState 各自调度会引入一轮多余的
- * 全量重算（render 计数测试能捕获），reducer 单次 dispatch 单轮渲染。
- * 重复 enter 同一节点 / 无 hover 时 leave 都是 no-op（返回原 state 引用，
- * React 直接 bail out）。
- */
-export interface HoverState {
-  hoveredNode: string | null
-  prevActiveNode: string | null
-}
-
-export type HoverAction = { type: 'enter'; id: string } | { type: 'leave' }
-
-export function hoverReducer(
-  state: HoverState,
-  action: HoverAction
-): HoverState {
-  switch (action.type) {
-    case 'enter':
-      if (action.id === state.hoveredNode) return state
-      return {
-        hoveredNode: action.id,
-        prevActiveNode: state.hoveredNode,
-      }
-    case 'leave':
-      if (state.hoveredNode === null) return state
-      return { hoveredNode: null, prevActiveNode: state.hoveredNode }
+  return {
+    highlightedNodes: applyNodeHighlight(
+      rfNodes,
+      activeNode,
+      highlightedNodeIds,
+      prevNodeData
+    ),
+    highlightedEdges,
   }
 }

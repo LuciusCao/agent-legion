@@ -1,5 +1,7 @@
 import type { DagNodeStatus } from '../dagNodeStatus'
 
+export { nodeExecutionTypeLabel } from './dagNodeExecutionType'
+
 export type DagNodeChangeType = 'added' | 'modified' | 'removed'
 
 // 节点执行类型（#284 显式 type 词汇的展示层迁移，#1180）：卡片头部类型
@@ -7,18 +9,6 @@ export type DagNodeChangeType = 'added' | 'modified' | 'removed'
 // 自含执行档案的 agent 节点（EXEC-AGENT-PROFILE-001）。start/approval 不
 // dispatch，没有执行类型（值为 null，不渲染类型徽标）。
 export type NodeExecutionType = 'code' | 'agent'
-
-/** 类型徽标文案：agent 节点声明了 execution.runtime 时附 runtime
- * （agent·velites——旧「Pi Agent」标签真正想表达的语义，#1180）。 */
-export function nodeExecutionTypeLabel(
-  data: Pick<DagNodeData, 'executionType' | 'executionRuntime'>
-): string | null {
-  if (!data.executionType) return null
-  if (data.executionType === 'agent' && data.executionRuntime) {
-    return `agent·${data.executionRuntime}`
-  }
-  return data.executionType
-}
 
 // 拓扑/类型徽标联合（#392 Phase 3）：approval 为审批门专属徽标。
 export type TopologyBadge =
