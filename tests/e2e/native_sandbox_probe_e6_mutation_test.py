@@ -436,7 +436,7 @@ def test_corrupt_baseline_still_unloads_managed_but_never_reports_restored(
     evidence = tmp_path / "rollback.json"
     with pytest.raises(RuntimeError, match="baseline unreadable"):
         apparmor.disable(evidence)
-    assert calls[0] == ["apparmor_parser", "-R", str(managed)]
+    assert calls[0] == ["/usr/sbin/apparmor_parser", "-R", str(managed)]
     assert not managed.exists()
     document = json.loads(evidence.read_text(encoding="utf-8"))
     assert document["apparmor_profiles_restored"] is False

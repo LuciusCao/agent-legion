@@ -49,7 +49,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            apparmor apparmor-profiles bubblewrap iproute2 libcap2-bin strace util-linux
+            apparmor apparmor-profiles apparmor-utils bubblewrap iproute2 libcap2-bin strace util-linux
 
       - name: Run native probe contract tests
         run: uv run pytest -q tests/e2e/native_sandbox_probe_contract_test.py tests/e2e/native_sandbox_probe_e6_contract_test.py tests/e2e/native_sandbox_probe_e6_mutation_test.py

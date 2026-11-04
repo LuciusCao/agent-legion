@@ -62,7 +62,7 @@ def _case_audit(case: dict[str, Any]) -> dict[str, Any]:
 
 def collect_apparmor_status(output: Path) -> None:
     completed = subprocess.run(
-        ["aa-status", "--json"], capture_output=True, text=True, timeout=30, check=False
+        ["/usr/sbin/aa-status", "--json"], capture_output=True, text=True, timeout=30, check=False
     )
     (output / "apparmor-status.json").write_text(
         _sanitize(completed.stdout + completed.stderr), encoding="utf-8"

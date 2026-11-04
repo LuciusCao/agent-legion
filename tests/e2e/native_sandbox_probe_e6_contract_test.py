@@ -337,6 +337,7 @@ def test_workflow_is_disposable_a_b_r_with_separate_candidate_artifacts() -> Non
     assert workflow["permissions"] == {"contents": "read"}
     source = WORKFLOW.read_text(encoding="utf-8")
     assert "apparmor-profiles" in source
+    assert "apparmor-utils" in source
     assert "native_sandbox_probe_apparmor.py enable" in source
     assert "native_sandbox_probe_apparmor.py disable" in source
     assert "run-candidate targeted" in source and "run-candidate rollback" in source
@@ -353,9 +354,9 @@ def test_only_reviewed_double_profile_and_managed_rollback_are_permitted() -> No
     assert Path("/etc/apparmor.d/bwrap-userns-restrict") == apparmor.MANAGED
     assert len(apparmor.EXPECTED_SOURCE_SHA256) == 64
     assert apparmor.EXPECTED_SOURCE_SHA256 in source
-    assert '["apparmor_parser", "-Q", str(MANAGED)]' in source
-    assert '["apparmor_parser", "-r", str(MANAGED)]' in source
-    assert '["apparmor_parser", "-R", str(MANAGED)]' in source
+    assert '["/usr/sbin/apparmor_parser", "-Q", str(MANAGED)]' in source
+    assert '["/usr/sbin/apparmor_parser", "-r", str(MANAGED)]' in source
+    assert '["/usr/sbin/apparmor_parser", "-R", str(MANAGED)]' in source
     assert "unshare-userns-restrict" not in source
     assert "AppArmorProfile" not in source
     assert "aa-disable" not in source and "sysctl -w" not in source

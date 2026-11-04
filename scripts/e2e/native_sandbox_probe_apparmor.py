@@ -197,9 +197,9 @@ def enable(evidence_path: Path) -> None:
     os.chown(temporary, 0, 0)
     temporary.chmod(0o644)
     os.replace(temporary, MANAGED)
-    parse_check = _run(["apparmor_parser", "-Q", str(MANAGED)])
-    load = _run(["apparmor_parser", "-r", str(MANAGED)])
-    enforce = _run(["aa-enforce", str(MANAGED)])
+    parse_check = _run(["/usr/sbin/apparmor_parser", "-Q", str(MANAGED)])
+    load = _run(["/usr/sbin/apparmor_parser", "-r", str(MANAGED)])
+    enforce = _run(["/usr/sbin/aa-enforce", str(MANAGED)])
     after = _static_snapshot()
     after_profiles = read_profiles(PROFILES)
     added = sorted(set(after_profiles) - set(before_profiles))
@@ -232,7 +232,7 @@ def enable(evidence_path: Path) -> None:
         "after": after,
         "added_profiles": added,
         "removed_profiles": removed,
-        "aa_status": _run(["aa-status", "--json"])["stdout"],
+        "aa_status": _run(["/usr/sbin/aa-status", "--json"])["stdout"],
         "global_apparmor_enabled": _read(Path("/sys/module/apparmor/parameters/enabled")),
     }
     _write_evidence(STATE, document)
@@ -247,7 +247,7 @@ def disable(evidence_path: Path) -> None:
     if os.path.lexists(MANAGED):
         if not managed_profile_valid(MANAGED, EXPECTED_SOURCE_SHA256):
             raise RuntimeError("refusing to remove an unmanaged or drifted AppArmor file")
-        _run(["apparmor_parser", "-R", str(MANAGED)])
+        _run(["/usr/sbin/apparmor_parser", "-R", str(MANAGED)])
         removed_with_parser = True
         MANAGED.unlink()
     after_profiles = read_profiles(PROFILES)
@@ -272,7 +272,7 @@ def disable(evidence_path: Path) -> None:
         "baseline_error": baseline_error,
         "after": after,
         "global_apparmor_enabled": _read(Path("/sys/module/apparmor/parameters/enabled")),
-        "aa_status": _run(["aa-status", "--json"])["stdout"],
+        "aa_status": _run(["/usr/sbin/aa-status", "--json"])["stdout"],
     }
     _write_evidence(evidence_path, document)
     if baseline_error is not None:
