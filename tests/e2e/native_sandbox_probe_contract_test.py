@@ -157,8 +157,8 @@ def test_no_privilege_network_or_lifecycle_escape_hatches() -> None:
         assert forbidden not in source
     assert "strace" in source
     assert "apparmor" in source
-    collector = (ROOT / "scripts" / "e2e" / "native_sandbox_probe_collect.py").read_text()
-    assert '["aa-status", "--json"]' in collector
+    audit = (ROOT / "scripts" / "e2e" / "native_sandbox_probe_audit.py").read_text()
+    assert '["aa-status", "--json"]' in audit
     assert 'shutil.which("aa-enabled")' in source
     assert "/usr/sbin/aa-enabled" not in source
     assert "close_fds=true" in source

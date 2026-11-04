@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import math
 import subprocess
+from pathlib import Path
 from typing import Any
 
 RELEVANT_AUDIT = ("audit", "apparmor", "seccomp", "denied", "bwrap", "unshare")
@@ -56,3 +58,26 @@ def _case_audit(case: dict[str, Any]) -> dict[str, Any]:
         "rendered": "\n".join(relevant)
         + ("\n" if relevant else "<no matching kernel audit diagnostics>\n"),
     }
+
+
+def collect_apparmor_status(output: Path) -> None:
+    completed = subprocess.run(
+        ["aa-status", "--json"], capture_output=True, text=True, timeout=30, check=False
+    )
+    (output / "apparmor-status.json").write_text(
+        _sanitize(completed.stdout + completed.stderr), encoding="utf-8"
+    )
+    (output / "apparmor-collection.json").write_text(
+        json.dumps(
+            {
+                "returncode": completed.returncode,
+                "stdout_nonempty": bool(completed.stdout.strip()),
+                "stderr": _sanitize(completed.stderr),
+                "passed": completed.returncode == 0 and bool(completed.stdout.strip()),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )

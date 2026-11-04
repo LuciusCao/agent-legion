@@ -5,10 +5,19 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import subprocess
+import sys
 from pathlib import Path
 
-from scripts.e2e.native_sandbox_probe_audit import _case_audit, _journal, _sanitize
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.e2e.native_sandbox_probe_audit import (  # noqa: E402
+    _case_audit,
+    _journal,
+    collect_apparmor_status,
+)
+from scripts.e2e.native_sandbox_probe_audit import _sanitize as _sanitize  # noqa: E402
 
 
 def main() -> int:
@@ -31,26 +40,7 @@ def main() -> int:
         ),
         encoding="utf-8",
     )
-    aa_status = subprocess.run(
-        ["aa-status", "--json"], capture_output=True, text=True, timeout=30, check=False
-    )
-    (args.output / "apparmor-status.json").write_text(
-        _sanitize(aa_status.stdout + aa_status.stderr), encoding="utf-8"
-    )
-    (args.output / "apparmor-collection.json").write_text(
-        json.dumps(
-            {
-                "returncode": aa_status.returncode,
-                "stdout_nonempty": bool(aa_status.stdout.strip()),
-                "stderr": _sanitize(aa_status.stderr),
-                "passed": aa_status.returncode == 0 and bool(aa_status.stdout.strip()),
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    collect_apparmor_status(args.output)
     cases = []
     for summary_name in ("summary.json", "candidate-summary.json"):
         summary_path = args.output / summary_name

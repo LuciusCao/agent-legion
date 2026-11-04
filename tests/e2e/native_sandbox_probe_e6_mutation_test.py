@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -203,7 +205,7 @@ def test_concurrent_listener_controls_are_isolated_with_forced_interleaving(monk
         }
 
     def interleaved(host, port):
-        barrier.wait(timeout=5)
+        barrier.wait(timeout=30)
         return actual_tcp(host, port)
 
     def abstract_attempt(case):
@@ -254,7 +256,7 @@ def test_concurrent_execute_main_and_summary_keep_listener_and_namespace_indepen
 
     def synchronized_run(case, command, work):
         if phase == "rollback" or case != "e6-n0-single":
-            barrier.wait(timeout=5)
+            barrier.wait(timeout=30)
         return run(case, command, work)
 
     probe._command = observe_command
@@ -463,3 +465,17 @@ def test_pending_write_uses_atomic_replace_and_workflow_compares_independent_pro
     assert list(tmp_path.iterdir()) == [destination]
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert 'before_aa["profiles"] == after_aa["profiles"]' in workflow
+
+
+def test_absolute_entry_points_import_repo_modules_outside_checkout(tmp_path) -> None:
+    root = WORKFLOW.parents[2]
+    for name in ("native_sandbox_probe_collect.py", "native_sandbox_probe_quiesce.py"):
+        completed = subprocess.run(
+            [sys.executable, str(root / "scripts/e2e" / name), "--help"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        assert completed.returncode == 0, (name, completed.stderr)

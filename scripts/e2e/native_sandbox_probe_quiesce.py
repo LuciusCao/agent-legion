@@ -6,12 +6,17 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
 
-from scripts.e2e.native_sandbox_probe_apparmor import _require_root_ci
-from scripts.e2e.native_sandbox_probe_apparmor_state import write_evidence_atomic
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.e2e.native_sandbox_probe_apparmor import _require_root_ci  # noqa: E402
+from scripts.e2e.native_sandbox_probe_apparmor_state import write_evidence_atomic  # noqa: E402
 
 UNITS = (
     "agent-legion-native-sandbox-probe-e6@targeted.service",
