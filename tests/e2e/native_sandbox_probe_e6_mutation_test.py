@@ -19,6 +19,7 @@ from scripts.e2e.native_sandbox_probe import ProbeListener
 from scripts.e2e.native_sandbox_probe_e6 import E6Probe
 from scripts.e2e.native_sandbox_probe_e6_contract import validate_e6_result
 from scripts.e2e.native_sandbox_probe_e6_evidence import TOP_LEVEL_FIELDS
+from scripts.e2e.native_sandbox_probe_e6_listeners import positive_controls
 from tests.e2e.native_sandbox_probe_e6_contract_test import (
     CLEANUP_MODES,
     LISTENERS,
@@ -287,6 +288,22 @@ def test_wrong_parent_control_token_is_infrastructure_failure(monkeypatch) -> No
     )
     with pytest.raises(RuntimeError, match="positive control failed"):
         probe._positive_controls("case")
+
+
+def test_positive_control_waits_for_listener_count_confirmation() -> None:
+    counts = iter((0, 0, 1))
+    listener = SimpleNamespace(host="127.0.0.1", port=12345, count=lambda: next(counts))
+    controls = positive_controls(
+        {"loopback": listener},
+        tcp_attempt=lambda host, port: {
+            "connected": True,
+            "token_valid": True,
+            "detail": "connected",
+        },
+        abstract_attempt=lambda: {},
+    )
+    assert controls["loopback"]["before"] == 0
+    assert controls["loopback"]["after"] == 1
 
 
 def test_abstract_unix_has_static_contract_and_native_only_dynamic_proof() -> None:

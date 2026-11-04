@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import socket
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -81,6 +82,11 @@ def positive_controls(
             else tcp_attempt(listener.host, listener.port)
         )
         after = listener.count()
+        if attempt["connected"] is True and attempt["token_valid"] is True and after == before:
+            deadline = time.monotonic() + 5
+            while after == before and time.monotonic() < deadline:
+                time.sleep(0.005)
+                after = listener.count()
         row = {**attempt, "before": before, "after": after}
         if (
             attempt["connected"] is not True
