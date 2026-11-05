@@ -105,6 +105,7 @@ const NODE_SAFE_TEST_EXEMPTIONS = [
   'src/stores/jobStore.rerunByFailure.test.ts: fixtures.ts only types the WebSocket mock shape',
   'src/stores/jobStore.test.ts: fixtures.ts only types the WebSocket mock shape',
   'src/stores/settingStore.test.ts: fixtures.ts only types the WebSocket mock shape',
+  'src/features/workflowStudio/shared/agentPublishRequestActions.test.ts: StudioState and AgentPublishRequestState imports are type-only; runtime stays pure',
 ]
 
 // ---------------------------------------------------------------------------
