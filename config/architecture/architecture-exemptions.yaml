@@ -466,26 +466,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/349
   ceiling: 112
 - check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/shared/useAgentPublishRequest.ts
-  reason: 'The #429 fix moves the resolved notice into a shared zustand store (per-instance
-    useState was a dead feature — the dialog''s confirm/cancel wrote a notice the aside instance
-    could never read) and observes the pending→null transition so an externally-superseded request
-    (manual publish / newer agent request) lands a dismissable receipt instead of the dialog
-    closing silently. The observation effect and the two refs belong with the confirm/cancel
-    actions they disambiguate; the notice text builders already live in agentPublishNoticeStore.
-    The fourth round (#429 四轮) adds publishInFlight (the whole-confirm window flag the dialog
-    uses to show "publish in progress" on polled confirming rows) and teaches the observation
-    effect to skip confirming rows (a live claim is not a terminal null jump — no bogus receipt).
-    The closing round (#429 收尾 P3) makes a cancel 404 silent (the backend''s deliberate lost-to-the-claim
-    answer is not an operation failure; the row state speaks for itself) while non-404 failures
-    keep the toast. Revisit when issue 416''s deferred follow-ups (buffered rejection, session
-    wiring) rework this hook. Re-anchored by #926 from #456 (closed) to #1000: the overage above
-    is the shipped feature itself and the removal condition above stands; #1000 tracks at most
-    five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1000
-  ceiling: 137
-- check: architecture.file_budget
   path: server/app/db/connection.py
   reason: '#438 makes __exit__ leak-proof (close in finally so a failed commit/rollback cannot
     strand the checkout) and stamps the checkout origin for the pool return-path telemetry.
@@ -651,54 +631,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1016
   ceiling: 38
 - check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/shared/WorkflowStudioDraftSaveControl.tsx
-  reason: 'Issue #633 kimi review adds the conflict exit UI (adopt/keep-mine action buttons)
-    to the draft-save conflict loop. The growth is the conflict-UX feature itself (the P1 findings
-    demanded explicit exits instead of a one-key silent override); splitting the conflict lifecycle
-    out of the save controller would fork the CAS base bookkeeping it guards. Ceiling at actual
-    + 10 per the dated-exemption convention (#804 定案删掉手动「保存草稿」按钮后文件收缩， ceiling 顺势从 83 降到 82).
-    Remove when the draft-save wiring gets its planned rework or a budget re-balance pass re-registers
-    it. Re-anchored by #926 from #456 (closed) to #1000: the overage above is the shipped feature
-    itself and the removal condition above stands; #1000 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1000
-  ceiling: 82
-- check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/shared/draftSaveController.ts
-  reason: '#429 rounds four and closing: flushNow/save return the PUT promise the agent-publish
-    confirm awaits (#427). The state machine keeps its single-file shape by design: splitting
-    it would fork the requestId/timer/CAS-baseline invariants it guards. #633 adds the conflict
-    lifecycle (enter/resolve/adopt + autosave suspension); pure state transitions moved to draftSaveConflict.ts,
-    and codex R3 P1 adds the PUT serialization (queued saves re-issue with the advanced CAS
-    baseline; the queue/drain/schedule orchestration lives in draftSaveQueue.ts). The 171→182
-    ceiling bump rides the develop release train (AGENT_LEGION_BUDGET_MONOTONICITY_ RELEASE_TRAIN;
-    #633 is the planned draft-save wiring rework this exemption waited for). Remove when the
-    queue module absorbs the remaining save wiring or a budget re-balance re-registers it. Re-anchored
-    by #926 from #429 (closed) to #1000: the overage above is the shipped feature itself and
-    the removal condition above stands; #1000 tracks at most five entries (#917 A-2). #1177
-    defect-family closing (fake-settled: blank-skip markBlankSkipped, conflict-resolve suspended
-    pending, stale savedHash advance) adds guard transitions that mutate the same
-    timers/CAS/pendingSave this file holds — they cannot move to draftSaveConflict.ts (pure
-    state transitions only) without forking the invariants. Time-boxed 182→224 (actual 214 +
-    10) per the #641 re-sign convention (expires below); renewed justification is the defect
-    family itself, removal condition unchanged.'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1000
-  ceiling: 224
-  expires: 2026-11-30
-- check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/shared/useWorkflowDraftPersistence.ts
-  reason: '#429 closing P2-1: flushNow now returns the DraftSaveFlushResult (the live terminal
-    state, not the React useState snapshot the dialog''s closure captured at click time). #633
-    adds the conflict-exit passthrough (adoptServerDraft/resolveConflict — kimi review P1-2;
-    the exits live in useDraftServerSync and flow through here) and the reapply wiring consumes
-    the same hook. Revisit when the draft-save wiring gets its planned rework. Re-anchored by
-    #926 from #429 (closed) to #1000: the overage above is the shipped feature itself and the
-    removal condition above stands; #1000 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1000
-  ceiling: 95
-- check: architecture.file_budget
   path: worker/execution/execution_lane.py
   reason: '#647 PR #648 复审加固（codex round 2 + subagent 双审）：退休交接 re-check（_retire_if_idle，防 idle
     超时窗口提交的任务永久滞留）、spawn 判定与插入合并为临界区原子裁决（_spawn/_spawn_locked，防并发突破 max_workers）、take→finish
@@ -779,19 +711,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/751
   ceiling: 210
   expires: 2027-03-31
-- check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/code-editor/WorkflowNodeCodeSection.tsx
-  reason: '#749 review 修复（P2-2/P3-2/P3-3）把 CAS 发布的时序与门控做实：保存响应 的 code_hash 同步回填（runSavingDraft
-    包装 run，消灭保存→立即发布的假 409 窗口）、 发布 404 分支文案（publishErrorFor）、缺 draft_code_hash 时按钮 disabled
-    + title 提示（publishDisabled/publishDisabledReason 两个 props 经 WorkflowNodeCodeActions 透传）。修前版本靠可点后
-    reject 封 hash 缺失口、靠 fire-and-forget reload 回填 hash，都是时序谎言；修复的诚实成本使有效行 184→213（超 179+15 带
-    19 行）。面板 仍是节点代码检查器的单一 section 组件；下一次增长应拆 actions 编排或错误文案 模块。时间盒：#456 预算清扫时重签或拆分。 Re-anchored
-    by #926 from #456 (closed) to #1000: the overage above is the shipped feature itself and
-    the removal condition above stands; #1000 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1000
-  ceiling: 213
-  expires: 2026-12-31
 - check: architecture.file_budget
   path: server/app/routes/runs.py
   reason: '#734 tags the three runs routes with API_SCOPE_INTAKE_TAG so the api-scope admission

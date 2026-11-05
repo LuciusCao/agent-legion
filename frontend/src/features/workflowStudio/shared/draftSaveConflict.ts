@@ -1,6 +1,6 @@
 /* #633 冲突生命周期与保存编排（kimi/codex review 拆出）：状态机
    （draftSaveController）的状态转换纯函数、调度决策与 PUT 响应分派。
-   计时器/CAS 基线/请求生命期留在 controller（它们与竞争时序强耦合），
+   计时器/CAS 基线由 draftSaveLifecycle 持有，请求执行由 controller 承接，
    这里是可以独立测试的决策逻辑。 */
 
 import type { DraftSaveState, PutWorkflowDraftFn } from './draftSaveTypes'

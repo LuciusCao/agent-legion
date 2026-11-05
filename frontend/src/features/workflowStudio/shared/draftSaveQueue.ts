@@ -3,7 +3,7 @@
    竞争（A 先落盘则 B 必然被自己的 A 409，连续编辑被误报为外部冲突）——B
    排队，A 终态后以 A 推进的新基线补发。一次只放行一个（补发本身成为新的
    在途）；排队请求被作废（requestId 过期）或冲突挂起时按既有语义处置。
-   计时器与 CAS 基线留在 controller（与竞争时序强耦合），这里可独立测试。 */
+   计时器与 CAS 基线由 draftSaveLifecycle 持有，PUT/drain 由 controller 执行。 */
 
 import { WorkflowDraftConflictError } from '../../../api/workflowDraft'
 import { runSave } from './draftSaveConflict'
