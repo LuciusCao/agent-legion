@@ -486,17 +486,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1000
   ceiling: 137
 - check: architecture.file_budget
-  path: frontend/src/lib/queryKeysExtra.ts
-  reason: 'Merge-growth class (PR 317 precedent): develop''s #419 connectionKeys and #427 nodeRuns
-    entries plus this branch''s studioPublishRequest key (the agent publish request poll, #416)
-    union to one effective line past the 65 ceiling each side satisfied alone. The module is
-    a flat key registry; each line is one cache identity. Revisit at the next registry cleanup.
-    Re-anchored by #926 from #456 (closed) to #1017: the overage above is the shipped feature
-    itself and the removal condition above stands; #1017 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1017
-  ceiling: 66
-- check: architecture.file_budget
   path: server/app/db/connection.py
   reason: '#438 makes __exit__ leak-proof (close in finally so a failed commit/rollback cannot
     strand the checkout) and stamps the checkout origin for the pool return-path telemetry.
@@ -635,21 +624,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1016
   ceiling: 104
-- check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/shared/AgentPublishRequestDialog.tsx
-  reason: 'The #429 fourth round (#429 四轮 P2-1/P3-2) makes the confirm''s draft flush a completion-order
-    await (flushDraftSave returns the PUT promise; the server-draft re-read and the confirm
-    endpoint fire only after it resolves — the old fire-and-forget could publish a stale draft
-    whose hash happened to match) and teaches the dialog to hold itself open on polled confirming
-    rows (publishInFlight keeps the buttons disabled mid-publish instead of the dialog vanishing).
-    The growth is the try/catch around the flush/read-draft chain plus the error toast the review
-    asked for. Revisit when the deferred follow-ups (a shared useConfirmPublish hook) rework
-    the dialog''s action wiring. Re-anchored by #926 from #456 (closed) to #1017: the overage
-    above is the shipped feature itself and the removal condition above stands; #1017 tracks
-    at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1017
-  ceiling: 58
 - check: architecture.file_budget
   path: server/app/agent_runtime/tool_catalog.py
   reason: '#518 adds the json tool''s entry to the velites static mirror — the file is the declared
