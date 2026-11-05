@@ -433,15 +433,15 @@ server/app/
 | InfraConnectionsResponse | BaseModel | database: DatabaseConnectionView, storage: StorageConnectionView | app/routes/infra_connections_contracts.py |
 | InfraConnectionTestRequest | BaseModel | target: Literal['database', 'storage'] | app/routes/infra_connections_contracts.py |
 | InfraConnectionTestResponse | BaseModel | target: Literal['database', 'storage'], ok: bool, reason: str | None | app/routes/infra_connections_contracts.py |
-| InstanceCleanupSettings | BaseModel | log_retention_days: int, run_dir_retention_days: int, interval_seconds: int | app/routes/instance_settings_contracts.py |
-| InstanceMonitoringSettings | BaseModel | sample_interval_seconds: float, retention_days: int | app/routes/instance_settings_contracts.py |
-| InstanceWorkflowsSettings | BaseModel | max_items_per_run: int, node_code_max_bytes: int | app/routes/instance_settings_contracts.py |
-| InstanceAgentWorkersSettings | BaseModel | max_archive_bytes: int, min_protocol_version: int, max_concurrent_result_comm... | app/routes/instance_settings_contracts.py |
-| InstanceAgentEnqueueSettings | BaseModel | workers: int, max_pending: int | app/routes/instance_settings_contracts.py |
-| InstanceResultUnpackSettings | BaseModel | workers: int | app/routes/instance_settings_contracts.py |
-| InstanceResultValidateSettings | BaseModel | workers: int | app/routes/instance_settings_contracts.py |
-| InstanceAgentClaimSettings | BaseModel | worker_touch_interval_seconds: float | app/routes/instance_settings_contracts.py |
 | InstanceSettingsDocument | BaseModel | cleanup: InstanceCleanupSettings, monitoring: InstanceMonitoringSettings, hea... | app/routes/instance_settings_contracts.py |
+| InstanceCleanupSettings | BaseModel | log_retention_days: int, run_dir_retention_days: int, interval_seconds: int | app/routes/instance_settings_core_contracts.py |
+| InstanceMonitoringSettings | BaseModel | sample_interval_seconds: float, retention_days: int | app/routes/instance_settings_core_contracts.py |
+| InstanceWorkflowsSettings | BaseModel | max_items_per_run: int, node_code_max_bytes: int | app/routes/instance_settings_execution_contracts.py |
+| InstanceAgentWorkersSettings | BaseModel | max_archive_bytes: int, min_protocol_version: int, max_concurrent_result_comm... | app/routes/instance_settings_execution_contracts.py |
+| InstanceAgentEnqueueSettings | BaseModel | workers: int, max_pending: int | app/routes/instance_settings_execution_contracts.py |
+| InstanceResultUnpackSettings | BaseModel | workers: int | app/routes/instance_settings_execution_contracts.py |
+| InstanceResultValidateSettings | BaseModel | workers: int | app/routes/instance_settings_execution_contracts.py |
+| InstanceAgentClaimSettings | BaseModel | worker_touch_interval_seconds: float | app/routes/instance_settings_execution_contracts.py |
 | ApprovalDecisionCreateRequest | BaseModel | verdict: ApprovalVerdict, payload: dict[str, Any], note: str, rework_target: ... | app/routes/job_approval_contracts.py |
 | ApprovalDecisionResponse | BaseModel | id: str, job_id: str, node_key: str, verdict: ApprovalVerdict, note: str, rew... | app/routes/job_approval_contracts.py |
 | ApprovalDecisionListResponse | BaseModel | decisions: list[ApprovalDecisionResponse] | app/routes/job_approval_contracts.py |

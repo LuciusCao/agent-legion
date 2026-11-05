@@ -1,7 +1,6 @@
 // 容量旋钮字段组（#509 agent_enqueue 入队池、#554 result 解包进程池、
 // #569 result 校验进程池、#561 Worker 在线标记写入节流）。
-// 从 instanceSettingsFields.ts 拆出以控制体积预算（主表有 #521 豁免
-// ceiling，不可再上抬）；三者都是实例级、重启生效的容量调参。
+// 从字段组聚合器拆出；这些旋钮都是实例级、重启生效的容量调参。
 
 import { BATCHING_TOGGLE, type FieldGroup } from './instanceSettingsFieldTypes'
 
