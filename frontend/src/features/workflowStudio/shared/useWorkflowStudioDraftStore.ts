@@ -6,8 +6,7 @@ import type {
 import { useQueryClient } from '@tanstack/react-query'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import type { DraftSaveFlushResult, DraftSaveState } from './draftSaveTypes'
-import { useServerDraftApply } from './useServerDraftApply'
-import { useWorkflowDraftPersistence } from './useWorkflowDraftPersistence'
+import { useServerDraftPersistence } from './useServerDraftPersistence'
 import { useWorkflowDraftQuery } from './useWorkflowDraftQuery'
 import { useWorkflowStudioDraft } from './useWorkflowStudioDraft'
 
@@ -15,8 +14,7 @@ import { useWorkflowStudioDraft } from './useWorkflowStudioDraft'
  * 自动持久化。useWorkflowStudio 只与本 hook 对接，保持各自文件的体积预算。 */
 export type DraftStoreControls = {
   draftSave: DraftSaveState
-  /** #429 收尾 P2-1：flush 的返回值携带本次落盘的终态（ok=false 即失败），
-   * 发布确认的守卫读它——不读 React useState 快照的 draftSave.status。 */
+  /** flush 的返回值携带本次落盘终态，发布确认守卫不读 React 状态快照。 */
   flushDraftSave: (keepalive?: boolean) => Promise<DraftSaveFlushResult>
 }
 
@@ -38,38 +36,17 @@ export function useWorkflowStudioDraftStore(
     activeRevision,
     fetchRevisionDetail
   )
-  const serverDraft = draftQuery.data
-  const { setDraftYaml, consumeConflict } = useServerDraftApply(
-    workspaceId,
-    originalYaml,
-    serverDraft === undefined ? undefined : serverDraft.definition_yaml,
-    serverDraft === undefined ? undefined : serverDraft.updated_at,
-    draft.setDraftYaml,
-    /* kimi review P1-1：own-save 回显判定需要当前画布内容。 */
-    draft.draftYaml,
-    /* #1143：服务端草稿的语义身份随草稿传入（冲突通知携带，采用时恢复）。 */
-    serverDraft === undefined
-      ? undefined
-      : (serverDraft.definition_hash ?? null),
-    /* #1226 五轮收口：服务端代次随草稿传入（冲突通知携带，采用时恢复为
-       CAS 基线）。 */
-    serverDraft === undefined ? undefined : serverDraft.generation
-  )
-  // #633 codex review P1-2：服务端草稿前进且画布采用了它（用户无本地
-  // 编辑）时，保存层同步 hydrate——CAS 基线代次推进到服务端真值，
-  // 后续 PUT 以新基线竞争而不是用落后代次 409。
-  const draftSave = useWorkflowDraftPersistence(
-    workspaceId,
-    draft.draftYaml,
-    originalYaml,
-    serverDraft,
-    draftQuery.isError,
-    consumeConflict
-  )
-  // 采用历史版本也算「用户碰过」：useViewedRevisionAsDraft 内部闭包的是
-  // 原始 setter，先经 touched-aware setter 写入同一值标记 touched，否则
-  // 迟到的服务端草稿会把刚采用的内容覆盖掉（revision 模式下
-  // definitionYaml 即被查看版本的 YAML）。
+  const { setDraftYaml, draftSave, adoptServerDraft } =
+    useServerDraftPersistence({
+      workspaceId,
+      originalYaml,
+      draftYaml: draft.draftYaml,
+      setDraftYamlState: draft.setDraftYaml,
+      serverDraft: draftQuery.data,
+      serverDraftLoadError: draftQuery.isError,
+    })
+  // 采用历史版本也算「用户碰过」：先经 touched-aware setter 写入同一值，
+  // 迟到的服务端草稿才不会覆盖刚采用的内容。
   const useViewedRevisionAsDraft = () => {
     if (draft.viewMode === 'revision' && draft.definitionYaml) {
       setDraftYaml(draft.definitionYaml)
@@ -82,20 +59,10 @@ export function useWorkflowStudioDraftStore(
     useViewedRevisionAsDraft,
     draftSave: draftSave.state,
     flushDraftSave: draftSave.flushNow,
-    /* kimi review P1-2：冲突出口——采用服务端版本经 touched-aware setter
-       写画布；keep-mine 继续保存。#1143：hash 是被采用草稿的语义身份；
-       #1226：generation 是其代次（采用后恢复为 CAS 基线）。 */
-    adoptServerDraft: (
-      yaml: string,
-      at: string | null,
-      hash?: string | null,
-      generation?: number | null
-    ) => draftSave.adoptServerDraft(yaml, at, setDraftYaml, hash, generation),
+    adoptServerDraft,
     resolveConflict: draftSave.resolveConflict,
-    /* #1226 四轮 P1：发布成功后失效服务端草稿查询（后端 #1221 已删行）——
-       重取到「无草稿」经 useDraftServerSync 把保存控制器重新 hydrate 成
-       「无草稿 + 新 canonical 基线」，画布 reset 的尾随 schedule 不再被判成
-       新编辑，debounce 到期也就不会 PUT 重建刚删的草稿行。 */
+    /* 发布成功后失效服务端草稿查询：空态响应把保存控制器重新水合到
+       新 canonical 基线，尾随 schedule 不会 PUT 重建刚删的草稿行。 */
     invalidateServerDraft: () =>
       queryClient.invalidateQueries({
         queryKey: extraQueryKeys.workflowStudioDraft(workspaceId ?? ''),

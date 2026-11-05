@@ -6,6 +6,7 @@ import {
   decideServerDraftReapply,
   type ServerDraftConflictPayload,
 } from './serverDraftAdvance'
+import type { ServerDraftReapplyInput } from './useServerDraftApply.types'
 
 /** 非React的应用跟踪器：记录已应用的 updated_at 与代次（#1226 复审 P2：
  * 前进判定以代次为准）与「用户碰过」标记，
@@ -33,29 +34,22 @@ export class ServerDraftApplyTracker {
    * 判定（kimi review P1-1）：服务端草稿与画布一致时走 apply（内容相同，
    * 实际只是推进基线），不误报冲突。#1143：serverDraftHash 随草稿传入，
    * 冲突通知携带它（保存层存进 conflictDraftHash，采用服务端版本时恢复）。 */
-  evaluate(
-    serverDraftYaml: string | null | undefined,
-    serverDraftUpdatedAt: string | null | undefined,
-    applyToCanvas: (yaml: string) => void,
-    canvasYaml?: string,
-    serverDraftHash?: string | null,
-    serverDraftGeneration?: number | null
-  ): 'apply' | 'conflict' | 'noop' {
+  evaluate(input: ServerDraftReapplyInput): 'apply' | 'conflict' | 'noop' {
     const decision = decideServerDraftReapply({
-      serverDraftYaml,
-      serverDraftUpdatedAt,
-      serverDraftHash,
-      serverDraftGeneration,
+      serverDraftYaml: input.serverDraftYaml,
+      serverDraftUpdatedAt: input.serverDraftUpdatedAt,
+      serverDraftHash: input.serverDraftHash,
+      serverDraftGeneration: input.serverDraftGeneration,
       appliedUpdatedAt: this.appliedAt,
       appliedGeneration: this.appliedGeneration,
       userTouched: this.touched,
-      canvasYaml,
+      canvasYaml: input.canvasYaml,
     })
     if (decision.action === 'apply') {
       this.appliedAt = decision.updatedAt
       // #1226 复审 P2：代次随应用推进；缺失（混合部署旧响应）不清空已知值。
-      if (serverDraftGeneration != null)
-        this.appliedGeneration = serverDraftGeneration
+      if (input.serverDraftGeneration != null)
+        this.appliedGeneration = input.serverDraftGeneration
       this.conflict = null
       // codex R4 P2: an apply IS the server acknowledging a baseline the
       // canvas now matches (own-save echo, or an explicit adopt). The local
@@ -63,7 +57,7 @@ export class ServerDraftApplyTracker {
       // flag would misclassify the NEXT different agent update as "local
       // unsaved edits" and raise a phantom conflict.
       this.touched = false
-      applyToCanvas(decision.yaml)
+      input.setDraftYamlState(decision.yaml)
       return 'apply'
     }
     if (decision.action === 'conflict') {
