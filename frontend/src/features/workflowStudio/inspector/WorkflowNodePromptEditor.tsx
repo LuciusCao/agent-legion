@@ -1,5 +1,5 @@
-import { Button, Chip, MenuItem, TextField } from '@mui/material'
-import { useShowNodeDetailPreview } from './nodeDetailPreviewContext'
+import { Button, MenuItem, TextField } from '@mui/material'
+import { WorkflowNodeSkillBinding } from './WorkflowNodeSkillBinding'
 import styles from './WorkflowNodePromptEditor.module.css'
 
 export type NodePromptEditorProps = {
@@ -20,22 +20,9 @@ export type NodePromptEditorProps = {
  * 追加/覆写，追加=默认指令+自定义，覆写=仅自定义。平台提示词
  * 两种模式下都不可覆盖）。 */
 export function WorkflowNodePromptEditor(props: NodePromptEditorProps) {
-  const showPreview = useShowNodeDetailPreview()
   return (
     <>
-      <div className={styles.toolbar}>
-        <span className={styles.toolbarLabel}>绑定技能</span>
-        {props.skillKey ? (
-          <Chip
-            size="small"
-            label={props.skillKey}
-            clickable
-            onClick={() => showPreview('skill')}
-          />
-        ) : (
-          <Chip size="small" label="未绑定技能" variant="outlined" disabled />
-        )}
-      </div>
+      <WorkflowNodeSkillBinding skillKey={props.skillKey} />
       <div className={styles.editor}>
         <div className={styles.editorHeader}>
           <span className={styles.editorTitle}>自定义提示词</span>
