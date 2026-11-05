@@ -608,40 +608,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1012
   ceiling: 121
 - check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/inspector/WorkflowNodePromptEditor.tsx
-  reason: '#513 adds the prompt-mode selector (append/overwrite) to the custom prompt editor:
-    one TextField select with two labeled options plus the state-switching hint line — the interaction
-    the whole feature is about. The data layer lives in useNodePromptPreview; splitting the
-    selector out would separate the mode from the textarea it governs. Remove if the prompt
-    panel is restructured. Re-anchored by #926 from #456 (closed) to #1014: the overage above
-    is the shipped feature itself and the removal condition above stands; #1014 tracks at most
-    five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1014
-  ceiling: 82
-- check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/inspector/useNodePromptPreview.ts
-  reason: '#513: the hook derives the prompt mode from the draft YAML (junk-tolerant normalization
-    mirroring the prompt field) and exposes onPatchMode — data-layer counterparts of the editor''s
-    mode selector. Same P1 normalization family as customPrompt above it. Remove with the mode
-    selector. Re-anchored by #926 from #456 (closed) to #1014: the overage above is the shipped
-    feature itself and the removal condition above stands; #1014 tracks at most five entries
-    (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1014
-  ceiling: 98
-- check: architecture.file_budget
-  path: frontend/src/features/workflowStudio/inspector/WorkflowNodeToolsEditor.tsx
-  reason: 'codex P2 on #527: invalid declared tools render as removable chips (MUI multi-select
-    cannot deselect a disabled option, so the removal needs its own surface) — one Chip row
-    inside the existing alert. The editor is already the node-level counterpart of AgentEditor''s
-    picker. Remove together with the AgentEditor tool-picker exemption. Re-anchored by #926
-    from #456 (closed) to #1014: the overage above is the shipped feature itself and the removal
-    condition above stands; #1014 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1014
-  ceiling: 90
-- check: architecture.file_budget
   path: server/app/mcp_server/skill_tools.py
   reason: 'Issue #633 adds the create_skill tool to the skill tool group: one more tool function
     (docstring is the budget-heavy part — every tool''s contract text lives in its docstring)

@@ -6,11 +6,8 @@ import { useDebouncedCallback } from '../../../hooks/useDebouncedCallback'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import type { WorkflowNodeRecord } from '../../../types'
 import type { NodePromptEditorProps } from './WorkflowNodePromptEditor'
-import {
-  asConfigValue,
-  patchWorkflowNodeExecution,
-} from '../shared/workflowStudioYamlDraft.execution'
-import { parseWorkflowNode } from '../shared/workflowStudioYamlDraft.parse'
+import { readNodePromptDraft } from './nodePromptDraft'
+import { patchWorkflowNodeExecution } from '../shared/workflowStudioYamlDraft.execution'
 
 const PREVIEW_DEBOUNCE_MS = 300
 
@@ -55,20 +52,8 @@ export function useNodePromptPreview(props: NodePromptPreviewPanelProps): {
   })
   const preview = query.data ?? null
 
-  const draft = parseWorkflowNode(props.definitionYaml, props.node.key)
-  // 草稿 prompt 可能是手写非字符串 junk（`prompt: 123`，合法 YAML 非法
-  // 契约值）：按未配置归一，不得因 .trim() 抛异常（codex P1 缺陷族）。
-  const customPrompt = asConfigValue(
-    draft ? draft.execution?.prompt : props.node.execution?.prompt
-  )
-  const isDefault = customPrompt.trim() === ''
-  // #513：拼接模式（追加/覆写）；非 overwrite 一律归一 append（含
-  // junk 值与未声明）。
-  const rawMode = asConfigValue(
-    draft ? draft.execution?.prompt_mode : props.node.execution?.prompt_mode
-  )
-  const promptMode: 'append' | 'overwrite' =
-    rawMode === 'overwrite' ? 'overwrite' : 'append'
+  const promptDraft = readNodePromptDraft(props.definitionYaml, props.node)
+  const { customPrompt, isDefault, promptMode } = promptDraft
   // skill_key 以后端预览响应为准（显式 null = 未绑定）；响应未返回前用
   // agentCatalog 绑定兜底。
   const skillKey = preview
