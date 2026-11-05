@@ -318,28 +318,6 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/architecture/backend.md#agent-worker-协议响应形态response-model-豁免的依据
 - check: architecture.file_budget
-  path: frontend/src/components/dag/dagNodeTypes.ts
-  reason: 'The hover-highlight rework (#276) adds the two data-level boolean fields (active/dimmed)
-    that make per-node memoization work; the interface is a flat field list where each line
-    IS a feature, so the 2-line growth is the honest cost of the fix, not splittable structure.
-    Re-anchored by #926 from #300 (closed with this disposition) to #1004: the overage above
-    is the shipped feature itself and the removal condition above stands; #1004 tracks at most
-    five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1004
-  ceiling: 30
-- check: architecture.file_budget
-  path: frontend/src/components/dagHighlight.ts
-  reason: 'The chained-comparison rework of hover highlighting (Codex P2 review on PR 285) grows
-    this pure module by the prev-visual-state parameter, the prev/active node lookup maps, and
-    the hover state machine -- the atomic prevActiveNode/hoveredNode update via a reducer is
-    what prevents a wasted full recompute round between hovers. Re-anchored by #926 from #300
-    (closed with this disposition) to #1004: the overage above is the shipped feature itself
-    and the removal condition above stands; #1004 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1004
-  ceiling: 111
-- check: architecture.file_budget
   path: server/app/db/migrations/jobs_workflow_key_alignment.py
   reason: The issue-211 Phase 3 v68 data migration aligns every stored workflow_key with the v62 binding
     across the live tables plus the node_code entity-key prefix. Each composite-unique surface carries
@@ -397,16 +375,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1030
   ceiling: 134
-- check: architecture.file_budget
-  path: frontend/src/features/previewPanel/PreviewPanelSection.tsx
-  reason: 'The Codex P2 review on PR 345 added bundle content into the PreviewPanelHost remount
-    key plus the hashBundle helper -- a cross-navigation bridge-request isolation fix that must
-    stay at the composition site to keep the in-flight-window reasoning local. Re-anchored by
-    #926 from #456 (closed) to #1004: the overage above is the shipped feature itself and the
-    removal condition above stands; #1004 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1004
-  ceiling: 77
 - check: architecture.file_budget
   path: worker/runtime/preflight.py
   reason: '#381 moved velites/pi out of the worker image (runtime executors are externally-mounted
