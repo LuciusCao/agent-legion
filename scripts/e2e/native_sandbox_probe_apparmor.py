@@ -199,7 +199,6 @@ def enable(evidence_path: Path) -> None:
     os.replace(temporary, MANAGED)
     parse_check = _run(["/usr/sbin/apparmor_parser", "-Q", str(MANAGED)])
     load = _run(["/usr/sbin/apparmor_parser", "-r", str(MANAGED)])
-    enforce = _run(["/usr/sbin/aa-enforce", str(MANAGED)])
     after = _static_snapshot()
     after_profiles = read_profiles(PROFILES)
     added = sorted(set(after_profiles) - set(before_profiles))
@@ -226,7 +225,6 @@ def enable(evidence_path: Path) -> None:
         },
         "parse_check": parse_check,
         "load": load,
-        "enforce": enforce,
         "before": before,
         "before_profiles": before_profiles,
         "after": after,

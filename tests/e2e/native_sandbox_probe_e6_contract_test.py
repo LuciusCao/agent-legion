@@ -357,9 +357,54 @@ def test_only_reviewed_double_profile_and_managed_rollback_are_permitted() -> No
     assert '["/usr/sbin/apparmor_parser", "-Q", str(MANAGED)]' in source
     assert '["/usr/sbin/apparmor_parser", "-r", str(MANAGED)]' in source
     assert '["/usr/sbin/apparmor_parser", "-R", str(MANAGED)]' in source
+    assert "aa-enforce" not in source
+    assert 'after_profiles.get("bwrap") != "(enforce)"' in source
+    assert 'after_profiles.get("unpriv_bwrap") != "(enforce)"' in source
     assert "unshare-userns-restrict" not in source
     assert "AppArmorProfile" not in source
     assert "aa-disable" not in source and "sysctl -w" not in source
+
+
+def test_enable_loads_only_managed_profile_and_verifies_enforcing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    state = tmp_path / "state.json"
+    managed = tmp_path / "managed"
+    source = tmp_path / "source"
+    source.write_text("profile", encoding="utf-8")
+    monkeypatch.setattr(apparmor, "STATE", state)
+    monkeypatch.setattr(apparmor, "MANAGED", managed)
+    monkeypatch.setattr(apparmor, "SOURCE", source)
+    monkeypatch.setattr(apparmor, "_require_root_ci", lambda: None)
+    monkeypatch.setattr(apparmor, "_require_source", lambda: {"reviewed": True})
+    monkeypatch.setattr(apparmor, "_static_snapshot", lambda: {"Seccomp": "2"})
+    profiles = iter(
+        [
+            {"stock": "(enforce)"},
+            {"stock": "(enforce)", "bwrap": "(enforce)", "unpriv_bwrap": "(enforce)"},
+        ]
+    )
+    monkeypatch.setattr(apparmor, "read_profiles", lambda path: next(profiles))
+    monkeypatch.setattr(apparmor.os, "chown", lambda *args: None)
+    commands = []
+
+    def run(command):
+        commands.append(command)
+        return {"command": command, "returncode": 0, "stdout": "{}", "stderr": ""}
+
+    monkeypatch.setattr(apparmor, "_run", run)
+    evidence = tmp_path / "evidence.json"
+    apparmor.enable(evidence)
+    assert commands == [
+        ["/usr/sbin/apparmor_parser", "-Q", str(managed)],
+        ["/usr/sbin/apparmor_parser", "-r", str(managed)],
+        ["/usr/sbin/aa-status", "--json"],
+    ]
+    document = json.loads(evidence.read_text(encoding="utf-8"))
+    assert document["added_profiles"] == ["bwrap", "unpriv_bwrap"]
+    assert document["removed_profiles"] == []
+    assert document["before"] == document["after"] == {"Seccomp": "2"}
+    assert "enforce" not in document
 
 
 def test_source_drift_stops_before_profile_installation(monkeypatch, tmp_path: Path) -> None:

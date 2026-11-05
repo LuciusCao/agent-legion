@@ -413,6 +413,11 @@ def test_quiesce_requires_inactive_units_nonempty_pids_and_reclamation(
     assert quiesce_module.quiesce(empty, empty, tmp_path / "empty-quiesce.json") is False
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "|| true" not in workflow
+    assert '--stock-summary "$GITHUB_WORKSPACE/native-sandbox-probe-stock/summary.json"' in workflow
+    assert (
+        '--candidate-summary "$GITHUB_WORKSPACE/native-sandbox-probe-targeted/candidate-summary.json"'
+        in workflow
+    )
     assert workflow.index("native_sandbox_probe_quiesce.py") < workflow.index(
         'install --repo "$GITHUB_WORKSPACE" || status=$?', workflow.index("R - unload")
     )

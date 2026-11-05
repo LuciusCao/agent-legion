@@ -160,8 +160,8 @@ jobs:
           status=0
           sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
             /usr/bin/python3 scripts/e2e/native_sandbox_probe_quiesce.py \
-            --stock-summary /var/lib/agent-legion-native-sandbox-probe/evidence/summary.json \
-            --candidate-summary /var/lib/agent-legion-native-sandbox-probe/evidence/candidate-summary.json \
+            --stock-summary "$GITHUB_WORKSPACE/native-sandbox-probe-stock/summary.json" \
+            --candidate-summary "$GITHUB_WORKSPACE/native-sandbox-probe-targeted/candidate-summary.json" \
             --evidence /var/lib/agent-legion-native-sandbox-probe/rollback-quiesce.json || status=$?
           if [[ $status -eq 0 ]]; then
             sudo --preserve-env=CI,NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL,GITHUB_SHA \
