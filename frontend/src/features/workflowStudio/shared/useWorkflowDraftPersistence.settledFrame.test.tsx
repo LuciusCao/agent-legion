@@ -12,8 +12,7 @@ import type { WorkflowDraftStoreResponse } from '../../../api/workflowDraft'
 import { DraftSaveController } from './draftSaveController'
 import { savedIdentityConfirms } from './draftIdentity'
 import type { DraftSaveState } from './draftSaveTypes'
-import { useServerDraftApply } from './useServerDraftApply'
-import { useWorkflowDraftPersistence } from './useWorkflowDraftPersistence'
+import { useServerDraftPersistence } from './useServerDraftPersistence'
 
 const mocks = { putWorkflowDraft: vi.fn() }
 
@@ -38,31 +37,22 @@ function renderComposition(frames: Frame[]) {
   return renderHook<
     {
       setDraftYaml: (value: string) => void
-      persistence: ReturnType<typeof useWorkflowDraftPersistence>
+      persistence: ReturnType<typeof useServerDraftPersistence>['draftSave']
       draftYaml: string
     },
     Props
   >(
     ({ serverDraft }) => {
       const [draftYaml, setDraftYamlState] = useState(ORIGINAL)
-      const { setDraftYaml, consumeConflict } = useServerDraftApply(
-        'ws1',
-        ORIGINAL,
-        serverDraft?.definition_yaml,
-        serverDraft?.updated_at,
-        setDraftYamlState,
-        draftYaml,
-        serverDraft === undefined ? undefined : serverDraft.definition_hash,
-        serverDraft === undefined ? undefined : serverDraft.generation
-      )
-      const persistence = useWorkflowDraftPersistence(
-        'ws1',
-        draftYaml,
-        ORIGINAL,
-        serverDraft,
-        false,
-        consumeConflict
-      )
+      const { setDraftYaml, draftSave: persistence } =
+        useServerDraftPersistence({
+          workspaceId: 'ws1',
+          originalYaml: ORIGINAL,
+          draftYaml,
+          setDraftYamlState,
+          serverDraft,
+          serverDraftLoadError: false,
+        })
       frames.push({ canvas: draftYaml, save: persistence.state })
       return { setDraftYaml, persistence, draftYaml }
     },
