@@ -98,7 +98,7 @@ def _passed_result(case: str) -> dict:
 def test_workflow_runs_on_branch_push_at_the_current_sha() -> None:
     workflow = _workflow()
     triggers = workflow[True]
-    assert triggers["push"]["branches"] == ["feat/084-native-sandbox-network-probe-39"]
+    assert triggers["push"]["branches"] == ["feat/linux-targeted-apparmor-validation-39"]
     assert set(triggers["pull_request"]["paths"]) == {
         ".github/workflows/native-sandbox-probe.yml",
         "scripts/e2e/native_sandbox_probe*",
@@ -157,8 +157,8 @@ def test_no_privilege_network_or_lifecycle_escape_hatches() -> None:
         assert forbidden not in source
     assert "strace" in source
     assert "apparmor" in source
-    collector = (ROOT / "scripts" / "e2e" / "native_sandbox_probe_collect.py").read_text()
-    assert '["aa-status", "--json"]' in collector
+    audit = (ROOT / "scripts" / "e2e" / "native_sandbox_probe_audit.py").read_text()
+    assert '["/usr/sbin/aa-status", "--json"]' in audit
     assert 'shutil.which("aa-enabled")' in source
     assert "/usr/sbin/aa-enabled" not in source
     assert "close_fds=true" in source
@@ -653,7 +653,8 @@ def test_audit_window_allows_delayed_kernel_journal_delivery(monkeypatch) -> Non
 
     monkeypatch.setitem(_case_audit.__globals__, "_journal", fake_journal)
     raw = _case_audit({"started_epoch": 100.0, "ended_epoch": 101.0})
-    assert 'apparmor="DENIED"' in raw
+    assert 'apparmor="DENIED"' in raw["rendered"]
+    assert raw["passed"] is True and raw["relevant_count"] == 1
     assert calls == [("-k", "--since", "@99.500000", "--until", "@103.000000")]
 
 

@@ -2,15 +2,17 @@
 set -euo pipefail
 
 UNIT_NAME=agent-legion-native-sandbox-probe.service
+CANDIDATE_UNIT_PREFIX=agent-legion-native-sandbox-probe-e6
 INSTALL_ROOT=/opt/agent-legion-native-sandbox-probe
 STATE_DIR=/var/lib/agent-legion-native-sandbox-probe
 SERVICE_USER=agent-legion-sandbox-probe
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 UNIT_SOURCE="$SCRIPT_DIR/native_sandbox_probe.service"
+CANDIDATE_UNIT_SOURCE="$SCRIPT_DIR/native_sandbox_probe_e6@.service"
 HARNESS="$INSTALL_ROOT/repo/scripts/e2e/native_sandbox_probe.py"
 
 usage() {
-  echo "usage: $0 verify | install --repo PATH | run | collect --output PATH" >&2
+  echo "usage: $0 verify | install --repo PATH | run | run-candidate PHASE | collect --output PATH" >&2
   exit 2
 }
 
@@ -28,6 +30,7 @@ require_ci_root() {
 verify_unit() {
   bash -n "$SCRIPT_DIR/native_sandbox_probe.sh"
   systemd-analyze verify "$UNIT_SOURCE"
+  systemd-analyze verify "$CANDIDATE_UNIT_SOURCE"
 }
 
 run_harness() {
@@ -113,7 +116,9 @@ install_service() {
   cp -a "$repo/data/bin" "$INSTALL_ROOT/repo/data/bin"
   chown -R root:root "$INSTALL_ROOT"
   install -m 0644 "$UNIT_SOURCE" "/etc/systemd/system/$UNIT_NAME"
+  install -m 0644 "$CANDIDATE_UNIT_SOURCE" "/etc/systemd/system/$CANDIDATE_UNIT_PREFIX@.service"
   systemd-analyze verify "/etc/systemd/system/$UNIT_NAME"
+  systemd-analyze verify "/etc/systemd/system/$CANDIDATE_UNIT_PREFIX@.service"
   mkdir -p "$STATE_DIR"
   chown "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"
   chmod 0700 "$STATE_DIR"
@@ -174,6 +179,19 @@ PY
   }
 }
 
+run_candidate() {
+  local phase=$1
+  local unit="$CANDIDATE_UNIT_PREFIX@$phase.service"
+  require_ci_root
+  [[ $phase == targeted || $phase == rollback ]] || usage
+  systemctl reset-failed "$unit" >/dev/null 2>&1 || true
+  systemctl start --wait "$unit"
+  [[ $(systemctl show "$unit" --property=Result --value) == success ]] || {
+    echo "E6 native probe harness failed; preserving evidence" >&2
+    return 1
+  }
+}
+
 collect_evidence() {
   local output=$1
   require_ci_root
@@ -197,6 +215,10 @@ case $1 in
   run)
     [[ $# -eq 1 ]] || usage
     run_service
+    ;;
+  run-candidate)
+    [[ $# -eq 2 ]] || usage
+    run_candidate "$2"
     ;;
   collect)
     [[ $# -eq 3 && $2 == --output ]] || usage

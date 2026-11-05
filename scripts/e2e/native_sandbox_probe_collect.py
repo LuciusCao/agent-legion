@@ -4,36 +4,20 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import shutil
-import subprocess
+import sys
 from pathlib import Path
-from typing import Any
 
-RELEVANT_AUDIT = ("audit", "apparmor", "seccomp", "denied", "bwrap", "unshare")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-
-def _sanitize(text: str) -> str:
-    return text.replace("native-sandbox-probe-parent-canary", "[redacted-probe-canary]").replace(
-        "native-sandbox-probe-canary", "[redacted-probe-canary]"
-    )
-
-
-def _journal(*args: str) -> str:
-    completed = subprocess.run(
-        ["journalctl", "--no-pager", *args], capture_output=True, text=True, timeout=30, check=False
-    )
-    return _sanitize(completed.stdout + completed.stderr)
-
-
-def _case_audit(case: dict[str, Any]) -> str:
-    start = math.floor((float(case["started_epoch"]) - 0.5) * 1_000_000) / 1_000_000
-    end = math.ceil((float(case["ended_epoch"]) + 2.0) * 1_000_000) / 1_000_000
-    raw = _journal("-k", "--since", f"@{start:.6f}", "--until", f"@{end:.6f}")
-    relevant = [
-        line for line in raw.splitlines() if any(word in line.lower() for word in RELEVANT_AUDIT)
-    ]
-    return "\n".join(relevant) + ("\n" if relevant else "<no matching kernel audit diagnostics>\n")
+from scripts.e2e.native_sandbox_probe_audit import (  # noqa: E402
+    _case_audit,
+    _journal,
+    collect_apparmor_status,
+)
+from scripts.e2e.native_sandbox_probe_audit import _sanitize as _sanitize  # noqa: E402
 
 
 def main() -> int:
@@ -45,19 +29,25 @@ def main() -> int:
     if args.evidence.is_dir():
         shutil.copytree(args.evidence, args.output, dirs_exist_ok=True)
     args.output.mkdir(parents=True, exist_ok=True)
-    (args.output / "systemd-journal.log").write_text(_journal("-u", args.unit), encoding="utf-8")
-    aa_status = subprocess.run(
-        ["aa-status", "--json"], capture_output=True, text=True, timeout=30, check=False
+    (args.output / "systemd-journal.log").write_text(
+        _journal(
+            "-u",
+            args.unit,
+            "-u",
+            "agent-legion-native-sandbox-probe-e6@targeted.service",
+            "-u",
+            "agent-legion-native-sandbox-probe-e6@rollback.service",
+        ),
+        encoding="utf-8",
     )
-    (args.output / "apparmor-status.json").write_text(
-        _sanitize(aa_status.stdout + aa_status.stderr), encoding="utf-8"
-    )
-    summary_path = args.output / "summary.json"
+    collect_apparmor_status(args.output)
     cases = []
-    if summary_path.is_file():
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        cases = summary.get("cases", [])
-    else:
+    for summary_name in ("summary.json", "candidate-summary.json"):
+        summary_path = args.output / summary_name
+        if summary_path.is_file():
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            cases.extend(summary.get("cases", []))
+    if not cases:
         cases = [
             json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(args.output.glob("cases/*/result.json"))
@@ -65,7 +55,11 @@ def main() -> int:
     for case in cases:
         case_dir = args.output / "cases" / case["case"]
         case_dir.mkdir(parents=True, exist_ok=True)
-        (case_dir / "kernel-audit.log").write_text(_case_audit(case), encoding="utf-8")
+        audit = _case_audit(case)
+        (case_dir / "kernel-audit.log").write_text(audit.pop("rendered"), encoding="utf-8")
+        (case_dir / "kernel-audit.json").write_text(
+            json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
     if cases:
         start = min(float(case["started_epoch"]) for case in cases) - 1
         end = max(float(case["ended_epoch"]) for case in cases) + 3
