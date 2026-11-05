@@ -1,4 +1,4 @@
-"""Stop and prove reclamation of every old native-probe execution before rollback."""
+"""Stop and prove reclamation of the latest stock and candidate executions before rollback."""
 
 from __future__ import annotations
 

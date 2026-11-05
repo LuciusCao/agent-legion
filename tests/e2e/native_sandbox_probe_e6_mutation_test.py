@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from scripts.e2e import native_sandbox_probe_apparmor as apparmor
 from scripts.e2e import native_sandbox_probe_audit as audit_module
@@ -413,14 +414,94 @@ def test_quiesce_requires_inactive_units_nonempty_pids_and_reclamation(
     assert quiesce_module.quiesce(empty, empty, tmp_path / "empty-quiesce.json") is False
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "|| true" not in workflow
-    assert '--stock-summary "$GITHUB_WORKSPACE/native-sandbox-probe-stock/summary.json"' in workflow
+    rollback = workflow[workflow.index("R - unload") :]
+    assert (
+        '--stock-summary "$GITHUB_WORKSPACE/native-sandbox-probe-targeted/summary.json"' in rollback
+    )
+    assert (
+        '--stock-summary "$GITHUB_WORKSPACE/native-sandbox-probe-stock/summary.json"'
+        not in rollback
+    )
     assert (
         '--candidate-summary "$GITHUB_WORKSPACE/native-sandbox-probe-targeted/candidate-summary.json"'
-        in workflow
+        in rollback
     )
-    assert workflow.index("native_sandbox_probe_quiesce.py") < workflow.index(
-        'install --repo "$GITHUB_WORKSPACE" || status=$?', workflow.index("R - unload")
+    quiesce_step = rollback.index("native_sandbox_probe_quiesce.py")
+    install_step = rollback.index('install --repo "$GITHUB_WORKSPACE" || status=$?')
+    assert quiesce_step < rollback.index("if [[ $status -eq 0 ]]; then") < install_step
+
+
+def test_quiesce_targeted_stock_survivor_fails_before_rerun(monkeypatch, tmp_path) -> None:
+    _, candidate = _summary_paths(tmp_path)
+    targeted_stock = tmp_path / "targeted-stock.json"
+    targeted_stock.write_text(
+        json.dumps({"cases": [{"execution": {"launcher_pid": 6765}}]}),
+        encoding="utf-8",
     )
+    monkeypatch.setattr(quiesce_module, "_require_root_ci", lambda: None)
+
+    def fake_command(command):
+        active = command[1] == "is-active"
+        return {
+            "command": command,
+            "returncode": 3 if active else 0,
+            "stdout": "inactive" if active else "",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(quiesce_module, "_command", fake_command)
+    monkeypatch.setattr(
+        quiesce_module,
+        "_wait_reclaimed",
+        lambda pids, pgids: {"pids": [6765], "pgids": [6765]},
+    )
+    evidence = tmp_path / "targeted-survivor.json"
+    assert quiesce_module.quiesce(targeted_stock, candidate, evidence) is False
+    document = json.loads(evidence.read_text(encoding="utf-8"))
+    assert document["quiesced"] is False
+    assert document["observed_pids"] == [2000, 2001, 2002, 6765]
+    assert document["observed_pgids"] == [2000, 2001, 2002, 6765]
+    assert document["remaining"] == {"pids": [6765], "pgids": [6765]}
+    assert 1000 not in document["observed_pids"]
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    script = next(
+        step["run"]
+        for step in workflow["jobs"]["native-probe"]["steps"]
+        if step.get("name", "").startswith("R - unload")
+    )
+    log = tmp_path / "workflow-sudo.log"
+    harness = f"""
+log={log}
+sudo() {{
+  printf '%s\n' "$*" >> "$log"
+  if [[ "$*" == *native_sandbox_probe_quiesce.py* ]]; then
+    return 1
+  fi
+  return 0
+}}
+install() {{ return 0; }}
+"""
+    completed = subprocess.run(
+        ["bash", "-c", harness + script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            "CI": "true",
+            "NATIVE_SANDBOX_PROBE_ALLOW_SYSTEMD_INSTALL": "1",
+            "GITHUB_SHA": "sentinel",
+            "GITHUB_WORKSPACE": str(tmp_path),
+            "PATH": "/usr/bin:/bin",
+        },
+    )
+    assert completed.returncode == 1
+    commands = log.read_text(encoding="utf-8")
+    assert "native_sandbox_probe_quiesce.py" in commands
+    assert "native_sandbox_probe_apparmor.py disable" in commands
+    assert "native_sandbox_probe.sh collect" in commands
+    assert "native_sandbox_probe.sh install" not in commands
+    assert "native_sandbox_probe.sh run " not in commands
+    assert "native_sandbox_probe.sh run-candidate" not in commands
 
 
 def test_corrupt_baseline_still_unloads_managed_but_never_reports_restored(
