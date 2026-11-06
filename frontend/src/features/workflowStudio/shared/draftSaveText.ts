@@ -21,3 +21,10 @@ export function draftSaveText(save: DraftSaveState | undefined): string | null {
   return null
   return null
 }
+
+export function draftSaveWarningFlags(save: DraftSaveState | undefined) {
+  const inConflict = save?.conflict === true
+  const isWarning =
+    save?.loadError === true || save?.status === 'error' || inConflict
+  return { inConflict, isWarning }
+}
