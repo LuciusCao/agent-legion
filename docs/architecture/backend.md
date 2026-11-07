@@ -557,7 +557,7 @@ server/app/
 | RunItemRef | BaseModel | type: Literal['ref'], connection_key: str, external_id: str, params: dict[str... | app/routes/run_item_contracts.py |
 | RunItemBundle | BaseModel | type: Literal['bundle'], bundle_id: str, client_token: _ClientToken | app/routes/run_item_contracts.py |
 | RunItemText | BaseModel | type: Literal['text'], content: str, filename: str | None, client_token: _Cli... | app/routes/run_item_contracts.py |
-| ProfileBucket | BaseModel | bucket_start: str, intake_runs: int, intake_items: int, pass_count: int, pass... | app/routes/runtime_profile_contracts.py |
+| ProfileBucket | BaseModel | bucket_start: str, intake_runs: int, intake_items: int, pass_count: int, pass... | app/routes/runtime_profile_bucket.py |
 | ProfileVerdict | BaseModel | stage: str, conclusion: str, evidence: dict[str, object] | app/routes/runtime_profile_contracts.py |
 | RuntimeProfileResponse | BaseModel | buckets: list[ProfileBucket], verdict: ProfileVerdict | app/routes/runtime_profile_contracts.py |
 | SkillFileResponse | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/skill_contracts.py |

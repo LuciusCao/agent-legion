@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -12,11 +11,11 @@ from server.app.db.retry import retry_on_database_conflict
 from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events import JobEventManager
-from server.app.events.aggregator import record_job_update
 from server.app.executors import _lease_finish_batch, _lease_write_paths
 from server.app.executors._lease_approval import park_awaiting_approval_repo
 from server.app.executors._lease_config_failure import fail_without_lease
 from server.app.executors._lease_control import active_lease_counts
+from server.app.executors._lease_job_events import broadcast_job_update
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.models import (
     ClaimedExecution,
@@ -26,8 +25,6 @@ from server.app.executors.models import (
 )
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.job_bulk_sql import id_chunks
-
-logger = logging.getLogger(__name__)
 
 __all__ = ["ExecutorLeaseRepository"]
 
@@ -64,29 +61,7 @@ class ExecutorLeaseRepository:
         init_db(self.path)
 
     def _broadcast_job_update(self, job_id: str) -> None:
-        try:
-            if self.job_db is None or self.job_event_manager is None:
-                return
-            if self.job_event_buffer is not None:
-                record_job_update(self.job_db, self.job_event_buffer, job_id)
-                return
-            job = self.job_db.get_job(job_id)
-            workspace_id = str(job.get("workspace_id", "")) if job else ""
-            if not workspace_id:
-                return
-            stats = self.job_db.count_jobs_by_status(workspace_id)
-            self.job_event_manager.broadcast_job_updated(workspace_id, job_id, stats)
-        except Exception:
-            # #204 broad-except audit: fire-and-forget observability, called
-            # only AFTER the lease/write transaction already committed (every
-            # call site sits below the `with write_transaction` block). A SSE
-            # refresh failure must never roll back or fail a claim/finish that
-            # already succeeded — the stats are trigger-maintained
-            # (DB-JOB-STATUS-COUNTS-001), so the very next state change
-            # re-broadcasts the correct numbers and the missed one self-heals.
-            # The outcome space here is the DB read surface plus the bus, not
-            # a business family; logger.exception keeps the traceback.
-            logger.exception("Failed to broadcast job update for %s", job_id)
+        broadcast_job_update(self, job_id)
 
     # Write paths delegate to _lease_write_paths (one connect-and-transact
     # unit per call, retried on database conflicts).

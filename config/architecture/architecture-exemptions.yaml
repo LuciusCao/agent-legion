@@ -104,43 +104,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/994
   ceiling: 87
 - check: architecture.file_budget
-  path: server/app/agent_broker/broker.py
-  reason: 'Issue #591 threads the optional result_batcher seam through mark_done (submit branch
-    + the _mark_done_direct rename) plus the constructor parameter — the batched arm itself
-    lives in sister module mark_done_batch.py, but the submit hop must sit on the method every
-    caller already reaches (the batcher and the direct path share one entry point). Re-sized
-    down from 268 under #612''s docstring-free metric (docstring rows no longer count). Ceiling
-    at actual + 10 per the dated-exemption convention (#521 leases.py precedent). Remove when
-    the broker gets its planned structural split or the group-commit queue retires. Re-anchored
-    by #926 from #456 (closed) to #1010: the overage above is the shipped feature itself and
-    the removal condition above stands; #1010 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1010
-  ceiling: 227
-- check: architecture.file_budget
-  path: server/app/bootstrap/agent_plane.py
-  reason: 'Issue #591 constructs the ResultCommitBatcher before the broker and the lease repository
-    (both receive it) and exposes it on the AgentPlane dataclass for the lifespan start/stop
-    — the plane is the composition root the wiring must read at. The codex review round (C1)
-    added the result_batching gate parameter so a start_worker=False app builds no batcher at
-    all. Re-sized down from 101 under #612''s docstring-free metric. Ceiling at actual + 5 per
-    the dated-exemption convention. Remove when the plane assembly gets its planned restructure.
-    Re-anchored by #926 from #456 (closed) to #1010: the overage above is the shipped feature
-    itself and the removal condition above stands; #1010 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1010
-  ceiling: 92
-- check: architecture.file_budget
-  path: server/app/executors/leases.py
-  reason: 'Issue #521 threads the optional stage_timer keyword through finish() into _lease_write_paths;
-    the parameter must ride the same retry wrapper as the result it instruments (a retry re-runs
-    the stages it re-measures). Re-anchored by #926 from #456 (closed) to #1010: the overage
-    above is the shipped feature itself and the removal condition above stands; #1010 tracks
-    at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1010
-  ceiling: 126
-- check: architecture.file_budget
   path: server/app/services/path_hygiene.py
   reason: 'Issue #521 adds the per-path warn dedupe (set + lock + keyed signature) and the one-time
     rewrite orchestration (rebase rule, chunk loop, two daemon-thread kickers). The rewrite
@@ -152,15 +115,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1003
   ceiling: 104
-- check: architecture.file_budget
-  path: server/app/routes/runtime_profile_contracts.py
-  reason: 'Issue #521 mirrors the fourteen result-stage gauge columns into ProfileBucket, the
-    same field-list growth the v78 claim-stage split made. The model IS the response contract.
-    Re-anchored by #926 from #456 (closed) to #1010: the overage above is the shipped feature
-    itself and the removal condition above stands; #1010 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1010
-  ceiling: 55
 - check: architecture.file_budget
   path: worker/executor_log.py
   reason: '#510 grew this module by the events split: events_log_path anchoring, the is_structured_event
@@ -286,16 +240,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1011
   ceiling: 24
-- check: architecture.file_budget
-  path: server/app/agent_broker/agent_result_commit.py
-  reason: 'Issue #359 adds the execute-done counter at the terminal-commit point (two effective
-    lines). The counter must fire exactly where the lease and request both reach their terminal
-    state — moving it out would separate the gauge from the state transition it measures. Re-anchored
-    by #926 from #456 (closed) to #1010: the overage above is the shipped feature itself and
-    the removal condition above stands; #1010 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1010
-  ceiling: 65
 - check: architecture.file_budget
   path: server/app/services/ops_metrics/service.py
   reason: 'Issue #359 extends the sampling pass to persist the runtime-profile gauge row (one

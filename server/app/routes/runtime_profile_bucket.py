@@ -1,0 +1,53 @@
+"""One runtime-profile bucket, mirroring ``ops_runtime_profile_samples``."""
+
+from __future__ import annotations
+
+from pydantic import BaseModel
+
+
+class ProfileBucket(BaseModel):
+    bucket_start: str
+    intake_runs: int
+    intake_items: int
+    pass_count: int
+    pass_seconds_total: float
+    pass_scan_seconds_max: float
+    pass_slow_count: int
+    enqueue_submitted: int
+    enqueue_pool_skipped: int
+    enqueue_pending: int
+    enqueue_stock_gated: int
+    claim_count: int
+    claim_empty_count: int
+    claim_seconds_total: float
+    claim_seconds_max: float
+    claim_queue_wait_seconds_total: float
+    claim_queue_wait_seconds_max: float
+    claim_scan_seconds_total: float
+    claim_scan_seconds_max: float
+    claim_evaluate_seconds_total: float
+    claim_evaluate_seconds_max: float
+    claim_writes_seconds_total: float
+    claim_writes_seconds_max: float
+    execute_active: int
+    execute_done: int
+    execute_requeued: int
+    result_count: int
+    result_seconds_total: float
+    result_seconds_max: float
+    result_unpack_seconds_total: float
+    result_unpack_seconds_max: float
+    result_artifacts_verify_seconds_total: float
+    result_artifacts_verify_seconds_max: float
+    result_validate_seconds_total: float
+    result_validate_seconds_max: float
+    result_artifacts_upload_seconds_total: float
+    result_artifacts_upload_seconds_max: float
+    result_lease_write_seconds_total: float
+    result_lease_write_seconds_max: float
+    result_events_seconds_total: float
+    result_events_seconds_max: float
+    result_mark_done_seconds_total: float
+    result_mark_done_seconds_max: float
+    db_pool_waiting: int
+    db_pool_wait_seconds_total: float

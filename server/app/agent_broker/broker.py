@@ -14,9 +14,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from server.app.agent_broker import mark_done_batch, reaper, release, sweepers
+from server.app.agent_broker import broker_result_commit, mark_done_batch, reaper, release, sweepers
 from server.app.agent_broker.claim import AgentClaim, ClaimRacedError
 from server.app.agent_broker.claim_retry import claim_with_retry
 from server.app.agent_broker.empty import EmptyClaimTrigger
@@ -257,58 +257,17 @@ class AgentExecutionBroker:
         return single_heartbeat(self, execution_id, worker_id, lease_id)
 
     def claimed_payload(self, execution_id: str, worker_id: str) -> dict[str, Any] | None:
-        with read_connection(self.database_dsn) as conn:
-            row = conn.execute(
-                "select manifest_json, lease_id, job_id, node_key from agent_execution_requests"
-                " where execution_id=%s and worker_id=%s and state in ('claimed', 'reporting')",
-                (execution_id, worker_id),
-            ).fetchone()
-        if row is None:
-            return None
-        return {
-            "manifest": json.loads(row["manifest_json"]),
-            "lease_id": row["lease_id"],
-            "job_id": row["job_id"],
-            "node_key": row["node_key"],
-        }
+        return broker_result_commit.claimed_payload(self, execution_id, worker_id)
 
     def cancelled_code_executions(self, worker_id: str) -> list[str]:
-        """Claimed kind='code' executions whose job left the runnable set.
-
-        Backs the heartbeat cancel body (batch 2, design §7.5): the Worker
-        kills the process group for each returned execution_id. Only
-        'claimed' rows matter — 'reporting' executions already exited.
-        """
-        with read_connection(self.database_dsn) as conn:
-            rows = conn.execute(
-                "select r.execution_id from agent_execution_requests r"
-                " join jobs j on j.id=r.job_id"
-                " where r.worker_id=%s and r.kind='code' and r.state='claimed'"
-                " and (j.execution_paused=1 or j.status not in ('queued', 'running'))",
-                (worker_id,),
-            ).fetchall()
-        return [str(row["execution_id"]) for row in rows]
+        return broker_result_commit.cancelled_code_executions(self, worker_id)
 
     def mark_done(
         self, execution_id: str, worker_id: str, lease_id: str, outcome: Mapping[str, Any]
     ) -> str | None:
         """Close the request; bound to the current lease_id so a late result
         from a previous attempt is rejected after a requeue/re-claim."""
-        # #591 group-commit：batcher 在位时终态写停靠写线程队列、与完成波
-        # 其余成员合批；None（关闭/测试）保持直连路径。
-        if self.result_batcher is not None:
-            # direct = the post-stop fallback (#591 C6): a racing producer
-            # must not park on the drained queue.
-            direct = lambda: self._mark_done_direct(  # noqa: E731
-                execution_id, worker_id, lease_id, outcome
-            )
-            return cast(
-                "str | None",
-                self.result_batcher.submit(
-                    "mark_done", (execution_id, worker_id, lease_id, outcome), direct=direct
-                ),
-            )
-        return self._mark_done_direct(execution_id, worker_id, lease_id, outcome)
+        return broker_result_commit.mark_done(self, execution_id, worker_id, lease_id, outcome)
 
     def _mark_done_direct(
         self, execution_id: str, worker_id: str, lease_id: str, outcome: Mapping[str, Any]
