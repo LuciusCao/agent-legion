@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-11-07
+
+主打 Studio 与实例设置预算回落、Worker Key 使用统计口径修复及 CI 依赖维护：Key 的 Worker 使用计数与当前 workspace 可见范围对齐，删除告警仍保留全实例消费者；预览/DAG、草稿同步/保存/发布、Inspector 和实例设置契约按职责拆分并清退预算豁免，不改变既有产品行为。原生 Linux targeted AppArmor 实验得出 candidate-only no-go，不构成生产支持。
+
+### Fixed
+
+- Worker Key 使用统计与 workspace 范围对齐（issue #1172，PR #1459）：Agent 与 Worker 设置区的「N 个 Worker 使用」改为只统计最近注册使用该 Key 且服务当前 workspace 的 Worker，不再出现被计数却在当前列表不可见的消费者；删除 Key 的级联告警仍使用全实例消费者列表，避免低估删除影响。legacy 全局 Worker 与 workspace 过滤谓词保持不变。
+
+### Maintenance
+
+- Studio 与预览/DAG 预算回落（issues #1000、#1004、#1013、#1014、#1017）：预览视图、DAG hover 高亮、服务端草稿同步/重放、Prompt 编辑与草稿归一化、保存/发布 action、query key 注册及节点代码加载按职责拆分，补齐 node-safe action 与服务端同步测试并删除到期豁免；草稿保存、发布确认、运行配置通道和现有视觉/交互契约不变。
+- 实例设置字段与后端契约拆分（issue #1015，PR #1460）：全局设置字段按 core/worker/workflow 分类，实例设置路由契约按 core/execution 分模块，保留既有 API 形状、默认值与校验语义，并清退对应体积预算豁免。
+- GitHub Actions 依赖集中升级（#1461–#1463 及同期 action 更新）：`softprops/action-gh-release` 升至 3.0.3、`astral-sh/setup-uv` 升至 10.3.3、`docker/build-push-action` 升至 7.4.0，同期更新 `docker/login-action` 4.7.0、`actions/setup-node` 7.1.0 与 `Swatinem/rust-cache` 2.9.3；全部继续使用完整 commit SHA 钉版，原 Dependabot PR 由集中提交覆盖后不重复计入合并项。
+- targeted AppArmor 原生沙箱实验（issues #39、#1049，PR #1458）：在隔离 Ubuntu 环境对 direct-bwrap candidate 执行 A/B/R 与原始证据采集，candidate 在 payload 启动前因 proc mount 权限失败而判定 no-go，rollback 恢复 stock 状态；未修改 Worker/velites 生产沙箱、宿主长期安全策略或部署权限，candidate summary 始终 `production_fixed=false`，并发与 payload 内语义因 fail-fast 未获得通过证据。
+- 里程碑历史归属校准（issues #1199、#1001）：普通节点 `config/config_schema` 的运行/结构分类核查确认双通道主体已由 0.8.1 #1351 覆盖，普通节点配置继续属于结构契约；AgentEditor 工具 picker 共享化目标已随旧组件退役而失去适用对象，实时发现另列 #1467。两项均只完成对账，本区间没有对应新增产品差异，不重复声明新功能或修复。
+
+### 升级注意
+
+- **数据库：** 本版没有新 schema 迁移，当前版本保持 v104；仍建议升级前备份 PostgreSQL，已完成 v104 的实例无需额外迁移，回滚使用与目标 schema 匹配的备份。
+- **Host / Worker / velites 顺序与版本线：** `v0.8.4..main` 的 `worker/`、`shared/`、`velites/` 无产品差异，本次只发布 Host/main `v0.8.5`，不创建 `worker-v0.8.5` 或新 velites tag。升级顺序仍为 Host → Worker：先升 Host 到 v0.8.5 并确认健康，再逐台维护 Worker；Worker 继续使用 worker-v0.8.4 与 velites-v0.5.10，无需为主仓版本号重装，Worker 注册/claim 协议保持 v6。
+- **一键安装钉版：** `scripts/install-worker.sh` 默认钉版保持 worker 0.8.4 / velites 0.5.10，与本次空差异审计一致；不要为跟随主仓版本号而指定不存在的 worker-v0.8.5。
+- **frontend 独立版本线：** 本次包含 frontend 修复与内部重构但不单独发布 npm 包，`frontend/package.json` 与 lockfile 保持 0.4.0-alpha。
+- **发布前置：** release PR 合并后必须在对应 main 精确提交上运行 Nightly Gate 并取得全绿，再创建 `v0.8.5` 与主仓 GitHub Release；不得用本发布流程生成 worker/velites 空版本或执行生产部署。
+
+### 已知后续
+
+- **原生 Linux 部署（#39、#1049，milestone #37）：** 两项 issue 与 Linux 部署里程碑保持 open。targeted AppArmor candidate 当前仅为 no-go 实验结论，native probe 的 CI 状态分离与并发 audit/rollback 证据完整性分别由 #1470、#1471 跟进；原生非 root systemd、真实 Host/Worker 迁移/回滚与生产验收尚未完成，本版不得宣称原生 Linux 生产支持。
+
 ## [0.8.4] - 2026-11-03
 
 主打 Worker 容器资源限额实测落地与 velites 工具错误可见性：Worker 各 Compose 形态新增 256MiB / 128 pids 默认值及测量 envelope 守卫，一键安装升级会按实际控制卷预检并保留用户状态；velites 修复 OpenAI 兼容 provider 的工具错误标记透传。另含任务中心窄屏排版、Worker 静态容量误报移除、资源测量与原生沙箱诊断工具，以及入口/工具层/测试预算重构。原生非 root systemd 与 AppArmor 验证不在本版完成范围内。
