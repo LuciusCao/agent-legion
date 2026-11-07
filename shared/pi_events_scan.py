@@ -64,10 +64,11 @@ def _dump_event(event: dict[str, Any]) -> str:
 
 
 def _write_kept_event(dst: TextIO, event: Any, line: str, redactor: SecretRedactor | None) -> None:
-    """Write one kept event line, its string values redacted (#842).
+    """Write one kept event line, its string keys and values redacted (#842/#1175).
 
-    ANY per-line failure — the span function escaping, the re-serialization,
-    or the write itself — drops the whole line fail-closed. A raw line must
+    ANY per-line failure — the span function escaping, a rewritten-key
+    collision, the re-serialization, or the write itself — drops the whole
+    line fail-closed. A raw line must
     never be written, and a per-line failure must never escalate to a
     whole-scan failure: a whole-scan failure discards the raw events file
     outright when a redactor was supplied (#1165, see
@@ -135,19 +136,22 @@ def scan_and_compress_pi_events(
       cut by the trim, so after any cut the leading partial line (or, on a
       single line, partial token) is dropped too.
 
-    Events redaction (#842): with a ``redactor`` snapshot, the STRING
-    VALUES of kept events are redacted in the same pass — a
-    ``tool_execution_end`` whose tool output echoes a registered secret
-    (``bash env``, ``cat`` of a config file) would otherwise ride the
-    compressed file to the Host and the job-log renderer verbatim. Only
-    string values are rewritten (``SecretRedactor.redact_json``), so the
-    output line is re-serialized valid JSON with the same structure; the
-    returned ``model_error`` attribution string is redacted too (it flows
-    into result metadata / error_message). A span function that RAISES on
-    an event fails closed: that line is dropped from the output — never
-    written raw. The SAME drop covers a hit line whose re-serialization
-    cannot be written (JSON-escaped lone surrogates decode to real
-    surrogate characters that ``ensure_ascii=False`` cannot UTF-8-encode):
+    Events redaction (#842/#1175): with a ``redactor`` snapshot, the STRING
+    KEYS AND VALUES of kept events are redacted in the same pass — a
+    ``tool_execution_end`` whose tool output or nested key echoes a registered
+    secret (``bash env``, ``cat`` of a config file) would otherwise ride the
+    compressed file to the Host and the job-log renderer verbatim. Ordinary
+    key names, key order and non-string leaves stay unchanged
+    (``SecretRedactor.redact_json``), so the output line is re-serialized
+    valid JSON with the same structure; the returned ``model_error``
+    attribution string is redacted too (it flows into result metadata /
+    error_message). A span function that RAISES on a key or value, or two
+    rewritten keys colliding, fails closed: that whole line is dropped from
+    the output — never written raw and never returned as a dict with one
+    colliding entry silently overwritten. The SAME drop covers a hit line
+    whose re-serialization cannot be written (JSON-escaped lone surrogates
+    decode to real surrogate characters that ``ensure_ascii=False`` cannot
+    UTF-8-encode):
     dropping the line beats failing the scan, which would leave the raw
     file for the result archive. A redaction failure on the
     ``model_error`` string degrades the attribution to
