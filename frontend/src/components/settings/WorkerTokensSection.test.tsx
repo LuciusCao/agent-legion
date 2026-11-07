@@ -434,6 +434,86 @@ describe('WorkerTokensSection', () => {
     })
   })
 
+  it('excludes stale key consumers that no longer serve the current workspace (#1172)', async () => {
+    mockListAgentWorkers.mockResolvedValue([
+      { ...sampleWorker, register_token_ids: ['t1'] },
+      {
+        ...sampleWorker,
+        worker_id: 'w-stale',
+        name: 'stale-mac',
+        allowed_workspaces: ['other_ws'],
+        register_token_ids: ['t1'],
+      },
+    ])
+    renderSection()
+    await waitFor(() => screen.getByTestId('worker-w1'))
+
+    const item = screen.getByTestId('register-token-t1')
+    const usageChip = within(item).getByText('1 个 Worker 使用')
+    expect(usageChip.getAttribute('title')).toContain('mac-mini')
+    expect(usageChip.getAttribute('title')).not.toContain('stale-mac')
+    expect(item.textContent).not.toContain('2 个 Worker 使用')
+    expect(screen.queryByTestId('worker-w-stale')).toBeNull()
+  })
+
+  it('counts a multi-key worker only on keys it actually used (#1172)', async () => {
+    mockListRegisterTokens.mockResolvedValue([
+      sampleToken,
+      {
+        ...sampleToken,
+        token_id: 't9',
+        label: 'other-ws-key',
+        workspace_id: 'other_ws',
+      },
+    ])
+    mockListAgentWorkers.mockResolvedValue([
+      {
+        ...sampleWorker,
+        worker_id: 'w-shared',
+        name: 'shared-mac',
+        allowed_workspaces: [WORKSPACE_ID, 'other_ws'],
+        register_token_ids: ['t1', 't9'],
+      },
+      {
+        ...sampleWorker,
+        worker_id: 'w-other-key',
+        name: 'other-key-mac',
+        allowed_workspaces: [WORKSPACE_ID, 'other_ws'],
+        register_token_ids: ['t9'],
+      },
+    ])
+    renderSection()
+    await waitFor(() => screen.getByTestId('worker-w-shared'))
+
+    expect(screen.getByTestId('worker-w-other-key')).toBeTruthy()
+    const item = screen.getByTestId('register-token-t1')
+    const usageChip = within(item).getByText('1 个 Worker 使用')
+    expect(usageChip.getAttribute('title')).toContain('shared-mac')
+    expect(usageChip.getAttribute('title')).not.toContain('other-key-mac')
+  })
+
+  it('keeps out-of-scope consumers in the delete cascade warning (#1172)', async () => {
+    mockListAgentWorkers.mockResolvedValue([
+      {
+        ...sampleWorker,
+        worker_id: 'w-stale',
+        name: 'stale-mac',
+        allowed_workspaces: ['other_ws'],
+        register_token_ids: ['t1'],
+      },
+    ])
+    renderSection()
+    await waitFor(() => screen.getByText('home-mac-mini'))
+
+    const item = screen.getByTestId('register-token-t1')
+    expect(within(item).getByText('未被使用')).toBeTruthy()
+    fireEvent.click(item.querySelector('button') as HTMLButtonElement)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('1 个 Worker（stale-mac）')
+    expect(dialog.textContent).toContain('一并删除')
+  })
+
   it('marks a bound-but-legacy-revoked key on the worker row', async () => {
     mockListRegisterTokens.mockResolvedValue([
       { ...sampleToken, revoked: true },
