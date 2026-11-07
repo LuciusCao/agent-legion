@@ -31,40 +31,18 @@ from fastapi.responses import JSONResponse
 from server.app.auth.api_intake import require_workspace_api_intake
 from server.app.auth.api_scope_surface import API_SCOPE_INTAKE_TAG
 from server.app.auth.dependencies import get_current_user
-from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
 from server.app.routes.run_contracts import (
     RunAcceptedResponse,
-    RunBatchResponse,
     RunCreateRequest,
     RunCreateResponse,
     RunDetailResponse,
     RunListResponse,
 )
+from server.app.routes.runs_intake import log_api, register_run_batch_controls
 from server.app.services.materials import MaterialStorageUnavailableError
 from server.app.services.run_service import RunService
 
 logger = logging.getLogger(__name__)
-
-
-# #626 audit: an api-token submission attributes to the token id, never an
-# impersonated user (the api-scope identity carries no user id, so created_by
-# stays empty for the machine channel). The attempt record is pre-validation
-# observability; the success record fires only after the service actually
-# accepted/created the run, so a rejected submission (unknown material, no
-# active revision, duplicate) never logs a success.
-def _log_api(user: dict[str, Any], verb: str, workspace_id: str, run_id: str | None = None) -> None:
-    if user.get("actor_scope") != WORKSPACE_API_SCOPE:
-        return
-    # The attempt record carries no run_id (pre-validation); the success
-    # record always does — pinned by test_workspace_api_token_boundaries.py.
-    suffix = f" run_id={run_id}" if run_id is not None else ""
-    logger.info(
-        "%s via workspace api token: token_id=%s workspace_id=%s%s",
-        verb,
-        user.get("api_token_id"),
-        workspace_id,
-        suffix,
-    )
 
 
 def create_runs_router(service: RunService) -> APIRouter:
@@ -82,7 +60,7 @@ def create_runs_router(service: RunService) -> APIRouter:
         payload: RunCreateRequest,
         user: Annotated[dict[str, Any], Depends(get_current_user)],
     ) -> RunCreateResponse | JSONResponse:
-        _log_api(user, "run submission attempt", workspace_id)
+        log_api(logger, user, "run submission attempt", workspace_id)
         # exclude_unset keeps input_json verbatim (no params={} filler).
         items = [item.model_dump(exclude_unset=True) for item in payload.items]
         try:
@@ -96,7 +74,7 @@ def create_runs_router(service: RunService) -> APIRouter:
                     items=items,
                     created_by=str(user.get("id") or ""),
                 )
-                _log_api(user, "run accepted (async)", workspace_id, accepted["run"]["id"])
+                log_api(logger, user, "run accepted (async)", workspace_id, accepted["run"]["id"])
                 return JSONResponse(
                     status_code=202, content=RunAcceptedResponse(**accepted).model_dump()
                 )
@@ -111,7 +89,7 @@ def create_runs_router(service: RunService) -> APIRouter:
         except MaterialStorageUnavailableError as exc:
             # text items need the object store (same 503 as the materials API).
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        _log_api(user, "run submitted", workspace_id, result["run"]["id"])
+        log_api(logger, user, "run submitted", workspace_id, result["run"]["id"])
         return RunCreateResponse(**result)
 
     @router.get("/workspaces/{workspace_id}/runs", response_model=RunListResponse, tags=[API_SCOPE_INTAKE_TAG])  # fmt: skip
@@ -126,31 +104,6 @@ def create_runs_router(service: RunService) -> APIRouter:
     def get_run(workspace_id: str, run_id: str) -> RunDetailResponse:
         return RunDetailResponse(**service.get_run(workspace_id, run_id))
 
-    # #1117 async-mode control plane: feeder-only pause/resume/cancel (jobs
-    # already created stay; the job batch ops manage them). Registered via
-    # add_api_route so the three verbs share one declaration; endpoint names
-    # stay distinct for the api-scope manifest (#734 contract test).
-    def pause_run_batch(workspace_id: str, run_id: str) -> RunBatchResponse:
-        return RunBatchResponse(**service.pause_run_batch(workspace_id, run_id))
-
-    def resume_run_batch(workspace_id: str, run_id: str) -> RunBatchResponse:
-        return RunBatchResponse(**service.resume_run_batch(workspace_id, run_id))
-
-    def cancel_run_batch(workspace_id: str, run_id: str) -> RunBatchResponse:
-        return RunBatchResponse(**service.cancel_run_batch(workspace_id, run_id))
-
-    for _action, _endpoint in (
-        ("pause", pause_run_batch),
-        ("resume", resume_run_batch),
-        ("cancel", cancel_run_batch),
-    ):
-        router.add_api_route(
-            f"/workspaces/{{workspace_id}}/runs/{{run_id}}/{_action}",
-            _endpoint,
-            methods=["POST"],
-            response_model=RunBatchResponse,
-            dependencies=[Depends(require_workspace_api_intake)],
-            tags=[API_SCOPE_INTAKE_TAG],
-        )
+    register_run_batch_controls(router, service)
 
     return router
