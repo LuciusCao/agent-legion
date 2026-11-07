@@ -138,6 +138,20 @@ agent sweep、两个 queued-request sweep、批 claim 的每个候选——code 
 全序的 `(hashtext('job-mutation:' || job_id)::int, job_id)` 后缀，而不是另起
 纯 job_id 排序。
 
+**Heartbeat / result finish 行锁决策矩阵**（#1449）：job-mutation 全序与
+executor_leases 全序是两个独立维度，不能用 finish 调用顺序代替 lease 锁序论证。
+
+| 路径 | job-mutation 锁 | 请求行锁 | executor_leases 行锁 | 冲突重试 |
+| --- | --- | --- | --- | --- |
+| 批量 heartbeat | 不取 | 按 execution_id 排序 | 同一 execution_id 顺序逐项续期 | 不新增；靠共享锁序消除本环 |
+| `finish_many` | 先按全局 `(hashtext, job_id)` 序集中预取 | 不在本事务触碰 | 随后按 execution_id 排序集中 `FOR UPDATE`，再按 job 序执行 finish | 保留既有有界幂等重试 |
+| 单条 finish / heartbeat | 单 job / 不取 | 单请求 / 不触碰 | 单 lease，不构成多项 AB-BA | 保留各自既有语义 |
+| `mark_done` | 不取 | finish 提交后的独立事务 | 不触碰 | 批臂保留既有有界幂等重试 |
+
+#1449 的修复前环是批量 heartbeat 与 `finish_many` 各持一张 lease、再交叉
+等待对方 lease；它不是 #690 的 node-counter 三方环。预锁不改变 finish 的代次
+CAS、lease ownership、queue-order verdict 或 finish→mark_done 两阶段提交顺序。
+
 **创建入锁域**（#1083）：job 删除的提交后清理在 `job-mutation` 锁下复核行
 不存在才把 job_dir rename 入 `.trash`；创建路径在 mkdir / upsert 之前取同一把
 锁并持到提交，二者互斥，同源重建要么在复核前已提交（清理整体跳过），要么等

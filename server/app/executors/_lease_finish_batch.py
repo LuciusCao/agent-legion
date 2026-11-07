@@ -19,6 +19,9 @@ Two disciplines the codex review on #609 added:
   prevents cross-batch AB-BA) and restore queue-order verdicts. v82's
   append-and-try-fold counters no longer require this ordering for
   deadlock safety, but preserving it avoids unnecessary scheduling churn.
+  Lease rows are a separate lock domain (#1449): after the job locks are
+  pre-acquired, the batch pre-locks them in execution_id order shared with
+  batch heartbeat, then runs finish_lease in the job order above.
 - **The writer thread owns only the shared transaction** (#591 C5): events
   post-processing (token capture + PI compression, two full-file scans per
   item) is returned to the SUBMITTING commit thread as per-item closures —
@@ -98,6 +101,22 @@ def finish_many(
                 )
             )
         resolved.sort(key=lambda entry: entry[:3])
+        # Take every advisory lock before any row lock (EXEC-GENERATION-001).
+        # finish_lease re-enters the same per-job lock below; pre-acquisition
+        # here also keeps all subsequent row writes inside the global job order.
+        for job_id in dict.fromkeys(entry[1] for entry in resolved if entry[1]):
+            conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"job-mutation:{job_id}",))
+        # #1449: heartbeat_batch holds request rows in execution_id order and
+        # renews their leases in that same order. Pre-lock this batch's lease
+        # rows in the identical order before finish_lease walks jobs, otherwise
+        # the two transactions can each hold one lease and wait for the other.
+        # The later UPDATEs reuse these locks; verdicts still follow job order
+        # and are restored to queue order below.
+        conn.execute(
+            "select id from executor_leases where id = any(%s)"
+            " order by execution_id, id for update",
+            ([entry[3] for entry in resolved],),
+        )
         by_index: dict[int, bool] = {}
         stale_by_index: dict[int, bool] = {}
         for _job_key, _job_id, index, lease_id, result, _timer in resolved:

@@ -107,20 +107,19 @@ def batch_heartbeat(
     fires (the event stream keeps meaning "investigate"). Duplicated
     execution ids are collapsed to the last lease_id.
 
-    Lock-order note (#5125358408 P1-B): this transaction locks THREE tables,
-    always in this order — agent_execution_requests (``for update`` per batch
-    item, iterated in sorted execution_id order), then executor_leases
-    (``heartbeat_lease``'s select+update by primary key), then agent_workers
-    (``touch_worker``'s row update). The AER→lease ordering matches every
-    other renewal path (single heartbeat, claim promote, result commit), so
-    cross-table cycles would need a path that locks leases BEFORE requests —
-    none exists today and any such edit must re-prove this note. The
-    per-item AER row locks themselves are taken in sorted (primary-key) order
-    so two concurrent batch transactions sharing one worker registration
-    (an ops-incident scenario) lock the same rows in the same order instead
-    of interleaving A,B / B,A — the deadlock face v5 introduced. Any future
-    edit adding a fourth locked table must extend this note with its
-    position and the same-direction argument."""
+    Lock-order note (#5125358408 P1-B, #1449): this transaction locks THREE
+    tables, always in this order — agent_execution_requests (``for update``
+    per batch item), then executor_leases (``heartbeat_lease``'s
+    select+update by primary key), then agent_workers (``touch_worker``'s
+    row update). Both per-item domains use sorted execution_id order, so two
+    heartbeat batches cannot interleave A,B / B,A on either domain. Grouped
+    result finish pre-locks its leases in this same execution_id order after
+    pre-acquiring job-mutation locks in the EXEC-GENERATION-001 global job
+    order; its later job-ordered finish calls therefore cannot invert the
+    lease order against this transaction. The single heartbeat renews only
+    one lease and mark_done runs in a separate transaction, so neither adds
+    a multi-lease edge to this cycle. Any future edit adding a fourth locked
+    table or changing either per-item order must re-prove both arguments."""
     # Collapse duplicates while preserving order: a Worker bug sending the
     # same execution twice must not lock and update one row twice.
     by_execution: dict[str, str] = {}
