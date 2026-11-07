@@ -560,11 +560,11 @@ exemptions:
     reflection pinned by the cross-binary contract test) into the adapter declaration — one
     dataclass field. The mirror itself lives in tool_catalog.py; this file only carries the
     reference. Remove together with the mirror if velites ever self-describes over the wire
-    instead of via static declaration. Re-anchored by #926 from #456 (closed) to #1001: the
-    overage above is the shipped feature itself and the removal condition above stands; #1001
-    tracks at most five entries (#917 A-2).'
+    instead of via static declaration. Re-anchored from #1001 (closed) to #1467: the overage above
+    is the shipped feature itself and the removal condition above stands; #1467 owns runtime
+    tool discovery, which satisfies that removal condition.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1001
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1467
   ceiling: 16
 - check: architecture.file_budget
   path: frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.ts
@@ -610,11 +610,11 @@ exemptions:
     mirror of `velites tools list --json`, pinned equal by the cross-binary contract test; its
     size is the catalog''s size plus the pi triple. The entry must live here in full (description/parameters
     verbatim) or the parity test fails by design. Remove if the mirror is replaced by runtime
-    probing. Re-anchored by #926 from #456 (closed) to #1001: the overage above is the shipped
-    feature itself and the removal condition above stands; #1001 tracks at most five entries
-    (#917 A-2).'
+    probing. Re-anchored from #1001 (closed) to #1467: the overage above is the shipped feature
+    itself and the removal condition above stands; #1467 owns runtime tool discovery, which
+    satisfies that removal condition.'
   owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1001
+  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1467
   ceiling: 192
 - check: architecture.file_budget
   path: server/app/mcp_server/agent_tools.py
