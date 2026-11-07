@@ -479,7 +479,7 @@ def test_presigned_headers_match_raw_endpoint_policy(name, gzipped):
     import io
 
     from server.app.routes.job_artifact_raw_response import raw_response
-    from server.app.services.external_artifact_access import _presigned_headers
+    from server.app.services.external_artifact_entries import presigned_headers
     from server.app.services.job_artifact_raw_types import RawArtifact
 
     raw = raw_response(
@@ -495,7 +495,7 @@ def test_presigned_headers_match_raw_endpoint_policy(name, gzipped):
         expected["ResponseContentDisposition"] = raw.headers["content-disposition"]
     if gzipped:
         expected["ResponseContentEncoding"] = raw.headers["content-encoding"]
-    assert _presigned_headers(name, gzipped) == expected
+    assert presigned_headers(name, gzipped) == expected
 
 
 def test_list_artifacts_local_and_disabled_entries_have_no_url(job_db, settings):
