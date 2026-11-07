@@ -12,18 +12,18 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from server.app.agent_broker import AgentExecutionBroker, worker_events
+from server.app.agent_broker import AgentExecutionBroker
+from server.app.agent_broker.agent_result_commit_effects import (
+    cleanup_result_commit,
+    note_committed_result,
+)
 from server.app.agent_broker.lease_reclaim_audit import reject_result
 from server.app.agent_broker.result_output_manifest import (
     enrich_outcome_from_archived_manifest,
 )
 from server.app.agent_broker.result_spool import publish_staged_result
-from server.app.agent_broker.result_timing import ResultStageTimer, report_result_stages
-from server.app.agent_control.completion import (
-    AgentCompletionHandler,
-    AgentOutcome,
-    report_auth_failure_safe,
-)
+from server.app.agent_broker.result_timing import ResultStageTimer
+from server.app.agent_control.completion import AgentCompletionHandler, AgentOutcome
 
 
 def commit_agent_result(
@@ -92,30 +92,14 @@ def commit_agent_result(
             raise reject_result(*audit, stage="mark_done", detail=detail, payload=payload)
         stage_timer.stage("mark_done")
         succeeded = True
-        # #490 execution.finished: outcome + wall time (claim → committed
-        # result spans download/run/upload); claimed_at is read post-done,
-        # so the wall time is best-effort.
-        worker_events.note_execution_finished(
-            execution_id, worker_id, payload, outcome, broker.database_dsn
-        )
-        # Runtime profile (#359): execute-stage done rate (a worker execution
-        # reached its terminal state through the normal result path).
-        from server.app.services.runtime_profile import profile
-
-        profile.note_execution_done()
-        if outcome.auth_failure_connection:
-            # Batch 2 (design §5.3): the node recorded an upstream auth
-            # failure; the Host performs the privileged invalidation.
-            report_auth_failure_safe(broker.database_dsn, outcome.auth_failure_connection)
+        note_committed_result(broker, execution_id, worker_id, payload, outcome)
     finally:
-        report_result_stages(
-            stage_timer, execution_id=execution_id, worker_id=worker_id, committed=succeeded
+        cleanup_result_commit(
+            broker,
+            stage_timer,
+            execution_id=execution_id,
+            worker_id=worker_id,
+            committed=succeeded,
+            archive_name=archive_name,
+            payload=payload,
         )
-        # The archive name is unique to this attempt — always reclaim it.
-        broker.discard_result_archive(archive_name)
-        if succeeded:
-            # Only a fully committed result retires the shared execution
-            # bundle. On 409/500 paths the bundle must survive for
-            # re-queued attempts; terminal-request bundles are reaped by
-            # the sweeper (AgentExecutionBroker.reap_terminal_bundles).
-            broker.retire_bundle(str(payload["manifest"].get("bundle_name", "")))
