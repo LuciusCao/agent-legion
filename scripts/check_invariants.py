@@ -10,8 +10,9 @@ from pathlib import Path
 
 import yaml
 
-from scripts.architecture.budget_policy import BudgetConfigurationError, load_budget_policy
-from scripts.quality.exemptions import load_exemptions, validate_exemptions
+from scripts.architecture.budget_invariants import validate_budget_exemptions
+from scripts.architecture.budget_policy import BudgetConfigurationError
+from scripts.quality.exemptions import load_exemptions
 from scripts.quality.invariants import load_registry, validate_registry
 from scripts.quality.issue_state import expired_issue_errors
 
@@ -64,17 +65,10 @@ def main(argv: list[str] | None = None) -> int:
     # #641: the exemption ceiling check shares the budget policy's growth
     # allowance band, and expires deadlines hard-fail once past.
     try:
-        policy = load_budget_policy(
-            project_root / "config/architecture/architecture-budget-policy.yaml"
-        )
+        errors.extend(validate_budget_exemptions(project_root, exemptions))
     except BudgetConfigurationError as exc:
         logger.error("budget configuration: %s", exc)
         return 1
-    errors.extend(
-        validate_exemptions(
-            exemptions, base_path=project_root, growth_allowance=policy.growth_allowance
-        )
-    )
     # Expiry detection reads the tracked issue-state cache (offline and
     # deterministic); refresh it with `make architecture-issue-states` or the
     # nightly exemption-expiry job when anchors close.

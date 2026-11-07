@@ -49,45 +49,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/993
   ceiling: 68
 - check: architecture.file_budget
-  path: scripts/architecture/file_budgets.py
-  reason: 'Issue #641 threads the growth_allowance band and the FrozenCeiling expiry through
-    the budget evaluator: _build_frozen_ceilings returns ceiling+expires pairs and check_file_budgets
-    passes the policy band into the monotonicity guard — 3 effective lines past the 168 baseline.
-    The evaluator is the single place ceilings, exemptions and the band intersect. Remove when
-    the frozen-ceiling plumbing moves into budget_monotonicity wholesale or a budget re-balance
-    re-registers it. Re-anchored by #926 from #456 (closed) to #1008: the overage above is the
-    shipped feature itself and the removal condition above stands; #1008 tracks at most five
-    entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1008
-  ceiling: 171
-- check: architecture.file_budget
-  path: scripts/check_invariants.py
-  reason: 'Issue #641 wires the budget policy growth_allowance into validate_exemptions so the
-    exemption ceiling check shares the same band as the file-budget gate, and the load failure
-    surfaces as an explicit error — 3 effective lines past the 69 baseline. The alternative
-    is exempting ceiling drift between the two gates (a misregistered exemption would only fail
-    one of them). Remove when the two registry validators merge into a single entry point or
-    a budget re-balance re-registers it. Re-anchored by #926 from #456 (closed) to #1008: the
-    overage above is the shipped feature itself and the removal condition above stands; #1008
-    tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1008
-  ceiling: 72
-- check: architecture.file_budget
-  path: scripts/architecture/budget_policy.py
-  reason: 'Issue #641 adds the growth_allowance policy knob: one dataclass field, the _parse_growth_allowance
-    loader (optional, non-negative, default 0 keeps the strict pre-#641 line) and its _check_keys
-    whitelist entry — 9 effective lines past the 153 baseline. The guard files are budgeted
-    by their own gate; the alternative (parking the parser in a sibling module) would split
-    the typed policy loader in two for a nine-line feature. Remove when the allowance parser
-    folds into a shared optional-int helper or a budget re-balance re-registers it. Re-anchored
-    by #926 from #456 (closed) to #1008: the overage above is the shipped feature itself and
-    the removal condition above stands; #1008 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1008
-  ceiling: 162
-- check: architecture.file_budget
   path: velites/src/contract.rs
   reason: 'Issue #542 migrates the machine-readable contract location to the skill-root contract.yaml:
     the parse tiering (root wins completely and fails closed on a malformed file, embedded-block
@@ -210,20 +171,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/994
   ceiling: 87
-- check: architecture.file_budget
-  path: scripts/architecture/effective_lines.py
-  reason: 'Issue #610 adds the docstring-row detection to the Python effective-line metric (ast
-    walk over module/class/function first statements plus the own-row boundary check against
-    code sharing the row) — ~4 effective lines past the 88 baseline. The metric module IS the
-    single counting authority every budget decision reads; splitting the docstring scanner into
-    a sister module would fork the metric from the file that gates it. Ceiling at actual + 10
-    per the dated-exemption convention. Remove when the metric module gets its planned split
-    (scanner vs counting) or a budget re-balance pass re-registers it. Re-anchored by #926 from
-    #456 (closed) to #1008: the overage above is the shipped feature itself and the removal
-    condition above stands; #1008 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1008
-  ceiling: 92
 - check: architecture.file_budget
   path: server/app/agent_broker/broker.py
   reason: 'Issue #591 threads the optional result_batcher seam through mark_done (submit branch

@@ -363,3 +363,49 @@ class TestExemptionRefiling:
         root, policy = _refile_repo(tmp_path, committed_ceiling=171, lines=145)
 
         assert _check_with_refile(root, policy, 150) == []
+
+
+class TestBudgetRefactorRegressionContracts:
+    @pytest.mark.parametrize(
+        ("value", "message"),
+        [
+            ("15", "growth_allowance must be an integer"),
+            (-1, "growth_allowance must not be negative"),
+        ],
+    )
+    def test_allowance_policy_error_text_is_stable(
+        self, tmp_path: Path, value: object, message: str
+    ) -> None:
+        data = copy.deepcopy(VALID_POLICY)
+        data["production"]["growth_allowance"] = value
+        policy_path = tmp_path / "policy.yaml"
+        policy_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+        with pytest.raises(BudgetConfigurationError) as caught:
+            load_budget_policy(policy_path)
+
+        assert str(caught.value) == message
+
+    def test_baseline_ceiling_may_match_but_not_exceed_committed_floor(
+        self, tmp_path: Path
+    ) -> None:
+        from tests.architecture_budget_helpers import git_repo
+
+        root, policy = git_repo(tmp_path, files={"server/app/example.py": 110})
+        (root / "server/app/example.py").write_text("\n".join(["line"] * 101))
+        assert check_file_budgets(root, policy, ()) == []
+
+        write_baseline(root, {"server/app/example.py": 111})
+        assert check_file_budgets(root, policy, ()) == [
+            "server/app/example.py: ceiling 111 rose above committed ceiling 110; "
+            "ceilings only ratchet down — split the file or file a dated "
+            "architecture.file_budget exemption"
+        ]
+
+    def test_expiry_error_text_is_stable(self, tmp_path: Path) -> None:
+        exemption = _exemption(ceiling=100, expires="2026-09-01")
+
+        assert validate_exemptions((exemption,), tmp_path, today=date(2026, 9, 13)) == [
+            "exemption 1: exemption expired on 2026-09-01 — renew it with a fresh "
+            "justification and a later expires date, or shrink the file back under its ceiling"
+        ]

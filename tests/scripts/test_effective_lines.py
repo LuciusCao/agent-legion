@@ -194,3 +194,26 @@ def test_sql_excludes_dash_dash_comment_lines(tmp_path: Path) -> None:
     )
     # code lines: create, id, ); = 3
     assert count_effective_lines(path) == 3
+
+
+def test_python_async_docstring_and_comment_rows_are_free(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path / "example.py",
+        "async def fetch():\n"
+        '    """Fetch a value.\n'
+        "    More detail.\n"
+        '    """\n'
+        "    # Explain the return, not the syntax.\n"
+        "    return 1  # trailing comments do not make a row free\n",
+    )
+
+    assert count_effective_lines(path) == 2
+
+
+def test_python_comment_before_code_makes_row_count(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path / "example.py",
+        "# free comment\nx = 1\n    # free indented comment\ny = 2  # counted code row\n",
+    )
+
+    assert count_effective_lines(path) == 2
