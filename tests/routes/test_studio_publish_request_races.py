@@ -375,7 +375,7 @@ def test_stale_confirming_row_recovers_via_sweep(client, job_db, monkeypatch) ->
     sweep (ridden by the pending poll / the create guard) must flip it to
     ``expired`` so (a) the agent's status tool sees an honest terminal state
     and (b) a NEW request can be parked instead of 409ing forever."""
-    from server.app.services.studio_publish_request_support import (
+    from server.app.services.studio_publish_request_heartbeat import (
         CONFIRMING_STALE_SECONDS,
     )
 

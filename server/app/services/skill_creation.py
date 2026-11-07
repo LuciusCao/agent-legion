@@ -25,7 +25,6 @@ import logging
 import os
 import shutil
 import stat
-import tempfile
 from os.path import lexists as _lexists
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -36,11 +35,11 @@ from server.app.services.skill_build_residue import (
     BUILD_RESIDUE_GITIGNORE,
     residue_payload_errors,
 )
-from server.app.services.skill_edit_checks import (
-    contract_errors,
-    contract_yaml_errors,
-    resolve_targets_checked,
+from server.app.services.skill_contract_checks import (
+    proposed_contract_errors,
+    written_contract_errors,
 )
+from server.app.services.skill_edit_checks import resolve_targets_checked
 from server.app.services.skill_editing import (
     STUDIO_GIT_AUTHOR_EMAIL,
     STUDIO_GIT_AUTHOR_NAME,
@@ -66,13 +65,6 @@ MAX_PATH_LENGTH = 512
 MAX_FILE_BYTES = 128 * 1024
 MAX_TAG_LENGTH = 128
 MAX_MESSAGE_LENGTH = 4096
-
-_CONTRACT_TRIO = ("SKILL.md", "references/output-contract.md", "scripts/validate_output.py")
-# #542: new skills are born with the full four-file set — the machine
-# contract must live in a root contract.yaml from the first commit (the
-# embedded-block location is deprecated and never an acceptable birth
-# form; migration leniency applies only to save_version/validate).
-_CONTRACT_REQUIRED = _CONTRACT_TRIO + ("contract.yaml",)
 
 
 class SkillCreationService:
@@ -116,7 +108,7 @@ class SkillCreationService:
         targets, path_errors = resolve_targets_checked(
             repo_dir, [(raw, content) for raw, content in files]
         )
-        contract = self._proposed_contract_errors(targets, repo_dir)
+        contract = proposed_contract_errors(targets, repo_dir)
         # #1038: build residue is never authored content (same rule and text
         # as the shared PUT) — and the seeded .gitignore below would make
         # `git add -A` silently drop it from the birth commit.
@@ -151,12 +143,7 @@ class SkillCreationService:
                 # (trio + root contract.yaml, same graded rules — a
                 # malformed contract.yaml is an error, and a new skill must
                 # be born with one at all).
-                written_errors = contract_errors(repo_dir)
-                written_errors.extend(contract_yaml_errors(repo_dir))
-                if not (repo_dir / "contract.yaml").is_file():
-                    written_errors.append(
-                        {"path": "contract.yaml", "error": "missing contract.yaml"}
-                    )
+                written_errors = written_contract_errors(repo_dir)
                 if written_errors:
                     raise SkillEditValidationError(
                         "Skill contract validation failed for the created skill",
@@ -251,38 +238,6 @@ class SkillCreationService:
                 f"Invalid tag name: {new_tag!r}",
                 [{"path": ".", "error": f"tag {new_tag!r} is not a valid git ref name"}],
             )
-
-    @staticmethod
-    def _proposed_contract_errors(
-        targets: list[tuple[Path, str]], repo_dir: Path
-    ) -> list[dict[str, str]]:
-        """The four-file contract checked against the PROPOSED file set,
-        before anything is written (same error shape as the on-disk check).
-
-        #542: create_skill is the strict birth gate — a root ``contract.yaml``
-        must be present in the payload AND parse clean (a malformed one is
-        the same 422 as a missing trio file)."""
-        proposed = {
-            path.relative_to(repo_dir.resolve()).as_posix(): content for path, content in targets
-        }
-        errors: list[dict[str, str]] = []
-        skill_md = proposed.get("SKILL.md")
-        if skill_md is None:
-            errors.append({"path": "SKILL.md", "error": "missing SKILL.md"})
-        elif not skill_md.strip():
-            errors.append({"path": "SKILL.md", "error": "SKILL.md is empty"})
-        for required in _CONTRACT_REQUIRED[1:]:
-            if required not in proposed:
-                errors.append({"path": required, "error": f"missing {required}"})
-        contract_yaml = proposed.get("contract.yaml")
-        if contract_yaml is not None:
-            # The proposed TEXT is authoritative, not any on-disk state:
-            # validate it through the same strict parser via a scratch dir.
-            with tempfile.TemporaryDirectory() as scratch:
-                staged = Path(scratch)
-                (staged / "contract.yaml").write_text(contract_yaml, encoding="utf-8")
-                errors.extend(contract_yaml_errors(staged))
-        return errors
 
     # Class attribute (not an import alias at module scope) so tests can
     # monkeypatch the git runner per service class.

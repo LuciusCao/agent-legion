@@ -10,17 +10,11 @@ them reports them the same way).
 
 from pydantic import BaseModel, Field
 
+from server.app.routes.studio_agent_skill_validation_contracts import (
+    SkillValidationIssue,
+    SkillValidationWarning,
+)
 from server.app.skill_authoring_limits import SKILL_CONTENT_MAX_CHARS
-
-
-class SkillValidationIssue(BaseModel):
-    path: str
-    error: str
-
-
-class SkillValidationWarning(BaseModel):
-    path: str
-    error: str
 
 
 class SkillValidateToolResponse(BaseModel):
