@@ -75,19 +75,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1008
   ceiling: 72
 - check: architecture.file_budget
-  path: scripts/quality/exemptions.py
-  reason: 'Issue #641 adds the optional expires deadline to the exemption schema: the field,
-    the strict-ISO-date validator with the today-parameterized hard failure on expiry, and the
-    growth_allowance parameter that keeps the ceiling-vs-actual check consistent with the file-budget
-    gate — 21 effective lines past the 113 baseline. The expiry wording is the gate copy developers
-    see, so it lives with the validator. Remove when expiry checks move into issue_state expiry
-    governance or a budget re-balance re-registers it. Re-anchored by #926 from #456 (closed)
-    to #1005: the overage above is the shipped feature itself and the removal condition above
-    stands; #1005 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1005
-  ceiling: 140
-- check: architecture.file_budget
   path: scripts/architecture/budget_policy.py
   reason: 'Issue #641 adds the growth_allowance policy knob: one dataclass field, the _parse_growth_allowance
     loader (optional, non-negative, default 0 keeps the strict pre-#641 line) and its _check_keys
