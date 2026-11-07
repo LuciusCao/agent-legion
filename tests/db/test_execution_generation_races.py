@@ -808,11 +808,12 @@ def test_finish_many_cross_ws_alias_quadruple_no_ab_ba(job_db, monkeypatch) -> N
     按相反顺序等同两把锁。
 
     编舞（等信号非等时长）：A = finish_many([a, b])——monkeypatch 的
-    finish_lease 在完成第一项（a，持 K1）后泊住，K2 尚未取；B =
-    finish_many([c, d])。纯键序下 B 的第一项是 d（K1）→ 原地等待且不持
-    K2；ws 分桶序（旧代码）下 B 的第一项是 c（W1 桶在前）→ 先拿 K2 再等
-    K1——「等待期间不得持有 K2」的键级断言即突变自检的抓点。双方随后干净
-    提交、无 40P01。"""
+    finish_lease 在完成第一项（a）后泊住；#1449 的集中预取允许 A 此刻已持
+    K1、K2。B = finish_many([c, d])。纯键序下 B 的第一项是 d（K1）→ 原地
+    等待且不持 K2；ws 分桶序（旧代码）下 B 的第一项是 c（W1 桶在前）→ 先拿
+    K2 再等 K1。键级断言是「granted K2 holder 若存在则全部属于 A」——既允许
+    #1449 的合法预取，也保留「等待中的 B 绝不持 K2」这一突变抓点。双方随后
+    干净提交、无 40P01。"""
     import server.app.executors._lease_finish_batch as batch_module
 
     job_a, job_b, job_c, job_d = _cross_ws_alias_quadruple(job_db)
@@ -841,12 +842,14 @@ def test_finish_many_cross_ws_alias_quadruple_no_ab_ba(job_db, monkeypatch) -> N
     release_a = threading.Event()
     real_finish_lease = batch_module.finish_lease
     calls = {"n": 0}
+    a_backend_pids: list[int] = []
 
     def _blocking_finish_lease(conn, lease_id, result, data_dir=None):  # noqa: ANN001
         calls["n"] += 1
         verdict = real_finish_lease(conn, lease_id, result, data_dir)
         if calls["n"] == 1:
-            # A 已完成第一项（持 K1），泊住——第二项（K2）尚未取锁。
+            a_backend_pids.append(int(conn._raw.info.backend_pid))
+            # A 已完成第一项并泊住；#1449 允许它已集中预持 K1、K2。
             first_item_done.set()
             assert release_a.wait(timeout=15)
         return verdict
@@ -868,9 +871,11 @@ def test_finish_many_cross_ws_alias_quadruple_no_ab_ba(job_db, monkeypatch) -> N
             )
         )
         _await_job_mutation_waiter(job_d)  # B 卡在 K1（d 的锁）上
-        # 关键断言：等待中的 B 不得持有 K2——ws 分桶序（旧代码）下 B 先拿了
-        # c 的锁（K2），此处必红。
-        assert _advisory_holders_for_job(job_b, granted=True) == []
+        # 关键断言：A 可以合法预持 K2，但等待中的 B 绝不持有 K2。pre-#1449
+        # 的空 holder 集同样合法；ws 分桶序让 B 先拿 K2 时此处必红。
+        assert a_backend_pids
+        k2_holders = _advisory_holders_for_job(job_b, granted=True)
+        assert all(pid == a_backend_pids[0] for pid in k2_holders)
         release_a.set()
         _join(thread_b)
         assert outcome_b.get("error") is None, outcome_b.get("error")
