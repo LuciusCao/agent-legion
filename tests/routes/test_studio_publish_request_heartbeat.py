@@ -56,7 +56,7 @@ def test_heartbeated_confirming_row_survives_past_stale_threshold(
     heartbeat loop bumps claimed_at every interval, so the poll's stale
     predicate (claimed_at < now - 300s) never matches a live claim — the row
     resolves confirmed and the receipt is honest."""
-    from server.app.services import studio_publish_request_support as support
+    from server.app.services import studio_publish_request_heartbeat as support
 
     # Shrink the heartbeat interval so the renewal actually fires inside a
     # test: the interval constant is the loop's only clock; the production
@@ -137,7 +137,7 @@ def test_stale_confirming_row_without_heartbeat_is_still_swept(client, job_db, m
     Deterministic by construction: the production 60s interval is NOT
     shrunk here, so no heartbeat can land within the test's lifetime — the
     dead owner is exactly the no-renewal case."""
-    from server.app.services.studio_publish_request_support import (
+    from server.app.services.studio_publish_request_heartbeat import (
         CONFIRMING_STALE_SECONDS,
     )
 
@@ -228,7 +228,7 @@ def test_heartbeat_thread_start_failure_rolls_back_to_pending(client, job_db, mo
     gets) and the caller sees the 500."""
     import threading
 
-    from server.app.services import studio_publish_request_support as support
+    from server.app.services import studio_publish_request_heartbeat as support
 
     real_thread = threading.Thread
 

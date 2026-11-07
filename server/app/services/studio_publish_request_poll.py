@@ -24,12 +24,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from server.app.services.studio_publish_request_support import (
+from server.app.services.studio_publish_request_heartbeat import (
     CONFIRMING_STALE_SECONDS,
-    is_past_expiry,
     is_stale_claim,
-    iso_payload,
 )
+from server.app.services.studio_publish_request_support import is_past_expiry, iso_payload
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries

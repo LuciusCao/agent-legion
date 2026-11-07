@@ -15,10 +15,10 @@ Two actors, one handshake:
   fails the same gates and raises — the request returns to pending so the
   human can fix the draft and confirm again, or cancel.
 
-Shared helpers (wire payload, expiry comparison, the draft-version token,
-the #464 confirm heartbeat) live in studio_publish_request_support.py;
+Shared wire and draft-binding helpers live in studio_publish_request_support.py;
+read-side advisories and confirm-claim liveness have focused sibling modules;
 the poll-side read (pending / live-confirming surfacing, the stale-claim
-sweeps) in studio_publish_request_poll.py (#429 四轮 split, file budget).
+sweeps) is in studio_publish_request_poll.py.
 """
 
 from __future__ import annotations
@@ -31,10 +31,12 @@ from server.app.services.job_errors import (
     NotFoundError,
 )
 from server.app.services.studio_agent_tools import studio_agent_created_by
-from server.app.services.studio_publish_request_poll import poll_pending_request
-from server.app.services.studio_publish_request_support import (
-    _confirming_claim_heartbeat as confirming_claim_heartbeat,  # #464 心跳契约
+from server.app.services.studio_publish_request_advisories import (
+    draft_warnings,
+    with_current_draft_warnings,
 )
+from server.app.services.studio_publish_request_heartbeat import confirming_claim_heartbeat
+from server.app.services.studio_publish_request_poll import poll_pending_request
 from server.app.services.studio_publish_request_support import (
     active_revision_id,
     draft_yaml_hash,
@@ -50,8 +52,6 @@ from server.app.services.workflow_draft_publish import (
     publish_workflow_draft,
     validate_workflow_draft_for_publish,
 )
-from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
-from server.app.workflows.skill_repo_gate import skill_repo_publish_warnings
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -114,7 +114,7 @@ class StudioPublishRequestService:
         # computed read-side (never persisted), same list the human review
         # poll computes for the same draft.
         return with_draft_warnings(
-            iso_payload(request), self._draft_warnings(workspace_id, draft_yaml)
+            iso_payload(request), draft_warnings(self._job_db, workspace_id, draft_yaml)
         )
 
     def get_request_status(self, request_id: str, user: dict[str, Any]) -> dict[str, Any]:
@@ -124,28 +124,9 @@ class StudioPublishRequestService:
         request = self._job_db.get_publish_request(request_id)
         if request is None or not may_read_request(self._job_db, request, user):
             raise NotFoundError("Publish request not found")
-        draft = self._job_db.get_workspace_workflow_draft(request["workspace_id"])
-        warnings: list[str] = []
-        if draft is not None:
-            warnings = self._draft_warnings(request["workspace_id"], str(draft["definition_yaml"]))
-        return with_draft_warnings(iso_payload(request), warnings)
-
-    def _draft_warnings(self, workspace_id: str, draft_yaml: str) -> list[str]:
-        """#542 read-side advisory: agent-node skills without a machine
-        contract. Never blocks anything — a draft that fails to parse here
-        has no agent nodes to warn about (and could not have been requested
-        in the first place)."""
-        try:
-            definition = workflow_definition_from_yaml_string(draft_yaml)
-        except Exception:
-            # #204 broad-except audit: display-only advisory enrichment on
-            # a best-effort basis — a draft this malformed would have been
-            # rejected by request_publish's full validation, so the only
-            # way here is a concurrent edit racing the read. No warnings
-            # (an empty list) is the honest degradation; the error channel
-            # stays with the publish validation itself.
-            return []
-        return skill_repo_publish_warnings(definition, workspace_id, self._job_db)
+        return with_current_draft_warnings(
+            self._job_db, request["workspace_id"], iso_payload(request)
+        )
 
     # -- human side (Studio endpoints) ------------------------------------
 
@@ -162,13 +143,7 @@ class StudioPublishRequestService:
         request = poll_pending_request(self._job_db, workspace_id)
         if request is None:
             return None
-        draft = self._job_db.get_workspace_workflow_draft(workspace_id)
-        warnings = (
-            self._draft_warnings(workspace_id, str(draft["definition_yaml"]))
-            if draft is not None
-            else []
-        )
-        return with_draft_warnings(request, warnings)
+        return with_current_draft_warnings(self._job_db, workspace_id, request)
 
     def confirm(self, workspace_id: str, request_id: str) -> dict[str, Any]:
         """Human confirm: publish the draft through the manual-publish gates.

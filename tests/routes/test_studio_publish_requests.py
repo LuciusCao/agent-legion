@@ -547,7 +547,7 @@ nodes:
         ]
 
     monkeypatch.setattr(
-        "server.app.services.studio_publish_requests.skill_repo_publish_warnings",
+        "server.app.services.studio_publish_request_advisories.skill_repo_publish_warnings",
         _fake_warnings,
     )
     # The errors pass keeps running against the (absent) repo; stub it empty
