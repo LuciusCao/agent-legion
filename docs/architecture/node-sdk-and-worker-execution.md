@@ -152,6 +152,12 @@ SDK 版本，SDK 承诺向后兼容（只加不减，破坏性变更走 `NodeCon
 - 节点运行时没有任何直达 DB 的能力；auth 上报标记是纯文件事实，父进程重新校验 connection
   key 来源后才执行失效——节点本就知道自己用的 connection key，失效自己的缓存 token 不产生
   新权限。
+- Worker 的压缩事件与应急转储共用 `SecretRedactor.redact_json`：JSON 解码后的字符串 key
+  和 value 使用同一 secret span 快照脱敏，普通 key 名、key 顺序、列表与非字符串叶保持不变。
+  同一对象内两个 key 重写后相同（包括与既有 `***` key 相撞）时不返回会静默覆盖条目的
+  dict，而是抛出不携带原始 key 的 `ValueError`；兄弟对象不受此限制。key/value 的
+  span 错误与碰撞都由消费面整行丢弃，其他事件照常保留，原始事件行不得进入归档或
+  state 证据目录（#1175）。
 
 ## 6. 配置：节点代码体积上限（#628/#786）
 

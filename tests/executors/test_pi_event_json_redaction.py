@@ -1,13 +1,13 @@
-"""#842：events.jsonl 压缩保留事件的字符串值脱敏回归族。
+"""#842/#1175：events.jsonl 压缩保留事件的字符串 key/value 脱敏回归族。
 
-Worker 上传前（压缩扫描同一趟）对保留事件的字符串值做脱敏：bash 工具输出
-（``tool_execution_end`` 的 ``result.content[].text``）回显的已注册密钥不得
-随压缩文件交付 Host、渲染进任务日志。只改字符串值（键名/数值/布尔/null
-原样），输出仍是合法 JSON；``redactor=None``（Host 侧）逐字保留、零 JSON
-改写开销；区间函数逃逸 fail-closed——该事件行整行丢弃，绝不以 raw 形态写出。
-评审 P3 补两族：命中行的重序列化无法 UTF-8 编码（JSON 转义 lone surrogate
-经 ``json.loads`` 解码为真实代理字符）同样整行丢弃——丢行优于整趟失败，整趟
-失败会把未压缩未脱敏的 events.jsonl 原样留给 result.tar.gz 外发；model_error
+Worker 上传前（压缩扫描同一趟）对保留事件的字符串 key 与值做脱敏：bash 工具输出
+（``tool_execution_end`` 的 ``result.content[].text``）或嵌套 key 回显的已注册密钥
+不得随压缩文件交付 Host、渲染进任务日志。普通键名、数值/布尔/null 与 key 顺序原样，
+输出仍是合法 JSON；``redactor=None``（Host 侧）逐字保留、零 JSON 改写开销；区间函数
+逃逸或重写后 key 碰撞均 fail-closed——该事件行整行丢弃，绝不以 raw 形态写出，也不
+静默覆盖碰撞条目。评审 P3 补两族：命中行的重序列化无法 UTF-8 编码（JSON 转义 lone
+surrogate 经 ``json.loads`` 解码为真实代理字符）同样整行丢弃——丢行优于整趟失败，
+整趟失败会把未压缩未脱敏的 events.jsonl 原样留给 result.tar.gz 外发；model_error
 归因串的脱敏逃逸降级为固定占位、不炸穿扫描。
 
 #1165 深化——文件终态（见 shared/pi_events.py docstring 的状态机 A–F）
@@ -152,9 +152,8 @@ def test_message_end_content_and_toolcall_arguments_redacted(tmp_path):
     assert kept[0]["message"]["stopReason"] == "stop"
 
 
-def test_non_string_leaves_and_keys_untouched(tmp_path):
-    """只改字符串值：数值/布尔/null/嵌套列表原样，键名（含密钥名与密钥值形态
-    的键）不动——结构保真，输出仍是合法 JSON。"""
+def test_non_string_leaves_and_key_order_preserved_while_secret_keys_redacted(tmp_path):
+    """数值/布尔/null 与普通键名原样，插入顺序不变；密钥值形态的键和值都脱敏。"""
     secret = "zz-leaf-token-" + "l" * 50
     events = [
         {
@@ -176,7 +175,133 @@ def test_non_string_leaves_and_keys_untouched(tmp_path):
     assert tool["timing"] == {"totalMs": 12.5, "firstByteMs": 3, "reapMs": None}
     assert tool["mixed"] == [1, 2.5, True, None, "keep", REDACTED]
     assert tool["LLM_GATEWAY_TOKEN"] == "not-a-secret-value"
-    assert tool[secret] == 1  # 密钥值形态的键：只脱值不脱键（文档化边界）
+    assert tool[REDACTED] == 1
+    assert secret not in tool
+    assert list(tool) == [
+        "type",
+        "toolCallId",
+        "toolName",
+        "result",
+        "isError",
+        "output_bytes",
+        "timing",
+        "mixed",
+        "LLM_GATEWAY_TOKEN",
+        REDACTED,
+    ]
+
+
+def test_nested_and_escaped_secret_keys_redacted_with_values(tmp_path):
+    """嵌套 key 中的引号、反斜杠、换行与非 ASCII 字符按解码后的文本命中；
+    原始 JSONL 的转义形态与解析后的 key/value 都不得残留 canary。"""
+    secret = 'zz-json-key-"\\-\n-汉-' + "k" * 40
+    event = {
+        "type": "message_end",
+        "message": {
+            "payload": {
+                secret: f"value={secret}",
+                "ordinary": [1, True, None, {"nested": secret}],
+            }
+        },
+    }
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+    assert json.dumps(secret) in events_path.read_text(encoding="utf-8")
+
+    scan_and_compress_pi_events(
+        events_path, redactor=SecretRedactor(literal_spans(secret), len(secret))
+    )
+
+    raw = events_path.read_text(encoding="utf-8")
+    assert secret not in raw
+    assert json.dumps(secret) not in raw
+    payload = json.loads(raw)["message"]["payload"]
+    assert list(payload) == [REDACTED, "ordinary"]
+    assert payload[REDACTED] == f"value={REDACTED}"
+    assert payload["ordinary"] == [1, True, None, {"nested": REDACTED}]
+
+
+def test_redact_json_key_collisions_raise_without_leaking_keys():
+    """两个 secret key、secret 与既有 ***、部分命中后的 key 都可能碰撞；
+    直接调用必须抛错而非让后一个条目静默覆盖前一个，异常本身不携带原文。"""
+    first = "zz-first-key-" + "a" * 40
+    second = "zz-second-key-" + "b" * 40
+    redactor = SecretRedactor(literal_spans(first, second), max(len(first), len(second)))
+    collisions = [
+        {first: "first-entry", second: "second-entry"},
+        {first: "first-entry", REDACTED: "preexisting-placeholder"},
+        {f"prefix-{first}": "first-entry", f"prefix-{second}": "second-entry"},
+    ]
+
+    for event in collisions:
+        with pytest.raises(ValueError, match="collision") as exc_info:
+            redactor.redact_json(event)
+        message = str(exc_info.value)
+        assert first not in message
+        assert second not in message
+
+    siblings = redactor.redact_json(
+        {"left": {first: "one"}, "right": {second: "two"}, "items": [{first: "three"}]}
+    )
+    assert siblings == {
+        "left": {REDACTED: "one"},
+        "right": {REDACTED: "two"},
+        "items": [{REDACTED: "three"}],
+    }
+
+
+def test_key_collision_drops_whole_compressed_event_fail_closed(tmp_path):
+    """压缩面遇到碰撞整行丢弃，前后事件保留；不能返回只剩一个 *** 条目的 dict。"""
+    first = "zz-compressed-first-" + "c" * 40
+    second = "zz-compressed-second-" + "d" * 40
+    events = [
+        {"type": "session", "sessionId": "before"},
+        {
+            "type": "tool_execution_end",
+            "nested": {first: f"first-entry={first}", second: f"second-entry={second}"},
+        },
+        {"type": "agent_end", "reason": "after"},
+    ]
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text("".join(json.dumps(event) + "\n" for event in events), encoding="utf-8")
+
+    _, original, compressed, _ = scan_and_compress_pi_events(
+        events_path,
+        redactor=SecretRedactor(literal_spans(first, second), max(len(first), len(second))),
+    )
+
+    assert original > 0 and compressed > 0
+    raw = events_path.read_text(encoding="utf-8")
+    kept = [json.loads(line) for line in raw.splitlines()]
+    assert [event["type"] for event in kept] == ["session", "agent_end"]
+    assert first not in raw and second not in raw
+    assert "first-entry" not in raw and "second-entry" not in raw
+
+
+def test_key_span_error_drops_compressed_event_fail_closed(tmp_path):
+    """span 函数即使只在 key 上失败，也走与 value 失败相同的整行 fail-closed。"""
+    secret = "zz-key-span-error-" + "e" * 40
+
+    def exploding_on_secret(text: str):
+        if secret in text:
+            raise RuntimeError("span function escaped")
+        return []
+
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text(
+        '{"type":"session"}\n'
+        + json.dumps({"type": "tool_execution_end", "nested": {secret: "clean-value"}})
+        + '\n{"type":"agent_end"}\n',
+        encoding="utf-8",
+    )
+
+    scan_and_compress_pi_events(
+        events_path, redactor=SecretRedactor(exploding_on_secret, len(secret))
+    )
+
+    raw = events_path.read_text(encoding="utf-8")
+    assert [json.loads(line)["type"] for line in raw.splitlines()] == ["session", "agent_end"]
+    assert secret not in raw
 
 
 def test_clean_events_keep_original_bytes_with_and_without_redactor(tmp_path):

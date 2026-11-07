@@ -120,3 +120,71 @@ def test_model_error_secret_redacted_into_metadata(tmp_path: Path, monkeypatch) 
     assert report["status"] == "failed"
     assert report["error_message"] == "401 invalid key ***"
     assert secret.encode() not in archived["events.jsonl"]
+
+
+def _deliver_and_capture_events(work_root: Path) -> tuple[dict, bytes]:
+    client = QueueFakeClient()
+    archived: dict[str, bytes] = {}
+    original_report = client.report
+
+    def report_and_capture(execution_id, lease_id, archive):
+        archived["events.jsonl"] = _capture_archived_events(archive)
+        return original_report(execution_id, lease_id, archive)
+
+    client.report = report_and_capture  # type: ignore[method-assign]
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=0))
+    queue.shutdown()
+    return client.reports[0], archived["events.jsonl"]
+
+
+def test_nested_secret_key_redacted_before_archive_leaves_worker(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """真实 prepare→tar 车道：嵌套 secret key 与 value 都不得进入归档成员。"""
+    secret = "archive-nested-key-secret-1175"
+    monkeypatch.setenv("LLM_GATEWAY_TOKEN", secret)
+    work_root = tmp_path / "work"
+    _events_with_tool_output(
+        work_root,
+        [
+            {"type": "tool_execution_end", "nested": {secret: secret, "ordinary": "kept"}},
+            {"type": "agent_end"},
+        ],
+    )
+
+    report, face = _deliver_and_capture_events(work_root)
+
+    assert report["status"] == "completed"
+    assert secret.encode() not in face
+    kept = [json.loads(line) for line in face.decode("utf-8").splitlines()]
+    assert [event["type"] for event in kept] == ["tool_execution_end", "agent_end"]
+    assert kept[0]["nested"] == {"***": "***", "ordinary": "kept"}
+
+
+def test_colliding_secret_keys_fail_closed_before_archive(tmp_path: Path, monkeypatch) -> None:
+    """归档车道遇到多个 key 重写为 *** 时丢弃整个事件，不静默覆盖任一条目。"""
+    first = "archive-first-collision-secret-1175"
+    second = "archive-second-collision-secret-1175"
+    monkeypatch.setenv("LLM_GATEWAY_TOKEN", first)
+    monkeypatch.setenv("CI_KEY", second)
+    work_root = tmp_path / "work"
+    _events_with_tool_output(
+        work_root,
+        [
+            {"type": "session", "sessionId": "before"},
+            {
+                "type": "tool_execution_end",
+                "nested": {first: f"first-entry={first}", second: f"second-entry={second}"},
+            },
+            {"type": "agent_end"},
+        ],
+    )
+
+    report, face = _deliver_and_capture_events(work_root)
+
+    assert report["status"] == "completed"
+    assert first.encode() not in face and second.encode() not in face
+    assert b"first-entry" not in face and b"second-entry" not in face
+    kept = [json.loads(line) for line in face.decode("utf-8").splitlines()]
+    assert [event["type"] for event in kept] == ["session", "agent_end"]
