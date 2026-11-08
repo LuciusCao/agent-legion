@@ -139,20 +139,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1467
   ceiling: 16
 - check: architecture.file_budget
-  path: server/app/mcp_server/server.py
-  reason: 'Issue #633 merges three tool groups into the registration sequence (draft CAS pair,
-    shared-material pair, agent-definition read trio) and the inline save_agent_definition_draft
-    gains the requires_labels/ config_schema parameters. Each group''s register_* call plus
-    its guard comment is one effective line over the frozen 103 baseline; the module is the
-    single composition root and every tool group that CAN live in a sibling module already does.
-    Remove when the last inline tools (get_authoring_guide / get_studio_context / save_node_code_draft
-    / save_agent_definition_draft) move to sibling modules. Re-anchored by #926 from #456 (closed)
-    to #1016: the overage above is the shipped feature itself and the removal condition above
-    stands; #1016 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1016
-  ceiling: 104
-- check: architecture.file_budget
   path: server/app/agent_runtime/tool_catalog.py
   reason: '#518 adds the json tool''s entry to the velites static mirror — the file is the declared
     mirror of `velites tools list --json`, pinned equal by the cross-binary contract test; its
@@ -164,20 +150,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1467
   ceiling: 192
-- check: architecture.file_budget
-  path: server/app/mcp_server/agent_tools.py
-  reason: 'Issue #633 adds the create_agent_definition tool to the agent tool group: one more
-    tool function (docstring is the budget-heavy part — every tool''s contract text lives in
-    its docstring, and the create spells out the capability-derivation + 409 semantics) beside
-    the read trio. The module IS the single agent-tool registration surface; splitting one tool
-    into a sister module would fork the group''s shared client_factory wiring. Ceiling at actual
-    + 10 per the dated-exemption convention. Remove when the agent tool group gets a registration
-    split per tool or a budget re-balance frees headroom. Re-anchored by #926 from #456 (closed)
-    to #1016: the overage above is the shipped feature itself and the removal condition above
-    stands; #1016 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1016
-  ceiling: 38
 - check: architecture.file_budget
   path: worker/execution/execution_lane.py
   reason: '#647 PR #648 复审加固（codex round 2 + subagent 双审）：退休交接 re-check（_retire_if_idle，防 idle
