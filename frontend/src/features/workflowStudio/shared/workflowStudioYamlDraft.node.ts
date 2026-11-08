@@ -1,0 +1,116 @@
+import {
+  dumpWorkflowYaml,
+  parseWorkflowYaml,
+} from './workflowStudioYamlDraft.parse'
+import type { WorkflowYamlNode } from './workflowStudioYamlDraft.parse'
+
+function patchNode(
+  rawYaml: string,
+  nodeKey: string,
+  patch: (node: WorkflowYamlNode) => void
+): string {
+  const draft = parseWorkflowYaml(rawYaml)
+  const node = draft.nodes?.[nodeKey]
+  if (!node) throw new Error(`Node ${nodeKey} not found`)
+  patch(node)
+  return dumpWorkflowYaml(draft)
+}
+
+export function patchWorkflowNodeLabel(
+  rawYaml: string,
+  nodeKey: string,
+  label: string
+): string {
+  return patchNode(rawYaml, nodeKey, (node) => {
+    node.label = label
+  })
+}
+
+export function patchWorkflowNodeCapability(
+  rawYaml: string,
+  nodeKey: string,
+  capability: string
+): string {
+  return patchNode(rawYaml, nodeKey, (node) => {
+    node.capability = capability
+  })
+}
+
+export function patchWorkflowNodeInputs(
+  rawYaml: string,
+  nodeKey: string,
+  inputs: string[]
+): string {
+  return patchNode(rawYaml, nodeKey, (node) => {
+    node.inputs = inputs
+  })
+}
+
+export function patchWorkflowNodeOutputs(
+  rawYaml: string,
+  nodeKey: string,
+  outputs: string[]
+): string {
+  return patchNode(rawYaml, nodeKey, (node) => {
+    node.outputs = outputs
+  })
+}
+
+// #443/#476：节点级工具声明（仅 agent 节点）。空数组 = 回到未声明
+// （dispatch 回落 Agent 定义的 tools），与 outputs 的「空即未声明」
+// 语义一致——空数组从 YAML 里整个删键，避免 loader 收到显式空列表。
+export function patchWorkflowNodeTools(
+  rawYaml: string,
+  nodeKey: string,
+  tools: string[]
+): string {
+  return patchNode(rawYaml, nodeKey, (node) => {
+    if (tools.length === 0) {
+      delete node.tools
+      return
+    }
+    node.tools = tools
+  })
+}
+
+// M48：节点级 requires_labels（仅 agent 节点，运行通道字段）。空 mapping =
+// 未声明（任意可用 worker），与 tools 的「空即删键」语义一致。
+export function patchWorkflowNodeRequiresLabels(
+  rawYaml: string,
+  nodeKey: string,
+  labels: Record<string, string>
+): string {
+  return patchNode(rawYaml, nodeKey, (node) => {
+    if (Object.keys(labels).length === 0) {
+      delete node.requires_labels
+      return
+    }
+    node.requires_labels = labels
+  })
+}
+
+export function patchWorkflowNodeTerminalOutcome(
+  rawYaml: string,
+  nodeKey: string,
+  outcome: string
+): string {
+  return patchNode(rawYaml, nodeKey, (node) => {
+    if (!outcome.trim()) {
+      delete node.terminal
+      return
+    }
+    node.terminal = { outcome: outcome.trim() }
+  })
+}
+
+// start 节点的入口契约。与 patchNode 不同：loader 注入的合成 _start 节点可能
+// 不在 draft YAML 文本里，节点缺失时补建 start 条目而不是抛错。
+export function patchWorkflowNodeAcceptedItemTypes(
+  rawYaml: string,
+  nodeKey: string,
+  types: string[]
+): string {
+  const d = parseWorkflowYaml(rawYaml)
+  ;((d.nodes ??= {})[nodeKey] ??= { type: 'start' }).accepted_item_types = types
+  return dumpWorkflowYaml(d)
+}
