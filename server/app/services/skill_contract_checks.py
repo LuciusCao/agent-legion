@@ -5,8 +5,11 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from server.app.services.skill_edit_checks import contract_errors, contract_yaml_errors
-from server.app.skills.contract_probe import probe_contract
+from server.app.services.skill_contract import contract_yaml_errors
+from server.app.services.skill_contract_advisories import (
+    contract_tier_warnings as contract_tier_warnings,
+)
+from server.app.services.skill_edit_checks import contract_errors
 
 _CONTRACT_REQUIRED = (
     "SKILL.md",
@@ -49,16 +52,3 @@ def written_contract_errors(repo_dir: Path) -> list[dict[str, str]]:
     if not (repo_dir / "contract.yaml").is_file():
         errors.append({"path": "contract.yaml", "error": "missing contract.yaml"})
     return errors
-
-
-def contract_tier_warnings(path: Path) -> tuple[str, ...]:
-    """Return display-only contract migration nudges for the editor."""
-    tier = probe_contract(path)
-    if tier == "embedded_block":
-        return (
-            "machine contract lives in the deprecated embedded block; "
-            "migrate to a root contract.yaml",
-        )
-    if tier in ("none", "undetermined"):
-        return ("no machine contract; runtime output validation is existence-only",)
-    return ()

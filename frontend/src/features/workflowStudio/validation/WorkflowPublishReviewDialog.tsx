@@ -4,10 +4,10 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Typography,
 } from '@mui/material'
 import type { WorkflowRevisionSummary } from '../../../types'
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
+import { WorkflowPublishReviewDialogAdvisories } from './WorkflowPublishReviewDialogAdvisories'
 import { WorkflowPublishReviewDialogChanges } from './WorkflowPublishReviewDialogChanges'
 import { canConfirmPublish } from './WorkflowPublishReviewDialog.helpers'
 import { WorkflowPublishReviewDialogMeta } from './WorkflowPublishReviewDialogMeta'
@@ -71,9 +71,7 @@ export function WorkflowPublishReviewDialog({
   // 只看摘要会永久禁用确认（通道死端）。
   const confirmDisabled =
     !canConfirmPublish(summary, runtimeChangedKeys) || resolving || contentStale
-  const requestClose = () => {
-    if (!resolving) onCancel()
-  }
+  const requestClose = () => (resolving ? undefined : onCancel())
 
   return (
     <Dialog open={open} onClose={requestClose} maxWidth="sm" fullWidth>
@@ -93,22 +91,10 @@ export function WorkflowPublishReviewDialog({
           runtimeChangedKeys={runtimeChangedKeys}
           runtimeSavedKeys={runtimeSavedKeys}
         />
-        {contentStale && (
-          <Typography variant="body2" color="error" sx={{ mt: 2 }}>
-            草稿内容在你审阅期间已被更新（可能来自 Agent
-            自动保存）——请关闭后重新审阅再发布
-          </Typography>
-        )}
-        {advisories.length > 0 && (
-          <Typography
-            variant="body2"
-            color="warning.main"
-            sx={{ mt: 2, whiteSpace: 'pre-line' }}
-            data-testid="publish-advisories"
-          >
-            {advisories.join('\n')}
-          </Typography>
-        )}
+        <WorkflowPublishReviewDialogAdvisories
+          advisories={advisories}
+          contentStale={contentStale}
+        />
       </DialogContent>
       <DialogActions>
         <Button onClick={requestClose} variant="outlined" disabled={resolving}>
