@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
+from server.app.jobs.queries.artifact_key_gc import (
+    load_all_object_storage_keys,
+    load_existing_object_storage_keys,
+)
 from server.app.jobs.queries.artifact_reconcile import ArtifactReconcileQueriesMixin
 
 
@@ -50,10 +54,7 @@ class JobArtifactKeyQueriesMixin(ArtifactReconcileQueriesMixin):
         误判为孤儿删掉。运维 CLI 专用，运行时路径不得使用。
         """
         with self._connect_read() as conn:
-            rows = conn.execute(
-                "select storage_key from job_artifacts union select storage_key from materials"
-            )
-            return {str(row["storage_key"]) for row in rows}
+            return load_all_object_storage_keys(conn)
 
     def existing_object_storage_keys(self, storage_keys: list[str]) -> set[str]:
         """Return the subset of ``storage_keys`` currently present in
@@ -69,10 +70,4 @@ class JobArtifactKeyQueriesMixin(ArtifactReconcileQueriesMixin):
         if not storage_keys:
             return set()
         with self._connect_read() as conn:
-            rows = conn.execute(
-                "select storage_key from job_artifacts where storage_key = ANY(%s)"
-                " union"
-                " select storage_key from materials where storage_key = ANY(%s)",
-                (storage_keys, storage_keys),
-            )
-            return {str(row["storage_key"]) for row in rows}
+            return load_existing_object_storage_keys(conn, storage_keys)

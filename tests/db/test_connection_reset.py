@@ -398,3 +398,28 @@ def test_origin_walk_is_hard_capped() -> None:
     # A shallow plumbing-only stack stays under the cap and resolves to the
     # plain unknown marker.
     assert pool_reset._checkout_origin(make_plumbing_stack(3)) == "unknown"
+
+
+@pytest.mark.no_db
+def test_close_returns_checkout_even_when_settle_fails(monkeypatch) -> None:
+    import server.app.db.checkout as checkout
+    from server.app.db.connection import DatabaseConnection
+
+    events: list[str] = []
+
+    class Pool:
+        def putconn(self, raw) -> None:
+            assert raw is raw_connection
+            events.append("return")
+
+    def fail_settle(raw) -> None:
+        assert raw is raw_connection
+        events.append("settle")
+        raise RuntimeError("broken connection")
+
+    raw_connection = object()
+    monkeypatch.setattr(checkout, "settle_return", fail_settle)
+    conn = DatabaseConnection(raw_connection, Pool(), "postgresql://test")
+    conn.close()
+    conn.close()
+    assert events == ["settle", "return"]

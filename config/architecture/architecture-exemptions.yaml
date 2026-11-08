@@ -37,30 +37,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1030
   ceiling: 208
 - check: architecture.file_budget
-  path: server/app/db/migrations/run_job_status_counts.py
-  reason: 'Issue #358''s review round (P2 on #374) adds the dead-row recycle trigger (runs delete
-    purges the counter rows): the counter table is deliberately FK-free because jobs.run_id
-    is unconstrained text, so the recycle cannot ride a cascade like the v36 workspace twin.
-    Both triggers and the backfill are one migration''s cohesive DDL; splitting the file would
-    separate the sync function from its recycle pair. Re-anchored by #926 from #456 (closed)
-    to #1011: the overage above is the shipped feature itself and the removal condition above
-    stands; #1011 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1011
-  ceiling: 71
-- check: architecture.file_budget
-  path: server/app/db/migrations/__init__.py
-  reason: 'The #358/#359 merge round registers two new migration functions (ops_runtime_profile_samples,
-    run_job_status_counts); ruff''s isort normalizes each single-name import with a noqa marker
-    to the parenthesized form, so the file grew by two lines against its baseline. The file
-    is a pure re-export index whose growth model is one entry per migration module; revisit
-    if the migrations package gains a programmatic registry. Re-anchored by #926 from #456 (closed)
-    to #1011: the overage above is the shipped feature itself and the removal condition above
-    stands; #1011 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1011
-  ceiling: 67
-- check: architecture.file_budget
   path: server/app/db/migrations/runs_sql.py
   reason: The issue-211 M2 batch adds _INSERT_RUNS_SQL_V70 — the column-less twin of the job_batches cutover
     (without it a pre-v53 database upgraded to v70+ silently drops every historical batch row). Re-anchored #211 → #1030 at the #211 M3 close (frozen migration body; see #1030).
@@ -100,19 +76,6 @@ exemptions:
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/998
   ceiling: 50
 - check: architecture.file_budget
-  path: server/app/jobs/queries/job_artifact_keys.py
-  reason: 'Re-filed (systematic review round, PR #344): the GC storage-key query surface for
-    job_artifacts and materials lives in one mixin (#340) — the systematic review found that
-    material keys of a workspace literally named jobs / jobs-staging land inside the GC prefixes,
-    so both the scan-time loader and the delete-time revalidation lookup had to union materials.storage_key;
-    splitting the two tables across mixins would separate one reference set into two call sites
-    that must stay in lockstep. Re-anchored by #926 from #340 (closed) to #1011: the overage
-    above is the shipped feature itself and the removal condition above stands; #1011 tracks
-    at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1011
-  ceiling: 24
-- check: architecture.file_budget
   path: server/app/events/buffer.py
   reason: Issue 353 swaps the per-event job_event_seq bump for segmented allocation (one UPDATE grants
     SEGMENT_SIZE revisions, spent from an in-process counter). The growth is a module-level constant with
@@ -123,17 +86,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/349
   ceiling: 112
-- check: architecture.file_budget
-  path: server/app/db/connection.py
-  reason: '#438 makes __exit__ leak-proof (close in finally so a failed commit/rollback cannot
-    strand the checkout) and stamps the checkout origin for the pool return-path telemetry.
-    The 8 effective lines are the two documented guards; the attribution logic itself lives
-    in pool_reset.py. Stays until the transaction helpers retire this facade. Re-anchored by
-    #926 from #456 (closed) to #1011: the overage above is the shipped feature itself and the
-    removal condition above stands; #1011 tracks at most five entries (#917 A-2).'
-  owner: database
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1011
-  ceiling: 75
 - check: architecture.file_budget
   path: server/app/workflows/loader.py
   reason: 'Issue #458 round-trip fix: the asdict snapshot reloader must translate the serialized
