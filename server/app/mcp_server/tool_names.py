@@ -1,29 +1,27 @@
 """Authoritative manifest of studio-agent MCP tool names (issue #678).
 
-The tool surface is registered in ``server.create_mcp_server`` — five
-inline tools plus eight ``register_*_tools`` sibling modules — and Studio
-chat consumes the names to recognize agent-legion tool calls (permission
-auto-approve + the mcp_status smoke signal, ``studio_chat/prompts.py``).
-A hand-copied list in the consumer drifted 12 tools behind the
-registrations (#678) and silently degraded those tools to
-human-confirmed permission. This module is the single authority instead:
-adding, renaming, or removing a tool means editing this set in the same
-change — ``tests/mcp_server/test_tool_names.py`` pins the equality
-(FastMCP-registered names == this constant == the prompts-side
-reference), so drift fails CI instead of shipping. Comments are free
-under the effective-line budget, so the per-group annotations below stay
-generous on purpose.
+The tool surface is registered in ``server.create_mcp_server`` through
+cohesive sibling modules, and Studio chat consumes the names to recognize
+agent-legion tool calls (permission auto-approve + the mcp_status smoke
+signal, ``studio_chat/prompts.py``). A hand-copied list in the consumer
+drifted 12 tools behind the registrations (#678) and silently degraded
+those tools to human-confirmed permission. This module is the single
+authority instead: adding, renaming, or removing a tool means editing this
+set in the same change — ``tests/mcp_server/test_tool_names.py`` pins the
+equality (FastMCP-registered names == this constant == the prompts-side
+reference), so drift fails CI instead of shipping. Comments are free under
+the effective-line budget, so the per-group annotations below stay generous
+on purpose.
 """
 
 from __future__ import annotations
 
-# Grouped by registering site, in create_mcp_server's registration order:
-# the server.py inline tools first, then each register_* sibling module.
+# Grouped by registering module, in create_mcp_server's registration order.
 AGENT_LEGION_MCP_TOOL_NAMES: frozenset[str] = frozenset(
     {
-        # server.py inline: the local authoring playbook, the session-bound
-        # studio context, the code-node draft pair, and the agent-definition
-        # draft save.
+        # studio_tools.py / node_code_tools.py / agent_definition_tools.py:
+        # the local authoring playbook, session-bound studio context,
+        # code-node draft pair, and agent-definition draft save.
         "get_authoring_guide",
         "get_studio_context",
         "save_node_code_draft",
