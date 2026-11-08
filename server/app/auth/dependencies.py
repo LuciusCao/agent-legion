@@ -31,6 +31,7 @@ from server.app.auth.workspace_api_tokens import WORKSPACE_API_SCOPE
 SESSION_COOKIE = "agent_legion_session"
 CSRF_HEADER = "x-agent-legion-request"
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+_MEMBER_ROLE_RANK = {"viewer": 1, "editor": 2}
 
 
 def extract_session_token(request: Request) -> tuple[str | None, str | None]:
@@ -41,9 +42,7 @@ def extract_session_token(request: Request) -> tuple[str | None, str | None]:
         if token:
             return token, "bearer"
     cookie_token = request.cookies.get(SESSION_COOKIE)
-    if cookie_token:
-        return cookie_token, "cookie"
-    return None, None
+    return (cookie_token, "cookie") if cookie_token else (None, None)
 
 
 def get_current_user(request: Request) -> dict[str, Any]:
@@ -60,16 +59,12 @@ def get_current_user(request: Request) -> dict[str, Any]:
     token, channel = extract_session_token(request)
     if token is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    user: dict[str, Any] | None = request.app.state.auth_service.authenticate(token)
+    auth = request.app.state.auth_service
+    user: dict[str, Any] | None = auth.authenticate(token)
     if user is None and channel == "bearer":
-        # Scoped tokens (studio agent runs) authenticate via Bearer only.
-        user = request.app.state.auth_service.authenticate_scoped(token)
-    if user is None and channel == "bearer":
-        # Workspace API intake tokens (#626): same Bearer-only, CSRF-exempt
-        # rule as scoped tokens. Only the {token_id}.{secret} shape reaches
-        # the store — a session/scoped token can never collide with it. The
-        # #738 per-token request bucket is charged there (429 + Retry-After).
-        user = resolve_api_token_identity(request, token)
+        # Scoped tokens and workspace API tokens are Bearer-only. The latter
+        # also charges its per-token request bucket during resolution (#738).
+        user = auth.authenticate_scoped(token) or resolve_api_token_identity(request, token)
     if user is None:
         raise HTTPException(status_code=401, detail="Session expired or revoked")
     if (
@@ -82,17 +77,11 @@ def get_current_user(request: Request) -> dict[str, Any]:
     return user
 
 
-def require_user(user: Annotated[dict[str, Any], Depends(get_current_user)]) -> dict[str, Any]:
-    # #626 attack review (HIGH-1): the workspace API machine identity has NO
-    # user id, so any require_user handler reading user['id'] would 500 — and
-    # the scopeless require_user mounts (GET /api/agent-workers, /api/connections
-    # /keys, /api/agents) leaked instance-wide operational metadata to it.
-    # require_user means "a real user identity": refuse the api scope here
-    # (403, the scoped-identity refusal shape of require_admin) so the refusal
-    # also covers future scopeless mounts. The studio-agent scope is NOT
-    # refused: it carries the initiating user's row and the draft/validate
-    # endpoints stay reachable for it by design (STUDIO-AGENT-001) — its
-    # permission boundary is the effecting guards (reject_studio_agent_scope).
+CurrentUser = Annotated[dict[str, Any], Depends(get_current_user)]
+
+
+def require_user(user: CurrentUser) -> dict[str, Any]:
+    """Require a real user identity, not the workspace API machine identity."""
     if user.get("actor_scope") == WORKSPACE_API_SCOPE:
         raise HTTPException(
             status_code=403, detail="Workspace API tokens cannot use user endpoints"
@@ -100,51 +89,50 @@ def require_user(user: Annotated[dict[str, Any], Depends(get_current_user)]) -> 
     return user
 
 
-def require_admin(user: Annotated[dict[str, Any], Depends(get_current_user)]) -> dict[str, Any]:
-    # A scoped token inherits the initiating user's role; without this check a
-    # token minted for an admin would pass require_admin and reach every admin
-    # endpoint (STUDIO-AGENT-001: scoped identities never take effect).
+def _refuse_scoped(user: dict[str, Any], action: str) -> None:
     scope = user.get("actor_scope")
     if scope:
-        detail = (
-            "Studio agent scope cannot use admin endpoints"
-            if scope == STUDIO_AGENT_SCOPE
-            else "Scoped tokens cannot use admin endpoints"
-        )
-        raise HTTPException(status_code=403, detail=detail)
+        subject = "Studio agent scope" if scope == STUDIO_AGENT_SCOPE else "Scoped tokens"
+        raise HTTPException(status_code=403, detail=f"{subject} cannot {action}")
+
+
+def require_admin(user: CurrentUser) -> dict[str, Any]:
+    """Require an unscoped admin identity; scoped tokens inherit the minter's role."""
+    _refuse_scoped(user, "use admin endpoints")
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin role required")
     return user
 
 
-def reject_studio_agent_scope(
-    user: Annotated[dict[str, Any], Depends(get_current_user)],
-) -> dict[str, Any]:
-    """Effecting-endpoint guard: scoped tokens get 403 (STUDIO-AGENT-001).
-
-    Aligned with require_admin: any non-empty actor_scope is refused, not just
-    the studio-agent scope, so a future scope type cannot silently inherit
-    effecting rights.
-    """
-    scope = user.get("actor_scope")
-    if scope:
-        detail = (
-            "Studio agent scope cannot take effect"
-            if scope == STUDIO_AGENT_SCOPE
-            else "Scoped tokens cannot take effect"
-        )
-        raise HTTPException(status_code=403, detail=detail)
+def reject_studio_agent_scope(user: CurrentUser) -> dict[str, Any]:
+    """Effecting-endpoint guard: every scoped identity gets 403."""
+    _refuse_scoped(user, "take effect")
     return user
 
 
-def require_studio_agent_scope(
-    user: Annotated[dict[str, Any], Depends(get_current_user)],
-) -> dict[str, Any]:
-    """Tool-surface guard: only studio-agent scoped tokens may call the
-    ``/api/studio-agent/tools/*`` endpoints; full user sessions get 403
-    (STUDIO-AGENT-001)."""
+def require_studio_agent_scope(user: CurrentUser) -> dict[str, Any]:
+    """Only studio-agent scoped tokens may call the studio tool surface."""
     if user.get("actor_scope") != STUDIO_AGENT_SCOPE:
         raise HTTPException(status_code=403, detail="Studio agent scoped token required")
+    return user
+
+
+def require_workspace_role(
+    request: Request,
+    user: dict[str, Any],
+    workspace_id: str | None,
+    not_found: str = "Workspace not found",
+    membership_only: bool = False,
+) -> dict[str, Any]:
+    """Apply the shared admin/membership/role arm after route-specific scope checks."""
+    if user.get("role") == "admin" or not workspace_id:
+        return user
+    role = request.app.state.job_db.get_workspace_role(str(workspace_id), str(user["id"]))
+    if role is None:
+        raise HTTPException(status_code=404, detail=not_found)
+    minimum = "viewer" if request.method in _SAFE_METHODS else "editor"
+    if not membership_only and _MEMBER_ROLE_RANK.get(role, 0) < _MEMBER_ROLE_RANK[minimum]:
+        raise HTTPException(status_code=403, detail="Insufficient workspace role")
     return user
 
 
@@ -153,36 +141,14 @@ def require_studio_agent_workspace(
     request: Request,
     user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
 ) -> dict[str, Any]:
-    """Refuse a workspace-bound run token operating on another workspace.
-
-    #710 follow-up (product decision: skills and the whole studio-agent tool
-    surface are workspace-isolated): an UNBOUND self-service token (origin
-    'user', no workspace binding) now falls back to a membership check — the
-    minter must be a member of the addressed workspace (viewer suffices for
-    reads; the write routes gate mutating verbs themselves via the tool
-    contracts). Previously bound=None passed through with no workspace
-    relation at all, which on the skill tools meant a leaked unbound token
-    held read AND commit+tag rights over every workspace's skill repos."""
+    """Bind run tokens to their workspace; unbound tokens require membership."""
     refuse_foreign_binding(user, workspace_id)
-    if not user.get("scoped_workspace_id") and user.get("role") != "admin":
-        role = request.app.state.job_db.get_workspace_role(str(workspace_id), str(user["id"]))
-        if role is None:
-            # 404, matching the workspace guard's enumeration-safe refusal.
-            raise HTTPException(status_code=404, detail="Workspace not found")
+    if not user.get("scoped_workspace_id"):
+        require_workspace_role(request, user, workspace_id, membership_only=True)
     return user
 
 
-def enforce_scoped_workspace_binding(
-    workspace_id: str,
-    user: Annotated[dict[str, Any], Depends(get_current_user)],
-) -> dict[str, Any]:
-    """Read-side guard for mixed audiences (#158): full sessions pass through,
-    a workspace-bound scoped token may only read its own workspace.
-
-    The effecting surface refuses scoped tokens outright
-    (``reject_studio_agent_scope``); chat reads stay reachable for the agent's
-    own session, but without this check a leaked run token could read every
-    workspace the initiating user can see (messages and the SSE stream).
-    """
+def enforce_scoped_workspace_binding(workspace_id: str, user: CurrentUser) -> dict[str, Any]:
+    """Read-side guard: a bound scoped token may only read its own workspace."""
     refuse_foreign_binding(user, workspace_id)
     return user
