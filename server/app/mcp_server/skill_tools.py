@@ -11,28 +11,14 @@ that equally never touches the lock (``create_skill``, #633).
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import quote
 
 from mcp.server.fastmcp import FastMCP
 
 from server.app.mcp_server import local_files
-from server.app.mcp_server.config import McpServerConfig
-from server.app.mcp_server.tool_client import ToolClient
-
-ClientFactory = Callable[[], Awaitable[tuple[McpServerConfig, ToolClient]]]
-
-
-def _skill_path(workspace_id: str, skill_key: str) -> str:
-    """Workspace-scoped URL for a skill (keys are <workspace>/<name>; the
-    path scope must agree with the key's own workspace segment — #710)."""
-    return f"/workspaces/{quote(workspace_id, safe='')}/skills/{_skill_key_path(skill_key)}"
-
-
-def _skill_key_path(skill_key: str) -> str:
-    """URL-encode each skill-key segment (keys are <group>/<name>)."""
-    return "/".join(quote(segment, safe="") for segment in skill_key.split("/"))
+from server.app.mcp_server.skill_creation import register_create_skill_tool
+from server.app.mcp_server.skill_tool_common import ClientFactory, _skill_path
 
 
 def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
@@ -101,25 +87,4 @@ def register_skill_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         body: dict[str, Any] = {"files": files, "new_tag": new_tag, "message": message}
         return await client.call("POST", f"{_skill_path(workspace_id, skill_key)}/versions", body)
 
-    @mcp.tool(structured_output=False)
-    async def create_skill(
-        workspace_id: str,
-        skill_name: str,
-        files: list[dict[str, str]],
-        new_tag: str,
-        message: str,
-    ) -> str:
-        """Create a BRAND-NEW skill repo under the workspace's skill
-        directory. skill_name: one segment (^[a-z0-9][a-z0-9_-]{0,63}$);
-        files MUST carry the four-file contract set (SKILL.md +
-        references/output-contract.md + scripts/validate_output.py + root
-        contract.yaml) or 422. All-or-nothing; initial commit tagged new_tag;
-        lock untouched. Iterate with validate_skill / save_skill_version."""
-        _, client = await client_factory()
-        body: dict[str, Any] = {
-            "skill_name": skill_name,
-            "files": files,
-            "new_tag": new_tag,
-            "message": message,
-        }
-        return await client.call("POST", f"/workspaces/{workspace_id}/skills", body)
+    register_create_skill_tool(mcp, client_factory)
