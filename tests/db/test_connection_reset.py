@@ -423,3 +423,46 @@ def test_close_returns_checkout_even_when_settle_fails(monkeypatch) -> None:
     conn.close()
     conn.close()
     assert events == ["settle", "return"]
+
+
+@pytest.mark.no_db
+def test_checkout_origin_helper_preserves_walk_budget() -> None:
+    import sys
+
+    import server.app.db.checkout as checkout
+
+    class RawConnection:
+        agent_legion_origin: str
+
+    namespace: dict[str, Any] = {
+        "__name__": "server.app.db.plumbing",
+        "sys": sys,
+        "record_checkout_origin": pool_reset.record_checkout_origin,
+        "stamp_checkout_origin": checkout.stamp_checkout_origin,
+    }
+    exec(
+        """
+def main_checkout(raw):
+    record_checkout_origin(raw, sys._getframe())
+
+def extracted_checkout(raw):
+    stamp_checkout_origin(raw)
+
+def plumbing(depth, checkout, raw):
+    if depth == 1:
+        return checkout(raw)
+    return plumbing(depth - 1, checkout, raw)
+
+def dispatch(checkout, raw):
+    return plumbing(27, checkout, raw)
+""",
+        namespace,
+    )
+
+    main_raw = RawConnection()
+    extracted_raw = RawConnection()
+    namespace["dispatch"](namespace["main_checkout"], main_raw)
+    namespace["dispatch"](namespace["extracted_checkout"], extracted_raw)
+
+    assert "test_checkout_origin_helper_preserves_walk_budget" in main_raw.agent_legion_origin
+    assert extracted_raw.agent_legion_origin == main_raw.agent_legion_origin

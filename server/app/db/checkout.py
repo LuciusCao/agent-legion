@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 def stamp_checkout_origin(raw: Connection[dict[str, Any]]) -> None:
     # Bounded frame walk, no formatting until a leak actually hits the reset hook.
-    record_checkout_origin(raw, sys._getframe())
+    record_checkout_origin(raw, sys._getframe(1))
 
 
 def return_checkout(
