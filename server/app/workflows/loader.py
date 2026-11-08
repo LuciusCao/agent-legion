@@ -5,10 +5,7 @@ from typing import Any
 
 import yaml
 
-from server.app.workflows.approval_node import (
-    strip_snapshot_placeholders,
-    validate_approval_edges,
-)
+from server.app.workflows.approval_node import validate_approval_edges
 from server.app.workflows.node_config_schema import load_node_config_schema
 from server.app.workflows.schema import (
     WorkflowCondition,
@@ -20,7 +17,6 @@ from server.app.workflows.schema import (
     WorkflowShardSpec,
     WorkflowTerminal,
 )
-from server.app.workflows.snapshot_shape import ensure_mapping, snapshot_field
 from server.app.workflows.start_node import ensure_start_node, load_start_fields
 from server.app.workflows.validator import _validate_acyclic
 from server.app.workflows.workflow_execution_defaults import apply_workflow_execution
@@ -31,6 +27,7 @@ from server.app.workflows.workflow_node_profile import (
     validate_node_profile_fields,
 )
 from server.app.workflows.workflow_node_skill import load_node_skill
+from server.app.workflows.workflow_snapshot import snapshot_to_mapping
 
 
 def _string_list(value: Any, field_name: str, node_key: str) -> list[str]:
@@ -304,52 +301,7 @@ def workflow_definition_from_mapping(
 def workflow_definition_from_dict(
     payload: dict[str, Any],
 ) -> WorkflowDefinition:
-    nodes_payload = snapshot_field(payload, "nodes", default={}, list_form=False)
-    edges_payload = snapshot_field(payload, "edges", default=[], list_form=True)
-    raw = {
-        "key": payload.get("key"),
-        "label": payload.get("label"),
-        "schema_version": payload.get("schema_version", 1),
-        "intake": payload.get("intake", {}),
-        "execution": payload.get("execution"),
-        "nodes": {},
-        "edges": [],
-    }
-    for node_key, node in nodes_payload.items():
-        raw_node = dict(node)
-        # Snapshots store the dataclass field name; the yaml spelling is ``type``.
-        if "node_type" in raw_node:
-            raw_node["type"] = raw_node.pop("node_type")
-        # #458: ``WorkflowReduceSpec.from_node`` serializes as ``from_node``
-        # in asdict snapshots, but the yaml spelling the loader reads is
-        # ``from`` (mirrors the node_type translation above). Existing
-        # snapshots all carry ``from_node``; a ``from`` key passes through
-        # unchanged (and wins if both ever appear).
-        raw_reduce = raw_node.get("reduce")
-        if isinstance(raw_reduce, dict) and "from_node" in raw_reduce:
-            translated = dict(raw_reduce)
-            translated.setdefault("from", translated.pop("from_node"))
-            raw_node["reduce"] = translated
-        # asdict snapshots carry every field on every node: strip the
-        # per-type placeholders a start/approval node must not declare, and
-        # the default contract copy on non-start nodes.
-        strip_snapshot_placeholders(raw_node)
-        ensure_mapping(raw_node.get("terminal"), f"node {node_key} 'terminal'")
-        raw["nodes"][node_key] = raw_node
-    for edge in edges_payload:
-        raw_edge = {
-            "from": edge.get("source") or edge.get("from"),
-            "to": edge.get("target") or edge.get("to"),
-        }
-        condition = ensure_mapping(edge.get("condition") or edge.get("when"), "edge 'condition'")
-        if condition:
-            raw_edge["when"] = {
-                "artifact": condition.get("artifact"),
-                "path": condition.get("path"),
-                "equals": condition.get("equals"),
-            }
-        raw["edges"].append(raw_edge)
-    return workflow_definition_from_mapping(raw)
+    return workflow_definition_from_mapping(snapshot_to_mapping(payload))
 
 
 def load_workflow_definition(
