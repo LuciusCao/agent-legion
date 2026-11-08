@@ -18,38 +18,25 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from server.app.auth.dependencies import (
-    require_studio_agent_scope,
-    require_studio_agent_workspace,
-)
+from server.app.auth import dependencies as auth
+from server.app.auth import skill_access
 from server.app.jobs import JobQueries
-from server.app.routes.skill_catalog_route import (
-    require_skill_key_in_workspace,
-    resolve_skill_key_owner,
-)
 from server.app.routes.skill_contracts import SkillDetailResponse
 from server.app.routes.studio_agent_skill_contracts import (
     SkillSaveVersionRequest,
     SkillSaveVersionResponse,
     SkillValidateToolResponse,
 )
-from server.app.services.job_errors import NotFoundError
 from server.app.services.skill_catalog import SkillCatalogService
 from server.app.services.skill_editing import SkillEditingService, SkillFileWrite
 from server.app.settings import Settings
 
 
 def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Settings) -> APIRouter:
-    from server.app.routes.studio_agent_shared_tools import (
-        create_studio_agent_shared_tools_router,
-    )
+    from server.app.routes.studio_agent_shared_tools import create_studio_agent_shared_tools_router
 
-    router = APIRouter(
-        dependencies=[
-            Depends(require_studio_agent_scope),
-            Depends(require_studio_agent_workspace),
-        ]
-    )
+    guards = (auth.require_studio_agent_scope, auth.require_studio_agent_workspace)
+    router = APIRouter(dependencies=[Depends(guard) for guard in guards])
     catalog = SkillCatalogService(job_db)
     editing = SkillEditingService(runs_dir=settings.skills_runs_dir)
 
@@ -61,9 +48,9 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
         workspace_id: str, skill_key: str, ref: str | None = None, for_edit: bool = False
     ) -> SkillDetailResponse:
         if for_edit:
-            _require_skill_writable_in_workspace(job_db, skill_key, workspace_id)
+            skill_access.require_skill_writable_in_workspace(job_db, skill_key, workspace_id)
         else:
-            _require_skill_in_workspace(job_db, skill_key, workspace_id)
+            skill_access.require_skill_key_in_workspace(job_db, skill_key, workspace_id)
         return SkillDetailResponse(
             **catalog.detail(
                 skill_key, ref=ref, for_edit=for_edit, runs_dir=settings.skills_runs_dir
@@ -75,7 +62,7 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
         response_model=SkillValidateToolResponse,
     )
     def validate_skill(workspace_id: str, skill_key: str) -> SkillValidateToolResponse:
-        _require_skill_in_workspace(job_db, skill_key, workspace_id)
+        skill_access.require_skill_key_in_workspace(job_db, skill_key, workspace_id)
         return SkillValidateToolResponse(**editing.validate(skill_key))
 
     @router.post(
@@ -87,7 +74,7 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
         workspace_id: str, skill_key: str, payload: SkillSaveVersionRequest
     ) -> SkillSaveVersionResponse:
         files = [SkillFileWrite(path=item.path, content=item.content) for item in payload.files]
-        _require_skill_writable_in_workspace(job_db, skill_key, workspace_id)
+        skill_access.require_skill_writable_in_workspace(job_db, skill_key, workspace_id)
         result = editing.save_version(skill_key, files, payload.new_tag, payload.message)
         assert result is not None  # None only when prepare skips (not used here)
         return SkillSaveVersionResponse(**result)
@@ -98,28 +85,3 @@ def create_studio_agent_skill_tools_router(job_db: JobQueries, settings: Setting
     # modules sit at frozen budget ceilings.
     router.include_router(create_studio_agent_shared_tools_router(job_db, settings))
     return router
-
-
-def _require_skill_in_workspace(job_db: JobQueries, skill_key: str, workspace_id: str) -> None:
-    """Read/validate-side ownership for the skill tool surface (#710, codex
-    P2 + red-team R8 on #745). Delegates to the shared resolver: a key whose
-    first segment belongs to an existing workspace is that workspace's
-    private asset (case-variant keys are refused inside the resolver — the
-    case-insensitive-filesystem bypass); group directories stay shared READ
-    surfaces."""
-    require_skill_key_in_workspace(job_db, skill_key, workspace_id)
-
-
-def _require_skill_writable_in_workspace(
-    job_db: JobQueries, skill_key: str, workspace_id: str
-) -> None:
-    """Write-side ownership (red-team R8 P1-2 on #745): a group directory is
-    consumed by every workspace that references it, so committing/tagging
-    into it is an instance-level act — scoped tokens (the only audience of
-    this surface) never qualify. Workspace-directory keys keep the read-side
-    ownership rule."""
-    owner = resolve_skill_key_owner(job_db, skill_key)
-    if owner is None:
-        raise NotFoundError("Group skills are read-only for studio agents")
-    if owner != workspace_id:
-        raise NotFoundError(f"Skill not found in workspace {workspace_id}")

@@ -856,6 +856,10 @@ keyset 上界，feeder 按 chunk 增量解析，不物化全量 id；在途执�
   workspace）。不经此模块的面：Worker token 鉴权（`routes/agent_workers.py` 的
   `authorize_worker`）与 Studio MCP mount（ASGI 级 scoped-token 检查，Mount 绕过
   路由层依赖，STUDIO-AGENT-001）。
+- `server.app.auth.workspace_access` 负责 generic/job 路由入口；两者在 API-scope
+  与绑定裁决后共用 `dependencies.require_workspace_role`，但保留各自的 403/404
+  防枚举形状。`server.app.auth.skill_access` 统一 skill key/绝对路径归属与 group
+  写保护，只补充已鉴权 workspace 的对象归属，不是独立放行通道。
 - `server.app.agent_broker.dispatch` 把就绪的 Agent 节点冻结为可 claim 单元：
   解析有效 `execution` 块 → 暂存输入 → 渲染命令 spec → 打包自包含 bundle。不变式：
   manifest 在 enqueue 冻结且只带白名单非敏感 config（CONFIG-MANIFEST-001）；
