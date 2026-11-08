@@ -423,7 +423,7 @@ fail-closed 报错，内置节点不受影响。
   agent 跑中自查、就地修复。三态：全过返回 `contract ok (N files checked)`；有违约返回
   编号违约清单（`is_error`，文案面向模型可行动）；skill 目录都没有可解析契约段时返回
   信息性错误（"nothing to validate against"），不静默成功。引擎与关卡、Host 复核共用
-  `src/contract.rs` 一份实现；
+  `src/contract/` 一份实现（source 解析与执行校验分别位于 `parser.rs` / `validation.rs`）；
 - **输出契约段（受控接口，权威定义；#542 起位置迁移到根目录）**：机器可读契约的
   权威位置是 skill 根目录的 `contract.yaml`（独立 YAML 文件，顶层 `files:` 列表，
   结构与下方示例一致）。legacy 位置——`references/output-contract.md` 中嵌入的

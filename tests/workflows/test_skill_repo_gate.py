@@ -241,3 +241,25 @@ def test_pinned_ref_with_contract_on_the_tag_does_not_warn(tmp_path: Path) -> No
         )
         == []
     )
+
+
+def test_malformed_declared_contracts_do_not_produce_missing_contract_advisories(
+    tmp_path: Path,
+) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("ws")
+    skill_base = tmp_path / "skills"
+    repo = skill_base / "group" / "name"
+    _make_skill_repo(repo)
+    definition = _definition({"key": "group/name", "ref": "latest"})
+    root = repo / "contract.yaml"
+    root.write_text("files: [", encoding="utf-8")
+
+    assert skill_repo_publish_warnings(definition, workspace["id"], queries, skill_base) == []
+
+    root.unlink()
+    (repo / "references").mkdir()
+    (repo / "references/output-contract.md").write_text(
+        "```yaml contract\nfiles: [\n", encoding="utf-8"
+    )
+    assert skill_repo_publish_warnings(definition, workspace["id"], queries, skill_base) == []
