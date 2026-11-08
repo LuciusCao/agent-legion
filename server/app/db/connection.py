@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
@@ -9,10 +8,10 @@ from psycopg import Connection
 from psycopg.pq import TransactionStatus
 from psycopg_pool import ConnectionPool
 
+from server.app.db.checkout import return_checkout, stamp_checkout_origin
 from server.app.db.cursor import Cursor
 from server.app.db.dialect import ConnectSource, postgres_sql, resolve_dsn
 from server.app.db.dialect import DatabaseDsn as DatabaseDsn  # noqa: F401 (re-export)
-from server.app.db.pool_reset import record_checkout_origin, settle_return
 from server.app.db.pools import close_database_pools as close_database_pools
 from server.app.db.pools import pool_for
 
@@ -64,27 +63,7 @@ class DatabaseConnection:
         if self._closed:
             return
         self._closed = True
-        # #438: observe BEFORE the pool's async reset — this is the only
-        # synchronous point where a dirty return can be attributed to its
-        # checkout site. #1077: the dirty transaction is also rolled back
-        # here, so it never depends on the pool worker's ReturnConnection
-        # (discarded when a pool close wins the race).
-        # #439: the return must never be blocked — if settle_return raises
-        # (broken connection, unexpected info error) the checkout would
-        # leak all over again. Its failure loses the observation/rollback
-        # only, not the connection.
-        try:
-            settle_return(self._raw)
-        except Exception:
-            # #204 broad-except audit: the return path must not gain a leak
-            # path (#439). settle_return's failures are a broken connection
-            # or an unexpected info error (psycopg rollback errors are
-            # already absorbed inside) — un-narrowable here, and any raise
-            # would skip putconn and strand the checkout all over again.
-            # Losing the observation is strictly cheaper than losing the
-            # return; the pool reset hook is the independent backstop.
-            logger.debug("settle_return failed during close (#439)", exc_info=True)
-        self._pool.putconn(self._raw)
+        return_checkout(self._raw, self._pool)
 
     def __enter__(self) -> DatabaseConnection:
         return self
@@ -130,7 +109,6 @@ def connect_database(dsn: ConnectSource) -> DatabaseConnection:
     pool = pool_for(dsn)
     raw = pool.getconn()
     # Leak telemetry for the pool reset hook (#438): remember the checkout
-    # site so a dirty return can be attributed. Bounded frame walk, no
-    # formatting until a leak actually hits the reset hook.
-    record_checkout_origin(raw, sys._getframe())
+    # site so a dirty return can be attributed.
+    stamp_checkout_origin(raw)
     return DatabaseConnection(raw, pool, dsn)
