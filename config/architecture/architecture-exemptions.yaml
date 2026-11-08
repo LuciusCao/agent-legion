@@ -1,17 +1,5 @@
 exemptions:
 - check: architecture.file_budget
-  path: server/app/services/path_hygiene.py
-  reason: 'Issue #521 adds the per-path warn dedupe (set + lock + keyed signature) and the one-time
-    rewrite orchestration (rebase rule, chunk loop, two daemon-thread kickers). The rewrite
-    rides the facade queries added in jobs/queries/path_hygiene; the service keeps the warnings/report/rewrite
-    story in one module. Shrinks back once every deployment''s stored absolute-path rows have
-    been rewritten and the rewrite pass can drop. Re-anchored by #926 from #456 (closed) to
-    #1003: the overage above is the shipped feature itself and the removal condition above stands;
-    #1003 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1003
-  ceiling: 104
-- check: architecture.file_budget
   path: worker/executor_log.py
   reason: '#510 grew this module by the events split: events_log_path anchoring, the is_structured_event
     sniff (containment-shaped after review R1 — a prefix check dropped the forensic events),
@@ -60,18 +48,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1011
   ceiling: 71
-- check: architecture.file_budget
-  path: server/app/services/run_partial_failure.py
-  reason: 'codex round-1 #2 on PR #479: the two-branch chunked-creation compensation (empty-run
-    removal vs partial-run failed-marking) moved into this module so the /runs items path and
-    the /job-batches intake share ONE implementation and cannot drift. The error type, the operator
-    message, and the compensation protocol are one concern; splitting them across modules would
-    separate the failure protocol from its error contract. Re-anchored by #926 from #456 (closed)
-    to #1003: the overage above is the shipped feature itself and the removal condition above
-    stands; #1003 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1003
-  ceiling: 57
 - check: architecture.file_budget
   path: server/app/db/migrations/__init__.py
   reason: 'The #358/#359 merge round registers two new migration functions (ops_runtime_profile_samples,
@@ -136,30 +112,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1011
   ceiling: 24
-- check: architecture.file_budget
-  path: server/app/services/ops_metrics/service.py
-  reason: 'Issue #359 extends the sampling pass to persist the runtime-profile gauge row (one
-    call plus the pool/pool-backlog gauge readers kept next to their only consumer). The sampler
-    stays one cohesive write surface; the durable split is a sampling-dispatch module if more
-    gauge families join, at which point this exemption goes stale. #490 feeds the offline detector
-    from the same last_seen read (one call, threshold restored to match the online count — review
-    P0 on #494). Re-anchored by #926 from #456 (closed) to #1003: the overage above is the shipped
-    feature itself and the removal condition above stands; #1003 tracks at most five entries
-    (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1003
-  ceiling: 189
-- check: architecture.file_budget
-  path: server/app/routes/__init__.py
-  reason: 'Issue 329 mounts the job diagnosis observation router in the route assembly (one
-    import + one secured() call, three effective lines past the baseline ceiling 137). The file
-    is the single mount point for every feature router; the durable fix is splitting the assembly
-    per domain, at which point this exemption goes stale. Re-anchored by #926 from #456 (closed)
-    to #1003: the overage above is the shipped feature itself and the removal condition above
-    stands; #1003 tracks at most five entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1003
-  ceiling: 140
 - check: architecture.file_budget
   path: server/app/events/buffer.py
   reason: Issue 353 swaps the per-event job_event_seq bump for segmented allocation (one UPDATE grants
@@ -282,20 +234,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1012
   ceiling: 121
-- check: architecture.file_budget
-  path: server/app/mcp_server/skill_tools.py
-  reason: 'Issue #633 adds the create_skill tool to the skill tool group: one more tool function
-    (docstring is the budget-heavy part — every tool''s contract text lives in its docstring)
-    beside get/validate/save_version. The module IS the single skill-tool registration surface;
-    splitting one tool into a sister module would fork the group''s shared client_factory wiring
-    and the URL-encoding helper. Ceiling at actual + 10 per the dated-exemption convention.
-    Remove when the skill tool group gets a registration split per tool or a budget re-balance
-    frees headroom. Re-anchored by #926 from #456 (closed) to #1003: the overage above is the
-    shipped feature itself and the removal condition above stands; #1003 tracks at most five
-    entries (#917 A-2).'
-  owner: workspace-executor
-  remove_when: issues/open/github.com/LuciusCao/agent-legion/issues/1003
-  ceiling: 48
 - check: architecture.file_budget
   path: server/app/mcp_server/server.py
   reason: 'Issue #633 merges three tool groups into the registration sequence (draft CAS pair,
