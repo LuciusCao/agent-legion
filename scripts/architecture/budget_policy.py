@@ -15,6 +15,7 @@ from .budget_policy_fields import (
     _parse_growth_allowance,
     _parse_positive_int,
     _parse_relative_path,
+    _parse_relative_path_list,
     _parse_string_list,
     _require_mapping,
 )
@@ -49,6 +50,15 @@ class BudgetPolicy:
     # into the registry (the ratchet still only lowers) — unlike
     # buffer_lines, which the ratchet refills at actual + buffer.
     growth_allowance: int = 0
+    per_file_ceiling_exempt_roots: tuple[str, ...] = ()
+
+
+def per_file_ceiling_exempt_root(path: str, policy: BudgetPolicy) -> str | None:
+    normalized = _normalize_path(path)
+    for root in policy.per_file_ceiling_exempt_roots:
+        if normalized == root or normalized.startswith(root + "/"):
+            return root
+    return None
 
 
 def load_budget_policy(path: Path) -> BudgetPolicy:
@@ -74,7 +84,14 @@ def load_budget_policy(path: Path) -> BudgetPolicy:
     tests = _require_mapping(raw, "tests")
     _check_keys(
         production,
-        {"roots", "exclude", "buffer_lines", "max_lines", "growth_allowance"},
+        {
+            "roots",
+            "exclude",
+            "buffer_lines",
+            "max_lines",
+            "growth_allowance",
+            "per_file_ceiling_exempt_roots",
+        },
         "production",
     )
     _check_keys(tests, {"roots", "max_lines"}, "tests")
@@ -87,6 +104,9 @@ def load_budget_policy(path: Path) -> BudgetPolicy:
         test_roots=_parse_test_roots(tests),
         test_max_lines=_parse_positive_int(tests, "max_lines"),
         growth_allowance=_parse_growth_allowance(production),
+        per_file_ceiling_exempt_roots=_parse_relative_path_list(
+            production, "per_file_ceiling_exempt_roots", "production"
+        ),
     )
 
 

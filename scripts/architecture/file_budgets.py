@@ -11,6 +11,7 @@ from .budget_baseline import (
     _BudgetConfigurationError,
     _build_frozen_ceilings,
     load_budget_baseline,
+    per_file_ceiling_exemption_errors,
 )
 from .budget_evaluation import effective_ceiling_errors, stale_exemption_errors
 from .budget_inventory import absolute_limit_map, build_budget_inventory
@@ -42,17 +43,25 @@ def check_file_budgets(
 
     production_set = set(inventory.production)
     excluded_set = set(inventory.excluded)
+    ceiling_exempt_set = set(inventory.per_file_ceiling_exempt)
+    ceiling_production = inventory.ceiling_production
     baseline_files = baseline.files
-    errors: list[str] = []
+    ceiling_baseline_files = {
+        path: ceiling for path, ceiling in baseline_files.items() if path not in ceiling_exempt_set
+    }
+    errors = per_file_ceiling_exemption_errors(policy, exemptions)
 
-    frozen_ceilings = _build_frozen_ceilings(inventory.production, exemptions)
+    frozen_ceilings = _build_frozen_ceilings(ceiling_production, exemptions)
     errors.extend(
         ceiling_regression_errors(
-            root, baseline_files, frozen_ceilings, growth_allowance=policy.growth_allowance
+            root,
+            ceiling_baseline_files,
+            frozen_ceilings,
+            growth_allowance=policy.growth_allowance,
         )
     )
 
-    errors.extend(stale_exemption_errors(root, baseline_files, frozen_ceilings, policy))
+    errors.extend(stale_exemption_errors(root, ceiling_baseline_files, frozen_ceilings, policy))
 
     for path in baseline_files:
         if path in excluded_set:
@@ -68,7 +77,11 @@ def check_file_budgets(
     # full-replay schema file) replace the global absolute limit.
     limits = absolute_limit_map(policy, inventory.production)
     for path in inventory.production:
-        if path not in baseline_files and path not in frozen_ceilings:
+        if (
+            path not in ceiling_exempt_set
+            and path not in baseline_files
+            and path not in frozen_ceilings
+        ):
             errors.append(
                 f"{path}: production file has no baseline; "
                 "run scripts/ratchet_architecture_budgets.py"
@@ -83,7 +96,7 @@ def check_file_budgets(
 
     errors.extend(
         effective_ceiling_errors(
-            root, inventory.production, baseline_files, frozen_ceilings, policy
+            root, ceiling_production, ceiling_baseline_files, frozen_ceilings, policy
         )
     )
 

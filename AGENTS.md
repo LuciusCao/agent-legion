@@ -67,7 +67,7 @@
 - 宽捕获纪律（#204/#298）：`server/app` 与 `worker/` 下新增 `except Exception`（或裸 `except:`）必须带 `# #204 broad-except audit:` 注释（讲清失败语义、为什么吞、结果空间、日志保全），或收窄为具体异常族；无注释的宽捕获会被 `scripts/architecture/broad_except_audit.py` 拒绝。
 - 概念退役 PR 必须同步在 `config/architecture/docs-retired-terms.yaml` 追加 pattern 条目，并清零现行文档命中（退役表述上下文豁免，语义见 `scripts/architecture/docs_retired_terms.py`）；现行文档白名单须与 `docs/architecture/README.md` 现行文档索引表同步。
 - 不要手写 frontend transport types，必须从 `frontend/src/generated/api.ts` 派生。
-- 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。ceiling 按有效行数计（排除注释/空行/docstring——不要为凑预算压缩注释）；`growth_allowance` 容忍带（当前 15 行）只吸收 prettier 重排与小型增长，带内超出**不注册新条目、永不被 ratchet 吸收**——不要把容忍带当常驻余量，超出带即报错。计量口径、声明式产物 root 覆盖与豁免语义见 [backend.md](docs/architecture/backend.md)「接口契约与架构守护」。
+- 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。ceiling 按有效行数计（排除注释/空行/docstring——不要为凑预算压缩注释）；`growth_allowance` 容忍带（当前 15 行）只吸收 prettier 重排与小型增长，带内超出**不注册新条目、永不被 ratchet 吸收**——不要把容忍带当常驻余量，超出带即报错。`server/app/db/migrations` 仅豁免逐文件 baseline/ceiling/ratchet，全部文件保留 raw 800 绝对上限，禁止新增 file_budget 豁免（#1030）。计量口径、root 策略与豁免语义见 [backend.md](docs/architecture/backend.md)「接口契约与架构守护」。
 - ceiling 单调只降不升（#209）：`check_architecture` 按 git 锚点拒绝**已跟踪条目**的任何上抬；合法上抬通道只有带 `remove_when` 的 `architecture.file_budget` 豁免（超容忍带须带 `expires:` 时间盒，到期 `check_invariants` 硬失败）与全新文件首次登记；改名不重置 ceiling（#236）。release-train 例外与本地锚点模拟（`AGENT_LEGION_BUDGET_BASE`）见 [backend.md](docs/architecture/backend.md) 同节。
 
 ## 6. Boundary Rules（禁止模式摘要）

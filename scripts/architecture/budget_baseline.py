@@ -10,8 +10,25 @@ from typing import Any
 from scripts.quality.exemptions import ArchitectureExemption
 
 from .budget_monotonicity import FrozenCeiling
+from .budget_policy import BudgetPolicy, per_file_ceiling_exempt_root
 
 __test__ = False
+
+
+def per_file_ceiling_exemption_errors(
+    policy: BudgetPolicy, exemptions: tuple[ArchitectureExemption, ...]
+) -> list[str]:
+    errors: list[str] = []
+    for ex in exemptions:
+        if ex.check != "architecture.file_budget":
+            continue
+        root = per_file_ceiling_exempt_root(ex.path, policy)
+        if root is not None:
+            errors.append(
+                f"{ex.path}: architecture.file_budget exemptions are forbidden under "
+                f"per-file ceiling exempt root {root}; remove the exemption"
+            )
+    return errors
 
 
 @dataclass(frozen=True)
