@@ -12,6 +12,7 @@ from server.app.services.workflow_revision_format import serialize_definition
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 from server.app.workflows.execution_control import allowed_nodes
 from tests.helpers import make_workflow_worker
+from tests.helpers.sharding import poll_until as _poll_until
 from tests.postgres_support import TEST_DATABASE_URL
 from tests.workers.helpers import (
     RecordingExecutor,
@@ -279,11 +280,13 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
     worker = _make_worker(tmp_path, db_path, executor, [definition])
     executor.block_event.set()
 
-    for _ in range(20):
-        worker._poll()
+    def job_paused_or_completed() -> bool:
         job_after = job_db.get_job(job["id"])
-        if job_after and job_after["status"] in ("paused", "completed"):
-            break
+        return job_after is not None and job_after["status"] in ("paused", "completed")
+
+    assert _poll_until(worker, job_paused_or_completed), (
+        f"job={job_db.get_job(job['id'])!r}; nodes={job_db.list_job_nodes(job['id'])!r}"
+    )
 
     worker.stop()
 
