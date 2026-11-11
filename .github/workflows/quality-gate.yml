@@ -171,6 +171,15 @@ jobs:
 
       - run: uv sync
 
+      # The unit tier includes real filesystem/network/process-group sandbox
+      # tests. Ubuntu restricts unprivileged userns via AppArmor; current
+      # bubblewrap no longer supports the legacy setuid mode, so the disposable
+      # CI VM must explicitly enable userns.
+      - name: Install bubblewrap (velites sandbox backend)
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
         env:

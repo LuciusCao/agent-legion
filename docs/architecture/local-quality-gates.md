@@ -355,7 +355,9 @@ release-train `HEAD`-only exception.
   `scripts/check_versions.py` — the decoupled versioning discipline for
   velites/frontend, see CONTRIBUTING "House rules") plus the
   PostgreSQL-offline unit tier (`GATE_TIER=unit`), uploading its coverage
-  data file as a 1-day artifact.
+  data file as a 1-day artifact. Before the tests, the job installs bubblewrap
+  and enables unprivileged user namespaces: this tier executes the real
+  filesystem, network and process-group sandbox tests rather than mocks.
 - **api-check** — the api:check OpenAPI contract step (Python + Postgres +
   node_modules) and the worker UI node:test suite. Its own lightweight job
   (issue #193): it runs on the frontend lane too, so frontend-only PRs no
