@@ -18,9 +18,14 @@ import pytest
 
 from server.app.executors.code import CodeExecutor
 from server.app.executors.contracts import CodeCapabilityConfig
-from server.app.executors.models import ExecutionContext
-from tests.helpers import pid_is_running
-from tests.helpers.velites_sandbox import sandboxed as _sandboxed
+from server.app.executors.models import ExecutionContext, ExecutionResult
+from tests.helpers import wait_for_predicate
+from tests.helpers.velites_sandbox import (
+    loopback_http_service,
+)
+from tests.helpers.velites_sandbox import (
+    sandboxed as _sandboxed,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -219,22 +224,35 @@ def test_node_code_fails_closed_without_sandbox(
 def test_custom_sandbox_denies_writes_outside_job_dir(
     tmp_path: Path, context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """macOS seatbelt integration: writes outside job_dir/tmp fail with EPERM."""
-    _sandboxed(monkeypatch)
-    result = _run(
-        _executor(),
-        context,
-        """
+    """The repo root stays unwritable; the same probe succeeds without a sandbox."""
+    from server.app.executors._code_sandbox import _SERVER_REPO_ROOT
+    from workspace_libs.code_loader import _load_run_from_source
+
+    probe = _SERVER_REPO_ROOT / ".agent-legion-sandbox-probe"
+    assert not probe.exists(), f"stale sandbox probe: {probe}"
+    source = _source(
+        f"""
         from pathlib import Path
 
         def run(job, job_dir, runtime):
-            (Path.home() / ".agent-legion-sandbox-probe").write_text("x", encoding="utf-8")
-        """,
+            Path({str(probe)!r}).write_text("x", encoding="utf-8")
+        """
     )
+    try:
+        _load_run_from_source(source)(context.job, context.job_dir, {})
+        assert probe.is_file(), "unsandboxed control did not execute the write probe"
+        probe.unlink()
 
-    assert result.status == "failed"
-    assert _DENIED_ERROR in result.error_message
-    assert not (Path.home() / ".agent-legion-sandbox-probe").exists()
+        _sandboxed(monkeypatch)
+        result = _run(_executor(), context, source, expected_outputs=())
+        leaked = probe.exists()
+        if leaked:
+            probe.unlink()
+        assert result.status == "failed"
+        assert _DENIED_ERROR in result.error_message
+        assert not leaked, "sandbox let a write escape into the repo root"
+    finally:
+        probe.unlink(missing_ok=True)
 
 
 def test_custom_sandbox_denies_reads_outside_allowlist(
@@ -299,32 +317,37 @@ def test_custom_sandbox_env_is_whitelisted(
 def test_custom_sandbox_denies_network_by_default(
     context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Outbound network is denied unless the node opts in (EXEC-CODE-003, P-0.5)."""
+    """The default cannot reach a host service; sandbox_network=true can."""
     _sandboxed(monkeypatch)
-    source = _source(
-        """
-        import urllib.request
+    with loopback_http_service() as (url, requests):
+        source = _source(
+            f"""
+            import urllib.request
 
-        def run(job, job_dir, runtime):
-            urllib.request.urlopen("http://127.0.0.1:9/", timeout=2)
-        """
-    )
-
-    denied = _executor().execute(replace(context, node_code=source))
-    assert denied.status == "failed"
-    assert _NET_ERROR in denied.error_message
-
-    allowed = _executor().execute(
-        replace(
-            context,
-            node_code=source,
-            execution_id="exec-net",
-            node_config={"sandbox_network": True},
+            def run(job, job_dir, runtime):
+                response = urllib.request.urlopen({url!r}, timeout=2)
+                (job_dir / "out.json").write_text(response.read().decode(), encoding="utf-8")
+            """
         )
-    )
-    assert allowed.status == "failed"
-    # With network allowed the failure is a plain connection refusal, not EPERM.
-    assert "Operation not permitted" not in allowed.error_message
+
+        denied = _executor().execute(replace(context, node_code=source))
+        assert denied.status == "failed"
+        assert _NET_ERROR in denied.error_message or (
+            sys.platform == "linux" and "Connection refused" in denied.error_message
+        )
+        assert requests == [], "denied request reached the host loopback service"
+
+        allowed = _executor().execute(
+            replace(
+                context,
+                node_code=source,
+                execution_id="exec-net",
+                node_config={"sandbox_network": True},
+            )
+        )
+        assert allowed.status == "completed", allowed.error_message
+        assert (context.job_dir / "out.json").read_text(encoding="utf-8") == "ok"
+        assert requests == ["/"]
 
 
 def test_repo_read_subdirs_include_sdk_but_not_examples() -> None:
@@ -369,25 +392,19 @@ def test_read_result_validates_json_schema(tmp_path: Path) -> None:
         assert failure is not None and failure.status == "failed", bad
 
 
-def test_custom_cancel_kills_whole_process_group(
-    tmp_path: Path, context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Cancellation kills the exec'd child's whole group (no orphaned grandchildren)."""
+def _run_grandchild_probe(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch, *, cancel: bool
+) -> tuple[ExecutionResult, Path]:
     _sandboxed(monkeypatch)
-    marker = tmp_path / "grandchild-survived"
-    pid_file = tmp_path / "grandchild.pid"
-    # The grandchild outlives the sandboxed child by design: it sleeps, then
-    # touches the marker. The test asserts cancellation killed the whole
-    # group BEFORE that touch. Watching the grandchild's PID exit (instead of
-    # sleeping past its touch deadline) keeps the assertion race-free under
-    # load: once the PID is gone, a surviving shell can no longer touch.
+    marker = context.job_dir / "grandchild-survived"
+    started = context.job_dir / "grandchild-started"
     custom_source = (
         "import subprocess\n"
         "import time\n\n"
         "def run(job, job_dir, runtime):\n"
         f"    marker = job_dir / '{marker.name}'\n"
-        "    proc = subprocess.Popen(['/bin/sh', '-c', f'sleep 2; touch {marker}'])\n"
-        f"    (job_dir / '{pid_file.name}').write_text(str(proc.pid))\n"
+        "    subprocess.Popen(['/bin/sh', '-c', f'sleep 2; touch {marker}'])\n"
+        f"    (job_dir / '{started.name}').write_text('1')\n"
         "    time.sleep(30)\n"
     )
 
@@ -396,48 +413,49 @@ def test_custom_cancel_kills_whole_process_group(
     from server.app.executors.cancellation import CancellationToken
 
     token = CancellationToken(_threading.Event())
-    sandboxed = replace(
-        context,
-        node_code=custom_source,
-        runtime={"cancellation": token},
-    )
-
-    # Cancel deterministically mid-execution: run the executor on a thread and
-    # fire the token only after the pid file proves the grandchild spawned.
-    # A wall-clock timer raced the child's startup under load (the same race
-    # CI just caught in the orphan-reaper twin of this test).
+    sandboxed = replace(context, node_code=custom_source, runtime={"cancellation": token})
     outcome_holder: dict = {}
 
     def run() -> None:
         try:
             outcome_holder["result"] = _executor().execute(sandboxed)
         except Exception as exc:
-            # Re-raised below; a bare holder["result"] KeyError would bury it.
             outcome_holder["error"] = exc
 
     thread = _threading.Thread(target=run)
     thread.start()
-    spawn_deadline = time.monotonic() + 10.0
     try:
-        while not pid_file.exists():
-            assert time.monotonic() < spawn_deadline, "grandchild never started"
-            time.sleep(0.05)
-        token.cancel()
+        wait_for_predicate(started.is_file, timeout=10.0)
+        if cancel:
+            token.cancel()
+        else:
+            wait_for_predicate(marker.is_file, timeout=10.0)
     finally:
+        token.cancel()
         thread.join(timeout=10.0)
     assert not thread.is_alive()
     if "error" in outcome_holder:
         raise outcome_holder["error"]
+    return outcome_holder["result"], marker
 
-    result = outcome_holder["result"]
+
+def test_custom_cancel_kills_whole_process_group(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cancelled sandbox cannot leave a grandchild to write its marker."""
+    result, marker = _run_grandchild_probe(context, monkeypatch, cancel=True)
     assert result.status == "cancelled"
-    pid = int(pid_file.read_text().strip())
-    # The grandchild must be dead well before its 2s sleep ends. Fresh
-    # deadline: the spawn phase above may have consumed most of its own.
-    death_deadline = time.monotonic() + 10.0
-    while pid_is_running(pid):
-        assert time.monotonic() < death_deadline, (
-            f"grandchild {pid} survived cancellation; marker={marker}"
-        )
-        time.sleep(0.05)
+    # The grandchild's own action is scheduled two seconds after its start
+    # signal. This negative window lets that action become observable; it is
+    # not a timing guess for executor startup or cancellation completion.
+    time.sleep(3.0)
     assert not marker.exists()
+
+
+def test_grandchild_marker_probe_detects_no_cancel_mutation(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without the cancellation mutation, the same grandchild writes its marker."""
+    result, marker = _run_grandchild_probe(context, monkeypatch, cancel=False)
+    assert marker.exists()
+    assert result.status == "cancelled"
