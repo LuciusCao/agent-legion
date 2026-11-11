@@ -796,7 +796,13 @@ server/app/
   声明式产物 root 可覆盖绝对上限（`production.roots[].max_lines`）——`server/app/db`
   的 `.sql`（全量 replay schema，单文件是刻意设计，1200 raw）与 `worker/ui` 的
   `.js/.css`（原生无构建链单文件面，1000 raw）各设 root 级上限，ceiling 仍按有效行数
-  单调棘轮；挂账超过 30 天的豁免由
+  单调棘轮。#1030 的 `production.per_file_ceiling_exempt_roots` 仅豁免逐文件 baseline
+  完整性、effective-line ceiling 与 ratchet 生成；文件仍属 production inventory，root 未匹配
+  任何 production 文件即配置错误，raw 绝对上限及非豁免 root 的 monotonic/growth-allowance
+  行为不变。该 root 下禁止新增 `architecture.file_budget` 豁免；ratchet 会移除其中既有
+  baseline，且不为新文件生成条目。当前唯一配置是 `server/app/db/migrations`：其中所有文件
+  （包括 SQL）保留全局 800 raw 上限，非 migration 的 root 覆盖不变；冻结的历史 migration
+  无需为兼容旧库升级而拆分或反复重签豁免。挂账超过 30 天的豁免由
   `scripts/check_exemption_age.py` 在 full gate 中告警（不阻断）。
 
 ### Agent Worker 协议响应形态（response model 豁免的依据）

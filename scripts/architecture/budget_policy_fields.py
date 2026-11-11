@@ -84,3 +84,22 @@ def _parse_string_list(
         if not isinstance(item, str):
             raise BudgetConfigurationError(f"{context}.{key} entries must be strings")
     return tuple(value)
+
+
+def _parse_relative_path_list(mapping: dict[str, Any], key: str, context: str) -> tuple[str, ...]:
+    value = mapping.get(key, [])
+    if not isinstance(value, list):
+        raise BudgetConfigurationError(f"{context}.{key} must be a list")
+    seen: set[str] = set()
+    result: list[str] = []
+    for idx, item in enumerate(value):
+        item_context = f"{context}.{key}[{idx}]"
+        path = _parse_relative_path({"path": item}, "path", item_context)
+        normalized = _normalize_path(path)
+        if normalized == ".":
+            raise BudgetConfigurationError(f"{item_context}.path must not be empty or '.'")
+        if normalized in seen:
+            raise BudgetConfigurationError(f"duplicate {context}.{key} path: {path}")
+        seen.add(normalized)
+        result.append(normalized)
+    return tuple(result)
