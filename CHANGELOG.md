@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-11-11
+
+主打 Agent 批量结果完成与心跳的 lease 死锁修复、Worker 压缩事件与应急证据的嵌套 JSON key 脱敏，并完成 Host、Worker、velites 与治理面的预算回落；三条产品线均有实际源码差异，配套发布 Host/main v0.8.6、worker-v0.8.6 与 velites-v0.5.11。
+
+### Fixed
+
+- Agent 批量 heartbeat 与 grouped result finish 的 lease 行锁 AB-BA 死锁（issue #1449，PR #1477）：`finish_many` 先按既有 `(hashtext(job-mutation), job_id)` 全序集中预取 job-mutation 锁，再按 `execution_id, id` 集中预取 `executor_leases` 行锁，随后保持原 job 序完成结果；批量 heartbeat 继续按 `execution_id` 序取 lease 锁，消除两条并发路径各持一张 lease 后交叉等待的锁环。Worker 身份、lease ownership、execution generation CAS、settled/lost verdict、queue-order verdict 与 finish→mark_done 提交语义不变，未新增重试框架。
+
+### Security
+
+- Worker 压缩 Pi events 与应急证据的嵌套 JSON key 脱敏（issue #1175，PR #1476）：已注册及 secret-shaped 字面量出现在解码后的 JSON 字符串 key 时也按既有 value 规则替换，覆盖嵌套对象、转义 key、message/toolCall 与 bash 输出等保留事件；key 顺序、数值、布尔、null 与普通字段保持不变。重写后同一对象发生 key 碰撞时 fail-closed 丢弃该事件行，避免静默覆盖条目或回退原始密钥；Host `redactor=None` 的逐字保留路径不变。该修复位于 `shared/`，Host 与 Worker 产物都必须发布，不能只升级一侧。
+
+### Maintenance
+
+- Skill contract 三端拆分（issue #994，PR #1483）：Python root-contract 解析、source-tier/publish advisories 与前端发布复核提示按职责拆出，velites contract facade 分为 parser、validation 与测试模块并补 Rust/Python/前端等价回归；root `contract.yaml` 优先级、malformed/unreadable fail-closed、embedded-block 兼容层及既有 import/API、UI、tool/event 契约不变。
+- Host API、认证与执行面预算回落（issues #993、#1002、#1003、#1009、#1010）：workspace skill guard、runs intake、external artifact entry/access、路径告警与补偿、ops sampling、route assembly、Studio skill publish support、agent result commit plane 等按职责拆分并清退豁免；endpoint 挂载顺序、认证 scope、API schema、部分创建补偿、采样与执行代次语义不变。
+- 数据库、workflow 与 MCP 组合工具拆分（issues #1011、#1012、#1016）：checkout attribution/return、artifact-key GC、v73 run 状态计数 SQL、workflow snapshot/revision echo 与 MCP studio/node-code/agent-definition 工具迁入姊妹模块；v73 trigger、retention index、backfill SQL 与执行顺序保持逐字等价，连接生命周期、GC、workflow 序列化及 MCP 注册顺序和 wire contract 不变。
+- Worker heartbeat registry 拆分（issue #751，PR #1489）：lease entry 与完整 registry 状态机迁入 `heartbeat_registry.py`，批量 coordinator 继续负责请求、分片、降级与取消投递；registration、upload handover/rebind、pruning、snapshot、lost/settled verdict 与既有 facade import 保持等价，并补 registry 定向与 mutation 回归。
+- 架构预算治理与 migration root 策略（issues #1005、#1008、#1030）：exemption schema/expiry、baseline/frozen-ceiling、effective-line 与 invariant wiring 拆分为内聚 helper；`server/app/db/migrations` 登记为 `production.per_file_ceiling_exempt_roots`，仅豁免逐文件 baseline 完整性、effective-line ceiling 与 ratchet 生成，全部 migration Python/SQL 文件仍受 raw 800 行绝对上限，禁止新增 `architecture.file_budget` 豁免，非 migration 规则与 ceiling 单调性不变。
+- backend-unit 真实沙箱门禁修复（PR #1491）：GitHub Actions 在 Ubuntu 24.04 为 backend-unit 配置 bubblewrap 与 unprivileged user namespaces，并修正跨 PID namespace 进程检查、loopback 正对照和 read-only bind 写入探针；只改变 CI 与测试机制，不修改 server、worker、shared 或 velites 产品行为，也不代表原生 Linux 生产部署已经验收。
+
+### 升级注意
+
+- **数据库：** 本版没有新 schema 迁移，当前版本保持 v104；#1011 仅移动既有 v73 SQL 文本，#1030 仅调整预算治理，均不改变 migration 注册、执行顺序、最低升级版本或持久化数据。仍建议升级前备份 PostgreSQL，已完成 v104 的实例无需额外迁移，回滚使用与目标 schema 匹配的备份。
+- **Host / Worker / velites 发布集合：** `worker-v0.8.4..main` 的 `worker/`、`shared/` 与 `velites-v0.5.10..main` 的 `velites/` 均有实际源码差异，本次发布 `v0.8.6`、`worker-v0.8.6`、`velites-v0.5.11`，不沿用旧 Worker/velites，也不创建空版本。
+- **升级顺序与配套：** 必须先升 Host 到 v0.8.6 并确认健康，再逐台升级 Worker 到 worker-v0.8.6 并配套 velites-v0.5.11；Worker 注册/claim 协议保持 v6，但协议号不变不能替代版本配套。#1175 的共享脱敏修复需要 Host 与 Worker 都升级，#751 的 registry 拆分只随新 Worker 产物交付，velites #994 拆分随 0.5.11 交付且公共 contract 行为不变。
+- **一键安装钉版：** `scripts/install-worker.sh` 默认钉版更新为 worker 0.8.6 / velites 0.5.11；重复执行继续保留 `worker.yaml`、模型配置、显式资源 limits、控制卷与 pending upload。需等 worker-v0.8.6 镜像与 velites-v0.5.11 三平台 release 产物发布成功后，才能使用默认版本执行一键升级或回滚到该组合。
+- **frontend 独立版本线：** 本次包含 frontend 结构保持型拆分但不单独发布 npm 包，`frontend/package.json` 与 lockfile 保持 0.4.0-alpha。
+- **发布前置：** release PR 合并后必须在对应 main 精确提交上运行 Nightly Gate 并取得全绿，再创建上述三个非空 tag 与对应 GitHub Releases；不得用本发布流程执行生产部署。
+
+### 已知后续
+
+- **原生 Linux 部署（#39、#1049）：** 两项 issue 保持 open；#1491 只让 backend-unit 在受控 CI runner 上执行真实沙箱回归，原生非 root systemd、宿主长期安全策略与真实 Host/Worker 迁移/回滚验收仍未完成，本版不得宣称原生 Linux 生产支持。
+
 ## [0.8.5] - 2026-11-07
 
 主打 Studio 与实例设置预算回落、Worker Key 使用统计口径修复及 CI 依赖维护：Key 的 Worker 使用计数与当前 workspace 可见范围对齐，删除告警仍保留全实例消费者；预览/DAG、草稿同步/保存/发布、Inspector 和实例设置契约按职责拆分并清退预算豁免，不改变既有产品行为。原生 Linux targeted AppArmor 实验得出 candidate-only no-go，不构成生产支持。
