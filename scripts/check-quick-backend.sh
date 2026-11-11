@@ -153,6 +153,10 @@ run_tests() {
         ${telemetry_args[@]+"${telemetry_args[@]}"}
       ;;
     unit)
+      echo "=== CI Workflow Sandbox Setup Contract ==="
+      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
+        tests/ci/test_quality_gate_sandbox_setup.py
+
       echo "=== Python Unit Tests (PostgreSQL offline) ==="
       AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
         UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \

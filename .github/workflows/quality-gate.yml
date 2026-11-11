@@ -152,7 +152,9 @@ jobs:
     name: backend-unit
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    # #1142: pinned — use the same validated sandbox runner as the other lanes;
+    # ubuntu-latest migrated to Ubuntu 26, whose bubblewrap path is not validated
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       # Full history for the backend static round: budget_monotonicity
@@ -170,6 +172,15 @@ jobs:
           python-version: "3.13"
 
       - run: uv sync
+
+      # The unit tier includes real filesystem/network/process-group sandbox
+      # tests. Ubuntu restricts unprivileged userns via AppArmor; current
+      # bubblewrap no longer supports the legacy setuid mode, so the disposable
+      # CI VM must explicitly enable userns.
+      - name: Install bubblewrap (velites sandbox backend)
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh

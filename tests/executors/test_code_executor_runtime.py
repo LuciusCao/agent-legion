@@ -19,7 +19,12 @@ import pytest
 
 from server.app.executors.code import CodeExecutor
 from server.app.executors.models import ExecutionContext
-from tests.helpers.velites_sandbox import sandboxed as _sandboxed
+from tests.helpers.velites_sandbox import (
+    loopback_http_service,
+)
+from tests.helpers.velites_sandbox import (
+    sandboxed as _sandboxed,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -486,32 +491,36 @@ def test_execute_timeout_comes_from_node_config(
 def test_sandbox_network_opt_in_comes_from_node_config(
     context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """sandbox_network=true in the resolved node config opts the node into
-    network access; anything else keeps the sandbox default (deny)."""
+    """sandbox_network=true opts in; the default cannot reach the host service."""
     _sandboxed(monkeypatch)
-    source = _source(
-        """
-        import urllib.request
+    with loopback_http_service() as (url, requests):
+        source = _source(
+            f"""
+            import urllib.request
 
-        def run(job, job_dir, runtime):
-            urllib.request.urlopen("http://127.0.0.1:9/", timeout=2)
-        """
-    )
-
-    denied = _executor().execute(
-        replace(context, node_code=source, node_config={"sandbox_network": False})
-    )
-    assert denied.status == "failed"
-    assert _NET_ERROR in denied.error_message
-
-    # With network allowed the failure is a plain connection refusal, not EPERM.
-    allowed = _executor().execute(
-        replace(
-            context,
-            node_code=source,
-            execution_id="exec-net-node",
-            node_config={"sandbox_network": True},
+            def run(job, job_dir, runtime):
+                response = urllib.request.urlopen({url!r}, timeout=2)
+                (job_dir / "out.json").write_text(response.read().decode(), encoding="utf-8")
+            """
         )
-    )
-    assert allowed.status == "failed"
-    assert "Operation not permitted" not in allowed.error_message
+
+        denied = _executor().execute(
+            replace(context, node_code=source, node_config={"sandbox_network": False})
+        )
+        assert denied.status == "failed"
+        assert _NET_ERROR in denied.error_message or (
+            sys.platform == "linux" and "Connection refused" in denied.error_message
+        )
+        assert requests == [], "denied request reached the host loopback service"
+
+        allowed = _executor().execute(
+            replace(
+                context,
+                node_code=source,
+                execution_id="exec-net-node",
+                node_config={"sandbox_network": True},
+            )
+        )
+        assert allowed.status == "completed", allowed.error_message
+        assert (context.job_dir / "out.json").read_text(encoding="utf-8") == "ok"
+        assert requests == ["/"]
