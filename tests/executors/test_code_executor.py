@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import sys
 import textwrap
-import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -224,11 +223,14 @@ def test_node_code_fails_closed_without_sandbox(
 def test_custom_sandbox_denies_writes_outside_job_dir(
     tmp_path: Path, context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The repo root stays unwritable; the same probe succeeds without a sandbox."""
+    """A read-only repo subtree rejects writes; the same probe works unsandboxed."""
     from server.app.executors._code_sandbox import _SERVER_REPO_ROOT
     from workspace_libs.code_loader import _load_run_from_source
 
-    probe = _SERVER_REPO_ROOT / ".agent-legion-sandbox-probe"
+    probe = _SERVER_REPO_ROOT / "server" / ".agent-legion-sandbox-probe"
+    expected_error = (
+        "Operation not permitted" if sys.platform == "darwin" else "Read-only file system"
+    )
     assert not probe.exists(), f"stale sandbox probe: {probe}"
     source = _source(
         f"""
@@ -249,8 +251,8 @@ def test_custom_sandbox_denies_writes_outside_job_dir(
         if leaked:
             probe.unlink()
         assert result.status == "failed"
-        assert _DENIED_ERROR in result.error_message
-        assert not leaked, "sandbox let a write escape into the repo root"
+        assert expected_error in result.error_message
+        assert not leaked, "sandbox let a write escape into the read-only repo subtree"
     finally:
         probe.unlink(missing_ok=True)
 
@@ -392,6 +394,22 @@ def test_read_result_validates_json_schema(tmp_path: Path) -> None:
         assert failure is not None and failure.status == "failed", bad
 
 
+def _grandchild_running(marker: Path) -> bool:
+    import subprocess
+
+    # The marker path is a unique command-line identity visible in both PID
+    # namespaces; unlike the sandbox-private PID, it is valid on the host.
+    return (
+        subprocess.run(
+            ["pgrep", "-f", str(marker)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
 def _run_grandchild_probe(
     context: ExecutionContext, monkeypatch: pytest.MonkeyPatch, *, cancel: bool
 ) -> tuple[ExecutionResult, Path]:
@@ -403,8 +421,10 @@ def _run_grandchild_probe(
         "import time\n\n"
         "def run(job, job_dir, runtime):\n"
         f"    marker = job_dir / '{marker.name}'\n"
-        "    subprocess.Popen(['/bin/sh', '-c', f'sleep 2; touch {marker}'])\n"
-        f"    (job_dir / '{started.name}').write_text('1')\n"
+        f"    started = job_dir / '{started.name}'\n"
+        "    subprocess.Popen(\n"
+        "        ['/bin/sh', '-c', f'touch {started}; sleep 5; touch {marker}']\n"
+        "    )\n"
         "    time.sleep(30)\n"
     )
 
@@ -442,13 +462,10 @@ def _run_grandchild_probe(
 def test_custom_cancel_kills_whole_process_group(
     context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A cancelled sandbox cannot leave a grandchild to write its marker."""
+    """A cancelled sandbox cannot leave a grandchild running or writing."""
     result, marker = _run_grandchild_probe(context, monkeypatch, cancel=True)
     assert result.status == "cancelled"
-    # The grandchild's own action is scheduled two seconds after its start
-    # signal. This negative window lets that action become observable; it is
-    # not a timing guess for executor startup or cancellation completion.
-    time.sleep(3.0)
+    wait_for_predicate(lambda: not _grandchild_running(marker), timeout=10.0)
     assert not marker.exists()
 
 
