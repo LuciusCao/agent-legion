@@ -346,7 +346,13 @@ def test_help_uses_isolated_environment(tmp_path: Path, monkeypatch: pytest.Monk
 
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         observed.update(kwargs)
-        return subprocess.CompletedProcess(args, 0, HELP_OUTPUT, "")
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            HELP_OUTPUT
+            + "PROBE WORKER_VERSION=0.8.6 VELITES_VERSION=0.5.11 COMPOSE_REF=worker-v0.8.6\n",
+            "",
+        )
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     assert _errors(tmp_path) == []
@@ -567,6 +573,162 @@ def test_direct_script_entrypoint(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+_PROBE_SCRIPT = r"""
+docker() {
+  if [ "${1:-} ${2:-} ${3:-}" = "compose version --short" ]; then
+    printf '%s\n' 'v2.29.0'
+  elif [ "${1:-} ${2:-}" = "compose version" ]; then
+    printf '%s\n' 'Docker Compose version v2.29.0'
+  else
+    exit 97
+  fi
+}
+curl() { exit 97; }
+grep() { return 0; }
+uname() { printf '%s\n' 'x86_64'; }
+hostname() { printf '%s\n' 'probe'; }
+mkdir() {
+  printf 'PROBE WORKER_VERSION=%s VELITES_VERSION=%s COMPOSE_REF=%s\n' "$WORKER_VERSION" "$VELITES_VERSION" "$COMPOSE_REF"
+  exit 0
+}
+script="$1"
+shift
+. "$script"
+"""
+
+
+def _probe(
+    root: Path, shell: str = "sh", args: list[str] | None = None, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    command = [
+        shell,
+        "-c",
+        _PROBE_SCRIPT,
+        "release-pin-probe",
+        str(root / "scripts/install-worker.sh"),
+    ]
+    if args:
+        command.extend(args)
+    environment = {"HOME": str(root / "home"), "AGENT_WORKER_INSTALL_DIR": str(root / "install")}
+    if env:
+        environment.update(env)
+    return subprocess.run(
+        command, cwd=root, env=environment, capture_output=True, text=True, timeout=10, check=False
+    )
+
+
+@pytest.mark.parametrize("variable", [WORKER, VELITES])
+@pytest.mark.parametrize("value", ["stale", "empty"])
+def test_effective_reassignment_after_derivation_fails(
+    tmp_path: Path, variable: str, value: str
+) -> None:
+    source = (ROOT / "scripts/install-worker.sh").read_text(encoding="utf-8")
+    effective = _purpose_line(source, variable, "effective")
+    actual = _stale(variable) if value == "stale" else ""
+    assignment = f'{variable.removesuffix("_DEFAULT")}="{actual}"'
+    source = source.replace(effective, f"{effective}\n{assignment}", 1)
+    _write_repo(tmp_path, installer=source)
+    _help(tmp_path, variable, _default(variable), "sh")
+    result = _probe(tmp_path)
+    if value == "empty":
+        assert result.returncode != 0
+    else:
+        assert result.returncode == 0, result.stderr
+        assert f"{variable.removesuffix('_DEFAULT')}={actual}" in result.stdout
+        expected_ref = actual if variable == WORKER else _default(WORKER)
+        assert f"COMPOSE_REF=worker-v{expected_ref}" in result.stdout
+        assert not (tmp_path / "install").exists()
+    assert any(variable in error for error in _errors(tmp_path))
+
+
+@pytest.mark.parametrize("shell", ["sh", "dash"])
+@pytest.mark.parametrize(
+    ("args", "env", "worker_version", "velites_version"),
+    [
+        (None, None, "0.8.6", "0.5.11"),
+        (
+            None,
+            {
+                "AGENT_WORKER_VERSION": "8.8.8",
+                "VELITES_VERSION": "7.7.7",
+            },
+            "8.8.8",
+            "7.7.7",
+        ),
+        (
+            ["--version", "9.8.7", "--velites-version", "6.5.4"],
+            {"AGENT_WORKER_VERSION": "8.8.8", "VELITES_VERSION": "7.7.7"},
+            "9.8.7",
+            "6.5.4",
+        ),
+    ],
+)
+def test_probe_effective_override_precedence_and_compose_ref(
+    tmp_path: Path,
+    shell: str,
+    args: list[str] | None,
+    env: dict[str, str] | None,
+    worker_version: str,
+    velites_version: str,
+) -> None:
+    if shutil.which(shell) is None:
+        pytest.skip(f"{shell} is not installed")
+    _write_repo(tmp_path)
+    result = _probe(tmp_path, shell=shell, args=args, env=env)
+    assert result.returncode == 0, result.stderr
+    assert f"WORKER_VERSION={worker_version}" in result.stdout
+    assert f"VELITES_VERSION={velites_version}" in result.stdout
+    assert f"COMPOSE_REF=worker-v{worker_version}" in result.stdout
+    assert not (tmp_path / "install").exists()
+
+
+def test_probe_explicit_compose_ref_override_is_preserved(tmp_path: Path) -> None:
+    _write_repo(tmp_path)
+    result = _probe(tmp_path, env={"AGENT_WORKER_COMPOSE_REF": "worker-v0.0.1"})
+    assert result.returncode == 0, result.stderr
+    assert "COMPOSE_REF=worker-v0.0.1" in result.stdout
+
+
+def test_probe_stubs_do_not_execute_real_docker_curl_or_mkdir(tmp_path: Path) -> None:
+    _write_repo(tmp_path)
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    marker = tmp_path / "real-command-called"
+    for name in ("docker", "curl"):
+        path = fake_bin / name
+        path.write_text(f"#!/bin/sh\ntouch {marker}\n", encoding="utf-8")
+        path.chmod(0o755)
+    result = _probe(tmp_path, shell="/bin/sh", env={"PATH": str(fake_bin)})
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists()
+    assert not (tmp_path / "install").exists()
+
+
+@pytest.mark.parametrize("case", ["missing", "duplicate", "early-exit", "timeout"])
+def test_probe_execution_failures_are_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    _write_repo(tmp_path)
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if case == "timeout":
+            raise subprocess.TimeoutExpired(cmd="/bin/sh", timeout=10)
+        if case == "early-exit":
+            return subprocess.CompletedProcess(args, 1, HELP_OUTPUT, "early")
+        stdout = (
+            ""
+            if case == "missing"
+            else HELP_OUTPUT
+            + "PROBE WORKER_VERSION=0.8.6 VELITES_VERSION=0.5.11 COMPOSE_REF=worker-v0.8.6\n" * 2
+        )
+        return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert any(
+        "effective" in error or "--help" in error or "超时" in error for error in _errors(tmp_path)
+    )
 
 
 def test_release_pin_gate_is_in_governance_phase() -> None:

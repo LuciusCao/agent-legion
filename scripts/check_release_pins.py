@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Validate Worker release pins with installer behavior and structured YAML.
 
-Installer defaults are checked by running the supported, side-effect-free
-``sh install-worker.sh --help`` path in an isolated HOME/install directory with
-version overrides removed and a timeout. This validates real defaults instead of
-emulating shell quoting. Canonical declaration, effective derivation, and usage
-printf remain exact single-point contracts. The behavior check does not attempt
-to defend against malicious conditional branches or arbitrary dynamic code.
+Installer defaults are checked in an isolated HOME/install directory with version
+overrides removed and a timeout. The supported ``--help`` path proves displayed
+defaults, while a normal-entry first-mkdir probe proves final effective Worker,
+velites, and COMPOSE_REF before any real file, download, or Docker side effect.
+Canonical declaration, effective derivation, and usage printf remain exact
+single-point contracts. The command stubs are a test boundary, not a full install
+or a defense against malicious branches or arbitrary dynamic code.
 
 Compose files are parsed with ``yaml.compose(..., Loader=yaml.SafeLoader)``.
 Mapping paths, duplicate fields, scalar tags/styles, and complete image values
@@ -38,16 +39,14 @@ from scripts.check_versions import manifest_version_from_text, normalize  # noqa
 WORKER_IMAGE = "ghcr.io/luciuscao/agent-legion-worker"
 _TAG = r"[0-9A-Za-z._-]+"
 _IMAGE_REFIX = re.compile(rf"^(?P<core>{_TAG})-r\d+$")
-INSTALLERS = (
-    (
-        "WORKER_VERSION_DEFAULT",
-        "printf '  --version TAG         worker 镜像 tag（默认 %s；须存在 worker-v<TAG> 发布 tag）\\n' \"$WORKER_VERSION_DEFAULT\"",
-    ),
-    (
-        "VELITES_VERSION_DEFAULT",
-        "printf '  --velites-version VER velites 二进制版本（默认 %s）\\n' \"$VELITES_VERSION_DEFAULT\"",
-    ),
-)
+_STANDALONE_PATTERN = rf"\$\{{AGENT_WORKER_IMAGE:-{re.escape(WORKER_IMAGE)}:(?P<version>{_TAG})\}}"
+_FIXED_PATTERN = rf"{re.escape(WORKER_IMAGE)}:(?P<version>{_TAG})"
+INSTALLERS = {
+    "WORKER_VERSION_DEFAULT": "printf '  --version TAG         worker 镜像 tag（默认 %s；须存在 worker-v<TAG> 发布 tag）\\n' \"$WORKER_VERSION_DEFAULT\"",
+    "VELITES_VERSION_DEFAULT": "printf '  --velites-version VER velites 二进制版本（默认 %s）\\n' \"$VELITES_VERSION_DEFAULT\"",
+}
+ENVIRONMENTS = {"agent-legion": "AGENT_WORKER_VERSION", "velites": "VELITES_VERSION"}
+_PROBE_SCRIPT = r'''docker() { if [ "${1:-} ${2:-} ${3:-}" = "compose version --short" ]; then printf '%s\n' 'v2.29.0'; else printf '%s\n' 'Docker Compose version v2.29.0'; fi; }; curl() { exit 97; }; grep() { return 0; }; uname() { printf '%s\n' 'x86_64'; }; hostname() { printf '%s\n' 'probe'; }; mkdir() { printf 'PROBE WORKER_VERSION=%s VELITES_VERSION=%s COMPOSE_REF=%s\n' "$WORKER_VERSION" "$VELITES_VERSION" "$COMPOSE_REF"; exit 0; }; script="$1"; shift; /bin/sh "$script" --help; . "$script"'''
 
 
 def _pin_matches(found: str, want: str, compare: str) -> bool:
@@ -64,9 +63,7 @@ def manifest_versions(root: Path) -> dict[str, str]:
     velites = manifest_version_from_text(
         Path("velites/Cargo.toml"), (root / "velites/Cargo.toml").read_text(encoding="utf-8")
     )
-    if not agent or not velites:
-        raise ValueError("版本清单缺 project.version 或 package.version")
-    return {"agent-legion": agent, "velites": velites}
+    return {"agent-legion": agent or "", "velites": velites or ""}
 
 
 def installer_errors(root: Path, expected: dict[str, str]) -> list[str]:
@@ -78,47 +75,53 @@ def installer_errors(root: Path, expected: dict[str, str]) -> list[str]:
         options = {"capture_output": True, "text": True, "timeout": 10, "check": False}
         try:
             result = subprocess.run(
-                ["/bin/sh", str(path), "--help"],
+                ["/bin/sh", "-c", _PROBE_SCRIPT, "release-pin-probe", str(path)],
                 cwd=temporary,
                 env={"HOME": temporary, "AGENT_WORKER_INSTALL_DIR": f"{temporary}/worker-install"},
                 **options,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return [*errors, f"install-worker --help 执行失败或超时：{exc}"]
-        if result.returncode != 0:
-            errors.append(f"install-worker --help 返回 {result.returncode}")
-        if (Path(temporary) / "worker-install").exists():
-            errors.append("install-worker --help 创建了安装目录（应为无副作用路径）")
-        for variable, usage in INSTALLERS:
+        for variable, usage in INSTALLERS.items():
             component = "agent-legion" if variable == "WORKER_VERSION_DEFAULT" else "velites"
             compare = "exact" if variable == "VELITES_VERSION_DEFAULT" else "image_tag"
-            environment = (
-                "AGENT_WORKER_VERSION" if component == "agent-legion" else "VELITES_VERSION"
-            )
+            environment = ENVIRONMENTS[component]
             effective = f'{variable.removesuffix("_DEFAULT")}="${{{environment}:-${variable}}}"'
             marker = usage.split("（默认", 1)[0].split("'", 1)[1].strip()
             declaration = re.compile(rf'{variable}="(?P<version>{_TAG})"')
-            matches = [match for line in lines if (match := declaration.fullmatch(line))]
-            valid = len(matches) == 1 and all(
-                lines.count(purpose) == 1 for purpose in (effective, usage)
-            )
-            found = matches[0].group("version") if valid else ""
-            if not valid or not _pin_matches(found, expected[component], compare):
+            versions = [line.split('"')[1] for line in lines if declaration.fullmatch(line)]
+            if (
+                len(versions) != 1
+                or any(lines.count(purpose) != 1 for purpose in (effective, usage))
+                or not _pin_matches(versions[0] if versions else "", expected[component], compare)
+            ):
                 errors.append(f"{variable}: 单点声明/用途或发布版本不符合契约")
             defaults = re.findall(rf"{re.escape(marker)}.*默认 ([^；）\s]*)", result.stdout)
             if result.returncode == 0 and (
                 len(defaults) != 1 or not _pin_matches(defaults[0], expected[component], compare)
             ):
                 errors.append(f"{variable}: --help 实际默认版本不符合发布线")
+        probe = re.findall(
+            r"PROBE WORKER_VERSION=(\S*) VELITES_VERSION=(\S*) COMPOSE_REF=(\S+)", result.stdout
+        )
+        if (
+            result.returncode != 0
+            or (Path(temporary) / "worker-install").exists()
+            or len(probe) != 1
+            or not _pin_matches(probe[0][0], expected["agent-legion"], "image_tag")
+            or not _pin_matches(probe[0][1], expected["velites"], "exact")
+            or probe[0][2] != f"worker-v{probe[0][0]}"
+        ):
+            errors.append(
+                "WORKER_VERSION_DEFAULT / VELITES_VERSION_DEFAULT: --help/normal-path 执行失败、安装目录创建或 effective/COMPOSE_REF 不一致"
+            )
     return errors
 
 
 def _field(node: Node | None, key: str, path: str) -> Node:
     if not isinstance(node, MappingNode):
         raise ValueError(f"{path} 应为 mapping")
-    entries = [
-        value for name, value in node.value if isinstance(name, ScalarNode) and name.value == key
-    ]
+    entries = [value for name, value in node.value if getattr(name, "value", None) == key]
     if len(entries) != 1:
         raise ValueError(f"{path}.{key} 出现 {len(entries)} 次（应为 1）")
     return entries[0]
@@ -130,17 +133,13 @@ def compose_errors(root: Path, want: str) -> list[str]:
         try:
             document = yaml.compose(
                 (root / f"deploy/compose.worker.{name}.yaml").read_text(encoding="utf-8"),
-                Loader=yaml.SafeLoader,
+                yaml.SafeLoader,
             )
             worker = _field(_field(document, "services", "root"), "worker", "services")
             image = _field(worker, "image", "services.worker")
             environment = _field(worker, "environment", "services.worker")
             env = _field(environment, "AGENT_WORKER_IMAGE_VERSION", "services.worker.environment")
-            pattern = (
-                rf"\$\{{AGENT_WORKER_IMAGE:-{re.escape(WORKER_IMAGE)}:(?P<version>{_TAG})\}}"
-                if name == "standalone"
-                else rf"{re.escape(WORKER_IMAGE)}:(?P<version>{_TAG})"
-            )
+            pattern = _STANDALONE_PATTERN if name == "standalone" else _FIXED_PATTERN
             for field, node in (("image", image), ("AGENT_WORKER_IMAGE_VERSION", env)):
                 if (
                     not isinstance(node, ScalarNode)
