@@ -46,7 +46,7 @@ INSTALLERS = {
     "VELITES_VERSION_DEFAULT": "printf '  --velites-version VER velites 二进制版本（默认 %s）\\n' \"$VELITES_VERSION_DEFAULT\"",
 }
 ENVIRONMENTS = {"agent-legion": "AGENT_WORKER_VERSION", "velites": "VELITES_VERSION"}
-_PROBE_SCRIPT = r'''docker() { if [ "${1:-} ${2:-} ${3:-}" = "compose version --short" ]; then printf '%s\n' 'v2.29.0'; else printf '%s\n' 'Docker Compose version v2.29.0'; fi; }; curl() { exit 97; }; grep() { return 0; }; uname() { printf '%s\n' 'x86_64'; }; hostname() { printf '%s\n' 'probe'; }; mkdir() { printf 'PROBE WORKER_VERSION=%s VELITES_VERSION=%s COMPOSE_REF=%s\n' "$WORKER_VERSION" "$VELITES_VERSION" "$COMPOSE_REF"; exit 0; }; script="$1"; shift; /bin/sh "$script" --help; . "$script"'''
+_PROBE_SCRIPT = r'''docker() { if [ "${1:-} ${2:-} ${3:-}" = "compose version --short" ]; then printf '%s\n' 'v2.29.0'; else printf '%s\n' 'Docker Compose version v2.29.0'; fi; }; curl() { exit 97; }; grep() { return 0; }; uname() { printf '%s\n' 'x86_64'; }; hostname() { printf '%s\n' 'probe'; }; mkdir() { printf 'PROBE WORKER_VERSION=%s VELITES_VERSION=%s COMPOSE_REF=%s\n' "$WORKER_VERSION" "$VELITES_VERSION" "$COMPOSE_REF"; exit 0; }; script="$1"; shift; /bin/sh "$script" --help || exit $?; . "$script"'''
 
 
 def _pin_matches(found: str, want: str, compare: str) -> bool:

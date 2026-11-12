@@ -595,6 +595,7 @@ mkdir() {
 }
 script="$1"
 shift
+/bin/sh "$script" --help || exit $?
 . "$script"
 """
 
@@ -700,7 +701,7 @@ def test_probe_stubs_do_not_execute_real_docker_curl_or_mkdir(tmp_path: Path) ->
         path = fake_bin / name
         path.write_text(f"#!/bin/sh\ntouch {marker}\n", encoding="utf-8")
         path.chmod(0o755)
-    result = _probe(tmp_path, shell="/bin/sh", env={"PATH": str(fake_bin)})
+    result = _probe(tmp_path, shell="/bin/sh", env={"PATH": f"{fake_bin}:/bin:/usr/bin"})
     assert result.returncode == 0, result.stderr
     assert not marker.exists()
     assert not (tmp_path / "install").exists()
@@ -729,6 +730,30 @@ def test_probe_execution_failures_are_fail_closed(
     assert any(
         "effective" in error or "--help" in error or "超时" in error for error in _errors(tmp_path)
     )
+
+
+@pytest.mark.parametrize("shell", ["sh", "dash"])
+def test_help_nonzero_cannot_be_masked_by_normal_probe(tmp_path: Path, shell: str) -> None:
+    if shutil.which(shell) is None:
+        pytest.skip(f"{shell} is not installed")
+    source = (ROOT / "scripts/install-worker.sh").read_text(encoding="utf-8")
+    source = source.replace("-h|--help) usage; exit 0 ;;", "-h|--help) usage; exit 7 ;;", 1)
+    _write_repo(tmp_path, installer=source)
+    direct = subprocess.run(
+        [shell, str(tmp_path / "scripts/install-worker.sh"), "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert direct.returncode == 7
+    assert "默认 0.8.6" in direct.stdout
+    assert "默认 0.5.11" in direct.stdout
+
+    result = _probe(tmp_path, shell=shell)
+    assert result.returncode == 7, result.stdout + result.stderr
+    assert "PROBE " not in result.stdout
+    assert any("--help" in error or "normal-path" in error for error in _errors(tmp_path))
 
 
 def test_release_pin_gate_is_in_governance_phase() -> None:
