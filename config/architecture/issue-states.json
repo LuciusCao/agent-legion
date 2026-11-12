@@ -1,24 +1,11 @@
 {
   "version": 1,
-  "updated_at": "2026-11-07T04:16:32+00:00",
+  "updated_at": "2026-11-12T05:43:39+00:00",
   "issues": {
-    "github.com/LuciusCao/agent-legion/issues/1002": "open",
-    "github.com/LuciusCao/agent-legion/issues/1003": "open",
-    "github.com/LuciusCao/agent-legion/issues/1005": "open",
-    "github.com/LuciusCao/agent-legion/issues/1008": "open",
-    "github.com/LuciusCao/agent-legion/issues/1009": "open",
-    "github.com/LuciusCao/agent-legion/issues/1010": "open",
-    "github.com/LuciusCao/agent-legion/issues/1011": "open",
-    "github.com/LuciusCao/agent-legion/issues/1012": "open",
-    "github.com/LuciusCao/agent-legion/issues/1016": "open",
-    "github.com/LuciusCao/agent-legion/issues/1030": "open",
     "github.com/LuciusCao/agent-legion/issues/1467": "open",
     "github.com/LuciusCao/agent-legion/issues/349": "open",
     "github.com/LuciusCao/agent-legion/issues/469": "open",
     "github.com/LuciusCao/agent-legion/issues/727": "open",
-    "github.com/LuciusCao/agent-legion/issues/751": "open",
-    "github.com/LuciusCao/agent-legion/issues/993": "open",
-    "github.com/LuciusCao/agent-legion/issues/994": "open",
     "github.com/LuciusCao/agent-legion/issues/997": "open",
     "github.com/LuciusCao/agent-legion/issues/998": "open"
   }
