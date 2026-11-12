@@ -4,9 +4,10 @@
 The Worker image tags use ``check_versions.normalize()`` so PEP 440 and tag-style
 prereleases compare equally; an ``-rN`` image rebuild suffix is also accepted.
 Velites tags instead match its Cargo manifest exactly because the release workflow
-uses that literal version in the tag name. Missing files, malformed manifests, and
-missing or duplicate pins are errors: changing a pinned shape requires updating
-this contract too.
+uses that literal version in the tag name. Discovery and validation are separate:
+every actual assignment or field is counted, including empty or differently quoted
+forms, then the complete value must match its contract (standalone interpolation
+versus fixed Compose scalar). Missing, duplicate, or malformed pins are errors.
 
 This check is deliberately offline and read-only. Release-tag existence remains
 an installer/runtime concern, with explicit version overrides as the escape hatch.
@@ -28,8 +29,14 @@ if str(project_root) not in sys.path:
 from scripts.check_versions import normalize  # noqa: E402
 
 WORKER_IMAGE = "ghcr.io/luciuscao/agent-legion-worker"
-_INSTALLER_VAR = r'^{var}_DEFAULT="(?P<version>[0-9A-Za-z._-]+)"$'
 _IMAGE_REFIX = re.compile(r"^(?P<core>[0-9A-Za-z._-]+)-r\d+$")
+_VALUE_TAIL = r"(?:[ \t]*|[ \t]+#.*)"
+_INSTALLER_VALUE = re.compile(r'"(?P<version>[0-9A-Za-z._-]+)"[ \t]*')
+_STANDALONE_VALUE = re.compile(
+    rf"[ \t]*\$\{{AGENT_WORKER_IMAGE:-{re.escape(WORKER_IMAGE)}:"
+    rf"(?P<version>[^\s}}]+)\}}{_VALUE_TAIL}"
+)
+_FIXED_VALUE = re.compile(rf"[ \t]*{re.escape(WORKER_IMAGE)}:(?P<version>[^\s#]+){_VALUE_TAIL}")
 
 
 @dataclass(frozen=True)
@@ -37,53 +44,49 @@ class Pin:
     label: str
     path: Path
     component: str
-    pattern: re.Pattern[str]
+    discovery: re.Pattern[str]
+    shape: re.Pattern[str]
     where: str
     compare: str = "image_tag"
 
 
 def _installer_pins() -> tuple[Pin, ...]:
     installer = Path("scripts/install-worker.sh")
-    return (
+    return tuple(
         Pin(
-            label="install-worker WORKER_VERSION",
+            label=f"install-worker {variable}",
             path=installer,
-            component="agent-legion",
-            pattern=re.compile(_INSTALLER_VAR.format(var="WORKER_VERSION"), re.M),
-            where="WORKER_VERSION_DEFAULT 默认值",
-        ),
-        Pin(
-            label="install-worker VELITES_VERSION",
-            path=installer,
-            component="velites",
-            pattern=re.compile(_INSTALLER_VAR.format(var="VELITES_VERSION"), re.M),
-            where="VELITES_VERSION_DEFAULT 默认值",
-            compare="exact",
-        ),
+            component="agent-legion" if variable == "WORKER_VERSION" else "velites",
+            discovery=re.compile(
+                rf"^[ \t]*(?P<prefix>(?:(?:export|readonly)[ \t]+)?){variable}_DEFAULT="
+                r"(?P<value>.*)$",
+                re.M,
+            ),
+            shape=_INSTALLER_VALUE,
+            where=f"{variable}_DEFAULT 默认值",
+            compare="exact" if variable == "VELITES_VERSION" else "image_tag",
+        )
+        for variable in ("WORKER_VERSION", "VELITES_VERSION")
     )
 
 
 def _compose_pins() -> tuple[Pin, ...]:
-    pins: list[Pin] = []
-    for name in ("standalone", "pull.example"):
-        path = Path(f"deploy/compose.worker.{name}.yaml")
-        for field in ("image", "AGENT_WORKER_IMAGE_VERSION"):
-            pattern = re.compile(
-                rf"^\s*{field}:\s*"
-                r"(?:\$\{AGENT_WORKER_IMAGE:-)?"
-                rf"{re.escape(WORKER_IMAGE)}:(?P<version>[^\s}}]+)",
+    return tuple(
+        Pin(
+            label=f"compose.worker.{name}.yaml {field}",
+            path=Path(f"deploy/compose.worker.{name}.yaml"),
+            component="agent-legion",
+            discovery=re.compile(
+                rf"^[ \t]*(?P<prefix>(?:-[ \t]+)?[\"']?){field}(?P<suffix>[\"']?):"
+                r"(?P<value>.*)$",
                 re.M,
-            )
-            pins.append(
-                Pin(
-                    label=f"compose.worker.{name}.yaml {field}",
-                    path=path,
-                    component="agent-legion",
-                    pattern=pattern,
-                    where=f"{field}: GHCR 镜像默认 tag",
-                )
-            )
-    return tuple(pins)
+            ),
+            shape=_STANDALONE_VALUE if name == "standalone" else _FIXED_VALUE,
+            where=f"{field}: GHCR 镜像默认 tag",
+        )
+        for name in ("standalone", "pull.example")
+        for field in ("image", "AGENT_WORKER_IMAGE_VERSION")
+    )
 
 
 PINS: tuple[Pin, ...] = _installer_pins() + _compose_pins()
@@ -131,7 +134,7 @@ def pin_errors(root: Path) -> tuple[list[str], list[str]]:
         except OSError as exc:
             errors.append(f"{pin.label}: 读取 {pin.path} 失败：{exc}")
             continue
-        matches = list(pin.pattern.finditer(text))
+        matches = list(pin.discovery.finditer(text))
         if len(matches) != 1:
             errors.append(
                 f"{pin.label}: 在 {pin.path} 找到 {len(matches)} 处 {pin.where} "
@@ -139,7 +142,17 @@ def pin_errors(root: Path) -> tuple[list[str], list[str]]:
                 "scripts/check_release_pins.py"
             )
             continue
-        found = matches[0].group("version")
+        match = matches[0]
+        shaped = None
+        if not match.group("prefix") and not match.groupdict().get("suffix"):
+            shaped = pin.shape.fullmatch(match.group("value"))
+        if shaped is None:
+            errors.append(
+                f"{pin.label}: {pin.path} 的 {pin.where} 完整赋值/字段形态非法"
+                "（空值、引号、插值括号、后缀或垃圾文本不符合契约）"
+            )
+            continue
+        found = shaped.group("version")
         if not _pin_matches(found, want, pin.compare):
             errors.append(
                 f"{pin.label}: {pin.path} 的 {pin.where} 为 {found}，"

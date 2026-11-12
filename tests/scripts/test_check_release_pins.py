@@ -1,4 +1,4 @@
-"""File-only contract tests for the release-pin gate (#504/#1112)."""
+"""Contract tests for release-pin discovery, complete scalar validation, and CLI behavior."""
 
 from __future__ import annotations
 
@@ -251,6 +251,159 @@ def test_real_standalone_retains_image_interpolation() -> None:
     source = (ROOT / "deploy/compose.worker.standalone.yaml").read_text(encoding="utf-8")
     version = check_release_pins.manifest_versions(ROOT)["agent-legion"]
     assert source.count(f"${{AGENT_WORKER_IMAGE:-{WORKER_IMAGE}:{version}}}") == 2
+
+
+def _set_compose_value(document: str, field: str, value: str) -> str:
+    pattern = re.compile(rf"^([ \t]*{field}:).*$", re.M)
+    replaced, count = pattern.subn(rf"\g<1> {value}", document, count=1)
+    assert count == 1
+    return replaced
+
+
+def _duplicate_compose_field(document: str, field: str, duplicate: str) -> str:
+    line = next(line for line in document.splitlines() if line.lstrip().startswith(f"{field}:"))
+    indent = line[: len(line) - len(line.lstrip())]
+    return document.replace(line, f"{line}\n{indent}{duplicate.format(field=field)}", 1)
+
+
+def _write_compose_repo(root: Path, name: str, document: str) -> None:
+    if name == "standalone":
+        _write_repo(root, standalone=document)
+    else:
+        _write_repo(root, pull_example=document)
+
+
+@pytest.mark.parametrize(
+    ("variable", "expected"),
+    [("WORKER_VERSION_DEFAULT", "0.8.6"), ("VELITES_VERSION_DEFAULT", "0.5.11")],
+)
+@pytest.mark.parametrize(
+    "shape",
+    [
+        "{variable}='0.6.0'",
+        '{variable}=""',
+        "{variable}=0.6.0",
+        "export {variable}='0.6.0'",
+        "readonly {variable}='0.6.0'",
+    ],
+)
+def test_installer_discovers_every_duplicate_assignment_shape(
+    tmp_path: Path, variable: str, expected: str, shape: str
+) -> None:
+    original = f'{variable}="{expected}"'
+    duplicate = shape.format(variable=variable)
+    _write_repo(tmp_path, installer=INSTALLER.replace(original, f"{original}\n{duplicate}", 1))
+    errors, _ = pin_errors(tmp_path)
+    assert any(variable in error and "找到 2 处" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("variable", "expected"),
+    [("WORKER_VERSION_DEFAULT", "0.8.6"), ("VELITES_VERSION_DEFAULT", "0.5.11")],
+)
+@pytest.mark.parametrize(
+    "shape",
+    ["{variable}='{expected}'", '{variable}=""', "{variable}={expected}"],
+)
+def test_installer_rejects_invalid_unique_assignment_shape(
+    tmp_path: Path, variable: str, expected: str, shape: str
+) -> None:
+    original = f'{variable}="{expected}"'
+    _write_repo(
+        tmp_path,
+        installer=INSTALLER.replace(
+            original, shape.format(variable=variable, expected=expected), 1
+        ),
+    )
+    errors, _ = pin_errors(tmp_path)
+    assert any(variable in error for error in errors)
+
+
+@pytest.mark.parametrize("field", ["image", "AGENT_WORKER_IMAGE_VERSION"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "${AGENT_WORKER_IMAGE:-ghcr.io/luciuscao/agent-legion-worker:0.8.6}-stale",
+        "${AGENT_WORKER_IMAGE:-ghcr.io/luciuscao/agent-legion-worker:0.8.6",
+        "${AGENT_WORKER_IMAGE:-ghcr.io/luciuscao/agent-legion-worker:0.8.6} trailing",
+        "${AGENT_WORKER_IMAGE:-ghcr.io/luciuscao/agent-legion-worker:0.8.6}}",
+        '""',
+        "",
+    ],
+)
+def test_standalone_consumes_complete_interpolated_scalar(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    document = _set_compose_value(STANDALONE, field, value)
+    _write_compose_repo(tmp_path, "standalone", document)
+    errors, _ = pin_errors(tmp_path)
+    assert any("standalone" in error and field in error for error in errors)
+
+
+@pytest.mark.parametrize("field", ["image", "AGENT_WORKER_IMAGE_VERSION"])
+def test_standalone_rejects_fixed_scalar(tmp_path: Path, field: str) -> None:
+    document = _set_compose_value(STANDALONE, field, f"{WORKER_IMAGE}:0.8.6")
+    _write_compose_repo(tmp_path, "standalone", document)
+    errors, _ = pin_errors(tmp_path)
+    assert any("standalone" in error and field in error for error in errors)
+
+
+@pytest.mark.parametrize("field", ["image", "AGENT_WORKER_IMAGE_VERSION"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "ghcr.io/luciuscao/agent-legion-worker:0.8.6 trailing-junk",
+        "ghcr.io/luciuscao/agent-legion-worker:0.8.6#trailing-junk",
+        "ghcr.io/luciuscao/agent-legion-worker:0.8.6-junk",
+        "ghcr.io/luciuscao/agent-legion-worker:0.8.6}",
+        '"ghcr.io/luciuscao/agent-legion-worker:0.8.6"',
+        "",
+    ],
+)
+def test_pull_example_consumes_complete_fixed_scalar(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    document = _set_compose_value(PULL_EXAMPLE, field, value)
+    _write_compose_repo(tmp_path, "pull.example", document)
+    errors, _ = pin_errors(tmp_path)
+    assert any("pull.example" in error and field in error for error in errors)
+
+
+@pytest.mark.parametrize("field", ["image", "AGENT_WORKER_IMAGE_VERSION"])
+def test_pull_example_rejects_interpolated_scalar(tmp_path: Path, field: str) -> None:
+    value = f"${{AGENT_WORKER_IMAGE:-{WORKER_IMAGE}:0.8.6}}"
+    document = _set_compose_value(PULL_EXAMPLE, field, value)
+    _write_compose_repo(tmp_path, "pull.example", document)
+    errors, _ = pin_errors(tmp_path)
+    assert any("pull.example" in error and field in error for error in errors)
+
+
+@pytest.mark.parametrize("name", ["standalone", "pull.example"])
+@pytest.mark.parametrize("field", ["image", "AGENT_WORKER_IMAGE_VERSION"])
+@pytest.mark.parametrize("duplicate", ['{field}: ""', "'{field}': ''"])
+def test_compose_discovers_empty_and_quoted_duplicate_fields(
+    tmp_path: Path, name: str, field: str, duplicate: str
+) -> None:
+    original = STANDALONE if name == "standalone" else PULL_EXAMPLE
+    document = _duplicate_compose_field(original, field, duplicate)
+    _write_compose_repo(tmp_path, name, document)
+    errors, _ = pin_errors(tmp_path)
+    assert any(name in error and field in error and "找到 2 处" in error for error in errors)
+
+
+@pytest.mark.parametrize("name", ["standalone", "pull.example"])
+@pytest.mark.parametrize("field", ["image", "AGENT_WORKER_IMAGE_VERSION"])
+def test_compose_allows_comment_after_complete_value(tmp_path: Path, name: str, field: str) -> None:
+    if name == "standalone":
+        value = f"${{AGENT_WORKER_IMAGE:-{WORKER_IMAGE}:0.8.6}} # release pin"
+        original = STANDALONE
+    else:
+        value = f"{WORKER_IMAGE}:0.8.6 # release pin"
+        original = PULL_EXAMPLE
+    document = _set_compose_value(original, field, value)
+    _write_compose_repo(tmp_path, name, document)
+    errors, _ = pin_errors(tmp_path)
+    assert errors == []
 
 
 def test_release_pin_gate_is_in_governance_phase() -> None:
