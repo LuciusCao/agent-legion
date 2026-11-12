@@ -23,6 +23,8 @@ WORKER_VERSION_DEFAULT="0.8.6"
 VELITES_VERSION_DEFAULT="0.5.11"
 WORKER_VERSION="${AGENT_WORKER_VERSION:-$WORKER_VERSION_DEFAULT}"
 VELITES_VERSION="${VELITES_VERSION:-$VELITES_VERSION_DEFAULT}"
+printf '  --version TAG         worker 镜像 tag（默认 %s；须存在 worker-v<TAG> 发布 tag）\\n' "$WORKER_VERSION_DEFAULT"
+printf '  --velites-version VER velites 二进制版本（默认 %s）\\n' "$VELITES_VERSION_DEFAULT"
 """
 
 STANDALONE = """\
@@ -575,6 +577,96 @@ def test_installer_comment_assignment_like_is_fail_closed(tmp_path: Path, variab
     _write_repo(tmp_path, installer=INSTALLER.replace(original, commented, 1))
     errors, _ = pin_errors(tmp_path)
     assert any(variable in error and "找到 2 处" in error for error in errors)
+
+
+def _quoted_assignment(form: str, variable: str, value: str) -> str:
+    if form == "export-quoted":
+        return f"export '{variable}'=\"{value}\""
+    if form == "escaped-equals":
+        return f"export {variable}" + "\\" + f'="{value}"'
+    return f"readonly '{variable}'=\"{value}\""
+
+
+@pytest.mark.parametrize(
+    ("variable", "expected"),
+    [("WORKER_VERSION_DEFAULT", "0.8.6"), ("VELITES_VERSION_DEFAULT", "0.5.11")],
+)
+@pytest.mark.parametrize("form", ["export-quoted", "escaped-equals", "readonly-quoted"])
+@pytest.mark.parametrize("value", ["0.6.0", ""], ids=["stale", "empty"])
+def test_installer_discovers_quoted_assignment_duplicates(
+    tmp_path: Path, variable: str, expected: str, form: str, value: str
+) -> None:
+    original = f'{variable}="{expected}"'
+    duplicate = _quoted_assignment(form, variable, value)
+    _write_repo(tmp_path, installer=INSTALLER.replace(original, f"{original}\n{duplicate}", 1))
+    errors, _ = pin_errors(tmp_path)
+    assert any(variable in error and "总出现 4 次" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("variable", "expected"),
+    [("WORKER_VERSION_DEFAULT", "0.8.6"), ("VELITES_VERSION_DEFAULT", "0.5.11")],
+)
+@pytest.mark.parametrize("shell", ["sh", "dash"])
+@pytest.mark.parametrize("form", ["export-quoted", "escaped-equals", "readonly-quoted"])
+def test_installer_quoted_assignment_matches_real_shell_and_gate(
+    tmp_path: Path, variable: str, expected: str, shell: str, form: str
+) -> None:
+    if shutil.which(shell) is None:
+        pytest.skip(f"{shell} is not installed")
+    original = f'{variable}="{expected}"'
+    duplicate = _quoted_assignment(form, variable, "0.6.0")
+    source = (ROOT / "scripts/install-worker.sh").read_text(encoding="utf-8")
+    source = source.replace(original, f"{original}\n{duplicate}", 1)
+    _write_repo(tmp_path)
+    installer = tmp_path / "scripts/install-worker.sh"
+    installer.write_text(source, encoding="utf-8")
+
+    result = subprocess.run([shell, str(installer), "--help"], capture_output=True, text=True)
+    label = "worker 镜像 tag" if variable == "WORKER_VERSION_DEFAULT" else "velites 二进制版本"
+    assert result.returncode == 0, result.stderr
+    assert f"{label}（默认 0.6.0" in result.stdout
+    errors, _ = pin_errors(tmp_path)
+    assert any(variable in error and "总出现 4 次" in error for error in errors)
+
+
+def _purpose_line(source: str, variable: str, kind: str) -> str:
+    if kind == "usage":
+        return next(
+            line
+            for line in source.splitlines()
+            if line.lstrip().startswith("printf") and variable in line
+        )
+    effective = variable.removesuffix("_DEFAULT")
+    return next(line for line in source.splitlines() if line.startswith(f"{effective}="))
+
+
+@pytest.mark.parametrize("variable", ["WORKER_VERSION_DEFAULT", "VELITES_VERSION_DEFAULT"])
+@pytest.mark.parametrize("kind", ["effective", "usage"])
+def test_installer_rejects_changed_allowed_purpose(
+    tmp_path: Path, variable: str, kind: str
+) -> None:
+    source = (ROOT / "scripts/install-worker.sh").read_text(encoding="utf-8")
+    line = _purpose_line(source, variable, kind)
+    changed = (
+        line.replace(":-", ":+", 1) if kind == "effective" else line.replace("printf", "PRINTF", 1)
+    )
+    source = source.replace(line, changed, 1)
+    _write_repo(tmp_path)
+    (tmp_path / "scripts/install-worker.sh").write_text(source, encoding="utf-8")
+    errors, _ = pin_errors(tmp_path)
+    assert any(variable in error for error in errors)
+
+
+@pytest.mark.parametrize("variable", ["WORKER_VERSION_DEFAULT", "VELITES_VERSION_DEFAULT"])
+@pytest.mark.parametrize("kind", ["eval", "comment"])
+def test_installer_counts_name_without_assignment(tmp_path: Path, variable: str, kind: str) -> None:
+    expected = "0.8.6" if variable == "WORKER_VERSION_DEFAULT" else "0.5.11"
+    original = f'{variable}="{expected}"'
+    extra = f"eval 'echo \"${variable}\"'" if kind == "eval" else f"# ${variable}"
+    _write_repo(tmp_path, installer=INSTALLER.replace(original, f"{original}\n{extra}", 1))
+    errors, _ = pin_errors(tmp_path)
+    assert any(variable in error and "总出现 4 次" in error for error in errors)
 
 
 def test_release_pin_gate_is_in_governance_phase() -> None:

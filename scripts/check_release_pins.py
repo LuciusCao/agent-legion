@@ -4,11 +4,12 @@
 The Worker image tags use ``check_versions.normalize()`` so PEP 440 and tag-style
 prereleases compare equally; an ``-rN`` image rebuild suffix is also accepted.
 Velites tags instead match its Cargo manifest exactly because the release workflow
-uses that literal version in the tag name. Discovery and validation are separate.
-Installer discovery counts every same-named assignment-like occurrence, even in
-comments or prose; this deliberate false-positive boundary avoids an incomplete
-shell lexer. Exactly one canonical logical-line declaration must independently
-match. Compose fields are counted and their complete values must match the
+uses that literal version in the tag name. Installer uses an exact-name occurrence
+census plus a three-purpose allowlist: one canonical declaration, one effective
+derivation, and one usage printf must each appear exactly once and explain all
+three occurrences. Quoted, escaped, commented, prose, or eval-text references and
+changed allowed lines fail closed; new legitimate references require updating this
+contract. Compose fields are counted and their complete values must match the
 standalone interpolation or fixed-scalar contract. Installer text is normalized only by POSIX
 backslash-newline removal first; a unique continued assignment is accepted when
 its normalized shape is valid. Compose tags must fullmatch the Docker-compatible
@@ -54,23 +55,30 @@ class Pin:
     shape: re.Pattern[str]
     where: str
     compare: str = "image_tag"
-    logical_shell: bool = False
+    purposes: tuple[str, ...] = ()
 
 
 def _installer_pins() -> tuple[Pin, ...]:
     installer = Path("scripts/install-worker.sh")
     return tuple(
         Pin(
-            label=f"install-worker {variable}",
+            label=f"install-worker {variable.removesuffix('_DEFAULT')}",
             path=installer,
-            component="agent-legion" if variable == "WORKER_VERSION" else "velites",
-            discovery=re.compile(rf"(?<![0-9A-Za-z_]){variable}_DEFAULT="),
-            shape=re.compile(rf'^[ \t]*{variable}_DEFAULT="(?P<version>{_TAG})"[ \t]*$', re.M),
-            where=f"{variable}_DEFAULT 默认值",
-            compare="exact" if variable == "VELITES_VERSION" else "image_tag",
-            logical_shell=True,
+            component="agent-legion" if variable == "WORKER_VERSION_DEFAULT" else "velites",
+            discovery=re.compile(rf"(?<![0-9A-Za-z_]){variable}(?![0-9A-Za-z_])"),
+            shape=re.compile(rf'^[ \t]*{variable}="(?P<version>{_TAG})"[ \t]*$', re.M),
+            where=f"{variable} 默认值",
+            compare="exact" if variable == "VELITES_VERSION_DEFAULT" else "image_tag",
+            purposes=(
+                'WORKER_VERSION="${AGENT_WORKER_VERSION:-$WORKER_VERSION_DEFAULT}"'
+                if variable == "WORKER_VERSION_DEFAULT"
+                else 'VELITES_VERSION="${VELITES_VERSION:-$VELITES_VERSION_DEFAULT}"',
+                "printf '  --version TAG         worker 镜像 tag（默认 %s；须存在 worker-v<TAG> 发布 tag）\\n' \"$WORKER_VERSION_DEFAULT\""
+                if variable == "WORKER_VERSION_DEFAULT"
+                else "printf '  --velites-version VER velites 二进制版本（默认 %s）\\n' \"$VELITES_VERSION_DEFAULT\"",
+            ),
         )
-        for variable in ("WORKER_VERSION", "VELITES_VERSION")
+        for variable in ("WORKER_VERSION_DEFAULT", "VELITES_VERSION_DEFAULT")
     )
 
 
@@ -138,22 +146,26 @@ def pin_errors(root: Path) -> tuple[list[str], list[str]]:
         except OSError as exc:
             errors.append(f"{pin.label}: 读取 {pin.path} 失败：{exc}")
             continue
-        text = text.replace("\\" + "\n", "") if pin.logical_shell else text
+        text = text.replace("\\" + "\n", "") if pin.purposes else text
         matches = list(pin.discovery.finditer(text))
-        if len(matches) != 1:
+        if len(matches) != (3 if pin.purposes else 1):
+            found = max(0, len(matches) - len(pin.purposes)) if pin.purposes else len(matches)
             errors.append(
-                f"{pin.label}: 在 {pin.path} 找到 {len(matches)} 处 {pin.where} "
-                "钉点（应为 1）——钉点形态即契约，改形态必须同步更新 "
-                "scripts/check_release_pins.py"
+                f"{pin.label}: 在 {pin.path} 找到 {found} 处 {pin.where} "
+                f"（变量名总出现 {len(matches)} 次，应为 {3 if pin.purposes else 1}）"
+                "——钉点形态即契约，改形态必须同步更新 scripts/check_release_pins.py"
             )
             continue
-        match = matches[0]
         shaped = None
-        if pin.logical_shell:
+        if pin.purposes:
             canonical = list(pin.shape.finditer(text))
-            shaped = canonical[0] if len(canonical) == 1 else None
-        elif not match.group("prefix") and not match.groupdict().get("suffix"):
-            shaped = pin.shape.fullmatch(match.group("value"))
+            if len(canonical) == 1 and all(
+                sum(line.strip() == purpose for line in text.splitlines()) == 1
+                for purpose in pin.purposes
+            ):
+                shaped = canonical[0]
+        elif not matches[0].group("prefix") and not matches[0].groupdict().get("suffix"):
+            shaped = pin.shape.fullmatch(matches[0].group("value"))
         if shaped is None:
             errors.append(
                 f"{pin.label}: {pin.path} 的 {pin.where} 完整赋值/字段形态非法"
