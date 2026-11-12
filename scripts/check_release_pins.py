@@ -7,7 +7,11 @@ Velites tags instead match its Cargo manifest exactly because the release workfl
 uses that literal version in the tag name. Discovery and validation are separate:
 every actual assignment or field is counted, including empty or differently quoted
 forms, then the complete value must match its contract (standalone interpolation
-versus fixed Compose scalar). Missing, duplicate, or malformed pins are errors.
+versus fixed Compose scalar). Installer text is normalized only by POSIX
+backslash-newline removal first; a unique continued assignment is accepted when
+its normalized shape is valid. Compose tags must fullmatch the Docker-compatible
+character set before version normalization, so PEP 440 local suffixes are not
+accepted as Docker tags. Missing, duplicate, or malformed pins are errors.
 
 This check is deliberately offline and read-only. Release-tag existence remains
 an installer/runtime concern, with explicit version overrides as the escape hatch.
@@ -29,14 +33,15 @@ if str(project_root) not in sys.path:
 from scripts.check_versions import normalize  # noqa: E402
 
 WORKER_IMAGE = "ghcr.io/luciuscao/agent-legion-worker"
-_IMAGE_REFIX = re.compile(r"^(?P<core>[0-9A-Za-z._-]+)-r\d+$")
+_TAG = r"[0-9A-Za-z._-]+"
+_IMAGE_REFIX = re.compile(rf"^(?P<core>{_TAG})-r\d+$")
 _VALUE_TAIL = r"(?:[ \t]*|[ \t]+#.*)"
-_INSTALLER_VALUE = re.compile(r'"(?P<version>[0-9A-Za-z._-]+)"[ \t]*')
+_INSTALLER_VALUE = re.compile(rf'"(?P<version>{_TAG})"[ \t]*')
 _STANDALONE_VALUE = re.compile(
     rf"[ \t]*\$\{{AGENT_WORKER_IMAGE:-{re.escape(WORKER_IMAGE)}:"
-    rf"(?P<version>[^\s}}]+)\}}{_VALUE_TAIL}"
+    rf"(?P<version>{_TAG})\}}{_VALUE_TAIL}"
 )
-_FIXED_VALUE = re.compile(rf"[ \t]*{re.escape(WORKER_IMAGE)}:(?P<version>[^\s#]+){_VALUE_TAIL}")
+_FIXED_VALUE = re.compile(rf"[ \t]*{re.escape(WORKER_IMAGE)}:(?P<version>{_TAG}){_VALUE_TAIL}")
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,7 @@ class Pin:
     shape: re.Pattern[str]
     where: str
     compare: str = "image_tag"
+    logical_shell: bool = False
 
 
 def _installer_pins() -> tuple[Pin, ...]:
@@ -65,6 +71,7 @@ def _installer_pins() -> tuple[Pin, ...]:
             shape=_INSTALLER_VALUE,
             where=f"{variable}_DEFAULT 默认值",
             compare="exact" if variable == "VELITES_VERSION" else "image_tag",
+            logical_shell=True,
         )
         for variable in ("WORKER_VERSION", "VELITES_VERSION")
     )
@@ -134,6 +141,7 @@ def pin_errors(root: Path) -> tuple[list[str], list[str]]:
         except OSError as exc:
             errors.append(f"{pin.label}: 读取 {pin.path} 失败：{exc}")
             continue
+        text = text.replace("\\" + "\n", "") if pin.logical_shell else text
         matches = list(pin.discovery.finditer(text))
         if len(matches) != 1:
             errors.append(

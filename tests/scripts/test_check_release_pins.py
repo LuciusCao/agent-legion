@@ -1,8 +1,9 @@
-"""Contract tests for release-pin discovery, complete scalar validation, and CLI behavior."""
+"""Contract tests for pin discovery, POSIX logical lines, scalar/tag validation, and CLI."""
 
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -404,6 +405,100 @@ def test_compose_allows_comment_after_complete_value(tmp_path: Path, name: str, 
     _write_compose_repo(tmp_path, name, document)
     errors, _ = pin_errors(tmp_path)
     assert errors == []
+
+
+def _continued_assignment(variable: str, value: str, *, internal: bool = False) -> str:
+    continuation = "\\" + "\n"
+    if internal:
+        name = variable.replace("_DEFAULT", f"_{continuation}DEFAULT")
+        return f'{name}="{value}"'
+    return f'{variable}{continuation}="{value}"'
+
+
+@pytest.mark.parametrize(
+    ("variable", "expected"),
+    [("WORKER_VERSION_DEFAULT", "0.8.6"), ("VELITES_VERSION_DEFAULT", "0.5.11")],
+)
+@pytest.mark.parametrize("internal", [False, True], ids=["before-equals", "inside-name"])
+@pytest.mark.parametrize("value", ["0.6.0", ""], ids=["stale", "empty"])
+def test_installer_discovers_continued_duplicate_assignments(
+    tmp_path: Path, variable: str, expected: str, internal: bool, value: str
+) -> None:
+    original = f'{variable}="{expected}"'
+    duplicate = _continued_assignment(variable, value, internal=internal)
+    _write_repo(tmp_path, installer=INSTALLER.replace(original, f"{original}\n{duplicate}", 1))
+    errors, _ = pin_errors(tmp_path)
+    assert any(variable in error and "找到 2 处" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("variable", "expected"),
+    [("WORKER_VERSION_DEFAULT", "0.8.6"), ("VELITES_VERSION_DEFAULT", "0.5.11")],
+)
+@pytest.mark.parametrize("internal", [False, True], ids=["before-equals", "inside-name"])
+@pytest.mark.parametrize("outcome", ["current", "stale", "empty"])
+def test_installer_unique_continuation_follows_normalized_shape(
+    tmp_path: Path, variable: str, expected: str, internal: bool, outcome: str
+) -> None:
+    value = {"current": expected, "stale": "0.6.0", "empty": ""}[outcome]
+    original = f'{variable}="{expected}"'
+    continued = _continued_assignment(variable, value, internal=internal)
+    _write_repo(tmp_path, installer=INSTALLER.replace(original, continued, 1))
+    errors, _ = pin_errors(tmp_path)
+    if outcome == "current":
+        assert errors == []
+    else:
+        assert any(variable in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("variable", "expected"),
+    [("WORKER_VERSION_DEFAULT", "0.8.6"), ("VELITES_VERSION_DEFAULT", "0.5.11")],
+)
+@pytest.mark.parametrize("shell", ["sh", "dash"])
+@pytest.mark.parametrize("duplicate", [True, False], ids=["duplicate-stale", "unique-current"])
+def test_installer_continuation_matches_real_shell_and_gate(
+    tmp_path: Path, variable: str, expected: str, shell: str, duplicate: bool
+) -> None:
+    if shutil.which(shell) is None:
+        pytest.skip(f"{shell} is not installed")
+    original = f'{variable}="{expected}"'
+    continued = _continued_assignment(variable, "0.6.0" if duplicate else expected)
+    replacement = f"{original}\n{continued}" if duplicate else continued
+    source = (ROOT / "scripts/install-worker.sh").read_text(encoding="utf-8")
+    source = source.replace(original, replacement, 1)
+    _write_repo(tmp_path)
+    installer = tmp_path / "scripts/install-worker.sh"
+    installer.write_text(source, encoding="utf-8")
+
+    result = subprocess.run([shell, str(installer), "--help"], capture_output=True, text=True)
+    expected_version = "0.6.0" if duplicate else expected
+    label = "worker 镜像 tag" if variable == "WORKER_VERSION_DEFAULT" else "velites 二进制版本"
+    assert result.returncode == 0, result.stderr
+    assert f"{label}（默认 {expected_version}" in result.stdout
+    errors, _ = pin_errors(tmp_path)
+    if duplicate:
+        assert any(variable in error and "找到 2 处" in error for error in errors)
+    else:
+        assert errors == []
+
+
+@pytest.mark.parametrize("name", ["standalone", "pull.example"])
+@pytest.mark.parametrize("field", ["image", "AGENT_WORKER_IMAGE_VERSION"])
+def test_compose_rejects_docker_incompatible_local_suffix(
+    tmp_path: Path, name: str, field: str
+) -> None:
+    tag = "0.8.6+0.6.0"
+    if name == "standalone":
+        value = f"${{AGENT_WORKER_IMAGE:-{WORKER_IMAGE}:{tag}}}"
+        original = STANDALONE
+    else:
+        value = f"{WORKER_IMAGE}:{tag}"
+        original = PULL_EXAMPLE
+    document = _set_compose_value(original, field, value)
+    _write_compose_repo(tmp_path, name, document)
+    errors, _ = pin_errors(tmp_path)
+    assert any(name in error and field in error for error in errors)
 
 
 def test_release_pin_gate_is_in_governance_phase() -> None:
