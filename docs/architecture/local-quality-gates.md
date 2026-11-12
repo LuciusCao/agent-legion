@@ -39,7 +39,7 @@ other selected lanes run their own checks. Local trimming therefore does not
 reduce server-side coverage for applicable changes.
 
 Lane trimming never covers the repo-wide governance checks (issue #1201):
-`check_invariants`, `check_versions`, `check_architecture` and
+`check_invariants`, `check_versions`, `check_release_pins`, `check_architecture` and
 `generate_architecture --check` govern frontend, velites and docs files too
 (frontend file budgets, the `*.test.ts` 1000-line cap, version manifests,
 docs freshness), but they run inside the backend lane's static phase — a
@@ -353,7 +353,13 @@ release-train `HEAD`-only exception.
 - **backend-unit** — static checks (ruff, format, mypy, architecture contracts,
   invariant registry, spec health, version-manifest consistency via
   `scripts/check_versions.py` — the decoupled versioning discipline for
-  velites/frontend, see CONTRIBUTING "House rules") plus the
+  velites/frontend, see CONTRIBUTING "House rules" — and offline, fail-closed
+  release-pin consistency via `scripts/check_release_pins.py`, which executes only
+  the supported side-effect-free installer `--help` and first-mkdir probe paths in
+  an isolated, timeout-bounded environment (the latter validates final effective
+  Worker/velites/COMPOSE_REF with command stubs) and validates Compose structure
+  with PyYAML node trees (installer defaults plus `image` and `AGENT_WORKER_IMAGE_VERSION` in both
+  the standalone and pull-example Compose files, #504/#1112) plus the
   PostgreSQL-offline unit tier (`GATE_TIER=unit`), uploading its coverage
   data file as a 1-day artifact. Like the other sandbox lanes, it runs on the
   validated `ubuntu-24.04` runner, installs bubblewrap and enables unprivileged
@@ -411,7 +417,7 @@ release-train `HEAD`-only exception.
   backend lane is off and skips otherwise — the exact complement of the
   `check_architecture` static round inside `backend-unit`.
 - **governance-guard** — the repo-wide governance checks
-  (`BACKEND_GATE_PHASE=governance`: `check_invariants`, `check_versions`,
+  (`BACKEND_GATE_PHASE=governance`: `check_invariants`, `check_versions`, `check_release_pins`,
   `check_architecture`, `generate_architecture --check`) as a standalone job
   (issue #1201). They govern frontend/velites/docs files too, so they must
   run even when a path trim turns the backend lane off; when the lane is on,

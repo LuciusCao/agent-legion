@@ -1053,6 +1053,7 @@
     "scripts/check_coverage_partitions.py": 219,
     "scripts/check_exemption_age.py": 57,
     "scripts/check_invariants.py": 69,
+    "scripts/check_release_pins.py": 140,
     "scripts/check_reruns.py": 165,
     "scripts/check_versions.py": 219,
     "scripts/e2e/_backend_factory.py": 15,

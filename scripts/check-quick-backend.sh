@@ -27,6 +27,10 @@ run_governance_checks() {
   # 禁止锁步 bump——无谓的版本前进会击穿 velites 二进制指纹与 Docker 缓存层）。
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_versions || failed=1
 
+  echo "=== Release Pins ==="
+  # 安装器与 Compose 的消费者侧默认版本必须跟随当前清单（#504/#1112）。
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_release_pins || failed=1
+
   echo "=== Architecture Contracts ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_architecture || failed=1
 
