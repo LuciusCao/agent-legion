@@ -20,6 +20,7 @@ from server.app.workflows.definition import (
     WorkflowNode,
 )
 from tests.helpers import scan_entries
+from tests.helpers.sharding import poll_until as _poll_until
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -371,11 +372,13 @@ def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -
     worker = _make_worker(tmp_path, db_path, executor, [definition], code_capacity=4)
     block_event.set()
 
-    for _ in range(20):
-        worker._poll()
+    def job_paused_or_completed() -> bool:
         job_after = job_db.get_job(job["id"])
-        if job_after and job_after["status"] in ("paused", "completed"):
-            break
+        return job_after is not None and job_after["status"] in ("paused", "completed")
+
+    assert _poll_until(worker, job_paused_or_completed), (
+        f"job={job_db.get_job(job['id'])!r}; nodes={job_db.list_job_nodes(job['id'])!r}"
+    )
 
     worker.stop()
 
