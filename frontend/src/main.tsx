@@ -18,9 +18,7 @@ if (!root) throw new Error('App root not found')
 createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
+      <BrowserRouter>
         <ThemeProvider theme={theme}>
           <CssBaseline />
           <App />

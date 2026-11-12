@@ -12,6 +12,10 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -56,3 +60,32 @@ def sandboxed(monkeypatch: pytest.MonkeyPatch) -> None:
         "server.app.executors._code_sandbox.resolve_sandbox_binary",
         lambda: str(binary),
     )
+
+
+@contextmanager
+def loopback_http_service() -> Iterator[tuple[str, list[str]]]:
+    """Serve ``ok`` on an ephemeral host-loopback port and record request paths."""
+    requests: list[str] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            requests.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, _format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}", requests
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=10)
+        assert not thread.is_alive()

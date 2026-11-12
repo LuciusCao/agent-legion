@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import pytest
 from fastapi import APIRouter, Depends
+from pydantic import ValidationError
 
 from server.app.auth import scoped_tokens
 from server.app.auth.workspace_access import require_workspace_access
+from server.app.routes.studio_agent_job_tool_contracts import StudioAgentJobNode
 from server.app.routes.studio_agent_job_tools import create_studio_agent_job_tools_router
 from tests.helpers import publish_builtin_revision
 from tests.helpers.seed import insert_job, insert_workspace
@@ -77,6 +79,40 @@ def _scoped_client(client, job_db, workspace_id: str | None = None):
     scoped = client.__class__(client.app)
     scoped.headers["authorization"] = f"Bearer {token}"
     return scoped, admin_id
+
+
+def _studio_node_kwargs(**overrides):
+    return {
+        "node_key": "node-1",
+        "label": "Node 1",
+        "capability": "capability",
+        "status": "running",
+        "error_message": "",
+        "inputs": [],
+        "outputs": [],
+        "execution_type": None,
+        "executor_kind": None,
+        "agent_id": None,
+        **overrides,
+    }
+
+
+@pytest.mark.parametrize("retired", ["pi", "openclaw"])
+def test_studio_agent_job_node_rejects_retired_executor_kinds(retired: str) -> None:
+    with pytest.raises(ValidationError):
+        StudioAgentJobNode(**_studio_node_kwargs(executor_kind=retired))
+
+
+@pytest.mark.parametrize("execution_type", ["code", "agent", None])
+def test_studio_agent_job_node_accepts_execution_type(execution_type: str | None) -> None:
+    node = StudioAgentJobNode(**_studio_node_kwargs(execution_type=execution_type))
+    assert node.execution_type == execution_type
+
+
+@pytest.mark.parametrize("invalid", ["pi", "openclaw", "remote"])
+def test_studio_agent_job_node_rejects_unknown_execution_types(invalid: str) -> None:
+    with pytest.raises(ValidationError):
+        StudioAgentJobNode(**_studio_node_kwargs(execution_type=invalid))
 
 
 def _seed_workspace(job_db, workspace_id: str) -> None:
@@ -224,8 +260,13 @@ def test_get_job_detail_trims_payload_and_suggests_rerun(tools_client) -> None:
     assert "log_path" not in payload["runs"][0]
     assert payload["runs"][0]["id"] == run_id
     assert payload["runs"][0]["has_log"] is True
-    node = next(n for n in payload["nodes"] if n["node_key"] == "write_script")
+    nodes = {n["node_key"]: n for n in payload["nodes"]}
+    node = nodes["write_script"]
+    assert node["execution_type"] == "agent"
+    assert node["executor_kind"] is None
     assert node["error_message"] == "LLM timeout"
+    assert nodes["intake_knowledge_points"]["execution_type"] == "code"
+    assert nodes["intake_knowledge_points"]["executor_kind"] == "code"
     assert payload["suggested_actions"] == [
         {
             "action": "rerun_node",
@@ -263,6 +304,91 @@ def test_list_jobs_filters_status_and_caps_limit(tools_client) -> None:
     payload = response.json()
     assert payload["returned"] == 1
     assert [job["id"] for job in payload["jobs"]] == ["job-bad"]
+    # Everything fits in one page: no further page is offered.
+    assert payload["next_cursor"] is None
+
+
+def test_list_jobs_paginates_with_next_cursor(tools_client) -> None:
+    """#1261: pages beyond the first stay reachable — following next_cursor
+    walks the whole list, and the union of pages covers every job."""
+    job_db = tools_client.app.state.job_db
+    _seed_workspace(job_db, "ws-paged")
+    for index in range(1, 6):
+        _seed_job(
+            job_db,
+            workspace_id="ws-paged",
+            job_id=f"job-{index}",
+            job_status="completed",
+            nodes=[],
+        )
+    with job_db.connect() as conn:
+        for index in range(1, 6):
+            conn.execute(
+                "update jobs set created_at=%s where id=%s",
+                (f"2026-01-01 00:00:0{index}+00", f"job-{index}"),
+            )
+    scoped, _ = _scoped_client(tools_client, job_db)
+    url = "/api/studio-agent/tools/workspaces/ws-paged/jobs"
+
+    page1 = scoped.get(url, params={"limit": 2}).json()
+    assert [job["id"] for job in page1["jobs"]] == ["job-5", "job-4"]
+    assert page1["returned"] == 2
+    assert page1["next_cursor"] is not None
+
+    page2 = scoped.get(url, params={"limit": 2, "cursor": page1["next_cursor"]}).json()
+    assert [job["id"] for job in page2["jobs"]] == ["job-3", "job-2"]
+    assert page2["next_cursor"] is not None
+
+    page3 = scoped.get(url, params={"limit": 2, "cursor": page2["next_cursor"]}).json()
+    assert [job["id"] for job in page3["jobs"]] == ["job-1"]
+    assert page3["next_cursor"] is None
+
+    paged_ids = [job["id"] for page in (page1, page2, page3) for job in page["jobs"]]
+    assert sorted(paged_ids) == [f"job-{index}" for index in range(1, 6)]
+
+
+def test_list_jobs_cursor_keeps_status_filter(tools_client) -> None:
+    job_db = tools_client.app.state.job_db
+    _seed_workspace(job_db, "ws-paged-filter")
+    for index in range(1, 5):
+        _seed_job(
+            job_db,
+            workspace_id="ws-paged-filter",
+            job_id=f"job-{index}",
+            job_status="failed" if index % 2 else "completed",
+            nodes=[],
+        )
+    with job_db.connect() as conn:
+        for index in range(1, 5):
+            conn.execute(
+                "update jobs set created_at=%s where id=%s",
+                (f"2026-01-01 00:00:0{index}+00", f"job-{index}"),
+            )
+    scoped, _ = _scoped_client(tools_client, job_db)
+    url = "/api/studio-agent/tools/workspaces/ws-paged-filter/jobs"
+
+    page1 = scoped.get(url, params={"status": "failed", "limit": 1}).json()
+    assert [job["id"] for job in page1["jobs"]] == ["job-3"]
+    assert page1["next_cursor"] is not None
+
+    page2 = scoped.get(
+        url, params={"status": "failed", "limit": 1, "cursor": page1["next_cursor"]}
+    ).json()
+    assert [job["id"] for job in page2["jobs"]] == ["job-1"]
+    assert page2["next_cursor"] is None
+
+
+def test_list_jobs_rejects_malformed_cursor(tools_client) -> None:
+    job_db = tools_client.app.state.job_db
+    _seed_workspace(job_db, "ws-bad-cursor")
+    scoped, _ = _scoped_client(tools_client, job_db)
+
+    response = scoped.get(
+        "/api/studio-agent/tools/workspaces/ws-bad-cursor/jobs",
+        params={"cursor": "not-a-cursor"},
+    )
+
+    assert response.status_code == 422
 
 
 def test_get_node_logs_defaults_to_latest_failed_run(tools_client) -> None:
@@ -417,6 +543,8 @@ def test_get_job_context_binds_session_workspace_and_focus(tools_client) -> None
     assert payload["workspace_id"] == "ws-ctx"
     assert payload["focus_node_key"] == "write_script"
     assert payload["job"]["job"]["id"] == "job-1"
+    assert payload["job"]["nodes"][0]["execution_type"] == "agent"
+    assert payload["job"]["nodes"][0]["executor_kind"] is None
     assert payload["job"]["suggested_actions"][0]["action"] == "rerun_node"
     assert payload["recent_failures"] == []
 

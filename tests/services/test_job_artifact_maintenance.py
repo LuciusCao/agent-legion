@@ -26,6 +26,7 @@ from server.app.services.job_artifact_maintenance import (
 )
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from tests.fakes.artifact_keys import manifest_bytes, manifest_key
+from tests.fakes.artifact_rows import seed_artifact_row
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -170,7 +171,8 @@ _GZ_KEY = "jobs/ws-1/job-1/out.json.gz"
 def _seed_gz_row(store: JobArtifactObjectStore, storage: FakeStorage, payload: bytes) -> None:
     """登记一条 .gz 形态清单行：size_bytes=压缩后、content_hash=未压缩。"""
     storage.objects[_GZ_KEY] = gzip.compress(payload)
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id="ws-1",
         job_id="job-1",
         node_key="n1",

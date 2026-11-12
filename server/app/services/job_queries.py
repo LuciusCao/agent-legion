@@ -83,16 +83,23 @@ class JobQueryService:
         completed_nodes = sum(1 for summary in summaries if summary["status"] == "completed")
         total_nodes = len(summaries)
 
+        # 「当前节点」解析优先级与 scheduler summarize_job_status 对齐
+        # （#1277）：running → failed → awaiting_approval → ready。
+        # failed 保持既有优先——并行分支「一边 awaiting_approval、一边
+        # failed」时 job 级状态是 failed，active 节点也指向失败节点；
+        # awaiting_approval/ready 同属「执行面当前所在」——停在审批门或
+        # 就绪待跑时当前节点是门/就绪节点本身，不能落到下游首个 pending。
+        # 同优先级内的 tie-break 是 job_nodes.id（插入序，#1294），与
+        # job_filtering._ACTIVE_NODE_CLAUSE / facet node_counts 共享同一
+        # 语义：声明/插入序不保证等于拓扑序，而 SQL 侧无法复现拓扑位次
+        # （边不在关系表里），故摘要侧向 id 序对齐，保证 ?active_node_key=
+        # 过滤、facet 计数与列表行三者一致。
         active_node_key: str | None = None
-        for summary in summaries:
-            if summary["status"] == "running":
-                active_node_key = summary["node_key"]
+        for active_status in ("running", "failed", "awaiting_approval", "ready"):
+            candidates = [node for node in nodes if str(node["status"]) == active_status]
+            if candidates:
+                active_node_key = str(min(candidates, key=lambda node: node["id"])["node_key"])
                 break
-        if active_node_key is None:
-            for summary in summaries:
-                if summary["status"] == "failed":
-                    active_node_key = summary["node_key"]
-                    break
 
         error_summary = ""
         if active_node_key is not None:

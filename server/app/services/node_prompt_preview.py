@@ -20,7 +20,7 @@ from server.app.jobs import JobQueries
 from server.app.services.agent_node_profile import resolve_agent_node_profile
 from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
-from server.app.services.workflow_draft_store import save_workflow_draft
+from server.app.services.workflow_draft_cas import save_workflow_draft_if_unchanged
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
 from server.app.workflows.definition import workflow_definition_from_dict
 from server.app.workflows.node_prompt import build_default_node_instructions
@@ -156,10 +156,21 @@ def save_node_prompt(
     the node falls back to the auto-assembled default instructions. #513:
     ``prompt_mode`` (append/overwrite) may be set alongside; ``None`` leaves
     the stored mode untouched. The new draft is fully built and validated
-    before the single upsert applies it.
+    before the single upsert applies it. The save is compare-and-set on the
+    read-time draft generation (#1226 五轮收口): a publish (or another save)
+    advancing the generation between the read and the write refuses this
+    stale-base write with a conflict instead of resurrecting the deleted
+    content or overwriting a newer draft.
     """
-    draft = job_db.get_workspace_workflow_draft(workspace_id)
-    base_yaml = str(draft["definition_yaml"]) if draft is not None else None
+    draft = job_db.get_workspace_workflow_draft_state(workspace_id)
+    # CAS base = 读取时刻的草稿代次——与内容读同一快照（#1226 六轮 codex
+    # P1：拆分读会让并发保存后的新代次配给 null 内容，本次写入会 CAS 成功、
+    # 静默覆盖从未看到的草稿）。读-判-写之间发布删行推进代次 → 本次写入
+    # 409 而不是重建旧内容（#1226 五轮收口）。
+    base_generation = int(draft["generation"])
+    base_yaml = draft["definition_yaml"]
+    if base_yaml is not None:
+        base_yaml = str(base_yaml)
     if base_yaml is None:
         workspace = job_db.get_workspace(workspace_id)
         if workspace is None:
@@ -190,7 +201,9 @@ def save_node_prompt(
     updated_definition = replace(
         base_definition, nodes={**base_definition.nodes, node_key: updated_node}
     )
-    saved = save_workflow_draft(job_db, workspace_id, definition_to_yaml(updated_definition))
+    saved = save_workflow_draft_if_unchanged(
+        job_db, workspace_id, definition_to_yaml(updated_definition), base_generation
+    )
     return {
         "node_key": node_key,
         "is_default": not prompt.strip(),

@@ -922,6 +922,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/jobs/{job_id}/raw-artifacts/{artifact_name}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Artifact Raw Nested */
+    get: operations['get_artifact_raw_nested_api_jobs__job_id__raw_artifacts__artifact_name__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/jobs/{job_id}/run-to': {
     parameters: {
       query?: never
@@ -1974,6 +1991,142 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/job-batch-operations': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Job Batch Operations */
+    get: operations['list_job_batch_operations_api_workspaces__workspace_id__job_batch_operations_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Job Batch Operation */
+    get: operations['get_job_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/archive': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Archive Job Batch Operation */
+    post: operations['archive_job_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__archive_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/cancel': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Cancel Batch Operation */
+    post: operations['cancel_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__cancel_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/pause': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Pause Batch Operation */
+    post: operations['pause_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__pause_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/results': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Job Batch Operation Results */
+    get: operations['list_job_batch_operation_results_api_workspaces__workspace_id__job_batch_operations__op_id__results_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/resume': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Resume Batch Operation */
+    post: operations['resume_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__resume_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/retry-failed': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Retry Failed Batch Operation */
+    post: operations['retry_failed_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__retry_failed_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/job-batches': {
     parameters: {
       query?: never
@@ -2025,6 +2178,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/jobs/batch-approve': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Batch Approve */
+    post: operations['batch_approve_api_workspaces__workspace_id__jobs_batch_approve_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/jobs/batch-pause': {
     parameters: {
       query?: never
@@ -2036,6 +2206,23 @@ export interface paths {
     put?: never
     /** Batch Pause Workspace Jobs */
     post: operations['batch_pause_workspace_jobs_api_workspaces__workspace_id__jobs_batch_pause_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/jobs/batch-reject': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Batch Reject */
+    post: operations['batch_reject_api_workspaces__workspace_id__jobs_batch_reject_post']
     delete?: never
     options?: never
     head?: never
@@ -2808,6 +2995,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/run-batches': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Run Batches */
+    get: operations['list_run_batches_api_workspaces__workspace_id__run_batches_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/run-batches/{run_id}/archive': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Archive Run Batch */
+    post: operations['archive_run_batch_api_workspaces__workspace_id__run_batches__run_id__archive_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/runs': {
     parameters: {
       query?: never
@@ -2837,6 +3058,57 @@ export interface paths {
     get: operations['get_run_api_workspaces__workspace_id__runs__run_id__get']
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/runs/{run_id}/cancel': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Cancel Run Batch */
+    post: operations['cancel_run_batch_api_workspaces__workspace_id__runs__run_id__cancel_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/runs/{run_id}/pause': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Pause Run Batch */
+    post: operations['pause_run_batch_api_workspaces__workspace_id__runs__run_id__pause_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/runs/{run_id}/resume': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Resume Run Batch */
+    post: operations['resume_run_batch_api_workspaces__workspace_id__runs__run_id__resume_post']
     delete?: never
     options?: never
     head?: never
@@ -3180,6 +3452,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages/{message_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Message */
+    get: operations['get_message_api_workspaces__workspace_id__studio_chat_sessions__session_id__messages__message_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/mode': {
     parameters: {
       query?: never
@@ -3445,6 +3734,57 @@ export interface paths {
     }
     /** Get Workflow Revision Detail */
     get: operations['get_workflow_revision_detail_api_workspaces__workspace_id__workflow_revisions__revision_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/workflow-runtime': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    /** Save Runtime */
+    patch: operations['save_runtime_api_workspaces__workspace_id__workflow_runtime_patch']
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/workflow-runtime/rollback': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Rollback Runtime */
+    post: operations['rollback_runtime_api_workspaces__workspace_id__workflow_runtime_rollback_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/workflow-runtime/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Runtime Versions */
+    get: operations['list_runtime_versions_api_workspaces__workspace_id__workflow_runtime_versions_get']
     put?: never
     post?: never
     delete?: never
@@ -3894,6 +4234,27 @@ export interface components {
       /** Requests Per Minute */
       requests_per_minute: number
     }
+    /** ApprovalBatchResultResponse */
+    ApprovalBatchResultResponse: {
+      /** Job Id */
+      job_id: string
+      /** Message */
+      message?: string | null
+      /** Node Key */
+      node_key?: string | null
+      /**
+       * Operation
+       * @enum {string}
+       */
+      operation: 'approve' | 'reject'
+      /** Reason Code */
+      reason_code?: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'succeeded' | 'skipped' | 'failed'
+    }
     /** ApprovalDecisionCreateRequest */
     ApprovalDecisionCreateRequest: {
       /**
@@ -3901,6 +4262,10 @@ export interface components {
        * @default
        */
       note: string
+      /** Payload */
+      payload?: {
+        [key: string]: unknown
+      }
       /**
        * Rework Target
        * @default
@@ -3919,6 +4284,10 @@ export interface components {
     }
     /** ApprovalDecisionResponse */
     ApprovalDecisionResponse: {
+      /** Batch Id */
+      batch_id?: string | null
+      /** Batch Selection */
+      batch_selection?: ('ids' | 'filter') | null
       /** Created At */
       created_at?: string | null
       /** Decided By */
@@ -3931,6 +4300,10 @@ export interface components {
       node_key: string
       /** Note */
       note: string
+      /** Payload */
+      payload?: {
+        [key: string]: unknown
+      }
       /** Rework Target */
       rework_target: string
       /**
@@ -3960,6 +4333,24 @@ export interface components {
     BatchAgentClaimResponse: {
       /** Claims */
       claims: components['schemas']['AgentClaimResponse'][]
+    }
+    /** BatchApprovalJobsRequest */
+    BatchApprovalJobsRequest: {
+      /** Exclude Ids */
+      exclude_ids?: string[]
+      filter?: components['schemas']['JobFilterPayload'] | null
+      /** Job Ids */
+      job_ids?: string[] | null
+      /**
+       * Note
+       * @default
+       */
+      note: string
+    }
+    /** BatchApprovalJobsResponse */
+    BatchApprovalJobsResponse: {
+      /** Results */
+      results: components['schemas']['ApprovalBatchResultResponse'][]
     }
     /**
      * BatchHeartbeatItem
@@ -4102,6 +4493,10 @@ export interface components {
       max_code_concurrency?: number | null
       /** Max Concurrency */
       max_concurrency?: number | null
+      /** Node Concurrency Limits */
+      node_concurrency_limits?: {
+        [key: string]: number
+      } | null
       /** Worker Id */
       worker_id: string
     }
@@ -4627,6 +5022,241 @@ export interface components {
       /** Node Code Max Bytes */
       node_code_max_bytes: number
     }
+    /**
+     * JobBatchOperationAcceptedResponse
+     * @description 202 body of every async-dispatched batch endpoint.
+     */
+    JobBatchOperationAcceptedResponse: {
+      operation: components['schemas']['JobBatchOperationResponse']
+    }
+    /**
+     * JobBatchOperationArchiveResponse
+     * @description 手动归档回包：更新后的卡片载荷（幂等：重复归档返回现态，不报错）。
+     */
+    JobBatchOperationArchiveResponse: {
+      operation: components['schemas']['JobBatchOperationListItem']
+    }
+    /**
+     * JobBatchOperationListItem
+     * @description 任务中心批量操作卡片载荷：#946 操作句柄 + 归档位。
+     *
+     *     archive_source：manual = 用户在任务中心手动归档；auto = 终态结束超过
+     *     7 天按查询口径自动归档（不落列）；非归档视图为 null。
+     */
+    JobBatchOperationListItem: {
+      /** Archive Source */
+      archive_source: ('manual' | 'auto') | null
+      /** Archived At */
+      archived_at: string | null
+      /** Chunk Errors */
+      chunk_errors?: {
+        [key: string]: unknown
+      }[]
+      /** Created At */
+      created_at?: string | null
+      /**
+       * Created By
+       * @default
+       */
+      created_by: string
+      /**
+       * Error Message
+       * @default
+       */
+      error_message: string
+      /** Failed Count */
+      failed_count: number
+      /**
+       * Feeding Gated
+       * @description 未完成投喂是否正被 workspace 积压水位门控
+       */
+      feeding_gated?: boolean | null
+      /** Finished At */
+      finished_at?: string | null
+      /** Id */
+      id: string
+      /** Items Total */
+      items_total: number
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind:
+        | 'rerun'
+        | 'rerun_by_failure'
+        | 'delete'
+        | 'run_to'
+        | 'pause'
+        | 'resume'
+        | 'upgrade_workflow'
+        | 'package'
+        | 'clear_packed'
+        | 'approve'
+        | 'reject'
+      /** Output */
+      output?: {
+        [key: string]: unknown
+      }
+      /** Processed Count */
+      processed_count: number
+      /** Reason Counts */
+      reason_counts?: {
+        [key: string]: number
+      }
+      /** Skipped Count */
+      skipped_count: number
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        | 'pending'
+        | 'running'
+        | 'paused'
+        | 'completed'
+        | 'failed'
+        | 'cancelled'
+      /** Succeeded Count */
+      succeeded_count: number
+      /** Updated At */
+      updated_at?: string | null
+      /**
+       * Watermark
+       * @description feeder 当前生效的 workspace 积压水位
+       */
+      watermark?: number | null
+      /**
+       * Workspace Backlog
+       * @description 派生快照中的 pending + running 任务数
+       */
+      workspace_backlog?: number | null
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /**
+     * JobBatchOperationListResponse
+     * @description 单视图一页；active_count 与视图无关（徽标与分区标题同快照）。
+     */
+    JobBatchOperationListResponse: {
+      /**
+       * Active Count
+       * @description 进行中 + 排队数（徽标口径）
+       */
+      active_count: number
+      /**
+       * Next Cursor
+       * @description keyset 游标（ended/archived 瀑布流）；active 视图不分页恒为 null
+       */
+      next_cursor: string | null
+      /** Operations */
+      operations: components['schemas']['JobBatchOperationListItem'][]
+    }
+    /**
+     * JobBatchOperationResponse
+     * @description The public operation handle (accept response + status poll).
+     */
+    JobBatchOperationResponse: {
+      /** Chunk Errors */
+      chunk_errors?: {
+        [key: string]: unknown
+      }[]
+      /** Created At */
+      created_at?: string | null
+      /**
+       * Created By
+       * @default
+       */
+      created_by: string
+      /**
+       * Error Message
+       * @default
+       */
+      error_message: string
+      /** Failed Count */
+      failed_count: number
+      /**
+       * Feeding Gated
+       * @description 未完成投喂是否正被 workspace 积压水位门控
+       */
+      feeding_gated?: boolean | null
+      /** Finished At */
+      finished_at?: string | null
+      /** Id */
+      id: string
+      /** Items Total */
+      items_total: number
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind:
+        | 'rerun'
+        | 'rerun_by_failure'
+        | 'delete'
+        | 'run_to'
+        | 'pause'
+        | 'resume'
+        | 'upgrade_workflow'
+        | 'package'
+        | 'clear_packed'
+        | 'approve'
+        | 'reject'
+      /** Output */
+      output?: {
+        [key: string]: unknown
+      }
+      /** Processed Count */
+      processed_count: number
+      /** Reason Counts */
+      reason_counts?: {
+        [key: string]: number
+      }
+      /** Skipped Count */
+      skipped_count: number
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        | 'pending'
+        | 'running'
+        | 'paused'
+        | 'completed'
+        | 'failed'
+        | 'cancelled'
+      /** Succeeded Count */
+      succeeded_count: number
+      /** Updated At */
+      updated_at?: string | null
+      /**
+       * Watermark
+       * @description feeder 当前生效的 workspace 积压水位
+       */
+      watermark?: number | null
+      /**
+       * Workspace Backlog
+       * @description 派生快照中的 pending + running 任务数
+       */
+      workspace_backlog?: number | null
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** JobBatchOperationResultItem */
+    JobBatchOperationResultItem: {
+      /** Result */
+      result: {
+        [key: string]: unknown
+      }
+      /** Seq */
+      seq: number
+    }
+    /** JobBatchOperationResultsResponse */
+    JobBatchOperationResultsResponse: {
+      /** Next Cursor */
+      next_cursor?: string | null
+      /** Results */
+      results: components['schemas']['JobBatchOperationResultItem'][]
+    }
     /** JobBatchRequest */
     JobBatchRequest: {
       /**
@@ -4808,10 +5438,20 @@ export interface components {
       created_at: string
       /** Error Message */
       error_message: string
-      /** Executor Id */
+      /** Execution Type */
+      execution_type?: ('code' | 'agent') | null
+      /**
+       * Executor Id
+       * @deprecated
+       * @description Deprecated: use execution_type.
+       */
       executor_id?: string | null
-      /** Executor Kind */
-      executor_kind?: ('code' | 'pi' | 'openclaw') | null
+      /**
+       * Executor Kind
+       * @deprecated
+       * @description Deprecated: use execution_type.
+       */
+      executor_kind?: 'code' | null
       /** Finished At */
       finished_at?: string | null
       hydration_defer?: components['schemas']['HydrationDeferResponse'] | null
@@ -5117,6 +5757,18 @@ export interface components {
     MaterialBundleResponse: {
       bundle: components['schemas']['MaterialBundleRecord']
     }
+    /**
+     * MaterialCompleteRequest
+     * @description Optional complete body (#1269 格子②): the caller pins the upload
+     *     generation its PUT URL was issued for (from the presign response); a
+     *     mismatch means a newer presign superseded this upload — 409 without
+     *     touching the row, instead of a misleading 422 that flips the newer
+     *     attempt's row to failed.
+     */
+    MaterialCompleteRequest: {
+      /** Expected Upload Generation */
+      expected_upload_generation?: number | null
+    }
     /** MaterialDeleteResponse */
     MaterialDeleteResponse: {
       /** Deleted */
@@ -5177,6 +5829,8 @@ export interface components {
       size_bytes: number
       /** Status */
       status: string
+      /** Upload Generation */
+      upload_generation: number
       /** Workspace Id */
       workspace_id: string
     }
@@ -6067,13 +6721,186 @@ export interface components {
       allowed_workspaces: string[]
       /**
        * Host Protocol Version
-       * @default 5
+       * @default 6
        */
       host_protocol_version: number
       /** Worker Token */
       worker_token: string
       /** Workspaces */
       workspaces?: components['schemas']['AgentWorkerWorkspace'][]
+    }
+    /**
+     * RunAcceptedResponse
+     * @description 202 异步受理（#1117）：run 记录 + batch 句柄；job 由 feeder 后台创建，
+     *     轮询 GET /workspaces/{id}/runs/{run_id}（batch + job_stats）取进度。
+     */
+    RunAcceptedResponse: {
+      batch: components['schemas']['RunBatchRecord']
+      run: components['schemas']['RunRecord']
+    }
+    /**
+     * RunBatchArchiveResponse
+     * @description 手动归档回包：更新后的卡片载荷（幂等语义见 archive_run_batch 的 409）。
+     */
+    RunBatchArchiveResponse: {
+      batch: components['schemas']['RunBatchListItem']
+    }
+    /**
+     * RunBatchListItem
+     * @description 任务中心卡片载荷：#1117 句柄 + 归档位与操作归属。
+     *
+     *     archive_source：manual = 用户在任务中心手动归档；auto = 终态结束超过
+     *     7 天按查询口径自动归档（不落列）；非归档视图为 null。
+     *     failed_item_count（reviewer r1 P2-1）：由 chunk_errors 推导的 chunk
+     *     级失败条目数（chunk_start + RUN_BATCH_CHUNK_SIZE，以 items_total 钳
+     *     制），调用方据此把「跳过（已有任务）」与「失败」拆开——跳过数 =
+     *     processed_count − jobs_created − failed_item_count；chunk_errors 打
+     *     满 20 条时 failed_item_count 为下限（lower_bound=true）。
+     */
+    RunBatchListItem: {
+      /** Archive Source */
+      archive_source: ('manual' | 'auto') | null
+      /** Archived At */
+      archived_at: string | null
+      /** Chunk Errors */
+      chunk_errors: {
+        [key: string]: unknown
+      }[]
+      /** Created At */
+      created_at: string | null
+      /** Created By */
+      created_by: string
+      /** Error Message */
+      error_message: string
+      /**
+       * Failed Item Count
+       * @description chunk 级失败的条目数（由 chunk_errors 推导；dedup 跳过不含在内）
+       */
+      failed_item_count: number
+      /**
+       * Failed Item Count Lower Bound
+       * @description chunk_errors 已达 20 条上限时为 true：真实失败数 ≥ failed_item_count
+       */
+      failed_item_count_lower_bound: boolean
+      /**
+       * Feeding Gated
+       * @description 未完成投喂是否正被 workspace 积压水位门控
+       */
+      feeding_gated?: boolean | null
+      /** Finished At */
+      finished_at: string | null
+      /** Items Total */
+      items_total: number
+      /**
+       * Jobs Created
+       * @description 该 run 当前实有 job 数（每 tick 按 count_jobs_in_run 重算）
+       */
+      jobs_created: number
+      /**
+       * Processed Count
+       * @description 游标：已处理的条目数（含 dedup 跳过与失败 chunk）
+       */
+      processed_count: number
+      /** Run Id */
+      run_id: string
+      /**
+       * Status
+       * @description pending/running/paused/completed/failed/cancelled（语义见 runs-async-mode.md §2）
+       */
+      status: string
+      /** Updated At */
+      updated_at: string | null
+      /**
+       * Watermark
+       * @description feeder 当前生效的 workspace 积压水位
+       */
+      watermark?: number | null
+      /**
+       * Workspace Backlog
+       * @description 派生快照中的 pending + running 任务数
+       */
+      workspace_backlog?: number | null
+    }
+    /**
+     * RunBatchListResponse
+     * @description 单视图一页；active_count 与视图无关（AppBar 徽标与分区标题同快照）。
+     */
+    RunBatchListResponse: {
+      /**
+       * Active Count
+       * @description 进行中 + 排队数（徽标口径）
+       */
+      active_count: number
+      /** Batches */
+      batches: components['schemas']['RunBatchListItem'][]
+      /**
+       * Next Cursor
+       * @description keyset 游标（ended/archived 瀑布流）；active 视图不分页恒为 null
+       */
+      next_cursor: string | null
+    }
+    /**
+     * RunBatchRecord
+     * @description 异步 run 的 feeder 句柄（#1117）：状态机 + 游标 + 计数器。
+     *
+     *     jobs_skipped 由调用方按 processed_count − jobs_created 推导（dedup 过滤
+     *     与 chunk 跳过同源，不单独物化）；chunk_errors 至多 20 条（intake 先例）。
+     */
+    RunBatchRecord: {
+      /** Chunk Errors */
+      chunk_errors: {
+        [key: string]: unknown
+      }[]
+      /** Created At */
+      created_at: string | null
+      /** Error Message */
+      error_message: string
+      /**
+       * Feeding Gated
+       * @description 未完成投喂是否正被 workspace 积压水位门控
+       */
+      feeding_gated?: boolean | null
+      /** Finished At */
+      finished_at: string | null
+      /** Items Total */
+      items_total: number
+      /**
+       * Jobs Created
+       * @description 该 run 当前实有 job 数（每 tick 按 count_jobs_in_run 重算）
+       */
+      jobs_created: number
+      /**
+       * Processed Count
+       * @description 游标：已处理的条目数（含 dedup 跳过与失败 chunk）
+       */
+      processed_count: number
+      /** Run Id */
+      run_id: string
+      /**
+       * Status
+       * @description pending/running/paused/completed/failed/cancelled（语义见 runs-async-mode.md §2）
+       */
+      status: string
+      /** Updated At */
+      updated_at: string | null
+      /**
+       * Watermark
+       * @description feeder 当前生效的 workspace 积压水位
+       */
+      watermark?: number | null
+      /**
+       * Workspace Backlog
+       * @description 派生快照中的 pending + running 任务数
+       */
+      workspace_backlog?: number | null
+    }
+    /**
+     * RunBatchResponse
+     * @description pause/resume/cancel 控制面回包（#1117）：与 202 受理同形。
+     */
+    RunBatchResponse: {
+      batch: components['schemas']['RunBatchRecord']
+      run: components['schemas']['RunRecord']
     }
     /** RunCreateRequest */
     RunCreateRequest: {
@@ -6084,13 +6911,16 @@ export interface components {
         | components['schemas']['RunItemBundle']
         | components['schemas']['RunItemText']
       )[]
+      /** Mode */
+      mode?: ('sync' | 'async') | null
     }
     /**
      * RunCreateResponse
      * @description #467 A4 响应瘦身保持：run + created_count only，永不物化 job 行
      *     （万级 items 的响应体积回归由测试钉住）；#735 加回 job_ids——服务层
      *     本就返回的字符串 id 列表（体积与 job rows 差一个数量级），外部系统
-     *     提交后即可拿到 job_id 去 #703 的单 job 端点轮询。
+     *     提交后即可拿到 job_id 去 #703 的单 job 端点轮询。#1157 phase0 加
+     *     skipped_count 标量计数（不随规模涨体积）。
      */
     RunCreateResponse: {
       /** Created Count */
@@ -6101,9 +6931,15 @@ export interface components {
        */
       job_ids: string[]
       run: components['schemas']['RunRecord']
+      /**
+       * Skipped Count
+       * @description 本次提交被跳过（未新建）的条目数：条目已存在对应任务的 dedup 过滤，加上写入竞态中被并发提交先行认领的条目；created_count + skipped_count == 本次提交条目数。
+       */
+      skipped_count: number
     }
     /** RunDetailResponse */
     RunDetailResponse: {
+      batch?: components['schemas']['RunBatchRecord'] | null
       job_stats: components['schemas']['RunJobStats']
       run: components['schemas']['RunRecord']
     }
@@ -6265,6 +7101,19 @@ export interface components {
       output: number | null
       /** Total */
       total: number | null
+    }
+    /** RuntimeConfigVersionSummary */
+    RuntimeConfigVersionSummary: {
+      /** Changed Keys */
+      changed_keys: string[]
+      /** Created At */
+      created_at: string
+      /** Created By */
+      created_by: string
+      /** Revision Id */
+      revision_id: string
+      /** Version */
+      version: number
     }
     /** RuntimeProfileResponse */
     RuntimeProfileResponse: {
@@ -6779,6 +7628,8 @@ export interface components {
       jobs: components['schemas']['StudioAgentJobView'][]
       /** Limit */
       limit: number
+      /** Next Cursor */
+      next_cursor?: string | null
       /** Returned */
       returned: number
     }
@@ -6807,8 +7658,14 @@ export interface components {
       capability: string
       /** Error Message */
       error_message: string
-      /** Executor Kind */
-      executor_kind: string | null
+      /** Execution Type */
+      execution_type: ('code' | 'agent') | null
+      /**
+       * Executor Kind
+       * @deprecated
+       * @description Deprecated: use execution_type.
+       */
+      executor_kind: 'code' | null
       /** Inputs */
       inputs: string[]
       /** Label */
@@ -6946,7 +7803,9 @@ export interface components {
      *     ``availability`` and ``detection`` are response-only (admins see which
      *     entries can launch and which catalog agents this host has); both are
      *     never persisted and never accepted on PUT, so they live here rather than
-     *     on the shared document model.
+     *     on the shared document model. ``revision`` is the stored content version
+     *     (#355): derived from the stored document alone (probe results never
+     *     change it), round-tripped by the editor and checked on PUT.
      */
     StudioAgentRegistryResponse: {
       /** Agents */
@@ -6961,13 +7820,30 @@ export interface components {
       detection?: {
         [key: string]: components['schemas']['StudioAgentDetection']
       }
+      /**
+       * Revision
+       * @default
+       */
+      revision: string
     }
-    /** StudioAgentRegistryUpdate */
+    /**
+     * StudioAgentRegistryUpdate
+     * @description PUT 载荷：``revision`` 为客户端 GET 快照时的内容版本（#355）。
+     *
+     *     服务端在写入事务内比对该版本：不一致返回 409，detail 携带当前注册表
+     *     （含新版本）供前端刷新。缺省为空——省略即跳过检查（一次性客户端与
+     *     smoke 脚本的整份替换语义不变）。
+     */
     StudioAgentRegistryUpdate: {
       /** Agents */
       agents?: components['schemas']['StudioAgentRegistryEntry'][]
       /** Api Base */
       api_base: string
+      /**
+       * Revision
+       * @default
+       */
+      revision: string
     }
     /**
      * StudioAgentSuggestedAction
@@ -7034,22 +7910,28 @@ export interface components {
     }
     /**
      * StudioAgentWorkflowDraftResponse
-     * @description Human draft-store mirror; both null when no draft (structured empty).
+     * @description Human draft-store mirror; null content fields when no draft
+     *     (structured empty), generation always the workspace's current one.
      */
     StudioAgentWorkflowDraftResponse: {
       /** Definition Hash */
       definition_hash?: string | null
       /** Definition Yaml */
       definition_yaml?: string | null
+      /**
+       * Generation
+       * @default 0
+       */
+      generation: number
       /** Updated At */
       updated_at?: string | null
     }
     /** StudioAgentWorkflowDraftSaveRequest */
     StudioAgentWorkflowDraftSaveRequest: {
+      /** Base Generation */
+      base_generation: number
       /** Definition Yaml */
       definition_yaml: string
-      /** Expected Updated At */
-      expected_updated_at: string
     }
     /**
      * StudioChatAgentOption
@@ -7075,15 +7957,14 @@ export interface components {
      * StudioChatContextResponse
      * @description What the get_studio_context MCP tool returns: the session's bound
      *     workspace, the human's live Studio node selection, the canvas' unpublished
-     *     workflow draft (None until the frontend pushes it), the draft row's
-     *     ``updated_at`` (kimi review P2-5: the CAS token for a subsequent
-     *     ``save_workflow_draft`` — the session-pushed draft_yaml alone carries
-     *     no baseline; None = never-saved), and the active workflow's structure.
-     *     ``workflow`` is None when nothing is published yet.
+     *     workflow draft (None until the frontend pushes it), and the active
+     *     workflow's structure. ``workflow`` is None when nothing is published yet.
+     *
+     *     #1226 八轮复审 P1：会话镜像的 draft_yaml 与代次分属两条通道，任何此处
+     *     另读的代次都可能与 YAML 错配——因此响应不携带代次；save_workflow_draft
+     *     的 CAS base 一律从 get_workflow_draft 的原子状态读取。
      */
     StudioChatContextResponse: {
-      /** Draft Updated At */
-      draft_updated_at: string | null
       /** Draft Yaml */
       draft_yaml: string | null
       /** Selected Node Key */
@@ -7126,7 +8007,14 @@ export interface components {
        * Kind
        * @enum {string}
        */
-      kind: 'text' | 'tool_call' | 'plan' | 'permission' | 'status' | 'thought'
+      kind:
+        | 'text'
+        | 'tool_call'
+        | 'plan'
+        | 'permission'
+        | 'status'
+        | 'thought'
+        | 'draft'
       /**
        * Role
        * @enum {string}
@@ -7143,6 +8031,8 @@ export interface components {
     }
     /** StudioChatMessagesResponse */
     StudioChatMessagesResponse: {
+      /** Has More */
+      has_more: boolean
       /** Messages */
       messages: components['schemas']['StudioChatMessageRecord'][]
     }
@@ -7752,25 +8642,33 @@ export interface components {
      *     契约模型化——此前是裸 dict，前端只能手写 transport type）。
      *
      *     与 ``WorkflowDraftStoreResponse`` 同一字段集（服务端 current draft 的
-     *     单一形状）：草稿不存在（never-saved 竞态删除后撞 CAS）时全 null。
+     *     单一形状）：草稿行不存在（发布删除后的代次冲突）时 yaml/时间戳/hash
+     *     全 null，但 ``generation`` 始终是 workspace 当前代次（重 base 以它为
+     *     准）。
      */
     WorkflowDraftConflictCurrentDraft: {
       /** Definition Hash */
       definition_hash?: string | null
       /** Definition Yaml */
       definition_yaml?: string | null
+      /**
+       * Generation
+       * @default 0
+       */
+      generation: number
       /** Updated At */
       updated_at?: string | null
     }
     /**
      * WorkflowDraftConflictDetail
      * @description 409 detail 顶层（服务层 DraftConflictError.payload 的契约形态）：
-     *     message（人读指引）+ expected_updated_at（stale 基线）+ current_draft。
+     *     message（人读指引）+ base_generation（写入方声明的落后基线）+
+     *     current_draft（含当前代次）。
      */
     WorkflowDraftConflictDetail: {
+      /** Base Generation */
+      base_generation: number
       current_draft: components['schemas']['WorkflowDraftConflictCurrentDraft']
-      /** Expected Updated At */
-      expected_updated_at: string
       /** Message */
       message: string
     }
@@ -7791,10 +8689,10 @@ export interface components {
     }
     /** WorkflowDraftStoreRequest */
     WorkflowDraftStoreRequest: {
+      /** Base Generation */
+      base_generation?: number | null
       /** Definition Yaml */
       definition_yaml: string
-      /** Expected Updated At */
-      expected_updated_at?: string | null
     }
     /** WorkflowDraftStoreResponse */
     WorkflowDraftStoreResponse: {
@@ -7802,6 +8700,11 @@ export interface components {
       definition_hash?: string | null
       /** Definition Yaml */
       definition_yaml?: string | null
+      /**
+       * Generation
+       * @default 0
+       */
+      generation: number
       /** Updated At */
       updated_at?: string | null
     }
@@ -8154,6 +9057,31 @@ export interface components {
        * @enum {string}
        */
       severity: 'none' | 'info' | 'warning' | 'breaking'
+    }
+    /** WorkflowRuntimeRollbackRequest */
+    WorkflowRuntimeRollbackRequest: {
+      /** Version */
+      version: number
+    }
+    /**
+     * WorkflowRuntimeSaveRequest
+     * @description Full definition YAML; only the runtime slice may differ from active.
+     */
+    WorkflowRuntimeSaveRequest: {
+      /** Definition Yaml */
+      definition_yaml: string
+    }
+    /** WorkflowRuntimeSaveResponse */
+    WorkflowRuntimeSaveResponse: {
+      revision: components['schemas']['WorkflowRevisionSummary']
+      runtime_version?:
+        | components['schemas']['RuntimeConfigVersionSummary']
+        | null
+    }
+    /** WorkflowRuntimeVersionsResponse */
+    WorkflowRuntimeVersionsResponse: {
+      /** Versions */
+      versions: components['schemas']['RuntimeConfigVersionSummary'][]
     }
     /** WorkflowTerminalResponse */
     WorkflowTerminalResponse: {
@@ -10243,6 +11171,16 @@ export interface operations {
           'application/octet-stream': unknown
         }
       }
+      /** @description Range Not Satisfiable (.gz 解压口径越界，#1259) */
+      416: {
+        headers: {
+          'Content-Range'?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -10308,6 +11246,61 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['JobMutationResultResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_artifact_raw_nested_api_jobs__job_id__raw_artifacts__artifact_name__get: {
+    parameters: {
+      query?: never
+      header?: {
+        Range?: string | null
+      }
+      path: {
+        job_id: string
+        artifact_name: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
+      /** @description Partial Content (Range request) */
+      206: {
+        headers: {
+          'Content-Length'?: string
+          'Content-Range'?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
+      /** @description Range Not Satisfiable (.gz 解压口径越界，#1259) */
+      416: {
+        headers: {
+          'Content-Range'?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
         }
       }
       /** @description Validation Error */
@@ -11002,6 +11995,7 @@ export interface operations {
       query?: {
         status?: string | null
         limit?: number
+        cursor?: string | null
       }
       header?: never
       path: {
@@ -11270,7 +12264,9 @@ export interface operations {
   save_node_code_draft_api_studio_agent_tools_workspaces__workspace_id__nodes__node_key__code_draft_put: {
     parameters: {
       query?: never
-      header?: never
+      header?: {
+        'x-agent-legion-mcp-session-id'?: string | null
+      }
       path: {
         workspace_id: string
         node_key: string
@@ -11774,7 +12770,9 @@ export interface operations {
   save_workflow_draft_route_api_studio_agent_tools_workspaces__workspace_id__workflow_draft_put: {
     parameters: {
       query?: never
-      header?: never
+      header?: {
+        'x-agent-legion-mcp-session-id'?: string | null
+      }
       path: {
         workspace_id: string
       }
@@ -11795,7 +12793,7 @@ export interface operations {
           'application/json': components['schemas']['StudioAgentWorkflowDraftResponse']
         }
       }
-      /** @description Stale CAS base */
+      /** @description Stale base generation */
       409: {
         headers: {
           [name: string]: unknown
@@ -12557,6 +13555,268 @@ export interface operations {
       }
     }
   }
+  list_job_batch_operations_api_workspaces__workspace_id__job_batch_operations_get: {
+    parameters: {
+      query?: {
+        view?: 'active' | 'ended' | 'archived'
+        limit?: number
+        cursor?: string | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_job_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        op_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  archive_job_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__archive_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        op_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationArchiveResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  cancel_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__cancel_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        op_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  pause_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__pause_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        op_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_job_batch_operation_results_api_workspaces__workspace_id__job_batch_operations__op_id__results_get: {
+    parameters: {
+      query?: {
+        limit?: number
+        cursor?: number | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+        op_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationResultsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  resume_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__resume_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        op_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  retry_failed_batch_operation_api_workspaces__workspace_id__job_batch_operations__op_id__retry_failed_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        op_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   create_workspace_job_batch_api_workspaces__workspace_id__job_batches_post: {
     parameters: {
       query?: never
@@ -12651,6 +13911,59 @@ export interface operations {
           'application/json': components['schemas']['BatchJobMutationResponse']
         }
       }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  batch_approve_api_workspaces__workspace_id__jobs_batch_approve_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BatchApprovalJobsRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BatchApprovalJobsResponse']
+        }
+      }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -12686,6 +13999,59 @@ export interface operations {
           'application/json': components['schemas']['BatchJobMutationResponse']
         }
       }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  batch_reject_api_workspaces__workspace_id__jobs_batch_reject_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BatchApprovalJobsRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BatchApprovalJobsResponse']
+        }
+      }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -12719,6 +14085,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['BatchJobMutationResponse']
+        }
+      }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
         }
       }
       /** @description Validation Error */
@@ -12791,6 +14166,15 @@ export interface operations {
           'application/json': components['schemas']['BatchJobMutationResponse']
         }
       }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -12824,6 +14208,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['BatchJobMutationResponse']
+        }
+      }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
         }
       }
       /** @description Validation Error */
@@ -12861,6 +14254,15 @@ export interface operations {
           'application/json': components['schemas']['BatchJobMutationResponse']
         }
       }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -12894,6 +14296,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspacePackageStatusResetResponse']
+        }
+      }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
         }
       }
       /** @description Validation Error */
@@ -12971,6 +14382,15 @@ export interface operations {
           'application/json': components['schemas']['WorkspacePackageResponse']
         }
       }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -13004,6 +14424,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['JobRerunByFailureResponse']
+        }
+      }
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobBatchOperationAcceptedResponse']
         }
       }
       /** @description Validation Error */
@@ -13183,6 +14612,16 @@ export interface operations {
       206: {
         headers: {
           'Content-Length'?: string
+          'Content-Range'?: string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': unknown
+        }
+      }
+      /** @description Range Not Satisfiable (.gz 解压口径越界，#1259) */
+      416: {
+        headers: {
           'Content-Range'?: string
           [name: string]: unknown
         }
@@ -13514,7 +14953,13 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    requestBody?: {
+      content: {
+        'application/json':
+          | components['schemas']['MaterialCompleteRequest']
+          | null
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {
@@ -14500,6 +15945,73 @@ export interface operations {
       }
     }
   }
+  list_run_batches_api_workspaces__workspace_id__run_batches_get: {
+    parameters: {
+      query?: {
+        view?: 'active' | 'ended' | 'archived'
+        limit?: number
+        cursor?: string | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunBatchListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  archive_run_batch_api_workspaces__workspace_id__run_batches__run_id__archive_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunBatchArchiveResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   list_runs_api_workspaces__workspace_id__runs_get: {
     parameters: {
       query?: {
@@ -14557,6 +16069,15 @@ export interface operations {
           'application/json': components['schemas']['RunCreateResponse']
         }
       }
+      /** @description 异步受理句柄 */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunAcceptedResponse']
+        }
+      }
       /** @description Validation Error */
       422: {
         headers: {
@@ -14587,6 +16108,102 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['RunDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  cancel_run_batch_api_workspaces__workspace_id__runs__run_id__cancel_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunBatchResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  pause_run_batch_api_workspaces__workspace_id__runs__run_id__pause_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunBatchResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  resume_run_batch_api_workspaces__workspace_id__runs__run_id__resume_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        run_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RunBatchResponse']
         }
       }
       /** @description Validation Error */
@@ -15330,6 +16947,7 @@ export interface operations {
     parameters: {
       query?: {
         after_seq?: number
+        before_seq?: number | null
       }
       header?: never
       path: {
@@ -15375,6 +16993,39 @@ export interface operations {
         'application/json': components['schemas']['StudioChatMessageCreateRequest']
       }
     }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatMessageResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_message_api_workspaces__workspace_id__studio_chat_sessions__session_id__messages__message_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+        message_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
     responses: {
       /** @description Successful Response */
       200: {
@@ -15663,7 +17314,7 @@ export interface operations {
           'application/json': components['schemas']['WorkflowDraftStoreResponse']
         }
       }
-      /** @description Stale CAS base */
+      /** @description Stale base generation */
       409: {
         headers: {
           [name: string]: unknown
@@ -15964,6 +17615,107 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowRevisionDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_runtime_api_workspaces__workspace_id__workflow_runtime_patch: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowRuntimeSaveRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowRuntimeSaveResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  rollback_runtime_api_workspaces__workspace_id__workflow_runtime_rollback_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowRuntimeRollbackRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowRuntimeSaveResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_runtime_versions_api_workspaces__workspace_id__workflow_runtime_versions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowRuntimeVersionsResponse']
         }
       }
       /** @description Validation Error */

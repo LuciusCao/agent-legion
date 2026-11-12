@@ -9,6 +9,8 @@ data source for the #350 run progress view.
 
 from __future__ import annotations
 
+import pytest
+
 from server.app.db.migrations.run_job_status_counts import (
     migrate_run_job_status_counts,
 )
@@ -193,3 +195,23 @@ def test_count_jobs_by_status_in_run_matches_group_by(tmp_path) -> None:
     plan_text = "\n".join(str(row[0]) if not isinstance(row, dict) else str(row) for row in plan)
     assert "run_job_status_counts_pkey" in plan_text
     assert "jobs" not in plan_text
+
+
+@pytest.mark.no_db
+def test_v73_migration_preserves_sql_execution_order() -> None:
+    from server.app.db.migrations.run_job_status_counts_sql import (
+        BACKFILL_SQL,
+        RETENTION_INDEX_DDL,
+        TRIGGER_DDL,
+    )
+
+    class RecordingConnection:
+        def __init__(self) -> None:
+            self.statements: list[str] = []
+
+        def execute(self, sql: str) -> None:
+            self.statements.append(sql)
+
+    conn = RecordingConnection()
+    migrate_run_job_status_counts(conn)
+    assert conn.statements == [TRIGGER_DDL, RETENTION_INDEX_DDL, BACKFILL_SQL]

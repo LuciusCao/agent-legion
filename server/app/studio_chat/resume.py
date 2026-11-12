@@ -11,10 +11,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from server.app.services.job_errors import ConflictError, InvalidOperationError
+from server.app.services.job_errors import ConflictError
 from server.app.studio_chat.background_baseline import capture_resume_baseline
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.empty_turn_retry import retry_empty_turn
+from server.app.studio_chat.resume_preflight import require_resumable_agent
 from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.wire_baseline import capture_wire_baseline
 
@@ -25,9 +26,15 @@ _ARCHIVED_DETAIL = "Chat session is archived; unarchive it before continuing"
 
 
 def resume_session(
-    service: StudioChatService, session_id: str, workspace_id: str, user_id: str
+    service: StudioChatService,
+    session_id: str,
+    workspace_id: str,
+    user_id: str,
+    *,
+    from_statuses: tuple[str, ...] = ("closed", "error"),
+    agent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Rebuild the runtime of a closed/error session; history is kept.
+    """Rebuild the runtime of a from-statuses session; history is kept.
 
     The agent regains context two ways (session_load.open_acp_session):
     ACP session/load of the prior acp_session_id when the
@@ -37,6 +44,13 @@ def resume_session(
     Resuming a session that is still live on this server is an idempotent
     no-op — except an idle session whose last turn was confirmed empty,
     where it replays that message once (#882, empty_turn_retry).
+
+    from_statuses (#1238): the manual entry keeps ("closed", "error"); the
+    send-path auto-resume passes ("idle", "error") — the claim then moves
+    idle -> starting in one capacity-checked statement (no intermediate
+    uncounted error state, codex round-4 P1) and never reopens a closed row.
+    agent (#1238 codex round-4 P2-1): the caller's preflighted agent rides the
+    chain instead of being re-resolved after the first write.
     """
     from server.app.studio_chat import service as service_module
 
@@ -45,7 +59,7 @@ def resume_session(
         # #924: an archived session continues only after unarchive (the
         # claim SQL and the spawn fence refuse the stamp too).
         raise ConflictError(_ARCHIVED_DETAIL)
-    if session["status"] not in ("closed", "error"):
+    if session["status"] not in from_statuses:
         runtime = service.runtime(session_id)
         if runtime is not None:
             # #882: on a live idle session 「继续对话」 replays a confirmed
@@ -57,32 +71,26 @@ def resume_session(
         # startup reaper owns that reconciliation (marks it error, after
         # which it becomes resumable).
         raise ConflictError(f"Chat session is {session['status']} and cannot be resumed")
-    # A closed/error session can still have a registered runtime winding
+    # A resumable session can still have a registered runtime winding
     # down (fatal error -> _on_exit window) or left over by a reap that
     # raced a live handle: the resume winner settles it below, right
     # after the atomic claim.
-    agent_id = str(session["agent_id"])
-    agent = service._registry.find_agent(agent_id)
     if agent is None:
-        raise InvalidOperationError(f"Unknown studio agent: {agent_id}")
-    command = str(agent["command"])
-    if not service._probe.available(command):
-        raise InvalidOperationError(
-            f"Studio agent '{agent_id}' is not available on this host"
-            f" (command not found: {command})"
-        )
-    # Atomic closed/error -> starting claim under the creation cap's
+        agent = require_resumable_agent(service, session)
+    # Atomic from-statuses -> starting claim under the creation cap's
     # advisory lock: a resume spawns a subprocess, so it counts against
     # the same active-session cap and cannot race creators past it. The
     # cap constant is read through the service module at call time so
     # tests monkeypatching it keep working.
     max_active = service_module.MAX_ACTIVE_STUDIO_CHAT_SESSIONS
     baseline = capture_resume_baseline(str(service._settings.root_dir), session["acp_session_id"])
-    if not service.db.claim_studio_chat_resume(session_id, max_active=max_active):
+    if not service.db.claim_studio_chat_resume(
+        session_id, max_active=max_active, from_statuses=from_statuses
+    ):
         current = service.db.get_studio_chat_session(session_id) or {}
         if current.get("archived_at") is not None:
             raise ConflictError(_ARCHIVED_DETAIL)
-        if current.get("status") not in ("closed", "error"):
+        if current.get("status") not in from_statuses:
             raise ConflictError("Chat session was resumed concurrently")
         raise ConflictError(
             f"Too many active studio chat sessions (limit {max_active});"

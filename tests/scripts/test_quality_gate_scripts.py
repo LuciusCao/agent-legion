@@ -8,6 +8,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -45,6 +47,7 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         "FRONTEND_TEST_PROJECT",
         "GATE_LANES",
         "GATE_SHARD",
+        "GATE_SKIP_GOVERNANCE",
         "GATE_SKIP_STATIC",
         "GATE_TIER",
         "KEEP_COVERAGE",
@@ -365,13 +368,30 @@ def test_quick_gate_heartbeat_prints_running_lane_progress(tmp_path: Path) -> No
     # The quick gate sources the shared job-count helper.
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
     shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
+    # Minimal sufficient timing (was sleep 6 + heartbeat 2): the heartbeat loop
+    # polls every 1s and prints once SECONDS-last_heartbeat >= interval, so
+    # interval 1 gives the 3s lane two heartbeat chances (~1s and ~2s ticks).
+    # Margin note (honest accounting): the safety margin is ~1s, not the old
+    # ~3s — heartbeat is wall-clock behavior that cannot be fully signal-driven
+    # (the thing under test IS the 1s poll cadence), so the budget is kept
+    # bounded (sleep 3, one round) and the failure mode is loud and diagnosable
+    # (heartbeat_lines empty → assertion diff shows the whole gate stdout).
     _write_executable(
         scripts / "check-quick-backend.sh",
-        '#!/usr/bin/env bash\necho "backend lane working"\nsleep 6\n',
+        '#!/usr/bin/env bash\necho "backend lane working"\nsleep 3\n',
     )
     _write_executable(scripts / "check-quick-frontend.sh", "#!/usr/bin/env bash\nexit 0\n")
 
-    result = _run(quick_gate, cwd=tmp_path, env={"GATE_HEARTBEAT_SECONDS": "2"})
+    # GATE_SKIP_STATIC=1 confines the run to the test rounds: the heartbeat
+    # loop lives in run_round and is identical across rounds, so one slow-lane
+    # round (test-backend) exercises it fully — the static round's duplicate
+    # 3s bought no extra coverage. The full-rounds path stays pinned by
+    # test_quick_gate_fast_lanes_are_not_padded_by_heartbeat_sleep above.
+    result = _run(
+        quick_gate,
+        cwd=tmp_path,
+        env={"GATE_HEARTBEAT_SECONDS": "1", "GATE_SKIP_STATIC": "1", "GATE_LANES": "backend"},
+    )
 
     assert result.returncode == 0, result.stdout + result.stderr
     heartbeat_lines = [line for line in result.stdout.splitlines() if line.startswith("[gate:")]
@@ -429,11 +449,12 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     _write_executable(
         scripts / "check-quick.sh",
         "#!/usr/bin/env bash\n"
-        'printf "quick:lanes=%s,cov=%s,mode=%s,tier=%s,append=%s,skip_static=%s,skip_worker_ui=%s\\n" '
+        'printf "quick:lanes=%s,cov=%s,mode=%s,tier=%s,append=%s,skip_static=%s,skip_worker_ui=%s,skip_governance=%s\\n" '
         '"${GATE_LANES:-unset}" "${AGENT_LEGION_COV:-unset}" '
         '"${FRONTEND_TEST_MODE:-unset}" "${GATE_TIER:-unset}" '
         '"${AGENT_LEGION_COV_APPEND:-0}" '
-        '"${GATE_SKIP_STATIC:-unset}" "${BACKEND_SKIP_WORKER_UI_TESTS:-unset}" >>"$GATE_LOG"\n',
+        '"${GATE_SKIP_STATIC:-unset}" "${BACKEND_SKIP_WORKER_UI_TESTS:-unset}" '
+        '"${GATE_SKIP_GOVERNANCE:-unset}" >>"$GATE_LOG"\n',
     )
     _write_executable(scripts / "check-deps-audit.sh", "#!/usr/bin/env bash\nexit 0\n")
     for command in ("uv", "npm"):
@@ -464,11 +485,14 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     # The postgres segment re-enters the quick gate for its test round only
     # (GATE_SKIP_STATIC=1, BACKEND_SKIP_WORKER_UI_TESTS=1): segment 1a already
     # ran the static checks and the tier-independent worker UI tests, so every
-    # check still runs exactly once per full gate.
+    # check still runs exactly once per full gate. Segment 2 trims the backend
+    # lane, which would trigger the repo-wide governance guard (issue #1201) —
+    # GATE_SKIP_GOVERNANCE=1 keeps the set at exactly one run (segment 1a's
+    # backend static phase already included it).
     assert quick_calls == [
-        "quick:lanes=backend,cov=1,mode=unset,tier=unit,append=0,skip_static=unset,skip_worker_ui=unset",
-        "quick:lanes=backend,cov=1,mode=unset,tier=postgres,append=1,skip_static=1,skip_worker_ui=1",
-        "quick:lanes=frontend rust,cov=unset,mode=coverage,tier=unset,append=0,skip_static=unset,skip_worker_ui=unset",
+        "quick:lanes=backend,cov=1,mode=unset,tier=unit,append=0,skip_static=unset,skip_worker_ui=unset,skip_governance=unset",
+        "quick:lanes=backend,cov=1,mode=unset,tier=postgres,append=1,skip_static=1,skip_worker_ui=1,skip_governance=unset",
+        "quick:lanes=frontend rust,cov=unset,mode=coverage,tier=unset,append=0,skip_static=unset,skip_worker_ui=unset,skip_governance=1",
     ]
     assert calls.count("npm:run build:bundle") == 1
     assert not any("test:coverage" in call for call in calls)
@@ -499,6 +523,91 @@ def test_quick_gate_cleanup_only_removes_coverage_data_files(tmp_path: Path) -> 
     assert not cov.exists()
     assert not worker_data.exists()
     assert sibling.exists()
+
+
+def _run_smoke_backend_gate(
+    tmp_path: Path, env: dict[str, str]
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-queue.sh", scripts / "gate-queue.sh")
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'printf "%s\\n" "$*" >"$GATE_LOG"\n'
+        'printf "rerun:%s\\n" "${AGENT_LEGION_RERUN_REPORT:-unset}" >>"$GATE_LOG"\n'
+        'for arg in "$@"; do\n'
+        '  case "$arg" in\n'
+        '    --junitxml=*) printf "<testsuite tests=\\"0\\"/>\\n" >"${arg#--junitxml=}" ;;\n'
+        "  esac\n"
+        "done\n"
+        'exit "$FAKE_PYTEST_EXIT"\n',
+    )
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "AGENT_LEGION_RERUN_REPORT": "",
+            "AGENT_LEGION_TEST_DURATIONS": "",
+            "AGENT_LEGION_TEST_RESULT_NAME": "",
+            "AGENT_LEGION_TEST_RESULTS_DIR": "",
+            "AGENT_LEGION_TEST_WORKERS": "2",
+            "BACKEND_GATE_PHASE": "test",
+            "FAKE_PYTEST_EXIT": "0",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "smoke",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            **env,
+        },
+    )
+    return result, gate_log
+
+
+@pytest.mark.parametrize("pytest_exit", [0, 5])
+def test_smoke_backend_gate_forwards_telemetry_and_preserves_exit_code(
+    tmp_path: Path, pytest_exit: int
+) -> None:
+    results = tmp_path / "results"
+    result, gate_log = _run_smoke_backend_gate(
+        tmp_path,
+        {
+            "AGENT_LEGION_TEST_DURATIONS": "12",
+            "AGENT_LEGION_TEST_RESULT_NAME": "smoke",
+            "AGENT_LEGION_TEST_RESULTS_DIR": str(results),
+            "FAKE_PYTEST_EXIT": str(pytest_exit),
+        },
+    )
+
+    assert result.returncode == pytest_exit, result.stdout + result.stderr
+    calls = gate_log.read_text(encoding="utf-8").splitlines()
+    assert calls == [
+        "run --frozen pytest -q --ignore=tests/full --ignore=tests/ci "
+        "-m smoke -n 2 --dist worksteal --reruns 1 --reruns-delay 2 "
+        f"--durations=12 --junitxml={results / 'smoke-junit.xml'} "
+        "-p scripts.pytest_telemetry",
+        f"rerun:{results / 'smoke-reruns.json'}",
+    ]
+    assert (results / "smoke-junit.xml").read_text(encoding="utf-8") == '<testsuite tests="0"/>\n'
+
+
+def test_smoke_backend_gate_without_results_dir_keeps_default_invocation(tmp_path: Path) -> None:
+    results = tmp_path / "results"
+    result, gate_log = _run_smoke_backend_gate(tmp_path, {})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert gate_log.read_text(encoding="utf-8").splitlines() == [
+        "run --frozen pytest -q --ignore=tests/full --ignore=tests/ci "
+        "-m smoke -n 2 --dist worksteal --reruns 1 --reruns-delay 2",
+        "rerun:unset",
+    ]
+    assert not results.exists()
 
 
 def test_frontend_gate_emits_junit_and_json_reports(tmp_path: Path) -> None:
@@ -631,3 +740,30 @@ def test_rust_lane_workers_env_override_wins(tmp_path: Path) -> None:
 
     assert re.search(r"cargo:clippy .* -j 3 ", calls)
     assert "cargo:test --locked -j 3" in calls
+
+
+# #1307 pipe 族：gate 输出被调用方裸 pipe（`| tail`/`| head`）时管道只回传
+# 末段命令的退出码，真实结论会丢。脚本侧的纪律是内部统一 pipefail（管道不吞
+# 任一环节的失败）+ lane 输出落盘（本文件的 SIGPIPE 测试族已 pin），失败结论
+# 同时写 stderr（test_quick_gate_reports_each_lane_status 已 pin）。gate-jobs.sh
+# 与 gate-queue.sh 是被 source 的库、不自带 set 选项，由调用方的 pipefail 覆盖。
+_GATE_PIPEFAIL_SCRIPTS = (
+    "check-quick.sh",
+    "check-quick-backend.sh",
+    "check-quick-frontend.sh",
+    "check.sh",
+    "check-ci.sh",
+    "check-fast.sh",
+    "run-local-gate.sh",
+)
+
+
+@pytest.mark.parametrize("script_name", _GATE_PIPEFAIL_SCRIPTS)
+def test_gate_scripts_set_euo_pipefail(script_name: str) -> None:
+    # check-quick-backend.sh leads with a comment block (the --frozen
+    # rationale, #526) before its `set` line — scan a generous header window.
+    head = (PROJECT_ROOT / "scripts" / script_name).read_text(encoding="utf-8").splitlines()[:12]
+    assert any(line.strip() == "set -euo pipefail" for line in head), (
+        f"{script_name} lost its pipefail header: an internal pipeline would "
+        "again be able to swallow a failing stage's exit code (#1307)"
+    )

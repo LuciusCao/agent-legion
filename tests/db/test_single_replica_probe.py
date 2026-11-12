@@ -37,6 +37,8 @@ class FakeConnection:
         self.fail = fail
         self.executed: list[str] = []
         self.commits = 0
+        # len(executed) at each commit: pins commit-after-statement order.
+        self.commit_points: list[int] = []
         self.closed = False
 
     def execute(self, sql: str, params: object = None) -> FakeResult:
@@ -49,6 +51,7 @@ class FakeConnection:
 
     def commit(self) -> None:
         self.commits += 1
+        self.commit_points.append(len(self.executed))
 
     def close(self) -> None:
         self.closed = True
@@ -82,6 +85,11 @@ def test_probe_acquires_lock_and_holds_connection(fake_connect) -> None:
     probe.close()
     assert fake.closed is True
     assert "pg_advisory_unlock" in fake.executed[-1]
+    # #1077: the unlock SELECT's transaction is committed before the return,
+    # so the connection goes back IDLE instead of relying on the pool's
+    # async rollback (which a racing pool close discards).
+    assert fake.commit_points[-1] == len(fake.executed)
+    assert fake.commits == 2
 
 
 def test_probe_commits_the_try_lock_transaction_on_conflict(fake_connect) -> None:

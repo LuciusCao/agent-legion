@@ -20,6 +20,7 @@ function makeNode(nodeKey: string, status: string): JobDetail['nodes'][number] {
     outputs: [],
     error_message: '',
     stale_reason: '',
+    execution_type: 'code',
     executor_kind: 'code',
   }
 }

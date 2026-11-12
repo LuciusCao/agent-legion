@@ -63,7 +63,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
             label="Workspace ID"
             value={id}
             onChange={(e) => setId(e.target.value)}
-            helperText="仅小写字母、数字、-、_，创建后不可修改（同时作为 Workflow Key）"
+            helperText="仅小写字母、数字、-、_，创建后不可修改"
             error={id.length > 0 && !idValid}
             required
           />

@@ -186,6 +186,56 @@ describe('workflowStudioModel', () => {
     expect(details?.outgoing).toEqual([])
   })
 
+  it('materializes v1 after into ghost incoming/outgoing (#1258 codex P2)', () => {
+    // v1 草稿依赖只存于 after（无顶层 edges）：ghost 详情必须与 loader
+    // 物化同构，否则依赖关系段退化为 0 入/0 出。
+    const yaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  fetch:',
+      '    capability: fetch',
+      '    after: [_start]',
+      '  intake:',
+      '    capability: intake',
+      '    after: [fetch]',
+      '',
+    ].join('\n')
+
+    const details = ghostDraftNodeDetails(yaml, 'intake')
+
+    expect(details?.incoming).toEqual([
+      { source: 'fetch', target: 'intake', condition: null },
+    ])
+    expect(details?.outgoing).toEqual([])
+    // 对照：v2 草稿 after 只是 echo 字段，不物化。
+    const v2Yaml =
+      yaml.replace('key: demo', 'key: demo\nschema_version: 2') + 'edges: []\n'
+    expect(ghostDraftNodeDetails(v2Yaml, 'intake')?.incoming).toEqual([])
+  })
+
+  it('normalizes malformed node list fields instead of crashing (#1258 codex 四轮 P1)', () => {
+    // 与 record 映射同一归一化（normalizeStringList）：inputs: foo 等异形
+    // 不抛、按空数组呈现。
+    const yaml = [
+      'key: demo',
+      'nodes:',
+      '  _start:',
+      '    type: start',
+      '  intake:',
+      '    capability: intake',
+      '    inputs: foo',
+      '    outputs: {a: 1}',
+      '    after: 5',
+      '',
+    ].join('\n')
+    const details = ghostDraftNodeDetails(yaml, 'intake')
+    expect(details?.node.inputs).toEqual([])
+    expect(details?.node.outputs).toEqual([])
+    expect(details?.node.after).toEqual([])
+  })
+
   it('returns null ghost details for unknown or unparsable nodes', () => {
     const yaml = 'key: demo\nnodes:\n  intake:\n    capability: intake\n'
     expect(ghostDraftNodeDetails(yaml, 'missing')).toBeNull()

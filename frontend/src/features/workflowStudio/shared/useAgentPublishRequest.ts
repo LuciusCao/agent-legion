@@ -1,17 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import {
-  cancelPublishRequest,
-  confirmPublishRequest,
   fetchPendingPublishRequest,
   type StudioPublishRequestRecord,
 } from '../../../api/studioPublishRequestApi'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
-import { useUiStore } from '../../../stores/uiStore'
-import {
-  agentPublishStatusNotice,
-  useAgentPublishNoticeStore,
-} from './agentPublishNoticeStore'
+import { useAgentPublishNoticeStore } from './agentPublishNoticeStore'
+import { useAgentPublishRequestActions } from './useAgentPublishRequestActions'
+import { useAgentPublishRequestSync } from './useAgentPublishRequestSync'
 
 /** 轮询间隔：agent 发起请求到人点开 Studio 之间没有推送通道，5 秒轮询在
  * 「弹窗及时」与「请求量」之间取折中（与后端 10 分钟 TTL 相比足够密）。 */
@@ -32,8 +27,12 @@ export type AgentPublishRequestState = {
   /** cancel 在途（#429 三轮复审 P3）：在途期间重复 cancel 早退——二次
    * cancel 必 404，红 toast 与正确回执同现是假失败。 */
   canceling: boolean
-  /** 用户确认：走后端确认端点（与手动发布同门禁），成功后失效相关查询。 */
-  confirm: () => Promise<void>
+  /** 用户确认：走后端确认端点（与手动发布同门禁），成功后失效相关查询。
+   * #1122：onConfirmed 在端点成功后、invalidate 触发重取之前同步调用——
+   * 对话框借此把发布的草稿原文登记进 justPublishedRef（复用手动发布管道
+   * 的收尾），否则紧随的 canonical 新基线被 baseline sync 误判为外部
+   * 变更，preserveDirtyDraft 永真、dirty chip 卡在「有未发布变更」。 */
+  confirm: (onConfirmed?: () => void) => Promise<void>
   /** 用户取消：请求落 rejected，agent 可继续修改草稿再发起。404（输给
    * confirm 的 claim / 已被顶替 / 已过期）静默 refetch——不弹「取消失败」
    * （#429 收尾 P3：对「输给 confirm」是误导，行态自己说话）。 */
@@ -53,17 +52,8 @@ export type AgentPublishRequestState = {
 export function useAgentPublishRequest(
   workspaceId: string | undefined
 ): AgentPublishRequestState {
-  const queryClient = useQueryClient()
-  const showToast = useUiStore((s) => s.showToast)
-  const landNotice = useAgentPublishNoticeStore((s) => s.landNotice)
   const clearNotice = useAgentPublishNoticeStore((s) => s.clearNotice)
   const resolvedNotice = useAgentPublishNoticeStore((s) => s.resolvedNotice)
-  const markResolved = useAgentPublishNoticeStore((s) => s.markResolved)
-  const [confirming, setConfirming] = useState(false)
-  // 三轮复审 P3：cancel 的在途守卫，与 confirming 对称（见类型注释）。
-  const [canceling, setCanceling] = useState(false)
-  /** 上一轮见过的 pending id：观测 pending→null 跳变用。 */
-  const lastSeenPendingId = useRef<string | null>(null)
 
   const { data: pendingRequest, refetch: refetchPending } = useQuery({
     queryKey: extraQueryKeys.studioPublishRequest(workspaceId ?? ''),
@@ -72,110 +62,14 @@ export function useAgentPublishRequest(
     refetchInterval: POLL_INTERVAL_MS,
   })
   const requestId = pendingRequest?.id ?? null
-
-  const invalidate = useCallback(async () => {
-    if (!workspaceId) return
-    await Promise.all([
-      queryClient.invalidateQueries({
-        queryKey: extraQueryKeys.studioPublishRequest(workspaceId),
-      }),
-      queryClient.invalidateQueries({
-        queryKey: extraQueryKeys.workflowStudioData(workspaceId),
-      }),
-    ])
-  }, [queryClient, workspaceId])
-
-  // 观测 pending→null 的跳变：跳变的请求若已被本 app 内任一实例主动
-  // resolve（store 的 lastResolvedRequestId 命中——#429 二轮复审：per-
-  // instance ref 挡不住旁观者，对话框与栏顶共享 QueryClient，invalidate
-  // 后双方同时收到跳变，旁观实例会拿「已消解」覆盖操作实例刚着陆的正确
-  // 回执），则回执已由操作响应着陆，这里不动；否则是后端被顶替（agent
-  // 重发新请求 / 手动发布取代）或 TTL 过期，弹窗无声关闭——补一轮回执。
-  // confirming 行不算跳变（#429 四轮 P3-2）：confirm 在途时轮询会送来
-  // status='confirming' 的同一请求——它是「发布进行中」，不是「已消解」，
-  // 着陆回执的必须是真正终态的 null 跳变。
-  useEffect(() => {
-    if (pendingRequest) {
-      if (pendingRequest.status === 'confirming') return
-      lastSeenPendingId.current = pendingRequest.id
-      return
-    }
-    const lastId = lastSeenPendingId.current
-    if (!lastId) return
-    lastSeenPendingId.current = null
-    if (
-      useAgentPublishNoticeStore.getState().lastResolvedRequestId !== lastId
-    ) {
-      landNotice('Agent 的发布请求已消解（被新请求或手动发布取代，或已过期）')
-    }
-  }, [pendingRequest, landNotice])
-
-  const confirm = useCallback(async () => {
-    if (!workspaceId || !requestId || confirming) return
-    setConfirming(true)
-    try {
-      const resolved = await confirmPublishRequest(workspaceId, requestId)
-      markResolved(requestId)
-      const notice = agentPublishStatusNotice(resolved)
-      if (notice) landNotice(notice)
-      await invalidate()
-    } catch (error) {
-      showToast(
-        `确认发布失败：${(error instanceof Error && error.message) || '网络错误'}`,
-        'error'
-      )
-      // 失败（如草稿校验不过）后刷新 pending：请求可能仍在（可修复后重试）
-      // 也可能已过期（后端返回 404 → 弹窗由轮询自然关闭）。
-      await refetchPending()
-    } finally {
-      setConfirming(false)
-    }
-  }, [
-    workspaceId,
-    requestId,
-    confirming,
-    invalidate,
-    showToast,
-    refetchPending,
-    landNotice,
-    markResolved,
-  ])
-
-  const cancel = useCallback(async () => {
-    if (!workspaceId || !requestId || canceling) return
-    setCanceling(true)
-    try {
-      const resolved = await cancelPublishRequest(workspaceId, requestId)
-      markResolved(requestId)
-      const notice = agentPublishStatusNotice(resolved)
-      if (notice) landNotice(notice)
-      await invalidate()
-    } catch (error) {
-      // #429 收尾 P3：404 = 请求已不在（输了给 confirm 的 claim / 已被顶替
-      // / 已过期）——后端契约故意用 404 回答，不是操作失败。「取消失败」
-      // 的红 toast 对「输给 confirm」是误导（发布正在进行，取消本来就该
-      // 不生效）；静默 refetchPending，行态自己说话（confirming/confirmed
-      // 的回执或对话框状态会自然呈现）。其他错误（网络/5xx）照旧提示。
-      if ((error as { status?: number }).status !== 404) {
-        showToast(
-          `取消失败：${(error instanceof Error && error.message) || '网络错误'}`,
-          'error'
-        )
-      }
-      await refetchPending()
-    } finally {
-      setCanceling(false)
-    }
-  }, [
-    workspaceId,
-    requestId,
-    canceling,
-    invalidate,
-    showToast,
-    refetchPending,
-    landNotice,
-    markResolved,
-  ])
+  const invalidate = useAgentPublishRequestSync(workspaceId, pendingRequest)
+  const { confirming, canceling, confirm, cancel } =
+    useAgentPublishRequestActions({
+      workspaceId,
+      requestId,
+      invalidate,
+      refetchPending,
+    })
 
   return {
     pendingRequest: pendingRequest ?? null,

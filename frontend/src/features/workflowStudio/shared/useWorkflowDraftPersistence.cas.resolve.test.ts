@@ -18,11 +18,12 @@ vi.mock('../../../api', () => ({
   putWorkflowDraft: (...args: unknown[]) => mocks.putWorkflowDraft(...args),
 }))
 vi.mock('../../../api/workflowDraft', () => ({
-  DRAFT_NEVER_SAVED: 'never-saved',
   WorkflowDraftConflictError: class extends Error {
     readonly currentDraft: {
       definition_yaml: string | null
       updated_at: string | null
+      definition_hash: string | null
+      generation: number | null
     }
     constructor(detail: unknown) {
       super('workflow draft conflict')
@@ -33,10 +34,14 @@ vi.mock('../../../api/workflowDraft', () => ({
       const current = (payload.current_draft ?? {}) as {
         definition_yaml?: string | null
         updated_at?: string | null
+        definition_hash?: string | null
+        generation?: number | null
       }
       this.currentDraft = {
         definition_yaml: current.definition_yaml ?? null,
         updated_at: current.updated_at ?? null,
+        definition_hash: current.definition_hash ?? null,
+        generation: current.generation ?? null,
       }
     }
   },
@@ -45,6 +50,7 @@ vi.mock('../../../api/workflowDraft', () => ({
 const SERVER_DRAFT = {
   definition_yaml: 'key: demo\nlabel: Server\n',
   updated_at: '2026-08-27T01:02:03+00:00',
+  generation: 7,
 }
 
 type HookProps = {
@@ -53,7 +59,7 @@ type HookProps = {
   originalYaml: string
   serverDraft:
     | typeof SERVER_DRAFT
-    | { definition_yaml: null; updated_at: null }
+    | { definition_yaml: null; updated_at: null; generation: number }
     | undefined
   loadError?: boolean
 }
@@ -75,7 +81,12 @@ function renderPersistence(initial: HookProps) {
 /* consume 是稳定的闭包（内部读外部可变的 pending），rerender 只需换 props。 */
 function renderHookResult(
   initial: HookProps,
-  consume: () => { yaml: string; updatedAt: string; hash: string | null } | null
+  consume: () => {
+    yaml: string
+    updatedAt: string
+    hash: string | null
+    generation: number | null
+  } | null
 ) {
   return renderHook(
     (props: HookProps) =>
@@ -102,6 +113,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       current_draft: {
         definition_yaml: 'key: demo\nlabel: Agent v2\n',
         updated_at: '2026-09-12T10:00:00+00:00',
+        generation: 9,
       },
     })
   }
@@ -118,13 +130,21 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -138,7 +158,11 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       workspaceId: 'ws1',
       draftYaml: 'key: demo\nlabel: Third\n',
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -150,6 +174,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: 'key: demo\nlabel: Third\n',
       updated_at: '2026-09-12T11:00:00+00:00',
+      generation: 10,
     })
     act(() => result.current.resolveConflict(true))
     await act(async () => {
@@ -162,7 +187,11 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       workspaceId: 'ws1',
       draftYaml: 'key: demo\nlabel: Fourth\n',
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -170,7 +199,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
       'ws1',
       'key: demo\nlabel: Fourth\n',
-      { expectedUpdatedAt: '2026-09-12T11:00:00+00:00' }
+      { baseGeneration: 10 }
     )
   })
 
@@ -183,13 +212,21 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -200,6 +237,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: EDITED,
       updated_at: '2026-09-12T11:00:00+00:00',
+      generation: 10,
     })
     act(() => result.current.resolveConflict(true))
     await act(async () => {
@@ -207,7 +245,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     })
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
     expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith('ws1', EDITED, {
-      expectedUpdatedAt: '2026-09-12T10:00:00+00:00',
+      baseGeneration: 9,
     })
     expect(result.current.state.conflict).toBeUndefined()
   })
@@ -218,13 +256,21 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -247,13 +293,21 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -266,7 +320,11 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       workspaceId: 'ws1',
       draftYaml: 'key: demo\nlabel: During conflict\n',
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -284,12 +342,17 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: 'key: demo\nlabel: Final\n',
       updated_at: '2026-09-12T11:00:00+00:00',
+      generation: 10,
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: 'key: demo\nlabel: Final\n',
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -297,7 +360,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
       'ws1',
       'key: demo\nlabel: Final\n',
-      { expectedUpdatedAt: '2026-09-12T10:00:00+00:00' }
+      { baseGeneration: 9 }
     )
   })
 
@@ -309,13 +372,21 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -325,12 +396,17 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       workspaceId: 'ws1',
       draftYaml: 'key: demo\nlabel: During conflict\n',
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
 
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: 'key: demo\nlabel: During conflict\n',
       updated_at: '2026-09-12T11:00:00+00:00',
+      generation: 10,
     })
     act(() => result.current.resolveConflict(true))
     // 补发 debounce 窗口内：status 已是 pending（非假 saved）。
@@ -341,7 +417,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
       'ws1',
       'key: demo\nlabel: During conflict\n',
-      { expectedUpdatedAt: '2026-09-12T10:00:00+00:00' }
+      { baseGeneration: 9 }
     )
   })
 
@@ -353,6 +429,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       yaml: 'key: demo\nlabel: Agent v2\n',
       updatedAt: '2026-08-27T03:00:00+00:00',
       hash: null,
+      generation: 9,
     }
     let pending: typeof conflict | null = null
     const consume = () => {
@@ -365,7 +442,11 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
         workspaceId: 'ws1',
         draftYaml: EDITED,
         originalYaml: BASE,
-        serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+        serverDraft: {
+          definition_yaml: BASE,
+          updated_at: SERVER_AT,
+          generation: 7,
+        },
       },
       consume
     )
@@ -378,6 +459,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       serverDraft: {
         definition_yaml: conflict.yaml,
         updated_at: conflict.updatedAt,
+        generation: conflict.generation,
       },
     })
     await waitFor(() => expect(result.current.state.conflict).toBe(true))
@@ -388,6 +470,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: EDITED,
       updated_at: '2026-08-27T04:00:00+00:00',
+      generation: 10,
     })
     rerender({
       workspaceId: 'ws1',
@@ -396,6 +479,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       serverDraft: {
         definition_yaml: conflict.yaml,
         updated_at: conflict.updatedAt,
+        generation: conflict.generation,
       },
     })
     await act(async () => {
@@ -409,7 +493,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith(
       'ws1',
       'key: demo\nlabel: After conflict\n',
-      { expectedUpdatedAt: conflict.updatedAt }
+      { baseGeneration: conflict.generation }
     )
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
   })
@@ -424,6 +508,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       yaml: 'key: demo\nlabel: Agent v2\n',
       updatedAt: '2026-08-27T03:00:00+00:00',
       hash: null,
+      generation: 9,
     }
     let pending: typeof conflict | null = null
     const consume = () => {
@@ -436,7 +521,11 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
         workspaceId: 'ws1',
         draftYaml: BASE,
         originalYaml: BASE,
-        serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+        serverDraft: {
+          definition_yaml: BASE,
+          updated_at: SERVER_AT,
+          generation: 7,
+        },
       },
       consume
     )
@@ -444,12 +533,17 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: EDITED,
       updated_at: '2026-08-27T02:00:00+00:00',
+      generation: 8,
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -466,6 +560,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       serverDraft: {
         definition_yaml: conflict.yaml,
         updated_at: conflict.updatedAt,
+        generation: conflict.generation,
       },
     })
     await waitFor(() => expect(result.current.state.conflict).toBe(true))
@@ -474,6 +569,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: EDITED,
       updated_at: '2026-08-27T04:00:00+00:00',
+      generation: 10,
     })
     act(() => result.current.resolveConflict(true))
     await act(async () => {
@@ -483,7 +579,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       callsBeforeConflict
     )
     expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith('ws1', EDITED, {
-      expectedUpdatedAt: conflict.updatedAt,
+      baseGeneration: conflict.generation,
     })
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
   })
@@ -494,13 +590,21 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -522,7 +626,11 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突解决与重应用', ()
       workspaceId: 'ws1',
       draftYaml: 'key: demo\nlabel: Agent v2\n',
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)

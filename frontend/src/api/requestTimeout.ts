@@ -9,7 +9,7 @@ export const DEFAULT_READ_TIMEOUT_MS = 30_000
  * 耗时更久，且客户端中止并不撤销服务端动作，过早超时只会误报失败。 */
 export const DEFAULT_WRITE_TIMEOUT_MS = 120_000
 /** #719：批量操作（batch-rerun/run-to/delete/package/clear-packed/升级/
- * 暂停恢复）服务端同步处理整批（可达全量筛选结果），耗时随规模增长，
+ * 暂停恢复/审批）服务端同步处理整批（可达全量筛选结果），耗时随规模增长，
  * 豁免超时。 */
 export const BULK_REQUEST_TIMEOUT = null
 /** 超时错误的结构化错误码（错误映射层据此出文案，与 #718 联动）。 */

@@ -5,10 +5,14 @@ must stay below the online code fleet's declared capacity x factor (floored
 by min_stock, capped at max_stock); over-target nodes stay pending for the
 local pool. Without it an online code Worker let every ready code node
 enqueue, flooding the broker queue (2026-08-18 prod incident).
+
+#1320 (B): requests parked by the v6 material-ETag claim gate are excluded
+from the stock while no online >= v6 code Worker can ever claim them.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -18,6 +22,7 @@ from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.workflow_worker.code_claim import try_claim_code_worker_node
 from server.app.workflow_worker.code_stock import CodeStockConfig, CodeStockGate
+from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
 from tests.helpers.agent_worker_api import (
     enqueue_code as _enqueue_code,
 )
@@ -118,3 +123,99 @@ def test_stock_gate_blocks_code_worker_enqueue() -> None:
 
     assert handled is False
     dispatch.try_mark_in_flight.assert_not_called()
+
+
+# --- #1320 (B): requests parked by the v6 material ETag gate do not occupy
+# code stock while the fleet has no online >= v6 code Worker ------------------
+
+
+def _register_fleet(protocol_version: int, *, max_code_concurrency: int = 2) -> None:
+    AgentWorkerRegistry(TEST_DATABASE_URL).issue_token(
+        worker_id="worker-code-stock",
+        name="worker",
+        runtimes=["pi"],
+        capabilities=["package"],
+        max_concurrency=1,
+        max_code_concurrency=max_code_concurrency,
+        protocol_version=protocol_version,
+    )
+
+
+def _enqueue_etag_gated(job_db, *, job_id: str, material_id: str, bundle: bool = False) -> None:
+    """One queued code request whose job input hits the ETag gate predicate:
+    a no-hash material row with a bound etag (directly, or via a bundle)."""
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values ('test-workspace', 'Test')"
+            " on conflict(id) do nothing"
+        )
+        conn.execute(
+            "insert into materials(id, workspace_id, content_hash, filename, content_type,"
+            " size_bytes, storage_key, status, created_by, object_etag)"
+            " values (%s, 'test-workspace', '', 'g.txt', 'text/plain', 1,"
+            " 'test-workspace/x/v2g0/m_x/g.txt', 'ready', 'user-1', 'etag-1')",
+            (material_id,),
+        )
+        if bundle:
+            conn.execute(
+                "insert into material_bundles(id, workspace_id, name) values (%s, 'test-workspace', 'b')",
+                (f"bundle-{material_id}",),
+            )
+            conn.execute(
+                "insert into material_bundle_members(bundle_id, material_id, path, ordinal)"
+                " values (%s, %s, 'a.txt', 0)",
+                (f"bundle-{material_id}", material_id),
+            )
+            input_doc = {"type": "bundle", "bundle_id": f"bundle-{material_id}"}
+        else:
+            input_doc = {"type": "material", "material_id": material_id}
+        conn.execute(
+            "insert into jobs(id, workspace_id, source_type, source_id, status, input_json)"
+            " values (%s, 'test-workspace', 'material', %s, 'queued', %s)",
+            (job_id, material_id, json.dumps(input_doc)),
+        )
+        conn.execute("insert into job_nodes(job_id, node_key) values (%s, 'package')", (job_id,))
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
+    _enqueue_code(broker, job_id=job_id)
+
+
+def test_etag_gated_stock_excluded_without_v6_worker(job_db) -> None:
+    """v5-only fleet: gate-parked requests stay off the stock count, so the
+    claimable backlog alone decides the gate (2 claimable < target 3 → open;
+    a third claimable closes it)."""
+    config = CodeStockConfig(min_stock=0, max_stock=100)  # target = ceil(2 x 1.5) = 3
+    _register_fleet(MATERIAL_ETAG_PROTOCOL_VERSION - 1)
+    _enqueue_code_stock(job_db, start=0, count=2)
+    _enqueue_etag_gated(job_db, job_id="job-gated-1", material_id="mat-g1")
+    _enqueue_etag_gated(job_db, job_id="job-gated-2", material_id="mat-g2")  # 4 queued total
+
+    assert _gate(config).allows() is True
+
+    _enqueue_code_stock(job_db, start=2, count=1)  # 3 claimable = target
+    assert _gate(config).allows() is False
+
+
+def test_etag_gated_stock_counts_with_v6_worker(job_db) -> None:
+    """A >= v6 Worker drains gate-parked requests: they count against stock
+    again (the backlog is claimable, so it must throttle production)."""
+    config = CodeStockConfig(min_stock=0, max_stock=100)  # target = 3
+    _register_fleet(MATERIAL_ETAG_PROTOCOL_VERSION)
+    _enqueue_code_stock(job_db, start=0, count=2)
+    _enqueue_etag_gated(job_db, job_id="job-gated-1", material_id="mat-g1")
+    _enqueue_etag_gated(job_db, job_id="job-gated-2", material_id="mat-g2")  # 4 queued total
+
+    assert _gate(config).allows() is False
+
+
+def test_etag_gated_stock_excluded_bundle_branch_and_empty_fleet(job_db) -> None:
+    """Bundle inputs follow the same exclusion; with NO fleet at all (empty
+    capacity) the exclusion still applies."""
+    config = CodeStockConfig(min_stock=2, max_stock=100)  # no fleet: target = min_stock 2
+    _enqueue_etag_gated(job_db, job_id="job-gated-b1", material_id="mat-gb1", bundle=True)
+    _enqueue_etag_gated(job_db, job_id="job-gated-b2", material_id="mat-gb2", bundle=True)
+    _enqueue_code_stock(job_db, start=0, count=1)  # 1 claimable
+
+    assert _gate(config).allows() is True
+
+    _enqueue_code_stock(job_db, start=1, count=1)  # 2 claimable = target
+    assert _gate(config).allows() is False

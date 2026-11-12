@@ -30,6 +30,11 @@ production:
     - path: server/app/db
       extensions: [.sql]
       max_lines: 1200
+  # #1030：migration 文件仍受 raw 800 绝对上限约束，但不参与逐文件 baseline、
+  # effective-line ceiling 或 ratchet；root 必须匹配 production 文件，且不得
+  # 再配置 architecture.file_budget 豁免。
+  per_file_ceiling_exempt_roots:
+    - server/app/db/migrations
   exclude:
     - frontend/src/generated/**
     - worker/ui/vendor/**

@@ -9,15 +9,19 @@ WORKFLOW_KEY = "education_video_problems_generation"
 WORKSPACE_ID = "ws-run-chunk"
 
 
-def definition_accepting_refs():
+def definition_accepting(item_types: list[str]):
     import copy
 
     from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
     from server.app.workflows.definition import workflow_definition_from_dict
 
     raw = copy.deepcopy(DEMO_WORKFLOW_DEFINITION)
-    raw["nodes"]["_start"]["accepted_item_types"] = ["material", "ref"]
+    raw["nodes"]["_start"]["accepted_item_types"] = list(item_types)
     return workflow_definition_from_dict(raw)
+
+
+def definition_accepting_refs():
+    return definition_accepting(["material", "ref"])
 
 
 def workspace(job_db, settings) -> None:

@@ -25,7 +25,8 @@
   white-space: nowrap;
 }
 .popover {
-  width: 300px;
+  /* #1129：加宽面板缓解归档行拥挤（标题 + 倒计时徽标 + 恢复 + 删除）。 */
+  width: 340px;
   max-height: 360px;
   overflow-y: auto;
   padding: 4px 0;

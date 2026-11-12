@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { publishWorkflowDraft } from '../../../api'
+import { hasStructuralChanges } from '../validation/workflowStudioChanges'
 import { useValidationFeedback } from '../validation/useValidationFeedback'
 import { useDraftAutoValidation } from './useDraftAutoValidation'
 import type { DraftSaveState } from './draftSaveTypes'
@@ -11,6 +12,9 @@ import type { UseWorkflowDraftCompareResult } from './useWorkflowDraftCompare'
  * 状态机的当前状态做触发边沿。 */
 type DraftWithSave = UseWorkflowStudioDraftResult & {
   draftSave: DraftSaveState
+  /** #1226 四轮 P1：发布成功后失效服务端草稿查询（后端已删行），让保存
+   * 控制器随「无草稿」重取同步到新 canonical 基线。 */
+  invalidateServerDraft: () => Promise<unknown>
 }
 
 export type UseWorkflowStudioActionsResult = {
@@ -59,11 +63,12 @@ export function useWorkflowStudioActions(
     setValidating,
   })
   const { compareState, compareErrors, compareSummary } = compare
+  // M48 双通道：execution-only 变更（runtime 字段）不点亮发布——运行配置
+  // 走运行通道的「保存运行配置」即改即存；发布复核只承载结构变更。
   const hasCompareChanges = Boolean(
-    compareSummary?.nodeChanges.length ||
-    compareSummary?.edgeChanges.length ||
-    compareSummary?.intakeChanges.length ||
-    compareSummary?.riskFlags.length
+    compareSummary &&
+    (hasStructuralChanges(compareSummary) ||
+      compareSummary.riskFlags.length > 0)
   )
   const hasBlockingCompareError = Boolean(
     compareErrors?.some(
@@ -97,6 +102,10 @@ export function useWorkflowStudioActions(
         // canonical 基线变化时据此强制 reset，不误判为外部变更保留旧草稿。
         draft.markDraftPublished(draft.definitionYaml)
         await reload()
+        /* #1226 四轮 P1：后端发布即删草稿行——失效草稿查询，否则画布 reset
+           到 canonical 后保存控制器仍持旧草稿基线，尾随 debounce PUT 会按
+           CAS-over-absence 语义立刻重建刚删的草稿行。 */
+        await draft.invalidateServerDraft()
         notify('保存成功', 'success')
       } else {
         // 服务端发布期校验未过：错误列表归校验通道（chip ✗ + 抽屉详情），

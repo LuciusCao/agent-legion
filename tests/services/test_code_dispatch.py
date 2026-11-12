@@ -28,6 +28,7 @@ from server.app.agent_broker.code_manifest_config import (
     resolve_code_manifest_config,
     split_manifest_config,
 )
+from server.app.agent_broker.worker_presence import has_online_etag_capable_code_worker
 from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.db.transaction import write_transaction
 from server.app.executors.contracts import CodeCapabilityConfig
@@ -35,6 +36,7 @@ from server.app.services.artifact_store import ArtifactStore
 from server.app.services.vault import VaultService
 from server.app.settings import Settings
 from server.app.workflows.definition import WorkflowNode
+from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 from worker.code_runner import build_child_payload
@@ -383,6 +385,7 @@ def _register_probe_worker(
     capabilities: list[str] | None = None,
     max_code_concurrency: int = 1,
     allowed_workspaces: list[str] | None = None,
+    protocol_version: int = 2,
 ) -> None:
     AgentWorkerRegistry(TEST_DATABASE_URL).issue_token(
         worker_id=worker_id,
@@ -391,9 +394,52 @@ def _register_probe_worker(
         capabilities=capabilities,
         max_concurrency=10,
         max_code_concurrency=max_code_concurrency,
-        protocol_version=2,
+        protocol_version=protocol_version,
         allowed_workspaces=allowed_workspaces,
     )
+
+
+def test_etag_capable_probe_requires_v6_worker(job_db) -> None:
+    """#1320: the v6 fleet probe tells whether the fleet can claim ETag-gated
+    requests — a pre-v6 code Worker never qualifies; the workspace ACL applies
+    exactly like the v2 probe."""
+
+    def probe(workspace: str = "test-workspace") -> bool:
+        return has_online_etag_capable_code_worker(TEST_DATABASE_URL, workspace)
+
+    assert probe() is False
+    # v5-only fleet: code-claimable in general, but not for gated requests.
+    _register_probe_worker("worker-v5", protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION - 1)
+    assert probe() is False
+    # A v6 Worker anywhere in the workspace's admission scope qualifies.
+    _register_probe_worker("worker-v6", protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION)
+    assert probe() is True
+    _revoke("worker-v6")
+    with job_db.connect() as conn:
+        conn.execute("insert into workspaces(id, name) values ('other-workspace', 'Other')")
+    _register_probe_worker(
+        "worker-v6-scoped",
+        protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
+        allowed_workspaces=["other-workspace"],
+    )
+    assert probe() is False
+    assert probe("other-workspace") is True
+
+
+def test_etag_capable_probe_method_caches_within_ttl(job_db, tmp_path) -> None:
+    """#1320: the service-level v6 probe is TTL-cached like the v2 probe,
+    shares its cache without key collisions, and pins the v6 floor (a v5-only
+    fleet must read False — mutation guard for the protocol floor)."""
+    service = _service(job_db, tmp_path)
+    _register_probe_worker("worker-v5", protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION - 1)
+    assert service.online_etag_capable_code_worker_available("test-workspace") is False
+    _register_probe_worker("worker-v6", protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION)
+    # The stale negative is served within the TTL window.
+    assert service.online_etag_capable_code_worker_available("test-workspace") is False
+    service._online_probe.clear()
+    assert service.online_etag_capable_code_worker_available("test-workspace") is True
+    # The sentinel cache key does not disturb the capability probe.
+    assert service.online_code_worker_available("package", "test-workspace") is True
 
 
 def test_online_code_worker_probe_ignores_capability(job_db) -> None:

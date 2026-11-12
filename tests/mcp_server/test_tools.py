@@ -18,6 +18,7 @@ from server.app.mcp_server.config import (
     API_BASE_ENV,
     DEFAULT_API_BASE,
     SESSION_ID_ENV,
+    SESSION_ID_HEADER,
     TOKEN_ENV,
     McpConfigError,
     McpServerConfig,
@@ -132,7 +133,7 @@ def test_loopback_tools_are_async() -> None:
     server = create_mcp_server(
         McpServerConfig(api_base="http://backend.test:9000", token="t", session_id="sess-1")
     )
-    tools = server._tool_manager._tools  # pinned mcp==1.29 internals
+    tools = server._tool_manager._tools  # pinned mcp==1.30 internals
     for name in (
         "get_studio_context",
         "get_active_workflow",
@@ -203,9 +204,9 @@ def test_get_workflow_draft_gets_canvas_draft(recorded) -> None:
     assert calls[0]["url"].endswith("/workspaces/ws-1/workflow/draft")
 
 
-def test_save_workflow_draft_puts_with_cas_token(recorded) -> None:
-    # #633: the write carries the CAS base (expected_updated_at) — a stale
-    # token comes back as HTTP 409 text carrying the current draft.
+def test_save_workflow_draft_puts_with_base_generation(recorded) -> None:
+    # #633 + #1226 五轮收口: the write carries the CAS base generation — a
+    # stale base comes back as HTTP 409 text carrying the current draft state.
     server, calls = recorded
     _run_tool(
         server,
@@ -213,14 +214,14 @@ def test_save_workflow_draft_puts_with_cas_token(recorded) -> None:
         {
             "workspace_id": "ws-1",
             "definition_yaml": "key: wf\n",
-            "expected_updated_at": "2026-09-12 00:00:00+00",
+            "base_generation": 3,
         },
     )
     assert calls[0]["method"] == "PUT"
     assert calls[0]["url"].endswith("/workspaces/ws-1/workflow/draft")
     assert calls[0]["json"] == {
         "definition_yaml": "key: wf\n",
-        "expected_updated_at": "2026-09-12 00:00:00+00",
+        "base_generation": 3,
     }
 
 
@@ -509,7 +510,21 @@ def test_get_preview_guide_is_served_locally(recorded) -> None:
     text = _run_tool(server, "get_preview_guide", {})
     # The preview panel playbook ships with the MCP server: no HTTP call.
     assert calls == []
-    for section in ("Bridge API", "listArtifacts", "readArtifact", "getJobDetail"):
+    for section in (
+        "Bridge API",
+        "listArtifacts",
+        "readArtifact",
+        "readArtifactBytes",
+        "getJobDetail",
+        "media-src blob:",
+        # blob URL 生命周期归面板（#1178 codex P2）：示例必须带回收形态。
+        "revokeObjectURL",
+        "pagehide",
+        # 重跑后的重取语义（#1178 codex 复审）：桥通道穿透缓存。
+        "no-store",
+        # 字节桥调用面（#1178 codex 复审 P1 收口）：宿主注入全局，非端口下发。
+        "__agentLegionPreviewBytes",
+    ):
         assert section in text
 
 
@@ -577,7 +592,7 @@ def test_static_config_without_session_skips_session_tools() -> None:
     # registers the two session-bound tools (they could only answer
     # "unavailable"); the callable-resolver HTTP transport keeps them.
     server = create_mcp_server(_CONFIG)
-    tools = server._tool_manager._tools  # pinned mcp==1.29 internals
+    tools = server._tool_manager._tools  # pinned mcp==1.30 internals
     assert len(tools) == 33
     assert "get_studio_context" not in tools
     assert "get_job_context" not in tools
@@ -647,6 +662,25 @@ def test_loopback_client_ignores_env_proxies(monkeypatch) -> None:
     monkeypatch.setattr("server.app.mcp_server.tool_client.httpx.AsyncClient", FakeAsyncClient)
     asyncio.run(ToolClient(_CONFIG).call("GET", "/workspaces/ws-1/workflow"))
     assert captured.get("trust_env") is False
+
+
+def test_loopback_client_forwards_session_binding_header(monkeypatch) -> None:
+    """#1123: the loopback carries the chat-session binding so save routes can
+    pin the synthetic draft_saved timeline event to the session."""
+    sent: list[dict] = []
+
+    def capture(method, url, json=None, headers=None, timeout=None):  # noqa: A002
+        sent.append(headers or {})
+        return _FakeResponse(200)
+
+    _patch_http_client(monkeypatch, capture)
+
+    bound = McpServerConfig(api_base="http://backend.test:9000", token="t", session_id="sess-7")
+    asyncio.run(ToolClient(bound).call("PUT", "/workspaces/ws-1/workflow/draft", {}))
+    assert sent[-1].get(SESSION_ID_HEADER) == "sess-7"
+
+    asyncio.run(ToolClient(_CONFIG).call("PUT", "/workspaces/ws-1/workflow/draft", {}))
+    assert SESSION_ID_HEADER not in sent[-1]
 
 
 def test_config_requires_token() -> None:

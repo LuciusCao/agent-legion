@@ -146,7 +146,7 @@ resolve_machine_identity() {
     fi
   done
   if [[ "$(uname -s)" == "Darwin" ]]; then
-    candidate="$(ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null | sed -n 's/.*IOPlatformUUID" = "\([^"]*\)".*/\1/p' | head -n 1)"
+    candidate="$(ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null | sed -n 's/.*IOPlatformUUID" = "\([^"]*\)".*/\1/p' | awk 'NR==1')"
     if [[ -n "$candidate" ]]; then
       printf 'platform-uuid:%s' "$candidate"
       return 0

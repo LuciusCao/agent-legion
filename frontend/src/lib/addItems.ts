@@ -64,7 +64,9 @@ export type UploadMaterialResult = {
   deduplicated: boolean
 }
 
-/** 单文件上传协议：presign → PUT 直传对象存储 → complete。 */
+/** 单文件上传协议：presign → PUT 直传对象存储 → complete（携带 presign
+ *  时的上传代次，#1269 格子②——其间行被重试推进代次时 complete 得 409，
+ *  调用方按失败重试整个上传即可）。 */
 export async function uploadMaterialFile(
   workspaceId: string,
   file: File,
@@ -84,14 +86,23 @@ export async function uploadMaterialFile(
   if (!presigned.upload_url) {
     throw new Error('后端未返回上传地址')
   }
+  // #1321：presign 把 If-None-Match: * 签进 URL 的 SignedHeaders（对象
+  // create-only），PUT 必须原样携带该头（缺头 403 SignatureDoesNotMatch）。
+  // 网络重试遇上 412 = 首个 PUT 已落盘但响应丢失：按「已上传」继续走
+  // complete——size/hash 由服务端核验兜底，字节不符仍会在 complete 处 422。
   const response = await fetch(presigned.upload_url, {
     method: 'PUT',
+    headers: { 'If-None-Match': '*' },
     body: file,
   })
-  if (!response.ok) {
+  if (!response.ok && response.status !== 412) {
     throw new Error(`直传失败 (HTTP ${response.status})`)
   }
-  await completeMaterial(workspaceId, materialId)
+  await completeMaterial(
+    workspaceId,
+    materialId,
+    presigned.material.upload_generation
+  )
   return { materialId, deduplicated: false }
 }
 

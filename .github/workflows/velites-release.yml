@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Tag must match velites/Cargo.toml version
         run: |
@@ -56,7 +56,7 @@ jobs:
           - triple: aarch64-unknown-linux-gnu
             runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # container job 的默认 shell 是 sh（dash，无 pipefail）；脚本步骤统一
       # bash——首次触发即踩坑（sh: Illegal option -o pipefail）。
@@ -81,7 +81,7 @@ jobs:
           cp velites/target/release/velites "dist/${name}/velites"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: velites-${{ matrix.triple }}
           path: dist/*.tar.gz
@@ -90,10 +90,10 @@ jobs:
   build-macos:
     name: build aarch64-apple-darwin
     needs: validate
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
@@ -113,7 +113,7 @@ jobs:
           cp velites/target/release/velites "dist/${name}/velites"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: velites-aarch64-apple-darwin
           path: dist/*.tar.gz
@@ -137,11 +137,11 @@ jobs:
       # codex P1 on #533：下方 notes 生成要 git ls-remote origin 查上一个
       # velites tag——GitHub-hosted runner 是全新环境，没有 checkout 就没有
       # origin；depth 1 即可（只查 tag 引用，不看历史）。
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           merge-multiple: true
@@ -256,7 +256,7 @@ jobs:
           cat release-notes.md
           echo "--- title: ${title}"
 
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           name: ${{ steps.notes.outputs.title }}
           files: |

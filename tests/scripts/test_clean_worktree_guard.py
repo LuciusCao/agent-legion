@@ -37,6 +37,7 @@ NAMES_LIB = ROOT / "scripts" / "worktree-names-lib.sh"
 # buffered stdout): the script reads it via `... | awk '{...; exit}'` under
 # pipefail, and per-line echoes would race awk's early exit into SIGPIPE.
 _GIT_STUB = """#!/usr/bin/env bash
+if [[ "$1" == "-C" ]]; then shift 2; fi
 if [[ "$1" == "worktree" && "$2" == "list" ]]; then
   printf '%s\\n' \\
     "worktree __MAIN__" \\
@@ -49,9 +50,33 @@ if [[ "$1" == "worktree" && "$2" == "list" ]]; then
     "worktree __MAIN__/.worktrees/other" \\
     "HEAD 0000000000000000000000000000000000000000" \\
     "branch refs/heads/feat/other"
+  if [[ -n "${STUB_TOWER_WT:-}" ]]; then
+    printf '%s\n' \
+      "" \
+      "worktree __MAIN__/.worktrees/victim/.tower/worktrees/${STUB_TOWER_WT}" \
+      "HEAD 1111111111111111111111111111111111111111" \
+      "branch refs/heads/feat/tower"
+  fi
   exit 0
 fi
+# 派生名锁（#1084）落在 git common dir 下；只读查询，不记入 stub 日志。
+if [[ "$1" == "rev-parse" && "$2" == "--git-common-dir" ]]; then
+  echo "__MAIN__/.git"
+  exit 0
+fi
+# 远端分支删除必须在放锁之后（#1084 P2：远端网络操作不入锁域）——push 时
+# 仍有 holder 即违规。
+if [[ "$1" == "push" ]]; then
+  if ls "__MAIN__/.git/worktree-derived-names.lock"/holder-* >/dev/null 2>&1; then
+    printf 'push-under-lock\n' >>"${STUB_LOG:-/dev/null}"
+  fi
+fi
 printf 'git %s\\n' "$*" >>"${STUB_LOG:-/dev/null}"
+# 真实 git worktree remove 会删掉目录；删除阶段的同名重建检查（#1084）
+# 以目录是否仍在判定注册条目是否有使用方。
+if [[ "$1" == "worktree" && "$2" == "remove" ]]; then
+  rm -rf "$3"
+fi
 exit 0
 """
 
@@ -62,9 +87,11 @@ _PSQL_STUB = """#!/usr/bin/env bash
 exit 0
 """
 
+# uv 桩：bucket probe 成功且无需删除（probe 失败在 clean-worktree.sh 里是
+# fail-closed 中止，不能再用「uv 失败」模拟跳过路径，#1084）。
 _UV_STUB = """#!/usr/bin/env bash
-echo "uv stub (S3 cleanup skipped)"
-exit 1
+echo "uv stub (bucket probe: nothing to delete)"
+exit 0
 """
 
 
@@ -78,6 +105,7 @@ def _setup(tmp_path: Path) -> tuple[Path, Path, Path]:
     main = tmp_path / "main"
     scripts_dir = main / ".worktrees" / "other" / "scripts"
     scripts_dir.mkdir(parents=True)
+    (main / ".git").mkdir()
     shutil.copy(SCRIPT, scripts_dir / "clean-worktree.sh")
     shutil.copy(DB_SCRIPT, scripts_dir / "drop-worktree-db.sh")
     shutil.copy(NAMES_LIB, scripts_dir / NAMES_LIB.name)
@@ -154,6 +182,60 @@ def test_cwd_outside_target_worktree_proceeds(tmp_path: Path) -> None:
     assert "工作目录在待清理的 worktree 内" not in result.stderr
 
 
+def test_parent_cleanup_refuses_registered_tower_dependent(tmp_path: Path) -> None:
+    main, bin_dir, stub_log = _setup(tmp_path)
+    parent = main / ".worktrees" / "victim"
+    tower = parent / ".tower" / "worktrees" / "wt-1"
+    tower.mkdir(parents=True)
+    stub_log.write_text("", encoding="utf-8")
+
+    result = _run(
+        main / ".worktrees" / "other" / "scripts" / "clean-worktree.sh",
+        bin_dir,
+        cwd=main,
+        extra_env={"STUB_LOG": str(stub_log), "STUB_TOWER_WT": "wt-1"},
+    )
+
+    assert result.returncode == 1
+    assert "tower 子 worktree 复用其派生库/bucket" in result.stderr
+    assert str(tower) in result.stderr
+    assert "worktree remove" not in stub_log.read_text()
+
+
+_PSQL_EXISTING_DB_STUB = """#!/usr/bin/env bash
+if [[ "$*" == *pg_database_size* ]]; then
+  echo "agent_legion_dev|1 MB"
+elif [[ "$*" == *"select 1 from pg_database"* ]]; then
+  echo 1
+fi
+exit 0
+"""
+
+_DROPDB_PROBE = """#!/usr/bin/env bash
+echo "dropdb $*" >> "${STUB_LOG:-/dev/null}"
+"""
+
+
+def test_parent_db_drop_refuses_registered_tower_dependent(tmp_path: Path) -> None:
+    main, bin_dir, stub_log = _setup(tmp_path)
+    tower = main / ".worktrees" / "victim" / ".tower" / "worktrees" / "wt-1"
+    tower.mkdir(parents=True)
+    _write_stub(bin_dir / "psql", _PSQL_EXISTING_DB_STUB)
+    _write_stub(bin_dir / "dropdb", _DROPDB_PROBE)
+    stub_log.write_text("", encoding="utf-8")
+
+    result = _run(
+        main / ".worktrees" / "other" / "scripts" / "drop-worktree-db.sh",
+        bin_dir,
+        cwd=main,
+        extra_env={"STUB_LOG": str(stub_log), "STUB_TOWER_WT": "wt-1"},
+    )
+
+    assert result.returncode == 1
+    assert "拒绝删除父 worktree 派生库" in result.stderr
+    assert "dropdb" not in stub_log.read_text()
+
+
 # --- remote-branch protection (#930) ---------------------------------------
 
 
@@ -206,6 +288,8 @@ def test_delete_remote_branch_deletes_unprotected_branch(tmp_path: Path, branch:
 
     assert result.returncode == 0, result.stderr
     assert f"git push origin --delete {branch}\n" in stub_log.read_text(encoding="utf-8")
+    # 远端网络操作不入锁域（#1084 P2）：push 时派生名锁必须已释放。
+    assert "push-under-lock" not in stub_log.read_text(encoding="utf-8")
     assert "受保护分支" not in result.stderr
 
 

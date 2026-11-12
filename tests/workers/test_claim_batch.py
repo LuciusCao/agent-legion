@@ -73,7 +73,15 @@ class _FakeBatchClient:
         self.calls: list[dict] = []
 
     def claim_batch(
-        self, worker_id, max_concurrency, max_code_concurrency, *, limit, agent_limit, code_limit
+        self,
+        worker_id,
+        max_concurrency,
+        max_code_concurrency,
+        *,
+        limit,
+        agent_limit,
+        code_limit,
+        node_concurrency_limits=None,
     ):  # type: ignore[no-untyped-def]
         self.calls.append(
             {
@@ -83,6 +91,7 @@ class _FakeBatchClient:
                 "limit": limit,
                 "agent_limit": agent_limit,
                 "code_limit": code_limit,
+                "node_concurrency_limits": node_concurrency_limits,
             }
         )
         return self.script.pop(0)
@@ -116,6 +125,25 @@ def _submitter(collector: list[dict], budget: dict[str, int]):  # type: ignore[n
 
 
 class TestDrainBudget:
+    def test_node_limits_reach_the_claim_payload(self) -> None:
+        """#1158：热更读到的节点上限映射随每次 claim 声明透传到 client。"""
+        budget = {"agent": 1, "code": 0}
+        ctx, _pool_deferred, submitted = _ctx(_FakeBatchClient([]))
+        ctx.node_limits = {"heavy": 1}
+        ctx.client.script = [[{"execution_id": "e0", "kind": "agent", "node_key": "generate"}]]
+
+        drain_budget(
+            ctx,
+            budget,
+            {"agent": 10, "code": 0},
+            32,
+            0,
+            True,
+            _submitter(submitted, budget),
+        )
+
+        assert ctx.client.calls[0]["node_concurrency_limits"] == {"heavy": 1}
+
     def test_one_batch_fills_budget(self) -> None:
         budget = {"agent": 3, "code": 0}
         ctx, pool_deferred, submitted = _ctx(_FakeBatchClient([]))

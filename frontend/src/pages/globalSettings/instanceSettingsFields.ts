@@ -1,14 +1,13 @@
-// 实例设置表单的字段元数据表（从 InstanceSettingsSection 拆出以控制体积预算；
-// 各组用户视角说明在 instanceSettingsHints.ts）。
-// #389：code_capacity（本地兜底执行并发上限，实例级，重启生效）在
-// 「本地执行」组，0 = 纯远程模式（不在宿主本地执行 code 节点）。
-// 保留策略类字段（materials/execution retention）见姊妹文件
-// instanceSettingsRetentionFields.ts。
+// 实例设置表单的字段组聚合与字段查找；各组定义位于同域姊妹模块，
+// 用户视角说明在 instanceSettingsHints.ts。
 
 import type { FieldGroup, NumberFieldDef } from './instanceSettingsFieldTypes'
 import { CAPACITY_FIELD_GROUPS } from './instanceSettingsCapacityFields'
+import { CORE_FIELD_GROUPS } from './instanceSettingsCoreFields'
 import { RETENTION_FIELD_GROUPS } from './instanceSettingsRetentionFields'
 import { SECURITY_FIELD_GROUPS } from './instanceSettingsSecurityFields'
+import { WORKER_FIELD_GROUPS } from './instanceSettingsWorkerFields'
+import { WORKFLOW_FIELD_GROUPS } from './instanceSettingsWorkflowFields'
 
 export type { FieldGroup, NumberFieldDef } from './instanceSettingsFieldTypes'
 export { CAPACITY_FIELD_GROUPS } from './instanceSettingsCapacityFields'
@@ -16,142 +15,12 @@ export { RETENTION_FIELD_GROUPS } from './instanceSettingsRetentionFields'
 export { SECURITY_FIELD_GROUPS } from './instanceSettingsSecurityFields'
 
 export const FIELD_GROUPS: FieldGroup[] = [
-  {
-    title: '清理',
-    fields: [
-      {
-        path: 'cleanup.log_retention_days',
-        label: '日志保留天数',
-        integer: true,
-      },
-      {
-        path: 'cleanup.run_dir_retention_days',
-        label: '运行目录保留天数',
-        integer: true,
-      },
-      {
-        path: 'cleanup.interval_seconds',
-        label: '清理间隔（秒）',
-        integer: true,
-      },
-    ],
-    toggles: [],
-  },
-  {
-    title: '监控',
-    fields: [
-      {
-        path: 'monitoring.sample_interval_seconds',
-        label: '采样间隔（秒）',
-        integer: false,
-      },
-      {
-        path: 'monitoring.retention_days',
-        label: '数据保留天数',
-        integer: true,
-      },
-    ],
-    toggles: [],
-  },
-  {
-    title: '心跳与租约',
-    fields: [
-      {
-        path: 'heartbeat_interval_seconds',
-        label: '心跳间隔（秒）',
-        integer: false,
-      },
-      { path: 'lease_ttl_seconds', label: '租约 TTL（秒）', integer: true },
-      {
-        path: 'heartbeat_failure_threshold',
-        label: '心跳失败阈值',
-        integer: true,
-      },
-    ],
-    toggles: [],
-  },
-  {
-    title: 'Sweeper',
-    fields: [
-      {
-        path: 'sweeper_interval_seconds',
-        label: '扫描间隔（秒）',
-        integer: false,
-      },
-    ],
-    toggles: [{ path: 'sweeper_enabled', label: '启用 sweeper' }],
-  },
-  {
-    title: '运行与本地执行',
-    fields: [
-      // #358：单次 run 条目上限（0 不限制），超限提交被 API 拒绝。
-      // workflows.enabled 已随 #385/#389 退役（部署形态由 code_capacity 表达）。
-      {
-        path: 'workflows.max_items_per_run',
-        label: '单次 run 条目上限（0 不限制）',
-        integer: true,
-        allowZero: true,
-      },
-      // #786：节点代码体积上限纳入实例设置（#628 的 env-only 决策改判）。
-      // 验收反馈：表单单位 KB（契约仍是字节，换算在 formValues/payload 两侧，
-      // 与 WorkflowNodeCodeEditor 的 Math.round(bytes/1024) KB 展示同源）。
-      // min 以显示单位计：1 KB 对应契约 ge=1024 字节。
-      {
-        path: 'workflows.node_code_max_bytes',
-        label: '节点代码体积上限（KB）',
-        integer: true,
-        min: 1,
-      },
-      {
-        path: 'code_capacity',
-        label: '本地执行并发上限（0 = 纯远程模式）',
-        integer: true,
-        allowZero: true,
-      },
-    ],
-    toggles: [],
-  },
+  ...CORE_FIELD_GROUPS,
+  ...WORKFLOW_FIELD_GROUPS,
   ...RETENTION_FIELD_GROUPS,
   ...CAPACITY_FIELD_GROUPS,
   ...SECURITY_FIELD_GROUPS,
-  {
-    title: 'Worker 限制',
-    fields: [
-      {
-        path: 'agent_workers.max_archive_bytes',
-        label: '归档大小上限（字节）',
-        integer: true,
-      },
-      {
-        path: 'agent_workers.min_protocol_version',
-        label: '最低协议版本',
-        integer: true,
-      },
-      {
-        path: 'agent_workers.max_concurrent_result_commits',
-        label: 'result 提交并发上限（0 不限制）',
-        integer: true,
-        allowZero: true,
-      },
-      {
-        path: 'agent_workers.artifact_spot_check_percent',
-        label: '产物校验抽检比例 %（0 全信任，100 全核验）',
-        integer: true,
-        allowZero: true,
-        max: 100,
-      },
-      {
-        // #739 codex P2：契约 ge=60 / le=604800（S3 SigV4 7 天上限）在客户端
-        // 拦截，越界值不再裸奔到后端 422。
-        path: 'agent_workers.artifact_download_presign_ttl_seconds',
-        label: '外部产物下载直连 URL 有效期（秒）',
-        integer: true,
-        min: 60,
-        max: 604800,
-      },
-    ],
-    toggles: [],
-  },
+  ...WORKER_FIELD_GROUPS,
 ]
 
 export function fieldDef(path: string): NumberFieldDef {

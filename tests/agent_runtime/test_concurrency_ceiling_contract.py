@@ -103,12 +103,9 @@ def test_relay_shard_admission_covers_the_ceiling() -> None:
 
 
 def test_load_shedding_decouples_from_the_concurrency_ceiling() -> None:
-    """#657 隐性假设复核：load 回压按核数判定，与并发档位无耦合——上限
-    放宽到 2048 不改变回压行为（同一核数下阈值恒定）。"""
+    """load 回压只按实测负载判定，不检查声明的并发容量。"""
     from worker.load_shedding import LoadShedder
 
-    shedder_1024 = LoadShedder(1024, log=lambda _m: None)
-    shedder_2048 = LoadShedder(2048, log=lambda _m: None)
-    budget = {"agent": 64, "code": 0}
-    # 同预算下两档位的回压判定一致（核数未变，档位不参与判定）。
-    assert shedder_1024.shed(dict(budget)) == shedder_2048.shed(dict(budget))
+    logs: list[str] = []
+    LoadShedder(log=logs.append)
+    assert logs == []

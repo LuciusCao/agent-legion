@@ -10,6 +10,7 @@ import yaml
 
 from shared.code_sandbox import resolve_sandbox_binary
 from shared.concurrency_limits import MAX_DYNAMIC_CONCURRENCY
+from worker import worker_declarations
 
 logger = logging.getLogger(__name__)
 # 已移除的配置键（#452：`capabilities` 自 #284 起即 no-op）：存量 worker.yaml
@@ -69,6 +70,18 @@ def load_code_concurrency(path: Path) -> int:
     ):
         raise ValueError(f"code 并发数必须是 0 到 {MAX_DYNAMIC_CONCURRENCY} 的整数")
     return value
+
+
+def load_node_concurrency_limits(path: Path) -> dict[str, int]:
+    """节点级并发上限（#1158）：{node_key: N}，缺省/空 = 不限制。
+
+    与 load_claim_controls 同契约：非法值抛 ValueError（启动预检 fail-fast，
+    热更保留旧值）。校验规则单一来源在 worker_declarations（config 入口与
+    热读共用）。
+    """
+    return worker_declarations.normalize_node_concurrency_limits(
+        load_config(path).get("node_concurrency_limits", {})
+    )
 
 
 def hot_code_concurrency(current: int, loaded: int) -> tuple[int, bool]:

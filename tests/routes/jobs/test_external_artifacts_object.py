@@ -62,7 +62,8 @@ def test_raw_missing_object_is_404(two_workspaces, monkeypatch):
 
 def test_raw_range_request_on_object_artifact(two_workspaces):
     """External video consumers need byte ranges: 206 + Content-Range on the
-    object-store branch (gzip objects ignore Range, so use a bare-key row)."""
+    object-store branch, bare-key row form (the .gz form's decoded-range
+    behavior is covered by the #1259 tests below)."""
     c, job_a, _ = two_workspaces
     payload = b"0123456789"
     _register_object_artifact(c, job_a, "clip.mp4", payload, gzipped=False)
@@ -75,6 +76,56 @@ def test_raw_range_request_on_object_artifact(two_workspaces):
     assert response.status_code == 206
     assert response.headers["content-range"] == "bytes 2-5/10"
     assert response.content == b"2345"
+
+
+def test_raw_range_request_on_gz_object_served_decoded(two_workspaces):
+    """#1259：.gz 对象的 Range 按解压口径答 206 + Content-Range、无
+    Content-Encoding——修复前回 200 + gzip 透传，浏览器网络栈判为协议
+    失败（内置产物预览全挂）。"""
+    c, job_a, _ = two_workspaces
+    payload = b"0123456789"
+    _register_object_artifact(c, job_a, "clip.mp4", payload, gzipped=True)
+
+    response = c.get(
+        f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/clip.mp4/raw",
+        headers={"Range": "bytes=2-5"},
+    )
+
+    assert response.status_code == 206
+    assert response.headers["content-range"] == "bytes 2-5/10"
+    assert "content-encoding" not in response.headers
+    assert response.content == b"2345"
+
+
+def test_raw_range_unsatisfiable_on_gz_object_is_416(two_workspaces):
+    """#1259：起点越过解压长度 → 416 + Content-Range: */<解压长度>，
+    无 Content-Encoding。"""
+    c, job_a, _ = two_workspaces
+    _register_object_artifact(c, job_a, "clip.mp4", b"0123456789", gzipped=True)
+
+    response = c.get(
+        f"/api/workspaces/ws-a/jobs/{job_a['id']}/artifacts/clip.mp4/raw",
+        headers={"Range": "bytes=100-"},
+    )
+
+    assert response.status_code == 416
+    assert response.headers["content-range"] == "bytes */10"
+    assert "content-encoding" not in response.headers
+
+
+def test_raw_endpoint_declares_416_in_openapi(two_workspaces):
+    """#1274（#1259 复验遗留）：raw 端点经共享 raw_response 可答 416
+    （.gz 解压口径越界），OpenAPI 契约必须声明——否则 generated client
+    把 416 当未知状态码。"""
+    c, _, _ = two_workspaces
+
+    raw_path = c.app.openapi()["paths"][
+        "/api/workspaces/{workspace_id}/jobs/{job_id}/artifacts/{artifact_name}/raw"
+    ]
+
+    unsatisfiable = raw_path["get"]["responses"]["416"]
+    assert "application/octet-stream" in unsatisfiable["content"]
+    assert set(unsatisfiable["headers"]) == {"Content-Range"}
 
 
 # --- P2-1: 子路径产物名列出 + 下载往返 ---------------------------------------

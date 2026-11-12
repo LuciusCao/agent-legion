@@ -55,12 +55,13 @@ def _fire(
     backend: ServiceBackend, session_id: str, runtime: SessionRuntime, armed_since: float | None
 ) -> None:
     # Identity BEFORE the lock (registry lookup takes runtimes_lock, and the
-    # lock order is runtimes_lock -> runtime.lock — teardown takes them in
-    # that order, so taking runtime.lock first here would invert it). A
-    # close/resume that re-homed the session to a NEW runtime makes this
-    # timer's whole outcome stale: nothing is ours to clear (#694 review
-    # R3-P2). The registry could still swap right after this read — the
-    # conditional DB clear below is the atomic arbiter for that residue.
+    # lock order is runtime.lock -> runtimes_lock — teardown takes them in
+    # that order; this timer's registry probe therefore runs BEFORE
+    # runtime.lock, never under it). A close/resume that re-homed the session
+    # to a NEW runtime makes this timer's whole outcome stale: nothing is
+    # ours to clear (#694 review R3-P2). The registry could still swap right
+    # after this read — the conditional DB clear below is the atomic arbiter
+    # for that residue.
     if backend.runtime(session_id) is not runtime:
         return
     with runtime.lock:

@@ -15,6 +15,10 @@ export interface AgentPublishResolvedNotice {
 
 interface AgentPublishNoticeState {
   resolvedNotice: AgentPublishResolvedNotice | null
+  /** M65 拆卡：当前挂起（pending/confirming）的 agent 发布请求 id 镜像，
+   * 由 AgentPublishRequestDialog 的观测 effect 写入——让 Workflow 草稿卡
+   * （无 QueryClient 的直渲染场景）也能读到「发布请求挂起」并展示引导条。 */
+  pendingRequestId: string | null
   /** 本 app 内任一 hook 实例最近一次主动 resolve（confirm/cancel）掉的
    * 请求 id（#429 二轮复审）：观测 pending→null 跳变时，跳变的请求若
    * 命中它，说明正确回执已由操作实例着陆——旁观实例不得再覆盖。per-
@@ -36,6 +40,8 @@ interface AgentPublishNoticeState {
   clearNotice: () => void
   /** confirm/cancel 成功后记录本次主动 resolve 的请求 id。 */
   markResolved: (requestId: string) => void
+  /** AgentPublishRequestDialog 同步挂起请求 id（无挂起时置 null）。 */
+  setPendingRequestId: (requestId: string | null) => void
 }
 
 let nextNoticeId = 1
@@ -43,11 +49,13 @@ let nextNoticeId = 1
 export const useAgentPublishNoticeStore = create<AgentPublishNoticeState>(
   (set) => ({
     resolvedNotice: null,
+    pendingRequestId: null,
     lastResolvedRequestId: null,
     landNotice: (message) =>
       set({ resolvedNotice: { id: nextNoticeId++, message } }),
     clearNotice: () => set({ resolvedNotice: null }),
     markResolved: (requestId) => set({ lastResolvedRequestId: requestId }),
+    setPendingRequestId: (requestId) => set({ pendingRequestId: requestId }),
   })
 )
 

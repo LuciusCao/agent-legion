@@ -38,6 +38,7 @@ from shared.code_contract import CODE_BUNDLE_NODE_FILE as CODE_BUNDLE_NODE_FILE
 from shared.code_contract import CODE_RESULT_LOG_MEMBER as CODE_RESULT_LOG_MEMBER
 from shared.code_contract import CODE_RESULT_METADATA_KEYS as CODE_RESULT_METADATA_KEYS
 from shared.code_contract import MAX_CONNECTION_KEY_CHARS as MAX_CONNECTION_KEY_CHARS
+from shared.code_contract import auth_failure_marker_path as auth_failure_marker_path
 
 #: 沙箱包装器的候选二进制名（#383）：优先 velites-sandbox（独立 bin，烤进
 #: worker 镜像的沙箱基础设施），兜底 velites（全量二进制的 sandbox wrap

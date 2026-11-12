@@ -21,6 +21,7 @@ transition rides the same transaction through the JobQueries facade
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -29,14 +30,14 @@ from typing import Any
 from server.app.events.aggregator import broadcast_job_update, record_job_update
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.approval_decisions import ApprovalGateConflict
-from server.app.scheduler_wakeup import notify_schedulable_work
+from server.app.services import approval_commit
+from server.app.services.approval_payload import resolve_approval_payload
 from server.app.services.job_errors import (
     ConflictError,
     InvalidOperationError,
     NotFoundError,
 )
 from server.app.services.job_rerun import JobRerunService
-from server.app.services.staged_json_artifact import replace_durable, stage_json
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.settings import Settings
@@ -70,7 +71,10 @@ class ApprovalDecisionService:
     def list_decisions(self, workspace_id: str, job_id: str) -> list[dict[str, Any]]:
         """Full decision history for one job, newest first."""
         self._require_job(workspace_id, job_id)
-        return self.job_db.list_approval_decisions(job_id)
+        rows = self.job_db.list_approval_decisions(job_id)
+        for row in rows:
+            row["payload"] = json.loads(str(row.pop("payload_json") or "{}"))
+        return rows
 
     # ── the decision ────────────────────────────────────────────────────
 
@@ -84,6 +88,9 @@ class ApprovalDecisionService:
         note: str = "",
         rework_target: str = "",
         decided_by: str = "",
+        payload: dict[str, Any] | None = None,
+        batch_id: str | None = None,
+        batch_selection: str | None = None,
     ) -> dict[str, Any]:
         if verdict not in APPROVAL_VERDICTS:
             raise InvalidOperationError(
@@ -98,55 +105,42 @@ class ApprovalDecisionService:
             raise NotFoundError(f"Node {node_key} is not an approval node of this workflow")
 
         if verdict == "approved":
-            return self._approve(job, node_key, note, decided_by)
+            resolved = resolve_approval_payload(node, payload)
+            return self._approve(
+                job, node_key, note, decided_by, resolved, batch_id, batch_selection
+            )
         if verdict == "rejected":
-            return self._reject(job, node_key, note, decided_by)
+            return self._reject(job, node_key, note, decided_by, batch_id, batch_selection)
         return self._rework(job, definition, node, note, rework_target, decided_by)
 
     # ── verdict paths ───────────────────────────────────────────────────
 
     def _approve(
-        self, job: dict[str, Any], node_key: str, note: str, decided_by: str
+        self,
+        job: dict[str, Any],
+        node_key: str,
+        note: str,
+        decided_by: str,
+        payload: dict[str, Any],
+        batch_id: str | None,
+        batch_selection: str | None,
     ) -> dict[str, Any]:
-        job_id = str(job["id"])
-        decision = self._decision_row(job_id, node_key, "approved", note, "", decided_by)
-        # #929: the decision artifact is staged (fsynced temp file in the job
-        # dir) before the transaction but only swapped into place by
-        # ``replace_durable`` inside it, after the job-mutation-locked status guard
-        # passes — a duplicate or late decision fails the guard before
-        # touching the committed artifact, and the gate never completes with
-        # the artifact missing for downstream inputs. The directory fsync also
-        # lands before the commit (#975). A failed replace rolls the
-        # transaction back with the committed file untouched; once the replace
-        # succeeded, a failed directory fsync or commit still rolls the DB
-        # back but leaves the uncommitted file in place — the next decision on
-        # the still-awaiting gate overwrites it.
-        artifact_name = f"{node_key}.approval.json"
-        target = self._artifact_path(job, artifact_name)
-        staged = stage_json(target, decision)
-        try:
-            self._gate_transition(
-                lambda: self.job_db.approve_gate_atomic(
-                    decision, on_guarded=lambda: replace_durable(staged, target)
-                )
-            )
-        finally:
-            staged.unlink(missing_ok=True)
-        self._upload_artifact(job, node_key, artifact_name)
-        # Downstream nodes just became dispatchable — wake the poll loop.
-        notify_schedulable_work()
-        self._broadcast(job_id)
-        return decision
+        return approval_commit.approve(
+            self, job, node_key, note, decided_by, payload, batch_id, batch_selection
+        )
 
     def _reject(
-        self, job: dict[str, Any], node_key: str, note: str, decided_by: str
+        self,
+        job: dict[str, Any],
+        node_key: str,
+        note: str,
+        decided_by: str,
+        batch_id: str | None,
+        batch_selection: str | None,
     ) -> dict[str, Any]:
-        job_id = str(job["id"])
-        decision = self._decision_row(job_id, node_key, "rejected", note, "", decided_by)
-        message = f"rejected by reviewer: {note}" if note else "rejected by reviewer"
-        self._gate_transition(lambda: self.job_db.reject_gate_atomic(decision, message))
-        self._broadcast(job_id)
-        return decision
+        return approval_commit.reject(
+            self, job, node_key, note, decided_by, batch_id, batch_selection
+        )
 
     def _rework(
         self,
@@ -187,6 +181,10 @@ class ApprovalDecisionService:
         note: str,
         rework_target: str,
         decided_by: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        batch_id: str | None = None,
+        batch_selection: str | None = None,
     ) -> dict[str, Any]:
         return {
             "id": uuid.uuid4().hex,
@@ -196,6 +194,9 @@ class ApprovalDecisionService:
             "note": note,
             "rework_target": rework_target,
             "decided_by": decided_by,
+            "payload": payload or {},
+            "batch_id": batch_id,
+            "batch_selection": batch_selection,
         }
 
     def _artifact_path(self, job: dict[str, Any], name: str) -> Path:

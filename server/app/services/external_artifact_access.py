@@ -9,14 +9,14 @@ authoritative copy, EXEC-ARTIFACT-STORE-001) with legacy local job_dir names.
 
 #739 appends presigned GET download URLs to the object-backed entries: the
 signature covers ONLY the manifest row's storage_key (a server-generated key
-under jobs/{workspace_id}/{job_id}/ — record_remote/verify_remote reject any
-key outside that layout, so no request input reaches the signed string), and
+under jobs/{workspace_id}/{job_id}/ — current artifact layout validation
+rejects any key outside that layout, so no request input reaches the signed string), and
 the URL carries just SigV4 query parameters — no credentials. The URL is a
 channel to the SAME representation the raw endpoint serves: the raw
 endpoint's response headers (whitelisted Content-Type, attachment
 Content-Disposition, ``Content-Encoding: gzip`` for #338 ``.gz`` objects) are
 signed in as S3 response overrides, so every object row — including the
-``.gz`` outputs of v4+ Workers — gets a URL (see _presigned_headers). What
+``.gz`` outputs of v4+ Workers — gets a URL (see external_artifact_entries). What
 the URL does NOT inherit from the Host (per-request auth, version pinning)
 is contracted in docs/workspace-api-tokens.md「读取产物」.
 
@@ -28,15 +28,12 @@ and polling never mints URLs that would be discarded (#739 codex P2).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from server.app.jobs import JobQueries
-from server.app.services.job_artifact_gzip import is_gzip_key
-from server.app.services.job_artifact_media import (
-    attachment_disposition,
-    raw_disposition_type,
-    raw_media_type,
+from server.app.services.external_artifact_entries import (
+    local_artifact_entry,
+    presigned_object_entry,
 )
 from server.app.services.job_artifact_names import (
     is_downloadable_artifact_name,
@@ -70,20 +67,6 @@ def _listing_rows(store: Any, job: dict[str, Any]) -> tuple[set[str], dict[str, 
         for name, row in latest.items()
         if is_downloadable_artifact_name(name) and not refuse_row_outside_job_prefix(row, job)
     }
-
-
-def _presigned_headers(name: str, gzipped: bool) -> dict[str, str]:
-    """S3 response overrides that make a presigned GET answer with the raw
-    endpoint's header policy (job_artifact_raw_response.raw_response) —
-    one policy source (job_artifact_media), two channels. Objects are
-    uploaded without metadata (octet-stream), so without these the direct
-    channel would drift from raw on type, disposition and gzip framing."""
-    headers = {"ResponseContentType": raw_media_type(name)}
-    if raw_disposition_type(name) == "attachment":
-        headers["ResponseContentDisposition"] = attachment_disposition(name)
-    if gzipped:
-        headers["ResponseContentEncoding"] = "gzip"
-    return headers
 
 
 class ExternalArtifactAccessService:
@@ -238,47 +221,9 @@ class ExternalArtifactAccessService:
         # iterates store.rows_for_job) — assert keeps mypy seeing the guard.
         store = self._enabled_store()
         assert store is not None
-        name = str(row["name"])
-        size = row.get("size_bytes")
-        storage_key = str(row["storage_key"])
-        gzipped = is_gzip_key(storage_key)
         workers = self.settings.executor_runtime.agent_workers
         ttl = int(workers.artifact_download_presign_ttl_seconds)
-        download_url = store.storage.presign_get(
-            storage_key, expires_seconds=ttl, response_headers=_presigned_headers(name, gzipped)
-        )
-        # 上界而非保证：签名凭据先于 TTL 失效时 URL 提前 403，调用方按
-        # 403 重取清单（docs/workspace-api-tokens.md「读取产物」）。
-        expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
-        return {
-            "name": name,
-            "storage": "object",
-            "node_key": str(row.get("node_key") or ""),
-            "size_bytes": int(size) if isinstance(size, int) else None,
-            "content_hash": str(row.get("content_hash") or ""),
-            "uploaded_at": row.get("uploaded_at"),
-            "media_type": raw_media_type(name),
-            "download_url": download_url,
-            "expires_at": expires_at,
-            "content_encoding": "gzip" if gzipped else "",
-        }
+        return presigned_object_entry(row, store, ttl)
 
     def _local_entry(self, name: str) -> dict[str, Any]:
-        # Legacy job_dir-only artifact (never uploaded): no manifest row, so
-        # size/hash are unknown at listing time; the raw endpoint still
-        # serves it from the local copy. #739: never presigned — there is no
-        # object to sign for; download_url/expires_at stay null and
-        # content_encoding is empty (the raw endpoint serves local files
-        # uncompressed).
-        return {
-            "name": name,
-            "storage": "local",
-            "node_key": "",
-            "size_bytes": None,
-            "content_hash": "",
-            "uploaded_at": None,
-            "media_type": raw_media_type(name),
-            "download_url": None,
-            "expires_at": None,
-            "content_encoding": "",
-        }
+        return local_artifact_entry(name)

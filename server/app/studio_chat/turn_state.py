@@ -20,6 +20,10 @@ def open_turn(
     """
     runtime.turn_owner = owner if owner is not None else object()
     runtime.stream.reset()
+    # #1228 codex P2: toolCallId 生命周期不跨 turn——新 turn 起点清空
+    # coalescing 归属表（对齐 stream slots 的 reset；turn 内取消/超时无
+    # 终态帧的条目不泄漏，id 复用不误合并旧行）。
+    runtime.tool_call_messages.clear()
     runtime.loading = False
     runtime.turn_open = True
     runtime.turn_started_at = time.monotonic()

@@ -246,3 +246,31 @@ def test_rerun_resets_packed_flag(job_db: JobQueries, tmp_path: Path) -> None:
 
     job_db.mark_node_for_rerun(completed["id"], "extract_question", [])
     assert job_db.get_job(completed["id"])["packed"] == 0
+
+
+def test_set_jobs_packed_chunks_bulk_update(job_db: JobQueries, monkeypatch) -> None:
+    # #1348: with the batch cap raised to 20000, the packed UPDATE must chunk
+    # its IN list by CHUNK_ROWS instead of one giant parameter list.
+    from server.app.jobs.queries import job_bulk_sql
+    from server.app.jobs.queries import workspace_packages as wp_queries
+
+    real_id_chunks = job_bulk_sql.id_chunks
+    chunk_sizes: list[int] = []
+
+    def spy_id_chunks(ids):  # noqa: ANN001, ANN202 - test spy
+        for chunk in real_id_chunks(ids):
+            chunk_sizes.append(len(chunk))
+            yield chunk
+
+    monkeypatch.setattr(wp_queries, "id_chunks", spy_id_chunks)
+    monkeypatch.setattr(job_bulk_sql, "CHUNK_ROWS", 2)
+
+    jobs = [_create_job(job_db, "chunk-ws", f"Q60{index}") for index in range(5)]
+    job_db.set_jobs_packed([job["id"] for job in jobs], packed=1)
+
+    assert chunk_sizes == [2, 2, 1]
+    assert [job_db.get_job(job["id"])["packed"] for job in jobs] == [1] * 5
+
+    chunk_sizes.clear()
+    job_db.set_jobs_packed([], packed=0)
+    assert chunk_sizes == []

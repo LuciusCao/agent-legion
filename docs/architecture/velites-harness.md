@@ -1,27 +1,20 @@
-# velites：Agent Legion 自研轻量 Agent Harness 设计
-
-日期：2026-07-31 ｜ 状态：已落地（现行设计文档；2026-08-03 升格落地、2026-08-04 金丝雀关闭，见 §9）｜ 前置：[PoC 报告](./velites-poc-report.md)（worktree `poc-rust-pi`）
+# velites：Agent Legion 自研轻量 Agent Harness 现行规格
 
 > velites（罗马军团轻步兵）是 Agent Legion 的专用 agent 执行内核：Rust 实现、单静态二进制、
 > 极简上下文、可控性（controllability）作为第一特性。它替代 Node 版 Pi CLI 承担
 > workflow 节点的 headless 执行。
 
+本文是 velites 的**现行规格**：事件 schema（§4）、可控性与沙箱（§5）、CLI（§6）、
+provider（§7）、工具（§8）、集成形态与 runtime 接入指南（§9）、Quality Impact（§10）。
+立项动机、升格期灰度路径、里程碑与立项时的开放问题已拆入
+[velites-harness-design-history.md](velites-harness-design-history.md)（#1103），
+章节号保持不变以兼容代码注释中的 `§N` 引用。
+
 ## 1. 背景与动机
 
-当前 worker 上每个节点执行 = 冷启动一个 Node Pi 进程。高并发 worker 形态下的实测（2026-07-31）：
-
-- 每个 pi 进程常驻数十至上百 MB、峰值可达数百 MB，数十并发即占用数 GB 内存；
-- 每次节点执行都要付 Node 启动 + 模块加载（实测 1.5–1.7 s CPU），执行量大时累积成显著开销；
-- `--mode json` 的 `message_update` delta 占 stdout 体积 99%+，Pi 侧序列化、worker 泵逐字节
-  扫描后全部丢弃——协议层面的纯浪费，且无法通过配置关闭（PoC 已确认）。
-
-PoC（pi_agent_rust 替换验证）同时证明了两件事：
-
-1. 收益空间是真实的：同负载 Rust 实现 RSS ≈ 1/6.5、启动 CPU ≈ 0；
-2. 但我们对 harness 的需求面极窄（3 个工具 + skill 注入 + 事件流 + 一个 OpenAI 兼容
-   provider），fork 一个 30 万行、以插件/TUI 为主体的移植版是背着债务起步。
-
-因此决策：**自研 velites**，范围严格限定在 Agent Legion 的真实消费面内。
+见 [velites-harness-design-history.md §1](velites-harness-design-history.md#1-背景与动机)：
+Node Pi 冷启动与 delta 事件开销过大，PoC 证实 Rust 实现收益真实而需求面极窄，故自研、
+范围严格限定在 Agent Legion 的真实消费面内。
 
 ## 2. 目标与非目标
 
@@ -58,8 +51,7 @@ velites/                 # Cargo crate（本仓库根下新目录）
     agent.rs             # agent loop
     events.rs            # 事件 schema 定义（serde）+ EventSink 契约/测试 sink
     event_sink.rs        # stdout 事件落盘 sink（BufWriter 攒批，#577）
-    models.rs            # ~/.velites/models.json provider/model registry
-    config.rs            # 旧 gateway 凭据迁移桥
+    models.rs            # ~/.velites/models.json provider/model registry（唯一凭据来源）
     session.rs           # session.jsonl 镜像落盘（--session-dir）
     tools/               # read/write/bash/uuid/json/validate 工具本体，加 specs/catalog
                          # 工具目录、command_guard/command_paths 命令守卫、bash_env/bash_proc
@@ -87,7 +79,9 @@ agent 框架；依赖清单评审纳入 PR。
 
 worker 侧进程模型不变：`worker/executor.py` 每个 claim 起一个 velites 子进程
 （`subprocess.Popen(cwd=job_dir, start_new_session=True)`），stdout 即事件流。
-二进制经 Dockerfile 新增 rust build stage 打进 worker 镜像；命令构建经
+#381 起 worker 镜像不含 agent runtime：velites 二进制由宿主机按平台外挂（compose bind mount 到
+`/app/data/bin/velites`，自带副本优先解析，见 §9 与 `deploy/compose.worker.yaml`），镜像只内置
+code 池沙箱用的 `velites-sandbox`（#383）；命令构建经
 Host 侧 runtime catalog（`server/app/agent_runtime/`，按 agent 节点执行档案的
 `execution.runtime` 分发到各 adapter，EXEC-RUNTIME-DISPATCH-001）——pi → pi argv、
 velites → velites argv；pi 不退役、长期保留，
@@ -177,15 +171,16 @@ TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计�
 
 ## 5. 可控性特性（第一特性）
 
-核心五项（评审已确认）：
+核心五项（评审已确认；下表即现行行为——预算、优雅取消、输出自检与无 delta 均已交付，
+设计期「现状对照」列的 Pi 对照已随落地移除）：
 
-| 特性 | 设计 | 现状对照 |
-|---|---|---|
-| 预算内建 | `--max-turns`、`--max-tokens`（按 usage 累计）、wall-clock deadline（复用 `--timeout-seconds`，M3 起该 flag 界定整个 run 的墙钟上限；**不再**兼任单次 provider HTTP 总超时——总超时会掐断长生成流，HTTP 层改为 connect 超时 + chunk 间 idle 超时，见 §7）；每次模型调用**前**检查，耗尽时注入一条收尾消息给模型**一个**收尾轮写出已声明产物，然后结束，`agent_end{reason: "budget_exceeded"}`（M3 实现为可选 `reason` 字段，取 `budget_exceeded` / `cancelled` 两值，替代布尔 flag 方案）；预算值走 `AgentDefinition.config_schema` 解析链成为节点标准可调参数 | 现在只有外层 wall-clock 强杀 |
-| 优雅取消 | SIGTERM 被 loop 捕获：检查点在 turn 边界与每次工具执行完成后（模型调用也可被中断）；bash 工具正在跑时走既有 TERM→grace→KILL 进程组清理；收尾发出 `agent_end{reason:"cancelled"}` 再退出，**exit 0**（取消是 Host 主动行为，非 harness 故障；M3 已决）；SIGKILL 兜底语义不变 | 现在 cancel = 进程组强杀，无事件收尾 |
-| 输出自检 | `--require-output <file>`（可多次）；loop 正常结束前自检缺失项（路径走工具同款 cwd 沙箱校验，逃逸路径启动即报错），有缺失则注入系统消息给**一次**补救轮；最终**总是**发 `outputs_validation{missing:[...]}` 事件（`missing` 可为空，M3 已决：显式事件便于 Host 判定）；补救后仍缺失的非取消运行 **exit 1**（EXEC-HARNESS-OUTPUTS-001）。#443 起升级为**契约模式**：任一 `--skill` 目录声明了机器可读契约（#542 起根目录 `contract.yaml` 为权威位置，legacy 嵌入块继续生效，见 §8）时，引擎同时校验文件**内容**（text 长度/必备标题、JSON Schema draft 2020-12），违约与缺失一样触发补救轮与 exit 1，事件带 `mode: contract` + `violations`；契约解析失败按一条违约处理（fail-closed，不静默降级；未闭合 fence 同此），且因契约位于只读 skill 目录、模型无法修复而**跳过补救轮直接失败**（不烧徒劳的 token）；无可解析契约时保持 legacy 存在性语义，事件带 `mode: existence`（给 skill 作者补契约的信号） | 现在 Host 事后扫 job_dir 才发现缺失 |
-| 零自动发现 | 不读 AGENTS.md/CLAUDE.md、不扫描 skill/扩展/模板目录、不读用户级配置；上下文 = `--system-prompt` + `--skill` + `@prompt.md`，无第三个来源（代码层不存在发现逻辑，而非"有逻辑加开关"） | Pi 靠 4 个 `--no-*` flag 维持；pi_agent_rust 无开关（PoC 的 P0 阻断项） |
-| 无 delta | 见 §4 | 现在 99% 的 stdout 体积是被丢弃的 delta |
+| 特性 | 现行行为 |
+|---|---|
+| 预算内建 | `--max-turns`、`--max-tokens`（按 usage 累计）、wall-clock deadline（复用 `--timeout-seconds`，M3 起该 flag 界定整个 run 的墙钟上限；**不再**兼任单次 provider HTTP 总超时——总超时会掐断长生成流，HTTP 层改为 connect 超时 + chunk 间 idle 超时，见 §7）；每次模型调用**前**检查，耗尽时注入一条收尾消息给模型**一个**收尾轮写出已声明产物，然后结束，`agent_end{reason: "budget_exceeded"}`（M3 实现为可选 `reason` 字段，取 `budget_exceeded` / `cancelled` 两值，替代布尔 flag 方案）；预算值走 `AgentDefinition.config_schema` 解析链成为节点标准可调参数 |
+| 优雅取消 | SIGTERM 被 loop 捕获：检查点在 turn 边界与每次工具执行完成后（模型调用也可被中断）；bash 工具正在跑时走既有 TERM→grace→KILL 进程组清理；收尾发出 `agent_end{reason:"cancelled"}` 再退出，**exit 0**（取消是 Host 主动行为，非 harness 故障；M3 已决）；SIGKILL 兜底语义不变 |
+| 输出自检 | `--require-output <file>`（可多次）；loop 正常结束前自检缺失项（路径走工具同款 cwd 沙箱校验，逃逸路径启动即报错），有缺失则注入系统消息给**一次**补救轮；最终**总是**发 `outputs_validation{missing:[...]}` 事件（`missing` 可为空，M3 已决：显式事件便于 Host 判定）；补救后仍缺失的非取消运行 **exit 1**（EXEC-HARNESS-OUTPUTS-001）。#443 起升级为**契约模式**：任一 `--skill` 目录声明了机器可读契约（#542 起根目录 `contract.yaml` 为权威位置，legacy 嵌入块继续生效，见 §8）时，引擎同时校验文件**内容**（text 长度/必备标题、JSON Schema draft 2020-12），违约与缺失一样触发补救轮与 exit 1，事件带 `mode: contract` + `violations`；契约解析失败按一条违约处理（fail-closed，不静默降级；未闭合 fence 同此），且因契约位于只读 skill 目录、模型无法修复而**跳过补救轮直接失败**（不烧徒劳的 token）；无可解析契约时保持 legacy 存在性语义，事件带 `mode: existence`（给 skill 作者补契约的信号） |
+| 零自动发现 | 不读 AGENTS.md/CLAUDE.md、不扫描 skill/扩展/模板目录、不读用户级配置；上下文 = `--system-prompt` + `--skill` + `@prompt.md`，无第三个来源（代码层不存在发现逻辑，而非"有逻辑加开关"） |
+| 无 delta | 见 §4 |
 
 评审后调整的两项：
 
@@ -317,9 +312,14 @@ velites --mode json \
 - `--mode` 只有 `json`（headless 唯一形态）；
 - 未知 flag 直接报错退出（与 Pi/pi_agent_rust 的静默吞掉相反，防止配置漂移）；
 - `--name` 保留（仅标识用途，写入 `session` 事件）；
+- `--session-dir`：保留 flag（CLI 兼容），velites 落一个自有格式的 `session.jsonl`
+  （消息历史的镜像落盘，成本≈0），但**不提供 resume 入口**。注意区分：`events.jsonl`
+  （stdout 归档）是 UI 过程预览/token 计量/失败判定的数据源，必须完整；`session.jsonl`
+  只是为将来「中断恢复（resume）」特性预留的素材，resume 需单独立项设计；
 - `--max-output-tokens`（#952）是**单次**模型调用的输出上限（thinking 计入其中），
-  覆盖 models.json 的 `maxOutputTokens`，OpenAI 兼容路径作为请求体 `max_tokens`
-  下发；与累计预算 `--max-tokens` 无关。来源是节点 config 键 `max_output_tokens`，
+  覆盖 models.json 的 `maxOutputTokens`，OpenAI 兼容路径按模型条目的
+  `outputTokensParam` 作为请求体 `max_tokens`（缺省）或 `max_completion_tokens`（#1093，
+  推理模型）下发；与累计预算 `--max-tokens` 无关。来源是节点 config 键 `max_output_tokens`，
   触顶归因与续写草案见 [llm-output-budget-design.md](llm-output-budget-design.md)。
 
 ### `velites sandbox wrap`（EXEC-CODE-003）
@@ -350,8 +350,9 @@ fail-closed 报错，内置节点不受影响。
   cache 420k = velites 修复前 input 447k），`saturating_sub` 兜底异常网关；
 - `thinking` 按 driver 映射：OpenAI 使用 `reasoning_effort`；Anthropic 使用模型配置的
   `thinkingBudgets` 生成 `thinking.budget_tokens`；
-- 已知边界：严格要求 SSE——gateway 上只回 `application/json` 的模型不可用
-  （PoC P2 发现）；模型接入约束由实例级外部服务连接与 gateway 运维策略控制，
+- 响应按 Content-Type 分流：SSE 流式与 `application/json` 非流式响应都支持
+  （`openai_compat` 按响应头选择 `parse_non_streaming`，gateway 上只回 JSON 的
+  模型可用）；模型接入约束由实例级外部服务连接与 gateway 运维策略控制，
   不再通过 `config/workflow.yaml` 维护（split yaml 已退役）。
 - HTTP 层**不设整请求总超时**（总超时会掐断几分钟的长生成流；2026-08-01
   回放事故证实 gateway 会在上游失败时直接掐流）：内建 connect 超时 10s +
@@ -372,10 +373,10 @@ fail-closed 报错，内置节点不受影响。
   动态发现见 [velites-model-registry.md](./velites-model-registry.md)；
 - `apiKey` 支持 `$ENV` / `${ENV}` 精确引用；模型发现即解析引用，缺失时 fail-closed，
   Worker 不会广播该 runtime 的模型；文件可能含字面 secret，因此权限应为 0600；
-- 旧 `~/.velites/config.json` 与 `VELITES_BASE_URL/VELITES_API_KEY` 是已进入 deprecation
-  的迁移桥（#602：直调时 stderr 打迁移指引，移除时间未定），仅在没有 models 文件
-  且直接运行 `gateway/openai_compat` 时兜底，不参与 Worker capability discovery——
-  配置入口是 `~/.velites/models.json`；
+- 旧 `~/.velites/config.json` 与 `VELITES_BASE_URL/VELITES_API_KEY` 迁移桥已移除
+  （#602 deprecation → #1102 删除 `config.rs` 与 lib.rs gateway 兜底分支）：没有
+  models 文件时 `gateway/openai_compat` 直调与其他 provider 一样以退出码 2 报错、
+  指向 `models.json` 与迁移文档，配置入口只有 `~/.velites/models.json`；
 - secret 不上命令行或 Host manifest。
 
 ## 8. 工具实现
@@ -422,7 +423,7 @@ fail-closed 报错，内置节点不受影响。
   agent 跑中自查、就地修复。三态：全过返回 `contract ok (N files checked)`；有违约返回
   编号违约清单（`is_error`，文案面向模型可行动）；skill 目录都没有可解析契约段时返回
   信息性错误（"nothing to validate against"），不静默成功。引擎与关卡、Host 复核共用
-  `src/contract.rs` 一份实现；
+  `src/contract/` 一份实现（source 解析与执行校验分别位于 `parser.rs` / `validation.rs`）；
 - **输出契约段（受控接口，权威定义；#542 起位置迁移到根目录）**：机器可读契约的
   权威位置是 skill 根目录的 `contract.yaml`（独立 YAML 文件，顶层 `files:` 列表，
   结构与下方示例一致）。legacy 位置——`references/output-contract.md` 中嵌入的
@@ -510,35 +511,15 @@ manifest 的执行块统一为
 单字段改动（在途 job 经「升级 workflow」生效），操作手册见
 `docs/remote-execution-runbook.md` §6。
 
-**flavor 的退役（2026-08-05）**：`workflows.pi.flavor` 实现选择层已随 yaml
-块一并删除。此前保持 `runtime: pi` 的 4 个业务视频 agent 已由
-schema v27 migration 翻转为 `runtime: velites`（新发 published 版本、归档
-旧版）。`PiRuntimeConfig` 当时只剩硬编码默认（flavor="pi"，该配置类亦已于 2026-08-26 死代码清理中删除）；此前专供的本地
-pi executor 死路径（`executors/pi.py` + `PiRunner` 及
-pi_config/pi_command_builder/pi_prompt 链）已整体删除（#108）。
-
-**pi 的定位（2026-08-04 用户决策）**：pi **不退役**，作为可选 runtime 长期
-保留——velites 是生产主力，pi 作为备选实现与对照基线继续可用
-（`runtime: pi` 即完整 pi 路径）。若未来仅出于卫生目的清理
-（如 command_spec version 升级），另行立项评估，与退役无关。
+**pi 的定位**：pi 不退役，作为可选 runtime 长期保留——velites 是生产主力，
+pi 作为备选实现与对照基线继续可用（`runtime: pi` 即完整 pi 路径）。flavor
+实现选择层的退役与 pi 定位决策的经过见
+[设计历史 §2](velites-harness-design-history.md#2-切换期决策原-9-历史段落)。
 
 **回退**：单节点异常把该 agent 节点的 `execution.runtime` 改回 `pi` 并发布；
 系统性异常同法全部迁回 `pi`（或改 workflow 顶层 `execution.runtime` 默认）。沙箱异常当前需发版调整
 （`velites_no_sandbox` 配置项已随 `workflows.pi` 退役；`execution.no_sandbox`
 在 manifest 恒为 false）。
-
-**历史灰度路径（已完成，存档）**：
-
-- Phase 0：契约测试 + 真二进制集成测试入库（M4）；
-- Phase 1 shadow = 抽样回放（当时的离线回放脚本双跑 pi 与 velites，diff 事件流与
-  产出；该脚本已不在仓库中）；
-- Phase 2 金丝雀 = 全局 `flavor: velites` + worker capacity 压低起步，逐步
-  恢复至生产量级并发（整夜跑批验证、成功率高）；
-- 升格落地（2026-08-03，PR #20/#21）：runtime 枚举/dispatch/sweeper/runtime
-  维度 + Worker UI/预检；审题链路迁 `runtime: velites` 并整夜跑批验证
-  （生产量级节点量）；
-- 金丝雀关闭（2026-08-04，`14ec130f`）：`flavor: velites` 与审题链路
-  `runtime: velites` 落为 tracked 默认值。
 
 **worker bundle 与部署**：二进制不打进 bundle（bundle 只带 skill + prompt）。
 #254 起 runtime 声明 = 启动时自动探测（自带副本 `data/bin/` 优先、PATH
@@ -584,10 +565,13 @@ pi                      # 交互式完成认证
 6. **硬要求**：runtime 必须在 stdout 产出 pi 兼容 JSONL 事件子集
    （`velites/schema/events.schema.json`）——UI 预览、失败检测与 token
    计量都消费它；产不出流式事件的 runtime 不接（openclaw 即因此退役，
-   其一次性 envelope 无中间事件、无 token usage）。
+   其一次性 envelope 无中间事件、无 token usage）。事件 schema 改动必须
+   同步该 schema 文件并保持契约测试 `velites/tests/schema_current.rs` /
+   `golden_events.rs` 通过；禁止引入 delta 事件（`message_update` /
+   `tool_execution_update`）。
 
-历史参考：openclaw 曾按上述步骤完整接入（adapter、Worker 事件合成层、
-e2e），后按用户决策整体退役——实现与拆除过程见 git 历史（#75）。
+历史参考：openclaw 曾按上述步骤完整接入后整体退役（#75），见
+[设计历史 §2](velites-harness-design-history.md#2-切换期决策原-9-历史段落)。
 
 ## 10. Quality Impact
 
@@ -617,38 +601,7 @@ e2e），后按用户决策整体退役——实现与拆除过程见 git 历史
 - **文档**：README 增 velites 章节；本文件进 `docs/architecture/`；
   AGENTS.md 第 6 节 executor 扩展链补 velites 边界说明。
 
-## 11. 里程碑
+## 11. 里程碑 / 12. 风险与开放问题
 
-| 里程碑 | 内容 | 验收 |
-|---|---|---|
-| M1 骨架 | crate 初始化、CLI、事件 emitter、stub provider 的 agent loop（read/write/bash） | cargo test 绿；stub 下 golden 事件序列 |
-| M2 契约对齐 | OpenAI 兼容 SSE provider、skill 加载、错误/重试语义 | 真 gateway 跑 `review_subtitles` fixture，与 Node Pi diff 通过 |
-| M3 可控性 | 预算/取消/输出自检 + 工具体积度量 | 三条 invariant 测试入库 |
-| M4 集成 | flavor 配置、Dockerfile rust stage、CI rust lane、集成测试 full lane | `./scripts/check-quick.sh` + full gate 绿 |
-| M4.5 沙箱 | §5 沙箱小节：Sandbox 抽象、macOS seatbelt 先行、Linux bwrap 在 worker 镜像验证、`EXEC-HARNESS-SANDBOX-001` | 沙箱集成测试入库（quick lane）；逃逸尝试全部被拒 |
-| M5 灰度 | shadow → 金丝雀 → 默认 | 生产高并发形态下 RSS/CPU 对比报告 |
-
-## 12. 风险与开放问题
-
-- **上下文体积护栏（已拍板：pi 对齐截断）**：原疑虑是截断可能伤 agent 表现、且
-  阈值缺乏依据。2026-08-01 决策：直接对齐 pi 的成熟策略——2000 行 / 50KB
-  （50×1024 字节）双阈值先到即截，read 截头、bash 截尾并落临时文件，提示语与
-  pi 一致（细节见 §8）；截断不切断行（bash 末行单行超限除外）。`output_bytes`
-  继续记录截断前体积，金丝雀期间观察截断触发率与 agent 表现，必要时再调阈值；
-- **SSE 方言**：gateway 背后不同模型的 SSE 细节差异（PoC P2）——M2 用真实模型矩阵
-  验证；缓解：解析器对非标准 event 行容错跳过；
-- **thinking 参数映射**：不同后端 wire 参数不同——初期只支持 gateway 当前映射，
-  新后端接入时显式扩展；
-- **prompt 兼容性**：SKILL.md 中的指令对模型行为的引导经 Pi 验证过，velites 的
-  system prompt 拼装顺序不同可能改变行为——M2 diff 不仅比事件结构，也抽查产出质量；
-- **工作量估计**：M1–M3 约 1.5–2 周（loop 本身小，成本在工具鲁棒性与 provider 兼容），
-  M4–M5 约 1 周。
-
-### 已决项
-
-- **`--session-dir`（评审已决）**：保留 flag（CLI 兼容），velites 落一个自有格式的
-  `session.jsonl`（消息历史的镜像落盘，成本≈0），但**不提供 resume 入口**。
-  注意区分：`events.jsonl`（stdout 归档）是 UI 过程预览/token 计量/失败判定的
-  数据源，必须完整；`session.jsonl` 只是为将来"中断恢复（resume）"特性预留的
-  素材。resume 作为可控性家族的候选第八特性，待 velites 切换稳定后单独立项
-  （涉及 session 格式 v1、Host 重跑链路、上下文信任边界，需独立设计）。
+已拆入 [velites-harness-design-history.md](velites-harness-design-history.md) §3/§4（立项时的
+里程碑计划与开放问题，均已落地或已决）。

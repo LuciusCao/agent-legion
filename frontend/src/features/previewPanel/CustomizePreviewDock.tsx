@@ -20,6 +20,11 @@ import { StudioChatSessionBar } from '../workflowStudio/chat/StudioChatSessionBa
 import { useStudioChatSessionManage } from '../workflowStudio/chat/useStudioChatSessionManage'
 import styles from './CustomizePreviewDock.module.css'
 
+// 定制预览面板没有画布承接 workflow 草稿（#1120 codex 二轮 P1）：模块级
+// noop 保持引用稳定——内联箭头随会话状态每 render 重建（流式 chunk 一路
+// 传到 MessageItem），会穿透 memo 重渲染全部可见消息行。
+const noopApplyWorkflowDraft = () => undefined
+
 export interface CustomizePreviewDockProps {
   workspaceId: string
   onClose: () => void
@@ -77,7 +82,7 @@ function CustomizePreviewChat({ workspaceId }: { workspaceId: string }) {
           noSessionReason="先选择会话或新建对话"
           closedReason="会话已关闭或中断，点「继续对话」恢复"
           showAgentConfig
-          onApplyWorkflowDraft={() => undefined}
+          onApplyWorkflowDraft={noopApplyWorkflowDraft}
         />
       )}
     </div>

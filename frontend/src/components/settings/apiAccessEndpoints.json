@@ -4,7 +4,22 @@
     {
       "method": "POST",
       "path": "/runs",
-      "purpose": "提交条目，一项一个 job（唯一的写操作）"
+      "purpose": "提交条目，一项一个 job（同步默认；mode=\"async\" 异步受理返 202 + batch 句柄）"
+    },
+    {
+      "method": "POST",
+      "path": "/runs/{run_id}/pause",
+      "purpose": "暂停异步 run 的投喂（已建 job 不动）"
+    },
+    {
+      "method": "POST",
+      "path": "/runs/{run_id}/resume",
+      "purpose": "恢复异步 run 的投喂"
+    },
+    {
+      "method": "POST",
+      "path": "/runs/{run_id}/cancel",
+      "purpose": "终止异步 run 的投喂（已建 job 保留）"
     },
     {
       "method": "GET",
@@ -15,6 +30,16 @@
       "method": "GET",
       "path": "/runs/{run_id}",
       "purpose": "单个 run 与 job_stats 进度聚合"
+    },
+    {
+      "method": "GET",
+      "path": "/run-batches",
+      "purpose": "批量任务三视图列表（view=active|ended|archived，含徽标计数 active_count）"
+    },
+    {
+      "method": "POST",
+      "path": "/run-batches/{run_id}/archive",
+      "purpose": "手动归档终态批量任务"
     },
     {
       "method": "GET",

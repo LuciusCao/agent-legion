@@ -44,7 +44,6 @@ tests/db/test_execution_generation_races.py 的纪律）。
 from __future__ import annotations
 
 import threading
-import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -64,6 +63,7 @@ from server.app.executors.models import CODE_EXECUTOR_ID, ExecutionResult, Lease
 from server.app.jobs.node_limits import replace_workspace_node_limits
 from shared.protocol import PROTOCOL_VERSION
 from tests.helpers.agent_worker_api import seed_request
+from tests.helpers.pg_waits import backend_pid, wait_until_waiter_blocked_by
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -325,27 +325,6 @@ def _join(thread: threading.Thread) -> None:
     assert not thread.is_alive(), "write-side transaction never resolved"
 
 
-def _await_code_pool_waiter(timeout: float = 10.0) -> None:
-    """确定性同步点：等到有 backend 正等待 code-pool advisory 锁（比照
-    test_execution_generation_races._await_job_mutation_waiter 的手法：
-    pg_locks 观测，非裸 sleep）。"""
-    with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as probe:
-        row = probe.execute("select hashtext(%s)", ("code-pool",)).fetchone()
-        assert row is not None
-        expected = int(row[0]) & 0xFFFFFFFFFFFFFFFF
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            rows = probe.execute(
-                "select classid, objid from pg_locks"
-                " where locktype='advisory' and objsubid=1 and not granted"
-            ).fetchall()
-            for classid, objid in rows:
-                if ((int(classid) << 32) | int(objid)) & 0xFFFFFFFFFFFFFFFF == expected:
-                    return
-            time.sleep(0.02)
-    raise AssertionError(f"no backend waited on code-pool within {timeout}s")
-
-
 def test_first_config_insert_mid_claim_skips_unlocked_count(job_db, monkeypatch) -> None:
     """P2-1（claim 侧）：probe 判「无 limit 行、不取锁」后、节点检查前，
     配置插入在另一会话提交——claim 不得在无锁状态下计数新行（与并发持锁
@@ -398,8 +377,17 @@ def test_first_config_insert_mid_claim_skips_unlocked_count(job_db, monkeypatch)
     assert _active_node_lease_count(job_db, workspace_id, node_key) == 1
 
 
-def _write_limit_rows(workspace_id: str, node_key: str) -> None:
+def _write_limit_rows(
+    workspace_id: str,
+    node_key: str,
+    waiter_pid: list[int],
+    waiter_ready: threading.Event,
+) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
+        # pid 回传握手（先例 test_sharding_concurrency.py）：先 append 后
+        # set，主线程拿到的一定是即将阻塞在锁上的那个连接的 pid。
+        waiter_pid.append(backend_pid(conn))
+        waiter_ready.set()
         replace_workspace_node_limits(
             conn, workspace_id, [{"node_key": node_key, "concurrency_limit": 1}]
         )
@@ -408,19 +396,34 @@ def _write_limit_rows(workspace_id: str, node_key: str) -> None:
 def test_node_limit_config_write_takes_code_pool_lock_first(job_db) -> None:
     """P2-1（写侧）：replace_workspace_node_limits 在写任何 limit 行之前取
     code-pool 锁——锁被他人持有时配置写阻塞（与持锁 claim 串行化，持锁
-    claim 事务内的 limit 现值因此稳定）。去掉该锁时本用例的同步点超时
-    变红（写不阻塞、直接完成）。"""
+    claim 事务内的 limit 现值因此稳定）。去掉该锁时本用例经探针的
+    thread= 早失败变红（写线程不阻塞、直接完成）。"""
     workspace_id, node_key = "ws-1149-p21w", "package"
     _seed_code_job(job_db, workspace_id, "job-seed", node_key)
 
     holder = psycopg.connect(TEST_DATABASE_URL)
+    thread: threading.Thread | None = None
     try:
         holder.execute("select pg_advisory_xact_lock(hashtext('code-pool'))")
-        thread, outcome = _start(lambda: _write_limit_rows(workspace_id, node_key))
-        _await_code_pool_waiter()
+        waiter_pid: list[int] = []
+        waiter_ready = threading.Event()
+        thread, outcome = _start(
+            lambda: _write_limit_rows(workspace_id, node_key, waiter_pid, waiter_ready)
+        )
+        assert waiter_ready.wait(timeout=10), "写线程未拿到连接"
+        # 双端钉死（#1211 C-2 / PR #1224 codex P2）：advisory 全域键全实例
+        # 共享（不被 xdist schema 隔离），同键他 worker 的等待者也被本
+        # holder 阻塞——单端「任意被 holder 阻塞者」探针会在目标 waiter
+        # 到达锁点前提前返回；必须钉「目标 waiter pid 的阻塞列表含 holder」。
+        wait_until_waiter_blocked_by(waiter_pid[0], backend_pid(holder), thread=thread)
         holder.commit()
     finally:
         holder.close()
+        # 同权回收（对齐 two_phase 的 recheck 用例）：holder 关闭即释放
+        # advisory 锁，写线程解阻后必须有人 join——否则其异步提交会撞
+        # 下一测试的 TRUNCATE 归因。守卫覆盖探针先于 _start 失败的路径。
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=30)
     _join(thread)
 
     assert outcome.get("error") is None
@@ -435,21 +438,70 @@ def test_node_limit_config_write_takes_code_pool_lock_first(job_db) -> None:
 
 
 def test_batch_takes_code_pool_lock_before_any_job_mutation(job_db) -> None:
-    """P2-2：批写事务在首个候选取 job-mutation 锁之前统一取 code-pool——
+    """P2-2 + #1378 codex P2：批写事务在首个候选取 job-mutation 锁之前统一取
+    池级锁——code-pool 集中 probe（#1149）+ 全部 agent 候选 workspace 的
+    agent-ws 锁按实际键升序预取。
+
     批序里 agent 候选（不取 code-pool）在前、带 limit 行的 code 候选在后
     时，逐候选获取会把 code-pool 排到 job-mutation 之后（倒置全局锁序、
-    与「持 code-pool 等 job-mutation」的本地 claim 成环）；集中 probe 在
-    事务首句恢复全序。spy 记录全部 advisory 锁键的到达次序作断言。"""
+    与「持 code-pool 等 job-mutation」的本地 claim 成环）；同理逐候选取
+    agent-ws 会把 ws 锁交错进纯 (job 锁键, job_id) 的 job 序里——候选集
+    不同的两个并发批可按相反顺序取 ws 锁（ws 域 AB-BA）。集中预取在事务
+    首句恢复层级序。spy 记录全部 advisory 锁键的到达次序作断言；agent 侧
+    用两个 workspace 且 ws 锁键序与 job 锁键序相反（去掉预取则第二把 ws
+    锁落到首个 job-mutation 之后、次序随 job 键序——断言必红）。"""
     workspace_id, node_key = "ws-1149-p22", "package"
-    seed_request(job_db, job_id="job-a-agent", workspace_id=workspace_id)
+    # 两个 agent workspace：ws 锁键序与各自 job 的 job 锁键序相反（ws_hi 的
+    # ws 锁键更大、其 job 的锁键更小——纯键序下它先被 promote）。
+    ws_lo, ws_hi = "ws-1149-p22-lo", "ws-1149-p22-hi"
+    with psycopg.connect(TEST_DATABASE_URL) as conn:
+        key_lo = int(
+            conn.execute("select hashtext(%s)::int as k", (f"agent-ws:{ws_lo}",)).fetchone()[0]
+        )
+        key_hi = int(
+            conn.execute("select hashtext(%s)::int as k", (f"agent-ws:{ws_hi}",)).fetchone()[0]
+        )
+        if key_lo > key_hi:
+            ws_lo, ws_hi = ws_hi, ws_lo
+        job_lo = job_hi = ""
+        for i in range(200):
+            cand_lo, cand_hi = f"job-1149-lo-{i:03d}", f"job-1149-hi-{i:03d}"
+            job_key_lo = int(
+                conn.execute(
+                    "select hashtext('job-mutation:' || %s)::int as k", (cand_lo,)
+                ).fetchone()[0]
+            )
+            job_key_hi = int(
+                conn.execute(
+                    "select hashtext('job-mutation:' || %s)::int as k", (cand_hi,)
+                ).fetchone()[0]
+            )
+            if job_key_hi < job_key_lo:
+                job_lo, job_hi = cand_lo, cand_hi
+                break
+    assert job_lo and job_hi, "expected an inverted (ws key, job key) pair within 200 candidates"
+    seed_request(job_db, job_id=job_lo, workspace_id=ws_lo)
+    seed_request(job_db, job_id=job_hi, workspace_id=ws_hi)
+    # floor 纪律：ws_lo 的 agent 请求先排队（其 ws 锁键较小，先入floor），
+    # ws_hi 的随后被同批 admitted。
+    base = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set queued_at=%s where job_id=%s",
+            (base, job_lo),
+        )
+        conn.execute(
+            "update agent_execution_requests set queued_at=%s where job_id=%s",
+            (base + timedelta(seconds=1), job_hi),
+        )
     _seed_code_job(job_db, workspace_id, "job-z-code", node_key)
     _set_node_limit(job_db, workspace_id, node_key, 1)
     _enqueue_code(job_db, workspace_id, "job-z-code", node_key)
     _register_code_worker("worker-1149-p22")
     pool = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
-    selection = select_batch_candidates(pool, "worker-1149-p22", None, None, limit=2)
-    assert {str(row["kind"]) for row in selection.candidates} == {"agent", "code"}
+    selection = select_batch_candidates(pool, "worker-1149-p22", None, None, limit=3)
+    assert len(selection.candidates) == 3
 
     advisory_keys: list[str] = []
     with write_transaction(TEST_DATABASE_URL) as conn:
@@ -466,13 +518,30 @@ def test_batch_takes_code_pool_lock_before_any_job_mutation(job_db) -> None:
             pool, conn, "worker-1149-p22", None, None, selection=selection
         )
 
-    assert [claim.job_id for claim in outcome.claims] == ["job-a-agent", "job-z-code"]
+    # 领取序 = 全局批序 (job 锁键, job_id)：由 job-mutation 实际锁键
+    # （hashtext）决定，按真实键现算期望值（#1346/#1378：无 ws 分桶）。
+    with psycopg.connect(TEST_DATABASE_URL) as conn:
+        rows = conn.execute(
+            "select id, hashtext('job-mutation:' || id)::int as jk"
+            " from (values (%s), (%s), (%s)) as t(id)",
+            (job_lo, job_hi, "job-z-code"),
+        ).fetchall()
+    key_by_job = {str(row[0]): (int(row[1]), str(row[0])) for row in rows}
+    expected_claim_order = sorted(key_by_job, key=lambda j: key_by_job[j])
+    assert [claim.job_id for claim in outcome.claims] == expected_claim_order
     assert "code-pool" in advisory_keys
     first_job_mutation = next(
         (i for i, key in enumerate(advisory_keys) if key.startswith("job-mutation:")), None
     )
     assert first_job_mutation is not None
     assert advisory_keys.index("code-pool") < first_job_mutation
+    # agent-ws 池锁同样在首个 job-mutation 之前（批首预取，#1378），且两把
+    # 锁按实际 ws 锁键升序——与 code-pool 的集中 probe 同族（池锁层级序：
+    # code-pool probe → agent-ws 预取 → job-mutation）。
+    ws_domain_lo, ws_domain_hi = f"agent-ws:{ws_lo}", f"agent-ws:{ws_hi}"
+    assert advisory_keys.index("code-pool") < advisory_keys.index(ws_domain_lo)
+    assert advisory_keys.index(ws_domain_lo) < advisory_keys.index(ws_domain_hi)
+    assert advisory_keys.index(ws_domain_hi) < first_job_mutation
 
 
 # ---------------------------------------------------------------------------

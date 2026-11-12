@@ -22,9 +22,8 @@ import { DagEdge as DagEdgeComponent } from './DagEdge'
 import { DagNode as DagNodeComponent } from './DagNode'
 import { DagSelectionViewport } from './DagSelectionViewport'
 import type { DagNodeData } from './DagNode'
-import type { DagNodeChangeType } from './dagNodeTypes'
+import type { DagNodeChangeType, NodeExecutionType } from './dagNodeTypes'
 import type { DagNodeStatus } from '../dagNodeStatus'
-import type { ExecutorKind } from '../../types/jobTypes'
 import { NodeDetailsPanel } from '../NodeDetailsPanel'
 import { filterRelevantRuns } from '../../lib/jobRuns'
 import { applyHighlight, hoverReducer } from '../dagHighlight'
@@ -37,8 +36,8 @@ export interface DagGraphNode {
   status: DagNodeStatus
   created_at: string
   duration?: number
-  executorKind?: ExecutorKind | null
-  executorId?: string | null
+  executionType?: NodeExecutionType | null
+  executionRuntime?: string | null
   agentId?: string | null
   workerId?: string | null
   capability?: string
@@ -93,19 +92,10 @@ const FIT_VIEW_OPTIONS = { padding: 0.18, minZoom: 0.35, maxZoom: 1.2 }
 const nodeTypes = { dagNode: DagNodeComponent }
 const edgeTypes = { dagEdge: DagEdgeComponent }
 
-type NormalizedExecutorKind = NonNullable<DagNodeData['executorKind']>
-
-function normalizeExecutorKind(
-  kind?: ExecutorKind | null
-): DagNodeData['executorKind'] {
-  if (!kind) return null
-  return kind as NormalizedExecutorKind
-}
-
 // 布局计算在 dagLayout.ts（#417 拆出：无边 dagre 退化布局治理 + 体积预算）。
 function layoutGraph(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
   return {
-    ...computeLayout(nodes, edges, normalizeExecutorKind),
+    ...computeLayout(nodes, edges),
     rfEdges: buildRfEdges(edges),
   }
 }

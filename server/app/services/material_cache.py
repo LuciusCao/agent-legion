@@ -16,15 +16,45 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
+
+from botocore.exceptions import ClientError
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.rowmap import parse_object
 from server.app.db.transaction import read_connection
-from server.app.storage import ObjectStorage, build_s3_storage
-from shared.material_cache import MaterializeError, materialize_stream
+from server.app.jobs.queries.material_claim_gate import requires_etag_protocol_sql
+from server.app.storage import ObjectStorage, build_s3_storage, is_precondition_failed
+from shared.material_cache import (
+    MaterializeError,
+    material_cache_address,
+    materialize_stream,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def open_verified_stream(
+    storage: ObjectStorage, storage_key: str, object_etag: str, label: str
+) -> BinaryIO:
+    """``open_stream`` conditioned on the material row's recorded ETag (#1279).
+
+    The S3 If-Match binds the verification to the exact bytes this GET
+    returns (412 before any byte is served), so a same-size overwrite that
+    landed after complete() surfaces as a ``MaterializeError`` instead of
+    silently caching poisoned bytes. An empty ``object_etag`` (a pre-v98 row
+    the #1316 startup binder has not bound yet, or could not bind: base
+    size-only semantics) skips the condition.
+    """
+    try:
+        return storage.open_stream(storage_key, if_match=object_etag)
+    except ClientError as exc:
+        if is_precondition_failed(exc):
+            raise MaterializeError(
+                f"{label} bytes changed after completion (ETag mismatch); repair the row "
+                "with scripts/request_material_reupload.py, then re-upload the material"
+            ) from exc
+        raise
 
 
 def input_document(job: Mapping[str, Any]) -> dict[str, Any]:
@@ -49,9 +79,12 @@ def is_material_input(job: Mapping[str, Any]) -> bool:
 def _fetch_material_row(
     connect_source: ConnectSource, workspace_id: str, material_id: str
 ) -> dict[str, Any]:
+    # requires_etag_protocol：旧 Worker 门禁谓词与本行快照同读（#1316 R12，
+    # 描述符层的判定必须与描述符字段出自同一快照，见 material_claim_descriptors）。
     with read_connection(connect_source) as conn:
         row = conn.execute(
-            "select * from materials where id=%s and workspace_id=%s",
+            "select mat.*, " + requires_etag_protocol_sql("mat") + " as requires_etag_protocol"
+            " from materials mat where mat.id=%s and mat.workspace_id=%s",
             (material_id, workspace_id),
         ).fetchone()
     if row is None:
@@ -108,14 +141,18 @@ def material_runtime_block(
     content_hash = str(row.get("content_hash") or "")
     filename = str(row.get("filename") or "")
     size_bytes = int(row.get("size_bytes") or 0)
+    object_etag = str(row.get("object_etag") or "")
     # Content addressing dedups downloads across jobs of the same material;
-    # hashless rows fall back to their (unique) id.
-    address = content_hash or material_id
+    # hashless rows address by id + upload generation (#1279 codex r6：修复
+    # 代次 +1 后旧地址自然孤儿化，毒化缓存不再命中）。
+    address = material_cache_address(material_id, content_hash, int(row["upload_generation"]))
     try:
         path = materialize_stream(
             cache_root,
             address,
-            lambda: storage.open_stream(str(row["storage_key"])),
+            lambda: open_verified_stream(
+                storage, str(row["storage_key"]), object_etag, f"material {material_id}"
+            ),
             expected_sha256=content_hash,
             expected_size=size_bytes,
             log=lambda message: logger.warning("%s", message),
@@ -175,47 +212,3 @@ def prefetch_material_block(
         job,
         storage=executor._object_store(),
     )
-
-
-def material_claim_block(
-    connect_source: ConnectSource,
-    workspace_id: str,
-    job: Mapping[str, Any],
-    *,
-    storage: ObjectStorage | None = None,
-    download_expires_seconds: int = 3600,
-) -> dict[str, Any] | None:
-    """The Worker-facing material descriptor for the claim response.
-
-    Injected into the claim-time ``runtime_context`` (memory only, like the
-    secret injection — the persisted manifest keeps only the audit stub).
-    The Worker materializes from the presigned GET URL with no storage
-    credentials of its own; ``storage_key`` never crosses the wire. Bundle
-    inputs get one presigned GET per member (#156).
-    """
-    input_doc = input_document(job)
-    if input_doc.get("type") == "bundle":
-        from server.app.services.material_bundle_cache import bundle_claim_block
-
-        return bundle_claim_block(
-            connect_source,
-            workspace_id,
-            job,
-            storage=storage,
-            download_expires_seconds=download_expires_seconds,
-        )
-    if input_doc.get("type") != "material":
-        return None
-    row = _ready_row(connect_source, workspace_id, input_doc)
-    material_id = str(row["id"])
-    storage = _require_storage(storage, material_id)
-    return {
-        "material_id": material_id,
-        "filename": str(row.get("filename") or ""),
-        "content_type": str(row.get("content_type") or ""),
-        "size_bytes": int(row.get("size_bytes") or 0),
-        "content_hash": str(row.get("content_hash") or ""),
-        "download_url": storage.presign_get(
-            str(row["storage_key"]), expires_seconds=download_expires_seconds
-        ),
-    }

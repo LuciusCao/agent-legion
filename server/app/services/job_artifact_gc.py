@@ -38,10 +38,13 @@ def gc_deleted_job_artifacts(
     """Drop the job's artifact refs and physically delete unreferenced artifacts.
 
     ``delete_refs_for_job`` is an idempotent sweep: it returns an empty list
-    when the FK cascade already removed the rows. ``delete_unreferenced``
-    re-checks the refcount inside its own transaction, so artifacts still
-    referenced by other jobs survive. Failures are logged, never raised:
-    orphans are accepted as known debt and must not change the deletion result.
+    when the FK cascade already removed the rows, and it skips the delete
+    outright when a live jobs row owns the id again (same-source recreate
+    after the deletion committed, #1248) — those refs belong to the new job.
+    ``delete_unreferenced`` re-checks the refcount inside its own transaction,
+    so artifacts still referenced by other jobs survive. Failures are logged,
+    never raised: orphans are accepted as known debt and must not change the
+    deletion result.
     """
     if store is None:
         return

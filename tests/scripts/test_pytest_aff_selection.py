@@ -9,13 +9,18 @@ tests/scripts/test_quality_gate_scripts.py.
 
 from __future__ import annotations
 
+import argparse
 import pathlib
 import sqlite3
+import subprocess
 
 import pytest
 
+import scripts.pytest_aff_selection as aff_selection
+import scripts.pytest_aff_unmapped as aff_unmapped
 from scripts.pytest_aff_selection import (
     build_index_from_coverage,
+    postgres_manifest_files,
     select_affected_tests,
     unmapped_source_files,
 )
@@ -274,3 +279,160 @@ def test_unmapped_source_files_flags_deleted_test_helpers(tmp_path):
     )
 
     assert unmapped == ["tests/helpers/seed.py"]
+
+
+def _write_postgres_manifest(root: pathlib.Path, files: list[str]) -> None:
+    manifest = root / "config" / "architecture" / "postgres-test-files.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    import json
+
+    manifest.write_text(json.dumps({"version": 1, "files": files}), encoding="utf-8")
+
+
+def test_postgres_manifest_files_reads_the_manifest(tmp_path):
+    _write_postgres_manifest(tmp_path, ["tests/db/test_jobs.py"])
+
+    assert postgres_manifest_files(tmp_path) == frozenset({"tests/db/test_jobs.py"})
+    # Missing or malformed manifest degrades to "no knowledge" — the gate's
+    # exit-5 tolerance then carries the postgres-only case alone.
+    assert postgres_manifest_files(tmp_path / "absent") == frozenset()
+    _write_postgres_manifest(tmp_path / "broken", [])
+    (tmp_path / "broken" / "config" / "architecture" / "postgres-test-files.json").write_text(
+        "not json", encoding="utf-8"
+    )
+    assert postgres_manifest_files(tmp_path / "broken") == frozenset()
+
+
+def test_select_affected_tests_never_passes_through_postgres_manifest_files(tmp_path):
+    """#1307/#304: a changed fully postgres-marked file must not become a
+    nodeid — under `-m "not postgres"` it collects zero tests and pytest
+    exits 5, which the gate used to count as a failure (M18/M55)."""
+    _write_postgres_manifest(tmp_path, ["tests/db/test_jobs.py"])
+    pg_file = tmp_path / "tests" / "db" / "test_jobs.py"
+    pg_file.parent.mkdir(parents=True)
+    pg_file.write_text("def test_a():\n    pass\n", encoding="utf-8")
+    unit_file = tmp_path / "tests" / "test_unit.py"
+    unit_file.write_text("def test_b():\n    pass\n", encoding="utf-8")
+
+    selected = select_affected_tests(
+        ["tests/db/test_jobs.py", "tests/test_unit.py"], {}, repo_root=tmp_path
+    )
+
+    assert selected == ["tests/test_unit.py"]
+
+
+def test_select_affected_tests_postgres_only_change_selects_nothing(tmp_path):
+    """The #304 shape: a change touching only postgres-tier test files yields
+    an empty selection, which the gate skips explicitly instead of failing
+    on pytest exit 5."""
+    _write_postgres_manifest(tmp_path, ["tests/db/test_jobs.py"])
+    pg_file = tmp_path / "tests" / "db" / "test_jobs.py"
+    pg_file.parent.mkdir(parents=True)
+    pg_file.write_text("def test_a():\n    pass\n", encoding="utf-8")
+
+    assert select_affected_tests(["tests/db/test_jobs.py"], {}, repo_root=tmp_path) == []
+
+
+def test_dependency_manifests_stay_visible_to_the_selector(tmp_path):
+    """#1307 r1 P2-2：pyproject.toml/uv.lock 在 tracked-roots 之外，但依赖
+    升级必须走 exit 4 全额回落（aff 空选择跳过不得吞掉后端测试）。它们在
+    前缀清单内，且不在覆盖索引里 → unmapped。"""
+    from scripts.pytest_aff_selection import _GIT_PATH_PREFIXES
+
+    assert "pyproject.toml" in _GIT_PATH_PREFIXES
+    assert "uv.lock" in _GIT_PATH_PREFIXES
+    for manifest in ("pyproject.toml", "uv.lock"):
+        (tmp_path / manifest).write_text("", encoding="utf-8")
+    assert unmapped_source_files(["pyproject.toml", "uv.lock"], {}, repo_root=tmp_path) == [
+        "pyproject.toml",
+        "uv.lock",
+    ]
+
+
+def test_uncovered_backend_trees_stay_visible_and_force_full_fallback(tmp_path):
+    """#1376: deploy/config/examples changes must not produce an empty skip."""
+    from scripts.pytest_aff_selection import _GIT_PATH_PREFIXES
+
+    changed = ["deploy/compose.worker.yaml", "config/workflow.yaml", "examples/demo.yaml"]
+    assert all(path.split("/", 1)[0] + "/" in _GIT_PATH_PREFIXES for path in changed)
+    assert unmapped_source_files(changed, {}, repo_root=tmp_path) == sorted(changed)
+    assert select_affected_tests(changed, {}, repo_root=tmp_path) == []
+
+
+def test_new_route_file_exits_4_for_full_unit_fallback(tmp_path, monkeypatch, capsys):
+    """#1385: the postgres-marked route inventory cannot run in aff; a new
+    route therefore stays unmapped instead of selecting a zero-test nodeid."""
+    route = tmp_path / "server/app/routes/new_feature.py"
+    route.parent.mkdir(parents=True)
+    route.write_text("router = None\n", encoding="utf-8")
+    changed = ["server/app/routes/new_feature.py"]
+
+    assert unmapped_source_files(changed, {}, repo_root=tmp_path) == changed
+    assert select_affected_tests(changed, {}, repo_root=tmp_path) == []
+    monkeypatch.setattr(aff_selection, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(aff_unmapped, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(aff_selection, "load_index", lambda: {})
+    monkeypatch.setattr(aff_selection, "changed_source_files", lambda base: changed)
+
+    assert aff_selection._cmd_select(argparse.Namespace(base=None)) == 4
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "unmapped-source-files" in captured.err
+    assert "# unmapped server/app/routes/new_feature.py" in captured.err
+
+
+def test_tracked_route_without_coverage_still_forces_full_fallback():
+    """An existing route missing from the index retains the same conservative
+    unknown-impact fallback as a new route."""
+    root = pathlib.Path(__file__).resolve().parents[2]
+    changed = ["server/app/routes/workspaces.py"]
+
+    assert unmapped_source_files(changed, {}, repo_root=root) == changed
+    assert select_affected_tests(changed, {}, repo_root=root) == []
+
+
+def _git(repo: pathlib.Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _commit_all(repo: pathlib.Path, message: str) -> None:
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", message)
+
+
+@pytest.mark.parametrize("state", ["committed_clean", "uncommitted", "mixed"])
+def test_changed_source_files_parses_real_git_output_by_command(tmp_path, monkeypatch, state):
+    _git(tmp_path, "init")
+    _git(tmp_path, "config", "user.email", "aff@example.test")
+    _git(tmp_path, "config", "user.name", "Aff Test")
+    source = tmp_path / "server" / "app" / "settings.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("INITIAL = True\n", encoding="utf-8")
+    _commit_all(tmp_path, "initial")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    source.write_text("INITIAL = False\n", encoding="utf-8")
+
+    expected = ["server/app/settings.py"]
+    if state in ("committed_clean", "mixed"):
+        _commit_all(tmp_path, "committed backend change")
+    if state in ("uncommitted", "mixed"):
+        staged = tmp_path / "server" / "app" / "staged.py"
+        staged.write_text("STAGED = True\n", encoding="utf-8")
+        _git(tmp_path, "add", "server/app/staged.py")
+        untracked = tmp_path / "server" / "app" / "untracked.py"
+        untracked.write_text("UNTRACKED = True\n", encoding="utf-8")
+        expected.extend(["server/app/staged.py", "server/app/untracked.py"])
+    monkeypatch.setattr(aff_selection, "REPO_ROOT", tmp_path)
+
+    changed = aff_selection.changed_source_files(None if state == "uncommitted" else base)
+
+    assert changed == sorted(expected)
+    test_file = tmp_path / "tests" / "test_aff.py"
+    test_file.parent.mkdir()
+    test_file.write_text("def test_changed():\n    pass\n", encoding="utf-8")
+    mapping = {path: ["tests/test_aff.py::test_changed"] for path in expected}
+    assert select_affected_tests(changed, mapping, repo_root=tmp_path) == [
+        "tests/test_aff.py::test_changed"
+    ]

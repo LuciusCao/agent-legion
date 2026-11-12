@@ -272,4 +272,7 @@ def test_websocket_requires_session(anon_client, client) -> None:
     ):
         pass
     with client.websocket_connect("/api/agents") as websocket:
-        assert websocket is not None
+        # Connect 成功本身由上下文管理器钉住（拒绝时抛 WebSocketDisconnect）；
+        # 断言真实状态：已认证连接会立刻收到 agent 快照帧。
+        snapshot = websocket.receive_json()
+        assert snapshot["type"] == "snapshot"

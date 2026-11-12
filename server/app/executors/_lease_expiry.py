@@ -1,9 +1,9 @@
 """lease 过期清扫面（自 ``_lease_lifecycle`` 拆出的文件预算姊妹模块）。
 
 ``expire_stale_leases`` 批扫到期 lease 并逐行收尾（EXEC-GENERATION-001：
-每行在 job-mutation advisory 锁内做代次 CAS，批序共用全库唯一序
-(ws 锁键, job_id)）；Agent Worker lease（'agent:%'）归 Agent broker
-sweep（requeue-with-retry 语义），本面刻意排除。
+每行在 job-mutation advisory 锁内做代次 CAS，批序共用全库唯一纯序
+(job 锁键, job_id)——不带 ws 分桶，#1346/#1378）；Agent Worker lease
+（'agent:%'）归 Agent broker sweep（requeue-with-retry 语义），本面刻意排除。
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:
         """
         select l.id, l.job_id, l.node_key, l.node_run_id, l.execution_id,
                l.execution_generation, j.workspace_id,
-               hashtext('agent-ws:' || j.workspace_id)::int as ws_lock_key
+               hashtext('job-mutation:' || l.job_id)::int as job_lock_key
         from executor_leases l
         join jobs j on j.id = l.job_id
         where l.status='active' and l.expires_at<=%s
@@ -47,11 +47,10 @@ def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:
     ).fetchall()
     expired: list[str] = []
     # EXEC-GENERATION-001：每行会取 job-mutation advisory 锁（xact 级、不随
-    # 语句/SAVEPOINT 释放），全库批路径共用唯一序 (ws 锁键, job_id)——与
-    # agent claim 批的 agent 块（claim_batch_tx._lock_order_sorted，同一
-    # hashtext('agent-ws:' || workspace_id) 键）及 finish_many/recover/
-    # sweep 相同，防批间 AB-BA。
-    for row in sorted(rows, key=lambda r: (int(r["ws_lock_key"]), str(r["job_id"]))):
+    # 语句/SAVEPOINT 释放），全库批路径共用唯一纯序 (job 锁键, job_id)——
+    # 不带 ws 分桶（#1378 codex P2：分桶在跨 ws 碰撞别名对上仍成环）——与
+    # finish_many/try_claim_many/recover/sweep/claim 批相同，防批间 AB-BA。
+    for row in sorted(rows, key=lambda r: (int(r["job_lock_key"]), str(r["job_id"]))):
         if _expire_lease_row(conn, row, now_str):
             expired.append(row["id"])
     return expired

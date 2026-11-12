@@ -39,6 +39,7 @@ class WorkflowWorkerState:
         "agent_pass",
         "batch_payload_cache",
         "definition_cache",
+        "etag_gate_alerted",
         "future_claims",
         "futures",
         "hydration_dangling",
@@ -81,13 +82,16 @@ class WorkflowWorkerState:
         # #827: per-(job, input) dangling manifest-row streaks for ready-gate
         # hydration (cross-pass; pruned with job_evals in build_ready_queues).
         self.hydration_dangling = DanglingManifestStreaks()
+        # #1320: jobs already alerted for the v6-ETag-gate deferral (cross-pass;
+        # once per job per process — the alert asks for a fleet upgrade).
+        self.etag_gate_alerted: set[str] = set()
         # Per-pass scan-phase wall times (seconds), reset in _poll and rendered
         # into the pass log: marks (mark store refresh + pause probes),
         # ws_query (per-workspace row fetch), miss_fetch (batched fat-row/node
         # reads for changed jobs), eval (per-changed-job ready evaluation).
         self.scan_phases: dict[str, float] = {}
         # Short-TTL route cache; see server.app.workflow_worker.routing.
-        self.route_cache: dict[tuple[str, str, str, bool], tuple[float, NodeRoute]] = {}
+        self.route_cache: dict[tuple[str, str, str, bool, str], tuple[float, NodeRoute]] = {}
         # Per-pass state (cleared in _poll).
         self.batch_payload_cache: dict[str, dict[str, Any] | None] = {}
         self.pass_claim_counts: dict[str, int] = {}

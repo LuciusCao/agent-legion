@@ -130,10 +130,12 @@ describe('useWorkflowStudio draft & revision', () => {
     mocks.fetchWorkflowDraft.mockResolvedValue({
       definition_yaml: null,
       updated_at: null,
+      generation: 0,
     })
     mocks.putWorkflowDraft.mockResolvedValue({
       definition_yaml: 'key: demo\n',
       updated_at: '2026-08-27T00:00:00+00:00',
+      generation: 1,
     })
   })
 
@@ -510,11 +512,11 @@ describe('useWorkflowStudio draft & revision', () => {
       vi.advanceTimersByTime(850)
     })
 
-    // 无服务端草稿时首次保存的 CAS 基线是 never-saved（#633）。
+    // 无服务端草稿时首次保存的 CAS 基线是代次 0（#633/#1226）。
     expect(mocks.putWorkflowDraft).toHaveBeenCalledWith(
       'ws1',
       'key: demo\nlabel: Autosaved\n',
-      { expectedUpdatedAt: 'never-saved' }
+      { baseGeneration: 0 }
     )
     await waitFor(() => expect(result.current.draftSave.status).toBe('saved'))
   })

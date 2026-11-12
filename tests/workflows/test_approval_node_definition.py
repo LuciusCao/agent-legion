@@ -55,6 +55,25 @@ def test_approval_node_parses_without_capability():
     assert "gate" in definition.executable_nodes
 
 
+def test_approval_node_accepts_verdict_payload_schema():
+    schema = {
+        "type": "object",
+        "properties": {"lane": {"type": "string", "default": "standard"}},
+        "required": ["lane"],
+    }
+    definition = workflow_definition_from_mapping(_approval_dag(config_schema=schema))
+    assert definition.nodes["gate"].config_schema == schema
+
+
+def test_approval_node_rejects_secret_verdict_payload_fields():
+    schema = {
+        "type": "object",
+        "properties": {"token": {"type": "string", "secret": True}},
+    }
+    with pytest.raises(WorkflowDefinitionError, match="secret verdict payload"):
+        workflow_definition_from_mapping(_approval_dag(config_schema=schema))
+
+
 @pytest.mark.parametrize(
     "field, value",
     [
@@ -62,7 +81,6 @@ def test_approval_node_parses_without_capability():
         ("execution", {"provider": "openai"}),
         ("shard", {"count": 2}),
         ("reduce", {"from": "write"}),
-        ("config_schema", {"foo": {"type": "string"}}),
         ("skill", "group/name"),
     ],
 )

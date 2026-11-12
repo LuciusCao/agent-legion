@@ -19,7 +19,7 @@
 - PostgreSQL 是唯一控制面数据库，开发机与生产语义一致；`server/` 与 `scripts/` 不使用 SQLite。
 - Job 产物权威副本在实例对象存储（`AGENT_LEGION_S3_*`，默认本地 SeaweedFS），本地 job_dir
   只是执行暂存与可淘汰缓存（EXEC-ARTIFACT-STORE-001；key 布局见
-  [artifact-direct-url-pinning.md](artifact-direct-url-pinning.md)，`data/` 布局见
+  [materials-and-runs.md §4.5](materials-and-runs.md#45-产物-key-布局与直连-url-版本固定853)，`data/` 布局见
   [../data-layout.md](../data-layout.md)）。
 - 配置来源：代码默认值 + env 覆盖（机器路径、密钥、DB URL 等 env-only 项）+ DB 实例设置文档；
   运行时 split yaml 已全部退役，详见 [backend.md「Configuration Reference」](backend.md#configuration-reference)。

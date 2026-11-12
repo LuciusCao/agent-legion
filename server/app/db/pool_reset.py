@@ -10,16 +10,19 @@ rolls back INTRANS/INERROR connections on ``putconn`` (asynchronously, on
 its maintenance workers). What the stock behavior lacks is attribution —
 the rollback logs an anonymous connection repr, so #438's long-lived
 idle-in-transaction sightings could not be traced to a call site. This
-module adds that attribution without touching the rollback itself.
+module adds that attribution, and (#1077) rolls a dirty return back on the
+caller's thread so the transaction never outlives a discarded pool task.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from threading import Lock
 from typing import Any
 
+import psycopg
 from psycopg import Connection
 from psycopg.pq import TransactionStatus
 
@@ -55,19 +58,31 @@ _reset_warn_last: dict[str, float] = {}
 _reset_warn_suppressed: dict[str, int] = {}
 
 
-def note_return(conn: Connection[dict[str, Any]]) -> None:
-    """Observe a connection at return time (``DatabaseConnection.close``).
+def settle_return(conn: Connection[dict[str, Any]]) -> None:
+    """Attribute, then roll back, a dirty return (``DatabaseConnection.close``).
 
     Called synchronously on the caller's thread, before psycopg_pool's
     maintenance workers get the connection — so unlike the ``reset``
     callback this sees the pre-rollback transaction status and can
-    attribute the leak while it is still a leak. Rollback stays the pool's
-    job; this only records.
+    attribute the leak while it is still a leak.
+
+    #1077: the rollback happens here too, not only on the pool worker. The
+    worker's ``ReturnConnection`` is discarded when ``ConnectionPool.close()``
+    flags the pool closed before the task runs, and no shutdown barrier can
+    cover a return that lands after it (a DB call still running past the
+    lifespan's bounded joins). Rolling back on the caller's thread means a
+    dirty transaction never depends on that task: a discarded task can at
+    most strand an IDLE connection (no snapshot, no locks) until GC. A
+    failed rollback (broken connection) leaves the pool's reset path as the
+    backstop — psycopg_pool discards connections it cannot reset.
     """
     status = conn.info.transaction_status
     if status == TransactionStatus.IDLE:
         return
     _warn_reset_leak(status, conn)
+    if status in (TransactionStatus.INTRANS, TransactionStatus.INERROR):
+        with contextlib.suppress(psycopg.Error):
+            conn.rollback()
 
 
 def reset_connection(conn: Connection[dict[str, Any]]) -> None:
@@ -99,8 +114,8 @@ def _warn_reset_leak(status: TransactionStatus, conn: Connection[dict[str, Any]]
         _reset_warn_last[key] = now
         suppressed = _reset_warn_suppressed.pop(key, 0)
     logger.warning(
-        "db connection returned %s with an open transaction (#438): rolled back by the "
-        "pool. leak origin: %s%s",
+        "db connection returned %s with an open transaction (#438): rolled back on "
+        "return. leak origin: %s%s",
         status.name,
         origin,
         f" (suppressed {suppressed} hits in the last interval)" if suppressed else "",

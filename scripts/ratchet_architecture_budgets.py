@@ -2,10 +2,11 @@
 
 Adds new, lowers stale, and removes obsolete entries. Ceilings are a one-way
 ratchet (#209): an existing entry is never raised, here or by hand —
-``check_architecture`` rejects raises against the committed floor. The only
-sanctioned way to raise a ceiling is a dated ``architecture.file_budget``
-exemption in ``config/architecture/architecture-exemptions.yaml``, which
-freezes a higher ceiling with removal tracking.
+``check_architecture`` rejects raises against the committed floor. For files
+still governed by per-file ceilings, the only sanctioned way to raise one is
+a dated ``architecture.file_budget`` exemption in
+``config/architecture/architecture-exemptions.yaml``, which freezes a higher
+ceiling with removal tracking.
 """
 
 from __future__ import annotations
@@ -57,11 +58,13 @@ def ratchet_budgets(root: Path) -> RatchetResult:
     old_map = baseline.files
     new_map: dict[str, int] = {}
     try:
-        frozen_ceilings = _build_frozen_ceilings(inventory.production, load_exemptions(root))
+        frozen_ceilings = _build_frozen_ceilings(
+            inventory.ceiling_production, load_exemptions(root)
+        )
     except _BudgetConfigurationError as exc:
         return RatchetResult(changed=False, errors=(f"budget configuration: {exc}",))
 
-    for path in inventory.production:
+    for path in inventory.ceiling_production:
         actual = count_effective_lines(root / path)
         desired = actual + policy.buffer_lines
         existing = old_map.get(path)

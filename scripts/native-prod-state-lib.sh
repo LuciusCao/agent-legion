@@ -41,7 +41,7 @@ native_pid_is_instance() {
     cmd="$(ps -ww -o command= -p "$pid" 2>/dev/null)" || return 1
     [[ "$cmd" == *"$marker"* ]] || return 1
     [[ " $cmd " == *" --port $port "* && " $cmd " == *" --host $bind "* ]] || return 1
-    cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+    cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | awk 'NR==1')"
     [[ -n "$cwd" ]] || return 1
     [[ "$(cd "$cwd" 2>/dev/null && pwd -P)" == "$(cd "$root" && pwd -P)" ]]
 }

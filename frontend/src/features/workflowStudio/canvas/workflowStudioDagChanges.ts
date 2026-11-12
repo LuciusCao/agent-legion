@@ -1,5 +1,8 @@
 import type * as DagTypes from '../../../components/dag/DagGraph'
-import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
+import {
+  isRuntimeOnlyNodeChange,
+  type ChangeSummaryViewModel,
+} from '../validation/workflowStudioChanges'
 
 export type NodeChangeCounts = {
   added: number
@@ -8,7 +11,9 @@ export type NodeChangeCounts = {
   total: number
 }
 
-/** 顶栏计数：按 compare 的 node_changes 统计 added/modified/removed；无变更返回 null。 */
+/** 顶栏计数：按 compare 的 node_changes 统计 added/modified/removed；无变更返回 null。
+ * M48：execution-only 变更（runtime 字段）走运行通道即改即存，不计入
+ * 「未发布变更」。 */
 export function countNodeChanges(
   summary: ChangeSummaryViewModel | null
 ): NodeChangeCounts | null {
@@ -20,9 +25,11 @@ export function countNodeChanges(
     total: 0,
   }
   for (const change of summary.nodeChanges) {
+    if (isRuntimeOnlyNodeChange(change)) continue
     counts[change.type] += 1
     counts.total += 1
   }
+  if (counts.total === 0) return null
   return counts
 }
 
@@ -40,8 +47,12 @@ export function applyCompareChanges(
   summary: ChangeSummaryViewModel | null
 ): { nodes: DagTypes.DagGraphNode[]; edges: DagTypes.DagGraphEdge[] } {
   if (!summary || summary.nodeChanges.length === 0) return { nodes, edges }
+  // M48：execution-only 变更（运行通道字段）不打画布角标——与「未发布
+  // 变更」chip 同口径，运行配置即改即存不属待发布改动。
   const changeByKey = new Map(
-    summary.nodeChanges.map((change) => [change.nodeKey, change.type])
+    summary.nodeChanges
+      .filter((change) => !isRuntimeOnlyNodeChange(change))
+      .map((change) => [change.nodeKey, change.type])
   )
   const nextNodes = nodes.map((node) => {
     const changeType = changeByKey.get(node.key)

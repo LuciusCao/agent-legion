@@ -19,6 +19,11 @@ the next turn's reset seeds a tail-only orphan row (no turn-tagged chunks).
 
 The state lives on SessionRuntime under the runtime lock; first-chunk
 create+attach is one critical section so a reset never lands between them.
+
+The module also carries the no-seq SSE payload shapes for in-place row
+updates: ``stream_message_payload`` for text/thought folds and
+``tool_call_message_payload`` for the #1120 tool_call coalescing (see
+tool_call_coalesce.py).
 """
 
 from __future__ import annotations
@@ -60,4 +65,21 @@ def stream_message_payload(
         "kind": kind,
         "role": "agent",
         "content": {"text": text},
+    }
+
+
+def tool_call_message_payload(
+    session_id: str, message_id: str, content: dict[str, Any]
+) -> dict[str, Any]:
+    """SSE payload for an in-place tool_call content merge (no seq, #1120).
+
+    Same half-row shape as ``stream_message_payload``: the frontend folds it
+    into the persisted row by id (``upsertMessage``), keeping seq/created_at.
+    """
+    return {
+        "id": message_id,
+        "session_id": session_id,
+        "kind": "tool_call",
+        "role": "agent",
+        "content": content,
     }

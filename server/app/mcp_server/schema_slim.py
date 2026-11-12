@@ -31,5 +31,5 @@ def _slim(node: dict[str, Any]) -> None:
 
 
 def slim_tool_parameters(mcp: FastMCP) -> None:
-    for tool in mcp._tool_manager.list_tools():  # pinned mcp==1.29 internals
+    for tool in mcp._tool_manager.list_tools():  # pinned mcp==1.30 internals
         _slim(tool.parameters)

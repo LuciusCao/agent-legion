@@ -81,6 +81,20 @@ MAX_RESULT_COMMAND_PARTS = 64
 # importing this module. Equality with the node_sdk side is pinned by
 # tests/workers/test_protocol_sync.py (issue #282).
 AUTH_FAILURE_MARKER_PATH = ".node_runtime/auth_failure"
+
+
+def auth_failure_marker_path(execution_id: str) -> str:
+    """Per-execution marker path (#1355, #1311 family): parallel code nodes
+    and shards share one ``job_dir``, so the fixed name let a neighbour's
+    pre-run clear delete this execution's marker or mis-attribute it at
+    consume time. Mirrors ``workspace_libs/node_sdk.auth_failure_marker_path``
+    (equality pinned by tests/workers/test_protocol_sync.py); the legacy fixed
+    name stays the fallback for runtimes without an ``execution_id``."""
+    if execution_id:
+        return f"{AUTH_FAILURE_MARKER_PATH}-{execution_id}"
+    return AUTH_FAILURE_MARKER_PATH
+
+
 # Connection keys reported by node code via report_auth_failure; bounded on
 # both sides (Host route agent_worker_results, Worker result metadata).
 MAX_CONNECTION_KEY_CHARS = 128

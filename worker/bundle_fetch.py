@@ -22,6 +22,7 @@ from shared.material_cache import (
     MATERIALS_CACHE_DIRNAME,
     MaterializeError,
     cache_file_path,
+    material_cache_address,
     materialize_stream,
 )
 from worker.material_fetch import _open_download
@@ -35,7 +36,7 @@ def materialize_claim_bundle(material: Mapping[str, Any], execution_dir: Path) -
         raise MaterializeError("claim bundle descriptor is incomplete")
     cache_root = Path(execution_dir).parent / MATERIALS_CACHE_DIRNAME
     manifest: list[tuple[str, str]] = []
-    parsed: list[tuple[str, str, str, str, int | None]] = []
+    parsed: list[tuple[str, str, str, str, str, int | None]] = []
     for entry in entries:
         if not isinstance(entry, Mapping):
             raise MaterializeError("claim bundle entry is not an object")
@@ -45,10 +46,14 @@ def materialize_claim_bundle(material: Mapping[str, Any], execution_dir: Path) -
         if not member_id or not url or not relpath:
             raise MaterializeError("claim bundle entry is incomplete")
         content_hash = str(entry.get("content_hash") or "")
+        object_etag = str(entry.get("object_etag") or "")
+        generation = entry.get("upload_generation")
+        generation = int(generation) if isinstance(generation, (int, float)) else None
         size = entry.get("size_bytes")
         expected_size = int(size) if isinstance(size, (int, float)) else None
-        address = content_hash or member_id
-        parsed.append((address, url, relpath, content_hash, expected_size))
+        # 无 hash 成员：地址带代次（#1279 codex r6，与单材料同规则）。
+        address = material_cache_address(member_id, content_hash, generation)
+        parsed.append((address, url, relpath, content_hash, object_etag, expected_size))
         manifest.append((address, relpath))
     tree_address = bundle_address(manifest)
     # 全程 pin 住全部成员与目录树：成员 i+1 的淘汰回合不得删掉成员 i
@@ -56,11 +61,11 @@ def materialize_claim_bundle(material: Mapping[str, Any], execution_dir: Path) -
     pin = {cache_file_path(cache_root, member_address) for member_address, _ in manifest}
     pin.add(cache_file_path(cache_root, tree_address))
     materialized: list[tuple[Path, str]] = []
-    for address, url, relpath, content_hash, expected_size in parsed:
+    for address, url, relpath, content_hash, object_etag, expected_size in parsed:
         path = materialize_stream(
             cache_root,
             address,
-            partial(_open_download, url),
+            partial(_open_download, url, if_match=object_etag),
             expected_sha256=content_hash,
             expected_size=expected_size,
             pin=pin,

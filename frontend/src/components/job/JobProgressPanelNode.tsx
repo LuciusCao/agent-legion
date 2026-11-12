@@ -6,6 +6,7 @@ import {
   computeWaitTime,
   EXECUTOR_KIND_ICONS,
   EXECUTOR_KIND_LABELS,
+  resolveVisibleExecutionType,
 } from '../jobProgressHelpers'
 import { TokenUsageRunDetail } from '../tokenUsage/TokenUsageRunDetail'
 import { JobNodeHydrationDefer } from './JobNodeHydrationDefer'
@@ -80,13 +81,20 @@ export function JobProgressPanelNode({
     node.status === 'pending'
       ? '等待中'
       : (computeWaitTime(node, allNodes) ?? '—')
-  const executorKind = node.executor_kind
-  const executorLabel = executorKind
-    ? (EXECUTOR_KIND_LABELS[executorKind] ?? executorKind)
-    : undefined
-  const executorIcon = executorKind
-    ? (EXECUTOR_KIND_ICONS[executorKind] ?? 'computer')
-    : undefined
+  // #1180/#1412：agent 节点也显示类型 chip；start/approval 投影的 code
+  // 类型与 DAG 一样经 capability 守卫抑制。
+  const executionType = resolveVisibleExecutionType(node)
+  const isAgentNode = executionType === 'agent'
+  const executorLabel = isAgentNode
+    ? 'agent'
+    : executionType
+      ? (EXECUTOR_KIND_LABELS[executionType] ?? executionType)
+      : undefined
+  const executorIcon = isAgentNode
+    ? 'smart_toy'
+    : executionType
+      ? (EXECUTOR_KIND_ICONS[executionType] ?? 'computer')
+      : undefined
 
   return (
     <div className={styles.timelineItem}>
@@ -133,7 +141,9 @@ export function JobProgressPanelNode({
           {executorLabel && executorIcon && (
             <span
               className={styles.executorBadge}
-              title={`执行器: ${executorLabel}`}
+              title={
+                isAgentNode ? '执行类型: agent' : `执行器: ${executorLabel}`
+              }
             >
               <MaterialIcon
                 name={executorIcon}

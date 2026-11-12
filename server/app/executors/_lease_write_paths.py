@@ -14,10 +14,9 @@ from server.app.db.connection import DatabaseConnection
 from server.app.db.transaction import write_transaction
 from server.app.executors._lease_claims import claim_lease
 from server.app.executors._lease_control import (
-    _ORPHAN_WS_LOCK_KEY,
+    job_mutation_lock_keys,
     lock_job_mutation_and_read_generation,
     sync_job_status,
-    ws_lock_keys_by_job,
 )
 from server.app.executors._lease_expiry import expire_stale_leases
 from server.app.executors._lease_lifecycle import finish_lease, heartbeat_lease
@@ -50,23 +49,25 @@ def try_claim_many(
 
     Claims run in the single global job-mutation batch order shared with
     ``finish_many`` / expire / recover / the agent sweep and the claim
-    batch's all-kinds order (EXEC-GENERATION-001, #759 phases 1c+7):
-    ``(hashtext('agent-ws:' || workspace_id)::int, job_id)`` — every claim
-    takes the ``job-mutation:<job_id>`` advisory xact lock, never released
-    before COMMIT, so one cross-batch order prevents AB-BA on that domain.
-    Since #645 review P2 the claim batch's code candidates join the same
-    order (they take no ``agent-ws:*`` lock and borrow the ws key purely as
-    a sort position), so no cross-batch pair walks the same two jobs in
-    different orders. Verdicts are reassembled in caller order.
+    batch's all-kinds order (EXEC-GENERATION-001, #759 phases 1c+7; #1346;
+    #1378 codex P2): ``(hashtext('job-mutation:' || job_id)::int, job_id)`` —
+    the ACTUAL advisory lock key, then the id as same-key tiebreak. No ws
+    component: bucketed orders still walk a cross-workspace collision-alias
+    pair in opposite orders; pool-level locks are covered by the lock-level
+    order (pool locks before job-mutation — claim_lease takes code-pool
+    first), not by the job sort. Every claim takes the
+    ``job-mutation:<job_id>`` advisory xact lock, never released before
+    COMMIT, so one cross-batch order prevents AB-BA on that domain.
+    Verdicts are reassembled in caller order.
     """
     with write_transaction(repo.path) as conn:
-        # The ws lock key is server-side (hashtext), so resolve it for the
+        # The lock key is server-side (hashtext), so resolve it for the
         # batch's jobs in one query before sorting.
-        ws_keys = ws_lock_keys_by_job(conn, [request.job_id for request in requests])
+        lock_keys = job_mutation_lock_keys(conn, [request.job_id for request in requests])
         results: list[ClaimedExecution | None] = [None] * len(requests)
         for index, request in sorted(
             enumerate(requests),
-            key=lambda e: (ws_keys.get(e[1].job_id, _ORPHAN_WS_LOCK_KEY), e[1].job_id, e[0]),
+            key=lambda e: (lock_keys[e[1].job_id], e[1].job_id, e[0]),
         ):
             results[index] = claim_lease(conn, request, repo.data_dir)
     _broadcast_committed(repo, [str(r.job_id) for r in results if r is not None])
@@ -109,14 +110,12 @@ def finish(
     _mark_result_stage(stage_timer, "lease_write")
 
     # Parse events.jsonl outside the main write transaction; the
-    # capture helper opens its own short write tx only for the persist.
-    # The helper still expects a caller-provided connection (its own
-    # migration is Task 3), so hand it a fresh one now that the commit
-    # has landed. A stale-generation finish (#759 review P2) settles the
-    # lease/history rows but the shared run_dir path may already belong
-    # to the NEW generation's run — token capture would misattribute and
-    # PI compression could truncate the new run's events.jsonl, so the
-    # events family is skipped on a stale verdict.
+    # capture helper orchestrates facade read → parse → persist with
+    # sequential checkouts (#1239). A stale-generation finish (#759 review
+    # P2) settles the lease/history rows but the shared run_dir path may
+    # already belong to the NEW generation's run — token capture would
+    # misattribute and PI compression could truncate the new run's
+    # events.jsonl, so the events family is skipped on a stale verdict.
     events_ran = result_flag and not generation_stale and result.status in ("completed", "failed")
     if events_ran:
         finish_events_post_processing(repo, lease_id, result)
@@ -135,17 +134,21 @@ def finish_events_post_processing(
 
     Completed/failed only (both finish paths' family gate — the direct
     path and the batched arm's post-commit callback); the data_dir guard
-    keeps the exact defensive shape. Parse events outside the main write
-    transaction; the capture helper opens its own short tx for the persist.
+    keeps the exact defensive shape. The capture orchestrates facade
+    read → parse → persist with sequential checkouts (#1239) — this
+    caller must not hold a connection across it.
     """
-    from server.app.db.transaction import read_connection
+    from server.app.jobs import JobQueries
     from server.app.services.token_usage_lease import capture_token_usage_after_lease_finish
     from server.app.storage_paths import resolve_data_path
     from shared.pi_events import compress_pi_events
 
     if repo.data_dir is not None:
-        with read_connection(repo.path) as read_conn:
-            capture_token_usage_after_lease_finish(read_conn, lease_id, repo.data_dir)
+        # Production always wires the facade; the legacy bare-DSN repo
+        # construction (tests) gets an ephemeral one — jobs_dir is unused
+        # by the capture methods.
+        job_db = repo.job_db or JobQueries(repo.path, repo.data_dir / "jobs")
+        capture_token_usage_after_lease_finish(job_db, lease_id, repo.data_dir)
         if result.run_dir:
             run_dir = resolve_data_path(result.run_dir, repo.data_dir, allow_missing=True)
             compress_pi_events(run_dir / "events.jsonl")
@@ -174,19 +177,19 @@ def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) 
     now_str = database_timestamp(now)
     with write_transaction(repo.path) as conn:
         rows = conn.execute(
-            "select j.id, hashtext('agent-ws:' || j.workspace_id)::int as ws_lock_key from jobs j"
+            "select j.id, hashtext('job-mutation:' || j.id)::int as job_lock_key from jobs j"
             " where j.status='running' and not exists"
             " (select 1 from executor_leases l where l.job_id=j.id and l.status='active')"
         ).fetchall()
         # EXEC-GENERATION-001：每个恢复都会取 job-mutation advisory xact 锁
-        # （不随语句提前释放），全库批路径共用唯一序 (ws 锁键, job_id)——与
-        # agent claim 批的 agent 块（claim_batch_tx._lock_order_sorted）及
-        # finish_many/expire/sweep 相同，防批间 AB-BA。
+        # （不随语句提前释放），全库批路径共用唯一纯序 (job 锁键, job_id)——
+        # 不带 ws 分桶（#1378 codex P2：分桶在跨 ws 碰撞别名对上仍成环）；与
+        # finish_many/try_claim_many/expire/sweep/claim 批相同，防批间 AB-BA。
         recovered = [
             job_id
             for job_id in (
                 str(row["id"])
-                for row in sorted(rows, key=lambda r: (int(r["ws_lock_key"]), str(r["id"])))
+                for row in sorted(rows, key=lambda r: (int(r["job_lock_key"]), str(r["id"])))
             )
             if _recover_orphaned_job(conn, job_id, now_str)
         ]

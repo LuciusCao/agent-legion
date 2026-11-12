@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.services import job_selection_resolver
+from server.app.services.job_failure_selection import resolve_failed_job_ids_page
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_rerun.by_failure_results import (
     assemble_rerun_targets,
@@ -32,7 +32,7 @@ from server.app.services.job_rerun.preview_checks import (
     resolve_rerun_node_from_nodes,
 )
 from server.app.services.job_rerun.single import commit_rerun_result
-from server.app.services.job_selection_resolver import ensure_batch_size, resolve_batch_selection
+from server.app.services.job_selection_resolver import resolve_batch_selection
 from server.app.workflows.workflow_consumption import dependency_downstream
 
 if TYPE_CHECKING:
@@ -151,6 +151,30 @@ def batch_rerun(
     return [results[job_id] for job_id in ids]
 
 
+def resolve_failure_rerun_scope(
+    job_db: Any,
+    workspace_id: str,
+    category: str,
+    job_ids: list[str] | tuple[str, ...] = (),
+    job_filter: JobListFilter | None = None,
+    exclude_ids: Collection[str] = (),
+) -> tuple[list[str], list[str]]:
+    """Resolve explicit/filter ids, or every matching failure when empty."""
+    ids = resolve_batch_selection(job_db, workspace_id, job_ids, job_filter, exclude_ids)
+    requested = [value.strip() for value in ids if value.strip()]
+    if requested:
+        return requested, requested
+    scope: list[str] = []
+    cursor: str | None = None
+    while True:
+        page, cursor, _ = resolve_failed_job_ids_page(
+            job_db, workspace_id, category, 1000, cursor=cursor
+        )
+        scope.extend(page)
+        if cursor is None:
+            return requested, scope
+
+
 def rerun_by_failure_category(
     service: JobRerunService,
     workspace_id: str,
@@ -171,19 +195,11 @@ def rerun_by_failure_category(
     per-job path exactly.
     """
     resolved = AUTO_STRATEGIES.get(category, "rerun_self") if strategy == "auto" else strategy
-    ids = resolve_batch_selection(service.job_db, workspace_id, job_ids, job_filter, exclude_ids)
-    requested = [value.strip() for value in ids if value.strip()]
-    scope = requested
+    requested, scope = resolve_failure_rerun_scope(
+        service.job_db, workspace_id, category, job_ids, job_filter, exclude_ids
+    )
     if not scope:
-        # An empty selection means "every job with a matching failure": cap it
-        # the same way as filter selections (#712 / #917 B-2) with a LIMITed
-        # distinct-job query, before any failed-run rows are materialized.
-        scope = service.job_db.list_failed_job_ids(
-            workspace_id, category=category, limit=job_selection_resolver.MAX_BATCH_JOBS + 1
-        )
-        ensure_batch_size(len(scope))
-        if not scope:
-            return []
+        return []
     grouped = failed_nodes_by_job(service, workspace_id, category, scope, workflow_key)
 
     pre = prefetch_rerun_state(service, list(grouped))

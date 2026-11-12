@@ -6,6 +6,7 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
+from server.app.services.job_creation_pipeline import JobCreationPipeline
 from server.app.services.job_intake_chunks import resolve_fresh_candidates
 from server.app.services.job_intake_registry import RESOLVERS, ResolverSpec
 from server.app.services.job_intake_workspace import get_workspace
@@ -27,6 +28,10 @@ class JobIntakeQueue:
         self.job_db = job_db
         self.settings = settings
         self.job_event_buffer = job_event_buffer
+        # #724: dedup probe / insert / notify / event record are the shared
+        # pipeline stages (buffer-only event wiring — the queue never had a
+        # manager fallback).
+        self.pipeline = JobCreationPipeline(job_db, settings, job_event_buffer=job_event_buffer)
 
     def consume_once(self) -> bool:
         batch = self.job_db.claim_intake_run()
@@ -141,7 +146,7 @@ class JobIntakeQueue:
         # entity is the registry key and every candidate() call sites passes
         # the entity param (or the literal "video") as entity_type — so the
         # keys are computable without running the resolver.
-        existing_keys = self.job_db.filter_existing_dedup_keys(
+        existing_keys = self.pipeline.probe_existing_keys(
             str(batch["workspace_id"]),
             ((entity, str(value)) for value in values),
         )
@@ -156,18 +161,17 @@ class JobIntakeQueue:
             str(batch["workspace_id"]),
             existing_keys,
         )
-        job_ids = self.job_db.create_jobs_bulk(
+        job_ids = self.pipeline.insert_jobs(
             candidates=candidates,
             workflow_key=str(batch["workspace_id"]),
             run_id=str(batch["id"]),
-            node_keys=list(definition.executable_nodes),
+            definition=definition,
             workspace_id=str(batch["workspace_id"]),
             revision=revision,
-            frozen_config=payload.get("node_config") or {},
+            node_config=payload.get("node_config") or {},
+            notify=notify_schedulable_work,
         )
         if job_ids:
-            notify_schedulable_work()
-        if self.job_event_buffer is not None and job_ids:
-            self.job_event_buffer.record_jobs_created(
+            self.pipeline.record_jobs_created(
                 str(batch["workspace_id"]), [str(job_id) for job_id in job_ids]
             )

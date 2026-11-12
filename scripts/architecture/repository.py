@@ -22,6 +22,7 @@ from scripts.architecture.executor_decoupling import (
 )
 from scripts.architecture.exemptions import categorize_exemptions, load_exemptions
 from scripts.architecture.file_budgets import check_file_budgets
+from scripts.architecture.frontend_emoji import check_frontend_emoji
 from scripts.architecture.helpers import (
     ROUTE_FORBIDDEN,
     SCHEDULER_FORBIDDEN,
@@ -37,6 +38,7 @@ from scripts.architecture.helpers import (
     threadpool_dict_by_workspace,
 )
 from scripts.architecture.import_cycles import check_import_cycles
+from scripts.architecture.nested_pool_checkout import check_nested_pool_checkout
 from scripts.architecture.route_contracts import has_protocol_response_annotation
 from scripts.architecture.script_permissions import check_script_permissions
 from scripts.architecture.service_boundaries import check_service_import_boundaries
@@ -55,6 +57,7 @@ from scripts.architecture.workspace_boundaries import (
     check_schema_mutation_locations,
     check_workspace_legacy_video_imports,
 )
+from scripts.architecture.zero_reference_exports import check_zero_reference_exports
 
 
 def check_repository(root: Path) -> list[str]:
@@ -180,6 +183,9 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_docs_consistency(root))
     errors.extend(check_script_permissions(root))
     errors.extend(check_shell_var_boundary(root))
+    errors.extend(check_nested_pool_checkout(root))
+    errors.extend(check_frontend_emoji(root))
+    errors.extend(check_zero_reference_exports(root))
 
     try:
         policy = load_budget_policy(root / "config/architecture/architecture-budget-policy.yaml")

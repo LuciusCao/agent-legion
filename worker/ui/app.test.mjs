@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NUMBER_DEFAULTS, bucketLabel, chartSeriesData, executionLabel, fillWindowBuckets, foldLogLines, formatElapsed, formatTokens, groupExecutions, hasChartData, labelsFromText, latestMetric, linesFromText, mergeDisabledRuntimes, metricsParams, modelsFromText, numberField, phaseProgress, runOccupancy, runtimeCardState, tokenCardModel, tokensLastHour } from "./app.js";
+import { NUMBER_DEFAULTS, bucketLabel, chartSeriesData, executionLabel, fillWindowBuckets, foldLogLines, formatElapsed, formatTokens, groupExecutions, hasChartData, labelsFromText, latestMetric, linesFromText, mergeDisabledRuntimes, metricsParams, modelsFromText, nodeLimitsFromText, numberField, phaseProgress, runOccupancy, runtimeCardState, tokenCardModel, tokensLastHour } from "./app.js";
 
 test("labelsFromText 解析多行 key=value", () => {
   assert.deepEqual(labelsFromText("host=home\nos=mac"), { host: "home", os: "mac" });
@@ -24,6 +24,22 @@ test("labelsFromText 空输入得到空对象", () => {
 test("labelsFromText 拒绝缺少 = 或 key 为空的行", () => {
   assert.throws(() => labelsFromText("no-separator"), /key=value/);
   assert.throws(() => labelsFromText("=value-only"), /key=value/);
+});
+
+// #1158 节点并发上限：key=N 多行映射，值限正整数
+test("nodeLimitsFromText 解析多行 node_key=N 并转成数字", () => {
+  assert.deepEqual(nodeLimitsFromText("heavy_transcode=1\nreview = 4"), { heavy_transcode: 1, review: 4 });
+});
+
+test("nodeLimitsFromText 空输入得到空对象（不限制）", () => {
+  assert.deepEqual(nodeLimitsFromText(""), {});
+  assert.deepEqual(nodeLimitsFromText("\n  \n"), {});
+});
+
+test("nodeLimitsFromText 拒绝非正整数值与缺 = 的行", () => {
+  for (const bad of ["no-separator", "=3", "node=", "node=0", "node=-1", "node=1.5", "node=abc"]) {
+    assert.throws(() => nodeLimitsFromText(bad), /node_key=正整数/);
+  }
 });
 
 test("linesFromText 去空行并去重", () => {

@@ -5,6 +5,10 @@ export {
   fetchJobArtifact,
   fetchJobDetail,
 } from './jobsApi'
+// prettier-ignore
+export { fetchJobArtifactRawBytes, READ_ARTIFACT_BYTES_MAX_BYTES, ArtifactTooLargeError } from './jobArtifactBytes'
+// prettier-ignore
+export type { ArtifactBytesResponse } from './jobArtifactBytes'
 export {
   createWorkspace,
   deleteWorkspace,
@@ -37,8 +41,14 @@ export { cancelPublishRequest, confirmPublishRequest, fetchPendingPublishRequest
 export type { StudioPublishRequestRecord } from './studioPublishRequestApi'
 export { publishWorkflowDraft, validateWorkflowDraft } from './workflows'
 export { fetchWorkflowDraft, putWorkflowDraft } from './workflowDraft'
+// prettier-ignore
+export { fetchWorkflowRuntimeVersions, rollbackWorkflowRuntimeConfig, saveWorkflowRuntimeConfig } from './workflowRuntimeApi'
 export { fetchOpsMetrics } from './metrics'
 export { presignMaterial, completeMaterial, createRun } from './materialsApi'
+// prettier-ignore
+export { listRunBatches, archiveRunBatch, pauseRunBatch, resumeRunBatch, cancelRunBatch, createRunAsync } from './runBatchesApi'
+// prettier-ignore
+export type { RunBatchListItem, RunBatchListResponse, RunBatchView, RunAcceptedResponse } from './runBatchesApi'
 // prettier-ignore
 export type { MetricBucket, OpsGranularity, OpsMetricsParams, OpsMetricsResponse } from './metrics'
 // prettier-ignore

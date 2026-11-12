@@ -41,6 +41,10 @@ EMPTY_TURN_SECONDS = 2.0
 # How long trailing content may lag the prompt response before the verdict.
 EMPTY_TURN_GRACE_SECONDS = 1.5
 
+# Construction seam: tests substitute a gated timer so the verdict never
+# depends on wall-clock scheduling (#1118).
+_timer_class = threading.Timer
+
 # #882: a confirmed empty turn keeps its human message replayable — the
 # idle-state 「继续对话」 re-delivers it once (empty_turn_retry.py).
 COMPACTION_DETAIL = (
@@ -69,7 +73,7 @@ def schedule_check(
             return
         if time.monotonic() - started_at >= EMPTY_TURN_SECONDS:
             return
-        timer = threading.Timer(
+        timer = _timer_class(
             EMPTY_TURN_GRACE_SECONDS,
             _confirm,
             args=(backend, session_id, runtime, (runtime.turn_owner, started_at)),

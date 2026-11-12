@@ -128,3 +128,25 @@ def test_mutation_result_rerun_nodes_stay_string_array(tmp_path):
         JobRerunByFailureResultResponse.model_validate(
             {"job_id": "j1", "operation": "rerun", "status": "succeeded", "rerun_nodes": [1, 2]}
         )
+
+
+def test_job_node_execution_type_and_deprecated_executor_fields(tmp_path):
+    from server.app.main import create_app
+
+    schemas = create_app(data_dir=tmp_path, start_worker=False).openapi()["components"]["schemas"]
+    for schema_name, legacy_fields in (
+        ("JobNodeResponse", ("executor_id", "executor_kind")),
+        ("StudioAgentJobNode", ("executor_kind",)),
+    ):
+        schema = schemas[schema_name]
+        execution_type = schema["properties"]["execution_type"]
+        assert execution_type["anyOf"] == [
+            {"type": "string", "enum": ["code", "agent"]},
+            {"type": "null"},
+        ]
+        for field in legacy_fields:
+            assert schema["properties"][field]["deprecated"] is True
+            assert "execution_type" in schema["properties"][field]["description"]
+
+    assert "execution_type" not in schemas["JobNodeResponse"]["required"]
+    assert "execution_type" in schemas["StudioAgentJobNode"]["required"]

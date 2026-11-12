@@ -9,9 +9,10 @@ action on the secured route surface.
 
 The published bundle renders in an ``<iframe sandbox="allow-scripts">``
 (never ``allow-same-origin``) and talks to the host page over the read-only
-postMessage bridge (listArtifacts/readArtifact/getJobDetail + theme), so a
-bundle — agent-authored by design — can never touch the user session or the
-rest of the platform.
+postMessage bridge (listArtifacts/readArtifact/readArtifactBytes/getJobDetail
++ theme; the byte channel ships with a 512 MiB cap and a ``capabilities``
+declaration in init, issue #1146), so a bundle — agent-authored by design —
+can never touch the user session or the rest of the platform.
 """
 
 from __future__ import annotations

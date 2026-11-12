@@ -12,7 +12,11 @@
   text-transform: uppercase;
 }
 .hash {
-  margin-left: 12px;
+  /* #1180 UI 验收返工：hash 列右对齐——状态文案（ACTIVE/ARCHIVED）长度
+     不一，固定左 margin 会让各行 hash 右边沿错开；MenuItem 是 flex 行，
+     margin-left: auto 把 hash 顶到行尾，各行右边沿自然对齐。 */
+  margin-left: auto;
+  padding-left: 12px;
   color: #616161;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;

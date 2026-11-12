@@ -130,6 +130,10 @@ class ArtifactStore:
 
     def delete_refs_for_job(self, job_id: str) -> list[str]:
         # 单事务内“先删后查孤儿”：返回删除后不再被任何 job 引用的 hash。
+        # 只作用于「已删除」的 job 实例（#1248）：删除提交后同一 id 可能已被
+        # 同源重建占用，此时 artifact_refs 行归新 job 所有，按裸 id 删除会误删
+        # 新 job 的引用。存在性条件与删除放进同一条 DELETE（单语句快照；refs
+        # 经 FK 只能在 jobs 行提交后写入），不靠先查后删的两步。
         with write_transaction(self._connect_source) as conn:
             hashes = [
                 row["hash"]
@@ -137,7 +141,11 @@ class ArtifactStore:
                     "select hash from artifact_refs where job_id = %s", (job_id,)
                 )
             ]
-            conn.execute("delete from artifact_refs where job_id = %s", (job_id,))
+            conn.execute(
+                "delete from artifact_refs where job_id = %s"
+                " and not exists (select 1 from jobs where id = %s)",
+                (job_id, job_id),
+            )
             orphaned = [
                 h
                 for h in hashes

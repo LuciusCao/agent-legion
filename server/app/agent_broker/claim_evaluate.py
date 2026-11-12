@@ -3,7 +3,9 @@
 Split out of ``claim_scan.py`` for the file-size budget: given one candidate
 row (from the bounded window scan, or from the #555 batch read phase) and
 the Worker view, try to claim it — admission, the advisory-lock ladder, the
-row lock, the job re-check + execution-generation CAS, capacity enforcement.
+row lock, the job re-check + execution-generation CAS, capacity enforcement
+(the gate functions themselves live in ``claim_capacity.py``, #1158 budget
+split).
 The lock-free admission filters live in
 ``claim_admission.py`` (#555 — shared with the batch read phase, which runs
 them outside any lock window); the promote write sequence (run row / lease /
@@ -19,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker import claim_node_limit
 from server.app.agent_broker.claim_admission import admit_candidate
+from server.app.agent_broker.claim_capacity import worker_node_admits, workspace_agent_admits
 from server.app.agent_broker.claim_promote import promote_claim
 from server.app.agent_broker.claim_scan import (
     RUNNABLE_JOB_STATUSES,
@@ -138,23 +141,14 @@ def evaluate_candidate(
         state.skip_reasons["generation_stale"] += 1
         return None
 
-    # Workspace-level capacity is agent-only (batch 2 decision 2); the ws
-    # lock and the cap check are both agent-branch-only.
-    if kind != "code":
-        capacity = conn.execute(
-            "select max_concurrency from workspace_agent_capacities where workspace_id=%s",
-            (selected["workspace_id"],),
-        ).fetchone()
-        if capacity is not None:
-            ws_active = conn.execute(
-                "select count(*) as cnt from agent_execution_requests"
-                " where workspace_id=%s and state='claimed' and kind='agent'",
-                (selected["workspace_id"],),
-            ).fetchone() or {"cnt": 0}
-            if int(ws_active["cnt"]) >= int(capacity["max_concurrency"]):
-                # Lost the race for this workspace's last slot; try the next.
-                state.skip_reasons["capacity_raced"] += 1
-                return None
+    # Capacity gates (claim_capacity.py, #1158 budget split): the
+    # workspace-level agent pool (agent-only, batch 2 decision 2) and the
+    # Worker per-node machine limit (both kinds; skip = 留队列，与
+    # capacity_full 同语义，unclaimable sweeper 不回收）。
+    if not workspace_agent_admits(conn, selected, kind, state):
+        return None
+    if not worker_node_admits(conn, worker_id, selected, view, state):
+        return None
 
     # Node-level concurrency limit for remote code claims (issue #1149): the
     # limit previously gated only the local code pool, so Worker-claimed code

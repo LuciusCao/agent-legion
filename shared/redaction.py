@@ -5,7 +5,7 @@ character spans) instead of returning rewritten text. Callers that cut text
 need the positions: ``shared/pi_events.py`` must keep a lookback region out
 of its output and widen its cut to the start of any secret straddling it,
 neither of which is possible behind a text-in/text-out black box. The
-Worker-side registry (worker/upload/stderr_evidence.py) produces the spans;
+Worker-side registry (worker/upload/secret_registry.py) produces the spans;
 this module only merges and applies them. Stdlib-only (see
 ``shared/__init__.py``).
 
@@ -18,12 +18,13 @@ the spans would have matched whole. ``max_chars`` is by construction ≥ the
 longest literal the snapshot's span function can match — the lookback
 contract text-cutting callers need.
 
-#842: ``redact_json`` rewrites ONLY string values (keys, numbers, booleans
-and null are never touched), so the result is always valid JSON with an
-identical structure — the compressed events.jsonl stays parseable by the
+#842/#1175: ``redact_json`` rewrites string keys and values while preserving
+key order, numbers, booleans and null, so the result stays valid JSON for the
 Host renderer. Matching runs on the DECODED string (json.loads has already
 turned ``\n`` / ``\"`` / ``\u0061`` escapes into real characters), which
-covers the escaped wire form of every registered literal.
+covers the escaped wire form of every registered literal. A rewritten-key
+collision raises instead of silently overwriting an entry; output faces own
+the resulting fail-closed drop policy.
 """
 
 from __future__ import annotations
@@ -60,19 +61,28 @@ class SecretRedactor:
         return apply_spans(text, self.spans(text))
 
     def redact_json(self, value: Any) -> Any:
-        """``value`` with every nested JSON string VALUE redacted.
+        """``value`` with every nested JSON string key and value redacted.
 
-        Keys are left alone (a secret-named key like ``TOKEN`` is not
-        secret material; a secret value used as a key is a documented
-        boundary), and non-string leaves pass through untouched, so the
-        output re-serializes to the same shape.
+        Matching runs on decoded strings, key order and non-string leaves are
+        preserved, and an untouched value compares equal to the input. A key
+        collision within one object after rewriting raises ``ValueError``
+        without including the original keys: returning the dict would silently
+        overwrite an entry. Separate objects may reuse the same redacted key.
+        Span-function errors and collisions propagate to the output face,
+        whose fail-closed policy decides whether to drop the event.
         """
         if isinstance(value, str):
             return self.redact(value)
         if isinstance(value, list):
             return [self.redact_json(item) for item in value]
         if isinstance(value, dict):
-            return {key: self.redact_json(item) for key, item in value.items()}
+            redacted = {}
+            for key, item in value.items():
+                redacted_key = self.redact(key) if isinstance(key, str) else key
+                if redacted_key in redacted:
+                    raise ValueError("JSON key collision after secret redaction")
+                redacted[redacted_key] = self.redact_json(item)
+            return redacted
         return value
 
 

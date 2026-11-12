@@ -15,10 +15,10 @@ Two actors, one handshake:
   fails the same gates and raises — the request returns to pending so the
   human can fix the draft and confirm again, or cancel.
 
-Shared helpers (wire payload, expiry comparison, the draft-version token)
-live in studio_publish_request_support.py; the poll-side read (pending /
-live-confirming surfacing, the stale-claim sweeps) in
-studio_publish_request_poll.py (#429 四轮 split, file budget).
+Shared wire and draft-binding helpers live in studio_publish_request_support.py;
+read-side advisories and confirm-claim liveness have focused sibling modules;
+the poll-side read (pending / live-confirming surfacing, the stale-claim
+sweeps) is in studio_publish_request_poll.py.
 """
 
 from __future__ import annotations
@@ -31,6 +31,11 @@ from server.app.services.job_errors import (
     NotFoundError,
 )
 from server.app.services.studio_agent_tools import studio_agent_created_by
+from server.app.services.studio_publish_request_advisories import (
+    draft_warnings,
+    with_current_draft_warnings,
+)
+from server.app.services.studio_publish_request_heartbeat import confirming_claim_heartbeat
 from server.app.services.studio_publish_request_poll import poll_pending_request
 from server.app.services.studio_publish_request_support import (
     active_revision_id,
@@ -47,8 +52,6 @@ from server.app.services.workflow_draft_publish import (
     publish_workflow_draft,
     validate_workflow_draft_for_publish,
 )
-from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
-from server.app.workflows.skill_repo_gate import skill_repo_publish_warnings
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -111,7 +114,7 @@ class StudioPublishRequestService:
         # computed read-side (never persisted), same list the human review
         # poll computes for the same draft.
         return with_draft_warnings(
-            iso_payload(request), self._draft_warnings(workspace_id, draft_yaml)
+            iso_payload(request), draft_warnings(self._job_db, workspace_id, draft_yaml)
         )
 
     def get_request_status(self, request_id: str, user: dict[str, Any]) -> dict[str, Any]:
@@ -121,28 +124,9 @@ class StudioPublishRequestService:
         request = self._job_db.get_publish_request(request_id)
         if request is None or not may_read_request(self._job_db, request, user):
             raise NotFoundError("Publish request not found")
-        draft = self._job_db.get_workspace_workflow_draft(request["workspace_id"])
-        warnings: list[str] = []
-        if draft is not None:
-            warnings = self._draft_warnings(request["workspace_id"], str(draft["definition_yaml"]))
-        return with_draft_warnings(iso_payload(request), warnings)
-
-    def _draft_warnings(self, workspace_id: str, draft_yaml: str) -> list[str]:
-        """#542 read-side advisory: agent-node skills without a machine
-        contract. Never blocks anything — a draft that fails to parse here
-        has no agent nodes to warn about (and could not have been requested
-        in the first place)."""
-        try:
-            definition = workflow_definition_from_yaml_string(draft_yaml)
-        except Exception:
-            # #204 broad-except audit: display-only advisory enrichment on
-            # a best-effort basis — a draft this malformed would have been
-            # rejected by request_publish's full validation, so the only
-            # way here is a concurrent edit racing the read. No warnings
-            # (an empty list) is the honest degradation; the error channel
-            # stays with the publish validation itself.
-            return []
-        return skill_repo_publish_warnings(definition, workspace_id, self._job_db)
+        return with_current_draft_warnings(
+            self._job_db, request["workspace_id"], iso_payload(request)
+        )
 
     # -- human side (Studio endpoints) ------------------------------------
 
@@ -159,13 +143,7 @@ class StudioPublishRequestService:
         request = poll_pending_request(self._job_db, workspace_id)
         if request is None:
             return None
-        draft = self._job_db.get_workspace_workflow_draft(workspace_id)
-        warnings = (
-            self._draft_warnings(workspace_id, str(draft["definition_yaml"]))
-            if draft is not None
-            else []
-        )
-        return with_draft_warnings(request, warnings)
+        return with_current_draft_warnings(self._job_db, workspace_id, request)
 
     def confirm(self, workspace_id: str, request_id: str) -> dict[str, Any]:
         """Human confirm: publish the draft through the manual-publish gates.
@@ -192,6 +170,11 @@ class StudioPublishRequestService:
         that landed must be recorded as confirmed, never denied by a TTL
         that expired mid-publish. The ``status='confirming'`` predicate
         alone still guards double-resolution.
+
+        #464: everything after the claim (gates, the before/after probes,
+        the publish, the resolve) runs inside a claimed_at heartbeat window
+        so a legitimately slow publish is never flipped to ``expired`` by
+        the stale-confirming sweep while it is still executing.
         """
         draft = self._job_db.get_workspace_workflow_draft(workspace_id)
         if draft is None:
@@ -209,73 +192,87 @@ class StudioPublishRequestService:
             # for the drifted-draft case (P1-3) and 404 otherwise.
             refuse_stale_draft_claim(self._job_db, workspace_id, request_id, draft_yaml)
             raise NotFoundError("Publish request not found or already resolved")
+        # #464：执行期心跳续租（契约见 confirming_claim_heartbeat）——包住
+        # 门禁+before 探测+publish+after 探测+resolve 全程：publish 返回后
+        # 的探测与落账同样吃 DB 锁/慢存储，窗口不续到 resolve 会重现
+        # 「发布成功但响应 expired」；慢发布不再被 300s 谓词误回收。
+        body_entered = False
         try:
-            # The key-match guard is a publish gate (422): replay it here so
-            # the confirm action is gate-equivalent to the manual publish
-            # button.
-            require_draft_workflow_key_match(self._job_db, workspace_id, draft_yaml)
-            active_before = active_revision_id(self._job_db, workspace_id)
-            valid, errors = publish_workflow_draft(
-                self._job_db,
-                workspace_id,
-                draft_yaml,
-                self._settings.executor_runtime.workflows.custom_nodes_enabled,
-            )
-        except Exception:
-            # #204 broad-except audit (#429 四轮 P1): the try block spans the
-            # full publish pipeline — its failure modes are NOT enumerable
-            # (JobServiceError gates, but also a DB drop surfacing as a bare
-            # psycopg/OS error, or a process kill between claim and resolve).
-            # Every one of them must roll the row back to pending: a
-            # ``confirming`` row left behind is invisible to the pending read,
-            # untouchable by cancel/supersede, and the create guard 409s all
-            # later requests — a permanent dead end for the workspace. The
-            # original exception is re-raised after the rollback (the caller
-            # still sees the real failure); the stale-confirming TTL sweep
-            # (claimed_at) is the backstop when even the rollback cannot run.
-            try:
-                self._job_db.resolve_publish_request(request_id, status="pending")
-            except Exception:
-                # #204 broad-except audit: best-effort rollback of an already-
-                # failed confirm. Swallowing the secondary error (logged) is
-                # deliberate: raising IT would mask the original publish
-                # failure, and there is no caller state left to recover — the
-                # stale-confirming sweep is the guaranteed eventual cleanup.
-                logger.exception(
-                    "confirm rollback to pending failed for publish request %s"
-                    " (workspace %s); the stale-confirming sweep will recover it",
+            with confirming_claim_heartbeat(self._job_db, request_id):
+                body_entered = True
+                try:
+                    # The key-match guard is a publish gate (422): replay it here so
+                    # the confirm action is gate-equivalent to the manual publish
+                    # button.
+                    require_draft_workflow_key_match(self._job_db, workspace_id, draft_yaml)
+                    active_before = active_revision_id(self._job_db, workspace_id)
+                    valid, errors = publish_workflow_draft(
+                        self._job_db,
+                        workspace_id,
+                        draft_yaml,
+                        self._settings.executor_runtime.workflows.custom_nodes_enabled,
+                    )
+                except Exception:
+                    # #204 broad-except audit (#429 四轮 P1): the try block spans the
+                    # full publish pipeline — its failure modes are NOT enumerable
+                    # (JobServiceError gates, but also a DB drop surfacing as a bare
+                    # psycopg/OS error, or a process kill between claim and resolve).
+                    # Every one of them must roll the row back to pending. The
+                    # original exception is re-raised after the rollback (the caller
+                    # still sees the real failure).
+                    self._rollback_claim_to_pending(workspace_id, request_id)
+                    raise
+                if not valid:
+                    # Publish refused (draft drifted after the agent's request): the
+                    # request returns to pending — the human can fix the draft and
+                    # confirm again, or cancel. Never resolve on a failed publish.
+                    self._rollback_claim_to_pending(workspace_id, request_id)
+                    raise ConflictError("Publish validation failed: " + "; ".join(errors[:5]))
+                active_after = active_revision_id(self._job_db, workspace_id)
+                produced_revision = active_after is not None and active_after != active_before
+                # Known limitation (#429 二轮复审，不修，注释记录): the before/after
+                # double probe can misattribute a revision that a concurrent manual
+                # publish created between the two probes — this request would record
+                # that foreign revision as its own result_revision_id. The window is
+                # the publish call's duration and requires a concurrent human publish
+                # of the same workspace; the effect is a mislabeled receipt, not data
+                # corruption. Fixing it needs a publish call that returns the revision
+                # it created, which is the deferred follow-up.
+                resolved = self._job_db.resolve_publish_request(
                     request_id,
-                    workspace_id,
+                    status="confirmed",
+                    # result_revision_id is non-null only when the publish created a
+                    # NEW revision; a runtime-only in-place save updates the existing
+                    # revision's config without a new version (#429), and the field
+                    # must say so instead of echoing the unchanged revision id.
+                    result_revision_id=active_after if produced_revision else None,
                 )
+                if resolved is None:
+                    resolved = self._resolve_lost_race(request_id)
+                return iso_payload(resolved)
+        except Exception:
+            # #204 broad-except audit: this outer except covers the heartbeat
+            # context's __enter__/__exit__ — thread.start() hitting the
+            # process thread limit is the known case (RuntimeError), but the
+            # context manager is a boundary whose failure surface is not
+            # enumerable. Whether the claim rolls back is decided by
+            # body_entered, not by where the exception came from: an enter
+            # failure means the publish never ran (roll back, below); a
+            # hypothetical exit failure could fire AFTER the publish landed,
+            # and body_entered=True correctly skips the rollback either way.
+            # The caller always sees the original exception (re-raised below).
+            # #1256 codex P2: the claim (pending → confirming) is already
+            # committed when __enter__ fails before yield, so the body's inner
+            # rollback never executes — without this path the row would sit
+            # confirming (uncancellable, 409ing every new request) until the
+            # 300s sweep. body_entered distinguishes the sources: body
+            # exceptions were already rolled back by the inner except, and the
+            # resolve step's failures deliberately stay OUT of rollback (the
+            # publish already landed; pending would invite a double publish —
+            # pinned by test_confirm_resolve_failure_keeps_confirming_not_pending).
+            if not body_entered:
+                self._rollback_claim_to_pending(workspace_id, request_id)
             raise
-        if not valid:
-            # Publish refused (draft drifted after the agent's request): the
-            # request returns to pending — the human can fix the draft and
-            # confirm again, or cancel. Never resolve on a failed publish.
-            self._job_db.resolve_publish_request(request_id, status="pending")
-            raise ConflictError("Publish validation failed: " + "; ".join(errors[:5]))
-        active_after = active_revision_id(self._job_db, workspace_id)
-        produced_revision = active_after is not None and active_after != active_before
-        # Known limitation (#429 二轮复审，不修，注释记录): the before/after
-        # double probe can misattribute a revision that a concurrent manual
-        # publish created between the two probes — this request would record
-        # that foreign revision as its own result_revision_id. The window is
-        # the publish call's duration and requires a concurrent human publish
-        # of the same workspace; the effect is a mislabeled receipt, not data
-        # corruption. Fixing it needs a publish call that returns the revision
-        # it created, which is the deferred follow-up.
-        resolved = self._job_db.resolve_publish_request(
-            request_id,
-            status="confirmed",
-            # result_revision_id is non-null only when the publish created a
-            # NEW revision; a runtime-only in-place save updates the existing
-            # revision's config without a new version (#429), and the field
-            # must say so instead of echoing the unchanged revision id.
-            result_revision_id=active_after if produced_revision else None,
-        )
-        if resolved is None:
-            resolved = self._resolve_lost_race(request_id)
-        return iso_payload(resolved)
 
     def cancel(self, workspace_id: str, request_id: str) -> dict[str, Any]:
         """Human cancel: the request lands ``rejected``; the agent keeps its
@@ -318,6 +315,30 @@ class StudioPublishRequestService:
         return iso_payload(resolved)
 
     # -- internals ---------------------------------------------------------
+
+    def _rollback_claim_to_pending(self, workspace_id: str, request_id: str) -> None:
+        """Best-effort rollback of a claimed (``confirming``) request to
+        ``pending`` when the guarded section failed BEFORE any publish
+        effect (pipeline failure, or the heartbeat thread failing to start —
+        #1256 codex P2). A ``confirming`` row left behind is invisible to
+        the pending read, untouchable by cancel/supersede, and wedges every
+        later request behind the confirming guard — a permanent dead end for
+        the workspace. The stale-confirming TTL sweep (claimed_at) is the
+        backstop when even this rollback cannot run."""
+        try:
+            self._job_db.resolve_publish_request(request_id, status="pending")
+        except Exception:
+            # #204 broad-except audit: best-effort rollback of an already-
+            # failed confirm. Swallowing the secondary error (logged) is
+            # deliberate: raising IT would mask the original failure, and
+            # there is no caller state left to recover — the stale-confirming
+            # sweep is the guaranteed eventual cleanup.
+            logger.exception(
+                "confirm rollback to pending failed for publish request %s"
+                " (workspace %s); the stale-confirming sweep will recover it",
+                request_id,
+                workspace_id,
+            )
 
     def _resolve_lost_race(self, request_id: str) -> dict[str, Any]:
         """The confirm's publish landed but its resolve matched no

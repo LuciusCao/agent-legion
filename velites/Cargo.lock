@@ -1747,7 +1747,7 @@ dependencies = [
 
 [[package]]
 name = "velites"
-version = "0.5.8"
+version = "0.5.11"
 dependencies = [
  "anyhow",
  "clap",

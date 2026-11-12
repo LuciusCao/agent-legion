@@ -3,7 +3,10 @@
   align-items: center;
   gap: 4px;
   width: 200px;
-  flex-shrink: 0;
+  /* #1335：窄面板下允许收缩（紧凑判定随实测宽度动态切换），
+     空间充足时保持 200px 不变。 */
+  flex-shrink: 1;
+  min-width: 96px;
   padding: 4px 0;
 }
 

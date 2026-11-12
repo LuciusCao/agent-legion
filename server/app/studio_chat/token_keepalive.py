@@ -33,7 +33,7 @@ TOKEN_INVALIDATED_DETAIL = (
     "点「继续对话」重建工具通道即可恢复，会话上下文将保留。"
 )
 # A checked-live token must outlive the current turn: the threshold is the
-# turn-duration ceiling plus grace, NOT the turn-start 30min one (#411 review).
+# turn-duration ceiling plus grace, NOT the turn-start 4h one (#411 review).
 _KEEPALIVE_RENEW_THRESHOLD = timedelta(seconds=PROMPT_TIMEOUT_SECONDS + 300)
 
 

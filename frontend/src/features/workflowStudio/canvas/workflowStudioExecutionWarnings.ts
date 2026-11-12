@@ -25,6 +25,9 @@ type NodeExecution = NonNullable<WorkflowNodeRecord['execution']>
  * 草稿节点 execution 还原 + 顶层默认合并（节点值优先；start 节点豁免，
  * prompt 仅节点级——对齐后端 loader.merge_execution_defaults）。节点未
  * 声明且默认全空时返回 undefined，保持记录形状与未配置时一致。
+ * runtime 同样还原（#1180 r3 复审：漏丢该键会让草稿画布的 agent·runtime
+ * 类型徽标恒无 runtime）：顶层 runtime 默认只达 agent 节点（code 节点
+ * 携带会让快照重载失败），空值不出键，保持记录形状最小。
  */
 export function mergeNodeExecution(
   node: WorkflowYamlNode,
@@ -38,22 +41,29 @@ export function mergeNodeExecution(
     prompt: asConfigValue(declared?.prompt),
     prompt_mode: asConfigValue(declared?.prompt_mode),
   }
+  // #933：节点声明优先；顶层 runtime 默认只达 agent 节点。
+  const runtime =
+    asConfigValue(declared?.runtime) ||
+    (node.type === 'agent' ? asConfigValue(defaults.runtime) : '')
   // 存在性判断同样走归一值：junk defaults（如 `{provider: 1}`）视为无默认。
   const hasDefaults =
     asConfigValue(defaults.provider) ||
     asConfigValue(defaults.model) ||
-    asConfigValue(defaults.thinking)
+    asConfigValue(defaults.thinking) ||
+    asConfigValue(defaults.runtime)
+  const withRuntime = (execution: NodeExecution): NodeExecution =>
+    runtime ? { ...execution, runtime } : execution
   if (node.type === 'start' || !hasDefaults) {
-    return declared ? values : undefined
+    return declared ? withRuntime(values) : undefined
   }
-  return {
+  return withRuntime({
     provider: values.provider || asConfigValue(defaults.provider),
     model: values.model || asConfigValue(defaults.model),
     thinking: values.thinking || asConfigValue(defaults.thinking),
     prompt: values.prompt,
     // #513：模式仅节点级（对齐后端 loader：顶层默认不合并该键）。
     prompt_mode: values.prompt_mode,
-  }
+  })
 }
 
 /** dispatch 必填键（EXEC-RUNTIME-DISPATCH-001）；thinking 可选，不进警告。 */

@@ -4,7 +4,8 @@ A scoped token minted for a studio chat run authenticates as the initiating
 user through the Bearer channel, but every effecting endpoint — workflow
 publish; node code publish/rollback/archive; agent and executor definition
 publish/rollback/archive; job lifecycle and execution triggers (delete,
-rerun, run-to, continue, batch intake, workflow upgrade, replay); workspace,
+rerun, run-to, continue, batch intake, workflow upgrade, replay, batch-op
+archive); workspace,
 secret, package, member and settings writes; worker pause/resume — mounts
 reject_studio_agent_scope and must refuse it with 403, and require_admin
 refuses scoped identities outright. Studio chat effecting endpoints (session
@@ -94,8 +95,19 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-run-to", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-pause", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-resume", None),
+    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-approve", None),
+    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-reject", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/rerun-by-failure", None),
     ("POST", "/api/workspaces/{workspace_id}/job-batches", None),
+    # M61 task-center manual archive: idempotent user write on the batch-op
+    # card, guarded like every other effecting workspace write.
+    ("POST", "/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/archive", None),
+    ("POST", "/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/pause", None),
+    ("POST", "/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/resume", None),
+    ("POST", "/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/cancel", None),
+    # #1358 retry-failed requeue: effecting write (enqueues a new operation),
+    # router-level reject_studio_agent_scope like archive.
+    ("POST", "/api/workspaces/{workspace_id}/job-batch-operations/{op_id}/retry-failed", None),
     # Run creation from items (materials-and-runs design §4) moved to
     # require_workspace_api_intake (#626) — it still refuses studio-agent
     # scopes (same 403), but admits the workspace API intake token; pinned
@@ -171,6 +183,19 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     # Context push (Studio node selection): the agent reads it back via
     # get_studio_context, so a scoped token must not rewrite its own context.
     ("PUT", f"{_CHAT}/sessions/{{session_id}}/context", {"selected_node_key": "n"}),
+    # Workflow runtime channel (M47): save and rollback mount
+    # reject_studio_agent_scope like the draft PUT — runtime config mutates
+    # the active revision in place, so it stays human-only.
+    (
+        "PATCH",
+        "/api/workspaces/{workspace_id}/workflow-runtime",
+        {"definition_yaml": _DRAFT_YAML},
+    ),
+    (
+        "POST",
+        "/api/workspaces/{workspace_id}/workflow-runtime/rollback",
+        {"version": 1},
+    ),
     # Shared-material propagation (#673): commits + tags local skill repos —
     # an effecting write for full sessions (the UI); scoped tokens use their
     # own scoped tool endpoint (exempt below), never this one.
@@ -238,6 +263,19 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     # scoped identity except the workspace API token on its OWN workspace;
     # studio-agent scopes get the same 403 reject_studio_agent_scope gave.
     ("POST", "/api/workspaces/{workspace_id}/runs"): "api intake channel guard",
+    # #1117 runs-async control plane: same require_workspace_api_intake guard as
+    # POST /runs — the verbs only steer the feeder (stop/resume feeding); the
+    # already-created jobs stay managed via the guarded job batch ops.
+    ("POST", "/api/workspaces/{workspace_id}/runs/{run_id}/pause"): "api intake channel guard",
+    ("POST", "/api/workspaces/{workspace_id}/runs/{run_id}/resume"): "api intake channel guard",
+    ("POST", "/api/workspaces/{workspace_id}/runs/{run_id}/cancel"): "api intake channel guard",
+    # #1157 phase3 task center: manual archive mounts the same
+    # require_workspace_api_intake guard as the #1117 control plane (part of
+    # the #626 machine loop: submit → poll → cancel → archive).
+    (
+        "POST",
+        "/api/workspaces/{workspace_id}/run-batches/{run_id}/archive",
+    ): "api intake channel guard",
     # Node prompt preview: read-only render, persists nothing.
     ("POST", "/api/workspaces/{workspace_id}/workflow/node-prompt-preview"): "preview only",
     # Scoped-only tool surface (require_studio_agent_scope): these endpoints
@@ -350,6 +388,7 @@ _PATH_PARAM_VALUES = {
     "request_id": "request-x",
     "material_id": "mat-x",
     "bundle_id": "bundle-x",
+    "op_id": "op-x",
 }
 
 

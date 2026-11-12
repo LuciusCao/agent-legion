@@ -14,7 +14,7 @@ import pytest
 from fastapi import HTTPException
 
 from server.app.routes.job_http import raise_job_http_error
-from server.app.services.job_errors import ConflictError
+from server.app.services.job_errors import ConflictError, InvalidOperationError
 from server.app.studio_chat.session_orphan import (
     ORPHAN_ERROR_DETAIL,
     SESSION_INTERRUPTED_CODE,
@@ -78,11 +78,14 @@ def test_interrupted_error_maps_to_409_with_payload_detail() -> None:
 
 
 def test_send_to_already_errored_session_does_not_restamp(chat, job_db) -> None:
+    """error 行无 runtime：#1238 六轮起发送会尝试自动 resume（可恢复态），
+    本用例的 agent 未注册 → preflight 拒绝且零写入——原有 error_detail
+    不被覆盖、时间线不变、无二次 spawn。"""
     service, _bus, _register, workspace_id, user_id = chat
     sid = _orphan(job_db, workspace_id, user_id, "error")
     job_db.update_studio_chat_session(sid, error_detail="agent process exited")
 
-    with pytest.raises(StudioChatSessionInterruptedError):
+    with pytest.raises(InvalidOperationError, match="Unknown studio agent"):
         service.send_message(sid, workspace_id, "hi")
 
     assert job_db.get_studio_chat_session(sid)["error_detail"] == "agent process exited"
@@ -132,9 +135,12 @@ def test_resume_claiming_between_recheck_and_append_gets_no_stale_error(
     calls = 0
 
     def runtime(session_id: str):
+        # #1121 P2-2: the send now re-reads through send_resume's lock first —
+        # call 1 = admission top, 2 = the ensure re-read, 3 = the projection's
+        # post-write recheck.
         nonlocal calls
         calls += 1
-        if calls == 2:  # post-write recheck: a resume claims right after it
+        if calls == 3:  # post-write recheck: a resume claims right after it
             assert job_db.claim_studio_chat_resume(session_id, max_active=32)
         return None
 
@@ -143,7 +149,7 @@ def test_resume_claiming_between_recheck_and_append_gets_no_stale_error(
     with pytest.raises(StudioChatSessionInterruptedError):
         service.send_message(sid, workspace_id, "hi")
 
-    assert calls == 2
+    assert calls == 3
     assert job_db.get_studio_chat_session(sid)["status"] == "starting"
     assert job_db.list_studio_chat_messages(sid) == []
     assert _session_publishes(bus, sid) == []
@@ -158,7 +164,9 @@ def test_runtime_registered_during_projection_rolls_the_stamp_back(
     service, bus, _register, workspace_id, user_id = chat
     sid = _orphan(job_db, workspace_id, user_id, "running")
     rt = _StubRuntime()
-    calls = iter([None, rt, rt])  # admission sees none; post-write recheck sees one
+    # #1121 P2-2: admission top + the ensure re-read both see no runtime; the
+    # projection's post-write recheck (call 3) is where the runtime appears.
+    calls = iter([None, None, rt, rt])
     monkeypatch.setattr(service, "runtime", lambda session_id: next(calls))
 
     with pytest.raises(ConflictError) as caught:
@@ -184,7 +192,8 @@ def test_rollback_never_undoes_a_new_runtime_real_failure(chat, job_db, monkeypa
     def runtime(session_id: str):
         nonlocal calls
         calls += 1
-        if calls == 2:  # recheck sees the new runtime, which then dies
+        # #1121 P2-2: 1 = admission top, 2 = ensure re-read, 3 = projection recheck.
+        if calls == 3:  # recheck sees the new runtime, which then dies
             job_db.update_studio_chat_session(
                 session_id, status="error", error_detail="agent process exited"
             )
@@ -199,16 +208,22 @@ def test_rollback_never_undoes_a_new_runtime_real_failure(chat, job_db, monkeypa
     row = job_db.get_studio_chat_session(sid)
     assert row["status"] == "error"
     assert row["error_detail"] == "agent process exited"
+    # That failure is the runtime's own projection (on_error appends and
+    # publishes it); the orphan error is never stacked on top (#1095).
+    assert job_db.list_studio_chat_messages(sid) == []
 
 
+@pytest.mark.parametrize("gone", ["closed", "unregistered"])
 def test_rollback_skips_a_new_runtime_that_exited_under_the_orphan_stamp(
-    chat, job_db, monkeypatch
+    chat, job_db, monkeypatch, gone
 ) -> None:
     """on_exit of the resumed runtime skips its own write while the row
     still carries this request's orphan stamp (status error) and only tears
     down; the rollback must see that generation gone/closed and leave the row
-    on error rather than resurrect idle/running with no runtime behind it."""
-    service, _bus, _register, workspace_id, user_id = chat
+    on error rather than resurrect idle/running with no runtime behind it.
+    Nobody else projects that error, so this request appends the event,
+    publishes the snapshot and answers the structured 409 (#1095)."""
+    service, bus, _register, workspace_id, user_id = chat
     sid = _orphan(job_db, workspace_id, user_id, "running")
     rt = _StubRuntime()
     calls = 0
@@ -216,19 +231,102 @@ def test_rollback_skips_a_new_runtime_that_exited_under_the_orphan_stamp(
     def runtime(session_id: str):
         nonlocal calls
         calls += 1
-        if calls == 2:  # recheck sees the new runtime, which then exits
-            rt.closed = True  # on_exit teardown: closed + unregistered
+        # #1121 P2-2: 1 = admission top, 2 = ensure re-read, 3 = projection recheck.
+        if calls == 3:  # recheck sees the new runtime, which then exits
+            rt.closed = gone == "closed"  # on_exit teardown: closed, then unregistered
             return rt
+        if calls == 4 and gone == "closed":
+            return rt  # in-lock recheck: still registered but closed
         return None
 
     monkeypatch.setattr(service, "runtime", runtime)
 
-    with pytest.raises(ConflictError):
+    with pytest.raises(StudioChatSessionInterruptedError) as caught:
         service.send_message(sid, workspace_id, "hi")
 
+    assert calls == 4
+    assert caught.value.payload["session_id"] == sid
     row = job_db.get_studio_chat_session(sid)
     assert row["status"] == "error"
     assert row["error_detail"] == ORPHAN_ERROR_DETAIL
+    events = [m["content"] for m in job_db.list_studio_chat_messages(sid) if m["kind"] == "status"]
+    assert events == [{"event": "error", "detail": ORPHAN_ERROR_DETAIL}]
+    assert _session_publishes(bus, sid)[-1]["status"] == "error"
+
+
+def test_gone_generation_replaced_by_a_new_resume_gets_no_stale_error(
+    chat, job_db, monkeypatch
+) -> None:
+    """The exited generation's slot can already be taken by a further resume
+    (row claimed error -> starting, new runtime registered) when the lock is
+    taken: the completed projection's live-guarded append must not push the
+    orphan error into that resumed session."""
+    service, bus, _register, workspace_id, user_id = chat
+    sid = _orphan(job_db, workspace_id, user_id, "running")
+    rt, replacement = _StubRuntime(), _StubRuntime()
+    calls = 0
+
+    def runtime(session_id: str):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            return rt
+        if calls == 4:  # in-lock recheck: rt exited, a further resume took over
+            assert job_db.claim_studio_chat_resume(session_id, max_active=32)
+            return replacement
+        return None
+
+    monkeypatch.setattr(service, "runtime", runtime)
+
+    with pytest.raises(StudioChatSessionInterruptedError):
+        service.send_message(sid, workspace_id, "hi")
+
+    assert job_db.get_studio_chat_session(sid)["status"] == "starting"
+    assert job_db.list_studio_chat_messages(sid) == []
+    assert _session_publishes(bus, sid) == []
+
+
+@pytest.mark.parametrize("recheck", ["none", "gone"])
+def test_orphan_event_is_pinned_to_its_own_stamp_at_append(
+    chat, job_db, monkeypatch, recheck
+) -> None:
+    """Between the generation verdict and the append, a further resume can
+    claim the row and its new runtime fail back to error with its own detail
+    (its on_error already projected that). The orphan event's append is
+    pinned atomically to this request's stamp, so it never lands on top
+    (#1207 codex P2)."""
+    service, bus, _register, workspace_id, user_id = chat
+    sid = _orphan(job_db, workspace_id, user_id, "running")
+    rt = _StubRuntime()
+    calls = 0
+
+    def runtime(session_id: str):
+        nonlocal calls
+        calls += 1
+        if calls == 3 and recheck == "gone":
+            rt.closed = True
+            return rt
+        return None
+
+    real_append = service.store.append_message_if_live
+
+    def append_after_resume_failed(session_id, *args, **kwargs):
+        assert job_db.claim_studio_chat_resume(session_id, max_active=32)
+        job_db.update_studio_chat_session(
+            session_id, status="error", error_detail="agent process exited"
+        )
+        return real_append(session_id, *args, **kwargs)
+
+    monkeypatch.setattr(service, "runtime", runtime)
+    monkeypatch.setattr(service.store, "append_message_if_live", append_after_resume_failed)
+
+    with pytest.raises(StudioChatSessionInterruptedError):
+        service.send_message(sid, workspace_id, "hi")
+
+    row = job_db.get_studio_chat_session(sid)
+    assert (row["status"], row["error_detail"]) == ("error", "agent process exited")
+    assert job_db.list_studio_chat_messages(sid) == []
+    assert _session_publishes(bus, sid) == []
 
 
 def test_orphan_projected_by_send_is_resumable(chat, job_db) -> None:

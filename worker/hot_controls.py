@@ -19,6 +19,7 @@ from yaml import YAMLError
 from worker.claim_batch import load_claim_batch_limit
 from worker.ramp_up import apply_ramp_hot_reload, load_ramp_up_controls
 from worker.runtime import controls as runtime_controls
+from worker.runtime.preflight import resource_envelope_error
 from worker.transfer_controls import load_transfer_controls
 
 # code 容量 0→>0 热开被拒（缺沙箱包装器）的一次性提示文案；守卫语义见
@@ -40,6 +41,8 @@ class DynamicControls:
     transfer: Any
     claim_batch_limit: int
     ramp: Any
+    # #1158 节点级并发上限：每次 claim 随声明上达 Host（下一次 claim 生效）。
+    node_limits: dict[str, int] | None = None
     code_hot_reject_logged: bool = False
 
 
@@ -59,8 +62,15 @@ def reload_controls(
         new_transfer = load_transfer_controls(config_path)
         new_ramp_controls = load_ramp_up_controls(config_path)
         new_claim_batch_limit = load_claim_batch_limit(config_path)
+        new_node_limits = runtime_controls.load_node_concurrency_limits(config_path)
     except (OSError, ValueError, YAMLError) as exc:
         return None, str(exc)
+    if error := resource_envelope_error(
+        agent=max_concurrency,
+        code=new_code_concurrency,
+        upload=new_transfer.upload_max_concurrency,
+    ):
+        return None, error
     max_code_concurrency, code_rejected = runtime_controls.hot_code_concurrency(
         current.max_code_concurrency, new_code_concurrency
     )
@@ -76,5 +86,6 @@ def reload_controls(
         transfer=new_transfer,
         claim_batch_limit=new_claim_batch_limit,
         ramp=apply_ramp_hot_reload(current.ramp, new_ramp_controls, log),
+        node_limits=new_node_limits,
         code_hot_reject_logged=code_rejected,
     ), None

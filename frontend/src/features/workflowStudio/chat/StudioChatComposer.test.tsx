@@ -80,7 +80,7 @@ function record(
 function renderComposer(
   overrides?: Partial<Parameters<typeof StudioChatComposer>[0]>
 ) {
-  const onSend = vi.fn()
+  const onSend = vi.fn().mockResolvedValue(true)
   render(
     <StudioChatComposer
       busy={false}
@@ -137,6 +137,41 @@ describe('StudioChatComposer input', () => {
       screen.queryByRole('button', { name: 'Agent 权限模式' })
     ).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '发送' })).toBeInTheDocument()
+  })
+
+  it('clears the input once the send is accepted (#1121)', async () => {
+    renderComposer()
+    const input = screen.getByLabelText('消息输入')
+    fireEvent.change(input, { target: { value: '已接纳' } })
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: false })
+    await waitFor(() => expect(input).toHaveValue(''))
+  })
+
+  it('restores the draft when the send fails (#1121)', async () => {
+    renderComposer({ onSend: vi.fn().mockResolvedValue(false) })
+    const input = screen.getByLabelText('消息输入')
+    fireEvent.change(input, { target: { value: '不能丢' } })
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: false })
+    await waitFor(() => expect(input).toHaveValue('不能丢'))
+  })
+
+  it('keeps text typed during the in-flight send when restoring a failed draft (#1121)', async () => {
+    let settle: (ok: boolean) => void = () => {}
+    renderComposer({
+      onSend: vi
+        .fn()
+        .mockImplementation(
+          () => new Promise<boolean>((resolve) => (settle = resolve))
+        ),
+    })
+    const input = screen.getByLabelText('消息输入')
+    fireEvent.change(input, { target: { value: '第一条' } })
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: false })
+    // 发送在途期间输入框已清空，用户继续打下一条。
+    await waitFor(() => expect(input).toHaveValue(''))
+    fireEvent.change(input, { target: { value: '第二条' } })
+    act(() => settle(false))
+    await waitFor(() => expect(input).toHaveValue('第一条\n第二条'))
   })
 })
 

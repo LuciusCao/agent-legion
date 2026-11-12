@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from .budget_policy import BudgetPolicy
+from .budget_policy import BudgetPolicy, per_file_ceiling_exempt_root
 
 __test__ = False
 
@@ -17,6 +17,12 @@ class BudgetInventory:
     production: tuple[str, ...]
     tests: tuple[str, ...]
     excluded: tuple[str, ...]
+    per_file_ceiling_exempt: tuple[str, ...] = ()
+
+    @property
+    def ceiling_production(self) -> tuple[str, ...]:
+        exempt = set(self.per_file_ceiling_exempt)
+        return tuple(path for path in self.production if path not in exempt)
 
 
 def build_budget_inventory(root: Path, policy: BudgetPolicy) -> tuple[BudgetInventory, list[str]]:
@@ -73,10 +79,18 @@ def build_budget_inventory(root: Path, policy: BudgetPolicy) -> tuple[BudgetInve
         if not matched:
             errors.append(f"exclude glob matched no production file: {exclude_glob}")
 
+    per_file_exempt_paths: set[str] = set()
+    for exempt_root in policy.per_file_ceiling_exempt_roots:
+        matched_paths = {path for path in production_paths if path.startswith(exempt_root + "/")}
+        if not matched_paths:
+            errors.append(f"per-file ceiling exempt root matched no production file: {exempt_root}")
+        per_file_exempt_paths.update(matched_paths)
+
     inventory = BudgetInventory(
         production=tuple(sorted(production_paths)),
         tests=tuple(sorted(test_paths)),
         excluded=tuple(sorted(excluded_paths)),
+        per_file_ceiling_exempt=tuple(sorted(per_file_exempt_paths)),
     )
     return inventory, sorted(errors)
 
@@ -125,12 +139,13 @@ def _matches_glob(rel_path: str, pattern: str, *, allow_dir_prefix: bool = False
 
 
 def absolute_limit_map(policy: BudgetPolicy, production: tuple[str, ...]) -> dict[str, int]:
-    """Root max_lines overrides, only for files that root governs (prefix
-    AND extension; sibling extensions keep the global limit)."""
+    """Root max_lines overrides for files under per-file ceiling governance."""
     return {
         path: root.max_lines
         for root in policy.production_roots
         if root.max_lines is not None
         for path in production
-        if path.startswith(root.path.rstrip("/") + "/") and path.endswith(tuple(root.extensions))
+        if per_file_ceiling_exempt_root(path, policy) is None
+        and path.startswith(root.path.rstrip("/") + "/")
+        and path.endswith(tuple(root.extensions))
     }

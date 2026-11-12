@@ -68,6 +68,7 @@ const mockDetail = {
       label: '提取',
       status: 'completed',
       capability: 'extract',
+      execution_type: 'code',
       executor_id: 'code-default',
       executor_kind: 'code',
       after: [],
@@ -84,8 +85,11 @@ const mockDetail = {
       label: '生成',
       status: 'failed',
       capability: 'generate',
-      executor_id: 'pi',
-      executor_kind: 'pi',
+      // #1180/#731：agent 节点的真实投影形状（pi 词汇已退役）。
+      execution_type: 'agent',
+      executor_id: null,
+      executor_kind: null,
+      agent_id: 'generate',
       after: ['extract'],
       inputs: [],
       outputs: [],
@@ -99,8 +103,10 @@ const mockDetail = {
       label: '审核',
       status: 'failed',
       capability: 'review',
-      executor_id: 'pi-2',
-      executor_kind: 'pi',
+      execution_type: 'agent',
+      executor_id: null,
+      executor_kind: null,
+      agent_id: 'review',
       after: ['generate'],
       inputs: [],
       outputs: [],
@@ -145,10 +151,7 @@ function renderPageWithCache() {
   })
   return render(
     <QueryClientProvider client={client}>
-      <ReactRouterMemoryRouter
-        initialEntries={['/workspaces/ws1/jobs/j1']}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
+      <ReactRouterMemoryRouter initialEntries={['/workspaces/ws1/jobs/j1']}>
         <ActionRenderer />
         <NavigateButton to="/workspaces/ws1/jobs/j1" label="去 j1" />
         <NavigateButton to="/workspaces/ws1/jobs/j2" label="去 j2" />

@@ -1,8 +1,30 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { useLayoutEffect } from 'react'
 import { useStudioChatQueue } from './useStudioChatQueue'
 
 type HookProps = { busy: boolean; sessionKey: string | null; blocked?: boolean }
+
+/** 同步兑现的迷你 thenable（#1121 P2-2 窗口用）：then 注册回调、resolve
+ * 在同一栈帧内同步派发并按 promise 语义链式传递映射值——用它把「迟到回调」
+ * 精确放进一次 commit 的布局效应里（被动效应尚未运行的窗口）。 */
+class SyncPromise {
+  private handlers: Array<(v: boolean) => void> = []
+  then(onFulfilled: (v: boolean) => unknown): SyncPromise {
+    const next = new SyncPromise()
+    this.handlers.push((v) => {
+      const mapped = onFulfilled(v)
+      next.resolve(typeof mapped === 'boolean' ? mapped : v)
+    })
+    return next
+  }
+  get pending(): boolean {
+    return this.handlers.length > 0
+  }
+  resolve(v: boolean) {
+    this.handlers.splice(0).forEach((h) => h(v))
+  }
+}
 
 function renderQueue(
   send: (text: string) => Promise<boolean>,
@@ -24,16 +46,112 @@ describe('useStudioChatQueue', () => {
   it('sends immediately when idle', () => {
     const send = vi.fn().mockResolvedValue(true)
     const { result } = renderQueue(send, { busy: false, sessionKey: 's1' })
-    act(() => result.current.submit('你好'))
+    act(() => {
+      void result.current.submit('你好')
+    })
     expect(send).toHaveBeenCalledWith('你好')
     expect(result.current.queuedMessages).toEqual([])
+  })
+
+  it('resolves true immediately for an enqueued message (#1121: 草稿已由队列保留)', async () => {
+    const send = vi.fn().mockResolvedValue(true)
+    const { result } = renderQueue(send, { busy: true, sessionKey: 's1' })
+    let accepted: boolean | undefined
+    act(() => {
+      void result.current.submit('排队').then((ok) => (accepted = ok))
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(accepted).toBe(true)
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('suppresses the failure signal when the session switched mid-flight (#1121 codex P2)', async () => {
+    // 发送在旧会话在途、落定前切到新会话：迟到的 false（无论是真失败还是
+    // #962 归属守卫丢弃的已成功发送）都改判 true——composer 不得把旧会话
+    // 文本恢复进新会话输入框（跨会话误发/重复发送风险）。
+    let resolveSend: (sent: boolean) => void = () => {}
+    const send = vi.fn().mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    const { result, rerender } = renderQueue(send, {
+      busy: false,
+      sessionKey: 's1',
+    })
+    let settled: boolean | undefined
+    act(() => {
+      void result.current.submit('旧会话的消息').then((ok) => (settled = ok))
+    })
+    rerender({ busy: false, sessionKey: 's2' })
+    await act(async () => {
+      resolveSend(false)
+    })
+    expect(settled).toBe(true)
+  })
+
+  it('resolves false for a same-session failure so the draft is restored (#1121)', async () => {
+    let resolveSend: (sent: boolean) => void = () => {}
+    const send = vi.fn().mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve
+        })
+    )
+    const { result } = renderQueue(send, { busy: false, sessionKey: 's1' })
+    let settled: boolean | undefined
+    act(() => {
+      void result.current.submit('同会话失败').then((ok) => (settled = ok))
+    })
+    await act(async () => {
+      resolveSend(false)
+    })
+    expect(settled).toBe(false)
+  })
+
+  it('settles by the committed identity inside the commit→passive-effect window (#1121 codex P2-2)', () => {
+    // 同步 thenable 从 s2 commit 的布局效应里兑现：此刻被动效应尚未运行——
+    // ref 若靠被动效应同步（mutation），迟到回调读到旧身份 s1 而误恢复；
+    // 布局效应同步（修复）则读到已提交的 s2，恢复被抑制。
+    const box = new SyncPromise()
+    const send = vi.fn().mockReturnValue(box as unknown as Promise<boolean>)
+    let settled: boolean | undefined
+    const { result, rerender } = renderHook(
+      (props: HookProps) => {
+        const queue = useStudioChatQueue(
+          props.busy,
+          props.blocked ?? false,
+          props.sessionKey,
+          send
+        )
+        // 与 queue 同一 commit 的布局效应（按调用序排在 queue 内部布局效应
+        // 之后触发兑现）。
+        useLayoutEffect(() => {
+          if (props.sessionKey === 's2' && box.pending) box.resolve(false)
+        })
+        return queue
+      },
+      { initialProps: { busy: false, sessionKey: 's1' } }
+    )
+    act(() => {
+      void result.current.submit('旧会话的消息').then((ok) => (settled = ok))
+    })
+    rerender({ busy: false, sessionKey: 's2' })
+    expect(settled).toBe(true)
   })
 
   it('enqueues while busy without sending', () => {
     const send = vi.fn().mockResolvedValue(true)
     const { result } = renderQueue(send, { busy: true, sessionKey: 's1' })
-    act(() => result.current.submit('第一条'))
-    act(() => result.current.submit('第二条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
+    act(() => {
+      void result.current.submit('第二条')
+    })
     expect(send).not.toHaveBeenCalled()
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
       '第一条',
@@ -47,8 +165,12 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
-    act(() => result.current.submit('第二条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
+    act(() => {
+      void result.current.submit('第二条')
+    })
 
     rerender({ busy: false, sessionKey: 's1' })
     await waitFor(() => expect(send).toHaveBeenCalledWith('第一条'))
@@ -72,7 +194,9 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
     rerender({ busy: false, sessionKey: 's1' })
     await waitFor(() => expect(send).toHaveBeenCalledWith('第一条'))
     // 等 then 回调落定后断言队列未被清空。
@@ -96,10 +220,14 @@ describe('useStudioChatQueue', () => {
       busy: false,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
     expect(send).toHaveBeenCalledWith('第一条')
 
-    act(() => result.current.submit('第二条'))
+    act(() => {
+      void result.current.submit('第二条')
+    })
     expect(send).toHaveBeenCalledTimes(1)
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual(['第二条'])
 
@@ -129,11 +257,15 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
     rerender({ busy: false, sessionKey: 's1' })
     await waitFor(() => expect(send).toHaveBeenCalledWith('第一条'))
 
-    act(() => result.current.submit('第二条'))
+    act(() => {
+      void result.current.submit('第二条')
+    })
     expect(send).toHaveBeenCalledTimes(1)
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
       '第一条',
@@ -153,8 +285,12 @@ describe('useStudioChatQueue', () => {
   it('removes a queued message manually', () => {
     const send = vi.fn().mockResolvedValue(true)
     const { result } = renderQueue(send, { busy: true, sessionKey: 's1' })
-    act(() => result.current.submit('第一条'))
-    act(() => result.current.submit('第二条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
+    act(() => {
+      void result.current.submit('第二条')
+    })
     const head = result.current.queuedMessages[0]
     act(() => result.current.remove(head.id))
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual(['第二条'])
@@ -166,7 +302,9 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
     rerender({ busy: true, sessionKey: 's2' })
     expect(result.current.queuedMessages).toEqual([])
   })
@@ -177,7 +315,9 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
     // 切到空闲的新会话：busy 翻转与会话切换同帧，旧队首不得发出。
     rerender({ busy: false, sessionKey: 's2' })
     await act(async () => {
@@ -195,7 +335,9 @@ describe('useStudioChatQueue', () => {
       blocked: false,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('排队消息'))
+    act(() => {
+      void result.current.submit('排队消息')
+    })
     rerender({ busy: false, blocked: true, sessionKey: 's1' })
     await act(async () => {
       await Promise.resolve()
@@ -217,7 +359,9 @@ describe('useStudioChatQueue', () => {
       blocked: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('压缩中提交'))
+    act(() => {
+      void result.current.submit('压缩中提交')
+    })
     expect(send).not.toHaveBeenCalled()
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
       '压缩中提交',
@@ -233,7 +377,9 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('m1'))
+    act(() => {
+      void result.current.submit('m1')
+    })
     rerender({ busy: false, sessionKey: 's1' })
     await waitFor(() => expect(send).toHaveBeenCalledWith('m1'))
     await act(async () => {
@@ -242,7 +388,9 @@ describe('useStudioChatQueue', () => {
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual(['m1'])
 
     // 失败 flush 后空闲窗口的新提交：尾插，不直发。
-    act(() => result.current.submit('m2'))
+    act(() => {
+      void result.current.submit('m2')
+    })
     expect(send).toHaveBeenCalledTimes(1)
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
       'm1',
@@ -269,13 +417,17 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('m1'))
+    act(() => {
+      void result.current.submit('m1')
+    })
     rerender({ busy: false, sessionKey: 's1' })
     await waitFor(() => expect(send).toHaveBeenCalledWith('m1'))
     await act(async () => {
       await Promise.resolve()
     })
-    act(() => result.current.submit('m2'))
+    act(() => {
+      void result.current.submit('m2')
+    })
     expect(result.current.queuedMessages.map((m) => m.text)).toEqual([
       'm1',
       'm2',
@@ -296,8 +448,12 @@ describe('useStudioChatQueue', () => {
       busy: true,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('m1'))
-    act(() => result.current.submit('m2'))
+    act(() => {
+      void result.current.submit('m1')
+    })
+    act(() => {
+      void result.current.submit('m2')
+    })
 
     const head = result.current.queuedMessages[0]
     act(() => result.current.remove(head.id))
@@ -320,7 +476,9 @@ describe('useStudioChatQueue', () => {
       blocked: false,
       sessionKey: 's1',
     })
-    act(() => result.current.submit('第一条'))
+    act(() => {
+      void result.current.submit('第一条')
+    })
     rerender({ busy: false, blocked: false, sessionKey: 's1' })
     await waitFor(() => expect(send).toHaveBeenCalledWith('第一条'))
     await act(async () => {
@@ -338,5 +496,54 @@ describe('useStudioChatQueue', () => {
     rerender({ busy: false, blocked: false, sessionKey: 's1' })
     await waitFor(() => expect(send).toHaveBeenCalledTimes(2))
     expect(send).toHaveBeenLastCalledWith('第一条')
+  })
+
+  it('cancels the old session slow-send timer on session switch (#1238 codex 四轮 P2-2)', () => {
+    // queue 把 sessionKey 作为 resetKey 传给 useInFlightSend：切会话后旧发送
+    // 的慢定时器不得再把 slowSend 置真（该提示优先于新会话的恢复入口）。
+    vi.useFakeTimers()
+    try {
+      const send = vi
+        .fn()
+        .mockImplementation(() => new Promise<boolean>(() => {}))
+      const { result, rerender } = renderQueue(send, {
+        busy: false,
+        sessionKey: 's1',
+      })
+      act(() => {
+        void result.current.submit('旧会话的消息')
+      })
+      rerender({ busy: false, sessionKey: 's2' })
+      act(() => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(result.current.slowSend).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('frees direct sends of the new session from the old session in-flight send (#1238 codex 五轮)', () => {
+    // 旧会话直发永不落定时切到空闲的新会话：新会话的提交必须直发而不是
+    // 入队——旧请求的落定只改 ref 不触发渲染，入队即滞留（flush 只认
+    // busy||blocked 翻转沿）。
+    const send = vi
+      .fn()
+      .mockImplementation(() => new Promise<boolean>(() => {}))
+    const { result, rerender } = renderQueue(send, {
+      busy: false,
+      sessionKey: 's1',
+    })
+    act(() => {
+      void result.current.submit('旧会话的消息')
+    })
+    expect(send).toHaveBeenCalledTimes(1)
+    rerender({ busy: false, sessionKey: 's2' })
+    act(() => {
+      void result.current.submit('新会话的消息')
+    })
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(send).toHaveBeenLastCalledWith('新会话的消息')
+    expect(result.current.queuedMessages).toEqual([])
   })
 })

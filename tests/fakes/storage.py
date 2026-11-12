@@ -8,6 +8,8 @@
 * ``deleted``            — delete_object 删除过的 key 列表（record_deletions）。
 * ``presigned``          — presign_put 的 (key, expires) 记录。
 * ``put_expiries`` / ``get_expiries`` — presign TTL 断言（claim 注入测试）。
+* ``put_if_none_match``  — presign_put 的条件写参数记录（#1321：材料 URL 恒 "*"，
+  Worker 产物暂存恒 ""）。
 * ``presigned_gets``     — presign_get 的 key 记录（claim block 断言）。
 * ``get_response_headers`` — presign_get 签入的响应头覆盖（#739 直连头语义断言）。
 * ``opened``             — open_stream 调用计数（缓存命中断言）。
@@ -18,6 +20,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 from collections.abc import Mapping
 from typing import BinaryIO
@@ -26,6 +29,11 @@ from server.app.storage import ObjectHead
 
 # 与协议默认一致的 presign 过期秒数（不 import 私有常量，测试语义自持）。
 DEFAULT_PRESIGN_EXPIRY_SECONDS = 3600
+
+
+def etag_of(payload: bytes) -> str:
+    """Fake 的单 PUT ETag 语义：与 S3 一致取内容 MD5（去引号形态）。"""
+    return hashlib.md5(payload, usedforsecurity=False).hexdigest()
 
 
 class FakeObjectStorage:
@@ -38,16 +46,21 @@ class FakeObjectStorage:
         record_deletions: bool = True,
         fail_put: bool = False,
         fail_put_with: Exception | None = None,
+        no_etag: bool = False,
     ) -> None:
         self.objects: dict[str, bytes] = dict(objects) if objects else {}
         self.record_deletions = record_deletions
         self.fail_put = fail_put
         self.fail_put_with = fail_put_with
+        # True 时 head_object 返回空 ETag（模拟不支持/不返回 ETag 的存储，
+        # 钉 #1279 R3b 的 fail-closed）。
+        self.no_etag = no_etag
         # 可变行为开关：True 时 delete_object 抛 botocore ClientError。
         self.fail_deletes = False
         self.deleted: list[str] = []
         self.presigned: list[tuple[str, int]] = []
         self.put_expiries: list[int] = []
+        self.put_if_none_match: list[str] = []
         self.get_expiries: list[int] = []
         self.presigned_gets: list[str] = []
         self.get_response_headers: list[dict[str, str]] = []
@@ -61,9 +74,11 @@ class FakeObjectStorage:
         storage_key: str,
         size_bytes: int,
         expires_seconds: int = DEFAULT_PRESIGN_EXPIRY_SECONDS,
+        if_none_match: str = "",
     ) -> str:
         self.presigned.append((storage_key, expires_seconds))
         self.put_expiries.append(expires_seconds)
+        self.put_if_none_match.append(if_none_match)
         return f"https://s3.test/upload/{storage_key}"
 
     def presign_get(
@@ -81,11 +96,21 @@ class FakeObjectStorage:
 
     def head_object(self, storage_key: str) -> ObjectHead | None:
         payload = self.objects.get(storage_key)
-        return None if payload is None else ObjectHead(size_bytes=len(payload))
+        if payload is None:
+            return None
+        return ObjectHead(size_bytes=len(payload), etag="" if self.no_etag else etag_of(payload))
 
-    def open_stream(self, storage_key: str) -> io.BytesIO:
+    def open_stream(self, storage_key: str, *, if_match: str = "") -> io.BytesIO:
         self.opened += 1
-        return io.BytesIO(self.objects[storage_key])
+        payload = self.objects[storage_key]
+        if if_match and if_match != etag_of(payload):
+            # 与 S3 的 If-Match 不一致响应同形：412 PreconditionFailed。
+            from botocore.exceptions import ClientError
+
+            raise ClientError(
+                {"Error": {"Code": "412", "Message": "PreconditionFailed"}}, "GetObject"
+            )
+        return io.BytesIO(payload)
 
     def open_range(self, storage_key: str, start: int, end: int) -> io.BytesIO:
         # S3 Range 语义：闭区间 [start, end]；调用方已按对象 size 裁剪。

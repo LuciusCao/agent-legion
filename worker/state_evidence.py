@@ -91,7 +91,8 @@ from shared.pi_events import scan_and_compress_pi_events
 from shared.stderr_tail import AGENT_STDERR_FILENAME
 from worker._atomic import atomic_write
 from worker.state_evidence_lines import render_line
-from worker.upload.stderr_evidence import secret_snapshot, stderr_tail_for_run
+from worker.upload.secret_registry import secret_snapshot
+from worker.upload.stderr_evidence import stderr_tail_for_run
 
 if TYPE_CHECKING:
     from shared.redaction import SecretRedactor

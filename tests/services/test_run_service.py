@@ -263,6 +263,7 @@ def test_duplicate_items_are_filtered(service, job_db) -> None:
         WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_material_item("mat-1")]
     )
     assert first["created_count"] == 1
+    assert first["skipped_count"] == 0
 
     # A resubmission mixing an existing item with a fresh one keeps only the fresh.
     second = service.create_run(
@@ -271,6 +272,8 @@ def test_duplicate_items_are_filtered(service, job_db) -> None:
         items=[_material_item("mat-1"), _material_item("mat-2")],
     )
     assert second["created_count"] == 1
+    # #1157 phase0：被 dedup 过滤的已存在条目计入 skipped_count。
+    assert second["skipped_count"] == 1
     assert _fetch_job(job_db, second["job_ids"][0])["source_id"] == "mat-2"
 
     # Nothing fresh left: the whole request is rejected like legacy intake.
@@ -288,6 +291,8 @@ def test_intra_request_duplicates_create_one_job(service, job_db) -> None:
     )
 
     assert result["created_count"] == 1
+    # 请求内重复条目同样计入 skipped_count（submitted − created 恒等）。
+    assert result["skipped_count"] == 1
 
 
 def test_validation_failures_leave_no_run_behind(service_all_types, job_db) -> None:
@@ -303,25 +308,28 @@ def test_validation_failures_leave_no_run_behind(service_all_types, job_db) -> N
     assert job_db.list_job_dedup_keys(WORKSPACE_ID, WORKFLOW_KEY) == set()
 
 
-def test_intra_request_job_id_collision_leaves_no_run(service, job_db) -> None:
-    # ``col/a`` and ``col_a`` normalize to the same job id (``_job_id`` maps
-    # "/" to "_"); the collision surfaces only inside create_jobs_bulk, after
-    # the run row already committed.
+def test_intra_request_escaped_pair_creates_distinct_jobs(service, job_db) -> None:
+    # #1255: ``col/a`` and ``col_a`` used to normalize to the same job id
+    # and collide; the injective encoding makes them two distinct legal
+    # jobs in one run.
     _insert_material(job_db, WORKSPACE_ID, "col/a")
     _insert_material(job_db, WORKSPACE_ID, "col_a")
 
-    with pytest.raises(InvalidOperationError, match="Job identity collision"):
-        service.create_run(
-            WORKSPACE_ID,
-            workflow_key=WORKFLOW_KEY,
-            items=[_material_item("col/a"), _material_item("col_a")],
-        )
+    result = service.create_run(
+        WORKSPACE_ID,
+        workflow_key=WORKFLOW_KEY,
+        items=[_material_item("col/a"), _material_item("col_a")],
+    )
 
-    assert service.list_runs(WORKSPACE_ID) == []
-    assert job_db.list_job_dedup_keys(WORKSPACE_ID, WORKFLOW_KEY) == set()
+    assert result["created_count"] == 2
+    assert len(set(result["job_ids"])) == 2
+    assert job_db.list_job_dedup_keys(WORKSPACE_ID, WORKFLOW_KEY) == {
+        ("material", "col/a"),
+        ("material", "col_a"),
+    }
 
 
-def test_cross_request_job_id_collision_compensates_the_new_run(service, job_db) -> None:
+def test_cross_request_escaped_pair_creates_distinct_jobs(service, job_db) -> None:
     _insert_material(job_db, WORKSPACE_ID, "col/a")
     _insert_material(job_db, WORKSPACE_ID, "col_a")
     first = service.create_run(
@@ -329,14 +337,21 @@ def test_cross_request_job_id_collision_compensates_the_new_run(service, job_db)
     )
     assert first["created_count"] == 1
 
-    # Different dedup key but the same job id as the existing row:
-    # create_jobs_bulk fails inside its transaction and the fresh run row
-    # must be compensated without touching the earlier run.
-    with pytest.raises(InvalidOperationError, match="Job identity collision"):
-        service.create_run(WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_material_item("col_a")])
+    # #1255: the second source no longer collides with the first job's id —
+    # it is a distinct job owned by its own run.
+    second = service.create_run(
+        WORKSPACE_ID, workflow_key=WORKFLOW_KEY, items=[_material_item("col_a")]
+    )
+    assert second["created_count"] == 1
 
-    assert [run["id"] for run in service.list_runs(WORKSPACE_ID)] == [first["run"]["id"]]
-    assert job_db.list_job_dedup_keys(WORKSPACE_ID, WORKFLOW_KEY) == {("material", "col/a")}
+    assert {run["id"] for run in service.list_runs(WORKSPACE_ID)} == {
+        first["run"]["id"],
+        second["run"]["id"],
+    }
+    assert job_db.list_job_dedup_keys(WORKSPACE_ID, WORKFLOW_KEY) == {
+        ("material", "col/a"),
+        ("material", "col_a"),
+    }
 
 
 def test_material_deleted_mid_creation_fails_and_compensates_run(service, job_db) -> None:

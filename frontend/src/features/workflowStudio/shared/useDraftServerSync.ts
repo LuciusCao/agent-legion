@@ -2,26 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import type { WorkflowDraftStoreResponse } from '../../../api/workflowDraft'
 import type { DraftSaveController } from './draftSaveController'
-import { isServerDraftNewer } from './serverDraftReapply'
+import type { AdoptServerDraft } from './draftSaveConflict'
+import { ServerDraftSyncTracker } from './serverDraftSync'
+import { useAdoptServerDraft } from './useAdoptServerDraft'
 import type { ServerDraftConflict } from './useServerDraftApply'
 
-/** #633：服务端草稿 → 保存控制器的接线（从 useWorkflowDraftPersistence
- * 拆出，文件体积预算）。三段职责共用一个 updated_at 真值：
- *
- * 1. 首装 hydrate：草稿查询到达且基线已知，把「已持久化基线」记为服务端
- *    草稿值（无草稿时记为基线 YAML），翻转 hydrated（保存 effect 依赖它
- *    做首次差异评估）。
- * 2. #633 codex review P1-2 重应用：turn-end 失效重取到更新的草稿且画布
- *    已采用（用户无本地编辑，useServerDraftApply 已写入）→ re-hydrate 推进
- *    lastPersisted/lastPersistedAt 到服务端真值，下一次 PUT 以新基线竞争。
- * 3. 冲突呈现：用户有本地编辑时经 consumeConflict 拿到通知 →
- *    enterConflict 进入 conflict 态（编辑保留，conflictDraftYaml =
- *    服务端草稿），基线同样推进。
- *
- * 同一 updated_at 不会重复 hydrate（isServerDraftNewer 为 false）；hydratedAt
- * 由本 hook 持有，与 useServerDraftApply 的画布采用共用同一时间戳。
- * consumeConflict 须稳定（useCallback）。返回的 isHydrated 供无依赖的
- * useCallback（flushNow/hasUnsavedChanges）读最新值，避免闭包过期。 */
+/** 服务端草稿 → 保存控制器的 React 接线。首装/重应用水合、冲突呈现与
+ * 空态重水合的状态和决策在 serverDraftSync.ts；本 hook 只保持 effect
+ * 顺序并执行控制器命令。consumeConflict 须稳定；isHydrated 供无依赖的
+ * flushNow/hasUnsavedChanges 读最新值，避免闭包过期。 */
 export function useDraftServerSync(
   workspaceId: string | undefined,
   serverDraft: WorkflowDraftStoreResponse | undefined,
@@ -31,18 +20,13 @@ export function useDraftServerSync(
 ): {
   hydrated: boolean
   isHydrated: () => boolean
-  adoptServerDraft: (
-    serverYaml: string,
-    serverAt: string | null,
-    onAdopt?: (serverYaml: string) => void
-  ) => void
+  adoptServerDraft: AdoptServerDraft
 } {
   const [hydrated, setHydrated] = useState(false)
-  const hydratedRef = useRef(false)
-  const hydratedAtRef = useRef<string | null>(null)
-  const isHydrated = useCallback(() => hydratedRef.current, [])
+  const trackerRef = useRef(new ServerDraftSyncTracker())
+  const isHydrated = useCallback(() => trackerRef.current.isHydrated(), [])
   useEffect(() => {
-    hydratedRef.current = false
+    trackerRef.current.reset()
     // eslint-disable-next-line react-hooks/set-state-in-effect -- workspace 切换时重置 hydrate 状态
     setHydrated(false)
   }, [workspaceId])
@@ -50,46 +34,28 @@ export function useDraftServerSync(
     if (serverDraft === undefined || !originalYaml) return
     // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrated 翻转须触发一次保存差异评估
     if (!hydrated) setHydrated(true)
-    const conflict = hydrated ? consumeConflict() : null
-    if (conflict) {
-      controllerRef.current?.enterConflict(
-        conflict.yaml,
-        conflict.updatedAt,
-        conflict.hash
-      )
-      hydratedAtRef.current = conflict.updatedAt || null
+    const decision = trackerRef.current.evaluate({
+      serverDraft,
+      originalYaml,
+      hydrated,
+      conflict: hydrated ? consumeConflict() : null,
+      controllerInConflict: () => controllerRef.current?.inConflict() ?? false,
+    })
+    if (decision.action === 'conflict') {
+      const { yaml, updatedAt, hash, generation } = decision.conflict
+      controllerRef.current?.enterConflict(yaml, updatedAt, hash, generation)
       return
     }
-    if (
-      hydrated &&
-      !isServerDraftNewer(serverDraft.updated_at, hydratedAtRef.current)
-    ) {
-      return
-    }
+    if (decision.action !== 'hydrate') return
     controllerRef.current?.hydrate(
-      serverDraft.definition_yaml ?? originalYaml,
-      serverDraft.updated_at,
-      serverDraft.definition_hash ?? null
+      decision.yaml,
+      decision.updatedAt,
+      decision.generation,
+      decision.hash
     )
-    hydratedAtRef.current = serverDraft.updated_at ?? null
-    hydratedRef.current = true
   }, [hydrated, serverDraft, originalYaml, controllerRef, consumeConflict])
-  /* kimi review P1-2：冲突出口——采用服务端（Agent）版本（hydrate 推进
-     基线、清除冲突；onAdopt 写画布）或显式 keep-mine 继续保存。#1143：
-     serverHash 是被采用草稿的语义身份，随 hydrate 恢复成 savedHash。 */
-  const adoptServerDraft = useCallback(
-    (
-      serverYaml: string,
-      serverAt: string | null,
-      onAdopt?: (yaml: string) => void,
-      serverHash?: string | null
-    ) => {
-      controllerRef.current?.adoptServerDraft(serverYaml, serverAt, serverHash)
-      onAdopt?.(serverYaml)
-    },
-    [controllerRef]
-  )
-  // #804 P1-A：resolveConflict 移到 useWorkflowDraftPersistence（keep-mine
-  // 需要当前画布内容补调度，serverSync 层拿不到 draftYaml）。
+  /* 采用服务端版本由 controller hydrate 推进基线并清冲突，onAdopt 写画布；
+     keep-mine 留在 useWorkflowDraftPersistence（需要当前画布补调度）。 */
+  const adoptServerDraft = useAdoptServerDraft(controllerRef)
   return { hydrated, isHydrated, adoptServerDraft }
 }

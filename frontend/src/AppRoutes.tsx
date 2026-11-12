@@ -10,6 +10,7 @@ import {
   QualityPage,
   SettingsPage,
   SetupPage,
+  TaskCenterPage,
   TokenUsagePage,
   WorkflowStudioPage,
   WorkspaceLayout,
@@ -33,6 +34,7 @@ export default function AppRoutes() {
           <Route path="jobs/:jobId" element={<JobDetailPage />} />
         </Route>
         <Route path="/workspaces/:workspaceId">
+          <Route path="tasks" element={<TaskCenterPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="token-usage" element={<TokenUsagePage />} />
           <Route path="monitoring" element={<MonitoringPage />} />

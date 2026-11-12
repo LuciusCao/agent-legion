@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { Routes, Route } from 'react-router-dom'
 import { MemoryRouter } from '../../testing/TestMemoryRouter'
 import { JobList } from './JobList'
@@ -77,7 +77,7 @@ describe('JobList', () => {
         activeNodeKey: { all: 2 },
       },
       isLoading: false,
-      error: null,
+      listLoadError: null,
       selectedIds: new Set(),
       expandedId: null,
       filterConfig: {
@@ -145,5 +145,34 @@ describe('JobList', () => {
 
     expect(screen.getByTestId('job-list-skeleton')).toBeInTheDocument()
     expect(screen.queryByText('暂无任务')).not.toBeInTheDocument()
+  })
+
+  it('error state shows a retry button that re-fetches the first page', () => {
+    const refreshFirstPage = vi.fn().mockResolvedValue(undefined)
+    useJobStore.setState({
+      jobs: [],
+      jobsById: {},
+      jobIds: [],
+      filteredJobIds: [],
+      listLoadError: 'backend down',
+      refreshFirstPage,
+    })
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<JobList workspaceId="ws1" />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('任务列表加载失败')).toBeInTheDocument()
+    expect(screen.getByText('backend down')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    expect(refreshFirstPage).toHaveBeenCalledWith('ws1')
   })
 })

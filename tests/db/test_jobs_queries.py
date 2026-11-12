@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from psycopg import IntegrityError
 
+from server.app.jobs.job_id_encoding import encode_job_id
 from server.app.jobs.job_state_mutations import (
     JobMutationConflict,
 )
@@ -95,7 +96,8 @@ def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
     )
 
     assert job["storage_dir"] == job_storage_ref(
-        "created_at_workspace", "created_at_workspace_demo_workflow_Q-CREATED"
+        "created_at_workspace",
+        encode_job_id("created_at_workspace", "demo_workflow", "Q-CREATED"),
     )
     assert job_storage_dir(tmp_path / "jobs", "created_at_workspace", job["id"]).is_dir()
 

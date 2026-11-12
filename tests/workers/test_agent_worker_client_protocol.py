@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 import requests
 
+from shared.protocol import PROTOCOL_VERSION
 from worker import executor as agent_worker
 from worker.host.errors import HostResponseError
 from worker.registration.retry import register_with_retry
@@ -84,6 +85,24 @@ def test_client_claim_declares_code_capacity() -> None:
     ]
 
 
+def test_client_claim_declares_node_concurrency_limits() -> None:
+    # #1158：节点级并发上限与容量同渠道每次 claim 重声明；显式空 map 也携带
+    # （「清空库存值」的唯一通道），None 不携带（Host 保留库存值）。
+    client = agent_worker.Client("http://unused")
+    seen: list[dict] = []
+    client.request = lambda *a, **k: (seen.append(json.loads(k["data"])), (204, b""))[1]  # type: ignore[method-assign]
+
+    client.claim_batch(
+        "w1", limit=1, agent_limit=1, code_limit=1, node_concurrency_limits={"heavy": 1}
+    )
+    client.claim_batch("w1", limit=1, agent_limit=1, code_limit=1, node_concurrency_limits={})
+    client.claim_batch("w1", limit=1, agent_limit=1, code_limit=1)
+
+    assert seen[0]["node_concurrency_limits"] == {"heavy": 1}
+    assert seen[1]["node_concurrency_limits"] == {}
+    assert "node_concurrency_limits" not in seen[2]
+
+
 def test_client_registration_declares_latest_protocol_and_code_capacity() -> None:
     client = agent_worker.Client("http://unused")
     seen: list[dict] = []
@@ -94,7 +113,8 @@ def test_client_registration_declares_latest_protocol_and_code_capacity() -> Non
         headers.update(kwargs["headers"])
         return (
             201,
-            b'{"worker_token": "tok", "host_protocol_version": 5, "allowed_workspaces": []}',
+            f'{{"worker_token": "tok", "host_protocol_version": {PROTOCOL_VERSION},'
+            ' "allowed_workspaces": []}'.encode(),
         )
 
     client.request = stub  # type: ignore[method-assign]
@@ -113,7 +133,7 @@ def test_client_registration_declares_latest_protocol_and_code_capacity() -> Non
         ["token-a", "token-b"],
     )
 
-    assert seen[0]["protocol_version"] == 5
+    assert seen[0]["protocol_version"] == PROTOCOL_VERSION
     assert seen[0]["max_code_concurrency"] == 3
     assert seen[0]["runtime_versions"] == {"velites": "velites 0.4.0-alpha"}
     # issue #35：全部 scoped token 逗号拼进同一个注册请求。
@@ -203,7 +223,10 @@ def test_registration_retries_transient_http_status_errors(
         del args, kwargs
         status = statuses.pop(0)
         if status == 201:
-            return (status, b'{"worker_token": "tok", "host_protocol_version": 5}')
+            return (
+                status,
+                f'{{"worker_token": "tok", "host_protocol_version": {PROTOCOL_VERSION}}}'.encode(),
+            )
         return (status, b"temporarily unavailable")
 
     client.request = flaky_request  # type: ignore[method-assign]

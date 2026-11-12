@@ -1,9 +1,9 @@
 /* #633 冲突生命周期与保存编排（kimi/codex review 拆出）：状态机
    （draftSaveController）的状态转换纯函数、调度决策与 PUT 响应分派。
-   计时器/CAS 基线/请求生命期留在 controller（它们与竞争时序强耦合），
+   计时器/CAS 基线由 draftSaveLifecycle 持有，请求执行由 controller 承接，
    这里是可以独立测试的决策逻辑。 */
 
-import type { DraftSaveState } from './draftSaveTypes'
+import type { DraftSaveState, PutWorkflowDraftFn } from './draftSaveTypes'
 
 /* 采用服务端版本（adoptServerDraft/hydrate 共用）：回到 idle、清除冲突，
    savedAt 跟随服务端时间戳（无时间戳时保留原值）。#1177 codex P2：
@@ -38,7 +38,8 @@ export function conflictEnteredState(
   current: DraftSaveState,
   serverYaml: string | null,
   serverAt: string | null,
-  serverHash?: string | null
+  serverHash?: string | null,
+  serverGeneration?: number | null
 ): DraftSaveState {
   return {
     ...current,
@@ -47,11 +48,14 @@ export function conflictEnteredState(
     conflict: true,
     conflictDraftYaml: serverYaml,
     conflictDraftHash: serverHash === undefined ? undefined : serverHash,
+    // #1226 五轮收口：冲突携带服务端代次——采用服务端版本后恢复为 CAS 基线。
+    conflictDraftGeneration:
+      serverGeneration === undefined ? undefined : serverGeneration,
   }
 }
 
-/* 冲突解除（resolveConflict(keep-mine)/画布回退到已持久化值）：清冲突
-   标记；#804 轮 6 H6：status 从 error（冲突态的占位，横幅语义靠
+/* 冲突解除（resolveConflict 显式二选一；#1195 起画布回退不再自动解除）：
+   清冲突标记；#804 轮 6 H6：status 从 error（冲突态的占位，横幅语义靠
    conflict 标记而非 error 本身）收敛到 saved/idle——采用 Agent 版本成功
    后不该留假 error 态。keep-mine 随后的保存会推进 savedAt/status。
    #1143 评审 P3-5：conflictDraftHash 与 conflictDraftYaml 对称清空（与
@@ -64,6 +68,7 @@ export function conflictClearedState(current: DraftSaveState): DraftSaveState {
     conflict: false,
     conflictDraftYaml: undefined,
     conflictDraftHash: undefined,
+    conflictDraftGeneration: undefined,
   }
 }
 
@@ -75,15 +80,30 @@ export function pendingAfterResolve(
   return keepMine ? pendingSave : null
 }
 
-/* 回退到已持久化值后的可见状态：pending/error 收回 saved/idle；冲突态
-   （画布回到服务端一致内容）一并清标记（kimi P2-3）。 */
+/* 回退到已持久化值后的可见状态：pending/error 收回 saved/idle。
+   #1195：冲突态不经此路径——CAS 基线已被冲突推进时「画布 == 冲突前
+   基线」不等于「画布 == 服务端」，自动解除会让下一次编辑静默覆盖
+   Agent 版本；冲突只能显式解除（controller 的 revertToPersisted 门控）。 */
 export function revertedState(current: DraftSaveState): DraftSaveState {
   const status = current.savedAt ? 'saved' : 'idle'
-  if (current.conflict) return conflictClearedState({ ...current, status })
   if (current.status === 'pending' || current.status === 'error') {
     return { ...current, status }
   }
   return current
+}
+
+/* #1196：草稿空白判据（PUT 门的唯一口径，decideSchedule 与 controller
+   forceSave 护栏共用）——与后端 workflow_draft_store_contracts._not_blank
+   的 Python str.strip() 对齐：其空白集比 JS trim() 多 \u0085(NEL) 与
+   \u001C-\u001F（FS/GS/RS/US），少了这层剥除，只含这些字符的画布会被
+   前端判成非空白发出 PUT、服务端确定性 422。反向差 \uFEFF（JS 剥、
+   Python 不剥）保持 skip——只含 BOM 的内容同样无意义，且 skip 方向永不
+   触发服务端拒绝（前端判空集 ⊇ 后端判空集是本谓词的安全方向）。 */
+export function isBlankDraftYaml(yaml: string): boolean {
+  return [...yaml].every(
+    (ch) =>
+      ch.trim() === '' || ch === '\u0085' || (ch >= '\u001C' && ch <= '\u001F')
+  )
 }
 
 /* schedule 的调度决策（kimi P1-2/P2-4）：空白内容 → skip（controller
@@ -101,7 +121,7 @@ export function decideSchedule(
   inFlight: boolean,
   inConflict: boolean
 ): ScheduleDecision {
-  if (!yaml.trim()) return { action: 'skip' }
+  if (isBlankDraftYaml(yaml)) return { action: 'skip' }
   if (persisted && !inFlight) return { action: 'revert' }
   return { action: 'pending', armTimer: !inConflict }
 }
@@ -116,12 +136,14 @@ export function stopTimer(
 
 /* 成功响应回调：作废与否都推进基线（R2 P1）；current 时才更新可见状态。
    #1143：savedHash 是本次落盘内容的服务端语义身份（响应带回，旧服务端
-   或不可解析草稿为 null——调用方按「无法核对」降级）。 */
+   或不可解析草稿为 null——调用方按「无法核对」降级）。#1226 五轮收口：
+   generation 是落盘后的新代次（下一次保存的 CAS 基线）。 */
 export type OnSaveSuccess = (
   yaml: string,
   updatedAt: string | null,
   current: boolean,
-  savedHash: string | null
+  savedHash: string | null,
+  generation: number | null
 ) => void
 
 /* 失败回调：409 冲突（WorkflowDraftConflictError，携带 current_draft）
@@ -132,16 +154,12 @@ export type OnSaveFailure = (
 ) => void
 
 /* 保存编排：发起 PUT 并按响应分派回调。requestId 过期的迟到响应只推进
-   基线、不构成失败信号（R2 P1）。 */
+   基线、不构成失败信号（R2 P1）。#1226 五轮收口：CAS 基线是代次。 */
 export function runSave(options: {
-  put: (
-    yaml: string,
-    keepalive: boolean,
-    expectedAt: string
-  ) => Promise<{ updated_at?: string | null; definition_hash?: string | null }>
+  put: PutWorkflowDraftFn
   yaml: string
   keepalive: boolean
-  expectedAt: string
+  baseGeneration: number | null
   requestId: number
   isCurrentRequest: (requestId: number) => boolean
   clearInFlight: (requestId: number) => void
@@ -149,18 +167,19 @@ export function runSave(options: {
   onFailure: OnSaveFailure
   resolve: (ok: boolean) => void
 }): void {
-  const { put, yaml, keepalive, expectedAt, requestId } = options
-  put(yaml, keepalive, expectedAt)
+  const { put, yaml, keepalive, baseGeneration, requestId } = options
+  put(yaml, keepalive, baseGeneration)
     .then((response) => {
       // onSuccess BEFORE clearInFlight: the success handler advances the
-      // persisted baseline (lastPersistedAt), and a queued save drains on
-      // clearInFlight — the drain must re-read the ADVANCED baseline, not
+      // persisted baseline (lastPersistedGeneration), and a queued save drains
+      // on clearInFlight — the drain must re-read the ADVANCED baseline, not
       // the pre-A snapshot (codex R3 P1 serialization).
       options.onSuccess(
         yaml,
         response.updated_at ?? null,
         options.isCurrentRequest(requestId),
-        response.definition_hash ?? null
+        response.definition_hash ?? null,
+        response.generation ?? null
       )
       options.clearInFlight(requestId)
       options.resolve(true)
@@ -172,23 +191,14 @@ export function runSave(options: {
     })
 }
 
-/* beforeunload 护栏谓词：pending（未落盘）/在途写入/失败未恢复/冲突挂起
-   （本页编辑未保存且自动 flush 已停）都算未保存。 */
-export function hasPendingWork(
-  hasPending: boolean,
-  inFlight: boolean,
-  errored: boolean,
-  inConflict: boolean
-): boolean {
-  return hasPending || inFlight || errored || inConflict
-}
-
 /* kimi review P1-2 冲突出口的签名（persistence 与 serverSync 共享）。
-   #1143：serverHash（可选）是被采用服务端草稿的语义身份。 */
+   #1143：serverHash（可选）是被采用服务端草稿的语义身份；#1226：
+   serverGeneration 是其代次（采用后恢复为 CAS 基线）。 */
 export type AdoptServerDraft = (
   serverYaml: string,
   serverAt: string | null,
   onAdopt?: (serverYaml: string) => void,
-  serverHash?: string | null
+  serverHash?: string | null,
+  serverGeneration?: number | null
 ) => void
 export type ResolveConflict = (keepMine: boolean) => void

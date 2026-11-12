@@ -23,6 +23,7 @@ from server.app.services.execution_retention import (
 )
 from server.app.services.execution_retention_sweeper import ExecutionRetentionThread
 from server.app.services.instance_settings_store import InstanceSettingsStore
+from server.app.services.run_batch_listing import sweep_archived_run_batches
 from tests.postgres_support import TEST_DATABASE_URL
 
 _WORKSPACE = "test-workspace"
@@ -178,6 +179,11 @@ def test_disabled_retention_deletes_nothing(job_db) -> None:
         "agent_execution_requests": 0,
         "executor_leases": 0,
         "node_run_token_usage": 0,
+        # #1157: the archived run_batches arm is unconditional (product
+        # promise), so it reports 0 here rather than disappearing.
+        "run_batches": 0,
+        # M61: same unconditional product promise for batch ops.
+        "job_batch_operations": 0,
     }
     assert _counts(job_db)["requests"] == 1
 
@@ -362,3 +368,163 @@ def test_sweep_thread_run_once_delegates_and_survives_failure(monkeypatch) -> No
     with pytest.raises(RuntimeError):
         thread.run_once()
     assert calls["n"] == 1
+
+
+def _insert_run_batch(
+    job_db,
+    *,
+    run_id: str,
+    status: str,
+    finished_at: datetime | None,
+    archived_at: datetime | None,
+) -> None:
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
+            (_WORKSPACE,),
+        )
+        conn.execute(
+            "insert into runs(id, workspace_id, source_kind, status) values (%s, %s, 'items', 'created')",
+            (run_id, _WORKSPACE),
+        )
+        conn.execute(
+            "insert into run_batches(run_id, workspace_id, status, finished_at, archived_at)"
+            " values (%s, %s, %s, %s, %s)",
+            (run_id, _WORKSPACE, status, finished_at, archived_at),
+        )
+
+
+def _run_batch_count(job_db) -> int:
+    with job_db._connect_read() as conn:
+        return int(conn.execute("select count(*) as c from run_batches").fetchone()["c"])
+
+
+def test_archived_run_batches_sweep_window_edges(job_db) -> None:
+    """#1157 phase3: manual archives die at archived_at + 90d; auto-archived
+    rows (archived_at null, terminal) die at finished_at + 7d + 90d. Rows
+    inside the window and non-terminal rows always survive."""
+    _clear_settings()  # the arm is unconditional (no execution_retention_days)
+    _insert_run_batch(
+        job_db,
+        run_id="manual-old",
+        status="completed",
+        finished_at=_NOW - timedelta(days=95),
+        archived_at=_NOW - timedelta(days=91),
+    )
+    _insert_run_batch(
+        job_db,
+        run_id="manual-recent",
+        status="completed",
+        finished_at=_NOW - timedelta(days=20),
+        archived_at=_NOW - timedelta(days=10),
+    )
+    _insert_run_batch(
+        job_db,
+        run_id="auto-old",
+        status="cancelled",
+        finished_at=_NOW - timedelta(days=98),
+        archived_at=None,
+    )
+    _insert_run_batch(
+        job_db,
+        run_id="auto-in-window",
+        status="completed",
+        finished_at=_NOW - timedelta(days=96),
+        archived_at=None,
+    )
+    _insert_run_batch(
+        job_db,
+        run_id="still-feeding",
+        status="running",
+        finished_at=None,
+        archived_at=None,
+    )
+
+    deleted = sweep_archived_run_batches(TEST_DATABASE_URL, _NOW)
+
+    assert deleted == 2
+    with job_db._connect_read() as conn:
+        remaining = {
+            str(row["run_id"]) for row in conn.execute("select run_id from run_batches").fetchall()
+        }
+    assert remaining == {"manual-recent", "auto-in-window", "still-feeding"}
+    # Idempotent: a second pass finds nothing.
+    assert sweep_archived_run_batches(TEST_DATABASE_URL, _NOW) == 0
+
+
+def test_archived_run_batches_arm_runs_when_retention_disabled(job_db) -> None:
+    """The 90-day archive retention is a product promise, not gated on
+    execution_retention_days (0 = the execution-plane tables keep everything)."""
+    _clear_settings()
+    _insert_run_batch(
+        job_db,
+        run_id="manual-old",
+        status="completed",
+        finished_at=_NOW - timedelta(days=100),
+        archived_at=_NOW - timedelta(days=95),
+    )
+
+    totals = sweep_expired_executions(TEST_DATABASE_URL, now=_NOW)
+
+    assert totals["run_batches"] == 1
+    assert totals["agent_execution_requests"] == 0
+    assert _run_batch_count(job_db) == 0
+
+
+def _insert_job_batch_operation(
+    job_db,
+    *,
+    op_id: str,
+    status: str,
+    finished_at: datetime | None,
+    archived_at: datetime | None,
+) -> None:
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
+            (_WORKSPACE,),
+        )
+        conn.execute(
+            "insert into job_batch_operations("
+            " id, workspace_id, kind, status, finished_at, archived_at)"
+            " values (%s, %s, 'pause', %s, %s, %s)",
+            (op_id, _WORKSPACE, status, finished_at, archived_at),
+        )
+
+
+def test_archived_job_batch_operations_arm_runs_when_retention_disabled(job_db) -> None:
+    """M61: batch ops share the run_batches archive semantics — the 90-day
+    archive retention is unconditional (auto-archive stays a query-time
+    reading; only this physical-delete arm runs in the sweeper)."""
+    _clear_settings()
+    _insert_job_batch_operation(
+        job_db,
+        op_id="op-manual-old",
+        status="completed",
+        finished_at=_NOW - timedelta(days=100),
+        archived_at=_NOW - timedelta(days=95),
+    )
+    _insert_job_batch_operation(
+        job_db,
+        op_id="op-auto-old",
+        status="completed",
+        finished_at=_NOW - timedelta(days=98),
+        archived_at=None,
+    )
+    _insert_job_batch_operation(
+        job_db,
+        op_id="op-in-window",
+        status="completed",
+        finished_at=_NOW - timedelta(days=10),
+        archived_at=None,
+    )
+
+    totals = sweep_expired_executions(TEST_DATABASE_URL, now=_NOW)
+
+    assert totals["job_batch_operations"] == 2
+    assert totals["agent_execution_requests"] == 0
+    with job_db._connect_read() as conn:
+        remaining = {
+            str(row["id"]) for row in conn.execute("select id from job_batch_operations").fetchall()
+        }
+    assert remaining == {"op-in-window"}

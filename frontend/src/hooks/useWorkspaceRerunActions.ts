@@ -4,6 +4,7 @@ import type { FailureCategoryContext } from '../components/JobRerunDialog/useFai
 
 export function useWorkspaceRerunActions(workspaceId: string | undefined) {
   const batchRerun = useJobStore((state) => state.batchRerun)
+  const batchRunTo = useJobStore((state) => state.batchRunTo)
   const rerunByFailure = useJobStore((state) => state.rerunByFailureCategory)
   const failureContext: FailureCategoryContext | undefined = workspaceId
     ? { workspaceId }
@@ -28,5 +29,9 @@ export function useWorkspaceRerunActions(workspaceId: string | undefined) {
     await batchRerun(workspaceId, nodeKey, fromFailedNode, jobIds)
   }
 
-  return { handleRerun, failureContext }
+  const handleRunTo = async (targetKey: string, startKey?: string) => {
+    if (workspaceId) await batchRunTo(workspaceId, targetKey, startKey)
+  }
+
+  return { handleRerun, handleRunTo, failureContext }
 }

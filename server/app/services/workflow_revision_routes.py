@@ -45,7 +45,7 @@ def derive_agent_routes(
         if node.node_type != "agent":
             continue
         # #933: self-contained nodes dispatch from their own profile and
-        # never materialize a route (dual-track publish, #440 P2).
+        # never materialize a route (EXEC-AGENT-PROFILE-001).
         if is_self_contained_agent_node(node):
             continue
         # #932: routes materialize only legacy-sourced profiles (the target

@@ -23,6 +23,9 @@ class WorkerConfigPayload(BaseModel):
     disabled_runtimes: list[str] | None = None
     max_concurrency: int | None = None
     max_code_concurrency: int | None = None
+    # 节点级并发上限（#1158）：{node_key: 正整数}，机器资源保护层；
+    # 热更新生效（下一次 claim 即按新映射声明给 Host）。
+    node_concurrency_limits: dict[str, int] | None = None
     upload_max_concurrency: int | None = None
     models: list[dict[str, str]] | None = None
     labels: dict[str, str] | None = None

@@ -116,7 +116,7 @@ def test_dirty_return_is_attributed_and_rolled_back(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Pool defense (#438): a connection returned with an open transaction
-    is rolled back by the pool, and the return path attributes the leak to
+    is rolled back on return (#1077), and the return path attributes the leak to
     its checkout origin — the diagnostic #438 lacked in production."""
     caplog.set_level(logging.WARNING, logger="server.app.db.pool_reset")
     conn = connect_database(TEST_DATABASE_URL)
@@ -398,3 +398,71 @@ def test_origin_walk_is_hard_capped() -> None:
     # A shallow plumbing-only stack stays under the cap and resolves to the
     # plain unknown marker.
     assert pool_reset._checkout_origin(make_plumbing_stack(3)) == "unknown"
+
+
+@pytest.mark.no_db
+def test_close_returns_checkout_even_when_settle_fails(monkeypatch) -> None:
+    import server.app.db.checkout as checkout
+    from server.app.db.connection import DatabaseConnection
+
+    events: list[str] = []
+
+    class Pool:
+        def putconn(self, raw) -> None:
+            assert raw is raw_connection
+            events.append("return")
+
+    def fail_settle(raw) -> None:
+        assert raw is raw_connection
+        events.append("settle")
+        raise RuntimeError("broken connection")
+
+    raw_connection = object()
+    monkeypatch.setattr(checkout, "settle_return", fail_settle)
+    conn = DatabaseConnection(raw_connection, Pool(), "postgresql://test")
+    conn.close()
+    conn.close()
+    assert events == ["settle", "return"]
+
+
+@pytest.mark.no_db
+def test_checkout_origin_helper_preserves_walk_budget() -> None:
+    import sys
+
+    import server.app.db.checkout as checkout
+
+    class RawConnection:
+        agent_legion_origin: str
+
+    namespace: dict[str, Any] = {
+        "__name__": "server.app.db.plumbing",
+        "sys": sys,
+        "record_checkout_origin": pool_reset.record_checkout_origin,
+        "stamp_checkout_origin": checkout.stamp_checkout_origin,
+    }
+    exec(
+        """
+def main_checkout(raw):
+    record_checkout_origin(raw, sys._getframe())
+
+def extracted_checkout(raw):
+    stamp_checkout_origin(raw)
+
+def plumbing(depth, checkout, raw):
+    if depth == 1:
+        return checkout(raw)
+    return plumbing(depth - 1, checkout, raw)
+
+def dispatch(checkout, raw):
+    return plumbing(27, checkout, raw)
+""",
+        namespace,
+    )
+
+    main_raw = RawConnection()
+    extracted_raw = RawConnection()
+    namespace["dispatch"](namespace["main_checkout"], main_raw)
+    namespace["dispatch"](namespace["extracted_checkout"], extracted_raw)
+
+    assert "test_checkout_origin_helper_preserves_walk_budget" in main_raw.agent_legion_origin
+    assert extracted_raw.agent_legion_origin == main_raw.agent_legion_origin

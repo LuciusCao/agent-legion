@@ -261,6 +261,31 @@ describe('workflowStudioChanges', () => {
     expect(formatNodeChange(change)).toBe('节点 A: 节点配置值、配置 Schema')
   })
 
+  it('labels runtime/tools/requires_labels changes in Chinese (#1114 codex P2)', () => {
+    // 谓词（structural_payload）覆盖的字段在摘要全报出后，展示层同步给
+    // 中文标签，不能在变更列表里裸字段名。
+    const change = buildChangeSummary(
+      makeResponse({
+        summary: {
+          risk_level: 'warning',
+          node_changes: [
+            makeNodeChange({
+              fields: ['runtime', 'tools', 'requires_labels'],
+              risk: 'warning',
+            }),
+          ],
+          edge_changes: [],
+          intake_changes: [],
+          metadata_changes: [],
+          risk_flags: [],
+        },
+      })
+    ).nodeChanges[0]
+    expect(formatNodeChange(change)).toBe(
+      '节点 A: 执行 Runtime、工具白名单、Worker 标签要求'
+    )
+  })
+
   it('formats node change text', () => {
     const added: NodeChange = {
       type: 'added',

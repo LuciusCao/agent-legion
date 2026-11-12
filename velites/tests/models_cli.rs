@@ -57,3 +57,40 @@ fn models_list_fails_closed_when_credential_reference_is_missing() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("is not set"));
 }
+
+#[test]
+fn gateway_without_registry_ignores_legacy_env_bridge() {
+    // #1102: the config.json / VELITES_BASE_URL bridge is removed. Even with
+    // both legacy variables set, a direct gateway/openai_compat run without a
+    // registry is a harness error (exit 2) pointing at models.json — never a
+    // request against the env-supplied endpoint.
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing-models.json");
+    for provider in ["gateway", "openai_compat"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_velites"))
+            .args([
+                "--provider",
+                provider,
+                "--model",
+                "m",
+                "--no-sandbox",
+                "say done",
+            ])
+            .current_dir(dir.path())
+            .env("VELITES_MODELS_PATH", &missing)
+            .env("VELITES_BASE_URL", "http://127.0.0.1:9/v1")
+            .env("VELITES_API_KEY", "test-only")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "provider {provider}");
+        assert!(output.stdout.is_empty(), "provider {provider}");
+        // The error names the registry path, the provider, the migration
+        // doc, and the removed bridge so operators know where to move.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("missing-models.json"), "{stderr}");
+        assert!(stderr.contains(&format!("{provider:?}")), "{stderr}");
+        assert!(stderr.contains("velites-model-registry.md"), "{stderr}");
+        assert!(stderr.contains("config.json"), "{stderr}");
+        assert!(stderr.contains("VELITES_BASE_URL"), "{stderr}");
+    }
+}

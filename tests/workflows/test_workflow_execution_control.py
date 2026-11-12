@@ -28,6 +28,7 @@ from server.app.workflows.execution_control import (
     ancestor_closure,
 )
 from tests.helpers import scan_entries
+from tests.helpers.sharding import poll_until as _poll_until
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -515,12 +516,13 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
     worker = _make_worker(tmp_path, queries, [definition])
     worker.state.scan_entries = scan_entries(definition)
 
-    # Poll repeatedly until the worker pauses on target completion.
-    for _ in range(20):
-        worker._poll()
+    def job_paused_or_completed() -> bool:
         job_after = queries.get_job(job_id)
-        if job_after and job_after["status"] in ("paused", "completed"):
-            break
+        return job_after is not None and job_after["status"] in ("paused", "completed")
+
+    assert _poll_until(worker, job_paused_or_completed), (
+        f"job={queries.get_job(job_id)!r}; nodes={queries.list_job_nodes(job_id)!r}"
+    )
 
     statuses = {node["node_key"]: node["status"] for node in queries.list_job_nodes(job_id)}
     assert statuses["root"] == "completed"

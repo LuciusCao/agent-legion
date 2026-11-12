@@ -2,8 +2,8 @@
 
 触顶（assistant ``stopReason=length``）只在**最后一次**模型调用触顶且声明产物
 缺失时改写失败原因，不改变任何 run 的成败判定。``_DECISION_TABLE`` 与
-docs/architecture/llm-output-budget-design.md「触顶归因决策表」1–40 行对应；
-第 41 行的 Provider 鉴权例外见 test_worker_upload_provider_auth.py。
+docs/architecture/llm-output-budget-design.md「触顶归因决策表」1–43 行对应；
+第 44 行的 Provider 鉴权例外见 test_worker_upload_provider_auth.py。
 共享桩见 tests/workers/upload_queue_testlib.py。
 """
 
@@ -157,17 +157,19 @@ _DECISION_TABLE = [
         _TRUNCATED,
     ),
     # codex P2（4203615556）：补救轮正常完成仍缺产物 → 不是触顶。
+    # #865：序列更新为续写形态（触顶 → 续写 stop 仍缺 → 补救 stop）。
     (
         "13-velites-remediation-stop",
         1,
-        [_assistant("length"), _assistant("stop"), _VALIDATION, _END],
+        [_assistant("length"), _assistant("stop"), _assistant("stop"), _VALIDATION, _END],
         False,
         _EXITED_1,
     ),
+    # #865：续写轮正常结束仍缺产物 → 补救轮 toolUse（工具执行后循环顶校验）。
     (
         "14-velites-remediation-tooluse",
         1,
-        [_assistant("length"), _assistant("toolUse"), _VALIDATION, _END],
+        [_assistant("length"), _assistant("stop"), _assistant("toolUse"), _VALIDATION, _END],
         False,
         _EXITED_1,
     ),
@@ -372,6 +374,33 @@ _DECISION_TABLE = [
         False,
         _TRUNCATED,
     ),
+    # #865 续写轮形态（C*）：触顶后 velites 先注入续写轮，连续触顶达上限（2）
+    # 才回落补救轮。归因语义不变——只看最后一次 assistant 调用。
+    # C1：触顶 → 续写 stop → 产物齐全 → completed（不归因）。
+    (
+        "41-C1-velites-continuation-recovers",
+        0,
+        [_assistant("length"), _assistant("stop"), {**_VALIDATION, "missing": []}, _END],
+        True,
+        "",
+    ),
+    # C2：触顶 → 续写 length（达上限回落）→ 补救 length → 归因（3x）。
+    (
+        "42-C2-velites-continuation-cap-remediation-length",
+        1,
+        [_assistant("length"), _assistant("length"), _assistant("length"), _VALIDATION, _END],
+        False,
+        _TRUNCATED,
+    ),
+    # C3：触顶 → 续写 length（达上限回落）→ 补救 stop 仍缺 → 不归因
+    # （补救轮没写齐产物，调高输出预算无济于事）。
+    (
+        "43-C3-velites-continuation-cap-remediation-stop",
+        1,
+        [_assistant("length"), _assistant("length"), _assistant("stop"), _VALIDATION, _END],
+        False,
+        _EXITED_1,
+    ),
 ]
 
 
@@ -419,3 +448,24 @@ def test_length_after_retry_clears_stale_model_error() -> None:
         state = fold_model_error(event, state)
     assert state is None
     assert fold_model_error(_LENGTH_WITH_ERROR, None) == "boom"
+
+
+def test_truncation_facts_ride_result_metadata(tmp_path: Path) -> None:
+    """#865：触顶计数与 last_stop 随 result metadata 上报（Host 落 outcome_json
+    的 DB 归因面）——续写恢复、判 completed 的 run 也携带；未触顶的 run 不带该键。"""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _write_events(
+        work_root,
+        [_assistant("length"), _assistant("stop"), {**_VALIDATION, "missing": []}, _END],
+    )
+    report = _report(work_root, exit_code=0)
+    assert report["status"] == "completed"
+    assert report["output_truncation"] == {"count": 1, "last_stop": "stop"}
+
+    clean_root = tmp_path / "clean"
+    _execution_dir(clean_root)
+    _write_events(clean_root, [_assistant("stop"), {**_VALIDATION, "missing": []}, _END])
+    clean_report = _report(clean_root, exit_code=0)
+    assert clean_report["status"] == "completed"
+    assert "output_truncation" not in clean_report

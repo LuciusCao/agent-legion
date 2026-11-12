@@ -145,6 +145,16 @@ describe('workflowStudioYamlDraft node patches', () => {
     expect(normalizeNodeSkill({ key: ' ' })).toBeNull()
   })
 
+  it('tolerates non-string skill key/ref instead of crashing (#1258 codex 四轮 P1 同族)', () => {
+    // skill: {key: 5}（合法 YAML 异形，编辑中途可达）——(key ?? '').trim()
+    // 对数字抛 TypeError，record 映射（形状守卫之后）与 WorkflowNodePreview
+    // 渲染期直连都崩。非字符串 key/ref 按未声明归一。
+    expect(normalizeNodeSkill({ key: 5 as unknown as string })).toBeNull()
+    expect(
+      normalizeNodeSkill({ key: 'demo/review', ref: true as unknown as string })
+    ).toEqual({ key: 'demo/review', ref: 'latest' })
+  })
+
   it('patches node execution settings and removes empty inheritance values', () => {
     const configured = patchWorkflowNodeExecution(
       yaml,

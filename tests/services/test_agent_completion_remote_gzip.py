@@ -26,6 +26,7 @@ from server.app.db.schema import init_db
 from server.app.db.transaction import write_transaction
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
 from tests.fakes.artifact_keys import pin_legacy_authority_keys
+from tests.fakes.artifact_rows import seed_artifact_row
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -243,7 +244,8 @@ def test_finish_rerun_form_change_raw_to_gzip(tmp_path: Path) -> None:
     storage.objects[GZ_STAGING_KEY] = GZ_PAYLOAD
     handler, leases, _, object_store, job_dir = _make_handler(tmp_path, storage)
     # 上一次运行的存量清单行（裸形态）。
-    object_store.record_remote(
+    seed_artifact_row(
+        object_store,
         workspace_id="ws-1",
         job_id="job-1",
         node_key="node_a",
@@ -293,6 +295,22 @@ def test_verify_remote_accepts_both_staging_key_forms(tmp_path: Path) -> None:
             storage_key="jobs-staging/ws-1/job-1/other-exec/out.json.gz",
             size_bytes=len(GZ_PAYLOAD),
             execution_id="exec-1",
+        )
+
+
+def test_verify_remote_rejects_legacy_fixed_authority_key() -> None:
+    """#1309：裸 authority 核验臂已退役；对象存在且尺寸匹配也不能重开。"""
+    storage = FakeStorage()
+    storage.objects[AUTHORITY_KEY] = PAYLOAD
+    object_store = JobArtifactObjectStore(TEST_DATABASE_URL, storage)
+
+    with pytest.raises(ValueError, match="execution id is required"):
+        object_store.verify_remote(
+            workspace_id="ws-1",
+            job_id="job-1",
+            name="out.json",
+            storage_key=AUTHORITY_KEY,
+            size_bytes=len(PAYLOAD),
         )
 
 

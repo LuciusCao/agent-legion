@@ -1,6 +1,26 @@
-import { Button } from '@mui/material'
+import { Button, Tooltip } from '@mui/material'
 import type { JobSummary, UpgradeMode } from '../../types'
 import { JobActionBarUpgrade } from './JobActionBarUpgrade'
+
+export function JobRunToAction({
+  disabled,
+  allMatching,
+  onOpen,
+}: {
+  disabled: boolean
+  allMatching: boolean
+  onOpen: () => void
+}) {
+  return (
+    <Tooltip title={allMatching ? '全量选择模式下不可用' : ''}>
+      <span>
+        <Button variant="outlined" onClick={onOpen} disabled={disabled}>
+          运行到
+        </Button>
+      </span>
+    </Tooltip>
+  )
+}
 
 export interface JobActionBarBatchButtonsProps {
   allMatching: boolean

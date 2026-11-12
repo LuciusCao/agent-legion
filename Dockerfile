@@ -30,8 +30,9 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 # g++：兜底编译无预编译 wheel 的 sdist 依赖。
 # ffmpeg：视频管线（转写前转 wav、章节切片、yt-dlp 合并）在 host 上直接调用。
+# git：SkillManager 在 host 上解析 latest/pinned 并用 git archive 物化 skill。
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends g++ ffmpeg \
+    && apt-get install -y --no-install-recommends g++ ffmpeg git \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 COPY pyproject.toml uv.lock ./
@@ -83,11 +84,16 @@ COPY worker /app/worker
 COPY shared /app/shared
 COPY worker/client.py /usr/local/bin/agent_worker_client.py
 COPY worker/cli_args.py /usr/local/bin/agent_worker_cli_args.py
+COPY worker/cli_payload.py /usr/local/bin/agent_worker_cli_payload.py
 COPY --chmod=755 worker/cli.py /usr/local/bin/workerctl
 # Smoke: the image must be able to import every worker entry point;
 # a missing COPY fails the build here instead of crash-looping at runtime.
 RUN python3 -c "import worker.service, worker.executor, worker.upload.queue"
 ENV PYTHONUNBUFFERED=1
+# Worker state dir (#1106): the single source for both the service and
+# `workerctl` (their --state-dir defaults read it), so `docker compose exec
+# worker workerctl status` finds control_token without extra flags.
+ENV AGENT_WORKER_STATE_DIR=/var/lib/agent-legion-worker-control
 EXPOSE 8787
 ENTRYPOINT ["python3", "-m", "worker.service"]
-CMD ["--config", "/etc/agent-legion/worker.yaml", "--state-dir", "/var/lib/agent-legion-worker-control", "--host", "0.0.0.0", "--port", "8787"]
+CMD ["--config", "/etc/agent-legion/worker.yaml", "--host", "0.0.0.0", "--port", "8787"]

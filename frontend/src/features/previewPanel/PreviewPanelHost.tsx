@@ -21,7 +21,9 @@
  *   外带通道，与 fetch/sendBeacon 同罪；收紧后图源只剩 data: 内联与平台
  *   origin，两处都是实际引用面：预览 bundle 无外链图（内置面板的消毒器
  *   只产出 https 远程图——收紧后这类图随 CSP 一起失效降级为空，属安全
- *   收敛的预期取舍））+ connect-src 限平台 origin。
+ *   收敛的预期取舍））+ media-src blob:（#1146：面板经桥 readArtifactBytes
+ *   取媒体字节后自建 blob URL 播放——blob 只能由面板本帧脚本创建，字节
+ *   全部来自桥，不构成出站面）+ connect-src 限平台 origin。
  *   宿主文档自身的 HTTP 头策略也被 srcdoc 继承：#989 起其 script-src 是
  *   per-response nonce，bundle 的 <script> 由 panelCsp.ts 盖章放行，inline
  *   事件属性（onclick=）被拦截并经 csp-violation 探针提示。
@@ -33,27 +35,56 @@
  *   数据）与 `<link rel="dns-prefetch">`/`rel="preconnect"` 的域名探测。
  *   fetch/sendBeacon/img/子资源/表单通道已闭合；导航/WebRTC/dns-prefetch
  *   通道作为接受的残留记录于此（均携带量有限——只能带出脚本已知的数据，
- *   不能读取响应）。
- * - 桥只暴露只读方法（listArtifacts/readArtifact/getJobDetail），返回的都是
- *   当前页面用户本来就有权看到的数据；写操作（发布/归档/改配置）不走桥。
- * - 消息鉴别：opaque origin 的 event.origin 恒为 "null"，不能用来鉴权——
- *   宿主钉住 event.source === iframe.contentWindow 再校验 source 标记；
- *   回包 postMessage(..., '*') 的目标窗口由 contentWindow 引用钉死，不会
- *   投递到其他窗口。
+ *   不能读取响应）。#1178 复审 P1 起**导航本身即撤销桥**：导航后的文档
+ *   （同 WindowProxy）不再能冒用桥读取任务数据，导航残留只剩 URL query
+ *   携带的、导航前脚本已知的数据。
+ * - 桥只暴露只读方法（listArtifacts/readArtifact/readArtifactBytes/
+ *   getJobDetail，方法体见 bridgeRequestHandler.ts），返回的都是当前页面
+ *   用户本来就有权看到的数据（readArtifactBytes 复用 raw 端点的会话鉴权，
+ *   512 MiB 内存护栏防大文件整读；bytes 经 postMessage transfer 零拷贝
+ *   转移给面板帧）；写操作（发布/归档/改配置）不走桥。
+ *   init 消息带 capabilities 声明（基础三法之外的增量方法，#1146）——
+ *   守卫白名单对未知 method 静默丢弃，面板无法靠探测发现新方法。
+ * - 消息鉴别（#1178 codex 复审 P1，第 4 轮收口）：opaque origin 的
+ *   event.origin 恒为 "null"，不能用来鉴权；而 sandbox iframe 自导航前后
+ *   WindowProxy 同一——窗口通道（event.source === contentWindow + source
+ *   标记）对「导航后文档的伪造消息」**不可闭合**。因此按数据敏感度分通道：
+ *   基础方法（文本量级，泄漏面与修复前等价）与控制消息（ready/
+ *   csp-violation/resize）保留 window 通道兼容存量面板；**媒体字节通道
+ *   （readArtifactBytes，可外传任意产物字节）只走 MessagePort**，且端口的
+ *   发放绑定初始 srcdoc 文档——宿主注入的 bootstrap（head 第一个脚本，
+ *   先于 bundle 任何代码执行）自建 Channel、闭包持有面板侧端口、把另一端
+ *   上交宿主（byteBridgeBootstrap.ts）；宿主每个挂载只接受第一次上交
+ *   （portBridge.ts，排序即鉴别：导航后文档的伪造上交必然晚到被拒——
+ *   该排序成立的前提是监听器先于 iframe 任何脚本注册：消息监听挂在
+ *   useLayoutEffect 上，DOM 提交同一任务内就位，先于 srcdoc 解析任务，
+ *   #1178 第 9 轮），init 重发只带数据、永不重新发放端口。面板自导航
+ *   销毁初始文档 global，闭包端口随之失效；同挂载内的第二次 load
+ *   （= 自导航——宿主改 srcdoc 走 key 整树重挂）再触发纵深撤销：
+ *   关端口、停窗口通道、下架帧内容。
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useTheme, type Theme } from '@mui/material/styles'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { useTheme } from '@mui/material/styles'
 import katexCssUrl from 'katex/dist/katex.min.css?url'
 import katexJsUrl from 'katex/dist/katex.min.js?url'
-import { fetchJobArtifact } from '../../api'
 import { useJobDetailQuery } from '../../hooks/useJobDetailQuery'
-import type { JobDetail } from '../../types/jobTypes'
 import {
-  isPanelToHostMessage,
+  PREVIEW_HOST_CAPABILITIES,
   PREVIEW_HOST_SOURCE,
   type PreviewHostInitMessage,
 } from './bridge'
+import { createBytePortAcceptor, type BytePortAcceptor } from './portBridge'
+import { createWindowMessageListener } from './windowBridge'
 import { buildPanelCsp, injectPanelCsp, readDocumentCspNonce } from './panelCsp'
+import { buildPreviewThemeVariables } from './previewThemeVars'
+import type { JobDetail } from '../../types/jobTypes'
 import styles from './PreviewPanelHost.module.css'
 
 const MIN_HEIGHT = 120
@@ -66,27 +97,16 @@ const CSP_BLOCKED_HINT =
   '可让 agent 按最新面板规范（用 addEventListener 绑定事件）重写面板，' +
   '或在「全局设置 → 实例设置 → 安全」中临时开启预览面板兼容模式。'
 
+// 面板自导航后的下架提示（#1178 codex 复审 P1 纵深撤销）：帧内容已不可信。
+const NAVIGATED_AWAY_HINT =
+  '此预览面板的脚本触发了页面跳转，已与任务数据断开连接（安全保护）。' +
+  '请联系管理员重新发布面板，或恢复默认面板。'
+
 export interface PreviewPanelHostProps {
   jobId: string
   /** 完整 HTML 文档 bundle（已发布版本或草稿预览）。 */
   html: string
   title?: string
-}
-
-/** 桥注入的主题变量：面板 CSS 用 var(--pp-*) 跟随平台观感。 */
-function buildThemeVariables(theme: Theme): Record<string, string> {
-  return {
-    '--pp-bg': theme.palette.background.default,
-    '--pp-surface': theme.palette.background.paper,
-    '--pp-text': theme.palette.text.primary,
-    '--pp-text-secondary': theme.palette.text.secondary,
-    '--pp-accent': theme.palette.primary.main,
-    '--pp-on-accent': theme.palette.primary.contrastText,
-    '--pp-error': theme.palette.error.main,
-    '--pp-border': theme.palette.divider,
-    '--pp-radius': `${theme.shape.borderRadius * 2}px`,
-    '--pp-font-family': theme.typography.fontFamily ?? 'sans-serif',
-  }
 }
 
 export function PreviewPanelHost({
@@ -103,21 +123,46 @@ export function PreviewPanelHost({
   // （替代 #11 时代面板内部的 artifact 重取；bundle 侧约定 init 即重渲染）。
   const readyRef = useRef(false)
   const nodeSignatureRef = useRef<string | null>(null)
+  // 字节桥端口（#1178 codex 复审 P1 收口）：不由宿主发放——注入 bootstrap
+  // 在初始文档解析期自建 Channel 并上交（byteBridgeBootstrap.ts），acceptor
+  // 每个挂载只接受第一次上交（portBridge.ts）。acceptor 在事件处理器里惰性
+  // 创建；detail 经 ref 读取，port 存活期内响应的永远是当前快照。
+  const detailRef = useRef<JobDetail | undefined>(undefined)
+  const acceptorRef = useRef<BytePortAcceptor | null>(null)
+  // 第二次 load = 面板自导航（宿主改 srcdoc 走 key 整树重挂，同一挂载里只
+  // 有一次初始 load）→ 纵深撤销：关端口、停窗口通道、下架帧内容。
+  const seenLoadRef = useRef(false)
+  const [navigatedAway, setNavigatedAway] = useState(false)
+  const navigatedRef = useRef(false)
 
   const initMessage = useMemo<PreviewHostInitMessage>(
     () => ({
       source: PREVIEW_HOST_SOURCE,
       type: 'init',
       jobId,
-      theme: buildThemeVariables(theme),
+      theme: buildPreviewThemeVariables(theme),
       assets: {
         // bundle 可按需懒加载平台构建产物（LaTeX 等）；缺失时必须自行降级。
         katexCssUrl: new URL(katexCssUrl, window.location.origin).href,
         katexJsUrl: new URL(katexJsUrl, window.location.origin).href,
       },
+      // 基础三法之外的增量能力（#1146）：面板据此同步分支，旧面板零影响。
+      capabilities: PREVIEW_HOST_CAPABILITIES,
     }),
     [jobId, theme]
   )
+
+  /**
+   * 下发 init（#1178 P1 收口后只带数据）：窗口通道 postMessage，无端口、
+   * 无能力。字节桥端口由初始文档的 bootstrap 上交、存活期内持续有效，
+   * 重发 init 只是「重取数据」信号，永不伴随新能力发放。
+   */
+  const sendInit = useCallback(() => {
+    const frame = iframeRef.current
+    const target = frame?.contentWindow
+    if (!target) return
+    target.postMessage(initMessage, '*')
+  }, [initMessage])
 
   // 面板内脚本被宿主严格 CSP 拦截（多为 inline 事件属性，#989）——提示而
   // 非静默失效。
@@ -141,94 +186,59 @@ export function PreviewPanelHost({
       nodeSignatureRef.current !== null &&
       nodeSignatureRef.current !== signature
     ) {
-      iframeRef.current?.contentWindow?.postMessage(initMessage, '*')
+      sendInit()
     }
     nodeSignatureRef.current = signature
-  }, [detail, initMessage])
+  }, [detail, initMessage, sendInit])
 
-  useEffect(() => {
-    function respond(
-      id: number,
-      ok: boolean,
-      payload?: unknown,
-      error?: string
-    ) {
-      iframeRef.current?.contentWindow?.postMessage(
-        {
-          source: PREVIEW_HOST_SOURCE,
-          type: 'response',
-          id,
-          ok,
-          ...(ok ? { payload } : { error: error ?? 'unknown error' }),
+  // 卸载即关闭字节桥端口（acceptor 惰性创建，可能从未接受过上交）。
+  useEffect(() => () => acceptorRef.current?.close(), [])
+
+  // 监听器注册用布局效应而非被动效应（#1178 codex 复审 P1，第 9 轮）：
+  // iframe 元素插入 DOM（提交阶段）即触发 srcdoc 解析任务排队，被动
+  // useEffect 的 flush 排在其后——bootstrap 的 byte-port-offer 会在注册
+  // 前投递并丢失，此后导航后文档的伪造 offer 就成了 acceptor 首次观察
+  // 到的 offer 被接受，「首次-only」边界被绕过。布局效应在 DOM 提交
+  // 同一任务内同步执行、先于 iframe 解析任务：真实 bootstrap 的 offer
+  // 永不丢失，首次观察到的一定是它（ready 握手的同源竞态一并消除——
+  // 早发 ready 曾可能同样丢失导致面板空白）。
+  useLayoutEffect(() => {
+    // detail 进 ref：字节桥 port 的存活期跨多次 detail 刷新，port 通道的
+    // 响应读当前快照（窗口通道每次 effect 重建本就用最新闭包）。
+    detailRef.current = detail
+    // 窗口通道消息处理在 windowBridge.ts（#1178 双通道分工）；本 effect
+    // 钉来源（event.source === frame.contentWindow——基础方法与控制消息
+    // 的窗口级鉴别）、先让 acceptor 消费字节桥 port 上交（含拒绝伪造），
+    // 检出导航后窗口通道整体撤销（字节桥端口由 acceptor.close 处理）。
+    const onMessage = createWindowMessageListener(
+      {
+        onReady: () => {
+          readyRef.current = true
+          nodeSignatureRef.current = (detail?.nodes ?? [])
+            .map((node) => `${node.node_key}:${node.status}`)
+            .join('|')
+          sendInit()
         },
-        '*'
-      )
-    }
-    async function handleRequest(
-      id: number,
-      method: string,
-      params: { name?: string } | undefined,
-      currentDetail: JobDetail | undefined
-    ) {
-      try {
-        switch (method) {
-          case 'listArtifacts':
-            respond(id, true, currentDetail?.artifacts ?? [])
-            return
-          case 'getJobDetail':
-            respond(id, true, currentDetail ?? null)
-            return
-          case 'readArtifact': {
-            const name = params?.name
-            if (!name) {
-              respond(id, false, undefined, 'readArtifact requires params.name')
-              return
-            }
-            respond(id, true, await fetchJobArtifact(jobId, name))
-            return
-          }
-          default:
-            respond(id, false, undefined, `unknown bridge method: ${method}`)
-        }
-      } catch (error) {
-        respond(
-          id,
-          false,
-          undefined,
-          error instanceof Error ? error.message : String(error)
-        )
-      }
-    }
-
-    function onMessage(event: MessageEvent) {
+        onCspViolation: () => setScriptBlocked(true),
+        onResize: (h) =>
+          setHeight(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(h)))),
+      },
+      { jobId, detail }
+    )
+    const guarded = (event: MessageEvent) => {
       const frame = iframeRef.current
       if (!frame || event.source !== frame.contentWindow) return
-      const data: unknown = event.data
-      if (!isPanelToHostMessage(data)) return
-      if (data.type === 'ready') {
-        readyRef.current = true
-        nodeSignatureRef.current = (detail?.nodes ?? [])
-          .map((node) => `${node.node_key}:${node.status}`)
-          .join('|')
-        frame.contentWindow?.postMessage(initMessage, '*')
-        return
-      }
-      if (data.type === 'csp-violation') {
-        setScriptBlocked(true)
-        return
-      }
-      if (data.type === 'resize') {
-        setHeight(
-          Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.round(data.height)))
-        )
-        return
-      }
-      void handleRequest(data.id, data.method, data.params, detail)
+      acceptorRef.current ??= createBytePortAcceptor({
+        jobId,
+        getDetail: () => detailRef.current,
+      })
+      if (acceptorRef.current.handleMessage(event)) return
+      if (navigatedRef.current) return
+      onMessage(event)
     }
-
-    window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
-  }, [jobId, detail, initMessage])
+    window.addEventListener('message', guarded)
+    return () => window.removeEventListener('message', guarded)
+  }, [jobId, detail, initMessage, sendInit])
 
   return (
     <div className={styles.wrapper} data-testid="preview-panel-host">
@@ -238,17 +248,36 @@ export function PreviewPanelHost({
           {CSP_BLOCKED_HINT}
         </div>
       )}
-      <iframe
-        ref={iframeRef}
-        className={styles.frame}
-        title={title ?? '自定义预览面板'}
-        // 安全红线见文件头注释：allow-scripts 可授，allow-same-origin 永不授；
-        // 出站网络由注入的 CSP meta 钉死（见 panelCsp.ts）。
-        sandbox="allow-scripts"
-        srcDoc={framedHtml}
-        style={{ height }}
-        onLoad={() => setLoading(false)}
-      />
+      {navigatedAway ? (
+        <div className={styles.cspWarning} role="status">
+          {NAVIGATED_AWAY_HINT}
+        </div>
+      ) : (
+        <iframe
+          ref={iframeRef}
+          className={styles.frame}
+          title={title ?? '自定义预览面板'}
+          // 安全红线见文件头注释：allow-scripts 可授，allow-same-origin 永不授；
+          // 出站网络由注入的 CSP meta 钉死（见 panelCsp.ts）。
+          sandbox="allow-scripts"
+          srcDoc={framedHtml}
+          style={{ height }}
+          onLoad={() => {
+            setLoading(false)
+            if (seenLoadRef.current) {
+              // 第二次 load = 面板自导航（宿主在同一挂载里只写一次 srcDoc，
+              // bundle 内容变化走 key 整树重挂）→ 纵深撤销：关字节桥端口、
+              // 停窗口通道、下架帧内容。字节桥的正确性不依赖本判定——能力
+              // 只发给初始文档（首次上交），导航后的文档既无端口也领不到。
+              navigatedRef.current = true
+              acceptorRef.current?.close()
+              setNavigatedAway(true)
+              return
+            }
+            seenLoadRef.current = true
+          }}
+        />
+      )}
     </div>
   )
 }

@@ -61,6 +61,22 @@ describe('WorkflowStudioDraftSaveControl', () => {
     expect(onRetrySave).toHaveBeenCalledOnce()
   })
 
+  it('#1204：terminal 失败（4xx/退避耗尽）不承诺自动重试，仍保留显式「重试保存」出口', () => {
+    const onRetrySave = vi.fn()
+    render(
+      <WorkflowStudioDraftSaveControl
+        save={{ status: 'error', savedAt: null, saveError: 'terminal' }}
+        readOnly={false}
+        onRetrySave={onRetrySave}
+      />
+    )
+    expect(
+      screen.getByText('草稿保存失败，不会自动重试——请修改内容或点击重试')
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试保存' }))
+    expect(onRetrySave).toHaveBeenCalledOnce()
+  })
+
   it('codex 轮 5 P2：loadError（GET 失败）不给重试保存（重试的是读取侧）', () => {
     render(
       <WorkflowStudioDraftSaveControl
@@ -153,5 +169,39 @@ describe('WorkflowStudioDraftSaveControlContainer', () => {
     fireEvent.click(screen.getByRole('button', { name: '保留本页编辑' }))
 
     expect(resolveConflict).toHaveBeenCalledWith(true)
+  })
+
+  it('空内容冲突（发布删行后的 409）的「采用」重置到 canonical 并按冲突代次重建基线（#1226 复审 P1）', () => {
+    /* 发布代次机制下，发布前已发出的 PUT 收到 current_draft 全 null 的
+       409——服务端没有草稿可采用。旧的「仅解除警示」让 controller 收敛
+       saved/idle 而画布仍是未落盘文本，关页即静默丢失。采用 = 画布回到
+       已发布 canonical，CAS 基线推进到冲突携带的发布后代次。 */
+    const resolveConflict = vi.fn()
+    const adoptServerDraft = vi.fn()
+    vi.mocked(useStudioState).mockReturnValue({
+      draftSave: {
+        status: 'idle',
+        savedAt: null,
+        conflict: true,
+        conflictDraftYaml: null,
+        conflictDraftHash: null,
+        conflictDraftGeneration: 5,
+      },
+      readOnly: false,
+      originalYaml: 'key: demo\nlabel: Canonical\n',
+      resolveConflict,
+      adoptServerDraft,
+    } as unknown as ReturnType<typeof useStudioState>)
+
+    render(<WorkflowStudioDraftSaveControlContainer />)
+    fireEvent.click(screen.getByRole('button', { name: '采用 Agent 版本' }))
+
+    expect(adoptServerDraft).toHaveBeenCalledWith(
+      'key: demo\nlabel: Canonical\n',
+      null,
+      null,
+      5
+    )
+    expect(resolveConflict).not.toHaveBeenCalled()
   })
 })

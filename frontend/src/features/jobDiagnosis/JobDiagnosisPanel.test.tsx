@@ -20,6 +20,28 @@ vi.mock('../../api/jobApi', () => ({
   runToJob: vi.fn(),
 }))
 
+// #1120 codex 二轮 P1：渲染计数探针——MessageItem 的 memo 命中时叶子
+// TextBubble 不会被调用；计数增长即 memo 被穿透（本入口的典型来源：
+// onApplyWorkflowDraft 内联 noop 每个流式 chunk 重建）。
+const textRenders = vi.hoisted(() => new Map<string, number>())
+vi.mock(
+  '../workflowStudio/chat/StudioChatTextBubble',
+  async (importOriginal) => {
+    const mod =
+      await importOriginal<
+        typeof import('../workflowStudio/chat/StudioChatTextBubble')
+      >()
+    const Bubble = mod.StudioChatTextBubble
+    return {
+      StudioChatTextBubble: (props: Parameters<typeof Bubble>[0]) => {
+        const id = props.message.id
+        textRenders.set(id, (textRenders.get(id) ?? 0) + 1)
+        return <Bubble {...props} />
+      },
+    }
+  }
+)
+
 const mockApi = vi.mocked(chatApi)
 const mockConfigApi = vi.mocked(configApi)
 const mockJobApi = vi.mocked(jobApi)
@@ -75,6 +97,7 @@ describe('JobDiagnosisPanel', () => {
 
   beforeEach(() => {
     testClient = createTestQueryClient()
+    textRenders.clear()
     EventSourceMock.reset()
     globalThis.EventSource = EventSourceMock as unknown as typeof EventSource
     vi.clearAllMocks()
@@ -548,5 +571,35 @@ describe('JobDiagnosisPanel', () => {
     expect(
       screen.queryByRole('button', { name: '继续对话' })
     ).not.toBeInTheDocument()
+  })
+
+  it('#1120 codex 二轮 P1：流式 chunk 不重渲染未触动的消息行（排查面板传入的草稿回调引用稳定）', async () => {
+    await renderReadyPanel()
+    // 两条完整消息经 SSE 落行（带 seq 直接插入，不触发补齐）。
+    emit({ type: 'message', message: agentTextMessage('m1', 10, '第一句') })
+    emit({ type: 'message', message: agentTextMessage('m2', 11, '前半') })
+    await screen.findByText('第一句')
+    await screen.findByText('前半')
+    const before = {
+      untouched: textRenders.get('m1') ?? 0,
+      streaming: textRenders.get('m2') ?? 0,
+    }
+    expect(before.untouched).toBeGreaterThan(0)
+
+    // 三个流式 chunk 打在 m2 上；m1 行渲染计数不得增长。
+    for (const text of ['前半，接', '前半，接一句', '前半，接一句半']) {
+      emit({
+        type: 'message',
+        message: {
+          id: 'm2',
+          session_id: 's9',
+          kind: 'text',
+          role: 'agent',
+          content: { text },
+        },
+      })
+    }
+    expect(textRenders.get('m1')).toBe(before.untouched)
+    expect(textRenders.get('m2')!).toBeGreaterThan(before.streaming)
   })
 })

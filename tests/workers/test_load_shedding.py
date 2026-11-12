@@ -4,13 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from worker.load_shedding import (
-    LoadSampler,
-    LoadShedder,
-    concurrency_capacity_warning,
-    load_budget_factor,
-    shed_value,
-)
+from worker.load_shedding import LoadSampler, LoadShedder, load_budget_factor, shed_value
 
 pytestmark = pytest.mark.no_db
 
@@ -61,7 +55,7 @@ def test_shedder_decays_budget_and_logs_transitions(monkeypatch: pytest.MonkeyPa
     logs: list[str] = []
     load = [4.0]
     sampler = LoadSampler(probe=lambda: (load[0], 0.0, 0.0))
-    shedder = LoadShedder(4, log=logs.append, sampler=sampler)
+    shedder = LoadShedder(log=logs.append, sampler=sampler)
     monkeypatch.setattr("worker.load_shedding.os.cpu_count", lambda: 8)
     budget = {"agent": 6, "code": 2}
     # load ≤ cores: passthrough (same object), no log.
@@ -89,14 +83,6 @@ def test_shedder_decays_budget_and_logs_transitions(monkeypatch: pytest.MonkeyPa
 
 def test_shedder_passes_through_when_load_unknown() -> None:
     sampler = LoadSampler(probe=lambda: (_ for _ in ()).throw(OSError()))
-    shedder = LoadShedder(4, log=lambda line: None, sampler=sampler)
+    shedder = LoadShedder(log=lambda line: None, sampler=sampler)
     budget = {"agent": 3, "code": 1}
     assert shedder.shed(budget) == budget
-
-
-def test_capacity_warning_threshold() -> None:
-    assert concurrency_capacity_warning(8, 8) is None
-    assert concurrency_capacity_warning(32, 8) is None
-    warning = concurrency_capacity_warning(33, 8)
-    assert warning is not None and "max_concurrency=33" in warning
-    assert concurrency_capacity_warning(100, 0) is None  # cores undetectable

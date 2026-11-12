@@ -40,6 +40,7 @@ def claim_with_retry(
     worker_id: str,
     declared_max_concurrency: int | None,
     declared_max_code_concurrency: int | None,
+    declared_node_limits: dict[str, int] | None = None,
 ) -> ClaimOutcome:
     """Run the single claim transaction, retrying one SQLSTATE 40P01.
 
@@ -60,6 +61,7 @@ def claim_with_retry(
                     worker_id,
                     declared_max_concurrency,
                     declared_max_code_concurrency,
+                    declared_node_limits,
                 )
         except Error as exc:
             if getattr(exc, "sqlstate", None) != "40P01" or attempt >= _CLAIM_DEADLOCK_RETRIES:

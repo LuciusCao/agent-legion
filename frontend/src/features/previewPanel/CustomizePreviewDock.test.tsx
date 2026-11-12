@@ -21,6 +21,28 @@ import { TestQueryProvider } from '../../testing/testQueryClient'
 vi.mock('../workflowStudio/chat/studioChatApi')
 vi.mock('../workflowStudio/chat/studioChatResumeApi')
 
+// #1120 codex 二轮 P1：渲染计数探针——MessageItem 的 memo 命中时叶子
+// TextBubble 不会被调用；计数增长即 memo 被穿透（本入口的典型来源：
+// onApplyWorkflowDraft 内联 noop 每个流式 chunk 重建）。
+const textRenders = vi.hoisted(() => new Map<string, number>())
+vi.mock(
+  '../workflowStudio/chat/StudioChatTextBubble',
+  async (importOriginal) => {
+    const mod =
+      await importOriginal<
+        typeof import('../workflowStudio/chat/StudioChatTextBubble')
+      >()
+    const Bubble = mod.StudioChatTextBubble
+    return {
+      StudioChatTextBubble: (props: Parameters<typeof Bubble>[0]) => {
+        const id = props.message.id
+        textRenders.set(id, (textRenders.get(id) ?? 0) + 1)
+        return <Bubble {...props} />
+      },
+    }
+  }
+)
+
 const mockChatApi = vi.mocked(chatApi)
 
 // 该 jsdom 环境不提供 localStorage：用内存 stub（Dock 容器按 surface key
@@ -84,6 +106,7 @@ function renderDock(workspaceId = 'ws1') {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  textRenders.clear()
   // Dock 容器按 surface key 记忆位置/折叠态：用例间不互相泄漏。
   localStorageStub.clear()
   EventSourceMock.reset()
@@ -306,5 +329,60 @@ describe('CustomizePreviewDock', () => {
       await screen.findByRole('button', { name: '继续对话' })
     ).toBeInTheDocument()
     expect(screen.getByLabelText('消息输入')).toBeDisabled()
+  })
+
+  it('#1120 codex 二轮 P1：流式 chunk 不重渲染未触动的消息行（Dock 传入的草稿回调引用稳定）', async () => {
+    mockChatApi.fetchStudioChatAgents.mockResolvedValue([
+      { id: 'kimi', label: 'Kimi' },
+    ] as never)
+    mockChatApi.fetchStudioChatSessions.mockResolvedValue([sessionRecord()])
+    mockChatApi.fetchStudioChatMessages.mockResolvedValue([
+      {
+        id: 'm1',
+        session_id: 's1',
+        kind: 'text',
+        role: 'user',
+        content: { text: '问题' },
+        seq: 1,
+        created_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'm2',
+        session_id: 's1',
+        kind: 'text',
+        role: 'agent',
+        content: { text: '前半' },
+        seq: 2,
+        created_at: '2026-01-01T00:00:00Z',
+      },
+    ] as never)
+    renderDock()
+    await screen.findByText('问题')
+    await screen.findByText('前半')
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    const before = {
+      untouched: textRenders.get('m1') ?? 0,
+      streaming: textRenders.get('m2') ?? 0,
+    }
+    expect(before.untouched).toBeGreaterThan(0)
+
+    // 三个流式 chunk 打在 m2 上；m1 行渲染计数不得增长。
+    const source = EventSourceMock.instances[0]
+    for (const text of ['前半，接', '前半，接一句', '前半，接一句半']) {
+      act(() => {
+        source.emitMessage({
+          type: 'message',
+          message: {
+            id: 'm2',
+            session_id: 's1',
+            kind: 'text',
+            role: 'agent',
+            content: { text },
+          },
+        })
+      })
+    }
+    expect(textRenders.get('m1')).toBe(before.untouched)
+    expect(textRenders.get('m2')!).toBeGreaterThan(before.streaming)
   })
 })

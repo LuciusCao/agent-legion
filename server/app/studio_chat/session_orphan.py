@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Never
 from server.app.services.job_errors import ConflictError
 
 if TYPE_CHECKING:
+    from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
 
 SESSION_INTERRUPTED_CODE = "studio_chat_session_interrupted"
@@ -58,9 +59,14 @@ def reject_orphaned_session(
     runtime is still registered and open, so a new runtime that fails
     (on_error rewriting the detail) or exits (on_exit tearing down while the
     row still carries this stamp) is never rolled back to the stale observed
-    status with no runtime behind it. The timeline event is appended only
-    while the row still says error (atomic predicate), so a resume claiming
-    the row after the recheck never inherits a stale error event.
+    status with no runtime behind it; such a gone generation leaves the stamp
+    owned by this request, which then completes the projection like the
+    no-runtime case (event + snapshot + structured 409, #1095). The timeline
+    event is appended only while the row still carries this request's own
+    stamp (status error AND the orphan detail, one atomic predicate), so a
+    resume claiming the row after the recheck — or a further generation that
+    then failed and stamped its own detail — never inherits a stale orphan
+    error event.
     """
     status = str(session["status"])
     if status == "starting":
@@ -69,28 +75,54 @@ def reject_orphaned_session(
         session_id, status_in=(status,), status="error", error_detail=ORPHAN_ERROR_DETAIL
     ):
         rt = service.runtime(session_id)
-        if rt is not None:
-            with rt.lock:
-                if service.runtime(session_id) is rt and not rt.closed:
-                    service.db.update_studio_chat_session_if(
-                        session_id,
-                        status_in=("error",),
-                        error_detail_is=ORPHAN_ERROR_DETAIL,
-                        status=status,
-                        error_detail=session.get("error_detail") or "",
-                    )
+        if rt is not None and _roll_back_under_live_generation(service, session_id, rt, session):
             raise ConflictError("Chat session was resumed concurrently; retry")
-        # The event rides the #915 atomic live-guarded append: a resume that
-        # claimed the row (error -> starting) after the recheck above makes
-        # the insert a no-op, and one racing it waits on the FOR SHARE lock
-        # — a stale error never lands after (or is pushed into) a resumed
-        # session.
+        # No live generation behind the stamp: either none was registered, or
+        # the one the recheck saw exited before its lock was taken (#1095) —
+        # its on_exit skipped the projection because the row already carried
+        # this stamp, so this request owns the event + snapshot.
+        # The event rides the #915 atomic live-guarded append, pinned to this
+        # request's own stamp (status error + orphan detail): a resume that
+        # claimed the row (error -> starting) — even one whose new runtime
+        # then failed back to error with its own detail, already projected by
+        # its on_error — makes the insert a no-op, and one racing it waits on
+        # the FOR SHARE lock, so a stale orphan error never lands after (or
+        # is pushed into) a resumed session.
         if service.store.append_message_if_live(
             session_id,
             "status",
             "system",
             {"event": "error", "detail": ORPHAN_ERROR_DETAIL},
             ("error",),
+            error_detail_is=ORPHAN_ERROR_DETAIL,
         ):
             service.store.publish_session(session_id)
     raise StudioChatSessionInterruptedError(session_id)
+
+
+def _roll_back_under_live_generation(
+    service: StudioChatService,
+    session_id: str,
+    rt: SessionRuntime,
+    session: dict[str, Any],
+) -> bool:
+    """Undo this request's orphan stamp while ``rt`` is still the registered,
+    open generation, under its lock (on_exit holds it end to end), and report
+    whether it was — the caller then answers a retry conflict. The undo is
+    pinned by ``error_detail_is``, so a real failure that generation's
+    on_error wrote over the stamp is never rolled back. ``False`` means the
+    generation exited/was replaced before the lock was taken: the stamp (if
+    still there) is this request's to project, which the caller's
+    stamp-pinned atomic append decides.
+    """
+    with rt.lock:
+        if service.runtime(session_id) is not rt or rt.closed:
+            return False
+        service.db.update_studio_chat_session_if(
+            session_id,
+            status_in=("error",),
+            error_detail_is=ORPHAN_ERROR_DETAIL,
+            status=str(session["status"]),
+            error_detail=session.get("error_detail") or "",
+        )
+        return True

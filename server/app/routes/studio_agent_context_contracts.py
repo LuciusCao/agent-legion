@@ -33,16 +33,16 @@ class StudioContextWorkflow(BaseModel):
 class StudioChatContextResponse(BaseModel):
     """What the get_studio_context MCP tool returns: the session's bound
     workspace, the human's live Studio node selection, the canvas' unpublished
-    workflow draft (None until the frontend pushes it), the draft row's
-    ``updated_at`` (kimi review P2-5: the CAS token for a subsequent
-    ``save_workflow_draft`` — the session-pushed draft_yaml alone carries
-    no baseline; None = never-saved), and the active workflow's structure.
-    ``workflow`` is None when nothing is published yet."""
+    workflow draft (None until the frontend pushes it), and the active
+    workflow's structure. ``workflow`` is None when nothing is published yet.
+
+    #1226 八轮复审 P1：会话镜像的 draft_yaml 与代次分属两条通道，任何此处
+    另读的代次都可能与 YAML 错配——因此响应不携带代次；save_workflow_draft
+    的 CAS base 一律从 get_workflow_draft 的原子状态读取。"""
 
     model_config = ConfigDict(extra="forbid")
 
     workspace_id: str
     selected_node_key: str | None
     draft_yaml: str | None
-    draft_updated_at: str | None
     workflow: StudioContextWorkflow | None

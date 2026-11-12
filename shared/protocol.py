@@ -21,8 +21,38 @@ Version history:
   v5 Workers run one heartbeat loop per machine: a single
   ``POST /api/agent-executions/heartbeats`` renews every claimed lease of
   that Worker in one write transaction. The single execution endpoint is
-  unchanged (a mixed fleet is served by the same Host); a v5 Worker that
-  meets a pre-v5 Host gets 404 and falls back to per-execution beats.
+  unchanged and keeps serving older (pre-v5) Workers from the same Host.
+  The other direction is not a mixed-fleet mode: the registration handshake
+  (worker/host/client.py) requires ``host_protocol_version >=
+  PROTOCOL_VERSION``, so a v5 Worker meeting a pre-v5 Host is refused at
+  registration and exits 2 before it ever beats. The Worker's 404/405
+  fallback to per-execution beats (worker/execution/heartbeat_batch.py) only
+  covers a Host rolled back underneath an already-registered v5 Worker; that
+  Worker exits 2 the same way at its next registration (restart). See the
+  compatibility matrix in docs/remote-execution-runbook.md §5.
+- 6 (MATERIAL_ETAG_PROTOCOL_VERSION, #1279): material ETag consumption-side
+  verification. v6 Workers attach If-Match (the claim descriptor's
+  ``object_etag``) to material downloads; older Workers ignore the field and
+  would silently consume a same-size overwrite of a hash-less material, so
+  the Host's claim admission skips material-gated candidates for them
+  (queued, not failed — they become claimable again after the Worker
+  upgrades). Gated = the job's material inputs include a hash-less row that
+  is uploading (repair in flight, #1316 R12) or ready with a bound
+  ``object_etag``. Hash rows stay claimable (the old Worker's sha256
+  recompute is already fail-closed); rows without an etag have nothing to
+  verify against; failed/expired rows keep their failure path. Rows bound
+  by the #1316 legacy binder are gated for pre-v6 Workers **permanently**
+  like any other bound row — a pre-v6 Worker can hold a pre-upgrade cache
+  at the bare material_id address and never re-GETs, so no elapsed time
+  can prove its cached bytes match the bound ETag (codex r2 P1: the
+  original 75-minute drain window was removed). The predicate lives in
+  server/app/jobs/queries/material_claim_gate.py and is re-checked on the
+  claim descriptor's own row snapshot
+  (``material_claim_descriptors.assert_worker_may_consume``, #1316 R12 —
+  the same snapshot re-check codex final P1 (#1279) required) so the
+  repair / failed-retry TOCTOU (admission → complete → new etag) cannot
+  leak either: a pre-v6 claim containing such a row is dropped and
+  requeued after lease expiry instead of being answered with a new ETag.
 
 Field-level deprecations ride without a version bump while the wire shape is
 unchanged; a deprecated field's removal rides without one too once no
@@ -62,7 +92,8 @@ CODE_PROTOCOL_VERSION = 2
 MODEL_RUNTIME_PROTOCOL_VERSION = 3
 ARTIFACT_GZIP_PROTOCOL_VERSION = 4
 HEARTBEAT_BATCH_PROTOCOL_VERSION = 5
+MATERIAL_ETAG_PROTOCOL_VERSION = 6
 
 # The protocol version this software declares at registration. Equals the
 # latest feature version above.
-PROTOCOL_VERSION = HEARTBEAT_BATCH_PROTOCOL_VERSION
+PROTOCOL_VERSION = MATERIAL_ETAG_PROTOCOL_VERSION

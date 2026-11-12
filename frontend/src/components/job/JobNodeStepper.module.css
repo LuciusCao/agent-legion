@@ -3,7 +3,10 @@
   flex-direction: column;
   gap: 4px;
   width: 176px;
-  flex-shrink: 0;
+  /* #1335：窄行槽下允许收缩（紧凑判定随实测宽度动态切换），
+     空间充足时保持 176px 不变。 */
+  flex-shrink: 1;
+  min-width: 96px;
 }
 
 .track {
@@ -39,6 +42,15 @@
 
 .failed .bar {
   background: var(--status-failed-border);
+}
+
+/* #1277：与 StepperCompactView（#1275）同色——ready 沿用 running 蓝。 */
+.ready .bar {
+  background: var(--status-running-border);
+}
+
+.awaitingApproval .bar {
+  background: var(--status-approval-border);
 }
 
 .pending .bar,

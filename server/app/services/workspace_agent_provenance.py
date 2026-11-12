@@ -1,9 +1,13 @@
 """Settings-page read model: which active-revision nodes inlined which Agent (#1079).
 
 #440 D1: after the v93 backfill the workspace "Agent 定义" directory becomes
-a read-only history. Each historical definition shows how many nodes of the
-current active revision carry its profile inline — read from the revision's
-``agent_profile_provenance`` sibling (``services.agent_profile_provenance``).
+a read-only view over history. (The view is read-only; the underlying
+catalog is not — the deprecated write routes still serve the legacy agent
+nodes of active revisions v93 could not inline, see
+``services.agent_node_profile``.) Each historical definition shows how many
+nodes of the current active revision carry its profile inline — read from
+the revision's ``agent_profile_provenance`` sibling
+(``services.agent_profile_provenance``).
 Provenance is carried forward only while a node's profile fields stay
 unchanged, so an entry here means "this node still runs the inlined copy of
 that definition"; a node edited after inlining no longer counts.

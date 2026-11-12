@@ -17,8 +17,6 @@ from server.app.storage_paths import ManagedPathError, resolve_data_path
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
 
-_JOB_ID_BATCH_SIZE = 1000
-
 
 def locate_job_dir(job_id: str, storage_dir: str, data_dir: Path) -> Path | None:
     """Resolve a jobs row to its on-disk directory, or None on bad paths.
@@ -39,25 +37,6 @@ def locate_job_dir(job_id: str, storage_dir: str, data_dir: Path) -> Path | None
     if resolved == resolved_jobs_dir or not resolved.is_relative_to(resolved_jobs_dir):
         return None
     return resolved
-
-
-def build_job_dir_index(db: JobQueries, data_dir: Path, job_ids: set[str]) -> dict[str, Path]:
-    """Map job_id to its job directory from the jobs table, batched by id."""
-    index: dict[str, Path] = {}
-    if not job_ids:
-        return index
-    ordered = sorted(job_ids)
-    for offset in range(0, len(ordered), _JOB_ID_BATCH_SIZE):
-        batch = ordered[offset : offset + _JOB_ID_BATCH_SIZE]
-        with db._connect_read() as conn:
-            rows = conn.execute(
-                "select id, storage_dir from jobs where id = any(%s)", (batch,)
-            ).fetchall()
-        for row in rows:
-            job_dir = locate_job_dir(str(row["id"]), row["storage_dir"], data_dir)
-            if job_dir is not None:
-                index[str(row["id"])] = job_dir
-    return index
 
 
 def iter_job_dirs(

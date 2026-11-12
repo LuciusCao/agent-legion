@@ -23,6 +23,7 @@ function makeNode(
     after: [],
     inputs: [],
     outputs: [],
+    execution_type: null,
     executor_id: null,
     executor_kind: null,
     ...overrides,
@@ -120,26 +121,96 @@ describe('toNodeCatalog', () => {
 })
 
 describe('toDagNodes', () => {
-  it('maps logical Agent and physical Worker separately onto dag nodes', () => {
+  it('maps agent nodes to the agent execution type and keeps Worker identity separately', () => {
     const nodes = toDagNodes([
       makeNode('generate', 'running', {
-        executor_kind: 'pi',
+        execution_type: 'agent',
         agent_id: 'key-info-generator',
         worker_id: 'worker-abc123',
       }),
     ])
 
-    expect(nodes[0].executorKind).toBe('pi')
+    expect(nodes[0].executionType).toBe('agent')
     expect(nodes[0].agentId).toBe('key-info-generator')
-    expect(nodes[0].executorId).toBeNull()
     expect(nodes[0].workerId).toBe('worker-abc123')
   })
 
-  it('defaults executor ids to null when absent', () => {
-    const nodes = toDagNodes([makeNode('generate', 'pending')])
+  it('maps code-pool nodes to the code execution type (#1180)', () => {
+    // executor_id 的 'code' 池键占位不再进入展示层（双「code」徽标的来源）。
+    const nodes = toDagNodes([
+      makeNode('generate', 'pending', {
+        execution_type: 'code',
+        executor_kind: 'code',
+        executor_id: 'code',
+      }),
+    ])
 
-    expect(nodes[0].executorKind).toBeNull()
-    expect(nodes[0].executorId).toBeNull()
+    expect(nodes[0].executionType).toBe('code')
+    expect(nodes[0].agentId).toBeNull()
+    expect(nodes[0].workerId).toBeNull()
+  })
+
+  it('falls back to legacy fields only when execution_type is absent', () => {
+    const nodes = toDagNodes([
+      makeNode('legacy-code', 'pending', {
+        execution_type: undefined,
+        executor_kind: 'code',
+      }),
+      makeNode('legacy-agent', 'pending', {
+        execution_type: undefined,
+        agent_id: 'legacy-agent',
+      }),
+    ])
+
+    expect(nodes.map((node) => node.executionType)).toEqual(['code', 'agent'])
+  })
+
+  it.each(['_start', 'review_gate'])(
+    'renders no code execution type for non-dispatching node %s (#1365)',
+    (nodeKey) => {
+      const nodes = toDagNodes([
+        makeNode(nodeKey, 'completed', {
+          capability: '',
+          execution_type: 'code',
+          executor_kind: 'code',
+        }),
+      ])
+
+      expect(nodes[0].executionType).toBeNull()
+    }
+  )
+
+  it('carries capability so a self-contained agent execution badge can be deduplicated (#1366)', () => {
+    const nodes = toDagNodes([
+      makeNode('review_keywords', 'pending', {
+        execution_type: 'agent',
+        agent_id: 'review_keywords',
+      }),
+    ])
+
+    expect(nodes[0].capability).toBe('review_keywords')
+    expect(nodes[0].agentId).toBe('review_keywords')
+  })
+
+  it('renders no execution type for route_error even if legacy fields disagree', () => {
+    const nodes = toDagNodes([
+      makeNode('generate', 'pending', {
+        execution_type: null,
+        executor_kind: 'code',
+        agent_id: 'stale-agent',
+      }),
+    ])
+
+    expect(nodes[0].executionType).toBeNull()
+    expect(nodes[0].agentId).toBe('stale-agent')
+  })
+
+  it('renders no execution type for a legacy route_error projection', () => {
+    const nodes = toDagNodes([
+      makeNode('generate', 'pending', { execution_type: undefined }),
+    ])
+
+    expect(nodes[0].executionType).toBeNull()
     expect(nodes[0].agentId).toBeNull()
     expect(nodes[0].workerId).toBeNull()
   })

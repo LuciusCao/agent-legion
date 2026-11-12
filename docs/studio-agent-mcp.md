@@ -13,7 +13,7 @@ workflow、预览面板与节点代码 / prompt 相关工具都是**读取 / 校
 
 - `get_active_workflow`：读激活 revision；无已发布 revision 时返回结构化空态 `{"state": "empty"}`，不报错。
 - `validate_workflow` / `compare_workflow`：校验、对比草稿；无基线时 compare 退化为草稿全貌预览。
-- `get_workflow_draft` / `save_workflow_draft`（#633）：读写画布同一份未发布草稿。读取无草稿时返回结构化空态（双 null）；保存以 CAS 语义写回完整 `definition_yaml`——携带上次读取的 `updated_at` 作 `expected_updated_at`（无草稿时用字面量 `never-saved`），过期即 409 且 detail 携带当前草稿（`current_draft.definition_yaml` / `current_draft.updated_at`），据此 rebase 重试而非静默覆盖。保存后画布与 YAML 编辑器经 turn-end 查询失效同步显示；编辑只落草稿。
+- `get_workflow_draft` / `save_workflow_draft`（#633；#1226 五轮收口改代次基线）：读写画布同一份未发布草稿。读取无草稿时返回结构化空态（内容字段 null + 当前 `generation`）；保存以 CAS 语义写回完整 `definition_yaml`——携带上次读取的 `generation` 作 `base_generation`（从未写过/发布清空后为当前空态代次），落后即 409 且 detail 携带当前草稿状态（`current_draft.definition_yaml` / `current_draft.generation`），据此 rebase 重试而非静默覆盖。保存后画布与 YAML 编辑器经 turn-end 查询失效同步显示；编辑只落草稿。
 - `request_workflow_publish`（#416）：只是「请求」——校验 workspace 未发布草稿通过后挂一条 pending 记录，由人在 Studio 的发布确认对话框里确认/取消，工具本身永不产生 revision；确认走与手动发布完全一致的门禁。
 - `get_publish_request_status`：查询发布请求结果（pending / confirmed / rejected / expired / superseded）。
 
@@ -48,8 +48,8 @@ workflow、预览面板与节点代码 / prompt 相关工具都是**读取 / 校
 
 - `get_preview_guide`：预览面板 playbook（本地静态资源，不发 HTTP）。
 - `get_preview_context`：workspace 最近 job 的产物清单 + 单 job 的限幅内容采样，用来对齐真实数据形状。
-- `get_preview_panel`：已发布 bundle + 待发布草稿，皆空即内置回落。
-- `save_preview_panel_draft`：单文件 HTML bundle，校验非空 / 完整文档 / ≤256KiB，覆盖式草稿。没有发布工具——发布永远是人在 job detail 页「定制预览」对话框里的点击。
+- `get_preview_panel`：已发布 bundle + 待发布草稿，皆空即内置回落。可选 `output_path` 把完整 JSON 导出到 workspace 暂存目录的新文件（不覆盖已有文件），只返回路径/字节数/SHA-256，供本地提取 html 编辑后再用 `html_path` 存回（#1272）。
+- `save_preview_panel_draft`：单文件 HTML bundle，校验非空 / 完整文档 / ≤256KiB，覆盖式草稿。`html` 与 `html_path` 二选一：`html_path` 从 workspace 暂存目录读 UTF-8 HTML（相对该目录，或目录内绝对路径），与 inline `html` 同一 256 KiB 上限，带 `html_path` 时响应中的 `html` 折叠为 `html_bytes`/`html_sha256` 回执（#1272）。响应携带刚写入草稿的 `html_hash`。没有发布工具——发布永远是人在 job detail 页「定制预览」对话框里的点击。
 
 **Job 观测**（#329，全部只读）
 
@@ -57,8 +57,17 @@ workflow、预览面板与节点代码 / prompt 相关工具都是**读取 / 校
 - `get_job_detail`：节点状态/错误、run 清单、产物名清单、声明的 inputs/outputs。
 - `get_node_logs`：默认取最近失败 run，路径与密钥已消毒，尾截限幅。
 - `read_artifact`：读产物内容，头截限幅。
-- `list_jobs`：列最近 job，状态过滤 + limit ≤100。
+- `list_jobs`：列最近 job（最新在前），状态过滤 + limit ≤100（MCP 侧收紧，REST 列表上限更高）；响应带 `next_cursor`，传回 `cursor` 入参翻页取更早的 job，不传即最新一页（#1261）。
 - `compare_jobs`：对比两个 job，per-node 状态/错误并排 + newly_failed / recovered 摘要。
+
+节点执行类型请使用 `execution_type`；旧字段处于弃用窗口，将在下一完整发布周期的 Phase 2 移除：
+
+| 旧字段 | 替换字段 |
+| --- | --- |
+| `executor_kind`（Studio job detail/context） | `execution_type`：`"code"` / `"agent"` / `null` |
+| `executor_id`（裸 `GET /api/jobs/{job_id}`） | `execution_type`；Worker 身份仍读 `worker_id` |
+
+`execution_type` 为 `null` 且 `route_error` 非空表示节点路由配置错误，此时没有可展示的执行类型，`agent_id` 也为 `null`；不要根据旧字段或节点名称反推为 agent。正常 code / agent 节点分别为 `"code"` / `"agent"`，Agent 身份仍独立读 `agent_id`。弃用窗口内旧字段继续返回，新调用方应立即迁移，不再新增依赖。
 
 job 观测组没有任何生效工具：重跑类动作由 agent 引用 `suggested_actions` payload 输出建议，UI 渲染确认卡片，人确认后由宿主会话走常规 job 路由执行（scoped token 直接调动作端点被拒）。
 
@@ -66,12 +75,13 @@ job 观测组没有任何生效工具：重跑类动作由 agent 引用 `suggest
 
 ## 大文件的字节精确编辑（#767/#768）
 
-`get_node_code`、`get_skill`、`get_shared_materials` 可以传
+`get_node_code`、`get_skill`、`get_shared_materials`、`get_preview_panel` 可以传
 `output_path="snapshot.json"`，将完整响应直接导出到 MCP 主机的
 `<进程 cwd>/data/studio-mcp-files/<workspace_id>/`，只返回路径、
 字节数与 SHA-256。同机 agent 可本地解析、修改，再传 `code_path`
-（节点源码）或 `files_path`（skill/shared 的 JSON 文件列表，亦接受
-完整导出响应）提交；单个文件条目也支持 `file_path` 替代 `content`。
+（节点源码）、`files_path`（skill/shared 的 JSON 文件列表，亦接受
+完整导出响应）或 `html_path`（预览面板 HTML）提交；单个文件条目也支持
+`file_path` 替代 `content`。
 原来的 inline 参数保持兼容。不要同时提交路径参数和对应正文参数。
 
 完整 skill 编辑导出仅限当前 workspace 自有的 skill；group skill 只能通过

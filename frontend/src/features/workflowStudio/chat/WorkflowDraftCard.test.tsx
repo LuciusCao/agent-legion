@@ -35,7 +35,7 @@ function makeStudio(overrides: Record<string, unknown> = {}) {
     compareState: 'ready',
     compareErrors: null,
     compareSummary: null,
-    definitionYaml: draft.yaml,
+    draftYaml: draft.yaml,
     nodes: [{ key: 'n_extract' }],
     focusNonce: 0,
     requestNodeFocus: vi.fn(),
@@ -146,7 +146,7 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
   })
 
   it('草稿与编辑器内容不一致时提示发布以编辑器 YAML 为准', () => {
-    renderCard(makeStudio({ definitionYaml: 'key: other\n' }))
+    renderCard(makeStudio({ draftYaml: 'key: other\n' }))
     expect(screen.getByText(/发布将以编辑器中的 YAML 为准/)).toBeInTheDocument()
   })
 
@@ -164,11 +164,12 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
     // 序列化规范重写 YAML（字节不同、语义相同、hash 相同）→ 不再误报。
     it('hash 相同：编辑器重排后的 YAML 字节不同也不提示', () => {
       const studio = makeStudio({
-        definitionYaml: 'nodes: []\nkey: demo_video_workflow\n',
+        draftYaml: 'nodes: []\nkey: demo_video_workflow\n',
         draftSave: {
           status: 'saved',
           savedAt: '2026-10-10T01:00:00+00:00',
           savedHash: 'h1',
+          savedYaml: 'nodes: []\nkey: demo_video_workflow\n',
         },
       })
       render(
@@ -189,7 +190,7 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
 
     it('hash 不同：真实分歧仍提示', () => {
       const studio = makeStudio({
-        definitionYaml: 'key: human-edited\n',
+        draftYaml: 'key: human-edited\n',
         draftSave: {
           status: 'saved',
           savedAt: '2026-10-10T01:00:00+00:00',
@@ -214,7 +215,7 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
 
     it('卡上无 hash（旧转录）：降级字符串比较，字节不同仍提示', () => {
       const studio = makeStudio({
-        definitionYaml: 'key: other\n',
+        draftYaml: 'key: other\n',
         draftSave: {
           status: 'saved',
           savedAt: '2026-10-10T01:00:00+00:00',
@@ -239,7 +240,7 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
 
     it('编辑器侧无 savedHash（未保存过/旧服务端）：降级字符串比较', () => {
       const studio = makeStudio({
-        definitionYaml: 'key: other\n',
+        draftYaml: 'key: other\n',
         draftSave: { status: 'idle', savedAt: null },
       })
       render(
@@ -266,7 +267,7 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
     it('hash 相同但编辑器有未保存编辑（pending/saving/error）→ 仍提示（评审 P2-1）', () => {
       for (const status of ['pending', 'saving', 'error'] as const) {
         const studio = makeStudio({
-          definitionYaml: 'nodes: []\nkey: demo_video_workflow\n',
+          draftYaml: 'nodes: []\nkey: demo_video_workflow\n',
           draftSave: {
             status,
             savedAt: '2026-10-10T01:00:00+00:00',
@@ -298,7 +299,7 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
     it('hash 相同但编辑器内容被清空/纯空白（skip 保存）→ 仍提示（#1177 codex R3 P2）', () => {
       for (const blank of ['', '  \n\t ']) {
         const studio = makeStudio({
-          definitionYaml: blank,
+          draftYaml: blank,
           draftSave: {
             status: 'saved',
             savedAt: '2026-10-10T01:00:00+00:00',
@@ -325,11 +326,12 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
 
     it('hash 相同且编辑器无未保存编辑（idle，hydrate/adopt 后内容=已落盘）→ 不提示', () => {
       const studio = makeStudio({
-        definitionYaml: 'nodes: []\nkey: demo_video_workflow\n',
+        draftYaml: 'nodes: []\nkey: demo_video_workflow\n',
         draftSave: {
           status: 'idle',
           savedAt: '2026-10-10T01:00:00+00:00',
           savedHash: 'h1',
+          savedYaml: 'nodes: []\nkey: demo_video_workflow\n',
         },
       })
       render(
@@ -346,6 +348,78 @@ describe('WorkflowDraftCard 发布入口（#667 B1）', () => {
       expect(
         screen.queryByText(/发布将以编辑器中的 YAML 为准/)
       ).not.toBeInTheDocument()
+    })
+
+    // #1196 第 1 项：hydrate/adopt 的单帧假 settled——状态已推进到
+    // idle + savedHash=H_D，画布仍是另一份内容（≠ savedYaml）。hash 相同
+    // 也必须回落提示：短路要求编辑器内容即 savedHash 的内容本体。
+    it('settled 且 hash 相同但编辑器内容 ≠ savedYaml（单帧假 settled）→ 仍提示（#1196）', () => {
+      const studio = makeStudio({
+        draftYaml: 'key: pre-hydration-edit\n',
+        draftSave: {
+          status: 'idle',
+          savedAt: '2026-10-10T01:00:00+00:00',
+          savedHash: 'h1',
+          savedYaml: 'nodes: []\nkey: demo_video_workflow\n',
+        },
+      })
+      render(
+        withStudioProviders(
+          studio,
+          makeStudioView(),
+          <WorkflowDraftCard
+            draft={{ ...draft, draftHash: 'h1' }}
+            workspaceId="ws1"
+            onApply={vi.fn()}
+          />
+        )
+      )
+      expect(
+        screen.getByText(/发布将以编辑器中的 YAML 为准/)
+      ).toBeInTheDocument()
+    })
+  })
+
+  // #1196 第 2 项：revision 查看模式下 definitionYaml 是被查看版本的 YAML，
+  // 提示的语义对象是保存状态机跟踪的草稿（draftYaml）——以草稿为准。
+  describe('revision 查看模式的提示口径（#1196）', () => {
+    const revisionYaml = 'key: demo_video_workflow\nlabel: v3\n'
+
+    it('草稿与卡一致时不因被查看版本不同而提示', () => {
+      renderCard(
+        makeStudio({ viewMode: 'revision', definitionYaml: revisionYaml })
+      )
+      expect(
+        screen.queryByText(/发布将以编辑器中的 YAML 为准/)
+      ).not.toBeInTheDocument()
+    })
+
+    it('草稿被清空时空白 guard 按草稿判定（不被非空 revision YAML 绕过）', () => {
+      const studio = makeStudio({
+        viewMode: 'revision',
+        definitionYaml: revisionYaml,
+        draftYaml: '',
+        draftSave: {
+          status: 'saved',
+          savedAt: '2026-10-10T01:00:00+00:00',
+          savedHash: 'h1',
+          savedYaml: revisionYaml,
+        },
+      })
+      render(
+        withStudioProviders(
+          studio,
+          makeStudioView(),
+          <WorkflowDraftCard
+            draft={{ ...draft, draftHash: 'h1' }}
+            workspaceId="ws1"
+            onApply={vi.fn()}
+          />
+        )
+      )
+      expect(
+        screen.getByText(/发布将以编辑器中的 YAML 为准/)
+      ).toBeInTheDocument()
     })
   })
 })

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from server.app.storage_paths import resolve_job_dir
+from server.app.storage_paths import job_node_log_name, resolve_job_dir
 from tests.helpers import publish_legacy_intake_revision
 from tests.helpers.auth import authenticate_client
 
@@ -139,12 +139,14 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
 
     assert response.status_code == 200
     nodes = {node["node_key"]: node for node in response.json()["nodes"]}
+    assert nodes["review_script"]["execution_type"] == "agent"
     assert nodes["review_script"]["executor_id"] is None
     assert nodes["review_script"]["executor_kind"] is None
     # #935: the demo agent nodes are self-contained — their Agent identity
     # is the node key (the request row's agent_id), not a route target.
     assert nodes["review_script"]["agent_id"] == "review_script"
     # P-0.5：非 Agent 路由节点投影为常量 code 池。
+    assert nodes["publish_content"]["execution_type"] == "code"
     assert nodes["publish_content"]["executor_id"] == "code"
     assert nodes["publish_content"]["executor_kind"] == "code"
 
@@ -221,14 +223,18 @@ def test_delete_job_cascades_and_returns_deleted_id(tmp_path):
         storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
         storage_dir.mkdir(parents=True, exist_ok=True)
         (storage_dir / "artifact.json").write_text("{}")
-        log_dir = app.state.settings.logs_dir / "jobs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        (log_dir / f"{job_id}-intake_knowledge_points.log").write_text("ok")
+        log_path = (
+            app.state.settings.logs_dir
+            / "jobs"
+            / job_node_log_name(job_id, "intake_knowledge_points")
+        )
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("ok")
         resp = c.delete(f"/api/jobs/{job_id}")
     assert resp.status_code == 200
     assert resp.json()["deleted"] == job_id
     assert not storage_dir.exists()
-    assert not (log_dir / f"{job_id}-intake_knowledge_points.log").exists()
+    assert not log_path.exists()
 
 
 def test_list_workspace_runs_returns_job_scoped_run_records(tmp_path):

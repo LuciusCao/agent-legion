@@ -31,6 +31,9 @@ export type UseWorkflowStudioDraftResult = {
   /** #666：发布成功后登记发布的草稿原文，baseline sync 见到紧随的基线
    * 变化时强制 reset（canonical 基线与草稿原文纯文本不等，不能走 preserve）。 */
   markDraftPublished: (publishedYaml: string) => void
+  /** M48 运行通道：登记一次本客户端发起的 runtime 保存/回滚——紧随的基线
+   * 推进（原地更新 active revision）保留草稿但不打「基线有更新」标记。 */
+  markRuntimeChannelSaved: () => void
   selectRevision: (revisionId: string) => Promise<void>
   backToDraft: () => void
   useViewedRevisionAsDraft: () => void
@@ -63,6 +66,7 @@ export function useWorkflowStudioDraft(
   )
 
   const justPublishedRef = useRef<string | null>(null)
+  const runtimeSavedRef = useRef(false)
   useDraftBaselineSync(
     originalYaml,
     activeRevision?.id,
@@ -71,7 +75,8 @@ export function useWorkflowStudioDraft(
     setViewState,
     clearRevisionLoadError,
     viewState.hasPreservedDraft,
-    justPublishedRef
+    justPublishedRef,
+    runtimeSavedRef
   )
 
   const readOnly = isRevisionReadOnly(viewState)
@@ -128,6 +133,9 @@ export function useWorkflowStudioDraft(
     revisionLoadError,
     markDraftPublished: (publishedYaml: string) => {
       justPublishedRef.current = publishedYaml
+    },
+    markRuntimeChannelSaved: () => {
+      runtimeSavedRef.current = true
     },
     selectRevision,
     backToDraft,

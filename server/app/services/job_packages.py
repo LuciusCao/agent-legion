@@ -37,13 +37,14 @@ class JobPackageService(WorkspacePackageClearPackedMixin, WorkspacePackageLifecy
     def list_workspace_packages(self, workspace_id: str, limit: int = 10) -> list[dict[str, Any]]:
         return self.job_db.list_workspace_packages(workspace_id, limit=limit)
 
-    def package(
-        self, workspace_id: str, job_ids: list[str] | None = None, **kwargs: Any
-    ) -> JobPackageResult:
-        """Package the selected jobs; kwargs take job_filter/exclude_ids."""
-        ids = resolve_batch_selection(self.job_db, workspace_id, job_ids, **kwargs)
-        if not ids:
-            raise EmptyJobSelectionError("No job_ids provided or matched by the filter")
+    def check_package_eligibility(
+        self, workspace_id: str, ids: list[str]
+    ) -> tuple[list[JobPackageItemResult], list[dict[str, Any]]]:
+        """Per-job eligibility verdicts + the eligible job rows (deduped).
+
+        Shared by the sync ``package`` path and the #946 async feeder's
+        per-chunk eligibility marking; verdicts are identical in both.
+        """
         results: list[JobPackageItemResult] = []
         eligible_jobs: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -80,20 +81,19 @@ class JobPackageService(WorkspacePackageClearPackedMixin, WorkspacePackageLifecy
                 continue
             eligible_jobs.append(job)
             results.append(self._result(normalized, "succeeded"))
+        return results, eligible_jobs
 
-        succeeded_count = sum(1 for r in results if r["status"] == "succeeded")
-        failed_count = len(results) - succeeded_count
+    def package_eligible_jobs(
+        self, workspace_id: str, eligible_jobs: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Packaging phase (one zip per call); returns the batch-level output.
 
-        response: JobPackageResult = {
-            "results": results,
-            "succeeded_count": succeeded_count,
-            "failed_count": failed_count,
-            "package_filename": None,
-            "download_url": None,
-        }
-
+        ``{}`` when nothing is eligible; otherwise
+        ``{package_filename, download_url}``. Shared by the sync ``package``
+        path and the #946 async feeder's completion hook.
+        """
         if not eligible_jobs:
-            return response
+            return {}
 
         workspace_packages_dir = self.settings.packages_dir / f"workspace-{workspace_id}"
         workspace_packages_dir.mkdir(parents=True, exist_ok=True)
@@ -113,7 +113,6 @@ class JobPackageService(WorkspacePackageClearPackedMixin, WorkspacePackageLifecy
             object_store=self.object_store,
         )
         package_filename = package_path.name
-        download_url = f"/api/workspaces/{workspace_id}/packages/{package_filename}"
 
         size_bytes = package_path.stat().st_size
         relative_path = make_data_relative(package_path, self.settings.data_dir)
@@ -123,10 +122,31 @@ class JobPackageService(WorkspacePackageClearPackedMixin, WorkspacePackageLifecy
         )
         self.job_db.set_jobs_packed([job["id"] for job in eligible_jobs], packed=1)
         self._purge_source_videos(eligible_jobs)
+        return {
+            "package_filename": package_filename,
+            "download_url": f"/api/workspaces/{workspace_id}/packages/{package_filename}",
+        }
 
-        response["package_filename"] = package_filename
-        response["download_url"] = download_url
-        return response
+    def package(
+        self, workspace_id: str, job_ids: list[str] | None = None, **kwargs: Any
+    ) -> JobPackageResult:
+        """Package the selected jobs; kwargs take job_filter/exclude_ids."""
+        ids = resolve_batch_selection(self.job_db, workspace_id, job_ids, **kwargs)
+        if not ids:
+            raise EmptyJobSelectionError("No job_ids provided or matched by the filter")
+        results, eligible_jobs = self.check_package_eligibility(workspace_id, ids)
+
+        succeeded_count = sum(1 for r in results if r["status"] == "succeeded")
+        failed_count = len(results) - succeeded_count
+
+        output = self.package_eligible_jobs(workspace_id, eligible_jobs)
+        return {
+            "results": results,
+            "succeeded_count": succeeded_count,
+            "failed_count": failed_count,
+            "package_filename": output.get("package_filename"),
+            "download_url": output.get("download_url"),
+        }
 
     def _purge_source_videos(self, jobs: list[dict[str, Any]]) -> None:
         """Drop the original source.mp4 once packaged; preview falls back to source_url."""

@@ -9,11 +9,23 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-# Chunk = one committed transaction (lock probe + insert + node rows); a
-# mid-run failure leaves whole committed chunks behind (see create_jobs_bulk).
-# 1000 = the pre-chunking statement batch: each chunk's unnest INSERT still
-# fires the v77 trigger once (#448).
+# Statement batch for bulk IN reads / unnest INSERTs (#448/#712). 1000 = the
+# pre-chunking statement batch. create_jobs_bulk commits in smaller
+# CREATE_CHUNK_ROWS transactions (below); a mid-run failure leaves whole
+# committed chunks behind (see create_jobs_bulk).
 CHUNK_ROWS = 1000
+
+# Commit chunk of create_jobs_bulk (#1243 codex R2). Each creating chunk holds
+# one job-mutation advisory xact lock per job until COMMIT (#1083), and xact
+# locks cannot be released early, so the lock batch IS the commit chunk.
+# Advisory locks never take the per-backend fast path: they live in the shared
+# lock table, sized max_locks_per_transaction × (max_connections +
+# max_prepared_transactions) = 64 × 100 = 6400 entries at PostgreSQL defaults
+# and shared by every session. 250 keeps one full chunk under 4% of that
+# (≈25 concurrent full chunks before the table alone is exhausted, vs ≈6 at
+# 1000); the cost is one INSERT statement / trigger firing per 250 rows
+# instead of per 1000 — still set-based (#448).
+CREATE_CHUNK_ROWS = 250
 
 
 def id_chunks(ids: Iterable[Any]) -> Iterator[list[str]]:
@@ -102,6 +114,56 @@ def insert_job_nodes_batched(conn: Any, pairs: list[tuple[str, str]]) -> None:
         chunk = pairs[start : start + CHUNK_ROWS]
         columns = [list(column) for column in zip(*chunk, strict=True)]
         conn.execute(JOB_NODES_BULK_INSERT_SQL, columns)
+
+
+LOCK_JOB_MUTATIONS_SQL = """
+select pg_advisory_xact_lock(hashtext('job-mutation:' || t.id))
+from unnest(%s::text[]) as t(id)
+order by hashtext('job-mutation:' || t.id), t.id
+"""
+
+
+def lock_job_mutations_sorted(conn: Any, job_ids: Iterable[str]) -> None:
+    """Take ``job-mutation:<id>`` for every id, in lock-key order, held to COMMIT (#1083).
+
+    Job creation joins the EXEC-GENERATION-001 lock domain so the deletion
+    cleanup's "row absent under the lock → rename into .trash" step is atomic
+    against a same-id recreate: the creator takes the lock BEFORE its mkdir
+    and upsert, so it either committed its row before the cleanup's recheck
+    (cleanup skips) or waits until the rename is done (mkdir lands on an
+    empty path). Callers take it before any row lock in the creating
+    transaction — level 2 of the global lock order, ahead of the chunk's
+    material/bundle FOR KEY SHARE probes and the jobs upsert.
+
+    The global batch order is the PURE ``(hashtext('job-mutation:' || id),
+    id)`` order — #1346 + #1378 codex P2: the lock resource is the 32-bit
+    ``hashtext`` of the key, not the id text, and there is no ws bucket —
+    any prefix (workspace or otherwise) still lets a collision-alias pair
+    (W1's K1 and W2's K1 are the SAME lock) be walked in opposite orders by
+    two cross-workspace batches. Ordering by the ACTUAL advisory key (id
+    only as the same-key tiebreak) is the one total order every path shares;
+    every creating call is single-workspace anyway, so the SQL's
+    ``(hashtext, id)`` order IS the global order — a create chunk never
+    walks two jobs opposite to finish_many / claim batches / sweeps. Precondition: no id may
+    name an existing job of ANOTHER workspace. Structurally true for new ids
+    since #1255 (injective encoding — a cross-workspace coincidence would
+    need a pre-v62 legacy row whose workspace/workflow id carries ``~``,
+    which the v62 workspace-id contract forbids); bulk callers still reject
+    every committed collision first (``verify_chunk_identities``, #1243) as
+    the integrity guard for that legacy residue.
+
+    One round trip (#1243 codex R2): the ORDER BY is on the actual lock key,
+    so the plan carries a Sort — correctness needs the volatile
+    ``pg_advisory_xact_lock`` evaluated ABOVE it (acquisition follows the
+    sorted order). PostgreSQL ≥ 9.6 keeps volatile target-list expressions
+    out of the sort input (``make_sort_input_target``): the lock is computed
+    per output row of the Sort, in ``(hashtext, id)`` order. Pinned by an
+    EXPLAIN test (a Sort on the lock key MUST sit below the lock-evaluating
+    node) and by the pg_locks ordering / colliding-quadruple deadlock tests.
+    """
+    deduped = sorted(set(job_ids))
+    if deduped:
+        conn.execute(LOCK_JOB_MUTATIONS_SQL, (deduped,)).fetchall()
 
 
 def lock_rows_for_key_share(

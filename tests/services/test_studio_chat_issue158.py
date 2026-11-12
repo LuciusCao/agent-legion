@@ -128,6 +128,19 @@ def _session_token(script_path: Path) -> str:
     raise AssertionError("session/new never reached the fake agent")
 
 
+def _row_is_dead(job_db, token: str) -> bool:
+    """The token row stays expired or revoked — a send-path auto-resume (#1121)
+    mints a NEW token and never revives the old one."""
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select (expires_at < current_timestamp or revoked_at is not null) as dead"
+            " from auth_scoped_tokens where token_hash=%s",
+            (hash_token(token),),
+        ).fetchone()
+    assert row is not None
+    return bool(row["dead"])
+
+
 def test_create_session_rejected_beyond_active_cap(chat, monkeypatch) -> None:
     service, _bus, register, workspace_id, user_id = chat
     register(TEXT_SCRIPT)
@@ -170,7 +183,7 @@ def test_fresh_token_is_not_rewritten_at_turn_start(chat, job_db) -> None:
     service.send_message(session["id"], workspace_id, "hi")
     with job_db.connect() as conn:
         row = conn.execute(
-            "select expires_at <= current_timestamp + interval '2 hours' as untouched"
+            "select expires_at <= current_timestamp + interval '25 hours' as untouched"
             " from auth_scoped_tokens where token_hash=%s",
             (hash_token(token),),
         ).fetchone()
@@ -180,7 +193,9 @@ def test_fresh_token_is_not_rewritten_at_turn_start(chat, job_db) -> None:
 
 def test_expired_token_is_not_revived_at_turn_start(chat, job_db) -> None:
     """A token that already expired while the session sat idle must stay dead:
-    turn start must not resurrect it (leaked-token guarantee, #158 review)."""
+    the send-path auto-resume (#1121) mints a NEW token and rebuilds the
+    runtime — the old one is never resurrected (leaked-token guarantee, #158
+    review)."""
     service, _bus, register, workspace_id, user_id = chat
     script_path = register(TEXT_SCRIPT)
     session = service.create_session(workspace_id, user_id, "fake-agent")
@@ -192,19 +207,12 @@ def test_expired_token_is_not_revived_at_turn_start(chat, job_db) -> None:
             " where token_hash=%s",
             (hash_token(token),),
         )
+    assert _row_is_dead(job_db, token)
+    service.send_message(session["id"], workspace_id, "hi")
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    assert job_db.count_studio_chat_user_messages(session["id"]) == 1
+    assert _row_is_dead(job_db, token)
     assert authenticate_scoped_token(job_db, token) is None
-    with pytest.raises(ConflictError, match="继续对话"):
-        service.send_message(session["id"], workspace_id, "hi")
-    assert job_db.count_studio_chat_user_messages(session["id"]) == 0
-    with job_db.connect() as conn:
-        row = conn.execute(
-            "select expires_at < current_timestamp as still_expired"
-            " from auth_scoped_tokens where token_hash=%s",
-            (hash_token(token),),
-        ).fetchone()
-    assert row["still_expired"]
-    assert authenticate_scoped_token(job_db, token) is None
-    assert service.get_session(session["id"])["status"] == "error"
 
 
 @pytest.mark.parametrize("phase", ["renew_scoped_token", "prepare_resume_prompt"])

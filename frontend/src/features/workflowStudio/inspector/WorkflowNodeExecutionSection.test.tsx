@@ -86,13 +86,15 @@ describe('WorkflowNodeExecutionSection node profile (#935 / #1079)', () => {
     expect(screen.queryByText(/尚未内联执行档案/)).not.toBeInTheDocument()
     expect(screen.getByLabelText('Runtime')).toBeInTheDocument()
     expect(screen.getByTestId('skill-selector-stub')).toBeInTheDocument()
-    expect(screen.getByLabelText('Model')).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '查看 Prompt' })
     ).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: '浏览技能文件' })
     ).toBeInTheDocument()
+    // M48：provider/model/thinking/prompt/tools/requires_labels 已迁入
+    // 「运行配置」专区（WorkflowNodeRuntimeChannelSection），本区不再渲染。
+    expect(screen.queryByLabelText('Model')).not.toBeInTheDocument()
     // tools 未声明时兜底是 runtime 默认档，不再提「Agent 默认」。
     expect(screen.queryByText(/Agent 默认/)).not.toBeInTheDocument()
   })
@@ -122,113 +124,6 @@ describe('WorkflowNodeExecutionSection node profile (#935 / #1079)', () => {
     fireEvent.click(screen.getByRole('option', { name: 'velites' }))
 
     expect(nextYaml).toContain('runtime: velites')
-  })
-
-  it('writes a node model override to workflow YAML', () => {
-    let nextYaml = ''
-    renderSection({
-      node,
-      definitionYaml: selfContainedYaml,
-      setDefinitionYaml: (value) => {
-        nextYaml = value
-      },
-    })
-
-    fireEvent.change(screen.getByLabelText('Model'), {
-      target: { value: 'gpt-5' },
-    })
-
-    expect(nextYaml).toContain('model: gpt-5')
-  })
-
-  it('keeps a cleared provider empty instead of restoring the persisted value', () => {
-    let nextYaml = ''
-    const nodeWithProvider: WorkflowNodeRecord = {
-      ...node,
-      execution: {
-        runtime: 'pi',
-        provider: 'deepseek',
-        model: '',
-        thinking: '',
-        prompt: '',
-        prompt_mode: '',
-      },
-    }
-    const initialYaml = `execution:\n  provider: deepseek\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n    execution:\n      runtime: pi\n      provider: deepseek\n`
-    const { rerender } = renderSection({
-      node: nodeWithProvider,
-      definitionYaml: initialYaml,
-      setDefinitionYaml: (value) => {
-        nextYaml = value
-      },
-    })
-
-    fireEvent.change(screen.getByLabelText('Provider'), {
-      target: { value: '' },
-    })
-
-    // 顶层 execution 默认保留在 YAML，节点级 provider（6 空格缩进）必须被移除。
-    expect(nextYaml).not.toContain('      provider:')
-    rerender(
-      <MemoryRouter initialEntries={['/workspaces/ws1/studio']}>
-        <Routes>
-          <Route
-            path="/workspaces/:workspaceId/studio"
-            element={
-              <WorkflowNodeExecutionSection
-                node={nodeWithProvider}
-                definitionYaml={nextYaml}
-                setDefinitionYaml={(value) => {
-                  nextYaml = value
-                }}
-              />
-            }
-          />
-        </Routes>
-      </MemoryRouter>
-    )
-    expect(screen.getByLabelText('Provider')).toHaveValue('')
-    expect(screen.getByText('继承 workflow 默认：deepseek')).toBeInTheDocument()
-  })
-
-  it('offers datalist options from the runtime models of online workers', () => {
-    renderSection({
-      node,
-      definitionYaml: selfContainedYaml,
-      setDefinitionYaml: () => {},
-    })
-
-    const providerInput = screen.getByLabelText('Provider') as HTMLInputElement
-    const providerList = document.getElementById(
-      providerInput.getAttribute('list')!
-    ) as HTMLDataListElement
-    expect(
-      Array.from(providerList.options).map((option) => option.value)
-    ).toEqual(['deepseek'])
-
-    // Model 选项跟随当前 provider 之外的回退：未填 provider 时给全部型号。
-    const modelInput = screen.getByLabelText('Model') as HTMLInputElement
-    const modelList = document.getElementById(
-      modelInput.getAttribute('list')!
-    ) as HTMLDataListElement
-    expect(Array.from(modelList.options).map((option) => option.value)).toEqual(
-      ['your-model-b', 'your-model-c']
-    )
-  })
-
-  it('shows the workflow thinking default on the empty option', () => {
-    renderSection({
-      node,
-      definitionYaml: selfContainedYaml,
-      setDefinitionYaml: () => {},
-    })
-
-    const thinkingSelect = screen.getByLabelText(
-      'Thinking'
-    ) as HTMLSelectElement
-    expect(thinkingSelect.options[0].textContent).toBe(
-      '继承 workflow 默认（low）'
-    )
   })
 
   // #1079（#440 P3b）：legacy 节点只提示补 runtime + runtime 下拉——不再

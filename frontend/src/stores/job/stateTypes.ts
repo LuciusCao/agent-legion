@@ -1,4 +1,9 @@
 import type { RerunByFailureCategoryAction } from '../../types/failureTypes'
+import type { BatchOpMaybeAccepted } from '../../api/jobBatchOperationsApi'
+import type {
+  ApprovalBatchKind,
+  BatchApprovalJobsResult,
+} from '../../api/jobApprovalApi'
 
 export type ContinueJobResult = Promise<{
   job_id: string
@@ -11,4 +16,12 @@ export type ContinueJobResult = Promise<{
 
 export interface RerunByFailureActions {
   rerunByFailureCategory: RerunByFailureCategoryAction
+}
+
+export interface JobSupplementalActions extends RerunByFailureActions {
+  batchApprovalLoading: boolean
+  batchApproval: (
+    workspaceId: string,
+    kind: ApprovalBatchKind
+  ) => Promise<BatchOpMaybeAccepted<BatchApprovalJobsResult>>
 }

@@ -4,39 +4,26 @@ import {
   buildStudioRevisionActions,
   useStudioNodeSelection,
 } from '../inspector/useStudioNodeSelection'
-import { useWorkflowDraftCompare } from './useWorkflowDraftCompare'
-import { useWorkflowStudioActions } from './useWorkflowStudioActions'
+import { useStudioRuntimeChannel } from './useStudioRuntimeChannel'
 import { useWorkflowStudioData } from './useWorkflowStudioData'
-import { useWorkflowStudioDraftStore } from './useWorkflowStudioDraftStore'
-import { isDefinitionDirty } from './workflowStudioModel'
+import { useWorkflowStudioServerDraft } from './useWorkflowStudioServerDraft'
 
 export function useWorkflowStudio(workspaceId: string | undefined) {
-  const {
-    loadState,
-    workflow,
-    revision,
-    revisions,
-    originalYaml,
-    reload,
-    fetchRevisionDetail,
-  } = useWorkflowStudioData(workspaceId)
+  const data = useWorkflowStudioData(workspaceId)
+  const { loadState, revision, revisions, originalYaml } = data
   const catalog = useAgentCatalog(workspaceId)
-  const draft = useWorkflowStudioDraftStore(
+  const { draft, compare, actions } = useWorkflowStudioServerDraft(
+    workspaceId,
+    data
+  )
+  // 运行通道：runtime 字段即改即存（不产生 revision），与结构发布通道并列。
+  const runtimeChannel = useStudioRuntimeChannel({
     workspaceId,
     originalYaml,
-    workflow,
-    revision,
-    fetchRevisionDetail
-  )
-  // 不按 viewMode 门控的 dirty：revision 模式下 compare 继续运行，顶栏
-  // 「草稿有未发布更改」才持续可见；画布 overlay 按 viewMode 另行门控。
-  const compare = useWorkflowDraftCompare(
-    workspaceId,
-    draft.draftYaml,
-    isDefinitionDirty(originalYaml, draft.draftYaml),
-    loadState === 'empty'
-  )
-  const actions = useWorkflowStudioActions(workspaceId, draft, reload, compare)
+    draftYaml: draft.draftYaml,
+    setDraftYaml: draft.setDraftYaml,
+    markRuntimeChannelSaved: draft.markRuntimeChannelSaved,
+  })
   const { nodes, edges } = useStudioDag(
     draft.visibleWorkflow,
     catalog.agents,
@@ -56,6 +43,10 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     agentCatalogError: catalog.loadError,
     retryAgentCatalog: catalog.retry,
     definitionYaml: draft.definitionYaml,
+    /* 空内容冲突的「采用」需要 canonical 原文：无草稿可采用时回到已发布版本。 */
+    originalYaml,
+    // 保存状态机跟踪的草稿本体（revision 模式下 ≠ definitionYaml）。
+    draftYaml: draft.draftYaml,
     setDefinitionYaml: draft.setDraftYaml,
     selectedNodeKey,
     setSelectedNodeKey,
@@ -67,7 +58,9 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     canSubmit: draft.canSubmit,
     draftSave: draft.draftSave,
     flushDraftSave: draft.flushDraftSave,
-    adoptServerDraft: draft.adoptServerDraft, // kimi review P1-2：冲突出口
+    // agent 发布确认与手动发布共用「登记发布原文」收尾。
+    markDraftPublished: draft.markDraftPublished,
+    adoptServerDraft: draft.adoptServerDraft,
     resolveConflict: draft.resolveConflict,
     canPublish: actions.canPublish,
     retryValidation: actions.retryValidation,
@@ -81,6 +74,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     retryCompare: compare.retry,
     compareErrors: compare.compareErrors,
     compareSummary: compare.compareSummary,
+    ...runtimeChannel,
     reviewDialogOpen: actions.reviewDialogOpen,
     reviewStale: actions.reviewStale,
     closeReviewDialog: actions.closeReviewDialog,

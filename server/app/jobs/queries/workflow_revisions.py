@@ -67,3 +67,24 @@ class WorkflowRevisionQueriesMixin(WorkflowRevisionReadQueriesMixin):
         if row is None:
             raise RuntimeError("workflow revision insert did not return a row")
         return dict(row)
+
+
+def compose_commit_hooks(
+    *hooks: Callable[[DatabaseConnection], None] | None,
+) -> Callable[[DatabaseConnection], None] | None:
+    """Merge optional revision-transaction hooks into one (None when all None).
+
+    The publish pipeline stacks caller hooks on the built-in override prune
+    (e.g. #1221's draft-row delete on draft publish): every hook runs inside
+    the revision transaction in argument order, so any failure rolls the
+    whole publish back.
+    """
+    active = [hook for hook in hooks if hook is not None]
+    if not active:
+        return None
+
+    def _run(conn: DatabaseConnection) -> None:
+        for hook in active:
+            hook(conn)
+
+    return _run

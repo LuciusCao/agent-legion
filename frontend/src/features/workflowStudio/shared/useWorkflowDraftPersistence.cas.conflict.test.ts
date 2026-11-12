@@ -20,11 +20,12 @@ vi.mock('../../../api', () => ({
   putWorkflowDraft: (...args: unknown[]) => mocks.putWorkflowDraft(...args),
 }))
 vi.mock('../../../api/workflowDraft', () => ({
-  DRAFT_NEVER_SAVED: 'never-saved',
   WorkflowDraftConflictError: class extends Error {
     readonly currentDraft: {
       definition_yaml: string | null
       updated_at: string | null
+      definition_hash: string | null
+      generation: number | null
     }
     constructor(detail: unknown) {
       super('workflow draft conflict')
@@ -35,10 +36,14 @@ vi.mock('../../../api/workflowDraft', () => ({
       const current = (payload.current_draft ?? {}) as {
         definition_yaml?: string | null
         updated_at?: string | null
+        definition_hash?: string | null
+        generation?: number | null
       }
       this.currentDraft = {
         definition_yaml: current.definition_yaml ?? null,
         updated_at: current.updated_at ?? null,
+        definition_hash: current.definition_hash ?? null,
+        generation: current.generation ?? null,
       }
     }
   },
@@ -47,6 +52,7 @@ vi.mock('../../../api/workflowDraft', () => ({
 const SERVER_DRAFT = {
   definition_yaml: 'key: demo\nlabel: Server\n',
   updated_at: '2026-08-27T01:02:03+00:00',
+  generation: 7,
 }
 
 type HookProps = {
@@ -55,7 +61,7 @@ type HookProps = {
   originalYaml: string
   serverDraft:
     | typeof SERVER_DRAFT
-    | { definition_yaml: null; updated_at: null }
+    | { definition_yaml: null; updated_at: null; generation: number }
     | undefined
   loadError?: boolean
 }
@@ -85,6 +91,7 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突呈现与挂起', () =>
       current_draft: {
         definition_yaml: 'key: demo\nlabel: Agent v2\n',
         updated_at: '2026-09-12T10:00:00+00:00',
+        generation: 9,
       },
     })
   }
@@ -101,13 +108,21 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突呈现与挂起', () =>
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
 
     await act(async () => {
@@ -136,13 +151,21 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突呈现与挂起', () =>
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
 
     let flushed: { ok: boolean; state: { conflict?: boolean } } | undefined
@@ -160,13 +183,21 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突呈现与挂起', () =>
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -183,6 +214,62 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突呈现与挂起', () =>
     expect(flushed?.ok).toBe(false)
   })
 
+  it('空态重取不得清掉 409 冲突（#1226 七轮复审 P1）', async () => {
+    /* 发布前已发出的 autosave 因发布推进代次收到 409（current_draft 全
+       null），enterConflict 建立冲突并清空 pendingSave；随后发布触发的
+       草稿查询才重取到 definition_yaml: null——旧实现对该空态无条件
+       hydrate，冲突被清、controller 收敛 idle、hasUnsaved()=false，画布
+       未落盘文本离页静默丢失。空态落地前必须看冲突态：在旗即保留
+       （基线代次已由冲突载荷推进），由用户显式二选一。 */
+    mocks.putWorkflowDraft.mockRejectedValue(
+      new WorkflowDraftConflictError({
+        message: 'Workflow draft conflict',
+        current_draft: {
+          definition_yaml: null,
+          updated_at: null,
+          generation: 9,
+        },
+      })
+    )
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+    expect(result.current.state.conflictDraftYaml).toBeNull()
+
+    // 发布后的空态重取到达（草稿行已删，代次 9）。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: { definition_yaml: null, updated_at: null, generation: 9 },
+    })
+
+    // 冲突必须保留——画布上的未落盘文本仍在守卫视野内（离页提示有原料）。
+    expect(result.current.state.conflict).toBe(true)
+    expect(result.current.hasUnsavedChanges()).toBe(true)
+  })
+
   it('a conflict keeps the user edits on the canvas (never silently reverted)', async () => {
     // 冲突只呈现（conflict 态 + conflictDraftYaml 供采用入口），画布上的
     // 用户编辑原样保留——由用户决定采用服务端草稿还是继续编辑。
@@ -191,13 +278,21 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突呈现与挂起', () =>
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     rerender({
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       vi.advanceTimersByTime(850)
@@ -219,7 +314,11 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突呈现与挂起', () =>
       workspaceId: 'ws1',
       draftYaml: BASE,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     // 一次失败的保存先进入 conflict 态。
     mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
@@ -227,7 +326,11 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突呈现与挂起', () =>
       workspaceId: 'ws1',
       draftYaml: EDITED,
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       await vi.advanceTimersByTimeAsync(850)
@@ -241,11 +344,82 @@ describe('useWorkflowDraftPersistence CAS (#633)：冲突呈现与挂起', () =>
       workspaceId: 'ws1',
       draftYaml: 'key: demo\nlabel: More\n',
       originalYaml: BASE,
-      serverDraft: { definition_yaml: BASE, updated_at: SERVER_AT },
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
     })
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000)
     })
     expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1) // 无覆盖性 PUT
+  })
+
+  it('冲突期间把画布改回冲突前内容不再自动解除冲突（#1195：须显式二选一）', async () => {
+    // enterConflict 已把 CAS 基线推进到服务端代次（Agent 版本 D2）。
+    // 此时画布逐字节回到冲突前的本地内容 D1，「画布 == D1」≠「画布 == 服务端
+    // D2」——自动解除冲突会让 savedAt（服务端 t2）与画布内容（D1）身份自相
+    // 矛盾，且下一次编辑以 t2 基线静默覆盖 D2。
+    mocks.putWorkflowDraft.mockRejectedValueOnce(conflictError())
+    const { result, rerender } = renderPersistence({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
+    })
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: EDITED,
+      originalYaml: BASE,
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    await waitFor(() => expect(result.current.state.conflict).toBe(true))
+
+    // 画布改回冲突前内容：冲突横幅保留（revert 不再自动解除），不发 PUT。
+    rerender({
+      workspaceId: 'ws1',
+      draftYaml: BASE,
+      originalYaml: BASE,
+      serverDraft: {
+        definition_yaml: BASE,
+        updated_at: SERVER_AT,
+        generation: 7,
+      },
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(result.current.state.conflict).toBe(true)
+    expect(result.current.state.status).toBe('error')
+    expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
+
+    // 显式 keep-mine 才解除冲突：以推进后的基线把画布内容写回（用户已看过
+    // 警示，覆盖 Agent 版本是显式选择而非静默发生）。
+    mocks.putWorkflowDraft.mockResolvedValue({
+      definition_yaml: BASE,
+      updated_at: '2026-09-12T11:00:00+00:00',
+      generation: 10,
+    })
+    act(() => result.current.resolveConflict(true))
+    await act(async () => {
+      vi.advanceTimersByTime(850)
+    })
+    expect(mocks.putWorkflowDraft).toHaveBeenLastCalledWith('ws1', BASE, {
+      baseGeneration: 9,
+    })
+    await waitFor(() => expect(result.current.state.status).toBe('saved'))
+    expect(result.current.state.conflict).toBeFalsy()
   })
 })

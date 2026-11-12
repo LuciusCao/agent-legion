@@ -1,3 +1,4 @@
+from server.app.jobs.job_id_encoding import encode_job_id
 from tests.helpers import publish_legacy_intake_revision
 from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
@@ -87,7 +88,9 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
     assert created.status_code == 200
     body = created.json()
     assert body["jobs"][0]["workspace_id"] == workspace_id
-    assert body["jobs"][0]["id"] == f"{workspace_id}_math_sprint_Q001"
+    # #1255: segments containing "_" are escaped ("_" → "~u") so the id is
+    # injective in (workspace, workflow_key, source_id).
+    assert body["jobs"][0]["id"] == "math~usprint_math~usprint_Q001"
     assert body["jobs"][0]["source_type"] == "question"
     assert [job["id"] for job in workspace_jobs.json()["jobs"]] == [body["jobs"][0]["id"]]
     assert other_jobs.json()["jobs"] == []
@@ -165,7 +168,7 @@ def test_delete_workspace_rejects_when_jobs_running(tmp_path):
             },
         )
         job_db = app.state.job_db
-        job_id = f"{ws_id}_running_ws_Q501"
+        job_id = encode_job_id(ws_id, "running_ws", "Q501")
         job_db.update_job_status(job_id, "running")
         response = c.delete(f"/api/workspaces/{ws_id}")
 
@@ -195,7 +198,7 @@ def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
             },
         )
         job_db = app.state.job_db
-        job_id = f"{ws_id}_delete_me_Q601"
+        job_id = encode_job_id(ws_id, "delete_me", "Q601")
         run = job_db.start_node_run(job_id, "write_script", ["echo", "hi"], "/dev/null")
         job_db.finish_node_run(run["id"], "completed", 0, "")
         job_ids = [j["id"] for j in job_db.list_jobs(workspace_id=ws_id)]

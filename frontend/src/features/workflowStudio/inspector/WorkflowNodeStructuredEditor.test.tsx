@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { WorkflowNodeStructuredEditor } from './WorkflowNodeStructuredEditor'
+import {
+  makeStudioView,
+  withStudioProviders,
+} from '../shared/testStudioProviders'
 import type { WorkflowNodeRecord } from '../../../types'
 
 const node: WorkflowNodeRecord = {
@@ -83,5 +87,43 @@ describe('WorkflowNodeStructuredEditor', () => {
       />
     )
     expect(screen.getByLabelText('节点名称')).toHaveValue('Fetch v2')
+  })
+
+  it('M48：compare 报告结构字段变更时挂「已修改 · 待发布」标记', () => {
+    const studio = {
+      compareSummary: {
+        createsRevision: true,
+        riskLevel: 'info',
+        severityLabel: '提示',
+        nodeChanges: [
+          {
+            type: 'modified',
+            nodeKey: 'fetch',
+            label: 'Fetch',
+            nodeType: 'code',
+            fields: ['label'],
+            severity: 'info',
+          },
+        ],
+        edgeChanges: [],
+        intakeChanges: [],
+        metadataChanges: [],
+        riskFlags: [],
+        changedNodeKeys: new Set(['fetch']),
+      },
+    }
+    render(
+      withStudioProviders(
+        studio,
+        makeStudioView(),
+        <WorkflowNodeStructuredEditor
+          node={node}
+          definitionYaml={yaml}
+          onDefinitionYamlChange={vi.fn()}
+        />
+      )
+    )
+
+    expect(screen.getByText('已修改 · 待发布')).toBeInTheDocument()
   })
 })

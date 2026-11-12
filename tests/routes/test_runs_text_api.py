@@ -75,6 +75,17 @@ def _materials(client, workspace_id: str) -> list[dict]:
     return client.get(f"/api/workspaces/{workspace_id}/materials").json()["materials"]
 
 
+_PUBLISH = "server.app.services.material_object_publish"
+
+
+def _row_key(job_db, material_id: str) -> str:
+    with job_db.read() as conn:
+        row = conn.execute(
+            "select storage_key from materials where id=%s", (material_id,)
+        ).fetchone()
+    return row["storage_key"]
+
+
 def _storage_keys(job_db, workspace_id: str) -> set[str]:
     with job_db.read() as conn:
         rows = conn.execute(
@@ -256,7 +267,8 @@ def test_text_batch_failure_rolls_back_every_material(
     def execute(conn, sql, params=None):
         nonlocal calls
         result = original_execute(conn, sql, params)
-        if failure == "database" and sql.startswith("insert into materials"):
+        # Publication inserts (ready rows) — intent staging inserts precede the PUTs.
+        if failure == "database" and sql.startswith("insert into materials") and "'ready'" in sql:
             calls += 1
             if calls == 2:
                 raise RuntimeError("second row failed")
@@ -321,16 +333,16 @@ def test_concurrent_text_batches_keep_only_winner_objects(
 def test_commit_acknowledgement_failure_preserves_committed_objects(
     client, storage, job_db, monkeypatch
 ) -> None:
+    from server.app.jobs.queries.material_intent import publish_material_intents
     from server.app.services.run_text_items import materialize_text_items
 
     workspace_id = _create_workspace(client)
-    original = job_db.publish_inline_materials
 
     def commit_then_fail(*args, **kwargs):
-        original(*args, **kwargs)
+        publish_material_intents(*args, **kwargs)
         raise RuntimeError("commit acknowledgement lost")
 
-    monkeypatch.setattr(job_db, "publish_inline_materials", commit_then_fail)
+    monkeypatch.setattr(f"{_PUBLISH}.publish_material_intents", commit_then_fail)
     with pytest.raises(RuntimeError, match="acknowledgement"):
         materialize_text_items(
             job_db,
@@ -344,13 +356,13 @@ def test_commit_acknowledgement_failure_preserves_committed_objects(
 
 
 def test_failed_batch_does_not_delete_concurrent_winner(client, storage, job_db, monkeypatch):
+    from server.app.jobs.queries.material_intent import publish_material_intents
     from server.app.services.run_text_items import materialize_text_items
 
     workspace_id = _create_workspace(client)
-    original = job_db.publish_inline_materials
 
     def concurrent_winner_then_fail(*args, **kwargs):
-        monkeypatch.setattr(job_db, "publish_inline_materials", original)
+        monkeypatch.setattr(f"{_PUBLISH}.publish_material_intents", publish_material_intents)
         materialize_text_items(
             job_db,
             client.app.state.materials_service,
@@ -359,7 +371,7 @@ def test_failed_batch_does_not_delete_concurrent_winner(client, storage, job_db,
         )
         raise RuntimeError("losing request failed")
 
-    monkeypatch.setattr(job_db, "publish_inline_materials", concurrent_winner_then_fail)
+    monkeypatch.setattr(f"{_PUBLISH}.publish_material_intents", concurrent_winner_then_fail)
     with pytest.raises(RuntimeError, match="losing request"):
         materialize_text_items(
             job_db,
@@ -404,9 +416,9 @@ def test_cleanup_failure_preserves_original_error_and_logs_recovery_keys(
     def fail_lookup(*args):
         raise RuntimeError("database unavailable")
 
-    monkeypatch.setattr(job_db, "publish_inline_materials", fail_commit)
+    monkeypatch.setattr(f"{_PUBLISH}.publish_material_intents", fail_commit)
     if cleanup_failure == "lookup":
-        monkeypatch.setattr(job_db, "referenced_inline_objects", fail_lookup)
+        monkeypatch.setattr(f"{_PUBLISH}.release_material_intents", fail_lookup)
     else:
         storage.fail_deletes = True
     with pytest.raises(RuntimeError, match="original failure"):
@@ -416,8 +428,16 @@ def test_cleanup_failure_preserves_original_error_and_logs_recovery_keys(
             workspace_id,
             [{"type": "text", "content": "A"}],
         )
-    assert _materials(client, workspace_id) == []
     (key,) = storage.objects
+    if cleanup_failure == "lookup":
+        # #1314：release 事务失败时 intent 行与对象一起保留——行继续引用
+        # key，S3 孤儿 GC 不会删它；用户可在材料列表删除这条 uploading 行。
+        (row,) = _materials(client, workspace_id)
+        assert row["status"] == "uploading"
+        assert _storage_keys(job_db, workspace_id) == {key}
+    else:
+        # intent 行已删、对象删除失败：单次使用 key 的孤儿交 GC 材料删除批。
+        assert _materials(client, workspace_id) == []
     assert key in caplog.text
 
 
@@ -500,6 +520,26 @@ def test_text_item_storage_failure_returns_503_without_a_run(client, storage, jo
     assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []
 
 
+def test_text_item_fails_closed_when_store_returns_no_etag(client, job_db) -> None:
+    """#1279 R3b：inline 产线 HEAD 空 ETag → fail-closed（503，不落
+    ready+etag='' 的永久无身份行）。"""
+    from server.app.services.materials import MaterialStorageUnavailableError
+    from server.app.services.run_text_items import materialize_text_items
+
+    workspace_id = _create_workspace(client)
+    no_etag_storage = FakeStorage(no_etag=True)
+    client.app.state.materials_service.storage = no_etag_storage
+    with pytest.raises(MaterialStorageUnavailableError):
+        materialize_text_items(
+            job_db,
+            client.app.state.materials_service,
+            workspace_id,
+            [{"type": "text", "content": "A"}],
+        )
+    assert _materials(client, workspace_id) == []
+    assert no_etag_storage.put_calls == 1  # PUT 已发生、HEAD 空 ETag 拒绝落行
+
+
 def test_missing_material_is_reported_before_text_is_stored(client, storage, job_db) -> None:
     """Stored items are validated first: an unknown material id 404s before any
     text material is written (error precedence of the pre-text path)."""
@@ -558,7 +598,7 @@ def test_presign_wins_after_text_precheck(client, storage, job_db, monkeypatch, 
                 content_hash=hashlib.sha256(b"B").hexdigest(),
             )
             material_id = upload["material"]["id"]
-            (key,) = _storage_keys(job_db, workspace_id)
+            key = _row_key(job_db, material_id)
             storage.put_object(key, b"X" if upload_state == "failed" else b"B")
             if upload_state == "failed":
                 with pytest.raises(MaterialVerificationError):
@@ -644,8 +684,7 @@ def test_ready_reuse_is_revalidated_at_publication(client, storage, job_db, monk
     (key,) = _storage_keys(job_db, workspace_id)
     storage.put_object(key, b"B")
     service.complete(workspace_id, material_id)
-    runtime_db = client.app.state.job_db
-    original_publish = runtime_db.publish_inline_materials
+    from server.app.jobs.queries.material_intent import publish_material_intents
 
     def mutate_then_publish(*args, **kwargs):
         if change in {"expired", "uploading"}:
@@ -662,12 +701,11 @@ def test_ready_reuse_is_revalidated_at_publication(client, storage, job_db, monk
                 workspace_id, filename="new.txt", size_bytes=1, content_hash=digest
             )
             if change == "replaced":
-                (new_key,) = _storage_keys(job_db, workspace_id)
-                storage.put_object(new_key, b"B")
+                storage.put_object(_row_key(job_db, new["material"]["id"]), b"B")
                 service.complete(workspace_id, new["material"]["id"])
-        return original_publish(*args, **kwargs)
+        return publish_material_intents(*args, **kwargs)
 
-    monkeypatch.setattr(runtime_db, "publish_inline_materials", mutate_then_publish)
+    monkeypatch.setattr(f"{_PUBLISH}.publish_material_intents", mutate_then_publish)
     response = _create_run(
         client,
         workspace_id,
@@ -675,7 +713,18 @@ def test_ready_reuse_is_revalidated_at_publication(client, storage, job_db, monk
     )
     assert response.status_code == 409, response.text
     assert all(row["content_hash"] == digest for row in _materials(client, workspace_id))
-    assert set(storage.objects) == _storage_keys(job_db, workspace_id)
+    # #1267 R5 起重试把行迁到代次段 key，被取代的旧代次对象按设计成为孤儿
+    # （回收交 bucket lifecycle）——「对象集合 == 行 key 集合」不再成立。
+    # 收窄后的不变量：ready 行的当前 key 必有正确字节（uploading 行的当前
+    # key 尚未 PUT，本就无对象）。
+    with job_db.read() as conn:
+        rows = conn.execute(
+            "select storage_key, status from materials where workspace_id=%s",
+            (workspace_id,),
+        ).fetchall()
+    for row in rows:
+        if row["status"] == "ready":
+            assert storage.objects[row["storage_key"]] == b"B"
     assert client.get(f"/api/workspaces/{workspace_id}/runs").json()["runs"] == []
 
 

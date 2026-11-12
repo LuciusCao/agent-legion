@@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context};
 use serde::{Deserialize, Serialize};
 
+mod output_tokens;
+pub use output_tokens::OutputTokensParam;
+
 pub const ENV_MODELS_PATH: &str = "VELITES_MODELS_PATH";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -50,6 +53,10 @@ pub struct ModelConfig {
     pub max_output_tokens: Option<u64>,
     #[serde(default)]
     pub thinking_budgets: BTreeMap<String, u64>,
+    /// Request-body field carrying the per-call output cap on the
+    /// `openai-completions` dialect (#1093). Absent → `max_tokens`.
+    #[serde(default)]
+    pub output_tokens_param: OutputTokensParam,
 }
 
 impl ModelEntry {
@@ -88,6 +95,21 @@ pub fn default_path() -> anyhow::Result<PathBuf> {
         .map(PathBuf::from)
         .ok_or_else(|| anyhow!("HOME is not set; cannot locate ~/.velites/models.json"))?;
     Ok(home.join(".velites").join("models.json"))
+}
+
+/// The run-time error when no registry file exists (#1102). Every provider,
+/// `gateway` / `openai_compat` included, is configured only here; the
+/// pre-0.2.0 `~/.velites/config.json` and `VELITES_BASE_URL` /
+/// `VELITES_API_KEY` env bridge was removed, so the message names it for
+/// operators still relying on it and points at the migration section.
+pub fn missing_registry_error(path: &Path, provider: &str) -> anyhow::Error {
+    anyhow!(
+        "models registry {} does not exist; configure provider {provider:?} and its model \
+         there (see docs/architecture/velites-model-registry.md). The legacy \
+         ~/.velites/config.json and VELITES_BASE_URL/VELITES_API_KEY are no longer \
+         read — migrate them per that doc's 'migrating from 0.1.x' section",
+        path.display(),
+    )
 }
 
 pub fn load_default() -> anyhow::Result<ModelsFile> {
@@ -191,6 +213,18 @@ fn validate(file: &ModelsFile) -> anyhow::Result<()> {
                     model.id
                 ));
             }
+            // #1093: the field choice exists only on the OpenAI dialect;
+            // Anthropic Messages always sends `max_tokens`, so a non-default
+            // declaration there would be silently ignored — reject it.
+            if provider.api == ApiKind::AnthropicMessages
+                && model.output_tokens_param != OutputTokensParam::MaxTokens
+            {
+                return Err(anyhow!(
+                    "provider {name:?} model {:?}: outputTokensParam is only supported \
+                     for api \"openai-completions\"",
+                    model.id
+                ));
+            }
         }
     }
     Ok(())
@@ -215,6 +249,11 @@ fn resolve_api_key(value: &str) -> anyhow::Result<String> {
 fn default_anthropic_version() -> String {
     "2023-06-01".to_string()
 }
+
+// `outputTokensParam` registry tests live in the child module (split for the
+// file size budget, #1093); everything else stays inline.
+#[cfg(test)]
+mod output_tokens_param_tests;
 
 #[cfg(test)]
 mod tests {

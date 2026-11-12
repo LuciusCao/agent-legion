@@ -16,10 +16,10 @@ sleep），thread.join(timeout=30) 后断言线程已死防假绿。
    ``has_active_request`` 会把本可由本地 code 池执行的新代次节点无限期
    挡住。
 3. 新代次对照：mutation 提交后按新代次 enqueue 正常插入（行为不变）。
-4. 混合 claim 批 × finish_many（P2）：批内 code 候选与 agent 候选的 ws
-   锁键序与 job_id 序相反时，批写入段与 finish_many 共用同一
-   (ws 锁键, job_id) 全序 → 无 40P01、双方干净提交；旧「code 块按
-   job_id 排最前」序下本案必成环（突变自检覆盖）。
+4. 混合 claim 批 × finish_many（P2）：批内 code 候选与 agent 候选共用
+   纯 (job 锁键, job_id) 全序（#1346：实际 advisory 锁键；#1378 codex P2：
+   无 ws 分桶，agent-ws 池锁批首预取）→ 无 40P01、双方干净提交；旧
+   「code 块按 job_id 排最前」序下本案必成环（突变自检覆盖）。
 """
 
 from __future__ import annotations
@@ -399,63 +399,53 @@ def test_enqueue_with_current_generation_after_mutation_succeeds(job_db) -> None
 # ---------------------------------------------------------------------------
 
 
-def _inverted_ws_pair(job_db, *, prefix: str) -> tuple[str, str]:
-    """一对文本序与 hashtext('agent-ws:' || …)::int 序相反的 workspace id。
-
-    返回 (ws_first, ws_second)：ws_first 锁键更小（文本更大），ws_second 锁键
-    更大（文本更小）——配反向 job id 后，纯 job_id 序与锁键序相反。
-    """
-    pool: list[tuple[str, int]] = []
-    with job_db.connect() as conn:
-        for i in range(200):
-            wid = f"{prefix}-{i:03d}"
-            row = conn.execute("select hashtext(%s)::int as k", (f"agent-ws:{wid}",)).fetchone()
-            assert row is not None
-            pool.append((wid, int(row["k"])))
-    for wid, key in sorted(pool):
-        smaller = [w for w, other_key in pool if w > wid and other_key < key]
-        if smaller:
-            return min(smaller), wid
-    raise AssertionError("no inverted (text, lock-key) pair among 200 candidates")
-
-
 def test_mixed_claim_batch_vs_finish_many_no_ab_ba(job_db) -> None:
-    """钉住「混合批与 finish 批共用同一全序」（#645 评审 P2）：claim 批的
-    code 候选也按 (ws 锁键, job_id) 参与排序（code 不取 agent-ws 锁，仅借
-    同一排序键）。
+    """钉住「混合批与 finish 批共用同一全序」（#645 评审 P2；#1346/#1378 改为
+    纯 (job 锁键, job_id) 序）：claim 批的 code 候选与 agent 候选按同一把
+    实际锁键排序（code 不取 agent-ws 锁；agent-ws 池锁由批首预取覆盖，
+    #1378 codex P2）。
 
-    两个 workspace（锁键序与 job_id 序相反）各两节点：n1 已被 code 池认领
-    （running、lease active），ws_first 的 job 排 agent 请求（n2），
-    ws_second 的 job 排 code 请求（n2）。A = 手工驱动的混合批
-    （_lock_order_sorted 后先领锁键较小侧的 job-z），B = finish_many（两条
-    n1 lease，入队序按 job_id 反序以证明排序键纠正了它）。统一序下 B 的
-    第一项就等 A 提交，双方干净提交、无 40P01；旧「code 块按 job_id 排最
-    前」序下 A 先取 job-a → 与 B（job-z → job-a）成环必 40P01（
-    deadlock_timeout=50ms，且排序断言立即变红——突变自检覆盖）。
+    两个 workspace 各两节点：n1 已被 code 池认领（running、lease active），
+    n2 一个排 agent 请求、一个排 code 请求。A = 手工驱动的混合批
+    （_lock_order_sorted 后先领锁键较小侧），B = finish_many（两条 n1
+    lease，入队序相反以证明排序键纠正了它）。统一序下 B 的第一项就等 A
+    提交，双方干净提交、无 40P01；任何异序（旧 code-first 块、ws 分桶、
+    id 文本序）都可能让双方先抢不同的锁成环（deadlock_timeout=50ms，且
+    排序断言立即变红——突变自检覆盖）。编舞不依赖 ws/id 文本序：
+    job_first/job_second 按真实 job-mutation 锁键现算。
     """
-    ws_first, ws_second = _inverted_ws_pair(job_db, prefix="eq4-ws")
-    # job_id 序与锁键序相反：job-a 在锁键较大的 ws_second，job-z 在 ws_first。
-    job_first, job_second = "eq4-job-z", "eq4-job-a"
+    ws_agent, ws_code = "eq4-ws-agent", "eq4-ws-code"
+    job_agent, job_code = "eq4-job-agent", "eq4-job-code"
+    with job_db.connect() as conn:
+        keys = {
+            job: int(
+                conn.execute("select hashtext('job-mutation:' || %s)::int as k", (job,)).fetchone()[
+                    "k"
+                ]
+            )
+            for job in (job_agent, job_code)
+        }
+    job_first, job_second = sorted(keys, key=lambda j: (keys[j], j))
+    kind_by_job = {job_agent: "agent", job_code: "code"}
+    ws_by_job = {job_agent: ws_agent, job_code: ws_code}
     broker = AgentExecutionBroker(TIMED_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     repo = _repo(job_db)
-    # ws_first：agent 请求（n2）+ n1 的 code 池 lease。
-    _seed_agent_lane(job_db, workspace_id=ws_first, job_id=job_first, node_key="n2")
-    _add_node(job_db, job_first, "n1")
+    # agent 侧 job：agent 请求（n2）+ n1 的 code 池 lease。
+    _seed_agent_lane(job_db, workspace_id=ws_agent, job_id=job_agent, node_key="n2")
+    _add_node(job_db, job_agent, "n1")
     assert (
-        _enqueue_agent(job_db, workspace_id=ws_first, job_id=job_first, node_key="n2", generation=0)
+        _enqueue_agent(job_db, workspace_id=ws_agent, job_id=job_agent, node_key="n2", generation=0)
         is not None
     )
-    # ws_second：code 请求（n2）+ n1 的 code 池 lease。
-    _seed_code_lane(job_db, workspace_id=ws_second, job_id=job_second, node_keys=["n1", "n2"])
+    # code 侧 job：code 请求（n2）+ n1 的 code 池 lease。
+    _seed_code_lane(job_db, workspace_id=ws_code, job_id=job_code, node_keys=["n1", "n2"])
     assert (
-        _enqueue_code(
-            job_db, workspace_id=ws_second, job_id=job_second, node_key="n2", generation=0
-        )
+        _enqueue_code(job_db, workspace_id=ws_code, job_id=job_code, node_key="n2", generation=0)
         is not None
     )
     lease_by_job: dict[str, str] = {}
-    for workspace_id, job_id in ((ws_first, job_first), (ws_second, job_second)):
-        claim = repo.try_claim(_code_claim_request(workspace_id, job_id, "n1", generation=0))
+    for job_id in (job_agent, job_code):
+        claim = repo.try_claim(_code_claim_request(ws_by_job[job_id], job_id, "n1", generation=0))
         assert claim is not None
         lease_by_job[job_id] = claim.lease_id
 
@@ -471,28 +461,28 @@ def test_mixed_claim_batch_vs_finish_many_no_ab_ba(job_db) -> None:
             )
         )
         ordered = _lock_order_sorted(candidates)
-        # 统一全序：锁键较小的 job-z（agent）在前；旧的 code-first 序会把
-        # job-a（code）排最前——本断言即 P2 的排序钉子。
+        # 统一纯序：锁键较小者在前（与 kind/ws/id 文本无关）——本断言即 P2
+        # 的排序钉子。
         assert [str(row["job_id"]) for row in ordered] == [job_first, job_second]
         claim1 = evaluate_candidate(
             broker, conn_a, "worker-eq4", ordered[0], _mixed_view(), ScanState()
         )
-        assert claim1 is not None and claim1.kind == "agent"  # A 持 job-mutation:job-z
+        assert claim1 is not None and claim1.kind == kind_by_job[job_first]
+        # A 持 job-mutation:job_first
 
         result = ExecutionResult(status="completed", exit_code=0)
         thread, outcome = _start(
             lambda: finish_many(
                 repo,
-                # 入队序按 job_id 序——排序键必须纠正它（两版代码下 B 的第一项
-                # 分别是 job-z（新）与 job-a（旧））。
+                # 入队序与锁键序相反——排序键必须纠正它。
                 [(lease_by_job[job_second], result, None), (lease_by_job[job_first], result, None)],
             )
         )
-        _await_job_mutation_waiter(job_first)  # B 卡在 job-z 的锁上
+        _await_job_mutation_waiter(job_first)  # B 卡在 job_first 的锁上
         claim2 = evaluate_candidate(
             broker, conn_a, "worker-eq4", ordered[1], _mixed_view(), ScanState()
         )
-        assert claim2 is not None and claim2.kind == "code"
+        assert claim2 is not None and claim2.kind == kind_by_job[job_second]
         conn_a.commit()
     finally:
         conn_a.close()

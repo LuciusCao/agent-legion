@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { SetStateAction } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRealtimeChannel } from '../../../lib/realtime'
 import { queryKeys } from '../../../lib/queryKeys'
 import { sessionsWithRetention } from './studioChatRetention'
 import {
   answerStudioChatPermission,
-  createStudioChatSession,
   fetchStudioChatAgents,
   fetchStudioChatMessages,
   fetchStudioChatSession,
@@ -14,11 +14,10 @@ import {
 import {
   handleSseMessageEvent,
   handleSseReconnect,
-  isTerminalStatus,
   type SsePayload,
 } from './studioChatEvents'
+import { isTerminalStatus } from './studioChatCalibration'
 import {
-  deriveChatViews,
   lastTerminalEvent,
   maxSeq,
   type ChatMessage,
@@ -32,6 +31,9 @@ import {
 } from './useStudioChatRunTiming'
 import { useStudioChatSessionMemory } from './useStudioChatSessionMemory'
 import { useStudioChatSessionActions } from './useStudioChatSessionActions'
+import { useStudioChatStartSession } from './useStudioChatStartSession'
+import { useStudioChatHistory } from './useStudioChatHistory'
+import { useStudioChatViews } from './useStudioChatViews'
 
 /** Studio「Agent 助手」对话面板的状态与动作：会话/消息经 REST 拉取，
  * 实时更新走 SSE（message 按 id upsert，session 为状态快照）；SSE
@@ -39,21 +41,40 @@ import { useStudioChatSessionActions } from './useStudioChatSessionActions'
 export function useStudioChat(workspaceId: string | undefined) {
   const queryClient = useQueryClient()
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessagesState] = useState<ChatMessage[]>([])
   const [session, setSession] = useState<StudioChatSessionRecord | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [starting, setStarting] = useState(false)
+  // 权威 messagesRef（#1305 复验 codex r2 P1）：所有消息写入必须经此包装——
+  // 入队即同步落地 ref，ref 恒等于「已提交 state + 已排队 updater」，事件
+  // 处理与点读落地读到同一事实，不依赖渲染冲刷/被动效应的事后同步（并发
+  // 渲染让步/挂起时事后同步窗口不可控）。updater 必须保持纯函数（包装急切
+  // 求值一次 + React 冲刷时再求值）。
   const messagesRef = useRef<ChatMessage[]>([])
+  const setMessages = useCallback((action: SetStateAction<ChatMessage[]>) => {
+    messagesRef.current =
+      typeof action === 'function' ? action(messagesRef.current) : action
+    setMessagesState(action)
+  }, [])
   const activeSessionIdRef = useRef<string | null>(null)
+  // 会话选择代次（#1237 codex P2-1）：A→B→A 切换后 sessionId 守卫失效
+  // （重新选中的还是 A），异步加载回调须同时校验代次——每次选择变化
+  // （含 workspace 切换清空）在入口 effect 递增。
+  const sessionGenerationRef = useRef(0)
+  // missed 帧点读重试链的去重表（#1289）：跨 SSE 事件共享，键为消息 id、
+  // 值为挂链时的会话代次（代次推进即失效，语义见 studioChatCalibration）。
+  const missedRetryRef = useRef(new Map<string, number>())
+  // workspace 往返代次（#1265）：只在 workspace 重置效应递增——startSession
+  // 的落地守卫用它识别 A→B→A，不被同 workspace 内的会话选择变化误伤。
+  const workspaceEpochRef = useRef(0)
   // 当前 workspace 的 ref 快照（codex P2 复审轮 #796）：startSession 等异步
   // 回调落地前切换 workspace 时，旧 workspace 的迟到响应不得写入本 hook
   // 的 state（本 hook 实例被 react-router 复用，不被重挂）。ref 更新合入
   // 下方 workspaceId 重置 effect（react-hooks/refs 禁止 render 期写 ref）。
+  // messagesRef 不在此同步：它由上方包装 setter 在入队时同步维护（权威 ref）。
   const workspaceIdRef = useRef(workspaceId)
   useEffect(() => {
-    messagesRef.current = messages
     activeSessionIdRef.current = activeSessionId
-  }, [messages, activeSessionId])
+  }, [activeSessionId])
 
   const agentsQuery = useQuery({
     queryKey: queryKeys.studioChatAgents(workspaceId ?? ''),
@@ -75,32 +96,38 @@ export function useStudioChat(workspaceId: string | undefined) {
     async (fromSeq?: number) => {
       if (!workspaceId || !activeSessionId) return false
       const sessionId = activeSessionId
+      const generation = sessionGenerationRef.current
       const after = fromSeq ?? maxSeq(messagesRef.current)
       const fetched = await fetchStudioChatMessages(
         workspaceId,
         sessionId,
         after
       )
+      // #1237 codex P2-1：归属校验同时核对会话与选择代次——A→B→A 后
+      // sessionId 相同，早先代次的迟到响应不得合入/触发自愈。
+      const current =
+        activeSessionIdRef.current === sessionId &&
+        sessionGenerationRef.current === generation
       // #563：terminal 判定在 updater 外计算——updater 可能被 React 推迟到
       // render 才执行（同 state 有排队更新时），在 updater 内赋值再返回会
       // 拿到恒 false，REST 补齐的自愈被静默跳过；updater 必须是纯函数。
-      const hasTerminal =
-        activeSessionIdRef.current === sessionId &&
-        fetched.some(isTerminalStatus)
-      setMessages((current) => {
+      const hasTerminal = current && fetched.some(isTerminalStatus)
+      setMessages((currentMessages) => {
         // 跨会话竞态：拉取在途时切换了会话，旧会话的消息不得合入新列表；
         // 函数式更新以 current 为基线——并发的 refill(0) 与增量补齐各自
         // 合入，后落者不再回写旧基线覆盖前者（#563）。
-        if (activeSessionIdRef.current !== sessionId) return current
-        return mergeMessages(current, fetched)
+        if (activeSessionIdRef.current !== sessionId) return currentMessages
+        if (sessionGenerationRef.current !== generation) return currentMessages
+        return mergeMessages(currentMessages, fetched)
       })
       return hasTerminal
     },
-    [workspaceId, activeSessionId]
+    [workspaceId, activeSessionId, setMessages]
   )
 
   // 进入/切换会话：全量拉一次消息与会话快照。
   useEffect(() => {
+    sessionGenerationRef.current += 1
     if (!workspaceId || !activeSessionId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- 会话切换时重置消息/快照（与 useWorkflowStudioDraft 同一模式）
       setMessages([])
@@ -123,12 +150,12 @@ export function useStudioChat(workspaceId: string | undefined) {
     return () => {
       stale = true
     }
-  }, [workspaceId, activeSessionId])
+  }, [workspaceId, activeSessionId, setMessages])
 
   // 会话快照兜底：列表/事件不可达时以 sessions 查询里的行为准。
   useEffect(() => {
     if (!activeSessionId || session) return
-    const fromList = (sessionsQuery.data ?? []).find(
+    const fromList = sessionsQuery.data?.find(
       (row) => row.id === activeSessionId
     )
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 用已加载的会话列表回填快照
@@ -150,6 +177,8 @@ export function useStudioChat(workspaceId: string | undefined) {
       refillMessages,
       fetchSession: fetchStudioChatSession,
       activeSessionId,
+      sessionGenerationRef,
+      missedRetryRef,
     }
     const channel = createRealtimeChannel({
       url: `/api/workspaces/${encodeURIComponent(workspaceId)}/studio-chat/sessions/${encodeURIComponent(activeSessionId)}/events`,
@@ -172,9 +201,18 @@ export function useStudioChat(workspaceId: string | undefined) {
       },
     })
     return () => channel.close()
-  }, [workspaceId, activeSessionId, refillMessages, queryClient, setSession])
+  }, [
+    workspaceId,
+    activeSessionId,
+    refillMessages,
+    queryClient,
+    setSession,
+    setMessages,
+  ])
 
-  async function runAction(action: () => Promise<void>) {
+  // useCallback 稳定化（#1120 codex P1）：runAction 是 answerPermission /
+  // resume 的依赖，每 render 新建会把不稳定逐层传导到 MessageItem 的 props。
+  const runAction = useCallback(async (action: () => Promise<void>) => {
     setActionError(null)
     try {
       await action()
@@ -183,39 +221,19 @@ export function useStudioChat(workspaceId: string | undefined) {
       setActionError(error instanceof Error ? error.message : '操作失败')
       return false
     }
-  }
+  }, [])
 
-  // 返回本次创建的成败（#801 codex 轮 7 根因方案）：useJobDiagnosis 的
-  // 失败闩锁只采信本次尝试的失败——无关的历史加载错误（恢复会话的消息
-  // 拉取失败）不采。
-  async function startSession(agentId: string): Promise<boolean | undefined> {
-    if (!workspaceId || starting) return
-    setStarting(true)
-    try {
-      const created = await createStudioChatSession(workspaceId, agentId)
-      // 迟到响应归属守卫（applyResumedSession 的 activeSessionIdRef 同款
-      // 模式）：落地前已切换 workspace 则丢弃——不得把 A 的会话写进 B 的
-      // 状态（随后的消息拉取会以 B 的 workspace 请求 A 的 session）。
-      // workspaceId 是调用帧闭包值，与当前 ref 比对即「发起时快照」语义。
-      if (workspaceIdRef.current !== workspaceId) return
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.studioChatSessions(workspaceId),
-      })
-      // 第二个异步窗口（codex P2 第六轮）：invalidate 的 refetch 在途时
-      // 也可能切了 workspace——写入前复检，上面的守卫只盖住第一个 await。
-      if (workspaceIdRef.current !== workspaceId) return
-      setSession(created)
-      setActiveSessionId(created.id)
-      return true
-    } catch (error) {
-      // 迟到失败同样不落：错误只对发起时的 workspace 可见。
-      if (workspaceIdRef.current === workspaceId)
-        setActionError(error instanceof Error ? error.message : '操作失败')
-      return false
-    } finally {
-      if (workspaceIdRef.current === workspaceId) setStarting(false)
-    }
-  }
+  // startSession 与其瞬态（starting）在姊妹 hook（文件预算，#1265 守卫
+  // 强化同批拆出）；代次快照双检的细节见 useStudioChatStartSession。
+  const { startSession, starting, resetStarting } = useStudioChatStartSession({
+    workspaceId,
+    workspaceIdRef,
+    workspaceEpochRef,
+    queryClient,
+    setSession,
+    setActiveSessionId,
+    setActionError,
+  })
 
   // send / cancel / setAllowAll 带会话归属守卫（#962）：切换会话后旧会话
   // 的迟到结果不写进新会话的状态。
@@ -228,25 +246,30 @@ export function useStudioChat(workspaceId: string | undefined) {
     setSession,
   })
 
-  async function answerPermission(
-    requestId: string,
-    answer: { option_id?: string; deny?: boolean }
-  ) {
-    if (!workspaceId || !activeSessionId) return
-    await runAction(async () => {
-      await answerStudioChatPermission(
-        workspaceId,
-        activeSessionId,
-        requestId,
-        {
-          deny: answer.deny ?? false,
-          option_id: answer.option_id ?? null,
-        }
-      )
-    })
-  }
+  const answerPermission = useCallback(
+    async (
+      requestId: string,
+      answer: { option_id?: string; deny?: boolean }
+    ) => {
+      if (!workspaceId || !activeSessionId) return
+      await runAction(async () => {
+        await answerStudioChatPermission(
+          workspaceId,
+          activeSessionId,
+          requestId,
+          {
+            deny: answer.deny ?? false,
+            option_id: answer.option_id ?? null,
+          }
+        )
+      })
+    },
+    [workspaceId, activeSessionId, runAction]
+  )
 
-  const views = useMemo(() => deriveChatViews(messages), [messages])
+  // #1120：toolCalls 增量归并 + 草稿视图引用稳定化（见 useStudioChatViews；
+  // 合成 draft_saved 事件的合并也在那里完成，#1123）。
+  const views = useStudioChatViews(messages)
   const { toolCalls, workflowDraft, nodeDrafts, permissions } = views
   // #675：取消轮收尾视图在姊妹文件（studioChatCancelVisibility），与
   // deriveChatViews 的派生链分开 memo——它只被 RunBar 消费。
@@ -283,11 +306,12 @@ export function useStudioChat(workspaceId: string | undefined) {
   // activeSessionId 置空联动复位，这里不重复清。
   useEffect(() => {
     workspaceIdRef.current = workspaceId
+    workspaceEpochRef.current += 1
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 会话切换时重置选中与瞬态（与上方消息重置同一模式）
     setActiveSessionId(null)
     setActionError(null)
-    setStarting(false)
-  }, [workspaceId])
+    resetStarting()
+  }, [workspaceId, resetStarting])
   // 按 workspace 记忆选中会话；未选择时恢复上次或回落最近会话。
   useStudioChatSessionMemory(
     workspaceId,
@@ -297,6 +321,16 @@ export function useStudioChat(workspaceId: string | undefined) {
   )
 
   const busy = session ? isStudioChatBusy(session.status) : false
+
+  // #1120 PR-4：滚动到顶自动加载更早消息（状态机在姊妹 hook）。
+  const { hasMoreHistory, loadOlderHistory } = useStudioChatHistory({
+    workspaceId,
+    activeSessionId,
+    activeSessionIdRef,
+    sessionGenerationRef,
+    messagesRef,
+    setMessages,
+  })
 
   return {
     agents: agentsQuery.data ?? [],
@@ -321,6 +355,8 @@ export function useStudioChat(workspaceId: string | undefined) {
     lastRunMs: runTiming.lastMs,
     lastTerminalEvent: terminalEvent,
     lastRunCancelled: runCancelled,
+    hasMoreHistory,
+    loadOlderHistory,
     resume,
     resuming,
     selectSession: setActiveSessionId,

@@ -4,11 +4,10 @@
 //! size gate, note wording) pinned from the outside, without reaching
 //! into private helpers.
 //!
-//! The `json.rs` inline `#[cfg(test)]` suite keeps the core
-//! read/modify-write coverage; these #747 tests live as a sister
-//! integration module because the review round grew them past the
-//! file's raw-line budget (the move is also what the #747 exemption's
-//! timebox asked for: test surface split out of the source file).
+//! `json_ops.rs` keeps the core read/modify-write coverage; these #747
+//! tests live as a sister integration module because the review round grew
+//! them past the file's raw-line budget (the move is also what the #747
+//! exemption's timebox asked for: test surface split out of the source file).
 
 use velites::tools::{ToolContext, ToolKind, ToolOutput};
 

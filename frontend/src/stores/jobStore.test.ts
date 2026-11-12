@@ -16,6 +16,11 @@ vi.mock('../api/jobApi', () => ({
   batchRunToJobs: vi.fn(),
 }))
 
+vi.mock('../api/jobBatchPauseApi', () => ({
+  batchPauseJobs: vi.fn(),
+  batchResumeJobs: vi.fn(),
+}))
+
 vi.mock('./uiStore', () => ({
   useUiStore: {
     getState: vi.fn(),
@@ -32,7 +37,10 @@ import {
   continueJob,
   batchRunToJobs,
 } from '../api/jobApi'
+import { batchPauseJobs } from '../api/jobBatchPauseApi'
+import { isJobBatchAccepted } from '../api/jobBatchOperationsApi'
 import { useUiStore } from './uiStore'
+import { useTaskCenterStore } from './taskCenterStore'
 
 const mockBatchRerunJobs = vi.mocked(batchRerunJobs)
 const mockBatchDeleteJobs = vi.mocked(batchDeleteJobs)
@@ -41,6 +49,7 @@ const mockPackageJobs = vi.mocked(packageJobs)
 const mockRunToJob = vi.mocked(runToJob)
 const mockContinueJob = vi.mocked(continueJob)
 const mockBatchRunToJobs = vi.mocked(batchRunToJobs)
+const mockBatchPauseJobs = vi.mocked(batchPauseJobs)
 const mockShowToast = vi.fn()
 const mockGetState = vi.mocked(useUiStore.getState)
 const mockRefreshFirstPage = vi.fn()
@@ -50,7 +59,7 @@ describe('jobStore', () => {
     useJobStore.setState({
       ...normalizeJobs([]),
       isLoading: false,
-      error: null,
+      listLoadError: null,
       selectedIds: new Set(),
       selectionMode: 'explicit',
       selectionFilter: null,
@@ -77,6 +86,7 @@ describe('jobStore', () => {
     mockRunToJob.mockReset()
     mockContinueJob.mockReset()
     mockBatchRunToJobs.mockReset()
+    mockBatchPauseJobs.mockReset()
     mockShowToast.mockReset()
     mockGetState.mockReturnValue(
       createMockUiState({ showToast: mockShowToast })
@@ -180,6 +190,38 @@ describe('jobStore', () => {
     )
   })
 
+  it('accepted 202 batch rerun notifies the task center instead of a toast（#946）', async () => {
+    useJobStore.setState({ selectedIds: new Set(['j1']) })
+    useTaskCenterStore.getState().clearAcceptedNotice()
+    mockBatchRerunJobs.mockResolvedValueOnce({
+      operation: {
+        id: 'op1',
+        workspace_id: 'ws1',
+        kind: 'rerun',
+        status: 'pending',
+        items_total: 2000,
+        processed_count: 0,
+        succeeded_count: 0,
+        skipped_count: 0,
+        failed_count: 0,
+        created_by: 'tester',
+        error_message: '',
+      },
+    })
+
+    const result = await useJobStore.getState().batchRerun('ws1', 'extract')
+
+    expect(isJobBatchAccepted(result)).toBe(true)
+    expect(mockShowToast).not.toHaveBeenCalled()
+    expect(mockRefreshFirstPage).not.toHaveBeenCalled()
+    expect(useTaskCenterStore.getState().acceptedNotice).toMatchObject({
+      workspaceId: 'ws1',
+      itemsTotal: 2000,
+      opId: 'op1',
+      opKind: 'rerun',
+    })
+  })
+
   it('surfaces 404 on batch rerun', async () => {
     useJobStore.setState({ selectedIds: new Set(['j1']) })
     const err = Object.assign(new Error('Not Found'), { status: 404 })
@@ -190,7 +232,9 @@ describe('jobStore', () => {
     ).rejects.toThrow('Not Found')
 
     expect(useJobStore.getState().selectedIds.size).toBe(1)
-    expect(useJobStore.getState().error).toBe('Not Found')
+    // mutation 失败只走 toast——listLoadError 是任务列表加载失败的唯一
+    // 信号，批量重跑失败不得把健康列表整页替换成错误页（#1189 评审 P1）。
+    expect(useJobStore.getState().listLoadError).toBeNull()
     expect(mockShowToast).toHaveBeenCalledWith('Not Found', 'error')
   })
 
@@ -245,6 +289,36 @@ describe('jobStore', () => {
     )
   })
 
+  it('accepted 202 batch package notifies without a toast（#946）', async () => {
+    useJobStore.setState({ selectedIds: new Set(['j1']) })
+    useTaskCenterStore.getState().clearAcceptedNotice()
+    mockPackageJobs.mockResolvedValueOnce({
+      operation: {
+        id: 'op9',
+        workspace_id: 'ws1',
+        kind: 'package',
+        status: 'pending',
+        items_total: 3000,
+        processed_count: 0,
+        succeeded_count: 0,
+        skipped_count: 0,
+        failed_count: 0,
+        created_by: 'tester',
+        error_message: '',
+      },
+    })
+
+    const result = await useJobStore.getState().batchPackage('ws1')
+
+    expect(isJobBatchAccepted(result)).toBe(true)
+    expect(mockShowToast).not.toHaveBeenCalled()
+    expect(mockRefreshFirstPage).not.toHaveBeenCalled()
+    expect(useTaskCenterStore.getState().acceptedNotice).toMatchObject({
+      opId: 'op9',
+      opKind: 'package',
+    })
+  })
+
   it('surfaces 404 on batch delete', async () => {
     useJobStore.setState({ selectedIds: new Set(['j1']) })
     const err = Object.assign(new Error('Not Found'), { status: 404 })
@@ -255,7 +329,7 @@ describe('jobStore', () => {
     )
 
     expect(useJobStore.getState().selectedIds.size).toBe(1)
-    expect(useJobStore.getState().error).toBe('Not Found')
+    expect(useJobStore.getState().listLoadError).toBeNull()
     expect(mockShowToast).toHaveBeenCalledWith('Not Found', 'error')
   })
 
@@ -284,6 +358,7 @@ describe('jobStore', () => {
     expect(mockPackageJobs).toHaveBeenCalledWith('ws1', {
       jobIds: ['j1', 'j2'],
     })
+    if (isJobBatchAccepted(result)) throw new Error('expected sync result')
     expect(result.download_url).toBe('/api/workspaces/ws1/packages/pkg.zip')
     expect(useJobStore.getState().selectedIds.size).toBe(0)
     expect(useJobStore.getState().selectMode).toBe(true)
@@ -526,5 +601,38 @@ describe('jobStore', () => {
     )
 
     expect(mockShowToast).toHaveBeenCalledWith('not paused', 'error')
+  })
+
+  it('keeps the healthy list and accepts patches when batch pause fails (#1189 P1)', async () => {
+    // 错误通道收口：batchPause 失败不再写共享 listLoadError——此前它会把
+    // 健康列表整页替换成错误页，且 patchActions 的守卫把后续 SSE patch
+    // 全部丢弃，只剩刷新页面恢复。
+    useJobStore.setState({
+      ...normalizeJobs([makeJob({ id: 'j1', status: 'running' })]),
+      jobsWorkspaceId: 'ws1',
+      revision: 1,
+      selectedIds: new Set(['j1']),
+    })
+    mockBatchPauseJobs.mockRejectedValueOnce(new Error('pause down'))
+
+    await expect(useJobStore.getState().batchPause('ws1')).rejects.toThrow(
+      'pause down'
+    )
+
+    expect(useJobStore.getState().listLoadError).toBeNull()
+    expect(useJobStore.getState().jobIds).toEqual(['j1'])
+    expect(mockShowToast).toHaveBeenCalledWith('pause down', 'error')
+
+    // SSE patch 不被守卫丢弃，正常落地。
+    useJobStore
+      .getState()
+      .applyJobPatchBatch(
+        'ws1',
+        2,
+        [makeJob({ id: 'j1', status: 'paused' })],
+        []
+      )
+    expect(useJobStore.getState().jobsById.j1.status).toBe('paused')
+    expect(useJobStore.getState().revision).toBe(2)
   })
 })

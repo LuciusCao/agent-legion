@@ -70,6 +70,9 @@ echo "=== Quick Gate (segmented) ==="
 # step only fires when both backend and frontend lanes are enabled in a single
 # invocation, so segment 2's frontend static lane runs api:check inline
 # (FRONTEND_API_CHECK defaults to 1 when the backend lane is absent).
+# Segment 2 also sets GATE_SKIP_GOVERNANCE=1: with the backend lane trimmed,
+# check-quick.sh would otherwise re-run the repo-wide governance checks
+# (issue #1201) that segment 1a's backend static phase already covered.
 # Standalone ./scripts/check-quick.sh usage is unaffected.
 #
 # The local full gate keeps BOTH backend tiers even though the quick gate's
@@ -88,7 +91,7 @@ echo "--- Segment 1b: backend postgres tier with coverage (exclusive machine) --
 GATE_LANES="backend" GATE_TIER=postgres GATE_SKIP_STATIC=1 BACKEND_SKIP_WORKER_UI_TESTS=1 \
   AGENT_LEGION_COV=1 AGENT_LEGION_COV_APPEND=1 "$ROOT_DIR/scripts/check-quick.sh"
 echo "--- Segment 2: frontend + rust lanes (no backend coverage) ---"
-GATE_LANES="frontend rust" FRONTEND_TEST_MODE=coverage "$ROOT_DIR/scripts/check-quick.sh"
+GATE_LANES="frontend rust" FRONTEND_TEST_MODE=coverage GATE_SKIP_GOVERNANCE=1 "$ROOT_DIR/scripts/check-quick.sh"
 
 log_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-legion-full.XXXXXX")"
 # Failed runs keep the full lane logs for diagnosis (the capped stdout tail is

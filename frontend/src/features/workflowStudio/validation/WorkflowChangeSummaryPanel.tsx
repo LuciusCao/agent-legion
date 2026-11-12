@@ -15,6 +15,10 @@ import {
   severityLabel,
   severityVariant,
 } from './workflowStudioChanges'
+import {
+  structuralNodeChangeGroups,
+  structuralRiskLevel,
+} from './workflowStudioStructuralFilter'
 import { WorkflowChangeSummaryPanelErrors } from './WorkflowChangeSummaryPanelErrors'
 import styles from './WorkflowChangeSummaryPanel.module.css'
 
@@ -162,8 +166,12 @@ export function WorkflowChangeSummaryPanel({
     )
   }
 
+  // #1352（方案 A）：与 chip 计数 / 发布门控 / 发布复核框 / 画布角标同
+  // 口径——execution-only 行（运行通道）整行剔除、不抬风险等级；混合节点
+  // 剥掉 execution 字段仅展示结构侧。
+  const nodeChanges = structuralNodeChangeGroups(viewModel)
   const hasChanges =
-    viewModel.nodeChanges.length > 0 ||
+    nodeChanges.length > 0 ||
     viewModel.edgeChanges.length > 0 ||
     viewModel.intakeChanges.length > 0 ||
     viewModel.metadataChanges.length > 0 ||
@@ -179,13 +187,13 @@ export function WorkflowChangeSummaryPanel({
       ) : (
         <>
           <div className={styles.emptyState}>
-            风险等级: {viewModel.severityLabel}
+            风险等级: {severityLabel(structuralRiskLevel(viewModel))}
           </div>
-          {viewModel.nodeChanges.length > 0 && (
+          {nodeChanges.length > 0 && (
             <div className={styles.section}>
               <h3 className={styles.sectionTitle}>节点变更</h3>
               <ul className={styles.list}>
-                {viewModel.nodeChanges.map((change) => (
+                {nodeChanges.map((change) => (
                   <NodeItem
                     key={`node-${change.type}-${change.nodeKey}`}
                     change={change}

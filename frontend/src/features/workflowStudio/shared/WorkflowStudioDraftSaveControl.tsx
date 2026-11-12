@@ -1,12 +1,15 @@
 import { Typography } from '@mui/material'
-import { draftSaveText } from './useWorkflowDraftPersistence'
-import type { DraftSaveState } from './useWorkflowDraftPersistence'
+import { draftSaveText, draftSaveWarningFlags } from './draftSaveText'
+import type { DraftSaveState } from './draftSaveTypes'
 import { useStudioState } from './studioStateContext'
 import {
   WorkflowStudioDraftConflictControl,
   WorkflowStudioDraftWarningText,
 } from './WorkflowStudioDraftWarningCluster'
 import islandStyles from './StudioCanvasIslands.module.css'
+import { useDraftSaveConflictActions } from './WorkflowStudioDraftSaveControlActions'
+
+export { useDraftSaveConflictActions } from './WorkflowStudioDraftSaveControlActions'
 
 type Props = {
   save: DraftSaveState | undefined
@@ -43,12 +46,10 @@ export function WorkflowStudioDraftSaveControl({
   onRetrySave,
 }: Props) {
   const text = draftSaveText(save)
-  const inConflict = save?.conflict === true
   // codex 轮 4 P1-3：持久化不可用（loadError）与终态失败（error，重试
   // 耗尽）属用户必须知情的警示——窄屏同样保留（⚠ 恒可见 + tooltip 载
   // 全文，长文案窄屏让位）；瞬态「保存中…」才允许窄屏隐藏。
-  const isWarning =
-    save?.loadError === true || save?.status === 'error' || inConflict
+  const { inConflict, isWarning } = draftSaveWarningFlags(save)
   const showConflictActions =
     !readOnly && inConflict && onAdoptServer && onKeepMine
   // #804 定案：无可见内容时不渲染——岛的 flex gap 会给空壳 span 留死白。
@@ -88,34 +89,6 @@ export function WorkflowStudioDraftSaveControl({
       {text}
     </Typography>
   )
-}
-
-/* 保存警示的回调接线（容器与抽屉警示横幅共用，轮 4 P2-F / 轮 5 P2）：
-   冲突二选一 + error 终态的显式重试（flushDraftSave 在 error 态会重新
-   schedule 当前内容再 flush——persistence 层既有语义）。 */
-export function useDraftSaveConflictActions() {
-  const studio = useStudioState()
-  return {
-    onAdoptServer: () => {
-      const conflict = studio.draftSave?.conflictDraftYaml
-      if (conflict == null) {
-        studio.resolveConflict(false)
-        return
-      }
-      // #1143：带上冲突草稿的语义身份——采用后 savedHash 恢复为服务端
-      // 草稿身份，草稿卡核对不应对刚采用的内容误报不一致。
-      // #1177 codex P2：conflictDraftHash 的 undefined/null 分开传递——
-      // undefined（冲突事件未带 hash 字段）保持 hydrate 的「不动旧值」；
-      // null（服务端明确无身份）清除旧 hash。
-      studio.adoptServerDraft(
-        conflict,
-        studio.draftSave?.savedAt ?? null,
-        studio.draftSave?.conflictDraftHash
-      )
-    },
-    onKeepMine: () => studio.resolveConflict(true),
-    onRetrySave: () => void studio.flushDraftSave(),
-  }
 }
 
 /* 顶栏接线：从 Studio context 取草稿保存状态与冲突动作（替代原 meta

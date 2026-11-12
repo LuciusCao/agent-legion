@@ -52,6 +52,7 @@ def claim_batch_with_retry(
     limit: int,
     agent_limit: int | None = None,
     code_limit: int | None = None,
+    declared_node_limits: dict[str, int] | None = None,
 ) -> BatchClaimOutcome:
     """Run one batch claim pass, retrying one SQLSTATE 40P01.
 
@@ -70,6 +71,7 @@ def claim_batch_with_retry(
                 limit=limit,
                 agent_limit=agent_limit,
                 code_limit=code_limit,
+                declared_node_limits=declared_node_limits,
             )
             with write_transaction(broker.database_dsn) as conn:
                 return claim_batch_in_transaction(
@@ -79,6 +81,7 @@ def claim_batch_with_retry(
                     declared_max_concurrency,
                     declared_max_code_concurrency,
                     selection=selection,
+                    declared_node_limits=declared_node_limits,
                 )
         except Error as exc:
             if getattr(exc, "sqlstate", None) != "40P01" or attempt >= _BATCH_DEADLOCK_RETRIES:
@@ -95,6 +98,7 @@ def claim_batch(
     limit: int,
     agent_limit: int | None = None,
     code_limit: int | None = None,
+    declared_node_limits: dict[str, int] | None = None,
 ) -> list[AgentClaim]:
     """Full batch claim pass: transaction + deadlock retry + post-commit
     side effects, mirroring ``broker.claim``'s discipline one-for-one —
@@ -119,6 +123,7 @@ def claim_batch(
             limit=limit,
             agent_limit=agent_limit,
             code_limit=code_limit,
+            declared_node_limits=declared_node_limits,
         )
         claims = list(outcome.claims)
         if not claims:

@@ -36,7 +36,7 @@ def identity_mismatch_error(job_id: str, current: Any, expected: tuple[Any, ...]
     return error
 
 
-def verify_chunk_identities(conn: Any, chunk: list[tuple[Any, ...]]) -> None:
+def verify_chunk_identities(conn: Any, chunk: list[tuple[Any, ...]]) -> dict[str, Any]:
     """Post-INSERT identity verification for one committed-chunk-to-be (#501).
 
     Runs inside the chunk's own transaction, AFTER ``insert_jobs_batched``
@@ -50,6 +50,13 @@ def verify_chunk_identities(conn: Any, chunk: list[tuple[Any, ...]]) -> None:
     foreign row bound to this run. Closes the precheck's read-then-insert
     window: a concurrent submit can slip an insert past the precheck (its
     row was in flight at read time), but it cannot slip one past this check.
+
+    #1243: create_jobs_bulk also runs it over the WHOLE batch before the
+    first commit (committed collisions reject before anything commits) and
+    per chunk under the chunk's job-mutation locks, before the INSERT (every
+    creator holds that lock to COMMIT, so the read already sees an in-flight
+    same-id insert's arbitrated outcome). Returns the ``job_id → identity
+    row`` map it read (the under-lock call reuses it as the existence map).
     """
     by_id = fetch_identity_map(conn, [str(row[0]) for row in chunk])
     for row in chunk:
@@ -60,3 +67,4 @@ def verify_chunk_identities(conn: Any, chunk: list[tuple[Any, ...]]) -> None:
             or current["source_id"] != row[3]
         ):
             raise identity_mismatch_error(str(row[0]), current, (row[1], row[2], row[3]))
+    return by_id

@@ -274,20 +274,44 @@ def test_marker_check_with_snapshot_rereads_live_membership(tmp_path: Path) -> N
     assert proc_groups.pgid_members(tmp_path / "none") is None
 
 
-def test_reap_many_groups_waits_once_not_per_record(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "delay_first_collect", [False, True], ids=["immediate_collect", "delayed_collect"]
+)
+def test_reap_many_groups_waits_once_not_per_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, delay_first_collect: bool
+) -> None:
     """一次 executor 被杀会遗留大量记录：整批 TERM/KILL 只等一次，而非每条 1s。"""
     procs = [_spawn_group(marker=f"agent-legion-exec-{i}") for i in range(4)]
     for i, proc in enumerate(procs):
         _write_record(tmp_path, f"exec-{i}", proc.pid)
+    if delay_first_collect:
+        real_waitpid = os.waitpid
+        first_group_wait = True
+
+        def _delay_first_group_wait(pgid: int, flags: int) -> tuple[int, int]:
+            nonlocal first_group_wait
+            if first_group_wait and pgid < 0 and flags == os.WNOHANG:
+                first_group_wait = False
+                return (0, 0)
+            return real_waitpid(pgid, flags)
+
+        monkeypatch.setattr(os, "waitpid", _delay_first_group_wait)
+    waits: list[float] = []
+    real_sleep = orphan_reaper.time.sleep
+
+    def _record_wait(seconds: float) -> None:
+        if seconds == 1:
+            waits.append(seconds)
+        real_sleep(seconds)
+
+    monkeypatch.setattr(orphan_reaper.time, "sleep", _record_wait)
     try:
-        started = time.monotonic()
         reap_orphaned_agents(tmp_path, lambda _msg: None)
-        elapsed = time.monotonic() - started
     finally:
         for proc in procs:
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(proc.pid, 9)
-    assert elapsed < 3.5, elapsed  # per-record sleeps would take >= 4s
+    assert waits == [1]
     for proc in procs:
         with pytest.raises(ChildProcessError):
             os.waitpid(proc.pid, os.WNOHANG)

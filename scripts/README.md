@@ -7,13 +7,13 @@
 | 脚本 | 用途 |
 |------|------|
 | `check-quick.sh` | 日常快速质量门：静态轮并行 backend/frontend/rust，测试轮错峰——backend 先单独跑完，frontend/rust 随后并行（三条测试 lane 同时起会从 gate 内部超订机器；静态轮很轻保持全并行）。`GATE_TIER=aff` 是 agent 内环组合档（backend 受影响测试 + 前端 `vitest related`，非 gate 凭证）。 |
-| `check-quick-backend.sh` | quick gate 后端 lane；支持 `BACKEND_GATE_PHASE=static\|test\|all`。测试档位 `GATE_TIER=smoke\|unit\|postgres\|full`：`full`（默认）与 `unit` 同选 PostgreSQL 离线 unit 层——postgres 集成层交给 PR CI，碰 db 改动时内环先跑直接相关测试，CI 不可用或离线发布才跑完整 `postgres` 档；pytest 统一 `-n <workers> --dist worksteal`（空闲 worker 窃取待跑测试，消掉单个慢测试拖尾整批的尾部延迟）；`aff` 按 `.pytest-aff-index.json` 选择受影响测试（无索引回落 unit），`aff-index` 一次性重建索引（带 `--cov-context=test` 的 unit 全量跑）。 |
+| `check-quick-backend.sh` | quick gate 后端 lane；支持 `BACKEND_GATE_PHASE=static\|test\|all\|governance`——`governance` 只跑仓库级治理检查（check_invariants/check_versions/check_architecture/generate_architecture，治理对象跨语言 lane），供 backend lane 被裁剪时的兜底：check-quick.sh 的 governance guard 与 CI 的 governance-guard job（#1201）。测试档位 `GATE_TIER=smoke\|unit\|postgres\|full`：`full`（默认）与 `unit` 同选 PostgreSQL 离线 unit 层——postgres 集成层交给 PR CI，碰 db 改动时内环先跑直接相关测试，CI 不可用或离线发布才跑完整 `postgres` 档；pytest 统一 `-n <workers> --dist worksteal`（空闲 worker 窃取待跑测试，消掉单个慢测试拖尾整批的尾部延迟）；`aff` 按 `.pytest-aff-index.json` 选择受影响测试（无索引回落 unit），`aff-index` 一次性重建索引（带 `--cov-context=test` 的 unit 全量跑）。 |
 | `check-quick-frontend.sh` | quick gate 前端 lane；支持 `FRONTEND_GATE_PHASE=static\|test\|all`，并通过 `FRONTEND_TEST_MODE=test\|coverage\|related` 选择 Vitest 模式（`related` = 只跑导入改动源文件的测试，`vitest related`）。 |
 | `gate-jobs.sh` | 各 lane 默认并行度策略：机器预算按并发 gate 数均分（`(cores-2)/N` 夹在 2..8，N 为机器级 slot 数）；队列不可见时回落兄弟 worktree 探测（`min(4, cores)` / `cores-2`）。 |
 | `gate-queue.sh` | 机器级 gate 排队：quick gate 在 git common dir 的共享 slot 目录取位，默认 `AGENT_LEGION_MAX_PARALLEL_GATES=1`（串行，各自独占整机预算；并发 2 仍会让各 lane 互相抢 CPU、超时类 flaky 复发，大机器可显式调回 2），满位则打印持有者并等待；陈旧 slot（pid 已死或超龄）自动回收。防多 agent worktree 并行跑门时互相拖垮（曾观察到 4 并发把最后一个 quick gate 拖到 ~1 小时）。 |
 | `pytest_aff_selection.py` | backend 受影响测试选择：从 `--cov-context=test` 的 coverage 数据蒸馏「源文件 → 测试 nodeid」逆索引（`build`），并按 git 改动选出受影响测试（`select`）；内环加速用，非 gate 凭证。 |
 | `check-fast.sh` | pre-commit 实际调用的 fast gate：ruff/mypy/前端 lint，不跑测试。 |
-| `check.sh` | 本地完整质量门（CI 不可用或离线发布时）：分段串行——backend unit 段（带 coverage）→ backend postgres 段（仅测试轮：`GATE_SKIP_STATIC=1` 跳过静态轮与 api-contract 步、`BACKEND_SKIP_WORKER_UI_TESTS=1` 跳过 worker UI 测试，coverage 追加到同一文件）→ frontend/rust 段，最后并行 full backend evidence/前端 bundle；quick gate 的 full 档缩到 unit 层后，本地全量语义由本脚本保持（两层都跑、每项检查恰好一次、覆盖率合并）。 |
+| `check.sh` | 本地完整质量门（CI 不可用或离线发布时）：分段串行——backend unit 段（带 coverage）→ backend postgres 段（仅测试轮：`GATE_SKIP_STATIC=1` 跳过静态轮与 api-contract 步、`BACKEND_SKIP_WORKER_UI_TESTS=1` 跳过 worker UI 测试，coverage 追加到同一文件）→ frontend/rust 段（`GATE_SKIP_GOVERNANCE=1` 去重仓库级治理检查，#1201），最后并行 full backend evidence/前端 bundle；quick gate 的 full 档缩到 unit 层后，本地全量语义由本脚本保持（两层都跑、每项检查恰好一次、覆盖率合并）。 |
 | `check-ci.sh` | CI 质量门：完整 gate 的 CI 扩展版本。 |
 | `check-deps-audit.sh` | 依赖漏洞审计（pip-audit + npm audit）；非阻塞，需网络。 |
 | `run-local-gate.sh` | 对精确 commit 执行 quick/full gate，并在 Git common directory 记录可复用的本地通过凭证。 |
@@ -72,7 +72,7 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 | `seed_from_prod.py` | 从本地 prod Docker stack 的 Postgres 只读导出并种子 develop 库（目标库名为 prod 名或 host 非 loopback 时拒绝执行）。无 make target，直接 `uv run python scripts/seed_from_prod.py` 调用。 |
 | `seed_dump_projection.py` | `seed_from_prod.py` 第 1 层的 COPY 块列投影（纯函数）：源库落后目标库一个 schema 版本时，剥离目标库已删除的列（如 v91 删除的 workspace key 列）。 |
 | `gc_artifacts.py` | 报告/回收 content-addressed artifact store 中零引用且超过在途宽限期的孤儿 blob（默认 dry-run，`--apply` 回收）。 |
-| `gc-s3-jobs.py` | 报告/回收对象存储 `jobs/`、`jobs-staging/` 前缀的孤儿对象（job 删除失败残留、promote 中途失败、staging 滞留；对照 `job_artifacts` 清单行 + 宽限窗判定，#340；默认 dry-run，`--apply` 回收）。 |
+| `gc-s3-jobs.py` | 报告/回收对象存储 `jobs/`、`jobs-staging/` 前缀的孤儿对象（job 删除失败残留、promote 中途失败、staging 滞留；对照 `job_artifacts` 清单行 + 宽限窗判定，#340）与材料根前缀孤儿（v2g 单次使用 key、对象年龄过 max(宽限窗, 1h)、删除前反查无行才删，旧文法只报告，#1314）；默认 dry-run，`--apply` 回收。 |
 | `agent_backfill_dry_run.py` | Agent 定义退役回填 dry-run 报告（#934 / #440，只读：连接强制 `default_transaction_read_only`、不跑 `init_db`、不碰对象存储）：遍历各 workspace 的 active revision 与草稿，模拟回填每个 agent 节点的 runtime / tools / config_schema / skill / requires_labels，列出共享定义组、解析不到的节点与 config_schema 覆盖差异。`uv run python -m scripts.agent_backfill_dry_run [--workspace ID] [--output PATH]`；报告反映部署数据，只留本地、不进仓库。 |
 | `report-orphan-s3-buckets.py` | 报告孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已不存在；只报不删，逐个给出 `clean-worktree.sh` 收尾命令，#340）。 |
 

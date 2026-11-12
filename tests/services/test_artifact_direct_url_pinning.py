@@ -27,6 +27,7 @@ from server.app.services.job_artifact_objects import (
 )
 from server.app.services.job_artifact_versions import artifact_version_key
 from server.app.services.job_artifacts import JobArtifactService
+from tests.fakes.artifact_rows import seed_artifact_row
 from tests.fakes.storage import FakeObjectStorage
 
 URL_PREFIX = "https://s3.test/download/"
@@ -218,7 +219,8 @@ def test_legacy_fixed_key_row_is_retired_not_overwritten(job_db, settings, tmp_p
     store = JobArtifactObjectStore(job_db, storage)
     legacy_key = artifact_storage_key(job["workspace_id"], job["id"], "report.json")
     storage.objects[legacy_key] = b"legacy"
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id=job["workspace_id"],
         job_id=job["id"],
         node_key="question_understanding",
@@ -243,7 +245,8 @@ def test_legacy_key_shared_by_another_node_row_is_kept(job_db, settings, tmp_pat
     legacy_key = artifact_storage_key(job["workspace_id"], job["id"], "shared.json")
     storage.objects[legacy_key] = b"shared"
     for node_key in ("question_understanding", "other_node"):
-        store.record_remote(
+        seed_artifact_row(
+            store,
             workspace_id=job["workspace_id"],
             job_id=job["id"],
             node_key=node_key,

@@ -36,6 +36,13 @@ def is_provider_auth_error(message: str | None) -> bool:
     )
 
 
+def model_error_for_exit(exit_code: int, message: str | None) -> str | None:
+    """Use exit-0 model errors and explicit Provider auth errors on exit 1."""
+    if exit_code == 0 or (exit_code == 1 and is_provider_auth_error(message)):
+        return message
+    return None
+
+
 def fold_model_error(event: dict[str, Any], last_error: str | None) -> str | None:
     """Fold one parsed Pi event into the running model-error state.
 

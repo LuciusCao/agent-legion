@@ -32,7 +32,7 @@ const baseData: DagNodeData = {
   label: 'review_keywords',
   status: 'completed',
   duration: 12.4,
-  executorKind: 'pi',
+  executionType: 'agent',
   nodeKey: 'review_keywords',
   capability: 'review_keywords',
   topologyBadges: ['entry', 'branch'],
@@ -41,14 +41,21 @@ const baseData: DagNodeData = {
 }
 
 describe('DagNode', () => {
-  it('renders label, status, duration and executor kind', () => {
+  it('renders label, status, duration and execution type', () => {
     renderWithProvider(baseData)
     expect(screen.getByText('Key · review_keywords')).toBeInTheDocument()
     expect(screen.getByText('能力 · review_keywords')).toBeInTheDocument()
-    expect(screen.getByText('pi')).toBeInTheDocument()
+    expect(screen.getByText('agent')).toBeInTheDocument()
     expect(screen.getByText('入口')).toBeInTheDocument()
     expect(screen.getByText('分支')).toBeInTheDocument()
     expect(screen.getByText(/耗时 12.4s/)).toBeInTheDocument()
+  })
+
+  // #1180：agent 节点声明 execution.runtime 时类型徽标附 runtime
+  // （agent·velites——旧「Pi Agent」标签真正想表达的语义）。
+  it('renders the runtime on the type badge when the agent node declares one', () => {
+    renderWithProvider({ ...baseData, executionRuntime: 'velites' })
+    expect(screen.getByText('agent·velites')).toBeInTheDocument()
   })
 
   // #415：label 不再单行省略——两行 line-clamp 由 CSS（.label 的
@@ -101,7 +108,6 @@ describe('DagNode', () => {
   it('renders Agent and Worker identity separately in the badge', () => {
     renderWithProvider({
       ...baseData,
-      executorKind: 'pi',
       agentId: 'key-info-generator',
       workerId: 'worker-abc123def456',
     })
@@ -228,15 +234,32 @@ describe('DagNode', () => {
     expect(baselineRule![1]).toContain('flex-shrink: 0')
   })
 
-  it('falls back to executorId when workerId is missing', () => {
+  // #1180：executorId 回落分支已删除——隐含 code 池的池键不是执行主体，
+  // code 节点被 Worker 认领前不渲染执行徽标（不再与类型徽标撞出双「code」）。
+  it('renders no execution badge for a code node before a worker claims it', () => {
     renderWithProvider({
       ...baseData,
-      executorId: 'code-default',
+      executionType: 'code',
+      agentId: null,
       workerId: null,
     })
-    const badge = screen.getByTestId('dag-node-execution-badge')
-    expect(badge).toHaveTextContent('code-default')
-    expect(badge).toHaveAttribute('title', 'code-default')
+    expect(
+      screen.queryByTestId('dag-node-execution-badge')
+    ).not.toBeInTheDocument()
+    expect(screen.getByText('code')).toBeInTheDocument()
+  })
+
+  // #1180：自含 agent 节点的 agent_id 投影即 node key（#933），与卡片
+  // 下方「Key · node_key」重复，不作为执行主体展示。
+  it('omits the execution badge when the agent identity is the node key itself', () => {
+    renderWithProvider({
+      ...baseData,
+      agentId: 'review_keywords',
+      workerId: null,
+    })
+    expect(
+      screen.queryByTestId('dag-node-execution-badge')
+    ).not.toBeInTheDocument()
   })
 
   it('renders the Agent while a request is queued without a Worker', () => {
@@ -250,7 +273,6 @@ describe('DagNode', () => {
     renderWithProvider({
       ...baseData,
       agentId: null,
-      executorId: null,
       workerId: null,
     })
     expect(
@@ -262,7 +284,6 @@ describe('DagNode', () => {
     renderWithProvider({
       ...baseData,
       agentId: null,
-      executorId: null,
       workerId: null,
       executorUnbound: true,
     })

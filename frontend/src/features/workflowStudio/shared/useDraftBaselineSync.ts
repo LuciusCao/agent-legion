@@ -25,7 +25,11 @@ export function useDraftBaselineSync(
   setViewState: Dispatch<SetStateAction<WorkflowStudioViewState>>,
   clearRevisionLoadError: () => void,
   hasPreservedDraft: boolean,
-  justPublishedRef: { current: string | null }
+  justPublishedRef: { current: string | null },
+  /* M48 运行通道：本客户端发起的 runtime 保存/回滚也会推进基线（原地更新
+     active revision）——这不是外部变更，草稿保留但不打 hasPreservedDraft
+     标记（否则每次保存运行配置都冒出「基线有更新」chip）。 */
+  runtimeSavedRef?: { current: boolean }
 ) {
   const draftYamlRef = useRef(draftYaml)
   useEffect(() => {
@@ -61,12 +65,17 @@ export function useDraftBaselineSync(
       !firstRun &&
       isDefinitionDirty(previousOriginal, currentDraft) &&
       isDefinitionDirty(originalYaml, currentDraft)
+    const silentRuntimeBump =
+      baselineChanged && runtimeSavedRef?.current === true
+    if (silentRuntimeBump && runtimeSavedRef) {
+      runtimeSavedRef.current = false
+    }
     if (!preserveDirtyDraft) {
       setDraftYaml(originalYaml)
     }
     setViewState({
       ...createDraftViewState(activeRevisionId ?? null),
-      hasPreservedDraft: preserveDirtyDraft,
+      hasPreservedDraft: preserveDirtyDraft && !silentRuntimeBump,
     })
     clearRevisionLoadError()
   }, [
@@ -76,6 +85,7 @@ export function useDraftBaselineSync(
     setDraftYaml,
     setViewState,
     justPublishedRef,
+    runtimeSavedRef,
   ])
 
   useEffect(() => {

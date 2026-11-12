@@ -110,9 +110,9 @@ def _token_expiry(job_db, token: str) -> datetime:
 def test_tool_call_renews_near_expiry_run_token(job_db, settings) -> None:
     """A live-but-aging token slides forward on the first tool_call update —
     the long-turn hole that let a token die under a running turn (#411).
-    45min of life sits ABOVE the turn-start 30min threshold (send_message's
-    renew is a no-op there) but BELOW the keepalive threshold (a full turn
-    duration plus grace), so only the tool_call keepalive can slide it."""
+    45min of life sits BELOW the turn-start 4h threshold and BELOW the
+    keepalive threshold (a full turn duration plus grace), so the tool_call
+    keepalive is what slides it here."""
     user_id = str(job_db.create_user("slide-user", password_hash=None)["id"])
     token = scoped_tokens.mint_scoped_token(job_db, user_id)
     with job_db.connect() as conn:
@@ -373,7 +373,7 @@ def test_expired_token_is_not_revived_by_keepalive(job_db, settings) -> None:
     dead (notice appended) and its expiry row is untouched — no revival."""
     user_id = str(job_db.create_user("expire-user", password_hash=None)["id"])
     token = scoped_tokens.mint_scoped_token(
-        job_db, user_id, now=datetime.now(UTC) - timedelta(hours=3)
+        job_db, user_id, now=datetime.now(UTC) - timedelta(hours=25)
     )
     service, _bus, session_id, _runtime, _workspace_id = _direct_session(job_db, settings, token)
     try:
@@ -414,7 +414,7 @@ def test_keepalive_db_failure_is_swallowed_and_retried(job_db, settings, monkeyp
         # Retry on the next tool_call: the check now succeeds (live token,
         # no notice) — proving the done-flag was reset by the failure path.
         # Three lookups: the retry's liveness SELECT plus the rowcount
-        # re-check (the fresh 2h token needs no slide, so the UPDATE
+        # re-check (the fresh token's full TTL needs no slide, so the UPDATE
         # returns False and _token_alive re-verifies liveness).
         service._on_update(session_id, _tool_call("tc-b"))
         assert calls["n"] == 3
@@ -576,9 +576,10 @@ def test_live_agent_tool_call_keeps_token_alive_end_to_end(job_db, settings, tmp
     try:
         session = service.create_session(workspace_id, user_id, "fake-agent")
         token_hash_row = _sole_live_token_hash(job_db)
-        # Age to 45 minutes before the turn: above the turn-start threshold,
-        # below the keepalive threshold — whoever checks it must keep it
-        # alive for the turn to finish with a working tool channel.
+        # Age to 45 minutes before the turn: below both the turn-start (4h)
+        # and the keepalive (one turn plus grace) thresholds — whoever checks
+        # it must keep it alive for the turn to finish with a working tool
+        # channel.
         with job_db.connect() as conn:
             conn.execute(
                 "update auth_scoped_tokens set expires_at = current_timestamp"

@@ -497,11 +497,23 @@ pub(super) fn wire_message(message: &Message) -> Value {
             }
             Value::Object(wire)
         }
-        Role::ToolResult => json!({
-            "role": "tool",
-            "tool_call_id": message.tool_call_id.as_deref().unwrap_or_default(),
-            "content": joined_text(message),
-        }),
+        Role::ToolResult => {
+            let text = joined_text(message);
+            let content = if message.is_error == Some(true) {
+                if text.is_empty() {
+                    "[ERROR]".into()
+                } else {
+                    format!("[ERROR] {text}")
+                }
+            } else {
+                text
+            };
+            json!({
+                "role": "tool",
+                "tool_call_id": message.tool_call_id.as_deref().unwrap_or_default(),
+                "content": content,
+            })
+        }
     }
 }
 

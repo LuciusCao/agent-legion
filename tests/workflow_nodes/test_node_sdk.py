@@ -9,6 +9,7 @@ import pytest
 
 from workspace_libs.node_sdk import (
     AUTH_FAILURE_MARKER_PATH,
+    NODE_RUNTIME_DIR,
     NodeContext,
     entrypoint,
     parse_json_object,
@@ -212,18 +213,34 @@ def test_workflow_manifest_reads_job_identity(tmp_path: Path) -> None:
 
 
 def test_report_auth_failure_writes_marker_with_connection_key(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path, {"node_config": {"connection": "cms-internal"}})
+    ctx = _ctx(
+        tmp_path,
+        {"node_config": {"connection": "cms-internal"}, "execution_id": "exec-9"},
+    )
 
     ctx.report_auth_failure()
 
-    marker = tmp_path / AUTH_FAILURE_MARKER_PATH
+    # #1355: the marker is namespaced per execution — parallel code nodes
+    # share one job_dir, so a fixed name races with neighbours' clear/consume.
+    marker = tmp_path / NODE_RUNTIME_DIR / "auth_failure-exec-9"
     assert marker.read_text(encoding="utf-8") == "cms-internal"
+    assert not (tmp_path / AUTH_FAILURE_MARKER_PATH).exists()
 
 
 def test_report_auth_failure_without_connection_writes_empty_marker(tmp_path: Path) -> None:
-    _ctx(tmp_path, {}).report_auth_failure()
+    _ctx(tmp_path, {"execution_id": "exec-9"}).report_auth_failure()
 
-    assert (tmp_path / AUTH_FAILURE_MARKER_PATH).read_text(encoding="utf-8") == ""
+    marker = tmp_path / NODE_RUNTIME_DIR / "auth_failure-exec-9"
+    assert marker.read_text(encoding="utf-8") == ""
+
+
+def test_report_auth_failure_without_execution_id_uses_legacy_marker(tmp_path: Path) -> None:
+    """Hand-built contexts (no execution_id in runtime) keep the legacy fixed
+    name; production dispatch always carries one."""
+    _ctx(tmp_path, {"node_config": {"connection": "cms-internal"}}).report_auth_failure()
+
+    marker = tmp_path / AUTH_FAILURE_MARKER_PATH
+    assert marker.read_text(encoding="utf-8") == "cms-internal"
 
 
 def test_logger_named_after_node_key(tmp_path: Path) -> None:

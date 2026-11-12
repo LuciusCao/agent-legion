@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useInFlightSend } from './useInFlightSend'
 
 export type StudioChatQueuedMessage = { id: string; text: string }
@@ -24,10 +24,20 @@ export function useStudioChatQueue(
 ) {
   const [queue, setQueue] = useState<StudioChatQueuedMessage[]>([])
   const queueRef = useRef(queue)
-  useEffect(() => {
+  // #1121 codex P2：submit 闭包捕获发起时的 sessionKey，落定回调经 ref 读
+  // 最新值比对——跨会话切换后迟到的失败信号不得触发 composer 草稿恢复。
+  // P2-2：ref 必须在布局效应（commit 阶段）同步——被动效应有 commit→effect
+  // 窗口，窗口内迟到的回调会按旧身份判定，把旧会话文本恢复进新会话输入框。
+  // queueRef 搭同一班车（它只被事件/回调读取，提前同步无害）。
+  const sessionKeyRef = useRef(sessionKey)
+  useLayoutEffect(() => {
     queueRef.current = queue
-  }, [queue])
-  const { inFlightRef, sendInFlight } = useInFlightSend(send)
+    sessionKeyRef.current = sessionKey
+  })
+  const { inFlightRef, sendInFlight, slowSend } = useInFlightSend(
+    send,
+    sessionKey
+  )
 
   // 跨会话切换清空队列：排队消息只属于当时那个会话。
   useEffect(() => {
@@ -61,7 +71,9 @@ export function useStudioChatQueue(
   }, [busy, blocked, sessionKey, inFlightRef, sendInFlight])
 
   const nextIdRef = useRef(1)
-  function submit(text: string) {
+  // #1121：返回是否已被保留（入队即 true——队列条可见可移除；直发以 send
+  // 结果为准）——composer 据此决定清稿还是留稿，发送失败不再丢草稿。
+  function submit(text: string): Promise<boolean> {
     // 首个直发在途（busy 尚未随 SSE 快照翻转）也视为忙：后续提交入队，
     // 避免两条都直发撞后端单 turn 原子认领的 409。压缩窗口（blocked）同理。
     // 队列非空时一律尾插（#797 复审批次 P2）：上一次 flush 失败会保留队首
@@ -71,9 +83,15 @@ export function useStudioChatQueue(
       const id = `q${nextIdRef.current}`
       nextIdRef.current += 1
       setQueue((current) => [...current, { id, text }])
-      return
+      return Promise.resolve(true)
     }
-    sendInFlight(text)
+    // #1121 codex P2：落定只剩 false 一种「恢复草稿」信号——切会话后迟到
+    // 的 false（含 #962 守卫丢弃的已成功发送，消息其实已入库）一律改判
+    // true， composer 不恢复旧会话文本进新会话输入框。
+    const submittedIn = sessionKey
+    return sendInFlight(text).then(
+      (ok) => ok || sessionKeyRef.current !== submittedIn
+    )
   }
 
   function remove(id: string) {
@@ -91,5 +109,5 @@ export function useStudioChatQueue(
     })
   }
 
-  return { queuedMessages: queue, submit, remove }
+  return { queuedMessages: queue, submit, remove, slowSend }
 }

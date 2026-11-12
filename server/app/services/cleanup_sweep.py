@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 
 from server.app.services.cleanup_sweep_store import CleanupSweepStore
 from server.app.services.job_dir_index import iter_job_dirs
-from server.app.services.job_run_dir_lookup import derive_run_dir_from_index
 from server.app.services.run_dir_cleanup import find_extra_run_dirs, remove_path
 from server.app.storage_paths import ManagedPathError, resolve_data_path
 
@@ -100,7 +99,8 @@ def _remove_row_artifacts(
     data_dir: Path,
     action: str,
     cutoff: datetime,
-    job_dir_index: dict[str, Path],
+    db: JobQueries,
+    pending_claim_strips: list[tuple[int, str]],
 ) -> int:
     """Remove one expired artifact (``log`` or ``run_dir``) for a row past retention."""
     try:
@@ -136,10 +136,22 @@ def _remove_row_artifacts(
             return 0
     run_dir_str = row["run_dir"]
     if not run_dir_str:
-        run_dir = derive_run_dir_from_index(row["job_id"], row["node_key"], job_dir_index)
-        if run_dir is not None:
-            run_dir_str = str(run_dir)
-    if not run_dir_str:
+        # #1315 fail-closed: an expired row with an empty run_dir owns no
+        # directory — the claim was never recorded (legacy rows) or was
+        # relinquished when keep-only-latest removed that dir and cleared the
+        # column. Deriving the newest token dir here would target a directory
+        # owned by a NEWER row (whose own run_dir claim and retention timeline
+        # apply), deleting fresh evidence for a stale row. Leftover dirs of
+        # such rows are bounded and reclaimed by cleanup_extra_runs_per_node.
+        return 0
+    if db.has_newer_run_dir_claimant(run_dir_str, finished, row["id"]):
+        # #1315 共享认领守卫：按 sweep 同一 (finished_at, id) 升序存在更新的
+        # 认领者（部署前 finish 不转移所有权留下的存量：worker 固定 token
+        # 目录被历次 run 共享）。本行不是所有者，删除会灭失认领者的证据——
+        # 只把本行的陈旧认领排进批缴清（较新者恒未被缴清，判据对同 chunk
+        # flush 滞后免疫），绝不删除；最新认领者无更新认领者，过期即正常
+        # 删除。
+        pending_claim_strips.append((row["id"], run_dir_str))
         return 0
     try:
         remove_path(resolve_data_path(run_dir_str, data_dir, allow_missing=True))
@@ -160,7 +172,6 @@ def sweep_expired_node_runs(
     data_dir: Path,
     log_cutoff: datetime,
     run_dir_cutoff: datetime,
-    job_dir_index: dict[str, Path],
 ) -> tuple[int, int]:
     """Remove expired node-run log files and run directories in bounded chunks.
 
@@ -204,10 +215,14 @@ def sweep_expired_node_runs(
                     ).fetchall()
                 if not rows:
                     break
+                pending_claim_strips: list[tuple[int, str]] = []
                 for row in rows:
                     totals[action] += _remove_row_artifacts(
-                        row, data_dir, action, cutoff, job_dir_index
+                        row, data_dir, action, cutoff, db, pending_claim_strips
                     )
+                # Shared-claim strips flush in one short write transaction per
+                # chunk — after the chunk's filesystem work, never around it.
+                db.release_stale_run_dir_claims(pending_claim_strips)
                 raw_last_finished_at = rows[-1]["finished_at"]
                 last_finished_at = (
                     raw_last_finished_at

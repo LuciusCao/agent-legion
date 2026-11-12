@@ -25,10 +25,13 @@ and a leftover would leak into the pool's next checkout.
 from __future__ import annotations
 
 import os
+import threading
 
 import pytest
+from psycopg.pq import TransactionStatus
 
 from server.app import single_replica_probe
+from server.app.db.pools import pool_for
 from server.app.db.transaction import read_connection
 from server.app.single_replica_probe import SingleReplicaProbe
 from tests.postgres_support import TEST_DATABASE_URL
@@ -73,4 +76,46 @@ def test_probe_closes_transaction_and_keeps_session_lock(
         assert row["acquired"] is True
         # Undo the acquisition so the pooled observer connection goes back
         # without a stray session lock.
+        observer.execute(single_replica_probe._UNLOCK_SQL, (unique_key,))
+
+
+class _GatedTask:
+    """Duck-typed pool maintenance task that parks a worker on a gate."""
+
+    def __init__(self, gate: threading.Event) -> None:
+        self._gate = gate
+
+    def run(self) -> None:
+        self._gate.wait(5)
+
+
+def test_probe_close_returns_the_connection_idle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#1077: close() must commit the unlock SELECT's transaction itself.
+
+    Every pool worker is parked first, so no async reset rollback can run
+    before the assertion: the connection must already be IDLE when it is
+    handed back, not INTRANS waiting on a rollback that a racing pool
+    close would discard.
+    """
+    unique_key = f"issue-1077-regression-{os.getpid()}"
+    monkeypatch.setattr(single_replica_probe, "_REPLICA_LOCK_KEY", unique_key)
+    probe = SingleReplicaProbe(TEST_DATABASE_URL)
+    assert probe.probe() is True
+    held = probe._connection
+    assert held is not None
+    raw = held._raw
+
+    pool = pool_for(TEST_DATABASE_URL)
+    gate = threading.Event()
+    for _ in range(pool.num_workers):
+        pool.run_task(_GatedTask(gate))
+    try:
+        probe.close()
+        assert raw.info.transaction_status == TransactionStatus.IDLE
+    finally:
+        gate.set()
+
+    with read_connection(TEST_DATABASE_URL) as observer:
+        row = observer.execute(single_replica_probe._TRY_LOCK_SQL, (unique_key,)).fetchone()
+        assert row["acquired"] is True
         observer.execute(single_replica_probe._UNLOCK_SQL, (unique_key,))

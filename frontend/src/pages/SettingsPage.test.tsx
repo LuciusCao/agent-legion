@@ -148,10 +148,7 @@ const defaultState: SettingState = {
 
 function renderPage(initialEntries = ['/workspaces/ws1/settings']) {
   return render(
-    <MemoryRouter
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      initialEntries={initialEntries}
-    >
+    <MemoryRouter initialEntries={initialEntries}>
       <Routes>
         <Route
           path="/workspaces/:workspaceId/settings"

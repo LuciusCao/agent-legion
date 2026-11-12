@@ -17,7 +17,9 @@ and ``queued_dropped`` tells the user to resend — never a silent loss.
 
 While any message is queued, later sends queue too (FIFO — a direct claim
 would overtake them) and background wakeups stand back (wake_session), so
-nothing can slip in between a turn's end and the queued message's start.
+nothing Studio sends can slip in between a turn's end and the queued
+message's start; a Kimi Code unprompted turn opened there is caught by the
+#1109 dequeue check (unprompted_queue.GatedUnpromptedWatcher.defer).
 A runtime torn down with messages still queued never starts them; the UI
 marks such rows undelivered once the session is no longer live.
 """
@@ -98,7 +100,12 @@ def _deliver(
     text: str,
     prompt: str,
 ) -> bool:
-    """ACP thread, at the queued prompt's turn: claim like human admission."""
+    """At the queued prompt's turn (worker thread, no lock held): claim like
+    human admission."""
+    # #1109: on Kimi Code, re-observe the wire journal first; a just-opened
+    # unprompted turn sends the message back to the gate (still pending).
+    if (gate := runtime.unprompted_gate) is not None and gate.defer(message_id, text, prompt):
+        return False
     with runtime.lock:
         runtime.inbound_pending -= 1
         if runtime.closed or service.runtime(session_id) is not runtime:

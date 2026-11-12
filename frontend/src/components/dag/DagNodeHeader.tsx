@@ -2,19 +2,22 @@ import { MaterialIcon } from '../MaterialIcon'
 import { DagNodeChangeBadge } from './DagNodeChangeBadge'
 import { DagNodeExecutionBadge } from './DagNodeExecutionBadge'
 import { DagNodeTerminalBadge } from './DagNodeTerminalBadge'
-import type { DagNodeData } from './dagNodeTypes'
+import { nodeExecutionTypeLabel, type DagNodeData } from './dagNodeTypes'
 import styles from './DagNode.module.css'
 import { STATUS_ICON } from '../dagNodeStatus'
 
 /**
- * DagNode 头部行（#276 预算拆分）：状态图标、标签、executor/agent 徽标与
- * 未绑定/终态标记。渲染输入只有 data 的展示字段（memo 由外层 DagNode 兜底，
- * 这里不重复 memo——它随 DagNode 一起执行）。
+ * DagNode 头部行（#276 预算拆分）：状态图标、标签、执行类型徽标（#284
+ * 显式 type 词汇，#1180——code/agent，不再是退役 executor 词汇）、执行
+ * 主体徽标（认领 worker 短码 / agent 身份）与未绑定/终态标记。渲染输入
+ * 只有 data 的展示字段（memo 由外层 DagNode 兜底，这里不重复 memo——它随
+ * DagNode 一起执行）。
  * 警告徽标短文案「缺执行」（#423 codex P2）：完整缺口说明在 title，缩短
  * 理由见 DagNode.module.css 的 .label 布局推演注释。
  */
 export function DagNodeHeader({ data }: { data: DagNodeData }) {
   const icon = STATUS_ICON[data.status]
+  const executionType = nodeExecutionTypeLabel(data)
   return (
     <div className={styles.header}>
       <span className={[styles.icon, styles[`icon${data.status}`]].join(' ')}>
@@ -23,8 +26,8 @@ export function DagNodeHeader({ data }: { data: DagNodeData }) {
       <span className={styles.label} title={data.label}>
         {data.label}
       </span>
-      {data.executorKind && (
-        <span className={styles.executorTag}>{data.executorKind}</span>
+      {executionType && (
+        <span className={styles.executorTag}>{executionType}</span>
       )}
       <DagNodeExecutionBadge data={data} />
       <DagNodeChangeBadge changeType={data.changeType} />

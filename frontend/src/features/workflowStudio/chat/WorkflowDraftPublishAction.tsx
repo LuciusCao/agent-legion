@@ -2,6 +2,8 @@ import {
   useStudioStateOptional,
   type StudioState,
 } from '../shared/studioStateContext'
+import { savedIdentityConfirms } from '../shared/draftIdentity'
+import { hasStructuralChanges } from '../validation/workflowStudioChanges'
 import styles from './StudioChatPanel.module.css'
 
 /* #667 B1：聊天草稿卡内的发布入口。发布对象永远是编辑器当前 YAML——
@@ -29,17 +31,21 @@ function publishDisabledReason(studio: StudioState): string | null {
     (error) => error.category === 'yaml' || error.category === 'schema'
   )
   if (hasBlockingError) return 'YAML / 结构存在错误，请先修正再发布'
-  // 与 useWorkflowStudioActions 的 hasCompareChanges 口径保持一致（不计
-  // metadataChanges）。
+  // r1 P2-2：与 useWorkflowStudioActions 的 hasCompareChanges 同口径
+  // （hasStructuralChanges || riskFlags——execution-only 的 runtime 变更不算
+  // 可发布变更，metadataChanges 自 M48 起计入）。
   const summary = studio.compareSummary
   const hasChanges = Boolean(
-    summary &&
-    (summary.nodeChanges.length ||
-      summary.edgeChanges.length ||
-      summary.intakeChanges.length ||
-      summary.riskFlags.length)
+    summary && (hasStructuralChanges(summary) || summary.riskFlags.length > 0)
   )
-  if (!hasChanges) return '与 active revision 没有可发布的变更'
+  if (!hasChanges) {
+    // M48：runtime-only 草稿走运行通道即改即存，发布按钮永远禁用——给
+    // 指引而不是笼统的「没有变更」（compare 可能确有 execution-only diff）。
+    if ((studio.runtimeChangedKeys?.length ?? 0) > 0) {
+      return '仅运行配置修改：在「运行配置」区保存即生效，无需发布'
+    }
+    return '与 active revision 没有可发布的变更'
+  }
   // 轮 6 H2：冲突未解决禁发布（canPublish 已含此门控）。
   if (studio.draftSave?.conflict) return '草稿存在冲突，请先解决冲突再发布'
   // codex 轮 3 P2：canPublish 已绑定「当前 YAML 校验通过」（自动校验驱动），
@@ -91,7 +97,12 @@ export function WorkflowDraftPublishButton() {
  * #1177 codex R3 P2：上述「偏离必然推进状态」有一个例外——空白内容。
  * decideSchedule 对空白 skip（服务端拒存空白草稿），状态停在上次成功
  * 保存的 settled、savedHash 仍是旧 H；用户清空编辑器后短路前置并不成立。
- * 空白永不落盘 ⇒ 对空白内容禁用短路，回落提示（恢复字节比较时代的行为）。 */
+ * 空白永不落盘 ⇒ 对空白内容禁用短路，回落提示（恢复字节比较时代的行为）。
+ * #1196：短路判据收口到 savedIdentityConfirms（另要求编辑器内容逐字节
+ * 等于 savedHash 的内容本体 savedYaml，消除 hydrate/adopt 的单帧假
+ * settled）；比较对象是保存状态机跟踪的草稿 studio.draftYaml——revision
+ * 查看模式下 definitionYaml 是被查看版本，而发布对象与 savedHash 都属于
+ * 草稿，提示以草稿为准（语义待产品确认）。 */
 export function WorkflowDraftStaleHint({
   draftYaml,
   draftHash,
@@ -100,13 +111,9 @@ export function WorkflowDraftStaleHint({
   draftHash: string | null
 }) {
   const studio = useStudioStateOptional()
-  if (!studio || studio.definitionYaml === draftYaml) return null
-  const save = studio.draftSave
-  const savedHash = save?.savedHash ?? null
-  const settled =
-    studio.definitionYaml.trim() !== '' &&
-    (save?.status === 'saved' || save?.status === 'idle')
-  if (draftHash && savedHash && settled && draftHash === savedHash) return null
+  if (!studio || studio.draftYaml === draftYaml) return null
+  if (savedIdentityConfirms(studio.draftSave, studio.draftYaml, draftHash))
+    return null
   return (
     <div className={styles.draftHint} role="note">
       该草稿与编辑器当前内容不一致，发布将以编辑器中的 YAML 为准

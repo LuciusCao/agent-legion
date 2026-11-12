@@ -24,6 +24,7 @@ from server.app.events.bus import InProcessEventBus
 from server.app.executors.sweeper import SweeperThread
 from server.app.http_middleware import add_http_middleware
 from server.app.jobs import JobQueries
+from server.app.lifespan_threads import stop_lifespan_threads
 from server.app.mcp_server.http_app import (
     MCP_MOUNT_PATH,
     StudioMcpRelay,
@@ -33,14 +34,18 @@ from server.app.routes import RouterDeps, create_router
 from server.app.routes.auth import create_auth_router
 from server.app.routes.job_http_handlers import register_job_http_exception_handlers
 from server.app.routes.quality_deps import build_quality_loop
-from server.app.scheduler_wakeup import unregister_wakeup
+from server.app.routes.run_batches import create_run_batches_router
 from server.app.services.agent_catalog_projection import AgentCatalogService
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
 from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
-from server.app.services.job_intake_queue import JobIntakeQueue
+from server.app.services.job_batch_operations.wiring import build_background_tasks
 from server.app.services.job_packages import JobPackageService
+from server.app.services.material_legacy_etag_binding import (
+    LegacyMaterialEtagBinderThread,
+    start_legacy_material_etag_binder,
+)
 from server.app.services.materials import MaterialsService
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
@@ -51,7 +56,6 @@ from server.app.settings import load_settings, validate_settings
 from server.app.single_replica_probe import SingleReplicaProbe
 from server.app.skills.skill_sources_retirement import retire_skill_sources_document
 from server.app.spa import mount_spa
-from server.app.startup_tasks import BackgroundTasks
 from server.app.storage import build_s3_storage_checked
 from server.app.studio_chat.agent_catalog import spawn_startup_detection
 from server.app.studio_chat.registry import StudioAgentRegistryStore
@@ -143,12 +147,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
     slow_sweeps: SweeperOwnedThreads | None = None
-    background_tasks = BackgroundTasks(
-        workspace_event_aggregator=workspace_event_aggregator,
-        agent_broadcast_controller=agent_manager.broadcast_controller,
-        job_intake_queue=JobIntakeQueue(job_db, settings, job_event_buffer),
-        ops_metrics=ops_metrics,
-    )
+    legacy_etag_binder: LegacyMaterialEtagBinderThread | None = None
+    # Constructed ahead of BackgroundTasks so the runs-async feeder shares the
+    # one MaterialsService instance (#1117 text-item materialization); the
+    # app.state assignment below reuses the same object.
+    materials_service = MaterialsService(job_db, object_storage)
     # Single-replica guardrail (#277): the runtime state above (in-process
     # event bus, login rate limiter, studio chat sessions, pause reset) is
     # process-local, so a second replica against the same database degrades
@@ -159,7 +162,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal workflow_worker_thread, sweeper_thread, slow_sweeps
+        nonlocal workflow_worker_thread, sweeper_thread, slow_sweeps, legacy_etag_binder
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
         replica_probe.probe()
         # #831/#835 velites 副本指纹对账（软告警）：Host 消费的两个面
@@ -217,6 +220,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                     object_storage,
                     studio_chat_service,
                 )
+            # #1316：存量无 hash 材料的 ETag 一次性绑定。每次启动都起（候选
+            # 来自 DB，重启不丢进度），只看对象存储是否配置——不受
+            # sweeper_enabled / code_capacity / claim 开关门控（#1312 R10 教训）。
+            legacy_etag_binder = start_legacy_material_etag_binder(job_db, object_storage)
         background_tasks.start(app)
         studio_chat_service.reap_zombie_sessions()
         studio_registry = StudioAgentRegistryStore(job_db)
@@ -241,15 +248,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             # Reap chat sessions before closing DB pools: teardown revokes
             # scoped tokens and settles permission waiters via the DB.
             studio_chat_service.shutdown()
-            for thread in (
-                sweeper_thread,
-                *(slow_sweeps or ()),
-            ):
-                if thread is not None:
-                    thread.stop()
-            if workflow_worker_thread is not None:
-                unregister_wakeup(workflow_worker_thread.wake)
-                workflow_worker_thread.stop()
+            stop_lifespan_threads(
+                sweeper_thread, slow_sweeps, legacy_etag_binder, workflow_worker_thread
+            )
             # #591: stop the group-commit writer BEFORE the pools close —
             # stop() drains parked writes to completion, and those writes
             # need a live pool (the same ordering discipline the studio
@@ -285,13 +286,27 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.studio_chat_service = studio_chat_service
     app.state.event_bus = job_event_manager.bus
     app.state.job_event_buffer = job_event_buffer
-    app.state.materials_service = MaterialsService(job_db, object_storage)
+    app.state.materials_service = materials_service
     app.state.job_artifact_objects = job_artifact_objects
     app.state.workspace_event_aggregator = workspace_event_aggregator
     agent_catalog = AgentCatalogService(settings, job_db)
     workspace_execution_configuration = WorkspaceExecutionConfigurationService(job_db, settings)
     workspace_configuration = WorkspaceConfigurationService(job_db, settings)
     job_packages = JobPackageService(job_db, settings, object_store=job_artifact_objects)
+    # BackgroundTasks assembly lives in job_batch_operations.wiring (#946,
+    # main.py file budget): intake consumer + runs-async feeder (#1117) +
+    # ops metrics + batch-ops feeder.
+    background_tasks = build_background_tasks(
+        job_db,
+        settings,
+        workspace_event_aggregator,
+        agent_manager,
+        ops_metrics,
+        job_event_manager,
+        job_event_buffer,
+        materials_service,
+        object_storage,
+    )
     app.include_router(create_auth_router(app.state.auth_service), prefix="/api")
     quality = build_quality_loop(job_db, artifact_store, object_store=job_artifact_objects)
     app.include_router(
@@ -323,6 +338,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             )
         )
     )
+    # #1157 phase3: the task-center run-batches surface mounts here (not in
+    # job_route_group): its router carries require_workspace_access itself,
+    # with identical membership/api-scope semantics for workspace-prefixed
+    # routes (routes/run_batches.py module docstring).
+    app.include_router(create_run_batches_router(job_db), prefix="/api")
     # After the API routers so /api/studio-agent/tools/* routes match first;
     # the mount only receives /api/studio-agent/mcp.
     app.mount(MCP_MOUNT_PATH, studio_mcp_relay)

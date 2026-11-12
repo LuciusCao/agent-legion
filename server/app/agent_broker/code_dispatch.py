@@ -32,6 +32,7 @@ from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionR
 from server.app.agent_broker.claim_paths import claim_log_path
 from server.app.agent_broker.code_manifest import runtime_context_stub
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
+from server.app.agent_broker.worker_presence import has_online_etag_capable_code_worker
 from server.app.agent_control.registry import CODE_PROTOCOL_VERSION as _CODE_PROTOCOL_VERSION
 from server.app.agent_control.registry import ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS
 from server.app.agent_control.registry import AgentWorkerRegistry
@@ -138,6 +139,21 @@ class CodeDispatchService:
         if now - probed_at >= _ONLINE_PROBE_TTL_SECONDS:
             result = has_online_code_worker(self.job_db, capability, workspace_id)
             self._online_probe[(capability, workspace_id)] = (now, result)
+        return result
+
+    def online_etag_capable_code_worker_available(self, workspace_id: str) -> bool:
+        """TTL-cached #1320 probe: an online >= v6 code Worker can claim ETag-gated requests.
+
+        Shares ``_online_probe`` under a sentinel capability key; the same 5s
+        staleness trade-off applies (a departing v6 Worker may read as online
+        for one TTL — claim admission stays the authoritative gate).
+        """
+        now = time.monotonic()
+        key = ("<etag-v6>", workspace_id)
+        probed_at, result = self._online_probe.get(key, (0.0, False))
+        if now - probed_at >= _ONLINE_PROBE_TTL_SECONDS:
+            result = has_online_etag_capable_code_worker(self.job_db, workspace_id)
+            self._online_probe[key] = (now, result)
         return result
 
     def is_in_flight(self, job_id: str, node_key: str) -> bool:

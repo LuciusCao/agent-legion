@@ -8,8 +8,9 @@ through the logs endpoint, which sanitizes).
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StudioAgentJobSummaryNode(BaseModel):
@@ -46,6 +47,8 @@ class StudioAgentJobListResponse(BaseModel):
     jobs: list[StudioAgentJobView]
     returned: int
     limit: int
+    # #1261: keyset cursor for the next (older) page; None on the last page.
+    next_cursor: str | None = None
 
 
 class StudioAgentJobNode(BaseModel):
@@ -58,7 +61,13 @@ class StudioAgentJobNode(BaseModel):
     error_message: str
     inputs: list[str]
     outputs: list[str]
-    executor_kind: str | None
+    execution_type: Literal["code", "agent"] | None
+    # Same vocabulary as JobNodeResponse (#731): only "code" (implicit code
+    # pool) or None (agent nodes) exist; pi/openclaw retired.
+    executor_kind: Literal["code"] | None = Field(
+        description="Deprecated: use execution_type.",
+        json_schema_extra={"deprecated": True},
+    )
     agent_id: str | None
     # Same decision as dispatch (PR #1085); set when it is a config error.
     route_error: str | None = None

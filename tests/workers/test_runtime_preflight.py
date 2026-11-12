@@ -22,7 +22,11 @@ from shared import code_sandbox
 from worker import executor as agent_worker
 from worker.binary_resolution import resolve_binary
 from worker.runtime import setup as runtime_setup
-from worker.runtime.preflight import parse_expect_runtimes, preflight_error
+from worker.runtime.preflight import (
+    parse_expect_runtimes,
+    preflight_error,
+    resource_envelope_error,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -423,3 +427,102 @@ def test_compose_files_carry_velites_mount_and_guard() -> None:
         assert "AGENT_WORKER_EXPECT_RUNTIMES: ${AGENT_WORKER_EXPECT_RUNTIMES-velites}" in text, (
             f"{name} 守卫注入缺失或插值形式错误"
         )
+
+
+@pytest.mark.no_db
+def test_resource_envelope_guard_requires_explicit_review_outside_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENT_WORKER_RESOURCE_LIMITS_MODE", raising=False)
+    assert resource_envelope_error(agent=99, code=99, upload=99) is None
+    monkeypatch.setenv("AGENT_WORKER_RESOURCE_LIMITS_MODE", "default")
+    assert resource_envelope_error(agent=10, code=0, upload=4) is None
+    for values in (
+        {"agent": 11, "code": 0, "upload": 4},
+        {"agent": 10, "code": 1, "upload": 4},
+        {"agent": 10, "code": 0, "upload": 5},
+    ):
+        error = resource_envelope_error(**values)
+        assert error is not None
+        assert "explicit" in error
+    monkeypatch.setenv("AGENT_WORKER_RESOURCE_LIMITS_MODE", "explicit")
+    assert resource_envelope_error(agent=99, code=99, upload=99) is None
+    monkeypatch.setenv("AGENT_WORKER_RESOURCE_LIMITS_MODE", "implicit")
+    assert resource_envelope_error(agent=10, code=0, upload=4) is not None
+
+
+@pytest.mark.no_db
+def test_prepare_runtime_models_rejects_unreviewed_default_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_WORKER_RESOURCE_LIMITS_MODE", "default")
+    config = {"max_concurrency": 11, "max_code_concurrency": 0, "upload_max_concurrency": 4}
+    error = runtime_setup.prepare_runtime_models(config)
+    assert error is not None
+    assert "测量 envelope" in error
+    assert config.get("models", []) == []
+
+
+@pytest.mark.no_db
+def test_config_store_envelope_rejection_is_before_atomic_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from worker.config_store import WorkerConfigStore
+
+    monkeypatch.setenv("AGENT_WORKER_RESOURCE_LIMITS_MODE", "default")
+    bootstrap = tmp_path / "bootstrap.yaml"
+    bootstrap.write_text(
+        json.dumps(
+            {
+                "host_url": "http://host",
+                "worker_id": "worker-1",
+                "max_concurrency": 10,
+                "max_code_concurrency": 0,
+                "upload_max_concurrency": 4,
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = WorkerConfigStore(tmp_path / "state", bootstrap)
+    before = store.path.read_bytes()
+    with pytest.raises(ValueError, match="测量 envelope"):
+        store.update_public({"max_concurrency": 11})
+    assert store.path.read_bytes() == before
+
+
+@pytest.mark.no_db
+def test_hot_reload_envelope_rejection_keeps_all_previous_controls(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from types import SimpleNamespace
+
+    from worker.hot_controls import DynamicControls, reload_controls
+
+    monkeypatch.setenv("AGENT_WORKER_RESOURCE_LIMITS_MODE", "default")
+    config = tmp_path / "worker.yaml"
+    config.write_text(
+        json.dumps(
+            {
+                "max_concurrency": 11,
+                "claim_enabled": True,
+                "max_code_concurrency": 0,
+                "upload_max_concurrency": 4,
+            }
+        ),
+        encoding="utf-8",
+    )
+    current = DynamicControls(
+        max_concurrency=10,
+        claim_enabled=False,
+        max_code_concurrency=0,
+        transfer=SimpleNamespace(upload_max_concurrency=4),
+        claim_batch_limit=8,
+        ramp=None,
+    )
+    uploads = SimpleNamespace(
+        calls=[], set_max_concurrency=lambda value: uploads.calls.append(value)
+    )
+    updated, error = reload_controls(config, current, uploads, lambda _message: None)
+    assert updated is None
+    assert error is not None and "测量 envelope" in error
+    assert uploads.calls == []

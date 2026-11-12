@@ -119,27 +119,6 @@ def _seed_job(conn, job_id, workspace_id, storage_dir) -> None:
     )
 
 
-def test_build_job_dir_index_resolves_both_layouts(job_db, settings) -> None:
-    from server.app.services.job_dir_index import build_job_dir_index
-
-    data_dir = settings.data_dir
-    with job_db.connect() as conn:
-        _seed_job(conn, "job-sharded", "ws", job_storage_ref("ws", "job-sharded"))
-        _seed_job(conn, "job-legacy", "ws", job_storage_ref("ws", "job-legacy", sharded=False))
-        _seed_job(conn, "job-no-storage", "ws", "")
-        _seed_job(conn, "job-bad-path", "ws", "../escape")
-
-    index = build_job_dir_index(
-        job_db, data_dir, {"job-sharded", "job-legacy", "job-no-storage", "job-bad-path", "missing"}
-    )
-
-    assert index["job-sharded"] == data_dir / job_storage_ref("ws", "job-sharded")
-    assert index["job-legacy"] == data_dir / "jobs" / "ws" / "job-legacy"
-    assert index["job-no-storage"] == data_dir / "jobs" / "job-no-storage"
-    assert "job-bad-path" not in index
-    assert "missing" not in index
-
-
 def test_cleanup_extra_runs_per_node_sharded_layout(job_db, settings) -> None:
     from server.app.services.cleanup_sweep import cleanup_extra_runs_per_node
 

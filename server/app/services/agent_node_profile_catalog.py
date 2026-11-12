@@ -46,9 +46,10 @@ def legacy_fallback_agent_id(
     """Agent a route-less legacy agent node dispatches to, or None (#933, #1091).
 
     Its capability's unique published Agent — exactly how revision publish
-    derived the route before the active revision pruned it. Shared by the
-    dispatch fallback (``workflow_worker.routing_fallback``) and the job
-    detail projection, so both name the same Agent for a frozen legacy node.
+    derived the route before the active revision pruned it. Reached by the
+    dispatch fallback and the job detail projection through
+    ``agent_route_validation`` (#1128), so both name the same Agent for a
+    frozen legacy node.
     """
     profile = resolve_agent_node_profile(node, legacy_agent_catalog(connect_source, workspace_id))
     if profile is None or profile.legacy_ref is None:

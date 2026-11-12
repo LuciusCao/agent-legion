@@ -65,6 +65,77 @@ def test_lifespan_with_start_worker_initializes_only_workflow_worker(tmp_path, m
     assert isinstance(app.state.code_executor, CodeExecutor)
 
 
+@pytest.mark.parametrize(
+    "knob", ["sweeper_disabled", "pure_remote"], ids=["sweeper_enabled=False", "code_capacity=0"]
+)
+def test_lifespan_starts_legacy_etag_binder_regardless_of_unrelated_knobs(
+    tmp_path, monkeypatch, knob
+):
+    """#1316（#1312 R10 教训）：存量材料 ETag 绑定线程只看对象存储是否配置——
+    sweeper_enabled=False 逃生舱与纯远程（code_capacity=0）形态下照常启动。"""
+    from server.app import main
+    from server.app.services.material_legacy_etag_binding import (
+        LegacyMaterialEtagBinderThread,
+    )
+
+    calls = []
+    monkeypatch.setattr(WorkflowWorkerThread, "start", lambda self: calls.append("workflow"))
+    monkeypatch.setattr(SweeperThread, "start", lambda self: calls.append("sweeper"))
+    monkeypatch.setattr(
+        LegacyMaterialEtagBinderThread, "start", lambda self: calls.append("etag-binder")
+    )
+    monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
+    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
+    monkeypatch.setattr(main, "build_s3_storage_checked", lambda: object())
+
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
+
+    real_load_settings = main.load_settings
+
+    def load_with_knob(**kwargs):
+        settings = real_load_settings(**kwargs)
+        if knob == "sweeper_disabled":
+            settings.executor_runtime.sweeper_enabled = False
+        else:
+            settings.executor_runtime.code_capacity = 0
+        return settings
+
+    monkeypatch.setattr(main, "load_settings", load_with_knob)
+
+    app = main.create_app(data_dir=tmp_path, start_worker=True)
+    with TestClient(app) as _:
+        pass
+
+    assert "etag-binder" in calls
+    if knob == "sweeper_disabled":
+        assert "sweeper" not in calls
+
+
+def test_lifespan_skips_legacy_etag_binder_without_object_storage(tmp_path, monkeypatch):
+    from server.app import main
+    from server.app.services.material_legacy_etag_binding import (
+        LegacyMaterialEtagBinderThread,
+    )
+
+    calls = []
+    monkeypatch.setattr(WorkflowWorkerThread, "start", lambda self: None)
+    monkeypatch.setattr(
+        LegacyMaterialEtagBinderThread, "start", lambda self: calls.append("etag-binder")
+    )
+    monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
+    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
+    monkeypatch.setattr(main, "build_s3_storage_checked", lambda: None)
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
+
+    app = main.create_app(data_dir=tmp_path, start_worker=True)
+    with TestClient(app) as _:
+        pass
+
+    assert calls == []
+
+
 def test_lifespan_sweeper_disabled_by_settings(tmp_path, monkeypatch):
     from server.app import main
 

@@ -5,7 +5,7 @@ workflow 升级/重跑与并发执行之间的串行化机制、执行态平面�
 以及审查同类并发改动时复用的对抗审查 checklist。invariant 注册表的正式表述
 见 `config/architecture/architecture-invariants.yaml` 的 EXEC-GENERATION-001
 条目；反向审计证据见
-[workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)
+[architecture-evidence-matrix.md](architecture-evidence-matrix.md)
 的同名行。本文不写行号——以模块级文件引用为准。
 
 ## 1. 问题背景（issue #759）
@@ -111,7 +111,7 @@ brick。现行语义：决策写在 `job-mutation` 锁下只做状态守卫—�
 | --- | --- | --- |
 | 1（最外） | 池级锁：`code-pool` / `agent-ws:<workspace_id>` / `agent-worker:<worker_id>` | claim 与批路径（批的 code-pool 在写事务首句集中决策，#1149）；`workspace_node_limits` 配置写（#1149，共享 code-pool，先于任何 limit 行写）；mutation 侧**永不取** |
 | 1.5 | `artifact-authority:<key>` | promote 事务首句（多 key 升序），串行化产物字节面的备份/copy/登记/恢复；mutation 侧不取，与池锁无共持 |
-| 2 | `job-mutation:<job_id>` | mutation 侧首句；所有执行态写面在池锁之后（或无池锁直接）取 |
+| 2 | `job-mutation:<job_id>` | mutation 侧首句；所有执行态写面在池锁之后（或无池锁直接）取；job 创建（`create_job` / `create_jobs_bulk` 每个 chunk）事务首句、先于 mkdir 与任何行锁（#1083） |
 | 3 | `implementation-publication:<workspace_id>` | upgrade guard 事务（无条件，先于 active revision 重读）；发布侧共享（见 2.9） |
 | 4 | `skill-lock`（全局单文档域） | skill 锁文档写与 upgrade 重验（见 2.9） |
 | 5（最内） | 行锁（`FOR UPDATE` 等） | 各写面自身 |
@@ -128,11 +128,36 @@ agent-worker；workspace_node_limits 配置写只取 code-pool（唯一调用方
 code-pool 持有者请求 workspaces 行）。
 
 **批序全序**：每个跨 job 的批（finish_many、try_claim_many、expire、recover、
-agent sweep、两个 queued-request sweep、批 claim 的每个候选——code 也包括，
-借 ws 锁键纯当排序位，code 本不取 agent-ws 锁）一律按全库唯一序
-`(hashtext('agent-ws:' || workspace_id)::int, job_id)` 遍历；jobs 行已消失的
-孤儿项用哨兵 `-(2**31)` 定位（`_ORPHAN_WS_LOCK_KEY`），job_id 收尾决胜。单一
-全序保证任意两批不会以相反顺序走同一对 job。
+agent sweep、两个 queued-request sweep、批 claim 的每个候选——code 也包括）
+一律按全库唯一序 `(hashtext('job-mutation:' || job_id)::int, job_id)` 遍历，
+没有 ws 分桶；agent-ws 是 pool 级锁，批 claim 在起始阶段按实际 ws 锁键升序
+预获取，不作为 job-mutation 批序的元组前缀。孤儿项的锁键同样按 id 直接计算
+（advisory 锁不依赖 jobs 行存在），job_id 收尾决胜。单一
+全序保证任意两批不会以相反顺序走同一对 job。job 创建批（`create_jobs_bulk`
+的每个 chunk，#1083）只含单一 workspace，`lock_job_mutations_sorted` 使用同一
+全序的 `(hashtext('job-mutation:' || job_id)::int, job_id)` 后缀，而不是另起
+纯 job_id 排序。
+
+**Heartbeat / result finish 行锁决策矩阵**（#1449）：job-mutation 全序与
+executor_leases 全序是两个独立维度，不能用 finish 调用顺序代替 lease 锁序论证。
+
+| 路径 | job-mutation 锁 | 请求行锁 | executor_leases 行锁 | 冲突重试 |
+| --- | --- | --- | --- | --- |
+| 批量 heartbeat | 不取 | 按 execution_id 排序 | 同一 execution_id 顺序逐项续期 | 不新增；靠共享锁序消除本环 |
+| `finish_many` | 先按全局 `(hashtext, job_id)` 序集中预取 | 不在本事务触碰 | 随后按 execution_id 排序集中 `FOR UPDATE`，再按 job 序执行 finish | 保留既有有界幂等重试 |
+| 单条 finish / heartbeat | 单 job / 不取 | 单请求 / 不触碰 | 单 lease，不构成多项 AB-BA | 保留各自既有语义 |
+| `mark_done` | 不取 | finish 提交后的独立事务 | 不触碰 | 批臂保留既有有界幂等重试 |
+
+#1449 的修复前环是批量 heartbeat 与 `finish_many` 各持一张 lease、再交叉
+等待对方 lease；它不是 #690 的 node-counter 三方环。预锁不改变 finish 的代次
+CAS、lease ownership、queue-order verdict 或 finish→mark_done 两阶段提交顺序。
+
+**创建入锁域**（#1083）：job 删除的提交后清理在 `job-mutation` 锁下复核行
+不存在才把 job_dir rename 入 `.trash`；创建路径在 mkdir / upsert 之前取同一把
+锁并持到提交，二者互斥，同源重建要么在复核前已提交（清理整体跳过），要么等
+rename 完成后才 mkdir 空目录。删除事件广播也在 `job-mutation` 锁的只读短事务内
+复核 jobs 行仍不存在后才记录/发送；复核发现同源重建或复核失败时跳过广播，避免
+旧 job 的 deleted 事件误删新 job（#1357）。
 
 ### 2.6 artifact 消费关系索引：唯一枚举处
 
@@ -333,7 +358,10 @@ already_current。有继承候选时再取全局
   发布、回滚、归档（`server/app/jobs/queries/upgrade_impl_identity.py`）、
   active workflow revision 发布
   （`server/app/jobs/queries/workflow_revision_projection.py`）、runtime-only
-  原地编辑（`server/app/services/workflow_revision_runtime.py`）。
+  原地编辑与 runtime 通道的配置版本追加
+  （`server/app/services/runtime_config.py`，M47——runtime 通道端点与
+  草稿发布的原地臂共用同一写函数；该写面不动执行态五表，故不在
+  EXEC-GENERATION-002 注册表域内）。
 - `skill-lock`（全局）：`SkillLockStore.put_lock` 的全部写（dispatch 首次 pin、
   `make skills-lock` 重锁）与 upgrade plan 阶段的锁内读
   （`server/app/services/skill_lock_store.py`）。dispatch 热路径的解析读不进
@@ -466,8 +494,8 @@ manifest 按 legacy 消耗规则兜底：Worker 按排序后键序物化、同�
 - [ ] 新路径的取锁顺序是否与全局锁序一致（池级 → job-mutation → 行锁）？
       有没有「先拿行锁再取 advisory 锁」的 AB-BA（历史教训：请求行 FOR UPDATE
       必须先移到 advisory 锁之后）？
-- [ ] 批路径是否只有一个全序？新增批是否沿用
-      `(hashtext('agent-ws:' || workspace_id)::int, job_id)`，包括不取 ws 锁的
+- [ ] 批路径是否只有一个全序？新增批是否沿用无 ws 分桶的
+      `(hashtext('job-mutation:' || job_id)::int, job_id)`，包括不取 ws 锁的
       code 候选？有没有第二条排序规则（纯 job_id、按扫描返回序）混入？
 - [ ] advisory xact 锁语义是否被正确对待：savepoint 回滚不释放锁、xact 锁不可
       跨连接重入（持锁事务内不要另起短事务取同一把锁，会自锁）？
@@ -672,10 +700,10 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
 
 ## 6. 相关文档
 
-- [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)：
+- [architecture-evidence-matrix.md](architecture-evidence-matrix.md)：
   架构承诺的反向审计证据矩阵（EXEC-GENERATION-001 行）。
-- [node-sdk-and-worker-execution-design.md](node-sdk-and-worker-execution-design.md)：
-  节点 SDK 与 Worker 执行模型（lease、job_dir、产物通道的底层设计）。
+- [node-sdk-and-worker-execution.md](node-sdk-and-worker-execution.md)：
+  节点 SDK 与 Worker 执行模型（lease、job_dir、产物通道；底层设计过程见其链接的历史设计稿）。
 - [backend.md](backend.md)：后端服务总览（lease 申请、对象存储、配置治理）。
 - AGENTS.md §6 Boundary Rules：EXEC-ARTIFACT-STORE-001（产物权威副本在对象
   存储）、EXEC-APPROVAL-001（审批门语义）等关联红线的摘要。

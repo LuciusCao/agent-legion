@@ -1,7 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { putWorkflowDraft } from '../../../api'
+import { useCallback, useEffect, useRef } from 'react'
 import type { WorkflowDraftStoreResponse } from '../../../api/workflowDraft'
-import { DraftSaveController } from './draftSaveController'
 import {
   IDLE_DRAFT_SAVE,
   type DraftSaveFlushResult,
@@ -10,6 +8,7 @@ import {
 import type { AdoptServerDraft, ResolveConflict } from './draftSaveConflict'
 import { useDraftServerSync } from './useDraftServerSync'
 import { useDraftUnloadGuard } from './useDraftUnloadGuard'
+import { useWorkflowDraftPersistenceController } from './useWorkflowDraftPersistenceController'
 import type { ServerDraftConflict } from './useServerDraftApply'
 
 export type { DraftSaveState } from './draftSaveTypes'
@@ -50,8 +49,6 @@ export function useWorkflowDraftPersistence(
   serverDraftLoadError = false,
   consumeReapplyConflict: () => ServerDraftConflict | null = () => null
 ): DraftSaveControls {
-  const [state, setState] = useState<DraftSaveState>(IDLE_DRAFT_SAVE)
-  const controllerRef = useRef<DraftSaveController | null>(null)
   // draft/original 镜像 ref：flushNow/hasUnsavedChanges 的 useCallback 不依赖
   // 草稿值本身，经 ref 读最新值。
   const yamlRefs = useRef({ draft: draftYaml, original: originalYaml })
@@ -60,31 +57,8 @@ export function useWorkflowDraftPersistence(
     yamlRefs.current = { draft: draftYaml, original: originalYaml }
   })
 
-  /* controller 生命周期与 workspace 切换重置；cleanup 清理计时器（pending
-     的尾部编辑随 debounce 窗口丢弃，与旧行为一致；页面级离开由
-     useDraftUnloadGuard 的 flush 覆盖）。 */
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- workspace 切换时重置保存状态
-    setState(IDLE_DRAFT_SAVE)
-    if (!workspaceId) return
-    const controller = new DraftSaveController(
-      /* #633：expectedUpdatedAt 由 controller 维护（hydrate 记录基线、保存
-         成功后推进），这里只透传——keepalive 分支同样携带 CAS 基线。 */
-      (yaml, keepalive, expectedUpdatedAt) =>
-        putWorkflowDraft(workspaceId, yaml, {
-          ...(keepalive && { keepalive: true }),
-          expectedUpdatedAt,
-        })
-    )
-    controllerRef.current = controller
-    const unsubscribe = controller.subscribe(setState)
-    return () => {
-      unsubscribe()
-      controller.dispose()
-      controllerRef.current = null
-    }
-  }, [workspaceId])
-
+  const { controllerRef, state } =
+    useWorkflowDraftPersistenceController(workspaceId)
   const { hydrated, isHydrated, adoptServerDraft } = useDraftServerSync(
     workspaceId,
     serverDraft,
@@ -96,7 +70,7 @@ export function useWorkflowDraftPersistence(
   useEffect(() => {
     if (!workspaceId || !hydrated) return
     controllerRef.current?.schedule(draftYaml)
-  }, [workspaceId, draftYaml, hydrated])
+  }, [workspaceId, draftYaml, hydrated, controllerRef])
 
   const flushNow = useCallback(
     (keepalive = false): Promise<DraftSaveFlushResult> => {
@@ -110,7 +84,7 @@ export function useWorkflowDraftPersistence(
       controller.schedule(yamlRefs.current.draft)
       return controller.flushNow({ keepalive })
     },
-    [isHydrated]
+    [isHydrated, controllerRef]
   )
 
   const hasUnsavedChanges = useCallback(() => {
@@ -122,18 +96,21 @@ export function useWorkflowDraftPersistence(
       return !!draft.trim() && draft !== original
     }
     return controller.hasUnsaved()
-  }, [isHydrated])
+  }, [isHydrated, controllerRef])
 
   useDraftUnloadGuard({ flush: flushNow, hasUnsavedChanges })
 
   // #804 P1-A：keep-mine 把当前画布内容带给 controller——在途 409 清空
   // pendingSave 后由它补调度（否则状态机卡 error 永不落盘）。
-  const resolveConflict = useCallback((keepMine: boolean) => {
-    controllerRef.current?.resolveConflict(
-      keepMine,
-      () => yamlRefs.current.draft
-    )
-  }, [])
+  const resolveConflict = useCallback(
+    (keepMine: boolean) => {
+      controllerRef.current?.resolveConflict(
+        keepMine,
+        () => yamlRefs.current.draft
+      )
+    },
+    [controllerRef]
+  )
 
   return {
     state: serverDraftLoadError ? { ...state, loadError: true } : state,

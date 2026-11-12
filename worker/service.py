@@ -15,6 +15,7 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
 from worker import service_host_guard as host_guard
+from worker.cli_args import default_state_dir
 from worker.config_response import public_config_response
 from worker.console_url import CONSOLE_URL_ENV, resolve_console_url
 from worker.heartbeat_relay import start_heartbeat_relay, stop_heartbeat_relay
@@ -29,19 +30,22 @@ from worker.supervisor import WorkerConfigStore, WorkerSupervisor
 logger = logging.getLogger(__name__)
 
 
-# 三个容量参数（max_concurrency / max_code_concurrency /
-# upload_max_concurrency）与 claim 开关全部热更：executor 主循环每轮
+# 四个容量参数（max_concurrency / max_code_concurrency /
+# upload_max_concurrency / node_concurrency_limits）与 claim 开关全部热更：executor 主循环每轮
 # 重读状态副本，调大立即放行新 claim、调小不杀在跑执行，新容量随下一次
 # claim 上报 Host，无需重新注册或重启。code 容量 0→>0 的 velites 守卫由
 # 循环内 hot_code_concurrency fail-closed 执行（缺失 velites 时拒绝热开
 # 并打日志），不依赖重启预检。ramp_up（#471 冷启动爬坡）同为热更：改参数
 # 调整下一次档位节奏、置 null 立即结束爬坡窗口。claim_batch_limit（#546
-# 批领取上限）同为热更：下一轮批申请即按新值折算。host_url / worker_id /
-# disabled_runtimes 等进程级配置仍走重启路径（生效 runtimes 随重启重新探测）。
+# 批领取上限）同为热更：下一轮批申请即按新值折算。node_concurrency_limits
+# （#1158 节点级并发上限）同为热更：下一次 claim 的声明即带新映射。host_url
+# / worker_id / disabled_runtimes 等进程级配置仍走重启路径（生效 runtimes
+# 随重启重新探测）。
 _HOT_CONFIG_FIELDS = {
     "claim_enabled",
     "max_concurrency",
     "max_code_concurrency",
+    "node_concurrency_limits",
     "ramp_up",
     "upload_max_concurrency",
     "claim_batch_limit",
@@ -159,7 +163,8 @@ def main() -> int:
         default=None,
         help="可选 bootstrap：仅状态副本缺失时导入一次的种子配置（docker/远程部署用）",
     )
-    parser.add_argument("--state-dir", type=Path, default=Path("data/agent-worker-service"))
+    # 与 workerctl 同源（#1106）：AGENT_WORKER_STATE_DIR > data/agent-worker-service。
+    parser.add_argument("--state-dir", type=Path, default=default_state_dir())
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
     args = parser.parse_args()

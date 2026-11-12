@@ -19,10 +19,20 @@ from typing import Any
 
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
-from server.app.services.material_cache import _require_storage, input_document
+from server.app.jobs.queries.material_claim_gate import requires_etag_protocol_sql
+from server.app.services.material_cache import (
+    _require_storage,
+    input_document,
+    open_verified_stream,
+)
 from server.app.storage import ObjectStorage
 from shared.material_bundle import assemble_bundle_tree, bundle_address
-from shared.material_cache import MaterializeError, cache_file_path, materialize_stream
+from shared.material_cache import (
+    MaterializeError,
+    cache_file_path,
+    material_cache_address,
+    materialize_stream,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +60,9 @@ def _ready_bundle(
             dict(row)
             for row in conn.execute(
                 "select m.path, mat.id, mat.status, mat.filename, mat.size_bytes,"
-                " mat.content_hash, mat.storage_key"
+                " mat.content_hash, mat.storage_key, mat.object_etag, mat.upload_generation, "
+                + requires_etag_protocol_sql("mat")
+                + " as requires_etag_protocol"
                 " from material_bundle_members m"
                 " join materials mat on mat.id = m.material_id"
                 " where m.bundle_id=%s order by m.ordinal",
@@ -65,8 +77,13 @@ def _ready_bundle(
 
 
 def _member_address(member: Mapping[str, Any]) -> str:
-    """Same addressing rule as single materials: content hash, else id."""
-    return str(member.get("content_hash") or "") or str(member["id"])
+    """Same addressing rule as single materials: content hash, else id +
+    upload generation（#1279 codex r6：修复代次 +1 后旧地址自然孤儿化）。"""
+    return material_cache_address(
+        str(member["id"]),
+        str(member.get("content_hash") or ""),
+        int(member["upload_generation"]),
+    )
 
 
 def _entries_block(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -107,7 +124,13 @@ def bundle_runtime_block(
             path = materialize_stream(
                 cache_root,
                 member_address,
-                partial(storage.open_stream, str(member["storage_key"])),
+                partial(
+                    open_verified_stream,
+                    storage,
+                    str(member["storage_key"]),
+                    str(member.get("object_etag") or ""),
+                    f"bundle member {member['id']}",
+                ),
                 expected_sha256=str(member.get("content_hash") or ""),
                 expected_size=int(member.get("size_bytes") or 0),
                 pin=pin,
@@ -164,38 +187,3 @@ def prefetch_bundle_block(
         job,
         storage=executor._object_store(),
     )
-
-
-def bundle_claim_block(
-    connect_source: ConnectSource,
-    workspace_id: str,
-    job: Mapping[str, Any],
-    *,
-    storage: ObjectStorage | None = None,
-    download_expires_seconds: int = 3600,
-) -> dict[str, Any] | None:
-    """The Worker-facing bundle descriptor: one presigned GET per member."""
-    input_doc = input_document(job)
-    if input_doc.get("type") != "bundle":
-        return None
-    bundle, members = _ready_bundle(connect_source, workspace_id, input_doc)
-    bundle_id = str(bundle["id"])
-    storage = _require_storage(storage, bundle_id)
-    return {
-        "material_id": bundle_id,
-        "kind": "bundle",
-        "filename": str(bundle.get("name") or ""),
-        "size_bytes": int(bundle.get("total_size_bytes") or 0),
-        "entries": [
-            {
-                "material_id": str(member["id"]),
-                "path": str(member["path"]),
-                "size_bytes": int(member.get("size_bytes") or 0),
-                "content_hash": str(member.get("content_hash") or ""),
-                "download_url": storage.presign_get(
-                    str(member["storage_key"]), expires_seconds=download_expires_seconds
-                ),
-            }
-            for member in members
-        ],
-    }

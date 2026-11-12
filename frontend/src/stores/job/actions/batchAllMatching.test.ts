@@ -90,7 +90,7 @@ describe('batch actions in allMatching selection mode', () => {
       ...normalizeJobs([createJobSummary({ id: 'j1', status: 'failed' })]),
       jobsWorkspaceId: 'ws1',
       isLoading: false,
-      error: null,
+      listLoadError: null,
       selectedIds: new Set(),
       selectionMode: 'explicit',
       selectionFilter: null,
@@ -298,7 +298,10 @@ describe('batch actions in allMatching selection mode', () => {
 
     expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
     expect(showToast).toHaveBeenCalledWith('boom', 'error')
-    expect(useJobStore.getState().error).toBe('boom')
+    // 错误通道收口（#1189 评审 P1）：mutation 失败只走 toast，不再写共享
+    // listLoadError——否则一次批量失败即把健康列表整页替换成错误页。
+    expect(useJobStore.getState().listLoadError).toBeNull()
+    expect(useJobStore.getState().jobIds).toEqual(['j1'])
     expect(useJobStore.getState().batchUpgradeWorkflowLoading).toBe(false)
   })
 
@@ -315,7 +318,8 @@ describe('batch actions in allMatching selection mode', () => {
     ).rejects.toThrow('boom')
 
     expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
-    expect(useJobStore.getState().error).toBe('boom')
+    expect(useJobStore.getState().listLoadError).toBeNull()
+    expect(useJobStore.getState().jobIds).toEqual(['j1'])
   })
 
   it('explicit mode still sends job id lists', async () => {

@@ -1,16 +1,21 @@
 import editorStyles from './WorkflowStructuredEditor.module.css'
 
-/** Thinking 档位选择：空值继承 workflow 顶层 execution 默认（自
- * WorkflowNodeRuntimeSettings 拆出，文件预算）。 */
+/** Thinking 档位选择：空值继承 workflow 顶层 execution 默认（运行配置专区
+ * 与既有执行档案编辑共用）。 */
 export function WorkflowNodeThinkingField(props: {
   value: string
   inherited: string
   readOnly?: boolean
+  /** M48：label 尾部的通道状态点（已修改 · 待保存 / 已生效）。 */
+  labelSuffix?: React.ReactNode
   onChange: (value: string) => void
 }) {
   return (
     <label className={editorStyles.field}>
-      <span className={editorStyles.fieldLabel}>Thinking</span>
+      <span className={editorStyles.fieldLabel}>
+        Thinking
+        {props.labelSuffix}
+      </span>
       <select
         aria-label="Thinking"
         className={editorStyles.fieldInput}

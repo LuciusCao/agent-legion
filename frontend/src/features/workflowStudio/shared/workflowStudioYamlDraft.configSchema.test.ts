@@ -12,7 +12,10 @@ import {
   configValueConstraintError,
   isSecretConfigProperty,
 } from './workflowStudioYamlDraft.configSchema.constraints'
-import { isConfigValueOfType } from './workflowStudioYamlDraft.configSchema.configLink'
+import {
+  isConfigValueOfType,
+  migrateNodeConfigKey,
+} from './workflowStudioYamlDraft.configSchema.configLink'
 import {
   addWorkflowNodeSchemaProperty,
   patchWorkflowNodeSchemaProperty,
@@ -463,6 +466,36 @@ describe('add/rename/remove schema properties', () => {
 })
 
 describe('patchWorkflowNodeConfigSchema (whole-block replace)', () => {
+  it('adds a verdict payload schema to an approval node (#1410)', () => {
+    const approval = [
+      'key: demo',
+      'nodes:',
+      '  gate:',
+      '    type: approval',
+      '    config: {rework_target: generate, feedback_artifact: review.json}',
+      '',
+    ].join('\n')
+    const next = patchWorkflowNodeConfigSchema(approval, 'gate', {
+      type: 'object',
+      properties: { verdict_note: { type: 'string' } },
+      required: ['verdict_note'],
+    })
+    const node = (
+      yaml.load(next) as {
+        nodes?: Record<string, Record<string, unknown>>
+      }
+    ).nodes?.gate
+    expect(node?.config_schema).toEqual({
+      type: 'object',
+      properties: { verdict_note: { type: 'string' } },
+      required: ['verdict_note'],
+    })
+    expect(node?.config).toEqual({
+      rework_target: 'generate',
+      feedback_artifact: 'review.json',
+    })
+  })
+
   it('replaces and deletes the whole schema block', () => {
     const replaced = patchWorkflowNodeConfigSchema(dagYaml, 'generate', {
       type: 'object',
@@ -601,5 +634,18 @@ describe('config value constraints (#428 codex round 2)', () => {
     expect(isSecretConfigProperty({ type: 'string', secret_ref: true })).toBe(
       false
     )
+  })
+})
+
+describe('migrateNodeConfigKey (#1258 复验 P3-B)', () => {
+  it('ignores Object.prototype keys — no own key, no migration', () => {
+    // `fromKey in config` 走原型链：rename/delete 名为 toString 的 schema
+    // 属性时，无该自有键的 config 会被误判为有旧键，把
+    // Object.prototype.toString 函数体迁进新键——dumpWorkflowYaml 随后抛错。
+    const node: { config?: Record<string, unknown> } = { config: { a: 1 } }
+    migrateNodeConfigKey(node, 'toString', 'renamed')
+    expect(node.config).toEqual({ a: 1 })
+    migrateNodeConfigKey(node, 'constructor')
+    expect(node.config).toEqual({ a: 1 })
   })
 })

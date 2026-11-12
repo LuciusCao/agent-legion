@@ -44,7 +44,7 @@ function fakeChat(overrides?: Record<string, unknown>): StudioChat {
   } as unknown as StudioChat
 }
 
-function fakeQueue(count = 0) {
+function fakeQueue(count = 0, slowSend = false) {
   return {
     queuedMessages: Array.from({ length: count }, (_, i) => ({
       id: `q${i}`,
@@ -52,14 +52,19 @@ function fakeQueue(count = 0) {
     })),
     submit: vi.fn(),
     remove: vi.fn(),
+    slowSend,
   }
 }
 
-function renderStrip(chatOverrides?: Record<string, unknown>, queueCount = 0) {
+function renderStrip(
+  chatOverrides?: Record<string, unknown>,
+  queueCount = 0,
+  slowSend = false
+) {
   return render(
     <AgentChatStatusStrip
       chat={fakeChat(chatOverrides)}
-      queue={fakeQueue(queueCount)}
+      queue={fakeQueue(queueCount, slowSend)}
     />
   )
 }
@@ -68,6 +73,28 @@ describe('AgentChatStatusStrip', () => {
   it('renders nothing when there is no status to show', () => {
     const { container } = renderStrip()
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it('shows a calm 正在恢复对话… while a send is slow (#1121)', () => {
+    renderStrip(undefined, 0, true)
+    const runState = screen.getByLabelText('运行状态')
+    expect(runState).toHaveTextContent('正在恢复对话…')
+    expect(runState).not.toHaveTextContent('已中断')
+    expect(
+      screen.queryByRole('button', { name: '继续对话' })
+    ).not.toBeInTheDocument()
+  })
+
+  it('masks the transient error snapshot during an auto-resume send (#1121)', () => {
+    // 自动恢复途中会话行短暂落 error：慢发送提示优先于「会话已中断」。
+    renderStrip(
+      { closed: true, session: sessionRecord({ status: 'error' }) },
+      0,
+      true
+    )
+    const runState = screen.getByLabelText('运行状态')
+    expect(runState).toHaveTextContent('正在恢复对话…')
+    expect(runState).not.toHaveTextContent('会话已中断')
   })
 
   it('shows the busy state without an inline cancel button (#787)', () => {

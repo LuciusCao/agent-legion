@@ -16,7 +16,11 @@ from datetime import datetime
 from typing import Any
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
-from server.app.jobs.queries.failed_node_runs_sql import FailedRunCursor, latest_failed_runs_sql
+from server.app.jobs.queries.failed_node_runs_sql import (
+    FailedRunCursor,
+    failed_job_page_cursor_sql,
+    latest_failed_runs_sql,
+)
 
 
 class FailedNodeRunQueriesMixin(ConnectionQueriesMixin):
@@ -51,10 +55,7 @@ class FailedNodeRunQueriesMixin(ConnectionQueriesMixin):
             node_key=node_key,
             before=before,
         )
-        limit_sql = ""
-        if limit is not None:
-            limit_sql = " limit %s"
-            params.append(limit)
+        params.append(limit)
         with self._connect_read() as conn:
             rows = conn.execute(
                 f"""
@@ -67,23 +68,39 @@ class FailedNodeRunQueriesMixin(ConnectionQueriesMixin):
                   latest.error_message,
                   latest.finished_at
                 {latest_sql}
-                order by latest.finished_at desc, latest.id desc{limit_sql}
+                order by latest.finished_at desc, latest.id desc limit %s
                 """,
                 params,
             )
             return [dict(row) for row in rows]
 
-    def list_failed_job_ids(self, workspace_id: str, *, category: str, limit: int) -> list[str]:
-        """Distinct job ids whose latest run of some node failed with ``category``.
-
-        Same latest-run semantics as ``list_failed_node_runs`` but returns at
-        most ``limit`` ids (#712 review P1): the unrestricted rerun-by-failure
-        selection asks for cap + 1 to decide "too many" without materializing
-        every matching failed run of the workspace.
-        """
+    def list_failed_job_ids_page(
+        self,
+        workspace_id: str,
+        *,
+        category: str,
+        limit: int,
+        before: str | None = None,
+        freeze_at: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Keyset-page distinct jobs by their newest matching failed run."""
         latest_sql, params = latest_failed_runs_sql(workspace_id, category=category)
+        freeze_sql, before_sql = failed_job_page_cursor_sql(freeze_at, before, params)
         with self._connect_read() as conn:
             rows = conn.execute(
-                f"select distinct latest.job_id {latest_sql} limit %s", [*params, limit]
+                f"""
+                with latest_runs as (
+                  select latest.job_id, latest.finished_at, latest.id as node_run_id
+                  {latest_sql}
+                ), frozen_runs as (
+                  select * from latest_runs{freeze_sql}
+                ), candidates as (
+                  select distinct on (job_id) * from frozen_runs
+                  order by job_id, finished_at desc nulls last, node_run_id desc
+                )
+                select * from candidates{before_sql}
+                order by finished_at desc nulls last, node_run_id desc limit %s
+                """,
+                [*params, limit],
             ).fetchall()
-        return [str(row["job_id"]) for row in rows]
+        return [dict(row) for row in rows]

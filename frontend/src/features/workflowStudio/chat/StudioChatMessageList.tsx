@@ -1,6 +1,6 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import type { StudioChat } from './useStudioChat'
-import { useChatAutoScroll } from './useChatAutoScroll'
+import { useChatScroll } from './useChatScroll'
 import {
   asText,
   statusEvent,
@@ -23,8 +23,10 @@ type Props = {
 
 export function StudioChatMessageList(props: Props) {
   const { chat } = props
-  const { bottomRef, listRef, handleScroll, pinnedToBottomRef } =
-    useChatAutoScroll(chat.messages)
+  const { bottomRef, listRef, handleScroll, pinnedToBottomRef } = useChatScroll(
+    chat.messages,
+    chat.loadOlderHistory
+  )
   // Memoized: during streaming every SSE message event re-renders this list;
   // the toolCall lookup is O(messages × toolCalls) if rebuilt naively, and a
   // Map keyed by toolCallId makes it O(messages + toolCalls).
@@ -64,28 +66,36 @@ export function StudioChatMessageList(props: Props) {
     () => new Map(chat.permissions.map((view) => [view.requestId, view])),
     [chat.permissions]
   )
-
-  // workflow 草稿卡片挂在最后一个携带该 yaml 的工具调用后面。
-  const draftAnchorId = useMemo(
-    () =>
-      chat.workflowDraft
-        ? (chat.toolCalls
-            .filter(
-              (call) =>
-                call.rawInput?.definition_yaml === chat.workflowDraft!.yaml &&
-                (call.title.toLowerCase().includes('validate_workflow') ||
-                  call.title.toLowerCase().includes('compare_workflow'))
-            )
-            .slice(-1)[0]?.toolCallId ?? null)
-        : null,
-    [chat.toolCalls, chat.workflowDraft]
+  // #1120（codex P1）：onToggleAllowAll 是 MessageItem 全行 prop，必须稳定
+  // 引用——内联箭头每个流式 chunk 都建新函数，memo 直接穿透。
+  // 渲染时绑定会话 id（#962）：切会话后旧卡片的迟到点击被丢弃。
+  const { setAllowAll, activeSessionId } = chat
+  const handleToggleAllowAll = useCallback(
+    (enabled: boolean) => setAllowAll(enabled, activeSessionId ?? undefined),
+    [setAllowAll, activeSessionId]
   )
+
+  // workflow 草稿卡的工具卡锚点由派生视图自带（mergeWorkflowDraft 记录；
+  // 合成事件锚点走 anchorMessageId，见下）。
+  const draftAnchorId = chat.workflowDraft?.anchorToolCallId ?? null
+  // 输给去重的合成 draft 消息不渲染（卡片已挂在胜出的锚点上）；
+  // 只保留当前锚点消息（#1123）。
+  const draftMessageAnchors = useMemo(() => {
+    const ids = new Set<string>()
+    if (chat.workflowDraft?.anchorMessageId)
+      ids.add(chat.workflowDraft.anchorMessageId)
+    for (const draft of chat.nodeDrafts) {
+      if (draft.anchorMessageId) ids.add(draft.anchorMessageId)
+    }
+    return ids
+  }, [chat.workflowDraft, chat.nodeDrafts])
 
   // Updates of an existing tool card have no separate visual row.
   const visibleMessages = chat.messages.filter(
     (message) =>
       (message.kind !== 'tool_call' ||
         toolCallByFirstMessage.has(message.id)) &&
+      (message.kind !== 'draft' || draftMessageAnchors.has(message.id)) &&
       !(message.kind === 'status' && statusEvent(message).event === 'turn_end')
   )
   return (
@@ -123,10 +133,7 @@ export function StudioChatMessageList(props: Props) {
               onApplyWorkflowDraft={props.onApplyWorkflowDraft}
               onSelectNode={props.onSelectNode}
               onAnswerPermission={chat.answerPermission}
-              // 渲染时绑定会话 id（#962）：切会话后旧卡片的迟到点击被丢弃。
-              onToggleAllowAll={(enabled) =>
-                chat.setAllowAll(enabled, chat.activeSessionId ?? undefined)
-              }
+              onToggleAllowAll={handleToggleAllowAll}
             />
           )
         }}

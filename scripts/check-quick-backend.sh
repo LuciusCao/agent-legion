@@ -9,6 +9,36 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# 仓库级治理检查（issue #1201）：治理对象跨语言 lane（前端文件体积预算、
+# velites/frontend 版本清单、docs freshness），而被治理路径的改动可能把
+# backend lane 整个裁掉（纯 frontend/velites/docs 变更），因此本组检查同时
+# 经 BACKEND_GATE_PHASE=governance 独立暴露：check-quick.sh 在 backend lane 被
+# 裁剪时以该 phase 兜底，CI 以 governance-guard job 兜底——两条路互补，同一次
+# 门禁恰好跑一遍。组内失败聚合：全部跑完再统一退出，首个违规不再 fail-fast
+# 短路后续检查（PR #1177 里 check_invariants 红掉掩盖 check_architecture 违规）。
+run_governance_checks() {
+  local failed=0
+
+  echo "=== Architecture Invariant Registry ==="
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_invariants || failed=1
+
+  echo "=== Version Manifests ==="
+  # 清单 ↔ lock 一致 + 发版解耦纪律（velites/frontend 版本线独立于仓库版本，
+  # 禁止锁步 bump——无谓的版本前进会击穿 velites 二进制指纹与 Docker 缓存层）。
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_versions || failed=1
+
+  echo "=== Architecture Contracts ==="
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_architecture || failed=1
+
+  echo "=== Architecture Docs Freshness ==="
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.generate_architecture --check || failed=1
+
+  if [[ "$failed" -ne 0 ]]; then
+    echo "Repo-wide governance checks failed (see the sections above)." >&2
+    return 1
+  fi
+}
+
 run_static_checks() {
   echo "=== Ruff Lint ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen ruff check .
@@ -16,30 +46,17 @@ run_static_checks() {
   echo "=== Ruff Format ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen ruff format --check .
 
-  echo "=== Architecture Invariant Registry ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_invariants
-
-  echo "=== Version Manifests ==="
-  # 清单 ↔ lock 一致 + 发版解耦纪律（velites/frontend 版本线独立于仓库版本，
-  # 禁止锁步 bump——无谓的版本前进会击穿 velites 二进制指纹与 Docker 缓存层）。
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_versions
+  echo "=== MyPy Type Check ==="
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen mypy server/app worker shared workspace_libs scripts/architecture scripts/quality workflow_nodes
 
   # The business skill shared-assets check (scripts/check-skills-shared.py)
   # retired with the business skill sources; the script itself leaves with the
   # business runtime code in P4.
-
-  echo "=== MyPy Type Check ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen mypy server/app worker shared workspace_libs scripts/architecture scripts/quality workflow_nodes
-
-  echo "=== Architecture Contracts ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.check_architecture
-
-  echo "=== Architecture Docs Freshness ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.generate_architecture --check
-
   # The spec health check (scripts/verify_specs.py) retired with the
   # unpublished docs/superpowers specs (f4e7e46f): the directory is
   # gitignored and absent, so the step had been passing vacuously.
+
+  run_governance_checks
 }
 
 run_tests() {
@@ -132,9 +149,14 @@ run_tests() {
         -m "smoke" \
         -n "$workers" --dist worksteal \
         --reruns 1 \
-        --reruns-delay 2
+        --reruns-delay 2 \
+        ${telemetry_args[@]+"${telemetry_args[@]}"}
       ;;
     unit)
+      echo "=== CI Workflow Sandbox Setup Contract ==="
+      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
+        tests/ci/test_quality_gate_sandbox_setup.py
+
       echo "=== Python Unit Tests (PostgreSQL offline) ==="
       AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
         UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
@@ -156,29 +178,52 @@ run_tests() {
       # back to the plain unit tier. Never a gate pass: full suite stays the
       # pre-push/CI boundary.
       aff_args=()
+      aff_skip=0
       if command -v git >/dev/null 2>&1 && [[ -f "$ROOT_DIR/.pytest-aff-index.json" ]]; then
         base_ref="$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD origin/main 2>/dev/null || true)"
         selected=""
         selection_status=0
+        # stderr stays attached to the lane log: the selector's diagnostics
+        # (no-index, unmapped files, the postgres blind-spot hint, #1307)
+        # are exactly what a misleading aff result needs next to it.
         selected="$(UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.pytest_aff_selection select \
-          ${base_ref:+--base "$base_ref"} 2>/dev/null)" || selection_status=$?
+          ${base_ref:+--base "$base_ref"})" || selection_status=$?
         # Exit 4 = a changed source file is missing from the index (stale
         # index or a --cov blind spot): the affected tests are unknown, so
         # run the full unit tier rather than a silently incomplete subset.
         if [[ "$selection_status" -eq 4 ]]; then
           echo "=== Python Unit Tests (aff fallback: changed source files missing from the index) ==="
-        elif [[ -n "$selected" ]] && [[ "$(printf '%s\n' "$selected" | wc -l)" -lt 400 ]]; then
-          echo "=== Python Affected Tests (selected $(printf '%s' "$selected" | wc -l | tr -d ' ') of unit tier) ==="
+        elif [[ "$selection_status" -eq 0 && -z "$selected" ]]; then
+          # Empty selection (#1307/#304): the change set has no unit-tier
+          # tests to run (postgres-tier-only edits, tests/full or tests/ci
+          # files, docs/registries). Skip explicitly instead of letting an
+          # empty pytest invocation fail with exit 5 or paying a full
+          # unit-tier fallback for nothing. "Empty" means "nothing affected"
+          # only inside the tracked change set (source roots, backend-affecting
+          # config/deploy/examples trees + the two dependency manifests):
+          # those uncovered trees and pyproject.toml/uv.lock stay visible to
+          # the selector and take the exit-4 full fallback, so neither a
+          # backend-relevant config change nor a dependency upgrade skips the
+          # backend tests (#1307 r1 P2-2, #1376).
+          aff_skip=1
+        elif [[ -n "$selected" ]] && [[ "$(printf '%s\n' "$selected" | wc -l | tr -d ' ')" -lt 400 ]]; then
+          echo "=== Python Affected Tests (selected $(printf '%s\n' "$selected" | wc -l | tr -d ' ') of unit tier) ==="
           while IFS= read -r nodeid; do
             aff_args+=("$nodeid")
           done <<<"$selected"
+        elif [[ -n "$selected" ]]; then
+          echo "=== Python Unit Tests (aff fallback: selection too broad) ==="
         else
-          echo "=== Python Unit Tests (aff fallback: no index or selection too broad) ==="
+          echo "=== Python Unit Tests (aff fallback: selection unavailable, status $selection_status) ==="
         fi
       else
         echo "=== Python Unit Tests (aff fallback: no .pytest-aff-index.json; prime it with GATE_TIER=aff-index) ==="
       fi
-      if [[ ${#aff_args[@]} -gt 0 ]]; then
+      if [[ "$aff_skip" -eq 1 ]]; then
+        echo "=== aff: no affected unit-tier tests for this change set; skipping the backend test run ==="
+        echo "    (postgres-tier changes are covered by GATE_TIER=postgres ./scripts/check-quick-backend.sh and CI backend-postgres-*)"
+      elif [[ ${#aff_args[@]} -gt 0 ]]; then
+        aff_status=0
         AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
           UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
           --ignore=tests/full \
@@ -187,7 +232,18 @@ run_tests() {
           -n "$workers" --dist worksteal \
           --reruns 1 \
           --reruns-delay 2 \
-          "${aff_args[@]}"
+          "${aff_args[@]}" || aff_status=$?
+        if [[ "$aff_status" -eq 5 ]]; then
+          # pytest exit 5 = no tests collected: every selected nodeid was
+          # deselected by `-m "not postgres"` — a postgres-marked file the
+          # manifest does not list (fixture-based classification). A
+          # legitimate empty run, not a failure (#1307/#304; M55 hit this
+          # on tests/routes/test_studio_agent_scope.py).
+          echo "=== aff: all selected tests belong to the postgres tier; nothing ran in the unit tier ==="
+          echo "    (cover them with GATE_TIER=postgres ./scripts/check-quick-backend.sh or CI backend-postgres-*)"
+        elif [[ "$aff_status" -ne 0 ]]; then
+          return "$aff_status"
+        fi
       else
         AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
           UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
@@ -308,6 +364,9 @@ run_tests() {
 
 case "${BACKEND_GATE_PHASE:-all}" in
   static) run_static_checks ;;
+  # governance：仓库级治理检查单独成 phase，供 backend lane 被裁剪的门禁兜底
+  # （check-quick.sh 的 governance guard、CI 的 governance-guard job，#1201）。
+  governance) run_governance_checks ;;
   test) run_tests ;;
   all)
     run_static_checks

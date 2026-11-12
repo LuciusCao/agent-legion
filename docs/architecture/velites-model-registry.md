@@ -20,6 +20,12 @@ velites 的单一事实源是 `~/.velites/models.json`（`VELITES_MODELS_PATH` �
       "apiKey": "$SQAI_API_KEY",
       "models": ["kimi-k2.6"]
     },
+    "openai": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "$OPENAI_API_KEY",
+      "models": [{"id": "o3-mini", "outputTokensParam": "max_completion_tokens"}]
+    },
     "anthropic": {
       "api": "anthropic-messages",
       "baseUrl": "https://api.anthropic.com",
@@ -34,6 +40,16 @@ velites 的单一事实源是 `~/.velites/models.json`（`VELITES_MODELS_PATH` �
   }
 }
 ```
+
+模型条目可写成裸 id 字符串，或带方言参数的对象（未知键一律拒绝）：
+
+- `maxOutputTokens` / `thinkingBudgets`：`anthropic-messages` 的单次输出上限默认值与
+  thinking 档位预算；
+- `outputTokensParam`（#1093，仅 `openai-completions`）：节点下发 `--max-output-tokens`
+  时上限写进请求体的哪个字段——`max_tokens`（缺省，Kimi / DeepSeek 等多数兼容服务）或
+  `max_completion_tokens`（OpenAI o-series 等推理模型，收到 `max_tokens` 会直接拒绝请求）。
+  未配置上限时两个字段都不发，与此前一致；在 `anthropic-messages` provider 上声明非缺省值
+  会让 registry 加载失败（该方言恒用 `max_tokens`，声明不会生效）。
 
 `apiKey` 可为 0600 文件中的字面值；推荐使用精确的 `$ENV` / `${ENV}` 引用。模型发现
 会解析凭据引用：引用缺失即探测失败，该 runtime 不广播任何模型，不会领取 Agent 任务。
@@ -67,16 +83,18 @@ rm -f "$tmp"
 velites models list --json
 ```
 
-旧 `config.json` 可以暂时保留；一旦 `models.json` 存在，Worker 发现只以新 registry
-为准。如果 `apiKey` 改用 `$ENV` 引用，原生 Worker 需在启动环境中提供该
-变量；Docker Worker 按上文使用 `VELITES_PROVIDER_ENV_FILE`。
+迁移完成后旧 `config.json` 不再被读取，可只留作备份。如果 `apiKey` 改用 `$ENV`
+引用，原生 Worker 需在启动环境中提供该变量；Docker Worker 按上文使用
+`VELITES_PROVIDER_ENV_FILE`。
 
-**Deprecation 状态（#602）**：`config.json`（连同 `VELITES_BASE_URL` /
-`VELITES_API_KEY` env 覆盖）是仅供直调 CLI 的迁移桥——结构上进不了 Worker
-模型发现。自 velites 0.5.4（主仓 0.7.12）起，直调使用该文件或 env 时 stderr 会打
-deprecation 警告（指回本节迁移方法）。桥目前仍在代码中，移除时间未定、届时另行公告
-（移除内容为 `config.rs` 与 lib.rs 的 gateway 兜底分支，gateway/openai_compat 直调
-报错直接指向 models.json）；新配置一律写 `models.json`。
+**Deprecation 状态（#602 → #1102，已移除）**：`config.json`（连同 `VELITES_BASE_URL` /
+`VELITES_API_KEY` env 覆盖）曾是仅供直调 CLI 的迁移桥——结构上进不了 Worker
+模型发现。velites 0.5.4（主仓 0.7.12）起直调使用该文件或 env 时 stderr 打
+deprecation 警告；#1102 起桥已移除（`config.rs` 与 lib.rs 的 gateway 兜底分支一并
+删除，随 0.5.8 之后的下一个 velites 版本发布）。此后 velites 不再读取该文件与这两个
+env：没有 `models.json` 时任何 provider（含 `gateway` / `openai_compat`）直调都以
+退出码 2 报错，错误信息指向 `models.json` 路径与本节迁移方法。仍依赖旧文件的直调
+环境须先按上文迁移再升级 velites。
 
 ## Runtime adapters
 
@@ -109,14 +127,14 @@ Host，因此滚动发布必须先升级 Host、再升级 Worker；这避免旧 
 velites 保留 crate 内的 `Provider` trait，并实现：
 
 - `openai-completions`：OpenAI-compatible Chat Completions、SSE、tool calls、
-  `reasoning_effort`；
+  `reasoning_effort`，输出上限字段按模型 `outputTokensParam` 选择（#1093）；
 - `anthropic-messages`：Anthropic Messages API、`x-api-key` / `anthropic-version`、
   content blocks、streamed `input_json_delta`、tool use/result、cache usage、stop reason，
   以及 thinking level 到模型 `thinkingBudgets` 的映射。
 
 Host 下发的 provider 名称原样传入 velites并记录到事件中；不再把 `sqai`、`deepseek` 等
-静默改写成 `gateway`。旧 `VELITES_BASE_URL/VELITES_API_KEY` 只作为无 models 文件时
-`gateway/openai_compat` 直跑的迁移桥，不参与 Worker 模型发现。
+静默改写成 `gateway`。`gateway` / `openai_compat` 与其他 provider 一样只从
+`models.json` 解析（旧 `VELITES_BASE_URL/VELITES_API_KEY` 迁移桥已随 #1102 移除）。
 
 ## Quality Impact
 

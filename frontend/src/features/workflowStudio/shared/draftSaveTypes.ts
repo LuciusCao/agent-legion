@@ -14,6 +14,11 @@ export type DraftSaveState = {
    * 字节差异干扰。冲突挂起期间刻意不推进（编辑器有未保存编辑，发布以
    * 编辑器为准——此时提示应保留）。 */
   savedHash?: string | null
+  /** #1196：savedHash 所描述的内容本体（= controller 的已持久化基线
+   * lastPersisted，由 setState 单点注入，与 savedHash 同一快照原子推进）。
+   * 「当前内容已落盘」的真值是逐字节 content === savedYaml，而不是从
+   * status 推断——status 与画布写入分属不同 effect 链，可错开一帧。 */
+  savedYaml?: string | null
   /** GET 草稿查询失败（仅内存模式）时由组合层合并进来，供 UI 警示。 */
   loadError?: boolean
   /** #633：CAS 冲突——服务端草稿已被 agent/其它会话推进，本页未保存的
@@ -25,6 +30,14 @@ export type DraftSaveState = {
   /** #1143：冲突时服务端草稿的语义身份——「采用服务端版本」后作为
    * savedHash 恢复（画布内容即服务端草稿，卡核对不应对它误报）。 */
   conflictDraftHash?: string | null
+  /** #1226 五轮收口：冲突时服务端的草稿代次——采用服务端版本后作为
+   * CAS 基线（generation）恢复。 */
+  conflictDraftGeneration?: number | null
+  /** #1204：error 的失败形态——'retrying'（退避重试在途，「将自动重试」
+   * 为真）或 'terminal'（4xx 客户端拒绝 / 退避耗尽，永不自行重试，文案
+   * 不得再承诺）。只在 status==='error' 时有意义，每次进入 error 由
+   * controller 重写。 */
+  saveError?: 'retrying' | 'terminal'
 }
 
 export const IDLE_DRAFT_SAVE: DraftSaveState = { status: 'idle', savedAt: null }
@@ -39,7 +52,7 @@ const KEEPALIVE_MAX_BODY_BYTES = 60_000
 export type PutWorkflowDraftFn = (
   yaml: string,
   keepalive: boolean,
-  expectedUpdatedAt: string | null
+  baseGeneration: number | null
 ) => Promise<WorkflowDraftStoreResponse>
 
 /** #429：flushNow 的结果——本次 flush 是否把最新内容落到了服务端。
@@ -59,4 +72,15 @@ export type DraftSaveFlushResult = {
 export function withinKeepaliveLimit(yaml: string): boolean {
   const body = JSON.stringify({ definition_yaml: yaml })
   return new TextEncoder().encode(body).byteLength <= KEEPALIVE_MAX_BODY_BYTES
+}
+
+/* beforeunload 护栏谓词：pending（未落盘）/在途写入/失败未恢复/冲突挂起
+   （本页编辑未保存且自动 flush 已停）都算未保存。 */
+export function hasPendingWork(
+  hasPending: boolean,
+  inFlight: boolean,
+  errored: boolean,
+  inConflict: boolean
+): boolean {
+  return hasPending || inFlight || errored || inConflict
 }

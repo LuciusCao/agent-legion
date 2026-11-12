@@ -17,6 +17,7 @@ from server.app.routes.workflow_revisions_contracts import (
     WorkflowRevisionsResponse,
     WorkflowRevisionSummary,
 )
+from server.app.routes.workflow_runtime import create_workflow_runtime_router
 from server.app.services.workflow_revision_format import (
     definition_to_yaml,
     workflow_definition_to_response_payload,
@@ -90,4 +91,6 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
     router.include_router(create_workflow_draft_compare_router(job_db))
     router.include_router(create_workflow_draft_store_router(job_db))
     router.include_router(create_workflow_node_prompt_router(job_db))
+    # M47: runtime channel (save / version history / rollback).
+    router.include_router(create_workflow_runtime_router(job_db))
     return router

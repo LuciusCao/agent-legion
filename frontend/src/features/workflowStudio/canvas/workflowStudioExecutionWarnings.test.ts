@@ -111,6 +111,48 @@ describe('mergeNodeExecution', () => {
       prompt_mode: '',
     })
   })
+
+  it('carries the node-declared runtime through even without top-level defaults (#1180)', () => {
+    // r3 评审回归：漏丢 runtime 键会让草稿画布的 agent·runtime 类型徽标
+    // 恒无 runtime（只读 revision 视图走后端 loader，不受影响）。
+    expect(
+      mergeNodeExecution(
+        { type: 'agent', execution: { runtime: 'velites' } },
+        {}
+      )
+    ).toEqual({
+      provider: '',
+      model: '',
+      thinking: '',
+      prompt: '',
+      prompt_mode: '',
+      runtime: 'velites',
+    })
+  })
+
+  it('merges the top-level runtime default into agent nodes only (#933)', () => {
+    const withRuntime = { ...defaults, runtime: 'pi' }
+    expect(mergeNodeExecution({ type: 'agent' }, withRuntime)?.runtime).toBe(
+      'pi'
+    )
+    // 节点声明值优先于顶层默认。
+    expect(
+      mergeNodeExecution(
+        { type: 'agent', execution: { runtime: 'velites' } },
+        withRuntime
+      )?.runtime
+    ).toBe('velites')
+    // code 节点不携带 runtime（快照重载会失败，对齐后端 loader）。
+    const codeMerged = mergeNodeExecution({ type: 'code' }, withRuntime)
+    expect(codeMerged && 'runtime' in codeMerged).toBe(false)
+    // start 节点整体豁免合并。
+    expect(mergeNodeExecution({ type: 'start' }, withRuntime)).toBeUndefined()
+    // 空 runtime 不出键，保持记录形状与未配置时一致。
+    expect(
+      mergeNodeExecution({ type: 'agent' }, defaults) &&
+        'runtime' in mergeNodeExecution({ type: 'agent' }, defaults)!
+    ).toBe(false)
+  })
 })
 
 describe('nodeExecutionWarning', () => {

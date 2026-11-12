@@ -38,7 +38,9 @@ import styles from './WorkerTokensSection.module.css'
  * still need the full worker↔key picture) but rendered filtered to this
  * workspace: workers whose allowed_workspaces contains it (plus the []
  * allow-all legacy scope, EXEC-WORKERACL-001), keys bound to it, and only
- * this workspace's key names on the worker rows.
+ * this workspace's key names on the worker rows. Key usage chips use the
+ * same worker-scope predicate (#1172); only the delete-key dialog retains
+ * the full-instance consumer list for its cascade warning.
  */
 export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
   const [label, setLabel] = useState('')
@@ -74,18 +76,24 @@ export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
   // code_dispatch 的同一谓词，monitoring 面板 agentWorkerRows 同口径）：
   // legacy 全局注册的存量 worker 实际承接本 ws 任务，必须显示（其「待
   // 迁移」chip 提示 admin 删记录后重注册）。
-  const workers = allWorkers.filter(
-    (worker) =>
+  function servesCurrentWorkspace(worker: AgentWorkerSummary): boolean {
+    return (
       worker.allowed_workspaces.length === 0 ||
       worker.allowed_workspaces.includes(workspaceId)
-  )
+    )
+  }
+  const workers = allWorkers.filter(servesCurrentWorkspace)
 
   // The worker↔key binding (schema v59): which workers' latest registration
-  // was admitted by this key.
+  // was admitted by this key. The delete warning needs this full-instance
+  // list even when a consumer no longer serves the current workspace.
   function tokenConsumers(tokenId: string): AgentWorkerSummary[] {
     return allWorkers.filter((worker) =>
       (worker.register_token_ids ?? []).includes(tokenId)
     )
+  }
+  function workspaceTokenConsumers(tokenId: string): AgentWorkerSummary[] {
+    return tokenConsumers(tokenId).filter(servesCurrentWorkspace)
   }
   const pendingConsumers = tokenConsumers(pendingDeleteToken?.token_id ?? '')
   const pendingKeyWarning =
@@ -217,7 +225,7 @@ export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
       ) : (
         <ul className={styles.list}>
           {tokens.map((token) => {
-            const consumers = tokenConsumers(token.token_id)
+            const consumers = workspaceTokenConsumers(token.token_id)
             return (
               <li
                 key={token.token_id}
@@ -235,10 +243,10 @@ export function WorkerTokensSection({ workspaceId }: { workspaceId: string }) {
                   className={styles.chip}
                   title={
                     consumers.length > 0
-                      ? `最近注册使用该 key 的 Worker：${consumers
+                      ? `最近注册使用该 key 且服务当前 workspace 的 Worker：${consumers
                           .map(workerName)
                           .join('、')}`
-                      : '暂无 Worker 的最近注册使用该 key'
+                      : '暂无服务当前 workspace 的 Worker 最近注册使用该 key'
                   }
                 >
                   {consumers.length > 0

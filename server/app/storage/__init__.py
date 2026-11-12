@@ -2,19 +2,23 @@
 
 from server.app.storage.probe import build_s3_storage_checked
 from server.app.storage.s3_client import (
+    IF_NONE_MATCH_STAR,
     ObjectHead,
     ObjectStorage,
     S3StorageClient,
     build_s3_storage,
+    is_precondition_failed,
 )
 from server.app.storage.s3_settings import S3Settings, load_s3_settings
 
 __all__ = [
+    "IF_NONE_MATCH_STAR",
     "ObjectHead",
     "ObjectStorage",
     "S3Settings",
     "S3StorageClient",
     "build_s3_storage",
     "build_s3_storage_checked",
+    "is_precondition_failed",
     "load_s3_settings",
 ]

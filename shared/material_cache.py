@@ -75,6 +75,28 @@ def cache_file_path(cache_root: Path, address: str) -> Path:
     return Path(cache_root) / address[:2] / address
 
 
+def material_cache_address(
+    material_id: str, content_hash: str, upload_generation: int | None = None
+) -> str:
+    """The cache address of one material (#1279 codex r6: 代次即身份落到
+    缓存寻址面).
+
+    声明了 content_hash 的行按内容寻址（hash 即内容身份，天然不变）；
+    无 hash 行的地址带上传代次（``{material_id}-v2g{generation}``）：修复
+    （request_material_reupload）代次 +1 后旧地址自然孤儿化——缓存是
+    可淘汰的 LRU，无需显式失效，新版消费者不会再命中修复前写下的（可能
+    已毒化的）字节。代次来源与消费读取的行快照同一份（Host dispatch 现读
+    行 / Worker 取 claim 描述符里与 presigned URL 同行的代次），不会
+    「读 A 代址取 B 代对象」。``upload_generation=None``（旧 Server 的
+    claim 描述符无此字段）回落裸 material_id——#1279 前的既有形态。
+    """
+    if content_hash:
+        return content_hash
+    if upload_generation is None:
+        return material_id
+    return f"{material_id}-v2g{upload_generation}"
+
+
 def materialize_stream(
     cache_root: Path,
     address: str,

@@ -6,11 +6,14 @@ run) clears it, and the "waiting for background compaction" wording is
 reserved for kimi sessions that actually showed compaction.
 
 Drives the service callbacks directly (stub handle, no subprocess), the
-same pattern as test_studio_chat_compaction.py.
+same pattern as test_studio_chat_compaction.py. The verdict timer is a
+test-gated _GatedTimer (#1118): it fires only when the test releases it,
+so "trailing content clears the verdict" never races wall-clock scheduling.
 """
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -35,10 +38,38 @@ class _StubHandle:
     def close(self) -> None: ...
 
 
+class _GatedTimer(threading.Timer):
+    """Verdict timer that fires only when the test releases it (#1118).
+
+    start() launches the thread as usual, but run() waits on the release
+    event instead of the grace interval: the test delivers every callback
+    first, then releases the verdict — no assertion depends on the runner
+    scheduling the timer thread within a wall-clock grace. cancel()
+    (teardown) also releases so the thread exits instead of hanging.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.released = threading.Event()
+
+    def run(self):
+        self.released.wait(30)
+        if not self.finished.is_set():
+            self.function(*self.args, **self.kwargs)
+        self.finished.set()
+
+    def cancel(self):
+        super().cancel()
+        self.released.set()
+
+    def release(self):
+        self.released.set()
+
+
 @pytest.fixture
 def direct(job_db, settings, monkeypatch):
     """Idle session row + registered runtime without an ACP subprocess."""
-    monkeypatch.setattr(empty_turn, "EMPTY_TURN_GRACE_SECONDS", 0.05)
+    monkeypatch.setattr(empty_turn, "_timer_class", _GatedTimer)
     service = StudioChatService(job_db, settings, None)
     workspace_id = job_db.create_workspace(name="Chat WS")["id"]
     user_id = str(job_db.create_user("chat-user", password_hash=None)["id"])
@@ -65,12 +96,16 @@ def _chunk(text: str) -> dict:
     return {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}
 
 
-def _settle_verdict(runtime: SessionRuntime) -> None:
-    """Wait for the deferred verdict (if one was armed) to run."""
+def _fire_verdict(runtime: SessionRuntime) -> None:
+    """Release the armed verdict and wait for its thread to finish.
+
+    Signal-driven: the gated timer's run() proceeds only after release(),
+    so this returns exactly when _confirm has completed — no grace sleep."""
     timer = runtime.empty_turn_timer
-    if timer is not None:
-        timer.join(5)
-        assert not timer.is_alive()
+    assert isinstance(timer, _GatedTimer)
+    timer.release()
+    timer.join(30)
+    assert not timer.is_alive()
 
 
 def _empty_turns(service, session_id: str, workspace_id: str) -> list[dict]:
@@ -86,7 +121,7 @@ def test_instant_zero_content_end_turn_is_flagged_neutrally(direct) -> None:
     _ready(service, session_id, "kimi-code-acp")
     service.send_message(session_id, workspace_id, "hello")
     service._on_turn_end(session_id, "end_turn")
-    _settle_verdict(runtime)
+    _fire_verdict(runtime)
     [notice] = _empty_turns(service, session_id, workspace_id)
     # kimi, but no compaction seen in this process: claim no cause.
     assert notice["compaction_suspected"] is False
@@ -104,7 +139,7 @@ def test_trailing_content_after_turn_end_clears_the_verdict(direct) -> None:
     service.send_message(session_id, workspace_id, "hello")
     service._on_turn_end(session_id, "end_turn")
     service._on_update(session_id, _chunk("短回复"))
-    _settle_verdict(runtime)
+    _fire_verdict(runtime)
     assert _empty_turns(service, session_id, workspace_id) == []
     texts = [
         m["content"]["text"]
@@ -123,7 +158,7 @@ def test_trailing_tool_call_also_clears_the_verdict(direct) -> None:
         session_id,
         {"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "read", "status": "completed"},
     )
-    _settle_verdict(runtime)
+    _fire_verdict(runtime)
     assert _empty_turns(service, session_id, workspace_id) == []
 
 
@@ -135,7 +170,7 @@ def test_non_kimi_agent_never_gets_compaction_wording(direct) -> None:
     service._on_update(session_id, _chunk("Compacting conversation context\n"))
     service.send_message(session_id, workspace_id, "hello")
     service._on_turn_end(session_id, "end_turn")
-    _settle_verdict(runtime)
+    _fire_verdict(runtime)
     [notice] = _empty_turns(service, session_id, workspace_id)
     assert notice["compaction_suspected"] is False
     assert notice["detail"] == empty_turn.NEUTRAL_DETAIL
@@ -148,7 +183,7 @@ def test_kimi_with_compaction_evidence_keeps_compaction_wording(direct) -> None:
     service._on_update(session_id, _chunk("Compaction completed."))
     service.send_message(session_id, workspace_id, "hello")
     service._on_turn_end(session_id, "end_turn")
-    _settle_verdict(runtime)
+    _fire_verdict(runtime)
     [notice] = _empty_turns(service, session_id, workspace_id)
     assert notice["compaction_suspected"] is True
     assert notice["detail"] == empty_turn.COMPACTION_DETAIL
@@ -157,16 +192,13 @@ def test_kimi_with_compaction_evidence_keeps_compaction_wording(direct) -> None:
     assert runtime.compaction_seen is False
 
 
-def test_next_turn_inside_the_grace_drops_the_stale_verdict(direct, monkeypatch) -> None:
+def test_next_turn_inside_the_grace_drops_the_stale_verdict(direct) -> None:
     service, session_id, runtime, workspace_id = direct
-    monkeypatch.setattr(empty_turn, "EMPTY_TURN_GRACE_SECONDS", 0.5)
     _ready(service, session_id, "kimi-code-acp")
     service.send_message(session_id, workspace_id, "hello")
     service._on_turn_end(session_id, "end_turn")
-    timer = runtime.empty_turn_timer
-    assert timer is not None
     service.send_message(session_id, workspace_id, "hello again")
-    timer.join(5)
+    _fire_verdict(runtime)
     assert _empty_turns(service, session_id, workspace_id) == []
 
 
@@ -193,15 +225,14 @@ def test_slow_slash_and_platform_turns_are_not_flagged(direct) -> None:
     assert _empty_turns(service, session_id, workspace_id) == []
 
 
-def test_teardown_cancels_a_pending_verdict(direct, monkeypatch) -> None:
+def test_teardown_cancels_a_pending_verdict(direct) -> None:
     service, session_id, runtime, workspace_id = direct
-    monkeypatch.setattr(empty_turn, "EMPTY_TURN_GRACE_SECONDS", 30)
     _ready(service, session_id, "kimi-code-acp")
     service.send_message(session_id, workspace_id, "hello")
     service._on_turn_end(session_id, "end_turn")
     timer = runtime.empty_turn_timer
-    assert timer is not None
+    assert isinstance(timer, _GatedTimer)
     service.shutdown()
-    timer.join(5)
+    timer.join(30)
     assert not timer.is_alive()
     assert runtime.empty_turn_timer is None

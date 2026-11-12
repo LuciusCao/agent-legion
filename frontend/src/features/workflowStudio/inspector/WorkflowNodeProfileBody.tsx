@@ -60,13 +60,7 @@ export function WorkflowNodeProfileBody(props: {
         setDefinitionYaml={props.setDefinitionYaml}
         readOnly={props.readOnly}
       />
-      <WorkflowAgentExecutionDetails
-        node={props.node}
-        runtime={props.runtimeInfo.effectiveRuntime}
-        definitionYaml={props.definitionYaml}
-        setDefinitionYaml={props.setDefinitionYaml}
-        readOnly={props.readOnly}
-      />
+      <WorkflowAgentExecutionDetails />
     </>
   )
 }

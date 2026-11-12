@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentPublishRequestDialog } from './AgentPublishRequestDialog'
 import { makeStudioView, withStudioProviders } from './testStudioProviders'
+import { useAgentPublishNoticeStore } from './agentPublishNoticeStore'
 import { useSettingStore } from '../../../stores/settingStore'
 import { useUiStore } from '../../../stores/uiStore'
 import { TestQueryProvider } from '../../../testing/testQueryClient'
@@ -91,6 +92,10 @@ const studioState = {
   flushDraftSave: vi.fn().mockResolvedValue({ ok: true, state: null }),
   // 顶栏状态文本的展示位（守卫不再读它——React 快照在 await 期间不更新）。
   draftSave: { status: 'saved' as const, savedAt: null },
+  // #1122：确认成功后登记发布原文（justPublishedRef 收尾）的接线位；
+  // definitionYaml 是服务端草稿缺失时的回落登记值。
+  markDraftPublished: vi.fn(),
+  definitionYaml: 'key: w\n',
 }
 
 function pendingRecord(
@@ -129,6 +134,11 @@ describe('AgentPublishRequestDialog', () => {
     vi.clearAllMocks()
     useSettingStore.setState({ workspaceId: 'ws1' })
     useUiStore.setState({ toast: null })
+    useAgentPublishNoticeStore.setState({
+      resolvedNotice: null,
+      pendingRequestId: null,
+      lastResolvedRequestId: null,
+    })
     mocks.fetchPendingPublishRequest.mockResolvedValue(null)
   })
 
@@ -151,6 +161,32 @@ describe('AgentPublishRequestDialog', () => {
       expect(
         screen.getByRole('dialog', { name: '发布 workflow revision' })
       ).toBeInTheDocument()
+    )
+  })
+
+  // M65 评审 P2-3 钉：镜像 effect 是 pendingRequestId 的唯一写入方——
+  // 删掉它，结构卡的「发布请求挂起」引导条会静默消失（引导条测试直接
+  // 置 store，不覆盖镜像链路）。
+  it('M65：pending 请求经镜像 effect 写入 agentPublishNoticeStore（引导条数据源）', async () => {
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    renderDialog()
+
+    await waitFor(() =>
+      expect(useAgentPublishNoticeStore.getState().pendingRequestId).toBe(
+        'req-1'
+      )
+    )
+  })
+
+  it('M65：无 pending 时镜像归 null（陈旧值被清除，引导条撤离）', async () => {
+    useAgentPublishNoticeStore.setState({ pendingRequestId: 'stale-req' })
+    renderDialog()
+
+    await waitFor(() =>
+      expect(mocks.fetchPendingPublishRequest).toHaveBeenCalled()
+    )
+    await waitFor(() =>
+      expect(useAgentPublishNoticeStore.getState().pendingRequestId).toBeNull()
     )
   })
 
@@ -412,6 +448,119 @@ describe('AgentPublishRequestDialog', () => {
     ).toBeInTheDocument()
     // confirming 状态下按钮禁用（发布进行中，不可重复触发）。
     await waitFor(() => expect(confirmButton).toBeDisabled())
+  })
+
+  it('confirm registers the re-read server draft as just-published (#1122)', async () => {
+    // #1122 根因钉：确认成功后必须把发布原文登记进 justPublishedRef
+    // （markDraftPublished），否则紧随的 canonical 基线被 baseline sync
+    // 判为外部变更，dirty chip 永真。登记值取重读的服务端草稿——它就是
+    // 确认端点将发布的内容（后端 confirm 读同一行，hash 校验兜底）。
+    studioState.flushDraftSave = vi.fn().mockResolvedValue({
+      ok: true,
+      state: { status: 'saved', savedAt: null },
+    })
+    mocks.fetchWorkflowDraft.mockResolvedValue({
+      definition_yaml: 'key: w\nlabel: V2\n',
+    })
+    mocks.confirmPublishRequest.mockResolvedValue({
+      ...pendingRecord(),
+      status: 'confirmed',
+      result_revision_id: 'ws1:demo_video_workflow:v2',
+      resolved_at: '2026-09-03T10:02:00Z',
+    })
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    renderDialog()
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '确认发布' })
+    )
+
+    await waitFor(() =>
+      expect(studioState.markDraftPublished).toHaveBeenCalledWith(
+        'key: w\nlabel: V2\n'
+      )
+    )
+    expect(mocks.confirmPublishRequest).toHaveBeenCalledWith('ws1', 'req-1')
+  })
+
+  it('confirm falls back to the canvas yaml when the server draft row is gone (#1122)', async () => {
+    // #1122 的回落形态：重读不到服务端草稿行时登记画布原文（此时 confirm
+    // 端点也会 404，登记无害——justPublishedRef 在草稿偏离时自动失效）。
+    studioState.flushDraftSave = vi.fn().mockResolvedValue({
+      ok: true,
+      state: { status: 'saved', savedAt: null },
+    })
+    mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: null })
+    mocks.confirmPublishRequest.mockResolvedValue({
+      ...pendingRecord(),
+      status: 'confirmed',
+      result_revision_id: 'ws1:demo_video_workflow:v2',
+      resolved_at: '2026-09-03T10:02:00Z',
+    })
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    renderDialog({ definitionYaml: 'key: canvas\n' })
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '确认发布' })
+    )
+
+    await waitFor(() =>
+      expect(studioState.markDraftPublished).toHaveBeenCalledWith(
+        'key: canvas\n'
+      )
+    )
+  })
+
+  it('M49 runtime-only 请求（compare 无条目 + 有 runtime 键）：确认保存可用并调确认端点', async () => {
+    // 通道死端回归钉：agent 对 tools/requires_labels-only 草稿发起发布
+    // 请求时 compare 摘要为空（M47 起这些字段不进 compare）——旧门禁把
+    // 确认永久禁用（用户只剩取消）。现在 runtime 键存在即可确认：标题
+    // 「保存节点运行配置」、runtime-only 文案、确认端点照常调用（后端按
+    // runtime-only 原地生效 + 追加配置版本，result_revision_id 为 null）。
+    mocks.fetchPendingPublishRequest.mockResolvedValue(pendingRecord())
+    studioState.flushDraftSave = vi.fn().mockResolvedValue({
+      ok: true,
+      state: { status: 'saved', savedAt: null },
+    })
+    mocks.fetchWorkflowDraft.mockResolvedValue({ definition_yaml: 'key: w\n' })
+    mocks.confirmPublishRequest.mockResolvedValue({
+      ...pendingRecord(),
+      status: 'confirmed',
+      result_revision_id: null,
+      resolved_at: '2026-09-03T10:02:00Z',
+    })
+    renderDialog({
+      createsRevision: false,
+      compareSummary: {
+        createsRevision: false,
+        riskLevel: 'none' as const,
+        severityLabel: '无风险',
+        nodeChanges: [],
+        edgeChanges: [],
+        intakeChanges: [],
+        metadataChanges: [],
+        riskFlags: [],
+        changedNodeKeys: new Set(),
+      },
+      runtimeChangedKeys: ['nodes.fetch_items.tools'],
+    })
+
+    const confirmButton = await screen.findByRole('button', {
+      name: '确认保存',
+    })
+    expect(
+      screen.getByRole('dialog', { name: '保存节点运行配置' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/确认后立即对新执行生效并追加一条配置版本/)
+    ).toBeInTheDocument()
+    expect(confirmButton).toBeEnabled()
+
+    await userEvent.click(confirmButton)
+
+    await waitFor(() =>
+      expect(mocks.confirmPublishRequest).toHaveBeenCalledWith('ws1', 'req-1')
+    )
   })
 
   it('cancel calls the cancel endpoint and closes the dialog', async () => {

@@ -34,8 +34,8 @@ export function dagNodePropsEqual(
     prevData.status === nextData.status &&
     prevData.nodeKey === nextData.nodeKey &&
     prevData.duration === nextData.duration &&
-    prevData.executorKind === nextData.executorKind &&
-    prevData.executorId === nextData.executorId &&
+    prevData.executionType === nextData.executionType &&
+    prevData.executionRuntime === nextData.executionRuntime &&
     prevData.agentId === nextData.agentId &&
     prevData.workerId === nextData.workerId &&
     prevData.capability === nextData.capability &&

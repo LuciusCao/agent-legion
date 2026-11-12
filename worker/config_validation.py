@@ -24,6 +24,7 @@ from worker.runtime.controls import (
     strip_removed_keys,
     validate_claim_controls,
 )
+from worker.runtime.preflight import resource_envelope_error
 
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _EDITABLE_FIELDS = {
@@ -34,6 +35,7 @@ _EDITABLE_FIELDS = {
     "disabled_runtimes",
     "max_concurrency",
     "max_code_concurrency",
+    "node_concurrency_limits",
     "upload_max_concurrency",
     "models",
     "labels",
@@ -52,6 +54,8 @@ _DEFAULTS: dict[str, Any] = {
     "disabled_runtimes": [],
     "max_concurrency": 1,
     "max_code_concurrency": 0,
+    # 节点级并发上限（#1158）：{node_key: N} 机器资源保护层，空 = 不限制。
+    "node_concurrency_limits": {},
     "upload_max_concurrency": 4,
     "models": [],
     "labels": {},
@@ -108,6 +112,7 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     concurrency = config.get("max_concurrency")
     claim_enabled = config.get("claim_enabled")
     validate_claim_controls(concurrency, claim_enabled)
+    assert isinstance(concurrency, int)
     # 批次 2 code 执行池；0 = 仅 agent。上限与 Host 注册契约引用同一常量。
     code_concurrency = config.get("max_code_concurrency", 0)
     if (
@@ -124,6 +129,10 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     ):
         raise ValueError(f"上传并发数必须是 1 到 {MAX_DYNAMIC_CONCURRENCY} 的整数")
     normalized_labels = worker_declarations.normalize_labels(config.get("labels", {}))
+    # 节点级并发上限（#1158）：随每次 claim 声明热同步到 Host，无需重注册。
+    node_limits = worker_declarations.normalize_node_concurrency_limits(
+        config.get("node_concurrency_limits", {})
+    )
     # models allowlist 的 runtime 取值校验对齐支持全集而非生效集合：生效集合
     # 随机器安装状态浮动，持久化校验不该跟着漂（发现阶段仍按生效集合取交集）。
     models = worker_declarations.normalize_models(config.get("models", []), SUPPORTED_RUNTIMES)
@@ -151,6 +160,10 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     # 冷启动爬坡（#471）：None/False = 禁用（一次性全量，行为回到现状）；
     # 归一化出口（键补齐、int→float）在 ramp_up.normalized_ramp_up_block。
     ramp_up = normalized_ramp_up_block(validate_ramp_up(config.get("ramp_up")))
+    if error := resource_envelope_error(
+        agent=concurrency, code=code_concurrency, upload=upload_concurrency
+    ):
+        raise ValueError(error)
     return {
         **config,
         "host_url": host_url,
@@ -160,6 +173,7 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
         "runtimes": runtimes,
         "max_concurrency": concurrency,
         "max_code_concurrency": code_concurrency,
+        "node_concurrency_limits": node_limits,
         "upload_max_concurrency": upload_concurrency,
         "claim_enabled": claim_enabled,
         "labels": normalized_labels,

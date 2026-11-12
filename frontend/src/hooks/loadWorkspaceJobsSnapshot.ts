@@ -31,7 +31,11 @@ export async function loadWorkspaceJobsSnapshot(
       first.total,
       first.next_cursor
     )
-  const facets = await fetchJobFacets(workspaceId, params)
+  const facets = await fetchJobFacets(workspaceId, params).catch(() => null)
+  // facets 只是计数面板：失败独立降级（保持旧值/缺失），不向调用方抛出——
+  // 列表已写入，抛出会被 createLoadSnapshot 的 catch 当整页失败调
+  // failJobFetch 清空刚写入的列表（#1189 codex P1-b）。
+  if (!facets) return
   if (isStale() || useJobStore.getState().filterConfig !== filterConfig) return
   useJobStore.getState().setFacets(workspaceId, facets)
 }

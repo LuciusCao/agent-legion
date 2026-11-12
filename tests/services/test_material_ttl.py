@@ -19,7 +19,7 @@ from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.instance_settings_store import InstanceSettingsStore
 from server.app.services.material_bundles import MaterialBundlesService
-from server.app.services.material_cache import material_claim_block
+from server.app.services.material_claim_descriptors import material_claim_block
 from server.app.services.material_ttl import (
     DELETE_GRACE_SECONDS,
     collect_expired_materials,
@@ -29,6 +29,7 @@ from server.app.services.material_ttl import (
 from server.app.services.material_ttl_sweeper import MaterialTtlSweeperThread
 from server.app.services.materials import MaterialsService
 from shared.material_cache import MaterializeError
+from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
 from tests.fakes.storage import FakeObjectStorage
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -67,7 +68,7 @@ def _ready_material(service: MaterialsService, storage: FakeStorage, filename: s
         created_by="user-1",
     )
     material_id = result["material"]["id"]
-    storage.objects[f"{WORKSPACE_ID}/{content_hash}/{filename}"] = payload
+    storage.objects[f"{WORKSPACE_ID}/{content_hash}/v2g0/m_{material_id}/{filename}"] = payload
     service.complete(WORKSPACE_ID, material_id)
     return material_id
 
@@ -187,7 +188,13 @@ def test_expired_material_rejected_at_claim_resolution(
     job = {"input_json": {"type": "material", "material_id": material_id}}
 
     with pytest.raises(MaterializeError, match="not ready"):
-        material_claim_block(TEST_DATABASE_URL, WORKSPACE_ID, job, storage=storage)
+        material_claim_block(
+            TEST_DATABASE_URL,
+            WORKSPACE_ID,
+            job,
+            storage=storage,
+            worker_protocol_version=MATERIAL_ETAG_PROTOCOL_VERSION,
+        )
 
 
 def test_expired_material_revived_by_same_hash_presign(
@@ -215,6 +222,11 @@ def test_expired_material_revived_by_same_hash_presign(
     assert result["upload_url"] is not None
     assert _material_row(material_id)["status"] == "uploading"
 
+    # R5 起复活重试迁到代次段 key：旧代次对象成为孤儿（lifecycle 回收），
+    # 新代次必须重新上传（PUT 到刚签发的 key）。
+    (revived_key, _) = storage.presigned[-1]
+    assert revived_key == f"{WORKSPACE_ID}/{content_hash}/v2g1/m_{material_id}/revive.txt"
+    storage.objects[revived_key] = payload
     service.complete(WORKSPACE_ID, material_id)
 
     row = _material_row(material_id)

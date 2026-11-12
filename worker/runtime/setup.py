@@ -11,6 +11,7 @@ from worker.runtime.preflight import (
     EXPECT_RUNTIMES_ENV,
     parse_expect_runtimes,
     preflight_error,
+    resource_envelope_error,
     velites_staleness_warning,
 )
 
@@ -52,6 +53,12 @@ def prepare_runtime_models(config: dict[str, Any], *, code_concurrency: int = 0)
             "（旧版 `runtimes` opt-in 键迁移也会转入停用集合）。修正二选一："
             f"从 {EXPECT_RUNTIMES_ENV} 移除该 runtime，或从 disabled_runtimes 取消停用后重启"
         )
+    if error := resource_envelope_error(
+        agent=config.get("max_concurrency", 1),
+        code=code_concurrency,
+        upload=config.get("upload_max_concurrency", 4),
+    ):
+        return error
     error = preflight_error(code_concurrency=code_concurrency, expect_runtimes=expect_runtimes)
     if error is not None:
         return error

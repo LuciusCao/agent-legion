@@ -553,7 +553,7 @@ describe('JobDetailPage', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-        if (url === '/api/jobs/j1/artifacts/question.json/raw') {
+        if (url === '/api/jobs/j1/raw-artifacts/question.json') {
           return Promise.resolve({
             ok: true,
             headers: { get: () => null },
@@ -614,7 +614,7 @@ describe('JobDetailPage', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-        if (url === '/api/jobs/j1/artifacts/question.json/raw') {
+        if (url === '/api/jobs/j1/raw-artifacts/question.json') {
           return Promise.resolve({
             ok: false,
             status: 500,

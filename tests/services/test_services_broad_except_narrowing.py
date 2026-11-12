@@ -231,74 +231,44 @@ def test_stage_outputs_programming_error_propagates_uncaught(tmp_path: Path) -> 
 # ---------------------------------------------------------------------------
 
 
-class _UsageConn:
-    database_dsn = "postgresql://invalid/test"
+class _FakeJobDb:
+    """Facade stand-in: a real read source, and a persist that must not run
+    when the parse step failed."""
 
-    def execute(self, sql: str, params: tuple | None = None):
-        class _Row:
-            def __init__(self, data: dict) -> None:
-                self._data = data
+    def read_lease_token_usage_source(self, lease_id: str) -> dict:
+        return {"workspace_id": "ws", "node_run": {"run_dir": "jobs/j1/runs/node_a/tok"}}
 
-            def __getitem__(self, key: str):
-                return self._data[key]
-
-        if "executor_leases" in sql:
-            return _Result([_Row({"node_run_id": "nr-1", "workspace_id": "ws"})])
-        if "node_runs" in sql:
-            return _Result([_Row({"run_dir": "jobs/j1/runs/node_a/tok"})])
-        return _Result([])
+    def persist_lease_token_usage(self, summary) -> None:
+        raise AssertionError("persist must not run when the parse step failed")
 
 
-class _Result:
-    def __init__(self, rows: list) -> None:
-        self._rows = rows
-
-    def fetchone(self):
-        return self._rows[0] if self._rows else None
-
-    def fetchall(self):
-        return self._rows
-
-
-def test_capture_token_usage_swallows_oserror(caplog) -> None:
+def test_capture_token_usage_swallows_oserror(caplog, monkeypatch) -> None:
     """#204 窄化：解析/持久化的 OSError（连接层）按 best-effort 吞掉
     （debug 日志），完成路径不受影响。"""
-    conn = _UsageConn()
-
     import server.app.services.token_usage_lease as lease_module
 
-    original = lease_module.parse_token_usage_for_lease
-
-    def _failing_parse(conn, lease_id: str, data_dir: Path):
+    def _failing_parse(source: dict, data_dir: Path):
         raise OSError("connection reset")
 
-    lease_module.parse_token_usage_for_lease = _failing_parse
-    try:
-        with caplog.at_level(logging.DEBUG, logger="server.app.services.token_usage_lease"):
-            capture_token_usage_after_lease_finish(conn, "lease-1", Path("/data"))
-    finally:
-        lease_module.parse_token_usage_for_lease = original
+    monkeypatch.setattr(lease_module, "parse_lease_run_usage", _failing_parse)
+
+    with caplog.at_level(logging.DEBUG, logger="server.app.services.token_usage_lease"):
+        capture_token_usage_after_lease_finish(_FakeJobDb(), "lease-1", Path("/data"))
 
     assert "Failed to capture token usage" in caplog.text
 
 
-def test_capture_token_usage_propagates_programming_error() -> None:
+def test_capture_token_usage_propagates_programming_error(monkeypatch) -> None:
     """#204 窄化：注入的编程错误（TypeError）上抛，不再静默 debug 掉。"""
-    conn = _UsageConn()
-
     import server.app.services.token_usage_lease as lease_module
 
-    original = lease_module.parse_token_usage_for_lease
-
-    def _broken_parse(conn, lease_id: str, data_dir: Path):
+    def _broken_parse(source: dict, data_dir: Path):
         raise TypeError("parse contract violation")
 
-    lease_module.parse_token_usage_for_lease = _broken_parse
-    try:
-        with pytest.raises(TypeError, match="parse contract violation"):
-            capture_token_usage_after_lease_finish(conn, "lease-1", Path("/data"))
-    finally:
-        lease_module.parse_token_usage_for_lease = original
+    monkeypatch.setattr(lease_module, "parse_lease_run_usage", _broken_parse)
+
+    with pytest.raises(TypeError, match="parse contract violation"):
+        capture_token_usage_after_lease_finish(_FakeJobDb(), "lease-1", Path("/data"))
 
 
 # ---------------------------------------------------------------------------

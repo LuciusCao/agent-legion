@@ -48,14 +48,13 @@ jobs:
   # Lane detection (Actions minutes cost control): push/PR runs narrow the
   # gate by changed paths, mirroring the local pre-push lane policy —
   # frontend-only changes skip the backend pytest shards (api-check still
-  # runs), velites-only changes run just the rust job, docs-only changes
-  # skip every backend/frontend lane (only this detection job and the
-  # docs-terms guard run — triggers carry no paths-ignore, because a
+  # runs), velites-only changes select rust rather than backend/frontend, and
+  # docs-only changes skip those test/build lanes while docs-terms and
+  # governance-guard still run. Triggers carry no paths-ignore because a
   # workflow that never starts leaves required checks pending forever and
-  # blocks docs-only PRs, first hit on #316).
-  # Shared files (config, scripts, tests,
-  # workflows, anything outside frontend//velites//docs/) run the full
-  # backend+frontend gate; dispatch runs always get every lane.
+  # blocks docs-only PRs (first hit on #316). Shared files (config, scripts,
+  # tests, anything outside frontend//velites//docs/) select backend+frontend;
+  # workflow/composite-action edits and dispatch runs select every lane.
   changes:
     name: changes
     runs-on: ubuntu-latest
@@ -66,7 +65,7 @@ jobs:
       rust: ${{ steps.filter.outputs.rust }}
       docker: ${{ steps.filter.outputs.docker }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -153,7 +152,9 @@ jobs:
     name: backend-unit
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    # #1142: pinned — use the same validated sandbox runner as the other lanes;
+    # ubuntu-latest migrated to Ubuntu 26, whose bubblewrap path is not validated
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       # Full history for the backend static round: budget_monotonicity
@@ -161,16 +162,25 @@ jobs:
       # not resolve — a depth-1 clone would red the job on every run. Deep
       # history keeps the anchors resolvable (codex review on PR #231);
       # changes already fetches depth 0.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           python-version: "3.13"
 
       - run: uv sync
+
+      # The unit tier includes real filesystem/network/process-group sandbox
+      # tests. Ubuntu restricts unprivileged userns via AppArmor; current
+      # bubblewrap no longer supports the legacy setuid mode, so the disposable
+      # CI VM must explicitly enable userns.
+      - name: Install bubblewrap (velites sandbox backend)
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
@@ -207,7 +217,7 @@ jobs:
       # coverage floor and the aggregate summary.
       - name: Upload unit shard coverage data
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: backend-unit-coverage
           path: coverage-data/backend-unit.coverage
@@ -215,7 +225,7 @@ jobs:
 
       - name: Upload unit shard test telemetry
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: backend-unit-telemetry
           path: |
@@ -266,9 +276,9 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           python-version: "3.13"
@@ -277,7 +287,7 @@ jobs:
 
       # The api:check contract step regenerates frontend API types via
       # openapi-typescript/prettier from frontend/node_modules.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -342,9 +352,9 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           python-version: "3.13"
@@ -411,7 +421,7 @@ jobs:
       # corresponding download step there, keeping the gate red.
       - name: Upload shard coverage data
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: backend-postgres-${{ matrix.shard }}-coverage
           path: coverage-data/backend-postgres-${{ matrix.shard }}.coverage
@@ -419,7 +429,7 @@ jobs:
 
       - name: Upload full-gate coverage data
         if: always() && matrix.shard == 'b'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: backend-full-coverage
           path: coverage-data/backend-full.coverage
@@ -427,7 +437,7 @@ jobs:
 
       - name: Upload shard test telemetry
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: backend-postgres-${{ matrix.shard }}-telemetry
           path: |
@@ -437,7 +447,7 @@ jobs:
 
       - name: Upload full-gate test telemetry
         if: always() && matrix.shard == 'b'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: backend-full-telemetry
           path: |
@@ -460,9 +470,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.13"
 
@@ -470,6 +480,42 @@ jobs:
         run: uv run --no-project --with pyyaml python -m scripts.architecture.docs_retired_terms
         env:
           PYTHONPATH: .
+
+  # Repo-wide governance guard (issue #1201): check_invariants /
+  # check_versions / check_architecture / generate_architecture govern
+  # frontend, velites and docs files too (frontend file budgets, the
+  # *.test.ts 1000-line cap, version manifests, docs freshness), but they run
+  # inside backend-unit's static step — a frontend-only / velites-only /
+  # docs-only diff sets backend=false and would merge a budget violation with
+  # no lane ever running them (PR #1177's over-ceiling frontend files were
+  # only caught because the PR also touched config/). Same complement pattern
+  # as docs-terms: backend-unit's static phase includes the set whenever the
+  # backend lane is on, so per run the checks execute exactly once. Unlike
+  # docs-terms this needs the project env (check_architecture imports
+  # server.app) and full history (budget monotonicity anchors on HEAD^).
+  governance-guard:
+    name: governance-guard
+    needs: changes
+    if: needs.changes.outputs.backend == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      - name: Repo-wide governance checks
+        run: BACKEND_GATE_PHASE=governance ./scripts/check-quick-backend.sh
+        env:
+          # Same release-train anchor opt-out as backend-unit's static step.
+          AGENT_LEGION_BUDGET_MONOTONICITY_RELEASE_TRAIN: ${{ ((github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'release/')) || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))) && '1' || '0' }}
 
   # Combined coverage floor + aggregate backend evidence (issue #193): the
   # needs-DAG guarantees backend-unit and every backend-postgres shard
@@ -485,9 +531,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           python-version: "3.13"
@@ -499,66 +545,66 @@ jobs:
       # fails its upload step, and the missing artifact fails this download
       # step instead of computing the floor on partial coverage data.
       - name: Download unit shard coverage data
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: backend-unit-coverage
           path: coverage-data
 
       - name: Download postgres shard A coverage data
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: backend-postgres-a-coverage
           path: coverage-data
 
       - name: Download postgres shard B coverage data
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: backend-postgres-b-coverage
           path: coverage-data
 
       - name: Download postgres shard C coverage data
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: backend-postgres-c-coverage
           path: coverage-data
 
       - name: Download full-gate coverage data
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: backend-full-coverage
           path: coverage-data
 
       - name: Download unit shard test telemetry
         if: always()
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: backend-unit-telemetry
           path: test-results
 
       - name: Download postgres shard A test telemetry
         if: always()
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: backend-postgres-a-telemetry
           path: test-results
 
       - name: Download postgres shard B test telemetry
         if: always()
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: backend-postgres-b-telemetry
           path: test-results
 
       - name: Download postgres shard C test telemetry
         if: always()
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: backend-postgres-c-telemetry
           path: test-results
 
       - name: Download full-gate test telemetry
         if: always()
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: backend-full-telemetry
           path: test-results
@@ -616,14 +662,15 @@ jobs:
 
       # A retry-pass is still a loss of test determinism. Known nodeids may
       # carry a short-lived registry entry, but a new rerun turns the PR red
-      # immediately. Deadline expiry is a wall-clock judgement and is only
-      # enforced by nightly-gate.yml exemption-expiry (#941): enforcing it
-      # here turned every deadline day red for unrelated PRs.
-      # Every PR / merge-group run (whatever its target branch) still rejects
-      # entries it adds or re-dates with an already expired deadline, judged
-      # against the target's registry (--base-registry); untouched entries
-      # stay clock-free (#941 R3/R4). Scheduled jobs only see the default
-      # branch, and the nightly check runs only after the merge.
+      # immediately. Untouched pre-existing deadline expiry is a wall-clock
+      # judgement enforced by nightly-gate.yml exemption-expiry (#941), not
+      # here: enforcing it here turned every deadline day red for unrelated
+      # PRs. Every PR / merge-group run (whatever its target branch) still
+      # rejects entries it adds or re-targets with an already expired
+      # deadline, judged against the target's registry (--base-registry);
+      # untouched pre-existing entries remain notes (#941 R3/R4). Scheduled
+      # jobs only see the default branch, and the nightly check runs only
+      # after the merge.
       - name: Enforce flaky rerun registry
         if: always()
         env:
@@ -659,9 +706,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -685,7 +732,7 @@ jobs:
 
       - name: Upload logic coverage blob
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frontend-coverage-blob-logic
           path: coverage-blobs/logic/
@@ -723,9 +770,9 @@ jobs:
           - shard: b
             gate_shard: 2/2
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -746,7 +793,7 @@ jobs:
 
       - name: Upload component coverage blob
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frontend-coverage-blob-component-${{ matrix.shard }}
           path: coverage-blobs/component-${{ matrix.shard }}/
@@ -770,9 +817,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -782,7 +829,7 @@ jobs:
         working-directory: frontend
 
       - name: Download coverage blobs
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: frontend-coverage-blob-*
           path: coverage-blobs
@@ -810,7 +857,7 @@ jobs:
       # backend partitions only because it never passes --frontend. Enforce
       # them here against the merged blob data; uv provides the python for
       # scripts/check_coverage_partitions.py (stdlib only for --frontend).
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           python-version: "3.13"
@@ -871,14 +918,14 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           python-version: "3.13"
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -896,7 +943,7 @@ jobs:
         with:
           toolchain: stable
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: velites
           # One shared cache across the rust lane and both e2e jobs: the e2e
@@ -932,7 +979,7 @@ jobs:
 
       - name: Upload E2E failure evidence
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-smoke-results
           path: frontend/e2e-results/
@@ -946,7 +993,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
@@ -954,7 +1001,7 @@ jobs:
           components: rustfmt, clippy
 
       # Cold build is ~14 min; the cache is mandatory, not optional.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: velites
           # One shared cache across the rust lane and both e2e jobs: the e2e
@@ -995,7 +1042,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # torch/CUDA 依赖链（funasr）已移除，镜像体积回落；保留 free-disk-space
       # 作为磁盘余量兜底（torch 时代 ubuntu-latest ~14GB 曾在构建中途耗尽，
@@ -1011,19 +1058,27 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build host image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: host
           push: false
+          load: true
+          tags: agent-legion-host:ci
           cache-from: type=gha,scope=host
           cache-to: type=gha,mode=max,scope=host
 
+      - name: Prepare Host skill checkout smoke
+        run: python scripts/e2e/host_skill_checkout_smoke.py prepare --workspace "$RUNNER_TEMP/host-skill-checkout-smoke"
+
+      - name: Run Host skill checkout smoke
+        run: docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$RUNNER_TEMP/host-skill-checkout-smoke:/smoke" agent-legion-host:ci python -m scripts.e2e.host_skill_checkout_smoke run --workspace /smoke
+
       - name: Build worker image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: worker
@@ -1046,6 +1101,7 @@ jobs:
       - api-check
       - backend-postgres
       - docs-terms
+      - governance-guard
       - backend-coverage
       - frontend-logic
       - frontend-component
@@ -1072,7 +1128,7 @@ jobs:
             (.changes.result == "success") and
             require_selected(
               .changes.outputs.backend != "true";
-              ["docs-terms"]
+              ["docs-terms", "governance-guard"]
             ) and
             require_selected(
               .changes.outputs.backend == "true";

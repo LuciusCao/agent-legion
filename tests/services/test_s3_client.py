@@ -85,6 +85,31 @@ def test_presign_signature_is_present_on_public_urls() -> None:
     assert "AWSAccessKeyId=" not in url
 
 
+def test_presign_put_signs_if_none_match_into_signed_headers() -> None:
+    """#1321: material PUT URLs carry If-None-Match: * in SignedHeaders —
+    the storage layer enforces create-only (second PUT → 412); an uploader
+    omitting the header gets 403 SignatureDoesNotMatch."""
+    from urllib.parse import parse_qs
+
+    storage = S3StorageClient(_settings())
+
+    url = storage.presign_put("k.bin", 10, if_none_match="*")
+
+    signed = parse_qs(urlparse(url).query)["X-Amz-SignedHeaders"][0].split(";")
+    assert "if-none-match" in signed
+
+
+def test_presign_put_without_condition_signs_host_only() -> None:
+    """Default stays unconditional (Worker artifact staging channel)."""
+    from urllib.parse import parse_qs
+
+    storage = S3StorageClient(_settings())
+
+    url = storage.presign_put("k.bin", 10)
+
+    assert parse_qs(urlparse(url).query)["X-Amz-SignedHeaders"] == ["host"]
+
+
 def test_data_plane_client_has_bounded_timeouts_and_no_botocore_retries() -> None:
     """A storage outage must not park a code-pool lease slot for minutes:
     bounded connect/read timeouts, and botocore retries stay off — the

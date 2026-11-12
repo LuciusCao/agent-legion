@@ -10,6 +10,18 @@ ExecutionStatus = Literal["completed", "failed", "cancelled"]
 # its historical values; new rows always carry this constant.
 CODE_EXECUTOR_ID = "code"
 
+# Node-limit counting predicate (#1167 口径表, #1171 三处消费点对齐): only
+# the code lease FORMS count against a node's concurrency limit — the local
+# pool's 'code' (_lease_claims.claim_lease) and remote code claims'
+# 'agent:code:%' (claim_promote / code_dispatch write the same shape). A
+# non-code 'agent:<id>' lease is agent-lane execution, never code-pool
+# concurrency: on a node_key that turned agent→code across revisions, the old
+# agent run must not consume the new code node's limit. The %% is the psycopg
+# paramstyle escape for a literal %. Consumers: agent_broker.claim_node_limit
+# (remote claim gate), executors._lease_claim_limits (local claim gate),
+# executors.scheduling.capacity (scheduler hint snapshot).
+CODE_LEASE_FORMS_PREDICATE = "(executor_id='code' or executor_id like 'agent:code:%%')"
+
 
 @dataclass(frozen=True)
 class ExecutionContext:

@@ -73,25 +73,20 @@ def lock_job_mutation_and_read_generation(conn: DatabaseConnection, job_id: str)
     return int(row["execution_generation"]) if row is not None else None
 
 
-# Sort sentinel for batch items whose workspace lock key cannot be resolved
-# (the jobs row vanished before the batch's lookup — the item then fails the
-# generation CAS without writing). hashtext's int domain is signed 32-bit, so
-# -(2**31) is a real possible key value; the sentinel only needs a
-# deterministic position, and the job_id tiebreak keeps even that collision
-# consistent across batches.
-_ORPHAN_WS_LOCK_KEY = -(2**31)
+def job_mutation_lock_keys(conn: DatabaseConnection, job_ids: list[str]) -> dict[str, int]:
+    """EXEC-GENERATION-001 全库唯一批序的排序键：每 job 的实际 32 位锁键
+    hashtext('job-mutation:' || id)::int（#1346 / #1378 codex P2）。
 
-
-def ws_lock_keys_by_job(conn: DatabaseConnection, job_ids: list[str]) -> dict[str, int]:
-    """EXEC-GENERATION-001 全库唯一批序的 ws 分量：每 job 的
-    hashtext('agent-ws:' || workspace_id)::int——与 agent claim 批的
-    ``_lock_order_sorted``（claim_scan 的 ws_lock_key 列）同源同事。"""
+    批序是纯 (锁键, job_id) 全序——不带 ws 分桶：分桶会让跨 workspace 批在
+    碰撞别名对（W1 的 K1 与 W2 的 K1 是同一把锁）上仍按相反顺序取锁；池级锁
+    由锁层级序（池锁先于 job-mutation）与 claim 批的 ws 预取纪律覆盖，不参与
+    job 锁排序。advisory 锁键不依赖 jobs 行存在，直接按 id 计算。"""
     rows = conn.execute(
-        "select id, hashtext('agent-ws:' || workspace_id)::int as ws_lock_key"
-        " from jobs where id = any(%s)",
-        (sorted(set(job_ids)),),
+        "select t.id as id, hashtext('job-mutation:' || t.id)::int as job_lock_key"
+        " from unnest(%s::text[]) as t(id)",
+        (sorted({str(job_id) for job_id in job_ids}),),
     ).fetchall()
-    return {str(row["id"]): int(row["ws_lock_key"]) for row in rows}
+    return {str(r["id"]): int(r["job_lock_key"]) for r in rows}
 
 
 def sync_job_status(conn: DatabaseConnection, job_id: str) -> None:

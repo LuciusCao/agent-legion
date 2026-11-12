@@ -6,7 +6,6 @@ from server.app.services.job_errors import (
     ConflictError,
     CustomNodesDisabledError,
     DraftWorkflowKeyMismatchError,
-    InvalidDraftCasTokenError,
     InvalidOperationError,
     JobServiceError,
     NotFoundError,
@@ -35,9 +34,8 @@ def raise_job_http_error(error: JobServiceError) -> Never:
         raise HTTPException(status_code=501, detail=str(error)) from error
     if isinstance(error, PayloadTooLargeError):
         raise HTTPException(status_code=413, detail=str(error)) from error
-    # InvalidDraftCasTokenError（#633 P2-2，非法 CAS 时间戳是输入错误）与
-    # key-mismatch 同为 422，都先于 InvalidOperationError 的 400。
-    if isinstance(error, (DraftWorkflowKeyMismatchError, InvalidDraftCasTokenError)):
+    # key-mismatch 是 422，先于 InvalidOperationError 的 400。
+    if isinstance(error, DraftWorkflowKeyMismatchError):
         raise HTTPException(status_code=422, detail=str(error)) from error
     if isinstance(error, PartialRunCreationError):
         # #467 A3：分块提交下失败可能已创建部分 job——进度必须可见。

@@ -4,17 +4,16 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Typography,
 } from '@mui/material'
 import type { WorkflowRevisionSummary } from '../../../types'
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
+import { WorkflowPublishReviewDialogAdvisories } from './WorkflowPublishReviewDialogAdvisories'
 import { WorkflowPublishReviewDialogChanges } from './WorkflowPublishReviewDialogChanges'
-import { hasCompareSummaryChanges } from './WorkflowPublishReviewDialog.helpers'
+import { canConfirmPublish } from './WorkflowPublishReviewDialog.helpers'
 import { WorkflowPublishReviewDialogMeta } from './WorkflowPublishReviewDialogMeta'
 
 type Props = {
   open: boolean
-  workflowKey: string | null
   activeRevision: WorkflowRevisionSummary | null
   nextVersion: number
   createsRevision?: boolean
@@ -37,11 +36,14 @@ type Props = {
   /** #804 轮 4 P2-C 审 A 发 B：确认框打开期间草稿 YAML 被后台换掉 →
    * 禁确认 + 提示重审（审阅的 diff 与将发布的内容已不一致）。 */
   contentStale?: boolean
+  /** M48：草稿里尚未经运行通道保存的 runtime 键（信息条）。 */
+  runtimeChangedKeys?: string[]
+  /** M48：本会话已经运行通道保存生效的 runtime 键（信息条）。 */
+  runtimeSavedKeys?: string[]
 }
 
 export function WorkflowPublishReviewDialog({
   open,
-  workflowKey,
   activeRevision,
   nextVersion,
   createsRevision = true,
@@ -53,19 +55,23 @@ export function WorkflowPublishReviewDialog({
   canceling = false,
   advisories = [],
   contentStale = false,
+  runtimeChangedKeys = [],
+  runtimeSavedKeys = [],
 }: Props) {
-  const hasChanges = hasCompareSummaryChanges(summary)
+  const resolving = confirming || canceling
   // 任一操作在途即禁止二次触发关闭与确认（#429 四轮 codex P2：cancel 在途
   // 时确认按钮不禁会并发 cancel+confirm，终态由后端竞态决定）。
-  const resolving = confirming || canceling
   // #429 二轮复审 P3：confirm 进行中，关闭渠道（返回编辑/ESC/backdrop）
   // 全部不触发 cancel——发布已在途，此时 cancel 会让 revision 实际上线但
   // 回执/agent 状态显示被拒（误导）。回调早退一处守卫，覆盖三个入口。
   // 三轮复审 P3：cancel 在途同样静默——二次 cancel 必 404，红 toast 与
   // 正确回执同现是假失败。
-  const requestClose = () => {
-    if (!resolving) onCancel()
-  }
+  // M49：确认门禁收口到 canConfirmPublish（结构 diff 或待生效 runtime 键
+  // 任一即可确认）——runtime-only 的 agent 发布请求 compare 摘要为空，
+  // 只看摘要会永久禁用确认（通道死端）。
+  const confirmDisabled =
+    !canConfirmPublish(summary, runtimeChangedKeys) || resolving || contentStale
+  const requestClose = () => (resolving ? undefined : onCancel())
 
   return (
     <Dialog open={open} onClose={requestClose} maxWidth="sm" fullWidth>
@@ -74,29 +80,21 @@ export function WorkflowPublishReviewDialog({
       </DialogTitle>
       <DialogContent>
         <WorkflowPublishReviewDialogMeta
-          workflowKey={workflowKey}
           activeRevision={activeRevision}
           nextVersion={nextVersion}
           createsRevision={createsRevision}
           definitionHash={definitionHash}
         />
-        <WorkflowPublishReviewDialogChanges summary={summary} />
-        {contentStale && (
-          <Typography variant="body2" color="error" sx={{ mt: 2 }}>
-            草稿内容在你审阅期间已被更新（可能来自 Agent
-            自动保存）——请关闭后重新审阅再发布
-          </Typography>
-        )}
-        {advisories.length > 0 && (
-          <Typography
-            variant="body2"
-            color="warning.main"
-            sx={{ mt: 2, whiteSpace: 'pre-line' }}
-            data-testid="publish-advisories"
-          >
-            {advisories.join('\n')}
-          </Typography>
-        )}
+        <WorkflowPublishReviewDialogChanges
+          summary={summary}
+          createsRevision={createsRevision}
+          runtimeChangedKeys={runtimeChangedKeys}
+          runtimeSavedKeys={runtimeSavedKeys}
+        />
+        <WorkflowPublishReviewDialogAdvisories
+          advisories={advisories}
+          contentStale={contentStale}
+        />
       </DialogContent>
       <DialogActions>
         <Button onClick={requestClose} variant="outlined" disabled={resolving}>
@@ -106,7 +104,7 @@ export function WorkflowPublishReviewDialog({
           onClick={onConfirm}
           variant="contained"
           color="primary"
-          disabled={!hasChanges || resolving || contentStale}
+          disabled={confirmDisabled}
         >
           {createsRevision ? '确认发布' : '确认保存'}
         </Button>

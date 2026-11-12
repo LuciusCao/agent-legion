@@ -4,6 +4,354 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Provider 鉴权失败导致 velites 因声明产物缺失返回 exit 1 时，Worker 结果准备不再丢弃结构化事件中的真实错误并上报裸 `Agent process exited 1`（issue #1502）：对 HTTP 401、HTTP 200 错误体内的 `code=401`，以及 API key disabled / invalid / revoked 等明确签名保留 Provider 原始错误，Host 既有分类随之记录为 `technical/provider_request`，可通过现有技术错误筛选与 `rerun-by-failure` 在修复凭据后手动重跑；普通非鉴权模型错误与其他非零退出仍保持原归因，不新增自动重试。
+
+## [0.8.6] - 2026-11-11
+
+主打 Agent 批量结果完成与心跳的 lease 死锁修复、Worker 压缩事件与应急证据的嵌套 JSON key 脱敏，并完成 Host、Worker、velites 与治理面的预算回落；三条产品线均有实际源码差异，配套发布 Host/main v0.8.6、worker-v0.8.6 与 velites-v0.5.11。
+
+### Fixed
+
+- Agent 批量 heartbeat 与 grouped result finish 的 lease 行锁 AB-BA 死锁（issue #1449，PR #1477）：`finish_many` 先按既有 `(hashtext(job-mutation), job_id)` 全序集中预取 job-mutation 锁，再按 `execution_id, id` 集中预取 `executor_leases` 行锁，随后保持原 job 序完成结果；批量 heartbeat 继续按 `execution_id` 序取 lease 锁，消除两条并发路径各持一张 lease 后交叉等待的锁环。Worker 身份、lease ownership、execution generation CAS、settled/lost verdict、queue-order verdict 与 finish→mark_done 提交语义不变，未新增重试框架。
+
+### Security
+
+- Worker 压缩 Pi events 与应急证据的嵌套 JSON key 脱敏（issue #1175，PR #1476）：已注册及 secret-shaped 字面量出现在解码后的 JSON 字符串 key 时也按既有 value 规则替换，覆盖嵌套对象、转义 key、message/toolCall 与 bash 输出等保留事件；key 顺序、数值、布尔、null 与普通字段保持不变。重写后同一对象发生 key 碰撞时 fail-closed 丢弃该事件行，避免静默覆盖条目或回退原始密钥；Host `redactor=None` 的逐字保留路径不变。该修复位于 `shared/`，Host 与 Worker 产物都必须发布，不能只升级一侧。
+
+### Maintenance
+
+- Skill contract 三端拆分（issue #994，PR #1483）：Python root-contract 解析、source-tier/publish advisories 与前端发布复核提示按职责拆出，velites contract facade 分为 parser、validation 与测试模块并补 Rust/Python/前端等价回归；root `contract.yaml` 优先级、malformed/unreadable fail-closed、embedded-block 兼容层及既有 import/API、UI、tool/event 契约不变。
+- Host API、认证与执行面预算回落（issues #993、#1002、#1003、#1009、#1010）：workspace skill guard、runs intake、external artifact entry/access、路径告警与补偿、ops sampling、route assembly、Studio skill publish support、agent result commit plane 等按职责拆分并清退豁免；endpoint 挂载顺序、认证 scope、API schema、部分创建补偿、采样与执行代次语义不变。
+- 数据库、workflow 与 MCP 组合工具拆分（issues #1011、#1012、#1016）：checkout attribution/return、artifact-key GC、v73 run 状态计数 SQL、workflow snapshot/revision echo 与 MCP studio/node-code/agent-definition 工具迁入姊妹模块；v73 trigger、retention index、backfill SQL 与执行顺序保持逐字等价，连接生命周期、GC、workflow 序列化及 MCP 注册顺序和 wire contract 不变。
+- Worker heartbeat registry 拆分（issue #751，PR #1489）：lease entry 与完整 registry 状态机迁入 `heartbeat_registry.py`，批量 coordinator 继续负责请求、分片、降级与取消投递；registration、upload handover/rebind、pruning、snapshot、lost/settled verdict 与既有 facade import 保持等价，并补 registry 定向与 mutation 回归。
+- 架构预算治理与 migration root 策略（issues #1005、#1008、#1030）：exemption schema/expiry、baseline/frozen-ceiling、effective-line 与 invariant wiring 拆分为内聚 helper；`server/app/db/migrations` 登记为 `production.per_file_ceiling_exempt_roots`，仅豁免逐文件 baseline 完整性、effective-line ceiling 与 ratchet 生成，全部 migration Python/SQL 文件仍受 raw 800 行绝对上限，禁止新增 `architecture.file_budget` 豁免，非 migration 规则与 ceiling 单调性不变。
+- backend-unit 真实沙箱门禁修复（PR #1491）：GitHub Actions 在 Ubuntu 24.04 为 backend-unit 配置 bubblewrap 与 unprivileged user namespaces，并修正跨 PID namespace 进程检查、loopback 正对照和 read-only bind 写入探针；只改变 CI 与测试机制，不修改 server、worker、shared 或 velites 产品行为，也不代表原生 Linux 生产部署已经验收。
+
+### 升级注意
+
+- **数据库：** 本版没有新 schema 迁移，当前版本保持 v104；#1011 仅移动既有 v73 SQL 文本，#1030 仅调整预算治理，均不改变 migration 注册、执行顺序、最低升级版本或持久化数据。仍建议升级前备份 PostgreSQL，已完成 v104 的实例无需额外迁移，回滚使用与目标 schema 匹配的备份。
+- **Host / Worker / velites 发布集合：** `worker-v0.8.4..main` 的 `worker/`、`shared/` 与 `velites-v0.5.10..main` 的 `velites/` 均有实际源码差异，本次发布 `v0.8.6`、`worker-v0.8.6`、`velites-v0.5.11`，不沿用旧 Worker/velites，也不创建空版本。
+- **升级顺序与配套：** 必须先升 Host 到 v0.8.6 并确认健康，再逐台升级 Worker 到 worker-v0.8.6 并配套 velites-v0.5.11；Worker 注册/claim 协议保持 v6，但协议号不变不能替代版本配套。#1175 的共享脱敏修复需要 Host 与 Worker 都升级，#751 的 registry 拆分只随新 Worker 产物交付，velites #994 拆分随 0.5.11 交付且公共 contract 行为不变。
+- **一键安装钉版：** `scripts/install-worker.sh` 默认钉版更新为 worker 0.8.6 / velites 0.5.11；重复执行继续保留 `worker.yaml`、模型配置、显式资源 limits、控制卷与 pending upload。需等 worker-v0.8.6 镜像与 velites-v0.5.11 三平台 release 产物发布成功后，才能使用默认版本执行一键升级或回滚到该组合。
+- **frontend 独立版本线：** 本次包含 frontend 结构保持型拆分但不单独发布 npm 包，`frontend/package.json` 与 lockfile 保持 0.4.0-alpha。
+- **发布前置：** release PR 合并后必须在对应 main 精确提交上运行 Nightly Gate 并取得全绿，再创建上述三个非空 tag 与对应 GitHub Releases；不得用本发布流程执行生产部署。
+
+### 已知后续
+
+- **原生 Linux 部署（#39、#1049）：** 两项 issue 保持 open；#1491 只让 backend-unit 在受控 CI runner 上执行真实沙箱回归，原生非 root systemd、宿主长期安全策略与真实 Host/Worker 迁移/回滚验收仍未完成，本版不得宣称原生 Linux 生产支持。
+
+## [0.8.5] - 2026-11-07
+
+主打 Studio 与实例设置预算回落、Worker Key 使用统计口径修复及 CI 依赖维护：Key 的 Worker 使用计数与当前 workspace 可见范围对齐，删除告警仍保留全实例消费者；预览/DAG、草稿同步/保存/发布、Inspector 和实例设置契约按职责拆分并清退预算豁免，不改变既有产品行为。原生 Linux targeted AppArmor 实验得出 candidate-only no-go，不构成生产支持。
+
+### Fixed
+
+- Worker Key 使用统计与 workspace 范围对齐（issue #1172，PR #1459）：Agent 与 Worker 设置区的「N 个 Worker 使用」改为只统计最近注册使用该 Key 且服务当前 workspace 的 Worker，不再出现被计数却在当前列表不可见的消费者；删除 Key 的级联告警仍使用全实例消费者列表，避免低估删除影响。legacy 全局 Worker 与 workspace 过滤谓词保持不变。
+
+### Maintenance
+
+- Studio 与预览/DAG 预算回落（issues #1000、#1004、#1013、#1014、#1017）：预览视图、DAG hover 高亮、服务端草稿同步/重放、Prompt 编辑与草稿归一化、保存/发布 action、query key 注册及节点代码加载按职责拆分，补齐 node-safe action 与服务端同步测试并删除到期豁免；草稿保存、发布确认、运行配置通道和现有视觉/交互契约不变。
+- 实例设置字段与后端契约拆分（issue #1015，PR #1460）：全局设置字段按 core/worker/workflow 分类，实例设置路由契约按 core/execution 分模块，保留既有 API 形状、默认值与校验语义，并清退对应体积预算豁免。
+- GitHub Actions 依赖集中升级（#1461–#1463 及同期 action 更新）：`softprops/action-gh-release` 升至 3.0.3、`astral-sh/setup-uv` 升至 10.3.3、`docker/build-push-action` 升至 7.4.0，同期更新 `docker/login-action` 4.7.0、`actions/setup-node` 7.1.0 与 `Swatinem/rust-cache` 2.9.3；全部继续使用完整 commit SHA 钉版，原 Dependabot PR 由集中提交覆盖后不重复计入合并项。
+- targeted AppArmor 原生沙箱实验（issues #39、#1049，PR #1458）：在隔离 Ubuntu 环境对 direct-bwrap candidate 执行 A/B/R 与原始证据采集，candidate 在 payload 启动前因 proc mount 权限失败而判定 no-go，rollback 恢复 stock 状态；未修改 Worker/velites 生产沙箱、宿主长期安全策略或部署权限，candidate summary 始终 `production_fixed=false`，并发与 payload 内语义因 fail-fast 未获得通过证据。
+- 里程碑历史归属校准（issues #1199、#1001）：普通节点 `config/config_schema` 的运行/结构分类核查确认双通道主体已由 0.8.1 #1351 覆盖，普通节点配置继续属于结构契约；AgentEditor 工具 picker 共享化目标已随旧组件退役而失去适用对象，实时发现另列 #1467。两项均只完成对账，本区间没有对应新增产品差异，不重复声明新功能或修复。
+
+### 升级注意
+
+- **数据库：** 本版没有新 schema 迁移，当前版本保持 v104；仍建议升级前备份 PostgreSQL，已完成 v104 的实例无需额外迁移，回滚使用与目标 schema 匹配的备份。
+- **Host / Worker / velites 顺序与版本线：** `v0.8.4..main` 的 `worker/`、`shared/`、`velites/` 无产品差异，本次只发布 Host/main `v0.8.5`，不创建 `worker-v0.8.5` 或新 velites tag。升级顺序仍为 Host → Worker：先升 Host 到 v0.8.5 并确认健康，再逐台维护 Worker；Worker 继续使用 worker-v0.8.4 与 velites-v0.5.10，无需为主仓版本号重装，Worker 注册/claim 协议保持 v6。
+- **一键安装钉版：** `scripts/install-worker.sh` 默认钉版保持 worker 0.8.4 / velites 0.5.10，与本次空差异审计一致；不要为跟随主仓版本号而指定不存在的 worker-v0.8.5。
+- **frontend 独立版本线：** 本次包含 frontend 修复与内部重构但不单独发布 npm 包，`frontend/package.json` 与 lockfile 保持 0.4.0-alpha。
+- **发布前置：** release PR 合并后必须在对应 main 精确提交上运行 Nightly Gate 并取得全绿，再创建 `v0.8.5` 与主仓 GitHub Release；不得用本发布流程生成 worker/velites 空版本或执行生产部署。
+
+### 已知后续
+
+- **原生 Linux 部署（#39、#1049，milestone #37）：** 两项 issue 与 Linux 部署里程碑保持 open。targeted AppArmor candidate 当前仅为 no-go 实验结论，native probe 的 CI 状态分离与并发 audit/rollback 证据完整性分别由 #1470、#1471 跟进；原生非 root systemd、真实 Host/Worker 迁移/回滚与生产验收尚未完成，本版不得宣称原生 Linux 生产支持。
+
+## [0.8.4] - 2026-11-03
+
+主打 Worker 容器资源限额实测落地与 velites 工具错误可见性：Worker 各 Compose 形态新增 256MiB / 128 pids 默认值及测量 envelope 守卫，一键安装升级会按实际控制卷预检并保留用户状态；velites 修复 OpenAI 兼容 provider 的工具错误标记透传。另含任务中心窄屏排版、Worker 静态容量误报移除、资源测量与原生沙箱诊断工具，以及入口/工具层/测试预算重构。原生非 root systemd 与 AppArmor 验证不在本版完成范围内。
+
+### Added
+
+- Worker 容器实测资源限额（issue #1049 的 Docker/Compose 子集，PR #1448）：`compose.worker.yaml`、`compose.worker.standalone.yaml` 与 `compose.host.yaml` 默认设置 `mem_limit=256m`、`pids_limit=128`、`AGENT_WORKER_RESOURCE_LIMITS_MODE=default`，zero-runtime 与 pull override 继承同一默认值。默认值仅覆盖原生 Linux reference envelope：agent=10、code=0（Host local code）、upload=4、每波 20 jobs、每个 artifact 1MiB；不改变 `max_concurrency`、bwrap、capability、seccomp 或 CPU 限制。启动、控制台/API 写入与热更共用 envelope guard，超 envelope 的 default 配置 fail-closed，不静默 clamp；自定义或明确无限额须评审后设置 `AGENT_WORKER_RESOURCE_LIMITS_MODE=explicit`。该子集不代表 #1049 的原生非 root systemd 目标已经完成。
+- Worker 资源测量与故障注入工具（issue #1049 前置工具，PR #1434、#1448）：新增隔离 measurement Compose、原生 Ubuntu workflow 与 cgroup v2 全容器 memory/pids 采样，覆盖 agent/code/mixed、direct S3 upload、受控 upload backlog、pending/executor/container restart，并校验精确 execution 身份、产物对象字节与当前代次注册。Docker Desktop 只作功能证据，不作 sizing；测量专用权限、Host support 容器和 AppArmor override 不进入生产配置，工具本身不推荐限额数值。
+
+### Changed
+
+- 一键 Worker 安装/升级资源预检（issue #1049，PR #1448 及后续修复）：`scripts/install-worker.sh` 幂等维护版本与资源自管行，在任何 compose/.env 提交前按实际 Compose project 解析并核查 `worker-control` 卷，优先用目标 Worker 镜像的 PyYAML 与 `validate_config` 读取运行时控制副本，只有副本不存在才回退引导文件；default 超 envelope、镜像/卷不可用或配置无法可靠解析都会保留旧文件并中止。升级或回滚不重置显式 limits，不改写 `worker.yaml`、pending upload 或上传队列；同时修复 Compose config 退出码检查与控制副本并发解析，fresh 缺省写入 256m/128/default。
+
+### Fixed
+
+- velites OpenAI 兼容工具结果错误透传（issue #450，PR #1426）：`openai_compat` 回传 tool result 时在 `is_error=true` 的文本前加 `[ERROR]`，模型不再把 read/write/bash/validate 等工具失败当作普通成功结果；Anthropic 原生 `is_error` 字段、事件流与成功结果形状不变。
+- Worker agent 并发静态容量误报（issue #1126，PR #1424）：移除按「CPU 核数 ×4」对网络等待型 agent `max_concurrency` 发出的启动 WARNING，避免诱导运维错误压低健康并发；基于实测 load1 的动态 claim 衰减与恢复逻辑保持不变。
+- 任务中心与 shell 窄屏排版（issue #1422，PR #1425）：≤700px 的任务中心分区标题与卡片底行改为纵向堆叠，390px 下不再挤压标题或留下孤行；同时修复 shell fade 的横向溢出，桌面布局不变。
+- Host 镜像 Skill checkout 运行依赖（issue #1049 配套，PR #1448）：Host 镜像补装 `git`，容器内解析 latest/pinned skill 并执行 `git archive` 物化时不再缺少系统工具；Worker 镜像同步打包拆分后的 CLI payload 模块。
+
+### Security
+
+- certifi 与 filelock 定向安全升级（#1150 nightly deps-audit 跟进）：certifi 2026.5.20 → 2026.10.23，消除 GHSA-6q48-6c7w-9gw2 / PYSEC-2026-4320（同一公告的两条 feed 记录），requests 的真实 TLS 链不再使用受影响 CA 数据；filelock 3.29.0 → 4.2.7，修复 CVE-2026-112907、112909、112910、112913、112915、112935、112936、112939、112940，其中 112909 直接覆盖项目使用的 POSIX FileLock。`pyproject.toml` 新增 `filelock>=4.2.1` 安全下限，避免后续 lock 回退到受影响版本；本次不沿用 0.8.3 的依赖漏洞豁免。
+
+### Maintenance
+
+- 过期 FLAKY 注册清理（#1150 nightly exemption-expiry 跟进）：删除 FLAKY-006/007/009/010/011/012/013/014/019/020 共 10 条注册而非再次延长 deadline；#1151 run 37902305361 与 #1453 run 41578924892 的 backend-coverage 均为 `Rerun nodeids observed: 0`，#1453 五份原始 rerun artifacts 全 attempts=0 且 JUnit 确认目标均实际执行、无 failure/error。007/009/012/020 有明确根因修复，其余由 CI postgres `-n1` 与连续零复发证据支撑；FLAKY-021 保留，任何已删条目复发将按未注册 rerun 硬失败处理。
+- velites 入口、工具层与测试预算回落（issues #996、#995、#311，PR #1431、#1436、#1437、#1439、#1440、#1441）：argv 入口、agent output、bash 输出截断、JSON 宽容解析重复键与工具 spec 按职责拆分，CLI/session 内联测试迁至集成测试并删除到期豁免；不改变命令、事件或配置契约。`config.rs` 迁移桥退役早已随 velites 0.5.9 / 主仓 0.8.1 发布，本区间 #996 只完成入口拆分，不重复声明配置行为变化。
+- Worker supervisor 与 CLI 拆分（issue #451，PR #1442）：进程派生/env 组装与 CLI payload 收进独立模块，移除 supervisor 体积豁免；监督状态、生命周期与代理注入语义不变。
+- 原生沙箱网络诊断（issues #39、#1049，PR #1453）：新增 stock Ubuntu 24.04 N0 权限矩阵、统一 fail-closed 原始证据契约与 mutation 覆盖，记录当前硬边界下 no-network bwrap/userns 失败及未触发的后续实验；未修改 velites/Worker 生产沙箱、宿主 AppArmor/seccomp/sysctl、capabilities 或共享网络，结论为诊断证据而非生产修复。
+- 贡献者首反馈循环与门禁口径（issue #723，PR #1427、#1428、#1432 及 #1438 对应文档提交）：CONTRIBUTING 与本地门禁文档补齐路径→lane→耗时指引、smoke 冷热缓存与慢测试归因，aff committed-diff 路径解析保留真实文件名，telemetry 参数传递及 CI 注释口径同步校准。
+- StudioChatPermission 样式拆分（issue #999，PR #1451，属 0.8.5 里程碑提前合入）：权限样式迁至独立 CSS module 并删除到期豁免，组件仅切换 import；既有 UI 验收三状态截图逐字节一致，无视觉或交互变化，本版不重复验收。
+- 里程碑历史归属校准（issue #507）：原生 velites 双安置点的新鲜度维护实际已由 PR #835 在此前版本交付，`v0.8.3..v0.8.4` 不含该问题的新运行时差异；本版仅完成 0.8.4 里程碑对账，不重复声明 PATH 单副本方案或新生产升级 E2E。
+- 测试与 CI 依赖维护（PR #1433、#1443）：orphan reaper 测试断言实际批等待次数并隔离 grace wait，`actions/download-artifact` 升至 8.0.2 且继续按完整 commit SHA 钉版；运行时行为不变。
+
+### 升级注意
+
+- **数据库：** 本版没有 server 代码或新 schema 迁移，当前版本保持 v104；仍建议升级前备份 PostgreSQL。已由 0.8.2/0.8.3 完成 v104 的实例无需额外迁移，回滚使用与目标 schema 匹配的备份。
+- **Host / Worker / velites 顺序：** 必须先升 Host 到 v0.8.4 并确认健康，再逐台升级 Worker 到 worker-v0.8.4，并配套 velites-v0.5.10。Worker 注册/claim 协议保持 v6，`min_protocol_version` 不变；新 Worker 对低于 v6 的旧 Host 仍会在注册握手拒绝，不能把「协议号未变」理解为可以反向先升 Worker。
+- **Worker 资源 envelope：** 默认 256MiB / 128 pids 只适用于 agent≤10、code=0、upload≤4 的已测 envelope；超过任一上限时，升级前必须评审实际内存与线程需求，显式设置 `AGENT_WORKER_MEM_LIMIT` / `AGENT_WORKER_PIDS_LIMIT`（明确无限额为 `0` / `-1`）并设 `AGENT_WORKER_RESOURCE_LIMITS_MODE=explicit`。安装器预检失败会保留旧 compose/.env；不要为绕过启动拒绝而直接删除 guard 或静默降低并发。
+- **一键安装钉版与状态：** `scripts/install-worker.sh` 默认钉到 worker 0.8.4 / velites 0.5.10；重复执行会保留 `worker.yaml`、模型配置、显式资源 limits、控制卷与 pending upload。需等 worker-v0.8.4 镜像与 velites-v0.5.10 三平台 release 产物发布成功后，才能使用默认版本执行一键升级。
+- **frontend 独立版本线：** 本次包含 frontend 窄屏修复与无视觉变化的 CSS 拆分，但不单独发布 npm 包；`frontend/package.json` 与 lockfile 保持 0.4.0-alpha，仓库主版本前进不触发独立组件锁步 bump。
+
+### 已知后续
+
+- **原生 Linux 部署（#1049、#39，milestone #37）：** 两项 issue 均保持 open；原生非 root 专用系统账户、systemd 资源约束、目录/secret 权限、迁移/回滚与真实 Host/Worker 验收尚未完成。PR #1453 只提供诊断工具，stock Ubuntu 24.04 在当前非 root、空 capabilities、不修改宿主 AppArmor/seccomp/sysctl 的边界下结论为 no-go，E2/E5 未触发；targeted AppArmor profile 仍是后续待原生 A/B/R 与真实部署验收的候选方向，不在本版宣称支持或完成。
+
+## [0.8.3] - 2026-10-26
+
+主打批量异步操作控制面与任务中心可用性：批量操作新增暂停、继续、取消及任务中心入口，并修复快速恢复时的漏执行与重复打包；任务中心独立为完整页面，补齐结束卡片迁移与水位停喂提示。job 节点契约新增 `execution_type`，旧 `executor_id` / `executor_kind` 进入弃用窗口；另收口执行徽标与 Studio 风险口径、approval schema 保留、内部产物写入退役及门禁稳定性。
+
+### Added
+
+- 批量异步操作 pause/resume/cancel 控制面（issue #1397）：新增 `POST /workspaces/{id}/job-batch-operations/{op_id}/pause|resume|cancel`，任务中心进行中卡片提供对应操作；pause 接受 pending/running，resume 只接受 paused，cancel 接受 pending/running/paused，其他状态迁移与重复 cancel 返回 409。控制粒度为 chunk 边界：暂停或取消阻止后续 chunk 认领与流式补页，已开始的本 chunk 仍提交逐 job 结果，不回滚既有副作用，也不承诺即时取消单个 job 或中断已开始的打包完成钩。
+- 任务中心独立完整页面（issue #1391）：任务路由移出 workspace 内嵌布局，active 与 archived 视图统一使用 AppShell/AppBar，提供返回当前 workspace 与首页的导航；原 `/workspaces/:id/tasks` URL 与 AuthGate 保持不变。
+
+### Changed
+
+- job 节点执行类型契约 Phase 1（issue #1367，additive）：job 详情与 Studio job detail/context 的节点投影新增 `execution_type: "code" | "agent" | null`，前端执行徽标改读该字段；job 详情的 `executor_id` / `executor_kind` 与 Studio 契约的 `executor_kind` 均标 deprecated，弃用窗口内继续返回。Worker 身份仍读 `worker_id`、Agent 身份仍读 `agent_id`；`execution_type=null` 且 `route_error` 非空表示路由配置错误，不应按旧字段或节点名反推类型。timeline 徽标维持既有展示语义，契约新增不改变其布局。
+
+### Fixed
+
+- 批量操作 pause 后立即 resume 的两处竞态（issue #1397）：旧 feeder 在 pause-wins 后先保存新 buffer、分页 cursor、已发现 total 与可选完成 output，再推进游标和计数，恢复重查不会把其他 job 映射到已记录 seq，关闭漏执行窗口；package 完成 output 在恢复与重放间复用，不再重复执行批级打包。正常 mid-chunk 簿记与取消时的 output 保留语义不变。
+- 任务中心历史视图与停喂状态可见性（issues #1392、#1393）：active→ended 的批次迁移会同步失效 ended 查询，完成卡片无需手动刷新即可出现；run-batch 与 job-batch-op 列表按同一 backlog 快照暴露 `feeding_gate`，卡片明确展示水位停喂原因，流式批量操作在等待水位时也不再被误判为仍在推进。
+- 执行徽标口径族（issues #1365、#1366、#1412）：无 capability 的 start/approval 节点不再在 DAG 或进度 timeline 显示 code chip；自含 agent 节点的执行徽标与卡片标题去重，label 等于 node key 时不再重复，同时保留 capability 元信息。DAG 与 timeline 共用可见执行类型判定，新契约与 legacy 投影一致。
+- Studio 结构风险口径族（issues #1369、#1381、#1402）：变更摘要面板、发布复核框与变更计数 chip 统一按过滤后的结构字段重算风险，混合 execution-only 与 label/text_input 变更降为 info，runtime 等真实结构风险保留 warning，不再直接消费后端聚合风险等级。
+- approval 节点 verdict schema 保留（issue #1410）：Studio 节点类型切换与 YAML 清洗按 schema v104 契约保留 approval `config_schema`，添加审批 verdict 字段及类型往返不再丢配置；破坏性切换提示与后端校验矩阵对齐。
+- 里程碑历史归属校准（issue #495，实际修复 PR #886 / commit `65e951910`）：纯本地 shard 早已统一经 dispatch 判定入口传入 `node_code`，不会误报 EXEC-CODE-002；该 issue 于 2026-10-10 关闭，不在 `v0.8.2..main` 新差异内，本版仅完成 0.8.3 里程碑对账，不重复声明新运行时修复。
+
+### Maintenance
+
+- legacy 产物清单写入 helper 退役（issues #1394、#1407）：测试改用共享 SQL fake 播种 legacy 行，删除 `JobArtifactObjectStore.record_remote` 及剩余旧 API 文档表述；权威产物对象写入与读取路径不变。
+- 架构检查器与 aff 选择收口（issues #1374、#1375、#1376、#1379、#1380、#1385）：frontend emoji 豁免按出现次数钉住；零引用导出检查收窄装饰器豁免并排除 barrel 自引用；嵌套池 checkout 纳入 conn-first 门面调用；未跟踪路径与新增 route 保持 unmapped 并回退 unit 全量，避免 aff 空选择漏跑。
+- 门禁与测试稳定性族（issues #1364、#1368、#1387）：StudioAgentJobNode 补齐退役 executor_kind 值拒绝参数化；WorkspaceMainPage/WorkflowStudioPage 改为等待可观察信号；worktree 撞名竞态测试采用两阶段文件握手与 inode 保活，连续验证后摘除 FLAKY-022 注册条目。
+- 架构文档同步（issues #1377、#1382）：锁域说明对齐 job-mutation 纯全序与 agent-ws 池锁预取，删除退役 orphan-lock 哨兵句；auth failure marker 文档更新为按 execution 隔离的唯一名。
+- tower 嵌套 worktree 兼容（issue #1409）：初始化、清理与派生名护栏识别 `.tower/worktrees/wt-*` 布局，tower 子实例复用父实例 `.env`、数据库与 bucket，测试库按父名与子名派生，避免嵌套实例误派生或互相 TRUNCATE。
+- 前端死导出清理（issue #1408）：删除三组已无消费者的实现与 barrel 重导出，并移除对应零引用豁免和失效体积预算豁免。
+
+### 升级注意
+
+- **数据库：** 本版没有新 schema 迁移，当前版本保持 v104；仍建议升级前备份 PostgreSQL。已由 0.8.2 完成 v104 的实例无需额外迁移，回滚使用与目标 schema 匹配的备份。
+- **`execution_type` 弃用迁移：** 新调用方立即改读 `execution_type`；job 详情的 `executor_id` / `executor_kind` 不再用于判断执行类型，Worker 身份改读 `worker_id`，Agent 身份继续读 `agent_id`。旧 `executor_id` / `executor_kind` 在 Phase 1 仍返回，将在下一完整发布周期的 Phase 2 移除，请勿新增依赖。
+- **批量控制面语义：** pause/resume/cancel 只控制异步批量操作的后续 chunk，不是单 job 即时取消协议；已提交逐 job 变更与审批 decision 不回滚。快速暂停再恢复会保留流式快照与 package output，客户端继续按 operation 状态和逐 job 结果判断完成，不把暂停视为终态。
+- **Host / Worker / velites：** `worker-v0.8.2..main` 的 `worker/`、`shared/`、`velites/` 无差异，本版不发布 worker-v0.8.3；`velites-v0.5.9..main` 的 `velites/` 也无差异，不发布新 velites tag。Host 升到 v0.8.3 后继续使用 worker-v0.8.2 与 velites-v0.5.9，`scripts/install-worker.sh` 默认钉版保持 worker 0.8.2 / velites 0.5.9。
+- **frontend 独立版本线：** 本次包含 frontend 修复但不单独发布 npm 包，`frontend/package.json` 与 lockfile 保持 0.4.0-alpha；仓库主版本前进不触发独立组件锁步 bump。
+
+## [0.8.2] - 2026-10-25
+
+主打批量审批与大批量操作收口、材料内容身份与孤儿回收加固：新增批量通过/终止和失败项重试，批量筛选取消单请求数量上限并改为冻结上界后的流式补页；材料上传引入 create-only 条件写、存量无 hash 材料自动绑定 ETag，材料与 job 产物 GC 按 key 文法重开或收紧删除批；另含分片输入与并行 marker 归属、job 锁序与删除广播、Studio 双通道和日志目录等一批修复。
+
+### Added
+
+- 批量审批与现有多选 UI（issue #1363，schema v104）：新增 `POST /workspaces/{id}/jobs/batch-approve` 与 `POST .../batch-reject`，显式 ids 与 filter 双选择面复用 0.8.1 批量操作框架，小选择同步返回、超过阈值转 202 并由 feeder 执行，任务中心展示逐 job 结果；现有任务列表多选操作区新增「通过」「终止」，本版不新增独立待审批聚合页或键盘快审流。每次成功决策仍逐 job 追加 `approval_decisions` 并记录 batch id、ids/filter 选择形态与 actor；批量 approve 只采用节点 defaults，`required` 且无 default 的门按 `needs_manual_input` 跳过并留在待审，多门 job 按 `multiple_awaiting_gates` 整条跳过，并发/reset 冲突记 `gate_conflict`，rework 不进批量面；approve 会解锁下游，故与 rerun 族同受 workspace backlog 水位约束。
+- 批量操作失败项重试 API（issue #1358）：新增 `POST /workspaces/{id}/job-batch-operations/{op_id}/retry-failed`，终态（completed/failed/cancelled）操作的 failed 项按原 kind 与原参数生成带 `retry_of` 溯源的新 operation，始终异步返回 202，原操作及其结果不被改写；package 表示重打包失败项，pause/resume 因无意义、approve/reject 因必须生成新的批审计身份而明确拒绝，非终态返回 409、不可重试 kind 或无失败项返回 400。
+
+### Changed
+
+- 批量选择流式化并退役单请求数量上限（issue #1362）：删除 `MAX_BATCH_JOBS`、显式 id 列表的 `max_length` 与 `batch_selection_too_large` 422，`AGENT_LEGION_MAX_BATCH_JOBS` 在 0.8.2 仅打 deprecation warning、不再影响行为；filter/failure 大选择只预读阈值+1 条决定同步或异步，操作行冻结原始筛选参数、keyset 上界与有界首 buffer，feeder 每 tick 增量补页而非反复解析全量 id，`items_total` 随发现增长、终态精确。jobs 以 `(created_at,id)`、failure 以 `(finished_at,node_run_id)` 冻结上界，受理后晚到或排序进入上界之前的项不混入；failure 冻结为 entry-sided，已在集中的 job 若 latest failed run 被新 run 取代可从后续页退出。小选择同步快路径不变，在途执行负载仍由 backlog 水位约束；任务中心 pause/cancel 尚无公开控制端点，不把状态机预留当作已交付止损能力。
+- S3 孤儿 GC 材料删除批重开（issue #1314）：inline 文本与 demo seed 改走服务端材料写入 chokepoint（先落无 hash 的 uploading intent 行、再 PUT、再同事务换成 ready 行），所有材料对象从第一个字节起都被行引用；`scripts/gc-s3-jobs.py --apply` 据此删除 v2g 单次使用文法、对象年龄过 max(--grace-hours, 1h 下限)、删除前新鲜反查无行的材料孤儿，旧文法材料孤儿仍只报告；交错决策表见 materials-and-runs-design §6.4.2。
+- DAG 节点类型与执行主体徽标改用现行词汇（issues #1180、#731）：Studio 与 job 详情统一展示 `code` / `agent` 类型，Studio agent 节点可附 runtime（如 `agent·velites`）；执行徽标只显示真实执行主体（worker 短码或不等于 node key 的 agent 身份），删除隐含 code 池键的占位回落，code 节点不再出现双「code」、自含 agent 节点不再重复 node key。job-view 与 Studio MCP 契约的 `executor_kind` 同步收窄为 `"code" | null`，摘除已退役的 pi/openclaw 枚举；lease/容量层内部 code 池键不变。
+
+### Fixed
+
+- 材料 ETag 恢复重绑（`scripts/rebind_material_etags.py`）的 CAS 从 (object_etag, storage_key) 扩为四钉：再钉扫描时的 `upload_generation` 与 `status`（TTL 过期、complete 失败只翻 status，旧 CAS 拦不住）；CAS 落空单列为「竞态失败」报告、退出码 1（issue #1313）。
+- 旧 Worker 材料门禁的入队出口与容量计数（issue #1320）：无在线 v6+ code Worker 时，命中 ETag 门禁的远程 code 节点不再入队——Host 有本地容量则回落本地、自行做 If-Match 核验，纯远程形态保持 pending 且不占 code stock，v6 Worker 上线后自动恢复；已入队的门禁请求在无 v6+ Worker 时也从 stock 排除，避免不可领 backlog 饿死可领请求。每个 job 每进程首次 deferral 记 WARNING，v5-only 车队可据此升级 Worker 或保留 Host 本地产能。
+- 并行 code 节点的分片输入与认证失败 marker 归属（issues #1355、#1356）：Host 本地分片把 `shard_index` / `shard_input` 镜像进节点 SDK runtime，与 Worker 远程路径对齐；`.node_runtime/auth_failure` 改为 `auth_failure-<execution_id>`，SDK 写入、Host 清理/消费与 Worker 读取三侧同按 execution 隔离，邻节点或分片不再互删、错认 marker，手工构造且无 execution_id 的 runtime 保留 legacy 固定名兼容。
+- job-mutation 全域锁序与删除广播身份复核（issues #1346、#1357，含 #1342/#1343 测试补强）：创建、claim、finish、expire/recover 与 sweep 等多 job 路径统一按实际 advisory 锁资源 `(hashtext('job-mutation:' || job_id), job_id)` 的纯全序取锁，不再按 id 文本或 workspace 分桶，关闭 32 位 hash 碰撞别名导致的跨批 AB-BA；claim 批在首个 job-mutation 锁前按实际 key 预取 agent-ws 池锁，保持池锁 → job-mutation 的层级序。删除广播改在同一把 job 锁下复核 jobs 行仍不存在才发出，同源重建已落行则跳过，未重建时 created 事件必在 deleted 之后，客户端不会把新 job 误删；复核或事件 sink 失败不反转已提交删除。
+- 节点日志目录确定性分片（issue #1340）：新日志写入 `logs/jobs/by-job/<sha1(job_id)[:2]>/<job_id>/`，避免长期保留 job 时单目录条目无界增长；#1113 期未分片目录与更早扁平名不搬迁，读取、retention 与 job 删除按 `node_runs.log_path` 和各代命名规则兼容，删除时两代 per-job 目录均可清理。
+- Studio 双通道与草稿校验四处修复（issues #1352、#1353、#1359、#1360）：变更摘要面板与 chip/发布门控同滤 execution-only 行，混合节点只展示结构字段并按结构侧计算风险；顶层 `execution.runtime` 只折入 agent 节点的结构载荷，纯 code workflow 不再被前端误判为结构变更；自动校验对 4xx 确定性拒绝立即终结，仅网络/5xx 走 2s/4s/8s 退避；chat 卡「存为草稿」后的自动校验延迟 400ms 触发，给「未发布变更」瞬态 chip 留下可渲染窗口。
+- worktree 清理中断后的派生库静默收养（issue #1349）：`init-worktree.sh` 在派生名锁内识别「无初始化标记、`.env` 尚未指向自身派生库、但派生库已存在」的新实例并拒绝初始化，避免 clean 在 remove 与 drop 之间被 SIGKILL 后同名实例继承旧库；拒绝时移除本趟从 base 复制且指向 base 资源的 `.env`，既有 `.env` 不删。管理员可用 `scripts/drop-worktree-db.sh <name> --yes` 清理残留后重跑，或核实确需继承后以 `AGENT_LEGION_INIT_ADOPT_EXISTING_DB=1` 显式收养；离线无法探测时维持原有跳过提示。
+- 撞名 `jobs-staging` 前缀的材料孤儿宽限窗（issue #1322）：材料形态 key 在 staging 扫描页内先分流并按材料 `--grace-hours` 判定，`--staging-grace-hours` 只约束真正 staging 对象；staging 窗更长时撞名材料不再从候选与报告中消失，反向情形仍经材料 1h 下限复核，不会提前删除。
+
+### Security
+
+- 材料 presign PUT 引入 create-only 条件写（issue #1321）：材料首发、presign 重试与 repair 重传 URL 把 `If-None-Match: *` 签入 SigV4 SignedHeaders，客户端必须原样携带，首个 PUT 后同 URL 重放/覆盖由存储层返回 412，缺头返回 403；前端网络重试把 412 视为「已上传」，complete 后覆盖在存储层一次性关闭，消费侧 If-Match 降为纵深。Worker 产物 staging PUT 保持原语义，不受此变更影响。
+- 存量无 hash 材料的 ETag 身份绑定（issue #1316）：v98 前完成、`object_etag=''` 的无 hash 材料由新 Host 每次启动时的后台线程按当前 HEAD 一次性绑定（不受 sweeper_enabled / code_capacity 等开关影响；失败只报告、行保持 size-only，不挂起不翻 failed；`scripts/bind_legacy_material_etags.py` 可补跑），绑定 CAS 同条 UPDATE 把 `upload_generation` +1，未绑窗口内写入的 `{id}-v2g{gen}` 缓存地址孤儿化；绑定后升级前签出的 PUT URL 的同尺寸覆盖在 Host 与 v6 Worker 上 412 响亮失败；旧 Worker（< v6）对已绑 ETag 的无 hash 材料**永久门禁**（任务保持 queued、不随时间放行——pre-v6 Worker 命中升级前裸 material_id 缓存时不发 GET 也不核验字节，任何排空期都不能证明其缓存与已绑 ETag 相符），repair 进行中（uploading）的无 hash 行也对旧 Worker 门禁，claim 描述符按同一行快照复判，关闭准入与描述符组装之间的跨事务窗口。
+- legacy 固定 job authority key 退出 GC 删除批（issue #1309）：`scripts/gc-s3-jobs.py --apply` 只删除 #853 起 `jobs/{workspace}/{job}/.v/{32hex attempt}/...` 的一次性版本 key，旧固定 authority key 因同 job 重建窗口无法由一次 fresh revalidate 关闭而仅报告不删除；门禁钉在删除动作上，手工构造报告也不能绕过，staging 回收与 rollback 备份豁免不变。
+
+### Maintenance
+
+- 架构治理检查产品化（issues #1308、#1344、#1354、#732）：新增嵌套池 checkout AST 检查（JobQueries 自 checkout 方法集 + 两层 callee 闭包，注册 DB-POOL-CHECKOUT-001）、前后端零引用导出检查与 frontend emoji 区段检查，均接入不可按 lane 裁剪的 `check_architecture`；存量命中以双向校验、只降不升的显式 allowlist 钉住，执行代次 registry 长文本同步补齐 job 创建锁域与 `lock_job_mutations_sorted`。
+- quick gate 与 nightly 修复（issues #1307、#304、#1331、#1333、#1387）：aff 对空选择显式跳过并提示未跑的 postgres 关联测试，依赖清单变更走全额回落，输出管道保留真实退出码；nightly failure-tracker 补全 needs 并覆盖 cancelled 超时 lane；release train 是否已发布改按 tag/合并状态判定，避免与 main 同版本时漏查 flaky deadline；登记 worktree-collision clean-abort 的 FLAKY-022 以继续追踪。
+- GitHub Actions 依赖更新（PR #1323、#1324、#1325、#1326、#1327）：`docker/login-action` 4.6.0、`docker/setup-buildx-action` 4.4.1、`astral-sh/setup-uv` 10.3.0、`actions/upload-artifact` 7.0.2、`actions/checkout` 7.0.1，继续使用完整 commit SHA 钉版。
+
+### 升级注意
+
+- **数据库：** 升级前备份 PostgreSQL；Host 启动自动执行 schema v104，给 `approval_decisions` 增加 payload 与批审计上下文字段/索引，并把 approve/reject 加入 `job_batch_operations.kind` 约束。迁移只向前，不要把 v104 dump 恢复给旧代码；回滚使用升级前备份。
+- **Host / Worker 顺序与 tag：** 必须先升 Host 到 v0.8.2 并确认健康，再逐台升级 Worker 到 worker-v0.8.2；Worker 协议保持 v6。pre-v6 Worker 对已绑 ETag 或 repair 中的无 hash 材料任务不可领，纯远程且无 v6 Worker 时任务保持 pending、不占 code stock，升级后自动恢复；本版 worker 线包含并行 code 节点 marker 隔离修复，不能用「协议号未变」替代 worker-v0.8.2 发布。
+- **批量选择配置与 API：** `AGENT_LEGION_MAX_BATCH_JOBS` 已失效，设置后只打 deprecation warning，请从部署配置移除；自写客户端不应再依赖 `batch_selection_too_large` 422 或旧显式 id 数量上限，大 filter/failure 操作会按冻结上界流式执行，需用任务句柄和逐 job 结果判断完成与跳过。
+- **对象存储与上传客户端：** 材料 PUT 后端必须支持签名 `If-None-Match: *` 条件写；自写上传/重传客户端必须携带 `-H 'If-None-Match: *'`，缺头 403、同 URL 重放 412，网络重试遇 412 按已上传处理。SeaweedFS 4.45 已实测，RustFS 条件写尚待实测，使用该后端升级前必须先验证；不兼容的后端不能用于本版材料上传。
+- **存量材料绑定与 GC：** 新 Host 启动会自动绑定 v98 前的无 hash 材料 ETag，失败行保持 size-only 并报告，可用 `scripts/bind_legacy_material_etags.py` dry-run → `--apply` 补跑；升级采用停机、单副本 Host，避免新旧 Host 同时在役签发 URL。`scripts/gc-s3-jobs.py` 现在会删除符合门禁的材料孤儿，请先 dry-run 审查删除批再 `--apply`；旧文法材料与 legacy 固定 job authority key 仍只报告。
+- **一键安装与 velites：** `scripts/install-worker.sh` 默认钉到 worker 0.8.2 / velites 0.5.9；`velites/` 自 velites-v0.5.9 无源码差异，本版不发布新 velites tag。
+
+### 已知后续
+
+- RustFS 的签名 `If-None-Match: *` 条件 PUT 尚待实测；在该后端完成验证前，不应把本版材料上传切换到 RustFS。
+
+## [0.8.1] - 2026-10-22
+
+主打 runs-async 里程碑收官与 Studio 运行配置双通道：大批量添加条目与 9 个批量 job 操作改为秒级异步受理，新增任务中心页承载进度卡片、暂停/继续/取消与归档；agent 节点运行配置（provider/model/thinking/prompt/tools/requires_labels）经独立运行通道即改即存、版本化可回滚，不再卷入草稿发布链路；配套 velites 0.5.9 带来单次输出触顶自动续写，并退役 `config.json` 迁移桥（Breaking）；另含 job_id 单射编码、并行 code 节点结果归因、stepper 动态阈值等一批执行面/前端修复与 KaTeX/React Router 安全升级。
+
+### Added
+
+- Studio Inspector 双通道分离（M48，0.8.1 studio-split 里程碑，接 M47 后端）：agent 节点详情新增「运行配置」独立专区（与既有 Inspector 分区同构的中性专区，标题旁挂「运行通道 · 即改即存」小徽标）——provider / model / thinking / prompt（默认随 skill / 自定义双模式）/ tools / requires_labels 一区编辑，tools 与 requires_labels 采用新 chip 编辑器控件（chip + 删除 + 虚线添加按钮，tools 接 per-runtime 工具目录下拉、requires_labels 自由文本 key=value）；独立「保存运行配置」按钮直调运行通道端点，立即生效、不产生新 revision，保存后字段挂「已生效」标记、左下 toast 确认。结构字段编辑（label / capability / skill / execution.runtime / config / 数据契约等）维持草稿 → 发布链路不变，各结构区挂「结构通道 · 发布生效」徽标；execution-only 变更不再点亮顶栏「未发布变更」chip 与画布角标、不解除发布按钮禁用。发布复核框只列结构 diff，runtime 变更以信息条明示去向（已经运行通道单独生效 / 未保存的将随发布写入新版本）。「运行配置」区内置版本历史对话框（时间 / 操作者 / 变更键列表）与逐版本回滚入口（回滚立即生效并追加为新版本）；revision 只读视图下运行配置区整体禁用并给提示横幅。Studio Agent 的 workflow 建议卡按通道分组——「运行配置（N 项）」组「应用并生效」（不产生版本）与「结构变更（N 项）」组「存为草稿」（随发布生效）分别提交、互不影响。
+
+- Studio 任务中心与大批量添加条目异步接线（issue #1157 Phase 3，runs-async 里程碑收官）：workspace 新增 `/workspaces/:id/tasks` 任务中心页与 AppBar「任务」入口（徽标计数 = 进行中 + 排队）——添加条目超过 1000 条自动切 `mode: "async"` 秒级受理（关对话框 + 带「查看进度 →」的受理通知），进度在任务中心以卡片网格呈现（进行中与排队全量置顶、已结束按结束时间倒序 keyset 瀑布流），卡片自洽承载状态 badge、进度条、已处理/新建/跳过计数、耗时与操作（进行中的暂停/继续/取消走 #1117 控制面，终态可归档）；终态卡片可手动归档、结束超过 7 天按查询口径自动归档，「已归档」只读视图标注手动/自动来源，归档记录 90 天由 execution retention sweep 的无条件臂清理（手动按 `archived_at`、自动按 `finished_at` + 7d 窗口）。小批量（≤1000）同步快路径与 Phase 0 兜底完全不变。后端新增 `GET /workspaces/{id}/run-batches`（active/ended/archived 三视图 + `active_count` 徽标计数）与 `POST .../run-batches/{run_id}/archive`（guarded UPDATE，非终态/重复归档 409），两端点纳入 #626 workspace API token 通道；schema v100 新增 `run_batches.archived_at`。卡片数据模型 source-agnostic（`kind: run-batch | job-batch-op`），后续多选批量操作（#946 族）复用同一页面与卡片组件。
+- Runs 异步受理模式（issue #1117，runs-async 里程碑 Phase 2 核心）：`POST /workspaces/{id}/runs` 新增 `mode: "async"`，秒级受理返回 202 与 run + batch 句柄（run id 与同步路径同一确定性 digest，盲重试跨模式幂等），items 的解析/去重/建 job 由新进程内 feeder（`run_batches` 状态行 + `startup_tasks` 托管消费循环，intake queue 同款认领/退避/崩溃回收）按 chunk 滴灌完成，workspace 非终态 job 积压达水位（30000，受 `workflows.max_items_per_run` 钳制）时自动停喂；新增 `POST .../runs/{run_id}/pause|resume|cancel` 控制面（只停喂，已建 job 沿用既有批量操作管理），`GET .../runs/{id}` 详情新增可空 `batch` 进度字段，四个端点均纳入 #626 workspace API token 通道（`API_SCOPE_INTAKE_ROUTE_NAMES` 登记）。schema v99 新增 `run_batches` 表（基础设施状态行，非 #505/#532 Campaign 产品实体）。Studio UI 不变（异步接线归 #1157 Phase 3）。
+- Studio workflow runtime 通道与 agent runtime 配置版本化（M47，schema v102）：新增 `PATCH /workspaces/{id}/workflow-runtime`（runtime 字段直存——节点级 provider/model/thinking/prompt/prompt_mode/tools/requires_labels 与顶层 execution 同类默认键，原地更新 active revision 不产生新 revision，结构差异返回 409 引导走草稿发布通道）、`GET .../workflow-runtime/versions`（版本历史：时间戳/操作者/变更键清单）与 `POST .../workflow-runtime/rollback`（回滚 = 把目标版本切片应用到当前结构后追加为新版本，历史不篡改）；每次有实际变更的 runtime 保存（含草稿发布的 runtime-only 原地臂）追加一条不可变 `workflow_runtime_config_versions` 行作为审计与回滚来源。tools/requires_labels 自此离开草稿结构判定（仅改它们不再产生新 revision，草稿对比也不再报告），dispatch 解析链与在途 job 快照语义不变。前端界面在后续里程碑接入。
+- velites 单次输出触顶自动续写（issue #865）：agent 节点回复触顶（`stopReason=length`）不再按普通停止静默收尾——触顶回复中未执行的 toolCall 从发往模型的历史剔除（Anthropic 缺 signature 的 thinking 块一并剔除，session 镜像与事件流保留原始消息不改写），注入续写提示后在同一 run 内继续：已落盘部分保留、续写轮不占用产物补救轮，连续触顶达 2 次回落原收尾路径，续写轮计入 `max_turns` / `max_tokens` / 墙钟预算。每次触顶在 stderr 留痕（turn 号 + 输出 token 数）；Worker 结果 metadata 新增 `output_truncation {count, last_stop}`，Host 解析落 `agent_execution_requests.outcome_json`，补齐「续写恢复后判 completed」run 的 DB 归因面；触顶归因决策表扩续写形态行（C1-C3），失败分类与 job 日志渲染条目不变。行为变化随 velites 0.5.9 落版生效。
+
+- velites OpenAI 兼容路径的单次输出上限字段按模型方言选择（issue #1093，#952/#1075 follow-up）：models.json 模型条目新增可选键 `outputTokensParam`（`max_tokens` | `max_completion_tokens`，仅 `openai-completions` provider），节点下发 `--max-output-tokens` 时上限写进声明的字段——OpenAI o-series 等推理模型声明 `max_completion_tokens` 后不再因收到 `max_tokens` 被拒。缺省仍发 `max_tokens`，未配置上限时两个字段都不发，存量 registry 与请求形状不变；未知取值或在 `anthropic-messages` provider 上声明非缺省值会让 registry 加载失败（fail-closed，不静默忽略）。旧版 velites 遇到该键会按未知字段拒绝整个 models.json，需先升级 Worker 上的 velites 再写入该键。
+
+- 批量操作的任务中心列表面与归档语义（M61，#946 族收官，schema v103）：新增 `GET /workspaces/{id}/job-batch-operations`（active/ended/archived 三视图，ended/archived keyset 分页按结束时间倒序，`reason_counts` 列表页一次 group-by 不逐行 N+1）与 `POST .../job-batch-operations/{op_id}/archive`（幂等手动归档——重复归档返回现态不报错，与 run_batches 的 409 形态为有意分叉；非终态 409、跨 workspace 404）；`job_batch_operations.archived_at` + 部分索引落地，归档与 retention 复用 #1157 既有 sweeper 路径（7 天自动归档同为查询口径不落列、90 天物理删除、结果子表 FK 级联），不造平行实现。
+
+- 任务中心批量操作卡片与双源混排（M52，#946 前端面）：8 个批量端点的 202 受理接入前端（响应为「同步结果 | 202 句柄」判别联合），受理后改为通知任务中心取代一次性 toast；任务中心卡片网格混排 run-batch 与 job-batch-op 双源（active 进行中倒序 + 排队提交序、ended/archived 按结束倒序，双瀑布流「加载更早」同步推进；AppBar 徽标 = 双源 `active_count` 合并，受理通知按操作类型措辞），卡片自洽承载状态徽标、进度条、计数、逐 job 结果（`/results` keyset 分页对话框）与打包终态的「下载打包」；job-batch-op 卡片的暂停/取消控制面本期不外露（终态操作：逐条结果 / 查看任务 / 归档），reason 词表补 `not_failed` 等中文化。
+
+### Changed
+
+- 批量 job 操作异步化（issue #946，runs-async 里程碑 Phase 4）：9 个批量端点（batch-rerun、rerun-by-failure、DELETE batch、batch-run-to、batch-pause、batch-resume、batch-upgrade-workflow、package、clear-packed）在选择超过 1000 个 job（env `AGENT_LEGION_BATCH_OPS_ASYNC_THRESHOLD` 覆盖、重启生效）时秒级受理返回 202 + 任务句柄，由新进程内 feeder（schema v101 `job_batch_operations` 状态行 + `job_batch_operation_results` 逐 job 结果子表，#1117 同款认领/水位滴灌/崩溃回收）按 chunk 执行；逐 job 结果语义（succeeded/skipped/failed + reason_code）与写前校验纪律不变（chunk 直调同步路径的同一批 service 入口），重放护栏保证崩溃回收不重复执行已记录的 job；新增 `GET /workspaces/{id}/job-batch-operations/{op_id}`（状态 + 计数 + 失败原因分布 + package 产物）与 `.../results`（keyset 分页逐 job 明细）轮询面。小选择保持同步快路径逐字节不变；`MAX_BATCH_JOBS` 20000 上限保留为请求体/误操作护栏。设计见 docs/architecture/batch-ops-async.md；前端进度呈现归后续 UI 切片（原型验收先行）。
+- 批量 job 端点的单请求选择上限从 5000 上调至 20000，并新增 env `AGENT_LEGION_MAX_BATCH_JOBS` 覆盖（重启生效，issue #1348）：原上限是 0.7.16 评审波次的人为护栏（#712/#917）而非性能实测推导，写侧逐 job 一个事务（锁即放）、读侧已按 `CHUNK_ROWS=1000` 分块，均按规模线性扩展；`jobs/package` / `jobs/clear-packed` 共用的 `set_jobs_packed` UPDATE 同步改为按块执行，补齐读侧之外的最后一个未分块写面。线程池占用语义不变（1 请求 1 槽位），大批量操作仍同步等待、无进度反馈，进度展示与后台化归 #946（0.8.1 内后续迭代）。前端 `rerunJobsByFailure` 补上与其他批量端点一致的 `BULK_REQUEST_TIMEOUT` 超时豁免，消除「前端 2 分钟超时误报失败、服务端继续跑」的缺口。
+- 提取共享 JobCreationPipeline（issue #724，runs-async 里程碑 Phase 1）：同步 `/runs`（run_service）与 legacy intake 两条路径（同步 `/job-batches` 与异步 intake queue）此前各自串联同构的创建序列（dedup 探测 → 候选接受 → 节点配置解析 → 版本冻结 → 确定性 run 行 → `create_jobs_bulk` → #501 补偿 → 调度唤醒 → 创建事件 record），语义修正需双写；现序列各阶段收进 `server/app/services/job_creation_pipeline.py` 单一实现，两路径只在「值从哪来」（items vs intake 解析值、新建 vs 已入队 run 行、点查 vs 全量 dedup 探测、ValueError 是否转 400 的 pinned 契约）经参数分叉。#1243 的 job-mutation 锁域语义（整批身份预检、锁内 INSERT 前复核、CREATE_CHUNK_ROWS=250 提交粒度）与 #1255 单射编码仍在 `JobQueries.create_jobs_bulk` 内逐字保留，本重构只做编排归一，无 API/行为变化；新增 `tests/services/test_job_intake_pipeline_equivalence.py` 钉住同输入经同步/异步路径产出等价 job 集合。
+
+- 架构文档现行 / 历史拆分（issue #1103，PR-A，docs）：四份以设计过程为主体的文档移入 `docs/architecture/README.md`「历史设计记录」并抽出现行参考——新增 `materials-and-runs.md`（条目 / 材料 / bundle / text / run 输入模型、start 入口契约、对象存储与物化缓存，并收编 #853 产物版本 key 与直连 URL 固定的现行机制）与 `node-sdk-and-worker-execution.md`（code 节点执行链、运行时契约、SDK API、Worker code 协议、`node_code_max_bytes`），实例设置旧概念治理的现行部分（容量三层、纯控制面模式与健康信号）并入 `backend.md`；`velites-harness.md` 收为现行规格（章节号不变，代码注释 `§N` 引用仍可解析），立项动机、灰度路径、里程碑与开放问题拆入 `velites-harness-design-history.md`；`studio-service-lifecycle.md` 与 `studio-kimi-background-wakeup.md` 合并为 `studio-chat-session-runtime.md`（服务层 + 会话层）。同步 `_CURRENT_DOCS`、索引表、AGENTS.md §6 链接、invariant registry 与各文档互链。
+- 证据矩阵改名与 Worker 部署文档拆分（issue #1103，PR-B，docs）：`workspace-executor-evidence-matrix.md` 改名为 `architecture-evidence-matrix.md`（沿用的「Workspace Executor」是 schema v47 已退役的命名），同步 AGENTS.md §6 两处链接、`tests/scripts/test_evidence_matrix.py` 的 `MATRIX_PATH`、`_CURRENT_DOCS`、索引与各文档引用，`docs-retired-terms.yaml` 追加旧文件名 pattern；`docs/agent-worker-deployment.md` 只保留操作步骤，runtime 声明与准入语义、code 任务 secret 边界、velites 安置与升级设计（#831）、控制面鉴权判定矩阵 / Host 头校验 / `worker-ctrl` 网络隔离、控制台入口与引导判定迁入新现行文档 `docs/architecture/agent-worker.md`；删除已失效的 `route_response_model` 豁免 `server/app/routes/studio_chat.py:session_events`（handler 已迁到 `studio_chat_events.py` 且以 `StreamingResponse` 声明，由协议响应判定自动豁免）。
+- stepper 紧凑形态判定从硬编码节点数阈值（50）改为按实测轨道宽度动态计算（issue #1335，#1124/#1257 follow-up）：ResizeObserver 实测轨道宽度 × 每段最小可辨识像素（2px，gap 归零下限），每段不足 2px 才切紧凑形态——宽轨道下 60–80 节点保持逐段渲染，窄面板下少量节点即切紧凑，宽度变化实时重算；`compactThreshold` prop 保留为显式覆盖，无 ResizeObserver 环境回落旧阈值行为，轨道 CSS 放开 flex-shrink（min-width 96px）使窄面板可真实压缩轨道。评审与合并后红线收口：紧凑判定改 callback ref 挂 ResizeObserver（消费组件空态分支不挂容器 ref，空依赖 mount effect 读到 null 直接 return，数据到达后 observer 永不建、动态判定终身静默失效；改后元素出现/消失时建/销 observer，覆盖空态→有数据迁移）；轨道间距计算收进 `useStepperCompactMode`（两个消费方的 FALLBACK 常量归一），体积预算基线随之登记，未动 ceiling、未新增豁免。
+- Studio Agent 建议卡按通道拆为两张独立卡片（M65，M48 双通道的呈现层收口）：「运行配置变更」卡（runtime 键 diff + 「应用并生效」+ 版本历史入口 + 「已生效 · vN」落定态）与「Workflow 草稿」卡（仅结构变更 + 查看 diff / 应用到编辑器 / 发布新版本，「存为草稿」并入单一主按钮）固定呈现顺序（运行配置卡在前）、分别提交互不影响；发布请求挂起时结构卡给引导条（发布只发结构，不等待 runtime 卡）。落定记录键带 workspaceId 前缀防同 tab 跨 workspace 串扰；每张运行配置卡的 diff 各自相对最新生效基线，连续编辑语义不变。卡片视觉经多轮用户验收返工对齐既有间距/按钮/徽标 token，版本历史对话框查询改 `staleTime: 0`（重开不再展示旧列表）。
+
+### Fixed
+
+- job 删除清理与同源重建的竞态窗口（issue #1083，#1065 follow-up）：`create_job` / `create_jobs_bulk` 此前不取 `job-mutation:<id>` 锁且先 mkdir 再 upsert，同源 job 若在清理「锁下复核行不存在」与「rename 入 `.trash`」之间重建，其采用的目录会被整体移走；现在创建路径在 mkdir / upsert 前取同一把锁并持到提交（bulk 每个 chunk 用一条集合语句按 job_id 升序取完锁，chunk 提交粒度降为 250 行以约束共享锁表占用，即全局批序在单 workspace 上的形态，先于 material/bundle 行锁；取锁前先拒绝撞上其他 workspace 现存 job 的 id 碰撞，保住全局锁序），bulk 的「已存在则不建目录」判定改在锁下按 chunk 重读，不再用无锁的整次预检。
+- `make prod-down docker` / `make stack-host-down` / `make stack-down` 不停 profile 下的本地对象存储容器（issue #1105，#1099 follow-up）：host stack 的 down 此前不带 `--profile`，seaweedfs / rustfs 容器留存、stack 网络移除报 "Resource is still in use"。现三个入口经 Makefile `COMPOSE_HOST_DOWN_PROFILES` 无条件带上 `materials-local` 与 `materials-local-rustfs`（未启动的 profile 服务 down 为 no-op）；刻意不复用 up 侧的 `local-s3-decide.sh --compose-flags`——down 时判定输入（`deploy/.env`、`AGENT_LEGION_LOCAL_S3*`）可能已不同于 up 时，决策失败的退出码也会被命令替换吞掉，都会漏停实际在跑的容器。`tests/scripts/test_stack_down_profiles.py` 以 `make -n` 渲染全部 compose down 入口，并从 compose 文件自身推导 profile 全集断言无遗漏；部署文档 §3/§8 的手动停止临时说明删除。
+- 容器内 `workerctl` 无参数读不到控制令牌（issue #1106，#1099 follow-up）：`--state-dir` 默认值此前是相对路径 `data/agent-worker-service`，镜像 WORKDIR 为 `/app`、状态卷在 `/var/lib/agent-legion-worker-control`，`docker compose exec worker workerctl status` 报「读不到控制令牌」。现 `workerctl` 与 `worker.service` 的 `--state-dir` 默认值同源读 `AGENT_WORKER_STATE_DIR`（与 Makefile 变量同名，未设置/空值回落 `data/agent-worker-service`，解析时求值），Dockerfile worker 阶段设 `ENV AGENT_WORKER_STATE_DIR=/var/lib/agent-legion-worker-control` 并从 `CMD` 去掉重复的 `--state-dir`（ENV 为镜像内唯一来源）；docs/agent-worker-deployment.md 的 `wctl()` 去掉 `--state-dir` 绕行（旧镜像仍需显式传参，文档注明），docs/data-layout.md 同步。回归测试 `tests/workers/test_worker_state_dir_default.py` 钉住 CLI/service 默认值读环境变量、镜像布局下的 `workerctl status` 端到端（单文件副本 + 假控制 API）与 Dockerfile ENV 和 compose 状态卷挂载点一致。
+- 添加条目大批量提交的结果不可见与文案误导（issue #1157，Phase 0 过渡兜底；完整解 = 本条目的 Phase 3 任务中心，见上方 Added）：超过 1000 个条目的创建运行请求豁免客户端 120s 写超时（服务端同步建行耗时随规模增长，客户端中止并不撤销服务端动作，过早超时只会把「仍在处理」误报成失败），对话框对大批量提交显式提示「稍后刷新查看、建议分批提交」；提交超时/网络中断的 toast 改为「暂时没收到结果，请稍后刷新任务列表查看，重提不会重复创建」语义（确定性 run id + 条目 dedup 兜底重试安全）；全量重复的 400 在 toast 可读化为「这 N 个条目都已经有任务了」（`No tasks were resolved from input` 对外机器契约字符串保持不变）；创建运行响应新增 `skipped_count` 跳过计数（已存在 dedup 过滤 + 写入竞态被并发 run 认领），成功 toast 一并告知「M 个条目已有任务，自动跳过」。
+
+- 节点日志跨 job 同名碰撞（issue #1113，#1065 follow-up）：旧扁平名 `logs/jobs/<job_id>-<node_key>[-shard-<i>].log` 在 source_id 与 node_key 都可含连字符时互相覆盖（job `A` 节点 `x-y` 与 job `A-x` 节点 `y` 同写 `A-x-y.log`；`A` 的分片 `x#1` 与 `A-x` 的节点 `shard-1` 同写 `A-x-shard-1.log`），删除侧也无法区分。新命名 `logs/jobs/by-job/<job_id>/<enc(node_key)>[.shard-<i>].log`（`storage_paths.job_node_log_name` 唯一入口，node_key 仅把 `%` `/` `.` 与控制字符转义为 `%XX`、非 ASCII 原样保留，含 `/` 也只占一个文件名分量、不建子目录；文件名超 NAME_MAX 时改用有界的 `<前缀>.<sha256>` 形态），对 (job_id, node_key, shard) 单射；job 删除整目录移走本 job 独占的日志目录。存量扁平名无需迁移：读取侧本就按 `node_runs.log_path` 原样读；删除侧只删删除事务内 node_runs 快照登记过、且文件名等于本行节点 key 旧命名的文件（不再按 job_nodes 节点 key 生成旧名，避免误删兄弟 job 的同名日志）。
+- Studio 草稿对比把仅改 `execution.runtime` 的草稿误判为 `creates_revision=false`（issue #1114，#1104 follow-up）：此前对比侧按自身字段名清单判定、把一切 `execution` 变更当作可原地应用，Inspector 保存条据此提供「应用到运行 / 不产生新版本」，而发布路径把节点有效 runtime 计入结构、实际发布新 revision。现两侧共用同一判定 `revision_structurally_changed`（`workflow_revision_change.py`，`structural_payload` 从 `workflow_revision_runtime.py` 迁入）：节点级或顶层默认 runtime 导致任一节点有效 runtime 变化 → `creates_revision=true`，对比结果在该节点变更字段里标 `runtime`，保存条对其不提供「应用到运行」并提示需发布新版本；仅改 provider / model / thinking / prompt / prompt_mode（含顶层同类默认）仍可原地应用。codex 复审收口（P2）：谓词（`structural_payload` 的 asdict 相等）覆盖、而 `_node_change_fields` 摘要漏报的字段差集为 `tools` / `requires_labels`——仅改这两个字段的草稿此前 `creates_revision=true` 但摘要为空，Studio 从摘要推 `hasCompareChanges` 会静默禁用发布；现摘要与风险映射（warning 档）补齐这两个字段，展示层同步补 `runtime` / `tools` / `requires_labels` 中文标签。
+- Studio Kimi Code 自发回合门在出队边界重新观察 wire 日志（issue #1109，#1029 / PR #1076 follow-up）：一次释放多条暂存消息时，后一条在前一条回合结束后、自身开始前若遇引擎因 task / cron 新开自发回合，此前会被直接送进 ACP、零内容结算且回复不可见。现在每条排队消息的 `before_start` 先推进一次 watcher（并发 step 最多等 5 秒），门开着、已有更早消息被退回或等不到 step 时把消息退回暂存（排在已退回消息之后、新到消息之前，`inbound_pending` 照计、不写提示行）；暂存消息只在 ACP 队列里已无排队消息时整体释放，保持 FIFO。`wake_session` 在发送边界同样重新观察，门开着就释放认领、任务 id 放回游标重试，不吊销令牌。`before_start` 改在工作线程执行，不在 ACP 事件循环里读日志、写库；锁序保持 step_lock → runtime.lock。「引擎已开回合、日志未写」的残余窗口仍属固有。
+- `_shared` 共享材料全量写入在复制构建残留与 rename 前按不跟随链接的身份快照复核（issue #1097，#1068 follow-up）：此前 `shared_dir.is_dir()` 跟随符号链接，`_shared` 已是或在校验后被带外替换为符号链接时，残留复制会递归读取链接目标、`os.rename` 会迁移另一个身份的路径。现父目录在锁内只打开一次（可信锚点），此后全部操作相对该描述符：`_shared` 经 `lstat` 取 `(st_dev, st_ino)` 快照，符号链接/文件直接 fail closed；残留复制改为在 `O_NOFOLLOW` 打开并 `fstat` 比对过的描述符上 `os.fwalk(follow_symlinks=False)`，只复制单链接普通文件（符号链接、FIFO、设备、硬链接一律跳过）；退役 rename 前复核身份、rename 后验证被移走的确为快照目录，不符则移回并 fail closed；staging 目录身份在创建时固定，残留写入经其描述符完成，promote/restore 要求目标不存在且事后验证；清理按身份删除（经固定描述符清空内容、只按名删除已空目录），绝不清空被换入的目录。新增原语模块 `server/app/fs_dir_identity.py` 与 `server/app/fs_dir_moves.py`（SECURITY-PATH-002 补充）。
+- 生产关池与单副本探针解锁的归还被丢弃（issue #1077，#1045 follow-up）：#1045 只在测试边界关池前等待池 worker 排队的 `ReturnConnection` 执行完，生产 lifespan 仍直接 `close_database_pools()`，关池前排队的脏归还回滚会被 `ConnectionPool.close()` 静默丢弃（服务端会话带着事务与快照存活到 GC）；`single_replica_probe.close()` 则在非 autocommit 连接上执行 `pg_advisory_unlock` 后把 INTRANS 连接还池，正好依赖这条异步回滚。现 settle 屏障下沉到 `server/app/db/pool_settle.py`，`pools.close_database_pools` 作为唯一关池 chokepoint 先 settle 本进程的池再关闭（生产 lifespan 与测试边界共用，删除 `tests/postgres_support.py` 的重复实现，逐测试隔离改用 `pools.settle_database_pools`）；探针解锁后立即 commit，连接以 IDLE 归还；lifespan 无法完全 quiesce DB 用户（有界 join、不可中断的 `to_thread` 调用），故 `DatabaseConnection.close` 的归还观测点（`pool_reset.settle_return`）在 `putconn` 前对脏连接同步 rollback，栅栏之后才落地的归还即便任务被丢弃也不再保留事务。池尺寸/回收 env 解析拆到 `pool_sizing.py` 为 `pools.py` 腾出预算（回到常规 ceiling 内，顺带撤销其 `architecture.file_budget` 豁免）。
+- Studio 聊天孤儿投影在「并发恢复注册的 runtime 取锁前已退出」时漏发错误事件与会话快照（issue #1095，#1056 follow-up）：此前代次复检失败直接抛普通 409「resumed concurrently; retry」，行已落 `error` 但当前标签页收不到 SSE 快照、需刷新才出现恢复条；现于该 runtime 锁内裁决——仍是登记且未关闭的代次才回滚并答复重试，代次已消失且行仍带本请求的孤儿戳则补齐事件追加 + 快照发布并返回结构化中断 409，行已被该 runtime 的 on_error 改写或被后续恢复认领时只答结构化 409、不叠加陈旧错误事件；孤儿错误事件的追加在同一原子谓词内钉住 `status=error` 与本请求的孤儿 detail（`append_studio_chat_message_if_live` 新增 `error_detail_is`），后续恢复的新 runtime 失败写回 error 时也不再被叠加。
+- worktree 派生名撞名检测的检查到建/删区间加锁（issue #1084，#950 follow-up）：此前撞名检测是一次性前置检查，`drop-worktree-db.sh` 停在交互确认时另一进程可建好并初始化派生名相同的新 worktree，确认后照删新 worktree 正在用的库。现 `init-worktree.sh` / `clean-worktree.sh` / `drop-worktree-db.sh` 共用 git common dir 下的机器级锁 `worktree-derived-names.lock`（`scripts/worktree-names-lib.sh`，沿用 gate-queue 的无 flock 原子发布准入，pid 判死回收 SIGKILL 残留），clean 从移除 worktree 前持锁到删完派生库与 bucket；交互确认一律在取锁之前（持锁等用户输入会卡住别的 init），取锁后重验目标身份（HEAD/分支/.git 指纹，确认/等锁窗口内同名重建即拒绝）、重做撞名检查（删除前同名注册条目也算冲突）并重新探测实际存在的库与 bucket（锁前 probe 仅用于确认展示）；探测/指纹采集失败一律 fail-closed 中止（「查询失败」不等于「不存在」，stat 按 BSD/GNU 方言分流）；锁按登记的共同执行者判活——父进程被 SIGKILL 后，借用锁的嵌套 drop 与后台 bucket delete 子进程仍持有锁，竞争者不得与孤儿执行者并发。顺带修复 clean 的 bucket 交互确认：python heredoc 的 stdin 已是 EOF，`input()` 必抛 EOFError，无 `--yes` 时 bucket 步骤此前只会降级跳过，现确认挪到 bash 侧（probe → 确认 → 持锁 delete 两阶段）。
+- execution retention sweep 的 run_dir 共享认领双形态（issue #1315）：其一，worker agent 节点 token 目录固定名（`runs/<node>/worker`）使 finish 的 derive-at-finish 把同一目录写回多个 node_runs 行，过期行经非空分支 rmtree 共享目录、当前 run 的 events.jsonl 灭失——确立「一个磁盘目录同一时刻至多被一个 node_runs 行拥有」不变量：finish_lease 写 run_dir 时同事务缴清同目录其他行的认领（crash 回滚不留零认领窗口，stale 代次 finish 同样适用），sweep 删除非空 run_dir 前查共享认领、有则缴清行不删目录。其二，共享认领守卫的「存在任一其他认领者」判据与 per-chunk 批缴清叠加时，同 chunk 两条过期共享认领行会被双双缴清（缴清未 flush 互不可见）、游标越过后永不重访 → 目录永久泄漏；判据改为与 sweep 同一 (finished_at, id) 升序的「存在更新认领者」，较新者恒未被缴清、对 flush 滞后免疫。
+- job_id 改为单射转义编码，根因收口跨 workspace 碰撞（issue #1255，PR #1243 R5 揭示的死锁窗口）：旧形态把允许含下划线的 workspace / workflow_key / source_id 用裸下划线直接拼接（source 还把 `/` 归一为 `_`），映射非单射——workspace `a` + source `a_a_z` 与 workspace `a_a` + source `z` 同码，批量创建可能把别 workspace 的 job 行纳入锁集合，与批处理路径形成 AB-BA 死锁窗口。新编码段内 `~` 转义（`~`→`~~`、`_`→`~u`、`/`→`~s`）、段间裸 `_` 连接，编码对 (workspace, workflow, source_id) 为双射（`server/app/jobs/job_id_encoding.py`；更直观的 `_→__` 加倍方案在段边界非单射，反例钉死在模块 docstring）。存量兼容：旧 id 作为不透明主键原样可读（全仓无消费方把 id 解析回段），去重探测走 (source_type, source_id) 列而非重算 id，仅新建 job 用新编码，跨时代 id 巧合碰撞仍由既有身份检查捕获为结构化错误；无 `_` / `/` / `~` 的段保持旧拼写。行为变化（有意）：source 归一碰撞（`col/a` vs `col_a`）不再拒绝，两者是不同合法 job。postgres 层同族字面量断言跟随修正（#1347）。
+- skill `_shared` staging 写入走固定描述符 O_NOFOLLOW，promote 前拒绝树内符号链接（issue #1254，#1242 codex R3 P1 根治）：`fs_safety` 新增 `write_text_at` / `write_tree_at`——从 pinned staging 描述符逐组件 `open_dir_beneath` 建目录、`O_EXCL|O_NOFOLLOW` 建文件，mkdir→write 之间子目录被换成 symlink 时写入 fail closed、不再被重定向到树外；`fs_dir_moves` 新增 `require_no_symlink_entries`，promote 前在固定 staging fd 上 `fwalk(follow_symlinks=False)` 拒绝任何符号链接条目（纵深防御）；staging fd 贯穿 payload 写入与 swap 全程。
+- 并行 code 节点结果归因错配（issue #1311）：job_dir 是 per-job 共享目录，本地 code 池并行节点（及同节点多 shard）共用固定名 `.custom_node_result.json`——邻节点子进程的结果写入、父进程的开跑 unlink 与收尾清理互相覆盖，失败节点的 error_message 会被同时完成的健康节点父进程读走（0.8.0 验收实测：扇出中实际成功的节点被记为 failed、error_message 与失败邻节点逐字相同，下游 53 节点被错误阻断）；结果文件改按 execution_id（per-claim uuid）命名，跨节点/分片/重试唯一。同族普查收口：`artifact_restore` 恢复被逐出输入的临时文件从固定 `<name>.part` 改为 pid+id(target) 唯一名，并行节点恢复同一输入时互相截断/误移的窗口关闭；`.node_runtime/auth_failure` marker 同为共享固定名的同族遗留已单独立项。
+- Studio agent 发布请求管道双通道对齐（M49，M48 评审漏网 + 本分支回归）：① 通道死端——agent 对 tools/requires_labels-only 草稿发起发布请求时 compare 摘要为空（M47 起这些字段不进 compare），复核框确认按钮以 compare 摘要为门禁被永久禁用、用户只剩取消；确认门禁收口到「结构 diff 或待生效 runtime 键任一即可确认」（后端确认端点本就按 runtime-only 原地生效 + 追加配置版本处理），runtime-only 形态下复核框文案改「无结构变更，本次只保存运行配置 / 确认后立即生效并追加配置版本，不创建新 revision」。② 会话内连续编辑串行化——保存/回滚的在途守卫从 useState 快照改 ref（同帧双击/双入口同帧触发会穿透 state 守卫连发 PATCH），并补上 rollback 漏掉的 finally 复位（此前任意一次回滚后整会话运行通道静默锁死：保存/再回滚均 return false，无请求无 toast）。
+- Studio 草稿保存链路（issue #1196 三项补齐）：① 草稿卡「与编辑器不一致」提示的单帧假 settled——状态推进与画布写入错开的一帧提示被误隐藏；草稿身份判据收口到 `savedIdentityConfirms`，在语义 hash 之外额外要求编辑器内容逐字节等于 lastPersisted（两者同快照原子成对），hydrate 换基线而未给身份时清除旧 hash；revision 查看模式下 stale 提示的比较对象改为保存状态机跟踪的草稿（`studio.draftYaml`）。② 前后端草稿空白判据对齐——后端 `_not_blank` 用 Python `str.strip()`（空白集含 `\x85`/`\x1c`-`\x1f`，JS `trim()` 不剥），只含这些字符的画布被前端判成非空白发出 PUT、服务端确定性 422；新增 `isBlankDraftYaml` 谓词（判空集 ⊇ 后端判空集），自动保存调度与 forceSave 护栏统一接入，后端行为不变。③ 草稿保存 4xx 终态不退避重试已于 0.8.0 窗口落地，本次刷新注释口径。
+- 0.8.1 合并窗口的 main 红热修（M54/M55/M59/M64）：M61 新增的 `POST .../job-batch-operations/{op_id}/archive` 补挂 `reject_studio_agent_scope` scoped-token 拒绝依赖并登记写端点注册表（`_EFFECTING_WRITE_ROUTES`）——此前端点实际缺守卫且机械盘点测试红；M47 的 `PATCH /workflow-runtime` 与 `POST /workflow-runtime/rollback` 同样补登记（均挂 scoped-token 拒绝依赖但未入清单）；任务中心归档边界测试改执行时点读钟（CI xdist 的 collection→execution 漂移把模块 import 时冻结的边界样本推出 7 天窗口），日历渲染测试钉 TZ 并改用本地时区原语构造样本（vitest `--pool=threads` 的 worker_threads 内 `process.env` 是快照副本、`vi.stubEnv('TZ')` 不触达进程级 tzset）。
+
+### Removed
+
+- **Breaking (velites):** 移除 `~/.velites/config.json` 迁移桥（issue #1102，#602 deprecation 的收尾）：删除 `velites/src/config.rs` 与 lib.rs 的 gateway 兜底分支，velites 不再读取 `~/.velites/config.json` 与 `VELITES_BASE_URL` / `VELITES_API_KEY` env；`~/.velites/models.json`（或 `VELITES_MODELS_PATH`）成为唯一 provider 凭据来源，没有 registry 时 `gateway` / `openai_compat` 直调与其他 provider 一样以退出码 2 报错，错误信息给出 registry 路径并指向 `velites-model-registry.md` 的 0.1.x 迁移节。Worker 模型发现本就只读 `models.json`，经 Worker 领取的任务不受影响。**升级注意：** 仍靠旧文件或这两个 env 直调 velites 的环境，升级到包含本改动的 velites 版本前先按迁移节写好 `models.json`；随 velites 0.5.9 落版发布，该版 release notes 已在「升级注意」组标 Breaking。
+
+### Security
+
+- KaTeX 0.17.0 → 0.18.10 与 React Router 6.30.x → 7.18.4 安全升级（issues #1329、#1330，0.8.0「已知后续」两项收官）：修复 GHSA-238p-pmpm-9mq7（KaTeX，低严重度且以原型污染为前提）与 GHSA-337j-9hxr-rhxg / GHSA-wrjc-x8rr-h8h6（React Router SSR hydration constructor injection 与 `<Link>`/`useNavigate` backslash 开放重定向——SSR 项本不适用于当前 Declarative Mode，开放重定向项随升级消除）。KaTeX 定向 0.18 线不跳 0.19（0.18.0 的 CSS class prefix breaking 经全仓核对无命中：无自定义 CSS/DOMPurify allowlist 依赖内部类，根类 `.katex` 不变）；React Router 走 Declarative Mode major 迁移，v7 已成默认的 future flags（`v7_startTransition` / `v7_relativeSplatPath`）从入口与测试删除，Link/useNavigate 目标全量盘点均为内部路径。
+
+### Maintenance
+
+- 治理守卫 `shell_var_boundary` 补齐三处罕见形态（issue #1096，#1060 follow-up；开发者面，无运行时行为变化）：① 算术帧外的全数字 heredoc 分隔符（`cat <<123`，含 `let x<<2` 这类 bash 同样按 heredoc 解析的写法）登记为 heredoc，正文按 heredoc 判定——此前正文被当普通代码、正文中 `'$X，'` 的单引号被误当保护而漏报；`$((1<<2))` / `((x<<=1))` 等算术移位仍由 arith 帧排除。② Makefile 非 recipe 行（赋值）里的引号只是 make 普通字符，值经 `$(VAR)` 粘进 recipe 后的 shell 引号未知，改为对其中每个 `$$NAME` 保守判定（`MSG = '$$X，'` 不再漏报，`$$$$X` / `$(X)` 仍不报）；判定前按 make 语义剥离行尾注释（引用外未转义的 `#`，`define` 体内除外），注释里的 `$$X，` 不误报（拆出 `scripts/architecture/make_values.py`）。③ 算术帧内的 `((` 只是分组括号，不再按 `((…))` 命令开新帧——`$(( ((1+2)*3) ))` 不再回落逐行多报。全仓 tracked shell 源与 Makefile 零新增命中。
+- 0.8.1 评审 follow-up sweep 批次（#1247/#1248/#1250/#1251/#1252/#1253/#1336/#1337/#1338/#1339/#1341，M56）：`delete_refs_for_job` 的 DELETE 携带 `not exists (jobs)` 条件（同源重建占用同 id 时 refs 归新 job，按裸 id 的删除单语句原子跳过，FK 保证无先查后删窗口）；init-worktree 默认基准选择的 awk 不再提前 exit、两处 `| head -1` 换读完输入的 `awk 'NR==1'`（worktree 多到 porcelain 输出超管道缓冲时上游 SIGPIPE、pipefail 下 141 静默退出，#1145 同族）；派生名锁判活补 zombie / pid 复用识别（holder 发布时写入 `ps -o lstart=` 启动时间，ps 读不到自身启动时间即拒绝取锁）；make 注释剥离的引用跟踪从 depth 计数改开括号类型栈（函数实参里的字面异类闭合符不再提前终止引用导致漏报）；ops 文档 .env 追加守卫收紧（写入键须被 grep 模式覆盖、未匹配分支区分 rc=1 与读失败、rc 捕获/比较须紧随 grep），materials 文档 S3 凭据片段同步为「读失败中止」结构；关池竞态测试去固定 0.3s 定时器改内部释放 gate（屏障失效必红，已变异验证）；compose down profile 测试容忍 `!reset`/`!override` 本地标签；velites-harness §5/§7、node-sdk-and-worker-execution §2 runtime 键三类清单、Agent catalog docstring legacy 例外、agent-worker.md code 协议链接等现行文档口径校准。
+- 过时 docstring 更正与 ops 文档守卫加固（#1110、#1115，开发者面，无运行时行为变化）：v5 心跳回退与 agent 执行档案的 docstring 按现行语义更正（v5 Worker 遇 pre-v5 Host 注册握手即 exit 2；EXEC-AGENT-PROFILE-001 节点档案为准）；read-before-write 判定器补三处漏报（CORS 放行集合逐项白名单、`.env` 追加须在未匹配分支、rc 检查须命中即中止）。
+
+### 升级注意
+
+- **数据库：** 升级前备份 PostgreSQL；Host 启动会自动按序执行 v99–v103，包括 `run_batches` 表与其 `archived_at` 列、`job_batch_operations` + 逐 job 结果子表、`workflow_runtime_config_versions` 版本表。迁移只向前，不要把 v103 dump 恢复给旧代码；需要回滚时使用升级前备份。
+- **Host / Worker 顺序：** 必须先升 Host 到 v0.8.1 并确认健康，再逐台升级 Worker 到 worker-v0.8.1。Worker 协议保持 v6（`min_protocol_version` 不变），滚动窗口内旧 Worker 可继续领取普通任务，无新增领取门禁。
+- **velites 0.5.9（含 Breaking）：** 本版配套 velites-v0.5.9，`scripts/install-worker.sh` 的 `VELITES_VERSION` 默认已钉 0.5.9。行为变化：#865 触顶自动续写（见 Added）；**Breaking：** #1102 起 velites 不再读取 `~/.velites/config.json` 与 `VELITES_BASE_URL` / `VELITES_API_KEY` env，`~/.velites/models.json` 成为唯一 provider 凭据来源——仍靠旧文件或这两个 env 直调 velites 的环境，升级前先按 `velites-model-registry.md` 的 0.1.x 迁移节写好 `models.json`；#1093 的 `outputTokensParam` 键会被 0.5.9 之前的 velites 按未知字段拒绝，先升级 Worker 上的 velites 再写入该键。
+- **一键安装钉版：** `scripts/install-worker.sh` 的默认版本钉到 worker 0.8.1 / velites 0.5.9；一键安装文档默认从 `main` 拉脚本，依赖本钉版保持默认最新。
+
+### 已知后续
+
+- #1356：Host 本地路径不下发 `shard_index` / `shard_input` runtime 键（仅 Worker 注入；Host 侧分片身份经 expected_outputs 文件名区分），如需 Host 侧补齐见该 issue。
+- 并行 code 节点同族遗留：`.node_runtime/auth_failure` marker 为共享固定名（写侧在 `workspace_libs/node_sdk.py`），已单独立项跟进（见 #1311 条目）。
+
+## [0.8.0] - 2026-10-19
+
+主打 Studio 长会话与草稿协作、材料内容身份与 Worker 容量治理：长对话单行合并与历史分页、会话自动恢复、草稿代次 CAS 与发布单一权威；材料上传代次和 ETag 全链核验（Worker 协议 v6）；Worker 节点级并发上限与一批执行面/UI 稳定性修复。
+
+### Added
+
+- Worker 节点级并发上限（issue #1158，schema v94）：Worker 控制台新增 `node_concurrency_limits {node_key: N}`，按「本机 × 裸 node_key」限制 agent 与 code 执行数，随下一次 claim 热同步，无需重启或重注册；空配置保持不限，跨 workspace 同名节点按机器资源语义保守合并计数。Host 批读预过滤、批内预留与写相权威复核共同避免队头饿死；code 节点同时受 workspace 全局节点上限与本机上限约束。
+- Studio Chat 长历史分页与持续校准（issues #1120、#1236、#1265、#1270 及后续时序族）：messages 接口新增 `before_seq` / `has_more`，并提供按消息 id 点读；前端支持滚动到顶部加载更早消息、滚动锚定补偿、未溢出短会话主动补拉与失败重试。跨会话迟到分页、SSE 全量校准与窗口外原地更新行统一受代次和快照守卫，点读冲突后会再收口一次，历史不再被最新 500 行窗口截断，也不长期停留在工具调用中间态。
+- 子代理保存草稿也出草稿卡（issue #1123，schema v95）：Agent/AgentSwarm 保存 workflow 或节点代码草稿的成功路径由后端补写合成 `draft` 时间线消息，前端与主 agent 的工具事件按实体去重，用户可直接在对话内查看、应用或进入发布流程；写面绑定会话 token、runtime 代次、草稿代次与归档状态，迟到或越权事件不会落到别的会话。
+- Studio MCP 翻页与大面板文件入口（issues #1261、#1272）：`list_jobs` 透传 `cursor` 并返回 `next_cursor`，超过单页 limit 的 job 可用于诊断；`save_preview_panel_draft` 新增 `html_path`，`get_preview_panel` 新增 `output_path` 导出，沿用暂存目录授权、链接拒绝和 256 KiB 上限，大 HTML 不必再逐字内联进工具参数。
+- 材料恢复工具（issue #1279）：`scripts/request_material_reupload.py` 把 ETag 失配的原 material_id 翻回 uploading、推进代次并轮换 key，签发受代次保护的一小时重传 URL，重传后历史 job/bundle 引用随原 id 愈合；`scripts/rebind_material_etags.py` 用于 S3 快照恢复后的 ETag 重绑，默认 dry-run，逐行核验 size/hash 后才 CAS 更新，无法核验的行只报告并以非零码退出。
+- 超多节点 stepper 紧凑形态（issues #1124、#1257）：节点数超过 50 时改为 `current/total` 数字进度与细进度条，避免分段条被 flex gap 压塌；50 节点以内保留原视觉，DAG 与 job 列表共用紧凑组件。
+
+### Changed
+
+- **Breaking (API/behavior):** Studio workflow 草稿 CAS 从时间戳改为代次（issue #1221，schema v96）：草稿读取、保存与 409 冲突响应携带 `generation`，PUT 的 `expected_updated_at` 改为 `base_generation`；Studio-agent `save_workflow_draft` 必填代次，人侧 PUT 省略时仍保留无 CAS 的 legacy last-write-wins 兼容路径，因此旧 `expected_updated_at` 不再构成冲突保护。每次保存与发布都推进代次；发布成功在同一事务删除草稿行并推进代次，发布前在途写不能复活已删草稿，所有 tab 最终以新 revision 为唯一权威，语义等价的旁观画布不再误报 dirty。发布成功后若要按草稿做 quality replay，需要先重新编辑生成草稿。
+- 材料 presign / complete 引入上传代次与单次使用 key（issues #1119、#1267、#1269，schema v97）：新对象 key 采用 `{workspace}/{hash|id}/v2g{generation}/m_{material_id}/{filename}`，每次 presign 重试在行锁内推进代次并换 key，旧 PUT URL 随之失效；`MaterialRecord` 新增 `upload_generation`，complete 可携带 `expected_upload_generation`，错代次在任何对象 I/O 前返回 409 且不改行，旧的无 body complete 调用仍兼容。filename 拒绝以 `/` 结尾、空段、`.`/`..` 段、反斜杠与控制字符，非空 content_hash 必须是 64 位小写 sha256；并发删除/TTL 回收下的 presign 重试由断言改为 404。
+- Worker 协议升级到 v6（issue #1279）：claim 材料描述符增量携带 `object_etag` 与 `upload_generation`，v6 Worker 下载时附加 `If-Match`，无 hash 缓存地址纳入代次；Host 对 pre-v6 Worker 跳过「无 hash 且 ETag 已绑」的材料候选，任务留队列而非失败，hash 行与 `etag=''` 行不受门禁。`min_protocol_version` 仍为 1，正常升级不需要调整。
+- Studio Chat 会话层无感续期（issue #1121）：scoped token TTL 从 2 小时调整为 24 小时、续期阈值从 30 分钟调整为 4 小时；发送前先检查活性，死 token 在 per-session 临界区内自动 resume、铸新 token 并重建 runtime，成功后才把消息入库发送，并发发送只恢复一次。自动恢复期间显示轻量状态，失败时保留输入草稿与手动「继续对话」入口；过期 token 本身不复活，会话关闭吊销和效应端点权限约束不变。
+
+### Fixed
+
+- Studio 发布请求 confirming 状态 300s 超时误回收（issue #464）：confirm 执行期（门禁 → before/after 探测 → publish → resolve 全程，含失败回滚分支）由守护线程按 CONFIRMING_STALE_SECONDS/5（60s）周期续租 claimed_at，谓词骑在 UPDATE 上（status='confirming'，失配 rowcount=0 即停跳），慢发布不再被轮询侧的 stale-confirming 谓词误改成 expired；无心跳的死进程行仍按原谓词被清扫为 expired（owner-liveness 语义，非豁免）。心跳线程启动失败（进程线程上限等）同样走回滚路径：claim 已提交的 confirming 行退回 pending，不再滞留 300s 等清扫（#1256 codex P2）。
+- Studio Agent 注册表 PUT 陈旧快照冲突检查（issue #355）：管理员基于旧快照编辑期间若启动探测或「重新检测」先提交，整份 PUT 会静默删除新探测到的 detected 行。GET 响应现携带注册表内容版本 `revision`（存储文档 canonical JSON 的 sha256 前缀；版本输入只含 agents 与显式存储的 api_base——未配置时按进程实际地址推导的 api_base（#915）不参与，重启/换端口不会产生假陈旧），PUT 带上该版本后服务端在 `SELECT ... FOR UPDATE` 同一事务内比对，不匹配返回 409 且 detail 携带当前注册表（#719 错误形态）；前端弹确认对话框，「刷新注册表」直接采用 409 detail 携带的最新文档一次性前进编辑器（invalidate 重取进不了已挂载编辑器，否则会 409 死循环），不自动重试；省略 `revision` 的调用保持原整份替换语义（smoke 脚本已改为携带 GET 到的 revision）。
+- Studio Chat 长对话内存与历史可用性（issue #1120）：同一 `toolCallId` 的流式更新由逐快照新增行改为原地合并单行，避免数据库行数、前端消息拷贝与最新窗口被工具更新乘法放大；runtime 重建后的归属缺失退化为新增行而不丢数据。工具卡默认只渲染前 4000 字符并可二次展开完整输出，视图派生按消息缓存增量归并，未变消息与动作回调保持引用稳定，流式 chunk 不再穿透整表 memo。
+- `.gz` 产物 raw Range 请求恢复浏览器预览（issues #1259、#1274）：带 Range 的 gzip 对象改按解压字节口径返回 206 流式区间或 416，Content-Range 使用解压长度；不支持的多区间/后缀区间或长度未知时回退全量解压 200，无 Range 的既有 gzip 透传不变。raw 与 external artifacts 的 OpenAPI 均补齐 416 声明。
+- legacy agent 节点执行投影与路由漂移一致化（issue #1128）：job 详情与 Studio MCP 复用 dispatch 的路由裁决，Agent 归档或 capability 变更后返回 `route_error`，不再一面判配置失败、一面显示正常；Worker 路由缓存命中也会重新裁决漂移，缓存键纳入冻结 capability，避免 TTL 内旧路由或跨 capability 污染。`route_error` 已进入 API/MCP，前端专门展示尚未做。
+- Studio 节点编辑与发布稳定性（issues #405、#1122、#1221）：approval 切出时 capability 在同一提交补齐，upstream 只统计真实入边；异常草稿的数组/边集/skill 字段统一归一化，类型切换、检查器与画布不再因原型链键或畸形形状误判。发布代次、空态重取、会话上下文与草稿卡统一按同一代次判定，修复 Agent 发布后 dirty 永真及尾随保存复活草稿等收敛问题。
+- 任务进度与会话 UI（issues #1127、#1129、#1275、#1277、#1292、#1294）：归档/删除确认改为标题下方的行内展开，不再用警告卡替换整行；退役的「Workflow Key」文案从创建与发布对话框移除。active node 统一按 running → failed → awaiting_approval → ready 等执行口径解析，同优先级按 id 决胜，列表行、节点筛选、facet 与紧凑 stepper 不再各自显示不同的当前节点。
+- 数据库小池形态的嵌套 checkout（issue #1239）：token usage capture 改为顺序读写连接，blocked-queue 诊断改为先骑调用方连接采样、释放后再落库；`AGENT_LEGION_DB_POOL_MAX_SIZE=1` 时不再因二次取连接等待 10 秒，usage 行不再静默丢失，诊断也不会把 PoolTimeout 传播进 claim 响应。
+- 材料孤儿扫描与命名边界（issues #1269、#1285、#1287、#1295）：`gc-s3-jobs.py` 覆盖 bucket 根材料前缀并分页扫描，`.rollback` 豁免收窄到 jobs 前缀，撞名 `jobs` / `jobs-staging` workspace 的材料形态 key 会被分流而非误并入 job 产物；complete 的 ready 幂等快路也移到代次检查之后。鉴于 key 复用和 PUT→行发布窗口，材料孤儿当前只扫描报告、不进入删除批，job 产物 GC 保持既有路径。
+
+### Security
+
+- 无 hash 材料建立 ETag 内容身份与消费核验链（issue #1279，schema v98）：complete 的 HEAD ETag 与 ready 原子落 `materials.object_etag`，inline 文本和 demo seed 同样记录，空 ETag 直接 fail-closed；complete 的 sha256 流读绑定 HEAD ETag，Host 单材料/bundle/分片物化与 Worker 下载在 cache miss 时用 `If-Match` 把所取字节绑定到该身份，complete 后同尺寸覆盖会以 412 / MaterializeError 暴露而非静默消费。无 hash 缓存地址包含上传代次，repair 后旧缓存不会复活。v98 前完成的 `object_etag=''` 存量行仍维持 size-only，身份建立由 #1316 跟进，残留边界见升级注意。
+- mcp 定向升级 1.29.0 → 1.30.0（CVE-2026-59951 / GHSA-84m7-p3x7-pcfv）：修复默认 stateful Streamable HTTP 会话无限积累导致的内存耗尽——本应用以默认 FastMCP + `streamable_http_app()` 提供 Studio MCP HTTP 面，scoped Bearer 守卫只减少匿名暴露，持有效 token 者仍可无限开会话，故不豁免。约束保持 `>=1.12,<2`；上游 1.30 另含 30 分钟空闲会话过期与 10k 会话上限、同源 redirect 与 OAuth issuer 校验（server 未使用 OAuth client/AuthSettings），pinned internals 注释（server 与测试共 5 处）同步到 1.30。
+- DOMPurify 升级 3.4.13 → 3.4.17（两项 XSS 公告，均要求 `IN_PLACE` 模式）：纯 lockfile 升级，manifest 约束 `^3.4.13` 不变；本应用传入字符串、未设 `IN_PLACE`，`afterSanitizeAttributes` hook 只改/删属性不移除节点，当前形态不满足已公告触发链，升级为不保留已知漏洞版本。
+
+### Maintenance
+
+- 测试与内部结构治理（issue #1118、PR #1310 等）：Studio empty-turn 宽限测试改为事件驱动，消除真实 50ms 竞速；token usage 数据访问收进 JobQueries 门面；`shared/pi_events.py` 扫描逻辑与 Worker stderr 证据模块拆分并回收已关闭锚点的预算豁免。运行时契约不变。
+- 退役已修复/已稳定的 flaky registry 条目（#1150 nightly 门禁治理）：FLAKY-016 已由 `6c05d19f2` 的 `lost_armed` 定向修复消除「never reached running」竞态（测试已迁至 `tests/workers/test_execution_run_handoff.py`）；FLAKY-017 根因（关池丢弃排队 rollback 导致后续 TRUNCATE 30s lock timeout）已由 #1078 修复；FLAKY-018 在 #1151 将 CI postgres 钉 `-n1` 后两轮完整 backend CI 的 rerun 汇总为 0。FLAKY-016/017 的旧 nodeid 已随测试文件迁移失效；FLAKY-018 的 nodeid 仍在现行代码（`tests/routes/test_agent_workers.py`）中、条目删除后复发即成为 unregistered rerun 硬失败，比继续吸收更能强制根因治理。
+- 部署与恢复文档同步材料 v6 协议、单次使用 key、ETag 后端契约、行级重传与 S3 恢复重绑步骤；对象存储后端必须提供非空 HEAD ETag 与单 GET 原子快照，支持矩阵内 AWS S3 / MinIO / SeaweedFS 已核对。
+
+### 升级注意
+
+- **数据库：** 升级前备份 PostgreSQL；Host 启动会自动按序执行 v94–v98，包括 Worker 节点上限列、聊天 draft kind、草稿代次表、材料上传代次列与材料 ETag 列。迁移只向前，不要把 v98 dump 恢复给旧代码；需要回滚时使用升级前备份，并按 runbook 配套处理 Host 与 Worker。
+- **Host / Worker 顺序：** 必须先升 Host 到 v0.8.0 并确认健康，再逐台升级 Worker 到 worker-v0.8.0。新 Worker 对旧 Host 会因 `host_protocol_version` 低于自身 v6 而 exit 2；Host 先升期间旧 Worker 仍可处理普通任务，但已绑 ETag 的无 hash 材料任务只能由 v6 Worker 领取，在仅有旧 Worker 时会保持 queued，升级后自动可领，不需要手工 drain 或调高 `min_protocol_version`。
+- **草稿 API 迁移：** 自写调用方把 `PUT /api/workspaces/{workspace_id}/workflow-draft` 与 `/api/studio-agent/tools/workspaces/{workspace_id}/workflow/draft` 的 CAS 字段从 `expected_updated_at` 改为最近一次 GET/409 返回的 `generation`，作为 `base_generation` 回传；Studio-agent 缺字段返回 422，人侧只发旧字段会落到无 CAS 的兼容路径。发布成功后草稿行不再保留，依赖发布后草稿回放的流程需先重新编辑。
+- **材料上传客户端：** presign 后保存 `material.upload_generation`，complete 时以 `expected_upload_generation` 回传；409 表示上传已被新一轮 presign 取代，应重新 presign，旧 PUT URL 不再可复用。此前接受目录形态、不可归一化 filename 或非 64 位小写 sha256 的调用现在返回 422。
+- **对象存储要求与一次性残留窗：** 后端必须保证 HEAD 返回非空 ETag，且带 `If-Match` 的 GET 返回 open 时刻的原子快照。v98 前完成的存量行 `object_etag=''`，本版不为其新建身份；升级前签出且仍有效的 PUT URL 最长一小时内仍可同尺寸覆盖这些无 hash 对象而不被本版识别。敏感部署可在升级前停止签发上传一小时，或升级后一小时内暂不消费存量无 hash 材料；升级前已经污染的行也无法靠本版反向识别（#1316）。
+- **S3 快照恢复：** 若用 `aws s3 cp --recursive` 重传恢复对象，大文件 ETag 会改变；逐对象校验后、恢复调度前必须依次运行 `uv run python scripts/rebind_material_etags.py`（dry-run）与 `... --apply`，存在无法重绑的行时先人工处置。卷级逐字节冷恢复不改变 ETag，无需重绑。执行期间保持 Host、Worker 与材料写操作停止，避免 #1313 所跟踪的 rebind/repair 并发窗口。
+- **velites：** 本版继续配套 velites-v0.5.8，`velites/` 自该 tag 后无源码差异，不发布新的 velites tag；`scripts/install-worker.sh` 的 Worker 默认值已钉到 0.8.0，`VELITES_VERSION` 保持 0.5.8。
+
+### 已知后续
+
+- #1316：为 `object_etag=''` 的存量无 hash 材料建立可信身份与统一门禁，彻底关闭上述一次性窗口及升级前已污染行不可识别的问题。
+- #1314：先关闭 inline/demo 等写路径的 PUT→材料行发布窗口，再把材料根前缀孤儿重新纳入 GC 删除批；此前材料孤儿仍只报告，实际回收依赖 bucket lifecycle。
+- #1313：加强 `rebind_material_etags.py` CAS 对 storage_key / generation / status 的复核；当前按恢复 runbook 停止相关写入执行。
+- #1309：评估并收口 #853 前 legacy 固定 job authority key 的 GC revalidate→delete 残余窗口；#853 后的 per-attempt uuid key 不在此列。
+- #1329：KaTeX 升级 ≥0.18.2 修复 GHSA-238p-pmpm-9mq7（当前 0.17.0，`^0.17.0` 不允许 0.18.x，0.18/0.19 均含 breaking change，需定向升级并回归 LaTeXSpan/RichText/questionPanel 与默认 CSS）；公告为低严重度且以应用或依赖已存在原型污染为前提，本应用 `renderToString` 后直接 `innerHTML`、没有输出后再 sanitize 的替代防线，残余风险在修复前持续存在。
+- #1330：React Router 迁移 ≥7.18 修复 GHSA-337j-9hxr-rhxg 与 GHSA-wrjc-x8rr-h8h6（当前 6.30.6，两项公告 first patched 均为 7.18.0，需独立 major migration 与全路由/e2e 回归）；SSR hydration constructor injection 项不适用于当前 Declarative Mode（`createRoot` + `BrowserRouter`），但 `<Link>`/`useNavigate` backslash 开放重定向项不能随之排除，仍待升级修复。
+
+## [0.7.19] - 2026-10-11
+
+Worker 结果上报协议 v2（元数据移出 HTTP 头改走归档 `result.json`，**部署硬约束 Host 先升**）+ 执行面系统性收口：节点级并发限制覆盖远程 code Worker、`latest` 绑定 skill 的升级不再误重跑、events.jsonl 工具输出全链脱敏（P1 安全）、worker 上报心跳停摆/401/降级归档族收口；前端 workspace 主页加载失败误判引导页修复（#1183）、预览面板支持媒体产物播放（#1146）；分支模型收口为 trunk-based（#1150）。
+
 ### Added
 
 - 预览面板（自定义 preview panel）支持媒体产物播放（issue #1146，PR 面向面板作者的桥契约扩展）：宿主桥新增只读方法 `readArtifactBytes`——面板以 `{method:"readArtifactBytes", params:{name}}` 请求，宿主用自身会话经 raw 端点取回字节、以 postMessage transfer（零拷贝）回传 `ArrayBuffer` + `mediaType`，面板侧 `URL.createObjectURL(new Blob([buf], {type}))` 建 blob URL 喂 `<video>`/`<audio>`；读取上限 512 MiB（Content-Length 预检 + 实际字节数复核，超限走桥错误响应通道）。面板 CSP 增加 `media-src blob:`（只加 blob:，无网络出站面——blob URL 只能由面板本帧脚本创建；宿主文档头层的 media-src 本就放行，此条只解开面板 `default-src 'none'` 的压制）。init 消息新增 `capabilities: ["readArtifactBytes"]` 能力声明（旧面板零影响、新面板可同步分支）。面板作者指南（`server/app/mcp_server/preview_guide.md`）补方法签名、blob 播放与字幕叠加示例（`readArtifact` 读文本字幕轨 + `timeupdate` 叠加）。**注意：本条为 UI 改动，随 0.7.19 的 UI 验收批次交付，用户验收后合入。**
@@ -18,7 +366,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
-- Provider 鉴权失败导致 velites 因声明产物缺失返回 exit 1 时，Worker 结果准备不再丢弃结构化事件中的真实错误并上报裸 `Agent process exited 1`（issue #1502）：对 HTTP 401、HTTP 200 错误体内的 `code=401`，以及 API key disabled / invalid / revoked 等明确签名保留 Provider 原始错误，Host 既有分类随之记录为 `technical/provider_request`，可通过现有技术错误筛选与 `rerun-by-failure` 在修复凭据后手动重跑；普通非鉴权模型错误与其他非零退出仍保持原归因，不新增自动重试。
+- workspace 主页在有任务的 workspace 上偶发整页替换为「开始使用 Workspace」引导页（issue #1183，刷新后大概率恢复、活跃期会与任务列表交替横跳）：任务列表加载失败（`failJobFetch` 清空 jobs；`totalJobs=null` 来自初始态与筛选重试的列表重置，按 0 计）后的 store 形态与「真空白」不可区分，`shouldShowEmptyGuide` 误判；stats 刷新失败同走 `failJobFetch`（配合 react-query `refetchOnWindowFocus`）把后端瞬时故障放大成整页列表销毁。四处收口：其一，引导判定增加 `jobsError` 输入（加载失败绝不渲染引导），错误态由 `JobList` 渲染（`cloud_off` + 错误详情 + 刷新提示，居列表区中央，错误行不再被 flex 顶到视口底缘）；其二，`refreshWorkspaceEvents` 失败不再触碰任务列表（stats 查询自身错误状态承接，`throwOnError` 死选项移除）；其三，`applyJobPatchBatch` 在失败空态（error 非空）丢弃增量 patch——此前失败后一条 `job_patch_batch` 落地即清 error 并把增量套在空列表上，「假空白 + error 已清」重新满足引导判定、症状原样复发（删除型 patch 时引导页直接回来），error 只由整页快照成功、筛选重试或 workspace 重置清除；其四，revision 水位与内容绑定：`resetForWorkspace` 重置 revision（跨 workspace 切换残留高 revision 卡 skeleton）；快照在途期间落地了更高 revision patch 的陈旧快照由 revision 守卫丢弃（不抬水位伪装——服务端采样 revision 先于读 jobs，抬水位会让采样后的 patch 被守卫永久丢弃），SSE 路径由 pendingEvents 排队覆盖、`refreshFirstPage` 在途期间 patch 进 store 级缓冲（revision 冻结），快照以真实 revision 落地后同一 set 内重放缓冲。`filtersActive` 布尔链下沉 `onboardingReadiness.anyFilterActive` 纯函数（`workspaceEventRefresh` ceiling 41→33 随 ratchet 收进提交）。失败态无自动重拉（恢复走既有 SSE 重连与 `resync_required` 通道，另有错误页「重试」按钮手动整页重拉）为 issue 边界内明确不做的决策。对抗评审收口：store 共享字段 `error` 重命名为 `listLoadError` 并钉死为「任务列表加载失败的唯一信号」——此前九个批量/操作 action 的 catch 把 mutation 失败写入该字段，任意一次批量操作失败即把健康列表整页替换成错误页、SSE patch 被守卫全部丢弃且多数路径无自动恢复；mutation 错误现只走 toast 不落 store，慢请求跨 workspace 切换的污染也随之消除。快照加载器 `createLoadSnapshot` 的 finally 补 staleness 守卫（旧 workspace 闭包的 generation 是闭包私有、仍报 current，不再提前把共享 `snapshotLoadingRef` 置 false）。codex 复审收口：`setJobsPageUpdate` 的 `Math.max` 抬水位伪装撤销（见其四）；facets 失败独立降级——`refreshFirstPage` 与 SSE 初始加载中 facets 请求失败不再触碰已写入的列表（此前会误置 `listLoadError`/触发 `failJobFetch` 清列表）。codex 三轮收口：`refreshFirstPage` 在途 patch 改走 store 级缓冲重放（`snapshotInFlight` + `pendingPatchBuffer`，应用快照与重放同一 set 原子完成，缓冲上限 1000 溢出即诚实报错），重拉循环（上限 3 次）退化为并发整页快照的安全网，耗尽走 `failJobFetch` 诚实报错——不再提交半应用的部分列表。codex 四轮收口：refreshFirstPage 的 apply 步骤加错误态否决——在途期间 `failJobFetch` 落地（缓冲溢出/并发 SSE loader 失败）即否决本轮响应（其采样可能早于被丢弃的 patch），下一次重拉是全新采样、应用即清错误整体重建（自愈，无额外 generation plumbing）；自愈臂作为 `failJobFetch` 的逆操作成对恢复 `isLoading` 并重新武装 patch 缓冲（只清错误会把 store 留在「空列表 + 非 loading + 无错误」的假空白形态，引导页在重拉在途期间闪现）。
 - events.jsonl 工具输出未脱敏（issue #842，P1 安全）：agent 工具输出（bash `env`、`cat` 密钥文件回显的密钥）此前随压缩 events.jsonl **原样保留**，被 Host 落盘进 job dir 并渲染进任务日志（违 VAULT-SECRET-001）。现 Worker 压缩扫描同一趟对保留事件（`tool_execution_end` / `message_end` 等）的字符串值脱敏（键名/数值/布尔/null 原样，输出仍合法 JSON；匹配在 `json.loads` 解码后的字符串上做，PEM 的 `\n` 转义形态正确命中），覆盖 Host 落盘与渲染两个面；`model_error` 归因串同趟脱敏。无命中的事件行逐字节保留原行。fail-closed 语义完整（对抗评审收口）：脱敏/重序列化/写出三环节纳入同一 per-line 防护——任一逃逸（含 lone surrogate 的 UnicodeEncodeError）丢该行 + 日志，绝不以 raw 形态写出；`model_error` 脱敏异常降级为固定占位文本；staging 临时文件在一切失败路径清理。同时完成 #844：注册表改为 `SecretRedactor` 快照对象（一次不可变读取，同时携带区间函数与最大长度，构造即保证 lookback margin ≥ 最长可匹配字面量），stderr 尾部与 events JSON 两处脱敏共用同一快照；退役 `secret_spans` / `max_secret_chars` / `redact_secrets`。
 - 0.7.19 合并后 codex 收口轮（#1165/#1168/#1169）：五个评审 finding 修平。其一（#1165，P1 安全）：events 压缩扫描整趟失败（fsync/replace 抛错）时未脱敏 events.jsonl 此前**原样留在原位**、随 run_dir 进结果归档上传 Host——#842 堵住的泄漏从失败路径重开；现带 redactor 的整趟失败在 `scan_and_compress_pi_events` 内就地截空原文件（redactor=None 的 Host 写路径保持「原样保留」旧语义），截空自身失败（EACCES 族）由 prepare 的幸存者守卫兜底（检测非空幸存原文件 → 诚实判败走空归档，raw 字节任何路径进不了归档）；#959 语义保持：扫描失败仍是「归档降级但结果照常上报」，run 不卡租约。其二（#1168 P1）：prep 失败臂的空归档写入在 execution_dir 整体消失（agent 自删）时抛 FileNotFoundError 且在 except 之外——bulk 车道异常退出、failed 结果报不上、卡租约重跑；现写前重建父目录，execution_dir 存在但不可写（EACCES 族）时兜底把空归档落进 state 取证结构（work_root 之外），结果仍可上报，两处都写不进才上抛走崩溃-恢复。其三（#1168 P2）：`listing.txt` 目录清单此前原样记录相对路径——agent 把密钥写进**文件名**（`LLM_GATEWAY_TOKEN=sk-…` 作为路径组件）即明文入无 TTL 的 state 证据快照；现每条 entry 持久化前过 span 脱敏，单条脱敏逃逸降级固定占位。其四（#1168 P2）：应急转储超长 JSON 行的中切截断会落在转义序列/字符串边界上、产物无法 `json.loads`；现 JSON 行按「截字段值 + 重序列化」保语法（结构超限整体降级单行占位事件），非 JSON 行保持既有中切标记。其五（#1169 P2）：判败回收的 metadata-only 归档未按 `max_archive_bytes` 复测——1 KiB 配置 + 4000 字符高熵 error_message 仍超限即覆写，Host 持续 413、降级闸第二次同形超限当终态删 marker 丢结果；现按实际 gzip 体积自适应裁剪非判定字段（command 清空、error_message 递减截断，status/exit_code 恒保留）后原子替换，全部判败臂（finalize 拒写、report 413/非 413 降级）共用。归档写入与判败载荷收口进 `worker/upload/degraded_archive.py`、单行渲染收口进 `worker/state_evidence_lines.py`（预算治理同步登记）。
 - Worker 结果上报重试期间心跳停摆导致已完成结果被丢弃（issue #1098，#959 follow-up）：report 内层传输重试（3 次 × 120s + 退避 ≈ 360s）远超 lease TTL 90s，sweeper 在恢复续租前回收租约、重报吃 409。现 `/result` 走单次尝试（`max_attempts=1`，artifact 通道保持 3 次），重试全部交给外层循环（每次之间 resume 心跳 → 退避 → quiesce）——心跳空窗从 ≈360s 降到 ≤120s + 一拍残差，默认配置下靠 #566 heartbeat deferral 窗口（控制面新鲜即推迟过期清扫，硬截止 2×TTL=180s）续期存活。降级重写窗口的 resume/quiesce 心跳对同步恢复（#755 R10 P2 纪律）。
@@ -729,7 +1077,11 @@ Initial open-source release.
 - Demo workflow `education_video_problems_generation` under `examples/`, runnable out of the box against a real LLM.
 - Docker deployment stacks (`deploy/`) and remote worker deployment runbook.
 
-[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.7.6...HEAD
+[Unreleased]: https://github.com/LuciusCao/agent-legion/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/LuciusCao/agent-legion/compare/v0.8.2...v0.8.3
+[0.8.2]: https://github.com/LuciusCao/agent-legion/compare/v0.8.1...v0.8.2
+[0.8.1]: https://github.com/LuciusCao/agent-legion/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/LuciusCao/agent-legion/compare/v0.7.19...v0.8.0
 [0.7.6]: https://github.com/LuciusCao/agent-legion/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/LuciusCao/agent-legion/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/LuciusCao/agent-legion/compare/v0.7.3...v0.7.4

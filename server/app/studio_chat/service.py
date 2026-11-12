@@ -34,6 +34,8 @@ from server.app.studio_chat.availability import AgentAvailabilityProbe
 from server.app.studio_chat.background_wakeup import cancel_wakeup
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.lifecycle import ServiceLifecycle, starting_operation
+from server.app.studio_chat.message_pages import get_message, list_messages_page
+from server.app.studio_chat.permissions import settle_pending_permissions
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.resume import resume_session
 from server.app.studio_chat.retention import studio_chat_retention_days
@@ -73,6 +75,9 @@ class StudioChatService:
         self._probe = probe if probe is not None else AgentAvailabilityProbe()
         self._runtimes: dict[str, SessionRuntime] = {}
         self._runtimes_lock = threading.Lock()
+        # #1121 send-path auto-resume serializer (send_resume.py), keyed by
+        # session id; guarded by _runtimes_lock.
+        self._send_resume_locks: dict[str, threading.Lock] = {}
         self._lifecycle = ServiceLifecycle()
         self.store = StudioChatStore(job_db, bus)
 
@@ -216,8 +221,10 @@ class StudioChatService:
 
     # -- messaging ---------------------------------------------------------
 
-    def send_message(self, session_id: str, workspace_id: str, text: str) -> dict[str, Any]:
-        return send_message(self, session_id, workspace_id, text)
+    def send_message(
+        self, session_id: str, workspace_id: str, text: str, user_id: str | None = None
+    ) -> dict[str, Any]:
+        return send_message(self, session_id, workspace_id, text, user_id=user_id)
 
     def list_messages(
         self, session_id: str, workspace_id: str, *, after_seq: int = 0
@@ -225,27 +232,25 @@ class StudioChatService:
         self.get_session(session_id, workspace_id)
         return self._db.list_studio_chat_messages(session_id, after_seq=after_seq)
 
+    def list_messages_page(self, session_id: str, workspace_id: str, **cursors: Any):
+        """Paged read for the messages endpoint (#1120 PR-3); thin delegate —
+        the typed cursor contract lives in studio_chat.message_pages."""
+        return list_messages_page(self, session_id, workspace_id, **cursors)
+
+    def get_message(self, session_id: str, workspace_id: str, message_id: str) -> dict[str, Any]:
+        """Single-message point read (#1236); thin delegate — see studio_chat.message_pages."""
+        return get_message(self, session_id, workspace_id, message_id)
+
     def cancel(self, session_id: str, workspace_id: str) -> dict[str, Any]:
         session = self.get_session(session_id, workspace_id)
         runtime = self.runtime(session_id)
         if runtime is not None:
             cancel_wakeup(runtime)
-            self._settle_pending_permissions(runtime)
+            settle_pending_permissions(runtime)
             runtime.handle.cancel()
         if session["status"] in ("running", "awaiting_permission"):
             self.store.append_message(session_id, "status", "system", {"event": "cancel_requested"})
         return self.get_session(session_id)
-
-    @staticmethod
-    def _settle_pending_permissions(runtime: SessionRuntime) -> None:
-        """Deny every parked permission so a cancelled turn never leaves a
-        permission prompt hanging (AGENTS.md half-applied-state discipline).
-        Pop each entry so a respond racing the cancel finds it gone (#158)."""
-        with runtime.lock:
-            while runtime.pending_permissions:
-                _request_id, pending = runtime.pending_permissions.popitem()
-                pending.decision = {"deny": True}
-                pending.event.set()
 
     def set_allow_all_permissions(
         self, session_id: str, workspace_id: str, enabled: bool
@@ -329,7 +334,7 @@ class StudioChatService:
         wedged once the post-cancel grace expires."""
         runtime = self.runtime(session_id)
         if runtime is not None:
-            self._settle_pending_permissions(runtime)
+            settle_pending_permissions(runtime)
 
     def _on_error(self, session_id: str, detail: str, *, fatal: bool) -> None:
         self._events().on_error(session_id, detail, fatal=fatal)

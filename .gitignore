@@ -50,5 +50,9 @@ htmlcov_backend/
 .pytest-aff-index.json
 .pytest-aff-coverage*
 
+# worktree 初始化完成标记（scripts/init-worktree.sh 写入，clean/drop 的
+# INCLUDE_SELF 删除护栏据此判定同名登记是否为资源主，#1084）
+.worktree-initialized.ok
+
 # Tower multi-agent workspace (comms state + nested mission worktrees)
 .tower/

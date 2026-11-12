@@ -81,6 +81,39 @@ override it. Gate tiers, the machine-wide gate queue, and what CI runs are
 documented in
 [docs/architecture/local-quality-gates.md](docs/architecture/local-quality-gates.md).
 
+### Choose the smoke lane before pushing
+
+Use `aff` while editing, then the matching smoke lane for pre-push feedback.
+The measured times below are one warm-cache sample on the 10-core Mac and at
+the SHA documented in the gate guide; they are observations, not an SLA. The
+independent backend/frontend/Rust/static rows use the gate's execution timer
+and exclude time waiting for another worktree's machine-wide gate slot. The
+complete all-lane value uses `/usr/bin/time` total wall time; that complete run
+did not queue. Combinations without a measurement are not estimates.
+
+| Files changed | Path-trimmed local command | Observed execution |
+| --- | --- | ---: |
+| Backend only (`server/`, `worker/`, `shared/`, `tests/`, `workflow_nodes/`) | `GATE_LANES=backend GATE_TIER=smoke ./scripts/check-quick.sh` | 189s (3m09s) |
+| Frontend only (`frontend/**`, except its manifest/lock below) | `GATE_LANES=frontend GATE_TIER=smoke ./scripts/check-quick.sh` | 841s (14m01s) |
+| `frontend/package.json` or `frontend/package-lock.json` | `GATE_LANES="backend frontend rust" GATE_TIER=smoke ./scripts/check-quick.sh` | 667.03s (11m07s), complete gate |
+| Rust only (`velites/**`, including `velites/Cargo.lock`, except schema) | `GATE_LANES=rust GATE_TIER=smoke ./scripts/check-quick.sh` | 101s (1m41s) |
+| `velites/schema/**` only | `GATE_LANES="backend rust" GATE_TIER=smoke ./scripts/check-quick.sh` | not separately measured |
+| Docs only (`docs/**`, root `*.md`, `LICENSE`) | `GATE_LANES=static GATE_TIER=smoke ./scripts/check-quick.sh` | 154s (2m34s) |
+| Ordinary mixed known paths | Take the union; for example, `server/` + `frontend/` uses `GATE_LANES="backend frontend" GATE_TIER=smoke ./scripts/check-quick.sh` | not separately measured |
+| Shared/global or indeterminate diff: `pyproject.toml`, `uv.lock`, `Makefile`, `scripts/**`, `.githooks/**`, `.github/**`, `config/**`; new refs, diff failure, or a clean-tree local invocation | `GATE_LANES="backend frontend rust" GATE_TIER=smoke ./scripts/check-quick.sh` | 667.03s (11m07s), complete gate |
+
+An explicit all-lane run is also a valid **optional conservative superset** for
+any other change, but it is not the classifier's minimal path-trimmed choice;
+do not read its 667.03s sample as a schema-only or ordinary-mixed measurement.
+Nested Markdown runtime inputs follow their directory's lane rather than the
+docs-only rule. The complete smoke gate still runs frontend and Rust tests;
+the ~90-second soft target covers only its curated backend pytest selection.
+Database changes also need their directly related PostgreSQL tests in the
+inner loop; CI runs the complete unit and PostgreSQL tiers for applicable
+paths. See the
+[measurement method, cold/warm breakdown, and slow-test attribution](docs/architecture/local-quality-gates.md#measured-local-smoke-one-coldwarm-pair)
+before comparing your own timings.
+
 ## Before you open a PR
 
 1. Run the affected-test feedback loop while editing
@@ -93,27 +126,30 @@ documented in
    runs the fast gate, pre-push runs the smoke tier trimmed by the pushed
    paths. Never bypass them with `--no-verify`.
 
-3. The full gate runs on GitHub Actions for every PR
-   (`.github/workflows/quality-gate.yml`). The stable `quality-gate` aggregate
-   check is the required merge boundary; run `./scripts/check.sh` locally only
-   when CI is unavailable or an offline release credential is required.
+3. The CI quality gate runs on GitHub Actions for PRs targeting
+   `main`/`master`/`release/*`, with lanes selected by changed paths
+   (`.github/workflows/quality-gate.yml`). Selected
+   backend lanes run the complete unit and PostgreSQL tiers; the stable
+   `quality-gate` aggregate check is the required merge boundary. Run
+   `./scripts/check.sh` locally only when CI is unavailable or an offline
+   release credential is required.
 
 ### PR target branch
 
-- Issue PRs target the release integration branch of the version in
-  progress (`release/<version>`, e.g. the one recent merged PRs point at);
-  the release branch merges into `main` when the version is cut. Several
-  `release/*` branches can exist at once — ask a maintainer when unsure
-  which one is open.
+- `main` is the only standing trunk. Branch feature and fix work from `main`
+  and open the PR back to `main`; do not target a release branch by default.
+  A `release/*` branch is only a temporary stabilization window cut from
+  `main` when a release needs one: it accepts cherry-picked fixes and is
+  deleted after the release.
 - Stacked PRs: express the dependency with the child PR's base branch; fix
   shared defects in the lowest affected layer first, then merge bottom-up
-  (re-target the child onto the release branch and re-run CI on its new head
-  before merging it). The PR gate only triggers for PRs into trunk and
-  `release/*` branches, so dispatch `quality-gate.yml` manually for a PR
-  whose base is a feature branch. This repository squash-merges: after a
-  parent PR lands, the child's inherited parent commits are no longer
-  ancestors of the release branch, so check the merge-base and diff (and
-  replay only the child's own commits if needed) before re-targeting it.
+  (re-target the child onto `main` and re-run CI on its new head before
+  merging it). The PR gate only triggers for PRs into trunk and `release/*`
+  branches, so dispatch `quality-gate.yml` manually for a PR whose base is a
+  feature branch. This repository squash-merges: after a parent PR lands, the
+  child's inherited parent commits are no longer ancestors of `main`, so
+  check the merge-base and diff (and replay only the child's own commits if
+  needed) before re-targeting it.
 
 ## House rules
 

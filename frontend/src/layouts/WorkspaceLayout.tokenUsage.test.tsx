@@ -17,6 +17,15 @@ vi.mock('../api', () => ({
   }),
 }))
 
+// #1157 phase3：任务中心入口的 active 轮询（jsdom 无 QueryClientProvider）。
+vi.mock('../features/taskCenter/useRunBatches', () => ({
+  useActiveRunBatches: () => ({ data: undefined }),
+  runBatchKeys: {
+    all: (id: string) => ['run-batches', id],
+    view: (id: string, view: string) => ['run-batches', id, view],
+  },
+}))
+
 vi.mock('../views/WorkspaceJobList', () => ({
   default: () => <div data-testid="job-list">JobList</div>,
 }))

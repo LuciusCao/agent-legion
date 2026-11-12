@@ -68,7 +68,7 @@ STAGING_KEY_PREFIX = "jobs-staging"
 
 
 def artifact_storage_key(workspace_id: str, job_id: str, name: str) -> str:
-    """Legacy fixed authority key (pre-#853 rows; the bare verify arm)."""
+    """Legacy fixed authority key for pre-#853 rows and compatibility fixtures."""
     return f"{KEY_PREFIX}/{workspace_id}/{job_id}/{name}"
 
 
@@ -215,25 +215,27 @@ class JobArtifactObjectStore:
     ) -> None:
         """HEAD-verify a Worker-reported object WITHOUT registering it.
 
-        The validation half of ``record_remote``: the result-commit path
-        verifies ALL reported refs before applying ANY (no half-applied
-        state), then registers/downloads them in the apply phase. With
-        ``execution_id`` the expected key is the per-execution staging key
-        (Worker uploads); without it, the authority key. ``max_size_bytes``
-        applies the same size ceiling the legacy archive channel enforces
-        (instance setting ``agent_workers.max_archive_bytes``).
+        The result-commit path verifies ALL reported refs before applying ANY
+        (no half-applied state), then registers/downloads them in the apply
+        phase. The expected key is the per-execution staging key (Worker
+        uploads). ``max_size_bytes`` applies the same size ceiling the legacy
+        archive channel enforces (instance setting
+        ``agent_workers.max_archive_bytes``). The pre-#853 bare authority-key
+        arm is closed (#1309): a missing execution id is rejected instead of
+        accepting a reusable fixed key.
         """
         if self.storage is None:
             raise ValueError("object storage is not configured")
+        if not execution_id:
+            raise ValueError(
+                "execution id is required; legacy fixed authority keys are no longer accepted"
+            )
         if max_size_bytes is not None and size_bytes > max_size_bytes:
             raise ValueError(
                 f"uploaded object size {size_bytes} exceeds the artifact size "
                 f"limit {max_size_bytes} for {name!r}"
             )
-        if execution_id:
-            expected_key = artifact_staging_key(workspace_id, job_id, execution_id, name)
-        else:
-            expected_key = artifact_storage_key(workspace_id, job_id, name)
+        expected_key = artifact_staging_key(workspace_id, job_id, execution_id, name)
         # #338 dual-form: v4+ Workers upload to the ``.gz``-suffixed key,
         # older Workers to the bare key — the Host accepts both and the
         # suffix alone decides the stored form downstream.
@@ -248,42 +250,8 @@ class JobArtifactObjectStore:
                 f"the declared size {size_bytes} for {name!r}"
             )
 
-    def record_remote(
-        self,
-        *,
-        workspace_id: str,
-        job_id: str,
-        node_key: str,
-        name: str,
-        storage_key: str,
-        size_bytes: int,
-        content_hash: str = "",
-    ) -> dict[str, Any] | None:
-        """Register an artifact a Worker uploaded directly (HEAD-verified).
-
-        The key must match the server-side layout and the stored object must
-        exist with the declared size — Worker reports are untrusted.
-        """
-        if self.storage is None:
-            return None
-        self.verify_remote(
-            workspace_id=workspace_id,
-            job_id=job_id,
-            name=name,
-            storage_key=storage_key,
-            size_bytes=size_bytes,
-        )
-        return self._register_row(
-            job_id=job_id,
-            node_key=node_key,
-            name=name,
-            storage_key=storage_key,
-            size_bytes=size_bytes,
-            content_hash=content_hash,
-        )
-
     def record_remote_many(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
-        """Batch variant of ``record_remote``: ONE write transaction.
+        """Atomically upsert already-verified refs in ONE write transaction.
 
         The promote phase of the Worker-direct channel registers every
         already-verified ref atomically — a mid-batch failure rolls the whole
@@ -322,9 +290,8 @@ class JobArtifactObjectStore:
     ) -> dict[str, Any] | None:
         """Single-row upsert in its own transaction (batch path inlines it).
 
-        Ungated by design: the only callers left are the no-lease paths
-        (``record_remote`` HEAD-verified registrations, the reconciler and
-        approval direct writes) — lease-carrying writes go through
+        Ungated by design: the only callers left are the no-lease reconciler
+        and approval direct writes — lease-carrying writes go through
         ``register_rows_guarded`` inside the shared promote primitive.
         ``superseded`` (#853) collects the key the row pointed at before.
         """

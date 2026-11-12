@@ -35,6 +35,12 @@ from worker.runtime.catalog import (
     SUPPORTED_RUNTIMES,
     detect_installed_runtimes,
 )
+from worker.runtime.resource_preflight import (
+    RESOURCE_LIMITS_MODE_ENV as RESOURCE_LIMITS_MODE_ENV,
+)
+from worker.runtime.resource_preflight import (
+    resource_envelope_error as resource_envelope_error,
+)
 from worker.runtime.staleness import velites_staleness_warning as velites_staleness_warning
 
 #: 期望 runtime 环境变量：docker 部署在 compose 里声明，裸机部署可写进

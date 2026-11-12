@@ -86,6 +86,17 @@ describe('appendWorkflowNode', () => {
     ).toThrow(WorkflowNodeAppendError)
   })
 
+  it('allows keys shadowing Object.prototype members (#1258 codex 三轮 P3)', () => {
+    // 冲突检查的下标判定走原型链：草稿里没有 toString 节点，却误报
+    // 「已存在」。存在性判定必须查自有键。
+    const out = appendWorkflowNode(baseYaml, {
+      nodeType: 'code',
+      key: 'toString',
+    })
+    // 下标访问：点访问 .toString 在类型层解析为 Object 内建方法。
+    expect(parseNodes(out).nodes?.['toString']?.type).toBe('code')
+  })
+
   it('rejects malformed keys', () => {
     for (const key of ['', '  ', 'has space', 'a:b']) {
       expect(() =>

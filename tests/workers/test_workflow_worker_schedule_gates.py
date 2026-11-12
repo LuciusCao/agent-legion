@@ -23,11 +23,22 @@ from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, 
 
 @pytest.fixture(autouse=True)
 def _agent_catalog():
-    """The claim path resolves the published catalog from the DB now; stub it."""
+    """The claim path resolves the published catalog from the DB now; stub it.
+
+    The second stub covers the route-cache hit re-adjudication (#1266): these
+    tests pre-seed the cache with the canned route, so the drift check must
+    not hit the (mocked) DB either.
+    """
     catalog = {"agent-x": MagicMock(config_schema={})}
-    with patch(
-        "server.app.workflow_worker.agent_claim_profile.resolve_dispatch_agent_profile",
-        side_effect=lambda _dsn, _workspace_id, agent_id, _pin: catalog.get(agent_id),
+    with (
+        patch(
+            "server.app.workflow_worker.agent_claim_profile.resolve_dispatch_agent_profile",
+            side_effect=lambda _dsn, _workspace_id, agent_id, _pin: catalog.get(agent_id),
+        ),
+        patch(
+            "server.app.workflow_worker.routing.routed_agent_error",
+            return_value=None,
+        ),
     ):
         yield
 
@@ -52,7 +63,10 @@ def _worker(tmp_path: Path, route: NodeRoute, node: WorkflowNode) -> MagicMock:
     worker.state.pass_claim_counts = {}
     worker.state.agent_pass = AgentPassState()
     worker.state.route_cache = {
-        ("ws1", "test", node.key, node.node_type == "agent"): (time.monotonic(), route)
+        ("ws1", "test", node.key, node.node_type == "agent", node.capability): (
+            time.monotonic(),
+            route,
+        )
     }
     return worker
 

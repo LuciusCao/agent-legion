@@ -111,8 +111,10 @@ def _session_url(workspace_id: str, session_id: str) -> str:
     return f"/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}"
 
 
-def _member_client(client, username="chat-member", password="pw1"):
-    response = client.post("/api/users", json={"username": username, "password": password})
+def _member_client(client, username="chat-member", password="pw1", role="member"):
+    response = client.post(
+        "/api/users", json={"username": username, "password": password, "role": role}
+    )
     assert response.status_code == 201, response.text
     member_id = response.json()["id"]
     member = client.__class__(client.app)
@@ -209,3 +211,40 @@ def test_resume_auth_boundaries(client, job_db, tmp_path) -> None:
 def test_resume_anonymous_returns_401(anon_client) -> None:
     response = anon_client.post("/api/workspaces/ws-1/studio-chat/sessions/s-1/resume")
     assert response.status_code == 401
+
+
+def test_send_auto_resume_mints_token_for_the_current_sender(client, job_db, tmp_path) -> None:
+    """#1121 codex P2-1 路由链路：创建者被禁用后（其 token 随之读死），同
+    workspace 另一名 admin 的发送触发自动 resume——新 run token 必须铸给
+    发送者本人（铸给已禁用的创建者会一铸即死、发送 409 且反复 respawn）。
+    Studio 会话面 admin-only（P4），故两位用户都是 admin。"""
+    _register_fake_agent(client, tmp_path)
+    workspace_id = _create_workspace(client)
+    creator, creator_id = _member_client(client, "creator-user", "pw1", role="admin")
+    sender, sender_id = _member_client(client, "sender-user", "pw2", role="admin")
+    job_db.upsert_workspace_member(workspace_id, creator_id, "editor")
+    job_db.upsert_workspace_member(workspace_id, sender_id, "editor")
+    response = creator.post(
+        f"/api/workspaces/{workspace_id}/studio-chat/sessions",
+        json={"agent_id": "fake-agent"},
+    )
+    assert response.status_code == 200, response.text
+    session_id = response.json()["session"]["id"]
+    _CREATED_SESSIONS.append((workspace_id, session_id))
+    url = _session_url(workspace_id, session_id)
+    assert creator.post(f"{url}/messages", json={"text": "ping"}).status_code == 200
+    _wait_for(lambda: client.get(url).json()["session"]["status"] == "idle")
+    job_db.update_user(creator_id, disabled=True)
+
+    sent = sender.post(f"{url}/messages", json={"text": "editor continues"})
+
+    assert sent.status_code == 200, sent.text
+    _wait_for(lambda: client.get(url).json()["session"]["status"] == "idle")
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select 1 from auth_scoped_tokens"
+            " where user_id=%s and workspace_id=%s and revoked_at is null"
+            " and expires_at > current_timestamp",
+            (sender_id, workspace_id),
+        ).fetchone()
+    assert row is not None

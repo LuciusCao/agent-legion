@@ -119,12 +119,15 @@ export function ConfigValueField({
   )
 }
 
-/** 供消费方组装 overrideValue 的便捷封装（与 ConfigValueFieldLabel 对齐）。 */
+/** 供消费方组装 overrideValue 的便捷封装（与 ConfigValueFieldLabel 对齐）。
+ * 自有键判定：`in` 走原型链会把 toString 等内建成员当 override 值
+ * （#1258 复验 P3-B）。 */
 export function configOverrideValueOf(
   liveOverrides: Record<string, unknown> | undefined,
   key: string
 ): ConfigValueOverride {
-  return liveOverrides != null && key in liveOverrides
+  return liveOverrides != null &&
+    Object.prototype.hasOwnProperty.call(liveOverrides, key)
     ? { value: liveOverrides[key] }
     : undefined
 }

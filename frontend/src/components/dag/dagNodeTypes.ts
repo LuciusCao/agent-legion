@@ -1,7 +1,14 @@
-import type { ExecutorKind } from '../../types/jobTypes'
 import type { DagNodeStatus } from '../dagNodeStatus'
 
+export { nodeExecutionTypeLabel } from './dagNodeExecutionType'
+
 export type DagNodeChangeType = 'added' | 'modified' | 'removed'
+
+// 节点执行类型（#284 显式 type 词汇的展示层迁移，#1180）：卡片头部类型
+// 徽标的取值全集。code = 隐含 code 池节点（EXEC-CODE-POOL-001）；agent =
+// 自含执行档案的 agent 节点（EXEC-AGENT-PROFILE-001）。start/approval 不
+// dispatch，没有执行类型（值为 null，不渲染类型徽标）。
+export type NodeExecutionType = 'code' | 'agent'
 
 // 拓扑/类型徽标联合（#392 Phase 3）：approval 为审批门专属徽标。
 export type TopologyBadge =
@@ -15,8 +22,10 @@ export interface DagNodeData extends Record<string, unknown> {
   label: string
   status: DagNodeStatus
   duration?: number
-  executorKind?: ExecutorKind | null
-  executorId?: string | null
+  executionType?: NodeExecutionType | null
+  /** agent 节点声明的 execution.runtime（如 velites）；仅 Studio 侧有记录
+   * 侧数据源，job 详情契约不带 runtime，恒为 null。 */
+  executionRuntime?: string | null
   agentId?: string | null
   workerId?: string | null
   nodeKey?: string

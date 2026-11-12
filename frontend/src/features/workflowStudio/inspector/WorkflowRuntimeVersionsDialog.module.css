@@ -1,0 +1,46 @@
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f1f3f4;
+}
+.row:last-of-type {
+  border-bottom: none;
+}
+.rowMain {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.versionTag {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0b6b53;
+  background: #eef7f3;
+  border: 1px solid #bfe3d4;
+  border-radius: 8px;
+  padding: 1px 8px;
+  flex-shrink: 0;
+}
+.time {
+  font-size: 12px;
+  color: #43474e;
+  white-space: nowrap;
+}
+.keys {
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #0b6b53;
+  /* r5（用户复验）：变更键按 token 边界折行——word-break: break-all 会把
+   * write_script.prompt_mode 从中间截断（prompt_mod e）；keys 以「、」
+   * 分隔（CJK 顿号是天然断点），仅当单个 token 比整行还长时才断词。 */
+  overflow-wrap: break-word;
+}
+.meta {
+  font-size: 12px;
+  color: #687078;
+}

@@ -3,7 +3,7 @@
 The identity diff (set semantics) lives with the node diff in
 ``workflow_draft_compare``; this module owns the order-sensitive pieces the
 identity set cannot see: duplicate source/target detection and the edges
-reorder — a same-set-different-order draft that ``_structural_payload``
+reorder — a same-set-different-order draft that ``structural_payload``
 publishes as a new revision.
 """
 
@@ -52,7 +52,7 @@ def _diff_edge_order(
     """Issue #431: report an edges reorder (same set, different order).
 
     It is invisible to the identity diff below but structural to the publish
-    path (``_structural_payload`` compares the edges list with ordered
+    path (``structural_payload`` compares the edges list with ordered
     ``==``), so it would publish a new revision while compare reports zero
     changes. Reported once at the definition level through the edges
     dimension: node-level ``after`` does not mirror it — the two orders are

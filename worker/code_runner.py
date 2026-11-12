@@ -33,10 +33,10 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from shared.code_sandbox import (
-    AUTH_FAILURE_MARKER_PATH,
     CODE_BUNDLE_NODE_FILE,
     CODE_RESULT_LOG_MEMBER,
     MAX_CONNECTION_KEY_CHARS,
+    auth_failure_marker_path,
     build_sandbox_argv,
     child_env,
     read_result_error,
@@ -214,9 +214,11 @@ def read_auth_failure_key(job_dir: Path, manifest: dict[str, Any]) -> str:
     sync): the Host-side parent invalidates the cached token directly; the
     Worker reports the key in the result metadata and the Host invalidates
     after commit (batch 2 decision 7). Falls back to the config's connection
-    selector when the marker is empty, same as the Host."""
+    selector when the marker is empty, same as the Host. The marker is
+    per-execution (#1355), matching the SDK write side."""
     key = ""
-    marker = job_dir / AUTH_FAILURE_MARKER_PATH
+    execution_id = str(manifest.get("execution_id") or "")
+    marker = job_dir / auth_failure_marker_path(execution_id)
     try:
         if marker.is_file():
             key = marker.read_text(encoding="utf-8").strip()
@@ -320,9 +322,10 @@ def execute_code(
             )
         result_path = job_dir / RESULT_BASENAME
         # A leftover result/marker from a previous attempt must never fake a
-        # fresh outcome (same hygiene as the Host-side sandbox path).
+        # fresh outcome (same hygiene as the Host-side sandbox path). The
+        # marker is per-execution (#1355).
         result_path.unlink(missing_ok=True)
-        (job_dir / AUTH_FAILURE_MARKER_PATH).unlink(missing_ok=True)
+        (job_dir / auth_failure_marker_path(execution_id)).unlink(missing_ok=True)
         log_path = execution_dir / CODE_RESULT_LOG_MEMBER
         timeout = float(manifest.get("timeout_seconds") or 1800)
         # Material input (design §6.2): materialize into the work-root cache

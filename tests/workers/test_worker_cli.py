@@ -131,6 +131,7 @@ def test_container_style_standalone_workerctl_can_import_companion_modules(
     shutil.copyfile(ROOT / "worker/cli.py", bin_dir / "workerctl")
     shutil.copyfile(ROOT / "worker/client.py", bin_dir / "agent_worker_client.py")
     shutil.copyfile(ROOT / "worker/cli_args.py", bin_dir / "agent_worker_cli_args.py")
+    shutil.copyfile(ROOT / "worker/cli_payload.py", bin_dir / "agent_worker_cli_payload.py")
 
     result = subprocess.run(
         [sys.executable, str(bin_dir / "workerctl"), "--help"],
@@ -142,3 +143,22 @@ def test_container_style_standalone_workerctl_can_import_companion_modules(
 
     assert result.returncode == 0, result.stderr
     assert "claim" in result.stdout
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(bin_dir / "workerctl"),
+            "--token",
+            "control-token",
+            "configure",
+            "--model",
+            "invalid",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1, result.stderr
+    assert "[runtime:]provider/model" in result.stdout

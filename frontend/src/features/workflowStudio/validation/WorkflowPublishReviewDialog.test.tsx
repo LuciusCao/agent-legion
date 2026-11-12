@@ -66,7 +66,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -85,7 +84,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -98,15 +96,16 @@ describe('WorkflowPublishReviewDialog', () => {
     expect(screen.getByText('发布 workflow revision')).toBeInTheDocument()
     expect(screen.getByText(/当前 active v1/)).toBeInTheDocument()
     expect(screen.getByText(/新 revision v2/)).toBeInTheDocument()
-    expect(screen.getByText('demo')).toBeInTheDocument()
     expect(screen.getByText('abcdef12')).toBeInTheDocument()
+    // #1127：「Workflow Key」概念已退役（DB-WORKSPACE-KEY-BINDING-001，
+    // workspace id 即 workflow 身份），meta 网格不再展示该行。
+    expect(screen.queryByText('Workflow Key')).not.toBeInTheDocument()
   })
 
   it('explains that runtime-only changes keep the current revision', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         createsRevision={false}
@@ -144,7 +143,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -156,6 +154,122 @@ describe('WorkflowPublishReviewDialog', () => {
 
     expect(screen.getByRole('button', { name: '确认发布' })).toBeDisabled()
     expect(onConfirm).not.toHaveBeenCalled()
+  })
+
+  it('M49 runtime-only 确认（compare 无条目 + 有 runtime 键）：确认可用，文案按不创建新 revision 口径', () => {
+    // agent 发布请求的 tools/requires_labels-only 变更：M47 起它们不进
+    // compare，summary 恒空——旧门禁（只看 compare 摘要）把确认永久禁用，
+    // 是双通道死端。现在 runtime 键存在即可确认（确认端点按 runtime-only
+    // 原地生效 + 追加配置版本），文案不再说「写入新版本」。
+    render(
+      <WorkflowPublishReviewDialog
+        open
+        activeRevision={revision}
+        nextVersion={2}
+        createsRevision={false}
+        definitionHash="abcdef1234567890"
+        summary={buildChangeSummary(makeSummaryResponse())}
+        runtimeChangedKeys={['nodes.generate.tools']}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('保存节点运行配置')).toBeInTheDocument()
+    expect(
+      screen.getByText(/无结构变更，本次只保存运行配置/)
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/确认后立即对新执行生效并追加一条配置版本/)
+    ).toBeInTheDocument()
+    expect(screen.queryByText('没有可发布的变更')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认保存' })).toBeEnabled()
+  })
+
+  it('M49 结构发布 + 未保存 runtime 键：保持「随发布写入新版本」口径且确认可用', () => {
+    // 混合场景不回归：有结构 diff 时确认门照旧由 compare 摘要满足，
+    // runtime 信息条保持 M48 的「随本次发布一并写入新版本」文案。
+    const summary = buildChangeSummary(
+      makeSummaryResponse({
+        creates_revision: true,
+        summary: {
+          risk_level: 'info',
+          node_changes: [
+            {
+              type: 'modified',
+              node_key: 'generate',
+              label: '生成',
+              node_type: 'code',
+              fields: ['label'],
+              risk: 'info',
+            },
+          ],
+          edge_changes: [],
+          intake_changes: [],
+          metadata_changes: [],
+          risk_flags: [],
+        },
+      })
+    )
+    render(
+      <WorkflowPublishReviewDialog
+        open
+        activeRevision={revision}
+        nextVersion={2}
+        createsRevision
+        definitionHash="abcdef1234567890"
+        summary={summary}
+        runtimeChangedKeys={['nodes.generate.model']}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByText(/尚未通过运行通道保存——将随本次发布一并写入新版本/)
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认发布' })).toBeEnabled()
+  })
+
+  it('#1369/#1381: uses the filtered structural risk for mixed execution and label changes', () => {
+    const summary = buildChangeSummary(
+      makeSummaryResponse({
+        summary: {
+          risk_level: 'warning',
+          node_changes: [
+            {
+              type: 'modified',
+              node_key: 'write_script',
+              label: '撰写脚本',
+              node_type: 'agent',
+              fields: ['label', 'execution'],
+              risk: 'warning',
+            },
+          ],
+          edge_changes: [],
+          intake_changes: [],
+          metadata_changes: [],
+          risk_flags: [],
+        },
+      })
+    )
+
+    render(
+      <WorkflowPublishReviewDialog
+        open
+        activeRevision={revision}
+        nextVersion={2}
+        definitionHash="abcdef1234567890"
+        summary={summary}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('撰写脚本: 标签')).toBeInTheDocument()
+    expect(screen.queryByText(/执行配置/)).not.toBeInTheDocument()
+    expect(screen.getAllByText('提示').length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryByText('警告')).not.toBeInTheDocument()
   })
 
   it('calls confirm once when user explicitly confirms', async () => {
@@ -185,7 +299,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -234,7 +347,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -282,7 +394,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -330,7 +441,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -380,7 +490,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -422,7 +531,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"
@@ -461,7 +569,6 @@ describe('WorkflowPublishReviewDialog', () => {
     render(
       <WorkflowPublishReviewDialog
         open
-        workflowKey="demo"
         activeRevision={revision}
         nextVersion={2}
         definitionHash="abcdef1234567890"

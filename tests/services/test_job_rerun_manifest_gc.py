@@ -33,6 +33,7 @@ from server.app.workflows.definition import (
     WorkflowNode,
     workflow_definition_from_mapping,
 )
+from tests.fakes.artifact_rows import seed_artifact_row, seed_artifact_row_tx
 from tests.fakes.storage import FakeObjectStorage
 
 pytestmark = pytest.mark.postgres
@@ -336,7 +337,8 @@ def test_rerun_object_cleanup_spares_re_registered_authority_keys(
     up_key = f"jobs/{workspace['id']}/{job['id']}/up.json"
     down_key = f"jobs/{workspace['id']}/{job['id']}/down.json"
     storage.objects[up_key] = b"new run bytes"
-    store.record_remote(
+    seed_artifact_row(
+        store,
         workspace_id=str(workspace["id"]),
         job_id=job["id"],
         node_key="up",
@@ -400,7 +402,8 @@ def test_rerun_object_cleanup_revalidates_per_object_mid_delete(
             # 新 attempt 完成 promote_all——对象 copy 到同一权威键 +
             # record_remote_many 一个事务提交新清单行。
             storage.objects[up_key] = b"fresh attempt bytes!"
-            store.record_remote(
+            seed_artifact_row(
+                store,
                 workspace_id=str(workspace["id"]),
                 job_id=job["id"],
                 node_key="up",
@@ -550,7 +553,8 @@ def test_object_cleanup_skips_key_while_promote_holds_authority_lock(
         assert up_key not in storage.deleted
         assert storage.objects[up_key] == b"new generation bytes"
         # promote 后段：登记清单行并提交（锁随提交释放）。
-        store.record_remote(
+        seed_artifact_row_tx(
+            promote_conn,
             workspace_id=str(workspace["id"]),
             job_id=job["id"],
             node_key="up",

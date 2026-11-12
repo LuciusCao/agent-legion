@@ -42,7 +42,9 @@ export function appendWorkflowNode(
     throw new WorkflowNodeAppendError('草稿结构异常；请先在 YAML 编辑器修正')
   }
   const nodes = draft.nodes ?? {}
-  if (nodes[key] !== undefined) {
+  // 冲突检查查自有键：下标判定走原型链会把 toString 等键误判为已存在
+  // （#1258 codex 三轮 P3，与 materializeDraftEdges 同族）。
+  if (Object.prototype.hasOwnProperty.call(nodes, key)) {
     throw new WorkflowNodeAppendError(`节点 Key「${key}」已存在`)
   }
   const capability =

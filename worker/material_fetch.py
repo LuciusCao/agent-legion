@@ -22,6 +22,7 @@ import requests
 from shared.material_cache import (
     MATERIALS_CACHE_DIRNAME,
     MaterializeError,
+    material_cache_address,
     materialize_stream,
 )
 
@@ -30,14 +31,30 @@ from shared.material_cache import (
 _DOWNLOAD_TIMEOUT_SECONDS = 120
 
 
-def _open_download(url: str) -> BinaryIO:
+def _open_download(url: str, *, if_match: str = "") -> BinaryIO:
     """Open a streaming reader for the presigned GET URL.
 
     Module-level seam: tests monkeypatch this instead of touching the
     network. The URL comes from the authenticated claim channel, so no
     SSRF guard applies here (unlike node-originated downloads).
+
+    ``if_match`` (#1279) carries the claim descriptor's ``object_etag``:
+    If-Match is not a signed header, so attaching it to the presigned GET
+    is allowed, and a same-size overwrite after complete() answers 412
+    instead of silently serving poisoned bytes. Empty (older servers,
+    pre-v98 rows) = unconditional.（协议 < v6 的旧 Worker 领不到命中门禁
+    的材料任务——claim admission 跳过，不存在「忽略该字段仍执行」的
+    窗口；见 shared/protocol.py v6 条目。）
     """
-    response = requests.get(url, stream=True, timeout=_DOWNLOAD_TIMEOUT_SECONDS)
+    headers = {"If-Match": f'"{if_match}"'} if if_match else {}
+    response = requests.get(url, stream=True, timeout=_DOWNLOAD_TIMEOUT_SECONDS, headers=headers)
+    if response.status_code == 412:
+        response.close()
+        raise MaterializeError(
+            "material bytes changed after the server's completion check "
+            "(ETag mismatch); an operator must repair the row with "
+            "scripts/request_material_reupload.py, then re-upload the material"
+        )
     if response.status_code != 200:
         response.close()
         raise MaterializeError(f"material download failed with HTTP {response.status_code}")
@@ -63,13 +80,20 @@ def materialize_claim_material(
         raise MaterializeError("claim material descriptor is incomplete")
     content_hash = str(material.get("content_hash") or "")
     filename = str(material.get("filename") or "")
+    object_etag = str(material.get("object_etag") or "")
+    # 无 hash 行的缓存地址带代次（#1279 codex r6：代次即身份——repair 代次
+    # +1 后旧地址自然孤儿化，修复前（可能被旧 Worker 无核验缓存的）毒化
+    # 字节不再命中）。旧 Server 的描述符无 upload_generation → None 回落
+    # 裸 id（既有形态）。代次与 download_url 来自同一行快照，恒一致。
+    generation = material.get("upload_generation")
+    generation = int(generation) if isinstance(generation, (int, float)) else None
     size = material.get("size_bytes")
     expected_size = int(size) if isinstance(size, (int, float)) else None
     cache_root = Path(execution_dir).parent / MATERIALS_CACHE_DIRNAME
     path = materialize_stream(
         cache_root,
-        content_hash or material_id,
-        lambda: _open_download(url),
+        material_cache_address(material_id, content_hash, generation),
+        lambda: _open_download(url, if_match=object_etag),
         expected_sha256=content_hash,
         expected_size=expected_size,
     )

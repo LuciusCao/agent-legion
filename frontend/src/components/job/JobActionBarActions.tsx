@@ -1,36 +1,26 @@
 import { useState } from 'react'
-import { Button, Tooltip } from '@mui/material'
+import { Button } from '@mui/material'
 import type { JobActionBarProps } from './JobActionBar'
 import { JobRerunDialog } from '../JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
 import { JobAllMatchingRerunDialog } from './JobAllMatchingRerunDialog'
 import { JobAllMatchingUpgradeDialog } from './JobAllMatchingUpgradeDialog'
-import { JobActionBarBatchButtons } from './JobActionBarBatchButtons'
 import {
+  JobActionBarBatchButtons,
+  JobRunToAction,
+} from './JobActionBarBatchButtons'
+import { JobBatchApprovalButtons } from './JobApprovalActionButton'
+import { ConfirmDialog } from '../ConfirmDialog'
+import type { ApprovalBatchKind } from '../../api/jobApprovalApi'
+import {
+  allMatchingActionDisabled,
+  canApproveJob,
   canContinueJob,
   computeActionDisabled,
-  type JobActionDisabled,
 } from '../jobActionEligibility'
 import styles from './JobActionBar.module.css'
 
-const ALL_MATCHING_TOOLTIP = '全量选择模式下不可用'
-
 type JobActionBarActionsProps = JobActionBarProps & { isBatch: boolean }
-
-function allMatchingDisabled(
-  count: number,
-  loading: boolean
-): JobActionDisabled {
-  const blocked = loading || count === 0
-  return {
-    rerun: blocked,
-    runTo: true,
-    continue: true,
-    package: blocked,
-    clearPacked: blocked,
-    delete: blocked,
-  }
-}
 
 export function JobActionBarActions(props: JobActionBarActionsProps) {
   const {
@@ -50,6 +40,7 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
     onDelete,
     onPause,
     onResume,
+    onApproval,
     onUpgradeWorkflow,
     onExitSelectMode,
     itemLabel = '任务',
@@ -57,26 +48,25 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
   const [rerunOpen, setRerunOpen] = useState(false)
   const [runToOpen, setRunToOpen] = useState(false)
   const [upgradeOpen, setUpgradeOpen] = useState(false)
+  const [approval, setApproval] = useState<ApprovalBatchKind | null>(null)
   const allMatching = allMatchingCount != null
   const disabled = allMatching
-    ? allMatchingDisabled(allMatchingCount, loading)
+    ? allMatchingActionDisabled(allMatchingCount, loading)
     : computeActionDisabled(jobs, loading)
+  const approvalEligible = jobs.filter(canApproveJob).length
+  const selectedCount = props.selectedCount ?? jobs.length
   const handleRunTo = (targetKey: string, startKey?: string) =>
     onRunTo?.(targetKey, startKey)
-
-  const runToButton = (
-    <Button
-      variant="outlined"
-      onClick={() => setRunToOpen(true)}
-      disabled={disabled.runTo}
-    >
-      运行到
-    </Button>
-  )
 
   return (
     <>
       <div className={styles.actions}>
+        {isBatch && onApproval && (
+          <JobBatchApprovalButtons
+            disabled={loading || allMatching || approvalEligible === 0}
+            onOpenApproval={setApproval}
+          />
+        )}
         {isBatch && (
           <JobActionBarBatchButtons
             allMatching={allMatching}
@@ -97,13 +87,11 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
         >
           重跑
         </Button>
-        {allMatching ? (
-          <Tooltip title={ALL_MATCHING_TOOLTIP}>
-            <span>{runToButton}</span>
-          </Tooltip>
-        ) : (
-          runToButton
-        )}
+        <JobRunToAction
+          allMatching={allMatching}
+          disabled={disabled.runTo}
+          onOpen={() => setRunToOpen(true)}
+        />
         {!isBatch && jobs.some((job) => canContinueJob(job)) && (
           <Button
             variant="outlined"
@@ -143,6 +131,30 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
           </Button>
         )}
       </div>
+
+      {onApproval && (
+        <ConfirmDialog
+          open={approval !== null}
+          title={approval === 'approve' ? '确认批量通过' : '确认批量终止'}
+          confirmLabel={approval === 'approve' ? '确认通过' : '确认终止'}
+          confirmColor={approval === 'reject' ? 'error' : 'primary'}
+          busyLabel="提交中..."
+          onClose={() => setApproval(null)}
+          onConfirm={async () => {
+            if (!approval) return
+            await onApproval(approval)
+            setApproval(null)
+          }}
+        >
+          <p>
+            已选择 {selectedCount} 项，预计执行 {approvalEligible} 项、跳过{' '}
+            {Math.max(0, selectedCount - approvalEligible)} 项。
+            <br />
+            {approval === 'approve' ? '通过' : '终止'}
+            当前待审批门；实际结果以提交结果或任务中心为准。
+          </p>
+        </ConfirmDialog>
+      )}
 
       {allMatching ? (
         <JobAllMatchingRerunDialog

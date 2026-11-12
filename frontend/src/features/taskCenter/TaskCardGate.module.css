@@ -1,0 +1,26 @@
+.feedingGate {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: #fff8e1;
+  color: #795548;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.feedingGateBadge {
+  flex: none;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: #ffecb3;
+  color: #6d4c00;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.feedingGateText {
+  min-width: 0;
+}

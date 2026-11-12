@@ -135,6 +135,17 @@ def finish_lease(
             lease["node_run_id"],
         ),
     )
+    if run_dir:
+        # #1315 所有权转移：一个磁盘目录同一时刻至多被一个 node_runs 行拥有。
+        # worker agent 节点的 token 目录是固定名（runs/<node>/worker），同一
+        # (job,node) 的历次 run 复用同一目录；不缴清旧认领的话，共享该
+        # run_dir 的历史行一过 retention，sweep 的非空分支就会删掉当前 run
+        # 正在使用的目录。与上方 UPDATE 同事务：本行认领已立、再缴其他行的
+        # 认领，中途 crash 整体回滚，不留「零认领」窗口。
+        conn.execute(
+            "update node_runs set run_dir='', session_dir='' where run_dir=%s and id<>%s",
+            (run_dir, lease["node_run_id"]),
+        )
     if finish_shard_execution(conn, lease, result, now_str, generation_stale=generation_stale):
         return FinishVerdict(True, generation_stale)
 

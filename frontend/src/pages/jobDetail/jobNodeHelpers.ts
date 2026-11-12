@@ -1,4 +1,5 @@
 import type { DagEdge, DagGraphNode } from '../../components/dag/DagGraph'
+import { resolveVisibleExecutionType } from '../../components/jobProgressHelpers'
 import type { JobNode } from '../../types/jobTypes'
 
 const VALID_STATUSES = new Set<DagGraphNode['status']>([
@@ -42,10 +43,12 @@ export function toDagNodes(nodes: JobNode[]): DagGraphNode[] {
     inputs: n.inputs,
     outputs: n.outputs,
     duration: computeNodeDuration(n.started_at, n.finished_at),
-    executorKind: n.executor_kind ?? null,
-    executorId: n.executor_id ?? null,
+    // start/approval 不携带 capability；route_error 的 execution_type 为
+    // null。executor_id 的 'code' 池键不进入展示层。
+    executionType: resolveVisibleExecutionType(n),
     agentId: n.agent_id ?? null,
     workerId: n.worker_id ?? null,
+    capability: n.capability,
   }))
 }
 

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  DRAFT_NEVER_SAVED,
   WorkflowDraftConflictError,
   fetchWorkflowDraft,
   putWorkflowDraft,
@@ -61,7 +60,7 @@ describe('workflowDraft api', () => {
     )
   })
 
-  it('carries the CAS base in the body when expectedUpdatedAt is set (#633)', async () => {
+  it('carries the CAS base generation in the body when set (#633/#1226)', async () => {
     const fetchMock = mockFetchJson({
       definition_yaml: 'key: wf',
       updated_at: '2026-09-12T00:00:00+00:00',
@@ -69,7 +68,7 @@ describe('workflowDraft api', () => {
     global.fetch = fetchMock
 
     await putWorkflowDraft('ws1', 'key: wf', {
-      expectedUpdatedAt: '2026-09-11T00:00:00+00:00',
+      baseGeneration: 4,
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -78,7 +77,7 @@ describe('workflowDraft api', () => {
         method: 'PUT',
         body: JSON.stringify({
           definition_yaml: 'key: wf',
-          expected_updated_at: '2026-09-11T00:00:00+00:00',
+          base_generation: 4,
         }),
       })
     )
@@ -87,10 +86,11 @@ describe('workflowDraft api', () => {
   it('translates a 409 into WorkflowDraftConflictError with the current draft (#633)', async () => {
     const detail = {
       message: 'Workflow draft conflict: another session saved a newer draft.',
-      expected_updated_at: '2026-09-11T00:00:00+00:00',
+      base_generation: 4,
       current_draft: {
         definition_yaml: 'key: wf\nlabel: agent\n',
         updated_at: '2026-09-12T00:00:00+00:00',
+        generation: 5,
       },
     }
     global.fetch = vi.fn().mockResolvedValue({
@@ -101,7 +101,7 @@ describe('workflowDraft api', () => {
     } as unknown as Response)
 
     const error = await putWorkflowDraft('ws1', 'key: wf', {
-      expectedUpdatedAt: DRAFT_NEVER_SAVED,
+      baseGeneration: 0,
     }).then(
       () => null,
       (e: unknown) => e
@@ -113,6 +113,8 @@ describe('workflowDraft api', () => {
       updated_at: '2026-09-12T00:00:00+00:00',
       // #1143：current_draft 现携带语义身份（此 mock detail 未带 → null）。
       definition_hash: null,
+      // #1226：代次随冲突响应传播（采用/重 base 用）。
+      generation: 5,
     })
   })
 })

@@ -1,6 +1,10 @@
 import type { BatchJobTarget } from '../../../api/batchTarget'
 import type { JobListFilterParams } from '../../../types/jobTypes'
-import type { JobState } from '../state'
+import type { JobState, JobStoreSet } from '../state'
+import { batchApprovalJobs } from '../../../api/jobApprovalApi'
+import { isJobBatchAccepted } from '../../../api/jobBatchOperationsApi'
+import { notifyJobBatchAccepted } from '../../taskCenterStore'
+import { applyMutationResults } from './mutationResults'
 
 export const FAILED_SELECTION_FILTER: JobListFilterParams = {
   status: 'failed',
@@ -81,4 +85,22 @@ export async function refreshAfterBatchOperation(
 ): Promise<void> {
   get().clearSelection()
   await get().refreshFirstPage(workspaceId)
+}
+
+export async function runBatchApproval(
+  set: JobStoreSet,
+  get: () => JobState,
+  workspaceId: string,
+  kind: Parameters<typeof batchApprovalJobs>[1]
+) {
+  const target = resolveBatchTarget(get())
+  if (!target) return { results: [] }
+  const data = await batchApprovalJobs(workspaceId, kind, target)
+  if (isJobBatchAccepted(data)) {
+    notifyJobBatchAccepted(workspaceId, data.operation)
+    return data
+  }
+  applyMutationResults(set, data.results, kind === 'approve' ? '通过' : '终止')
+  await refreshAfterBatchOperation(get, workspaceId)
+  return data
 }

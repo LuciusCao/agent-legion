@@ -1,5 +1,6 @@
 import type { WorkflowDefinitionRecord } from '../../../types'
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
+import { useMemo } from 'react'
 import type { ChangeSummaryViewModel } from '../validation/workflowStudioChanges'
 import {
   NodeDetailPreviewContext,
@@ -27,7 +28,17 @@ type Props = {
  * 切换为预览视图（不开 dialog，右侧 Agent 对话保持可见可聊）。预览状态由
  * 抽屉持有（面包屑需要感知），本组件只做分发与 context 下发。 */
 export function WorkflowNodeDetailBody(props: Props) {
-  const details = inspectorNodeDetails(props, props.nodeKey)
+  const { workflow, definitionYaml, compareSummary, nodeKey } = props
+  // 与 WorkflowNodeInspector 同一 details 链（含完整草稿转换的形状守卫，
+  // #405 codex P1），按输入 memo 化避免每次渲染重解析。
+  const details = useMemo(
+    () =>
+      inspectorNodeDetails(
+        { workflow, definitionYaml, compareSummary },
+        nodeKey
+      ),
+    [workflow, definitionYaml, compareSummary, nodeKey]
+  )
   return (
     <NodeDetailPreviewContext.Provider value={props.onShowPreview}>
       {props.activeKind && details ? (

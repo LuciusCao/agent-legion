@@ -75,8 +75,9 @@ def job_mutation_lock(path: str, job_id: str) -> Iterator[bool]:
     the jobs row exists under the lock.
 
     #958：job 删除提交后的本地清理在本锁下复核行仍不存在才动文件——同源
-    重建的 job（确定性 id）若已落行就整体跳过；持锁期间新 job 的 claim
-    （同锁域）无法推进，不会有节点往待移走的目录写入。只读，不写任何行。
+    重建的 job（确定性 id）若已落行就整体跳过；持锁期间同源重建（创建路径
+    在 mkdir / upsert 前取同一把锁，#1083）与新 job 的 claim（同锁域）都无法
+    推进，不会有目录被创建或写入后又被移走。只读，不写任何行。
     """
     with write_transaction(path) as conn:
         conn.execute("select pg_advisory_xact_lock(hashtext('job-mutation:' || %s))", (job_id,))

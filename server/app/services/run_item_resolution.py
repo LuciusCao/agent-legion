@@ -4,7 +4,10 @@ Split out of ``run_service.py`` for the file-size budget (same precedent as
 ``run_bundle_candidate``). The resolvers map items to job candidates using
 chunked set-based existence probes behind the JobQueries facade
 (BOUNDARY-DATA-001: ``run_item_probes`` + ``external_connections``); the old
-shape ran one query per item.
+shape ran one query per item. ``create_run_response`` (#1157 phase0, same
+budget split) assembles the POST /runs response dict — it takes the
+already-shaped run record so this module never imports back into
+``run_service`` (which owns ``_run_record``).
 """
 
 from __future__ import annotations
@@ -13,6 +16,24 @@ from typing import Any
 
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.run_item_client_token import item_client_token, scoped_entity_id
+
+
+def create_run_response(
+    record: dict[str, Any], job_ids: list[str], submitted_count: int
+) -> dict[str, Any]:
+    """POST /runs 的响应组装（#1157 phase0）。
+
+    ``skipped_count`` = submitted − created，涵盖 dedup 探测过滤（条目已
+    存在）与写入竞态被并发 run 先行认领两类跳过——前端据此展示「新建 N
+    跳过 M」，无需二次请求；#501 治愈路径传 ``job_ids=[]``，全部提交条目
+    计入 skipped。
+    """
+    return {
+        "run": record,
+        "created_count": len(job_ids),
+        "job_ids": job_ids,
+        "skipped_count": submitted_count - len(job_ids),
+    }
 
 
 def resolve_run_items(job_db: Any, workspace_id: str, items: list[dict[str, Any]]) -> list[dict]:

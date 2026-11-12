@@ -1,9 +1,12 @@
 import { batchPauseJobs, batchResumeJobs } from '../../../api/jobBatchPauseApi'
+import { isJobBatchAccepted } from '../../../api/jobBatchOperationsApi'
 import { useUiStore } from '../../uiStore'
+import { notifyJobBatchAccepted } from '../../taskCenterStore'
 import { applyMutationResults } from './mutationResults'
 import {
   refreshAfterBatchOperation,
   resolveBatchTarget,
+  runBatchApproval,
 } from './selectionModeState'
 import type { JobState, JobStoreSet } from '../state'
 
@@ -15,6 +18,10 @@ export function pauseActions(set: JobStoreSet, get: () => JobState) {
       set({ batchPauseLoading: true })
       try {
         const data = await batchPauseJobs(workspaceId, target, reason)
+        if (isJobBatchAccepted(data)) {
+          notifyJobBatchAccepted(workspaceId, data.operation)
+          return data
+        }
         const results = data.results ?? []
         applyMutationResults(set, results, '暂停')
         await refreshAfterBatchOperation(get, workspaceId)
@@ -22,7 +29,6 @@ export function pauseActions(set: JobStoreSet, get: () => JobState) {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Batch pause failed'
-        set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
       } finally {
@@ -36,6 +42,10 @@ export function pauseActions(set: JobStoreSet, get: () => JobState) {
       set({ batchResumeLoading: true })
       try {
         const data = await batchResumeJobs(workspaceId, target)
+        if (isJobBatchAccepted(data)) {
+          notifyJobBatchAccepted(workspaceId, data.operation)
+          return data
+        }
         const results = data.results ?? []
         applyMutationResults(set, results, '恢复')
         await refreshAfterBatchOperation(get, workspaceId)
@@ -43,11 +53,24 @@ export function pauseActions(set: JobStoreSet, get: () => JobState) {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Batch resume failed'
-        set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
       } finally {
         set({ batchResumeLoading: false })
+      }
+    },
+
+    async batchApproval(workspaceId: string, kind: 'approve' | 'reject') {
+      set({ batchApprovalLoading: true })
+      try {
+        return await runBatchApproval(set, get, workspaceId, kind)
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Batch approval failed'
+        useUiStore.getState().showToast(message, 'error')
+        throw err
+      } finally {
+        set({ batchApprovalLoading: false })
       }
     },
   }

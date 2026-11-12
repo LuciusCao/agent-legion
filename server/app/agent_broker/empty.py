@@ -18,7 +18,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 
-from server.app.agent_broker.empty_diagnostics import log_blocked_queue
+from server.app.agent_broker.empty_diagnostics import log_blocked_queue, read_queue_head
 from server.app.db.dialect import ConnectSource
 from server.app.db.transaction import read_connection
 
@@ -55,14 +55,23 @@ class EmptyClaimTrigger:
             if now - self._last_fired < self.debounce_seconds:
                 return
             self._last_fired = now
+        has_queued = False
+        head: list[dict[str, str]] | None = None
         with read_connection(dsn) as conn:
-            row = conn.execute(
-                "select 1 from agent_execution_requests where state='queued' limit 1"
-            ).fetchone()
-            if row is not None:
-                if reasons:
-                    log_blocked_queue(dsn, conn, reasons)
-                return
+            has_queued = (
+                conn.execute(
+                    "select 1 from agent_execution_requests where state='queued' limit 1"
+                ).fetchone()
+                is not None
+            )
+            if has_queued and reasons:
+                head = read_queue_head(conn)
+        # Persist the signal only after the read checkout is released —
+        # log_blocked_queue opens its own write transaction (#1239).
+        if has_queued:
+            if head is not None:
+                log_blocked_queue(dsn, reasons, head)
+            return
         if callback is None:
             return
         try:

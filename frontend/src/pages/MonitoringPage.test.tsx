@@ -13,10 +13,7 @@ vi.mock('../api/metrics', () => ({
 
 function renderPage() {
   return render(
-    <MemoryRouter
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      initialEntries={['/monitoring']}
-    >
+    <MemoryRouter initialEntries={['/monitoring']}>
       <Routes>
         <Route path="/monitoring" element={<MonitoringPage />} />
       </Routes>

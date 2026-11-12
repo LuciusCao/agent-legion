@@ -32,6 +32,18 @@ logger = logging.getLogger(__name__)
 PERMISSION_TIMEOUT_SECONDS = 120
 
 
+def settle_pending_permissions(runtime: SessionRuntime) -> None:
+    """Deny every parked permission so a cancelled turn never leaves a
+    permission prompt hanging (AGENTS.md half-applied-state discipline).
+    Pop each entry so a respond racing the cancel finds it gone (#158).
+    Split from service.py (file budget, #1238 merge); semantics unchanged."""
+    with runtime.lock:
+        while runtime.pending_permissions:
+            _request_id, pending = runtime.pending_permissions.popitem()
+            pending.decision = {"deny": True}
+            pending.event.set()
+
+
 def handle_permission_request(
     backend: ServiceBackend,
     session_id: str,

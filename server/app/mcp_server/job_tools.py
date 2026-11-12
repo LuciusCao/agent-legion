@@ -90,13 +90,22 @@ def register_job_tools(
         return await client.call("GET", path)
 
     @mcp.tool(structured_output=False)
-    async def list_jobs(workspace_id: str, status: str | None = None, limit: int = 20) -> str:
+    async def list_jobs(
+        workspace_id: str,
+        status: str | None = None,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> str:
         """Recent jobs of the workspace (newest first) with status,
         error_summary, per-node summaries. status filters (e.g. "failed");
-        limit caps at 100. For fleet questions and picking compare_jobs
-        pairs."""
+        limit caps at 100 (MCP-side policy; the REST list allows more).
+        The response carries next_cursor when more (older) jobs exist —
+        pass it back as cursor to fetch the next page; omit cursor for the
+        newest page. For fleet questions and picking compare_jobs pairs."""
         _, client = await client_factory()
-        path = f"{_ws(workspace_id)}/jobs" + _query({"status": status, "limit": limit})
+        path = f"{_ws(workspace_id)}/jobs" + _query(
+            {"status": status, "limit": limit, "cursor": cursor}
+        )
         return await client.call("GET", path)
 
     @mcp.tool(structured_output=False)

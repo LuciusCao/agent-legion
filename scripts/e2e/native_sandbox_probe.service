@@ -1,0 +1,45 @@
+[Unit]
+Description=Agent Legion disposable native sandbox network probe (CI only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=agent-legion-sandbox-probe
+Group=agent-legion-sandbox-probe
+WorkingDirectory=/var/lib/agent-legion-native-sandbox-probe
+Environment=HOME=/var/lib/agent-legion-native-sandbox-probe
+Environment=USER=agent-legion-sandbox-probe
+Environment=LOGNAME=agent-legion-sandbox-probe
+Environment=AGENT_LEGION_SKIP_DOTENV=1
+StateDirectory=agent-legion-native-sandbox-probe
+StateDirectoryMode=0700
+ExecStart=/usr/bin/python3 /opt/agent-legion-native-sandbox-probe/repo/scripts/e2e/native_sandbox_probe.py --state-dir /var/lib/agent-legion-native-sandbox-probe --output-dir /var/lib/agent-legion-native-sandbox-probe/evidence --context n0 --cases e0-n0-current-no-network,e0-n0-bwrap-no-net-control,e1-n0-user-namespace,e1-n0-user-net-namespace,e2-n0-private-loopback,e3-n0-raw-netlink-trace,e5-n0-single,e5-n0-concurrent-a,e5-n0-concurrent-b --summarize
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SecureBits=noroot noroot-locked no-setuid-fixup no-setuid-fixup-locked
+UMask=0077
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/agent-legion-native-sandbox-probe
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+LimitNOFILE=65535
+TimeoutStartSec=10min
+TimeoutStopSec=35s
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agent-legion-native-sandbox-probe
+
+[Install]
+WantedBy=multi-user.target

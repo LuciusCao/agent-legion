@@ -22,7 +22,8 @@ from typing import TYPE_CHECKING, Any
 
 from shared.output_truncation import OutputTruncation
 from shared.pi_events import scan_and_compress_pi_events
-from shared.pi_model_error import is_provider_auth_error
+from shared.pi_model_error import model_error_for_exit
+from shared.stderr_tail import AGENT_STDERR_FILENAME
 from worker.state_evidence import dump_prep_evidence, prep_failure_message
 from worker.upload.degraded_archive import (
     failed_metadata,
@@ -31,11 +32,8 @@ from worker.upload.degraded_archive import (
 )
 from worker.upload.report_policy import declared_ceiling_rejection
 from worker.upload.result_metadata import MAX_ERROR_MESSAGE_CHARS, exit_verdict
-from worker.upload.stderr_evidence import (
-    AGENT_STDERR_FILENAME,
-    secret_snapshot,
-    stderr_tail_for_run,
-)
+from worker.upload.secret_registry import secret_snapshot
+from worker.upload.stderr_evidence import stderr_tail_for_run
 
 if TYPE_CHECKING:
     from worker.upload.queue import UploadTask
@@ -158,10 +156,9 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # a truncated run whose outputs all landed still completes, and model
     # errors / budget exhaustion / contract violations / crashes / timeouts
     # keep their attribution (exclusion rules: OutputTruncation.failure).
-    model_error = scanned_model_error if task.exit_code == 0 else None
-    if task.exit_code == 1 and is_provider_auth_error(scanned_model_error):
-        model_error = scanned_model_error
-    failure = truncation.failure(task.expected_outputs, outputs, task.exit_code) or model_error
+    failure = truncation.failure(task.expected_outputs, outputs, task.exit_code) or (
+        model_error_for_exit(task.exit_code, scanned_model_error)
+    )
     result_status, error = exit_verdict(task.exit_code, failure, stderr_tail)
     metadata = {
         "status": result_status,
@@ -171,6 +168,16 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         "output_artifacts": {},
         "run_dir": PurePosixPath(run_dir.relative_to(job_dir)).as_posix(),
     }
+    # #865: the scan's truncation facts ride the result metadata into the
+    # Host outcome_json — the DB attribution face for runs whose failure was
+    # NOT rewritten (e.g. the continuation turn recovered and the run
+    # completed, or the remediation turn ended untruncated). Optional and
+    # tolerated-absent on the Host side (older Workers never send it).
+    if truncation.count:
+        metadata["output_truncation"] = {
+            "count": truncation.count,
+            "last_stop": truncation.last_stop,
+        }
     # #748: agent_stderr_tail rides the report metadata (not just the
     # archive) so the DB row + external error_summary surface the crash
     # reason without unpacking the archive. Keep the END of the tail

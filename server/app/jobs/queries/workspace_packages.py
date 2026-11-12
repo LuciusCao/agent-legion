@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.job_bulk_sql import id_chunks
 
 
 class WorkspacePackageQueriesMixin(ConnectionQueriesMixin):
@@ -97,13 +98,15 @@ class WorkspacePackageQueriesMixin(ConnectionQueriesMixin):
             )
 
     def set_jobs_packed(self, job_ids: list[str], packed: int) -> None:
-        if not job_ids:
-            return
-        placeholders = ",".join("%s" for _ in job_ids)
+        # Chunk the IN list like other bulk writes (job_bulk_sql.CHUNK_ROWS):
+        # a single giant parameter list is the only piece that does not scale
+        # linearly when the batch cap rises (#1348).
         with self.connect() as conn:
-            conn.execute(
-                f"""
-                update jobs set packed = %s where id in ({placeholders})
-                """,
-                (packed, *job_ids),
-            )
+            for chunk in id_chunks(job_ids):
+                placeholders = ",".join("%s" for _ in chunk)
+                conn.execute(
+                    f"""
+                    update jobs set packed = %s where id in ({placeholders})
+                    """,
+                    (packed, *chunk),
+                )

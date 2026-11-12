@@ -1,27 +1,28 @@
-"""Shared helpers for the studio publish-request handshake (#429 三轮).
-
-Split from services/studio_publish_requests.py (file budget): the wire-
-payload shaping, the lazy-expiry timestamp comparison, and the draft-version
-token are used by the service layer but carry no state-machine semantics of
-their own.
-"""
+"""Shared wire, draft-binding, and authorization helpers for publish requests."""
 
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from server.app.services.job_errors import ConflictError
+from server.app.services.studio_publish_request_heartbeat import CONFIRMING_STALE_SECONDS
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
 
-# #429 四轮 P1: how long a ``confirming`` row may sit before readers treat
-# it as a dead process's claim (the confirm died between claim and resolve).
-# A healthy publish completes in seconds; 5 minutes absorbs slow disk/
-# pagination without ever sweeping a live claim.
-CONFIRMING_STALE_SECONDS = 300
+__all__ = [
+    "CONFIRMING_STALE_SECONDS",
+    "active_revision_id",
+    "draft_yaml_hash",
+    "is_past_expiry",
+    "iso_payload",
+    "may_read_request",
+    "refuse_stale_draft_claim",
+    "with_draft_warnings",
+    "workspace_draft_yaml",
+]
 
 
 def workspace_draft_yaml(job_db: JobQueries, workspace_id: str) -> str:
@@ -100,19 +101,6 @@ def is_past_expiry(request: dict[str, Any]) -> bool:
     if isinstance(expires_at, str):
         expires_at = datetime.fromisoformat(expires_at)
     return expires_at <= datetime.now(UTC)
-
-
-def is_stale_claim(request: dict[str, Any]) -> bool:
-    """Whether a ``confirming`` row's claim is past the stale threshold
-    (#429 四轮 P1): the claiming process is presumed dead. String-tolerant
-    like ``is_past_expiry``. A row without ``claimed_at`` reads as NOT
-    stale — the safe default never risks expiring a live claim."""
-    claimed_at = request.get("claimed_at")
-    if claimed_at is None:
-        return False
-    if isinstance(claimed_at, str):
-        claimed_at = datetime.fromisoformat(claimed_at)
-    return claimed_at <= datetime.now(UTC) - timedelta(seconds=CONFIRMING_STALE_SECONDS)
 
 
 def may_read_request(job_db: JobQueries, request: dict[str, Any], user: dict[str, Any]) -> bool:

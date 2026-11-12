@@ -8,6 +8,7 @@ import {
   deleteWorkspacePackage,
   fetchActiveWorkflowRevision,
   fetchJobArtifact,
+  fetchJobArtifactRawBytes,
   fetchJobDetail,
   fetchWorkflowRevisionDetail,
   fetchWorkflowRevisions,
@@ -15,6 +16,8 @@ import {
   updateWorkspace,
   updateWorkspacePackage,
 } from './index'
+import { ArtifactTooLargeError } from './jobArtifactBytes'
+import { jobArtifactRawUrl } from './jobsApi'
 import {
   getAgentCatalog,
   getSkillDetail,
@@ -305,6 +308,197 @@ describe('job helpers', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/jobs/j1/artifacts/log.txt',
       expect.any(Object)
+    )
+  })
+
+  it('fetchJobArtifactRawBytes reads raw bytes with media type (#1146)', async () => {
+    const mediaBytes = Uint8Array.from([0, 1, 2, 0xfd, 0xfe, 0xff]).buffer
+    const arrayBuffer = vi.fn().mockResolvedValue(mediaBytes)
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer,
+      headers: new Headers({
+        'Content-Length': '6',
+        'Content-Type': 'video/mp4',
+      }),
+    } as unknown as Response)
+    global.fetch = fetchMock
+
+    const result = await fetchJobArtifactRawBytes('j1', 'demo.mp4')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/jobs/j1/raw-artifacts/demo.mp4',
+      {
+        // #1178 codex 复审：重取通道必须穿透 HTTP 缓存——同名产物重跑后
+        // 字节已变而 URL 不变，freshness window 会播出旧字节。
+        cache: 'no-store',
+      }
+    )
+    expect(result).toEqual({
+      name: 'demo.mp4',
+      mediaType: 'video/mp4',
+      bytes: mediaBytes,
+    })
+    expect(arrayBuffer).toHaveBeenCalled()
+  })
+
+  it('fetchJobArtifactRawBytes rejects on oversized Content-Length without reading the body', async () => {
+    const arrayBuffer = vi.fn()
+    const cancel = vi.fn().mockResolvedValue(undefined)
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer,
+      body: { cancel, getReader: vi.fn() },
+      headers: new Headers({ 'Content-Length': String(512 * 1024 * 1024 + 1) }),
+    } as unknown as Response)
+    global.fetch = fetchMock
+
+    await expect(
+      fetchJobArtifactRawBytes('j1', 'big.mp4')
+    ).rejects.toBeInstanceOf(ArtifactTooLargeError)
+    expect(arrayBuffer).not.toHaveBeenCalled()
+    // 预检命中即取消流，不读取任何正文。
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('fetchJobArtifactRawBytes enforces the limit incrementally on streamed bodies and cancels mid-stream (#1178 codex)', async () => {
+    // Content-Length 缺失（或 gzip 声明的是压缩后长度）时，上限必须在读取
+    // 途中触发——不能把超限正文完整分配进内存才复核。maxBytes 收窄到 8：
+    // 第二个 6 字节块累计 12 > 8 即取消，第三个块永远不该被读取。
+    const chunk = (n: number) => new Uint8Array(n).fill(1)
+    const cancel = vi.fn().mockResolvedValue(undefined)
+    const reader = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({ done: false, value: chunk(6) })
+        .mockResolvedValueOnce({ done: false, value: chunk(6) })
+        .mockResolvedValueOnce({ done: false, value: chunk(6) }),
+      cancel,
+    }
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: { getReader: () => reader },
+      headers: new Headers(),
+    } as unknown as Response)
+    global.fetch = fetchMock
+
+    await expect(
+      fetchJobArtifactRawBytes('j1', 'big.mp4', { maxBytes: 8 })
+    ).rejects.toBeInstanceOf(ArtifactTooLargeError)
+    expect(reader.read).toHaveBeenCalledTimes(2)
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('fetchJobArtifactRawBytes forwards the abort signal to fetch (#1178 codex 复审 P2 取消语义)', async () => {
+    const controller = new AbortController()
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(1)),
+      headers: new Headers(),
+    } as unknown as Response)
+    global.fetch = fetchMock
+
+    await fetchJobArtifactRawBytes('j1', 'demo.mp4', {
+      signal: controller.signal,
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/jobs/j1/raw-artifacts/demo.mp4',
+      { cache: 'no-store', signal: controller.signal }
+    )
+  })
+
+  it('fetchJobArtifactRawBytes assembles multi-chunk streamed bodies', async () => {
+    const reader = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({ done: false, value: Uint8Array.from([1, 2]) })
+        .mockResolvedValueOnce({
+          done: false,
+          value: Uint8Array.from([3, 4, 5]),
+        })
+        .mockResolvedValueOnce({ done: true, value: undefined }),
+      cancel: vi.fn(),
+    }
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: { getReader: () => reader },
+      headers: new Headers({ 'Content-Type': 'video/mp4' }),
+    } as unknown as Response)
+    global.fetch = fetchMock
+
+    const result = await fetchJobArtifactRawBytes('j1', 'demo.mp4')
+    expect(Array.from(new Uint8Array(result.bytes))).toEqual([1, 2, 3, 4, 5])
+    expect(result.mediaType).toBe('video/mp4')
+    expect(reader.cancel).not.toHaveBeenCalled()
+  })
+
+  it('fetchJobArtifactRawBytes rejects when the body exceeds the limit without Content-Length', async () => {
+    // CI 零大分配：maxBytes 收窄到 8，16 字节 body 即超限——与 512 MiB 上限
+    // 走同一条错误路径（断言不变），不必真造 512 MiB buffer。
+    const mediaBytes = new ArrayBuffer(16)
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(mediaBytes),
+      headers: new Headers(),
+    } as unknown as Response)
+    global.fetch = fetchMock
+
+    await expect(
+      fetchJobArtifactRawBytes('j1', 'big.mp4', { maxBytes: 8 })
+    ).rejects.toThrow(/exceed readArtifactBytes limit/)
+  })
+
+  it('fetchJobArtifactRawBytes re-fetches the same URL after an init resend — every call hits fetch with no-store (#1178 codex)', async () => {
+    // 重跑覆盖后的重取语义：宿主 init 重发 → 面板重调同名产物 → URL 不变
+    // ——通道必须每次真实打到服务端（no-store），浏览器不得用 freshness
+    // window 的旧响应截流。
+    const first = Uint8Array.from([1]).buffer
+    const second = Uint8Array.from([2]).buffer
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(first),
+        headers: new Headers({ 'Content-Type': 'video/mp4' }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(second),
+        headers: new Headers({ 'Content-Type': 'video/mp4' }),
+      } as unknown as Response)
+    global.fetch = fetchMock
+
+    const before = await fetchJobArtifactRawBytes('j1', 'final.mp4')
+    const after = await fetchJobArtifactRawBytes('j1', 'final.mp4')
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    for (const call of fetchMock.mock.calls) {
+      expect(call[0]).toBe('/api/jobs/j1/raw-artifacts/final.mp4')
+      expect(call[1]).toEqual({ cache: 'no-store' })
+    }
+    expect(new Uint8Array(after.bytes)).toEqual(new Uint8Array(second))
+    expect(new Uint8Array(before.bytes)).toEqual(new Uint8Array(first))
+  })
+
+  it('jobArtifactRawUrl 走独立前缀嵌套路由并按路径段编码（#1178 codex 复审 P2，第 6 轮收口）', () => {
+    // /raw-artifacts/ 前缀与文本路由 /artifacts/{name:path} 零撞形（贪婪
+    // 后缀形态会把名为 x/raw 的产物文本 URL 按前缀名吞掉）。整名
+    // encodeURIComponent 会把 / 编成 %2F——ASGI 解码后变回分隔符；按段
+    // 编码后 / 原样保留，层级结构语义不变。
+    expect(jobArtifactRawUrl('j1', 'final.mp4')).toBe(
+      '/api/jobs/j1/raw-artifacts/final.mp4'
+    )
+    expect(jobArtifactRawUrl('j1', 'reports/final.mp4')).toBe(
+      '/api/jobs/j1/raw-artifacts/reports/final.mp4'
+    )
+    expect(jobArtifactRawUrl('j1', 'deep/nested/dir/clip.mp4')).toBe(
+      '/api/jobs/j1/raw-artifacts/deep/nested/dir/clip.mp4'
+    )
+    // 段内特殊字符仍被编码（空格/#/中文），段间分隔符不受影响。
+    expect(jobArtifactRawUrl('j 1', 'my clip.mp4')).toBe(
+      '/api/jobs/j%201/raw-artifacts/my%20clip.mp4'
+    )
+    expect(jobArtifactRawUrl('j1', 'a#b/帧 1.mp4')).toBe(
+      '/api/jobs/j1/raw-artifacts/a%23b/%E5%B8%A7%201.mp4'
     )
   })
 })

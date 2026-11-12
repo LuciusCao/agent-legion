@@ -1,6 +1,9 @@
+from typing import Annotated, Any
+
 from fastapi import APIRouter, Depends, Request
 
 from server.app.auth.dependencies import reject_studio_agent_scope
+from server.app.auth.workspace_access import require_workspace_access
 from server.app.jobs import JobQueries
 from server.app.routes.workflow_revisions_contracts import (
     WorkflowDraftRequest,
@@ -50,6 +53,7 @@ def create_workflow_draft_publish_router(job_db: JobQueries, settings: Settings)
         workspace_id: str,
         request: WorkflowDraftRequest,
         http_request: Request,
+        user: Annotated[dict[str, Any], Depends(require_workspace_access)],
     ) -> WorkflowDraftValidationResponse:
         require_draft_workflow_key_match(job_db, workspace_id, request.definition_yaml)
         valid, errors = publish_workflow_draft(
@@ -57,6 +61,10 @@ def create_workflow_draft_publish_router(job_db: JobQueries, settings: Settings)
             workspace_id,
             request.definition_yaml,
             settings.executor_runtime.workflows.custom_nodes_enabled,
+            # M47: a runtime-only publish appends a config version row; stamp
+            # the operator on it (the structural path opens a new revision
+            # instead, whose row carries no operator column).
+            created_by=f"user:{user['id']}",
         )
         if valid:
             # The publish effect is real: any pending agent publish request

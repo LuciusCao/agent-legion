@@ -116,7 +116,7 @@ describe('uploadMaterialFile', () => {
 
   it('runs presign → PUT → complete and returns the material id', async () => {
     mockPresign.mockResolvedValue({
-      material: { id: 'm1' },
+      material: { id: 'm1', upload_generation: 2 },
       upload_url: 'https://s3.example/put',
       upload_expires_in_seconds: 900,
       deduplicated: false,
@@ -142,9 +142,11 @@ describe('uploadMaterialFile', () => {
     )
     expect(fetchMock).toHaveBeenCalledWith('https://s3.example/put', {
       method: 'PUT',
+      headers: { 'If-None-Match': '*' },
       body: file,
     })
-    expect(mockComplete).toHaveBeenCalledWith('ws1', 'm1')
+    // #1282 复审 P1：complete 携带 presign 响应里的上传代次。
+    expect(mockComplete).toHaveBeenCalledWith('ws1', 'm1', 2)
   })
 
   it('skips the PUT when the material is deduplicated', async () => {
@@ -179,5 +181,25 @@ describe('uploadMaterialFile', () => {
       '直传失败 (HTTP 403)'
     )
     expect(mockComplete).not.toHaveBeenCalled()
+  })
+
+  it('treats a 412 PUT as already uploaded and still completes (#1321)', async () => {
+    // 条件写（If-None-Match: *）下的网络重试：首个 PUT 已落盘、响应丢失，
+    // 重放得 412——按「已上传」处理，内容裁决交给 complete 的服务端核验。
+    mockPresign.mockResolvedValue({
+      material: { id: 'm1', upload_generation: 3 },
+      upload_url: 'https://s3.example/put',
+      upload_expires_in_seconds: 900,
+      deduplicated: false,
+    } as never)
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue({ ok: false, status: 412 } as Response)
+    mockComplete.mockResolvedValue({ material: { id: 'm1' } } as never)
+
+    const result = await uploadMaterialFile('ws1', file, 'a.txt')
+
+    expect(result).toEqual({ materialId: 'm1', deduplicated: false })
+    expect(mockComplete).toHaveBeenCalledWith('ws1', 'm1', 3)
   })
 })

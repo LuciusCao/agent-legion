@@ -3,10 +3,12 @@ import {
   type WorkflowYamlNode,
 } from './workflowStudioYamlDraft.parse'
 
-/** 顶层 execution 默认块（provider/model/thinking 子集，prompt 仅节点级）。 */
+/** 顶层 execution 默认块（provider/model/thinking/runtime 子集——prompt/
+ * prompt_mode 仅节点级 #513；runtime 默认只达 agent 节点 #933，对齐后端
+ * loader.merge_execution_defaults）。 */
 export type WorkflowYamlExecutionDefaults = Pick<
   NonNullable<WorkflowYamlNode['execution']>,
-  'provider' | 'model' | 'thinking'
+  'provider' | 'model' | 'thinking' | 'runtime'
 >
 
 /**

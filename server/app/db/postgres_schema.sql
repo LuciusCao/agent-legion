@@ -1076,15 +1076,19 @@ create table if not exists studio_chat_messages (
   id text primary key,
   seq bigint generated always as identity,
   session_id text not null references studio_chat_sessions(id) on delete cascade,
-  kind text not null check(kind in ('text', 'tool_call', 'plan', 'permission', 'status', 'thought')),
+  kind text not null check(kind in ('text', 'tool_call', 'plan', 'permission', 'status', 'thought', 'draft')),
   role text not null check(role in ('user', 'agent', 'system')),
   content_json text not null default '{}',
   created_at timestamptz not null default current_timestamp
 );
--- Upgrade path for pre-v45 databases: widen the kind check with 'thought'.
+-- Upgrade path for pre-v45 databases: widen the kind check ('thought' at
+-- v45, 'draft' at v95 — the replay list must carry EVERY value live rows can
+-- hold: PostgreSQL re-validates existing rows on ADD CONSTRAINT, so a narrow
+-- replay list fails the whole upgrade before the widening migration runs,
+-- #1123 codex P1).
 alter table studio_chat_messages drop constraint if exists studio_chat_messages_kind_check;
 alter table studio_chat_messages add constraint studio_chat_messages_kind_check
-  check(kind in ('text', 'tool_call', 'plan', 'permission', 'status', 'thought'));
+  check(kind in ('text', 'tool_call', 'plan', 'permission', 'status', 'thought', 'draft'));
 create unique index if not exists idx_studio_chat_messages_seq
   on studio_chat_messages(seq);
 create index if not exists idx_studio_chat_messages_session

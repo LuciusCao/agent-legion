@@ -234,7 +234,7 @@ def test_scan_and_compress_empty_tail_writes_no_sink(tmp_path):
 
 def test_scan_and_compress_sink_write_failure_never_fails(tmp_path, monkeypatch):
     """sink 不可写（OSError）不炸压缩：返回值仍带 tail，压缩照常完成。"""
-    from shared import pi_events
+    from shared import pi_events_scan as pi_events
     from shared.pi_events import scan_and_compress_pi_events
 
     def broken_persist(_sink, _tail):
@@ -281,7 +281,7 @@ def testpersist_stderr_tail_cleans_staging_on_replace_failure(tmp_path, monkeypa
     文件必须被清理——不清理则永久残留（内容虽已脱敏，但会随 run 目录进归档）。"""
     import os
 
-    from shared import pi_events
+    from shared import pi_events_scan as pi_events
     from shared.stderr_tail import persist_stderr_tail
 
     def failing_replace(src, dst):
@@ -640,7 +640,7 @@ _EVICT_PEM = "\n".join(
 
 # (stderr 文本, 已注册密钥, margin 提示, 不得出现在任何出口面的碎片)。
 # margin 提示遵守调用方契约（≥ 最长可匹配字面量，生产由
-# stderr_evidence.secret_snapshot 从同一注册表一次读出）：缓冲裁剪落在密钥
+# secret_registry.secret_snapshot 从同一注册表一次读出）：缓冲裁剪落在密钥
 # 中间时，残段必须整体落在 lookback 里、永不进入输出窗口。
 _EVICT_MATRIX = [
     pytest.param(

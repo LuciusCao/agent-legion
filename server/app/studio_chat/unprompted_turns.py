@@ -194,9 +194,10 @@ class UnpromptedTurnWatcher:
                 return
             tail = WireTail(path)
             if self.baseline_on_locate:
+                # baseline 完成前不认领（#1228 codex P1）：baseline 抛错时
+                # self.tail 保持 None，下一轮重新 baseline；提前赋值会让
+                # offset=0 的实例直接 read，从文件头重读历史重复落行。
                 tail.baseline()
-                self.tail = tail
-                return
             self.tail = tail
         if not self.pending:
             # A backlog left by a failed append pauses the journal: it is
@@ -215,7 +216,11 @@ class UnpromptedTurnWatcher:
             ended = False
             while self.pending:
                 kind, role, content = self.pending[0]
-                store.append_message(self.session_id, kind, role, content)
+                if kind == "tool_call":
+                    # #1120: tool.call/tool.result pairs coalesce into one row.
+                    store.append_tool_call(self.session_id, runtime, content)
+                else:
+                    store.append_message(self.session_id, kind, role, content)
                 self.pending.pop(0)
                 if kind == "tool_call" and is_agent_legion_tool_call(content):
                     runtime.mcp_observed = True

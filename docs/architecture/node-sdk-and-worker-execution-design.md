@@ -1,5 +1,9 @@
 # 节点 SDK 与 code 节点执行迁移 Worker（合并设计）
 
+> **历史设计记录**（#1103）：现行参考（执行链、运行时契约、SDK API、Worker code 协议、
+> 体积上限配置、残余面）已抽出到 [node-sdk-and-worker-execution.md](node-sdk-and-worker-execution.md)；
+> 本文保留批次设计与盘点，章节号不变以兼容代码注释中的 `§N` 引用。
+
 状态：批次 0/1 已实现；批次 2 已实施（§7，协议 v2 + schema v39，2026-08 落地）；
 批次 3 已取消（§9）。**2026-08-17 更新（#82/#96）**：§4.2 API 表面已扩展
 （entrypoint / batch_payload / root_dir + http_client / media 姊妹模块）；
@@ -203,14 +207,17 @@ SDK 不自定义异常类型，builtin 子进程与沙箱 child 的两种 token 
 
 ### 5.3 auth 失败上报：节点记录事实，父进程执行特权动作
 
-- 节点侧：`ctx.report_auth_failure()` 在 `job_dir/.node_runtime/auth_failure`
-  写标记文件（内容为 node_config 里的 connection key，可为空串）。job_dir 在
-  内置子进程、沙箱（可写白名单含 job_dir）、未来 Worker 三条路径都可写，无需
-  协议扩展；`.node_runtime/` 是目录，不会被节点产物的顶层文件清单
-  （`iterdir()` + `is_file()`）捞走。
+- 节点侧：`ctx.report_auth_failure()` 在
+  `job_dir/.node_runtime/auth_failure-<execution_id>` 写本 execution 的标记文件
+  （内容为 node_config 里的 connection key，可为空串）；runtime 无 execution_id 的
+  旧式手工上下文才回退固定名 `auth_failure`（#1355）。生产 dispatch 始终提供
+  execution_id，使并行节点、分片与重试的标记互相隔离。job_dir 在内置子进程、沙箱
+  （可写白名单含 job_dir）、Worker 三条路径都可写，无需协议扩展；`.node_runtime/`
+  是目录，不会被节点产物的顶层文件清单（`iterdir()` + `is_file()`）捞走。
 - 父进程侧：`_execute_isolated` 与 `execute_custom_sandboxed` 在子进程退出后
-  检查标记；存在则用 `ConnectionTokenService` 失效该连接的缓存 token，随后删除
-  标记。运行前先做 stale 清理（与 result 文件「上次残留不得伪装成功」同理）。
+  检查本 execution 的标记；存在则用 `ConnectionTokenService` 失效该连接的缓存
+  token，随后删除该标记。运行前只清理本 execution 的 stale 标记（与 result 文件
+  「上次残留不得伪装成功」同理），不会清掉并行邻节点的上报。
 - 语义变化：失效动作从「节点运行中立即」变为「节点退出后、dispatch 前」——
   连接 token 缓存在下一次 dispatch 才被读取，行为等价。自定义沙箱节点从
   「无法上报」变为「可上报」，属能力补齐。

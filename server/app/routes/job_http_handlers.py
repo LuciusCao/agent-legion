@@ -6,26 +6,10 @@ errors escape instead of hand-writing ``try/except`` mapping blocks.
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import Response
 
 from server.app.routes.job_http import raise_job_http_error
 from server.app.services.job_errors import JobServiceError
-from server.app.services.job_selection_resolver import BatchSelectionTooLargeError
-
-
-def batch_selection_too_large_response(_request: Request, error: Exception) -> JSONResponse:
-    """422 for an oversized batch selection (#712 / #917 B-2).
-
-    Raised by the shared selection resolver from every batch endpoint, so it
-    is mapped once at the app level instead of per route. ``detail.message``
-    is what clients display; ``code`` / ``limit`` let them localize it.
-    """
-    if not isinstance(error, BatchSelectionTooLargeError):
-        raise error
-    return JSONResponse(
-        status_code=422,
-        content={"detail": {"message": str(error), "code": error.code, "limit": error.limit}},
-    )
 
 
 async def job_service_error_response(request: Request, error: Exception) -> Response:
@@ -49,5 +33,4 @@ async def job_service_error_response(request: Request, error: Exception) -> Resp
 
 
 def register_job_http_exception_handlers(app: FastAPI) -> None:
-    app.add_exception_handler(BatchSelectionTooLargeError, batch_selection_too_large_response)
     app.add_exception_handler(JobServiceError, job_service_error_response)

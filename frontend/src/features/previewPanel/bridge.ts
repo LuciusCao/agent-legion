@@ -8,19 +8,37 @@
  * - 宿主回包用 postMessage(response, '*')：目标窗口已被 contentWindow 引用
  *   钉死，'*' 只是绕开 opaque origin 的语法要求，不会投递到别的窗口。
  *
- * 桥只暴露只读能力（listArtifacts / readArtifact / getJobDetail）与主题
- * 变量；写操作（发布、改配置）永远不走桥。新增方法即公共契约变更，需同步
- * server/app/mcp_server/preview_guide.md 与本文件的测试。
+ * 桥只暴露只读能力（listArtifacts / readArtifact / readArtifactBytes /
+ * getJobDetail）与主题变量；写操作（发布、改配置）永远不走桥。新增方法即
+ * 公共契约变更，需同步 server/app/mcp_server/preview_guide.md 与本文件的测试。
  */
 
 export const PREVIEW_PANEL_SOURCE = 'agent-legion-preview-panel'
 export const PREVIEW_HOST_SOURCE = 'agent-legion-preview-host'
 
+/** 面板 window 上的字节桥注入全局名（preview_guide.md 的作者契约同名）。 */
+export const PREVIEW_BYTE_BRIDGE_GLOBAL = '__agentLegionPreviewBytes'
+
+/** byte-port-offer 消息类型（bootstrap 上交字节桥端口；鉴别见 acceptor）。 */
+export const BYTE_PORT_OFFER_TYPE = 'byte-port-offer'
+
 /** 桥目前支持的方法（只读）。 */
 export type PreviewBridgeMethod =
   | 'listArtifacts'
   | 'readArtifact'
+  | 'readArtifactBytes'
   | 'getJobDetail'
+
+/**
+ * init.capabilities：宿主在基础契约（listArtifacts / readArtifact /
+ * getJobDetail，任意版本必有）之外额外支持的桥方法。#1146 起首个条目是
+ * readArtifactBytes（媒体字节 + blob 播放）。旧宿主不发该字段——面板把它
+ * 当作「仅基础契约」处理；方法级探测不可行（isPanelToHostMessage 白名单
+ * 对未知 method 静默丢弃，面板收不到错误响应），能力声明是唯一同步通道。
+ */
+export const PREVIEW_HOST_CAPABILITIES: readonly string[] = [
+  'readArtifactBytes',
+]
 
 /** 面板 → 宿主：就绪信号（宿主收到后下发 init）。 */
 export interface PreviewPanelReadyMessage {
@@ -35,7 +53,7 @@ export interface PreviewPanelResizeMessage {
   height: number
 }
 
-/** 面板 → 宿主：桥方法调用。readArtifact 需要 params.name。 */
+/** 面板 → 宿主：桥方法调用。readArtifact / readArtifactBytes 需要 params.name。 */
 export interface PreviewPanelRequestMessage {
   source: typeof PREVIEW_PANEL_SOURCE
   type: 'request'
@@ -54,13 +72,33 @@ export interface PreviewPanelCspViolationMessage {
   directive: string
 }
 
+/**
+ * 面板 → 宿主：字节桥 port 上交（#1178 codex 复审 P1 第 4 轮修复）。
+ * 由宿主注入的 bootstrap 脚本发出（byteBridgeBootstrap.ts），不是作者
+ * API；端口本体在消息的 `event.ports`（transfer），不在 data 里。宿主
+ * 每个 iframe 挂载只接受第一次上交（portBridge.ts），其后的上交（含
+ * 面板自导航后外部文档的伪造）一律拒绝并关闭。
+ */
+export interface PreviewPanelBytePortOfferMessage {
+  source: typeof PREVIEW_PANEL_SOURCE
+  type: 'byte-port-offer'
+}
+
 export type PreviewPanelToHostMessage =
   | PreviewPanelReadyMessage
   | PreviewPanelResizeMessage
   | PreviewPanelRequestMessage
   | PreviewPanelCspViolationMessage
+  | PreviewPanelBytePortOfferMessage
 
-/** 宿主 → 面板：初始化（jobId + 主题变量 + 可选资源 URL）。 */
+/** 宿主 → 面板：初始化（jobId + 主题变量 + 可选资源 URL + 能力声明）。
+ *
+ * init 只携带数据，永不携带端口等能力（#1178 codex 复审 P1）：字节桥
+ * （readArtifactBytes）的 MessagePort 由注入 bootstrap 在初始文档解析期
+ * 自建并上交宿主（见 byteBridgeBootstrap.ts / portBridge.ts），在面板文档
+ * 存活期内持续有效——节点状态变化触发的 init 重发是「重取数据」信号，
+ * 面板沿用既有全局桥函数即可，不要期待新的端口。
+ */
 export interface PreviewHostInitMessage {
   source: typeof PREVIEW_HOST_SOURCE
   type: 'init'
@@ -68,6 +106,8 @@ export interface PreviewHostInitMessage {
   theme: Record<string, string>
   /** 平台提供的可选资源（如 katexCssUrl/katexJsUrl）；面板必须能在缺失时降级。 */
   assets: Record<string, string>
+  /** 基础契约之外的桥方法（PREVIEW_HOST_CAPABILITIES）；旧宿主缺失该字段。 */
+  capabilities?: readonly string[]
 }
 
 /** 宿主 → 面板：桥方法响应（与 request 按 id 配对）。 */
@@ -84,9 +124,10 @@ export type PreviewHostToPanelMessage =
   | PreviewHostInitMessage
   | PreviewHostResponseMessage
 
-const BRIDGE_METHODS: readonly string[] = [
+export const BRIDGE_METHODS: readonly string[] = [
   'listArtifacts',
   'readArtifact',
+  'readArtifactBytes',
   'getJobDetail',
 ]
 
@@ -106,6 +147,10 @@ export function isPanelToHostMessage(
       return typeof data.height === 'number' && Number.isFinite(data.height)
     case 'csp-violation':
       return typeof data.directive === 'string'
+    case 'byte-port-offer':
+      // 端口本体在 event.ports（data 不含可校验字段）；首次-only 接受与
+      // 伪造拒绝在 portBridge.ts 的 acceptor。
+      return true
     case 'request':
       return (
         typeof data.id === 'number' &&

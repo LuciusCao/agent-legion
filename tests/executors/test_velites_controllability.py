@@ -375,6 +375,26 @@ def test_no_auto_discovery(tmp_path: Path, velites_binary: Path) -> None:
     thread.start()
     try:
         base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        # The registry is the only credential source (#1102 removed the
+        # config.json / env bridge); a private file also keeps a developer's
+        # real ~/.velites/models.json out of the run.
+        models_path = tmp_path / "models.json"
+        models_path.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "openai_compat": {
+                            "api": "openai-completions",
+                            "baseUrl": base_url,
+                            "apiKey": "test-key",
+                            "models": ["stub-model"],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        models_path.chmod(0o600)
         proc = _run(
             velites_binary,
             tmp_path,
@@ -390,13 +410,7 @@ def test_no_auto_discovery(tmp_path: Path, velites_binary: Path) -> None:
                 "--no-sandbox",
                 "@prompt.md",
             ],
-            env_extra={
-                "VELITES_BASE_URL": base_url,
-                "VELITES_API_KEY": "test-key",
-                # This test exercises the explicit legacy env bridge and must
-                # not inherit a developer's real ~/.velites/models.json.
-                "VELITES_MODELS_PATH": str(tmp_path / "missing-models.json"),
-            },
+            env_extra={"VELITES_MODELS_PATH": str(models_path)},
         )
     finally:
         server.shutdown()
@@ -410,3 +424,70 @@ def test_no_auto_discovery(tmp_path: Path, velites_binary: Path) -> None:
     assert marker not in proc.stdout, "AGENTS.md content leaked into the event stream"
     events = _events(proc)
     assert events[-1]["type"] == "agent_end"
+
+
+@pytest.mark.parametrize(
+    ("declared", "expected_field", "absent_field"),
+    [
+        (None, "max_tokens", "max_completion_tokens"),
+        ("max_tokens", "max_tokens", "max_completion_tokens"),
+        ("max_completion_tokens", "max_completion_tokens", "max_tokens"),
+    ],
+)
+def test_output_cap_field_follows_registry_declaration(
+    tmp_path: Path,
+    velites_binary: Path,
+    declared: str | None,
+    expected_field: str,
+    absent_field: str,
+) -> None:
+    """#1093: `--max-output-tokens` rides the body field the models.json entry
+    declares (`outputTokensParam`); an undeclared model keeps `max_tokens`."""
+    (tmp_path / "prompt.md").write_text("Say done.", encoding="utf-8")
+    _MockSseHandler.request_bodies = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _MockSseHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        model: dict[str, Any] = {"id": "o3-mini"}
+        if declared is not None:
+            model["outputTokensParam"] = declared
+        registry = {
+            "providers": {
+                "openai": {
+                    "api": "openai-completions",
+                    "baseUrl": f"http://127.0.0.1:{server.server_address[1]}",
+                    "apiKey": "test-key",
+                    "models": [model],
+                }
+            }
+        }
+        models_path = tmp_path / "models.json"
+        models_path.write_text(json.dumps(registry), encoding="utf-8")
+        models_path.chmod(0o600)
+        proc = _run(
+            velites_binary,
+            tmp_path,
+            [
+                "--provider",
+                "openai",
+                "--model",
+                "o3-mini",
+                "--max-output-tokens",
+                "4096",
+                "--no-sandbox",
+                "@prompt.md",
+            ],
+            env_extra={"VELITES_MODELS_PATH": str(models_path)},
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+    assert proc.returncode == 0, proc.stderr
+    assert _MockSseHandler.request_bodies, "provider received no request"
+    for raw in _MockSseHandler.request_bodies:
+        body = json.loads(raw)
+        assert body[expected_field] == 4096
+        assert absent_field not in body

@@ -24,7 +24,7 @@
 | D6 | 部署配置与凭据 | 权威配置（丢了可重建，但须同步改 PG 角色密码与对象存储凭据） | `deploy/.env`、`deploy/secrets/postgres_password`、`deploy/secrets/postgres_pgpass`、`deploy/compose.local.yaml`（均 gitignored）/ 根 `.env` | §1.1：文件复制 | §2.3 第 2 步：全新机器整份放回（先于一切）；原机回退**保留现有**并与备份 `diff`——PG 角色密码存在 PG 集群（卷）里而不在 dump 里，现有文件与现有集群匹配 | `docker compose "${F[@]}" config` 解析成功；`postgres` healthy |
 | D7 | Host 数据根 `artifacts/` | 视实例：§1.2 判定 `artifact_refs` 非空时是 legacy CAS 唯一副本 | 卷 `host-data`（或 bind，`HD_SRC`）下 / `data/`（或 `AGENT_LEGION_DATA_DIR`）下 | §2.2.3（与 `jobs/` 同包） | §2.3 第 5 步：`tar tzf` → 删现有 `artifacts/` 与 `jobs/` → 解包 | §2.4：`artifact_refs` 引用的每个 blob 文件存在 |
 | D8 | Host 数据根 `jobs/` | 视实例：§1.2 判定非空时含唯一副本；否则是可淘汰缓存 | 同 D7 | 判定非空：§2.2.3；判定为空：不备份 | 有备份：同 D7；无备份：**原机回退也必须清空现有 `jobs/`**——产物读取本地优先且不对照清单（`server/app/services/job_artifacts.py` 的 `read`），留着会读到备份点之后的文件 | §2.4 抽查产物下载 |
-| D9 | Host 数据根 `logs/` | 非权威：按保留期轮转的执行日志；节点日志 `logs/jobs/<job_id>-<node_key>.log` 文件名固定，重跑时截断重写（`server/app/executors/_code_sandbox.py` 的 `O_TRUNC`） | 同 D7 | 有审计需求才归档：§2.2.3 末尾的 `BACKUP_VOL "$HD_SRC" logs-jobs logs/jobs` | §2.3 第 5 步。原机回退：有归档就 `tar tzf` 校验后用它整体替换 `logs/jobs/`，没有就清空 `logs/jobs/`——留着会让恢复后的 job 显示备份点之后的日志；代价是历史节点日志不再可看 | 不适用 |
+| D9 | Host 数据根 `logs/` | 非权威：按保留期轮转的执行日志；节点日志 `logs/jobs/by-job/<job_id>/<node_key 编码>.log`（#1113 前为扁平名 `logs/jobs/<job_id>-<node_key>.log`）路径固定，重跑时截断重写（`server/app/executors/_code_sandbox.py` 的 `O_TRUNC`） | 同 D7 | 有审计需求才归档：§2.2.3 末尾的 `BACKUP_VOL "$HD_SRC" logs-jobs logs/jobs` | §2.3 第 5 步。原机回退：有归档就 `tar tzf` 校验后用它整体替换 `logs/jobs/`，没有就清空 `logs/jobs/`——留着会让恢复后的 job 显示备份点之后的日志；代价是历史节点日志不再可看 | 不适用 |
 | D10 | Host 数据根 `materials_cache/`、`agent_bundles/`、`packages/`、`videos/`、`artifacts/.staging/`、`native-prod.state`、`bin/`；`AGENT_LEGION_SKILLS_RUNS_DIR`（执行快照与锁的临时目录） | 可再生：内容寻址缓存 / 在途传输包 / 可重新导出的包 / 平台不再读写的目录 / CAS 写入暂存 / 原生 prod-up 运行态（PID 与端口）/ 原生 velites 副本（`ensure-velites.sh` 重建）/ 临时目录 | 同 D7（`SKILLS_RUNS_DIR` 默认在系统临时目录） | 不备份 | 不恢复；原机保留（缓存按内容寻址，不会读错；在途包由 reaper 清扫；运行态与副本由 prod-up 重写） | 不适用 |
 | D11 | skill root（各 skill 的本地 Git 仓，含 `.git` 与 `_shared`） | 权威：DB `skill_lock` 只存 commit，内容无法从 DB 或对象存储重建 | `${AGENT_SKILLS_DIR:-../skills}` 解析出的宿主机目录（`SKILLS`）/ `~/.agents/skills` | §2.2.4 tar | §2.3 第 5 步：`tar tzf` → 现有目录改名 `.pre-restore-<时间戳>` → 解到新建的空目录 | §2.4：`skill_lock` 每个 commit `git cat-file -e` |
 | D12 | velites 二进制 | 可再生：GitHub Release 产物 | `${VELITES_BIN:-../velites-bin/velites}` / `data/bin` 与 PATH（`ensure-velites.sh` 构建） | 不备份 | §2.3 第 6 步：按 `sha256.txt` 校验 tarball → 解压放到该路径 | `make prod-up docker` 的 `--wait` 通过（Worker healthy） |
@@ -307,10 +307,19 @@ TMP="$(mktemp "$BK/.agent_legion-dump.XXXXXX")" \
 末尾为 `/` 的 key 被当作目录，只差大小写的 key 在不区分大小写的文件系统上互相覆盖。
 这类不一致让备份失败，而不是让恢复时的「清空 bucket」变成不可逆丢失。产物 key 不以
 `/` 结尾（产物名不含 `/`：`job_artifact_objects.py` 的 `valid_artifact_name`）；材料 key
-为 `{workspace_id}/{hash}/{filename}`，而材料 API 目前**不拒绝**以 `/` 结尾的
-`filename`（`MaterialPresignRequest` 只限长度），客户端提交 `size_bytes=0` 的这类名字
-会留下一条 ready 材料行和一个零字节、以 `/` 结尾的 key。所以零字节的 `…/` key（无论
-是控制台建目录留下的标记，还是这种材料）不走文件系统：`CHK` 把它们从文件比对中剔除并
+为 `{workspace_id}/{hash}/v2g{代次}/m_{material_id}/{filename}`（首发即 v2g0，代次段让上传能力随
+重试失效，v2g 版本标记（写端不可注入）+ m_ 标记的 material_id 唯一段（#1279）让 key
+跨行不可复用且对 GC 门禁无歧义；更早的
+存量行无代次段、key 不可变，旧代次对象成为孤儿，由 GC/bucket lifecycle 回收；
+`scripts/gc-s3-jobs.py` 的材料根前缀扫描（#1269）只删除 v2g 单次使用文法、超过材料年龄下限且
+反查无行的孤儿，旧文法孤儿只报告不删除（#1314），#1267），材料 API 拒绝目录形态与下载时不可归一化的
+`filename`——以 `/` 结尾、含空 / `.` / `..` 段、含反斜杠或控制字符；`content_hash`
+同样拼进 key，非空时必须是 64 位小写 sha256 hex（422，
+`MaterialsService.presign` 入口经 `material_key_validation.py` 校验，#1119/#1267）。入口收紧
+之前已入库的以 `/` 结尾的 key 用
+`select id, workspace_id, filename, status, storage_key from materials where storage_key like '%/'`
+排查，经材料 API 逐个删除（行与对象一起删）；不删也不阻塞备份。所以零字节的 `…/` key（现在
+只服务控制台建目录留下的标记，以及收紧前上传、尚未清理的这类空材料）不走文件系统：`CHK` 把它们从文件比对中剔除并
 报出个数；它们的名字就在源清单 `objects.json` 里（与文件比对共用同一份清单，没有另外
 的旁文件可被单独截断或改写），恢复时 `PUT_MARKERS` 据此按名重建为零字节对象，并在
 清空 bucket 之后比对新清单与源清单的这一集合（§2.3 第 5 步），行 → 对象的核对因此仍能
@@ -340,7 +349,8 @@ export AWS_ACCESS_KEY_ID=<AGENT_LEGION_S3_ACCESS_KEY> \
 S3() { aws --endpoint-url "$EP" s3 "$@"; }
 LIST() { aws --endpoint-url "$EP" s3api list-objects-v2 --bucket "$B" --output json; }
 # MARKERS <清单 JSON>：从清单（objects.json，与文件比对共用同一份、无旁文件）列出零字节、
-# 以 / 结尾的 key（目录标记或以 / 结尾命名的空材料），排序后每行一个；它们落不了文件系统，
+# 以 / 结尾的 key（控制台目录标记；另有 #1119 入口收紧前上传、尚未清理的以 / 结尾命名的空
+# 材料），排序后每行一个；它们落不了文件系统，
 # 恢复时由 PUT_MARKERS 按名重建。key 含换行时逐行格式无法无损表达，直接判失败让人处理
 MARKERS() { python3 -c '
 import json,sys
@@ -618,6 +628,28 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
       发现，零字节目录标记除外），内容再逐对象对 `SHA256SUMS`。外部 S3 开了版本控制时，
       `rm` 只留下删除标记，旧版本仍占空间。
 
+      **材料 ETag 重绑（#1279，启动调度前必做）**：`aws s3 cp --recursive` 对较大的
+      文件走分段上传，即使字节与 sha256 完全相同，恢复后对象的 ETag 也与备份前不同——
+      而 `materials.object_etag` 仍是备份前的值，消费侧（Host/Worker 物化）的 If-Match
+      核验会全线 412。逐对象校验通过后、恢复调度（`scripts/resume-workspaces.sh` /
+      打开 worker claim）之前，先跑：
+
+      ```bash
+      uv run python scripts/rebind_material_etags.py          # dry-run：报告将重绑的行
+      uv run python scripts/rebind_material_etags.py --apply  # 逐行核验字节后重绑
+      ```
+
+      脚本对 ETag 失配的行先核验恢复字节（size 恒验 + content_hash 非空时流式
+      sha256），通过才原子重绑（CAS 钉住扫描时的 object_etag、storage_key、上传代次与
+      status，#1313）；字节不符或对象缺失的行 fail-closed 只报告（退出码 1），必须人工
+      处置后才能启动调度。扫描后行被并发改写（材料 API 的修复/重传/删除、TTL 过期、
+      另一次重绑）的行按「竞态失败」单列、不改动（同样退出码 1）：确认材料写入已停后重跑即可。
+      卷级冷备份（下文）逐字节还原则 ETag 不变，无需重绑（跑了也是全匹配的空转）。
+      `rebind` 只处理已记录 ETag 的行；`object_etag=''` 的存量无 hash 行（v98 前完成，
+      #1316）由第 6 步重新拉起的 Host 在启动时自动按当前 HEAD 绑定（恢复后的对象即
+      权威字节）。不重启 Host 时用 `scripts/bind_legacy_material_etags.py`（dry-run →
+      `--apply`）补跑；未绑定的行保持 size-only 语义，不挂起也不会失败。
+
    **对象存储·卷级冷备份**（§2.2.2 的备份）：停对象存储服务，`RESTORE_INTO` 校验后清空
    整个卷再解包，`THEN_UP` 重新拉起（无论成败）。`RESTORE_INTO` **先完整校验归档再删**：
    `tar tzf` 读完整个 gzip 流，截断或损坏的包会在这里失败，现有卷原样不动。现有卷还有
@@ -637,7 +669,7 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
    `RESTORE_INTO "$HD_SRC" "$BK/host-data-<时间戳>.tar.gz" artifacts jobs`。
    **§1.2 判定为空、没有这份备份时，原机回退同样要清空 `jobs/`**（它是缓存，可以删；
    不删就是上面说的新旧混合）：`docker run --rm -v "$HD_SRC":/dst busybox rm -rf /dst/jobs`
-   （Host 启动时会重建该目录）。节点日志同理（D9）：文件名按 `<job_id>-<node_key>` 固定、
+   （Host 启动时会重建该目录）。节点日志同理（D9）：路径按 job_id 与 node_key 固定、
    重跑时截断重写，留着会让恢复后的 job 显示备份点之后的日志。有归档就先校验、再整体替换：
    `RESTORE_INTO "$HD_SRC" "$BK/logs-jobs-<时间戳>.tar.gz" logs/jobs`；
    没有归档就清空：`docker run --rm -v "$HD_SRC":/dst busybox rm -rf /dst/logs/jobs`。

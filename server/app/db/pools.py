@@ -9,34 +9,12 @@ from psycopg_pool import ConnectionPool
 
 from server.app.db.dialect import DatabaseDsn
 from server.app.db.pool_reset import reset_connection
+from server.app.db.pool_settle import settle_pool_returns
+from server.app.db.pool_sizing import pool_max_idle, pool_max_lifetime, pool_max_size
 from server.app.db.rows import configure_connection, string_dict_row
 
 _POOLS: dict[tuple[int, str], ConnectionPool[Connection[dict[str, Any]]]] = {}
 _POOLS_LOCK = Lock()
-
-_POOL_MAX_SIZE_ENV = "AGENT_LEGION_DB_POOL_MAX_SIZE"
-_POOL_MAX_IDLE_ENV = "AGENT_LEGION_DB_POOL_MAX_IDLE"
-_POOL_MAX_LIFETIME_ENV = "AGENT_LEGION_DB_POOL_MAX_LIFETIME"
-_DEFAULT_POOL_MAX_SIZE = 32
-# Recycling defaults (120s idle / 900s lifetime) are tighter than
-# psycopg-pool's built-in 600s/3600s: idle shrink closes at most one
-# connection per max_idle interval, and a backend's session memory
-# (plan/sort caches) only returns to the OS when the connection is recycled,
-# so long-lived connections balloon under sustained load.
-
-
-def _pool_max_size() -> int:
-    try:
-        return max(1, int(os.environ.get(_POOL_MAX_SIZE_ENV, "")))
-    except ValueError:
-        return _DEFAULT_POOL_MAX_SIZE
-
-
-def _pool_seconds(env: str, default: float) -> float:
-    try:
-        return max(1.0, float(os.environ.get(env, "")))
-    except ValueError:
-        return default
 
 
 def pool_for(dsn: DatabaseDsn) -> ConnectionPool[Connection[dict[str, Any]]]:
@@ -47,9 +25,9 @@ def pool_for(dsn: DatabaseDsn) -> ConnectionPool[Connection[dict[str, Any]]]:
             pool = ConnectionPool[Connection[dict[str, Any]]](
                 conninfo=dsn,
                 min_size=1,
-                max_size=_pool_max_size(),
-                max_idle=_pool_seconds(_POOL_MAX_IDLE_ENV, 120.0),
-                max_lifetime=_pool_seconds(_POOL_MAX_LIFETIME_ENV, 900.0),
+                max_size=pool_max_size(),
+                max_idle=pool_max_idle(),
+                max_lifetime=pool_max_lifetime(),
                 timeout=10,
                 open=True,
                 kwargs={"row_factory": string_dict_row},
@@ -64,9 +42,37 @@ def pool_for(dsn: DatabaseDsn) -> ConnectionPool[Connection[dict[str, Any]]]:
         return pool
 
 
-def close_database_pools() -> None:
+def settle_database_pools() -> None:
+    """Run every queued return of this process's pools, keeping them open.
+
+    The per-test isolation barrier (#1045): pools stay alive for the whole
+    test worker session (per-test close/rebuild is costly under xdist
+    contention), and the only synchronization TRUNCATE needs beforehand is
+    that pending dirty-return rollbacks have run (see pool_settle). Idle
+    pooled connections hold no transaction and no locks (the #438 reset
+    hook verifies IDLE on return), so they never block the TRUNCATE.
+    Pools are keyed by (pid, dsn); a pool inherited across fork has no
+    worker threads in this process and would only stall on the barrier, so
+    it is skipped.
+    """
     with _POOLS_LOCK:
-        pools = list(_POOLS.values())
+        live = [pool for (pid, _dsn), pool in _POOLS.items() if pid == os.getpid()]
+    for pool in live:
+        settle_pool_returns(pool)
+
+
+def close_database_pools() -> None:
+    """Close every pool, settling this process's queued returns first.
+
+    The single pool-close chokepoint (#1077): production lifespan shutdown
+    and test boundaries both go through it, so a dirty return queued just
+    before shutdown is rolled back (and the connection closed with the
+    pool) instead of being discarded by ``ConnectionPool.close()``.
+    """
+    with _POOLS_LOCK:
+        entries = list(_POOLS.items())
         _POOLS.clear()
-    for pool in pools:
+    for (pid, _dsn), pool in entries:
+        if pid == os.getpid():
+            settle_pool_returns(pool)
         pool.close()

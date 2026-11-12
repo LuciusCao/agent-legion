@@ -1,68 +1,35 @@
 import ArticleOutlinedIcon from '@mui/icons-material/ArticleOutlined'
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
 import { Button } from '@mui/material'
-import { useMemo } from 'react'
-import { useParams } from 'react-router-dom'
-import type { WorkflowNodeRecord } from '../../../types'
 import { useShowNodeDetailPreview } from './nodeDetailPreviewContext'
-import { useWorkspaceRuntimeModels } from '../shared/useWorkspaceRuntimeModels'
-import { WorkflowNodeRuntimeSettings } from './WorkflowNodeRuntimeSettings'
-import { WorkflowNodeToolsEditor } from './WorkflowNodeToolsEditor'
-import { parseWorkflowExecutionDefaults } from '../shared/workflowStudioYamlDraft.executionDefaults'
 import styles from './WorkflowAgentExecutionDetails.module.css'
 
-export function WorkflowAgentExecutionDetails(props: {
-  node: WorkflowNodeRecord
-  runtime: string
-  definitionYaml: string
-  setDefinitionYaml: (value: string) => void
-  readOnly?: boolean
-}) {
+/**
+ * Agent 配置区（结构通道）：runtime 选择 / skill 绑定在
+ * WorkflowNodeProfileBody，本组件承载预览入口。M48 双通道后 provider /
+ * model / thinking / prompt / tools / requires_labels 已迁入「运行配置」
+ * 专区（WorkflowNodeRuntimeChannelSection，运行通道即改即存），此处不再
+ * 重复提供。
+ */
+export function WorkflowAgentExecutionDetails() {
   // 预览在详情 panel 内原位展开（不开 dialog），右侧 Agent 对话保持可见。
   const showPreview = useShowNodeDetailPreview()
-  const { workspaceId } = useParams<{ workspaceId: string }>()
-  // 「继承默认」提示的来源：草稿 YAML 顶层 execution 块（workspace 级
-  // Agent 默认配置已随 schema v64 退役）。全量 YAML parse 按草稿内容 memo，
-  // 不随每次渲染重算。
-  const defaults = useMemo(
-    () => parseWorkflowExecutionDefaults(props.definitionYaml),
-    [props.definitionYaml]
-  )
   return (
-    <>
-      <div className={styles.actions}>
-        <Button
-          size="small"
-          startIcon={<ArticleOutlinedIcon />}
-          onClick={() => showPreview('prompt')}
-        >
-          查看 Prompt
-        </Button>
-        <Button
-          size="small"
-          startIcon={<FolderOpenOutlinedIcon />}
-          onClick={() => showPreview('skill')}
-        >
-          浏览技能文件
-        </Button>
-      </div>
-      <WorkflowNodeRuntimeSettings
-        node={props.node}
-        runtime={props.runtime}
-        defaults={defaults}
-        runtimeModels={useWorkspaceRuntimeModels(workspaceId).data?.runtimes}
-        definitionYaml={props.definitionYaml}
-        setDefinitionYaml={props.setDefinitionYaml}
-        readOnly={props.readOnly}
-      />
-      {/* #443/#476：节点级 tools 声明编辑入口（per-runtime 工具目录）。 */}
-      <WorkflowNodeToolsEditor
-        node={props.node}
-        runtime={props.runtime}
-        definitionYaml={props.definitionYaml}
-        setDefinitionYaml={props.setDefinitionYaml}
-        readOnly={props.readOnly}
-      />
-    </>
+    <div className={styles.actions}>
+      <Button
+        size="small"
+        startIcon={<ArticleOutlinedIcon />}
+        onClick={() => showPreview('prompt')}
+      >
+        查看 Prompt
+      </Button>
+      <Button
+        size="small"
+        startIcon={<FolderOpenOutlinedIcon />}
+        onClick={() => showPreview('skill')}
+      >
+        浏览技能文件
+      </Button>
+    </div>
   )
 }

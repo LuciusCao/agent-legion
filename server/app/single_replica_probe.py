@@ -174,10 +174,17 @@ class SingleReplicaProbe:
         try:
             if self._lock_acquired:
                 conn.execute(_UNLOCK_SQL, (_REPLICA_LOCK_KEY,))
+                # #1077: the unlock SELECT opened a transaction on this
+                # non-autocommit connection. Commit it so the return is IDLE:
+                # an INTRANS return depends on the pool worker's async
+                # rollback, which a racing pool close would discard — the
+                # session would keep its snapshot until GC.
+                conn.commit()
         except Exception:  # noqa: BLE001 - shutdown is best-effort
             # #204 broad-except audit: shutdown safety net during the lifespan
-            # finally. A failed unlock (broken connection, pool already closed
-            # by the tests' teardown) must not raise out of close() and mask
+            # finally. A failed unlock or its commit (broken connection, pool
+            # already closed by the tests' teardown) must not raise out of
+            # close() and mask
             # the original error being unwound — and it is harmless anyway:
             # the session-level advisory lock dies with the session when the
             # connection drops (the docstring's server-side backstop). The

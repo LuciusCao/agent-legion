@@ -5,7 +5,11 @@ tens of thousands of ready candidates and saturated local capacity, the
 per-candidate route/binding SQL queries dominated the whole pass. Routing
 configuration changes rarely (operator edits in Workspace settings), so the
 resolution is cached for a short TTL: a stale entry at worst claims against
-a seconds-old binding or fails a claim that the next pass retries.
+a seconds-old binding or fails a claim that the next pass retries. Cache hits
+on Agent routes still re-adjudicate the target Agent against the (~5s cached)
+published catalog (#1266): an Agent archived or republished under another
+capability inside the TTL forces re-resolution instead of serving the stale
+route, so dispatch never diverges from the job detail projection.
 """
 
 from __future__ import annotations
@@ -16,11 +20,11 @@ from typing import TYPE_CHECKING
 
 from server.app.executors.models import CODE_EXECUTOR_ID
 from server.app.jobs.queries.workspace_node_limits import get_local_node_limit
-from server.app.services.agent_node_profile_catalog import resolve_dispatch_agent_profile
 from server.app.services.agent_node_profile_types import (
     PROFILE_SOURCE_DEFINITION,
     PROFILE_SOURCE_NODE,
 )
+from server.app.services.agent_route_validation import routed_agent_error
 from server.app.workflow_worker.routing_fallback import legacy_agent_fallback_route
 from server.app.workflows import workflow_node_profile as frozen
 
@@ -47,15 +51,19 @@ class NodeRoute:
 
 def route_cache_key(
     workspace_id: str, workflow_key: str, node: WorkflowNode
-) -> tuple[str, str, str, bool]:
-    """Route cache key of a frozen snapshot node (#935 R1, #1091).
+) -> tuple[str, str, str, bool, str]:
+    """Route cache key of a frozen snapshot node (#935 R1, #1091, #1266).
 
-    The snapshot's agent-ness is part of the key: a route row may outlive a
-    node one job froze as ``code`` while another job froze it as an agent
-    node, and the two must never share a cached route.
+    The snapshot's agent-ness and capability are both part of the key: a
+    route row may outlive a node one job froze as ``code`` while another job
+    froze it as an agent node, and two jobs may freeze the same node key with
+    different capabilities (the node was renamed across revisions) — a legacy
+    route's validity is adjudicated against the caller's capability
+    (#1128/#1266), so entries, errors included, must never be shared across
+    either frozen input.
     """
     is_agent = frozen.frozen_node_execution_kind(node) != frozen.FROZEN_NODE_CODE
-    return (workspace_id, workflow_key, node.key, is_agent)
+    return (workspace_id, workflow_key, node.key, is_agent, node.capability)
 
 
 def resolve_node_route(
@@ -85,10 +93,21 @@ def resolve_node_route(
     is_agent = kind == frozen.FROZEN_NODE_LEGACY_AGENT
     key = route_cache_key(workspace_id, workflow_key, node)
     now = time.monotonic()
+    route: NodeRoute | None = None
     cached = worker.state.route_cache.get(key)
     if cached is not None and now - cached[0] < ROUTE_CACHE_TTL_SECONDS:
         route = cached[1]
-    else:
+        if route.kind == "agent":
+            # #1266: the cached route predates any Agent definition drift inside
+            # the TTL — re-adjudicate against the (~5s cached) published catalog
+            # on every hit, a dict lookup, and force re-resolution on drift
+            # instead of dispatching through a stale route.
+            drift = routed_agent_error(
+                worker.job_db, workspace_id, route.target_id, node.capability
+            )
+            if drift is not None:
+                route = None
+    if route is None:
         route = _resolve_uncached(worker, workspace_id, workflow_key, node, is_agent=is_agent)
         worker.state.route_cache[key] = (now, route)
     if route.kind == "executor" and is_agent:
@@ -129,19 +148,10 @@ def _resolve_uncached(
         # never pull it off the code pool.
         if is_agent and route is not None and route["target_kind"] == "agent":
             agent_id = str(route["target_id"])
-            profile = resolve_dispatch_agent_profile(worker.job_db, workspace_id, agent_id, None)
-            if profile is None or profile.legacy_ref is None:
-                return NodeRoute(
-                    "error",
-                    error_message=(
-                        f"Agent {agent_id!r} has no published definition in workspace"
-                        f" {workspace_id!r}; agent definitions are workspace-scoped"
-                        " (schema v46) — upgrade the job to the active revision, whose agent"
-                        " nodes carry their own execution profile"
-                    ),
-                )
-            if profile.legacy_ref.capability != node.capability:
-                return NodeRoute("error", error_message=f"Invalid Agent route {agent_id!r}")
+            # #1128: the shared adjudication the job detail projection reuses.
+            error = routed_agent_error(worker.job_db, workspace_id, agent_id, node.capability)
+            if error is not None:
+                return NodeRoute("error", error_message=error)
             if worker.agent_dispatch is None:
                 raise RuntimeError("Agent dispatch service is not configured")
             return NodeRoute("agent", target_id=agent_id)

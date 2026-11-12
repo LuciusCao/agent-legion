@@ -275,6 +275,51 @@ def test_finish_lease_derives_run_dir_via_legacy_flat_layout(
     assert run["run_dir"] == token_dir.relative_to(data_dir).as_posix()
 
 
+def test_finish_lease_transfers_run_dir_ownership_from_older_rows(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    """#1315：finish 写 run_dir=D 时同事务缴清其他行对 D 的认领——一个磁盘
+    目录同一时刻至多被一个 node_runs 行拥有。worker agent 节点的固定 token
+    目录（runs/<node>/worker）被历次 run 复用；不转移的话，共享认领的历史
+    行一过 retention，sweep 非空分支就会删掉当前 run 正在使用的目录。"""
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-run-dir-transfer", "code-default", workspace_limit=2
+    )
+    claim = repo_a.try_claim(
+        _claim_request(workspace_id, job_id, executor_id="code-default", global_capacity=2)
+    )
+    assert claim is not None
+
+    data_dir = queries.jobs_dir.parent
+    token_dir = make_job_dir(data_dir, workspace_id, job_id) / "runs" / "review_keywords" / "worker"
+    token_dir.mkdir(parents=True)
+    run_dir_rel = token_dir.relative_to(data_dir).as_posix()
+
+    # 历史行（上一轮 run 的残留认领）：与本次 finish 共享同一固定目录。
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into node_runs(job_id, node_key, status, run_dir, session_dir, finished_at)"
+            " values (%s, %s, 'completed', %s, %s, current_timestamp)",
+            (job_id, "review_keywords", run_dir_rel, f"{run_dir_rel}/session"),
+        )
+        conn.commit()
+
+    result = ExecutionResult(status="completed", exit_code=0)
+    assert repo_a.finish(claim.lease_id, result) is True
+
+    with queries.connect() as conn:
+        rows = conn.execute(
+            "select id, run_dir, session_dir from node_runs"
+            " where job_id=%s and node_key=%s order by id",
+            (job_id, "review_keywords"),
+        ).fetchall()
+    owners = [row for row in rows if row["run_dir"] == run_dir_rel]
+    assert [row["id"] for row in owners] == [claim.node_run_id]
+    stale = [row for row in rows if row["id"] != claim.node_run_id]
+    assert stale
+    assert all(row["run_dir"] == "" and row["session_dir"] == "" for row in stale)
+
+
 def test_finish_lease_without_run_tokens_keeps_empty_run_dir(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:

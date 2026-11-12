@@ -7,6 +7,9 @@ shared by the local-file and object-store branches.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from typing import BinaryIO
+
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
@@ -21,6 +24,22 @@ from server.app.services.job_artifact_raw import RawArtifact
 # iterate_in_threadpool，botocore StreamingBody 默认 1 KiB 一块会让大媒体
 # 每秒数千次线程池跳转。
 _STREAM_CHUNK_BYTES = 64 * 1024
+
+
+def _decoded_range_chunks(stream: BinaryIO, start: int, end: int) -> Iterator[bytes]:
+    """全量解压流的 [start, end] 闭区间分块（#1259 unsliced_stream）。
+
+    gzip 顺序解码，先跳读 start 字节再限量供给；对象损坏（流短于 trailer
+    ISIZE 宣称的解压长度）时提前结束——响应体短于 Content-Length，客户端
+    按截断处理。
+    """
+    to_skip = start
+    while to_skip > 0 and (skipped := stream.read(min(to_skip, _STREAM_CHUNK_BYTES))):
+        to_skip -= len(skipped)
+    remaining = end - start + 1
+    while remaining > 0 and (chunk := stream.read(min(remaining, _STREAM_CHUNK_BYTES))):
+        remaining -= len(chunk)
+        yield chunk
 
 
 def raw_response(raw: RawArtifact) -> FileResponse | StreamingResponse:
@@ -40,12 +59,24 @@ def raw_response(raw: RawArtifact) -> FileResponse | StreamingResponse:
     ``raw.content_encoding == "gzip"`` (#338): the stream carries the stored
     (compressed) bytes — passed through with a ``Content-Encoding: gzip``
     header so browsers decode natively and API clients gunzip themselves.
-    Content-Length is the stored size; Range was already suppressed upstream
-    (gzip streams do not decode by byte range), so Accept-Ranges stays off
-    this form.
+    Content-Length is the stored size. This passthrough form never combines
+    with a Range request (#1259): ranged ``.gz`` requests arrive as
+    decompressed-unit handles (sliced below via ``unsliced_stream``), so
+    Accept-Ranges stays off only this form.
+
+    ``raw.unsatisfiable_range`` (#1259): the requested range lies beyond the
+    representation — 416 with ``Content-Range: bytes */<total>``, empty body.
     """
     media_type = raw_media_type(raw.name)
     disposition = raw_disposition_type(raw.name)
+    if raw.unsatisfiable_range:
+        total = "*" if raw.size_bytes is None else str(raw.size_bytes)
+        return StreamingResponse(
+            iter(()),
+            status_code=416,
+            media_type=media_type,
+            headers={"Content-Range": f"bytes */{total}"},
+        )
     if raw.stream is not None:
         stream = raw.stream
         headers = {}
@@ -63,8 +94,11 @@ def raw_response(raw: RawArtifact) -> FileResponse | StreamingResponse:
         if disposition == "attachment":
             headers["Content-Disposition"] = attachment_disposition(raw.name)
         status = 206 if raw.range_start is not None and raw.range_end is not None else 200
+        body: Iterator[bytes] = iter(lambda: stream.read(_STREAM_CHUNK_BYTES), b"")
+        if raw.unsliced_stream and range_start is not None and range_end is not None:
+            body = _decoded_range_chunks(stream, range_start, range_end)
         return StreamingResponse(
-            iter(lambda: stream.read(_STREAM_CHUNK_BYTES), b""),
+            body,
             status_code=status,
             media_type=media_type,
             headers=headers,

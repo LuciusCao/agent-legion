@@ -21,6 +21,7 @@ from server.app.auth.dependencies import (
     require_studio_agent_workspace,
 )
 from server.app.jobs import JobQueries
+from server.app.routes.job_list_contracts import JobCursor
 from server.app.routes.studio_agent_job_tool_contracts import (
     StudioAgentArtifactResponse,
     StudioAgentJobCompareResponse,
@@ -62,9 +63,14 @@ def create_studio_agent_job_tools_router(
         response_model=StudioAgentJobListResponse,
     )
     def list_jobs(
-        workspace_id: str, status: str | None = None, limit: int = 20
+        workspace_id: str,
+        status: str | None = None,
+        limit: int = 20,
+        # #1261: keyset pagination — pass the previous page's next_cursor for
+        # the next (older) page; malformed cursors 422 like /jobs/snapshot.
+        cursor: JobCursor = None,
     ) -> StudioAgentJobListResponse:
-        result = _service().list_jobs(workspace_id, status=status, limit=limit)
+        result = _service().list_jobs(workspace_id, status=status, limit=limit, cursor=cursor)
         return StudioAgentJobListResponse.model_validate(result)
 
     # Registered BEFORE /jobs/{job_id} so the literal segment wins.
